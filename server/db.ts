@@ -136,7 +136,7 @@ export async function getLimitUpRecordsByDate(date: string): Promise<LimitUpReco
   if (!db) return [];
 
   return await db.select().from(limitUpRecords)
-    .where(eq(limitUpRecords.limitUpDate, new Date(date)))
+    .where(eq(limitUpRecords.limitUpDate, date))
     .orderBy(limitUpRecords.limitUpTime);
 }
 
@@ -170,7 +170,7 @@ export async function getDailySectorStats(date: string): Promise<{ sector: strin
   if (!db) return [];
 
   const records = await db.select().from(limitUpRecords)
-    .where(eq(limitUpRecords.limitUpDate, new Date(date)));
+    .where(eq(limitUpRecords.limitUpDate, date));
 
   // 统计各题材数量
   const sectorMap = new Map<string, number>();
@@ -193,13 +193,7 @@ export async function getDistinctDates(): Promise<string[]> {
     .from(limitUpRecords)
     .orderBy(desc(limitUpRecords.limitUpDate));
 
-  return result.map(r => {
-    const d = r.date;
-    if (d instanceof Date) {
-      return d.toISOString().split('T')[0];
-    }
-    return String(d);
-  });
+  return result.map(r => r.date);
 }
 
 /** 更新涨停记录 */

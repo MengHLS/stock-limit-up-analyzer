@@ -80,12 +80,10 @@ export const appRouter = router({
         keywords: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        // 使用UTC时间避免时区转换问题
-        const [year, month, day] = input.limitUpDate.split('-').map(Number);
-        const dateUTC = new Date(Date.UTC(year, month - 1, day));
+        // 直接使用字符串格式日期，避免时区转换
         return await createLimitUpRecord({
           ...input,
-          limitUpDate: dateUTC,
+          limitUpDate: input.limitUpDate,
           createdBy: ctx.user.id,
         });
       }),
@@ -281,13 +279,11 @@ export const appRouter = router({
               sector?: string;
               keywords?: string;
             }) => {
-              // 使用UTC时间避免时区转换问题
-              const [year, month, day] = limitUpDate.split('-').map(Number);
-              const dateUTC = new Date(Date.UTC(year, month - 1, day));
+              // 直接使用字符串格式日期，避免时区转换
               return {
               stockCode: stock.stockCode,
               stockName: stock.stockName,
-              limitUpDate: dateUTC,
+              limitUpDate: limitUpDate,
               limitUpTime: stock.limitUpTime || null,
               boardCount: stock.boardCount || null,
               circulationValue: stock.circulationValue || null,

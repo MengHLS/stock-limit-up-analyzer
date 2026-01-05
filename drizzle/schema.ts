@@ -27,8 +27,8 @@ export const limitUpRecords = mysqlTable("limit_up_records", {
   stockCode: varchar("stockCode", { length: 20 }).notNull(),
   /** 股票名称，如 神剑股份 */
   stockName: varchar("stockName", { length: 50 }).notNull(),
-  /** 涨停日期 */
-  limitUpDate: date("limitUpDate").notNull(),
+  /** 涨停日期 - 使用string模式避免时区转换 */
+  limitUpDate: date("limitUpDate", { mode: "string" }).notNull(),
   /** 涨停时间，如 14:56:30 */
   limitUpTime: varchar("limitUpTime", { length: 20 }),
   /** 板数，如 10天9板 */

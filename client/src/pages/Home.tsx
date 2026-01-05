@@ -44,9 +44,7 @@ export default function Home() {
   const recordsByDate = useMemo(() => {
     const grouped = new Map<string, typeof allRecords>();
     for (const record of allRecords) {
-      const dateStr = record.limitUpDate instanceof Date 
-        ? record.limitUpDate.toISOString().split('T')[0]
-        : String(record.limitUpDate);
+      const dateStr = String(record.limitUpDate);
       if (!grouped.has(dateStr)) {
         grouped.set(dateStr, []);
       }
@@ -158,9 +156,7 @@ export default function Home() {
                           <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Calendar className="h-3.5 w-3.5" />
-                              {record.limitUpDate instanceof Date 
-                                ? record.limitUpDate.toLocaleDateString('zh-CN')
-                                : record.limitUpDate}
+                              {record.limitUpDate}
                             </span>
                             {record.limitUpTime && (
                               <span className="flex items-center gap-1">
