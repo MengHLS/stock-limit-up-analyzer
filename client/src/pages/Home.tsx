@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { trpc } from "@/lib/trpc";
 import { getLoginUrl } from "@/const";
 import { 
@@ -26,7 +27,7 @@ import { Link } from "wouter";
 export default function Home() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
 
   // 获取所有日期列表
   const { data: dates = [], isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
@@ -53,51 +54,55 @@ export default function Home() {
     return grouped;
   }, [allRecords]);
 
-  // 当前选中日期的题材统计
-  const currentDateStats = useMemo(() => {
-    if (!selectedDate) return [];
-    const records = recordsByDate.get(selectedDate) || [];
-    const sectorMap = new Map<string, number>();
-    for (const record of records) {
-      const sector = record.sector || '其他';
-      sectorMap.set(sector, (sectorMap.get(sector) || 0) + 1);
-    }
-    return Array.from(sectorMap.entries())
-      .map(([sector, count]) => ({ sector, count }))
-      .sort((a, b) => {
-        // "其他"始终放在最后
-        if (a.sector === '其他') return 1;
-        if (b.sector === '其他') return -1;
-        // 其他题材按涨停数降序排列
-        return b.count - a.count;
-      });
-  }, [selectedDate, recordsByDate]);
+  // 将日期字符串转换为Date对象的Map
+  const dateStringToDate = useMemo(() => {
+    const map = new Map<string, Date>();
+    dates.forEach(dateStr => {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      map.set(dateStr, new Date(year, month - 1, day));
+    });
+    return map;
+  }, [dates]);
 
-  // 按题材排序的股票列表（与题材统计顺序一致）
+  // 反向映射：Date对象转日期字符串
+  const dateToString = (date: Date | undefined): string | null => {
+    if (!date) return null;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // 当前选中日期的字符串格式
+  const selectedDateStr = dateToString(selectedDate);
+
+  // 获取当前选中日期的题材统计
+  const { data: currentDateStats = [] } = trpc.limitUp.getSectorStats.useQuery(
+    { date: selectedDateStr || '' },
+    { enabled: !!selectedDateStr }
+  );
+
+  // 对当前日期的涨停记录按题材排序
   const sortedRecords = useMemo(() => {
-    if (!selectedDate) return [];
-    const records = recordsByDate.get(selectedDate) || [];
-    // 创建题材优先级映射
+    if (!selectedDateStr) return [];
+    const records = recordsByDate.get(selectedDateStr) || [];
+    
+    // 创建题材顺序映射
     const sectorOrder = new Map<string, number>();
     currentDateStats.forEach((stat, index) => {
       sectorOrder.set(stat.sector, index);
     });
-    
-    // 解析板数字符串，提取数字用于排序
+
+    // 解析板数字符串为数字（用于排序）
     const parseBoardCount = (boardCount: string | null): number => {
       if (!boardCount) return 0;
-      // 匹配如 "10天9板", "5天3板", "2天2板", "1板", "1" 等格式
-      const match = boardCount.match(/(\d+)天?(\d+)?板?/);
+      const match = boardCount.match(/(\d+)天(\d+)板/);
       if (match) {
-        // 如果有第二个数字（如"10天9板"），使用第二个数字
-        return parseInt(match[2] || match[1], 10);
+        return parseInt(match[2]) || 0;
       }
-      // 尝试直接解析数字
-      const num = parseInt(boardCount, 10);
-      return isNaN(num) ? 0 : num;
+      return 0;
     };
-    
-    // 排序：题材 > 板数（降序） > 涨停时间
+
     return [...records].sort((a, b) => {
       const sectorA = a.sector || '其他';
       const sectorB = b.sector || '其他';
@@ -112,16 +117,36 @@ export default function Home() {
       // 3. 同板数内按涨停时间排序
       return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
     });
-  }, [selectedDate, recordsByDate, currentDateStats]);
+  }, [selectedDateStr, recordsByDate, currentDateStats]);
 
   // 自动选择最新日期
   useMemo(() => {
     if (dates.length > 0 && !selectedDate) {
-      setSelectedDate(dates[0]);
+      const latestDateStr = dates[0];
+      const date = dateStringToDate.get(latestDateStr);
+      if (date) {
+        setSelectedDate(date);
+      }
     }
-  }, [dates, selectedDate]);
+  }, [dates, selectedDate, dateStringToDate]);
 
   const isLoading = datesLoading || recordsLoading;
+
+  // 日历上有涨停数据的日期
+  const datesWithData = useMemo(() => {
+    return Array.from(dateStringToDate.values());
+  }, [dateStringToDate]);
+
+  // 自定义日历日期渲染，显示涨停数
+  const modifiers = useMemo(() => {
+    return {
+      hasData: datesWithData,
+    };
+  }, [datesWithData]);
+
+  const modifiersClassNames = {
+    hasData: "bg-primary/10 font-semibold",
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -160,30 +185,27 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="container py-8">
+      <main className="container py-8 max-w-7xl">
         {/* 搜索栏 */}
-        <div className="mb-8">
-          <div className="relative max-w-xl">
+        <div className="mb-6">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索股票代码或名称..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 h-11"
+              className="pl-10"
             />
           </div>
         </div>
 
         {/* 搜索结果 */}
         {searchQuery && (
-          <Card className="mb-8">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
                 <Search className="h-5 w-5" />
                 搜索结果
-                {searchResults.length > 0 && (
-                  <Badge variant="secondary">{searchResults.length} 条记录</Badge>
-                )}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -192,7 +214,9 @@ export default function Home() {
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : searchResults.length === 0 ? (
-                <p className="text-center py-8 text-muted-foreground">未找到相关股票</p>
+                <p className="text-center py-8 text-muted-foreground">
+                  未找到相关股票
+                </p>
               ) : (
                 <div className="space-y-3">
                   {searchResults.map((record) => (
@@ -246,87 +270,78 @@ export default function Home() {
         {/* 主内容区 */}
         {!searchQuery && (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* 左侧：日期列表 */}
+            {/* 左侧：日历 */}
             <Card className="lg:col-span-1">
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Calendar className="h-5 w-5" />
-                  日期列表
+                  选择日期
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-0">
-                <ScrollArea className="h-[500px]">
-                  {isLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : dates.length === 0 ? (
-                    <p className="text-center py-8 text-muted-foreground px-4">
-                      暂无数据，请先上传涨停复盘图片
-                    </p>
-                  ) : (
-                    <div className="space-y-1 p-2">
-                      {dates.map((date) => {
-                        const count = recordsByDate.get(date)?.length || 0;
-                        // 将 YYYY-MM-DD 格式转换为 MM月DD日
-                        const formatDate = (dateStr: string) => {
-                          const [year, month, day] = dateStr.split('-');
-                          return `${parseInt(month)}月${parseInt(day)}日`;
-                        };
-                        return (
-                          <button
-                            key={date}
-                            onClick={() => setSelectedDate(date)}
-                            className={`w-full flex flex-col items-start px-3 py-2.5 rounded-md transition-colors ${
-                              selectedDate === date
-                                ? 'bg-primary text-primary-foreground'
-                                : 'hover:bg-accent'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between w-full">
-                              <span className="font-medium">{formatDate(date)}</span>
-                              <ChevronRight className="h-4 w-4" />
-                            </div>
-                            <div className="text-xs mt-1 opacity-80">
-                              {count}只涨停
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </ScrollArea>
+              <CardContent>
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : dates.length === 0 ? (
+                  <p className="text-center py-8 text-muted-foreground text-sm">
+                    暂无数据，请先上传涨停复盘图片
+                  </p>
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      modifiers={modifiers}
+                      modifiersClassNames={modifiersClassNames}
+                      className="rounded-md border"
+                    />
+                    {selectedDateStr && (
+                      <div className="mt-4 text-center w-full">
+                        <p className="text-sm text-muted-foreground mb-1">已选择</p>
+                        <p className="font-semibold">{selectedDateStr}</p>
+                        <Badge variant="secondary" className="mt-2">
+                          {recordsByDate.get(selectedDateStr)?.length || 0}只涨停
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
             {/* 右侧：详情展示 */}
             <div className="lg:col-span-3 space-y-6">
-              {selectedDate && (
+              {!selectedDateStr ? (
+                <Card>
+                  <CardContent className="py-12">
+                    <p className="text-center text-muted-foreground">
+                      请在左侧日历中选择日期查看涨停数据
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
                 <>
                   {/* 题材统计 */}
                   <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-lg flex items-center gap-2">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
                         <BarChart3 className="h-5 w-5" />
-                        {selectedDate} 题材统计
+                        {selectedDateStr} 题材统计
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       {currentDateStats.length === 0 ? (
-                        <p className="text-center py-4 text-muted-foreground">暂无数据</p>
+                        <p className="text-center py-4 text-muted-foreground">
+                          暂无题材数据
+                        </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
-                          {currentDateStats.map(({ sector, count }) => (
-                            <Badge
-                              key={sector}
-                              variant="secondary"
-                              className="px-3 py-1.5 text-sm"
-                            >
-                              <Tag className="h-3.5 w-3.5 mr-1.5" />
-                              {sector}
-                              <span className="ml-2 px-1.5 py-0.5 rounded bg-primary/10 text-primary text-xs font-semibold">
-                                {count}
-                              </span>
+                          {currentDateStats.map((stat) => (
+                            <Badge key={stat.sector} variant="secondary" className="text-sm px-3 py-1">
+                              <Tag className="h-3 w-3 mr-1" />
+                              {stat.sector} {stat.count}
                             </Badge>
                           ))}
                         </div>
@@ -336,94 +351,70 @@ export default function Home() {
 
                   {/* 涨停股票列表 */}
                   <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-lg flex items-center gap-2">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
                         <TrendingUp className="h-5 w-5" />
-                        涨停股票
-                        <Badge variant="outline">
-                          {recordsByDate.get(selectedDate)?.length || 0} 只
-                        </Badge>
+                        涨停股票 {sortedRecords.length} 只
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="rounded-lg border overflow-hidden">
-                        <table className="w-full text-sm">
-                          <thead className="bg-muted/50">
-                            <tr>
-                              <th className="px-4 py-3 text-left font-medium">股票</th>
-                              <th className="px-4 py-3 text-left font-medium">涨停时间</th>
-                              <th className="px-4 py-3 text-left font-medium">板数</th>
-                              <th className="px-4 py-3 text-left font-medium">题材</th>
-                              <th className="px-4 py-3 text-left font-medium">关键词</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y">
+                      <ScrollArea className="h-[600px] pr-4">
+                        {sortedRecords.length === 0 ? (
+                          <p className="text-center py-8 text-muted-foreground">
+                            暂无涨停数据
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
                             {sortedRecords.map((record) => (
-                              <tr key={record.id} className="hover:bg-muted/30 transition-colors">
-                                <td className="px-4 py-3">
-                                  <div>
-                                    <span className="font-medium">{record.stockName}</span>
-                                    <span className="text-muted-foreground ml-2 text-xs">
-                                      {record.stockCode}
-                                    </span>
+                              <div
+                                key={record.id}
+                                className="p-4 rounded-lg border bg-card hover:bg-accent/30 transition-colors"
+                              >
+                                <div className="flex items-start justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <span className="font-semibold text-lg">{record.stockName}</span>
+                                      <span className="text-sm text-muted-foreground">{record.stockCode}</span>
+                                      {record.boardCount && (
+                                        <Badge variant="destructive" className="text-xs">
+                                          {record.boardCount}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-4 text-sm text-muted-foreground mb-2">
+                                      {record.limitUpTime && (
+                                        <span className="flex items-center gap-1">
+                                          <Clock className="h-3.5 w-3.5" />
+                                          {record.limitUpTime}
+                                        </span>
+                                      )}
+                                      {record.circulationValue && (
+                                        <span>流通市值: {record.circulationValue}亿</span>
+                                      )}
+                                      {record.turnover && (
+                                        <span>成交额: {record.turnover}亿</span>
+                                      )}
+                                    </div>
+                                    {record.keywords && (
+                                      <p className="text-sm text-muted-foreground">
+                                        {record.keywords}
+                                      </p>
+                                    )}
                                   </div>
-                                </td>
-                                <td className="px-4 py-3 text-muted-foreground">
-                                  {record.limitUpTime || '-'}
-                                </td>
-                                <td className="px-4 py-3">
-                                  {record.boardCount ? (
-                                    <Badge variant="outline" className="text-xs">
-                                      {record.boardCount}
-                                    </Badge>
-                                  ) : '-'}
-                                </td>
-                                <td className="px-4 py-3">
-                                  {record.sector ? (
-                                    <Badge variant="secondary" className="text-xs">
-                                      {record.sector}
-                                    </Badge>
-                                  ) : '-'}
-                                </td>
-                                <td className="px-4 py-3 max-w-xs">
-                                  <p className="text-xs text-muted-foreground truncate" title={record.keywords || ''}>
-                                    {record.keywords || '-'}
-                                  </p>
-                                </td>
-                              </tr>
+                                  <div className="ml-4">
+                                    {record.sector && (
+                                      <Badge className="whitespace-nowrap">{record.sector}</Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
                             ))}
-                          </tbody>
-                        </table>
-                      </div>
+                          </div>
+                        )}
+                      </ScrollArea>
                     </CardContent>
                   </Card>
                 </>
-              )}
-
-              {!selectedDate && !isLoading && dates.length > 0 && (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-16">
-                    <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground">请从左侧选择一个日期查看详情</p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {!isLoading && dates.length === 0 && (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-16">
-                    <Upload className="h-12 w-12 text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground mb-4">暂无涨停数据</p>
-                    {isAuthenticated && (
-                      <Link href="/upload">
-                        <Button>
-                          <Upload className="h-4 w-4 mr-2" />
-                          上传涨停复盘图片
-                        </Button>
-                      </Link>
-                    )}
-                  </CardContent>
-                </Card>
               )}
             </div>
           </div>
