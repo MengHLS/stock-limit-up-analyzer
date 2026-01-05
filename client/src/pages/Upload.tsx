@@ -17,7 +17,9 @@ import {
   ArrowLeft,
   Calendar,
   Sparkles,
-  FileImage
+  FileImage,
+  Trash2,
+  Images
 } from "lucide-react";
 import { useState, useCallback, useRef } from "react";
 import { Link, useLocation } from "wouter";
@@ -34,128 +36,215 @@ interface RecognizedStock {
   keywords: string;
 }
 
+interface FileItem {
+  id: string;
+  file: File;
+  previewUrl: string;
+  status: 'pending' | 'uploading' | 'recognizing' | 'completed' | 'error';
+  progress: number;
+  recognizedCount?: number;
+  error?: string;
+}
+
 export default function UploadPage() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [files, setFiles] = useState<FileItem[]>([]);
   const [limitUpDate, setLimitUpDate] = useState(() => {
     const today = new Date();
     return today.toISOString().split('T')[0];
   });
-  const [isUploading, setIsUploading] = useState(false);
-  const [isRecognizing, setIsRecognizing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [totalRecognized, setTotalRecognized] = useState(0);
   const [recognizedStocks, setRecognizedStocks] = useState<RecognizedStock[]>([]);
-  const [uploadProgress, setUploadProgress] = useState(0);
 
   const uploadMutation = trpc.image.upload.useMutation();
   const recognizeMutation = trpc.image.recognize.useMutation();
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length === 0) return;
 
-    // 验证文件类型
-    if (!file.type.startsWith('image/')) {
-      toast.error('请选择图片文件');
-      return;
+    const newFiles: FileItem[] = [];
+    
+    for (const file of selectedFiles) {
+      // 验证文件类型
+      if (!file.type.startsWith('image/')) {
+        toast.error(`${file.name} 不是图片文件`);
+        continue;
+      }
+
+      // 验证文件大小 (最大 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(`${file.name} 超过 10MB 限制`);
+        continue;
+      }
+
+      const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const previewUrl = URL.createObjectURL(file);
+      
+      newFiles.push({
+        id,
+        file,
+        previewUrl,
+        status: 'pending',
+        progress: 0,
+      });
     }
 
-    // 验证文件大小 (最大 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('图片大小不能超过 10MB');
-      return;
+    if (newFiles.length > 0) {
+      setFiles(prev => [...prev, ...newFiles]);
+      setRecognizedStocks([]);
+      setTotalRecognized(0);
     }
 
-    setSelectedFile(file);
-    setRecognizedStocks([]);
-
-    // 创建预览
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setPreviewUrl(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    // 清空input以便重复选择相同文件
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   }, []);
 
-  const handleUploadAndRecognize = useCallback(async () => {
-    if (!selectedFile || !limitUpDate) {
-      toast.error('请选择图片和涨停日期');
-      return;
-    }
+  const removeFile = useCallback((id: string) => {
+    setFiles(prev => {
+      const file = prev.find(f => f.id === id);
+      if (file) {
+        URL.revokeObjectURL(file.previewUrl);
+      }
+      return prev.filter(f => f.id !== id);
+    });
+  }, []);
 
-    setIsUploading(true);
-    setUploadProgress(0);
+  const clearAllFiles = useCallback(() => {
+    files.forEach(f => URL.revokeObjectURL(f.previewUrl));
+    setFiles([]);
+    setRecognizedStocks([]);
+    setTotalRecognized(0);
+  }, [files]);
+
+  const processFile = async (fileItem: FileItem): Promise<RecognizedStock[]> => {
+    // 更新状态为上传中
+    setFiles(prev => prev.map(f => 
+      f.id === fileItem.id ? { ...f, status: 'uploading', progress: 20 } : f
+    ));
 
     try {
       // 读取文件为 base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
         reader.onload = () => {
           const result = reader.result as string;
-          // 移除 data:image/xxx;base64, 前缀
           const base64 = result.split(',')[1];
           resolve(base64);
         };
         reader.onerror = reject;
+        reader.readAsDataURL(fileItem.file);
       });
-      reader.readAsDataURL(selectedFile);
 
-      setUploadProgress(20);
-      const base64Data = await base64Promise;
+      setFiles(prev => prev.map(f => 
+        f.id === fileItem.id ? { ...f, progress: 40 } : f
+      ));
 
       // 上传图片
-      setUploadProgress(40);
       const uploadResult = await uploadMutation.mutateAsync({
         base64Data,
-        fileName: selectedFile.name,
-        mimeType: selectedFile.type,
+        fileName: fileItem.file.name,
+        mimeType: fileItem.file.type,
       });
 
       if (!uploadResult) {
         throw new Error('上传失败');
       }
 
-      setUploadProgress(60);
-      setIsUploading(false);
-      setIsRecognizing(true);
+      setFiles(prev => prev.map(f => 
+        f.id === fileItem.id ? { ...f, status: 'recognizing', progress: 60 } : f
+      ));
 
       // 识别图片
-      toast.info('正在识别图片中的股票数据...');
       const recognizeResult = await recognizeMutation.mutateAsync({
         imageUrl: uploadResult.fileUrl,
         imageId: uploadResult.id,
         limitUpDate,
       });
 
-      setUploadProgress(100);
-      setRecognizedStocks(recognizeResult.stocks);
-      
-      toast.success(`识别完成，共识别到 ${recognizeResult.count} 只股票`);
+      setFiles(prev => prev.map(f => 
+        f.id === fileItem.id ? { 
+          ...f, 
+          status: 'completed', 
+          progress: 100,
+          recognizedCount: recognizeResult.count 
+        } : f
+      ));
+
+      return recognizeResult.stocks;
     } catch (error) {
-      console.error('Upload/recognize error:', error);
-      toast.error(error instanceof Error ? error.message : '处理失败，请重试');
-    } finally {
-      setIsUploading(false);
-      setIsRecognizing(false);
+      setFiles(prev => prev.map(f => 
+        f.id === fileItem.id ? { 
+          ...f, 
+          status: 'error', 
+          progress: 0,
+          error: error instanceof Error ? error.message : '处理失败'
+        } : f
+      ));
+      return [];
     }
-  }, [selectedFile, limitUpDate, uploadMutation, recognizeMutation]);
+  };
+
+  const handleBatchUpload = useCallback(async () => {
+    const pendingFiles = files.filter(f => f.status === 'pending' || f.status === 'error');
+    if (pendingFiles.length === 0) {
+      toast.error('没有待处理的图片');
+      return;
+    }
+
+    if (!limitUpDate) {
+      toast.error('请选择涨停日期');
+      return;
+    }
+
+    setIsProcessing(true);
+    setRecognizedStocks([]);
+    setTotalRecognized(0);
+
+    let allStocks: RecognizedStock[] = [];
+    let successCount = 0;
+
+    for (const fileItem of pendingFiles) {
+      const stocks = await processFile(fileItem);
+      if (stocks.length > 0) {
+        allStocks = [...allStocks, ...stocks];
+        successCount++;
+      }
+    }
+
+    setRecognizedStocks(allStocks);
+    setTotalRecognized(allStocks.length);
+    setIsProcessing(false);
+
+    if (successCount > 0) {
+      toast.success(`处理完成，共识别 ${allStocks.length} 只股票`);
+    } else {
+      toast.error('所有图片处理失败');
+    }
+  }, [files, limitUpDate, processFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) {
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    if (droppedFiles.length > 0) {
       const input = fileInputRef.current;
       if (input) {
         const dt = new DataTransfer();
-        dt.items.add(file);
+        droppedFiles.forEach(file => dt.items.add(file));
         input.files = dt.files;
         handleFileSelect({ target: input } as React.ChangeEvent<HTMLInputElement>);
       }
     }
   }, [handleFileSelect]);
+
+  const pendingCount = files.filter(f => f.status === 'pending' || f.status === 'error').length;
+  const completedCount = files.filter(f => f.status === 'completed').length;
 
   // 未登录状态
   if (!authLoading && !isAuthenticated) {
@@ -198,9 +287,9 @@ export default function UploadPage() {
 
       <main className="container py-8 max-w-4xl">
         <div className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">上传涨停复盘图片</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">批量上传涨停复盘图片</h1>
           <p className="text-muted-foreground mt-1">
-            上传涨停复盘图片，系统将自动识别其中的股票信息
+            支持一次选择多张图片，系统将依次识别其中的股票信息
           </p>
         </div>
 
@@ -209,8 +298,11 @@ export default function UploadPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">
-                <FileImage className="h-5 w-5" />
+                <Images className="h-5 w-5" />
                 选择图片
+                {files.length > 0 && (
+                  <Badge variant="secondary">{files.length} 张</Badge>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -232,7 +324,7 @@ export default function UploadPage() {
               {/* 文件上传区域 */}
               <div
                 className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-                  previewUrl ? 'border-primary/50 bg-primary/5' : 'border-muted-foreground/25 hover:border-primary/50'
+                  files.length > 0 ? 'border-primary/50 bg-primary/5' : 'border-muted-foreground/25 hover:border-primary/50'
                 }`}
                 onDrop={handleDrop}
                 onDragOver={(e) => e.preventDefault()}
@@ -241,77 +333,112 @@ export default function UploadPage() {
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
+                  multiple
                   onChange={handleFileSelect}
                   className="hidden"
                   id="file-upload"
                 />
                 
-                {previewUrl ? (
-                  <div className="space-y-4">
-                    <img
-                      src={previewUrl}
-                      alt="Preview"
-                      className="max-h-96 mx-auto rounded-lg shadow-md"
-                    />
-                    <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                      <ImageIcon className="h-4 w-4" />
-                      {selectedFile?.name}
+                <label htmlFor="file-upload" className="cursor-pointer">
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="p-4 rounded-full bg-muted">
+                      <UploadIcon className="h-8 w-8 text-muted-foreground" />
                     </div>
-                    <Button
-                      variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      重新选择
-                    </Button>
+                    <div>
+                      <p className="font-medium">点击或拖拽上传图片</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        支持多选，JPG、PNG 格式，单张最大 10MB
+                      </p>
+                    </div>
                   </div>
-                ) : (
-                  <label htmlFor="file-upload" className="cursor-pointer">
-                    <div className="flex flex-col items-center gap-4">
-                      <div className="p-4 rounded-full bg-muted">
-                        <UploadIcon className="h-8 w-8 text-muted-foreground" />
-                      </div>
-                      <div>
-                        <p className="font-medium">点击或拖拽上传图片</p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          支持 JPG、PNG 格式，最大 10MB
-                        </p>
-                      </div>
-                    </div>
-                  </label>
-                )}
+                </label>
               </div>
 
-              {/* 上传进度 */}
-              {(isUploading || isRecognizing) && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2">
-                      {isUploading ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          正在上传...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4 w-4 animate-pulse" />
-                          正在识别股票数据...
-                        </>
-                      )}
-                    </span>
-                    <span>{uploadProgress}%</span>
+              {/* 已选择的文件列表 */}
+              {files.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">已选择的图片</span>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={clearAllFiles}
+                      disabled={isProcessing}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      清空
+                    </Button>
                   </div>
-                  <Progress value={uploadProgress} />
+                  <ScrollArea className="h-[200px]">
+                    <div className="space-y-2">
+                      {files.map((fileItem) => (
+                        <div 
+                          key={fileItem.id}
+                          className="flex items-center gap-3 p-2 rounded-lg border bg-card"
+                        >
+                          <img 
+                            src={fileItem.previewUrl} 
+                            alt={fileItem.file.name}
+                            className="w-12 h-12 object-cover rounded"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{fileItem.file.name}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              {fileItem.status === 'pending' && (
+                                <Badge variant="outline" className="text-xs">待处理</Badge>
+                              )}
+                              {fileItem.status === 'uploading' && (
+                                <Badge variant="secondary" className="text-xs">
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  上传中
+                                </Badge>
+                              )}
+                              {fileItem.status === 'recognizing' && (
+                                <Badge variant="secondary" className="text-xs">
+                                  <Sparkles className="h-3 w-3 mr-1 animate-pulse" />
+                                  识别中
+                                </Badge>
+                              )}
+                              {fileItem.status === 'completed' && (
+                                <Badge variant="default" className="text-xs bg-green-500">
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  已识别 {fileItem.recognizedCount} 只
+                                </Badge>
+                              )}
+                              {fileItem.status === 'error' && (
+                                <Badge variant="destructive" className="text-xs">
+                                  <XCircle className="h-3 w-3 mr-1" />
+                                  {fileItem.error || '失败'}
+                                </Badge>
+                              )}
+                            </div>
+                            {(fileItem.status === 'uploading' || fileItem.status === 'recognizing') && (
+                              <Progress value={fileItem.progress} className="h-1 mt-2" />
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeFile(fileItem.id)}
+                            disabled={isProcessing && (fileItem.status === 'uploading' || fileItem.status === 'recognizing')}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
                 </div>
               )}
 
               {/* 上传按钮 */}
               <Button
-                onClick={handleUploadAndRecognize}
-                disabled={!selectedFile || !limitUpDate || isUploading || isRecognizing}
+                onClick={handleBatchUpload}
+                disabled={pendingCount === 0 || !limitUpDate || isProcessing}
                 className="w-full"
                 size="lg"
               >
-                {isUploading || isRecognizing ? (
+                {isProcessing ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     处理中...
@@ -319,10 +446,16 @@ export default function UploadPage() {
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4 mr-2" />
-                    上传并识别
+                    批量上传并识别 {pendingCount > 0 && `(${pendingCount} 张)`}
                   </>
                 )}
               </Button>
+
+              {completedCount > 0 && (
+                <p className="text-sm text-center text-muted-foreground">
+                  已完成 {completedCount}/{files.length} 张，共识别 {totalRecognized} 只股票
+                </p>
+              )}
             </CardContent>
           </Card>
 
