@@ -347,7 +347,7 @@ export default function Home() {
             <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-3">
             {/* 左侧：日历 */}
             <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
               <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-2 px-3">
