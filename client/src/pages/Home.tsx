@@ -347,7 +347,7 @@ export default function Home() {
             <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
             {/* 左侧：日历 */}
             <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
               <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-3 px-4">
@@ -385,13 +385,13 @@ export default function Home() {
                 <>
                   {/* 题材统计 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 py-2 px-4">
-                      <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                    <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 py-1.5 px-4">
+                      <CardTitle className="flex items-center gap-2 text-slate-700 text-sm">
                         <BarChart3 className="h-4 w-4 text-blue-600" />
                         {selectedDateStr} 题材统计
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-3 px-4 pb-3">
+                    <CardContent className="pt-2 px-4 pb-2">
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setSelectedSector(null)}
@@ -422,13 +422,7 @@ export default function Home() {
 
                   {/* 关注筛选 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 py-2 px-4">
-                      <CardTitle className="flex items-center gap-2 text-slate-700 text-sm">
-                        <Star className="h-4 w-4 text-amber-600" />
-                        关注筛选
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="pt-3 px-4 pb-3">
+                    <CardContent className="p-3">
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setWatchFilter("all")}

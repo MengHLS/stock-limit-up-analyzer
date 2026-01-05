@@ -103,3 +103,8 @@
 - [x] 减小按钮和元素间距（px-3 py-1.5）
 - [x] 增加涨停股票列表高度（h-[700px]）
 - [x] 减小header高度（h-14）
+
+## 进一步布局优化
+- [x] 移除关注筛选的标题栏，直接显示按钮（CardContent p-3）
+- [x] 减少题材统计的上下padding（CardHeader py-1.5, CardContent pt-2 pb-2）
+- [x] 缩窄左侧日历插件宽度（400px → 360px）
