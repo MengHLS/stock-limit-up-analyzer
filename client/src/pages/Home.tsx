@@ -166,35 +166,31 @@ export default function Home() {
 
   // 为日历添加涨停数标记和背景色
   const calendarStyle = useMemo(() => {
-    const styles: string[] = [
-      // 基础样式：为所有日期按钮设置最小高度
-      `.calendar-container .rdp-day_button {
-        min-height: 48px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 2px;
-      }`,
-    ];
+    if (dateCountMap.size === 0) return '';
+    
+    const styles: string[] = [];
     
     dateCountMap.forEach((count, dateStr) => {
       // 为有数据的日期添加背景色和涨停数
+      // 使用 .rdp-day 容器的 data-date 属性来定位
       styles.push(`
-        .calendar-container button[name="${dateStr}"] {
-          background-color: hsl(var(--primary) / 0.1);
+        .calendar-container .rdp-day[data-date="${dateStr}"] .rdp-day_button {
+          background-color: hsl(var(--primary) / 0.1) !important;
           font-weight: 600;
+          min-height: 52px;
+          position: relative;
         }
-        .calendar-container button[name="${dateStr}"]:hover {
-          background-color: hsl(var(--primary) / 0.2);
+        .calendar-container .rdp-day[data-date="${dateStr}"] .rdp-day_button:hover {
+          background-color: hsl(var(--primary) / 0.2) !important;
         }
-        .calendar-container button[name="${dateStr}"]::after {
-          content: "${count}只";
+        .calendar-container .rdp-day[data-date="${dateStr}"] .rdp-day_button::after {
+          content: "${count}";
           display: block;
-          font-size: 10px;
-          font-weight: 600;
+          font-size: 9px;
+          font-weight: 500;
           color: hsl(var(--primary));
           line-height: 1;
+          margin-top: 2px;
         }
       `);
     });
