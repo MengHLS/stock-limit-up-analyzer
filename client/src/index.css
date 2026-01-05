@@ -182,4 +182,46 @@
       max-width: 1280px; /* Standard content width */
     }
   }
+
+  /* 日历样式优化 */
+  .calendar-container .rdp {
+    @apply p-0;
+  }
+
+  .calendar-container .rdp-month {
+    @apply w-full;
+  }
+
+  .calendar-container .rdp-month_caption {
+    @apply mb-4 flex items-center justify-center relative;
+  }
+
+  .calendar-container .rdp-caption_label {
+    @apply text-lg font-bold text-slate-800;
+  }
+
+  .calendar-container .rdp-nav {
+    @apply flex items-center gap-2;
+  }
+
+  .calendar-container .rdp-button_previous,
+  .calendar-container .rdp-button_next {
+    @apply h-9 w-9 rounded-lg bg-gradient-to-br from-orange-100 to-red-100 hover:from-orange-200 hover:to-red-200 text-orange-700 border-2 border-orange-300 shadow-sm hover:shadow-md transition-all;
+  }
+
+  .calendar-container .rdp-weekdays {
+    @apply mb-2;
+  }
+
+  .calendar-container .rdp-weekday {
+    @apply text-sm font-semibold text-slate-600 p-2;
+  }
+
+  .calendar-container .rdp-week {
+    @apply grid grid-cols-7 gap-2 mb-2;
+  }
+
+  .calendar-container .rdp-day {
+    @apply p-0;
+  }
 }

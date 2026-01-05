@@ -176,20 +176,36 @@ export default function Home() {
       const dateStr = props.day?.date ? dateToString(props.day.date) : null;
       const count = dateStr ? dateCountMap.get(dateStr) : undefined;
       const hasData = count !== undefined;
+      const isSelected = props.selected;
+      const isToday = props.today;
 
       return (
         <button
           {...props}
           className={`
-            ${props.className || ''}
-            ${hasData ? 'bg-gradient-to-br from-orange-50 to-red-50 hover:from-orange-100 hover:to-red-100 border-orange-200 border font-bold shadow-sm' : ''}
-            flex flex-col items-center justify-center min-h-[56px] gap-0.5 rounded-lg transition-all
+            relative flex flex-col items-center justify-center w-full h-14 rounded-xl transition-all duration-200
+            ${hasData 
+              ? isSelected
+                ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-lg scale-105 border-2 border-orange-400'
+                : 'bg-gradient-to-br from-orange-100 to-red-100 hover:from-orange-200 hover:to-red-200 text-slate-800 border-2 border-orange-300 shadow-md hover:shadow-lg hover:scale-105'
+              : isSelected
+                ? 'bg-slate-200 text-slate-800 border-2 border-slate-400'
+                : isToday
+                  ? 'bg-blue-50 text-blue-700 border-2 border-blue-300 hover:bg-blue-100'
+                  : 'hover:bg-slate-100 text-slate-600 border border-transparent hover:border-slate-200'
+            }
           `}
         >
-          <span className={hasData ? 'text-base' : ''}>{props.day?.date.getDate()}</span>
+          <span className={`font-semibold ${
+            hasData ? 'text-lg' : 'text-base'
+          } ${isSelected && hasData ? 'text-white' : ''}`}>
+            {props.day?.date.getDate()}
+          </span>
           {hasData && (
-            <span className="text-[10px] font-bold text-orange-600 flex items-center gap-0.5">
-              <Flame className="h-2.5 w-2.5" />
+            <span className={`text-xs font-bold flex items-center gap-1 mt-0.5 ${
+              isSelected ? 'text-orange-100' : 'text-orange-700'
+            }`}>
+              <Flame className="h-3 w-3" />
               {count}
             </span>
           )}
