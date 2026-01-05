@@ -164,6 +164,27 @@ export default function Home() {
     return map;
   }, [dates, recordsByDate]);
 
+  // 为日历添加涨停数标记
+  const calendarStyle = useMemo(() => {
+    const styles: string[] = [];
+    dateCountMap.forEach((count, dateStr) => {
+      const [year, month, day] = dateStr.split('-');
+      const selector = `.rdp-day[data-date="${dateStr}"] .rdp-day_button`;
+      styles.push(`
+        ${selector}::after {
+          content: "${count}";
+          display: block;
+          font-size: 9px;
+          font-weight: 600;
+          color: hsl(var(--primary));
+          line-height: 1;
+          margin-top: 2px;
+        }
+      `);
+    });
+    return styles.join('\n');
+  }, [dateCountMap]);
+
   return (
     <div className="min-h-screen bg-background">
       {/* 顶部导航 */}
@@ -305,7 +326,7 @@ export default function Home() {
                   </p>
                 ) : (
                   <div className="flex flex-col items-center">
-                    <div className="calendar-with-counts">
+                    <div className="calendar-container">
                       <CalendarComponent
                         mode="single"
                         selected={selectedDate}
@@ -314,47 +335,7 @@ export default function Home() {
                         modifiersClassNames={modifiersClassNames}
                         className="rounded-md border"
                       />
-                      <style>{`
-                        .calendar-with-counts .rdp-day_button.relative {
-                          padding-bottom: 8px;
-                        }
-                        .calendar-with-counts .rdp-day_button.relative::after {
-                          content: attr(data-count);
-                          position: absolute;
-                          bottom: 0;
-                          left: 50%;
-                          transform: translateX(-50%);
-                          font-size: 9px;
-                          font-weight: 600;
-                          color: hsl(var(--primary));
-                        }
-                      `}</style>
-                      {/* 为每个有数据的日期添加data-count属性 */}
-                      <script
-                        dangerouslySetInnerHTML={{
-                          __html: `
-                            setTimeout(() => {
-                              const buttons = document.querySelectorAll('.calendar-with-counts .rdp-day_button.relative');
-                              const dateCountMap = ${JSON.stringify(Object.fromEntries(dateCountMap))};
-                              buttons.forEach(btn => {
-                                const dateStr = btn.getAttribute('aria-label');
-                                if (dateStr) {
-                                  // 解析日期
-                                  const match = dateStr.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
-                                  if (match) {
-                                    const [_, year, month, day] = match;
-                                    const key = \`\${year}-\${month.padStart(2, '0')}-\${day.padStart(2, '0')}\`;
-                                    const count = dateCountMap[key];
-                                    if (count) {
-                                      btn.setAttribute('data-count', count);
-                                    }
-                                  }
-                                }
-                              });
-                            }, 100);
-                          `,
-                        }}
-                      />
+                      <style>{calendarStyle}</style>
                     </div>
                     {/* 日期涨停数快速预览 */}
                     <div className="mt-4 w-full max-h-[200px] overflow-y-auto">
