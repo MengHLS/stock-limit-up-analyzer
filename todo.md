@@ -94,3 +94,12 @@
 - [x] 在首页添加关注筛选功能（全部、普通关注、重点关注）
 - [x] 实现关注状态实时更新和筛选显示
 - [x] 编写单元测试验证关注功能（getWatchStatus和updateWatchStatus）
+
+## 页面布局优化
+- [x] 减少卡片之间的间距（space-y-6改为space-y-3）
+- [x] 压缩卡片内部padding（CardHeader py-2, CardContent pt-3 pb-3）
+- [x] 优化整体页面边距（main py-3, gap-4）
+- [x] 减小标题字体大小（text-base或text-sm）
+- [x] 减小按钮和元素间距（px-3 py-1.5）
+- [x] 增加涨停股票列表高度（h-[700px]）
+- [x] 减小header高度（h-14）

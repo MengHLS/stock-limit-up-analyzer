@@ -226,7 +226,7 @@ export default function Home() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* 顶部导航 */}
       <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-xl supports-[backdrop-filter]:bg-white/60 shadow-sm">
-        <div className="container flex h-16 items-center justify-between">
+        <div className="container flex h-14 items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-lg">
               <TrendingUp className="h-5 w-5 text-white" />
@@ -263,30 +263,30 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="container py-6 max-w-[1600px]">
+      <main className="container py-3 max-w-[1600px]">
         {/* 搜索栏 */}
-        <div className="mb-6">
+        <div className="mb-4">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索股票代码或名称..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-12 h-12 text-base shadow-sm border-slate-200 focus-visible:ring-orange-500"
+              className="pl-12 h-10 text-base shadow-sm border-slate-200 focus-visible:ring-orange-500"
             />
           </div>
         </div>
 
         {/* 搜索结果 */}
         {searchQuery && (
-          <Card className="mb-6 shadow-lg border-slate-200">
-            <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50">
-              <CardTitle className="flex items-center gap-2 text-slate-700">
-                <Search className="h-5 w-5" />
+          <Card className="mb-4 shadow-lg border-slate-200">
+            <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 py-3 px-4">
+              <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                <Search className="h-4 w-4" />
                 搜索结果
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-6">
+            <CardContent className="pt-4 px-4 pb-4">
               {searchLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
@@ -296,11 +296,11 @@ export default function Home() {
                   未找到相关股票
                 </p>
               ) : (
-                <div className="grid gap-3">
+                <div className="grid gap-2">
                   {searchResults.map((record) => (
                     <div
                       key={record.id}
-                      className="flex items-center justify-between p-5 rounded-xl border border-slate-200 bg-white hover:shadow-md hover:border-orange-200 transition-all"
+                      className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white hover:shadow-md hover:border-orange-200 transition-all"
                     >
                       <div className="flex items-center gap-6">
                         <div>
@@ -347,7 +347,7 @@ export default function Home() {
             <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-4">
             {/* 左侧：日历 */}
             <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
               <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-3 px-4">
@@ -380,22 +380,22 @@ export default function Home() {
             </Card>
 
             {/* 右侧：涨停数据 */}
-            <div className="space-y-6">
+            <div className="space-y-3">
               {selectedDateStr && (
                 <>
                   {/* 题材统计 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
-                      <CardTitle className="flex items-center gap-2 text-slate-700">
-                        <BarChart3 className="h-5 w-5 text-blue-600" />
+                    <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 py-2 px-4">
+                      <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                        <BarChart3 className="h-4 w-4 text-blue-600" />
                         {selectedDateStr} 题材统计
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-6">
+                    <CardContent className="pt-3 px-4 pb-3">
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setSelectedSector(null)}
-                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                          className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
                             selectedSector === null
                               ? 'bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-md'
                               : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -407,7 +407,7 @@ export default function Home() {
                           <button
                             key={stat.sector}
                             onClick={() => setSelectedSector(stat.sector === selectedSector ? null : stat.sector)}
-                            className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
                               selectedSector === stat.sector
                                 ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md'
                                 : 'bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 border border-blue-200'
@@ -422,17 +422,17 @@ export default function Home() {
 
                   {/* 关注筛选 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 py-3">
-                      <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                    <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 py-2 px-4">
+                      <CardTitle className="flex items-center gap-2 text-slate-700 text-sm">
                         <Star className="h-4 w-4 text-amber-600" />
                         关注筛选
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-4">
+                    <CardContent className="pt-3 px-4 pb-3">
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setWatchFilter("all")}
-                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                          className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
                             watchFilter === "all"
                               ? 'bg-gradient-to-r from-slate-500 to-slate-600 text-white shadow-md'
                               : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -442,7 +442,7 @@ export default function Home() {
                         </button>
                         <button
                           onClick={() => setWatchFilter("normal")}
-                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-1 ${
+                          className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all flex items-center gap-1 ${
                             watchFilter === "normal"
                               ? 'bg-gradient-to-r from-orange-400 to-orange-500 text-white shadow-md'
                               : 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200'
@@ -453,7 +453,7 @@ export default function Home() {
                         </button>
                         <button
                           onClick={() => setWatchFilter("important")}
-                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-1 ${
+                          className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all flex items-center gap-1 ${
                             watchFilter === "important"
                               ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-md'
                               : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
@@ -468,14 +468,14 @@ export default function Home() {
 
                   {/* 涨停股票列表 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50">
-                      <CardTitle className="flex items-center gap-2 text-slate-700">
-                        <Flame className="h-5 w-5 text-orange-600" />
+                    <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-2 px-4">
+                      <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                        <Flame className="h-4 w-4 text-orange-600" />
                         涨停股票 {sortedRecords.length} 只
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-6">
-                      <ScrollArea className="h-[600px] pr-4">
+                    <CardContent className="pt-3 px-4 pb-3">
+                      <ScrollArea className="h-[700px] pr-4">
                         <WatchFilteredStockList 
                           records={sortedRecords} 
                           watchFilter={watchFilter}
@@ -535,11 +535,11 @@ function WatchFilteredStockList({
       {filteredRecords.map((record) => (
                             <div
                               key={record.id}
-                              className="group p-4 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
+                              className="group p-3 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
                             >
-                              <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-start justify-between mb-2">
                                 <div className="flex items-center gap-3">
-                                  <span className="font-bold text-lg text-slate-800 group-hover:text-orange-600 transition-colors">
+                                  <span className="font-bold text-base text-slate-800 group-hover:text-orange-600 transition-colors">
                                     {record.stockName}
                                   </span>
                                   <span className="text-sm font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
@@ -568,7 +568,7 @@ function WatchFilteredStockList({
                                 </div>
                               </div>
                               {record.keywords && (
-                                <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg">
+                                <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-2 rounded-lg">
                                   {record.keywords}
                                 </p>
                               )}
