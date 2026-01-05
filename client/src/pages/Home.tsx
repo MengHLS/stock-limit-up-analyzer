@@ -21,7 +21,7 @@ import {
   Hash,
   Tag
 } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Link } from "wouter";
 
 export default function Home() {
@@ -164,39 +164,33 @@ export default function Home() {
     return map;
   }, [dates, recordsByDate]);
 
-  // 为日历添加涨停数标记和背景色
-  const calendarStyle = useMemo(() => {
-    if (dateCountMap.size === 0) return '';
-    
-    const styles: string[] = [];
-    
-    dateCountMap.forEach((count, dateStr) => {
-      // 为有数据的日期添加背景色和涨停数
-      // 使用 .rdp-day 容器的 data-date 属性来定位
-      styles.push(`
-        .calendar-container .rdp-day[data-date="${dateStr}"] .rdp-day_button {
-          background-color: hsl(var(--primary) / 0.1) !important;
-          font-weight: 600;
-          min-height: 52px;
-          position: relative;
-        }
-        .calendar-container .rdp-day[data-date="${dateStr}"] .rdp-day_button:hover {
-          background-color: hsl(var(--primary) / 0.2) !important;
-        }
-        .calendar-container .rdp-day[data-date="${dateStr}"] .rdp-day_button::after {
-          content: "${count}";
-          display: block;
-          font-size: 9px;
-          font-weight: 500;
-          color: hsl(var(--primary));
-          line-height: 1;
-          margin-top: 2px;
-        }
-      `);
-    });
-    
-    return styles.join('\n');
-  }, [dateCountMap]);
+  // 自定义DayButton组件，显示涨停数
+  const CustomDayButton = useCallback(
+    (props: any) => {
+      const dateStr = props.day?.date ? dateToString(props.day.date) : null;
+      const count = dateStr ? dateCountMap.get(dateStr) : undefined;
+      const hasData = count !== undefined;
+
+      return (
+        <button
+          {...props}
+          className={`
+            ${props.className || ''}
+            ${hasData ? 'bg-primary/10 hover:bg-primary/20 font-semibold' : ''}
+            flex flex-col items-center justify-center min-h-[52px] gap-1
+          `}
+        >
+          <span>{props.day?.date.getDate()}</span>
+          {hasData && (
+            <span className="text-[9px] font-medium text-primary">
+              {count}
+            </span>
+          )}
+        </button>
+      );
+    },
+    [dateCountMap]
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -346,8 +340,10 @@ export default function Home() {
                       modifiers={modifiers}
                       modifiersClassNames={modifiersClassNames}
                       className="rounded-md border"
+                      components={{
+                        DayButton: CustomDayButton as any,
+                      }}
                     />
-                    <style>{calendarStyle}</style>
                   </div>
                 )}
               </CardContent>
