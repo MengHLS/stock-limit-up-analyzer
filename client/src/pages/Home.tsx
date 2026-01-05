@@ -64,8 +64,35 @@ export default function Home() {
     }
     return Array.from(sectorMap.entries())
       .map(([sector, count]) => ({ sector, count }))
-      .sort((a, b) => b.count - a.count);
+      .sort((a, b) => {
+        // "其他"始终放在最后
+        if (a.sector === '其他') return 1;
+        if (b.sector === '其他') return -1;
+        // 其他题材按涨停数降序排列
+        return b.count - a.count;
+      });
   }, [selectedDate, recordsByDate]);
+
+  // 按题材排序的股票列表（与题材统计顺序一致）
+  const sortedRecords = useMemo(() => {
+    if (!selectedDate) return [];
+    const records = recordsByDate.get(selectedDate) || [];
+    // 创建题材优先级映射
+    const sectorOrder = new Map<string, number>();
+    currentDateStats.forEach((stat, index) => {
+      sectorOrder.set(stat.sector, index);
+    });
+    // 按题材优先级排序
+    return [...records].sort((a, b) => {
+      const sectorA = a.sector || '其他';
+      const sectorB = b.sector || '其他';
+      const orderA = sectorOrder.get(sectorA) ?? 999;
+      const orderB = sectorOrder.get(sectorB) ?? 999;
+      if (orderA !== orderB) return orderA - orderB;
+      // 同题材内按涨停时间排序
+      return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
+    });
+  }, [selectedDate, recordsByDate, currentDateStats]);
 
   // 自动选择最新日期
   useMemo(() => {
@@ -303,7 +330,7 @@ export default function Home() {
                             </tr>
                           </thead>
                           <tbody className="divide-y">
-                            {(recordsByDate.get(selectedDate) || []).map((record) => (
+                            {sortedRecords.map((record) => (
                               <tr key={record.id} className="hover:bg-muted/30 transition-colors">
                                 <td className="px-4 py-3">
                                   <div>
