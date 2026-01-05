@@ -1,0 +1,9 @@
+{
+  "query": "DELETE FROM limit_up_records WHERE limitUpDate = '2024-12-30' OR limitUpDate = '2025-12-30';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute DELETE FROM limit_up_records WHERE limitUpDate = '2024-12-30' OR limitUpDate = '2025-12-30';",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1578
+}

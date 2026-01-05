@@ -80,9 +80,12 @@ export const appRouter = router({
         keywords: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
+        // 使用UTC时间避免时区转换问题
+        const [year, month, day] = input.limitUpDate.split('-').map(Number);
+        const dateUTC = new Date(Date.UTC(year, month - 1, day));
         return await createLimitUpRecord({
           ...input,
-          limitUpDate: new Date(input.limitUpDate),
+          limitUpDate: dateUTC,
           createdBy: ctx.user.id,
         });
       }),
@@ -277,10 +280,14 @@ export const appRouter = router({
               turnover?: string;
               sector?: string;
               keywords?: string;
-            }) => ({
+            }) => {
+              // 使用UTC时间避免时区转换问题
+              const [year, month, day] = limitUpDate.split('-').map(Number);
+              const dateUTC = new Date(Date.UTC(year, month - 1, day));
+              return {
               stockCode: stock.stockCode,
               stockName: stock.stockName,
-              limitUpDate: new Date(limitUpDate),
+              limitUpDate: dateUTC,
               limitUpTime: stock.limitUpTime || null,
               boardCount: stock.boardCount || null,
               circulationValue: stock.circulationValue || null,
@@ -288,7 +295,8 @@ export const appRouter = router({
               sector: stock.sector || null,
               keywords: stock.keywords || null,
               createdBy: ctx.user.id,
-            }));
+            };
+            });
 
             await createLimitUpRecordsBatch(records);
           }

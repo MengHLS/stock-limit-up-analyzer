@@ -1,0 +1,40 @@
+{
+  "query": "SELECT id, stockCode, stockName, DATE_FORMAT(limitUpDate, '%Y-%m-%d') as limitUpDate FROM limit_up_records ORDER BY id DESC LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT id, stockCode, stockName, DATE_FORMAT(limitUpDate, '%Y-%m-%d') as limitUpDate FROM limit_up_records ORDER BY id DESC LIMIT 5;",
+  "rows": [
+    {
+      "id": "58",
+      "stockCode": "001231.SZ",
+      "stockName": "农心科技",
+      "limitUpDate": "2025-12-30"
+    },
+    {
+      "id": "57",
+      "stockCode": "002634.SZ",
+      "stockName": "棒杰股份",
+      "limitUpDate": "2025-12-30"
+    },
+    {
+      "id": "56",
+      "stockCode": "002766.SZ",
+      "stockName": "索菱股份",
+      "limitUpDate": "2025-12-30"
+    },
+    {
+      "id": "55",
+      "stockCode": "000809.SZ",
+      "stockName": "和展能源",
+      "limitUpDate": "2025-12-30"
+    },
+    {
+      "id": "54",
+      "stockCode": "003039.SZ",
+      "stockName": "顺控发展",
+      "limitUpDate": "2025-12-30"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tstockCode\tstockName\tlimitUpDate\n58\t001231.SZ\t农心科技\t2025-12-30\n57\t002634.SZ\t棒杰股份\t2025-12-30\n56\t002766.SZ\t索菱股份\t2025-12-30\n55\t000809.SZ\t和展能源\t2025-12-30\n54\t003039.SZ\t顺控发展\t2025-12-30\n",
+  "stderr": "",
+  "execution_time_ms": 1552
+}
