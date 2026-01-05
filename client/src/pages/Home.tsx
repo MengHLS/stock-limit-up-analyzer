@@ -173,17 +173,20 @@ export default function Home() {
   // 自定义DayButton组件，显示涨停数
   const CustomDayButton = useCallback(
     (props: any) => {
-      const dateStr = props.day?.date ? dateToString(props.day.date) : null;
+      // 确保传递所有必要的props
+      const { day, modifiers, ...buttonProps } = props;
+      const dateStr = day?.date ? dateToString(day.date) : null;
       const count = dateStr ? dateCountMap.get(dateStr) : undefined;
       const hasData = count !== undefined;
-      const isSelected = props.selected;
-      const isToday = props.today;
+      const isSelected = modifiers?.selected;
+      const isToday = modifiers?.today;
 
       return (
         <button
-          {...props}
+          {...buttonProps}
+          type="button"
           className={`
-            relative flex flex-col items-center justify-center w-full aspect-square rounded-xl transition-all duration-200 p-1
+            relative flex flex-col items-center justify-center w-full aspect-square rounded-xl transition-all duration-200 p-2
             ${hasData 
               ? isSelected
                 ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-lg border-2 border-orange-400'
@@ -197,15 +200,15 @@ export default function Home() {
           `}
         >
           <span className={`font-semibold leading-none ${
-            hasData ? 'text-base' : 'text-sm'
+            hasData ? 'text-lg' : 'text-base'
           } ${isSelected && hasData ? 'text-white' : ''}`}>
-            {props.day?.date.getDate()}
+            {day?.date.getDate()}
           </span>
           {hasData && (
-            <span className={`text-[10px] font-bold flex items-center gap-0.5 mt-0.5 leading-none ${
+            <span className={`text-xs font-bold flex items-center gap-0.5 mt-1 leading-none ${
               isSelected ? 'text-orange-100' : 'text-orange-700'
             }`}>
-              <Flame className="h-2.5 w-2.5" />
+              <Flame className="h-3 w-3" />
               <span>{count}</span>
             </span>
           )}
@@ -340,7 +343,7 @@ export default function Home() {
             <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6">
             {/* 左侧：日历 */}
             <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
               <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50">
