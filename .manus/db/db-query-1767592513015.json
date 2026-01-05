@@ -1,0 +1,82 @@
+{
+  "query": "SELECT DISTINCT limitUpDate FROM limit_up_records ORDER BY limitUpDate;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT DISTINCT limitUpDate FROM limit_up_records ORDER BY limitUpDate;",
+  "rows": [
+    {
+      "limitUpDate": "2023-12-18"
+    },
+    {
+      "limitUpDate": "2024-12-01"
+    },
+    {
+      "limitUpDate": "2024-12-02"
+    },
+    {
+      "limitUpDate": "2024-12-03"
+    },
+    {
+      "limitUpDate": "2024-12-04"
+    },
+    {
+      "limitUpDate": "2024-12-05"
+    },
+    {
+      "limitUpDate": "2024-12-08"
+    },
+    {
+      "limitUpDate": "2024-12-09"
+    },
+    {
+      "limitUpDate": "2024-12-10"
+    },
+    {
+      "limitUpDate": "2024-12-11"
+    },
+    {
+      "limitUpDate": "2024-12-12"
+    },
+    {
+      "limitUpDate": "2024-12-15"
+    },
+    {
+      "limitUpDate": "2024-12-16"
+    },
+    {
+      "limitUpDate": "2024-12-17"
+    },
+    {
+      "limitUpDate": "2024-12-19"
+    },
+    {
+      "limitUpDate": "2024-12-22"
+    },
+    {
+      "limitUpDate": "2024-12-23"
+    },
+    {
+      "limitUpDate": "2024-12-24"
+    },
+    {
+      "limitUpDate": "2024-12-25"
+    },
+    {
+      "limitUpDate": "2024-12-26"
+    },
+    {
+      "limitUpDate": "2024-12-29"
+    },
+    {
+      "limitUpDate": "2024-12-31"
+    },
+    {
+      "limitUpDate": "2025-12-30"
+    },
+    {
+      "limitUpDate": "2025-12-31"
+    }
+  ],
+  "messages": [],
+  "stdout": "limitUpDate\n2023-12-18\n2024-12-01\n2024-12-02\n2024-12-03\n2024-12-04\n2024-12-05\n2024-12-08\n2024-12-09\n2024-12-10\n2024-12-11\n2024-12-12\n2024-12-15\n2024-12-16\n2024-12-17\n2024-12-19\n2024-12-22\n2024-12-23\n2024-12-24\n2024-12-25\n2024-12-26\n2024-12-29\n2024-12-31\n2025-12-30\n2025-12-31\n",
+  "stderr": "",
+  "execution_time_ms": 1545
+}

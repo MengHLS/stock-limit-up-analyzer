@@ -268,25 +268,27 @@ export default function Home() {
                     <div className="space-y-1 p-2">
                       {dates.map((date) => {
                         const count = recordsByDate.get(date)?.length || 0;
+                        // 将 YYYY-MM-DD 格式转换为 MM月DD日
+                        const formatDate = (dateStr: string) => {
+                          const [year, month, day] = dateStr.split('-');
+                          return `${parseInt(month)}月${parseInt(day)}日`;
+                        };
                         return (
                           <button
                             key={date}
                             onClick={() => setSelectedDate(date)}
-                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md text-sm transition-colors ${
+                            className={`w-full flex flex-col items-start px-3 py-2.5 rounded-md transition-colors ${
                               selectedDate === date
                                 ? 'bg-primary text-primary-foreground'
                                 : 'hover:bg-accent'
                             }`}
                           >
-                            <span>{date}</span>
-                            <div className="flex items-center gap-2">
-                              <Badge 
-                                variant={selectedDate === date ? "secondary" : "outline"}
-                                className="text-xs"
-                              >
-                                {count}只
-                              </Badge>
+                            <div className="flex items-center justify-between w-full">
+                              <span className="font-medium">{formatDate(date)}</span>
                               <ChevronRight className="h-4 w-4" />
+                            </div>
+                            <div className="text-xs mt-1 opacity-80">
+                              {count}只涨停
                             </div>
                           </button>
                         );
