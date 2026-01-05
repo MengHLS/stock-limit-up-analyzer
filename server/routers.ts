@@ -21,6 +21,11 @@ import {
   createUploadedImage,
   updateImageStatus,
   getAllUploadedImages,
+  addToWatchlist,
+  removeFromWatchlist,
+  getUserWatchlist,
+  isStockWatched,
+  updateWatchType,
 } from "./db";
 
 export const appRouter = router({
@@ -128,6 +133,40 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await deleteLimitUpRecord(input.id);
+      }),
+
+    // 获取股票关注状态
+    getWatchStatus: protectedProcedure
+      .input(z.object({ stockCode: z.string() }))
+      .query(async ({ ctx, input }) => {
+        const watched = await isStockWatched(ctx.user.id, input.stockCode);
+        if (!watched) return "none";
+        return watched.watchType;
+      }),
+
+    // 更新股票关注状态
+    updateWatchStatus: protectedProcedure
+      .input(z.object({
+        stockCode: z.string(),
+        stockName: z.string(),
+        watchStatus: z.enum(['none', 'normal', 'important']),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (input.watchStatus === "none") {
+          return await removeFromWatchlist(ctx.user.id, input.stockCode);
+        } else {
+          const existing = await isStockWatched(ctx.user.id, input.stockCode);
+          if (existing) {
+            return await updateWatchType(ctx.user.id, input.stockCode, input.watchStatus);
+          } else {
+            return await addToWatchlist(
+              ctx.user.id,
+              input.stockCode,
+              input.stockName,
+              input.watchStatus
+            );
+          }
+        }
       }),
   }),
 
@@ -335,6 +374,58 @@ export const appRouter = router({
     getAll: protectedProcedure.query(async () => {
       return await getAllUploadedImages();
     }),
+  }),
+
+  // 股票关注相关API
+  watchlist: router({
+    // 添加关注
+    add: protectedProcedure
+      .input(z.object({
+        stockCode: z.string(),
+        stockName: z.string(),
+        watchType: z.enum(['normal', 'important']).default('normal'),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return await addToWatchlist(
+          ctx.user.id,
+          input.stockCode,
+          input.stockName,
+          input.watchType,
+          input.note
+        );
+      }),
+
+    // 移除关注
+    remove: protectedProcedure
+      .input(z.object({ stockCode: z.string() }))
+      .mutation(async ({ ctx, input }) => {
+        return await removeFromWatchlist(ctx.user.id, input.stockCode);
+      }),
+
+    // 获取关注列表
+    getAll: protectedProcedure
+      .input(z.object({ watchType: z.enum(['normal', 'important']).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        return await getUserWatchlist(ctx.user.id, input?.watchType);
+      }),
+
+    // 检查是否关注
+    check: protectedProcedure
+      .input(z.object({ stockCode: z.string() }))
+      .query(async ({ ctx, input }) => {
+        return await isStockWatched(ctx.user.id, input.stockCode);
+      }),
+
+    // 更新关注类型
+    updateType: protectedProcedure
+      .input(z.object({
+        stockCode: z.string(),
+        watchType: z.enum(['normal', 'important']),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return await updateWatchType(ctx.user.id, input.stockCode, input.watchType);
+      }),
   }),
 });
 

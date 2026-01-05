@@ -8,7 +8,10 @@ import {
   LimitUpRecord,
   uploadedImages,
   InsertUploadedImage,
-  UploadedImage
+  UploadedImage,
+  stockWatchlist,
+  InsertStockWatchlist,
+  StockWatchlist
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -304,4 +307,89 @@ export async function getAllUploadedImages(): Promise<UploadedImage[]> {
   if (!db) return [];
 
   return await db.select().from(uploadedImages).orderBy(desc(uploadedImages.createdAt));
+}
+
+// ==================== Stock Watchlist Functions ====================
+
+/** 添加股票到关注列表 */
+export async function addToWatchlist(userId: number, stockCode: string, stockName: string, watchType: 'normal' | 'important' = 'normal', note?: string): Promise<StockWatchlist | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  // 检查是否已经关注
+  const [existing] = await db.select().from(stockWatchlist)
+    .where(sql`${stockWatchlist.userId} = ${userId} AND ${stockWatchlist.stockCode} = ${stockCode}`);
+  
+  if (existing) {
+    // 如果已存在，更新关注类型和备注
+    await db.update(stockWatchlist)
+      .set({ watchType, note, updatedAt: new Date() })
+      .where(eq(stockWatchlist.id, existing.id));
+    
+    const [updated] = await db.select().from(stockWatchlist).where(eq(stockWatchlist.id, existing.id));
+    return updated || null;
+  }
+
+  // 新增关注
+  const result = await db.insert(stockWatchlist).values({
+    userId,
+    stockCode,
+    stockName,
+    watchType,
+    note,
+  });
+  
+  const insertId = result[0].insertId;
+  const [newWatch] = await db.select().from(stockWatchlist).where(eq(stockWatchlist.id, insertId));
+  return newWatch || null;
+}
+
+/** 从关注列表中移除股票 */
+export async function removeFromWatchlist(userId: number, stockCode: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db.delete(stockWatchlist)
+    .where(sql`${stockWatchlist.userId} = ${userId} AND ${stockWatchlist.stockCode} = ${stockCode}`);
+  
+  return result[0].affectedRows > 0;
+}
+
+/** 获取用户的关注列表 */
+export async function getUserWatchlist(userId: number, watchType?: 'normal' | 'important'): Promise<StockWatchlist[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  if (watchType) {
+    return await db.select().from(stockWatchlist)
+      .where(sql`${stockWatchlist.userId} = ${userId} AND ${stockWatchlist.watchType} = ${watchType}`)
+      .orderBy(desc(stockWatchlist.updatedAt));
+  }
+
+  return await db.select().from(stockWatchlist)
+    .where(eq(stockWatchlist.userId, userId))
+    .orderBy(desc(stockWatchlist.updatedAt));
+}
+
+/** 检查股票是否在关注列表中 */
+export async function isStockWatched(userId: number, stockCode: string): Promise<StockWatchlist | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [watch] = await db.select().from(stockWatchlist)
+    .where(sql`${stockWatchlist.userId} = ${userId} AND ${stockWatchlist.stockCode} = ${stockCode}`);
+  
+  return watch || null;
+}
+
+/** 更新关注类型 */
+export async function updateWatchType(userId: number, stockCode: string, watchType: 'normal' | 'important'): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db.update(stockWatchlist)
+    .set({ watchType, updatedAt: new Date() })
+    .where(sql`${stockWatchlist.userId} = ${userId} AND ${stockWatchlist.stockCode} = ${stockCode}`);
+  
+  return result[0].affectedRows > 0;
 }

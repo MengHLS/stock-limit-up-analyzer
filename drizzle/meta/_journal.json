@@ -15,6 +15,13 @@
       "when": 1767588021479,
       "tag": "0001_swift_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1767596365163,
+      "tag": "0002_red_azazel",
+      "breakpoints": true
     }
   ]
 }

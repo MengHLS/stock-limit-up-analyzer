@@ -73,3 +73,25 @@ export const uploadedImages = mysqlTable("uploaded_images", {
 
 export type UploadedImage = typeof uploadedImages.$inferSelect;
 export type InsertUploadedImage = typeof uploadedImages.$inferInsert;
+
+/**
+ * 股票关注表 - 存储用户关注的股票信息
+ */
+export const stockWatchlist = mysqlTable("stock_watchlist", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 用户ID */
+  userId: int("userId").notNull(),
+  /** 股票代码，如 002361.SZ */
+  stockCode: varchar("stockCode", { length: 20 }).notNull(),
+  /** 股票名称，如 神剑股份 */
+  stockName: varchar("stockName", { length: 50 }).notNull(),
+  /** 关注类型: normal(普通关注), important(重点关注) */
+  watchType: mysqlEnum("watchType", ["normal", "important"]).default("normal").notNull(),
+  /** 备注 */
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type StockWatchlist = typeof stockWatchlist.$inferSelect;
+export type InsertStockWatchlist = typeof stockWatchlist.$inferInsert;

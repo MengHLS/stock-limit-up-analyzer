@@ -18,9 +18,10 @@ import {
   Clock,
   Hash,
   Tag,
-  Flame
+  Flame,
+  Star
 } from "lucide-react";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
 
 export default function Home() {
@@ -29,6 +30,7 @@ export default function Home() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
+  const [watchFilter, setWatchFilter] = useState<"all" | "normal" | "important">("all");
 
   // 获取所有日期
   const { data: dates = [], isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
@@ -92,6 +94,8 @@ export default function Home() {
     if (selectedSector) {
       records = records.filter(r => r.sector === selectedSector);
     }
+    
+    // 按关注状态筛选（将在组件中处理）
     
     // 创建题材顺序映射
     const sectorOrder = new Map<string, number>();
@@ -416,6 +420,52 @@ export default function Home() {
                     </CardContent>
                   </Card>
 
+                  {/* 关注筛选 */}
+                  <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
+                    <CardHeader className="bg-gradient-to-r from-amber-50 to-orange-50 py-3">
+                      <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                        <Star className="h-4 w-4 text-amber-600" />
+                        关注筛选
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setWatchFilter("all")}
+                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                            watchFilter === "all"
+                              ? 'bg-gradient-to-r from-slate-500 to-slate-600 text-white shadow-md'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          全部股票
+                        </button>
+                        <button
+                          onClick={() => setWatchFilter("normal")}
+                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-1 ${
+                            watchFilter === "normal"
+                              ? 'bg-gradient-to-r from-orange-400 to-orange-500 text-white shadow-md'
+                              : 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200'
+                          }`}
+                        >
+                          <Star className="h-3 w-3" />
+                          普通关注
+                        </button>
+                        <button
+                          onClick={() => setWatchFilter("important")}
+                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all flex items-center gap-1 ${
+                            watchFilter === "important"
+                              ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-md'
+                              : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
+                          }`}
+                        >
+                          <Star className="h-3 w-3 fill-current" />
+                          重点关注
+                        </button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
                   {/* 涨停股票列表 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
                     <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50">
@@ -426,8 +476,63 @@ export default function Home() {
                     </CardHeader>
                     <CardContent className="pt-6">
                       <ScrollArea className="h-[600px] pr-4">
-                        <div className="grid gap-3">
-                          {sortedRecords.map((record) => (
+                        <WatchFilteredStockList 
+                          records={sortedRecords} 
+                          watchFilter={watchFilter}
+                        />
+                      </ScrollArea>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// 关注筛选股票列表组件
+function WatchFilteredStockList({ 
+  records, 
+  watchFilter 
+}: { 
+  records: any[]; 
+  watchFilter: "all" | "normal" | "important";
+}) {
+  const [watchStatusMap, setWatchStatusMap] = useState<Map<string, "none" | "normal" | "important">>(new Map());
+  
+  // 初始化所有股票为none状态
+  useEffect(() => {
+    const newMap = new Map<string, "none" | "normal" | "important">();
+    records.forEach(record => {
+      newMap.set(record.stockCode, "none");
+    });
+    setWatchStatusMap(newMap);
+  }, [records]);
+  
+  // 当WatchButton组件加载完成后，会通过onStatusChange回调更新真实状态
+  
+  // 筛选后的记录
+  const filteredRecords = records.filter((record) => {
+    if (watchFilter === "all") return true;
+    const status = watchStatusMap.get(record.stockCode) || "none";
+    return status === watchFilter;
+  });
+  
+  // 更新单个股票的关注状态
+  const updateWatchStatus = useCallback((stockCode: string, status: "none" | "normal" | "important") => {
+    setWatchStatusMap(prev => {
+      const newMap = new Map(prev);
+      newMap.set(stockCode, status);
+      return newMap;
+    });
+  }, []);
+
+  return (
+    <div className="grid gap-3">
+      {filteredRecords.map((record) => (
                             <div
                               key={record.id}
                               className="group p-4 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
@@ -446,13 +551,20 @@ export default function Home() {
                                     </Badge>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-2 text-sm">
-                                  <Clock className="h-4 w-4 text-green-500" />
-                                  <span className="font-semibold text-slate-700">{record.limitUpTime}</span>
-                                  <Badge variant="outline" className="gap-1 border-orange-300 text-orange-700 font-semibold">
-                                    <Tag className="h-3 w-3" />
-                                    {record.sector}
-                                  </Badge>
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <Clock className="h-4 w-4 text-green-500" />
+                                    <span className="font-semibold text-slate-700">{record.limitUpTime}</span>
+                                    <Badge variant="outline" className="gap-1 border-orange-300 text-orange-700 font-semibold">
+                                      <Tag className="h-3 w-3" />
+                                      {record.sector}
+                                    </Badge>
+                                  </div>
+                                  <WatchButton 
+                                    stockCode={record.stockCode} 
+                                    stockName={record.stockName}
+                                    onStatusChange={updateWatchStatus}
+                                  />
                                 </div>
                               </div>
                               {record.keywords && (
@@ -460,18 +572,80 @@ export default function Home() {
                                   {record.keywords}
                                 </p>
                               )}
-                            </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                    </CardContent>
-                  </Card>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
+        </div>
+      ))}
     </div>
+  );
+}
+
+// 关注按钮组件
+function WatchButton({ 
+  stockCode, 
+  stockName,
+  onStatusChange
+}: { 
+  stockCode: string; 
+  stockName: string;
+  onStatusChange?: (stockCode: string, status: "none" | "normal" | "important") => void;
+}) {
+  const utils = trpc.useUtils();
+  const { data: watchStatus } = trpc.limitUp.getWatchStatus.useQuery({ stockCode });
+  const updateWatch = trpc.limitUp.updateWatchStatus.useMutation({
+    onSuccess: (_, variables) => {
+      utils.limitUp.getWatchStatus.invalidate({ stockCode });
+      // 通知父组件状态变化
+      if (onStatusChange) {
+        onStatusChange(stockCode, variables.watchStatus);
+      }
+    },
+  });
+  
+  // 当关注状态加载完成后，通知父组件
+  useEffect(() => {
+    if (watchStatus && onStatusChange) {
+      onStatusChange(stockCode, watchStatus);
+    }
+  }, [watchStatus, stockCode, onStatusChange]);
+
+  const handleClick = () => {
+    if (!watchStatus) return;
+    
+    let newStatus: "none" | "normal" | "important";
+    if (watchStatus === "none") {
+      newStatus = "normal";
+    } else if (watchStatus === "normal") {
+      newStatus = "important";
+    } else {
+      newStatus = "none";
+    }
+    
+    updateWatch.mutate({ stockCode, stockName, watchStatus: newStatus });
+  };
+
+  if (!watchStatus) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={updateWatch.isPending}
+      className="transition-all hover:scale-110 disabled:opacity-50"
+      title={
+        watchStatus === "none" 
+          ? "点击添加关注" 
+          : watchStatus === "normal" 
+          ? "普通关注，点击切换为重点关注" 
+          : "重点关注，点击取消关注"
+      }
+    >
+      {watchStatus === "none" && (
+        <Star className="h-5 w-5 text-slate-300 hover:text-orange-400" />
+      )}
+      {watchStatus === "normal" && (
+        <Star className="h-5 w-5 text-orange-400 fill-orange-400" />
+      )}
+      {watchStatus === "important" && (
+        <Star className="h-5 w-5 text-red-600 fill-red-600" />
+      )}
+    </button>
   );
 }
