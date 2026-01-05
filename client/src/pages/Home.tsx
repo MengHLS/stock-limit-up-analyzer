@@ -133,6 +133,12 @@ export default function Home() {
             <h1 className="text-xl font-semibold tracking-tight">涨停复盘助手</h1>
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/market">
+              <Button variant="outline" size="sm" className="gap-2">
+                <BarChart3 className="h-4 w-4" />
+                大盘分析
+              </Button>
+            </Link>
             {isAuthenticated ? (
               <>
                 <Link href="/upload">

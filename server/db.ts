@@ -202,6 +202,60 @@ export async function getDistinctDates(): Promise<string[]> {
   return result.map(r => r.date);
 }
 
+/** 获取每日涨停数量统计 */
+export async function getDailyLimitUpStats(): Promise<{ date: string; count: number }[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const records = await db.select().from(limitUpRecords);
+  
+  // 按日期统计数量
+  const dateMap = new Map<string, number>();
+  for (const record of records) {
+    const date = record.limitUpDate;
+    dateMap.set(date, (dateMap.get(date) || 0) + 1);
+  }
+
+  return Array.from(dateMap.entries())
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date)); // 按日期升序
+}
+
+/** 获取每日题材分布统计 */
+export async function getDailySectorDistribution(): Promise<{ date: string; sectors: { sector: string; count: number }[] }[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const records = await db.select().from(limitUpRecords)
+    .orderBy(desc(limitUpRecords.limitUpDate));
+  
+  // 按日期和题材统计
+  const dateMap = new Map<string, Map<string, number>>();
+  for (const record of records) {
+    const date = record.limitUpDate;
+    const sector = record.sector || '其他';
+    
+    if (!dateMap.has(date)) {
+      dateMap.set(date, new Map());
+    }
+    const sectorMap = dateMap.get(date)!;
+    sectorMap.set(sector, (sectorMap.get(sector) || 0) + 1);
+  }
+
+  return Array.from(dateMap.entries())
+    .map(([date, sectorMap]) => ({
+      date,
+      sectors: Array.from(sectorMap.entries())
+        .map(([sector, count]) => ({ sector, count }))
+        .sort((a, b) => {
+          if (a.sector === '其他') return 1;
+          if (b.sector === '其他') return -1;
+          return b.count - a.count;
+        })
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date)); // 按日期降序
+}
+
 /** 更新涨停记录 */
 export async function updateLimitUpRecord(id: number, data: Partial<InsertLimitUpRecord>): Promise<LimitUpRecord | null> {
   const db = await getDb();

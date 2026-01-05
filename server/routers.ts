@@ -14,6 +14,8 @@ import {
   searchLimitUpRecords,
   getDailySectorStats,
   getDistinctDates,
+  getDailyLimitUpStats,
+  getDailySectorDistribution,
   updateLimitUpRecord,
   deleteLimitUpRecord,
   createUploadedImage,
@@ -64,6 +66,16 @@ export const appRouter = router({
     // 获取所有日期列表
     getDates: publicProcedure.query(async () => {
       return await getDistinctDates();
+    }),
+
+    // 获取每日涨停数量统计
+    getDailyStats: publicProcedure.query(async () => {
+      return await getDailyLimitUpStats();
+    }),
+
+    // 获取每日题材分布统计
+    getSectorDistribution: publicProcedure.query(async () => {
+      return await getDailySectorDistribution();
     }),
 
     // 创建涨停记录
