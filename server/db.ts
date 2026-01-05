@@ -181,7 +181,13 @@ export async function getDailySectorStats(date: string): Promise<{ sector: strin
 
   return Array.from(sectorMap.entries())
     .map(([sector, count]) => ({ sector, count }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => {
+      // "其他"始终放在最后
+      if (a.sector === '其他') return 1;
+      if (b.sector === '其他') return -1;
+      // 其他题材按涨停数降序排列
+      return b.count - a.count;
+    });
 }
 
 /** 获取所有日期列表 */
