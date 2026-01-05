@@ -185,7 +185,7 @@
 
   /* 日历样式优化 */
   .calendar-container .rdp {
-    @apply p-0;
+    @apply p-0 w-full;
   }
 
   .calendar-container .rdp-month {
@@ -206,15 +206,15 @@
 
   .calendar-container .rdp-button_previous,
   .calendar-container .rdp-button_next {
-    @apply h-9 w-9 rounded-lg bg-gradient-to-br from-orange-100 to-red-100 hover:from-orange-200 hover:to-red-200 text-orange-700 border-2 border-orange-300 shadow-sm hover:shadow-md transition-all;
+    @apply h-9 w-9 flex-shrink-0 rounded-lg bg-gradient-to-br from-orange-100 to-red-100 hover:from-orange-200 hover:to-red-200 text-orange-700 border-2 border-orange-300 shadow-sm hover:shadow-md transition-all;
   }
 
   .calendar-container .rdp-weekdays {
-    @apply mb-2;
+    @apply mb-3;
   }
 
   .calendar-container .rdp-weekday {
-    @apply text-sm font-semibold text-slate-600 p-2;
+    @apply text-sm font-semibold text-slate-600 text-center;
   }
 
   .calendar-container .rdp-week {
@@ -222,6 +222,10 @@
   }
 
   .calendar-container .rdp-day {
-    @apply p-0;
+    @apply p-0 flex items-center justify-center;
+  }
+
+  .calendar-container .rdp-day button {
+    @apply w-full aspect-square max-h-16;
   }
 }

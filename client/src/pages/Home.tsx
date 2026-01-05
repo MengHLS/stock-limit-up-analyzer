@@ -183,11 +183,11 @@ export default function Home() {
         <button
           {...props}
           className={`
-            relative flex flex-col items-center justify-center w-full h-14 rounded-xl transition-all duration-200
+            relative flex flex-col items-center justify-center w-full aspect-square rounded-xl transition-all duration-200 p-1
             ${hasData 
               ? isSelected
-                ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-lg scale-105 border-2 border-orange-400'
-                : 'bg-gradient-to-br from-orange-100 to-red-100 hover:from-orange-200 hover:to-red-200 text-slate-800 border-2 border-orange-300 shadow-md hover:shadow-lg hover:scale-105'
+                ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-lg border-2 border-orange-400'
+                : 'bg-gradient-to-br from-orange-100 to-red-100 hover:from-orange-200 hover:to-red-200 text-slate-800 border-2 border-orange-300 shadow-md hover:shadow-lg'
               : isSelected
                 ? 'bg-slate-200 text-slate-800 border-2 border-slate-400'
                 : isToday
@@ -196,17 +196,17 @@ export default function Home() {
             }
           `}
         >
-          <span className={`font-semibold ${
-            hasData ? 'text-lg' : 'text-base'
+          <span className={`font-semibold leading-none ${
+            hasData ? 'text-base' : 'text-sm'
           } ${isSelected && hasData ? 'text-white' : ''}`}>
             {props.day?.date.getDate()}
           </span>
           {hasData && (
-            <span className={`text-xs font-bold flex items-center gap-1 mt-0.5 ${
+            <span className={`text-[10px] font-bold flex items-center gap-0.5 mt-0.5 leading-none ${
               isSelected ? 'text-orange-100' : 'text-orange-700'
             }`}>
-              <Flame className="h-3 w-3" />
-              {count}
+              <Flame className="h-2.5 w-2.5" />
+              <span>{count}</span>
             </span>
           )}
         </button>
