@@ -54,7 +54,11 @@ export default function UploadPage() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [limitUpDate, setLimitUpDate] = useState(() => {
     const today = new Date();
-    return today.toISOString().split('T')[0];
+    // 默认使用2026年
+    const year = 2026;
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [totalRecognized, setTotalRecognized] = useState(0);
