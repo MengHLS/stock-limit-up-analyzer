@@ -145,8 +145,18 @@ export default function Home() {
   }, [datesWithData]);
 
   const modifiersClassNames = {
-    hasData: "bg-primary/10 font-semibold",
+    hasData: "relative",
   };
+
+  // 为每个有数据的日期创建映射，存储涨停数
+  const dateCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    dates.forEach(dateStr => {
+      const count = recordsByDate.get(dateStr)?.length || 0;
+      map.set(dateStr, count);
+    });
+    return map;
+  }, [dates, recordsByDate]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -295,17 +305,55 @@ export default function Home() {
                       onSelect={setSelectedDate}
                       modifiers={modifiers}
                       modifiersClassNames={modifiersClassNames}
-                      className="rounded-md border"
+                      className="rounded-md border [&_.rdp-day_button]:relative"
                     />
-                    {selectedDateStr && (
-                      <div className="mt-4 text-center w-full">
-                        <p className="text-sm text-muted-foreground mb-1">已选择</p>
-                        <p className="font-semibold">{selectedDateStr}</p>
-                        <Badge variant="secondary" className="mt-2">
-                          {recordsByDate.get(selectedDateStr)?.length || 0}只涨停
-                        </Badge>
+                    <style>{`
+                      .rdp-day_button.relative::after {
+                        content: '';
+                        position: absolute;
+                        bottom: 2px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        width: 4px;
+                        height: 4px;
+                        background: hsl(var(--primary));
+                        border-radius: 50%;
+                      }
+                    `}</style>
+                    {/* 日期涨停数快速预览 */}
+                    <div className="mt-4 w-full max-h-[200px] overflow-y-auto">
+                      <div className="text-xs text-muted-foreground mb-2 px-2">有数据的日期：</div>
+                      <div className="space-y-1 px-2">
+                        {dates.slice(0, 10).map((dateStr) => {
+                          const [year, month, day] = dateStr.split('-');
+                          const displayDate = `${parseInt(month)}月${parseInt(day)}日`;
+                          const count = recordsByDate.get(dateStr)?.length || 0;
+                          const isSelected = dateStr === selectedDateStr;
+                          return (
+                            <button
+                              key={dateStr}
+                              onClick={() => {
+                                const date = dateStringToDate.get(dateStr);
+                                if (date) setSelectedDate(date);
+                              }}
+                              className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-xs transition-colors ${
+                                isSelected
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'hover:bg-accent'
+                              }`}
+                            >
+                              <span className="font-medium">{displayDate}</span>
+                              <Badge 
+                                variant={isSelected ? "secondary" : "outline"}
+                                className="text-[10px] h-5"
+                              >
+                                {count}只
+                              </Badge>
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </CardContent>
