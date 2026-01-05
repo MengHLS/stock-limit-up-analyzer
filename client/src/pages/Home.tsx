@@ -82,14 +82,34 @@ export default function Home() {
     currentDateStats.forEach((stat, index) => {
       sectorOrder.set(stat.sector, index);
     });
-    // 按题材优先级排序
+    
+    // 解析板数字符串，提取数字用于排序
+    const parseBoardCount = (boardCount: string | null): number => {
+      if (!boardCount) return 0;
+      // 匹配如 "10天9板", "5天3板", "2天2板", "1板", "1" 等格式
+      const match = boardCount.match(/(\d+)天?(\d+)?板?/);
+      if (match) {
+        // 如果有第二个数字（如"10天9板"），使用第二个数字
+        return parseInt(match[2] || match[1], 10);
+      }
+      // 尝试直接解析数字
+      const num = parseInt(boardCount, 10);
+      return isNaN(num) ? 0 : num;
+    };
+    
+    // 排序：题材 > 板数（降序） > 涨停时间
     return [...records].sort((a, b) => {
       const sectorA = a.sector || '其他';
       const sectorB = b.sector || '其他';
       const orderA = sectorOrder.get(sectorA) ?? 999;
       const orderB = sectorOrder.get(sectorB) ?? 999;
+      // 1. 先按题材排序
       if (orderA !== orderB) return orderA - orderB;
-      // 同题材内按涨停时间排序
+      // 2. 同题材内按板数降序
+      const boardA = parseBoardCount(a.boardCount);
+      const boardB = parseBoardCount(b.boardCount);
+      if (boardA !== boardB) return boardB - boardA;
+      // 3. 同板数内按涨停时间排序
       return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
     });
   }, [selectedDate, recordsByDate, currentDateStats]);
