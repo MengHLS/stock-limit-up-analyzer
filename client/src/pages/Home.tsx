@@ -28,6 +28,7 @@ export default function Home() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
+  const [selectedSector, setSelectedSector] = useState<string | null>(null);
 
   // 获取所有日期列表
   const { data: dates = [], isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
@@ -82,10 +83,15 @@ export default function Home() {
     { enabled: !!selectedDateStr }
   );
 
-  // 对当前日期的涨停记录按题材排序
+  // 对当前日期的涨停记录按题材排序和筛选
   const sortedRecords = useMemo(() => {
     if (!selectedDateStr) return [];
-    const records = recordsByDate.get(selectedDateStr) || [];
+    let records = recordsByDate.get(selectedDateStr) || [];
+    
+    // 按题材筛选
+    if (selectedSector) {
+      records = records.filter(r => r.sector === selectedSector);
+    }
     
     // 创建题材顺序映射
     const sectorOrder = new Map<string, number>();
@@ -117,7 +123,7 @@ export default function Home() {
       // 3. 同板数内按涨停时间排序
       return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
     });
-  }, [selectedDateStr, recordsByDate, currentDateStats]);
+  }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector]);
 
   // 自动选择最新日期
   useMemo(() => {
@@ -299,27 +305,57 @@ export default function Home() {
                   </p>
                 ) : (
                   <div className="flex flex-col items-center">
-                    <CalendarComponent
-                      mode="single"
-                      selected={selectedDate}
-                      onSelect={setSelectedDate}
-                      modifiers={modifiers}
-                      modifiersClassNames={modifiersClassNames}
-                      className="rounded-md border [&_.rdp-day_button]:relative"
-                    />
-                    <style>{`
-                      .rdp-day_button.relative::after {
-                        content: '';
-                        position: absolute;
-                        bottom: 2px;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        width: 4px;
-                        height: 4px;
-                        background: hsl(var(--primary));
-                        border-radius: 50%;
-                      }
-                    `}</style>
+                    <div className="calendar-with-counts">
+                      <CalendarComponent
+                        mode="single"
+                        selected={selectedDate}
+                        onSelect={setSelectedDate}
+                        modifiers={modifiers}
+                        modifiersClassNames={modifiersClassNames}
+                        className="rounded-md border"
+                      />
+                      <style>{`
+                        .calendar-with-counts .rdp-day_button.relative {
+                          padding-bottom: 8px;
+                        }
+                        .calendar-with-counts .rdp-day_button.relative::after {
+                          content: attr(data-count);
+                          position: absolute;
+                          bottom: 0;
+                          left: 50%;
+                          transform: translateX(-50%);
+                          font-size: 9px;
+                          font-weight: 600;
+                          color: hsl(var(--primary));
+                        }
+                      `}</style>
+                      {/* 为每个有数据的日期添加data-count属性 */}
+                      <script
+                        dangerouslySetInnerHTML={{
+                          __html: `
+                            setTimeout(() => {
+                              const buttons = document.querySelectorAll('.calendar-with-counts .rdp-day_button.relative');
+                              const dateCountMap = ${JSON.stringify(Object.fromEntries(dateCountMap))};
+                              buttons.forEach(btn => {
+                                const dateStr = btn.getAttribute('aria-label');
+                                if (dateStr) {
+                                  // 解析日期
+                                  const match = dateStr.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+                                  if (match) {
+                                    const [_, year, month, day] = match;
+                                    const key = \`\${year}-\${month.padStart(2, '0')}-\${day.padStart(2, '0')}\`;
+                                    const count = dateCountMap[key];
+                                    if (count) {
+                                      btn.setAttribute('data-count', count);
+                                    }
+                                  }
+                                }
+                              });
+                            }, 100);
+                          `,
+                        }}
+                      />
+                    </div>
                     {/* 日期涨停数快速预览 */}
                     <div className="mt-4 w-full max-h-[200px] overflow-y-auto">
                       <div className="text-xs text-muted-foreground mb-2 px-2">有数据的日期：</div>
@@ -386,8 +422,20 @@ export default function Home() {
                         </p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
+                          <Badge 
+                            variant={selectedSector === null ? "default" : "outline"}
+                            className="text-sm px-3 py-1 cursor-pointer hover:bg-primary/90 transition-colors"
+                            onClick={() => setSelectedSector(null)}
+                          >
+                            全部 {recordsByDate.get(selectedDateStr)?.length || 0}
+                          </Badge>
                           {currentDateStats.map((stat) => (
-                            <Badge key={stat.sector} variant="secondary" className="text-sm px-3 py-1">
+                            <Badge 
+                              key={stat.sector} 
+                              variant={selectedSector === stat.sector ? "default" : "outline"}
+                              className="text-sm px-3 py-1 cursor-pointer hover:bg-primary/90 transition-colors"
+                              onClick={() => setSelectedSector(stat.sector)}
+                            >
                               <Tag className="h-3 w-3 mr-1" />
                               {stat.sector} {stat.count}
                             </Badge>
@@ -412,49 +460,39 @@ export default function Home() {
                             暂无涨停数据
                           </p>
                         ) : (
-                          <div className="space-y-3">
+                          <div className="space-y-2">
                             {sortedRecords.map((record) => (
                               <div
                                 key={record.id}
-                                className="p-4 rounded-lg border bg-card hover:bg-accent/30 transition-colors"
+                                className="p-3 rounded-lg border bg-card hover:bg-accent/30 transition-colors"
                               >
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-2">
-                                      <span className="font-semibold text-lg">{record.stockName}</span>
-                                      <span className="text-sm text-muted-foreground">{record.stockCode}</span>
-                                      {record.boardCount && (
-                                        <Badge variant="destructive" className="text-xs">
-                                          {record.boardCount}
-                                        </Badge>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-4 text-sm text-muted-foreground mb-2">
-                                      {record.limitUpTime && (
-                                        <span className="flex items-center gap-1">
-                                          <Clock className="h-3.5 w-3.5" />
-                                          {record.limitUpTime}
-                                        </span>
-                                      )}
-                                      {record.circulationValue && (
-                                        <span>流通市值: {record.circulationValue}亿</span>
-                                      )}
-                                      {record.turnover && (
-                                        <span>成交额: {record.turnover}亿</span>
-                                      )}
-                                    </div>
-                                    {record.keywords && (
-                                      <p className="text-sm text-muted-foreground">
-                                        {record.keywords}
-                                      </p>
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="font-semibold text-base truncate">{record.stockName}</span>
+                                    <span className="text-xs text-muted-foreground shrink-0">{record.stockCode}</span>
+                                    {record.boardCount && (
+                                      <Badge variant="destructive" className="text-xs shrink-0">
+                                        {record.boardCount}
+                                      </Badge>
                                     )}
                                   </div>
-                                  <div className="ml-4">
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {record.limitUpTime && (
+                                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                        <Clock className="h-3 w-3" />
+                                        {record.limitUpTime}
+                                      </span>
+                                    )}
                                     {record.sector && (
-                                      <Badge className="whitespace-nowrap">{record.sector}</Badge>
+                                      <Badge variant="secondary" className="text-xs">{record.sector}</Badge>
                                     )}
                                   </div>
                                 </div>
+                                {record.keywords && (
+                                  <p className="text-xs text-muted-foreground mt-1.5 line-clamp-1">
+                                    {record.keywords}
+                                  </p>
+                                )}
                               </div>
                             ))}
                           </div>
