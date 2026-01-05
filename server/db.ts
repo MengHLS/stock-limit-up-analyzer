@@ -1,11 +1,19 @@
-import { eq } from "drizzle-orm";
+import { eq, desc, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { 
+  InsertUser, 
+  users, 
+  limitUpRecords, 
+  InsertLimitUpRecord, 
+  LimitUpRecord,
+  uploadedImages,
+  InsertUploadedImage,
+  UploadedImage
+} from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -17,6 +25,8 @@ export async function getDb() {
   }
   return _db;
 }
+
+// ==================== User Functions ====================
 
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) {
@@ -89,4 +99,155 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// ==================== Limit Up Records Functions ====================
+
+/** 创建涨停记录 */
+export async function createLimitUpRecord(record: InsertLimitUpRecord): Promise<LimitUpRecord | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db.insert(limitUpRecords).values(record);
+  const insertId = result[0].insertId;
+  
+  const [newRecord] = await db.select().from(limitUpRecords).where(eq(limitUpRecords.id, insertId));
+  return newRecord || null;
+}
+
+/** 批量创建涨停记录 */
+export async function createLimitUpRecordsBatch(records: InsertLimitUpRecord[]): Promise<number> {
+  const db = await getDb();
+  if (!db || records.length === 0) return 0;
+
+  const result = await db.insert(limitUpRecords).values(records);
+  return result[0].affectedRows;
+}
+
+/** 获取所有涨停记录，按日期降序 */
+export async function getAllLimitUpRecords(): Promise<LimitUpRecord[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
+}
+
+/** 按日期获取涨停记录 */
+export async function getLimitUpRecordsByDate(date: string): Promise<LimitUpRecord[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(limitUpRecords)
+    .where(eq(limitUpRecords.limitUpDate, new Date(date)))
+    .orderBy(limitUpRecords.limitUpTime);
+}
+
+/** 搜索股票涨停记录 */
+export async function searchLimitUpRecords(query: string): Promise<LimitUpRecord[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const searchPattern = `%${query}%`;
+  return await db.select().from(limitUpRecords)
+    .where(or(
+      like(limitUpRecords.stockCode, searchPattern),
+      like(limitUpRecords.stockName, searchPattern)
+    ))
+    .orderBy(desc(limitUpRecords.limitUpDate));
+}
+
+/** 按题材获取涨停记录 */
+export async function getLimitUpRecordsBySector(sector: string): Promise<LimitUpRecord[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(limitUpRecords)
+    .where(like(limitUpRecords.sector, `%${sector}%`))
+    .orderBy(desc(limitUpRecords.limitUpDate));
+}
+
+/** 获取每日题材统计 */
+export async function getDailySectorStats(date: string): Promise<{ sector: string; count: number }[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const records = await db.select().from(limitUpRecords)
+    .where(eq(limitUpRecords.limitUpDate, new Date(date)));
+
+  // 统计各题材数量
+  const sectorMap = new Map<string, number>();
+  for (const record of records) {
+    const sector = record.sector || '其他';
+    sectorMap.set(sector, (sectorMap.get(sector) || 0) + 1);
+  }
+
+  return Array.from(sectorMap.entries())
+    .map(([sector, count]) => ({ sector, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/** 获取所有日期列表 */
+export async function getDistinctDates(): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const result = await db.selectDistinct({ date: limitUpRecords.limitUpDate })
+    .from(limitUpRecords)
+    .orderBy(desc(limitUpRecords.limitUpDate));
+
+  return result.map(r => {
+    const d = r.date;
+    if (d instanceof Date) {
+      return d.toISOString().split('T')[0];
+    }
+    return String(d);
+  });
+}
+
+/** 更新涨停记录 */
+export async function updateLimitUpRecord(id: number, data: Partial<InsertLimitUpRecord>): Promise<LimitUpRecord | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  await db.update(limitUpRecords).set(data).where(eq(limitUpRecords.id, id));
+  
+  const [updated] = await db.select().from(limitUpRecords).where(eq(limitUpRecords.id, id));
+  return updated || null;
+}
+
+/** 删除涨停记录 */
+export async function deleteLimitUpRecord(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db.delete(limitUpRecords).where(eq(limitUpRecords.id, id));
+  return result[0].affectedRows > 0;
+}
+
+// ==================== Uploaded Images Functions ====================
+
+/** 创建图片上传记录 */
+export async function createUploadedImage(image: InsertUploadedImage): Promise<UploadedImage | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db.insert(uploadedImages).values(image);
+  const insertId = result[0].insertId;
+  
+  const [newImage] = await db.select().from(uploadedImages).where(eq(uploadedImages.id, insertId));
+  return newImage || null;
+}
+
+/** 更新图片状态 */
+export async function updateImageStatus(id: number, status: 'pending' | 'processing' | 'completed' | 'failed'): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  await db.update(uploadedImages).set({ status }).where(eq(uploadedImages.id, id));
+}
+
+/** 获取所有上传的图片 */
+export async function getAllUploadedImages(): Promise<UploadedImage[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(uploadedImages).orderBy(desc(uploadedImages.createdAt));
+}
