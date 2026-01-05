@@ -108,3 +108,12 @@
 - [x] 移除关注筛选的标题栏，直接显示按钮（CardContent p-3）
 - [x] 减少题材统计的上下padding（CardHeader py-1.5, CardContent pt-2 pb-2）
 - [x] 缩窄左侧日历插件宽度（400px → 360px）
+
+## 极致压缩空白
+- [x] 减小卡片之间间距（space-y-3 → space-y-2, gap-4 → gap-3）
+- [x] 进一步压缩涨停股票卡片padding（p-3 → p-2）
+- [x] 减小日历CardHeader padding（py-3 → py-2, px-4 → px-3）
+- [x] 减小主内容区域padding（py-3 → py-2）
+- [x] 压缩涨停股票列表内部间距（gap-3 → gap-2, mb-2 → mb-1.5）
+- [x] 压缩所有CardHeader和CardContent（py-1至py-2, px-3）
+- [x] 减小搜索栏和搜索结果间距（mb-4 → mb-3）

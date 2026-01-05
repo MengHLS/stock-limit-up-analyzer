@@ -263,9 +263,9 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="container py-3 max-w-[1600px]">
+      <main className="container py-2 max-w-[1600px]">
         {/* 搜索栏 */}
-        <div className="mb-4">
+        <div className="mb-3">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -279,14 +279,14 @@ export default function Home() {
 
         {/* 搜索结果 */}
         {searchQuery && (
-          <Card className="mb-4 shadow-lg border-slate-200">
-            <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 py-3 px-4">
+          <Card className="mb-3 shadow-lg border-slate-200">
+            <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50 py-2 px-3">
               <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
                 <Search className="h-4 w-4" />
                 搜索结果
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-4 px-4 pb-4">
+            <CardContent className="pt-2 px-3 pb-2">
               {searchLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
@@ -347,16 +347,16 @@ export default function Home() {
             <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-3">
             {/* 左侧：日历 */}
             <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-              <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-3 px-4">
+              <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-2 px-3">
                 <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
                   <Calendar className="h-5 w-5 text-orange-600" />
                   选择日期
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-4 px-4 pb-4">
+              <CardContent className="pt-2 px-3 pb-2">
                 {dates.length === 0 ? (
                   <p className="text-center py-12 text-muted-foreground">
                     暂无数据，请先上传涨停复盘图片
@@ -380,18 +380,18 @@ export default function Home() {
             </Card>
 
             {/* 右侧：涨停数据 */}
-            <div className="space-y-3">
+            <div className="space-y-2">
               {selectedDateStr && (
                 <>
                   {/* 题材统计 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 py-1.5 px-4">
+                    <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 py-1 px-3">
                       <CardTitle className="flex items-center gap-2 text-slate-700 text-sm">
                         <BarChart3 className="h-4 w-4 text-blue-600" />
                         {selectedDateStr} 题材统计
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-2 px-4 pb-2">
+                    <CardContent className="pt-1.5 px-3 pb-1.5">
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setSelectedSector(null)}
@@ -422,7 +422,7 @@ export default function Home() {
 
                   {/* 关注筛选 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardContent className="p-3">
+                    <CardContent className="p-2">
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setWatchFilter("all")}
@@ -462,13 +462,13 @@ export default function Home() {
 
                   {/* 涨停股票列表 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-                    <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-2 px-4">
+                    <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-1 px-3">
                       <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
                         <Flame className="h-4 w-4 text-orange-600" />
                         涨停股票 {sortedRecords.length} 只
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="pt-3 px-4 pb-3">
+                    <CardContent className="pt-2 px-3 pb-2">
                       <ScrollArea className="h-[700px] pr-4">
                         <WatchFilteredStockList 
                           records={sortedRecords} 
@@ -525,13 +525,13 @@ function WatchFilteredStockList({
   }, []);
 
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-2">
       {filteredRecords.map((record) => (
                             <div
                               key={record.id}
-                              className="group p-3 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
+                              className="group p-2 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
                             >
-                              <div className="flex items-start justify-between mb-2">
+                              <div className="flex items-start justify-between mb-1.5">
                                 <div className="flex items-center gap-3">
                                   <span className="font-bold text-base text-slate-800 group-hover:text-orange-600 transition-colors">
                                     {record.stockName}
@@ -562,7 +562,7 @@ function WatchFilteredStockList({
                                 </div>
                               </div>
                               {record.keywords && (
-                                <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-2 rounded-lg">
+                                <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-1.5 rounded-lg">
                                   {record.keywords}
                                 </p>
                               )}
