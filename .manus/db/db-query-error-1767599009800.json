@@ -1,0 +1,8 @@
+{
+  "query": "SELECT COUNT(*) as count, MIN(limitUpDate) as min_date, MAX(limitUpDate) as max_date FROM limitUpRecords WHERE limitUpDate LIKE '2023-%'",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT COUNT(*) as count, MIN(limitUpDate) as min_date, MAX(limitUpDate) as max_date FROM limitUpRecords WHERE limitUpDate LIKE '2023-%'",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1146 (42S02) at line 1: Table 'vwwjfde663dhej4tohvzpq.limitUpRecords' doesn't exist"
+  ]
+}

@@ -1,4 +1,4 @@
-import { eq, desc, like, or, sql } from "drizzle-orm";
+import { eq, desc, like, or, sql, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   InsertUser, 
@@ -224,12 +224,18 @@ export async function getDailyLimitUpStats(): Promise<{ date: string; count: num
     .sort((a, b) => a.date.localeCompare(b.date)); // 按日期升序
 }
 
-/** 获取每日题材分布统计 */
+/** 获取每日题材分布统计（近30天） */
 export async function getDailySectorDistribution(): Promise<{ date: string; sectors: { sector: string; count: number }[] }[]> {
   const db = await getDb();
   if (!db) return [];
 
+  // 计算30天前的日期
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
   const records = await db.select().from(limitUpRecords)
+    .where(gte(limitUpRecords.limitUpDate, thirtyDaysAgoStr))
     .orderBy(desc(limitUpRecords.limitUpDate));
   
   // 按日期和题材统计

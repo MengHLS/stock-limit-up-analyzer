@@ -208,7 +208,7 @@ export default function MarketPage() {
                       <PieChart className="h-5 w-5" />
                       热门题材排行
                     </CardTitle>
-                    <CardDescription>统计周期内涨停次数最多的题材</CardDescription>
+                    <CardDescription>近30天内涨停次数最多的题材</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">

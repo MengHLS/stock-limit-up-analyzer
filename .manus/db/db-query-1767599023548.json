@@ -1,0 +1,15 @@
+{
+  "query": "SELECT COUNT(*) as count, MIN(limitUpDate) as min_date, MAX(limitUpDate) as max_date FROM limit_up_records WHERE limitUpDate LIKE '2023-%'",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT COUNT(*) as count, MIN(limitUpDate) as min_date, MAX(limitUpDate) as max_date FROM limit_up_records WHERE limitUpDate LIKE '2023-%'",
+  "rows": [
+    {
+      "count": "70",
+      "min_date": "2023-11-28",
+      "max_date": "2023-11-28"
+    }
+  ],
+  "messages": [],
+  "stdout": "count\tmin_date\tmax_date\n70\t2023-11-28\t2023-11-28\n",
+  "stderr": "",
+  "execution_time_ms": 1548
+}
