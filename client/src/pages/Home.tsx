@@ -2,7 +2,6 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -16,46 +15,47 @@ import {
   TrendingUp, 
   BarChart3, 
   Loader2,
-  ChevronRight,
   Clock,
   Hash,
-  Tag
+  Tag,
+  Flame
 } from "lucide-react";
 import { useState, useMemo, useCallback } from "react";
 import { Link } from "wouter";
 
 export default function Home() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
+  
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
 
-  // 获取所有日期列表
+  // 获取所有日期
   const { data: dates = [], isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
-  
-  // 获取所有涨停记录
+
+  // 获取所有涨停记录（用于按日期分组）
   const { data: allRecords = [], isLoading: recordsLoading } = trpc.limitUp.getAll.useQuery();
-  
-  // 搜索结果
+
+  // 搜索股票
   const { data: searchResults = [], isLoading: searchLoading } = trpc.limitUp.search.useQuery(
     { query: searchQuery },
     { enabled: searchQuery.length > 0 }
   );
 
-  // 按日期分组的记录
+  // 按日期分组记录
   const recordsByDate = useMemo(() => {
-    const grouped = new Map<string, typeof allRecords>();
-    for (const record of allRecords) {
-      const dateStr = String(record.limitUpDate);
-      if (!grouped.has(dateStr)) {
-        grouped.set(dateStr, []);
+    const map = new Map<string, typeof allRecords>();
+    allRecords.forEach(record => {
+      const date = record.limitUpDate;
+      if (!map.has(date)) {
+        map.set(date, []);
       }
-      grouped.get(dateStr)!.push(record);
-    }
-    return grouped;
+      map.get(date)!.push(record);
+    });
+    return map;
   }, [allRecords]);
 
-  // 将日期字符串转换为Date对象的Map
+  // 创建日期字符串到Date对象的映射
   const dateStringToDate = useMemo(() => {
     const map = new Map<string, Date>();
     dates.forEach(dateStr => {
@@ -65,7 +65,7 @@ export default function Home() {
     return map;
   }, [dates]);
 
-  // 反向映射：Date对象转日期字符串
+  // 日期转字符串
   const dateToString = (date: Date | undefined): string | null => {
     if (!date) return null;
     const year = date.getFullYear();
@@ -79,11 +79,11 @@ export default function Home() {
 
   // 获取当前选中日期的题材统计
   const { data: currentDateStats = [] } = trpc.limitUp.getSectorStats.useQuery(
-    { date: selectedDateStr || '' },
+    { date: selectedDateStr! },
     { enabled: !!selectedDateStr }
   );
 
-  // 对当前日期的涨停记录按题材排序和筛选
+  // 当前选中日期的涨停记录（按题材、板数、时间排序并支持筛选）
   const sortedRecords = useMemo(() => {
     if (!selectedDateStr) return [];
     let records = recordsByDate.get(selectedDateStr) || [];
@@ -110,16 +110,20 @@ export default function Home() {
     };
 
     return [...records].sort((a, b) => {
-      const sectorA = a.sector || '其他';
-      const sectorB = b.sector || '其他';
-      const orderA = sectorOrder.get(sectorA) ?? 999;
-      const orderB = sectorOrder.get(sectorB) ?? 999;
-      // 1. 先按题材排序
-      if (orderA !== orderB) return orderA - orderB;
+      // 1. 按题材排序
+      const sectorOrderA = sectorOrder.get(a.sector || '') ?? 999;
+      const sectorOrderB = sectorOrder.get(b.sector || '') ?? 999;
+      if (sectorOrderA !== sectorOrderB) {
+        return sectorOrderA - sectorOrderB;
+      }
+      
       // 2. 同题材内按板数降序
       const boardA = parseBoardCount(a.boardCount);
       const boardB = parseBoardCount(b.boardCount);
-      if (boardA !== boardB) return boardB - boardA;
+      if (boardA !== boardB) {
+        return boardB - boardA;
+      }
+      
       // 3. 同板数内按涨停时间排序
       return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
     });
@@ -158,8 +162,10 @@ export default function Home() {
   const dateCountMap = useMemo(() => {
     const map = new Map<string, number>();
     dates.forEach(dateStr => {
-      const count = recordsByDate.get(dateStr)?.length || 0;
-      map.set(dateStr, count);
+      const records = recordsByDate.get(dateStr);
+      if (records) {
+        map.set(dateStr, records.length);
+      }
     });
     return map;
   }, [dates, recordsByDate]);
@@ -176,13 +182,14 @@ export default function Home() {
           {...props}
           className={`
             ${props.className || ''}
-            ${hasData ? 'bg-primary/10 hover:bg-primary/20 font-semibold' : ''}
-            flex flex-col items-center justify-center min-h-[52px] gap-1
+            ${hasData ? 'bg-gradient-to-br from-orange-50 to-red-50 hover:from-orange-100 hover:to-red-100 border-orange-200 border font-bold shadow-sm' : ''}
+            flex flex-col items-center justify-center min-h-[56px] gap-0.5 rounded-lg transition-all
           `}
         >
-          <span>{props.day?.date.getDate()}</span>
+          <span className={hasData ? 'text-base' : ''}>{props.day?.date.getDate()}</span>
           {hasData && (
-            <span className="text-[9px] font-medium text-primary">
+            <span className="text-[10px] font-bold text-orange-600 flex items-center gap-0.5">
+              <Flame className="h-2.5 w-2.5" />
               {count}
             </span>
           )}
@@ -193,17 +200,21 @@ export default function Home() {
   );
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-xl supports-[backdrop-filter]:bg-white/60 shadow-sm">
         <div className="container flex h-16 items-center justify-between">
           <div className="flex items-center gap-3">
-            <TrendingUp className="h-7 w-7 text-primary" />
-            <h1 className="text-xl font-semibold tracking-tight">涨停复盘助手</h1>
+            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-lg">
+              <TrendingUp className="h-5 w-5 text-white" />
+            </div>
+            <h1 className="text-xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
+              涨停复盘助手
+            </h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <Link href="/market">
-              <Button variant="outline" size="sm" className="gap-2">
+              <Button variant="ghost" size="sm" className="gap-2 hover:bg-blue-50">
                 <BarChart3 className="h-4 w-4" />
                 大盘分析
               </Button>
@@ -211,7 +222,7 @@ export default function Home() {
             {isAuthenticated ? (
               <>
                 <Link href="/upload">
-                  <Button variant="default" size="sm" className="gap-2">
+                  <Button size="sm" className="gap-2 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 shadow-md">
                     <Upload className="h-4 w-4" />
                     上传图片
                   </Button>
@@ -221,7 +232,7 @@ export default function Home() {
                 </span>
               </>
             ) : (
-              <Button variant="default" size="sm" asChild>
+              <Button size="sm" asChild className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700">
                 <a href={getLoginUrl()}>登录</a>
               </Button>
             )}
@@ -229,80 +240,77 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="container py-8 max-w-7xl">
+      <main className="container py-6 max-w-[1600px]">
         {/* 搜索栏 */}
         <div className="mb-6">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索股票代码或名称..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-12 h-12 text-base shadow-sm border-slate-200 focus-visible:ring-orange-500"
             />
           </div>
         </div>
 
         {/* 搜索结果 */}
         {searchQuery && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
+          <Card className="mb-6 shadow-lg border-slate-200">
+            <CardHeader className="bg-gradient-to-r from-slate-50 to-blue-50">
+              <CardTitle className="flex items-center gap-2 text-slate-700">
                 <Search className="h-5 w-5" />
                 搜索结果
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               {searchLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
                 </div>
               ) : searchResults.length === 0 ? (
-                <p className="text-center py-8 text-muted-foreground">
+                <p className="text-center py-12 text-muted-foreground">
                   未找到相关股票
                 </p>
               ) : (
-                <div className="space-y-3">
+                <div className="grid gap-3">
                   {searchResults.map((record) => (
                     <div
                       key={record.id}
-                      className="flex items-center justify-between p-4 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                      className="flex items-center justify-between p-5 rounded-xl border border-slate-200 bg-white hover:shadow-md hover:border-orange-200 transition-all"
                     >
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-6">
                         <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold">{record.stockName}</span>
-                            <span className="text-sm text-muted-foreground">{record.stockCode}</span>
-                          </div>
-                          <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="h-3.5 w-3.5" />
-                              {record.limitUpDate}
-                            </span>
-                            {record.limitUpTime && (
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3.5 w-3.5" />
-                                {record.limitUpTime}
-                              </span>
-                            )}
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="font-bold text-lg text-slate-800">{record.stockName}</span>
+                            <span className="text-sm font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">{record.stockCode}</span>
                             {record.boardCount && (
-                              <Badge variant="outline" className="text-xs">
+                              <Badge variant="destructive" className="bg-gradient-to-r from-orange-500 to-red-600 font-semibold">
                                 {record.boardCount}
                               </Badge>
                             )}
                           </div>
+                          <div className="flex items-center gap-4 text-sm text-slate-600">
+                            <span className="flex items-center gap-1.5">
+                              <Calendar className="h-4 w-4 text-blue-500" />
+                              {record.limitUpDate}
+                            </span>
+                            <span className="flex items-center gap-1.5">
+                              <Clock className="h-4 w-4 text-green-500" />
+                              {record.limitUpTime}
+                            </span>
+                            <Badge variant="outline" className="gap-1 border-orange-300 text-orange-700">
+                              <Tag className="h-3 w-3" />
+                              {record.sector}
+                            </Badge>
+                          </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        {record.sector && (
-                          <Badge className="mb-1">{record.sector}</Badge>
-                        )}
-                        {record.keywords && (
-                          <p className="text-xs text-muted-foreground max-w-xs truncate">
-                            {record.keywords}
-                          </p>
-                        )}
-                      </div>
+                      {record.keywords && (
+                        <div className="text-sm text-slate-600 max-w-md line-clamp-2">
+                          {record.keywords}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -311,24 +319,23 @@ export default function Home() {
           </Card>
         )}
 
-        {/* 主内容区 */}
-        {!searchQuery && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
             {/* 左侧：日历 */}
-            <Card className="lg:col-span-1">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Calendar className="h-5 w-5" />
+            <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
+              <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50">
+                <CardTitle className="flex items-center gap-2 text-slate-700">
+                  <Calendar className="h-5 w-5 text-orange-600" />
                   选择日期
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : dates.length === 0 ? (
-                  <p className="text-center py-8 text-muted-foreground text-sm">
+              <CardContent className="pt-6">
+                {dates.length === 0 ? (
+                  <p className="text-center py-12 text-muted-foreground">
                     暂无数据，请先上传涨停复盘图片
                   </p>
                 ) : (
@@ -339,7 +346,7 @@ export default function Home() {
                       onSelect={setSelectedDate}
                       modifiers={modifiers}
                       modifiersClassNames={modifiersClassNames}
-                      className="rounded-md border"
+                      className="rounded-lg"
                       components={{
                         DayButton: CustomDayButton as any,
                       }}
@@ -349,108 +356,94 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            {/* 右侧：详情展示 */}
-            <div className="lg:col-span-3 space-y-6">
-              {!selectedDateStr ? (
-                <Card>
-                  <CardContent className="py-12">
-                    <p className="text-center text-muted-foreground">
-                      请在左侧日历中选择日期查看涨停数据
-                    </p>
-                  </CardContent>
-                </Card>
-              ) : (
+            {/* 右侧：涨停数据 */}
+            <div className="space-y-6">
+              {selectedDateStr && (
                 <>
                   {/* 题材统计 */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <BarChart3 className="h-5 w-5" />
+                  <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
+                    <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50">
+                      <CardTitle className="flex items-center gap-2 text-slate-700">
+                        <BarChart3 className="h-5 w-5 text-blue-600" />
                         {selectedDateStr} 题材统计
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      {currentDateStats.length === 0 ? (
-                        <p className="text-center py-4 text-muted-foreground">
-                          暂无题材数据
-                        </p>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          <Badge 
-                            variant={selectedSector === null ? "default" : "outline"}
-                            className="text-sm px-3 py-1 cursor-pointer hover:bg-primary/90 transition-colors"
-                            onClick={() => setSelectedSector(null)}
+                    <CardContent className="pt-6">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => setSelectedSector(null)}
+                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                            selectedSector === null
+                              ? 'bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-md'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          全部 {sortedRecords.length}
+                        </button>
+                        {currentDateStats.map((stat) => (
+                          <button
+                            key={stat.sector}
+                            onClick={() => setSelectedSector(stat.sector === selectedSector ? null : stat.sector)}
+                            className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                              selectedSector === stat.sector
+                                ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md'
+                                : 'bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 border border-blue-200'
+                            }`}
                           >
-                            全部 {recordsByDate.get(selectedDateStr)?.length || 0}
-                          </Badge>
-                          {currentDateStats.map((stat) => (
-                            <Badge 
-                              key={stat.sector} 
-                              variant={selectedSector === stat.sector ? "default" : "outline"}
-                              className="text-sm px-3 py-1 cursor-pointer hover:bg-primary/90 transition-colors"
-                              onClick={() => setSelectedSector(stat.sector)}
-                            >
-                              <Tag className="h-3 w-3 mr-1" />
-                              {stat.sector} {stat.count}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
+                            {stat.sector} {stat.count}
+                          </button>
+                        ))}
+                      </div>
                     </CardContent>
                   </Card>
 
                   {/* 涨停股票列表 */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <TrendingUp className="h-5 w-5" />
+                  <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
+                    <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50">
+                      <CardTitle className="flex items-center gap-2 text-slate-700">
+                        <Flame className="h-5 w-5 text-orange-600" />
                         涨停股票 {sortedRecords.length} 只
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="pt-6">
                       <ScrollArea className="h-[600px] pr-4">
-                        {sortedRecords.length === 0 ? (
-                          <p className="text-center py-8 text-muted-foreground">
-                            暂无涨停数据
-                          </p>
-                        ) : (
-                          <div className="space-y-2">
-                            {sortedRecords.map((record) => (
-                              <div
-                                key={record.id}
-                                className="p-3 rounded-lg border bg-card hover:bg-accent/30 transition-colors"
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                                    <span className="font-semibold text-base truncate">{record.stockName}</span>
-                                    <span className="text-xs text-muted-foreground shrink-0">{record.stockCode}</span>
-                                    {record.boardCount && (
-                                      <Badge variant="destructive" className="text-xs shrink-0">
-                                        {record.boardCount}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {record.limitUpTime && (
-                                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                        <Clock className="h-3 w-3" />
-                                        {record.limitUpTime}
-                                      </span>
-                                    )}
-                                    {record.sector && (
-                                      <Badge variant="secondary" className="text-xs">{record.sector}</Badge>
-                                    )}
-                                  </div>
+                        <div className="grid gap-3">
+                          {sortedRecords.map((record) => (
+                            <div
+                              key={record.id}
+                              className="group p-4 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
+                            >
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                  <span className="font-bold text-lg text-slate-800 group-hover:text-orange-600 transition-colors">
+                                    {record.stockName}
+                                  </span>
+                                  <span className="text-sm font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                                    {record.stockCode}
+                                  </span>
+                                  {record.boardCount && (
+                                    <Badge className="bg-gradient-to-r from-orange-500 to-red-600 text-white font-bold shadow-sm">
+                                      {record.boardCount}
+                                    </Badge>
+                                  )}
                                 </div>
-                                {record.keywords && (
-                                  <p className="text-xs text-muted-foreground mt-1.5 line-clamp-1">
-                                    {record.keywords}
-                                  </p>
-                                )}
+                                <div className="flex items-center gap-2 text-sm">
+                                  <Clock className="h-4 w-4 text-green-500" />
+                                  <span className="font-semibold text-slate-700">{record.limitUpTime}</span>
+                                  <Badge variant="outline" className="gap-1 border-orange-300 text-orange-700 font-semibold">
+                                    <Tag className="h-3 w-3" />
+                                    {record.sector}
+                                  </Badge>
+                                </div>
                               </div>
-                            ))}
-                          </div>
-                        )}
+                              {record.keywords && (
+                                <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg">
+                                  {record.keywords}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </ScrollArea>
                     </CardContent>
                   </Card>
