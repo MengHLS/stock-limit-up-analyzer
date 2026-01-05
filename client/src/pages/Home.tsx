@@ -164,24 +164,41 @@ export default function Home() {
     return map;
   }, [dates, recordsByDate]);
 
-  // 为日历添加涨停数标记
+  // 为日历添加涨停数标记和背景色
   const calendarStyle = useMemo(() => {
-    const styles: string[] = [];
+    const styles: string[] = [
+      // 基础样式：为所有日期按钮设置最小高度
+      `.calendar-container .rdp-day_button {
+        min-height: 48px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+      }`,
+    ];
+    
     dateCountMap.forEach((count, dateStr) => {
-      const [year, month, day] = dateStr.split('-');
-      const selector = `.rdp-day[data-date="${dateStr}"] .rdp-day_button`;
+      // 为有数据的日期添加背景色和涨停数
       styles.push(`
-        ${selector}::after {
-          content: "${count}";
+        .calendar-container button[name="${dateStr}"] {
+          background-color: hsl(var(--primary) / 0.1);
+          font-weight: 600;
+        }
+        .calendar-container button[name="${dateStr}"]:hover {
+          background-color: hsl(var(--primary) / 0.2);
+        }
+        .calendar-container button[name="${dateStr}"]::after {
+          content: "${count}只";
           display: block;
-          font-size: 9px;
+          font-size: 10px;
           font-weight: 600;
           color: hsl(var(--primary));
           line-height: 1;
-          margin-top: 2px;
         }
       `);
     });
+    
     return styles.join('\n');
   }, [dateCountMap]);
 
@@ -325,52 +342,16 @@ export default function Home() {
                     暂无数据，请先上传涨停复盘图片
                   </p>
                 ) : (
-                  <div className="flex flex-col items-center">
-                    <div className="calendar-container">
-                      <CalendarComponent
-                        mode="single"
-                        selected={selectedDate}
-                        onSelect={setSelectedDate}
-                        modifiers={modifiers}
-                        modifiersClassNames={modifiersClassNames}
-                        className="rounded-md border"
-                      />
-                      <style>{calendarStyle}</style>
-                    </div>
-                    {/* 日期涨停数快速预览 */}
-                    <div className="mt-4 w-full max-h-[200px] overflow-y-auto">
-                      <div className="text-xs text-muted-foreground mb-2 px-2">有数据的日期：</div>
-                      <div className="space-y-1 px-2">
-                        {dates.slice(0, 10).map((dateStr) => {
-                          const [year, month, day] = dateStr.split('-');
-                          const displayDate = `${parseInt(month)}月${parseInt(day)}日`;
-                          const count = recordsByDate.get(dateStr)?.length || 0;
-                          const isSelected = dateStr === selectedDateStr;
-                          return (
-                            <button
-                              key={dateStr}
-                              onClick={() => {
-                                const date = dateStringToDate.get(dateStr);
-                                if (date) setSelectedDate(date);
-                              }}
-                              className={`w-full flex items-center justify-between px-2 py-1.5 rounded text-xs transition-colors ${
-                                isSelected
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'hover:bg-accent'
-                              }`}
-                            >
-                              <span className="font-medium">{displayDate}</span>
-                              <Badge 
-                                variant={isSelected ? "secondary" : "outline"}
-                                className="text-[10px] h-5"
-                              >
-                                {count}只
-                              </Badge>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                  <div className="calendar-container">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      modifiers={modifiers}
+                      modifiersClassNames={modifiersClassNames}
+                      className="rounded-md border"
+                    />
+                    <style>{calendarStyle}</style>
                   </div>
                 )}
               </CardContent>
