@@ -346,13 +346,13 @@ export default function Home() {
           <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-6">
             {/* 左侧：日历 */}
             <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-              <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50">
-                <CardTitle className="flex items-center gap-2 text-slate-700">
+              <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-3 px-4">
+                <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
                   <Calendar className="h-5 w-5 text-orange-600" />
                   选择日期
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-6">
+              <CardContent className="pt-4 px-4 pb-4">
                 {dates.length === 0 ? (
                   <p className="text-center py-12 text-muted-foreground">
                     暂无数据，请先上传涨停复盘图片

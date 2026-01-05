@@ -82,3 +82,7 @@
 ## 日历优化需求
 - [x] 增大日历单元格尺寸（增大容器宽度和padding）
 - [x] 修复月份切换按钮不能使用的问题（修复CustomDayButton props传递）
+
+## 日历间距优化
+- [x] 减小日历插件左右两侧的空白（CardContent px-4）
+- [x] 减小日历插件上方的空白（CardHeader py-3, Calendar p-0）
