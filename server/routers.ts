@@ -171,10 +171,11 @@ export const appRouter = router({
             messages: [
               {
                 role: "system",
-                content: `你是一个专业的股票数据识别助手。请分析用户提供的股票涨停复盘图片，提取其中的股票信息。
+                content: `你是一个专业的股票数据识别助手。请分析用户提供的股票涨停复盘图片，提取其中的股票信息和日期。
 
 请严格按照以下JSON格式返回数据：
 {
+  "date": "图片中的涨停日期，格式为YYYY-MM-DD，如图片标题显示12.31则返回2024-12-31",
   "stocks": [
     {
       "stockCode": "股票代码，如002361.SZ",
@@ -190,19 +191,20 @@ export const appRouter = router({
 }
 
 注意事项：
-1. 仔细识别图片中的每一行股票数据
-2. 股票代码需要包含交易所后缀（.SZ或.SH）
-3. 题材分类是图片中的大标题分类
-4. 关键词是每行股票最后一列的详细描述
-5. 如果某个字段无法识别，请留空字符串
-6. 确保返回有效的JSON格式`
+1. 首先识别图片标题中的日期（通常在标题中显示如"12.31"或"2024.12.31"），转换为YYYY-MM-DD格式
+2. 仔细识别图片中的每一行股票数据
+3. 股票代码需要包含交易所后缀（.SZ或.SH）
+4. 题材分类是图片中的大标题分类
+5. 关键词是每行股票最后一列的详细描述
+6. 如果某个字段无法识别，请留空字符串
+7. 确保返回有效的JSON格式`
               },
               {
                 role: "user",
                 content: [
                   {
                     type: "text",
-                    text: `请识别这张涨停复盘图片中的所有股票数据。日期是${limitUpDate}。`
+                    text: `请识别这张涨停复盘图片中的日期和所有股票数据。请从图片标题中提取日期。`
                   },
                   {
                     type: "image_url",
@@ -222,6 +224,7 @@ export const appRouter = router({
                 schema: {
                   type: "object",
                   properties: {
+                    date: { type: "string", description: "涨停日期，格式YYYY-MM-DD" },
                     stocks: {
                       type: "array",
                       items: {
@@ -241,7 +244,7 @@ export const appRouter = router({
                       }
                     }
                   },
-                  required: ["stocks"],
+                  required: ["date", "stocks"],
                   additionalProperties: false
                 }
               }
@@ -265,6 +268,7 @@ export const appRouter = router({
           }
 
           const data = JSON.parse(content);
+          const recognizedDate = data.date || limitUpDate; // 使用识别的日期，如果没有则回退到用户输入的日期
           const stocks = data.stocks || [];
 
           // 批量保存到数据库
@@ -279,11 +283,11 @@ export const appRouter = router({
               sector?: string;
               keywords?: string;
             }) => {
-              // 直接使用字符串格式日期，避免时区转换
+              // 使用从图片中识别的日期
               return {
               stockCode: stock.stockCode,
               stockName: stock.stockName,
-              limitUpDate: limitUpDate,
+              limitUpDate: recognizedDate,
               limitUpTime: stock.limitUpTime || null,
               boardCount: stock.boardCount || null,
               circulationValue: stock.circulationValue || null,
@@ -304,6 +308,7 @@ export const appRouter = router({
           return {
             success: true,
             count: stocks.length,
+            date: recognizedDate,
             stocks,
           };
         } catch (error) {
