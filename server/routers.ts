@@ -319,7 +319,8 @@ export const appRouter = router({
           }
 
           const data = JSON.parse(content);
-          const recognizedDate = data.date || limitUpDate; // 使用识别的日期，如果没有则回退到用户输入的日期
+          // 优先使用用户选择的日期，如果没有则使用LLM识别的日期
+          const recognizedDate = limitUpDate || data.date;
           const stocks = data.stocks || [];
 
           // 批量保存到数据库
@@ -334,7 +335,7 @@ export const appRouter = router({
               sector?: string;
               keywords?: string;
             }) => {
-              // 使用从图片中识别的日期
+              // 使用用户选择的日期（优先级更高）
               return {
               stockCode: stock.stockCode,
               stockName: stock.stockName,
