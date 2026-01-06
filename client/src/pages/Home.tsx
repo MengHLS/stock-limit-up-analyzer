@@ -145,7 +145,7 @@ export default function Home() {
       // 3. 同板数内按涨停时间排序
       return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
     });
-  }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector]);
+  }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector, selectedBoard, getStockBoard]);
 
   // 自动选择最新日期
   useMemo(() => {
