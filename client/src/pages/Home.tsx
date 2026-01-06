@@ -35,7 +35,7 @@ export default function Home() {
 
   // 获取股票板块
   const getStockBoard = (stockCode: string): string => {
-    if (stockCode.startsWith('300')) return '创业板';
+    if (stockCode.startsWith('300') || stockCode.startsWith('301')) return '创业板';
     if (stockCode.startsWith('688')) return '科创板';
     if (stockCode.startsWith('900')) return '北交所';
     return '主板';
@@ -566,7 +566,7 @@ function WatchFilteredStockList({
   
   // 获取股票板块
   const getStockBoard = (stockCode: string): string => {
-    if (stockCode.startsWith('300')) return '创业板';
+    if (stockCode.startsWith('300') || stockCode.startsWith('301')) return '创业板';
     if (stockCode.startsWith('688')) return '科创板';
     if (stockCode.startsWith('900')) return '北交所';
     return '主板';
