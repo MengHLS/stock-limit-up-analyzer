@@ -33,13 +33,13 @@ export default function Home() {
   const [watchFilter, setWatchFilter] = useState<"all" | "normal" | "important">("all");
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
 
-  // 获取股票板块
-  const getStockBoard = (stockCode: string): string => {
+  // 获取股票板块（使用useCallback避免依赖问题）
+  const getStockBoard = useCallback((stockCode: string): string => {
     if (stockCode.startsWith('300') || stockCode.startsWith('301')) return '创业板';
     if (stockCode.startsWith('688')) return '科创板';
     if (stockCode.startsWith('920')) return '北交所';
     return '主板';
-  };
+  }, []);
 
   // 获取所有日期
   const { data: dates = [], isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
@@ -145,7 +145,7 @@ export default function Home() {
       // 3. 同板数内按涨停时间排序
       return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
     });
-  }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector, selectedBoard, getStockBoard]);
+  }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector, selectedBoard]);
 
   // 自动选择最新日期
   useMemo(() => {
@@ -564,13 +564,13 @@ function WatchFilteredStockList({
 }) {
   const [watchStatusMap, setWatchStatusMap] = useState<Map<string, "none" | "normal" | "important">>(new Map());
   
-  // 获取股票板块
-  const getStockBoard = (stockCode: string): string => {
+  // 获取股票板块（使用useCallback避免依赖问题）
+  const getStockBoard = useCallback((stockCode: string): string => {
     if (stockCode.startsWith('300') || stockCode.startsWith('301')) return '创业板';
     if (stockCode.startsWith('688')) return '科创板';
     if (stockCode.startsWith('920')) return '北交所';
     return '主板';
-  };
+  }, []);
   
   // 初始化所有股票为none状态
   useEffect(() => {

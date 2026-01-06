@@ -116,13 +116,22 @@ export async function createLimitUpRecord(record: InsertLimitUpRecord): Promise<
   return newRecord || null;
 }
 
-/** 批量创建涨停记录 */
+/** 批量创建涨停记录（分批插入，每批最多100条） */
 export async function createLimitUpRecordsBatch(records: InsertLimitUpRecord[]): Promise<number> {
   const db = await getDb();
   if (!db || records.length === 0) return 0;
 
-  const result = await db.insert(limitUpRecords).values(records);
-  return result[0].affectedRows;
+  // 分批插入，每批最多100条
+  const BATCH_SIZE = 100;
+  let totalAffected = 0;
+  
+  for (let i = 0; i < records.length; i += BATCH_SIZE) {
+    const batch = records.slice(i, i + BATCH_SIZE);
+    const result = await db.insert(limitUpRecords).values(batch);
+    totalAffected += result[0].affectedRows;
+  }
+  
+  return totalAffected;
 }
 
 /** 获取所有涨停记录，按日期降序 */
