@@ -1,0 +1,70 @@
+{
+  "query": "SELECT id, stockCode, stockName, limitUpDate FROM limit_up_records ORDER BY limitUpDate LIMIT 10",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT id, stockCode, stockName, limitUpDate FROM limit_up_records ORDER BY limitUpDate LIMIT 10",
+  "rows": [
+    {
+      "id": "30009",
+      "stockCode": "002555.SZ",
+      "stockName": "三七互娱",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30003",
+      "stockCode": "301293.SZ",
+      "stockName": "三博脑科",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30008",
+      "stockCode": "002925.SZ",
+      "stockName": "盈趣科技",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30005",
+      "stockCode": "600775.SH",
+      "stockName": "南京熊猫",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30002",
+      "stockCode": "002195.SZ",
+      "stockName": "岩山科技",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30001",
+      "stockCode": "002173.SZ",
+      "stockName": "创新医疗",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30007",
+      "stockCode": "603716.SH",
+      "stockName": "塞力医疗",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30006",
+      "stockCode": "920199.BJ",
+      "stockName": "倍益康",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30004",
+      "stockCode": "301363.SZ",
+      "stockName": "美好医疗",
+      "limitUpDate": "2024-01-05"
+    },
+    {
+      "id": "30010",
+      "stockCode": "688626.SH",
+      "stockName": "翔宇医疗",
+      "limitUpDate": "2024-01-05"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tstockCode\tstockName\tlimitUpDate\n30009\t002555.SZ\t三七互娱\t2024-01-05\n30003\t301293.SZ\t三博脑科\t2024-01-05\n30008\t002925.SZ\t盈趣科技\t2024-01-05\n30005\t600775.SH\t南京熊猫\t2024-01-05\n30002\t002195.SZ\t岩山科技\t2024-01-05\n30001\t002173.SZ\t创新医疗\t2024-01-05\n30007\t603716.SH\t塞力医疗\t2024-01-05\n30006\t920199.BJ\t倍益康\t2024-01-05\n30004\t301363.SZ\t美好医疗\t2024-01-05\n30010\t688626.SH\t翔宇医疗\t2024-01-05\n",
+  "stderr": "",
+  "execution_time_ms": 1505
+}

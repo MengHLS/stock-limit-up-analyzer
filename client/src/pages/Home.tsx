@@ -31,6 +31,15 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [watchFilter, setWatchFilter] = useState<"all" | "normal" | "important">("all");
+  const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
+
+  // 获取股票板块
+  const getStockBoard = (stockCode: string): string => {
+    if (stockCode.startsWith('300')) return '创业板';
+    if (stockCode.startsWith('688')) return '科创板';
+    if (stockCode.startsWith('900')) return '北交所';
+    return '主板';
+  };
 
   // 获取所有日期
   const { data: dates = [], isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
@@ -96,6 +105,11 @@ export default function Home() {
     }
     
     // 按关注状态筛选（将在组件中处理）
+    
+    // 按板块筛选
+    if (selectedBoard) {
+      records = records.filter(r => getStockBoard(r.stockCode) === selectedBoard);
+    }
     
     // 创建题材顺序映射
     const sectorOrder = new Map<string, number>();
@@ -456,6 +470,59 @@ export default function Home() {
                           <Star className="h-3 w-3 fill-current" />
                           重点关注
                         </button>
+                        {/* 板块筛选 */}
+                        <div className="flex items-center gap-1 ml-2 pl-2 border-l border-slate-300">
+                          <button
+                            onClick={() => setSelectedBoard(null)}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                              selectedBoard === null
+                                ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-md'
+                                : 'bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200'
+                            }`}
+                          >
+                            全部板
+                          </button>
+                          <button
+                            onClick={() => setSelectedBoard('创业板')}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                              selectedBoard === '创业板'
+                                ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-md'
+                                : 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200'
+                            }`}
+                          >
+                            创业板
+                          </button>
+                          <button
+                            onClick={() => setSelectedBoard('科创板')}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                              selectedBoard === '科创板'
+                                ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md'
+                                : 'bg-cyan-50 text-cyan-700 hover:bg-cyan-100 border border-cyan-200'
+                            }`}
+                          >
+                            科创板
+                          </button>
+                          <button
+                            onClick={() => setSelectedBoard('主板')}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                              selectedBoard === '主板'
+                                ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-md'
+                                : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border border-yellow-200'
+                            }`}
+                          >
+                            主板
+                          </button>
+                          <button
+                            onClick={() => setSelectedBoard('北交所')}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                              selectedBoard === '北交所'
+                                ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white shadow-md'
+                                : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                            }`}
+                          >
+                            北交所
+                          </button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -496,6 +563,14 @@ function WatchFilteredStockList({
   watchFilter: "all" | "normal" | "important";
 }) {
   const [watchStatusMap, setWatchStatusMap] = useState<Map<string, "none" | "normal" | "important">>(new Map());
+  
+  // 获取股票板块
+  const getStockBoard = (stockCode: string): string => {
+    if (stockCode.startsWith('300')) return '创业板';
+    if (stockCode.startsWith('688')) return '科创板';
+    if (stockCode.startsWith('900')) return '北交所';
+    return '主板';
+  };
   
   // 初始化所有股票为none状态
   useEffect(() => {
@@ -544,6 +619,21 @@ function WatchFilteredStockList({
                                       {record.boardCount}
                                     </Badge>
                                   )}
+                                  {/* 板块标签 */}
+                                  {(() => {
+                                    const board = getStockBoard(record.stockCode);
+                                    const boardColors: Record<string, string> = {
+                                      '创业板': 'bg-green-100 text-green-700 border-green-300',
+                                      '科创板': 'bg-cyan-100 text-cyan-700 border-cyan-300',
+                                      '主板': 'bg-yellow-100 text-yellow-700 border-yellow-300',
+                                      '北交所': 'bg-rose-100 text-rose-700 border-rose-300'
+                                    };
+                                    return (
+                                      <Badge variant="outline" className={`border ${boardColors[board]} font-semibold text-xs`}>
+                                        {board}
+                                      </Badge>
+                                    );
+                                  })()}
                                 </div>
                                 <div className="flex items-center gap-3">
                                   <div className="flex items-center gap-2 text-sm">

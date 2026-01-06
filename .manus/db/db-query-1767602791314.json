@@ -1,0 +1,50 @@
+{
+  "query": "SELECT limitUpDate, COUNT(*) as count FROM limit_up_records GROUP BY limitUpDate ORDER BY limitUpDate ASC LIMIT 10",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT limitUpDate, COUNT(*) as count FROM limit_up_records GROUP BY limitUpDate ORDER BY limitUpDate ASC LIMIT 10",
+  "rows": [
+    {
+      "limitUpDate": "2024-01-05",
+      "count": "108"
+    },
+    {
+      "limitUpDate": "2025-11-28",
+      "count": "70"
+    },
+    {
+      "limitUpDate": "2025-12-01",
+      "count": "55"
+    },
+    {
+      "limitUpDate": "2025-12-02",
+      "count": "47"
+    },
+    {
+      "limitUpDate": "2025-12-03",
+      "count": "48"
+    },
+    {
+      "limitUpDate": "2025-12-04",
+      "count": "38"
+    },
+    {
+      "limitUpDate": "2025-12-05",
+      "count": "73"
+    },
+    {
+      "limitUpDate": "2025-12-08",
+      "count": "74"
+    },
+    {
+      "limitUpDate": "2025-12-09",
+      "count": "53"
+    },
+    {
+      "limitUpDate": "2025-12-10",
+      "count": "57"
+    }
+  ],
+  "messages": [],
+  "stdout": "limitUpDate\tcount\n2024-01-05\t108\n2025-11-28\t70\n2025-12-01\t55\n2025-12-02\t47\n2025-12-03\t48\n2025-12-04\t38\n2025-12-05\t73\n2025-12-08\t74\n2025-12-09\t53\n2025-12-10\t57\n",
+  "stderr": "",
+  "execution_time_ms": 1523
+}
