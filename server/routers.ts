@@ -26,6 +26,11 @@ import {
   getUserWatchlist,
   isStockWatched,
   updateWatchType,
+  upsertMarketData,
+  getMarketDataByDate,
+  getAllMarketData,
+  getRecentMarketData,
+  deleteMarketData,
 } from "./db";
 
 export const appRouter = router({
@@ -426,6 +431,53 @@ export const appRouter = router({
       }))
       .mutation(async ({ ctx, input }) => {
         return await updateWatchType(ctx.user.id, input.stockCode, input.watchType);
+      }),
+  }),
+
+  // 大盘数据相关API
+  market: router({
+    // 添加或更新大盘数据
+    upsert: protectedProcedure
+      .input(z.object({
+        dataDate: z.string(),
+        turnover: z.string(),
+        marginBalance: z.string(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return await upsertMarketData({
+          dataDate: input.dataDate,
+          turnover: input.turnover,
+          marginBalance: input.marginBalance,
+          note: input.note,
+          createdBy: ctx.user.id,
+        });
+      }),
+
+    // 获取指定日期的大盘数据
+    getByDate: publicProcedure
+      .input(z.object({ date: z.string() }))
+      .query(async ({ input }) => {
+        return await getMarketDataByDate(input.date);
+      }),
+
+    // 获取所有大盘数据
+    getAll: publicProcedure.query(async () => {
+      return await getAllMarketData();
+    }),
+
+    // 获取最近N天的大盘数据
+    getRecent: publicProcedure
+      .input(z.object({ days: z.number().optional() }))
+      .query(async ({ input }) => {
+        return await getRecentMarketData(input.days || 30);
+      }),
+
+    // 删除大盘数据
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await deleteMarketData(input.id);
       }),
   }),
 });

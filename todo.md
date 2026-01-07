@@ -167,3 +167,11 @@
 
 ## 数据日期转换
 - [x] 将2024-01-06的数据改为2026-01-06（已确认2024-01-06数据为0条，2026-01-06数据已更新）
+
+## 大盘数据录入功能
+- [x] 设计marketData表（日期、成交额、两融余额）
+- [x] 创建数据库迁移（执行 pnpm db:push）
+- [x] 开发后端API（upsert/getByDate/getAll/getRecent/delete）
+- [x] 开发前端UI页面（MarketData.tsx）
+- [x] 添加路由（/market-data）
+- [x] 编写单元测试（marketData.test.ts，5个测试全部通过）

@@ -95,3 +95,25 @@ export const stockWatchlist = mysqlTable("stock_watchlist", {
 
 export type StockWatchlist = typeof stockWatchlist.$inferSelect;
 export type InsertStockWatchlist = typeof stockWatchlist.$inferInsert;
+
+/**
+ * 大盘数据表 - 存储每日大盘成交额和两融余额
+ */
+export const marketData = mysqlTable("market_data", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 数据日期 */
+  dataDate: date("dataDate", { mode: "string" }).notNull().unique(),
+  /** 大盘成交额（亿元） */
+  turnover: varchar("turnover", { length: 20 }).notNull(),
+  /** 两融余额（亿元） */
+  marginBalance: varchar("marginBalance", { length: 20 }).notNull(),
+  /** 备注 */
+  note: text("note"),
+  /** 创建者用户ID */
+  createdBy: int("createdBy"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MarketData = typeof marketData.$inferSelect;
+export type InsertMarketData = typeof marketData.$inferInsert;

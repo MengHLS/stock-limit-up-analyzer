@@ -22,6 +22,13 @@
       "when": 1767596365163,
       "tag": "0002_red_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1767757263692,
+      "tag": "0003_bouncy_ulik",
+      "breakpoints": true
     }
   ]
 }

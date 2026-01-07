@@ -11,7 +11,10 @@ import {
   UploadedImage,
   stockWatchlist,
   InsertStockWatchlist,
-  StockWatchlist
+  StockWatchlist,
+  marketData,
+  InsertMarketData,
+  MarketData
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -406,5 +409,78 @@ export async function updateWatchType(userId: number, stockCode: string, watchTy
     .set({ watchType, updatedAt: new Date() })
     .where(sql`${stockWatchlist.userId} = ${userId} AND ${stockWatchlist.stockCode} = ${stockCode}`);
   
+  return result[0].affectedRows > 0;
+}
+
+// ==================== Market Data Functions ====================
+
+/** 添加或更新大盘数据 */
+export async function upsertMarketData(data: InsertMarketData): Promise<MarketData | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  // 检查是否已存在该日期的数据
+  const [existing] = await db.select().from(marketData)
+    .where(eq(marketData.dataDate, data.dataDate!));
+  
+  if (existing) {
+    // 更新现有数据
+    await db.update(marketData)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(marketData.dataDate, data.dataDate!));
+    
+    const [updated] = await db.select().from(marketData)
+      .where(eq(marketData.dataDate, data.dataDate!));
+    return updated || null;
+  }
+
+  // 新增数据
+  const result = await db.insert(marketData).values(data);
+  const insertId = result[0].insertId;
+  
+  const [newData] = await db.select().from(marketData).where(eq(marketData.id, insertId));
+  return newData || null;
+}
+
+/** 获取指定日期的大盘数据 */
+export async function getMarketDataByDate(date: string): Promise<MarketData | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [data] = await db.select().from(marketData)
+    .where(eq(marketData.dataDate, date));
+  
+  return data || null;
+}
+
+/** 获取所有大盘数据 */
+export async function getAllMarketData(): Promise<MarketData[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(marketData)
+    .orderBy(desc(marketData.dataDate));
+}
+
+/** 获取最近N天的大盘数据 */
+export async function getRecentMarketData(days: number = 30): Promise<MarketData[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  return await db.select().from(marketData)
+    .where(gte(marketData.dataDate, startDateStr))
+    .orderBy(desc(marketData.dataDate));
+}
+
+/** 删除大盘数据 */
+export async function deleteMarketData(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db.delete(marketData).where(eq(marketData.id, id));
   return result[0].affectedRows > 0;
 }
