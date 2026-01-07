@@ -484,3 +484,56 @@ export async function deleteMarketData(id: number): Promise<boolean> {
   const result = await db.delete(marketData).where(eq(marketData.id, id));
   return result[0].affectedRows > 0;
 }
+
+/** 获取涨停数与大盘数据的关联统计（最近N天）*/
+export async function getLimitUpWithMarketData(days: number = 30): Promise<{
+  date: string;
+  limitUpCount: number;
+  turnover?: string;
+  marginBalance?: string;
+}[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // 计算N天前的日期
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  // 获取涨停数据
+  const limitUpRecordsData = await db.select().from(limitUpRecords)
+    .where(gte(limitUpRecords.limitUpDate, startDateStr))
+    .orderBy(desc(limitUpRecords.limitUpDate));
+
+  // 按日期统计涨停数
+  const dateMap = new Map<string, number>();
+  for (const record of limitUpRecordsData) {
+    const date = record.limitUpDate;
+    dateMap.set(date, (dateMap.get(date) || 0) + 1);
+  }
+
+  // 获取大盘数据
+  const marketDataList = await db.select().from(marketData)
+    .where(gte(marketData.dataDate, startDateStr))
+    .orderBy(desc(marketData.dataDate));
+
+  // 按日期构建大盘数据映射
+  const marketDataMap = new Map<string, { turnover: string; marginBalance: string }>();
+  for (const data of marketDataList) {
+    marketDataMap.set(data.dataDate, {
+      turnover: data.turnover,
+      marginBalance: data.marginBalance,
+    });
+  }
+
+  // 合并数据，按日期排序
+  const result = Array.from(dateMap.entries())
+    .map(([date, limitUpCount]) => ({
+      date,
+      limitUpCount,
+      ...marketDataMap.get(date),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date)); // 按日期升序
+
+  return result;
+}

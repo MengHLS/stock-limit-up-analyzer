@@ -31,6 +31,7 @@ import {
   getAllMarketData,
   getRecentMarketData,
   deleteMarketData,
+  getLimitUpWithMarketData,
 } from "./db";
 
 export const appRouter = router({
@@ -478,6 +479,12 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         return await deleteMarketData(input.id);
+      }),
+    // 获取涨停数与大盘数据的关联统计（最近N天）
+    getLimitUpWithMarketData: publicProcedure
+      .input(z.object({ days: z.number().optional() }))
+      .query(async ({ input }) => {
+        return await getLimitUpWithMarketData(input.days || 30);
       }),
   }),
 });

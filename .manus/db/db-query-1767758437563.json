@@ -1,0 +1,13 @@
+{
+  "query": "SELECT COUNT(*) as count FROM market_data;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT COUNT(*) as count FROM market_data;",
+  "rows": [
+    {
+      "count": "2"
+    }
+  ],
+  "messages": [],
+  "stdout": "count\n2\n",
+  "stderr": "",
+  "execution_time_ms": 1544
+}

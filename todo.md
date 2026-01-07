@@ -175,3 +175,12 @@
 - [x] 开发前端UI页面（MarketData.tsx）
 - [x] 添加路由（/market-data）
 - [x] 编写单元测试（marketData.test.ts，5个测试全部通过）
+
+
+## 大盘数据可视化功能
+- [x] 后端API：获取涨停数与大盘数据的关联统计（getLimitUpWithMarketData）
+- [x] 前端图表组件：成交额趋势图（折线图）
+- [x] 前端图表组件：两融余额趋势图（折线图）
+- [x] 前端图表组件：涨停数与成交额关联图（双轴图表）
+- [x] 集成到大盘分析页面，在“大盘数据”标签页中展示
+- [x] 单元测试：验证大盘数据查询API（marketVisualization.test.ts，6个测试全部通过）

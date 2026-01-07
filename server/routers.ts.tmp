@@ -1,0 +1,6 @@
+    // 获取涨停数与大盘数据的关联统计（最近N天）
+    getLimitUpWithMarketData: publicProcedure
+      .input(z.object({ days: z.number().optional() }))
+      .query(async ({ input }) => {
+        return await getLimitUpWithMarketData(input.days || 30);
+      }),

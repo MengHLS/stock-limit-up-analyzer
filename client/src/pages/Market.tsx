@@ -10,8 +10,9 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 export default function MarketPage() {
   const { data: dailyStats, isLoading: statsLoading } = trpc.limitUp.getDailyStats.useQuery();
   const { data: sectorDistribution, isLoading: sectorLoading } = trpc.limitUp.getSectorDistribution.useQuery();
+  const { data: limitUpWithMarketData, isLoading: marketDataLoading } = trpc.market.getLimitUpWithMarketData.useQuery({ days: 30 });
 
-  const isLoading = statsLoading || sectorLoading;
+  const isLoading = statsLoading || sectorLoading || marketDataLoading;
 
   // 计算统计数据
   const totalDays = dailyStats?.length || 0;
@@ -132,9 +133,115 @@ export default function MarketPage() {
             <Tabs defaultValue="trend" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="trend">涨停趋势</TabsTrigger>
+                <TabsTrigger value="market">大盘数据</TabsTrigger>
                 <TabsTrigger value="sector">题材分布</TabsTrigger>
                 <TabsTrigger value="ranking">题材排行</TabsTrigger>
               </TabsList>
+
+                {/* 大盘数据 */}
+              <TabsContent value="market" className="space-y-4">
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {/* 成交额趋势图 */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>成交额趋势</CardTitle>
+                      <CardDescription>展示最近30天的日均成交额变化</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={limitUpWithMarketData?.map(item => ({
+                          date: item.date.substring(5),
+                          成交额: item.turnover ? parseFloat(item.turnover) : 0,
+                        })) || []}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                          <YAxis />
+                          <Tooltip formatter={(value) => `${value}亿`} />
+                          <Legend />
+                          <Line 
+                            type="monotone" 
+                            dataKey="成交额" 
+                            stroke="#10b981" 
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* 两融余额趋势图 */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>两融余额趋势</CardTitle>
+                      <CardDescription>展示最近30天的融资融券余额变化</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={limitUpWithMarketData?.map(item => ({
+                          date: item.date.substring(5),
+                          两融余额: item.marginBalance ? parseFloat(item.marginBalance) : 0,
+                        })) || []}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                          <YAxis />
+                          <Tooltip formatter={(value) => `${value}亿`} />
+                          <Legend />
+                          <Line 
+                            type="monotone" 
+                            dataKey="两融余额" 
+                            stroke="#f59e0b" 
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* 涨停数与成交额关联图 */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>涨停数与成交额关联分析</CardTitle>
+                    <CardDescription>展示涨停数量与日均成交额的关系</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ResponsiveContainer width="100%" height={400}>
+                      <LineChart data={limitUpWithMarketData?.map(item => ({
+                        date: item.date.substring(5),
+                        涨停数: item.limitUpCount,
+                        成交额: item.turnover ? parseFloat(item.turnover) : 0,
+                      })) || []}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                        <YAxis yAxisId="left" />
+                        <YAxis yAxisId="right" orientation="right" />
+                        <Tooltip />
+                        <Legend />
+                        <Line 
+                          yAxisId="left"
+                          type="monotone" 
+                          dataKey="涨停数" 
+                          stroke="#3b82f6" 
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey="成交额" 
+                          stroke="#10b981" 
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
               {/* 涨停趋势图 */}
               <TabsContent value="trend" className="space-y-4">
