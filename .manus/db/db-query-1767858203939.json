@@ -1,0 +1,28 @@
+{
+  "query": "SHOW TABLES;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SHOW TABLES;",
+  "rows": [
+    {
+      "Tables_in_VWwjFDE663Dhej4TohVzPQ": "__drizzle_migrations"
+    },
+    {
+      "Tables_in_VWwjFDE663Dhej4TohVzPQ": "limit_up_records"
+    },
+    {
+      "Tables_in_VWwjFDE663Dhej4TohVzPQ": "market_data"
+    },
+    {
+      "Tables_in_VWwjFDE663Dhej4TohVzPQ": "stock_watchlist"
+    },
+    {
+      "Tables_in_VWwjFDE663Dhej4TohVzPQ": "uploaded_images"
+    },
+    {
+      "Tables_in_VWwjFDE663Dhej4TohVzPQ": "users"
+    }
+  ],
+  "messages": [],
+  "stdout": "Tables_in_VWwjFDE663Dhej4TohVzPQ\n__drizzle_migrations\nlimit_up_records\nmarket_data\nstock_watchlist\nuploaded_images\nusers\n",
+  "stderr": "",
+  "execution_time_ms": 1546
+}

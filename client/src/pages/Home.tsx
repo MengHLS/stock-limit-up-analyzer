@@ -205,27 +205,27 @@ export default function Home() {
           {...buttonProps}
           type="button"
           className={`
-            relative flex flex-col items-center justify-center w-full aspect-square rounded-md transition-all duration-200 p-0.5 text-xs font-medium gap-0.5
+            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-300 p-2 text-sm font-medium gap-1 cursor-pointer
             ${hasData 
               ? isSelected
-                ? 'bg-gradient-to-b from-orange-400 to-orange-500 text-white shadow-lg border border-orange-300 hover:shadow-xl'
-                : 'bg-gradient-to-b from-orange-50 to-orange-100 hover:from-orange-100 hover:to-orange-150 text-orange-600 border border-orange-200 shadow-sm hover:shadow-md'
+                ? 'bg-gradient-to-br from-orange-400 via-orange-500 to-red-500 text-white shadow-xl border border-orange-300 hover:shadow-2xl hover:scale-105'
+                : 'bg-gradient-to-br from-orange-50 via-orange-100 to-yellow-50 hover:from-orange-100 hover:via-orange-150 hover:to-yellow-100 text-orange-700 border border-orange-200 shadow-md hover:shadow-lg hover:scale-102'
               : isSelected
-                ? 'bg-gradient-to-b from-slate-200 to-slate-300 text-slate-700 border border-slate-300 shadow-md'
+                ? 'bg-gradient-to-br from-slate-200 to-slate-300 text-slate-700 border border-slate-300 shadow-lg hover:scale-105'
                 : isToday
-                  ? 'bg-gradient-to-b from-blue-50 to-blue-100 text-blue-600 border border-blue-200 shadow-sm hover:shadow-md'
-                  : 'hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 hover:shadow-sm'
+                  ? 'bg-gradient-to-br from-blue-100 to-blue-200 text-blue-700 border border-blue-300 shadow-md hover:shadow-lg hover:scale-102 ring-2 ring-blue-300 ring-opacity-50'
+                  : 'hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-sm hover:shadow-md hover:scale-102'
             }
           `}
         >
-          <span className={`font-bold leading-none text-sm ${
-            hasData && isSelected ? 'text-white' : hasData ? 'text-orange-700' : ''
+          <span className={`font-bold leading-tight text-base ${
+            hasData && isSelected ? 'text-white' : hasData ? 'text-orange-700' : 'text-slate-700'
           }`}>
             {day?.date.getDate()}
           </span>
           {hasData && (
-            <span className={`text-xs font-bold leading-none ${
-              isSelected ? 'text-orange-100' : 'text-orange-600'
+            <span className={`text-sm font-bold leading-tight ${
+              isSelected ? 'text-orange-100' : 'text-orange-700'
             }`}>
               {count}
             </span>
