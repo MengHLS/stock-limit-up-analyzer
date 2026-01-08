@@ -205,27 +205,27 @@ export default function Home() {
           {...buttonProps}
           type="button"
           className={`
-            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-200 p-1.5 text-sm font-medium
+            relative flex flex-col items-center justify-center w-full aspect-square rounded-md transition-all duration-200 p-0.5 text-xs font-medium gap-0.5
             ${hasData 
               ? isSelected
-                ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-md border border-orange-400'
-                : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 shadow-sm hover:shadow-md'
+                ? 'bg-gradient-to-b from-orange-400 to-orange-500 text-white shadow-lg border border-orange-300 hover:shadow-xl'
+                : 'bg-gradient-to-b from-orange-50 to-orange-100 hover:from-orange-100 hover:to-orange-150 text-orange-600 border border-orange-200 shadow-sm hover:shadow-md'
               : isSelected
-                ? 'bg-slate-300 text-slate-800 border border-slate-400 shadow-sm'
+                ? 'bg-gradient-to-b from-slate-200 to-slate-300 text-slate-700 border border-slate-300 shadow-md'
                 : isToday
-                  ? 'bg-blue-100 text-blue-700 border border-blue-300 hover:bg-blue-150'
-                  : 'hover:bg-slate-100 text-slate-600 border border-transparent hover:border-slate-200'
+                  ? 'bg-gradient-to-b from-blue-50 to-blue-100 text-blue-600 border border-blue-200 shadow-sm hover:shadow-md'
+                  : 'hover:bg-slate-50 text-slate-500 border border-transparent hover:border-slate-200 hover:shadow-sm'
             }
           `}
         >
-          <span className={`font-semibold leading-tight ${
-            hasData ? 'text-base' : 'text-sm'
-          } ${isSelected && hasData ? 'text-white' : ''}`}>
+          <span className={`font-bold leading-none text-sm ${
+            hasData && isSelected ? 'text-white' : hasData ? 'text-orange-700' : ''
+          }`}>
             {day?.date.getDate()}
           </span>
           {hasData && (
-            <span className={`text-xs font-bold mt-1 leading-none ${
-              isSelected ? 'text-orange-100' : 'text-orange-700'
+            <span className={`text-xs font-bold leading-none ${
+              isSelected ? 'text-orange-100' : 'text-orange-600'
             }`}>
               {count}
             </span>
