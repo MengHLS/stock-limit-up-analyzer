@@ -19,7 +19,8 @@ import {
   Hash,
   Tag,
   Flame,
-  Star
+  Star,
+  Database
 } from "lucide-react";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
@@ -256,6 +257,16 @@ export default function Home() {
                 大盘分析
               </Button>
             </Link>
+            {isAuthenticated ? (
+              <>
+                <Link href="/market-data-input">
+                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-green-50">
+                    <Database className="h-4 w-4" />
+                    录入数据
+                  </Button>
+                </Link>
+              </>
+            ) : null}
             {isAuthenticated ? (
               <>
                 <Link href="/upload">
