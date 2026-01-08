@@ -205,30 +205,29 @@ export default function Home() {
           {...buttonProps}
           type="button"
           className={`
-            relative flex flex-col items-center justify-center w-full aspect-square rounded-xl transition-all duration-200 p-2
+            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-200 p-1.5 text-sm font-medium
             ${hasData 
               ? isSelected
-                ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-lg border-2 border-orange-400'
-                : 'bg-gradient-to-br from-orange-100 to-red-100 hover:from-orange-200 hover:to-red-200 text-slate-800 border-2 border-orange-300 shadow-md hover:shadow-lg'
+                ? 'bg-gradient-to-br from-orange-500 to-red-600 text-white shadow-md border border-orange-400'
+                : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 shadow-sm hover:shadow-md'
               : isSelected
-                ? 'bg-slate-200 text-slate-800 border-2 border-slate-400'
+                ? 'bg-slate-300 text-slate-800 border border-slate-400 shadow-sm'
                 : isToday
-                  ? 'bg-blue-50 text-blue-700 border-2 border-blue-300 hover:bg-blue-100'
+                  ? 'bg-blue-100 text-blue-700 border border-blue-300 hover:bg-blue-150'
                   : 'hover:bg-slate-100 text-slate-600 border border-transparent hover:border-slate-200'
             }
           `}
         >
-          <span className={`font-semibold leading-none ${
-            hasData ? 'text-lg' : 'text-base'
+          <span className={`font-semibold leading-tight ${
+            hasData ? 'text-base' : 'text-sm'
           } ${isSelected && hasData ? 'text-white' : ''}`}>
             {day?.date.getDate()}
           </span>
           {hasData && (
-            <span className={`text-xs font-bold flex items-center gap-0.5 mt-1 leading-none ${
+            <span className={`text-xs font-bold mt-1 leading-none ${
               isSelected ? 'text-orange-100' : 'text-orange-700'
             }`}>
-              <Flame className="h-3 w-3" />
-              <span>{count}</span>
+              {count}
             </span>
           )}
         </button>
