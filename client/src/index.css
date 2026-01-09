@@ -190,29 +190,33 @@
   
   /* 日历插件样式优化 */
   .rdp {
-    --rdp-cell-size: 40px;
+    --rdp-cell-size: 56px;
     --rdp-accent-color: #f97316;
     --rdp-background-color: #fef3c7;
     margin: 0;
   }
   
   .rdp-months {
-    @apply gap-4;
+    @apply gap-6;
   }
   
   .rdp-month {
-    @apply gap-3;
+    @apply gap-4;
   }
   
   .rdp-head_cell {
-    @apply font-semibold text-slate-600 text-sm;
+    @apply font-bold text-slate-700 text-base;
   }
   
   .rdp-row {
-    @apply gap-1;
+    @apply gap-2;
   }
   
   .rdp-cell {
     @apply p-0;
+  }
+  
+  .rdp-day {
+    @apply text-lg font-bold;
   }
 }

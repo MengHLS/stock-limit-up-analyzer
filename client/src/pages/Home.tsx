@@ -218,15 +218,11 @@ export default function Home() {
             }
           `}
         >
-          <span className={`font-bold leading-tight text-base ${
-            hasData && isSelected ? 'text-white' : hasData ? 'text-orange-700' : 'text-slate-700'
-          }`}>
+          <span className={`font-bold leading-none text-xl ${hasData && isSelected ? "text-white" : hasData ? "text-orange-800" : "text-slate-800"}`}>
             {day?.date.getDate()}
           </span>
           {hasData && (
-            <span className={`text-sm font-bold leading-tight ${
-              isSelected ? 'text-orange-100' : 'text-orange-700'
-            }`}>
+            <span className={`text-xs font-semibold leading-none ${isSelected ? "text-orange-100" : "text-orange-600"}`}>
               {count}
             </span>
           )}
