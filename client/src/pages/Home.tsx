@@ -252,6 +252,12 @@ export default function Home() {
                 大盘分析
               </Button>
             </Link>
+            <Link href="/sector-distribution">
+              <Button variant="ghost" size="sm" className="gap-2 hover:bg-orange-50">
+                <Flame className="h-4 w-4" />
+                题材热度
+              </Button>
+            </Link>
             {isAuthenticated ? (
               <>
                 <Link href="/market-data-input">

@@ -9,6 +9,7 @@ import Upload from "./pages/Upload";
 import Market from "./pages/Market";
 import MarketData from "./pages/MarketData";
 import MarketDataInput from "./pages/MarketDataInput";
+import SectorDistribution from "./pages/SectorDistribution";
 
 function Router() {
   return (
@@ -16,8 +17,9 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/upload"} component={Upload} />
       <Route path={"/market"} component={Market} />
-       <Route path="/market-data" component={MarketData} />
+      <Route path="/market-data" component={MarketData} />
       <Route path="/market-data-input" component={MarketDataInput} />
+      <Route path="/sector-distribution" component={SectorDistribution} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

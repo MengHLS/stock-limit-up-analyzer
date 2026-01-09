@@ -537,3 +537,62 @@ export async function getLimitUpWithMarketData(days: number = 30): Promise<{
 
   return result;
 }
+
+
+/** 获取近N天的题材热度统计 */
+export async function getSectorHeatmapData(days: number = 30): Promise<{
+  sector: string;
+  totalCount: number;
+  dailyData: { date: string; count: number }[];
+}[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // 计算N天前的日期
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  // 获取最近N天的涨停记录
+  const records = await db.select().from(limitUpRecords)
+    .where(gte(limitUpRecords.limitUpDate, startDateStr))
+    .orderBy(desc(limitUpRecords.limitUpDate));
+
+  // 按题材和日期统计
+  const sectorMap = new Map<string, Map<string, number>>();
+  const sectorTotalMap = new Map<string, number>();
+
+  for (const record of records) {
+    const sector = record.sector || '其他';
+    const date = record.limitUpDate;
+
+    // 统计总数
+    sectorTotalMap.set(sector, (sectorTotalMap.get(sector) || 0) + 1);
+
+    // 统计每日数据
+    if (!sectorMap.has(sector)) {
+      sectorMap.set(sector, new Map());
+    }
+    const dailyMap = sectorMap.get(sector)!;
+    dailyMap.set(date, (dailyMap.get(date) || 0) + 1);
+  }
+
+  // 构建结果
+  const result = Array.from(sectorMap.entries())
+    .map(([sector, dailyMap]) => ({
+      sector,
+      totalCount: sectorTotalMap.get(sector) || 0,
+      dailyData: Array.from(dailyMap.entries())
+        .map(([date, count]) => ({ date, count }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    }))
+    .sort((a, b) => {
+      // "其他"始终放在最后
+      if (a.sector === '其他') return 1;
+      if (b.sector === '其他') return -1;
+      // 其他题材按总数降序排列
+      return b.totalCount - a.totalCount;
+    });
+
+  return result;
+}

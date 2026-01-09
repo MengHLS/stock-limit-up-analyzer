@@ -32,6 +32,7 @@ import {
   getRecentMarketData,
   deleteMarketData,
   getLimitUpWithMarketData,
+  getSectorHeatmapData,
 } from "./db";
 
 export const appRouter = router({
@@ -485,6 +486,16 @@ export const appRouter = router({
       .input(z.object({ days: z.number().optional() }))
       .query(async ({ input }) => {
         return await getLimitUpWithMarketData(input.days || 30);
+      }),
+  }),
+
+  // 题材分布相关API
+  sector: router({
+    // 获取近N天的题材热度统计
+    getHeatmapData: publicProcedure
+      .input(z.object({ days: z.number().optional() }))
+      .query(async ({ input }) => {
+        return await getSectorHeatmapData(input.days || 30);
       }),
   }),
 });
