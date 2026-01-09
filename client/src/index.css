@@ -187,4 +187,32 @@
   .calendar-container {
     @apply w-full;
   }
+  
+  /* 日历插件样式优化 */
+  .rdp {
+    --rdp-cell-size: 40px;
+    --rdp-accent-color: #f97316;
+    --rdp-background-color: #fef3c7;
+    margin: 0;
+  }
+  
+  .rdp-months {
+    @apply gap-4;
+  }
+  
+  .rdp-month {
+    @apply gap-3;
+  }
+  
+  .rdp-head_cell {
+    @apply font-semibold text-slate-600 text-sm;
+  }
+  
+  .rdp-row {
+    @apply gap-1;
+  }
+  
+  .rdp-cell {
+    @apply p-0;
+  }
 }
