@@ -1,0 +1,9 @@
+{
+  "query": "UPDATE limit_up_records SET sector = SUBSTRING_INDEX(sector, '*', 1) WHERE limitUpDate IN ('2025-12-17', '2025-12-22', '2025-12-23') AND sector LIKE '%*%'",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute UPDATE limit_up_records SET sector = SUBSTRING_INDEX(sector, '*', 1) WHERE limitUpDate IN ('2025-12-17', '2025-12-22', '2025-12-23') AND sector LIKE '%*%'",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1568
+}

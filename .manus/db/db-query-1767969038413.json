@@ -1,0 +1,360 @@
+{
+  "query": "SELECT id, stockCode, stockName, sector, limitUpDate FROM limit_up_records WHERE limitUpDate IN ('2025-12-17', '2025-12-22', '2025-12-23') LIMIT 50",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT id, stockCode, stockName, sector, limitUpDate FROM limit_up_records WHERE limitUpDate IN ('2025-12-17', '2025-12-22', '2025-12-23') LIMIT 50",
+  "rows": [
+    {
+      "id": "841",
+      "stockCode": "603163.SH",
+      "stockName": "圣晖集成",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "842",
+      "stockCode": "000551.SZ",
+      "stockName": "创元科技",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "843",
+      "stockCode": "603929.SH",
+      "stockName": "亚翔集成",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "844",
+      "stockCode": "002643.SZ",
+      "stockName": "万润股份",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "845",
+      "stockCode": "000859.SZ",
+      "stockName": "国风新材",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "846",
+      "stockCode": "601133.SH",
+      "stockName": "柏诚股份",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "847",
+      "stockCode": "002957.SZ",
+      "stockName": "科瑞技术",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "848",
+      "stockCode": "688376.SH",
+      "stockName": "美埃科技",
+      "sector": "半导体*8",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "849",
+      "stockCode": "002788.SZ",
+      "stockName": "鹭燕医药",
+      "sector": "消费*7",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "850",
+      "stockCode": "603696.SH",
+      "stockName": "安记食品",
+      "sector": "消费*7",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "851",
+      "stockCode": "002228.SZ",
+      "stockName": "合兴包装",
+      "sector": "消费*7",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "852",
+      "stockCode": "600712.SH",
+      "stockName": "南宁百货",
+      "sector": "消费*7",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "853",
+      "stockCode": "002718.SZ",
+      "stockName": "友邦吊顶",
+      "sector": "消费*7",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "854",
+      "stockCode": "002330.SZ",
+      "stockName": "得利斯",
+      "sector": "消费*7",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "855",
+      "stockCode": "000759.SZ",
+      "stockName": "中百集团",
+      "sector": "消费*7",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "856",
+      "stockCode": "002837.SZ",
+      "stockName": "英维克",
+      "sector": "液冷*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "857",
+      "stockCode": "301123.SZ",
+      "stockName": "奕东电子",
+      "sector": "液冷*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "858",
+      "stockCode": "002909.SZ",
+      "stockName": "集泰股份",
+      "sector": "液冷*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "859",
+      "stockCode": "300990.SZ",
+      "stockName": "同飞股份",
+      "sector": "液冷*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "860",
+      "stockCode": "603203.SH",
+      "stockName": "快克智能",
+      "sector": "液冷*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "861",
+      "stockCode": "300414.SZ",
+      "stockName": "中光防雷",
+      "sector": "液冷*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "862",
+      "stockCode": "002361.SZ",
+      "stockName": "神剑股份",
+      "sector": "商业航天*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "863",
+      "stockCode": "001336.SZ",
+      "stockName": "楚环科技",
+      "sector": "商业航天*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "864",
+      "stockCode": "603698.SH",
+      "stockName": "航天工程",
+      "sector": "商业航天*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "865",
+      "stockCode": "002201.SZ",
+      "stockName": "九鼎新材",
+      "sector": "商业航天*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "866",
+      "stockCode": "002098.SZ",
+      "stockName": "浔兴股份",
+      "sector": "商业航天*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "867",
+      "stockCode": "300726.SZ",
+      "stockName": "宏达电子",
+      "sector": "商业航天*6",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "868",
+      "stockCode": "002163.SZ",
+      "stockName": "海南发展",
+      "sector": "海南*5",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "869",
+      "stockCode": "603069.SH",
+      "stockName": "海汽集团",
+      "sector": "海南*5",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "870",
+      "stockCode": "002596.SZ",
+      "stockName": "海南瑞泽",
+      "sector": "海南*5",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "871",
+      "stockCode": "000566.SZ",
+      "stockName": "海南海药",
+      "sector": "海南*5",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "872",
+      "stockCode": "600179.SH",
+      "stockName": "安通控股",
+      "sector": "海南*5",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "873",
+      "stockCode": "002759.SZ",
+      "stockName": "天际股份",
+      "sector": "六氟磷酸锂*3",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "874",
+      "stockCode": "603978.SH",
+      "stockName": "深圳新星",
+      "sector": "六氟磷酸锂*3",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "875",
+      "stockCode": "002407.SZ",
+      "stockName": "多氟多",
+      "sector": "六氟磷酸锂*3",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "876",
+      "stockCode": "002796.SZ",
+      "stockName": "世嘉科技",
+      "sector": "光通信*2",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "877",
+      "stockCode": "603938.SH",
+      "stockName": "三孚股份",
+      "sector": "光通信*2",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "878",
+      "stockCode": "601208.SH",
+      "stockName": "东材科技",
+      "sector": "电子布/铜箔*2",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "879",
+      "stockCode": "603256.SH",
+      "stockName": "宏和科技",
+      "sector": "电子布/铜箔*2",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "880",
+      "stockCode": "002842.SZ",
+      "stockName": "翔鹭钨业",
+      "sector": "钨*2",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "881",
+      "stockCode": "002378.SZ",
+      "stockName": "章源钨业",
+      "sector": "钨*2",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "882",
+      "stockCode": "001331.SZ",
+      "stockName": "胜通能源",
+      "sector": "公告*4",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "883",
+      "stockCode": "002969.SZ",
+      "stockName": "嘉美包装",
+      "sector": "公告*4",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "884",
+      "stockCode": "002810.SZ",
+      "stockName": "山东赫达",
+      "sector": "公告*4",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "885",
+      "stockCode": "000036.SZ",
+      "stockName": "华联控股",
+      "sector": "公告*4",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "886",
+      "stockCode": "605167.SH",
+      "stockName": "利柏特",
+      "sector": "其他*9",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "887",
+      "stockCode": "002631.SZ",
+      "stockName": "德尔未来",
+      "sector": "其他*9",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "888",
+      "stockCode": "000695.SZ",
+      "stockName": "滨海能源",
+      "sector": "其他*9",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "889",
+      "stockCode": "002888.SZ",
+      "stockName": "惠威科技",
+      "sector": "其他*9",
+      "limitUpDate": "2025-12-23"
+    },
+    {
+      "id": "890",
+      "stockCode": "002843.SZ",
+      "stockName": "泰嘉股份",
+      "sector": "其他*9",
+      "limitUpDate": "2025-12-23"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tstockCode\tstockName\tsector\tlimitUpDate\n841\t603163.SH\t圣晖集成\t半导体*8\t2025-12-23\n842\t000551.SZ\t创元科技\t半导体*8\t2025-12-23\n843\t603929.SH\t亚翔集成\t半导体*8\t2025-12-23\n844\t002643.SZ\t万润股份\t半导体*8\t2025-12-23\n845\t000859.SZ\t国风新材\t半导体*8\t2025-12-23\n846\t601133.SH\t柏诚股份\t半导体*8\t2025-12-23\n847\t002957.SZ\t科瑞技术\t半导体*8\t2025-12-23\n848\t688376.SH\t美埃科技\t半导体*8\t2025-12-23\n849\t002788.SZ\t鹭燕医药\t消费*7\t2025-12-23\n850\t603696.SH\t安记食品\t消费*7\t2025-12-23\n851\t002228.SZ\t合兴包装\t消费*7\t2025-12-23\n852\t600712.SH\t南宁百货\t消费*7\t2025-12-23\n853\t002718.SZ\t友邦吊顶\t消费*7\t2025-12-23\n854\t002330.SZ\t得利斯\t消费*7\t2025-12-23\n855\t000759.SZ\t中百集团\t消费*7\t2025-12-23\n856\t002837.SZ\t英维克\t液冷*6\t2025-12-23\n857\t301123.SZ\t奕东电子\t液冷*6\t2025-12-23\n858\t002909.SZ\t集泰股份\t液冷*6\t2025-12-23\n859\t300990.SZ\t同飞股份\t液冷*6\t2025-12-23\n860\t603203.SH\t快克智能\t液冷*6\t2025-12-23\n861\t300414.SZ\t中光防雷\t液冷*6\t2025-12-23\n862\t002361.SZ\t神剑股份\t商业航天*6\t2025-12-23\n863\t001336.SZ\t楚环科技\t商业航天*6\t2025-12-23\n864\t603698.SH\t航天工程\t商业航天*6\t2025-12-23\n865\t002201.SZ\t九鼎新材\t商业航天*6\t2025-12-23\n866\t002098.SZ\t浔兴股份\t商业航天*6\t2025-12-23\n867\t300726.SZ\t宏达电子\t商业航天*6\t2025-12-23\n868\t002163.SZ\t海南发展\t海南*5\t2025-12-23\n869\t603069.SH\t海汽集团\t海南*5\t2025-12-23\n870\t002596.SZ\t海南瑞泽\t海南*5\t2025-12-23\n871\t000566.SZ\t海南海药\t海南*5\t2025-12-23\n872\t600179.SH\t安通控股\t海南*5\t2025-12-23\n873\t002759.SZ\t天际股份\t六氟磷酸锂*3\t2025-12-23\n874\t603978.SH\t深圳新星\t六氟磷酸锂*3\t2025-12-23\n875\t002407.SZ\t多氟多\t六氟磷酸锂*3\t2025-12-23\n876\t002796.SZ\t世嘉科技\t光通信*2\t2025-12-23\n877\t603938.SH\t三孚股份\t光通信*2\t2025-12-23\n878\t601208.SH\t东材科技\t电子布/铜箔*2\t2025-12-23\n879\t603256.SH\t宏和科技\t电子布/铜箔*2\t2025-12-23\n880\t002842.SZ\t翔鹭钨业\t钨*2\t2025-12-23\n881\t002378.SZ\t章源钨业\t钨*2\t2025-12-23\n882\t001331.SZ\t胜通能源\t公告*4\t2025-12-23\n883\t002969.SZ\t嘉美包装\t公告*4\t2025-12-23\n884\t002810.SZ\t山东赫达\t公告*4\t2025-12-23\n885\t000036.SZ\t华联控股\t公告*4\t2025-12-23\n886\t605167.SH\t利柏特\t其他*9\t2025-12-23\n887\t002631.SZ\t德尔未来\t其他*9\t2025-12-23\n888\t000695.SZ\t滨海能源\t其他*9\t2025-12-23\n889\t002888.SZ\t惠威科技\t其他*9\t2025-12-23\n890\t002843.SZ\t泰嘉股份\t其他*9\t2025-12-23\n",
+  "stderr": "",
+  "execution_time_ms": 1542
+}

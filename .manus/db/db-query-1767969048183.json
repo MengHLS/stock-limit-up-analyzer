@@ -1,0 +1,97 @@
+{
+  "query": "SELECT DISTINCT sector FROM limit_up_records WHERE limitUpDate IN ('2025-12-17', '2025-12-22', '2025-12-23') ORDER BY sector",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT DISTINCT sector FROM limit_up_records WHERE limitUpDate IN ('2025-12-17', '2025-12-22', '2025-12-23') ORDER BY sector",
+  "rows": [
+    {
+      "sector": "PCB板*2"
+    },
+    {
+      "sector": "光通信*2"
+    },
+    {
+      "sector": "光通信*5"
+    },
+    {
+      "sector": "光通信*7"
+    },
+    {
+      "sector": "公告*3"
+    },
+    {
+      "sector": "公告*4"
+    },
+    {
+      "sector": "六氟磷酸锂*3"
+    },
+    {
+      "sector": "其他*12"
+    },
+    {
+      "sector": "其他*9"
+    },
+    {
+      "sector": "半导体*7"
+    },
+    {
+      "sector": "半导体*8"
+    },
+    {
+      "sector": "可控核聚变*3"
+    },
+    {
+      "sector": "商业航天*2"
+    },
+    {
+      "sector": "商业航天*6"
+    },
+    {
+      "sector": "地产*2"
+    },
+    {
+      "sector": "大金融*2"
+    },
+    {
+      "sector": "智能驾驶*2"
+    },
+    {
+      "sector": "机器人*6"
+    },
+    {
+      "sector": "海南*26"
+    },
+    {
+      "sector": "海南*5"
+    },
+    {
+      "sector": "消费*6"
+    },
+    {
+      "sector": "消费*7"
+    },
+    {
+      "sector": "消费*8"
+    },
+    {
+      "sector": "液冷*3"
+    },
+    {
+      "sector": "液冷*6"
+    },
+    {
+      "sector": "烟花爆竹*2"
+    },
+    {
+      "sector": "电子布/铜箔*2"
+    },
+    {
+      "sector": "钨*2"
+    },
+    {
+      "sector": "锂矿*4"
+    }
+  ],
+  "messages": [],
+  "stdout": "sector\nPCB板*2\n光通信*2\n光通信*5\n光通信*7\n公告*3\n公告*4\n六氟磷酸锂*3\n其他*12\n其他*9\n半导体*7\n半导体*8\n可控核聚变*3\n商业航天*2\n商业航天*6\n地产*2\n大金融*2\n智能驾驶*2\n机器人*6\n海南*26\n海南*5\n消费*6\n消费*7\n消费*8\n液冷*3\n液冷*6\n烟花爆竹*2\n电子布/铜箔*2\n钨*2\n锂矿*4\n",
+  "stderr": "",
+  "execution_time_ms": 1545
+}

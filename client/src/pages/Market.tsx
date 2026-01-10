@@ -134,114 +134,8 @@ export default function MarketPage() {
               <TabsList>
                 <TabsTrigger value="trend">涨停趋势</TabsTrigger>
                 <TabsTrigger value="market">大盘数据</TabsTrigger>
-                <TabsTrigger value="sector">题材分布</TabsTrigger>
-                <TabsTrigger value="ranking">题材排行</TabsTrigger>
+                <TabsTrigger value="heatmap">题材热力</TabsTrigger>
               </TabsList>
-
-                {/* 大盘数据 */}
-              <TabsContent value="market" className="space-y-4">
-                <div className="grid gap-4 lg:grid-cols-2">
-                  {/* 成交额趋势图 */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>成交额趋势</CardTitle>
-                      <CardDescription>展示最近30天的日均成交额变化</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={limitUpWithMarketData?.map(item => ({
-                          date: item.date.substring(5),
-                          成交额: item.turnover ? parseFloat(item.turnover) : 0,
-                        })) || []}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                          <YAxis />
-                          <Tooltip formatter={(value) => `${value}亿`} />
-                          <Legend />
-                          <Line 
-                            type="monotone" 
-                            dataKey="成交额" 
-                            stroke="#10b981" 
-                            strokeWidth={2}
-                            dot={{ r: 3 }}
-                            activeDot={{ r: 5 }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </CardContent>
-                  </Card>
-
-                  {/* 两融余额趋势图 */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>两融余额趋势</CardTitle>
-                      <CardDescription>展示最近30天的融资融券余额变化</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={limitUpWithMarketData?.map(item => ({
-                          date: item.date.substring(5),
-                          两融余额: item.marginBalance ? parseFloat(item.marginBalance) : 0,
-                        })) || []}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                          <YAxis />
-                          <Tooltip formatter={(value) => `${value}亿`} />
-                          <Legend />
-                          <Line 
-                            type="monotone" 
-                            dataKey="两融余额" 
-                            stroke="#f59e0b" 
-                            strokeWidth={2}
-                            dot={{ r: 3 }}
-                            activeDot={{ r: 5 }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* 涨停数与成交额关联图 */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>涨停数与成交额关联分析</CardTitle>
-                    <CardDescription>展示涨停数量与日均成交额的关系</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={400}>
-                      <LineChart data={limitUpWithMarketData?.map(item => ({
-                        date: item.date.substring(5),
-                        涨停数: item.limitUpCount,
-                        成交额: item.turnover ? parseFloat(item.turnover) : 0,
-                      })) || []}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                        <YAxis yAxisId="left" />
-                        <YAxis yAxisId="right" orientation="right" />
-                        <Tooltip />
-                        <Legend />
-                        <Line 
-                          yAxisId="left"
-                          type="monotone" 
-                          dataKey="涨停数" 
-                          stroke="#3b82f6" 
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                        />
-                        <Line 
-                          yAxisId="right"
-                          type="monotone" 
-                          dataKey="成交额" 
-                          stroke="#10b981" 
-                          strokeWidth={2}
-                          dot={{ r: 3 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </TabsContent>
 
               {/* 涨停趋势图 */}
               <TabsContent value="trend" className="space-y-4">
@@ -278,98 +172,96 @@ export default function MarketPage() {
                 </Card>
               </TabsContent>
 
-              {/* 题材分布图 */}
-              <TabsContent value="sector" className="space-y-4">
+              {/* 大盘数据 - 三轴融合图表 */}
+              <TabsContent value="market" className="space-y-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle>近7日题材分布</CardTitle>
-                    <CardDescription>展示最近7天各题材的涨停数量分布</CardDescription>
+                    <CardTitle>大盘综合分析</CardTitle>
+                    <CardDescription>涨停数、成交额、两融余额三轴融合展示</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <ResponsiveContainer width="100%" height={400}>
-                      <BarChart data={recentSectorData}>
+                    <ResponsiveContainer width="100%" height={500}>
+                      <LineChart data={limitUpWithMarketData?.map(item => ({
+                        date: item.date.substring(5),
+                        涨停数: item.limitUpCount,
+                        成交额: item.turnover ? parseFloat(item.turnover) : 0,
+                        两融余额: item.marginBalance ? parseFloat(item.marginBalance) : 0,
+                      })) || []}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis />
+                        <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                        <YAxis yAxisId="left" label={{ value: '涨停数', angle: -90, position: 'insideLeft' }} />
+                        <YAxis yAxisId="middle" orientation="right" label={{ value: '成交额(亿)', angle: 90, position: 'insideRight' }} />
+                        <YAxis yAxisId="right" orientation="right" label={{ value: '两融余额(亿)', angle: -90, position: 'right' }} />
                         <Tooltip />
                         <Legend />
-                        {Array.from(allSectorNames).map((sector, index) => (
-                          <Bar 
-                            key={sector}
-                            dataKey={sector} 
-                            fill={colors[index % colors.length]}
-                            stackId="a"
-                          />
-                        ))}
-                      </BarChart>
+                        <Line 
+                          yAxisId="left"
+                          type="monotone" 
+                          dataKey="涨停数" 
+                          stroke="#3b82f6" 
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                        <Line 
+                          yAxisId="middle"
+                          type="monotone" 
+                          dataKey="成交额" 
+                          stroke="#10b981" 
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                        <Line 
+                          yAxisId="right"
+                          type="monotone" 
+                          dataKey="两融余额" 
+                          stroke="#f59e0b" 
+                          strokeWidth={2}
+                          dot={{ r: 3 }}
+                        />
+                      </LineChart>
                     </ResponsiveContainer>
                   </CardContent>
                 </Card>
               </TabsContent>
 
-              {/* 题材排行 */}
-              <TabsContent value="ranking" className="space-y-4">
+              {/* 题材热力日历 */}
+              <TabsContent value="heatmap" className="space-y-4">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <PieChart className="h-5 w-5" />
-                      热门题材排行
-                    </CardTitle>
-                    <CardDescription>近30天内涨停次数最多的题材</CardDescription>
+                    <CardTitle>题材热力日历</CardTitle>
+                    <CardDescription>展示各题材在不同日期的涨停热度（颜色越深热度越高）</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-3">
-                      {topSectors.map(([sector, count], index) => (
-                        <div key={sector} className="flex items-center gap-4">
-                          <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 text-primary font-semibold text-sm">
-                            {index + 1}
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-medium">{sector}</span>
-                              <Badge variant="secondary">{count} 只</Badge>
+                    <div className="space-y-4 max-h-[800px] overflow-y-auto">
+                      {sectorDistribution?.slice(0, 30).map((day) => {
+                        const maxCount = Math.max(...day.sectors.map(s => s.count), 1);
+                        return (
+                          <div key={day.date} className="space-y-2">
+                            <div className="font-medium text-sm">{day.date}</div>
+                            <div className="flex flex-wrap gap-2">
+                              {day.sectors.slice(0, 10).map((s) => {
+                                const intensity = Math.min(100, (s.count / maxCount) * 100);
+                                const opacity = 0.3 + (intensity / 100) * 0.7;
+                                return (
+                                  <div
+                                    key={s.sector}
+                                    className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-all hover:shadow-md"
+                                    style={{
+                                      backgroundColor: `rgba(59, 130, 246, ${opacity})`,
+                                      minWidth: '90px',
+                                      textAlign: 'center'
+                                    }}
+                                    title={`${s.sector}: ${s.count}只`}
+                                  >
+                                    <div className="truncate">{s.sector}</div>
+                                    <div className="text-xs opacity-80">{s.count}只</div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-primary transition-all"
-                                style={{ width: `${(count / totalLimitUps) * 100}%` }}
-                              />
-                            </div>
                           </div>
-                          <div className="text-sm text-muted-foreground w-12 text-right">
-                            {((count / totalLimitUps) * 100).toFixed(1)}%
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* 每日题材详情 */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle>每日题材详情</CardTitle>
-                    <CardDescription>查看每天的题材分布情况</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {sectorDistribution?.slice(0, 10).map((day) => (
-                        <div key={day.date} className="border-b pb-4 last:border-0">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-medium">{day.date}</span>
-                            <Badge variant="outline">
-                              {day.sectors.reduce((sum, s) => sum + s.count, 0)} 只
-                            </Badge>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {day.sectors.slice(0, 8).map((s) => (
-                              <Badge key={s.sector} variant="secondary" className="text-xs">
-                                {s.sector} {s.count}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </CardContent>
                 </Card>

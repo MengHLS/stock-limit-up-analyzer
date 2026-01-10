@@ -1,0 +1,8 @@
+{
+  "query": "SELECT id, stock_code, stock_name, sector, upload_date FROM limit_up_records WHERE upload_date IN ('2025-12-17', '2025-12-22', '2025-12-23') LIMIT 30",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT id, stock_code, stock_name, sector, upload_date FROM limit_up_records WHERE upload_date IN ('2025-12-17', '2025-12-22', '2025-12-23') LIMIT 30",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'upload_date' in 'where clause'"
+  ]
+}
