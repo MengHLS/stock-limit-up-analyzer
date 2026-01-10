@@ -130,54 +130,18 @@ export default function MarketPage() {
             </div>
 
             {/* 图表区域 */}
-            <Tabs defaultValue="trend" className="space-y-4">
+            <Tabs defaultValue="market" className="space-y-4">
               <TabsList>
-                <TabsTrigger value="trend">涨停趋势</TabsTrigger>
                 <TabsTrigger value="market">大盘数据</TabsTrigger>
                 <TabsTrigger value="heatmap">题材热力</TabsTrigger>
               </TabsList>
-
-              {/* 涨停趋势图 */}
-              <TabsContent value="trend" className="space-y-4">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>每日涨停数量趋势</CardTitle>
-                    <CardDescription>展示每日涨停股票数量的变化趋势</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={400}>
-                      <LineChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis 
-                          dataKey="date" 
-                          tick={{ fontSize: 12 }}
-                          angle={-45}
-                          textAnchor="end"
-                          height={60}
-                        />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Line 
-                          type="monotone" 
-                          dataKey="涨停数" 
-                          stroke="#3b82f6" 
-                          strokeWidth={2}
-                          dot={{ r: 4 }}
-                          activeDot={{ r: 6 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </TabsContent>
 
               {/* 大盘数据 - 三轴融合图表 */}
               <TabsContent value="market" className="space-y-4">
                 <Card>
                   <CardHeader>
                     <CardTitle>大盘综合分析</CardTitle>
-                    <CardDescription>涨停数、成交额、两融余额三轴融合展示</CardDescription>
+                    <CardDescription>涨停数、成交额、两融余额展示</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={500}>
@@ -190,8 +154,7 @@ export default function MarketPage() {
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                         <YAxis yAxisId="left" label={{ value: '涨停数', angle: -90, position: 'insideLeft' }} />
-                        <YAxis yAxisId="middle" orientation="right" label={{ value: '成交额(亿)', angle: 90, position: 'insideRight' }} />
-                        <YAxis yAxisId="right" orientation="right" label={{ value: '两融余额(亿)', angle: -90, position: 'right' }} />
+                        <YAxis yAxisId="right" orientation="right" label={{ value: '成交额/两融余额(亿)', angle: 90, position: 'insideRight' }} />
                         <Tooltip />
                         <Legend />
                         <Line 
@@ -203,7 +166,7 @@ export default function MarketPage() {
                           dot={{ r: 3 }}
                         />
                         <Line 
-                          yAxisId="middle"
+                          yAxisId="right"
                           type="monotone" 
                           dataKey="成交额" 
                           stroke="#10b981" 
