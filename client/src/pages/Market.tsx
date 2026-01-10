@@ -192,39 +192,59 @@ export default function MarketPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle>题材热力日历</CardTitle>
-                    <CardDescription>展示各题材在不同日期的涨停热度（颜色越深热度越高）</CardDescription>
+                    <CardDescription>颜色深浅表示该日期该题材的涨停数量</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4 max-h-[800px] overflow-y-auto">
-                      {sectorDistribution?.slice(0, 30).map((day) => {
-                        const maxCount = Math.max(...day.sectors.map(s => s.count), 1);
-                        return (
-                          <div key={day.date} className="space-y-2">
-                            <div className="font-medium text-sm">{day.date}</div>
-                            <div className="flex flex-wrap gap-2">
-                              {day.sectors.slice(0, 10).map((s) => {
-                                const intensity = Math.min(100, (s.count / maxCount) * 100);
-                                const opacity = 0.3 + (intensity / 100) * 0.7;
-                                return (
-                                  <div
-                                    key={s.sector}
-                                    className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-all hover:shadow-md"
-                                    style={{
-                                      backgroundColor: `rgba(59, 130, 246, ${opacity})`,
-                                      minWidth: '90px',
-                                      textAlign: 'center'
-                                    }}
-                                    title={`${s.sector}: ${s.count}只`}
-                                  >
-                                    <div className="truncate">{s.sector}</div>
-                                    <div className="text-xs opacity-80">{s.count}只</div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-sm">
+                        <thead>
+                          <tr>
+                            <th className="border border-border p-2 bg-muted text-left font-medium min-w-[80px]">题材</th>
+                            {sectorDistribution?.slice(0, 20).map((day) => (
+                              <th key={day.date} className="border border-border p-2 bg-muted text-center font-medium min-w-[50px] text-xs">
+                                {day.date.split('-').slice(1).join('-')}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const allSectors = new Set();
+                            sectorDistribution?.forEach(day => {
+                              day.sectors.forEach(s => allSectors.add(s.sector));
+                            });
+                            
+                            const maxValue = Math.max(...(sectorDistribution?.flatMap(day => day.sectors.map(s => s.count)) || [1]));
+                            
+                            return Array.from(allSectors).slice(0, 15).map((sector: any) => (
+                              <tr key={sector as string}>
+                                <td className="border border-border p-2 font-medium text-left bg-muted sticky left-0 z-10 min-w-[80px] text-xs">
+                                  {sector as string}
+                                </td>
+                                {sectorDistribution?.slice(0, 20).map((day) => {
+                                  const sectorData = day.sectors.find(s => s.sector === sector);
+                                  const count = sectorData?.count || 0;
+                                  const intensity = count === 0 ? 0 : Math.min(100, (count / maxValue) * 100);
+                                  const opacity = intensity === 0 ? 0 : 0.2 + (intensity / 100) * 0.8;
+                                  
+                                  return (
+                                    <td
+                                      key={`${sector}-${day.date}`}
+                                      className="border border-border p-2 text-center text-xs"
+                                      style={{
+                                        backgroundColor: count === 0 ? 'transparent' : `rgba(59, 130, 246, ${opacity})`,
+                                        color: intensity > 50 ? 'white' : 'inherit'
+                                      }}
+                                    >
+                                      {count > 0 ? count : '-'}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ));
+                          })()}
+                        </tbody>
+                      </table>
                     </div>
                   </CardContent>
                 </Card>
