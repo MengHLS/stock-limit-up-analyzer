@@ -493,9 +493,9 @@ export const appRouter = router({
   sector: router({
     // 获取近N天的题材热度统计
     getHeatmapData: publicProcedure
-      .input(z.object({ days: z.number().optional() }))
+      .input(z.object({ days: z.number().optional() }).optional())
       .query(async ({ input }) => {
-        return await getSectorHeatmapData(input.days || 30);
+        return await getSectorHeatmapData(input?.days || 30);
       }),
   }),
 });
