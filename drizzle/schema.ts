@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date, index } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -45,7 +45,16 @@ export const limitUpRecords = mysqlTable("limit_up_records", {
   createdBy: int("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  // 关键查询索引
+  limitUpDateIdx: index("idx_limit_up_date").on(table.limitUpDate),
+  stockCodeIdx: index("idx_stock_code").on(table.stockCode),
+  sectorIdx: index("idx_sector").on(table.sector),
+  createdByIdx: index("idx_created_by").on(table.createdBy),
+  // 复合索引用于常见查询模式
+  dateStockIdx: index("idx_date_stock").on(table.limitUpDate, table.stockCode),
+  dateSectorIdx: index("idx_date_sector").on(table.limitUpDate, table.sector),
+}));
 
 export type LimitUpRecord = typeof limitUpRecords.$inferSelect;
 export type InsertLimitUpRecord = typeof limitUpRecords.$inferInsert;
@@ -69,7 +78,10 @@ export const uploadedImages = mysqlTable("uploaded_images", {
   createdBy: int("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  statusIdx: index("idx_status").on(table.status),
+  createdByIdx: index("idx_created_by_images").on(table.createdBy),
+}));
 
 export type UploadedImage = typeof uploadedImages.$inferSelect;
 export type InsertUploadedImage = typeof uploadedImages.$inferInsert;
@@ -91,7 +103,10 @@ export const stockWatchlist = mysqlTable("stock_watchlist", {
   note: text("note"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_user_id").on(table.userId),
+  userStockIdx: index("idx_user_stock").on(table.userId, table.stockCode),
+}));
 
 export type StockWatchlist = typeof stockWatchlist.$inferSelect;
 export type InsertStockWatchlist = typeof stockWatchlist.$inferInsert;
@@ -113,7 +128,9 @@ export const marketData = mysqlTable("market_data", {
   createdBy: int("createdBy"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  dataDateIdx: index("idx_data_date").on(table.dataDate),
+}));
 
 export type MarketData = typeof marketData.$inferSelect;
 export type InsertMarketData = typeof marketData.$inferInsert;
