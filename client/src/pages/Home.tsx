@@ -18,7 +18,6 @@ import {
   Clock,
   Hash,
   Tag,
-  Flame,
   Star,
   Database
 } from "lucide-react";
@@ -250,12 +249,6 @@ export default function Home() {
               <Button variant="ghost" size="sm" className="gap-2 hover:bg-blue-50">
                 <BarChart3 className="h-4 w-4" />
                 大盘分析
-              </Button>
-            </Link>
-            <Link href="/sector-distribution">
-              <Button variant="ghost" size="sm" className="gap-2 hover:bg-orange-50">
-                <Flame className="h-4 w-4" />
-                题材热度
               </Button>
             </Link>
             {isAuthenticated ? (
@@ -543,7 +536,7 @@ export default function Home() {
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
                     <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-1 px-3">
                       <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
-                        <Flame className="h-4 w-4 text-orange-600" />
+                        <TrendingUp className="h-4 w-4 text-orange-600" />
                         涨停股票 {sortedRecords.length} 只
                       </CardTitle>
                     </CardHeader>
