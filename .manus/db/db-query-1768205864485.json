@@ -1,0 +1,9 @@
+{
+  "query": "SELECT stockCode, stockName, COUNT(*) as count FROM limit_up_records WHERE sector = '商业航天' AND DATE(limitUpDate) = CURDATE() GROUP BY stockCode, stockName HAVING count > 1 ORDER BY count DESC;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT stockCode, stockName, COUNT(*) as count FROM limit_up_records WHERE sector = '商业航天' AND DATE(limitUpDate) = CURDATE() GROUP BY stockCode, stockName HAVING count > 1 ORDER BY count DESC;",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1519
+}

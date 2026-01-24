@@ -1,0 +1,70 @@
+{
+  "query": "SELECT * FROM limit_up_records WHERE stockCode = '603778.SH' ORDER BY limitUpDate DESC;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT * FROM limit_up_records WHERE stockCode = '603778.SH' ORDER BY limitUpDate DESC;",
+  "rows": [
+    {
+      "id": "60066",
+      "stockCode": "603778.SH",
+      "stockName": "国晟科技",
+      "limitUpDate": "2026-01-06",
+      "limitUpTime": "10:15:09",
+      "boardCount": "5天3板",
+      "circulationValue": "136.9",
+      "turnover": "11.3",
+      "sector": "锂电产业链",
+      "keywords": "锂电池+拟增资铁岭环球(固态电池)+太空光伏(未证实)+钙钛矿组件",
+      "createdBy": "1",
+      "createdAt": "2026-01-06 09:08:01",
+      "updatedAt": "2026-01-06 09:14:35"
+    },
+    {
+      "id": "30054",
+      "stockCode": "603778.SH",
+      "stockName": "国晟科技",
+      "limitUpDate": "2026-01-05",
+      "limitUpTime": "14:28:22",
+      "boardCount": "4天2板",
+      "circulationValue": "124.5",
+      "turnover": "15",
+      "sector": "商业航天",
+      "keywords": "太空光伏(未证实)+钙钛矿光伏组件+锂电池+拟增资铁岭环球(固态电池)",
+      "createdBy": "1",
+      "createdAt": "2026-01-05 08:30:12",
+      "updatedAt": "2026-01-05 08:48:58"
+    },
+    {
+      "id": "1131",
+      "stockCode": "603778.SH",
+      "stockName": "国晟科技",
+      "limitUpDate": "2025-12-29",
+      "limitUpTime": "14:26:59",
+      "boardCount": "1",
+      "circulationValue": "107.9",
+      "turnover": "16.5",
+      "sector": "电池产业链",
+      "keywords": "锂电池+钙钛矿光伏组件+拟增资铁岭环球(固态电池)",
+      "createdBy": "1",
+      "createdAt": "2026-01-05 05:34:14",
+      "updatedAt": "2026-01-05 08:38:00"
+    },
+    {
+      "id": "2108",
+      "stockCode": "603778.SH",
+      "stockName": "国晟科技",
+      "limitUpDate": "2025-11-28",
+      "limitUpTime": "10:57:13",
+      "boardCount": "15天10板",
+      "circulationValue": "75",
+      "turnover": "12.8",
+      "sector": "绿色能源",
+      "keywords": "拟收购孚悦科技(锂电池)+钙钛矿光伏组件+拟增资铁岭环球",
+      "createdBy": "1",
+      "createdAt": "2026-01-05 07:40:21",
+      "updatedAt": "2026-01-05 08:38:00"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tstockCode\tstockName\tlimitUpDate\tlimitUpTime\tboardCount\tcirculationValue\tturnover\tsector\tkeywords\tcreatedBy\tcreatedAt\tupdatedAt\n60066\t603778.SH\t国晟科技\t2026-01-06\t10:15:09\t5天3板\t136.9\t11.3\t锂电产业链\t锂电池+拟增资铁岭环球(固态电池)+太空光伏(未证实)+钙钛矿组件\t1\t2026-01-06 09:08:01\t2026-01-06 09:14:35\n30054\t603778.SH\t国晟科技\t2026-01-05\t14:28:22\t4天2板\t124.5\t15\t商业航天\t太空光伏(未证实)+钙钛矿光伏组件+锂电池+拟增资铁岭环球(固态电池)\t1\t2026-01-05 08:30:12\t2026-01-05 08:48:58\n1131\t603778.SH\t国晟科技\t2025-12-29\t14:26:59\t1\t107.9\t16.5\t电池产业链\t锂电池+钙钛矿光伏组件+拟增资铁岭环球(固态电池)\t1\t2026-01-05 05:34:14\t2026-01-05 08:38:00\n2108\t603778.SH\t国晟科技\t2025-11-28\t10:57:13\t15天10板\t75\t12.8\t绿色能源\t拟收购孚悦科技(锂电池)+钙钛矿光伏组件+拟增资铁岭环球\t1\t2026-01-05 07:40:21\t2026-01-05 08:38:00\n",
+  "stderr": "",
+  "execution_time_ms": 1561
+}

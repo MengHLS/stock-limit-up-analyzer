@@ -594,3 +594,116 @@ export async function getSectorHeatmapData(days: number = 30): Promise<{
 
   return result;
 }
+
+
+/**
+ * 获取连板梯队统计数据
+ * @param date 查询日期（格式：YYYY-MM-DD）
+ * @returns 连板梯队分布、趋势、股票列表和情绪指标
+ */
+export async function getConnectionBoardStats(date: string) {
+  const db = await getDb();
+  if (!db) return null;
+
+  // 辅助函数：从boardCount字段提取板数
+  const extractBoards = (boardCount: string | null): number => {
+    if (!boardCount) return 1;
+    const match = boardCount.match(/(\d+)板/);
+    return match ? parseInt(match[1], 10) : 1;
+  };
+
+  // 1. 获取指定日期的所有涨停记录
+  const records = await db.select().from(limitUpRecords)
+    .where(eq(limitUpRecords.limitUpDate, date));
+  
+  // 按板数降序排序
+  const sortedRecords = records.sort((a, b) => extractBoards(b.boardCount) - extractBoards(a.boardCount));
+
+  // 2. 统计连板梯队分布
+  const distribution: { boards: number; count: number; label: string }[] = [];
+  const boardCountMap = new Map<number, number>();
+
+  for (const record of sortedRecords) {
+    const boards = extractBoards(record.boardCount);
+    boardCountMap.set(boards, (boardCountMap.get(boards) || 0) + 1);
+  }
+
+  // 构建分布数据
+  const sortedBoards = Array.from(boardCountMap.keys()).sort((a, b) => a - b);
+  for (const boards of sortedBoards) {
+    const count = boardCountMap.get(boards) || 0;
+    let label = '';
+    if (boards === 1) label = '首板';
+    else if (boards >= 7) label = '7板+';
+    else label = `${boards}板`;
+    
+    distribution.push({ boards, count, label });
+  }
+
+  // 3. 获取最近7天的连板趋势数据
+  const trend: { date: string; board1: number; board2: number; board3: number; board4Plus: number }[] = [];
+  const sevenDaysAgo = new Date(date);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+  
+  for (let i = 0; i < 7; i++) {
+    const currentDate = new Date(sevenDaysAgo);
+    currentDate.setDate(currentDate.getDate() + i);
+    const dateStr = currentDate.toISOString().split('T')[0];
+    
+    const dayRecords = await db.select().from(limitUpRecords)
+      .where(eq(limitUpRecords.limitUpDate, dateStr));
+    
+    let board1 = 0, board2 = 0, board3 = 0, board4Plus = 0;
+    for (const record of dayRecords) {
+      const boards = extractBoards(record.boardCount);
+      if (boards === 1) board1++;
+      else if (boards === 2) board2++;
+      else if (boards === 3) board3++;
+      else board4Plus++;
+    }
+    
+    trend.push({ date: dateStr, board1, board2, board3, board4Plus });
+  }
+
+  // 4. 构建股票列表（按板数降序）
+  const stocks = sortedRecords.map(r => ({
+    stockCode: r.stockCode,
+    stockName: r.stockName,
+    boards: extractBoards(r.boardCount),
+    sector: r.sector || '其他',
+    limitUpTime: r.limitUpTime || '',
+    connectionDays: r.boardCount || '1天1板',
+  }));
+
+  // 5. 计算情绪指标
+  const totalLimitUp = sortedRecords.length;
+  const connectionBoards = sortedRecords.filter(r => extractBoards(r.boardCount) >= 2).length;
+  const maxBoards = sortedRecords.length > 0 ? Math.max(...sortedRecords.map(r => extractBoards(r.boardCount))) : 0;
+  const board3Plus = sortedRecords.filter(r => extractBoards(r.boardCount) >= 3).length;
+  
+  // 情绪评分计算公式
+  let emotionScore = 0;
+  if (totalLimitUp > 0) {
+    const connectionRatio = connectionBoards / totalLimitUp;
+    const maxBoardScore = Math.min(maxBoards / 10, 1);
+    const board3PlusRatio = connectionBoards > 0 ? board3Plus / connectionBoards : 0;
+    
+    emotionScore = Math.round(
+      connectionRatio * 40 + 
+      maxBoardScore * 30 + 
+      board3PlusRatio * 30
+    );
+  }
+
+  return {
+    distribution,
+    trend,
+    stocks,
+    metrics: {
+      totalLimitUp,
+      connectionBoards,
+      maxBoards,
+      emotionScore,
+    },
+  };
+}

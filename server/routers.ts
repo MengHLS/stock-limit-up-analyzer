@@ -33,6 +33,7 @@ import {
   deleteMarketData,
   getLimitUpWithMarketData,
   getSectorHeatmapData,
+  getConnectionBoardStats,
 } from "./db";
 
 export const appRouter = router({
@@ -174,6 +175,13 @@ export const appRouter = router({
             );
           }
         }
+      }),
+
+    // 获取连板梯队统计
+    getConnectionBoardStats: publicProcedure
+      .input(z.object({ date: z.string() }))
+      .query(async ({ input }) => {
+        return await getConnectionBoardStats(input.date);
       }),
   }),
 
