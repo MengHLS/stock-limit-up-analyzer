@@ -1,0 +1,8 @@
+{
+  "query": "SELECT stockCode, stockName, limitUpDate, boardCount FROM limitUpRecords WHERE limitUpDate >= '2026-01-20' ORDER BY limitUpDate DESC, stockCode LIMIT 30",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway03.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 5WJGoeaLu46cguw.root --database VWwjFDE663Dhej4TohVzPQ --execute SELECT stockCode, stockName, limitUpDate, boardCount FROM limitUpRecords WHERE limitUpDate >= '2026-01-20' ORDER BY limitUpDate DESC, stockCode LIMIT 30",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1146 (42S02) at line 1: Table 'vwwjfde663dhej4tohvzpq.limitUpRecords' doesn't exist"
+  ]
+}

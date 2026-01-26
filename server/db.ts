@@ -1,4 +1,4 @@
-import { eq, desc, like, or, sql, gte, count } from "drizzle-orm";
+import { eq, desc, like, or, sql, gte, count, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   InsertUser, 
@@ -605,30 +605,83 @@ export async function getConnectionBoardStats(date: string) {
   const db = await getDb();
   if (!db) return null;
 
-  // 辅助函数：从boardCount字段提取板数
-  const extractBoards = (boardCount: string | null): number => {
-    if (!boardCount) return 1;
-    const match = boardCount.match(/(\d+)板/);
-    return match ? parseInt(match[1], 10) : 1;
+  // 1. 一次性获取所有涨停记录（优化：避免多次数据库查询）
+  const allRecords = await db.select().from(limitUpRecords)
+    .orderBy(desc(limitUpRecords.limitUpDate));
+  
+  // 2. 构建股票涨停日期映射：{ stockCode -> Set<date> }
+  const stockDatesMap = new Map<string, Set<string>>();
+  for (const record of allRecords) {
+    if (!stockDatesMap.has(record.stockCode)) {
+      stockDatesMap.set(record.stockCode, new Set());
+    }
+    stockDatesMap.get(record.stockCode)!.add(record.limitUpDate);
+  }
+  
+  // 3. 获取所有交易日期（降序排列）
+  const tradingDatesSet = new Set<string>();
+  for (const record of allRecords) {
+    tradingDatesSet.add(record.limitUpDate);
+  }
+  const tradingDates = Array.from(tradingDatesSet).sort((a, b) => b.localeCompare(a));
+  
+  // 4. 辅助函数：在内存中计算某只股票在指定日期的连板数
+  const calculateConsecutiveBoards = (stockCode: string, targetDate: string): number => {
+    const stockDates = stockDatesMap.get(stockCode);
+    if (!stockDates) return 1;
+    
+    const targetIndex = tradingDates.indexOf(targetDate);
+    if (targetIndex === -1) return 1;
+    
+    let boards = 1;
+    // 从目标日期往前查找连续涨停
+    for (let i = targetIndex + 1; i < tradingDates.length; i++) {
+      const prevDate = tradingDates[i];
+      if (stockDates.has(prevDate)) {
+        boards++;
+      } else {
+        break; // 不连续，停止计算
+      }
+    }
+    return boards;
   };
 
-  // 1. 获取指定日期的所有涨停记录
-  const records = await db.select().from(limitUpRecords)
-    .where(eq(limitUpRecords.limitUpDate, date));
+  // 5. 获取指定日期的所有涨停记录
+  const records = allRecords.filter(r => r.limitUpDate === date);
   
+  // 6. 计算每只股票的连板数
+  const stocksWithBoards: Array<{
+    stockCode: string;
+    stockName: string;
+    boards: number;
+    sector: string;
+    limitUpTime: string;
+    connectionDays: string;
+  }> = [];
+
+  for (const record of records) {
+    const boards = calculateConsecutiveBoards(record.stockCode, date);
+    stocksWithBoards.push({
+      stockCode: record.stockCode,
+      stockName: record.stockName,
+      boards,
+      sector: record.sector || '其他',
+      limitUpTime: record.limitUpTime || '',
+      connectionDays: `${boards}天${boards}板`,
+    });
+  }
+
   // 按板数降序排序
-  const sortedRecords = records.sort((a, b) => extractBoards(b.boardCount) - extractBoards(a.boardCount));
+  stocksWithBoards.sort((a, b) => b.boards - a.boards);
 
-  // 2. 统计连板梯队分布
-  const distribution: { boards: number; count: number; label: string }[] = [];
+  // 7. 统计连板梯队分布
   const boardCountMap = new Map<number, number>();
-
-  for (const record of sortedRecords) {
-    const boards = extractBoards(record.boardCount);
-    boardCountMap.set(boards, (boardCountMap.get(boards) || 0) + 1);
+  for (const stock of stocksWithBoards) {
+    boardCountMap.set(stock.boards, (boardCountMap.get(stock.boards) || 0) + 1);
   }
 
   // 构建分布数据
+  const distribution: { boards: number; count: number; label: string }[] = [];
   const sortedBoards = Array.from(boardCountMap.keys()).sort((a, b) => a - b);
   for (const boards of sortedBoards) {
     const count = boardCountMap.get(boards) || 0;
@@ -640,46 +693,32 @@ export async function getConnectionBoardStats(date: string) {
     distribution.push({ boards, count, label });
   }
 
-  // 3. 获取最近7天的连板趋势数据
+  // 8. 获取最近7天的连板趋势数据（在内存中计算）
   const trend: { date: string; board1: number; board2: number; board3: number; board4Plus: number }[] = [];
-  const sevenDaysAgo = new Date(date);
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
   
-  for (let i = 0; i < 7; i++) {
-    const currentDate = new Date(sevenDaysAgo);
-    currentDate.setDate(currentDate.getDate() + i);
-    const dateStr = currentDate.toISOString().split('T')[0];
-    
-    const dayRecords = await db.select().from(limitUpRecords)
-      .where(eq(limitUpRecords.limitUpDate, dateStr));
+  const targetIndex = tradingDates.indexOf(date);
+  const recentDates = tradingDates.slice(Math.max(0, targetIndex - 6), targetIndex + 1).reverse();
+  
+  for (const trendDate of recentDates) {
+    const dayRecords = allRecords.filter(r => r.limitUpDate === trendDate);
     
     let board1 = 0, board2 = 0, board3 = 0, board4Plus = 0;
     for (const record of dayRecords) {
-      const boards = extractBoards(record.boardCount);
+      const boards = calculateConsecutiveBoards(record.stockCode, trendDate);
       if (boards === 1) board1++;
       else if (boards === 2) board2++;
       else if (boards === 3) board3++;
       else board4Plus++;
     }
     
-    trend.push({ date: dateStr, board1, board2, board3, board4Plus });
+    trend.push({ date: trendDate, board1, board2, board3, board4Plus });
   }
 
-  // 4. 构建股票列表（按板数降序）
-  const stocks = sortedRecords.map(r => ({
-    stockCode: r.stockCode,
-    stockName: r.stockName,
-    boards: extractBoards(r.boardCount),
-    sector: r.sector || '其他',
-    limitUpTime: r.limitUpTime || '',
-    connectionDays: r.boardCount || '1天1板',
-  }));
-
-  // 5. 计算情绪指标
-  const totalLimitUp = sortedRecords.length;
-  const connectionBoards = sortedRecords.filter(r => extractBoards(r.boardCount) >= 2).length;
-  const maxBoards = sortedRecords.length > 0 ? Math.max(...sortedRecords.map(r => extractBoards(r.boardCount))) : 0;
-  const board3Plus = sortedRecords.filter(r => extractBoards(r.boardCount) >= 3).length;
+  // 9. 计算情绪指标
+  const totalLimitUp = stocksWithBoards.length;
+  const connectionBoards = stocksWithBoards.filter(s => s.boards >= 2).length;
+  const maxBoards = stocksWithBoards.length > 0 ? Math.max(...stocksWithBoards.map(s => s.boards)) : 0;
+  const board3Plus = stocksWithBoards.filter(s => s.boards >= 3).length;
   
   // 情绪评分计算公式
   let emotionScore = 0;
@@ -698,7 +737,7 @@ export async function getConnectionBoardStats(date: string) {
   return {
     distribution,
     trend,
-    stocks,
+    stocks: stocksWithBoards,
     metrics: {
       totalLimitUp,
       connectionBoards,
