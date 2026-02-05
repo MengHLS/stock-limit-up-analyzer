@@ -134,3 +134,40 @@ export const marketData = mysqlTable("market_data", {
 
 export type MarketData = typeof marketData.$inferSelect;
 export type InsertMarketData = typeof marketData.$inferInsert;
+
+/**
+ * 情绪预警表 - 存储市场情绪拐点预警记录
+ */
+export const sentimentAlerts = mysqlTable("sentiment_alerts", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 预警日期 */
+  alertDate: date("alertDate", { mode: "string" }).notNull(),
+  /** 预警类型: warming(转暖), cooling(转冷), extreme_hot(极度亢奋), extreme_cold(极度冰点) */
+  alertType: mysqlEnum("alertType", ["warming", "cooling", "extreme_hot", "extreme_cold"]).notNull(),
+  /** 预警标题 */
+  title: varchar("title", { length: 100 }).notNull(),
+  /** 预警描述 */
+  description: text("description"),
+  /** 当日情绪评分 */
+  currentScore: int("currentScore").notNull(),
+  /** 前一日情绪评分 */
+  previousScore: int("previousScore"),
+  /** 评分变化值 */
+  scoreChange: int("scoreChange"),
+  /** 当日涨停数 */
+  totalLimitUp: int("totalLimitUp"),
+  /** 当日连板数 */
+  connectionBoards: int("connectionBoards"),
+  /** 当日最高板 */
+  maxBoards: int("maxBoards"),
+  /** 是否已读 */
+  isRead: mysqlEnum("isRead", ["0", "1"]).default("0").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  alertDateIdx: index("idx_alert_date").on(table.alertDate),
+  alertTypeIdx: index("idx_alert_type").on(table.alertType),
+  isReadIdx: index("idx_is_read").on(table.isRead),
+}));
+
+export type SentimentAlert = typeof sentimentAlerts.$inferSelect;
+export type InsertSentimentAlert = typeof sentimentAlerts.$inferInsert;

@@ -21,6 +21,7 @@ import {
   Star,
   Database
 } from "lucide-react";
+import { SentimentAlertBell } from "@/components/SentimentAlertBell";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
 
@@ -245,6 +246,7 @@ export default function Home() {
             </h1>
           </div>
           <div className="flex items-center gap-3">
+            <SentimentAlertBell />
             <Link href="/market">
               <Button variant="ghost" size="sm" className="gap-2 hover:bg-blue-50">
                 <BarChart3 className="h-4 w-4" />

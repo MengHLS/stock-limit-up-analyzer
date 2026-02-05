@@ -14,7 +14,10 @@ import {
   StockWatchlist,
   marketData,
   InsertMarketData,
-  MarketData
+  MarketData,
+  sentimentAlerts,
+  InsertSentimentAlert,
+  SentimentAlert
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -745,4 +748,257 @@ export async function getConnectionBoardStats(date: string) {
       emotionScore,
     },
   };
+}
+
+
+// ==================== Sentiment Alert Functions ====================
+
+/**
+ * 情绪等级定义
+ */
+export const EMOTION_LEVELS = {
+  EXTREME_COLD: { min: 0, max: 20, label: '极度冰点', color: '#1e40af' },
+  COLD: { min: 20, max: 35, label: '冰点', color: '#3b82f6' },
+  COOL: { min: 35, max: 45, label: '偏冷', color: '#60a5fa' },
+  NEUTRAL: { min: 45, max: 55, label: '中性', color: '#94a3b8' },
+  WARM: { min: 55, max: 65, label: '偏暖', color: '#fb923c' },
+  HOT: { min: 65, max: 80, label: '亢奋', color: '#f97316' },
+  EXTREME_HOT: { min: 80, max: 100, label: '极度亢奋', color: '#dc2626' },
+};
+
+/**
+ * 获取情绪等级
+ */
+export function getEmotionLevel(score: number): { label: string; color: string } {
+  if (score <= EMOTION_LEVELS.EXTREME_COLD.max) return EMOTION_LEVELS.EXTREME_COLD;
+  if (score <= EMOTION_LEVELS.COLD.max) return EMOTION_LEVELS.COLD;
+  if (score <= EMOTION_LEVELS.COOL.max) return EMOTION_LEVELS.COOL;
+  if (score <= EMOTION_LEVELS.NEUTRAL.max) return EMOTION_LEVELS.NEUTRAL;
+  if (score <= EMOTION_LEVELS.WARM.max) return EMOTION_LEVELS.WARM;
+  if (score <= EMOTION_LEVELS.HOT.max) return EMOTION_LEVELS.HOT;
+  return EMOTION_LEVELS.EXTREME_HOT;
+}
+
+/**
+ * 检测情绪拐点并生成预警
+ * @param currentDate 当前日期
+ * @returns 生成的预警（如果有拐点）或null
+ */
+export async function detectSentimentTurningPoint(currentDate: string): Promise<InsertSentimentAlert | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  // 获取当前日期的情绪数据
+  const currentStats = await getConnectionBoardStats(currentDate);
+  if (!currentStats || currentStats.metrics.totalLimitUp === 0) {
+    return null;
+  }
+
+  const currentScore = currentStats.metrics.emotionScore;
+  const currentLevel = getEmotionLevel(currentScore);
+
+  // 获取最近7天的交易日期（用于获取前一天的数据）
+  const allRecords = await db.select().from(limitUpRecords)
+    .orderBy(desc(limitUpRecords.limitUpDate));
+  
+  const tradingDatesSet = new Set<string>();
+  for (const record of allRecords) {
+    tradingDatesSet.add(record.limitUpDate);
+  }
+  const tradingDates = Array.from(tradingDatesSet).sort((a, b) => b.localeCompare(a));
+  
+  const currentIndex = tradingDates.indexOf(currentDate);
+  if (currentIndex === -1 || currentIndex >= tradingDates.length - 1) {
+    return null; // 没有前一天的数据
+  }
+
+  const previousDate = tradingDates[currentIndex + 1];
+  const previousStats = await getConnectionBoardStats(previousDate);
+  if (!previousStats) {
+    return null;
+  }
+
+  const previousScore = previousStats.metrics.emotionScore;
+  const previousLevel = getEmotionLevel(previousScore);
+  const scoreChange = currentScore - previousScore;
+
+  // 检测拐点条件
+  let alertType: 'warming' | 'cooling' | 'extreme_hot' | 'extreme_cold' | null = null;
+  let title = '';
+  let description = '';
+
+  // 1. 极端情绪预警
+  if (currentScore >= 80 && previousScore < 80) {
+    alertType = 'extreme_hot';
+    title = '⚠️ 市场进入极度亢奋区间';
+    description = `情绪评分从${previousScore}分升至${currentScore}分，市场进入极度亢奋状态。历史经验表明，极度亢奋后往往伴随回调，建议控制仓位，谨慎追高。`;
+  } else if (currentScore <= 20 && previousScore > 20) {
+    alertType = 'extreme_cold';
+    title = '❄️ 市场进入极度冰点区间';
+    description = `情绪评分从${previousScore}分降至${currentScore}分，市场进入极度冰点状态。历史经验表明，极度冰点往往是底部区域，可关注超跌反弹机会。`;
+  }
+  // 2. 情绪转暖预警（从冰点/偏冷转向中性/偏暖）
+  else if (scoreChange >= 15 && previousScore <= 35 && currentScore > 35) {
+    alertType = 'warming';
+    title = '🔥 市场情绪转暖信号';
+    description = `情绪评分从${previousScore}分(${previousLevel.label})升至${currentScore}分(${currentLevel.label})，涨幅${scoreChange}分。连板股数从${previousStats.metrics.connectionBoards}只增至${currentStats.metrics.connectionBoards}只，市场做多情绪回升，可适当加仓。`;
+  }
+  // 3. 情绪转冷预警（从亢奋/偏暖转向中性/偏冷）
+  else if (scoreChange <= -15 && previousScore >= 55 && currentScore < 55) {
+    alertType = 'cooling';
+    title = '📉 市场情绪转冷信号';
+    description = `情绪评分从${previousScore}分(${previousLevel.label})降至${currentScore}分(${currentLevel.label})，跌幅${Math.abs(scoreChange)}分。连板股数从${previousStats.metrics.connectionBoards}只降至${currentStats.metrics.connectionBoards}只，市场做多情绪减弱，建议减仓观望。`;
+  }
+  // 4. 大幅波动预警（单日变化超过20分）
+  else if (Math.abs(scoreChange) >= 20) {
+    if (scoreChange > 0) {
+      alertType = 'warming';
+      title = '📈 市场情绪大幅回暖';
+      description = `情绪评分单日大涨${scoreChange}分，从${previousScore}分升至${currentScore}分。涨停数从${previousStats.metrics.totalLimitUp}只增至${currentStats.metrics.totalLimitUp}只，市场活跃度显著提升。`;
+    } else {
+      alertType = 'cooling';
+      title = '📉 市场情绪大幅降温';
+      description = `情绪评分单日大跌${Math.abs(scoreChange)}分，从${previousScore}分降至${currentScore}分。涨停数从${previousStats.metrics.totalLimitUp}只降至${currentStats.metrics.totalLimitUp}只，市场活跃度明显下降。`;
+    }
+  }
+
+  if (!alertType) {
+    return null;
+  }
+
+  return {
+    alertDate: currentDate,
+    alertType,
+    title,
+    description,
+    currentScore,
+    previousScore,
+    scoreChange,
+    totalLimitUp: currentStats.metrics.totalLimitUp,
+    connectionBoards: currentStats.metrics.connectionBoards,
+    maxBoards: currentStats.metrics.maxBoards,
+    isRead: '0',
+  };
+}
+
+/**
+ * 创建情绪预警记录
+ */
+export async function createSentimentAlert(alert: InsertSentimentAlert): Promise<SentimentAlert | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  // 检查是否已存在同日期同类型的预警
+  const existing = await db.select().from(sentimentAlerts)
+    .where(and(
+      eq(sentimentAlerts.alertDate, alert.alertDate),
+      eq(sentimentAlerts.alertType, alert.alertType)
+    ))
+    .limit(1);
+
+  if (existing.length > 0) {
+    return existing[0]; // 已存在，返回现有记录
+  }
+
+  const result = await db.insert(sentimentAlerts).values(alert);
+  const insertId = result[0].insertId;
+  
+  const [newAlert] = await db.select().from(sentimentAlerts).where(eq(sentimentAlerts.id, insertId));
+  return newAlert || null;
+}
+
+/**
+ * 获取所有预警记录（按日期降序）
+ */
+export async function getAllSentimentAlerts(limit: number = 50): Promise<SentimentAlert[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(sentimentAlerts)
+    .orderBy(desc(sentimentAlerts.alertDate), desc(sentimentAlerts.createdAt))
+    .limit(limit);
+}
+
+/**
+ * 获取未读预警数量
+ */
+export async function getUnreadAlertCount(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const result = await db.select({ count: count() })
+    .from(sentimentAlerts)
+    .where(eq(sentimentAlerts.isRead, '0'));
+
+  return result[0]?.count || 0;
+}
+
+/**
+ * 标记预警为已读
+ */
+export async function markAlertAsRead(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db.update(sentimentAlerts)
+    .set({ isRead: '1' })
+    .where(eq(sentimentAlerts.id, id));
+
+  return result[0].affectedRows > 0;
+}
+
+/**
+ * 标记所有预警为已读
+ */
+export async function markAllAlertsAsRead(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const result = await db.update(sentimentAlerts)
+    .set({ isRead: '1' })
+    .where(eq(sentimentAlerts.isRead, '0'));
+
+  return result[0].affectedRows;
+}
+
+/**
+ * 检测并生成指定日期的预警（如果有拐点）
+ */
+export async function checkAndCreateAlert(date: string): Promise<SentimentAlert | null> {
+  const alert = await detectSentimentTurningPoint(date);
+  if (alert) {
+    return await createSentimentAlert(alert);
+  }
+  return null;
+}
+
+/**
+ * 批量检测最近N天的情绪拐点（用于初始化或补充历史预警）
+ */
+export async function batchCheckAlerts(days: number = 30): Promise<SentimentAlert[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  // 获取所有交易日期
+  const allRecords = await db.select().from(limitUpRecords)
+    .orderBy(desc(limitUpRecords.limitUpDate));
+  
+  const tradingDatesSet = new Set<string>();
+  for (const record of allRecords) {
+    tradingDatesSet.add(record.limitUpDate);
+  }
+  const tradingDates = Array.from(tradingDatesSet).sort((a, b) => b.localeCompare(a));
+
+  // 取最近N天
+  const recentDates = tradingDates.slice(0, days);
+  const alerts: SentimentAlert[] = [];
+
+  for (const date of recentDates) {
+    const alert = await checkAndCreateAlert(date);
+    if (alert) {
+      alerts.push(alert);
+    }
+  }
+
+  return alerts;
 }

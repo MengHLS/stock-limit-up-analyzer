@@ -34,6 +34,14 @@ import {
   getLimitUpWithMarketData,
   getSectorHeatmapData,
   getConnectionBoardStats,
+  getAllSentimentAlerts,
+  getUnreadAlertCount,
+  markAlertAsRead,
+  markAllAlertsAsRead,
+  checkAndCreateAlert,
+  batchCheckAlerts,
+  EMOTION_LEVELS,
+  getEmotionLevel,
 } from "./db";
 
 export const appRouter = router({
@@ -504,6 +512,59 @@ export const appRouter = router({
       .input(z.object({ days: z.number().optional() }).optional())
       .query(async ({ input }) => {
         return await getSectorHeatmapData(input?.days || 30);
+      }),
+  }),
+
+  // 情绪预警相关API
+  sentiment: router({
+    // 获取所有预警记录
+    getAlerts: publicProcedure
+      .input(z.object({ limit: z.number().optional() }).optional())
+      .query(async ({ input }) => {
+        return await getAllSentimentAlerts(input?.limit || 50);
+      }),
+
+    // 获取未读预警数量
+    getUnreadCount: publicProcedure.query(async () => {
+      return await getUnreadAlertCount();
+    }),
+
+    // 标记单个预警为已读
+    markAsRead: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        return await markAlertAsRead(input.id);
+      }),
+
+    // 标记所有预警为已读
+    markAllAsRead: protectedProcedure.mutation(async () => {
+      return await markAllAlertsAsRead();
+    }),
+
+    // 检测指定日期的情绪拐点并生成预警
+    checkAlert: protectedProcedure
+      .input(z.object({ date: z.string() }))
+      .mutation(async ({ input }) => {
+        return await checkAndCreateAlert(input.date);
+      }),
+
+    // 批量检测最近N天的情绪拐点
+    batchCheck: protectedProcedure
+      .input(z.object({ days: z.number().optional() }).optional())
+      .mutation(async ({ input }) => {
+        return await batchCheckAlerts(input?.days || 30);
+      }),
+
+    // 获取情绪等级定义
+    getEmotionLevels: publicProcedure.query(() => {
+      return EMOTION_LEVELS;
+    }),
+
+    // 获取指定评分的情绪等级
+    getEmotionLevel: publicProcedure
+      .input(z.object({ score: z.number() }))
+      .query(({ input }) => {
+        return getEmotionLevel(input.score);
       }),
   }),
 });
