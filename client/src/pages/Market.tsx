@@ -156,7 +156,7 @@ export default function MarketPage() {
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                         <YAxis yAxisId="left" label={{ value: '涨停数', angle: -90, position: 'insideLeft' }} />
-                        <YAxis yAxisId="right" orientation="right" label={{ value: '成交额/两融余额(亿)', angle: 90, position: 'insideRight' }} />
+                        <YAxis yAxisId="right" orientation="right" domain={[7500, 'auto']} label={{ value: '成交额/两融余额(亿)', angle: 90, position: 'insideRight' }} />
                         <Tooltip />
                         <Legend />
                         <Line 
