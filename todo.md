@@ -272,3 +272,9 @@
 
 ## 大盘数据图表优化
 - [x] 修改大盘综合分析图表右侧竖轴起始值为7500（成交额/两融余额）
+
+## 本地上传脚本功能
+- [x] 创建uploadAndRecognize API接口（支持base64图片、日期参数）
+- [x] 编写Python本地上传脚本示例（upload_script_example.py）
+- [x] 编写单元测试验证API接口（image.uploadAndRecognize.test.ts，12个测试通过）
+- [x] 修复TypeScript类型错误（image可能为null的检查）

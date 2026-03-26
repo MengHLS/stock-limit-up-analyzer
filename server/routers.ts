@@ -398,6 +398,161 @@ export const appRouter = router({
     getAll: protectedProcedure.query(async () => {
       return await getAllUploadedImages();
     }),
+
+    // 上传图片并自动识别（支持本地脚本调用）
+    uploadAndRecognize: protectedProcedure
+      .input(z.object({
+        base64Data: z.string(),
+        fileName: z.string(),
+        mimeType: z.string(),
+        limitUpDate: z.string(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { base64Data, fileName, mimeType, limitUpDate } = input;
+        
+        const buffer = Buffer.from(base64Data, 'base64');
+        const fileKey = `limit-up-images/${ctx.user.id}/${nanoid()}-${fileName}`;
+        const { url } = await storagePut(fileKey, buffer, mimeType);
+        
+        const image = await createUploadedImage({
+          fileKey,
+          fileUrl: url,
+          originalName: fileName,
+          createdBy: ctx.user.id,
+        });
+        
+        if (!image) {
+          throw new Error("创建图片记录失败");
+        }
+        
+        try {
+          await updateImageStatus(image.id, 'processing');
+          
+          const response = await invokeLLM({
+            messages: [
+              {
+                role: "system",
+                content: `你是一个专业的股票数据识别助手。请分析用户提供的股票涨停复盘图片，提取其中的股票信息。
+
+请严格按照以下JSON格式返回数据：
+{
+  "date": "图片中的涨停日期，格式为YYYY-MM-DD",
+  "stocks": [
+    {
+      "stockCode": "股票代码，如002361.SZ",
+      "stockName": "股票名称",
+      "limitUpTime": "涨停时间，如14:56:30",
+      "boardCount": "板数，如10天9板",
+      "circulationValue": "流通市值（亿元）",
+      "turnover": "成交额（亿元）",
+      "sector": "所属题材分类",
+      "keywords": "涨停关键词"
+    }
+  ]
+}`
+              },
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: `请识别这张涨停复盘图片中的日期和所有股票数据。`
+                  },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: url,
+                      detail: "high"
+                    }
+                  }
+                ]
+              }
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "stock_limit_up_data",
+                strict: true,
+                schema: {
+                  type: "object",
+                  properties: {
+                    date: { type: "string" },
+                    stocks: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          stockCode: { type: "string" },
+                          stockName: { type: "string" },
+                          limitUpTime: { type: "string" },
+                          boardCount: { type: "string" },
+                          circulationValue: { type: "string" },
+                          turnover: { type: "string" },
+                          sector: { type: "string" },
+                          keywords: { type: "string" }
+                        },
+                        required: ["stockCode", "stockName", "limitUpTime", "boardCount", "circulationValue", "turnover", "sector", "keywords"],
+                        additionalProperties: false
+                      }
+                    }
+                  },
+                  required: ["date", "stocks"],
+                  additionalProperties: false
+                }
+              }
+            }
+          });
+
+          const rawContent = response.choices[0]?.message?.content;
+          if (!rawContent) {
+            throw new Error("LLM返回内容为空");
+          }
+
+          let content: string;
+          if (typeof rawContent === 'string') {
+            content = rawContent;
+          } else if (Array.isArray(rawContent)) {
+            const textPart = rawContent.find(p => p.type === 'text');
+            content = textPart && 'text' in textPart ? textPart.text : '';
+          } else {
+            throw new Error("无法解析LLM返回内容");
+          }
+
+          const data = JSON.parse(content);
+          const recognizedDate = limitUpDate || data.date;
+          const stocks = data.stocks || [];
+
+          if (stocks.length > 0) {
+            const records = stocks.map((stock: any) => ({
+              stockCode: stock.stockCode,
+              stockName: stock.stockName,
+              limitUpDate: recognizedDate,
+              limitUpTime: stock.limitUpTime || null,
+              boardCount: stock.boardCount || null,
+              circulationValue: stock.circulationValue || null,
+              turnover: stock.turnover || null,
+              sector: stock.sector || null,
+              keywords: stock.keywords || null,
+              createdBy: ctx.user.id,
+            }));
+
+            await createLimitUpRecordsBatch(records);
+          }
+
+          await updateImageStatus(image.id, 'completed');
+
+          return {
+            success: true,
+            imageId: image.id,
+            count: stocks.length,
+            date: recognizedDate,
+            stocks,
+          };
+        } catch (error) {
+          await updateImageStatus(image.id, 'failed');
+          throw error;
+        }
+      }),
   }),
 
   // 股票关注相关API
