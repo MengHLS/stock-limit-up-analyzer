@@ -66,6 +66,7 @@ export default function UploadPage() {
 
   const uploadMutation = trpc.image.upload.useMutation();
   const recognizeMutation = trpc.image.recognize.useMutation();
+  const uploadAndRecognizeMutation = trpc.image.uploadAndRecognize.useMutation();
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -150,38 +151,32 @@ export default function UploadPage() {
         f.id === fileItem.id ? { ...f, progress: 40 } : f
       ));
 
-      // 上传图片
-      const uploadResult = await uploadMutation.mutateAsync({
-        base64Data,
-        fileName: fileItem.file.name,
-        mimeType: fileItem.file.type,
-      });
-
-      if (!uploadResult) {
-        throw new Error('上传失败');
-      }
-
+      // 使用新的 uploadAndRecognize API 一步完成上传和识别
       setFiles(prev => prev.map(f => 
         f.id === fileItem.id ? { ...f, status: 'recognizing', progress: 60 } : f
       ));
 
-      // 识别图片
-      const recognizeResult = await recognizeMutation.mutateAsync({
-        imageUrl: uploadResult.fileUrl,
-        imageId: uploadResult.id,
+      const result = await uploadAndRecognizeMutation.mutateAsync({
+        base64Data,
+        fileName: fileItem.file.name,
+        mimeType: fileItem.file.type,
         limitUpDate,
       });
+
+      if (!result || !result.success) {
+        throw new Error('识别失败');
+      }
 
       setFiles(prev => prev.map(f => 
         f.id === fileItem.id ? { 
           ...f, 
           status: 'completed', 
           progress: 100,
-          recognizedCount: recognizeResult.count 
+          recognizedCount: result.count 
         } : f
       ));
 
-      return recognizeResult.stocks;
+      return result.stocks || [];
     } catch (error) {
       setFiles(prev => prev.map(f => 
         f.id === fileItem.id ? { 
@@ -473,7 +468,7 @@ export default function UploadPage() {
                   <Badge variant="secondary">{recognizedStocks.length} 只股票</Badge>
                 </CardTitle>
                 <CardDescription>
-                  以下股票数据已自动保存到数据库
+                  以下股票数据已自动识别并保存到数据库
                 </CardDescription>
               </CardHeader>
               <CardContent>

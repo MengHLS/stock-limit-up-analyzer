@@ -278,3 +278,10 @@
 - [x] 编写Python本地上传脚本示例（upload_script_example.py）
 - [x] 编写单元测试验证API接口（image.uploadAndRecognize.test.ts，12个测试通过）
 - [x] 修复TypeScript类型错误（image可能为null的检查）
+
+
+## 图片上传自动识别功能
+- [x] 修改前端上传组件支持自动识别
+- [x] 昺示识别进度和结果预览
+- [x] 自动将识别的股票数据保存到数据库
+- [x] 优化用户交互流程和反馈
