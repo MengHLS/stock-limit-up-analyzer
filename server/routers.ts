@@ -550,6 +550,8 @@ export const appRouter = router({
           };
         } catch (error) {
           await updateImageStatus(image.id, 'failed');
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[uploadAndRecognize] 识别失败:', errorMessage);
           throw error;
         }
       }),
