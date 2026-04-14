@@ -89,13 +89,14 @@ class StockUploadClient:
         print(f"📤 正在上传图片: {file_name}")
         print(f"📅 涨停日期: {limit_up_date}")
         print(f"🔗 API端点: {endpoint}")
+        print(f"💡 提示: 图片上传后将在后台异步识别，无需等待识别完成")
         
         try:
             response = requests.post(
                 endpoint,
                 json=payload,
                 headers=self.headers,
-                timeout=60
+                timeout=30
             )
             
             if response.status_code == 200:

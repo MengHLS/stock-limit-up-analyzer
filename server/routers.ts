@@ -425,24 +425,47 @@ export const appRouter = router({
           throw new Error("创建图片记录失败");
         }
         
-        try {
-          await updateImageStatus(image.id, 'processing');
-          
-          const response = await invokeLLM({
+        // 立即返回成功，后台异步识别
+        await updateImageStatus(image.id, 'processing');
+        
+        // 在后台异步执行识别，不阻塞返回
+        (async () => {
+          try {
+            const response = await invokeLLM({
             messages: [
               {
                 role: "system",
-                content: `你是一个专业的股票数据识别助手。请分析用户提供的股票涨停复盘图片，提取其中的股票信息。
+                content: `你是一个专业的中文股票数据识别助手。你的任务是什么？
 
-请严格按照以下JSON格式返回数据：
+你需要分析用户提供的股票涨停复盘图片，提取其中的所有股票信息。
+
+一些重要的识别指南：
+1. 日期识别：从图片中提取涨停日期，格式必须是YYYY-MM-DD，年份为2026。
+2. 股票代码：提取中文股票代码，不要混混不清。常见代码格式：
+   - 深业主板: 000xxx.SZ
+   - 创业板: 300xxx.SZ
+   - 科创板: 688xxx.SH
+   - 北交所: 8xxxxx.BJ
+   - 上海主板: 600xxx.SH
+3. 股票名称：一定要是中文名称。
+4. 涨停时间：提取时间，格式为HH:MM:SS，应在09:30-15:00之间。
+5. 板数：一定要是整数，并且是一个有效的板数值。
+6. 流通市值和成交额：单位是亿元，一定要是数字。
+7. 题材和关键词：一定要是中文。
+
+如果图片中不清楚或没有某个字段，你可以：
+- 对于日期：使用提供的日期参数
+- 对于其他字段：使用空字符串或null
+
+严格按照以下JSON格式返回数据，不要添加额外字段：
 {
-  "date": "图片中的涨停日期，格式为YYYY-MM-DD",
+  "date": "涨停日期，格式为YYYY-MM-DD",
   "stocks": [
     {
       "stockCode": "股票代码，如002361.SZ",
       "stockName": "股票名称",
       "limitUpTime": "涨停时间，如14:56:30",
-      "boardCount": "板数，如10天9板",
+      "boardCount": "板数，如10",
       "circulationValue": "流通市值（亿元）",
       "turnover": "成交额（亿元）",
       "sector": "所属题材分类",
@@ -456,7 +479,15 @@ export const appRouter = router({
                 content: [
                   {
                     type: "text",
-                    text: `请识别这张涨停复盘图片中的日期和所有股票数据。`
+                    text: `请识别这张涨停复盘图片中的日期和所有股票数据。
+
+重要提示：
+1. 一定要提取图片中的所有股票，不要遗漏任何一个
+2. 如果某个字段不清楚或缺失，仍然要尽量提取其他可见的字段
+3. 股票代码、名称、题材和关键词必须是中文格式
+4. 返回的JSON中stocks数组不能为空（除非图片中确实没有任何股票信息）
+5. 如果图片中有表格，请逐行提取每一只股票
+6. 如果股票名称后面有代码，代码格式应该是 XXX.SZ 或 XXX.SH 这样的格式`
                   },
                   {
                     type: "image_url",
@@ -539,20 +570,20 @@ export const appRouter = router({
             await createLimitUpRecordsBatch(records);
           }
 
-          await updateImageStatus(image.id, 'completed');
-
-          return {
-            success: true,
-            imageId: image.id,
-            count: stocks.length,
-            date: recognizedDate,
-            stocks,
-          };
-        } catch (error) {
-          await updateImageStatus(image.id, 'failed');
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error('[uploadAndRecognize] 识别失败:', errorMessage);
-          throw error;
+            await updateImageStatus(image.id, 'completed');
+            console.log(`[uploadAndRecognize] 图片 ${image.id} 识别成功，识别出 ${stocks.length} 只股票`);
+          } catch (error) {
+            await updateImageStatus(image.id, 'failed');
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error('[uploadAndRecognize] 识别失败:', errorMessage);
+          }
+        })();
+        
+        // 立即返回成功，不等待识别完成
+        return {
+          success: true,
+          imageId: image.id,
+          message: '图片上传成功，正在后台识别中...',
         }
       }),
   }),
