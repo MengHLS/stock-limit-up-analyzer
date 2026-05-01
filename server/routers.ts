@@ -428,9 +428,17 @@ export const appRouter = router({
         // 立即返回成功，后台异步识别
         await updateImageStatus(image.id, 'processing');
         
+        // 保存上下文信息供异步函数使用
+        const userId = ctx.user.id;
+        const imageId = image.id;
+        const imageUrl = url;
+        
         // 在后台异步执行识别，不阻塞返回
-        (async () => {
+        // 使用 Promise 确保异步任务正常执行
+        void (async () => {
           try {
+            console.log(`[uploadAndRecognize] 开始识别图片 ${imageId}...`);
+            console.log(`[uploadAndRecognize] 调用LLM识别图片 ${imageId}...`);
             const response = await invokeLLM({
             messages: [
               {
@@ -564,20 +572,26 @@ export const appRouter = router({
               turnover: stock.turnover || null,
               sector: stock.sector || null,
               keywords: stock.keywords || null,
-              createdBy: ctx.user.id,
+              createdBy: userId,
             }));
 
+            console.log(`[uploadAndRecognize] 保存 ${records.length} 条股票记录到数据库...`);
             await createLimitUpRecordsBatch(records);
+            console.log(`[uploadAndRecognize] 股票记录保存成功`);
           }
 
-            await updateImageStatus(image.id, 'completed');
-            console.log(`[uploadAndRecognize] 图片 ${image.id} 识别成功，识别出 ${stocks.length} 只股票`);
-          } catch (error) {
-            await updateImageStatus(image.id, 'failed');
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error('[uploadAndRecognize] 识别失败:', errorMessage);
+          await updateImageStatus(imageId, 'completed');
+          console.log(`[uploadAndRecognize] 图片 ${imageId} 识别完成，识别出 ${stocks.length} 只股票`);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error('[uploadAndRecognize] 识别失败:', errorMessage, error instanceof Error ? error.stack : '');
+          try {
+            await updateImageStatus(imageId, 'failed');
+          } catch (updateError) {
+            console.error('[uploadAndRecognize] 更新图片状态失败:', updateError);
           }
-        })();
+        }
+      })();
         
         // 立即返回成功，不等待识别完成
         return {
