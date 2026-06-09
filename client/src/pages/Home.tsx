@@ -33,6 +33,8 @@ export default function Home() {
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [watchFilter, setWatchFilter] = useState<"all" | "normal" | "important">("all");
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
+  const [showFirstBoard, setShowFirstBoard] = useState(false);
+  const [sortByTime, setSortByTime] = useState<"asc" | "desc" | null>(null);
 
   // 获取股票板块（使用useCallback避免依赖问题）
   const getStockBoard = useCallback((stockCode: string): string => {
@@ -112,6 +114,19 @@ export default function Home() {
       records = records.filter(r => getStockBoard(r.stockCode) === selectedBoard);
     }
     
+    // 按当日首板筛选
+    if (showFirstBoard) {
+      records = records.filter(r => {
+        const boardCount = r.boardCount;
+        if (!boardCount) return false;
+        const match = boardCount.match(/(\d+)天(\d+)板/);
+        if (match) {
+          return parseInt(match[2]) === 1;
+        }
+        return false;
+      });
+    }
+    
     // 创建题材顺序映射
     const sectorOrder = new Map<string, number>();
     currentDateStats.forEach((stat, index) => {
@@ -127,6 +142,16 @@ export default function Home() {
       }
       return 0;
     };
+
+    // 如果启用按时间排序，直接按时间排序
+    if (sortByTime) {
+      return [...records].sort((a, b) => {
+        const timeA = a.limitUpTime || '';
+        const timeB = b.limitUpTime || '';
+        const comparison = timeA.localeCompare(timeB);
+        return sortByTime === 'asc' ? comparison : -comparison;
+      });
+    }
 
     return [...records].sort((a, b) => {
       // 1. 按题材排序
@@ -146,7 +171,7 @@ export default function Home() {
       // 3. 同板数内按涨停时间排序
       return (a.limitUpTime || '').localeCompare(b.limitUpTime || '');
     });
-  }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector, selectedBoard]);
+  }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector, selectedBoard, showFirstBoard, sortByTime]);
 
   // 自动选择最新日期
   useMemo(() => {
@@ -528,6 +553,33 @@ export default function Home() {
                             }`}
                           >
                             北交所
+                          </button>
+                        </div>
+                        
+                        {/* 当日首板和时间排序 */}
+                        <div className="flex items-center gap-1 ml-2 pl-2 border-l border-slate-300">
+                          <button
+                            onClick={() => setShowFirstBoard(!showFirstBoard)}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                              showFirstBoard
+                                ? 'bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-md'
+                                : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200'
+                            }`}
+                          >
+                            当日首板
+                          </button>
+                          <button
+                            onClick={() => setSortByTime(sortByTime === null ? 'asc' : sortByTime === 'asc' ? 'desc' : null)}
+                            className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-all flex items-center gap-1 ${
+                              sortByTime === null
+                                ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                : sortByTime === 'asc'
+                                ? 'bg-gradient-to-r from-teal-500 to-cyan-500 text-white shadow-md'
+                                : 'bg-gradient-to-r from-cyan-500 to-teal-500 text-white shadow-md'
+                            }`}
+                          >
+                            <Clock className="h-3 w-3" />
+                            {sortByTime === null ? '按时间' : sortByTime === 'asc' ? '时间↑' : '时间↓'}
                           </button>
                         </div>
                       </div>
