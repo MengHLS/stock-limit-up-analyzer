@@ -146,9 +146,21 @@ export default function Home() {
     // 如果启用按时间排序，直接按时间排序
     if (sortByTime) {
       return [...records].sort((a, b) => {
-        const timeA = a.limitUpTime || '';
-        const timeB = b.limitUpTime || '';
-        const comparison = timeA.localeCompare(timeB);
+        const timeA = a.limitUpTime || '00:00';
+        const timeB = b.limitUpTime || '00:00';
+        // 将时间字符串转换为分钟数进行比较
+        const parseTime = (time: string): number => {
+          const parts = time.split(':');
+          if (parts.length === 2) {
+            const hours = parseInt(parts[0], 10);
+            const minutes = parseInt(parts[1], 10);
+            return hours * 60 + minutes;
+          }
+          return 0;
+        };
+        const minutesA = parseTime(timeA);
+        const minutesB = parseTime(timeB);
+        const comparison = minutesA - minutesB;
         return sortByTime === 'asc' ? comparison : -comparison;
       });
     }
