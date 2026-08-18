@@ -20,6 +20,7 @@ import {
   SentimentAlert
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import { normalizeLimitUpTime } from '../shared/limitUpTime';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -110,12 +111,21 @@ export async function getUserByOpenId(openId: string) {
 
 // ==================== Limit Up Records Functions ====================
 
+function normalizeLimitUpRecordTime(record: InsertLimitUpRecord): InsertLimitUpRecord {
+  if (record.limitUpTime === undefined) return record;
+  const normalized = normalizeLimitUpTime(record.limitUpTime);
+  if (record.limitUpTime && !normalized) {
+    throw new Error(`涨停时间格式无效：${record.limitUpTime}，应为HH:MM或HH:MM:SS`);
+  }
+  return { ...record, limitUpTime: normalized };
+}
+
 /** 创建涨停记录 */
 export async function createLimitUpRecord(record: InsertLimitUpRecord): Promise<LimitUpRecord | null> {
   const db = await getDb();
   if (!db) return null;
 
-  const result = await db.insert(limitUpRecords).values(record);
+  const result = await db.insert(limitUpRecords).values(normalizeLimitUpRecordTime(record));
   const insertId = result[0].insertId;
   
   const [newRecord] = await db.select().from(limitUpRecords).where(eq(limitUpRecords.id, insertId));
@@ -132,7 +142,7 @@ export async function createLimitUpRecordsBatch(records: InsertLimitUpRecord[]):
   let totalAffected = 0;
   
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
-    const batch = records.slice(i, i + BATCH_SIZE);
+    const batch = records.slice(i, i + BATCH_SIZE).map(normalizeLimitUpRecordTime);
     const result = await db.insert(limitUpRecords).values(batch);
     totalAffected += result[0].affectedRows;
   }
@@ -187,18 +197,23 @@ export async function getDailySectorStats(date: string): Promise<{ sector: strin
   const db = await getDb();
   if (!db) return [];
 
-  // 只返回聚合结果，避免把整日股票明细加载到Node内存中。
-  const sectorExpression = sql<string>`COALESCE(NULLIF(TRIM(${limitUpRecords.sector}), ''), '其他')`;
+  // 只返回按原始题材聚合的结果，避免把整日股票明细加载到Node内存中。
+  // 空题材统一在内存中合并为“其他”，兼容MySQL only_full_group_by模式。
   const rows = await db.select({
-    sector: sectorExpression,
+    sector: limitUpRecords.sector,
     count: count(),
   })
     .from(limitUpRecords)
     .where(eq(limitUpRecords.limitUpDate, date))
-    .groupBy(sectorExpression);
+    .groupBy(limitUpRecords.sector);
 
-  return rows
-    .map((row) => ({ sector: row.sector, count: Number(row.count) }))
+  const sectorCounts = new Map<string, number>();
+  for (const row of rows) {
+    const sector = row.sector?.trim() || '其他';
+    sectorCounts.set(sector, (sectorCounts.get(sector) ?? 0) + Number(row.count));
+  }
+
+  return Array.from(sectorCounts, ([sector, sectorCount]) => ({ sector, count: sectorCount }))
     .sort((a, b) => {
       if (a.sector === '其他') return 1;
       if (b.sector === '其他') return -1;
@@ -281,7 +296,16 @@ export async function updateLimitUpRecord(id: number, data: Partial<InsertLimitU
   const db = await getDb();
   if (!db) return null;
 
-  await db.update(limitUpRecords).set(data).where(eq(limitUpRecords.id, id));
+  const normalizedData = { ...data };
+  if (data.limitUpTime !== undefined) {
+    const normalized = normalizeLimitUpTime(data.limitUpTime);
+    if (data.limitUpTime && !normalized) {
+      throw new Error(`涨停时间格式无效：${data.limitUpTime}，应为HH:MM或HH:MM:SS`);
+    }
+    normalizedData.limitUpTime = normalized;
+  }
+
+  await db.update(limitUpRecords).set(normalizedData).where(eq(limitUpRecords.id, id));
   
   const [updated] = await db.select().from(limitUpRecords).where(eq(limitUpRecords.id, id));
   return updated || null;

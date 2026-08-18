@@ -7,6 +7,8 @@ import { invokeLLM } from "./_core/llm";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
 import { parseRecognitionResult } from "./recognition";
+import { isValidLimitUpTime } from "../shared/limitUpTime";
+
 import {
   createLimitUpRecord,
   createLimitUpRecordsBatch,
@@ -44,6 +46,10 @@ import {
   EMOTION_LEVELS,
   getEmotionLevel,
 } from "./db";
+
+const limitUpTimeInput = z.string().refine(isValidLimitUpTime, {
+  message: "涨停时间应为HH:MM或HH:MM:SS格式",
+});
 
 export const appRouter = router({
   system: systemRouter,
@@ -106,7 +112,7 @@ export const appRouter = router({
         stockCode: z.string(),
         stockName: z.string(),
         limitUpDate: z.string(),
-        limitUpTime: z.string().optional(),
+        limitUpTime: limitUpTimeInput.optional(),
         boardCount: z.string().optional(),
         circulationValue: z.string().optional(),
         turnover: z.string().optional(),
@@ -129,7 +135,7 @@ export const appRouter = router({
         stockCode: z.string().optional(),
         stockName: z.string().optional(),
         limitUpDate: z.string().optional(),
-        limitUpTime: z.string().optional(),
+        limitUpTime: limitUpTimeInput.optional(),
         boardCount: z.string().optional(),
         circulationValue: z.string().optional(),
         turnover: z.string().optional(),
@@ -269,7 +275,7 @@ export const appRouter = router({
 1. 优先使用用户提供的日期；没有用户日期时才从图片标题识别日期
 2. 仔细识别表格中的每一行股票，不要合并或遗漏行
 3. 股票代码保留数字，并补充正确交易所后缀：深市.SZ、沪市.SH、北交所.BJ
-4. 涨停时间统一为HH:MM或HH:MM:SS；无法确认时返回空字符串
+4. 涨停时间统一为HH:MM:SS（例如14:56:30）；如果图片只有HH:MM则补秒为:00，无法确认时返回空字符串
 5. 板数、流通市值和成交额保留图片中的原始文字或数字，不要猜测
 6. 题材分类和关键词按图片原文提取；无法识别的字段返回空字符串
 7. 只返回JSON，不添加Markdown代码块或解释文字`
@@ -440,7 +446,7 @@ export const appRouter = router({
    - 北交所: 8xxxxx.BJ
    - 上海主板: 600xxx.SH
 3. 股票名称：一定要是中文名称。
-4. 涨停时间：提取为HH:MM或HH:MM:SS，无法确认时返回空字符串。
+4. 涨停时间：统一提取为HH:MM:SS（例如14:56:30）；只有HH:MM时补秒为:00，无法确认时返回空字符串。
 5. 板数、流通市值和成交额：保留图片中的原始值，不要猜测或改单位。
 6. 题材和关键词：按图片原文提取，无法确认时返回空字符串。
 

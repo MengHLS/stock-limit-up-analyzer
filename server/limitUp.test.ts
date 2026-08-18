@@ -184,6 +184,7 @@ describe("custom sector data flow", () => {
 
     expect(created).toBeTruthy();
     if (!created) return;
+    expect(created.limitUpTime).toBe("10:00:00");
 
     try {
       const updated = await caller.limitUp.update({

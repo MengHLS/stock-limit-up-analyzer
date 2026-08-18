@@ -1,3 +1,5 @@
+import { normalizeLimitUpTime } from "../shared/limitUpTime";
+
 export type RecognizedStock = {
   stockCode: string;
   stockName: string;
@@ -62,7 +64,7 @@ export function parseRecognitionResult(rawContent: unknown, fallbackDate: string
       return [{
         stockCode,
         stockName,
-        limitUpTime: textValue(stock.limitUpTime),
+        limitUpTime: normalizeLimitUpTime(textValue(stock.limitUpTime)) ?? "",
         boardCount: textValue(stock.boardCount),
         circulationValue: textValue(stock.circulationValue),
         turnover: textValue(stock.turnover),

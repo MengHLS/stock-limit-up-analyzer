@@ -8,7 +8,7 @@ describe("buildLimitUpCsv", () => {
         limitUpDate: "2026-08-18",
         stockCode: "000001",
         stockName: "平安银行",
-        limitUpTime: "09:31",
+        limitUpTime: "09:31:00",
         boardCount: "1天1板",
         sector: "银行",
         circulationValue: "100亿",
@@ -20,6 +20,7 @@ describe("buildLimitUpCsv", () => {
     expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv).toContain("日期,股票代码,股票名称");
     expect(csv).toContain("2026-08-18,000001,平安银行");
+    expect(csv).toContain("09:31:00");
   });
 
   it("quotes values containing commas, quotes, or newlines", () => {

@@ -8,6 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { trpc } from "@/lib/trpc";
 import { getLoginUrl } from "@/const";
+import { normalizeLimitUpTime } from "@shared/limitUpTime";
 import { 
   Upload as UploadIcon, 
   Image as ImageIcon,
@@ -501,7 +502,7 @@ export default function UploadPage() {
                               </div>
                             </td>
                             <td className="px-4 py-3 text-muted-foreground">
-                              {stock.limitUpTime || '-'}
+                              {normalizeLimitUpTime(stock.limitUpTime) || '-'}
                             </td>
                             <td className="px-4 py-3">
                               {stock.boardCount ? (

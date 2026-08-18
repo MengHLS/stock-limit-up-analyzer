@@ -10,6 +10,7 @@ import { trpc } from "@/lib/trpc";
 import { filterFirstBoardRecords, getPreviousCalendarDate } from "@/lib/firstBoard";
 import { buildLimitUpCsv } from "@/lib/exportCsv";
 import { normalizeCustomSector } from "@/lib/customSector";
+import { isValidLimitUpTime, normalizeLimitUpTime } from "@shared/limitUpTime";
 import { buildAdjacentRecordsByDate, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "@/lib/homeData";
 import { getLoginUrl } from "@/const";
 import { 
@@ -176,21 +177,15 @@ export default function Home() {
     // 如果启用按时间排序，直接按时间排序
     if (sortByTime) {
       return [...records].sort((a, b) => {
-        const timeA = a.limitUpTime || '00:00';
-        const timeB = b.limitUpTime || '00:00';
-        // 将时间字符串转换为分钟数进行比较
+        const timeA = normalizeLimitUpTime(a.limitUpTime) ?? '00:00:00';
+        const timeB = normalizeLimitUpTime(b.limitUpTime) ?? '00:00:00';
         const parseTime = (time: string): number => {
-          const parts = time.split(':');
-          if (parts.length === 2) {
-            const hours = parseInt(parts[0], 10);
-            const minutes = parseInt(parts[1], 10);
-            return hours * 60 + minutes;
-          }
-          return 0;
+          const [hours, minutes, seconds] = time.split(':').map(Number);
+          return hours * 3600 + minutes * 60 + seconds;
         };
-        const minutesA = parseTime(timeA);
-        const minutesB = parseTime(timeB);
-        const comparison = minutesA - minutesB;
+        const secondsA = parseTime(timeA);
+        const secondsB = parseTime(timeB);
+        const comparison = secondsA - secondsB;
         return sortByTime === 'asc' ? comparison : -comparison;
       });
     }
@@ -416,7 +411,7 @@ export default function Home() {
                             </span>
                             <span className="flex items-center gap-1.5">
                               <Clock className="h-4 w-4 text-green-500" />
-                              {record.limitUpTime}
+                              {normalizeLimitUpTime(record.limitUpTime) ?? '-'}
                             </span>
                             <Badge variant="outline" className="gap-1 border-orange-300 text-orange-700">
                               <Tag className="h-3 w-3" />
@@ -811,7 +806,7 @@ function WatchFilteredStockList({
                                 <div className="flex items-center gap-3">
                                   <div className="flex items-center gap-2 text-sm">
                                     <Clock className="h-4 w-4 text-green-500" />
-                                    <span className="font-semibold text-slate-700">{record.limitUpTime}</span>
+                                    <span className="font-semibold text-slate-700">{normalizeLimitUpTime(record.limitUpTime) ?? '-'}</span>
                                     <Badge variant="outline" className="gap-1 border-orange-300 text-orange-700 font-semibold">
                                       <Tag className="h-3 w-3" />
                                       {record.sector}
@@ -907,7 +902,7 @@ function StockRecordActions({ record }: { record: any }) {
   const utils = trpc.useUtils();
   const [editing, setEditing] = useState(false);
   const [stockName, setStockName] = useState(record.stockName ?? "");
-  const [limitUpTime, setLimitUpTime] = useState(record.limitUpTime ?? "");
+  const [limitUpTime, setLimitUpTime] = useState(normalizeLimitUpTime(record.limitUpTime) ?? "");
   const [sector, setSector] = useState(record.sector ?? "");
   const [keywords, setKeywords] = useState(record.keywords ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -933,16 +928,16 @@ function StockRecordActions({ record }: { record: any }) {
     onError: (error) => window.alert(error.message || "删除失败，请稍后重试"),
   });
 
-  const isTimeValid = !limitUpTime.trim() || /^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(limitUpTime.trim());
+  const isTimeValid = isValidLimitUpTime(limitUpTime);
 
   if (editing) {
     return (
       <div className="absolute right-2 top-10 z-10 grid w-64 gap-1 rounded-lg border border-orange-200 bg-white p-2 shadow-xl">
         <Input value={stockName} onChange={(event) => setStockName(event.target.value)} placeholder="股票名称" className="h-7 text-xs" />
-        <Input value={limitUpTime} onChange={(event) => setLimitUpTime(event.target.value)} placeholder="涨停时间 HH:MM" className="h-7 text-xs" />
+        <Input value={limitUpTime} onChange={(event) => setLimitUpTime(event.target.value)} placeholder="涨停时间 HH:MM:SS" className="h-7 text-xs" />
         <Input value={sector} onChange={(event) => setSector(event.target.value)} placeholder="自定义题材分类" className="h-7 text-xs" />
         <Input value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="关键词" className="h-7 text-xs" />
-        {!isTimeValid && <p className="text-xs text-red-600">时间格式应为 HH:MM</p>}
+        {!isTimeValid && <p className="text-xs text-red-600">时间格式应为 HH:MM:SS（也支持输入HH:MM自动补秒）</p>}
         {errorMessage && <p className="text-xs text-red-600">{errorMessage}</p>}
         <div className="flex justify-end gap-1">
           <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEditing(false)}>取消</Button>
@@ -953,7 +948,7 @@ function StockRecordActions({ record }: { record: any }) {
             onClick={() => updateRecord.mutate({
               id: record.id,
               stockName: stockName.trim(),
-              limitUpTime: limitUpTime.trim() || undefined,
+              limitUpTime: normalizeLimitUpTime(limitUpTime) ?? "",
               sector: normalizeCustomSector(sector),
               keywords: keywords.trim() || undefined,
             })}

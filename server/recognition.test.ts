@@ -22,6 +22,7 @@ describe("parseRecognitionResult", () => {
 
     expect(result.date).toBe("2026-08-18");
     expect(result.stocks[0].stockCode).toBe("600000.SH");
+    expect(result.stocks[0].limitUpTime).toBe("09:31:00");
   });
 
   it("reads text content returned as an array and drops incomplete rows", () => {

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
+import { normalizeLimitUpTime } from "@shared/limitUpTime";
 import { ArrowLeft, TrendingUp, Calendar, BarChart3, PieChart, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -467,7 +468,7 @@ function ConnectionBoardsTab() {
                     <td className="p-2">
                       <Badge variant="outline">{stock.sector}</Badge>
                     </td>
-                    <td className="p-2 text-muted-foreground">{stock.limitUpTime}</td>
+                    <td className="p-2 text-muted-foreground">{normalizeLimitUpTime(stock.limitUpTime) ?? '-'}</td>
                     <td className="p-2 text-muted-foreground text-xs">{stock.connectionDays}</td>
                   </tr>
                 ))}
