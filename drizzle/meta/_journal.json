@@ -43,6 +43,13 @@
       "when": 1770263241074,
       "tag": "0005_rainy_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787064045992,
+      "tag": "0006_brief_living_tribunal",
+      "breakpoints": true
     }
   ]
 }

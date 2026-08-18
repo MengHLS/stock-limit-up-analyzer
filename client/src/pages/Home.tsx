@@ -10,7 +10,7 @@ import { trpc } from "@/lib/trpc";
 import { filterFirstBoardRecords, getPreviousCalendarDate } from "@/lib/firstBoard";
 import { buildLimitUpCsv } from "@/lib/exportCsv";
 import { normalizeCustomSector } from "@/lib/customSector";
-import { buildAdjacentRecordsByDate, summarizeDailyCounts } from "@/lib/homeData";
+import { buildAdjacentRecordsByDate, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "@/lib/homeData";
 import { getLoginUrl } from "@/const";
 import { 
   Upload, 
@@ -36,6 +36,11 @@ const EMPTY_ARRAY: any[] = [];
 
 export default function Home() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const { data: watchlistData } = trpc.watchlist.getAll.useQuery(undefined, {
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+  });
+  const watchlist = watchlistData ?? EMPTY_ARRAY;
   
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [searchQuery, setSearchQuery] = useState("");
@@ -55,13 +60,11 @@ export default function Home() {
     return '主板';
   }, []);
 
-  // 获取所有日期
-  const { data: datesData, isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
-  const dates = datesData ?? EMPTY_ARRAY;
-
+  // 每日统计同时提供日历日期和每日数量，避免重复请求日期列表
   // 只加载每日统计及当前日/前一自然日记录，避免首页初始拉取全部历史明细
   const { data: dailyStatsData, isLoading: dailyStatsLoading } = trpc.limitUp.getDailyStats.useQuery();
   const dailyStats = dailyStatsData ?? EMPTY_ARRAY;
+  const dates = useMemo(() => dailyStats.map((stat) => stat.date), [dailyStats]);
   const selectedDateStrForQuery = selectedDate
     ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`
     : null;
@@ -133,12 +136,8 @@ export default function Home() {
     }
   }, [selectedDate]);
 
-  // 获取当前选中日期的题材统计
-  const { data: currentDateStatsData } = trpc.limitUp.getSectorStats.useQuery(
-    { date: selectedDateStr! },
-    { enabled: !!selectedDateStr }
-  );
-  const currentDateStats = currentDateStatsData ?? EMPTY_ARRAY;
+  // 题材统计直接从当前日期记录计算，避免再次查询同一批涨停数据
+  const currentDateStats = useMemo(() => summarizeSectorStats(selectedRecords), [selectedRecords]);
 
   // 当前选中日期的涨停记录（按题材、板数、时间排序并支持筛选）
   const sortedRecords = useMemo(() => {
@@ -227,7 +226,7 @@ export default function Home() {
     }
   }, [dates, selectedDate, dateStringToDate]);
 
-  const isLoading = datesLoading || dailyStatsLoading || selectedRecordsLoading;
+  const isLoading = dailyStatsLoading || selectedRecordsLoading;
 
   const handleExport = useCallback(() => {
     if (!selectedDateStr || recordsForExport.length === 0) return;
@@ -710,6 +709,7 @@ export default function Home() {
                           records={sortedRecords}
                           watchFilter={watchFilter}
                           isAuthenticated={isAuthenticated}
+                          watchlist={watchlist}
                           onFilteredRecordsChange={setRecordsForExport}
                         />
                       </ScrollArea>
@@ -730,11 +730,13 @@ function WatchFilteredStockList({
   records,
   watchFilter,
   isAuthenticated,
+  watchlist,
   onFilteredRecordsChange,
 }: {
   records: any[];
   watchFilter: "all" | "normal" | "important";
   isAuthenticated: boolean;
+  watchlist: Array<{ stockCode: string; watchType: "normal" | "important" }>;
   onFilteredRecordsChange?: (records: any[]) => void;
 }) {
   const [watchStatusMap, setWatchStatusMap] = useState<Map<string, "none" | "normal" | "important">>(new Map());
@@ -747,14 +749,10 @@ function WatchFilteredStockList({
     return '主板';
   }, []);
   
-  // 初始化所有股票为none状态
+  // 使用一次性关注列表初始化当前日期股票状态，避免逐股票发起请求
   useEffect(() => {
-    const newMap = new Map<string, "none" | "normal" | "important">();
-    records.forEach(record => {
-      newMap.set(record.stockCode, "none");
-    });
-    setWatchStatusMap(newMap);
-  }, [records]);
+    setWatchStatusMap(buildWatchStatusMap(records, watchlist));
+  }, [records, watchlist]);
   
   // 当WatchButton组件加载完成后，会通过onStatusChange回调更新真实状态
   
@@ -771,11 +769,7 @@ function WatchFilteredStockList({
   
   // 更新单个股票的关注状态
   const updateWatchStatus = useCallback((stockCode: string, status: "none" | "normal" | "important") => {
-    setWatchStatusMap(prev => {
-      const newMap = new Map(prev);
-      newMap.set(stockCode, status);
-      return newMap;
-    });
+    setWatchStatusMap((prev) => setWatchStatus(prev, stockCode, status));
   }, []);
 
   return (
@@ -827,6 +821,7 @@ function WatchFilteredStockList({
                                     <WatchButton
                                       stockCode={record.stockCode}
                                       stockName={record.stockName}
+                                      watchStatus={watchStatusMap.get(record.stockCode) ?? "none"}
                                       onStatusChange={updateWatchStatus}
                                     />
                                   )}
@@ -848,30 +843,21 @@ function WatchFilteredStockList({
 function WatchButton({ 
   stockCode, 
   stockName,
+  watchStatus,
   onStatusChange
 }: { 
   stockCode: string; 
   stockName: string;
+  watchStatus: "none" | "normal" | "important";
   onStatusChange?: (stockCode: string, status: "none" | "normal" | "important") => void;
 }) {
   const utils = trpc.useUtils();
-  const { data: watchStatus } = trpc.limitUp.getWatchStatus.useQuery({ stockCode });
   const updateWatch = trpc.limitUp.updateWatchStatus.useMutation({
     onSuccess: (_, variables) => {
-      utils.limitUp.getWatchStatus.invalidate({ stockCode });
-      // 通知父组件状态变化
-      if (onStatusChange) {
-        onStatusChange(stockCode, variables.watchStatus);
-      }
+      utils.watchlist.getAll.invalidate();
+      onStatusChange?.(stockCode, variables.watchStatus);
     },
   });
-  
-  // 当关注状态加载完成后，通知父组件
-  useEffect(() => {
-    if (watchStatus && onStatusChange) {
-      onStatusChange(stockCode, watchStatus);
-    }
-  }, [watchStatus, stockCode, onStatusChange]);
 
   const handleClick = () => {
     if (!watchStatus) return;
@@ -932,18 +918,16 @@ function StockRecordActions({ record }: { record: any }) {
       setErrorMessage(null);
       setSuccessMessage("已保存自定义题材分类");
       setEditing(false);
-      utils.limitUp.getAll.invalidate();
-      utils.limitUp.getDates.invalidate();
-      utils.limitUp.getSectorStats.invalidate({ date: record.limitUpDate });
+      utils.limitUp.getDailyStats.invalidate();
+      utils.limitUp.getByDate.invalidate({ date: record.limitUpDate });
       utils.limitUp.search.invalidate();
     },
     onError: (error) => setErrorMessage(error.message || "保存失败，请稍后重试"),
   });
   const deleteRecord = trpc.limitUp.delete.useMutation({
     onSuccess: () => {
-      utils.limitUp.getAll.invalidate();
-      utils.limitUp.getDates.invalidate();
-      utils.limitUp.getSectorStats.invalidate({ date: record.limitUpDate });
+      utils.limitUp.getDailyStats.invalidate();
+      utils.limitUp.getByDate.invalidate({ date: record.limitUpDate });
       utils.limitUp.search.invalidate();
     },
     onError: (error) => window.alert(error.message || "删除失败，请稍后重试"),

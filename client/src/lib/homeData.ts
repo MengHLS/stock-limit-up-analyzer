@@ -24,3 +24,55 @@ export function summarizeDailyCounts(stats: readonly DailyCount[]) {
     days: counts.length,
   };
 }
+
+
+export type SectorRecord = {
+  sector?: string | null;
+};
+
+export type SectorCount = {
+  sector: string;
+  count: number;
+};
+
+export function summarizeSectorStats(records: readonly SectorRecord[]): SectorCount[] {
+  const sectorCounts = new Map<string, number>();
+  records.forEach((record) => {
+    const sector = record.sector?.trim() || "其他";
+    sectorCounts.set(sector, (sectorCounts.get(sector) ?? 0) + 1);
+  });
+
+  return Array.from(sectorCounts.entries())
+    .map(([sector, count]) => ({ sector, count }))
+    .sort((a, b) => {
+      if (a.sector === "其他") return 1;
+      if (b.sector === "其他") return -1;
+      return b.count - a.count;
+    });
+}
+
+
+export type WatchStatus = "none" | "normal" | "important";
+
+export type WatchlistItem = {
+  stockCode: string;
+  watchType: Exclude<WatchStatus, "none">;
+};
+
+export function buildWatchStatusMap(
+  records: readonly { stockCode: string }[],
+  watchlist: readonly WatchlistItem[],
+): Map<string, WatchStatus> {
+  const watchedMap = new Map(watchlist.map((item) => [item.stockCode, item.watchType] as const));
+  return new Map(records.map((record) => [record.stockCode, watchedMap.get(record.stockCode) ?? "none"]));
+}
+
+export function setWatchStatus(
+  statusMap: ReadonlyMap<string, WatchStatus>,
+  stockCode: string,
+  status: WatchStatus,
+): Map<string, WatchStatus> {
+  const next = new Map(statusMap);
+  next.set(stockCode, status);
+  return next;
+}

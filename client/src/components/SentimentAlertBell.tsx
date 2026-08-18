@@ -67,7 +67,11 @@ export function SentimentAlertBell() {
   // 获取预警数据
   const { data: alerts = [], isLoading: alertsLoading } = trpc.sentiment.getAlerts.useQuery(
     { limit: 20 },
-    { refetchInterval: 60000 } // 每分钟刷新一次
+    {
+      enabled: open,
+      refetchInterval: open ? 60000 : false,
+      staleTime: 60000,
+    }
   );
 
   // 获取未读数量

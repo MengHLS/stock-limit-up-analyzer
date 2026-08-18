@@ -53,6 +53,7 @@ export const limitUpRecords = mysqlTable("limit_up_records", {
   createdByIdx: index("idx_created_by").on(table.createdBy),
   // 复合索引用于常见查询模式
   dateStockIdx: index("idx_date_stock").on(table.limitUpDate, table.stockCode),
+  dateTimeIdx: index("idx_date_time").on(table.limitUpDate, table.limitUpTime),
   dateSectorIdx: index("idx_date_sector").on(table.limitUpDate, table.sector),
 }));
 

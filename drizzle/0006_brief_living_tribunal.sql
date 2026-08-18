@@ -1,0 +1,1 @@
+CREATE INDEX `idx_date_time` ON `limit_up_records` (`limitUpDate`,`limitUpTime`);

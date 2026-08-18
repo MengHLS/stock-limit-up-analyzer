@@ -187,23 +187,21 @@ export async function getDailySectorStats(date: string): Promise<{ sector: strin
   const db = await getDb();
   if (!db) return [];
 
-  const records = await db.select().from(limitUpRecords)
-    .where(eq(limitUpRecords.limitUpDate, date));
+  // 只返回聚合结果，避免把整日股票明细加载到Node内存中。
+  const sectorExpression = sql<string>`COALESCE(NULLIF(TRIM(${limitUpRecords.sector}), ''), '其他')`;
+  const rows = await db.select({
+    sector: sectorExpression,
+    count: count(),
+  })
+    .from(limitUpRecords)
+    .where(eq(limitUpRecords.limitUpDate, date))
+    .groupBy(sectorExpression);
 
-  // 统计各题材数量
-  const sectorMap = new Map<string, number>();
-  for (const record of records) {
-    const sector = record.sector || '其他';
-    sectorMap.set(sector, (sectorMap.get(sector) || 0) + 1);
-  }
-
-  return Array.from(sectorMap.entries())
-    .map(([sector, count]) => ({ sector, count }))
+  return rows
+    .map((row) => ({ sector: row.sector, count: Number(row.count) }))
     .sort((a, b) => {
-      // "其他"始终放在最后
       if (a.sector === '其他') return 1;
       if (b.sector === '其他') return -1;
-      // 其他题材按涨停数降序排列
       return b.count - a.count;
     });
 }
