@@ -7,6 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { trpc } from "@/lib/trpc";
+import { filterFirstBoardRecords } from "@/lib/firstBoard";
 import { getLoginUrl } from "@/const";
 import { 
   Upload, 
@@ -114,17 +115,9 @@ export default function Home() {
       records = records.filter(r => getStockBoard(r.stockCode) === selectedBoard);
     }
     
-    // 按当日首板筛选
+    // 按当日首板筛选：今天涨停且前一自然日没有涨停记录
     if (showFirstBoard) {
-      records = records.filter(r => {
-        const boardCount = r.boardCount;
-        if (!boardCount) return false;
-        const match = boardCount.match(/(\d+)天(\d+)板/);
-        if (match) {
-          return parseInt(match[2]) === 1;
-        }
-        return false;
-      });
+      records = filterFirstBoardRecords(recordsByDate, selectedDateStr);
     }
     
     // 创建题材顺序映射
