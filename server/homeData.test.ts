@@ -1,0 +1,23 @@
+import { describe, expect, it } from "vitest";
+import { buildAdjacentRecordsByDate, summarizeDailyCounts } from "../client/src/lib/homeData";
+
+describe("home data helpers", () => {
+  it("keeps only the selected and previous-date records for first-board checks", () => {
+    const current = [{ stockCode: "000001.SZ" }];
+    const previous = [{ stockCode: "000002.SZ" }];
+    const map = buildAdjacentRecordsByDate("2026-08-18", current, "2026-08-17", previous);
+
+    expect([...map.keys()]).toEqual(["2026-08-18", "2026-08-17"]);
+    expect(map.get("2026-08-18")).toEqual(current);
+    expect(map.get("2026-08-17")).toEqual(previous);
+    expect(map.has("2026-08-16")).toBe(false);
+  });
+
+  it("summarizes positive daily counts and ignores empty days", () => {
+    expect(summarizeDailyCounts([
+      { date: "2026-08-16", count: 0 },
+      { date: "2026-08-17", count: 79 },
+      { date: "2026-08-18", count: 80 },
+    ])).toEqual({ total: 159, average: 79.5, days: 2 });
+  });
+});

@@ -1,0 +1,39 @@
+{
+  "loaded": true,
+  "controls": {
+    "monthJump": {
+      "available": true,
+      "selected": "2024-12"
+    },
+    "firstBoard": {
+      "available": true,
+      "clicked": true
+    },
+    "timeSort": {
+      "available": true,
+      "clicked": true
+    },
+    "boardFilter": {
+      "available": true,
+      "clicked": true
+    }
+  },
+  "initial": {
+    "title": "股票涨停分析助手",
+    "bodyHasStockList": true,
+    "monthSelect": "2026-08"
+  },
+  "afterFirstBoard": {
+    "buttonText": "当日首板",
+    "buttonActive": true,
+    "listCountText": "涨停股票 62 只"
+  },
+  "afterTimeSort": {
+    "buttonText": "时间↑"
+  },
+  "afterBoardFilter": {
+    "boardButtonCount": 1,
+    "boardActive": true,
+    "listCountText": "涨停股票 5 只"
+  }
+}

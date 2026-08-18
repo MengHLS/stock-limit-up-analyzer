@@ -7,7 +7,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { trpc } from "@/lib/trpc";
-import { filterFirstBoardRecords } from "@/lib/firstBoard";
+import { filterFirstBoardRecords, getPreviousCalendarDate } from "@/lib/firstBoard";
+import { buildLimitUpCsv } from "@/lib/exportCsv";
+import { normalizeCustomSector } from "@/lib/customSector";
+import { buildAdjacentRecordsByDate, summarizeDailyCounts } from "@/lib/homeData";
 import { getLoginUrl } from "@/const";
 import { 
   Upload, 
@@ -20,11 +23,16 @@ import {
   Hash,
   Tag,
   Star,
-  Database
+  Database,
+  Download,
+  Pencil,
+  Trash2
 } from "lucide-react";
 import { SentimentAlertBell } from "@/components/SentimentAlertBell";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { Link } from "wouter";
+
+const EMPTY_ARRAY: any[] = [];
 
 export default function Home() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
@@ -36,6 +44,8 @@ export default function Home() {
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null);
   const [showFirstBoard, setShowFirstBoard] = useState(false);
   const [sortByTime, setSortByTime] = useState<"asc" | "desc" | null>(null);
+  const [recordsForExport, setRecordsForExport] = useState<any[]>([]);
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
 
   // 获取股票板块（使用useCallback避免依赖问题）
   const getStockBoard = useCallback((stockCode: string): string => {
@@ -46,29 +56,39 @@ export default function Home() {
   }, []);
 
   // 获取所有日期
-  const { data: dates = [], isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
+  const { data: datesData, isLoading: datesLoading } = trpc.limitUp.getDates.useQuery();
+  const dates = datesData ?? EMPTY_ARRAY;
 
-  // 获取所有涨停记录（用于按日期分组）
-  const { data: allRecords = [], isLoading: recordsLoading } = trpc.limitUp.getAll.useQuery();
+  // 只加载每日统计及当前日/前一自然日记录，避免首页初始拉取全部历史明细
+  const { data: dailyStatsData, isLoading: dailyStatsLoading } = trpc.limitUp.getDailyStats.useQuery();
+  const dailyStats = dailyStatsData ?? EMPTY_ARRAY;
+  const selectedDateStrForQuery = selectedDate
+    ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`
+    : null;
+  const previousDateStr = selectedDateStrForQuery ? getPreviousCalendarDate(selectedDateStrForQuery) : null;
+  const { data: selectedRecordsData, isLoading: selectedRecordsLoading } = trpc.limitUp.getByDate.useQuery(
+    { date: selectedDateStrForQuery ?? "" },
+    { enabled: !!selectedDateStrForQuery },
+  );
+  const selectedRecords = selectedRecordsData ?? EMPTY_ARRAY;
+  const { data: previousRecordsData } = trpc.limitUp.getByDate.useQuery(
+    { date: previousDateStr ?? "" },
+    { enabled: !!previousDateStr },
+  );
+  const previousRecords = previousRecordsData ?? EMPTY_ARRAY;
 
   // 搜索股票
-  const { data: searchResults = [], isLoading: searchLoading } = trpc.limitUp.search.useQuery(
+  const { data: searchResultsData, isLoading: searchLoading } = trpc.limitUp.search.useQuery(
     { query: searchQuery },
     { enabled: searchQuery.length > 0 }
   );
+  const searchResults = searchResultsData ?? EMPTY_ARRAY;
 
-  // 按日期分组记录
-  const recordsByDate = useMemo(() => {
-    const map = new Map<string, typeof allRecords>();
-    allRecords.forEach(record => {
-      const date = record.limitUpDate;
-      if (!map.has(date)) {
-        map.set(date, []);
-      }
-      map.get(date)!.push(record);
-    });
-    return map;
-  }, [allRecords]);
+  // 首板筛选只需要当前日和前一自然日记录
+  const recordsByDate = useMemo(
+    () => buildAdjacentRecordsByDate(selectedDateStrForQuery, selectedRecords, previousDateStr, previousRecords),
+    [selectedDateStrForQuery, selectedRecords, previousDateStr, previousRecords],
+  );
 
   // 创建日期字符串到Date对象的映射
   const dateStringToDate = useMemo(() => {
@@ -92,32 +112,50 @@ export default function Home() {
   // 当前选中日期的字符串格式
   const selectedDateStr = dateToString(selectedDate);
 
+  const dataMonths = useMemo(() => {
+    return Array.from(new Set(dates.map((date) => date.slice(0, 7)))).sort((a, b) => b.localeCompare(a));
+  }, [dates]);
+
+  const boardStats = useMemo(() => {
+    const stats = new Map<string, number>();
+    (recordsByDate.get(selectedDateStr ?? "") ?? []).forEach((record) => {
+      const board = getStockBoard(record.stockCode);
+      stats.set(board, (stats.get(board) ?? 0) + 1);
+    });
+    return Array.from(stats.entries()).sort((a, b) => b[1] - a[1]);
+  }, [recordsByDate, selectedDateStr, getStockBoard]);
+
+  const dailyCountSummary = useMemo(() => summarizeDailyCounts(dailyStats), [dailyStats]);
+
+  useEffect(() => {
+    if (selectedDate) {
+      setCalendarMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+    }
+  }, [selectedDate]);
+
   // 获取当前选中日期的题材统计
-  const { data: currentDateStats = [] } = trpc.limitUp.getSectorStats.useQuery(
+  const { data: currentDateStatsData } = trpc.limitUp.getSectorStats.useQuery(
     { date: selectedDateStr! },
     { enabled: !!selectedDateStr }
   );
+  const currentDateStats = currentDateStatsData ?? EMPTY_ARRAY;
 
   // 当前选中日期的涨停记录（按题材、板数、时间排序并支持筛选）
   const sortedRecords = useMemo(() => {
     if (!selectedDateStr) return [];
     let records = recordsByDate.get(selectedDateStr) || [];
-    
-    // 按题材筛选
+
+    // 首先计算当日首板，再叠加题材和板块筛选，保证多个筛选条件可组合
+    if (showFirstBoard) {
+      records = filterFirstBoardRecords(recordsByDate, selectedDateStr);
+    }
+
     if (selectedSector) {
       records = records.filter(r => r.sector === selectedSector);
     }
-    
-    // 按关注状态筛选（将在组件中处理）
-    
-    // 按板块筛选
+
     if (selectedBoard) {
       records = records.filter(r => getStockBoard(r.stockCode) === selectedBoard);
-    }
-    
-    // 按当日首板筛选：今天涨停且前一自然日没有涨停记录
-    if (showFirstBoard) {
-      records = filterFirstBoardRecords(recordsByDate, selectedDateStr);
     }
     
     // 创建题材顺序映射
@@ -179,7 +217,7 @@ export default function Home() {
   }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector, selectedBoard, showFirstBoard, sortByTime]);
 
   // 自动选择最新日期
-  useMemo(() => {
+  useEffect(() => {
     if (dates.length > 0 && !selectedDate) {
       const latestDateStr = dates[0];
       const date = dateStringToDate.get(latestDateStr);
@@ -189,7 +227,20 @@ export default function Home() {
     }
   }, [dates, selectedDate, dateStringToDate]);
 
-  const isLoading = datesLoading || recordsLoading;
+  const isLoading = datesLoading || dailyStatsLoading || selectedRecordsLoading;
+
+  const handleExport = useCallback(() => {
+    if (!selectedDateStr || recordsForExport.length === 0) return;
+
+    const csv = buildLimitUpCsv(recordsForExport);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `涨停数据-${selectedDateStr}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [selectedDateStr, recordsForExport]);
 
   // 日历上有涨停数据的日期
   const datesWithData = useMemo(() => {
@@ -210,14 +261,9 @@ export default function Home() {
   // 为每个有数据的日期创建映射，存储涨停数
   const dateCountMap = useMemo(() => {
     const map = new Map<string, number>();
-    dates.forEach(dateStr => {
-      const records = recordsByDate.get(dateStr);
-      if (records) {
-        map.set(dateStr, records.length);
-      }
-    });
+    dailyStats.forEach((stat) => map.set(stat.date, Number(stat.count)));
     return map;
-  }, [dates, recordsByDate]);
+  }, [dailyStats]);
 
   // 自定义DayButton组件，显示涨停数
   const CustomDayButton = useCallback(
@@ -402,10 +448,27 @@ export default function Home() {
             {/* 左侧：日历 */}
             <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
               <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-2 px-3">
-                <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
-                  <Calendar className="h-5 w-5 text-orange-600" />
-                  选择日期
-                </CardTitle>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                      <Calendar className="h-5 w-5 text-orange-600" />
+                      选择日期
+                    </CardTitle>
+                    {dataMonths.length > 1 && (
+                      <select
+                        aria-label="快速跳转到有数据的月份"
+                        value={`${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, "0")}`}
+                        onChange={(event) => {
+                          const [year, month] = event.target.value.split("-").map(Number);
+                          setCalendarMonth(new Date(year, month - 1, 1));
+                        }}
+                        className="rounded-md border border-orange-200 bg-white px-2 py-1 text-xs text-orange-700 outline-none focus:ring-2 focus:ring-orange-300"
+                      >
+                        {dataMonths.map((month) => (
+                          <option key={month} value={month}>{`${month.slice(0, 4)}年${month.slice(5)}月`}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
               </CardHeader>
               <CardContent className="pt-2 px-3 pb-2">
                 {dates.length === 0 ? (
@@ -417,6 +480,8 @@ export default function Home() {
                     <CalendarComponent
                       mode="single"
                       selected={selectedDate}
+                      month={calendarMonth}
+                      onMonthChange={setCalendarMonth}
                       onSelect={setSelectedDate}
                       modifiers={modifiers}
                       modifiersClassNames={modifiersClassNames}
@@ -443,6 +508,32 @@ export default function Home() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="pt-1.5 px-3 pb-1.5">
+                      <div className="mb-2 grid grid-cols-3 gap-2">
+                        <div className="rounded-lg bg-orange-50 px-2 py-1.5 text-center">
+                          <div className="text-[11px] text-orange-600">当日涨停</div>
+                          <div className="font-bold text-orange-700">{recordsByDate.get(selectedDateStr)?.length ?? 0}</div>
+                        </div>
+                        <div className="rounded-lg bg-blue-50 px-2 py-1.5 text-center">
+                          <div className="text-[11px] text-blue-600">历史日均</div>
+                          <div className="font-bold text-blue-700">{dailyCountSummary.average}</div>
+                        </div>
+                        <div className="rounded-lg bg-indigo-50 px-2 py-1.5 text-center">
+                          <div className="text-[11px] text-indigo-600">累计记录</div>
+                          <div className="font-bold text-indigo-700">{dailyCountSummary.total}</div>
+                        </div>
+                      </div>
+                      <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-purple-50 px-2 py-1.5">
+                        <span className="text-xs font-semibold text-purple-700">板块联动</span>
+                        {boardStats.map(([board, count]) => (
+                          <button
+                            key={board}
+                            onClick={() => setSelectedBoard(selectedBoard === board ? null : board)}
+                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${selectedBoard === board ? "bg-purple-600 text-white" : "bg-white text-purple-700"}`}
+                          >
+                            {board} {count}
+                          </button>
+                        ))}
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         <button
                           onClick={() => setSelectedSector(null)}
@@ -594,16 +685,32 @@ export default function Home() {
                   {/* 涨停股票列表 */}
                   <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
                     <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-1 px-3">
-                      <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
-                        <TrendingUp className="h-4 w-4 text-orange-600" />
-                        涨停股票 {sortedRecords.length} 只
-                      </CardTitle>
+                      <div className="flex items-center justify-between gap-3">
+                        <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                          <TrendingUp className="h-4 w-4 text-orange-600" />
+                          涨停股票 {sortedRecords.length} 只
+                        </CardTitle>
+                        {isAuthenticated && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleExport}
+                            disabled={recordsForExport.length === 0}
+                            className="gap-1 border-orange-200 text-orange-700 hover:bg-orange-50"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            导出CSV
+                          </Button>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent className="pt-2 px-3 pb-2">
                       <ScrollArea className="h-[700px] pr-4">
-                        <WatchFilteredStockList 
-                          records={sortedRecords} 
+                        <WatchFilteredStockList
+                          records={sortedRecords}
                           watchFilter={watchFilter}
+                          isAuthenticated={isAuthenticated}
+                          onFilteredRecordsChange={setRecordsForExport}
                         />
                       </ScrollArea>
                     </CardContent>
@@ -619,12 +726,16 @@ export default function Home() {
 }
 
 // 关注筛选股票列表组件
-function WatchFilteredStockList({ 
-  records, 
-  watchFilter 
-}: { 
-  records: any[]; 
+function WatchFilteredStockList({
+  records,
+  watchFilter,
+  isAuthenticated,
+  onFilteredRecordsChange,
+}: {
+  records: any[];
   watchFilter: "all" | "normal" | "important";
+  isAuthenticated: boolean;
+  onFilteredRecordsChange?: (records: any[]) => void;
 }) {
   const [watchStatusMap, setWatchStatusMap] = useState<Map<string, "none" | "normal" | "important">>(new Map());
   
@@ -648,11 +759,15 @@ function WatchFilteredStockList({
   // 当WatchButton组件加载完成后，会通过onStatusChange回调更新真实状态
   
   // 筛选后的记录
-  const filteredRecords = records.filter((record) => {
+  const filteredRecords = useMemo(() => records.filter((record) => {
     if (watchFilter === "all") return true;
     const status = watchStatusMap.get(record.stockCode) || "none";
     return status === watchFilter;
-  });
+  }), [records, watchFilter, watchStatusMap]);
+
+  useEffect(() => {
+    onFilteredRecordsChange?.(filteredRecords);
+  }, [filteredRecords, onFilteredRecordsChange]);
   
   // 更新单个股票的关注状态
   const updateWatchStatus = useCallback((stockCode: string, status: "none" | "normal" | "important") => {
@@ -668,7 +783,7 @@ function WatchFilteredStockList({
       {filteredRecords.map((record) => (
                             <div
                               key={record.id}
-                              className="group p-2 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
+                              className="group relative p-2 rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 hover:shadow-lg hover:border-orange-200 transition-all"
                             >
                               <div className="flex items-start justify-between mb-1.5">
                                 <div className="flex items-center gap-3">
@@ -708,11 +823,14 @@ function WatchFilteredStockList({
                                       {record.sector}
                                     </Badge>
                                   </div>
-                                  <WatchButton 
-                                    stockCode={record.stockCode} 
-                                    stockName={record.stockName}
-                                    onStatusChange={updateWatchStatus}
-                                  />
+                                  {isAuthenticated && (
+                                    <WatchButton
+                                      stockCode={record.stockCode}
+                                      stockName={record.stockName}
+                                      onStatusChange={updateWatchStatus}
+                                    />
+                                  )}
+                                  {isAuthenticated && <StockRecordActions record={record} />}
                                 </div>
                               </div>
                               {record.keywords && (
@@ -795,5 +913,101 @@ function WatchButton({
         <Star className="h-5 w-5 text-red-600 fill-red-600" />
       )}
     </button>
+  );
+}
+
+
+function StockRecordActions({ record }: { record: any }) {
+  const utils = trpc.useUtils();
+  const [editing, setEditing] = useState(false);
+  const [stockName, setStockName] = useState(record.stockName ?? "");
+  const [limitUpTime, setLimitUpTime] = useState(record.limitUpTime ?? "");
+  const [sector, setSector] = useState(record.sector ?? "");
+  const [keywords, setKeywords] = useState(record.keywords ?? "");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const updateRecord = trpc.limitUp.update.useMutation({
+    onSuccess: () => {
+      setErrorMessage(null);
+      setSuccessMessage("已保存自定义题材分类");
+      setEditing(false);
+      utils.limitUp.getAll.invalidate();
+      utils.limitUp.getDates.invalidate();
+      utils.limitUp.getSectorStats.invalidate({ date: record.limitUpDate });
+      utils.limitUp.search.invalidate();
+    },
+    onError: (error) => setErrorMessage(error.message || "保存失败，请稍后重试"),
+  });
+  const deleteRecord = trpc.limitUp.delete.useMutation({
+    onSuccess: () => {
+      utils.limitUp.getAll.invalidate();
+      utils.limitUp.getDates.invalidate();
+      utils.limitUp.getSectorStats.invalidate({ date: record.limitUpDate });
+      utils.limitUp.search.invalidate();
+    },
+    onError: (error) => window.alert(error.message || "删除失败，请稍后重试"),
+  });
+
+  const isTimeValid = !limitUpTime.trim() || /^(?:[01]\\d|2[0-3]):[0-5]\\d$/.test(limitUpTime.trim());
+
+  if (editing) {
+    return (
+      <div className="absolute right-2 top-10 z-10 grid w-64 gap-1 rounded-lg border border-orange-200 bg-white p-2 shadow-xl">
+        <Input value={stockName} onChange={(event) => setStockName(event.target.value)} placeholder="股票名称" className="h-7 text-xs" />
+        <Input value={limitUpTime} onChange={(event) => setLimitUpTime(event.target.value)} placeholder="涨停时间 HH:MM" className="h-7 text-xs" />
+        <Input value={sector} onChange={(event) => setSector(event.target.value)} placeholder="自定义题材分类" className="h-7 text-xs" />
+        <Input value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="关键词" className="h-7 text-xs" />
+        {!isTimeValid && <p className="text-xs text-red-600">时间格式应为 HH:MM</p>}
+        {errorMessage && <p className="text-xs text-red-600">{errorMessage}</p>}
+        <div className="flex justify-end gap-1">
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setEditing(false)}>取消</Button>
+          <Button
+            size="sm"
+            className="h-7 px-2 text-xs"
+            disabled={updateRecord.isPending || !stockName.trim() || !isTimeValid}
+            onClick={() => updateRecord.mutate({
+              id: record.id,
+              stockName: stockName.trim(),
+              limitUpTime: limitUpTime.trim() || undefined,
+              sector: normalizeCustomSector(sector),
+              keywords: keywords.trim() || undefined,
+            })}
+          >
+            保存
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+        <div className="flex items-center gap-1">
+      {successMessage && <span className="text-xs text-green-600">{successMessage}</span>}
+      <button
+        type="button"
+        className="rounded p-1 text-slate-400 hover:bg-orange-50 hover:text-orange-600"
+        title="编辑记录"
+        onClick={() => {
+          setSuccessMessage(null);
+          setEditing(true);
+        }}
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+        title="删除记录"
+        disabled={deleteRecord.isPending}
+        onClick={() => {
+          if (window.confirm(`确定删除 ${record.stockName}（${record.stockCode}）吗？`)) {
+            deleteRecord.mutate({ id: record.id });
+          }
+        }}
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
   );
 }

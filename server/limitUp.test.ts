@@ -165,3 +165,40 @@ describe("image router", () => {
     });
   });
 });
+
+
+describe("custom sector data flow", () => {
+  it("persists a custom sector and exposes it in daily statistics", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+    const testDate = "2099-12-30";
+    const created = await caller.limitUp.create({
+      stockCode: "CUSTOM-SECTOR-TEST",
+      stockName: "自定义题材测试股票",
+      limitUpDate: testDate,
+      limitUpTime: "10:00",
+      boardCount: "1天1板",
+      sector: "原始题材",
+      keywords: "测试",
+    });
+
+    expect(created).toBeTruthy();
+    if (!created) return;
+
+    try {
+      const updated = await caller.limitUp.update({
+        id: created.id,
+        sector: "自定义题材测试",
+      });
+      expect(updated?.sector).toBe("自定义题材测试");
+
+      const publicCaller = appRouter.createCaller(createPublicContext().ctx);
+      const stats = await publicCaller.limitUp.getSectorStats({ date: testDate });
+      expect(stats).toEqual(
+        expect.arrayContaining([{ sector: "自定义题材测试", count: 1 }]),
+      );
+    } finally {
+      await caller.limitUp.delete({ id: created.id });
+    }
+  });
+});

@@ -1,0 +1,60 @@
+{
+  "imagePath": "/home/ubuntu/upload/1231.png",
+  "expectedDate": "2026-08-09",
+  "recognizedDate": "2026-08-09",
+  "stockCount": 57,
+  "firstFive": [
+    {
+      "stockCode": "002361.SZ",
+      "stockName": "神剑股份",
+      "limitUpTime": "14:56:30",
+      "boardCount": "10天9板",
+      "circulationValue": "116",
+      "turnover": "51",
+      "sector": "商业航天",
+      "keywords": "商业航天+军工(客户成飞)+碳纤维+轮胎"
+    },
+    {
+      "stockCode": "603278.SH",
+      "stockName": "大业股份",
+      "limitUpTime": "14:41:17",
+      "boardCount": "6天6板",
+      "circulationValue": "58.2",
+      "turnover": "19.2",
+      "sector": "商业航天",
+      "keywords": "商业航天+人形机器人(灵巧手/腱绳)+光伏+轮胎"
+    },
+    {
+      "stockCode": "002347.SZ",
+      "stockName": "泰尔股份",
+      "limitUpTime": "9:30:15",
+      "boardCount": "5天5板",
+      "circulationValue": "61.1",
+      "turnover": "5",
+      "sector": "商业航天",
+      "keywords": "商业航天+3D打印+工业机器人+动力电池回收"
+    },
+    {
+      "stockCode": "600118.SH",
+      "stockName": "中国卫星",
+      "limitUpTime": "11:26:23",
+      "boardCount": "6天5板",
+      "circulationValue": "1122.8",
+      "turnover": "135.8",
+      "sector": "商业航天",
+      "keywords": "千帆星座+卫星服务+导航制造+广播通信"
+    },
+    {
+      "stockCode": "600783.SH",
+      "stockName": "鲁信创投",
+      "limitUpTime": "14:56:50",
+      "boardCount": "6天5板",
+      "circulationValue": "184.1",
+      "turnover": "29.5",
+      "sector": "商业航天",
+      "keywords": "参股蓝箭航天+拟设立人工智能创投基金+创投+参股丝杠公司"
+    }
+  ],
+  "validCodeCount": 57,
+  "recognizedAt": "2026-08-18T11:58:28.794Z"
+}

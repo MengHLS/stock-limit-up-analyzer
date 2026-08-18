@@ -1,0 +1,37 @@
+{
+  "initial": {
+    "loaded": true,
+    "month": "2026-08",
+    "calendarCount": true
+  },
+  "search": {
+    "available": true,
+    "value": "金牛化工"
+  },
+  "afterSearch": {
+    "hasStockName": true,
+    "hasSearchResultsLabel": true
+  },
+  "dateSwitch": {
+    "available": true,
+    "clicked": true,
+    "text": "17106",
+    "outerHTML": "<button data-loc=\"client/src/pages/Home.tsx:280\" class=\"\n            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-300 p-2 text-sm font-medium gap-1 cursor-pointer\n            bg-gradient-to-br from-orange-50 via-orange-100 to-yellow-50 hover:from-orange-100 hover:via-orange-150 hover:to-yellow-100 text-orange-700 border border-orange-200 shadow-md hover:shadow-lg hover:scale-102\n          \" type=\"button\" tabindex=\"-1\" aria-label=\"Monday, August 17th, 2026\"><span data-loc=\"client/src/pages/Home.tsx:297\" class=\"font-bold leading-none text-xl text-orange-800\">17</span><span data-loc=\"client/src/pages/Home.tsx:301\" class=\"text-xs font-semibold leading-none text-orange-600\">106</span></button>",
+    "parentHTML": "<td class=\"relative w-full h-full p-0 text-center [&amp;:first-child[data-selected=true]_button]:rounded-l-md [&amp;:last-child[data-selected=true]_button]:rounded-r-md group/day aspect-square select-none rdp-day relative\" role=\"gridcell\" data-day=\"2026-08-17\"><button data-loc=\"client/src/pages/Home.tsx:280\" class=\"\n            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-300 p-2 text-sm font-medium gap-1 cursor-pointer\n            bg"
+  },
+  "afterDateSwitch": {
+    "hasNewDateSummary": true,
+    "hasCalendarCount": true,
+    "selectedDateSummary": "2026-08-17 题材统计",
+    "calendarButtons": [
+      "17106",
+      "全部 106"
+    ],
+    "listCountText": "涨停股票 106 只",
+    "location": "http://127.0.0.1:3000/",
+    "readyState": "complete",
+    "bodyHtmlPrefix": "\n    <script id=\"manus-runtime\">window.__MANUS_HOST_DEV__ = true;\n(function(){\"use strict\";var Mr={exports:{}},Kn={};/**\n * @license React\n * react-jsx-runtime.production.js\n *\n * Copyright (c) Meta Platforms, Inc. and affiliates.\n *\n * This source code is licensed under the MIT license found in the\n * LICENSE file in the root directory of this source tree.\n */var $c;function um(){if($c)return Kn;$c=1;var r=Symbol.for(\"react.transitional.element\"),i=Symbol.for(\"react.fragment\");function c(s,d,m){var x=null;if(m!==void 0&&(x=\"\"+m),d.key!==void 0&&(x=\"\"+d.key),\"key\"in d){m={};for(var R in d)R!==\"key\"&&(m[R]=d[R])}else m=d;return d=m.ref,{$$typeof:r,type:s,key:x,ref:d!==void 0?d:null,props:m}}return Kn.Fragment=i,Kn.jsx=c,Kn.jsxs=c,Kn}var Fc;function dm(){return Fc||(Fc=1,Mr.exports=um()),Mr.exports}var h=dm(),Ar={exports:{}},Pn={},Rr={exports:{}},Nr={};/**\n * @license React\n * scheduler.production.js\n *\n * Copyright (c) Meta Platforms, Inc. and affiliates.\n *\n * This source code is licen",
+    "rootHtmlPrefix": "<section aria-label=\"Notifications alt+T\" tabindex=\"-1\" aria-live=\"polite\" aria-relevant=\"additions text\" aria-atomic=\"false\"></section><div data-loc=\"client/src/pages/Home.tsx:312\" class=\"min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50\"><header data-loc=\"client/src/pages/Home.tsx:314\" class=\"sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-xl supports-[backdrop-filter]:bg-white/60 shadow-sm\"><div data-loc=\"client/src/pages/Home.tsx:315\" class=\"container flex h-14 items-center justify-between\"><div data-loc=\"client/src/pages/Home.tsx:316\" class=\"flex items-center gap-3\"><div data-loc=\"client/src/pages/Home.tsx:317\" class=\"h-9 w-9 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-lg\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-trending-up h-5 w-5 text-wh",
+    "errorText": null
+  }
+}

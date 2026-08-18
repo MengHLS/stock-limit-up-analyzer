@@ -6,6 +6,7 @@ import { z } from "zod";
 import { invokeLLM } from "./_core/llm";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
+import { parseRecognitionResult } from "./recognition";
 import {
   createLimitUpRecord,
   createLimitUpRecordsBatch,
@@ -245,11 +246,11 @@ export const appRouter = router({
             messages: [
               {
                 role: "system",
-                content: `你是一个专业的股票数据识别助手。请分析用户提供的股票涨停复盘图片，提取其中的股票信息和日期。
+                content: `你是一个专业的中文股票涨停复盘图片识别助手。请逐行读取图片中的涨停股票表格，并只返回符合JSON Schema的数据。
 
 请严格按照以下JSON格式返回数据：
 {
-  "date": "图片中的涨停日期，格式为YYYY-MM-DD，如图片标题显示12.31则返回2024-12-31",
+  "date": "图片中的涨停日期，格式为YYYY-MM-DD；若图片没有日期则使用用户提供的日期",
   "stocks": [
     {
       "stockCode": "股票代码，如002361.SZ",
@@ -265,13 +266,13 @@ export const appRouter = router({
 }
 
 注意事项：
-1. 首先识别图片标题中的日期（通常在标题中显示如"12.31"或"2024.12.31"），转换为YYYY-MM-DD格式
-2. 仔细识别图片中的每一行股票数据
-3. 股票代码需要包含交易所后缀（.SZ或.SH）
-4. 题材分类是图片中的大标题分类
-5. 关键词是每行股票最后一列的详细描述
-6. 如果某个字段无法识别，请留空字符串
-7. 确保返回有效的JSON格式`
+1. 优先使用用户提供的日期；没有用户日期时才从图片标题识别日期
+2. 仔细识别表格中的每一行股票，不要合并或遗漏行
+3. 股票代码保留数字，并补充正确交易所后缀：深市.SZ、沪市.SH、北交所.BJ
+4. 涨停时间统一为HH:MM或HH:MM:SS；无法确认时返回空字符串
+5. 板数、流通市值和成交额保留图片中的原始文字或数字，不要猜测
+6. 题材分类和关键词按图片原文提取；无法识别的字段返回空字符串
+7. 只返回JSON，不添加Markdown代码块或解释文字`
               },
               {
                 role: "user",
@@ -329,22 +330,7 @@ export const appRouter = router({
           if (!rawContent) {
             throw new Error("LLM返回内容为空");
           }
-
-          // 处理content可能是字符串或数组的情况
-          let content: string;
-          if (typeof rawContent === 'string') {
-            content = rawContent;
-          } else if (Array.isArray(rawContent)) {
-            const textPart = rawContent.find(p => p.type === 'text');
-            content = textPart && 'text' in textPart ? textPart.text : '';
-          } else {
-            throw new Error("无法解析LLM返回内容");
-          }
-
-          const data = JSON.parse(content);
-          // 优先使用用户选择的日期，如果没有则使用LLM识别的日期
-          const recognizedDate = limitUpDate || data.date;
-          const stocks = data.stocks || [];
+          const { date: recognizedDate, stocks } = parseRecognitionResult(rawContent, limitUpDate);
 
           // 批量保存到数据库
           if (stocks.length > 0) {
@@ -443,27 +429,22 @@ export const appRouter = router({
             messages: [
               {
                 role: "system",
-                content: `你是一个专业的中文股票数据识别助手。你的任务是什么？
+                content: `你是一个专业的中文股票涨停复盘图片识别助手。请逐行提取图片中的全部涨停股票信息，并严格输出JSON。
 
-你需要分析用户提供的股票涨停复盘图片，提取其中的所有股票信息。
-
-一些重要的识别指南：
-1. 日期识别：从图片中提取涨停日期，格式必须是YYYY-MM-DD，年份为2026。
-2. 股票代码：提取中文股票代码，不要混混不清。常见代码格式：
+识别指南：
+1. 日期优先使用接口传入的日期；只有没有传入日期时才从图片标题识别YYYY-MM-DD。
+2. 股票代码只保留数字和交易所后缀，按市场补充.SZ、.SH或.BJ。常见代码格式：
    - 深业主板: 000xxx.SZ
    - 创业板: 300xxx.SZ
    - 科创板: 688xxx.SH
    - 北交所: 8xxxxx.BJ
    - 上海主板: 600xxx.SH
 3. 股票名称：一定要是中文名称。
-4. 涨停时间：提取时间，格式为HH:MM:SS，应在09:30-15:00之间。
-5. 板数：一定要是整数，并且是一个有效的板数值。
-6. 流通市值和成交额：单位是亿元，一定要是数字。
-7. 题材和关键词：一定要是中文。
+4. 涨停时间：提取为HH:MM或HH:MM:SS，无法确认时返回空字符串。
+5. 板数、流通市值和成交额：保留图片中的原始值，不要猜测或改单位。
+6. 题材和关键词：按图片原文提取，无法确认时返回空字符串。
 
-如果图片中不清楚或没有某个字段，你可以：
-- 对于日期：使用提供的日期参数
-- 对于其他字段：使用空字符串或null
+如果图片中不清楚或没有某个字段：日期使用提供的日期参数，其他字段使用空字符串；不要编造股票代码、名称或数值。
 
 严格按照以下JSON格式返回数据，不要添加额外字段：
 {
@@ -546,20 +527,7 @@ export const appRouter = router({
           if (!rawContent) {
             throw new Error("LLM返回内容为空");
           }
-
-          let content: string;
-          if (typeof rawContent === 'string') {
-            content = rawContent;
-          } else if (Array.isArray(rawContent)) {
-            const textPart = rawContent.find(p => p.type === 'text');
-            content = textPart && 'text' in textPart ? textPart.text : '';
-          } else {
-            throw new Error("无法解析LLM返回内容");
-          }
-
-          const data = JSON.parse(content);
-          const recognizedDate = limitUpDate || data.date;
-          const stocks = data.stocks || [];
+          const { date: recognizedDate, stocks } = parseRecognitionResult(rawContent, limitUpDate);
 
           if (stocks.length > 0) {
             const records = stocks.map((stock: any) => ({
