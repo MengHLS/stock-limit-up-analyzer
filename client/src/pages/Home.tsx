@@ -11,7 +11,7 @@ import { filterFirstBoardRecords, getPreviousCalendarDate } from "@/lib/firstBoa
 import { buildLimitUpCsv } from "@/lib/exportCsv";
 import { normalizeCustomSector } from "@/lib/customSector";
 import { isValidLimitUpTime, normalizeLimitUpTime } from "@shared/limitUpTime";
-import { buildAdjacentRecordsByDate, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "@/lib/homeData";
+import { buildAdjacentRecordsByDate, getLatestDateString, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "@/lib/homeData";
 import { getLoginUrl } from "@/const";
 import { 
   Upload, 
@@ -210,11 +210,11 @@ export default function Home() {
     });
   }, [selectedDateStr, recordsByDate, currentDateStats, selectedSector, selectedBoard, showFirstBoard, sortByTime]);
 
-  // 自动选择最新日期
+  // 自动选择数据库中最新的涨停日期，而不是系统当前日期
   useEffect(() => {
-    if (dates.length > 0 && !selectedDate) {
-      const latestDateStr = dates[0];
-      const date = dateStringToDate.get(latestDateStr);
+    if (!selectedDate) {
+      const latestDateStr = getLatestDateString(dates);
+      const date = latestDateStr ? dateStringToDate.get(latestDateStr) : undefined;
       if (date) {
         setSelectedDate(date);
       }

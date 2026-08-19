@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAdjacentRecordsByDate, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "../client/src/lib/homeData";
+import { buildAdjacentRecordsByDate, getLatestDateString, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "../client/src/lib/homeData";
 
 describe("home data helpers", () => {
   it("keeps only the selected and previous-date records for first-board checks", () => {
@@ -11,6 +11,11 @@ describe("home data helpers", () => {
     expect(map.get("2026-08-18")).toEqual(current);
     expect(map.get("2026-08-17")).toEqual(previous);
     expect(map.has("2026-08-16")).toBe(false);
+  });
+
+  it("selects the latest database date regardless of input order", () => {
+    expect(getLatestDateString(["2026-01-09", "2026-08-18", "2026-02-01"])).toBe("2026-08-18");
+    expect(getLatestDateString([])).toBeNull();
   });
 
   it("summarizes positive daily counts and ignores empty days", () => {

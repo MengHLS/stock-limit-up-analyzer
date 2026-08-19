@@ -76,3 +76,9 @@ export function setWatchStatus(
   next.set(stockCode, status);
   return next;
 }
+
+
+export function getLatestDateString(dates: readonly string[]): string | null {
+  if (dates.length === 0) return null;
+  return dates.reduce((latest, date) => (date > latest ? date : latest));
+}
