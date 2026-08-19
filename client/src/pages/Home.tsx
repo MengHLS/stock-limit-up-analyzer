@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { trpc } from "@/lib/trpc";
 import { filterFirstBoardRecords, getPreviousCalendarDate } from "@/lib/firstBoard";
 import { buildLimitUpCsv } from "@/lib/exportCsv";
@@ -50,6 +51,7 @@ export default function Home() {
   const [showFirstBoard, setShowFirstBoard] = useState(false);
   const [sortByTime, setSortByTime] = useState<"asc" | "desc" | null>(null);
   const [recordsForExport, setRecordsForExport] = useState<any[]>([]);
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
 
   // 获取股票板块（使用useCallback避免依赖问题）
   const getStockBoard = useCallback((stockCode: string): string => {
@@ -115,6 +117,12 @@ export default function Home() {
   const selectedDateStr = dateToString(selectedDate);
 
   const dailyCountSummary = useMemo(() => summarizeDailyCounts(dailyStats), [dailyStats]);
+
+  useEffect(() => {
+    if (selectedDate) {
+      setCalendarMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
+    }
+  }, [selectedDate]);
 
   // 题材统计直接从当前日期记录计算，避免再次查询同一批涨停数据
   const currentDateStats = useMemo(() => summarizeSectorStats(selectedRecords), [selectedRecords]);
@@ -214,6 +222,66 @@ export default function Home() {
     link.click();
     URL.revokeObjectURL(url);
   }, [selectedDateStr, recordsForExport]);
+
+  // 日历上有涨停数据的日期
+  const datesWithData = useMemo(() => {
+    return Array.from(dateStringToDate.values());
+  }, [dateStringToDate]);
+
+  const modifiers = useMemo(() => ({
+    hasData: datesWithData,
+  }), [datesWithData]);
+
+  const modifiersClassNames = {
+    hasData: "relative",
+  };
+
+  const dateCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    dailyStats.forEach((stat) => map.set(stat.date, Number(stat.count)));
+    return map;
+  }, [dailyStats]);
+
+  const CustomDayButton = useCallback(
+    (props: any) => {
+      const { day, modifiers, ...buttonProps } = props;
+      const dateStr = day?.date ? dateToString(day.date) : null;
+      const count = dateStr ? dateCountMap.get(dateStr) : undefined;
+      const hasData = count !== undefined;
+      const isSelected = modifiers?.selected;
+      const isToday = modifiers?.today;
+
+      return (
+        <button
+          {...buttonProps}
+          type="button"
+          className={`
+            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-300 p-2 text-sm font-medium gap-1 cursor-pointer
+            ${hasData 
+              ? isSelected
+                ? 'bg-gradient-to-br from-orange-400 via-orange-500 to-red-500 text-white shadow-xl border border-orange-300 hover:shadow-2xl hover:scale-105'
+                : 'bg-gradient-to-br from-orange-50 via-orange-100 to-yellow-50 hover:from-orange-100 hover:via-orange-150 hover:to-yellow-100 text-orange-700 border border-orange-200 shadow-md hover:shadow-lg hover:scale-102'
+              : isSelected
+                ? 'bg-gradient-to-br from-slate-200 to-slate-300 text-slate-700 border border-slate-300 shadow-lg hover:scale-105'
+                : isToday
+                  ? 'bg-gradient-to-br from-blue-100 to-blue-200 text-blue-700 border border-blue-300 shadow-md hover:shadow-lg hover:scale-102 ring-2 ring-blue-300 ring-opacity-50'
+                  : 'hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-sm hover:shadow-md hover:scale-102'
+            }
+          `}
+        >
+          <span className={`font-bold leading-none text-xl ${hasData && isSelected ? "text-white" : hasData ? "text-orange-800" : "text-slate-800"}`}>
+            {day?.date.getDate()}
+          </span>
+          {hasData && (
+            <span className={`text-xs font-semibold leading-none ${isSelected ? "text-orange-100" : "text-orange-600"}`}>
+              {count}
+            </span>
+          )}
+        </button>
+      );
+    },
+    [dateCountMap]
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -351,7 +419,42 @@ export default function Home() {
             <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-3">
+            {/* 左侧：日历 */}
+            <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
+              <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-2 px-3">
+                <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
+                  <Calendar className="h-5 w-5 text-orange-600" />
+                  选择日期
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-2 px-3 pb-2">
+                {dates.length === 0 ? (
+                  <p className="text-center py-12 text-muted-foreground">
+                    暂无数据，请先上传涨停复盘图片
+                  </p>
+                ) : (
+                  <div className="calendar-container">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedDate}
+                      month={calendarMonth}
+                      onMonthChange={setCalendarMonth}
+                      onSelect={setSelectedDate}
+                      modifiers={modifiers}
+                      modifiersClassNames={modifiersClassNames}
+                      className="rounded-lg"
+                      components={{
+                        DayButton: CustomDayButton as any,
+                      }}
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* 右侧：涨停数据 */}
+            <div className="space-y-2">
               {selectedDateStr && (
                 <>
                   {/* 题材统计 */}
@@ -562,6 +665,7 @@ export default function Home() {
                 </>
               )}
             </div>
+          </div>
         )}
       </main>
     </div>
