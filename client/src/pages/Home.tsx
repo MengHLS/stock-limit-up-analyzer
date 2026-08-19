@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { trpc } from "@/lib/trpc";
 import { filterFirstBoardRecords, getPreviousCalendarDate } from "@/lib/firstBoard";
 import { buildLimitUpCsv } from "@/lib/exportCsv";
@@ -51,7 +50,6 @@ export default function Home() {
   const [showFirstBoard, setShowFirstBoard] = useState(false);
   const [sortByTime, setSortByTime] = useState<"asc" | "desc" | null>(null);
   const [recordsForExport, setRecordsForExport] = useState<any[]>([]);
-  const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
 
   // 获取股票板块（使用useCallback避免依赖问题）
   const getStockBoard = useCallback((stockCode: string): string => {
@@ -116,26 +114,7 @@ export default function Home() {
   // 当前选中日期的字符串格式
   const selectedDateStr = dateToString(selectedDate);
 
-  const dataMonths = useMemo(() => {
-    return Array.from(new Set(dates.map((date) => date.slice(0, 7)))).sort((a, b) => b.localeCompare(a));
-  }, [dates]);
-
-  const boardStats = useMemo(() => {
-    const stats = new Map<string, number>();
-    (recordsByDate.get(selectedDateStr ?? "") ?? []).forEach((record) => {
-      const board = getStockBoard(record.stockCode);
-      stats.set(board, (stats.get(board) ?? 0) + 1);
-    });
-    return Array.from(stats.entries()).sort((a, b) => b[1] - a[1]);
-  }, [recordsByDate, selectedDateStr, getStockBoard]);
-
   const dailyCountSummary = useMemo(() => summarizeDailyCounts(dailyStats), [dailyStats]);
-
-  useEffect(() => {
-    if (selectedDate) {
-      setCalendarMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
-    }
-  }, [selectedDate]);
 
   // 题材统计直接从当前日期记录计算，避免再次查询同一批涨停数据
   const currentDateStats = useMemo(() => summarizeSectorStats(selectedRecords), [selectedRecords]);
@@ -235,72 +214,6 @@ export default function Home() {
     link.click();
     URL.revokeObjectURL(url);
   }, [selectedDateStr, recordsForExport]);
-
-  // 日历上有涨停数据的日期
-  const datesWithData = useMemo(() => {
-    return Array.from(dateStringToDate.values());
-  }, [dateStringToDate]);
-
-  // 自定义日历日期渲染，显示涨停数
-  const modifiers = useMemo(() => {
-    return {
-      hasData: datesWithData,
-    };
-  }, [datesWithData]);
-
-  const modifiersClassNames = {
-    hasData: "relative",
-  };
-
-  // 为每个有数据的日期创建映射，存储涨停数
-  const dateCountMap = useMemo(() => {
-    const map = new Map<string, number>();
-    dailyStats.forEach((stat) => map.set(stat.date, Number(stat.count)));
-    return map;
-  }, [dailyStats]);
-
-  // 自定义DayButton组件，显示涨停数
-  const CustomDayButton = useCallback(
-    (props: any) => {
-      // 确保传递所有必要的props
-      const { day, modifiers, ...buttonProps } = props;
-      const dateStr = day?.date ? dateToString(day.date) : null;
-      const count = dateStr ? dateCountMap.get(dateStr) : undefined;
-      const hasData = count !== undefined;
-      const isSelected = modifiers?.selected;
-      const isToday = modifiers?.today;
-
-      return (
-        <button
-          {...buttonProps}
-          type="button"
-          className={`
-            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-300 p-2 text-sm font-medium gap-1 cursor-pointer
-            ${hasData 
-              ? isSelected
-                ? 'bg-gradient-to-br from-orange-400 via-orange-500 to-red-500 text-white shadow-xl border border-orange-300 hover:shadow-2xl hover:scale-105'
-                : 'bg-gradient-to-br from-orange-50 via-orange-100 to-yellow-50 hover:from-orange-100 hover:via-orange-150 hover:to-yellow-100 text-orange-700 border border-orange-200 shadow-md hover:shadow-lg hover:scale-102'
-              : isSelected
-                ? 'bg-gradient-to-br from-slate-200 to-slate-300 text-slate-700 border border-slate-300 shadow-lg hover:scale-105'
-                : isToday
-                  ? 'bg-gradient-to-br from-blue-100 to-blue-200 text-blue-700 border border-blue-300 shadow-md hover:shadow-lg hover:scale-102 ring-2 ring-blue-300 ring-opacity-50'
-                  : 'hover:bg-slate-100 text-slate-600 border border-slate-200 shadow-sm hover:shadow-md hover:scale-102'
-            }
-          `}
-        >
-          <span className={`font-bold leading-none text-xl ${hasData && isSelected ? "text-white" : hasData ? "text-orange-800" : "text-slate-800"}`}>
-            {day?.date.getDate()}
-          </span>
-          {hasData && (
-            <span className={`text-xs font-semibold leading-none ${isSelected ? "text-orange-100" : "text-orange-600"}`}>
-              {count}
-            </span>
-          )}
-        </button>
-      );
-    },
-    [dateCountMap]
-  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -438,59 +351,7 @@ export default function Home() {
             <Loader2 className="h-10 w-10 animate-spin text-orange-500" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-3">
-            {/* 左侧：日历 */}
-            <Card className="shadow-xl border-slate-200 bg-white/80 backdrop-blur">
-              <CardHeader className="bg-gradient-to-r from-orange-50 to-red-50 py-2 px-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="flex items-center gap-2 text-slate-700 text-base">
-                      <Calendar className="h-5 w-5 text-orange-600" />
-                      选择日期
-                    </CardTitle>
-                    {dataMonths.length > 1 && (
-                      <select
-                        aria-label="快速跳转到有数据的月份"
-                        value={`${calendarMonth.getFullYear()}-${String(calendarMonth.getMonth() + 1).padStart(2, "0")}`}
-                        onChange={(event) => {
-                          const [year, month] = event.target.value.split("-").map(Number);
-                          setCalendarMonth(new Date(year, month - 1, 1));
-                        }}
-                        className="rounded-md border border-orange-200 bg-white px-2 py-1 text-xs text-orange-700 outline-none focus:ring-2 focus:ring-orange-300"
-                      >
-                        {dataMonths.map((month) => (
-                          <option key={month} value={month}>{`${month.slice(0, 4)}年${month.slice(5)}月`}</option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-              </CardHeader>
-              <CardContent className="pt-2 px-3 pb-2">
-                {dates.length === 0 ? (
-                  <p className="text-center py-12 text-muted-foreground">
-                    暂无数据，请先上传涨停复盘图片
-                  </p>
-                ) : (
-                  <div className="calendar-container">
-                    <CalendarComponent
-                      mode="single"
-                      selected={selectedDate}
-                      month={calendarMonth}
-                      onMonthChange={setCalendarMonth}
-                      onSelect={setSelectedDate}
-                      modifiers={modifiers}
-                      modifiersClassNames={modifiersClassNames}
-                      className="rounded-lg"
-                      components={{
-                        DayButton: CustomDayButton as any,
-                      }}
-                    />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* 右侧：涨停数据 */}
-            <div className="space-y-2">
+          <div className="space-y-2">
               {selectedDateStr && (
                 <>
                   {/* 题材统计 */}
@@ -515,18 +376,6 @@ export default function Home() {
                           <div className="text-[11px] text-indigo-600">累计记录</div>
                           <div className="font-bold text-indigo-700">{dailyCountSummary.total}</div>
                         </div>
-                      </div>
-                      <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-purple-50 px-2 py-1.5">
-                        <span className="text-xs font-semibold text-purple-700">板块联动</span>
-                        {boardStats.map(([board, count]) => (
-                          <button
-                            key={board}
-                            onClick={() => setSelectedBoard(selectedBoard === board ? null : board)}
-                            className={`rounded-full px-2 py-0.5 text-xs font-medium ${selectedBoard === board ? "bg-purple-600 text-white" : "bg-white text-purple-700"}`}
-                          >
-                            {board} {count}
-                          </button>
-                        ))}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button
@@ -713,7 +562,6 @@ export default function Home() {
                 </>
               )}
             </div>
-          </div>
         )}
       </main>
     </div>
