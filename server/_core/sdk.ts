@@ -256,11 +256,30 @@ class SDKServer {
     } as GetUserInfoWithJwtResponse;
   }
 
-  async authenticateRequest(req: Request): Promise<User> {
+  async authenticateRequest(req: Request): Promise<User & { taskUid?: string; isCron?: boolean }> {
     // Regular authentication flow
     const cookies = this.parseCookies(req.headers.cookie);
     const sessionCookie = cookies.get(COOKIE_NAME);
     const session = await this.verifySession(sessionCookie);
+
+    if (session && session.openId.startsWith("cron_")) {
+      const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+      if (!userInfo.taskUid) throw ForbiddenError("Cron session missing task_uid");
+      const now = new Date();
+      return {
+        id: -1,
+        openId: session.openId,
+        name: userInfo.name || "Manus Scheduled Task",
+        email: null,
+        loginMethod: null,
+        role: "user",
+        createdAt: now,
+        updatedAt: now,
+        lastSignedIn: now,
+        taskUid: userInfo.taskUid ?? undefined,
+        isCron: true,
+      } as any;
+    }
 
     if (!session) {
       throw ForbiddenError("Invalid session cookie");
