@@ -25,6 +25,7 @@ import {
   Hash,
   Tag,
   Star,
+  Crown,
   Database,
   Download,
   Pencil,
@@ -309,6 +310,12 @@ export default function Home() {
               <Button variant="ghost" size="sm" className="gap-2 hover:bg-orange-50">
                 <Activity className="h-4 w-4" />
                 情绪分析
+              </Button>
+            </Link>
+            <Link href="/leader-candidates">
+              <Button variant="ghost" size="sm" className="gap-2 hover:bg-amber-50">
+                <Crown className="h-4 w-4" />
+                龙头候选
               </Button>
             </Link>
             {isAuthenticated ? (

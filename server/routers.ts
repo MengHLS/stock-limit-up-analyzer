@@ -38,6 +38,7 @@ import {
   getSectorHeatmapData,
   getConnectionBoardStats,
   getMaxConnectionBoardTrend,
+  getLeaderCandidates,
   getAllSentimentAlerts,
   getUnreadAlertCount,
   markAlertAsRead,
@@ -694,6 +695,11 @@ export const appRouter = router({
 
   // 情绪预警相关API
   sentiment: router({
+    // 获取可解释的主板龙头候选池（收盘后复盘排序，不构成交易建议）
+    getLeaderCandidates: publicProcedure.query(async () => {
+      return await getLeaderCandidates();
+    }),
+
     // 获取每日最高连板趋势及对应股票名称
     getMaxConnectionBoardTrend: publicProcedure.query(async () => {
       return await getMaxConnectionBoardTrend();
