@@ -272,7 +272,7 @@ export default function SentimentAnalysisPage() {
                 <Card className="border-rose-100 bg-white/85 shadow-sm">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base"><GitBranch className="h-4 w-4 text-rose-600" />龙头列表</CardTitle>
-                    <CardDescription>汇总全部已确认主板龙头；同一股票只展示一行，并标注其原生龙、周期龙头、穿越周期龙或补涨龙等身份。</CardDescription>
+                    <CardDescription>汇总全部已确认主板龙头；同一股票只展示一行。原生龙仅指未被穿越周期龙或补涨龙身份覆盖的独立来源类型。</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {cycleAnalysis.leaderList.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">当前样本尚未出现已确认的主板龙头。</p> : <div className="space-y-2">{cycleAnalysis.leaderList.map((leader) => (

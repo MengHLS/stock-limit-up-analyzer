@@ -238,6 +238,7 @@ function buildLeaderList(
 ): LeaderListItem[] {
   const items = new Map<string, LeaderListItem>();
   const typeOrder: Record<LeaderListType, number> = { "原生龙": 0, "穿越周期龙": 1, "补涨龙": 2, "周期龙头": 3 };
+  const nativeSourceNotes = new Set(nativeLeaders.map((leader) => `${leader.startDate} 低位混沌期首板起涨`));
   const addLeader = (input: {
     stockCode: string;
     stockName: string;
@@ -320,7 +321,16 @@ function buildLeaderList(
   }
 
   return Array.from(items.values())
-    .map((item) => ({ ...item, leaderTypes: item.leaderTypes.sort((left, right) => typeOrder[left] - typeOrder[right]) }))
+    .map((item) => {
+      const coveredByPostBreakType = item.leaderTypes.includes("穿越周期龙") || item.leaderTypes.includes("补涨龙");
+      const leaderTypes = (coveredByPostBreakType ? item.leaderTypes.filter((type) => type !== "原生龙") : item.leaderTypes)
+        .sort((left, right) => typeOrder[left] - typeOrder[right]);
+      return {
+        ...item,
+        leaderTypes,
+        sourceNotes: coveredByPostBreakType ? item.sourceNotes.filter((note) => !nativeSourceNotes.has(note)) : item.sourceNotes,
+      };
+    })
     .sort((left, right) => right.firstLeaderDate.localeCompare(left.firstLeaderDate) || right.highestBoards - left.highestBoards);
 }
 
