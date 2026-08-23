@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildDistinctHighBoardLabels } from "@/lib/highBoardLabels";
 import { trpc } from "@/lib/trpc";
 import { Activity, ArrowLeft, CalendarDays, Loader2, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -65,7 +66,7 @@ export default function SentimentAnalysisPage() {
   );
   const visibleChartData = chartData.slice(visibleStartIndex, visibleEndIndex + 1);
   const visiblePeakBoards = visibleChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
-  const visibleHighBoardPoints = visibleChartData.filter((point) => point.maxBoards >= 6);
+  const visibleHighBoardLabels = buildDistinctHighBoardLabels(visibleChartData);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50/40 to-red-50/50">
@@ -166,7 +167,7 @@ export default function SentimentAnalysisPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>每日最高连板折线图</CardTitle>
-                    <CardDescription>仅统计主板股票；默认显示最近60个交易日，并标注全部6板及以上股票名称。</CardDescription>
+                    <CardDescription>仅统计主板股票；默认显示最近60个交易日，并对每段连续高连板仅标注一次股票名称。</CardDescription>
                   </div>
                   <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
                     {formatDate(visibleChartData[0]?.date ?? chartData[0].date)} 至 {formatDate(visibleChartData.at(-1)?.date ?? chartData.at(-1)?.date ?? "")}
@@ -195,7 +196,7 @@ export default function SentimentAnalysisPage() {
                       </LineChart>
                     </ResponsiveContainer>
                     <div className="pointer-events-none absolute inset-0 overflow-visible">
-                      {visibleHighBoardPoints.map((point, labelIndex) => {
+                      {visibleHighBoardLabels.map((point, labelIndex) => {
                         const pointIndex = visibleChartData.findIndex((item) => item.date === point.date);
                         const xPercent = visibleChartData.length === 1
                           ? 50
@@ -211,7 +212,7 @@ export default function SentimentAnalysisPage() {
                               marginTop: `${-(labelIndex % 2) * 28}px`,
                             }}
                           >
-                            {point.stockNames.join("、") || `${point.maxBoards}板`}
+                            {point.labelNames.join("、") || `${point.maxBoards}板`}
                           </div>
                         );
                       })}
