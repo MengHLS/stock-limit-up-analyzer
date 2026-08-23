@@ -8,6 +8,11 @@ export type LeaderCandidateSourceRecord = {
   circulationValue: string | null;
 };
 
+export type LeaderCandidateTrajectoryPoint = {
+  date: string;
+  boards: number;
+};
+
 export type LeaderCandidate = {
   rank: number;
   stockCode: string;
@@ -21,6 +26,7 @@ export type LeaderCandidate = {
   circulationValue: string | null;
   reasons: string[];
   riskTags: string[];
+  trajectory: LeaderCandidateTrajectoryPoint[];
 };
 
 export type LeaderCandidateResult = {
@@ -29,6 +35,32 @@ export type LeaderCandidateResult = {
   maxBoards: number;
   strongSectors: Array<{ sector: string; count: number }>;
   candidates: LeaderCandidate[];
+};
+
+export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "stockName" | "sector" | "boards" | "score"> & {
+  date: string;
+  nextDate: string;
+  success: boolean;
+};
+
+export type LeaderCandidateScoreBand = {
+  label: string;
+  sampleSize: number;
+  successCount: number;
+  successRate: number | null;
+};
+
+export type LeaderCandidateBacktestResult = {
+  definition: string;
+  totalSamples: number;
+  successCount: number;
+  successRate: number | null;
+  scoreBands: LeaderCandidateScoreBand[];
+  recommendedMinScore: number | null;
+  calibrationSampleSize: number;
+  calibrationPeriod: { startDate: string | null; endDate: string | null };
+  outOfSample: { sampleSize: number; successCount: number; successRate: number | null };
+  latestRows: LeaderCandidateBacktestRow[];
 };
 
 function isMainBoardStock(stockCode: string) {
@@ -56,25 +88,32 @@ function formatTurnover(turnover: string | null) {
   return turnover?.trim() ? `${turnover}亿元` : null;
 }
 
+function percent(successCount: number, sampleSize: number) {
+  if (sampleSize === 0) return null;
+  return Number(((successCount / sampleSize) * 100).toFixed(1));
+}
+
 /**
- * 用全量涨停记录构建最新交易日的主板龙头候选池。
- * 评分仅用于收盘后排序与复盘，所有得分来源和风险项均随候选结果返回。
+ * 仅使用 targetDate 当日及以前的记录构建候选，确保历史回测的每个信号不读取未来数据。
  */
-export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): LeaderCandidateResult {
-  if (records.length === 0) {
+export function buildLeaderCandidatesForDate(
+  records: LeaderCandidateSourceRecord[],
+  targetDate: string,
+): LeaderCandidateResult {
+  const recordsAsOfDate = records.filter((record) => record.limitUpDate <= targetDate);
+  if (recordsAsOfDate.length === 0) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
   }
 
-  const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
+  const tradingDates = Array.from(new Set(recordsAsOfDate.map((record) => record.limitUpDate)))
     .sort((left, right) => right.localeCompare(left));
-  const latestDate = tradingDates[0] ?? null;
-  if (!latestDate) {
+  if (!tradingDates.includes(targetDate)) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
   }
 
   const tradingDateIndex = new Map(tradingDates.map((date, index) => [date, index]));
   const stockDates = new Map<string, Set<string>>();
-  for (const record of records) {
+  for (const record of recordsAsOfDate) {
     if (!isMainBoardStock(record.stockCode)) continue;
     const dates = stockDates.get(record.stockCode) ?? new Set<string>();
     dates.add(record.limitUpDate);
@@ -94,15 +133,16 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
     return boards;
   };
 
-  // 同一股票同日若存在重复记录，保留涨停时间更早的一条，避免重复计数。
+  // 同一股票同日有重复记录时，只保留封板更早的一条，避免重复计数。
   const currentRecordsByCode = new Map<string, LeaderCandidateSourceRecord>();
-  for (const record of records) {
-    if (record.limitUpDate !== latestDate || !isMainBoardStock(record.stockCode)) continue;
+  for (const record of recordsAsOfDate) {
+    if (record.limitUpDate !== targetDate || !isMainBoardStock(record.stockCode)) continue;
     const existing = currentRecordsByCode.get(record.stockCode);
     if (!existing || (record.limitUpTime ?? "99:99:99") < (existing.limitUpTime ?? "99:99:99")) {
       currentRecordsByCode.set(record.stockCode, record);
     }
   }
+
   const currentRecords = Array.from(currentRecordsByCode.values());
   const sectorCounts = new Map<string, number>();
   for (const record of currentRecords) {
@@ -115,10 +155,12 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
     .sort((left, right) => right.count - left.count || left.sector.localeCompare(right.sector))
     .slice(0, 5);
 
+  const currentDateIndex = tradingDateIndex.get(targetDate) ?? 0;
+  const trajectoryDates = tradingDates.slice(currentDateIndex, currentDateIndex + 7).reverse();
   const candidates = currentRecords
     .map((record) => {
       const sector = normalizeSector(record.sector);
-      const boards = calculateBoards(record.stockCode, latestDate);
+      const boards = calculateBoards(record.stockCode, targetDate);
       const sectorCount = sectorCounts.get(sector) ?? 0;
       const limitUpMinutes = timeToMinutes(record.limitUpTime);
       const turnover = parseNumeric(record.turnover);
@@ -133,10 +175,7 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
       const turnoverScore = turnover >= 20 ? 10 : turnover >= 10 ? 8 : turnover >= 5 ? 6 : turnover >= 2 ? 3 : 1;
       const score = Math.min(100, boardScore + sectorScore + timeScore + turnoverScore);
 
-      const reasons = [
-        `${boards}板高度`,
-        `${sector} ${sectorCount}只涨停`,
-      ];
+      const reasons = [`${boards}板高度`, `${sector} ${sectorCount}只涨停`];
       if (record.limitUpTime) reasons.push(`${record.limitUpTime.slice(0, 5)} 封板`);
       const formattedTurnover = formatTurnover(record.turnover);
       if (formattedTurnover) reasons.push(`成交额 ${formattedTurnover}`);
@@ -160,6 +199,10 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
         circulationValue: record.circulationValue,
         reasons,
         riskTags,
+        trajectory: trajectoryDates.map((date) => ({
+          date,
+          boards: stockDates.get(record.stockCode)?.has(date) ? calculateBoards(record.stockCode, date) : 0,
+        })),
       };
     })
     .filter((candidate) => (
@@ -177,10 +220,113 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
     .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
 
   return {
-    date: latestDate,
+    date: targetDate,
     totalMainBoardLimitUps: currentRecords.length,
-    maxBoards: currentRecords.length > 0 ? Math.max(...currentRecords.map((record) => calculateBoards(record.stockCode, latestDate))) : 0,
+    maxBoards: currentRecords.length > 0 ? Math.max(...currentRecords.map((record) => calculateBoards(record.stockCode, targetDate))) : 0,
     strongSectors,
     candidates,
+  };
+}
+
+/** 构建数据库最新交易日的主板龙头候选池。 */
+export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): LeaderCandidateResult {
+  const latestDate = Array.from(new Set(records.map((record) => record.limitUpDate)))
+    .sort((left, right) => right.localeCompare(left))[0];
+  if (!latestDate) {
+    return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
+  }
+  return buildLeaderCandidatesForDate(records, latestDate);
+}
+
+/**
+ * 回测口径：在T日收盘后，严格使用T日及以前数据生成候选；
+ * 成功定义为该股票在下一已记录交易日（T+1）仍出现在涨停记录中。
+ */
+export function buildLeaderCandidateBacktest(records: LeaderCandidateSourceRecord[]): LeaderCandidateBacktestResult {
+  const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
+    .sort((left, right) => left.localeCompare(right));
+  const recordsByDate = new Map<string, Set<string>>();
+  for (const record of records) {
+    const codes = recordsByDate.get(record.limitUpDate) ?? new Set<string>();
+    codes.add(record.stockCode);
+    recordsByDate.set(record.limitUpDate, codes);
+  }
+
+  const rows: LeaderCandidateBacktestRow[] = [];
+  // 最后一个交易日没有T+1结果，主动排除，形成至少一个交易日的观察间隔。
+  for (let index = 0; index < tradingDates.length - 1; index += 1) {
+    const date = tradingDates[index];
+    const nextDate = tradingDates[index + 1];
+    const candidateResult = buildLeaderCandidatesForDate(records, date);
+    const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
+
+    for (const candidate of candidateResult.candidates) {
+      rows.push({
+        date,
+        nextDate,
+        stockCode: candidate.stockCode,
+        stockName: candidate.stockName,
+        sector: candidate.sector,
+        boards: candidate.boards,
+        score: candidate.score,
+        success: nextDayCodes.has(candidate.stockCode),
+      });
+    }
+  }
+
+  const calculateBand = (label: string, predicate: (row: LeaderCandidateBacktestRow) => boolean): LeaderCandidateScoreBand => {
+    const bandRows = rows.filter(predicate);
+    const successCount = bandRows.filter((row) => row.success).length;
+    return { label, sampleSize: bandRows.length, successCount, successRate: percent(successCount, bandRows.length) };
+  };
+  const successCount = rows.filter((row) => row.success).length;
+  const scoreBands = [
+    calculateBand("65分及以上", (row) => row.score >= 65),
+    calculateBand("55–64分", (row) => row.score >= 55 && row.score < 65),
+    calculateBand("45–54分", (row) => row.score >= 45 && row.score < 55),
+    calculateBand("45分以下", (row) => row.score < 45),
+  ];
+
+  // 评分阈值仅用较早70%的日期校准，再在较晚30%的日期做样本外验证，避免将同一批样本既用于选阈值又用于评估。
+  const calibrationDateCount = Math.max(0, Math.floor(tradingDates.length * 0.7));
+  const calibrationDates = new Set(tradingDates.slice(0, calibrationDateCount));
+  const calibrationRows = rows.filter((row) => calibrationDates.has(row.date));
+  const outOfSampleRows = rows.filter((row) => !calibrationDates.has(row.date));
+  const thresholdOptions = [45, 50, 55, 60, 65]
+    .map((threshold) => {
+      const thresholdRows = calibrationRows.filter((row) => row.score >= threshold);
+      const thresholdSuccesses = thresholdRows.filter((row) => row.success).length;
+      return { threshold, sampleSize: thresholdRows.length, successRate: percent(thresholdSuccesses, thresholdRows.length) };
+    })
+    .filter((item) => item.sampleSize >= 20 && item.successRate !== null)
+    .sort((left, right) => (
+      (right.successRate ?? 0) - (left.successRate ?? 0)
+      || right.sampleSize - left.sampleSize
+      || right.threshold - left.threshold
+    ));
+  const recommended = thresholdOptions[0] ?? null;
+  const outOfSampleAtThreshold = recommended
+    ? outOfSampleRows.filter((row) => row.score >= recommended.threshold)
+    : [];
+  const outOfSampleSuccessCount = outOfSampleAtThreshold.filter((row) => row.success).length;
+
+  return {
+    definition: "成功=候选在T日收盘后入池，且在下一已记录交易日T+1仍为涨停；末个交易日因缺少T+1结果不纳入样本。",
+    totalSamples: rows.length,
+    successCount,
+    successRate: percent(successCount, rows.length),
+    scoreBands,
+    recommendedMinScore: recommended?.threshold ?? null,
+    calibrationSampleSize: recommended?.sampleSize ?? 0,
+    calibrationPeriod: {
+      startDate: calibrationDateCount > 0 ? tradingDates[0] : null,
+      endDate: calibrationDateCount > 0 ? tradingDates[calibrationDateCount - 1] : null,
+    },
+    outOfSample: {
+      sampleSize: outOfSampleAtThreshold.length,
+      successCount: outOfSampleSuccessCount,
+      successRate: percent(outOfSampleSuccessCount, outOfSampleAtThreshold.length),
+    },
+    latestRows: rows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score).slice(0, 30),
   };
 }

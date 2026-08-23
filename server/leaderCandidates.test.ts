@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLeaderCandidates } from "./leaderCandidates";
+import { buildLeaderCandidateBacktest, buildLeaderCandidates } from "./leaderCandidates";
 
 describe("buildLeaderCandidates", () => {
   it("仅从最新交易日的主板涨停中生成可解释候选，并排除非主板股票", () => {
@@ -50,5 +50,44 @@ describe("buildLeaderCandidates", () => {
 
     expect(result.totalMainBoardLimitUps).toBe(1);
     expect(result.candidates[0]).toMatchObject({ stockCode: "600001.SH", boards: 2, limitUpTime: "09:40:00" });
+  });
+
+  it("回测仅使用T日及以前数据生成候选，并以T加1涨停延续作为成功口径", () => {
+    const records = [
+      { stockCode: "600001.SH", stockName: "主板甲", limitUpDate: "2026-08-18", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: null },
+      { stockCode: "600002.SH", stockName: "主板乙", limitUpDate: "2026-08-18", limitUpTime: "09:45:00", sector: "题材A", turnover: "20", circulationValue: null },
+      { stockCode: "600003.SH", stockName: "主板丙", limitUpDate: "2026-08-18", limitUpTime: "09:50:00", sector: "题材A", turnover: "20", circulationValue: null },
+      { stockCode: "600001.SH", stockName: "主板甲", limitUpDate: "2026-08-19", limitUpTime: "09:35:00", sector: "题材A", turnover: "20", circulationValue: null },
+      { stockCode: "600002.SH", stockName: "主板乙", limitUpDate: "2026-08-19", limitUpTime: "09:42:00", sector: "题材A", turnover: "20", circulationValue: null },
+      { stockCode: "600003.SH", stockName: "主板丙", limitUpDate: "2026-08-19", limitUpTime: "09:48:00", sector: "题材A", turnover: "20", circulationValue: null },
+    ];
+
+    const result = buildLeaderCandidateBacktest(records);
+    const firstDayLead = result.latestRows.find((row) => row.date === "2026-08-18" && row.stockCode === "600001.SH");
+
+    expect(firstDayLead).toMatchObject({ boards: 1, success: true });
+    expect(result.totalSamples).toBe(3);
+    expect(result.successCount).toBe(3);
+    expect(result.successRate).toBe(100);
+  });
+
+  it("仅在满足最低历史样本量时输出校准阈值", () => {
+    const dates = Array.from({ length: 22 }, (_, index) => `2026-08-${String(index + 1).padStart(2, "0")}`);
+    const records = dates.flatMap((date) => ["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({
+      stockCode,
+      stockName: `主板${index + 1}`,
+      limitUpDate: date,
+      limitUpTime: "09:40:00",
+      sector: "题材A",
+      turnover: "20",
+      circulationValue: null,
+    })));
+
+    const result = buildLeaderCandidateBacktest(records);
+
+    expect(result.totalSamples).toBe(63);
+    expect(result.recommendedMinScore).toBe(45);
+    expect(result.calibrationSampleSize).toBe(45);
+    expect(result.outOfSample).toMatchObject({ sampleSize: 18, successCount: 18, successRate: 100 });
   });
 });

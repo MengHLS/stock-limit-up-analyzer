@@ -20,9 +20,21 @@ export default function LeaderCandidatesPage() {
   const { data, isLoading, isError, refetch, isFetching } = trpc.sentiment.getLeaderCandidates.useQuery(undefined, {
     staleTime: 60_000,
   });
+  const { data: backtest, isLoading: backtestLoading, refetch: refetchBacktest } = trpc.sentiment.getLeaderCandidateBacktest.useQuery(undefined, {
+    staleTime: 5 * 60_000,
+  });
 
   const candidates = data?.candidates ?? [];
   const strongSectors = data?.strongSectors ?? [];
+  const threshold = backtest?.recommendedMinScore ?? null;
+  const calibratedCandidates = threshold === null ? candidates : candidates.filter((candidate) => candidate.score >= threshold);
+  const displayedCandidates = calibratedCandidates.length > 0 ? calibratedCandidates : candidates;
+  const isCalibratedFilterApplied = threshold !== null && calibratedCandidates.length > 0;
+
+  const refreshAll = () => {
+    void refetch();
+    void refetchBacktest();
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/60 to-slate-50">
@@ -38,7 +50,7 @@ export default function LeaderCandidatesPage() {
             <Crown className="h-5 w-5 text-amber-600" />
             <h1 className="text-lg font-semibold text-slate-800">龙头候选池</h1>
           </div>
-          <Button variant="outline" size="sm" className="ml-auto gap-2" onClick={() => refetch()} disabled={isFetching}>
+          <Button variant="outline" size="sm" className="ml-auto gap-2" onClick={refreshAll} disabled={isFetching || backtestLoading}>
             <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
             刷新数据
           </Button>
@@ -65,8 +77,27 @@ export default function LeaderCandidatesPage() {
             <div className="grid gap-4 md:grid-cols-3">
               <Card className="border-amber-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">候选交易日</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-amber-600">{formatDate(data.date)}</div><p className="mt-1 text-xs text-slate-500">按数据库最新涨停日期生成</p></CardContent></Card>
               <Card className="border-orange-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">主板最高连板</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-orange-600">{data.maxBoards}<span className="ml-1 text-base">板</span></div><p className="mt-1 text-xs text-slate-500">主板涨停 {data.totalMainBoardLimitUps} 只</p></CardContent></Card>
-              <Card className="border-red-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">重点观察候选</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-red-600">{candidates.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">满足高度、题材或综合评分条件</p></CardContent></Card>
+              <Card className="border-red-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">重点观察候选</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-red-600">{displayedCandidates.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">{isCalibratedFilterApplied ? `已按历史校准阈值 ${threshold} 分筛选` : "满足高度、题材或综合评分条件"}</p></CardContent></Card>
             </div>
+
+            <Card className="border-sky-100 bg-white/85 shadow-sm">
+              <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="h-4 w-4 text-sky-600" />历史候选池回测</CardTitle><CardDescription>严格在T日收盘后生成候选，成功定义为该股票在下一已记录交易日（T+1）仍为涨停；最后一个交易日不计入样本。</CardDescription></CardHeader>
+              <CardContent>
+                {backtestLoading ? <div className="flex items-center gap-2 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />正在计算历史样本…</div> : !backtest || backtest.totalSamples === 0 ? <p className="py-3 text-sm text-slate-500">历史候选样本不足，暂无法计算回测结果。</p> : (
+                  <div className="space-y-4">
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      <div className="rounded-lg border border-sky-100 bg-sky-50/70 p-3"><p className="text-xs text-slate-500">T+1延续成功率</p><p className="mt-1 text-2xl font-bold text-sky-700">{backtest.successRate ?? "-"}<span className="ml-1 text-sm">{backtest.successRate === null ? "" : "%"}</span></p><p className="mt-1 text-xs text-slate-500">{backtest.successCount}/{backtest.totalSamples} 个候选样本</p></div>
+                      <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 p-3"><p className="text-xs text-slate-500">历史校准阈值</p><p className="mt-1 text-2xl font-bold text-indigo-700">{backtest.recommendedMinScore ?? "-"}<span className="ml-1 text-sm">{backtest.recommendedMinScore === null ? "" : "分"}</span></p><p className="mt-1 text-xs text-slate-500">需至少20个历史样本才会启用</p></div>
+                      <div className="rounded-lg border border-violet-100 bg-violet-50/70 p-3"><p className="text-xs text-slate-500">校准样本数</p><p className="mt-1 text-2xl font-bold text-violet-700">{backtest.calibrationSampleSize}</p><p className="mt-1 text-xs text-slate-500">评分阈值对应的历史样本</p></div>
+                      <div className="rounded-lg border border-emerald-100 bg-emerald-50/70 p-3"><p className="text-xs text-slate-500">样本外T+1成功率</p><p className="mt-1 text-2xl font-bold text-emerald-700">{backtest.outOfSample.successRate ?? "-"}<span className="ml-1 text-sm">{backtest.outOfSample.successRate === null ? "" : "%"}</span></p><p className="mt-1 text-xs text-slate-500">{backtest.outOfSample.successCount}/{backtest.outOfSample.sampleSize} 个较晚期样本</p></div>
+                    </div>
+                    <p className="text-xs leading-5 text-slate-500">阈值由较早70%交易日校准（{formatDate(backtest.calibrationPeriod.startDate)}至{formatDate(backtest.calibrationPeriod.endDate)}），再在较晚30%交易日做样本外验证；若阈值样本不足20个，则不启用校准筛选。</p>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{backtest.scoreBands.map((band) => <div key={band.label} className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs font-medium text-slate-600">{band.label}</p><p className="mt-1 text-lg font-bold text-slate-800">{band.successRate ?? "-"}{band.successRate === null ? "" : "%"}</p><p className="text-xs text-slate-500">{band.successCount}/{band.sampleSize} 成功</p></div>)}</div>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[700px] text-sm"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2 font-medium">候选日期</th><th className="px-3 py-2 font-medium">股票</th><th className="px-3 py-2 font-medium">题材</th><th className="px-3 py-2 font-medium">评分</th><th className="px-3 py-2 font-medium">连板</th><th className="px-3 py-2 font-medium">T+1结果</th></tr></thead><tbody>{backtest.latestRows.slice(0, 12).map((row) => <tr key={`${row.date}-${row.stockCode}`} className="border-t border-slate-100"><td className="px-3 py-2 text-slate-600">{formatDate(row.date)}</td><td className="px-3 py-2"><p className="font-medium text-slate-800">{row.stockName}</p><p className="font-mono text-xs text-slate-500">{row.stockCode}</p></td><td className="px-3 py-2 text-slate-600">{row.sector}</td><td className="px-3 py-2 font-medium text-slate-700">{row.score}</td><td className="px-3 py-2 text-orange-600">{row.boards}板</td><td className="px-3 py-2"><Badge variant="outline" className={row.success ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}>{row.success ? `T+1 ${formatDate(row.nextDate)} 延续` : `T+1 ${formatDate(row.nextDate)} 未延续`}</Badge></td></tr>)}</tbody></table></div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
 
             <Card className="border-amber-100 bg-white/80 shadow-sm">
               <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-amber-600" />当前强势题材</CardTitle><CardDescription>按最新交易日主板涨停家数统计，用于判断候选股是否具备题材支撑。</CardDescription></CardHeader>
@@ -76,9 +107,9 @@ export default function LeaderCandidatesPage() {
             <Card className="border-slate-200 bg-white/90 shadow-xl shadow-slate-200/50">
               <CardHeader><CardTitle>候选列表</CardTitle><CardDescription>评分由“连板高度、题材广度、封板时间、成交额”构成；风险标签用于提示需要进一步核验的条件。</CardDescription></CardHeader>
               <CardContent>
-                {candidates.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有满足候选规则的主板股票；可在首页查看全部涨停与题材分布。</div> : (
+                {displayedCandidates.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有满足候选规则的主板股票；可在首页查看全部涨停与题材分布。</div> : (
                   <div className="space-y-3">
-                    {candidates.map((candidate) => (
+                    {displayedCandidates.map((candidate) => (
                       <article key={candidate.stockCode} className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-amber-50/30 p-4 transition-shadow hover:shadow-md">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
                           <div className="flex min-w-0 items-center gap-3 lg:w-[255px]">
@@ -97,6 +128,10 @@ export default function LeaderCandidatesPage() {
                           {candidate.reasons.map((reason) => <Badge key={reason} variant="secondary" className="bg-emerald-50 text-emerald-700">{reason}</Badge>)}
                           {candidate.riskTags.length > 0 && <><span className="ml-1 flex items-center gap-1 text-xs font-medium text-slate-500"><ShieldAlert className="h-3.5 w-3.5" />风险提示</span>{candidate.riskTags.map((tag) => <Badge key={tag} variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">{tag}</Badge>)}</>}
                         </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                          <span className="mr-1 text-xs font-medium text-slate-500">近期连板轨迹</span>
+                          {candidate.trajectory.map((point) => <span key={point.date} className={`rounded-md border px-1.5 py-1 text-[11px] ${point.boards > 0 ? "border-amber-200 bg-amber-50 text-amber-700" : "border-slate-200 bg-slate-50 text-slate-400"}`}><span className="mr-1 text-slate-400">{point.date.slice(5)}</span>{point.boards > 0 ? `${point.boards}板` : "-"}</span>)}
+                        </div>
                       </article>
                     ))}
                   </div>
@@ -104,7 +139,7 @@ export default function LeaderCandidatesPage() {
               </CardContent>
             </Card>
 
-            <p className="text-center text-xs text-slate-500">研究口径：默认仅统计主板股票，排除创业板、科创板和北交所；候选评分是复盘辅助，不代表预测或交易建议。</p>
+            <p className="text-center text-xs text-slate-500">研究口径：默认仅统计主板股票，排除创业板、科创板和北交所；回测只检验T+1涨停延续，不代表收益、价格表现或预测，候选评分是复盘辅助。</p>
           </div>
         )}
       </main>

@@ -39,6 +39,7 @@ import {
   getConnectionBoardStats,
   getMaxConnectionBoardTrend,
   getLeaderCandidates,
+  getLeaderCandidateBacktest,
   getAllSentimentAlerts,
   getUnreadAlertCount,
   markAlertAsRead,
@@ -698,6 +699,11 @@ export const appRouter = router({
     // 获取可解释的主板龙头候选池（收盘后复盘排序，不构成交易建议）
     getLeaderCandidates: publicProcedure.query(async () => {
       return await getLeaderCandidates();
+    }),
+
+    // 按历史候选池计算下一已记录交易日的连板延续结果
+    getLeaderCandidateBacktest: publicProcedure.query(async () => {
+      return await getLeaderCandidateBacktest();
     }),
 
     // 获取每日最高连板趋势及对应股票名称
