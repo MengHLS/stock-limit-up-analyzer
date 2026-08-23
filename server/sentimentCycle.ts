@@ -191,7 +191,16 @@ function buildNativeLeaders(
 
     for (const record of uniqueTodayRecords) {
       if (previousCodes.has(record.stockCode) || boardsAt(record.stockCode, date) !== 1 || nativeLeaders.has(record.stockCode)) continue;
-      const confirmationDate = tradingDates.slice(index + 1).find((futureDate) => boardsAt(record.stockCode, futureDate) >= CYCLE_LEADER_MIN_BOARDS);
+      let confirmationDate: string | undefined;
+      for (let cursor = index + 1; cursor < tradingDates.length; cursor += 1) {
+        const futureDate = tradingDates[cursor];
+        const remainsInSameRun = (recordsByDate.get(futureDate) ?? []).some((item) => item.stockCode === record.stockCode);
+        if (!remainsInSameRun) break;
+        if (boardsAt(record.stockCode, futureDate) >= CYCLE_LEADER_MIN_BOARDS) {
+          confirmationDate = futureDate;
+          break;
+        }
+      }
       if (!confirmationDate) continue;
       nativeLeaders.set(record.stockCode, {
         stockCode: record.stockCode,

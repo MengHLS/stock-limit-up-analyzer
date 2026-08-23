@@ -58,6 +58,27 @@ describe("buildSentimentCycleAnalysis", () => {
     expect(beforeConfirmation.nativeLeaders).toEqual([]);
   });
 
+  it("以同一连续连板段的首日为原生龙起点，不回溯到数据库中更早的孤立涨停", () => {
+    const interruptedRun = [
+      row("600006.SH", "连续龙", "2026-09-01", "新题材"),
+      row("600007.SH", "市场样本", "2026-09-02", "其他"),
+      row("600006.SH", "连续龙", "2026-09-03", "新题材"),
+      row("600006.SH", "连续龙", "2026-09-04", "新题材"),
+      row("600006.SH", "连续龙", "2026-09-05", "新题材"),
+      row("600006.SH", "连续龙", "2026-09-06", "新题材"),
+      row("600006.SH", "连续龙", "2026-09-07", "新题材"),
+      row("600006.SH", "连续龙", "2026-09-08", "新题材"),
+    ];
+    const analysis = buildSentimentCycleAnalysis(interruptedRun);
+
+    expect(analysis.nativeLeaders).toContainEqual(expect.objectContaining({
+      stockName: "连续龙",
+      startDate: "2026-09-03",
+      confirmationDate: "2026-09-08",
+    }));
+    expect(analysis.nativeLeaders.some((leader) => leader.startDate === "2026-09-01")).toBe(false);
+  });
+
   it("将连续相同市场周期合并，并保留区间内发生过的情绪阶段", () => {
     const earlyAnalysis = buildSentimentCycleAnalysis(source.filter((record) => record.limitUpDate <= "2026-08-14"));
 
