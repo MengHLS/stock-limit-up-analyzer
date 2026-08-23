@@ -71,11 +71,24 @@ export type NativeLeader = {
   confirmationDate: string;
 };
 
+export type LeaderListType = "原生龙" | "周期龙头" | "穿越周期龙" | "补涨龙";
+
+export type LeaderListItem = {
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  leaderTypes: LeaderListType[];
+  firstLeaderDate: string;
+  highestBoards: number;
+  sourceNotes: string[];
+};
+
 export type SentimentCycleAnalysis = {
   days: SentimentCycleDay[];
   segments: SentimentCycleSegment[];
   breakEvents: LeaderBreakEvent[];
   nativeLeaders: NativeLeader[];
+  leaderList: LeaderListItem[];
   definition: string;
 };
 
@@ -216,6 +229,101 @@ function buildNativeLeaders(
   return Array.from(nativeLeaders.values()).sort((left, right) => right.confirmationDate.localeCompare(left.confirmationDate));
 }
 
+function buildLeaderList(
+  tradingDates: string[],
+  recordsByDate: Map<string, SentimentCycleSourceRecord[]>,
+  boardsAt: (stockCode: string, date: string) => number,
+  nativeLeaders: NativeLeader[],
+  breakEvents: LeaderBreakEvent[],
+): LeaderListItem[] {
+  const items = new Map<string, LeaderListItem>();
+  const typeOrder: Record<LeaderListType, number> = { "原生龙": 0, "穿越周期龙": 1, "补涨龙": 2, "周期龙头": 3 };
+  const addLeader = (input: {
+    stockCode: string;
+    stockName: string;
+    sector: string;
+    leaderType: LeaderListType;
+    confirmedDate: string;
+    highestBoards: number;
+    sourceNote: string;
+  }) => {
+    const existing = items.get(input.stockCode);
+    if (!existing) {
+      items.set(input.stockCode, {
+        stockCode: input.stockCode,
+        stockName: input.stockName,
+        sector: input.sector,
+        leaderTypes: [input.leaderType],
+        firstLeaderDate: input.confirmedDate,
+        highestBoards: input.highestBoards,
+        sourceNotes: [input.sourceNote],
+      });
+      return;
+    }
+    if (!existing.leaderTypes.includes(input.leaderType)) existing.leaderTypes.push(input.leaderType);
+    if (!existing.sourceNotes.includes(input.sourceNote)) existing.sourceNotes.push(input.sourceNote);
+    existing.firstLeaderDate = existing.firstLeaderDate < input.confirmedDate ? existing.firstLeaderDate : input.confirmedDate;
+    existing.highestBoards = Math.max(existing.highestBoards, input.highestBoards);
+    if (existing.sector === "未分类" && input.sector) existing.sector = input.sector;
+  };
+
+  for (const date of tradingDates) {
+    const uniqueRecords = Array.from(new Map((recordsByDate.get(date) ?? []).map((record) => [record.stockCode, record])).values());
+    for (const record of uniqueRecords) {
+      const boards = boardsAt(record.stockCode, date);
+      if (boards !== CYCLE_LEADER_MIN_BOARDS) continue;
+      addLeader({
+        stockCode: record.stockCode,
+        stockName: record.stockName,
+        sector: record.sector ?? "未分类",
+        leaderType: "周期龙头",
+        confirmedDate: date,
+        highestBoards: boards,
+        sourceNote: `${date} 首次达到6板`,
+      });
+    }
+  }
+  for (const leader of nativeLeaders) {
+    addLeader({
+      stockCode: leader.stockCode,
+      stockName: leader.stockName,
+      sector: leader.sector,
+      leaderType: "原生龙",
+      confirmedDate: leader.confirmationDate,
+      highestBoards: CYCLE_LEADER_MIN_BOARDS,
+      sourceNote: `${leader.startDate} 低位混沌期首板起涨`,
+    });
+  }
+  for (const event of breakEvents) {
+    for (const leader of event.throughCycleLeaders) {
+      addLeader({
+        stockCode: leader.stockCode,
+        stockName: leader.stockName,
+        sector: leader.sector,
+        leaderType: "穿越周期龙",
+        confirmedDate: leader.breakthroughDate ?? event.breakDate,
+        highestBoards: leader.highestBoardsAfterBreak,
+        sourceNote: `${event.breakDate} 原周期龙断板后突破${event.originalMaxBoards}板`,
+      });
+    }
+    for (const leader of event.reboundLeaders) {
+      addLeader({
+        stockCode: leader.stockCode,
+        stockName: leader.stockName,
+        sector: leader.sector,
+        leaderType: "补涨龙",
+        confirmedDate: leader.breakthroughDate ?? event.breakDate,
+        highestBoards: leader.highestBoardsAfterBreak,
+        sourceNote: `${event.breakDate} 原周期龙断板后未突破老龙高度但达到6板`,
+      });
+    }
+  }
+
+  return Array.from(items.values())
+    .map((item) => ({ ...item, leaderTypes: item.leaderTypes.sort((left, right) => typeOrder[left] - typeOrder[right]) }))
+    .sort((left, right) => right.firstLeaderDate.localeCompare(left.firstLeaderDate) || right.highestBoards - left.highestBoards);
+}
+
 /**
  * 周期龙头信号：主板股票达到6板（高于5板）。没有任何6板及以上主板股票的交易日为混沌周期。
  * 原龙头断板后，任何断板日涨停股票只要在后续交易日严格突破老龙头高度，即为穿越周期龙；
@@ -325,11 +433,13 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
     });
   }
 
+  const sortedBreakEvents = breakEvents.sort((left, right) => right.breakDate.localeCompare(left.breakDate)).slice(0, 12);
   return {
     days,
     segments: buildSegments(days),
-    breakEvents: breakEvents.sort((left, right) => right.breakDate.localeCompare(left.breakDate)).slice(0, 12),
+    breakEvents: sortedBreakEvents,
     nativeLeaders,
+    leaderList: buildLeaderList(tradingDates, recordsByDate, boardsAt, nativeLeaders, sortedBreakEvents),
     definition: "周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原生龙为本轮连板首日处于最高连板不超过2板的低位混沌期、当日没有既有周期龙头，且后续成长至6板的主板股票。原龙头断板仅以6板及以上前日最高标为对象。断板日涨停股票后续严格突破老龙头高度的为穿越周期龙；未突破老龙头高度但达到6板的统一为补涨龙。起涨或断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
   };
 }

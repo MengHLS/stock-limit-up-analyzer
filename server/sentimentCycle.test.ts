@@ -58,6 +58,19 @@ describe("buildSentimentCycleAnalysis", () => {
     expect(beforeConfirmation.nativeLeaders).toEqual([]);
   });
 
+  it("汇总所有已确认龙头并以一只股票一行展示其全部类型", () => {
+    const analysis = buildSentimentCycleAnalysis(source);
+    const originalLeader = analysis.leaderList.find((leader) => leader.stockCode === "600001.SH");
+    const throughLeader = analysis.leaderList.find((leader) => leader.stockCode === "600002.SH");
+    const reboundLeader = analysis.leaderList.find((leader) => leader.stockCode === "600004.SH");
+
+    expect(originalLeader).toMatchObject({ stockName: "老龙头", leaderTypes: ["原生龙", "周期龙头"] });
+    expect(throughLeader).toMatchObject({ stockName: "中位股", leaderTypes: ["穿越周期龙", "周期龙头"], highestBoards: 10 });
+    expect(reboundLeader).toMatchObject({ stockName: "低位补涨股", leaderTypes: ["补涨龙", "周期龙头"], highestBoards: 6 });
+    expect(analysis.leaderList.filter((leader) => leader.stockCode === "600002.SH")).toHaveLength(1);
+    expect(analysis.leaderList.some((leader) => leader.stockCode === "300001.SZ")).toBe(false);
+  });
+
   it("以同一连续连板段的首日为原生龙起点，不回溯到数据库中更早的孤立涨停", () => {
     const interruptedRun = [
       row("600006.SH", "连续龙", "2026-09-01", "新题材"),
