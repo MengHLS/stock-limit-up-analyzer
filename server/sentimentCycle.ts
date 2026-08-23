@@ -444,13 +444,13 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
     });
   }
 
-  const sortedBreakEvents = breakEvents.sort((left, right) => right.breakDate.localeCompare(left.breakDate)).slice(0, 12);
+  const sortedBreakEvents = breakEvents.sort((left, right) => right.breakDate.localeCompare(left.breakDate));
   return {
     days,
     segments: buildSegments(days),
     breakEvents: sortedBreakEvents,
     nativeLeaders,
     leaderList: buildLeaderList(tradingDates, recordsByDate, boardsAt, nativeLeaders, sortedBreakEvents),
-    definition: "周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原生龙为本轮连板首日处于最高连板不超过2板的低位混沌期、当日没有既有周期龙头，且后续成长至6板的主板股票。原龙头断板仅以6板及以上前日最高标为对象。断板日涨停股票后续严格突破老龙头高度的为穿越周期龙；未突破老龙头高度但达到6板的统一为补涨龙。起涨或断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
+    definition: "龙头列表覆盖数据库内全部已记录交易日。周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原生龙为本轮连板首日处于最高连板不超过2板的低位混沌期、当日没有既有周期龙头，且后续成长至6板的主板股票。原龙头断板仅以6板及以上前日最高标为对象。断板日涨停股票后续严格突破老龙头高度的为穿越周期龙；未突破老龙头高度但达到6板的统一为补涨龙。起涨或断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
   };
 }

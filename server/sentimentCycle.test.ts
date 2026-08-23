@@ -102,6 +102,22 @@ describe("buildSentimentCycleAnalysis", () => {
     expect(leader?.sourceNotes).toContain("非补涨龙且非穿越周期龙，标记为原生龙");
   });
 
+  it("跨越近期事件上限时仍使用全部交易日汇总断板后的各类龙头", () => {
+    const dateFor = (offset: number) => new Date(Date.UTC(2027, 0, offset + 1)).toISOString().slice(0, 10);
+    const longHistory = Array.from({ length: 14 }, (_, segment) => Array.from({ length: 6 }, (_, board) => {
+      const stockCode = `600${String(100 + segment).padStart(3, "0")}.SH`;
+      return row(stockCode, `历史龙${segment + 1}`, dateFor(segment * 6 + board), "历史题材");
+    })).flat();
+    const analysis = buildSentimentCycleAnalysis(longHistory);
+
+    expect(analysis.breakEvents).toHaveLength(13);
+    expect(analysis.breakEvents.some((event) => event.breakDate === dateFor(6))).toBe(true);
+    expect(analysis.leaderList.find((leader) => leader.stockName === "历史龙14")).toMatchObject({
+      leaderTypes: ["补涨龙", "周期龙头"],
+      highestBoards: 6,
+    });
+  });
+
   it("以同一连续连板段的首日为原生龙起点，不回溯到数据库中更早的孤立涨停", () => {
     const interruptedRun = [
       row("600006.SH", "连续龙", "2026-09-01", "新题材"),
