@@ -5,7 +5,7 @@ import { ContinuousRangeSlider } from "@/components/ContinuousRangeSlider";
 import { buildDistinctHighBoardLabels } from "@/lib/highBoardLabels";
 import { trpc } from "@/lib/trpc";
 import { DEFAULT_VISIBLE_TRADING_DAYS, getDefaultVisibleRange, normalizeVisibleRange } from "@/lib/visibleRange";
-import { Activity, ArrowLeft, CalendarDays, Loader2, TrendingUp } from "lucide-react";
+import { Activity, ArrowLeft, CalendarDays, Crown, Flame, GitBranch, Loader2, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import {
@@ -34,6 +34,7 @@ function ChartTooltip({ active, payload }: any) {
       <p className="mt-1 max-w-[240px] text-xs text-slate-600">
         {point.stockNames.length > 0 ? `股票：${point.stockNames.join("、")}` : "当日暂无涨停记录"}
       </p>
+      {point.phase && <p className="mt-1 text-xs font-medium text-sky-700">周期阶段：{point.phase} · {point.phaseReason}</p>}
     </div>
   );
 }
@@ -44,10 +45,15 @@ export default function SentimentAnalysisPage() {
     trpc.sentiment.getMaxConnectionBoardTrend.useQuery(undefined, {
       staleTime: 60_000,
     });
+  const { data: cycleAnalysis, refetch: refetchCycle } = trpc.sentiment.getSentimentCycleAnalysis.useQuery(undefined, {
+    staleTime: 60_000,
+  });
 
+  const cycleByDate = new Map((cycleAnalysis?.days ?? []).map((day) => [day.date, day]));
   const rawChartData = trend.map((point) => ({
     ...point,
     shortDate: point.date.slice(5),
+    ...(cycleByDate.get(point.date) ?? {}),
   }));
   const peakBoards = rawChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
   const chartData = rawChartData;
@@ -68,6 +74,7 @@ export default function SentimentAnalysisPage() {
   const visibleChartData = chartData.slice(visibleStartIndex, visibleEndIndex + 1);
   const visiblePeakBoards = visibleChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
   const visibleHighBoardLabels = buildDistinctHighBoardLabels(visibleChartData);
+  const latestCycleDay = cycleAnalysis?.days.at(-1);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50/40 to-red-50/50">
@@ -87,7 +94,7 @@ export default function SentimentAnalysisPage() {
             variant="outline"
             size="sm"
             className="ml-auto gap-2"
-            onClick={() => refetch()}
+            onClick={() => { void refetch(); void refetchCycle(); }}
             disabled={isLoading}
           >
             <TrendingUp className="h-4 w-4" />
@@ -101,7 +108,7 @@ export default function SentimentAnalysisPage() {
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-orange-600">Market Sentiment</p>
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">最高连板趋势</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            根据数据库中的主板涨停记录，按已记录交易日计算每日最高连板数，并在对应数据点展示最高连板股票名称。
+            以主板最高连板趋势划分情绪阶段，识别各阶段高度龙头；同时在原龙头断板日生成新周期研究候选，并回顾其后续连板表现。
             创业板、科创板和北交所股票不参与本项统计。
           </p>
         </div>
@@ -118,7 +125,7 @@ export default function SentimentAnalysisPage() {
               <Activity className="mb-4 h-12 w-12 text-red-300" />
               <p className="font-medium text-slate-800">最高连板数据加载失败</p>
               <p className="mt-2 text-sm text-slate-500">请稍后重试，或检查数据库连接状态。</p>
-              <Button variant="outline" className="mt-5" onClick={() => refetch()}>
+              <Button variant="outline" className="mt-5" onClick={() => { void refetch(); void refetchCycle(); }}>
                 重新加载
               </Button>
             </CardContent>
@@ -133,7 +140,7 @@ export default function SentimentAnalysisPage() {
           </Card>
         ) : (
           <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <Card className="border-orange-100 bg-white/80 shadow-sm">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-slate-600">当前最高连板</CardTitle>
@@ -160,6 +167,10 @@ export default function SentimentAnalysisPage() {
                   <div className="text-3xl font-bold text-blue-600">{chartData.length}<span className="ml-1 text-base">天</span></div>
                   <p className="mt-1 text-xs text-slate-500">仅统计主板涨停记录</p>
                 </CardContent>
+              </Card>
+              <Card className="border-sky-100 bg-white/80 shadow-sm">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">当前情绪阶段</CardTitle></CardHeader>
+                <CardContent><div className="text-xl font-bold text-sky-700">{latestCycleDay?.phase ?? "-"}</div><p className="mt-1 line-clamp-2 text-xs text-slate-500">{latestCycleDay?.phaseReason ?? "等待周期分析数据"}</p></CardContent>
               </Card>
             </div>
 
@@ -228,10 +239,47 @@ export default function SentimentAnalysisPage() {
                     range={{ startIndex: visibleStartIndex, endIndex: visibleEndIndex }}
                     onRangeChange={setVisibleRange}
                   />
-                  <p className="text-center text-xs text-slate-500">连续拖动选区或两端手柄，松手后会对齐交易日并更新主图。</p>
+                  <p className="text-center text-xs text-slate-500">连续拖动选区或两端手柄，松手后会对齐交易日并更新主图；悬浮数据点可查看对应情绪阶段。</p>
                 </div>
               </CardContent>
             </Card>
+
+            {cycleAnalysis && (
+              <div className="grid gap-6 lg:grid-cols-[1fr_1.35fr]">
+                <Card className="border-sky-100 bg-white/85 shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base"><Flame className="h-4 w-4 text-orange-600" />情绪周期与阶段龙头</CardTitle>
+                    <CardDescription>按最高连板高度及相邻交易日变化划分阶段；龙头为该阶段曾达到当日最高连板的主板股票。</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {cycleAnalysis.segments.slice(-8).reverse().map((segment) => (
+                        <div key={`${segment.phase}-${segment.startDate}`} className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+                          <div className="flex items-center justify-between gap-2"><Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">{segment.phase}</Badge><span className="text-xs font-medium text-orange-600">阶段最高 {segment.maxBoards}板</span></div>
+                          <p className="mt-2 text-xs text-slate-500">{formatDate(segment.startDate)} 至 {formatDate(segment.endDate)}</p>
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-700">阶段龙头：{segment.leaderNames.join("、") || "-"}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-rose-100 bg-white/85 shadow-sm">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base"><GitBranch className="h-4 w-4 text-rose-600" />龙头断板后的新周期趋势</CardTitle>
+                    <CardDescription>断板定义为前一交易日全部最高连板股票在当日均未涨停。候选仅以断板日及以前数据生成；后3交易日表现仅作历史复盘。</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {cycleAnalysis.breakEvents.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">当前样本尚未识别到3板及以上原龙头的完整断板事件。</p> : <div className="space-y-3">{cycleAnalysis.breakEvents.slice(0, 5).map((event) => (
+                      <article key={event.breakDate} className="rounded-xl border border-rose-100 bg-rose-50/30 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-sm font-semibold text-slate-800">{formatDate(event.breakDate)} 原龙头断板</p><p className="mt-1 text-xs text-slate-500">前日 {formatDate(event.previousDate)} · {event.originalLeaderNames.join("、")} · {event.originalMaxBoards}板</p></div><Badge variant="outline" className="border-rose-200 bg-white text-rose-700">断板日最高 {event.breakDayMaxBoards}板</Badge></div>
+                        <div className="mt-3 border-t border-rose-100 pt-3"><p className="mb-2 flex items-center gap-1 text-xs font-medium text-slate-600"><Crown className="h-3.5 w-3.5 text-amber-600" />当日新周期研究候选</p>{event.newCycleCandidates.length === 0 ? <p className="text-xs text-slate-500">当日没有满足候选池条件的主板股票。</p> : <div className="flex flex-wrap gap-2">{event.newCycleCandidates.map((candidate) => <div key={candidate.stockCode} className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2"><p className="text-xs font-semibold text-slate-800">{candidate.stockName} <span className="text-amber-700">{candidate.boards}板 / {candidate.score}分</span></p><p className="mt-1 text-[11px] text-slate-500">{candidate.sector} · {candidate.followUpReady ? `后3日最高${candidate.followUpHighestBoards ?? 0}板${candidate.becameHighestBoardLeader ? "，曾成为最高标" : ""}` : "后3日数据未完备"}</p></div>)}</div>}</div>
+                      </article>
+                    ))}</div>}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
 
             <Card className="border-slate-200 bg-white/80 shadow-sm">
               <CardHeader>

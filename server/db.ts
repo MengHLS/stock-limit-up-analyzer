@@ -22,6 +22,7 @@ import {
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
 import { buildLeaderCandidateBacktest, buildLeaderCandidates, type LeaderCandidateBacktestOptions } from './leaderCandidates';
+import { buildSentimentCycleAnalysis } from './sentimentCycle';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1108,6 +1109,24 @@ export async function getMaxConnectionBoardTrend() {
   }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate));
 
   return buildMaxConnectionBoardTrend(allRecords);
+}
+
+/** 获取基于主板最高连板趋势的情绪周期、原龙头断板和新周期候选分析。 */
+export async function getSentimentCycleAnalysis() {
+  const db = await getDb();
+  if (!db) return buildSentimentCycleAnalysis([]);
+
+  const records = await db.select({
+    stockCode: limitUpRecords.stockCode,
+    stockName: limitUpRecords.stockName,
+    limitUpDate: limitUpRecords.limitUpDate,
+    limitUpTime: limitUpRecords.limitUpTime,
+    sector: limitUpRecords.sector,
+    turnover: limitUpRecords.turnover,
+    circulationValue: limitUpRecords.circulationValue,
+  }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
+
+  return buildSentimentCycleAnalysis(records);
 }
 
 /** 获取最新交易日的主板龙头候选池。 */

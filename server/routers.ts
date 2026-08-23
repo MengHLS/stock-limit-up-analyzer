@@ -38,6 +38,7 @@ import {
   getSectorHeatmapData,
   getConnectionBoardStats,
   getMaxConnectionBoardTrend,
+  getSentimentCycleAnalysis,
   getLeaderCandidates,
   getLeaderCandidateBacktest,
   getAllSentimentAlerts,
@@ -714,6 +715,11 @@ export const appRouter = router({
     // 获取每日最高连板趋势及对应股票名称
     getMaxConnectionBoardTrend: publicProcedure.query(async () => {
       return await getMaxConnectionBoardTrend();
+    }),
+
+    // 基于最高连板趋势划分情绪阶段，并在原龙头断板日分析新周期候选
+    getSentimentCycleAnalysis: publicProcedure.query(async () => {
+      return await getSentimentCycleAnalysis();
     }),
 
     // 获取所有预警记录
