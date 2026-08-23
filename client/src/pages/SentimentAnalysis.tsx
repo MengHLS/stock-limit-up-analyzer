@@ -65,7 +65,7 @@ export default function SentimentAnalysisPage() {
   );
   const visibleChartData = chartData.slice(visibleStartIndex, visibleEndIndex + 1);
   const visiblePeakBoards = visibleChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
-  const visiblePeakDates = visibleChartData.filter((point) => point.maxBoards === visiblePeakBoards);
+  const visibleHighBoardPoints = visibleChartData.filter((point) => point.maxBoards >= 6);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50/40 to-red-50/50">
@@ -166,7 +166,7 @@ export default function SentimentAnalysisPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>每日最高连板折线图</CardTitle>
-                    <CardDescription>仅统计主板股票；默认显示最近60个交易日，拖动下方横轴缩放条可查看历史区间。</CardDescription>
+                    <CardDescription>仅统计主板股票；默认显示最近60个交易日，并标注全部6板及以上股票名称。</CardDescription>
                   </div>
                   <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
                     {formatDate(visibleChartData[0]?.date ?? chartData[0].date)} 至 {formatDate(visibleChartData.at(-1)?.date ?? chartData.at(-1)?.date ?? "")}
@@ -195,7 +195,7 @@ export default function SentimentAnalysisPage() {
                       </LineChart>
                     </ResponsiveContainer>
                     <div className="pointer-events-none absolute inset-0 overflow-visible">
-                      {visiblePeakDates.map((point) => {
+                      {visibleHighBoardPoints.map((point, labelIndex) => {
                         const pointIndex = visibleChartData.findIndex((item) => item.date === point.date);
                         const xPercent = visibleChartData.length === 1
                           ? 50
@@ -203,11 +203,15 @@ export default function SentimentAnalysisPage() {
                         const yPercent = 4 + (1 - point.maxBoards / (visiblePeakBoards + 1)) * 70;
                         return (
                           <div
-                            key={`peak-label-${point.date}`}
-                            className="absolute -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700 shadow-sm"
-                            style={{ left: `${xPercent}%`, top: `${yPercent}%` }}
+                            key={`high-board-label-${point.date}`}
+                            className="absolute max-w-[180px] -translate-x-1/2 -translate-y-full rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-center text-xs font-semibold leading-5 text-orange-700 shadow-sm"
+                            style={{
+                              left: `${xPercent}%`,
+                              top: `${yPercent}%`,
+                              marginTop: `${-(labelIndex % 2) * 28}px`,
+                            }}
                           >
-                            {point.stockNames.join("、") || "最高连板"}
+                            {point.stockNames.join("、") || `${point.maxBoards}板`}
                           </div>
                         );
                       })}
