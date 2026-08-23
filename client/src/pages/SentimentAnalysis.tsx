@@ -1,14 +1,14 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ContinuousRangeSlider } from "@/components/ContinuousRangeSlider";
 import { buildDistinctHighBoardLabels } from "@/lib/highBoardLabels";
 import { trpc } from "@/lib/trpc";
 import { DEFAULT_VISIBLE_TRADING_DAYS, getDefaultVisibleRange, normalizeVisibleRange } from "@/lib/visibleRange";
 import { Activity, ArrowLeft, CalendarDays, Loader2, TrendingUp } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import {
-  Brush,
   CartesianGrid,
   Line,
   LineChart,
@@ -40,8 +40,6 @@ function ChartTooltip({ active, payload }: any) {
 
 export default function SentimentAnalysisPage() {
   const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 });
-  const pendingRangeRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
   const { data: trend = [], isLoading, isError, refetch } =
     trpc.sentiment.getMaxConnectionBoardTrend.useQuery(undefined, {
       staleTime: 60_000,
@@ -61,30 +59,6 @@ export default function SentimentAnalysisPage() {
     if (chartData.length === 0) return;
     setVisibleRange(defaultRange);
   }, [chartData.length, defaultRange.startIndex, defaultRange.endIndex]);
-
-  useEffect(() => () => {
-    if (animationFrameRef.current !== null) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-  }, []);
-
-  const handleBrushChange = useCallback((range: { startIndex?: number; endIndex?: number }) => {
-    pendingRangeRef.current = normalizeVisibleRange(range, chartData.length, defaultRange);
-    if (animationFrameRef.current !== null) return;
-
-    animationFrameRef.current = requestAnimationFrame(() => {
-      animationFrameRef.current = null;
-      const nextRange = pendingRangeRef.current;
-      pendingRangeRef.current = null;
-      if (!nextRange) return;
-
-      setVisibleRange((currentRange) => (
-        currentRange.startIndex === nextRange.startIndex && currentRange.endIndex === nextRange.endIndex
-          ? currentRange
-          : nextRange
-      ));
-    });
-  }, [chartData.length, defaultRange]);
 
   const { startIndex: visibleStartIndex, endIndex: visibleEndIndex } = normalizeVisibleRange(
     visibleRange,
@@ -245,24 +219,12 @@ export default function SentimentAnalysisPage() {
                       })}
                     </div>
                   </div>
-                  <div className="h-[64px] rounded-md border border-orange-100 bg-orange-50/40">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
-                        <Line type="monotone" dataKey="maxBoards" stroke="#fdba74" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                        <Brush
-                          dataKey="shortDate"
-                          height={28}
-                          travellerWidth={12}
-                          startIndex={visibleStartIndex}
-                          endIndex={visibleEndIndex}
-                          stroke="#fb923c"
-                          fill="#fff7ed"
-                          onChange={handleBrushChange}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <p className="text-center text-xs text-slate-500">拖动两端橙色滑块或移动选中区域，可切换查看的交易日区间。</p>
+                  <ContinuousRangeSlider
+                    data={chartData.map((point) => ({ value: point.maxBoards }))}
+                    range={{ startIndex: visibleStartIndex, endIndex: visibleEndIndex }}
+                    onRangeChange={setVisibleRange}
+                  />
+                  <p className="text-center text-xs text-slate-500">连续拖动选区或两端手柄，松手后会对齐交易日并更新主图。</p>
                 </div>
               </CardContent>
             </Card>
