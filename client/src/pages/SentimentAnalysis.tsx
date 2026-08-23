@@ -182,7 +182,7 @@ export default function SentimentAnalysisPage() {
                       <LineChart data={visibleChartData} margin={{ top: 50, right: 24, left: 0, bottom: 12 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="shortDate" tick={{ fontSize: 12, fill: "#64748b" }} minTickGap={18} />
-                      <YAxis allowDecimals={false} domain={[0, "dataMax + 1"]} tick={{ fontSize: 12, fill: "#64748b" }} label={{ value: "最高连板数", angle: -90, position: "insideLeft", fill: "#64748b" }} />
+                      <YAxis width={60} allowDecimals={false} domain={[0, "dataMax + 1"]} tick={{ fontSize: 12, fill: "#64748b" }} label={{ value: "最高连板数", angle: -90, position: "insideLeft", fill: "#64748b" }} />
                       <Tooltip content={<ChartTooltip />} />
                       <Line
                         type="monotone"
@@ -199,16 +199,20 @@ export default function SentimentAnalysisPage() {
                     <div className="pointer-events-none absolute inset-0 overflow-visible">
                       {visibleHighBoardLabels.map((point, labelIndex) => {
                         const pointIndex = visibleChartData.findIndex((item) => item.date === point.date);
-                        const xPercent = visibleChartData.length === 1
-                          ? 50
-                          : 5 + (pointIndex / (visibleChartData.length - 1)) * 90;
+                        const pointProgress = visibleChartData.length === 1
+                          ? 0.5
+                          : pointIndex / (visibleChartData.length - 1);
+                        // 图表左侧为固定60px的Y轴，右侧为24px边距；以真实绘图区而非容器百分比定位。
+                        const centeredLeft = visibleChartData.length === 1
+                          ? "calc(50% + 18px)"
+                          : `calc(60px + ${pointProgress * 100}% - ${pointProgress * 84}px)`;
                         const yPercent = 4 + (1 - point.maxBoards / (visiblePeakBoards + 1)) * 70;
                         return (
                           <div
                             key={`high-board-label-${point.date}`}
-                            className="absolute max-w-[180px] -translate-x-1/2 -translate-y-full rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-center text-xs font-semibold leading-5 text-orange-700 shadow-sm"
+                            className="absolute inline-flex min-w-[72px] max-w-[180px] -translate-x-1/2 -translate-y-full items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-center text-xs font-semibold leading-5 text-orange-700 shadow-sm"
                             style={{
-                              left: `${xPercent}%`,
+                              left: centeredLeft,
                               top: `${yPercent}%`,
                               marginTop: `${-(labelIndex % 2) * 28}px`,
                             }}
