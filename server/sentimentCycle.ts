@@ -162,8 +162,8 @@ function buildSegments(days: SentimentCycleDay[]): SentimentCycleSegment[] {
 
 /**
  * 周期龙头信号：主板股票达到6板（高于5板）。没有任何6板及以上主板股票的交易日为混沌周期。
- * 原龙头断板后，穿越周期龙须为断板日3板及以上的中位涨停，并在后续交易日严格突破老龙头高度；
- * 补涨龙须为断板日1至2板的低位涨停，并在后续交易日达到6板。分类结果仅用于历史回顾，
+ * 原龙头断板后，任何断板日涨停股票只要在后续交易日严格突破老龙头高度，即为穿越周期龙；
+ * 未突破老龙头高度但达到6板的股票，统一为补涨龙。分类结果仅用于历史回顾，
  * 断板日信号与候选评分均严格截至断板日生成，不读取未来记录。
  */
 export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[]): SentimentCycleAnalysis {
@@ -226,8 +226,9 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
       const subsequentDays = futureDates.filter((date) => (recordsByDate.get(date) ?? []).some((item) => item.stockCode === record.stockCode));
       const highestBoardsAfterBreak = Math.max(boardsAt(record.stockCode, current.date), ...subsequentDays.map((date) => boardsAt(record.stockCode, date)));
       const sourceBoards = boardsAt(record.stockCode, current.date);
-      const breakthroughThreshold = sourceBoards >= MID_LEVEL_MIN_BOARDS ? previous.maxBoards + 1 : CYCLE_LEADER_MIN_BOARDS;
-      const breakthroughDate = subsequentDays.find((date) => boardsAt(record.stockCode, date) >= breakthroughThreshold) ?? null;
+      const strictBreakthroughDate = subsequentDays.find((date) => boardsAt(record.stockCode, date) > previous.maxBoards) ?? null;
+      const reachedCycleLeaderDate = subsequentDays.find((date) => boardsAt(record.stockCode, date) >= CYCLE_LEADER_MIN_BOARDS) ?? null;
+      const breakthroughDate = strictBreakthroughDate ?? reachedCycleLeaderDate;
       const validationStatus = breakthroughDate
         ? "已验证"
         : (lastTradingDate === current.date || subsequentDays.at(-1) === lastTradingDate ? "观察中" : "未达标");
@@ -243,10 +244,10 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
       };
     });
     const throughCycleLeaders = inspected
-      .filter((item) => item.breakDayBoards >= MID_LEVEL_MIN_BOARDS && item.breakDayBoards < previous.maxBoards && item.highestBoardsAfterBreak > previous.maxBoards)
+      .filter((item) => item.highestBoardsAfterBreak > previous.maxBoards)
       .sort((left, right) => right.highestBoardsAfterBreak - left.highestBoardsAfterBreak);
     const reboundLeaders = inspected
-      .filter((item) => item.breakDayBoards <= LOW_LEVEL_MAX_BOARDS && item.highestBoardsAfterBreak >= CYCLE_LEADER_MIN_BOARDS)
+      .filter((item) => item.breakthroughDate !== null && item.highestBoardsAfterBreak >= CYCLE_LEADER_MIN_BOARDS && item.highestBoardsAfterBreak <= previous.maxBoards)
       .sort((left, right) => right.highestBoardsAfterBreak - left.highestBoardsAfterBreak);
     const classifiedCodes = new Set([...throughCycleLeaders, ...reboundLeaders].map((item) => item.stockCode));
     const postBreakObservations = inspected
@@ -271,6 +272,6 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
     days,
     segments: buildSegments(days),
     breakEvents: breakEvents.sort((left, right) => right.breakDate.localeCompare(left.breakDate)).slice(0, 12),
-    definition: "周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原龙头断板仅以6板及以上前日最高标为对象；穿越周期龙为断板日3板及以上的中位涨停，后续严格突破老龙头高度；补涨龙为断板日1至2板的低位涨停，后续达到6板。断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
+    definition: "周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原龙头断板仅以6板及以上前日最高标为对象。断板日涨停股票后续严格突破老龙头高度的为穿越周期龙；未突破老龙头高度但达到6板的统一为补涨龙。断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
   };
 }
