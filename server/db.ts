@@ -1024,3 +1024,84 @@ export async function batchCheckAlerts(days: number = 30): Promise<SentimentAler
 
   return alerts;
 }
+
+
+/**
+ * 计算每日最高连板趋势。
+ * 连板数沿用连板梯队统计规则：股票在相邻的已记录交易日连续涨停，连续天数即连板数。
+ */
+export function buildMaxConnectionBoardTrend(records: Array<Pick<LimitUpRecord, "stockCode" | "stockName" | "limitUpDate">>): Array<{
+  date: string;
+  maxBoards: number;
+  stockNames: string[];
+  stockCodes: string[];
+}> {
+  if (records.length === 0) return [];
+
+  const tradingDates = Array.from(new Set(records.map(record => record.limitUpDate)))
+    .sort((a, b) => b.localeCompare(a));
+  const tradingDateIndex = new Map(tradingDates.map((date, index) => [date, index]));
+  const stockDatesMap = new Map<string, Set<string>>();
+  const recordsByDate = new Map<string, typeof records>();
+
+  for (const record of records) {
+    if (!stockDatesMap.has(record.stockCode)) {
+      stockDatesMap.set(record.stockCode, new Set());
+    }
+    stockDatesMap.get(record.stockCode)!.add(record.limitUpDate);
+
+    const dateRecords = recordsByDate.get(record.limitUpDate) ?? [];
+    dateRecords.push(record);
+    recordsByDate.set(record.limitUpDate, dateRecords);
+  }
+
+  const calculateConsecutiveBoards = (stockCode: string, targetDate: string): number => {
+    const stockDates = stockDatesMap.get(stockCode);
+    const targetIndex = tradingDateIndex.get(targetDate);
+    if (!stockDates || targetIndex === undefined) return 1;
+
+    let boards = 1;
+    for (let index = targetIndex + 1; index < tradingDates.length; index += 1) {
+      if (!stockDates.has(tradingDates[index])) break;
+      boards += 1;
+    }
+    return boards;
+  };
+
+  return tradingDates.slice().reverse().map((date) => {
+    const namesByCode = new Map<string, string>();
+    let maxBoards = 0;
+
+    for (const record of recordsByDate.get(date) ?? []) {
+      const boards = calculateConsecutiveBoards(record.stockCode, date);
+      if (boards > maxBoards) {
+        maxBoards = boards;
+        namesByCode.clear();
+      }
+      if (boards === maxBoards) {
+        namesByCode.set(record.stockCode, record.stockName);
+      }
+    }
+
+    return {
+      date,
+      maxBoards,
+      stockNames: Array.from(namesByCode.values()),
+      stockCodes: Array.from(namesByCode.keys()),
+    };
+  });
+}
+
+/** 获取每日最高连板趋势（数据库全量涨停记录）。 */
+export async function getMaxConnectionBoardTrend() {
+  const db = await getDb();
+  if (!db) return [];
+
+  const allRecords = await db.select({
+    stockCode: limitUpRecords.stockCode,
+    stockName: limitUpRecords.stockName,
+    limitUpDate: limitUpRecords.limitUpDate,
+  }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate));
+
+  return buildMaxConnectionBoardTrend(allRecords);
+}

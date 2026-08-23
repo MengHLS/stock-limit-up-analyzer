@@ -19,6 +19,7 @@ import {
   Calendar, 
   TrendingUp, 
   BarChart3, 
+  Activity,
   Loader2,
   Clock,
   Hash,
@@ -302,6 +303,12 @@ export default function Home() {
               <Button variant="ghost" size="sm" className="gap-2 hover:bg-blue-50">
                 <BarChart3 className="h-4 w-4" />
                 大盘分析
+              </Button>
+            </Link>
+            <Link href="/sentiment-analysis">
+              <Button variant="ghost" size="sm" className="gap-2 hover:bg-orange-50">
+                <Activity className="h-4 w-4" />
+                情绪分析
               </Button>
             </Link>
             {isAuthenticated ? (

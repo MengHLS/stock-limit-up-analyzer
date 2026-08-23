@@ -10,6 +10,7 @@ import Market from "./pages/Market";
 import MarketData from "./pages/MarketData";
 import MarketDataInput from "./pages/MarketDataInput";
 import SentimentAlerts from "./pages/SentimentAlerts";
+import SentimentAnalysis from "./pages/SentimentAnalysis";
 
 
 function Router() {
@@ -21,6 +22,7 @@ function Router() {
       <Route path="/market-data" component={MarketData} />
       <Route path="/market-data-input" component={MarketDataInput} />
       <Route path="/sentiment-alerts" component={SentimentAlerts} />
+      <Route path="/sentiment-analysis" component={SentimentAnalysis} />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
