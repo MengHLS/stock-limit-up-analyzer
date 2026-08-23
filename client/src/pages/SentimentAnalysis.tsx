@@ -99,7 +99,8 @@ export default function SentimentAnalysisPage() {
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-orange-600">Market Sentiment</p>
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">最高连板趋势</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            根据数据库中的涨停记录，按已记录交易日计算每日最高连板数，并在对应数据点展示最高连板股票名称。
+            根据数据库中的主板涨停记录，按已记录交易日计算每日最高连板数，并在对应数据点展示最高连板股票名称。
+            创业板、科创板和北交所股票不参与本项统计。
           </p>
         </div>
 
@@ -155,7 +156,7 @@ export default function SentimentAnalysisPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-bold text-blue-600">{chartData.length}<span className="ml-1 text-base">天</span></div>
-                  <p className="mt-1 text-xs text-slate-500">数据来自涨停记录表</p>
+                  <p className="mt-1 text-xs text-slate-500">仅统计主板涨停记录</p>
                 </CardContent>
               </Card>
             </div>
@@ -165,7 +166,7 @@ export default function SentimentAnalysisPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>每日最高连板折线图</CardTitle>
-                    <CardDescription>默认显示最近60个交易日；拖动下方横轴缩放条可查看历史区间，最高点标注对应股票。</CardDescription>
+                    <CardDescription>仅统计主板股票；默认显示最近60个交易日，拖动下方横轴缩放条可查看历史区间。</CardDescription>
                   </div>
                   <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
                     {formatDate(visibleChartData[0]?.date ?? chartData[0].date)} 至 {formatDate(visibleChartData.at(-1)?.date ?? chartData.at(-1)?.date ?? "")}

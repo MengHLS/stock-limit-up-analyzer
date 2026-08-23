@@ -1038,13 +1038,14 @@ export function buildMaxConnectionBoardTrend(records: Array<Pick<LimitUpRecord, 
 }> {
   if (records.length === 0) return [];
 
+  const isMainBoardStock = (stockCode: string) => !/^(300|301|688|920)/.test(stockCode);
   const tradingDates = Array.from(new Set(records.map(record => record.limitUpDate)))
     .sort((a, b) => b.localeCompare(a));
   const tradingDateIndex = new Map(tradingDates.map((date, index) => [date, index]));
   const stockDatesMap = new Map<string, Set<string>>();
   const recordsByDate = new Map<string, typeof records>();
 
-  for (const record of records) {
+  for (const record of records.filter(record => isMainBoardStock(record.stockCode))) {
     if (!stockDatesMap.has(record.stockCode)) {
       stockDatesMap.set(record.stockCode, new Set());
     }
@@ -1068,7 +1069,7 @@ export function buildMaxConnectionBoardTrend(records: Array<Pick<LimitUpRecord, 
     return boards;
   };
 
-  return tradingDates.slice().reverse().map((date) => {
+  return tradingDates.slice().reverse().flatMap((date) => {
     const namesByCode = new Map<string, string>();
     let maxBoards = 0;
 
@@ -1083,12 +1084,14 @@ export function buildMaxConnectionBoardTrend(records: Array<Pick<LimitUpRecord, 
       }
     }
 
-    return {
+    if (maxBoards === 0) return [];
+
+    return [{
       date,
       maxBoards,
       stockNames: Array.from(namesByCode.values()),
       stockCodes: Array.from(namesByCode.keys()),
-    };
+    }];
   });
 }
 
