@@ -39,6 +39,25 @@ describe("buildSentimentCycleAnalysis", () => {
     expect(analysis.days.every((day) => !day.stockCodes.includes("300001.SZ"))).toBe(true);
   });
 
+  it("只将低位混沌期首板起涨、后续成为六板龙头的股票识别为原生龙", () => {
+    const analysis = buildSentimentCycleAnalysis(source);
+    const originalLeader = analysis.nativeLeaders.find((leader) => leader.stockCode === "600001.SH");
+
+    expect(originalLeader).toMatchObject({
+      stockName: "老龙头",
+      startDate: "2026-08-10",
+      startDayMaxBoards: 1,
+      confirmationDate: "2026-08-15",
+    });
+    expect(analysis.nativeLeaders.some((leader) => leader.stockName === "中位股")).toBe(false);
+    expect(analysis.nativeLeaders.some((leader) => leader.stockCode === "300001.SZ")).toBe(false);
+  });
+
+  it("在原生龙达到六板前不以未来数据提前确认", () => {
+    const beforeConfirmation = buildSentimentCycleAnalysis(source.filter((record) => record.limitUpDate <= "2026-08-14"));
+    expect(beforeConfirmation.nativeLeaders).toEqual([]);
+  });
+
   it("将连续相同市场周期合并，并保留区间内发生过的情绪阶段", () => {
     const earlyAnalysis = buildSentimentCycleAnalysis(source.filter((record) => record.limitUpDate <= "2026-08-14"));
 

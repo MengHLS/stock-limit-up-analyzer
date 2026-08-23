@@ -62,10 +62,20 @@ export type LeaderBreakEvent = {
   postBreakObservations: PostBreakLeader[];
 };
 
+export type NativeLeader = {
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  startDate: string;
+  startDayMaxBoards: number;
+  confirmationDate: string;
+};
+
 export type SentimentCycleAnalysis = {
   days: SentimentCycleDay[];
   segments: SentimentCycleSegment[];
   breakEvents: LeaderBreakEvent[];
+  nativeLeaders: NativeLeader[];
   definition: string;
 };
 
@@ -161,6 +171,42 @@ function buildSegments(days: SentimentCycleDay[]): SentimentCycleSegment[] {
   return segments;
 }
 
+function buildNativeLeaders(
+  tradingDates: string[],
+  recordsByDate: Map<string, SentimentCycleSourceRecord[]>,
+  boardsAt: (stockCode: string, date: string) => number,
+  leaders: DailyLeader[],
+): NativeLeader[] {
+  const dailyMaxBoards = new Map(leaders.map((leader) => [leader.date, leader.maxBoards]));
+  const nativeLeaders = new Map<string, NativeLeader>();
+
+  for (let index = 0; index < tradingDates.length; index += 1) {
+    const date = tradingDates[index];
+    const previousDate = tradingDates[index - 1];
+    const startDayMaxBoards = dailyMaxBoards.get(date) ?? 0;
+    // 低位混沌：起涨日市场最高连板不超过2板，因此当日不存在6板及以上既有周期龙头。
+    if (startDayMaxBoards > LOW_LEVEL_MAX_BOARDS) continue;
+    const previousCodes = new Set((previousDate ? recordsByDate.get(previousDate) : [])?.map((record) => record.stockCode) ?? []);
+    const uniqueTodayRecords = Array.from(new Map((recordsByDate.get(date) ?? []).map((record) => [record.stockCode, record])).values());
+
+    for (const record of uniqueTodayRecords) {
+      if (previousCodes.has(record.stockCode) || boardsAt(record.stockCode, date) !== 1 || nativeLeaders.has(record.stockCode)) continue;
+      const confirmationDate = tradingDates.slice(index + 1).find((futureDate) => boardsAt(record.stockCode, futureDate) >= CYCLE_LEADER_MIN_BOARDS);
+      if (!confirmationDate) continue;
+      nativeLeaders.set(record.stockCode, {
+        stockCode: record.stockCode,
+        stockName: record.stockName,
+        sector: record.sector ?? "未分类",
+        startDate: date,
+        startDayMaxBoards,
+        confirmationDate,
+      });
+    }
+  }
+
+  return Array.from(nativeLeaders.values()).sort((left, right) => right.confirmationDate.localeCompare(left.confirmationDate));
+}
+
 /**
  * 周期龙头信号：主板股票达到6板（高于5板）。没有任何6板及以上主板股票的交易日为混沌周期。
  * 原龙头断板后，任何断板日涨停股票只要在后续交易日严格突破老龙头高度，即为穿越周期龙；
@@ -178,6 +224,7 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
       cycleLeaderNames: marketCycle === "龙头周期" ? leader.stockNames : [],
     };
   });
+  const nativeLeaders = buildNativeLeaders(tradingDates, recordsByDate, boardsAt, leaders);
   const breakEvents: LeaderBreakEvent[] = [];
 
   for (let index = 1; index < leaders.length; index += 1) {
@@ -273,6 +320,7 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
     days,
     segments: buildSegments(days),
     breakEvents: breakEvents.sort((left, right) => right.breakDate.localeCompare(left.breakDate)).slice(0, 12),
-    definition: "周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原龙头断板仅以6板及以上前日最高标为对象。断板日涨停股票后续严格突破老龙头高度的为穿越周期龙；未突破老龙头高度但达到6板的统一为补涨龙。断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
+    nativeLeaders,
+    definition: "周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原生龙为本轮连板首日处于最高连板不超过2板的低位混沌期、当日没有既有周期龙头，且后续成长至6板的主板股票。原龙头断板仅以6板及以上前日最高标为对象。断板日涨停股票后续严格突破老龙头高度的为穿越周期龙；未突破老龙头高度但达到6板的统一为补涨龙。起涨或断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
   };
 }

@@ -261,6 +261,11 @@ export default function SentimentAnalysisPage() {
                         </div>
                       ))}
                     </div>
+                    <div className="mt-4 border-t border-sky-100 pt-4">
+                      <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Crown className="h-4 w-4 text-amber-600" />已确认原生龙</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">本轮连板首日处于最高连板不超过2板的低位混沌期，且当日无既有周期龙头；后续达到6板后才完成历史确认。</p>
+                      {cycleAnalysis.nativeLeaders.length === 0 ? <p className="py-4 text-center text-xs text-slate-500">当前样本未出现已确认的原生龙。</p> : <div className="mt-3 space-y-2">{cycleAnalysis.nativeLeaders.slice(0, 6).map((leader) => <div key={leader.stockCode} className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-slate-800">{leader.stockName}</p><Badge variant="outline" className="border-amber-200 bg-white text-amber-700">原生龙</Badge></div><p className="mt-1 text-xs text-slate-600">{leader.sector} · {formatDate(leader.startDate)} 从低位混沌期首板起涨（当日最高{leader.startDayMaxBoards}板）</p><p className="mt-1 text-xs font-medium text-amber-800">{formatDate(leader.confirmationDate)} 确认达到6板</p></div>)}</div>}
+                    </div>
                   </CardContent>
                 </Card>
 
