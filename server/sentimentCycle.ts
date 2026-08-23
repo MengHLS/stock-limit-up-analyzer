@@ -1,7 +1,7 @@
 import { buildLeaderCandidatesForDate, type LeaderCandidateSourceRecord } from "./leaderCandidates";
 
 export type SentimentCyclePhase = "冰点试错" | "修复上升" | "上升发酵" | "高位分歧" | "高位亢奋" | "高位退潮";
-
+export type MarketCycleType = "混沌周期" | "龙头周期";
 export type SentimentCycleSourceRecord = LeaderCandidateSourceRecord;
 
 type DailyLeader = {
@@ -14,10 +14,13 @@ type DailyLeader = {
 export type SentimentCycleDay = DailyLeader & {
   phase: SentimentCyclePhase;
   phaseReason: string;
+  marketCycle: MarketCycleType;
+  cycleLeaderNames: string[];
 };
 
 export type SentimentCycleSegment = {
   phase: SentimentCyclePhase;
+  marketCycle: MarketCycleType;
   startDate: string;
   endDate: string;
   maxBoards: number;
@@ -36,6 +39,17 @@ export type NewCycleCandidate = {
   becameHighestBoardLeader: boolean | null;
 };
 
+export type PostBreakLeader = {
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  breakDayBoards: number;
+  score: number | null;
+  highestBoardsAfterBreak: number;
+  breakthroughDate: string | null;
+  validationStatus: "已验证" | "观察中" | "未达标";
+};
+
 export type LeaderBreakEvent = {
   breakDate: string;
   previousDate: string;
@@ -43,6 +57,9 @@ export type LeaderBreakEvent = {
   originalMaxBoards: number;
   breakDayMaxBoards: number;
   newCycleCandidates: NewCycleCandidate[];
+  throughCycleLeaders: PostBreakLeader[];
+  reboundLeaders: PostBreakLeader[];
+  postBreakObservations: PostBreakLeader[];
 };
 
 export type SentimentCycleAnalysis = {
@@ -51,6 +68,10 @@ export type SentimentCycleAnalysis = {
   breakEvents: LeaderBreakEvent[];
   definition: string;
 };
+
+const CYCLE_LEADER_MIN_BOARDS = 6;
+const MID_LEVEL_MIN_BOARDS = 3;
+const LOW_LEVEL_MAX_BOARDS = 2;
 
 function isMainBoardStock(stockCode: string) {
   return !/^(300|301|688|920)/.test(stockCode);
@@ -121,41 +142,56 @@ function buildSegments(days: SentimentCycleDay[]): SentimentCycleSegment[] {
   const segments: SentimentCycleSegment[] = [];
   for (const day of days) {
     const previous = segments.at(-1);
-    if (!previous || previous.phase !== day.phase) {
-      segments.push({ phase: day.phase, startDate: day.date, endDate: day.date, maxBoards: day.maxBoards, leaderNames: [...day.stockNames] });
+    if (!previous || previous.phase !== day.phase || previous.marketCycle !== day.marketCycle) {
+      segments.push({
+        phase: day.phase,
+        marketCycle: day.marketCycle,
+        startDate: day.date,
+        endDate: day.date,
+        maxBoards: day.maxBoards,
+        leaderNames: [...day.cycleLeaderNames],
+      });
       continue;
     }
     previous.endDate = day.date;
     previous.maxBoards = Math.max(previous.maxBoards, day.maxBoards);
-    previous.leaderNames = Array.from(new Set([...previous.leaderNames, ...day.stockNames]));
+    previous.leaderNames = Array.from(new Set([...previous.leaderNames, ...day.cycleLeaderNames]));
   }
   return segments;
 }
 
 /**
- * 每日阶段和断板候选信号只使用断板日及之前数据。后续三交易日表现仅对历史事件回顾展示，
- * 与断板日的候选生成分离，避免向信号输入未来信息。
+ * 周期龙头信号：主板股票达到6板（高于5板）。没有任何6板及以上主板股票的交易日为混沌周期。
+ * 原龙头断板后，穿越周期龙须为断板日3板及以上的中位涨停，并在后续交易日严格突破老龙头高度；
+ * 补涨龙须为断板日1至2板的低位涨停，并在后续交易日达到6板。分类结果仅用于历史回顾，
+ * 断板日信号与候选评分均严格截至断板日生成，不读取未来记录。
  */
 export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[]): SentimentCycleAnalysis {
   const { leaders, tradingDates, recordsByDate, boardsAt } = buildDailyLeaders(records);
-  const days = leaders.map((leader, index) => ({
-    ...leader,
-    ...phaseFor(leader.maxBoards, index > 0 ? leaders[index - 1].maxBoards : null),
-  }));
+  const days = leaders.map((leader, index) => {
+    const marketCycle: MarketCycleType = leader.maxBoards >= CYCLE_LEADER_MIN_BOARDS ? "龙头周期" : "混沌周期";
+    return {
+      ...leader,
+      ...phaseFor(leader.maxBoards, index > 0 ? leaders[index - 1].maxBoards : null),
+      marketCycle,
+      cycleLeaderNames: marketCycle === "龙头周期" ? leader.stockNames : [],
+    };
+  });
   const breakEvents: LeaderBreakEvent[] = [];
 
   for (let index = 1; index < leaders.length; index += 1) {
     const previous = leaders[index - 1];
     const current = leaders[index];
-    if (previous.maxBoards < 3) continue;
+    if (previous.maxBoards < CYCLE_LEADER_MIN_BOARDS) continue;
     const currentCodes = new Set((recordsByDate.get(current.date) ?? []).map((record) => record.stockCode));
     const allOriginalLeadersBroken = previous.stockCodes.length > 0 && previous.stockCodes.every((code) => !currentCodes.has(code));
     if (!allOriginalLeadersBroken) continue;
 
     const originalCodes = new Set(previous.stockCodes);
-    const candidates = buildLeaderCandidatesForDate(records, current.date).candidates
+    const scoreByCode = new Map(buildLeaderCandidatesForDate(records, current.date).candidates
       .filter((candidate) => !originalCodes.has(candidate.stockCode))
-      .slice(0, 5);
+      .map((candidate) => [candidate.stockCode, candidate]));
+    const candidates = Array.from(scoreByCode.values()).slice(0, 5);
     const followUpDates = tradingDates.slice(index + 1, index + 4);
     const followUpReady = followUpDates.length === 3;
     const newCycleCandidates = candidates.map((candidate) => {
@@ -165,10 +201,7 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
           ? boardsAt(candidate.stockCode, date)
           : 0));
       const becameHighestBoardLeader = followUpReady
-        ? followUpDates.some((date) => {
-          const dailyLeader = leaders.find((leader) => leader.date === date);
-          return dailyLeader?.stockCodes.includes(candidate.stockCode) ?? false;
-        })
+        ? followUpDates.some((date) => leaders.find((leader) => leader.date === date)?.stockCodes.includes(candidate.stockCode) ?? false)
         : null;
       return {
         stockCode: candidate.stockCode,
@@ -182,6 +215,45 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
         becameHighestBoardLeader,
       };
     });
+
+    const lastTradingDate = tradingDates.at(-1) ?? current.date;
+    const breakDayStocks = Array.from(new Map((recordsByDate.get(current.date) ?? [])
+      .filter((record) => !originalCodes.has(record.stockCode))
+      .map((record) => [record.stockCode, record])).values());
+    const inspected = breakDayStocks.map((record): PostBreakLeader => {
+      const candidate = scoreByCode.get(record.stockCode);
+      const futureDates = tradingDates.slice(index + 1);
+      const subsequentDays = futureDates.filter((date) => (recordsByDate.get(date) ?? []).some((item) => item.stockCode === record.stockCode));
+      const highestBoardsAfterBreak = Math.max(boardsAt(record.stockCode, current.date), ...subsequentDays.map((date) => boardsAt(record.stockCode, date)));
+      const sourceBoards = boardsAt(record.stockCode, current.date);
+      const breakthroughThreshold = sourceBoards >= MID_LEVEL_MIN_BOARDS ? previous.maxBoards + 1 : CYCLE_LEADER_MIN_BOARDS;
+      const breakthroughDate = subsequentDays.find((date) => boardsAt(record.stockCode, date) >= breakthroughThreshold) ?? null;
+      const validationStatus = breakthroughDate
+        ? "已验证"
+        : (lastTradingDate === current.date || subsequentDays.at(-1) === lastTradingDate ? "观察中" : "未达标");
+      return {
+        stockCode: record.stockCode,
+        stockName: record.stockName,
+        sector: record.sector ?? "未分类",
+        breakDayBoards: sourceBoards,
+        score: candidate?.score ?? null,
+        highestBoardsAfterBreak,
+        breakthroughDate,
+        validationStatus,
+      };
+    });
+    const throughCycleLeaders = inspected
+      .filter((item) => item.breakDayBoards >= MID_LEVEL_MIN_BOARDS && item.breakDayBoards < previous.maxBoards && item.highestBoardsAfterBreak > previous.maxBoards)
+      .sort((left, right) => right.highestBoardsAfterBreak - left.highestBoardsAfterBreak);
+    const reboundLeaders = inspected
+      .filter((item) => item.breakDayBoards <= LOW_LEVEL_MAX_BOARDS && item.highestBoardsAfterBreak >= CYCLE_LEADER_MIN_BOARDS)
+      .sort((left, right) => right.highestBoardsAfterBreak - left.highestBoardsAfterBreak);
+    const classifiedCodes = new Set([...throughCycleLeaders, ...reboundLeaders].map((item) => item.stockCode));
+    const postBreakObservations = inspected
+      .filter((item) => !classifiedCodes.has(item.stockCode) && (item.breakDayBoards >= MID_LEVEL_MIN_BOARDS || item.breakDayBoards <= LOW_LEVEL_MAX_BOARDS))
+      .sort((left, right) => right.breakDayBoards - left.breakDayBoards || (right.score ?? 0) - (left.score ?? 0))
+      .slice(0, 5);
+
     breakEvents.push({
       breakDate: current.date,
       previousDate: previous.date,
@@ -189,6 +261,9 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
       originalMaxBoards: previous.maxBoards,
       breakDayMaxBoards: current.maxBoards,
       newCycleCandidates,
+      throughCycleLeaders,
+      reboundLeaders,
+      postBreakObservations,
     });
   }
 
@@ -196,6 +271,6 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
     days,
     segments: buildSegments(days),
     breakEvents: breakEvents.sort((left, right) => right.breakDate.localeCompare(left.breakDate)).slice(0, 12),
-    definition: "周期仅由主板每日最高连板及相邻已记录交易日的高度变化划分。原龙头断板定义为前一交易日全部最高连板股票在当日均未涨停；断板日新周期候选仅使用当日及以前数据生成，后3交易日表现仅作历史回顾。",
+    definition: "周期龙头定义为主板6板及以上；当日没有主板6板及以上股票即为混沌周期。原龙头断板仅以6板及以上前日最高标为对象；穿越周期龙为断板日3板及以上的中位涨停，后续严格突破老龙头高度；补涨龙为断板日1至2板的低位涨停，后续达到6板。断板日信号只使用当日及以前数据，后续结果只作历史回顾。",
   };
 }

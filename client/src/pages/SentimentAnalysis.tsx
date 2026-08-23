@@ -34,7 +34,7 @@ function ChartTooltip({ active, payload }: any) {
       <p className="mt-1 max-w-[240px] text-xs text-slate-600">
         {point.stockNames.length > 0 ? `股票：${point.stockNames.join("、")}` : "当日暂无涨停记录"}
       </p>
-      {point.phase && <p className="mt-1 text-xs font-medium text-sky-700">周期阶段：{point.phase} · {point.phaseReason}</p>}
+      {point.phase && <p className="mt-1 text-xs font-medium text-sky-700">{point.marketCycle} · {point.phase} · {point.phaseReason}</p>}
     </div>
   );
 }
@@ -108,7 +108,7 @@ export default function SentimentAnalysisPage() {
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-orange-600">Market Sentiment</p>
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">最高连板趋势</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            以主板最高连板趋势划分情绪阶段，识别各阶段高度龙头；同时在原龙头断板日生成新周期研究候选，并回顾其后续连板表现。
+            主板高于5板才确认为周期龙头；没有6板及以上主板股票时标记为混沌周期。原周期龙断板后，页面复盘中位股是否穿越老龙高度，以及低位股是否成长为补涨龙。
             创业板、科创板和北交所股票不参与本项统计。
           </p>
         </div>
@@ -169,8 +169,8 @@ export default function SentimentAnalysisPage() {
                 </CardContent>
               </Card>
               <Card className="border-sky-100 bg-white/80 shadow-sm">
-                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">当前情绪阶段</CardTitle></CardHeader>
-                <CardContent><div className="text-xl font-bold text-sky-700">{latestCycleDay?.phase ?? "-"}</div><p className="mt-1 line-clamp-2 text-xs text-slate-500">{latestCycleDay?.phaseReason ?? "等待周期分析数据"}</p></CardContent>
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">当前市场周期</CardTitle></CardHeader>
+                <CardContent><div className="text-xl font-bold text-sky-700">{latestCycleDay?.marketCycle ?? "-"}</div><p className="mt-1 text-xs font-medium text-slate-600">{latestCycleDay?.phase ?? "等待阶段数据"}</p><p className="mt-1 line-clamp-2 text-xs text-slate-500">{latestCycleDay?.phaseReason ?? "等待周期分析数据"}</p></CardContent>
               </Card>
             </div>
 
@@ -248,16 +248,16 @@ export default function SentimentAnalysisPage() {
               <div className="grid gap-6 lg:grid-cols-[1fr_1.35fr]">
                 <Card className="border-sky-100 bg-white/85 shadow-sm">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base"><Flame className="h-4 w-4 text-orange-600" />情绪周期与阶段龙头</CardTitle>
-                    <CardDescription>按最高连板高度及相邻交易日变化划分阶段；龙头为该阶段曾达到当日最高连板的主板股票。</CardDescription>
+                    <CardTitle className="flex items-center gap-2 text-base"><Flame className="h-4 w-4 text-orange-600" />情绪周期与周期龙头</CardTitle>
+                    <CardDescription>周期龙头仅指主板6板及以上股票；没有6板以上主板股票的阶段显示为混沌周期。</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
                       {cycleAnalysis.segments.slice(-8).reverse().map((segment) => (
                         <div key={`${segment.phase}-${segment.startDate}`} className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-                          <div className="flex items-center justify-between gap-2"><Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">{segment.phase}</Badge><span className="text-xs font-medium text-orange-600">阶段最高 {segment.maxBoards}板</span></div>
+                          <div className="flex items-center justify-between gap-2"><div className="flex flex-wrap gap-1"><Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">{segment.marketCycle}</Badge><Badge variant="outline" className="border-slate-200 bg-white text-slate-600">{segment.phase}</Badge></div><span className="text-xs font-medium text-orange-600">阶段最高 {segment.maxBoards}板</span></div>
                           <p className="mt-2 text-xs text-slate-500">{formatDate(segment.startDate)} 至 {formatDate(segment.endDate)}</p>
-                          <p className="mt-1 line-clamp-2 text-sm text-slate-700">阶段龙头：{segment.leaderNames.join("、") || "-"}</p>
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-700">周期龙头：{segment.leaderNames.join("、") || "本阶段尚无6板以上主板股票"}</p>
                         </div>
                       ))}
                     </div>
@@ -266,14 +266,15 @@ export default function SentimentAnalysisPage() {
 
                 <Card className="border-rose-100 bg-white/85 shadow-sm">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base"><GitBranch className="h-4 w-4 text-rose-600" />龙头断板后的新周期趋势</CardTitle>
-                    <CardDescription>断板定义为前一交易日全部最高连板股票在当日均未涨停。候选仅以断板日及以前数据生成；后3交易日表现仅作历史复盘。</CardDescription>
+                    <CardTitle className="flex items-center gap-2 text-base"><GitBranch className="h-4 w-4 text-rose-600" />周期龙断板后的穿越龙与补涨龙</CardTitle>
+                    <CardDescription>仅以6板及以上原周期龙的断板事件复盘：中位涨停后续严格突破老龙高度为穿越周期龙；低位涨停后续达到6板为补涨龙。</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {cycleAnalysis.breakEvents.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">当前样本尚未识别到3板及以上原龙头的完整断板事件。</p> : <div className="space-y-3">{cycleAnalysis.breakEvents.slice(0, 5).map((event) => (
+                    {cycleAnalysis.breakEvents.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">当前样本尚未识别到6板及以上原周期龙的完整断板事件。</p> : <div className="space-y-3">{cycleAnalysis.breakEvents.slice(0, 5).map((event) => (
                       <article key={event.breakDate} className="rounded-xl border border-rose-100 bg-rose-50/30 p-4">
                         <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-sm font-semibold text-slate-800">{formatDate(event.breakDate)} 原龙头断板</p><p className="mt-1 text-xs text-slate-500">前日 {formatDate(event.previousDate)} · {event.originalLeaderNames.join("、")} · {event.originalMaxBoards}板</p></div><Badge variant="outline" className="border-rose-200 bg-white text-rose-700">断板日最高 {event.breakDayMaxBoards}板</Badge></div>
-                        <div className="mt-3 border-t border-rose-100 pt-3"><p className="mb-2 flex items-center gap-1 text-xs font-medium text-slate-600"><Crown className="h-3.5 w-3.5 text-amber-600" />当日新周期研究候选</p>{event.newCycleCandidates.length === 0 ? <p className="text-xs text-slate-500">当日没有满足候选池条件的主板股票。</p> : <div className="flex flex-wrap gap-2">{event.newCycleCandidates.map((candidate) => <div key={candidate.stockCode} className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2"><p className="text-xs font-semibold text-slate-800">{candidate.stockName} <span className="text-amber-700">{candidate.boards}板 / {candidate.score}分</span></p><p className="mt-1 text-[11px] text-slate-500">{candidate.sector} · {candidate.followUpReady ? `后3日最高${candidate.followUpHighestBoards ?? 0}板${candidate.becameHighestBoardLeader ? "，曾成为最高标" : ""}` : "后3日数据未完备"}</p></div>)}</div>}</div>
+                        <div className="mt-3 grid gap-2 border-t border-rose-100 pt-3 sm:grid-cols-2"><div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3"><p className="mb-2 text-xs font-semibold text-violet-800">穿越周期龙</p><p className="mb-2 text-[11px] text-violet-700">断板日3板及以上，后续严格突破老龙 {event.originalMaxBoards}板。</p>{event.throughCycleLeaders.length === 0 ? <p className="text-xs text-slate-500">暂无历史已验证样本。</p> : event.throughCycleLeaders.map((leader) => <p key={leader.stockCode} className="mb-1 text-xs text-slate-700"><strong>{leader.stockName}</strong> · 断板日{leader.breakDayBoards}板，后续{leader.highestBoardsAfterBreak}板 · {leader.breakthroughDate ? `${formatDate(leader.breakthroughDate)}突破` : leader.validationStatus}</p>)}</div><div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3"><p className="mb-2 text-xs font-semibold text-emerald-800">补涨龙</p><p className="mb-2 text-[11px] text-emerald-700">断板日1至2板，后续达到6板。</p>{event.reboundLeaders.length === 0 ? <p className="text-xs text-slate-500">暂无历史已验证样本。</p> : event.reboundLeaders.map((leader) => <p key={leader.stockCode} className="mb-1 text-xs text-slate-700"><strong>{leader.stockName}</strong> · 断板日{leader.breakDayBoards}板，后续{leader.highestBoardsAfterBreak}板 · {leader.breakthroughDate ? `${formatDate(leader.breakthroughDate)}达到6板` : leader.validationStatus}</p>)}</div></div>
+                        {event.postBreakObservations.length > 0 && <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 p-2.5"><p className="flex items-center gap-1 text-xs font-medium text-amber-800"><Crown className="h-3.5 w-3.5" />断板日观察股（未满足历史确认条件）</p><p className="mt-1 text-xs text-slate-600">{event.postBreakObservations.map((leader) => `${leader.stockName} ${leader.breakDayBoards}板${leader.score === null ? "" : `/${leader.score}分`}·${leader.validationStatus}`).join("；")}</p></div>}
                       </article>
                     ))}</div>}
                   </CardContent>
