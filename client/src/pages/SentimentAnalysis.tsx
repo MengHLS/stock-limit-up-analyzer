@@ -3,8 +3,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { Activity, ArrowLeft, CalendarDays, Loader2, TrendingUp } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import {
+  Brush,
   CartesianGrid,
   Line,
   LineChart,
@@ -35,6 +37,7 @@ function ChartTooltip({ active, payload }: any) {
 }
 
 export default function SentimentAnalysisPage() {
+  const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 });
   const { data: trend = [], isLoading, isError, refetch } =
     trpc.sentiment.getMaxConnectionBoardTrend.useQuery(undefined, {
       staleTime: 60_000,
@@ -48,6 +51,21 @@ export default function SentimentAnalysisPage() {
   const chartData = rawChartData;
   const peakDates = chartData.filter((point) => point.maxBoards === peakBoards);
   const latest = chartData[chartData.length - 1];
+  const defaultStartIndex = Math.max(0, chartData.length - 60);
+
+  useEffect(() => {
+    if (chartData.length === 0) return;
+    setVisibleRange({ startIndex: defaultStartIndex, endIndex: chartData.length - 1 });
+  }, [chartData.length, defaultStartIndex]);
+
+  const visibleStartIndex = Math.min(Math.max(visibleRange.startIndex, 0), Math.max(chartData.length - 1, 0));
+  const visibleEndIndex = Math.min(
+    Math.max(visibleRange.endIndex, visibleStartIndex),
+    Math.max(chartData.length - 1, 0),
+  );
+  const visibleChartData = chartData.slice(visibleStartIndex, visibleEndIndex + 1);
+  const visiblePeakBoards = visibleChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
+  const visiblePeakDates = visibleChartData.filter((point) => point.maxBoards === visiblePeakBoards);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50/40 to-red-50/50">
@@ -147,17 +165,18 @@ export default function SentimentAnalysisPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>每日最高连板折线图</CardTitle>
-                    <CardDescription>横轴为日期，纵轴为最高连板数；数据点上方标注当日最高连板股票。</CardDescription>
+                    <CardDescription>默认显示最近60个交易日；拖动下方横轴缩放条可查看历史区间，最高点标注对应股票。</CardDescription>
                   </div>
                   <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
-                    {formatDate(chartData[0].date)} 至 {formatDate(chartData[chartData.length - 1].date)}
+                    {formatDate(visibleChartData[0]?.date ?? chartData[0].date)} 至 {formatDate(visibleChartData.at(-1)?.date ?? chartData.at(-1)?.date ?? "")}
                   </Badge>
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="relative h-[460px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} margin={{ top: 50, right: 24, left: 0, bottom: 12 }}>
+                <div className="space-y-3">
+                  <div className="relative h-[430px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={visibleChartData} margin={{ top: 50, right: 24, left: 0, bottom: 12 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                       <XAxis dataKey="shortDate" tick={{ fontSize: 12, fill: "#64748b" }} minTickGap={18} />
                       <YAxis allowDecimals={false} domain={[0, "dataMax + 1"]} tick={{ fontSize: 12, fill: "#64748b" }} label={{ value: "最高连板数", angle: -90, position: "insideLeft", fill: "#64748b" }} />
@@ -170,27 +189,52 @@ export default function SentimentAnalysisPage() {
                         strokeWidth={3}
                         dot={{ r: 5, fill: "#ea580c", stroke: "#fff", strokeWidth: 2 }}
                         activeDot={{ r: 7, fill: "#dc2626" }}
+                        isAnimationActive={false}
                       />
-                    </LineChart>
-                  </ResponsiveContainer>
-                  <div className="pointer-events-none absolute inset-0 overflow-visible">
-                    {peakDates.map((point) => {
-                      const pointIndex = chartData.findIndex((item) => item.date === point.date);
-                      const xPercent = chartData.length === 1
-                        ? 50
-                        : 5 + (pointIndex / (chartData.length - 1)) * 90;
-                      const yPercent = 4 + (1 - point.maxBoards / (peakBoards + 1)) * 76;
-                      return (
-                        <div
-                          key={`peak-label-${point.date}`}
-                          className="absolute -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700 shadow-sm"
-                          style={{ left: `${xPercent}%`, top: `${yPercent}%` }}
-                        >
-                          {point.stockNames.join("、") || "最高连板"}
-                        </div>
-                      );
-                    })}
+                      </LineChart>
+                    </ResponsiveContainer>
+                    <div className="pointer-events-none absolute inset-0 overflow-visible">
+                      {visiblePeakDates.map((point) => {
+                        const pointIndex = visibleChartData.findIndex((item) => item.date === point.date);
+                        const xPercent = visibleChartData.length === 1
+                          ? 50
+                          : 5 + (pointIndex / (visibleChartData.length - 1)) * 90;
+                        const yPercent = 4 + (1 - point.maxBoards / (visiblePeakBoards + 1)) * 70;
+                        return (
+                          <div
+                            key={`peak-label-${point.date}`}
+                            className="absolute -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700 shadow-sm"
+                            style={{ left: `${xPercent}%`, top: `${yPercent}%` }}
+                          >
+                            {point.stockNames.join("、") || "最高连板"}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
+                  <div className="h-[64px] rounded-md border border-orange-100 bg-orange-50/40">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
+                        <Line type="monotone" dataKey="maxBoards" stroke="#fdba74" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                        <Brush
+                          dataKey="shortDate"
+                          height={28}
+                          travellerWidth={12}
+                          startIndex={visibleStartIndex}
+                          endIndex={visibleEndIndex}
+                          stroke="#fb923c"
+                          fill="#fff7ed"
+                          onChange={(range) => {
+                            setVisibleRange({
+                              startIndex: range.startIndex ?? defaultStartIndex,
+                              endIndex: range.endIndex ?? chartData.length - 1,
+                            });
+                          }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <p className="text-center text-xs text-slate-500">拖动两端橙色滑块或移动选中区域，可切换查看的交易日区间。</p>
                 </div>
               </CardContent>
             </Card>
