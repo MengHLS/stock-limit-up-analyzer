@@ -52,6 +52,8 @@ export type LeaderCandidateScoreBand = {
 
 export type LeaderCandidateBacktestResult = {
   definition: string;
+  observationDays: 1 | 2;
+  appliedMinScore: number | null;
   totalSamples: number;
   successCount: number;
   successRate: number | null;
@@ -61,6 +63,11 @@ export type LeaderCandidateBacktestResult = {
   calibrationPeriod: { startDate: string | null; endDate: string | null };
   outOfSample: { sampleSize: number; successCount: number; successRate: number | null };
   latestRows: LeaderCandidateBacktestRow[];
+};
+
+export type LeaderCandidateBacktestOptions = {
+  observationDays?: 1 | 2;
+  minScore?: number;
 };
 
 function isMainBoardStock(stockCode: string) {
@@ -242,7 +249,11 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
  * 回测口径：在T日收盘后，严格使用T日及以前数据生成候选；
  * 成功定义为该股票在下一已记录交易日（T+1）仍出现在涨停记录中。
  */
-export function buildLeaderCandidateBacktest(records: LeaderCandidateSourceRecord[]): LeaderCandidateBacktestResult {
+export function buildLeaderCandidateBacktest(
+  records: LeaderCandidateSourceRecord[],
+  options: LeaderCandidateBacktestOptions = {},
+): LeaderCandidateBacktestResult {
+  const observationDays = options.observationDays ?? 1;
   const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => left.localeCompare(right));
   const recordsByDate = new Map<string, Set<string>>();
@@ -253,10 +264,10 @@ export function buildLeaderCandidateBacktest(records: LeaderCandidateSourceRecor
   }
 
   const rows: LeaderCandidateBacktestRow[] = [];
-  // 最后一个交易日没有T+1结果，主动排除，形成至少一个交易日的观察间隔。
-  for (let index = 0; index < tradingDates.length - 1; index += 1) {
+  // 最后 observationDays 个交易日缺少完整观察结果，主动排除，确保结果位于信号日之后。
+  for (let index = 0; index < tradingDates.length - observationDays; index += 1) {
     const date = tradingDates[index];
-    const nextDate = tradingDates[index + 1];
+    const nextDate = tradingDates[index + observationDays];
     const candidateResult = buildLeaderCandidatesForDate(records, date);
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
 
@@ -274,19 +285,15 @@ export function buildLeaderCandidateBacktest(records: LeaderCandidateSourceRecor
     }
   }
 
-  const calculateBand = (label: string, predicate: (row: LeaderCandidateBacktestRow) => boolean): LeaderCandidateScoreBand => {
-    const bandRows = rows.filter(predicate);
+  const calculateBand = (
+    sourceRows: LeaderCandidateBacktestRow[],
+    label: string,
+    predicate: (row: LeaderCandidateBacktestRow) => boolean,
+  ): LeaderCandidateScoreBand => {
+    const bandRows = sourceRows.filter(predicate);
     const successCount = bandRows.filter((row) => row.success).length;
     return { label, sampleSize: bandRows.length, successCount, successRate: percent(successCount, bandRows.length) };
   };
-  const successCount = rows.filter((row) => row.success).length;
-  const scoreBands = [
-    calculateBand("65分及以上", (row) => row.score >= 65),
-    calculateBand("55–64分", (row) => row.score >= 55 && row.score < 65),
-    calculateBand("45–54分", (row) => row.score >= 45 && row.score < 55),
-    calculateBand("45分以下", (row) => row.score < 45),
-  ];
-
   // 评分阈值仅用较早70%的日期校准，再在较晚30%的日期做样本外验证，避免将同一批样本既用于选阈值又用于评估。
   const calibrationDateCount = Math.max(0, Math.floor(tradingDates.length * 0.7));
   const calibrationDates = new Set(tradingDates.slice(0, calibrationDateCount));
@@ -305,16 +312,29 @@ export function buildLeaderCandidateBacktest(records: LeaderCandidateSourceRecor
       || right.threshold - left.threshold
     ));
   const recommended = thresholdOptions[0] ?? null;
+  const appliedMinScore = options.minScore ?? recommended?.threshold ?? null;
+  const appliedRows = appliedMinScore === null
+    ? rows
+    : rows.filter((row) => row.score >= appliedMinScore);
+  const successCount = appliedRows.filter((row) => row.success).length;
+  const scoreBands = [
+    calculateBand(appliedRows, "65分及以上", (row) => row.score >= 65),
+    calculateBand(appliedRows, "55–64分", (row) => row.score >= 55 && row.score < 65),
+    calculateBand(appliedRows, "45–54分", (row) => row.score >= 45 && row.score < 55),
+    calculateBand(appliedRows, "45分以下", (row) => row.score < 45),
+  ];
   const outOfSampleAtThreshold = recommended
-    ? outOfSampleRows.filter((row) => row.score >= recommended.threshold)
-    : [];
+    ? outOfSampleRows.filter((row) => appliedMinScore === null || row.score >= appliedMinScore)
+    : appliedMinScore === null ? outOfSampleRows : outOfSampleRows.filter((row) => row.score >= appliedMinScore);
   const outOfSampleSuccessCount = outOfSampleAtThreshold.filter((row) => row.success).length;
 
   return {
-    definition: "成功=候选在T日收盘后入池，且在下一已记录交易日T+1仍为涨停；末个交易日因缺少T+1结果不纳入样本。",
-    totalSamples: rows.length,
+    definition: `成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
+    observationDays,
+    appliedMinScore,
+    totalSamples: appliedRows.length,
     successCount,
-    successRate: percent(successCount, rows.length),
+    successRate: percent(successCount, appliedRows.length),
     scoreBands,
     recommendedMinScore: recommended?.threshold ?? null,
     calibrationSampleSize: recommended?.sampleSize ?? 0,
@@ -327,6 +347,6 @@ export function buildLeaderCandidateBacktest(records: LeaderCandidateSourceRecor
       successCount: outOfSampleSuccessCount,
       successRate: percent(outOfSampleSuccessCount, outOfSampleAtThreshold.length),
     },
-    latestRows: rows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score).slice(0, 30),
+    latestRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score).slice(0, 30),
   };
 }

@@ -21,7 +21,7 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
-import { buildLeaderCandidateBacktest, buildLeaderCandidates } from './leaderCandidates';
+import { buildLeaderCandidateBacktest, buildLeaderCandidates, type LeaderCandidateBacktestOptions } from './leaderCandidates';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1129,9 +1129,9 @@ export async function getLeaderCandidates() {
 }
 
 /** 获取基于历史候选池的T+1连板延续回测结果。 */
-export async function getLeaderCandidateBacktest() {
+export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktestOptions = {}) {
   const db = await getDb();
-  if (!db) return buildLeaderCandidateBacktest([]);
+  if (!db) return buildLeaderCandidateBacktest([], options);
 
   const records = await db.select({
     stockCode: limitUpRecords.stockCode,
@@ -1143,5 +1143,5 @@ export async function getLeaderCandidateBacktest() {
     circulationValue: limitUpRecords.circulationValue,
   }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
 
-  return buildLeaderCandidateBacktest(records);
+  return buildLeaderCandidateBacktest(records, options);
 }

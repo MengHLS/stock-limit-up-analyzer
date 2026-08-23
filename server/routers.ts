@@ -702,8 +702,13 @@ export const appRouter = router({
     }),
 
     // 按历史候选池计算下一已记录交易日的连板延续结果
-    getLeaderCandidateBacktest: publicProcedure.query(async () => {
-      return await getLeaderCandidateBacktest();
+    getLeaderCandidateBacktest: publicProcedure
+      .input(z.object({
+        observationDays: z.union([z.literal(1), z.literal(2)]).default(1),
+        minScore: z.number().int().min(0).max(100).optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return await getLeaderCandidateBacktest(input);
     }),
 
     // 获取每日最高连板趋势及对应股票名称

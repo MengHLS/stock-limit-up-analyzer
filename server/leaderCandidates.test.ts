@@ -90,4 +90,17 @@ describe("buildLeaderCandidates", () => {
     expect(result.calibrationSampleSize).toBe(45);
     expect(result.outOfSample).toMatchObject({ sampleSize: 18, successCount: 18, successRate: 100 });
   });
+
+  it("支持将第2个后续交易日作为成功口径，且手动阈值会过滤回测样本", () => {
+    const records = [
+      ...["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({ stockCode, stockName: `主板${index + 1}`, limitUpDate: "2026-08-18", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: null })),
+      ...["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({ stockCode, stockName: `主板${index + 1}`, limitUpDate: "2026-08-19", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: null })),
+      { stockCode: "600001.SH", stockName: "主板1", limitUpDate: "2026-08-20", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: null },
+    ];
+
+    const tPlus2 = buildLeaderCandidateBacktest(records, { observationDays: 2, minScore: 45 });
+
+    expect(tPlus2).toMatchObject({ observationDays: 2, appliedMinScore: 45, totalSamples: 3, successCount: 1, successRate: 33.3 });
+    expect(tPlus2.latestRows.every((row) => row.score >= 45)).toBe(true);
+  });
 });
