@@ -85,9 +85,9 @@ describe("buildLeaderCandidates", () => {
 
     const result = buildLeaderCandidateBacktest(records);
 
-    expect(result.totalSamples).toBe(63);
+    expect(result.totalSamples).toBe(57);
     expect(result.recommendedMinScore).toBe(45);
-    expect(result.calibrationSampleSize).toBe(45);
+    expect(result.calibrationSampleSize).toBe(39);
     expect(result.outOfSample).toMatchObject({ sampleSize: 18, successCount: 18, successRate: 100 });
   });
 
@@ -98,9 +98,30 @@ describe("buildLeaderCandidates", () => {
       { stockCode: "600001.SH", stockName: "主板1", limitUpDate: "2026-08-20", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: null },
     ];
 
-    const tPlus2 = buildLeaderCandidateBacktest(records, { observationDays: 2, minScore: 45 });
+    const tPlus2 = buildLeaderCandidateBacktest(records, { observationDays: 2, minScore: 35 });
 
-    expect(tPlus2).toMatchObject({ observationDays: 2, appliedMinScore: 45, totalSamples: 3, successCount: 1, successRate: 33.3 });
-    expect(tPlus2.latestRows.every((row) => row.score >= 45)).toBe(true);
+    expect(tPlus2).toMatchObject({ observationDays: 2, appliedMinScore: 35, totalSamples: 3, successCount: 1, successRate: 33.3 });
+    expect(tPlus2.latestRows.every((row) => row.score >= 35)).toBe(true);
+  });
+
+  it("流通市值评分优先考虑容量与弹性均衡区间，并提示缺失或极端市值风险", () => {
+    const result = buildLeaderCandidates([
+      { stockCode: "600001.SH", stockName: "均衡市值", limitUpDate: "2026-08-21", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600002.SH", stockName: "中小市值", limitUpDate: "2026-08-21", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "50" },
+      { stockCode: "600003.SH", stockName: "超大市值", limitUpDate: "2026-08-21", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "800" },
+      { stockCode: "600004.SH", stockName: "市值缺失", limitUpDate: "2026-08-21", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: null },
+    ]);
+
+    const balanced = result.candidates.find((candidate) => candidate.stockCode === "600001.SH");
+    const small = result.candidates.find((candidate) => candidate.stockCode === "600002.SH");
+    const mega = result.candidates.find((candidate) => candidate.stockCode === "600003.SH");
+    const missing = result.candidates.find((candidate) => candidate.stockCode === "600004.SH");
+
+    expect(balanced).toMatchObject({ marketCapScore: 16, marketCapLabel: "容量最优区间" });
+    expect(small).toMatchObject({ marketCapScore: 12, marketCapLabel: "弹性容量均衡" });
+    expect(mega).toMatchObject({ marketCapScore: 5, marketCapLabel: "超大盘弹性偏低" });
+    expect(missing?.riskTags).toContain("流通市值缺失");
+    expect((balanced?.score ?? 0)).toBeGreaterThan(small?.score ?? 0);
+    expect((small?.score ?? 0)).toBeGreaterThan(mega?.score ?? 0);
   });
 });

@@ -24,6 +24,8 @@ export type LeaderCandidate = {
   limitUpTime: string | null;
   turnover: string | null;
   circulationValue: string | null;
+  marketCapScore: number;
+  marketCapLabel: string;
   reasons: string[];
   riskTags: string[];
   trajectory: LeaderCandidateTrajectoryPoint[];
@@ -37,7 +39,7 @@ export type LeaderCandidateResult = {
   candidates: LeaderCandidate[];
 };
 
-export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "stockName" | "sector" | "boards" | "score"> & {
+export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "stockName" | "sector" | "boards" | "score" | "circulationValue" | "marketCapScore"> & {
   date: string;
   nextDate: string;
   success: boolean;
@@ -93,6 +95,17 @@ function timeToMinutes(time: string | null) {
 
 function formatTurnover(turnover: string | null) {
   return turnover?.trim() ? `${turnover}亿元` : null;
+}
+
+/** 流通市值以亿元计；中等市值兼具承接容量与弹性，因此给予较高权重。 */
+function calculateMarketCapScore(circulationValue: string | null) {
+  const marketCap = parseNumeric(circulationValue);
+  if (marketCap <= 0) return { score: 0, label: "市值缺失" };
+  if (marketCap < 20) return { score: 4, label: "小盘弹性" };
+  if (marketCap < 80) return { score: 12, label: "弹性容量均衡" };
+  if (marketCap <= 200) return { score: 16, label: "容量最优区间" };
+  if (marketCap <= 500) return { score: 10, label: "大盘承接" };
+  return { score: 5, label: "超大盘弹性偏低" };
 }
 
 function percent(successCount: number, sampleSize: number) {
@@ -171,27 +184,32 @@ export function buildLeaderCandidatesForDate(
       const sectorCount = sectorCounts.get(sector) ?? 0;
       const limitUpMinutes = timeToMinutes(record.limitUpTime);
       const turnover = parseNumeric(record.turnover);
-      const boardScore = Math.min(boards, 6) * 8;
-      const sectorScore = Math.min(sectorCount, 6) * 5;
+      const marketCap = calculateMarketCapScore(record.circulationValue);
+      const boardScore = Math.min(boards, 6) * 7;
+      const sectorScore = Math.min(sectorCount, 6) * 4;
       const timeScore = limitUpMinutes === null ? 2
-        : limitUpMinutes <= 10 * 60 ? 12
-          : limitUpMinutes <= 11 * 60 + 30 ? 9
-            : limitUpMinutes <= 13 * 60 + 30 ? 6
-              : limitUpMinutes <= 14 * 60 + 30 ? 3
+        : limitUpMinutes <= 10 * 60 ? 10
+          : limitUpMinutes <= 11 * 60 + 30 ? 8
+            : limitUpMinutes <= 13 * 60 + 30 ? 5
+              : limitUpMinutes <= 14 * 60 + 30 ? 2
                 : 0;
-      const turnoverScore = turnover >= 20 ? 10 : turnover >= 10 ? 8 : turnover >= 5 ? 6 : turnover >= 2 ? 3 : 1;
-      const score = Math.min(100, boardScore + sectorScore + timeScore + turnoverScore);
+      const turnoverScore = turnover >= 20 ? 8 : turnover >= 10 ? 6 : turnover >= 5 ? 4 : turnover >= 2 ? 2 : 1;
+      const score = Math.min(100, boardScore + sectorScore + timeScore + turnoverScore + marketCap.score);
 
       const reasons = [`${boards}板高度`, `${sector} ${sectorCount}只涨停`];
       if (record.limitUpTime) reasons.push(`${record.limitUpTime.slice(0, 5)} 封板`);
       const formattedTurnover = formatTurnover(record.turnover);
       if (formattedTurnover) reasons.push(`成交额 ${formattedTurnover}`);
+      if (record.circulationValue) reasons.push(`流通市值 ${record.circulationValue}亿元 · ${marketCap.label} ${marketCap.score}分`);
 
       const riskTags: string[] = [];
       if (boards === 1) riskTags.push("首板待晋级确认");
       if (sectorCount <= 1) riskTags.push("题材支撑偏弱");
       if (limitUpMinutes !== null && limitUpMinutes > 14 * 60 + 30) riskTags.push("封板偏晚");
       if (boards >= 4 && sectorCount <= 2) riskTags.push("高位题材支撑弱");
+      if (marketCap.score === 0) riskTags.push("流通市值缺失");
+      if (marketCap.label === "小盘弹性") riskTags.push("小盘波动较大");
+      if (marketCap.label === "超大盘弹性偏低") riskTags.push("超大盘弹性偏低");
 
       return {
         rank: 0,
@@ -204,6 +222,8 @@ export function buildLeaderCandidatesForDate(
         limitUpTime: record.limitUpTime,
         turnover: record.turnover,
         circulationValue: record.circulationValue,
+        marketCapScore: marketCap.score,
+        marketCapLabel: marketCap.label,
         reasons,
         riskTags,
         trajectory: trajectoryDates.map((date) => ({
@@ -280,6 +300,8 @@ export function buildLeaderCandidateBacktest(
         sector: candidate.sector,
         boards: candidate.boards,
         score: candidate.score,
+        circulationValue: candidate.circulationValue,
+        marketCapScore: candidate.marketCapScore,
         success: nextDayCodes.has(candidate.stockCode),
       });
     }
@@ -309,7 +331,7 @@ export function buildLeaderCandidateBacktest(
     .sort((left, right) => (
       (right.successRate ?? 0) - (left.successRate ?? 0)
       || right.sampleSize - left.sampleSize
-      || right.threshold - left.threshold
+      || left.threshold - right.threshold
     ));
   const recommended = thresholdOptions[0] ?? null;
   const appliedMinScore = options.minScore ?? recommended?.threshold ?? null;
