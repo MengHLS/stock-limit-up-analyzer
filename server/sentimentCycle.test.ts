@@ -39,6 +39,19 @@ describe("buildSentimentCycleAnalysis", () => {
     expect(analysis.days.every((day) => !day.stockCodes.includes("300001.SZ"))).toBe(true);
   });
 
+  it("将连续相同市场周期合并，并保留区间内发生过的情绪阶段", () => {
+    const earlyAnalysis = buildSentimentCycleAnalysis(source.filter((record) => record.limitUpDate <= "2026-08-14"));
+
+    expect(earlyAnalysis.segments).toHaveLength(1);
+    expect(earlyAnalysis.segments[0]).toMatchObject({
+      marketCycle: "混沌周期",
+      startDate: "2026-08-10",
+      endDate: "2026-08-14",
+      maxBoards: 5,
+      phases: ["冰点试错", "修复上升", "上升发酵"],
+    });
+  });
+
   it("在老龙断板后区分突破老龙的穿越周期龙和突破五板的低位补涨龙", () => {
     const analysis = buildSentimentCycleAnalysis(source);
     const event = analysis.breakEvents.find((item) => item.breakDate === "2026-08-18");

@@ -254,8 +254,8 @@ export default function SentimentAnalysisPage() {
                   <CardContent>
                     <div className="space-y-2">
                       {cycleAnalysis.segments.slice(-8).reverse().map((segment) => (
-                        <div key={`${segment.phase}-${segment.startDate}`} className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-                          <div className="flex items-center justify-between gap-2"><div className="flex flex-wrap gap-1"><Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">{segment.marketCycle}</Badge><Badge variant="outline" className="border-slate-200 bg-white text-slate-600">{segment.phase}</Badge></div><span className="text-xs font-medium text-orange-600">阶段最高 {segment.maxBoards}板</span></div>
+                        <div key={`${segment.marketCycle}-${segment.startDate}`} className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+                          <div className="flex items-center justify-between gap-2"><div className="flex flex-wrap gap-1"><Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">{segment.marketCycle}</Badge><Badge variant="outline" className="border-slate-200 bg-white text-slate-600">{segment.phases.join(" · ")}</Badge></div><span className="text-xs font-medium text-orange-600">阶段最高 {segment.maxBoards}板</span></div>
                           <p className="mt-2 text-xs text-slate-500">{formatDate(segment.startDate)} 至 {formatDate(segment.endDate)}</p>
                           <p className="mt-1 line-clamp-2 text-sm text-slate-700">周期龙头：{segment.leaderNames.join("、") || "本阶段尚无6板以上主板股票"}</p>
                         </div>

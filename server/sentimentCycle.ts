@@ -19,8 +19,8 @@ export type SentimentCycleDay = DailyLeader & {
 };
 
 export type SentimentCycleSegment = {
-  phase: SentimentCyclePhase;
   marketCycle: MarketCycleType;
+  phases: SentimentCyclePhase[];
   startDate: string;
   endDate: string;
   maxBoards: number;
@@ -142,10 +142,10 @@ function buildSegments(days: SentimentCycleDay[]): SentimentCycleSegment[] {
   const segments: SentimentCycleSegment[] = [];
   for (const day of days) {
     const previous = segments.at(-1);
-    if (!previous || previous.phase !== day.phase || previous.marketCycle !== day.marketCycle) {
+    if (!previous || previous.marketCycle !== day.marketCycle) {
       segments.push({
-        phase: day.phase,
         marketCycle: day.marketCycle,
+        phases: [day.phase],
         startDate: day.date,
         endDate: day.date,
         maxBoards: day.maxBoards,
@@ -155,6 +155,7 @@ function buildSegments(days: SentimentCycleDay[]): SentimentCycleSegment[] {
     }
     previous.endDate = day.date;
     previous.maxBoards = Math.max(previous.maxBoards, day.maxBoards);
+    previous.phases = Array.from(new Set([...previous.phases, day.phase]));
     previous.leaderNames = Array.from(new Set([...previous.leaderNames, ...day.cycleLeaderNames]));
   }
   return segments;
