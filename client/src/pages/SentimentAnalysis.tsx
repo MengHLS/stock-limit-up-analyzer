@@ -3,8 +3,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildDistinctHighBoardLabels } from "@/lib/highBoardLabels";
 import { trpc } from "@/lib/trpc";
+import { DEFAULT_VISIBLE_TRADING_DAYS, getDefaultVisibleRange, normalizeVisibleRange } from "@/lib/visibleRange";
 import { Activity, ArrowLeft, CalendarDays, Loader2, TrendingUp } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import {
   Brush,
@@ -39,6 +40,8 @@ function ChartTooltip({ active, payload }: any) {
 
 export default function SentimentAnalysisPage() {
   const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 });
+  const pendingRangeRef = useRef<{ startIndex: number; endIndex: number } | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const { data: trend = [], isLoading, isError, refetch } =
     trpc.sentiment.getMaxConnectionBoardTrend.useQuery(undefined, {
       staleTime: 60_000,
@@ -52,17 +55,41 @@ export default function SentimentAnalysisPage() {
   const chartData = rawChartData;
   const peakDates = chartData.filter((point) => point.maxBoards === peakBoards);
   const latest = chartData[chartData.length - 1];
-  const defaultStartIndex = Math.max(0, chartData.length - 60);
+  const defaultRange = getDefaultVisibleRange(chartData.length, DEFAULT_VISIBLE_TRADING_DAYS);
 
   useEffect(() => {
     if (chartData.length === 0) return;
-    setVisibleRange({ startIndex: defaultStartIndex, endIndex: chartData.length - 1 });
-  }, [chartData.length, defaultStartIndex]);
+    setVisibleRange(defaultRange);
+  }, [chartData.length, defaultRange.startIndex, defaultRange.endIndex]);
 
-  const visibleStartIndex = Math.min(Math.max(visibleRange.startIndex, 0), Math.max(chartData.length - 1, 0));
-  const visibleEndIndex = Math.min(
-    Math.max(visibleRange.endIndex, visibleStartIndex),
-    Math.max(chartData.length - 1, 0),
+  useEffect(() => () => {
+    if (animationFrameRef.current !== null) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+  }, []);
+
+  const handleBrushChange = useCallback((range: { startIndex?: number; endIndex?: number }) => {
+    pendingRangeRef.current = normalizeVisibleRange(range, chartData.length, defaultRange);
+    if (animationFrameRef.current !== null) return;
+
+    animationFrameRef.current = requestAnimationFrame(() => {
+      animationFrameRef.current = null;
+      const nextRange = pendingRangeRef.current;
+      pendingRangeRef.current = null;
+      if (!nextRange) return;
+
+      setVisibleRange((currentRange) => (
+        currentRange.startIndex === nextRange.startIndex && currentRange.endIndex === nextRange.endIndex
+          ? currentRange
+          : nextRange
+      ));
+    });
+  }, [chartData.length, defaultRange]);
+
+  const { startIndex: visibleStartIndex, endIndex: visibleEndIndex } = normalizeVisibleRange(
+    visibleRange,
+    chartData.length,
+    defaultRange,
   );
   const visibleChartData = chartData.slice(visibleStartIndex, visibleEndIndex + 1);
   const visiblePeakBoards = visibleChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
@@ -167,7 +194,7 @@ export default function SentimentAnalysisPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <CardTitle>每日最高连板折线图</CardTitle>
-                    <CardDescription>仅统计主板股票；默认显示最近60个交易日，并对每段连续高连板仅标注一次股票名称。</CardDescription>
+                    <CardDescription>仅统计主板股票；默认显示最近90个交易日，并对每段连续高连板仅标注一次股票名称。</CardDescription>
                   </div>
                   <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
                     {formatDate(visibleChartData[0]?.date ?? chartData[0].date)} 至 {formatDate(visibleChartData.at(-1)?.date ?? chartData.at(-1)?.date ?? "")}
@@ -230,12 +257,7 @@ export default function SentimentAnalysisPage() {
                           endIndex={visibleEndIndex}
                           stroke="#fb923c"
                           fill="#fff7ed"
-                          onChange={(range) => {
-                            setVisibleRange({
-                              startIndex: range.startIndex ?? defaultStartIndex,
-                              endIndex: range.endIndex ?? chartData.length - 1,
-                            });
-                          }}
+                          onChange={handleBrushChange}
                         />
                       </LineChart>
                     </ResponsiveContainer>
