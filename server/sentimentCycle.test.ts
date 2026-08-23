@@ -87,6 +87,21 @@ describe("buildSentimentCycleAnalysis", () => {
     expect(leader?.leaderTypes).not.toContain("原生龙");
   });
 
+  it("非穿越且非补涨的已确认周期龙头默认标注为原生龙", () => {
+    const standaloneCycle = [
+      row("600010.SH", "前序高度股", "2026-11-01", "旧题材"), row("600010.SH", "前序高度股", "2026-11-02", "旧题材"),
+      row("600010.SH", "前序高度股", "2026-11-03", "旧题材"), row("600011.SH", "独立周期龙", "2026-11-03", "新题材"),
+      row("600011.SH", "独立周期龙", "2026-11-04", "新题材"), row("600011.SH", "独立周期龙", "2026-11-05", "新题材"),
+      row("600011.SH", "独立周期龙", "2026-11-06", "新题材"), row("600011.SH", "独立周期龙", "2026-11-07", "新题材"),
+      row("600011.SH", "独立周期龙", "2026-11-08", "新题材"),
+    ];
+    const analysis = buildSentimentCycleAnalysis(standaloneCycle);
+    const leader = analysis.leaderList.find((item) => item.stockCode === "600011.SH");
+
+    expect(leader).toMatchObject({ leaderTypes: ["原生龙", "周期龙头"] });
+    expect(leader?.sourceNotes).toContain("非补涨龙且非穿越周期龙，标记为原生龙");
+  });
+
   it("以同一连续连板段的首日为原生龙起点，不回溯到数据库中更早的孤立涨停", () => {
     const interruptedRun = [
       row("600006.SH", "连续龙", "2026-09-01", "新题材"),

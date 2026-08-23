@@ -323,13 +323,14 @@ function buildLeaderList(
   return Array.from(items.values())
     .map((item) => {
       const coveredByPostBreakType = item.leaderTypes.includes("穿越周期龙") || item.leaderTypes.includes("补涨龙");
-      const leaderTypes = (coveredByPostBreakType ? item.leaderTypes.filter((type) => type !== "原生龙") : item.leaderTypes)
+      const baseTypes: LeaderListType[] = coveredByPostBreakType ? item.leaderTypes.filter((type) => type !== "原生龙") : item.leaderTypes;
+      const shouldShowNativeLeader = !coveredByPostBreakType && baseTypes.includes("周期龙头");
+      const leaderTypes: LeaderListType[] = (shouldShowNativeLeader && !baseTypes.includes("原生龙") ? [...baseTypes, "原生龙" as LeaderListType] : baseTypes)
         .sort((left, right) => typeOrder[left] - typeOrder[right]);
-      return {
-        ...item,
-        leaderTypes,
-        sourceNotes: coveredByPostBreakType ? item.sourceNotes.filter((note) => !nativeSourceNotes.has(note)) : item.sourceNotes,
-      };
+      const sourceNotes = coveredByPostBreakType
+        ? item.sourceNotes.filter((note) => !nativeSourceNotes.has(note))
+        : (shouldShowNativeLeader && !item.leaderTypes.includes("原生龙") ? [...item.sourceNotes, "非补涨龙且非穿越周期龙，标记为原生龙"] : item.sourceNotes);
+      return { ...item, leaderTypes, sourceNotes };
     })
     .sort((left, right) => right.firstLeaderDate.localeCompare(left.firstLeaderDate) || right.highestBoards - left.highestBoards);
 }
