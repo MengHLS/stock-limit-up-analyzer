@@ -110,6 +110,32 @@ describe("buildLeaderCandidates", () => {
     expect(tPlus2.historicalRows.every((row) => row.score >= 35)).toBe(true);
   });
 
+  it("按候选信号日的情绪阶段聚合独立样本外漏斗，不从后续验证日读取阶段", () => {
+    const dates = Array.from({ length: 10 }, (_, index) => `2026-08-${String(index + 1).padStart(2, "0")}`);
+    const records = dates.flatMap((date) => ["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({
+      stockCode,
+      stockName: `主板${index + 1}`,
+      limitUpDate: date,
+      limitUpTime: "09:40:00",
+      sector: "题材A",
+      turnover: "20",
+      circulationValue: null,
+    })));
+    const phaseByDate = new Map(dates.map((date, index) => [date, {
+      phase: index < 7 ? "修复上升" as const : "高位亢奋" as const,
+      maxBoards: index < 7 ? 3 : 6,
+    }]));
+
+    const result = buildLeaderCandidateBacktest(records, { minScore: 0 }, { phaseByDate });
+    const repair = result.phaseFunnel.find((item) => item.phase === "修复上升");
+    const euphoria = result.phaseFunnel.find((item) => item.phase === "高位亢奋");
+
+    // 70%分界后仅第8、9个交易日有完整T+1观察期，二者均归属高位亢奋。
+    expect(repair).toMatchObject({ sampleSize: 0, successCount: 0, maxBoards: null });
+    expect(euphoria).toMatchObject({ sampleSize: 6, successCount: 6, successRate: 100, maxBoards: 6 });
+    expect(result.historicalRows.find((row) => row.date === "2026-08-01")?.phase).toBe("修复上升");
+  });
+
   it("回测覆盖每个可观察交易日的全部候选，而非每日期20只或近期30条明细", () => {
     const stockCodes = Array.from({ length: 25 }, (_, index) => `600${String(index + 100).padStart(3, "0")}.SH`);
     const dates = ["2026-08-18", "2026-08-19", "2026-08-20"];

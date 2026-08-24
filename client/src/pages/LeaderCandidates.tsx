@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CandidateInsightCharts, type CandidateChartFilters } from "@/components/CandidateInsightCharts";
+import { CandidatePhaseFunnel } from "@/components/CandidatePhaseFunnel";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { Activity, AlertTriangle, ArrowLeft, Crown, Loader2, RefreshCw, ShieldAlert, Sparkles, TrendingUp } from "lucide-react";
@@ -25,7 +26,9 @@ export default function LeaderCandidatesPage() {
   const [manualMinScore, setManualMinScore] = useState<number | undefined>();
   const [scoreInputError, setScoreInputError] = useState<string | null>(null);
   const [chartFilters, setChartFilters] = useState<CandidateChartFilters>({ stockCode: null, sector: null, boardBucket: null, scoreBand: null });
+  const [phaseFilter, setPhaseFilter] = useState<"冰点试错" | "修复上升" | "上升发酵" | "高位分歧" | "高位亢奋" | "高位退潮" | null>(null);
   const candidateListRef = useRef<HTMLDivElement | null>(null);
+  const backtestHistoryRef = useRef<HTMLDivElement | null>(null);
   const { data, isLoading, isError, refetch, isFetching } = trpc.sentiment.getLeaderCandidates.useQuery(undefined, {
     staleTime: 60_000,
   });
@@ -55,7 +58,15 @@ export default function LeaderCandidatesPage() {
     return true;
   });
   const isThresholdFilterApplied = threshold !== null;
+  const historicalRows = backtest?.historicalRows ?? [];
+  const filteredHistoricalRows = phaseFilter
+    ? historicalRows.filter((row) => row.phase === phaseFilter)
+    : historicalRows;
   const focusCandidateList = () => candidateListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const applyPhaseFilter = (phase: typeof phaseFilter) => {
+    setPhaseFilter(phase);
+    requestAnimationFrame(() => backtestHistoryRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
 
   const refreshAll = () => {
     void refetch();
@@ -136,6 +147,15 @@ export default function LeaderCandidatesPage() {
               onFocusCandidates={focusCandidateList}
             />
 
+            {backtest && backtest.totalSamples > 0 && (
+              <CandidatePhaseFunnel
+                stages={backtest.phaseFunnel}
+                observationDays={observationDays}
+                activePhase={phaseFilter}
+                onPhaseChange={applyPhaseFilter}
+              />
+            )}
+
             <Card className="border-sky-100 bg-white/85 shadow-sm">
               <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="h-4 w-4 text-sky-600" />历史候选池回测</CardTitle><CardDescription>覆盖数据库内全部满足观察窗口的交易日及当日所有符合规则的主板候选；严格在T日收盘后生成候选，并以第1个或第2个后续已记录交易日是否仍涨停作为成功口径。</CardDescription></CardHeader>
               <CardContent>
@@ -162,7 +182,7 @@ export default function LeaderCandidatesPage() {
                     </div>
                     <p className="text-xs leading-5 text-slate-500">阈值由较早70%交易日校准（{formatDate(backtest.calibrationPeriod.startDate)}至{formatDate(backtest.calibrationPeriod.endDate)}），再在较晚30%交易日做样本外验证；若阈值样本不足20个，则不启用校准筛选。</p>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{backtest.scoreBands.map((band) => <div key={band.label} className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs font-medium text-slate-600">{band.label}</p><p className="mt-1 text-lg font-bold text-slate-800">{band.successRate ?? "-"}{band.successRate === null ? "" : "%"}</p><p className="text-xs text-slate-500">{band.successCount}/{band.sampleSize} 成功</p></div>)}</div>
-                    <div><p className="mb-2 text-xs text-slate-500">全样本历史明细：共 {backtest.historicalRows.length} 条（按候选日期倒序）</p><div className="max-h-[620px] overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[780px] text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2 font-medium">候选日期</th><th className="px-3 py-2 font-medium">股票</th><th className="px-3 py-2 font-medium">题材</th><th className="px-3 py-2 font-medium">评分</th><th className="px-3 py-2 font-medium">流通市值/评分</th><th className="px-3 py-2 font-medium">连板</th><th className="px-3 py-2 font-medium">T+{backtest.observationDays}结果</th></tr></thead><tbody>{backtest.historicalRows.map((row) => <tr key={`${row.date}-${row.stockCode}`} className="border-t border-slate-100"><td className="px-3 py-2 text-slate-600">{formatDate(row.date)}</td><td className="px-3 py-2"><p className="font-medium text-slate-800">{row.stockName}</p><p className="font-mono text-xs text-slate-500">{row.stockCode}</p></td><td className="px-3 py-2 text-slate-600">{row.sector}</td><td className="px-3 py-2 font-medium text-slate-700">{row.score}</td><td className="px-3 py-2 text-slate-600">{row.circulationValue ? `${row.circulationValue}亿 / ${row.marketCapScore}分` : "- / 0分"}</td><td className="px-3 py-2 text-orange-600">{row.boards}板</td><td className="px-3 py-2"><Badge variant="outline" className={row.success ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}>{row.success ? `T+${backtest.observationDays} ${formatDate(row.nextDate)} 延续` : `T+${backtest.observationDays} ${formatDate(row.nextDate)} 未延续`}</Badge></td></tr>)}</tbody></table></div></div>
+                    <div ref={backtestHistoryRef}><div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500"><span>全样本历史明细：显示 {filteredHistoricalRows.length}/{historicalRows.length} 条（按候选日期倒序）</span>{phaseFilter && <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-700">阶段筛选：{phaseFilter}<button type="button" className="ml-1 font-bold" onClick={() => applyPhaseFilter(null)}>×</button></Badge>}</div><div className="max-h-[620px] overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[860px] text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2 font-medium">候选日期</th><th className="px-3 py-2 font-medium">阶段</th><th className="px-3 py-2 font-medium">股票</th><th className="px-3 py-2 font-medium">题材</th><th className="px-3 py-2 font-medium">评分</th><th className="px-3 py-2 font-medium">流通市值/评分</th><th className="px-3 py-2 font-medium">连板</th><th className="px-3 py-2 font-medium">T+{backtest.observationDays}结果</th></tr></thead><tbody>{filteredHistoricalRows.map((row) => <tr key={`${row.date}-${row.stockCode}`} className="border-t border-slate-100"><td className="px-3 py-2 text-slate-600">{formatDate(row.date)}</td><td className="px-3 py-2"><Badge variant="outline" className="border-indigo-100 bg-indigo-50 text-indigo-700">{row.phase ?? "阶段缺失"}</Badge></td><td className="px-3 py-2"><p className="font-medium text-slate-800">{row.stockName}</p><p className="font-mono text-xs text-slate-500">{row.stockCode}</p></td><td className="px-3 py-2 text-slate-600">{row.sector}</td><td className="px-3 py-2 font-medium text-slate-700">{row.score}</td><td className="px-3 py-2 text-slate-600">{row.circulationValue ? `${row.circulationValue}亿 / ${row.marketCapScore}分` : "- / 0分"}</td><td className="px-3 py-2 text-orange-600">{row.boards}板</td><td className="px-3 py-2"><Badge variant="outline" className={row.success ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}>{row.success ? `T+${backtest.observationDays} ${formatDate(row.nextDate)} 延续` : `T+${backtest.observationDays} ${formatDate(row.nextDate)} 未延续`}</Badge></td></tr>)}</tbody></table></div></div>
                   </div>
                 )}
               </CardContent>

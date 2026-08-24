@@ -1162,5 +1162,7 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
     circulationValue: limitUpRecords.circulationValue,
   }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
 
-  return buildLeaderCandidateBacktest(records, options);
+  const cycleAnalysis = buildSentimentCycleAnalysis(records);
+  const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
+  return buildLeaderCandidateBacktest(records, options, { phaseByDate });
 }

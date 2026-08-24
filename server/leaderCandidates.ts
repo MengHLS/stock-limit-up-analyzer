@@ -1,3 +1,5 @@
+import type { SentimentCyclePhase } from "./sentimentCycle";
+
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
   stockName: string;
@@ -43,6 +45,8 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   date: string;
   nextDate: string;
   success: boolean;
+  phase: SentimentCyclePhase | null;
+  maxBoards: number | null;
 };
 
 export type LeaderCandidateScoreBand = {
@@ -67,12 +71,25 @@ export type LeaderCandidateBacktestResult = {
   calibrationPeriod: { startDate: string | null; endDate: string | null };
   outOfSample: { sampleSize: number; successCount: number; successRate: number | null };
   outOfSampleScoreBands: LeaderCandidateScoreBand[];
+  phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
 };
 
 export type LeaderCandidateBacktestOptions = {
   observationDays?: 1 | 2;
   minScore?: number;
+};
+
+export type LeaderCandidatePhaseFunnelItem = {
+  phase: SentimentCyclePhase;
+  sampleSize: number;
+  successCount: number;
+  successRate: number | null;
+  maxBoards: number | null;
+};
+
+export type LeaderCandidateBacktestContext = {
+  phaseByDate?: Map<string, { phase: SentimentCyclePhase; maxBoards: number }>;
 };
 
 type LeaderCandidateBuildOptions = {
@@ -282,6 +299,7 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
 export function buildLeaderCandidateBacktest(
   records: LeaderCandidateSourceRecord[],
   options: LeaderCandidateBacktestOptions = {},
+  context: LeaderCandidateBacktestContext = {},
 ): LeaderCandidateBacktestResult {
   const observationDays = options.observationDays ?? 1;
   const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
@@ -301,6 +319,7 @@ export function buildLeaderCandidateBacktest(
     // 回测须覆盖T日所有满足规则的主板候选，不能沿用当前页面每日期20只的展示上限。
     const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
+    const phaseContext = context.phaseByDate?.get(date);
 
     for (const candidate of candidateResult.candidates) {
       rows.push({
@@ -314,6 +333,8 @@ export function buildLeaderCandidateBacktest(
         circulationValue: candidate.circulationValue,
         marketCapScore: candidate.marketCapScore,
         success: nextDayCodes.has(candidate.stockCode),
+        phase: phaseContext?.phase ?? null,
+        maxBoards: phaseContext?.maxBoards ?? null,
       });
     }
   }
@@ -368,6 +389,19 @@ export function buildLeaderCandidateBacktest(
     ? outOfSampleRows.filter((row) => appliedMinScore === null || row.score >= appliedMinScore)
     : appliedMinScore === null ? outOfSampleRows : outOfSampleRows.filter((row) => row.score >= appliedMinScore);
   const outOfSampleSuccessCount = outOfSampleAtThreshold.filter((row) => row.success).length;
+  const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
+  const phaseFunnel = phaseOrder.map((phase) => {
+    const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
+    const successCount = phaseRows.filter((row) => row.success).length;
+    const knownMaxBoards = phaseRows.map((row) => row.maxBoards).filter((value): value is number => value !== null);
+    return {
+      phase,
+      sampleSize: phaseRows.length,
+      successCount,
+      successRate: percent(successCount, phaseRows.length),
+      maxBoards: knownMaxBoards.length > 0 ? Math.max(...knownMaxBoards) : null,
+    };
+  });
 
   return {
     definition: `成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
@@ -390,6 +424,8 @@ export function buildLeaderCandidateBacktest(
     },
     // 该分层始终以所有样本外行计算，不受当前手动阈值影响，用于比较各评分区间的独立样本外表现。
     outOfSampleScoreBands: scoreBandDefinitions.map((definition) => calculateBand(outOfSampleRows, definition)),
+    // 阶段漏斗使用当前评分阈值下的独立样本外行；每行的阶段仅来自候选信号日，不读取后续验证日。
+    phaseFunnel,
     historicalRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score),
   };
 }
