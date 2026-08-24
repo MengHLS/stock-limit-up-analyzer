@@ -47,6 +47,8 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
 
 export type LeaderCandidateScoreBand = {
   label: string;
+  minScore: number;
+  maxScore: number | null;
   sampleSize: number;
   successCount: number;
   successRate: number | null;
@@ -64,6 +66,7 @@ export type LeaderCandidateBacktestResult = {
   calibrationSampleSize: number;
   calibrationPeriod: { startDate: string | null; endDate: string | null };
   outOfSample: { sampleSize: number; successCount: number; successRate: number | null };
+  outOfSampleScoreBands: LeaderCandidateScoreBand[];
   historicalRows: LeaderCandidateBacktestRow[];
 };
 
@@ -315,14 +318,27 @@ export function buildLeaderCandidateBacktest(
     }
   }
 
+  const scoreBandDefinitions = [
+    { label: "65分及以上", minScore: 65, maxScore: null },
+    { label: "55–64分", minScore: 55, maxScore: 64 },
+    { label: "45–54分", minScore: 45, maxScore: 54 },
+    { label: "45分以下", minScore: 0, maxScore: 44 },
+  ] as const;
   const calculateBand = (
     sourceRows: LeaderCandidateBacktestRow[],
-    label: string,
-    predicate: (row: LeaderCandidateBacktestRow) => boolean,
+    definition: typeof scoreBandDefinitions[number],
   ): LeaderCandidateScoreBand => {
-    const bandRows = sourceRows.filter(predicate);
+    const bandRows = sourceRows.filter((row) => (
+      row.score >= definition.minScore
+      && (definition.maxScore === null || row.score <= definition.maxScore)
+    ));
     const successCount = bandRows.filter((row) => row.success).length;
-    return { label, sampleSize: bandRows.length, successCount, successRate: percent(successCount, bandRows.length) };
+    return {
+      ...definition,
+      sampleSize: bandRows.length,
+      successCount,
+      successRate: percent(successCount, bandRows.length),
+    };
   };
   // 评分阈值仅用较早70%的日期校准，再在较晚30%的日期做样本外验证，避免将同一批样本既用于选阈值又用于评估。
   const calibrationDateCount = Math.max(0, Math.floor(tradingDates.length * 0.7));
@@ -347,12 +363,7 @@ export function buildLeaderCandidateBacktest(
     ? rows
     : rows.filter((row) => row.score >= appliedMinScore);
   const successCount = appliedRows.filter((row) => row.success).length;
-  const scoreBands = [
-    calculateBand(appliedRows, "65分及以上", (row) => row.score >= 65),
-    calculateBand(appliedRows, "55–64分", (row) => row.score >= 55 && row.score < 65),
-    calculateBand(appliedRows, "45–54分", (row) => row.score >= 45 && row.score < 55),
-    calculateBand(appliedRows, "45分以下", (row) => row.score < 45),
-  ];
+  const scoreBands = scoreBandDefinitions.map((definition) => calculateBand(appliedRows, definition));
   const outOfSampleAtThreshold = recommended
     ? outOfSampleRows.filter((row) => appliedMinScore === null || row.score >= appliedMinScore)
     : appliedMinScore === null ? outOfSampleRows : outOfSampleRows.filter((row) => row.score >= appliedMinScore);
@@ -377,6 +388,8 @@ export function buildLeaderCandidateBacktest(
       successCount: outOfSampleSuccessCount,
       successRate: percent(outOfSampleSuccessCount, outOfSampleAtThreshold.length),
     },
+    // 该分层始终以所有样本外行计算，不受当前手动阈值影响，用于比较各评分区间的独立样本外表现。
+    outOfSampleScoreBands: scoreBandDefinitions.map((definition) => calculateBand(outOfSampleRows, definition)),
     historicalRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score),
   };
 }

@@ -89,6 +89,12 @@ describe("buildLeaderCandidates", () => {
     expect(result.recommendedMinScore).toBe(45);
     expect(result.calibrationSampleSize).toBe(39);
     expect(result.outOfSample).toMatchObject({ sampleSize: 18, successCount: 18, successRate: 100 });
+    expect(result.outOfSampleScoreBands.find((band) => band.label === "65分及以上")).toMatchObject({
+      minScore: 65,
+      maxScore: null,
+      sampleSize: 18,
+      successRate: 100,
+    });
   });
 
   it("支持将第2个后续交易日作为成功口径，且手动阈值会过滤回测样本", () => {

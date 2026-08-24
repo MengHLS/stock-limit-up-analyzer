@@ -1,10 +1,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CandidateInsightCharts, type CandidateChartFilters } from "@/components/CandidateInsightCharts";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { Activity, AlertTriangle, ArrowLeft, Crown, Loader2, RefreshCw, ShieldAlert, Sparkles, TrendingUp } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 
 function formatDate(date: string | null) {
@@ -23,6 +24,8 @@ export default function LeaderCandidatesPage() {
   const [scoreDraft, setScoreDraft] = useState("");
   const [manualMinScore, setManualMinScore] = useState<number | undefined>();
   const [scoreInputError, setScoreInputError] = useState<string | null>(null);
+  const [chartFilters, setChartFilters] = useState<CandidateChartFilters>({ stockCode: null, sector: null, boardBucket: null, scoreBand: null });
+  const candidateListRef = useRef<HTMLDivElement | null>(null);
   const { data, isLoading, isError, refetch, isFetching } = trpc.sentiment.getLeaderCandidates.useQuery(undefined, {
     staleTime: 60_000,
   });
@@ -37,8 +40,22 @@ export default function LeaderCandidatesPage() {
   const candidates = data?.candidates ?? [];
   const strongSectors = data?.strongSectors ?? [];
   const threshold = backtest?.appliedMinScore ?? null;
-  const displayedCandidates = threshold === null ? candidates : candidates.filter((candidate) => candidate.score >= threshold);
+  const candidatesAtThreshold = threshold === null ? candidates : candidates.filter((candidate) => candidate.score >= threshold);
+  const displayedCandidates = candidatesAtThreshold.filter((candidate) => {
+    if (chartFilters.stockCode && candidate.stockCode !== chartFilters.stockCode) return false;
+    if (chartFilters.sector && candidate.sector !== chartFilters.sector) return false;
+    if (chartFilters.boardBucket) {
+      const boardBucket = Math.min(Math.max(candidate.boards, 1), 6);
+      if (boardBucket !== chartFilters.boardBucket) return false;
+    }
+    if (chartFilters.scoreBand) {
+      if (candidate.score < chartFilters.scoreBand.minScore) return false;
+      if (chartFilters.scoreBand.maxScore !== null && candidate.score > chartFilters.scoreBand.maxScore) return false;
+    }
+    return true;
+  });
   const isThresholdFilterApplied = threshold !== null;
+  const focusCandidateList = () => candidateListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const refreshAll = () => {
     void refetch();
@@ -110,6 +127,15 @@ export default function LeaderCandidatesPage() {
               <Card className="border-red-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">重点观察候选</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-red-600">{displayedCandidates.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">{isThresholdFilterApplied ? `当前最低评分阈值 ${threshold} 分` : "满足高度、题材或综合评分条件"}</p></CardContent></Card>
             </div>
 
+            <CandidateInsightCharts
+              candidates={candidatesAtThreshold}
+              scoreBands={backtest?.outOfSampleScoreBands ?? []}
+              observationDays={observationDays}
+              filters={chartFilters}
+              onFiltersChange={setChartFilters}
+              onFocusCandidates={focusCandidateList}
+            />
+
             <Card className="border-sky-100 bg-white/85 shadow-sm">
               <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><TrendingUp className="h-4 w-4 text-sky-600" />历史候选池回测</CardTitle><CardDescription>覆盖数据库内全部满足观察窗口的交易日及当日所有符合规则的主板候选；严格在T日收盘后生成候选，并以第1个或第2个后续已记录交易日是否仍涨停作为成功口径。</CardDescription></CardHeader>
               <CardContent>
@@ -147,10 +173,10 @@ export default function LeaderCandidatesPage() {
               <CardContent className="flex flex-wrap gap-2">{strongSectors.map((item) => <Badge key={item.sector} variant="outline" className="border-amber-200 bg-amber-50 px-3 py-1 text-amber-700">{item.sector} <span className="ml-1 font-bold">{item.count}</span> 只</Badge>)}</CardContent>
             </Card>
 
-            <Card className="border-slate-200 bg-white/90 shadow-xl shadow-slate-200/50">
+            <Card ref={candidateListRef} className="border-slate-200 bg-white/90 shadow-xl shadow-slate-200/50">
               <CardHeader><CardTitle>候选列表</CardTitle><CardDescription>评分由“连板高度、题材广度、封板时间、成交额、流通市值”构成；风险标签用于提示需要进一步核验的条件。</CardDescription></CardHeader>
               <CardContent>
-                {displayedCandidates.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有满足候选规则的主板股票；可在首页查看全部涨停与题材分布。</div> : (
+                {displayedCandidates.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有同时满足候选规则与图表筛选条件的主板股票；可清除图表筛选后重试。</div> : (
                   <div className="space-y-3">
                     {displayedCandidates.map((candidate) => (
                       <article key={candidate.stockCode} className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-amber-50/30 p-4 transition-shadow hover:shadow-md">
