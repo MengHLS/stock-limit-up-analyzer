@@ -63,7 +63,7 @@ describe("buildLeaderCandidates", () => {
     ];
 
     const result = buildLeaderCandidateBacktest(records);
-    const firstDayLead = result.latestRows.find((row) => row.date === "2026-08-18" && row.stockCode === "600001.SH");
+    const firstDayLead = result.historicalRows.find((row) => row.date === "2026-08-18" && row.stockCode === "600001.SH");
 
     expect(firstDayLead).toMatchObject({ boards: 1, success: true });
     expect(result.totalSamples).toBe(3);
@@ -101,7 +101,27 @@ describe("buildLeaderCandidates", () => {
     const tPlus2 = buildLeaderCandidateBacktest(records, { observationDays: 2, minScore: 35 });
 
     expect(tPlus2).toMatchObject({ observationDays: 2, appliedMinScore: 35, totalSamples: 3, successCount: 1, successRate: 33.3 });
-    expect(tPlus2.latestRows.every((row) => row.score >= 35)).toBe(true);
+    expect(tPlus2.historicalRows.every((row) => row.score >= 35)).toBe(true);
+  });
+
+  it("回测覆盖每个可观察交易日的全部候选，而非每日期20只或近期30条明细", () => {
+    const stockCodes = Array.from({ length: 25 }, (_, index) => `600${String(index + 100).padStart(3, "0")}.SH`);
+    const dates = ["2026-08-18", "2026-08-19", "2026-08-20"];
+    const records = dates.flatMap((date) => stockCodes.map((stockCode, index) => ({
+      stockCode,
+      stockName: `主板${index + 1}`,
+      limitUpDate: date,
+      limitUpTime: "09:40:00",
+      sector: "题材A",
+      turnover: "20",
+      circulationValue: null,
+    })));
+
+    const result = buildLeaderCandidateBacktest(records);
+
+    expect(result.totalSamples).toBe(50);
+    expect(result.historicalRows).toHaveLength(50);
+    expect(result.historicalRows.every((row) => row.date !== "2026-08-20")).toBe(true);
   });
 
   it("流通市值评分优先考虑容量与弹性均衡区间，并提示缺失或极端市值风险", () => {

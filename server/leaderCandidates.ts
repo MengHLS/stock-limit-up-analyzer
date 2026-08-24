@@ -64,12 +64,16 @@ export type LeaderCandidateBacktestResult = {
   calibrationSampleSize: number;
   calibrationPeriod: { startDate: string | null; endDate: string | null };
   outOfSample: { sampleSize: number; successCount: number; successRate: number | null };
-  latestRows: LeaderCandidateBacktestRow[];
+  historicalRows: LeaderCandidateBacktestRow[];
 };
 
 export type LeaderCandidateBacktestOptions = {
   observationDays?: 1 | 2;
   minScore?: number;
+};
+
+type LeaderCandidateBuildOptions = {
+  candidateLimit?: number | null;
 };
 
 function isMainBoardStock(stockCode: string) {
@@ -119,6 +123,7 @@ function percent(successCount: number, sampleSize: number) {
 export function buildLeaderCandidatesForDate(
   records: LeaderCandidateSourceRecord[],
   targetDate: string,
+  options: LeaderCandidateBuildOptions = {},
 ): LeaderCandidateResult {
   const recordsAsOfDate = records.filter((record) => record.limitUpDate <= targetDate);
   if (recordsAsOfDate.length === 0) {
@@ -177,7 +182,7 @@ export function buildLeaderCandidatesForDate(
 
   const currentDateIndex = tradingDateIndex.get(targetDate) ?? 0;
   const trajectoryDates = tradingDates.slice(currentDateIndex, currentDateIndex + 7).reverse();
-  const candidates = currentRecords
+  const rankedCandidates = currentRecords
     .map((record) => {
       const sector = normalizeSector(record.sector);
       const boards = calculateBoards(record.stockCode, targetDate);
@@ -242,9 +247,11 @@ export function buildLeaderCandidatesForDate(
       || right.boards - left.boards
       || right.sectorCount - left.sectorCount
       || (left.limitUpTime ?? "99:99:99").localeCompare(right.limitUpTime ?? "99:99:99")
-    ))
-    .slice(0, 20)
-    .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+    ));
+  const candidatesForResult = options.candidateLimit === null
+    ? rankedCandidates
+    : rankedCandidates.slice(0, options.candidateLimit ?? 20);
+  const candidates = candidatesForResult.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
 
   return {
     date: targetDate,
@@ -288,7 +295,8 @@ export function buildLeaderCandidateBacktest(
   for (let index = 0; index < tradingDates.length - observationDays; index += 1) {
     const date = tradingDates[index];
     const nextDate = tradingDates[index + observationDays];
-    const candidateResult = buildLeaderCandidatesForDate(records, date);
+    // 回测须覆盖T日所有满足规则的主板候选，不能沿用当前页面每日期20只的展示上限。
+    const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
 
     for (const candidate of candidateResult.candidates) {
@@ -369,6 +377,6 @@ export function buildLeaderCandidateBacktest(
       successCount: outOfSampleSuccessCount,
       successRate: percent(outOfSampleSuccessCount, outOfSampleAtThreshold.length),
     },
-    latestRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score).slice(0, 30),
+    historicalRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score),
   };
 }
