@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   filterFirstBoardRecords,
-  getPreviousCalendarDate,
+  getPreviousRecordedDate,
 } from "../client/src/lib/firstBoard";
 
 type RecordItem = {
@@ -11,15 +11,14 @@ type RecordItem = {
 };
 
 describe("firstBoard", () => {
-  it("calculates the previous calendar date across month and year boundaries", () => {
-    expect(getPreviousCalendarDate("2026-08-18")).toBe("2026-08-17");
-    expect(getPreviousCalendarDate("2026-03-01")).toBe("2026-02-28");
-    expect(getPreviousCalendarDate("2026-01-01")).toBe("2025-12-31");
+  it("calculates the previous recorded trading date rather than the previous calendar date", () => {
+    expect(getPreviousRecordedDate(["2026-08-14", "2026-08-17", "2026-08-18"], "2026-08-18")).toBe("2026-08-17");
+    expect(getPreviousRecordedDate(["2026-08-14", "2026-08-17", "2026-08-20"], "2026-08-20")).toBe("2026-08-17");
+    expect(getPreviousRecordedDate(["2025-12-31", "2026-01-05"], "2026-01-05")).toBe("2025-12-31");
   });
 
   it("returns null for invalid dates", () => {
-    expect(getPreviousCalendarDate("2026-02-30")).toBeNull();
-    expect(getPreviousCalendarDate("not-a-date")).toBeNull();
+    expect(getPreviousRecordedDate(["2026-02-28"], "not-a-date")).toBeNull();
   });
 
   it("keeps today's limit-up stocks that did not limit up yesterday", () => {
@@ -55,5 +54,22 @@ describe("firstBoard", () => {
     ]);
 
     expect(filterFirstBoardRecords(recordsByDate, "2026-08-18")).toHaveLength(1);
+  });
+
+  it("excludes consecutive limit-ups when the prior recorded trading day is separated by a weekend or holiday", () => {
+    const recordsByDate = new Map<string, RecordItem[]>([
+      ["2026-08-17", [{ stockCode: "000001", stockName: "上一交易日涨停", limitUpDate: "2026-08-17" }]],
+      [
+        "2026-08-20",
+        [
+          { stockCode: "000001", stockName: "隔日连板", limitUpDate: "2026-08-20" },
+          { stockCode: "000002", stockName: "隔日首板", limitUpDate: "2026-08-20" },
+        ],
+      ],
+    ]);
+
+    expect(filterFirstBoardRecords(recordsByDate, "2026-08-20")).toEqual([
+      { stockCode: "000002", stockName: "隔日首板", limitUpDate: "2026-08-20" },
+    ]);
   });
 });

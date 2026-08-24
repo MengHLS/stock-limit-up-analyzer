@@ -7,7 +7,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { trpc } from "@/lib/trpc";
-import { filterFirstBoardRecords, getPreviousCalendarDate } from "@/lib/firstBoard";
+import { filterFirstBoardRecords, getPreviousRecordedDate } from "@/lib/firstBoard";
 import { buildLimitUpCsv } from "@/lib/exportCsv";
 import { normalizeCustomSector } from "@/lib/customSector";
 import { isValidLimitUpTime, normalizeLimitUpTime } from "@shared/limitUpTime";
@@ -64,14 +64,17 @@ export default function Home() {
   }, []);
 
   // 每日统计同时提供日历日期和每日数量，避免重复请求日期列表
-  // 只加载每日统计及当前日/前一自然日记录，避免首页初始拉取全部历史明细
+  // 只加载每日统计及当前日/上一已记录交易日，避免首页初始拉取全部历史明细
   const { data: dailyStatsData, isLoading: dailyStatsLoading } = trpc.limitUp.getDailyStats.useQuery();
   const dailyStats = dailyStatsData ?? EMPTY_ARRAY;
   const dates = useMemo(() => dailyStats.map((stat) => stat.date), [dailyStats]);
   const selectedDateStrForQuery = selectedDate
     ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`
     : null;
-  const previousDateStr = selectedDateStrForQuery ? getPreviousCalendarDate(selectedDateStrForQuery) : null;
+  const previousDateStr = useMemo(
+    () => selectedDateStrForQuery ? getPreviousRecordedDate(dates, selectedDateStrForQuery) : null,
+    [dates, selectedDateStrForQuery],
+  );
   const { data: selectedRecordsData, isLoading: selectedRecordsLoading } = trpc.limitUp.getByDate.useQuery(
     { date: selectedDateStrForQuery ?? "" },
     { enabled: !!selectedDateStrForQuery },
@@ -90,7 +93,7 @@ export default function Home() {
   );
   const searchResults = searchResultsData ?? EMPTY_ARRAY;
 
-  // 首板筛选只需要当前日和前一自然日记录
+  // 首板筛选只需要当前日和上一已记录交易日记录
   const recordsByDate = useMemo(
     () => buildAdjacentRecordsByDate(selectedDateStrForQuery, selectedRecords, previousDateStr, previousRecords),
     [selectedDateStrForQuery, selectedRecords, previousDateStr, previousRecords],
