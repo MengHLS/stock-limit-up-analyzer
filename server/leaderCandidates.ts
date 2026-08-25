@@ -138,6 +138,8 @@ export type LeaderCandidatePhaseFunnelItem = {
 export type LeaderCandidateBacktestContext = {
   phaseByDate?: Map<string, { phase: SentimentCyclePhase; maxBoards: number }>;
   priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
+  /** 由日线行情提供的完整实际交易日序列；价格回测不使用自然日推算。 */
+  tradingDates?: string[];
 };
 
 export type LeaderCandidateDailyPrice = {
@@ -419,8 +421,11 @@ export function buildLeaderCandidateBacktest(
   context: LeaderCandidateBacktestContext = {},
 ): LeaderCandidateBacktestResult {
   const observationDays = options.observationDays ?? 1;
-  const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
+  const candidateTradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => left.localeCompare(right));
+  const marketTradingDates = Array.from(new Set(context.tradingDates ?? candidateTradingDates))
+    .sort((left, right) => left.localeCompare(right));
+  const marketTradingDateIndex = new Map(marketTradingDates.map((date, index) => [date, index]));
   const recordsByDate = new Map<string, Set<string>>();
   for (const record of records) {
     const codes = recordsByDate.get(record.limitUpDate) ?? new Set<string>();
@@ -431,11 +436,16 @@ export function buildLeaderCandidateBacktest(
   const stockNameByCode = buildLatestStockNameMap(records);
   const rows: LeaderCandidateBacktestRow[] = [];
   // 最后 observationDays 个交易日缺少完整观察结果，主动排除，确保结果位于信号日之后。
-  for (let index = 0; index < tradingDates.length - observationDays; index += 1) {
-    const date = tradingDates[index];
-    const nextDate = tradingDates[index + observationDays];
-    const nextDayDate = tradingDates[index + 1];
-    const secondDayDate = tradingDates[index + 2] ?? null;
+  for (let index = 0; index < candidateTradingDates.length - observationDays; index += 1) {
+    const date = candidateTradingDates[index];
+    const nextDate = candidateTradingDates[index + observationDays];
+    const marketIndex = marketTradingDateIndex.get(date);
+    const nextDayDate = marketIndex === undefined
+      ? candidateTradingDates[index + 1]
+      : marketTradingDates[marketIndex + 1] ?? candidateTradingDates[index + 1];
+    const secondDayDate = marketIndex === undefined
+      ? candidateTradingDates[index + 2] ?? null
+      : marketTradingDates[marketIndex + 2] ?? null;
     // 回测须覆盖T日所有满足规则的主板候选，不能沿用当前页面每日期20只的展示上限。
     const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null, stockNameByCode });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
@@ -503,8 +513,8 @@ export function buildLeaderCandidateBacktest(
     };
   };
   // 评分阈值仅用较早70%的日期校准，再在较晚30%的日期做样本外验证，避免将同一批样本既用于选阈值又用于评估。
-  const calibrationDateCount = Math.max(0, Math.floor(tradingDates.length * 0.7));
-  const calibrationDates = new Set(tradingDates.slice(0, calibrationDateCount));
+  const calibrationDateCount = Math.max(0, Math.floor(candidateTradingDates.length * 0.7));
+  const calibrationDates = new Set(candidateTradingDates.slice(0, calibrationDateCount));
   const calibrationRows = rows.filter((row) => calibrationDates.has(row.date));
   const outOfSampleRows = rows.filter((row) => !calibrationDates.has(row.date));
   const thresholdOptions = [45, 50, 55, 60, 65]
@@ -562,8 +572,8 @@ export function buildLeaderCandidateBacktest(
     recommendedMinScore: recommended?.threshold ?? null,
     calibrationSampleSize: recommended?.sampleSize ?? 0,
     calibrationPeriod: {
-      startDate: calibrationDateCount > 0 ? tradingDates[0] : null,
-      endDate: calibrationDateCount > 0 ? tradingDates[calibrationDateCount - 1] : null,
+      startDate: calibrationDateCount > 0 ? candidateTradingDates[0] : null,
+      endDate: calibrationDateCount > 0 ? candidateTradingDates[calibrationDateCount - 1] : null,
     },
     outOfSample: {
       sampleSize: outOfSampleAtThreshold.length,

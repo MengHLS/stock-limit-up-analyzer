@@ -1223,5 +1223,6 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
   const priceByStockDate = await getLeaderCandidateDailyPriceMap();
-  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate });
+  const tradingDates = Array.from(new Set(Array.from(priceByStockDate.keys()).map((key) => key.split("::").at(-1)!))).sort();
+  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate, tradingDates });
 }

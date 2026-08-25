@@ -113,6 +113,8 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
       const limitDown = validPrice(position.row.nextClosePrice) && exitPrice <= position.row.nextClosePrice * 0.901;
       if (blockLimitDownSells && limitDown) {
         blockedSellCount += 1;
+        const trade = trades.find((item) => item.stockCode === position.row.stockCode && item.entryDate === position.row.nextDayDate && item.status === "filled");
+        if (trade) trade.reason = "T+2收盘接近跌停，按保守规则未出清";
         continue;
       }
       const slippedExit = exitPrice * (1 - slippageBps / 10000);
@@ -135,7 +137,12 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
     const unavailable = entryRows.filter((row) => !validPrice(row.nextOpenPrice) || !validPrice(row.secondDayClosePrice));
     for (const row of unavailable) {
       missingDataCount += 1;
-      trades.push({ signalDate: row.date, entryDate: date, exitDate: row.secondDayDate, stockCode: row.stockCode, stockName: row.stockName, score: row.score, shares: 0, entryPrice: null, exitPrice: null, totalFees: 0, netPnl: null, netReturn: null, status: "skipped", reason: "缺少T+1开盘或T+2收盘行情" });
+      const reason = row.secondDayDate === null
+        ? "未到T+2实际交易日"
+        : !validPrice(row.nextOpenPrice)
+          ? "缺少T+1开盘行情"
+          : "T+2实际交易日无可用收盘价";
+      trades.push({ signalDate: row.date, entryDate: date, exitDate: row.secondDayDate, stockCode: row.stockCode, stockName: row.stockName, score: row.score, shares: 0, entryPrice: null, exitPrice: null, totalFees: 0, netPnl: null, netReturn: null, status: "skipped", reason });
     }
     const overlappingStockRows = entryRows.filter((row) => (
       validPrice(row.nextOpenPrice)
@@ -186,9 +193,12 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
   }
 
   for (const position of Array.from(positions.values())) {
-    missingDataCount += 1;
     const trade = trades.find((item) => item.stockCode === position.row.stockCode && item.entryDate === position.row.nextDayDate && item.status === "filled");
-    if (trade) trade.reason = "回测区间结束，尚未到可出清日期";
+    if (!trade || trade.reason !== null) continue;
+    missingDataCount += 1;
+    trade.reason = position.row.secondDayDate === null
+      ? "未到T+2实际交易日"
+      : "回测区间结束，尚未完成T+2出清";
   }
   const filledTrades = trades.filter((trade) => trade.status === "filled" && trade.netPnl !== null);
   const pnlValues = filledTrades.map((trade) => trade.netPnl!);

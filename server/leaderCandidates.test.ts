@@ -212,6 +212,31 @@ describe("buildLeaderCandidates", () => {
     });
   });
 
+  it("价格回测以完整日线交易日历定位 T+1/T+2，自动跨过周末和节假日", () => {
+    const records = ["2026-08-21", "2026-08-24"].flatMap((date) => ["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({
+      stockCode,
+      stockName: `主板${index + 1}`,
+      limitUpDate: date,
+      limitUpTime: "09:40:00",
+      sector: "题材A",
+      turnover: "20",
+      circulationValue: "100",
+    })));
+    const priceByStockDate = new Map([
+      ["600001.SH::2026-08-21", { openPrice: 9.8, closePrice: 10 }],
+      ["600001.SH::2026-08-24", { openPrice: 10.5, closePrice: 10.8 }],
+      ["600001.SH::2026-08-25", { openPrice: 10.9, closePrice: 11 }],
+    ]);
+
+    const result = buildLeaderCandidateBacktest(records, { minScore: 0 }, {
+      priceByStockDate,
+      tradingDates: ["2026-08-21", "2026-08-24", "2026-08-25"],
+    });
+    const fridayRow = result.historicalRows.find((row) => row.stockCode === "600001.SH" && row.date === "2026-08-21");
+
+    expect(fridayRow).toMatchObject({ nextDayDate: "2026-08-24", secondDayDate: "2026-08-25", secondDayClosePrice: 11 });
+  });
+
   it("回测覆盖每个可观察交易日的全部候选，而非每日期20只或近期30条明细", () => {
     const stockCodes = Array.from({ length: 25 }, (_, index) => `600${String(index + 100).padStart(3, "0")}.SH`);
     const dates = ["2026-08-18", "2026-08-19", "2026-08-20"];

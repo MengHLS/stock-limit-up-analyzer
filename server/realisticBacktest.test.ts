@@ -77,6 +77,29 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     const missing = simulateRealisticTPlus1ToTPlus2([row({ secondDayClosePrice: null })], { initialCapital: 100000 });
     expect(missing.filledCount).toBe(0);
     expect(missing.missingDataCount).toBe(1);
-    expect(missing.trades[0].reason).toContain("缺少");
+    expect(missing.trades[0].reason).toBe("T+2实际交易日无可用收盘价");
+  });
+
+  it("按实际交易日而非自然日跨周末与节假日出清", () => {
+    const acrossWeekend = simulateRealisticTPlus1ToTPlus2([
+      row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25" }),
+    ], { initialCapital: 100000, maxPositions: 1 });
+    const acrossHoliday = simulateRealisticTPlus1ToTPlus2([
+      row({ stockCode: "600002.SH", date: "2026-10-01", nextDate: "2026-10-09", nextDayDate: "2026-10-09", secondDayDate: "2026-10-12" }),
+    ], { initialCapital: 100000, maxPositions: 1 });
+
+    expect(acrossWeekend.trades[0]).toMatchObject({ entryDate: "2026-08-24", exitDate: "2026-08-25", netPnl: expect.any(Number), reason: null });
+    expect(acrossWeekend.equityCurve.map((point) => point.date)).toEqual(["2026-08-24", "2026-08-25"]);
+    expect(acrossHoliday.trades[0]).toMatchObject({ entryDate: "2026-10-09", exitDate: "2026-10-12", netPnl: expect.any(Number), reason: null });
+    expect(acrossHoliday.equityCurve.map((point) => point.date)).toEqual(["2026-10-09", "2026-10-12"]);
+  });
+
+  it("对数据末端尚无 T+2 交易日给出精确提示，不归因于周末", () => {
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ secondDayDate: null, secondDayClosePrice: null }),
+    ], { initialCapital: 100000 });
+
+    expect(result.trades[0]).toMatchObject({ status: "skipped", exitDate: null, reason: "未到T+2实际交易日" });
+    expect(result.openPositionCount).toBe(0);
   });
 });
