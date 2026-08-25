@@ -709,6 +709,17 @@ export const appRouter = router({
       .input(z.object({
         observationDays: z.union([z.literal(1), z.literal(2)]).default(1),
         minScore: z.number().int().min(0).max(100).optional(),
+        realistic: z.object({
+          initialCapital: z.number().positive().max(100000000).optional(),
+          maxPositions: z.number().int().min(1).max(100).optional(),
+          commissionRate: z.number().min(0).max(0.01).optional(),
+          stampDutyRate: z.number().min(0).max(0.01).optional(),
+          transferFeeRate: z.number().min(0).max(0.01).optional(),
+          slippageBps: z.number().min(0).max(1000).optional(),
+          lotSize: z.number().int().min(1).max(10000).optional(),
+          blockLimitUpBuys: z.boolean().optional(),
+          blockLimitDownSells: z.boolean().optional(),
+        }).optional(),
       }).optional())
       .query(async ({ input }) => {
         return await getLeaderCandidateBacktest(input);

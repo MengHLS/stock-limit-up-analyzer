@@ -1,5 +1,6 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
+import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
 
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
@@ -117,11 +118,13 @@ export type LeaderCandidateBacktestResult = {
   outOfSampleScoreBands: LeaderCandidateScoreBand[];
   phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
+  realisticSimulation: RealisticBacktestResult;
 };
 
 export type LeaderCandidateBacktestOptions = {
   observationDays?: 1 | 2;
   minScore?: number;
+  realistic?: RealisticBacktestOptions;
 };
 
 export type LeaderCandidatePhaseFunnelItem = {
@@ -533,6 +536,7 @@ export function buildLeaderCandidateBacktest(
   const outOfSampleTPlus2Premium = calculatePremiumSummary(outOfSampleAtThreshold, "secondDayOpenPremium", "secondDayClosePremium");
   const tPlus1CloseToTPlus2Close = calculateExitSummary(appliedRows);
   const outOfSampleTPlus1CloseToTPlus2Close = calculateExitSummary(outOfSampleAtThreshold);
+  const realisticSimulation = simulateRealisticTPlus1ToTPlus2(appliedRows, options.realistic);
   const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
@@ -577,5 +581,6 @@ export function buildLeaderCandidateBacktest(
     // 阶段漏斗使用当前评分阈值下的独立样本外行；每行的阶段仅来自候选信号日，不读取后续验证日。
     phaseFunnel,
     historicalRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score),
+    realisticSimulation,
   };
 }
