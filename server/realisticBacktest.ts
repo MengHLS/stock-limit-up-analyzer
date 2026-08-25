@@ -49,7 +49,11 @@ export type RealisticBacktestResult = {
   totalReturn: number;
   maxDrawdown: number;
   tradeCount: number;
+  /** 已执行买入的订单数，包含回测结束时尚未出清的持仓。 */
   filledCount: number;
+  /** 已完成 T+2 收盘出清的订单数，绩效指标仅基于这些订单。 */
+  completedCount: number;
+  openPositionCount: number;
   skippedCount: number;
   winningTrades: number;
   winRate: number | null;
@@ -74,7 +78,8 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
   const transferFeeRate = options.transferFeeRate ?? 0.00001;
   const slippageBps = options.slippageBps ?? 10;
   const lotSize = Math.max(1, Math.floor(options.lotSize ?? 100));
-  const blockLimitUpBuys = options.blockLimitUpBuys ?? true;
+  // 只有日线开盘价、收盘价时无法确认排队成交；默认允许按开盘价成交，严格限制可手动开启。
+  const blockLimitUpBuys = options.blockLimitUpBuys ?? false;
   const blockLimitDownSells = options.blockLimitDownSells ?? true;
   const assumptions = { initialCapital, maxPositions, commissionRate, stampDutyRate, transferFeeRate, slippageBps, lotSize, blockLimitUpBuys, blockLimitDownSells };
   const sortedRows = rows.slice().sort((a, b) => a.nextDayDate.localeCompare(b.nextDayDate) || b.score - a.score || a.stockCode.localeCompare(b.stockCode));
@@ -192,7 +197,9 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
     totalReturn: round(((finalCapital - initialCapital) / initialCapital) * 100),
     maxDrawdown: round(maxDrawdown),
     tradeCount: trades.length,
-    filledCount: filledTrades.length,
+    filledCount: trades.filter((trade) => trade.status === "filled").length,
+    completedCount: filledTrades.length,
+    openPositionCount: positions.size,
     skippedCount: trades.filter((trade) => trade.status === "skipped").length,
     winningTrades: filledTrades.filter((trade) => trade.netPnl! > 0).length,
     winRate: rate(filledTrades.filter((trade) => trade.netPnl! > 0).length, filledTrades.length),

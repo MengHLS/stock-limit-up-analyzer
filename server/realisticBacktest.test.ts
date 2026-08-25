@@ -66,7 +66,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
   });
 
   it("按保守规则拒绝接近涨停的买入，并记录缺行情原因", () => {
-    const blocked = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 11 })], { initialCapital: 100000 });
+    const blocked = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 11 })], { initialCapital: 100000, blockLimitUpBuys: true });
     expect(blocked.filledCount).toBe(0);
     expect(blocked.blockedBuyCount).toBe(1);
     expect(blocked.trades[0].reason).toContain("涨停");
