@@ -102,4 +102,34 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(result.trades[0]).toMatchObject({ status: "skipped", exitDate: null, reason: "未到T+2实际交易日" });
     expect(result.openPositionCount).toBe(0);
   });
+
+  it("限制跌停卖出时在后续实际交易日持续尝试出清，而非停止回测", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-24", { openPrice: 10.5, closePrice: 10.8 }],
+      ["600001.SH::2026-08-25", { openPrice: 9.8, closePrice: 9.7 }],
+      ["600001.SH::2026-08-26", { openPrice: 8.8, closePrice: 8.7 }],
+      ["600001.SH::2026-08-27", { openPrice: 8.8, closePrice: 8.9 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25", secondDayClosePrice: 9.7 }),
+    ], { initialCapital: 100000, maxPositions: 1, blockLimitDownSells: true }, prices, ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"]);
+
+    expect(result).toMatchObject({ blockedSellCount: 2, completedCount: 1, openPositionCount: 0 });
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-27", netPnl: expect.any(Number), reason: "跌停后延期至实际交易日出清" });
+    expect(result.equityCurve.map((point) => point.date)).toEqual(["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"]);
+  });
+
+  it("回测末端仍无法卖出时，以最后实际交易日收盘价估值并保留持仓", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-24", { openPrice: 10.5, closePrice: 10.8 }],
+      ["600001.SH::2026-08-25", { openPrice: 9.8, closePrice: 9.7 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25", secondDayClosePrice: 9.7 }),
+    ], { initialCapital: 100000, maxPositions: 1, blockLimitDownSells: true }, prices, ["2026-08-24", "2026-08-25"]);
+
+    expect(result).toMatchObject({ blockedSellCount: 1, completedCount: 0, openPositionCount: 1, missingDataCount: 0 });
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-25", netPnl: null, reason: "回测结束仍持仓，按2026-08-25收盘价期末估值" });
+    expect(result.finalCapital).toBeLessThan(result.initialCapital);
+  });
 });

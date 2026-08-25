@@ -1,4 +1,4 @@
-import type { LeaderCandidateBacktestRow } from "./leaderCandidates";
+import type { LeaderCandidateBacktestRow, LeaderCandidateDailyPrice } from "./leaderCandidates";
 
 export type RealisticBacktestOptions = {
   initialCapital?: number;
@@ -73,7 +73,12 @@ const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 const rate = (count: number, total: number) => total === 0 ? null : round((count / total) * 100, 1);
 const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
 
-export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow[], options: RealisticBacktestOptions = {}): RealisticBacktestResult {
+export function simulateRealisticTPlus1ToTPlus2(
+  rows: LeaderCandidateBacktestRow[],
+  options: RealisticBacktestOptions = {},
+  priceByStockDate: Map<string, LeaderCandidateDailyPrice> = new Map(),
+  tradingDates: string[] = [],
+): RealisticBacktestResult {
   const initialCapital = options.initialCapital ?? 100_000;
   const maxPositions = Math.max(1, Math.floor(options.maxPositions ?? 5));
   const commissionRate = options.commissionRate ?? 0.0003;
@@ -90,12 +95,20 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
   const eventDates = Array.from(new Set([
     ...entryDates,
     ...sortedRows.map((row) => row.secondDayDate).filter((date): date is string => date !== null),
+    ...tradingDates,
   ])).sort();
   const candidatesByEntryDate = new Map<string, LeaderCandidateBacktestRow[]>();
   for (const row of sortedRows) candidatesByEntryDate.set(row.nextDayDate, [...(candidatesByEntryDate.get(row.nextDayDate) ?? []), row]);
 
   let cash = initialCapital;
-  const positions = new Map<string, { row: LeaderCandidateBacktestRow; shares: number; entryPrice: number; capitalCost: number }>();
+  const positions = new Map<string, {
+    row: LeaderCandidateBacktestRow;
+    shares: number;
+    entryPrice: number;
+    capitalCost: number;
+    previousClosePrice: number | null;
+    latestValuationPrice: number;
+  }>();
   const trades: RealisticTrade[] = [];
   const equityCurve: RealisticEquityPoint[] = [];
   let blockedBuyCount = 0;
@@ -104,17 +117,23 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
 
   for (const date of eventDates) {
     for (const [key, position] of Array.from(positions.entries())) {
-      if (position.row.secondDayDate !== date) continue;
-      const exitPrice = position.row.secondDayClosePrice;
+      if (!position.row.secondDayDate || date < position.row.secondDayDate) continue;
+      const marketClosePrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.closePrice ?? null;
+      const exitPrice = date === position.row.secondDayDate
+        ? position.row.secondDayClosePrice ?? marketClosePrice
+        : marketClosePrice;
       if (!validPrice(exitPrice)) {
-        missingDataCount += 1;
         continue;
       }
-      const limitDown = validPrice(position.row.nextClosePrice) && exitPrice <= position.row.nextClosePrice * 0.901;
+      position.latestValuationPrice = exitPrice;
+      const limitDown = validPrice(position.previousClosePrice) && exitPrice <= position.previousClosePrice * 0.901;
       if (blockLimitDownSells && limitDown) {
         blockedSellCount += 1;
+        position.previousClosePrice = exitPrice;
         const trade = trades.find((item) => item.stockCode === position.row.stockCode && item.entryDate === position.row.nextDayDate && item.status === "filled");
-        if (trade) trade.reason = "T+2收盘接近跌停，按保守规则未出清";
+        if (trade) trade.reason = date === position.row.secondDayDate
+          ? "T+2收盘接近跌停，按保守规则延后至下一实际交易日"
+          : "连续跌停，继续等待下一实际交易日";
         continue;
       }
       const slippedExit = exitPrice * (1 - slippageBps / 10000);
@@ -125,10 +144,12 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
       cash += proceeds;
       const trade = trades.find((item) => item.stockCode === position.row.stockCode && item.entryDate === position.row.nextDayDate && item.status === "filled");
       if (trade) {
+        trade.exitDate = date;
         trade.exitPrice = round(slippedExit, 4);
         trade.totalFees = round(trade.totalFees + sellFees);
         trade.netPnl = round(netPnl);
         trade.netReturn = round((netPnl / position.capitalCost) * 100);
+        trade.reason = date === position.row.secondDayDate ? null : "跌停后延期至实际交易日出清";
       }
       positions.delete(key);
     }
@@ -185,20 +206,30 @@ export function simulateRealisticTPlus1ToTPlus2(rows: LeaderCandidateBacktestRow
       if (capitalCost > cash) continue;
       cash -= capitalCost;
       const key = `${row.stockCode}::${date}`;
-      positions.set(key, { row, shares, entryPrice: slippedEntry, capitalCost });
+      positions.set(key, {
+        row,
+        shares,
+        entryPrice: slippedEntry,
+        capitalCost,
+        previousClosePrice: row.nextClosePrice,
+        latestValuationPrice: slippedEntry,
+      });
       trades.push({ signalDate: row.date, entryDate: date, exitDate: row.secondDayDate, stockCode: row.stockCode, stockName: row.stockName, score: row.score, shares, entryPrice: round(slippedEntry, 4), exitPrice: null, totalFees: round(buyFees), netPnl: null, netReturn: null, status: "filled", reason: null });
     }
-    const markedEquity = cash + Array.from(positions.values()).reduce((sum, position) => sum + position.capitalCost, 0);
+    const markedEquity = cash + Array.from(positions.values()).reduce((sum, position) => {
+      const closePrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.closePrice ?? null;
+      if (validPrice(closePrice)) position.latestValuationPrice = closePrice;
+      return sum + position.latestValuationPrice * position.shares;
+    }, 0);
     equityCurve.push({ date, equity: round(markedEquity), cash: round(cash), openPositions: positions.size });
   }
 
   for (const position of Array.from(positions.values())) {
     const trade = trades.find((item) => item.stockCode === position.row.stockCode && item.entryDate === position.row.nextDayDate && item.status === "filled");
-    if (!trade || trade.reason !== null) continue;
-    missingDataCount += 1;
-    trade.reason = position.row.secondDayDate === null
-      ? "未到T+2实际交易日"
-      : "回测区间结束，尚未完成T+2出清";
+    if (!trade) continue;
+    const valuationDate = eventDates.at(-1) ?? position.row.secondDayDate ?? position.row.nextDayDate;
+    if (trade.reason === null) missingDataCount += 1;
+    trade.reason = `回测结束仍持仓，按${valuationDate}收盘价期末估值`;
   }
   const filledTrades = trades.filter((trade) => trade.status === "filled" && trade.netPnl !== null);
   const pnlValues = filledTrades.map((trade) => trade.netPnl!);

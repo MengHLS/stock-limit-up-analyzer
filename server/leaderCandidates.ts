@@ -546,7 +546,12 @@ export function buildLeaderCandidateBacktest(
   const outOfSampleTPlus2Premium = calculatePremiumSummary(outOfSampleAtThreshold, "secondDayOpenPremium", "secondDayClosePremium");
   const tPlus1CloseToTPlus2Close = calculateExitSummary(appliedRows);
   const outOfSampleTPlus1CloseToTPlus2Close = calculateExitSummary(outOfSampleAtThreshold);
-  const realisticSimulation = simulateRealisticTPlus1ToTPlus2(appliedRows, options.realistic);
+  const realisticSimulation = simulateRealisticTPlus1ToTPlus2(
+    appliedRows,
+    options.realistic,
+    context.priceByStockDate,
+    marketTradingDates,
+  );
   const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
