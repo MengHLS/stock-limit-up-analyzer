@@ -27,6 +27,8 @@ export type RealisticTrade = {
   totalFees: number;
   netPnl: number | null;
   netReturn: number | null;
+  /** 买入日从T+1开盘到收盘的原始日内涨幅，不含滑点和费用。 */
+  entryDayChange?: number | null;
   status: "filled" | "skipped";
   reason: string | null;
 };
@@ -75,7 +77,12 @@ export type RealisticBacktestResult = {
 
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 const rate = (count: number, total: number) => total === 0 ? null : round((count / total) * 100, 1);
-  const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
+const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
+
+function calculateEntryDayChange(row: LeaderCandidateBacktestRow) {
+  if (!validPrice(row.nextOpenPrice) || !validPrice(row.nextClosePrice)) return null;
+  return round(((row.nextClosePrice - row.nextOpenPrice) / row.nextOpenPrice) * 100);
+}
 
 /** 使用订单标识生成稳定抽样值，使概率模式在重复回测时可复现。 */
 function hitsDeterministicProbability(key: string, probability: number) {
@@ -275,6 +282,13 @@ export function simulateRealisticTPlus1ToTPlus2(
     if (trade.reason === null) missingDataCount += 1;
     const terminalReason = `回测结束仍持仓，按${valuationDate}收盘价期末估值`;
     trade.reason = trade.reason ? `${trade.reason}；${terminalReason}` : terminalReason;
+  }
+  const entryDayChangeByOrder = new Map(sortedRows.map((row) => [
+    `${row.date}::${row.stockCode}`,
+    calculateEntryDayChange(row),
+  ]));
+  for (const trade of trades) {
+    trade.entryDayChange = entryDayChangeByOrder.get(`${trade.signalDate}::${trade.stockCode}`) ?? null;
   }
   const filledTrades = trades.filter((trade) => trade.status === "filled" && trade.netPnl !== null);
   const pnlValues = filledTrades.map((trade) => trade.netPnl!);

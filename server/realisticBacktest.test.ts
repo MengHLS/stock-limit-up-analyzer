@@ -48,7 +48,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     });
 
     expect(result.filledCount).toBe(1);
-    expect(result.trades[0]).toMatchObject({ status: "filled", shares: 900, entryPrice: 10.5105, exitPrice: 10.989 });
+    expect(result.trades[0]).toMatchObject({ status: "filled", shares: 900, entryPrice: 10.5105, exitPrice: 10.989, netReturn: expect.any(Number), entryDayChange: 2.86 });
     expect(result.trades[0].netPnl).toBeGreaterThan(0);
     expect(result.equityCurve.length).toBe(2);
     expect(result.finalCapital).toBeGreaterThan(result.initialCapital);
@@ -78,6 +78,9 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(missing.filledCount).toBe(0);
     expect(missing.missingDataCount).toBe(1);
     expect(missing.trades[0].reason).toBe("T+2实际交易日无可用收盘价");
+
+    const missingEntryClose = simulateRealisticTPlus1ToTPlus2([row({ nextClosePrice: null })], { initialCapital: 100000 });
+    expect(missingEntryClose.trades[0]).toMatchObject({ status: "filled", entryDayChange: null });
   });
 
   it("按实际交易日而非自然日跨周末与节假日出清", () => {
