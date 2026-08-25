@@ -150,6 +150,10 @@ describe("buildLeaderCandidates", () => {
       ["600001.SH::2026-08-18", { openPrice: 9.8, closePrice: 10 }],
       ["600001.SH::2026-08-19", { openPrice: 10.5, closePrice: 11 }],
       ["600001.SH::2026-08-20", { openPrice: 11.5, closePrice: 12 }],
+      ["600002.SH::2026-08-18", { openPrice: 9.8, closePrice: 10 }],
+      ["600002.SH::2026-08-20", { openPrice: 11, closePrice: 0 }],
+      ["600003.SH::2026-08-18", { openPrice: 9.8, closePrice: 10 }],
+      ["600003.SH::2026-08-20", { openPrice: 0, closePrice: 13 }],
     ]);
 
     const result = buildLeaderCandidateBacktest(records, { minScore: 0 }, { priceByStockDate });
@@ -180,9 +184,11 @@ describe("buildLeaderCandidates", () => {
       closePremiumPositiveRate: 100,
     });
     expect(result.tPlus2Premium).toMatchObject({
-      sampleSize: 1,
-      averageOpenPremium: 15,
-      averageClosePremium: 20,
+      sampleSize: 3,
+      openSampleSize: 2,
+      closeSampleSize: 2,
+      averageOpenPremium: 12.5,
+      averageClosePremium: 25,
       openPremiumPositiveRate: 100,
       closePremiumPositiveRate: 100,
     });

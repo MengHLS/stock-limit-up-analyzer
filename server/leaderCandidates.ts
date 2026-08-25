@@ -75,7 +75,10 @@ export type LeaderCandidateScoreBand = {
 };
 
 export type LeaderCandidatePremiumSummary = {
+  /** 至少有开盘或收盘一项价格的去重样本数。 */
   sampleSize: number;
+  openSampleSize: number;
+  closeSampleSize: number;
   averageOpenPremium: number | null;
   averageClosePremium: number | null;
   openPremiumPositiveCount: number;
@@ -187,9 +190,9 @@ function premiumPercent(baseClosePrice: number | undefined, laterPrice: number |
 }
 
 function calculatePremiumSummary(rows: LeaderCandidateBacktestRow[], openField: "nextOpenPremium" | "secondDayOpenPremium" = "nextOpenPremium", closeField: "nextClosePremium" | "secondDayClosePremium" = "nextClosePremium"): LeaderCandidatePremiumSummary {
-  const premiumRows = rows.filter((row) => row[openField] !== null && row[closeField] !== null);
-  const openPremiums = premiumRows.map((row) => row[openField]!);
-  const closePremiums = premiumRows.map((row) => row[closeField]!);
+  const openPremiums = rows.map((row) => row[openField]).filter((value): value is number => value !== null);
+  const closePremiums = rows.map((row) => row[closeField]).filter((value): value is number => value !== null);
+  const sampleRows = rows.filter((row) => row[openField] !== null || row[closeField] !== null);
   const openPremiumPositiveCount = openPremiums.filter((value) => value > 0).length;
   const closePremiumPositiveCount = closePremiums.filter((value) => value > 0).length;
   const average = (values: number[]) => values.length === 0
@@ -197,13 +200,15 @@ function calculatePremiumSummary(rows: LeaderCandidateBacktestRow[], openField: 
     : Number((values.reduce((total, value) => total + value, 0) / values.length).toFixed(2));
 
   return {
-    sampleSize: premiumRows.length,
+    sampleSize: sampleRows.length,
+    openSampleSize: openPremiums.length,
+    closeSampleSize: closePremiums.length,
     averageOpenPremium: average(openPremiums),
     averageClosePremium: average(closePremiums),
     openPremiumPositiveCount,
-    openPremiumPositiveRate: percent(openPremiumPositiveCount, premiumRows.length),
+    openPremiumPositiveRate: percent(openPremiumPositiveCount, openPremiums.length),
     closePremiumPositiveCount,
-    closePremiumPositiveRate: percent(closePremiumPositiveCount, premiumRows.length),
+    closePremiumPositiveRate: percent(closePremiumPositiveCount, closePremiums.length),
   };
 }
 

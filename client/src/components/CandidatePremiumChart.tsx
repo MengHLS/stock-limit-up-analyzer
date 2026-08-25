@@ -7,6 +7,8 @@ type PremiumScoreBand = {
   sampleSize: number;
   premium: {
     sampleSize: number;
+    openSampleSize: number;
+    closeSampleSize: number;
     averageOpenPremium: number | null;
     averageClosePremium: number | null;
     openPremiumPositiveRate: number | null;
@@ -14,6 +16,8 @@ type PremiumScoreBand = {
   };
   tPlus2Premium: {
     sampleSize: number;
+    openSampleSize: number;
+    closeSampleSize: number;
     averageOpenPremium: number | null;
     averageClosePremium: number | null;
     openPremiumPositiveRate: number | null;
@@ -34,7 +38,7 @@ function premiumTooltip({ active, payload }: any) {
       <p className="font-semibold text-slate-800">{point.label}</p>
       <p className="mt-1 text-xs text-sky-700">T+1 平均开盘/收盘：{point.averageOpenPremium ?? "-"}% / {point.averageClosePremium ?? "-"}%</p>
       <p className="mt-1 text-xs text-violet-700">T+2 平均开盘/收盘：{point.secondDayAverageOpenPremium ?? "-"}% / {point.secondDayAverageClosePremium ?? "-"}%</p>
-      <p className="mt-1 text-xs text-slate-500">T+1 可比 {point.premiumSampleSize}/{point.sampleSize} 条 · T+2 可比 {point.secondDayPremiumSampleSize}/{point.sampleSize} 条</p>
+      <p className="mt-1 text-xs text-slate-500">T+1 开盘/收盘样本 {point.openSampleSize}/{point.closeSampleSize} 条 · T+2 开盘/收盘样本 {point.secondDayOpenSampleSize}/{point.secondDayCloseSampleSize} 条</p>
       <p className="mt-1 text-xs text-slate-500">T+1 正溢价率 {point.openPremiumPositiveRate ?? "-"}% / {point.closePremiumPositiveRate ?? "-"}% · T+2 正溢价率 {point.secondDayOpenPremiumPositiveRate ?? "-"}% / {point.secondDayClosePremiumPositiveRate ?? "-"}%</p>
     </div>
   );
@@ -45,11 +49,15 @@ export function CandidatePremiumChart({ scoreBands }: CandidatePremiumChartProps
     label: band.label,
     sampleSize: band.sampleSize,
     premiumSampleSize: band.premium.sampleSize,
+    openSampleSize: band.premium.openSampleSize,
+    closeSampleSize: band.premium.closeSampleSize,
     averageOpenPremium: band.premium.averageOpenPremium,
     averageClosePremium: band.premium.averageClosePremium,
     openPremiumPositiveRate: band.premium.openPremiumPositiveRate,
     closePremiumPositiveRate: band.premium.closePremiumPositiveRate,
     secondDayPremiumSampleSize: band.tPlus2Premium.sampleSize,
+    secondDayOpenSampleSize: band.tPlus2Premium.openSampleSize,
+    secondDayCloseSampleSize: band.tPlus2Premium.closeSampleSize,
     secondDayAverageOpenPremium: band.tPlus2Premium.averageOpenPremium,
     secondDayAverageClosePremium: band.tPlus2Premium.averageClosePremium,
     secondDayOpenPremiumPositiveRate: band.tPlus2Premium.openPremiumPositiveRate,
