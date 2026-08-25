@@ -63,6 +63,28 @@ describe("buildLeaderCandidates", () => {
     expect(result.candidates[0]).toMatchObject({ stockCode: "600001.SH", boards: 2, limitUpTime: "09:40:00" });
   });
 
+  it("五板及以上仅保留在市场高度统计，不参与候选评分与历史回测", () => {
+    const dates = ["2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-22", "2026-08-25"];
+    const highBoardRecords = dates.map((limitUpDate) => ({
+      stockCode: "600001.SH", stockName: "高位龙头", limitUpDate, limitUpTime: "09:35:00", sector: "题材A", turnover: "20", circulationValue: "100",
+    }));
+    const records = [
+      ...highBoardRecords,
+      { stockCode: "600002.SH", stockName: "低位甲", limitUpDate: "2026-08-22", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600002.SH", stockName: "低位甲", limitUpDate: "2026-08-25", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600003.SH", stockName: "低位乙", limitUpDate: "2026-08-25", limitUpTime: "09:45:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600004.SH", stockName: "低位丙", limitUpDate: "2026-08-25", limitUpTime: "09:50:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+    ];
+
+    const latest = buildLeaderCandidates(records);
+    const backtest = buildLeaderCandidateBacktest(records, { minScore: 0 });
+
+    expect(latest).toMatchObject({ maxBoards: 6, totalMainBoardLimitUps: 4 });
+    expect(latest.candidates.some((candidate) => candidate.stockCode === "600001.SH")).toBe(false);
+    expect(backtest.historicalRows.every((row) => row.boards < 5)).toBe(true);
+    expect(backtest.historicalRows.find((row) => row.date === "2026-08-22" && row.stockCode === "600001.SH")).toBeUndefined();
+  });
+
   it("回测仅使用T日及以前数据生成候选，并以T加1涨停延续作为成功口径", () => {
     const records = [
       { stockCode: "600001.SH", stockName: "主板甲", limitUpDate: "2026-08-18", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: null },
@@ -84,27 +106,27 @@ describe("buildLeaderCandidates", () => {
 
   it("仅在满足最低历史样本量时输出校准阈值", () => {
     const dates = Array.from({ length: 22 }, (_, index) => `2026-08-${String(index + 1).padStart(2, "0")}`);
-    const records = dates.flatMap((date) => ["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({
-      stockCode,
-      stockName: `主板${index + 1}`,
+    const records = dates.flatMap((date, dateIndex) => [0, 1, 2].map((stockIndex) => ({
+      stockCode: `600${String(Math.floor(dateIndex / 4) * 3 + stockIndex + 1).padStart(3, "0")}.SH`,
+      stockName: `主板${stockIndex + 1}`,
       limitUpDate: date,
       limitUpTime: "09:40:00",
       sector: "题材A",
       turnover: "20",
-      circulationValue: null,
+      circulationValue: "100",
     })));
 
     const result = buildLeaderCandidateBacktest(records);
 
-    expect(result.totalSamples).toBe(57);
+    expect(result.totalSamples).toBe(63);
     expect(result.recommendedMinScore).toBe(45);
-    expect(result.calibrationSampleSize).toBe(39);
-    expect(result.outOfSample).toMatchObject({ sampleSize: 18, successCount: 18, successRate: 100 });
+    expect(result.calibrationSampleSize).toBe(45);
+    expect(result.outOfSample).toMatchObject({ sampleSize: 18, successCount: 12, successRate: 66.7 });
     expect(result.outOfSampleScoreBands.find((band) => band.label === "65分及以上")).toMatchObject({
       minScore: 65,
       maxScore: null,
-      sampleSize: 18,
-      successRate: 100,
+      sampleSize: 9,
+      successRate: 33.3,
     });
   });
 
@@ -123,14 +145,14 @@ describe("buildLeaderCandidates", () => {
 
   it("按候选信号日的情绪阶段聚合独立样本外漏斗，不从后续验证日读取阶段", () => {
     const dates = Array.from({ length: 10 }, (_, index) => `2026-08-${String(index + 1).padStart(2, "0")}`);
-    const records = dates.flatMap((date) => ["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({
-      stockCode,
-      stockName: `主板${index + 1}`,
+    const records = dates.flatMap((date, dateIndex) => [0, 1, 2].map((stockIndex) => ({
+      stockCode: `600${String(Math.floor(dateIndex / 4) * 3 + stockIndex + 1).padStart(3, "0")}.SH`,
+      stockName: `主板${stockIndex + 1}`,
       limitUpDate: date,
       limitUpTime: "09:40:00",
       sector: "题材A",
       turnover: "20",
-      circulationValue: null,
+      circulationValue: "100",
     })));
     const phaseByDate = new Map(dates.map((date, index) => [date, {
       phase: index < 7 ? "修复上升" as const : "高位亢奋" as const,
@@ -143,7 +165,7 @@ describe("buildLeaderCandidates", () => {
 
     // 70%分界后仅第8、9个交易日有完整T+1观察期，二者均归属高位亢奋。
     expect(repair).toMatchObject({ sampleSize: 0, successCount: 0, maxBoards: null });
-    expect(euphoria).toMatchObject({ sampleSize: 6, successCount: 6, successRate: 100, maxBoards: 6 });
+    expect(euphoria).toMatchObject({ sampleSize: 6, successCount: 3, successRate: 50, maxBoards: 6 });
     expect(result.historicalRows.find((row) => row.date === "2026-08-01")?.phase).toBe("修复上升");
   });
 

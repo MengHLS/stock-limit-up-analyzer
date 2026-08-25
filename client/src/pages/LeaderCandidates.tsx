@@ -248,6 +248,7 @@ export default function LeaderCandidatesPage() {
                 </div>
                 {backtestLoading ? <div className="flex items-center gap-2 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />正在计算历史样本…</div> : !backtest || backtest.totalSamples === 0 ? <p className="py-3 text-sm text-slate-500">历史候选样本不足，暂无法计算回测结果。</p> : (
                   <div className="space-y-4">
+                    <p className="rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2 text-xs leading-5 text-sky-800">候选评分与组合资金回测仅覆盖主板 1 至 4 板标的；五板及以上仅保留在情绪周期和最高连板统计中，不参与候选评分。</p>
                     <div className="grid gap-3 sm:grid-cols-4">
                       <div className="rounded-lg border border-sky-100 bg-sky-50/70 p-3"><p className="text-xs text-slate-500">T+{backtest.observationDays}延续成功率</p><p className="mt-1 text-2xl font-bold text-sky-700">{backtest.successRate ?? "-"}<span className="ml-1 text-sm">{backtest.successRate === null ? "" : "%"}</span></p><p className="mt-1 text-xs text-slate-500">{backtest.successCount}/{backtest.totalSamples} 个候选样本</p></div>
                       <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 p-3"><p className="text-xs text-slate-500">历史校准阈值</p><p className="mt-1 text-2xl font-bold text-indigo-700">{backtest.recommendedMinScore ?? "-"}<span className="ml-1 text-sm">{backtest.recommendedMinScore === null ? "" : "分"}</span></p><p className="mt-1 text-xs text-slate-500">需至少20个历史样本才会启用</p></div>

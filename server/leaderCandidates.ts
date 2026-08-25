@@ -321,7 +321,9 @@ export function buildLeaderCandidatesForDate(
 
   const currentDateIndex = tradingDateIndex.get(targetDate) ?? 0;
   const trajectoryDates = tradingDates.slice(currentDateIndex, currentDateIndex + 7).reverse();
-  const rankedCandidates = currentRecords
+  // 五板及以上属于高位情绪观察范围，不进入候选评分或组合回测，避免高位风险与低位启动筛选混在同一口径。
+  const scorableRecords = currentRecords.filter((record) => calculateBoards(record.stockCode, targetDate) < 5);
+  const rankedCandidates = scorableRecords
     .map((record) => {
       const sector = normalizeSectorName(record.sector);
       const boards = calculateBoards(record.stockCode, targetDate);
@@ -567,7 +569,7 @@ export function buildLeaderCandidateBacktest(
   });
 
   return {
-    definition: `成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
+    definition: `候选仅限1至4板主板涨停股；成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
     observationDays,
     appliedMinScore,
     totalSamples: appliedRows.length,
