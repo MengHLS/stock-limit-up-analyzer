@@ -106,8 +106,8 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
   it("限制跌停卖出时在后续实际交易日持续尝试出清，而非停止回测", () => {
     const prices = new Map([
       ["600001.SH::2026-08-24", { openPrice: 10.5, closePrice: 10.8 }],
-      ["600001.SH::2026-08-25", { openPrice: 9.8, closePrice: 9.7 }],
-      ["600001.SH::2026-08-26", { openPrice: 8.8, closePrice: 8.7 }],
+      ["600001.SH::2026-08-25", { openPrice: 9.7, closePrice: 9.7 }],
+      ["600001.SH::2026-08-26", { openPrice: 8.7, closePrice: 8.7 }],
       ["600001.SH::2026-08-27", { openPrice: 8.8, closePrice: 8.9 }],
     ]);
     const result = simulateRealisticTPlus1ToTPlus2([
@@ -122,7 +122,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
   it("回测末端仍无法卖出时，以最后实际交易日收盘价估值并保留持仓", () => {
     const prices = new Map([
       ["600001.SH::2026-08-24", { openPrice: 10.5, closePrice: 10.8 }],
-      ["600001.SH::2026-08-25", { openPrice: 9.8, closePrice: 9.7 }],
+      ["600001.SH::2026-08-25", { openPrice: 9.7, closePrice: 9.7 }],
     ]);
     const result = simulateRealisticTPlus1ToTPlus2([
       row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25", secondDayClosePrice: 9.7 }),
@@ -132,6 +132,19 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-25", netPnl: null });
     expect(result.trades[0].reason).toContain("回测结束仍持仓，按2026-08-25收盘价期末估值");
     expect(result.finalCapital).toBeLessThan(result.initialCapital);
+  });
+
+  it("非一字跌停即使收盘接近跌停，严格模式下仍按当日收盘价正常出清", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-24", { openPrice: 10.5, closePrice: 10.8 }],
+      ["600001.SH::2026-08-25", { openPrice: 9.9, closePrice: 9.7 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25", secondDayClosePrice: 9.7 }),
+    ], { initialCapital: 100000, maxPositions: 1, blockLimitDownSells: true }, prices, ["2026-08-24", "2026-08-25"]);
+
+    expect(result).toMatchObject({ blockedSellCount: 0, completedCount: 1, openPositionCount: 0 });
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-25", netPnl: expect.any(Number), reason: null });
   });
 
   it("一字跌停保守成交概率支持 0%、可复现的中间概率与 100% 三种情景", () => {

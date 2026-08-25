@@ -167,15 +167,15 @@ export function simulateRealisticTPlus1ToTPlus2(
       const oneWordProbabilityFill = oneWordLimitDown
         && enableOneWordLimitDownProbability
         && hitsDeterministicProbability(`${position.row.stockCode}::${position.row.nextDayDate}::${date}`, oneWordLimitDownSellProbability);
-      if (blockLimitDownSells && limitDown && !oneWordProbabilityFill) {
+      if (blockLimitDownSells && oneWordLimitDown && !oneWordProbabilityFill) {
         blockedSellCount += 1;
         position.previousClosePrice = exitPrice;
         const trade = trades.find((item) => item.stockCode === position.row.stockCode && item.entryDate === position.row.nextDayDate && item.status === "filled");
-        if (trade) trade.reason = oneWordLimitDown && enableOneWordLimitDownProbability
+        if (trade) trade.reason = enableOneWordLimitDownProbability
           ? `一字跌停，保守成交概率${oneWordLimitDownSellProbability}%未命中，继续等待下一实际交易日`
           : date === position.row.secondDayDate
-            ? "T+2收盘接近跌停，按保守规则延后至下一实际交易日"
-            : "连续跌停，继续等待下一实际交易日";
+            ? "T+2一字跌停，按严格规则延后至下一实际交易日"
+            : "连续一字跌停，继续等待下一实际交易日";
         continue;
       }
       const slippedExit = exitPrice * (1 - slippageBps / 10000);
