@@ -46,12 +46,19 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   date: string;
   nextDate: string;
   nextDayDate: string;
+  secondDayDate: string | null;
   success: boolean;
   signalClosePrice: number | null;
   nextOpenPrice: number | null;
   nextClosePrice: number | null;
   nextOpenPremium: number | null;
   nextClosePremium: number | null;
+  secondDayOpenPrice: number | null;
+  secondDayClosePrice: number | null;
+  secondDayOpenPremium: number | null;
+  secondDayClosePremium: number | null;
+  tPlus1CloseToTPlus2CloseReturn: number | null;
+  tPlus1CloseToTPlus2CloseSuccess: boolean | null;
   phase: SentimentCyclePhase | null;
   maxBoards: number | null;
 };
@@ -64,6 +71,7 @@ export type LeaderCandidateScoreBand = {
   successCount: number;
   successRate: number | null;
   premium: LeaderCandidatePremiumSummary;
+  tPlus2Premium: LeaderCandidatePremiumSummary;
 };
 
 export type LeaderCandidatePremiumSummary = {
@@ -74,6 +82,15 @@ export type LeaderCandidatePremiumSummary = {
   openPremiumPositiveRate: number | null;
   closePremiumPositiveCount: number;
   closePremiumPositiveRate: number | null;
+};
+
+export type LeaderCandidateExitSummary = {
+  sampleSize: number;
+  successCount: number;
+  successRate: number | null;
+  averageReturn: number | null;
+  positiveReturnCount: number;
+  positiveReturnRate: number | null;
 };
 
 export type LeaderCandidateBacktestResult = {
@@ -90,6 +107,10 @@ export type LeaderCandidateBacktestResult = {
   outOfSample: { sampleSize: number; successCount: number; successRate: number | null };
   premium: LeaderCandidatePremiumSummary;
   outOfSamplePremium: LeaderCandidatePremiumSummary;
+  tPlus2Premium: LeaderCandidatePremiumSummary;
+  outOfSampleTPlus2Premium: LeaderCandidatePremiumSummary;
+  tPlus1CloseToTPlus2Close: LeaderCandidateExitSummary;
+  outOfSampleTPlus1CloseToTPlus2Close: LeaderCandidateExitSummary;
   outOfSampleScoreBands: LeaderCandidateScoreBand[];
   phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
@@ -165,10 +186,10 @@ function premiumPercent(baseClosePrice: number | undefined, laterPrice: number |
   return Number((((laterPrice - baseClosePrice) / baseClosePrice) * 100).toFixed(2));
 }
 
-function calculatePremiumSummary(rows: LeaderCandidateBacktestRow[]): LeaderCandidatePremiumSummary {
-  const premiumRows = rows.filter((row) => row.nextOpenPremium !== null && row.nextClosePremium !== null);
-  const openPremiums = premiumRows.map((row) => row.nextOpenPremium!);
-  const closePremiums = premiumRows.map((row) => row.nextClosePremium!);
+function calculatePremiumSummary(rows: LeaderCandidateBacktestRow[], openField: "nextOpenPremium" | "secondDayOpenPremium" = "nextOpenPremium", closeField: "nextClosePremium" | "secondDayClosePremium" = "nextClosePremium"): LeaderCandidatePremiumSummary {
+  const premiumRows = rows.filter((row) => row[openField] !== null && row[closeField] !== null);
+  const openPremiums = premiumRows.map((row) => row[openField]!);
+  const closePremiums = premiumRows.map((row) => row[closeField]!);
   const openPremiumPositiveCount = openPremiums.filter((value) => value > 0).length;
   const closePremiumPositiveCount = closePremiums.filter((value) => value > 0).length;
   const average = (values: number[]) => values.length === 0
@@ -183,6 +204,23 @@ function calculatePremiumSummary(rows: LeaderCandidateBacktestRow[]): LeaderCand
     openPremiumPositiveRate: percent(openPremiumPositiveCount, premiumRows.length),
     closePremiumPositiveCount,
     closePremiumPositiveRate: percent(closePremiumPositiveCount, premiumRows.length),
+  };
+}
+
+function calculateExitSummary(rows: LeaderCandidateBacktestRow[]): LeaderCandidateExitSummary {
+  const exitRows = rows.filter((row) => row.tPlus1CloseToTPlus2CloseReturn !== null);
+  const returns = exitRows.map((row) => row.tPlus1CloseToTPlus2CloseReturn!);
+  const positiveReturnCount = returns.filter((value) => value > 0).length;
+  const averageReturn = returns.length === 0
+    ? null
+    : Number((returns.reduce((total, value) => total + value, 0) / returns.length).toFixed(2));
+  return {
+    sampleSize: exitRows.length,
+    successCount: positiveReturnCount,
+    successRate: percent(positiveReturnCount, exitRows.length),
+    averageReturn,
+    positiveReturnCount,
+    positiveReturnRate: percent(positiveReturnCount, exitRows.length),
   };
 }
 
@@ -368,6 +406,7 @@ export function buildLeaderCandidateBacktest(
     const date = tradingDates[index];
     const nextDate = tradingDates[index + observationDays];
     const nextDayDate = tradingDates[index + 1];
+    const secondDayDate = tradingDates[index + 2] ?? null;
     // 回测须覆盖T日所有满足规则的主板候选，不能沿用当前页面每日期20只的展示上限。
     const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null, stockNameByCode });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
@@ -376,10 +415,15 @@ export function buildLeaderCandidateBacktest(
     for (const candidate of candidateResult.candidates) {
       const signalPrice = context.priceByStockDate?.get(`${candidate.stockCode}::${date}`);
       const nextDayPrice = context.priceByStockDate?.get(`${candidate.stockCode}::${nextDayDate}`);
+      const secondDayPrice = secondDayDate
+        ? context.priceByStockDate?.get(`${candidate.stockCode}::${secondDayDate}`)
+        : undefined;
+      const tPlus1CloseToTPlus2CloseReturn = premiumPercent(nextDayPrice?.closePrice, secondDayPrice?.closePrice);
       rows.push({
         date,
         nextDate,
         nextDayDate,
+        secondDayDate,
         stockCode: candidate.stockCode,
         stockName: candidate.stockName,
         sector: candidate.sector,
@@ -393,6 +437,12 @@ export function buildLeaderCandidateBacktest(
         nextClosePrice: nextDayPrice?.closePrice ?? null,
         nextOpenPremium: premiumPercent(signalPrice?.closePrice, nextDayPrice?.openPrice),
         nextClosePremium: premiumPercent(signalPrice?.closePrice, nextDayPrice?.closePrice),
+        secondDayOpenPrice: secondDayPrice?.openPrice ?? null,
+        secondDayClosePrice: secondDayPrice?.closePrice ?? null,
+        secondDayOpenPremium: premiumPercent(signalPrice?.closePrice, secondDayPrice?.openPrice),
+        secondDayClosePremium: premiumPercent(signalPrice?.closePrice, secondDayPrice?.closePrice),
+        tPlus1CloseToTPlus2CloseReturn,
+        tPlus1CloseToTPlus2CloseSuccess: tPlus1CloseToTPlus2CloseReturn === null ? null : tPlus1CloseToTPlus2CloseReturn > 0,
         phase: phaseContext?.phase ?? null,
         maxBoards: phaseContext?.maxBoards ?? null,
       });
@@ -420,6 +470,7 @@ export function buildLeaderCandidateBacktest(
       successCount,
       successRate: percent(successCount, bandRows.length),
       premium: calculatePremiumSummary(bandRows),
+      tPlus2Premium: calculatePremiumSummary(bandRows, "secondDayOpenPremium", "secondDayClosePremium"),
     };
   };
   // 评分阈值仅用较早70%的日期校准，再在较晚30%的日期做样本外验证，避免将同一批样本既用于选阈值又用于评估。
@@ -452,6 +503,10 @@ export function buildLeaderCandidateBacktest(
   const outOfSampleSuccessCount = outOfSampleAtThreshold.filter((row) => row.success).length;
   const premium = calculatePremiumSummary(appliedRows);
   const outOfSamplePremium = calculatePremiumSummary(outOfSampleAtThreshold);
+  const tPlus2Premium = calculatePremiumSummary(appliedRows, "secondDayOpenPremium", "secondDayClosePremium");
+  const outOfSampleTPlus2Premium = calculatePremiumSummary(outOfSampleAtThreshold, "secondDayOpenPremium", "secondDayClosePremium");
+  const tPlus1CloseToTPlus2Close = calculateExitSummary(appliedRows);
+  const outOfSampleTPlus1CloseToTPlus2Close = calculateExitSummary(outOfSampleAtThreshold);
   const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
@@ -487,6 +542,10 @@ export function buildLeaderCandidateBacktest(
     },
     premium,
     outOfSamplePremium,
+    tPlus2Premium,
+    outOfSampleTPlus2Premium,
+    tPlus1CloseToTPlus2Close,
+    outOfSampleTPlus1CloseToTPlus2Close,
     // 该分层始终以所有样本外行计算，不受当前手动阈值影响，用于比较各评分区间的独立样本外表现。
     outOfSampleScoreBands: scoreBandDefinitions.map((definition) => calculateBand(outOfSampleRows, definition)),
     // 阶段漏斗使用当前评分阈值下的独立样本外行；每行的阶段仅来自候选信号日，不读取后续验证日。

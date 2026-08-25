@@ -137,7 +137,7 @@ describe("buildLeaderCandidates", () => {
   });
 
   it("仅用信号日收盘与下一已记录交易日价格计算候选池次日开盘和收盘溢价", () => {
-    const records = ["2026-08-18", "2026-08-19"].flatMap((date) => ["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({
+    const records = ["2026-08-18", "2026-08-19", "2026-08-20"].flatMap((date) => ["600001.SH", "600002.SH", "600003.SH"].map((stockCode, index) => ({
       stockCode,
       stockName: `主板${index + 1}`,
       limitUpDate: date,
@@ -149,6 +149,7 @@ describe("buildLeaderCandidates", () => {
     const priceByStockDate = new Map([
       ["600001.SH::2026-08-18", { openPrice: 9.8, closePrice: 10 }],
       ["600001.SH::2026-08-19", { openPrice: 10.5, closePrice: 11 }],
+      ["600001.SH::2026-08-20", { openPrice: 11.5, closePrice: 12 }],
     ]);
 
     const result = buildLeaderCandidateBacktest(records, { minScore: 0 }, { priceByStockDate });
@@ -162,14 +163,35 @@ describe("buildLeaderCandidates", () => {
       nextClosePrice: 11,
       nextOpenPremium: 5,
       nextClosePremium: 10,
+      secondDayDate: "2026-08-20",
+      secondDayOpenPrice: 11.5,
+      secondDayClosePrice: 12,
+      secondDayOpenPremium: 15,
+      secondDayClosePremium: 20,
+      tPlus1CloseToTPlus2CloseReturn: 9.09,
+      tPlus1CloseToTPlus2CloseSuccess: true,
     });
     expect(missingPriceRow?.nextOpenPremium).toBeNull();
     expect(result.premium).toMatchObject({
-      sampleSize: 1,
-      averageOpenPremium: 5,
-      averageClosePremium: 10,
+      sampleSize: 2,
+      averageOpenPremium: 4.78,
+      averageClosePremium: 9.54,
       openPremiumPositiveRate: 100,
       closePremiumPositiveRate: 100,
+    });
+    expect(result.tPlus2Premium).toMatchObject({
+      sampleSize: 1,
+      averageOpenPremium: 15,
+      averageClosePremium: 20,
+      openPremiumPositiveRate: 100,
+      closePremiumPositiveRate: 100,
+    });
+    expect(result.tPlus1CloseToTPlus2Close).toMatchObject({
+      sampleSize: 1,
+      successCount: 1,
+      successRate: 100,
+      averageReturn: 9.09,
+      positiveReturnRate: 100,
     });
   });
 
