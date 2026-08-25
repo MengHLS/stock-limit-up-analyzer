@@ -27,7 +27,9 @@ export type RealisticTrade = {
   totalFees: number;
   netPnl: number | null;
   netReturn: number | null;
-  /** 买入日从T+1开盘到收盘的原始日内涨幅，不含滑点和费用。 */
+  /** 实际买入成交价（含滑点）相对买入日开盘价的买点涨幅。 */
+  entryPointPremium?: number | null;
+  /** 旧明细表兼容字段；与实际买点涨幅一致，不再作为独立口径展示。 */
   entryDayChange?: number | null;
   status: "filled" | "skipped";
   reason: string | null;
@@ -78,11 +80,6 @@ export type RealisticBacktestResult = {
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 const rate = (count: number, total: number) => total === 0 ? null : round((count / total) * 100, 1);
 const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
-
-function calculateEntryDayChange(row: LeaderCandidateBacktestRow) {
-  if (!validPrice(row.nextOpenPrice) || !validPrice(row.nextClosePrice)) return null;
-  return round(((row.nextClosePrice - row.nextOpenPrice) / row.nextOpenPrice) * 100);
-}
 
 /** 使用订单标识生成稳定抽样值，使概率模式在重复回测时可复现。 */
 function hitsDeterministicProbability(key: string, probability: number) {
@@ -283,12 +280,14 @@ export function simulateRealisticTPlus1ToTPlus2(
     const terminalReason = `回测结束仍持仓，按${valuationDate}收盘价期末估值`;
     trade.reason = trade.reason ? `${trade.reason}；${terminalReason}` : terminalReason;
   }
-  const entryDayChangeByOrder = new Map(sortedRows.map((row) => [
-    `${row.date}::${row.stockCode}`,
-    calculateEntryDayChange(row),
-  ]));
+  const sourceRowByOrder = new Map(sortedRows.map((row) => [`${row.date}::${row.stockCode}`, row]));
   for (const trade of trades) {
-    trade.entryDayChange = entryDayChangeByOrder.get(`${trade.signalDate}::${trade.stockCode}`) ?? null;
+    const row = sourceRowByOrder.get(`${trade.signalDate}::${trade.stockCode}`);
+    const entryPointPremium = trade.status === "filled" && row && validPrice(trade.entryPrice) && validPrice(row.nextOpenPrice)
+      ? round(((trade.entryPrice - row.nextOpenPrice) / row.nextOpenPrice) * 100)
+      : null;
+    trade.entryPointPremium = entryPointPremium;
+    trade.entryDayChange = entryPointPremium;
   }
   const filledTrades = trades.filter((trade) => trade.status === "filled" && trade.netPnl !== null);
   const pnlValues = filledTrades.map((trade) => trade.netPnl!);

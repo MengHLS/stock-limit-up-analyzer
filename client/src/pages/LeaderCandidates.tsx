@@ -7,7 +7,7 @@ import { CandidatePremiumChart } from "@/components/CandidatePremiumChart";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { Activity, AlertTriangle, ArrowLeft, Crown, Loader2, RefreshCw, ShieldAlert, Sparkles, TrendingUp } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 
 function formatDate(date: string | null) {
@@ -122,6 +122,37 @@ export default function LeaderCandidatesPage() {
       return !keyword || `${trade.stockCode} ${trade.stockName}`.toLowerCase().includes(keyword);
     });
   }, [orderReasonFilter, orderSearch, orderStatusFilter, realisticOrders]);
+  useEffect(() => {
+    const ordersTable = Array.from(document.querySelectorAll("table")).find((table) => table.querySelector("thead tr")?.textContent?.includes("信号日") && table.querySelector("thead tr")?.textContent?.includes("净收益"));
+    if (!ordersTable) return;
+    const headerRow = ordersTable.querySelector("thead tr");
+    if (headerRow && !headerRow.querySelector("[data-order-extra-header]")) {
+      for (const label of ["收益率", "买点涨幅"]) {
+        const header = document.createElement("th");
+        header.dataset.orderExtraHeader = "true";
+        header.className = "px-3 py-2";
+        header.textContent = label;
+        headerRow.insertBefore(header, headerRow.lastElementChild);
+      }
+    }
+    Array.from(ordersTable.querySelectorAll("tbody tr")).forEach((tableRow, index) => {
+      tableRow.querySelectorAll("[data-order-extra-cell]").forEach((cell) => cell.remove());
+      const trade = filteredRealisticOrders[index];
+      if (!trade) return;
+      const reasonCell = tableRow.lastElementChild;
+      const createCell = (value: number | null | undefined) => {
+        const cell = document.createElement("td");
+        cell.dataset.orderExtraCell = "true";
+        cell.className = `px-3 py-2 ${value !== null && value !== undefined && value >= 0 ? "text-emerald-700" : "text-rose-600"}`;
+        cell.textContent = value === null || value === undefined ? "-" : `${value}%`;
+        return cell;
+      };
+      tableRow.insertBefore(createCell(trade.netReturn), reasonCell);
+      tableRow.insertBefore(createCell(trade.entryPointPremium), reasonCell);
+    });
+    const duplicateTitle = Array.from(document.querySelectorAll("p")).find((element) => element.textContent === "订单收益百分比与买入日涨幅");
+    duplicateTitle?.closest(".max-h-64")?.setAttribute("hidden", "true");
+  }, [filteredRealisticOrders]);
   const focusCandidateList = () => candidateListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   const applyPhaseFilter = (phase: typeof phaseFilter) => {
     setPhaseFilter(phase);
