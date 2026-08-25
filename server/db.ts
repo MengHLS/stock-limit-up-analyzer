@@ -27,6 +27,7 @@ import { normalizeSectorName } from '../shared/stockDataNormalization';
 import {
   buildLeaderCandidateBacktest,
   buildLeaderCandidates,
+  buildLeaderCandidateDailyPriceMap,
   type LeaderCandidateBacktestOptions,
   type LeaderCandidateDailyPrice,
 } from './leaderCandidates';
@@ -564,14 +565,7 @@ export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, Lea
     closePrice: stockDailyPrices.closePrice,
   }).from(stockDailyPrices);
 
-  const map = new Map<string, LeaderCandidateDailyPrice>();
-  for (const row of rows) {
-    const openPrice = Number(row.openPrice);
-    const closePrice = Number(row.closePrice);
-    if (!Number.isFinite(openPrice) || !Number.isFinite(closePrice) || openPrice <= 0 || closePrice <= 0) continue;
-    map.set(`${row.stockCode}::${row.tradeDate}`, { openPrice, closePrice });
-  }
-  return map;
+  return buildLeaderCandidateDailyPriceMap(rows);
 }
 
 /** 获取涨停数与大盘数据的关联统计（最近N天）*/

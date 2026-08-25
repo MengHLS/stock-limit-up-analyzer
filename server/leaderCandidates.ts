@@ -138,9 +138,30 @@ export type LeaderCandidateBacktestContext = {
 };
 
 export type LeaderCandidateDailyPrice = {
-  openPrice: number;
-  closePrice: number;
+  openPrice: number | null;
+  closePrice: number | null;
 };
+
+export type LeaderCandidateDailyPriceRow = {
+  stockCode: string;
+  tradeDate: string;
+  openPrice: string | number | null;
+  closePrice: string | number | null;
+};
+
+/** 保留开盘或收盘任一有效价格；只有两项都无效时才丢弃该交易日记录。 */
+export function buildLeaderCandidateDailyPriceMap(rows: LeaderCandidateDailyPriceRow[]): Map<string, LeaderCandidateDailyPrice> {
+  const map = new Map<string, LeaderCandidateDailyPrice>();
+  for (const row of rows) {
+    const parsedOpenPrice = Number(row.openPrice);
+    const parsedClosePrice = Number(row.closePrice);
+    const openPrice = Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
+    const closePrice = Number.isFinite(parsedClosePrice) && parsedClosePrice > 0 ? parsedClosePrice : null;
+    if (openPrice === null && closePrice === null) continue;
+    map.set(`${row.stockCode}::${row.tradeDate}`, { openPrice, closePrice });
+  }
+  return map;
+}
 
 type LeaderCandidateBuildOptions = {
   candidateLimit?: number | null;
@@ -184,7 +205,7 @@ function percent(successCount: number, sampleSize: number) {
   return Number(((successCount / sampleSize) * 100).toFixed(1));
 }
 
-function premiumPercent(baseClosePrice: number | undefined, laterPrice: number | undefined) {
+function premiumPercent(baseClosePrice: number | null | undefined, laterPrice: number | null | undefined) {
   if (!baseClosePrice || !laterPrice || baseClosePrice <= 0 || laterPrice <= 0) return null;
   return Number((((laterPrice - baseClosePrice) / baseClosePrice) * 100).toFixed(2));
 }

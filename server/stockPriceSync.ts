@@ -31,13 +31,14 @@ const RECENT_SYNC_DATE_COUNT = 8;
 const TUSHARE_SYNC_CONCURRENCY = 2;
 
 /**
- * 对每条涨停记录同步信号日价格及下一已记录交易日价格。
- * 后者即使股票未继续涨停也必须保存，才能评价候选池的次日溢价。
+ * 对每条涨停记录同步信号日、下一已记录交易日及下二已记录交易日价格。
+ * 后两者即使股票未继续涨停也必须保存，才能评价候选池的 T+1/T+2 溢价和跨日出清。
  */
 export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[]): StockPriceSyncTarget[] {
   const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => left.localeCompare(right));
   const nextDateByDate = new Map(tradingDates.map((date, index) => [date, tradingDates[index + 1] ?? null]));
+  const secondDateByDate = new Map(tradingDates.map((date, index) => [date, tradingDates[index + 2] ?? null]));
   const codesByDate = new Map<string, Set<string>>();
 
   const addTarget = (date: string | null, stockCode: string) => {
@@ -50,6 +51,7 @@ export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[]
   for (const record of records) {
     addTarget(record.limitUpDate, record.stockCode);
     addTarget(nextDateByDate.get(record.limitUpDate) ?? null, record.stockCode);
+    addTarget(secondDateByDate.get(record.limitUpDate) ?? null, record.stockCode);
   }
 
   return Array.from(codesByDate.entries())
@@ -57,7 +59,7 @@ export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[]
     .sort((left, right) => left.tradeDate.localeCompare(right.tradeDate));
 }
 
-/** 同步价格表；recent 用于每日盘后补齐近八个已记录交易日，full 用于首次历史回填。 */
+/** 同步价格表；recent 用于每日盘后补齐近八个已记录交易日，full 用于首次历史回填。两种模式均覆盖 T+2 目标日期。 */
 export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promise<StockPriceSyncResult> {
   const records = await getLimitUpRecordsForStockPriceSync();
   const allTargets = buildStockPriceSyncTargets(records);

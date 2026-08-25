@@ -3,16 +3,18 @@ import { buildStockPriceSyncTargets } from "./stockPriceSync";
 import { parseTushareDailyPrices } from "./tushare";
 
 describe("股票日线同步", () => {
-  it("为每条涨停记录同时建立信号日和下一已记录交易日的价格目标", () => {
+  it("为每条涨停记录同时建立信号日、T+1 和 T+2 已记录交易日的价格目标", () => {
     const targets = buildStockPriceSyncTargets([
       { stockCode: "600001.SH", limitUpDate: "2026-08-18" },
       { stockCode: "600002.SH", limitUpDate: "2026-08-18" },
       { stockCode: "600001.SH", limitUpDate: "2026-08-19" },
+      { stockCode: "600001.SH", limitUpDate: "2026-08-20" },
     ]);
 
     expect(targets).toEqual([
       { tradeDate: "2026-08-18", stockCodes: ["600001.SH", "600002.SH"] },
       { tradeDate: "2026-08-19", stockCodes: ["600001.SH", "600002.SH"] },
+      { tradeDate: "2026-08-20", stockCodes: ["600001.SH", "600002.SH"] },
     ]);
   });
 
