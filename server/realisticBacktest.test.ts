@@ -129,7 +129,30 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     ], { initialCapital: 100000, maxPositions: 1, blockLimitDownSells: true }, prices, ["2026-08-24", "2026-08-25"]);
 
     expect(result).toMatchObject({ blockedSellCount: 1, completedCount: 0, openPositionCount: 1, missingDataCount: 0 });
-    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-25", netPnl: null, reason: "回测结束仍持仓，按2026-08-25收盘价期末估值" });
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-25", netPnl: null });
+    expect(result.trades[0].reason).toContain("回测结束仍持仓，按2026-08-25收盘价期末估值");
     expect(result.finalCapital).toBeLessThan(result.initialCapital);
+  });
+
+  it("一字跌停保守成交概率支持 0%、可复现的中间概率与 100% 三种情景", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-24", { openPrice: 10.5, closePrice: 10.8 }],
+      ["600001.SH::2026-08-25", { openPrice: 9.7, closePrice: 9.7 }],
+    ]);
+    const candidate = row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25", secondDayClosePrice: 9.7 });
+    const baseOptions = { initialCapital: 100000, maxPositions: 1, blockLimitDownSells: true, enableOneWordLimitDownProbability: true };
+    const dates = ["2026-08-24", "2026-08-25"];
+
+    const zeroProbability = simulateRealisticTPlus1ToTPlus2([candidate], { ...baseOptions, oneWordLimitDownSellProbability: 0 }, prices, dates);
+    const midpointFirst = simulateRealisticTPlus1ToTPlus2([candidate], { ...baseOptions, oneWordLimitDownSellProbability: 50 }, prices, dates);
+    const midpointSecond = simulateRealisticTPlus1ToTPlus2([candidate], { ...baseOptions, oneWordLimitDownSellProbability: 50 }, prices, dates);
+    const fullProbability = simulateRealisticTPlus1ToTPlus2([candidate], { ...baseOptions, oneWordLimitDownSellProbability: 100 }, prices, dates);
+
+    expect(zeroProbability).toMatchObject({ blockedSellCount: 1, completedCount: 0, openPositionCount: 1 });
+    expect(zeroProbability.trades[0].reason).toContain("概率0%未命中");
+    expect(midpointFirst.trades[0]).toEqual(midpointSecond.trades[0]);
+    expect(midpointFirst.assumptions.oneWordLimitDownSellProbability).toBe(50);
+    expect(fullProbability).toMatchObject({ blockedSellCount: 0, completedCount: 1, openPositionCount: 0 });
+    expect(fullProbability.trades[0].reason).toContain("概率100%命中");
   });
 });

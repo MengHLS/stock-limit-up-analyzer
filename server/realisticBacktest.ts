@@ -10,6 +10,8 @@ export type RealisticBacktestOptions = {
   lotSize?: number;
   blockLimitUpBuys?: boolean;
   blockLimitDownSells?: boolean;
+  enableOneWordLimitDownProbability?: boolean;
+  oneWordLimitDownSellProbability?: number;
 };
 
 export type RealisticTrade = {
@@ -42,6 +44,8 @@ export type RealisticBacktestResult = {
     lotSize: number;
     blockLimitUpBuys: boolean;
     blockLimitDownSells: boolean;
+    enableOneWordLimitDownProbability: boolean;
+    oneWordLimitDownSellProbability: number;
   };
   initialCapital: number;
   finalCapital: number;
@@ -71,7 +75,19 @@ export type RealisticBacktestResult = {
 
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 const rate = (count: number, total: number) => total === 0 ? null : round((count / total) * 100, 1);
-const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
+  const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
+
+/** 使用订单标识生成稳定抽样值，使概率模式在重复回测时可复现。 */
+function hitsDeterministicProbability(key: string, probability: number) {
+  if (probability <= 0) return false;
+  if (probability >= 100) return true;
+  let hash = 2166136261;
+  for (const char of key) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % 10_000 < Math.round(probability * 100);
+}
 
 export function simulateRealisticTPlus1ToTPlus2(
   rows: LeaderCandidateBacktestRow[],
@@ -89,7 +105,21 @@ export function simulateRealisticTPlus1ToTPlus2(
   // 只有日线开盘价、收盘价时无法确认排队成交；默认允许按开盘价成交，严格限制可手动开启。
   const blockLimitUpBuys = options.blockLimitUpBuys ?? false;
   const blockLimitDownSells = options.blockLimitDownSells ?? false;
-  const assumptions = { initialCapital, maxPositions, commissionRate, stampDutyRate, transferFeeRate, slippageBps, lotSize, blockLimitUpBuys, blockLimitDownSells };
+  const enableOneWordLimitDownProbability = options.enableOneWordLimitDownProbability ?? false;
+  const oneWordLimitDownSellProbability = Math.min(100, Math.max(0, options.oneWordLimitDownSellProbability ?? 0));
+  const assumptions = {
+    initialCapital,
+    maxPositions,
+    commissionRate,
+    stampDutyRate,
+    transferFeeRate,
+    slippageBps,
+    lotSize,
+    blockLimitUpBuys,
+    blockLimitDownSells,
+    enableOneWordLimitDownProbability,
+    oneWordLimitDownSellProbability,
+  };
   const sortedRows = rows.slice().sort((a, b) => a.nextDayDate.localeCompare(b.nextDayDate) || b.score - a.score || a.stockCode.localeCompare(b.stockCode));
   const entryDates = Array.from(new Set(sortedRows.map((row) => row.nextDayDate))).sort();
   const eventDates = Array.from(new Set([
@@ -118,7 +148,9 @@ export function simulateRealisticTPlus1ToTPlus2(
   for (const date of eventDates) {
     for (const [key, position] of Array.from(positions.entries())) {
       if (!position.row.secondDayDate || date < position.row.secondDayDate) continue;
-      const marketClosePrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.closePrice ?? null;
+      const marketPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`);
+      const marketClosePrice = marketPrice?.closePrice ?? null;
+      const marketOpenPrice = marketPrice?.openPrice ?? null;
       const exitPrice = date === position.row.secondDayDate
         ? position.row.secondDayClosePrice ?? marketClosePrice
         : marketClosePrice;
@@ -127,13 +159,23 @@ export function simulateRealisticTPlus1ToTPlus2(
       }
       position.latestValuationPrice = exitPrice;
       const limitDown = validPrice(position.previousClosePrice) && exitPrice <= position.previousClosePrice * 0.901;
-      if (blockLimitDownSells && limitDown) {
+      const oneWordLimitDown = limitDown
+        && validPrice(position.previousClosePrice)
+        && validPrice(marketOpenPrice)
+        && marketOpenPrice <= position.previousClosePrice * 0.901
+        && Math.abs(marketOpenPrice - exitPrice) <= position.previousClosePrice * 0.002;
+      const oneWordProbabilityFill = oneWordLimitDown
+        && enableOneWordLimitDownProbability
+        && hitsDeterministicProbability(`${position.row.stockCode}::${position.row.nextDayDate}::${date}`, oneWordLimitDownSellProbability);
+      if (blockLimitDownSells && limitDown && !oneWordProbabilityFill) {
         blockedSellCount += 1;
         position.previousClosePrice = exitPrice;
         const trade = trades.find((item) => item.stockCode === position.row.stockCode && item.entryDate === position.row.nextDayDate && item.status === "filled");
-        if (trade) trade.reason = date === position.row.secondDayDate
-          ? "T+2收盘接近跌停，按保守规则延后至下一实际交易日"
-          : "连续跌停，继续等待下一实际交易日";
+        if (trade) trade.reason = oneWordLimitDown && enableOneWordLimitDownProbability
+          ? `一字跌停，保守成交概率${oneWordLimitDownSellProbability}%未命中，继续等待下一实际交易日`
+          : date === position.row.secondDayDate
+            ? "T+2收盘接近跌停，按保守规则延后至下一实际交易日"
+            : "连续跌停，继续等待下一实际交易日";
         continue;
       }
       const slippedExit = exitPrice * (1 - slippageBps / 10000);
@@ -149,7 +191,9 @@ export function simulateRealisticTPlus1ToTPlus2(
         trade.totalFees = round(trade.totalFees + sellFees);
         trade.netPnl = round(netPnl);
         trade.netReturn = round((netPnl / position.capitalCost) * 100);
-        trade.reason = date === position.row.secondDayDate ? null : "跌停后延期至实际交易日出清";
+        trade.reason = oneWordProbabilityFill
+          ? `一字跌停保守成交概率${oneWordLimitDownSellProbability}%命中，实际交易日出清`
+          : date === position.row.secondDayDate ? null : "跌停后延期至实际交易日出清";
       }
       positions.delete(key);
     }
@@ -229,7 +273,8 @@ export function simulateRealisticTPlus1ToTPlus2(
     if (!trade) continue;
     const valuationDate = eventDates.at(-1) ?? position.row.secondDayDate ?? position.row.nextDayDate;
     if (trade.reason === null) missingDataCount += 1;
-    trade.reason = `回测结束仍持仓，按${valuationDate}收盘价期末估值`;
+    const terminalReason = `回测结束仍持仓，按${valuationDate}收盘价期末估值`;
+    trade.reason = trade.reason ? `${trade.reason}；${terminalReason}` : terminalReason;
   }
   const filledTrades = trades.filter((trade) => trade.status === "filled" && trade.netPnl !== null);
   const pnlValues = filledTrades.map((trade) => trade.netPnl!);

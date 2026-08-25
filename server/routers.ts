@@ -719,6 +719,8 @@ export const appRouter = router({
           lotSize: z.number().int().min(1).max(10000).optional(),
           blockLimitUpBuys: z.boolean().optional(),
           blockLimitDownSells: z.boolean().optional(),
+          enableOneWordLimitDownProbability: z.boolean().optional(),
+          oneWordLimitDownSellProbability: z.number().min(0).max(100).optional(),
         }).optional(),
       }).optional())
       .query(async ({ input }) => {
