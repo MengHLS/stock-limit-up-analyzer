@@ -62,6 +62,9 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
 
     expect(result.filledCount).toBe(1);
     expect(result.skippedCount).toBe(1);
+    expect(result.totalCandidateCount).toBe(2);
+    expect(result.priceAvailableCount).toBe(2);
+    expect(result.capacitySkippedCount).toBe(1);
     expect(result.trades.find((trade) => trade.stockCode === "600002.SH")?.reason).toBe("资金按评分排序优先分配");
   });
 
