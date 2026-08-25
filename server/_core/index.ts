@@ -9,6 +9,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { sdk } from "./sdk";
 import * as db from "../db";
+import { syncCandidateDailyPrices } from "../stockPriceSync";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -94,6 +95,26 @@ async function startServer() {
       return res.json({ ok: true, date: todayStr, data: saved });
     } catch (error: any) {
       console.error("[MarketSync] Error in scheduled sync:", error);
+      return res.status(500).json({
+        error: error.message || "Internal server error",
+        stack: error.stack,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  // 定时任务回调：盘后补齐候选池所需近期日线价格，重复执行会按代码与日期覆盖写入。
+  app.post("/api/scheduled/syncStockDailyPrices", async (req, res) => {
+    try {
+      const authUser = await sdk.authenticateRequest(req);
+      if (!authUser.isCron) {
+        return res.status(403).json({ error: "Unauthorized cron caller" });
+      }
+
+      const result = await syncCandidateDailyPrices("recent");
+      return res.json({ ok: true, result });
+    } catch (error: any) {
+      console.error("[StockPriceSync] Scheduled sync failed:", error);
       return res.status(500).json({
         error: error.message || "Internal server error",
         stack: error.stack,

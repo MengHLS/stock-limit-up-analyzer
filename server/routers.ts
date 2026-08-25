@@ -2,12 +2,14 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { invokeLLM } from "./_core/llm";
 import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
 import { parseRecognitionResult } from "./recognition";
 import { isValidLimitUpTime } from "../shared/limitUpTime";
+import { syncCandidateDailyPrices } from "./stockPriceSync";
 
 import {
   createLimitUpRecord,
@@ -710,7 +712,17 @@ export const appRouter = router({
       }).optional())
       .query(async ({ input }) => {
         return await getLeaderCandidateBacktest(input);
-    }),
+      }),
+
+    // 管理员手动触发首轮历史回填或最近交易日补齐，外部行情密钥仅保留在服务端。
+    syncCandidateDailyPrices: protectedProcedure
+      .input(z.object({ mode: z.enum(["full", "recent"]).default("recent") }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可同步外部日线行情" });
+        }
+        return syncCandidateDailyPrices(input.mode);
+      }),
 
     // 获取每日最高连板趋势及对应股票名称
     getMaxConnectionBoardTrend: publicProcedure.query(async () => {

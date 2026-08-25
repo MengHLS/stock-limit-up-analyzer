@@ -44,7 +44,13 @@ export type LeaderCandidateResult = {
 export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "stockName" | "sector" | "boards" | "score" | "circulationValue" | "marketCapScore"> & {
   date: string;
   nextDate: string;
+  nextDayDate: string;
   success: boolean;
+  signalClosePrice: number | null;
+  nextOpenPrice: number | null;
+  nextClosePrice: number | null;
+  nextOpenPremium: number | null;
+  nextClosePremium: number | null;
   phase: SentimentCyclePhase | null;
   maxBoards: number | null;
 };
@@ -56,6 +62,17 @@ export type LeaderCandidateScoreBand = {
   sampleSize: number;
   successCount: number;
   successRate: number | null;
+  premium: LeaderCandidatePremiumSummary;
+};
+
+export type LeaderCandidatePremiumSummary = {
+  sampleSize: number;
+  averageOpenPremium: number | null;
+  averageClosePremium: number | null;
+  openPremiumPositiveCount: number;
+  openPremiumPositiveRate: number | null;
+  closePremiumPositiveCount: number;
+  closePremiumPositiveRate: number | null;
 };
 
 export type LeaderCandidateBacktestResult = {
@@ -70,6 +87,8 @@ export type LeaderCandidateBacktestResult = {
   calibrationSampleSize: number;
   calibrationPeriod: { startDate: string | null; endDate: string | null };
   outOfSample: { sampleSize: number; successCount: number; successRate: number | null };
+  premium: LeaderCandidatePremiumSummary;
+  outOfSamplePremium: LeaderCandidatePremiumSummary;
   outOfSampleScoreBands: LeaderCandidateScoreBand[];
   phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
@@ -90,6 +109,12 @@ export type LeaderCandidatePhaseFunnelItem = {
 
 export type LeaderCandidateBacktestContext = {
   phaseByDate?: Map<string, { phase: SentimentCyclePhase; maxBoards: number }>;
+  priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
+};
+
+export type LeaderCandidateDailyPrice = {
+  openPrice: number;
+  closePrice: number;
 };
 
 type LeaderCandidateBuildOptions = {
@@ -135,6 +160,32 @@ function calculateMarketCapScore(circulationValue: string | null) {
 function percent(successCount: number, sampleSize: number) {
   if (sampleSize === 0) return null;
   return Number(((successCount / sampleSize) * 100).toFixed(1));
+}
+
+function premiumPercent(baseClosePrice: number | undefined, laterPrice: number | undefined) {
+  if (!baseClosePrice || !laterPrice || baseClosePrice <= 0 || laterPrice <= 0) return null;
+  return Number((((laterPrice - baseClosePrice) / baseClosePrice) * 100).toFixed(2));
+}
+
+function calculatePremiumSummary(rows: LeaderCandidateBacktestRow[]): LeaderCandidatePremiumSummary {
+  const premiumRows = rows.filter((row) => row.nextOpenPremium !== null && row.nextClosePremium !== null);
+  const openPremiums = premiumRows.map((row) => row.nextOpenPremium!);
+  const closePremiums = premiumRows.map((row) => row.nextClosePremium!);
+  const openPremiumPositiveCount = openPremiums.filter((value) => value > 0).length;
+  const closePremiumPositiveCount = closePremiums.filter((value) => value > 0).length;
+  const average = (values: number[]) => values.length === 0
+    ? null
+    : Number((values.reduce((total, value) => total + value, 0) / values.length).toFixed(2));
+
+  return {
+    sampleSize: premiumRows.length,
+    averageOpenPremium: average(openPremiums),
+    averageClosePremium: average(closePremiums),
+    openPremiumPositiveCount,
+    openPremiumPositiveRate: percent(openPremiumPositiveCount, premiumRows.length),
+    closePremiumPositiveCount,
+    closePremiumPositiveRate: percent(closePremiumPositiveCount, premiumRows.length),
+  };
 }
 
 /**
@@ -316,15 +367,19 @@ export function buildLeaderCandidateBacktest(
   for (let index = 0; index < tradingDates.length - observationDays; index += 1) {
     const date = tradingDates[index];
     const nextDate = tradingDates[index + observationDays];
+    const nextDayDate = tradingDates[index + 1];
     // 回测须覆盖T日所有满足规则的主板候选，不能沿用当前页面每日期20只的展示上限。
     const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
     const phaseContext = context.phaseByDate?.get(date);
 
     for (const candidate of candidateResult.candidates) {
+      const signalPrice = context.priceByStockDate?.get(`${candidate.stockCode}::${date}`);
+      const nextDayPrice = context.priceByStockDate?.get(`${candidate.stockCode}::${nextDayDate}`);
       rows.push({
         date,
         nextDate,
+        nextDayDate,
         stockCode: candidate.stockCode,
         stockName: candidate.stockName,
         sector: candidate.sector,
@@ -333,6 +388,11 @@ export function buildLeaderCandidateBacktest(
         circulationValue: candidate.circulationValue,
         marketCapScore: candidate.marketCapScore,
         success: nextDayCodes.has(candidate.stockCode),
+        signalClosePrice: signalPrice?.closePrice ?? null,
+        nextOpenPrice: nextDayPrice?.openPrice ?? null,
+        nextClosePrice: nextDayPrice?.closePrice ?? null,
+        nextOpenPremium: premiumPercent(signalPrice?.closePrice, nextDayPrice?.openPrice),
+        nextClosePremium: premiumPercent(signalPrice?.closePrice, nextDayPrice?.closePrice),
         phase: phaseContext?.phase ?? null,
         maxBoards: phaseContext?.maxBoards ?? null,
       });
@@ -359,6 +419,7 @@ export function buildLeaderCandidateBacktest(
       sampleSize: bandRows.length,
       successCount,
       successRate: percent(successCount, bandRows.length),
+      premium: calculatePremiumSummary(bandRows),
     };
   };
   // 评分阈值仅用较早70%的日期校准，再在较晚30%的日期做样本外验证，避免将同一批样本既用于选阈值又用于评估。
@@ -389,6 +450,8 @@ export function buildLeaderCandidateBacktest(
     ? outOfSampleRows.filter((row) => appliedMinScore === null || row.score >= appliedMinScore)
     : appliedMinScore === null ? outOfSampleRows : outOfSampleRows.filter((row) => row.score >= appliedMinScore);
   const outOfSampleSuccessCount = outOfSampleAtThreshold.filter((row) => row.success).length;
+  const premium = calculatePremiumSummary(appliedRows);
+  const outOfSamplePremium = calculatePremiumSummary(outOfSampleAtThreshold);
   const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
@@ -422,6 +485,8 @@ export function buildLeaderCandidateBacktest(
       successCount: outOfSampleSuccessCount,
       successRate: percent(outOfSampleSuccessCount, outOfSampleAtThreshold.length),
     },
+    premium,
+    outOfSamplePremium,
     // 该分层始终以所有样本外行计算，不受当前手动阈值影响，用于比较各评分区间的独立样本外表现。
     outOfSampleScoreBands: scoreBandDefinitions.map((definition) => calculateBand(outOfSampleRows, definition)),
     // 阶段漏斗使用当前评分阈值下的独立样本外行；每行的阶段仅来自候选信号日，不读取后续验证日。

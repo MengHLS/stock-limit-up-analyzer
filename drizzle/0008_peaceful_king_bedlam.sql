@@ -1,0 +1,1 @@
+ALTER TABLE `stock_daily_prices` ADD CONSTRAINT `uq_stock_daily_price_stock_date` UNIQUE(`stockCode`,`tradeDate`);

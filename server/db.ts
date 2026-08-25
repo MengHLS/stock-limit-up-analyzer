@@ -15,13 +15,20 @@ import {
   marketData,
   InsertMarketData,
   MarketData,
+  stockDailyPrices,
+  InsertStockDailyPrice,
   sentimentAlerts,
   InsertSentimentAlert,
   SentimentAlert
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
-import { buildLeaderCandidateBacktest, buildLeaderCandidates, type LeaderCandidateBacktestOptions } from './leaderCandidates';
+import {
+  buildLeaderCandidateBacktest,
+  buildLeaderCandidates,
+  type LeaderCandidateBacktestOptions,
+  type LeaderCandidateDailyPrice,
+} from './leaderCandidates';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -508,6 +515,62 @@ export async function deleteMarketData(id: number): Promise<boolean> {
 
   const result = await db.delete(marketData).where(eq(marketData.id, id));
   return result[0].affectedRows > 0;
+}
+
+// ==================== Stock Daily Price Functions ====================
+
+export type StockDailyPriceUpsert = Pick<InsertStockDailyPrice, "stockCode" | "tradeDate" | "openPrice" | "closePrice" | "preClosePrice" | "source">;
+
+/** 为候选池价格同步返回最小涨停记录集合。 */
+export async function getLimitUpRecordsForStockPriceSync(): Promise<Array<{ stockCode: string; limitUpDate: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ stockCode: limitUpRecords.stockCode, limitUpDate: limitUpRecords.limitUpDate })
+    .from(limitUpRecords)
+    .orderBy(limitUpRecords.limitUpDate);
+}
+
+/** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格。 */
+export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Promise<number> {
+  const db = await getDb();
+  if (!db || rows.length === 0) return 0;
+
+  const BATCH_SIZE = 500;
+  for (let index = 0; index < rows.length; index += BATCH_SIZE) {
+    const batch = rows.slice(index, index + BATCH_SIZE);
+    await db.insert(stockDailyPrices).values(batch).onDuplicateKeyUpdate({
+      set: {
+        openPrice: sql`VALUES(\`openPrice\`)`,
+        closePrice: sql`VALUES(\`closePrice\`)`,
+        preClosePrice: sql`VALUES(\`preClosePrice\`)`,
+        source: sql`VALUES(\`source\`)`,
+        sourceUpdatedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+  }
+  return rows.length;
+}
+
+/** 构造候选池回测所需的股票—交易日价格映射。 */
+export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, LeaderCandidateDailyPrice>> {
+  const db = await getDb();
+  if (!db) return new Map();
+  const rows = await db.select({
+    stockCode: stockDailyPrices.stockCode,
+    tradeDate: stockDailyPrices.tradeDate,
+    openPrice: stockDailyPrices.openPrice,
+    closePrice: stockDailyPrices.closePrice,
+  }).from(stockDailyPrices);
+
+  const map = new Map<string, LeaderCandidateDailyPrice>();
+  for (const row of rows) {
+    const openPrice = Number(row.openPrice);
+    const closePrice = Number(row.closePrice);
+    if (!Number.isFinite(openPrice) || !Number.isFinite(closePrice) || openPrice <= 0 || closePrice <= 0) continue;
+    map.set(`${row.stockCode}::${row.tradeDate}`, { openPrice, closePrice });
+  }
+  return map;
 }
 
 /** 获取涨停数与大盘数据的关联统计（最近N天）*/
@@ -1164,5 +1227,6 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
 
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
-  return buildLeaderCandidateBacktest(records, options, { phaseByDate });
+  const priceByStockDate = await getLeaderCandidateDailyPriceMap();
+  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate });
 }

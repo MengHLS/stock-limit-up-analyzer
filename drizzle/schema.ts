@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date, index } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date, index, uniqueIndex } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -59,6 +59,37 @@ export const limitUpRecords = mysqlTable("limit_up_records", {
 
 export type LimitUpRecord = typeof limitUpRecords.$inferSelect;
 export type InsertLimitUpRecord = typeof limitUpRecords.$inferInsert;
+
+/**
+ * 股票日线价格表 - 保存外部行情源返回的未复权开盘、收盘和前收价格。
+ * 价格按股票代码和交易日唯一，供候选池以 T 日收盘为基准计算 T+1 溢价。
+ */
+export const stockDailyPrices = mysqlTable("stock_daily_prices", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 股票代码，如 002361.SZ */
+  stockCode: varchar("stockCode", { length: 20 }).notNull(),
+  /** 交易日期，使用 string 模式避免时区转换 */
+  tradeDate: date("tradeDate", { mode: "string" }).notNull(),
+  /** 当日开盘价 */
+  openPrice: varchar("openPrice", { length: 24 }).notNull(),
+  /** 当日收盘价 */
+  closePrice: varchar("closePrice", { length: 24 }).notNull(),
+  /** 当日除权前收价 */
+  preClosePrice: varchar("preClosePrice", { length: 24 }).notNull(),
+  /** 行情来源，如 tushare */
+  source: varchar("source", { length: 32 }).notNull().default("tushare"),
+  /** 外部行情写入时间 */
+  sourceUpdatedAt: timestamp("sourceUpdatedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  stockDateUnique: uniqueIndex("uq_stock_daily_price_stock_date").on(table.stockCode, table.tradeDate),
+  stockDateIdx: index("idx_stock_daily_price_stock_date").on(table.stockCode, table.tradeDate),
+  tradeDateIdx: index("idx_stock_daily_price_trade_date").on(table.tradeDate),
+}));
+
+export type StockDailyPrice = typeof stockDailyPrices.$inferSelect;
+export type InsertStockDailyPrice = typeof stockDailyPrices.$inferInsert;
 
 /**
  * 图片上传记录表 - 存储上传的复盘图片信息

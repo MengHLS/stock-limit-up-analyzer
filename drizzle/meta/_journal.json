@@ -50,6 +50,20 @@
       "when": 1787064045992,
       "tag": "0006_brief_living_tribunal",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787654192454,
+      "tag": "0007_sharp_next_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787654389671,
+      "tag": "0008_peaceful_king_bedlam",
+      "breakpoints": true
     }
   ]
 }
