@@ -1,4 +1,5 @@
 import { normalizeLimitUpTime } from "../shared/limitUpTime";
+import { normalizeSectorName } from "../shared/stockDataNormalization";
 
 export type RecognizedStock = {
   stockCode: string;
@@ -68,7 +69,7 @@ export function parseRecognitionResult(rawContent: unknown, fallbackDate: string
         boardCount: textValue(stock.boardCount),
         circulationValue: textValue(stock.circulationValue),
         turnover: textValue(stock.turnover),
-        sector: textValue(stock.sector),
+        sector: normalizeSectorName(textValue(stock.sector), ""),
         keywords: textValue(stock.keywords),
       }];
     }),

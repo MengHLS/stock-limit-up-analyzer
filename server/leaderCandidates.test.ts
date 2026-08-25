@@ -214,3 +214,33 @@ describe("buildLeaderCandidates", () => {
     expect((small?.score ?? 0)).toBeGreaterThan(mega?.score ?? 0);
   });
 });
+
+
+describe("candidate data normalization", () => {
+  it("合并题材后的星号统计后缀，不让同一题材被拆成多个分组", () => {
+    const result = buildLeaderCandidates([
+      { stockCode: "600001.SH", stockName: "主板甲", limitUpDate: "2026-08-25", limitUpTime: "09:30:00", sector: "算力*3", turnover: "8", circulationValue: "60" },
+      { stockCode: "600002.SH", stockName: "主板乙", limitUpDate: "2026-08-25", limitUpTime: "09:35:00", sector: "算力*2", turnover: "7", circulationValue: "60" },
+      { stockCode: "600003.SH", stockName: "主板丙", limitUpDate: "2026-08-25", limitUpTime: "09:40:00", sector: "算力*1", turnover: "6", circulationValue: "60" },
+    ]);
+
+    expect(result.strongSectors[0]).toEqual({ sector: "算力", count: 3 });
+    expect(result.candidates[0]?.sector).toBe("算力");
+    expect(result.candidates[0]?.sectorCount).toBe(3);
+    expect(result.candidates[0]?.reasons).toContain("算力 3只涨停");
+  });
+
+  it("历史候选展示采用代码最近的稳定名称，避免 OCR 名称漂移污染回测明细", () => {
+    const records = [
+      { stockCode: "600001.SH", stockName: "错误名称", limitUpDate: "2026-08-18", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600002.SH", stockName: "主板乙", limitUpDate: "2026-08-18", limitUpTime: "09:45:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600001.SH", stockName: "正确名称", limitUpDate: "2026-08-19", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600002.SH", stockName: "主板乙", limitUpDate: "2026-08-19", limitUpTime: "09:45:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600003.SH", stockName: "主板丙", limitUpDate: "2026-08-18", limitUpTime: "09:50:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600003.SH", stockName: "主板丙", limitUpDate: "2026-08-19", limitUpTime: "09:50:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+    ];
+
+    const result = buildLeaderCandidateBacktest(records, { minScore: 0 });
+    expect(result.historicalRows.find((row) => row.stockCode === "600001.SH")?.stockName).toBe("正确名称");
+  });
+});

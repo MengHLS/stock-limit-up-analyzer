@@ -1,4 +1,5 @@
 import { buildLeaderCandidatesForDate, type LeaderCandidateSourceRecord } from "./leaderCandidates";
+import { normalizeSectorName } from "../shared/stockDataNormalization";
 
 export type SentimentCyclePhase = "冰点试错" | "修复上升" | "上升发酵" | "高位分歧" | "高位亢奋" | "高位退潮";
 export type MarketCycleType = "混沌周期" | "龙头周期";
@@ -218,7 +219,7 @@ function buildNativeLeaders(
       nativeLeaders.set(record.stockCode, {
         stockCode: record.stockCode,
         stockName: record.stockName,
-        sector: record.sector ?? "未分类",
+        sector: normalizeSectorName(record.sector, "未分类"),
         startDate: date,
         startDayMaxBoards,
         confirmationDate,
@@ -265,7 +266,7 @@ function buildLeaderList(
     if (!existing.sourceNotes.includes(input.sourceNote)) existing.sourceNotes.push(input.sourceNote);
     existing.firstLeaderDate = existing.firstLeaderDate < input.confirmedDate ? existing.firstLeaderDate : input.confirmedDate;
     existing.highestBoards = Math.max(existing.highestBoards, input.highestBoards);
-    if (existing.sector === "未分类" && input.sector) existing.sector = input.sector;
+    if (existing.sector === "未分类" && input.sector) existing.sector = normalizeSectorName(input.sector, "未分类");
   };
 
   for (const date of tradingDates) {
@@ -276,7 +277,7 @@ function buildLeaderList(
       addLeader({
         stockCode: record.stockCode,
         stockName: record.stockName,
-        sector: record.sector ?? "未分类",
+        sector: normalizeSectorName(record.sector, "未分类"),
         leaderType: "周期龙头",
         confirmedDate: date,
         highestBoards: boards,
@@ -411,7 +412,7 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
       return {
         stockCode: record.stockCode,
         stockName: record.stockName,
-        sector: record.sector ?? "未分类",
+        sector: normalizeSectorName(record.sector, "未分类"),
         breakDayBoards: sourceBoards,
         score: candidate?.score ?? null,
         highestBoardsAfterBreak,

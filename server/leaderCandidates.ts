@@ -1,4 +1,5 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
+import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
 
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
@@ -119,14 +120,11 @@ export type LeaderCandidateDailyPrice = {
 
 type LeaderCandidateBuildOptions = {
   candidateLimit?: number | null;
+  stockNameByCode?: Map<string, string>;
 };
 
 function isMainBoardStock(stockCode: string) {
   return !/^(300|301|688|920)/.test(stockCode);
-}
-
-function normalizeSector(sector: string | null) {
-  return sector?.trim() || "其他";
 }
 
 function parseNumeric(value: string | null) {
@@ -197,6 +195,7 @@ export function buildLeaderCandidatesForDate(
   options: LeaderCandidateBuildOptions = {},
 ): LeaderCandidateResult {
   const recordsAsOfDate = records.filter((record) => record.limitUpDate <= targetDate);
+  const stockNameByCode = options.stockNameByCode ?? buildLatestStockNameMap(records);
   if (recordsAsOfDate.length === 0) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
   }
@@ -242,7 +241,7 @@ export function buildLeaderCandidatesForDate(
   const currentRecords = Array.from(currentRecordsByCode.values());
   const sectorCounts = new Map<string, number>();
   for (const record of currentRecords) {
-    const sector = normalizeSector(record.sector);
+    const sector = normalizeSectorName(record.sector);
     sectorCounts.set(sector, (sectorCounts.get(sector) ?? 0) + 1);
   }
 
@@ -255,7 +254,7 @@ export function buildLeaderCandidatesForDate(
   const trajectoryDates = tradingDates.slice(currentDateIndex, currentDateIndex + 7).reverse();
   const rankedCandidates = currentRecords
     .map((record) => {
-      const sector = normalizeSector(record.sector);
+      const sector = normalizeSectorName(record.sector);
       const boards = calculateBoards(record.stockCode, targetDate);
       const sectorCount = sectorCounts.get(sector) ?? 0;
       const limitUpMinutes = timeToMinutes(record.limitUpTime);
@@ -290,7 +289,7 @@ export function buildLeaderCandidatesForDate(
       return {
         rank: 0,
         stockCode: record.stockCode,
-        stockName: record.stockName,
+        stockName: stockNameByCode.get(record.stockCode) ?? record.stockName,
         sector,
         boards,
         sectorCount,
@@ -340,7 +339,7 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): L
   if (!latestDate) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
   }
-  return buildLeaderCandidatesForDate(records, latestDate);
+  return buildLeaderCandidatesForDate(records, latestDate, { stockNameByCode: buildLatestStockNameMap(records) });
 }
 
 /**
@@ -362,6 +361,7 @@ export function buildLeaderCandidateBacktest(
     recordsByDate.set(record.limitUpDate, codes);
   }
 
+  const stockNameByCode = buildLatestStockNameMap(records);
   const rows: LeaderCandidateBacktestRow[] = [];
   // 最后 observationDays 个交易日缺少完整观察结果，主动排除，确保结果位于信号日之后。
   for (let index = 0; index < tradingDates.length - observationDays; index += 1) {
@@ -369,7 +369,7 @@ export function buildLeaderCandidateBacktest(
     const nextDate = tradingDates[index + observationDays];
     const nextDayDate = tradingDates[index + 1];
     // 回测须覆盖T日所有满足规则的主板候选，不能沿用当前页面每日期20只的展示上限。
-    const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null });
+    const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null, stockNameByCode });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
     const phaseContext = context.phaseByDate?.get(date);
 

@@ -23,6 +23,7 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
+import { normalizeSectorName } from '../shared/stockDataNormalization';
 import {
   buildLeaderCandidateBacktest,
   buildLeaderCandidates,
@@ -218,7 +219,7 @@ export async function getDailySectorStats(date: string): Promise<{ sector: strin
 
   const sectorCounts = new Map<string, number>();
   for (const row of rows) {
-    const sector = row.sector?.trim() || '其他';
+    const sector = normalizeSectorName(row.sector);
     sectorCounts.set(sector, (sectorCounts.get(sector) ?? 0) + Number(row.count));
   }
 
@@ -277,7 +278,7 @@ export async function getDailySectorDistribution(): Promise<{ date: string; sect
   const dateMap = new Map<string, Map<string, number>>();
   for (const record of records) {
     const date = record.limitUpDate;
-    const sector = record.sector || '其他';
+    const sector = normalizeSectorName(record.sector);
     
     if (!dateMap.has(date)) {
       dateMap.set(date, new Map());
@@ -651,7 +652,7 @@ export async function getSectorHeatmapData(days: number = 30): Promise<{
   const sectorTotalMap = new Map<string, number>();
 
   for (const record of records) {
-    const sector = record.sector || '其他';
+    const sector = normalizeSectorName(record.sector);
     const date = record.limitUpDate;
 
     // 统计总数
@@ -755,7 +756,7 @@ export async function getConnectionBoardStats(date: string) {
       stockCode: record.stockCode,
       stockName: record.stockName,
       boards,
-      sector: record.sector || '其他',
+      sector: normalizeSectorName(record.sector),
       limitUpTime: record.limitUpTime || '',
       connectionDays: `${boards}天${boards}板`,
     });
