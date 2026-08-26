@@ -10,6 +10,7 @@ import { serveStatic, setupVite } from "./vite";
 import { sdk } from "./sdk";
 import * as db from "../db";
 import { syncCandidateDailyPrices } from "../stockPriceSync";
+import { fetchMarketFactorSnapshot } from "../marketFactors";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -65,34 +66,21 @@ async function startServer() {
       });
       const todayStr = formatter.format(now);
 
-      // 尝试从公开API或模拟财经数据获取当日大盘成交额与两融余额
-      // 若获取失败或非交易日，使用合理的市场均值或上证/深证合计数据兜底，确保幂等入库
-      let turnover = "12500亿";
-      let marginBalance = "15800亿";
-
       try {
-        const response = await fetch("https://hq.sinajs.cn/list=s_sh000001,s_sz390001", {
-          headers: { Referer: "https://finance.sina.com.cn" },
+        const snapshot = await fetchMarketFactorSnapshot(todayStr);
+        const saved = await db.upsertMarketData({
+          dataDate: todayStr,
+          turnover: String(snapshot.turnoverYi),
+          marginBalance: String(snapshot.marginBalanceYi),
+          note: "真实来源：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总",
         });
-        const text = await response.text();
-        // 解析新浪行情或计算综合成交额
-        if (text.includes("sh000001")) {
-          // 示例：从实时行情估算或赋予标准格式
-          turnover = "13200亿";
-          marginBalance = "15950亿";
-        }
-      } catch (fetchErr) {
-        console.warn("[MarketSync] External fetch fallback used:", fetchErr);
+        console.log(`[MarketSync] Synced verified market data for ${todayStr}: turnover=${snapshot.turnoverYi}, marginBalance=${snapshot.marginBalanceYi}`);
+        return res.json({ ok: true, date: todayStr, data: saved, sources: snapshot.sources });
+      } catch (sourceError) {
+        const skipped = sourceError instanceof Error ? sourceError.message : String(sourceError);
+        console.warn(`[MarketSync] Skipped ${todayStr}; verified market sources are unavailable: ${skipped}`);
+        return res.json({ ok: true, skipped, date: todayStr });
       }
-
-      const saved = await db.upsertMarketData({
-        dataDate: todayStr,
-        turnover,
-        marginBalance,
-      });
-
-      console.log(`[MarketSync] Successfully synced market data for ${todayStr}: turnover=${turnover}, marginBalance=${marginBalance}`);
-      return res.json({ ok: true, date: todayStr, data: saved });
     } catch (error: any) {
       console.error("[MarketSync] Error in scheduled sync:", error);
       return res.status(500).json({

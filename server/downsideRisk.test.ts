@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDownsideRiskResearch } from "./downsideRisk";
+import { buildDownsideRiskResearch, scoreDownsideRiskSignal } from "./downsideRisk";
 import type { LeaderCandidateBacktestRow } from "./leaderCandidates";
 import { simulateRealisticTPlus1ToTPlus2 } from "./realisticBacktest";
 
@@ -247,7 +247,7 @@ describe("buildDownsideRiskResearch", () => {
     expect(attribution.riskPenaltyOnlyFilledCount + attribution.commonFilledCount).toBe(riskPenaltyFilled);
     expect(attribution.commonFilledDifferentReturnCount).toBe(0);
     expect(attribution.autoTunedSignalCount + attribution.fallbackWeightSignalCount).toBe(rows.length);
-    expect(result.factorAblations).toHaveLength(8);
+    expect(result.factorAblations).toHaveLength(11);
     expect(result.factorAblations.every((factor) => Number.isFinite(factor.fullCycle.returnDelta) && Number.isFinite(factor.walkForward.drawdownDelta))).toBe(true);
     const noContributionFactor = result.factorAblations.find((factor) => factor.key === "candidateScore")!;
     expect(noContributionFactor).toMatchObject({ affectedSignalCount: 0, fullCycle: { returnDelta: 0, drawdownDelta: 0 }, walkForward: { returnDelta: 0, drawdownDelta: 0 } });
@@ -266,5 +266,26 @@ describe("buildDownsideRiskResearch", () => {
     expect(changed.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution])).toEqual(
       baseline.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution]),
     );
+  });
+
+  it("市场涨停数、沪深成交额和两融偏离仅使用信号日及此前已验证数据，缺失或未验证值不计分", () => {
+    const signal = row({ date: "2026-08-18" });
+    const marketFactorsByDate = new Map([
+      ["2026-08-11", { limitUpCount: 60, turnoverYi: 18000, marginBalanceYi: 10000, sourceIsVerified: true }],
+      ["2026-08-12", { limitUpCount: 60, turnoverYi: 18000, marginBalanceYi: 10000, sourceIsVerified: true }],
+      ["2026-08-13", { limitUpCount: 60, turnoverYi: 18000, marginBalanceYi: 10000, sourceIsVerified: true }],
+      ["2026-08-14", { limitUpCount: 60, turnoverYi: 18000, marginBalanceYi: 10000, sourceIsVerified: true }],
+      ["2026-08-15", { limitUpCount: 60, turnoverYi: 18000, marginBalanceYi: 10000, sourceIsVerified: true }],
+      ["2026-08-18", { limitUpCount: 35, turnoverYi: 9000, marginBalanceYi: 10300, sourceIsVerified: true }],
+      ["2026-08-19", { limitUpCount: 200, turnoverYi: 50000, marginBalanceYi: 20000, sourceIsVerified: true }],
+    ]);
+    const context = { marketFactorsByDate };
+    expect(scoreDownsideRiskSignal(signal, context).riskScore).toBe(25);
+
+    marketFactorsByDate.set("2026-08-19", { limitUpCount: 1, turnoverYi: 1, marginBalanceYi: 1, sourceIsVerified: true });
+    expect(scoreDownsideRiskSignal(signal, context).riskScore).toBe(25);
+
+    const unverified = new Map([["2026-08-18", { limitUpCount: 35, turnoverYi: 9000, marginBalanceYi: 10300, sourceIsVerified: false }]]);
+    expect(scoreDownsideRiskSignal(signal, { marketFactorsByDate: unverified }).riskScore).toBe(17);
   });
 });

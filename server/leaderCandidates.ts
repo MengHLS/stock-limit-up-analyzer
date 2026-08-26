@@ -136,6 +136,7 @@ export type LeaderCandidateBacktestResult = {
   realisticSimulation: RealisticBacktestResult;
   downsideRiskResearch: DownsideRiskResearchResult;
   dailyPriceCoverage: LeaderCandidateDailyPriceCoverage;
+  marketFactorCoverage: LeaderCandidateMarketFactorCoverage;
 };
 
 export type LeaderCandidateBacktestOptions = {
@@ -157,8 +158,30 @@ export type LeaderCandidateBacktestContext = {
   phaseByDate?: Map<string, { phase: SentimentCyclePhase; maxBoards: number }>;
   priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
   dailyPriceCoverage?: LeaderCandidateDailyPriceCoverage;
+  /** 每个候选仅读取自身信号日对应的市场记录，不能以T+1或后续记录代替。 */
+  marketFactorsByDate?: Map<string, LeaderCandidateMarketFactors>;
   /** 由日线行情提供的完整实际交易日序列；价格回测不使用自然日推算。 */
   tradingDates?: string[];
+};
+
+export type LeaderCandidateMarketFactors = {
+  /** 项目已录入的当日涨停记录数，并非交易所官方口径。 */
+  limitUpCount: number | null;
+  /** 仅接受Tushare daily聚合得到的沪深两市成交额（亿元）。 */
+  turnoverYi: number | null;
+  /** 仅接受上交所和深交所公开文件汇总得到的两融余额（亿元）。 */
+  marginBalanceYi: number | null;
+  sourceIsVerified: boolean;
+};
+
+export type LeaderCandidateMarketFactorCoverage = {
+  signalDateCount: number;
+  limitUpCountDateCount: number;
+  turnoverDateCount: number;
+  marginBalanceDateCount: number;
+  verifiedMarketDataDateCount: number;
+  startDate: string | null;
+  endDate: string | null;
 };
 
 export type LeaderCandidateDailyPrice = {
@@ -212,6 +235,7 @@ type LeaderCandidateBuildOptions = {
   stockNameByCode?: Map<string, string>;
   phaseByDate?: Map<string, { phase: SentimentCyclePhase; maxBoards: number }>;
   priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
+  marketFactorsByDate?: Map<string, LeaderCandidateMarketFactors>;
   riskPenaltyWeight?: number;
 };
 
@@ -413,7 +437,7 @@ export function buildLeaderCandidatesForDate(
         tPlus1CloseToTPlus2CloseSuccess: null,
         phase: signalPhase?.phase ?? null,
         maxBoards: signalPhase?.maxBoards ?? null,
-      }, { priceByStockDate: options.priceByStockDate });
+      }, { priceByStockDate: options.priceByStockDate, marketFactorsByDate: options.marketFactorsByDate });
       const riskPenalty = Number((risk.riskScore * (options.riskPenaltyWeight ?? defaultDownsideRiskPenaltyWeight)).toFixed(2));
       const netScore = Number(Math.max(0, score - riskPenalty).toFixed(2));
 
@@ -548,6 +572,7 @@ export function buildLeaderCandidateBacktest(
       stockNameByCode,
       phaseByDate: context.phaseByDate,
       priceByStockDate: context.priceByStockDate,
+      marketFactorsByDate: context.marketFactorsByDate,
     });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
     const phaseContext = context.phaseByDate?.get(date);
@@ -664,7 +689,19 @@ export function buildLeaderCandidateBacktest(
   const downsideRiskResearch = buildDownsideRiskResearch(appliedRows, options.downsideRisk, options.realistic, {
     priceByStockDate: context.priceByStockDate,
     tradingDates: marketTradingDates,
+    marketFactorsByDate: context.marketFactorsByDate,
   });
+  const signalDates = Array.from(new Set(appliedRows.map((row) => row.date))).sort();
+  const marketFactorRows = signalDates.map((date) => context.marketFactorsByDate?.get(date));
+  const marketFactorCoverage: LeaderCandidateMarketFactorCoverage = {
+    signalDateCount: signalDates.length,
+    limitUpCountDateCount: marketFactorRows.filter((item) => item?.limitUpCount !== null && item?.limitUpCount !== undefined).length,
+    turnoverDateCount: marketFactorRows.filter((item) => item?.turnoverYi !== null && item?.turnoverYi !== undefined).length,
+    marginBalanceDateCount: marketFactorRows.filter((item) => item?.marginBalanceYi !== null && item?.marginBalanceYi !== undefined).length,
+    verifiedMarketDataDateCount: marketFactorRows.filter((item) => item?.sourceIsVerified).length,
+    startDate: signalDates[0] ?? null,
+    endDate: signalDates.at(-1) ?? null,
+  };
   const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
@@ -712,5 +749,6 @@ export function buildLeaderCandidateBacktest(
     realisticSimulation,
     downsideRiskResearch,
     dailyPriceCoverage: context.dailyPriceCoverage ?? { rowCount: 0, stockCount: 0, startDate: null, endDate: null, lowPriceCount: 0, amountCount: 0 },
+    marketFactorCoverage,
   };
 }

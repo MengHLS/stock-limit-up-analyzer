@@ -79,6 +79,16 @@ describe("独立组合资金回测页面", () => {
       "全样本原始收益（未扣风险分）",
       "样本外风险扣分收益",
       "dailyPriceCoverage",
+      "data-market-factor-coverage",
+      "市场因子数据覆盖",
+      "marketFactorCoverage",
+      "项目涨停数覆盖",
+      "已验证市场数据",
+      "沪深成交额覆盖",
+      "两融余额覆盖",
+      "Tushare daily 聚合",
+      "零贡献",
+      "marginBalanceComparableSampleSize",
       "滚动样本外窗口",
       "低价覆盖",
       "资金与仓位审计",
@@ -121,6 +131,9 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("riskContributions");
     expect(researchSource).toContain("相同资金、成本、仓位、入场和唯一退出约束连续回测");
     expect(researchSource).toContain("日线成交额");
+    expect(researchSource).toContain("项目涨停数");
+    expect(researchSource).toContain("沪深两市成交额");
+    expect(researchSource).toContain("两融余额偏离");
     expect(pageSource).toContain("date >= startDate");
     expect(pageSource).toContain("downsideRiskResearch?.fullCycle.startDate");
     expect(styleSource).toContain("[data-trade-difference-table] > div:last-child");

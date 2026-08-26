@@ -33,6 +33,7 @@ import {
   type LeaderCandidateDailyPriceCoverage,
 } from './leaderCandidates';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
+import { parseStoredMarketYi } from './marketFactors';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -495,6 +496,58 @@ export async function getAllMarketData(): Promise<MarketData[]> {
 
   return await db.select().from(marketData)
     .orderBy(desc(marketData.dataDate));
+}
+
+/** 回测所需的信号日市场因子原始行；涨停数为项目已录入的limit_up_records逐日记录数。 */
+export type LeaderCandidateMarketFactorRow = {
+  dataDate: string;
+  limitUpCount: number;
+  turnover: string | null;
+  marginBalance: string | null;
+  note: string | null;
+};
+
+export async function getLeaderCandidateMarketFactorRows(): Promise<LeaderCandidateMarketFactorRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const [limitUpCounts, marketRows] = await Promise.all([
+    db.select({
+      dataDate: limitUpRecords.limitUpDate,
+      limitUpCount: count(),
+    }).from(limitUpRecords).groupBy(limitUpRecords.limitUpDate),
+    db.select({
+      dataDate: marketData.dataDate,
+      turnover: marketData.turnover,
+      marginBalance: marketData.marginBalance,
+      note: marketData.note,
+    }).from(marketData),
+  ]);
+  const marketByDate = new Map(marketRows.map((row) => [row.dataDate, row]));
+  return limitUpCounts.map((row) => {
+    const market = marketByDate.get(row.dataDate);
+    return {
+      dataDate: row.dataDate,
+      limitUpCount: Number(row.limitUpCount),
+      turnover: market?.turnover ?? null,
+      marginBalance: market?.marginBalance ?? null,
+      note: market?.note ?? null,
+    };
+  });
+}
+
+function buildVerifiedMarketFactorMap(rows: LeaderCandidateMarketFactorRow[]) {
+  return new Map(rows.map((row) => {
+    const sourceIsVerified = Boolean(
+      row.note?.includes("真实来源：Tushare daily")
+      && row.note.includes("上交所/深交所公开两融汇总"),
+    );
+    return [row.dataDate, {
+      limitUpCount: Number.isFinite(row.limitUpCount) && row.limitUpCount > 0 ? row.limitUpCount : null,
+      turnoverYi: sourceIsVerified ? parseStoredMarketYi(row.turnover) : null,
+      marginBalanceYi: sourceIsVerified ? parseStoredMarketYi(row.marginBalance) : null,
+      sourceIsVerified,
+    }];
+  }));
 }
 
 /** 获取最近N天的大盘数据 */
@@ -1243,7 +1296,8 @@ export async function getLeaderCandidates() {
     amount: stockDailyPrices.amount,
   }).from(stockDailyPrices).where(eq(stockDailyPrices.tradeDate, latestDate));
   const priceByStockDate = buildLeaderCandidateDailyPriceMap(signalDayPrices);
-  return buildLeaderCandidates(records, { phaseByDate, priceByStockDate });
+  const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
+  return buildLeaderCandidates(records, { phaseByDate, priceByStockDate, marketFactorsByDate });
 }
 
 /** 获取基于历史候选池的T+1连板延续回测结果。 */
@@ -1265,6 +1319,7 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
   const priceByStockDate = await getLeaderCandidateDailyPriceMap();
   const dailyPriceCoverage = await getLeaderCandidateDailyPriceCoverage();
+  const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
   const tradingDates = Array.from(new Set(Array.from(priceByStockDate.keys()).map((key) => key.split("::").at(-1)!))).sort();
-  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage });
+  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage, marketFactorsByDate });
 }
