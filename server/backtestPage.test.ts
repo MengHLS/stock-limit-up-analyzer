@@ -23,14 +23,20 @@ describe("独立组合资金回测页面", () => {
       "T+1开盘预期过滤",
       "分仓策略",
       "第二日卖出策略",
+      "动态回撤止盈",
       "资金与仓位审计",
       "全部模拟订单",
       "minimumExpectedOpenChangePercent",
       "oneWordLimitDownSellProbability",
       "一字跌停保守成交概率",
       "exitStrategy",
+      "trailingProfitActivationPercent",
+      "trailingDrawdownPercent",
     ]) {
       expect(pageSource).toContain(requiredText);
     }
+    const candidateSource = readFileSync(resolve(projectRoot, "client/src/pages/LeaderCandidates.tsx"), "utf8");
+    expect(candidateSource).not.toContain("trailingProfitActivationPercent");
+    expect(candidateSource).not.toContain("trailingDrawdownPercent");
   });
 });
