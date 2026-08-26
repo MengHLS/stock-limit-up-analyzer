@@ -9,8 +9,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { trpc } from "@/lib/trpc";
 import { getLoginUrl } from "@/const";
 import { normalizeLimitUpTime } from "@shared/limitUpTime";
-import { 
-  Upload as UploadIcon, 
+import { mapStoredLimitUpRecords, type UploadRefreshStock } from "@/lib/uploadRefresh";
+import {
+  Upload as UploadIcon,
   Image as ImageIcon,
   Loader2,
   CheckCircle2,
@@ -20,22 +21,16 @@ import {
   Sparkles,
   FileImage,
   Trash2,
-  Images
+  Images,
+  RefreshCw,
+  Database,
+  AlertCircle,
 } from "lucide-react";
 import { useState, useCallback, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { toast } from "sonner";
 
-interface RecognizedStock {
-  stockCode: string;
-  stockName: string;
-  limitUpTime: string;
-  boardCount: string;
-  circulationValue: string;
-  turnover: string;
-  sector: string;
-  keywords: string;
-}
+type RecognizedStock = UploadRefreshStock;
 
 interface FileItem {
   id: string;
@@ -67,6 +62,32 @@ export default function UploadPage() {
 
   const uploadMutation = trpc.image.upload.useMutation();
   const recognizeMutation = trpc.image.recognize.useMutation();
+  const utils = trpc.useUtils();
+
+  const [uploadedDateStocks, setUploadedDateStocks] = useState<RecognizedStock[]>([]);
+  const [refreshedDate, setRefreshedDate] = useState<string | null>(null);
+  const [dateRefreshState, setDateRefreshState] = useState<"idle" | "loading" | "success" | "empty" | "error">("idle");
+  const [dateRefreshError, setDateRefreshError] = useState<string | null>(null);
+
+  const refreshUploadedDateData = useCallback(async (date: string): Promise<number | null> => {
+    setRefreshedDate(date);
+    setDateRefreshState("loading");
+    setDateRefreshError(null);
+
+    try {
+      const records = await utils.limitUp.getByDate.fetch({ date });
+      const mappedRecords = mapStoredLimitUpRecords(records);
+      setUploadedDateStocks(mappedRecords);
+      setDateRefreshState(mappedRecords.length > 0 ? "success" : "empty");
+      return mappedRecords.length;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "按日期获取数据失败";
+      setUploadedDateStocks([]);
+      setDateRefreshError(message);
+      setDateRefreshState("error");
+      return null;
+    }
+  }, [utils]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -103,6 +124,10 @@ export default function UploadPage() {
       setFiles(prev => [...prev, ...newFiles]);
       setRecognizedStocks([]);
       setTotalRecognized(0);
+      setUploadedDateStocks([]);
+      setRefreshedDate(null);
+      setDateRefreshState("idle");
+      setDateRefreshError(null);
     }
 
     // 清空input以便重复选择相同文件
@@ -126,6 +151,10 @@ export default function UploadPage() {
     setFiles([]);
     setRecognizedStocks([]);
     setTotalRecognized(0);
+    setUploadedDateStocks([]);
+    setRefreshedDate(null);
+    setDateRefreshState("idle");
+    setDateRefreshError(null);
   }, [files]);
 
   const processFile = async (fileItem: FileItem): Promise<RecognizedStock[]> => {
@@ -225,14 +254,28 @@ export default function UploadPage() {
 
     setRecognizedStocks(allStocks);
     setTotalRecognized(allStocks.length);
+
+    let refreshedCount: number | null = null;
+    if (successCount > 0) {
+      // 所有图片保存完成后，只按本次上传日期重新查询一次，避免多图上传产生重复请求。
+      refreshedCount = await refreshUploadedDateData(limitUpDate);
+    }
+
     setIsProcessing(false);
 
     if (successCount > 0) {
       toast.success(`处理完成，共识别 ${allStocks.length} 只股票`);
+      if (refreshedCount === null) {
+        toast.info(`识别数据已保存，但 ${limitUpDate} 的自动刷新失败，请稍后重试`);
+      } else if (refreshedCount === 0) {
+        toast.info(`已完成识别，但 ${limitUpDate} 暂无可展示记录`);
+      } else {
+        toast.success(`已自动加载 ${limitUpDate} 的 ${refreshedCount} 条数据库记录`);
+      }
     } else {
       toast.error('所有图片处理失败');
     }
-  }, [files, limitUpDate, processFile]);
+  }, [files, limitUpDate, processFile, refreshUploadedDateData]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -540,8 +583,121 @@ export default function UploadPage() {
               </CardContent>
             </Card>
           )}
+
+          {dateRefreshState !== "idle" && refreshedDate && (
+            <Card data-upload-date-refresh>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  {dateRefreshState === "error" ? (
+                    <AlertCircle className="h-5 w-5 text-destructive" />
+                  ) : dateRefreshState === "loading" ? (
+                    <RefreshCw className="h-5 w-5 animate-spin text-primary" />
+                  ) : (
+                    <Database className="h-5 w-5 text-primary" />
+                  )}
+                  上传日期数据
+                  {dateRefreshState === "success" && (
+                    <Badge variant="secondary">{uploadedDateStocks.length} 条</Badge>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  识别入库后已自动重新获取 {refreshedDate} 的数据库记录。
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {dateRefreshState === "loading" && (
+                  <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在加载 {refreshedDate} 的最新数据...
+                  </div>
+                )}
+                {dateRefreshState === "error" && (
+                  <div className="flex items-center justify-between gap-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                    <span className="text-destructive">
+                      自动刷新失败：{dateRefreshError || "暂时无法获取该日期数据"}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void refreshUploadedDateData(refreshedDate)}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      重试
+                    </Button>
+                  </div>
+                )}
+                {dateRefreshState === "empty" && (
+                  <div className="rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground">
+                    识别已完成，但 {refreshedDate} 当前没有可展示的数据库记录。
+                  </div>
+                )}
+                {dateRefreshState === "success" && (
+                  <>
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                      <span>以下为 {refreshedDate} 重新查询到的完整记录，包含本次上传前已有数据。</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void refreshUploadedDateData(refreshedDate)}
+                      >
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        再次刷新
+                      </Button>
+                    </div>
+                    <RefreshedDateTable stocks={uploadedDateStocks} />
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </main>
     </div>
+  );
+}
+
+function RefreshedDateTable({ stocks }: { stocks: RecognizedStock[] }) {
+  return (
+    <ScrollArea className="h-[400px]">
+      <div className="rounded-lg border overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="px-4 py-3 text-left font-medium">股票</th>
+              <th className="px-4 py-3 text-left font-medium">涨停时间</th>
+              <th className="px-4 py-3 text-left font-medium">板数</th>
+              <th className="px-4 py-3 text-left font-medium">题材</th>
+              <th className="px-4 py-3 text-left font-medium">关键词</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {stocks.map((stock, index) => (
+              <tr key={`${stock.stockCode}-${index}`} className="hover:bg-muted/30 transition-colors">
+                <td className="px-4 py-3">
+                  <div>
+                    <span className="font-medium">{stock.stockName}</span>
+                    <span className="text-muted-foreground ml-2 text-xs">{stock.stockCode}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {normalizeLimitUpTime(stock.limitUpTime) || '-'}
+                </td>
+                <td className="px-4 py-3">
+                  {stock.boardCount ? <Badge variant="outline" className="text-xs">{stock.boardCount}</Badge> : '-'}
+                </td>
+                <td className="px-4 py-3">
+                  {stock.sector ? <Badge variant="secondary" className="text-xs">{stock.sector}</Badge> : '-'}
+                </td>
+                <td className="px-4 py-3 max-w-xs">
+                  <p className="text-xs text-muted-foreground truncate" title={stock.keywords}>
+                    {stock.keywords || '-'}
+                  </p>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </ScrollArea>
   );
 }
