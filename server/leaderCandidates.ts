@@ -1,7 +1,7 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
 import { buildDownsideRiskResearch, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskOptions, type DownsideRiskResearchResult } from "./downsideRisk";
-import { simulateRealisticTPlus1ToTPlus2, type ExitStrategy, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
+import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
 
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
@@ -134,16 +134,8 @@ export type LeaderCandidateBacktestResult = {
   phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
   realisticSimulation: RealisticBacktestResult;
-  exitStrategyComparison: LeaderCandidateExitStrategyComparisonItem[];
   downsideRiskResearch: DownsideRiskResearchResult;
   dailyPriceCoverage: LeaderCandidateDailyPriceCoverage;
-};
-
-export type LeaderCandidateExitStrategyComparisonItem = {
-  exitStrategy: ExitStrategy;
-  label: string;
-  description: string;
-  realisticSimulation: RealisticBacktestResult;
 };
 
 export type LeaderCandidateBacktestOptions = {
@@ -193,29 +185,6 @@ export type LeaderCandidateDailyPriceRow = {
   lowPrice?: string | number | null;
   amount?: string | number | null;
 };
-
-const exitStrategyComparisonDefinitions: Array<Omit<LeaderCandidateExitStrategyComparisonItem, "realisticSimulation">> = [
-  { exitStrategy: "t2Close", label: "固定T+2收盘", description: "在第二个后续实际交易日收盘出清，作为一致的基准策略。" },
-  { exitStrategy: "trailingHold", label: "动态回撤止盈", description: "T+2起保留开盘止损；达到启动浮盈后，仅在收盘从已知高点回撤至阈值才出清。" },
-  { exitStrategy: "riskManagedHold", label: "动态止盈、止损与强势续持", description: "在动态回撤止盈和开盘止损基础上，未启动止盈时仅在强势收盘条件满足时续持。" },
-];
-
-/** 三种退出方式共享候选、入场、费用、仓位和成交限制，仅替换退出规则。 */
-export function buildExitStrategyComparison(
-  rows: LeaderCandidateBacktestRow[],
-  realisticOptions: RealisticBacktestOptions | undefined,
-  context: LeaderCandidateBacktestContext,
-): LeaderCandidateExitStrategyComparisonItem[] {
-  return exitStrategyComparisonDefinitions.map((definition) => ({
-    ...definition,
-    realisticSimulation: simulateRealisticTPlus1ToTPlus2(
-      rows,
-      { ...(realisticOptions ?? {}), exitStrategy: definition.exitStrategy },
-      context.priceByStockDate,
-      context.tradingDates,
-    ),
-  }));
-}
 
 /** 保留开盘或收盘任一有效价格；只有两项都无效时才丢弃该交易日记录。 */
 export function buildLeaderCandidateDailyPriceMap(rows: LeaderCandidateDailyPriceRow[]): Map<string, LeaderCandidateDailyPrice> {
@@ -691,10 +660,6 @@ export function buildLeaderCandidateBacktest(
     context.priceByStockDate,
     marketTradingDates,
   );
-  const exitStrategyComparison = buildExitStrategyComparison(appliedRows, options.realistic, {
-    priceByStockDate: context.priceByStockDate,
-    tradingDates: marketTradingDates,
-  });
   // 风险研究使用全历史候选生成多个滚动窗口；每个窗口的验证段严格位于前置训练段之后，避免固定70/30切分限制可验证样本量。
   const downsideRiskResearch = buildDownsideRiskResearch(appliedRows, options.downsideRisk, options.realistic, {
     priceByStockDate: context.priceByStockDate,
@@ -745,7 +710,6 @@ export function buildLeaderCandidateBacktest(
     phaseFunnel,
     historicalRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score),
     realisticSimulation,
-    exitStrategyComparison,
     downsideRiskResearch,
     dailyPriceCoverage: context.dailyPriceCoverage ?? { rowCount: 0, stockCount: 0, startDate: null, endDate: null, lowPriceCount: 0, amountCount: 0 },
   };

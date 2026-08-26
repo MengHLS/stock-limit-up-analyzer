@@ -45,6 +45,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
       lotSize: 100,
       blockLimitUpBuys: false,
       blockLimitDownSells: false,
+      maxHoldingDays: 2,
     });
 
     expect(result.filledCount).toBe(1);
@@ -140,14 +141,14 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
   it("按实际交易日而非自然日跨周末与节假日出清", () => {
     const acrossWeekend = simulateRealisticTPlus1ToTPlus2([
       row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25" }),
-    ], { initialCapital: 100000, maxPositions: 1 });
+    ], { initialCapital: 100000, maxPositions: 1, maxHoldingDays: 2 });
     const acrossHoliday = simulateRealisticTPlus1ToTPlus2([
       row({ stockCode: "600002.SH", date: "2026-10-01", nextDate: "2026-10-09", nextDayDate: "2026-10-09", secondDayDate: "2026-10-12" }),
-    ], { initialCapital: 100000, maxPositions: 1 });
+    ], { initialCapital: 100000, maxPositions: 1, maxHoldingDays: 2 });
 
-    expect(acrossWeekend.trades[0]).toMatchObject({ entryDate: "2026-08-24", exitDate: "2026-08-25", netPnl: expect.any(Number), reason: null });
+    expect(acrossWeekend.trades[0]).toMatchObject({ entryDate: "2026-08-24", exitDate: "2026-08-25", netPnl: expect.any(Number), reason: "达到最多续持2个交易日" });
     expect(acrossWeekend.equityCurve.map((point) => point.date)).toEqual(["2026-08-24", "2026-08-25"]);
-    expect(acrossHoliday.trades[0]).toMatchObject({ entryDate: "2026-10-09", exitDate: "2026-10-12", netPnl: expect.any(Number), reason: null });
+    expect(acrossHoliday.trades[0]).toMatchObject({ entryDate: "2026-10-09", exitDate: "2026-10-12", netPnl: expect.any(Number), reason: "达到最多续持2个交易日" });
     expect(acrossHoliday.equityCurve.map((point) => point.date)).toEqual(["2026-10-09", "2026-10-12"]);
   });
 
@@ -173,7 +174,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     ], { initialCapital: 100000, maxPositions: 1, blockLimitDownSells: true }, prices, ["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"]);
 
     expect(result).toMatchObject({ blockedSellCount: 2, completedCount: 1, openPositionCount: 0 });
-    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-27", netPnl: expect.any(Number), reason: "跌停后延期至实际交易日出清" });
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-27", netPnl: expect.any(Number), reason: expect.stringContaining("开盘触发止损") });
     expect(result.equityCurve.map((point) => point.date)).toEqual(["2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27"]);
   });
 
@@ -202,7 +203,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     ], { initialCapital: 100000, maxPositions: 1, blockLimitDownSells: true }, prices, ["2026-08-24", "2026-08-25"]);
 
     expect(result).toMatchObject({ blockedSellCount: 0, completedCount: 1, openPositionCount: 0 });
-    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-25", netPnl: expect.any(Number), reason: null });
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-25", netPnl: expect.any(Number), reason: expect.stringContaining("开盘触发止损") });
   });
 
   it("一字跌停保守成交概率支持 0%、可复现的中间概率与 100% 三种情景", () => {

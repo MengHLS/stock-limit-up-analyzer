@@ -74,6 +74,7 @@ describe("buildDownsideRiskResearch", () => {
     expect(result.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter"]);
     expect(result.experiments.find((experiment) => experiment.key === "hardFilter")).toMatchObject({ inputCandidateCount: 1, excludedCandidateCount: 1 });
     expect(result.experiments.every((experiment) => experiment.realisticSimulation.assumptions.initialCapital === 100000)).toBe(true);
+    expect(result.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
   });
 
   it("观察期不完整时不生成下行标签，避免用不完整的未来路径比较风险分层", () => {

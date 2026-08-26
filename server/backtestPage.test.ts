@@ -22,14 +22,8 @@ describe("独立组合资金回测页面", () => {
     for (const requiredText of [
       "T+1开盘预期过滤",
       "分仓策略",
-      "第二日卖出策略",
-      "动态回撤止盈",
-      "退出策略对比实验台",
-      "固定T+2收盘",
-      "动态止盈、止损与强势续持",
+      "唯一退出策略：动态止盈、止损与强势续持",
       "累计收益率",
-      "exitStrategyComparison",
-      "comparisonCurve",
       "下行风险评分实验框架",
       "下行风险研究参数",
       "featureMatrix",
@@ -46,12 +40,16 @@ describe("独立组合资金回测页面", () => {
       "minimumExpectedOpenChangePercent",
       "oneWordLimitDownSellProbability",
       "一字跌停保守成交概率",
-      "exitStrategy",
       "trailingProfitActivationPercent",
       "trailingDrawdownPercent",
     ]) {
       expect(pageSource).toContain(requiredText);
     }
+    expect(pageSource).not.toContain("退出策略对比实验台");
+    expect(pageSource).not.toContain("固定T+2收盘");
+    expect(pageSource).not.toContain("exitStrategyComparison");
+    expect(pageSource).not.toContain("comparisonCurve");
+    expect(pageSource).not.toContain("exitStrategy:");
     const candidateSource = readFileSync(resolve(projectRoot, "client/src/pages/LeaderCandidates.tsx"), "utf8");
     const researchSource = readFileSync(resolve(projectRoot, "server/downsideRisk.ts"), "utf8");
     expect(candidateSource).not.toContain("trailingProfitActivationPercent");

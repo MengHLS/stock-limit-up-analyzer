@@ -1,7 +1,7 @@
 import type { LeaderCandidateBacktestRow, LeaderCandidateDailyPrice } from "./leaderCandidates";
 
 export type PositionSizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
-export type ExitStrategy = "t2Close" | "trailingHold" | "riskManagedHold";
+export type ExitStrategy = "riskManagedHold";
 
 export type RealisticBacktestOptions = {
   initialCapital?: number;
@@ -17,6 +17,7 @@ export type RealisticBacktestOptions = {
   oneWordLimitDownSellProbability?: number;
   positionSizingStrategy?: PositionSizingStrategy;
   fixedPositionPercent?: number;
+  /** 兼容旧调用；仅接受唯一的风险管理退出策略，运行时始终固定为该策略。 */
   exitStrategy?: ExitStrategy;
   trailingProfitActivationPercent?: number;
   trailingDrawdownPercent?: number;
@@ -163,7 +164,7 @@ export function simulateRealisticTPlus1ToTPlus2(
   const oneWordLimitDownSellProbability = Math.min(100, Math.max(0, options.oneWordLimitDownSellProbability ?? 0));
   const positionSizingStrategy = options.positionSizingStrategy ?? "equal";
   const fixedPositionPercent = Math.min(100, Math.max(1, options.fixedPositionPercent ?? 20));
-  const exitStrategy = options.exitStrategy ?? "t2Close";
+  const exitStrategy: ExitStrategy = "riskManagedHold";
   const trailingProfitActivationPercent = Math.min(100, Math.max(0, options.trailingProfitActivationPercent ?? 6));
   const trailingDrawdownPercent = Math.min(100, Math.max(0, options.trailingDrawdownPercent ?? 3));
   const stopLossPercent = Math.min(100, Math.max(0, options.stopLossPercent ?? 5));
@@ -239,7 +240,7 @@ export function simulateRealisticTPlus1ToTPlus2(
   for (const date of eventDates) {
     // 开盘：先处理已有仓位的开盘止损，再处理新买入；同日收盘出清资金不可提前参与开盘买入。
     for (const [key, position] of Array.from(positions.entries())) {
-      if (exitStrategy === "t2Close" || !position.row.secondDayDate || date < position.row.secondDayDate) continue;
+      if (!position.row.secondDayDate || date < position.row.secondDayDate) continue;
       const marketOpenPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.openPrice ?? null;
       if (!validPrice(marketOpenPrice)) continue;
       const openReturnPercent = ((marketOpenPrice - position.entryPrice) / position.entryPrice) * 100;
@@ -408,36 +409,32 @@ export function simulateRealisticTPlus1ToTPlus2(
         continue;
       }
       let exitTriggerReason: string | null = null;
-      if (exitStrategy !== "t2Close") {
-        const peakClosePrice = position.highestClosePrice;
-        const peakReturnPercent = ((peakClosePrice - position.entryPrice) / position.entryPrice) * 100;
-        const drawdownFromPeakPercent = peakClosePrice === 0 ? 0 : ((exitPrice - peakClosePrice) / peakClosePrice) * 100;
-        const trailingArmed = peakReturnPercent >= trailingProfitActivationPercent;
-        if (closeReturnPercent <= -stopLossPercent) {
-          exitTriggerReason = `收盘触发止损（${round(closeReturnPercent)}% ≤ -${stopLossPercent}%）`;
-        } else if (trailingArmed && drawdownFromPeakPercent < 0 && drawdownFromPeakPercent <= -trailingDrawdownPercent) {
-          exitTriggerReason = `动态回撤止盈（峰值收益${round(peakReturnPercent)}%，回撤${round(drawdownFromPeakPercent)}% ≤ -${trailingDrawdownPercent}%）`;
+      const peakClosePrice = position.highestClosePrice;
+      const peakReturnPercent = ((peakClosePrice - position.entryPrice) / position.entryPrice) * 100;
+      const drawdownFromPeakPercent = peakClosePrice === 0 ? 0 : ((exitPrice - peakClosePrice) / peakClosePrice) * 100;
+      const trailingArmed = peakReturnPercent >= trailingProfitActivationPercent;
+      if (closeReturnPercent <= -stopLossPercent) {
+        exitTriggerReason = `收盘触发止损（${round(closeReturnPercent)}% ≤ -${stopLossPercent}%）`;
+      } else if (trailingArmed && drawdownFromPeakPercent < 0 && drawdownFromPeakPercent <= -trailingDrawdownPercent) {
+        exitTriggerReason = `动态回撤止盈（峰值收益${round(peakReturnPercent)}%，回撤${round(drawdownFromPeakPercent)}% ≤ -${trailingDrawdownPercent}%）`;
+      } else {
+        const strongClose = closeReturnPercent >= strongHoldMinReturn
+          && (!validPrice(position.previousClosePrice) || exitPrice >= position.previousClosePrice);
+        if (holdingDays >= maxHoldingDays) {
+          exitTriggerReason = `达到最多续持${maxHoldingDays}个交易日`;
+        } else if (!trailingArmed && !strongClose) {
+          exitTriggerReason = date === position.row.secondDayDate
+            ? "T+2收盘未满足强势续持条件"
+            : "后续收盘未满足强势续持条件";
         } else {
-          const strongClose = closeReturnPercent >= strongHoldMinReturn
-            && (!validPrice(position.previousClosePrice) || exitPrice >= position.previousClosePrice);
-          if (holdingDays >= maxHoldingDays) {
-            exitTriggerReason = `达到最多续持${maxHoldingDays}个交易日`;
-          } else if (exitStrategy === "riskManagedHold" && !trailingArmed && !strongClose) {
-            exitTriggerReason = date === position.row.secondDayDate
-              ? "T+2收盘未满足强势续持条件"
-              : "后续收盘未满足强势续持条件";
-          } else {
-            position.previousClosePrice = exitPrice;
-            position.highestClosePrice = peakClosePrice;
-            if (trade) {
-              trade.reason = exitStrategy === "trailingHold"
-                ? `动态回撤止盈续持：峰值收益${round(peakReturnPercent)}%，当前回撤${round(drawdownFromPeakPercent)}%，继续持有`
-                : trailingArmed
-                ? `动态止盈已启动：峰值收益${round(peakReturnPercent)}%，当前回撤${round(drawdownFromPeakPercent)}%，继续持有`
-                : `满足强势续持：收盘收益${round(closeReturnPercent)}%，收盘不低于前收；继续持有`;
-            }
-            continue;
+          position.previousClosePrice = exitPrice;
+          position.highestClosePrice = peakClosePrice;
+          if (trade) {
+            trade.reason = trailingArmed
+              ? `动态止盈已启动：峰值收益${round(peakReturnPercent)}%，当前回撤${round(drawdownFromPeakPercent)}%，继续持有`
+              : `满足强势续持：收盘收益${round(closeReturnPercent)}%，收盘不低于前收；继续持有`;
           }
+          continue;
         }
       }
       settlePosition(
