@@ -70,6 +70,7 @@ export default function LeaderCandidatesPage() {
   });
 
   const candidates = data?.candidates ?? [];
+  const allScoredStocks = data?.allScoredStocks ?? [];
   const strongSectors = data?.strongSectors ?? [];
   const threshold = backtest?.appliedMinScore ?? null;
   const candidatesAtThreshold = threshold === null ? candidates : candidates.filter((candidate) => candidate.score >= threshold);
@@ -86,6 +87,20 @@ export default function LeaderCandidatesPage() {
     }
     return true;
   });
+  const displayedAllScoredStocks = allScoredStocks.filter((stock) => {
+    if (chartFilters.stockCode && stock.stockCode !== chartFilters.stockCode) return false;
+    if (chartFilters.sector && stock.sector !== chartFilters.sector) return false;
+    if (chartFilters.boardBucket) {
+      const boardBucket = Math.min(Math.max(stock.boards, 1), 6);
+      if (boardBucket !== chartFilters.boardBucket) return false;
+    }
+    if (chartFilters.scoreBand) {
+      if (stock.score < chartFilters.scoreBand.minScore) return false;
+      if (chartFilters.scoreBand.maxScore !== null && stock.score > chartFilters.scoreBand.maxScore) return false;
+    }
+    return true;
+  });
+  const focusCandidateCodes = new Set(candidates.map((candidate) => candidate.stockCode));
   const isThresholdFilterApplied = threshold !== null;
   const historicalRows = backtest?.historicalRows ?? [];
   const filteredHistoricalRows = phaseFilter
@@ -172,10 +187,11 @@ export default function LeaderCandidatesPage() {
           <Card><CardContent className="flex flex-col items-center justify-center py-24 text-center"><Activity className="mb-4 h-12 w-12 text-amber-300" /><p className="font-medium text-slate-800">暂无可分析的涨停数据</p><p className="mt-2 text-sm text-slate-500">录入最新交易日涨停记录后，将自动生成候选池。</p></CardContent></Card>
         ) : (
           <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <Card className="border-amber-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">候选交易日</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-amber-600">{formatDate(data.date)}</div><p className="mt-1 text-xs text-slate-500">按数据库最新涨停日期生成</p></CardContent></Card>
               <Card className="border-orange-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">主板最高连板</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-orange-600">{data.maxBoards}<span className="ml-1 text-base">板</span></div><p className="mt-1 text-xs text-slate-500">主板涨停 {data.totalMainBoardLimitUps} 只</p></CardContent></Card>
               <Card className="border-red-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">重点观察候选</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-red-600">{displayedCandidates.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">{isThresholdFilterApplied ? `当前最低评分阈值 ${threshold} 分` : "满足高度、题材或综合评分条件"}</p></CardContent></Card>
+              <Card className="border-sky-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">当日评分覆盖</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-sky-600">{displayedAllScoredStocks.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">全部主板1–4板涨停股，不设重点候选阈值</p></CardContent></Card>
             </div>
 
             <CandidateInsightCharts
@@ -243,16 +259,16 @@ export default function LeaderCandidatesPage() {
             </Card>
 
             <Card ref={candidateListRef} className="border-slate-200 bg-white/90 shadow-xl shadow-slate-200/50">
-              <CardHeader><CardTitle>候选列表</CardTitle><CardDescription>龙头评分由“连板高度、题材广度、封板时间、成交额、流通市值”构成；下行风险分与风险扣分并列展示。当前排序保持原始龙头评分，不因新增风险参照改变候选池口径。</CardDescription></CardHeader>
+              <CardHeader><CardTitle>当日主板1–4板评分列表</CardTitle><CardDescription>展示当日全部可评分主板1–4板涨停股，不再因重点候选准入条件或65分等评分阈值截断。龙头评分、下行风险分、风险扣分和净评分并列展示；“重点候选”标识、图表和回测仍保持既有口径。</CardDescription></CardHeader>
               <CardContent>
-                {displayedCandidates.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有同时满足候选规则与图表筛选条件的主板股票；可清除图表筛选后重试。</div> : (
+                {displayedAllScoredStocks.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有符合图表筛选条件的主板1–4板股票；可清除图表筛选后重试。</div> : (
                   <div className="space-y-3">
-                    {displayedCandidates.map((candidate) => (
+                    {displayedAllScoredStocks.map((candidate) => (
                       <article key={candidate.stockCode} className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-amber-50/30 p-4 transition-shadow hover:shadow-md">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
                           <div className="flex min-w-0 items-center gap-3 lg:w-[255px]">
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-sm font-bold text-white shadow-sm">{candidate.rank}</span>
-                            <div className="min-w-0"><h3 className="truncate font-bold text-slate-900">{candidate.stockName}</h3><p className="mt-0.5 font-mono text-xs text-slate-500">{candidate.stockCode}</p></div>
+                            <div className="min-w-0"><div className="flex items-center gap-2"><h3 className="truncate font-bold text-slate-900">{candidate.stockName}</h3>{focusCandidateCodes.has(candidate.stockCode) && <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">重点候选</Badge>}</div><p className="mt-0.5 font-mono text-xs text-slate-500">{candidate.stockCode}</p></div>
                           </div>
                           <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
                             <div><p className="text-xs text-slate-500">龙头评分</p><Badge variant="outline" className={`mt-1 ${scoreTone(candidate.score)}`}>{candidate.score} 分</Badge></div>

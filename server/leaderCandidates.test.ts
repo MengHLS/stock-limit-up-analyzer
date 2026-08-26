@@ -51,6 +51,22 @@ describe("buildLeaderCandidates", () => {
     expect(result.candidates).toHaveLength(0);
   });
 
+  it("当日全量评分列表包含低分主板1至4板股票，但重点候选与非主板边界保持不变", () => {
+    const records = [
+      { stockCode: "600010.SH", stockName: "重点甲", limitUpDate: "2026-08-18", limitUpTime: "10:00:00", sector: "题材A", turnover: "5", circulationValue: "50" },
+      { stockCode: "600010.SH", stockName: "重点甲", limitUpDate: "2026-08-19", limitUpTime: "10:00:00", sector: "题材A", turnover: "5", circulationValue: "50" },
+      { stockCode: "600011.SH", stockName: "低分乙", limitUpDate: "2026-08-19", limitUpTime: "14:50:00", sector: "题材B", turnover: "0", circulationValue: null },
+      { stockCode: "300010.SZ", stockName: "创业板丙", limitUpDate: "2026-08-19", limitUpTime: "09:30:00", sector: "题材C", turnover: "20", circulationValue: "60" },
+    ];
+    const result = buildLeaderCandidates(records);
+    const lowScoreStock = result.allScoredStocks.find((candidate) => candidate.stockCode === "600011.SH");
+
+    expect(result.allScoredStocks.map((candidate) => candidate.stockCode)).toEqual(["600010.SH", "600011.SH"]);
+    expect(lowScoreStock?.score).toBeLessThan(52);
+    expect(result.candidates.map((candidate) => candidate.stockCode)).toEqual(["600010.SH"]);
+    expect(result.allScoredStocks.some((candidate) => candidate.stockCode === "300010.SZ")).toBe(false);
+  });
+
   it("将信号日风险分、扣分和净评分并列返回，且不读取未来日线行情", () => {
     const records = [
       { stockCode: "600010.SH", stockName: "高风险甲", limitUpDate: "2026-08-18", limitUpTime: "10:00:00", sector: "题材A", turnover: "2", circulationValue: "10" },

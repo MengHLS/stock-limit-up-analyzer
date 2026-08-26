@@ -45,6 +45,8 @@ export type LeaderCandidateResult = {
   totalMainBoardLimitUps: number;
   maxBoards: number;
   strongSectors: Array<{ sector: string; count: number }>;
+  /** 当日全部可评分主板1–4板涨停股，不受重点候选准入或展示上限影响。 */
+  allScoredStocks: LeaderCandidate[];
   candidates: LeaderCandidate[];
 };
 
@@ -337,13 +339,13 @@ export function buildLeaderCandidatesForDate(
   const recordsAsOfDate = records.filter((record) => record.limitUpDate <= targetDate);
   const stockNameByCode = options.stockNameByCode ?? buildLatestStockNameMap(records);
   if (recordsAsOfDate.length === 0) {
-    return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
+    return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], allScoredStocks: [], candidates: [] };
   }
 
   const tradingDates = Array.from(new Set(recordsAsOfDate.map((record) => record.limitUpDate)))
     .sort((left, right) => right.localeCompare(left));
   if (!tradingDates.includes(targetDate)) {
-    return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
+    return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], allScoredStocks: [], candidates: [] };
   }
 
   const tradingDateIndex = new Map(tradingDates.map((date, index) => [date, index]));
@@ -394,7 +396,7 @@ export function buildLeaderCandidatesForDate(
   const trajectoryDates = tradingDates.slice(currentDateIndex, currentDateIndex + 7).reverse();
   // 五板及以上属于高位情绪观察范围，不进入候选评分或组合回测，避免高位风险与低位启动筛选混在同一口径。
   const scorableRecords = currentRecords.filter((record) => calculateBoards(record.stockCode, targetDate) < 5);
-  const rankedCandidates = scorableRecords
+  const rankedAllScoredStocks = scorableRecords
     .map((record) => {
       const sector = normalizeSectorName(record.sector);
       const boards = calculateBoards(record.stockCode, targetDate);
@@ -488,6 +490,14 @@ export function buildLeaderCandidatesForDate(
         })),
       };
     })
+    .sort((left, right) => (
+      right.score - left.score
+      || right.boards - left.boards
+      || right.sectorCount - left.sectorCount
+      || (left.limitUpTime ?? "99:99:99").localeCompare(right.limitUpTime ?? "99:99:99")
+    ));
+  const allScoredStocks = rankedAllScoredStocks.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
+  const rankedCandidates = allScoredStocks
     .filter((candidate) => (
       candidate.boards >= 2
       || (candidate.sectorCount >= 3 && candidate.limitUpTime !== null && timeToMinutes(candidate.limitUpTime)! <= 13 * 60 + 30)
@@ -509,6 +519,7 @@ export function buildLeaderCandidatesForDate(
     totalMainBoardLimitUps: currentRecords.length,
     maxBoards: currentRecords.length > 0 ? Math.max(...currentRecords.map((record) => calculateBoards(record.stockCode, targetDate))) : 0,
     strongSectors,
+    allScoredStocks,
     candidates,
   };
 }
@@ -518,7 +529,7 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[], op
   const latestDate = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => right.localeCompare(left))[0];
   if (!latestDate) {
-    return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
+    return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], allScoredStocks: [], candidates: [] };
   }
   return buildLeaderCandidatesForDate(records, latestDate, { ...options, stockNameByCode: options.stockNameByCode ?? buildLatestStockNameMap(records) });
 }

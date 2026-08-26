@@ -62,6 +62,9 @@ describe("独立组合资金回测页面", () => {
     expect(candidateSource).toContain("净评分");
     expect(candidateSource).toContain("龙头/风险/净评分");
     expect(candidateSource).toContain("风险分只使用每行信号日信息");
+    expect(candidateSource).toContain("当日主板1–4板评分列表");
+    expect(candidateSource).toContain("allScoredStocks");
+    expect(candidateSource).toContain("重点候选");
     expect(researchSource).toContain("风险扣分策略");
     expect(researchSource).toContain("高风险硬过滤");
     expect(researchSource).toContain("日线成交额");
