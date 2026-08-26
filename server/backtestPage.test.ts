@@ -43,6 +43,11 @@ describe("独立组合资金回测页面", () => {
       "fullCycleRiskCurve",
       "fullCycleExperiments",
       "全周期累计收益",
+      "逐笔交易差异对比",
+      "data-trade-difference-table",
+      "fullCycleTradeDifferences",
+      "仅看有差异订单",
+      "高风险过滤",
       "样本外累计拼接曲线",
       "data-walk-forward",
       "walkForward.equityCurve",
@@ -83,6 +88,8 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("风险扣分策略");
     expect(researchSource).toContain("高风险硬过滤");
     expect(researchSource).toContain("fullCycle");
+    expect(researchSource).toContain("tradeDifferences");
+    expect(researchSource).toContain("hardFilterExcluded");
     expect(researchSource).toContain("相同资金、成本、仓位、入场和唯一退出约束连续回测");
     expect(researchSource).toContain("日线成交额");
   });

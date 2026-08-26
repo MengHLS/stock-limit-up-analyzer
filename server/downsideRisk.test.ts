@@ -217,5 +217,13 @@ describe("buildDownsideRiskResearch", () => {
     expect(result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("前置训练窗口自动选出的风险扣分权重");
     expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
     expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.initialCapital === realistic.initialCapital)).toBe(true);
+    expect(result.fullCycle.tradeDifferences).toHaveLength(rows.length);
+    expect(new Set(result.fullCycle.tradeDifferences.map((item) => `${item.signalDate}::${item.stockCode}`)).size).toBe(rows.length);
+    const highRisk = result.fullCycle.tradeDifferences.find((item) => item.stockName.startsWith("高风险"))!;
+    const lowRisk = result.fullCycle.tradeDifferences.find((item) => item.stockName.startsWith("低风险"))!;
+    expect(highRisk).toMatchObject({ hardFilterExcluded: true, hardFilter: null });
+    expect(highRisk.riskPenalty!.score).toBeLessThan(highRisk.baseline!.score);
+    expect(lowRisk).toMatchObject({ hardFilterExcluded: false });
+    expect(lowRisk.hardFilter).not.toBeNull();
   });
 });

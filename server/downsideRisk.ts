@@ -1,5 +1,5 @@
 import type { LeaderCandidateBacktestContext, LeaderCandidateBacktestRow } from "./leaderCandidates";
-import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
+import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult, type RealisticTrade } from "./realisticBacktest";
 
 export type DownsideRiskOptions = {
   observationDays?: number;
@@ -105,6 +105,23 @@ export type DownsideRiskFullCycleResult = {
   startDate: string | null;
   endDate: string | null;
   experiments: DownsideRiskExperimentItem[];
+  tradeDifferences: DownsideRiskTradeDifferenceRow[];
+};
+
+export type DownsideRiskTradeSnapshot = Pick<RealisticTrade,
+  "status" | "score" | "shares" | "entryDate" | "exitDate" | "entryPrice" | "exitPrice" | "netReturn" | "reason"
+>;
+
+export type DownsideRiskTradeDifferenceRow = {
+  signalDate: string;
+  stockCode: string;
+  stockName: string;
+  riskScore: number;
+  appliedPenaltyWeight: number;
+  baseline: DownsideRiskTradeSnapshot | null;
+  riskPenalty: DownsideRiskTradeSnapshot | null;
+  hardFilter: DownsideRiskTradeSnapshot | null;
+  hardFilterExcluded: boolean;
 };
 
 export type DownsideRiskResearchResult = {
@@ -260,6 +277,45 @@ function buildExperimentsWithWindowWeights(
     run("riskPenalty", "风险扣分策略", "每个验证窗口仅使用其前置训练窗口自动选出的风险扣分权重。", riskPenaltyRows, 0),
     run("hardFilter", "高风险硬过滤", `剔除风险分 ≥ ${hardRiskThreshold} 的候选。`, hardFilterRows, rows.length - hardFilterRows.length),
   ];
+}
+
+function buildTradeDifferences(
+  profiles: DownsideRiskProfile[],
+  experiments: DownsideRiskExperimentItem[],
+  penaltyWeightByDate: Map<string, number>,
+  fallbackPenaltyWeight: number,
+  hardRiskThreshold: number,
+): DownsideRiskTradeDifferenceRow[] {
+  const profileByKey = new Map(profiles.map((profile) => [`${profile.row.date}::${profile.row.stockCode}`, profile]));
+  const tradesByExperiment = new Map(experiments.map((experiment) => [
+    experiment.key,
+    new Map(experiment.realisticSimulation.trades.map((trade) => [`${trade.signalDate}::${trade.stockCode}`, trade])),
+  ]));
+  const snapshot = (trade: RealisticTrade | undefined): DownsideRiskTradeSnapshot | null => trade ? {
+    status: trade.status,
+    score: trade.score,
+    shares: trade.shares,
+    entryDate: trade.entryDate,
+    exitDate: trade.exitDate,
+    entryPrice: trade.entryPrice,
+    exitPrice: trade.exitPrice,
+    netReturn: trade.netReturn,
+    reason: trade.reason,
+  } : null;
+  return Array.from(profileByKey.keys()).sort((left, right) => right.localeCompare(left)).map((key) => {
+    const profile = profileByKey.get(key)!;
+    return {
+      signalDate: profile.row.date,
+      stockCode: profile.row.stockCode,
+      stockName: profile.row.stockName,
+      riskScore: profile.riskScore,
+      appliedPenaltyWeight: penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight,
+      baseline: snapshot(tradesByExperiment.get("baseline")?.get(key)),
+      riskPenalty: snapshot(tradesByExperiment.get("riskPenalty")?.get(key)),
+      hardFilter: snapshot(tradesByExperiment.get("hardFilter")?.get(key)),
+      hardFilterExcluded: profile.riskScore >= hardRiskThreshold,
+    } satisfies DownsideRiskTradeDifferenceRow;
+  });
 }
 
 function selectPenaltyWeight(
@@ -457,6 +513,7 @@ export function buildDownsideRiskResearch(
     ? buildExperimentsWithWindowWeights(profiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
     : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
   const fullCycleDates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
+  const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold);
 
   return {
     definition: `风险分仅使用信号日可见字段；下行标签为T+1开盘后连续${observationDays}个实际交易日中最低价（缺失时降级为收盘价）相对T+1开盘价的最大不利波动。滚动验证的测试段严格位于前置${rollingTrainTradingDays}个交易日校准段之后。${autoTunePenaltyWeight ? "每个校准段在固定权重网格内按训练期收益减0.5倍最大回撤寻优，选中权重只用于其后验证段。" : "风险扣分权重使用手动设定值。"}`,
@@ -484,6 +541,7 @@ export function buildDownsideRiskResearch(
       startDate: fullCycleDates[0] ?? null,
       endDate: fullCycleDates.at(-1) ?? null,
       experiments: fullCycleExperiments,
+      tradeDifferences: fullCycleTradeDifferences,
     },
   };
 }
