@@ -241,5 +241,24 @@ describe("buildDownsideRiskResearch", () => {
     expect(attribution.riskPenaltyOnlyFilledCount + attribution.commonFilledCount).toBe(riskPenaltyFilled);
     expect(attribution.commonFilledDifferentReturnCount).toBe(0);
     expect(attribution.autoTunedSignalCount + attribution.fallbackWeightSignalCount).toBe(rows.length);
+    expect(result.factorAblations).toHaveLength(8);
+    expect(result.factorAblations.every((factor) => Number.isFinite(factor.fullCycle.returnDelta) && Number.isFinite(factor.walkForward.drawdownDelta))).toBe(true);
+    const noContributionFactor = result.factorAblations.find((factor) => factor.key === "candidateScore")!;
+    expect(noContributionFactor).toMatchObject({ affectedSignalCount: 0, fullCycle: { returnDelta: 0, drawdownDelta: 0 }, walkForward: { returnDelta: 0, drawdownDelta: 0 } });
+    expect(result.factorAblations.every((factor) => factor.fullCycle.filledCount >= 0 && factor.walkForward.filledCount >= 0)).toBe(true);
+  });
+
+  it("未来价格路径变化不会改变风险因子在信号日的消融覆盖和平均贡献", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const options = { observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true, penaltyWeight: 0.35 };
+    const realistic = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2 };
+    const baseline = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: prices, tradingDates: dates });
+    const futureChangedPrices = new Map(prices);
+    const changedKey = `${rows.at(-1)!.stockCode}::${dates.at(-1)!}`;
+    futureChangedPrices.set(changedKey, { ...futureChangedPrices.get(changedKey)!, closePrice: 1, lowPrice: 1 });
+    const changed = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: futureChangedPrices, tradingDates: dates });
+    expect(changed.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution])).toEqual(
+      baseline.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution]),
+    );
   });
 });

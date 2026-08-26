@@ -54,6 +54,14 @@ describe("独立组合资金回测页面", () => {
       "原始独有成交",
       "扣分独有成交",
       "自动 / 回退权重信号",
+      "风险评分负向因子消融",
+      "data-factor-ablation",
+      "factorAblations",
+      "样本外 Δ回撤",
+      "全周期表象负向，样本外未复现",
+      "当前没有在全周期与严格样本外同时复现的核心负向因子",
+      "stableNegativeFactors",
+      "fullCycleOnlyNegativeFactors",
       "样本外累计拼接曲线",
       "data-walk-forward",
       "walkForward.equityCurve",
@@ -99,6 +107,8 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("hardFilterExcluded");
     expect(researchSource).toContain("riskPenaltyAttribution");
     expect(researchSource).toContain("baselineOnlyNetPnl");
+    expect(researchSource).toContain("buildFactorAblations");
+    expect(researchSource).toContain("riskContributions");
     expect(researchSource).toContain("相同资金、成本、仓位、入场和唯一退出约束连续回测");
     expect(researchSource).toContain("日线成交额");
     expect(pageSource).toContain("date >= startDate");

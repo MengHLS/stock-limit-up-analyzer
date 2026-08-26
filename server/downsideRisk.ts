@@ -30,6 +30,7 @@ export type DownsideRiskProfile = {
   row: LeaderCandidateBacktestRow;
   riskScore: number;
   riskTier: "低风险" | "中风险" | "高风险";
+  riskContributions: Record<string, number>;
   maxAdverseReturn: number | null;
   observedTradingDays: number;
   usedLowPriceForLabel: boolean;
@@ -156,6 +157,24 @@ export type DownsideRiskResearchResult = {
   rollingWindows: DownsideRiskRollingWindow[];
   walkForward: DownsideRiskWalkForwardResult | null;
   fullCycle: DownsideRiskFullCycleResult;
+  factorAblations: DownsideRiskFactorAblation[];
+};
+
+export type DownsideRiskAblationMetric = {
+  totalReturn: number;
+  maxDrawdown: number;
+  returnDelta: number;
+  drawdownDelta: number;
+  filledCount: number;
+};
+
+export type DownsideRiskFactorAblation = {
+  key: string;
+  label: string;
+  affectedSignalCount: number;
+  averageContribution: number;
+  fullCycle: DownsideRiskAblationMetric;
+  walkForward: DownsideRiskAblationMetric;
 };
 
 const riskFeatures: DownsideRiskFeature[] = [
@@ -205,19 +224,23 @@ function adverseReturnLabel(row: LeaderCandidateBacktestRow, context: LeaderCand
   };
 }
 
-function calculateRiskScore(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
-  let score = 0;
-  score += row.boards >= 4 ? 20 : row.boards === 3 ? 12 : row.boards === 2 ? 5 : 0;
-  score += (row.sectorCount ?? 0) <= 1 ? 16 : (row.sectorCount ?? 0) === 2 ? 8 : 0;
+function calculateRiskContributions(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
   const time = row.limitUpTime ?? "";
-  score += !time ? 5 : time >= "14:30:00" ? 16 : time >= "13:30:00" ? 9 : 0;
   const amount = readSignalPrice(row, context)?.amount ?? null;
-  score += amount === null ? 7 : amount < 10_000 ? 12 : amount < 50_000 ? 6 : 0;
-  score += row.marketCapScore <= 4 ? 10 : row.marketCapScore <= 5 ? 6 : 0;
-  score += row.phase === "高位退潮" ? 24 : row.phase === "高位亢奋" ? 16 : row.phase === "高位分歧" ? 9 : 0;
-  score += (row.maxBoards ?? 0) >= 6 ? 10 : (row.maxBoards ?? 0) >= 5 ? 6 : 0;
-  score += row.score < 50 ? 8 : row.score < 60 ? 3 : 0;
-  return Math.min(100, score);
+  return {
+    boards: row.boards >= 4 ? 20 : row.boards === 3 ? 12 : row.boards === 2 ? 5 : 0,
+    sectorCount: (row.sectorCount ?? 0) <= 1 ? 16 : (row.sectorCount ?? 0) === 2 ? 8 : 0,
+    limitUpTime: !time ? 5 : time >= "14:30:00" ? 16 : time >= "13:30:00" ? 9 : 0,
+    signalAmount: amount === null ? 7 : amount < 10_000 ? 12 : amount < 50_000 ? 6 : 0,
+    marketCap: row.marketCapScore <= 4 ? 10 : row.marketCapScore <= 5 ? 6 : 0,
+    phase: row.phase === "高位退潮" ? 24 : row.phase === "高位亢奋" ? 16 : row.phase === "高位分歧" ? 9 : 0,
+    marketHeight: (row.maxBoards ?? 0) >= 6 ? 10 : (row.maxBoards ?? 0) >= 5 ? 6 : 0,
+    candidateScore: row.score < 50 ? 8 : row.score < 60 ? 3 : 0,
+  } satisfies Record<string, number>;
+}
+
+function calculateRiskScore(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
+  return Math.min(100, Object.values(calculateRiskContributions(row, context)).reduce((sum, value) => sum + value, 0));
 }
 
 function riskTier(riskScore: number): DownsideRiskProfile["riskTier"] {
@@ -235,8 +258,9 @@ export function scoreDownsideRiskSignal(
   return { riskScore, riskTier: riskTier(riskScore) };
 }
 
-function applyRiskPenalty(profile: DownsideRiskProfile, penaltyWeight: number): LeaderCandidateBacktestRow {
-  return { ...profile.row, score: Math.max(0, round(profile.row.score - profile.riskScore * penaltyWeight)) };
+function applyRiskPenalty(profile: DownsideRiskProfile, penaltyWeight: number, omittedFeatureKey?: string): LeaderCandidateBacktestRow {
+  const effectiveRiskScore = Math.max(0, profile.riskScore - (omittedFeatureKey ? profile.riskContributions[omittedFeatureKey] ?? 0 : 0));
+  return { ...profile.row, score: Math.max(0, round(profile.row.score - effectiveRiskScore * penaltyWeight)) };
 }
 
 function buildExperiments(
@@ -289,6 +313,42 @@ function buildExperimentsWithWindowWeights(
     run("riskPenalty", "风险扣分策略", "每个验证窗口仅使用其前置训练窗口自动选出的风险扣分权重。", riskPenaltyRows, 0),
     run("hardFilter", "高风险硬过滤", `剔除风险分 ≥ ${hardRiskThreshold} 的候选。`, hardFilterRows, rows.length - hardFilterRows.length),
   ];
+}
+
+function toAblationMetric(simulation: RealisticBacktestResult, reference: RealisticBacktestResult): DownsideRiskAblationMetric {
+  return {
+    totalReturn: simulation.totalReturn,
+    maxDrawdown: simulation.maxDrawdown,
+    returnDelta: round(simulation.totalReturn - reference.totalReturn),
+    drawdownDelta: round(simulation.maxDrawdown - reference.maxDrawdown),
+    filledCount: simulation.filledCount,
+  };
+}
+
+function buildFactorAblations(
+  fullCycleProfiles: DownsideRiskProfile[],
+  validationProfiles: DownsideRiskProfile[],
+  fullCycleRiskPenalty: RealisticBacktestResult,
+  validationRiskPenalty: RealisticBacktestResult,
+  penaltyWeightByDate: Map<string, number>,
+  fallbackPenaltyWeight: number,
+  realisticOptions: RealisticBacktestOptions | undefined,
+  context: LeaderCandidateBacktestContext,
+): DownsideRiskFactorAblation[] {
+  const weightedRows = (profiles: DownsideRiskProfile[], omittedFeatureKey: string) => profiles.map((profile) => applyRiskPenalty(profile, penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight, omittedFeatureKey));
+  return riskFeatures.map((feature) => {
+    const fullCycleSimulation = simulateRealisticTPlus1ToTPlus2(weightedRows(fullCycleProfiles, feature.key), realisticOptions, context.priceByStockDate, context.tradingDates);
+    const walkForwardSimulation = simulateRealisticTPlus1ToTPlus2(weightedRows(validationProfiles, feature.key), realisticOptions, context.priceByStockDate, context.tradingDates);
+    const contributions = fullCycleProfiles.map((profile) => profile.riskContributions[feature.key] ?? 0).filter((value) => value > 0);
+    return {
+      key: feature.key,
+      label: feature.label,
+      affectedSignalCount: contributions.length,
+      averageContribution: contributions.length === 0 ? 0 : round(contributions.reduce((sum, value) => sum + value, 0) / contributions.length),
+      fullCycle: toAblationMetric(fullCycleSimulation, fullCycleRiskPenalty),
+      walkForward: toAblationMetric(walkForwardSimulation, validationRiskPenalty),
+    } satisfies DownsideRiskFactorAblation;
+  });
 }
 
 function buildTradeDifferences(
@@ -507,11 +567,14 @@ export function buildDownsideRiskResearch(
   const rollingValidationTradingDays = Math.min(60, Math.max(10, Math.floor(options?.rollingValidationTradingDays ?? 30)));
   const profiles = rows.map((row) => {
     const label = adverseReturnLabel(row, context, observationDays);
-    const { riskScore, riskTier: profileRiskTier } = scoreDownsideRiskSignal(row, context);
+    const riskContributions = calculateRiskContributions(row, context);
+    const riskScore = Math.min(100, Object.values(riskContributions).reduce((sum, value) => sum + value, 0));
+    const profileRiskTier = riskTier(riskScore);
     return {
       row,
       riskScore,
       riskTier: profileRiskTier,
+      riskContributions,
       ...label,
       mediumDownside: label.maxAdverseReturn === null ? null : label.maxAdverseReturn <= -mediumDownsidePercent,
       highDownside: label.maxAdverseReturn === null ? null : label.maxAdverseReturn <= -highDownsidePercent,
@@ -554,6 +617,16 @@ export function buildDownsideRiskResearch(
   const fullCycleDates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
   const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold);
   const fullCycleRiskPenaltyAttribution = buildRiskPenaltyAttribution(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate);
+  const factorAblations = buildFactorAblations(
+    profiles,
+    evaluationProfiles,
+    fullCycleExperiments.find((experiment) => experiment.key === "riskPenalty")!.realisticSimulation,
+    experiments.find((experiment) => experiment.key === "riskPenalty")!.realisticSimulation,
+    rollingResult.penaltyWeightByDate,
+    penaltyWeight,
+    realisticOptions,
+    context,
+  );
 
   return {
     definition: `风险分仅使用信号日可见字段；下行标签为T+1开盘后连续${observationDays}个实际交易日中最低价（缺失时降级为收盘价）相对T+1开盘价的最大不利波动。滚动验证的测试段严格位于前置${rollingTrainTradingDays}个交易日校准段之后。${autoTunePenaltyWeight ? "每个校准段在固定权重网格内按训练期收益减0.5倍最大回撤寻优，选中权重只用于其后验证段。" : "风险扣分权重使用手动设定值。"}`,
@@ -574,6 +647,7 @@ export function buildDownsideRiskResearch(
     experiments,
     rollingWindows,
     walkForward: buildWalkForwardResult(experiments, rollingWindows),
+    factorAblations,
     fullCycle: {
       definition: autoTunePenaltyWeight && rollingWindows.length > 0
         ? "三版策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。"
