@@ -212,4 +212,55 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(fullProbability).toMatchObject({ blockedSellCount: 0, completedCount: 1, openPositionCount: 0 });
     expect(fullProbability.trades[0].reason).toContain("概率100%命中");
   });
+
+  it("风险管理续持策略仅用当日收盘触发止盈、止损或继续持有", () => {
+    const candidate = row({ nextOpenPrice: 10, nextClosePrice: 10.2, secondDayClosePrice: 11 });
+    const base = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, exitStrategy: "riskManagedHold" as const };
+
+    const takeProfit = simulateRealisticTPlus1ToTPlus2([candidate], { ...base, takeProfitPercent: 10, stopLossPercent: 5, strongHoldMinReturn: 3, maxHoldingDays: 5 });
+    const stopLoss = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 10, secondDayClosePrice: 9.4 })], { ...base, takeProfitPercent: 10, stopLossPercent: 5, strongHoldMinReturn: 3, maxHoldingDays: 5 });
+
+    expect(takeProfit.trades[0]).toMatchObject({ exitDate: "2026-08-20", reason: expect.stringContaining("触发止盈") });
+    expect(stopLoss.trades[0]).toMatchObject({ exitDate: "2026-08-20", reason: expect.stringContaining("触发止损") });
+  });
+
+  it("强势续持在T+2只看当日收盘，随后转弱或达到持有上限时出清", () => {
+    const candidate = row({ nextOpenPrice: 10, nextClosePrice: 10.2, secondDayClosePrice: 10.5 });
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 10, closePrice: 10.2 }],
+      ["600001.SH::2026-08-20", { openPrice: 10.3, closePrice: 10.5 }],
+      ["600001.SH::2026-08-21", { openPrice: 10.5, closePrice: 10.8 }],
+      ["600001.SH::2026-08-22", { openPrice: 10.2, closePrice: 10.1 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([candidate], {
+      initialCapital: 100000,
+      maxPositions: 1,
+      commissionRate: 0,
+      stampDutyRate: 0,
+      transferFeeRate: 0,
+      slippageBps: 0,
+      exitStrategy: "riskManagedHold",
+      takeProfitPercent: 20,
+      stopLossPercent: 8,
+      strongHoldMinReturn: 3,
+      maxHoldingDays: 5,
+    }, prices, ["2026-08-19", "2026-08-20", "2026-08-21", "2026-08-22"]);
+    const maxHolding = simulateRealisticTPlus1ToTPlus2([candidate], {
+      initialCapital: 100000,
+      maxPositions: 1,
+      commissionRate: 0,
+      stampDutyRate: 0,
+      transferFeeRate: 0,
+      slippageBps: 0,
+      exitStrategy: "riskManagedHold",
+      takeProfitPercent: 20,
+      stopLossPercent: 8,
+      strongHoldMinReturn: 3,
+      maxHoldingDays: 3,
+    }, prices, ["2026-08-19", "2026-08-20", "2026-08-21"]);
+
+    expect(result.equityCurve.find((point) => point.date === "2026-08-20")?.openPositions).toBe(1);
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-22", reason: expect.stringContaining("未满足强势续持") });
+    expect(maxHolding.trades[0]).toMatchObject({ exitDate: "2026-08-21", reason: expect.stringContaining("达到最多续持3个交易日") });
+  });
 });

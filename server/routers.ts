@@ -723,6 +723,11 @@ export const appRouter = router({
           oneWordLimitDownSellProbability: z.number().min(0).max(100).optional(),
           positionSizingStrategy: z.enum(["equal", "scoreWeighted", "fixedPercent"]).optional(),
           fixedPositionPercent: z.number().min(1).max(100).optional(),
+          exitStrategy: z.enum(["t2Close", "riskManagedHold"]).optional(),
+          takeProfitPercent: z.number().min(0).max(100).optional(),
+          stopLossPercent: z.number().min(0).max(100).optional(),
+          strongHoldMinReturn: z.number().min(0).max(100).optional(),
+          maxHoldingDays: z.number().int().min(2).max(30).optional(),
         }).optional(),
       }).optional())
       .query(async ({ input }) => {

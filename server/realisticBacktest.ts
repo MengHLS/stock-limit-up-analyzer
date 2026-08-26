@@ -1,6 +1,7 @@
 import type { LeaderCandidateBacktestRow, LeaderCandidateDailyPrice } from "./leaderCandidates";
 
 export type PositionSizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
+export type ExitStrategy = "t2Close" | "riskManagedHold";
 
 export type RealisticBacktestOptions = {
   initialCapital?: number;
@@ -16,6 +17,11 @@ export type RealisticBacktestOptions = {
   oneWordLimitDownSellProbability?: number;
   positionSizingStrategy?: PositionSizingStrategy;
   fixedPositionPercent?: number;
+  exitStrategy?: ExitStrategy;
+  takeProfitPercent?: number;
+  stopLossPercent?: number;
+  strongHoldMinReturn?: number;
+  maxHoldingDays?: number;
 };
 
 export type RealisticTrade = {
@@ -56,6 +62,11 @@ export type RealisticBacktestResult = {
     oneWordLimitDownSellProbability: number;
     positionSizingStrategy: PositionSizingStrategy;
     fixedPositionPercent: number;
+    exitStrategy: ExitStrategy;
+    takeProfitPercent: number;
+    stopLossPercent: number;
+    strongHoldMinReturn: number;
+    maxHoldingDays: number;
   };
   initialCapital: number;
   finalCapital: number;
@@ -90,6 +101,7 @@ type Position = {
   capitalCost: number;
   previousClosePrice: number | null;
   latestValuationPrice: number;
+  entryTradingDateIndex: number;
 };
 
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
@@ -146,6 +158,11 @@ export function simulateRealisticTPlus1ToTPlus2(
   const oneWordLimitDownSellProbability = Math.min(100, Math.max(0, options.oneWordLimitDownSellProbability ?? 0));
   const positionSizingStrategy = options.positionSizingStrategy ?? "equal";
   const fixedPositionPercent = Math.min(100, Math.max(1, options.fixedPositionPercent ?? 20));
+  const exitStrategy = options.exitStrategy ?? "t2Close";
+  const takeProfitPercent = Math.min(100, Math.max(0, options.takeProfitPercent ?? 10));
+  const stopLossPercent = Math.min(100, Math.max(0, options.stopLossPercent ?? 5));
+  const strongHoldMinReturn = Math.min(100, Math.max(0, options.strongHoldMinReturn ?? 3));
+  const maxHoldingDays = Math.max(2, Math.floor(options.maxHoldingDays ?? 5));
   const assumptions = {
     initialCapital,
     maxPositions,
@@ -160,6 +177,11 @@ export function simulateRealisticTPlus1ToTPlus2(
     oneWordLimitDownSellProbability,
     positionSizingStrategy,
     fixedPositionPercent,
+    exitStrategy,
+    takeProfitPercent,
+    stopLossPercent,
+    strongHoldMinReturn,
+    maxHoldingDays,
   };
   const sortedRows = rows.slice().sort((left, right) => (
     left.nextDayDate.localeCompare(right.nextDayDate) || right.score - left.score || left.stockCode.localeCompare(right.stockCode)
@@ -170,6 +192,7 @@ export function simulateRealisticTPlus1ToTPlus2(
     ...sortedRows.map((row) => row.secondDayDate).filter((date): date is string => date !== null),
     ...tradingDates,
   ])).sort();
+  const tradingDateIndex = new Map(eventDates.map((date, index) => [date, index]));
   const candidatesByEntryDate = new Map<string, LeaderCandidateBacktestRow[]>();
   for (const row of sortedRows) candidatesByEntryDate.set(row.nextDayDate, [...(candidatesByEntryDate.get(row.nextDayDate) ?? []), row]);
 
@@ -252,6 +275,7 @@ export function simulateRealisticTPlus1ToTPlus2(
         capitalCost,
         previousClosePrice: row.nextClosePrice,
         latestValuationPrice: slippedEntry,
+        entryTradingDateIndex: tradingDateIndex.get(date) ?? 0,
       });
       peakOpenPositionCount = Math.max(peakOpenPositionCount, positions.size);
       minimumCash = Math.min(minimumCash, cash);
@@ -291,6 +315,8 @@ export function simulateRealisticTPlus1ToTPlus2(
         continue;
       }
       position.latestValuationPrice = exitPrice;
+      const holdingDays = Math.max(1, (tradingDateIndex.get(date) ?? position.entryTradingDateIndex) - position.entryTradingDateIndex + 1);
+      const closeReturnPercent = ((exitPrice - position.entryPrice) / position.entryPrice) * 100;
       const limitDown = validPrice(position.previousClosePrice) && exitPrice <= position.previousClosePrice * 0.901;
       const oneWordLimitDown = limitDown
         && validPrice(position.previousClosePrice)
@@ -310,6 +336,28 @@ export function simulateRealisticTPlus1ToTPlus2(
             : "连续一字跌停，继续等待下一实际交易日";
         continue;
       }
+      let exitTriggerReason: string | null = null;
+      if (exitStrategy === "riskManagedHold") {
+        if (closeReturnPercent <= -stopLossPercent) {
+          exitTriggerReason = `收盘触发止损（${round(closeReturnPercent)}% ≤ -${stopLossPercent}%）`;
+        } else if (closeReturnPercent >= takeProfitPercent) {
+          exitTriggerReason = `收盘触发止盈（${round(closeReturnPercent)}% ≥ ${takeProfitPercent}%）`;
+        } else {
+          const strongClose = closeReturnPercent >= strongHoldMinReturn
+            && (!validPrice(position.previousClosePrice) || exitPrice >= position.previousClosePrice);
+          if (holdingDays >= maxHoldingDays) {
+            exitTriggerReason = `达到最多续持${maxHoldingDays}个交易日`;
+          } else if (!strongClose) {
+            exitTriggerReason = date === position.row.secondDayDate
+              ? "T+2收盘未满足强势续持条件"
+              : "后续收盘未满足强势续持条件";
+          } else {
+            position.previousClosePrice = exitPrice;
+            if (trade) trade.reason = `满足强势续持：收盘收益${round(closeReturnPercent)}%，收盘不低于前收；继续持有`;
+            continue;
+          }
+        }
+      }
       const slippedExit = exitPrice * (1 - slippageBps / 10_000);
       const grossExit = slippedExit * position.shares;
       const sellFees = grossExit * (commissionRate + stampDutyRate + transferFeeRate);
@@ -324,7 +372,7 @@ export function simulateRealisticTPlus1ToTPlus2(
         trade.netReturn = round((netPnl / position.capitalCost) * 100);
         trade.reason = oneWordProbabilityFill
           ? `一字跌停保守成交概率${oneWordLimitDownSellProbability}%命中，实际交易日出清`
-          : date === position.row.secondDayDate ? null : "跌停后延期至实际交易日出清";
+          : exitTriggerReason ?? (date === position.row.secondDayDate ? null : "跌停后延期至实际交易日出清");
       }
       positions.delete(key);
     }
