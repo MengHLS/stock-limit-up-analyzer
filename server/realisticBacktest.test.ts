@@ -76,6 +76,19 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
 
     expect(result.trades.find((trade) => trade.stockCode === "600001.SH")).toMatchObject({ status: "filled", exitDate: "2026-08-20" });
     expect(result.trades.find((trade) => trade.stockCode === "600002.SH")).toMatchObject({ status: "skipped", reason: "超过最大持仓数" });
+    expect(result).toMatchObject({ peakOpenPositionCount: 1, minimumCash: expect.any(Number) });
+  });
+
+  it("首笔全仓买入后即使尚有持仓槽位，也不得用不足一手的剩余资金继续买入", () => {
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ stockCode: "600001.SH", date: "2026-08-18", nextDayDate: "2026-08-19", secondDayDate: "2026-08-21", nextOpenPrice: 9.5 }),
+      row({ stockCode: "600002.SH", date: "2026-08-19", nextDayDate: "2026-08-20", secondDayDate: "2026-08-22" }),
+    ], { initialCapital: 1000, maxPositions: 2, lotSize: 100 });
+
+    expect(result.trades.find((trade) => trade.stockCode === "600001.SH")).toMatchObject({ status: "filled", shares: 100 });
+    expect(result.trades.find((trade) => trade.stockCode === "600002.SH")).toMatchObject({ status: "skipped", reason: "可用资金不足以买入一手" });
+    expect(result).toMatchObject({ peakOpenPositionCount: 1, minimumCash: expect.any(Number) });
+    expect(result.minimumCash).toBeGreaterThanOrEqual(0);
   });
 
   it("按保守规则拒绝接近涨停的买入，并记录缺行情原因", () => {

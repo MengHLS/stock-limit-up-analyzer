@@ -60,6 +60,8 @@ export type RealisticBacktestResult = {
   filledCount: number;
   completedCount: number;
   openPositionCount: number;
+  peakOpenPositionCount: number;
+  minimumCash: number;
   totalCandidateCount: number;
   priceAvailableCount: number;
   capacitySkippedCount: number;
@@ -168,6 +170,8 @@ export function simulateRealisticTPlus1ToTPlus2(
   let blockedBuyCount = 0;
   let blockedSellCount = 0;
   let missingDataCount = 0;
+  let peakOpenPositionCount = 0;
+  let minimumCash = initialCapital;
   const findFilledTrade = (position: Position) => trades.find((trade) => (
     trade.stockCode === position.row.stockCode && trade.entryDate === position.row.nextDayDate && trade.status === "filled"
   ));
@@ -193,6 +197,10 @@ export function simulateRealisticTPlus1ToTPlus2(
       trades.push(createSkippedTrade(row, slots === 0 ? "超过最大持仓数" : "资金按评分排序优先分配", null));
     }
     for (const row of selected) {
+      if (positions.size >= maxPositions) {
+        trades.push(createSkippedTrade(row, "超过最大持仓数"));
+        continue;
+      }
       const entryOpenPrice = row.nextOpenPrice!;
       const limitUp = validPrice(row.signalClosePrice) && entryOpenPrice >= row.signalClosePrice * 1.099;
       if (blockLimitUpBuys && limitUp) {
@@ -210,7 +218,7 @@ export function simulateRealisticTPlus1ToTPlus2(
       const grossEntry = slippedEntry * shares;
       const buyFees = grossEntry * (commissionRate + transferFeeRate);
       const capitalCost = grossEntry + buyFees;
-      if (capitalCost > cash) {
+      if (capitalCost > cash + 1e-8) {
         trades.push(createSkippedTrade(row, "可用资金不足以完成买入"));
         continue;
       }
@@ -223,6 +231,8 @@ export function simulateRealisticTPlus1ToTPlus2(
         previousClosePrice: row.nextClosePrice,
         latestValuationPrice: slippedEntry,
       });
+      peakOpenPositionCount = Math.max(peakOpenPositionCount, positions.size);
+      minimumCash = Math.min(minimumCash, cash);
       trades.push({
         signalDate: row.date,
         entryDate: date,
@@ -348,6 +358,8 @@ export function simulateRealisticTPlus1ToTPlus2(
     filledCount: trades.filter((trade) => trade.status === "filled").length,
     completedCount: filledTrades.length,
     openPositionCount: positions.size,
+    peakOpenPositionCount,
+    minimumCash: round(minimumCash),
     totalCandidateCount: rows.length,
     priceAvailableCount,
     capacitySkippedCount,
