@@ -91,6 +91,23 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(result.minimumCash).toBeGreaterThanOrEqual(0);
   });
 
+  it("支持等权、评分加权和固定比例分仓，并保持资金与仓位约束", () => {
+    const candidates = [
+      row({ stockCode: "600001.SH", score: 90, nextOpenPrice: 10, secondDayClosePrice: 10 }),
+      row({ stockCode: "600002.SH", score: 60, nextOpenPrice: 10, secondDayClosePrice: 10 }),
+    ];
+    const baseOptions = { initialCapital: 20000, maxPositions: 2, lotSize: 100, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0 };
+    const equal = simulateRealisticTPlus1ToTPlus2(candidates, { ...baseOptions, positionSizingStrategy: "equal" });
+    const weighted = simulateRealisticTPlus1ToTPlus2(candidates, { ...baseOptions, positionSizingStrategy: "scoreWeighted" });
+    const fixed = simulateRealisticTPlus1ToTPlus2(candidates, { ...baseOptions, positionSizingStrategy: "fixedPercent", fixedPositionPercent: 25 });
+
+    expect(equal.trades.filter((trade) => trade.status === "filled").map((trade) => trade.shares)).toEqual([1000, 1000]);
+    expect(weighted.trades.filter((trade) => trade.status === "filled").map((trade) => trade.shares)).toEqual([1200, 800]);
+    expect(fixed.trades.filter((trade) => trade.status === "filled").map((trade) => trade.shares)).toEqual([500, 500]);
+    expect(fixed.minimumCash).toBe(10000);
+    expect([equal, weighted, fixed].every((result) => result.minimumCash >= 0 && result.peakOpenPositionCount <= 2)).toBe(true);
+  });
+
   it("按保守规则拒绝接近涨停的买入，并记录缺行情原因", () => {
     const blocked = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 11 })], { initialCapital: 100000, blockLimitUpBuys: true });
     expect(blocked.filledCount).toBe(0);

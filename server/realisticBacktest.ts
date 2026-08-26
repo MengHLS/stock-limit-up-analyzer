@@ -1,5 +1,7 @@
 import type { LeaderCandidateBacktestRow, LeaderCandidateDailyPrice } from "./leaderCandidates";
 
+export type PositionSizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
+
 export type RealisticBacktestOptions = {
   initialCapital?: number;
   maxPositions?: number;
@@ -12,6 +14,8 @@ export type RealisticBacktestOptions = {
   blockLimitDownSells?: boolean;
   enableOneWordLimitDownProbability?: boolean;
   oneWordLimitDownSellProbability?: number;
+  positionSizingStrategy?: PositionSizingStrategy;
+  fixedPositionPercent?: number;
 };
 
 export type RealisticTrade = {
@@ -50,6 +54,8 @@ export type RealisticBacktestResult = {
     blockLimitDownSells: boolean;
     enableOneWordLimitDownProbability: boolean;
     oneWordLimitDownSellProbability: number;
+    positionSizingStrategy: PositionSizingStrategy;
+    fixedPositionPercent: number;
   };
   initialCapital: number;
   finalCapital: number;
@@ -138,6 +144,8 @@ export function simulateRealisticTPlus1ToTPlus2(
   const blockLimitDownSells = options.blockLimitDownSells ?? false;
   const enableOneWordLimitDownProbability = options.enableOneWordLimitDownProbability ?? false;
   const oneWordLimitDownSellProbability = Math.min(100, Math.max(0, options.oneWordLimitDownSellProbability ?? 0));
+  const positionSizingStrategy = options.positionSizingStrategy ?? "equal";
+  const fixedPositionPercent = Math.min(100, Math.max(1, options.fixedPositionPercent ?? 20));
   const assumptions = {
     initialCapital,
     maxPositions,
@@ -150,6 +158,8 @@ export function simulateRealisticTPlus1ToTPlus2(
     blockLimitDownSells,
     enableOneWordLimitDownProbability,
     oneWordLimitDownSellProbability,
+    positionSizingStrategy,
+    fixedPositionPercent,
   };
   const sortedRows = rows.slice().sort((left, right) => (
     left.nextDayDate.localeCompare(right.nextDayDate) || right.score - left.score || left.stockCode.localeCompare(right.stockCode)
@@ -191,7 +201,17 @@ export function simulateRealisticTPlus1ToTPlus2(
     const available = eligibleRows.filter((row) => !heldCodes.has(row.stockCode));
     const slots = Math.max(0, maxPositions - positions.size);
     const selected = available.slice(0, slots);
-    const budgetPerPosition = selected.length > 0 ? cash / selected.length : 0;
+    const budgetByRow = new Map<LeaderCandidateBacktestRow, number>();
+    if (positionSizingStrategy === "scoreWeighted") {
+      const scoreTotal = selected.reduce((sum, row) => sum + Math.max(row.score, 0), 0);
+      for (const row of selected) {
+        budgetByRow.set(row, scoreTotal > 0 ? cash * Math.max(row.score, 0) / scoreTotal : cash / selected.length);
+      }
+    } else if (positionSizingStrategy === "fixedPercent") {
+      for (const row of selected) budgetByRow.set(row, initialCapital * fixedPositionPercent / 100);
+    } else {
+      for (const row of selected) budgetByRow.set(row, cash / selected.length);
+    }
     for (const row of available) {
       if (selected.includes(row)) continue;
       trades.push(createSkippedTrade(row, slots === 0 ? "超过最大持仓数" : "资金按评分排序优先分配", null));
@@ -209,7 +229,9 @@ export function simulateRealisticTPlus1ToTPlus2(
         continue;
       }
       const slippedEntry = entryOpenPrice * (1 + slippageBps / 10_000);
-      const shares = Math.floor(budgetPerPosition / (slippedEntry * (1 + commissionRate + transferFeeRate)) / lotSize) * lotSize;
+      const plannedBudget = budgetByRow.get(row) ?? 0;
+      const executableBudget = Math.min(plannedBudget, cash);
+      const shares = Math.floor(executableBudget / (slippedEntry * (1 + commissionRate + transferFeeRate)) / lotSize) * lotSize;
       if (shares < lotSize) {
         missingDataCount += 1;
         trades.push(createSkippedTrade(row, "可用资金不足以买入一手"));

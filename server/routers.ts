@@ -721,6 +721,8 @@ export const appRouter = router({
           blockLimitDownSells: z.boolean().optional(),
           enableOneWordLimitDownProbability: z.boolean().optional(),
           oneWordLimitDownSellProbability: z.number().min(0).max(100).optional(),
+          positionSizingStrategy: z.enum(["equal", "scoreWeighted", "fixedPercent"]).optional(),
+          fixedPositionPercent: z.number().min(1).max(100).optional(),
         }).optional(),
       }).optional())
       .query(async ({ input }) => {
