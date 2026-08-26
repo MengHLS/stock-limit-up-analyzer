@@ -723,7 +723,7 @@ export const appRouter = router({
           oneWordLimitDownSellProbability: z.number().min(0).max(100).optional(),
           positionSizingStrategy: z.enum(["equal", "scoreWeighted", "fixedPercent"]).optional(),
           fixedPositionPercent: z.number().min(1).max(100).optional(),
-          exitStrategy: z.enum(["t2Close", "riskManagedHold"]).optional(),
+          exitStrategy: z.enum(["t2Close", "trailingHold", "riskManagedHold"]).optional(),
           trailingProfitActivationPercent: z.number().min(0).max(100).optional(),
           trailingDrawdownPercent: z.number().min(0).max(100).optional(),
           stopLossPercent: z.number().min(0).max(100).optional(),

@@ -1,7 +1,7 @@
 import type { LeaderCandidateBacktestRow, LeaderCandidateDailyPrice } from "./leaderCandidates";
 
 export type PositionSizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
-export type ExitStrategy = "t2Close" | "riskManagedHold";
+export type ExitStrategy = "t2Close" | "trailingHold" | "riskManagedHold";
 
 export type RealisticBacktestOptions = {
   initialCapital?: number;
@@ -239,7 +239,7 @@ export function simulateRealisticTPlus1ToTPlus2(
   for (const date of eventDates) {
     // 开盘：先处理已有仓位的开盘止损，再处理新买入；同日收盘出清资金不可提前参与开盘买入。
     for (const [key, position] of Array.from(positions.entries())) {
-      if (exitStrategy !== "riskManagedHold" || !position.row.secondDayDate || date < position.row.secondDayDate) continue;
+      if (exitStrategy === "t2Close" || !position.row.secondDayDate || date < position.row.secondDayDate) continue;
       const marketOpenPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.openPrice ?? null;
       if (!validPrice(marketOpenPrice)) continue;
       const openReturnPercent = ((marketOpenPrice - position.entryPrice) / position.entryPrice) * 100;
@@ -408,7 +408,7 @@ export function simulateRealisticTPlus1ToTPlus2(
         continue;
       }
       let exitTriggerReason: string | null = null;
-      if (exitStrategy === "riskManagedHold") {
+      if (exitStrategy !== "t2Close") {
         const peakClosePrice = position.highestClosePrice;
         const peakReturnPercent = ((peakClosePrice - position.entryPrice) / position.entryPrice) * 100;
         const drawdownFromPeakPercent = peakClosePrice === 0 ? 0 : ((exitPrice - peakClosePrice) / peakClosePrice) * 100;
@@ -422,7 +422,7 @@ export function simulateRealisticTPlus1ToTPlus2(
             && (!validPrice(position.previousClosePrice) || exitPrice >= position.previousClosePrice);
           if (holdingDays >= maxHoldingDays) {
             exitTriggerReason = `达到最多续持${maxHoldingDays}个交易日`;
-          } else if (!trailingArmed && !strongClose) {
+          } else if (exitStrategy === "riskManagedHold" && !trailingArmed && !strongClose) {
             exitTriggerReason = date === position.row.secondDayDate
               ? "T+2收盘未满足强势续持条件"
               : "后续收盘未满足强势续持条件";
@@ -430,7 +430,9 @@ export function simulateRealisticTPlus1ToTPlus2(
             position.previousClosePrice = exitPrice;
             position.highestClosePrice = peakClosePrice;
             if (trade) {
-              trade.reason = trailingArmed
+              trade.reason = exitStrategy === "trailingHold"
+                ? `动态回撤止盈续持：峰值收益${round(peakReturnPercent)}%，当前回撤${round(drawdownFromPeakPercent)}%，继续持有`
+                : trailingArmed
                 ? `动态止盈已启动：峰值收益${round(peakReturnPercent)}%，当前回撤${round(drawdownFromPeakPercent)}%，继续持有`
                 : `满足强势续持：收盘收益${round(closeReturnPercent)}%，收盘不低于前收；继续持有`;
             }
