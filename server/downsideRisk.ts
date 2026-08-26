@@ -563,8 +563,8 @@ export function buildDownsideRiskResearch(
   const penaltyWeight = Math.min(1, Math.max(0, options?.penaltyWeight ?? defaultDownsideRiskPenaltyWeight));
   const autoTunePenaltyWeight = options?.autoTunePenaltyWeight ?? true;
   const hardRiskThreshold = Math.min(100, Math.max(0, options?.hardRiskThreshold ?? 65));
-  const rollingTrainTradingDays = Math.min(150, Math.max(30, Math.floor(options?.rollingTrainTradingDays ?? 90)));
-  const rollingValidationTradingDays = Math.min(60, Math.max(10, Math.floor(options?.rollingValidationTradingDays ?? 30)));
+  const rollingTrainTradingDays = Math.min(150, Math.max(30, Math.floor(options?.rollingTrainTradingDays ?? 45)));
+  const rollingValidationTradingDays = Math.min(60, Math.max(10, Math.floor(options?.rollingValidationTradingDays ?? 14)));
   const profiles = rows.map((row) => {
     const label = adverseReturnLabel(row, context, observationDays);
     const riskContributions = calculateRiskContributions(row, context);

@@ -64,6 +64,12 @@ function buildWeightSelectionFixture() {
 }
 
 describe("buildDownsideRiskResearch", () => {
+  it("默认采用45日训练与14日验证的滚动参数", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const result = buildDownsideRiskResearch(rows, { observationDays: 2 }, {}, { priceByStockDate: prices, tradingDates: dates });
+    expect(result).toMatchObject({ rollingTrainTradingDays: 45, rollingValidationTradingDays: 14 });
+  });
+
   it("只以信号日特征计分，并优先用买入后完整实际交易日最低价路径生成下行标签和可比实验", () => {
     const highRisk = row({
       stockCode: "600001.SH", stockName: "高风险", boards: 4, sectorCount: 1, score: 45, limitUpTime: "14:40:00", turnover: "1", marketCapScore: 4, phase: "高位退潮", maxBoards: 6,
