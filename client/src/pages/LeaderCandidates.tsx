@@ -39,31 +39,8 @@ export default function LeaderCandidatesPage() {
   const [manualMinScore, setManualMinScore] = useState<number | undefined>();
   const [scoreInputError, setScoreInputError] = useState<string | null>(null);
   const [priceSyncMessage, setPriceSyncMessage] = useState<string | null>(null);
-  const [realisticConfig, setRealisticConfig] = useState({
-    initialCapital: 100000,
-    maxPositions: 5,
-    commissionBps: 3,
-    stampDutyBps: 5,
-    transferFeeBps: 0.1,
-    slippageBps: 10,
-    blockLimitUpBuys: false,
-    blockLimitDownSells: false,
-    enableOneWordLimitDownProbability: false,
-    oneWordLimitDownSellProbability: 0,
-    positionSizingStrategy: "equal" as "equal" | "scoreWeighted" | "fixedPercent",
-    fixedPositionPercent: 20,
-    exitStrategy: "t2Close" as "t2Close" | "riskManagedHold",
-    takeProfitPercent: 10,
-    stopLossPercent: 5,
-    strongHoldMinReturn: 3,
-    maxHoldingDays: 5,
-    minimumExpectedOpenChangePercent: -2,
-  });
   const [chartFilters, setChartFilters] = useState<CandidateChartFilters>({ stockCode: null, sector: null, boardBucket: null, scoreBand: null });
   const [phaseFilter, setPhaseFilter] = useState<"冰点试错" | "修复上升" | "上升发酵" | "高位分歧" | "高位亢奋" | "高位退潮" | null>(null);
-  const [orderStatusFilter, setOrderStatusFilter] = useState<"all" | "filled" | "skipped">("all");
-  const [orderReasonFilter, setOrderReasonFilter] = useState("all");
-  const [orderSearch, setOrderSearch] = useState("");
   const candidateListRef = useRef<HTMLDivElement | null>(null);
   const backtestHistoryRef = useRef<HTMLDivElement | null>(null);
   const { data, isLoading, isError, refetch, isFetching } = trpc.sentiment.getLeaderCandidates.useQuery(undefined, {
@@ -72,27 +49,7 @@ export default function LeaderCandidatesPage() {
   const backtestInput = useMemo(() => ({
     observationDays,
     ...(manualMinScore === undefined ? {} : { minScore: manualMinScore }),
-    realistic: {
-      initialCapital: realisticConfig.initialCapital,
-      maxPositions: realisticConfig.maxPositions,
-      commissionRate: realisticConfig.commissionBps / 10000,
-      stampDutyRate: realisticConfig.stampDutyBps / 10000,
-      transferFeeRate: realisticConfig.transferFeeBps / 10000,
-      slippageBps: realisticConfig.slippageBps,
-      blockLimitUpBuys: realisticConfig.blockLimitUpBuys,
-      blockLimitDownSells: realisticConfig.blockLimitDownSells,
-      enableOneWordLimitDownProbability: realisticConfig.enableOneWordLimitDownProbability,
-      oneWordLimitDownSellProbability: realisticConfig.oneWordLimitDownSellProbability,
-      positionSizingStrategy: realisticConfig.positionSizingStrategy,
-      fixedPositionPercent: realisticConfig.fixedPositionPercent,
-      exitStrategy: realisticConfig.exitStrategy,
-      takeProfitPercent: realisticConfig.takeProfitPercent,
-      stopLossPercent: realisticConfig.stopLossPercent,
-      strongHoldMinReturn: realisticConfig.strongHoldMinReturn,
-      maxHoldingDays: realisticConfig.maxHoldingDays,
-      minimumExpectedOpenChangePercent: realisticConfig.minimumExpectedOpenChangePercent,
-    },
-  }), [manualMinScore, observationDays, realisticConfig]);
+  }), [manualMinScore, observationDays]);
   const { data: backtest, isLoading: backtestLoading, refetch: refetchBacktest } = trpc.sentiment.getLeaderCandidateBacktest.useQuery(backtestInput, {
     staleTime: 5 * 60_000,
   });
@@ -128,50 +85,6 @@ export default function LeaderCandidatesPage() {
   const filteredHistoricalRows = phaseFilter
     ? historicalRows.filter((row) => row.phase === phaseFilter)
     : historicalRows;
-  const realisticOrders = backtest?.realisticSimulation.trades ?? [];
-  const realisticOrderReasons = useMemo(() => Array.from(new Set(realisticOrders.map((trade) => trade.reason).filter((reason): reason is string => Boolean(reason)))).sort(), [realisticOrders]);
-  const filteredRealisticOrders = useMemo(() => {
-    const keyword = orderSearch.trim().toLowerCase();
-    return realisticOrders.filter((trade) => {
-      if (orderStatusFilter !== "all" && trade.status !== orderStatusFilter) return false;
-      if (orderReasonFilter !== "all" && trade.reason !== orderReasonFilter) return false;
-      return !keyword || `${trade.stockCode} ${trade.stockName}`.toLowerCase().includes(keyword);
-    });
-  }, [orderReasonFilter, orderSearch, orderStatusFilter, realisticOrders]);
-  useEffect(() => {
-    const legacyOrdersTable = Array.from(document.querySelectorAll("table")).find((table) => {
-      const headerText = table.querySelector("thead tr")?.textContent ?? "";
-      return headerText.includes("信号日") && headerText.includes("净收益") && !headerText.includes("收益率");
-    });
-    if (legacyOrdersTable) {
-      const headerRow = legacyOrdersTable.querySelector("thead tr");
-      if (headerRow && !headerRow.querySelector("[data-order-metric-header]")) {
-        for (const label of ["收益率", "买点涨幅"]) {
-          const header = document.createElement("th");
-          header.dataset.orderMetricHeader = "true";
-          header.className = "px-3 py-2";
-          header.textContent = label;
-          headerRow.insertBefore(header, headerRow.lastElementChild);
-        }
-      }
-      Array.from(legacyOrdersTable.querySelectorAll("tbody tr")).forEach((tableRow, index) => {
-        tableRow.querySelectorAll("[data-order-metric-cell]").forEach((cell) => cell.remove());
-        const trade = filteredRealisticOrders[index];
-        if (!trade || !tableRow.lastElementChild) return;
-        const appendMetric = (value: number | null | undefined) => {
-          const cell = document.createElement("td");
-          cell.dataset.orderMetricCell = "true";
-          cell.className = `px-3 py-2 ${value !== null && value !== undefined && value >= 0 ? "text-rose-600" : "text-emerald-700"}`;
-          cell.textContent = value === null || value === undefined ? "-" : `${value}%`;
-          tableRow.insertBefore(cell, tableRow.lastElementChild);
-        };
-        appendMetric(trade.netReturn);
-        appendMetric(trade.entryPointPremium);
-      });
-    }
-    const duplicateTitle = Array.from(document.querySelectorAll("p")).find((element) => element.textContent === "订单收益百分比与买入日涨幅");
-    duplicateTitle?.closest(".max-h-64")?.setAttribute("hidden", "true");
-  }, [filteredRealisticOrders]);
   const focusCandidateList = () => candidateListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   const applyPhaseFilter = (phase: typeof phaseFilter) => {
     setPhaseFilter(phase);
@@ -310,13 +223,6 @@ export default function LeaderCandidatesPage() {
                       {backtest.outOfSamplePremium.sampleSize === 0 && backtest.outOfSampleTPlus2Premium.sampleSize === 0 ? <p className="mt-3 text-sm text-amber-700">尚无可比价格数据。请点击“回填历史行情”拉取 Tushare 日线后刷新回测。</p> : <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><div className="rounded-lg border border-amber-100 bg-white p-3"><p className="text-xs font-semibold text-slate-500">样本外 T+1 开/收溢价</p><p className="mt-1 text-xl font-bold text-amber-700">{backtest.outOfSamplePremium.averageOpenPremium ?? "-"}% / {backtest.outOfSamplePremium.averageClosePremium ?? "-"}%</p><p className="mt-1 text-xs text-slate-500">正溢价率 {backtest.outOfSamplePremium.openPremiumPositiveRate ?? "-"}% / {backtest.outOfSamplePremium.closePremiumPositiveRate ?? "-"}%</p></div><div className="rounded-lg border border-violet-100 bg-white p-3"><p className="text-xs font-semibold text-slate-500">样本外 T+2 开/收溢价</p><p className="mt-1 text-xl font-bold text-violet-700">{backtest.outOfSampleTPlus2Premium.averageOpenPremium ?? "-"}% / {backtest.outOfSampleTPlus2Premium.averageClosePremium ?? "-"}%</p><p className="mt-1 text-xs text-slate-500">正溢价率 {backtest.outOfSampleTPlus2Premium.openPremiumPositiveRate ?? "-"}% / {backtest.outOfSampleTPlus2Premium.closePremiumPositiveRate ?? "-"}%</p></div><div className="rounded-lg border border-emerald-100 bg-white p-3"><p className="text-xs font-semibold text-slate-500">T+1 买入 → T+2 出清</p><p className="mt-1 text-xl font-bold text-emerald-700">{backtest.outOfSampleTPlus1CloseToTPlus2Close.successRate ?? "-"}%</p><p className="mt-1 text-xs text-slate-500">成功 {backtest.outOfSampleTPlus1CloseToTPlus2Close.successCount}/{backtest.outOfSampleTPlus1CloseToTPlus2Close.sampleSize} · 平均收益 {backtest.outOfSampleTPlus1CloseToTPlus2Close.averageReturn ?? "-"}%</p></div></div>}
                     </div>
                     <div className="rounded-xl border border-sky-200 bg-gradient-to-r from-sky-50 to-violet-50 p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-slate-900">组合资金回测已迁移至独立页面</p><p className="mt-1 text-xs leading-5 text-slate-600">独立页面集中提供买入预期过滤、分仓、止盈止损与续持策略、资金审计和全部订单筛选。</p></div><Link href="/backtest" className="inline-flex h-9 items-center justify-center rounded-md bg-sky-600 px-3 text-sm font-medium text-white shadow-sm hover:bg-sky-700">进入组合资金回测</Link></div></div>
-                    <p className="rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2 text-xs leading-5 text-sky-800">订单表中的“买点涨幅”按实际买入成交价（已含买入滑点）相对信号日收盘价计算，反映从信号日收盘到次日实际买点的跳空与成交摩擦；并非固定滑点或买入日内涨幅。</p>
-                    <p className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-xs leading-5 text-emerald-800">资金审计：峰值持仓 {backtest.realisticSimulation.peakOpenPositionCount}/{backtest.realisticSimulation.assumptions.maxPositions}；历史最低可用现金 ¥{formatMoney(backtest.realisticSimulation.minimumCash)}。回测在开盘前锁定已有持仓与可用现金，不允许透支或超过最大持仓。</p>
-                    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-sky-100 bg-sky-50/60 p-3"><div><p className="text-xs font-semibold text-sky-900">T+1开盘预期过滤</p><p className="mt-1 text-xs text-sky-700">以信号日收盘价为基准。开盘涨幅严格低于阈值时，视为不符合预期并跳过买入；等于阈值仍可参与。</p></div><label className="text-xs text-slate-600">最低开盘涨幅(%)<input type="number" min="-50" max="100" step="0.5" value={realisticConfig.minimumExpectedOpenChangePercent} onChange={(event) => setRealisticConfig((current) => ({ ...current, minimumExpectedOpenChangePercent: Math.min(100, Math.max(-50, Number(event.target.value) || 0)) }))} className="mt-1 block h-8 w-28 rounded-md border border-slate-200 bg-white px-2" /></label><span className="pb-1 text-xs font-medium text-sky-800">当前：低于 {realisticConfig.minimumExpectedOpenChangePercent}% 不买入</span></div>
-                    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-violet-100 bg-violet-50/60 p-3"><div><p className="text-xs font-semibold text-violet-900">分仓策略</p><p className="mt-1 text-xs text-violet-700">等权：同日可用现金等分；评分加权：按候选评分比例分配；固定比例：每笔最多使用初始资金的设定比例。</p></div><label className="text-xs text-slate-600">策略<select value={realisticConfig.positionSizingStrategy} onChange={(event) => setRealisticConfig((current) => ({ ...current, positionSizingStrategy: event.target.value === "scoreWeighted" ? "scoreWeighted" : event.target.value === "fixedPercent" ? "fixedPercent" : "equal" }))} className="mt-1 block h-8 rounded-md border border-slate-200 bg-white px-2"><option value="equal">等权分仓</option><option value="scoreWeighted">评分加权</option><option value="fixedPercent">固定单笔比例</option></select></label><label className="text-xs text-slate-600">固定单笔比例(%)<input type="number" min="1" max="100" step="1" disabled={realisticConfig.positionSizingStrategy !== "fixedPercent"} value={realisticConfig.fixedPositionPercent} onChange={(event) => setRealisticConfig((current) => ({ ...current, fixedPositionPercent: Math.min(100, Math.max(1, Number(event.target.value) || 1)) }))} className="mt-1 block h-8 w-28 rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-100" /></label></div>
-                    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-amber-100 bg-amber-50/60 p-3"><div><p className="text-xs font-semibold text-amber-900">第二日卖出策略</p><p className="mt-1 text-xs text-amber-700">固定T+2：第二个后续实际交易日收盘出清。止盈止损与强势续持：从T+2收盘起按当日收盘价判断；满足止盈/止损立即出清，收盘收益达到续持阈值且不低于前收则继续持有，最多续持至设定交易日。</p></div><label className="text-xs text-slate-600">策略<select value={realisticConfig.exitStrategy} onChange={(event) => setRealisticConfig((current) => ({ ...current, exitStrategy: event.target.value === "riskManagedHold" ? "riskManagedHold" : "t2Close" }))} className="mt-1 block h-8 rounded-md border border-slate-200 bg-white px-2"><option value="t2Close">固定T+2收盘</option><option value="riskManagedHold">止盈止损与强势续持</option></select></label><label className="text-xs text-slate-600">止盈(%)<input type="number" min="0" max="100" step="0.5" disabled={realisticConfig.exitStrategy !== "riskManagedHold"} value={realisticConfig.takeProfitPercent} onChange={(event) => setRealisticConfig((current) => ({ ...current, takeProfitPercent: Math.min(100, Math.max(0, Number(event.target.value) || 0)) }))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-100" /></label><label className="text-xs text-slate-600">止损(%)<input type="number" min="0" max="100" step="0.5" disabled={realisticConfig.exitStrategy !== "riskManagedHold"} value={realisticConfig.stopLossPercent} onChange={(event) => setRealisticConfig((current) => ({ ...current, stopLossPercent: Math.min(100, Math.max(0, Number(event.target.value) || 0)) }))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-100" /></label><label className="text-xs text-slate-600">续持阈值(%)<input type="number" min="0" max="100" step="0.5" disabled={realisticConfig.exitStrategy !== "riskManagedHold"} value={realisticConfig.strongHoldMinReturn} onChange={(event) => setRealisticConfig((current) => ({ ...current, strongHoldMinReturn: Math.min(100, Math.max(0, Number(event.target.value) || 0)) }))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-100" /></label><label className="text-xs text-slate-600">最多持有日<input type="number" min="2" max="30" step="1" disabled={realisticConfig.exitStrategy !== "riskManagedHold"} value={realisticConfig.maxHoldingDays} onChange={(event) => setRealisticConfig((current) => ({ ...current, maxHoldingDays: Math.min(30, Math.max(2, Math.floor(Number(event.target.value) || 2))) }))} className="mt-1 block h-8 w-24 rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-100" /></label></div>
-                    <div hidden className="max-h-64 overflow-auto rounded-lg border border-sky-100 bg-white"><div className="sticky top-0 border-b border-sky-100 bg-sky-50 px-3 py-2"><p className="text-xs font-semibold text-sky-800">订单收益百分比与买入日涨幅</p><p className="mt-0.5 text-[11px] text-slate-500">旧版重复明细已隐藏，订单指标以主订单表为准。</p></div></div>
-                    <div className="flex flex-col gap-3 rounded-lg border border-rose-100 bg-rose-50/50 p-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-sm font-semibold text-slate-800">一字跌停保守成交概率</p><p className="mt-1 text-xs leading-5 text-slate-500">仅在“限制跌停卖出”开启后生效。一字跌停以开盘与收盘均接近跌停价识别；概率判定使用稳定订单标识，重复回测结果可复现。未命中时继续等待后续实际交易日。</p></div><div className="flex flex-wrap items-end gap-3"><label className="flex items-center gap-1 text-xs text-slate-600"><input type="checkbox" checked={realisticConfig.enableOneWordLimitDownProbability} disabled={!realisticConfig.blockLimitDownSells} onChange={(event) => setRealisticConfig((current) => ({ ...current, enableOneWordLimitDownProbability: event.target.checked }))} />启用概率模式</label><label className="text-xs text-slate-600">成交概率(%)<input type="number" min="0" max="100" step="1" disabled={!realisticConfig.blockLimitDownSells || !realisticConfig.enableOneWordLimitDownProbability} value={realisticConfig.oneWordLimitDownSellProbability} onChange={(event) => setRealisticConfig((current) => ({ ...current, oneWordLimitDownSellProbability: Math.min(100, Math.max(0, Number(event.target.value) || 0)) }))} className="mt-1 block h-8 w-24 rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-100" /></label></div></div>
                     <p className="text-xs leading-5 text-slate-500">阈值由较早70%交易日校准（{formatDate(backtest.calibrationPeriod.startDate)}至{formatDate(backtest.calibrationPeriod.endDate)}），再在较晚30%交易日做样本外验证；若阈值样本不足20个，则不启用校准筛选。</p>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{backtest.outOfSampleScoreBands.map((band) => <div key={band.label} className="rounded-lg border border-slate-200 bg-white p-3"><p className="text-xs font-medium text-slate-600">{band.label}</p><p className="mt-1 text-lg font-bold text-slate-800">{band.successRate ?? "-"}{band.successRate === null ? "" : "%"}</p><p className="text-xs text-slate-500">{band.successCount}/{band.sampleSize} 延续 · T+1开盘 {band.premium.averageOpenPremium ?? "-"}% · T+2开/收 {band.tPlus2Premium.averageOpenPremium ?? "-"}% / {band.tPlus2Premium.averageClosePremium ?? "-"}%</p></div>)}</div>
                     <div ref={backtestHistoryRef}><div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500"><span>全样本历史明细：显示 {filteredHistoricalRows.length}/{historicalRows.length} 条（按候选日期倒序）</span>{phaseFilter && <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-700">阶段筛选：{phaseFilter}<button type="button" className="ml-1 font-bold" onClick={() => applyPhaseFilter(null)}>×</button></Badge>}</div><div className="max-h-[620px] overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[1160px] text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2 font-medium">候选日期</th><th className="px-3 py-2 font-medium">阶段</th><th className="px-3 py-2 font-medium">股票</th><th className="px-3 py-2 font-medium">题材</th><th className="px-3 py-2 font-medium">评分</th><th className="px-3 py-2 font-medium">流通市值/评分</th><th className="px-3 py-2 font-medium">连板</th><th className="px-3 py-2 font-medium">T+1 开/收溢价</th><th className="px-3 py-2 font-medium">T+2 开/收溢价</th><th className="px-3 py-2 font-medium">T+1买入→T+2出清</th><th className="px-3 py-2 font-medium">T+{backtest.observationDays}结果</th></tr></thead><tbody>{filteredHistoricalRows.map((row) => <tr key={`${row.date}-${row.stockCode}`} className="border-t border-slate-100"><td className="px-3 py-2 text-slate-600">{formatDate(row.date)}</td><td className="px-3 py-2"><Badge variant="outline" className="border-indigo-100 bg-indigo-50 text-indigo-700">{row.phase ?? "阶段缺失"}</Badge></td><td className="px-3 py-2"><p className="font-medium text-slate-800">{row.stockName}</p><p className="font-mono text-xs text-slate-500">{row.stockCode}</p></td><td className="px-3 py-2 text-slate-600">{row.sector}</td><td className="px-3 py-2 font-medium text-slate-700">{row.score}</td><td className="px-3 py-2 text-slate-600">{row.circulationValue ? `${row.circulationValue}亿 / ${row.marketCapScore}分` : "- / 0分"}</td><td className="px-3 py-2 text-orange-600">{row.boards}板</td><td className="px-3 py-2"><p className={row.nextOpenPremium !== null && row.nextOpenPremium > 0 ? "font-medium text-emerald-700" : "text-slate-600"}>开 {row.nextOpenPremium === null ? "-" : `${row.nextOpenPremium}%`}</p><p className={row.nextClosePremium !== null && row.nextClosePremium > 0 ? "font-medium text-emerald-700" : "text-slate-600"}>收 {row.nextClosePremium === null ? "-" : `${row.nextClosePremium}%`}</p></td><td className="px-3 py-2"><p className={row.secondDayOpenPremium !== null && row.secondDayOpenPremium > 0 ? "font-medium text-violet-700" : "text-slate-600"}>开 {row.secondDayOpenPremium === null ? "-" : `${row.secondDayOpenPremium}%`}</p><p className={row.secondDayClosePremium !== null && row.secondDayClosePremium > 0 ? "font-medium text-violet-700" : "text-slate-600"}>收 {row.secondDayClosePremium === null ? "-" : `${row.secondDayClosePremium}%`}</p>{getTPlus2PriceStatus(row) && <p className="mt-0.5 text-[10px] text-slate-400">{getTPlus2PriceStatus(row)}</p>}</td><td className="px-3 py-2">{row.tPlus1CloseToTPlus2CloseReturn === null ? <span className="text-slate-500">-</span> : <><p className={row.tPlus1CloseToTPlus2CloseSuccess ? "font-medium text-emerald-700" : "text-rose-600"}>{row.tPlus1CloseToTPlus2CloseReturn}%</p><p className="text-xs text-slate-500">{row.tPlus1CloseToTPlus2CloseSuccess ? "成功" : "未成功"}</p></>}</td><td className="px-3 py-2"><Badge variant="outline" className={row.success ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}>{row.success ? `T+${backtest.observationDays} ${formatDate(row.nextDate)} 延续` : `T+${backtest.observationDays} ${formatDate(row.nextDate)} 未延续`}</Badge></td></tr>)}</tbody></table></div></div>

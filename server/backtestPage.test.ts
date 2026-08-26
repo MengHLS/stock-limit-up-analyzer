@@ -13,6 +13,7 @@ describe("独立组合资金回测页面", () => {
     expect(appSource).toContain('component={Backtest}');
     expect(candidateSource).toContain('href="/backtest"');
     expect(candidateSource).toContain("组合资金回测已迁移至独立页面");
+    expect(candidateSource).not.toContain("realisticConfig");
   });
 
   it("独立页保留参数、资金审计和完整订单表", () => {
@@ -25,6 +26,8 @@ describe("独立组合资金回测页面", () => {
       "资金与仓位审计",
       "全部模拟订单",
       "minimumExpectedOpenChangePercent",
+      "oneWordLimitDownSellProbability",
+      "一字跌停保守成交概率",
       "exitStrategy",
     ]) {
       expect(pageSource).toContain(requiredText);
