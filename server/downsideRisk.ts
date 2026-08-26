@@ -106,6 +106,18 @@ export type DownsideRiskFullCycleResult = {
   endDate: string | null;
   experiments: DownsideRiskExperimentItem[];
   tradeDifferences: DownsideRiskTradeDifferenceRow[];
+  riskPenaltyAttribution: DownsideRiskPenaltyAttribution;
+};
+
+export type DownsideRiskPenaltyAttribution = {
+  baselineOnlyFilledCount: number;
+  riskPenaltyOnlyFilledCount: number;
+  commonFilledCount: number;
+  commonFilledDifferentReturnCount: number;
+  baselineOnlyNetPnl: number;
+  riskPenaltyOnlyNetPnl: number;
+  autoTunedSignalCount: number;
+  fallbackWeightSignalCount: number;
 };
 
 export type DownsideRiskTradeSnapshot = Pick<RealisticTrade,
@@ -318,6 +330,33 @@ function buildTradeDifferences(
   });
 }
 
+function buildRiskPenaltyAttribution(
+  profiles: DownsideRiskProfile[],
+  experiments: DownsideRiskExperimentItem[],
+  penaltyWeightByDate: Map<string, number>,
+): DownsideRiskPenaltyAttribution {
+  const tradesByExperiment = new Map(experiments.map((experiment) => [
+    experiment.key,
+    new Map(experiment.realisticSimulation.trades.map((trade) => [`${trade.signalDate}::${trade.stockCode}`, trade])),
+  ]));
+  const baselineTrades = tradesByExperiment.get("baseline")!;
+  const riskPenaltyTrades = tradesByExperiment.get("riskPenalty")!;
+  const keys = Array.from(new Set([...Array.from(baselineTrades.keys()), ...Array.from(riskPenaltyTrades.keys())]));
+  const baselineOnly = keys.map((key) => baselineTrades.get(key)).filter((trade): trade is RealisticTrade => Boolean(trade && trade.status === "filled" && riskPenaltyTrades.get(`${trade.signalDate}::${trade.stockCode}`)?.status === "skipped"));
+  const riskOnly = keys.map((key) => riskPenaltyTrades.get(key)).filter((trade): trade is RealisticTrade => Boolean(trade && trade.status === "filled" && baselineTrades.get(`${trade.signalDate}::${trade.stockCode}`)?.status === "skipped"));
+  const common = keys.map((key) => ({ baseline: baselineTrades.get(key), riskPenalty: riskPenaltyTrades.get(key) })).filter((pair): pair is { baseline: RealisticTrade; riskPenalty: RealisticTrade } => pair.baseline?.status === "filled" && pair.riskPenalty?.status === "filled");
+  return {
+    baselineOnlyFilledCount: baselineOnly.length,
+    riskPenaltyOnlyFilledCount: riskOnly.length,
+    commonFilledCount: common.length,
+    commonFilledDifferentReturnCount: common.filter(({ baseline, riskPenalty }) => baseline.netReturn !== riskPenalty.netReturn).length,
+    baselineOnlyNetPnl: round(baselineOnly.reduce((sum, trade) => sum + (trade.netPnl ?? 0), 0)),
+    riskPenaltyOnlyNetPnl: round(riskOnly.reduce((sum, trade) => sum + (trade.netPnl ?? 0), 0)),
+    autoTunedSignalCount: profiles.filter((profile) => penaltyWeightByDate.has(profile.row.date)).length,
+    fallbackWeightSignalCount: profiles.filter((profile) => !penaltyWeightByDate.has(profile.row.date)).length,
+  };
+}
+
 function selectPenaltyWeight(
   trainingProfiles: DownsideRiskProfile[],
   realisticOptions: RealisticBacktestOptions | undefined,
@@ -514,6 +553,7 @@ export function buildDownsideRiskResearch(
     : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
   const fullCycleDates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
   const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold);
+  const fullCycleRiskPenaltyAttribution = buildRiskPenaltyAttribution(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate);
 
   return {
     definition: `风险分仅使用信号日可见字段；下行标签为T+1开盘后连续${observationDays}个实际交易日中最低价（缺失时降级为收盘价）相对T+1开盘价的最大不利波动。滚动验证的测试段严格位于前置${rollingTrainTradingDays}个交易日校准段之后。${autoTunePenaltyWeight ? "每个校准段在固定权重网格内按训练期收益减0.5倍最大回撤寻优，选中权重只用于其后验证段。" : "风险扣分权重使用手动设定值。"}`,
@@ -542,6 +582,7 @@ export function buildDownsideRiskResearch(
       endDate: fullCycleDates.at(-1) ?? null,
       experiments: fullCycleExperiments,
       tradeDifferences: fullCycleTradeDifferences,
+      riskPenaltyAttribution: fullCycleRiskPenaltyAttribution,
     },
   };
 }

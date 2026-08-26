@@ -234,5 +234,12 @@ describe("buildDownsideRiskResearch", () => {
     expect(highRisk.riskPenalty!.score).toBeLessThan(highRisk.baseline!.score);
     expect(lowRisk).toMatchObject({ hardFilterExcluded: false });
     expect(lowRisk.hardFilter).not.toBeNull();
+    const attribution = result.fullCycle.riskPenaltyAttribution;
+    const baselineFilled = result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")!.realisticSimulation.filledCount;
+    const riskPenaltyFilled = result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.realisticSimulation.filledCount;
+    expect(attribution.baselineOnlyFilledCount + attribution.commonFilledCount).toBe(baselineFilled);
+    expect(attribution.riskPenaltyOnlyFilledCount + attribution.commonFilledCount).toBe(riskPenaltyFilled);
+    expect(attribution.commonFilledDifferentReturnCount).toBe(0);
+    expect(attribution.autoTunedSignalCount + attribution.fallbackWeightSignalCount).toBe(rows.length);
   });
 });

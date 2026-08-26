@@ -48,6 +48,12 @@ describe("独立组合资金回测页面", () => {
       "fullCycleTradeDifferences",
       "仅看有差异订单",
       "高风险过滤",
+      "风险扣分策略表现归因",
+      "data-risk-penalty-attribution",
+      "riskPenaltyAttribution",
+      "原始独有成交",
+      "扣分独有成交",
+      "自动 / 回退权重信号",
       "样本外累计拼接曲线",
       "data-walk-forward",
       "walkForward.equityCurve",
@@ -91,6 +97,8 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("fullCycle");
     expect(researchSource).toContain("tradeDifferences");
     expect(researchSource).toContain("hardFilterExcluded");
+    expect(researchSource).toContain("riskPenaltyAttribution");
+    expect(researchSource).toContain("baselineOnlyNetPnl");
     expect(researchSource).toContain("相同资金、成本、仓位、入场和唯一退出约束连续回测");
     expect(researchSource).toContain("日线成交额");
     expect(pageSource).toContain("date >= startDate");
