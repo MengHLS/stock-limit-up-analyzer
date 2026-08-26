@@ -263,4 +263,48 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-22", reason: expect.stringContaining("未满足强势续持") });
     expect(maxHolding.trades[0]).toMatchObject({ exitDate: "2026-08-21", reason: expect.stringContaining("达到最多续持3个交易日") });
   });
+
+  it("风险管理策略在T+2开盘触发止损时按开盘价立即出清", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 10, closePrice: 10.2 }],
+      ["600001.SH::2026-08-20", { openPrice: 9.4, closePrice: 9.8 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 10, nextClosePrice: 10.2, secondDayClosePrice: 9.8 })], {
+      initialCapital: 100000,
+      maxPositions: 1,
+      commissionRate: 0,
+      stampDutyRate: 0,
+      transferFeeRate: 0,
+      slippageBps: 0,
+      exitStrategy: "riskManagedHold",
+      stopLossPercent: 5,
+      takeProfitPercent: 10,
+    }, prices, ["2026-08-19", "2026-08-20"]);
+
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-20", exitPrice: 9.4, reason: expect.stringContaining("开盘触发止损") });
+  });
+
+  it("开盘止损完成后可释放仓位与现金供同日开盘候选使用，但一字跌停仍不强行成交", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 10, closePrice: 10.2 }],
+      ["600001.SH::2026-08-20", { openPrice: 9.4, closePrice: 9.8 }],
+      ["600002.SH::2026-08-20", { openPrice: 10, closePrice: 10.2 }],
+      ["600001.SH::2026-08-21", { openPrice: 9, closePrice: 9 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ stockCode: "600001.SH", date: "2026-08-18", nextDayDate: "2026-08-19", secondDayDate: "2026-08-20", nextOpenPrice: 10, nextClosePrice: 10.2, secondDayClosePrice: 9.8 }),
+      row({ stockCode: "600002.SH", date: "2026-08-19", nextDayDate: "2026-08-20", secondDayDate: "2026-08-21", nextOpenPrice: 10, nextClosePrice: 10.2, secondDayClosePrice: 10.1 }),
+    ], { initialCapital: 10000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, exitStrategy: "riskManagedHold", stopLossPercent: 5, takeProfitPercent: 10 }, prices, ["2026-08-19", "2026-08-20", "2026-08-21"]);
+    const oneWordPrices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 10, closePrice: 10.2 }],
+      ["600001.SH::2026-08-20", { openPrice: 9, closePrice: 9 }],
+    ]);
+    const oneWordLimit = simulateRealisticTPlus1ToTPlus2([
+      row({ nextOpenPrice: 10, nextClosePrice: 10.2, secondDayClosePrice: 9 }),
+    ], { initialCapital: 100000, maxPositions: 1, exitStrategy: "riskManagedHold", stopLossPercent: 5, blockLimitDownSells: true }, oneWordPrices, ["2026-08-19", "2026-08-20"]);
+
+    expect(result.trades.find((trade) => trade.stockCode === "600001.SH")).toMatchObject({ reason: expect.stringContaining("开盘触发止损") });
+    expect(result.trades.find((trade) => trade.stockCode === "600002.SH")).toMatchObject({ status: "filled", entryDate: "2026-08-20" });
+    expect(oneWordLimit.trades[0].reason).toContain("开盘触发止损但接近跌停");
+  });
 });

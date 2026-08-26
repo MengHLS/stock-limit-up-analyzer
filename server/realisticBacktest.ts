@@ -208,9 +208,42 @@ export function simulateRealisticTPlus1ToTPlus2(
   const findFilledTrade = (position: Position) => trades.find((trade) => (
     trade.stockCode === position.row.stockCode && trade.entryDate === position.row.nextDayDate && trade.status === "filled"
   ));
+  const settlePosition = (key: string, position: Position, date: string, rawExitPrice: number, reason: string | null) => {
+    const trade = findFilledTrade(position);
+    const slippedExit = rawExitPrice * (1 - slippageBps / 10_000);
+    const grossExit = slippedExit * position.shares;
+    const sellFees = grossExit * (commissionRate + stampDutyRate + transferFeeRate);
+    const proceeds = grossExit - sellFees;
+    const netPnl = proceeds - position.capitalCost;
+    cash += proceeds;
+    if (trade) {
+      trade.exitDate = date;
+      trade.exitPrice = round(slippedExit, 4);
+      trade.totalFees = round(trade.totalFees + sellFees);
+      trade.netPnl = round(netPnl);
+      trade.netReturn = round((netPnl / position.capitalCost) * 100);
+      trade.reason = reason;
+    }
+    positions.delete(key);
+  };
 
   for (const date of eventDates) {
-    // 开盘：此时当日收盘尚未发生，待出清仓位的资金不可参与今日买入。
+    // 开盘：先处理已有仓位的开盘止损，再处理新买入；同日收盘出清资金不可提前参与开盘买入。
+    for (const [key, position] of Array.from(positions.entries())) {
+      if (exitStrategy !== "riskManagedHold" || !position.row.secondDayDate || date < position.row.secondDayDate) continue;
+      const marketOpenPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.openPrice ?? null;
+      if (!validPrice(marketOpenPrice)) continue;
+      const openReturnPercent = ((marketOpenPrice - position.entryPrice) / position.entryPrice) * 100;
+      const opensAtLimitDown = validPrice(position.previousClosePrice) && marketOpenPrice <= position.previousClosePrice * 0.901;
+      if (openReturnPercent <= -stopLossPercent) {
+        if (blockLimitDownSells && opensAtLimitDown) {
+          const trade = findFilledTrade(position);
+          if (trade) trade.reason = "开盘触发止损但接近跌停，等待收盘确认可成交性";
+          continue;
+        }
+        settlePosition(key, position, date, marketOpenPrice, `开盘触发止损（${round(openReturnPercent)}% ≤ -${stopLossPercent}%）`);
+      }
+    }
     const entryRows = candidatesByEntryDate.get(date) ?? [];
     const unavailable = entryRows.filter((row) => !validPrice(row.nextOpenPrice));
     for (const row of unavailable) {
@@ -329,11 +362,16 @@ export function simulateRealisticTPlus1ToTPlus2(
       if (blockLimitDownSells && oneWordLimitDown && !oneWordProbabilityFill) {
         blockedSellCount += 1;
         position.previousClosePrice = exitPrice;
-        if (trade) trade.reason = enableOneWordLimitDownProbability
-          ? `一字跌停，保守成交概率${oneWordLimitDownSellProbability}%未命中，继续等待下一实际交易日`
-          : date === position.row.secondDayDate
-            ? "T+2一字跌停，按严格规则延后至下一实际交易日"
-            : "连续一字跌停，继续等待下一实际交易日";
+        if (trade) {
+          const delayReason = enableOneWordLimitDownProbability
+            ? `一字跌停，保守成交概率${oneWordLimitDownSellProbability}%未命中，继续等待下一实际交易日`
+            : date === position.row.secondDayDate
+              ? "T+2一字跌停，按严格规则延后至下一实际交易日"
+              : "连续一字跌停，继续等待下一实际交易日";
+          trade.reason = trade.reason?.startsWith("开盘触发止损但接近跌停")
+            ? `${trade.reason}；${delayReason}`
+            : delayReason;
+        }
         continue;
       }
       let exitTriggerReason: string | null = null;
@@ -358,23 +396,15 @@ export function simulateRealisticTPlus1ToTPlus2(
           }
         }
       }
-      const slippedExit = exitPrice * (1 - slippageBps / 10_000);
-      const grossExit = slippedExit * position.shares;
-      const sellFees = grossExit * (commissionRate + stampDutyRate + transferFeeRate);
-      const proceeds = grossExit - sellFees;
-      const netPnl = proceeds - position.capitalCost;
-      cash += proceeds;
-      if (trade) {
-        trade.exitDate = date;
-        trade.exitPrice = round(slippedExit, 4);
-        trade.totalFees = round(trade.totalFees + sellFees);
-        trade.netPnl = round(netPnl);
-        trade.netReturn = round((netPnl / position.capitalCost) * 100);
-        trade.reason = oneWordProbabilityFill
+      settlePosition(
+        key,
+        position,
+        date,
+        exitPrice,
+        oneWordProbabilityFill
           ? `一字跌停保守成交概率${oneWordLimitDownSellProbability}%命中，实际交易日出清`
-          : exitTriggerReason ?? (date === position.row.secondDayDate ? null : "跌停后延期至实际交易日出清");
-      }
-      positions.delete(key);
+          : exitTriggerReason ?? (date === position.row.secondDayDate ? null : "跌停后延期至实际交易日出清"),
+      );
     }
 
     const markedEquity = cash + Array.from(positions.values()).reduce((sum, position) => {
