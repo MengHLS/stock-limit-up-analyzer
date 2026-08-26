@@ -42,6 +42,8 @@ describe("独立组合资金回测页面", () => {
       "data-walk-forward",
       "walkForward.equityCurve",
       "样本外累计收益",
+      "全样本原始收益（未扣风险分）",
+      "样本外风险扣分收益",
       "dailyPriceCoverage",
       "滚动样本外窗口",
       "低价覆盖",
