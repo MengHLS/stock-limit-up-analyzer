@@ -22,6 +22,7 @@ export type RealisticBacktestOptions = {
   stopLossPercent?: number;
   strongHoldMinReturn?: number;
   maxHoldingDays?: number;
+  minimumExpectedOpenChangePercent?: number;
 };
 
 export type RealisticTrade = {
@@ -67,6 +68,7 @@ export type RealisticBacktestResult = {
     stopLossPercent: number;
     strongHoldMinReturn: number;
     maxHoldingDays: number;
+    minimumExpectedOpenChangePercent: number;
   };
   initialCapital: number;
   finalCapital: number;
@@ -163,6 +165,7 @@ export function simulateRealisticTPlus1ToTPlus2(
   const stopLossPercent = Math.min(100, Math.max(0, options.stopLossPercent ?? 5));
   const strongHoldMinReturn = Math.min(100, Math.max(0, options.strongHoldMinReturn ?? 3));
   const maxHoldingDays = Math.max(2, Math.floor(options.maxHoldingDays ?? 5));
+  const minimumExpectedOpenChangePercent = Math.min(100, Math.max(-50, options.minimumExpectedOpenChangePercent ?? -2));
   const assumptions = {
     initialCapital,
     maxPositions,
@@ -182,6 +185,7 @@ export function simulateRealisticTPlus1ToTPlus2(
     stopLossPercent,
     strongHoldMinReturn,
     maxHoldingDays,
+    minimumExpectedOpenChangePercent,
   };
   const sortedRows = rows.slice().sort((left, right) => (
     left.nextDayDate.localeCompare(right.nextDayDate) || right.score - left.score || left.stockCode.localeCompare(right.stockCode)
@@ -252,9 +256,22 @@ export function simulateRealisticTPlus1ToTPlus2(
     }
     const heldCodes = new Set(Array.from(positions.values()).map((position) => position.row.stockCode));
     const eligibleRows = entryRows.filter((row) => validPrice(row.nextOpenPrice));
-    const overlappingRows = eligibleRows.filter((row) => heldCodes.has(row.stockCode));
+    const belowExpectationRows = eligibleRows.filter((row) => {
+      const signalClosePrice = row.signalClosePrice;
+      return validPrice(signalClosePrice)
+        && ((row.nextOpenPrice! - signalClosePrice) / signalClosePrice) * 100 < minimumExpectedOpenChangePercent;
+    });
+    for (const row of belowExpectationRows) {
+      const signalClosePrice = row.signalClosePrice;
+      if (!validPrice(signalClosePrice)) continue;
+      const openChange = ((row.nextOpenPrice! - signalClosePrice) / signalClosePrice) * 100;
+      blockedBuyCount += 1;
+      trades.push(createSkippedTrade(row, `T+1开盘低于预期（${round(openChange)}% < ${minimumExpectedOpenChangePercent}%），不买入`));
+    }
+    const expectationEligibleRows = eligibleRows.filter((row) => !belowExpectationRows.includes(row));
+    const overlappingRows = expectationEligibleRows.filter((row) => heldCodes.has(row.stockCode));
     for (const row of overlappingRows) trades.push(createSkippedTrade(row, "同一股票已有持仓"));
-    const available = eligibleRows.filter((row) => !heldCodes.has(row.stockCode));
+    const available = expectationEligibleRows.filter((row) => !heldCodes.has(row.stockCode));
     const slots = Math.max(0, maxPositions - positions.size);
     const selected = available.slice(0, slots);
     const budgetByRow = new Map<LeaderCandidateBacktestRow, number>();

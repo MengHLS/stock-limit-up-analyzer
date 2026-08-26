@@ -83,7 +83,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     const result = simulateRealisticTPlus1ToTPlus2([
       row({ stockCode: "600001.SH", date: "2026-08-18", nextDayDate: "2026-08-19", secondDayDate: "2026-08-21", nextOpenPrice: 9.5 }),
       row({ stockCode: "600002.SH", date: "2026-08-19", nextDayDate: "2026-08-20", secondDayDate: "2026-08-22" }),
-    ], { initialCapital: 1000, maxPositions: 2, lotSize: 100 });
+    ], { initialCapital: 1000, maxPositions: 2, lotSize: 100, minimumExpectedOpenChangePercent: -10 });
 
     expect(result.trades.find((trade) => trade.stockCode === "600001.SH")).toMatchObject({ status: "filled", shares: 100 });
     expect(result.trades.find((trade) => trade.stockCode === "600002.SH")).toMatchObject({ status: "skipped", reason: "可用资金不足以买入一手" });
@@ -106,6 +106,20 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(fixed.trades.filter((trade) => trade.status === "filled").map((trade) => trade.shares)).toEqual([500, 500]);
     expect(fixed.minimumCash).toBe(10000);
     expect([equal, weighted, fixed].every((result) => result.minimumCash >= 0 && result.peakOpenPositionCount <= 2)).toBe(true);
+  });
+
+  it("T+1开盘严格低于预期阈值时跳过买入，等于阈值仍可入场且不占用资金", () => {
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ stockCode: "600001.SH", score: 90, signalClosePrice: 10, nextOpenPrice: 9.79, secondDayClosePrice: 10 }),
+      row({ stockCode: "600002.SH", score: 80, signalClosePrice: 10, nextOpenPrice: 9.8, secondDayClosePrice: 10 }),
+      row({ stockCode: "600003.SH", score: 70, signalClosePrice: 10, nextOpenPrice: 10, secondDayClosePrice: 10 }),
+    ], { initialCapital: 20000, maxPositions: 2, lotSize: 100, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, minimumExpectedOpenChangePercent: -2 });
+
+    expect(result.trades.find((trade) => trade.stockCode === "600001.SH")).toMatchObject({ status: "skipped", shares: 0, reason: expect.stringContaining("低于预期") });
+    expect(result.trades.find((trade) => trade.stockCode === "600002.SH")?.status).toBe("filled");
+    expect(result.trades.find((trade) => trade.stockCode === "600003.SH")?.status).toBe("filled");
+    expect(result).toMatchObject({ blockedBuyCount: 1, filledCount: 2, minimumCash: expect.any(Number) });
+    expect(result.minimumCash).toBeGreaterThanOrEqual(0);
   });
 
   it("按保守规则拒绝接近涨停的买入，并记录缺行情原因", () => {

@@ -728,6 +728,7 @@ export const appRouter = router({
           stopLossPercent: z.number().min(0).max(100).optional(),
           strongHoldMinReturn: z.number().min(0).max(100).optional(),
           maxHoldingDays: z.number().int().min(2).max(30).optional(),
+          minimumExpectedOpenChangePercent: z.number().min(-50).max(100).optional(),
         }).optional(),
       }).optional())
       .query(async ({ input }) => {
