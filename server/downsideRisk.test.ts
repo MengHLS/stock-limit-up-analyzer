@@ -36,6 +36,32 @@ function row(overrides: Partial<LeaderCandidateBacktestRow>): LeaderCandidateBac
   };
 }
 
+function buildWeightSelectionFixture() {
+  const dates = Array.from({ length: 42 }, (_, index) => `2026-03-${String(index + 1).padStart(2, "0")}`);
+  const rows: LeaderCandidateBacktestRow[] = [];
+  const prices = new Map<string, { openPrice: number; closePrice: number; lowPrice: number; amount: number }>();
+  for (let index = 0; index < 40; index += 1) {
+    const date = dates[index]!;
+    const secondDayDate = dates[index + 1]!;
+    const highRisk = row({
+      date, nextDate: date, nextDayDate: date, secondDayDate,
+      stockCode: `600H${String(index).padStart(3, "0")}.SH`, stockName: `高风险${index}`,
+      score: 90, boards: 4, sectorCount: 1, limitUpTime: "14:40:00", marketCapScore: 4, phase: "高位退潮", maxBoards: 6,
+    });
+    const lowRisk = row({
+      date, nextDate: date, nextDayDate: date, secondDayDate,
+      stockCode: `600L${String(index).padStart(3, "0")}.SH`, stockName: `低风险${index}`,
+      score: 80, boards: 2, sectorCount: 4, limitUpTime: "09:40:00", marketCapScore: 16, phase: "修复上升", maxBoards: 3,
+    });
+    rows.push(highRisk, lowRisk);
+    prices.set(`${highRisk.stockCode}::${date}`, { openPrice: 10, closePrice: 10, lowPrice: 9.8, amount: 5_000 });
+    prices.set(`${highRisk.stockCode}::${secondDayDate}`, { openPrice: 8, closePrice: 8, lowPrice: 8, amount: 5_000 });
+    prices.set(`${lowRisk.stockCode}::${date}`, { openPrice: 10, closePrice: 10, lowPrice: 10, amount: 90_000 });
+    prices.set(`${lowRisk.stockCode}::${secondDayDate}`, { openPrice: 12, closePrice: 12, lowPrice: 10, amount: 90_000 });
+  }
+  return { dates, rows, prices };
+}
+
 describe("buildDownsideRiskResearch", () => {
   it("只以信号日特征计分，并优先用买入后完整实际交易日最低价路径生成下行标签和可比实验", () => {
     const highRisk = row({
@@ -102,5 +128,50 @@ describe("buildDownsideRiskResearch", () => {
     expect(result.rollingWindows).toHaveLength(1);
     expect(result.rollingWindows[0]).toMatchObject({ calibrationStartDate: dates[0], calibrationEndDate: dates[29], validationStartDate: dates[30], validationEndDate: dates[39], labeledSampleSize: 10 });
     expect(result.labeledSampleSize).toBe(10);
+  });
+
+  it("在每个训练窗口内从固定网格选出更优扣分权重，并只将其用于后续验证窗口", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true,
+    }, {
+      initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0,
+      trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2,
+    }, { priceByStockDate: prices, tradingDates: dates });
+
+    const window = result.rollingWindows[0]!;
+    expect(result.autoTunePenaltyWeight).toBe(true);
+    expect(result.penaltyWeightGrid).toEqual([0, 0.15, 0.35, 0.55, 0.75, 1]);
+    expect(window.autoTunedPenaltyWeight).toBe(0.15);
+    expect(window.trainingSampleSize).toBe(60);
+    expect(window.weightTrials).toHaveLength(6);
+    expect(window.weightTrials.find((trial) => trial.penaltyWeight === 0.15)!.objectiveValue).toBeGreaterThan(window.weightTrials.find((trial) => trial.penaltyWeight === 0)!.objectiveValue);
+    expect(window.experiments.find((experiment) => experiment.key === "riskPenalty")!.realisticSimulation.assumptions.exitStrategy).toBe("riskManagedHold");
+  });
+
+  it("验证期未来价格变化不会影响已在训练期选出的权重，完全平局时选择更小权重", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const options = { observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true };
+    const realistic = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2 };
+    const before = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: prices, tradingDates: dates });
+    for (const item of rows.filter((candidate) => candidate.date >= dates[30]!)) {
+      prices.set(`${item.stockCode}::${item.nextDayDate}`, { openPrice: 10, closePrice: 1, lowPrice: 1, amount: 1 });
+      if (item.secondDayDate) prices.set(`${item.stockCode}::${item.secondDayDate}`, { openPrice: 1, closePrice: 1, lowPrice: 1, amount: 1 });
+    }
+    const after = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: prices, tradingDates: dates });
+    expect(after.rollingWindows[0]!.autoTunedPenaltyWeight).toBe(before.rollingWindows[0]!.autoTunedPenaltyWeight);
+
+    const tied = buildDownsideRiskResearch(rows.filter((candidate) => candidate.stockName.startsWith("高风险")), { observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true }, realistic, { priceByStockDate: prices, tradingDates: dates });
+    expect(tied.rollingWindows[0]!.autoTunedPenaltyWeight).toBe(0);
+  });
+
+  it("关闭自动寻优时所有验证窗口回退使用手动扣分权重", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: false, penaltyWeight: 0.55,
+    }, { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0 }, { priceByStockDate: prices, tradingDates: dates });
+
+    expect(result.rollingWindows[0]).toMatchObject({ autoTunedPenaltyWeight: 0.55, weightTrials: [] });
+    expect(result.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("手动设定");
   });
 });
