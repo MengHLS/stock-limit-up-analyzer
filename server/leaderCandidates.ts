@@ -125,6 +125,7 @@ export type LeaderCandidateBacktestResult = {
   realisticSimulation: RealisticBacktestResult;
   exitStrategyComparison: LeaderCandidateExitStrategyComparisonItem[];
   downsideRiskResearch: DownsideRiskResearchResult;
+  dailyPriceCoverage: LeaderCandidateDailyPriceCoverage;
 };
 
 export type LeaderCandidateExitStrategyComparisonItem = {
@@ -152,6 +153,7 @@ export type LeaderCandidatePhaseFunnelItem = {
 export type LeaderCandidateBacktestContext = {
   phaseByDate?: Map<string, { phase: SentimentCyclePhase; maxBoards: number }>;
   priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
+  dailyPriceCoverage?: LeaderCandidateDailyPriceCoverage;
   /** 由日线行情提供的完整实际交易日序列；价格回测不使用自然日推算。 */
   tradingDates?: string[];
 };
@@ -159,6 +161,17 @@ export type LeaderCandidateBacktestContext = {
 export type LeaderCandidateDailyPrice = {
   openPrice: number | null;
   closePrice: number | null;
+  lowPrice?: number | null;
+  amount?: number | null;
+};
+
+export type LeaderCandidateDailyPriceCoverage = {
+  rowCount: number;
+  stockCount: number;
+  startDate: string | null;
+  endDate: string | null;
+  lowPriceCount: number;
+  amountCount: number;
 };
 
 export type LeaderCandidateDailyPriceRow = {
@@ -166,6 +179,8 @@ export type LeaderCandidateDailyPriceRow = {
   tradeDate: string;
   openPrice: string | number | null;
   closePrice: string | number | null;
+  lowPrice?: string | number | null;
+  amount?: string | number | null;
 };
 
 const exitStrategyComparisonDefinitions: Array<Omit<LeaderCandidateExitStrategyComparisonItem, "realisticSimulation">> = [
@@ -197,10 +212,17 @@ export function buildLeaderCandidateDailyPriceMap(rows: LeaderCandidateDailyPric
   for (const row of rows) {
     const parsedOpenPrice = Number(row.openPrice);
     const parsedClosePrice = Number(row.closePrice);
+    const parsedLowPrice = row.lowPrice === null || row.lowPrice === undefined ? null : Number(row.lowPrice);
+    const parsedAmount = row.amount === null || row.amount === undefined ? null : Number(row.amount);
     const openPrice = Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
     const closePrice = Number.isFinite(parsedClosePrice) && parsedClosePrice > 0 ? parsedClosePrice : null;
     if (openPrice === null && closePrice === null) continue;
-    map.set(`${row.stockCode}::${row.tradeDate}`, { openPrice, closePrice });
+    map.set(`${row.stockCode}::${row.tradeDate}`, {
+      openPrice,
+      closePrice,
+      lowPrice: parsedLowPrice !== null && Number.isFinite(parsedLowPrice) && parsedLowPrice > 0 ? parsedLowPrice : null,
+      amount: parsedAmount !== null && Number.isFinite(parsedAmount) && parsedAmount >= 0 ? parsedAmount : null,
+    });
   }
   return map;
 }
@@ -602,8 +624,8 @@ export function buildLeaderCandidateBacktest(
     priceByStockDate: context.priceByStockDate,
     tradingDates: marketTradingDates,
   });
-  // 风险标签只用于后续完整观察期评估；实验基于既有70/30时间切分中的样本外候选，避免将标签期结果反向用于同一批样本的准入判断。
-  const downsideRiskResearch = buildDownsideRiskResearch(outOfSampleAtThreshold, options.downsideRisk, options.realistic, {
+  // 风险研究使用全历史候选生成多个滚动窗口；每个窗口的验证段严格位于前置训练段之后，避免固定70/30切分限制可验证样本量。
+  const downsideRiskResearch = buildDownsideRiskResearch(appliedRows, options.downsideRisk, options.realistic, {
     priceByStockDate: context.priceByStockDate,
     tradingDates: marketTradingDates,
   });
@@ -654,5 +676,6 @@ export function buildLeaderCandidateBacktest(
     realisticSimulation,
     exitStrategyComparison,
     downsideRiskResearch,
+    dailyPriceCoverage: context.dailyPriceCoverage ?? { rowCount: 0, stockCount: 0, startDate: null, endDate: null, lowPriceCount: 0, amountCount: 0 },
   };
 }

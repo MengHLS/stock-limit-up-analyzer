@@ -737,6 +737,8 @@ export const appRouter = router({
           highDownsidePercent: z.number().min(1).max(50).optional(),
           penaltyWeight: z.number().min(0).max(1).optional(),
           hardRiskThreshold: z.number().min(0).max(100).optional(),
+          rollingTrainTradingDays: z.number().int().min(30).max(150).optional(),
+          rollingValidationTradingDays: z.number().int().min(10).max(60).optional(),
         }).optional(),
       }).optional())
       .query(async ({ input }) => {

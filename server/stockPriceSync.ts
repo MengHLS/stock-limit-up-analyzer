@@ -3,7 +3,7 @@ import {
   upsertStockDailyPrices,
   type StockDailyPriceUpsert,
 } from "./db";
-import { fetchTushareDailyPricesByDate } from "./tushare";
+import { fetchTushareDailyPricesByDate, fetchTushareTradingDates } from "./tushare";
 
 export type StockPriceSyncMode = "full" | "recent";
 
@@ -34,11 +34,12 @@ const TUSHARE_SYNC_CONCURRENCY = 2;
  * 对每条涨停记录同步信号日、下一已记录交易日及下二已记录交易日价格。
  * 后两者即使股票未继续涨停也必须保存，才能评价候选池的 T+1/T+2 溢价和跨日出清。
  */
-export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[]): StockPriceSyncTarget[] {
-  const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
+export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[], marketTradingDates?: string[], futureTradingDayCount = 10): StockPriceSyncTarget[] {
+  const fallbackTradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => left.localeCompare(right));
-  const nextDateByDate = new Map(tradingDates.map((date, index) => [date, tradingDates[index + 1] ?? null]));
-  const secondDateByDate = new Map(tradingDates.map((date, index) => [date, tradingDates[index + 2] ?? null]));
+  const tradingDates = Array.from(new Set(marketTradingDates?.length ? marketTradingDates : fallbackTradingDates))
+    .sort((left, right) => left.localeCompare(right));
+  const tradingIndex = new Map(tradingDates.map((date, index) => [date, index]));
   const codesByDate = new Map<string, Set<string>>();
 
   const addTarget = (date: string | null, stockCode: string) => {
@@ -50,8 +51,10 @@ export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[]
 
   for (const record of records) {
     addTarget(record.limitUpDate, record.stockCode);
-    addTarget(nextDateByDate.get(record.limitUpDate) ?? null, record.stockCode);
-    addTarget(secondDateByDate.get(record.limitUpDate) ?? null, record.stockCode);
+    const signalIndex = tradingIndex.get(record.limitUpDate);
+    for (let offset = 1; offset <= futureTradingDayCount; offset += 1) {
+      addTarget(signalIndex === undefined ? null : tradingDates[signalIndex + offset] ?? null, record.stockCode);
+    }
   }
 
   return Array.from(codesByDate.entries())
@@ -59,10 +62,23 @@ export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[]
     .sort((left, right) => left.tradeDate.localeCompare(right.tradeDate));
 }
 
-/** 同步价格表；recent 用于每日盘后补齐近八个已记录交易日，full 用于首次历史回填。两种模式均覆盖 T+2 目标日期。 */
+/** 同步价格表；recent 用于每日盘后补齐近八个已记录交易日，full 用于首次历史回填。两种模式覆盖信号后十个实际交易日。 */
 export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promise<StockPriceSyncResult> {
   const records = await getLimitUpRecordsForStockPriceSync();
-  const allTargets = buildStockPriceSyncTargets(records);
+  const recordDates = records.map((record) => record.limitUpDate).sort((left, right) => left.localeCompare(right));
+  if (recordDates.length === 0) return { mode, targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [], dates: [] };
+  const startDate = recordDates[0];
+  const endDate = new Date(`${recordDates.at(-1)}T00:00:00Z`);
+  endDate.setUTCDate(endDate.getUTCDate() + 21);
+  const calendarEndDate = endDate.toISOString().slice(0, 10);
+  let marketTradingDates: string[];
+  try {
+    marketTradingDates = await fetchTushareTradingDates(startDate, calendarEndDate);
+  } catch (error) {
+    console.warn("[StockPriceSync] 交易日历获取失败，降级为涨停记录日期：", error);
+    marketTradingDates = Array.from(new Set(recordDates));
+  }
+  const allTargets = buildStockPriceSyncTargets(records, marketTradingDates, 10);
   const targets = mode === "full" ? allTargets : allTargets.slice(-RECENT_SYNC_DATE_COUNT);
   let savedPriceRows = 0;
   let missingPricePairs = 0;
@@ -81,6 +97,8 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
             tradeDate: price.tradeDate,
             openPrice: String(price.openPrice),
             closePrice: String(price.closePrice),
+            lowPrice: String(price.lowPrice),
+            amount: String(price.amount),
             preClosePrice: String(price.preClosePrice),
             source: "tushare",
           }));

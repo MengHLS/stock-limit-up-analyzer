@@ -36,6 +36,11 @@ describe("独立组合资金回测页面", () => {
       "riskTiers",
       "downsideRiskCurve",
       "downsideRiskResearch.experiments",
+      "rollingTrainTradingDays",
+      "rollingValidationTradingDays",
+      "dailyPriceCoverage",
+      "滚动样本外窗口",
+      "低价覆盖",
       "资金与仓位审计",
       "全部模拟订单",
       "minimumExpectedOpenChangePercent",
@@ -53,5 +58,6 @@ describe("独立组合资金回测页面", () => {
     expect(candidateSource).not.toContain("trailingDrawdownPercent");
     expect(researchSource).toContain("风险扣分策略");
     expect(researchSource).toContain("高风险硬过滤");
+    expect(researchSource).toContain("日线成交额");
   });
 });

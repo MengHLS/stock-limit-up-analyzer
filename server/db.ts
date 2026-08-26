@@ -30,6 +30,7 @@ import {
   buildLeaderCandidateDailyPriceMap,
   type LeaderCandidateBacktestOptions,
   type LeaderCandidateDailyPrice,
+  type LeaderCandidateDailyPriceCoverage,
 } from './leaderCandidates';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
 
@@ -521,7 +522,7 @@ export async function deleteMarketData(id: number): Promise<boolean> {
 
 // ==================== Stock Daily Price Functions ====================
 
-export type StockDailyPriceUpsert = Pick<InsertStockDailyPrice, "stockCode" | "tradeDate" | "openPrice" | "closePrice" | "preClosePrice" | "source">;
+export type StockDailyPriceUpsert = Pick<InsertStockDailyPrice, "stockCode" | "tradeDate" | "openPrice" | "closePrice" | "lowPrice" | "amount" | "preClosePrice" | "source">;
 
 /** 为候选池价格同步返回最小涨停记录集合。 */
 export async function getLimitUpRecordsForStockPriceSync(): Promise<Array<{ stockCode: string; limitUpDate: string }>> {
@@ -544,6 +545,8 @@ export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Pro
       set: {
         openPrice: sql`VALUES(\`openPrice\`)`,
         closePrice: sql`VALUES(\`closePrice\`)`,
+        lowPrice: sql`VALUES(\`lowPrice\`)`,
+        amount: sql`VALUES(\`amount\`)`,
         preClosePrice: sql`VALUES(\`preClosePrice\`)`,
         source: sql`VALUES(\`source\`)`,
         sourceUpdatedAt: new Date(),
@@ -563,9 +566,34 @@ export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, Lea
     tradeDate: stockDailyPrices.tradeDate,
     openPrice: stockDailyPrices.openPrice,
     closePrice: stockDailyPrices.closePrice,
+    lowPrice: stockDailyPrices.lowPrice,
+    amount: stockDailyPrices.amount,
   }).from(stockDailyPrices);
 
   return buildLeaderCandidateDailyPriceMap(rows);
+}
+
+/** 返回候选回测使用的行情覆盖状态，供研究页面提示低价与成交额的实际回填进度。 */
+export async function getLeaderCandidateDailyPriceCoverage(): Promise<LeaderCandidateDailyPriceCoverage> {
+  const db = await getDb();
+  if (!db) return { rowCount: 0, stockCount: 0, startDate: null, endDate: null, lowPriceCount: 0, amountCount: 0 };
+  const rows = await db.select({
+    rowCount: sql<number>`COUNT(*)`,
+    stockCount: sql<number>`COUNT(DISTINCT ${stockDailyPrices.stockCode})`,
+    startDate: sql<string | null>`MIN(${stockDailyPrices.tradeDate})`,
+    endDate: sql<string | null>`MAX(${stockDailyPrices.tradeDate})`,
+    lowPriceCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.lowPrice} IS NOT NULL THEN 1 ELSE 0 END)`,
+    amountCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.amount} IS NOT NULL THEN 1 ELSE 0 END)`,
+  }).from(stockDailyPrices);
+  const row = rows[0];
+  return {
+    rowCount: Number(row?.rowCount ?? 0),
+    stockCount: Number(row?.stockCount ?? 0),
+    startDate: row?.startDate ?? null,
+    endDate: row?.endDate ?? null,
+    lowPriceCount: Number(row?.lowPriceCount ?? 0),
+    amountCount: Number(row?.amountCount ?? 0),
+  };
 }
 
 /** 获取涨停数与大盘数据的关联统计（最近N天）*/
@@ -1223,6 +1251,7 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
   const priceByStockDate = await getLeaderCandidateDailyPriceMap();
+  const dailyPriceCoverage = await getLeaderCandidateDailyPriceCoverage();
   const tradingDates = Array.from(new Set(Array.from(priceByStockDate.keys()).map((key) => key.split("::").at(-1)!))).sort();
-  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate, tradingDates });
+  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage });
 }

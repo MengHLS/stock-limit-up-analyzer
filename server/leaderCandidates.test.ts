@@ -9,8 +9,8 @@ describe("buildLeaderCandidates", () => {
       { stockCode: "600003.SH", tradeDate: "2026-08-20", openPrice: "0", closePrice: "" },
     ]);
 
-    expect(map.get("600001.SH::2026-08-20")).toEqual({ openPrice: 11, closePrice: null });
-    expect(map.get("600002.SH::2026-08-20")).toEqual({ openPrice: null, closePrice: 12 });
+    expect(map.get("600001.SH::2026-08-20")).toEqual({ openPrice: 11, closePrice: null, lowPrice: null, amount: null });
+    expect(map.get("600002.SH::2026-08-20")).toEqual({ openPrice: null, closePrice: 12, lowPrice: null, amount: null });
     expect(map.has("600003.SH::2026-08-20")).toBe(false);
   });
   it("仅从最新交易日的主板涨停中生成可解释候选，并排除非主板股票", () => {

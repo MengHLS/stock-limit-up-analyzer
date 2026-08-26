@@ -74,6 +74,10 @@ export const stockDailyPrices = mysqlTable("stock_daily_prices", {
   openPrice: varchar("openPrice", { length: 24 }).notNull(),
   /** 当日收盘价 */
   closePrice: varchar("closePrice", { length: 24 }).notNull(),
+  /** 当日最低价；用于持仓期最大不利波动研究。 */
+  lowPrice: varchar("lowPrice", { length: 24 }),
+  /** 当日成交额（Tushare daily 的 amount，单位千元）。 */
+  amount: varchar("amount", { length: 32 }),
   /** 当日除权前收价 */
   preClosePrice: varchar("preClosePrice", { length: 24 }).notNull(),
   /** 行情来源，如 tushare */
