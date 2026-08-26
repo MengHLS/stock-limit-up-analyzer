@@ -203,4 +203,19 @@ describe("buildDownsideRiskResearch", () => {
       expect(experiment).toMatchObject({ totalReturn: source.realisticSimulation.totalReturn, finalCapital: source.realisticSimulation.finalCapital, completedCount: source.realisticSimulation.completedCount });
     }
   });
+
+  it("对原始、风险扣分和高风险硬过滤执行同一全周期连续回测，并只在验证段应用训练选出的权重", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const realistic = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2 };
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true, penaltyWeight: 0.35,
+    }, realistic, { priceByStockDate: prices, tradingDates: dates });
+
+    expect(result.fullCycle).toMatchObject({ startDate: dates[0], endDate: dates[39] });
+    expect(result.fullCycle.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter"]);
+    expect(result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")).toMatchObject({ inputCandidateCount: rows.length, excludedCandidateCount: 0 });
+    expect(result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("前置训练窗口自动选出的风险扣分权重");
+    expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
+    expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.initialCapital === realistic.initialCapital)).toBe(true);
+  });
 });

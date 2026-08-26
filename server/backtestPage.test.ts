@@ -38,6 +38,11 @@ describe("独立组合资金回测页面", () => {
       "选出权重",
       "训练目标",
       "trainingObjectiveValue",
+      "全周期三策略收益对比",
+      "data-full-cycle-comparison",
+      "fullCycleRiskCurve",
+      "fullCycleExperiments",
+      "全周期累计收益",
       "样本外累计拼接曲线",
       "data-walk-forward",
       "walkForward.equityCurve",
@@ -77,6 +82,8 @@ describe("独立组合资金回测页面", () => {
     expect(candidateSource).toContain("重点候选");
     expect(researchSource).toContain("风险扣分策略");
     expect(researchSource).toContain("高风险硬过滤");
+    expect(researchSource).toContain("fullCycle");
+    expect(researchSource).toContain("相同资金、成本、仓位、入场和唯一退出约束连续回测");
     expect(researchSource).toContain("日线成交额");
   });
 });

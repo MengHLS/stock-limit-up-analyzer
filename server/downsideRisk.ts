@@ -100,6 +100,13 @@ export type DownsideRiskWalkForwardResult = {
   equityCurve: Array<{ date: string; baseline: number | null; riskPenalty: number | null; hardFilter: number | null }>;
 };
 
+export type DownsideRiskFullCycleResult = {
+  definition: string;
+  startDate: string | null;
+  endDate: string | null;
+  experiments: DownsideRiskExperimentItem[];
+};
+
 export type DownsideRiskResearchResult = {
   definition: string;
   observationDays: number;
@@ -119,6 +126,7 @@ export type DownsideRiskResearchResult = {
   experiments: DownsideRiskExperimentItem[];
   rollingWindows: DownsideRiskRollingWindow[];
   walkForward: DownsideRiskWalkForwardResult | null;
+  fullCycle: DownsideRiskFullCycleResult;
 };
 
 const riskFeatures: DownsideRiskFeature[] = [
@@ -445,6 +453,10 @@ export function buildDownsideRiskResearch(
   const experiments = autoTunePenaltyWeight && rollingWindows.length > 0
     ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
     : buildExperiments(evaluationProfiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
+  const fullCycleExperiments = autoTunePenaltyWeight && rollingWindows.length > 0
+    ? buildExperimentsWithWindowWeights(profiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
+    : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
+  const fullCycleDates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
 
   return {
     definition: `风险分仅使用信号日可见字段；下行标签为T+1开盘后连续${observationDays}个实际交易日中最低价（缺失时降级为收盘价）相对T+1开盘价的最大不利波动。滚动验证的测试段严格位于前置${rollingTrainTradingDays}个交易日校准段之后。${autoTunePenaltyWeight ? "每个校准段在固定权重网格内按训练期收益减0.5倍最大回撤寻优，选中权重只用于其后验证段。" : "风险扣分权重使用手动设定值。"}`,
@@ -465,5 +477,13 @@ export function buildDownsideRiskResearch(
     experiments,
     rollingWindows,
     walkForward: buildWalkForwardResult(experiments, rollingWindows),
+    fullCycle: {
+      definition: autoTunePenaltyWeight && rollingWindows.length > 0
+        ? "三版策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。"
+        : "三版策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测；风险扣分使用手动设定权重。",
+      startDate: fullCycleDates[0] ?? null,
+      endDate: fullCycleDates.at(-1) ?? null,
+      experiments: fullCycleExperiments,
+    },
   };
 }
