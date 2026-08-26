@@ -1,5 +1,6 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
+import { buildDownsideRiskResearch, type DownsideRiskOptions, type DownsideRiskResearchResult } from "./downsideRisk";
 import { simulateRealisticTPlus1ToTPlus2, type ExitStrategy, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
 
 export type LeaderCandidateSourceRecord = {
@@ -44,6 +45,9 @@ export type LeaderCandidateResult = {
 };
 
 export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "stockName" | "sector" | "boards" | "score" | "circulationValue" | "marketCapScore"> & {
+  sectorCount?: number;
+  limitUpTime?: string | null;
+  turnover?: string | null;
   date: string;
   nextDate: string;
   nextDayDate: string;
@@ -120,6 +124,7 @@ export type LeaderCandidateBacktestResult = {
   historicalRows: LeaderCandidateBacktestRow[];
   realisticSimulation: RealisticBacktestResult;
   exitStrategyComparison: LeaderCandidateExitStrategyComparisonItem[];
+  downsideRiskResearch: DownsideRiskResearchResult;
 };
 
 export type LeaderCandidateExitStrategyComparisonItem = {
@@ -133,6 +138,7 @@ export type LeaderCandidateBacktestOptions = {
   observationDays?: 1 | 2;
   minScore?: number;
   realistic?: RealisticBacktestOptions;
+  downsideRisk?: DownsideRiskOptions;
 };
 
 export type LeaderCandidatePhaseFunnelItem = {
@@ -504,7 +510,10 @@ export function buildLeaderCandidateBacktest(
         stockName: candidate.stockName,
         sector: candidate.sector,
         boards: candidate.boards,
+        sectorCount: candidate.sectorCount,
         score: candidate.score,
+        limitUpTime: candidate.limitUpTime,
+        turnover: candidate.turnover,
         circulationValue: candidate.circulationValue,
         marketCapScore: candidate.marketCapScore,
         success: nextDayCodes.has(candidate.stockCode),
@@ -593,6 +602,11 @@ export function buildLeaderCandidateBacktest(
     priceByStockDate: context.priceByStockDate,
     tradingDates: marketTradingDates,
   });
+  // 风险标签只用于后续完整观察期评估；实验基于既有70/30时间切分中的样本外候选，避免将标签期结果反向用于同一批样本的准入判断。
+  const downsideRiskResearch = buildDownsideRiskResearch(outOfSampleAtThreshold, options.downsideRisk, options.realistic, {
+    priceByStockDate: context.priceByStockDate,
+    tradingDates: marketTradingDates,
+  });
   const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
@@ -639,5 +653,6 @@ export function buildLeaderCandidateBacktest(
     historicalRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score),
     realisticSimulation,
     exitStrategyComparison,
+    downsideRiskResearch,
   };
 }

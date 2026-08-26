@@ -731,6 +731,13 @@ export const appRouter = router({
           maxHoldingDays: z.number().int().min(2).max(30).optional(),
           minimumExpectedOpenChangePercent: z.number().min(-50).max(100).optional(),
         }).optional(),
+        downsideRisk: z.object({
+          observationDays: z.number().int().min(2).max(10).optional(),
+          mediumDownsidePercent: z.number().min(1).max(50).optional(),
+          highDownsidePercent: z.number().min(1).max(50).optional(),
+          penaltyWeight: z.number().min(0).max(1).optional(),
+          hardRiskThreshold: z.number().min(0).max(100).optional(),
+        }).optional(),
       }).optional())
       .query(async ({ input }) => {
         return await getLeaderCandidateBacktest(input);

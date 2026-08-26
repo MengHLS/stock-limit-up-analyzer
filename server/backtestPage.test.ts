@@ -30,6 +30,12 @@ describe("独立组合资金回测页面", () => {
       "累计收益率",
       "exitStrategyComparison",
       "comparisonCurve",
+      "下行风险评分实验框架",
+      "下行风险研究参数",
+      "featureMatrix",
+      "riskTiers",
+      "downsideRiskCurve",
+      "downsideRiskResearch.experiments",
       "资金与仓位审计",
       "全部模拟订单",
       "minimumExpectedOpenChangePercent",
@@ -42,7 +48,10 @@ describe("独立组合资金回测页面", () => {
       expect(pageSource).toContain(requiredText);
     }
     const candidateSource = readFileSync(resolve(projectRoot, "client/src/pages/LeaderCandidates.tsx"), "utf8");
+    const researchSource = readFileSync(resolve(projectRoot, "server/downsideRisk.ts"), "utf8");
     expect(candidateSource).not.toContain("trailingProfitActivationPercent");
     expect(candidateSource).not.toContain("trailingDrawdownPercent");
+    expect(researchSource).toContain("风险扣分策略");
+    expect(researchSource).toContain("高风险硬过滤");
   });
 });
