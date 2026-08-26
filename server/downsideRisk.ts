@@ -81,6 +81,25 @@ export type DownsideRiskRollingWindow = {
   experiments: Array<Pick<DownsideRiskExperimentItem, "key" | "inputCandidateCount" | "excludedCandidateCount" | "realisticSimulation">>;
 };
 
+export type DownsideRiskWalkForwardExperiment = {
+  key: DownsideRiskExperimentItem["key"];
+  label: string;
+  totalReturn: number;
+  maxDrawdown: number;
+  finalCapital: number;
+  filledCount: number;
+  completedCount: number;
+};
+
+export type DownsideRiskWalkForwardResult = {
+  definition: string;
+  startDate: string | null;
+  endDate: string | null;
+  validationWindowCount: number;
+  experiments: DownsideRiskWalkForwardExperiment[];
+  equityCurve: Array<{ date: string; baseline: number | null; riskPenalty: number | null; hardFilter: number | null }>;
+};
+
 export type DownsideRiskResearchResult = {
   definition: string;
   observationDays: number;
@@ -99,6 +118,7 @@ export type DownsideRiskResearchResult = {
   riskTiers: DownsideRiskTierSummary[];
   experiments: DownsideRiskExperimentItem[];
   rollingWindows: DownsideRiskRollingWindow[];
+  walkForward: DownsideRiskWalkForwardResult | null;
 };
 
 const riskFeatures: DownsideRiskFeature[] = [
@@ -316,6 +336,55 @@ function buildRollingWindows(
   return { windows, penaltyWeightByDate };
 }
 
+function buildWalkForwardResult(
+  experiments: DownsideRiskExperimentItem[],
+  rollingWindows: DownsideRiskRollingWindow[],
+): DownsideRiskWalkForwardResult | null {
+  if (rollingWindows.length === 0 || experiments.length === 0) return null;
+  const startDate = rollingWindows[0]!.validationStartDate;
+  const completedExitDates = experiments.flatMap((experiment) => experiment.realisticSimulation.trades
+    .filter((trade) => trade.status === "filled" && trade.netPnl !== null && trade.exitDate !== null)
+    .map((trade) => trade.exitDate!));
+  const endDate = [...completedExitDates, rollingWindows.at(-1)!.validationEndDate].sort().at(-1)!;
+  const curveByExperiment = new Map(experiments.map((experiment) => [
+    experiment.key,
+    new Map(experiment.realisticSimulation.equityCurve
+      .filter((point) => point.date >= startDate && point.date <= endDate)
+      .map((point) => [point.date, point.equity])),
+  ]));
+  const dates = Array.from(new Set(experiments.flatMap((experiment) => experiment.realisticSimulation.equityCurve
+    .filter((point) => point.date >= startDate && point.date <= endDate)
+    .map((point) => point.date)))).sort();
+  const initialCapitalByKey = new Map(experiments.map((experiment) => [experiment.key, experiment.realisticSimulation.initialCapital]));
+  const returnAt = (key: DownsideRiskExperimentItem["key"], date: string) => {
+    const equity = curveByExperiment.get(key)?.get(date);
+    const initialCapital = initialCapitalByKey.get(key);
+    return equity === undefined || !initialCapital ? null : round(((equity / initialCapital) - 1) * 100);
+  };
+
+  return {
+    definition: "按时间顺序合并各无重叠验证窗口的候选，并在同一连续资金账户内重新执行；每个信号日只使用其前置训练窗口选出的权重。窗口边界不重置资金或持仓，因此曲线为复利口径的整体样本外表现。",
+    startDate,
+    endDate,
+    validationWindowCount: rollingWindows.length,
+    experiments: experiments.map((experiment) => ({
+      key: experiment.key,
+      label: experiment.label,
+      totalReturn: experiment.realisticSimulation.totalReturn,
+      maxDrawdown: experiment.realisticSimulation.maxDrawdown,
+      finalCapital: experiment.realisticSimulation.finalCapital,
+      filledCount: experiment.realisticSimulation.filledCount,
+      completedCount: experiment.realisticSimulation.completedCount,
+    })),
+    equityCurve: dates.map((date) => ({
+      date,
+      baseline: returnAt("baseline", date),
+      riskPenalty: returnAt("riskPenalty", date),
+      hardFilter: returnAt("hardFilter", date),
+    })),
+  };
+}
+
 /**
  * 风险分只读取候选信号日字段；买入后日内最低价路径只用于事后标签。滚动验证窗口的测试段严格位于校准段之后。
  */
@@ -373,6 +442,10 @@ export function buildDownsideRiskResearch(
   const lowPriceLabelSampleSize = evaluationProfiles.filter((profile) => profile.usedLowPriceForLabel).length;
   const signalAmountSampleSize = evaluationProfiles.filter((profile) => readSignalPrice(profile.row, context)?.amount !== null && readSignalPrice(profile.row, context)?.amount !== undefined).length;
 
+  const experiments = autoTunePenaltyWeight && rollingWindows.length > 0
+    ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
+    : buildExperiments(evaluationProfiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
+
   return {
     definition: `风险分仅使用信号日可见字段；下行标签为T+1开盘后连续${observationDays}个实际交易日中最低价（缺失时降级为收盘价）相对T+1开盘价的最大不利波动。滚动验证的测试段严格位于前置${rollingTrainTradingDays}个交易日校准段之后。${autoTunePenaltyWeight ? "每个校准段在固定权重网格内按训练期收益减0.5倍最大回撤寻优，选中权重只用于其后验证段。" : "风险扣分权重使用手动设定值。"}`,
     observationDays,
@@ -389,9 +462,8 @@ export function buildDownsideRiskResearch(
     lowPriceLabelSampleSize,
     signalAmountSampleSize,
     riskTiers,
-    experiments: autoTunePenaltyWeight && rollingWindows.length > 0
-      ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
-      : buildExperiments(evaluationProfiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；"),
+    experiments,
     rollingWindows,
+    walkForward: buildWalkForwardResult(experiments, rollingWindows),
   };
 }

@@ -174,4 +174,33 @@ describe("buildDownsideRiskResearch", () => {
     expect(result.rollingWindows[0]).toMatchObject({ autoTunedPenaltyWeight: 0.55, weightTrials: [] });
     expect(result.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("手动设定");
   });
+
+  it("将全部无重叠验证窗口在同一连续资金账户中拼接，并返回有序且无重复的整体样本外曲线", () => {
+    const dates = Array.from({ length: 72 }, (_, index) => `2026-04-${String(index + 1).padStart(2, "0")}`);
+    const rows = dates.slice(0, 70).map((date, index) => row({
+      date, nextDate: date, nextDayDate: date, secondDayDate: dates[index + 1]!,
+      stockCode: `601${String(index).padStart(3, "0")}.SH`, stockName: `拼接${index}`,
+    }));
+    const prices = new Map<string, { openPrice: number; closePrice: number; lowPrice: number; amount: number }>();
+    for (const item of rows) {
+      prices.set(`${item.stockCode}::${item.nextDayDate}`, { openPrice: 10, closePrice: 10, lowPrice: 9.8, amount: 60_000 });
+      prices.set(`${item.stockCode}::${item.secondDayDate}`, { openPrice: 10.5, closePrice: 10.5, lowPrice: 10, amount: 60_000 });
+    }
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: false, penaltyWeight: 0.35,
+    }, {
+      initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0,
+      trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2,
+    }, { priceByStockDate: prices, tradingDates: dates });
+
+    const walkForward = result.walkForward!;
+    expect(result.rollingWindows).toHaveLength(4);
+    expect(walkForward).toMatchObject({ startDate: dates[30], endDate: dates[69], validationWindowCount: 4 });
+    expect(walkForward.equityCurve.map((point) => point.date)).toEqual([...walkForward.equityCurve.map((point) => point.date)].sort());
+    expect(new Set(walkForward.equityCurve.map((point) => point.date)).size).toBe(walkForward.equityCurve.length);
+    for (const experiment of walkForward.experiments) {
+      const source = result.experiments.find((item) => item.key === experiment.key)!;
+      expect(experiment).toMatchObject({ totalReturn: source.realisticSimulation.totalReturn, finalCapital: source.realisticSimulation.finalCapital, completedCount: source.realisticSimulation.completedCount });
+    }
+  });
 });
