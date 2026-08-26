@@ -53,8 +53,8 @@ export default function BacktestPage() {
     const search = keyword.trim().toLowerCase();
     return orders.filter((order) => (orderStatus === "all" || order.status === orderStatus) && (reason === "all" || order.reason === reason) && (!search || `${order.stockCode} ${order.stockName}`.toLowerCase().includes(search)));
   }, [keyword, orderStatus, orders, reason]);
-  const buildCurve = (items: Array<{ key: string; realisticSimulation: { equityCurve: Array<{ date: string; equity: number }>; initialCapital: number } }>) => {
-    const dates = Array.from(new Set(items.flatMap((item) => item.realisticSimulation.equityCurve.map((point) => point.date)))).sort();
+  const buildCurve = (items: Array<{ key: string; realisticSimulation: { equityCurve: Array<{ date: string; equity: number }>; initialCapital: number } }>, startDate?: string | null) => {
+    const dates = Array.from(new Set(items.flatMap((item) => item.realisticSimulation.equityCurve.map((point) => point.date)))).sort().filter((date) => !startDate || date >= startDate);
     return dates.map((date) => {
       const point: Record<string, string | number> = { date: date.slice(5) };
       for (const item of items) {
@@ -65,7 +65,7 @@ export default function BacktestPage() {
     });
   };
   const downsideRiskCurve = useMemo(() => buildCurve((downsideRiskResearch?.experiments ?? []).map((item) => ({ key: item.key, realisticSimulation: item.realisticSimulation }))), [downsideRiskResearch]);
-  const fullCycleRiskCurve = useMemo(() => buildCurve(fullCycleExperiments.map((item) => ({ key: item.key, realisticSimulation: item.realisticSimulation }))), [fullCycleExperiments]);
+  const fullCycleRiskCurve = useMemo(() => buildCurve(fullCycleExperiments.map((item) => ({ key: item.key, realisticSimulation: item.realisticSimulation })), downsideRiskResearch?.fullCycle.startDate), [downsideRiskResearch?.fullCycle.startDate, fullCycleExperiments]);
   const displayedTradeDifferences = useMemo(() => {
     const search = tradeDiffKeyword.trim().toLowerCase();
     const signature = (trade: TradeDiffSnapshot | null) => trade ? [trade.status, trade.score, trade.shares, trade.entryDate, trade.exitDate, trade.entryPrice, trade.exitPrice, trade.netReturn, trade.reason].join("|") : "";

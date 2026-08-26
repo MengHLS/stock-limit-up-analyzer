@@ -74,6 +74,7 @@ describe("独立组合资金回测页面", () => {
     expect(pageSource).not.toContain("exitStrategy:");
     const candidateSource = readFileSync(resolve(projectRoot, "client/src/pages/LeaderCandidates.tsx"), "utf8");
     const researchSource = readFileSync(resolve(projectRoot, "server/downsideRisk.ts"), "utf8");
+    const styleSource = readFileSync(resolve(projectRoot, "client/src/index.css"), "utf8");
     expect(candidateSource).not.toContain("trailingProfitActivationPercent");
     expect(candidateSource).not.toContain("trailingDrawdownPercent");
     expect(candidateSource).toContain("龙头评分");
@@ -92,5 +93,10 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("hardFilterExcluded");
     expect(researchSource).toContain("相同资金、成本、仓位、入场和唯一退出约束连续回测");
     expect(researchSource).toContain("日线成交额");
+    expect(pageSource).toContain("date >= startDate");
+    expect(pageSource).toContain("downsideRiskResearch?.fullCycle.startDate");
+    expect(styleSource).toContain("[data-trade-difference-table] > div:last-child");
+    expect(styleSource).toContain("max-height: 42rem");
+    expect(styleSource).toContain("position: sticky");
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDownsideRiskResearch } from "./downsideRisk";
 import type { LeaderCandidateBacktestRow } from "./leaderCandidates";
+import { simulateRealisticTPlus1ToTPlus2 } from "./realisticBacktest";
 
 function row(overrides: Partial<LeaderCandidateBacktestRow>): LeaderCandidateBacktestRow {
   return {
@@ -217,6 +218,14 @@ describe("buildDownsideRiskResearch", () => {
     expect(result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("前置训练窗口自动选出的风险扣分权重");
     expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
     expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.initialCapital === realistic.initialCapital)).toBe(true);
+    const standaloneBaseline = simulateRealisticTPlus1ToTPlus2(rows, realistic, prices, dates);
+    expect(result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")!.realisticSimulation).toMatchObject({
+      totalReturn: standaloneBaseline.totalReturn,
+      finalCapital: standaloneBaseline.finalCapital,
+      maxDrawdown: standaloneBaseline.maxDrawdown,
+      filledCount: standaloneBaseline.filledCount,
+      completedCount: standaloneBaseline.completedCount,
+    });
     expect(result.fullCycle.tradeDifferences).toHaveLength(rows.length);
     expect(new Set(result.fullCycle.tradeDifferences.map((item) => `${item.signalDate}::${item.stockCode}`)).size).toBe(rows.length);
     const highRisk = result.fullCycle.tradeDifferences.find((item) => item.stockName.startsWith("高风险"))!;
