@@ -259,6 +259,17 @@ describe("buildLeaderCandidates", () => {
     expect(fridayRow).toMatchObject({ nextDayDate: "2026-08-24", secondDayDate: "2026-08-25", secondDayClosePrice: 11 });
   });
 
+  it("成功观察日使用完整市场交易日历，不因中间无涨停记录而跳过实际T+1", () => {
+    const records = ["600001.SH", "600002.SH", "600003.SH"].flatMap((stockCode, index) => [
+      { stockCode, stockName: `主板${index + 1}`, limitUpDate: "2026-08-18", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      ...(stockCode === "600001.SH" ? [{ stockCode, stockName: "主板1", limitUpDate: "2026-08-20", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" }] : []),
+    ]);
+    const result = buildLeaderCandidateBacktest(records, { minScore: 0 }, { tradingDates: ["2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21"] });
+    const signalRow = result.historicalRows.find((row) => row.date === "2026-08-18" && row.stockCode === "600001.SH");
+
+    expect(signalRow).toMatchObject({ nextDate: "2026-08-19", nextDayDate: "2026-08-19", success: false });
+  });
+
   it("回测覆盖每个可观察交易日的全部候选，而非每日期20只或近期30条明细", () => {
     const stockCodes = Array.from({ length: 25 }, (_, index) => `600${String(index + 100).padStart(3, "0")}.SH`);
     const dates = ["2026-08-18", "2026-08-19", "2026-08-20"];

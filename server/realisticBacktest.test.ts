@@ -48,7 +48,7 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     });
 
     expect(result.filledCount).toBe(1);
-    expect(result.trades[0]).toMatchObject({ status: "filled", shares: 900, entryPrice: 10.5105, exitPrice: 10.989, netReturn: expect.any(Number), entryPointPremium: 0.1 });
+    expect(result.trades[0]).toMatchObject({ status: "filled", shares: 900, entryPrice: 10.5105, exitPrice: 10.989, netReturn: expect.any(Number), entryPointPremium: 5.11 });
     expect(result.trades[0].netPnl).toBeGreaterThan(0);
     expect(result.equityCurve.length).toBe(2);
     expect(result.finalCapital).toBeGreaterThan(result.initialCapital);
@@ -68,6 +68,16 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(result.trades.find((trade) => trade.stockCode === "600002.SH")?.reason).toBe("资金按评分排序优先分配");
   });
 
+  it("同日开盘买入不能使用当日收盘出清所得资金，也不能在原持仓收盘前释放仓位", () => {
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ stockCode: "600001.SH", date: "2026-08-18", nextDayDate: "2026-08-19", secondDayDate: "2026-08-20" }),
+      row({ stockCode: "600002.SH", date: "2026-08-19", nextDayDate: "2026-08-20", secondDayDate: "2026-08-21" }),
+    ], { initialCapital: 10000, maxPositions: 1 });
+
+    expect(result.trades.find((trade) => trade.stockCode === "600001.SH")).toMatchObject({ status: "filled", exitDate: "2026-08-20" });
+    expect(result.trades.find((trade) => trade.stockCode === "600002.SH")).toMatchObject({ status: "skipped", reason: "超过最大持仓数" });
+  });
+
   it("按保守规则拒绝接近涨停的买入，并记录缺行情原因", () => {
     const blocked = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 11 })], { initialCapital: 100000, blockLimitUpBuys: true });
     expect(blocked.filledCount).toBe(0);
@@ -75,12 +85,12 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(blocked.trades[0].reason).toContain("涨停");
 
     const missing = simulateRealisticTPlus1ToTPlus2([row({ secondDayClosePrice: null })], { initialCapital: 100000 });
-    expect(missing.filledCount).toBe(0);
+    expect(missing.filledCount).toBe(1);
     expect(missing.missingDataCount).toBe(1);
-    expect(missing.trades[0].reason).toBe("T+2实际交易日无可用收盘价");
+    expect(missing.trades[0].reason).toContain("T+2收盘行情缺失");
 
     const missingEntryClose = simulateRealisticTPlus1ToTPlus2([row({ nextClosePrice: null })], { initialCapital: 100000 });
-    expect(missingEntryClose.trades[0]).toMatchObject({ status: "filled", entryPointPremium: 0.1 });
+    expect(missingEntryClose.trades[0]).toMatchObject({ status: "filled", entryPointPremium: 5.11 });
   });
 
   it("按实际交易日而非自然日跨周末与节假日出清", () => {
@@ -102,8 +112,9 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
       row({ secondDayDate: null, secondDayClosePrice: null }),
     ], { initialCapital: 100000 });
 
-    expect(result.trades[0]).toMatchObject({ status: "skipped", exitDate: null, reason: "未到T+2实际交易日" });
-    expect(result.openPositionCount).toBe(0);
+    expect(result.trades[0]).toMatchObject({ status: "filled", entryDate: "2026-08-19", exitDate: null, netPnl: null });
+    expect(result.trades[0].reason).toContain("回测结束仍持仓");
+    expect(result.openPositionCount).toBe(1);
   });
 
   it("限制跌停卖出时在后续实际交易日持续尝试出清，而非停止回测", () => {

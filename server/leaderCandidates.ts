@@ -437,11 +437,15 @@ export function buildLeaderCandidateBacktest(
 
   const stockNameByCode = buildLatestStockNameMap(records);
   const rows: LeaderCandidateBacktestRow[] = [];
-  // 最后 observationDays 个交易日缺少完整观察结果，主动排除，确保结果位于信号日之后。
-  for (let index = 0; index < candidateTradingDates.length - observationDays; index += 1) {
+  // 信号日只来自涨停记录；观察日优先来自完整市场交易日历，避免无涨停日被误跳过。
+  for (let index = 0; index < candidateTradingDates.length; index += 1) {
     const date = candidateTradingDates[index];
-    const nextDate = candidateTradingDates[index + observationDays];
     const marketIndex = marketTradingDateIndex.get(date);
+    const nextDate = marketIndex === undefined
+      ? candidateTradingDates[index + observationDays]
+      : marketTradingDates[marketIndex + observationDays];
+    // 最后 observationDays 个实际交易日缺少完整观察结果，主动排除，确保结果位于信号日之后。
+    if (!nextDate) continue;
     const nextDayDate = marketIndex === undefined
       ? candidateTradingDates[index + 1]
       : marketTradingDates[marketIndex + 1] ?? candidateTradingDates[index + 1];
