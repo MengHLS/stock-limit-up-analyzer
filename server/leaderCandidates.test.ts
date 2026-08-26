@@ -69,6 +69,26 @@ describe("buildLeaderCandidates", () => {
     expect(withFuture.candidates[0]).toMatchObject({ riskScore: candidate.riskScore, riskPenalty: candidate.riskPenalty, netScore: candidate.netScore });
   });
 
+  it("全样本历史明细为每条候选保留信号日风险分、扣分和净评分，且不读取后续日线成交额", () => {
+    const records = [
+      { stockCode: "600010.SH", stockName: "历史高风险", limitUpDate: "2026-08-18", limitUpTime: "10:00:00", sector: "题材A", turnover: "2", circulationValue: "10" },
+      { stockCode: "600010.SH", stockName: "历史高风险", limitUpDate: "2026-08-19", limitUpTime: "14:40:00", sector: "题材A", turnover: "2", circulationValue: "10" },
+      { stockCode: "600010.SH", stockName: "历史高风险", limitUpDate: "2026-08-20", limitUpTime: "14:40:00", sector: "题材A", turnover: "2", circulationValue: "10" },
+    ];
+    const basePrices = new Map([
+      ["600010.SH::2026-08-19", { openPrice: 10, closePrice: 10, amount: 5_000 }],
+      ["600010.SH::2026-08-20", { openPrice: 10, closePrice: 10, amount: 8_000 }],
+    ]);
+    const phaseByDate = new Map([["2026-08-19", { phase: "高位退潮" as const, maxBoards: 6 }]]);
+    const build = (prices: typeof basePrices) => buildLeaderCandidateBacktest(records, {}, { phaseByDate, priceByStockDate: prices, tradingDates: ["2026-08-18", "2026-08-19", "2026-08-20"] });
+    const historicalRow = build(basePrices).historicalRows.find((row) => row.date === "2026-08-19")!;
+    const withChangedLaterAmount = new Map([...basePrices, ["600010.SH::2026-08-20", { openPrice: 10, closePrice: 10, amount: 999_999 }]]);
+    const historicalRowWithChangedLaterAmount = build(withChangedLaterAmount).historicalRows.find((row) => row.date === "2026-08-19")!;
+
+    expect(historicalRow).toMatchObject({ riskScore: 100, riskTier: "高风险", riskPenalty: 35, netScore: 0 });
+    expect(historicalRowWithChangedLaterAmount).toMatchObject({ riskScore: historicalRow.riskScore, riskPenalty: historicalRow.riskPenalty, netScore: historicalRow.netScore });
+  });
+
   it("同一股票同日重复记录时保留较早封板记录，避免重复统计", () => {
     const result = buildLeaderCandidates([
       { stockCode: "600001.SH", stockName: "主板甲", limitUpDate: "2026-08-20", limitUpTime: "14:20:00", sector: "题材A", turnover: "5", circulationValue: null },

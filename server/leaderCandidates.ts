@@ -52,6 +52,11 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   sectorCount?: number;
   limitUpTime?: string | null;
   turnover?: string | null;
+  /** 信号日可见的下行风险字段；不参与既有原始评分阈值与排序。 */
+  riskScore?: number;
+  riskTier?: "低风险" | "中风险" | "高风险";
+  riskPenalty?: number;
+  netScore?: number;
   date: string;
   nextDate: string;
   nextDayDate: string;
@@ -558,7 +563,12 @@ export function buildLeaderCandidateBacktest(
       ? candidateTradingDates[index + 2] ?? null
       : marketTradingDates[marketIndex + 2] ?? null;
     // 回测须覆盖T日所有满足规则的主板候选，不能沿用当前页面每日期20只的展示上限。
-    const candidateResult = buildLeaderCandidatesForDate(records, date, { candidateLimit: null, stockNameByCode });
+    const candidateResult = buildLeaderCandidatesForDate(records, date, {
+      candidateLimit: null,
+      stockNameByCode,
+      phaseByDate: context.phaseByDate,
+      priceByStockDate: context.priceByStockDate,
+    });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
     const phaseContext = context.phaseByDate?.get(date);
 
@@ -580,6 +590,10 @@ export function buildLeaderCandidateBacktest(
         boards: candidate.boards,
         sectorCount: candidate.sectorCount,
         score: candidate.score,
+        riskScore: candidate.riskScore,
+        riskTier: candidate.riskTier,
+        riskPenalty: candidate.riskPenalty,
+        netScore: candidate.netScore,
         limitUpTime: candidate.limitUpTime,
         turnover: candidate.turnover,
         circulationValue: candidate.circulationValue,
