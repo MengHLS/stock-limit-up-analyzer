@@ -1230,7 +1230,20 @@ export async function getLeaderCandidates() {
     circulationValue: limitUpRecords.circulationValue,
   }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
 
-  return buildLeaderCandidates(records);
+  const latestDate = records[0]?.limitUpDate;
+  if (!latestDate) return buildLeaderCandidates(records);
+  const cycleAnalysis = buildSentimentCycleAnalysis(records);
+  const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
+  const signalDayPrices = await db.select({
+    stockCode: stockDailyPrices.stockCode,
+    tradeDate: stockDailyPrices.tradeDate,
+    openPrice: stockDailyPrices.openPrice,
+    closePrice: stockDailyPrices.closePrice,
+    lowPrice: stockDailyPrices.lowPrice,
+    amount: stockDailyPrices.amount,
+  }).from(stockDailyPrices).where(eq(stockDailyPrices.tradeDate, latestDate));
+  const priceByStockDate = buildLeaderCandidateDailyPriceMap(signalDayPrices);
+  return buildLeaderCandidates(records, { phaseByDate, priceByStockDate });
 }
 
 /** 获取基于历史候选池的T+1连板延续回测结果。 */

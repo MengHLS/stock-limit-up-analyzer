@@ -51,6 +51,24 @@ describe("buildLeaderCandidates", () => {
     expect(result.candidates).toHaveLength(0);
   });
 
+  it("将信号日风险分、扣分和净评分并列返回，且不读取未来日线行情", () => {
+    const records = [
+      { stockCode: "600010.SH", stockName: "高风险甲", limitUpDate: "2026-08-18", limitUpTime: "10:00:00", sector: "题材A", turnover: "2", circulationValue: "10" },
+      { stockCode: "600010.SH", stockName: "高风险甲", limitUpDate: "2026-08-19", limitUpTime: "14:40:00", sector: "题材A", turnover: "2", circulationValue: "10" },
+    ];
+    const phaseByDate = new Map([["2026-08-19", { phase: "高位退潮" as const, maxBoards: 6 }]]);
+    const signalOnlyPrices = new Map([["600010.SH::2026-08-19", { openPrice: 10, closePrice: 10, amount: 5_000 }]]);
+    const withFuturePrice = new Map([...signalOnlyPrices, ["600010.SH::2026-08-20", { openPrice: 10, closePrice: 10, amount: 999_999 }]]);
+
+    const withoutFuture = buildLeaderCandidates(records, { phaseByDate, priceByStockDate: signalOnlyPrices });
+    const withFuture = buildLeaderCandidates(records, { phaseByDate, priceByStockDate: withFuturePrice });
+    const candidate = withoutFuture.candidates[0]!;
+
+    expect(candidate).toMatchObject({ score: 24, riskScore: 100, riskTier: "高风险", riskPenalty: 35, netScore: 0 });
+    expect(candidate.riskTags).toContain("下行风险偏高");
+    expect(withFuture.candidates[0]).toMatchObject({ riskScore: candidate.riskScore, riskPenalty: candidate.riskPenalty, netScore: candidate.netScore });
+  });
+
   it("同一股票同日重复记录时保留较早封板记录，避免重复统计", () => {
     const result = buildLeaderCandidates([
       { stockCode: "600001.SH", stockName: "主板甲", limitUpDate: "2026-08-20", limitUpTime: "14:20:00", sector: "题材A", turnover: "5", circulationValue: null },

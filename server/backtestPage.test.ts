@@ -56,6 +56,10 @@ describe("独立组合资金回测页面", () => {
     const researchSource = readFileSync(resolve(projectRoot, "server/downsideRisk.ts"), "utf8");
     expect(candidateSource).not.toContain("trailingProfitActivationPercent");
     expect(candidateSource).not.toContain("trailingDrawdownPercent");
+    expect(candidateSource).toContain("龙头评分");
+    expect(candidateSource).toContain("下行风险");
+    expect(candidateSource).toContain("风险扣分");
+    expect(candidateSource).toContain("净评分");
     expect(researchSource).toContain("风险扣分策略");
     expect(researchSource).toContain("高风险硬过滤");
     expect(researchSource).toContain("日线成交额");

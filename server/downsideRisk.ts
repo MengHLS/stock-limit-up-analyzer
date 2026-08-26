@@ -11,6 +11,13 @@ export type DownsideRiskOptions = {
   rollingValidationTradingDays?: number;
 };
 
+export type DownsideRiskSignalScore = {
+  riskScore: number;
+  riskTier: "低风险" | "中风险" | "高风险";
+};
+
+export const defaultDownsideRiskPenaltyWeight = 0.35;
+
 export type DownsideRiskFeature = {
   key: string;
   label: string;
@@ -144,6 +151,15 @@ function riskTier(riskScore: number): DownsideRiskProfile["riskTier"] {
   return "低风险";
 }
 
+/** 实时候选池与历史研究共用的信号日风险分；买入后行情仅用于事后标签，不参与本函数。 */
+export function scoreDownsideRiskSignal(
+  row: LeaderCandidateBacktestRow,
+  context: LeaderCandidateBacktestContext,
+): DownsideRiskSignalScore {
+  const riskScore = calculateRiskScore(row, context);
+  return { riskScore, riskTier: riskTier(riskScore) };
+}
+
 function buildExperiments(
   profiles: DownsideRiskProfile[],
   penaltyWeight: number,
@@ -212,17 +228,17 @@ export function buildDownsideRiskResearch(
   const observationDays = Math.min(10, Math.max(2, Math.floor(options?.observationDays ?? 5)));
   const mediumDownsidePercent = Math.min(50, Math.max(1, options?.mediumDownsidePercent ?? 4));
   const highDownsidePercent = Math.min(50, Math.max(mediumDownsidePercent, options?.highDownsidePercent ?? 8));
-  const penaltyWeight = Math.min(1, Math.max(0, options?.penaltyWeight ?? 0.35));
+  const penaltyWeight = Math.min(1, Math.max(0, options?.penaltyWeight ?? defaultDownsideRiskPenaltyWeight));
   const hardRiskThreshold = Math.min(100, Math.max(0, options?.hardRiskThreshold ?? 65));
   const rollingTrainTradingDays = Math.min(150, Math.max(30, Math.floor(options?.rollingTrainTradingDays ?? 90)));
   const rollingValidationTradingDays = Math.min(60, Math.max(10, Math.floor(options?.rollingValidationTradingDays ?? 30)));
   const profiles = rows.map((row) => {
     const label = adverseReturnLabel(row, context, observationDays);
-    const riskScore = calculateRiskScore(row, context);
+    const { riskScore, riskTier: profileRiskTier } = scoreDownsideRiskSignal(row, context);
     return {
       row,
       riskScore,
-      riskTier: riskTier(riskScore),
+      riskTier: profileRiskTier,
       ...label,
       mediumDownside: label.maxAdverseReturn === null ? null : label.maxAdverseReturn <= -mediumDownsidePercent,
       highDownside: label.maxAdverseReturn === null ? null : label.maxAdverseReturn <= -highDownsidePercent,

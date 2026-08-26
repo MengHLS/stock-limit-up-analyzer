@@ -1,6 +1,6 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
-import { buildDownsideRiskResearch, type DownsideRiskOptions, type DownsideRiskResearchResult } from "./downsideRisk";
+import { buildDownsideRiskResearch, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskOptions, type DownsideRiskResearchResult } from "./downsideRisk";
 import { simulateRealisticTPlus1ToTPlus2, type ExitStrategy, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
 
 export type LeaderCandidateSourceRecord = {
@@ -26,6 +26,10 @@ export type LeaderCandidate = {
   boards: number;
   sectorCount: number;
   score: number;
+  riskScore: number;
+  riskTier: "低风险" | "中风险" | "高风险";
+  riskPenalty: number;
+  netScore: number;
   limitUpTime: string | null;
   turnover: string | null;
   circulationValue: string | null;
@@ -230,6 +234,9 @@ export function buildLeaderCandidateDailyPriceMap(rows: LeaderCandidateDailyPric
 type LeaderCandidateBuildOptions = {
   candidateLimit?: number | null;
   stockNameByCode?: Map<string, string>;
+  phaseByDate?: Map<string, { phase: SentimentCyclePhase; maxBoards: number }>;
+  priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
+  riskPenaltyWeight?: number;
 };
 
 function isMainBoardStock(stockCode: string) {
@@ -400,6 +407,39 @@ export function buildLeaderCandidatesForDate(
                 : 0;
       const turnoverScore = turnover >= 20 ? 8 : turnover >= 10 ? 6 : turnover >= 5 ? 4 : turnover >= 2 ? 2 : 1;
       const score = Math.min(100, boardScore + sectorScore + timeScore + turnoverScore + marketCap.score);
+      const signalPhase = options.phaseByDate?.get(targetDate);
+      const risk = scoreDownsideRiskSignal({
+        stockCode: record.stockCode,
+        stockName: stockNameByCode.get(record.stockCode) ?? record.stockName,
+        sector,
+        boards,
+        sectorCount,
+        score,
+        limitUpTime: record.limitUpTime,
+        turnover: record.turnover,
+        circulationValue: record.circulationValue,
+        marketCapScore: marketCap.score,
+        date: targetDate,
+        nextDate: targetDate,
+        nextDayDate: targetDate,
+        secondDayDate: null,
+        success: false,
+        signalClosePrice: null,
+        nextOpenPrice: null,
+        nextClosePrice: null,
+        nextOpenPremium: null,
+        nextClosePremium: null,
+        secondDayOpenPrice: null,
+        secondDayClosePrice: null,
+        secondDayOpenPremium: null,
+        secondDayClosePremium: null,
+        tPlus1CloseToTPlus2CloseReturn: null,
+        tPlus1CloseToTPlus2CloseSuccess: null,
+        phase: signalPhase?.phase ?? null,
+        maxBoards: signalPhase?.maxBoards ?? null,
+      }, { priceByStockDate: options.priceByStockDate });
+      const riskPenalty = Number((risk.riskScore * (options.riskPenaltyWeight ?? defaultDownsideRiskPenaltyWeight)).toFixed(2));
+      const netScore = Number(Math.max(0, score - riskPenalty).toFixed(2));
 
       const reasons = [`${boards}板高度`, `${sector} ${sectorCount}只涨停`];
       if (record.limitUpTime) reasons.push(`${record.limitUpTime.slice(0, 5)} 封板`);
@@ -415,6 +455,8 @@ export function buildLeaderCandidatesForDate(
       if (marketCap.score === 0) riskTags.push("流通市值缺失");
       if (marketCap.label === "小盘弹性") riskTags.push("小盘波动较大");
       if (marketCap.label === "超大盘弹性偏低") riskTags.push("超大盘弹性偏低");
+      if (risk.riskTier === "高风险") riskTags.push("下行风险偏高");
+      if (risk.riskTier === "中风险") riskTags.push("下行风险中等");
 
       return {
         rank: 0,
@@ -424,6 +466,10 @@ export function buildLeaderCandidatesForDate(
         boards,
         sectorCount,
         score,
+        riskScore: risk.riskScore,
+        riskTier: risk.riskTier,
+        riskPenalty,
+        netScore,
         limitUpTime: record.limitUpTime,
         turnover: record.turnover,
         circulationValue: record.circulationValue,
@@ -463,13 +509,13 @@ export function buildLeaderCandidatesForDate(
 }
 
 /** 构建数据库最新交易日的主板龙头候选池。 */
-export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[]): LeaderCandidateResult {
+export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[], options: LeaderCandidateBuildOptions = {}): LeaderCandidateResult {
   const latestDate = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => right.localeCompare(left))[0];
   if (!latestDate) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], candidates: [] };
   }
-  return buildLeaderCandidatesForDate(records, latestDate, { stockNameByCode: buildLatestStockNameMap(records) });
+  return buildLeaderCandidatesForDate(records, latestDate, { ...options, stockNameByCode: options.stockNameByCode ?? buildLatestStockNameMap(records) });
 }
 
 /**

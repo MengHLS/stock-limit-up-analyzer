@@ -33,6 +33,12 @@ function scoreTone(score: number) {
   return "border-slate-200 bg-slate-50 text-slate-700";
 }
 
+function riskTone(tier: "低风险" | "中风险" | "高风险") {
+  if (tier === "高风险") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (tier === "中风险") return "border-amber-200 bg-amber-50 text-amber-700";
+  return "border-emerald-200 bg-emerald-50 text-emerald-700";
+}
+
 export default function LeaderCandidatesPage() {
   const [observationDays, setObservationDays] = useState<1 | 2>(1);
   const [scoreDraft, setScoreDraft] = useState("");
@@ -154,7 +160,7 @@ export default function LeaderCandidatesPage() {
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-amber-600">Leader Watchlist</p>
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">主线中的重点观察候选</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            候选评分仅用于收盘后复盘排序，综合当前主板连板高度、题材广度、封板时间与成交额；每一项入选原因和风险标签都可见，不构成买卖建议。
+            龙头评分仅用于收盘后复盘排序，综合当前主板连板高度、题材广度、封板时间与成交额；下行风险分只读取信号日可见信息，按风险分×0.35计算扣分。当前候选准入、排序和图表仍以原始龙头评分为准，净评分仅作风险参照。
           </p>
         </section>
 
@@ -237,7 +243,7 @@ export default function LeaderCandidatesPage() {
             </Card>
 
             <Card ref={candidateListRef} className="border-slate-200 bg-white/90 shadow-xl shadow-slate-200/50">
-              <CardHeader><CardTitle>候选列表</CardTitle><CardDescription>评分由“连板高度、题材广度、封板时间、成交额、流通市值”构成；风险标签用于提示需要进一步核验的条件。</CardDescription></CardHeader>
+              <CardHeader><CardTitle>候选列表</CardTitle><CardDescription>龙头评分由“连板高度、题材广度、封板时间、成交额、流通市值”构成；下行风险分与风险扣分并列展示。当前排序保持原始龙头评分，不因新增风险参照改变候选池口径。</CardDescription></CardHeader>
               <CardContent>
                 {displayedCandidates.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有同时满足候选规则与图表筛选条件的主板股票；可清除图表筛选后重试。</div> : (
                   <div className="space-y-3">
@@ -248,8 +254,11 @@ export default function LeaderCandidatesPage() {
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-sm font-bold text-white shadow-sm">{candidate.rank}</span>
                             <div className="min-w-0"><h3 className="truncate font-bold text-slate-900">{candidate.stockName}</h3><p className="mt-0.5 font-mono text-xs text-slate-500">{candidate.stockCode}</p></div>
                           </div>
-                          <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-5">
-                            <div><p className="text-xs text-slate-500">综合评分</p><Badge variant="outline" className={`mt-1 ${scoreTone(candidate.score)}`}>{candidate.score} 分</Badge></div>
+                          <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+                            <div><p className="text-xs text-slate-500">龙头评分</p><Badge variant="outline" className={`mt-1 ${scoreTone(candidate.score)}`}>{candidate.score} 分</Badge></div>
+                            <div><p className="text-xs text-slate-500">下行风险</p><Badge variant="outline" className={`mt-1 ${riskTone(candidate.riskTier)}`}>{candidate.riskScore} · {candidate.riskTier}</Badge></div>
+                            <div><p className="text-xs text-slate-500">风险扣分</p><p className="mt-1 font-semibold text-emerald-700">-{candidate.riskPenalty} 分</p></div>
+                            <div><p className="text-xs text-slate-500">净评分</p><Badge variant="outline" className={`mt-1 ${scoreTone(candidate.netScore)}`}>{candidate.netScore} 分</Badge></div>
                             <div><p className="text-xs text-slate-500">连板高度</p><p className="mt-1 font-semibold text-orange-600">{candidate.boards} 板</p></div>
                             <div><p className="text-xs text-slate-500">题材广度</p><p className="mt-1 text-sm font-medium text-slate-700">{candidate.sector} · {candidate.sectorCount}只</p></div>
                             <div><p className="text-xs text-slate-500">封板 / 成交额</p><p className="mt-1 text-sm font-medium text-slate-700">{candidate.limitUpTime?.slice(0, 5) ?? "-"} / {candidate.turnover ? `${candidate.turnover}亿` : "-"}</p></div>
