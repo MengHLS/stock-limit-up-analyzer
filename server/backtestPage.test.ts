@@ -166,6 +166,9 @@ describe("独立组合资金回测页面", () => {
       "第六层：交易现实性", "手续费", "滑点", "换手率", "平均持仓时间", "资金利用率", "平均仓位", "最大仓位", "市场冲击",
       "data-strategy-evaluation", "SIX-LAYER STRATEGY EVALUATION", "严格样本外", "连续资金账户", "无风险收益率为0%", "252交易日",
     ]) expect(evaluationSource).toContain(requiredText);
+    for (const requiredText of ["MetricLabel", "TooltipTrigger", "TooltipContent", "CircleHelp", "查看指标说明", "side=\"top\""]) {
+      expect(evaluationSource).toContain(requiredText);
+    }
     expect(researchSource).toContain("riskPenaltyAttribution");
     expect(researchSource).toContain("baselineOnlyNetPnl");
     expect(researchSource).toContain("buildFactorAblations");
