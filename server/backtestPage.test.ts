@@ -93,6 +93,15 @@ describe("独立组合资金回测页面", () => {
       "低价覆盖",
       "资金与仓位审计",
       "全部模拟订单",
+      "订单策略切换",
+      "原始评分基准",
+      "风险扣分策略",
+      "高风险硬过滤",
+      "高风险剔除",
+      "fullCycleOrdersByStrategy",
+      "orderStrategyOptions",
+      "data-all-simulated-orders",
+      "orders-scroll-container",
       "minimumExpectedOpenChangePercent",
       "oneWordLimitDownSellProbability",
       "一字跌停保守成交概率",
@@ -137,6 +146,7 @@ describe("独立组合资金回测页面", () => {
     expect(pageSource).toContain("date >= startDate");
     expect(pageSource).toContain("downsideRiskResearch?.fullCycle.startDate");
     expect(styleSource).toContain("[data-trade-difference-table] > div:last-child");
+    expect(styleSource).toContain("[data-all-simulated-orders] .orders-scroll-container");
     expect(styleSource).toContain("max-height: 42rem");
     expect(styleSource).toContain("position: sticky");
   });

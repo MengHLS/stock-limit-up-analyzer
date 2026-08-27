@@ -230,4 +230,15 @@
     top: 0;
     z-index: 10;
   }
+
+  [data-all-simulated-orders] .orders-scroll-container {
+    max-height: 42rem;
+    overflow: auto;
+  }
+
+  [data-all-simulated-orders] .orders-scroll-container thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
 }

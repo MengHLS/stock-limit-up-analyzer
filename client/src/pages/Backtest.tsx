@@ -11,7 +11,99 @@ function formatDate(date: string | null) { return date ? date.replace(/^(\d{4})-
 function Metric({ label, value, tone = "text-slate-800" }: { label: string; value: string; tone?: string }) { return <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">{label}</p><p className={`mt-1 text-lg font-bold ${tone}`}>{value}</p></div>; }
 function ReturnLineChart({ data, series }: { data: Array<Record<string, string | number>>; series: Array<{ key: string; label: string; color: string }> }) { return <div className="mt-5 h-[330px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={data} margin={{ top: 12, right: 20, bottom: 8, left: -8 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} /><XAxis dataKey="date" minTickGap={24} tick={{ fontSize: 11, fill: "#64748b" }} /><YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(value) => `${value}%`} /><Tooltip formatter={(value) => [`${value}%`, "累计收益率"]} /><Legend wrapperStyle={{ fontSize: 12 }} />{series.map((item) => <Line key={item.key} type="monotone" dataKey={item.key} name={item.label} stroke={item.color} strokeWidth={2.25} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls />)}</LineChart></ResponsiveContainer></div>; }
 type TradeDiffSnapshot = { status: "filled" | "skipped"; score: number; shares: number; entryDate: string | null; exitDate: string | null; entryPrice: number | null; exitPrice: number | null; netReturn: number | null; reason: string | null };
+type OrderStrategyKey = "baseline" | "riskPenalty" | "hardFilter";
+type SimulatedOrder = { signalDate: string; entryDate: string | null; exitDate: string | null; stockCode: string; stockName: string; score: number; shares: number; entryPrice: number | null; exitPrice: number | null; netReturn: number | null; entryPointPremium?: number | null; status: "filled" | "skipped"; reason: string | null; highRiskExcluded?: boolean };
+const orderStrategyOptions: Array<{ key: OrderStrategyKey; label: string; description: string }> = [
+  { key: "baseline", label: "原始评分基准", description: "保留原始候选评分与全部模拟订单。" },
+  { key: "riskPenalty", label: "风险扣分策略", description: "按自动/回退风险权重重新排序后的完整模拟订单。" },
+  { key: "hardFilter", label: "高风险硬过滤", description: "同时展示实际模拟订单和因高风险被排除的未入场订单。" },
+];
 function TradeDiffCell({ trade, filtered = false }: { trade: TradeDiffSnapshot | null; filtered?: boolean }) { if (filtered) return <div className="min-w-44 rounded-lg bg-amber-50 p-2 text-amber-800"><p className="font-semibold">高风险过滤</p><p className="mt-1 text-slate-500">风险分达到阈值，未进入模拟</p></div>; if (!trade) return <span className="text-slate-400">无订单</span>; return <div className="min-w-44 rounded-lg bg-slate-50 p-2"><p className={`font-semibold ${trade.status === "filled" ? "text-slate-800" : "text-amber-700"}`}>{trade.status === "filled" ? "已入场" : "未入场"} · 评分 {trade.score}</p><p className="mt-1 text-slate-500">{formatDate(trade.entryDate)} → {formatDate(trade.exitDate)}</p><p className="mt-1 text-slate-500">{trade.entryPrice ?? "-"} / {trade.exitPrice ?? "-"} · {trade.shares || "-"}股</p><p className={`mt-1 font-semibold ${trade.netReturn !== null && trade.netReturn >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{trade.netReturn === null ? "收益待定" : `${trade.netReturn}%`}</p><p className="mt-1 leading-4 text-slate-500">{trade.reason ?? "-"}</p></div>; }
+
+function FullOrdersSection({
+  strategy,
+  onStrategyChange,
+  activeStrategy,
+  orders,
+  displayedOrders,
+  orderStatus,
+  onOrderStatusChange,
+  reason,
+  onReasonChange,
+  reasons,
+  keyword,
+  onKeywordChange,
+}: {
+  strategy: OrderStrategyKey;
+  onStrategyChange: (strategy: OrderStrategyKey) => void;
+  activeStrategy: (typeof orderStrategyOptions)[number];
+  orders: SimulatedOrder[];
+  displayedOrders: SimulatedOrder[];
+  orderStatus: "all" | "filled" | "skipped";
+  onOrderStatusChange: (status: "all" | "filled" | "skipped") => void;
+  reason: string;
+  onReasonChange: (reason: string) => void;
+  reasons: string[];
+  keyword: string;
+  onKeywordChange: (keyword: string) => void;
+}) {
+  const filledCount = orders.filter((order) => order.status === "filled").length;
+  const skippedCount = orders.length - filledCount;
+  const highRiskExcludedCount = orders.filter((order) => order.highRiskExcluded).length;
+
+  return (
+    <section data-all-simulated-orders className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-4 border-b border-slate-100 pb-4">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="mr-auto">
+            <h2 className="font-semibold">全部模拟订单</h2>
+            <p className="mt-1 text-xs text-slate-500">切换后展示对应全周期策略的全部订单；红涨绿跌。</p>
+          </div>
+          <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="订单策略切换">
+            {orderStrategyOptions.map((option) => (
+              <Button
+                key={option.key}
+                type="button"
+                size="sm"
+                variant={strategy === option.key ? "default" : "ghost"}
+                role="tab"
+                aria-selected={strategy === option.key}
+                onClick={() => onStrategyChange(option.key)}
+                className={strategy === option.key ? "bg-slate-800 text-white hover:bg-slate-700" : "text-slate-600"}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="mr-auto">
+            <p className="text-sm font-medium text-slate-800">{activeStrategy.label}</p>
+            <p className="mt-1 text-xs text-slate-500">{activeStrategy.description}</p>
+            <p className="mt-2 text-xs text-slate-600">显示 {displayedOrders.length}/{orders.length} 笔 · 已入场 {filledCount} 笔 · 未入场 {skippedCount} 笔{strategy === "hardFilter" && ` · 高风险剔除 ${highRiskExcludedCount} 笔`}</p>
+          </div>
+          <label className="text-xs text-slate-600">状态<select value={orderStatus} onChange={(event) => onOrderStatusChange(event.target.value as "all" | "filled" | "skipped")} className="mt-1 block h-8 rounded-md border border-slate-200 px-2"><option value="all">全部</option><option value="filled">已入场</option><option value="skipped">未入场</option></select></label>
+          <label className="text-xs text-slate-600">原因<select value={reason} onChange={(event) => onReasonChange(event.target.value)} className="mt-1 block h-8 max-w-52 rounded-md border border-slate-200 px-2"><option value="all">全部</option>{reasons.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label className="text-xs text-slate-600">搜索<Input value={keyword} onChange={(event) => onKeywordChange(event.target.value)} placeholder="代码或名称" className="mt-1 h-8 w-36" /></label>
+        </div>
+      </div>
+      <div className="orders-scroll-container overflow-auto rounded-lg border border-slate-200">
+        <table className="w-full min-w-[1220px] text-xs">
+          <thead className="bg-slate-100 text-left text-slate-500">
+            <tr><th className="px-3 py-2">信号日</th><th className="px-3 py-2">股票</th><th className="px-3 py-2">评分</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">股数</th><th className="px-3 py-2">买入/卖出日</th><th className="px-3 py-2">买入/卖出价</th><th className="px-3 py-2">收益率</th><th className="px-3 py-2">买点涨幅</th><th className="px-3 py-2">原因</th></tr>
+          </thead>
+          <tbody>
+            {displayedOrders.map((order, index) => {
+              const entryPointPremium = order.entryPointPremium ?? null;
+              return <tr key={`${strategy}-${order.signalDate}-${order.stockCode}-${index}`} className="border-t border-slate-100 align-top"><td className="whitespace-nowrap px-3 py-2">{formatDate(order.signalDate)}</td><td className="px-3 py-2"><p className="font-medium">{order.stockName}</p><p className="font-mono text-slate-400">{order.stockCode}</p></td><td className="px-3 py-2 font-medium text-slate-700">{order.score}</td><td className="px-3 py-2">{order.highRiskExcluded ? <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800">高风险剔除</span> : order.status === "filled" ? "已成交" : "未成交"}</td><td className="px-3 py-2">{order.shares || "-"}</td><td className="whitespace-nowrap px-3 py-2">{formatDate(order.entryDate)} / {formatDate(order.exitDate)}</td><td className="whitespace-nowrap px-3 py-2">{order.entryPrice ?? "-"} / {order.exitPrice ?? "-"}</td><td className={`px-3 py-2 font-medium ${order.netReturn !== null && order.netReturn >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{order.netReturn === null ? "-" : `${order.netReturn}%`}</td><td className={`px-3 py-2 font-medium ${entryPointPremium !== null && entryPointPremium >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{entryPointPremium === null ? "-" : `${entryPointPremium}%`}</td><td className="max-w-80 px-3 py-2 leading-5 text-slate-500">{order.reason ?? "-"}</td></tr>;
+            })}
+          </tbody>
+        </table>
+        {displayedOrders.length === 0 && <p className="p-6 text-center text-sm text-slate-500">没有符合当前筛选条件的订单。</p>}
+      </div>
+    </section>
+  );
+}
 
 export default function BacktestPage() {
   const [config, setConfig] = useState({
@@ -26,6 +118,7 @@ export default function BacktestPage() {
   const [keyword, setKeyword] = useState("");
   const [tradeDiffOnly, setTradeDiffOnly] = useState(true);
   const [tradeDiffKeyword, setTradeDiffKeyword] = useState("");
+  const [orderStrategy, setOrderStrategy] = useState<OrderStrategyKey>("baseline");
   const update = <K extends keyof typeof config>(key: K, value: (typeof config)[K]) => setConfig((current) => ({ ...current, [key]: value }));
   const input = useMemo(() => ({
     observationDays: 1 as const,
@@ -51,7 +144,39 @@ export default function BacktestPage() {
   const riskPenaltyAttribution = downsideRiskResearch?.fullCycle.riskPenaltyAttribution;
   const factorAblations = downsideRiskResearch?.factorAblations ?? [];
   const fullCycleTradeDifferences = downsideRiskResearch?.fullCycle.tradeDifferences ?? [];
-  const orders = simulation?.trades ?? [];
+  const fullCycleOrdersByStrategy = useMemo(() => {
+    const sortOrders = (items: SimulatedOrder[]) => [...items].sort((left, right) => right.signalDate.localeCompare(left.signalDate) || left.stockCode.localeCompare(right.stockCode));
+    const ordersByStrategy = new Map<OrderStrategyKey, SimulatedOrder[]>();
+    for (const key of ["baseline", "riskPenalty", "hardFilter"] as const) {
+      ordersByStrategy.set(key, fullCycleExperiments.find((experiment) => experiment.key === key)?.realisticSimulation.trades ?? []);
+    }
+    const hardFilterOrders = ordersByStrategy.get("hardFilter") ?? [];
+    const hardFilterOrderKeys = new Set(hardFilterOrders.map((order) => `${order.signalDate}::${order.stockCode}`));
+    const excludedOrders: SimulatedOrder[] = fullCycleTradeDifferences
+      .filter((row) => row.hardFilterExcluded && !hardFilterOrderKeys.has(`${row.signalDate}::${row.stockCode}`))
+      .map((row) => ({
+        signalDate: row.signalDate,
+        entryDate: null,
+        exitDate: null,
+        stockCode: row.stockCode,
+        stockName: row.stockName,
+        score: row.hardFilter?.score ?? row.baseline?.score ?? row.riskPenalty?.score ?? 0,
+        shares: 0,
+        entryPrice: null,
+        exitPrice: null,
+        netReturn: null,
+        entryPointPremium: null,
+        status: "skipped",
+        reason: `风险分 ${row.riskScore} 达到硬过滤阈值，未进入模拟`,
+        highRiskExcluded: true,
+      }));
+    ordersByStrategy.set("hardFilter", sortOrders([...hardFilterOrders, ...excludedOrders]));
+    ordersByStrategy.set("baseline", sortOrders(ordersByStrategy.get("baseline") ?? []));
+    ordersByStrategy.set("riskPenalty", sortOrders(ordersByStrategy.get("riskPenalty") ?? []));
+    return ordersByStrategy;
+  }, [fullCycleExperiments, fullCycleTradeDifferences]);
+  const orders = fullCycleOrdersByStrategy.get(orderStrategy) ?? (orderStrategy === "baseline" ? simulation?.trades ?? [] : []);
+  const activeOrderStrategy = orderStrategyOptions.find((item) => item.key === orderStrategy)!;
   const reasons = useMemo(() => Array.from(new Set(orders.map((order) => order.reason).filter((value): value is string => Boolean(value)))).sort(), [orders]);
   const displayedOrders = useMemo(() => {
     const search = keyword.trim().toLowerCase();
@@ -122,7 +247,23 @@ export default function BacktestPage() {
         {downsideRiskResearch && marketFactorCoverage && <section data-market-factor-coverage className="rounded-2xl border border-sky-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start gap-3"><DatabaseZap className="mt-0.5 h-5 w-5 text-sky-700" /><div className="mr-auto"><p className="text-xs font-bold tracking-[0.16em] text-sky-700">MARKET FACTOR COVERAGE</p><h2 className="mt-1 font-semibold">市场因子数据覆盖</h2><p className="mt-1 max-w-4xl text-xs leading-5 text-slate-600">市场风险因子严格读取候选自身信号日：项目涨停数来自已录入的全表记录，沪深成交额来自 Tushare daily 聚合，两融余额来自上交所与深交所公开汇总文件。未验证或缺失的成交额、两融余额均按<strong>零贡献</strong>处理，不以占位值填补。</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><Metric label="回测信号日" value={`${marketFactorCoverage.signalDateCount} 日`} /><Metric label="项目涨停数覆盖" value={`${marketFactorCoverage.limitUpCountDateCount} / ${marketFactorCoverage.signalDateCount}`} /><Metric label="已验证市场数据" value={`${marketFactorCoverage.verifiedMarketDataDateCount} / ${marketFactorCoverage.signalDateCount}`} tone="text-sky-700" /><Metric label="沪深成交额覆盖" value={`${marketFactorCoverage.turnoverDateCount} / ${marketFactorCoverage.signalDateCount}`} /><Metric label="两融余额覆盖" value={`${marketFactorCoverage.marginBalanceDateCount} / ${marketFactorCoverage.signalDateCount}`} /></div><p className="mt-3 text-xs leading-5 text-slate-500">覆盖日期：{marketFactorCoverage.startDate ?? "-"} 至 {marketFactorCoverage.endDate ?? "-"}。两融余额可用样本 {downsideRiskResearch.marginBalanceSampleSize} 个，其中相对前20个历史已验证日期可比较 {downsideRiskResearch.marginBalanceComparableSampleSize} 个；该项仅衡量绝对偏离，不解释为杠杆方向或资金净流入。</p></section>}
         {downsideRiskResearch && <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 text-fuchsia-700" /><div className="mr-auto"><h2 className="font-semibold">下行风险评分实验框架</h2><p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">{downsideRiskResearch.definition} 当前展示 {downsideRiskResearch.labeledSampleSize} 个完整观察期的样本外候选；原始、风险扣分和高风险过滤三版均使用唯一的动态止盈、开盘止损与强势续持退出策略。</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="日线覆盖" value={`${dailyPriceCoverage?.rowCount ?? 0} 行`} /><Metric label="日期范围" value={`${dailyPriceCoverage?.startDate ?? "-"} 至 ${dailyPriceCoverage?.endDate ?? "-"}`} /><Metric label="低价覆盖" value={`${dailyPriceCoverage?.lowPriceCount ?? 0} / ${dailyPriceCoverage?.rowCount ?? 0}`} /><Metric label="成交额覆盖" value={`${dailyPriceCoverage?.amountCount ?? 0} / ${dailyPriceCoverage?.rowCount ?? 0}`} /></div><p className="mt-3 text-xs leading-5 text-slate-500">低价标签完整样本 {downsideRiskResearch.lowPriceLabelSampleSize} 个；信号日成交额可用样本 {downsideRiskResearch.signalAmountSampleSize} 个。{downsideRiskResearch.autoTunePenaltyWeight && <span className="font-medium text-fuchsia-800"> 自动寻优网格：{downsideRiskResearch.penaltyWeightGrid.join("、")}；训练目标 = 收益率 − 0.5 × 最大回撤，依次以收益、回撤、已出清笔数和更小权重决胜。</span>}{downsideRiskResearch.labeledSampleSize < 50 && <span className="font-medium text-amber-700"> 当前完整观察期样本少于50个，仅适合观察特征方向。</span>}</p><div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{downsideRiskResearch.featureMatrix.map((feature) => <div key={feature.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-800">{feature.label}</p><span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{feature.timing}</span></div><p className="mt-1 text-xs leading-5 text-slate-500">{feature.definition}</p></div>)}</div><div className="mt-5 overflow-auto rounded-xl border border-slate-200"><table className="w-full min-w-[720px] text-xs"><thead className="bg-slate-100 text-left text-slate-500"><tr><th className="px-3 py-2">风险分层</th><th className="px-3 py-2">样本数</th><th className="px-3 py-2">平均最大不利波动</th><th className="px-3 py-2">≤ -{downsideRiskResearch.mediumDownsidePercent}%</th><th className="px-3 py-2">≤ -{downsideRiskResearch.highDownsidePercent}%</th></tr></thead><tbody>{downsideRiskResearch.riskTiers.map((tier) => <tr key={tier.tier} className="border-t border-slate-100"><td className="px-3 py-2 font-medium text-slate-800">{tier.tier}</td><td className="px-3 py-2">{tier.sampleSize}</td><td className="px-3 py-2 text-emerald-700">{tier.averageMaxAdverseReturn ?? "-"}{tier.averageMaxAdverseReturn === null ? "" : "%"}</td><td className="px-3 py-2">{tier.mediumDownsideCount} / {tier.mediumDownsideRate ?? "-"}%</td><td className="px-3 py-2">{tier.highDownsideCount} / {tier.highDownsideRate ?? "-"}%</td></tr>)}</tbody></table></div><div className="mt-5 grid gap-3 md:grid-cols-3">{downsideRiskResearch.experiments.map((experiment) => <div key={experiment.key} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800">{experiment.label}</p><p className="mt-1 min-h-10 text-xs leading-5 text-slate-500">{experiment.description}</p></div><span className={experiment.realisticSimulation.totalReturn >= 0 ? "text-sm font-bold text-rose-600" : "text-sm font-bold text-emerald-700"}>{experiment.realisticSimulation.totalReturn}%</span></div><div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3 text-xs"><div><p className="text-slate-400">最大回撤</p><p className="mt-1 font-semibold text-emerald-700">{experiment.realisticSimulation.maxDrawdown}%</p></div><div><p className="text-slate-400">候选/剔除</p><p className="mt-1 font-semibold text-slate-700">{experiment.inputCandidateCount}/{experiment.excludedCandidateCount}</p></div><div><p className="text-slate-400">胜率</p><p className="mt-1 font-semibold text-slate-700">{experiment.realisticSimulation.winRate ?? "-"}%</p></div></div></div>)}</div><ReturnLineChart data={downsideRiskCurve} series={downsideRiskResearch.experiments.map((item) => ({ key: item.key, label: item.label, color: item.key === "baseline" ? "#64748b" : item.key === "riskPenalty" ? "#d946ef" : "#f59e0b" }))} /><div className="mt-5 rounded-xl border border-slate-200"><div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2"><DatabaseZap className="h-4 w-4 text-fuchsia-700" /><div><p className="text-sm font-semibold">滚动样本外窗口</p><p className="text-xs text-slate-500">每一行均以前置{downsideRiskResearch.rollingTrainTradingDays}个交易日校准、后续{downsideRiskResearch.rollingValidationTradingDays}个交易日验证；自动寻优只用校准期结果，不将验证期路径反向用于选权。</p></div></div><div className="overflow-auto"><table className="w-full min-w-[1360px] text-xs"><thead className="bg-white text-left text-slate-500"><tr><th className="px-3 py-2">窗口</th><th className="px-3 py-2">训练期</th><th className="px-3 py-2">验证期</th><th className="px-3 py-2">训练样本</th><th className="px-3 py-2">选出权重</th><th className="px-3 py-2">训练目标</th><th className="px-3 py-2">训练收益/回撤</th><th className="px-3 py-2">验证标签</th><th className="px-3 py-2">原始收益</th><th className="px-3 py-2">扣分收益</th><th className="px-3 py-2">过滤收益</th></tr></thead><tbody>{downsideRiskResearch.rollingWindows.map((window) => { const byKey = new Map(window.experiments.map((item) => [item.key, item])); return <tr key={window.index} className="border-t border-slate-100"><td className="px-3 py-2">{window.index}</td><td className="px-3 py-2">{window.calibrationStartDate} 至 {window.calibrationEndDate}</td><td className="px-3 py-2">{window.validationStartDate} 至 {window.validationEndDate}</td><td className="px-3 py-2">{window.trainingSampleSize}</td><td className="px-3 py-2 font-semibold text-fuchsia-800">{window.autoTunedPenaltyWeight}</td><td className="px-3 py-2">{window.trainingObjectiveValue}%</td><td className="px-3 py-2"><span className={window.trainingTotalReturn >= 0 ? "text-rose-600" : "text-emerald-700"}>{window.trainingTotalReturn}%</span> / <span className="text-emerald-700">{window.trainingMaxDrawdown}%</span></td><td className="px-3 py-2 text-emerald-700">{window.labeledSampleSize} / {window.highDownsideRate ?? "-"}%</td>{(["baseline", "riskPenalty", "hardFilter"] as const).map((key) => { const result = byKey.get(key)?.realisticSimulation.totalReturn; return <td key={key} className={`px-3 py-2 font-medium ${result !== undefined && result >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{result ?? "-"}{result === undefined ? "" : "%"}</td>; })}</tr>; })}</tbody></table></div></div></section>}
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start gap-2"><ShieldCheck className="mt-0.5 h-5 w-5 text-emerald-700" /><div><h2 className="font-semibold">资金与仓位审计</h2><p className="mt-1 text-sm text-slate-600">峰值持仓 {simulation.peakOpenPositionCount}/{simulation.assumptions.maxPositions}，最低可用现金 ¥{formatMoney(simulation.minimumCash)}。开盘止损释放的资金仅在同一开盘时点后参与候选排序；收盘出清资金不提前复用。</p></div></div></section>
+        <FullOrdersSection
+          strategy={orderStrategy}
+          onStrategyChange={(strategy) => { setOrderStrategy(strategy); setReason("all"); }}
+          activeStrategy={activeOrderStrategy}
+          orders={orders}
+          displayedOrders={displayedOrders}
+          orderStatus={orderStatus}
+          onOrderStatusChange={setOrderStatus}
+          reason={reason}
+          onReasonChange={setReason}
+          reasons={reasons}
+          keyword={keyword}
+          onKeywordChange={setKeyword}
+        />
+        {false && <>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex flex-wrap items-end gap-3"><div className="mr-auto"><h2 className="font-semibold">全部模拟订单</h2><p className="mt-1 text-xs text-slate-500">显示 {displayedOrders.length}/{orders.length} 笔；红涨绿跌。</p></div><label className="text-xs text-slate-600">状态<select value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as "all" | "filled" | "skipped")} className="mt-1 block h-8 rounded-md border border-slate-200 px-2"><option value="all">全部</option><option value="filled">已入场</option><option value="skipped">未入场</option></select></label><label className="text-xs text-slate-600">原因<select value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1 block h-8 max-w-48 rounded-md border border-slate-200 px-2"><option value="all">全部</option>{reasons.map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label className="text-xs text-slate-600">搜索<Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="代码或名称" className="mt-1 h-8 w-36" /></label></div><div className="overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[1100px] text-xs"><thead className="bg-slate-100 text-left text-slate-500"><tr><th className="px-3 py-2">信号日</th><th className="px-3 py-2">股票</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">股数</th><th className="px-3 py-2">买入/卖出日</th><th className="px-3 py-2">买入/卖出价</th><th className="px-3 py-2">收益率</th><th className="px-3 py-2">买点涨幅</th><th className="px-3 py-2">原因</th></tr></thead><tbody>{displayedOrders.map((order, index) => { const entryPointPremium = order.entryPointPremium ?? null; return <tr key={`${order.signalDate}-${order.stockCode}-${index}`} className="border-t border-slate-100"><td className="px-3 py-2">{formatDate(order.signalDate)}</td><td className="px-3 py-2"><p className="font-medium">{order.stockName}</p><p className="font-mono text-slate-400">{order.stockCode}</p></td><td className="px-3 py-2">{order.status === "filled" ? "已成交" : "未成交"}</td><td className="px-3 py-2">{order.shares || "-"}</td><td className="px-3 py-2">{formatDate(order.entryDate)} / {formatDate(order.exitDate)}</td><td className="px-3 py-2">{order.entryPrice ?? "-"} / {order.exitPrice ?? "-"}</td><td className={`px-3 py-2 ${order.netReturn !== null && order.netReturn >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{order.netReturn === null ? "-" : `${order.netReturn}%`}</td><td className={`px-3 py-2 ${entryPointPremium !== null && entryPointPremium >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{entryPointPremium === null ? "-" : `${entryPointPremium}%`}</td><td className="max-w-72 px-3 py-2 text-slate-500">{order.reason ?? "-"}</td></tr>; })}</tbody></table></div></section>
+        </>}
       </>}
     </div>
   </main>;
