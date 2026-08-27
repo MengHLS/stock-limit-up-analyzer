@@ -1,6 +1,6 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
-import { buildDownsideRiskResearch, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskOptions, type DownsideRiskResearchResult } from "./downsideRisk";
+import { buildDownsideRiskResearch, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult } from "./downsideRisk";
 import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
 
 export type LeaderCandidateSourceRecord = {
@@ -137,6 +137,61 @@ export type LeaderCandidateBacktestResult = {
   downsideRiskResearch: DownsideRiskResearchResult;
   dailyPriceCoverage: LeaderCandidateDailyPriceCoverage;
   marketFactorCoverage: LeaderCandidateMarketFactorCoverage;
+  strategyPortfolioSnapshot: LeaderCandidateStrategyPortfolioSnapshot;
+};
+
+export type LeaderCandidatePortfolioHolding = {
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  signalDate: string;
+  entryDate: string | null;
+  entryPrice: number | null;
+  shares: number;
+  score: number;
+  valuationDate: string | null;
+  valuationPrice: number | null;
+  priceChangePercent: number | null;
+  reason: string | null;
+};
+
+export type LeaderCandidatePreparedBuy = {
+  rank: number;
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  boards: number;
+  signalDate: string;
+  score: number;
+  riskScore: number;
+  riskTier: "低风险" | "中风险" | "高风险";
+  strategyScore: number;
+  reasons: string[];
+  conditions: string[];
+};
+
+export type LeaderCandidateStrategyPortfolio = {
+  key: "baseline" | "riskPenalty" | "hardFilter";
+  label: string;
+  description: string;
+  asOfDate: string | null;
+  availableCash: number;
+  maxPositions: number;
+  openPositionCount: number;
+  availableSlots: number;
+  currentHoldings: LeaderCandidatePortfolioHolding[];
+  preparedBuys: LeaderCandidatePreparedBuy[];
+  candidateCount: number;
+  excludedHighRiskCount: number;
+  note: string;
+};
+
+export type LeaderCandidateStrategyPortfolioSnapshot = {
+  asOfDate: string | null;
+  latestSignalDate: string | null;
+  nextEntryTiming: string;
+  definition: string;
+  strategies: LeaderCandidateStrategyPortfolio[];
 };
 
 export type LeaderCandidateBacktestOptions = {
@@ -527,6 +582,136 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[], op
   return buildLeaderCandidatesForDate(records, latestDate, { ...options, stockNameByCode: options.stockNameByCode ?? buildLatestStockNameMap(records) });
 }
 
+const snapshotRound = (value: number, digits = 2) => Number(value.toFixed(digits));
+
+/**
+ * 将全周期三策略回测的期末未出清订单与最新信号日候选组合成展示快照。
+ * 准备买入只代表下一实际交易日开盘前的模型优先级，绝不假定未知的开盘价、成交或资金分配结果。
+ */
+export function buildLeaderCandidateStrategyPortfolioSnapshot(
+  latestCandidates: LeaderCandidateResult,
+  fullCycleExperiments: DownsideRiskExperimentItem[],
+  options: {
+    appliedMinScore: number | null;
+    penaltyWeight: number;
+    autoTunePenaltyWeight: boolean;
+    hardRiskThreshold: number;
+    rollingWindows: Array<Pick<DownsideRiskResearchResult["rollingWindows"][number], "validationStartDate" | "validationEndDate" | "autoTunedPenaltyWeight">>;
+    priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
+    historicalRows: LeaderCandidateBacktestRow[];
+  },
+): LeaderCandidateStrategyPortfolioSnapshot {
+  const latestSignalDate = latestCandidates.date;
+  const candidatePool = latestCandidates.candidates.filter((candidate) => (
+    options.appliedMinScore === null || candidate.score >= options.appliedMinScore
+  ));
+  const experimentByKey = new Map(fullCycleExperiments.map((experiment) => [experiment.key, experiment]));
+  const appliedPenaltyWeight = latestSignalDate && options.autoTunePenaltyWeight
+    ? options.rollingWindows.find((window) => latestSignalDate >= window.validationStartDate && latestSignalDate <= window.validationEndDate)?.autoTunedPenaltyWeight ?? options.penaltyWeight
+    : options.penaltyWeight;
+
+  const strategies: LeaderCandidateStrategyPortfolio[] = (["baseline", "riskPenalty", "hardFilter"] as const).map((key) => {
+    const experiment = experimentByKey.get(key);
+    const simulation = experiment?.realisticSimulation;
+    const asOfDate = simulation?.equityCurve.at(-1)?.date ?? null;
+    const holdings = (simulation?.trades ?? [])
+      .filter((trade) => trade.status === "filled" && trade.exitPrice === null)
+      .map((trade) => {
+        const valuationPrice = asOfDate
+          ? options.priceByStockDate?.get(`${trade.stockCode}::${asOfDate}`)?.closePrice ?? null
+          : null;
+        const priceChangePercent = valuationPrice !== null && trade.entryPrice !== null && trade.entryPrice > 0
+          ? snapshotRound(((valuationPrice - trade.entryPrice) / trade.entryPrice) * 100)
+          : null;
+        const source = options.historicalRows.find((row) => row.date === trade.signalDate && row.stockCode === trade.stockCode);
+        return {
+          stockCode: trade.stockCode,
+          stockName: trade.stockName,
+          sector: source?.sector ?? "-",
+          signalDate: trade.signalDate,
+          entryDate: trade.entryDate,
+          entryPrice: trade.entryPrice,
+          shares: trade.shares,
+          score: trade.score,
+          valuationDate: asOfDate,
+          valuationPrice,
+          priceChangePercent,
+          reason: trade.reason,
+        } satisfies LeaderCandidatePortfolioHolding;
+      });
+    const heldCodes = new Set(holdings.map((holding) => holding.stockCode));
+    const maxPositions = simulation?.assumptions.maxPositions ?? 0;
+    const availableSlots = Math.max(0, maxPositions - holdings.length);
+    const candidateWithScore = candidatePool.map((candidate) => ({
+      candidate,
+      strategyScore: key === "riskPenalty"
+        ? Math.max(0, snapshotRound(candidate.score - candidate.riskScore * appliedPenaltyWeight))
+        : candidate.score,
+    }));
+    const highRiskExcludedCount = key === "hardFilter"
+      ? candidateWithScore.filter(({ candidate }) => candidate.riskScore >= options.hardRiskThreshold).length
+      : 0;
+    const strategyCandidates = candidateWithScore
+      .filter(({ candidate }) => key !== "hardFilter" || candidate.riskScore < options.hardRiskThreshold)
+      .sort((left, right) => (
+        right.strategyScore - left.strategyScore
+        || right.candidate.boards - left.candidate.boards
+        || right.candidate.sectorCount - left.candidate.sectorCount
+        || (left.candidate.limitUpTime ?? "99:99:99").localeCompare(right.candidate.limitUpTime ?? "99:99:99")
+        || left.candidate.stockCode.localeCompare(right.candidate.stockCode)
+      ));
+    const preparedBuys = strategyCandidates
+      .filter(({ candidate }) => !heldCodes.has(candidate.stockCode))
+      .slice(0, availableSlots)
+      .map(({ candidate, strategyScore }, index) => ({
+        rank: index + 1,
+        stockCode: candidate.stockCode,
+        stockName: candidate.stockName,
+        sector: candidate.sector,
+        boards: candidate.boards,
+        signalDate: latestSignalDate ?? "",
+        score: candidate.score,
+        riskScore: candidate.riskScore,
+        riskTier: candidate.riskTier,
+        strategyScore,
+        reasons: candidate.reasons,
+        conditions: [
+          `下一实际交易日开盘涨幅不低于${simulation?.assumptions.minimumExpectedOpenChangePercent ?? -2}%`,
+          simulation?.assumptions.blockLimitUpBuys ? "开盘接近涨停时按保守规则不追买" : "需按实际开盘价与整手资金约束核算",
+          "以开盘时可用资金、最大持仓与策略排序为准，未承诺成交",
+        ],
+      } satisfies LeaderCandidatePreparedBuy));
+
+    return {
+      key,
+      label: experiment?.label ?? (key === "baseline" ? "原始策略" : key === "riskPenalty" ? "风险扣分策略" : "高风险硬过滤"),
+      description: experiment?.description ?? "暂无策略回测数据。",
+      asOfDate,
+      availableCash: simulation?.equityCurve.at(-1)?.cash ?? simulation?.initialCapital ?? 0,
+      maxPositions,
+      openPositionCount: holdings.length,
+      availableSlots,
+      currentHoldings: holdings,
+      preparedBuys,
+      candidateCount: strategyCandidates.length,
+      excludedHighRiskCount: highRiskExcludedCount,
+      note: key === "riskPenalty"
+        ? `最新信号日使用风险扣分权重 ${appliedPenaltyWeight}；若该日不在已完成验证窗口内，则使用手动回退权重。`
+        : key === "hardFilter"
+          ? `风险分不低于 ${options.hardRiskThreshold} 的候选不纳入该策略准备清单。`
+          : "按原始候选评分排序。",
+    } satisfies LeaderCandidateStrategyPortfolio;
+  });
+
+  return {
+    asOfDate: strategies[0]?.asOfDate ?? null,
+    latestSignalDate,
+    nextEntryTiming: "下一实际交易日开盘",
+    definition: "当前持仓为全周期模拟截止日尚未出清的订单；准备买入为最新信号日后、在已知信号日信息下的模型优先级。未知的下一开盘价格、成交限制和当日资金变动不会被预先假定。此处仅作历史规则的模拟展示，不构成交易建议。",
+    strategies,
+  };
+}
+
 /**
  * 回测口径：在T日收盘后，严格使用T日及以前数据生成候选；
  * 成功定义为该股票在下一已记录交易日（T+1）仍出现在涨停记录中。
@@ -691,6 +876,29 @@ export function buildLeaderCandidateBacktest(
     tradingDates: marketTradingDates,
     marketFactorsByDate: context.marketFactorsByDate,
   });
+  const latestSignalDate = candidateTradingDates.at(-1) ?? null;
+  const latestCandidateResult = latestSignalDate
+    ? buildLeaderCandidatesForDate(records, latestSignalDate, {
+      candidateLimit: null,
+      stockNameByCode,
+      phaseByDate: context.phaseByDate,
+      priceByStockDate: context.priceByStockDate,
+      marketFactorsByDate: context.marketFactorsByDate,
+    })
+    : buildLeaderCandidates([]);
+  const strategyPortfolioSnapshot = buildLeaderCandidateStrategyPortfolioSnapshot(
+    latestCandidateResult,
+    downsideRiskResearch.fullCycle.experiments,
+    {
+      appliedMinScore,
+      penaltyWeight: downsideRiskResearch.penaltyWeight,
+      autoTunePenaltyWeight: downsideRiskResearch.autoTunePenaltyWeight,
+      hardRiskThreshold: downsideRiskResearch.hardRiskThreshold,
+      rollingWindows: downsideRiskResearch.rollingWindows,
+      priceByStockDate: context.priceByStockDate,
+      historicalRows: appliedRows,
+    },
+  );
   const signalDates = Array.from(new Set(appliedRows.map((row) => row.date))).sort();
   const marketFactorRows = signalDates.map((date) => context.marketFactorsByDate?.get(date));
   const marketFactorCoverage: LeaderCandidateMarketFactorCoverage = {
@@ -748,7 +956,15 @@ export function buildLeaderCandidateBacktest(
     historicalRows: appliedRows.slice().sort((left, right) => right.date.localeCompare(left.date) || right.score - left.score),
     realisticSimulation,
     downsideRiskResearch,
-    dailyPriceCoverage: context.dailyPriceCoverage ?? { rowCount: 0, stockCount: 0, startDate: null, endDate: null, lowPriceCount: 0, amountCount: 0 },
+    dailyPriceCoverage: context.dailyPriceCoverage ?? {
+      rowCount: 0,
+      stockCount: 0,
+      startDate: null,
+      endDate: null,
+      lowPriceCount: 0,
+      amountCount: 0,
+    },
     marketFactorCoverage,
+    strategyPortfolioSnapshot,
   };
 }
