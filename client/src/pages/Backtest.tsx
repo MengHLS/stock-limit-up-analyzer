@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { nextOrderReturnSortDirection, sortOrdersByNetReturn, type OrderReturnSortDirection } from "@/lib/orderReturnSort";
 import { trpc } from "@/lib/trpc";
 import { ArrowLeft, BarChart3, DatabaseZap, Loader2, RefreshCw, ShieldAlert, ShieldCheck, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -33,6 +34,8 @@ function FullOrdersSection({
   reasons,
   keyword,
   onKeywordChange,
+  returnSortDirection,
+  onReturnSortDirectionChange,
 }: {
   strategy: OrderStrategyKey;
   onStrategyChange: (strategy: OrderStrategyKey) => void;
@@ -46,6 +49,8 @@ function FullOrdersSection({
   reasons: string[];
   keyword: string;
   onKeywordChange: (keyword: string) => void;
+  returnSortDirection: OrderReturnSortDirection;
+  onReturnSortDirectionChange: (direction: OrderReturnSortDirection) => void;
 }) {
   const filledCount = orders.filter((order) => order.status === "filled").length;
   const skippedCount = orders.length - filledCount;
@@ -90,7 +95,7 @@ function FullOrdersSection({
       <div className="orders-scroll-container overflow-auto rounded-lg border border-slate-200">
         <table className="w-full min-w-[1220px] text-xs">
           <thead className="bg-slate-100 text-left text-slate-500">
-            <tr><th className="px-3 py-2">信号日</th><th className="px-3 py-2">股票</th><th className="px-3 py-2">评分</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">股数</th><th className="px-3 py-2">买入/卖出日</th><th className="px-3 py-2">买入/卖出价</th><th className="px-3 py-2">收益率</th><th className="px-3 py-2">买点涨幅</th><th className="px-3 py-2">原因</th></tr>
+            <tr><th className="px-3 py-2">信号日</th><th className="px-3 py-2">股票</th><th className="px-3 py-2">评分</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">股数</th><th className="px-3 py-2">买入/卖出日</th><th className="px-3 py-2">买入/卖出价</th><th className="px-3 py-2"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" onClick={() => onReturnSortDirectionChange(nextOrderReturnSortDirection(returnSortDirection))} aria-label={`按收益率${returnSortDirection === "desc" ? "升序" : "降序"}排列`} aria-sort={returnSortDirection === "asc" ? "ascending" : returnSortDirection === "desc" ? "descending" : "none"}>收益率 <span aria-hidden="true" className={returnSortDirection === "none" ? "text-slate-400" : "text-sky-700"}>{returnSortDirection === "asc" ? "↑" : returnSortDirection === "desc" ? "↓" : "↕"}</span></button></th><th className="px-3 py-2">买点涨幅</th><th className="px-3 py-2">原因</th></tr>
           </thead>
           <tbody>
             {displayedOrders.map((order, index) => {
@@ -119,6 +124,7 @@ export default function BacktestPage() {
   const [tradeDiffOnly, setTradeDiffOnly] = useState(true);
   const [tradeDiffKeyword, setTradeDiffKeyword] = useState("");
   const [orderStrategy, setOrderStrategy] = useState<OrderStrategyKey>("baseline");
+  const [orderReturnSortDirection, setOrderReturnSortDirection] = useState<OrderReturnSortDirection>("none");
   const update = <K extends keyof typeof config>(key: K, value: (typeof config)[K]) => setConfig((current) => ({ ...current, [key]: value }));
   const input = useMemo(() => ({
     observationDays: 1 as const,
@@ -178,10 +184,11 @@ export default function BacktestPage() {
   const orders = fullCycleOrdersByStrategy.get(orderStrategy) ?? (orderStrategy === "baseline" ? simulation?.trades ?? [] : []);
   const activeOrderStrategy = orderStrategyOptions.find((item) => item.key === orderStrategy)!;
   const reasons = useMemo(() => Array.from(new Set(orders.map((order) => order.reason).filter((value): value is string => Boolean(value)))).sort(), [orders]);
-  const displayedOrders = useMemo(() => {
+  const filteredOrders = useMemo(() => {
     const search = keyword.trim().toLowerCase();
     return orders.filter((order) => (orderStatus === "all" || order.status === orderStatus) && (reason === "all" || order.reason === reason) && (!search || `${order.stockCode} ${order.stockName}`.toLowerCase().includes(search)));
   }, [keyword, orderStatus, orders, reason]);
+  const displayedOrders = useMemo(() => sortOrdersByNetReturn(filteredOrders, orderReturnSortDirection), [filteredOrders, orderReturnSortDirection]);
   const buildCurve = (items: Array<{ key: string; realisticSimulation: { equityCurve: Array<{ date: string; equity: number }>; initialCapital: number } }>, startDate?: string | null) => {
     const dates = Array.from(new Set(items.flatMap((item) => item.realisticSimulation.equityCurve.map((point) => point.date)))).sort().filter((date) => !startDate || date >= startDate);
     return dates.map((date) => {
@@ -260,6 +267,8 @@ export default function BacktestPage() {
           reasons={reasons}
           keyword={keyword}
           onKeywordChange={setKeyword}
+          returnSortDirection={orderReturnSortDirection}
+          onReturnSortDirectionChange={setOrderReturnSortDirection}
         />
         {false && <>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex flex-wrap items-end gap-3"><div className="mr-auto"><h2 className="font-semibold">全部模拟订单</h2><p className="mt-1 text-xs text-slate-500">显示 {displayedOrders.length}/{orders.length} 笔；红涨绿跌。</p></div><label className="text-xs text-slate-600">状态<select value={orderStatus} onChange={(event) => setOrderStatus(event.target.value as "all" | "filled" | "skipped")} className="mt-1 block h-8 rounded-md border border-slate-200 px-2"><option value="all">全部</option><option value="filled">已入场</option><option value="skipped">未入场</option></select></label><label className="text-xs text-slate-600">原因<select value={reason} onChange={(event) => setReason(event.target.value)} className="mt-1 block h-8 max-w-48 rounded-md border border-slate-200 px-2"><option value="all">全部</option>{reasons.map((value) => <option key={value} value={value}>{value}</option>)}</select></label><label className="text-xs text-slate-600">搜索<Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="代码或名称" className="mt-1 h-8 w-36" /></label></div><div className="overflow-auto rounded-lg border border-slate-200"><table className="w-full min-w-[1100px] text-xs"><thead className="bg-slate-100 text-left text-slate-500"><tr><th className="px-3 py-2">信号日</th><th className="px-3 py-2">股票</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">股数</th><th className="px-3 py-2">买入/卖出日</th><th className="px-3 py-2">买入/卖出价</th><th className="px-3 py-2">收益率</th><th className="px-3 py-2">买点涨幅</th><th className="px-3 py-2">原因</th></tr></thead><tbody>{displayedOrders.map((order, index) => { const entryPointPremium = order.entryPointPremium ?? null; return <tr key={`${order.signalDate}-${order.stockCode}-${index}`} className="border-t border-slate-100"><td className="px-3 py-2">{formatDate(order.signalDate)}</td><td className="px-3 py-2"><p className="font-medium">{order.stockName}</p><p className="font-mono text-slate-400">{order.stockCode}</p></td><td className="px-3 py-2">{order.status === "filled" ? "已成交" : "未成交"}</td><td className="px-3 py-2">{order.shares || "-"}</td><td className="px-3 py-2">{formatDate(order.entryDate)} / {formatDate(order.exitDate)}</td><td className="px-3 py-2">{order.entryPrice ?? "-"} / {order.exitPrice ?? "-"}</td><td className={`px-3 py-2 ${order.netReturn !== null && order.netReturn >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{order.netReturn === null ? "-" : `${order.netReturn}%`}</td><td className={`px-3 py-2 ${entryPointPremium !== null && entryPointPremium >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{entryPointPremium === null ? "-" : `${entryPointPremium}%`}</td><td className="max-w-72 px-3 py-2 text-slate-500">{order.reason ?? "-"}</td></tr>; })}</tbody></table></div></section>
