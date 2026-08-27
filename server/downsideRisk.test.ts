@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDownsideRiskResearch, scoreDownsideRiskSignal } from "./downsideRisk";
+import { buildDownsideRiskResearch, calculateRiskAdjustedPerformance, scoreDownsideRiskSignal } from "./downsideRisk";
 import type { LeaderCandidateBacktestRow } from "./leaderCandidates";
 import { simulateRealisticTPlus1ToTPlus2 } from "./realisticBacktest";
 
@@ -64,6 +64,47 @@ function buildWeightSelectionFixture() {
 }
 
 describe("buildDownsideRiskResearch", () => {
+  it("基于相邻交易日权益曲线计算可复算的夏普、索提诺、卡玛与回撤压力，不读取候选未来价格", () => {
+    const performance = calculateRiskAdjustedPerformance({
+      initialCapital: 100,
+      finalCapital: 108,
+      maxDrawdown: 10,
+      equityCurve: [
+        { date: "2026-01-01", equity: 100, cash: 100, openPositions: 0 },
+        { date: "2026-01-02", equity: 110, cash: 100, openPositions: 0 },
+        { date: "2026-01-03", equity: 99, cash: 99, openPositions: 0 },
+        { date: "2026-01-04", equity: 108, cash: 108, openPositions: 0 },
+      ],
+    } as never);
+
+    expect(performance).toMatchObject({
+      returnSampling: "相邻交易日收盘权益",
+      riskFreeAnnualRate: 0,
+      annualizationTradingDays: 252,
+      equityPointCount: 4,
+      dailyReturnCount: 3,
+      annualizedReturn: 64108.93,
+      dailyVolatility: 11.2937,
+      annualizedVolatility: 179.28,
+      annualizedDownsideDeviation: 91.65,
+      calmarRatio: 6410.893,
+      ulcerIndex: 5.08,
+    });
+    expect(performance.sharpeRatio).toBeGreaterThan(0);
+    expect(performance.sortinoRatio).toBeGreaterThan(0);
+  });
+
+  it("权益点不足或波动为零时不制造无限夏普、索提诺或卡玛比率", () => {
+    const performance = calculateRiskAdjustedPerformance({
+      initialCapital: 100,
+      finalCapital: 100,
+      maxDrawdown: 0,
+      equityCurve: [{ date: "2026-01-01", equity: 100, cash: 100, openPositions: 0 }],
+    } as never);
+
+    expect(performance).toMatchObject({ dailyReturnCount: 0, annualizedReturn: null, sharpeRatio: null, sortinoRatio: null, calmarRatio: null });
+  });
+
   it("默认采用45日训练与14日验证的滚动参数", () => {
     const { dates, rows, prices } = buildWeightSelectionFixture();
     const result = buildDownsideRiskResearch(rows, { observationDays: 2 }, {}, { priceByStockDate: prices, tradingDates: dates });

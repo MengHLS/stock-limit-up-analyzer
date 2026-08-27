@@ -62,6 +62,17 @@ describe("独立组合资金回测页面", () => {
       "qualityBlend",
       "qualityGate",
       "strategyColors",
+      "data-risk-adjusted-evaluation",
+      "风险调整后评价",
+      "夏普比率",
+      "索提诺比率",
+      "卡玛比率",
+      "Ulcer指数",
+      "年化波动",
+      "年化下行波动",
+      "相邻交易日收盘权益",
+      "无风险年化收益率固定为0%",
+      "年化系数为252个交易日",
       "逐笔交易差异对比",
       "data-trade-difference-table",
       "fullCycleTradeDifferences",
@@ -155,6 +166,8 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("tradeDifferences");
     expect(researchSource).toContain("hardFilterExcluded");
     expect(researchSource).toContain("qualityGateExcluded");
+    expect(researchSource).toContain("calculateRiskAdjustedPerformance");
+    expect(researchSource).toContain("riskAdjustedPerformance");
     expect(researchSource).toContain("riskPenaltyAttribution");
     expect(researchSource).toContain("baselineOnlyNetPnl");
     expect(researchSource).toContain("buildFactorAblations");

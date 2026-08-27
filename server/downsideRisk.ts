@@ -57,6 +57,27 @@ export type DownsideRiskExperimentItem = {
   inputCandidateCount: number;
   excludedCandidateCount: number;
   realisticSimulation: RealisticBacktestResult;
+  riskAdjustedPerformance: DownsideRiskAdjustedPerformance;
+};
+
+/**
+ * 以同一连续资金曲线的相邻交易日权益变动计算；无风险收益率固定为0，
+ * 因回测不模拟现金管理收益。年化系数采用市场通行的252个交易日。
+ */
+export type DownsideRiskAdjustedPerformance = {
+  returnSampling: "相邻交易日收盘权益";
+  riskFreeAnnualRate: number;
+  annualizationTradingDays: number;
+  equityPointCount: number;
+  dailyReturnCount: number;
+  annualizedReturn: number | null;
+  dailyVolatility: number | null;
+  annualizedVolatility: number | null;
+  annualizedDownsideDeviation: number | null;
+  sharpeRatio: number | null;
+  sortinoRatio: number | null;
+  calmarRatio: number | null;
+  ulcerIndex: number | null;
 };
 
 export type DownsideRiskWeightTrial = {
@@ -92,6 +113,7 @@ export type DownsideRiskWalkForwardExperiment = {
   finalCapital: number;
   filledCount: number;
   completedCount: number;
+  riskAdjustedPerformance: DownsideRiskAdjustedPerformance;
 };
 
 export type DownsideRiskWalkForwardResult = {
@@ -203,6 +225,47 @@ const riskFeatures: DownsideRiskFeature[] = [
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 const ratio = (numerator: number, denominator: number) => denominator === 0 ? null : round((numerator / denominator) * 100, 1);
 const penaltyWeightGrid = [0, 0.15, 0.35, 0.55, 0.75, 1];
+
+const riskAnnualizationTradingDays = 252;
+
+/**
+ * 夏普、索提诺和卡玛均基于同一连续账户的相邻交易日收盘权益。
+ * 无风险收益率设为0，因为模拟器未配置现金管理收益；不以未来价格筛选或改写策略。
+ */
+export function calculateRiskAdjustedPerformance(simulation: RealisticBacktestResult): DownsideRiskAdjustedPerformance {
+  const equities = simulation.equityCurve.map((point) => point.equity).filter((equity) => Number.isFinite(equity) && equity > 0);
+  const dailyReturns = equities.slice(1).map((equity, index) => equity / equities[index]! - 1).filter((value) => Number.isFinite(value));
+  const meanReturn = dailyReturns.length === 0 ? null : dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length;
+  const dailyVolatility = meanReturn === null || dailyReturns.length < 2 ? null : Math.sqrt(dailyReturns.reduce((sum, value) => sum + (value - meanReturn) ** 2, 0) / (dailyReturns.length - 1));
+  const downsideDeviation = dailyReturns.length === 0 ? null : Math.sqrt(dailyReturns.reduce((sum, value) => sum + Math.min(value, 0) ** 2, 0) / dailyReturns.length);
+  const annualizedReturn = dailyReturns.length === 0 || simulation.initialCapital <= 0 || simulation.finalCapital <= 0
+    ? null
+    : (simulation.finalCapital / simulation.initialCapital) ** (riskAnnualizationTradingDays / dailyReturns.length) - 1;
+  let peak = simulation.initialCapital;
+  const drawdowns = equities.map((equity) => {
+    peak = Math.max(peak, equity);
+    return peak === 0 ? 0 : (equity / peak) - 1;
+  });
+  const ulcerIndex = drawdowns.length === 0 ? null : Math.sqrt(drawdowns.reduce((sum, drawdown) => sum + drawdown ** 2, 0) / drawdowns.length);
+  const annualizedVolatility = dailyVolatility === null ? null : dailyVolatility * Math.sqrt(riskAnnualizationTradingDays);
+  const annualizedDownsideDeviation = downsideDeviation === null ? null : downsideDeviation * Math.sqrt(riskAnnualizationTradingDays);
+  const maxDrawdown = simulation.maxDrawdown / 100;
+  return {
+    returnSampling: "相邻交易日收盘权益",
+    riskFreeAnnualRate: 0,
+    annualizationTradingDays: riskAnnualizationTradingDays,
+    equityPointCount: equities.length,
+    dailyReturnCount: dailyReturns.length,
+    annualizedReturn: annualizedReturn === null ? null : round(annualizedReturn * 100, 2),
+    dailyVolatility: dailyVolatility === null ? null : round(dailyVolatility * 100, 4),
+    annualizedVolatility: annualizedVolatility === null ? null : round(annualizedVolatility * 100, 2),
+    annualizedDownsideDeviation: annualizedDownsideDeviation === null ? null : round(annualizedDownsideDeviation * 100, 2),
+    sharpeRatio: annualizedReturn === null || !annualizedVolatility ? null : round(annualizedReturn / annualizedVolatility, 3),
+    sortinoRatio: annualizedReturn === null || !annualizedDownsideDeviation ? null : round(annualizedReturn / annualizedDownsideDeviation, 3),
+    calmarRatio: annualizedReturn === null || !maxDrawdown ? null : round(annualizedReturn / maxDrawdown, 3),
+    ulcerIndex: ulcerIndex === null ? null : round(ulcerIndex * 100, 2),
+  };
+}
 
 function readSignalPrice(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
   return context.priceByStockDate?.get(`${row.stockCode}::${row.date}`);
@@ -391,14 +454,10 @@ function buildExperiments(
   descriptionPrefix = "",
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
-  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => ({
-    key,
-    label,
-    description,
-    inputCandidateCount: experimentRows.length,
-    excludedCandidateCount,
-    realisticSimulation: simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates),
-  });
+  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
+    const realisticSimulation = simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
+    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation) };
+  };
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeight));
   const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
   const qualityBlendRows = profiles.map((profile) => applyQualityBlend(profile, context));
@@ -422,14 +481,10 @@ function buildExperimentsWithWindowWeights(
   context: LeaderCandidateBacktestContext,
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
-  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => ({
-    key,
-    label,
-    description,
-    inputCandidateCount: experimentRows.length,
-    excludedCandidateCount,
-    realisticSimulation: simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates),
-  });
+  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
+    const realisticSimulation = simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
+    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation) };
+  };
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight));
   const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
   const qualityBlendRows = profiles.map((profile) => applyQualityBlend(profile, context));
@@ -672,6 +727,7 @@ function buildWalkForwardResult(
       finalCapital: experiment.realisticSimulation.finalCapital,
       filledCount: experiment.realisticSimulation.filledCount,
       completedCount: experiment.realisticSimulation.completedCount,
+      riskAdjustedPerformance: experiment.riskAdjustedPerformance,
     })),
     equityCurve: dates.map((date) => ({
       date,
