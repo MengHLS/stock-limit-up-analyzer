@@ -62,6 +62,7 @@ export default function UploadPage() {
 
   const uploadMutation = trpc.image.upload.useMutation();
   const recognizeMutation = trpc.image.recognize.useMutation();
+  const recordRefreshMutation = trpc.operationLog.recordRefresh.useMutation();
   const utils = trpc.useUtils();
 
   const [uploadedDateStocks, setUploadedDateStocks] = useState<RecognizedStock[]>([]);
@@ -77,17 +78,33 @@ export default function UploadPage() {
     try {
       const records = await utils.limitUp.getByDate.fetch({ date });
       const mappedRecords = mapStoredLimitUpRecords(records);
+      const status = mappedRecords.length > 0 ? "success" : "empty";
       setUploadedDateStocks(mappedRecords);
-      setDateRefreshState(mappedRecords.length > 0 ? "success" : "empty");
+      setDateRefreshState(status);
+      try {
+        await recordRefreshMutation.mutateAsync({
+          date,
+          status,
+          refreshedCount: mappedRecords.length,
+          message: status === "success" ? `按日期刷新到 ${mappedRecords.length} 条记录` : "按日期刷新成功但没有记录",
+        });
+      } catch (logError) {
+        console.warn("[OperationLog] 日期刷新成功，但日志写入失败:", logError);
+      }
       return mappedRecords.length;
     } catch (error) {
       const message = error instanceof Error ? error.message : "按日期获取数据失败";
       setUploadedDateStocks([]);
       setDateRefreshError(message);
       setDateRefreshState("error");
+      try {
+        await recordRefreshMutation.mutateAsync({ date, status: "failed", message });
+      } catch (logError) {
+        console.warn("[OperationLog] 日期刷新失败，且日志写入失败:", logError);
+      }
       return null;
     }
-  }, [utils]);
+  }, [recordRefreshMutation, utils]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -197,9 +214,11 @@ export default function UploadPage() {
 
       // 识别图片
       const recognizeResult = await recognizeMutation.mutateAsync({
-        imageUrl: uploadResult.fileUrl,
-        imageId: uploadResult.id,
-        limitUpDate,
+                  imageUrl: uploadResult.fileUrl,
+          imageId: uploadResult.id,
+          fileName: fileItem.file.name,
+          limitUpDate,
+
       });
 
       setFiles(prev => prev.map(f => 

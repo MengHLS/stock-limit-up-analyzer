@@ -13,6 +13,7 @@ import SentimentAlerts from "./pages/SentimentAlerts";
 import SentimentAnalysis from "./pages/SentimentAnalysis";
 import LeaderCandidates from "./pages/LeaderCandidates";
 import Backtest from "./pages/Backtest";
+import OperationLogs from "./pages/OperationLogs";
 
 
 function Router() {
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/sentiment-analysis" component={SentimentAnalysis} />
       <Route path="/leader-candidates" component={LeaderCandidates} />
       <Route path="/backtest" component={Backtest} />
+      <Route path="/operation-logs" component={OperationLogs} />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

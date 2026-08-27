@@ -19,7 +19,10 @@ import {
   InsertStockDailyPrice,
   sentimentAlerts,
   InsertSentimentAlert,
-  SentimentAlert
+  SentimentAlert,
+  operationLogs,
+  InsertOperationLog,
+  OperationLog
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
@@ -361,6 +364,62 @@ export async function getAllUploadedImages(): Promise<UploadedImage[]> {
   if (!db) return [];
 
   return await db.select().from(uploadedImages).orderBy(desc(uploadedImages.createdAt));
+}
+
+// ==================== Operation Log Functions ====================
+
+export type OperationLogType = 'image_recognition' | 'date_refresh';
+export type OperationLogStatus = 'processing' | 'success' | 'empty' | 'failed';
+
+/** 创建操作日志。日志属于当前操作者，查询时不会跨用户暴露。 */
+export async function createOperationLog(log: InsertOperationLog): Promise<OperationLog | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db.insert(operationLogs).values(log);
+  const insertId = result[0].insertId;
+  const [newLog] = await db.select().from(operationLogs).where(eq(operationLogs.id, insertId));
+  return newLog || null;
+}
+
+/** 更新操作日志的最终状态和结果字段。 */
+export async function updateOperationLog(
+  id: number,
+  changes: Partial<Pick<InsertOperationLog, 'status' | 'effectiveDate' | 'recognizedCount' | 'refreshedCount' | 'message'>>,
+): Promise<OperationLog | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  await db.update(operationLogs)
+    .set({ ...changes, updatedAt: new Date() })
+    .where(eq(operationLogs.id, id));
+  const [updatedLog] = await db.select().from(operationLogs).where(eq(operationLogs.id, id));
+  return updatedLog || null;
+}
+
+/** 获取当前用户的操作日志，支持类型、状态和日期筛选。 */
+export async function getOperationLogs(
+  userId: number,
+  filters?: {
+    operationType?: OperationLogType;
+    status?: OperationLogStatus;
+    date?: string;
+    limit?: number;
+  },
+): Promise<OperationLog[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions = [eq(operationLogs.createdBy, userId)];
+  if (filters?.operationType) conditions.push(eq(operationLogs.operationType, filters.operationType));
+  if (filters?.status) conditions.push(eq(operationLogs.status, filters.status));
+  if (filters?.date) conditions.push(eq(operationLogs.requestedDate, filters.date));
+
+  const limit = Math.min(Math.max(filters?.limit ?? 100, 1), 200);
+  return await db.select().from(operationLogs)
+    .where(and(...conditions))
+    .orderBy(desc(operationLogs.createdAt))
+    .limit(limit);
 }
 
 // ==================== Stock Watchlist Functions ====================

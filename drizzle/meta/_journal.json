@@ -71,6 +71,13 @@
       "when": 1787726941077,
       "tag": "0009_broad_speed",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787808603565,
+      "tag": "0010_orange_kate_bishop",
+      "breakpoints": true
     }
   ]
 }

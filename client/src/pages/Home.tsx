@@ -27,6 +27,7 @@ import {
   Star,
   Crown,
   Database,
+  ClipboardList,
   Download,
   Pencil,
   Trash2
@@ -333,6 +334,12 @@ export default function Home() {
             ) : null}
             {isAuthenticated ? (
               <>
+                <Link href="/operation-logs">
+                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-slate-100">
+                    <ClipboardList className="h-4 w-4" />
+                    操作日志
+                  </Button>
+                </Link>
                 <Link href="/upload">
                   <Button size="sm" className="gap-2 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 shadow-md">
                     <Upload className="h-4 w-4" />

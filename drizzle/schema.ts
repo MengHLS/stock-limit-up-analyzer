@@ -123,6 +123,43 @@ export type UploadedImage = typeof uploadedImages.$inferSelect;
 export type InsertUploadedImage = typeof uploadedImages.$inferInsert;
 
 /**
+ * 操作日志表 - 记录图片识别结果与指定日期数据刷新状态
+ */
+export const operationLogs = mysqlTable("operation_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 操作类型：图片识别或日期数据刷新 */
+  operationType: mysqlEnum("operationType", ["image_recognition", "date_refresh"]).notNull(),
+  /** 操作状态：处理中、成功、空结果或失败 */
+  status: mysqlEnum("status", ["processing", "success", "empty", "failed"]).notNull(),
+  /** 关联的图片记录，可为空（批量刷新可能对应多张图片） */
+  imageId: int("imageId"),
+  /** 图片原始文件名或操作来源说明 */
+  fileName: varchar("fileName", { length: 255 }),
+  /** 用户选择或请求的日期 */
+  requestedDate: date("requestedDate", { mode: "string" }),
+  /** 识别结果最终使用的日期 */
+  effectiveDate: date("effectiveDate", { mode: "string" }),
+  /** 图片识别出的股票数量 */
+  recognizedCount: int("recognizedCount"),
+  /** 日期刷新查询到的记录数量 */
+  refreshedCount: int("refreshedCount"),
+  /** 错误或补充说明 */
+  message: text("message"),
+  /** 操作者用户ID */
+  createdBy: int("createdBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  userCreatedIdx: index("idx_operation_logs_user_created").on(table.createdBy, table.createdAt),
+  typeStatusIdx: index("idx_operation_logs_type_status").on(table.operationType, table.status),
+  requestedDateIdx: index("idx_operation_logs_requested_date").on(table.requestedDate),
+  imageIdx: index("idx_operation_logs_image").on(table.imageId),
+}));
+
+export type OperationLog = typeof operationLogs.$inferSelect;
+export type InsertOperationLog = typeof operationLogs.$inferInsert;
+
+/**
  * 股票关注表 - 存储用户关注的股票信息
  */
 export const stockWatchlist = mysqlTable("stock_watchlist", {

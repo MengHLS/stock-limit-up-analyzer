@@ -49,6 +49,9 @@ import {
   markAllAlertsAsRead,
   checkAndCreateAlert,
   batchCheckAlerts,
+  createOperationLog,
+  updateOperationLog,
+  getOperationLogs,
   EMOTION_LEVELS,
   getEmotionLevel,
 } from "./db";
@@ -56,6 +59,27 @@ import {
 const limitUpTimeInput = z.string().refine(isValidLimitUpTime, {
   message: "涨停时间应为HH:MM或HH:MM:SS格式",
 });
+
+async function beginOperationLog(log: Parameters<typeof createOperationLog>[0]): Promise<number | null> {
+  try {
+    return (await createOperationLog(log))?.id ?? null;
+  } catch (error) {
+    console.warn("[OperationLog] 创建日志失败，不阻断主流程:", error);
+    return null;
+  }
+}
+
+async function finishOperationLog(
+  id: number | null,
+  changes: Parameters<typeof updateOperationLog>[1],
+): Promise<void> {
+  if (id === null) return;
+  try {
+    await updateOperationLog(id, changes);
+  } catch (error) {
+    console.warn("[OperationLog] 更新日志失败，不阻断主流程:", error);
+  }
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -243,10 +267,19 @@ export const appRouter = router({
       .input(z.object({
         imageUrl: z.string(),
         imageId: z.number().optional(),
+        fileName: z.string().optional(),
         limitUpDate: z.string(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const { imageUrl, imageId, limitUpDate } = input;
+        const { imageUrl, imageId, fileName, limitUpDate } = input;
+        const operationLogId = await beginOperationLog({
+          operationType: "image_recognition",
+          status: "processing",
+          imageId: imageId ?? null,
+          fileName: fileName ?? null,
+          requestedDate: limitUpDate,
+          createdBy: ctx.user.id,
+        });
         
         if (imageId) {
           await updateImageStatus(imageId, 'processing');
@@ -377,6 +410,12 @@ export const appRouter = router({
           if (imageId) {
             await updateImageStatus(imageId, 'completed');
           }
+          await finishOperationLog(operationLogId, {
+            status: stocks.length > 0 ? "success" : "empty",
+            effectiveDate: recognizedDate,
+            recognizedCount: stocks.length,
+            message: stocks.length > 0 ? `识别并保存 ${stocks.length} 条股票记录` : "图片中未识别到可保存的股票记录",
+          });
 
           return {
             success: true,
@@ -388,6 +427,10 @@ export const appRouter = router({
           if (imageId) {
             await updateImageStatus(imageId, 'failed');
           }
+          await finishOperationLog(operationLogId, {
+            status: "failed",
+            message: error instanceof Error ? error.message : String(error),
+          });
           throw error;
         }
       }),
@@ -425,6 +468,14 @@ export const appRouter = router({
         
         // 立即返回成功，后台异步识别
         await updateImageStatus(image.id, 'processing');
+        const operationLogId = await beginOperationLog({
+          operationType: "image_recognition",
+          status: "processing",
+          imageId: image.id,
+          fileName,
+          requestedDate: limitUpDate,
+          createdBy: ctx.user.id,
+        });
         
         // 保存上下文信息供异步函数使用
         const userId = ctx.user.id;
@@ -561,10 +612,20 @@ export const appRouter = router({
           }
 
           await updateImageStatus(imageId, 'completed');
+          await finishOperationLog(operationLogId, {
+            status: stocks.length > 0 ? "success" : "empty",
+            effectiveDate: recognizedDate,
+            recognizedCount: stocks.length,
+            message: stocks.length > 0 ? `识别并保存 ${stocks.length} 条股票记录` : "图片中未识别到可保存的股票记录",
+          });
           console.log(`[uploadAndRecognize] 图片 ${imageId} 识别完成，识别出 ${stocks.length} 只股票`);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           console.error('[uploadAndRecognize] 识别失败:', errorMessage, error instanceof Error ? error.stack : '');
+          await finishOperationLog(operationLogId, {
+            status: "failed",
+            message: errorMessage,
+          });
           try {
             await updateImageStatus(imageId, 'failed');
           } catch (updateError) {
@@ -579,6 +640,43 @@ export const appRouter = router({
           imageId: image.id,
           message: '图片上传成功，正在后台识别中...',
         }
+      }),
+  }),
+
+  // 图片识别与日期数据刷新操作日志
+  operationLog: router({
+    getRecent: protectedProcedure
+      .input(z.object({
+        operationType: z.enum(["image_recognition", "date_refresh"]).optional(),
+        status: z.enum(["processing", "success", "empty", "failed"]).optional(),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }).optional())
+      .query(async ({ ctx, input }) => {
+        return await getOperationLogs(ctx.user.id, input);
+      }),
+
+    recordRefresh: protectedProcedure
+      .input(z.object({
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        status: z.enum(["success", "empty", "failed"]),
+        refreshedCount: z.number().int().min(0).optional(),
+        message: z.string().max(2000).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const log = await createOperationLog({
+          operationType: "date_refresh",
+          status: input.status,
+          requestedDate: input.date,
+          effectiveDate: input.date,
+          refreshedCount: input.refreshedCount ?? null,
+          message: input.message ?? null,
+          createdBy: ctx.user.id,
+        });
+        if (!log) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "操作日志保存失败" });
+        }
+        return log;
       }),
   }),
 
