@@ -398,6 +398,16 @@ export async function updateOperationLog(
 }
 
 /** 获取当前用户的操作日志，支持类型、状态和日期筛选。 */
+export async function getOperationLogById(id: number, userId: number): Promise<OperationLog | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [log] = await db.select().from(operationLogs)
+    .where(and(eq(operationLogs.id, id), eq(operationLogs.createdBy, userId)))
+    .limit(1);
+  return log || null;
+}
+
 export async function getOperationLogs(
   userId: number,
   filters?: {

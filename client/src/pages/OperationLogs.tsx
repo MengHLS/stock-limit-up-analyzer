@@ -9,6 +9,7 @@ import { getLoginUrl } from "@/const";
 import { AlertCircle, ArrowLeft, ClipboardList, Loader2, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
+import { toast } from "sonner";
 
 type OperationTypeFilter = "" | "image_recognition" | "date_refresh";
 type OperationStatusFilter = "" | "processing" | "success" | "empty" | "failed";
@@ -53,6 +54,31 @@ export default function OperationLogsPage() {
   const { data: logs, isLoading, isFetching, error, refetch } = trpc.operationLog.getRecent.useQuery(queryInput, {
     enabled: isAuthenticated,
   });
+  const [retryingLogId, setRetryingLogId] = useState<number | null>(null);
+  const retryOperation = trpc.operationLog.retry.useMutation();
+  const recognizeRetry = trpc.image.recognize.useMutation();
+
+  const handleRetry = async (logId: number) => {
+    setRetryingLogId(logId);
+    try {
+      const result = await retryOperation.mutateAsync({ logId });
+      if (result.status === "ready" && result.retryInput) {
+        await recognizeRetry.mutateAsync(result.retryInput);
+        toast.success("图片识别重试已完成，新的识别日志已写入");
+      } else if (result.status === "ready") {
+        throw new Error("失败日志缺少可重试的图片参数");
+      } else if (result.status === "failed") {
+        toast.error(result.message || "日期刷新重试失败");
+      } else {
+        toast.success(result.message || "失败操作已重试");
+      }
+      await refetch();
+    } catch (retryError) {
+      toast.error(retryError instanceof Error ? retryError.message : "重试失败，请稍后再试");
+    } finally {
+      setRetryingLogId(null);
+    }
+  };
 
   if (!authLoading && !isAuthenticated) {
     return (
@@ -160,6 +186,7 @@ export default function OperationLogsPage() {
                       <th className="px-4 py-3 font-medium">文件/图片</th>
                       <th className="px-4 py-3 font-medium">结果</th>
                       <th className="px-4 py-3 font-medium">说明</th>
+                      <th className="px-4 py-3 text-right font-medium">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -179,6 +206,20 @@ export default function OperationLogsPage() {
                             {type === "image_recognition" ? `识别 ${log.recognizedCount ?? 0} 条` : `刷新 ${log.refreshedCount ?? 0} 条`}
                           </td>
                           <td className="max-w-[320px] px-4 py-3 text-muted-foreground"><p className="break-words">{log.message || "-"}</p></td>
+                          <td className="whitespace-nowrap px-4 py-3 text-right">
+                            {logStatus === "failed" && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void handleRetry(log.id)}
+                                disabled={retryingLogId !== null}
+                                className="gap-1"
+                              >
+                                {retryingLogId === log.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                                {retryingLogId === log.id ? "重试中" : "一键重试"}
+                              </Button>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}

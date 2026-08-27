@@ -51,6 +51,7 @@ import {
   batchCheckAlerts,
   createOperationLog,
   updateOperationLog,
+  getOperationLogById,
   getOperationLogs,
   EMOTION_LEVELS,
   getEmotionLevel,
@@ -277,6 +278,7 @@ export const appRouter = router({
           status: "processing",
           imageId: imageId ?? null,
           fileName: fileName ?? null,
+          imageUrl,
           requestedDate: limitUpDate,
           createdBy: ctx.user.id,
         });
@@ -473,6 +475,7 @@ export const appRouter = router({
           status: "processing",
           imageId: image.id,
           fileName,
+          imageUrl: url,
           requestedDate: limitUpDate,
           createdBy: ctx.user.id,
         });
@@ -677,6 +680,87 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "操作日志保存失败" });
         }
         return log;
+      }),
+
+    retry: protectedProcedure
+      .input(z.object({ logId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const sourceLog = await getOperationLogById(input.logId, ctx.user.id);
+        if (!sourceLog) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "操作日志不存在或无权访问" });
+        }
+        if (sourceLog.status !== "failed") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "只有失败状态的操作可以重试" });
+        }
+        if (!sourceLog.requestedDate) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "该日志缺少原始日期，无法重试" });
+        }
+
+        if (sourceLog.operationType === "image_recognition") {
+          if (!sourceLog.imageUrl) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "该失败日志缺少原始图片，无法重试" });
+          }
+
+          return {
+            operationType: sourceLog.operationType,
+            sourceLogId: sourceLog.id,
+            retryLogId: null,
+            status: "ready" as const,
+            retryInput: {
+              imageUrl: sourceLog.imageUrl,
+              imageId: sourceLog.imageId ?? undefined,
+              fileName: sourceLog.fileName ?? undefined,
+              limitUpDate: sourceLog.requestedDate,
+            },
+            message: "已校验原始图片和日期，正在重新执行识别",
+          };
+        }
+
+        try {
+          const records = await getLimitUpRecordsByDate(sourceLog.requestedDate);
+          const status = records.length > 0 ? "success" : "empty";
+          const retryLog = await createOperationLog({
+            operationType: "date_refresh",
+            status,
+            requestedDate: sourceLog.requestedDate,
+            effectiveDate: sourceLog.requestedDate,
+            refreshedCount: records.length,
+            message: status === "success" ? `重试刷新到 ${records.length} 条记录` : "重试刷新成功但没有记录",
+            createdBy: ctx.user.id,
+          });
+          if (!retryLog) {
+            throw new Error("重试日志保存失败");
+          }
+          return {
+            operationType: sourceLog.operationType,
+            sourceLogId: sourceLog.id,
+            retryLogId: retryLog.id,
+            status,
+            count: records.length,
+            message: retryLog.message,
+          };
+        } catch (error) {
+          const retryLog = await createOperationLog({
+            operationType: "date_refresh",
+            status: "failed",
+            requestedDate: sourceLog.requestedDate,
+            effectiveDate: sourceLog.requestedDate,
+            refreshedCount: 0,
+            message: error instanceof Error ? `重试失败：${error.message}` : "重试失败",
+            createdBy: ctx.user.id,
+          });
+          if (!retryLog) {
+            throw error;
+          }
+          return {
+            operationType: sourceLog.operationType,
+            sourceLogId: sourceLog.id,
+            retryLogId: retryLog.id,
+            status: "failed" as const,
+            count: 0,
+            message: retryLog.message,
+          };
+        }
       }),
   }),
 

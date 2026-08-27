@@ -22,6 +22,7 @@ describe("图片识别与日期刷新操作日志", () => {
       "recognizedCount",
       "refreshedCount",
       "createdBy: int(\"createdBy\").notNull()",
+      "imageUrl: text(\"imageUrl\")",
     ]) {
       expect(schemaSource).toContain(requiredText);
     }
@@ -30,6 +31,8 @@ describe("图片识别与日期刷新操作日志", () => {
   it("日志查询按当前用户隔离并支持类型、状态、日期筛选", () => {
     expect(dbSource).toContain("export async function getOperationLogs(");
     expect(dbSource).toContain("eq(operationLogs.createdBy, userId)");
+    expect(dbSource).toContain("export async function getOperationLogById");
+    expect(dbSource).toContain("eq(operationLogs.id, id)");
     expect(dbSource).toContain("filters?.operationType");
     expect(dbSource).toContain("filters?.status");
     expect(dbSource).toContain("filters?.date");
@@ -44,6 +47,13 @@ describe("图片识别与日期刷新操作日志", () => {
     expect(uploadSource).toContain("recordRefreshMutation.mutateAsync");
     expect(uploadSource).toContain("dateRefreshState");
     expect(routerSource).toContain("recordRefresh: protectedProcedure");
+    expect(routerSource).toContain("retry: protectedProcedure");
+    expect(routerSource).toContain('sourceLog.status !== "failed"');
+    expect(routerSource).toContain('sourceLog.operationType === "image_recognition"');
+    expect(routerSource).toContain("sourceLog.imageUrl");
+    expect(pageSource).toContain("retryOperation.mutateAsync");
+    expect(pageSource).toContain('logStatus === "failed"');
+    expect(pageSource).toContain("一键重试");
   });
 
   it("日志页面已注册并提供状态与类型筛选", () => {

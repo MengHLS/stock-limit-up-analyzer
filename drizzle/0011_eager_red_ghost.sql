@@ -1,0 +1,1 @@
+ALTER TABLE `operation_logs` ADD `imageUrl` text;

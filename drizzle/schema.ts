@@ -135,6 +135,8 @@ export const operationLogs = mysqlTable("operation_logs", {
   imageId: int("imageId"),
   /** 图片原始文件名或操作来源说明 */
   fileName: varchar("fileName", { length: 255 }),
+  /** 受当前用户保护的原始图片地址，用于失败识别重试 */
+  imageUrl: text("imageUrl"),
   /** 用户选择或请求的日期 */
   requestedDate: date("requestedDate", { mode: "string" }),
   /** 识别结果最终使用的日期 */
