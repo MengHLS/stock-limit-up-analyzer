@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDownsideRiskResearch, calculateRiskAdjustedPerformance, scoreDownsideRiskSignal } from "./downsideRisk";
+import { buildDownsideRiskResearch, calculateRiskAdjustedPerformance, calculateStrategyEvaluation, scoreDownsideRiskSignal } from "./downsideRisk";
 import type { LeaderCandidateBacktestRow } from "./leaderCandidates";
 import { simulateRealisticTPlus1ToTPlus2 } from "./realisticBacktest";
 
@@ -103,6 +103,43 @@ describe("buildDownsideRiskResearch", () => {
     } as never);
 
     expect(performance).toMatchObject({ dailyReturnCount: 0, annualizedReturn: null, sharpeRatio: null, sortinoRatio: null, calmarRatio: null });
+  });
+
+  it("从既有资金曲线、订单、交易日和日线成交额复算六层评价，不将其反馈到信号评分", () => {
+    const first = row({ stockCode: "600101.SH", date: "2026-01-01", nextDayDate: "2026-01-02", secondDayDate: "2026-01-03" });
+    const second = row({ stockCode: "600102.SH", date: "2026-01-02", nextDayDate: "2026-01-03", secondDayDate: "2026-01-04" });
+    const evaluation = calculateStrategyEvaluation({
+      initialCapital: 100000,
+      finalCapital: 96000,
+      totalReturn: -4,
+      maxDrawdown: 12,
+      winRate: 33.3,
+      profitFactor: 0.5,
+      peakOpenPositionCount: 2,
+      assumptions: { slippageBps: 10 },
+      equityCurve: [
+        { date: "2026-01-02", equity: 100000, cash: 50000, openPositions: 1 },
+        { date: "2026-01-03", equity: 105000, cash: 30000, openPositions: 2 },
+        { date: "2026-01-04", equity: 96000, cash: 96000, openPositions: 0 },
+      ],
+      trades: [
+        { signalDate: first.date, entryDate: first.nextDayDate, exitDate: first.secondDayDate, stockCode: first.stockCode, stockName: first.stockName, score: 80, shares: 1000, entryPrice: 10, exitPrice: 11, totalFees: 15, netPnl: 985, netReturn: 9.85, status: "filled", reason: null },
+        { signalDate: second.date, entryDate: second.nextDayDate, exitDate: second.secondDayDate, stockCode: second.stockCode, stockName: second.stockName, score: 80, shares: 1000, entryPrice: 10, exitPrice: 9, totalFees: 15, netPnl: -1015, netReturn: -10.15, status: "filled", reason: null },
+        { signalDate: "2026-01-01", entryDate: "2026-01-02", exitDate: "2026-01-04", stockCode: "600103.SH", stockName: "测试丙", score: 80, shares: 1000, entryPrice: 10, exitPrice: 9, totalFees: 15, netPnl: -1015, netReturn: -10.15, status: "filled", reason: null },
+      ],
+    } as never, {
+      tradingDates: ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+      priceByStockDate: new Map([[`${first.stockCode}::${first.nextDayDate}`, { openPrice: 10, closePrice: 11, amount: 20_000 }], [`${second.stockCode}::${second.nextDayDate}`, { openPrice: 10, closePrice: 9, amount: 20_000 }]]),
+    }, [first, second]);
+
+    expect(evaluation.core).toMatchObject({ totalReturn: -4, maxDrawdown: 12 });
+    expect(evaluation.tradeQuality).toMatchObject({ tradeCount: 3, maxConsecutiveLosses: 2, expectancy: -3.48, averageWin: 9.85, averageLoss: -10.15, payoffRatio: 0.97 });
+    expect(evaluation.tailRisk.valueAtRisk95).not.toBeNull();
+    expect(evaluation.tailRisk.conditionalValueAtRisk95).toBeLessThanOrEqual(evaluation.tailRisk.valueAtRisk95!);
+    expect(evaluation.stability).toMatchObject({ rollingWindowTradingDays: 63, topFivePositiveDayReturnContribution: 100 });
+    expect(evaluation.tradingRealism).toMatchObject({ totalFees: 45, modeledOneWaySlippageBps: 10, maxOpenPositions: 2, entryParticipationCoverageCount: 2 });
+    expect(evaluation.tradingRealism.averageEntryParticipationBps).toBe(5);
+    expect(evaluation.tradingRealism.averageCapitalUtilization).toBeGreaterThan(0);
   });
 
   it("默认采用45日训练与14日验证的滚动参数", () => {

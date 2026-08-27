@@ -18,6 +18,7 @@ describe("独立组合资金回测页面", () => {
 
   it("独立页保留参数、资金审计和完整订单表", () => {
     const pageSource = readFileSync(resolve(projectRoot, "client/src/pages/Backtest.tsx"), "utf8");
+    const evaluationSource = readFileSync(resolve(projectRoot, "client/src/components/StrategyEvaluationPanel.tsx"), "utf8");
 
     for (const requiredText of [
       "T+1开盘预期过滤",
@@ -52,27 +53,11 @@ describe("独立组合资金回测页面", () => {
       "data-full-cycle-comparison",
       "fullCycleRiskCurve",
       "fullCycleExperiments",
-      "统一策略评价",
-      "data-strategy-evaluation",
-      "UNIFIED STRATEGY EVALUATION",
-      "全周期连续资金账户",
-      "严格滚动样本外",
       "质量复合评分",
       "质量门控策略",
       "qualityBlend",
       "qualityGate",
       "strategyColors",
-      "data-risk-adjusted-evaluation",
-      "风险调整后评价",
-      "夏普比率",
-      "索提诺比率",
-      "卡玛比率",
-      "Ulcer指数",
-      "年化波动",
-      "年化下行波动",
-      "相邻交易日收盘权益",
-      "无风险年化收益率固定为0%",
-      "年化系数为252个交易日",
       "逐笔交易差异对比",
       "data-trade-difference-table",
       "fullCycleTradeDifferences",
@@ -168,6 +153,19 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("qualityGateExcluded");
     expect(researchSource).toContain("calculateRiskAdjustedPerformance");
     expect(researchSource).toContain("riskAdjustedPerformance");
+    expect(researchSource).toContain("calculateStrategyEvaluation");
+    expect(researchSource).toContain("strategyRobustness");
+    expect(pageSource).toContain("StrategyEvaluationPanel");
+    expect(pageSource).not.toContain("<RiskAdjustedComparison");
+    for (const requiredText of [
+      "第一层：核心结果", "CAGR", "Total Return", "Max Drawdown", "Sharpe", "Sortino", "Calmar", "Ulcer Index",
+      "第二层：交易质量", "Win Rate", "Profit Factor", "Expectancy", "Avg Win", "Avg Loss", "Payoff Ratio", "Max Consecutive Losses", "Trade Count",
+      "第三层：尾部风险", "VaR 95%", "CVaR 95%", "VaR 99%", "CVaR 99%", "Skewness", "Excess Kurtosis", "Worst Day", "Worst Trade",
+      "第四层：稳定性", "盈利月份比例", "Rolling Sharpe", "Rolling Calmar", "Rolling CAGR", "最大回撤持续时间", "最长恢复时间", "收益集中度",
+      "第五层：鲁棒性", "Walk Forward OOS Sharpe", "IS/OOS 夏普衰减率", "参数稳定性", "参数敏感度", "不同市场环境表现",
+      "第六层：交易现实性", "手续费", "滑点", "换手率", "平均持仓时间", "资金利用率", "平均仓位", "最大仓位", "市场冲击",
+      "data-strategy-evaluation", "SIX-LAYER STRATEGY EVALUATION", "严格样本外", "连续资金账户", "无风险收益率为0%", "252交易日",
+    ]) expect(evaluationSource).toContain(requiredText);
     expect(researchSource).toContain("riskPenaltyAttribution");
     expect(researchSource).toContain("baselineOnlyNetPnl");
     expect(researchSource).toContain("buildFactorAblations");

@@ -58,6 +58,7 @@ export type DownsideRiskExperimentItem = {
   excludedCandidateCount: number;
   realisticSimulation: RealisticBacktestResult;
   riskAdjustedPerformance: DownsideRiskAdjustedPerformance;
+  strategyEvaluation: DownsideRiskStrategyEvaluation;
 };
 
 /**
@@ -78,6 +79,72 @@ export type DownsideRiskAdjustedPerformance = {
   sortinoRatio: number | null;
   calmarRatio: number | null;
   ulcerIndex: number | null;
+};
+
+export type DownsideRiskStrategyEvaluation = {
+  core: {
+    cagr: number | null;
+    totalReturn: number;
+    maxDrawdown: number;
+    sharpeRatio: number | null;
+    sortinoRatio: number | null;
+    calmarRatio: number | null;
+    ulcerIndex: number | null;
+  };
+  tradeQuality: {
+    winRate: number | null;
+    profitFactor: number | null;
+    expectancy: number | null;
+    averageWin: number | null;
+    averageLoss: number | null;
+    payoffRatio: number | null;
+    maxConsecutiveLosses: number;
+    tradeCount: number;
+  };
+  tailRisk: {
+    valueAtRisk95: number | null;
+    conditionalValueAtRisk95: number | null;
+    valueAtRisk99: number | null;
+    conditionalValueAtRisk99: number | null;
+    skewness: number | null;
+    excessKurtosis: number | null;
+    worstDay: number | null;
+    worstTrade: number | null;
+  };
+  stability: {
+    profitableMonthRate: number | null;
+    profitableYearRate: number | null;
+    latestRollingSharpe: number | null;
+    latestRollingCalmar: number | null;
+    latestRollingCagr: number | null;
+    rollingWindowTradingDays: number;
+    maxDrawdownDurationTradingDays: number | null;
+    longestRecoveryTradingDays: number | null;
+    topFivePositiveDayReturnContribution: number | null;
+  };
+  tradingRealism: {
+    totalFees: number;
+    modeledOneWaySlippageBps: number;
+    periodTurnoverToInitialCapital: number | null;
+    averageHoldingTradingDays: number | null;
+    averageCapitalUtilization: number | null;
+    averageOpenPositions: number | null;
+    maxOpenPositions: number;
+    averageEntryParticipationBps: number | null;
+    entryParticipationCoverageCount: number;
+  };
+};
+
+export type DownsideRiskStrategyRobustness = {
+  key: DownsideRiskStrategyKey;
+  label: string;
+  walkForwardOosSharpe: number | null;
+  walkForwardOosCagr: number | null;
+  sharpeDecayRate: number | null;
+  cagrDecayRate: number | null;
+  parameterStability: { kind: "fixed" | "rollingPenaltyWeight"; distinctValueCount: number; standardDeviation: number | null };
+  parameterSensitivity: { minimumTrainingObjective: number | null; maximumTrainingObjective: number | null; range: number | null };
+  marketEnvironments: Array<{ phase: string; completedTradeCount: number; averageTradeReturn: number | null }>;
 };
 
 export type DownsideRiskWeightTrial = {
@@ -114,6 +181,7 @@ export type DownsideRiskWalkForwardExperiment = {
   filledCount: number;
   completedCount: number;
   riskAdjustedPerformance: DownsideRiskAdjustedPerformance;
+  strategyEvaluation: DownsideRiskStrategyEvaluation;
 };
 
 export type DownsideRiskWalkForwardResult = {
@@ -189,6 +257,7 @@ export type DownsideRiskResearchResult = {
   walkForward: DownsideRiskWalkForwardResult | null;
   fullCycle: DownsideRiskFullCycleResult;
   factorAblations: DownsideRiskFactorAblation[];
+  strategyRobustness: DownsideRiskStrategyRobustness[];
 };
 
 export type DownsideRiskAblationMetric = {
@@ -264,6 +333,143 @@ export function calculateRiskAdjustedPerformance(simulation: RealisticBacktestRe
     sortinoRatio: annualizedReturn === null || !annualizedDownsideDeviation ? null : round(annualizedReturn / annualizedDownsideDeviation, 3),
     calmarRatio: annualizedReturn === null || !maxDrawdown ? null : round(annualizedReturn / maxDrawdown, 3),
     ulcerIndex: ulcerIndex === null ? null : round(ulcerIndex * 100, 2),
+  };
+}
+
+function average(values: number[]) { return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length; }
+function sampleStandardDeviation(values: number[]) {
+  const mean = average(values);
+  return mean === null || values.length < 2 ? null : Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1));
+}
+function historicalQuantile(values: number[], probability: number) {
+  if (values.length === 0) return null;
+  const sorted = values.slice().sort((left, right) => left - right);
+  const index = (sorted.length - 1) * probability;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (index - lower);
+}
+
+function maxDrawdownFromEquities(equities: number[]) {
+  let peak = equities[0] ?? 0;
+  let maxDrawdown = 0;
+  for (const equity of equities) {
+    peak = Math.max(peak, equity);
+    maxDrawdown = Math.max(maxDrawdown, peak === 0 ? 0 : (peak - equity) / peak);
+  }
+  return maxDrawdown;
+}
+
+function calculatePeriodProfitability(equityPoints: RealisticBacktestResult["equityCurve"], initialCapital: number, period: "month" | "year") {
+  const grouped = new Map<string, { baseEquity: number; endEquity: number }>();
+  let previousEquity = initialCapital;
+  let previousKey: string | null = null;
+  for (const point of equityPoints) {
+    const key = period === "month" ? point.date.slice(0, 7) : point.date.slice(0, 4);
+    const entry = grouped.get(key);
+    if (entry) entry.endEquity = point.equity;
+    else grouped.set(key, { baseEquity: previousKey === null ? initialCapital : previousEquity, endEquity: point.equity });
+    previousEquity = point.equity;
+    previousKey = key;
+  }
+  const returns = Array.from(grouped.values()).map((item) => item.baseEquity <= 0 ? null : item.endEquity / item.baseEquity - 1).filter((value): value is number => value !== null && Number.isFinite(value));
+  return ratio(returns.filter((value) => value > 0).length, returns.length);
+}
+
+function calculateDrawdownDurations(equities: number[]) {
+  if (equities.length === 0) return { maxDrawdownDurationTradingDays: null, longestRecoveryTradingDays: null };
+  let peak = equities[0]!;
+  let drawdownStart: number | null = null;
+  let maxDuration = 0;
+  let longestRecovery = 0;
+  equities.forEach((equity, index) => {
+    if (equity >= peak) {
+      if (drawdownStart !== null) longestRecovery = Math.max(longestRecovery, index - drawdownStart);
+      peak = equity;
+      drawdownStart = null;
+      return;
+    }
+    if (drawdownStart === null) drawdownStart = index;
+    maxDuration = Math.max(maxDuration, index - drawdownStart + 1);
+  });
+  if (drawdownStart !== null) longestRecovery = Math.max(longestRecovery, equities.length - 1 - drawdownStart);
+  return { maxDrawdownDurationTradingDays: maxDuration || null, longestRecoveryTradingDays: longestRecovery || null };
+}
+
+export function calculateStrategyEvaluation(
+  simulation: RealisticBacktestResult,
+  context: LeaderCandidateBacktestContext,
+  candidateRows: LeaderCandidateBacktestRow[],
+): DownsideRiskStrategyEvaluation {
+  const riskAdjusted = calculateRiskAdjustedPerformance(simulation);
+  const equityPoints = simulation.equityCurve.filter((point) => Number.isFinite(point.equity) && point.equity > 0);
+  const equities = equityPoints.map((point) => point.equity);
+  const dailyReturns = equities.slice(1).map((equity, index) => equity / equities[index]! - 1).filter((value) => Number.isFinite(value));
+  const completedTrades = simulation.trades.filter((trade) => trade.status === "filled" && trade.netReturn !== null);
+  const tradeReturns = completedTrades.map((trade) => trade.netReturn!);
+  const winningReturns = tradeReturns.filter((value) => value > 0);
+  const losingReturns = tradeReturns.filter((value) => value < 0);
+  const tradeReturnMean = average(tradeReturns);
+  const averageWin = average(winningReturns);
+  const averageLoss = average(losingReturns);
+  const orderedTrades = completedTrades.slice().sort((left, right) => (left.exitDate ?? left.entryDate ?? left.signalDate).localeCompare(right.exitDate ?? right.entryDate ?? right.signalDate));
+  let maximumConsecutiveLosses = 0;
+  let consecutiveLosses = 0;
+  for (const trade of orderedTrades) {
+    if ((trade.netReturn ?? 0) < 0) {
+      consecutiveLosses += 1;
+      maximumConsecutiveLosses = Math.max(maximumConsecutiveLosses, consecutiveLosses);
+    } else consecutiveLosses = 0;
+  }
+  const valueAtRisk95 = historicalQuantile(dailyReturns, 0.05);
+  const valueAtRisk99 = historicalQuantile(dailyReturns, 0.01);
+  const conditionalValueAtRisk95 = valueAtRisk95 === null ? null : average(dailyReturns.filter((value) => value <= valueAtRisk95));
+  const conditionalValueAtRisk99 = valueAtRisk99 === null ? null : average(dailyReturns.filter((value) => value <= valueAtRisk99));
+  const dailyReturnMean = average(dailyReturns);
+  const dailyReturnDeviation = sampleStandardDeviation(dailyReturns);
+  const skewness = dailyReturnMean === null || dailyReturnDeviation === null || dailyReturnDeviation === 0 || dailyReturns.length < 3
+    ? null
+    : dailyReturns.length / ((dailyReturns.length - 1) * (dailyReturns.length - 2)) * dailyReturns.reduce((sum, value) => sum + ((value - dailyReturnMean) / dailyReturnDeviation) ** 3, 0);
+  const excessKurtosis = dailyReturnMean === null || dailyReturnDeviation === null || dailyReturnDeviation === 0 || dailyReturns.length < 4
+    ? null
+    : (dailyReturns.length * (dailyReturns.length + 1) / ((dailyReturns.length - 1) * (dailyReturns.length - 2) * (dailyReturns.length - 3))) * dailyReturns.reduce((sum, value) => sum + ((value - dailyReturnMean) / dailyReturnDeviation) ** 4, 0) - (3 * (dailyReturns.length - 1) ** 2 / ((dailyReturns.length - 2) * (dailyReturns.length - 3)));
+  const rollingWindowTradingDays = 63;
+  const rollingPoints = equityPoints.slice(-(rollingWindowTradingDays + 1));
+  const rollingEquities = rollingPoints.map((point) => point.equity);
+  const rollingRisk = rollingEquities.length < 2 ? null : calculateRiskAdjustedPerformance({
+    ...simulation,
+    initialCapital: rollingEquities[0]!,
+    finalCapital: rollingEquities.at(-1)!,
+    maxDrawdown: round(maxDrawdownFromEquities(rollingEquities) * 100),
+    equityCurve: rollingPoints,
+  });
+  const positiveDailyReturns = dailyReturns.filter((value) => value > 0);
+  const topFivePositiveDayReturnContribution = positiveDailyReturns.length === 0 ? null : ratio(
+    positiveDailyReturns.slice().sort((left, right) => right - left).slice(0, 5).reduce((sum, value) => sum + value, 0),
+    positiveDailyReturns.reduce((sum, value) => sum + value, 0),
+  );
+  const tradingDateIndex = new Map((context.tradingDates ?? []).map((date, index) => [date, index]));
+  const holdingDays = completedTrades.map((trade) => {
+    const entry = trade.entryDate ? tradingDateIndex.get(trade.entryDate) : undefined;
+    const exit = trade.exitDate ? tradingDateIndex.get(trade.exitDate) : undefined;
+    return entry === undefined || exit === undefined ? null : Math.max(1, exit - entry + 1);
+  }).filter((value): value is number => value !== null);
+  const rowByKey = new Map(candidateRows.map((row) => [`${row.date}::${row.stockCode}`, row]));
+  const entryParticipationBps = simulation.trades.filter((trade) => trade.status === "filled" && trade.entryPrice !== null && trade.shares > 0).map((trade) => {
+    const row = rowByKey.get(`${trade.signalDate}::${trade.stockCode}`);
+    const amount = row?.nextDayDate ? context.priceByStockDate?.get(`${trade.stockCode}::${row.nextDayDate}`)?.amount ?? null : null;
+    return amount === null || amount <= 0 ? null : (trade.entryPrice! * trade.shares) / (amount * 1_000) * 10_000;
+  }).filter((value): value is number => value !== null && Number.isFinite(value));
+  const totalTradedValue = simulation.trades.filter((trade) => trade.status === "filled").reduce((sum, trade) => sum + (trade.entryPrice ?? 0) * trade.shares + (trade.exitPrice ?? 0) * trade.shares, 0);
+  const totalFees = simulation.trades.filter((trade) => trade.status === "filled").reduce((sum, trade) => sum + trade.totalFees, 0);
+  const averageCapitalUtilization = average(equityPoints.map((point) => point.equity <= 0 ? 0 : Math.max(0, (point.equity - point.cash) / point.equity)));
+  const { maxDrawdownDurationTradingDays, longestRecoveryTradingDays } = calculateDrawdownDurations(equities);
+  return {
+    core: { cagr: riskAdjusted.annualizedReturn, totalReturn: simulation.totalReturn, maxDrawdown: simulation.maxDrawdown, sharpeRatio: riskAdjusted.sharpeRatio, sortinoRatio: riskAdjusted.sortinoRatio, calmarRatio: riskAdjusted.calmarRatio, ulcerIndex: riskAdjusted.ulcerIndex },
+    tradeQuality: { winRate: simulation.winRate, profitFactor: simulation.profitFactor, expectancy: tradeReturnMean === null ? null : round(tradeReturnMean), averageWin: averageWin === null ? null : round(averageWin), averageLoss: averageLoss === null ? null : round(averageLoss), payoffRatio: averageWin === null || averageLoss === null || averageLoss === 0 ? null : round(Math.abs(averageWin / averageLoss), 3), maxConsecutiveLosses: maximumConsecutiveLosses, tradeCount: completedTrades.length },
+    tailRisk: { valueAtRisk95: valueAtRisk95 === null ? null : round(valueAtRisk95 * 100, 2), conditionalValueAtRisk95: conditionalValueAtRisk95 === null ? null : round(conditionalValueAtRisk95 * 100, 2), valueAtRisk99: valueAtRisk99 === null ? null : round(valueAtRisk99 * 100, 2), conditionalValueAtRisk99: conditionalValueAtRisk99 === null ? null : round(conditionalValueAtRisk99 * 100, 2), skewness: skewness === null ? null : round(skewness, 3), excessKurtosis: excessKurtosis === null ? null : round(excessKurtosis, 3), worstDay: dailyReturns.length === 0 ? null : round(Math.min(...dailyReturns) * 100, 2), worstTrade: tradeReturns.length === 0 ? null : round(Math.min(...tradeReturns), 2) },
+    stability: { profitableMonthRate: calculatePeriodProfitability(equityPoints, simulation.initialCapital, "month"), profitableYearRate: calculatePeriodProfitability(equityPoints, simulation.initialCapital, "year"), latestRollingSharpe: rollingRisk?.sharpeRatio ?? null, latestRollingCalmar: rollingRisk?.calmarRatio ?? null, latestRollingCagr: rollingRisk?.annualizedReturn ?? null, rollingWindowTradingDays, maxDrawdownDurationTradingDays, longestRecoveryTradingDays, topFivePositiveDayReturnContribution },
+    tradingRealism: { totalFees: round(totalFees), modeledOneWaySlippageBps: simulation.assumptions.slippageBps, periodTurnoverToInitialCapital: simulation.initialCapital <= 0 ? null : round(totalTradedValue / simulation.initialCapital * 100, 1), averageHoldingTradingDays: average(holdingDays) === null ? null : round(average(holdingDays)!), averageCapitalUtilization: averageCapitalUtilization === null ? null : round(averageCapitalUtilization * 100, 1), averageOpenPositions: average(equityPoints.map((point) => point.openPositions)) === null ? null : round(average(equityPoints.map((point) => point.openPositions))!, 2), maxOpenPositions: simulation.peakOpenPositionCount, averageEntryParticipationBps: average(entryParticipationBps) === null ? null : round(average(entryParticipationBps)!), entryParticipationCoverageCount: entryParticipationBps.length },
   };
 }
 
@@ -451,12 +657,12 @@ function buildExperiments(
   hardRiskThreshold: number,
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
-  descriptionPrefix = "",
+  descriptionPrefix = "", // 手动权重路径
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
   const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
     const realisticSimulation = simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
-    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation) };
+    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation), strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, experimentRows) };
   };
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeight));
   const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
@@ -483,7 +689,7 @@ function buildExperimentsWithWindowWeights(
   const rows = profiles.map((profile) => profile.row);
   const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
     const realisticSimulation = simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
-    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation) };
+    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation), strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, experimentRows) };
   };
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight));
   const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
@@ -728,6 +934,7 @@ function buildWalkForwardResult(
       filledCount: experiment.realisticSimulation.filledCount,
       completedCount: experiment.realisticSimulation.completedCount,
       riskAdjustedPerformance: experiment.riskAdjustedPerformance,
+      strategyEvaluation: experiment.strategyEvaluation,
     })),
     equityCurve: dates.map((date) => ({
       date,
@@ -738,6 +945,51 @@ function buildWalkForwardResult(
       qualityGate: returnAt("qualityGate", date),
     })),
   };
+}
+
+function buildStrategyRobustness(
+  fullCycleExperiments: DownsideRiskExperimentItem[],
+  walkForward: DownsideRiskWalkForwardResult | null,
+  rollingWindows: DownsideRiskRollingWindow[],
+  profiles: DownsideRiskProfile[],
+): DownsideRiskStrategyRobustness[] {
+  const walkForwardByKey = new Map((walkForward?.experiments ?? []).map((experiment) => [experiment.key, experiment]));
+  const profileByTradeKey = new Map(profiles.map((profile) => [`${profile.row.date}::${profile.row.stockCode}`, profile]));
+  const selectedWeights = rollingWindows.map((window) => window.autoTunedPenaltyWeight);
+  const trialObjectives = rollingWindows.flatMap((window) => window.weightTrials.map((trial) => trial.objectiveValue));
+  return fullCycleExperiments.map((experiment) => {
+    const outOfSample = walkForwardByKey.get(experiment.key);
+    const fullCagr = experiment.strategyEvaluation.core.cagr;
+    const outOfSampleCagr = outOfSample?.strategyEvaluation.core.cagr ?? null;
+    const fullSharpe = experiment.strategyEvaluation.core.sharpeRatio;
+    const outOfSampleSharpe = outOfSample?.strategyEvaluation.core.sharpeRatio ?? null;
+    const environmentMap = new Map<string, number[]>();
+    for (const trade of experiment.realisticSimulation.trades) {
+      if (trade.status !== "filled" || trade.netReturn === null) continue;
+      const phase = profileByTradeKey.get(`${trade.signalDate}::${trade.stockCode}`)?.row.phase ?? "未标注周期";
+      environmentMap.set(phase, [...(environmentMap.get(phase) ?? []), trade.netReturn]);
+    }
+    const usesRollingPenaltyWeight = experiment.key === "riskPenalty";
+    return {
+      key: experiment.key,
+      label: experiment.label,
+      walkForwardOosSharpe: outOfSampleSharpe,
+      walkForwardOosCagr: outOfSampleCagr,
+      sharpeDecayRate: fullSharpe === null || fullSharpe === 0 || outOfSampleSharpe === null ? null : round((fullSharpe - outOfSampleSharpe) / Math.abs(fullSharpe) * 100, 1),
+      cagrDecayRate: fullCagr === null || fullCagr === 0 || outOfSampleCagr === null ? null : round((fullCagr - outOfSampleCagr) / Math.abs(fullCagr) * 100, 1),
+      parameterStability: {
+        kind: usesRollingPenaltyWeight ? "rollingPenaltyWeight" : "fixed",
+        distinctValueCount: usesRollingPenaltyWeight ? new Set(selectedWeights).size : 1,
+        standardDeviation: usesRollingPenaltyWeight ? (sampleStandardDeviation(selectedWeights) === null ? null : round(sampleStandardDeviation(selectedWeights)! , 3)) : 0,
+      },
+      parameterSensitivity: usesRollingPenaltyWeight && trialObjectives.length > 0 ? {
+        minimumTrainingObjective: round(Math.min(...trialObjectives), 4),
+        maximumTrainingObjective: round(Math.max(...trialObjectives), 4),
+        range: round(Math.max(...trialObjectives) - Math.min(...trialObjectives), 4),
+      } : { minimumTrainingObjective: null, maximumTrainingObjective: null, range: null },
+      marketEnvironments: Array.from(environmentMap.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([phase, returns]) => ({ phase, completedTradeCount: returns.length, averageTradeReturn: average(returns) === null ? null : round(average(returns)!) })),
+    } satisfies DownsideRiskStrategyRobustness;
+  });
 }
 
 /**
@@ -832,6 +1084,8 @@ export function buildDownsideRiskResearch(
     realisticOptions,
     context,
   );
+  const walkForward = buildWalkForwardResult(experiments, rollingWindows);
+  const strategyRobustness = buildStrategyRobustness(fullCycleExperiments, walkForward, rollingWindows, profiles);
 
   return {
     definition: `风险分仅使用信号日可见字段；下行标签为T+1开盘后连续${observationDays}个实际交易日中最低价（缺失时降级为收盘价）相对T+1开盘价的最大不利波动。滚动验证的测试段严格位于前置${rollingTrainTradingDays}个交易日校准段之后。${autoTunePenaltyWeight ? "每个校准段在固定权重网格内按训练期收益减0.5倍最大回撤寻优，选中权重只用于其后验证段。" : "风险扣分权重使用手动设定值。"}`,
@@ -855,8 +1109,9 @@ export function buildDownsideRiskResearch(
     riskTiers,
     experiments,
     rollingWindows,
-    walkForward: buildWalkForwardResult(experiments, rollingWindows),
+    walkForward,
     factorAblations,
+    strategyRobustness,
     fullCycle: {
       definition: autoTunePenaltyWeight && rollingWindows.length > 0
         ? "五种策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。质量复合与质量门控均只读取信号日数据。"
