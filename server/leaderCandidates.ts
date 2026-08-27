@@ -1,6 +1,6 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
-import { buildDownsideRiskResearch, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult } from "./downsideRisk";
+import { buildDownsideRiskResearch, calculateQualityBlendScoreForRisk, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult, type DownsideRiskStrategyKey } from "./downsideRisk";
 import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
 
 export type LeaderCandidateSourceRecord = {
@@ -171,7 +171,7 @@ export type LeaderCandidatePreparedBuy = {
 };
 
 export type LeaderCandidateStrategyPortfolio = {
-  key: "baseline" | "riskPenalty" | "hardFilter";
+  key: DownsideRiskStrategyKey;
   label: string;
   description: string;
   asOfDate: string | null;
@@ -585,7 +585,7 @@ export function buildLeaderCandidates(records: LeaderCandidateSourceRecord[], op
 const snapshotRound = (value: number, digits = 2) => Number(value.toFixed(digits));
 
 /**
- * 将全周期三策略回测的期末未出清订单与最新信号日候选组合成展示快照。
+ * 将全周期五策略回测的期末未出清订单与最新信号日候选组合成展示快照。
  * 准备买入只代表下一实际交易日开盘前的模型优先级，绝不假定未知的开盘价、成交或资金分配结果。
  */
 export function buildLeaderCandidateStrategyPortfolioSnapshot(
@@ -610,7 +610,27 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     ? options.rollingWindows.find((window) => latestSignalDate >= window.validationStartDate && latestSignalDate <= window.validationEndDate)?.autoTunedPenaltyWeight ?? options.penaltyWeight
     : options.penaltyWeight;
 
-  const strategies: LeaderCandidateStrategyPortfolio[] = (["baseline", "riskPenalty", "hardFilter"] as const).map((key) => {
+  const latestRowByStockCode = new Map(options.historicalRows
+    .filter((row) => row.date === latestSignalDate)
+    .map((row) => [row.stockCode, row]));
+  const qualityScoringContext = { priceByStockDate: options.priceByStockDate };
+  const scoredCandidatePool = candidatePool.map((candidate) => {
+    const historicalRow = latestRowByStockCode.get(candidate.stockCode);
+    const signalRow = historicalRow ? { ...historicalRow, score: candidate.score } : null;
+    const qualityScore = signalRow
+      ? calculateQualityBlendScoreForRisk(signalRow, candidate.riskScore, qualityScoringContext)
+      : candidate.score;
+    return { candidate, qualityScore };
+  });
+  const sortedQualityScores = scoredCandidatePool.map(({ qualityScore }) => qualityScore).sort((left, right) => left - right);
+  const qualityMedianIndex = Math.floor(sortedQualityScores.length / 2);
+  const qualityGateThreshold = sortedQualityScores.length === 0
+    ? null
+    : sortedQualityScores.length % 2 === 0
+      ? (sortedQualityScores[qualityMedianIndex - 1]! + sortedQualityScores[qualityMedianIndex]!) / 2
+      : sortedQualityScores[qualityMedianIndex]!;
+
+  const strategies: LeaderCandidateStrategyPortfolio[] = (["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"] as const).map((key) => {
     const experiment = experimentByKey.get(key);
     const simulation = experiment?.realisticSimulation;
     const asOfDate = simulation?.equityCurve.at(-1)?.date ?? null;
@@ -642,17 +662,27 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     const heldCodes = new Set(holdings.map((holding) => holding.stockCode));
     const maxPositions = simulation?.assumptions.maxPositions ?? 0;
     const availableSlots = Math.max(0, maxPositions - holdings.length);
-    const candidateWithScore = candidatePool.map((candidate) => ({
+    const candidateWithScore = scoredCandidatePool.map(({ candidate, qualityScore }) => ({
       candidate,
       strategyScore: key === "riskPenalty"
         ? Math.max(0, snapshotRound(candidate.score - candidate.riskScore * appliedPenaltyWeight))
+        : key === "qualityBlend" || key === "qualityGate"
+          ? qualityScore
         : candidate.score,
     }));
-    const highRiskExcludedCount = key === "hardFilter"
+    const excludedHighRiskCount = key === "hardFilter"
       ? candidateWithScore.filter(({ candidate }) => candidate.riskScore >= options.hardRiskThreshold).length
+      : key === "qualityGate"
+        ? candidateWithScore.filter(({ candidate, strategyScore }) => candidate.riskScore >= options.hardRiskThreshold || strategyScore < (qualityGateThreshold ?? Number.NEGATIVE_INFINITY)).length
       : 0;
     const strategyCandidates = candidateWithScore
-      .filter(({ candidate }) => key !== "hardFilter" || candidate.riskScore < options.hardRiskThreshold)
+      .filter(({ candidate, strategyScore }) => (
+        key === "hardFilter"
+          ? candidate.riskScore < options.hardRiskThreshold
+          : key === "qualityGate"
+            ? candidate.riskScore < options.hardRiskThreshold && strategyScore >= (qualityGateThreshold ?? Number.POSITIVE_INFINITY)
+            : true
+      ))
       .sort((left, right) => (
         right.strategyScore - left.strategyScore
         || right.candidate.boards - left.candidate.boards
@@ -684,7 +714,7 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
 
     return {
       key,
-      label: experiment?.label ?? (key === "baseline" ? "原始策略" : key === "riskPenalty" ? "风险扣分策略" : "高风险硬过滤"),
+      label: experiment?.label ?? (key === "baseline" ? "原始策略" : key === "riskPenalty" ? "风险扣分策略" : key === "hardFilter" ? "高风险硬过滤" : key === "qualityBlend" ? "质量复合评分" : "质量门控策略"),
       description: experiment?.description ?? "暂无策略回测数据。",
       asOfDate,
       availableCash: simulation?.equityCurve.at(-1)?.cash ?? simulation?.initialCapital ?? 0,
@@ -694,12 +724,16 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
       currentHoldings: holdings,
       preparedBuys,
       candidateCount: strategyCandidates.length,
-      excludedHighRiskCount: highRiskExcludedCount,
+      excludedHighRiskCount,
       note: key === "riskPenalty"
         ? `最新信号日使用风险扣分权重 ${appliedPenaltyWeight}；若该日不在已完成验证窗口内，则使用手动回退权重。`
         : key === "hardFilter"
           ? `风险分不低于 ${options.hardRiskThreshold} 的候选不纳入该策略准备清单。`
-          : "按原始候选评分排序。",
+          : key === "qualityBlend"
+            ? "固定质量复合分：68%原始候选强度、32%信号日安全度，加早封、题材共振与充足成交额奖励。"
+            : key === "qualityGate"
+              ? `仅保留质量复合分不低于当日中位数 ${qualityGateThreshold ?? "-"} 且风险分低于 ${options.hardRiskThreshold} 的候选。`
+              : "按原始候选评分排序。",
     } satisfies LeaderCandidateStrategyPortfolio;
   });
 

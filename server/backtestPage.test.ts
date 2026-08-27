@@ -48,11 +48,20 @@ describe("独立组合资金回测页面", () => {
       "选出权重",
       "训练目标",
       "trainingObjectiveValue",
-      "全周期三策略收益对比",
+      "全周期五策略收益对比",
       "data-full-cycle-comparison",
       "fullCycleRiskCurve",
       "fullCycleExperiments",
-      "全周期累计收益",
+      "统一策略评价",
+      "data-strategy-evaluation",
+      "UNIFIED STRATEGY EVALUATION",
+      "全周期连续资金账户",
+      "严格滚动样本外",
+      "质量复合评分",
+      "质量门控策略",
+      "qualityBlend",
+      "qualityGate",
+      "strategyColors",
       "逐笔交易差异对比",
       "data-trade-difference-table",
       "fullCycleTradeDifferences",
@@ -75,9 +84,7 @@ describe("独立组合资金回测页面", () => {
       "样本外累计拼接曲线",
       "data-walk-forward",
       "walkForward.equityCurve",
-      "样本外累计收益",
-      "全样本原始收益（未扣风险分）",
-      "样本外风险扣分收益",
+      "连续拼接的严格滚动样本外验证结果",
       "dailyPriceCoverage",
       "data-market-factor-coverage",
       "市场因子数据覆盖",
@@ -142,9 +149,12 @@ describe("独立组合资金回测页面", () => {
     expect(candidateSource).toContain("重点候选");
     expect(researchSource).toContain("风险扣分策略");
     expect(researchSource).toContain("高风险硬过滤");
+    expect(researchSource).toContain("质量复合评分");
+    expect(researchSource).toContain("质量门控策略");
     expect(researchSource).toContain("fullCycle");
     expect(researchSource).toContain("tradeDifferences");
     expect(researchSource).toContain("hardFilterExcluded");
+    expect(researchSource).toContain("qualityGateExcluded");
     expect(researchSource).toContain("riskPenaltyAttribution");
     expect(researchSource).toContain("baselineOnlyNetPnl");
     expect(researchSource).toContain("buildFactorAblations");

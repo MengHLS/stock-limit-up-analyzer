@@ -17,6 +17,8 @@ export type DownsideRiskSignalScore = {
   riskTier: "低风险" | "中风险" | "高风险";
 };
 
+export type DownsideRiskStrategyKey = "baseline" | "riskPenalty" | "hardFilter" | "qualityBlend" | "qualityGate";
+
 export const defaultDownsideRiskPenaltyWeight = 0.35;
 
 export type DownsideRiskFeature = {
@@ -49,7 +51,7 @@ export type DownsideRiskTierSummary = {
 };
 
 export type DownsideRiskExperimentItem = {
-  key: "baseline" | "riskPenalty" | "hardFilter";
+  key: DownsideRiskStrategyKey;
   label: string;
   description: string;
   inputCandidateCount: number;
@@ -98,7 +100,7 @@ export type DownsideRiskWalkForwardResult = {
   endDate: string | null;
   validationWindowCount: number;
   experiments: DownsideRiskWalkForwardExperiment[];
-  equityCurve: Array<{ date: string; baseline: number | null; riskPenalty: number | null; hardFilter: number | null }>;
+  equityCurve: Array<{ date: string; baseline: number | null; riskPenalty: number | null; hardFilter: number | null; qualityBlend: number | null; qualityGate: number | null }>;
 };
 
 export type DownsideRiskFullCycleResult = {
@@ -134,7 +136,10 @@ export type DownsideRiskTradeDifferenceRow = {
   baseline: DownsideRiskTradeSnapshot | null;
   riskPenalty: DownsideRiskTradeSnapshot | null;
   hardFilter: DownsideRiskTradeSnapshot | null;
+  qualityBlend: DownsideRiskTradeSnapshot | null;
+  qualityGate: DownsideRiskTradeSnapshot | null;
   hardFilterExcluded: boolean;
+  qualityGateExcluded: boolean;
 };
 
 export type DownsideRiskResearchResult = {
@@ -298,6 +303,85 @@ function applyRiskPenalty(profile: DownsideRiskProfile, penaltyWeight: number, o
   return { ...profile.row, score: Math.max(0, round(profile.row.score - effectiveRiskScore * penaltyWeight)) };
 }
 
+/**
+ * 质量复合评分采用预先固定的信号日规则：候选强度68%、安全度32%，并为早封、题材共振和充足成交额提供小幅奖励。
+ * 该分不读取T+1及后续价格，也不根据验证期结果调整系数。
+ */
+export function calculateQualityBlendScoreForRisk(row: LeaderCandidateBacktestRow, riskScore: number, context: LeaderCandidateBacktestContext) {
+  const amount = readSignalPrice(row, context)?.amount ?? null;
+  const earlySealBonus = row.limitUpTime !== null && row.limitUpTime !== undefined && row.limitUpTime <= "10:30:00" ? 2 : 0;
+  const sectorBonus = (row.sectorCount ?? 0) >= 3 ? 2 : 0;
+  const liquidityBonus = amount !== null && amount >= 50_000 ? 2 : 0;
+  return Math.max(0, round(row.score * 0.68 + (100 - riskScore) * 0.32 + earlySealBonus + sectorBonus + liquidityBonus));
+}
+
+export function scoreQualityBlendSignal(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
+  const { riskScore } = scoreDownsideRiskSignal(row, context);
+  return { qualityScore: calculateQualityBlendScoreForRisk(row, riskScore, context), riskScore };
+}
+
+function calculateQualityBlendScore(profile: DownsideRiskProfile, context: LeaderCandidateBacktestContext) {
+  return calculateQualityBlendScoreForRisk(profile.row, profile.riskScore, context);
+}
+
+function applyQualityBlend(profile: DownsideRiskProfile, context: LeaderCandidateBacktestContext): LeaderCandidateBacktestRow {
+  return { ...profile.row, score: calculateQualityBlendScore(profile, context) };
+}
+
+/** 质量门控仅与同一信号日其他候选横向比较，所用中位数、风险分及字段均在信号日收盘后可知。 */
+export function selectQualityGateProfileKeys(
+  profiles: DownsideRiskProfile[],
+  hardRiskThreshold: number,
+  context: LeaderCandidateBacktestContext,
+) {
+  const profilesByDate = new Map<string, DownsideRiskProfile[]>();
+  for (const profile of profiles) {
+    const items = profilesByDate.get(profile.row.date) ?? [];
+    items.push(profile);
+    profilesByDate.set(profile.row.date, items);
+  }
+  const selected = new Set<string>();
+  for (const items of Array.from(profilesByDate.values())) {
+    const qualityScores = items.map((profile) => calculateQualityBlendScore(profile, context));
+    const threshold = median(qualityScores);
+    for (const profile of items) {
+      if (profile.riskScore < hardRiskThreshold && calculateQualityBlendScore(profile, context) >= threshold) {
+        selected.add(`${profile.row.date}::${profile.row.stockCode}`);
+      }
+    }
+  }
+  return selected;
+}
+
+/** 供最新候选计划复用的质量门控：仅基于同一信号日已知字段及此前市场上下文。 */
+export function selectQualityGateRowKeys(
+  rows: LeaderCandidateBacktestRow[],
+  hardRiskThreshold: number,
+  context: LeaderCandidateBacktestContext,
+) {
+  const profiles = rows.map((row) => ({
+    row,
+    riskScore: scoreDownsideRiskSignal(row, context).riskScore,
+  }));
+  const profilesByDate = new Map<string, Array<{ row: LeaderCandidateBacktestRow; riskScore: number }>>();
+  for (const profile of profiles) {
+    const items = profilesByDate.get(profile.row.date) ?? [];
+    items.push(profile);
+    profilesByDate.set(profile.row.date, items);
+  }
+  const selected = new Set<string>();
+  for (const items of Array.from(profilesByDate.values())) {
+    const qualityScores = items.map(({ row, riskScore }) => calculateQualityBlendScoreForRisk(row, riskScore, context));
+    const threshold = median(qualityScores);
+    for (const { row, riskScore } of items) {
+      if (riskScore < hardRiskThreshold && calculateQualityBlendScoreForRisk(row, riskScore, context) >= threshold) {
+        selected.add(`${row.date}::${row.stockCode}`);
+      }
+    }
+  }
+  return selected;
+}
+
 function buildExperiments(
   profiles: DownsideRiskProfile[],
   penaltyWeight: number,
@@ -307,7 +391,7 @@ function buildExperiments(
   descriptionPrefix = "",
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
-  const run = (key: DownsideRiskExperimentItem["key"], label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => ({
+  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => ({
     key,
     label,
     description,
@@ -317,10 +401,15 @@ function buildExperiments(
   });
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeight));
   const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
+  const qualityBlendRows = profiles.map((profile) => applyQualityBlend(profile, context));
+  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context);
+  const qualityGateRows = profiles.filter((profile) => qualityGateKeys.has(`${profile.row.date}::${profile.row.stockCode}`)).map((profile) => applyQualityBlend(profile, context));
   return [
     run("baseline", "原始策略", "保留原始候选评分与完整观察期样本。", rows, 0),
     run("riskPenalty", "风险扣分策略", `${descriptionPrefix}候选分扣减 风险分 × ${penaltyWeight}，不删除候选。`, riskPenaltyRows, 0),
     run("hardFilter", "高风险硬过滤", `剔除风险分 ≥ ${hardRiskThreshold} 的候选。`, hardFilterRows, rows.length - hardFilterRows.length),
+    run("qualityBlend", "质量复合评分", "预设68%原始候选强度 + 32%信号日安全度，并对早封、题材共振和充足成交额小幅奖励；不使用未来行情。", qualityBlendRows, 0),
+    run("qualityGate", "质量门控策略", `仅保留质量复合分不低于当日中位数且风险分 < ${hardRiskThreshold} 的候选；门槛只使用同日横截面。`, qualityGateRows, rows.length - qualityGateRows.length),
   ];
 }
 
@@ -333,7 +422,7 @@ function buildExperimentsWithWindowWeights(
   context: LeaderCandidateBacktestContext,
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
-  const run = (key: DownsideRiskExperimentItem["key"], label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => ({
+  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => ({
     key,
     label,
     description,
@@ -343,10 +432,15 @@ function buildExperimentsWithWindowWeights(
   });
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight));
   const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
+  const qualityBlendRows = profiles.map((profile) => applyQualityBlend(profile, context));
+  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context);
+  const qualityGateRows = profiles.filter((profile) => qualityGateKeys.has(`${profile.row.date}::${profile.row.stockCode}`)).map((profile) => applyQualityBlend(profile, context));
   return [
     run("baseline", "原始策略", "保留原始候选评分与完整观察期样本。", rows, 0),
     run("riskPenalty", "风险扣分策略", "每个验证窗口仅使用其前置训练窗口自动选出的风险扣分权重。", riskPenaltyRows, 0),
     run("hardFilter", "高风险硬过滤", `剔除风险分 ≥ ${hardRiskThreshold} 的候选。`, hardFilterRows, rows.length - hardFilterRows.length),
+    run("qualityBlend", "质量复合评分", "预设68%原始候选强度 + 32%信号日安全度，并对早封、题材共振和充足成交额小幅奖励；不使用未来行情。", qualityBlendRows, 0),
+    run("qualityGate", "质量门控策略", `仅保留质量复合分不低于当日中位数且风险分 < ${hardRiskThreshold} 的候选；门槛只使用同日横截面。`, qualityGateRows, rows.length - qualityGateRows.length),
   ];
 }
 
@@ -392,8 +486,10 @@ function buildTradeDifferences(
   penaltyWeightByDate: Map<string, number>,
   fallbackPenaltyWeight: number,
   hardRiskThreshold: number,
+  context: LeaderCandidateBacktestContext,
 ): DownsideRiskTradeDifferenceRow[] {
   const profileByKey = new Map(profiles.map((profile) => [`${profile.row.date}::${profile.row.stockCode}`, profile]));
+  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context);
   const tradesByExperiment = new Map(experiments.map((experiment) => [
     experiment.key,
     new Map(experiment.realisticSimulation.trades.map((trade) => [`${trade.signalDate}::${trade.stockCode}`, trade])),
@@ -420,7 +516,10 @@ function buildTradeDifferences(
       baseline: snapshot(tradesByExperiment.get("baseline")?.get(key)),
       riskPenalty: snapshot(tradesByExperiment.get("riskPenalty")?.get(key)),
       hardFilter: snapshot(tradesByExperiment.get("hardFilter")?.get(key)),
+      qualityBlend: snapshot(tradesByExperiment.get("qualityBlend")?.get(key)),
+      qualityGate: snapshot(tradesByExperiment.get("qualityGate")?.get(key)),
       hardFilterExcluded: profile.riskScore >= hardRiskThreshold,
+      qualityGateExcluded: !qualityGateKeys.has(key),
     } satisfies DownsideRiskTradeDifferenceRow;
   });
 }
@@ -554,7 +653,7 @@ function buildWalkForwardResult(
     .filter((point) => point.date >= startDate && point.date <= endDate)
     .map((point) => point.date)))).sort();
   const initialCapitalByKey = new Map(experiments.map((experiment) => [experiment.key, experiment.realisticSimulation.initialCapital]));
-  const returnAt = (key: DownsideRiskExperimentItem["key"], date: string) => {
+  const returnAt = (key: DownsideRiskStrategyKey, date: string) => {
     const equity = curveByExperiment.get(key)?.get(date);
     const initialCapital = initialCapitalByKey.get(key);
     return equity === undefined || !initialCapital ? null : round(((equity / initialCapital) - 1) * 100);
@@ -579,6 +678,8 @@ function buildWalkForwardResult(
       baseline: returnAt("baseline", date),
       riskPenalty: returnAt("riskPenalty", date),
       hardFilter: returnAt("hardFilter", date),
+      qualityBlend: returnAt("qualityBlend", date),
+      qualityGate: returnAt("qualityGate", date),
     })),
   };
 }
@@ -663,7 +764,7 @@ export function buildDownsideRiskResearch(
     ? buildExperimentsWithWindowWeights(profiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
     : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
   const fullCycleDates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
-  const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold);
+  const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, context);
   const fullCycleRiskPenaltyAttribution = buildRiskPenaltyAttribution(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate);
   const factorAblations = buildFactorAblations(
     profiles,
@@ -702,8 +803,8 @@ export function buildDownsideRiskResearch(
     factorAblations,
     fullCycle: {
       definition: autoTunePenaltyWeight && rollingWindows.length > 0
-        ? "三版策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。"
-        : "三版策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测；风险扣分使用手动设定权重。",
+        ? "五种策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。质量复合与质量门控均只读取信号日数据。"
+        : "五种策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测；风险扣分使用手动设定权重，质量复合与质量门控只读取信号日数据。",
       startDate: fullCycleDates[0] ?? null,
       endDate: fullCycleDates.at(-1) ?? null,
       experiments: fullCycleExperiments,

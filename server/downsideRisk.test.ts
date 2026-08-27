@@ -104,8 +104,9 @@ describe("buildDownsideRiskResearch", () => {
     expect(result.signalAmountSampleSize).toBe(2);
     expect(result.riskTiers.find((tier) => tier.tier === "高风险")).toMatchObject({ sampleSize: 1, averageMaxAdverseReturn: -30, mediumDownsideCount: 1, highDownsideCount: 1 });
     expect(result.riskTiers.find((tier) => tier.tier === "低风险")).toMatchObject({ sampleSize: 1, averageMaxAdverseReturn: 0, mediumDownsideCount: 0, highDownsideCount: 0 });
-    expect(result.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter"]);
+    expect(result.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"]);
     expect(result.experiments.find((experiment) => experiment.key === "hardFilter")).toMatchObject({ inputCandidateCount: 1, excludedCandidateCount: 1 });
+    expect(result.experiments.find((experiment) => experiment.key === "qualityGate")!.excludedCandidateCount).toBeGreaterThanOrEqual(1);
     expect(result.experiments.every((experiment) => experiment.realisticSimulation.assumptions.initialCapital === 100000)).toBe(true);
     expect(result.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
   });
@@ -211,7 +212,7 @@ describe("buildDownsideRiskResearch", () => {
     }
   });
 
-  it("对原始、风险扣分和高风险硬过滤执行同一全周期连续回测，并只在验证段应用训练选出的权重", () => {
+  it("对五种策略执行同一全周期连续回测，并只在验证段应用训练选出的风险扣分权重", () => {
     const { dates, rows, prices } = buildWeightSelectionFixture();
     const realistic = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2 };
     const result = buildDownsideRiskResearch(rows, {
@@ -219,7 +220,7 @@ describe("buildDownsideRiskResearch", () => {
     }, realistic, { priceByStockDate: prices, tradingDates: dates });
 
     expect(result.fullCycle).toMatchObject({ startDate: dates[0], endDate: dates[39] });
-    expect(result.fullCycle.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter"]);
+    expect(result.fullCycle.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"]);
     expect(result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")).toMatchObject({ inputCandidateCount: rows.length, excludedCandidateCount: 0 });
     expect(result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("前置训练窗口自动选出的风险扣分权重");
     expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
@@ -238,8 +239,11 @@ describe("buildDownsideRiskResearch", () => {
     const lowRisk = result.fullCycle.tradeDifferences.find((item) => item.stockName.startsWith("低风险"))!;
     expect(highRisk).toMatchObject({ hardFilterExcluded: true, hardFilter: null });
     expect(highRisk.riskPenalty!.score).toBeLessThan(highRisk.baseline!.score);
+    expect(highRisk).toMatchObject({ qualityGateExcluded: true, qualityGate: null });
     expect(lowRisk).toMatchObject({ hardFilterExcluded: false });
     expect(lowRisk.hardFilter).not.toBeNull();
+    expect(lowRisk.qualityBlend).not.toBeNull();
+    expect(lowRisk.qualityGate).not.toBeNull();
     const attribution = result.fullCycle.riskPenaltyAttribution;
     const baselineFilled = result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")!.realisticSimulation.filledCount;
     const riskPenaltyFilled = result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.realisticSimulation.filledCount;
@@ -265,6 +269,9 @@ describe("buildDownsideRiskResearch", () => {
     const changed = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: futureChangedPrices, tradingDates: dates });
     expect(changed.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution])).toEqual(
       baseline.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution]),
+    );
+    expect(changed.fullCycle.tradeDifferences.map((item) => [item.signalDate, item.stockCode, item.qualityBlend?.score, item.qualityGateExcluded])).toEqual(
+      baseline.fullCycle.tradeDifferences.map((item) => [item.signalDate, item.stockCode, item.qualityBlend?.score, item.qualityGateExcluded]),
     );
   });
 

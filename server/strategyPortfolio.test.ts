@@ -11,7 +11,7 @@ const makeRecord = (date: string, stockCode: string, stockName: string, limitUpT
   circulationValue: "100",
 });
 
-describe("三策略持仓与准备买入快照", () => {
+describe("五策略持仓与准备买入快照", () => {
   it("只以最新信号日生成下一实际交易日准备买入优先级，不预设未知开盘成交", () => {
     const records = [
       ...["2026-08-18", "2026-08-19"].flatMap((date) => [
@@ -31,10 +31,13 @@ describe("三策略持仓与准备买入快照", () => {
 
     expect(result.strategyPortfolioSnapshot.latestSignalDate).toBe("2026-08-20");
     expect(result.strategyPortfolioSnapshot.nextEntryTiming).toBe("下一实际交易日开盘");
+    expect(result.strategyPortfolioSnapshot.strategies.map((item) => item.key)).toEqual(["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"]);
     const baseline = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "baseline")!;
     expect(baseline.preparedBuys).toHaveLength(2);
     expect(baseline.preparedBuys.every((item) => item.signalDate === "2026-08-20")).toBe(true);
     expect(baseline.preparedBuys.flatMap((item) => item.conditions).join(" ")).toContain("未承诺成交");
+    const qualityBlend = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "qualityBlend")!;
+    expect(qualityBlend.preparedBuys.every((item, index, items) => index === 0 || items[index - 1]!.strategyScore >= item.strategyScore)).toBe(true);
   });
 
   it("当前持仓取模拟截止日未出清订单，并且准备买入不重复已有持仓", () => {
@@ -57,7 +60,7 @@ describe("三策略持仓与准备买入快照", () => {
     expect(baseline.preparedBuys).toHaveLength(0);
   });
 
-  it("高风险硬过滤的准备清单不包含被阈值排除的候选", () => {
+  it("高风险硬过滤与质量门控的准备清单均不包含被阈值排除的候选", () => {
     const records = ["2026-08-18", "2026-08-19", "2026-08-20"].flatMap((date) => [
       makeRecord(date, "600001.SH", "主板甲"), makeRecord(date, "600002.SH", "主板乙"),
     ]);
@@ -71,7 +74,10 @@ describe("三策略持仓与准备买入快照", () => {
     });
 
     const hardFilter = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "hardFilter")!;
+    const qualityGate = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "qualityGate")!;
     expect(hardFilter.preparedBuys).toHaveLength(0);
     expect(hardFilter.excludedHighRiskCount).toBeGreaterThan(0);
+    expect(qualityGate.preparedBuys).toHaveLength(0);
+    expect(qualityGate.excludedHighRiskCount).toBeGreaterThan(0);
   });
 });
