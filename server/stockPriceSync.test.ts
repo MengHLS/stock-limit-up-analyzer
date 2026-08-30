@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildStockPriceSyncTargets } from "./stockPriceSync";
+import { buildStockPriceSyncTargets, buildUploadPriceSyncPlan } from "./stockPriceSync";
 import { parseTushareDailyPrices } from "./tushare";
 
 describe("股票日线同步", () => {
@@ -27,6 +27,27 @@ describe("股票日线同步", () => {
 
     expect(targets).toHaveLength(11);
     expect(targets.at(-1)).toEqual({ tradeDate: "2026-09-01", stockCodes: ["600001.SH"] });
+  });
+
+  it("近期上传选择上传日前最近六个候选日，由每个候选日补齐后续T+5交易日", () => {
+    const plan = buildUploadPriceSyncPlan("2026-08-26", ["600003.SH"], [
+      { stockCode: "600001.SH", limitUpDate: "2026-08-18" },
+      { stockCode: "600002.SH", limitUpDate: "2026-08-20" },
+      { stockCode: "600003.SH", limitUpDate: "2026-08-21" },
+      { stockCode: "600004.SH", limitUpDate: "2026-08-22" },
+      { stockCode: "600005.SH", limitUpDate: "2026-08-25" },
+      { stockCode: "600006.SH", limitUpDate: "2026-08-26" },
+    ], new Date("2026-08-30T00:00:00Z"));
+    expect(plan).toEqual({ mode: "recent", signalDates: ["2026-08-18", "2026-08-20", "2026-08-21", "2026-08-22", "2026-08-25", "2026-08-26"], stockCodes: [] });
+  });
+
+  it("历史上传只选择本次图片股票，并由该信号日补齐后续T+5交易日", () => {
+    const plan = buildUploadPriceSyncPlan("2025-01-06", ["600001.SH", "600999.SH"], [
+      { stockCode: "600001.SH", limitUpDate: "2025-01-06" },
+      { stockCode: "600002.SH", limitUpDate: "2025-01-06" },
+      { stockCode: "600999.SH", limitUpDate: "2025-01-07" },
+    ], new Date("2026-08-30T00:00:00Z"));
+    expect(plan).toEqual({ mode: "historical", signalDates: ["2025-01-06"], stockCodes: ["600001.SH"] });
   });
 
   it("解析 Tushare daily 的开盘、收盘、最低价、成交额和前收字段", () => {

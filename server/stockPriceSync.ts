@@ -130,8 +130,9 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
 }
 
 /** 上传识别完成后，按单个涨停日期精准同步该日期及后续十个实际交易日的行情。 */
-export async function syncCandidateDailyPricesForDate(limitUpDate: string): Promise<StockPriceSyncResult> {
-  const records = await getLimitUpRecordsForStockPriceSyncByDate(limitUpDate);
+export async function syncCandidateDailyPricesForDate(limitUpDate: string, futureTradingDayCount = 10, stockCodes?: string[]): Promise<StockPriceSyncResult> {
+  const codeSet = stockCodes ? new Set(stockCodes) : null;
+  const records = (await getLimitUpRecordsForStockPriceSyncByDate(limitUpDate)).filter((record) => !codeSet || codeSet.has(record.stockCode));
   if (records.length === 0) return { mode: "recent", targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [], dates: [] };
 
   const calendarEnd = new Date(`${limitUpDate}T00:00:00Z`);
@@ -144,7 +145,7 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string): Prom
     marketTradingDates = [limitUpDate];
   }
 
-  const targets = buildStockPriceSyncTargets(records, marketTradingDates, 10);
+  const targets = buildStockPriceSyncTargets(records, marketTradingDates, futureTradingDayCount);
   let savedPriceRows = 0;
   let missingPricePairs = 0;
   const failedDates: string[] = [];
@@ -177,4 +178,54 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string): Prom
     }
   }
   return { mode: "recent", targetTradingDates: targets.length, requestedStockDatePairs: targets.reduce((total, target) => total + target.stockCodes.length, 0), savedPriceRows, missingPricePairs, failedDates, dates: targets.map((target) => target.tradeDate) };
+}
+
+export type UploadPriceSyncPlan = {
+  mode: "recent" | "historical";
+  signalDates: string[];
+  stockCodes: string[];
+};
+
+/** 近期按上传日前最近六个信号日（含上传日）补齐，历史上传只补齐本次图片中的股票。 */
+export function buildUploadPriceSyncPlan(
+  uploadDate: string,
+  uploadedStockCodes: string[],
+  records: StockPriceSyncSourceRecord[],
+  now = new Date(),
+): UploadPriceSyncPlan {
+  const today = now.toISOString().slice(0, 10);
+  const recentCutoff = new Date(`${today}T00:00:00Z`);
+  recentCutoff.setUTCDate(recentCutoff.getUTCDate() - 14);
+  const cutoffDate = recentCutoff.toISOString().slice(0, 10);
+  const isRecent = uploadDate >= cutoffDate && uploadDate <= today;
+  if (isRecent) {
+    const signalDates = Array.from(new Set(records.map((record) => record.limitUpDate).filter((date) => date <= uploadDate))).sort().slice(-6);
+    return { mode: "recent", signalDates, stockCodes: [] };
+  }
+  const codes = new Set(uploadedStockCodes);
+  const historicalCodes = Array.from(new Set(records.filter((record) => record.limitUpDate === uploadDate && codes.has(record.stockCode)).map((record) => record.stockCode))).sort();
+  return { mode: "historical", signalDates: historicalCodes.length > 0 ? [uploadDate] : [], stockCodes: historicalCodes };
+}
+
+/** 按上传日期智能补全T+5；重复调用只覆盖同一股票—交易日记录，不产生重复行情行。 */
+export async function syncCandidateDailyPricesForUpload(uploadDate: string, uploadedStockCodes: string[]): Promise<Omit<StockPriceSyncResult, "mode"> & UploadPriceSyncPlan> {
+  const records = await getLimitUpRecordsForStockPriceSync();
+  const plan = buildUploadPriceSyncPlan(uploadDate, uploadedStockCodes, records);
+  const empty = { targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [] as string[], dates: [] as string[] };
+  if (plan.signalDates.length === 0) return { ...empty, ...plan };
+
+  let aggregate = empty;
+  for (const signalDate of plan.signalDates) {
+    const result = await syncCandidateDailyPricesForDate(signalDate, 5, plan.mode === "historical" ? plan.stockCodes : undefined);
+    aggregate = {
+      ...aggregate,
+      targetTradingDates: aggregate.targetTradingDates + result.targetTradingDates,
+      requestedStockDatePairs: aggregate.requestedStockDatePairs + result.requestedStockDatePairs,
+      savedPriceRows: aggregate.savedPriceRows + result.savedPriceRows,
+      missingPricePairs: aggregate.missingPricePairs + result.missingPricePairs,
+      failedDates: [...aggregate.failedDates, ...result.failedDates],
+      dates: [...aggregate.dates, ...result.dates],
+    };
+  }
+  return { ...aggregate, ...plan };
 }
