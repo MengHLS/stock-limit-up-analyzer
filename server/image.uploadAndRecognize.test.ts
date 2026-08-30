@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { z } from 'zod';
 
 /**
@@ -13,6 +15,14 @@ import { z } from 'zod';
  */
 
 describe('image.uploadAndRecognize', () => {
+  it('识别保存成功后必须按识别出的有效日期同步行情，并记录日期刷新结果', () => {
+    const routerSource = readFileSync(resolve(import.meta.dirname, "routers.ts"), "utf8");
+    expect(routerSource).toContain("syncUploadedDatePrices(recognizedDate, ctx.user.id)");
+    expect(routerSource).toContain("syncUploadedDatePrices(recognizedDate, userId)");
+    expect(routerSource).toContain('operationType: "date_refresh"');
+    expect(routerSource).toContain("syncCandidateDailyPricesForDate(limitUpDate)");
+    expect(routerSource).toContain("savedPriceRows");
+  });
   
   it('应该验证输入参数的类型', () => {
     // 测试输入验证schema

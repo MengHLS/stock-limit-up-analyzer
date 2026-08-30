@@ -655,6 +655,15 @@ export async function getLimitUpRecordsForStockPriceSync(): Promise<Array<{ stoc
     .orderBy(limitUpRecords.limitUpDate);
 }
 
+/** 返回指定涨停日期的股票集合，供上传完成后精准同步该日期及后续交易日行情。 */
+export async function getLimitUpRecordsForStockPriceSyncByDate(limitUpDate: string): Promise<Array<{ stockCode: string; limitUpDate: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({ stockCode: limitUpRecords.stockCode, limitUpDate: limitUpRecords.limitUpDate })
+    .from(limitUpRecords)
+    .where(eq(limitUpRecords.limitUpDate, limitUpDate));
+}
+
 /** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格。 */
 export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Promise<number> {
   const db = await getDb();

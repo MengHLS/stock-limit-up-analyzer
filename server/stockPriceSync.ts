@@ -1,5 +1,6 @@
 import {
   getLimitUpRecordsForStockPriceSync,
+  getLimitUpRecordsForStockPriceSyncByDate,
   upsertStockDailyPrices,
   type StockDailyPriceUpsert,
 } from "./db";
@@ -126,4 +127,54 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
     failedDates,
     dates: targets.map((target) => target.tradeDate),
   };
+}
+
+/** 上传识别完成后，按单个涨停日期精准同步该日期及后续十个实际交易日的行情。 */
+export async function syncCandidateDailyPricesForDate(limitUpDate: string): Promise<StockPriceSyncResult> {
+  const records = await getLimitUpRecordsForStockPriceSyncByDate(limitUpDate);
+  if (records.length === 0) return { mode: "recent", targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [], dates: [] };
+
+  const calendarEnd = new Date(`${limitUpDate}T00:00:00Z`);
+  calendarEnd.setUTCDate(calendarEnd.getUTCDate() + 21);
+  let marketTradingDates: string[];
+  try {
+    marketTradingDates = await fetchTushareTradingDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
+  } catch (error) {
+    console.warn(`[StockPriceSync] ${limitUpDate} 交易日历获取失败，降级为指定日期：`, error);
+    marketTradingDates = [limitUpDate];
+  }
+
+  const targets = buildStockPriceSyncTargets(records, marketTradingDates, 10);
+  let savedPriceRows = 0;
+  let missingPricePairs = 0;
+  const failedDates: string[] = [];
+  for (let index = 0; index < targets.length; index += TUSHARE_SYNC_CONCURRENCY) {
+    const targetBatch = targets.slice(index, index + TUSHARE_SYNC_CONCURRENCY);
+    const batchResults = await Promise.all(targetBatch.map(async (target) => {
+      try {
+        const priceRows = await fetchTushareDailyPricesByDate(target.tradeDate);
+        const requestedCodes = new Set(target.stockCodes);
+        const relevantRows: StockDailyPriceUpsert[] = priceRows.filter((price) => requestedCodes.has(price.stockCode)).map((price) => ({
+          stockCode: price.stockCode,
+          tradeDate: price.tradeDate,
+          openPrice: String(price.openPrice),
+          closePrice: String(price.closePrice),
+          lowPrice: String(price.lowPrice),
+          amount: String(price.amount),
+          preClosePrice: String(price.preClosePrice),
+          source: "tushare",
+        }));
+        return { savedCount: await upsertStockDailyPrices(relevantRows), missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null };
+      } catch (error) {
+        console.warn(`[StockPriceSync] 跳过上传日期 ${target.tradeDate} 日线同步：`, error);
+        return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate };
+      }
+    }));
+    for (const result of batchResults) {
+      savedPriceRows += result.savedCount;
+      missingPricePairs += result.missingCount;
+      if (result.failedDate) failedDates.push(result.failedDate);
+    }
+  }
+  return { mode: "recent", targetTradingDates: targets.length, requestedStockDatePairs: targets.reduce((total, target) => total + target.stockCodes.length, 0), savedPriceRows, missingPricePairs, failedDates, dates: targets.map((target) => target.tradeDate) };
 }

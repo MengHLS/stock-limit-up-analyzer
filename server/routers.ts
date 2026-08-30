@@ -9,7 +9,7 @@ import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
 import { parseRecognitionResult } from "./recognition";
 import { isValidLimitUpTime } from "../shared/limitUpTime";
-import { syncCandidateDailyPrices } from "./stockPriceSync";
+import { syncCandidateDailyPrices, syncCandidateDailyPricesForDate } from "./stockPriceSync";
 
 import {
   createLimitUpRecord,
@@ -79,6 +79,34 @@ async function finishOperationLog(
     await updateOperationLog(id, changes);
   } catch (error) {
     console.warn("[OperationLog] 更新日志失败，不阻断主流程:", error);
+  }
+}
+
+async function syncUploadedDatePrices(limitUpDate: string, userId: number): Promise<Awaited<ReturnType<typeof syncCandidateDailyPricesForDate>>> {
+  const operationLogId = await beginOperationLog({
+    operationType: "date_refresh",
+    status: "processing",
+    requestedDate: limitUpDate,
+    createdBy: userId,
+    message: `识别保存完成，开始同步 ${limitUpDate} 的信号日及后续行情`,
+  });
+  try {
+    const result = await syncCandidateDailyPricesForDate(limitUpDate);
+    const allFailed = result.targetTradingDates > 0 && result.failedDates.length === result.targetTradingDates && result.savedPriceRows === 0;
+    const status = allFailed ? "failed" : result.savedPriceRows > 0 ? "success" : "empty";
+    await finishOperationLog(operationLogId, {
+      status,
+      effectiveDate: limitUpDate,
+      refreshedCount: result.savedPriceRows,
+      message: allFailed
+        ? `行情同步失败：${result.failedDates.join(", ")}`
+        : `行情同步完成：覆盖 ${result.targetTradingDates} 个交易日，保存 ${result.savedPriceRows} 条，缺失 ${result.missingPricePairs} 条`,
+    });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await finishOperationLog(operationLogId, { status: "failed", effectiveDate: limitUpDate, message: `行情同步失败：${message}` });
+    throw error;
   }
 }
 
@@ -419,11 +447,13 @@ export const appRouter = router({
             message: stocks.length > 0 ? `识别并保存 ${stocks.length} 条股票记录` : "图片中未识别到可保存的股票记录",
           });
 
+          const marketSync = stocks.length > 0 ? await syncUploadedDatePrices(recognizedDate, ctx.user.id) : null;
           return {
             success: true,
             count: stocks.length,
             date: recognizedDate,
             stocks,
+            marketSync,
           };
         } catch (error) {
           if (imageId) {
@@ -621,6 +651,14 @@ export const appRouter = router({
             recognizedCount: stocks.length,
             message: stocks.length > 0 ? `识别并保存 ${stocks.length} 条股票记录` : "图片中未识别到可保存的股票记录",
           });
+          if (stocks.length > 0) {
+            try {
+              const marketSync = await syncUploadedDatePrices(recognizedDate, userId);
+              console.log(`[uploadAndRecognize] 图片 ${imageId} 行情同步完成，保存 ${marketSync.savedPriceRows} 条价格记录`);
+            } catch (syncError) {
+              console.error(`[uploadAndRecognize] 图片 ${imageId} 行情同步失败：`, syncError);
+            }
+          }
           console.log(`[uploadAndRecognize] 图片 ${imageId} 识别完成，识别出 ${stocks.length} 只股票`);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
