@@ -41,6 +41,15 @@ describe("股票日线同步", () => {
     expect(plan).toEqual({ mode: "recent", signalDates: ["2026-08-18", "2026-08-20", "2026-08-21", "2026-08-22", "2026-08-25", "2026-08-26"], stockCodes: [] });
   });
 
+  it("跨信号日合并目标，让前几日涨停股票在当前交易日仍被同步", () => {
+    const targets = buildStockPriceSyncTargets([
+      { stockCode: "600001.SH", limitUpDate: "2026-08-18" },
+      { stockCode: "600002.SH", limitUpDate: "2026-08-20" },
+    ], ["2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26"], 5);
+    expect(targets.find((target) => target.tradeDate === "2026-08-24")?.stockCodes).toEqual(["600001.SH", "600002.SH"]);
+    expect(targets.find((target) => target.tradeDate === "2026-08-25")?.stockCodes).toEqual(["600001.SH", "600002.SH"]);
+  });
+
   it("历史上传只选择本次图片股票，并由该信号日补齐后续T+5交易日", () => {
     const plan = buildUploadPriceSyncPlan("2025-01-06", ["600001.SH", "600999.SH"], [
       { stockCode: "600001.SH", limitUpDate: "2025-01-06" },
