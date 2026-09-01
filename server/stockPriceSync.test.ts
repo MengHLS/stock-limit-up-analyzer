@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildStockPriceSyncTargets, buildUploadPriceSyncPlan } from "./stockPriceSync";
+import { buildMissingStockPriceRequirements, buildStockPriceSyncTargets, buildUploadPriceSyncPlan } from "./stockPriceSync";
 import { parseTushareDailyPrices } from "./tushare";
 
 describe("股票日线同步", () => {
@@ -48,6 +48,18 @@ describe("股票日线同步", () => {
       { stockCode: "600999.SH", limitUpDate: "2025-01-07" },
     ], new Date("2026-08-30T00:00:00Z"));
     expect(plan).toEqual({ mode: "historical", signalDates: ["2025-01-06"], stockCodes: ["600001.SH"] });
+  });
+
+  it("只返回缺失的信号日及后续五个实际交易日，并保留每条股票信号日的审计范围", () => {
+    const requirements = buildMissingStockPriceRequirements(
+      [{ stockCode: "600001.SH", limitUpDate: "2026-08-18" }, { stockCode: "600002.SH", limitUpDate: "2026-08-18" }],
+      new Set(["600001.SH::2026-08-18", "600001.SH::2026-08-19", "600001.SH::2026-08-20", "600001.SH::2026-08-21", "600001.SH::2026-08-24", "600001.SH::2026-08-25", "600002.SH::2026-08-18"]),
+      ["2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26"],
+      5,
+    );
+    expect(requirements).toHaveLength(1);
+    expect(requirements[0]?.stockCode).toBe("600002.SH");
+    expect(requirements[0]?.missingTradeDates).toEqual(["2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25"]);
   });
 
   it("解析 Tushare daily 的开盘、收盘、最低价、成交额和前收字段", () => {

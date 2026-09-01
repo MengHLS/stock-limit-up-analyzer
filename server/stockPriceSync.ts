@@ -1,6 +1,7 @@
 import {
   getLimitUpRecordsForStockPriceSync,
   getLimitUpRecordsForStockPriceSyncByDate,
+  getLeaderCandidateDailyPriceMap,
   upsertStockDailyPrices,
   type StockDailyPriceUpsert,
 } from "./db";
@@ -228,4 +229,68 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
     };
   }
   return { ...aggregate, ...plan };
+}
+
+export type MissingStockPriceRequirement = {
+  stockCode: string;
+  signalDate: string;
+  requiredTradeDates: string[];
+  missingTradeDates: string[];
+  missingCount: number;
+};
+
+export function buildMissingStockPriceRequirements(
+  records: StockPriceSyncSourceRecord[],
+  priceKeys: ReadonlySet<string>,
+  marketTradingDates: string[],
+  futureTradingDayCount = 5,
+): MissingStockPriceRequirement[] {
+  const tradingDates = Array.from(new Set(marketTradingDates)).sort();
+  const indexByDate = new Map(tradingDates.map((date, index) => [date, index]));
+  return records.map((record) => {
+    const signalIndex = indexByDate.get(record.limitUpDate);
+    const requiredTradeDates = signalIndex === undefined
+      ? [record.limitUpDate]
+      : tradingDates.slice(signalIndex, signalIndex + futureTradingDayCount + 1);
+    const missingTradeDates = requiredTradeDates.filter((tradeDate) => !priceKeys.has(`${record.stockCode}::${tradeDate}`));
+    return { stockCode: record.stockCode, signalDate: record.limitUpDate, requiredTradeDates, missingTradeDates, missingCount: missingTradeDates.length };
+  }).filter((item) => item.missingCount > 0);
+}
+
+export async function getMissingStockPriceRequirements(filter?: { stockCode?: string; signalDate?: string }): Promise<MissingStockPriceRequirement[]> {
+  const allRecords = await getLimitUpRecordsForStockPriceSync();
+  const records = allRecords.filter((record) => (!filter?.stockCode || record.stockCode === filter.stockCode) && (!filter?.signalDate || record.limitUpDate === filter.signalDate));
+  if (records.length === 0) return [];
+  const dates = records.map((record) => record.limitUpDate).sort();
+  const end = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 14);
+  let tradingDates: string[];
+  try {
+    tradingDates = await fetchTushareTradingDates(dates[0]!, end.toISOString().slice(0, 10));
+  } catch (error) {
+    console.warn("[StockPriceSync] 缺失检查交易日历获取失败，降级为候选日期：", error);
+    tradingDates = Array.from(new Set(dates));
+  }
+  const priceMap = await getLeaderCandidateDailyPriceMap();
+  const requirements = buildMissingStockPriceRequirements(records, new Set(priceMap.keys()), tradingDates, 5);
+  const unique = new Map<string, MissingStockPriceRequirement>();
+  for (const item of requirements) unique.set(`${item.stockCode}::${item.signalDate}`, item);
+  return Array.from(unique.values()).sort((left, right) => left.signalDate.localeCompare(right.signalDate) || left.stockCode.localeCompare(right.stockCode));
+}
+
+export async function syncMissingStockPrices(filter?: { stockCode?: string; signalDate?: string }): Promise<{ mode: "manual"; targetTradingDates: number; requestedStockDatePairs: number; savedPriceRows: number; missingPricePairs: number; failedDates: string[]; dates: string[] }> {
+  const requirements = await getMissingStockPriceRequirements(filter);
+  const byDate = new Map<string, string[]>();
+  for (const item of requirements) byDate.set(item.signalDate, Array.from(new Set([...(byDate.get(item.signalDate) ?? []), item.stockCode])));
+  const aggregate = { mode: "manual" as const, targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [] as string[], dates: [] as string[] };
+  for (const [signalDate, stockCodes] of Array.from(byDate.entries())) {
+    const result = await syncCandidateDailyPricesForDate(signalDate, 5, stockCodes);
+    aggregate.targetTradingDates += result.targetTradingDates;
+    aggregate.requestedStockDatePairs += result.requestedStockDatePairs;
+    aggregate.savedPriceRows += result.savedPriceRows;
+    aggregate.missingPricePairs += result.missingPricePairs;
+    aggregate.failedDates.push(...result.failedDates);
+    aggregate.dates.push(...result.dates);
+  }
+  return aggregate;
 }
