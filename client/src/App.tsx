@@ -3,11 +3,11 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
+import AppShell from "./components/AppShell";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Upload from "./pages/Upload";
 import Market from "./pages/Market";
-import MarketData from "./pages/MarketData";
 import MarketDataInput from "./pages/MarketDataInput";
 import SentimentAlerts from "./pages/SentimentAlerts";
 import SentimentAnalysis from "./pages/SentimentAnalysis";
@@ -15,7 +15,6 @@ import LeaderCandidates from "./pages/LeaderCandidates";
 import Backtest from "./pages/Backtest";
 import OperationLogs from "./pages/OperationLogs";
 import StockSync from "./pages/StockSync";
-import StockPriceSync from "./pages/StockPriceSync";
 
 
 function Router() {
@@ -24,14 +23,12 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/upload"} component={Upload} />
       <Route path={"/market"} component={Market} />
-      <Route path="/market-data" component={MarketData} />
       <Route path="/market-data-input" component={MarketDataInput} />
       <Route path="/sentiment-alerts" component={SentimentAlerts} />
       <Route path="/sentiment-analysis" component={SentimentAnalysis} />
       <Route path="/leader-candidates" component={LeaderCandidates} />
       <Route path="/backtest" component={Backtest} />
       <Route path="/operation-logs" component={OperationLogs} />
-      <Route path="/stock-price-sync" component={StockPriceSync} />
       <Route path="/stock-sync" component={StockSync} />
 
       <Route path="/404" component={NotFound} />
@@ -46,7 +43,9 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <AppShell>
+            <Router />
+          </AppShell>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

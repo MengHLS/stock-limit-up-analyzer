@@ -6,9 +6,12 @@ import {
   getLimitUpRecordsForSyncCheck,
   getStockDailyPricePairs,
   upsertStockDailyPrices,
+  getStockSuspensionWindows,
+  expandSuspendedDatesByStock,
+  upsertSuspensionWindows,
   type StockDailyPriceUpsert,
 } from "./db";
-import { fetchTushareDailyPricesByDate, fetchTushareTradingDates, isTushareRateLimitError } from "./tushare";
+import { fetchTushareDailyPricesByDate, fetchTushareTradingDates, fetchTushareStockTradeDates, isTushareRateLimitError } from "./tushare";
 
 export type StockPriceSyncMode = "full" | "recent";
 
@@ -38,10 +41,25 @@ const RECENT_SYNC_DATE_COUNT = 8;
 const TUSHARE_SYNC_CONCURRENCY = 2;
 
 /**
+ * 观察窗口（信号日 + N 个可交易日）的交易日历终点缓冲，单位自然日。
+ * 涨停后紧跟停牌的股票，其可交易观察日会随停牌时长向后顺延；若日历终点只留 21 自然日，
+ * 长停牌会把第 N 个可交易日推出日历窗口而被截断，导致复牌后尾部交易日漏同步。
+ * 取 90 自然日（约 3 个月）覆盖 A 股重组停牌上限，退市/永久停牌则由观察窗口自然中断（数不满即 break）。
+ */
+const OBSERVATION_WINDOW_CALENDAR_PADDING_DAYS = 90;
+
+/** 退市/长期停牌的"永久无行情"结束日：用远超正常交易区间的日期表示，供停牌窗口覆盖到任意未来交易日。 */
+export const PERMANENT_SUSPENSION_END = "9999-12-31";
+
+/** 末笔成交日之后连续无成交的市场交易日达到该阈值，即判定为退市/长期停牌（而非近几日数据未更新）。 */
+const TRAILING_SUSPENSION_MIN_TRADING_DAYS = 5;
+
+/**
  * 对每条涨停记录同步信号日、下一已记录交易日及下二已记录交易日价格。
  * 后两者即使股票未继续涨停也必须保存，才能评价候选池的 T+1/T+2 溢价和跨日出清。
+ * 停牌日（个股无成交）不视为可交易观察日，自动跳过，观察窗口向后顺延至凑满可交易日数。
  */
-export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[], marketTradingDates?: string[], futureTradingDayCount = 10): StockPriceSyncTarget[] {
+export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[], marketTradingDates?: string[], futureTradingDayCount = 10, suspendedDatesByStock?: Map<string, Set<string>>): StockPriceSyncTarget[] {
   const fallbackTradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => left.localeCompare(right));
   const tradingDates = Array.from(new Set(marketTradingDates?.length ? marketTradingDates : fallbackTradingDates))
@@ -59,14 +77,27 @@ export function buildStockPriceSyncTargets(records: StockPriceSyncSourceRecord[]
   for (const record of records) {
     addTarget(record.limitUpDate, record.stockCode);
     const signalIndex = tradingIndex.get(record.limitUpDate);
-    for (let offset = 1; offset <= futureTradingDayCount; offset += 1) {
-      addTarget(signalIndex === undefined ? null : tradingDates[signalIndex + offset] ?? null, record.stockCode);
+    if (signalIndex === undefined) continue;
+    const suspended = suspendedDatesByStock?.get(record.stockCode);
+    let addedTradableDays = 0;
+    for (let offset = 1; addedTradableDays < futureTradingDayCount; offset += 1) {
+      const date = tradingDates[signalIndex + offset];
+      if (!date) break;
+      if (suspended?.has(date)) continue;
+      addTarget(date, record.stockCode);
+      addedTradableDays += 1;
     }
   }
 
   return Array.from(codesByDate.entries())
     .map(([tradeDate, stockCodes]) => ({ tradeDate, stockCodes: Array.from(stockCodes).sort() }))
     .sort((left, right) => left.tradeDate.localeCompare(right.tradeDate));
+}
+
+/** 读取停牌窗口并展开为「股票代码 → 停牌交易日集合」。 */
+async function loadSuspendedDatesByStock(tradingDates: string[]): Promise<Map<string, Set<string>>> {
+  const windows = await getStockSuspensionWindows();
+  return expandSuspendedDatesByStock(windows, tradingDates);
 }
 
 /** 同步价格表；recent 用于每日盘后补齐近八个已记录交易日，full 用于首次历史回填。两种模式覆盖信号后十个实际交易日。 */
@@ -76,7 +107,7 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
   if (recordDates.length === 0) return { mode, targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [], dates: [] };
   const startDate = recordDates[0];
   const endDate = new Date(`${recordDates.at(-1)}T00:00:00Z`);
-  endDate.setUTCDate(endDate.getUTCDate() + 21);
+  endDate.setUTCDate(endDate.getUTCDate() + OBSERVATION_WINDOW_CALENDAR_PADDING_DAYS);
   const calendarEndDate = endDate.toISOString().slice(0, 10);
   let marketTradingDates: string[];
   try {
@@ -85,7 +116,7 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
     console.warn("[StockPriceSync] 交易日历获取失败，降级为涨停记录日期：", error);
     marketTradingDates = Array.from(new Set(recordDates));
   }
-  const allTargets = buildStockPriceSyncTargets(records, marketTradingDates, 10);
+  const allTargets = buildStockPriceSyncTargets(records, marketTradingDates, 10, await loadSuspendedDatesByStock(marketTradingDates));
   const targets = mode === "full" ? allTargets : allTargets.slice(-RECENT_SYNC_DATE_COUNT);
   let savedPriceRows = 0;
   let missingPricePairs = 0;
@@ -105,8 +136,10 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
             tradeDate: price.tradeDate,
             openPrice: String(price.openPrice),
             closePrice: String(price.closePrice),
+            highPrice: String(price.highPrice),
             lowPrice: String(price.lowPrice),
             amount: String(price.amount),
+            volume: String(price.volume),
             preClosePrice: String(price.preClosePrice),
             source: "tushare",
           }));
@@ -146,7 +179,7 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
   if (records.length === 0) return { mode: "recent", targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [], dates: [] };
 
   const calendarEnd = new Date(`${limitUpDate}T00:00:00Z`);
-  calendarEnd.setUTCDate(calendarEnd.getUTCDate() + 21);
+  calendarEnd.setUTCDate(calendarEnd.getUTCDate() + OBSERVATION_WINDOW_CALENDAR_PADDING_DAYS);
   let marketTradingDates: string[];
   try {
     marketTradingDates = await fetchTushareTradingDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
@@ -156,7 +189,7 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
     if (marketTradingDates.length === 0) marketTradingDates = [limitUpDate];
   }
 
-  const targets = buildStockPriceSyncTargets(records, marketTradingDates, futureTradingDayCount);
+  const targets = buildStockPriceSyncTargets(records, marketTradingDates, futureTradingDayCount, await loadSuspendedDatesByStock(marketTradingDates));
   let savedPriceRows = 0;
   let missingPricePairs = 0;
   let rateLimited = false;
@@ -172,8 +205,10 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
           tradeDate: price.tradeDate,
           openPrice: String(price.openPrice),
           closePrice: String(price.closePrice),
+          highPrice: String(price.highPrice),
           lowPrice: String(price.lowPrice),
           amount: String(price.amount),
+          volume: String(price.volume),
           preClosePrice: String(price.preClosePrice),
           source: "tushare",
         }));
@@ -192,6 +227,127 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
     }
   }
   return { mode: "recent", targetTradingDates: targets.length, requestedStockDatePairs: targets.reduce((total, target) => total + target.stockCodes.length, 0), savedPriceRows, missingPricePairs, failedDates, dates: targets.map((target) => target.tradeDate), rateLimited };
+}
+
+export type DateRangeSyncDetail = {
+  tradeDate: string;
+  requestedCount: number;
+  savedCount: number;
+  missingCount: number;
+  failed: boolean;
+};
+
+export type DateRangeSyncResult = {
+  startDate: string;
+  endDate: string;
+  targetTradingDates: number;
+  requestedStockDatePairs: number;
+  savedPriceRows: number;
+  missingPricePairs: number;
+  failedDates: string[];
+  dates: string[];
+  rateLimited: boolean;
+  dateDetails: DateRangeSyncDetail[];
+};
+
+/**
+ * 按日期范围同步行情：只同步 [startDate, endDate] 内的交易日里，涨停记录观察窗口（信号日 + 后续十个可交易日）覆盖到的股票。
+ * 支持单日（startDate === endDate）与区间；停牌/退市日自动跳过不空拉。返回每个交易日的成功/失败明细供前端反馈。
+ */
+export async function syncCandidateDailyPricesForDateRange(startDate: string, endDate: string): Promise<DateRangeSyncResult> {
+  const empty = (): DateRangeSyncResult => ({
+    startDate,
+    endDate,
+    targetTradingDates: 0,
+    requestedStockDatePairs: 0,
+    savedPriceRows: 0,
+    missingPricePairs: 0,
+    failedDates: [],
+    dates: [],
+    rateLimited: false,
+    dateDetails: [],
+  });
+  if (startDate > endDate) return empty();
+  const records = await getLimitUpRecordsForStockPriceSync();
+  if (records.length === 0) return empty();
+
+  const recordDates = records.map((record) => record.limitUpDate).sort((left, right) => left.localeCompare(right));
+  // 交易日历需覆盖「最早信号日」到 endDate，确保更早信号日的 T+N 窗口能正确映射到所选范围内的交易日。
+  const calendarStart = recordDates[0]! < startDate ? recordDates[0]! : startDate;
+  let marketTradingDates: string[];
+  try {
+    marketTradingDates = await fetchTushareTradingDates(calendarStart, endDate);
+  } catch (error) {
+    console.warn(`[StockPriceSync] ${startDate}~${endDate} 交易日历获取失败，降级为已同步交易日：`, error);
+    marketTradingDates = await getStockDailyPriceTradeDates(calendarStart, endDate);
+    if (marketTradingDates.length === 0) marketTradingDates = Array.from(new Set(recordDates));
+  }
+
+  const allTargets = buildStockPriceSyncTargets(records, marketTradingDates, 10, await loadSuspendedDatesByStock(marketTradingDates));
+  const targets = allTargets.filter((target) => target.tradeDate >= startDate && target.tradeDate <= endDate);
+
+  let savedPriceRows = 0;
+  let missingPricePairs = 0;
+  let rateLimited = false;
+  const failedDates: string[] = [];
+  const dateDetails: DateRangeSyncDetail[] = [];
+
+  for (let index = 0; index < targets.length && !rateLimited; index += TUSHARE_SYNC_CONCURRENCY) {
+    const targetBatch = targets.slice(index, index + TUSHARE_SYNC_CONCURRENCY);
+    const batchResults = await Promise.all(targetBatch.map(async (target) => {
+      try {
+        const priceRows = await fetchTushareDailyPricesByDate(target.tradeDate);
+        const requestedCodes = new Set(target.stockCodes);
+        const relevantRows: StockDailyPriceUpsert[] = priceRows
+          .filter((price) => requestedCodes.has(price.stockCode))
+          .map((price) => ({
+            stockCode: price.stockCode,
+            tradeDate: price.tradeDate,
+            openPrice: String(price.openPrice),
+            closePrice: String(price.closePrice),
+            highPrice: String(price.highPrice),
+            lowPrice: String(price.lowPrice),
+            amount: String(price.amount),
+            volume: String(price.volume),
+            preClosePrice: String(price.preClosePrice),
+            source: "tushare",
+          }));
+        const savedCount = await upsertStockDailyPrices(relevantRows);
+        return { tradeDate: target.tradeDate, requestedCount: target.stockCodes.length, savedCount, missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failed: false, rateLimited: false };
+      } catch (error) {
+        const rateLimitedHit = isTushareRateLimitError(error);
+        console.warn(`[StockPriceSync] 按日期范围同步跳过 ${target.tradeDate}：`, error);
+        return { tradeDate: target.tradeDate, requestedCount: target.stockCodes.length, savedCount: 0, missingCount: target.stockCodes.length, failed: true, rateLimited: rateLimitedHit };
+      }
+    }));
+
+    for (const batchResult of batchResults) {
+      savedPriceRows += batchResult.savedCount;
+      missingPricePairs += batchResult.missingCount;
+      if (batchResult.failed) failedDates.push(batchResult.tradeDate);
+      if (batchResult.rateLimited) rateLimited = true;
+      dateDetails.push({
+        tradeDate: batchResult.tradeDate,
+        requestedCount: batchResult.requestedCount,
+        savedCount: batchResult.savedCount,
+        missingCount: batchResult.missingCount,
+        failed: batchResult.failed,
+      });
+    }
+  }
+
+  return {
+    startDate,
+    endDate,
+    targetTradingDates: targets.length,
+    requestedStockDatePairs: targets.reduce((total, target) => total + target.stockCodes.length, 0),
+    savedPriceRows,
+    missingPricePairs,
+    failedDates,
+    dates: targets.map((target) => target.tradeDate),
+    rateLimited,
+    dateDetails: dateDetails.sort((left, right) => left.tradeDate.localeCompare(right.tradeDate)),
+  };
 }
 
 export type UploadPriceSyncPlan = {
@@ -232,7 +388,7 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
   const selectedRecords = records.filter((record) => plan.signalDates.includes(record.limitUpDate) && (plan.mode === "recent" || plan.stockCodes.includes(record.stockCode)));
   const startDate = plan.signalDates[0]!;
   const calendarEnd = new Date(`${plan.signalDates[plan.signalDates.length - 1]}T00:00:00Z`);
-  calendarEnd.setUTCDate(calendarEnd.getUTCDate() + 14);
+  calendarEnd.setUTCDate(calendarEnd.getUTCDate() + OBSERVATION_WINDOW_CALENDAR_PADDING_DAYS);
   let marketTradingDates: string[];
   try {
     marketTradingDates = await fetchTushareTradingDates(startDate, calendarEnd.toISOString().slice(0, 10));
@@ -241,7 +397,7 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
     marketTradingDates = await getStockDailyPriceTradeDates(startDate, calendarEnd.toISOString().slice(0, 10));
     if (marketTradingDates.length === 0) marketTradingDates = Array.from(new Set(selectedRecords.map((record) => record.limitUpDate))).sort();
   }
-  const targets = buildStockPriceSyncTargets(selectedRecords, marketTradingDates, 5);
+  const targets = buildStockPriceSyncTargets(selectedRecords, marketTradingDates, 5, await loadSuspendedDatesByStock(marketTradingDates));
   let savedPriceRows = 0;
   let missingPricePairs = 0;
   const failedDates: string[] = [];
@@ -249,7 +405,7 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
     const batchResults = await Promise.all(targets.slice(index, index + TUSHARE_SYNC_CONCURRENCY).map(async (target) => {
       try {
         const requestedCodes = new Set(target.stockCodes);
-        const relevantRows = (await fetchTushareDailyPricesByDate(target.tradeDate)).filter((price) => requestedCodes.has(price.stockCode)).map((price) => ({ stockCode: price.stockCode, tradeDate: price.tradeDate, openPrice: String(price.openPrice), closePrice: String(price.closePrice), lowPrice: String(price.lowPrice), amount: String(price.amount), preClosePrice: String(price.preClosePrice), source: "tushare" } satisfies StockDailyPriceUpsert));
+        const relevantRows = (await fetchTushareDailyPricesByDate(target.tradeDate)).filter((price) => requestedCodes.has(price.stockCode)).map((price) => ({ stockCode: price.stockCode, tradeDate: price.tradeDate, openPrice: String(price.openPrice), closePrice: String(price.closePrice), highPrice: String(price.highPrice), lowPrice: String(price.lowPrice), amount: String(price.amount), volume: String(price.volume), preClosePrice: String(price.preClosePrice), source: "tushare" } satisfies StockDailyPriceUpsert));
         return { savedCount: await upsertStockDailyPrices(relevantRows), missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null as string | null };
       } catch (error) {
         console.warn(`[StockPriceSync] 上传补全跳过 ${target.tradeDate}：`, error);
@@ -293,7 +449,7 @@ export async function getMissingStockPriceRequirements(filter?: { stockCode?: st
   if (records.length === 0) return [];
   const dates = records.map((record) => record.limitUpDate).sort();
   const end = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
-  end.setUTCDate(end.getUTCDate() + 14);
+  end.setUTCDate(end.getUTCDate() + OBSERVATION_WINDOW_CALENDAR_PADDING_DAYS);
   let tradingDates: string[];
   try {
     tradingDates = await fetchTushareTradingDates(dates[0]!, end.toISOString().slice(0, 10));
@@ -334,6 +490,8 @@ export type StockPriceSyncCheckItem = {
   sector: string | null;
   missingDates: string[];
   missingCount: number;
+  /** 观察窗口内落在停牌区间的交易日（个股无成交，非同步缺陷）。 */
+  suspendedDates: string[];
 };
 
 export type StockPriceSyncCheck = {
@@ -345,6 +503,8 @@ export type StockPriceSyncCheck = {
     missingPairs: number;
     syncedPairCount: number;
     calendarAvailable: boolean;
+    /** 停牌导致的"无行情"日数（不计入 missingPairs，仅作提示）。 */
+    suspendedPairs: number;
   };
   items: StockPriceSyncCheckItem[];
 };
@@ -364,6 +524,7 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
     missingPairs: 0,
     syncedPairCount: pricePairs.size,
     calendarAvailable: false,
+    suspendedPairs: 0,
   };
   if (records.length === 0) return { summary: emptySummary, items: [] };
 
@@ -371,7 +532,7 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
   let calendarAvailable = false;
   const recordDates = Array.from(new Set(records.map((record) => record.limitUpDate))).sort((left, right) => left.localeCompare(right));
   const endDate = new Date(`${recordDates[recordDates.length - 1]}T00:00:00Z`);
-  endDate.setUTCDate(endDate.getUTCDate() + 21);
+  endDate.setUTCDate(endDate.getUTCDate() + OBSERVATION_WINDOW_CALENDAR_PADDING_DAYS);
   try {
     tradingDates = await fetchTushareTradingDates(recordDates[0], endDate.toISOString().slice(0, 10));
     calendarAvailable = true;
@@ -380,16 +541,29 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
     tradingDates = recordDates;
   }
   const tradingIndex = new Map(tradingDates.map((date, index) => [date, index]));
+  const suspendedDatesByStock = await loadSuspendedDatesByStock(tradingDates);
 
   const items: StockPriceSyncCheckItem[] = records.map((record) => {
-    const requiredDates = new Set<string>([record.limitUpDate]);
     const signalIndex = tradingIndex.get(record.limitUpDate);
+    const suspended = suspendedDatesByStock.get(record.stockCode);
+    // 观察窗口 = 信号日 + 后续 futureTradingDayCount 个可交易（非停牌）市场交易日。
+    const requiredDates = new Set<string>([record.limitUpDate]);
     if (signalIndex !== undefined) {
-      for (let offset = 1; offset <= futureTradingDayCount; offset += 1) {
+      let addedTradable = 0;
+      for (let offset = 1; addedTradable < futureTradingDayCount; offset += 1) {
         const date = tradingDates[signalIndex + offset];
-        if (date) requiredDates.add(date);
+        if (!date) break;
+        if (suspended?.has(date)) continue;
+        requiredDates.add(date);
+        addedTradable += 1;
       }
     }
+    // 朴素窗口 = 信号日 + 后续 futureTradingDayCount 个市场交易日，其中的停牌日单独提示（不计缺失）。
+    const suspendedDates = signalIndex === undefined
+      ? []
+      : tradingDates.slice(signalIndex + 1, signalIndex + 1 + futureTradingDayCount)
+          .filter((date) => suspended?.has(date))
+          .sort((left, right) => left.localeCompare(right));
     const missingDates = Array.from(requiredDates)
       .filter((date) => !pricePairs.has(`${record.stockCode}|${date}`))
       .sort((left, right) => left.localeCompare(right));
@@ -401,6 +575,7 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
       sector: record.sector,
       missingDates,
       missingCount: missingDates.length,
+      suspendedDates,
     };
   });
 
@@ -413,6 +588,7 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
   const fullySynced = items.filter((item) => item.missingCount === 0).length;
   const fullyMissing = items.filter((item) => item.missingDates.includes(item.limitUpDate)).length;
   const partialSynced = items.length - fullySynced - fullyMissing;
+  const suspendedPairs = items.reduce((total, item) => total + item.suspendedDates.length, 0);
 
   return {
     summary: {
@@ -423,7 +599,88 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
       missingPairs: items.reduce((total, item) => total + item.missingCount, 0),
       syncedPairCount: pricePairs.size,
       calendarAvailable,
+      suspendedPairs,
     },
     items,
   };
+}
+
+export type StockSuspensionInference = {
+  stockCode: string;
+  windows: Array<{ startDate: string; endDate: string; tradingDayCount: number }>;
+  tradedDates: number;
+  invalidCode?: boolean;
+  /** 末笔成交日之后市场仍持续无该股成交 → 退市/长期停牌（窗口 endDate 为永久日期）。 */
+  trailing?: boolean;
+};
+
+/**
+ * 用 Tushare 个股日线反推单只股票的停牌窗口（市场交易日 − 该股实际成交日），并落库为
+ * source=tushare-daily-infer。区间至少覆盖给定的 startDate..endDate，跨期连续停牌会自动合并。
+ * 返回每只股票推断出的窗口，供前端展示核查结果。
+ */
+export async function inferStockSuspensionWindows(
+  stockCodes: string[],
+  startDate: string,
+  endDate: string,
+): Promise<StockSuspensionInference[]> {
+  const marketTradingDates = await fetchTushareTradingDates(startDate, endDate);
+  const results: StockSuspensionInference[] = [];
+
+  for (const stockCode of stockCodes) {
+    let tradedDates: string[];
+    try {
+      tradedDates = await fetchTushareStockTradeDates(stockCode, startDate, endDate);
+    } catch (error) {
+      if (isTushareRateLimitError(error)) throw error;
+      // 代码无效/退市等无法取到日线：不做停牌落库，交由调用方按 invalidCode 处理。
+      results.push({ stockCode, windows: [], tradedDates: 0, invalidCode: true });
+      continue;
+    }
+    if (tradedDates.length === 0) {
+      results.push({ stockCode, windows: [], tradedDates: 0, invalidCode: true });
+      continue;
+    }
+    const tradedSet = new Set(tradedDates);
+    const missing = marketTradingDates.filter((date) => !tradedSet.has(date) && date >= tradedDates[0]! && date <= tradedDates.at(-1)!);
+    // 连续缺失段 → 停牌窗口（含交易日计数）
+    const rawWindows: Array<{ startDate: string; endDate: string }> = [];
+    for (const date of missing) {
+      const last = rawWindows.at(-1);
+      if (last && marketTradingDates.indexOf(date) === marketTradingDates.indexOf(last.endDate) + 1) {
+        last.endDate = date;
+      } else {
+        rawWindows.push({ startDate: date, endDate: date });
+      }
+    }
+    const windows: Array<{ startDate: string; endDate: string; tradingDayCount: number }> = rawWindows.map(({ startDate, endDate }) => ({
+      startDate,
+      endDate,
+      tradingDayCount: marketTradingDates.filter((d) => d >= startDate && d <= endDate).length,
+    }));
+
+    // 尾部缺失识别：末笔成交日之后市场仍持续无该股成交 → 退市或长期停牌（永久无行情）。
+    const lastTraded = tradedDates.at(-1)!;
+    const trailingDates = marketTradingDates.filter((date) => date > lastTraded);
+    const trailing = trailingDates.length >= TRAILING_SUSPENSION_MIN_TRADING_DAYS;
+    if (trailing) {
+      windows.push({
+        startDate: trailingDates[0]!,
+        endDate: PERMANENT_SUSPENSION_END,
+        tradingDayCount: trailingDates.length,
+      });
+    }
+
+    if (windows.length > 0) {
+      await upsertSuspensionWindows(windows.map(({ startDate, endDate }) => ({
+        stockCode,
+        startDate,
+        endDate,
+        source: "tushare-daily-infer" as const,
+        note: endDate === PERMANENT_SUSPENSION_END ? `退市：末笔成交 ${lastTraded} 后摘牌无行情` : null,
+      })));
+    }
+    results.push({ stockCode, windows, tradedDates: tradedDates.length, trailing: trailing || undefined });
+  }
+  return results;
 }

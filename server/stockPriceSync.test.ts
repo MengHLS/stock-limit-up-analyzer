@@ -71,12 +71,12 @@ describe("股票日线同步", () => {
     expect(requirements[0]?.missingTradeDates).toEqual(["2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25"]);
   });
 
-  it("解析 Tushare daily 的开盘、收盘、最低价、成交额和前收字段", () => {
+  it("解析 Tushare daily 的开盘、收盘、最高、最低、成交额、成交量和前收字段", () => {
     const prices = parseTushareDailyPrices({
       code: 0,
       data: {
-        fields: ["ts_code", "trade_date", "open", "close", "low", "amount", "pre_close"],
-        items: [["600001.SH", "20260819", 10.5, 11, 10.1, 123456.78, 10]],
+        fields: ["ts_code", "trade_date", "open", "close", "high", "low", "amount", "vol", "pre_close"],
+        items: [["600001.SH", "20260819", 10.5, 11, 11.2, 10.1, 123456.78, 98765, 10]],
       },
     });
 
@@ -85,8 +85,10 @@ describe("股票日线同步", () => {
       tradeDate: "2026-08-19",
       openPrice: 10.5,
       closePrice: 11,
+      highPrice: 11.2,
       lowPrice: 10.1,
       amount: 123456.78,
+      volume: 98765,
       preClosePrice: 10,
     }]);
   });

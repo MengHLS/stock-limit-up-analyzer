@@ -5,9 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Plus, Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { Plus, Loader2, CheckCircle, AlertCircle } from "lucide-react";
 import { useState } from "react";
 import { Link } from "wouter";
+import { toast } from "sonner";
 
 
 export default function MarketDataInputPage() {
@@ -25,7 +26,7 @@ export default function MarketDataInputPage() {
 
   const upsertMarketDataMutation = trpc.market.upsert.useMutation({
     onSuccess: () => {
-      alert("大盘数据已保存");
+      toast.success("大盘数据已保存");
       setSuccessMessage("数据已成功保存！");
       setFormData({
         dataDate: "",
@@ -36,7 +37,7 @@ export default function MarketDataInputPage() {
       setTimeout(() => setSuccessMessage(""), 3000);
     },
     onError: (error) => {
-      alert("保存失败：" + (error.message || "请重试"));
+      toast.error("保存失败：" + (error.message || "请重试"));
     },
   });
 
@@ -53,13 +54,13 @@ export default function MarketDataInputPage() {
     
     // 验证必填字段
     if (!formData.dataDate || !formData.turnover || !formData.marginBalance) {
-      alert("请填写所有必填字段（日期、成交额、两融余额）");
+      toast.error("请填写所有必填字段（日期、成交额、两融余额）");
       return;
     }
 
     // 验证数字格式
     if (isNaN(parseFloat(formData.turnover)) || isNaN(parseFloat(formData.marginBalance))) {
-      alert("成交额和两融余额必须是有效的数字");
+      toast.error("成交额和两融余额必须是有效的数字");
       return;
     }
 
@@ -78,40 +79,22 @@ export default function MarketDataInputPage() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+      <div className="flex items-center justify-center py-20">
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle>需要登录</CardTitle>
             <CardDescription>请先登录以录入大盘数据</CardDescription>
           </CardHeader>
-          <CardContent>
-            <Link href="/">
-              <Button className="w-full">返回首页</Button>
-            </Link>
-          </CardContent>
         </Card>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-xl supports-[backdrop-filter]:bg-white/60 shadow-sm">
-        <div className="container flex h-14 items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <Button variant="ghost" size="sm" className="gap-2">
-                <ArrowLeft className="h-4 w-4" />
-                返回首页
-              </Button>
-            </Link>
-            <h1 className="text-xl font-bold text-slate-900">录入大盘数据</h1>
-          </div>
-        </div>
-      </header>
-
-      <main className="container py-8 max-w-2xl">
+    <div className="container max-w-2xl py-6">
+      <div className="mb-4">
+        <h1 className="text-xl font-bold text-slate-900">录入大盘数据</h1>
+      </div>
         <Card>
           <CardHeader>
             <CardTitle>大盘交易数据录入</CardTitle>
@@ -247,7 +230,6 @@ export default function MarketDataInputPage() {
             </form>
           </CardContent>
         </Card>
-      </main>
     </div>
   );
 }

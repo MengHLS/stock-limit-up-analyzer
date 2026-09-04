@@ -4,9 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Link } from "wouter";
+import { toast } from "sonner";
 import { 
-  ArrowLeft, 
   Bell, 
   TrendingUp, 
   TrendingDown, 
@@ -71,10 +70,10 @@ export default function SentimentAlertsPage() {
     onSuccess: (data) => {
       utils.sentiment.getAlerts.invalidate();
       utils.sentiment.getUnreadCount.invalidate();
-      alert(`检测完成，生成了 ${data.length} 条新预警`);
+      toast.success(`检测完成，生成了 ${data.length} 条新预警`);
     },
     onError: (error) => {
-      alert(`检测失败: ${error.message}`);
+      toast.error(`检测失败: ${error.message}`);
     },
   });
 
@@ -114,58 +113,45 @@ export default function SentimentAlertsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center">
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              返回首页
-            </Button>
-          </Link>
-          <div className="ml-4 flex items-center gap-2">
-            <Bell className="h-5 w-5" />
-            <h1 className="text-lg font-semibold">情绪预警管理</h1>
-            {unreadCount > 0 && (
-              <Badge variant="destructive">{unreadCount} 条未读</Badge>
-            )}
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {isAuthenticated && (
-              <>
+    <div className="container py-6 max-w-4xl">
+      <div className="mb-4 flex items-center gap-2">
+        <Bell className="h-5 w-5" />
+        <h1 className="text-lg font-semibold">情绪预警管理</h1>
+        {unreadCount > 0 && (
+          <Badge variant="destructive">{unreadCount} 条未读</Badge>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          {isAuthenticated && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBatchCheck}
+                disabled={batchCheckMutation.isPending}
+              >
+                {batchCheckMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                检测历史拐点
+              </Button>
+              {unreadCount > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleBatchCheck}
-                  disabled={batchCheckMutation.isPending}
+                  onClick={() => markAllAsReadMutation.mutate()}
+                  disabled={markAllAsReadMutation.isPending}
                 >
-                  {batchCheckMutation.isPending ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                  )}
-                  检测历史拐点
+                  <CheckCheck className="h-4 w-4 mr-2" />
+                  全部已读
                 </Button>
-                {unreadCount > 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => markAllAsReadMutation.mutate()}
-                    disabled={markAllAsReadMutation.isPending}
-                  >
-                    <CheckCheck className="h-4 w-4 mr-2" />
-                    全部已读
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
+              )}
+            </>
+          )}
         </div>
-      </header>
-
-      <main className="container py-8 max-w-4xl">
-        {/* 预警规则说明 */}
+      </div>
+      {/* 预警规则说明 */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="text-base">预警规则说明</CardTitle>
@@ -312,7 +298,6 @@ export default function SentimentAlertsPage() {
             )}
           </CardContent>
         </Card>
-      </main>
     </div>
   );
 }

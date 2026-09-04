@@ -380,4 +380,66 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(result.trades.find((trade) => trade.stockCode === "600002.SH")).toMatchObject({ status: "filled", entryDate: "2026-08-20" });
     expect(oneWordLimit.trades[0].reason).toContain("开盘触发止损但接近跌停");
   });
+
+  it("按成交额分档加成滑点：小盘股滑点更大", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 10.5, closePrice: 10.8, amount: 50000 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([row()], {
+      initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 10, lotSize: 100,
+    }, prices, ["2026-08-19", "2026-08-20"]);
+
+    // amount=5千万 < 1亿 → 基础10bps + 20bps = 30bps；买入价 = 10.5 × 1.003
+    expect(result.trades[0]).toMatchObject({ status: "filled", entryPrice: 10.5315 });
+  });
+
+  it("T+1一字涨停封死时跳过买入", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 11, closePrice: 11, highPrice: 11, lowPrice: 11 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 11, nextClosePrice: 11 })], {
+      initialCapital: 100000, blockOneWordLimitUpBuys: true,
+    }, prices, ["2026-08-19", "2026-08-20"]);
+
+    expect(result.filledCount).toBe(0);
+    expect(result.blockedBuyCount).toBe(1);
+    expect(result.trades[0].reason).toContain("一字涨停");
+  });
+
+  it("盘中最低价触及止损价时按止损价出清", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 10, closePrice: 10.2 }],
+      ["600001.SH::2026-08-20", { openPrice: 9.8, closePrice: 9.7, lowPrice: 9.4 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 10, nextClosePrice: 10.2, secondDayClosePrice: 9.7 })], {
+      initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0,
+      enableIntradayStopLoss: true, stopLossPercent: 5, strongHoldMinReturn: 20, maxHoldingDays: 5,
+    }, prices, ["2026-08-19", "2026-08-20"]);
+
+    expect(result.trades[0]).toMatchObject({ exitDate: "2026-08-20", exitPrice: 9.5, reason: expect.stringContaining("盘中触及止损") });
+  });
+
+  it("按成交额比例限制单笔买入规模", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 10, closePrice: 10.2, amount: 5000 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 10 })], {
+      initialCapital: 1000000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, lotSize: 100, maxPositionAmountRatio: 0.1,
+    }, prices, ["2026-08-19", "2026-08-20"]);
+
+    // amount=5000千元(500万元) × 10% = 50万元 → 50万/10 = 5万股 = 500手
+    expect(result.trades[0].shares).toBe(50000);
+  });
+
+  it("检测除权除息跳空并标记样本", () => {
+    const prices = new Map([
+      ["600001.SH::2026-08-19", { openPrice: 9, closePrice: 9.2, preClosePrice: 8 }],
+    ]);
+    const result = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 9 })], {
+      initialCapital: 100000, detectExRights: true, minimumExpectedOpenChangePercent: -20,
+    }, prices, ["2026-08-19", "2026-08-20"]);
+
+    expect(result.trades[0].exRights).toBe(true);
+    expect(result.exRightsCount).toBe(1);
+  });
 });

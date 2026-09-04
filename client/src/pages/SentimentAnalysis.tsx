@@ -5,9 +5,8 @@ import { ContinuousRangeSlider } from "@/components/ContinuousRangeSlider";
 import { buildDistinctHighBoardLabels } from "@/lib/highBoardLabels";
 import { trpc } from "@/lib/trpc";
 import { DEFAULT_VISIBLE_TRADING_DAYS, getDefaultVisibleRange, normalizeVisibleRange } from "@/lib/visibleRange";
-import { Activity, ArrowLeft, CalendarDays, Crown, Flame, GitBranch, Loader2, TrendingUp } from "lucide-react";
+import { Activity, CalendarDays, Crown, Flame, GitBranch, Loader2, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link } from "wouter";
 import {
   CartesianGrid,
   Line,
@@ -77,34 +76,22 @@ export default function SentimentAnalysisPage() {
   const latestCycleDay = cycleAnalysis?.days.at(-1);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50/40 to-red-50/50">
-      <header className="sticky top-0 z-50 w-full border-b bg-white/85 backdrop-blur-xl">
-        <div className="container flex h-16 items-center">
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              返回首页
-            </Button>
-          </Link>
-          <div className="ml-4 flex items-center gap-2">
-            <Activity className="h-5 w-5 text-orange-600" />
-            <h1 className="text-lg font-semibold text-slate-800">情绪分析</h1>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto gap-2"
-            onClick={() => { void refetch(); void refetchCycle(); }}
-            disabled={isLoading}
-          >
-            <TrendingUp className="h-4 w-4" />
-            刷新数据
-          </Button>
-        </div>
-      </header>
-
-      <main className="container max-w-7xl py-8">
-        <div className="mb-6">
+    <div className="container max-w-7xl py-6">
+      <div className="mb-6 flex items-center gap-2">
+        <Activity className="h-5 w-5 text-orange-600" />
+        <h1 className="text-lg font-semibold text-slate-800">情绪分析</h1>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto gap-2"
+          onClick={() => { void refetch(); void refetchCycle(); }}
+          disabled={isLoading}
+        >
+          <TrendingUp className="h-4 w-4" />
+          刷新数据
+        </Button>
+      </div>
+      <div className="mb-6">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-orange-600">Market Sentiment</p>
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">最高连板趋势</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
@@ -310,7 +297,6 @@ export default function SentimentAnalysisPage() {
             </Card>
           </div>
         )}
-      </main>
     </div>
   );
 }

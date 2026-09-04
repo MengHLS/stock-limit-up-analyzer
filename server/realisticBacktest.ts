@@ -25,6 +25,14 @@ export type RealisticBacktestOptions = {
   strongHoldMinReturn?: number;
   maxHoldingDays?: number;
   minimumExpectedOpenChangePercent?: number;
+  /** T+1 一字涨停（开盘即封死、全天无开板）无法成交，跳过买入。 */
+  blockOneWordLimitUpBuys?: boolean;
+  /** 用当日最低价模拟盘中止损：开盘未破位但盘中触及止损价即成交。 */
+  enableIntradayStopLoss?: boolean;
+  /** 单笔买入占当日成交额的比例上限（0 表示不限制），用于容量约束。 */
+  maxPositionAmountRatio?: number;
+  /** 检测除权除息跳空（信号日收盘与 T+1 前收不一致）并标记样本。 */
+  detectExRights?: boolean;
 };
 
 export type RealisticTrade = {
@@ -44,6 +52,8 @@ export type RealisticTrade = {
   entryPointPremium?: number | null;
   /** 兼容旧表格字段，与 entryPointPremium 相同，不再单独展示。 */
   entryDayChange?: number | null;
+  /** 是否检测到除权除息跳空（收益口径存疑）。 */
+  exRights?: boolean;
   status: "filled" | "skipped";
   reason: string | null;
 };
@@ -72,6 +82,10 @@ export type RealisticBacktestResult = {
     strongHoldMinReturn: number;
     maxHoldingDays: number;
     minimumExpectedOpenChangePercent: number;
+    blockOneWordLimitUpBuys: boolean;
+    enableIntradayStopLoss: boolean;
+    maxPositionAmountRatio: number;
+    detectExRights: boolean;
   };
   initialCapital: number;
   finalCapital: number;
@@ -95,6 +109,7 @@ export type RealisticBacktestResult = {
   blockedBuyCount: number;
   blockedSellCount: number;
   missingDataCount: number;
+  exRightsCount: number;
   equityCurve: RealisticEquityPoint[];
   trades: RealisticTrade[];
 };
@@ -113,6 +128,15 @@ type Position = {
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 const rate = (count: number, total: number) => total === 0 ? null : round((count / total) * 100, 1);
 const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
+
+/** 按当日成交额（Tushare daily amount，单位千元）对基础滑点做流动性分层加成；无成交额信息时回落为固定基础滑点。 */
+function amountAdjustedSlippageBps(baseBps: number, amount: number | null | undefined): number {
+  if (amount === null || amount === undefined || !Number.isFinite(amount) || amount <= 0) return baseBps;
+  if (amount < 100_000) return baseBps + 20;      // 成交额 < 1 亿元
+  if (amount < 500_000) return baseBps + 10;      // 1 ~ 5 亿元
+  if (amount < 2_000_000) return baseBps + 5;     // 5 ~ 20 亿元
+  return baseBps;                                 // ≥ 20 亿元
+}
 
 /** 使用订单标识生成稳定抽样值，使概率模式在重复回测时可复现。 */
 function hitsDeterministicProbability(key: string, probability: number) {
@@ -171,6 +195,10 @@ export function simulateRealisticTPlus1ToTPlus2(
   const strongHoldMinReturn = Math.min(100, Math.max(0, options.strongHoldMinReturn ?? 3));
   const maxHoldingDays = Math.max(2, Math.floor(options.maxHoldingDays ?? 5));
   const minimumExpectedOpenChangePercent = Math.min(100, Math.max(-50, options.minimumExpectedOpenChangePercent ?? -2));
+  const blockOneWordLimitUpBuys = options.blockOneWordLimitUpBuys ?? false;
+  const enableIntradayStopLoss = options.enableIntradayStopLoss ?? false;
+  const maxPositionAmountRatio = Math.max(0, options.maxPositionAmountRatio ?? 0);
+  const detectExRights = options.detectExRights ?? false;
   const assumptions = {
     initialCapital,
     maxPositions,
@@ -192,6 +220,10 @@ export function simulateRealisticTPlus1ToTPlus2(
     strongHoldMinReturn,
     maxHoldingDays,
     minimumExpectedOpenChangePercent,
+    blockOneWordLimitUpBuys,
+    enableIntradayStopLoss,
+    maxPositionAmountRatio,
+    detectExRights,
   };
   const sortedRows = rows.slice().sort((left, right) => (
     left.nextDayDate.localeCompare(right.nextDayDate) || right.score - left.score || left.stockCode.localeCompare(right.stockCode)
@@ -220,7 +252,9 @@ export function simulateRealisticTPlus1ToTPlus2(
   ));
   const settlePosition = (key: string, position: Position, date: string, rawExitPrice: number, reason: string | null) => {
     const trade = findFilledTrade(position);
-    const slippedExit = rawExitPrice * (1 - slippageBps / 10_000);
+    const exitAmount = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.amount ?? null;
+    const exitSlippageBps = amountAdjustedSlippageBps(slippageBps, exitAmount);
+    const slippedExit = rawExitPrice * (1 - exitSlippageBps / 10_000);
     const grossExit = slippedExit * position.shares;
     const sellFees = grossExit * (commissionRate + stampDutyRate + transferFeeRate);
     const proceeds = grossExit - sellFees;
@@ -301,16 +335,38 @@ export function simulateRealisticTPlus1ToTPlus2(
         continue;
       }
       const entryOpenPrice = row.nextOpenPrice!;
+      const entryDayPrice = priceByStockDate.get(`${row.stockCode}::${row.nextDayDate}`);
+      const entryHighPrice = entryDayPrice?.highPrice ?? null;
+      const entryLowPrice = entryDayPrice?.lowPrice ?? null;
+      const entryAmount = entryDayPrice?.amount ?? null;
+
       const limitUp = validPrice(row.signalClosePrice) && entryOpenPrice >= row.signalClosePrice * 1.099;
       if (blockLimitUpBuys && limitUp) {
         blockedBuyCount += 1;
         trades.push(createSkippedTrade(row, "T+1开盘接近涨停，按保守规则不可追买"));
         continue;
       }
-      const slippedEntry = entryOpenPrice * (1 + slippageBps / 10_000);
+      // 一字涨停：开盘即封死且全天无开板（开≈高≈低），挂单无法成交。
+      const oneWordLimitUp = limitUp
+        && validPrice(entryHighPrice) && validPrice(entryLowPrice)
+        && Math.abs(entryHighPrice - entryLowPrice) <= entryOpenPrice * 0.002
+        && Math.abs(entryOpenPrice - entryHighPrice) <= entryOpenPrice * 0.002;
+      if (blockOneWordLimitUpBuys && oneWordLimitUp) {
+        blockedBuyCount += 1;
+        trades.push(createSkippedTrade(row, "T+1一字涨停封死，无法买入"));
+        continue;
+      }
+
+      const entrySlippageBps = amountAdjustedSlippageBps(slippageBps, entryAmount);
+      const slippedEntry = entryOpenPrice * (1 + entrySlippageBps / 10_000);
       const plannedBudget = budgetByRow.get(row) ?? 0;
       const executableBudget = Math.min(plannedBudget, cash);
-      const shares = Math.floor(executableBudget / (slippedEntry * (1 + commissionRate + transferFeeRate)) / lotSize) * lotSize;
+      let shares = Math.floor(executableBudget / (slippedEntry * (1 + commissionRate + transferFeeRate)) / lotSize) * lotSize;
+      // 容量约束：单笔买入金额不超过当日成交额的一定比例，避免回测买入现实中无法成交的仓位。
+      if (maxPositionAmountRatio > 0 && validPrice(entryAmount)) {
+        const capacityShares = Math.floor((entryAmount * 1000 * maxPositionAmountRatio) / entryOpenPrice / lotSize) * lotSize;
+        if (capacityShares < shares) shares = capacityShares;
+      }
       if (shares < lotSize) {
         missingDataCount += 1;
         trades.push(createSkippedTrade(row, "可用资金不足以买入一手"));
@@ -323,6 +379,12 @@ export function simulateRealisticTPlus1ToTPlus2(
         trades.push(createSkippedTrade(row, "可用资金不足以完成买入"));
         continue;
       }
+      // 除权除息检测：信号日收盘与 T+1 前收不一致说明发生除权，收益口径存疑。
+      const entryPreClose = entryDayPrice?.preClosePrice ?? null;
+      const exRights = detectExRights
+        && validPrice(row.signalClosePrice)
+        && validPrice(entryPreClose)
+        && Math.abs(entryPreClose - row.signalClosePrice) / row.signalClosePrice > 0.01;
       cash -= capitalCost;
       positions.set(`${row.stockCode}::${date}`, {
         row,
@@ -349,6 +411,7 @@ export function simulateRealisticTPlus1ToTPlus2(
         totalFees: round(buyFees),
         netPnl: null,
         netReturn: null,
+        exRights,
         status: "filled",
         reason: null,
       });
@@ -370,6 +433,7 @@ export function simulateRealisticTPlus1ToTPlus2(
       const marketPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`);
       const marketClosePrice = marketPrice?.closePrice ?? null;
       const marketOpenPrice = marketPrice?.openPrice ?? null;
+      const marketLowPrice = marketPrice?.lowPrice ?? null;
       const exitPrice = date === position.row.secondDayDate
         ? position.row.secondDayClosePrice ?? marketClosePrice
         : marketClosePrice;
@@ -390,6 +454,14 @@ export function simulateRealisticTPlus1ToTPlus2(
         && validPrice(marketOpenPrice)
         && marketOpenPrice <= position.previousClosePrice * 0.901
         && Math.abs(marketOpenPrice - exitPrice) <= position.previousClosePrice * 0.002;
+      // 盘中止损：开盘未破位但当日最低价触及止损价，按止损价成交（贴近真实硬止损）。
+      if (enableIntradayStopLoss && !oneWordLimitDown) {
+        const stopPrice = position.entryPrice * (1 - stopLossPercent / 100);
+        if (validPrice(marketLowPrice) && validPrice(marketOpenPrice) && marketOpenPrice > stopPrice && marketLowPrice <= stopPrice) {
+          settlePosition(key, position, date, stopPrice, `盘中触及止损（${round((stopPrice - position.entryPrice) / position.entryPrice * 100)}% ≤ -${stopLossPercent}%）`);
+          continue;
+        }
+      }
       const oneWordProbabilityFill = oneWordLimitDown
         && enableOneWordLimitDownProbability
         && hitsDeterministicProbability(`${position.row.stockCode}::${position.row.nextDayDate}::${date}`, oneWordLimitDownSellProbability);
@@ -512,6 +584,7 @@ export function simulateRealisticTPlus1ToTPlus2(
     blockedBuyCount,
     blockedSellCount,
     missingDataCount,
+    exRightsCount: trades.filter((trade) => trade.exRights === true).length,
     equityCurve,
     trades,
   };

@@ -77,6 +77,14 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   tPlus1CloseToTPlus2CloseSuccess: boolean | null;
   phase: SentimentCyclePhase | null;
   maxBoards: number | null;
+  /** 信号日次一市场交易日即停牌（当日无法卖出），T+1/T+2 溢价不可用。 */
+  suspendedAfterSignal?: boolean;
+  /** 复牌后首个可交易日（涨停后停牌样本的有效离场观察日）。 */
+  resumeDate?: string | null;
+  /** 复牌首日相对信号日收盘的开盘溢价（%）。 */
+  resumeOpenPremium?: number | null;
+  /** 复牌首日相对信号日收盘的收盘溢价（%）。 */
+  resumeClosePremium?: number | null;
 };
 
 export type LeaderCandidateScoreBand = {
@@ -130,6 +138,8 @@ export type LeaderCandidateBacktestResult = {
   outOfSampleTPlus2Premium: LeaderCandidatePremiumSummary;
   tPlus1CloseToTPlus2Close: LeaderCandidateExitSummary;
   outOfSampleTPlus1CloseToTPlus2Close: LeaderCandidateExitSummary;
+  resumeDayExit: LeaderCandidateExitSummary;
+  outOfSampleResumeDayExit: LeaderCandidateExitSummary;
   outOfSampleScoreBands: LeaderCandidateScoreBand[];
   phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
@@ -217,6 +227,8 @@ export type LeaderCandidateBacktestContext = {
   marketFactorsByDate?: Map<string, LeaderCandidateMarketFactors>;
   /** 由日线行情提供的完整实际交易日序列；价格回测不使用自然日推算。 */
   tradingDates?: string[];
+  /** 股票代码 → 停牌交易日集合，用于识别涨停后停牌样本并改以复牌首日计算离场收益。 */
+  suspendedDatesByStock?: Map<string, Set<string>>;
 };
 
 export type LeaderCandidateMarketFactors = {
@@ -242,8 +254,11 @@ export type LeaderCandidateMarketFactorCoverage = {
 export type LeaderCandidateDailyPrice = {
   openPrice: number | null;
   closePrice: number | null;
+  highPrice?: number | null;
   lowPrice?: number | null;
   amount?: number | null;
+  volume?: number | null;
+  preClosePrice?: number | null;
 };
 
 export type LeaderCandidateDailyPriceCoverage = {
@@ -251,8 +266,10 @@ export type LeaderCandidateDailyPriceCoverage = {
   stockCount: number;
   startDate: string | null;
   endDate: string | null;
+  highPriceCount: number;
   lowPriceCount: number;
   amountCount: number;
+  volumeCount: number;
 };
 
 export type LeaderCandidateDailyPriceRow = {
@@ -260,26 +277,36 @@ export type LeaderCandidateDailyPriceRow = {
   tradeDate: string;
   openPrice: string | number | null;
   closePrice: string | number | null;
+  highPrice?: string | number | null;
   lowPrice?: string | number | null;
   amount?: string | number | null;
+  volume?: string | number | null;
+  preClosePrice?: string | number | null;
 };
 
 /** 保留开盘或收盘任一有效价格；只有两项都无效时才丢弃该交易日记录。 */
 export function buildLeaderCandidateDailyPriceMap(rows: LeaderCandidateDailyPriceRow[]): Map<string, LeaderCandidateDailyPrice> {
   const map = new Map<string, LeaderCandidateDailyPrice>();
+  const toPositiveNumber = (value: string | number | null | undefined) => {
+    const parsed = value === null || value === undefined ? null : Number(value);
+    return parsed !== null && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
+  const toNonNegativeNumber = (value: string | number | null | undefined) => {
+    const parsed = value === null || value === undefined ? null : Number(value);
+    return parsed !== null && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  };
   for (const row of rows) {
-    const parsedOpenPrice = Number(row.openPrice);
-    const parsedClosePrice = Number(row.closePrice);
-    const parsedLowPrice = row.lowPrice === null || row.lowPrice === undefined ? null : Number(row.lowPrice);
-    const parsedAmount = row.amount === null || row.amount === undefined ? null : Number(row.amount);
-    const openPrice = Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
-    const closePrice = Number.isFinite(parsedClosePrice) && parsedClosePrice > 0 ? parsedClosePrice : null;
+    const openPrice = toPositiveNumber(row.openPrice);
+    const closePrice = toPositiveNumber(row.closePrice);
     if (openPrice === null && closePrice === null) continue;
     map.set(`${row.stockCode}::${row.tradeDate}`, {
       openPrice,
       closePrice,
-      lowPrice: parsedLowPrice !== null && Number.isFinite(parsedLowPrice) && parsedLowPrice > 0 ? parsedLowPrice : null,
-      amount: parsedAmount !== null && Number.isFinite(parsedAmount) && parsedAmount >= 0 ? parsedAmount : null,
+      highPrice: toPositiveNumber(row.highPrice),
+      lowPrice: toPositiveNumber(row.lowPrice),
+      amount: toNonNegativeNumber(row.amount),
+      volume: toNonNegativeNumber(row.volume),
+      preClosePrice: toPositiveNumber(row.preClosePrice),
     });
   }
   return map;
@@ -373,6 +400,24 @@ function calculateExitSummary(rows: LeaderCandidateBacktestRow[]): LeaderCandida
     averageReturn,
     positiveReturnCount,
     positiveReturnRate: percent(positiveReturnCount, exitRows.length),
+  };
+}
+
+/** 仅统计「涨停后停牌」样本的复牌首日离场收益。 */
+function calculateResumeExitSummary(rows: LeaderCandidateBacktestRow[]): LeaderCandidateExitSummary {
+  const resumeRows = rows.filter((row) => row.suspendedAfterSignal && row.resumeClosePremium !== null);
+  const returns = resumeRows.map((row) => row.resumeClosePremium!);
+  const positiveReturnCount = returns.filter((value) => value > 0).length;
+  const averageReturn = returns.length === 0
+    ? null
+    : Number((returns.reduce((total, value) => total + value, 0) / returns.length).toFixed(2));
+  return {
+    sampleSize: resumeRows.length,
+    successCount: positiveReturnCount,
+    successRate: percent(positiveReturnCount, resumeRows.length),
+    averageReturn,
+    positiveReturnCount,
+    positiveReturnRate: percent(positiveReturnCount, resumeRows.length),
   };
 }
 
@@ -802,6 +847,26 @@ export function buildLeaderCandidateBacktest(
       const secondDayPrice = secondDayDate
         ? context.priceByStockDate?.get(`${candidate.stockCode}::${secondDayDate}`)
         : undefined;
+      const suspendedSet = context.suspendedDatesByStock?.get(candidate.stockCode);
+      const isSuspendedOn = (d: string | null | undefined) => (d ? (suspendedSet?.has(d) ?? false) : false);
+      const suspendedAfterSignal = isSuspendedOn(nextDayDate);
+      // 复牌首日 = 信号日后第一个非停牌市场交易日；涨停后停牌样本以此作为可离场观察日。
+      let resumeDate: string | null = null;
+      if (suspendedAfterSignal && marketIndex !== undefined) {
+        for (let offset = 1; ; offset += 1) {
+          const candidateResumeDate = marketTradingDates[marketIndex + offset];
+          if (!candidateResumeDate) break;
+          if (!isSuspendedOn(candidateResumeDate)) {
+            resumeDate = candidateResumeDate;
+            break;
+          }
+        }
+      } else if (!suspendedAfterSignal) {
+        resumeDate = nextDayDate;
+      }
+      const resumePrice = resumeDate
+        ? context.priceByStockDate?.get(`${candidate.stockCode}::${resumeDate}`)
+        : undefined;
       const tPlus1CloseToTPlus2CloseReturn = premiumPercent(nextDayPrice?.closePrice, secondDayPrice?.closePrice);
       rows.push({
         date,
@@ -836,6 +901,10 @@ export function buildLeaderCandidateBacktest(
         tPlus1CloseToTPlus2CloseSuccess: tPlus1CloseToTPlus2CloseReturn === null ? null : tPlus1CloseToTPlus2CloseReturn > 0,
         phase: phaseContext?.phase ?? null,
         maxBoards: phaseContext?.maxBoards ?? null,
+        suspendedAfterSignal,
+        resumeDate,
+        resumeOpenPremium: premiumPercent(signalPrice?.closePrice, resumePrice?.openPrice),
+        resumeClosePremium: premiumPercent(signalPrice?.closePrice, resumePrice?.closePrice),
       });
     }
   }
@@ -898,6 +967,8 @@ export function buildLeaderCandidateBacktest(
   const outOfSampleTPlus2Premium = calculatePremiumSummary(outOfSampleAtThreshold, "secondDayOpenPremium", "secondDayClosePremium");
   const tPlus1CloseToTPlus2Close = calculateExitSummary(appliedRows);
   const outOfSampleTPlus1CloseToTPlus2Close = calculateExitSummary(outOfSampleAtThreshold);
+  const resumeDayExit = calculateResumeExitSummary(appliedRows);
+  const outOfSampleResumeDayExit = calculateResumeExitSummary(outOfSampleAtThreshold);
   const realisticSimulation = simulateRealisticTPlus1ToTPlus2(
     appliedRows,
     options.realistic,
@@ -983,6 +1054,8 @@ export function buildLeaderCandidateBacktest(
     outOfSampleTPlus2Premium,
     tPlus1CloseToTPlus2Close,
     outOfSampleTPlus1CloseToTPlus2Close,
+    resumeDayExit,
+    outOfSampleResumeDayExit,
     // 该分层始终以所有样本外行计算，不受当前手动阈值影响，用于比较各评分区间的独立样本外表现。
     outOfSampleScoreBands: scoreBandDefinitions.map((definition) => calculateBand(outOfSampleRows, definition)),
     // 阶段漏斗使用当前评分阈值下的独立样本外行；每行的阶段仅来自候选信号日，不读取后续验证日。
@@ -995,8 +1068,10 @@ export function buildLeaderCandidateBacktest(
       stockCount: 0,
       startDate: null,
       endDate: null,
+      highPriceCount: 0,
       lowPriceCount: 0,
       amountCount: 0,
+      volumeCount: 0,
     },
     marketFactorCoverage,
     strategyPortfolioSnapshot,

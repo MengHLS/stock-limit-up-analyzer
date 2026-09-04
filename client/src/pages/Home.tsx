@@ -4,7 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { trpc } from "@/lib/trpc";
 import { filterFirstBoardRecords, getPreviousRecordedDate } from "@/lib/firstBoard";
@@ -12,35 +11,26 @@ import { buildLimitUpCsv } from "@/lib/exportCsv";
 import { normalizeCustomSector } from "@/lib/customSector";
 import { isValidLimitUpTime, normalizeLimitUpTime } from "@shared/limitUpTime";
 import { buildAdjacentRecordsByDate, getLatestDateString, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "@/lib/homeData";
-import { getLoginUrl } from "@/const";
 import { 
-  Upload, 
   Search, 
   Calendar, 
   TrendingUp, 
   BarChart3, 
-  Activity,
   Loader2,
   Clock,
-  Hash,
   Tag,
   Star,
-  Crown,
-  Database,
-  ClipboardList,
-  CloudDownload,
   Download,
   Pencil,
   Trash2
 } from "lucide-react";
-import { SentimentAlertBell } from "@/components/SentimentAlertBell";
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { Link } from "wouter";
+import { toast } from "sonner";
 
 const EMPTY_ARRAY: any[] = [];
 
 export default function Home() {
-  const { user, loading: authLoading, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { data: watchlistData } = trpc.watchlist.getAll.useQuery(undefined, {
     enabled: isAuthenticated,
     staleTime: 60_000,
@@ -291,88 +281,8 @@ export default function Home() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur-xl supports-[backdrop-filter]:bg-white/60 shadow-sm">
-        <div className="container flex h-14 items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-lg">
-              <TrendingUp className="h-5 w-5 text-white" />
-            </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
-              涨停复盘助手
-            </h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <SentimentAlertBell />
-            <Link href="/market">
-              <Button variant="ghost" size="sm" className="gap-2 hover:bg-blue-50">
-                <BarChart3 className="h-4 w-4" />
-                大盘分析
-              </Button>
-            </Link>
-            <Link href="/sentiment-analysis">
-              <Button variant="ghost" size="sm" className="gap-2 hover:bg-orange-50">
-                <Activity className="h-4 w-4" />
-                情绪分析
-              </Button>
-            </Link>
-            <Link href="/leader-candidates">
-              <Button variant="ghost" size="sm" className="gap-2 hover:bg-amber-50">
-                <Crown className="h-4 w-4" />
-                龙头候选
-              </Button>
-            </Link>
-            {isAuthenticated ? (
-              <>
-                <Link href="/market-data-input">
-                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-green-50">
-                    <Database className="h-4 w-4" />
-                    录入数据
-                  </Button>
-                </Link>
-              </>
-            ) : null}
-            {isAuthenticated ? (
-              <>
-                <Link href="/operation-logs">
-                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-slate-100">
-                    <ClipboardList className="h-4 w-4" />
-                    操作日志
-                  </Button>
-                </Link>
-                <Link href="/stock-sync">
-                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-sky-50">
-                    <CloudDownload className="h-4 w-4" />
-                    行情同步
-                  </Button>
-                </Link>
-                <Link href="/stock-price-sync">
-                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-blue-50">
-                    <Database className="h-4 w-4" />
-                    行情检查
-                  </Button>
-                </Link>
-                <Link href="/upload">
-                  <Button size="sm" className="gap-2 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 shadow-md">
-                    <Upload className="h-4 w-4" />
-                    上传图片
-                  </Button>
-                </Link>
-                <span className="text-sm text-muted-foreground">
-                  {user?.name || '用户'}
-                </span>
-              </>
-            ) : (
-              <Button size="sm" asChild className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700">
-                <a href={getLoginUrl()}>登录</a>
-              </Button>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <main className="container py-2 max-w-[1600px]">
+    <div className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+      <div className="container py-2 max-w-[1600px]">
         {/* 搜索栏 */}
         <div className="mb-3">
           <div className="relative">
@@ -704,7 +614,7 @@ export default function Home() {
             </div>
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
@@ -914,7 +824,7 @@ function StockRecordActions({ record }: { record: any }) {
       utils.limitUp.getByDate.invalidate({ date: record.limitUpDate });
       utils.limitUp.search.invalidate();
     },
-    onError: (error) => window.alert(error.message || "删除失败，请稍后重试"),
+    onError: (error) => toast.error(error.message || "删除失败，请稍后重试"),
   });
 
   const isTimeValid = isValidLimitUpTime(limitUpTime);

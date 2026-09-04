@@ -10,7 +10,10 @@ import { nanoid } from "nanoid";
 import { parseRecognitionResult } from "./recognition";
 import { isValidLimitUpTime } from "../shared/limitUpTime";
 import { getMissingStockPriceRequirements, syncMissingStockPrices } from "./stockPriceSync";
-import { syncCandidateDailyPrices, syncCandidateDailyPricesForUpload, syncCandidateDailyPricesForDate, checkStockPriceSync } from "./stockPriceSync";
+import { syncCandidateDailyPrices, syncCandidateDailyPricesForUpload, syncCandidateDailyPricesForDate, syncCandidateDailyPricesForDateRange, checkStockPriceSync, inferStockSuspensionWindows } from "./stockPriceSync";
+import { syncMarketDataOnce, getLastMarketSyncResult, getBeijingDateString } from "./marketSync";
+import { lookupStockByTencent, normalizeStockCode } from "./stockIdentity";
+import { correctLimitUpStockIdentity, getStockSuspensionWindows, upsertSuspensionWindows, deleteSuspensionWindow } from "./db";
 
 import {
   createLimitUpRecord,
@@ -44,6 +47,9 @@ import {
   getSentimentCycleAnalysis,
   getLeaderCandidates,
   getLeaderCandidateBacktest,
+  saveBacktestRun,
+  listBacktestRuns,
+  getBacktestRun,
   getAllSentimentAlerts,
   getUnreadAlertCount,
   markAlertAsRead,
@@ -60,6 +66,47 @@ import {
 
 const limitUpTimeInput = z.string().refine(isValidLimitUpTime, {
   message: "涨停时间应为HH:MM或HH:MM:SS格式",
+});
+
+/** 回测参数 schema：计算与保存共用，保证保存的参数能被直接复算。 */
+const backtestOptionsSchema = z.object({
+  observationDays: z.union([z.literal(1), z.literal(2)]).default(1),
+  minScore: z.number().int().min(0).max(100).optional(),
+  realistic: z.object({
+    initialCapital: z.number().positive().max(100000000).optional(),
+    maxPositions: z.number().int().min(1).max(100).optional(),
+    commissionRate: z.number().min(0).max(0.01).optional(),
+    stampDutyRate: z.number().min(0).max(0.01).optional(),
+    transferFeeRate: z.number().min(0).max(0.01).optional(),
+    slippageBps: z.number().min(0).max(1000).optional(),
+    lotSize: z.number().int().min(1).max(10000).optional(),
+    blockLimitUpBuys: z.boolean().optional(),
+    blockLimitDownSells: z.boolean().optional(),
+    enableOneWordLimitDownProbability: z.boolean().optional(),
+    oneWordLimitDownSellProbability: z.number().min(0).max(100).optional(),
+    positionSizingStrategy: z.enum(["equal", "scoreWeighted", "fixedPercent"]).optional(),
+    fixedPositionPercent: z.number().min(1).max(100).optional(),
+    trailingProfitActivationPercent: z.number().min(0).max(100).optional(),
+    trailingDrawdownPercent: z.number().min(0).max(100).optional(),
+    stopLossPercent: z.number().min(0).max(100).optional(),
+    strongHoldMinReturn: z.number().min(0).max(100).optional(),
+    maxHoldingDays: z.number().int().min(2).max(30).optional(),
+    minimumExpectedOpenChangePercent: z.number().min(-50).max(100).optional(),
+    blockOneWordLimitUpBuys: z.boolean().optional(),
+    enableIntradayStopLoss: z.boolean().optional(),
+    detectExRights: z.boolean().optional(),
+    maxPositionAmountRatio: z.number().min(0).max(1).optional(),
+  }).optional(),
+  downsideRisk: z.object({
+    observationDays: z.number().int().min(2).max(10).optional(),
+    mediumDownsidePercent: z.number().min(1).max(50).optional(),
+    highDownsidePercent: z.number().min(1).max(50).optional(),
+    penaltyWeight: z.number().min(0).max(1).optional(),
+    autoTunePenaltyWeight: z.boolean().optional(),
+    hardRiskThreshold: z.number().min(0).max(100).optional(),
+    rollingTrainTradingDays: z.number().int().min(30).max(150).optional(),
+    rollingValidationTradingDays: z.number().int().min(10).max(60).optional(),
+  }).optional(),
 });
 
 async function beginOperationLog(log: Parameters<typeof createOperationLog>[0]): Promise<number | null> {
@@ -900,6 +947,29 @@ export const appRouter = router({
       .mutation(async ({ input }) => {
         return await deleteMarketData(input.id);
       }),
+
+    // 手动触发当天大盘数据同步（管理员）
+    syncNow: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可同步大盘数据" });
+        }
+        return await syncMarketDataOnce();
+      }),
+
+    // 查询大盘数据最近一次同步状态与今日是否已有数据
+    getSyncStatus: publicProcedure
+      .query(async () => {
+        const today = getBeijingDateString();
+        const todayData = await getMarketDataByDate(today);
+        return {
+          today,
+          hasTodayData: !!todayData,
+          todayData,
+          lastSync: getLastMarketSyncResult(),
+        };
+      }),
+
     // 获取涨停数与大盘数据的关联统计（最近N天）
     getLimitUpWithMarketData: publicProcedure
       .input(z.object({ days: z.number().optional() }))
@@ -927,43 +997,35 @@ export const appRouter = router({
 
     // 按历史候选池计算下一已记录交易日的连板延续结果
     getLeaderCandidateBacktest: publicProcedure
-      .input(z.object({
-        observationDays: z.union([z.literal(1), z.literal(2)]).default(1),
-        minScore: z.number().int().min(0).max(100).optional(),
-        realistic: z.object({
-          initialCapital: z.number().positive().max(100000000).optional(),
-          maxPositions: z.number().int().min(1).max(100).optional(),
-          commissionRate: z.number().min(0).max(0.01).optional(),
-          stampDutyRate: z.number().min(0).max(0.01).optional(),
-          transferFeeRate: z.number().min(0).max(0.01).optional(),
-          slippageBps: z.number().min(0).max(1000).optional(),
-          lotSize: z.number().int().min(1).max(10000).optional(),
-          blockLimitUpBuys: z.boolean().optional(),
-          blockLimitDownSells: z.boolean().optional(),
-          enableOneWordLimitDownProbability: z.boolean().optional(),
-          oneWordLimitDownSellProbability: z.number().min(0).max(100).optional(),
-          positionSizingStrategy: z.enum(["equal", "scoreWeighted", "fixedPercent"]).optional(),
-          fixedPositionPercent: z.number().min(1).max(100).optional(),
-          trailingProfitActivationPercent: z.number().min(0).max(100).optional(),
-          trailingDrawdownPercent: z.number().min(0).max(100).optional(),
-          stopLossPercent: z.number().min(0).max(100).optional(),
-          strongHoldMinReturn: z.number().min(0).max(100).optional(),
-          maxHoldingDays: z.number().int().min(2).max(30).optional(),
-          minimumExpectedOpenChangePercent: z.number().min(-50).max(100).optional(),
-        }).optional(),
-        downsideRisk: z.object({
-          observationDays: z.number().int().min(2).max(10).optional(),
-          mediumDownsidePercent: z.number().min(1).max(50).optional(),
-          highDownsidePercent: z.number().min(1).max(50).optional(),
-          penaltyWeight: z.number().min(0).max(1).optional(),
-          autoTunePenaltyWeight: z.boolean().optional(),
-          hardRiskThreshold: z.number().min(0).max(100).optional(),
-          rollingTrainTradingDays: z.number().int().min(30).max(150).optional(),
-          rollingValidationTradingDays: z.number().int().min(10).max(60).optional(),
-        }).optional(),
-      }).optional())
+      .input(backtestOptionsSchema.optional())
       .query(async ({ input }) => {
         return await getLeaderCandidateBacktest(input);
+      }),
+
+    // 保存一次回测（参数 + 完整结果），供历史回顾与多组对比
+    saveBacktestRun: protectedProcedure
+      .input(backtestOptionsSchema)
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可保存回测结果" });
+        }
+        const result = await getLeaderCandidateBacktest(input);
+        const id = await saveBacktestRun(input, result);
+        return { id };
+      }),
+
+    // 列出已保存回测（摘要级）
+    listBacktestRuns: publicProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(200).optional() }).optional())
+      .query(async ({ input }) => {
+        return await listBacktestRuns(input?.limit ?? 50);
+      }),
+
+    // 读取单条已保存回测的完整结果
+    getBacktestRun: publicProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        return await getBacktestRun(input.id);
       }),
 
     // 管理员手动触发首轮历史回填或最近交易日补齐，外部行情密钥仅保留在服务端。
@@ -1007,6 +1069,122 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可同步外部日线行情" });
         }
         return await syncCandidateDailyPricesForDate(input.date, 10, input.stockCodes);
+      }),
+
+    // 按日期范围（单日或区间）同步日线行情，返回每个交易日的成功/失败明细
+    syncStockPricesByDateRange: protectedProcedure
+      .input(z.object({
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可同步外部日线行情" });
+        }
+        if (input.startDate > input.endDate) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "起始日期不能晚于结束日期" });
+        }
+        const result = await syncCandidateDailyPricesForDateRange(input.startDate, input.endDate);
+        const allFailed = result.targetTradingDates > 0 && result.savedPriceRows === 0 && result.failedDates.length === result.targetTradingDates;
+        const status = allFailed ? "failed" : result.savedPriceRows > 0 ? "success" : "empty";
+        const operationLogId = await beginOperationLog({
+          operationType: "date_refresh",
+          status,
+          requestedDate: input.startDate,
+          createdBy: ctx.user.id,
+          refreshedCount: result.savedPriceRows,
+          message: `按日期范围同步：${input.startDate} ~ ${input.endDate}，覆盖 ${result.targetTradingDates} 个交易日，保存 ${result.savedPriceRows} 条，缺失 ${result.missingPricePairs} 条${result.failedDates.length > 0 ? `，失败日期 ${result.failedDates.join(", ")}` : ""}`,
+        });
+        return { ...result, operationLogId };
+      }),
+
+    // 用腾讯行情按代码反查真实名称，供人工校正前验证代码是否正确
+    lookupStockInfo: publicProcedure
+      .input(z.object({ code: z.string() }))
+      .mutation(async ({ input }) => {
+        const tsCode = normalizeStockCode(input.code);
+        const info = await lookupStockByTencent(tsCode);
+        return info ?? null;
+      }),
+
+    // 批量校正涨停记录的股票名称/代码（按旧代码+旧名称精确匹配，自动补全交易所后缀）
+    correctStockIdentity: protectedProcedure
+      .input(z.object({
+        fromCode: z.string(),
+        fromName: z.string(),
+        toCode: z.string(),
+        toName: z.string(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可校正股票名称与代码" });
+        }
+        const result = await correctLimitUpStockIdentity(input);
+        if (!result.ok) {
+          const details = result.conflicts
+            .map((conflict) => `${conflict.limitUpDate}（已有 ${conflict.existingNames.join("、")}）`)
+            .join("；");
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `校正会与以下涨停日期已有记录冲突，请先处理重复记录再重试：${details}`,
+          });
+        }
+        return { updatedRows: result.updatedRows, dates: result.dates };
+      }),
+
+    // 读取已记录的停牌窗口（供页面展示与人工撤销）
+    listSuspensionWindows: publicProcedure.query(async () => {
+      return await getStockSuspensionWindows();
+    }),
+
+    // 用 Tushare 个股日线反推停牌窗口并落库（管理员）
+    inferStockSuspension: protectedProcedure
+      .input(z.object({
+        stockCodes: z.array(z.string()).min(1),
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可反推停牌窗口" });
+        }
+        return await inferStockSuspensionWindows(input.stockCodes, input.startDate, input.endDate);
+      }),
+
+    // 人工标记停牌区间（管理员，兜底推断不可靠的情况）
+    markStockSuspension: protectedProcedure
+      .input(z.object({
+        stockCode: z.string(),
+        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可标记停牌区间" });
+        }
+        if (input.startDate > input.endDate) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "停牌起始日期不能晚于结束日期" });
+        }
+        const stockCode = normalizeStockCode(input.stockCode);
+        await upsertSuspensionWindows([{
+          stockCode,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          source: "manual",
+          note: input.note ?? null,
+        }]);
+        return await getStockSuspensionWindows([stockCode]);
+      }),
+
+    // 删除停牌窗口（管理员，撤销误标或已复牌的窗口）
+    deleteStockSuspension: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可删除停牌窗口" });
+        }
+        return { deleted: await deleteSuspensionWindow(input.id) };
       }),
 
     // 获取每日最高连板趋势及对应股票名称

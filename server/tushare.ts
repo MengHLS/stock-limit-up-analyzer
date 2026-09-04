@@ -3,8 +3,10 @@ export type TushareDailyPrice = {
   tradeDate: string;
   openPrice: number;
   closePrice: number;
+  highPrice: number;
   lowPrice: number;
   amount: number;
+  volume: number;
   preClosePrice: number;
 };
 
@@ -74,7 +76,7 @@ export function parseTushareDailyPrices(payload: TusharePayload): TushareDailyPr
   const fields = payload.data?.fields ?? [];
   const items = payload.data?.items ?? [];
   const indexByField = new Map(fields.map((field, index) => [field, index]));
-  const requiredFields = ["ts_code", "trade_date", "open", "close", "low", "amount", "pre_close"];
+  const requiredFields = ["ts_code", "trade_date", "open", "close", "high", "low", "amount", "vol", "pre_close"];
   for (const field of requiredFields) {
     if (!indexByField.has(field)) throw new Error(`Tushare daily 返回缺少字段：${field}`);
   }
@@ -87,8 +89,10 @@ export function parseTushareDailyPrices(payload: TusharePayload): TushareDailyPr
       tradeDate,
       openPrice: requiredNumber(item[indexByField.get("open")!], "open", stockCode, tradeDate),
       closePrice: requiredNumber(item[indexByField.get("close")!], "close", stockCode, tradeDate),
+      highPrice: requiredNumber(item[indexByField.get("high")!], "high", stockCode, tradeDate),
       lowPrice: requiredNumber(item[indexByField.get("low")!], "low", stockCode, tradeDate),
       amount: nonNegativeNumber(item[indexByField.get("amount")!], "amount", stockCode, tradeDate),
+      volume: nonNegativeNumber(item[indexByField.get("vol")!], "vol", stockCode, tradeDate),
       preClosePrice: requiredNumber(item[indexByField.get("pre_close")!], "pre_close", stockCode, tradeDate),
     };
   });
@@ -107,7 +111,7 @@ export async function fetchTushareDailyPricesByDate(tradeDate: string): Promise<
         api_name: "daily",
         token,
         params: { trade_date: toTushareDate(tradeDate) },
-        fields: "ts_code,trade_date,open,close,low,amount,pre_close",
+        fields: "ts_code,trade_date,open,close,high,low,amount,vol,pre_close",
       }),
     });
     if (!response.ok) throw new Error(`Tushare daily 网络请求失败：HTTP ${response.status}`);
@@ -136,6 +140,78 @@ export async function fetchTushareDailyPricesByDate(tradeDate: string): Promise<
     }
   }
   throw lastError instanceof Error ? lastError : new Error("Tushare daily 网络请求失败");
+}
+
+/**
+ * 获取单只股票在区间内实际有成交的交易日（ISO 日期升序）。
+ * 与市场交易日历相减即得该股的停牌窗口，是识别"停牌缺失"的可靠依据。
+ * 单次调用即可覆盖一只股票的全历史，适合对疑似停牌的少量股票做定点核查。
+ */
+export async function fetchTushareStockTradeDates(tsCode: string, startDate: string, endDate: string): Promise<string[]> {
+  const token = process.env.TUSHARE_TOKEN;
+  if (!token) throw new Error("未配置 TUSHARE_TOKEN，无法获取个股成交日期");
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await fetch(TUSHARE_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          api_name: "daily",
+          token,
+          params: {
+            ts_code: tsCode,
+            start_date: toTushareDate(startDate),
+            end_date: toTushareDate(endDate),
+          },
+          fields: "ts_code,trade_date",
+        }),
+      });
+      if (!response.ok) throw new Error(`Tushare 个股成交日期网络请求失败：HTTP ${response.status}`);
+      const payload = await response.json() as TusharePayload;
+      if (payload.code !== 0) throw new Error(`Tushare 个股成交日期请求失败：${payload.msg || `错误码 ${payload.code ?? "未知"}`}`);
+      const fields = payload.data?.fields ?? [];
+      const items = payload.data?.items ?? [];
+      const dateIndex = fields.indexOf("trade_date");
+      if (dateIndex < 0) throw new Error("Tushare 个股成交日期返回缺少 trade_date 字段");
+      return Array.from(new Set(items.map((item) => toIsoDate(String(item[dateIndex])))))
+        .sort((left, right) => left.localeCompare(right));
+    } catch (error) {
+      lastError = error;
+      if (isTushareRateLimitError(error)) {
+        // 限频：等待 60 秒后仅再试一次，仍失败则抛错让上层中止，避免对同一股票反复请求。
+        await new Promise((resolve) => setTimeout(resolve, 60_000));
+        try {
+          const response = await fetch(TUSHARE_API_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              api_name: "daily",
+              token,
+              params: { ts_code: tsCode, start_date: toTushareDate(startDate), end_date: toTushareDate(endDate) },
+              fields: "ts_code,trade_date",
+            }),
+          });
+          if (!response.ok) throw new Error(`Tushare 个股成交日期网络请求失败：HTTP ${response.status}`);
+          const payload = await response.json() as TusharePayload;
+          if (payload.code !== 0) throw new Error(`Tushare 个股成交日期请求失败：${payload.msg || `错误码 ${payload.code ?? "未知"}`}`);
+          const fields = payload.data?.fields ?? [];
+          const items = payload.data?.items ?? [];
+          const dateIndex = fields.indexOf("trade_date");
+          if (dateIndex < 0) throw new Error("Tushare 个股成交日期返回缺少 trade_date 字段");
+          return Array.from(new Set(items.map((item) => toIsoDate(String(item[dateIndex])))))
+            .sort((left, right) => left.localeCompare(right));
+        } catch (finalError) {
+          throw new Error(`Tushare 个股成交日期频率限制，请稍后重试：${finalError instanceof Error ? finalError.message : String(finalError)}`);
+        }
+      }
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) break;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Tushare 个股成交日期请求失败");
 }
 
 /** 获取交易所实际开市日期，用于信号后的连续交易日覆盖，避免用自然日或涨停记录日期替代交易日历。 */

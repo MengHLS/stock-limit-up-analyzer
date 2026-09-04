@@ -5,14 +5,41 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/lib/trpc";
 import { normalizeLimitUpTime } from "@shared/limitUpTime";
-import { ArrowLeft, TrendingUp, Calendar, BarChart3, PieChart, Loader2 } from "lucide-react";
-import { Link } from "wouter";
+import { TrendingUp, Calendar, BarChart3, PieChart, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
+function formatSyncAt(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export default function MarketPage() {
+  const utils = trpc.useUtils();
   const { data: dailyStats, isLoading: statsLoading } = trpc.limitUp.getDailyStats.useQuery();
   const { data: sectorDistribution, isLoading: sectorLoading } = trpc.limitUp.getSectorDistribution.useQuery();
-  const { data: limitUpWithMarketData, isLoading: marketDataLoading } = trpc.market.getLimitUpWithMarketData.useQuery({ days: 30 });
+  const { data: limitUpWithMarketData, isLoading: marketDataLoading } = trpc.market.getLimitUpWithMarketData.useQuery({ days: 30 }, { refetchInterval: 300_000 });
+
+  const { data: syncStatus } = trpc.market.getSyncStatus.useQuery(undefined, {
+    refetchInterval: 60_000,
+  });
+
+  const syncNowMutation = trpc.market.syncNow.useMutation({
+    onSuccess: (result) => {
+      if (result.ok) {
+        toast.success(`大盘数据已同步：成交额 ${result.turnoverYi} 亿、两融余额 ${result.marginBalanceYi} 亿`);
+      } else {
+        toast.warning(result.skipped || "同步已跳过");
+      }
+      void utils.market.getSyncStatus.invalidate();
+      void utils.market.getLimitUpWithMarketData.invalidate();
+    },
+    onError: (error) => {
+      toast.error(`同步失败：${error.message}`);
+    },
+  });
 
   const isLoading = statsLoading || sectorLoading || marketDataLoading;
 
@@ -60,24 +87,35 @@ export default function MarketPage() {
   const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center">
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              返回首页
-            </Button>
-          </Link>
-          <div className="ml-4 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            <h1 className="text-lg font-semibold">大盘分析</h1>
-          </div>
+    <div className="container py-6 max-w-7xl">
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-5 w-5" />
+          <h1 className="text-lg font-semibold">大盘分析</h1>
         </div>
-      </header>
-
-      <main className="container py-8 max-w-7xl">
+        <div className="flex items-center gap-3">
+          {syncStatus?.hasTodayData ? (
+            <span className="flex items-center gap-1 text-xs text-emerald-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              今日数据已就绪（{syncStatus.today}）
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {syncStatus?.lastSync ? `上次同步 ${formatSyncAt(syncStatus.lastSync.at)}` : "尚未自动同步"}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => syncNowMutation.mutate()}
+            disabled={syncNowMutation.isPending}
+          >
+            {syncNowMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            立即同步
+          </Button>
+        </div>
+      </div>
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -260,7 +298,6 @@ export default function MarketPage() {
             </Tabs>
           </div>
         )}
-      </main>
     </div>
   );
 }

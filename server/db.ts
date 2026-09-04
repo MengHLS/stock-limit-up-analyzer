@@ -1,6 +1,7 @@
-import { eq, desc, like, or, sql, gte, count, and } from "drizzle-orm";
+import { eq, desc, like, or, sql, gte, count, and, inArray, notInArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { lte } from "drizzle-orm";
+import { normalizeStockCode } from "./stockIdentity";
 import { 
   InsertUser, 
   users, 
@@ -23,7 +24,12 @@ import {
   SentimentAlert,
   operationLogs,
   InsertOperationLog,
-  OperationLog
+  OperationLog,
+  stockSuspensionWindows,
+  InsertStockSuspensionWindow,
+  backtestRuns,
+  InsertBacktestRun,
+  BacktestRun,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
@@ -32,10 +38,14 @@ import {
   buildLeaderCandidateBacktest,
   buildLeaderCandidates,
   buildLeaderCandidateDailyPriceMap,
+  type LeaderCandidateBacktestContext,
   type LeaderCandidateBacktestOptions,
+  type LeaderCandidateBacktestResult,
   type LeaderCandidateDailyPrice,
   type LeaderCandidateDailyPriceCoverage,
+  type LeaderCandidateSourceRecord,
 } from './leaderCandidates';
+import { TTLCache, stableHash } from './backtestCache';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
 import { parseStoredMarketYi } from './marketFactors';
 
@@ -645,7 +655,7 @@ export async function deleteMarketData(id: number): Promise<boolean> {
 
 // ==================== Stock Daily Price Functions ====================
 
-export type StockDailyPriceUpsert = Pick<InsertStockDailyPrice, "stockCode" | "tradeDate" | "openPrice" | "closePrice" | "lowPrice" | "amount" | "preClosePrice" | "source">;
+export type StockDailyPriceUpsert = Pick<InsertStockDailyPrice, "stockCode" | "tradeDate" | "openPrice" | "closePrice" | "highPrice" | "lowPrice" | "amount" | "volume" | "preClosePrice" | "source">;
 
 /** 为候选池价格同步返回最小涨停记录集合。 */
 export async function getLimitUpRecordsForStockPriceSync(): Promise<Array<{ stockCode: string; limitUpDate: string }>> {
@@ -703,6 +713,198 @@ export async function getStockDailyPricePairs(): Promise<Set<string>> {
   return new Set(rows.map((row) => `${row.stockCode}|${row.tradeDate}`));
 }
 
+// ==================== Stock Suspension Window Functions ====================
+
+export type SuspensionWindowInput = {
+  stockCode: string;
+  startDate: string;
+  endDate: string;
+  source: "tushare-daily-infer" | "manual";
+  note?: string | null;
+};
+
+/** 将同一股票同一来源下重叠的停牌区间合并为最小覆盖区间。 */
+export function mergeSuspensionWindows(windows: Array<{ startDate: string; endDate: string }>): Array<{ startDate: string; endDate: string }> {
+  if (windows.length === 0) return [];
+  const sorted = [...windows].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+  const merged: Array<{ startDate: string; endDate: string }> = [];
+  for (const window of sorted) {
+    const last = merged.at(-1);
+    if (last && window.startDate <= last.endDate) {
+      if (window.endDate > last.endDate) last.endDate = window.endDate;
+    } else {
+      merged.push({ startDate: window.startDate, endDate: window.endDate });
+    }
+  }
+  return merged;
+}
+
+/** 合并重叠停牌窗口并保留各自备注（合并区间时优先保留已有非空备注）。 */
+function mergeSuspensionWindowsWithNote(windows: Array<{ startDate: string; endDate: string; note: string | null }>): Array<{ startDate: string; endDate: string; note: string | null }> {
+  if (windows.length === 0) return [];
+  const sorted = [...windows].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+  const merged: Array<{ startDate: string; endDate: string; note: string | null }> = [];
+  for (const window of sorted) {
+    const last = merged.at(-1);
+    if (last && window.startDate <= last.endDate) {
+      if (window.endDate > last.endDate) last.endDate = window.endDate;
+      if (!last.note && window.note) last.note = window.note;
+    } else {
+      merged.push({ startDate: window.startDate, endDate: window.endDate, note: window.note });
+    }
+  }
+  return merged;
+}
+
+/**
+ * 按「股票 + 来源」分组写入停牌窗口：先删除该股票该来源的旧窗口，再写入合并后的窗口，
+ * 使推断结果可被幂等覆盖，同时不误删另一来源（如人工标记）的窗口。
+ */
+export async function upsertSuspensionWindows(rows: SuspensionWindowInput[]): Promise<number> {
+  const db = await getDb();
+  if (!db || rows.length === 0) return 0;
+  const groups = new Map<string, SuspensionWindowInput[]>();
+  for (const row of rows) {
+    const key = `${row.stockCode}::${row.source}`;
+    const list = groups.get(key) ?? [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  let total = 0;
+  for (const [key, list] of Array.from(groups.entries())) {
+    const [stockCode, source] = key.split("::") as [string, SuspensionWindowInput["source"]];
+    const merged = mergeSuspensionWindowsWithNote(list.map(({ startDate, endDate, note }) => ({ startDate, endDate, note: note ?? null })));
+    await db.delete(stockSuspensionWindows)
+      .where(and(eq(stockSuspensionWindows.stockCode, stockCode), eq(stockSuspensionWindows.source, source)));
+    if (merged.length > 0) {
+      await db.insert(stockSuspensionWindows).values(merged.map(({ startDate, endDate, note }) => ({
+        stockCode,
+        startDate,
+        endDate,
+        source,
+        note,
+      })));
+    }
+    total += merged.length;
+  }
+  return total;
+}
+
+/** 读取停牌窗口；可选按股票代码过滤。 */
+export async function getStockSuspensionWindows(codes?: string[]): Promise<Array<{ id: number; stockCode: string; startDate: string; endDate: string; source: "tushare-daily-infer" | "manual"; note: string | null }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const query = db.select({
+    id: stockSuspensionWindows.id,
+    stockCode: stockSuspensionWindows.stockCode,
+    startDate: stockSuspensionWindows.startDate,
+    endDate: stockSuspensionWindows.endDate,
+    source: stockSuspensionWindows.source,
+    note: stockSuspensionWindows.note,
+  }).from(stockSuspensionWindows);
+  const rows = codes && codes.length > 0
+    ? await query.where(inArray(stockSuspensionWindows.stockCode, codes)).orderBy(stockSuspensionWindows.stockCode, stockSuspensionWindows.startDate)
+    : await query.orderBy(stockSuspensionWindows.stockCode, stockSuspensionWindows.startDate);
+  return rows.map((row) => ({
+    id: row.id,
+    stockCode: row.stockCode,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    source: row.source,
+    note: row.note,
+  }));
+}
+
+/** 删除指定 id 的停牌窗口（供人工撤销）。 */
+export async function deleteSuspensionWindow(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.delete(stockSuspensionWindows).where(eq(stockSuspensionWindows.id, id));
+  return result[0].affectedRows > 0;
+}
+
+/** 将停牌窗口展开为「股票代码 → 停牌交易日集合」，仅保留落在市场交易日历内的日期。 */
+export function expandSuspendedDatesByStock(
+  windows: Array<{ stockCode: string; startDate: string; endDate: string }>,
+  tradingDates: string[],
+): Map<string, Set<string>> {
+  const byStock = new Map<string, Set<string>>();
+  for (const window of windows) {
+    const set = byStock.get(window.stockCode) ?? new Set<string>();
+    for (const date of tradingDates) {
+      if (date >= window.startDate && date <= window.endDate) set.add(date);
+    }
+    byStock.set(window.stockCode, set);
+  }
+  return byStock;
+}
+
+export type CorrectLimitUpStockIdentityResult =
+  | { ok: true; updatedRows: number; dates: string[] }
+  | { ok: false; conflicts: Array<{ limitUpDate: string; existingNames: string[] }> };
+
+/**
+ * 批量校正涨停记录的名称/代码（按旧代码+旧名称精确定位，避免误伤同代码下的其他股票）。
+ * - fromName 必须精确匹配，防止一个代码下混有多只不同股票时误改；
+ * - toCode 会自动规范化后缀（6→SH、0/3→SZ、4/8/92→BJ）；
+ * - 若新代码在相同涨停日已存在其他记录，返回 conflicts 交由上层提示，不做更新（防重复）。
+ */
+export async function correctLimitUpStockIdentity(params: {
+  fromCode: string;
+  fromName: string;
+  toCode: string;
+  toName: string;
+}): Promise<CorrectLimitUpStockIdentityResult> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("数据库不可用，无法校正");
+  }
+  const toCode = normalizeStockCode(params.toCode);
+  const toName = params.toName.trim();
+  if (!toName) throw new Error("股票名称不能为空");
+
+  const targets = await db.select({ id: limitUpRecords.id, limitUpDate: limitUpRecords.limitUpDate })
+    .from(limitUpRecords)
+    .where(and(eq(limitUpRecords.stockCode, params.fromCode), eq(limitUpRecords.stockName, params.fromName)));
+  if (targets.length === 0) {
+    throw new Error(`未找到待校正记录：${params.fromCode} ${params.fromName}`);
+  }
+  const targetIds = targets.map((target) => target.id);
+  const dates = Array.from(new Set(targets.map((target) => String(target.limitUpDate))));
+
+  // 冲突检测：目标代码在相同涨停日已有其他记录（非本次待改行）
+  const conflicted = await db.select({
+    limitUpDate: limitUpRecords.limitUpDate,
+    stockName: limitUpRecords.stockName,
+  }).from(limitUpRecords)
+    .where(and(
+      eq(limitUpRecords.stockCode, toCode),
+      inArray(limitUpRecords.limitUpDate, dates),
+      notInArray(limitUpRecords.id, targetIds),
+    ));
+  if (conflicted.length > 0) {
+    const byDate = new Map<string, string[]>();
+    for (const row of conflicted) {
+      const key = String(row.limitUpDate);
+      const list = byDate.get(key) ?? [];
+      list.push(row.stockName ?? "-");
+      byDate.set(key, list);
+    }
+    return {
+      ok: false,
+      conflicts: Array.from(byDate.entries())
+        .sort(([left], [right]) => right.localeCompare(left))
+        .map(([limitUpDate, existingNames]) => ({ limitUpDate, existingNames })),
+    };
+  }
+
+  await db.update(limitUpRecords)
+    .set({ stockCode: toCode, stockName: toName })
+    .where(inArray(limitUpRecords.id, targetIds));
+
+  return { ok: true, updatedRows: targetIds.length, dates };
+}
+
 /** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格。 */
 export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Promise<number> {
   const db = await getDb();
@@ -715,8 +917,10 @@ export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Pro
       set: {
         openPrice: sql`VALUES(\`openPrice\`)`,
         closePrice: sql`VALUES(\`closePrice\`)`,
+        highPrice: sql`VALUES(\`highPrice\`)`,
         lowPrice: sql`VALUES(\`lowPrice\`)`,
         amount: sql`VALUES(\`amount\`)`,
+        volume: sql`VALUES(\`volume\`)`,
         preClosePrice: sql`VALUES(\`preClosePrice\`)`,
         source: sql`VALUES(\`source\`)`,
         sourceUpdatedAt: new Date(),
@@ -748,24 +952,29 @@ export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, Lea
     tradeDate: stockDailyPrices.tradeDate,
     openPrice: stockDailyPrices.openPrice,
     closePrice: stockDailyPrices.closePrice,
+    highPrice: stockDailyPrices.highPrice,
     lowPrice: stockDailyPrices.lowPrice,
     amount: stockDailyPrices.amount,
+    volume: stockDailyPrices.volume,
+    preClosePrice: stockDailyPrices.preClosePrice,
   }).from(stockDailyPrices);
 
   return buildLeaderCandidateDailyPriceMap(rows);
 }
 
-/** 返回候选回测使用的行情覆盖状态，供研究页面提示低价与成交额的实际回填进度。 */
+/** 返回候选回测使用的行情覆盖状态，供研究页面提示高低价与成交额/量的实际回填进度。 */
 export async function getLeaderCandidateDailyPriceCoverage(): Promise<LeaderCandidateDailyPriceCoverage> {
   const db = await getDb();
-  if (!db) return { rowCount: 0, stockCount: 0, startDate: null, endDate: null, lowPriceCount: 0, amountCount: 0 };
+  if (!db) return { rowCount: 0, stockCount: 0, startDate: null, endDate: null, highPriceCount: 0, lowPriceCount: 0, amountCount: 0, volumeCount: 0 };
   const rows = await db.select({
     rowCount: sql<number>`COUNT(*)`,
     stockCount: sql<number>`COUNT(DISTINCT ${stockDailyPrices.stockCode})`,
     startDate: sql<string | null>`MIN(${stockDailyPrices.tradeDate})`,
     endDate: sql<string | null>`MAX(${stockDailyPrices.tradeDate})`,
+    highPriceCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.highPrice} IS NOT NULL THEN 1 ELSE 0 END)`,
     lowPriceCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.lowPrice} IS NOT NULL THEN 1 ELSE 0 END)`,
     amountCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.amount} IS NOT NULL THEN 1 ELSE 0 END)`,
+    volumeCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.volume} IS NOT NULL THEN 1 ELSE 0 END)`,
   }).from(stockDailyPrices);
   const row = rows[0];
   return {
@@ -773,8 +982,10 @@ export async function getLeaderCandidateDailyPriceCoverage(): Promise<LeaderCand
     stockCount: Number(row?.stockCount ?? 0),
     startDate: row?.startDate ?? null,
     endDate: row?.endDate ?? null,
+    highPriceCount: Number(row?.highPriceCount ?? 0),
     lowPriceCount: Number(row?.lowPriceCount ?? 0),
     amountCount: Number(row?.amountCount ?? 0),
+    volumeCount: Number(row?.volumeCount ?? 0),
   };
 }
 
@@ -1421,18 +1632,41 @@ export async function getLeaderCandidates() {
     tradeDate: stockDailyPrices.tradeDate,
     openPrice: stockDailyPrices.openPrice,
     closePrice: stockDailyPrices.closePrice,
+    highPrice: stockDailyPrices.highPrice,
     lowPrice: stockDailyPrices.lowPrice,
     amount: stockDailyPrices.amount,
+    volume: stockDailyPrices.volume,
+    preClosePrice: stockDailyPrices.preClosePrice,
   }).from(stockDailyPrices).where(eq(stockDailyPrices.tradeDate, latestDate));
   const priceByStockDate = buildLeaderCandidateDailyPriceMap(signalDayPrices);
   const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
   return buildLeaderCandidates(records, { phaseByDate, priceByStockDate, marketFactorsByDate });
 }
 
-/** 获取基于历史候选池的T+1连板延续回测结果。 */
-export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktestOptions = {}) {
+type BacktestBaseContext = {
+  records: LeaderCandidateSourceRecord[];
+  context: LeaderCandidateBacktestContext;
+};
+
+let backtestBaseContextCache: { value: BacktestBaseContext; expiresAt: number } | null = null;
+const BACKTEST_BASE_CONTEXT_TTL_MS = 3 * 60 * 1000;
+const backtestResultCache = new TTLCache<LeaderCandidateBacktestResult>(5 * 60 * 1000, 64);
+
+/**
+ * 加载回测所需的「仅依赖 DB、不依赖参数」的中间数据，单独物化并短 TTL 缓存。
+ * 这样参数变化时只需重算模拟部分，不必每次全量拉涨停记录 + 11 万行日线 + 情绪周期 + 停牌窗口。
+ */
+async function loadBacktestBaseContext(): Promise<BacktestBaseContext> {
+  const now = Date.now();
+  if (backtestBaseContextCache && now < backtestBaseContextCache.expiresAt) {
+    return backtestBaseContextCache.value;
+  }
   const db = await getDb();
-  if (!db) return buildLeaderCandidateBacktest([], options);
+  if (!db) {
+    const empty: BacktestBaseContext = { records: [], context: {} };
+    backtestBaseContextCache = { value: empty, expiresAt: now + BACKTEST_BASE_CONTEXT_TTL_MS };
+    return empty;
+  }
 
   const records = await db.select({
     stockCode: limitUpRecords.stockCode,
@@ -1450,5 +1684,120 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
   const dailyPriceCoverage = await getLeaderCandidateDailyPriceCoverage();
   const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
   const tradingDates = Array.from(new Set(Array.from(priceByStockDate.keys()).map((key) => key.split("::").at(-1)!))).sort();
-  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage, marketFactorsByDate });
+  const suspendedDatesByStock = expandSuspendedDatesByStock(await getStockSuspensionWindows(), tradingDates);
+
+  const value: BacktestBaseContext = {
+    records,
+    context: { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage, marketFactorsByDate, suspendedDatesByStock },
+  };
+  backtestBaseContextCache = { value, expiresAt: now + BACKTEST_BASE_CONTEXT_TTL_MS };
+  return value;
+}
+
+/** 获取基于历史候选池的T+1连板延续回测结果（按参数哈希做结果缓存）。 */
+export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktestOptions = {}): Promise<LeaderCandidateBacktestResult> {
+  const cacheKey = stableHash(options);
+  const cached = backtestResultCache.get(cacheKey);
+  if (cached) return cached;
+  const { records, context } = await loadBacktestBaseContext();
+  const result = buildLeaderCandidateBacktest(records, options, context);
+  backtestResultCache.set(cacheKey, result);
+  return result;
+}
+
+/** 从回测结果提取扁平关键指标，供历史列表页快速展示（不承载完整明细）。 */
+function extractBacktestSummary(result: LeaderCandidateBacktestResult) {
+  return {
+    observationDays: result.observationDays,
+    appliedMinScore: result.appliedMinScore,
+    totalSamples: result.totalSamples,
+    successCount: result.successCount,
+    successRate: result.successRate,
+    averageClosePremium: result.premium.averageClosePremium,
+    tPlus1To2AverageReturn: result.tPlus1CloseToTPlus2Close.averageReturn,
+    realisticTotalReturn: result.realisticSimulation.totalReturn,
+    realisticMaxDrawdown: result.realisticSimulation.maxDrawdown,
+    realisticWinRate: result.realisticSimulation.winRate,
+    realisticTradeCount: result.realisticSimulation.tradeCount,
+  };
+}
+
+export type BacktestRunSummary = {
+  id: number;
+  createdAt: string | null;
+  summary: Record<string, unknown> | null;
+};
+
+export type SavedBacktestRun = {
+  id: number;
+  createdAt: string | null;
+  options: LeaderCandidateBacktestOptions;
+  summary: Record<string, unknown> | null;
+  result: LeaderCandidateBacktestResult;
+};
+
+function timestampToIso(value: Date | string | null): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+/** 保存一次回测（参数 + 完整结果），返回记录 id。参数哈希作为去重/缓存键。 */
+export async function saveBacktestRun(options: LeaderCandidateBacktestOptions, result: LeaderCandidateBacktestResult): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const paramsJson = JSON.stringify(options);
+  const summary = extractBacktestSummary(result);
+  const inserted = await db.insert(backtestRuns).values({
+    paramsHash: stableHash(options),
+    paramsJson,
+    summaryJson: JSON.stringify(summary),
+    resultJson: JSON.stringify(result),
+  });
+  return Number(inserted[0].insertId);
+}
+
+/** 列出已保存的回测（摘要级，不含完整结果），按保存时间倒序。 */
+export async function listBacktestRuns(limit = 50): Promise<BacktestRunSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({
+    id: backtestRuns.id,
+    createdAt: backtestRuns.createdAt,
+    summaryJson: backtestRuns.summaryJson,
+  }).from(backtestRuns).orderBy(desc(backtestRuns.createdAt)).limit(limit);
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: timestampToIso(row.createdAt),
+    summary: row.summaryJson ? (JSON.parse(row.summaryJson) as Record<string, unknown>) : null,
+  }));
+}
+
+/** 读取单条已保存回测的完整结果。 */
+export async function getBacktestRun(id: number): Promise<SavedBacktestRun | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(backtestRuns).where(eq(backtestRuns.id, id));
+  const row = rows[0];
+  if (!row) return null;
+  let result: LeaderCandidateBacktestResult | null = null;
+  try {
+    result = JSON.parse(row.resultJson ?? "null") as LeaderCandidateBacktestResult;
+  } catch {
+    return null;
+  }
+  let options: LeaderCandidateBacktestOptions = {};
+  try {
+    options = JSON.parse(row.paramsJson ?? "{}") as LeaderCandidateBacktestOptions;
+  } catch {
+    options = {};
+  }
+  let summary: Record<string, unknown> | null = null;
+  try {
+    summary = row.summaryJson ? (JSON.parse(row.summaryJson) as Record<string, unknown>) : null;
+  } catch {
+    summary = null;
+  }
+  return { id: row.id, createdAt: timestampToIso(row.createdAt), options, summary, result };
 }

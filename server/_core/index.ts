@@ -8,9 +8,8 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { sdk } from "./sdk";
-import * as db from "../db";
 import { syncCandidateDailyPrices } from "../stockPriceSync";
-import { fetchMarketFactorSnapshot } from "../marketFactors";
+import { startMarketSyncScheduler, syncMarketDataOnce, syncMarketDataIfMissing } from "../marketSync";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -48,7 +47,7 @@ async function startServer() {
     })
   );
 
-  // 定时任务回调：自动获取大盘成交额与两融余额并写入数据库
+  // 定时任务回调：自动获取大盘成交额与两融余额并写入数据库（供外部 cron 平台调用）
   app.post("/api/scheduled/syncMarketData", async (req, res) => {
     try {
       const authUser = await sdk.authenticateRequest(req);
@@ -56,31 +55,13 @@ async function startServer() {
         return res.status(403).json({ error: "Unauthorized cron caller" });
       }
 
-      // 获取当前北京时间日期 (YYYY-MM-DD)
-      const now = new Date();
-      const formatter = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Shanghai',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      });
-      const todayStr = formatter.format(now);
-
-      try {
-        const snapshot = await fetchMarketFactorSnapshot(todayStr);
-        const saved = await db.upsertMarketData({
-          dataDate: todayStr,
-          turnover: String(snapshot.turnoverYi),
-          marginBalance: String(snapshot.marginBalanceYi),
-          note: "真实来源：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总",
-        });
-        console.log(`[MarketSync] Synced verified market data for ${todayStr}: turnover=${snapshot.turnoverYi}, marginBalance=${snapshot.marginBalanceYi}`);
-        return res.json({ ok: true, date: todayStr, data: saved, sources: snapshot.sources });
-      } catch (sourceError) {
-        const skipped = sourceError instanceof Error ? sourceError.message : String(sourceError);
-        console.warn(`[MarketSync] Skipped ${todayStr}; verified market sources are unavailable: ${skipped}`);
-        return res.json({ ok: true, skipped, date: todayStr });
+      const result = await syncMarketDataOnce();
+      if (result.ok) {
+        console.log(`[MarketSync] Synced verified market data for ${result.date}: turnover=${result.turnoverYi}, marginBalance=${result.marginBalanceYi}`);
+        return res.json({ ok: true, date: result.date, data: result, sources: result.sources });
       }
+      console.warn(`[MarketSync] Skipped ${result.date}; verified market sources are unavailable: ${result.skipped}`);
+      return res.json({ ok: true, skipped: result.skipped, date: result.date });
     } catch (error: any) {
       console.error("[MarketSync] Error in scheduled sync:", error);
       return res.status(500).json({
@@ -126,6 +107,14 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // 启动大盘数据盘后自动同步调度（北京时间 16:00 / 17:30，服务自身定时，不依赖外部 cron）。
+    startMarketSyncScheduler();
+    // 启动兜底：延迟片刻后，若今日（北京时间）尚无大盘数据则立即补同步一次。
+    setTimeout(() => {
+      void syncMarketDataIfMissing().catch((error) => {
+        console.error("[MarketSync] 启动补同步异常:", error);
+      });
+    }, 10_000);
   });
 }
 

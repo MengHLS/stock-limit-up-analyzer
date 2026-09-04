@@ -16,7 +16,6 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
-  ArrowLeft,
   Calendar,
   Sparkles,
   FileImage,
@@ -316,7 +315,7 @@ export default function UploadPage() {
   // 未登录状态
   if (!authLoading && !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex items-center justify-center py-20">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle>请先登录</CardTitle>
@@ -326,12 +325,6 @@ export default function UploadPage() {
             <Button asChild>
               <a href={getLoginUrl()}>登录</a>
             </Button>
-            <Link href="/">
-              <Button variant="outline" className="w-full">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                返回首页
-              </Button>
-            </Link>
           </CardContent>
         </Card>
       </div>
@@ -339,21 +332,8 @@ export default function UploadPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* 顶部导航 */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur">
-        <div className="container flex h-16 items-center">
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              返回首页
-            </Button>
-          </Link>
-        </div>
-      </header>
-
-      <main className="container py-8 max-w-4xl">
-        <div className="mb-8">
+    <div className="container py-6 max-w-4xl">
+      <div className="mb-8">
           <h1 className="text-2xl font-semibold tracking-tight">批量上传涨停复盘图片</h1>
           <p className="text-muted-foreground mt-1">
             支持一次选择多张图片，系统将依次识别其中的股票信息
@@ -670,7 +650,6 @@ export default function UploadPage() {
             </Card>
           )}
         </div>
-      </main>
     </div>
   );
 }

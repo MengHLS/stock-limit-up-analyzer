@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date, index, uniqueIndex } from "drizzle-orm/mysql-core";
+import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date, index, uniqueIndex, longtext } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -74,10 +74,14 @@ export const stockDailyPrices = mysqlTable("stock_daily_prices", {
   openPrice: varchar("openPrice", { length: 24 }).notNull(),
   /** 当日收盘价 */
   closePrice: varchar("closePrice", { length: 24 }).notNull(),
-  /** 当日最低价；用于持仓期最大不利波动研究。 */
+  /** 当日最高价；用于盘中限价买入与止盈成交模拟。 */
+  highPrice: varchar("highPrice", { length: 24 }),
+  /** 当日最低价；用于持仓期最大不利波动研究与盘中止损模拟。 */
   lowPrice: varchar("lowPrice", { length: 24 }),
   /** 当日成交额（Tushare daily 的 amount，单位千元）。 */
   amount: varchar("amount", { length: 32 }),
+  /** 当日成交量（Tushare daily 的 vol，单位手）。 */
+  volume: varchar("volume", { length: 32 }),
   /** 当日除权前收价 */
   preClosePrice: varchar("preClosePrice", { length: 24 }).notNull(),
   /** 行情来源，如 tushare */
@@ -246,3 +250,52 @@ export const sentimentAlerts = mysqlTable("sentiment_alerts", {
 
 export type SentimentAlert = typeof sentimentAlerts.$inferSelect;
 export type InsertSentimentAlert = typeof sentimentAlerts.$inferInsert;
+
+/**
+ * 股票停牌窗口表 - 记录个股在特定区间内无成交（停牌）的区间，供行情同步检查与回测识别"停牌缺失"与"真缺失"。
+ * 由 Tushare 个股日线反推（source=tushare-daily-infer）或人工标记（source=manual）写入。
+ */
+export const stockSuspensionWindows = mysqlTable("stock_suspension_windows", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 股票代码，如 600984.SH */
+  stockCode: varchar("stockCode", { length: 20 }).notNull(),
+  /** 停牌起始交易日（含） */
+  startDate: date("startDate", { mode: "string" }).notNull(),
+  /** 停牌结束交易日（含） */
+  endDate: date("endDate", { mode: "string" }).notNull(),
+  /** 来源：tushare-daily-infer（个股日线反推）或 manual（人工标记） */
+  source: mysqlEnum("source", ["tushare-daily-infer", "manual"]).notNull(),
+  /** 备注（如停牌原因） */
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  stockDateUnique: uniqueIndex("uq_suspension_stock_dates").on(table.stockCode, table.startDate, table.endDate),
+  stockIdx: index("idx_suspension_stock").on(table.stockCode),
+}));
+
+export type StockSuspensionWindow = typeof stockSuspensionWindows.$inferSelect;
+export type InsertStockSuspensionWindow = typeof stockSuspensionWindows.$inferInsert;
+
+/**
+ * 回测结果持久化表 - 保存用户手动保存的回测参数、摘要与完整结果，供历史回顾与多组对比。
+ * paramsHash 由参数 JSON 稳定哈希得到，可用于「相同参数直接复用历史结果」的缓存/去重。
+ */
+export const backtestRuns = mysqlTable("backtest_runs", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 参数 JSON 的 SHA-1 哈希，用于去重与快速命中 */
+  paramsHash: varchar("paramsHash", { length: 64 }).notNull(),
+  /** 回测参数快照（含观察天数/分数阈值/真实回测参数/下行风险参数） */
+  paramsJson: text("paramsJson").notNull(),
+  /** 摘要（扁平关键指标，供列表页快速展示） */
+  summaryJson: text("summaryJson"),
+  /** 完整回测结果（LeaderCandidateBacktestResult 序列化） */
+  resultJson: longtext("resultJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  paramsHashIdx: index("idx_backtest_runs_hash").on(table.paramsHash),
+  createdAtIdx: index("idx_backtest_runs_created").on(table.createdAt),
+}));
+
+export type BacktestRun = typeof backtestRuns.$inferSelect;
+export type InsertBacktestRun = typeof backtestRuns.$inferInsert;

@@ -6,7 +6,7 @@ import { CandidatePhaseFunnel } from "@/components/CandidatePhaseFunnel";
 import { CandidatePremiumChart } from "@/components/CandidatePremiumChart";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
-import { Activity, AlertTriangle, ArrowLeft, Crown, Loader2, RefreshCw, ShieldAlert, Sparkles, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, Crown, Loader2, RefreshCw, ShieldAlert, Sparkles, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 
@@ -144,34 +144,22 @@ export default function LeaderCandidatesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50/60 to-slate-50">
-      <header className="sticky top-0 z-50 border-b bg-white/85 backdrop-blur-xl">
-        <div className="container flex h-16 items-center">
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2">
-              <ArrowLeft className="h-4 w-4" />
-              返回首页
-            </Button>
-          </Link>
-          <div className="ml-4 flex items-center gap-2">
-            <Crown className="h-5 w-5 text-amber-600" />
-            <h1 className="text-lg font-semibold text-slate-800">龙头候选池</h1>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={syncHistoricalPrices} disabled={priceSyncMutation.isPending}>
-              {priceSyncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
-              回填历史行情
-            </Button>
-            <Button variant="outline" size="sm" className="gap-2" onClick={refreshAll} disabled={isFetching || backtestLoading}>
-            <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-            刷新数据
-            </Button>
-          </div>
+    <div className="container max-w-7xl py-6">
+      <div className="mb-4 flex items-center gap-2">
+        <Crown className="h-5 w-5 text-amber-600" />
+        <h1 className="text-lg font-semibold text-slate-800">龙头候选池</h1>
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={syncHistoricalPrices} disabled={priceSyncMutation.isPending}>
+            {priceSyncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+            回填历史行情
+          </Button>
+          <Button variant="outline" size="sm" className="gap-2" onClick={refreshAll} disabled={isFetching || backtestLoading}>
+          <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+          刷新数据
+          </Button>
         </div>
-      </header>
-
-      <main className="container max-w-7xl py-8">
-        <section className="mb-6 max-w-3xl">
+      </div>
+      <section className="mb-6 max-w-3xl">
           <p className="text-sm font-medium uppercase tracking-[0.18em] text-amber-600">Leader Watchlist</p>
           <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">主线中的重点观察候选</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -300,7 +288,6 @@ export default function LeaderCandidatesPage() {
             <p className="text-center text-xs text-slate-500">研究口径：默认仅统计主板股票，排除创业板、科创板和北交所；回测检验可选T+1或T+2涨停延续，不代表收益、价格表现或预测，候选评分是复盘辅助。</p>
           </div>
         )}
-      </main>
     </div>
   );
 }
