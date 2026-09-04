@@ -347,6 +347,12 @@ export default function Home() {
                     行情同步
                   </Button>
                 </Link>
+                <Link href="/stock-price-sync">
+                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-blue-50">
+                    <Database className="h-4 w-4" />
+                    行情检查
+                  </Button>
+                </Link>
                 <Link href="/upload">
                   <Button size="sm" className="gap-2 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 shadow-md">
                     <Upload className="h-4 w-4" />

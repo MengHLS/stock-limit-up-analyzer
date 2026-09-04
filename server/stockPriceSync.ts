@@ -1,6 +1,8 @@
 import {
   getLimitUpRecordsForStockPriceSync,
   getLimitUpRecordsForStockPriceSyncByDate,
+  getLeaderCandidateDailyPriceMap,
+  getStockDailyPriceTradeDates,
   getLimitUpRecordsForSyncCheck,
   getStockDailyPricePairs,
   upsertStockDailyPrices,
@@ -150,7 +152,8 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
     marketTradingDates = await fetchTushareTradingDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
   } catch (error) {
     console.warn(`[StockPriceSync] ${limitUpDate} 交易日历获取失败，降级为指定日期：`, error);
-    marketTradingDates = [limitUpDate];
+    marketTradingDates = await getStockDailyPriceTradeDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
+    if (marketTradingDates.length === 0) marketTradingDates = [limitUpDate];
   }
 
   const targets = buildStockPriceSyncTargets(records, marketTradingDates, futureTradingDayCount);
@@ -225,20 +228,102 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
   const empty = { targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [] as string[], dates: [] as string[] };
   if (plan.signalDates.length === 0) return { ...empty, ...plan };
 
-  let aggregate = empty;
-  for (const signalDate of plan.signalDates) {
-    const result = await syncCandidateDailyPricesForDate(signalDate, 5, plan.mode === "historical" ? plan.stockCodes : undefined);
-    aggregate = {
-      ...aggregate,
-      targetTradingDates: aggregate.targetTradingDates + result.targetTradingDates,
-      requestedStockDatePairs: aggregate.requestedStockDatePairs + result.requestedStockDatePairs,
-      savedPriceRows: aggregate.savedPriceRows + result.savedPriceRows,
-      missingPricePairs: aggregate.missingPricePairs + result.missingPricePairs,
-      failedDates: [...aggregate.failedDates, ...result.failedDates],
-      dates: [...aggregate.dates, ...result.dates],
-    };
+  // 近期上传必须把前几日涨停且仍处于T+5窗口的股票带到当前交易日，不能仅查询当前信号日。
+  const selectedRecords = records.filter((record) => plan.signalDates.includes(record.limitUpDate) && (plan.mode === "recent" || plan.stockCodes.includes(record.stockCode)));
+  const startDate = plan.signalDates[0]!;
+  const calendarEnd = new Date(`${plan.signalDates[plan.signalDates.length - 1]}T00:00:00Z`);
+  calendarEnd.setUTCDate(calendarEnd.getUTCDate() + 14);
+  let marketTradingDates: string[];
+  try {
+    marketTradingDates = await fetchTushareTradingDates(startDate, calendarEnd.toISOString().slice(0, 10));
+  } catch (error) {
+    console.warn(`[StockPriceSync] 上传补全交易日历获取失败，降级为候选日期：`, error);
+    marketTradingDates = await getStockDailyPriceTradeDates(startDate, calendarEnd.toISOString().slice(0, 10));
+    if (marketTradingDates.length === 0) marketTradingDates = Array.from(new Set(selectedRecords.map((record) => record.limitUpDate))).sort();
   }
-  return { ...aggregate, ...plan };
+  const targets = buildStockPriceSyncTargets(selectedRecords, marketTradingDates, 5);
+  let savedPriceRows = 0;
+  let missingPricePairs = 0;
+  const failedDates: string[] = [];
+  for (let index = 0; index < targets.length; index += TUSHARE_SYNC_CONCURRENCY) {
+    const batchResults = await Promise.all(targets.slice(index, index + TUSHARE_SYNC_CONCURRENCY).map(async (target) => {
+      try {
+        const requestedCodes = new Set(target.stockCodes);
+        const relevantRows = (await fetchTushareDailyPricesByDate(target.tradeDate)).filter((price) => requestedCodes.has(price.stockCode)).map((price) => ({ stockCode: price.stockCode, tradeDate: price.tradeDate, openPrice: String(price.openPrice), closePrice: String(price.closePrice), lowPrice: String(price.lowPrice), amount: String(price.amount), preClosePrice: String(price.preClosePrice), source: "tushare" } satisfies StockDailyPriceUpsert));
+        return { savedCount: await upsertStockDailyPrices(relevantRows), missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null as string | null };
+      } catch (error) {
+        console.warn(`[StockPriceSync] 上传补全跳过 ${target.tradeDate}：`, error);
+        return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate };
+      }
+    }));
+    for (const result of batchResults) { savedPriceRows += result.savedCount; missingPricePairs += result.missingCount; if (result.failedDate) failedDates.push(result.failedDate); }
+  }
+  return { targetTradingDates: targets.length, requestedStockDatePairs: targets.reduce((total, target) => total + target.stockCodes.length, 0), savedPriceRows, missingPricePairs, failedDates, dates: targets.map((target) => target.tradeDate), ...plan };
+}
+
+export type MissingStockPriceRequirement = {
+  stockCode: string;
+  signalDate: string;
+  requiredTradeDates: string[];
+  missingTradeDates: string[];
+  missingCount: number;
+};
+
+export function buildMissingStockPriceRequirements(
+  records: StockPriceSyncSourceRecord[],
+  priceKeys: ReadonlySet<string>,
+  marketTradingDates: string[],
+  futureTradingDayCount = 5,
+): MissingStockPriceRequirement[] {
+  const tradingDates = Array.from(new Set(marketTradingDates)).sort();
+  const indexByDate = new Map(tradingDates.map((date, index) => [date, index]));
+  return records.map((record) => {
+    const signalIndex = indexByDate.get(record.limitUpDate);
+    const requiredTradeDates = signalIndex === undefined
+      ? [record.limitUpDate]
+      : tradingDates.slice(signalIndex, signalIndex + futureTradingDayCount + 1);
+    const missingTradeDates = requiredTradeDates.filter((tradeDate) => !priceKeys.has(`${record.stockCode}::${tradeDate}`));
+    return { stockCode: record.stockCode, signalDate: record.limitUpDate, requiredTradeDates, missingTradeDates, missingCount: missingTradeDates.length };
+  }).filter((item) => item.missingCount > 0);
+}
+
+export async function getMissingStockPriceRequirements(filter?: { stockCode?: string; signalDate?: string }): Promise<MissingStockPriceRequirement[]> {
+  const allRecords = await getLimitUpRecordsForStockPriceSync();
+  const records = allRecords.filter((record) => (!filter?.stockCode || record.stockCode === filter.stockCode) && (!filter?.signalDate || record.limitUpDate === filter.signalDate));
+  if (records.length === 0) return [];
+  const dates = records.map((record) => record.limitUpDate).sort();
+  const end = new Date(`${dates[dates.length - 1]}T00:00:00Z`);
+  end.setUTCDate(end.getUTCDate() + 14);
+  let tradingDates: string[];
+  try {
+    tradingDates = await fetchTushareTradingDates(dates[0]!, end.toISOString().slice(0, 10));
+  } catch (error) {
+    console.warn("[StockPriceSync] 缺失检查交易日历获取失败，降级为候选日期：", error);
+    tradingDates = await getStockDailyPriceTradeDates(dates[0], end.toISOString().slice(0, 10));
+    if (tradingDates.length === 0) tradingDates = Array.from(new Set(dates));
+  }
+  const priceMap = await getLeaderCandidateDailyPriceMap();
+  const requirements = buildMissingStockPriceRequirements(records, new Set(priceMap.keys()), tradingDates, 5);
+  const unique = new Map<string, MissingStockPriceRequirement>();
+  for (const item of requirements) unique.set(`${item.stockCode}::${item.signalDate}`, item);
+  return Array.from(unique.values()).sort((left, right) => left.signalDate.localeCompare(right.signalDate) || left.stockCode.localeCompare(right.stockCode));
+}
+
+export async function syncMissingStockPrices(filter?: { stockCode?: string; signalDate?: string }): Promise<{ mode: "manual"; targetTradingDates: number; requestedStockDatePairs: number; savedPriceRows: number; missingPricePairs: number; failedDates: string[]; dates: string[] }> {
+  const requirements = await getMissingStockPriceRequirements(filter);
+  const byDate = new Map<string, string[]>();
+  for (const item of requirements) byDate.set(item.signalDate, Array.from(new Set([...(byDate.get(item.signalDate) ?? []), item.stockCode])));
+  const aggregate = { mode: "manual" as const, targetTradingDates: 0, requestedStockDatePairs: 0, savedPriceRows: 0, missingPricePairs: 0, failedDates: [] as string[], dates: [] as string[] };
+  for (const [signalDate, stockCodes] of Array.from(byDate.entries())) {
+    const result = await syncCandidateDailyPricesForDate(signalDate, 5, stockCodes);
+    aggregate.targetTradingDates += result.targetTradingDates;
+    aggregate.requestedStockDatePairs += result.requestedStockDatePairs;
+    aggregate.savedPriceRows += result.savedPriceRows;
+    aggregate.missingPricePairs += result.missingPricePairs;
+    aggregate.failedDates.push(...result.failedDates);
+    aggregate.dates.push(...result.dates);
+  }
+  return aggregate;
 }
 
 export type StockPriceSyncCheckItem = {

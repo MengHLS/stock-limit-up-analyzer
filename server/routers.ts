@@ -9,6 +9,7 @@ import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
 import { parseRecognitionResult } from "./recognition";
 import { isValidLimitUpTime } from "../shared/limitUpTime";
+import { getMissingStockPriceRequirements, syncMissingStockPrices } from "./stockPriceSync";
 import { syncCandidateDailyPrices, syncCandidateDailyPricesForUpload, syncCandidateDailyPricesForDate, checkStockPriceSync } from "./stockPriceSync";
 
 import {
@@ -973,6 +974,21 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可同步外部日线行情" });
         }
         return syncCandidateDailyPrices(input.mode);
+      }),
+
+    // 检查候选股票信号日及T+1至T+5行情的缺失情况。
+    getMissingStockPrices: protectedProcedure
+      .input(z.object({ stockCode: z.string().optional(), signalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional())
+      .query(async ({ input }) => getMissingStockPriceRequirements(input)),
+
+    // 手动补齐缺失行情；只允许管理员使用外部行情接口。
+    syncMissingStockPrices: protectedProcedure
+      .input(z.object({ stockCode: z.string().optional(), signalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }).optional())
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可手动同步外部日线行情" });
+        const result = await syncMissingStockPrices(input);
+        const operationLogId = await beginOperationLog({ operationType: "date_refresh", status: result.failedDates.length > 0 && result.savedPriceRows === 0 ? "failed" : result.savedPriceRows > 0 ? "success" : "empty", requestedDate: input?.signalDate ?? null, createdBy: ctx.user.id, refreshedCount: result.savedPriceRows, message: `手动同步：覆盖 ${result.targetTradingDates} 个交易日，保存 ${result.savedPriceRows} 条，缺失 ${result.missingPricePairs} 条${result.failedDates.length > 0 ? `，失败日期 ${result.failedDates.join(", ")}` : ""}` });
+        return { ...result, operationLogId };
       }),
 
     // 检查各涨停记录的信号日及后续交易日行情是否已同步

@@ -1,5 +1,6 @@
 import { eq, desc, like, or, sql, gte, count, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
+import { lte } from "drizzle-orm";
 import { 
   InsertUser, 
   users, 
@@ -724,6 +725,18 @@ export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Pro
     });
   }
   return rows.length;
+}
+
+/** 返回本地已存在的实际交易日集合，用于外部交易日历限频时的安全回退。 */
+export async function getStockDailyPriceTradeDates(startDate?: string, endDate?: string): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (startDate) conditions.push(gte(stockDailyPrices.tradeDate, startDate));
+  if (endDate) conditions.push(lte(stockDailyPrices.tradeDate, endDate));
+  const query = db.selectDistinct({ tradeDate: stockDailyPrices.tradeDate }).from(stockDailyPrices);
+  const rows = conditions.length > 0 ? await query.where(and(...conditions)).orderBy(stockDailyPrices.tradeDate) : await query.orderBy(stockDailyPrices.tradeDate);
+  return rows.map((row) => row.tradeDate);
 }
 
 /** 构造候选池回测所需的股票—交易日价格映射。 */

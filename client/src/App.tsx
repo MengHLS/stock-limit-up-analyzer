@@ -15,6 +15,7 @@ import LeaderCandidates from "./pages/LeaderCandidates";
 import Backtest from "./pages/Backtest";
 import OperationLogs from "./pages/OperationLogs";
 import StockSync from "./pages/StockSync";
+import StockPriceSync from "./pages/StockPriceSync";
 
 
 function Router() {
@@ -30,6 +31,7 @@ function Router() {
       <Route path="/leader-candidates" component={LeaderCandidates} />
       <Route path="/backtest" component={Backtest} />
       <Route path="/operation-logs" component={OperationLogs} />
+      <Route path="/stock-price-sync" component={StockPriceSync} />
       <Route path="/stock-sync" component={StockSync} />
 
       <Route path="/404" component={NotFound} />
