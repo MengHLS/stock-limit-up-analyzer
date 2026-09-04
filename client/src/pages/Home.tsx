@@ -28,6 +28,7 @@ import {
   Crown,
   Database,
   ClipboardList,
+  CloudDownload,
   Download,
   Pencil,
   Trash2
@@ -338,6 +339,12 @@ export default function Home() {
                   <Button variant="ghost" size="sm" className="gap-2 hover:bg-slate-100">
                     <ClipboardList className="h-4 w-4" />
                     操作日志
+                  </Button>
+                </Link>
+                <Link href="/stock-sync">
+                  <Button variant="ghost" size="sm" className="gap-2 hover:bg-sky-50">
+                    <CloudDownload className="h-4 w-4" />
+                    行情同步
                   </Button>
                 </Link>
                 <Link href="/upload">

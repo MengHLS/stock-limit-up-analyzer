@@ -664,6 +664,44 @@ export async function getLimitUpRecordsForStockPriceSyncByDate(limitUpDate: stri
     .where(eq(limitUpRecords.limitUpDate, limitUpDate));
 }
 
+/** 返回涨停记录去重（股票+日期）后的明细，供行情同步检查页展示名称、板数与题材。 */
+export async function getLimitUpRecordsForSyncCheck(): Promise<Array<{
+  stockCode: string;
+  stockName: string;
+  limitUpDate: string;
+  boardCount: string | null;
+  sector: string | null;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({
+    stockCode: limitUpRecords.stockCode,
+    stockName: limitUpRecords.stockName,
+    limitUpDate: limitUpRecords.limitUpDate,
+    boardCount: limitUpRecords.boardCount,
+    sector: limitUpRecords.sector,
+  }).from(limitUpRecords)
+    .orderBy(limitUpRecords.limitUpDate, limitUpRecords.stockCode);
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = `${row.stockCode}|${row.limitUpDate}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** 返回已同步的股票—交易日组合集合，key 形如 `${stockCode}|${tradeDate}`。 */
+export async function getStockDailyPricePairs(): Promise<Set<string>> {
+  const db = await getDb();
+  if (!db) return new Set();
+  const rows = await db.select({
+    stockCode: stockDailyPrices.stockCode,
+    tradeDate: stockDailyPrices.tradeDate,
+  }).from(stockDailyPrices);
+  return new Set(rows.map((row) => `${row.stockCode}|${row.tradeDate}`));
+}
+
 /** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格。 */
 export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Promise<number> {
   const db = await getDb();

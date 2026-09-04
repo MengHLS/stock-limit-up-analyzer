@@ -1,10 +1,12 @@
 import {
   getLimitUpRecordsForStockPriceSync,
   getLimitUpRecordsForStockPriceSyncByDate,
+  getLimitUpRecordsForSyncCheck,
+  getStockDailyPricePairs,
   upsertStockDailyPrices,
   type StockDailyPriceUpsert,
 } from "./db";
-import { fetchTushareDailyPricesByDate, fetchTushareTradingDates } from "./tushare";
+import { fetchTushareDailyPricesByDate, fetchTushareTradingDates, isTushareRateLimitError } from "./tushare";
 
 export type StockPriceSyncMode = "full" | "recent";
 
@@ -26,6 +28,8 @@ export type StockPriceSyncResult = {
   missingPricePairs: number;
   failedDates: string[];
   dates: string[];
+  /** 是否因 Tushare 限频而提前中止同步。 */
+  rateLimited?: boolean;
 };
 
 const RECENT_SYNC_DATE_COUNT = 8;
@@ -83,9 +87,10 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
   const targets = mode === "full" ? allTargets : allTargets.slice(-RECENT_SYNC_DATE_COUNT);
   let savedPriceRows = 0;
   let missingPricePairs = 0;
+  let rateLimited = false;
   const failedDates: string[] = [];
 
-  for (let index = 0; index < targets.length; index += TUSHARE_SYNC_CONCURRENCY) {
+  for (let index = 0; index < targets.length && !rateLimited; index += TUSHARE_SYNC_CONCURRENCY) {
     const targetBatch = targets.slice(index, index + TUSHARE_SYNC_CONCURRENCY);
     const batchResults = await Promise.all(targetBatch.map(async (target) => {
       try {
@@ -104,10 +109,11 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
             source: "tushare",
           }));
         const savedCount = await upsertStockDailyPrices(relevantRows);
-        return { savedCount, missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null };
+        return { savedCount, missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null, rateLimited: false };
       } catch (error) {
+        const rateLimitedHit = isTushareRateLimitError(error);
         console.warn(`[StockPriceSync] 跳过 ${target.tradeDate} 日线同步：`, error);
-        return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate };
+        return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate, rateLimited: rateLimitedHit };
       }
     }));
 
@@ -115,6 +121,7 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
       savedPriceRows += batchResult.savedCount;
       missingPricePairs += batchResult.missingCount;
       if (batchResult.failedDate) failedDates.push(batchResult.failedDate);
+      if (batchResult.rateLimited) rateLimited = true;
     }
   }
 
@@ -126,6 +133,7 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
     missingPricePairs,
     failedDates,
     dates: targets.map((target) => target.tradeDate),
+    rateLimited,
   };
 }
 
@@ -148,8 +156,9 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
   const targets = buildStockPriceSyncTargets(records, marketTradingDates, futureTradingDayCount);
   let savedPriceRows = 0;
   let missingPricePairs = 0;
+  let rateLimited = false;
   const failedDates: string[] = [];
-  for (let index = 0; index < targets.length; index += TUSHARE_SYNC_CONCURRENCY) {
+  for (let index = 0; index < targets.length && !rateLimited; index += TUSHARE_SYNC_CONCURRENCY) {
     const targetBatch = targets.slice(index, index + TUSHARE_SYNC_CONCURRENCY);
     const batchResults = await Promise.all(targetBatch.map(async (target) => {
       try {
@@ -165,19 +174,21 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
           preClosePrice: String(price.preClosePrice),
           source: "tushare",
         }));
-        return { savedCount: await upsertStockDailyPrices(relevantRows), missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null };
+        return { savedCount: await upsertStockDailyPrices(relevantRows), missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null, rateLimited: false };
       } catch (error) {
+        const rateLimitedHit = isTushareRateLimitError(error);
         console.warn(`[StockPriceSync] 跳过上传日期 ${target.tradeDate} 日线同步：`, error);
-        return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate };
+        return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate, rateLimited: rateLimitedHit };
       }
     }));
     for (const result of batchResults) {
       savedPriceRows += result.savedCount;
       missingPricePairs += result.missingCount;
       if (result.failedDate) failedDates.push(result.failedDate);
+      if (result.rateLimited) rateLimited = true;
     }
   }
-  return { mode: "recent", targetTradingDates: targets.length, requestedStockDatePairs: targets.reduce((total, target) => total + target.stockCodes.length, 0), savedPriceRows, missingPricePairs, failedDates, dates: targets.map((target) => target.tradeDate) };
+  return { mode: "recent", targetTradingDates: targets.length, requestedStockDatePairs: targets.reduce((total, target) => total + target.stockCodes.length, 0), savedPriceRows, missingPricePairs, failedDates, dates: targets.map((target) => target.tradeDate), rateLimited };
 }
 
 export type UploadPriceSyncPlan = {
@@ -228,4 +239,106 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
     };
   }
   return { ...aggregate, ...plan };
+}
+
+export type StockPriceSyncCheckItem = {
+  stockCode: string;
+  stockName: string;
+  limitUpDate: string;
+  boardCount: string | null;
+  sector: string | null;
+  missingDates: string[];
+  missingCount: number;
+};
+
+export type StockPriceSyncCheck = {
+  summary: {
+    totalStocks: number;
+    fullySynced: number;
+    partialSynced: number;
+    fullyMissing: number;
+    missingPairs: number;
+    syncedPairCount: number;
+    calendarAvailable: boolean;
+  };
+  items: StockPriceSyncCheckItem[];
+};
+
+/**
+ * 检查各涨停记录（去重股票+日期）的信号日及后续交易日行情是否已同步。
+ * 优先使用 Tushare 交易日历计算后续交易日，日历不可用时降级为仅检查信号日本身。
+ */
+export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<StockPriceSyncCheck> {
+  const records = await getLimitUpRecordsForSyncCheck();
+  const pricePairs = await getStockDailyPricePairs();
+  const emptySummary = {
+    totalStocks: 0,
+    fullySynced: 0,
+    partialSynced: 0,
+    fullyMissing: 0,
+    missingPairs: 0,
+    syncedPairCount: pricePairs.size,
+    calendarAvailable: false,
+  };
+  if (records.length === 0) return { summary: emptySummary, items: [] };
+
+  let tradingDates: string[] = [];
+  let calendarAvailable = false;
+  const recordDates = Array.from(new Set(records.map((record) => record.limitUpDate))).sort((left, right) => left.localeCompare(right));
+  const endDate = new Date(`${recordDates[recordDates.length - 1]}T00:00:00Z`);
+  endDate.setUTCDate(endDate.getUTCDate() + 21);
+  try {
+    tradingDates = await fetchTushareTradingDates(recordDates[0], endDate.toISOString().slice(0, 10));
+    calendarAvailable = true;
+  } catch (error) {
+    console.warn("[StockPriceSync] 交易日历获取失败，行情检查降级为仅信号日：", error);
+    tradingDates = recordDates;
+  }
+  const tradingIndex = new Map(tradingDates.map((date, index) => [date, index]));
+
+  const items: StockPriceSyncCheckItem[] = records.map((record) => {
+    const requiredDates = new Set<string>([record.limitUpDate]);
+    const signalIndex = tradingIndex.get(record.limitUpDate);
+    if (signalIndex !== undefined) {
+      for (let offset = 1; offset <= futureTradingDayCount; offset += 1) {
+        const date = tradingDates[signalIndex + offset];
+        if (date) requiredDates.add(date);
+      }
+    }
+    const missingDates = Array.from(requiredDates)
+      .filter((date) => !pricePairs.has(`${record.stockCode}|${date}`))
+      .sort((left, right) => left.localeCompare(right));
+    return {
+      stockCode: record.stockCode,
+      stockName: record.stockName,
+      limitUpDate: record.limitUpDate,
+      boardCount: record.boardCount,
+      sector: record.sector,
+      missingDates,
+      missingCount: missingDates.length,
+    };
+  });
+
+  items.sort((left, right) =>
+    right.missingCount - left.missingCount ||
+    right.limitUpDate.localeCompare(left.limitUpDate) ||
+    left.stockCode.localeCompare(right.stockCode)
+  );
+
+  const fullySynced = items.filter((item) => item.missingCount === 0).length;
+  const fullyMissing = items.filter((item) => item.missingDates.includes(item.limitUpDate)).length;
+  const partialSynced = items.length - fullySynced - fullyMissing;
+
+  return {
+    summary: {
+      totalStocks: items.length,
+      fullySynced,
+      partialSynced,
+      fullyMissing,
+      missingPairs: items.reduce((total, item) => total + item.missingCount, 0),
+      syncedPairCount: pricePairs.size,
+      calendarAvailable,
+    },
+    items,
+  };
 }

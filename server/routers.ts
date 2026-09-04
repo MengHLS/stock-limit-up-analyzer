@@ -9,7 +9,7 @@ import { storagePut } from "./storage";
 import { nanoid } from "nanoid";
 import { parseRecognitionResult } from "./recognition";
 import { isValidLimitUpTime } from "../shared/limitUpTime";
-import { syncCandidateDailyPrices, syncCandidateDailyPricesForUpload } from "./stockPriceSync";
+import { syncCandidateDailyPrices, syncCandidateDailyPricesForUpload, syncCandidateDailyPricesForDate, checkStockPriceSync } from "./stockPriceSync";
 
 import {
   createLimitUpRecord,
@@ -973,6 +973,24 @@ export const appRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可同步外部日线行情" });
         }
         return syncCandidateDailyPrices(input.mode);
+      }),
+
+    // 检查各涨停记录的信号日及后续交易日行情是否已同步
+    getStockSyncStatus: publicProcedure.query(async () => {
+      return await checkStockPriceSync();
+    }),
+
+    // 手动同步指定涨停日期（及可选股票代码）的日线行情
+    syncStockPriceForDate: protectedProcedure
+      .input(z.object({
+        date: z.string(),
+        stockCodes: z.array(z.string()).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可同步外部日线行情" });
+        }
+        return await syncCandidateDailyPricesForDate(input.date, 10, input.stockCodes);
       }),
 
     // 获取每日最高连板趋势及对应股票名称
