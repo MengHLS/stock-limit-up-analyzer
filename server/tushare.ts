@@ -19,6 +19,15 @@ type TusharePayload = {
 
 const TUSHARE_API_URL = "https://api.tushare.pro";
 const RETRY_DELAYS_MS = [1_000, 2_500, 5_000];
+const TRADING_DATE_CACHE_TTL_MS = 6 * 60 * 60 * 1_000;
+const tradingDateCache = new Map<string, { expiresAt: number; dates: string[] }>();
+const tradingDateInFlight = new Map<string, Promise<string[]>>();
+
+/** 清理交易日历缓存，供测试和需要强制刷新时使用。 */
+export function clearTushareTradingDateCache() {
+  tradingDateCache.clear();
+  tradingDateInFlight.clear();
+}
 
 function toTushareDate(date: string) {
   return date.replaceAll("-", "");
@@ -108,38 +117,51 @@ export async function fetchTushareDailyPricesByDate(tradeDate: string): Promise<
 export async function fetchTushareTradingDates(startDate: string, endDate: string): Promise<string[]> {
   const token = process.env.TUSHARE_TOKEN;
   if (!token) throw new Error("未配置 TUSHARE_TOKEN，无法同步交易日历");
+  const cacheKey = `${startDate}::${endDate}`;
+  const cached = tradingDateCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return [...cached.dates];
+  if (cached) tradingDateCache.delete(cacheKey);
+  const pending = tradingDateInFlight.get(cacheKey);
+  if (pending) return [...await pending];
 
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
-    try {
-      const response = await fetch(TUSHARE_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_name: "trade_cal",
-          token,
-          params: { exchange: "SSE", start_date: toTushareDate(startDate), end_date: toTushareDate(endDate) },
-          fields: "cal_date,is_open",
-        }),
-      });
-      if (!response.ok) throw new Error(`Tushare 交易日历网络请求失败：HTTP ${response.status}`);
-      const payload = await response.json() as TusharePayload;
-      if (payload.code !== 0) throw new Error(`Tushare 交易日历请求失败：${payload.msg || `错误码 ${payload.code ?? "未知"}`}`);
-      const fields = payload.data?.fields ?? [];
-      const items = payload.data?.items ?? [];
-      const calendarIndex = fields.indexOf("cal_date");
-      const openIndex = fields.indexOf("is_open");
-      if (calendarIndex < 0 || openIndex < 0) throw new Error("Tushare 交易日历返回缺少 cal_date 或 is_open 字段");
-      return items
-        .filter((item) => Number(item[openIndex]) === 1)
-        .map((item) => toIsoDate(String(item[calendarIndex])))
-        .sort((left, right) => left.localeCompare(right));
-    } catch (error) {
-      lastError = error;
-      const delay = RETRY_DELAYS_MS[attempt];
-      if (delay === undefined) break;
-      await new Promise((resolve) => setTimeout(resolve, delay));
+  const request = (async () => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        const response = await fetch(TUSHARE_API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_name: "trade_cal",
+            token,
+            params: { exchange: "SSE", start_date: toTushareDate(startDate), end_date: toTushareDate(endDate) },
+            fields: "cal_date,is_open",
+          }),
+        });
+        if (!response.ok) throw new Error(`Tushare 交易日历网络请求失败：HTTP ${response.status}`);
+        const payload = await response.json() as TusharePayload;
+        if (payload.code !== 0) throw new Error(`Tushare 交易日历请求失败：${payload.msg || `错误码 ${payload.code ?? "未知"}`}`);
+        const fields = payload.data?.fields ?? [];
+        const items = payload.data?.items ?? [];
+        const calendarIndex = fields.indexOf("cal_date");
+        const openIndex = fields.indexOf("is_open");
+        if (calendarIndex < 0 || openIndex < 0) throw new Error("Tushare 交易日历返回缺少 cal_date 或 is_open 字段");
+        const dates = items.filter((item) => Number(item[openIndex]) === 1).map((item) => toIsoDate(String(item[calendarIndex]))).sort((left, right) => left.localeCompare(right));
+        tradingDateCache.set(cacheKey, { expiresAt: Date.now() + TRADING_DATE_CACHE_TTL_MS, dates });
+        return dates;
+      } catch (error) {
+        lastError = error;
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) break;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
     }
+    throw lastError instanceof Error ? lastError : new Error("Tushare 交易日历网络请求失败");
+  })();
+  tradingDateInFlight.set(cacheKey, request);
+  try {
+    return [...await request];
+  } finally {
+    tradingDateInFlight.delete(cacheKey);
   }
-  throw lastError instanceof Error ? lastError : new Error("Tushare 交易日历网络请求失败");
 }
