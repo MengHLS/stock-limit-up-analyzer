@@ -2,6 +2,7 @@ import {
   getLimitUpRecordsForStockPriceSync,
   getLimitUpRecordsForStockPriceSyncByDate,
   getLeaderCandidateDailyPriceMap,
+  getStockDailyPriceTradeDates,
   upsertStockDailyPrices,
   type StockDailyPriceUpsert,
 } from "./db";
@@ -143,7 +144,8 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
     marketTradingDates = await fetchTushareTradingDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
   } catch (error) {
     console.warn(`[StockPriceSync] ${limitUpDate} 交易日历获取失败，降级为指定日期：`, error);
-    marketTradingDates = [limitUpDate];
+    marketTradingDates = await getStockDailyPriceTradeDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
+    if (marketTradingDates.length === 0) marketTradingDates = [limitUpDate];
   }
 
   const targets = buildStockPriceSyncTargets(records, marketTradingDates, futureTradingDayCount);
@@ -225,7 +227,8 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
     marketTradingDates = await fetchTushareTradingDates(startDate, calendarEnd.toISOString().slice(0, 10));
   } catch (error) {
     console.warn(`[StockPriceSync] 上传补全交易日历获取失败，降级为候选日期：`, error);
-    marketTradingDates = Array.from(new Set(selectedRecords.map((record) => record.limitUpDate))).sort();
+    marketTradingDates = await getStockDailyPriceTradeDates(startDate, calendarEnd.toISOString().slice(0, 10));
+    if (marketTradingDates.length === 0) marketTradingDates = Array.from(new Set(selectedRecords.map((record) => record.limitUpDate))).sort();
   }
   const targets = buildStockPriceSyncTargets(selectedRecords, marketTradingDates, 5);
   let savedPriceRows = 0;
@@ -285,7 +288,8 @@ export async function getMissingStockPriceRequirements(filter?: { stockCode?: st
     tradingDates = await fetchTushareTradingDates(dates[0]!, end.toISOString().slice(0, 10));
   } catch (error) {
     console.warn("[StockPriceSync] 缺失检查交易日历获取失败，降级为候选日期：", error);
-    tradingDates = Array.from(new Set(dates));
+    tradingDates = await getStockDailyPriceTradeDates(dates[0], end.toISOString().slice(0, 10));
+    if (tradingDates.length === 0) tradingDates = Array.from(new Set(dates));
   }
   const priceMap = await getLeaderCandidateDailyPriceMap();
   const requirements = buildMissingStockPriceRequirements(records, new Set(priceMap.keys()), tradingDates, 5);
