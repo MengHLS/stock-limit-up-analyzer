@@ -1,5 +1,11 @@
 import type { LeaderCandidateBacktestContext, LeaderCandidateBacktestRow } from "./leaderCandidates";
-import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult, type RealisticTrade } from "./realisticBacktest";
+import type { RealisticBacktestOptions, RealisticBacktestResult, RealisticTrade } from "./realisticBacktest";
+import {
+  RESEARCH_LEGACY_SIMULATION_SOURCE,
+  type ResearchSimulationProvenance,
+  type ResearchSimulationSource,
+} from "./research/legacyTransactionSimulator";
+import { mean, sampleStandardDeviation, quantile, median, skewness, excessKurtosis, sharpeRatio, annualizedReturnFromEquityCurve } from "../shared/quant-stats";
 
 export type DownsideRiskOptions = {
   observationDays?: number;
@@ -233,6 +239,11 @@ export type DownsideRiskTradeDifferenceRow = {
 };
 
 export type DownsideRiskResearchResult = {
+  /**
+   * 模拟来源 provenance（STEP 5 P2-2）：研究报表使用的交易模拟器标识。
+   * `productionRuntime` 恒为 false —— 研究报表不得被当作生产交易引擎的结果消费。
+   */
+  simulator: ResearchSimulationProvenance;
   definition: string;
   observationDays: number;
   mediumDownsidePercent: number;
@@ -297,9 +308,7 @@ export function calculateRiskAdjustedPerformance(simulation: RealisticBacktestRe
   const meanReturn = dailyReturns.length === 0 ? null : dailyReturns.reduce((sum, value) => sum + value, 0) / dailyReturns.length;
   const dailyVolatility = meanReturn === null || dailyReturns.length < 2 ? null : Math.sqrt(dailyReturns.reduce((sum, value) => sum + (value - meanReturn) ** 2, 0) / (dailyReturns.length - 1));
   const downsideDeviation = dailyReturns.length === 0 ? null : Math.sqrt(dailyReturns.reduce((sum, value) => sum + Math.min(value, 0) ** 2, 0) / dailyReturns.length);
-  const annualizedReturn = dailyReturns.length === 0 || simulation.initialCapital <= 0 || simulation.finalCapital <= 0
-    ? null
-    : (simulation.finalCapital / simulation.initialCapital) ** (riskAnnualizationTradingDays / dailyReturns.length) - 1;
+  const annualizedReturn = annualizedReturnFromEquityCurve(simulation.initialCapital, simulation.finalCapital, dailyReturns.length, riskAnnualizationTradingDays);
   let peak = simulation.initialCapital;
   const drawdowns = equities.map((equity) => {
     peak = Math.max(peak, equity);
@@ -309,6 +318,8 @@ export function calculateRiskAdjustedPerformance(simulation: RealisticBacktestRe
   const annualizedVolatility = dailyVolatility === null ? null : dailyVolatility * Math.sqrt(riskAnnualizationTradingDays);
   const annualizedDownsideDeviation = downsideDeviation === null ? null : downsideDeviation * Math.sqrt(riskAnnualizationTradingDays);
   const maxDrawdown = simulation.maxDrawdown / 100;
+  // 标准算术年化夏普（全系统唯一定义）：mean(dailyReturn)/sampleStd(dailyReturn)·√252。
+  const sharpeRatioValue = sharpeRatio(dailyReturns);
   return {
     returnSampling: "相邻交易日收盘权益",
     riskFreeAnnualRate: 0,
@@ -319,25 +330,11 @@ export function calculateRiskAdjustedPerformance(simulation: RealisticBacktestRe
     dailyVolatility: dailyVolatility === null ? null : round(dailyVolatility * 100, 4),
     annualizedVolatility: annualizedVolatility === null ? null : round(annualizedVolatility * 100, 2),
     annualizedDownsideDeviation: annualizedDownsideDeviation === null ? null : round(annualizedDownsideDeviation * 100, 2),
-    sharpeRatio: annualizedReturn === null || !annualizedVolatility ? null : round(annualizedReturn / annualizedVolatility, 3),
+    sharpeRatio: sharpeRatioValue === null ? null : round(sharpeRatioValue, 3),
     sortinoRatio: annualizedReturn === null || !annualizedDownsideDeviation ? null : round(annualizedReturn / annualizedDownsideDeviation, 3),
     calmarRatio: annualizedReturn === null || !maxDrawdown ? null : round(annualizedReturn / maxDrawdown, 3),
     ulcerIndex: ulcerIndex === null ? null : round(ulcerIndex * 100, 2),
   };
-}
-
-function average(values: number[]) { return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length; }
-function sampleStandardDeviation(values: number[]) {
-  const mean = average(values);
-  return mean === null || values.length < 2 ? null : Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (values.length - 1));
-}
-function historicalQuantile(values: number[], probability: number) {
-  if (values.length === 0) return null;
-  const sorted = values.slice().sort((left, right) => left - right);
-  const index = (sorted.length - 1) * probability;
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (index - lower);
 }
 
 function maxDrawdownFromEquities(equities: number[]) {
@@ -399,9 +396,9 @@ export function calculateStrategyEvaluation(
   const tradeReturns = completedTrades.map((trade) => trade.netReturn!);
   const winningReturns = tradeReturns.filter((value) => value > 0);
   const losingReturns = tradeReturns.filter((value) => value < 0);
-  const tradeReturnMean = average(tradeReturns);
-  const averageWin = average(winningReturns);
-  const averageLoss = average(losingReturns);
+  const tradeReturnMean = mean(tradeReturns);
+  const averageWin = mean(winningReturns);
+  const averageLoss = mean(losingReturns);
   const orderedTrades = completedTrades.slice().sort((left, right) => (left.exitDate ?? left.entryDate ?? left.signalDate).localeCompare(right.exitDate ?? right.entryDate ?? right.signalDate));
   let maximumConsecutiveLosses = 0;
   let consecutiveLosses = 0;
@@ -411,18 +408,12 @@ export function calculateStrategyEvaluation(
       maximumConsecutiveLosses = Math.max(maximumConsecutiveLosses, consecutiveLosses);
     } else consecutiveLosses = 0;
   }
-  const valueAtRisk95 = historicalQuantile(dailyReturns, 0.05);
-  const valueAtRisk99 = historicalQuantile(dailyReturns, 0.01);
-  const conditionalValueAtRisk95 = valueAtRisk95 === null ? null : average(dailyReturns.filter((value) => value <= valueAtRisk95));
-  const conditionalValueAtRisk99 = valueAtRisk99 === null ? null : average(dailyReturns.filter((value) => value <= valueAtRisk99));
-  const dailyReturnMean = average(dailyReturns);
-  const dailyReturnDeviation = sampleStandardDeviation(dailyReturns);
-  const skewness = dailyReturnMean === null || dailyReturnDeviation === null || dailyReturnDeviation === 0 || dailyReturns.length < 3
-    ? null
-    : dailyReturns.length / ((dailyReturns.length - 1) * (dailyReturns.length - 2)) * dailyReturns.reduce((sum, value) => sum + ((value - dailyReturnMean) / dailyReturnDeviation) ** 3, 0);
-  const excessKurtosis = dailyReturnMean === null || dailyReturnDeviation === null || dailyReturnDeviation === 0 || dailyReturns.length < 4
-    ? null
-    : (dailyReturns.length * (dailyReturns.length + 1) / ((dailyReturns.length - 1) * (dailyReturns.length - 2) * (dailyReturns.length - 3))) * dailyReturns.reduce((sum, value) => sum + ((value - dailyReturnMean) / dailyReturnDeviation) ** 4, 0) - (3 * (dailyReturns.length - 1) ** 2 / ((dailyReturns.length - 2) * (dailyReturns.length - 3)));
+  const valueAtRisk95 = quantile(dailyReturns, 0.05);
+  const valueAtRisk99 = quantile(dailyReturns, 0.01);
+  const conditionalValueAtRisk95 = valueAtRisk95 === null ? null : mean(dailyReturns.filter((value) => value <= valueAtRisk95));
+  const conditionalValueAtRisk99 = valueAtRisk99 === null ? null : mean(dailyReturns.filter((value) => value <= valueAtRisk99));
+  const skewnessValue = skewness(dailyReturns);
+  const excessKurtosisValue = excessKurtosis(dailyReturns);
   const rollingWindowTradingDays = 63;
   const rollingPoints = equityPoints.slice(-(rollingWindowTradingDays + 1));
   const rollingEquities = rollingPoints.map((point) => point.equity);
@@ -452,14 +443,14 @@ export function calculateStrategyEvaluation(
   }).filter((value): value is number => value !== null && Number.isFinite(value));
   const totalTradedValue = simulation.trades.filter((trade) => trade.status === "filled").reduce((sum, trade) => sum + (trade.entryPrice ?? 0) * trade.shares + (trade.exitPrice ?? 0) * trade.shares, 0);
   const totalFees = simulation.trades.filter((trade) => trade.status === "filled").reduce((sum, trade) => sum + trade.totalFees, 0);
-  const averageCapitalUtilization = average(equityPoints.map((point) => point.equity <= 0 ? 0 : Math.max(0, (point.equity - point.cash) / point.equity)));
+  const averageCapitalUtilization = mean(equityPoints.map((point) => point.equity <= 0 ? 0 : Math.max(0, (point.equity - point.cash) / point.equity)));
   const { maxDrawdownDurationTradingDays, longestRecoveryTradingDays } = calculateDrawdownDurations(equities);
   return {
     core: { cagr: riskAdjusted.annualizedReturn, totalReturn: simulation.totalReturn, maxDrawdown: simulation.maxDrawdown, sharpeRatio: riskAdjusted.sharpeRatio, sortinoRatio: riskAdjusted.sortinoRatio, calmarRatio: riskAdjusted.calmarRatio, ulcerIndex: riskAdjusted.ulcerIndex },
     tradeQuality: { winRate: simulation.winRate, profitFactor: simulation.profitFactor, expectancy: tradeReturnMean === null ? null : round(tradeReturnMean), averageWin: averageWin === null ? null : round(averageWin), averageLoss: averageLoss === null ? null : round(averageLoss), payoffRatio: averageWin === null || averageLoss === null || averageLoss === 0 ? null : round(Math.abs(averageWin / averageLoss), 3), maxConsecutiveLosses: maximumConsecutiveLosses, tradeCount: completedTrades.length },
-    tailRisk: { valueAtRisk95: valueAtRisk95 === null ? null : round(valueAtRisk95 * 100, 2), conditionalValueAtRisk95: conditionalValueAtRisk95 === null ? null : round(conditionalValueAtRisk95 * 100, 2), valueAtRisk99: valueAtRisk99 === null ? null : round(valueAtRisk99 * 100, 2), conditionalValueAtRisk99: conditionalValueAtRisk99 === null ? null : round(conditionalValueAtRisk99 * 100, 2), skewness: skewness === null ? null : round(skewness, 3), excessKurtosis: excessKurtosis === null ? null : round(excessKurtosis, 3), worstDay: dailyReturns.length === 0 ? null : round(Math.min(...dailyReturns) * 100, 2), worstTrade: tradeReturns.length === 0 ? null : round(Math.min(...tradeReturns), 2) },
+    tailRisk: { valueAtRisk95: valueAtRisk95 === null ? null : round(valueAtRisk95 * 100, 2), conditionalValueAtRisk95: conditionalValueAtRisk95 === null ? null : round(conditionalValueAtRisk95 * 100, 2), valueAtRisk99: valueAtRisk99 === null ? null : round(valueAtRisk99 * 100, 2), conditionalValueAtRisk99: conditionalValueAtRisk99 === null ? null : round(conditionalValueAtRisk99 * 100, 2), skewness: skewnessValue === null ? null : round(skewnessValue, 3), excessKurtosis: excessKurtosisValue === null ? null : round(excessKurtosisValue, 3), worstDay: dailyReturns.length === 0 ? null : round(Math.min(...dailyReturns) * 100, 2), worstTrade: tradeReturns.length === 0 ? null : round(Math.min(...tradeReturns), 2) },
     stability: { profitableMonthRate: calculatePeriodProfitability(equityPoints, simulation.initialCapital, "month"), profitableYearRate: calculatePeriodProfitability(equityPoints, simulation.initialCapital, "year"), latestRollingSharpe: rollingRisk?.sharpeRatio ?? null, latestRollingCalmar: rollingRisk?.calmarRatio ?? null, latestRollingCagr: rollingRisk?.annualizedReturn ?? null, rollingWindowTradingDays, maxDrawdownDurationTradingDays, longestRecoveryTradingDays, topFivePositiveDayReturnContribution },
-    tradingRealism: { totalFees: round(totalFees), modeledOneWaySlippageBps: simulation.assumptions.slippageBps, periodTurnoverToInitialCapital: simulation.initialCapital <= 0 ? null : round(totalTradedValue / simulation.initialCapital * 100, 1), averageHoldingTradingDays: average(holdingDays) === null ? null : round(average(holdingDays)!), averageCapitalUtilization: averageCapitalUtilization === null ? null : round(averageCapitalUtilization * 100, 1), averageOpenPositions: average(equityPoints.map((point) => point.openPositions)) === null ? null : round(average(equityPoints.map((point) => point.openPositions))!, 2), maxOpenPositions: simulation.peakOpenPositionCount, averageEntryParticipationBps: average(entryParticipationBps) === null ? null : round(average(entryParticipationBps)!), entryParticipationCoverageCount: entryParticipationBps.length },
+    tradingRealism: { totalFees: round(totalFees), modeledOneWaySlippageBps: simulation.assumptions.slippageBps, periodTurnoverToInitialCapital: simulation.initialCapital <= 0 ? null : round(totalTradedValue / simulation.initialCapital * 100, 1), averageHoldingTradingDays: mean(holdingDays) === null ? null : round(mean(holdingDays)!), averageCapitalUtilization: averageCapitalUtilization === null ? null : round(averageCapitalUtilization * 100, 1), averageOpenPositions: mean(equityPoints.map((point) => point.openPositions)) === null ? null : round(mean(equityPoints.map((point) => point.openPositions))!, 2), maxOpenPositions: simulation.peakOpenPositionCount, averageEntryParticipationBps: mean(entryParticipationBps) === null ? null : round(mean(entryParticipationBps)!), entryParticipationCoverageCount: entryParticipationBps.length },
   };
 }
 
@@ -495,14 +486,7 @@ function adverseReturnLabel(row: LeaderCandidateBacktestRow, context: LeaderCand
   };
 }
 
-function median(values: number[]) {
-  const sorted = values.slice().sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
-}
-
-function calculateRiskContributions(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
-  const time = row.limitUpTime ?? "";
+function calculateRiskContributions(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {  const time = row.limitUpTime ?? "";
   const amount = readSignalPrice(row, context)?.amount ?? null;
   return {
     boards: row.boards >= 4 ? 20 : row.boards === 3 ? 12 : row.boards === 2 ? 5 : 0,
@@ -579,7 +563,7 @@ export function selectQualityGateProfileKeys(
     const qualityScores = items.map((profile) => calculateQualityBlendScore(profile, context));
     const threshold = median(qualityScores);
     for (const profile of items) {
-      if (profile.riskScore < hardRiskThreshold && calculateQualityBlendScore(profile, context) >= threshold) {
+      if (threshold !== null && profile.riskScore < hardRiskThreshold && calculateQualityBlendScore(profile, context) >= threshold) {
         selected.add(`${profile.row.date}::${profile.row.stockCode}`);
       }
     }
@@ -608,7 +592,7 @@ export function selectQualityGateRowKeys(
     const qualityScores = items.map(({ row, riskScore }) => calculateQualityBlendScoreForRisk(row, riskScore, context));
     const threshold = median(qualityScores);
     for (const { row, riskScore } of items) {
-      if (riskScore < hardRiskThreshold && calculateQualityBlendScoreForRisk(row, riskScore, context) >= threshold) {
+      if (threshold !== null && riskScore < hardRiskThreshold && calculateQualityBlendScoreForRisk(row, riskScore, context) >= threshold) {
         selected.add(`${row.date}::${row.stockCode}`);
       }
     }
@@ -623,10 +607,11 @@ function buildExperiments(
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
   descriptionPrefix = "", // 手动权重路径
+  source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
   const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
-    const realisticSimulation = simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
+    const realisticSimulation = source.simulate(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
     return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation), strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, experimentRows) };
   };
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeight));
@@ -650,10 +635,11 @@ function buildExperimentsWithWindowWeights(
   hardRiskThreshold: number,
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
+  source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
   const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
-    const realisticSimulation = simulateRealisticTPlus1ToTPlus2(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
+    const realisticSimulation = source.simulate(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
     return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation), strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, experimentRows) };
   };
   const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight));
@@ -689,11 +675,12 @@ function buildFactorAblations(
   fallbackPenaltyWeight: number,
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
+  source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
 ): DownsideRiskFactorAblation[] {
   const weightedRows = (profiles: DownsideRiskProfile[], omittedFeatureKey: string) => profiles.map((profile) => applyRiskPenalty(profile, penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight, omittedFeatureKey));
   return riskFeatures.map((feature) => {
-    const fullCycleSimulation = simulateRealisticTPlus1ToTPlus2(weightedRows(fullCycleProfiles, feature.key), realisticOptions, context.priceByStockDate, context.tradingDates);
-    const walkForwardSimulation = simulateRealisticTPlus1ToTPlus2(weightedRows(validationProfiles, feature.key), realisticOptions, context.priceByStockDate, context.tradingDates);
+    const fullCycleSimulation = source.simulate(weightedRows(fullCycleProfiles, feature.key), realisticOptions, context.priceByStockDate, context.tradingDates);
+    const walkForwardSimulation = source.simulate(weightedRows(validationProfiles, feature.key), realisticOptions, context.priceByStockDate, context.tradingDates);
     const contributions = fullCycleProfiles.map((profile) => profile.riskContributions[feature.key] ?? 0).filter((value) => value > 0);
     return {
       key: feature.key,
@@ -781,9 +768,10 @@ function selectPenaltyWeight(
   trainingProfiles: DownsideRiskProfile[],
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
+  source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
 ) {
   const trials = penaltyWeightGrid.map((weight) => {
-    const simulation = simulateRealisticTPlus1ToTPlus2(
+    const simulation = source.simulate(
       trainingProfiles.map((profile) => applyRiskPenalty(profile, weight)),
       realisticOptions,
       context.priceByStockDate,
@@ -817,6 +805,7 @@ function buildRollingWindows(
   hardRiskThreshold: number,
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
+  source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
 ): { windows: DownsideRiskRollingWindow[]; penaltyWeightByDate: Map<string, number> } {
   const dates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
   const windows: DownsideRiskRollingWindow[] = [];
@@ -827,7 +816,7 @@ function buildRollingWindows(
     const trainingProfiles = profiles.filter((profile) => calibrationDateSet.has(profile.row.date) && profile.maxAdverseReturn !== null);
     const validationProfiles = profiles.filter((profile) => validationDateSet.has(profile.row.date) && profile.maxAdverseReturn !== null);
     const selection = autoTunePenaltyWeight
-      ? selectPenaltyWeight(trainingProfiles, realisticOptions, context)
+      ? selectPenaltyWeight(trainingProfiles, realisticOptions, context, source)
       : { selected: { penaltyWeight, objectiveValue: 0, totalReturn: 0, maxDrawdown: 0, completedCount: 0 }, trials: [] as DownsideRiskWeightTrial[] };
     validationDateSet.forEach((date) => penaltyWeightByDate.set(date, selection.selected.penaltyWeight));
     const experiments = buildExperiments(
@@ -837,6 +826,7 @@ function buildRollingWindows(
       realisticOptions,
       context,
       autoTunePenaltyWeight ? "训练窗口自动寻优后；" : "手动设定；",
+      source,
     );
     const highDownsideCount = validationProfiles.filter((profile) => profile.maxAdverseReturn! <= -mediumDownsidePercent).length;
     windows.push({
@@ -952,7 +942,7 @@ function buildStrategyRobustness(
         maximumTrainingObjective: round(Math.max(...trialObjectives), 4),
         range: round(Math.max(...trialObjectives) - Math.min(...trialObjectives), 4),
       } : { minimumTrainingObjective: null, maximumTrainingObjective: null, range: null },
-      marketEnvironments: Array.from(environmentMap.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([phase, returns]) => ({ phase, completedTradeCount: returns.length, averageTradeReturn: average(returns) === null ? null : round(average(returns)!) })),
+      marketEnvironments: Array.from(environmentMap.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([phase, returns]) => ({ phase, completedTradeCount: returns.length, averageTradeReturn: mean(returns) === null ? null : round(mean(returns)!) })),
     } satisfies DownsideRiskStrategyRobustness;
   });
 }
@@ -965,6 +955,7 @@ export function buildDownsideRiskResearch(
   options: DownsideRiskOptions | undefined,
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
+  source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
 ): DownsideRiskResearchResult {
   const observationDays = Math.min(10, Math.max(2, Math.floor(options?.observationDays ?? 5)));
   const mediumDownsidePercent = Math.min(50, Math.max(1, options?.mediumDownsidePercent ?? 4));
@@ -989,7 +980,7 @@ export function buildDownsideRiskResearch(
       highDownside: label.maxAdverseReturn === null ? null : label.maxAdverseReturn <= -highDownsidePercent,
     } satisfies DownsideRiskProfile;
   });
-  const rollingResult = buildRollingWindows(profiles, rollingTrainTradingDays, rollingValidationTradingDays, mediumDownsidePercent, penaltyWeight, autoTunePenaltyWeight, hardRiskThreshold, realisticOptions, context);
+  const rollingResult = buildRollingWindows(profiles, rollingTrainTradingDays, rollingValidationTradingDays, mediumDownsidePercent, penaltyWeight, autoTunePenaltyWeight, hardRiskThreshold, realisticOptions, context, source);
   const rollingWindows = rollingResult.windows;
   const evaluationDates = new Set(rollingWindows.flatMap((window) => {
     const allDates = context.tradingDates ?? [];
@@ -1018,11 +1009,11 @@ export function buildDownsideRiskResearch(
   const signalAmountSampleSize = evaluationProfiles.filter((profile) => readSignalPrice(profile.row, context)?.amount !== null && readSignalPrice(profile.row, context)?.amount !== undefined).length;
 
   const experiments = autoTunePenaltyWeight && rollingWindows.length > 0
-    ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
-    : buildExperiments(evaluationProfiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
+    ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context, source)
+    : buildExperiments(evaluationProfiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；", source);
   const fullCycleExperiments = autoTunePenaltyWeight && rollingWindows.length > 0
-    ? buildExperimentsWithWindowWeights(profiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
-    : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；");
+    ? buildExperimentsWithWindowWeights(profiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context, source)
+    : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；", source);
   const fullCycleDates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
   const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, context);
   const fullCycleRiskPenaltyAttribution = buildRiskPenaltyAttribution(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate);
@@ -1035,11 +1026,18 @@ export function buildDownsideRiskResearch(
     penaltyWeight,
     realisticOptions,
     context,
+    source,
   );
   const walkForward = buildWalkForwardResult(experiments, rollingWindows);
   const strategyRobustness = buildStrategyRobustness(fullCycleExperiments, walkForward, rollingWindows, profiles);
 
   return {
+    simulator: {
+      id: source.id,
+      label: source.label,
+      productionRuntime: source.productionRuntime,
+      semantics: source.semantics,
+    },
     definition: `风险分仅使用信号日可见字段；下行标签为T+1开盘后连续${observationDays}个实际交易日中最低价（缺失时降级为收盘价）相对T+1开盘价的最大不利波动。滚动验证的测试段严格位于前置${rollingTrainTradingDays}个交易日校准段之后。${autoTunePenaltyWeight ? "每个校准段在固定权重网格内按训练期收益减0.5倍最大回撤寻优，选中权重只用于其后验证段。" : "风险扣分权重使用手动设定值。"}`,
     observationDays,
     mediumDownsidePercent,

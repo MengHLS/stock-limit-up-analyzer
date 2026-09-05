@@ -138,6 +138,26 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(missingEntryClose.trades[0]).toMatchObject({ status: "filled", entryPointPremium: 5.11 });
   });
 
+  it("P1-F4：涨跌停判定统一走板块权威阈值，不再用 9.9% 近似", () => {
+    const base = { initialCapital: 100000, maxPositions: 1, blockLimitUpBuys: true } as const;
+    // 主板（非 ST）：signalClose=10，+9.9% 开盘 10.99 < 真实涨停价 11.00 → 不拦截；达到 11.00 才拦截。
+    const mainNotAtLimit = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 10.99 })], { ...base });
+    expect(mainNotAtLimit).toMatchObject({ filledCount: 1, blockedBuyCount: 0 });
+    const mainAtLimit = simulateRealisticTPlus1ToTPlus2([row({ nextOpenPrice: 11 })], { ...base });
+    expect(mainAtLimit).toMatchObject({ filledCount: 0, blockedBuyCount: 1 });
+    // 创业板（20%）：signalClose=10，开盘 +15%（11.5）不是涨停 → 不拦截；达 +20%（12.00）才拦截。
+    const chinextNotAtLimit = simulateRealisticTPlus1ToTPlus2([row({ stockCode: "300001.SZ", nextOpenPrice: 11.5 })], { ...base });
+    expect(chinextNotAtLimit).toMatchObject({ filledCount: 1, blockedBuyCount: 0 });
+    const chinextAtLimit = simulateRealisticTPlus1ToTPlus2([row({ stockCode: "300001.SZ", nextOpenPrice: 12 })], { ...base });
+    expect(chinextAtLimit).toMatchObject({ filledCount: 0, blockedBuyCount: 1 });
+    // 主板 ST（5%）：signalClose=10，开盘 +5%（10.50）即为涨停 → 拦截。
+    const stAtLimit = simulateRealisticTPlus1ToTPlus2([row({ stockName: "*ST示例", nextOpenPrice: 10.5 })], { ...base });
+    expect(stAtLimit).toMatchObject({ filledCount: 0, blockedBuyCount: 1 });
+    // 北交所（30%）：signalClose=10，开盘 +10%（11.00）不是 30% 涨停 → 不拦截。
+    const bseNotAtLimit = simulateRealisticTPlus1ToTPlus2([row({ stockCode: "920001.BJ", nextOpenPrice: 11 })], { ...base });
+    expect(bseNotAtLimit).toMatchObject({ filledCount: 1, blockedBuyCount: 0 });
+  });
+
   it("按实际交易日而非自然日跨周末与节假日出清", () => {
     const acrossWeekend = simulateRealisticTPlus1ToTPlus2([
       row({ date: "2026-08-21", nextDate: "2026-08-24", nextDayDate: "2026-08-24", secondDayDate: "2026-08-25" }),

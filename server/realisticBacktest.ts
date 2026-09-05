@@ -10,6 +10,7 @@ import {
   type OpenExpectationTier,
   type OpenExpectationTierOutcome,
 } from "./openExpectation";
+import { isPriceAtLimitDown, isPriceAtLimitUp } from "./data/boardRules";
 
 export type PositionSizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
 export type ExitStrategy = "riskManagedHold";
@@ -81,6 +82,27 @@ export type RealisticTrade = {
 
 export type RealisticEquityPoint = { date: string; equity: number; cash: number; openPositions: number };
 
+/**
+ * 回测模拟结果（API response 形状）。
+ *
+ * ⚠️ 语义口径（STEP 5 P2-1）——必须与调用方理解一致，字段名沿用历史 API 不得改名：
+ *
+ * 生产 realisticSimulation 由 Strategy Engine 产出，语义为：
+ *   T 收盘信号 → T+1 开盘买入 → Risk 准入 → 持有 → 回测期末按市价估值（Mark-to-Market）。
+ * 生产策略 leader-candidate-baseline 为 long-only、不产生 SELL 信号，因此
+ * 「已平仓交易」在 long-only 语义下可能长期为 0，这属于正常结果，不是回测失败。
+ *
+ * 由此产生的最重要消费者约定：
+ *   - completedCount  只统计**已完成平仓**的交易；未平仓的持仓不计入。
+ *   - openPositionCount 表示回测结束时**仍持有**的仓位；这些仓位既不计入胜率，也不计为失败交易。
+ *   - winRate         只针对 completed trades 计算；completedCount = 0 时为 null（不是 0%）。
+ *   - winningTrades   同样只统计已完成交易。
+ *   - averageReturn / profitFactor 基于 completed trades 的收益/盈亏；无可平仓交易时为 null。
+ *   - winRate === null 表示「样本不足/无可平仓交易」，**绝不等于策略胜率为 0%**。
+ *
+ * 因此：禁止把 winRate 直接对外解释为「策略胜率」。前端展示口径见
+ * client/src/pages/Backtest.tsx（统一展示为「已平仓胜率」）。
+ */
 export type RealisticBacktestResult = {
   assumptions: {
     initialCapital: number;
@@ -112,11 +134,19 @@ export type RealisticBacktestResult = {
   initialCapital: number;
   finalCapital: number;
   netProfit: number;
+  /** 组合总收益率（%）：含期末仍持仓的浮动盈亏（Mark-to-Market），不要求交易已平仓。 */
   totalReturn: number;
+  /** 最大回撤（%）：基于逐日权益曲线（含未平仓持仓估值）计算。 */
   maxDrawdown: number;
   tradeCount: number;
+  /** 实际成交（建仓）笔数：含回测期末仍未平仓的持仓。 */
   filledCount: number;
+  /**
+   * 已完成平仓的交易笔数。
+   * long-only（无 SELL）语义下该值可能为 0 —— 这表示「没有平仓事件」，不是回测失败。
+   */
   completedCount: number;
+  /** 回测结束时仍持有的仓位数（未实现盈亏；不计入胜率，也不计为失败交易）。 */
   openPositionCount: number;
   peakOpenPositionCount: number;
   minimumCash: number;
@@ -124,9 +154,17 @@ export type RealisticBacktestResult = {
   priceAvailableCount: number;
   capacitySkippedCount: number;
   skippedCount: number;
+  /** 已平仓交易中净收益为正的笔数；只统计 completedCount 口径内的交易。 */
   winningTrades: number;
+  /**
+   * 已平仓交易胜率（%）＝ winningTrades / completedCount × 100。
+   * completedCount = 0 时为 null（样本不足），绝不等于 0%。
+   * 禁止对外解释为「策略胜率」。
+   */
   winRate: number | null;
+  /** 已平仓交易的平均收益率（%）；无已平仓交易时为 null。 */
   averageReturn: number | null;
+  /** 已平仓交易的盈亏比（总盈利 / 总亏损）；无可平仓交易或分母为 0 时为 null。 */
   profitFactor: number | null;
   blockedBuyCount: number;
   blockedSellCount: number;
@@ -316,7 +354,12 @@ export function simulateRealisticTPlus1ToTPlus2(
       const marketOpenPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.openPrice ?? null;
       if (!validPrice(marketOpenPrice)) continue;
       const openReturnPercent = ((marketOpenPrice - position.entryPrice) / position.entryPrice) * 100;
-      const opensAtLimitDown = validPrice(position.previousClosePrice) && marketOpenPrice <= position.previousClosePrice * 0.901;
+      const opensAtLimitDown = isPriceAtLimitDown({
+        stockCode: position.row.stockCode,
+        stockName: position.row.stockName,
+        price: marketOpenPrice,
+        referencePrice: position.previousClosePrice,
+      }) === true;
       if (openReturnPercent <= -stopLossPercent) {
         if (blockLimitDownSells && opensAtLimitDown) {
           const trade = findFilledTrade(position);
@@ -399,7 +442,14 @@ export function simulateRealisticTPlus1ToTPlus2(
       const entryLowPrice = entryDayPrice?.lowPrice ?? null;
       const entryAmount = entryDayPrice?.amount ?? null;
 
-      const limitUp = validPrice(row.signalClosePrice) && entryOpenPrice >= row.signalClosePrice * 1.099;
+      // 涨跌停判定统一走 boardRules 权威（主板 10% / ST 5% / 创业板·科创板 20% / 北交所 30%），
+      // 不再使用 1.099 / 0.901 近似。规则不可判定时视为不能确认触及（null），不做「伪 10%」假设。
+      const limitUp = isPriceAtLimitUp({
+        stockCode: row.stockCode,
+        stockName: row.stockName,
+        price: entryOpenPrice,
+        referencePrice: row.signalClosePrice,
+      }) === true;
       if (blockLimitUpBuys && limitUp) {
         blockedBuyCount += 1;
         trades.push(createSkippedTrade(row, "T+1开盘接近涨停，按保守规则不可追买", row.nextDayDate, expectationOf(row)));
@@ -511,12 +561,24 @@ export function simulateRealisticTPlus1ToTPlus2(
       position.latestValuationPrice = exitPrice;
       const holdingDays = Math.max(1, (tradingDateIndex.get(date) ?? position.entryTradingDateIndex) - position.entryTradingDateIndex + 1);
       const closeReturnPercent = ((exitPrice - position.entryPrice) / position.entryPrice) * 100;
-      const limitDown = validPrice(position.previousClosePrice) && exitPrice <= position.previousClosePrice * 0.901;
+      const previousClose = position.previousClosePrice;
+      const limitDown = isPriceAtLimitDown({
+        stockCode: position.row.stockCode,
+        stockName: position.row.stockName,
+        price: exitPrice,
+        referencePrice: previousClose,
+      }) === true;
+      const opensAtLimitDown = isPriceAtLimitDown({
+        stockCode: position.row.stockCode,
+        stockName: position.row.stockName,
+        price: marketOpenPrice,
+        referencePrice: previousClose,
+      }) === true;
       const oneWordLimitDown = limitDown
-        && validPrice(position.previousClosePrice)
+        && opensAtLimitDown
         && validPrice(marketOpenPrice)
-        && marketOpenPrice <= position.previousClosePrice * 0.901
-        && Math.abs(marketOpenPrice - exitPrice) <= position.previousClosePrice * 0.002;
+        && validPrice(previousClose)
+        && Math.abs(marketOpenPrice - exitPrice) <= previousClose * 0.002;
       // 盘中止损：开盘未破位但当日最低价触及止损价，按止损价成交（贴近真实硬止损）。
       if (enableIntradayStopLoss && !oneWordLimitDown) {
         const stopPrice = position.entryPrice * (1 - stopLossPercent / 100);

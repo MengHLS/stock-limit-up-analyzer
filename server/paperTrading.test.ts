@@ -149,8 +149,9 @@ describe("advancePaperTradingDay 逐日推进", () => {
   });
 
   it("一字涨停封死按规则不追买", () => {
+    // 主板非 ST：signalClose=10 → 真实涨停价 = 11.00（10.99 只是 +9.9%，并非涨停）。
     const priceByStockDate = new Map<string, LeaderCandidateDailyPrice>([
-      ["600001.SH::2026-08-19", price(10.99, 10.99, { highPrice: 10.99, lowPrice: 10.99 })],
+      ["600001.SH::2026-08-19", price(11, 11, { highPrice: 11, lowPrice: 11 })],
     ]);
     const state: PaperTradingState = { ...createInitialPaperTradingState(100_000), pendingBuys: [makePending({ signalClosePrice: 10 })] };
     const result = advancePaperTradingDay({

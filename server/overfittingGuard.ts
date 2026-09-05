@@ -1,7 +1,11 @@
 import type { LeaderCandidateBacktestRow } from "./leaderCandidates";
 import type { RealisticBacktestOptions, RealisticBacktestResult } from "./realisticBacktest";
-import { simulateRealisticTPlus1ToTPlus2 } from "./realisticBacktest";
+import { RESEARCH_LEGACY_SIMULATION_SOURCE } from "./research/legacyTransactionSimulator";
 import type { LeaderCandidateDailyPrice } from "./leaderCandidates";
+import { mean, quantile, normalCdf, normalQuantile, sharpeRatio, skewness, excessKurtosis } from "../shared/quant-stats";
+
+// 保持既有调用方（technicalFactors 等）兼容：正态分布基础函数已统一迁移到 shared/quant-stats。
+export { normalCdf, normalQuantile } from "../shared/quant-stats";
 
 /**
  * 过拟合防护（三-P0）：打地鼠基准（随机策略对照）与 Deflated Sharpe Ratio（多重检验校正）。
@@ -23,48 +27,6 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-function erf(x: number): number {
-  const sign = x < 0 ? -1 : 1;
-  const absX = Math.abs(x);
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
-  const t = 1 / (1 + p * absX);
-  const y = 1 - (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t) * Math.exp(-absX * absX);
-  return sign * y;
-}
-
-/** 标准正态累积分布函数 Φ(x)。 */
-export function normalCdf(x: number): number {
-  return 0.5 * (1 + erf(x / Math.SQRT2));
-}
-
-/** 标准正态逆累积分布函数 Φ⁻¹(p)，Acklam 算法。 */
-export function normalQuantile(p: number): number {
-  if (p <= 0) return -Infinity;
-  if (p >= 1) return Infinity;
-  const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.38357751867269e2, -3.066479806614716e1, 2.506628277459239];
-  const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1];
-  const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
-  const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416];
-  const plow = 0.02425;
-  const phigh = 1 - plow;
-  if (p < plow) {
-    const q = Math.sqrt(-2 * Math.log(p));
-    return (((((c[0]! * q + c[1]!) * q + c[2]!) * q + c[3]!) * q + c[4]!) * q + c[5]!) / ((((d[0]! * q + d[1]!) * q + d[2]!) * q + d[3]!) * q + 1);
-  }
-  if (p <= phigh) {
-    const q = p - 0.5;
-    const r = q * q;
-    return (((((a[0]! * r + a[1]!) * r + a[2]!) * r + a[3]!) * r + a[4]!) * r + a[5]!) * q / (((((b[0]! * r + b[1]!) * r + b[2]!) * r + b[3]!) * r + b[4]!) * r + 1);
-  }
-  const q = Math.sqrt(-2 * Math.log(1 - p));
-  return -(((((c[0]! * q + c[1]!) * q + c[2]!) * q + c[3]!) * q + c[4]!) * q + c[5]!) / ((((d[0]! * q + d[1]!) * q + d[2]!) * q + d[3]!) * q + 1);
-}
-
 export type SharpeMoments = {
   sharpeRatio: number;
   skewness: number;
@@ -72,21 +34,15 @@ export type SharpeMoments = {
   sampleLength: number;
 };
 
-function mean(values: number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-/** 由日收益率序列计算夏普、偏度、峰度（excess kurtosis）。 */
+/** 由日收益率序列计算夏普、偏度、峰度（excess kurtosis，统一 sample-adjusted Fisher-Pearson）。 */
 export function calculateSharpeMoments(dailyReturns: number[], annualizationTradingDays = 252): SharpeMoments | null {
-  if (dailyReturns.length < 3) return null;
-  const meanReturn = mean(dailyReturns);
-  const variance = dailyReturns.reduce((sum, value) => sum + (value - meanReturn) ** 2, 0) / (dailyReturns.length - 1);
-  if (variance <= 0) return null;
-  const std = Math.sqrt(variance);
-  const sharpe = (meanReturn / std) * Math.sqrt(annualizationTradingDays);
-  const skewness = dailyReturns.reduce((sum, value) => sum + ((value - meanReturn) / std) ** 3, 0) / dailyReturns.length;
-  const kurtosis = dailyReturns.reduce((sum, value) => sum + ((value - meanReturn) / std) ** 4, 0) / dailyReturns.length - 3;
-  return { sharpeRatio: sharpe, skewness, kurtosis, sampleLength: dailyReturns.length };
+  const valid = dailyReturns.filter((value) => Number.isFinite(value));
+  if (valid.length < 3) return null;
+  const sharpe = sharpeRatio(valid, annualizationTradingDays);
+  const skew = skewness(valid);
+  const kurt = excessKurtosis(valid);
+  if (sharpe === null || skew === null || kurt === null) return null;
+  return { sharpeRatio: sharpe, skewness: skew, kurtosis: kurt, sampleLength: valid.length };
 }
 
 /** 多重检验下的期望最优夏普 E[SR_max]（Bailey & López de Prado 2014）。 */
@@ -94,8 +50,9 @@ export function expectedMaximumSharpe(numTrials: number, sharpeRatio: number, sk
   const safeTrials = Math.max(1, numTrials);
   const varianceOfSharpe = (1 - skewness * sharpeRatio + (kurtosis + 2) / 4 * sharpeRatio ** 2) / (sampleLength - 1);
   const stdOfSharpe = Math.sqrt(Math.max(0, varianceOfSharpe));
-  const z1 = normalQuantile(1 - 1 / safeTrials);
-  const z2 = normalQuantile(1 - 1 / (safeTrials * E));
+  // safeTrials >= 1 → 入参落在 [0,1)，normalQuantile 仅在 NaN 入参时返回 null，此处恒为有限值。
+  const z1 = normalQuantile(1 - 1 / safeTrials)!;
+  const z2 = normalQuantile(1 - 1 / (safeTrials * E))!;
   return stdOfSharpe * ((1 - EULER_MASCHERONI) * z1 + EULER_MASCHERONI * z2);
 }
 
@@ -104,7 +61,8 @@ export function deflatedSharpeRatio(sharpeRatio: number, numTrials: number, skew
   const expected = expectedMaximumSharpe(numTrials, sharpeRatio, skewness, kurtosis, sampleLength);
   const denominator = Math.sqrt(Math.max(1e-12, 1 - skewness * sharpeRatio + (kurtosis + 2) / 4 * sharpeRatio ** 2));
   const z = ((sharpeRatio - expected) * Math.sqrt(sampleLength - 1)) / denominator;
-  return normalCdf(z);
+  // z 由有限入参计算得到，normalCdf 仅在 NaN 入参时返回 null，此处恒为有限值。
+  return normalCdf(z)!;
 }
 
 /**
@@ -115,7 +73,8 @@ export function deflatedSharpeRatio(sharpeRatio: number, numTrials: number, skew
 export function probabilisticSharpeRatio(sharpeRatio: number, benchmarkSharpe: number, skewness: number, kurtosis: number, sampleLength: number): number {
   const denominator = Math.sqrt(Math.max(1e-12, 1 - skewness * sharpeRatio + (kurtosis + 2) / 4 * sharpeRatio ** 2));
   const z = ((sharpeRatio - benchmarkSharpe) * Math.sqrt(sampleLength - 1)) / denominator;
-  return normalCdf(z);
+  // z 由有限入参计算得到，normalCdf 仅在 NaN 入参时返回 null，此处恒为有限值。
+  return normalCdf(z)!;
 }
 
 export type MonkeyBenchmarkResult = {
@@ -197,16 +156,6 @@ export function buildOverfittingGuardReport(simulation: RealisticBacktestResult,
   };
 }
 
-/** 分位数（线性插值），空数组返回 null。 */
-function quantileAt(sorted: number[], p: number): number | null {
-  if (sorted.length === 0) return null;
-  const index = (sorted.length - 1) * p;
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) return sorted[lower]!;
-  return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (index - lower);
-}
-
 /**
  * 日收益蒙特卡洛自助（Bootstrap）：有放回重抽样日收益，重构权益曲线，
  * 得到夏普、最大回撤、CAGR 的经验分布，输出 95% 置信区间与破产概率。
@@ -241,15 +190,15 @@ export function runReturnBootstrap(dailyReturns: number[], numTrials = 2000, see
   const sortedSharpe = [...sharpes].sort((a, b) => a - b);
   const sortedDrawdown = [...drawdowns].sort((a, b) => a - b);
   const meanOf = (values: number[]) => values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
-  const sharpeLower = quantileAt(sortedSharpe, 0.025);
-  const sharpeUpper = quantileAt(sortedSharpe, 0.975);
+  const sharpeLower = quantile(sortedSharpe, 0.025);
+  const sharpeUpper = quantile(sortedSharpe, 0.975);
   return {
     numTrials,
     sharpeMean: meanOf(sharpes) === null ? null : Number((meanOf(sharpes)!).toFixed(3)),
     sharpeLower95: sharpeLower === null ? null : Number(sharpeLower.toFixed(3)),
     sharpeUpper95: sharpeUpper === null ? null : Number(sharpeUpper.toFixed(3)),
     maxDrawdownMean: meanOf(drawdowns) === null ? null : Number((meanOf(drawdowns)! * 100).toFixed(1)),
-    maxDrawdownP95: quantileAt(sortedDrawdown, 0.95) === null ? null : Number((quantileAt(sortedDrawdown, 0.95)! * 100).toFixed(1)),
+    maxDrawdownP95: quantile(sortedDrawdown, 0.95) === null ? null : Number((quantile(sortedDrawdown, 0.95)! * 100).toFixed(1)),
     cagrMean: meanOf(cagrs) === null ? null : Number((meanOf(cagrs)! * 100).toFixed(1)),
     ruinProbability: drawdowns.length === 0 ? null : Number((drawdowns.filter((value) => value >= ruinThreshold).length / drawdowns.length).toFixed(4)),
     definition,
@@ -279,7 +228,7 @@ export function runCostSensitivity(
   priceByStockDate: Map<string, LeaderCandidateDailyPrice>,
   tradingDates: string[],
   multipliers: number[] = [0, 1, 1.5, 2, 3],
-  simulate: Simulate = simulateRealisticTPlus1ToTPlus2,
+  simulate: Simulate = RESEARCH_LEGACY_SIMULATION_SOURCE.simulate,
 ): CostSensitivityResult {
   const points: CostSensitivityPoint[] = [];
   for (const multiplier of multipliers) {
@@ -317,7 +266,7 @@ export function runMonkeyBenchmark(
   tradingDates: string[],
   trialCount = 200,
   seed = 20260905,
-  simulate: Simulate = simulateRealisticTPlus1ToTPlus2,
+  simulate: Simulate = RESEARCH_LEGACY_SIMULATION_SOURCE.simulate,
 ): MonkeyBenchmarkResult {
   const real = simulate(rows, options, priceByStockDate, tradingDates);
   const realReturns = dailyReturnsFromSimulation(real);

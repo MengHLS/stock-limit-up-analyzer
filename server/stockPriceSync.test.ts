@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMissingStockPriceRequirements, buildStockPriceSyncTargets, buildUploadPriceSyncPlan } from "./stockPriceSync";
+import { buildMissingStockPriceRequirements, buildStockPriceSyncTargets, buildUploadPriceSyncPlan, toValidatedStockDailyPriceUpserts } from "./stockPriceSync";
 import { parseTushareDailyPrices } from "./tushare";
 
 describe("股票日线同步", () => {
@@ -91,5 +91,109 @@ describe("股票日线同步", () => {
       volume: 98765,
       preClosePrice: 10,
     }]);
+  });
+});
+
+describe("P1-F3 生产入库数据质量路径", () => {
+  const base = {
+    stockCode: "600001.SH",
+    tradeDate: "2026-08-19",
+    openPrice: 10,
+    closePrice: 11,
+    highPrice: 11.2,
+    lowPrice: 9.9,
+    amount: 150000,
+    volume: 120000,
+    preClosePrice: 10,
+  };
+
+  it("正常 OHLCV 行 → 全部 VALID 可写入，数值字段以字符串保留", () => {
+    const result = toValidatedStockDailyPriceUpserts([base], new Set(["600001.SH"]));
+    expect(result.rows).toHaveLength(1);
+    expect(result.invalidCount).toBe(0);
+    expect(result.unpersistableCount).toBe(0);
+    expect(result.qualityIssues).toHaveLength(0);
+    expect(result.rows[0]).toEqual({
+      stockCode: "600001.SH",
+      tradeDate: "2026-08-19",
+      openPrice: "10",
+      closePrice: "11",
+      highPrice: "11.2",
+      lowPrice: "9.9",
+      amount: "150000",
+      volume: "120000",
+      preClosePrice: "10",
+      source: "tushare",
+    });
+  });
+
+  it("high < max(open, close, low) → INVALID 不进入正常入库", () => {
+    const result = toValidatedStockDailyPriceUpserts([{ ...base, highPrice: 10.8, closePrice: 11 }], new Set(["600001.SH"]));
+    expect(result.rows).toHaveLength(0);
+    expect(result.invalidCount).toBe(1);
+    expect(result.qualityIssues.some((issue) => issue.status === "INVALID" && issue.codes.includes("HIGH_LT_MAX"))).toBe(true);
+  });
+
+  it("low > min(open, close, high) → INVALID 不进入正常入库", () => {
+    const result = toValidatedStockDailyPriceUpserts([{ ...base, lowPrice: 10.3, openPrice: 10 }], new Set(["600001.SH"]));
+    expect(result.rows).toHaveLength(0);
+    expect(result.invalidCount).toBe(1);
+    expect(result.qualityIssues.some((issue) => issue.status === "INVALID" && issue.codes.includes("LOW_GT_MIN"))).toBe(true);
+  });
+
+  it("negative volume / negative amount → INVALID 不进入正常入库", () => {
+    const negVolume = toValidatedStockDailyPriceUpserts([{ ...base, volume: -1 }], new Set(["600001.SH"]));
+    expect(negVolume.rows).toHaveLength(0);
+    expect(negVolume.invalidCount).toBe(1);
+    expect(negVolume.qualityIssues[0]?.codes).toContain("NEGATIVE_VOLUME");
+    const negAmount = toValidatedStockDailyPriceUpserts([{ ...base, amount: -5 }], new Set(["600001.SH"]));
+    expect(negAmount.rows).toHaveLength(0);
+    expect(negAmount.invalidCount).toBe(1);
+    expect(negAmount.qualityIssues[0]?.codes).toContain("NEGATIVE_AMOUNT");
+  });
+
+  it('missing close / missing preClose → 不可持久化（DB NOT NULL），不写 "undefined"/"null"', () => {
+    const missingClose = toValidatedStockDailyPriceUpserts([{ ...base, closePrice: undefined }], new Set(["600001.SH"]));
+    expect(missingClose.rows).toHaveLength(0);
+    expect(missingClose.unpersistableCount).toBe(1);
+    const missingPre = toValidatedStockDailyPriceUpserts([{ ...base, preClosePrice: null }], new Set(["600001.SH"]));
+    expect(missingPre.rows).toHaveLength(0);
+    expect(missingPre.unpersistableCount).toBe(1);
+    expect(missingPre.qualityIssues[0]?.codes).toContain("REQUIRED_PRICE_MISSING");
+  });
+
+  it('null / undefined 数值字段 → 可空字段保留 null，绝不产生 "undefined"/"null" 字符串', () => {
+    const result = toValidatedStockDailyPriceUpserts([
+      { ...base, highPrice: null, amount: undefined, lowPrice: undefined, volume: null },
+    ], new Set(["600001.SH"]));
+    expect(result.rows).toHaveLength(1);
+    const row = result.rows[0]!;
+    // 任何字段都不得出现 "undefined" 或 "null" 字面量
+    for (const value of Object.values(row)) {
+      expect(value).not.toBe("undefined");
+      expect(value).not.toBe("null");
+    }
+    expect(row.highPrice).toBeNull();
+    expect(row.amount).toBeNull();
+    expect(row.lowPrice).toBeNull();
+    expect(row.volume).toBeNull();
+    expect(row.openPrice).toBe("10");
+    // 可空字段缺失 → WARNING 放行但留下质量信息（provenance）
+    const warning = result.qualityIssues.find((issue) => issue.status === "WARNING");
+    expect(warning).toBeDefined();
+    expect(warning!.codes).toContain("FIELD_MISSING");
+  });
+
+  it("非法数值（非数字字符串）→ 解析为 null；缺失 open 时不可持久化", () => {
+    const garbage = toValidatedStockDailyPriceUpserts([{ ...base, openPrice: "abc" }], new Set(["600001.SH"]));
+    expect(garbage.rows).toHaveLength(0);
+    expect(garbage.unpersistableCount).toBe(1);
+  });
+
+  it("未请求的股票不进入结果；无行可写时 savedCount 为 0 语义不变", () => {
+    const result = toValidatedStockDailyPriceUpserts([base], new Set(["600002.SH"]));
+    expect(result.rows).toHaveLength(0);
+    expect(result.invalidCount).toBe(0);
+    expect(result.unpersistableCount).toBe(0);
   });
 });

@@ -47,6 +47,7 @@ import {
   getSentimentCycleAnalysis,
   getLeaderCandidates,
   getLeaderCandidateBacktest,
+  getLeaderCandidateResearch,
   saveBacktestRun,
   listBacktestRuns,
   getBacktestRun,
@@ -1018,7 +1019,17 @@ export const appRouter = router({
     getLeaderCandidateBacktest: publicProcedure
       .input(backtestOptionsSchema.optional())
       .query(async ({ input }) => {
+        // STEP 5 P2-2：生产核心路径 —— 不执行 research-legacy 模拟器。
         return await getLeaderCandidateBacktest(input);
+      }),
+
+    // 完整分析报表（研究端点）：生产核心 + 下行风险研究。
+    // 风险研究实验段使用 research-legacy 交易模拟器（显式研究来源），仅供分析页/审计使用；
+    // 与 getLeaderCandidateBacktest（生产核心）分离，保证生产请求不隐式执行 legacy 模拟器。
+    getLeaderCandidateResearch: publicProcedure
+      .input(backtestOptionsSchema.optional())
+      .query(async ({ input }) => {
+        return await getLeaderCandidateResearch(input);
       }),
 
     // 保存一次回测（参数 + 完整结果），供历史回顾与多组对比
@@ -1028,7 +1039,9 @@ export const appRouter = router({
         if (ctx.user.role !== "admin") {
           throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可保存回测结果" });
         }
-        const result = await getLeaderCandidateBacktest(input);
+        // 历史快照保存完整分析报表（含风险研究），便于历史回顾与多组对比；
+        // 研究模拟来自显式 research 来源，不改变 getLeaderCandidateBacktest 生产核心的 legacy 边界。
+        const result = await getLeaderCandidateResearch(input);
         const id = await saveBacktestRun(input, result);
         return { id };
       }),

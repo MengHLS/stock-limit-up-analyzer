@@ -1,7 +1,8 @@
 import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
 import { buildDownsideRiskResearch, calculateQualityBlendScoreForRisk, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult, type DownsideRiskStrategyKey } from "./downsideRisk";
-import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
+import type { RealisticBacktestOptions, RealisticBacktestResult } from "./realisticBacktest";
+import { RESEARCH_LEGACY_SIMULATION_SOURCE } from "./research/legacyTransactionSimulator";
 import { computeTechnicalFactorValues, evaluateFactorEffectiveness } from "./technicalFactors";
 import type { FactorEffectivenessReport, TechnicalFactorKey } from "./technicalFactors";
 import { buildFactorNeutralizationReport } from "./factorCombination";
@@ -10,6 +11,7 @@ import { buildOverfittingGuardReport } from "./overfittingGuard";
 import type { OverfittingGuardReport } from "./overfittingGuard";
 import { buildFinalVerdict } from "./factorScore";
 import type { FinalVerdict } from "./factorScore";
+import { parseNonNegativeNumber, parsePositivePrice } from "./data/validation";
 
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
@@ -154,10 +156,19 @@ export type LeaderCandidateBacktestResult = {
   phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
   realisticSimulation: RealisticBacktestResult;
-  downsideRiskResearch: DownsideRiskResearchResult;
+  /**
+   * 下行风险研究报告。仅在显式研究路径（runLeaderCandidateResearchReport / includeResearch=true）
+   * 下非空；生产回测请求（getLeaderCandidateBacktest，includeResearch=false）为 null，
+   * 以避免生产请求隐式执行 research-legacy 交易模拟器（STEP 5 P2-2 边界）。
+   */
+  downsideRiskResearch: DownsideRiskResearchResult | null;
   dailyPriceCoverage: LeaderCandidateDailyPriceCoverage;
   marketFactorCoverage: LeaderCandidateMarketFactorCoverage;
-  strategyPortfolioSnapshot: LeaderCandidateStrategyPortfolioSnapshot;
+  /**
+   * 五策略持仓与准备买入快照，来源为下行风险研究的全周期实验（含 research-legacy 模拟）。
+   * 与研究报表同生命周期：生产回测请求为 null。
+   */
+  strategyPortfolioSnapshot: LeaderCandidateStrategyPortfolioSnapshot | null;
   /** 技术面因子有效性三件套评估（RankIC/IC_IR、分位数分层单调性、阶段 IC 稳定性）。 */
   factorEvaluation: FactorEffectivenessReport;
   /** 因子组合与筛选：相关性矩阵、高相关去重建议、标准化+市值中性化后的技术因子。 */
@@ -305,26 +316,21 @@ export type LeaderCandidateDailyPriceRow = {
 /** 保留开盘或收盘任一有效价格；只有两项都无效时才丢弃该交易日记录。 */
 export function buildLeaderCandidateDailyPriceMap(rows: LeaderCandidateDailyPriceRow[]): Map<string, LeaderCandidateDailyPrice> {
   const map = new Map<string, LeaderCandidateDailyPrice>();
-  const toPositiveNumber = (value: string | number | null | undefined) => {
-    const parsed = value === null || value === undefined ? null : Number(value);
-    return parsed !== null && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-  };
-  const toNonNegativeNumber = (value: string | number | null | undefined) => {
-    const parsed = value === null || value === undefined ? null : Number(value);
-    return parsed !== null && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-  };
+  // 统一使用 canonical 数据层的解析语义（server/data/validation）：
+  //   price（元/股）→ parsePositivePrice；volume（手）/amount（千元）→ parseNonNegativeNumber。
+  // 禁止在此重复维护一套 toPositiveNumber / toNonNegativeNumber。
   for (const row of rows) {
-    const openPrice = toPositiveNumber(row.openPrice);
-    const closePrice = toPositiveNumber(row.closePrice);
+    const openPrice = parsePositivePrice(row.openPrice);
+    const closePrice = parsePositivePrice(row.closePrice);
     if (openPrice === null && closePrice === null) continue;
     map.set(`${row.stockCode}::${row.tradeDate}`, {
       openPrice,
       closePrice,
-      highPrice: toPositiveNumber(row.highPrice),
-      lowPrice: toPositiveNumber(row.lowPrice),
-      amount: toNonNegativeNumber(row.amount),
-      volume: toNonNegativeNumber(row.volume),
-      preClosePrice: toPositiveNumber(row.preClosePrice),
+      highPrice: parsePositivePrice(row.highPrice),
+      lowPrice: parsePositivePrice(row.lowPrice),
+      amount: parseNonNegativeNumber(row.amount),
+      volume: parseNonNegativeNumber(row.volume),
+      preClosePrice: parsePositivePrice(row.preClosePrice),
     });
   }
   return map;
@@ -809,15 +815,42 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
 }
 
 /**
+ * 生产核心模式（includeResearch=false）必须由调用方注入 realisticSimulationOverride，
+ * 防止生产请求意外回退到 research-legacy 模拟器（STEP 5 P2-2 边界铁律）。
+ */
+function throwProductionOverrideRequired(): never {
+  throw new Error(
+    "buildLeaderCandidateBacktest 生产核心模式（includeResearch=false）缺少 realisticSimulationOverride："
+    + "生产回测模拟结果必须由 Strategy Engine 注入，禁止回退到 legacy 交易模拟器。",
+  );
+}
+
+/**
  * 回测口径：在T日收盘后，严格使用T日及以前数据生成候选；
  * 成功定义为该股票在下一已记录交易日（T+1）仍出现在涨停记录中。
+ *
+ * runtime（可选，Step 5 FIX-2 / P2-2）：
+ *   · realisticSimulationOverride：生产入口注入由 Strategy Engine
+ *     （runStrategyEngineBacktest + Risk/PositionSizer/Backtest Core）产出的模拟结果。
+ *   · includeResearch（默认 true）：研究路径开关。研究报表（下行风险/持仓快照/
+ *     finalVerdict 样本外成分）依赖 research-legacy 模拟器，仅研究路径构建；
+ *     生产核心请求由 runLeaderCandidateStrategyBacktest 传入 includeResearch=false 与
+ *     realisticSimulationOverride，从而保证生产请求路径不隐式执行 legacy 交易模拟器。
+ *     当 includeResearch=true 且未传 override 时（研究兼容调用方与既有测试），
+ *     顶层模拟段使用研究出口 RESEARCH_LEGACY_SIMULATION_SOURCE 兜底。
  */
 export function buildLeaderCandidateBacktest(
   records: LeaderCandidateSourceRecord[],
   options: LeaderCandidateBacktestOptions = {},
   context: LeaderCandidateBacktestContext = {},
+  runtime: { realisticSimulationOverride?: RealisticBacktestResult; includeResearch?: boolean } = {},
 ): LeaderCandidateBacktestResult {
   const observationDays = options.observationDays ?? 1;
+  // STEP 5 P2-2：研究报表（downsideRiskResearch / strategyPortfolioSnapshot 及 finalVerdict 的样本外成分）
+  // 依赖 research-legacy 交易模拟器，仅研究路径显式开启（includeResearch=true，默认兼容历史调用方）。
+  // 生产回测请求由 leaderCandidateStrategyBacktest.ts 传入 includeResearch=false，
+  // 保证生产请求路径不隐式执行 legacy 模拟器。
+  const includeResearch = runtime.includeResearch ?? true;
   const candidateTradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => left.localeCompare(right));
   const marketTradingDates = Array.from(new Set(context.tradingDates ?? candidateTradingDates))
@@ -994,41 +1027,44 @@ export function buildLeaderCandidateBacktest(
   const outOfSampleTPlus1CloseToTPlus2Close = calculateExitSummary(outOfSampleAtThreshold);
   const resumeDayExit = calculateResumeExitSummary(appliedRows);
   const outOfSampleResumeDayExit = calculateResumeExitSummary(outOfSampleAtThreshold);
-  const realisticSimulation = simulateRealisticTPlus1ToTPlus2(
-    appliedRows,
-    options.realistic,
-    context.priceByStockDate,
-    marketTradingDates,
-  );
+  // 生产核心请求（includeResearch=false）必须由调用方注入 Strategy Engine 模拟结果；
+  // 研究路径（includeResearch=true）未注入 override 时，以研究出口兜底（legacy 兼容调用方与既有测试）。
+  const realisticSimulation = runtime.realisticSimulationOverride
+    ?? (includeResearch
+      ? RESEARCH_LEGACY_SIMULATION_SOURCE.simulate(appliedRows, options.realistic, context.priceByStockDate, marketTradingDates)
+      : throwProductionOverrideRequired());
   // 风险研究使用全历史候选生成多个滚动窗口；每个窗口的验证段严格位于前置训练段之后，避免固定70/30切分限制可验证样本量。
-  const downsideRiskResearch = buildDownsideRiskResearch(appliedRows, options.downsideRisk, options.realistic, {
-    priceByStockDate: context.priceByStockDate,
-    tradingDates: marketTradingDates,
-    marketFactorsByDate: context.marketFactorsByDate,
-  });
-  const latestSignalDate = candidateTradingDates.at(-1) ?? null;
-  const latestCandidateResult = latestSignalDate
-    ? buildLeaderCandidatesForDate(records, latestSignalDate, {
-      candidateLimit: null,
-      stockNameByCode,
-      phaseByDate: context.phaseByDate,
+  // P2-2：风险研究实验的模拟段为 research-legacy 语义，仅研究路径构建；生产回测请求不进入该分支。
+  const downsideRiskResearch = includeResearch
+    ? buildDownsideRiskResearch(appliedRows, options.downsideRisk, options.realistic, {
       priceByStockDate: context.priceByStockDate,
+      tradingDates: marketTradingDates,
       marketFactorsByDate: context.marketFactorsByDate,
     })
-    : buildLeaderCandidates([]);
-  const strategyPortfolioSnapshot = buildLeaderCandidateStrategyPortfolioSnapshot(
-    latestCandidateResult,
-    downsideRiskResearch.fullCycle.experiments,
-    {
-      appliedMinScore,
-      penaltyWeight: downsideRiskResearch.penaltyWeight,
-      autoTunePenaltyWeight: downsideRiskResearch.autoTunePenaltyWeight,
-      hardRiskThreshold: downsideRiskResearch.hardRiskThreshold,
-      rollingWindows: downsideRiskResearch.rollingWindows,
-      priceByStockDate: context.priceByStockDate,
-      historicalRows: appliedRows,
-    },
-  );
+    : null;
+  const latestSignalDate = candidateTradingDates.at(-1) ?? null;
+  // 持仓快照依赖研究实验（含 research-legacy 逐笔退出），仅研究路径生成。
+  const strategyPortfolioSnapshot = includeResearch
+    ? buildLeaderCandidateStrategyPortfolioSnapshot(
+      latestSignalDate ? buildLeaderCandidatesForDate(records, latestSignalDate, {
+        candidateLimit: null,
+        stockNameByCode,
+        phaseByDate: context.phaseByDate,
+        priceByStockDate: context.priceByStockDate,
+        marketFactorsByDate: context.marketFactorsByDate,
+      }) : buildLeaderCandidates([]),
+      downsideRiskResearch?.fullCycle.experiments ?? [],
+      {
+        appliedMinScore,
+        penaltyWeight: downsideRiskResearch?.penaltyWeight ?? defaultDownsideRiskPenaltyWeight,
+        autoTunePenaltyWeight: downsideRiskResearch?.autoTunePenaltyWeight ?? false,
+        hardRiskThreshold: downsideRiskResearch?.hardRiskThreshold ?? 0,
+        rollingWindows: downsideRiskResearch?.rollingWindows ?? [],
+        priceByStockDate: context.priceByStockDate,
+        historicalRows: appliedRows,
+      },
+    )
+    : null;
   const signalDates = Array.from(new Set(appliedRows.map((row) => row.date))).sort();
   const marketFactorRows = signalDates.map((date) => context.marketFactorsByDate?.get(date));
   const marketFactorCoverage: LeaderCandidateMarketFactorCoverage = {
@@ -1057,7 +1093,8 @@ export function buildLeaderCandidateBacktest(
   const factorEvaluationReport = evaluateFactorEffectiveness(rows);
   const factorCombinationReport = buildFactorNeutralizationReport(rows);
   const overfittingGuardReport = buildOverfittingGuardReport(realisticSimulation, 30);
-  const riskPenaltyRobustness = downsideRiskResearch.strategyRobustness.find((item) => item.key === "riskPenalty");
+  // P2-2：样本外（WFA）风险稳健性来自研究报表，仅研究路径可用；生产核心结论不含该成分，由研究端点补齐。
+  const riskPenaltyRobustness = downsideRiskResearch?.strategyRobustness.find((item) => item.key === "riskPenalty") ?? null;
   const finalVerdict = buildFinalVerdict(
     factorEvaluationReport,
     factorCombinationReport,

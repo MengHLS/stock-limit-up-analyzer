@@ -1,5 +1,8 @@
 import type { LeaderCandidateBacktestRow, LeaderCandidateDailyPrice } from "./leaderCandidates";
-import { normalCdf } from "./overfittingGuard";
+import { mean, median, skewness, excessKurtosis, neweyWestMeanTStat, sampleStandardDeviation, spearman, normalTwoSidedPValue } from "../shared/quant-stats";
+
+// 保持既有调用方（factorCombination.ts）兼容：Spearman 已统一迁移到 shared/quant-stats。
+export { spearman } from "../shared/quant-stats";
 
 /**
  * 技术面因子库（第一版）：换手率、量比、振幅。
@@ -68,62 +71,6 @@ function toFiniteNumber(value: string | number | null | undefined): number | nul
 function parseCirculationValueYi(circulationValue: string | null | undefined): number | null {
   const parsed = toFiniteNumber(circulationValue);
   return parsed !== null && parsed > 0 ? parsed : null;
-}
-
-function mean(values: number[]): number | null {
-  if (values.length === 0) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((left, right) => left - right);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
-}
-
-function skewness(values: number[], meanValue: number, std: number): number | null {
-  if (values.length < 3 || std <= 0) return null;
-  return values.reduce((sum, value) => sum + ((value - meanValue) / std) ** 3, 0) / values.length;
-}
-
-function excessKurtosis(values: number[], meanValue: number, std: number): number | null {
-  if (values.length < 4 || std <= 0) return null;
-  return values.reduce((sum, value) => sum + ((value - meanValue) / std) ** 4, 0) / values.length - 3;
-}
-
-/**
- * Newey-West HAC 稳健 t 统计量：考虑 IC 序列的自相关，不假设每日 IC 独立。
- * Bartlett 核权重 w_l = 1 - l/(L+1)；默认滞后 L = floor(4·(n/100)^(2/9))。
- * 返回均值的 HAC 标准误与 t 统计量；样本 < 3 或标准误为 0 时返回 null。
- */
-function neweyWestMeanTStat(series: number[], lag?: number): { tStat: number; se: number } | null {
-  const n = series.length;
-  if (n < 3) return null;
-  const meanValue = series.reduce((sum, value) => sum + value, 0) / n;
-  const errors = series.map((value) => value - meanValue);
-  const maxLag = Math.max(1, Math.floor(4 * (n / 100) ** (2 / 9)));
-  const L = lag ?? Math.min(n - 2, maxLag);
-  const gamma = (l: number): number => {
-    let sum = 0;
-    for (let t = l; t < n; t += 1) sum += errors[t]! * errors[t - l]!;
-    return sum / n;
-  };
-  let variance = gamma(0);
-  for (let l = 1; l <= L; l += 1) {
-    variance += 2 * (1 - l / (L + 1)) * gamma(l);
-  }
-  const se = Math.sqrt(Math.max(0, variance / n));
-  if (se <= 0) return null;
-  return { tStat: meanValue / se, se };
-}
-
-function sampleStd(values: number[]): number | null {
-  if (values.length < 2) return null;
-  const meanValue = mean(values);
-  if (meanValue === null) return null;
-  const variance = values.reduce((sum, value) => sum + (value - meanValue) ** 2, 0) / (values.length - 1);
-  return Math.sqrt(variance);
 }
 
 /** 因子-收益关系形态识别：基于五分组均值的启发式判定（供判断因子是否线性可用）。 */
@@ -355,40 +302,6 @@ export type FactorEffectivenessReport = {
   icDecay: FactorDecayResult[];
 };
 
-function rankValues(values: number[]): number[] {
-  const indexed = values.map((value, index) => ({ value, index }));
-  indexed.sort((left, right) => left.value - right.value);
-  const ranks = new Array<number>(values.length);
-  for (let i = 0; i < indexed.length; i += 1) {
-    let j = i;
-    while (j + 1 < indexed.length && indexed[j + 1]!.value === indexed[i]!.value) j += 1;
-    const averageRank = (i + j) / 2 + 1;
-    for (let k = i; k <= j; k += 1) ranks[indexed[k]!.index] = averageRank;
-    i = j;
-  }
-  return ranks;
-}
-
-/** Spearman 秩相关；样本量 < 3 或任一变差为 0 时返回 null。 */
-export function spearman(x: number[], y: number[]): number | null {
-  if (x.length < 3) return null;
-  const rx = rankValues(x);
-  const ry = rankValues(y);
-  const meanX = mean(rx);
-  const meanY = mean(ry);
-  if (meanX === null || meanY === null) return null;
-  let numerator = 0;
-  let denomX = 0;
-  let denomY = 0;
-  for (let i = 0; i < rx.length; i += 1) {
-    numerator += (rx[i]! - meanX) * (ry[i]! - meanY);
-    denomX += (rx[i]! - meanX) ** 2;
-    denomY += (ry[i]! - meanY) ** 2;
-  }
-  if (denomX === 0 || denomY === 0) return null;
-  return numerator / Math.sqrt(denomX * denomY);
-}
-
 function readForwardReturn(row: LeaderCandidateBacktestRow, field: FactorForwardReturnField): number | null {
   const value = row[field];
   return value === null || value === undefined || !Number.isFinite(value) ? null : value;
@@ -435,9 +348,9 @@ function summarizeIcSeries(dailyIcs: number[]): {
     : null;
   const hac = neweyWestMeanTStat(dailyIcs);
   const icHacTStat = hac?.tStat ?? null;
-  const pValue = icHacTStat !== null ? 2 * (1 - normalCdf(Math.abs(icHacTStat))) : null;
-  const icSkewness = meanIc !== null && icStd !== null && icStd > 0 ? skewness(dailyIcs, meanIc, icStd) : null;
-  const icKurtosis = meanIc !== null && icStd !== null && icStd > 0 ? excessKurtosis(dailyIcs, meanIc, icStd) : null;
+  const pValue = icHacTStat !== null ? normalTwoSidedPValue(icHacTStat) : null;
+  const icSkewness = skewness(dailyIcs);
+  const icKurtosis = excessKurtosis(dailyIcs);
   const positiveIcRatio = dailyIcs.length === 0 ? null : dailyIcs.filter((value) => value > 0).length / dailyIcs.length;
   return { meanIc, icStd, icIr, direction, icTStat, icHacTStat, pValue, icSkewness, icKurtosis, positiveIcRatio };
 }
@@ -525,7 +438,7 @@ function buildQuintiles(
     const forwardReturns = slice.map((item) => item.forward);
     const averageForward = mean(forwardReturns);
     const medianForward = median(forwardReturns);
-    const std = sampleStd(forwardReturns);
+    const std = sampleStandardDeviation(forwardReturns);
     const positiveRate = forwardReturns.length === 0 ? null : forwardReturns.filter((value) => value > 0).length / forwardReturns.length;
     const sharpe = averageForward !== null && std !== null && std > 0 ? averageForward / std : null;
     buckets.push({

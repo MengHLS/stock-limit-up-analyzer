@@ -13,11 +13,13 @@ import {
   formatMissedReason,
   type OpenExpectationTable,
 } from "./openExpectation";
+import { isPriceAtLimitDown, isPriceAtLimitUp } from "./data/boardRules";
 
 /**
  * 前向纸面交易闭环（四-P1）：真实样本外兜底。
  *
- * 与历史回测 `simulateRealisticTPlus1ToTPlus2` 的差别在于：这里是有状态的、逐日推进的增量过程——
+ * 与历史回测（research-legacy 交易模拟器，见 research/legacyTransactionSimulator）的差别在于：
+ * 这里是有状态的、逐日推进的增量过程——
  * T 日收盘用「仅 T 日及以前」的信号生成次日准备买入清单 → 下一交易日开盘按真实开盘价成交 →
  * 持仓按风险管理的止盈止损规则逐日追踪出清 → 累积真实前向权益曲线，与历史回测对比。
  *
@@ -409,7 +411,14 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
       skippedOrders.push(createSkippedOrder(pending, today, reason));
       continue;
     }
-    const limitUp = validPrice(pending.signalClosePrice) && openPrice >= pending.signalClosePrice * 1.099;
+    // 涨跌停判定统一走 boardRules 权威（主板 10% / ST 5% / 创业板·科创板 20% / 北交所 30%），
+    // 不再使用 1.099 / 0.901 近似；规则不可判定时视为不能确认触及（null），不做「伪 10%」假设。
+    const limitUp = isPriceAtLimitUp({
+      stockCode: pending.stockCode,
+      stockName: pending.stockName,
+      price: openPrice,
+      referencePrice: pending.signalClosePrice,
+    }) === true;
     if (blockLimitUpBuys && limitUp) {
       skippedOrders.push(createSkippedOrder(pending, today, "开盘接近涨停，按保守规则不可追买"));
       continue;
@@ -513,11 +522,22 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
     const marketLowPrice = dayPrice?.lowPrice ?? null;
     const holdingDays = Math.max(1, todayIndex - position.entryTradingDateIndex + 1);
     const closeReturnPercent = ((closePrice - position.entryPrice) / position.entryPrice) * 100;
-    const limitDown = validPrice(position.previousClosePrice) && closePrice <= position.previousClosePrice * 0.901;
+    const limitDown = isPriceAtLimitDown({
+      stockCode: position.stockCode,
+      stockName: position.stockName,
+      price: closePrice,
+      referencePrice: position.previousClosePrice,
+    }) === true;
+    const opensAtLimitDown = isPriceAtLimitDown({
+      stockCode: position.stockCode,
+      stockName: position.stockName,
+      price: marketOpenPrice,
+      referencePrice: position.previousClosePrice,
+    }) === true;
     const oneWordLimitDown = limitDown
-      && validPrice(position.previousClosePrice)
+      && opensAtLimitDown
       && validPrice(marketOpenPrice)
-      && marketOpenPrice <= position.previousClosePrice * 0.901
+      && validPrice(position.previousClosePrice)
       && Math.abs(marketOpenPrice - closePrice) <= position.previousClosePrice * 0.002;
 
     if (enableIntradayStopLoss && !oneWordLimitDown) {

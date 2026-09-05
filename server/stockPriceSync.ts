@@ -12,6 +12,7 @@ import {
   type StockDailyPriceUpsert,
 } from "./db";
 import { fetchTushareDailyPricesByDate, fetchTushareTradingDates, fetchTushareStockTradeDates, isTushareRateLimitError } from "./tushare";
+import { toCanonicalBar, validateMarketBar, type RawDailyPriceRow } from "./data";
 
 export type StockPriceSyncMode = "full" | "recent";
 
@@ -39,6 +40,111 @@ export type StockPriceSyncResult = {
 
 const RECENT_SYNC_DATE_COUNT = 8;
 const TUSHARE_SYNC_CONCURRENCY = 2;
+
+// ---------------------------------------------------------------------------
+// 生产入库数据质量路径（P1-F3）：
+//   External Raw Row → toCanonicalBar（canonical adapter）→ validateMarketBar（三态校验）
+//     → StockDailyPriceUpsert（仅 VALID / 可写入的 WARNING）
+// 铁律：
+//   - INVALID 行（OHLC 矛盾、负 volume/amount、非正价格等）绝不进入正常入库；
+//   - WARNING 行按既有业务要求可入库，但必须返回质量信息（qualityIssues）供上层留痕/告警；
+//   - 缺失数值字段保持 null（禁止 String(undefined) === "undefined" / String(null) === "null"），
+//     DB 非空列（open/close/preClose）缺失视为不可持久化，一并拒写并计数。
+// ---------------------------------------------------------------------------
+
+/** 单行质量留痕信息（provenance）。 */
+export interface ValidatedPriceQualityIssue {
+  stockCode: string;
+  tradeDate: string;
+  status: "VALID" | "WARNING" | "INVALID" | "UNPERSISTABLE";
+  codes: string[];
+}
+
+/** 生产入库转换结果。 */
+export interface ValidatedPriceUpsertResult {
+  /** 通过校验且可写入（open/close/preClose 均存在以匹配 DB NOT NULL）的 upsert 行。 */
+  rows: StockDailyPriceUpsert[];
+  /** 被校验为 INVALID 而拒绝写入的行数。 */
+  invalidCount: number;
+  /** 校验通过但因 open/close/preClose 缺失（DB NOT NULL 列）无法持久化的行数。 */
+  unpersistableCount: number;
+  /** 质量留痕：WARNING 放行行 + INVALID/不可持久化拒绝行（供日志与审计）。 */
+  qualityIssues: ValidatedPriceQualityIssue[];
+}
+
+/** DB 中 NOT NULL 的价格列：任缺其一即无法按现有 schema 入库。 */
+const REQUIRED_PERSISTENCE_PRICE_FIELDS = ["open", "close", "preClose"] as const;
+
+/** 把外部行情行（Tushare / DB 读取）经 canonical adapter + validation 后转换为可入库行。 */
+export function toValidatedStockDailyPriceUpserts(
+  priceRows: ReadonlyArray<RawDailyPriceRow>,
+  requestedCodes: ReadonlySet<string>,
+): ValidatedPriceUpsertResult {
+  const rows: StockDailyPriceUpsert[] = [];
+  const qualityIssues: ValidatedPriceQualityIssue[] = [];
+  let invalidCount = 0;
+  let unpersistableCount = 0;
+
+  for (const price of priceRows) {
+    if (!requestedCodes.has(price.stockCode)) continue;
+    const bar = toCanonicalBar(price);
+    const validation = validateMarketBar(bar);
+    const status = validation.status;
+    if (status === "INVALID") {
+      invalidCount += 1;
+      qualityIssues.push({
+        stockCode: bar.symbol,
+        tradeDate: bar.timestamp,
+        status: "INVALID",
+        codes: validation.issues.map((issue) => issue.code),
+      });
+      continue;
+    }
+    // NOT NULL 列缺失 → 无法按现有 schema 持久化（不能把 null 写成 "null" 字符串）。
+    const missingRequired = REQUIRED_PERSISTENCE_PRICE_FIELDS.some((field) => bar[field] === null || !Number.isFinite(bar[field]!));
+    if (missingRequired) {
+      unpersistableCount += 1;
+      qualityIssues.push({
+        stockCode: bar.symbol,
+        tradeDate: bar.timestamp,
+        status: "UNPERSISTABLE",
+        codes: ["REQUIRED_PRICE_MISSING"],
+      });
+      continue;
+    }
+    // 数值 → 字符串写库（DB 列 varchar）；可空字段缺失保留 null（数据库 null），
+    // 绝不产生 "undefined"/"null" 字面量。
+    const text = (value: number | null | undefined): string | null =>
+      value === null || value === undefined || !Number.isFinite(value) ? null : String(value);
+    rows.push({
+      stockCode: bar.symbol,
+      tradeDate: bar.timestamp,
+      openPrice: text(bar.open)!,
+      closePrice: text(bar.close)!,
+      highPrice: text(bar.high),
+      lowPrice: text(bar.low),
+      amount: text(bar.amount),
+      volume: text(bar.volume),
+      preClosePrice: text(bar.preClose)!,
+      source: "tushare",
+    });
+    if (status === "WARNING") {
+      qualityIssues.push({
+        stockCode: bar.symbol,
+        tradeDate: bar.timestamp,
+        status: "WARNING",
+        codes: validation.issues.map((issue) => issue.code),
+      });
+    }
+  }
+
+  return { rows, invalidCount, unpersistableCount, qualityIssues };
+}
+
+/** 把一条质量留痕转成可读日志（相同 stock-date 聚合 code）。 */
+export function formatValidatedPriceQualityIssue(issue: ValidatedPriceQualityIssue): string {
+  return `[${issue.status}] ${issue.stockCode} ${issue.tradeDate}: ${issue.codes.join(",")}`;
+}
 
 /**
  * 观察窗口（信号日 + N 个可交易日）的交易日历终点缓冲，单位自然日。
@@ -128,23 +234,12 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
     const batchResults = await Promise.all(targetBatch.map(async (target) => {
       try {
         const priceRows = await fetchTushareDailyPricesByDate(target.tradeDate);
-        const requestedCodes = new Set(target.stockCodes);
-        const relevantRows: StockDailyPriceUpsert[] = priceRows
-          .filter((price) => requestedCodes.has(price.stockCode))
-          .map((price) => ({
-            stockCode: price.stockCode,
-            tradeDate: price.tradeDate,
-            openPrice: String(price.openPrice),
-            closePrice: String(price.closePrice),
-            highPrice: String(price.highPrice),
-            lowPrice: String(price.lowPrice),
-            amount: String(price.amount),
-            volume: String(price.volume),
-            preClosePrice: String(price.preClosePrice),
-            source: "tushare",
-          }));
-        const savedCount = await upsertStockDailyPrices(relevantRows);
-        return { savedCount, missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null, rateLimited: false };
+        // 生产入库必须经过 canonical adapter + validateMarketBar（P1-F3）：
+        // INVALID 不写入；WARNING 写入但留下质量信息；缺失字段保持 null 而非 "undefined"/"null"。
+        const validated = toValidatedStockDailyPriceUpserts(priceRows, new Set(target.stockCodes));
+        for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
+        const savedCount = await upsertStockDailyPrices(validated.rows);
+        return { savedCount, missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null, rateLimited: false };
       } catch (error) {
         const rateLimitedHit = isTushareRateLimitError(error);
         console.warn(`[StockPriceSync] 跳过 ${target.tradeDate} 日线同步：`, error);
@@ -199,20 +294,9 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
     const batchResults = await Promise.all(targetBatch.map(async (target) => {
       try {
         const priceRows = await fetchTushareDailyPricesByDate(target.tradeDate);
-        const requestedCodes = new Set(target.stockCodes);
-        const relevantRows: StockDailyPriceUpsert[] = priceRows.filter((price) => requestedCodes.has(price.stockCode)).map((price) => ({
-          stockCode: price.stockCode,
-          tradeDate: price.tradeDate,
-          openPrice: String(price.openPrice),
-          closePrice: String(price.closePrice),
-          highPrice: String(price.highPrice),
-          lowPrice: String(price.lowPrice),
-          amount: String(price.amount),
-          volume: String(price.volume),
-          preClosePrice: String(price.preClosePrice),
-          source: "tushare",
-        }));
-        return { savedCount: await upsertStockDailyPrices(relevantRows), missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null, rateLimited: false };
+        const validated = toValidatedStockDailyPriceUpserts(priceRows, new Set(target.stockCodes));
+        for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
+        return { savedCount: await upsertStockDailyPrices(validated.rows), missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null, rateLimited: false };
       } catch (error) {
         const rateLimitedHit = isTushareRateLimitError(error);
         console.warn(`[StockPriceSync] 跳过上传日期 ${target.tradeDate} 日线同步：`, error);
@@ -297,23 +381,10 @@ export async function syncCandidateDailyPricesForDateRange(startDate: string, en
     const batchResults = await Promise.all(targetBatch.map(async (target) => {
       try {
         const priceRows = await fetchTushareDailyPricesByDate(target.tradeDate);
-        const requestedCodes = new Set(target.stockCodes);
-        const relevantRows: StockDailyPriceUpsert[] = priceRows
-          .filter((price) => requestedCodes.has(price.stockCode))
-          .map((price) => ({
-            stockCode: price.stockCode,
-            tradeDate: price.tradeDate,
-            openPrice: String(price.openPrice),
-            closePrice: String(price.closePrice),
-            highPrice: String(price.highPrice),
-            lowPrice: String(price.lowPrice),
-            amount: String(price.amount),
-            volume: String(price.volume),
-            preClosePrice: String(price.preClosePrice),
-            source: "tushare",
-          }));
-        const savedCount = await upsertStockDailyPrices(relevantRows);
-        return { tradeDate: target.tradeDate, requestedCount: target.stockCodes.length, savedCount, missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failed: false, rateLimited: false };
+        const validated = toValidatedStockDailyPriceUpserts(priceRows, new Set(target.stockCodes));
+        for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
+        const savedCount = await upsertStockDailyPrices(validated.rows);
+        return { tradeDate: target.tradeDate, requestedCount: target.stockCodes.length, savedCount, missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failed: false, rateLimited: false };
       } catch (error) {
         const rateLimitedHit = isTushareRateLimitError(error);
         console.warn(`[StockPriceSync] 按日期范围同步跳过 ${target.tradeDate}：`, error);
@@ -405,8 +476,9 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
     const batchResults = await Promise.all(targets.slice(index, index + TUSHARE_SYNC_CONCURRENCY).map(async (target) => {
       try {
         const requestedCodes = new Set(target.stockCodes);
-        const relevantRows = (await fetchTushareDailyPricesByDate(target.tradeDate)).filter((price) => requestedCodes.has(price.stockCode)).map((price) => ({ stockCode: price.stockCode, tradeDate: price.tradeDate, openPrice: String(price.openPrice), closePrice: String(price.closePrice), highPrice: String(price.highPrice), lowPrice: String(price.lowPrice), amount: String(price.amount), volume: String(price.volume), preClosePrice: String(price.preClosePrice), source: "tushare" } satisfies StockDailyPriceUpsert));
-        return { savedCount: await upsertStockDailyPrices(relevantRows), missingCount: Math.max(0, target.stockCodes.length - relevantRows.length), failedDate: null as string | null };
+        const validated = toValidatedStockDailyPriceUpserts(await fetchTushareDailyPricesByDate(target.tradeDate), requestedCodes);
+        for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
+        return { savedCount: await upsertStockDailyPrices(validated.rows), missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null as string | null };
       } catch (error) {
         console.warn(`[StockPriceSync] 上传补全跳过 ${target.tradeDate}：`, error);
         return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate };

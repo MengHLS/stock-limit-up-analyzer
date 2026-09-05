@@ -2,6 +2,8 @@ import { eq, desc, like, or, sql, gte, count, and, inArray, notInArray } from "d
 import { drizzle } from "drizzle-orm/mysql2";
 import { lte } from "drizzle-orm";
 import { normalizeStockCode } from "./stockIdentity";
+import type { RawDailyPriceRow } from "./data";
+import { runLeaderCandidateResearchReport, runLeaderCandidateStrategyBacktest } from "./leaderCandidateStrategyBacktest";
 import { 
   InsertUser, 
   users, 
@@ -37,7 +39,6 @@ import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
 import { normalizeSectorName } from '../shared/stockDataNormalization';
 import {
-  buildLeaderCandidateBacktest,
   buildLeaderCandidates,
   buildLeaderCandidatesForDate,
   buildLeaderCandidateDailyPriceMap,
@@ -46,6 +47,7 @@ import {
   type LeaderCandidateBacktestResult,
   type LeaderCandidateDailyPrice,
   type LeaderCandidateDailyPriceCoverage,
+  type LeaderCandidateDailyPriceRow,
   type LeaderCandidateSourceRecord,
 } from './leaderCandidates';
 import { TTLCache, stableHash } from './backtestCache';
@@ -918,10 +920,99 @@ export async function correctLimitUpStockIdentity(params: {
   return { ok: true, updatedRows: targetIds.length, dates };
 }
 
-/** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格。 */
+// ---------------------------------------------------------------------------
+// (stockCode, tradeDate) 数据库级唯一约束（P2-F3）
+//
+// stock_daily_prices 必须以 (stockCode, tradeDate) 唯一：
+//   - 迁移/schema 中已声明 uq_stock_daily_price_stock_date；
+//   - 若历史库因早期未建约束而存在重复行，直接加唯一索引会失败，因此先清理脏数据
+//     （同一股票—交易日保留最小 id 行），再补建约束；
+//   - 幂等：仅当约束缺失时才执行清理 + DDL，进程内只执行一次。
+// upsertStockDailyPrices 依赖该唯一键做 ON DUPLICATE KEY UPDATE。
+// ---------------------------------------------------------------------------
+
+const STOCK_DAILY_PRICE_UNIQUE_INDEX = "uq_stock_daily_price_stock_date";
+
+/** 需要删除的重复行 id（同一 stockCode+tradeDate 只保留最小 id）。纯函数，供 SQL 路径与测试复用。 */
+export function duplicateStockDailyPriceIdsToRemove(
+  rows: ReadonlyArray<{ id: number; stockCode: string; tradeDate: string }>,
+): number[] {
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const key = `${row.stockCode}::${row.tradeDate}`;
+    const list = groups.get(key) ?? [];
+    list.push(row.id);
+    groups.set(key, list);
+  }
+  const toRemove: number[] = [];
+  for (const ids of Array.from(groups.values())) {
+    ids.sort((left: number, right: number) => left - right);
+    for (const id of ids.slice(1)) toRemove.push(id);
+  }
+  return toRemove.sort((left: number, right: number) => left - right);
+}
+
+let stockDailyUniqueEnsured = false;
+let stockDailyUniqueEnsurePromise: Promise<void> | null = null;
+
+/** MySQL/TiDB：唯一索引已存在时的错误（ER_DUP_KEYNAME, 1061）。 */
+function isDuplicateIndexNameError(error: unknown): boolean {
+  return error instanceof Error && /Duplicate key name|ER_DUP_KEYNAME|already exists/i.test(error.message);
+}
+
+/** 需先清理重复数据再建索引的错误（ER_DUP_ENTRY, 1062）。 */
+function isDuplicateEntryError(error: unknown): boolean {
+  return error instanceof Error && /Duplicate entry|ER_DUP_ENTRY/i.test(error.message);
+}
+
+/**
+ * 确保 stock_daily_prices 存在 (stockCode, tradeDate) 唯一约束。
+ * 流程（幂等）：
+ *   1) 尝试创建唯一索引；若已存在（Duplicate key name）→ 完成；
+ *   2) 若因历史重复行失败（Duplicate entry）→ 先删除同键中的多余行（保留最小 id），再重试创建。
+ * 返回 promise 不 reject（失败降级告警），保证 upsert 主路径不被 DDL 问题阻塞。
+ */
+function ensureStockDailyPricesUniqueIndex(db: NonNullable<Awaited<ReturnType<typeof getDb>>>): Promise<void> {
+  if (stockDailyUniqueEnsured) return Promise.resolve();
+  if (!stockDailyUniqueEnsurePromise) {
+    stockDailyUniqueEnsurePromise = (async () => {
+      const createIndex = () => db.execute(sql.raw(
+        `CREATE UNIQUE INDEX \`${STOCK_DAILY_PRICE_UNIQUE_INDEX}\` ON \`stock_daily_prices\` (\`stockCode\`, \`tradeDate\`)`,
+      ));
+      try {
+        await createIndex();
+      } catch (error) {
+        if (isDuplicateIndexNameError(error)) {
+          stockDailyUniqueEnsured = true; // 约束已存在
+          return;
+        }
+        if (!isDuplicateEntryError(error)) throw error;
+        // 历史脏数据：删除同一 (stockCode, tradeDate) 中 id 较大的重复行，再补建约束。
+        await db.execute(sql`
+          DELETE \`p1\` FROM \`stock_daily_prices\` AS \`p1\`
+          INNER JOIN \`stock_daily_prices\` AS \`p2\`
+            ON \`p1\`.\`stockCode\` = \`p2\`.\`stockCode\`
+           AND \`p1\`.\`tradeDate\` = \`p2\`.\`tradeDate\`
+           AND \`p1\`.\`id\` > \`p2\`.\`id\`
+        `);
+        await createIndex();
+      }
+      stockDailyUniqueEnsured = true;
+    })().catch((error: unknown) => {
+      // DDL 失败（如无权限）不应使 upsert 崩溃：降级并告警，让上层继续。
+      stockDailyUniqueEnsurePromise = null;
+      console.warn(`[Database] 确保 stock_daily_prices 唯一约束失败：`, error);
+    });
+  }
+  return stockDailyUniqueEnsurePromise;
+}
+
+/** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格（依赖 (stockCode, tradeDate) 唯一键）。 */
 export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Promise<number> {
   const db = await getDb();
   if (!db || rows.length === 0) return 0;
+  // 惰性确保唯一约束（幂等；失败只告警不阻塞写入，避免数据同步完全中断）。
+  await ensureStockDailyPricesUniqueIndex(db);
 
   const BATCH_SIZE = 500;
   for (let index = 0; index < rows.length; index += BATCH_SIZE) {
@@ -956,10 +1047,10 @@ export async function getStockDailyPriceTradeDates(startDate?: string, endDate?:
   return rows.map((row) => row.tradeDate);
 }
 
-/** 构造候选池回测所需的股票—交易日价格映射。 */
-export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, LeaderCandidateDailyPrice>> {
+/** stock_daily_prices 全量原始行情行（统一喂给价格映射与 Strategy Engine canonical 层）。 */
+async function loadStockDailyPriceRows(): Promise<LeaderCandidateDailyPriceRow[]> {
   const db = await getDb();
-  if (!db) return new Map();
+  if (!db) return [];
   const rows = await db.select({
     stockCode: stockDailyPrices.stockCode,
     tradeDate: stockDailyPrices.tradeDate,
@@ -971,8 +1062,12 @@ export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, Lea
     volume: stockDailyPrices.volume,
     preClosePrice: stockDailyPrices.preClosePrice,
   }).from(stockDailyPrices);
+  return rows;
+}
 
-  return buildLeaderCandidateDailyPriceMap(rows);
+/** 构造候选池回测所需的股票—交易日价格映射。 */
+export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, LeaderCandidateDailyPrice>> {
+  return buildLeaderCandidateDailyPriceMap(await loadStockDailyPriceRows());
 }
 
 /** 返回候选回测使用的行情覆盖状态，供研究页面提示高低价与成交额/量的实际回填进度。 */
@@ -1658,6 +1753,8 @@ export async function getLeaderCandidates() {
 
 type BacktestBaseContext = {
   records: LeaderCandidateSourceRecord[];
+  /** 全量原始日线行情行（供 Strategy Engine canonical/Feature 层使用）。 */
+  rawRows: RawDailyPriceRow[];
   context: LeaderCandidateBacktestContext;
 };
 
@@ -1676,7 +1773,7 @@ async function loadBacktestBaseContext(): Promise<BacktestBaseContext> {
   }
   const db = await getDb();
   if (!db) {
-    const empty: BacktestBaseContext = { records: [], context: {} };
+    const empty: BacktestBaseContext = { records: [], rawRows: [], context: {} };
     backtestBaseContextCache = { value: empty, expiresAt: now + BACKTEST_BASE_CONTEXT_TTL_MS };
     return empty;
   }
@@ -1693,7 +1790,10 @@ async function loadBacktestBaseContext(): Promise<BacktestBaseContext> {
 
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
-  const priceByStockDate = await getLeaderCandidateDailyPriceMap();
+  // 只拉一次全量日线：同一批原始行既用于 legacy 价格映射（priceByStockDate），
+  // 也直接作为 Strategy Engine 的 canonical/Feature 输入（rawRows），避免两套查询两套口径。
+  const rawRows = await loadStockDailyPriceRows();
+  const priceByStockDate = buildLeaderCandidateDailyPriceMap(rawRows);
   const dailyPriceCoverage = await getLeaderCandidateDailyPriceCoverage();
   const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
   const tradingDates = Array.from(new Set(Array.from(priceByStockDate.keys()).map((key) => key.split("::").at(-1)!))).sort();
@@ -1701,19 +1801,48 @@ async function loadBacktestBaseContext(): Promise<BacktestBaseContext> {
 
   const value: BacktestBaseContext = {
     records,
+    rawRows,
     context: { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage, marketFactorsByDate, suspendedDatesByStock },
   };
   backtestBaseContextCache = { value, expiresAt: now + BACKTEST_BASE_CONTEXT_TTL_MS };
   return value;
 }
 
-/** 获取基于历史候选池的T+1连板延续回测结果（按参数哈希做结果缓存）。 */
+/**
+ * 获取基于历史候选池的T+1连板延续回测结果（按参数哈希做结果缓存）。
+ *
+ * 正式生产入口（STEP 5 P2-2 边界）：结果由 Strategy Engine 新链路产出——
+ *   rawRows → toCanonicalBar/validateMarketBar → runFeaturePipeline →
+ *   FeatureSnapshotBundle → leader-candidate-baseline(featureMode="limit-up-confirm") →
+ *   PositionSizer/RiskManager → runBacktestWithRisk → Adapter → LeaderCandidateBacktestResult。
+ * 本函数为「生产核心版」：下行风险研究等 research-legacy 报表不在此构建
+ * （downsideRiskResearch / strategyPortfolioSnapshot 为 null），生产请求路径
+ * legacy 交易模拟器调用为 0。完整分析报表请调用 getLeaderCandidateResearch。
+ */
 export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktestOptions = {}): Promise<LeaderCandidateBacktestResult> {
   const cacheKey = stableHash(options);
   const cached = backtestResultCache.get(cacheKey);
   if (cached) return cached;
-  const { records, context } = await loadBacktestBaseContext();
-  const result = buildLeaderCandidateBacktest(records, options, context);
+  const { records, rawRows, context } = await loadBacktestBaseContext();
+  const result = runLeaderCandidateStrategyBacktest(records, rawRows, context, options);
+  backtestResultCache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * 完整分析报表（研究端点专用，STEP 5 P2-2）：生产核心 + 下行风险研究报表。
+ *
+ * 风险研究实验段使用 research-legacy 交易模拟器（显式研究来源、带 provenance），
+ * 仅允许研究请求调用；不得进入 getLeaderCandidateBacktest 生产请求。返回结果形状
+ * 与生产核心一致，但 downsideRiskResearch / strategyPortfolioSnapshot 非空，
+ * finalVerdict 含样本外（WFA）稳健性成分。
+ */
+export async function getLeaderCandidateResearch(options: LeaderCandidateBacktestOptions = {}): Promise<LeaderCandidateBacktestResult> {
+  const cacheKey = `research:${stableHash(options)}`;
+  const cached = backtestResultCache.get(cacheKey);
+  if (cached) return cached;
+  const { records, rawRows, context } = await loadBacktestBaseContext();
+  const result = runLeaderCandidateResearchReport(records, rawRows, context, options);
   backtestResultCache.set(cacheKey, result);
   return result;
 }

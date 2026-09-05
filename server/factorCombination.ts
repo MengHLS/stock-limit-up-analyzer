@@ -1,6 +1,9 @@
 import type { LeaderCandidateBacktestRow } from "./leaderCandidates";
-import { spearman } from "./technicalFactors";
+import { mean, pearsonCorrelation, spearmanCorrelation, spearman } from "../shared/quant-stats";
 import type { EvaluableFactorKey, TechnicalFactorKey } from "./technicalFactors";
+
+// 保持既有调用方（测试等）兼容：Pearson/Spearman 已统一迁移到 shared/quant-stats。
+export { pearsonCorrelation, spearmanCorrelation } from "../shared/quant-stats";
 
 /**
  * 因子组合与筛选流程（二-P0）：相关性去重、标准化、市值/题材中性化。
@@ -62,38 +65,6 @@ export function extractFactorValueMatrix(rows: LeaderCandidateBacktestRow[]): Fa
   return { keys, values };
 }
 
-function mean(values: number[]): number | null {
-  if (values.length === 0) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-/** Pearson 相关；仅使用两因子同时有效的样本。样本 < 3 或任一变差为 0 时返回 null。 */
-export function pearsonCorrelation(x: Array<number | null>, y: Array<number | null>): number | null {
-  const pairs: Array<[number, number]> = [];
-  for (let i = 0; i < x.length; i += 1) {
-    const xi = x[i];
-    const yi = y[i];
-    if (xi === null || yi === null || !Number.isFinite(xi) || !Number.isFinite(yi)) continue;
-    pairs.push([xi, yi]);
-  }
-  if (pairs.length < 3) return null;
-  const xs = pairs.map((pair) => pair[0]);
-  const ys = pairs.map((pair) => pair[1]);
-  const meanX = mean(xs);
-  const meanY = mean(ys);
-  if (meanX === null || meanY === null) return null;
-  let numerator = 0;
-  let denomX = 0;
-  let denomY = 0;
-  for (let i = 0; i < xs.length; i += 1) {
-    numerator += (xs[i]! - meanX) * (ys[i]! - meanY);
-    denomX += (xs[i]! - meanX) ** 2;
-    denomY += (ys[i]! - meanY) ** 2;
-  }
-  if (denomX === 0 || denomY === 0) return null;
-  return numerator / Math.sqrt(denomX * denomY);
-}
-
 export type FactorCorrelationMatrix = {
   keys: CombinationFactorKey[];
   labels: Record<CombinationFactorKey, string>;
@@ -107,20 +78,6 @@ export function buildFactorCorrelationMatrix(matrix: FactorValueMatrix): FactorC
     rowKey === colKey ? 1 : pearsonCorrelation(matrix.values[rowKey], matrix.values[colKey])
   )));
   return { keys: matrix.keys, labels, matrix: correlationMatrix };
-}
-
-/** Spearman 秩相关；仅使用两因子同时有效的样本。样本 < 3 或任一变差为 0 时返回 null。 */
-export function spearmanCorrelation(x: Array<number | null>, y: Array<number | null>): number | null {
-  const xs: number[] = [];
-  const ys: number[] = [];
-  for (let i = 0; i < x.length; i += 1) {
-    const xi = x[i];
-    const yi = y[i];
-    if (xi === null || yi === null || !Number.isFinite(xi) || !Number.isFinite(yi)) continue;
-    xs.push(xi);
-    ys.push(yi);
-  }
-  return spearman(xs, ys);
 }
 
 /** 计算因子间 Spearman 秩相关矩阵（对非线性/异常值更稳健）。 */

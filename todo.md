@@ -992,3 +992,33 @@
 - [x] 为Tushare交易日历查询增加按日期范围缓存和并发请求复用
 - [x] 保留缓存失效、接口失败和数据库交易日回退逻辑，并记录缓存命中行为
 - [x] 补充缓存命中、重复并发、范围隔离和失败回退测试，完成全链路验证
+
+
+## Step 4 P3-F4 / P3-F5 修复与重新验收
+- [x] P3-F4：`MaxPositionExposurePolicy` → `CapacityPolicy` 重命名；`name="capacity"`；violation code 统一为 `CAPACITY_EXCEEDED`
+- [x] P3-F4：更新 manager.ts / risk.test.ts / risk.fix.test.ts 中所有 11 处类引用与 4 处 violation code 断言
+- [x] P3-F5：`MaxPositionsPolicy` 对同 symbol 加仓 BUY 直接 REJECT `ADD_POSITION_NOT_SUPPORTED`，与 Portfolio.buy 兜底语义对齐
+- [x] P3-F5：反转 risk.test.ts 中"已有同 symbol 持仓视为加仓"测试期望为 REJECT
+- [x] 新增 6 项 P3-F4/F5 回归测试（policy 层 + 集成层端到端 + 命名空间分离），risk.fix.test.ts 9 → 15
+- [x] 独立验收（`docs/PHASE1_STEP4_REAUDIT_REPORT.md`）：20 项 PASS 条件全部成立；全量测试 445 passed / 15 failed（与 Step 4-FIX 清单完全一致，**无新增失败**）；typecheck / build 全绿
+- [x] Step 4 READY FOR FINAL ACCEPTANCE
+
+## STEP 5：统一数据质量层 + Canonical Market Data + Feature/Factor Pipeline（开发完成，待独立审计）
+- [x] Phase 1 现状审计：MarketBar 缺 volume/turnoverRate/limitUp/adjustment；单位语义散落；isMainBoardStock 正则重复 3 处；涨停比例内联近似；无 feature 契约/注册中心/流水线；统计函数多处自实现
+- [x] `server/data/types.ts`：CanonicalMarketBar + MARKET_DATA_UNITS（price 元/股、volume 手、amount 千元、turnoverRate %）+ PriceAdjustment(仅 raw) + DataQuality/BarValidationResult
+- [x] `server/data/adapter.ts`：toCanonicalBar（Tushare/DB varchar 行统一归一化，非法→null）+ toEngineMarketBar（engine 降级显式丢弃多余字段）
+- [x] `server/data/validation.ts`：validateMarketBar VALID/WARNING/INVALID + 稳定 code + parseNumericPrice
+- [x] `server/data/boardRules.ts`：板块/涨跌停比例唯一权威（主板 10%、ST 5%、创业/科创 20%、北交所 30%）；limitUpPrice/limitDownPrice 复用 Backtest Core 纯函数并 re-export
+- [x] `server/data/series.ts`：visibleBars("close"≤当日 / "open"<当日) + MarketBarSeries（排序/同日重复报错/current/previous/window/getByDate）
+- [x] `server/features/contract.ts`：READY/INSUFFICIENT_DATA/INVALID_DATA 三态 + FeatureFactory/Instance/Context/Metadata
+- [x] `server/features/registry.ts`：FeatureRegistry（重复注册/未知 id 抛错、list 稳定排序）+ 单例
+- [x] `server/features/basic.ts`：sma/return/avgAmount/avgVolume/volatility/amplitude/limitUpHit 7 个基础特征（不为数量造因子）
+- [x] `server/features/snapshot.ts`：FeatureSnapshot 同一 symbol/asOf/可见切片绑定
+- [x] `server/features/pipeline.ts`：runFeaturePipeline 确定性流水线（visibleBars→series→calculate→snapshot）
+- [x] 统计统一：technicalFactors/downsideRisk/factorCombination/overfittingGuard 删除 263 行自实现，统一引用 shared/quant-stats；overfittingGuard threshold=null 分支修复
+- [x] StrategyContext 向后兼容扩展：contract 可选 features + registry.evaluate 透传 + adapter buildStrategySignalProvider 可选 buildFeatures
+- [x] 复权处理：adjustment 恒 "raw"，forward/backward 仅类型扩展位，engine 降级丢弃（防混用）
+- [x] 测试：server/data/data.test.ts 16 tests；features.pipeline.test.ts 11 tests（Future Leakage/Decision Time/Determinism 100×/Instance Isolation/Warm-up/Registry）
+- [x] Golden Test：features.golden.test.ts 3 tests（Raw→Canonical→Validation→Pipeline→Strategy features→Signal→Risk→Backtest Core 全链路；fixture 前置 2025-12-30/31 预热交易日）
+- [x] 回归：全量 475 passed / 15 failed（15 项均为既有环境类，与 Step 1–4 同源，**无新增失败**）；tsc --noEmit ✅；build ✅
+- [x] 开发报告 `docs/PHASE1_STEP5_DEVELOPMENT_REPORT.md`（含已知问题：sharpe 口径统一、threshold null 分支、turnoverRate 留空等）——不自行宣告 PASS，待独立审计
