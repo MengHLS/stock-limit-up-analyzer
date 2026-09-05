@@ -247,10 +247,6 @@ export type DownsideRiskResearchResult = {
   labeledSampleSize: number;
   lowPriceLabelSampleSize: number;
   signalAmountSampleSize: number;
-  marketLimitUpCountSampleSize: number;
-  twoMarketTurnoverSampleSize: number;
-  marginBalanceSampleSize: number;
-  marginBalanceComparableSampleSize: number;
   riskTiers: DownsideRiskTierSummary[];
   experiments: DownsideRiskExperimentItem[];
   rollingWindows: DownsideRiskRollingWindow[];
@@ -283,12 +279,6 @@ const riskFeatures: DownsideRiskFeature[] = [
   { key: "limitUpTime", label: "封板时间", definition: "信号日封板时间；封板偏晚增加风险扣分。", timing: "信号日" },
   { key: "signalAmount", label: "日线成交额", definition: "信号日Tushare日线成交额（千元）；成交额不足或缺失增加风险扣分。", timing: "信号日" },
   { key: "marketCap", label: "流通市值评分", definition: "信号日可得流通市值分层；极小盘、超大盘或缺失增加风险扣分。", timing: "信号日" },
-  { key: "phase", label: "情绪周期", definition: "信号日最高连板趋势所属阶段；高位退潮与亢奋阶段增加风险扣分。", timing: "信号日" },
-  { key: "marketHeight", label: "市场高度", definition: "信号日主板最高连板数；高度拥挤时增加风险扣分。", timing: "信号日" },
-  { key: "candidateScore", label: "原始候选分", definition: "原有龙头候选强度分；较低分增加风险扣分。", timing: "信号日" },
-  { key: "marketLimitUpCount", label: "项目涨停数", definition: "信号日项目已录入的全表涨停记录数；≤40或≥120时轻度增加风险扣分，非交易所官方全市场口径。", timing: "信号日" },
-  { key: "twoMarketTurnover", label: "沪深两市成交额", definition: "信号日Tushare daily汇总沪市与深市证券成交额（亿元）；<10000或≥25000时轻度增加风险扣分，不代表资金净流入。", timing: "信号日" },
-  { key: "marginBalanceTrend", label: "两融余额偏离", definition: "信号日上交所与深交所公开文件汇总的两融余额，相对前20个已验证市场日期的中位数偏离超过2%时轻度增加风险扣分。", timing: "信号日" },
 ];
 
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
@@ -511,40 +501,15 @@ function median(values: number[]) {
   return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
 }
 
-/** 仅以信号日前已验证的两融数据为基准，避免将后续两融余额带入当日评分。 */
-function calculateMarginBalanceTrendContribution(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
-  const currentFactor = context.marketFactorsByDate?.get(row.date);
-  const current = currentFactor?.sourceIsVerified ? currentFactor.marginBalanceYi : null;
-  if (current === null || current === undefined || current <= 0) return 0;
-  const historical = Array.from(context.marketFactorsByDate?.entries() ?? [])
-    .filter(([date, factor]) => date < row.date && factor.sourceIsVerified && factor.marginBalanceYi !== null && factor.marginBalanceYi !== undefined && factor.marginBalanceYi > 0)
-    .sort(([left], [right]) => right.localeCompare(left))
-    .slice(0, 20)
-    .map(([, factor]) => factor.marginBalanceYi!);
-  if (historical.length < 5) return 0;
-  const baseline = median(historical);
-  const deviation = (current - baseline) / baseline;
-  return Math.abs(deviation) >= 0.02 ? 4 : 0;
-}
-
 function calculateRiskContributions(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {
   const time = row.limitUpTime ?? "";
   const amount = readSignalPrice(row, context)?.amount ?? null;
-  const marketFactor = context.marketFactorsByDate?.get(row.date);
-  const limitUpCount = marketFactor?.limitUpCount ?? null;
-  const turnoverYi = marketFactor?.sourceIsVerified ? marketFactor.turnoverYi : null;
   return {
     boards: row.boards >= 4 ? 20 : row.boards === 3 ? 12 : row.boards === 2 ? 5 : 0,
     sectorCount: (row.sectorCount ?? 0) <= 1 ? 16 : (row.sectorCount ?? 0) === 2 ? 8 : 0,
     limitUpTime: !time ? 5 : time >= "14:30:00" ? 16 : time >= "13:30:00" ? 9 : 0,
     signalAmount: amount === null ? 7 : amount < 10_000 ? 12 : amount < 50_000 ? 6 : 0,
     marketCap: row.marketCapScore <= 4 ? 10 : row.marketCapScore <= 5 ? 6 : 0,
-    phase: row.phase === "高位退潮" ? 24 : row.phase === "高位亢奋" ? 16 : row.phase === "高位分歧" ? 9 : 0,
-    marketHeight: (row.maxBoards ?? 0) >= 6 ? 10 : (row.maxBoards ?? 0) >= 5 ? 6 : 0,
-    candidateScore: row.score < 50 ? 8 : row.score < 60 ? 3 : 0,
-    marketLimitUpCount: limitUpCount === null ? 0 : limitUpCount <= 40 ? 5 : limitUpCount >= 120 ? 4 : 0,
-    twoMarketTurnover: turnoverYi === null ? 0 : turnoverYi < 10_000 ? 4 : turnoverYi >= 25_000 ? 3 : 0,
-    marginBalanceTrend: calculateMarginBalanceTrendContribution(row, context),
   } satisfies Record<string, number>;
 }
 
@@ -1051,19 +1016,6 @@ export function buildDownsideRiskResearch(
   });
   const lowPriceLabelSampleSize = evaluationProfiles.filter((profile) => profile.usedLowPriceForLabel).length;
   const signalAmountSampleSize = evaluationProfiles.filter((profile) => readSignalPrice(profile.row, context)?.amount !== null && readSignalPrice(profile.row, context)?.amount !== undefined).length;
-  const marketLimitUpCountSampleSize = evaluationProfiles.filter((profile) => {
-    const value = context.marketFactorsByDate?.get(profile.row.date)?.limitUpCount;
-    return value !== null && value !== undefined;
-  }).length;
-  const twoMarketTurnoverSampleSize = evaluationProfiles.filter((profile) => {
-    const value = context.marketFactorsByDate?.get(profile.row.date)?.turnoverYi;
-    return value !== null && value !== undefined;
-  }).length;
-  const marginBalanceSampleSize = evaluationProfiles.filter((profile) => {
-    const value = context.marketFactorsByDate?.get(profile.row.date)?.marginBalanceYi;
-    return value !== null && value !== undefined;
-  }).length;
-  const marginBalanceComparableSampleSize = evaluationProfiles.filter((profile) => calculateMarginBalanceTrendContribution(profile.row, context) > 0 || Array.from(context.marketFactorsByDate?.entries() ?? []).filter(([date, factor]) => date < profile.row.date && factor.sourceIsVerified && factor.marginBalanceYi !== null && factor.marginBalanceYi !== undefined).length >= 5).length;
 
   const experiments = autoTunePenaltyWeight && rollingWindows.length > 0
     ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context)
@@ -1102,10 +1054,6 @@ export function buildDownsideRiskResearch(
     labeledSampleSize: evaluationProfiles.length,
     lowPriceLabelSampleSize,
     signalAmountSampleSize,
-    marketLimitUpCountSampleSize,
-    twoMarketTurnoverSampleSize,
-    marginBalanceSampleSize,
-    marginBalanceComparableSampleSize,
     riskTiers,
     experiments,
     rollingWindows,
@@ -1114,8 +1062,8 @@ export function buildDownsideRiskResearch(
     strategyRobustness,
     fullCycle: {
       definition: autoTunePenaltyWeight && rollingWindows.length > 0
-        ? "五种策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。质量复合与质量门控均只读取信号日数据。"
-        : "五种策略使用全部主板1–4板历史候选、相同资金、成本、仓位、入场和唯一退出约束连续回测；风险扣分使用手动设定权重，质量复合与质量门控只读取信号日数据。",
+        ? "五种策略使用全部主板涨停股历史候选（不限连板高度）、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。质量复合与质量门控均只读取信号日数据。"
+        : "五种策略使用全部主板涨停股历史候选（不限连板高度）、相同资金、成本、仓位、入场和唯一退出约束连续回测；风险扣分使用手动设定权重，质量复合与质量门控只读取信号日数据。",
       startDate: fullCycleDates[0] ?? null,
       endDate: fullCycleDates.at(-1) ?? null,
       experiments: fullCycleExperiments,

@@ -92,6 +92,13 @@
       "when": 1788517211189,
       "tag": "0012_yellow_iron_man",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1788545150783,
+      "tag": "0013_paper_trading",
+      "breakpoints": true
     }
   ]
 }

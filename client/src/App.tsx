@@ -13,6 +13,7 @@ import SentimentAlerts from "./pages/SentimentAlerts";
 import SentimentAnalysis from "./pages/SentimentAnalysis";
 import LeaderCandidates from "./pages/LeaderCandidates";
 import Backtest from "./pages/Backtest";
+import PaperTrading from "./pages/PaperTrading";
 import OperationLogs from "./pages/OperationLogs";
 import StockSync from "./pages/StockSync";
 
@@ -28,6 +29,7 @@ function Router() {
       <Route path="/sentiment-analysis" component={SentimentAnalysis} />
       <Route path="/leader-candidates" component={LeaderCandidates} />
       <Route path="/backtest" component={Backtest} />
+      <Route path="/paper-trading" component={PaperTrading} />
       <Route path="/operation-logs" component={OperationLogs} />
       <Route path="/stock-sync" component={StockSync} />
 

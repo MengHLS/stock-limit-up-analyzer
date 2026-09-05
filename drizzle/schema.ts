@@ -299,3 +299,33 @@ export const backtestRuns = mysqlTable("backtest_runs", {
 
 export type BacktestRun = typeof backtestRuns.$inferSelect;
 export type InsertBacktestRun = typeof backtestRuns.$inferInsert;
+
+/**
+ * 前向纸面交易运行表 - 一次「真实样本外」的纸面交易实验。
+ * 每次推进（逐日成交/出清/标记市值）后把最新状态 JSON 回写，供服务重启后续跑。
+ */
+export const paperTradingRuns = mysqlTable("paper_trading_runs", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 运行名称，如「前向纸面-基准策略」。 */
+  label: varchar("label", { length: 120 }).notNull(),
+  /** 策略 key：baseline / riskPenalty / hardFilter / qualityBlend / qualityGate。 */
+  strategyKey: varchar("strategyKey", { length: 32 }).notNull(),
+  /** 回测参数快照（含 realistic 成交/退出规则与 downsideRisk 参数）。 */
+  paramsJson: text("paramsJson").notNull(),
+  /** 初始资金（元）。 */
+  initialCapital: int("initialCapital").notNull(),
+  /** 运行状态：active（持续推进）/ paused（暂停）/ completed（已结束）。 */
+  status: mysqlEnum("status", ["active", "paused", "completed"]).default("active").notNull(),
+  /** 最近一次已处理交易日（前向曲线推进到的最新日期）。 */
+  lastProcessedDate: date("lastProcessedDate", { mode: "string" }),
+  /** 完整运行状态 JSON（现金/持仓/准备买入清单/订单/前向权益曲线）。 */
+  stateJson: longtext("stateJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  statusIdx: index("idx_paper_runs_status").on(table.status),
+  createdAtIdx: index("idx_paper_runs_created").on(table.createdAt),
+}));
+
+export type PaperTradingRun = typeof paperTradingRuns.$inferSelect;
+export type InsertPaperTradingRun = typeof paperTradingRuns.$inferInsert;

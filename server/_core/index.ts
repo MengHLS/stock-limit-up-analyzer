@@ -10,6 +10,7 @@ import { serveStatic, setupVite } from "./vite";
 import { sdk } from "./sdk";
 import { syncCandidateDailyPrices } from "../stockPriceSync";
 import { startMarketSyncScheduler, syncMarketDataOnce, syncMarketDataIfMissing } from "../marketSync";
+import { startPaperTradingScheduler, advancePaperTradingOnce } from "../paperTradingScheduler";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -91,6 +92,29 @@ async function startServer() {
       });
     }
   });
+
+  // 定时任务回调：把全部 active 前向纸面交易运行推进到最新交易日（真实样本外闭环）。
+  app.post("/api/scheduled/advancePaperTrading", async (req, res) => {
+    try {
+      const authUser = await sdk.authenticateRequest(req);
+      if (!authUser.isCron) {
+        return res.status(403).json({ error: "Unauthorized cron caller" });
+      }
+
+      const result = await advancePaperTradingOnce();
+      if (result.ok) {
+        return res.json({ ok: true, result });
+      }
+      return res.json({ ok: true, skipped: result.skipped });
+    } catch (error: any) {
+      console.error("[PaperTrading] Scheduled advance failed:", error);
+      return res.status(500).json({
+        error: error.message || "Internal server error",
+        stack: error.stack,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -109,6 +133,8 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
     // 启动大盘数据盘后自动同步调度（北京时间 16:00 / 17:30，服务自身定时，不依赖外部 cron）。
     startMarketSyncScheduler();
+    // 启动前向纸面交易每日推进调度（北京时间 17:00 / 18:30，在行情同步之后）。
+    startPaperTradingScheduler();
     // 启动兜底：延迟片刻后，若今日（北京时间）尚无大盘数据则立即补同步一次。
     setTimeout(() => {
       void syncMarketDataIfMissing().catch((error) => {

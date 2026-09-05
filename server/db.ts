@@ -30,6 +30,8 @@ import {
   backtestRuns,
   InsertBacktestRun,
   BacktestRun,
+  paperTradingRuns,
+  InsertPaperTradingRun,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
@@ -37,6 +39,7 @@ import { normalizeSectorName } from '../shared/stockDataNormalization';
 import {
   buildLeaderCandidateBacktest,
   buildLeaderCandidates,
+  buildLeaderCandidatesForDate,
   buildLeaderCandidateDailyPriceMap,
   type LeaderCandidateBacktestContext,
   type LeaderCandidateBacktestOptions,
@@ -48,6 +51,16 @@ import {
 import { TTLCache, stableHash } from './backtestCache';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
 import { parseStoredMarketYi } from './marketFactors';
+import { runMonkeyBenchmark, runCostSensitivity } from './overfittingGuard';
+import {
+  advancePaperTradingDay,
+  buildForwardPreparedBuys,
+  buildPaperTradingSummary,
+  createInitialPaperTradingState,
+  type PaperTradingState,
+  type PaperTradingStrategyKey,
+  type PaperTradingSummary,
+} from './paperTrading';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -1705,6 +1718,32 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
   return result;
 }
 
+/** 打地鼠基准：随机打乱评分排序重复回测，判断真实策略是否显著优于随机选股。 */
+export async function runMonkeyBenchmarkForBacktest(options: LeaderCandidateBacktestOptions, trialCount = 100) {
+  const result = await getLeaderCandidateBacktest(options);
+  const { context } = await loadBacktestBaseContext();
+  return runMonkeyBenchmark(
+    result.historicalRows,
+    options.realistic,
+    context.priceByStockDate ?? new Map(),
+    context.tradingDates ?? [],
+    trialCount,
+  );
+}
+
+/** 交易成本敏感性：在 0/1/1.5/2/3 倍成本下重复回测，判断策略是否依赖理想无成本环境。 */
+export async function runCostSensitivityForBacktest(options: LeaderCandidateBacktestOptions, multipliers?: number[]) {
+  const result = await getLeaderCandidateBacktest(options);
+  const { context } = await loadBacktestBaseContext();
+  return runCostSensitivity(
+    result.historicalRows,
+    options.realistic,
+    context.priceByStockDate ?? new Map(),
+    context.tradingDates ?? [],
+    multipliers,
+  );
+}
+
 /** 从回测结果提取扁平关键指标，供历史列表页快速展示（不承载完整明细）。 */
 function extractBacktestSummary(result: LeaderCandidateBacktestResult) {
   return {
@@ -1800,4 +1839,241 @@ export async function getBacktestRun(id: number): Promise<SavedBacktestRun | nul
     summary = null;
   }
   return { id: row.id, createdAt: timestampToIso(row.createdAt), options, summary, result };
+}
+
+// ==================== 前向纸面交易（四-P1：真实样本外兜底） ====================
+
+export type PaperTradingRunSummary = {
+  id: number;
+  label: string;
+  strategyKey: PaperTradingStrategyKey;
+  status: "active" | "paused" | "completed";
+  lastProcessedDate: string | null;
+  createdAt: string | null;
+  summary: PaperTradingSummary | null;
+};
+
+export type PaperTradingRunDetail = PaperTradingRunSummary & {
+  initialCapital: number;
+  options: LeaderCandidateBacktestOptions;
+  state: PaperTradingState;
+};
+
+const PAPER_TRADING_STRATEGY_KEYS: PaperTradingStrategyKey[] = ["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"];
+
+function isPaperTradingStrategyKey(value: string): value is PaperTradingStrategyKey {
+  return (PAPER_TRADING_STRATEGY_KEYS as string[]).includes(value);
+}
+
+function parsePaperTradingState(json: string | null, initialCapital: number): PaperTradingState {
+  if (!json) return createInitialPaperTradingState(initialCapital);
+  try {
+    const parsed = JSON.parse(json) as PaperTradingState;
+    // 结构兜底：老数据缺字段时补默认值，避免推进崩溃。
+    return {
+      cash: parsed.cash ?? initialCapital,
+      positions: Array.isArray(parsed.positions) ? parsed.positions : [],
+      pendingBuys: Array.isArray(parsed.pendingBuys) ? parsed.pendingBuys : [],
+      orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+      equityCurve: Array.isArray(parsed.equityCurve) ? parsed.equityCurve : [],
+      lastProcessedDate: parsed.lastProcessedDate ?? null,
+    };
+  } catch {
+    return createInitialPaperTradingState(initialCapital);
+  }
+}
+
+/** 用「仅该信号日及以前」的数据生成候选，供前向清单评分（point-in-time）。 */
+function buildForwardCandidates(records: LeaderCandidateSourceRecord[], date: string, context: LeaderCandidateBacktestContext) {
+  return buildLeaderCandidatesForDate(records, date, {
+    phaseByDate: context.phaseByDate,
+    priceByStockDate: context.priceByStockDate,
+    marketFactorsByDate: context.marketFactorsByDate,
+  }).candidates;
+}
+
+/** 构造初始状态：以 startDate 收盘生成首个准备买入清单，尚未成交。 */
+function buildInitialForwardState(
+  records: LeaderCandidateSourceRecord[],
+  context: LeaderCandidateBacktestContext,
+  options: LeaderCandidateBacktestOptions,
+  strategyKey: PaperTradingStrategyKey,
+  startDate: string,
+  initialCapital: number,
+): PaperTradingState {
+  const realistic = options.realistic ?? {};
+  const downside = options.downsideRisk ?? {};
+  const maxPositions = Math.max(1, Math.floor(realistic.maxPositions ?? 5));
+  const candidates = buildForwardCandidates(records, startDate, context);
+  const pendingBuys = buildForwardPreparedBuys(
+    candidates,
+    startDate,
+    strategyKey,
+    {
+      appliedMinScore: options.minScore ?? null,
+      penaltyWeight: downside.penaltyWeight,
+      hardRiskThreshold: downside.hardRiskThreshold ?? 0,
+      priceByStockDate: context.priceByStockDate,
+    },
+    new Set(),
+    maxPositions,
+  );
+  const state = createInitialPaperTradingState(initialCapital);
+  state.pendingBuys = pendingBuys;
+  state.lastProcessedDate = startDate;
+  return state;
+}
+
+/** 归一化参数：把初始资金并入 realistic，确保固定仓位占比等口径一致。 */
+function normalizePaperTradingOptions(options: LeaderCandidateBacktestOptions, initialCapital: number): LeaderCandidateBacktestOptions {
+  return { ...options, realistic: { ...(options.realistic ?? {}), initialCapital: Math.floor(initialCapital) } };
+}
+
+/** 创建一次前向纸面交易运行，返回运行 id。初始准备清单以最新信号日收盘生成。 */
+export async function createPaperTradingRun(
+  label: string,
+  strategyKey: PaperTradingStrategyKey,
+  options: LeaderCandidateBacktestOptions,
+  initialCapital: number,
+): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const { records, context } = await loadBacktestBaseContext();
+  const dates = Array.from(new Set(records.map((record) => record.limitUpDate))).sort();
+  const startDate = dates.at(-1);
+  if (!startDate) return 0;
+  const normalized = normalizePaperTradingOptions(options, initialCapital);
+  const state = buildInitialForwardState(records, context, normalized, strategyKey, startDate, initialCapital);
+  const inserted = await db.insert(paperTradingRuns).values({
+    label,
+    strategyKey,
+    paramsJson: JSON.stringify(normalized),
+    initialCapital: Math.floor(initialCapital),
+    status: "active",
+    lastProcessedDate: state.lastProcessedDate,
+    stateJson: JSON.stringify(state),
+  });
+  return Number(inserted[0].insertId);
+}
+
+/** 列出前向纸面交易运行（含扁平摘要），按创建时间倒序。 */
+export async function listPaperTradingRuns(limit = 50): Promise<PaperTradingRunSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(paperTradingRuns).orderBy(desc(paperTradingRuns.createdAt)).limit(limit);
+  return rows.map((row) => {
+    const state = parsePaperTradingState(row.stateJson, row.initialCapital);
+    return {
+      id: row.id,
+      label: row.label,
+      strategyKey: isPaperTradingStrategyKey(row.strategyKey) ? row.strategyKey : "baseline",
+      status: row.status,
+      lastProcessedDate: row.lastProcessedDate,
+      createdAt: timestampToIso(row.createdAt),
+      summary: buildPaperTradingSummary(state, row.initialCapital),
+    };
+  });
+}
+
+/** 读取单条前向纸面交易运行的完整状态。 */
+export async function getPaperTradingRun(id: number): Promise<PaperTradingRunDetail | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(paperTradingRuns).where(eq(paperTradingRuns.id, id));
+  const row = rows[0];
+  if (!row) return null;
+  let options: LeaderCandidateBacktestOptions = {};
+  try {
+    options = JSON.parse(row.paramsJson ?? "{}") as LeaderCandidateBacktestOptions;
+  } catch {
+    options = {};
+  }
+  const state = parsePaperTradingState(row.stateJson, row.initialCapital);
+  return {
+    id: row.id,
+    label: row.label,
+    strategyKey: isPaperTradingStrategyKey(row.strategyKey) ? row.strategyKey : "baseline",
+    status: row.status,
+    lastProcessedDate: row.lastProcessedDate,
+    createdAt: timestampToIso(row.createdAt),
+    summary: buildPaperTradingSummary(state, row.initialCapital),
+    initialCapital: row.initialCapital,
+    options,
+    state,
+  };
+}
+
+/** 更新运行状态（active / paused / completed）。 */
+export async function setPaperTradingRunStatus(id: number, status: "active" | "paused" | "completed"): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(paperTradingRuns).set({ status }).where(eq(paperTradingRuns.id, id));
+}
+
+/** 回写运行状态（唯一事实源，覆盖式写入 stateJson）。 */
+async function persistPaperTradingRunState(id: number, state: PaperTradingState): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(paperTradingRuns).set({
+    stateJson: JSON.stringify(state),
+    lastProcessedDate: state.lastProcessedDate,
+  }).where(eq(paperTradingRuns.id, id));
+}
+
+/**
+ * 把一次运行推进到「已有日线行情的最新交易日」。
+ * 逐日：开盘成交既有准备清单 → 收盘止盈止损出清 → 标记市值 → 生成下一交易日清单。
+ * 若该运行已推进到最新日期，则原样返回当前摘要。
+ */
+export async function advancePaperTradingRunToLatest(id: number): Promise<PaperTradingSummary | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const run = await getPaperTradingRun(id);
+  if (!run || run.status !== "active") return null;
+  const { records, context } = await loadBacktestBaseContext();
+  const priceByStockDate = context.priceByStockDate ?? new Map<string, LeaderCandidateDailyPrice>();
+  const tradingDates = context.tradingDates ?? [];
+  if (tradingDates.length === 0) return run.summary;
+
+  const options = run.options;
+  const realistic = options.realistic ?? {};
+  const downside = options.downsideRisk ?? {};
+  const lastProcessed = run.state.lastProcessedDate;
+  const datesToAdvance = tradingDates.filter((date) => lastProcessed === null || date > lastProcessed);
+
+  let state = run.state;
+  for (const today of datesToAdvance) {
+    const candidates = buildForwardCandidates(records, today, context);
+    const result = advancePaperTradingDay({
+      state,
+      today,
+      signalCandidates: candidates,
+      priceByStockDate,
+      tradingDates,
+      strategyKey: run.strategyKey,
+      realistic,
+      appliedMinScore: options.minScore ?? null,
+      penaltyWeight: downside.penaltyWeight,
+      hardRiskThreshold: downside.hardRiskThreshold ?? 0,
+    });
+    state = result.state;
+  }
+
+  await persistPaperTradingRunState(id, state);
+  return buildPaperTradingSummary(state, run.initialCapital);
+}
+
+/** 推进所有 active 运行到最新交易日，供每日定时任务调用。 */
+export async function advanceAllActivePaperTradingRuns(): Promise<Array<{ runId: number; label: string; summary: PaperTradingSummary | null }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ id: paperTradingRuns.id, label: paperTradingRuns.label })
+    .from(paperTradingRuns)
+    .where(eq(paperTradingRuns.status, "active"));
+  const results: Array<{ runId: number; label: string; summary: PaperTradingSummary | null }> = [];
+  for (const row of rows) {
+    const summary = await advancePaperTradingRunToLatest(row.id);
+    results.push({ runId: row.id, label: row.label, summary });
+  }
+  return results;
 }

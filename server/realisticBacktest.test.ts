@@ -442,4 +442,63 @@ describe("simulateRealisticTPlus1ToTPlus2", () => {
     expect(result.trades[0].exRights).toBe(true);
     expect(result.exRightsCount).toBe(1);
   });
+
+  it("次日开盘预期三档：开启后按封板时间分档，不及预期放弃买入", () => {
+    const table = {
+      early: { center: 3, lower: 1, upper: 4 },
+      morning: { center: 2.5, lower: 1, upper: 4 },
+      afternoon: { center: 1, lower: -1, upper: 3 },
+      late: { center: 0, lower: 0, upper: 2 },
+      unknown: { center: 1, lower: -2, upper: 4 },
+    };
+    // 尾盘板(14:40) 开盘溢价 -1.5%（低于 late 下界 0）→ 不及预期 → 放弃
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ limitUpTime: "14:40:00", signalClosePrice: 10, nextOpenPrice: 9.85 }),
+    ], {
+      initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, expectationTierEnabled: true, expectationTable: table,
+    });
+
+    expect(result.filledCount).toBe(0);
+    const missed = result.trades[0];
+    expect(missed).toMatchObject({ status: "skipped", openExpectationTier: "misses", openExpectationBucket: "late" });
+    expect(missed.reason).toContain("次日不及预期");
+    expect(result.openExpectationTierSummary?.find((item) => item.tier === "misses")).toMatchObject({ candidateCount: 1, skippedCount: 1, filledCount: 0 });
+  });
+
+  it("次日开盘预期三档：超预期/符合预期买入并标记档位，逐档汇总正确", () => {
+    const table = {
+      early: { center: 3, lower: 1, upper: 4 },
+      morning: { center: 2.5, lower: 1, upper: 4 },
+      afternoon: { center: 1, lower: -1, upper: 3 },
+      late: { center: 0, lower: 0, upper: 2 },
+      unknown: { center: 1, lower: -2, upper: 4 },
+    };
+    const rows = [
+      row({ stockCode: "600001.SH", limitUpTime: "09:35:00", signalClosePrice: 10, nextOpenPrice: 10.6 }), // 早盘板 +6% > upper4 → exceeds
+      row({ stockCode: "600002.SH", limitUpTime: "10:20:00", signalClosePrice: 10, nextOpenPrice: 10.2 }), // 上午板 +2% ∈ [1,4] → meets
+      row({ stockCode: "600003.SH", limitUpTime: "14:40:00", signalClosePrice: 10, nextOpenPrice: 9.85 }), // 尾盘板 -1.5% < 0 → misses
+    ];
+    const result = simulateRealisticTPlus1ToTPlus2(rows, {
+      initialCapital: 1000000, maxPositions: 3, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, expectationTierEnabled: true, expectationTable: table,
+    });
+
+    expect(result.filledCount).toBe(2);
+    expect(result.trades.find((trade) => trade.stockCode === "600001.SH")).toMatchObject({ status: "filled", openExpectationTier: "exceeds", openExpectationBucket: "early" });
+    expect(result.trades.find((trade) => trade.stockCode === "600002.SH")).toMatchObject({ status: "filled", openExpectationTier: "meets", openExpectationBucket: "morning" });
+    expect(result.trades.find((trade) => trade.stockCode === "600003.SH")).toMatchObject({ status: "skipped", openExpectationTier: "misses" });
+    expect(result.openExpectationTierSummary?.map((item) => [item.tier, item.candidateCount, item.filledCount])).toEqual([
+      ["exceeds", 1, 1],
+      ["meets", 1, 1],
+      ["misses", 1, 0],
+    ]);
+  });
+
+  it("次日开盘预期三档默认关闭时保留旧的一刀切阈值文案与行为", () => {
+    const result = simulateRealisticTPlus1ToTPlus2([
+      row({ limitUpTime: "09:35:00", signalClosePrice: 10, nextOpenPrice: 9.7 }), // -3% < 默认 -2%
+    ], { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0 });
+    expect(result.trades[0].reason).toContain("T+1开盘低于预期");
+    expect(result.trades[0].openExpectationTier).toBeNull();
+    expect(result.openExpectationTierSummary).toBeUndefined();
+  });
 });

@@ -2,6 +2,14 @@ import type { SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
 import { buildDownsideRiskResearch, calculateQualityBlendScoreForRisk, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult, type DownsideRiskStrategyKey } from "./downsideRisk";
 import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
+import { computeTechnicalFactorValues, evaluateFactorEffectiveness } from "./technicalFactors";
+import type { FactorEffectivenessReport, TechnicalFactorKey } from "./technicalFactors";
+import { buildFactorNeutralizationReport } from "./factorCombination";
+import type { FactorNeutralizationReport } from "./factorCombination";
+import { buildOverfittingGuardReport } from "./overfittingGuard";
+import type { OverfittingGuardReport } from "./overfittingGuard";
+import { buildFinalVerdict } from "./factorScore";
+import type { FinalVerdict } from "./factorScore";
 
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
@@ -45,7 +53,7 @@ export type LeaderCandidateResult = {
   totalMainBoardLimitUps: number;
   maxBoards: number;
   strongSectors: Array<{ sector: string; count: number }>;
-  /** 当日全部可评分主板1–4板涨停股，不受重点候选准入或展示上限影响。 */
+  /** 当日全部可评分主板涨停股（不限连板高度，含首板与四板以上），不受重点候选准入或展示上限影响。 */
   allScoredStocks: LeaderCandidate[];
   candidates: LeaderCandidate[];
 };
@@ -85,6 +93,8 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   resumeOpenPremium?: number | null;
   /** 复牌首日相对信号日收盘的收盘溢价（%）。 */
   resumeClosePremium?: number | null;
+  /** 信号日技术面因子值（换手率/量比/振幅），严格 point-in-time，缺失时为 null。 */
+  technicalFactors?: Record<TechnicalFactorKey, number | null>;
 };
 
 export type LeaderCandidateScoreBand = {
@@ -148,6 +158,14 @@ export type LeaderCandidateBacktestResult = {
   dailyPriceCoverage: LeaderCandidateDailyPriceCoverage;
   marketFactorCoverage: LeaderCandidateMarketFactorCoverage;
   strategyPortfolioSnapshot: LeaderCandidateStrategyPortfolioSnapshot;
+  /** 技术面因子有效性三件套评估（RankIC/IC_IR、分位数分层单调性、阶段 IC 稳定性）。 */
+  factorEvaluation: FactorEffectivenessReport;
+  /** 因子组合与筛选：相关性矩阵、高相关去重建议、标准化+市值中性化后的技术因子。 */
+  factorCombination: FactorNeutralizationReport;
+  /** 过拟合防护：Deflated Sharpe（按参数搜索次数校正）。 */
+  overfittingGuard: OverfittingGuardReport;
+  /** 最终结论：逐因子评分与评级 + 策略过拟合风险 + 策略质量（可配置权重）。 */
+  finalVerdict: FinalVerdict;
 };
 
 export type LeaderCandidatePortfolioHolding = {
@@ -487,8 +505,8 @@ export function buildLeaderCandidatesForDate(
 
   const currentDateIndex = tradingDateIndex.get(targetDate) ?? 0;
   const trajectoryDates = tradingDates.slice(currentDateIndex, currentDateIndex + 7).reverse();
-  // 五板及以上属于高位情绪观察范围，不进入候选评分或组合回测，避免高位风险与低位启动筛选混在同一口径。
-  const scorableRecords = currentRecords.filter((record) => calculateBoards(record.stockCode, targetDate) < 5);
+  // 覆盖全市场、任意连板高度的主板涨停股（含首板与四板以上），不再按连板数量截断评分范围。
+  const scorableRecords = currentRecords;
   const rankedAllScoredStocks = scorableRecords
     .map((record) => {
       const sector = normalizeSectorName(record.sector);
@@ -592,8 +610,7 @@ export function buildLeaderCandidatesForDate(
   const allScoredStocks = rankedAllScoredStocks.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
   const rankedCandidates = allScoredStocks
     .filter((candidate) => (
-      candidate.boards >= 2
-      || (candidate.sectorCount >= 3 && candidate.limitUpTime !== null && timeToMinutes(candidate.limitUpTime)! <= 13 * 60 + 30)
+      (candidate.sectorCount >= 3 && candidate.limitUpTime !== null && timeToMinutes(candidate.limitUpTime)! <= 13 * 60 + 30)
       || candidate.score >= 52
     ))
     .sort((left, right) => (
@@ -868,6 +885,13 @@ export function buildLeaderCandidateBacktest(
         ? context.priceByStockDate?.get(`${candidate.stockCode}::${resumeDate}`)
         : undefined;
       const tPlus1CloseToTPlus2CloseReturn = premiumPercent(nextDayPrice?.closePrice, secondDayPrice?.closePrice);
+      const technicalFactors = computeTechnicalFactorValues(
+        candidate.stockCode,
+        date,
+        candidate.circulationValue,
+        signalPrice,
+        context,
+      );
       rows.push({
         date,
         nextDate,
@@ -905,6 +929,7 @@ export function buildLeaderCandidateBacktest(
         resumeDate,
         resumeOpenPremium: premiumPercent(signalPrice?.closePrice, resumePrice?.openPrice),
         resumeClosePremium: premiumPercent(signalPrice?.closePrice, resumePrice?.closePrice),
+        technicalFactors,
       });
     }
   }
@@ -1029,8 +1054,20 @@ export function buildLeaderCandidateBacktest(
     };
   });
 
+  const factorEvaluationReport = evaluateFactorEffectiveness(rows);
+  const factorCombinationReport = buildFactorNeutralizationReport(rows);
+  const overfittingGuardReport = buildOverfittingGuardReport(realisticSimulation, 30);
+  const riskPenaltyRobustness = downsideRiskResearch.strategyRobustness.find((item) => item.key === "riskPenalty");
+  const finalVerdict = buildFinalVerdict(
+    factorEvaluationReport,
+    factorCombinationReport,
+    overfittingGuardReport,
+    riskPenaltyRobustness?.walkForwardOosSharpe ?? null,
+    overfittingGuardReport.realSharpe,
+  );
+
   return {
-    definition: `候选仅限1至4板主板涨停股；成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
+    definition: `候选覆盖全市场主板涨停股（不限连板高度，含首板与四板以上）；成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
     observationDays,
     appliedMinScore,
     totalSamples: appliedRows.length,
@@ -1075,5 +1112,9 @@ export function buildLeaderCandidateBacktest(
     },
     marketFactorCoverage,
     strategyPortfolioSnapshot,
+    factorEvaluation: factorEvaluationReport,
+    factorCombination: factorCombinationReport,
+    overfittingGuard: overfittingGuardReport,
+    finalVerdict,
   };
 }

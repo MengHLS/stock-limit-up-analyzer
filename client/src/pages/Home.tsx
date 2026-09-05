@@ -11,6 +11,7 @@ import { buildLimitUpCsv } from "@/lib/exportCsv";
 import { normalizeCustomSector } from "@/lib/customSector";
 import { isValidLimitUpTime, normalizeLimitUpTime } from "@shared/limitUpTime";
 import { buildAdjacentRecordsByDate, getLatestDateString, summarizeDailyCounts, summarizeSectorStats, buildWatchStatusMap, setWatchStatus } from "@/lib/homeData";
+import { CorrectStockDialog } from "@/components/CorrectStockDialog";
 import { 
   Search, 
   Calendar, 
@@ -22,7 +23,8 @@ import {
   Star,
   Download,
   Pencil,
-  Trash2
+  Trash2,
+  Wand2
 } from "lucide-react";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { toast } from "sonner";
@@ -30,7 +32,9 @@ import { toast } from "sonner";
 const EMPTY_ARRAY: any[] = [];
 
 export default function Home() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const utils = trpc.useUtils();
   const { data: watchlistData } = trpc.watchlist.getAll.useQuery(undefined, {
     enabled: isAuthenticated,
     staleTime: 60_000,
@@ -46,6 +50,7 @@ export default function Home() {
   const [sortByTime, setSortByTime] = useState<"asc" | "desc" | null>(null);
   const [recordsForExport, setRecordsForExport] = useState<any[]>([]);
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => new Date());
+  const [correctStock, setCorrectStock] = useState<{ stockCode: string; stockName: string } | null>(null);
 
   // 获取股票板块（使用useCallback避免依赖问题）
   const getStockBoard = useCallback((stockCode: string): string => {
@@ -219,6 +224,16 @@ export default function Home() {
     link.click();
     URL.revokeObjectURL(url);
   }, [selectedDateStr, recordsForExport]);
+
+  // 校正股票代码/名称成功后：刷新日历统计、当日与前一交易日明细及搜索结果。
+  // 校正可能同步改写该股票在其他涨停日的记录，故当前挂载的两个日期缓存都要失效。
+  const handleStockCorrected = useCallback(() => {
+    void utils.limitUp.getDailyStats.invalidate();
+    void utils.limitUp.search.invalidate();
+    void utils.limitUp.getDates.invalidate();
+    if (selectedDateStr) void utils.limitUp.getByDate.invalidate({ date: selectedDateStr });
+    if (previousDateStr) void utils.limitUp.getByDate.invalidate({ date: previousDateStr });
+  }, [utils, selectedDateStr, previousDateStr]);
 
   // 日历上有涨停数据的日期
   const datesWithData = useMemo(() => {
@@ -605,6 +620,7 @@ export default function Home() {
                           isAuthenticated={isAuthenticated}
                           watchlist={watchlist}
                           onFilteredRecordsChange={setRecordsForExport}
+                          onCorrectStock={isAdmin ? (stock) => setCorrectStock(stock) : undefined}
                         />
                       </ScrollArea>
                     </CardContent>
@@ -615,6 +631,13 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      <CorrectStockDialog
+        open={correctStock !== null}
+        stock={correctStock ?? { stockCode: "", stockName: "" }}
+        onOpenChange={(open) => { if (!open) setCorrectStock(null); }}
+        onCorrected={handleStockCorrected}
+      />
     </div>
   );
 }
@@ -626,12 +649,15 @@ function WatchFilteredStockList({
   isAuthenticated,
   watchlist,
   onFilteredRecordsChange,
+  onCorrectStock,
 }: {
   records: any[];
   watchFilter: "all" | "normal" | "important";
   isAuthenticated: boolean;
   watchlist: Array<{ stockCode: string; watchType: "normal" | "important" }>;
   onFilteredRecordsChange?: (records: any[]) => void;
+  /** 管理员用于校正股票代码/名称（走身份批量校正，含自动补全后缀与冲突检测） */
+  onCorrectStock?: (stock: { stockCode: string; stockName: string }) => void;
 }) {
   const [watchStatusMap, setWatchStatusMap] = useState<Map<string, "none" | "normal" | "important">>(new Map());
   
@@ -719,7 +745,7 @@ function WatchFilteredStockList({
                                       onStatusChange={updateWatchStatus}
                                     />
                                   )}
-                                  {isAuthenticated && <StockRecordActions record={record} />}
+                                  {isAuthenticated && <StockRecordActions record={record} onCorrectStock={onCorrectStock} />}
                                 </div>
                               </div>
                               {record.keywords && (
@@ -797,7 +823,7 @@ function WatchButton({
 }
 
 
-function StockRecordActions({ record }: { record: any }) {
+function StockRecordActions({ record, onCorrectStock }: { record: any; onCorrectStock?: (stock: { stockCode: string; stockName: string }) => void }) {
   const utils = trpc.useUtils();
   const [editing, setEditing] = useState(false);
   const [stockName, setStockName] = useState(record.stockName ?? "");
@@ -862,6 +888,16 @@ function StockRecordActions({ record }: { record: any }) {
   return (
         <div className="flex items-center gap-1">
       {successMessage && <span className="text-xs text-green-600">{successMessage}</span>}
+      {onCorrectStock && (
+        <button
+          type="button"
+          className="rounded p-1 text-slate-400 hover:bg-amber-50 hover:text-amber-600"
+          title="校正股票代码 / 名称（自动补全交易所后缀，同步更新该股票全部涨停记录）"
+          onClick={() => onCorrectStock({ stockCode: record.stockCode, stockName: record.stockName })}
+        >
+          <Wand2 className="h-4 w-4" />
+        </button>
+      )}
       <button
         type="button"
         className="rounded p-1 text-slate-400 hover:bg-orange-50 hover:text-orange-600"

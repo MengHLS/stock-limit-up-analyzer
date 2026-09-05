@@ -179,7 +179,7 @@ export default function LeaderCandidatesPage() {
               <Card className="border-amber-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">候选交易日</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-amber-600">{formatDate(data.date)}</div><p className="mt-1 text-xs text-slate-500">按数据库最新涨停日期生成</p></CardContent></Card>
               <Card className="border-orange-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">主板最高连板</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-orange-600">{data.maxBoards}<span className="ml-1 text-base">板</span></div><p className="mt-1 text-xs text-slate-500">主板涨停 {data.totalMainBoardLimitUps} 只</p></CardContent></Card>
               <Card className="border-red-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">重点观察候选</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-red-600">{displayedCandidates.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">{isThresholdFilterApplied ? `当前最低评分阈值 ${threshold} 分` : "满足高度、题材或综合评分条件"}</p></CardContent></Card>
-              <Card className="border-sky-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">当日评分覆盖</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-sky-600">{displayedAllScoredStocks.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">全部主板1–4板涨停股，不设重点候选阈值</p></CardContent></Card>
+              <Card className="border-sky-100 bg-white/85 shadow-sm"><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-slate-600">当日评分覆盖</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-sky-600">{displayedAllScoredStocks.length}<span className="ml-1 text-base">只</span></div><p className="mt-1 text-xs text-slate-500">全部主板涨停股（不限连板高度），不设重点候选阈值</p></CardContent></Card>
             </div>
 
             <CandidateInsightCharts
@@ -221,7 +221,7 @@ export default function LeaderCandidatesPage() {
                 </div>
                 {backtestLoading ? <div className="flex items-center gap-2 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />正在计算历史样本…</div> : !backtest || backtest.totalSamples === 0 ? <p className="py-3 text-sm text-slate-500">历史候选样本不足，暂无法计算回测结果。</p> : (
                   <div className="space-y-4">
-                    <p className="rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2 text-xs leading-5 text-sky-800">候选评分与组合资金回测仅覆盖主板 1 至 4 板标的；五板及以上仅保留在情绪周期和最高连板统计中，不参与候选评分。</p>
+                    <p className="rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2 text-xs leading-5 text-sky-800">候选评分与组合资金回测覆盖全市场主板涨停股，不限连板高度（含首板与四板以上）。</p>
                     <div className="grid gap-3 sm:grid-cols-4">
                       <div className="rounded-lg border border-sky-100 bg-sky-50/70 p-3"><p className="text-xs text-slate-500">T+{backtest.observationDays}延续成功率</p><p className="mt-1 text-2xl font-bold text-sky-700">{backtest.successRate ?? "-"}<span className="ml-1 text-sm">{backtest.successRate === null ? "" : "%"}</span></p><p className="mt-1 text-xs text-slate-500">{backtest.successCount}/{backtest.totalSamples} 个候选样本</p></div>
                       <div className="rounded-lg border border-indigo-100 bg-indigo-50/70 p-3"><p className="text-xs text-slate-500">历史校准阈值</p><p className="mt-1 text-2xl font-bold text-indigo-700">{backtest.recommendedMinScore ?? "-"}<span className="ml-1 text-sm">{backtest.recommendedMinScore === null ? "" : "分"}</span></p><p className="mt-1 text-xs text-slate-500">需至少20个历史样本才会启用</p></div>
@@ -247,9 +247,9 @@ export default function LeaderCandidatesPage() {
             </Card>
 
             <Card ref={candidateListRef} className="border-slate-200 bg-white/90 shadow-xl shadow-slate-200/50">
-              <CardHeader><CardTitle>当日主板1–4板评分列表</CardTitle><CardDescription>展示当日全部可评分主板1–4板涨停股，不再因重点候选准入条件或65分等评分阈值截断。龙头评分、下行风险分、风险扣分和净评分并列展示；“重点候选”标识、图表和回测仍保持既有口径。</CardDescription></CardHeader>
+              <CardHeader><CardTitle>当日主板涨停股评分列表</CardTitle><CardDescription>展示当日全部可评分主板涨停股（不限连板高度），不再因重点候选准入条件或65分等评分阈值截断。龙头评分、下行风险分、风险扣分和净评分并列展示；“重点候选”标识、图表和回测仍保持既有口径。</CardDescription></CardHeader>
               <CardContent>
-                {displayedAllScoredStocks.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有符合图表筛选条件的主板1–4板股票；可清除图表筛选后重试。</div> : (
+                {displayedAllScoredStocks.length === 0 ? <div className="py-14 text-center text-sm text-slate-500">当前没有符合图表筛选条件的主板涨停股；可清除图表筛选后重试。</div> : (
                   <div className="space-y-3">
                     {displayedAllScoredStocks.map((candidate) => (
                       <article key={candidate.stockCode} className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-amber-50/30 p-4 transition-shadow hover:shadow-md">

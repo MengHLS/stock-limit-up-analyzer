@@ -50,6 +50,14 @@ import {
   saveBacktestRun,
   listBacktestRuns,
   getBacktestRun,
+  runMonkeyBenchmarkForBacktest,
+  runCostSensitivityForBacktest,
+  createPaperTradingRun,
+  listPaperTradingRuns,
+  getPaperTradingRun,
+  setPaperTradingRunStatus,
+  advancePaperTradingRunToLatest,
+  advanceAllActivePaperTradingRuns,
   getAllSentimentAlerts,
   getUnreadAlertCount,
   markAlertAsRead,
@@ -66,6 +74,15 @@ import {
 
 const limitUpTimeInput = z.string().refine(isValidLimitUpTime, {
   message: "涨停时间应为HH:MM或HH:MM:SS格式",
+});
+
+/** 次日开盘预期三档：期望档位表（center/lower/upper，单位 %）。 */
+const expectationTableSchema = z.object({
+  early: z.object({ center: z.number(), lower: z.number(), upper: z.number() }),
+  morning: z.object({ center: z.number(), lower: z.number(), upper: z.number() }),
+  afternoon: z.object({ center: z.number(), lower: z.number(), upper: z.number() }),
+  late: z.object({ center: z.number(), lower: z.number(), upper: z.number() }),
+  unknown: z.object({ center: z.number(), lower: z.number(), upper: z.number() }),
 });
 
 /** 回测参数 schema：计算与保存共用，保证保存的参数能被直接复算。 */
@@ -92,6 +109,8 @@ const backtestOptionsSchema = z.object({
     strongHoldMinReturn: z.number().min(0).max(100).optional(),
     maxHoldingDays: z.number().int().min(2).max(30).optional(),
     minimumExpectedOpenChangePercent: z.number().min(-50).max(100).optional(),
+    expectationTierEnabled: z.boolean().optional(),
+    expectationTable: expectationTableSchema.optional(),
     blockOneWordLimitUpBuys: z.boolean().optional(),
     enableIntradayStopLoss: z.boolean().optional(),
     detectExRights: z.boolean().optional(),
@@ -1026,6 +1045,78 @@ export const appRouter = router({
       .input(z.object({ id: z.number().int().positive() }))
       .query(async ({ input }) => {
         return await getBacktestRun(input.id);
+      }),
+
+    // 打地鼠基准：随机选股对照，判断真实策略是否显著优于随机（按需触发，多次模拟较慢）
+    runMonkeyBenchmark: publicProcedure
+      .input(z.object({
+        options: backtestOptionsSchema.optional(),
+        trialCount: z.number().int().min(10).max(1000).optional(),
+      }))
+      .query(async ({ input }) => {
+        return await runMonkeyBenchmarkForBacktest(input.options ?? {}, input.trialCount ?? 100);
+      }),
+
+    // 交易成本敏感性：0/1/1.5/2/3 倍成本重复回测，判断策略是否依赖理想无成本环境（按需触发）
+    runCostSensitivity: publicProcedure
+      .input(z.object({
+        options: backtestOptionsSchema.optional(),
+        multipliers: z.array(z.number().min(0).max(10)).min(2).max(7).optional(),
+      }))
+      .query(async ({ input }) => {
+        return await runCostSensitivityForBacktest(input.options ?? {}, input.multipliers);
+      }),
+
+    // 创建一次前向纸面交易运行（真实样本外闭环），初始准备清单以最新信号日收盘生成。
+    createPaperTradingRun: protectedProcedure
+      .input(z.object({
+        label: z.string().min(1).max(120),
+        strategyKey: z.enum(["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"]),
+        options: backtestOptionsSchema.optional(),
+        initialCapital: z.number().int().min(10_000).max(100_000_000).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可创建前向纸面交易运行" });
+        }
+        const id = await createPaperTradingRun(input.label, input.strategyKey, input.options ?? {}, input.initialCapital ?? 100_000);
+        return { id };
+      }),
+
+    // 列出全部前向纸面交易运行（含扁平摘要）。
+    listPaperTradingRuns: publicProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(200).optional() }).optional())
+      .query(async ({ input }) => {
+        return await listPaperTradingRuns(input?.limit ?? 50);
+      }),
+
+    // 读取单条前向纸面交易运行的完整状态（持仓/订单/前向曲线/准备清单）。
+    getPaperTradingRun: publicProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        return await getPaperTradingRun(input.id);
+      }),
+
+    // 暂停/恢复/结束一条运行。
+    setPaperTradingRunStatus: protectedProcedure
+      .input(z.object({ id: z.number().int().positive(), status: z.enum(["active", "paused", "completed"]) }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可更新运行状态" });
+        }
+        await setPaperTradingRunStatus(input.id, input.status);
+        return { ok: true };
+      }),
+
+    // 手动把一条运行推进到最新交易日。
+    advancePaperTradingRun: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可手动推进纸面交易" });
+        }
+        const summary = await advancePaperTradingRunToLatest(input.id);
+        return { summary };
       }),
 
     // 管理员手动触发首轮历史回填或最近交易日补齐，外部行情密钥仅保留在服务端。

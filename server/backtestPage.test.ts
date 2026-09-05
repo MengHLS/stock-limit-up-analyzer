@@ -90,8 +90,6 @@ describe("独立组合资金回测页面", () => {
       "沪深成交额覆盖",
       "两融余额覆盖",
       "Tushare daily 聚合",
-      "零贡献",
-      "marginBalanceComparableSampleSize",
       "滚动样本外窗口",
       "低价覆盖",
       "资金与仓位审计",
@@ -111,11 +109,13 @@ describe("独立组合资金回测页面", () => {
       "不预设成交",
       "不构成交易建议",
       "orders-scroll-container",
-      "orderReturnSortDirection",
-      "sortOrdersByNetReturn",
-      "nextOrderReturnSortDirection",
+      "sortOrdersByKey",
+      "OrderSortKey",
+      "handleOrderSortChange",
       "aria-sort",
       "按收益率",
+      "盈亏占资金比",
+      "pnlToEquityRatio",
       "minimumExpectedOpenChangePercent",
       "oneWordLimitDownSellProbability",
       "一字跌停保守成交概率",
@@ -140,7 +140,7 @@ describe("独立组合资金回测页面", () => {
     expect(candidateSource).toContain("净评分");
     expect(candidateSource).toContain("龙头/风险/净评分");
     expect(candidateSource).toContain("风险分只使用每行信号日信息");
-    expect(candidateSource).toContain("当日主板1–4板评分列表");
+    expect(candidateSource).toContain("当日主板涨停股评分列表");
     expect(candidateSource).toContain("allScoredStocks");
     expect(candidateSource).toContain("重点候选");
     expect(researchSource).toContain("风险扣分策略");
@@ -175,9 +175,6 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("riskContributions");
     expect(researchSource).toContain("相同资金、成本、仓位、入场和唯一退出约束连续回测");
     expect(researchSource).toContain("日线成交额");
-    expect(researchSource).toContain("项目涨停数");
-    expect(researchSource).toContain("沪深两市成交额");
-    expect(researchSource).toContain("两融余额偏离");
     expect(pageSource).toContain("date >= startDate");
     expect(pageSource).toContain("downsideRiskResearch?.fullCycle.startDate");
     expect(styleSource).toContain("[data-trade-difference-table] > div:last-child");

@@ -62,7 +62,10 @@ const navGroups: NavGroup[] = [
   },
   {
     label: "量化回测",
-    items: [{ label: "组合回测", path: "/backtest", icon: WalletCards }],
+    items: [
+      { label: "组合回测", path: "/backtest", icon: WalletCards },
+      { label: "前向纸面交易", path: "/paper-trading", icon: TrendingUp },
+    ],
   },
   {
     label: "数据录入",

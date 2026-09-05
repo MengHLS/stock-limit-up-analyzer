@@ -28,7 +28,7 @@ describe("buildLeaderCandidates", () => {
     expect(result.totalMainBoardLimitUps).toBe(2);
     expect(result.maxBoards).toBe(2);
     expect(result.strongSectors).toEqual([{ sector: "算力", count: 2 }]);
-    expect(result.candidates.map((candidate) => candidate.stockCode)).toEqual(["600001.SH", "600002.SH"]);
+    expect(result.candidates.map((candidate) => candidate.stockCode)).toEqual(["600001.SH"]);
     expect(result.candidates[0]).toMatchObject({
       rank: 1,
       boards: 2,
@@ -37,7 +37,8 @@ describe("buildLeaderCandidates", () => {
       reasons: expect.arrayContaining(["2板高度", "算力 2只涨停", "09:45 封板", "成交额 22亿元"]),
       riskTags: [],
     });
-    expect(result.candidates[1]?.riskTags).toContain("封板偏晚");
+    expect(result.allScoredStocks.map((candidate) => candidate.stockCode)).toEqual(["600001.SH", "600002.SH"]);
+    expect(result.allScoredStocks.find((candidate) => candidate.stockCode === "600002.SH")?.riskTags).toContain("封板偏晚");
   });
 
   it("以已记录交易日序列判定连板，交易日中断后重新从首板计算", () => {
@@ -51,7 +52,7 @@ describe("buildLeaderCandidates", () => {
     expect(result.candidates).toHaveLength(0);
   });
 
-  it("当日全量评分列表包含低分主板1至4板股票，但重点候选与非主板边界保持不变", () => {
+  it("当日全量评分列表包含低分主板涨停股，重点候选按质量门槛筛选且非主板边界保持不变", () => {
     const records = [
       { stockCode: "600010.SH", stockName: "重点甲", limitUpDate: "2026-08-18", limitUpTime: "10:00:00", sector: "题材A", turnover: "5", circulationValue: "50" },
       { stockCode: "600010.SH", stockName: "重点甲", limitUpDate: "2026-08-19", limitUpTime: "10:00:00", sector: "题材A", turnover: "5", circulationValue: "50" },
@@ -63,7 +64,8 @@ describe("buildLeaderCandidates", () => {
 
     expect(result.allScoredStocks.map((candidate) => candidate.stockCode)).toEqual(["600010.SH", "600011.SH"]);
     expect(lowScoreStock?.score).toBeLessThan(52);
-    expect(result.candidates.map((candidate) => candidate.stockCode)).toEqual(["600010.SH"]);
+    // 取消连板高度特权后，低分且题材支撑不足的股票不再进入重点候选
+    expect(result.candidates.map((candidate) => candidate.stockCode)).toEqual([]);
     expect(result.allScoredStocks.some((candidate) => candidate.stockCode === "300010.SZ")).toBe(false);
   });
 
@@ -78,18 +80,20 @@ describe("buildLeaderCandidates", () => {
 
     const withoutFuture = buildLeaderCandidates(records, { phaseByDate, priceByStockDate: signalOnlyPrices });
     const withFuture = buildLeaderCandidates(records, { phaseByDate, priceByStockDate: withFuturePrice });
-    const candidate = withoutFuture.candidates[0]!;
+    const candidate = withoutFuture.allScoredStocks[0]!;
 
-    expect(candidate).toMatchObject({ score: 24, riskScore: 100, riskTier: "高风险", riskPenalty: 35, netScore: 0 });
-    expect(candidate.riskTags).toContain("下行风险偏高");
-    expect(withFuture.candidates[0]).toMatchObject({ riskScore: candidate.riskScore, riskPenalty: candidate.riskPenalty, netScore: candidate.netScore });
+    expect(candidate).toMatchObject({ score: 24, riskScore: 59, riskTier: "中风险", riskPenalty: 20.65, netScore: 3.35 });
+    expect(candidate.riskTags).toContain("下行风险中等");
+    expect(withFuture.allScoredStocks[0]).toMatchObject({ riskScore: candidate.riskScore, riskPenalty: candidate.riskPenalty, netScore: candidate.netScore });
   });
 
   it("全样本历史明细为每条候选保留信号日风险分、扣分和净评分，且不读取后续日线成交额", () => {
     const records = [
-      { stockCode: "600010.SH", stockName: "历史高风险", limitUpDate: "2026-08-18", limitUpTime: "10:00:00", sector: "题材A", turnover: "2", circulationValue: "10" },
-      { stockCode: "600010.SH", stockName: "历史高风险", limitUpDate: "2026-08-19", limitUpTime: "14:40:00", sector: "题材A", turnover: "2", circulationValue: "10" },
-      { stockCode: "600010.SH", stockName: "历史高风险", limitUpDate: "2026-08-20", limitUpTime: "14:40:00", sector: "题材A", turnover: "2", circulationValue: "10" },
+      { stockCode: "600010.SH", stockName: "历史候选", limitUpDate: "2026-08-18", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600010.SH", stockName: "历史候选", limitUpDate: "2026-08-19", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600010.SH", stockName: "历史候选", limitUpDate: "2026-08-20", limitUpTime: "09:40:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600011.SH", stockName: "同题材乙", limitUpDate: "2026-08-19", limitUpTime: "09:45:00", sector: "题材A", turnover: "20", circulationValue: "100" },
+      { stockCode: "600012.SH", stockName: "同题材丙", limitUpDate: "2026-08-19", limitUpTime: "09:50:00", sector: "题材A", turnover: "20", circulationValue: "100" },
     ];
     const basePrices = new Map([
       ["600010.SH::2026-08-19", { openPrice: 10, closePrice: 10, amount: 5_000 }],
@@ -97,11 +101,11 @@ describe("buildLeaderCandidates", () => {
     ]);
     const phaseByDate = new Map([["2026-08-19", { phase: "高位退潮" as const, maxBoards: 6 }]]);
     const build = (prices: typeof basePrices) => buildLeaderCandidateBacktest(records, {}, { phaseByDate, priceByStockDate: prices, tradingDates: ["2026-08-18", "2026-08-19", "2026-08-20"] });
-    const historicalRow = build(basePrices).historicalRows.find((row) => row.date === "2026-08-19")!;
+    const historicalRow = build(basePrices).historicalRows.find((row) => row.date === "2026-08-19" && row.stockCode === "600010.SH")!;
     const withChangedLaterAmount = new Map([...basePrices, ["600010.SH::2026-08-20", { openPrice: 10, closePrice: 10, amount: 999_999 }]]);
-    const historicalRowWithChangedLaterAmount = build(withChangedLaterAmount).historicalRows.find((row) => row.date === "2026-08-19")!;
+    const historicalRowWithChangedLaterAmount = build(withChangedLaterAmount).historicalRows.find((row) => row.date === "2026-08-19" && row.stockCode === "600010.SH")!;
 
-    expect(historicalRow).toMatchObject({ riskScore: 100, riskTier: "高风险", riskPenalty: 35, netScore: 0 });
+    expect(historicalRow).toMatchObject({ riskScore: 17, riskTier: "低风险" });
     expect(historicalRowWithChangedLaterAmount).toMatchObject({ riskScore: historicalRow.riskScore, riskPenalty: historicalRow.riskPenalty, netScore: historicalRow.netScore });
   });
 
@@ -114,10 +118,10 @@ describe("buildLeaderCandidates", () => {
     ]);
 
     expect(result.totalMainBoardLimitUps).toBe(1);
-    expect(result.candidates[0]).toMatchObject({ stockCode: "600001.SH", boards: 2, limitUpTime: "09:40:00" });
+    expect(result.allScoredStocks[0]).toMatchObject({ stockCode: "600001.SH", boards: 2, limitUpTime: "09:40:00" });
   });
 
-  it("五板及以上仅保留在市场高度统计，不参与候选评分与历史回测", () => {
+  it("五板及以上与首板一样进入候选评分与历史回测，覆盖全连板高度", () => {
     const dates = ["2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-22", "2026-08-25"];
     const highBoardRecords = dates.map((limitUpDate) => ({
       stockCode: "600001.SH", stockName: "高位龙头", limitUpDate, limitUpTime: "09:35:00", sector: "题材A", turnover: "20", circulationValue: "100",
@@ -134,9 +138,12 @@ describe("buildLeaderCandidates", () => {
     const backtest = buildLeaderCandidateBacktest(records, { minScore: 0 });
 
     expect(latest).toMatchObject({ maxBoards: 6, totalMainBoardLimitUps: 4 });
-    expect(latest.candidates.some((candidate) => candidate.stockCode === "600001.SH")).toBe(false);
-    expect(backtest.historicalRows.every((row) => row.boards < 5)).toBe(true);
-    expect(backtest.historicalRows.find((row) => row.date === "2026-08-22" && row.stockCode === "600001.SH")).toBeUndefined();
+    // 六板龙头进入全量评分与重点候选
+    expect(latest.allScoredStocks.some((candidate) => candidate.stockCode === "600001.SH")).toBe(true);
+    expect(latest.candidates.some((candidate) => candidate.stockCode === "600001.SH")).toBe(true);
+    // 历史回测覆盖五板及以上样本
+    expect(backtest.historicalRows.some((row) => row.boards >= 5)).toBe(true);
+    expect(backtest.historicalRows.find((row) => row.date === "2026-08-22" && row.stockCode === "600001.SH")).toBeDefined();
   });
 
   it("回测仅使用T日及以前数据生成候选，并以T加1涨停延续作为成功口径", () => {
