@@ -99,6 +99,76 @@
       "when": 1788545150783,
       "tag": "0013_paper_trading",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1788628436453,
+      "tag": "0014_flaky_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1788629814494,
+      "tag": "0015_chunky_namora",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1788673171848,
+      "tag": "0016_backfill_checkpoints",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1788673171849,
+      "tag": "0017_research_securities",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "5",
+      "when": 1788673171850,
+      "tag": "0018_security_status_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "5",
+      "when": 1788673171851,
+      "tag": "0019_market_data_infra",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1788673171852,
+      "tag": "0020_corporate_actions",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1788673171853,
+      "tag": "0021_backtest_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1788673171854,
+      "tag": "0022_stock_daily_prices_high_volume",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1788676035482,
+      "tag": "0023_security_identity_unification",
+      "breakpoints": true
     }
   ]
 }

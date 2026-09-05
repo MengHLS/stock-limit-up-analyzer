@@ -1,0 +1,214 @@
+{
+  "tableNames": [
+    "__drizzle_migrations",
+    "backtest_runs",
+    "limit_up_records",
+    "market_data",
+    "operation_logs",
+    "sentiment_alerts",
+    "stock_daily_prices",
+    "stock_suspension_windows",
+    "stock_watchlist",
+    "uploaded_images",
+    "users"
+  ],
+  "stats": {
+    "ohlcv": {
+      "rows": 116332,
+      "minDate": "2024-12-30T16:00:00.000Z",
+      "maxDate": "2026-09-03T16:00:00.000Z",
+      "distinctStocks": 3479,
+      "distinctDates": 230,
+      "byYear": [
+        {
+          "year": 2024,
+          "rows": 1
+        },
+        {
+          "year": 2025,
+          "rows": 21483
+        },
+        {
+          "year": 2026,
+          "rows": 94848
+        }
+      ],
+      "nullHigh": 0,
+      "nullLow": 0,
+      "nullAmount": 0,
+      "nullVolume": 0,
+      "nullPreClose": 0,
+      "nullOpen": 0,
+      "nullClose": 0,
+      "bySource": [
+        {
+          "k": "tushare",
+          "c": 116332
+        }
+      ],
+      "duplicateGroups": 0,
+      "sample": [
+        {
+          "stockCode": "920895.BJ",
+          "tradeDate": "2026-09-03T16:00:00.000Z",
+          "openPrice": "29.09",
+          "closePrice": "27.52",
+          "highPrice": "30.89",
+          "lowPrice": "27.5",
+          "amount": "250909.39915",
+          "volume": "86588.66",
+          "preClosePrice": "30",
+          "source": "tushare"
+        },
+        {
+          "stockCode": "920855.BJ",
+          "tradeDate": "2026-09-03T16:00:00.000Z",
+          "openPrice": "15.8",
+          "closePrice": "15.1",
+          "highPrice": "16.13",
+          "lowPrice": "15.08",
+          "amount": "79371.94317",
+          "volume": "51069.65",
+          "preClosePrice": "16.3",
+          "source": "tushare"
+        },
+        {
+          "stockCode": "920592.BJ",
+          "tradeDate": "2026-09-03T16:00:00.000Z",
+          "openPrice": "27.23",
+          "closePrice": "27.7",
+          "highPrice": "29.37",
+          "lowPrice": "27.01",
+          "amount": "282964.55814",
+          "volume": "99578.96",
+          "preClosePrice": "27.24",
+          "source": "tushare"
+        }
+      ]
+    },
+    "limitUp": {
+      "rows": 15429,
+      "minDate": "2024-12-30T16:00:00.000Z",
+      "maxDate": "2026-09-03T16:00:00.000Z",
+      "distinctStocks": 3430,
+      "distinctDates": 220,
+      "byYear": [
+        {
+          "year": 2024,
+          "rows": 142
+        },
+        {
+          "year": 2025,
+          "rows": 3230
+        },
+        {
+          "year": 2026,
+          "rows": 12057
+        }
+      ],
+      "nullTime": 0,
+      "nullBoardCount": 2,
+      "nullCirculationValue": 153,
+      "nullTurnover": 148,
+      "nullSector": 0
+    },
+    "marketData": {
+      "rows": 201,
+      "minDate": "2024-12-30T16:00:00.000Z",
+      "maxDate": "2026-08-24T16:00:00.000Z",
+      "distinctDates": 201,
+      "byYear": [
+        {
+          "year": 2024,
+          "rows": 1
+        },
+        {
+          "year": 2025,
+          "rows": 44
+        },
+        {
+          "year": 2026,
+          "rows": 156
+        }
+      ],
+      "nullTurnover": 0,
+      "nullMarginBalance": 0,
+      "notes": [
+        {
+          "dataDate": "2026-08-24T16:00:00.000Z",
+          "note": "真实来源：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+        },
+        {
+          "dataDate": "2026-08-23T16:00:00.000Z",
+          "note": "真实来源：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+        },
+        {
+          "dataDate": "2026-08-20T16:00:00.000Z",
+          "note": "真实来源：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+        }
+      ]
+    },
+    "suspension": {
+      "rows": 155,
+      "minStart": "2025-04-23T16:00:00.000Z",
+      "maxStart": "2026-08-30T16:00:00.000Z",
+      "distinctStocks": 101,
+      "bySource": [
+        {
+          "k": "tushare-daily-infer",
+          "c": 155
+        }
+      ]
+    },
+    "backfillCheckpoints": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.backfill_checkpoints' doesn't exist",
+      "missing": true
+    },
+    "industry": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.industry_assignments' doesn't exist",
+      "missing": true
+    },
+    "indexMaster": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.index_master' doesn't exist",
+      "missing": true
+    },
+    "indexDaily": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.index_daily' doesn't exist",
+      "missing": true
+    },
+    "liquidity": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.liquidity_daily' doesn't exist",
+      "missing": true
+    },
+    "corporateActions": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.corporate_actions' doesn't exist",
+      "missing": true
+    },
+    "adjustmentFactors": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.adjustment_factors' doesn't exist",
+      "missing": true
+    },
+    "securityMaster": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.research_securities' doesn't exist",
+      "missing": true
+    },
+    "identifierHistory": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.research_security_identifier_history' doesn't exist",
+      "missing": true
+    },
+    "statusHistory": {
+      "error": "ER_NO_SUCH_TABLE",
+      "message": "Table 'vwwjfde663dhej4tohvzpq.research_security_status_history' doesn't exist",
+      "missing": true
+    }
+  }
+}

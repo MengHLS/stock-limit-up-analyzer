@@ -1047,11 +1047,17 @@ export async function getStockDailyPriceTradeDates(startDate?: string, endDate?:
   return rows.map((row) => row.tradeDate);
 }
 
-/** stock_daily_prices 全量原始行情行（统一喂给价格映射与 Strategy Engine canonical 层）。 */
-async function loadStockDailyPriceRows(): Promise<LeaderCandidateDailyPriceRow[]> {
+/**
+ * 读取 stock_daily_prices 原始行情行（喂给价格映射与 Strategy Engine canonical 层）。
+ *
+ * STEP 7.3 内存安全：支持按 tradeDate 区间 / stockCode 列表有界查询；不传范围时保持
+ * 历史行为（全量）。全市场回填后表规模约 9M 行，调用方应尽量传入范围，禁止无条件
+ * `db.select().from(stockDailyPrices)` 全表物化（详见 server/backfill/pagination.ts）。
+ */
+async function loadStockDailyPriceRows(range?: { startDate?: string; endDate?: string; stockCodes?: string[] }): Promise<LeaderCandidateDailyPriceRow[]> {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select({
+  const base = db.select({
     stockCode: stockDailyPrices.stockCode,
     tradeDate: stockDailyPrices.tradeDate,
     openPrice: stockDailyPrices.openPrice,
@@ -1062,7 +1068,11 @@ async function loadStockDailyPriceRows(): Promise<LeaderCandidateDailyPriceRow[]
     volume: stockDailyPrices.volume,
     preClosePrice: stockDailyPrices.preClosePrice,
   }).from(stockDailyPrices);
-  return rows;
+  const conditions = [];
+  if (range?.startDate) conditions.push(gte(stockDailyPrices.tradeDate, range.startDate));
+  if (range?.endDate) conditions.push(lte(stockDailyPrices.tradeDate, range.endDate));
+  if (range?.stockCodes && range.stockCodes.length > 0) conditions.push(inArray(stockDailyPrices.stockCode, range.stockCodes));
+  return conditions.length > 0 ? base.where(and(...conditions)) : base;
 }
 
 /** 构造候选池回测所需的股票—交易日价格映射。 */

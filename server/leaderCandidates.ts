@@ -863,6 +863,7 @@ export function buildLeaderCandidateBacktest(
     recordsByDate.set(record.limitUpDate, codes);
   }
 
+  // 股票名称：回测明细展示用「最近稳定名称」避免 OCR 漂移；ST 涨跌停比例的正确历史判定依赖 STEP 7.5 历史状态数据（见报告 P1）。
   const stockNameByCode = buildLatestStockNameMap(records);
   const rows: LeaderCandidateBacktestRow[] = [];
   // 信号日只来自涨停记录；观察日优先来自完整市场交易日历，避免无涨停日被误跳过。

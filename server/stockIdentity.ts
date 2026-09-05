@@ -2,16 +2,18 @@
  * 股票「代码/名称」身份工具：
  * - normalizeStockCode：按代码前缀补全/纠正交易所后缀（6→SH、0/3→SZ、4/8/92→BJ）
  * - lookupStockByTencent：用腾讯行情接口（qt.gtimg.cn）反查某代码的真实名称，用于人工校正前验证
+ *
+ * 说明：交易所推断与代码规范化已收敛到 STEP 7.4 的 server/security/code.ts（单一事实来源），
+ * 此处保留原函数签名，委托到权威实现，避免两处规则漂移。
  */
+
+import { inferExchange } from "./security/code";
 
 const TENCT_QUOTE_URL = "https://qt.gtimg.cn/q=";
 
 /** 根据 6 位数字代码推断交易所后缀，规则与 Tushare/A股一致。 */
 export function inferStockExchangeSuffix(digits: string): string {
-  if (digits.startsWith("6")) return "SH"; // 60/601/603/605 主板 + 688 科创板
-  if (digits.startsWith("0") || digits.startsWith("3")) return "SZ"; // 000/001/002/003 + 300/301
-  if (digits.startsWith("92") || digits.startsWith("4") || digits.startsWith("8")) return "BJ"; // 北交所 920/43/83/87/88
-  throw new Error(`无法识别的股票代码前缀：${digits}`);
+  return inferExchange(digits);
 }
 
 /** 将任意输入（可带/可不带后缀，大小写均可）规范化为 6位数字.交易所 形式；格式非法时抛错。 */
@@ -21,7 +23,7 @@ export function normalizeStockCode(input: string): string {
     throw new Error(`无效股票代码：${input}，请输入 6 位数字代码（如 600272 或 600272.SH）`);
   }
   const digits = match[1];
-  return `${digits}.${inferStockExchangeSuffix(digits)}`;
+  return `${digits}.${inferExchange(digits)}`;
 }
 
 export type TencentStockInfo = {
