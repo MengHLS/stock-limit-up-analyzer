@@ -329,3 +329,87 @@ export const paperTradingRuns = mysqlTable("paper_trading_runs", {
 
 export type PaperTradingRun = typeof paperTradingRuns.$inferSelect;
 export type InsertPaperTradingRun = typeof paperTradingRuns.$inferInsert;
+
+/**
+ * 研究实验表 - 一次研究实验的完整冻结输入（snapshotJson）+ 元数据 + 状态。
+ * snapshotJson 保存 canonical Experiment Snapshot（参数集 / 数据集 / 特征配置 / 回测配置），
+ * 是历史实验复现的唯一事实来源；status 仅由受约束状态机迁移，核心输入不可变。
+ */
+export const researchExperiments = mysqlTable("research_experiments", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 实验实体身份（如 EXP-YYYYMMDD-XXXXXXXX），全局唯一。 */
+  experimentId: varchar("experimentId", { length: 64 }).notNull().unique(),
+  /** 策略身份（冗余列，便于查询；权威值在 snapshotJson 内）。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  /** 策略版本（冗余列，便于查询；权威值在 snapshotJson 内）。 */
+  strategyVersion: varchar("strategyVersion", { length: 32 }).notNull(),
+  /** 冻结的 canonical 实验快照（ResearchExperimentSnapshot 序列化）。 */
+  snapshotJson: longtext("snapshotJson").notNull(),
+  /** 实验状态：created / running / completed / failed。 */
+  status: mysqlEnum("status", ["created", "running", "completed", "failed"]).notNull().default("created"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  createdAtIdx: index("idx_research_experiments_created").on(table.createdAt),
+}));
+
+export type ResearchExperimentRow = typeof researchExperiments.$inferSelect;
+export type InsertResearchExperiment = typeof researchExperiments.$inferInsert;
+
+/**
+ * 研究运行表 - 一次实验执行（Run）。一个 experimentId 可对应多个 runId。
+ * runId 全局唯一；resultJson 保存结构化结果摘要，error 保存失败信息。
+ */
+export const researchRuns = mysqlTable("research_runs", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Run 实体身份（如 RUN-<experimentId>-<suffix>），全局唯一。 */
+  runId: varchar("runId", { length: 96 }).notNull().unique(),
+  /** 所属实验。 */
+  experimentId: varchar("experimentId", { length: 64 }).notNull(),
+  /** Run 状态：running / succeeded / failed。 */
+  status: mysqlEnum("status", ["running", "succeeded", "failed"]).notNull().default("running"),
+  /** 结构化结果摘要（ResearchRunResultSummary 序列化；成功时非空）。 */
+  resultJson: longtext("resultJson"),
+  /** 失败信息（失败时非空）。 */
+  error: text("error"),
+  startedAt: timestamp("startedAt"),
+  finishedAt: timestamp("finishedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  experimentIdIdx: index("idx_research_runs_experiment").on(table.experimentId),
+  createdAtIdx: index("idx_research_runs_created").on(table.createdAt),
+}));
+
+export type ResearchRunRow = typeof researchRuns.$inferSelect;
+export type InsertResearchRun = typeof researchRuns.$inferInsert;
+
+/**
+ * 参数扫描批次表 - 一次 Sweep 的完整冻结输入（parameterSpaceJson）+ 元数据 + 状态。
+ * parameterSpaceJson 保存冻结的参数空间快照，experimentIdsJson 保存该批次生成的实验 ID 列表；
+ * 是「这批 Experiment 是根据什么参数空间产生的」唯一追溯依据。核心输入不可变。
+ */
+export const researchExperimentBatches = mysqlTable("research_experiment_batches", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 批实体身份（如 BATCH-YYYYMMDD-XXXXXXXX），全局唯一。 */
+  batchId: varchar("batchId", { length: 64 }).notNull().unique(),
+  /** 策略身份（冗余列，便于查询；权威值在 parameterSpaceJson 之外的批次元数据内）。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  /** 策略版本（冗余列，便于查询）。 */
+  strategyVersion: varchar("strategyVersion", { length: 32 }).notNull(),
+  /** 冻结的参数空间快照（ParameterSpace 序列化）。 */
+  parameterSpaceJson: longtext("parameterSpaceJson").notNull(),
+  /** 参数空间 canonical fingerprint（SHA-256，研究审计辅助）。 */
+  parameterSpaceFingerprint: varchar("parameterSpaceFingerprint", { length: 64 }).notNull(),
+  /** 该批次生成的 Experiment ID 列表（JSON 数组，顺序 = 组合生成顺序）。 */
+  experimentIdsJson: longtext("experimentIdsJson").notNull(),
+  /** 批次状态：created / running / completed / failed / cancelled。 */
+  status: mysqlEnum("status", ["created", "running", "completed", "failed", "cancelled"]).notNull().default("created"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  fingerprintIdx: index("idx_research_batches_fingerprint").on(table.parameterSpaceFingerprint),
+  createdAtIdx: index("idx_research_batches_created").on(table.createdAt),
+}));
+
+export type ResearchExperimentBatchRow = typeof researchExperimentBatches.$inferSelect;
+export type InsertResearchExperimentBatch = typeof researchExperimentBatches.$inferInsert;
