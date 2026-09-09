@@ -24,7 +24,7 @@ import {
   TushareMarketDataProvider,
   TushareTradingCalendarProvider,
 } from "../server/backfill";
-import { fetchTushareTradeCalendar } from "../server/backfill/tradingCalendar";
+import { fetchCanonicalTradingCalendar } from "../server/backfill/tradingCalendar";
 import { upsertStockDailyPrices } from "../server/db";
 
 const DEFAULT_BATCH_SIZE = 1_000;
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   const checkpointStore = new DbCheckpointStore();
   const scheduler = new BackfillScheduler({
     provider: new TushareMarketDataProvider(),
-    calendarProvider: new TushareTradingCalendarProvider(fetchTushareTradeCalendar),
+    calendarProvider: new TushareTradingCalendarProvider(fetchCanonicalTradingCalendar),
     checkpointStore,
     rateLimiter: new IntervalRateLimiter(args.intervalMs),
     upsertFn: (rows) => upsertStockDailyPrices(rows),

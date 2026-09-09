@@ -288,6 +288,21 @@ export default function BacktestPage() {
     trailingProfitActivationPercent: 6, trailingDrawdownPercent: 3, stopLossPercent: 5, strongHoldMinReturn: 3, maxHoldingDays: 5,
     downsideObservationDays: 5, mediumDownsidePercent: 4, highDownsidePercent: 8, riskPenaltyWeight: 0.35, autoTunePenaltyWeight: true, hardRiskThreshold: 65, rollingTrainTradingDays: 45, rollingValidationTradingDays: 14,
   });
+  // 回测区间（含边界）。默认最近 2 年；数据回填到 2019 后若全量加载会命中 489 万行价格并卡死，故必须限区间。
+  const [dateRange, setDateRange] = useState<{ startDate?: string; endDate?: string }>(() => {
+    const toIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const end = new Date();
+    const start = new Date();
+    start.setFullYear(start.getFullYear() - 2);
+    return { startDate: toIso(start), endDate: toIso(end) };
+  });
+  const setRecentRange = (years: number) => {
+    const toIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const end = new Date();
+    const start = new Date();
+    start.setFullYear(start.getFullYear() - years);
+    setDateRange({ startDate: toIso(start), endDate: toIso(end) });
+  };
   const [orderStatus, setOrderStatus] = useState<"all" | "filled" | "skipped">("all");
   const [reason, setReason] = useState("all");
   const [keyword, setKeyword] = useState("");
@@ -337,6 +352,8 @@ export default function BacktestPage() {
     setActivePreset("");
   };
   const input = useMemo(() => ({
+    startDate: dateRange.startDate,
+    endDate: dateRange.endDate,
     observationDays: 1 as const,
     realistic: {
       initialCapital: config.initialCapital, maxPositions: config.maxPositions, commissionRate: config.commissionBps / 10000, stampDutyRate: config.stampDutyBps / 10000, transferFeeRate: config.transferFeeBps / 10000, slippageBps: config.slippageBps,
@@ -350,7 +367,7 @@ export default function BacktestPage() {
       observationDays: config.downsideObservationDays, mediumDownsidePercent: config.mediumDownsidePercent, highDownsidePercent: config.highDownsidePercent, penaltyWeight: config.riskPenaltyWeight, autoTunePenaltyWeight: config.autoTunePenaltyWeight, hardRiskThreshold: config.hardRiskThreshold,
       rollingTrainTradingDays: config.rollingTrainTradingDays, rollingValidationTradingDays: config.rollingValidationTradingDays,
     },
-  }), [config]);
+  }), [config, dateRange]);
   // 分析页使用「完整分析报表」研究端点（生产核心 + 下行风险研究）。
   // 生产核心（getLeaderCandidateBacktest）不携带 research-legacy 研究段（STEP 5 P2-2 边界）。
   const { data, isLoading, isFetching, refetch } = trpc.sentiment.getLeaderCandidateResearch.useQuery(input, { staleTime: 5 * 60_000 });
@@ -495,7 +512,19 @@ export default function BacktestPage() {
               <span className="text-xs font-bold tracking-[0.18em]">PORTFOLIO BACKTEST</span>
             </div>
             <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">组合回测</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">以候选信号为基础，模拟T日收盘后产生信号、T+1开盘买入并持有。生产回测为纯多头策略、不产生卖出信号，回测期末按市价估值，所有判断仅使用当日及之前可见的信息。</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">以候选信号为基础，模拟T日收盘后产生信号、T+1开盘买入，持有满 N 个交易日（见「最多持有日」，默认 5 天）后于下一交易日开盘卖出。所有判断仅使用当日及之前可见的信息。</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-slate-600">回测区间</span>
+              <input type="date" value={dateRange.startDate ?? ""} onChange={(event) => setDateRange((current) => ({ ...current, startDate: event.target.value || undefined }))} className="h-8 rounded-md border border-slate-200 px-2 text-xs text-slate-700" aria-label="回测开始日期" />
+              <span className="text-xs text-slate-400">至</span>
+              <input type="date" value={dateRange.endDate ?? ""} onChange={(event) => setDateRange((current) => ({ ...current, endDate: event.target.value || undefined }))} className="h-8 rounded-md border border-slate-200 px-2 text-xs text-slate-700" aria-label="回测结束日期" />
+              <div className="ml-1 flex flex-wrap items-center gap-1">
+                {[1, 2, 3].map((years) => (
+                  <Button key={years} type="button" size="sm" variant="ghost" onClick={() => setRecentRange(years)} className="h-7 px-2 text-xs text-slate-500 hover:text-slate-700">近{years}年</Button>
+                ))}
+              </div>
+              <span className="text-[11px] text-slate-400">建议单次回测区间 ≤ 2 年，更早历史请分段选择</span>
+            </div>
           </div>
           <div className="flex flex-col gap-3 lg:items-end">
             <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-right">

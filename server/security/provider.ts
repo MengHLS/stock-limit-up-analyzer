@@ -162,26 +162,34 @@ export function buildPrimaryIdentifierFromRecord(
 /**
  * Tushare stock_basic Provider（尽力而为，可能限频）。
  * 未配置 TUSHARE_TOKEN 或限频时抛错，由上层决定重试策略。
+ *
+ * listStatus 控制拉取范围：
+ *   - undefined（默认）→ 全量（L 上市 + D 退市 + P 暂停），无 survivorship bias；
+ *   - "L" | "D" | "P" → 仅该状态（供测试/分片使用）。
  */
 export class TushareStockBasicProvider implements SecurityMasterProvider {
   readonly name = "tushare-stock-basic";
   private readonly url: string;
   private readonly token: string | undefined;
+  private readonly listStatus: "L" | "D" | "P" | undefined;
 
-  constructor(options?: { url?: string; token?: string }) {
+  constructor(options?: { url?: string; token?: string; listStatus?: "L" | "D" | "P" }) {
     this.url = options?.url ?? "https://api.tushare.pro";
     this.token = options?.token ?? process.env.TUSHARE_TOKEN;
+    this.listStatus = options?.listStatus;
   }
 
   async fetchSecurityMaster(): Promise<ProviderSecurityRecord[]> {
     if (!this.token) throw new Error("未配置 TUSHARE_TOKEN，无法拉取 stock_basic");
+    const params: Record<string, string> = {};
+    if (this.listStatus) params.list_status = this.listStatus;
     const response = await fetch(this.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         api_name: "stock_basic",
         token: this.token,
-        params: { list_status: "L" },
+        params,
         fields: "ts_code,symbol,name,list_status,list_date,delist_date,exchange,curr_type",
       }),
     });

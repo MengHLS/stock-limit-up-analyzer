@@ -13,12 +13,26 @@
 
 import type { BarValidationResult, CanonicalMarketBar, DataQuality, ValidationIssue } from "./types";
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+// 每月天数（2 月按平年 28 天，闰年由调用处 +1）。
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * 校验 YYYY-MM-DD 是否为真实日历日期。
+ * 用数值范围判定替代 `new Date().toISOString()` 往返（后者每根 bar 都要构造 Date + 格式化，
+ * 336K 行回测冷缓存时约占 ~0.7s）；两者对 YYYY-MM-DD 格式完全等价。
+ */
 function isValidDate(value: string): boolean {
-  if (!DATE_RE.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  const match = DATE_RE.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12) return false;
+  const isLeap = month === 2 && ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0);
+  const maxDay = isLeap ? 29 : DAYS_IN_MONTH[month - 1];
+  return day >= 1 && day <= maxDay;
 }
 
 const positivePrice = (v: number | null): v is number => v !== null && Number.isFinite(v) && v > 0;

@@ -71,6 +71,9 @@ export function runBacktest(input: RunBacktestInput): BacktestResult {
   // 风险决策追踪（仅当传入 risk 管道时记录）。
   const riskTraces: RiskDecisionTrace[] = [];
   const riskManager = input.risk?.manager;
+  // 交易日 → 序号（供持有期退出计算持有天数）。
+  const dayIndexMap = new Map(dates.map((d, index) => [d, index]));
+  const maxHoldingDays = config.maxHoldingDays;
 
   for (let i = 0; i < dates.length; i += 1) {
     const date = dates[i]!;
@@ -147,6 +150,26 @@ export function runBacktest(input: RunBacktestInput): BacktestResult {
       openPositionSymbols: portfolio.snapshotPositions().map((p) => p.symbol),
     };
     pendingSignals = input.signalProvider(date, snapshot);
+
+    // 持有期强制退出：买入建仓（entryTime）持有满 maxHoldingDays 个交易日后，
+    // 在届满日收盘产生 SELL，下一交易日开盘成交（与引擎 next-open 执行模型一致）。
+    if (maxHoldingDays !== undefined && Number.isFinite(maxHoldingDays) && maxHoldingDays > 0) {
+      const currentIndex = dayIndexMap.get(date);
+      if (currentIndex !== undefined) {
+        for (const entry of portfolio.openPositionEntries()) {
+          const entryIndex = dayIndexMap.get(entry.entryTime);
+          if (entryIndex !== undefined && currentIndex - entryIndex >= maxHoldingDays - 1) {
+            pendingSignals.push({
+              symbol: entry.symbol,
+              signalTime: date,
+              side: "sell",
+              quantity: entry.quantity,
+              reason: `持有满${maxHoldingDays}个交易日`,
+            });
+          }
+        }
+      }
+    }
 
     // 3. 当日收盘后记录权益点。
     equityCurve.push(portfolio.equityPoint(date, closePrices));

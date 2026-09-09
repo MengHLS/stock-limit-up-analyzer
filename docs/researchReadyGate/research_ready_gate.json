@@ -1,0 +1,496 @@
+{
+  "capturedAt": "2026-09-08T19:33:43.787Z",
+  "researchReady": true,
+  "summary": {
+    "total": 17,
+    "dataScope": 15,
+    "PASS": 17,
+    "PENDING": 0,
+    "FAIL": 0
+  },
+  "thresholds": {
+    "migrationRows": 24,
+    "canonicalDaysMin": 1800,
+    "securityMasterMin": 5500,
+    "identifierHistoryMin": 5500,
+    "statusEventCoverMin": 1500,
+    "industryCoverMin": 5000,
+    "indexCoreCount": 4,
+    "indexDaysMin": 1800,
+    "liquidityCoverMin": 5000,
+    "caGapTolerance": 250,
+    "adjCoverMin": 5000,
+    "pitOverlapMax": 0,
+    "survivorshipDelistedMin": 1
+  },
+  "checks": [
+    {
+      "id": 1,
+      "name": "Migration PASS",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "ledgerRows": 24,
+        "journalTag23": "0023_security_identity_unification",
+        "dbLastCreatedAt": "1788676035482",
+        "journalWhen23": "1788676035482"
+      },
+      "threshold": {
+        "ledgerRows": 24,
+        "tag23": "0023_security_identity_unification",
+        "dbLastCreatedAtMatchesJournal": true
+      },
+      "detail": "__drizzle_migrations 台账 24 行；journal idx=23 tag=0023_security_identity_unification"
+    },
+    {
+      "id": 2,
+      "name": "Trading Calendar FULL",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "canonicalDays": 1863,
+        "range": {
+          "min": "2019-01-02",
+          "max": "2026-09-04"
+        },
+        "perIndex": [
+          {
+            "indexCode": "000001.SH",
+            "days": 1863
+          },
+          {
+            "indexCode": "000300.SH",
+            "days": 1863
+          },
+          {
+            "indexCode": "000905.SH",
+            "days": 1863
+          },
+          {
+            "indexCode": "399001.SZ",
+            "days": 1863
+          }
+        ]
+      },
+      "threshold": {
+        "canonicalDays": 1800,
+        "coreIndexConsistent": 4
+      },
+      "detail": "canonical 交易日 1863 日（2019-01-02 → 2026-09-04），来源 index_daily 4 核心指数"
+    },
+    {
+      "id": 3,
+      "name": "OHLCV FULL",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "distinctTradeDates": 1865,
+        "canonicalDays": 1863,
+        "gapDays": 0,
+        "duplicateKeys": 0,
+        "coveragePct": 100.11
+      },
+      "threshold": {
+        "distinctTradeDates": 1863,
+        "duplicateKeys": 0
+      },
+      "detail": "覆盖 1865/1863 交易日（缺口 0 日），重复键 0"
+    },
+    {
+      "id": 4,
+      "name": "Security Master FULL",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "rows": 5552,
+        "distinctSecurityIds": 5552
+      },
+      "threshold": {
+        "rows": 5500
+      },
+      "detail": "research_securities 5552 行（distinct securityId 5552）"
+    },
+    {
+      "id": 5,
+      "name": "Identifier History FULL",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "rows": 5552,
+        "distinctSecurityIds": 5552,
+        "securitiesDistinctSecurityIds": 5552,
+        "oneToOne": true
+      },
+      "threshold": {
+        "rows": 5500,
+        "oneToOneWithSecurities": true
+      },
+      "detail": "5552 行，distinct securityId 5552（与 securities 5552 一一对应）"
+    },
+    {
+      "id": 6,
+      "name": "Historical Status",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "rows": 10373,
+        "distinctSecurityIds": 1830,
+        "byType": {
+          "SUSPENDED": 1830,
+          "ST": 734
+        },
+        "listingBoundaryVia": "research_securities (#4)"
+      },
+      "threshold": {
+        "minDistinctEventSecurities": 1500,
+        "requireSuspendedAndSt": true
+      },
+      "detail": "10373 行（事件态覆盖 1830 只：SUSPENDED 1830 / ST 734，下限 1500；LISTING/DELISTING 边界由 securities 全量提供）"
+    },
+    {
+      "id": 7,
+      "name": "Industry",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "distinctSecurities": 5212,
+        "effectiveRange": {
+          "min": "2026-08-31",
+          "max": "2026-08-31"
+        }
+      },
+      "threshold": {
+        "distinctSecurities": 5000
+      },
+      "detail": "覆盖 5212 只证券（effectiveFrom 2026-08-31 → 2026-08-31，当前快照非历史序列）"
+    },
+    {
+      "id": 8,
+      "name": "Index",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "distinctIndexCodes": 4,
+        "minDaysPerIndex": 1863
+      },
+      "threshold": {
+        "distinctIndexCodes": 4,
+        "minDaysPerIndex": 1800
+      },
+      "detail": "4 核心指数，各覆盖 1863 交易日"
+    },
+    {
+      "id": 9,
+      "name": "Liquidity",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "distinctSecurities": 5131
+      },
+      "threshold": {
+        "distinctSecurities": 5000
+      },
+      "detail": "覆盖 5131 只证券（全量需 5000）"
+    },
+    {
+      "id": 10,
+      "name": "Corporate Actions",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "distinctSecurities": 4824,
+        "adjustmentFactorSecurities": 5025,
+        "gapToAdjustmentFactors": 201
+      },
+      "threshold": {
+        "gapToAdjustmentFactorsMax": 250
+      },
+      "detail": "事件态表：覆盖 4824 只，AF（复权因子）5025 只，缺口 201 ≤ 容差 250（缺口=无分红送转事件的证券，实查确认）"
+    },
+    {
+      "id": 11,
+      "name": "Adjustment Factors",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "distinctSecurities": 5025
+      },
+      "threshold": {
+        "distinctSecurities": 5000
+      },
+      "detail": "覆盖 5025 只证券（全量需 5000）"
+    },
+    {
+      "id": 12,
+      "name": "Historical Universe 可重建",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "securitiesRows": 5552,
+        "identifierRows": 5552,
+        "statusRows": 10373,
+        "statusCoveredSecurities": 1830,
+        "statusTypeOk": true
+      },
+      "threshold": {
+        "threeTablesPopulated": true,
+        "minStatusEventSecurities": 1500,
+        "requireSuspendedAndSt": true
+      },
+      "detail": "三表数据：securities=5552、identifier=5552、status=10373（事件态覆盖 1830 ≥ 1500，SUSPENDED+ST 齐备）"
+    },
+    {
+      "id": 13,
+      "name": "PIT validation",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "identifierOverlaps": 0,
+        "statusOverlaps": 0
+      },
+      "threshold": {
+        "maxOverlaps": 0
+      },
+      "detail": "identifier 区间重叠 0、status 区间重叠 0（阈值 0）"
+    },
+    {
+      "id": 14,
+      "name": "Survivorship validation",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "delistedCount": 337
+      },
+      "threshold": {
+        "delistedCount": 1
+      },
+      "detail": "securities 含退市股 337 只"
+    },
+    {
+      "id": 15,
+      "name": "Data quality validation",
+      "dataScope": true,
+      "status": "PASS",
+      "current": {
+        "duplicateKeys": 0,
+        "nullCriticalFields": 0,
+        "weekendTradeDates": 0
+      },
+      "threshold": {
+        "duplicateKeys": 0,
+        "nullCriticalFields": 0,
+        "weekendTradeDates": 0
+      },
+      "detail": "重复键 0、null 关键字段 0、周末交易日 0"
+    },
+    {
+      "id": 16,
+      "name": "No critical blocker",
+      "dataScope": false,
+      "status": "PASS",
+      "current": {
+        "failedChecks": []
+      },
+      "threshold": {
+        "noFail": true
+      },
+      "detail": "无 FAIL 项"
+    },
+    {
+      "id": 17,
+      "name": "Certification snapshot 可复现",
+      "dataScope": false,
+      "status": "PASS",
+      "current": {
+        "script": "scripts/step12_certify_gate.mjs",
+        "output": "docs/researchReadyGate/research_ready_gate.json",
+        "idempotent": true
+      },
+      "threshold": {
+        "idempotent": true,
+        "timestamped": true
+      },
+      "detail": "只读 TiDB + 阈值常量化 + 当前值查库，重复运行生成一致判定"
+    }
+  ],
+  "snapshot": {
+    "capturedAt": "2026-09-08T19:32:30.443Z",
+    "migrationLedgerRows": 24,
+    "migrationLast": {
+      "id": "414155",
+      "hash": "e68e3fe9d3e3b568",
+      "created_at": "1788676035482"
+    },
+    "stock_daily_prices": {
+      "rows": 8891500,
+      "min_tradeDate": "2019-01-02",
+      "max_tradeDate": "2026-09-08",
+      "min_sourceUpdatedAt": "2026-09-06",
+      "max_sourceUpdatedAt": "2026-09-08"
+    },
+    "research_securities": {
+      "rows": 5552,
+      "min_listedDate": "1990-12-10",
+      "max_listedDate": "2026-09-02",
+      "min_delistedDate": "1999-07-12",
+      "max_delistedDate": "2026-07-17"
+    },
+    "research_security_identifier_history": {
+      "rows": 5552,
+      "min_effectiveFrom": "1990-12-10",
+      "max_effectiveFrom": "2026-09-02",
+      "min_effectiveTo": "1999-07-12",
+      "max_effectiveTo": "2026-07-17"
+    },
+    "research_security_status_history": {
+      "rows": 10373,
+      "min_effectiveFrom": "1998-05-04",
+      "max_effectiveFrom": "2026-09-04",
+      "min_effectiveTo": "1999-07-02",
+      "max_effectiveTo": "2026-09-04"
+    },
+    "industry_assignments": {
+      "rows": 5212,
+      "min_effectiveFrom": "2026-08-31",
+      "max_effectiveFrom": "2026-08-31",
+      "min_effectiveTo": null,
+      "max_effectiveTo": null
+    },
+    "index_master": {
+      "rows": 8,
+      "min_firstDate": "2019-01-02",
+      "max_firstDate": "2022-06-22",
+      "min_lastDate": "2026-09-04",
+      "max_lastDate": "2026-09-04"
+    },
+    "index_daily": {
+      "rows": 7452,
+      "min_tradeDate": "2019-01-02",
+      "max_tradeDate": "2026-09-04",
+      "min_retrievedAt": "2026-09-06",
+      "max_retrievedAt": "2026-09-06"
+    },
+    "liquidity_daily": {
+      "rows": 9015158,
+      "min_tradeDate": "1992-03-31",
+      "max_tradeDate": "2026-09-04",
+      "min_retrievedAt": "2026-09-06",
+      "max_retrievedAt": "2026-09-08"
+    },
+    "corporate_actions": {
+      "rows": 31641,
+      "min_effectiveDate": "2004-05-11",
+      "max_effectiveDate": "2026-10-23",
+      "min_recordDate": "2004-05-10",
+      "max_recordDate": "2026-10-22"
+    },
+    "adjustment_factors": {
+      "rows": 31337,
+      "min_effectiveDate": "1991-04-03",
+      "max_effectiveDate": "2026-09-04",
+      "min_retrievedAt": "2026-09-06",
+      "max_retrievedAt": "2026-09-07"
+    },
+    "backfill_checkpoints": {
+      "rows": 1863,
+      "min_tradeDate": "2019-01-02",
+      "max_tradeDate": "2026-09-04",
+      "min_completedAt": "2026-09-06",
+      "max_completedAt": "2026-09-06"
+    },
+    "ohlcvRange": {
+      "min": "2019-01-02",
+      "max": "2026-09-08"
+    },
+    "ohlcvDistinctStocks": 5796,
+    "ohlcvDuplicateKeys": 0,
+    "ohlcvByYear": [
+      {
+        "year": 2019,
+        "rows": 894171,
+        "tradingDays": 244,
+        "stocks": 3923
+      },
+      {
+        "year": 2020,
+        "rows": 964101,
+        "tradingDays": 243,
+        "stocks": 4362
+      },
+      {
+        "year": 2021,
+        "rows": 1085433,
+        "tradingDays": 243,
+        "stocks": 4839
+      },
+      {
+        "year": 2022,
+        "rows": 1179062,
+        "tradingDays": 242,
+        "stocks": 5181
+      },
+      {
+        "year": 2023,
+        "rows": 1258734,
+        "tradingDays": 242,
+        "stocks": 5381
+      },
+      {
+        "year": 2024,
+        "rows": 1293893,
+        "tradingDays": 242,
+        "stocks": 5433
+      },
+      {
+        "year": 2025,
+        "rows": 1313898,
+        "tradingDays": 243,
+        "stocks": 5500
+      },
+      {
+        "year": 2026,
+        "rows": 902208,
+        "tradingDays": 166,
+        "stocks": 5576
+      }
+    ],
+    "checkpoints": [
+      {
+        "status": "SUCCESS",
+        "count": 1863
+      }
+    ],
+    "checkpointRange": {
+      "min": "2019-01-02",
+      "max": "2026-09-04"
+    },
+    "schema_industry_assignments": {
+      "hasSecurityCode": true,
+      "securityIdNullable": true,
+      "uniqueIndexFirstCols": [
+        "uq_industry_assign_security_effective"
+      ]
+    },
+    "schema_liquidity_daily": {
+      "hasSecurityCode": true,
+      "securityIdNullable": true,
+      "uniqueIndexFirstCols": [
+        "uq_liquidity_daily_security_date"
+      ]
+    },
+    "schema_corporate_actions": {
+      "hasSecurityCode": true,
+      "securityIdNullable": true,
+      "uniqueIndexFirstCols": [
+        "uq_corporate_action_security_date_type"
+      ]
+    },
+    "schema_adjustment_factors": {
+      "hasSecurityCode": true,
+      "securityIdNullable": true,
+      "uniqueIndexFirstCols": [
+        "uq_adjustment_factor_security_date"
+      ]
+    }
+  }
+}

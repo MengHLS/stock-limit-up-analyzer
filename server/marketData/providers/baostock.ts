@@ -6,7 +6,7 @@
  * BaoStock 不提供市值（流通/总市值）→ 显式 UNAVAILABLE。
  */
 
-import type { IndexCode, IndexDailyBar, IndexMasterEntry, LiquidityDaily, SecurityId } from "../types";
+import type { IndexCode, IndexDailyBar, IndexMasterEntry, IndustryAssignment, LiquidityDaily, SecurityId } from "../types";
 import { normalizeLiquidity } from "../liquidity";
 import type { LiquidityProvider } from "./types";
 import { runPythonScript } from "./pythonBridge";
@@ -16,6 +16,13 @@ export function toBaostockCode(securityId: SecurityId): string {
   const [digits, exchange] = securityId.split(".");
   if (!digits || !exchange) throw new Error(`无法转 BaoStock 代码：${securityId}`);
   return `${exchange.toLowerCase()}.${digits}`;
+}
+
+/** 转规范化证券代码（sh.600000 → 600000.SH / sz.000001 → 000001.SZ / bj.920000 → 920000.BJ）。 */
+export function baostockCodeToSecurityCode(baostockCode: string): string {
+  const match = baostockCode.trim().toLowerCase().match(/^(sh|sz|bj)\.(\d{6})$/);
+  if (!match) throw new Error(`无法转规范化代码：${baostockCode}`);
+  return `${match[2]}.${match[1]!.toUpperCase()}`;
 }
 
 function num(value: string | number | null | undefined): number | null {
@@ -59,6 +66,8 @@ export interface BaostockStockRow {
   amount: string;
   turn: string;
   tradestatus: string;
+  /** 1=ST 0=正常（BaoStock 权威字段；STEP 12 起由 bridge 返回，流动性解析不使用它）。 */
+  isST?: string;
 }
 
 /** 解析 BaoStock 个股日线为 canonical LiquidityDaily（turn %、amount 元→千元、volume 股→手）。 */
@@ -121,3 +130,77 @@ export const baostockLiquidityProvider: LiquidityProvider = {
   },
   fetchDaily: fetchBaostockStockDaily,
 };
+
+// ---------------------------------------------------------------------------
+// STEP 12 WORK G — BaoStock 行业（当前证监会行业分类快照）
+// ---------------------------------------------------------------------------
+
+/** BaoStock query_stock_industry 返回的行业行。 */
+export interface BaostockIndustryRow {
+  updateDate: string;
+  code: string;
+  code_name: string;
+  industry: string;
+  industryClassification: string;
+}
+
+/** BaoStock query_stock_basic 返回的基础信息行。 */
+export interface BaostockStockBasicRow {
+  code: string;
+  name: string;
+  ipoDate: string;
+  outDate: string;
+  type: string;
+  status: string;
+}
+
+/**
+ * 拆分证监会行业字段（如 "J66货币金融服务"）为 { industryCode: "J66", industryName: "货币金融服务" }。
+ * 无代码前缀时（纯中文名）industryCode 置空、industryName 保留原文；空串两者皆空。
+ */
+export function splitIndustryCodeName(industry: string): { industryCode: string; industryName: string } {
+  const trimmed = (industry ?? "").trim();
+  const match = trimmed.match(/^([A-Za-z]+\d*)(.*)$/);
+  if (!match || !match[2]!.trim()) {
+    return { industryCode: match?.[1]?.trim() ?? "", industryName: trimmed };
+  }
+  return { industryCode: match[1]!.trim(), industryName: match[2]!.trim() };
+}
+
+/**
+ * 解析 BaoStock 行业行为 IndustryAssignment（PIT 语义）。
+ *
+ * 铁律（诚实表达）：BaoStock 仅返回「当前」行业，无历史区间。
+ *   - effectiveFrom = updateDate（行业分类更新时间），表达「从该时点起生效」；
+ *   - effectiveTo = null（当前仍有效）；
+ *   - source = "baostock"；retrievedAt = now。
+ * 本回填是「当前行业快照」，不是完整历史归属（历史行业缺失是 CONDITIONAL GAP）。
+ */
+export function parseBaostockIndustry(row: BaostockIndustryRow, retrievedAt?: string): IndustryAssignment {
+  const securityCode = baostockCodeToSecurityCode(row.code);
+  const { industryCode, industryName } = splitIndustryCodeName(row.industry);
+  return {
+    // 本领域 SecurityId 即规范化代码（见 types.ts），使对象可直接用于 industry.ts 的 PIT 函数。
+    securityId: securityCode,
+    industryCode,
+    industryName,
+    effectiveFrom: row.updateDate,
+    effectiveTo: null,
+    source: "baostock",
+    retrievedAt: retrievedAt ?? new Date().toISOString(),
+  };
+}
+
+/** 获取单只证券的当前证监会行业分类；无归属或返回空返回 null。 */
+export async function fetchBaostockIndustry(baostockCode: string): Promise<IndustryAssignment | null> {
+  const stdout = await runPythonScript("baostock_probe.py", ["stock_industry", baostockCode], "MARKETDATA_PYTHON");
+  const parsed = JSON.parse(stdout) as BaostockIndustryRow | null;
+  if (!parsed || !parsed.code || !parsed.industry) return null;
+  return parseBaostockIndustry(parsed);
+}
+
+/** 获取全市场证券基础信息（供回填筛选 type=1 股票）。 */
+export async function fetchBaostockStockBasic(): Promise<BaostockStockBasicRow[]> {
+  const stdout = await runPythonScript("baostock_probe.py", ["stock_basic"], "MARKETDATA_PYTHON");
+  return JSON.parse(stdout) as BaostockStockBasicRow[];
+}

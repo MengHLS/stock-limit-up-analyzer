@@ -212,6 +212,7 @@ export function runLeaderCandidateEngineProbe(
       initialCapital: assumptions.initialCapital,
       maxPositions: assumptions.maxPositions,
       maxPositionAmountRatio: assumptions.maxPositionAmountRatio,
+      maxHoldingDays: assumptions.maxHoldingDays,
       tradingDates: calendar,
       cost: {
         commissionRate: assumptions.commissionRate,

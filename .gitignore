@@ -59,6 +59,9 @@ jspm_packages/
 # TypeScript cache
 *.tsbuildinfo
 
+# Vitest runtime temp config snapshots
+vitest.config.ts.timestamp-*.mjs
+
 # Optional npm cache directory
 .npm
 
@@ -106,3 +109,11 @@ temp/
 *.sqlite
 *.sqlite3
 .project-config.json
+
+# BaoStock 安装包与运行时产物
+baostock-0.9.3.tar.gz
+scripts/_backfill_*.json
+scripts/_baostock_stock_basic_dump.json
+
+# Git 恢复时损坏 .git 的备份（含 reflog，供对照历史提交消息，确认后可删）
+.git.broken/

@@ -1,0 +1,6 @@
+[
+  { "exchange": "SZ", "code": "000001", "tsCode": "000001.SZ", "name": "平安银行", "effectiveFrom": "2012-08-02", "effectiveTo": null, "annDate": "2012-01-20", "changeReason": "其他" },
+  { "exchange": "SZ", "code": "000001", "tsCode": "000001.SZ", "name": "深发展A", "effectiveFrom": "2007-06-20", "effectiveTo": "2012-08-01", "annDate": "2007-06-14", "changeReason": "其他" },
+  { "exchange": "SZ", "code": "000001", "tsCode": "000001.SZ", "name": "S深发展A", "effectiveFrom": "2006-10-09", "effectiveTo": "2007-06-19", "annDate": "2006-09-28", "changeReason": "其他" },
+  { "exchange": "SZ", "code": "000001", "tsCode": "000001.SZ", "name": "深发展A", "effectiveFrom": "1991-04-03", "effectiveTo": "2006-10-08", "annDate": "1991-04-03", "changeReason": "其他" }
+]

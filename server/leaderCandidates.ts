@@ -238,6 +238,9 @@ export type LeaderCandidateBacktestOptions = {
   minScore?: number;
   realistic?: RealisticBacktestOptions;
   downsideRisk?: DownsideRiskOptions;
+  /** 回测区间起止（YYYY-MM-DD，含边界）。缺省表示不限（加载全量历史，数据量极大）。 */
+  startDate?: string;
+  endDate?: string;
 };
 
 export type LeaderCandidatePhaseFunnelItem = {

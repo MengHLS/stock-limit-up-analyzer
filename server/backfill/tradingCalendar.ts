@@ -91,6 +91,26 @@ export async function fetchTushareTradeCalendar(
   return Array.from(openByDate.values()).sort((a, b) => a.calDate.localeCompare(b.calDate));
 }
 
+/**
+ * STEP 12 — canonical trading calendar 适配层。
+ *
+ * Backfill 的交易日历统一改用 canonical 源 `server/security/tradingCalendar.ts`
+ * （契约 §8 + STEP 11 Work E 全系统唯一语义；数据源为参考股 000001.SZ 的 daily，
+ * 不经 trade_cal —— trade_cal 实测限 1 次/小时，无法支撑批量回填）。
+ * 返回类型保持 backfill 自有 TradingCalendarDay[]，语义不变（isOpen=true 才回填）。
+ */
+export async function fetchCanonicalTradingCalendar(
+  startDate: string,
+  endDate: string,
+): Promise<TradingCalendarDay[]> {
+  const { loadTradingCalendar } = await import("../security/tradingCalendar");
+  const calendar = await loadTradingCalendar(startDate, endDate, {
+    name: "backfill-calendar",
+    exchange: ["SSE", "SZSE"],
+  });
+  return calendar.tradingDays.map((calDate) => ({ calDate, exchange: "SSE", isOpen: true }));
+}
+
 /** 从交易日历中提取排序后的交易日（YYYY-MM-DD 升序）。 */
 export function extractTradingDates(calendar: TradingCalendarDay[]): string[] {
   return Array.from(new Set(calendar.filter((day) => day.isOpen).map((day) => day.calDate)))

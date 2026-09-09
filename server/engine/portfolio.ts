@@ -222,6 +222,15 @@ export class Portfolio {
     return { success: true };
   }
 
+  /** 当前持仓的建仓时点与数量（供引擎「持有期强制退出」在收盘时点产生 SELL 使用）。 */
+  openPositionEntries(): Array<{ symbol: string; entryTime: string; quantity: number }> {
+    return Array.from(this.positions.entries()).map(([symbol, pos]) => ({
+      symbol,
+      entryTime: this.openTrades.get(symbol)?.entryTime ?? "",
+      quantity: pos.quantity,
+    }));
+  }
+
   /** 标记价格并返回权益（cash + 持仓市值）。 */
   markToMarket(prices: Map<string, number>): number {
     let marketValue = 0;

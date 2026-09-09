@@ -7,7 +7,8 @@ export type TushareDailyPrice = {
   lowPrice: number;
   amount: number;
   volume: number;
-  preClosePrice: number;
+  /** 前收价；上市/首日交易无前收时可为 null（合法缺失，禁止填 0 伪造）。 */
+  preClosePrice: number | null;
 };
 
 type TusharePayload = {
@@ -62,6 +63,19 @@ function nonNegativeNumber(value: unknown, field: string, stockCode: string, tra
   return numberValue;
 }
 
+/**
+ * 可空前收价：null/undefined/空串 → null（上市首日等合法缺失场景）。
+ * 非空时必须为有限正数，否则抛错（保持严格，禁止静默 0/伪造）。
+ */
+function nullablePositiveNumber(value: unknown, field: string, stockCode: string, tradeDate: string): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numberValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    throw new Error(`Tushare 日线字段无效：${stockCode} ${tradeDate} 的 ${field}`);
+  }
+  return numberValue;
+}
+
 /** 判断错误是否为 Tushare 接口频率限制（限频）。 */
 export function isTushareRateLimitError(error: unknown): boolean {
   return error instanceof Error && /频率超限|限频|rate\s?limit|每分钟最多访问|访问频率|过于频繁/i.test(error.message);
@@ -93,7 +107,7 @@ export function parseTushareDailyPrices(payload: TusharePayload): TushareDailyPr
       lowPrice: requiredNumber(item[indexByField.get("low")!], "low", stockCode, tradeDate),
       amount: nonNegativeNumber(item[indexByField.get("amount")!], "amount", stockCode, tradeDate),
       volume: nonNegativeNumber(item[indexByField.get("vol")!], "vol", stockCode, tradeDate),
-      preClosePrice: requiredNumber(item[indexByField.get("pre_close")!], "pre_close", stockCode, tradeDate),
+      preClosePrice: nullablePositiveNumber(item[indexByField.get("pre_close")!], "pre_close", stockCode, tradeDate),
     };
   });
 }

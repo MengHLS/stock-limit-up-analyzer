@@ -10,7 +10,14 @@ export * from "./identifierHistory";
 export * from "./universe";
 export * from "./historicalUniverse";
 export * from "./provider";
+export * from "./baostock";
 export * from "./master";
+export * from "./deterministicId";
+export * from "./namechange";
+export * from "./buildSecurityMaster";
+
+// repository 依赖 ../db（drizzle），不在此重导出，避免纯领域测试被 DB 依赖拖入。
+// 落库入口：import { upsertSecurityMaster } from "./security/repository";
 
 // tradingCalendar 导出「交易日历口径」的 Exchange（"SSE"|"SZSE"|"BSE"），
 // 与 ./types 的 Exchange（"SH"|"SZ"|"BJ"）同名不同义，若走 export * 会产生歧义。

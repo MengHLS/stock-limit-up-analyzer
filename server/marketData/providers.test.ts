@@ -64,11 +64,29 @@ describe("BaoStock provider 解析", () => {
     expect(toBaostockCode("002361.SZ")).toBe("sz.002361");
   });
 
+  it("toBaostockCode 4 个核心指数映射（sh.000001 / sz.399001 / sh.000300 / sh.000905）", () => {
+    expect(toBaostockCode("000001.SH")).toBe("sh.000001");
+    expect(toBaostockCode("399001.SZ")).toBe("sz.399001");
+    expect(toBaostockCode("000300.SH")).toBe("sh.000300");
+    expect(toBaostockCode("000905.SH")).toBe("sh.000905");
+  });
+
   it("parseBaostockIndexDaily：股→手、元→千元", () => {
     const rows = [{ date: "2026-01-05", open: "1000", high: "1010", low: "990", close: "1005", volume: "5000000", amount: "123456789" }];
     const bars = parseBaostockIndexDaily(rows, "000300.SH");
     expect(bars[0]!.volume).toBeCloseTo(50_000); // 5000000 股 → 手
     expect(bars[0]!.amount).toBeCloseTo(123_456.789); // 元 → 千元
+  });
+
+  it("parseBaostockIndexDaily：source=baostock，空字段转 null 不伪造", () => {
+    const rows = [{ date: "2019-01-02", open: "", high: "", low: "", close: "2465.2910", volume: "", amount: "" }];
+    const bars = parseBaostockIndexDaily(rows, "000001.SH");
+    expect(bars[0]!.source).toBe("baostock");
+    expect(bars[0]!.tradeDate).toBe("2019-01-02");
+    expect(bars[0]!.close).toBeCloseTo(2465.291);
+    expect(bars[0]!.open).toBeNull();
+    expect(bars[0]!.volume).toBeNull();
+    expect(bars[0]!.amount).toBeNull();
   });
 
   it("parseBaostockStockDaily：turn %、股→手、元→千元，市值 null", () => {

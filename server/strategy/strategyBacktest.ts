@@ -29,6 +29,7 @@ import { buildLeaderCandidateDataViewForDate, buildStrategySignalProvider } from
 import { strategyRegistry } from "./registry";
 import { registerBuiltInStrategies } from "./strategies";
 import type { LeaderCandidateSourceRecord } from "../leaderCandidates";
+import { buildLatestStockNameMap } from "../../shared/stockDataNormalization";
 import type { LeaderCandidateDataView } from "./strategies/leaderCandidateBaseline";
 import type { StrategyConfig } from "./contract";
 
@@ -66,6 +67,8 @@ export interface StrategyEngineBacktestOptions {
   features?: readonly FeatureRequest[];
   /** 特征决策时点（缺省 "close"：信号日收盘后）。 */
   decisionPoint?: DecisionPoint;
+  /** 最多持有交易日数（可选）；传入后引擎在持有满 N 个交易日后强制卖出（缺省持有到期末）。 */
+  maxHoldingDays?: number;
   /**
    * 显式交易日历（升序）。生产环境传入市场交易日历后，引擎会在这些日期逐日评估策略；
    * 缺省时用原始行情行自带的日期集合（与旧行为一致）。最终日历 = 显式日历 ∪ 行情日期，
@@ -173,10 +176,15 @@ export function runStrategyEngineBacktest(input: StrategyEngineBacktestInput): S
   const featureSpecs = options.features && options.features.length > 0 ? [...options.features] : [...DEFAULT_PRODUCTION_FEATURES];
   const decisionLog: NonNullable<StrategyEngineBacktestProbe["decisionLog"]> = [];
 
+  // 股票名称映射与 records 副本只构建一次：buildLeaderCandidatesForDate 逐日重建时会
+  // 反复调用 buildLatestStockNameMap（O(15595)）与 records.filter，前者是纯冗余重算。
+  const recordsForView = [...records];
+  const stockNameByCode = buildLatestStockNameMap(recordsForView);
+
   const viewOf = (date: string): LeaderCandidateDataView => {
     const cached = viewCache.get(date);
     if (cached) return cached;
-    const view = buildLeaderCandidateDataViewForDate([...records], date);
+    const view = buildLeaderCandidateDataViewForDate(recordsForView, date, { stockNameByCode });
     viewCache.set(date, view);
     return view;
   };
@@ -248,6 +256,7 @@ export function runStrategyEngineBacktest(input: StrategyEngineBacktestInput): S
     cost: options.cost ?? DEFAULT_COST_MODEL,
     maxPositions: Math.max(1, Math.floor(options.maxPositions ?? 5)),
     maxPositionAmountRatio: options.maxPositionAmountRatio ?? 0,
+    maxHoldingDays: options.maxHoldingDays,
   };
 
   // 8. Golden Pipeline：Strategy → PositionSizer → RiskManager → Approved Order → Backtest Core。

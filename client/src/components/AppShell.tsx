@@ -26,15 +26,22 @@ import {
   Activity,
   BarChart3,
   Bell,
+  Boxes,
   ClipboardList,
   CloudDownload,
   Crown,
   Database,
   LayoutDashboard,
   LogOut,
+  History,
+  ShieldCheck,
+  SlidersHorizontal,
   TrendingUp,
   Upload,
   WalletCards,
+  Workflow,
+  FileText,
+  BookOpenCheck,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { type LucideIcon } from "lucide-react";
@@ -74,6 +81,21 @@ const navGroups: NavGroup[] = [
       { label: "录入大盘数据", path: "/market-data-input", icon: Database },
     ],
   },
+  // FE-1 — 研究链路导航分组（在 legacy 壳上增量新增，不重置既有页面）
+  {
+    label: "研究数据",
+    items: [
+      { label: "数据域健康", path: "/data-health", icon: ShieldCheck },
+      { label: "历史状态查询", path: "/historical-state", icon: History },
+      { label: "数据集构建", path: "/dataset-builder", icon: Boxes },
+      { label: "策略工作台", path: "/strategy-editor", icon: ClipboardList },
+      { label: "绩效仪表盘", path: "/performance", icon: Activity },
+      { label: "参数搜索", path: "/parameter-search", icon: SlidersHorizontal },
+      { label: "WFO/OOS 分析", path: "/walk-forward", icon: Workflow },
+      { label: "Regime/报告", path: "/regime-report", icon: FileText },
+      { label: "复盘工作台", path: "/review-workbench", icon: BookOpenCheck },
+    ],
+  },
   {
     label: "数据管理",
     items: [
@@ -110,11 +132,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </SidebarHeader>
 
         <SidebarContent>
-          {navGroups.map((group) => (
+          {navGroups.map(group => (
             <SidebarGroup key={group.label}>
               <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
               <SidebarMenu>
-                {group.items.map((item) => {
+                {group.items.map(item => {
                   const isActive =
                     item.path === "/"
                       ? location === "/"

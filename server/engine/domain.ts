@@ -147,6 +147,12 @@ export interface BacktestConfig {
   maxPositions: number;
   /** 单笔最大买入金额占当日成交额比例上限（0 = 不限），用于容量约束。 */
   maxPositionAmountRatio: number;
+  /**
+   * 最多持有交易日数（可选）。设置后，买入建仓（T+1 开盘）持有满 N 个交易日，
+   * 引擎在持有期届满的收盘时点产生 SELL 信号，下一交易日开盘成交。
+   * 未设置（undefined）则沿用旧语义：纯多头持有到回测期末按市价估值。
+   */
+  maxHoldingDays?: number;
 }
 
 /** 成本模型（全系统唯一手续费/滑点定义）。 */

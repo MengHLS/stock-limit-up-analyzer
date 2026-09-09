@@ -1,0 +1,65 @@
+{
+  "project": "stock-limit-up-analyzer",
+  "master_control": "ROADMAP.md (QUANT RESEARCH MASTER CONTROL SPEC V2)",
+  "audit_timestamp": "2026-09-09T00:40:00+08:00",
+  "audit_id": "AUDIT-002",
+  "audit_scope": "全系统代码审计（代码结构/模块实现/配置/接口逻辑/依赖关系；不含 DB 实际数据）",
+  "report": "docs/audit/reports/2026-09-09_AUDIT-002_FULL_SYSTEM_CODE_AUDIT_REPORT.md",
+
+  "research_ready": false,
+  "production_ready": false,
+
+  "code_chain_status": "CODE_READY（研究链 29/29 编码任务落地；VALIDATED 依赖数据链）",
+  "data_chain_status": "未审计（本轮排除 DB 数据；据 ROADMAP §44：A/B/F/G DATA_READY，C/E/D 回填中，H gate FALSE）",
+
+  "type_check": { "tsc_noEmit": "PASS (exit 0)", "coverage": "client/shared/server only — scripts/ 与 drizzle/ 未纳入（M-4）" },
+  "test_suite": { "vitest_run": "FAIL", "files": "157", "failed_files": 6, "tests": 2305, "failed_tests": 14, "passed_tests": 2291, "note": "非封闭：依赖 .env/活DB/活网络（H-2）" },
+
+  "critical_findings": [
+    "C-1 生产凭据硬编码 + 公开仓库泄露风险（.env 弱 JWT + _tushare_probe*.py 硬编码 token 未 ignore）",
+    "C-2 根目录残留大量探针/临时脚本与大文件（含 C-1 秘密载体）"
+  ],
+  "high_findings": [
+    "H-1 gate Migration 检查恒 false（step12_certify_gate.mjs:112 epoch ms vs datetime 字符串）→ RESEARCH_READY 永久被卡",
+    "H-2 测试套件非封闭，14 用例失败，与「测试全过」声明不符",
+    "H-3 退市股因缺 listedDate 被拒 → survivorship 缺口（buildSecurityMaster.ts:87）"
+  ],
+  "medium_findings": [
+    "M-1 三套回测引擎并存（engine/backtest/simulator+signalToPnl 口径重复）",
+    "M-2 researchRouter 反序列化强转无校验（researchRouter.ts:38-44）",
+    "M-3 OAuth as any 滥用 7 处（_core/sdk.ts）",
+    "M-4 tsconfig 未覆盖 scripts/ 与 drizzle/",
+    "M-5 前端 StrategyEditor 硬编码虚构种子文档",
+    "M-6 Map.tsx 死代码含 VITE_ key",
+    "M-7 status 历史表非幂等（SQL 版纯 INSERT）",
+    "M-8 asOf=null 双语义（reconstruct vs policy）",
+    "M-9 schema 三源 drift + securityCode 字段语义双轨",
+    "M-10 BaoStock 串行约束靠约定无跨进程锁",
+    "M-11 旧编号命名残留（Strategy13/signal13）+ routers.ts.tmp 残留"
+  ],
+  "low_findings": [
+    "L-1 前端 any/非空断言/Math.random ID/定时器未清理",
+    "L-2 空 catch 静默降级（signalToPnl/db.ts/dataHealth）",
+    "L-3 前端硬编码量化默认参数（Backtest/Market）",
+    "L-4 板块前缀启发式重复定义（Home.tsx）",
+    "L-5 DATABASE_URL 双处读取 + 脚本硬编码绝对路径 + 泄露库名",
+    "L-6 非空断言 ~269 处"
+  ],
+
+  "gate_status": {
+    "DATA_GATE": "PENDING（数据域 C/E/D 未全量，未审计）",
+    "IDENTITY_GATE": "PARTIAL（A-B universe 错配，历史 F-001）",
+    "PIT_GATE": "PASS(代码层)",
+    "SURVIVORSHIP_GATE": "PARTIAL（H-3 退市股缺口）",
+    "RESEARCH_DATASET_GATE": "CODE_READY（未认证）"
+  },
+
+  "next_required_actions": [
+    "1. 轮换 TiDB 密码/TUSHARE_TOKEN/JWT_SECRET + 清理根目录探针 + 补 .gitignore（C-1/C-2）",
+    "2. 修复 step12_certify_gate.mjs:112 时间口径（H-1）+ 补格式断言测试",
+    "3. scripts/drizzle 纳入 tsc（M-4）",
+    "4. 测试套件封闭化（mock 外部 API/DB，H-2）",
+    "5. 核对 rejected 退市股名单（H-3）",
+    "6. 收敛 M-1~M-11 架构/类型安全/命名/幂等问题"
+  ]
+}

@@ -1,0 +1,1679 @@
+{
+  "codes": [
+    {
+      "code": "000962.SZ",
+      "lastFailedAt": "2026-09-07T10:00:00Z",
+      "lastError": "网络接收错误"
+    },
+    {
+      "code": "002498.SZ",
+      "lastFailedAt": "2026-09-07T10:01:00Z",
+      "lastError": "网络接收错误"
+    },
+    {
+      "code": "601375.SH",
+      "lastFailedAt": "2026-09-07T11:34:37.139Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "002090.SZ",
+      "lastFailedAt": "2026-09-07T11:36:11.212Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "002441.SZ",
+      "lastFailedAt": "2026-09-07T11:37:45.271Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688186.SH",
+      "lastFailedAt": "2026-09-07T15:07:28.582Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688531.SH",
+      "lastFailedAt": "2026-09-07T17:20:37.325Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688232.SH",
+      "lastFailedAt": "2026-09-07T11:43:03.215Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688328.SH",
+      "lastFailedAt": "2026-09-07T16:45:46.133Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688628.SH",
+      "lastFailedAt": "2026-09-07T11:44:37.284Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688779.SH",
+      "lastFailedAt": "2026-09-07T15:20:59.056Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688312.SH",
+      "lastFailedAt": "2026-09-07T11:46:11.352Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688581.SH",
+      "lastFailedAt": "2026-09-07T17:12:18.026Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688795.SH",
+      "lastFailedAt": "2026-09-07T11:47:45.424Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688287.SH",
+      "lastFailedAt": "2026-09-07T15:40:45.734Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688389.SH",
+      "lastFailedAt": "2026-09-07T11:49:19.476Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688070.SH",
+      "lastFailedAt": "2026-09-07T16:40:34.940Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688370.SH",
+      "lastFailedAt": "2026-09-07T11:51:22.536Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688306.SH",
+      "lastFailedAt": "2026-09-07T11:51:48.976Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688617.SH",
+      "lastFailedAt": "2026-09-07T11:52:56.583Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688011.SH",
+      "lastFailedAt": "2026-09-07T11:53:23.021Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688592.SH",
+      "lastFailedAt": "2026-09-07T11:54:30.650Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688567.SH",
+      "lastFailedAt": "2026-09-07T15:32:26.439Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688337.SH",
+      "lastFailedAt": "2026-09-07T11:56:04.733Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688696.SH",
+      "lastFailedAt": "2026-09-07T15:11:05.700Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688368.SH",
+      "lastFailedAt": "2026-09-07T11:57:38.807Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688806.SH",
+      "lastFailedAt": "2026-09-07T17:07:35.840Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688336.SH",
+      "lastFailedAt": "2026-09-07T11:59:41.880Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688057.SH",
+      "lastFailedAt": "2026-09-07T12:00:08.274Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688247.SH",
+      "lastFailedAt": "2026-09-07T12:01:15.940Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688512.SH",
+      "lastFailedAt": "2026-09-07T16:25:59.395Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688321.SH",
+      "lastFailedAt": "2026-09-07T12:02:49.985Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688607.SH",
+      "lastFailedAt": "2026-09-07T12:03:16.388Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688018.SH",
+      "lastFailedAt": "2026-09-07T12:04:24.038Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688625.SH",
+      "lastFailedAt": "2026-09-07T15:14:13.802Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688699.SH",
+      "lastFailedAt": "2026-09-07T12:05:58.089Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688670.SH",
+      "lastFailedAt": "2026-09-07T17:15:55.150Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688071.SH",
+      "lastFailedAt": "2026-09-07T12:08:01.131Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688326.SH",
+      "lastFailedAt": "2026-09-07T12:08:27.540Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688356.SH",
+      "lastFailedAt": "2026-09-07T12:09:35.170Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688621.SH",
+      "lastFailedAt": "2026-09-07T15:49:05.014Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688680.SH",
+      "lastFailedAt": "2026-09-07T12:11:09.233Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688305.SH",
+      "lastFailedAt": "2026-09-07T15:27:44.277Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688161.SH",
+      "lastFailedAt": "2026-09-07T12:12:43.293Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688239.SH",
+      "lastFailedAt": "2026-09-07T16:15:37.001Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688459.SH",
+      "lastFailedAt": "2026-09-07T12:14:17.356Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688028.SH",
+      "lastFailedAt": "2026-09-07T12:15:12.808Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688836.SH",
+      "lastFailedAt": "2026-09-07T12:16:20.400Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688049.SH",
+      "lastFailedAt": "2026-09-07T12:16:46.859Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688089.SH",
+      "lastFailedAt": "2026-09-07T12:17:54.457Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688048.SH",
+      "lastFailedAt": "2026-09-07T15:22:33.122Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688820.SH",
+      "lastFailedAt": "2026-09-07T12:19:28.510Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688053.SH",
+      "lastFailedAt": "2026-09-07T15:15:47.846Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688293.SH",
+      "lastFailedAt": "2026-09-07T12:21:02.571Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688691.SH",
+      "lastFailedAt": "2026-09-07T12:21:58.043Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688519.SH",
+      "lastFailedAt": "2026-09-07T12:22:36.636Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688230.SH",
+      "lastFailedAt": "2026-09-07T17:27:22.545Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688137.SH",
+      "lastFailedAt": "2026-09-07T12:24:39.705Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688220.SH",
+      "lastFailedAt": "2026-09-07T16:29:07.522Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688809.SH",
+      "lastFailedAt": "2026-09-07T12:26:13.765Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688685.SH",
+      "lastFailedAt": "2026-09-07T17:09:09.910Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688561.SH",
+      "lastFailedAt": "2026-09-07T12:27:47.811Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688781.SH",
+      "lastFailedAt": "2026-09-07T15:17:21.909Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688182.SH",
+      "lastFailedAt": "2026-09-07T12:29:21.883Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688261.SH",
+      "lastFailedAt": "2026-09-07T12:30:17.351Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688271.SH",
+      "lastFailedAt": "2026-09-07T12:30:55.918Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688075.SH",
+      "lastFailedAt": "2026-09-07T15:36:03.525Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688199.SH",
+      "lastFailedAt": "2026-09-07T12:32:58.973Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688419.SH",
+      "lastFailedAt": "2026-09-07T12:33:25.457Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688191.SH",
+      "lastFailedAt": "2026-09-07T12:34:33.024Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688448.SH",
+      "lastFailedAt": "2026-09-07T12:34:59.522Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688297.SH",
+      "lastFailedAt": "2026-09-07T12:36:07.072Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688728.SH",
+      "lastFailedAt": "2026-09-07T16:20:48.187Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688102.SH",
+      "lastFailedAt": "2026-09-07T12:37:41.132Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688584.SH",
+      "lastFailedAt": "2026-09-07T16:17:40.054Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688668.SH",
+      "lastFailedAt": "2026-09-07T12:39:15.212Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688391.SH",
+      "lastFailedAt": "2026-09-07T17:00:50.663Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688063.SH",
+      "lastFailedAt": "2026-09-07T12:41:18.276Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688509.SH",
+      "lastFailedAt": "2026-09-07T12:41:44.796Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688171.SH",
+      "lastFailedAt": "2026-09-07T12:42:52.354Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688385.SH",
+      "lastFailedAt": "2026-09-07T16:50:57.310Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688083.SH",
+      "lastFailedAt": "2026-09-07T12:44:26.410Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688015.SH",
+      "lastFailedAt": "2026-09-07T15:37:37.598Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688395.SH",
+      "lastFailedAt": "2026-09-07T12:46:00.486Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688087.SH",
+      "lastFailedAt": "2026-09-07T16:22:22.261Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688148.SH",
+      "lastFailedAt": "2026-09-07T12:47:34.540Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688226.SH",
+      "lastFailedAt": "2026-09-07T17:24:14.429Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688429.SH",
+      "lastFailedAt": "2026-09-07T12:49:37.595Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688401.SH",
+      "lastFailedAt": "2026-09-07T16:57:13.565Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688825.SH",
+      "lastFailedAt": "2026-09-07T12:51:11.659Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688576.SH",
+      "lastFailedAt": "2026-09-07T16:42:37.993Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688619.SH",
+      "lastFailedAt": "2026-09-07T12:52:45.737Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688708.SH",
+      "lastFailedAt": "2026-09-07T15:42:19.797Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688618.SH",
+      "lastFailedAt": "2026-09-07T12:54:19.809Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688227.SH",
+      "lastFailedAt": "2026-09-07T12:55:15.246Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688290.SH",
+      "lastFailedAt": "2026-09-07T12:55:53.856Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688677.SH",
+      "lastFailedAt": "2026-09-07T12:56:49.284Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688682.SH",
+      "lastFailedAt": "2026-09-07T12:57:56.912Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688686.SH",
+      "lastFailedAt": "2026-09-07T17:10:43.961Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688153.SH",
+      "lastFailedAt": "2026-09-07T12:59:30.959Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688396.SH",
+      "lastFailedAt": "2026-09-07T17:02:24.703Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688120.SH",
+      "lastFailedAt": "2026-09-07T13:01:05.019Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688558.SH",
+      "lastFailedAt": "2026-09-07T16:30:41.561Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688758.SH",
+      "lastFailedAt": "2026-09-07T13:02:39.072Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688151.SH",
+      "lastFailedAt": "2026-09-07T16:34:18.690Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688599.SH",
+      "lastFailedAt": "2026-09-07T13:04:13.141Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688693.SH",
+      "lastFailedAt": "2026-09-07T16:44:12.071Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688566.SH",
+      "lastFailedAt": "2026-09-07T13:06:16.188Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688203.SH",
+      "lastFailedAt": "2026-09-07T16:55:39.493Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688012.SH",
+      "lastFailedAt": "2026-09-07T13:07:50.256Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688530.SH",
+      "lastFailedAt": "2026-09-07T15:25:41.204Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688168.SH",
+      "lastFailedAt": "2026-09-07T13:09:24.312Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688788.SH",
+      "lastFailedAt": "2026-09-07T15:19:24.993Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688105.SH",
+      "lastFailedAt": "2026-09-07T13:10:58.356Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688458.SH",
+      "lastFailedAt": "2026-09-07T16:23:56.318Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688369.SH",
+      "lastFailedAt": "2026-09-07T13:12:32.421Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688330.SH",
+      "lastFailedAt": "2026-09-07T17:28:56.604Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688506.SH",
+      "lastFailedAt": "2026-09-07T13:14:35.483Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688237.SH",
+      "lastFailedAt": "2026-09-07T13:15:01.947Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688331.SH",
+      "lastFailedAt": "2026-09-07T13:16:09.544Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688717.SH",
+      "lastFailedAt": "2026-09-07T16:35:52.755Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688128.SH",
+      "lastFailedAt": "2026-09-07T13:17:43.603Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688768.SH",
+      "lastFailedAt": "2026-09-07T15:58:58.365Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688184.SH",
+      "lastFailedAt": "2026-09-07T13:19:17.650Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688772.SH",
+      "lastFailedAt": "2026-09-07T15:57:24.302Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688362.SH",
+      "lastFailedAt": "2026-09-07T13:20:51.716Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688620.SH",
+      "lastFailedAt": "2026-09-07T17:30:30.675Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688450.SH",
+      "lastFailedAt": "2026-09-07T13:22:54.759Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688539.SH",
+      "lastFailedAt": "2026-09-07T15:55:50.220Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688569.SH",
+      "lastFailedAt": "2026-09-07T13:24:28.848Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688709.SH",
+      "lastFailedAt": "2026-09-07T13:24:55.272Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688176.SH",
+      "lastFailedAt": "2026-09-07T13:26:02.921Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688117.SH",
+      "lastFailedAt": "2026-09-07T16:04:09.559Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688115.SH",
+      "lastFailedAt": "2026-09-07T13:27:36.980Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688332.SH",
+      "lastFailedAt": "2026-09-07T13:28:32.381Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688056.SH",
+      "lastFailedAt": "2026-09-07T13:29:11.033Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688478.SH",
+      "lastFailedAt": "2026-09-07T15:54:16.158Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688307.SH",
+      "lastFailedAt": "2026-09-07T13:31:14.090Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688162.SH",
+      "lastFailedAt": "2026-09-07T16:01:01.430Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688309.SH",
+      "lastFailedAt": "2026-09-07T13:32:48.157Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688267.SH",
+      "lastFailedAt": "2026-09-07T13:33:14.527Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688275.SH",
+      "lastFailedAt": "2026-09-07T13:34:22.221Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688528.SH",
+      "lastFailedAt": "2026-09-07T13:34:48.575Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688077.SH",
+      "lastFailedAt": "2026-09-07T13:35:56.272Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688157.SH",
+      "lastFailedAt": "2026-09-07T17:03:58.749Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688659.SH",
+      "lastFailedAt": "2026-09-07T13:37:30.311Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688335.SH",
+      "lastFailedAt": "2026-09-07T15:47:30.963Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688610.SH",
+      "lastFailedAt": "2026-09-07T13:39:33.362Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688722.SH",
+      "lastFailedAt": "2026-09-07T13:39:59.744Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688565.SH",
+      "lastFailedAt": "2026-09-07T13:41:07.418Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688449.SH",
+      "lastFailedAt": "2026-09-07T16:05:43.632Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688350.SH",
+      "lastFailedAt": "2026-09-07T13:42:41.490Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688633.SH",
+      "lastFailedAt": "2026-09-07T16:10:54.816Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688583.SH",
+      "lastFailedAt": "2026-09-07T13:44:15.540Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688189.SH",
+      "lastFailedAt": "2026-09-07T13:45:10.902Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688835.SH",
+      "lastFailedAt": "2026-09-07T13:45:49.579Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688388.SH",
+      "lastFailedAt": "2026-09-07T13:46:44.951Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688789.SH",
+      "lastFailedAt": "2026-09-07T13:47:52.624Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688213.SH",
+      "lastFailedAt": "2026-09-07T17:22:11.382Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688582.SH",
+      "lastFailedAt": "2026-09-07T13:49:26.681Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688515.SH",
+      "lastFailedAt": "2026-09-07T15:45:56.929Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688099.SH",
+      "lastFailedAt": "2026-09-07T13:51:00.750Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688268.SH",
+      "lastFailedAt": "2026-09-07T14:59:09.270Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688211.SH",
+      "lastFailedAt": "2026-09-07T13:52:34.830Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688615.SH",
+      "lastFailedAt": "2026-09-07T14:56:01.135Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688671.SH",
+      "lastFailedAt": "2026-09-07T13:54:08.896Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688152.SH",
+      "lastFailedAt": "2026-09-07T13:55:04.262Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688757.SH",
+      "lastFailedAt": "2026-09-07T13:56:11.957Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688195.SH",
+      "lastFailedAt": "2026-09-07T17:25:48.484Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688366.SH",
+      "lastFailedAt": "2026-09-07T13:57:46.019Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688489.SH",
+      "lastFailedAt": "2026-09-07T16:12:28.892Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688783.SH",
+      "lastFailedAt": "2026-09-07T13:59:20.086Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688085.SH",
+      "lastFailedAt": "2026-09-07T16:27:33.461Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688818.SH",
+      "lastFailedAt": "2026-09-07T14:00:54.164Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688692.SH",
+      "lastFailedAt": "2026-09-07T14:01:49.460Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688390.SH",
+      "lastFailedAt": "2026-09-07T14:02:28.230Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688101.SH",
+      "lastFailedAt": "2026-09-07T15:00:43.314Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688061.SH",
+      "lastFailedAt": "2026-09-07T14:04:31.316Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688025.SH",
+      "lastFailedAt": "2026-09-07T15:44:22.863Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688499.SH",
+      "lastFailedAt": "2026-09-07T14:06:05.361Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688047.SH",
+      "lastFailedAt": "2026-09-07T14:06:31.653Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688190.SH",
+      "lastFailedAt": "2026-09-07T14:07:39.446Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688626.SH",
+      "lastFailedAt": "2026-09-07T16:47:20.201Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688796.SH",
+      "lastFailedAt": "2026-09-07T14:09:13.491Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688661.SH",
+      "lastFailedAt": "2026-09-07T15:09:02.637Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688775.SH",
+      "lastFailedAt": "2026-09-07T14:10:47.551Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688209.SH",
+      "lastFailedAt": "2026-09-07T15:39:11.649Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688098.SH",
+      "lastFailedAt": "2026-09-07T14:12:50.604Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688225.SH",
+      "lastFailedAt": "2026-09-07T17:19:03.254Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688206.SH",
+      "lastFailedAt": "2026-09-07T14:14:24.655Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688123.SH",
+      "lastFailedAt": "2026-09-07T16:48:54.257Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688159.SH",
+      "lastFailedAt": "2026-09-07T14:15:58.689Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688517.SH",
+      "lastFailedAt": "2026-09-07T16:09:20.763Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688065.SH",
+      "lastFailedAt": "2026-09-07T14:17:32.737Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688030.SH",
+      "lastFailedAt": "2026-09-07T16:19:14.129Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688469.SH",
+      "lastFailedAt": "2026-09-07T14:19:06.799Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688217.SH",
+      "lastFailedAt": "2026-09-07T17:17:29.209Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688529.SH",
+      "lastFailedAt": "2026-09-07T14:21:09.850Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688623.SH",
+      "lastFailedAt": "2026-09-07T14:21:36.149Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688612.SH",
+      "lastFailedAt": "2026-09-07T14:22:43.912Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688609.SH",
+      "lastFailedAt": "2026-09-07T15:12:39.751Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688131.SH",
+      "lastFailedAt": "2026-09-07T14:24:17.976Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688711.SH",
+      "lastFailedAt": "2026-09-07T15:24:07.164Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688767.SH",
+      "lastFailedAt": "2026-09-07T14:25:52.052Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688175.SH",
+      "lastFailedAt": "2026-09-07T14:26:47.347Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688416.SH",
+      "lastFailedAt": "2026-09-07T14:27:26.117Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688697.SH",
+      "lastFailedAt": "2026-09-07T14:57:35.189Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688238.SH",
+      "lastFailedAt": "2026-09-07T14:29:29.170Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688301.SH",
+      "lastFailedAt": "2026-09-07T15:50:39.066Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688178.SH",
+      "lastFailedAt": "2026-09-07T14:31:03.225Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688819.SH",
+      "lastFailedAt": "2026-09-07T16:37:26.818Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688486.SH",
+      "lastFailedAt": "2026-09-07T14:32:37.280Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688409.SH",
+      "lastFailedAt": "2026-09-07T17:05:32.798Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688072.SH",
+      "lastFailedAt": "2026-09-07T14:34:11.337Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688553.SH",
+      "lastFailedAt": "2026-09-07T16:52:31.370Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688357.SH",
+      "lastFailedAt": "2026-09-07T14:35:45.382Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688009.SH",
+      "lastFailedAt": "2026-09-07T15:04:20.432Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688536.SH",
+      "lastFailedAt": "2026-09-07T14:37:48.451Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688322.SH",
+      "lastFailedAt": "2026-09-07T15:05:54.509Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688698.SH",
+      "lastFailedAt": "2026-09-07T14:39:22.499Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688032.SH",
+      "lastFailedAt": "2026-09-07T15:02:46.357Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688258.SH",
+      "lastFailedAt": "2026-09-07T14:40:56.567Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688257.SH",
+      "lastFailedAt": "2026-09-07T16:14:02.936Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688392.SH",
+      "lastFailedAt": "2026-09-07T14:42:30.631Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688135.SH",
+      "lastFailedAt": "2026-09-07T14:43:25.978Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688317.SH",
+      "lastFailedAt": "2026-09-07T14:44:04.687Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688352.SH",
+      "lastFailedAt": "2026-09-07T14:45:00.057Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688181.SH",
+      "lastFailedAt": "2026-09-07T14:46:07.741Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688568.SH",
+      "lastFailedAt": "2026-09-07T14:46:34.123Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688078.SH",
+      "lastFailedAt": "2026-09-07T14:47:41.815Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688379.SH",
+      "lastFailedAt": "2026-09-07T16:07:17.705Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688270.SH",
+      "lastFailedAt": "2026-09-07T14:49:15.895Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688059.SH",
+      "lastFailedAt": "2026-09-07T14:49:42.236Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688766.SH",
+      "lastFailedAt": "2026-09-07T14:50:49.967Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688750.SH",
+      "lastFailedAt": "2026-09-07T14:51:45.287Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688092.SH",
+      "lastFailedAt": "2026-09-07T14:52:24.017Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688432.SH",
+      "lastFailedAt": "2026-09-07T17:13:52.085Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688119.SH",
+      "lastFailedAt": "2026-09-07T14:54:27.077Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688573.SH",
+      "lastFailedAt": "2026-09-07T14:54:53.391Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688608.SH",
+      "lastFailedAt": "2026-09-07T15:52:42.105Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688513.SH",
+      "lastFailedAt": "2026-09-07T15:29:18.329Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688651.SH",
+      "lastFailedAt": "2026-09-07T15:00:04.572Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688068.SH",
+      "lastFailedAt": "2026-09-07T16:39:00.887Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688425.SH",
+      "lastFailedAt": "2026-09-07T15:34:00.485Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688219.SH",
+      "lastFailedAt": "2026-09-07T15:04:46.747Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688602.SH",
+      "lastFailedAt": "2026-09-07T15:06:20.786Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688551.SH",
+      "lastFailedAt": "2026-09-07T16:02:35.496Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688177.SH",
+      "lastFailedAt": "2026-09-07T15:09:57.905Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688557.SH",
+      "lastFailedAt": "2026-09-07T16:32:15.624Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688359.SH",
+      "lastFailedAt": "2026-09-07T16:54:05.436Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688676.SH",
+      "lastFailedAt": "2026-09-07T16:59:16.609Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688439.SH",
+      "lastFailedAt": "2026-09-07T15:30:52.383Z",
+      "lastError": "baostock session spawn error: spawn \"/c/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688277.SH",
+      "lastFailedAt": "2026-09-07T15:18:17.191Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688635.SH",
+      "lastFailedAt": "2026-09-07T15:19:51.251Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688132.SH",
+      "lastFailedAt": "2026-09-07T15:21:25.291Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688039.SH",
+      "lastFailedAt": "2026-09-07T15:22:59.353Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688373.SH",
+      "lastFailedAt": "2026-09-07T15:25:02.434Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688520.SH",
+      "lastFailedAt": "2026-09-07T15:26:36.512Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688548.SH",
+      "lastFailedAt": "2026-09-07T15:28:10.578Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688022.SH",
+      "lastFailedAt": "2026-09-07T15:29:44.647Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688348.SH",
+      "lastFailedAt": "2026-09-07T15:31:18.702Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688133.SH",
+      "lastFailedAt": "2026-09-07T15:33:21.745Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688289.SH",
+      "lastFailedAt": "2026-09-07T15:34:55.809Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688681.SH",
+      "lastFailedAt": "2026-09-07T15:36:29.887Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688550.SH",
+      "lastFailedAt": "2026-09-07T15:38:03.944Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688811.SH",
+      "lastFailedAt": "2026-09-07T15:39:38.009Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688776.SH",
+      "lastFailedAt": "2026-09-07T15:41:41.054Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688253.SH",
+      "lastFailedAt": "2026-09-07T15:43:15.116Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688021.SH",
+      "lastFailedAt": "2026-09-07T15:44:49.172Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688308.SH",
+      "lastFailedAt": "2026-09-07T15:46:23.232Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688755.SH",
+      "lastFailedAt": "2026-09-07T15:47:57.311Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688798.SH",
+      "lastFailedAt": "2026-09-07T15:50:00.388Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688147.SH",
+      "lastFailedAt": "2026-09-07T15:51:34.446Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688718.SH",
+      "lastFailedAt": "2026-09-07T15:53:08.514Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688323.SH",
+      "lastFailedAt": "2026-09-07T15:54:42.579Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688276.SH",
+      "lastFailedAt": "2026-09-07T15:56:16.626Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688325.SH",
+      "lastFailedAt": "2026-09-07T15:58:19.698Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688055.SH",
+      "lastFailedAt": "2026-09-07T15:59:53.745Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688656.SH",
+      "lastFailedAt": "2026-09-07T16:01:27.802Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688383.SH",
+      "lastFailedAt": "2026-09-07T16:03:01.870Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688579.SH",
+      "lastFailedAt": "2026-09-07T16:04:35.934Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688790.SH",
+      "lastFailedAt": "2026-09-07T16:06:38.993Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688179.SH",
+      "lastFailedAt": "2026-09-07T16:08:13.042Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688555.SH",
+      "lastFailedAt": "2026-09-07T16:09:47.085Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688358.SH",
+      "lastFailedAt": "2026-09-07T16:11:21.135Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688106.SH",
+      "lastFailedAt": "2026-09-07T16:12:55.199Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688353.SH",
+      "lastFailedAt": "2026-09-07T16:14:58.270Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688141.SH",
+      "lastFailedAt": "2026-09-07T16:16:32.336Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688700.SH",
+      "lastFailedAt": "2026-09-07T16:18:06.395Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688020.SH",
+      "lastFailedAt": "2026-09-07T16:19:40.472Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688023.SH",
+      "lastFailedAt": "2026-09-07T16:21:14.542Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688503.SH",
+      "lastFailedAt": "2026-09-07T16:23:17.595Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688502.SH",
+      "lastFailedAt": "2026-09-07T16:24:51.654Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688122.SH",
+      "lastFailedAt": "2026-09-07T16:26:25.715Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688702.SH",
+      "lastFailedAt": "2026-09-07T16:27:59.788Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688251.SH",
+      "lastFailedAt": "2026-09-07T16:29:33.858Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688349.SH",
+      "lastFailedAt": "2026-09-07T16:31:36.926Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688399.SH",
+      "lastFailedAt": "2026-09-07T16:33:10.981Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688648.SH",
+      "lastFailedAt": "2026-09-07T16:34:45.028Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688426.SH",
+      "lastFailedAt": "2026-09-07T16:36:19.092Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688785.SH",
+      "lastFailedAt": "2026-09-07T16:37:53.158Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688371.SH",
+      "lastFailedAt": "2026-09-07T16:39:56.206Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688518.SH",
+      "lastFailedAt": "2026-09-07T16:41:30.272Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688029.SH",
+      "lastFailedAt": "2026-09-07T16:43:04.323Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688303.SH",
+      "lastFailedAt": "2026-09-07T16:44:38.389Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688097.SH",
+      "lastFailedAt": "2026-09-07T16:46:12.437Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688076.SH",
+      "lastFailedAt": "2026-09-07T16:48:15.486Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688016.SH",
+      "lastFailedAt": "2026-09-07T16:49:49.542Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688163.SH",
+      "lastFailedAt": "2026-09-07T16:51:23.595Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688200.SH",
+      "lastFailedAt": "2026-09-07T16:52:57.648Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688244.SH",
+      "lastFailedAt": "2026-09-07T16:54:31.698Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688041.SH",
+      "lastFailedAt": "2026-09-07T16:56:34.752Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688597.SH",
+      "lastFailedAt": "2026-09-07T16:58:08.816Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688475.SH",
+      "lastFailedAt": "2026-09-07T16:59:42.878Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688265.SH",
+      "lastFailedAt": "2026-09-07T17:01:16.941Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688001.SH",
+      "lastFailedAt": "2026-09-07T17:02:51.008Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688313.SH",
+      "lastFailedAt": "2026-09-07T17:04:54.069Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688019.SH",
+      "lastFailedAt": "2026-09-07T17:06:28.140Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688526.SH",
+      "lastFailedAt": "2026-09-07T17:08:02.210Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688726.SH",
+      "lastFailedAt": "2026-09-07T17:09:36.269Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688266.SH",
+      "lastFailedAt": "2026-09-07T17:11:10.318Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688765.SH",
+      "lastFailedAt": "2026-09-07T17:13:13.371Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688060.SH",
+      "lastFailedAt": "2026-09-07T17:14:47.428Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688035.SH",
+      "lastFailedAt": "2026-09-07T17:16:21.484Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688223.SH",
+      "lastFailedAt": "2026-09-07T17:17:55.534Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688229.SH",
+      "lastFailedAt": "2026-09-07T17:19:29.614Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688026.SH",
+      "lastFailedAt": "2026-09-07T17:21:32.653Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688759.SH",
+      "lastFailedAt": "2026-09-07T17:23:06.722Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688802.SH",
+      "lastFailedAt": "2026-09-07T17:24:40.789Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688630.SH",
+      "lastFailedAt": "2026-09-07T17:26:14.851Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688355.SH",
+      "lastFailedAt": "2026-09-07T17:27:48.921Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "688522.SH",
+      "lastFailedAt": "2026-09-07T17:29:51.975Z",
+      "lastError": "baostock session spawn error: spawn \"C:/Users/A/.workbuddy/binaries/python/envs/default/Scripts/python.exe\" ENOENT"
+    },
+    {
+      "code": "300286.SZ",
+      "lastFailedAt": "2026-09-08T19:31:04.729Z",
+      "lastError": "baostock query failed: 用户未登录"
+    },
+    {
+      "code": "301365.SZ",
+      "lastFailedAt": "2026-09-08T19:32:38.346Z",
+      "lastError": "baostock query failed: 用户未登录"
+    },
+    {
+      "code": "300177.SZ",
+      "lastFailedAt": "2026-09-08T19:34:12.424Z",
+      "lastError": "baostock query failed: 用户未登录"
+    }
+  ]
+}

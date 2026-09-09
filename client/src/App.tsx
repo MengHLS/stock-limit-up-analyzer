@@ -16,7 +16,24 @@ import Backtest from "./pages/Backtest";
 import PaperTrading from "./pages/PaperTrading";
 import OperationLogs from "./pages/OperationLogs";
 import StockSync from "./pages/StockSync";
-
+// FE-1 — 研究链路：数据域健康看板
+import DataHealth from "./pages/DataHealth";
+// FE-2 — 研究链路：asOf(T) 历史状态查询器
+import HistoricalState from "./pages/HistoricalState";
+// FE-3 — 研究链路：Research Dataset 构建器
+import DatasetBuilder from "./pages/DatasetBuilder";
+// FE-4 — 研究链路：策略编辑器 + 运行工作台
+import StrategyEditor from "./pages/StrategyEditor";
+// FE-5 — 研究链路：绩效仪表盘（骨架线）
+import PerformanceDashboard from "./pages/PerformanceDashboard";
+// FE-6 — 研究链路：参数搜索 + 鲁棒性（骨架线）
+import ParameterSearch from "./pages/ParameterSearch";
+// FE-7 — 研究链路：Walk-Forward / OOS + 过拟合判定（骨架线）
+import WalkForwardAnalysis from "./pages/WalkForwardAnalysis";
+// FE-8 — 研究链路：Regime + 报告导出（骨架线）
+import RegimeReport from "./pages/RegimeReport";
+// FE-9 — 研究链路：复盘纪律 + 生产闭环（骨架线）
+import ReviewWorkbench from "./pages/ReviewWorkbench";
 
 function Router() {
   return (
@@ -32,6 +49,15 @@ function Router() {
       <Route path="/paper-trading" component={PaperTrading} />
       <Route path="/operation-logs" component={OperationLogs} />
       <Route path="/stock-sync" component={StockSync} />
+      <Route path="/data-health" component={DataHealth} />
+      <Route path="/historical-state" component={HistoricalState} />
+      <Route path="/dataset-builder" component={DatasetBuilder} />
+      <Route path="/strategy-editor" component={StrategyEditor} />
+      <Route path="/performance" component={PerformanceDashboard} />
+      <Route path="/parameter-search" component={ParameterSearch} />
+      <Route path="/walk-forward" component={WalkForwardAnalysis} />
+      <Route path="/regime-report" component={RegimeReport} />
+      <Route path="/review-workbench" component={ReviewWorkbench} />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
