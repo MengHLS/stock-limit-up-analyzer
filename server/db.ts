@@ -69,7 +69,34 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      // 解析 DATABASE_URL：把 ssl 查询参数（JSON 字符串）转成对象传给 drizzle，
+      // 避免 mysql2 把 `ssl={"rejectUnauthorized":true}` 误当 SSL profile 名称（Unknown SSL profile）。
+      // 注意：URL.searchParams 会丢失 JSON 双引号（`{"a":1}` → `{a:1}` 无法 JSON.parse），
+      // 故从原始字符串按 `ssl={...}` 直接提取，保持 JSON 原样。
+      const raw = process.env.DATABASE_URL;
+      const u = new URL(raw);
+      const sslMatch = raw.match(/[?&]ssl=(\{[^&]*\})/);
+      let ssl: { rejectUnauthorized?: boolean } | undefined;
+      if (sslMatch) {
+        try {
+          const parsed = JSON.parse(sslMatch[1]) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            ssl = parsed as { rejectUnauthorized?: boolean };
+          }
+        } catch {
+          // ssl 参数非法时忽略（不传 ssl）
+        }
+      }
+      _db = drizzle({
+        connection: {
+          host: u.hostname,
+          port: u.port ? Number(u.port) : 4000,
+          user: decodeURIComponent(u.username),
+          password: decodeURIComponent(u.password),
+          database: u.pathname.slice(1),
+          ...(ssl ? { ssl } : {}),
+        },
+      });
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -1246,7 +1273,7 @@ export async function getConnectionBoardStats(date: string) {
   const db = await getDb();
   if (!db) return null;
 
-  // 1. 一次性获取所有涨停记录（优化：避免多次数据库查询）
+  // 1. 一次性获取所有涨停记录（优化：避免查询多次数据库）
   const allRecords = await db.select().from(limitUpRecords)
     .orderBy(desc(limitUpRecords.limitUpDate));
   
@@ -1787,8 +1814,8 @@ type BacktestBaseContext = {
 
 // 回测基础上下文按「日期区间」隔离缓存（回填后全量 489 万行价格无法单值缓存）。
 const backtestBaseContextCache = new Map<string, { value: BacktestBaseContext; expiresAt: number }>();
-const BACKTEST_BASE_CONTEXT_TTL_MS = 3 * 60 * 1000;
-const backtestResultCache = new TTLCache<LeaderCandidateBacktestResult>(5 * 60 * 1000, 64);
+const BACKTEST_BASE_CONTEXT_TTL_MS = 15 * 60 * 1000;
+const backtestResultCache = new TTLCache<LeaderCandidateBacktestResult>(30 * 60 * 1000, 256);
 // 价格覆盖率是对 890 万行 stock_daily_prices 的全表聚合扫描（~9s），且仅在回填后变化。
 // 用独立长 TTL 缓存（10 分钟）解耦于 base context 的 3 分钟 TTL，避免每次冷缓存回测都重扫。
 const dailyPriceCoverageCache = new TTLCache<LeaderCandidateDailyPriceCoverage>(10 * 60 * 1000, 4);

@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, date, index, uniqueIndex, longtext, double } from "drizzle-orm/mysql-core";
+import { int, bigint, boolean, mysqlEnum, mysqlTable, text, timestamp, varchar, date, index, uniqueIndex, longtext, double } from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -368,6 +368,12 @@ export const researchRuns = mysqlTable("research_runs", {
   experimentId: varchar("experimentId", { length: 64 }).notNull(),
   /** Run 状态：running / succeeded / failed。 */
   status: mysqlEnum("status", ["running", "succeeded", "failed"]).notNull().default("running"),
+  /** 绑定数据集身份（DS-<datasetVersion>，内容指纹派生）；legacy 路径可为 null。 */
+  datasetId: varchar("datasetId", { length: 128 }),
+  /** 绑定数据集内容指纹版本（rd-<builder>-<rowSchema>-<16hex>）；legacy 路径可为 null。 */
+  datasetVersion: varchar("datasetVersion", { length: 96 }),
+  /** 绑定数据集版本快照指纹（SHA-256 前 16 hex）；legacy 路径可为 null。 */
+  datasetFingerprint: varchar("datasetFingerprint", { length: 64 }),
   /** 结构化结果摘要（ResearchRunResultSummary 序列化；成功时非空）。 */
   resultJson: longtext("resultJson"),
   /** 失败信息（失败时非空）。 */
@@ -378,6 +384,7 @@ export const researchRuns = mysqlTable("research_runs", {
 }, (table) => ({
   experimentIdIdx: index("idx_research_runs_experiment").on(table.experimentId),
   createdAtIdx: index("idx_research_runs_created").on(table.createdAt),
+  datasetVersionIdx: index("idx_research_runs_dataset_version").on(table.datasetVersion),
 }));
 
 export type ResearchRunRow = typeof researchRuns.$inferSelect;
@@ -413,6 +420,127 @@ export const researchExperimentBatches = mysqlTable("research_experiment_batches
 
 export type ResearchExperimentBatchRow = typeof researchExperimentBatches.$inferSelect;
 export type InsertResearchExperimentBatch = typeof researchExperimentBatches.$inferInsert;
+
+/**
+ * 研究数据集持久化表（P2-T1 / G2）。
+ * 把 buildResearchDataset 的产物落库：datasetVersion（内容指纹版本）+ 版本快照 + 策略元数据
+ * + 数据快照 + universe 定义，实现「数据集可持久化、可复现、可追溯」。
+ * 幂等：datasetId = DS-<datasetVersion> 唯一；同内容重跑（同 datasetVersion）不产生重复行。
+ */
+export const researchDatasets = mysqlTable("research_datasets", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 数据集身份（DS-<datasetVersion>，内容指纹派生，唯一且确定性）。 */
+  datasetId: varchar("datasetId", { length: 128 }).notNull().unique(),
+  /** 内容指纹版本（rd-<builderVersion>-<rowSchemaVersion>-<16hex>）。 */
+  datasetVersion: varchar("datasetVersion", { length: 96 }).notNull(),
+  /** 数据集名称（仅描述，不进版本指纹）。 */
+  name: varchar("name", { length: 128 }).notNull(),
+  /** 起止日期（YYYY-MM-DD，含）。 */
+  startDate: date("startDate", { mode: "string" }).notNull(),
+  endDate: date("endDate", { mode: "string" }).notNull(),
+  /** 逐日 PIT（true）或固定 asOf 快照（false）。 */
+  asOfPerTradeDate: mysqlEnum("asOfPerTradeDate", ["true", "false"]).notNull().default("true"),
+  /** 固定 asOf（仅 asOfPerTradeDate=false 时非空）。 */
+  asOf: date("asOf", { mode: "string" }),
+  /** 标准行内容指纹（SHA-256 前 32 hex）。 */
+  rowsFingerprint: varchar("rowsFingerprint", { length: 64 }).notNull(),
+  /** 9 类 policy 内容指纹（SHA-256 前 16 hex）。 */
+  policySetFingerprint: varchar("policySetFingerprint", { length: 64 }).notNull(),
+  /** 版本快照产物指纹（SHA-256 前 16 hex）。 */
+  versionSnapshotFingerprint: varchar("versionSnapshotFingerprint", { length: 64 }).notNull(),
+  /** 版本快照产物（buildDatasetVersionSnapshot 序列化，可 round-trip）。 */
+  versionSnapshotJson: longtext("versionSnapshotJson").notNull(),
+  /** 数据快照（DataSnapshot 序列化，含逐域加载事实）。 */
+  dataSnapshotJson: longtext("dataSnapshotJson").notNull(),
+  /** universe 定义（UniverseDefinition 序列化）。 */
+  universeDefinitionJson: longtext("universeDefinitionJson").notNull(),
+  /** 标准行数。 */
+  rowCount: int("rowCount").notNull(),
+  /** 构建 gate：FAIL / PASS / INCONCLUSIVE。 */
+  gate: varchar("gate", { length: 16 }).notNull(),
+  /** gate 说明（JSON 数组）。 */
+  gateNotesJson: longtext("gateNotesJson").notNull(),
+  /** 分片行表名（rd_rows_<buildKey>）；分片构建时落库，非分片（内存）构建为 null。 */
+  rowsTableName: varchar("rowsTableName", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  versionIdx: index("idx_research_datasets_version").on(table.datasetVersion),
+  nameIdx: index("idx_research_datasets_name").on(table.name),
+  createdAtIdx: index("idx_research_datasets_created").on(table.createdAt),
+}));
+
+export type ResearchDatasetRow = typeof researchDatasets.$inferSelect;
+export type InsertResearchDataset = typeof researchDatasets.$inferInsert;
+
+// ===========================================================================
+// STEP STRATEGY-002 — 策略持久化（strategies + strategy_versions）
+// ===========================================================================
+
+/**
+ * 策略逻辑实体表 - 一个「策略族」的稳定身份与元数据。
+ * 代表 StrategyDefinition 的持久化实体：strategyId 唯一、name、最新版本、生命周期状态、时间戳。
+ * 版本内容不在本表，而在 strategy_versions（不可变版本表）；latestVersion 为冗余列，
+ * 权威值在 strategy_versions 中，本列仅用于列表快速展示。
+ */
+export const strategies = mysqlTable("strategies", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 策略稳定身份（如 "limit-up-baseline"），全局唯一。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull().unique(),
+  /** 策略名称（仅描述，不进版本指纹）。 */
+  name: varchar("name", { length: 128 }).notNull(),
+  /** 最新版本号（major.minor.patch；冗余列，权威值在 strategy_versions）。 */
+  latestVersion: varchar("latestVersion", { length: 32 }).notNull(),
+  /** 生命周期状态（Draft/Research/...；由 lifecycle 层维护，本层只透传，默认 Draft）。 */
+  status: varchar("status", { length: 32 }).notNull().default("Draft"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  strategyIdIdx: index("idx_strategies_strategy_id").on(table.strategyId),
+  createdAtIdx: index("idx_strategies_created").on(table.createdAt),
+}));
+
+export type StrategyRow = typeof strategies.$inferSelect;
+export type InsertStrategy = typeof strategies.$inferInsert;
+
+/**
+ * 策略不可变版本表 - 一个 (strategyId, version) 的唯一、不可变版本快照。
+ *
+ * 存储口径（复用 STEP-001 strategySchema，不另造版本模型）：
+ *   - strategyDocumentJson：serializeStrategyDocument(document)（§16 全字段本体，canonical JSON）；
+ *   - versionRecordJson：serializeStrategyVersionRecord(record)（§17 九项追溯完整快照，含 parameterSet /
+ *     backtestConfig / costModel / executionModel / codeVersion / createdAt）；
+ *   - fingerprint：StrategyDocument.fingerprint（内容指纹，幂等/不可变判定键，§7/§18/§19）。
+ *
+ * 不可变 + 并发兜底：uniqueIndex (strategyId, version) 保证同版本只能有一行；
+ * 禁止 UPDATE 已有版本的 strategyDocumentJson（改内容必须新建版本）。
+ */
+export const strategyVersions = mysqlTable("strategy_versions", {
+  id: int("id").autoincrement().primaryKey(),
+  /** 所属策略。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  /** 版本号（major.minor.patch，严格 semver）。 */
+  version: varchar("version", { length: 32 }).notNull(),
+  /** 序列化的 StrategyDocument（serializeStrategyDocument）。 */
+  strategyDocumentJson: longtext("strategyDocumentJson").notNull(),
+  /** 序列化的 StrategyVersionRecord（serializeStrategyVersionRecord，§17 九项追溯）。 */
+  versionRecordJson: longtext("versionRecordJson").notNull(),
+  /** 内容指纹（StrategyDocument.fingerprint；幂等/不可变判定键）。 */
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  /** 数据集版本（rd-…；冗余列，便于查询，权威值在 document 内）。 */
+  datasetVersion: varchar("datasetVersion", { length: 96 }).notNull(),
+  /** universe 标识（冗余列，便于查询）。 */
+  universeId: varchar("universeId", { length: 128 }).notNull(),
+  /** 代码版本（composeCodeVersion 产物）。 */
+  codeVersion: varchar("codeVersion", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  strategyVersionUnique: uniqueIndex("uq_strategy_versions_id_version").on(table.strategyId, table.version),
+  strategyIdIdx: index("idx_strategy_versions_strategy").on(table.strategyId),
+  createdAtIdx: index("idx_strategy_versions_created").on(table.createdAt),
+}));
+
+export type StrategyVersionRow = typeof strategyVersions.$inferSelect;
+export type InsertStrategyVersion = typeof strategyVersions.$inferInsert;
 
 /**
  * 全市场日线回填 checkpoint 表（STEP 7.3）。
@@ -751,3 +879,202 @@ export const researchSecurityStatusHistory = mysqlTable("research_security_statu
 
 export type ResearchSecurityStatusHistory = typeof researchSecurityStatusHistory.$inferSelect;
 export type InsertResearchSecurityStatusHistory = typeof researchSecurityStatusHistory.$inferInsert;
+
+// ===========================================================================
+// STEP DATASET-001 — Dataset Registry + 首板回踩 Dataset 独立物理表
+// ===========================================================================
+// 命名规范：物理表 ds_{dataset_code}_{role}（role ∈ event/path/outcome/feature）。
+// 一个逻辑 Dataset = 一组固定物理表；多个 Version 用 dataset_version_id 隔离，禁止一版一表。
+// Dataset 只描述客观事实，禁止绑定 Strategy；不复制公共 OHLCV（stock_daily_prices）。
+// path.relative_day 必须用交易日历（Trading Calendar），禁止自然日 +1。
+
+/**
+ * Dataset Registry：逻辑 Dataset 定义（dataset_definition）。
+ * datasetCode 业务唯一且稳定；event/path/outcome/feature 物理表名显式落库（不运行时猜名）。
+ */
+export const datasetDefinitions = mysqlTable("dataset_definition", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 稳定语义代码（lowercase snake_case，不含 version/date/env/uuid）。 */
+  datasetCode: varchar("datasetCode", { length: 64 }).notNull().unique(),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  /** EVENT / FACTOR / ML / RESEARCH。 */
+  datasetType: varchar("datasetType", { length: 32 }).notNull(),
+  /** DATABASE（未来可 PARQUET / OBJECT_STORAGE，当前不过度设计）。 */
+  storageType: varchar("storageType", { length: 32 }).notNull(),
+  /** ACTIVE / ARCHIVED。 */
+  status: varchar("status", { length: 20 }).notNull().default("ACTIVE"),
+  eventTableName: varchar("eventTableName", { length: 128 }),
+  pathTableName: varchar("pathTableName", { length: 128 }),
+  outcomeTableName: varchar("outcomeTableName", { length: 128 }),
+  featureTableName: varchar("featureTableName", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  datasetTypeIdx: index("idx_dataset_definition_type").on(table.datasetType),
+  statusIdx: index("idx_dataset_definition_status").on(table.status),
+}));
+
+export type DatasetDefinitionRow = typeof datasetDefinitions.$inferSelect;
+export type InsertDatasetDefinition = typeof datasetDefinitions.$inferInsert;
+
+/**
+ * Dataset Registry：逻辑版本（dataset_version）。Version 是逻辑版本，不是物理表。
+ * (datasetId, version) 唯一；数据通过 dataset_version_id 在物理表中隔离。
+ */
+export const datasetVersions = mysqlTable("dataset_version", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 软引用 dataset_definition.id（项目惯例：不加 FK）。 */
+  datasetId: bigint("datasetId", { mode: "number" }).notNull(),
+  version: varchar("version", { length: 32 }).notNull(),
+  /** DRAFT / BUILDING / READY / FAILED。 */
+  status: varchar("status", { length: 20 }).notNull().default("DRAFT"),
+  startDate: date("startDate", { mode: "string" }),
+  endDate: date("endDate", { mode: "string" }),
+  universeDefinitionJson: longtext("universeDefinitionJson"),
+  filterDefinitionJson: longtext("filterDefinitionJson"),
+  featureVersion: varchar("featureVersion", { length: 32 }),
+  sourceVersion: varchar("sourceVersion", { length: 32 }),
+  totalEvents: bigint("totalEvents", { mode: "number" }),
+  totalRows: bigint("totalRows", { mode: "number" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+}, (table) => ({
+  datasetVersionUnique: uniqueIndex("uq_dataset_version_dataset_version").on(table.datasetId, table.version),
+  datasetIdx: index("idx_dataset_version_dataset").on(table.datasetId),
+  statusIdx: index("idx_dataset_version_status").on(table.status),
+}));
+
+export type DatasetVersionRow = typeof datasetVersions.$inferSelect;
+export type InsertDatasetVersion = typeof datasetVersions.$inferInsert;
+
+/**
+ * Dataset Registry：构建作业（dataset_build_job）。支持 PENDING/RUNNING/COMPLETED/FAILED/CANCELLED
+ * 与 checkpoint/resume（lastSymbol/lastTradeDate/lastCursor）。
+ */
+export const datasetBuildJobs = mysqlTable("dataset_build_job", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
+  jobId: varchar("jobId", { length: 64 }).notNull().unique(),
+  status: varchar("status", { length: 20 }).notNull().default("PENDING"),
+  totalChunks: bigint("totalChunks", { mode: "number" }),
+  completedChunks: bigint("completedChunks", { mode: "number" }),
+  currentChunk: bigint("currentChunk", { mode: "number" }),
+  processedRows: bigint("processedRows", { mode: "number" }),
+  failedRows: bigint("failedRows", { mode: "number" }),
+  lastSymbol: varchar("lastSymbol", { length: 32 }),
+  lastTradeDate: date("lastTradeDate", { mode: "string" }),
+  /** checkpoint JSON（含 prevLimitUp + cumulative 滚动状态，随构建增长），用 longtext 避免 TEXT 64KB 上限。 */
+  lastCursor: longtext("lastCursor"),
+  startedAt: timestamp("startedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  completedAt: timestamp("completedAt"),
+  errorMessage: text("errorMessage"),
+}, (table) => ({
+  versionIdx: index("idx_dataset_build_job_version").on(table.datasetVersionId),
+  statusIdx: index("idx_dataset_build_job_status").on(table.status),
+}));
+
+export type DatasetBuildJobRow = typeof datasetBuildJobs.$inferSelect;
+export type InsertDatasetBuildJob = typeof datasetBuildJobs.$inferInsert;
+
+/**
+ * 首板回踩 Dataset：event（一行 = 一只股票某交易日一次「首板」事件）。
+ * 首板判定复用 server/data/boardRules（涨跌停权威）+ PIT ST（research_security_status_history），
+ * 禁止硬编码统一 +10%。
+ */
+export const firstLimitPullbackEvents = mysqlTable("ds_first_limit_pullback_event", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
+  eventId: varchar("eventId", { length: 64 }).notNull(),
+  symbol: varchar("symbol", { length: 32 }).notNull(),
+  tradeDate: date("tradeDate", { mode: "string" }).notNull(),
+  market: varchar("market", { length: 16 }),
+  industryCode: varchar("industryCode", { length: 32 }),
+  boardType: varchar("boardType", { length: 32 }),
+  open: double("open"),
+  high: double("high"),
+  low: double("low"),
+  close: double("close"),
+  previousClose: double("previousClose"),
+  limitUpPrice: double("limitUpPrice"),
+  volume: double("volume"),
+  amount: double("amount"),
+  turnover: double("turnover"),
+  isFirstLimit: boolean("isFirstLimit"),
+  previousLimitDate: date("previousLimitDate", { mode: "string" }),
+  daysSincePreviousLimit: int("daysSincePreviousLimit"),
+  historicalLimitCount: int("historicalLimitCount"),
+  marketCap: double("marketCap"),
+  floatMarketCap: double("floatMarketCap"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  eventVersionUnique: uniqueIndex("uq_ds_flp_event_version_event").on(table.datasetVersionId, table.eventId),
+  versionDateIdx: index("idx_ds_flp_event_version_date").on(table.datasetVersionId, table.tradeDate),
+  symbolDateIdx: index("idx_ds_flp_event_symbol_date").on(table.symbol, table.tradeDate),
+}));
+
+export type FirstLimitPullbackEventRow = typeof firstLimitPullbackEvents.$inferSelect;
+export type InsertFirstLimitPullbackEvent = typeof firstLimitPullbackEvents.$inferInsert;
+
+/**
+ * 首板回踩 Dataset：path（一行 = 一个 event + 一个 relative trading day）。
+ * relative_day 由交易日历推进，D+1 = 下一交易日（周五 D0 → 下周一 D+1）。
+ */
+export const firstLimitPullbackPaths = mysqlTable("ds_first_limit_pullback_path", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
+  eventId: varchar("eventId", { length: 64 }).notNull(),
+  symbol: varchar("symbol", { length: 32 }).notNull(),
+  tradeDate: date("tradeDate", { mode: "string" }).notNull(),
+  relativeDay: int("relativeDay").notNull(),
+  open: double("open"),
+  high: double("high"),
+  low: double("low"),
+  close: double("close"),
+  volume: double("volume"),
+  amount: double("amount"),
+  turnover: double("turnover"),
+  returnFromEventClose: double("returnFromEventClose"),
+  highFromEventClose: double("highFromEventClose"),
+  lowFromEventClose: double("lowFromEventClose"),
+  closeFromEventClose: double("closeFromEventClose"),
+  pullbackFromEventClose: double("pullbackFromEventClose"),
+  pullbackFromEventHigh: double("pullbackFromEventHigh"),
+  volumeRatio: double("volumeRatio"),
+  isBreakout: boolean("isBreakout"),
+  breakoutPrice: double("breakoutPrice"),
+  daysToBreakout: int("daysToBreakout"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  pathVersionEventDayUnique: uniqueIndex("uq_ds_flp_path_version_event_day").on(table.datasetVersionId, table.eventId, table.relativeDay),
+  eventDayIdx: index("idx_ds_flp_path_event_day").on(table.eventId, table.relativeDay),
+  symbolDateIdx: index("idx_ds_flp_path_symbol_date").on(table.symbol, table.tradeDate),
+  versionDayIdx: index("idx_ds_flp_path_version_day").on(table.datasetVersionId, table.relativeDay),
+}));
+
+export type FirstLimitPullbackPathRow = typeof firstLimitPullbackPaths.$inferSelect;
+export type InsertFirstLimitPullbackPath = typeof firstLimitPullbackPaths.$inferInsert;
+
+/**
+ * 首板回踩 Dataset：outcome（一行 = 一个 event + 一个 horizon 的未来结果）。
+ * Outcome 是研究结果，不是实时交易信号；Backtest Signal 不得读取本表未来结果。
+ */
+export const firstLimitPullbackOutcomes = mysqlTable("ds_first_limit_pullback_outcome", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
+  eventId: varchar("eventId", { length: 64 }).notNull(),
+  horizon: int("horizon").notNull(),
+  maxReturn: double("maxReturn"),
+  minReturn: double("minReturn"),
+  maxDrawdown: double("maxDrawdown"),
+  isBreakout: boolean("isBreakout"),
+  daysToBreakout: int("daysToBreakout"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+}, (table) => ({
+  outcomeVersionEventHorizonUnique: uniqueIndex("uq_ds_flp_outcome_version_event_horizon").on(table.datasetVersionId, table.eventId, table.horizon),
+  eventHorizonIdx: index("idx_ds_flp_outcome_event_horizon").on(table.eventId, table.horizon),
+}));
+
+export type FirstLimitPullbackOutcomeRow = typeof firstLimitPullbackOutcomes.$inferSelect;
+export type InsertFirstLimitPullbackOutcome = typeof firstLimitPullbackOutcomes.$inferInsert;

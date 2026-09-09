@@ -57,6 +57,59 @@ export interface ResearchDatasetRequest {
   asOf?: string | null;
   /** 市场状态核心指数代码集合（默认 4 大基准）。 */
   coreIndexCodes?: string[];
+  /** universe 过滤层（板块 / ST / T 日条件）；省略 = 全量可交易池。 */
+  universeFilter?: UniverseFilter;
+}
+
+/**
+ * 市场板块类别（与 server/data/boardRules classifyBoard 输出一致）。
+ * main=主板（60/000/001/002/003）、chinext=创业板（300/301）、star=科创板（688/689）、
+ * bse=北交所（920/43/83/87/88/4/8）、unknown=无法归类。
+ */
+export type BoardCategory = "main" | "chinext" | "star" | "bse" | "unknown";
+
+/** T 日条件（T 日信号过滤口径，纯信号筛选，不改变 eligibility 判定）。 */
+export type TDayCondition = "none" | "limitUp" | "firstBoard" | "consecutiveBoard";
+
+/** 回踩目标位类型（可多选）。 */
+export const PULLBACK_TARGET_TYPES = ["limitPrice", "t0Open", "t0Low", "ma5"] as const;
+export type PullbackTargetType = (typeof PULLBACK_TARGET_TYPES)[number];
+
+/**
+ * 回踩筛选条件（在「首板」事件 T0 之上，对 T+1~T+N 观察窗口做「触及且不破」判定）。
+ * 纯信号窄化，不改变 eligibility 判定；量化语义（目标位价格 / 触及 / 跌破）由后端权威判定。
+ */
+export interface PullbackScreenCondition {
+  /** 回踩目标位（可多选，任一命中即视为回踩）。 */
+  targetTypes: PullbackTargetType[];
+  /** 触及容差（%）：最低价允许落在 [目标位, 目标位×(1+容差)]。 */
+  tolerancePercent: number;
+  /** 观察窗口交易日数 N（T+1 ~ T+N）。 */
+  observationWindowDays: number;
+}
+
+/**
+ * 数据集 universe 过滤层（在 STEP 11 可交易决议之上叠加的可选窄化）。
+ * 只承载「保留/排除」声明，量化语义（板块归类 / ST / 涨停 / 回踩）一律由后端权威判定，
+ * 前端仅传选择，不实现、不重算。
+ */
+export interface UniverseFilter {
+  /** 仅保留这些板块；空数组 = 不过滤（全板块含 unknown）。 */
+  boards?: BoardCategory[];
+  /** 排除 ST / *ST（PIT st 维度，不依赖股票名称）。 */
+  excludeSt?: boolean;
+  /** T 日条件（默认 none = 不做信号筛选）。 */
+  tDayCondition?: TDayCondition;
+  /** 首板回踩条件（默认 null = 不做回踩筛选；仅当 tDayCondition=firstBoard 时生效）。 */
+  pullback?: PullbackScreenCondition | null;
+}
+
+/** 已规范化（默认值已应用）的 universe 过滤层。 */
+export interface NormalizedUniverseFilter {
+  boards: BoardCategory[];
+  excludeSt: boolean;
+  tDayCondition: TDayCondition;
+  pullback: PullbackScreenCondition | null;
 }
 
 /** 已规范化（默认值已应用）的请求。 */
@@ -64,6 +117,7 @@ export interface NormalizedResearchDatasetRequest extends ResearchDatasetRequest
   asOfPerTradeDate: boolean;
   asOf: string | null;
   coreIndexCodes: string[];
+  universeFilter: NormalizedUniverseFilter;
 }
 
 /** 请求校验错误（确定性列表）。 */

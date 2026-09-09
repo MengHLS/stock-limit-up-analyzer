@@ -69,9 +69,14 @@ export class ResearchRunService {
     assertExperimentTransition(experiment.status, "running");
     await experimentRepository.updateStatus(experimentId, "running");
 
-    // 6. 创建 Run（running）。
+    // 6. 创建 Run（running）。数据集身份从冻结快照解析（正式研究 Run 强绑定 Dataset）。
     const resolvedRunId = runId ?? generateRunId(experimentId);
     const startedAt = new Date().toISOString();
+    const datasetIdentity = {
+      datasetId: snapshot.dataset.datasetId ?? null,
+      datasetVersion: snapshot.dataset.datasetVersion ?? null,
+      datasetFingerprint: snapshot.dataset.datasetFingerprint ?? null,
+    };
     const running: ResearchRun = {
       runId: resolvedRunId,
       experimentId,
@@ -79,6 +84,7 @@ export class ResearchRunService {
       startedAt,
       result: null,
       error: null,
+      ...datasetIdentity,
       createdAt: startedAt,
     };
     await runRepository.saveRun(running);

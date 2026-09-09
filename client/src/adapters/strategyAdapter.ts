@@ -421,3 +421,177 @@ export function positionSizingLabel(kind: string): string {
       return kind || "—";
   }
 }
+
+/** 仓位模式的中文说明（供编辑器展示语义）。 */
+export function positionSizingDescription(kind: string): string {
+  switch (kind) {
+    case "equal-weight":
+      return "入选的候选等额分配资金，每只仓位相同，简单稳健。";
+    case "fixed-fraction":
+      return "每只固定占用初始资金的一定比例，超出部分留作现金。";
+    case "rank-weighted":
+      return "按候选排名高低分配权重，排名越靠前仓位越重。";
+    default:
+      return "";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 中文化展示 helper（规则类型 / 操作符 / 字段 / 执行模型）
+// ---------------------------------------------------------------------------
+
+/** 规则类型的中文标签（kind 白名单）。 */
+export function ruleKindLabel(kind: string): string {
+  switch (kind) {
+    case "threshold":
+      return "阈值";
+    case "time-based":
+      return "时间";
+    case "state":
+      return "状态";
+    case "event":
+      return "事件";
+    default:
+      return kind || "—";
+  }
+}
+
+/** 规则类型的中文说明。 */
+export function ruleKindDescription(kind: string): string {
+  switch (kind) {
+    case "threshold":
+      return "数值阈值比较（如涨跌幅 / 评分）";
+    case "time-based":
+      return "按持有时间 / 交易日触发";
+    case "state":
+      return "持仓或状态断言（如是否封板）";
+    case "event":
+      return "事件触发（如炸板 / 尾盘未封）";
+    default:
+      return "";
+  }
+}
+
+/** 比较操作符的中文标签。 */
+export function ruleOperatorLabel(op: string): string {
+  switch (op) {
+    case ">=":
+      return "≥ 大于等于";
+    case ">":
+      return "> 大于";
+    case "<=":
+      return "≤ 小于等于";
+    case "<":
+      return "< 小于";
+    case "==":
+      return "= 等于";
+    case "!=":
+      return "≠ 不等于";
+    default:
+      return op || "—";
+  }
+}
+
+/** 常用规则字段的中文标签（供字段选择与展示）。 */
+export const RULE_FIELD_LABELS: Record<string, string> = {
+  "candidate.rank": "候选综合排名",
+  "price.pctChange": "当日涨跌幅 (%)",
+  "price.limitUp": "是否封死涨停",
+  "candle.consecutiveLimitUps": "连板数",
+  "volume.turnoverRate": "换手率 (%)",
+  "volume.volumeRatio": "量比",
+  "marketCap.float": "流通市值 (亿)",
+  "sealAmountRatio": "封单额/流通市值",
+  "industry.isHot": "是否热点题材",
+  "score.composite": "综合评分",
+  "position.holdingDays": "持有天数",
+  "position.pnlPct": "持仓盈亏 (%)",
+  "limitUp.sealBroken": "是否炸板",
+  "time.closeSealed": "尾盘是否封板",
+  "price.dropFromHigh": "距高点回撤 (%)",
+  "price.openGap": "开盘缺口 (%)",
+  "position.count": "持仓数",
+  "account.dailyLossPct": "单日账户亏损 (%)",
+  "position.singleLossPct": "单笔亏损 (%)",
+  "account.maxDrawdownPct": "账户最大回撤 (%)",
+  "position.singleWeight": "单票仓位占比",
+};
+
+/** 字段中文标签（未知字段回退原文）。 */
+export function ruleFieldLabel(field: string): string {
+  return RULE_FIELD_LABELS[field] ?? field;
+}
+
+/** 执行模型标识的中文标签。 */
+export const EXECUTION_MODEL_LABELS: Record<string, string> = {
+  NEXT_OPEN: "次日开盘价",
+  NEXT_CLOSE: "次日收盘价",
+  VWAP_PROXY: "均价代理 (VWAP)",
+  LIMIT_PRICE: "限价成交",
+  "next-open": "次日开盘价",
+};
+
+// ---------------------------------------------------------------------------
+// 规则预设（入场 / 退出 / 风险，中文语义，供「添加预设条件」快速填充）
+// ---------------------------------------------------------------------------
+
+export type RuleCategory = "entry" | "exit" | "risk";
+
+export interface RulePreset {
+  /** 下拉项中文标签。 */
+  label: string;
+  category: RuleCategory;
+  kind: RuleKind;
+  field: string;
+  operator: RuleOperator;
+  operand: number | string | null;
+  /** 完整中文语义（规则 description）。 */
+  description: string;
+  note?: string;
+}
+
+export const RULE_PRESETS: RulePreset[] = [
+  // -- 入场规则 --
+  { label: "候选排名前 N", category: "entry", kind: "threshold", field: "candidate.rank", operator: "<=", operand: 5, description: "候选综合排名 ≤ 5 才允许进场" },
+  { label: "逼近涨停", category: "entry", kind: "threshold", field: "price.pctChange", operator: ">=", operand: 9.5, description: "当日涨幅 ≥ 9.5%（逼近涨停板）" },
+  { label: "收盘封板", category: "entry", kind: "state", field: "price.limitUp", operator: "==", operand: "true", description: "当日收盘封死涨停板" },
+  { label: "连板高度", category: "entry", kind: "threshold", field: "candle.consecutiveLimitUps", operator: ">=", operand: 2, description: "连续涨停 ≥ 2 板（强势梯队）" },
+  { label: "充分换手", category: "entry", kind: "threshold", field: "volume.turnoverRate", operator: ">=", operand: 5, description: "换手率 ≥ 5%（充分换手）" },
+  { label: "放量配合", category: "entry", kind: "threshold", field: "volume.volumeRatio", operator: ">=", operand: 1.5, description: "量比 ≥ 1.5（较昨日放量）" },
+  { label: "流通市值适中", category: "entry", kind: "threshold", field: "marketCap.float", operator: "<=", operand: 100, description: "流通市值 ≤ 100 亿元" },
+  { label: "封单强度", category: "entry", kind: "threshold", field: "sealAmountRatio", operator: ">=", operand: 0.1, description: "封单额/流通市值 ≥ 10%" },
+  { label: "热点题材", category: "entry", kind: "state", field: "industry.isHot", operator: "==", operand: "true", description: "所属板块为当日热点题材" },
+  { label: "评分门槛", category: "entry", kind: "threshold", field: "score.composite", operator: ">=", operand: 60, description: "综合评分 ≥ 60 分" },
+  // -- 退出规则 --
+  { label: "持有期上限", category: "exit", kind: "time-based", field: "position.holdingDays", operator: ">=", operand: 3, description: "持有 ≥ 3 个交易日强制退出" },
+  { label: "止盈离场", category: "exit", kind: "threshold", field: "position.pnlPct", operator: ">=", operand: 8, description: "持仓盈亏 ≥ 8% 止盈离场" },
+  { label: "止损离场", category: "exit", kind: "threshold", field: "position.pnlPct", operator: "<=", operand: -5, description: "持仓盈亏 ≤ -5% 止损离场" },
+  { label: "炸板退出", category: "exit", kind: "event", field: "limitUp.sealBroken", operator: "==", operand: "true", description: "涨停打开（炸板）即退出" },
+  { label: "尾盘未封退出", category: "exit", kind: "event", field: "time.closeSealed", operator: "==", operand: "false", description: "尾盘未能封板则次日退出" },
+  { label: "高点回撤退出", category: "exit", kind: "threshold", field: "price.dropFromHigh", operator: ">=", operand: 5, description: "距最高点回撤 ≥ 5% 退出" },
+  { label: "低开止损", category: "exit", kind: "threshold", field: "price.openGap", operator: "<=", operand: -3, description: "次日低开 ≥ 3% 止损离场" },
+  // -- 风险规则 --
+  { label: "最大持仓数", category: "risk", kind: "state", field: "position.count", operator: "<=", operand: 5, description: "同时持仓数 ≤ 5 只" },
+  { label: "单日亏损闸门", category: "risk", kind: "threshold", field: "account.dailyLossPct", operator: ">=", operand: 3, description: "单日账户亏损 ≥ 3% 停止开新仓" },
+  { label: "单笔最大亏损", category: "risk", kind: "threshold", field: "position.singleLossPct", operator: "<=", operand: -5, description: "单笔亏损 ≤ -5%" },
+  { label: "账户最大回撤", category: "risk", kind: "threshold", field: "account.maxDrawdownPct", operator: "<=", operand: 15, description: "账户最大回撤 ≤ 15%" },
+  { label: "单票仓位上限", category: "risk", kind: "threshold", field: "position.singleWeight", operator: "<=", operand: 0.2, description: "单票仓位占比 ≤ 20%" },
+];
+
+/** 按类别筛选预设。 */
+export function rulePresetsForCategory(category: RuleCategory): RulePreset[] {
+  return RULE_PRESETS.filter(p => p.category === category);
+}
+
+/** 把预设转成一条可编辑的规则（生成唯一 id）。 */
+export function presetToRule(preset: RulePreset): RuleViewModel {
+  return {
+    id: `rule-${Math.random().toString(36).slice(2, 8)}`,
+    kind: preset.kind,
+    description: preset.description,
+    field: preset.field,
+    operator: preset.operator,
+    operand: preset.operand as number | string | null,
+    note: preset.note ?? "",
+  };
+}

@@ -1,0 +1,40 @@
+{
+  "taskId": "P3-T1",
+  "gate": "G3",
+  "status": "CODE_READY",
+  "capturedAt": "2026-09-09T22:12:00+08:00",
+  "realData": false,
+  "reproducible": true,
+  "note": "synthetic fixture 验证 BUY→SELL 生命周期；真实数据验证由 P5-T1 Baseline 承担（铁律 CODE_READY≠VALIDATED）",
+  "exitStrategy": {
+    "mode": "hold-while-selected",
+    "semantics": "持仓不再入选当日候选池（minScore/featureMode 过滤后，不受 maxSignals 截断）即产生 SELL；无候选日不强制清仓",
+    "configurable": true,
+    "modes": ["hold-while-selected", "none"],
+    "default": "hold-while-selected"
+  },
+  "files": [
+    "server/strategy/strategies/leaderCandidateBaseline.ts (exitMode + buildHoldWhileSelectedExitSignals + evaluate 改造)",
+    "server/leaderCandidateStrategyBacktest.ts (LEADER_CANDIDATE_PRODUCTION_EXIT_MODE + buildProductionLeaderCandidateStrategyConfig)",
+    "server/research/adapter.ts (research parameterSchema 暴露 exitMode)",
+    "server/strategy/leaderCandidateBaseline.test.ts (+7 退出策略单测)",
+    "server/strategy/productionIntegration.test.ts (+3 端到端用例)",
+    "server/realisticSimulationSemantics.test.ts (注释更新，断言保持)",
+    "server/research/experimentPersistence.test.ts (参数集断言同步 exitMode 默认值)"
+  ],
+  "verification": {
+    "tsc": "PASS",
+    "strategyEngineTests": "server/strategy (73) + server/engine (45) = 99 PASS",
+    "researchTests": "44 files 1104 PASS",
+    "e2eClosedTrade": {
+      "scenario": "A E1 涨停(确认) → E2 开盘买入；E2 断板 → SELL → E3 开盘卖出",
+      "aTrade": { "entryTime": "2026-01-07", "exitTime": "2026-01-08", "openAtEnd": false, "netPnl": "not null", "holdingPeriod": 2 },
+      "completedTradeCount": ">= 1",
+      "decisionLogHasSell": true
+    }
+  },
+  "knownLimitations": [
+    "portfolio.sell 清仓时 trade.reason 硬编码 null，退出原因未传递到 Trade（留待 P3-T4）",
+    "真实 DB 数据跑通 SELL 留待 P5-T1 Baseline Backtest"
+  ]
+}

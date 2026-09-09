@@ -16,6 +16,8 @@
 import { loadDateFacts, loadResearchDatasetStatic, type StaticDatasetLoad } from "./db";
 import { buildStaticContexts, assembleDayRows } from "./assemble";
 import { resolveUniverseDefinition } from "./universe";
+import { isRowLimitUp, matchesTDayCondition } from "./tDayFilter";
+import { screenFirstBoardRow } from "./pullback";
 import { computeDatasetVersion } from "./version";
 import { derivePolicySet } from "./policy";
 import { normalizeResearchDatasetRequest, validateNormalizedResearchDatasetRequest } from "./validate";
@@ -23,12 +25,14 @@ import { RESEARCH_DATASET_BUILDER_VERSION, RESEARCH_DATASET_ROW_SCHEMA_VERSION }
 import type {
   BuildResearchDatasetOptions,
   DataSnapshot,
+  DateFacts,
   DomainSnapshot,
   NormalizedResearchDatasetRequest,
   ResearchDataset,
   ResearchDatasetGate,
   ResearchDatasetRequest,
   ResearchDatasetRow,
+  UniverseDayResult,
 } from "./types";
 
 /** 域顺序（快照输出确定性）。 */
@@ -52,7 +56,7 @@ function distinctSecurityCount(
   return new Set(rows.map((row) => row.securityId)).size;
 }
 
-function buildDataSnapshot(
+export function buildDataSnapshot(
   load: StaticDatasetLoad,
   tradingDays: readonly string[],
   factsCounts: { tradeDate: string; price: number; liquidity: number; index: number }[],
@@ -155,7 +159,7 @@ function buildDataSnapshot(
 }
 
 /** 抛错式请求校验（供 CLI/上层断言；结构化校验见 validate.ts）。 */
-function assertValidRequest(request: NormalizedResearchDatasetRequest): void {
+export function assertValidRequest(request: NormalizedResearchDatasetRequest): void {
   const issues = validateNormalizedResearchDatasetRequest(request);
   if (issues.length > 0) {
     throw new Error(`Research Dataset 请求非法：${issues.map((i) => `[${i.code}] ${i.message}`).join("；")}`);
@@ -220,14 +224,40 @@ export async function buildResearchDataset(
     corporateActions: staticLoad.corporateActions,
   });
 
+  const tDayCondition = request.universeFilter.tDayCondition;
+  const pullback = request.universeFilter.pullback;
   const rows: ResearchDatasetRow[] = [];
   const factsCounts: { tradeDate: string; price: number; liquidity: number; index: number }[] = [];
   const priceCodes = new Set<string>();
   const liquidityCodes = new Set<string>();
   let securitiesCappedHit = false;
+  const prevLimitUpBySecurity = new Set<string>();
+  const finalDays: UniverseDayResult[] = [];
+
+  // 首板回踩筛选需要前 4 个交易日（MA5）与后 N 个交易日（观察窗口）的日级事实，
+  // 故在逐日装配前，有界预加载扩展窗口的 facts（只读复用，价格键与装配层同源）。
+  const factsByDate = new Map<string, DateFacts>();
+  if (pullback && universeDefinition.days.length > 0) {
+    const firstDate = universeDefinition.days[0]!.tradeDate;
+    const lastDate = universeDefinition.days[universeDefinition.days.length - 1]!.tradeDate;
+    const backStart = calendar.addTradingDays(firstDate, -4) ?? firstDate;
+    // 向前缓冲：优先 lastDate + N 个交易日；若日历不足（数据边界），退到日历最后一天，
+    // 保证回踩窗口能尽量完整加载（窗口本身缺数据时仍由 screenFirstBoardRow 保守判 incomplete）。
+    const forwardEnd =
+      calendar.addTradingDays(lastDate, pullback.observationWindowDays) ??
+      calendar.tradingDays[calendar.tradingDays.length - 1] ??
+      lastDate;
+    const extendedDates = calendar.tradingDaysBetween(backStart, forwardEnd);
+    for (const d of extendedDates) {
+      factsByDate.set(d, await loadDateFacts(d, request.coreIndexCodes));
+    }
+  }
 
   for (const day of universeDefinition.days) {
-    const facts = await loadDateFacts(day.tradeDate, request.coreIndexCodes);
+    const facts =
+      factsByDate.get(day.tradeDate) ??
+      await loadDateFacts(day.tradeDate, request.coreIndexCodes);
+    if (!factsByDate.has(day.tradeDate)) factsByDate.set(day.tradeDate, facts);
     for (const code of Array.from(facts.priceByCode.keys())) priceCodes.add(code);
     for (const code of Array.from(facts.liquidityByCode.keys())) liquidityCodes.add(code);
     factsCounts.push({
@@ -236,13 +266,18 @@ export async function buildResearchDataset(
       liquidity: facts.liquidityByCode.size,
       index: facts.indexBars.length,
     });
-    const members = day.members;
-    const limited = members.slice(0, maxSecuritiesPerDay);
-    if (limited.length < members.length) securitiesCappedHit = true;
     const asOf = request.asOfPerTradeDate ? day.tradeDate : request.asOf;
+    // 扫描集：T 日条件需遍历全 universe（否则会漏掉排序靠后的首板），故仅「无 T 日条件」时
+    // 才在装配前截断（快路径）；有 T 日条件时先全量扫描、再对结果限流。
+    const filterActive = tDayCondition !== "none";
+    const scanMembers = filterActive
+      ? day.members
+      : day.members.slice(0, maxSecuritiesPerDay);
+    if (!filterActive && scanMembers.length < day.members.length) securitiesCappedHit = true;
+
     const dayRows = assembleDayRows(
       contexts,
-      limited,
+      scanMembers,
       day.tradeDate,
       asOf,
       facts.priceByCode,
@@ -250,12 +285,106 @@ export async function buildResearchDataset(
       facts.indexBars,
       staticLoad.indexMaster,
     );
-    rows.push(...dayRows);
+
+    // T 日条件过滤（价格依赖，仅完整构建时生效；逐日滚动 prevLimitUp，PIT 安全）。
+    const keptRows: ResearchDatasetRow[] = [];
+    const keptMembers: string[] = [];
+    const todayLimitUp = new Set<string>();
+    let tDayExcluded = 0;
+    for (const row of dayRows) {
+      const limitUp = isRowLimitUp(row);
+      if (limitUp) todayLimitUp.add(row.securityId);
+      if (matchesTDayCondition(tDayCondition, limitUp, prevLimitUpBySecurity.has(row.securityId))) {
+        keptRows.push(row);
+        keptMembers.push(row.securityId);
+      } else {
+        tDayExcluded += 1;
+      }
+    }
+
+    // 结果限流（对过滤后的最终行集生效，保护结果规模而非扫描规模）。
+    const finalRows = keptRows.slice(0, maxSecuritiesPerDay);
+    const finalMembers = keptMembers.slice(0, maxSecuritiesPerDay);
+    if (keptRows.length > maxSecuritiesPerDay) securitiesCappedHit = true;
+    rows.push(...finalRows);
+
+    const excludedByReason: Record<string, number> = { ...day.excludedByReason };
+    if (tDayExcluded > 0) {
+      excludedByReason.TDAY_CONDITION_EXCLUDED =
+        (excludedByReason.TDAY_CONDITION_EXCLUDED ?? 0) + tDayExcluded;
+    }
+    finalDays.push({ ...day, members: finalMembers, excludedByReason });
+
+    prevLimitUpBySecurity.clear();
+    for (const id of todayLimitUp) prevLimitUpBySecurity.add(id);
   }
 
-  if (securitiesCappedHit) {
-    notes.push({ domain: "A OHLCV", note: `maxSecuritiesPerDay 限制命中（单日仅处理前 ${maxSecuritiesPerDay} 成员）` });
+  // 首板回踩筛选（通用规则后处理）：对首板行做「触及且不破」判定，保留命中候选；
+  // 窗口不完整（缺交易日/停牌）保守排除。仅在 tDayCondition=firstBoard 时生效（validate 已守护）。
+  if (pullback) {
+    const calendarDates = calendar.tradingDays;
+    const priceByDate = new Map<string, DateFacts["priceByCode"]>();
+    for (const [d, f] of factsByDate) priceByDate.set(d, f.priceByCode);
+    const keptRows: ResearchDatasetRow[] = [];
+    const pullbackExcludedByDate = new Map<string, { notMatched: number; incomplete: number }>();
+    for (const row of rows) {
+      const verdict = screenFirstBoardRow(row, priceByDate, calendarDates, pullback);
+      if (!verdict.windowComplete) {
+        const e = pullbackExcludedByDate.get(row.tradeDate) ?? { notMatched: 0, incomplete: 0 };
+        e.incomplete += 1;
+        pullbackExcludedByDate.set(row.tradeDate, e);
+        continue;
+      }
+      if (verdict.matched) {
+        keptRows.push(row);
+      } else {
+        const e = pullbackExcludedByDate.get(row.tradeDate) ?? { notMatched: 0, incomplete: 0 };
+        e.notMatched += 1;
+        pullbackExcludedByDate.set(row.tradeDate, e);
+      }
+    }
+    rows.splice(0, rows.length, ...keptRows);
+    for (let i = 0; i < finalDays.length; i += 1) {
+      const day = finalDays[i]!;
+      const entry = pullbackExcludedByDate.get(day.tradeDate);
+      if (!entry) continue;
+      finalDays[i] = {
+        ...day,
+        excludedByReason: {
+          ...day.excludedByReason,
+          ...(entry.notMatched > 0 ? { PULLBACK_NOT_MATCHED: entry.notMatched } : {}),
+          ...(entry.incomplete > 0 ? { PULLBACK_INCOMPLETE: entry.incomplete } : {}),
+        },
+      };
+    }
   }
+
+  const pullbackRule = pullback
+    ? `；首板回踩=[${pullback.targetTypes.join("/")}] 容差${pullback.tolerancePercent}% 窗口T+1~T+${pullback.observationWindowDays}（触及且不破）`
+    : "";
+  const finalUniverseDefinition = {
+    ...universeDefinition,
+    rule:
+      tDayCondition !== "none"
+        ? `${universeDefinition.rule}；T日条件=${tDayCondition}${pullbackRule}`
+        : universeDefinition.rule,
+    days: finalDays,
+  };
+
+  if (securitiesCappedHit) {
+    notes.push({ domain: "A OHLCV", note: `maxSecuritiesPerDay 限制命中（单日结果截断至前 ${maxSecuritiesPerDay} 行）` });
+  }
+
+  // 行确定性排序：按 (tradeDate, securityId) 升序。universe 成员按 exchange→code→securityId
+  // 排序，与本契约（types.ts「标准行按 tradeDate → securityId 确定性排序」）不同，故此处显式
+  // 重排，保证 datasetVersion 确定性 + datasetAccess 绑定不变量（handle.ts）一致。
+  rows.sort((a, b) =>
+    a.tradeDate < b.tradeDate ? -1
+      : a.tradeDate > b.tradeDate ? 1
+        : a.securityId < b.securityId ? -1
+          : a.securityId > b.securityId ? 1
+            : 0,
+  );
 
   const dataSnapshot = buildDataSnapshot(
     staticLoad,
@@ -267,7 +396,7 @@ export async function buildResearchDataset(
     request,
     notes,
   );
-  const datasetVersion = computeDatasetVersion(request, universeDefinition, rows);
+  const datasetVersion = computeDatasetVersion(request, finalUniverseDefinition, rows);
   const policySet = derivePolicySet(request, dataSnapshot);
   const gateNotes: string[] = [];
   let gate: ResearchDatasetGate;
@@ -286,7 +415,7 @@ export async function buildResearchDataset(
 
   return {
     datasetVersion,
-    universeDefinition,
+    universeDefinition: finalUniverseDefinition,
     policySet,
     dataSnapshot,
     rows,

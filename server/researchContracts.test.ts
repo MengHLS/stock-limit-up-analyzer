@@ -56,6 +56,13 @@ describe("FE-0 · appRouter 注册（R6 回归锁）", () => {
     expect(Object.keys(researchShape)).toContain("historicalState.asOf");
     expect(Object.keys(researchShape)).toContain("researchDataset.build");
   });
+
+  it("research.strategy 下含 STEP STRATEGY-002 CRUD 端点（注册守卫）", () => {
+    const researchShape = (appRouter as any)._def.procedures;
+    for (const proc of ["create", "save", "load", "list", "delete", "createVersion", "loadVersion", "listVersions"]) {
+      expect(Object.keys(researchShape)).toContain(`research.strategy.${proc}`);
+    }
+  });
 });
 
 describe("FE-0 · 入参 schema 校验", () => {

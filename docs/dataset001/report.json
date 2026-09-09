@@ -1,0 +1,31 @@
+{
+  "datasetCode": "first_limit_pullback",
+  "version": "v2",
+  "versionId": 90001,
+  "jobId": "ds001-v2-1788975267064",
+  "status": "COMPLETED",
+  "window": {
+    "from": "2024-01-02",
+    "to": "2024-12-31"
+  },
+  "pathHorizon": 20,
+  "outcomeHorizons": [
+    5,
+    10,
+    20
+  ],
+  "counts": {
+    "events": 10240,
+    "paths": 206408,
+    "outcomes": 30720,
+    "totalRows": 237128
+  },
+  "processedRows": 237128,
+  "failedRows": 0,
+  "chunks": 10240,
+  "elapsedSec": 1381.6,
+  "throughput": {
+    "rowsPerSec": 171.6,
+    "eventsPerSec": 7.4
+  }
+}

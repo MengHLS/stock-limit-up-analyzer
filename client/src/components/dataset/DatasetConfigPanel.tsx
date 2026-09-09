@@ -17,15 +17,39 @@ import {
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { SectionCard } from "@/components/common";
 import { AlertTriangle, ChevronDown, Hammer, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import {
+  BOARD_LABELS,
   DATASET_CONFIG_LIMITS,
+  PULLBACK_TARGET_LABELS,
+  SELECTABLE_BOARDS,
+  SELECTABLE_PULLBACK_TARGETS,
+  TDAY_CONDITION_LABELS,
   validateDatasetConfig,
   type DatasetConfigViewModel,
 } from "@/adapters/datasetAdapter";
+import type {
+  PullbackTargetTypeValue,
+  TDayConditionValue,
+} from "@shared/researchContracts";
+
+/** T 日条件选项（展示顺序）。 */
+const TDAY_OPTIONS: TDayConditionValue[] = [
+  "none",
+  "limitUp",
+  "firstBoard",
+  "consecutiveBoard",
+];
 
 export function DatasetConfigPanel({
   config,
@@ -165,6 +189,185 @@ export function DatasetConfigPanel({
               数据链已就绪（A~H 全 DATA_READY）
             </Label>
           </div>
+
+          {/* Universe 过滤（板块 / ST / T 日条件） */}
+          <div className="mt-4 space-y-3 rounded-md border p-3">
+            <p className="text-xs font-semibold">
+              Universe 过滤（板块 / ST / T 日条件）
+            </p>
+
+            <div className="space-y-1.5">
+              <span className="text-[11px] text-muted-foreground">
+                市场板块（全选 = 不过滤）
+              </span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                {SELECTABLE_BOARDS.map(board => (
+                  <div key={board} className="flex items-center gap-1.5">
+                    <Checkbox
+                      id={`ds-board-${board}`}
+                      checked={config.boards.includes(board)}
+                      onCheckedChange={v =>
+                        set({
+                          boards:
+                            v === true
+                              ? [...config.boards, board]
+                              : config.boards.filter(b => b !== board),
+                        })
+                      }
+                    />
+                    <Label htmlFor={`ds-board-${board}`} className="text-xs">
+                      {BOARD_LABELS[board]}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="ds-exclude-st"
+                checked={config.excludeSt}
+                onCheckedChange={v => set({ excludeSt: v === true })}
+              />
+              <Label htmlFor="ds-exclude-st" className="text-xs font-medium">
+                排除 ST / *ST
+              </Label>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="ds-tday" className="text-xs font-medium">
+                T 日条件
+              </Label>
+              <Select
+                value={config.tDayCondition}
+                onValueChange={v =>
+                  set({ tDayCondition: v as TDayConditionValue })
+                }
+              >
+                <SelectTrigger id="ds-tday" size="sm" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TDAY_OPTIONS.map(o => (
+                    <SelectItem key={o} value={o}>
+                      {TDAY_CONDITION_LABELS[o]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                首板 = T 日涨停且 T-1 未涨停；涨停按板块+ST 取
+                10%/5%/20%/30%。仅完整构建时生效（预览只计入板块/ST）。
+              </p>
+            </div>
+
+            {/* 首板回踩筛选（通用条件） */}
+            <div className="space-y-2 border-t pt-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="ds-pullback"
+                  checked={config.pullback !== null}
+                  onCheckedChange={v => {
+                    if (v === true) {
+                      set({
+                        tDayCondition: "firstBoard",
+                        pullback: {
+                          targetTypes: ["limitPrice"],
+                          tolerancePercent: 2,
+                          observationWindowDays: 5,
+                        },
+                      });
+                    } else {
+                      set({ pullback: null });
+                    }
+                  }}
+                />
+                <Label htmlFor="ds-pullback" className="text-xs font-medium">
+                  首板回踩筛选（触及且不破）
+                </Label>
+              </div>
+
+              {config.pullback && (
+                <div className="space-y-2 pl-6">
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      回踩目标位（可多选，任一命中即回踩）
+                    </span>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {SELECTABLE_PULLBACK_TARGETS.map(target => (
+                        <div key={target} className="flex items-center gap-1.5">
+                          <Checkbox
+                            id={`ds-pb-${target}`}
+                            checked={config.pullback!.targetTypes.includes(target)}
+                            onCheckedChange={v => {
+                              const targetTypes =
+                                v === true
+                                  ? [...config.pullback!.targetTypes, target]
+                                  : config.pullback!.targetTypes.filter(
+                                      t => t !== target
+                                    );
+                              set({ pullback: { ...config.pullback!, targetTypes } });
+                            }}
+                          />
+                          <Label htmlFor={`ds-pb-${target}`} className="text-xs">
+                            {PULLBACK_TARGET_LABELS[target as PullbackTargetTypeValue]}
+                          </Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ds-pb-tol" className="text-[11px]">
+                        容差（%）
+                      </Label>
+                      <Input
+                        id="ds-pb-tol"
+                        type="number"
+                        min={0}
+                        max={50}
+                        value={config.pullback.tolerancePercent}
+                        onChange={e =>
+                          set({
+                            pullback: {
+                              ...config.pullback!,
+                              tolerancePercent: Number(e.target.value) || 0,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="ds-pb-win" className="text-[11px]">
+                        观察窗口（日）
+                      </Label>
+                      <Input
+                        id="ds-pb-win"
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={config.pullback.observationWindowDays}
+                        onChange={e =>
+                          set({
+                            pullback: {
+                              ...config.pullback!,
+                              observationWindowDays: Number(e.target.value) || 1,
+                            },
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    回踩 = 首板后 T+1~T+N
+                    最低价落在[目标位, 目标位×(1+容差)]且全程未跌破。
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
           <Alert className="mt-3 py-2">
             <AlertTriangle className="h-4 w-4" />
             <AlertDescription className="text-[11px]">

@@ -149,9 +149,9 @@ export function StrategyJsonEditor({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-56 text-xs">code</TableHead>
-                    <TableHead className="w-56 text-xs">path</TableHead>
-                    <TableHead className="text-xs">message</TableHead>
+                    <TableHead className="w-56 text-xs">代码（code）</TableHead>
+                    <TableHead className="w-56 text-xs">路径（path）</TableHead>
+                    <TableHead className="text-xs">信息（message）</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

@@ -55,6 +55,10 @@ export interface ResearchDatasetSpec {
    * 禁止伪造 "latest" / "deterministic" / "v1" 之类的虚假标识。
    */
   datasetVersion?: string;
+  /** 绑定数据集身份（DS-<datasetVersion>）；未绑定 C-12.6 Dataset 时保持 undefined。 */
+  datasetId?: string;
+  /** 绑定数据集版本快照指纹（SHA-256 前 16 hex）；未绑定时保持 undefined。 */
+  datasetFingerprint?: string;
 }
 
 /** 研究 Feature 配置。 */

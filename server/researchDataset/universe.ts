@@ -12,11 +12,13 @@
  */
 
 import { resolveHistoricalUniverse } from "../security/historicalUniverse";
+import { classifyBoard } from "../data/boardRules";
 import type { TradingCalendar } from "../security/tradingCalendar";
 import type { Security } from "../security/types";
 import type { SecurityIdentifier } from "../security/types";
 import type { SecurityStatusInterval } from "../securityStatus/types";
 import type {
+  BoardCategory,
   NormalizedResearchDatasetRequest,
   UniverseDayResult,
   UniverseDefinition,
@@ -54,6 +56,11 @@ export function resolveUniverseDefinition(
 ): UniverseDefinition {
   const perDayAsOf = request.asOfPerTradeDate;
   const fixedAsOf = request.asOf;
+  const filter = request.universeFilter;
+  const boardsFilter = new Set<BoardCategory>(filter.boards);
+  const boardsActive = boardsFilter.size > 0;
+  const excludeSt = filter.excludeSt;
+
   const days: UniverseDayResult[] = tradeDates.map((tradeDate) => {
     const asOf = perDayAsOf ? tradeDate : fixedAsOf;
     const result = resolveHistoricalUniverse(
@@ -70,16 +77,40 @@ export function resolveUniverseDefinition(
     const sortedReasonKeys = Object.keys(excluded).sort();
     const excludedByReason: Record<string, number> = {};
     for (const key of sortedReasonKeys) excludedByReason[key] = excluded[key]!;
+
+    // 叠加 universe 过滤层（板块 / ST）：在 STEP 11 可交易决议之上窄化，不改变 eligibility 判定。
+    const members: string[] = [];
+    for (const member of result.members) {
+      const board = classifyBoard(member.code ?? "") as BoardCategory;
+      if (boardsActive && !boardsFilter.has(board)) {
+        const reason = `BOARD_EXCLUDED:${board}`;
+        excludedByReason[reason] = (excludedByReason[reason] ?? 0) + 1;
+        continue;
+      }
+      if (excludeSt && (member.st === "ST" || member.st === "*ST")) {
+        excludedByReason.ST_EXCLUDED = (excludedByReason.ST_EXCLUDED ?? 0) + 1;
+        continue;
+      }
+      members.push(member.securityId);
+    }
+
     return {
       tradeDate,
       isTradingDay: result.isTradingDay ?? false,
-      members: result.members.map((member) => member.securityId),
+      members,
       excludedByReason,
     };
   });
 
+  const ruleParts = [
+    "STEP 11 resolveHistoricalUniverse：LISTING/TRADING 正向确认，SUSPENSION/DELISTING 显式阻断，UNKNOWN 默认拒绝",
+  ];
+  if (boardsActive) ruleParts.push(`板块过滤=${[...boardsFilter].sort().join("/")}`);
+  if (excludeSt) ruleParts.push("排除ST/*ST");
+  const rule = ruleParts.join("；");
+
   return {
-    rule: "STEP 11 resolveHistoricalUniverse：LISTING/TRADING 正向确认，SUSPENSION/DELISTING 显式阻断，UNKNOWN 默认拒绝",
+    rule,
     asOfDescription: perDayAsOf
       ? `逐日 PIT（每交易日 asOf = 该日 tradeDate）`
       : `固定快照 asOf = ${fixedAsOf ?? "（未提供，非法请求）"}`,

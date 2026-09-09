@@ -81,7 +81,7 @@ describe("Experiment Snapshot", () => {
       experimentId: "EXP-20260906-TEST0001",
       strategyId: "leader-candidate-baseline",
       strategyVersion: "1.0.0",
-      parameterSet: { minScore: null, maxSignals: 5, featureMode: "limit-up-confirm" },
+      parameterSet: { minScore: null, maxSignals: 5, featureMode: "limit-up-confirm", exitMode: "hold-while-selected" },
       dataset: { startDate: "2026-01-06", endDate: "2026-01-08", universe: "limit-up" },
       backtestConfig: {
         initialCapital: 100_000,
@@ -140,7 +140,7 @@ describe("Experiment Immutability", () => {
 
     const got = await service.getExperiment("EXP-20260906-TEST0001");
     expect(got.status).toBe("running");
-    expect(got.parameterSet).toEqual({ minScore: null, maxSignals: 5, featureMode: "limit-up-confirm" });
+    expect(got.parameterSet).toEqual({ minScore: null, maxSignals: 5, featureMode: "limit-up-confirm", exitMode: "hold-while-selected" });
     expect(got.dataset).toEqual({ startDate: "2026-01-06", endDate: "2026-01-08", universe: "limit-up" });
     expect(got.backtestConfig.initialCapital).toBe(100_000);
   });

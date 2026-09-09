@@ -88,9 +88,10 @@ export type RealisticEquityPoint = { date: string; equity: number; cash: number;
  * ⚠️ 语义口径（STEP 5 P2-1）——必须与调用方理解一致，字段名沿用历史 API 不得改名：
  *
  * 生产 realisticSimulation 由 Strategy Engine 产出，语义为：
- *   T 收盘信号 → T+1 开盘买入 → Risk 准入 → 持有 → 回测期末按市价估值（Mark-to-Market）。
- * 生产策略 leader-candidate-baseline 为 long-only、不产生 SELL 信号，因此
- * 「已平仓交易」在 long-only 语义下可能长期为 0，这属于正常结果，不是回测失败。
+ *   T 收盘信号 → T+1 开盘买入 → Risk 准入 → 持有 → 退出或期末估值。
+ * 生产策略 leader-candidate-baseline 退出策略为 hold-while-selected（持仓不再入选当日候选池
+ * 即卖出，见 G3 P3-T1）；当无退出信号时持仓持有到回测期末按市价估值（Mark-to-Market）。
+ * 因此「已平仓交易」在无退出信号的场景下可能长期为 0，这属于正常结果，不是回测失败。
  *
  * 由此产生的最重要消费者约定：
  *   - completedCount  只统计**已完成平仓**的交易；未平仓的持仓不计入。

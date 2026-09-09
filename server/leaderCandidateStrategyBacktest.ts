@@ -46,6 +46,9 @@ import type { Trade } from "./engine/domain";
 /** 生产策略 Feature 消费模式：候选必须被价格库快照确认「信号日收盘涨停」才纳入。 */
 export const LEADER_CANDIDATE_PRODUCTION_FEATURE_MODE = "limit-up-confirm" as const;
 
+/** 生产策略退出模式（G3 P3-T1）：hold-while-selected——持仓不再入选当日候选池即卖出。 */
+export const LEADER_CANDIDATE_PRODUCTION_EXIT_MODE = "hold-while-selected" as const;
+
 /** 生产策略每信号日最多输出的买入意图数量。 */
 export const LEADER_CANDIDATE_PRODUCTION_MAX_SIGNALS = 5 as const;
 
@@ -68,6 +71,7 @@ export function buildProductionLeaderCandidateStrategyConfig(options: LeaderCand
     minScore,
     maxSignals: LEADER_CANDIDATE_PRODUCTION_MAX_SIGNALS,
     featureMode: LEADER_CANDIDATE_PRODUCTION_FEATURE_MODE,
+    exitMode: LEADER_CANDIDATE_PRODUCTION_EXIT_MODE,
   };
 }
 

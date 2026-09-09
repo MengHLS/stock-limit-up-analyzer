@@ -5,6 +5,8 @@ import { systemRouter } from "./_core/systemRouter";
 import { historicalStateRouter } from "./historicalStateRouter";
 import { researchDatasetRouter } from "./researchDatasetRouter";
 import { researchRouter } from "./researchRouter";
+// DATASET-002.2 — Dataset Registry 只读 API（新架构；与旧 researchDataset 并存，不互替）
+import { datasetRegistryRouter } from "./datasetRegistry/router";
 // FE-0 扩展 — 研究 run 目录与就绪探测
 import { researchRunRouter } from "./researchRunRouter";
 // FE-1 — 数据域健康看板（STEP 12 gate 认证证据，只读）
@@ -257,6 +259,8 @@ export const appRouter = router({
   historicalState: historicalStateRouter,
   researchDataset: researchDatasetRouter,
   research: researchRouter,
+  // DATASET-002.2 — Dataset Registry 只读 API（Definition/Version/Job/Statistics/Event/Path/Outcome）
+  datasetRegistry: datasetRegistryRouter,
   // FE-0 扩展 — 研究 run 目录与就绪探测（只读；真实执行待数据认证后装配）
   researchRun: researchRunRouter,
   // FE-1 — 数据域健康看板

@@ -13,6 +13,7 @@ const REQUEST: NormalizedResearchDatasetRequest = {
   asOfPerTradeDate: true,
   asOf: null,
   coreIndexCodes: ["000001.SH", "000300.SH", "399001.SZ", "399006.SZ"],
+  universeFilter: { boards: [], excludeSt: false, tDayCondition: "none" },
 };
 
 const UNIVERSE: UniverseDefinition = {

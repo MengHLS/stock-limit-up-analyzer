@@ -1,0 +1,20 @@
+{
+  "taskId": "P2-T2",
+  "gate": "G2",
+  "status": "VALIDATED",
+  "capturedAt": "2026-09-09T21:45:40+08:00",
+  "realData": true,
+  "reproducible": true,
+  "method": "串行调用 buildResearchDataset 两次（同请求，同进程），对比全字段",
+  "consistency": {
+    "datasetVersion": { "a": "rd-1.0.0-1-879c5142a56cca67", "b": "rd-1.0.0-1-879c5142a56cca67", "equal": true },
+    "rowsFingerprint": { "a": "4b4b189f791a4228c445090e2d2e2c15", "b": "4b4b189f791a4228c445090e2d2e2c15", "equal": true },
+    "policySetFingerprint": { "a": "b415ca53256beeb5", "b": "b415ca53256beeb5", "equal": true },
+    "rowCount": { "a": 200, "b": 200, "equal": true },
+    "memberDayCount": { "a": 5097, "b": 5097, "equal": true },
+    "gate": { "a": "INCONCLUSIVE", "b": "INCONCLUSIVE", "equal": true }
+  },
+  "verdict": "PASS（两次构建 diff 为空）",
+  "note": "窗口 2024-01-02 单日 + maxSecuritiesPerDay=200 限制（加速）；确定性验证与窗口大小无关（computeDatasetVersion 纯函数 canonicalStringify 键排序 + SHA-256）",
+  "files": ["scripts/verifyDatasetConsistency.mts"]
+}

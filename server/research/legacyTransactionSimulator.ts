@@ -15,12 +15,12 @@
  *   关键能力：**资金循环复用**（平仓释放现金后可继续开新仓）。
  *
  * ── 为什么不能换成新 Engine（非等价，禁止伪装等价）─────────────────────────
- *   新 Engine 的生产策略 leader-candidate-baseline 为 long-only、**不产生 SELL 信号**；
- *   持仓持有到回测期末按市价估值（Mark-to-Market）。Portfolio 的 maxPositions 限制的是
- *   「同时持仓数」，在无可卖出信号时等价于「整个回测期最多成交 maxPositions 笔」。
- *   因此新 Engine **不具备**「资金循环 + 逐笔退出」能力，与下列研究指标不等价：
+ *   新 Engine 的生产策略 leader-candidate-baseline 为 long-only，退出策略为
+ *   hold-while-selected（持仓不再入选当日候选池即卖出，见 G3 P3-T1）。它与 legacy 的
+ *   「风险管理退出（开盘止损 / 动态止盈回撤 / 强势续持 / 最多持有 N 日强制出清）+
+ *   资金循环复用」仍是**不同交易语义**，与下列研究指标不等价：
  *     · selectPenaltyWeight（训练窗口 收益 − 0.5×回撤 寻优，依赖资金循环后的多笔成交）
- *     · strategyEvaluation.tradeQuality（胜率/盈亏比/最大连败，依赖逐笔退出）
+ *     · strategyEvaluation.tradeQuality（胜率/盈亏比/最大连败，依赖逐笔退出的具体规则）
  *     · buildTradeDifferences / buildRiskPenaltyAttribution（依赖订单替换与逐笔成交）
  *     · factorAblations（依赖逐笔成交差异）
  *   等价性由 server/research/engineNonEquivalence.test.ts 以可执行断言固定，

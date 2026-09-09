@@ -57,10 +57,16 @@ describe("FE-1 认证证据读取（真实文件）", () => {
     expect(gate.checks).toHaveLength(total);
   });
 
-  it("researchReady 与「无 FAIL 且无 PENDING」一致（不得粉饰）", async () => {
+  it("分层语义：dataFoundationReady(G0) 与「无 FAIL 且无 PENDING」一致，researchReady(G4) 不再等于数据域 PASS", async () => {
     const gate = realGate();
-    const expectReady = gate.summary.FAIL === 0 && gate.summary.PENDING === 0;
-    expect(gate.researchReady).toBe(expectReady);
+    // G0 = 15 项数据域检查全 PASS（无 FAIL 且无 PENDING）
+    const expectFoundationReady = gate.summary.FAIL === 0 && gate.summary.PENDING === 0;
+    expect(gate.dataFoundationReady).toBe(expectFoundationReady);
+    // 分层铁律（GCP-001）：researchReady 只指 G4（真实研究 E2E），G4 GAP 时恒 false，
+    // 即使 G0 已 PASS。当前 research_runs=0 → G4=GAP → researchReady=false。
+    expect(gate.gates?.G4?.status).toBe("GAP");
+    expect(gate.researchReady).toBe(false);
+    expect(gate.gates?.G0?.status).toBe(expectFoundationReady ? "PASS" : "GAP");
   });
 
   it("schema 不匹配时返回 parseError 而不伪造 gate", () => {

@@ -1,0 +1,53 @@
+{
+  "taskId": "P3-T4",
+  "gate": "G3",
+  "status": "CODE_READY",
+  "capturedAt": "2026-09-09T22:22:00+08:00",
+  "realData": false,
+  "reproducible": true,
+  "note": "synthetic fixture 逐项验证引擎边界逻辑；真实数据断言留待 P5-T1 Baseline（CODE_READY≠VALIDATED）",
+  "testFile": "server/engine/edgeCases.test.ts",
+  "covered": [
+    { "condition": "T+1", "status": "PASS", "evidence": "engine event loop: close signal -> next-open fill" },
+    { "condition": "涨跌停可成交性", "status": "PASS", "evidence": "NextOpenExecutionModel blockLimitUpBuy/blockLimitDownSell" },
+    { "condition": "停牌/数据缺失", "status": "PASS", "evidence": "成交日无 bar -> 信号作废，不成交不产生持仓" },
+    { "condition": "板块涨跌停幅度", "status": "PASS", "evidence": "boardRules.resolveLimitRules: 主板10%/ST5%/创业+科创20%/北交所30%" },
+    { "condition": "滑点", "status": "PASS", "evidence": "buy上浮/sell下浮 + 流动性分层 + 未来函数防护" },
+    { "condition": "费用", "status": "PASS", "evidence": "佣金最低5/印花税仅卖出/过户费双边" },
+    { "condition": "资金", "status": "PASS", "evidence": "现金不足向下取整到整手" },
+    { "condition": "退出", "status": "PASS", "evidence": "maxHoldingDays 时间退出 + hold-while-selected 信号退出(P3-T1)" }
+  ],
+  "knownGaps": [
+    {
+      "id": "K1",
+      "condition": "止损/止盈",
+      "status": "NOT_IMPLEMENTED",
+      "detail": "生产引擎退出仅 hold-while-selected + maxHoldingDays，无止损/止盈；待 P4-T1 定义 FIRST_FORMAL_STRATEGY 规则后接入"
+    },
+    {
+      "id": "K2",
+      "condition": "公司行为/除权",
+      "status": "NOT_IMPLEMENTED",
+      "detail": "adjustment_factors(31337) 已 FULL 但引擎未接入复权，除权日假盈亏"
+    },
+    {
+      "id": "K3",
+      "condition": "一字板封死概率",
+      "status": "NOT_IMPLEMENTED",
+      "detail": "仅 legacy enableOneWordLimitDownProbability，生产引擎无"
+    },
+    {
+      "id": "K4",
+      "condition": "板块 limitRules 注入生产引擎",
+      "status": "NOT_WIRED",
+      "detail": "boardRules.resolveLimitRules 已实现但 runStrategyEngineBacktest 用默认 10%，未按 symbol 注入，未启用 blockLimitUp/Down"
+    }
+  ],
+  "verification": {
+    "tsc": "PASS",
+    "edgeCasesTests": "18 PASS",
+    "engineTests": "server/engine/* 63 PASS",
+    "strategyTests": "server/strategy/* 54 PASS"
+  },
+  "files": ["server/engine/edgeCases.test.ts"]
+}

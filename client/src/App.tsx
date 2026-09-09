@@ -20,8 +20,15 @@ import StockSync from "./pages/StockSync";
 import DataHealth from "./pages/DataHealth";
 // FE-2 — 研究链路：asOf(T) 历史状态查询器
 import HistoricalState from "./pages/HistoricalState";
-// FE-3 — 研究链路：Research Dataset 构建器
+// FE-3 — 研究链路：Research Dataset 构建器（旧架构，保持不动）
 import DatasetBuilder from "./pages/DatasetBuilder";
+// DATASET-002.3 — Dataset Registry 前端（新架构，独立于 /dataset-builder）
+import {
+  DatasetList,
+  DatasetDetail,
+  VersionList,
+  VersionDetail,
+} from "./pages/datasets";
 // FE-4 — 研究链路：策略编辑器 + 运行工作台
 import StrategyEditor from "./pages/StrategyEditor";
 // FE-5 — 研究链路：绩效仪表盘（骨架线）
@@ -52,6 +59,11 @@ function Router() {
       <Route path="/data-health" component={DataHealth} />
       <Route path="/historical-state" component={HistoricalState} />
       <Route path="/dataset-builder" component={DatasetBuilder} />
+      {/* DATASET-002.3 — Dataset Registry（独立于 /dataset-builder） */}
+      <Route path="/datasets" component={DatasetList} />
+      <Route path="/datasets/:datasetId" component={DatasetDetail} />
+      <Route path="/datasets/:datasetId/versions" component={VersionList} />
+      <Route path="/datasets/:datasetId/versions/:versionId" component={VersionDetail} />
       <Route path="/strategy-editor" component={StrategyEditor} />
       <Route path="/performance" component={PerformanceDashboard} />
       <Route path="/parameter-search" component={ParameterSearch} />

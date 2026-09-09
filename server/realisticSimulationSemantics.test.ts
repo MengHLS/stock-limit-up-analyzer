@@ -2,14 +2,19 @@
  * STEP 5 P2-1 —— realisticSimulation 回测结果语义回归测试。
  *
  * 生产 realisticSimulation 由 Strategy Engine 产出：
- *   T 收盘信号 → T+1 开盘买入 → Risk 准入 → 持有 → 回测期末按市价估值。
- * leader-candidate-baseline 为 long-only、不产生 SELL，因此 completedCount 通常为 0。
+ *   T 收盘信号 → T+1 开盘买入 → Risk 准入 → 持有 → 退出或期末估值。
+ * leader-candidate-baseline 退出策略为 hold-while-selected（持仓不再入选候选池即卖出，
+ * 见 G3 P3-T1）；本测试 fixture 中 D2/D3 无任何新候选（A/B/C 仅在 D1 涨停），
+ * 按「无候选日不强制清仓」语义，A 持有到回测期末按市价估值 → completedCount = 0。
  *
  * 本测试锁定语义约定（不因后续重构漂移）：
- *   1. completedCount = 0      → winRate = null（绝不为 0%）、winningTrades = 0；
+ *   1. 无候选日不强制清仓 → completedCount = 0 → winRate = null（绝不为 0%）、winningTrades = 0；
  *   2. openPositionCount > 0   → 未平仓持仓不被计为失败交易（winningTrades/losingTrades 都不含它）；
  *   3. totalReturn / maxDrawdown / equityCurve / trades 仍然保持 Engine 语义（与引擎原始结果一致）；
  *   4. 同一 Data / Config / asOf 重复执行结果完全一致（Determinism）。
+ *
+ * 注：退出策略产生的已平仓交易（closed trade）由 productionIntegration.test.ts 的
+ * G3 P3-T1 场景覆盖；本测试专门锁定「无退出信号时」的 buy-and-hold 估值语义。
  */
 
 import { describe, expect, it } from "vitest";
@@ -94,12 +99,12 @@ function run() {
   return runLeaderCandidateEngineProbe(sourceRecords(), priceRows(), contextOf(), baseOptions);
 }
 
-describe("P2-1 生产 realisticSimulation 语义（long-only buy-and-hold）", () => {
+describe("P2-1 生产 realisticSimulation 语义（无退出信号时的 buy-and-hold 估值）", () => {
   it("T 信号 → T+1 开盘成交 → 期末持仓：completedCount = 0 且 openPositionCount > 0", () => {
     const { realisticSimulation: sim } = run();
     expect(sim.trades).toHaveLength(1);
     expect(sim.trades[0]).toMatchObject({ stockCode: A, signalDate: D1, entryDate: D2, status: "filled" });
-    // long-only、无 SELL → 回测期末仍持有，没有平仓事件。
+    // 本 fixture D2/D3 无新候选 → 无退出信号 → 回测期末仍持有，没有平仓事件。
     expect(sim.completedCount).toBe(0);
     expect(sim.openPositionCount).toBe(1);
     expect(sim.filledCount).toBe(1);

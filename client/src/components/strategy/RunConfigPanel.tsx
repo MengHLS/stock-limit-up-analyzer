@@ -28,6 +28,7 @@ import {
 import { Play, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { StrategyViewModel } from "@/adapters/strategyAdapter";
+import { EXECUTION_MODEL_LABELS } from "@/adapters/strategyAdapter";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
 
@@ -151,7 +152,7 @@ export function RunConfigPanel({
   return (
     <SectionCard
       title="回测配置"
-      description="Strategy → Dataset → Backtest Configuration → Run → Result"
+      description="策略 → 数据集 → 回测配置 → 运行 → 结果"
       right={
         <Tooltip>
           <TooltipTrigger asChild>
@@ -253,7 +254,7 @@ export function RunConfigPanel({
               <SelectContent>
                 {EXECUTION_MODELS.map(m => (
                   <SelectItem key={m} value={m}>
-                    {m}
+                    {EXECUTION_MODEL_LABELS[m] ?? m}（{m}）
                   </SelectItem>
                 ))}
               </SelectContent>

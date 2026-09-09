@@ -20,11 +20,23 @@ import { emptyDecision, type Strategy, type StrategyConfig, type StrategyContext
 import type { FeatureSnapshot, FeatureSnapshotBundle } from "../../features/snapshot";
 
 /**
+ * 退出策略模式（Step 5 / G3 P3-T1）。
+ *   - "hold-while-selected"（默认）：持仓股票若已不在当日候选池（经过 minScore /
+ *     featureMode 过滤，但不受 maxSignals 截断影响），则产生 SELL 退出信号——对齐
+ *     research simulator planDecisionDay 的「持有到不再入选」语义（龙头不再是龙头即退出）；
+ *     无候选日视为信息不足，不强制清仓。
+ *   - "none"：不产生任何 SELL 信号（保持旧 BUY-only buy-and-hold 语义，供对照研究）。
+ */
+export type LeaderCandidateExitMode = "hold-while-selected" | "none";
+
+/**
  * 策略配置（可序列化、可复现）。
  * 扩展（Step 5）：featureMode 让策略真实消费 Feature Layer——
  *   - "off"：不读取 context.features，行为与旧版完全一致；
  *   - "limit-up-confirm"：候选除满足评分外，还须被价格库快照确认「信号日收盘涨停」
  *     （limitUpHit READY 且 = 1，ST 按 5% 规则）。未被确认的候选不进入输出。
+ * 扩展（G3 P3-T1）：exitMode 让策略产生退出信号（SELL），使生产引擎具备逐笔退出能力，
+ * 不再「持有到期末按市价估值」导致胜率/回撤失真。
  */
 export interface LeaderCandidateBaselineConfig extends StrategyConfig {
   /** 最低候选评分阈值；null 表示不过滤。 */
@@ -33,6 +45,8 @@ export interface LeaderCandidateBaselineConfig extends StrategyConfig {
   maxSignals: number;
   /** 特征消费模式（默认 "off"，保持旧语义）。 */
   featureMode: "off" | "limit-up-confirm";
+  /** 退出策略模式（默认 "hold-while-selected"）。 */
+  exitMode: LeaderCandidateExitMode;
 }
 
 /** 单个已评分候选（信号日可见字段）。 */
@@ -58,6 +72,7 @@ export const LEADER_CANDIDATE_BASELINE_DEFAULT_CONFIG: LeaderCandidateBaselineCo
   minScore: null,
   maxSignals: 5,
   featureMode: "off",
+  exitMode: "hold-while-selected",
 };
 
 const toNonNegativeInt = (value: unknown, fallback: number) => {
@@ -99,6 +114,45 @@ function toBuySignal(candidate: LeaderCandidateScore, signalTime: string): Strat
 }
 
 // ---------------------------------------------------------------------------
+// 退出策略（G3 P3-T1）
+// ---------------------------------------------------------------------------
+
+function toSellSignal(symbol: string, signalTime: string): StrategySignal {
+  return {
+    symbol,
+    signalTime,
+    action: "SELL",
+    reason: `退出（hold-while-selected）：持仓 ${symbol} 已不在当日涨停候选池`,
+  };
+}
+
+/**
+ * hold-while-selected 退出信号（纯函数、确定性、PIT 安全）。
+ *
+ * 语义（对齐 research simulator planDecisionDay 的「持有到不再入选」）：
+ *   - desired = 经过 minScore / featureMode 过滤后的候选池（**不受 maxSignals 截断影响**——
+ *     退出判断看「是否仍是龙头候选」，而非「是否挤进前 N 名」）；
+ *   - 持仓中不在 desired 的证券 → SELL（按 symbol 升序确定性排序）；
+ *   - 无持仓直接返回空（不产生噪声信号）。
+ *
+ * 注意：无候选日（candidates.length === 0）由 evaluate 提前返回 emptyDecision，
+ * 不调用本函数——即「信息不足不强制清仓」，避免市场无涨停日误判为全线退出。
+ */
+function buildHoldWhileSelectedExitSignals(
+  openPositionSymbols: readonly string[],
+  filteredCandidates: readonly LeaderCandidateScore[],
+  signalTime: string,
+): StrategySignal[] {
+  if (openPositionSymbols.length === 0) return [];
+  const desired = new Set(filteredCandidates.map((candidate) => candidate.stockCode));
+  return openPositionSymbols
+    .filter((symbol) => !desired.has(symbol))
+    .slice()
+    .sort((left, right) => left.localeCompare(right))
+    .map((symbol) => toSellSignal(symbol, signalTime));
+}
+
+// ---------------------------------------------------------------------------
 // Feature Layer 消费（Step 5）
 // ---------------------------------------------------------------------------
 
@@ -130,7 +184,7 @@ export const leaderCandidateBaselineStrategy: Strategy<LeaderCandidateBaselineCo
     id: "leader-candidate-baseline",
     name: "龙头候选原始评分",
     version: "1.0.0",
-    description: "按信号日可见的原始综合评分降序排序龙头候选，输出前 N 个买入意图；纯多头、非日内。",
+    description: "按信号日可见的原始综合评分降序排序龙头候选，输出前 N 个买入意图；纯多头、非日内；退出策略 hold-while-selected（持仓不再入选候选池即卖出）。",
     category: "打板龙头候选",
     requiredData: ["leaderCandidateDataView"],
     supportsLong: true,
@@ -151,12 +205,16 @@ export const leaderCandidateBaselineStrategy: Strategy<LeaderCandidateBaselineCo
     const featureMode = raw.featureMode === "limit-up-confirm"
       ? "limit-up-confirm" as const
       : "off" as const;
-    return { minScore, maxSignals, featureMode };
+    const exitMode = raw.exitMode === "none"
+      ? "none" as const
+      : "hold-while-selected" as const;
+    return { minScore, maxSignals, featureMode, exitMode };
   },
 
   evaluate(context: StrategyContext<LeaderCandidateBaselineConfig, LeaderCandidateDataView>): StrategyDecision {
-    const { signalTime, data, config, features } = context;
+    const { signalTime, data, config, features, portfolio } = context;
     const candidates = data.candidates ?? [];
+    // 无候选日：信息不足，不产生任何信号（含不强制清仓），对齐 planDecisionDay 语义。
     if (candidates.length === 0) {
       return emptyDecision(this.metadata.version, true);
     }
@@ -177,12 +235,17 @@ export const leaderCandidateBaselineStrategy: Strategy<LeaderCandidateBaselineCo
       ? minScoreFiltered.filter((candidate) => isCandidateLimitUpConfirmed(features!, signalTime, candidate))
       : minScoreFiltered;
 
-    const signals = filtered
+    // G3 P3-T1 退出信号：持仓不在「过滤后候选池」→ SELL（sell 在前、buy 在后）。
+    const sellSignals = config.exitMode === "hold-while-selected"
+      ? buildHoldWhileSelectedExitSignals(portfolio.openPositionSymbols, filtered, signalTime)
+      : [];
+
+    const buySignals = filtered
       .slice()
       .sort(rankDescending)
       .slice(0, config.maxSignals)
       .map((candidate) => toBuySignal(candidate, signalTime));
 
-    return { signals, strategyVersion: this.metadata.version, insufficientData: false };
+    return { signals: [...sellSignals, ...buySignals], strategyVersion: this.metadata.version, insufficientData: false };
   },
 };

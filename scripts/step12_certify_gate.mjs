@@ -364,16 +364,111 @@ push({
 });
 
 // ---------------------------------------------------------------------------
-// 最终判定：RESEARCH_READY = 所有数据域条件（dataScope）均 PASS
+// 分层 Gate 判定（G0~G5，见 RESEARCH_GATE_SPECIFICATION.md §2 / GCP-001）
+//
+// 铁律（AUDIT-003）：数据域 PASS 只是 G0，绝不等于 RESEARCH_READY。
+//   G0 DATA_FOUNDATION_READY  = 15 项 dataScope 检查全 PASS
+//   G1 HISTORICAL_STATE_READY = industry PIT（securityId 非 NULL + 历史区间）
+//   G2 RESEARCH_DATASET_READY = research_datasets 表持久化 + 可复现 + policy 冻结
+//   G3 RESEARCH_ENGINE_READY  = 生产引擎 BUY+SELL + 去 legacy + 边界条件（真实数据）
+//   G4 RESEARCH_READY         = 真实研究 E2E（research_runs ≥ 1）+ OOS + overfitting
+//   G5 PRODUCTION_READY       = 持久化 + 前端 + 安全 + 监控
+//
+// researchReady 只指 G4；productionReady 只指 G5。G1~G5 尚未建设 → 诚实 GAP。
 // ---------------------------------------------------------------------------
 const dataChecks = checks.filter((c) => c.dataScope);
-const researchReady = dataChecks.every((c) => c.status === "PASS");
+const dataFoundationReady = dataChecks.every((c) => c.status === "PASS");
 const statusCounts = { PASS: 0, PENDING: 0, FAIL: 0 };
 for (const c of checks) statusCounts[c.status] = (statusCounts[c.status] || 0) + 1;
+
+// --- G1 HISTORICAL_STATE_READY：industry PIT 探测（真实查库，不 hardcode 结果） ---
+const indSecurityIdNull = n((await q("SELECT COUNT(*) c FROM industry_assignments WHERE securityId IS NULL"))[0].c);
+const indTotalRows = n((await q("SELECT COUNT(*) c FROM industry_assignments"))[0].c);
+const indEffRange = await q("SELECT DATE_FORMAT(MIN(effectiveFrom), '%Y-%m-%d') mn, DATE_FORMAT(MAX(effectiveFrom), '%Y-%m-%d') mx FROM industry_assignments");
+const indSinglePoint = indEffRange[0].mn === indEffRange[0].mx;
+const g1Ready = indSecurityIdNull === 0 && !indSinglePoint;
+const g1 = {
+  status: g1Ready ? "PASS" : "GAP",
+  reason: g1Ready ? null
+    : (indSecurityIdNull > 0
+      ? `industry securityId 未关联：${indSecurityIdNull}/${indTotalRows} 行 NULL`
+      : `industry effectiveFrom 单点 ${indEffRange[0].mn}（无历史 PIT 区间）`),
+  checks: {
+    industrySecurityIdNull: indSecurityIdNull,
+    industryTotalRows: indTotalRows,
+    industryEffectiveRange: indEffRange[0],
+  },
+};
+
+// --- G2 RESEARCH_DATASET_READY：research_datasets 表持久化探测 ---
+let g2 = { status: "GAP", reason: null, checks: {} };
+try {
+  const rd = await q("SELECT COUNT(*) c FROM research_datasets");
+  const rdRows = n(rd[0].c);
+  g2.checks = { researchDatasetsRows: rdRows };
+  if (rdRows >= 1) { g2.status = "PASS"; g2.reason = null; }
+  else g2.reason = "research_datasets 表存在但 0 行（无持久化数据集）";
+} catch (e) {
+  g2.checks = { tableError: e.code };
+  g2.reason = `research_datasets 表不存在（${e.code}）`;
+}
+
+// --- G3 RESEARCH_ENGINE_READY：生产引擎退出策略 + 真实数据 smoke 探测 ---
+// 生产引擎（server/strategy）当前 baseline 仅产 BUY 无 SELL（AUDIT-003 A5）。
+// 判定依据：是否有引擎真实运行证据 + 是否实现退出策略。二者未完成 → GAP。
+// 注意：G3 是代码能力判定，此处用「是否已落地退出策略的真实运行」作为探针，
+// 由 P3-T1（BUY+SELL）完成后翻转。真实探测：research_runs 中是否有 SELL 型 trade。
+let g3 = { status: "GAP", reason: "生产引擎退出策略未实现（baseline 仅 BUY 无 SELL，待 P3-T1）", checks: {} };
+try {
+  // 探测：是否存在任何已退出的交易（exitPrice 非 NULL），作为 BUY+SELL 生命周期的弱证据。
+  const bt = await q("SELECT COUNT(*) c FROM backtest_runs");
+  const btRows = n(bt[0].c);
+  g3.checks = { backtestRunsRows: btRows, note: "退出策略能力由 P3-T1 完成；此处仅探测运行产物" };
+} catch (e) {
+  g3.checks = { tableError: e.code };
+}
+
+// --- G4 RESEARCH_READY：真实研究 E2E（research_runs ≥ 1）探测 ---
+let g4 = { status: "GAP", reason: null, checks: {} };
+try {
+  const rr = await q("SELECT COUNT(*) c FROM research_runs");
+  const rrRows = n(rr[0].c);
+  g4.checks = { researchRunsRows: rrRows };
+  if (rrRows >= 1) { g4.status = "PASS"; g4.reason = null; }
+  else g4.reason = `research_runs = ${rrRows}，无真实研究 E2E（OOS/overfitting 未验证）`;
+} catch (e) {
+  g4.checks = { tableError: e.code };
+  g4.reason = `research_runs 表不存在（${e.code}）`;
+}
+
+// --- G5 PRODUCTION_READY：持久化表探测（strategy_versions/paper_trades/trade_journal_entries） ---
+const g5 = { status: "GAP", reason: null, checks: {} };
+const g5Missing = [];
+for (const t of ["strategy_versions", "paper_trades", "trade_journal_entries", "experiment_artifacts"]) {
+  try { await q(`SELECT COUNT(*) c FROM \`${t}\``); g5.checks[t] = "exists"; }
+  catch (e) { g5Missing.push(t); g5.checks[t] = `missing:${e.code}`; }
+}
+if (g5Missing.length > 0) g5.reason = `持久化表缺失：${g5Missing.join(", ")}`;
+else g5.status = "PASS";
+
+const researchReady = g4.status === "PASS";        // 只指 G4
+const productionReady = g5.status === "PASS";      // 只指 G5
+
+const gates = {
+  G0: { status: dataFoundationReady ? "PASS" : "GAP", reason: dataFoundationReady ? null : "存在 PENDING/FAIL 数据域检查", checks: dataChecks.map((c) => ({ id: c.id, name: c.name, status: c.status })) },
+  G1: g1,
+  G2: g2,
+  G3: g3,
+  G4: g4,
+  G5: g5,
+};
 
 const gate = {
   capturedAt: new Date().toISOString(),
   researchReady,
+  productionReady,
+  dataFoundationReady,
+  gates,
   summary: { total: checks.length, dataScope: dataChecks.length, ...statusCounts },
   thresholds: TH,
   checks,
@@ -382,7 +477,7 @@ const gate = {
 
 writeFileSync(new URL("../docs/researchReadyGate/research_ready_gate.json", import.meta.url), JSON.stringify(gate, null, 2));
 console.log("gate written to docs/researchReadyGate/research_ready_gate.json");
-console.log(JSON.stringify({ capturedAt: gate.capturedAt, researchReady, summary: gate.summary }, null, 2));
+console.log(JSON.stringify({ capturedAt: gate.capturedAt, dataFoundationReady, researchReady, productionReady, gates: Object.fromEntries(Object.entries(gates).map(([k, v]) => [k, v.status])), summary: gate.summary }, null, 2));
 for (const c of checks) {
   console.log(`[${c.status}] #${c.id} ${c.name} — ${c.detail}`);
 }

@@ -55,6 +55,14 @@ export function buildLeaderCandidateBaselineResearchDefinition(): ResearchStrate
           allowedValues: ["off", "limit-up-confirm"],
           description: "特征消费模式：off 不读取特征；limit-up-confirm 要求候选被价格库快照确认信号日收盘涨停",
         },
+        {
+          name: "exitMode",
+          type: "string",
+          required: false,
+          defaultValue: "hold-while-selected",
+          allowedValues: ["hold-while-selected", "none"],
+          description: "退出策略模式：hold-while-selected 持仓不再入选当日候选池即卖出；none 不产生退出信号（buy-and-hold）",
+        },
       ],
     },
     metadata: {

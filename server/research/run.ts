@@ -39,6 +39,15 @@ export interface ResearchRun {
   result: ResearchRunResultSummary | null;
   /** 失败时的错误信息；非失败为 null。 */
   error: string | null;
+  /**
+   * 绑定数据集身份（DS-<datasetVersion>，内容指纹派生）。
+   * 正式研究 Run 必须记录；legacy 路径（未绑定 C-12.6 Dataset）可为 null。
+   */
+  datasetId: string | null;
+  /** 绑定数据集内容指纹版本（rd-<builder>-<rowSchema>-<16hex>）；可为 null。 */
+  datasetVersion: string | null;
+  /** 绑定数据集版本快照指纹（SHA-256 前 16 hex）；可为 null。 */
+  datasetFingerprint: string | null;
   /** 创建时间（ISO）。 */
   createdAt: string;
 }

@@ -125,8 +125,8 @@ export const researchRunRouter = router({
         verdict = "DATASET_NOT_READY";
         reasons.push(
           gate.pendingChecks.length > 0
-            ? `数据域认证未通过（RESEARCH_READY=FALSE）：${gate.pendingChecks.join("、")} 尚为 PENDING，C/D/E 域回填完成后重新 certify 即解锁。`
-            : "数据域认证未通过（RESEARCH_READY=FALSE），请检查 gate 快照。"
+            ? `数据域认证未通过（G0 未全 PASS）：${gate.pendingChecks.join("、")} 尚为 PENDING，补齐数据域后重新 certify 即解锁 G0。`
+            : "研究链未就绪（RESEARCH_READY=G4 未通过）：数据地基 G0 已认证，但 Industry PIT（G1）/ Research Dataset（G2）/ 生产引擎退出策略（G3）尚未完成，需按 MASTER_PRODUCT_ROADMAP PHASE 1~3 依次建设。"
         );
       }
 

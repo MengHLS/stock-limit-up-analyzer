@@ -15,11 +15,16 @@
 
 import { publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
+import { readFileSync } from "node:fs";
 import {
   strategyDocumentSchema,
   strategyLifecycleRecordSchema,
   lifecycleTransitionInputSchema,
   metricsEvaluateInputSchema,
+  strategySaveInputSchema,
+  strategyIdInputSchema,
+  strategyLoadVersionInputSchema,
+  strategyCreateVersionInputSchema,
 } from "../shared/researchContracts";
 import type { StrategyDocument } from "./research/strategySchema/types";
 import type { StrategyLifecycleRecord, LifecycleEvidenceRef } from "./research/lifecycle/types";
@@ -31,10 +36,36 @@ import {
   STRATEGY_LIFECYCLE_STATUSES,
   STRATEGY_LIFECYCLE_TRANSITIONS,
 } from "./research";
+import { DbStrategyRepository } from "./research/strategyPersistence/db";
+import { StrategyService } from "./research/strategyPersistence/service";
+import { composeCodeVersion } from "./research/experimentLineage/codeVersion";
 import { evaluatePerformance } from "./research/performanceMetrics";
 import { evaluateRiskAdjustedMetrics } from "./research/riskAdjustedMetrics";
 import { evaluateTradeQualityMetrics } from "./research/tradeQualityMetrics";
 import type { EquityPoint, Trade } from "./backtest/types";
+
+/**
+ * STEP STRATEGY-002 — codeVersion 注入（composeCodeVersion 产物）。
+ * 入口读 package.json（git 短哈希不可得时按 +gunknown.dirty 保守标记），
+ * 失败响亮回退 CODE_VERSION_UNKNOWN。模块加载时计算一次，避免每次请求读文件。
+ */
+function resolveCodeVersion(): string {
+  try {
+    const raw = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+    const pkg = JSON.parse(raw) as { version?: unknown };
+    return composeCodeVersion({
+      packageVersion: typeof pkg.version === "string" ? pkg.version : null,
+      git: { commitShortHash: null, dirty: null },
+    });
+  } catch {
+    return "unknown";
+  }
+}
+
+const CODE_VERSION = resolveCodeVersion();
+
+/** 策略持久化编排服务（真实 DB 落库；fingerprint/幂等/不可变语义见 strategyPersistence）。 */
+const strategyService = new StrategyService(new DbStrategyRepository(), { codeVersion: CODE_VERSION });
 
 /**
  * 传输层 → 领域层边界投递。
@@ -74,6 +105,52 @@ export const researchRouter = router({
           toStrategyDocument(input.right),
         ),
       ),
+
+    // ---- STEP STRATEGY-002 · CRUD（持久化 + 版本化）----
+
+    /** 创建全新策略（strategyId 必须不存在）。 */
+    create: publicProcedure
+      .input(strategySaveInputSchema)
+      .mutation(({ input }) => strategyService.create({ document: input.document })),
+
+    /** 保存策略版本（幂等；strategyId 不存在时等价 create）。 */
+    save: publicProcedure
+      .input(strategySaveInputSchema)
+      .mutation(({ input }) => strategyService.save({ document: input.document })),
+
+    /** 加载策略最新版本本体（含指纹复核）。 */
+    load: publicProcedure
+      .input(strategyIdInputSchema)
+      .query(({ input }) => strategyService.load(input.strategyId)),
+
+    /** 列出全部策略摘要。 */
+    list: publicProcedure.query(() => strategyService.list()),
+
+    /** 删除策略（级联删版本）。 */
+    delete: publicProcedure
+      .input(strategyIdInputSchema)
+      .mutation(({ input }) => strategyService.delete(input.strategyId)),
+
+    /** 基于最新版本创建新版本（复用 cloneStrategyDocument + bump 语义闸门）。 */
+    createVersion: publicProcedure
+      .input(strategyCreateVersionInputSchema)
+      .mutation(({ input }) =>
+        strategyService.createVersion({
+          strategyId: input.strategyId,
+          document: input.document,
+          ...(input.bump ? { bump: input.bump } : {}),
+        }),
+      ),
+
+    /** 加载指定版本（§17 九项追溯记录，含指纹复核）。 */
+    loadVersion: publicProcedure
+      .input(strategyLoadVersionInputSchema)
+      .query(({ input }) => strategyService.loadVersion(input.strategyId, input.version)),
+
+    /** 列出某策略的全部版本摘要。 */
+    listVersions: publicProcedure
+      .input(strategyIdInputSchema)
+      .query(({ input }) => strategyService.listVersions(input.strategyId)),
   }),
 
   lifecycle: router({

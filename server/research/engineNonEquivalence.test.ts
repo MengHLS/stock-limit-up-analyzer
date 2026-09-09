@@ -9,9 +9,10 @@
  *     最多持有 N 日强制出清）→ **资金循环复用**。因此会产出「已完成平仓交易」。
  *
  *   · Strategy Engine 生产策略（leader-candidate-baseline）：
- *     long-only、无 SELL 信号，持仓持有到回测期末按市价估值（Mark-to-Market）。
+ *     long-only，退出策略为 hold-while-selected（持仓不再入选候选池即卖出，见 G3 P3-T1），
+ *     与 legacy 的「风险管理退出 + 资金循环复用」交易语义不同。
  *     Engine Result Adapter 语义（由 realisticSimulationSemantics.test.ts 固定）：
- *     completedCount=0 → winRate=null、winningTrades=0，openPositionCount>0。
+ *     无退出信号时 completedCount=0 → winRate=null、winningTrades=0，openPositionCount>0。
  *
  * 若有人声称「研究实验可等价替换为引擎」，本测试会失败：
  *   同一类回测输入下，legacy 明确产出已平仓交易（winRate 非 null），
@@ -114,7 +115,7 @@ describe("P2-2 research-legacy 与 Engine 非等价契约", () => {
     // 资金循环复用：成交笔数可超过同时持仓上限（平仓后释放资金再开新仓）。
     expect(simulation.filledCount).toBeGreaterThan(2);
 
-    // 引擎语义对照：long-only 无 SELL → completedCount=0 / winRate=null（另见 realisticSimulationSemantics.test.ts）。
+    // 引擎语义对照：无退出信号时 completedCount=0 / winRate=null（另见 realisticSimulationSemantics.test.ts）。
     // 若研究默认来源被替换为引擎 Adapter，上述断言将无法满足 —— 即「伪等价」被本测试拦截。
   });
 });

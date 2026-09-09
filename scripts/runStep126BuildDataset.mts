@@ -17,6 +17,7 @@
  *   --max-days=N       单日护栏（可选）
  *   --max-securities=N 单日成员护栏（可选）
  *   --out=PATH         报告输出路径（默认 docs/step12-evidence/research_dataset_report.json）
+ *   --persist          构建后落库到 research_datasets 表（幂等：同 datasetVersion 回放不重复）
  *
  * 输出 JSON：datasetVersion / universeDefinition / dataSnapshot / rows（数量摘要，不写全行）/
  * gate / gateNotes。gate 语义与 builder.ts 头注释一致。
@@ -25,7 +26,7 @@
 import "dotenv/config";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { buildResearchDataset } from "../server/researchDataset";
+import { buildResearchDataset, persistResearchDataset } from "../server/researchDataset";
 import type { ResearchDatasetRequest } from "../server/researchDataset";
 
 interface CliArgs {
@@ -37,6 +38,7 @@ interface CliArgs {
   maxDays: number | undefined;
   maxSecurities: number | undefined;
   out: string;
+  persist: boolean;
 }
 
 function readFlag(args: string[], name: string): string | undefined {
@@ -63,10 +65,11 @@ function parseArgs(args: string[]): CliArgs {
     maxDays: maxDaysRaw === undefined ? undefined : Number(maxDaysRaw),
     maxSecurities: maxSecuritiesRaw === undefined ? undefined : Number(maxSecuritiesRaw),
     out: resolve(readFlag(args, "out") ?? "docs/step12-evidence/research_dataset_report.json"),
+    persist: args.includes("--persist"),
   };
 }
 
-const { name, from, to, asOf, dataReady, maxDays, maxSecurities, out } = parseArgs(process.argv.slice(2));
+const { name, from, to, asOf, dataReady, maxDays, maxSecurities, out, persist } = parseArgs(process.argv.slice(2));
 const request: ResearchDatasetRequest = {
   name,
   startDate: from,
@@ -81,6 +84,12 @@ const dataset = await buildResearchDataset(request, {
   maxTradingDays: maxDays,
   maxSecuritiesPerDay: maxSecurities,
 });
+
+let persisted: { datasetId: string; replayed: boolean } | null = null;
+if (persist) {
+  const result = await persistResearchDataset(dataset);
+  persisted = { datasetId: result.datasetId, replayed: result.replayed };
+}
 
 const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
 const rowCount = dataset.rows.length;
@@ -117,6 +126,9 @@ if (dataset.gateNotes.length > 0) {
   console.log("  gateNotes   : %s", dataset.gateNotes.join("；"));
 }
 console.log("  报告输出    : %s", out);
+  if (persisted) {
+    console.log("  已持久化    : datasetId=%s（%s）", persisted.datasetId, persisted.replayed ? "幂等回放" : "新建");
+  }
 console.log("  认证边界    : %s（A~H 全 DATA_READY 后加 --data-ready 重跑方可作为 VALIDATED 证据）", dataReady ? "dataReady=true" : "dataReady=false（冒烟口径）");
 
 // 显式退出：drizzle mysql2 连接池空闲连接保持事件循环存活，防止 CLI 结束后进程悬挂。

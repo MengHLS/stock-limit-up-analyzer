@@ -177,6 +177,7 @@ const BASE_REQUEST: NormalizedResearchDatasetRequest = {
   asOfPerTradeDate: true,
   asOf: null,
   coreIndexCodes: ["000300.SH"],
+  universeFilter: { boards: [], excludeSt: false, tDayCondition: "none" },
 };
 
 describe("resolveUniverseDefinition", () => {
@@ -199,6 +200,58 @@ describe("resolveUniverseDefinition", () => {
     expect(universe.days).toHaveLength(1);
     expect(universe.days[0]!.members).toEqual([S1]);
     expect(universe.days[0]!.excludedByReason).toHaveProperty(EXCLUSION_REASONS.NOT_YET_LISTED);
+  });
+
+  it("板块过滤：只保留选中板块，其余计入 BOARD_EXCLUDED:<board>", () => {
+    const securities = [
+      security(), // S1 = 600000.SH（main）
+      security({ securityId: S2, exchange: "SZ" }), // S2 = 300001.SZ（chinext）
+    ];
+    const identifiers = [
+      identifier(),
+      identifier({ securityId: S2, code: "300001", exchange: "SZ", effectiveFrom: "2020-01-01", effectiveTo: null }),
+    ];
+    const statuses = [...tradableIntervals(S1), ...tradableIntervals(S2)];
+    const request: NormalizedResearchDatasetRequest = {
+      ...BASE_REQUEST,
+      universeFilter: { boards: ["main"], excludeSt: false, tDayCondition: "none" },
+    };
+    const universe = resolveUniverseDefinition(
+      { securities, identifiers, statusIntervals: statuses },
+      CAL,
+      ["2025-06-03"],
+      request,
+    );
+    expect(universe.days[0]!.members).toEqual([S1]);
+    expect(universe.days[0]!.excludedByReason).toHaveProperty("BOARD_EXCLUDED:chinext", 1);
+  });
+
+  it("排除 ST：ST 成员计入 ST_EXCLUDED（ST 不影响 eligibility，仅过滤层剔除）", () => {
+    const securities = [
+      security(), // S1 正常
+      security({ securityId: S2, exchange: "SZ" }), // S2 = 000001.SZ（ST）
+    ];
+    const identifiers = [
+      identifier(),
+      identifier({ securityId: S2, code: "000001", exchange: "SZ", effectiveFrom: "2020-01-01", effectiveTo: null }),
+    ];
+    const statuses = [
+      ...tradableIntervals(S1),
+      ...tradableIntervals(S2),
+      status({ securityId: S2, statusType: "ST", statusValue: "ST", effectiveFrom: "2020-01-01" }),
+    ];
+    const request: NormalizedResearchDatasetRequest = {
+      ...BASE_REQUEST,
+      universeFilter: { boards: [], excludeSt: true, tDayCondition: "none" },
+    };
+    const universe = resolveUniverseDefinition(
+      { securities, identifiers, statusIntervals: statuses },
+      CAL,
+      ["2025-06-03"],
+      request,
+    );
+    expect(universe.days[0]!.members).toEqual([S1]);
+    expect(universe.days[0]!.excludedByReason).toHaveProperty("ST_EXCLUDED", 1);
   });
 });
 

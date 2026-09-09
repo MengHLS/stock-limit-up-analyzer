@@ -49,6 +49,7 @@ const REQUEST: NormalizedResearchDatasetRequest = {
   asOfPerTradeDate: true,
   asOf: null,
   coreIndexCodes: ["000300.SH"],
+  universeFilter: { boards: [], excludeSt: false, tDayCondition: "none" },
 };
 
 const D1 = "2025-06-03";

@@ -30,6 +30,13 @@
 - 代码模块目录/文件名禁止携带 STEP/C-task 编号（如 signal13、costModel14 已全部更名）；纯语义小驼峰：signalEngine/costModel/executionConstraints/riskAdjustedMetrics/tradeQualityMetrics/parameterSearch/rollingOptimization/robustness/stochasticRobustness/walkForwardRun/oosIsolation/overfittingDetection/lifecycle/marketRegime/paperAccount/signalToPnl。
 - 给子代理的 prompt 一律用新目录名；历史文档旧名以 ROADMAP §47 21:45 改名记录为对照。
 
+## 数据集架构（Dataset Registry，STEP DATASET-001，2026-09-10）
+- Dataset 数据层 = `server/datasetRegistry/`（naming/types/registry/detection/path/builder/db）+ 独立物理表 `ds_{dataset_code}_{role}`（role∈event/path/outcome/feature）。
+- **一个逻辑 Dataset = 一组固定物理表**；多个 Version 用 `dataset_version_id` 隔离（**禁止** v1/v2 各建一套表）。
+- 表名显式落库在 `dataset_definition`；Registry 三实体：`dataset_definition`/`dataset_version`/`dataset_build_job`。
+- CLI：`node scripts/applyDatasetRegistry.mjs`（建表）／`npx tsx scripts/runDataset001Build.mts --from --to --version`（构建）／`node scripts/verifyDataset001.mjs`（数据质量）。
+- 性能要点：跨境 TiDB 往返 ~0.5s 是瓶颈，构建走「keyset 逐日 + 批量 IN 富集 + 30 日分块范围下推 + 批插」；checkpoint `lastCursor` 用 LONGTEXT（勿用 TEXT，会撑爆）。
+
 ## 开发约定
 - 多 agent 并行（DeepSeek-v4-flash、后台、本地提交不推送）；agent 产出必须「信任但验证」（跑 check + 测试 + 实查 DB）。
 - 每个任务完成后：测试 → 验证 → 报告 → 更新 ROADMAP.md → 决定下一任务，形成自主开发闭环。

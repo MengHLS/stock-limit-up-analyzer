@@ -62,7 +62,7 @@ import {
   Tag,
   XCircle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
@@ -79,33 +79,113 @@ const TEMPLATE_DOCUMENT = {
   universe: { universeId: "research-dataset:rd-1.0.0-1-cffc2a0e66efbf0b" },
   entryRules: [
     {
-      id: "enter-topN",
+      id: "enter-rank",
       kind: "threshold",
       field: "candidate.rank",
       operator: "<=",
       operand: 5,
-      description: "候选排名 <= 5 进场",
+      description: "候选综合排名 ≤ 5 才允许进场",
+    },
+    {
+      id: "enter-pct",
+      kind: "threshold",
+      field: "price.pctChange",
+      operator: ">=",
+      operand: 9.5,
+      description: "当日涨幅 ≥ 9.5%（逼近涨停板）",
+    },
+    {
+      id: "enter-limitup",
+      kind: "state",
+      field: "price.limitUp",
+      operator: "==",
+      operand: "true",
+      description: "当日收盘封死涨停板",
+    },
+    {
+      id: "enter-consecutive",
+      kind: "threshold",
+      field: "candle.consecutiveLimitUps",
+      operator: ">=",
+      operand: 2,
+      description: "连续涨停 ≥ 2 板（强势梯队）",
+    },
+    {
+      id: "enter-turnover",
+      kind: "threshold",
+      field: "volume.turnoverRate",
+      operator: ">=",
+      operand: 5,
+      description: "换手率 ≥ 5%（充分换手）",
     },
   ],
   exitRules: [
     {
-      id: "exit-days",
+      id: "exit-holding",
       kind: "time-based",
       field: "position.holdingDays",
       operator: ">=",
       operand: 3,
-      description: "持有 >= 3 交易日退出",
+      description: "持有 ≥ 3 个交易日强制退出",
+    },
+    {
+      id: "exit-takeprofit",
+      kind: "threshold",
+      field: "position.pnlPct",
+      operator: ">=",
+      operand: 8,
+      description: "持仓盈亏 ≥ 8% 止盈离场",
+    },
+    {
+      id: "exit-stoploss",
+      kind: "threshold",
+      field: "position.pnlPct",
+      operator: "<=",
+      operand: -5,
+      description: "持仓盈亏 ≤ -5% 止损离场",
+    },
+    {
+      id: "exit-sealbreak",
+      kind: "event",
+      field: "limitUp.sealBroken",
+      operator: "==",
+      operand: "true",
+      description: "涨停打开（炸板）即退出",
     },
   ],
   positionSizing: { kind: "equal-weight", maxPositions: 5 },
   riskRules: [
     {
-      id: "risk-max",
+      id: "risk-maxpos",
       kind: "state",
       field: "position.count",
       operator: "<=",
       operand: 5,
-      description: "持仓数 <= 5",
+      description: "同时持仓数 ≤ 5 只",
+    },
+    {
+      id: "risk-dailyloss",
+      kind: "threshold",
+      field: "account.dailyLossPct",
+      operator: ">=",
+      operand: 3,
+      description: "单日账户亏损 ≥ 3% 停止开新仓",
+    },
+    {
+      id: "risk-singleloss",
+      kind: "threshold",
+      field: "position.singleLossPct",
+      operator: "<=",
+      operand: -5,
+      description: "单笔亏损 ≤ -5%",
+    },
+    {
+      id: "risk-drawdown",
+      kind: "threshold",
+      field: "account.maxDrawdownPct",
+      operator: "<=",
+      operand: 15,
+      description: "账户最大回撤 ≤ 15%",
     },
   ],
   parameters: {
@@ -256,18 +336,20 @@ function EditorTab({
         <div className="space-y-4">
           <StrategyBasicInfo vm={vm} onChange={onVmChange} />
           <RuleEditor
-            title="入场规则（Entry Rules）"
-            description="进场条件（声明式，不执行）"
+            title="入场规则"
+            description="进场条件（声明式，不执行）——可用「添加预设条件」快速填充常用中文条件"
             icon={LogIn}
+            category="entry"
             rules={vm.entryRules}
             onChange={entryRules => onVmChange({ ...vm, entryRules })}
             defaultKind="threshold"
             fieldPlaceholder="如 candidate.rank"
           />
           <RuleEditor
-            title="退出规则（Exit Rules）"
+            title="退出规则"
             description="退出条件（时间 / 阈值 / 事件 / 状态）"
             icon={ArrowRight}
+            category="exit"
             rules={vm.exitRules}
             onChange={exitRules => onVmChange({ ...vm, exitRules })}
             defaultKind="time-based"
@@ -275,9 +357,10 @@ function EditorTab({
           />
           <PositionSizingEditor vm={vm} onChange={onVmChange} />
           <RuleEditor
-            title="风险规则（Risk Rules）"
-            description="如最大持仓 / 止损 / 最大回撤闸门"
+            title="风险规则"
+            description="如最大持仓 / 止损 / 单日亏损闸门 / 最大回撤"
             icon={ShieldAlert}
+            category="risk"
             rules={vm.riskRules}
             onChange={riskRules => onVmChange({ ...vm, riskRules })}
             defaultKind="state"
@@ -313,12 +396,12 @@ function VersionTab() {
       name: "涨停候选基线 v2",
       entryRules: [
         {
-          id: "enter-topN",
+          id: "enter-rank",
           kind: "threshold",
           field: "candidate.rank",
           operator: "<=",
           operand: 3,
-          description: "候选排名 <= 3 进场",
+          description: "候选综合排名 ≤ 3 才允许进场",
         },
       ],
     })
@@ -469,10 +552,10 @@ function VersionTab() {
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="border-b">
-                          <th className="w-56 px-3 py-2 font-medium">path</th>
-                          <th className="w-24 px-3 py-2 font-medium">kind</th>
+                          <th className="w-56 px-3 py-2 font-medium">路径</th>
+                          <th className="w-24 px-3 py-2 font-medium">类型</th>
                           <th className="px-3 py-2 font-medium">
-                            left → right
+                            左侧 → 右侧
                           </th>
                         </tr>
                       </thead>
@@ -620,7 +703,7 @@ function LifecycleTab({
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b">
-                      <th className="w-36 px-3 py-2 font-medium">from</th>
+                      <th className="w-36 px-3 py-2 font-medium">当前状态</th>
                       <th className="px-3 py-2 font-medium">可迁移至</th>
                     </tr>
                   </thead>
@@ -815,11 +898,11 @@ function LifecycleTab({
                 <table className="w-full text-left text-xs">
                   <thead>
                     <tr className="border-b">
-                      <th className="px-3 py-2 font-medium">seq</th>
-                      <th className="px-3 py-2 font-medium">from → to</th>
-                      <th className="px-3 py-2 font-medium">reason</th>
-                      <th className="px-3 py-2 font-medium">evidence</th>
-                      <th className="px-3 py-2 font-medium">hash</th>
+                      <th className="px-3 py-2 font-medium">序号</th>
+                      <th className="px-3 py-2 font-medium">状态迁移</th>
+                      <th className="px-3 py-2 font-medium">原因</th>
+                      <th className="px-3 py-2 font-medium">证据</th>
+                      <th className="px-3 py-2 font-medium">哈希</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -880,17 +963,105 @@ function RunWorkbenchTab({ vm }: { vm: StrategyViewModel }) {
 }
 
 // ---------------------------------------------------------------------------
+// 策略列表（STEP STRATEGY-002 · 最小列表：ID / Name / Latest Version / Status / Updated At / Load）
+// ---------------------------------------------------------------------------
+
+function StrategyList({ onLoad }: { onLoad: (strategyId: string) => void }) {
+  const list = trpc.research.strategy.list.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+  });
+
+  if (list.isLoading) {
+    return <Skeleton className="h-14 w-full" />;
+  }
+  if (list.error) {
+    return <p className="font-mono text-xs text-red-600">{list.error.message}</p>;
+  }
+  const items = list.data ?? [];
+  if (items.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        暂无已保存的策略——在下方编辑器中「保存」后会出现在这里。
+      </p>
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full text-left text-xs">
+        <thead>
+          <tr className="border-b bg-muted/40">
+            <th className="px-3 py-2 font-medium">策略 ID</th>
+            <th className="px-3 py-2 font-medium">名称</th>
+            <th className="px-3 py-2 font-medium">最新版本</th>
+            <th className="px-3 py-2 font-medium">状态</th>
+            <th className="px-3 py-2 font-medium">更新时间</th>
+            <th className="px-3 py-2 font-medium">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((s) => (
+            <tr key={s.strategyId} className="border-b last:border-b-0">
+              <td className="px-3 py-2 font-mono">{s.strategyId}</td>
+              <td className="px-3 py-2">{s.name}</td>
+              <td className="px-3 py-2 font-mono">{s.latestVersion}</td>
+              <td className="px-3 py-2">
+                <StatusBadge status={s.status} />
+              </td>
+              <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">
+                {s.updatedAt ? new Date(s.updatedAt).toLocaleString() : "—"}
+              </td>
+              <td className="px-3 py-2">
+                <Button size="sm" variant="ghost" onClick={() => onLoad(s.strategyId)}>
+                  <LogIn className="mr-1 h-3 w-3" /> 加载
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 页面
 // ---------------------------------------------------------------------------
 
 export default function StrategyEditor() {
   const validate = trpc.research.strategy.validate.useMutation();
+  const save = trpc.research.strategy.save.useMutation();
+  const createVersion = trpc.research.strategy.createVersion.useMutation();
   const [vm, setVm] = useState<StrategyViewModel>(() =>
     strategyToViewModel(TEMPLATE_DOCUMENT)
   );
   const [jsonText, setJsonText] = useState(() => json(TEMPLATE_DOCUMENT));
   const [validateStatus, setValidateStatus] = useState<boolean | null>(null);
   const [lifecycleStatus, setLifecycleStatus] = useState("Draft");
+
+  const [loadId, setLoadId] = useState<string | null>(null);
+  const loadQuery = trpc.research.strategy.load.useQuery(
+    { strategyId: loadId ?? "" },
+    { enabled: loadId !== null, retry: false, refetchOnWindowFocus: false }
+  );
+
+  useEffect(() => {
+    if (loadQuery.data) {
+      setVm(strategyToViewModel(loadQuery.data));
+      setJsonText(json(loadQuery.data));
+      setValidateStatus(null);
+      setLoadId(null);
+      toast.success("策略已加载", {
+        description: `${loadQuery.data.strategyId}@${loadQuery.data.version}`,
+      });
+    }
+  }, [loadQuery.data]);
+
+  useEffect(() => {
+    if (loadQuery.error) {
+      toast.error("加载失败", { description: loadQuery.error.message });
+      setLoadId(null);
+    }
+  }, [loadQuery.error]);
 
   function onValidate() {
     const doc = viewModelToStrategy(vm);
@@ -915,6 +1086,43 @@ export default function StrategyEditor() {
     );
   }
 
+  function onSave() {
+    const doc = viewModelToStrategy(vm);
+    save.mutate(
+      { document: doc },
+      {
+        onSuccess: saved => {
+          // 保存后以后端重组装的 document 为准（version / fingerprint 权威重算）
+          setVm(strategyToViewModel(saved));
+          setJsonText(json(saved));
+          setValidateStatus(true);
+          toast.success("策略已保存", {
+            description: `${saved.strategyId}@${saved.version}`,
+          });
+        },
+        onError: e => toast.error("保存失败", { description: e.message }),
+      }
+    );
+  }
+
+  function onCreateVersion() {
+    const doc = viewModelToStrategy(vm);
+    createVersion.mutate(
+      { strategyId: vm.strategyId, document: doc },
+      {
+        onSuccess: created => {
+          setVm(strategyToViewModel(created));
+          setJsonText(json(created));
+          setValidateStatus(true);
+          toast.success("新版本已创建", {
+            description: `${created.strategyId}@${created.version}`,
+          });
+        },
+        onError: e => toast.error("创建版本失败", { description: e.message }),
+      }
+    );
+  }
+
   return (
     <div className="space-y-4 p-4 md:p-6">
       <StrategyHeader
@@ -922,7 +1130,25 @@ export default function StrategyEditor() {
         lifecycleStatus={lifecycleStatus}
         validating={validate.isPending}
         onValidate={onValidate}
+        saving={save.isPending}
+        onSave={onSave}
+        creatingVersion={createVersion.isPending}
+        onCreateVersion={onCreateVersion}
       />
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <ClipboardList className="h-4 w-4" /> 已保存策略
+          </CardTitle>
+          <CardDescription>
+            点击「加载」把策略载入编辑器（持久化于真实数据库，重启后仍在）。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StrategyList onLoad={setLoadId} />
+        </CardContent>
+      </Card>
 
       {validateStatus !== null && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">

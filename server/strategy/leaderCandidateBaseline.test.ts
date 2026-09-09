@@ -49,11 +49,26 @@ function recordsThroughT6(): LeaderCandidateSourceRecord[] {
 
 const portfolio = () => ({ cash: 100000, equity: 100000, openPositionCount: 0, openPositionSymbols: [] as readonly string[] });
 
+const portfolioWith = (symbols: string[]) => ({
+  cash: 100000,
+  equity: 100000,
+  openPositionCount: symbols.length,
+  openPositionSymbols: symbols as readonly string[],
+});
+
 const evaluateBaseline = (records: LeaderCandidateSourceRecord[], signalTime: string, config?: Partial<LeaderCandidateBaselineConfig>) =>
   leaderCandidateBaselineStrategy.evaluate({
     signalTime,
     data: buildLeaderCandidateDataViewForDate(records, signalTime),
     portfolio: portfolio(),
+    config: leaderCandidateBaselineStrategy.normalizeConfig(config),
+  });
+
+const evaluateWithHoldings = (records: LeaderCandidateSourceRecord[], signalTime: string, holdings: string[], config?: Partial<LeaderCandidateBaselineConfig>) =>
+  leaderCandidateBaselineStrategy.evaluate({
+    signalTime,
+    data: buildLeaderCandidateDataViewForDate(records, signalTime),
+    portfolio: portfolioWith(holdings),
     config: leaderCandidateBaselineStrategy.normalizeConfig(config),
   });
 
@@ -235,5 +250,62 @@ describe("Registry + Backtest Core 集成", () => {
     expect(rd).toHaveLength(1);
     expect(rd![0]!.decision).toBe("APPROVE");
     expect(rd![0]!.approvedQuantity).toBe(100);
+  });
+});
+
+describe("G3 P3-T1 退出策略（hold-while-selected）", () => {
+  it("持仓不在当日候选池 → 产生 SELL 信号", () => {
+    const decision = evaluateWithHoldings(recordsThroughT3(), T3, ["600999.SH"]);
+    const sells = decision.signals.filter((signal) => signal.action === "SELL");
+    expect(sells).toHaveLength(1);
+    expect(sells[0]!.symbol).toBe("600999.SH");
+    expect(sells[0]!.signalTime).toBe(T3);
+    expect(sells[0]!.reason).toContain("hold-while-selected");
+  });
+
+  it("持仓仍在当日候选池 → 不产生 SELL（继续持有）", () => {
+    const decision = evaluateWithHoldings(recordsThroughT3(), T3, ["600001.SH", "600002.SH"]);
+    const sells = decision.signals.filter((signal) => signal.action === "SELL");
+    expect(sells).toHaveLength(0);
+    // BUY 信号仍按评分降序正常产出。
+    expect(decision.signals.map((signal) => signal.symbol)).toEqual(["600001.SH", "600002.SH", "600003.SH"]);
+  });
+
+  it("无候选日 → 信息不足、不强制清仓（不产生 SELL）", () => {
+    const decision = evaluateWithHoldings([], "2026-09-01", ["600999.SH"]);
+    expect(decision.insufficientData).toBe(true);
+    expect(decision.signals).toHaveLength(0);
+  });
+
+  it("exitMode=none → 保持旧 BUY-only 语义（不产生 SELL）", () => {
+    const decision = evaluateWithHoldings(recordsThroughT3(), T3, ["600999.SH"], { exitMode: "none" });
+    expect(decision.signals.filter((signal) => signal.action === "SELL")).toHaveLength(0);
+    expect(decision.signals.every((signal) => signal.action === "BUY")).toBe(true);
+  });
+
+  it("退出判断不受 maxSignals 截断影响（排名未进前 N 但仍入选候选池 → 继续持有）", () => {
+    // A(score 67) 进前 1，B(score 60) 被 maxSignals=1 截断；但 B 仍在「过滤后候选池」→ 不 SELL。
+    const decision = evaluateWithHoldings(recordsThroughT3(), T3, ["600002.SH"], { maxSignals: 1 });
+    const sells = decision.signals.filter((signal) => signal.action === "SELL");
+    expect(sells).toHaveLength(0);
+    // BUY 仅 top1（A）。
+    expect(decision.signals.map((signal) => signal.symbol)).toEqual(["600001.SH"]);
+  });
+
+  it("退出信号确定性：sell 在前、buy 在后，sell 按 symbol 升序", () => {
+    const decision = evaluateWithHoldings(recordsThroughT3(), T3, ["600999.SH", "600998.SH"]);
+    const actions = decision.signals.map((signal) => signal.action);
+    const sellSymbols = decision.signals.filter((signal) => signal.action === "SELL").map((signal) => signal.symbol);
+    // 两个 SELL 在最前，按 symbol 升序；随后是 BUY。
+    expect(actions[0]).toBe("SELL");
+    expect(actions[1]).toBe("SELL");
+    expect(sellSymbols).toEqual(["600998.SH", "600999.SH"]);
+    expect(actions.slice(2).every((action) => action === "BUY")).toBe(true);
+  });
+
+  it("确定性：相同持仓 + 相同候选池两次评估深度相等", () => {
+    expect(evaluateWithHoldings(recordsThroughT3(), T3, ["600999.SH"])).toEqual(
+      evaluateWithHoldings(recordsThroughT3(), T3, ["600999.SH"]),
+    );
   });
 });

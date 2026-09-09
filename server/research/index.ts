@@ -52,6 +52,8 @@ export * from "./experimentLineage";
 export * from "./simulator";
 // STEP 15 (C-15.1) — 策略 Schema + 版本化（§16 全字段结构化策略本体 + §17 最小版本追溯）
 export * from "./strategySchema";
+// STEP STRATEGY-002 — 策略持久化（Repository + Service + DB 落库，§5/§7/§8/§18/§19）
+export * from "./strategyPersistence";
 // STEP 14 (C-14.2) — 成本模型专项（市场冲击显式建模 + 成本声明 schema/校验/分解，复用 STEP 8 cost 原子函数）
 export * from "./costModel";
 // STEP 14 (C-14.3) — 执行与约束模型（组合式声明/校验/映射 simulator 配置，诚实 blocker 不冒充执行）

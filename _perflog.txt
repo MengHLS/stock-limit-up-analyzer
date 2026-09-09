@@ -1,0 +1,4 @@
+stocks=3936
+LIMIT 100: got 100 rows in 712ms
+LIMIT 10000: got 10000 rows in 14567ms
+LIMIT 100000: got 100000 rows in 158757ms

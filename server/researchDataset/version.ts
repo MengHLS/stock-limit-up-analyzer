@@ -62,3 +62,98 @@ export function computeDatasetVersion(
 export function computeRowsFingerprint(rows: readonly ResearchDatasetRow[]): string {
   return sha256Hex(canonicalStringify(rows)).slice(0, 32);
 }
+
+// ---------------------------------------------------------------------------
+// 流式指纹（分片构建配套）
+//
+// 分片构建把标准行逐片写入行表后，最终需要「不一次性加载全量 rows 到内存」也能算出
+// content-addressed 的 datasetVersion / rowsFingerprint。流式实现逐行增量 update 哈希，
+// 必须精确复现 canonicalStringify 的输出字节，从而保证：
+//   分片构建的 datasetVersion === 一次性构建（同内容）的 datasetVersion。
+// 关键格式：canonicalStringify({request,rows,universeDefinition}) 按字典序输出
+//   {"request":…,"rows":[…],"universeDefinition":…}  （request < rows < universeDefinition）
+// 因此流式按 request → rows（逐行，元素间逗号）→ universeDefinition 拼接。
+// ---------------------------------------------------------------------------
+
+/**
+ * 流式派生 datasetVersion（内存 O(1) 逐行，rows 需按 (tradeDate, securityId) 升序确定性排序）。
+ * 与 computeDatasetVersion 对「同内容」产出完全一致的版本字符串。
+ */
+export function computeDatasetVersionStreaming(
+  request: NormalizedResearchDatasetRequest,
+  universeDefinition: UniverseDefinition,
+  rows: Iterable<ResearchDatasetRow>,
+): string {
+  const hash = createHash("sha256");
+  hash.update('{"request":');
+  hash.update(canonicalStringify(request));
+  hash.update(',"rows":[');
+  let first = true;
+  for (const row of rows) {
+    if (!first) hash.update(",");
+    hash.update(canonicalStringify(row));
+    first = false;
+  }
+  hash.update('],"universeDefinition":');
+  hash.update(canonicalStringify(universeDefinition));
+  hash.update("}");
+  const digest = hash.digest("hex");
+  return `${versionPrefix()}-${digest.slice(0, 16)}`;
+}
+
+/** 流式标准行内容指纹（与 computeRowsFingerprint 同内容同值）。 */
+export function computeRowsFingerprintStreaming(rows: Iterable<ResearchDatasetRow>): string {
+  const hash = createHash("sha256");
+  hash.update("[");
+  let first = true;
+  for (const row of rows) {
+    if (!first) hash.update(",");
+    hash.update(canonicalStringify(row));
+    first = false;
+  }
+  hash.update("]");
+  return hash.digest("hex").slice(0, 32);
+}
+
+/** 流式指纹组合结果。 */
+export interface DatasetFingerprints {
+  datasetVersion: string;
+  rowsFingerprint: string;
+}
+
+/**
+ * 一次遍历同时计算 datasetVersion 与 rowsFingerprint（避免分片构建后对全量行做两轮流式读库）。
+ * rows 为异步可迭代（行表流式读回）；与 computeDatasetVersionStreaming / computeRowsFingerprintStreaming
+ * 对同内容产出完全一致。
+ */
+export async function computeDatasetFingerprintsStreaming(
+  request: NormalizedResearchDatasetRequest,
+  universeDefinition: UniverseDefinition,
+  rows: AsyncIterable<ResearchDatasetRow>,
+): Promise<DatasetFingerprints> {
+  const versionHash = createHash("sha256");
+  const rowsHash = createHash("sha256");
+  versionHash.update('{"request":');
+  versionHash.update(canonicalStringify(request));
+  versionHash.update(',"rows":[');
+  rowsHash.update("[");
+  let first = true;
+  for await (const row of rows) {
+    if (!first) {
+      versionHash.update(",");
+      rowsHash.update(",");
+    }
+    const canonical = canonicalStringify(row);
+    versionHash.update(canonical);
+    rowsHash.update(canonical);
+    first = false;
+  }
+  versionHash.update('],"universeDefinition":');
+  versionHash.update(canonicalStringify(universeDefinition));
+  versionHash.update("}");
+  rowsHash.update("]");
+  return {
+    datasetVersion: `${versionPrefix()}-${versionHash.digest("hex").slice(0, 16)}`,
+    rowsFingerprint: rowsHash.digest("hex").slice(0, 32),
+  };
+}

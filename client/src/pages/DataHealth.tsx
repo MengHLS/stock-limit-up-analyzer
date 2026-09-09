@@ -500,20 +500,40 @@ export default function DataHealth() {
             )}
           </div>
 
-          {/* RESEARCH_READY=FALSE 时的硬提示（不得隐藏，§31） */}
-          {!data.researchReady && (data.summary?.PENDING ?? 0) > 0 && (
+          {/* RESEARCH_READY=FALSE 时的硬提示（不得隐藏，§31）。分层语义：G0 数据地基 vs G4 研究就绪。 */}
+          {!data.researchReady && (
             <Card className="border-amber-300 bg-amber-50">
               <CardContent className="flex items-start gap-2 py-3 text-sm text-amber-800">
                 <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                 <div>
                   <p className="font-medium">
-                    RESEARCH_READY = FALSE：{data.summary?.PENDING}{" "}
-                    项数据域未达阈值
+                    RESEARCH_READY = FALSE（G4 未通过）
+                    {data.dataFoundationReady
+                      ? "：数据地基 G0 已认证，但研究链尚未建设"
+                      : "：数据地基 G0 亦未完全就绪"}
                   </p>
                   <p className="mt-0.5 text-xs">
-                    按 §0.2
-                    铁律，此期间不得产出正式策略结论；当前状态仅用于观察数据回填进度。
+                    按 §0.2 铁律，此期间不得产出正式策略结论。
+                    {data.dataFoundationReady
+                      ? "当前阻塞为 Industry PIT（G1）/ Research Dataset（G2）/ 生产引擎退出策略（G3），按 MASTER_PRODUCT_ROADMAP PHASE 1~3 依次建设。"
+                      : " 请先补齐数据域并重跑 certify 脚本。"}
                   </p>
+                  {data.gates && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {Object.entries(data.gates).map(([k, v]) => (
+                        <span
+                          key={k}
+                          className={`inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10px] ${
+                            v.status === "PASS"
+                              ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                              : "border-amber-300 bg-white text-amber-700"
+                          }`}
+                        >
+                          {k}:{v.status}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

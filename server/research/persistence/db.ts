@@ -51,6 +51,9 @@ function rowToRun(row: ResearchRunRow): ResearchRun {
     finishedAt: row.finishedAt === null ? undefined : toIso(row.finishedAt),
     result: row.resultJson === null ? null : deserializeResearchRunResultSummary(row.resultJson),
     error: row.error,
+    datasetId: row.datasetId,
+    datasetVersion: row.datasetVersion,
+    datasetFingerprint: row.datasetFingerprint,
     createdAt: toIso(row.createdAt),
   };
 }
@@ -119,6 +122,9 @@ export class DbResearchRunRepository implements ResearchRunRepository {
           status: run.status,
           resultJson,
           error: run.error,
+          datasetId: run.datasetId,
+          datasetVersion: run.datasetVersion,
+          datasetFingerprint: run.datasetFingerprint,
           finishedAt: run.finishedAt === undefined ? null : new Date(run.finishedAt),
         })
         .where(eq(researchRuns.runId, run.runId));
@@ -130,6 +136,9 @@ export class DbResearchRunRepository implements ResearchRunRepository {
       status: run.status,
       resultJson,
       error: run.error,
+      datasetId: run.datasetId,
+      datasetVersion: run.datasetVersion,
+      datasetFingerprint: run.datasetFingerprint,
       startedAt: new Date(run.startedAt),
       finishedAt: run.finishedAt === undefined ? null : new Date(run.finishedAt),
       createdAt: new Date(run.createdAt),

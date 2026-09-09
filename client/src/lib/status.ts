@@ -114,6 +114,23 @@ const STATUS_TONE: Record<string, StatusTone> = {
   NOT_YET_LISTED: "warning",
   DELISTED: "danger",
   KNOWN: "success",
+
+  // Dataset 能力 / 认证状态（STEP DS-V2）
+  AVAILABLE: "success",
+  CONDITIONAL: "warning",
+  UNAVAILABLE: "neutral",
+  CERTIFIED: "success",
+  REJECTED: "danger",
+
+  // Dataset Registry（STEP DATASET-002）：定义 / 版本 / 构建作业状态
+  // 版本：DRAFT / BUILDING / READY / FAILED；作业：PENDING / RUNNING / COMPLETED / FAILED / CANCELLED
+  DRAFT: "neutral",
+  BUILDING: "info",
+  COMPLETED: "success",
+  CANCELLED: "neutral",
+  // 定义：ACTIVE / ARCHIVED
+  ACTIVE: "success",
+  ARCHIVED: "neutral",
 };
 
 /** 状态字符串 → 语义色。空值 / 未收录 → neutral。 */

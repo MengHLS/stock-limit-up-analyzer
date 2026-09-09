@@ -1,0 +1,23 @@
+{
+  "taskId": "P2-T3",
+  "gate": "G2",
+  "status": "VALIDATED",
+  "capturedAt": "2026-09-09T21:32:00+08:00",
+  "realData": true,
+  "policySchemaVersion": "1",
+  "policyCount": 9,
+  "policyOrder": [
+    "pit", "survivorship", "corporate-action", "adjustment", "industry",
+    "liquidity", "universe-membership", "calendar-trading-days", "knowledge"
+  ],
+  "policySetFingerprint": "8ee5e42b4d96094e",
+  "authoritySource": "server/researchDataset/policy.ts (derivePolicySet / deriveExpectedPolicyValue)",
+  "validator": "server/researchDataset/policyValidate.ts (validateResearchDatasetPolicyConsistency)",
+  "freezeDoc": "docs/quantRoadmap/reports/research-dataset-policies.md",
+  "verification": {
+    "policyCount9": true,
+    "orderCorrect": true,
+    "fingerprintStableAcrossBuilds": true,
+    "policyTest": "16 PASS"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "taskId": "P1-T1",
+  "taskName": "G0 gate 固化（废除 researchReady=dataScope 语义）",
+  "gate": "G0",
+  "phase": 1,
+  "priority": "P0",
+  "capturedAt": "2026-09-09T12:40:00.000Z",
+  "status": "VALIDATED",
+  "realData": true,
+  "reproducible": true,
+  "inputs": {
+    "script": "scripts/step12_certify_gate.mjs",
+    "db": "TiDB Cloud（真实，非 mock）",
+    "evidenceJson": "docs/researchReadyGate/research_ready_gate.json"
+  },
+  "outputs": {
+    "dataFoundationReady": true,
+    "researchReady": false,
+    "productionReady": false,
+    "gates": {
+      "G0": "PASS",
+      "G1": "GAP",
+      "G2": "GAP",
+      "G3": "GAP",
+      "G4": "GAP",
+      "G5": "GAP"
+    }
+  },
+  "gatesReason": {
+    "G1": "industry securityId 未关联：5212/5212 行 NULL",
+    "G2": "research_datasets 表不存在（ER_NO_SUCH_TABLE）",
+    "G3": "生产引擎退出策略未实现（baseline 仅 BUY 无 SELL，待 P3-T1）",
+    "G4": "research_runs = 0，无真实研究 E2E（OOS/overfitting 未验证）",
+    "G5": "持久化表缺失：strategy_versions, paper_trades, trade_journal_entries, experiment_artifacts"
+  },
+  "acceptance": [
+    { "criterion": "G0 独立判定 JSON（15 项 dataScope 全 PASS → dataFoundationReady=true）", "status": "PASS" },
+    { "criterion": "researchReady 不再等于 dataScope PASS（现恒 false，只指 G4）", "status": "PASS" },
+    { "criterion": "分层 gates G0~G5 输出，G1~G5 诚实 GAP + reason", "status": "PASS" },
+    { "criterion": "同输入两次运行判定一致（可复现）", "status": "PASS" },
+    { "criterion": "相关测试通过（dataHealth 13 + researchContracts 12）", "status": "PASS" },
+    { "criterion": "tsc --noEmit 无错误", "status": "PASS" }
+  ],
+  "changedFiles": [
+    "scripts/step12_certify_gate.mjs",
+    "shared/dataHealthContracts.ts",
+    "server/dataHealth.ts",
+    "server/dataHealth.test.ts",
+    "server/researchRunRouter.ts",
+    "client/src/pages/DataHealth.tsx",
+    "docs/RESEARCH_GATE_SPECIFICATION.md"
+  ],
+  "gateChangeProposals": ["GCP-001", "GCP-002"],
+  "notes": "附带修复两处预先存在的 coverage 口径 bug：DOMAIN_SPEC.C targetKey（minDistinctEventSecurities）、DOMAIN_SPEC.D 覆盖率主口径收敛为 AF（CA 事件态表无法用静态 threshold 表达覆盖率）。"
+}

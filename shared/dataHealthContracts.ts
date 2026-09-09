@@ -43,10 +43,38 @@ export const gateSummarySchema = z.object({
 });
 export type GateSummary = z.infer<typeof gateSummarySchema>;
 
-/** 认证 gate 文件（`docs/step12-evidence/research_ready_gate.json`）结构。 */
+/**
+ * 分层 Gate 单项（G0~G5，见 RESEARCH_GATE_SPECIFICATION.md §2 / GCP-001）。
+ * status: PASS（本 Gate 验证通过）| GAP（未建设/存在缺口）| FAIL（判定不通过）。
+ * reason: GAP/FAIL 时的人类可读缺口说明；PASS 时为 null。
+ * checks: 本 Gate 的探测明细（形状因 Gate 而异，松散传输）。
+ */
+export const GATE_LEVEL_STATUSES = ["PASS", "GAP", "FAIL"] as const;
+export const gateLevelStatusSchema = z.enum(GATE_LEVEL_STATUSES);
+export type GateLevelStatus = (typeof GATE_LEVEL_STATUSES)[number];
+
+export const gateLevelSchema = z.object({
+  status: gateLevelStatusSchema,
+  reason: z.string().nullable().optional(),
+  /** 本 Gate 的探测明细：形状因 Gate 而异（G0 为 check 数组，G1~G5 为键值对象），松散传输。 */
+  checks: z.unknown().optional(),
+});
+export type GateLevel = z.infer<typeof gateLevelSchema>;
+
+/**
+ * 认证 gate 文件（`docs/researchReadyGate/research_ready_gate.json`）结构。
+ * 分层语义（GCP-001）：
+ *   - `dataFoundationReady` = G0（15 项数据域检查全 PASS）；
+ *   - `researchReady` = G4（真实研究 E2E + OOS + overfitting），**不再**等于数据域 PASS；
+ *   - `productionReady` = G5（持久化 + 前端 + 安全 + 监控）。
+ * 旧字段（summary/thresholds/checks/snapshot）保留向后兼容；`gates` 为新增分层明细。
+ */
 export const researchReadyGateFileSchema = z.object({
   capturedAt: z.string(),
   researchReady: z.boolean(),
+  productionReady: z.boolean().optional(),
+  dataFoundationReady: z.boolean().optional(),
+  gates: z.record(z.string(), gateLevelSchema).optional(),
   summary: gateSummarySchema,
   thresholds: z.record(z.string(), z.unknown()),
   checks: z.array(gateCheckSchema),
@@ -107,6 +135,10 @@ export const dataHealthOverviewSchema = z.object({
     parseError: z.string().nullable(),
   }),
   researchReady: z.boolean(),
+  /** 分层 Gate 语义（GCP-001）：researchReady 只指 G4；此处透传 G0/G5 与分层明细。 */
+  productionReady: z.boolean().nullable(),
+  dataFoundationReady: z.boolean().nullable(),
+  gates: z.record(z.string(), gateLevelSchema).nullable(),
   summary: gateSummarySchema.nullable(),
   /** A~G 七域派生健康度。 */
   domains: z.array(domainHealthSchema),

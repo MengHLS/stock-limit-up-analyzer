@@ -1,0 +1,30 @@
+{
+  "taskId": "P1-T4",
+  "gate": "G1",
+  "taskName": "Industry 历史 PIT 重建 + 覆盖报告",
+  "status": "PARTIAL",
+  "subDeliverables": {
+    "coverageReport": { "status": "VALIDATED", "path": "docs/quantRoadmap/reports/industry-historical-coverage.md" },
+    "historicalPitRebuild": { "status": "BLOCKED", "reason": "无免费稳定历史行业数据源" }
+  },
+  "capturedAt": "2026-09-09T20:55:00+08:00",
+  "realData": true,
+  "industrySnapshot": {
+    "totalRows": 5212,
+    "securityIdNull": 0,
+    "effectiveFrom": "single-point 2026-08-31",
+    "effectiveTo": "all NULL",
+    "source": "100% baostock",
+    "multiIntervalCodes": 0
+  },
+  "pitStatus": "CONDITIONAL",
+  "pitConclusion": "当前快照 AVAILABLE；历史 PIT NOT READY（2019-2026 无行业时序数据）",
+  "historicalSourceSurvey": {
+    "baostock": "仅当前分类，无历史",
+    "tushare_index_member_all": "需 5000 积分，当前受限",
+    "akshare": "未安装，质量未知",
+    "csrc": "无免费公开 API"
+  },
+  "allowedResearch": ["当前行业截面分析", "asOf>=2026-08-31 的当前截面特征"],
+  "forbiddenResearch": ["用当前行业回填 2019-2026 历史（未来数据）", "行业作为历史回测时序因子"]
+}

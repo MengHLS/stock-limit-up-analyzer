@@ -28,7 +28,9 @@ import { describe, expect, it } from "vitest";
 import type { RawDailyPriceRow } from "../data";
 import { runStrategyEngineBacktest } from "./strategyBacktest";
 import {
+  LEADER_CANDIDATE_PRODUCTION_EXIT_MODE,
   LEADER_CANDIDATE_PRODUCTION_FEATURE_MODE,
+  LEADER_CANDIDATE_PRODUCTION_FEATURES,
   LEADER_CANDIDATE_PRODUCTION_MAX_SIGNALS,
   LEADER_CANDIDATE_PRODUCTION_STRATEGY_ID,
   buildProductionLeaderCandidateStrategyConfig,
@@ -36,7 +38,7 @@ import {
   runLeaderCandidateResearchReport,
   runLeaderCandidateStrategyBacktest,
 } from "../leaderCandidateStrategyBacktest";
-import type { LeaderCandidateBacktestContext, LeaderCandidateBacktestOptions } from "../leaderCandidates";
+import type { LeaderCandidateBacktestContext, LeaderCandidateBacktestOptions, LeaderCandidateSourceRecord } from "../leaderCandidates";
 import { leaderCandidateBaselineStrategy, type LeaderCandidateDataView } from "./strategies/leaderCandidateBaseline";
 
 const D0 = "2026-01-05";
@@ -369,5 +371,121 @@ describe("RA-001/RA-002 生产入口：runLeaderCandidateStrategyBacktest → St
     expect(extreme.confirmedSymbols).toEqual(normal.confirmedSymbols);
     // open 时点不会用当日收盘涨停来确认候选（若渗漏，A 会在 extreme 下被「确认」）。
     expect(extreme.decisionLog).toHaveLength(0);
+  });
+});
+
+describe("G3 P3-T1 生产引擎退出策略（BUY → SELL 完整生命周期）", () => {
+  // 场景：E1 半导体三只涨停（A/A2/A3，sectorCount=3 满足准入），仅 A 被价格库确认涨停 → BUY A；
+  // E2 半导体另三只涨停（B/B2/B3），A 断板 → 持仓 A 不再入选 → SELL A、同时 BUY B。
+  const E0 = "2026-01-05";
+  const E1 = "2026-01-06";
+  const E2 = "2026-01-07";
+  const E3 = "2026-01-08";
+  const E4 = "2026-01-09";
+  const EXIT_CALENDAR = [E0, E1, E2, E3, E4];
+
+  const EXIT_A = "600001.SH"; // E1 涨停，被价格库确认，E2 断板
+  const EXIT_B = "600004.SH"; // E2 涨停，被价格库确认
+
+  function exitRecords(): LeaderCandidateSourceRecord[] {
+    const rec = (stockCode: string, stockName: string, limitUpDate: string, limitUpTime: string): LeaderCandidateSourceRecord => ({
+      stockCode, stockName, limitUpDate, limitUpTime, sector: "半导体", turnover: "12", circulationValue: "80",
+    });
+    return [
+      // E1 半导体三只涨停（A 被价格库确认，A2/A3 仅贡献 sectorCount）。
+      rec(EXIT_A, "中科蓝海", E1, "09:31:00"),
+      rec("600002.SH", "联动二", E1, "09:40:00"),
+      rec("600003.SH", "联动三", E1, "09:45:00"),
+      // E2 半导体另三只涨停（B 被价格库确认，B2/B3 仅贡献 sectorCount）。
+      rec(EXIT_B, "东方华电", E2, "09:31:00"),
+      rec("600005.SH", "接力二", E2, "09:40:00"),
+      rec("600006.SH", "接力三", E2, "09:45:00"),
+    ];
+  }
+
+  function exitBar(stockCode: string, tradeDate: string, open: number, close: number, preClose: number): RawDailyPriceRow {
+    return {
+      stockCode,
+      tradeDate,
+      openPrice: String(open),
+      closePrice: String(close),
+      highPrice: String(Math.max(open, close) + 0.1),
+      lowPrice: String(Math.min(open, close) - 0.1),
+      preClosePrice: String(preClose),
+      volume: "150000",
+      amount: "88000",
+    };
+  }
+
+  function exitRows(): RawDailyPriceRow[] {
+    return [
+      // A：E1 收盘涨停（10.0 → 11.0），E2/E3/E4 断板（不再涨停）。
+      exitBar(EXIT_A, E0, 10.0, 10.0, 10.0),
+      exitBar(EXIT_A, E1, 10.2, 11.0, 10.0),
+      exitBar(EXIT_A, E2, 11.2, 11.5, 11.0),
+      exitBar(EXIT_A, E3, 11.4, 11.0, 11.5),
+      exitBar(EXIT_A, E4, 11.0, 11.2, 11.0),
+      // B：E2 收盘涨停（20.0 → 22.0）。
+      exitBar(EXIT_B, E0, 20.0, 20.0, 20.0),
+      exitBar(EXIT_B, E1, 20.2, 20.5, 20.0),
+      exitBar(EXIT_B, E2, 20.5, 22.0, 20.0),
+      exitBar(EXIT_B, E3, 22.2, 22.5, 22.0),
+      exitBar(EXIT_B, E4, 22.4, 22.0, 22.5),
+    ];
+  }
+
+  function runExitProbe() {
+    return runStrategyEngineBacktest({
+      records: exitRecords(),
+      rawRows: exitRows(),
+      options: {
+        strategyId: LEADER_CANDIDATE_PRODUCTION_STRATEGY_ID,
+        strategyConfig: buildProductionLeaderCandidateStrategyConfig({}),
+        decisionPoint: "close",
+        features: LEADER_CANDIDATE_PRODUCTION_FEATURES,
+        requestedQuantity: 100,
+        initialCapital: 100_000,
+        maxPositions: 5,
+        tradingDates: EXIT_CALENDAR,
+        cost: { commissionRate: 0.0003, stampDutyRate: 0.0005, transferFeeRate: 0.00001, slippageBps: 10, lotSize: 100, minCommission: 5 },
+      },
+    });
+  }
+
+  it("生产配置显式接入 exitMode=hold-while-selected", () => {
+    const config = buildProductionLeaderCandidateStrategyConfig({});
+    expect(config.exitMode).toBe("hold-while-selected");
+    expect(LEADER_CANDIDATE_PRODUCTION_EXIT_MODE).toBe("hold-while-selected");
+  });
+
+  it("持仓断板后触发 SELL：A 形成 closed trade（entryTime=D2，exitTime=D3）", () => {
+    const probe = runExitProbe();
+    const trades = probe.result.trades;
+    const aTrade = trades.find((trade) => trade.symbol === EXIT_A);
+    const bTrade = trades.find((trade) => trade.symbol === EXIT_B);
+
+    // A 完整生命周期：D2 开盘买入 → D3 开盘卖出（断板退出），openAtEnd=false、已实现盈亏非 null。
+    expect(aTrade).toBeDefined();
+    expect(aTrade!.entryTime).toBe(E2);
+    expect(aTrade!.exitTime).toBe(E3);
+    expect(aTrade!.openAtEnd).toBe(false);
+    expect(aTrade!.netPnl).not.toBeNull();
+    // holdingPeriod 口径 = 建仓日 + 卖出日（E2、E3 两个交易日，含首尾）。
+    expect(aTrade!.holdingPeriod).toBe(2);
+
+    // B 在 D3 买入，期末仍持仓（openAtEnd=true）。
+    expect(bTrade).toBeDefined();
+    expect(bTrade!.entryTime).toBe(E3);
+    expect(bTrade!.openAtEnd).toBe(true);
+
+    // 决策日志包含 SELL 意图（可审计退出信号确实产生）。
+    expect(probe.decisionLog.some((log) => log.action === "SELL" && log.symbol === EXIT_A)).toBe(true);
+
+    // 引擎侧出现已平仓交易 → completedTradeCount 反映逐笔退出（不再 buy-and-hold 到期末）。
+    expect(probe.result.performance.completedTradeCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("Determinism：相同输入重复运行退出生命周期结果一致", () => {
+    expect(runExitProbe()).toEqual(runExitProbe());
   });
 });

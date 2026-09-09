@@ -106,7 +106,9 @@ export const DOMAIN_SPEC: Record<DataDomain, DomainSpec> = {
       {
         checkId: 6,
         currentKey: "distinctSecurityIds",
-        targetKey: "distinctSecurityIds",
+        // check#6 的 threshold 键为 minDistinctEventSecurities（事件态覆盖下限），
+        // 与 current 的 distinctSecurityIds 键名不同，需分别指定（口径修正）。
+        targetKey: "minDistinctEventSecurities",
         unit: "证券",
       },
     ],
@@ -116,12 +118,9 @@ export const DOMAIN_SPEC: Record<DataDomain, DomainSpec> = {
     tables: ["corporate_actions", "adjustment_factors"],
     checkIds: [10, 11],
     coverageSources: [
-      {
-        checkId: 10,
-        currentKey: "distinctSecurities",
-        targetKey: "distinctSecurities",
-        unit: "证券（CA）",
-      },
+      // 覆盖率主口径收敛为 AF（复权因子，逐股全量，静态阈值）。
+      // CA（公司行为）为事件态表，其覆盖目标是「AF − 容差」（动态），无法用单一静态
+      // threshold 表达覆盖率；CA 覆盖情况通过 domain detail（checkIds 10+11）展示。
       {
         checkId: 11,
         currentKey: "distinctSecurities",
@@ -351,6 +350,9 @@ export async function buildDataHealthOverview(): Promise<DataHealthOverview> {
         parseError,
       },
       researchReady: false,
+      productionReady: null,
+      dataFoundationReady: null,
+      gates: null,
       summary: null,
       domains: [],
       checks: [],
@@ -375,6 +377,9 @@ export async function buildDataHealthOverview(): Promise<DataHealthOverview> {
       parseError: null,
     },
     researchReady: gate.researchReady,
+    productionReady: gate.productionReady ?? null,
+    dataFoundationReady: gate.dataFoundationReady ?? null,
+    gates: gate.gates ?? null,
     summary: gate.summary,
     domains: deriveDomains(gate),
     checks: gate.checks,

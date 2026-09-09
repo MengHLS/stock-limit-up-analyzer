@@ -32,6 +32,9 @@ import {
   BuildPipeline,
   BuildSummary,
   BuildDiagnostics,
+  DatasetCapabilityPanel,
+  DatasetPreviewPanel,
+  DatasetCertifyPanel,
 } from "@/components/dataset";
 import {
   SnapshotView,
@@ -171,18 +174,22 @@ export default function DatasetBuilder() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-5">
-        {/* 配置 */}
-        <div className="lg:col-span-2">
+        {/* 配置 + 预览 + 认证 */}
+        <div className="space-y-4 lg:col-span-2">
           <DatasetConfigPanel
             config={config}
             onChange={setConfig}
             onSubmit={handleBuild}
             isBuilding={build.isPending}
           />
+          <DatasetPreviewPanel config={config} />
+          <DatasetCertifyPanel config={config} />
         </div>
 
-        {/* 结果区 */}
+        {/* 结果区 + 能力矩阵 */}
         <div className="space-y-4 lg:col-span-3">
+          <DatasetCapabilityPanel />
+
           {build.isPending && (
             <Card>
               <CardContent className="space-y-3 p-4">

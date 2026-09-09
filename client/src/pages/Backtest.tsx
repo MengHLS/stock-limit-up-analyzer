@@ -5,7 +5,7 @@ import { sortOrdersByKey, type OrderReturnSortDirection, type OrderSortKey } fro
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { BarChart3, DatabaseZap, History, Loader2, RefreshCw, Save, ShieldAlert, ShieldCheck, WalletCards } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 function formatMoney(value: number) { return new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 }).format(value); }
@@ -288,6 +288,13 @@ export default function BacktestPage() {
     trailingProfitActivationPercent: 6, trailingDrawdownPercent: 3, stopLossPercent: 5, strongHoldMinReturn: 3, maxHoldingDays: 5,
     downsideObservationDays: 5, mediumDownsidePercent: 4, highDownsidePercent: 8, riskPenaltyWeight: 0.35, autoTunePenaltyWeight: true, hardRiskThreshold: 65, rollingTrainTradingDays: 45, rollingValidationTradingDays: 14,
   });
+  // 参数输入防抖：config 连续变化时延迟 800ms 再触发重算，避免参数页每次敲击都跑一次完整研究模拟（~140 次 simulate）。
+  // 页面即时显示仍用 config；请求只认 debouncedConfig，二者解耦。
+  const [debouncedConfig, setDebouncedConfig] = useState(config);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedConfig(config), 800);
+    return () => clearTimeout(timer);
+  }, [config]);
   // 回测区间（含边界）。默认最近 2 年；数据回填到 2019 后若全量加载会命中 489 万行价格并卡死，故必须限区间。
   const [dateRange, setDateRange] = useState<{ startDate?: string; endDate?: string }>(() => {
     const toIso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -356,21 +363,21 @@ export default function BacktestPage() {
     endDate: dateRange.endDate,
     observationDays: 1 as const,
     realistic: {
-      initialCapital: config.initialCapital, maxPositions: config.maxPositions, commissionRate: config.commissionBps / 10000, stampDutyRate: config.stampDutyBps / 10000, transferFeeRate: config.transferFeeBps / 10000, slippageBps: config.slippageBps,
-      blockLimitUpBuys: config.blockLimitUpBuys, blockLimitDownSells: config.blockLimitDownSells, enableOneWordLimitDownProbability: config.enableOneWordLimitDownProbability, oneWordLimitDownSellProbability: config.oneWordLimitDownSellProbability,
-      blockOneWordLimitUpBuys: config.blockOneWordLimitUpBuys, enableIntradayStopLoss: config.enableIntradayStopLoss, detectExRights: config.detectExRights, maxPositionAmountRatio: config.maxPositionAmountPercent / 100,
-      positionSizingStrategy: config.positionSizingStrategy, fixedPositionPercent: config.fixedPositionPercent, minimumExpectedOpenChangePercent: config.minimumExpectedOpenChangePercent,
-      expectationTierEnabled: config.expectationTierEnabled, expectationTable: config.expectationTable,
-      trailingProfitActivationPercent: config.trailingProfitActivationPercent, trailingDrawdownPercent: config.trailingDrawdownPercent, stopLossPercent: config.stopLossPercent, strongHoldMinReturn: config.strongHoldMinReturn, maxHoldingDays: config.maxHoldingDays,
+      initialCapital: debouncedConfig.initialCapital, maxPositions: debouncedConfig.maxPositions, commissionRate: debouncedConfig.commissionBps / 10000, stampDutyRate: debouncedConfig.stampDutyBps / 10000, transferFeeRate: debouncedConfig.transferFeeBps / 10000, slippageBps: debouncedConfig.slippageBps,
+      blockLimitUpBuys: debouncedConfig.blockLimitUpBuys, blockLimitDownSells: debouncedConfig.blockLimitDownSells, enableOneWordLimitDownProbability: debouncedConfig.enableOneWordLimitDownProbability, oneWordLimitDownSellProbability: debouncedConfig.oneWordLimitDownSellProbability,
+      blockOneWordLimitUpBuys: debouncedConfig.blockOneWordLimitUpBuys, enableIntradayStopLoss: debouncedConfig.enableIntradayStopLoss, detectExRights: debouncedConfig.detectExRights, maxPositionAmountRatio: debouncedConfig.maxPositionAmountPercent / 100,
+      positionSizingStrategy: debouncedConfig.positionSizingStrategy, fixedPositionPercent: debouncedConfig.fixedPositionPercent, minimumExpectedOpenChangePercent: debouncedConfig.minimumExpectedOpenChangePercent,
+      expectationTierEnabled: debouncedConfig.expectationTierEnabled, expectationTable: debouncedConfig.expectationTable,
+      trailingProfitActivationPercent: debouncedConfig.trailingProfitActivationPercent, trailingDrawdownPercent: debouncedConfig.trailingDrawdownPercent, stopLossPercent: debouncedConfig.stopLossPercent, strongHoldMinReturn: debouncedConfig.strongHoldMinReturn, maxHoldingDays: debouncedConfig.maxHoldingDays,
     },
     downsideRisk: {
-      observationDays: config.downsideObservationDays, mediumDownsidePercent: config.mediumDownsidePercent, highDownsidePercent: config.highDownsidePercent, penaltyWeight: config.riskPenaltyWeight, autoTunePenaltyWeight: config.autoTunePenaltyWeight, hardRiskThreshold: config.hardRiskThreshold,
-      rollingTrainTradingDays: config.rollingTrainTradingDays, rollingValidationTradingDays: config.rollingValidationTradingDays,
+      observationDays: debouncedConfig.downsideObservationDays, mediumDownsidePercent: debouncedConfig.mediumDownsidePercent, highDownsidePercent: debouncedConfig.highDownsidePercent, penaltyWeight: debouncedConfig.riskPenaltyWeight, autoTunePenaltyWeight: debouncedConfig.autoTunePenaltyWeight, hardRiskThreshold: debouncedConfig.hardRiskThreshold,
+      rollingTrainTradingDays: debouncedConfig.rollingTrainTradingDays, rollingValidationTradingDays: debouncedConfig.rollingValidationTradingDays,
     },
-  }), [config, dateRange]);
+  }), [debouncedConfig, dateRange]);
   // 分析页使用「完整分析报表」研究端点（生产核心 + 下行风险研究）。
   // 生产核心（getLeaderCandidateBacktest）不携带 research-legacy 研究段（STEP 5 P2-2 边界）。
-  const { data, isLoading, isFetching, refetch } = trpc.sentiment.getLeaderCandidateResearch.useQuery(input, { staleTime: 5 * 60_000 });
+  const { data, isLoading, isFetching, refetch } = trpc.sentiment.getLeaderCandidateResearch.useQuery(input, { staleTime: 30 * 60_000, refetchOnWindowFocus: false });
   const [costSensitivityOn, setCostSensitivityOn] = useState(false);
   const costSensitivityQuery = trpc.sentiment.runCostSensitivity.useQuery({ options: input }, { enabled: costSensitivityOn });
   const costSensitivity = costSensitivityQuery.data;
