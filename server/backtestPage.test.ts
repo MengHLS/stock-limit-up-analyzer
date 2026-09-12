@@ -129,7 +129,14 @@ describe("独立组合资金回测页面", () => {
     expect(pageSource).not.toContain("exitStrategyComparison");
     expect(pageSource).not.toContain("comparisonCurve");
     expect(pageSource).not.toContain("exitStrategy:");
-    const candidateSource = readFileSync(resolve(projectRoot, "client/src/pages/LeaderCandidates.tsx"), "utf8");
+    // 龙头候选页在性能修复中把历史明细表格拆到独立组件，评分表头等文本随之迁移；
+    // 这里合并两处源码，保持原有防回归断言的强度不变。
+    const candidateSource = [
+      "client/src/pages/LeaderCandidates.tsx",
+      "client/src/components/CandidateHistoryTable.tsx",
+    ]
+      .map((file) => readFileSync(resolve(projectRoot, file), "utf8"))
+      .join("\n");
     const researchSource = readFileSync(resolve(projectRoot, "server/downsideRisk.ts"), "utf8");
     const styleSource = readFileSync(resolve(projectRoot, "client/src/index.css"), "utf8");
     expect(candidateSource).not.toContain("trailingProfitActivationPercent");

@@ -33,6 +33,9 @@ import type {
 } from "../framework/contract";
 import type { FeatureVersionRef } from "../signalEngine/types";
 import type { ResearchParameterSchema, ResearchParameterSet } from "../types";
+// STEP STRATEGY-003：富 StrategyDefinition（类型唯一来源在 definition.ts；此处仅 type-only 引用，
+// 不构成运行时循环依赖 —— definition.ts 不 import 本文件）。
+import type { StrategyDefinition } from "./definition";
 
 // ---------------------------------------------------------------------------
 // 记录书签
@@ -251,9 +254,39 @@ export interface StrategyDocument {
   // -- §16 dataset 绑定 --
   /** 内容寻址数据集版本（rd-…，见 C-12.6.1；validator 校验格式）。 */
   readonly datasetVersion: string;
+  /**
+   * 🔴 STEP STRATEGY-004 — **Dataset Registry 权威坐标**（`dataset_version.id`）。
+   *
+   * 与 `datasetVersion` 成对：本字段是跨模块唯一 Dataset Version 引用，
+   * `datasetVersion` 降级为显示 / 快照 label（`v1` / `v2`）。
+   *
+   * 与 `definition.datasets` 中 PRIMARY 绑定的关系（与 v1 视图同一纪律）：
+   *   Canonical `definition.datasets(PRIMARY).datasetVersionId`  ──单向派生──►  本字段
+   * 提供 definition 时本字段由派生值补齐；显式提供且与派生值不一致 → 响亮报错（不静默覆盖）。
+   * 缺省 = legacy `rd-…` 绑定（保留旧兼容分支）。
+   */
+  readonly datasetVersionId?: number;
 
   // -- §16 execution assumptions --
   readonly executionAssumptions: StrategyExecutionAssumptions;
+
+  /**
+   * STEP STRATEGY-003 — **富 StrategyDefinition**（可选）。
+   *
+   * 提供时它成为该版本的 **Canonical 规则快照**：`entry / exit / position / risk / execution /
+   * parameters / datasets` 完整表达「研究什么事件、观察多久、满足什么条件、何时出信号、
+   * 什么时候成交、买多少、什么时候卖、如何控风险、哪些参数可优化」。
+   *
+   * 与上方 v1 字段的关系（用户裁定 D1：在既有文档内演进，不建第二套 Source of Truth）：
+   *   Canonical `definition`  ──派生──►  entryRules / exitRules / riskRules /
+   *                                     positionSizing / parameters / executionModel
+   * 即 v1 字段是 **definition 的兼容视图**（派生是有损的，映射表见 map.ts#deriveLegacyViews）。
+   * `createStrategyDocument` 在提供 definition 时**自动派生缺失的 v1 字段**；若调用方同时显式
+   * 提供且与派生结果不一致，会响亮报 `SCHEMA_DEFINITION_VIEW_CONFLICT`（不静默覆盖）。
+   *
+   * 未提供 definition 时，本字段缺省，文档行为与 STEP-001 / STRATEGY-002 完全一致。
+   */
+  readonly definition?: StrategyDefinition;
 
   // -- 执行配方引用（可选；C-13.2 Strategy13 可序列化面） --
   readonly recipe?: StrategyRecipe;

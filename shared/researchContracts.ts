@@ -418,6 +418,37 @@ export const strategyLifecycleStatusSchema = z.enum(
 export type StrategyLifecycleStatusValue =
   (typeof STRATEGY_LIFECYCLE_STATUS_VALUES)[number];
 
+// ---------------------------------------------------------------------------
+// research · strategy（STEP STRATEGY-003 / 004 · 按源版本 clone / 版本状态迁移）
+// ---------------------------------------------------------------------------
+// 说明：这两组 schema 放在生命周期状态常量之后，因为它们复用 `STRATEGY_LIFECYCLE_STATUS_VALUES`
+// 作为版本状态的单一字面量来源（避免在前端再维护一份八态枚举）。
+
+/**
+ * 按**指定源版本** clone（SPEC §13：源版本可以是任意历史版本，不限于 latest）。
+ * 写操作 → 后端 adminProcedure。
+ */
+export const strategyCloneVersionInputSchema = z.object({
+  strategyId: z.string().min(1, "strategyId 必填"),
+  fromVersion: z.string().min(1, "fromVersion 必填（semver x.y.z）"),
+  targetVersion: z.string().min(1, "targetVersion 需为 semver x.y.z").optional(),
+  bump: z.enum(["major", "minor", "patch"]).optional(),
+  description: z.string().max(512).optional(),
+  status: strategyLifecycleStatusSchema.optional(),
+});
+export type StrategyCloneVersionInput = z.infer<typeof strategyCloneVersionInputSchema>;
+
+/**
+ * 版本生命周期状态迁移（STRATEGY-003 唯一允许的 UPDATE；内容仍不可变）。
+ * 写操作 → 后端 adminProcedure。
+ */
+export const strategySetVersionStatusInputSchema = z.object({
+  strategyId: z.string().min(1, "strategyId 必填"),
+  version: z.string().min(1, "version 必填（semver x.y.z）"),
+  status: strategyLifecycleStatusSchema,
+});
+export type StrategySetVersionStatusInput = z.infer<typeof strategySetVersionStatusInputSchema>;
+
 /** StrategyLifecycleRecord 传输层透传（校验由后端 assertValidStrategyLifecycleRecord 负责）。 */
 export const strategyLifecycleRecordSchema = z.custom<Record<string, unknown>>(
   value => typeof value === "object" && value !== null && !Array.isArray(value),
@@ -514,6 +545,49 @@ export type ResearchRunReadinessVerdict = z.infer<
   typeof researchRunReadinessVerdictSchema
 >;
 
+// ---------------------------------------------------------------------------
+// 闭环装配摘要（FE-4 · 与 readiness 同源）
+// ---------------------------------------------------------------------------
+
+/**
+ * 闭环 14 阶段 id（传输层字面量）。
+ * 必须与后端 `CLOSED_LOOP_STAGE_IDS` 完全一致，由契约单测断言守护。
+ */
+export const CLOSED_LOOP_STAGE_ID_VALUES = [
+  "data",
+  "research",
+  "strategy",
+  "backtest",
+  "evaluation",
+  "optimization",
+  "robustness",
+  "oos",
+  "overfitting",
+  "regime",
+  "paper",
+  "review",
+  "discipline",
+  "finalize",
+] as const;
+
+export const closedLoopStageIdSchema = z.enum(CLOSED_LOOP_STAGE_ID_VALUES);
+export type ClosedLoopStageIdValue = (typeof CLOSED_LOOP_STAGE_ID_VALUES)[number];
+
+/**
+ * 闭环装配覆盖率摘要（`assessClosedLoopWiringCoverage` 的传输层投影）。
+ * `wiredStages` = 本层已装配真实执行器的阶段（静态能力）；
+ * `coveredStages` = 给定入参下真正可覆盖的阶段（能力 ∧ 入参）。
+ */
+export const closedLoopWiringSummarySchema = z.object({
+  requestedStages: z.array(closedLoopStageIdSchema),
+  wiredStages: z.array(z.string()),
+  unwiredStages: z.array(z.string()),
+  coveredStages: z.array(closedLoopStageIdSchema),
+  uncoveredStages: z.array(closedLoopStageIdSchema),
+  executorBound: z.boolean(),
+});
+export type ClosedLoopWiringSummary = z.infer<typeof closedLoopWiringSummarySchema>;
+
 export const researchRunReadinessSchema = z.object({
   canRun: z.boolean(),
   verdict: researchRunReadinessVerdictSchema,
@@ -522,8 +596,15 @@ export const researchRunReadinessSchema = z.object({
   datasetGate: researchDatasetGateSummarySchema.nullish(),
   /** 已注册研究策略轻量目录（与 catalog.list 同构）。 */
   strategies: z.array(researchCatalogItemSchema),
-  /** 真实执行链是否已绑定（v1 恒定 false，见本区块注释纪律）。 */
+  /**
+   * 真实执行链是否已绑定。
+   * **真实探测**（不再硬编码）：由 `assessClosedLoopWiringCoverage` 计算——仅当被请求的
+   * 整条链的每个阶段都有「已装配执行器 ∧ 入参来源成立」时才为 true。任一段无执行器或
+   * 入参不可得 → false，并按 `wiring` 如实列出缺口阶段。
+   */
   executorBound: z.boolean(),
+  /** 闭环装配覆盖率明细（诊断用；与 executorBound 同一事实来源）。 */
+  wiring: closedLoopWiringSummarySchema,
 });
 
 // ---------------------------------------------------------------------------
@@ -587,4 +668,140 @@ export const metricsEvaluateInputSchema = z.object({
 });
 
 export type MetricsEvaluateInput = z.infer<typeof metricsEvaluateInputSchema>;
+
+// ---------------------------------------------------------------------------
+// FE-4 扩展 — 闭环运行请求 / 结果（真实执行，可复现）
+//
+// 纪律：
+//   - **本层不伪造入参**：`loopRun` 只接受调用方显式声明的真实入参（权益曲线 / 上游交接
+//     种子 / 生命周期意图）。拿不到的入参一律不注入 → 对应阶段由编排器如实 BLOCKED，
+//     绝不返回占位产物；
+//   - **无状态**：`loopRun` 不写库、不产生 run 记录持久化，只返回一次真实执行的完整轨迹
+//     （含链指纹），由调用方决定是否落账；
+//   - **可复现**：`runId` / `createdAt` 可由调用方注入；稳定输入 → 稳定 `chainFingerprint`。
+// ---------------------------------------------------------------------------
+
+/** 日期窗口（闭区间）。 */
+export const closedLoopDateRangeSchema = z.object({
+  startDate: z.string().min(1, "startDate 必填"),
+  endDate: z.string().min(1, "endDate 必填"),
+});
+
+/**
+ * backtest 阶段交接种子（subset 链场景：调用方已持有真实回测摘要，不想重跑 backtest）。
+ * 每个数字都必须来自一次真实回测——本层只做透传，不做任何派生/推算。
+ */
+export const closedLoopBacktestSummarySeedSchema = z.object({
+  /** 产生该摘要的模块名（默认 simulator）。 */
+  module: z.string().min(1).default("simulator"),
+  /** 该回测产物的内容指纹（sha256 hex）——将作为 evaluation 的 backtestFingerprint 绑定依据。 */
+  fingerprint: z.string().min(1, "fingerprint 必填（回测产物指纹）"),
+  /** 是否合成产物（合成摘要不得与真实结论混淆）。 */
+  synthetic: z.boolean().default(false),
+  datasetVersion: z.string().min(1),
+  datasetGate: z.string().min(1),
+  dateRange: closedLoopDateRangeSchema,
+  initialCapital: z.number(),
+  finalEquity: z.number(),
+  decisionDayCount: z.number().int().nonnegative(),
+  equityCurvePointCount: z.number().int().nonnegative(),
+  tradeCount: z.number().int().nonnegative(),
+});
+export type ClosedLoopBacktestSummarySeed = z.infer<
+  typeof closedLoopBacktestSummarySeedSchema
+>;
+
+/** finalize 阶段的生命周期推进意图（复用 STEP 21 传输契约）。 */
+export const closedLoopLifecycleInputSchema = z.object({
+  lifecycleRecord: strategyLifecycleRecordSchema,
+  transition: lifecycleTransitionInputSchema,
+  allowSyntheticEvidence: z.boolean().optional(),
+});
+export type ClosedLoopLifecycleInput = z.infer<
+  typeof closedLoopLifecycleInputSchema
+>;
+
+/**
+ * 闭环运行请求（FE-4）。
+ *
+ * 未提供的入参 = 该阶段入参不可得 → 对应阶段不会被注册执行器，编排器如实 BLOCKED。
+ * 这保证「UI 上点运行」永远不会得到一份凭空捏造的全绿结果。
+ */
+export const closedLoopRunInputSchema = z.object({
+  /** run id（缺省由 createdAt 派生，保证同 createdAt → 同 runId）。 */
+  runId: z.string().min(1).optional(),
+  /** 创建时间（ISO-8601；缺省取服务端当前时间）。 */
+  createdAt: z.string().min(1).optional(),
+  experimentId: z.string().min(1, "experimentId 必填（§28 谱系锚点）"),
+  strategyId: z.string().min(1, "strategyId 必填"),
+  strategyVersion: z.string().min(1).default("1.0.0"),
+  dateRange: closedLoopDateRangeSchema,
+  datasetVersion: z.string().nullish(),
+  universeVersion: z.string().nullish(),
+  codeVersion: z.string().nullish(),
+  executionModel: z.string().nullish(),
+  parameterSet: z.record(z.string(), z.unknown()).optional(),
+  /** 阶段选择（缺省 = canonical 全 14 阶段；必须为保序子集）。 */
+  stageIds: z.array(closedLoopStageIdSchema).optional(),
+  /** evaluation 阶段的直供入参（权益曲线 + 可选交易明细 + 口径参数）。 */
+  evaluationInput: metricsEvaluateInputSchema.optional(),
+  /** evaluation 阶段的上游交接种子（提供后 evaluation 可在无 backtest 阶段时执行）。 */
+  backtestSummarySeed: closedLoopBacktestSummarySeedSchema.optional(),
+  /** finalize 阶段生命周期推进意图。 */
+  lifecycle: closedLoopLifecycleInputSchema.optional(),
+});
+export type ClosedLoopRunInput = z.infer<typeof closedLoopRunInputSchema>;
+
+/** 单阶段结果（不含 lineage：lineage 为服务端内部锚点，不外传）。 */
+export const closedLoopRunStageResultSchema = z.object({
+  stageId: closedLoopStageIdSchema,
+  state: z.enum(["READY", "EXECUTED", "BLOCKED", "SKIPPED"]),
+  outputKind: z.string(),
+  outputHandoffFingerprint: z.string().nullable(),
+  /** 真实交接摘要（EXECUTED 才有；形状按 kind 判别，故透传）。 */
+  output: z.unknown().nullable(),
+  blocked: z
+    .object({
+      reasonCode: z.string(),
+      detail: z.string(),
+      upstreamStageId: z.string().nullable(),
+      errorCode: z.string().nullable(),
+      errorMessage: z.string().nullable(),
+    })
+    .nullable(),
+});
+
+export const closedLoopRunBlockedItemSchema = z.object({
+  stageId: closedLoopStageIdSchema,
+  reasonCode: z.string(),
+  detail: z.string(),
+  upstreamStageId: z.string().nullable(),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+});
+
+/** 闭环运行结果（一次真实执行的完整可审计轨迹）。 */
+export const closedLoopRunResultSchema = z.object({
+  runId: z.string(),
+  createdAt: z.string(),
+  chainFingerprint: z.string(),
+  fingerprint: z.string(),
+  overall: z.object({
+    status: z.enum(["ALL_EXECUTED", "PARTIAL_BLOCKED", "NO_STAGE_EXECUTED"]),
+    executedStageCount: z.number().int().nonnegative(),
+    blockedStageCount: z.number().int().nonnegative(),
+    skippedStageCount: z.number().int().nonnegative(),
+    firstBlockedReasonCode: z.string().nullable(),
+    synthetic: z.boolean(),
+    note: z.string(),
+  }),
+  /** 本次真正注入执行器的阶段。 */
+  runnerInjected: z.array(closedLoopStageIdSchema),
+  /** 全 14 阶段记录（未请求 = SKIPPED）。 */
+  stages: z.array(closedLoopRunStageResultSchema),
+  blockedSummary: z.array(closedLoopRunBlockedItemSchema),
+  /** 本次装配覆盖率（与 readiness.wiring 同一探测函数）。 */
+  wiring: closedLoopWiringSummarySchema,
+});
+export type ClosedLoopRunResult = z.infer<typeof closedLoopRunResultSchema>;
 export type ResearchRunReadiness = z.infer<typeof researchRunReadinessSchema>;

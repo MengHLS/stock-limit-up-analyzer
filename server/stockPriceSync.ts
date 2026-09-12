@@ -3,14 +3,22 @@ import {
   getLimitUpRecordsForStockPriceSyncByDate,
   getLeaderCandidateDailyPriceMap,
   getStockDailyPriceTradeDates,
+  getIndexDailyTradeDates,
   getLimitUpRecordsForSyncCheck,
-  getStockDailyPricePairs,
   upsertStockDailyPrices,
   getStockSuspensionWindows,
   expandSuspendedDatesByStock,
   upsertSuspensionWindows,
   type StockDailyPriceUpsert,
 } from "./db";
+import {
+  hasStockDailyPrice,
+  isStockPriceIndexReady,
+  registerSyncedPricePairs,
+  stockPriceIndexSnapshot,
+  stockPricePairCount,
+  type StockPriceIndexSnapshot,
+} from "./stockPriceIndex";
 import { fetchTushareDailyPricesByDate, fetchTushareTradingDates, fetchTushareStockTradeDates, isTushareRateLimitError } from "./tushare";
 import { toCanonicalBar, validateMarketBar, type RawDailyPriceRow } from "./data";
 
@@ -147,6 +155,28 @@ export function formatValidatedPriceQualityIssue(issue: ValidatedPriceQualityIss
 }
 
 /**
+ * 写入行情并同步维护位图索引。
+ *
+ * 所有行情写库都必须走这里：`stock_daily_prices` 只增不删，所以把刚写入的
+ * `(stockCode, tradeDate)` 增量并入索引即可，无需为了「同步检查」重读 889 万行。
+ */
+async function upsertStockDailyPricesTracked(rows: StockDailyPriceUpsert[]): Promise<number> {
+  const saved = await upsertStockDailyPrices(rows);
+  if (saved > 0) registerSyncedPricePairs(rows);
+  return saved;
+}
+
+/**
+ * 本地交易日历降级：优先用 index_daily（7,452 行，实测 ~0.2s），
+ * 仅在 index_daily 无数据时才回落到对大表扫 DISTINCT tradeDate（实测 ~8.4s）。
+ */
+async function localTradingDates(startDate: string, endDate: string): Promise<string[]> {
+  const fromIndex = await getIndexDailyTradeDates(startDate, endDate);
+  if (fromIndex.length > 0) return fromIndex;
+  return getStockDailyPriceTradeDates(startDate, endDate);
+}
+
+/**
  * 观察窗口（信号日 + N 个可交易日）的交易日历终点缓冲，单位自然日。
  * 涨停后紧跟停牌的股票，其可交易观察日会随停牌时长向后顺延；若日历终点只留 21 自然日，
  * 长停牌会把第 N 个可交易日推出日历窗口而被截断，导致复牌后尾部交易日漏同步。
@@ -238,7 +268,7 @@ export async function syncCandidateDailyPrices(mode: StockPriceSyncMode): Promis
         // INVALID 不写入；WARNING 写入但留下质量信息；缺失字段保持 null 而非 "undefined"/"null"。
         const validated = toValidatedStockDailyPriceUpserts(priceRows, new Set(target.stockCodes));
         for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
-        const savedCount = await upsertStockDailyPrices(validated.rows);
+        const savedCount = await upsertStockDailyPricesTracked(validated.rows);
         return { savedCount, missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null, rateLimited: false };
       } catch (error) {
         const rateLimitedHit = isTushareRateLimitError(error);
@@ -280,7 +310,7 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
     marketTradingDates = await fetchTushareTradingDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
   } catch (error) {
     console.warn(`[StockPriceSync] ${limitUpDate} 交易日历获取失败，降级为指定日期：`, error);
-    marketTradingDates = await getStockDailyPriceTradeDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
+    marketTradingDates = await localTradingDates(limitUpDate, calendarEnd.toISOString().slice(0, 10));
     if (marketTradingDates.length === 0) marketTradingDates = [limitUpDate];
   }
 
@@ -296,7 +326,7 @@ export async function syncCandidateDailyPricesForDate(limitUpDate: string, futur
         const priceRows = await fetchTushareDailyPricesByDate(target.tradeDate);
         const validated = toValidatedStockDailyPriceUpserts(priceRows, new Set(target.stockCodes));
         for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
-        return { savedCount: await upsertStockDailyPrices(validated.rows), missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null, rateLimited: false };
+        return { savedCount: await upsertStockDailyPricesTracked(validated.rows), missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null, rateLimited: false };
       } catch (error) {
         const rateLimitedHit = isTushareRateLimitError(error);
         console.warn(`[StockPriceSync] 跳过上传日期 ${target.tradeDate} 日线同步：`, error);
@@ -363,7 +393,7 @@ export async function syncCandidateDailyPricesForDateRange(startDate: string, en
     marketTradingDates = await fetchTushareTradingDates(calendarStart, endDate);
   } catch (error) {
     console.warn(`[StockPriceSync] ${startDate}~${endDate} 交易日历获取失败，降级为已同步交易日：`, error);
-    marketTradingDates = await getStockDailyPriceTradeDates(calendarStart, endDate);
+    marketTradingDates = await localTradingDates(calendarStart, endDate);
     if (marketTradingDates.length === 0) marketTradingDates = Array.from(new Set(recordDates));
   }
 
@@ -383,7 +413,7 @@ export async function syncCandidateDailyPricesForDateRange(startDate: string, en
         const priceRows = await fetchTushareDailyPricesByDate(target.tradeDate);
         const validated = toValidatedStockDailyPriceUpserts(priceRows, new Set(target.stockCodes));
         for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
-        const savedCount = await upsertStockDailyPrices(validated.rows);
+        const savedCount = await upsertStockDailyPricesTracked(validated.rows);
         return { tradeDate: target.tradeDate, requestedCount: target.stockCodes.length, savedCount, missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failed: false, rateLimited: false };
       } catch (error) {
         const rateLimitedHit = isTushareRateLimitError(error);
@@ -465,7 +495,7 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
     marketTradingDates = await fetchTushareTradingDates(startDate, calendarEnd.toISOString().slice(0, 10));
   } catch (error) {
     console.warn(`[StockPriceSync] 上传补全交易日历获取失败，降级为候选日期：`, error);
-    marketTradingDates = await getStockDailyPriceTradeDates(startDate, calendarEnd.toISOString().slice(0, 10));
+    marketTradingDates = await localTradingDates(startDate, calendarEnd.toISOString().slice(0, 10));
     if (marketTradingDates.length === 0) marketTradingDates = Array.from(new Set(selectedRecords.map((record) => record.limitUpDate))).sort();
   }
   const targets = buildStockPriceSyncTargets(selectedRecords, marketTradingDates, 5, await loadSuspendedDatesByStock(marketTradingDates));
@@ -478,7 +508,7 @@ export async function syncCandidateDailyPricesForUpload(uploadDate: string, uplo
         const requestedCodes = new Set(target.stockCodes);
         const validated = toValidatedStockDailyPriceUpserts(await fetchTushareDailyPricesByDate(target.tradeDate), requestedCodes);
         for (const issue of validated.qualityIssues) console.warn(`[StockPriceSync] ${formatValidatedPriceQualityIssue(issue)}`);
-        return { savedCount: await upsertStockDailyPrices(validated.rows), missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null as string | null };
+        return { savedCount: await upsertStockDailyPricesTracked(validated.rows), missingCount: Math.max(0, target.stockCodes.length - validated.rows.length), failedDate: null as string | null };
       } catch (error) {
         console.warn(`[StockPriceSync] 上传补全跳过 ${target.tradeDate}：`, error);
         return { savedCount: 0, missingCount: target.stockCodes.length, failedDate: target.tradeDate };
@@ -527,7 +557,7 @@ export async function getMissingStockPriceRequirements(filter?: { stockCode?: st
     tradingDates = await fetchTushareTradingDates(dates[0]!, end.toISOString().slice(0, 10));
   } catch (error) {
     console.warn("[StockPriceSync] 缺失检查交易日历获取失败，降级为候选日期：", error);
-    tradingDates = await getStockDailyPriceTradeDates(dates[0], end.toISOString().slice(0, 10));
+    tradingDates = await localTradingDates(dates[0], end.toISOString().slice(0, 10));
     if (tradingDates.length === 0) tradingDates = Array.from(new Set(dates));
   }
   const priceMap = await getLeaderCandidateDailyPriceMap();
@@ -582,35 +612,73 @@ export type StockPriceSyncCheck = {
 };
 
 /**
+ * 行情检查结果缓存：全量计算一次约数十秒（依赖位图索引已就绪后主要是读涨停记录 + 日历），
+ * 而页面的筛选/翻页/搜索都会重新请求。这里按 `futureTradingDayCount` 缓存整份结果，
+ * 页面层的 筛选/排序/分页 全部作用在缓存结果上，避免每次加载都重算。
+ * 任何写行情/改停牌/校正代码的操作都必须调用 `invalidateStockPriceSyncCache()`。
+ */
+const CHECK_CACHE_TTL_MS = 5 * 60 * 1000;
+let checkCache: { key: string; value: StockPriceSyncCheck; computedAt: number } | null = null;
+
+/** 失效行情检查缓存（写操作后调用）。 */
+export function invalidateStockPriceSyncCache(): void {
+  checkCache = null;
+}
+
+export class StockPriceIndexNotReadyError extends Error {
+  readonly snapshot: StockPriceIndexSnapshot;
+  constructor(snapshot: StockPriceIndexSnapshot) {
+    super("行情对位索引尚未就绪");
+    this.name = "StockPriceIndexNotReadyError";
+    this.snapshot = snapshot;
+  }
+}
+
+/**
  * 检查各涨停记录（去重股票+日期）的信号日及后续交易日行情是否已同步。
- * 优先使用 Tushare 交易日历计算后续交易日，日历不可用时降级为仅检查信号日本身。
+ * 优先使用 Tushare 交易日历计算后续交易日，日历不可用时降级为本地交易日历。
+ *
+ * 性能：已同步行情来自位图索引（O(1) 查询），不再每次拉取 stock_daily_prices 的 889 万行。
  */
 export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<StockPriceSyncCheck> {
+  if (!isStockPriceIndexReady()) throw new StockPriceIndexNotReadyError(stockPriceIndexSnapshot());
+  const cacheKey = `days:${futureTradingDayCount}`;
+  if (checkCache && checkCache.key === cacheKey && Date.now() - checkCache.computedAt < CHECK_CACHE_TTL_MS) {
+    return checkCache.value;
+  }
+
   const records = await getLimitUpRecordsForSyncCheck();
-  const pricePairs = await getStockDailyPricePairs();
+  const pairCount = stockPricePairCount();
   const emptySummary = {
     totalStocks: 0,
     fullySynced: 0,
     partialSynced: 0,
     fullyMissing: 0,
     missingPairs: 0,
-    syncedPairCount: pricePairs.size,
+    syncedPairCount: pairCount,
     calendarAvailable: false,
     suspendedPairs: 0,
   };
-  if (records.length === 0) return { summary: emptySummary, items: [] };
+  if (records.length === 0) {
+    const empty = { summary: emptySummary, items: [] };
+    checkCache = { key: cacheKey, value: empty, computedAt: Date.now() };
+    return empty;
+  }
 
   let tradingDates: string[] = [];
   let calendarAvailable = false;
   const recordDates = Array.from(new Set(records.map((record) => record.limitUpDate))).sort((left, right) => left.localeCompare(right));
   const endDate = new Date(`${recordDates[recordDates.length - 1]}T00:00:00Z`);
   endDate.setUTCDate(endDate.getUTCDate() + OBSERVATION_WINDOW_CALENDAR_PADDING_DAYS);
+  const calendarEnd = endDate.toISOString().slice(0, 10);
   try {
-    tradingDates = await fetchTushareTradingDates(recordDates[0], endDate.toISOString().slice(0, 10));
+    tradingDates = await fetchTushareTradingDates(recordDates[0]!, calendarEnd);
     calendarAvailable = true;
   } catch (error) {
-    console.warn("[StockPriceSync] 交易日历获取失败，行情检查降级为仅信号日：", error);
-    tradingDates = recordDates;
+    console.warn("[StockPriceSync] 外部交易日历获取失败，行情检查降级为本地交易日历：", error);
+    tradingDates = await localTradingDates(recordDates[0]!, calendarEnd);
+    calendarAvailable = tradingDates.length > 0;
+    if (tradingDates.length === 0) tradingDates = recordDates;
   }
   const tradingIndex = new Map(tradingDates.map((date, index) => [date, index]));
   const suspendedDatesByStock = await loadSuspendedDatesByStock(tradingDates);
@@ -637,7 +705,7 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
           .filter((date) => suspended?.has(date))
           .sort((left, right) => left.localeCompare(right));
     const missingDates = Array.from(requiredDates)
-      .filter((date) => !pricePairs.has(`${record.stockCode}|${date}`))
+      .filter((date) => hasStockDailyPrice(record.stockCode, date) !== true)
       .sort((left, right) => left.localeCompare(right));
     return {
       stockCode: record.stockCode,
@@ -662,18 +730,104 @@ export async function checkStockPriceSync(futureTradingDayCount = 10): Promise<S
   const partialSynced = items.length - fullySynced - fullyMissing;
   const suspendedPairs = items.reduce((total, item) => total + item.suspendedDates.length, 0);
 
-  return {
+  const result: StockPriceSyncCheck = {
     summary: {
       totalStocks: items.length,
       fullySynced,
       partialSynced,
       fullyMissing,
       missingPairs: items.reduce((total, item) => total + item.missingCount, 0),
-      syncedPairCount: pricePairs.size,
+      syncedPairCount: pairCount,
       calendarAvailable,
       suspendedPairs,
     },
     items,
+  };
+  checkCache = { key: cacheKey, value: result, computedAt: Date.now() };
+  return result;
+}
+
+export type StockPriceSyncPageInput = {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  onlyMissing?: boolean;
+  sortDir?: "asc" | "desc";
+  /** 跳过服务端缓存强制重算。 */
+  refresh?: boolean;
+  futureTradingDayCount?: number;
+};
+
+export type StockPriceSyncPage = {
+  summary: StockPriceSyncCheck["summary"];
+  /** 仅当前页数据（服务端已排序/筛选/切片）。 */
+  items: StockPriceSyncCheckItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  /** 本次结果的生成时刻（缓存命中时为缓存生成时刻）。 */
+  computedAt: string;
+  index: StockPriceIndexSnapshot;
+};
+
+/** 索引未就绪时返回的预热态，前端据此提示而非展示空列表。 */
+export type StockPriceSyncPageResult = ({ ready: true } & StockPriceSyncPage) | { ready: false; index: StockPriceIndexSnapshot };
+
+const MAX_PAGE_SIZE = 200;
+
+/**
+ * 服务端分页的行情同步状态查询。
+ *
+ * 之前由前端一次性取回全部记录（实测约 9.9 万条）再在浏览器里 filter/sort/slice，
+ * 响应体与前端计算量都极大；现在改为服务端筛选排序分页，只回传当前页。
+ */
+export async function checkStockPriceSyncPage(input: StockPriceSyncPageInput = {}): Promise<StockPriceSyncPageResult> {
+  if (!isStockPriceIndexReady()) return { ready: false, index: stockPriceIndexSnapshot() };
+  if (input.refresh) invalidateStockPriceSyncCache();
+  let check: StockPriceSyncCheck;
+  try {
+    check = await checkStockPriceSync(input.futureTradingDayCount ?? 10);
+  } catch (error) {
+    if (error instanceof StockPriceIndexNotReadyError) return { ready: false, index: error.snapshot };
+    throw error;
+  }
+
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(input.pageSize ?? 20)));
+  const requestedPage = Math.max(1, Math.trunc(input.page ?? 1));
+  const onlyMissing = input.onlyMissing ?? true;
+  const sortDir = input.sortDir ?? "desc";
+  const query = (input.search ?? "").trim().toLowerCase();
+
+  const filtered = check.items.filter((item) => {
+    if (onlyMissing && item.missingCount === 0) return false;
+    if (!query) return true;
+    return item.stockCode.toLowerCase().includes(query) || item.stockName.toLowerCase().includes(query);
+  });
+
+  const sorted = [...filtered].sort((left, right) => {
+    const byDate = sortDir === "asc"
+      ? left.limitUpDate.localeCompare(right.limitUpDate)
+      : right.limitUpDate.localeCompare(left.limitUpDate);
+    // 同日期回落到「缺失更多者靠前 + 代码升序」，与原前端稳定排序的观感一致且完全确定。
+    return byDate || right.missingCount - left.missingCount || left.stockCode.localeCompare(right.stockCode);
+  });
+
+  const total = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(requestedPage, totalPages);
+  const items = sorted.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  return {
+    ready: true,
+    summary: check.summary,
+    items,
+    total,
+    page: safePage,
+    pageSize,
+    totalPages,
+    computedAt: new Date(checkCache?.computedAt ?? Date.now()).toISOString(),
+    index: stockPriceIndexSnapshot(),
   };
 }
 

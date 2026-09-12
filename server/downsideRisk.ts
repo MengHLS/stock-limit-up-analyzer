@@ -6,6 +6,12 @@ import {
   type ResearchSimulationSource,
 } from "./research/legacyTransactionSimulator";
 import { mean, sampleStandardDeviation, quantile, median, skewness, excessKurtosis, sharpeRatio, annualizedReturnFromEquityCurve } from "../shared/quant-stats";
+import {
+  DEFAULT_MAX_PARTICIPATING_BOARDS,
+  boardHeightPositionScale,
+  boardHeightRiskContribution,
+  isBoardParticipationRestricted,
+} from "../shared/boardHeightRisk";
 
 export type DownsideRiskOptions = {
   observationDays?: number;
@@ -16,6 +22,12 @@ export type DownsideRiskOptions = {
   hardRiskThreshold?: number;
   rollingTrainTradingDays?: number;
   rollingValidationTradingDays?: number;
+  /**
+   * 高位连板风控：允许参与的最高连板高度。超过该高度的候选在「高风险硬过滤 / 质量门控」
+   * 中直接剔除；未超过但已属高位（5 板 / 6 板）的候选按固定系数降低仓位、并加大风险扣分。
+   * 缺省 6（见 shared/boardHeightRisk）。设为较大值即等价于关闭「限制参与」。
+   */
+  maxParticipatingBoards?: number;
 };
 
 export type DownsideRiskSignalScore = {
@@ -62,6 +74,10 @@ export type DownsideRiskExperimentItem = {
   description: string;
   inputCandidateCount: number;
   excludedCandidateCount: number;
+  /** 其中因「高位连板超过允许参与上限」被剔除的候选数（仅硬过滤 / 质量门控可能非零）。 */
+  boardHeightExcludedCount?: number;
+  /** 本次实验中对高位连板（5/6 板）做了仓位缩放的候选数（baseline 恒为 0）。 */
+  positionScaledCount?: number;
   realisticSimulation: RealisticBacktestResult;
   riskAdjustedPerformance: DownsideRiskAdjustedPerformance;
   strategyEvaluation: DownsideRiskStrategyEvaluation;
@@ -254,6 +270,19 @@ export type DownsideRiskResearchResult = {
   hardRiskThreshold: number;
   rollingTrainTradingDays: number;
   rollingValidationTradingDays: number;
+  /**
+   * 高位连板风控口径回显：允许参与上限、杠杆档位与仓位缩放系数。
+   * 说明：高位连板（超过上限）在硬过滤 / 质量门控中限制参与，5 板 / 6 板按系数降低仓位。
+   */
+  boardHeightRiskControl: {
+    maxParticipatingBoards: number;
+    highBoardTierFrom: number;
+    positionScaleFiveBoards: number;
+    positionScaleSixBoardsPlus: number;
+    definition: string;
+  };
+  /** 各策略实际被高位连板风控影响的候选计数（策略 key → 限制参与 / 降低仓位）。 */
+  boardHeightImpact: Array<{ key: DownsideRiskStrategyKey; restrictedCount: number; scaledCount: number }>;
   featureMatrix: DownsideRiskFeature[];
   labeledSampleSize: number;
   lowPriceLabelSampleSize: number;
@@ -285,9 +314,9 @@ export type DownsideRiskFactorAblation = {
 };
 
 const riskFeatures: DownsideRiskFeature[] = [
-  { key: "boards", label: "连板高度", definition: "信号日连续涨停板数；高板相对增加风险扣分。", timing: "信号日" },
-  { key: "sectorCount", label: "题材支撑", definition: "信号日同题材涨停数量；题材支撑不足增加风险扣分。", timing: "信号日" },
-  { key: "limitUpTime", label: "封板时间", definition: "信号日封板时间；封板偏晚增加风险扣分。", timing: "信号日" },
+  { key: "boards", label: "连板高度", definition: "信号日连续涨停板数；3 板起阶梯加权，5 板 / 6 板显著加重，7 板及以上按最高档（风险收益比最差）。", timing: "信号日" },
+  { key: "sectorCount", label: "题材支撑", definition: "信号日同题材涨停数量；题材支撑不足增加风险扣分。题材字段缺失时不产生扣分（缺失不是风险证据）。", timing: "信号日" },
+  { key: "limitUpTime", label: "封板时间", definition: "信号日封板时间；封板偏晚增加风险扣分。封板时间缺失时不产生扣分（缺失不是「封板偏晚」）。", timing: "信号日" },
   { key: "signalAmount", label: "日线成交额", definition: "信号日Tushare日线成交额（千元）；成交额不足或缺失增加风险扣分。", timing: "信号日" },
   { key: "marketCap", label: "流通市值评分", definition: "信号日可得流通市值分层；极小盘、超大盘或缺失增加风险扣分。", timing: "信号日" },
 ];
@@ -488,10 +517,15 @@ function adverseReturnLabel(row: LeaderCandidateBacktestRow, context: LeaderCand
 
 function calculateRiskContributions(row: LeaderCandidateBacktestRow, context: LeaderCandidateBacktestContext) {  const time = row.limitUpTime ?? "";
   const amount = readSignalPrice(row, context)?.amount ?? null;
+  // 缺失字段降级：sector / limitUpTime 标注为不可用时（历史期整段未采集），
+  // 缺失不再作为风险证据 —— 旧口径会把全部缺失记录并入同一兜底题材，
+  // 反而让「题材支撑不足」「封板偏晚」永不触发，等于用缺失伪造了「低风险」。
+  const sectorFieldUsable = row.sectorAvailable !== false;
+  const timeFieldUsable = row.limitUpTimeAvailable !== false;
   return {
-    boards: row.boards >= 4 ? 20 : row.boards === 3 ? 12 : row.boards === 2 ? 5 : 0,
-    sectorCount: (row.sectorCount ?? 0) <= 1 ? 16 : (row.sectorCount ?? 0) === 2 ? 8 : 0,
-    limitUpTime: !time ? 5 : time >= "14:30:00" ? 16 : time >= "13:30:00" ? 9 : 0,
+    boards: boardHeightRiskContribution(row.boards),
+    sectorCount: !sectorFieldUsable ? 0 : (row.sectorCount ?? 0) <= 1 ? 16 : (row.sectorCount ?? 0) === 2 ? 8 : 0,
+    limitUpTime: !timeFieldUsable ? 0 : !time ? 5 : time >= "14:30:00" ? 16 : time >= "13:30:00" ? 9 : 0,
     signalAmount: amount === null ? 7 : amount < 10_000 ? 12 : amount < 50_000 ? 6 : 0,
     marketCap: row.marketCapScore <= 4 ? 10 : row.marketCapScore <= 5 ? 6 : 0,
   } satisfies Record<string, number>;
@@ -546,11 +580,29 @@ function applyQualityBlend(profile: DownsideRiskProfile, context: LeaderCandidat
   return { ...profile.row, score: calculateQualityBlendScore(profile, context) };
 }
 
+/**
+ * 高位连板风控 —— 仓位侧（纯函数）。
+ *   超过允许参与上限的候选由调用方剔除（本函数不决定剔除）；
+ *   5 板 / 6 板在行上写入 positionScale，由交易模拟器按固定系数降低该笔预算上限。
+ * 说明：缩放只作用于单笔仓位，不改变候选排序、不删除候选、不读取 T+1 及以后信息。
+ */
+function withBoardHeightPositionScale(row: LeaderCandidateBacktestRow, maxParticipatingBoards: number): LeaderCandidateBacktestRow {
+  const scale = boardHeightPositionScale(row.boards, maxParticipatingBoards);
+  if (scale >= 1) return row;
+  return { ...row, positionScale: (row.positionScale ?? 1) * scale };
+}
+
+/** 统计被高位连板风控降低仓位的候选数（用于报表回显）。 */
+function countPositionScaled(rows: ReadonlyArray<LeaderCandidateBacktestRow>): number {
+  return rows.filter((row) => (row.positionScale ?? 1) < 1).length;
+}
+
 /** 质量门控仅与同一信号日其他候选横向比较，所用中位数、风险分及字段均在信号日收盘后可知。 */
 export function selectQualityGateProfileKeys(
   profiles: DownsideRiskProfile[],
   hardRiskThreshold: number,
   context: LeaderCandidateBacktestContext,
+  maxParticipatingBoards: number = DEFAULT_MAX_PARTICIPATING_BOARDS,
 ) {
   const profilesByDate = new Map<string, DownsideRiskProfile[]>();
   for (const profile of profiles) {
@@ -563,7 +615,11 @@ export function selectQualityGateProfileKeys(
     const qualityScores = items.map((profile) => calculateQualityBlendScore(profile, context));
     const threshold = median(qualityScores);
     for (const profile of items) {
-      if (threshold !== null && profile.riskScore < hardRiskThreshold && calculateQualityBlendScore(profile, context) >= threshold) {
+      // 门控同时受「风险分阈值」与「高位连板参与上限」约束，二者都在信号日可知。
+      if (threshold !== null
+        && profile.riskScore < hardRiskThreshold
+        && !isBoardParticipationRestricted(profile.row.boards, maxParticipatingBoards)
+        && calculateQualityBlendScore(profile, context) >= threshold) {
         selected.add(`${profile.row.date}::${profile.row.stockCode}`);
       }
     }
@@ -576,6 +632,7 @@ export function selectQualityGateRowKeys(
   rows: LeaderCandidateBacktestRow[],
   hardRiskThreshold: number,
   context: LeaderCandidateBacktestContext,
+  maxParticipatingBoards: number = DEFAULT_MAX_PARTICIPATING_BOARDS,
 ) {
   const profiles = rows.map((row) => ({
     row,
@@ -592,13 +649,26 @@ export function selectQualityGateRowKeys(
     const qualityScores = items.map(({ row, riskScore }) => calculateQualityBlendScoreForRisk(row, riskScore, context));
     const threshold = median(qualityScores);
     for (const { row, riskScore } of items) {
-      if (threshold !== null && riskScore < hardRiskThreshold && calculateQualityBlendScoreForRisk(row, riskScore, context) >= threshold) {
+      if (threshold !== null
+        && riskScore < hardRiskThreshold
+        && !isBoardParticipationRestricted(row.boards, maxParticipatingBoards)
+        && calculateQualityBlendScoreForRisk(row, riskScore, context) >= threshold) {
         selected.add(`${row.date}::${row.stockCode}`);
       }
     }
   }
   return selected;
 }
+
+/** 单个策略实验的执行闭包（由 buildExperiments* 注入交易模拟器与成本/退出参数）。 */
+type ExperimentRunner = (
+  key: DownsideRiskStrategyKey,
+  label: string,
+  description: string,
+  experimentRows: LeaderCandidateBacktestRow[],
+  excludedCandidateCount: number,
+  boardHeightExcludedCount?: number,
+) => DownsideRiskExperimentItem;
 
 function buildExperiments(
   profiles: DownsideRiskProfile[],
@@ -608,23 +678,82 @@ function buildExperiments(
   context: LeaderCandidateBacktestContext,
   descriptionPrefix = "", // 手动权重路径
   source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
+  maxParticipatingBoards: number = DEFAULT_MAX_PARTICIPATING_BOARDS,
 ): DownsideRiskExperimentItem[] {
   const rows = profiles.map((profile) => profile.row);
-  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
-    const realisticSimulation = source.simulate(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
-    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation), strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, experimentRows) };
+  const scaleRows = (sourceRows: LeaderCandidateBacktestRow[]) => sourceRows.map((row) => withBoardHeightPositionScale(row, maxParticipatingBoards));
+  const run = (
+    key: DownsideRiskStrategyKey,
+    label: string,
+    description: string,
+    experimentRows: LeaderCandidateBacktestRow[],
+    excludedCandidateCount: number,
+    boardHeightExcludedCount = 0,
+  ): DownsideRiskExperimentItem => {
+    // 原始策略作为对照基准，不做任何高位约束；其余策略统一在「仓位侧」按连板高度缩放。
+    const effectiveRows = key === "baseline" ? experimentRows : scaleRows(experimentRows);
+    const realisticSimulation = source.simulate(effectiveRows, realisticOptions, context.priceByStockDate, context.tradingDates);
+    return {
+      key,
+      label,
+      description,
+      inputCandidateCount: effectiveRows.length,
+      excludedCandidateCount,
+      boardHeightExcludedCount,
+      positionScaledCount: countPositionScaled(effectiveRows),
+      realisticSimulation,
+      riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation),
+      strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, effectiveRows),
+    };
   };
-  const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeight));
-  const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
+  return buildStrategyExperimentRows(profiles, null, penaltyWeight, hardRiskThreshold, context, descriptionPrefix, run, maxParticipatingBoards);
+}
+
+/**
+ * 五策略实验的共同行构造：把「风险扣分 / 高位连板参与上限 / 质量门控」三件信号日规则
+ * 集中在一处，避免 buildExperiments 与 buildExperimentsWithWindowWeights 两份实现漂移
+ * （历史缺陷正是口径在两个函数里各写一份，导致修复只落到其中一条路径）。
+ *
+ * @param penaltyWeightByDate 自动寻优路径的逐日权重；null 表示手动固定权重路径。
+ */
+function buildStrategyExperimentRows(
+  profiles: DownsideRiskProfile[],
+  penaltyWeightByDate: Map<string, number> | null,
+  fallbackPenaltyWeight: number,
+  hardRiskThreshold: number,
+  context: LeaderCandidateBacktestContext,
+  descriptionPrefix: string,
+  run: ExperimentRunner,
+  maxParticipatingBoards: number,
+): DownsideRiskExperimentItem[] {
+  const rows = profiles.map((profile) => profile.row);
+  const weightOf = (date: string) => penaltyWeightByDate?.get(date) ?? fallbackPenaltyWeight;
+  const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, weightOf(profile.row.date)));
+  const boardRestricted = profiles.filter((profile) => isBoardParticipationRestricted(profile.row.boards, maxParticipatingBoards));
+  const hardFilterProfiles = profiles.filter((profile) => (
+    profile.riskScore < hardRiskThreshold
+    && !isBoardParticipationRestricted(profile.row.boards, maxParticipatingBoards)
+  ));
+  const hardFilterRows = hardFilterProfiles.map((profile) => profile.row);
   const qualityBlendRows = profiles.map((profile) => applyQualityBlend(profile, context));
-  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context);
-  const qualityGateRows = profiles.filter((profile) => qualityGateKeys.has(`${profile.row.date}::${profile.row.stockCode}`)).map((profile) => applyQualityBlend(profile, context));
+  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context, maxParticipatingBoards);
+  const qualityGateRows = profiles
+    .filter((profile) => qualityGateKeys.has(`${profile.row.date}::${profile.row.stockCode}`))
+    .map((profile) => applyQualityBlend(profile, context));
+  // 因高位连板被限制参与的候选数（硬过滤与质量门控都会剔除它们）。
+  // 注意：其中一部分本来就不满足风险分阈值，故该数字是「被风控覆盖的候选数」，
+  // 而不是「若不设上限就会成交的额外笔数」，归因口径必须写清楚以免高估效果。
+  const boardHeightExcludedCount = boardRestricted.length;
+  const boardHeightNote = `高位连板风控：超过 ${maxParticipatingBoards} 板限制参与，5/6 板按系数降低仓位。`;
+  const riskPenaltyDescription = penaltyWeightByDate
+    ? "每个验证窗口仅使用其前置训练窗口自动选出的风险扣分权重。"
+    : `${descriptionPrefix}候选分扣减 风险分 × ${fallbackPenaltyWeight}，不删除候选。`;
   return [
-    run("baseline", "原始策略", "保留原始候选评分与完整观察期样本。", rows, 0),
-    run("riskPenalty", "风险扣分策略", `${descriptionPrefix}候选分扣减 风险分 × ${penaltyWeight}，不删除候选。`, riskPenaltyRows, 0),
-    run("hardFilter", "高风险硬过滤", `剔除风险分 ≥ ${hardRiskThreshold} 的候选。`, hardFilterRows, rows.length - hardFilterRows.length),
-    run("qualityBlend", "质量复合评分", "预设68%原始候选强度 + 32%信号日安全度，并对早封、题材共振和充足成交额小幅奖励；不使用未来行情。", qualityBlendRows, 0),
-    run("qualityGate", "质量门控策略", `仅保留质量复合分不低于当日中位数且风险分 < ${hardRiskThreshold} 的候选；门槛只使用同日横截面。`, qualityGateRows, rows.length - qualityGateRows.length),
+    run("baseline", "原始策略", "保留原始候选评分与完整观察期样本；不施加高位连板约束，作为对照基准。", rows, 0),
+    run("riskPenalty", "风险扣分策略", `${riskPenaltyDescription}${boardHeightNote}`, riskPenaltyRows, 0),
+    run("hardFilter", "高风险硬过滤", `剔除风险分 ≥ ${hardRiskThreshold} 或连板高度超过 ${maxParticipatingBoards} 板的候选。${boardHeightNote}`, hardFilterRows, rows.length - hardFilterRows.length, boardHeightExcludedCount),
+    run("qualityBlend", "质量复合评分", `预设68%原始候选强度 + 32%信号日安全度，并对早封、题材共振和充足成交额小幅奖励；不使用未来行情。${boardHeightNote}`, qualityBlendRows, 0),
+    run("qualityGate", "质量门控策略", `仅保留质量复合分不低于当日中位数、风险分 < ${hardRiskThreshold} 且连板高度不超过 ${maxParticipatingBoards} 板的候选；门槛只使用同日横截面。${boardHeightNote}`, qualityGateRows, rows.length - qualityGateRows.length, boardHeightExcludedCount),
   ];
 }
 
@@ -636,24 +765,33 @@ function buildExperimentsWithWindowWeights(
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
   source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
+  maxParticipatingBoards: number = DEFAULT_MAX_PARTICIPATING_BOARDS,
 ): DownsideRiskExperimentItem[] {
-  const rows = profiles.map((profile) => profile.row);
-  const run = (key: DownsideRiskStrategyKey, label: string, description: string, experimentRows: LeaderCandidateBacktestRow[], excludedCandidateCount: number): DownsideRiskExperimentItem => {
-    const realisticSimulation = source.simulate(experimentRows, realisticOptions, context.priceByStockDate, context.tradingDates);
-    return { key, label, description, inputCandidateCount: experimentRows.length, excludedCandidateCount, realisticSimulation, riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation), strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, experimentRows) };
+  const scaleRows = (sourceRows: LeaderCandidateBacktestRow[]) => sourceRows.map((row) => withBoardHeightPositionScale(row, maxParticipatingBoards));
+  const run = (
+    key: DownsideRiskStrategyKey,
+    label: string,
+    description: string,
+    experimentRows: LeaderCandidateBacktestRow[],
+    excludedCandidateCount: number,
+    boardHeightExcludedCount = 0,
+  ): DownsideRiskExperimentItem => {
+    const effectiveRows = key === "baseline" ? experimentRows : scaleRows(experimentRows);
+    const realisticSimulation = source.simulate(effectiveRows, realisticOptions, context.priceByStockDate, context.tradingDates);
+    return {
+      key,
+      label,
+      description,
+      inputCandidateCount: effectiveRows.length,
+      excludedCandidateCount,
+      boardHeightExcludedCount,
+      positionScaledCount: countPositionScaled(effectiveRows),
+      realisticSimulation,
+      riskAdjustedPerformance: calculateRiskAdjustedPerformance(realisticSimulation),
+      strategyEvaluation: calculateStrategyEvaluation(realisticSimulation, context, effectiveRows),
+    };
   };
-  const riskPenaltyRows = profiles.map((profile) => applyRiskPenalty(profile, penaltyWeightByDate.get(profile.row.date) ?? fallbackPenaltyWeight));
-  const hardFilterRows = profiles.filter((profile) => profile.riskScore < hardRiskThreshold).map((profile) => profile.row);
-  const qualityBlendRows = profiles.map((profile) => applyQualityBlend(profile, context));
-  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context);
-  const qualityGateRows = profiles.filter((profile) => qualityGateKeys.has(`${profile.row.date}::${profile.row.stockCode}`)).map((profile) => applyQualityBlend(profile, context));
-  return [
-    run("baseline", "原始策略", "保留原始候选评分与完整观察期样本。", rows, 0),
-    run("riskPenalty", "风险扣分策略", "每个验证窗口仅使用其前置训练窗口自动选出的风险扣分权重。", riskPenaltyRows, 0),
-    run("hardFilter", "高风险硬过滤", `剔除风险分 ≥ ${hardRiskThreshold} 的候选。`, hardFilterRows, rows.length - hardFilterRows.length),
-    run("qualityBlend", "质量复合评分", "预设68%原始候选强度 + 32%信号日安全度，并对早封、题材共振和充足成交额小幅奖励；不使用未来行情。", qualityBlendRows, 0),
-    run("qualityGate", "质量门控策略", `仅保留质量复合分不低于当日中位数且风险分 < ${hardRiskThreshold} 的候选；门槛只使用同日横截面。`, qualityGateRows, rows.length - qualityGateRows.length),
-  ];
+  return buildStrategyExperimentRows(profiles, penaltyWeightByDate, fallbackPenaltyWeight, hardRiskThreshold, context, "", run, maxParticipatingBoards);
 }
 
 function toAblationMetric(simulation: RealisticBacktestResult, reference: RealisticBacktestResult): DownsideRiskAblationMetric {
@@ -700,9 +838,10 @@ function buildTradeDifferences(
   fallbackPenaltyWeight: number,
   hardRiskThreshold: number,
   context: LeaderCandidateBacktestContext,
+  maxParticipatingBoards: number = DEFAULT_MAX_PARTICIPATING_BOARDS,
 ): DownsideRiskTradeDifferenceRow[] {
   const profileByKey = new Map(profiles.map((profile) => [`${profile.row.date}::${profile.row.stockCode}`, profile]));
-  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context);
+  const qualityGateKeys = selectQualityGateProfileKeys(profiles, hardRiskThreshold, context, maxParticipatingBoards);
   const tradesByExperiment = new Map(experiments.map((experiment) => [
     experiment.key,
     new Map(experiment.realisticSimulation.trades.map((trade) => [`${trade.signalDate}::${trade.stockCode}`, trade])),
@@ -731,7 +870,8 @@ function buildTradeDifferences(
       hardFilter: snapshot(tradesByExperiment.get("hardFilter")?.get(key)),
       qualityBlend: snapshot(tradesByExperiment.get("qualityBlend")?.get(key)),
       qualityGate: snapshot(tradesByExperiment.get("qualityGate")?.get(key)),
-      hardFilterExcluded: profile.riskScore >= hardRiskThreshold,
+      hardFilterExcluded: profile.riskScore >= hardRiskThreshold
+        || isBoardParticipationRestricted(profile.row.boards, maxParticipatingBoards),
       qualityGateExcluded: !qualityGateKeys.has(key),
     } satisfies DownsideRiskTradeDifferenceRow;
   });
@@ -806,6 +946,7 @@ function buildRollingWindows(
   realisticOptions: RealisticBacktestOptions | undefined,
   context: LeaderCandidateBacktestContext,
   source: ResearchSimulationSource = RESEARCH_LEGACY_SIMULATION_SOURCE,
+  maxParticipatingBoards: number = DEFAULT_MAX_PARTICIPATING_BOARDS,
 ): { windows: DownsideRiskRollingWindow[]; penaltyWeightByDate: Map<string, number> } {
   const dates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
   const windows: DownsideRiskRollingWindow[] = [];
@@ -827,6 +968,7 @@ function buildRollingWindows(
       context,
       autoTunePenaltyWeight ? "训练窗口自动寻优后；" : "手动设定；",
       source,
+      maxParticipatingBoards,
     );
     const highDownsideCount = validationProfiles.filter((profile) => profile.maxAdverseReturn! <= -mediumDownsidePercent).length;
     windows.push({
@@ -965,6 +1107,8 @@ export function buildDownsideRiskResearch(
   const hardRiskThreshold = Math.min(100, Math.max(0, options?.hardRiskThreshold ?? 65));
   const rollingTrainTradingDays = Math.min(150, Math.max(30, Math.floor(options?.rollingTrainTradingDays ?? 45)));
   const rollingValidationTradingDays = Math.min(60, Math.max(10, Math.floor(options?.rollingValidationTradingDays ?? 14)));
+  // 高位连板风控：允许参与上限。1 板起、上限 20 板，避免非法输入把全部候选剔除。
+  const maxParticipatingBoards = Math.min(20, Math.max(1, Math.floor(options?.maxParticipatingBoards ?? DEFAULT_MAX_PARTICIPATING_BOARDS)));
   const profiles = rows.map((row) => {
     const label = adverseReturnLabel(row, context, observationDays);
     const riskContributions = calculateRiskContributions(row, context);
@@ -980,7 +1124,7 @@ export function buildDownsideRiskResearch(
       highDownside: label.maxAdverseReturn === null ? null : label.maxAdverseReturn <= -highDownsidePercent,
     } satisfies DownsideRiskProfile;
   });
-  const rollingResult = buildRollingWindows(profiles, rollingTrainTradingDays, rollingValidationTradingDays, mediumDownsidePercent, penaltyWeight, autoTunePenaltyWeight, hardRiskThreshold, realisticOptions, context, source);
+  const rollingResult = buildRollingWindows(profiles, rollingTrainTradingDays, rollingValidationTradingDays, mediumDownsidePercent, penaltyWeight, autoTunePenaltyWeight, hardRiskThreshold, realisticOptions, context, source, maxParticipatingBoards);
   const rollingWindows = rollingResult.windows;
   const evaluationDates = new Set(rollingWindows.flatMap((window) => {
     const allDates = context.tradingDates ?? [];
@@ -1009,13 +1153,13 @@ export function buildDownsideRiskResearch(
   const signalAmountSampleSize = evaluationProfiles.filter((profile) => readSignalPrice(profile.row, context)?.amount !== null && readSignalPrice(profile.row, context)?.amount !== undefined).length;
 
   const experiments = autoTunePenaltyWeight && rollingWindows.length > 0
-    ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context, source)
-    : buildExperiments(evaluationProfiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；", source);
+    ? buildExperimentsWithWindowWeights(evaluationProfiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context, source, maxParticipatingBoards)
+    : buildExperiments(evaluationProfiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；", source, maxParticipatingBoards);
   const fullCycleExperiments = autoTunePenaltyWeight && rollingWindows.length > 0
-    ? buildExperimentsWithWindowWeights(profiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context, source)
-    : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；", source);
+    ? buildExperimentsWithWindowWeights(profiles, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, realisticOptions, context, source, maxParticipatingBoards)
+    : buildExperiments(profiles, penaltyWeight, hardRiskThreshold, realisticOptions, context, "手动设定；", source, maxParticipatingBoards);
   const fullCycleDates = Array.from(new Set(profiles.map((profile) => profile.row.date))).sort();
-  const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, context);
+  const fullCycleTradeDifferences = buildTradeDifferences(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate, penaltyWeight, hardRiskThreshold, context, maxParticipatingBoards);
   const fullCycleRiskPenaltyAttribution = buildRiskPenaltyAttribution(profiles, fullCycleExperiments, rollingResult.penaltyWeightByDate);
   const factorAblations = buildFactorAblations(
     profiles,
@@ -1048,6 +1192,18 @@ export function buildDownsideRiskResearch(
     hardRiskThreshold,
     rollingTrainTradingDays,
     rollingValidationTradingDays,
+    boardHeightRiskControl: {
+      maxParticipatingBoards,
+      highBoardTierFrom: 4,
+      positionScaleFiveBoards: 0.6,
+      positionScaleSixBoardsPlus: 0.3,
+      definition: `高位连板风控：连板高度超过 ${maxParticipatingBoards} 板的高位标的在「高风险硬过滤」与「质量门控」中限制参与；5 板 / 6 板虽未越上限，但按 0.6 / 0.3 倍降低单笔仓位，并在风险分中按连板高度阶梯加重扣分。原始策略不施加该约束，作为对照基准。`,
+    },
+    boardHeightImpact: fullCycleExperiments.map((experiment) => ({
+      key: experiment.key,
+      restrictedCount: experiment.boardHeightExcludedCount ?? 0,
+      scaledCount: experiment.positionScaledCount ?? 0,
+    })),
     featureMatrix: riskFeatures,
     labeledSampleSize: evaluationProfiles.length,
     lowPriceLabelSampleSize,
@@ -1060,8 +1216,8 @@ export function buildDownsideRiskResearch(
     strategyRobustness,
     fullCycle: {
       definition: autoTunePenaltyWeight && rollingWindows.length > 0
-        ? "五种策略使用全部主板涨停股历史候选（不限连板高度）、相同资金、成本、仓位、入场和唯一退出约束连续回测。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。质量复合与质量门控均只读取信号日数据。"
-        : "五种策略使用全部主板涨停股历史候选（不限连板高度）、相同资金、成本、仓位、入场和唯一退出约束连续回测；风险扣分使用手动设定权重，质量复合与质量门控只读取信号日数据。",
+        ? `五种策略使用全部主板涨停股历史候选（不限连板高度）、相同资金、成本、仓位、入场和唯一退出约束连续回测；高位连板风控对超过 ${maxParticipatingBoards} 板的候选限制参与、对 5/6 板降低仓位（原始策略不施加）。风险扣分在有前置训练窗口的日期使用该窗口选出的权重；首个训练段及未覆盖尾段使用手动回退权重，不以未来数据选权。质量复合与质量门控均只读取信号日数据。`
+        : `五种策略使用全部主板涨停股历史候选（不限连板高度）、相同资金、成本、仓位、入场和唯一退出约束连续回测；高位连板风控对超过 ${maxParticipatingBoards} 板的候选限制参与、对 5/6 板降低仓位（原始策略不施加）；风险扣分使用手动设定权重，质量复合与质量门控只读取信号日数据。`,
       startDate: fullCycleDates[0] ?? null,
       endDate: fullCycleDates.at(-1) ?? null,
       experiments: fullCycleExperiments,

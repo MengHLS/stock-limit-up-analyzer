@@ -35,7 +35,9 @@ import {
   PositionSizingEditor,
   StrategyJsonEditor,
   RunConfigPanel,
+  type RunConfigViewModel,
   RunResultPlaceholder,
+  ClosedLoopRunResultPanel,
 } from "@/components/strategy";
 import { trpc } from "@/lib/trpc";
 import type { StrategyLifecycleStatusValue } from "@shared/researchContracts";
@@ -45,6 +47,11 @@ import {
   type StrategyViewModel,
 } from "@/adapters/strategyAdapter";
 import { emptyRunResult } from "@/adapters/runResultAdapter";
+import {
+  buildClosedLoopRunViewModel,
+  deriveExperimentId,
+  type ClosedLoopRunViewModel,
+} from "@/adapters/closedLoopRunAdapter";
 import {
   ArrowRight,
   CheckCircle2,
@@ -940,24 +947,68 @@ function LifecycleTab({
 }
 
 // ---------------------------------------------------------------------------
-// Tab 4 · 运行工作台（Phase 6 结构预留）
+// Tab 4 · 运行工作台（FE-4：真实接线 researchRun.loopRun）
 // ---------------------------------------------------------------------------
 
 function RunWorkbenchTab({ vm }: { vm: StrategyViewModel }) {
-  const result = emptyRunResult();
-  // FE-0 扩展：运行就绪探测（只读，后端权威）。数据认证未完成期间返回 BLOCKED。
+  // 未发起运行 / 运行失败 → 空态（沿用既有结构预留面板；此处是唯一的 emptyRunResult 用途）
+  const [runResult, setRunResult] = useState<ClosedLoopRunViewModel | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  // FE-0：运行就绪探测（只读，后端权威）
   const readinessQuery = trpc.researchRun.readiness.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  const loopRun = trpc.researchRun.loopRun.useMutation({
+    onSuccess: raw => {
+      const parsed = buildClosedLoopRunViewModel(raw);
+      if (parsed === null) {
+        // 响应形态不符预期：如实报错，不伪造「已运行」
+        setRunError("运行返回体无法解析（缺少 runId / stages），未记录结果。");
+        setRunResult(null);
+        return;
+      }
+      setRunError(null);
+      setRunResult(parsed);
+    },
+    onError: e => {
+      setRunError(e.message);
+      setRunResult(null);
+    },
+  });
+
+  const handleRun = (config: RunConfigViewModel) => {
+    setRunError(null);
+    loopRun.mutate({
+      // experimentId 仅作 §28 谱系锚点标识（确定性派生，非业务数值）
+      experimentId: deriveExperimentId(vm.strategyId, {
+        startDate: config.startDate,
+        endDate: config.endDate,
+      }, config.executionModel),
+      strategyId: vm.strategyId,
+      strategyVersion: vm.version,
+      dateRange: { startDate: config.startDate, endDate: config.endDate },
+      executionModel: config.executionModel,
+    });
+  };
+
   return (
     <div className="space-y-4">
       <RunConfigPanel
         vm={vm}
         readiness={readinessQuery.data ?? null}
         readinessLoading={readinessQuery.isLoading}
+        onRun={handleRun}
+        running={loopRun.isPending}
+        runError={runError}
       />
-      <RunResultPlaceholder result={result} />
+      {runResult === null ? (
+        <RunResultPlaceholder result={emptyRunResult()} />
+      ) : (
+        <ClosedLoopRunResultPanel result={runResult} />
+      )}
     </div>
   );
 }

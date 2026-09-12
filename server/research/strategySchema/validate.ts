@@ -27,6 +27,12 @@ import { validateParameterSchema, validateParameterSet } from "../experimentVali
 import { validateRankingConfig, validateSelectionConfig } from "../framework/validation";
 import type { RankingConfig, SelectionConfig } from "../framework/contract";
 import {
+  isStrategyDatasetVersionLabel,
+  validateCanonicalStrategyDefinition,
+} from "./definitionValidation";
+import { isValidDatasetVersionId } from "./definition";
+import { deriveLegacyViews, legacyViewsEqual } from "./legacyViews";
+import {
   DECLARED_RULE_KINDS,
   POSITION_SIZING_KINDS,
   RULE_COMPARISON_OPERATORS,
@@ -57,6 +63,49 @@ function assertValid(r: ResearchValidationResult): void {
 /** 把一组 issues 重新挂到指定路径前缀下。 */
 function rebase(issues: readonly ResearchValidationIssue[], prefix: string): ResearchValidationIssue[] {
   return issues.map((item) => ({ code: item.code, path: `${prefix}.${item.path}`, message: item.message }));
+}
+
+/**
+ * STRATEGY-004 — doc 级 / 版本记录级 Dataset 坐标合法性（**二选一**，与 definitionValidation 同源）：
+ *   - 提供 `datasetVersionId`（正整数 = `dataset_version.id`）→ `datasetVersion` 必须是
+ *     Dataset Version label（`v1` / `v2`，即 Registry 的 `dataset_version.version`）；
+ *   - 缺省 `datasetVersionId` → 走 **legacy 兼容分支**，`datasetVersion` 必须是 rd-… 内容寻址串。
+ *
+ * 注意：本函数只判**形态**；「存在 / READY / datasetId 一致」属引用完整性，
+ * 只能在持久化层查真实 `dataset_version` 判定。
+ */
+function checkDatasetCoordinate(
+  datasetVersion: unknown,
+  datasetVersionId: unknown,
+  pathPrefix: string,
+  issues: ResearchValidationIssue[],
+): void {
+  const prefix = pathPrefix === "" ? "" : `${pathPrefix}.`;
+  const hasVersionId = datasetVersionId !== undefined && datasetVersionId !== null;
+  if (hasVersionId && !isValidDatasetVersionId(datasetVersionId)) {
+    issues.push(issue(
+      "SCHEMA_DATASET_VERSION_ID_INVALID",
+      `${prefix}datasetVersionId`,
+      `datasetVersionId 必须是正整数（Dataset Registry 的 dataset_version.id），实际：${String(datasetVersionId)}`,
+    ));
+  }
+  if (hasVersionId) {
+    if (!isStrategyDatasetVersionLabel(datasetVersion)) {
+      issues.push(issue(
+        "SCHEMA_DATASET_VERSION_INVALID",
+        `${prefix}datasetVersion`,
+        `提供 datasetVersionId 时 datasetVersion 必须是 Dataset Version label（如 v1 / v2；不得再写 legacy rd-… 串），实际：${String(datasetVersion)}`,
+      ));
+    }
+    return;
+  }
+  if (typeof datasetVersion !== "string" || !isValidDatasetVersionFormat(datasetVersion)) {
+    issues.push(issue(
+      "SCHEMA_DATASET_VERSION_INVALID",
+      `${prefix}datasetVersion`,
+      `未提供 datasetVersionId 时 datasetVersion 必须是 rd-… 内容寻址数据集版本（legacy 兼容分支：rd-<builder>-<rowSchema>-<sha256 前 16 hex>），实际：${String(datasetVersion)}`,
+    ));
+  }
 }
 
 /** 把既有校验器的路径根（如 parameterSchema / rankingConfig）替换为本层字段路径（如 parameters / recipe.rankingConfig）。 */
@@ -253,11 +302,14 @@ function checkUniverse(universe: unknown, datasetVersion: string | undefined, is
     const derivedPrefix = "research-dataset:";
     if (universeId.startsWith(derivedPrefix)) {
       const suffix = universeId.slice(derivedPrefix.length);
-      if (!isValidDatasetVersionFormat(suffix)) {
+      // STRATEGY-004：派生后缀 = `datasetVersion` 本身，因此它既可以是 legacy `rd-…`
+      // 内容寻址串，也可以是 Dataset Registry 的版本 label（v1 / v2）—— 与 dataset 坐标
+      // 「有坐标 → label，无坐标 → rd-…」同一口径（不在此处重复判定坐标形态）。
+      if (!isValidDatasetVersionFormat(suffix) && !isStrategyDatasetVersionLabel(suffix)) {
         issues.push(issue(
           "SCHEMA_UNIVERSE_DERIVED_FORMAT_INVALID",
           "universe.universeId",
-          `research-dataset 派生 universeId 的后缀必须是 rd-… 数据集版本，实际：${suffix}`,
+          `research-dataset 派生 universeId 的后缀必须是 rd-… 数据集版本或 Dataset Version label（如 v2），实际：${suffix}`,
         ));
       } else if (suffix !== datasetVersion) {
         issues.push(issue(
@@ -375,8 +427,7 @@ function checkRecipe(recipe: unknown, issues: ResearchValidationIssue[]): void {
 }
 
 /** 元数据（author / tags）。 */
-function checkMetadata(metadata: unknown, issues: ResearchValidationIssue[]): void {
-  if (metadata === undefined || metadata === null) return;
+function checkMetadata(metadata: unknown, issues: ResearchValidationIssue[]): void {  if (metadata === undefined || metadata === null) return;
   if (typeof metadata !== "object" || Array.isArray(metadata)) {
     issues.push(issue("SCHEMA_METADATA_INVALID", "metadata", "metadata 必须是对象"));
     return;
@@ -388,6 +439,56 @@ function checkMetadata(metadata: unknown, issues: ResearchValidationIssue[]): vo
     if (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string" || tag.trim() === "")) {
       issues.push(issue("SCHEMA_METADATA_TAGS_INVALID", "metadata.tags", "metadata.tags 必须是非空字符串数组"));
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// STEP STRATEGY-003 — Canonical definition 与 v1 派生视图的一致性复核
+// ---------------------------------------------------------------------------
+
+/**
+ * 复核「v1 字段 == 由 Canonical definition 单向派生的结果」。
+ *
+ * 为什么需要：`strategy_versions.fingerprint` 覆盖整份文档（含 definition 与 v1 字段），
+ * 所以**任何**手工篡改都会被指纹复核拦下。但 `versionRecordJson.strategy` 是**内嵌的第二份副本**
+ * （既有 §17 追溯契约，本任务不删除，用户裁定见报告 F1 处置），因此仍需一层显式断言，
+ * 把「双份」降级为「可检测的冗余」：任何一份的视图与定义不一致都必须响亮点名，
+ * 不允许静默选择其中一份覆盖另一份。
+ */
+function checkDefinitionViewConsistency(d: StrategyDocument, issues: ResearchValidationIssue[]): void {
+  const definition = d.definition;
+  if (definition === undefined || definition === null) return;
+  const views = deriveLegacyViews(definition);
+  const compare = (field: string, actual: unknown, expected: unknown): void => {
+    if (!legacyViewsEqual(actual, expected)) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_VIEW_DRIFT",
+        `definitionView.${field}`,
+        `${field} 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。` +
+        "不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+      ));
+    }
+  };
+  compare("entryRules", d.entryRules, views.entryRules);
+  compare("exitRules", d.exitRules, views.exitRules);
+  compare("riskRules", d.riskRules, views.riskRules);
+  compare("positionSizing", d.positionSizing, views.positionSizing);
+  compare("parameters", d.parameters, views.parameters);
+  const assumptions = d.executionAssumptions as unknown as Record<string, unknown> | null | undefined;
+  compare("executionAssumptions.executionModel", assumptions?.executionModel, views.executionModel);
+  if (views.datasetVersion !== undefined) {
+    compare("datasetVersion", d.datasetVersion, views.datasetVersion);
+  }
+  // STRATEGY-004：doc 级 datasetVersionId 是 PRIMARY 绑定权威坐标的兼容视图（单向派生）。
+  if (views.datasetVersionId !== undefined) {
+    compare("datasetVersionId", d.datasetVersionId, views.datasetVersionId);
+  } else if (d.datasetVersionId !== undefined && d.datasetVersionId !== null) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_VIEW_DRIFT",
+      "definitionView.datasetVersionId",
+      `doc 级 datasetVersionId（${String(d.datasetVersionId)}）在 definition 的 PRIMARY 绑定中不存在：` +
+      "该绑定走 legacy rd-… 分支，坐标必须删除或在绑定时声明（definition 是 Canonical，doc 级坐标只能是它的视图）。",
+    ));
   }
 }
 
@@ -442,17 +543,19 @@ export function validateStrategyDocument(document: StrategyDocument | undefined 
     issues.push(...remapPath(validateParameterSchema(d.parameters).issues, "parameterSchema", "parameters"));
   }
 
-  // -- §16 dataset 绑定（C-12.6.1 rd-… 内容寻址格式） --
-  if (typeof d.datasetVersion !== "string" || !isValidDatasetVersionFormat(d.datasetVersion)) {
-    issues.push(issue(
-      "SCHEMA_DATASET_VERSION_INVALID",
-      "datasetVersion",
-      `datasetVersion 必须是 rd-… 内容寻址数据集版本（rd-<builder>-<rowSchema>-<sha256 前 16 hex>），实际：${String(d.datasetVersion)}`,
-    ));
-  }
+  // -- §16 dataset 绑定（Dataset Registry 坐标，或 legacy rd-… 内容寻址分支） --
+  checkDatasetCoordinate(d.datasetVersion, d.datasetVersionId, "", issues);
 
   // -- §16 execution assumptions --
   checkExecutionAssumptions(d.executionAssumptions as unknown, issues);
+
+  // -- STEP STRATEGY-003：Canonical 富定义（可选）+ 与 v1 派生视图的一致性 --
+  if (d.definition !== undefined && d.definition !== null) {
+    const definitionValidation = validateCanonicalStrategyDefinition(d.definition);
+    issues.push(...rebase(definitionValidation.issues, "definition"));
+    // 定义自身非法时不再做派生比对（派生以定义合法为前提）。
+    if (definitionValidation.valid) checkDefinitionViewConsistency(d, issues);
+  }
 
   // -- 执行配方引用（可选） --
   checkRecipe(d.recipe as unknown, issues);
@@ -558,8 +661,17 @@ export function validateStrategyVersionRecord(record: StrategyVersionRecord | un
   }
 
   // -- §17 dataset / universe --
-  if (typeof r.datasetVersion !== "string" || !isValidDatasetVersionFormat(r.datasetVersion)) {
-    issues.push(issue("SCHEMA_RECORD_DATASET_VERSION_INVALID", "datasetVersion", "datasetVersion 必须是 rd-… 内容寻址数据集版本"));
+  // STRATEGY-004：与 document 同源判定（提供 datasetVersionId 时允许 label；否则要求 rd-…）。
+  // 版本记录保留自己的错误码，便于既有消费方区分「文档」与「追溯记录」两个层次。
+  const recordStrategy = r.strategy as unknown as StrategyDocument | null | undefined;
+  {
+    const recordDatasetIssues: ResearchValidationIssue[] = [];
+    checkDatasetCoordinate(r.datasetVersion, recordStrategy?.datasetVersionId, "", recordDatasetIssues);
+    issues.push(...recordDatasetIssues.map((item) => ({
+      code: item.code === "SCHEMA_DATASET_VERSION_INVALID" ? "SCHEMA_RECORD_DATASET_VERSION_INVALID" : item.code,
+      path: item.path,
+      message: item.message,
+    })));
   }
   checkNonEmptyString(r.universeId, "universeId", "SCHEMA_RECORD_UNIVERSE_ID_EMPTY", "universeId", issues);
 

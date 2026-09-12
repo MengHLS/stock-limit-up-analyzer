@@ -469,7 +469,9 @@ export function simulateRealisticTPlus1ToTPlus2(
 
       const entrySlippageBps = amountAdjustedSlippageBps(slippageBps, entryAmount);
       const slippedEntry = entryOpenPrice * (1 + entrySlippageBps / 10_000);
-      const plannedBudget = budgetByRow.get(row) ?? 0;
+      // 单笔仓位缩放（高位连板「降低仓位」）：只向下调整本笔预算上限，不改变选股与排序。
+      // 缺省 1 表示不缩放；缩放后总预算不增加，因此不会破坏「预算之和 ≤ 现金」的资金不变量。
+      const plannedBudget = (budgetByRow.get(row) ?? 0) * (row.positionScale ?? 1);
       const executableBudget = Math.min(plannedBudget, cash);
       let shares = Math.floor(executableBudget / (slippedEntry * (1 + commissionRate + transferFeeRate)) / lotSize) * lotSize;
       // 容量约束：单笔买入金额不超过当日成交额的一定比例，避免回测买入现实中无法成交的仓位。

@@ -1,7 +1,7 @@
 /**
  * STEP DATASET-001 — 首板事件检测（纯函数，无 IO，确定性）。
  *
- * 复用 STEP 5 涨跌停权威 `server/data/boardRules`（classifyBoard + limitUpPrice），
+ * 复用 STEP 5 涨跌停权威 `server/data/boardRules`（classifyBoard + exchangeLimitUpPrice），
  * 不重复实现「+10%」近似。涨停比例按板块 + PIT ST 维度：
  *   主板 10%（ST/*ST 5%）、创业板/科创板 20%、北交所 30%、unknown 板块不可判。
  *
@@ -11,7 +11,7 @@
  * 反泄漏：首板判定只依赖 T 日 close/preClose + 截至 T 日的滚动状态，绝不触碰未来。
  */
 
-import { classifyBoard, limitUpPrice } from "../data/boardRules";
+import { classifyBoard, exchangeLimitUpPrice } from "../data/boardRules";
 
 /** PIT ST 状态（来自 research_security_status_history，ST 维度解析）。 */
 export type StStatus = "NORMAL" | "ST" | "*ST" | "UNKNOWN";
@@ -45,16 +45,56 @@ export function limitUpRatio(code: string, st: StStatus): number | null {
   }
 }
 
-/** 收盘价是否触及涨停（close ≥ 涨停价）；价格缺失 / 比例不可判 → false（保守）。 */
+/** 收盘价是否触及涨停（close ≥ 交易所口径涨停价）；价格缺失 / 比例不可判 → false（保守）。 */
 export function isLimitUpClose(close: number | null, preClose: number | null, ratio: number | null): boolean {
   if (ratio === null) return false;
   if (close === null || preClose === null || preClose <= 0) return false;
-  return close >= limitUpPrice(preClose, ratio);
+  // 阈值必须取「四舍五入到分」的交易所口径涨停价：真实封板收盘价恰等于该值，
+  // 用未四舍五入的浮点乘积作阈值会系统性漏判（实测漏判率 38%，详见 boardRules.exchangeLimitUpPrice）。
+  // 容差 1e-9 仅用于抵御「两位小数 double 表示」的比较误差，不放松任何业务口径。
+  return close >= exchangeLimitUpPrice(preClose, ratio) - 1e-9;
 }
 
 /** 由 (symbol, tradeDate) 派生确定性事件 id（唯一 ≤ 64 字符）。 */
 export function computeEventId(symbol: string, tradeDate: string): string {
   return `${symbol}@${tradeDate}`;
+}
+
+// ---------------------------------------------------------------------------
+// 涨停候选「SQL 粗筛」下推（性能：把 8.9M 行大表的取数从「全市场」收敛到「接近涨停」）
+// ---------------------------------------------------------------------------
+//
+// 动机（实测）：全市场逐日拉取 stock_daily_prices 时，一次 61 天区间要传 21.9 万行（16.9s），
+// 而其中真正可能封板的只有约 8% —— 其余 92% 是纯浪费的跨境流量与解析开销。
+//
+// 语义约束（**必须**是 isLimitUpClose 的超集，否则静默漏判）：
+//   `isLimitUpClose(close, preClose, ratio)` 要求 `close ≥ exchangeLimitUpPrice(preClose, ratio)`
+//   即 `close ≥ Math.round(preClose × (1+ratio) × 100) / 100`，ratio ∈ {0.05, 0.10, 0.20, 0.30}。
+//   最低比例是 0.05（ST/*ST 主板），因此只需保证
+//     `close ≥ Math.round(preClose × 1.05 × 100) / 100` 的行全部被保留 即可。
+//
+// 为什么阈值取 1.045（而非 1.05）：直接下推 `close ≥ preClose × 1.05` 会因**四舍五入到分**
+// 而漏判（如 preClose=0.29 的涨停价恰为 0.30 = ×1.0345）。枚举 2 位小数昨收（k = preClose×100）：
+//   - k ≥ 100（昨收 ≥ 1.00 元）：`Math.round(k×1.05)/k` 的最小值 = **1.0458716**（k=109），
+//     故 `close ≥ preClose × 1.045` 是严格超集（余量 0.083%）；
+//   - k < 100（昨收 < 1.00 元，面值退市股）：k=1..9 时涨停价 == 昨收（比值 1.0），
+//     任何 > 1.0 的阈值都会漏判 → **低价股整段不做粗筛**（用 `preClose < 1.00 AND close ≥ preClose`）。
+//
+// 该谓词的正确性由 `scripts/verifyDatasetBuildPerf.mts` 在**真实 DB** 上做「全市场逐 bar 精确判定」
+// 对照实证（断言：粗筛结果经 isLimitUpClose 判定后与全量判定逐条一致，零漏判）。
+
+/** `stock_daily_prices` 涨停候选 SQL 谓词（列名为该表真实列名）。 */
+export const LIMIT_UP_CANDIDATE_SQL_PREDICATE =
+  "(`closePrice` >= `preClosePrice` * 1.045 OR (`preClosePrice` < 1.00 AND `closePrice` >= `preClosePrice`))";
+
+/**
+ * `LIMIT_UP_CANDIDATE_SQL_PREDICATE` 的 JS 等价实现（同一语义的单一来源，供内存实现与单测复用）。
+ * 只保证「是 isLimitUpClose 的超集」，粗筛命中 ≠ 涨停，仍须 `isLimitUpClose` 精确判定。
+ */
+export function isLimitUpCandidateBar(close: number | null, preClose: number | null): boolean {
+  if (close === null || preClose === null) return false;
+  if (close >= preClose * 1.045) return true;
+  return preClose < 1.0 && close >= preClose;
 }
 
 // ---------------------------------------------------------------------------

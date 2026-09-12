@@ -26,6 +26,8 @@ export interface DatasetDefinition {
   status: "ACTIVE" | "ARCHIVED";
   /** 物理表名显式落库（不运行时按 code+role 猜名）。 */
   eventTableName: string | null;
+  prefixTableName: string | null;
+  postTableName: string | null;
   pathTableName: string | null;
   outcomeTableName: string | null;
   featureTableName: string | null;
@@ -77,7 +79,14 @@ export interface DatasetBuildJob {
 // 首板回踩 Dataset 物理行类型（ds_first_limit_pullback_*）
 // ---------------------------------------------------------------------------
 
-/** 首板事件行（event）。 */
+/**
+ * 首板事件行（event）。
+ *
+ * **不含逐日行情**（`open`/`high`/`low`/`close`/`volume`/`amount` 在 `prefix`/`post`）：
+ * 事件表只回答「事件是什么」，行情由窗口表回答（消除跨表 t 日重复）。
+ * `previousClose` / `limitUpPrice` / `turnover` / `marketCap` / `floatMarketCap` 是
+ * **时点 / 定义性属性**（非日线原始字段），保留于本表。
+ */
 export interface FirstLimitPullbackEvent {
   datasetVersionId: number;
   eventId: string;
@@ -86,14 +95,11 @@ export interface FirstLimitPullbackEvent {
   market: string | null;
   industryCode: string | null;
   boardType: string | null;
-  open: number | null;
-  high: number | null;
-  low: number | null;
-  close: number | null;
+  /** t−1 日收盘价（涨停判定依据，不可下移）。 */
   previousClose: number | null;
+  /** 涨停价（由 previousClose 派生，四舍五入到分）。 */
   limitUpPrice: number | null;
-  volume: number | null;
-  amount: number | null;
+  /** t 日换手率（来自流动性富集 liquidity_daily.turnoverRate，非日线列）。 */
   turnover: number | null;
   isFirstLimit: boolean | null;
   previousLimitDate: string | null;
@@ -103,12 +109,16 @@ export interface FirstLimitPullbackEvent {
   floatMarketCap: number | null;
 }
 
-/** 路径行（path）。 */
-export interface FirstLimitPullbackPath {
+/**
+ * 原始行情窗口行（`prefix` / `post` **严格同构**，唯一区别是 `relativeDay` 区间）。
+ * 只含纯日线原始列，**不含任何衍生列**（不变量 I8/I9）。
+ */
+export interface FirstLimitPullbackRawBar {
   datasetVersionId: number;
   eventId: string;
   symbol: string;
   tradeDate: string;
+  /** prefix：∈ [-preWindowDays, 0]；post：∈ [1, postWindowDays]。 */
   relativeDay: number;
   open: number | null;
   high: number | null;
@@ -116,12 +126,29 @@ export interface FirstLimitPullbackPath {
   close: number | null;
   volume: number | null;
   amount: number | null;
-  turnover: number | null;
-  returnFromEventClose: number | null;
+}
+
+/** 前置行情行（`relativeDay ∈ [-preWindowDays, 0]`，0 = t 日；PIT 安全特征窗口）。 */
+export type FirstLimitPullbackPrefix = FirstLimitPullbackRawBar;
+
+/** 后置行情行（`relativeDay ∈ [1, postWindowDays]`；精确回测撮合 / 标签窗口）。 */
+export type FirstLimitPullbackPost = FirstLimitPullbackRawBar;
+
+/**
+ * 路径行（path）—— **只存衍生指标**，`relativeDay ≥ 1`。
+ *
+ * 已删：6 个原始行情列（→ `post`）、`turnover`（死列，恒 null）、
+ * `returnFromEventClose`（≡ `closeFromEventClose`）、`pullbackFromEventClose`（≡ `lowFromEventClose`）。
+ */
+export interface FirstLimitPullbackPath {
+  datasetVersionId: number;
+  eventId: string;
+  symbol: string;
+  tradeDate: string;
+  relativeDay: number;
   highFromEventClose: number | null;
   lowFromEventClose: number | null;
   closeFromEventClose: number | null;
-  pullbackFromEventClose: number | null;
   pullbackFromEventHigh: number | null;
   volumeRatio: number | null;
   isBreakout: boolean | null;
@@ -142,11 +169,58 @@ export interface FirstLimitPullbackOutcome {
 }
 
 // ---------------------------------------------------------------------------
+// 构建 / 筛选配置（STEP DATASET-003B）
+// ---------------------------------------------------------------------------
+//
+// 语义与 shared/datasetRegistryContracts.ts 的 B2 节同源（前端契约 / 领域类型一一对应）；
+// 落库于 dataset_build_config（主表标量）+ dataset_build_config_event / _board（子表多值）。
+
+/** 市场板块类别（与 server/data/boardRules.classifyBoard 输出一致）。 */
+export type DatasetBoard = "main" | "chinext" | "star" | "bse";
+
+/** 事件类型（客观市场事实，非策略信号）。 */
+export type DatasetEventKind = "firstBoard" | "limitUp" | "consecutiveBoard";
+
+/**
+ * 事件维度规格 = 相对日 × 事件类型。
+ * `relativeDay` 以「事件日 t」为 0（≤ 0）：0 = t 日、-1 = t-1 日、-2 = t-2 日。
+ * 多条规格为 OR（任一命中即收录）。
+ */
+export interface DatasetEventSpec {
+  relativeDay: number;
+  kind: DatasetEventKind;
+}
+
+/** 构建 / 筛选配置（领域形态：主表标量 + 子表多值已展开）。 */
+export interface DatasetBuildConfigRecord {
+  id?: number;
+  datasetVersionId: number;
+  /** 板块（空 = 不过滤，含 unknown）。 */
+  boards: DatasetBoard[];
+  /** 排除 ST/*ST（PIT st 维度）。 */
+  excludeSt: boolean;
+  /** 事件维度（至少 1 条）。 */
+  events: DatasetEventSpec[];
+  /** t 日之前的数据天数。 */
+  preWindowDays: number;
+  /** t 日之后的数据天数（等价旧 pathHorizon）。 */
+  postWindowDays: number;
+  /** outcome 视界（交易日，去重升序）。 */
+  outcomeHorizons: number[];
+  /** 批插入大小。 */
+  batchSize: number;
+  /** 配置 schema 版本。 */
+  configVersion: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // 构建抽象
 // ---------------------------------------------------------------------------
 
-/** 构建阶段。 */
-export type BuildPhase = "events" | "paths" | "outcomes";
+/** 构建阶段：先逐日检测事件，再逐事件装配窗口（prefix/post/path/outcome）。 */
+export type BuildPhase = "events" | "windows";
 
 /** 构建 checkpoint（cursor 断点）。 */
 export interface DatasetBuildCheckpoint {
@@ -165,12 +239,29 @@ export interface DatasetBuildCheckpoint {
   prevLimitUp?: string[];
   /** events 阶段 resume 所需的累计涨停历史（symbol → previousLimitDate / historicalLimitCount）。 */
   cumulative?: Record<string, { previousLimitDate: string | null; historicalLimitCount: number }>;
+  /**
+   * events 阶段 resume 所需的「每 symbol 涨停交易日序号」（窗口首个交易日 = 0）。
+   *
+   * 为什么需要：DATASET-003B 的事件维度允许锚点相对日 ≤ 0（t-1 / t-2…），必须精确回答
+   * 「锚点日是否涨停 / 锚点前一日是否涨停 / 锚点前最后一次涨停是哪天」。仅靠 prevLimitUp +
+   * cumulative（只有「截至今日」的一个标量）无法回看，故按 symbol 保留窗口内全部涨停日序号。
+   *
+   * 缺失（DATASET-001/002 旧版 checkpoint）→ builder 视为**不兼容**并明确失败
+   * （CHECKPOINT_INCOMPATIBLE），绝不静默用不完整状态续跑出错误数据。
+   */
+  limitUpDays?: Record<string, number[]>;
+  /** checkpoint 结构版本（DATASET-003B 起 = 2；旧 checkpoint 无此字段 = 1）。 */
+  schemaVersion?: number;
 }
 
 /** 构建结果。 */
 export interface DatasetBuildResult {
   status: "COMPLETED" | "FAILED";
   events: number;
+  /** prefix 表行数（原始行情，rd ≤ 0）。 */
+  prefixes: number;
+  /** post 表行数（原始行情，rd ≥ 1）。 */
+  posts: number;
   paths: number;
   outcomes: number;
   chunks: number;

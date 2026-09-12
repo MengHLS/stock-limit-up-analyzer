@@ -5,15 +5,21 @@
  * （events 逐日 keyset + paths/outcomes 按 event cursor）→ DbDatasetBuildIO（push-down + 幂等 upsert）。
  *
  * 用法（需项目根 .env 的 DATABASE_URL）：
- *   # 冒烟（小窗口）：
+ *   # 冒烟（小窗口，默认口径 = 全板块 / 含 ST / T 日首板 / t-0..t+20）：
  *   npx tsx scripts/runDataset001Build.mts --from=2024-01-02 --to=2024-01-10 --version=v1
- *   # 正式 benchmark（全历史）：
+ *   # 正式 benchmark（全历史 + 自定义筛选口径）：
  *   npx tsx scripts/runDataset001Build.mts --from=2019-01-02 --to=2026-09-04 --version=v1 \
- *     --path-horizon=20 --outcome-horizons=5,10,20 --batch-size=1000
+ *     --boards=main,chinext --exclude-st --events=0:firstBoard,-1:consecutiveBoard \
+ *     --pre=5 --post=20 --outcome-horizons=5,10,20 --batch-size=1000
+ *   # 兼容旧名：--path-horizon=N 等价于 --post=N
  *   # resume（崩溃续跑，jobId 见上次输出）：
  *   npx tsx scripts/runDataset001Build.mts --from=... --to=... --version=v1 --resume=<jobId>
  *   # 只查看状态：
  *   npx tsx scripts/runDataset001Build.mts --list
+ *
+ * 重要（DATASET-003B）：构建配置**不在本脚本内手工拼装**，一律从「该版本已固化的筛选配置」
+ * 解析（`service.resolveBuildConfigForVersion`），保证 CLI 与产品路径（runner）永不分叉。
+ * 因此对已存在的版本改 flag 不会改变其口径 —— 需要新口径请用新的 version 标签。
  *
  * 幂等：Build(v1) 重复执行走 ON DUPLICATE KEY，不产生重复行；
  * 版本隔离：所有行带 datasetVersionId，v1/v2 物理同表、逻辑隔离。
@@ -45,7 +51,14 @@ interface CliArgs {
   from: string;
   to: string;
   version: string;
-  pathHorizon: number;
+  /** 板块筛选（逗号分隔；空 = 全板块）。 */
+  boards: string[];
+  /** 排除 ST/*ST（PIT 状态）。 */
+  excludeSt: boolean;
+  /** 事件维度（`相对日:类型` 逗号分隔，如 `0:firstBoard,-1:consecutiveBoard`）。 */
+  events: { relativeDay: number; kind: string }[];
+  preWindowDays: number;
+  postWindowDays: number;
   outcomeHorizons: number[];
   batchSize: number;
   resumeJobId: string | null;
@@ -55,11 +68,30 @@ interface CliArgs {
 
 function parseArgs(args: string[]): CliArgs {
   const horizonRaw = readFlag(args, "outcome-horizons") ?? "5,10,20";
+  const boardsRaw = readFlag(args, "boards") ?? "";
+  // 事件维度：缺省 = T 日首板（与权威默认一致）；`--events=0:firstBoard,-1:limitUp`
+  const eventsRaw = readFlag(args, "events") ?? "0:firstBoard";
+  // `--path-horizon` 为 DATASET-003B 之前的旧名，保留为 `--post` 的兼容别名。
+  const postRaw = readFlag(args, "post") ?? readFlag(args, "path-horizon") ?? "20";
   return {
     from: readFlag(args, "from") ?? "",
     to: readFlag(args, "to") ?? "",
     version: readFlag(args, "version") ?? "v1",
-    pathHorizon: Number(readFlag(args, "path-horizon") ?? "20"),
+    boards: boardsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    excludeSt: readFlag(args, "exclude-st") === "true" || args.includes("--exclude-st"),
+    events: eventsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((s) => {
+        const [day, kind] = s.split(":");
+        return { relativeDay: Number(day), kind: (kind ?? "firstBoard").trim() };
+      }),
+    preWindowDays: Number(readFlag(args, "pre") ?? "0"),
+    postWindowDays: Number(postRaw),
     outcomeHorizons: horizonRaw.split(",").map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0),
     batchSize: Number(readFlag(args, "batch-size") ?? "1000"),
     resumeJobId: readFlag(args, "resume") ?? null,
@@ -133,10 +165,16 @@ if (!version) {
     version: args.version,
     startDate: args.from,
     endDate: args.to,
-    universeDefinition: { universe: "all-a-shares", source: "stock_daily_prices" },
-    filterDefinition: { board: "first-limit-pullback", rules: "boardRules" },
-    featureVersion: "1",
-    sourceVersion: "1",
+    // DATASET-003B：筛选 + 执行参数以单一 `filter` 固化（不再写 universeDefinition/filterDefinition 手拼 JSON）。
+    filter: {
+      boards: args.boards,
+      excludeSt: args.excludeSt,
+      events: args.events,
+      preWindowDays: args.preWindowDays,
+      postWindowDays: args.postWindowDays,
+      outcomeHorizons: args.outcomeHorizons,
+      batchSize: args.batchSize,
+    },
   });
   console.log("已创建 Dataset Version id=%s version=%s", version.id, args.version);
 } else {
@@ -144,12 +182,18 @@ if (!version) {
 }
 
 // 3. 构建作业（新 job 或 resume）。
-const jobId = args.resumeJobId ?? `ds001-${args.version}-${Date.now()}`;
 let job = args.resumeJobId ? await registry.getJob(args.resumeJobId) : undefined;
 if (!job) {
-  job = await service.startJob({ datasetVersionId: version.id!, jobId });
+  job = await service.createJob(version.id!); // PENDING
 }
-await service.markBuilding(version.id!);
+if (job.status === "PENDING") {
+  job = await service.startJob(job.jobId); // RUNNING
+  await service.markBuilding(version.id!); // version → BUILDING
+} else if (job.status !== "RUNNING") {
+  console.error("无法启动构建作业 %s（status=%s）", job.jobId, job.status);
+  process.exit(1);
+}
+const jobId = job.jobId;
 
 // resume checkpoint：从 job.lastCursor 反序列化。
 let resumeCheckpoint: DatasetBuildCheckpoint | null = null;
@@ -195,13 +239,30 @@ const reportProgress = async (checkpoint: DatasetBuildCheckpoint): Promise<void>
 
 let result;
 try {
+  // DATASET-003B：**不再手工拼装构建配置**，一律从「已固化的版本筛选配置」解析
+  // （配置行 → legacy 镜像 → 权威默认）。这样 CLI 与产品路径（runner）不可能漂移。
+  const resolved = await service.resolveBuildConfigForVersion(version.id!);
+  console.log(
+    "  已固化筛选口径: boards=[%s] excludeSt=%s events=[%s] t-%d..t+%d horizons=%s batchSize=%s",
+    resolved.boards.join(",") || "全板块",
+    resolved.excludeSt,
+    resolved.events.map((e) => `${e.relativeDay}:${e.kind}`).join(","),
+    resolved.preWindowDays,
+    resolved.postWindowDays,
+    resolved.outcomeHorizons.join(","),
+    resolved.batchSize,
+  );
   result = await builder.build({
     datasetVersionId: version.id!,
-    startDate: args.from,
-    endDate: args.to,
-    pathHorizon: args.pathHorizon,
-    outcomeHorizons: args.outcomeHorizons,
-    batchSize: args.batchSize,
+    startDate: resolved.startDate,
+    endDate: resolved.endDate,
+    boards: resolved.boards,
+    excludeSt: resolved.excludeSt,
+    events: resolved.events,
+    preWindowDays: resolved.preWindowDays,
+    postWindowDays: resolved.postWindowDays,
+    outcomeHorizons: resolved.outcomeHorizons,
+    batchSize: resolved.batchSize,
     resumeCheckpoint,
   }, reportProgress);
 } catch (err) {
@@ -214,7 +275,8 @@ try {
 
 // 5. 完成。
 const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(1);
-const totalRows = result.paths + result.outcomes;
+// 行数口径 = 五张物理表之和（与 DatasetVersionCounts.rowCount / 前端「实际行数」一致）。
+const totalRows = result.events + result.prefixes + result.posts + result.paths + result.outcomes;
 await service.completeJob(jobId);
 await service.markReady(version.id!, { totalEvents: result.events, totalRows: totalRows });
 
@@ -226,9 +288,23 @@ const report = {
   jobId,
   status: result.status,
   window: { from: args.from, to: args.to },
-  pathHorizon: args.pathHorizon,
-  outcomeHorizons: args.outcomeHorizons,
-  counts: { events: result.events, paths: result.paths, outcomes: result.outcomes, totalRows },
+  filter: {
+    boards: args.boards,
+    excludeSt: args.excludeSt,
+    events: args.events,
+    preWindowDays: args.preWindowDays,
+    postWindowDays: args.postWindowDays,
+    outcomeHorizons: args.outcomeHorizons,
+    batchSize: args.batchSize,
+  },
+  counts: {
+    events: result.events,
+    prefixes: result.prefixes,
+    posts: result.posts,
+    paths: result.paths,
+    outcomes: result.outcomes,
+    totalRows,
+  },
   processedRows: result.processedRows,
   failedRows: result.failedRows,
   chunks: result.chunks,
@@ -248,8 +324,10 @@ console.log("  定义      : %s (id=%s)", DATASET_CODE, definition.id);
 console.log("  版本      : %s (id=%s) -> READY", args.version, version.id);
 console.log("  作业      : %s -> COMPLETED", jobId);
 console.log("  事件      : %d", result.events);
-console.log("  路径      : %d", result.paths);
-console.log("  结果      : %d", result.outcomes);
+console.log("  前置行情  : %d", result.prefixes);
+console.log("  后置行情  : %d", result.posts);
+console.log("  路径衍生  : %d", result.paths);
+console.log("  未来结果  : %d", result.outcomes);
 console.log("  总行数    : %d（processedRows=%s）", totalRows, result.processedRows);
 console.log("  吞吐      : %s rows/s，%s events/s", report.throughput.rowsPerSec, report.throughput.eventsPerSec);
 console.log("  报告输出  : %s", args.out);

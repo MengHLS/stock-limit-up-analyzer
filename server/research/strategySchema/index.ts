@@ -17,6 +17,10 @@
  * 注意：本目录独立自持 index；research/index.ts 属既有文件未改动，如需并入统一出口由协调者决定。
  */
 
+export * from "./definition";
+export * from "./definitionValidation";
+export * from "./legacyViews";
+export * from "./projection";
 export * from "./types";
 export * from "./version";
 export * from "./validate";

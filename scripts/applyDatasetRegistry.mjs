@@ -4,6 +4,12 @@
 //   2) 按分号切分为单条语句（本 migration 无存储过程/触发器，语句内不含分号）；
 //   3) 逐条执行。表用 CREATE TABLE IF NOT EXISTS；索引重复创建（Duplicate key name）被捕获并忽略，
 // 重复运行无副作用。TiDB 默认关闭 multi-statement，故逐条单发。
+//
+// ⚠ 本脚本只负责 **Registry 三表**（dataset_definition / dataset_version / dataset_build_job）。
+//    数据集物理表（event / prefix / post / path / outcome）的**权威 DDL 在
+//    `server/datasetRegistry/plugins.ts`**（每个数据集自带表结构，声明式），
+//    由 `scripts/applyDatasetWindowLayering.mts` 统一建表 / 就地迁移（DATABASE_REDESIGN §3.5 S4）。
+//    0028 中的 legacy 三表 DDL 仅为历史留档，CREATE IF NOT EXISTS 不会覆盖既有表。
 import mysql from "mysql2/promise";
 import { readFileSync } from "node:fs";
 
@@ -54,37 +60,47 @@ for (const stmt of statements) {
   }
 }
 
-// 验证：6 张表 + 关键唯一约束。
-const expectedTables = [
+// 验证：3 张 Registry 表为**硬要求**；5 张物理表由 applyDatasetWindowLayering.mts 负责（缺失只告警）。
+const requiredTables = [
   "dataset_definition",
   "dataset_version",
   "dataset_build_job",
+];
+const physicalTables = [
   "ds_first_limit_pullback_event",
+  "ds_first_limit_pullback_prefix",
+  "ds_first_limit_pullback_post",
   "ds_first_limit_pullback_path",
   "ds_first_limit_pullback_outcome",
 ];
 const tableChecks = {};
-for (const t of expectedTables) {
+for (const t of [...requiredTables, ...physicalTables]) {
   const [rows] = await conn.query("SHOW TABLES LIKE ?", [t]);
   tableChecks[t] = rows.length > 0;
 }
 
-const uniqueIndexes = [
-  ["dataset_definition", "dataset_definition_dataset_code_unique"],
-  ["dataset_version", "uq_dataset_version_dataset_version"],
-  ["dataset_build_job", "dataset_build_job_job_id_unique"],
-  ["ds_first_limit_pullback_event", "uq_ds_flp_event_version_event"],
-  ["ds_first_limit_pullback_path", "uq_ds_flp_path_version_event_day"],
-  ["ds_first_limit_pullback_outcome", "uq_ds_flp_outcome_version_event_horizon"],
+// 唯一约束检查：按「列序列」断言（不依赖索引名，兼容 0028 legacy 命名与插件 DDL 命名）。
+const uniqueSpecs = [
+  ["dataset_definition", "datasetCode"],
+  ["dataset_version", "datasetId,version"],
+  ["dataset_build_job", "jobId"],
+  ["ds_first_limit_pullback_event", "datasetVersionId,eventId"],
+  ["ds_first_limit_pullback_prefix", "datasetVersionId,eventId,relativeDay"],
+  ["ds_first_limit_pullback_post", "datasetVersionId,eventId,relativeDay"],
+  ["ds_first_limit_pullback_path", "datasetVersionId,eventId,relativeDay"],
+  ["ds_first_limit_pullback_outcome", "datasetVersionId,eventId,horizon"],
 ];
 const uniqueChecks = {};
-for (const [table, indexName] of uniqueIndexes) {
+for (const [table, cols] of uniqueSpecs) {
   const [rows] = await conn.query(
-    `SELECT COUNT(*) AS n FROM information_schema.STATISTICS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
-    [table, indexName],
+    `SELECT INDEX_NAME, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS cols, MAX(NON_UNIQUE) AS nonUnique
+       FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+      GROUP BY INDEX_NAME`,
+    [table],
   );
-  uniqueChecks[`${table}.${indexName}`] = Number(rows[0].n) > 0;
+  const hit = rows.find((r) => r.cols === cols && Number(r.nonUnique) === 0);
+  uniqueChecks[`${table}(${cols})`] = hit ? hit.INDEX_NAME : false;
 }
 
 console.log(JSON.stringify({
@@ -98,6 +114,17 @@ console.log(JSON.stringify({
 
 await conn.end();
 
-if (errors.length > 0 || Object.values(tableChecks).some((v) => !v)) {
+const missingRequired = requiredTables.filter((t) => !tableChecks[t]);
+const missingPhysical = physicalTables.filter((t) => !tableChecks[t]);
+const badUnique = Object.entries(uniqueChecks).filter(([, v]) => !v).map(([k]) => k);
+
+if (missingPhysical.length > 0) {
+  console.warn(
+    `⚠ 物理表缺失（请运行 npx tsx scripts/applyDatasetWindowLayering.mts）：${missingPhysical.join(", ")}`,
+  );
+}
+
+if (errors.length > 0 || missingRequired.length > 0 || badUnique.length > 0) {
+  if (badUnique.length > 0) console.error(`❌ 唯一约束缺失：${badUnique.join(" | ")}`);
   process.exit(1);
 }

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { refreshStockPriceIndex } from "../server/stockPriceIndex";
 import { checkStockPriceSync, inferStockSuspensionWindows } from "../server/stockPriceSync";
 
 const START = "2025-10-01";
@@ -6,6 +7,8 @@ const END = "2026-09-04";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
+  // 行情同步检查依赖位图索引，脚本内先确保索引就绪（含磁盘快照快速路径）。
+  await refreshStockPriceIndex();
   const before = await checkStockPriceSync();
   const missingCodes = Array.from(new Set(before.items.filter((i) => i.missingCount > 0).map((i) => i.stockCode))).sort();
   console.log(`== 推断前：缺失对数=${before.summary.missingPairs}，停牌对数=${before.summary.suspendedPairs}，缺失股票数=${missingCodes.length} ==`);
@@ -38,6 +41,7 @@ async function main() {
     }
   }
 
+  await refreshStockPriceIndex({ force: true });
   const after = await checkStockPriceSync();
   console.log(`\n== 推断后：缺失对数=${after.summary.missingPairs}（-${before.summary.missingPairs - after.summary.missingPairs}），停牌对数=${after.summary.suspendedPairs} ==`);
   console.log("疑似代码错误(无日线):", invalid.join(", ") || "(无)");

@@ -34,7 +34,6 @@ import {
   LayoutDashboard,
   LogOut,
   History,
-  Layers,
   ShieldCheck,
   SlidersHorizontal,
   TrendingUp,
@@ -43,6 +42,7 @@ import {
   Workflow,
   FileText,
   BookOpenCheck,
+  FlaskConical,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { type LucideIcon } from "lucide-react";
@@ -88,8 +88,8 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "数据域健康", path: "/data-health", icon: ShieldCheck },
       { label: "历史状态查询", path: "/historical-state", icon: History },
-      { label: "数据集构建", path: "/dataset-builder", icon: Boxes },
-      { label: "数据集注册", path: "/datasets", icon: Layers },
+      { label: "数据集构建", path: "/datasets", icon: Boxes },
+      { label: "研究实验", path: "/research", icon: FlaskConical },
       { label: "策略工作台", path: "/strategy-editor", icon: ClipboardList },
       { label: "绩效仪表盘", path: "/performance", icon: Activity },
       { label: "参数搜索", path: "/parameter-search", icon: SlidersHorizontal },

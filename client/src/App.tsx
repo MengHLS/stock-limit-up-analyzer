@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, Redirect } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import AppShell from "./components/AppShell";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -20,9 +20,7 @@ import StockSync from "./pages/StockSync";
 import DataHealth from "./pages/DataHealth";
 // FE-2 — 研究链路：asOf(T) 历史状态查询器
 import HistoricalState from "./pages/HistoricalState";
-// FE-3 — 研究链路：Research Dataset 构建器（旧架构，保持不动）
-import DatasetBuilder from "./pages/DatasetBuilder";
-// DATASET-002.3 — Dataset Registry 前端（新架构，独立于 /dataset-builder）
+// DATASET-002.4B — 旧 /dataset-builder（FE-3）已整合进 Dataset Registry，此处仅保留重定向
 import {
   DatasetList,
   DatasetDetail,
@@ -41,6 +39,8 @@ import WalkForwardAnalysis from "./pages/WalkForwardAnalysis";
 import RegimeReport from "./pages/RegimeReport";
 // FE-9 — 研究链路：复盘纪律 + 生产闭环（骨架线）
 import ReviewWorkbench from "./pages/ReviewWorkbench";
+// RESEARCH-002 — 研究引擎：实验 / Run / 分析 / 结果 / 结论 工作台
+import { ResearchList, ResearchDetail } from "./pages/research";
 
 function Router() {
   return (
@@ -58,8 +58,11 @@ function Router() {
       <Route path="/stock-sync" component={StockSync} />
       <Route path="/data-health" component={DataHealth} />
       <Route path="/historical-state" component={HistoricalState} />
-      <Route path="/dataset-builder" component={DatasetBuilder} />
-      {/* DATASET-002.3 — Dataset Registry（独立于 /dataset-builder） */}
+      {/* DATASET-002.4B — 旧 /dataset-builder 已整合，重定向到新数据集构建入口 */}
+      <Route path="/dataset-builder">
+        <Redirect to="/datasets" />
+      </Route>
+      {/* DATASET-002.x — 数据集构建（Dataset Registry；含版本创建 / 构建 / 进度） */}
       <Route path="/datasets" component={DatasetList} />
       <Route path="/datasets/:datasetId" component={DatasetDetail} />
       <Route path="/datasets/:datasetId/versions" component={VersionList} />
@@ -70,6 +73,9 @@ function Router() {
       <Route path="/walk-forward" component={WalkForwardAnalysis} />
       <Route path="/regime-report" component={RegimeReport} />
       <Route path="/review-workbench" component={ReviewWorkbench} />
+      {/* RESEARCH-002 — 研究引擎工作台（实验 → Run → 分析 → 结果 → 结论） */}
+      <Route path="/research" component={ResearchList} />
+      <Route path="/research/:experimentId" component={ResearchDetail} />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

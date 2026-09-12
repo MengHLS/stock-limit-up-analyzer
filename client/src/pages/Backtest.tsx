@@ -3,6 +3,8 @@ import { Input } from "@/components/ui/input";
 import { StrategyEvaluationPanel } from "@/components/StrategyEvaluationPanel";
 import { sortOrdersByKey, type OrderReturnSortDirection, type OrderSortKey } from "@/lib/orderReturnSort";
 import { trpc } from "@/lib/trpc";
+import { BOARD_HEIGHT_RISK_MAX_TIER_FROM, boardHeightPositionScale, boardHeightRiskLadder, isBoardParticipationRestricted } from "@shared/boardHeightRisk";
+import { FIELD_COVERAGE_LABELS, type FieldCoverageReport } from "@shared/fieldAvailability";
 import { toast } from "sonner";
 import { BarChart3, DatabaseZap, History, Loader2, RefreshCw, Save, ShieldAlert, ShieldCheck, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -278,8 +280,112 @@ function OpenExpectationParamsCard({
   );
 }
 
-export default function BacktestPage() {
-  const [config, setConfig] = useState({
+/**
+ * 高位连板风控参数卡：阈值与梯度直接读 shared/boardHeightRisk 的唯一权威口径，
+ * 页面不再维护第二份「几板算高位」的表，避免口径漂移。
+ */
+function BoardHeightRiskParamsCard({
+  maxParticipatingBoards,
+  onChange,
+}: {
+  maxParticipatingBoards: number;
+  onChange: (value: number) => void;
+}) {
+  const ladder = boardHeightRiskLadder();
+  return (
+    <section data-board-height-risk-params className="rounded-2xl border border-rose-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-end gap-3 border-b border-rose-100 pb-3">
+        <div className="mr-auto">
+          <h2 className="font-semibold">高位连板风控</h2>
+          <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">连板高度越高，愿意在次日开盘接力的资金越少、断板后回撤越剧烈。风险分按连板高度阶梯加权，并叠加两道约束：<b>超过「允许参与上限」的标的在「高风险硬过滤 / 质量门控」中限制参与</b>；<b>5 板 / 6 板虽未越上限，但按 0.6 / 0.3 倍降低单笔仓位</b>。「原始策略」不施加该约束，始终作为对照基准。</p>
+        </div>
+        <label className="text-xs text-slate-600">允许参与上限（板）
+          <input
+            type="number"
+            min="1"
+            max="20"
+            value={maxParticipatingBoards}
+            onChange={(event) => onChange(Math.min(20, Math.max(1, Math.floor(Number(event.target.value) || 1))))}
+            className="mt-1 block h-9 w-24 rounded-md border border-slate-200 px-2"
+          />
+        </label>
+      </div>
+      <div className="overflow-auto rounded-lg border border-rose-100">
+        <table className="w-full min-w-[640px] text-xs">
+          <thead className="bg-rose-50 text-left text-rose-900"><tr><th className="px-3 py-2">连板高度</th><th className="px-3 py-2">风险扣分</th><th className="px-3 py-2">参与约束</th><th className="px-3 py-2">仓位系数</th></tr></thead>
+          <tbody>
+            {ladder.map((step) => {
+              const isTopTier = step.minBoards >= BOARD_HEIGHT_RISK_MAX_TIER_FROM;
+              const label = isTopTier ? `${step.minBoards} 板及以上` : `${step.minBoards} 板`;
+              const restricted = isBoardParticipationRestricted(step.minBoards, maxParticipatingBoards);
+              const scale = boardHeightPositionScale(step.minBoards, maxParticipatingBoards);
+              return (
+                <tr key={step.minBoards} className="border-t border-rose-100/70">
+                  <td className="px-3 py-2 font-medium text-slate-800">{label}</td>
+                  <td className="px-3 py-2 text-slate-600">+{step.contribution}</td>
+                  <td className="px-3 py-2">{restricted ? <span className="font-medium text-rose-700">限制参与（硬过滤 / 质量门控剔除）</span> : <span className="text-emerald-700">允许参与</span>}</td>
+                  <td className="px-3 py-2 text-slate-600">{scale >= 1 ? "1.0（不缩放）" : `${scale} 倍`}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-slate-500">风险扣分梯度为 0~100 风险分的组成项之一；上限越大，「限制参与」越宽松（设为 20 近似关闭），但阶梯扣分与 5/6 板降仓始终生效。该参数只影响本次回测与纸面交易，不写入行情库。缺失字段的降级处理见下方「数据覆盖」说明。</p>
+    </section>
+  );
+}
+
+/**
+ * 历史字段缺失提示条：仅当回测区间内存在整段未采集的字段时出现，
+ * 说明哪些字段缺失、回测采取了哪种降级口径。
+ */
+function FieldCoverageNotice({ report }: { report: FieldCoverageReport | null | undefined }) {
+  if (!report || report.degradedFields.length === 0) return null;
+  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  return (
+    <section data-field-coverage className="mx-auto max-w-7xl px-4 pt-5 sm:px-6">
+      <div className="rounded-2xl border border-amber-300 bg-amber-50/70 p-5 shadow-sm">
+        <div className="flex flex-wrap items-start gap-3">
+          <ShieldAlert className="mt-0.5 h-5 w-5 text-amber-700" />
+          <div className="mr-auto">
+            <p className="text-xs font-bold tracking-[0.16em] text-amber-700">FIELD COVERAGE · 历史字段缺失</p>
+            <h2 className="mt-1 font-semibold text-amber-950">回测区间内存在整段未采集字段，已按降级口径处理</h2>
+            <p className="mt-1 max-w-5xl text-xs leading-5 text-amber-900">{report.definition} 阈值：覆盖率 ≥ {percent(report.readyRatio)} 视为该字段已采集。</p>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <Metric label="涨停时间覆盖率" value={`${percent(report.limitUpTimeRatio)}（${report.degradedFields.includes("limitUpTime") ? "整段缺失，已降级" : "已采集"}）`} tone={report.degradedFields.includes("limitUpTime") ? "text-amber-700" : "text-slate-800"} />
+          <Metric label="所属板块覆盖率" value={`${percent(report.sectorRatio)}（${report.degradedFields.includes("sector") ? "整段缺失，已降级" : "已采集"}）`} tone={report.degradedFields.includes("sector") ? "text-amber-700" : "text-slate-800"} />
+          <Metric label="涨停关键词覆盖率" value={`${percent(report.keywordsRatio)}（${report.degradedFields.includes("keywords") ? "整段缺失" : "已采集"}）`} tone={report.degradedFields.includes("keywords") ? "text-amber-700" : "text-slate-800"} />
+        </div>
+        <div className="mt-4 overflow-auto rounded-lg border border-amber-200 bg-white">
+          <table className="w-full min-w-[720px] text-xs">
+            <thead className="bg-amber-50 text-left text-amber-900"><tr><th className="px-3 py-2">月份</th><th className="px-3 py-2">记录数</th><th className="px-3 py-2">涨停时间</th><th className="px-3 py-2">所属板块</th><th className="px-3 py-2">涨停关键词</th><th className="px-3 py-2">降级字段</th></tr></thead>
+            <tbody>
+              {report.degradedBuckets.map((bucket) => (
+                <tr key={bucket.bucket} className="border-t border-amber-100">
+                  <td className="px-3 py-2 font-medium text-slate-800">{bucket.bucket}</td>
+                  <td className="px-3 py-2 text-slate-600">{bucket.totalRecords}</td>
+                  <td className="px-3 py-2 text-slate-600">{percent(bucket.limitUpTimeRatio)}</td>
+                  <td className="px-3 py-2 text-slate-600">{percent(bucket.sectorRatio)}</td>
+                  <td className="px-3 py-2 text-slate-600">{percent(bucket.keywordsRatio)}</td>
+                  <td className="px-3 py-2 text-amber-800">{bucket.degradedFields.map((field) => FIELD_COVERAGE_LABELS[field]).join("、")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ul className="mt-3 space-y-1 text-xs leading-5 text-amber-900">
+          {report.degradationNotes.map((note) => <li key={note}>· {note}</li>)}
+        </ul>
+        <p className="mt-3 text-xs leading-5 text-amber-900">覆盖区间 {report.startDate ?? "-"} 至 {report.endDate ?? "-"}，共 {report.totalRecords} 条涨停记录；共 {report.degradedMonths.length} 个月存在降级字段。缺失只影响依赖该字段的特征与风险判断，不会让旧数据退出回测。</p>
+      </div>
+    </section>
+  );
+}
+
+export default function BacktestPage() {  const [config, setConfig] = useState({
     initialCapital: 100000, maxPositions: 5, commissionBps: 3, stampDutyBps: 5, transferFeeBps: 0.1, slippageBps: 10,
     blockLimitUpBuys: false, blockLimitDownSells: false, enableOneWordLimitDownProbability: false, oneWordLimitDownSellProbability: 0,
     blockOneWordLimitUpBuys: false, enableIntradayStopLoss: false, detectExRights: false, maxPositionAmountPercent: 0,
@@ -287,6 +393,8 @@ export default function BacktestPage() {
     expectationTierEnabled: false, expectationTable: OPEN_EXPECTATION_DEFAULT_CONFIG as OpenExpectationTableInput,
     trailingProfitActivationPercent: 6, trailingDrawdownPercent: 3, stopLossPercent: 5, strongHoldMinReturn: 3, maxHoldingDays: 5,
     downsideObservationDays: 5, mediumDownsidePercent: 4, highDownsidePercent: 8, riskPenaltyWeight: 0.35, autoTunePenaltyWeight: true, hardRiskThreshold: 65, rollingTrainTradingDays: 45, rollingValidationTradingDays: 14,
+    // 高位连板风控：超过该高度限制参与；5 板 / 6 板按系数降低仓位（见 shared/boardHeightRisk）。
+    maxParticipatingBoards: 6,
   });
   // 参数输入防抖：config 连续变化时延迟 800ms 再触发重算，避免参数页每次敲击都跑一次完整研究模拟（~140 次 simulate）。
   // 页面即时显示仍用 config；请求只认 debouncedConfig，二者解耦。
@@ -373,6 +481,7 @@ export default function BacktestPage() {
     downsideRisk: {
       observationDays: debouncedConfig.downsideObservationDays, mediumDownsidePercent: debouncedConfig.mediumDownsidePercent, highDownsidePercent: debouncedConfig.highDownsidePercent, penaltyWeight: debouncedConfig.riskPenaltyWeight, autoTunePenaltyWeight: debouncedConfig.autoTunePenaltyWeight, hardRiskThreshold: debouncedConfig.hardRiskThreshold,
       rollingTrainTradingDays: debouncedConfig.rollingTrainTradingDays, rollingValidationTradingDays: debouncedConfig.rollingValidationTradingDays,
+      maxParticipatingBoards: debouncedConfig.maxParticipatingBoards,
     },
   }), [debouncedConfig, dateRange]);
   // 分析页使用「完整分析报表」研究端点（生产核心 + 下行风险研究）。
@@ -553,6 +662,8 @@ export default function BacktestPage() {
         ))}
       </nav>
     </div>
+    {(activeTab === "overview" || activeTab === "risk") && <FieldCoverageNotice report={data?.fieldCoverage} />}
+    {activeTab === "overview" && downsideRiskResearch?.fullCycle && <section data-board-height-impact className="mx-auto max-w-7xl px-4 pt-5 sm:px-6"><div className="rounded-2xl border border-rose-200 bg-white p-5 shadow-sm"><div className="flex items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 text-rose-700" /><div><p className="text-xs font-bold tracking-[0.16em] text-rose-700">HIGH-BOARD RISK CONTROL</p><h2 className="mt-1 font-semibold">高位连板风控生效情况</h2><p className="mt-1 max-w-5xl text-xs leading-5 text-slate-600">{downsideRiskResearch.boardHeightRiskControl?.definition ?? "高位连板风控未回显（结果由旧版本生成）。"}</p></div></div><div className="mt-4 overflow-auto rounded-xl border border-rose-100"><table className="w-full min-w-[720px] text-xs"><thead className="bg-rose-50 text-left text-rose-900"><tr><th className="px-3 py-2">策略</th><th className="px-3 py-2">因高位连板限制参与</th><th className="px-3 py-2">因高位连板降低仓位</th><th className="px-3 py-2">说明</th></tr></thead><tbody>{(downsideRiskResearch.boardHeightImpact ?? []).map((impact) => { const experiment = fullCycleExperiments.find((item) => item.key === impact.key); return <tr key={impact.key} className="border-t border-rose-100"><td className="px-3 py-2 font-semibold" style={{ color: strategyColors[impact.key] }}>{experiment?.label ?? impact.key}</td><td className="px-3 py-2 text-slate-700">{impact.restrictedCount} 只</td><td className="px-3 py-2 text-slate-700">{impact.scaledCount} 只</td><td className="px-3 py-2 text-slate-500">{impact.key === "baseline" ? "原始策略不施加高位连板约束，作为对照基准。" : "限制参与作用于硬过滤 / 质量门控；降低仓位作用于风险扣分 / 质量复合 / 质量门控。"}</td></tr>; })}</tbody></table></div><p className="mt-3 text-xs leading-5 text-slate-500">说明：连板高度阶梯扣分进入所有「风险扣分 / 硬过滤 / 质量复合 / 质量门控」的风险判断；「原始策略」保留原始评分不施加任何高位约束，仅作对照。限制参与只发生在带硬门槛的策略上，因此「风险扣分 / 质量复合」的正确读法是「同池内降权 + 对 5/6 板降仓」，而不是删除候选。</p></div></section>}
     {activeTab === "overview" && downsideRiskResearch?.fullCycle && <section data-full-cycle-comparison className="mx-auto max-w-7xl px-4 pt-5 sm:px-6"><div className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start gap-3"><BarChart3 className="mt-0.5 h-5 w-5 text-violet-700" /><div className="mr-auto"><p className="text-xs font-bold tracking-[0.16em] text-violet-700">FULL-CYCLE COMPARISON</p><h2 className="mt-1 font-semibold">全周期五策略收益对比</h2><p className="mt-1 max-w-4xl text-xs leading-5 text-slate-600">{downsideRiskResearch.fullCycle.definition} 覆盖信号日 {downsideRiskResearch.fullCycle.startDate ?? "-"} 至 {downsideRiskResearch.fullCycle.endDate ?? "-"}。</p></div></div><ReturnLineChart data={fullCycleRiskCurve} series={fullCycleExperiments.map((item) => ({ key: item.key, label: item.label, color: strategyColors[item.key as OrderStrategyKey] }))} /><div data-trade-difference-table className="mt-6 rounded-xl border border-violet-100"><div className="flex flex-wrap items-end gap-3 border-b border-violet-100 bg-violet-50/60 px-4 py-3"><div className="mr-auto"><h3 className="text-sm font-semibold text-violet-950">逐笔交易差异对比</h3><p className="mt-1 text-xs text-violet-800">按相同信号日与股票对齐；每格依次展示状态、评分、买卖日期/价格/股数、收益率和原因。硬过滤与质量门控未进入模拟时单独标记。</p></div><label className="flex items-center gap-2 text-xs font-medium text-violet-900"><input type="checkbox" checked={tradeDiffOnly} onChange={(event) => setTradeDiffOnly(event.target.checked)} />仅看有差异订单</label><label className="text-xs text-slate-600">搜索<Input value={tradeDiffKeyword} onChange={(event) => setTradeDiffKeyword(event.target.value)} placeholder="代码、名称或日期" className="mt-1 h-8 w-40 bg-white" /></label></div><div className="overflow-auto"><table className="w-full min-w-[2140px] text-xs"><thead className="bg-white text-left text-slate-500"><tr><th className="px-3 py-2">信号日 / 股票</th><th className="px-3 py-2">风险分 / 扣分权重</th><th className="px-3 py-2">原始评分基准</th><th className="px-3 py-2">风险扣分策略</th><th className="px-3 py-2">高风险硬过滤</th><th className="px-3 py-2">质量复合评分</th><th className="px-3 py-2">质量门控策略</th></tr></thead><tbody>{displayedTradeDifferences.map((row) => <tr key={`${row.signalDate}-${row.stockCode}`} className="border-t border-slate-100 align-top"><td className="px-3 py-3"><p className="font-medium text-slate-800">{row.stockName}</p><p className="mt-1 font-mono text-slate-500">{row.stockCode}</p><p className="mt-1 text-slate-500">{row.signalDate}</p></td><td className="px-3 py-3"><p className="font-semibold text-fuchsia-800">风险 {row.riskScore}</p><p className="mt-1 text-slate-500">权重 {row.appliedPenaltyWeight}</p></td><td className="px-3 py-3"><TradeDiffCell trade={row.baseline} /></td><td className="px-3 py-3"><TradeDiffCell trade={row.riskPenalty} /></td><td className="px-3 py-3"><TradeDiffCell trade={row.hardFilter} filtered={row.hardFilterExcluded} /></td><td className="px-3 py-3"><TradeDiffCell trade={row.qualityBlend} /></td><td className="px-3 py-3"><TradeDiffCell trade={row.qualityGate} filtered={row.qualityGateExcluded} /></td></tr>)}</tbody></table>{displayedTradeDifferences.length === 0 && <p className="p-6 text-center text-sm text-slate-500">没有符合当前筛选条件的订单。</p>}</div></div></div></section>}
     {activeTab === "compare" && downsideRiskResearch?.walkForward && <section data-walk-forward className="mx-auto max-w-7xl px-4 pt-5 sm:px-6"><div className="rounded-2xl border border-fuchsia-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start gap-3"><DatabaseZap className="mt-0.5 h-5 w-5 text-fuchsia-700" /><div className="mr-auto"><h2 className="font-semibold">样本外累计拼接曲线</h2><p className="mt-1 max-w-4xl text-xs leading-5 text-slate-600">{downsideRiskResearch.walkForward.definition} 覆盖 {downsideRiskResearch.walkForward.validationWindowCount} 个连续验证窗口（{downsideRiskResearch.walkForward.startDate ?? "-"} 至 {downsideRiskResearch.walkForward.endDate ?? "-"}）。</p></div></div><ReturnLineChart data={downsideRiskResearch.walkForward.equityCurve.map((point) => ({ date: point.date.slice(5), ...(point.baseline === null ? {} : { baseline: point.baseline }), ...(point.riskPenalty === null ? {} : { riskPenalty: point.riskPenalty }), ...(point.hardFilter === null ? {} : { hardFilter: point.hardFilter }), ...(point.qualityBlend === null ? {} : { qualityBlend: point.qualityBlend }), ...(point.qualityGate === null ? {} : { qualityGate: point.qualityGate }) }))} series={downsideRiskResearch.walkForward.experiments.map((item) => ({ key: item.key, label: item.label, color: strategyColors[item.key as OrderStrategyKey] }))} /></div></section>}
     {activeTab === "compare" && rollingRiskStability && <section data-ten-window-stability className="mx-auto max-w-7xl px-4 pt-5 sm:px-6"><div className="rounded-2xl border border-indigo-200 bg-white p-5 shadow-sm"><div className="flex items-start gap-3"><BarChart3 className="mt-0.5 h-5 w-5 text-indigo-700" /><div><p className="text-xs font-bold tracking-[0.16em] text-indigo-700">GENERALIZATION CHECK</p><h2 className="mt-1 font-semibold">{rollingWindows.length}窗口样本外泛化稳定性</h2><p className="mt-1 text-xs leading-5 text-slate-600">每个窗口均只由其前置训练期选权；“相对优胜”要求风险扣分策略在该窗口同时实现更高收益与不更高的最大回撤。</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-3"><Metric label="风险扣分正收益窗口" value={`${rollingRiskStability.positiveRiskPenaltyWindows} / ${rollingWindows.length}`} tone="text-rose-600" /><Metric label="相对原始优胜窗口" value={`${rollingRiskStability.outperformingWindows} / ${rollingWindows.length}`} tone="text-indigo-700" /><Metric label="训练期选中权重分布" value={rollingRiskStability.distribution} /></div></div></section>}
@@ -573,6 +684,7 @@ export default function BacktestPage() {
         <div className="mt-3 rounded-xl border border-rose-100 bg-rose-50/50 p-3"><div className="flex flex-wrap items-end gap-3"><div className="mr-auto"><p className="text-xs font-semibold text-rose-900">唯一退出策略：动态止盈、止损与强势续持</p><p className="mt-1 text-xs text-rose-700">从T+2起：开盘触发止损即按开盘出清；收盘达到启动浮盈后从持仓期最高收盘价回撤则止盈；未启动止盈时仅满足强势续持条件才继续持有。</p></div><label className="text-xs text-slate-600">启动浮盈<input type="number" value={config.trailingProfitActivationPercent} onChange={(event) => update("trailingProfitActivationPercent", Math.min(100, Math.max(0, Number(event.target.value) || 0)))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">回撤阈值<input type="number" value={config.trailingDrawdownPercent} onChange={(event) => update("trailingDrawdownPercent", Math.min(100, Math.max(0, Number(event.target.value) || 0)))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">止损<input type="number" value={config.stopLossPercent} onChange={(event) => update("stopLossPercent", Math.min(100, Math.max(0, Number(event.target.value) || 0)))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">续持阈值<input type="number" value={config.strongHoldMinReturn} onChange={(event) => update("strongHoldMinReturn", Math.min(100, Math.max(0, Number(event.target.value) || 0)))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">最多持有日<input type="number" min="2" max="30" value={config.maxHoldingDays} onChange={(event) => update("maxHoldingDays", Math.min(30, Math.max(2, Math.floor(Number(event.target.value) || 2))))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label></div></div>
         <div className="mt-3 rounded-xl border border-fuchsia-100 bg-fuchsia-50/50 p-3"><div className="flex flex-wrap items-end gap-3"><div className="mr-auto"><p className="text-xs font-semibold text-fuchsia-900">下行风险研究参数</p><p className="mt-1 max-w-3xl text-xs text-fuchsia-800">原始、风险扣分和高风险过滤三版实验共享上方唯一退出策略；风险分只读取信号日字段，T+1开盘后的低价路径仅用于事后标签。自动寻优仅在训练窗口比较预设权重网格，选中权重只进入紧随其后的验证窗口。默认45日训练、14日验证，按当前行情覆盖形成10个连续无重叠样本外窗口。</p></div><label className="flex items-center gap-2 self-center text-xs font-medium text-fuchsia-900"><input type="checkbox" checked={config.autoTunePenaltyWeight} onChange={(event) => update("autoTunePenaltyWeight", event.target.checked)} />自动寻优</label><label className="text-xs text-slate-600">观察日<input type="number" min="2" max="10" value={config.downsideObservationDays} onChange={(event) => update("downsideObservationDays", Math.min(10, Math.max(2, Math.floor(Number(event.target.value) || 2))))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">中档下行<input type="number" min="1" max="50" value={config.mediumDownsidePercent} onChange={(event) => update("mediumDownsidePercent", Math.min(50, Math.max(1, Number(event.target.value) || 1)))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">高档下行<input type="number" min="1" max="50" value={config.highDownsidePercent} onChange={(event) => update("highDownsidePercent", Math.max(config.mediumDownsidePercent, Math.min(50, Number(event.target.value) || config.mediumDownsidePercent)))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">手动回退权重<input type="number" min="0" max="1" step="0.05" disabled={config.autoTunePenaltyWeight} value={config.riskPenaltyWeight} onChange={(event) => update("riskPenaltyWeight", Math.min(1, Math.max(0, Number(event.target.value) || 0)))} className="mt-1 block h-8 w-24 rounded-md border border-slate-200 bg-white px-2 disabled:bg-slate-100" /></label><label className="text-xs text-slate-600">硬过滤分<input type="number" min="0" max="100" value={config.hardRiskThreshold} onChange={(event) => update("hardRiskThreshold", Math.min(100, Math.max(0, Number(event.target.value) || 0)))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">训练窗口<input type="number" min="30" max="150" value={config.rollingTrainTradingDays} onChange={(event) => update("rollingTrainTradingDays", Math.min(150, Math.max(30, Math.floor(Number(event.target.value) || 30))))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label><label className="text-xs text-slate-600">验证窗口<input type="number" min="10" max="60" value={config.rollingValidationTradingDays} onChange={(event) => update("rollingValidationTradingDays", Math.min(60, Math.max(10, Math.floor(Number(event.target.value) || 10))))} className="mt-1 block h-8 w-20 rounded-md border border-slate-200 bg-white px-2" /></label></div></div>
       </section>}
+      {activeTab === "params" && <BoardHeightRiskParamsCard maxParticipatingBoards={config.maxParticipatingBoards} onChange={(value) => update("maxParticipatingBoards", value)} />}
       {activeTab === "params" && <OpenExpectationParamsCard enabled={config.expectationTierEnabled} table={config.expectationTable} onEnabledChange={(value) => update("expectationTierEnabled", value)} onTableChange={(next) => update("expectationTable", next)} />}
       {activeTab === "history" && <HistorySection />}
       {isLoading || !simulation ? <div className="flex min-h-72 items-center justify-center rounded-2xl border border-slate-200 bg-white"><Loader2 className="h-7 w-7 animate-spin text-sky-600" /></div> : <>

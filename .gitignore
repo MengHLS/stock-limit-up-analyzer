@@ -104,6 +104,9 @@ vitest.config.ts.timestamp-*.mjs
 tmp/
 temp/
 
+# 本地性能索引快照（可随时由服务端重建）
+.cache/
+
 # Database
 *.db
 *.sqlite

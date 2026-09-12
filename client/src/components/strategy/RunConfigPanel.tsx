@@ -3,10 +3,13 @@
  *
  * 提供：时间范围 / 初始资金 / 手续费 / 滑点 / 最大持仓 / 运行模式。
  *
- * FE-0 扩展接入（本轮）：顶部「运行就绪探测」条由后端 `researchRun.readiness`
- * 只读端点驱动（数据认证 gate + 策略注册 + 执行器绑定），未就绪原因原样展示；
- * 「运行策略」按钮 enabled = readiness.canRun（当前数据域认证未完成 → 恒 false，
- * 不伪造「已运行」；数据 + 执行链就绪后按钮自动可用，前端无需改动）。
+ * FE-0 扩展接入：顶部「运行就绪探测」条由后端 `researchRun.readiness` 只读端点驱动
+ * （认证 gate + 策略注册 + 装配覆盖率），未就绪原因原样展示。
+ *
+ * FE-4 扩展接入：`onRun` 注入后「运行策略」按钮可用，点击真实调用
+ * `researchRun.loopRun`（封闭循环编排器）。按钮**不因 executorBound=false 锁死**——
+ * 运行请求会真跑入参齐备的阶段、如实 BLOCKED 其余阶段，这是有诊断价值的真实执行；
+ * 未就绪原因只在 Tooltip 里提示，不阻断发起。
  */
 
 import { Input } from "@/components/ui/input";
@@ -25,7 +28,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Play, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Loader2, Play, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { StrategyViewModel } from "@/adapters/strategyAdapter";
 import { EXECUTION_MODEL_LABELS } from "@/adapters/strategyAdapter";
@@ -129,10 +132,17 @@ export function RunConfigPanel({
   vm,
   readiness,
   readinessLoading,
+  onRun,
+  running = false,
+  runError = null,
 }: {
   vm: StrategyViewModel;
   readiness?: RunReadinessOutput | null;
   readinessLoading?: boolean;
+  /** 发起闭环运行（FE-4）。缺省 → 按钮禁用（未接线场景）。 */
+  onRun?: (config: RunConfigViewModel) => void;
+  running?: boolean;
+  runError?: string | null;
 }) {
   const [config, setConfig] = useState<RunConfigViewModel>(() =>
     initRunConfig(vm)
@@ -140,14 +150,20 @@ export function RunConfigPanel({
   const set = (patch: Partial<RunConfigViewModel>) =>
     setConfig(c => ({ ...c, ...patch }));
 
-  const canRun = readiness?.canRun === true;
-  const tooltip = canRun
-    ? "执行端点将在数据 + 执行链就绪后启用（当前为就绪探测接入）"
-    : readiness && readiness.reasons.length > 0
-      ? readiness.reasons[0]
-      : readinessLoading
-        ? "正在探测运行就绪状态…"
-        : "运行就绪探测暂不可用";
+  // 按钮可用性由「是否接线」决定，而非「整条 14 阶段链是否就绪」：
+  // 运行请求会真实执行入参齐备的阶段，并把不可执行阶段如实 BLOCKED（诊断价值），
+  // 因此不因 executorBound=false 就把入口锁死（那会让工作台永远是空壳）。
+  const wired = typeof onRun === "function";
+  const canRun = wired && !running;
+  const reasonHint =
+    readiness && readiness.reasons.length > 0 ? readiness.reasons[0] : null;
+  const tooltip = !wired
+    ? "运行端点未接线（本页未注入 onRun）"
+    : running
+      ? "正在执行闭环运行…"
+      : reasonHint
+        ? `点击执行：入参齐备的阶段会真实运行；不可执行阶段将如实 BLOCKED。当前首因：${reasonHint}`
+        : "点击执行闭环运行（真实调用封闭循环编排器）";
 
   return (
     <SectionCard
@@ -157,8 +173,17 @@ export function RunConfigPanel({
         <Tooltip>
           <TooltipTrigger asChild>
             <span>
-              <Button size="sm" disabled={!canRun}>
-                <Play className="mr-1.5 h-3.5 w-3.5" /> 运行策略
+              <Button
+                size="sm"
+                disabled={!canRun}
+                onClick={() => onRun?.(config)}
+              >
+                {running ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {running ? "运行中…" : "运行策略"}
               </Button>
             </span>
           </TooltipTrigger>
@@ -174,6 +199,11 @@ export function RunConfigPanel({
         )}
         {!readinessLoading && readiness && (
           <ReadinessBlock readiness={readiness} />
+        )}
+        {runError && (
+          <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 font-mono text-[11px] text-red-700">
+            运行失败：{runError}
+          </p>
         )}
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

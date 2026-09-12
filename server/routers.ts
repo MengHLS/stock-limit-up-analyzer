@@ -7,6 +7,8 @@ import { researchDatasetRouter } from "./researchDatasetRouter";
 import { researchRouter } from "./researchRouter";
 // DATASET-002.2 — Dataset Registry 只读 API（新架构；与旧 researchDataset 并存，不互替）
 import { datasetRegistryRouter } from "./datasetRegistry/router";
+// RESEARCH-002 — Research Engine API（Experiment/Run/Analysis/Result/Conclusion；真实执行入口）
+import { researchEngineRouter } from "./researchEngineRouter";
 // FE-0 扩展 — 研究 run 目录与就绪探测
 import { researchRunRouter } from "./researchRunRouter";
 // FE-1 — 数据域健康看板（STEP 12 gate 认证证据，只读）
@@ -33,9 +35,16 @@ import {
   syncCandidateDailyPricesForUpload,
   syncCandidateDailyPricesForDate,
   syncCandidateDailyPricesForDateRange,
-  checkStockPriceSync,
+  checkStockPriceSyncPage,
+  invalidateStockPriceSyncCache,
   inferStockSuspensionWindows,
 } from "./stockPriceSync";
+import {
+  ensureStockPriceIndex,
+  isStockPriceIndexReady,
+  refreshStockPriceIndex,
+  stockPriceIndexSnapshot,
+} from "./stockPriceIndex";
 import {
   syncMarketDataOnce,
   getLastMarketSyncResult,
@@ -48,6 +57,13 @@ import {
   upsertSuspensionWindows,
   deleteSuspensionWindow,
 } from "./db";
+// 候选池明细载荷裁剪：明细改走分页端点，避免数十 MB 响应拖死浏览器。
+import {
+  stripLeaderCandidateHistory,
+  DEFAULT_LEADER_CANDIDATE_HISTORY_PAGE_SIZE,
+  MAX_LEADER_CANDIDATE_HISTORY_PAGE_SIZE,
+} from "./leaderCandidateHistory";
+import { SENTIMENT_CYCLE_PHASES } from "./sentimentCycle";
 
 import {
   createLimitUpRecord,
@@ -81,6 +97,7 @@ import {
   getSentimentCycleAnalysis,
   getLeaderCandidates,
   getLeaderCandidateBacktest,
+  getLeaderCandidateHistoryPage,
   getLeaderCandidateResearch,
   saveBacktestRun,
   listBacktestRuns,
@@ -132,6 +149,9 @@ const expectationTableSchema = z.object({
   }),
 });
 
+/** 情绪周期阶段 schema：与 server/sentimentCycle.ts 的阶段常量同源，避免字面量漂移。 */
+const sentimentCyclePhaseSchema = z.enum(SENTIMENT_CYCLE_PHASES);
+
 /** 回测参数 schema：计算与保存共用，保证保存的参数能被直接复算。 */
 const backtestOptionsSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -179,6 +199,8 @@ const backtestOptionsSchema = z.object({
       hardRiskThreshold: z.number().min(0).max(100).optional(),
       rollingTrainTradingDays: z.number().int().min(30).max(150).optional(),
       rollingValidationTradingDays: z.number().int().min(10).max(60).optional(),
+      /** 高位连板风控：允许参与的最高连板高度（超过即限制参与；5/6 板降低仓位）。 */
+      maxParticipatingBoards: z.number().int().min(1).max(20).optional(),
     })
     .optional(),
 });
@@ -223,6 +245,7 @@ async function syncUploadedDatePrices(
       limitUpDate,
       uploadedStockCodes
     );
+    invalidateStockPriceSyncCache();
     const allFailed =
       result.targetTradingDates > 0 &&
       result.failedDates.length === result.targetTradingDates &&
@@ -261,6 +284,8 @@ export const appRouter = router({
   research: researchRouter,
   // DATASET-002.2 — Dataset Registry 只读 API（Definition/Version/Job/Statistics/Event/Path/Outcome）
   datasetRegistry: datasetRegistryRouter,
+  // RESEARCH-002 — Research Engine（Experiment/Hypothesis/Run/Analysis/Result/Conclusion + 真实执行）
+  researchEngine: researchEngineRouter,
   // FE-0 扩展 — 研究 run 目录与就绪探测（只读；真实执行待数据认证后装配）
   researchRun: researchRunRouter,
   // FE-1 — 数据域健康看板
@@ -1251,12 +1276,36 @@ export const appRouter = router({
       return await getLeaderCandidates();
     }),
 
-    // 按历史候选池计算下一已记录交易日的连板延续结果
+    // 按历史候选池计算下一已记录交易日的连板延续结果（聚合结果 + 明细行数）。
+    // 2026-09-11 性能修复：不再随响应回传全量 historicalRows（数万行 / 数十 MB），
+    // 明细改由 getLeaderCandidateHistoryPage 服务端分页获取；聚合口径未变。
     getLeaderCandidateBacktest: publicProcedure
       .input(backtestOptionsSchema.optional())
       .query(async ({ input }) => {
         // STEP 5 P2-2：生产核心路径 —— 不执行 research-legacy 模拟器。
-        return await getLeaderCandidateBacktest(input);
+        return stripLeaderCandidateHistory(await getLeaderCandidateBacktest(input));
+      }),
+
+    // 全样本历史明细分页（服务端过滤 + 切片，单次响应恒 <= pageSize 行）。
+    // 复用同一份回测结果缓存，因此翻页不会重复跑全量模拟。
+    getLeaderCandidateHistoryPage: publicProcedure
+      .input(
+        backtestOptionsSchema.extend({
+          page: z.number().int().min(1).optional(),
+          pageSize: z.number().int().min(1).max(MAX_LEADER_CANDIDATE_HISTORY_PAGE_SIZE).optional(),
+          phase: sentimentCyclePhaseSchema.nullish(),
+          onlySuccess: z.boolean().nullish(),
+        }).optional(),
+      )
+      .query(async ({ input }) => {
+        const { page, pageSize, phase, onlySuccess, ...backtestOptions } = input ?? {};
+        return getLeaderCandidateHistoryPage({
+          ...backtestOptions,
+          page: page ?? 1,
+          pageSize: pageSize ?? DEFAULT_LEADER_CANDIDATE_HISTORY_PAGE_SIZE,
+          phase: phase ?? null,
+          onlySuccess: onlySuccess ?? null,
+        });
       }),
 
     // 完整分析报表（研究端点）：生产核心 + 下行风险研究。
@@ -1489,9 +1538,36 @@ export const appRouter = router({
         return { ...result, operationLogId };
       }),
 
-    // 检查各涨停记录的信号日及后续交易日行情是否已同步
-    getStockSyncStatus: publicProcedure.query(async () => {
-      return await checkStockPriceSync();
+    // 检查各涨停记录的信号日及后续交易日行情是否已同步（服务端筛选/排序/分页）。
+    // 只回传当前页，避免把 9.9 万条记录整份塞给浏览器。
+    getStockSyncStatus: publicProcedure
+      .input(
+        z
+          .object({
+            page: z.number().int().min(1).max(100000).optional(),
+            pageSize: z.number().int().min(1).max(200).optional(),
+            search: z.string().max(64).optional(),
+            onlyMissing: z.boolean().optional(),
+            sortDir: z.enum(["asc", "desc"]).optional(),
+            /** 强制跳过服务端缓存重算（「刷新」按钮）。 */
+            refresh: z.boolean().optional(),
+          })
+          .optional()
+      )
+      .query(async ({ input }) => {
+        // 位图索引未就绪时先触发后台装载，本次返回预热态而不是空列表。
+        if (!isStockPriceIndexReady()) ensureStockPriceIndex();
+        return await checkStockPriceSyncPage(input ?? {});
+      }),
+
+    /** 重建行情对位索引（脚本回填绕过了服务端增量维护时使用）。 */
+    rebuildStockSyncIndex: protectedProcedure.mutation(async ({ ctx }) => {
+      if (ctx.user.role !== "admin") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "仅管理员可重建行情索引" });
+      }
+      invalidateStockPriceSyncCache();
+      await refreshStockPriceIndex({ force: true });
+      return stockPriceIndexSnapshot();
     }),
 
     // 手动同步指定涨停日期（及可选股票代码）的日线行情
@@ -1509,11 +1585,13 @@ export const appRouter = router({
             message: "仅管理员可同步外部日线行情",
           });
         }
-        return await syncCandidateDailyPricesForDate(
+        const result = await syncCandidateDailyPricesForDate(
           input.date,
           10,
           input.stockCodes
         );
+        invalidateStockPriceSyncCache();
+        return result;
       }),
 
     // 按日期范围（单日或区间）同步日线行情，返回每个交易日的成功/失败明细
@@ -1558,6 +1636,7 @@ export const appRouter = router({
           refreshedCount: result.savedPriceRows,
           message: `按日期范围同步：${input.startDate} ~ ${input.endDate}，覆盖 ${result.targetTradingDates} 个交易日，保存 ${result.savedPriceRows} 条，缺失 ${result.missingPricePairs} 条${result.failedDates.length > 0 ? `，失败日期 ${result.failedDates.join(", ")}` : ""}`,
         });
+        invalidateStockPriceSyncCache();
         return { ...result, operationLogId };
       }),
 
@@ -1600,6 +1679,7 @@ export const appRouter = router({
             message: `校正会与以下涨停日期已有记录冲突，请先处理重复记录再重试：${details}`,
           });
         }
+        invalidateStockPriceSyncCache();
         return { updatedRows: result.updatedRows, dates: result.dates };
       }),
 
@@ -1624,11 +1704,13 @@ export const appRouter = router({
             message: "仅管理员可反推停牌窗口",
           });
         }
-        return await inferStockSuspensionWindows(
+        const inferred = await inferStockSuspensionWindows(
           input.stockCodes,
           input.startDate,
           input.endDate
         );
+        invalidateStockPriceSyncCache();
+        return inferred;
       }),
 
     // 人工标记停牌区间（管理员，兜底推断不可靠的情况）
@@ -1664,6 +1746,7 @@ export const appRouter = router({
             note: input.note ?? null,
           },
         ]);
+        invalidateStockPriceSyncCache();
         return await getStockSuspensionWindows([stockCode]);
       }),
 
@@ -1677,7 +1760,9 @@ export const appRouter = router({
             message: "仅管理员可删除停牌窗口",
           });
         }
-        return { deleted: await deleteSuspensionWindow(input.id) };
+        const deleted = await deleteSuspensionWindow(input.id);
+        if (deleted) invalidateStockPriceSyncCache();
+        return { deleted };
       }),
 
     // 获取每日最高连板趋势及对应股票名称

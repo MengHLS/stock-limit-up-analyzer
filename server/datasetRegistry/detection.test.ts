@@ -28,13 +28,44 @@ describe("detection: 涨停比例（复用 boardRules 口径，不硬编码 +10%
   });
 });
 
-describe("detection: 涨停判定", () => {
-  it("close ≥ 涨停价 = 涨停（未四舍五入阈值）", () => {
-    expect(isLimitUpClose(11.0, 10.0, 0.1)).toBe(true);
-    expect(isLimitUpClose(10.99, 10.0, 0.1)).toBe(false);
+describe("detection: 涨停判定（交易所口径，四舍五入到分）", () => {
+  it("close ≥ 涨停价 = 涨停；1 分钱之差不算", () => {
+    expect(isLimitUpClose(11.0, 10.0, 0.1)).toBe(true); // 10 → 11.00 恰好
+    expect(isLimitUpClose(10.99, 10.0, 0.1)).toBe(false); // 差 1 分
     expect(isLimitUpClose(null, 10.0, 0.1)).toBe(false);
     expect(isLimitUpClose(11.0, null, 0.1)).toBe(false);
     expect(isLimitUpClose(11.0, 10.0, null)).toBe(false);
+  });
+
+  it("回归：封板收盘价恰为「四舍五入到分」的涨停价时必须判为涨停（浮点误差不得漏判）", () => {
+    // 真实行情样本（2025-2026 实测）：前收 11.61 → 涨停价 12.77；
+    // 未四舍五入的原始乘积 11.61 × 1.1 = 12.771 > 12.77，旧实现会漏判。
+    expect(11.61 * 1.1).toBeGreaterThan(12.77);
+    expect(isLimitUpClose(12.77, 11.61, 0.1)).toBe(true);
+
+    // 前收 6.81 → 涨停价 7.49（原始乘积 7.491）
+    expect(isLimitUpClose(7.49, 6.81, 0.1)).toBe(true);
+
+    // 前收 11 → 涨停价 12.10（原始乘积 12.100000000000001）
+    expect(11 * 1.1).toBeGreaterThan(12.1);
+    expect(isLimitUpClose(12.1, 11, 0.1)).toBe(true);
+
+    // 创业板 20%：前收 10.01 → 涨停价 12.01（原始乘积 12.012）
+    expect(isLimitUpClose(12.01, 10.01, 0.2)).toBe(true);
+    // ST 5%：前收 1.01 → 涨停价 1.06（原始乘积 1.0605）
+    expect(isLimitUpClose(1.06, 1.01, 0.05)).toBe(true);
+  });
+
+  it("回归：低于涨停价 1 分仍判否（修正不得放松判定口径）", () => {
+    expect(isLimitUpClose(12.76, 11.61, 0.1)).toBe(false);
+    expect(isLimitUpClose(7.48, 6.81, 0.1)).toBe(false);
+    expect(isLimitUpClose(12.09, 11, 0.1)).toBe(false);
+    expect(isLimitUpClose(12.0, 10.01, 0.2)).toBe(false);
+    expect(isLimitUpClose(1.05, 1.01, 0.05)).toBe(false);
+  });
+
+  it("回归：超出涨停价（异常/除权失真数据）仍判为涨停（用 ≥ 而非 =）", () => {
+    expect(isLimitUpClose(13.5, 11.61, 0.1)).toBe(true);
   });
 });
 

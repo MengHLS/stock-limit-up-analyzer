@@ -32,7 +32,8 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { keepPreviousData } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 function formatDate(date: string) {
@@ -77,6 +78,7 @@ function describeSyncResult(result: SyncResultLike): { kind: "success" | "error"
 export default function StockSync() {
   const [onlyMissing, setOnlyMissing] = useState(true);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [syncingCode, setSyncingCode] = useState<string | null>(null);
   const [correctStock, setCorrectStock] = useState<{ stockCode: string; stockName: string } | null>(null);
   const [markSuspension, setMarkSuspension] = useState<{ stockCode: string; stockName: string } | null>(null);
@@ -85,9 +87,17 @@ export default function StockSync() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading, isError, refetch, isFetching } = trpc.sentiment.getStockSyncStatus.useQuery(undefined, {
-    staleTime: 30_000,
-  });
+  // 搜索防抖：避免每敲一个字就打一次接口（筛选在服务端做）。
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // 服务端筛选/排序/分页：只取当前页 20 条，不再把全部记录（约 9.9 万条）拉到浏览器里算。
+  const { data, isLoading, isError, refetch, isFetching } = trpc.sentiment.getStockSyncStatus.useQuery(
+    { page, pageSize, search: debouncedSearch || undefined, onlyMissing, sortDir },
+    { staleTime: 30_000, placeholderData: keepPreviousData }
+  );
 
   const syncAllMutation = trpc.sentiment.syncCandidateDailyPrices.useMutation({
     onSuccess: (result) => {
@@ -117,41 +127,27 @@ export default function StockSync() {
     },
   });
 
-  // 1) 先按当前筛选条件过滤
-  const filteredItems = useMemo(() => {
-    if (!data?.items) return [];
-    return data.items.filter((item) => {
-      if (onlyMissing && item.missingCount === 0) return false;
-      const q = search.trim().toLowerCase();
-      if (!q) return true;
-      return item.stockCode.toLowerCase().includes(q) || item.stockName.toLowerCase().includes(q);
-    });
-  }, [data, onlyMissing, search]);
-
-  // 2) 仅对「涨停日期」列做升/降序排序（稳定排序，同日期保持原相对顺序）
-  const sortedItems = useMemo(() => {
-    if (sortDir === "asc") {
-      return [...filteredItems].sort((a, b) => a.limitUpDate.localeCompare(b.limitUpDate));
-    }
-    return [...filteredItems].sort((a, b) => b.limitUpDate.localeCompare(a.limitUpDate));
-  }, [filteredItems, sortDir]);
-
-  // 3) 分页切片
-  const totalPages = Math.max(1, Math.ceil(sortedItems.length / pageSize));
-  const safePage = Math.min(page, totalPages);
-  const pagedItems = useMemo(
-    () => sortedItems.slice((safePage - 1) * pageSize, safePage * pageSize),
-    [sortedItems, safePage, pageSize]
-  );
-
-  // 筛选/搜索/每页条数变化时回到第一页，避免停留在越界页码
+  // 筛选/搜索/排序/每页条数变化时回到第一页，避免停留在越界页码。
   useEffect(() => {
     setPage(1);
-  }, [onlyMissing, search, pageSize]);
+  }, [onlyMissing, debouncedSearch, pageSize, sortDir]);
 
-  const items = pagedItems;
-  const summary = data?.summary;
+  const warmingUp = data != null && data.ready === false;
+  const pageResult = data != null && data.ready ? data : null;
+  const items = pageResult?.items ?? [];
+  const total = pageResult?.total ?? 0;
+  const totalPages = pageResult?.totalPages ?? 1;
+  const safePage = pageResult?.page ?? 1;
+  const summary = pageResult?.summary;
+  const indexBuiltAt = pageResult?.index.builtAt ?? null;
   const syncBusy = syncAllMutation.isPending;
+
+  // 索引构建中时轮询：索引就绪后服务端会直接返回结果，无需用户手动刷新。
+  useEffect(() => {
+    if (!warmingUp) return;
+    const timer = setInterval(() => void refetch(), 5_000);
+    return () => clearInterval(timer);
+  }, [warmingUp, refetch]);
 
   return (
     <div className="container py-4 max-w-[1400px] space-y-4">
@@ -198,6 +194,20 @@ export default function StockSync() {
           </Button>
         </div>
       </div>
+        {/* 索引预热提示：位图索引首次构建需要一次性聚合，之后从磁盘快照秒载 */}
+        {warmingUp && (
+          <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
+            <Loader2 className="h-4 w-4 mt-0.5 animate-spin shrink-0" />
+            <div>
+              <div className="font-medium">行情索引正在构建中</div>
+              <div className="mt-0.5 text-sky-600">
+                正在把「股票 × 交易日」的已同步关系统一压缩为位图索引（避免每次加载都全量扫描 889 万行行情表）。
+                首次构建约需 1~2 分钟，之后会落盘缓存、后续加载秒开。页面会自动重试。
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 概览卡片 */}
         {summary && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
@@ -232,10 +242,25 @@ export default function StockSync() {
           </div>
         )}
 
-        {!summary?.calendarAvailable && !isLoading && (
+        {pageResult && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
+            <span>
+              结果生成于 <span className="text-slate-500">{new Date(pageResult.computedAt).toLocaleTimeString("zh-CN")}</span>
+              （5 分钟内复用服务端缓存）
+            </span>
+            {indexBuiltAt && (
+              <span>
+                行情索引构建于 <span className="text-slate-500">{new Date(indexBuiltAt).toLocaleString("zh-CN")}</span>
+                （{pageResult.index.pairCount.toLocaleString("zh-CN")} 条已同步记录）
+              </span>
+            )}
+          </div>
+        )}
+
+        {summary && !summary.calendarAvailable && (
           <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             <AlertTriangle className="h-4 w-4" />
-            未配置 TUSHARE_TOKEN，无法获取交易日历，以下仅按「信号日」检查缺失情况。
+            无法获取交易日历，以下仅按「信号日」检查缺失情况。
           </div>
         )}
 
@@ -264,16 +289,25 @@ export default function StockSync() {
         {/* 列表 */}
         <Card className="shadow-sm border-slate-200">
           <CardContent className="p-0">
-            {isLoading ? (
+            {isLoading && !pageResult ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-6 w-6 animate-spin text-orange-500" />
               </div>
             ) : isError ? (
               <div className="flex items-center justify-center py-16 text-muted-foreground">加载失败，请刷新重试</div>
+            ) : warmingUp ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin text-sky-500 mb-2" />
+                行情索引构建中，稍后自动刷新
+              </div>
             ) : items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <CheckCircle2 className="h-10 w-10 text-emerald-500 mb-2" />
-                {onlyMissing ? "没有未同步的股票数据" : "暂无数据"}
+                {debouncedSearch
+                  ? "没有匹配的股票"
+                  : onlyMissing
+                    ? "没有未同步的股票数据"
+                    : "暂无数据"}
               </div>
             ) : (
               <Table>
@@ -394,12 +428,12 @@ export default function StockSync() {
           </CardContent>
         </Card>
 
-        {/* 排序状态 + 分页 */}
-        {!isLoading && !isError && sortedItems.length > 0 && (
+        {/* 排序状态 + 分页（服务端分页，total/totalPages 均来自接口） */}
+        {!isError && !warmingUp && total > 0 && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3 text-xs text-slate-500">
               <span>
-                共 <span className="font-semibold text-slate-700">{sortedItems.length}</span> 条
+                共 <span className="font-semibold text-slate-700">{total}</span> 条
               </span>
               <span className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50 px-2.5 py-1 text-orange-700">
                 {sortDir === "asc" ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}

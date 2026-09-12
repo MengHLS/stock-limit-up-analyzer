@@ -1,0 +1,127 @@
+{
+  "mode": "apply",
+  "statementsTotal": 15,
+  "executed": [
+    "column:strategies.description",
+    "column:strategies.strategyType",
+    "column:strategies.currentVersionId",
+    "index:strategies.idx_strategies_current_version",
+    "column:strategy_versions.parentVersionId",
+    "column:strategy_versions.status",
+    "column:strategy_versions.description",
+    "column:strategy_versions.updatedAt",
+    "index:strategy_versions.idx_strategy_versions_parent",
+    "index:strategy_versions.idx_strategy_versions_status",
+    "table:strategy_parameters",
+    "table:strategy_entry_rules",
+    "table:strategy_exit_rules",
+    "table:strategy_execution_rules",
+    "table:strategy_version_datasets"
+  ],
+  "skipped": [],
+  "tables": [
+    {
+      "name": "strategies",
+      "present": true
+    },
+    {
+      "name": "strategy_versions",
+      "present": true
+    },
+    {
+      "name": "strategy_parameters",
+      "present": true
+    },
+    {
+      "name": "strategy_entry_rules",
+      "present": true
+    },
+    {
+      "name": "strategy_exit_rules",
+      "present": true
+    },
+    {
+      "name": "strategy_execution_rules",
+      "present": true
+    },
+    {
+      "name": "strategy_version_datasets",
+      "present": true
+    }
+  ],
+  "columns": [
+    {
+      "name": "strategies.description",
+      "present": true
+    },
+    {
+      "name": "strategies.strategyType",
+      "present": true
+    },
+    {
+      "name": "strategies.currentVersionId",
+      "present": true
+    },
+    {
+      "name": "strategy_versions.parentVersionId",
+      "present": true
+    },
+    {
+      "name": "strategy_versions.status",
+      "present": true
+    },
+    {
+      "name": "strategy_versions.description",
+      "present": true
+    },
+    {
+      "name": "strategy_versions.updatedAt",
+      "present": true
+    }
+  ],
+  "indexes": [
+    {
+      "name": "strategy_versions.uq_strategy_versions_id_version",
+      "present": true
+    },
+    {
+      "name": "strategy_versions.idx_strategy_versions_parent",
+      "present": true
+    },
+    {
+      "name": "strategy_versions.idx_strategy_versions_status",
+      "present": true
+    },
+    {
+      "name": "strategy_parameters.uq_strategy_parameters_version_code",
+      "present": true
+    },
+    {
+      "name": "strategy_entry_rules.uq_strategy_entry_rules_version_rule",
+      "present": true
+    },
+    {
+      "name": "strategy_exit_rules.uq_strategy_exit_rules_version_rule",
+      "present": true
+    },
+    {
+      "name": "strategy_execution_rules.uq_strategy_execution_rules_version",
+      "present": true
+    },
+    {
+      "name": "strategy_version_datasets.uq_strategy_version_datasets_binding",
+      "present": true
+    }
+  ],
+  "rowCounts": {
+    "strategies": 0,
+    "strategy_versions": 0,
+    "strategy_parameters": 0,
+    "strategy_entry_rules": 0,
+    "strategy_exit_rules": 0,
+    "strategy_execution_rules": 0,
+    "strategy_version_datasets": 0
+  },
+  "failures": [],
+  "pass": true
+}

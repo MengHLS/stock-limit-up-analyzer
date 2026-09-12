@@ -6,6 +6,5 @@
  */
 
 export * from "./strategyAdapter";
-export * from "./datasetAdapter";
-export * from "./buildResultAdapter";
 export * from "./runResultAdapter";
+export * from "./datasetRegistryAdapter";

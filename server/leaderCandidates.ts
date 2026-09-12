@@ -1,5 +1,14 @@
-import type { SentimentCyclePhase } from "./sentimentCycle";
+import { SENTIMENT_CYCLE_PHASES, type SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
+import {
+  buildFieldCoverage,
+  buildFieldCoverageReport,
+  hasFieldValue,
+  resolveThemeWithFallback,
+  type FieldCoverageCounts,
+  type FieldCoverageReport,
+} from "../shared/fieldAvailability";
+import { boardHeightPositionScale, isBoardParticipationRestricted } from "../shared/boardHeightRisk";
 import { buildDownsideRiskResearch, calculateQualityBlendScoreForRisk, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult, type DownsideRiskStrategyKey } from "./downsideRisk";
 import type { RealisticBacktestOptions, RealisticBacktestResult } from "./realisticBacktest";
 import { RESEARCH_LEGACY_SIMULATION_SOURCE } from "./research/legacyTransactionSimulator";
@@ -12,6 +21,7 @@ import type { OverfittingGuardReport } from "./overfittingGuard";
 import { buildFinalVerdict } from "./factorScore";
 import type { FinalVerdict } from "./factorScore";
 import { parseNonNegativeNumber, parsePositivePrice } from "./data/validation";
+import { median } from "../shared/quant-stats";
 
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
@@ -21,6 +31,11 @@ export type LeaderCandidateSourceRecord = {
   sector: string | null;
   turnover: string | null;
   circulationValue: string | null;
+  /**
+   * 涨停关键词（如「商业航天+军工+碳纤维」）。历史期大面积缺失，仅用于字段覆盖识别
+   * 与「sector 缺失时的题材兜底」，不参与任何评分。
+   */
+  keywords?: string | null;
 };
 
 export type LeaderCandidateTrajectoryPoint = {
@@ -48,6 +63,13 @@ export type LeaderCandidate = {
   reasons: string[];
   riskTags: string[];
   trajectory: LeaderCandidateTrajectoryPoint[];
+  /**
+   * 信号日该股题材是否可解析（sector 缺失时为 false，题材家数改用同日中性兜底值）。
+   * 缺省（undefined）按「可用」处理，保证历史调用方与既有夹具语义不变。
+   */
+  sectorAvailable?: boolean;
+  /** 信号日该股封板时间是否可得；false 时封板相关风险不再作为风险证据。 */
+  limitUpTimeAvailable?: boolean;
 };
 
 export type LeaderCandidateResult = {
@@ -64,6 +86,18 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   sectorCount?: number;
   limitUpTime?: string | null;
   turnover?: string | null;
+  /**
+   * 字段可用性（缺失降级依据）。缺省 undefined 按「可用」处理，兼容既有夹具与调用方：
+   *   - sectorAvailable === false     → 题材家数为同日中性兜底值，题材支撑不产生风险扣分；
+   *   - limitUpTimeAvailable === false → 封板时间缺失不产生风险扣分（缺失 ≠ 封板偏晚）。
+   */
+  sectorAvailable?: boolean;
+  limitUpTimeAvailable?: boolean;
+  /**
+   * 单笔仓位缩放系数（高位连板「降低仓位」用，缺省 1 = 不缩放）。
+   * 只影响该笔的预算上限，不改变排序、不删除候选、不使用未来信息。
+   */
+  positionScale?: number;
   /** 信号日可见的下行风险字段；不参与既有原始评分阈值与排序。 */
   riskScore?: number;
   riskTier?: "低风险" | "中风险" | "高风险";
@@ -177,6 +211,11 @@ export type LeaderCandidateBacktestResult = {
   overfittingGuard: OverfittingGuardReport;
   /** 最终结论：逐因子评分与评级 + 策略过拟合风险 + 策略质量（可配置权重）。 */
   finalVerdict: FinalVerdict;
+  /**
+   * 回测区间内「涨停时间 / 所属板块 / 涨停关键词」的采集覆盖报告与降级说明。
+   * 仅用于识别与展示旧数据缺失，不参与评分、排序或成交。
+   */
+  fieldCoverage: FieldCoverageReport;
 };
 
 export type LeaderCandidatePortfolioHolding = {
@@ -346,6 +385,8 @@ type LeaderCandidateBuildOptions = {
   priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
   marketFactorsByDate?: Map<string, LeaderCandidateMarketFactors>;
   riskPenaltyWeight?: number;
+  /** 允许参与的最高连板高度；超过的高位连板仅在风险标签中显式提示（默认见 boardHeightRisk）。 */
+  maxParticipatingBoards?: number;
 };
 
 function isMainBoardStock(stockCode: string) {
@@ -501,11 +542,22 @@ export function buildLeaderCandidatesForDate(
   }
 
   const currentRecords = Array.from(currentRecordsByCode.values());
+  // 字段可用性识别：只使用该信号日记录（PIT 安全），得到该日「题材/封板时间」是否整体已采集。
+  const fieldCoverage: FieldCoverageCounts = buildFieldCoverage(currentRecords, targetDate);
+  // 题材聚合：只并入可解析题材的记录。历史期 sector 大面积缺失时，
+  // 旧口径会把当日全部缺失记录兜底成同一个「其他」题材 —— 既虚增题材共振得分，
+  // 又让「题材支撑不足」的风险扣分永不触发。这里改为「无法解析就不并入任何题材桶」。
+  const themeByCode = new Map<string, string>();
   const sectorCounts = new Map<string, number>();
   for (const record of currentRecords) {
-    const sector = normalizeSectorName(record.sector);
-    sectorCounts.set(sector, (sectorCounts.get(sector) ?? 0) + 1);
+    const { theme } = resolveThemeWithFallback(record);
+    if (theme === null) continue;
+    themeByCode.set(record.stockCode, theme);
+    sectorCounts.set(theme, (sectorCounts.get(theme) ?? 0) + 1);
   }
+  // 题材家数中性兜底：题材未知的标的改用「同日已解析题材家数的中位数」（只用同日横截面，PIT 安全）。
+  // 既不取上限（旧口径的巨型兜底题材 → 伪装成题材极强），也不取 1（伪造成题材极弱）。
+  const neutralSectorCount = median(Array.from(sectorCounts.values())) ?? 1;
 
   const strongSectors = Array.from(sectorCounts.entries())
     .map(([sector, count]) => ({ sector, count }))
@@ -518,10 +570,13 @@ export function buildLeaderCandidatesForDate(
   const scorableRecords = currentRecords;
   const rankedAllScoredStocks = scorableRecords
     .map((record) => {
-      const sector = normalizeSectorName(record.sector);
+      const hasTheme = themeByCode.has(record.stockCode);
+      // 题材未知时保留可读兜底名用于展示；家数走中性值，且不参与风险扣分。
+      const sector = hasTheme ? themeByCode.get(record.stockCode)! : normalizeSectorName(null);
       const boards = calculateBoards(record.stockCode, targetDate);
-      const sectorCount = sectorCounts.get(sector) ?? 0;
+      const sectorCount = hasTheme ? (sectorCounts.get(sector) ?? 0) : neutralSectorCount;
       const limitUpMinutes = timeToMinutes(record.limitUpTime);
+      const limitUpTimeAvailable = hasFieldValue(record.limitUpTime);
       const turnover = parseNumeric(record.turnover);
       const marketCap = calculateMarketCapScore(record.circulationValue);
       const boardScore = Math.min(boards, 6) * 7;
@@ -543,6 +598,8 @@ export function buildLeaderCandidatesForDate(
         sectorCount,
         score,
         limitUpTime: record.limitUpTime,
+        sectorAvailable: hasTheme,
+        limitUpTimeAvailable,
         turnover: record.turnover,
         circulationValue: record.circulationValue,
         marketCapScore: marketCap.score,
@@ -568,22 +625,38 @@ export function buildLeaderCandidatesForDate(
       const riskPenalty = Number((risk.riskScore * (options.riskPenaltyWeight ?? defaultDownsideRiskPenaltyWeight)).toFixed(2));
       const netScore = Number(Math.max(0, score - riskPenalty).toFixed(2));
 
-      const reasons = [`${boards}板高度`, `${sector} ${sectorCount}只涨停`];
-      if (record.limitUpTime) reasons.push(`${record.limitUpTime.slice(0, 5)} 封板`);
+      const baseReasons = [`${boards}板高度`, hasTheme ? `${sector} ${sectorCount}只涨停` : `题材未采集（同日中性家数 ${sectorCount}）`];
+      if (record.limitUpTime) baseReasons.push(`${record.limitUpTime.slice(0, 5)} 封板`);
       const formattedTurnover = formatTurnover(record.turnover);
-      if (formattedTurnover) reasons.push(`成交额 ${formattedTurnover}`);
-      if (record.circulationValue) reasons.push(`流通市值 ${record.circulationValue}亿元 · ${marketCap.label} ${marketCap.score}分`);
+      if (formattedTurnover) baseReasons.push(`成交额 ${formattedTurnover}`);
+      if (record.circulationValue) baseReasons.push(`流通市值 ${record.circulationValue}亿元 · ${marketCap.label} ${marketCap.score}分`);
 
       const riskTags: string[] = [];
       if (boards === 1) riskTags.push("首板待晋级确认");
-      if (sectorCount <= 1) riskTags.push("题材支撑偏弱");
+      if (hasTheme && sectorCount <= 1) riskTags.push("题材支撑偏弱");
       if (limitUpMinutes !== null && limitUpMinutes > 14 * 60 + 30) riskTags.push("封板偏晚");
-      if (boards >= 4 && sectorCount <= 2) riskTags.push("高位题材支撑弱");
+      if (boards >= 4 && hasTheme && sectorCount <= 2) riskTags.push("高位题材支撑弱");
       if (marketCap.score === 0) riskTags.push("流通市值缺失");
       if (marketCap.label === "小盘弹性") riskTags.push("小盘波动较大");
       if (marketCap.label === "超大盘弹性偏低") riskTags.push("超大盘弹性偏低");
+      // 高位连板：超过允许参与上限直接标注「限制参与」，否则按档位标注「降低仓位」。
+      if (isBoardParticipationRestricted(boards, options.maxParticipatingBoards)) {
+        riskTags.push(`${boards}板高位连板，限制参与`);
+      } else if (boardHeightPositionScale(boards, options.maxParticipatingBoards) < 1) {
+        riskTags.push(`${boards}板高位连板，降低仓位`);
+      }
+      // 缺失字段：显式标注，避免读者把「历史未采集」误读为个股异常。
+      if (!hasTheme) {
+        riskTags.push(fieldCoverage.sectorAvailable ? "本股题材数据缺失" : "题材数据整段缺失（历史未采集）");
+      }
+      if (!limitUpTimeAvailable) {
+        riskTags.push(fieldCoverage.limitUpTimeAvailable ? "本股封板时间缺失" : "封板时间整段缺失（历史未采集）");
+      }
       if (risk.riskTier === "高风险") riskTags.push("下行风险偏高");
       if (risk.riskTier === "中风险") riskTags.push("下行风险中等");
+
+      const reasons = [...baseReasons];
+      if (!hasTheme) reasons.push("题材数据缺失，题材家数按同日中性值处理");
 
       return {
         rank: 0,
@@ -604,6 +677,8 @@ export function buildLeaderCandidatesForDate(
         marketCapLabel: marketCap.label,
         reasons,
         riskTags,
+        sectorAvailable: hasTheme,
+        limitUpTimeAvailable,
         trajectory: trajectoryDates.map((date) => ({
           date,
           boards: stockDates.get(record.stockCode)?.has(date) ? calculateBoards(record.stockCode, date) : 0,
@@ -619,7 +694,10 @@ export function buildLeaderCandidatesForDate(
   const allScoredStocks = rankedAllScoredStocks.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
   const rankedCandidates = allScoredStocks
     .filter((candidate) => (
-      (candidate.sectorCount >= 3 && candidate.limitUpTime !== null && timeToMinutes(candidate.limitUpTime)! <= 13 * 60 + 30)
+      // 「题材共振 + 早封」准入路径必须建立在真实可得的题材与封板时间上；
+      // 字段缺失时不得凭中性兜底值伪造该路径，退回到纯评分阈值判断。
+      (candidate.sectorAvailable && candidate.limitUpTimeAvailable
+        && candidate.sectorCount >= 3 && candidate.limitUpTime !== null && timeToMinutes(candidate.limitUpTime)! <= 13 * 60 + 30)
       || candidate.score >= 52
     ))
     .sort((left, right) => (
@@ -891,6 +969,7 @@ export function buildLeaderCandidateBacktest(
       phaseByDate: context.phaseByDate,
       priceByStockDate: context.priceByStockDate,
       marketFactorsByDate: context.marketFactorsByDate,
+      maxParticipatingBoards: options.downsideRisk?.maxParticipatingBoards,
     });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
     const phaseContext = context.phaseByDate?.get(date);
@@ -939,6 +1018,8 @@ export function buildLeaderCandidateBacktest(
         sector: candidate.sector,
         boards: candidate.boards,
         sectorCount: candidate.sectorCount,
+        sectorAvailable: candidate.sectorAvailable,
+        limitUpTimeAvailable: candidate.limitUpTimeAvailable,
         score: candidate.score,
         riskScore: candidate.riskScore,
         riskTier: candidate.riskTier,
@@ -1080,7 +1161,7 @@ export function buildLeaderCandidateBacktest(
     startDate: signalDates[0] ?? null,
     endDate: signalDates.at(-1) ?? null,
   };
-  const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
+  const phaseOrder: SentimentCyclePhase[] = [...SENTIMENT_CYCLE_PHASES];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
     const successCount = phaseRows.filter((row) => row.success).length;
@@ -1157,5 +1238,7 @@ export function buildLeaderCandidateBacktest(
     factorCombination: factorCombinationReport,
     overfittingGuard: overfittingGuardReport,
     finalVerdict,
+    // 字段覆盖识别（展示 / 审计用）：说明旧数据哪些字段整段缺失、回测如何降级。
+    fieldCoverage: buildFieldCoverageReport(records),
   };
 }

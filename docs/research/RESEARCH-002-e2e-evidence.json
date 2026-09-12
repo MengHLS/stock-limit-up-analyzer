@@ -1,0 +1,841 @@
+{
+  "generatedAt": "2026-09-12T07:19:08.210Z",
+  "dataset": {
+    "datasetCode": "first_limit_pullback",
+    "datasetName": "首板回踩",
+    "datasetVersionId": 390002,
+    "versionLabel": "v2",
+    "status": "READY",
+    "startDate": "2024-09-01",
+    "endDate": "2026-09-01",
+    "totalEvents": 23978,
+    "horizons": [
+      5,
+      10,
+      20
+    ],
+    "pathRelativeDayRange": {
+      "min": 1,
+      "max": 20
+    }
+  },
+  "experiment": {
+    "id": 270001,
+    "name": "首板换手率与未来5日收益研究",
+    "researchType": "FEATURE"
+  },
+  "hypothesis": {
+    "id": 240001,
+    "statement": "换手率不同区间的首板股票，未来5日收益存在系统性差异。"
+  },
+  "run": {
+    "id": 360001,
+    "status": "COMPLETED",
+    "sampleCount": 23978,
+    "errorCode": null,
+    "engineDurationMs": 25355,
+    "totalScriptMs": 81599
+  },
+  "engineResult": {
+    "experimentId": 270001,
+    "runId": 360001,
+    "datasetVersionId": 390002,
+    "sampleCount": 23978,
+    "analysisCount": 5,
+    "resultCount": 138,
+    "conclusionId": 240001,
+    "conclusionType": "SUPPORTED",
+    "analyses": [
+      {
+        "analysisId": 300001,
+        "analysisType": "QUANTILE",
+        "status": "COMPLETED",
+        "resultCount": 53,
+        "durationMs": 1601
+      },
+      {
+        "analysisId": 300002,
+        "analysisType": "DESCRIPTIVE",
+        "status": "COMPLETED",
+        "resultCount": 38,
+        "durationMs": 1715
+      },
+      {
+        "analysisId": 300003,
+        "analysisType": "EVENT_STUDY",
+        "status": "COMPLETED",
+        "resultCount": 26,
+        "durationMs": 2004
+      },
+      {
+        "analysisId": 300004,
+        "analysisType": "CONDITIONAL",
+        "status": "COMPLETED",
+        "resultCount": 16,
+        "durationMs": 2140
+      },
+      {
+        "analysisId": 300005,
+        "analysisType": "STABILITY",
+        "status": "COMPLETED",
+        "resultCount": 5,
+        "durationMs": 1529
+      }
+    ],
+    "sampleBuildMs": 8925,
+    "durationMs": 25355
+  },
+  "analyses": [
+    {
+      "analysisId": 300001,
+      "analysisType": "QUANTILE",
+      "name": "换手率十分位 → 未来5日收益",
+      "target": "future_return_5d",
+      "config": {
+        "featureField": "turnover",
+        "targetField": "future_return_5d",
+        "quantileGroups": 10
+      },
+      "status": "COMPLETED",
+      "resultCount": 53,
+      "groupedSummary": {
+        "Q1": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 0.03785941641723375,
+          "MEDIAN_RETURN": 0.006993006993007044,
+          "WIN_RATE": 0.5271578947368422,
+          "STD_RETURN": 0.146356686756524
+        },
+        "Q10": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": -0.009686160626977818,
+          "MEDIAN_RETURN": -0.03137606454504704,
+          "WIN_RATE": 0.4037894736842105,
+          "STD_RETURN": 0.16306870817941807
+        },
+        "Q2": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 0.0204201686923874,
+          "MEDIAN_RETURN": -0.0015092061575612515,
+          "WIN_RATE": 0.4917894736842105,
+          "STD_RETURN": 0.1257950019590125
+        },
+        "Q3": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 0.016989606399153,
+          "MEDIAN_RETURN": -0.001014198782961439,
+          "WIN_RATE": 0.4943157894736842,
+          "STD_RETURN": 0.12099079420119052
+        },
+        "Q4": {
+          "SAMPLE_COUNT": 2374,
+          "MEAN_RETURN": 0.015757317799821466,
+          "MEDIAN_RETURN": -0.0083761788789,
+          "WIN_RATE": 0.4658803706823926,
+          "STD_RETURN": 0.12687397106536513
+        },
+        "Q5": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 0.01977344505078252,
+          "MEDIAN_RETURN": 0.0009689922480619948,
+          "WIN_RATE": 0.5014736842105263,
+          "STD_RETURN": 0.1259672441680285
+        },
+        "Q6": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 0.015420257208807572,
+          "MEDIAN_RETURN": -0.003597122302158197,
+          "WIN_RATE": 0.4787368421052632,
+          "STD_RETURN": 0.12476328104472258
+        },
+        "Q7": {
+          "SAMPLE_COUNT": 2374,
+          "MEAN_RETURN": 0.013450760797986488,
+          "MEDIAN_RETURN": -0.006636510416718831,
+          "WIN_RATE": 0.4692502106149958,
+          "STD_RETURN": 0.12335809337844912
+        },
+        "Q8": {
+          "SAMPLE_COUNT": 2376,
+          "MEAN_RETURN": 0.010435743945295029,
+          "MEDIAN_RETURN": -0.011836463703428536,
+          "WIN_RATE": 0.4566498316498317,
+          "STD_RETURN": 0.1326877472269302
+        },
+        "Q9": {
+          "SAMPLE_COUNT": 2374,
+          "MEAN_RETURN": 0.011729353908516088,
+          "MEDIAN_RETURN": -0.01076516386022088,
+          "WIN_RATE": 0.45324347093513057,
+          "STD_RETURN": 0.1344998389657699
+        }
+      },
+      "groupedSampleCounts": {
+        "Q1": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 2375,
+          "MEDIAN_RETURN": 2375,
+          "WIN_RATE": 2375,
+          "STD_RETURN": 2375
+        },
+        "Q10": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 2375,
+          "MEDIAN_RETURN": 2375,
+          "WIN_RATE": 2375,
+          "STD_RETURN": 2375
+        },
+        "Q2": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 2375,
+          "MEDIAN_RETURN": 2375,
+          "WIN_RATE": 2375,
+          "STD_RETURN": 2375
+        },
+        "Q3": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 2375,
+          "MEDIAN_RETURN": 2375,
+          "WIN_RATE": 2375,
+          "STD_RETURN": 2375
+        },
+        "Q4": {
+          "SAMPLE_COUNT": 2374,
+          "MEAN_RETURN": 2374,
+          "MEDIAN_RETURN": 2374,
+          "WIN_RATE": 2374,
+          "STD_RETURN": 2374
+        },
+        "Q5": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 2375,
+          "MEDIAN_RETURN": 2375,
+          "WIN_RATE": 2375,
+          "STD_RETURN": 2375
+        },
+        "Q6": {
+          "SAMPLE_COUNT": 2375,
+          "MEAN_RETURN": 2375,
+          "MEDIAN_RETURN": 2375,
+          "WIN_RATE": 2375,
+          "STD_RETURN": 2375
+        },
+        "Q7": {
+          "SAMPLE_COUNT": 2374,
+          "MEAN_RETURN": 2374,
+          "MEDIAN_RETURN": 2374,
+          "WIN_RATE": 2374,
+          "STD_RETURN": 2374
+        },
+        "Q8": {
+          "SAMPLE_COUNT": 2376,
+          "MEAN_RETURN": 2376,
+          "MEDIAN_RETURN": 2376,
+          "WIN_RATE": 2376,
+          "STD_RETURN": 2376
+        },
+        "Q9": {
+          "SAMPLE_COUNT": 2374,
+          "MEAN_RETURN": 2374,
+          "MEDIAN_RETURN": 2374,
+          "WIN_RATE": 2374,
+          "STD_RETURN": 2374
+        }
+      },
+      "scalarResults": [
+        {
+          "metricCode": "SPREAD_TOP_BOTTOM",
+          "metricValue": -0.04754557704421157,
+          "sampleCount": 4750,
+          "details": {
+            "featureVariable": "turnover",
+            "outcomeVariable": "future_return_5d",
+            "requestedGroups": 10,
+            "actualGroups": 10,
+            "cutPoints": [
+              2.46854,
+              3.5884800000000006,
+              4.631849999999999,
+              5.73026,
+              6.950749999999999,
+              8.40292,
+              10.274239999999997,
+              12.997,
+              17.88239999999999
+            ],
+            "pairCount": 23748,
+            "excludedForMissing": 230,
+            "groupingRule": "group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。",
+            "spreadDefinition": "SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。",
+            "metricDefinition": "**最高分位组均值 − 最低分位组均值**（left = 最高分位组，right = 最低分位组）。",
+            "topGroup": 10,
+            "bottomGroup": 1,
+            "topMean": -0.009686160626977818,
+            "bottomMean": 0.03785941641723375
+          }
+        },
+        {
+          "metricCode": "T_STAT_DIFFERENCE",
+          "metricValue": -10.574709925040798,
+          "sampleCount": 4750,
+          "details": {
+            "featureVariable": "turnover",
+            "outcomeVariable": "future_return_5d",
+            "requestedGroups": 10,
+            "actualGroups": 10,
+            "cutPoints": [
+              2.46854,
+              3.5884800000000006,
+              4.631849999999999,
+              5.73026,
+              6.950749999999999,
+              8.40292,
+              10.274239999999997,
+              12.997,
+              17.88239999999999
+            ],
+            "pairCount": 23748,
+            "excludedForMissing": 230,
+            "groupingRule": "group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。",
+            "spreadDefinition": "SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。",
+            "metricDefinition": "Welch 两样本 t 统计量 (m₁ − m₂)/√(s₁²/n₁ + s₂²/n₂)（left − right）。**不校正重叠视界带来的样本相关**，仅作研究辅助。",
+            "topGroup": 10,
+            "bottomGroup": 1
+          }
+        },
+        {
+          "metricCode": "P_VALUE_DIFFERENCE",
+          "metricValue": 0,
+          "sampleCount": 4750,
+          "details": {
+            "featureVariable": "turnover",
+            "outcomeVariable": "future_return_5d",
+            "requestedGroups": 10,
+            "actualGroups": 10,
+            "cutPoints": [
+              2.46854,
+              3.5884800000000006,
+              4.631849999999999,
+              5.73026,
+              6.950749999999999,
+              8.40292,
+              10.274239999999997,
+              12.997,
+              17.88239999999999
+            ],
+            "pairCount": 23748,
+            "excludedForMissing": 230,
+            "groupingRule": "group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。",
+            "spreadDefinition": "SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。",
+            "metricDefinition": "由 Welch t 统计量经**正态近似**得到的双尾 p 值（与 T_STAT 的 p 值同一近似口径）。未做多重比较校正，也不是交易有效性的证据。",
+            "topGroup": 10,
+            "bottomGroup": 1
+          }
+        }
+      ]
+    },
+    {
+      "analysisId": 300002,
+      "analysisType": "DESCRIPTIVE",
+      "name": "描述统计：换手率 / 未来5日收益",
+      "target": null,
+      "config": {
+        "variables": [
+          "turnover",
+          "future_return_5d"
+        ],
+        "quantileGroups": 10
+      },
+      "status": "COMPLETED",
+      "resultCount": 38,
+      "groupedSummary": {
+        "future_return_5d": {
+          "SAMPLE_COUNT": 23751,
+          "MISSING_COUNT": 227,
+          "MISSING_RATE": 0.009467011427141549,
+          "MEAN": 0.015210360880304351,
+          "MEDIAN": -0.005747126436781614,
+          "STD": 0.13343730914141402,
+          "MIN": -0.6463120049435425,
+          "MAX": 0.6205128205128206,
+          "P01": -0.23736735330304004,
+          "P05": -0.15551504707286584,
+          "P10": -0.11904761904761904,
+          "P25": -0.06218172121463524,
+          "P50": -0.005747126436781614,
+          "P75": 0.06607482117686211,
+          "P90": 0.17121588089330012,
+          "P95": 0.2670496594119521,
+          "P99": 0.5261210976523042,
+          "SKEWNESS": 1.4046902489339537,
+          "KURTOSIS": 3.898767516638003
+        },
+        "turnover": {
+          "SAMPLE_COUNT": 23975,
+          "MISSING_COUNT": 3,
+          "MISSING_RATE": 0.00012511468846442572,
+          "MEAN": 9.063458327424442,
+          "MEDIAN": 6.9447,
+          "STD": 7.903353335912992,
+          "MIN": 0.069,
+          "MAX": 91.6783,
+          "P01": 0.8329660000000001,
+          "P05": 1.79675,
+          "P10": 2.4654,
+          "P25": 4.10965,
+          "P50": 6.9447,
+          "P75": 11.4543,
+          "P90": 17.86662,
+          "P95": 23.431,
+          "P99": 37.807151999999945,
+          "SKEWNESS": 3.1862169774574527,
+          "KURTOSIS": 18.519072561377392
+        }
+      },
+      "groupedSampleCounts": {
+        "future_return_5d": {
+          "SAMPLE_COUNT": 23978,
+          "MISSING_COUNT": 23978,
+          "MISSING_RATE": 23978,
+          "MEAN": 23751,
+          "MEDIAN": 23751,
+          "STD": 23751,
+          "MIN": 23751,
+          "MAX": 23751,
+          "P01": 23751,
+          "P05": 23751,
+          "P10": 23751,
+          "P25": 23751,
+          "P50": 23751,
+          "P75": 23751,
+          "P90": 23751,
+          "P95": 23751,
+          "P99": 23751,
+          "SKEWNESS": 23751,
+          "KURTOSIS": 23751
+        },
+        "turnover": {
+          "SAMPLE_COUNT": 23978,
+          "MISSING_COUNT": 23978,
+          "MISSING_RATE": 23978,
+          "MEAN": 23975,
+          "MEDIAN": 23975,
+          "STD": 23975,
+          "MIN": 23975,
+          "MAX": 23975,
+          "P01": 23975,
+          "P05": 23975,
+          "P10": 23975,
+          "P25": 23975,
+          "P50": 23975,
+          "P75": 23975,
+          "P90": 23975,
+          "P95": 23975,
+          "P99": 23975,
+          "SKEWNESS": 23975,
+          "KURTOSIS": 23975
+        }
+      },
+      "scalarResults": []
+    },
+    {
+      "analysisId": 300003,
+      "analysisType": "EVENT_STUDY",
+      "name": "事件研究：T+1 / T+3 / T+5",
+      "target": null,
+      "config": {
+        "targetField": "future_return_5d",
+        "horizons": [
+          1,
+          3,
+          5
+        ]
+      },
+      "status": "COMPLETED",
+      "resultCount": 26,
+      "groupedSummary": {
+        "T+1": {
+          "SAMPLE_COUNT": 23917,
+          "MEAN_RETURN": 0.01636000701647653,
+          "MEDIAN_RETURN": 0.01072386058981234,
+          "STD_RETURN": 0.05599015027598352,
+          "WIN_RATE": 0.5718944683697789,
+          "T_STAT": 28.382232156381665,
+          "P_VALUE": 0
+        },
+        "T+3": {
+          "SAMPLE_COUNT": 23884,
+          "MEAN_RETURN": 0.01749795373366402,
+          "MEDIAN_RETURN": 0.0013807520213219167,
+          "STD_RETURN": 0.10541829757256152,
+          "WIN_RATE": 0.5038938201306313,
+          "T_STAT": 15.891934653906077,
+          "P_VALUE": 0
+        },
+        "T+5": {
+          "SAMPLE_COUNT": 23751,
+          "MEAN_RETURN": 0.015210360880304351,
+          "MEDIAN_RETURN": -0.005747126436781614,
+          "STD_RETURN": 0.13343730914141402,
+          "WIN_RATE": 0.47416950865226726,
+          "T_STAT": 10.606922316378684,
+          "P_VALUE": 0,
+          "MAX_FAVORABLE_EXCURSION": 0.11984551975693544,
+          "MAX_ADVERSE_EXCURSION": -0.06281773585074968,
+          "MAX_DRAWDOWN": -0.03714995650032536,
+          "BREAKOUT_RATE": 0.9349820668946536,
+          "MEAN_DAYS_TO_BREAKOUT": 1.0921093715152326
+        }
+      },
+      "groupedSampleCounts": {
+        "T+1": {
+          "SAMPLE_COUNT": 23917,
+          "MEAN_RETURN": 23917,
+          "MEDIAN_RETURN": 23917,
+          "STD_RETURN": 23917,
+          "WIN_RATE": 23917,
+          "T_STAT": 23917,
+          "P_VALUE": 23917
+        },
+        "T+3": {
+          "SAMPLE_COUNT": 23884,
+          "MEAN_RETURN": 23884,
+          "MEDIAN_RETURN": 23884,
+          "STD_RETURN": 23884,
+          "WIN_RATE": 23884,
+          "T_STAT": 23884,
+          "P_VALUE": 23884
+        },
+        "T+5": {
+          "SAMPLE_COUNT": 23751,
+          "MEAN_RETURN": 23751,
+          "MEDIAN_RETURN": 23751,
+          "STD_RETURN": 23751,
+          "WIN_RATE": 23751,
+          "T_STAT": 23751,
+          "P_VALUE": 23751,
+          "MAX_FAVORABLE_EXCURSION": 23751,
+          "MAX_ADVERSE_EXCURSION": 23751,
+          "MAX_DRAWDOWN": 23751,
+          "BREAKOUT_RATE": 23751,
+          "MEAN_DAYS_TO_BREAKOUT": 23751
+        }
+      },
+      "scalarResults": []
+    },
+    {
+      "analysisId": 300004,
+      "analysisType": "CONDITIONAL",
+      "name": "条件研究：换手率 3%~10% 首板",
+      "target": "future_return_5d",
+      "config": {
+        "featureField": "turnover",
+        "targetField": "future_return_5d",
+        "quantileGroups": 10
+      },
+      "status": "COMPLETED",
+      "resultCount": 16,
+      "groupedSummary": {
+        "ALL": {
+          "SAMPLE_COUNT": 23751,
+          "MEAN_RETURN": 0.015210360880304351,
+          "MEDIAN_RETURN": -0.005747126436781614,
+          "WIN_RATE": 0.47416950865226726,
+          "STD_RETURN": 0.13343730914141402,
+          "MAX_DRAWDOWN": -0.03714995650032536
+        },
+        "CONDITION": {
+          "SAMPLE_COUNT": 12826,
+          "MEAN_RETURN": 0.016620279657963366,
+          "MEDIAN_RETURN": -0.0037766720459028666,
+          "WIN_RATE": 0.48261344144706064,
+          "STD_RETURN": 0.12449156881106808,
+          "MAX_DRAWDOWN": -0.03334576507612465
+        }
+      },
+      "groupedSampleCounts": {
+        "ALL": {
+          "SAMPLE_COUNT": 23751,
+          "MEAN_RETURN": 23751,
+          "MEDIAN_RETURN": 23751,
+          "WIN_RATE": 23751,
+          "STD_RETURN": 23751,
+          "MAX_DRAWDOWN": 23931
+        },
+        "CONDITION": {
+          "SAMPLE_COUNT": 12826,
+          "MEAN_RETURN": 12826,
+          "MEDIAN_RETURN": 12826,
+          "WIN_RATE": 12826,
+          "STD_RETURN": 12826,
+          "MAX_DRAWDOWN": 12927
+        }
+      },
+      "scalarResults": [
+        {
+          "metricCode": "DIFFERENCE",
+          "metricValue": 0.0014099187776590132,
+          "sampleCount": 12826,
+          "details": {
+            "outcomeVariable": "future_return_5d",
+            "conditionRule": "turnover >= 3 AND turnover <= 10",
+            "conditionCount": 2,
+            "totalSampleCount": 23751,
+            "conditionSampleCount": 12826,
+            "differenceDefinition": "DIFFERENCE = mean(条件样本) − mean(全样本)。",
+            "relativeDifferenceDefinition": "RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。",
+            "metricDefinition": "**条件组均值 − 全部样本均值**（left = 条件组，right = 全样本）。"
+          }
+        },
+        {
+          "metricCode": "RELATIVE_DIFFERENCE",
+          "metricValue": 0.09269463024277708,
+          "sampleCount": 12826,
+          "details": {
+            "outcomeVariable": "future_return_5d",
+            "conditionRule": "turnover >= 3 AND turnover <= 10",
+            "conditionCount": 2,
+            "totalSampleCount": 23751,
+            "conditionSampleCount": 12826,
+            "differenceDefinition": "DIFFERENCE = mean(条件样本) − mean(全样本)。",
+            "relativeDifferenceDefinition": "RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。",
+            "metricDefinition": "(条件组均值 − 全样本均值) / |全样本均值|；基准均值为 0 时返回 null。"
+          }
+        },
+        {
+          "metricCode": "T_STAT_DIFFERENCE",
+          "metricValue": 1.007595725240712,
+          "sampleCount": 12826,
+          "details": {
+            "outcomeVariable": "future_return_5d",
+            "conditionRule": "turnover >= 3 AND turnover <= 10",
+            "conditionCount": 2,
+            "totalSampleCount": 23751,
+            "conditionSampleCount": 12826,
+            "differenceDefinition": "DIFFERENCE = mean(条件样本) − mean(全样本)。",
+            "relativeDifferenceDefinition": "RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。",
+            "metricDefinition": "Welch 两样本 t 统计量 (m₁ − m₂)/√(s₁²/n₁ + s₂²/n₂)（left − right）。**不校正重叠视界带来的样本相关**，仅作研究辅助。"
+          }
+        },
+        {
+          "metricCode": "P_VALUE_DIFFERENCE",
+          "metricValue": 0.3136486076054599,
+          "sampleCount": 12826,
+          "details": {
+            "outcomeVariable": "future_return_5d",
+            "conditionRule": "turnover >= 3 AND turnover <= 10",
+            "conditionCount": 2,
+            "totalSampleCount": 23751,
+            "conditionSampleCount": 12826,
+            "differenceDefinition": "DIFFERENCE = mean(条件样本) − mean(全样本)。",
+            "relativeDifferenceDefinition": "RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。",
+            "metricDefinition": "由 Welch t 统计量经**正态近似**得到的双尾 p 值（与 T_STAT 的 p 值同一近似口径）。未做多重比较校正，也不是交易有效性的证据。"
+          }
+        }
+      ]
+    },
+    {
+      "analysisId": 300005,
+      "analysisType": "STABILITY",
+      "name": "稳定性：按板块分组",
+      "target": "future_return_5d",
+      "config": {
+        "targetField": "future_return_5d",
+        "stabilityDimension": "board"
+      },
+      "status": "COMPLETED",
+      "resultCount": 5,
+      "groupedSummary": {
+        "ALL": {
+          "MEAN_RETURN": 0.015210360880304351
+        },
+        "main": {
+          "SAMPLE_COUNT": 23751,
+          "MEAN_RETURN": 0.015210360880304351,
+          "MEDIAN_RETURN": -0.005747126436781614,
+          "WIN_RATE": 0.47416950865226726
+        }
+      },
+      "groupedSampleCounts": {
+        "ALL": {
+          "MEAN_RETURN": 23751
+        },
+        "main": {
+          "SAMPLE_COUNT": 23751,
+          "MEAN_RETURN": 23751,
+          "MEDIAN_RETURN": 23751,
+          "WIN_RATE": 23751
+        }
+      },
+      "scalarResults": []
+    }
+  ],
+  "independentRecompute": {
+    "n": 23748,
+    "mean": 0.015214987939819253,
+    "cutPoints": [
+      2.46854,
+      3.5884800000000006,
+      4.631849999999999,
+      5.73026,
+      6.950749999999999,
+      8.40292,
+      10.274239999999997,
+      12.997,
+      17.88239999999999
+    ],
+    "actualGroups": 10,
+    "groupSizes": {
+      "1": 2375,
+      "2": 2375,
+      "3": 2375,
+      "4": 2374,
+      "5": 2375,
+      "6": 2375,
+      "7": 2374,
+      "8": 2376,
+      "9": 2374,
+      "10": 2375
+    },
+    "bottomN": 2375,
+    "topN": 2375,
+    "bottomMean": 0.03785941641723375,
+    "topMean": -0.009686160626977818,
+    "spread": -0.047545577044211564,
+    "horizons": [
+      5,
+      10,
+      20
+    ]
+  },
+  "conclusions": [
+    {
+      "id": 240001,
+      "conclusionType": "SUPPORTED",
+      "title": "首板换手率与未来5日收益研究 — 自动结论（SUPPORTED）",
+      "conclusion": "假设：「换手率不同区间的首板股票，未来5日收益存在系统性差异。」\n\n判定：**在预设规则下支持该假设**（样本、效应量、统计量、方向稳定性四项均达标）。\n\n关键量：Q10 − Q1 的 future_return_5d 均值差 = -0.0475；p = 0.0000；t = -10.5747；样本 23748（最小分组 2374）；方向一致性 0.778。\n\n判定依据（按顺序短路）：\n1. [通过] R2_样本达标 —— 总样本 23748（门槛 30），最小分组样本 2374（门槛 30）\n2. [通过] R3_效应达到最小实际阈值 —— |效应| = 0.0475，阈值 0.005\n3. [通过] R4_统计量达标 —— p = 0.0000，alpha = 0.05\n4. [通过] R5_方向稳定 —— 一致性 0.778，下限 0.6\n\n⚠️ 自动结论仅为**研究辅助**，不等同于统计显著性或交易有效性；任何策略性判断必须经 Backtest / 稳健性 / OOS 验证后才可成立，本阶段不产出交易结论。",
+      "evidence": {
+        "disclaimer": "⚠️ 自动结论仅为**研究辅助**，不等同于统计显著性或交易有效性；任何策略性判断必须经 Backtest / 稳健性 / OOS 验证后才可成立，本阶段不产出交易结论。",
+        "policy": {
+          "alpha": 0.05,
+          "materialityAbs": 0.005,
+          "minSampleCount": 30,
+          "stabilityMinConsistentRatio": 0.6,
+          "strongSampleMultiple": 2
+        },
+        "hypothesisId": 240001,
+        "hypothesisStatement": "换手率不同区间的首板股票，未来5日收益存在系统性差异。",
+        "primaryAnalysis": {
+          "analysisId": 300001,
+          "analysisType": "QUANTILE",
+          "effectLabel": "Q10 − Q1 的 future_return_5d 均值差",
+          "effect": -0.047545577044211564,
+          "pValue": 0,
+          "tStat": -10.574709925040798,
+          "sampleCount": 23748,
+          "minGroupSampleCount": 2374,
+          "groupCount": 10,
+          "directionConsistency": 0.7777777777777778
+        },
+        "primarySelectionRule": "按 QUANTILE → CONDITIONAL → EVENT_STUDY → STABILITY → SEGMENT_RELATION 的固定优先级选择主分析（不按效应大小挑选，避免选择性报告）",
+        "contributingAnalyses": [
+          {
+            "analysisId": 300001,
+            "analysisType": "QUANTILE",
+            "effect": -0.047545577044211564,
+            "effectLabel": "Q10 − Q1 的 future_return_5d 均值差",
+            "pValue": 0,
+            "sampleCount": 23748,
+            "notes": [
+              "group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。",
+              "SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。",
+              "T_STAT_DIFFERENCE / P_VALUE_DIFFERENCE 为 Welch 两样本检验；未校正多重比较与重叠视界，仅作研究辅助。",
+              "230 个样本因特征或结果缺失被排除（缺失不冒充有效样本）。"
+            ]
+          },
+          {
+            "analysisId": 300002,
+            "analysisType": "DESCRIPTIVE",
+            "effect": null,
+            "effectLabel": "描述性统计（无主效应）",
+            "pValue": null,
+            "sampleCount": 23978,
+            "notes": [
+              "DESCRIPTIVE 只描述分布，不做任何假设检验，因此不产出结论方向。",
+              "变量 turnover 缺失率 0.01%（缺失值不参与统计）",
+              "变量 future_return_5d 缺失率 0.95%（缺失值不参与统计）"
+            ]
+          },
+          {
+            "analysisId": 300003,
+            "analysisType": "EVENT_STUDY",
+            "effect": 0.01636000701647653,
+            "effectLabel": "T+1 未来收益均值（23917 个样本）",
+            "pValue": 0,
+            "sampleCount": 23978,
+            "notes": [
+              "主视界 = 样本数最多的视界（并列时取视界更大者）；选择规则已写死在代码里并写入证据，非事后挑选。",
+              "T_STAT / P_VALUE 使用 Newey-West HAC 稳健统计量 + 正态近似 p 值；事件样本存在重叠视界，独立性假设不严格成立，仅作研究辅助。",
+              "时间维度仅实现 Dataset 真实具备的「到突破天数」（outcome.daysToBreakout）；time_to_target / time_to_stop 需要逐日触价与止盈止损规则，Dataset 未定义，故不实现。",
+              "T+1：Dataset 未提供 max_return_1d / min_return_1d / max_drawdown_1d / is_breakout_1d / days_to_breakout_1d（这些列来自 outcome 表，outcome 只覆盖其声明视界；T+1 的收益序列来自 path），故不输出对应指标，不虚构。",
+              "T+3：Dataset 未提供 max_return_3d / min_return_3d / max_drawdown_3d / is_breakout_3d / days_to_breakout_3d（这些列来自 outcome 表，outcome 只覆盖其声明视界；T+3 的收益序列来自 path），故不输出对应指标，不虚构。"
+            ]
+          },
+          {
+            "analysisId": 300004,
+            "analysisType": "CONDITIONAL",
+            "effect": 0.0014099187776590132,
+            "effectLabel": "条件组 − 全样本的 future_return_5d 均值差",
+            "pValue": 0.3136486076054599,
+            "sampleCount": 23751,
+            "notes": [
+              "DIFFERENCE = mean(条件样本) − mean(全样本)。",
+              "RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。",
+              "T_STAT_DIFFERENCE / P_VALUE_DIFFERENCE 为 Welch 两样本检验（正态近似 p 值），未校正多重比较与重叠视界；「不可靠时不声称显著」：显著与否的判定由 ConclusionBuilder 依据预设阈值做出。"
+            ]
+          },
+          {
+            "analysisId": 300005,
+            "analysisType": "STABILITY",
+            "effect": 0.015210360880304353,
+            "effectLabel": "board 分组下 future_return_5d 的整体均值",
+            "pValue": null,
+            "sampleCount": 23751,
+            "notes": [
+              "各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。",
+              "方向一致性 > 0.6 且各组样本达标，才可能支撑「跨期稳定」的判断；本分析自身不下结论。",
+              "227 个样本因结果变量 future_return_5d 缺失被排除。",
+              "维度 board 上只有 1 个可用分组，**无法评估跨期稳定性**：方向一致性在单组时恒为 1，会被误读为「高度稳定」，故不产出 STABILITY_RATIO（不编造）。请改用覆盖多个分组的维度，或使用时间跨度更长的 Dataset Version。"
+            ]
+          }
+        ],
+        "ruleTrace": [
+          {
+            "rule": "R2_样本达标",
+            "passed": true,
+            "detail": "总样本 23748（门槛 30），最小分组样本 2374（门槛 30）"
+          },
+          {
+            "rule": "R3_效应达到最小实际阈值",
+            "passed": true,
+            "detail": "|效应| = 0.0475，阈值 0.005"
+          },
+          {
+            "rule": "R4_统计量达标",
+            "passed": true,
+            "detail": "p = 0.0000，alpha = 0.05"
+          },
+          {
+            "rule": "R5_方向稳定",
+            "passed": true,
+            "detail": "一致性 0.778，下限 0.6"
+          }
+        ],
+        "confidenceBasis": "基础 0.30；+0.25 统计达标；+0.156 方向一致性 × 0.20；+0.15 样本充裕",
+        "confidenceIsNotPValue": true
+      },
+      "confidence": 0.8556
+    }
+  ],
+  "elapsedMs": 81599
+}

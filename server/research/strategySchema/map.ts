@@ -23,6 +23,13 @@ import type { Strategy13 } from "../signalEngine/types";
 import { assertValidStrategy13 } from "../signalEngine/validate";
 import type { ResearchParameterSchema, ResearchParameterSet, ResearchParameterValue } from "../types";
 import {
+  normalizeStrategyDefinition,
+  type StrategyDefinition,
+  type StrategyDefinitionInput,
+} from "./definition";
+import { validateCanonicalStrategyDefinition } from "./definitionValidation";
+import { deriveLegacyViews, legacyViewsEqual } from "./legacyViews";
+import {
   STRATEGY_DOCUMENT_RECORD_KIND,
   STRATEGY_DOCUMENT_RECORD_VERSION,
   STRATEGY_VERSION_RECORD_KIND,
@@ -79,15 +86,184 @@ function normalizeCanonical(doc: Record<string, unknown>): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// STEP STRATEGY-003 — Canonical Definition ⇄ v1 兼容视图
+// ---------------------------------------------------------------------------
+// 派生实现（deriveLegacyViews / deriveExecutionModel / legacyViewsEqual）已抽到叶子模块
+// ./legacyViews.ts：它同时被 validate.ts 复用做「反序列化后一致性复核」，若留在本文件
+// 会与 validate.ts 形成运行时循环依赖。
+/**
+ * 在组装前把 Canonical `definition` 与 v1 视图对齐：
+ *   - definition 缺失 → 原样返回（既有行为零改动）；
+ *   - definition 存在 → 校验它 → 派生视图 → **缺失的 v1 字段由派生值补齐**；
+ *     调用方**显式提供**且与派生值不一致的字段 → 报 `SCHEMA_DEFINITION_VIEW_CONFLICT`（不静默覆盖）。
+ */
+function alignDefinitionViews(clone: Record<string, unknown>, issues: { code: string; path: string; message: string }[]): void {
+  const rawDefinition = clone.definition;
+  if (rawDefinition === undefined || rawDefinition === null) return;
+
+  const definition = normalizeStrategyDefinition(rawDefinition as StrategyDefinitionInput);
+  const definitionValidation = validateCanonicalStrategyDefinition(definition);
+  // 校验器的 issue.path 以 StrategyDefinition 根为基准（如 exit.rules[0]），
+  // 嵌入 StrategyDocument 时必须补 `definition.` 前缀；否则文档路径与 refetch 时
+  // validate.ts 的路径不一致（后者会再 rebase 一次）。
+  issues.push(...definitionValidation.issues.map((item) => ({
+    code: item.code,
+    path: `definition.${item.path}`,
+    message: item.message,
+  })));
+  clone.definition = definition;
+
+  const views = deriveLegacyViews(definition);
+
+  const conflict = (field: string): void => {
+    issues.push({
+      code: "SCHEMA_DEFINITION_VIEW_CONFLICT",
+      path: field,
+      message: `${field} 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），` +
+        "v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。",
+    });
+  };
+
+  const fillOrCheck = (field: string, derived: unknown): void => {
+    const current = clone[field];
+    if (current === undefined || current === null) {
+      clone[field] = derived;
+      return;
+    }
+    if (!legacyViewsEqual(current, derived)) conflict(field);
+  };
+
+  fillOrCheck("entryRules", views.entryRules);
+  fillOrCheck("exitRules", views.exitRules);
+  fillOrCheck("riskRules", views.riskRules);
+  fillOrCheck("positionSizing", views.positionSizing);
+  fillOrCheck("parameters", views.parameters);
+
+  if (views.datasetVersion !== undefined) {
+    const current = clone.datasetVersion;
+    if (current === undefined || current === null || current === "") {
+      clone.datasetVersion = views.datasetVersion;
+    } else if (!legacyViewsEqual(current, views.datasetVersion)) {
+      issues.push({
+        code: "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        path: "datasetVersion",
+        message: `datasetVersion（${String(current)}）与 definition.datasets 的 PRIMARY 绑定（${views.datasetVersion}）不一致`,
+      });
+    }
+  }
+
+  // STRATEGY-004：doc 级 datasetVersionId 是 PRIMARY 绑定权威坐标的兼容视图（单向派生）。
+  if (views.datasetVersionId !== undefined) {
+    const current = clone.datasetVersionId;
+    if (current === undefined || current === null) {
+      clone.datasetVersionId = views.datasetVersionId;
+    } else if (!legacyViewsEqual(current, views.datasetVersionId)) {
+      issues.push({
+        code: "SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH",
+        path: "datasetVersionId",
+        message: `datasetVersionId（${String(current)}）与 definition.datasets 的 PRIMARY 绑定（${views.datasetVersionId}）不一致`,
+      });
+    }
+  } else if (clone.datasetVersionId !== undefined && clone.datasetVersionId !== null) {
+    // PRIMARY 绑定走 legacy rd-… 分支（未声明坐标），doc 级却声明了坐标 → 语义冲突，响亮拒绝。
+    issues.push({
+      code: "SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH",
+      path: "datasetVersionId",
+      message: `datasetVersionId（${String(clone.datasetVersionId)}）与 definition.datasets 的 PRIMARY 绑定不一致：` +
+        "该绑定未声明 datasetVersionId（legacy rd-… 分支），doc 级坐标必须删除或改为在绑定时声明。",
+    });
+  }
+
+  const assumptions = clone.executionAssumptions;
+  if (assumptions === undefined || assumptions === null) {
+    issues.push({
+      code: "SCHEMA_DEFINITION_EXECUTION_ASSUMPTIONS_REQUIRED",
+      path: "executionAssumptions",
+      message: "提供 definition 时仍须显式提供 executionAssumptions.backtestConfig 与 .costModel（成本费率与初始资金无法从 definition 派生）",
+    });
+    return;
+  }
+  const asRecord = assumptions as Record<string, unknown>;
+  const providedModel = asRecord.executionModel;
+  if (providedModel === undefined || providedModel === null) {
+    asRecord.executionModel = views.executionModel;
+  } else if (!legacyViewsEqual(providedModel, views.executionModel)) {
+    issues.push({
+      code: "SCHEMA_DEFINITION_EXECUTION_MODEL_MISMATCH",
+      path: "executionAssumptions.executionModel",
+      message: `executionModel（${String(providedModel)}）与 definition.execution 的时序对派生结果（${views.executionModel}）不一致；` +
+        "executionModel 是派生视图，请删除它让组装层自动派生。",
+    });
+  }
+}
+
+/**
+ * `cloneVersion`（按指定源版本 clone，SPEC §13 / §26）的文档组装。
+ *
+ * - 源文档**有** Canonical definition → v1 兼容视图**不传入**，由 `assembleStrategyDocument`
+ *   从被复制的 definition 单向重新派生（保证新版本的视图与定义一致）；
+ * - 源文档**无** definition（历史 v1 文档）→ v1 字段原样复制。
+ * - 版本号由调用方给出（可以是历史版本 +1，也可以是任意未占用的目标版本号）；
+ *   `fingerprint` 必然重算（版本号本身参与指纹）。
+ */
+export function cloneStrategyDocumentToVersion(
+  base: StrategyDocument,
+  targetVersion: string,
+  description?: string | null,
+): StrategyDocument {
+  const raw: Record<string, unknown> = {
+    strategyId: base.strategyId,
+    version: targetVersion,
+    name: base.name,
+    description: description ?? base.description,
+    universe: base.universe,
+    ...(base.definition === undefined
+      ? {
+        entryRules: base.entryRules,
+        exitRules: base.exitRules,
+        positionSizing: base.positionSizing,
+        riskRules: base.riskRules,
+        parameters: base.parameters,
+      }
+      : { definition: base.definition }),
+    datasetVersion: base.datasetVersion,
+    ...(base.datasetVersionId === undefined ? {} : { datasetVersionId: base.datasetVersionId }),
+    executionAssumptions: base.executionAssumptions,
+    ...(base.recipe === undefined ? {} : { recipe: base.recipe }),
+    ...(base.metadata === undefined ? {} : { metadata: base.metadata }),
+  };
+  return assembleStrategyDocument(raw);
+}
+
+/**
+ * 组装 Canonical `StrategyDefinition`：规范化（确定性顺序）→ 校验（结构 + Look-Ahead）→ 深冻结。
+ *
+ * 与 `createStrategyDocumentFromDefinition` 的分工：本函数产出**定义级**对象（无身份 / 无 universe /
+ * 无成本模型），供「定义是否合法 / 两份定义是否同一套规则」的独立使用与测试；
+ * 文档级组装仍走 `createStrategyDocumentFromDefinition`。
+ */
+export function createStrategyDefinition(input: StrategyDefinitionInput): StrategyDefinition {
+  const definition = normalizeStrategyDefinition(input);
+  const validation = validateCanonicalStrategyDefinition(definition);
+  if (!validation.valid) {
+    throw new ResearchValidationError(validation.issues);
+  }
+  return deepFreeze(definition);
+}
+
 /**
  * 组装 §16 策略本体（不可变、确定性）。
- * 顺序：深拷贝入参（绝不冻结 / 共享调用方对象）→ 规范化确定性顺序 → 组装书签 +
- * 计算 fingerprint（覆盖全部内容字段，含 recordKind/recordVersion）→ 全字段结构校验
- * （失败响亮抛 ResearchValidationError）→ 深冻结。
+ * 顺序：深拷贝入参（绝不冻结 / 共享调用方对象）→ 规范化确定性顺序 →
+ * **对齐 Canonical definition 与 v1 派生视图**（仅当提供 definition）→ 组装书签 +
+ * 计算 fingerprint（覆盖全部内容字段，含 recordKind/recordVersion 与 definition）→
+ * 全字段结构校验（失败响亮抛 ResearchValidationError）→ 深冻结。
  */
-export function createStrategyDocument(input: StrategyDocumentInput): StrategyDocument {
-  const clone = structuredClone(input) as Record<string, unknown>;
+function assembleStrategyDocument(input: Record<string, unknown>): StrategyDocument {
+  const clone = structuredClone(input);
   normalizeCanonical(clone);
+  const preIssues: { code: string; path: string; message: string }[] = [];
+  alignDefinitionViews(clone, preIssues);
   const body = {
     recordKind: STRATEGY_DOCUMENT_RECORD_KIND,
     recordVersion: STRATEGY_DOCUMENT_RECORD_VERSION,
@@ -96,10 +272,93 @@ export function createStrategyDocument(input: StrategyDocumentInput): StrategyDo
   const fingerprint = computeStrategyDocumentFingerprint(body);
   const doc = { ...body, fingerprint } as unknown as StrategyDocument;
   const validation = validateStrategyDocument(doc);
-  if (!validation.valid) {
-    throw new ResearchValidationError(validation.issues);
+  const issues = [...preIssues, ...validation.issues];
+  if (issues.length > 0) {
+    throw new ResearchValidationError(issues);
   }
   return deepFreeze(doc);
+}
+
+/**
+ * 组装 §16 策略本体（不可变、确定性）。
+ * 提供 `definition` 时自动派生 v1 兼容视图（见 `alignDefinitionViews`）；
+ * 未提供时行为与 STEP-001 / STRATEGY-002 完全一致。
+ */
+export function createStrategyDocument(input: StrategyDocumentInput): StrategyDocument {
+  return assembleStrategyDocument(input as unknown as Record<string, unknown>);
+}
+
+/** `createStrategyDocumentFromDefinition` 输入：只需给 Canonical Definition 与不可派生项。 */
+export interface StrategyDocumentFromDefinitionInput {
+  readonly strategyId: string;
+  readonly version: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly universe: StrategyUniverse;
+  /** Canonical 富定义（`schemaVersion` 缺省补 `1.0`）。 */
+  readonly definition: StrategyDefinitionInput;
+  /** 省略时取 `definition.datasets` 中 PRIMARY 绑定的 datasetVersion。 */
+  readonly datasetVersion?: string;
+  /** 省略时取 `definition.datasets` 中 PRIMARY 绑定的 datasetVersionId（Dataset Registry 权威坐标）。 */
+  readonly datasetVersionId?: number;
+  /**
+   * 执行假设：`backtestConfig` 与 `costModel`（费率/资金）**必须显式提供**（无法从 definition 派生）；
+   * `executionModel` 省略时由 `definition.execution.executionTiming` 派生。
+   */
+  readonly executionAssumptions: {
+    readonly backtestConfig: StrategyBacktestConfig;
+    readonly costModel: CostModel;
+    readonly executionModel?: string;
+  };
+  readonly recipe?: StrategyRecipe;
+  readonly metadata?: StrategyMetadata;
+}
+
+/**
+ * 由 Canonical `StrategyDefinition` 组装完整 StrategyDocument（STEP STRATEGY-003 的推荐入口）。
+ * v1 兼容视图（entryRules / exitRules / riskRules / positionSizing / parameters / executionModel /
+ * datasetVersion）全部由 definition 单向派生，调用方无需手工保持一致。
+ *
+ * ⚠️ 本入口**要求** definition 存在：传 undefined / null 会让组装层退化成
+ * `definition = { schemaVersion: "1.0" }`（缺 entry/exit/…），最终在派生视图时抛出
+ * 难以定位的 `Cannot read properties of undefined`。因此在这里**响亮失败**：
+ * 无 definition 的历史 v1 文档必须走 `createStrategyDocument`。
+ */
+export function createStrategyDocumentFromDefinition(
+  input: StrategyDocumentFromDefinitionInput,
+): StrategyDocument {
+  const rawDefinition = input?.definition;
+  if (rawDefinition === undefined || rawDefinition === null || typeof rawDefinition !== "object") {
+    throw new ResearchValidationError([{
+      code: "SCHEMA_DEFINITION_REQUIRED",
+      path: "definition",
+      message: "createStrategyDocumentFromDefinition 要求提供 definition（Canonical 富定义）；" +
+        "历史 v1 文档（无 definition）请使用 createStrategyDocument。",
+    }]);
+  }
+  const raw: Record<string, unknown> = {
+    strategyId: input.strategyId,
+    version: input.version,
+    name: input.name,
+    ...(input.description === undefined ? {} : { description: input.description }),
+    universe: input.universe,
+    definition: {
+      schemaVersion: "1.0",
+      ...(structuredClone(rawDefinition) as object),
+    },
+    executionAssumptions: {
+      backtestConfig: input.executionAssumptions.backtestConfig,
+      costModel: input.executionAssumptions.costModel,
+      ...(input.executionAssumptions.executionModel === undefined
+        ? {}
+        : { executionModel: input.executionAssumptions.executionModel }),
+    },
+    ...(input.datasetVersion === undefined ? {} : { datasetVersion: input.datasetVersion }),
+    ...(input.datasetVersionId === undefined ? {} : { datasetVersionId: input.datasetVersionId }),
+    ...(input.recipe === undefined ? {} : { recipe: input.recipe }),
+    ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+  };
+  return assembleStrategyDocument(raw);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +378,15 @@ export interface StrategyDocumentPatch {
   /** 参数 schema 替换（defaultValue 变化 → minor；参数本体增删/类型/约束变化 → major）。 */
   readonly parameters?: ResearchParameterSchema;
   readonly datasetVersion?: string;
+  /** STRATEGY-004：替换 Dataset Registry 权威坐标（`dataset_version.id`）。 */
+  readonly datasetVersionId?: number;
   readonly executionAssumptions?: StrategyExecutionAssumptions;
+  /**
+   * STEP STRATEGY-003：替换 Canonical 富定义。传入时本函数会**忽略**上面的 v1 视图字段
+   * （entryRules / exitRules / riskRules / positionSizing / parameters），改由新 definition
+   * 单向派生，避免出现「definition 与视图不一致」的文档。
+   */
+  readonly definition?: StrategyDefinition;
   /** 传入即替换执行配方引用；缺省继承 base（不提供删除 recipe 的入口）。 */
   readonly recipe?: StrategyRecipe;
   /** null = 删除 metadata。 */
@@ -140,22 +407,30 @@ export function cloneStrategyDocument(
   patch: StrategyDocumentPatch,
   bump: "patch" | "minor" | "major",
 ): StrategyDocument {
-  const next: StrategyDocumentInput = {
+  const nextVersion = bumpStrategyVersion(base.version, bump);
+  const nextDefinition = patch.definition ?? base.definition;
+  // 传入新 definition 时，v1 视图必须由它重新派生 —— 因此不再透传 base / patch 的视图字段。
+  const inheritViews = patch.definition === undefined;
+  const nextDatasetVersionId = patch.datasetVersionId ?? base.datasetVersionId;
+  const next = {
     strategyId: base.strategyId,
-    version: bumpStrategyVersion(base.version, bump),
+    version: nextVersion,
     name: patch.name ?? base.name,
     description: patch.description === undefined ? base.description : (patch.description ?? undefined),
     universe: patch.universe ?? base.universe,
-    entryRules: patch.entryRules ?? base.entryRules,
-    exitRules: patch.exitRules ?? base.exitRules,
-    positionSizing: patch.positionSizing ?? base.positionSizing,
-    riskRules: patch.riskRules ?? base.riskRules,
-    parameters: patch.parameters ?? base.parameters,
+    entryRules: inheritViews ? (patch.entryRules ?? base.entryRules) : undefined,
+    exitRules: inheritViews ? (patch.exitRules ?? base.exitRules) : undefined,
+    positionSizing: inheritViews ? (patch.positionSizing ?? base.positionSizing) : undefined,
+    riskRules: inheritViews ? (patch.riskRules ?? base.riskRules) : undefined,
+    parameters: inheritViews ? (patch.parameters ?? base.parameters) : undefined,
     datasetVersion: patch.datasetVersion ?? base.datasetVersion,
+    // 缺省不下发 undefined 键（保持「未声明」与「声明为空」的区分，指纹不受影响）。
+    ...(nextDatasetVersionId === undefined ? {} : { datasetVersionId: nextDatasetVersionId }),
     executionAssumptions: patch.executionAssumptions ?? base.executionAssumptions,
+    ...(nextDefinition === undefined ? {} : { definition: nextDefinition }),
     recipe: patch.recipe ?? base.recipe,
     metadata: patch.metadata === undefined ? base.metadata : (patch.metadata ?? undefined),
-  };
+  } as unknown as StrategyDocumentInput;
   const doc = createStrategyDocument(next);
 
   // 版本语义闸门：bump 必须覆盖内容变化所需级别（见 compare.ts）。

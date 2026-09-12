@@ -131,7 +131,27 @@ const STATUS_TONE: Record<string, StatusTone> = {
   // 定义：ACTIVE / ARCHIVED
   ACTIVE: "success",
   ARCHIVED: "neutral",
+
+  // Research（RESEARCH-002 前端工作台）：假设状态 / 结论类型
+  // RESEARCH_HYPOTHESIS_STATUSES 的 DRAFT/REJECTED/INCONCLUSIVE 已在上方收录，此处补差集。
+  TESTING: "info",
+  SUPPORTED: "success",
+  // 「部分支持」按语义必须落在 warning：它有方向证据但未过门槛，不能显示成 success。
+  PARTIALLY_SUPPORTED: "warning",
+  // RESEARCH_CONCLUSION_STATUSES
+  FINAL: "success",
+  SUPERSEDED: "neutral",
+
+  // 闭环阶段状态机（closedLoop · FE-4 运行工作台）
+  // 阶段：READY / EXECUTED / BLOCKED / SKIPPED（READY/SKIPPED 已收录）
+  EXECUTED: "success",
+  BLOCKED: "danger",
+  // 全链状态：ALL_EXECUTED / PARTIAL_BLOCKED / NO_STAGE_EXECUTED
+  ALL_EXECUTED: "success",
+  PARTIAL_BLOCKED: "warning",
+  NO_STAGE_EXECUTED: "danger",
 };
+
 
 /** 状态字符串 → 语义色。空值 / 未收录 → neutral。 */
 export function toneForStatus(status: string | null | undefined): StatusTone {

@@ -1,9 +1,12 @@
 import "dotenv/config";
+import { refreshStockPriceIndex } from "../server/stockPriceIndex";
 import { checkStockPriceSync, syncCandidateDailyPricesForDate } from "../server/stockPriceSync";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main() {
+  // 行情同步检查依赖位图索引，脚本内先确保索引就绪（含磁盘快照快速路径）。
+  await refreshStockPriceIndex();
   // 找出所有缺失记录（去重股票+信号日）
   const before = await checkStockPriceSync(10);
   const missing = before.items.filter((i) => i.missingCount > 0);
@@ -32,6 +35,7 @@ async function main() {
     await sleep(1_200); // 轻微节流，避免触发限频
   }
 
+  await refreshStockPriceIndex({ force: true });
   const after = await checkStockPriceSync(10);
   console.log(`\n=== 回填后：缺失记录 ${after.items.filter((i) => i.missingCount > 0).length} 条，缺失对 ${after.summary.missingPairs} 个 ===`);
   const remaining = after.items.filter((i) => i.missingCount > 0);

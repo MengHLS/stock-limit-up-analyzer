@@ -9,3 +9,4 @@ export { PositionSizingEditor } from "./PositionSizingEditor";
 export { StrategyJsonEditor } from "./StrategyJsonEditor";
 export { RunConfigPanel, type RunConfigViewModel } from "./RunConfigPanel";
 export { RunResultPlaceholder } from "./RunResultPlaceholder";
+export { ClosedLoopRunResultPanel } from "./ClosedLoopRunResultPanel";

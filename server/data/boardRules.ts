@@ -21,6 +21,23 @@ import type { CanonicalMarketBar } from "./types";
 // 避免其它模块绕过本层重复实现或直接引用 engine 细节。
 export { limitUpPrice, limitDownPrice }; // eslint-disable-line no-re-export
 
+/**
+ * **交易所口径的涨停价**：以前收盘价为基准按涨跌幅计算，再**四舍五入到分**（2 位小数）。
+ *
+ * 为什么必须单独有这一个函数（而不是直接用 `limitUpPrice`）：
+ *   A 股真实行情里「封板」的收盘价恰等于四舍五入后的涨停价（如前收 6.81 → 涨停价 7.49）。
+ *   若阈值取未四舍五入的原始浮点乘积（`6.81 × 1.1 = 7.491`，或 `11 × 1.1 = 12.100000000000001`），
+ *   浮点误差会让 `close >= 阈值` 判为 false，从而**系统性漏判涨停**。
+ *   真实数据实测：2025-01-01..2026-09-04 区间内「收盘价恰为涨停价」的封板样本 4,325 个，
+ *   用未四舍五入阈值只能识别 2,680 个，**漏判 1,645 个（38.03%）**。
+ *
+ * 因此凡「判定是否涨停」「记录涨停价事实列」都必须走本函数，不得直接使用 `limitUpPrice`
+ * 的原始乘积作为比较阈值。
+ */
+export function exchangeLimitUpPrice(prevClose: number, limitUpRatio: number): number {
+  return Math.round(prevClose * (1 + limitUpRatio) * 100) / 100;
+}
+
 /** 板块类别。 */
 export type BoardCategory = "main" | "chinext" | "star" | "bse" | "unknown";
 

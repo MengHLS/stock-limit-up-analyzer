@@ -102,7 +102,10 @@ export interface StrategyViewModel {
   // parameters
   parameters: ParameterViewModel[];
   // dataset
+  /** Dataset Version 显示 / 快照 label（`v2`；legacy 绑定为 `rd-…`）。 */
   datasetVersion: string;
+  /** 🔴 STRATEGY-004：Dataset Registry 权威坐标（`dataset_version.id`）；null = 未绑定 / legacy。 */
+  datasetVersionId: number | null;
   // execution assumptions
   initialCapital: number;
   maxPositions: number | null;
@@ -305,6 +308,7 @@ const KNOWN_KEYS = new Set([
   "riskRules",
   "parameters",
   "datasetVersion",
+  "datasetVersionId",
   "executionAssumptions",
   "fingerprint",
 ]);
@@ -346,6 +350,7 @@ export function strategyToViewModel(raw: unknown): StrategyViewModel {
         ? (src.parameters.parameters as unknown[]).map(parseParameter)
         : [],
     datasetVersion: asStr(src.datasetVersion, ""),
+    datasetVersionId: asNullableNum(src.datasetVersionId),
     initialCapital: asNum(backtest.initialCapital, 100000),
     maxPositions: asNullableNum(backtest.maxPositions),
     costModel: parseCostModel(exec.costModel),
@@ -389,6 +394,10 @@ export function viewModelToStrategy(
     positionSizing: serializePositionSizing(vm.positionSizing),
     parameters: { parameters: vm.parameters.map(serializeParameter) },
     datasetVersion: vm.datasetVersion,
+    // STRATEGY-004：坐标缺省时不下发键（保持「未声明」语义，后端 legacy 分支才成立）。
+    ...(vm.datasetVersionId === null
+      ? {}
+      : { datasetVersionId: vm.datasetVersionId }),
     executionAssumptions,
     fingerprint: vm.fingerprint,
   };

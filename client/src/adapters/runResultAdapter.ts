@@ -1,9 +1,10 @@
 /**
  * runResultAdapter — Run / Backtest Result 的 Frontend Adapter（任务 §17，结构预留）。
  *
- * 现状：后端**尚无**策略级 Run Workbench / Backtest Result 端点（FE-4 仅有
- * validate/bump/compare/lifecycle）。本 adapter 只定义前端展示形态 + 防御性解析，
- * 供 Phase 6 Run Workbench 的 Empty State 与后续结果接入使用。
+ * 现状：**结果主路径已由 `closedLoopRunAdapter` 承接**（`researchRun.loopRun` 返回真实闭环
+ * 运行轨迹，并复用 `closedLoopRunToRunResult` 映射到本文件的 `RunResultViewModel`）。
+ * 本 adapter 保留自身的防御性解析能力，供「非闭环来源」的 run/backtest 结果接入，
+ * 并继续作为 FE-4 空态与结构预留的展示形态。
  *
  * 铁律：`parseRunResult` 在无真实数据时返回 `null`（前端渲染 Empty State），
  * **绝不由前端生成收益率 / Sharpe / 回撤等任何业务指标**。

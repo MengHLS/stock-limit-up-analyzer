@@ -1,7 +1,9 @@
 import { buildLeaderCandidatesForDate, type LeaderCandidateSourceRecord } from "./leaderCandidates";
 import { normalizeSectorName } from "../shared/stockDataNormalization";
 
-export type SentimentCyclePhase = "冰点试错" | "修复上升" | "上升发酵" | "高位分歧" | "高位亢奋" | "高位退潮";
+/** 情绪周期阶段（弱 → 强 → 退潮）的唯一权威顺序：漏斗展示、服务端筛选 schema 共用。 */
+export const SENTIMENT_CYCLE_PHASES = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"] as const;
+export type SentimentCyclePhase = (typeof SENTIMENT_CYCLE_PHASES)[number];
 export type MarketCycleType = "混沌周期" | "龙头周期";
 export type SentimentCycleSourceRecord = LeaderCandidateSourceRecord;
 

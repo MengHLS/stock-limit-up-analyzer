@@ -15,6 +15,7 @@ import {
   ResearchValidationError,
   type ResearchValidationIssue,
 } from "../experimentValidation";
+import type { StrategyDefinition } from "./definition";
 import type { StrategyDocument, StrategyVersionRecord } from "./types";
 import { validateStrategyDocument, validateStrategyVersionRecord } from "./validate";
 
@@ -40,6 +41,38 @@ function assertFiniteRecord(value: unknown, path: string): void {
 function digestBody(body: Record<string, unknown>): string {
   const canonical = canonicalStringify(body);
   return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+// ---------------------------------------------------------------------------
+// StrategyDefinition（STEP STRATEGY-003 · Canonical Definition 指纹）
+// ---------------------------------------------------------------------------
+
+/**
+ * 计算 **Canonical StrategyDefinition** 的内容指纹：`SHA-256(canonicalStringify(definition))`。
+ *
+ * SPEC §九 / §29 要求统一入口 `computeStrategyDefinitionFingerprint()`，并保证：
+ *   - 同一 Definition（语义相同，含规范化后的确定性数组顺序）→ 同一 Hash；
+ *   - 任何实质改动（entry / exit / parameter / position / risk / execution / dataset 绑定）
+ *     → Hash 必须变化。
+ *
+ * 说明：本函数与 `computeStrategyDocumentFingerprint` 是**两个不同层级**的指纹——
+ *   - Document 指纹（本文件上半部）= 整个 StrategyDocument（含身份 / universe /
+ *     executionAssumptions / recipe / metadata 与嵌入的 definition）的指纹，
+ *     它是 `strategy_versions.fingerprint` 的实际取值（物理列名不变，用户裁定 D2）；
+ *   - Definition 指纹（本函数）= 只覆盖 `StrategyDefinition` 子树，供「两份定义是否同一套规则」
+ *     的独立比对（例如 `versionRecordJson.strategy.definition` 与 `strategyDocumentJson.definition`
+ *     的一致性断言）。
+ * 二者都是 sha256 of canonical JSON，不依赖对象键插入顺序。
+ */
+export function computeStrategyDefinitionFingerprint(definition: StrategyDefinition): string {
+  assertFiniteRecord(definition, "definition");
+  return digestBody(definition as unknown as Record<string, unknown>);
+}
+
+/** 序列化 StrategyDefinition（canonical JSON；同内容必同串）。 */
+export function serializeStrategyDefinition(definition: StrategyDefinition): string {
+  assertFiniteRecord(definition, "definition");
+  return canonicalStringify(definition);
 }
 
 // ---------------------------------------------------------------------------

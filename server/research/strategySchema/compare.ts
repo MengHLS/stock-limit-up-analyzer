@@ -107,7 +107,7 @@ export function strategiesDeepEqual(left: StrategyDocument, right: StrategyDocum
   return compareStrategyDocuments(left, right).equal;
 }
 
-/** 变化级别的路径判定：结构字段（rules/universe/dataset/execution/recipe）与参数 schema 本体 → major。 */
+/** 变化级别的路径判定：结构字段（rules/universe/dataset/execution/definition）与参数 schema 本体 → major。 */
 function isMajorChangePath(path: string): boolean {
   const topLevelStructural = [
     "universe",
@@ -116,7 +116,11 @@ function isMajorChangePath(path: string): boolean {
     "riskRules",
     "positionSizing",
     "datasetVersion",
+    // STEP STRATEGY-004：Dataset Registry 权威坐标是数据边界，换版本即换数据 → 结构性变化。
+    "datasetVersionId",
     "executionAssumptions",
+    // STEP STRATEGY-003：Canonical 富定义是结构性内容 —— 任何改动都必须 major。
+    "definition",
     "recipe",
     "strategyId",
   ];

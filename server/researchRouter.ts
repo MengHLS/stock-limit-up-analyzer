@@ -11,9 +11,15 @@
  *   本层原样冒泡为 tRPC 错误（不吞异常、不返回「成功但没变」的假结果）；
  * - **状态不冒充**：本 router 不改变任何 STEP 状态判定——STEP 15/21 仍为
  *   `CODE_READY`，VALIDATED 依赖数据链就绪认证（§0.2 禁止越级）。
+ *
+ * STEP STRATEGY-004 增补：
+ * - 写操作（create / save / delete / createVersion / **cloneVersion** / **setVersionStatus**）
+ *   统一 `adminProcedure`，与 Dataset Registry / Research Engine 写端点权限口径一致；
+ * - 只读（load / list / listVersions / loadVersion / **loadBundle** / **getVersionBundle** /
+ *   **validateVersion**）保持 `publicProcedure`，不扩大也不缩小既有读取能力。
  */
 
-import { publicProcedure, router } from "./_core/trpc";
+import { publicProcedure, adminProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import { readFileSync } from "node:fs";
 import {
@@ -25,6 +31,8 @@ import {
   strategyIdInputSchema,
   strategyLoadVersionInputSchema,
   strategyCreateVersionInputSchema,
+  strategyCloneVersionInputSchema,
+  strategySetVersionStatusInputSchema,
 } from "../shared/researchContracts";
 import type { StrategyDocument } from "./research/strategySchema/types";
 import type { StrategyLifecycleRecord, LifecycleEvidenceRef } from "./research/lifecycle/types";
@@ -38,6 +46,7 @@ import {
 } from "./research";
 import { DbStrategyRepository } from "./research/strategyPersistence/db";
 import { StrategyService } from "./research/strategyPersistence/service";
+import { strategyCandidateRouter } from "./research/strategyCandidate/router";
 import { composeCodeVersion } from "./research/experimentLineage/codeVersion";
 import { evaluatePerformance } from "./research/performanceMetrics";
 import { evaluateRiskAdjustedMetrics } from "./research/riskAdjustedMetrics";
@@ -80,6 +89,15 @@ function toLifecycleRecord(value: Record<string, unknown>): StrategyLifecycleRec
 }
 
 export const researchRouter = router({
+  /**
+   * RESEARCH-006.2 — Research → Strategy 候选桥（`research.strategyCandidate.*`）。
+   *
+   * 与既有 `research.strategy.*`（策略本体 / 版本 / 生命周期，STRATEGY-002~004）**并列**，
+   * 不是它的替代：`strategyCandidate` 管「研究发现的取舍登记」，`strategy` 管「已转正的策略本体」。
+   * ⚠️ 本 STEP **不提供** `promote`：候选永远无法自动变成策略（006.3 才建那条路）。
+   */
+  strategyCandidate: strategyCandidateRouter,
+
   strategy: router({
     /** 校验 StrategyDocument（§16 全字段 + §17 追溯）。返回结构化 issue 列表。 */
     validate: publicProcedure
@@ -107,14 +125,16 @@ export const researchRouter = router({
       ),
 
     // ---- STEP STRATEGY-002 · CRUD（持久化 + 版本化）----
+    // STEP STRATEGY-004：写操作统一 `adminProcedure`（与 Dataset Registry / Research Engine 写端点口径一致）；
+    // 只读操作保持 publicProcedure（不扩大权限，也不缩小既有读取能力）。
 
     /** 创建全新策略（strategyId 必须不存在）。 */
-    create: publicProcedure
+    create: adminProcedure
       .input(strategySaveInputSchema)
       .mutation(({ input }) => strategyService.create({ document: input.document })),
 
     /** 保存策略版本（幂等；strategyId 不存在时等价 create）。 */
-    save: publicProcedure
+    save: adminProcedure
       .input(strategySaveInputSchema)
       .mutation(({ input }) => strategyService.save({ document: input.document })),
 
@@ -127,12 +147,12 @@ export const researchRouter = router({
     list: publicProcedure.query(() => strategyService.list()),
 
     /** 删除策略（级联删版本）。 */
-    delete: publicProcedure
+    delete: adminProcedure
       .input(strategyIdInputSchema)
       .mutation(({ input }) => strategyService.delete(input.strategyId)),
 
     /** 基于最新版本创建新版本（复用 cloneStrategyDocument + bump 语义闸门）。 */
-    createVersion: publicProcedure
+    createVersion: adminProcedure
       .input(strategyCreateVersionInputSchema)
       .mutation(({ input }) =>
         strategyService.createVersion({
@@ -151,6 +171,64 @@ export const researchRouter = router({
     listVersions: publicProcedure
       .input(strategyIdInputSchema)
       .query(({ input }) => strategyService.listVersions(input.strategyId)),
+
+    // ---- STEP STRATEGY-004 · 暴露 STRATEGY-003 已完成但未暴露的 Domain Service 能力 ----
+    // 以下 4 个能力在 STRATEGY-003 已实现于 StrategyService / Repository，本 STEP 只做「传输 → 领域」
+    // 投递（不重新实现任何领域逻辑）。写操作为 adminProcedure；只读保持 publicProcedure。
+
+    /**
+     * 一次取全一个版本（Canonical 本体 + §17 追溯 + 5 类投影）。
+     *
+     * 读操作（不改变任何状态）→ publicProcedure，与 `loadVersion` 同权限口径。
+     */
+    loadBundle: publicProcedure
+      .input(strategyLoadVersionInputSchema)
+      .query(({ input }) => strategyService.loadBundle(input.strategyId, input.version)),
+
+    /**
+     * `getVersionBundle` —— `loadBundle` 的**同实现别名**。
+     *
+     * 保留该名称是为了对齐 Repository 契约（`StrategyRepository.getVersionBundle`）的词汇；
+     * 两者调用同一 Service 方法，不存在第二套读取逻辑（避免出现两份口径）。
+     */
+    getVersionBundle: publicProcedure
+      .input(strategyLoadVersionInputSchema)
+      .query(({ input }) => strategyService.loadBundle(input.strategyId, input.version)),
+
+    /**
+     * 读库校验指定版本：文档全量校验（含 definition / Look-Ahead）+ 投影漂移检测。
+     * 只读（不修复、不写入）；漂移以明细返回，由调用方决定是否失败。
+     */
+    validateVersion: publicProcedure
+      .input(strategyLoadVersionInputSchema)
+      .query(({ input }) => strategyService.validateVersion(input.strategyId, input.version)),
+
+    /**
+     * 按**指定源版本** clone 出新版本（源版本可为任意历史版本；`parentVersionId` 指向源版本行）。
+     * 幂等三态：inserted / idempotent-skip / conflict（**绝不覆盖既有版本**）。写操作 → admin。
+     */
+    cloneVersion: adminProcedure
+      .input(strategyCloneVersionInputSchema)
+      .mutation(({ input }) =>
+        strategyService.cloneVersion({
+          strategyId: input.strategyId,
+          fromVersion: input.fromVersion,
+          ...(input.targetVersion === undefined ? {} : { targetVersion: input.targetVersion }),
+          ...(input.bump === undefined ? {} : { bump: input.bump }),
+          ...(input.description === undefined ? {} : { description: input.description }),
+          ...(input.status === undefined ? {} : { status: input.status }),
+        }),
+      ),
+
+    /**
+     * 版本生命周期状态迁移（唯一允许的 UPDATE；内容仍不可变）。写操作 → admin。
+     * 状态白名单由后端 `isStrategyLifecycleStatus` 权威判定（传输层只做字面量约束）。
+     */
+    setVersionStatus: adminProcedure
+      .input(strategySetVersionStatusInputSchema)
+      .mutation(({ input }) =>
+        strategyService.setVersionStatus(input.strategyId, input.version, input.status),
+      ),
   }),
 
   lifecycle: router({
