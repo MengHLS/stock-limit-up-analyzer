@@ -13,7 +13,7 @@
 import { DbDatasetRegistry } from "../../datasetRegistry/db";
 import type { DatasetVersionReadPort, DatasetVersionSnapshot } from "./service";
 
-/** 只暴露登记候选所需的三件事（label / status / datasetId）；不复制 Registry 的领域对象。 */
+/** 只暴露登记候选 / 转正所需的事实（label / status / datasetId / datasetCode）；不复制 Registry 领域对象。 */
 export class RegistryDatasetVersionReadPort implements DatasetVersionReadPort {
   private readonly registry: DbDatasetRegistry;
 
@@ -24,11 +24,16 @@ export class RegistryDatasetVersionReadPort implements DatasetVersionReadPort {
   async getVersionById(datasetVersionId: number): Promise<DatasetVersionSnapshot | undefined> {
     const version = await this.registry.getVersionById(datasetVersionId);
     if (!version) return undefined;
+    // RESEARCH-006.3：转正时 `definition.datasets[PRIMARY].datasetId` 需要正确的业务码，
+    // 因此这里再读一次对应的 `dataset_definition`（**只读**；仍然不复制 Registry 的任何表）。
+    // 读不到 definition 时**不猜**：`datasetCode` 保持缺省，由 promote 响亮拒绝。
+    const definition = await this.registry.getDefinitionById(version.datasetId);
     return {
       datasetVersionId: version.id ?? datasetVersionId,
       label: version.version,
       status: version.status,
       datasetId: version.datasetId,
+      ...(definition?.datasetCode === undefined ? {} : { datasetCode: definition.datasetCode }),
     };
   }
 }

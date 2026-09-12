@@ -120,3 +120,5 @@ scripts/_baostock_stock_basic_dump.json
 
 # Git 恢复时损坏 .git 的备份（含 reflog，供对照历史提交消息，确认后可删）
 .git.broken/
+.workbuddy/
+.manus/

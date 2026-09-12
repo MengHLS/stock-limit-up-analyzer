@@ -291,7 +291,7 @@ serializeStrategyDefinition(definition)           // canonical JSON（同内容�
 
 `scripts/verifyStrategyDomainModel.mts`（477 行）：Migration → Create → Version → Save → Read → Validate → Clone → Verify Hash → Verify Projection → information_schema → 清理。
 
-**实测输出（`_s003_verify.log`）**：
+**实测输出（`docs/evidence/_s003_verify.log`）**：
 
 ```
 总检查项 89，失败 0；VERDICT=PASS      SCRIPT_EXIT=0

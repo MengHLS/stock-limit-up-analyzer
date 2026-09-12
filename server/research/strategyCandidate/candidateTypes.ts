@@ -1,14 +1,16 @@
 /**
- * RESEARCH-006.2 — Conclusion → Strategy Candidate：领域类型 / 错误码 / **写入白名单**。
+ * RESEARCH-006.2 / 006.3 — Conclusion → Strategy Candidate：领域类型 / 错误码 / **写入白名单**。
  *
  * 架构依据（唯一基准）：`docs/research/RESEARCH-006.0-architecture.md`
- *   §7.1 Candidate 字段裁定 / §10.1 Candidate 生命周期两条纪律 / §11.1~11.2 端点与校验链 / §13.1。
- * 前序实施：`docs/research/RESEARCH-006.1-implementation.md`（DB + Domain Model 已落真实 TiDB）。
+ *   §7.1 Candidate 字段裁定 / §10.1 Candidate 生命周期两条纪律 / §11.1~11.3 端点与校验链 /
+ *   §13.1 最小增列 / §9.2 Dataset 继承与分歧。
+ * 前序实施：`docs/research/RESEARCH-006.1-implementation.md`（DB + Domain Model 已落真实 TiDB）、
+ *          `docs/research/RESEARCH-006.2-implementation.md`（候选业务线路）。
  *
  * 本文件的定位：**桥的应用层**（不是持久化层，也不是 Canonical Strategy 层）。
- *   - 只做「Research 发现的取舍登记」，**不产出** `StrategyDefinition`（那是 006.3 promote 的职责）；
- *   - 依赖方向：本模块 → `researchCore`（+ 只读 Dataset Registry 端口）；**本 STEP 不 import
- *     `strategyPersistence` / `strategySchema`**（006.2 §21）。
+ *   - 006.2：只做「Research 发现的取舍登记」；
+ *   - 006.3：`promote` 的**入参白名单**与专属错误码也归这里 —— 桥仍然只产出「候选状态」与
+ *     「转正结果」，`StrategyDefinition` 的构造始终由 `definitionBuild.ts` 唯一实现。
  */
 
 import {
@@ -115,24 +117,66 @@ export const STRATEGY_CANDIDATE_ERROR = {
   CANDIDATE_ALREADY_EXISTS: "STRATEGY_CANDIDATE_ALREADY_EXISTS",
   /** 指定的 Candidate 不存在。 */
   CANDIDATE_NOT_FOUND: "STRATEGY_CANDIDATE_NOT_FOUND",
-  /** `transition` 试图进入 `CONVERTED` —— 必须走未来的 `promote()`（006.3）。 */
+  /** `transition` 试图进入 `CONVERTED` —— 只有 `promote()`（006.3）可以产生。 */
   CONVERSION_REQUIRES_PROMOTE: "STRATEGY_CANDIDATE_CONVERSION_REQUIRES_PROMOTE",
   /** 状态迁移非法（不在 `CANDIDATE_TRANSITIONS` 内 / 目标不开放 / 状态未变化）。 */
   TRANSITION_INVALID: "STRATEGY_CANDIDATE_TRANSITION_INVALID",
   /** 入参非法（未知字段 / 空补丁 / 名称非法等）。 */
   INVALID_INPUT: "STRATEGY_CANDIDATE_INVALID_INPUT",
+
+  // -------------------------------------------------------------------------
+  // RESEARCH-006.3 —— promote() 专属（§5 / §8 / §12 / §14 / §15 / §25）
+  // -------------------------------------------------------------------------
+  /** 只有 `ACCEPTED` 允许转正；其余状态（DRAFT / REVIEW / REJECTED / ARCHIVED）一律拒绝（§5.3）。 */
+  CANDIDATE_NOT_ACCEPTED: "STRATEGY_CANDIDATE_NOT_ACCEPTED",
+  /** 候选缺少可写进 provenance 的来源锚（`conclusionId` / `experimentId` 非正整数）（§20）。 */
+  PROMOTE_SOURCE_INCOMPLETE: "STRATEGY_CANDIDATE_PROMOTE_SOURCE_INCOMPLETE",
+  /** 草图缺少构建 `StrategyDefinition` 的必填字段 —— **绝不补默认值**（§8）。 */
+  PROMOTE_SKETCH_INCOMPLETE: "STRATEGY_CANDIDATE_PROMOTE_SKETCH_INCOMPLETE",
+  /** 草图字段存在但非法 / 不被 StrategyDefinition 词表支持（如 `BETWEEN` / `regimeGate`）。 */
+  PROMOTE_SKETCH_INVALID: "STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID",
+  /** 构建出的 `StrategyDefinition` 未通过既有校验（含 Look-Ahead L1–L8）（§10）。 */
+  PROMOTE_DEFINITION_INVALID: "STRATEGY_CANDIDATE_PROMOTE_DEFINITION_INVALID",
+  /** 研究来源 Dataset ≠ 执行绑定 Dataset，但未提供 `datasetDivergenceReason`（§12）。 */
+  DATASET_DIVERGENCE_REASON_REQUIRED: "STRATEGY_CANDIDATE_DATASET_DIVERGENCE_REASON_REQUIRED",
+  /** Dataset 坐标存在但无法解析业务码（`dataset_definition.datasetCode`）等绑定语义冲突。 */
+  DATASET_BINDING_INVALID: "STRATEGY_CANDIDATE_DATASET_BINDING_INVALID",
+  /** 派生出的 `strategyId` 已被**另一个**策略占用（同 id 但该版本不存在）⇒ 拒绝挂靠。 */
+  PROMOTE_STRATEGY_ID_CONFLICT: "STRATEGY_CANDIDATE_PROMOTE_STRATEGY_ID_CONFLICT",
+  /** 同名版本的指纹不同（内容被改写）⇒ 违反版本不可变，拒绝。 */
+  PROMOTE_VERSION_CONFLICT: "STRATEGY_CANDIDATE_PROMOTE_VERSION_CONFLICT",
+  /**
+   * 跨存储第二步失败（§25 / §26）：Strategy / Version 已创建，但 provenance 或候选回写失败。
+   * `details` 必带已生成的 `strategyId` / `strategyVersionId`，供重试通过幂等闸门自愈。
+   */
+  PROMOTE_WRITEBACK_FAILED: "STRATEGY_CANDIDATE_PROMOTE_WRITEBACK_FAILED",
+  /** 候选已是 `CONVERTED` 但**没有**对应 provenance 行 —— 状态与溯源不一致，需人工核对（§19）。 */
+  PROMOTE_STATE_INCONSISTENT: "STRATEGY_CANDIDATE_PROMOTE_STATE_INCONSISTENT",
 } as const;
 
 export type StrategyCandidateErrorCode =
   (typeof STRATEGY_CANDIDATE_ERROR)[keyof typeof STRATEGY_CANDIDATE_ERROR];
 
+/**
+ * 桥的领域错误。
+ *
+ * `details` 只在**跨存储恢复**场景使用（006.3 §25）：`PROMOTE_WRITEBACK_FAILED` 必须携带已经
+ * 写入成功的 `strategyId` / `strategyVersionId`，否则调用方无法判断「要不要重试」与「重试会不会
+ * 产生第二份 Strategy」。
+ */
 export class StrategyCandidateError extends Error {
   readonly code: StrategyCandidateErrorCode;
+  readonly details?: Readonly<Record<string, unknown>>;
 
-  constructor(code: StrategyCandidateErrorCode, message: string) {
+  constructor(
+    code: StrategyCandidateErrorCode,
+    message: string,
+    details?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
     this.name = "StrategyCandidateError";
     this.code = code;
+    if (details !== undefined) this.details = details;
   }
 }
 
@@ -210,5 +254,57 @@ export function assertCandidateOverridesKeys(input: Record<string, unknown>): vo
         + `以下被拒绝：${offenders.join("、")}`
         + "（研究来源 Dataset 坐标恒取自 Experiment，不接受调用方覆盖）",
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// promote 入参白名单（RESEARCH-006.3 §4）
+// ---------------------------------------------------------------------------
+
+/**
+ * `promote` 的 `overrides` **只**接受这两个键 —— 这是 006.3 §4 的全部覆盖面。
+ *
+ * 🔴 明确**不接受**调用方提交 `StrategyDefinition` / `strategyId` / `version` / `status`：
+ * `StrategyDefinition` 只能由唯一的 `definitionBuild` 转换器从候选草稿生成（§4 末段 / §7）。
+ * 允许覆盖即等于把「转正」变成「用 API 直接写策略」。
+ */
+export const PROMOTE_OVERRIDE_KEYS = ["datasetBinding", "datasetDivergenceReason"] as const;
+export type PromoteOverrideKey = (typeof PROMOTE_OVERRIDE_KEYS)[number];
+
+/** `overrides.datasetBinding` 允许的键（唯一坐标：`datasetVersionId`）。 */
+export const PROMOTE_DATASET_BINDING_KEYS = ["datasetVersionId"] as const;
+
+export function assertPromoteOverridesKeys(input: Record<string, unknown>): void {
+  const offenders = Object.keys(input).filter(
+    (key) => !(PROMOTE_OVERRIDE_KEYS as readonly string[]).includes(key) && input[key] !== undefined,
+  );
+  if (offenders.length > 0) {
+    throw new StrategyCandidateError(
+      STRATEGY_CANDIDATE_ERROR.INVALID_INPUT,
+      `promote 的 overrides 只接受 ${PROMOTE_OVERRIDE_KEYS.join(" / ")}；以下被拒绝：${offenders.join("、")}`
+        + "（StrategyDefinition 只能由 definitionBuild 从候选草稿生成，不接受调用方提交）",
+    );
+  }
+  const binding = input.datasetBinding;
+  if (binding !== undefined && binding !== null) {
+    if (typeof binding !== "object" || Array.isArray(binding)) {
+      throw new StrategyCandidateError(
+        STRATEGY_CANDIDATE_ERROR.INVALID_INPUT,
+        "overrides.datasetBinding 必须是对象，形如 { datasetVersionId: 390002 }",
+      );
+    }
+    const bindingOffenders = Object.keys(binding as Record<string, unknown>).filter(
+      (key) =>
+        !(PROMOTE_DATASET_BINDING_KEYS as readonly string[]).includes(key)
+        && (binding as Record<string, unknown>)[key] !== undefined,
+    );
+    if (bindingOffenders.length > 0) {
+      throw new StrategyCandidateError(
+        STRATEGY_CANDIDATE_ERROR.INVALID_INPUT,
+        `overrides.datasetBinding 只接受 ${PROMOTE_DATASET_BINDING_KEYS.join(" / ")}；`
+          + `以下被拒绝：${bindingOffenders.join("、")}`
+          + "（唯一 Dataset 坐标是 dataset_version.id，不接受 datasetId + version / label / rd-* 等第二套坐标）",
+      );
+    }
   }
 }

@@ -27,6 +27,7 @@ import {
   researchStrategyCandidate,
 } from "../../../drizzle/schema";
 import {
+  ResearchCandidateError,
   assertCandidateConversionCoherence,
   assertCandidateInput,
   assertCandidateTransition,
@@ -1096,6 +1097,38 @@ export function createDbResearchRepositories(): ResearchRepositories {
           `删除失败，Candidate 不存在：${id}`,
         );
       }
+    },
+    /**
+     * RESEARCH-006.3 —— 语义化单列写入（`sourceDatasetDivergenceReason`）。
+     * 判据与 `inMemory.ts` **完全一致**：写一次即定；相同值幂等；不同值拒绝。
+     */
+    async setSourceDatasetDivergenceReason(id, reason) {
+      const db = await requireDb();
+      if (typeof reason !== "string" || reason.trim().length === 0) {
+        throw new ResearchCandidateError("sourceDatasetDivergenceReason 必须是非空字符串");
+      }
+      const current = await candidates.getById(id);
+      if (!current) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.EXPERIMENT_NOT_FOUND,
+          `写入来源分歧原因失败，Candidate 不存在：${id}`,
+        );
+      }
+      const trimmed = reason.trim();
+      const existing = current.sourceDatasetDivergenceReason ?? null;
+      if (existing !== null) {
+        if (existing === trimmed) return current; // 幂等：跨存储重试的第二次调用
+        throw new ResearchCandidateError(
+          `Candidate #${id} 已记录来源分歧原因（${existing}），不可改写为 ${trimmed}`,
+        );
+      }
+      await db
+        .update(researchStrategyCandidate)
+        .set({ sourceDatasetDivergenceReason: trimmed })
+        .where(eq(researchStrategyCandidate.id, id));
+      const updated = await candidates.getById(id);
+      if (!updated) throw new Error(`Candidate 更新后读取失败：${id}`);
+      return updated;
     },
   };
 

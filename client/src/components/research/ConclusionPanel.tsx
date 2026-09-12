@@ -26,6 +26,7 @@ import {
   rpcErrorToDiagnostic,
   type ConclusionVm,
 } from "@/adapters/researchEngineAdapter";
+import { CreateCandidateDialog } from "./CreateCandidateDialog";
 
 /** 极简 markdown：仅处理引擎文本里出现的 `**加粗**`，其余原样。不做富文本渲染。 */
 function EngineText({ text, className }: { text: string; className?: string }) {
@@ -68,6 +69,14 @@ function ConclusionCard({ vm }: { vm: ConclusionVm }) {
             )}
           </div>
         </div>
+        {/* RESEARCH-006.4.1 §3 —— 研究结论 → 策略候选的唯一入口（登记走 admin，默认值由后端负责）。 */}
+        {vm.id > 0 && (
+          <div className="shrink-0">
+            <CreateCandidateDialog
+              conclusion={{ id: vm.id, title: vm.title, conclusion: vm.conclusion, status: vm.status }}
+            />
+          </div>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         {evidence.disclaimer && (

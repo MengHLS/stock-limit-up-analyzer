@@ -14,6 +14,7 @@
  */
 
 import {
+  ResearchCandidateError,
   assertCandidateConversionCoherence,
   assertCandidateInput,
   assertCandidateTransition,
@@ -708,6 +709,33 @@ export function createInMemoryResearchRepositories(
         );
       }
       store.candidates.splice(idx, 1);
+    },
+    /**
+     * RESEARCH-006.3 —— 语义化单列写入（`sourceDatasetDivergenceReason`）。
+     * 判据与 `db.ts` **完全一致**：写一次即定；相同值幂等；不同值拒绝。
+     */
+    async setSourceDatasetDivergenceReason(id, reason) {
+      if (typeof reason !== "string" || reason.trim().length === 0) {
+        throw new ResearchCandidateError("sourceDatasetDivergenceReason 必须是非空字符串");
+      }
+      const found = store.candidates.find((c) => c.id === id);
+      if (!found) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.EXPERIMENT_NOT_FOUND,
+          `写入来源分歧原因失败，Candidate 不存在：${id}`,
+        );
+      }
+      const trimmed = reason.trim();
+      const existing = found.sourceDatasetDivergenceReason ?? null;
+      if (existing !== null) {
+        if (existing === trimmed) return { ...found };
+        throw new ResearchCandidateError(
+          `Candidate #${id} 已记录来源分歧原因（${existing}），不可改写为 ${trimmed}`,
+        );
+      }
+      found.sourceDatasetDivergenceReason = trimmed;
+      found.updatedAt = stamp();
+      return { ...found };
     },
   };
 

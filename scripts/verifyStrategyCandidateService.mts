@@ -604,4 +604,6 @@ const report = {
 console.log(JSON.stringify({ pass: report.pass, checks: report.checks, failed: report.failed }, null, 2));
 
 await conn.end();
-if (failures.length > 0) process.exit(1);
+// ⚠️ drizzle 连接池不会随 `conn.end()` 关闭，会让进程挂在事件循环上（006.1 同款问题）
+// ⇒ 结论已全部输出后**显式退出**，用退出码表达 pass/fail（便于 CI / 人工复跑判读）。
+process.exit(failures.length > 0 ? 1 : 0);

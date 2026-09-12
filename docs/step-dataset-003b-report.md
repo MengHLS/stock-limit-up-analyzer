@@ -185,7 +185,7 @@ return close >= limitUpPrice(preClose, ratio);   // = preClose * (1 + ratio)，�
 
 `11 × 1.1 = 12.100000000000001 > 12.10` → **真实封板收盘价被判为「未涨停」**。
 
-### 5.2 真实数据量化（`_limitprecision_probe.mjs`，真实 TiDB）
+### 5.2 真实数据量化（`docs/evidence/_limitprecision_probe.mjs`，真实 TiDB）
 
 扫描 `stock_daily_prices` 2025-01-01..2026-09-04（299,946 行）：
 
@@ -287,7 +287,7 @@ await service.markReady(versionId, { ... });   // version → READY + 计数
 
 ## 8. 附：关于「path / outcome 数据看起来一直重复」的排查结论
 
-同期收到反馈「path 跟 outcome 的数据一直重复」。用真实 DB 分三层取证（`_dupcheck_probe.mjs`）：
+同期收到反馈「path 跟 outcome 的数据一直重复」。用真实 DB 分三层取证（`docs/evidence/_dupcheck_probe.mjs`）：
 
 | 层 | 判定 | 证据 |
 | --- | --- | --- |
@@ -309,7 +309,7 @@ await service.markReady(versionId, { ... });   // version → READY + 计数
 | --- | --- |
 | 详细报告 | `docs/step-dataset-003b-report.md`（本文） |
 | 端到端验证 | `scripts/verifyDataset003b.mts` |
-| 精度证据探针 | `_limitprecision_probe.mjs`（涨停漏判量化）、`_t1anchor_probe.mjs`（PIT ST 取证）、`_dupcheck_probe.mjs`（重复排查） |
+| 精度证据探针 | `docs/evidence/_limitprecision_probe.mjs`（涨停漏判量化）、`docs/evidence/_t1anchor_probe.mjs`（PIT ST 取证）、`docs/evidence/_dupcheck_probe.mjs`（重复排查） |
 | 建表脚本 | `scripts/applyDatasetBuildConfig.mjs` + `drizzle/0029_dataset_build_config.sql` |
 | 一次性清理脚本 | `scripts/_cleanup003b.mts`（取消非终态作业 + 删临时版本/定义） |
 

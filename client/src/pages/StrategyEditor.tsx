@@ -39,6 +39,7 @@ import {
   RunResultPlaceholder,
   ClosedLoopRunResultPanel,
 } from "@/components/strategy";
+import { StrategyResearchProvenancePanel } from "@/components/research/StrategyResearchProvenancePanel";
 import { trpc } from "@/lib/trpc";
 import type { StrategyLifecycleStatusValue } from "@shared/researchContracts";
 import {
@@ -71,6 +72,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useSearch } from "wouter";
 
 // ---------------------------------------------------------------------------
 // 后端权威模板（开发期用后端纯函数生成一次；前端只透传，不重算 hash / fingerprint）
@@ -1090,16 +1092,40 @@ export default function StrategyEditor() {
   const [lifecycleStatus, setLifecycleStatus] = useState("Draft");
 
   const [loadId, setLoadId] = useState<string | null>(null);
+  /** 已从服务端加载的权威坐标（`null` = 仍在展示本地模板 ⇒ 不查溯源）。 */
+  const [loadedTarget, setLoadedTarget] = useState<{ strategyId: string; version: string } | null>(
+    null
+  );
+
   const loadQuery = trpc.research.strategy.load.useQuery(
     { strategyId: loadId ?? "" },
     { enabled: loadId !== null, retry: false, refetchOnWindowFocus: false }
   );
+
+  /**
+   * 「查看 Strategy Version」的最小落点（006.4.1-B §17 / §20）：
+   * `/strategy-editor?strategyId=…&version=…` —— **不新增第二套策略页面**。
+   *
+   * `version` 只作提示：`research.strategy.load` 以 `strategyId` 为准返回权威版本，
+   * 页面一律以**加载结果**为真（不用 URL 值伪造、也不拿它当坐标比对）。
+   * 只在首次进入时消费一次，之后用户手动点「加载」不受影响。
+   */
+  const search = useSearch();
+  const urlStrategyId = new URLSearchParams(search).get("strategyId");
+  const [urlLoadHandled, setUrlLoadHandled] = useState(false);
+  useEffect(() => {
+    if (urlLoadHandled) return;
+    if (urlStrategyId === null || urlStrategyId === "") return;
+    setUrlLoadHandled(true);
+    setLoadId(urlStrategyId);
+  }, [urlLoadHandled, urlStrategyId]);
 
   useEffect(() => {
     if (loadQuery.data) {
       setVm(strategyToViewModel(loadQuery.data));
       setJsonText(json(loadQuery.data));
       setValidateStatus(null);
+      setLoadedTarget({ strategyId: loadQuery.data.strategyId, version: loadQuery.data.version });
       setLoadId(null);
       toast.success("策略已加载", {
         description: `${loadQuery.data.strategyId}@${loadQuery.data.version}`,
@@ -1186,6 +1212,18 @@ export default function StrategyEditor() {
         creatingVersion={createVersion.isPending}
         onCreateVersion={onCreateVersion}
       />
+
+      {/*
+        §20：Research Provenance 只读区直接长在**现有**策略页上（不新建第二套 Strategy 页面）。
+        只在「确实从服务端加载了某个版本」之后出现 —— 本地模板态不会去查一个不存在的策略。
+        它**只读**且**不阻断**：查不到就明说「来源已不存在」，策略本身的读取/执行不受影响。
+      */}
+      {loadedTarget !== null && (
+        <StrategyResearchProvenancePanel
+          strategyId={loadedTarget.strategyId}
+          version={loadedTarget.version}
+        />
+      )}
 
       <Card>
         <CardHeader className="pb-2">

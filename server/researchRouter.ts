@@ -46,7 +46,7 @@ import {
 } from "./research";
 import { DbStrategyRepository } from "./research/strategyPersistence/db";
 import { StrategyService } from "./research/strategyPersistence/service";
-import { strategyCandidateRouter } from "./research/strategyCandidate/router";
+import { createDefaultStrategyCandidateRouter } from "./research/strategyCandidate/router";
 import { composeCodeVersion } from "./research/experimentLineage/codeVersion";
 import { evaluatePerformance } from "./research/performanceMetrics";
 import { evaluateRiskAdjustedMetrics } from "./research/riskAdjustedMetrics";
@@ -90,13 +90,15 @@ function toLifecycleRecord(value: Record<string, unknown>): StrategyLifecycleRec
 
 export const researchRouter = router({
   /**
-   * RESEARCH-006.2 — Research → Strategy 候选桥（`research.strategyCandidate.*`）。
+   * RESEARCH-006.2 / 006.3 — Research → Strategy 候选桥（`research.strategyCandidate.*`）。
    *
    * 与既有 `research.strategy.*`（策略本体 / 版本 / 生命周期，STRATEGY-002~004）**并列**，
    * 不是它的替代：`strategyCandidate` 管「研究发现的取舍登记」，`strategy` 管「已转正的策略本体」。
-   * ⚠️ 本 STEP **不提供** `promote`：候选永远无法自动变成策略（006.3 才建那条路）。
+   *
+   * 006.3 起 `strategyCandidate.promote` 是**唯一**把候选变成策略的入口（adminProcedure）；
+   * `codeVersion` 与既有 `strategyService` 同口径注入（同一进程只解析一次版本号）。
    */
-  strategyCandidate: strategyCandidateRouter,
+  strategyCandidate: createDefaultStrategyCandidateRouter({ codeVersion: CODE_VERSION }),
 
   strategy: router({
     /** 校验 StrategyDocument（§16 全字段 + §17 追溯）。返回结构化 issue 列表。 */

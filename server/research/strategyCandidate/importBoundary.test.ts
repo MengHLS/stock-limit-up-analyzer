@@ -140,24 +140,59 @@ describe("跨模块依赖方向守护（RESEARCH-006.1 §21 / §22）", () => {
 });
 
 /**
- * RESEARCH-006.2 追加的两条**本 STEP 专属**不变量。
+ * RESEARCH-006.3 — 桥边界守护（§47 Boundary Test）。
  *
- * ⚠️ 第 ① 条是**阶段性**的：006.2 §21 明确「本 STEP 暂时不要 import strategyPersistence」。
- *   006.3 落地 `promote` 时，本条应当**被改写**为「只有 service.ts 与 provenance 写入点可以
- *   import strategyPersistence」，而不是直接删除 —— 桥是唯一允许跨界的地方，这条边界必须一直被断言。
+ * 006.2 阶段的第 ① 条断言原文是「桥**暂时**不得 import Strategy 领域（promote 属 006.3）」。
+ * 006.3 落地 `promote` 后，本条按约定**被改写**（而不是删除）为「跨界只发生在允许清单内的文件」——
+ * 桥依然是唯一允许同时看见两侧的地方，而「桥内部谁能看见 Strategy」这件事必须一直被断言。
+ *
+ * 方向核对（006.3 §47）：
+ *   strategyCandidate ✓→ researchCore ✓→ strategyPersistence ✓（允许，但收在允许清单里）
+ *   researchCore      ✗→ strategyPersistence（第一条 describe 已断言）
+ *   strategyPersistence ✗→ researchCore     （第一条 describe 已断言）
+ *   datasetRegistry   ✗→ strategyCandidate  （第一条 describe 已断言）
  */
-describe("RESEARCH-006.2 桥边界追加守护（§21 / §22 / §28）", () => {
-  it("① 桥在 006.2 阶段不得 import Strategy 领域（promote 属 006.3）", () => {
+
+/** 允许 import `strategyPersistence` 的桥内文件（**唯一**跨界写 Strategy 的端口）。 */
+const STRATEGY_PERSISTENCE_ALLOWLIST = ["strategyPromotionPort.ts"];
+
+/**
+ * 允许 import `strategySchema` 的桥内文件。
+ *   - `strategyPromotionPort.ts`：组装 canonical 文档（`createStrategyDocumentFromDefinition`）；
+ *   - `definitionBuild.ts`：唯一转换器，只取 `strategySchema/definition` 的**类型与词表**（纯函数，无持久化）。
+ */
+const STRATEGY_SCHEMA_ALLOWLIST = ["strategyPromotionPort.ts", "definitionBuild.ts"];
+
+function baseName(rel: string): string {
+  return rel.slice(rel.lastIndexOf("/") + 1);
+}
+
+describe("RESEARCH-006.3 桥边界守护（§47）", () => {
+  it("① 桥内只有允许清单文件可以 import Strategy 领域（跨界必须收敛到端口）", () => {
     const violations: string[] = [];
     for (const f of scan("research/strategyCandidate")) {
+      if (f.rel.endsWith(".test.ts")) continue; // 测试自身会提到两条路径（本断言就在提）
+      const name = baseName(f.rel);
       for (const spec of f.specs) {
-        if (/strategyPersistence|strategySchema/.test(spec)) violations.push(`${f.rel} → ${spec}`);
+        if (/strategyPersistence/.test(spec) && !STRATEGY_PERSISTENCE_ALLOWLIST.includes(name)) {
+          violations.push(`${f.rel} → ${spec}（不在 strategyPersistence 允许清单）`);
+        }
+        if (/strategySchema/.test(spec) && !STRATEGY_SCHEMA_ALLOWLIST.includes(name)) {
+          violations.push(`${f.rel} → ${spec}（不在 strategySchema 允许清单）`);
+        }
       }
     }
     expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
   });
 
-  it("② 桥不得出现写 `strategies` / `strategy_versions` 的痕迹（§28 防偷跑）", () => {
+  it("①-b 允许清单里的文件**确实存在**（防止清单随重构静默失效）", () => {
+    const present = scan("research/strategyCandidate").map((f) => baseName(f.rel));
+    for (const name of [...STRATEGY_PERSISTENCE_ALLOWLIST, ...STRATEGY_SCHEMA_ALLOWLIST]) {
+      expect(present, `允许清单成员不存在：${name}`).toContain(name);
+    }
+  });
+
+  it("② 桥不得出现**直接**写 `strategy_versions` 的痕迹（§28 / §29：必须复用 StrategyService）", () => {
     const violations: string[] = [];
     for (const f of scan("research/strategyCandidate")) {
       // 测试自身会提到这些符号（本断言就在提），故只扫**生产源文件**。
@@ -165,6 +200,16 @@ describe("RESEARCH-006.2 桥边界追加守护（§21 / §22 / §28）", () => {
       const text = readFileSync(f.file, "utf8");
       for (const pattern of [/strategyVersions/, /strategyVersionDatasets/, /INSERT\s+INTO\s+strateg/i]) {
         if (pattern.test(text)) violations.push(`${f.rel} 命中 ${String(pattern)}`);
+      }
+    }
+    expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+  });
+
+  it("③ Strategy 侧不得反向认识 Research 侧的任何东西（含 006.3 新增端口）", () => {
+    const violations: string[] = [];
+    for (const f of scan("research/strategyPersistence")) {
+      for (const spec of f.specs) {
+        if (/(researchCore|strategyCandidate)/.test(spec)) violations.push(`${f.rel} → ${spec}`);
       }
     }
     expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);

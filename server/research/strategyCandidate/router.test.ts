@@ -14,9 +14,12 @@
 import { describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
 import { appRouter } from "../../routers";
-import { createInMemoryResearchRepositories } from "../../researchCore";
+import { createInMemoryResearchRepositories, type ResearchRepositories } from "../../researchCore";
+import { InMemoryStrategyRepository } from "../strategyPersistence/inMemory";
 import { buildStrategyCandidateRouter } from "./router";
 import { createStrategyCandidateService, type DatasetVersionReadPort } from "./service";
+import { createInMemoryStrategyResearchProvenanceRepository } from "./provenance";
+import { StrategyServicePromotionPort } from "./strategyPromotionPort";
 
 const DATASET_VERSION_ID = 900801;
 
@@ -117,16 +120,22 @@ function procedurePaths(r: unknown): string[] {
   return Object.keys((r as { _def: { procedures: Record<string, unknown> } })._def.procedures);
 }
 
-describe("RESEARCH-006.2 · Router 端点与偷跑检查", () => {
-  it("只暴露 4 个端点，且**不存在** promote（§29）", async () => {
+describe("RESEARCH-006.2 / 006.3 · Router 端点与偷跑检查", () => {
+  it("恰好暴露 5 个端点；006.3 起 promote 是**唯一**新增入口（§33）", async () => {
     const f = await buildFixture();
     expect(procedurePaths(f.router).sort()).toEqual([
       "createFromConclusion",
       "get",
+      // RESEARCH-006.4.1-B：只读溯源端点（§20/§22）。它不是第二个转正入口 ——
+      // 只读 `strategy_research_provenance`，不写任何表、不构造 StrategyDefinition。
+      "getVersionProvenance",
+      "promote",
       "transition",
       "update",
     ]);
-    expect(procedurePaths(f.router).some((p) => /promote|clone|strategy/i.test(p))).toBe(false);
+    // 除了 promote，不允许出现任何别的「策略化 / 克隆 / 转正」入口
+    const suspicious = procedurePaths(f.router).filter((p) => /clone|inherit|strategy|publish|convert/i.test(p));
+    expect(suspicious).toEqual([]);
   });
 
   it("已注册进 appRouter（research.strategyCandidate.*）—— 只读路由表，不触库", () => {
@@ -134,10 +143,185 @@ describe("RESEARCH-006.2 · Router 端点与偷跑检查", () => {
     expect(paths.filter((p) => p.startsWith("research.strategyCandidate.")).sort()).toEqual([
       "research.strategyCandidate.createFromConclusion",
       "research.strategyCandidate.get",
+      "research.strategyCandidate.getVersionProvenance",
+      "research.strategyCandidate.promote",
       "research.strategyCandidate.transition",
       "research.strategyCandidate.update",
     ]);
-    expect(paths).not.toContain("research.strategyCandidate.promote");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RESEARCH-006.3 — promote 端点
+// ---------------------------------------------------------------------------
+
+const PROMOTE_DATASET_CODE = "first_limit_pullback";
+const NOW_ISO = "2026-09-12T10:00:00.000Z";
+
+/** promote 需要装配 Strategy 侧（端口 + 溯源）；Dataset 端口也要能解出 datasetCode。 */
+const promoteDatasetPort: DatasetVersionReadPort = {
+  async getVersionById(id) {
+    return id === DATASET_VERSION_ID
+      ? {
+          datasetVersionId: id,
+          label: "v2",
+          status: "READY",
+          datasetId: 120001,
+          datasetCode: PROMOTE_DATASET_CODE,
+        }
+      : undefined;
+  },
+};
+
+function promoteDraft() {
+  return {
+    entryRule: {
+      event: "FIRST_LIMIT_UP",
+      timing: "NEXT_OPEN",
+      extra: {
+        observationWindow: { start: 1, end: 5, unit: "TRADING_DAY" },
+        trigger: "FIRST_VALID_DAY",
+        execution: { quantityMethod: "TARGET_WEIGHT", lotSize: 100 },
+        position: { sizingMethod: "FIXED_RATIO", positionRatio: 0.2 },
+        document: {
+          backtestConfig: { initialCapital: 1_000_000 },
+          costModel: {
+            commissionRate: 0.00025,
+            stampDutyRate: 0.0005,
+            transferFeeRate: 0.00001,
+            slippageBps: 5,
+            lotSize: 100,
+            minCommission: 5,
+          },
+        },
+      },
+    },
+    riskRule: { maxPositions: 5 },
+    parameterSpace: { holdingDays: { type: "number", min: 1, max: 20, step: 1 } },
+  };
+}
+
+async function buildPromoteFixture() {
+  const repos: ResearchRepositories = createInMemoryResearchRepositories({
+    datasetVersionExists: async (id) => id === DATASET_VERSION_ID,
+    now: () => new Date(NOW_ISO),
+  });
+  const experiment = await repos.experiments.create({
+    datasetVersionId: DATASET_VERSION_ID,
+    name: "E",
+    researchType: "EVENT_STUDY",
+    status: "COMPLETED",
+  });
+  const conclusion = await repos.conclusions.create({
+    experimentId: experiment.id as number,
+    conclusionType: "SUPPORTED",
+    title: "T",
+    conclusion: "C",
+    confidence: 0.8,
+  });
+  const strategyRepo = new InMemoryStrategyRepository(() => NOW_ISO, {
+    datasetRegistry: {
+      async getVersionById(id: number) {
+        return id === DATASET_VERSION_ID
+          ? { id, datasetId: 120001, version: "v2", status: "READY" }
+          : undefined;
+      },
+      async getDefinitionById(datasetId: number) {
+        return { id: datasetId, datasetCode: PROMOTE_DATASET_CODE };
+      },
+    },
+  });
+  const provenance = createInMemoryStrategyResearchProvenanceRepository({
+    now: () => new Date(NOW_ISO),
+  });
+
+  const router = buildStrategyCandidateRouter({
+    service: createStrategyCandidateService({
+      repos,
+      datasetVersions: promoteDatasetPort,
+      strategies: new StrategyServicePromotionPort(strategyRepo, { codeVersion: "test-1.0.0" }),
+      provenance,
+    }),
+  });
+  const caller = router.createCaller({ req: {} as never, res: {} as never, user: adminUser });
+  const anonCaller = router.createCaller({ req: {} as never, res: {} as never, user: null });
+
+  return { repos, strategyRepo, provenance, router, caller, anonCaller, conclusionId: conclusion.id as number };
+}
+
+/** 走「登记 → 填草稿 → ACCEPTED」所需的最小调用面（结构类型，避免把 tRPC caller 的完整类型摊开）。 */
+interface CandidateCaller {
+  createFromConclusion(input: { conclusionId: number }): Promise<{ candidate: { id?: number } }>;
+  update(input: { candidateId: number; patch: unknown }): Promise<unknown>;
+  transition(input: { candidateId: number; to: "REVIEW" | "ACCEPTED" }): Promise<unknown>;
+}
+
+/** 走完「登记 → 填草稿 → ACCEPTED」，返回 candidateId。 */
+async function acceptedVia(caller: CandidateCaller, conclusionId: number): Promise<number> {
+  const created = await caller.createFromConclusion({ conclusionId });
+  const candidateId = created.candidate.id as number;
+  await caller.update({ candidateId, patch: promoteDraft() as never });
+  await caller.transition({ candidateId, to: "REVIEW" });
+  await caller.transition({ candidateId, to: "ACCEPTED" });
+  return candidateId;
+}
+
+describe("RESEARCH-006.3 · Router `promote`（§33 / §34 / §35）", () => {
+  it("权限：写端点，未登录 → FORBIDDEN（**不开放 public**）", async () => {
+    const f = await buildPromoteFixture();
+    await expectTrpcError(f.anonCaller.promote({ candidateId: 1 }), "FORBIDDEN");
+  });
+
+  it("入参：未知顶层键 / overrides 里的完整 definition → 传输层 BAD_REQUEST", async () => {
+    const f = await buildPromoteFixture();
+    await expectTrpcError(
+      f.caller.promote({ candidateId: 1, strategyId: "hack" } as never),
+      "BAD_REQUEST",
+    );
+    await expectTrpcError(
+      f.caller.promote({ candidateId: 1, overrides: { definition: { entry: {} } } } as never),
+      "BAD_REQUEST",
+    );
+    await expectTrpcError(
+      f.caller.promote({ candidateId: 1, overrides: { datasetBinding: { datasetId: 1 } } } as never),
+      "BAD_REQUEST",
+    );
+  });
+
+  it("领域错误 → 稳定 code：不存在 NOT_FOUND / 非 ACCEPTED PRECONDITION_FAILED", async () => {
+    const f = await buildPromoteFixture();
+    await expectTrpcError(f.caller.promote({ candidateId: 999999999 }), "NOT_FOUND");
+
+    const created = await f.caller.createFromConclusion({ conclusionId: f.conclusionId });
+    await expectTrpcError(
+      f.caller.promote({ candidateId: created.candidate.id as number }),
+      "PRECONDITION_FAILED",
+    );
+  });
+
+  it("端到端：ACCEPTED → promote → CONVERTED，DTO 五键齐备；再次 promote 幂等", async () => {
+    const f = await buildPromoteFixture();
+    const candidateId = await acceptedVia(f.caller, f.conclusionId);
+
+    const result = await f.caller.promote({ candidateId });
+    expect(result.candidateId).toBe(candidateId);
+    expect(result.strategyId).toBe(`cand-${candidateId}`);
+    expect(typeof result.strategyVersionId).toBe("number");
+    expect(result.strategyVersion).toBe("1.0.0");
+    expect(typeof result.provenanceId).toBe("number");
+    expect(result.candidateStatus).toBe("CONVERTED");
+    expect(result.origin).toBe("DIRECT");
+    expect(result.idempotent).toBe(false);
+
+    const view = await f.caller.get({ candidateId });
+    expect(view.candidate.status).toBe("CONVERTED");
+    expect(view.candidate.strategyDefinitionId).toBe(result.strategyId);
+
+    const again = await f.caller.promote({ candidateId });
+    expect(again.idempotent).toBe(true);
+    expect(again.strategyVersionId).toBe(result.strategyVersionId);
+    expect(await f.strategyRepo.listVersions(result.strategyId)).toHaveLength(1);
+    expect(await f.provenance.listByStrategyId(result.strategyId)).toHaveLength(1);
   });
 });
 

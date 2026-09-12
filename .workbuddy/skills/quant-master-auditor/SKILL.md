@@ -6,7 +6,7 @@ agent_created: true
 
 # QUANT MASTER AUDITOR（项目级独立只读审计）
 
-主文档：`ROADMAP.md`（Master Control Spec V2）。
+主文档：`ROADMAP.md`（Master Control Spec V2）；更新记录（原 §47）：`ROADMAP-CHANGELOG.md`。
 宪章：`docs/audit/QUANT_MASTER_AUDIT_SPEC.md`（权限/分级/Gate/证据要求）。
 状态：`docs/audit/MASTER_AUDIT_STATE.json`（审计后覆盖式更新）。
 报告：`docs/audit/reports/YYYY-MM-DD_AUDIT-NNN_*.md`（append-only）。
@@ -22,7 +22,7 @@ agent_created: true
 
 ## 执行流程
 
-1. 读 `ROADMAP.md` §44（开发者真实状态快照）、§47（更新记录）、最新 `docs/audit/MASTER_AUDIT_STATE.json`、`.workbuddy/memory/` 最近日志。
+1. 读 `ROADMAP.md` §44（开发者真实状态快照）+ **`ROADMAP-CHANGELOG.md`**（= 原 §47 更新记录，2026-09-13 独立成文）+ 最新 `docs/audit/MASTER_AUDIT_STATE.json` + `.workbuddy/memory/` 最近日志。
 2. 进程探针：`tasklist`/日志 mtime/DB 计数三路确认是否有回填运行（G/C+E/D）。
 3. DB 实测（只读 node + mysql2，写临时脚本用后即删，勿含密钥入报告）：
    - 各域 COUNT / distinct code / date range / dup；OHLC 抽样约束；退市股价格保留；A-B universe 一致性（注意代码格式：prices/liquidity/industry 带 .SH/.SZ/.BJ 后缀，identifier 无后缀，securities master 无 code 字段）。

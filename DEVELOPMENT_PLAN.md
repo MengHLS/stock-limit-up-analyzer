@@ -105,7 +105,7 @@ P3 端到端验证 ── 真数据跑通「主观规则→回测→评价→优
 
 ## 7. 排期与分工总表（供直接排期）
 
-> 角色约定：**数据链 agent**＝BaoStock 独占回填 + DB 校验/认证（串行）；**research-dev agent**＝P2/P3 编码（多实例并行；共享统一出口 `server/research/index.ts` 合入需串行，合入后必须 `tsc --noEmit` + 全量 vitest 复核，防 DEFAULT_LOT_SIZE 式出口冲突重演）；**协调者**＝复核证据、合并出口、更新 TASK_TRACKING §5 / ROADMAP §44/§47。
+> 角色约定：**数据链 agent**＝BaoStock 独占回填 + DB 校验/认证（串行）；**research-dev agent**＝P2/P3 编码（多实例并行；共享统一出口 `server/research/index.ts` 合入需串行，合入后必须 `tsc --noEmit` + 全量 vitest 复核，防 DEFAULT_LOT_SIZE 式出口冲突重演）；**协调者**＝复核证据、合并出口、更新 TASK_TRACKING §5 / ROADMAP §44 / **§47（正文现位于根目录 `ROADMAP-CHANGELOG.md`，2026-09-13 起独立成文）**。
 
 | 批次 | 任务 | 建议分工 | 启动条件 | 预估窗口 |
 |---|---|---|---|---|
@@ -139,6 +139,6 @@ P3 端到端验证 ── 真数据跑通「主观规则→回测→评价→优
 
 1. **状态**只用 ROADMAP §7 七态（`DESIGN/CODE_READY/DATA_READY/VALIDATED/RESEARCH_READY/PRODUCTION_READY/BLOCKED`），升级证据要求同 TASK_TRACKING §0.2；「进行中/未开始」是进度词，不是状态值。
 2. 任务状态以 **TASK_TRACKING.md** 为准（追踪视图），本清单侧重排期/分工/验收；两文档 ID 互通（D-\*/C-\* 与 P0-x/P1-x/P2/P3 映射见 §3~§6 各表「依赖/关联模块」）。
-3. 每次实质推进（认领、状态升级、批次变化）：TASK_TRACKING §5 append 一条；数据/研究链变化同步 ROADMAP §44 覆盖式更新 + §47 append。
+3. 每次实质推进（认领、状态升级、批次变化）：TASK_TRACKING §5 append 一条；数据/研究链变化同步 ROADMAP §44 覆盖式更新 + **`ROADMAP-CHANGELOG.md`（原 §47）append**。
 4. P2 各 agent 交付后统一收口动作：`npx vitest run server/research server/researchDataset server/backtest`（当前基线 777 例零回归）+ `tsc --noEmit` exit 0 + `server/research/index.ts` 出口查重。
 5. 复杂度/窗口为计划估算，认领后按真实证据回填校准并留痕。

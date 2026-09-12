@@ -40,7 +40,8 @@ import RegimeReport from "./pages/RegimeReport";
 // FE-9 — 研究链路：复盘纪律 + 生产闭环（骨架线）
 import ReviewWorkbench from "./pages/ReviewWorkbench";
 // RESEARCH-002 — 研究引擎：实验 / Run / 分析 / 结果 / 结论 工作台
-import { ResearchList, ResearchDetail } from "./pages/research";
+// RESEARCH-006.4.1 — Research → Candidate 前端闭环：候选详情（结论 → 候选 → 状态流转）
+import { ResearchList, ResearchDetail, StrategyCandidateDetail } from "./pages/research";
 
 function Router() {
   return (
@@ -75,6 +76,8 @@ function Router() {
       <Route path="/review-workbench" component={ReviewWorkbench} />
       {/* RESEARCH-002 — 研究引擎工作台（实验 → Run → 分析 → 结果 → 结论） */}
       <Route path="/research" component={ResearchList} />
+      {/* RESEARCH-006.4.1 — 候选详情必须先于 `/research/:experimentId` 匹配（同前缀更深路径） */}
+      <Route path="/research/candidates/:candidateId" component={StrategyCandidateDetail} />
       <Route path="/research/:experimentId" component={ResearchDetail} />
 
       <Route path="/404" component={NotFound} />

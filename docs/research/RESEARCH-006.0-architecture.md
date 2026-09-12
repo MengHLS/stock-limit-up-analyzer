@@ -1,7 +1,7 @@
 # RESEARCH-006.0 — Research → Strategy Candidate/Draft 架构审计与接口设计
 
 > **性质**：架构审计 + 接口设计。**不实施链路**，不改 schema、不写 migration、不改现有业务行为、不碰 Dataset Registry。
-> **证据等级**：全部结论以**当前源码 + 真实 TiDB 只读实查**为准（探针 `_r006_probe.mjs` → `_r006_probe_result.md`）。凡旧报告写过而代码中没有的能力，一律判为不存在。
+> **证据等级**：全部结论以**当前源码 + 真实 TiDB 只读实查**为准（探针 `docs/evidence/_r006_probe.mjs` → `docs/evidence/_r006_probe_result.md`）。凡旧报告写过而代码中没有的能力，一律判为不存在。
 > **状态**：`RESEARCH-006.0 = COMPLETE`
 > **⚠️ 编号提示**：`§47` 已用 `RESEARCH-006 / 007 / 008`（9m/9n/9o）指代**结果页可读性**的前端任务。本 STEP 是**另一个** `RESEARCH-006`（架构线），故一律带 `.0/.1/...` 子号以示区分；后续若继续走架构线，建议在 §47 中统一标注「架构线」前缀，避免两条线互相冒充。
 
@@ -712,7 +712,7 @@ strategies(首板回踩不破开盘价) + strategy_versions(1.0.0, status=Draft)
 
 | 证据 | 来源 |
 | --- | --- |
-| 12 张 `research_*` / 6 张 `strategy_*` / 3 张 `dataset_*` 表存在性与行数 | `_r006_probe.mjs` → `_r006_probe_result.md`（真实 TiDB 只读） |
+| 12 张 `research_*` / 6 张 `strategy_*` / 3 张 `dataset_*` 表存在性与行数 | `docs/evidence/_r006_probe.mjs` → `docs/evidence/_r006_probe_result.md`（真实 TiDB 只读） |
 | `research_conclusion` / `research_strategy_candidate` 真实列 / 索引 / **零外键** | 同上（`information_schema`） |
 | `research_result` / `research_analysis` / `research_run` **零 dataset 列** | 同上 |
 | `strategy_versions` 真实列中**无 research 溯源列** | 同上 |

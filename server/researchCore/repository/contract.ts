@@ -251,6 +251,20 @@ export interface ResearchStrategyCandidateRepository {
   getById(id: number): Promise<ResearchStrategyCandidate | undefined>;
   list(filter?: ResearchCandidateListFilter): Promise<ResearchStrategyCandidate[]>;
   update(id: number, patch: ResearchStrategyCandidateUpdatePatch): Promise<ResearchStrategyCandidate>;
+  /**
+   * RESEARCH-006.3 — **语义化单列写入口**：记录「研究来源 Dataset ≠ 执行绑定 Dataset」的原因。
+   *
+   * 为什么不能走 `update`：`sourceDatasetDivergenceReason` 属**历史事实快照**，被
+   * `assertCandidateUpdatePatchKeys` 硬拒（可经普通 update 修改即等于伪造历史）。因此转正需要
+   * 一个**只写这一列**的专用方法（与 `status` / `strategyDefinitionId` 的语义化入口同一纪律），
+   * 并且**写一次即定**：
+   *   - 当前值为 `null` ⇒ 写入；
+   *   - 当前值已存在且与入参**相同** ⇒ 幂等 no-op（返回当前行，供跨存储重试自愈）；
+   *   - 当前值已存在但与入参**不同** ⇒ 拒绝（历史事实不可改写）。
+   *
+   * 006.0 §7.1 / §9.2：仅当转正绑定到**不同** Dataset Version 时才允许非空；一致时**必须**为 `null`。
+   */
+  setSourceDatasetDivergenceReason(id: number, reason: string): Promise<ResearchStrategyCandidate>;
   delete(id: number): Promise<void>;
 }
 

@@ -142,6 +142,13 @@ const STATUS_TONE: Record<string, StatusTone> = {
   FINAL: "success",
   SUPERSEDED: "neutral",
 
+  // RESEARCH-006.4.1 — Strategy Candidate（研究 → 策略桥）六态
+  // DRAFT / REJECTED / ARCHIVED 已在上方收录（neutral / danger / neutral）；
+  // 这里补齐 REVIEW / ACCEPTED / CONVERTED 的语义色。
+  REVIEW: "info",
+  ACCEPTED: "success",
+  CONVERTED: "success",
+
   // 闭环阶段状态机（closedLoop · FE-4 运行工作台）
   // 阶段：READY / EXECUTED / BLOCKED / SKIPPED（READY/SKIPPED 已收录）
   EXECUTED: "success",

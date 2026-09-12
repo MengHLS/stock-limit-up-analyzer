@@ -16,10 +16,12 @@ import {
   Braces,
   FileText,
   FlaskConical,
+  Grid3x3,
   History,
   Layers,
   Lightbulb,
   Plus,
+  Search,
   Sigma,
   Trophy,
 } from "lucide-react";
@@ -54,6 +56,7 @@ import {
   ConfirmDeleteButton,
   CreateAnalysisDialog,
   ExperimentActions,
+  ResearchMatrixView,
   RunEngineButton,
   RunExecutionBatches,
   RunIncrementalButton,
@@ -100,6 +103,34 @@ export default function ResearchDetail() {
     if (selectedAnalysisId !== null && analyses.some((a) => a.id === selectedAnalysisId)) return;
     setSelectedAnalysisId(analyses[0]!.id ?? null);
   }, [analyses, selectedAnalysisId]);
+
+  /**
+   * 结果页签的两种视图。
+   *
+   * `matrix`（默认）：把「决策日 × 回撤桶」这类**批量建出来的**分析拼回一张表 ——
+   * 一个 Run 动辄上百个分析，逐个点开的平铺按钮列表**看不出横向可比性**，而这类分析的
+   * 全部信息本身就是一张二维表。默认给矩阵就是为了让「哪一格站得住」第一眼可见。
+   *
+   * `single`：原有逐分析视图，负责「**这一格**里到底筛了什么、逐指标是多少」。
+   * 矩阵里点任一格会切到这里并选中该分析。
+   */
+  const [resultView, setResultView] = useState<"matrix" | "single">("matrix");
+  const [analysisQuery, setAnalysisQuery] = useState("");
+
+  /** 矩阵视图只需要 name / target / status（解析规则见 `researchMatrix.ts`）。 */
+  const matrixAnalyses = useMemo(
+    () =>
+      analyses.flatMap((a) =>
+        a.id === undefined ? [] : [{ id: a.id, name: a.name, target: a.target ?? null, status: a.status }],
+      ),
+    [analyses],
+  );
+
+  const visibleAnalyses = useMemo(() => {
+    const q = analysisQuery.trim().toLowerCase();
+    if (q.length === 0) return analyses;
+    return analyses.filter((a) => a.name.toLowerCase().includes(q) || String(a.id).includes(q));
+  }, [analyses, analysisQuery]);
 
   const createRun = trpc.researchEngine.createRun.useMutation();
   const removeRun = trpc.researchEngine.deleteRun.useMutation();
@@ -521,19 +552,69 @@ export default function ResearchDetail() {
             <EmptyState icon={BarChart3} title="该 Run 下还没有分析" />
           ) : (
             <>
-              <div className="flex flex-wrap items-center gap-2">
-                {analyses.map((a) => (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
                   <Button
-                    key={a.id}
                     size="sm"
-                    variant={a.id === selectedAnalysisId ? "default" : "outline"}
-                    onClick={() => setSelectedAnalysisId(a.id!)}
+                    variant={resultView === "matrix" ? "default" : "outline"}
+                    onClick={() => setResultView("matrix")}
                   >
-                    #{a.id} {a.analysisType}
+                    <Grid3x3 className="mr-1.5 h-3.5 w-3.5" /> 矩阵视图
                   </Button>
-                ))}
+                  <Button
+                    size="sm"
+                    variant={resultView === "single" ? "default" : "outline"}
+                    onClick={() => setResultView("single")}
+                  >
+                    <Sigma className="mr-1.5 h-3.5 w-3.5" /> 逐分析
+                  </Button>
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  该 Run 共 {analyses.length} 个分析
+                  {resultView === "single" && selectedAnalysisId !== null ? ` · 当前 #${selectedAnalysisId}` : ""}
+                </span>
               </div>
-              {selectedAnalysisId !== null && <AnalysisResultsView analysisId={selectedAnalysisId} />}
+
+              {resultView === "matrix" ? (
+                <ResearchMatrixView
+                  analyses={matrixAnalyses}
+                  onSelectAnalysis={(id) => {
+                    setSelectedAnalysisId(id);
+                    setResultView("single");
+                  }}
+                />
+              ) : (
+                <>
+                  {analyses.length > 20 && (
+                    <div className="relative max-w-sm">
+                      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        value={analysisQuery}
+                        onChange={(e) => setAnalysisQuery(e.target.value)}
+                        placeholder="按名称或 ID 过滤分析…"
+                        className="w-full rounded border bg-background py-1 pl-7 pr-2 text-xs"
+                      />
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {visibleAnalyses.map((a) => (
+                      <Button
+                        key={a.id}
+                        size="sm"
+                        variant={a.id === selectedAnalysisId ? "default" : "outline"}
+                        title={`${a.name}${a.target ? ` · ${a.target}` : ""}`}
+                        onClick={() => setSelectedAnalysisId(a.id!)}
+                      >
+                        #{a.id} {a.name.length > 30 ? `${a.name.slice(0, 30)}…` : a.name}
+                      </Button>
+                    ))}
+                    {visibleAnalyses.length === 0 && (
+                      <span className="text-xs text-muted-foreground">没有匹配「{analysisQuery}」的分析</span>
+                    )}
+                  </div>
+                  {selectedAnalysisId !== null && <AnalysisResultsView analysisId={selectedAnalysisId} />}
+                </>
+              )}
             </>
           )}
         </TabsContent>

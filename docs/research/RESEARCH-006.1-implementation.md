@@ -280,9 +280,9 @@ npx vitest run
 
 | 证据 | 路径 |
 | --- | --- |
-| 前状态只读审计（真实 TiDB） | `_r0061_probe.mjs` → `_r0061_probe_result.md` |
-| migration 首次 apply 断言 | `_r0061_apply.json`（`pass=true`，6 executed / 0 skipped） |
-| 幂等重放 | `_r0061_apply2.json`（6 skipped / `pass=true`） |
-| `--check` 断言 | `_r0061_check.json`（`pass=true`） |
-| 领域层真实库验收 | `scripts/verifyResearchStrategyBridge.mts` → `_r0061_verify.log`（50 ✓ / 0 ✗） |
-| 全量测试 | `_r0061_fulltest.log` / `_r0061_fulltest.clean.log` |
+| 前状态只读审计（真实 TiDB） | `docs/evidence/_r0061_probe.mjs` → `docs/evidence/_r0061_probe_result.md` |
+| migration 首次 apply 断言 | `docs/evidence/_r0061_apply.json`（`pass=true`，6 executed / 0 skipped） |
+| 幂等重放 | `docs/evidence/_r0061_apply2.json`（6 skipped / `pass=true`） |
+| `--check` 断言 | `docs/evidence/_r0061_check.json`（`pass=true`） |
+| 领域层真实库验收 | `scripts/verifyResearchStrategyBridge.mts` → `docs/evidence/_r0061_verify.log`（50 ✓ / 0 ✗） |
+| 全量测试 | `docs/evidence/_r0061_fulltest.log` / `docs/evidence/_r0061_fulltest.clean.log` |
