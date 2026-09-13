@@ -38,11 +38,27 @@ function sourceRef(module: string, moduleRunKind: string, runId: string | null, 
 // ① C-14.1 TradeSimulationRun → backtestSummary（复用其 run 摘要字段）
 // ---------------------------------------------------------------------------
 
+/** 成交明细投影上限（防长窗口把响应体撑爆；截断事实由 `tradesTruncated` 显式表达）。 */
+const BACKTEST_TRADE_DETAIL_LIMIT = 500;
+
 /**
  * 把 C-14.1 simulator 产出的 TradeSimulationRun 摘要化为 backtest 阶段交接。
- * 只摘取轻量字段（不拷贝 equityCurve/trades rows）；source 指向内容指纹。
+ *
+ * 两个层次：
+ *   1. **标量摘要**（原有 12 个字段）——回答「跑了多久 / 最终权益 / 成交几笔」；
+ *   2. **真实产出明细**（2026-09-13 增补）——`equityCurve`（策略产出的曲线）、
+ *      `executionStats.byReason`（**唯一**能解释「为什么没成交」的事实）、`skippedCounts`、
+ *      `trades`（有上限）、`costs`。
+ *      增补理由：此前只投影标量 ⇒ 界面跑出「0 成交 / 曲线全平」时无从得知原因（实测直读
+ *      事件面板时 59/59 单全部 `SUSPENDED`）。
+ *
+ * 纪律：一下都是**投影**，不重算任何指标、不补齐缺失值、不把截断后的条数当总笔数。
  */
 export function summarizeTradeSimulationRun(run: TradeSimulationRun): ClosedLoopBacktestSummary {
+  const skippedCounts = new Map<string, number>();
+  for (const entry of run.skipped) {
+    skippedCounts.set(entry.code, (skippedCounts.get(entry.code) ?? 0) + 1);
+  }
   return {
     kind: "backtestSummary",
     handoffVersion: 1,
@@ -56,6 +72,39 @@ export function summarizeTradeSimulationRun(run: TradeSimulationRun): ClosedLoop
     decisionDayCount: run.decisionDayCount,
     equityCurvePointCount: run.equityCurve.length,
     tradeCount: run.trades.length,
+    equityCurve: run.equityCurve.map(point => ({
+      date: point.date,
+      equity: point.equity,
+      cash: point.cash,
+      marketValue: point.marketValue,
+      openPositions: point.openPositions,
+    })),
+    executionStats: {
+      totalSignals: run.executionStats.totalSignals,
+      totalOrders: run.executionStats.totalOrders,
+      totalFills: run.executionStats.totalFills,
+      rejectedOrders: run.executionStats.rejectedOrders,
+      partialFills: run.executionStats.partialFills,
+      byReason: { ...run.executionStats.byReason },
+    },
+    skippedCounts: [...skippedCounts.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .map(([code, count]) => ({ code, count })),
+    trades: run.trades.slice(0, BACKTEST_TRADE_DETAIL_LIMIT).map(trade => ({
+      securityId: trade.securityId,
+      entryTime: trade.entryTime,
+      entryPrice: trade.entryPrice,
+      exitTime: trade.exitTime,
+      exitPrice: trade.exitPrice,
+      quantity: trade.quantity,
+      netPnl: trade.netPnl,
+      returnPct: trade.returnPct,
+      holdingPeriod: trade.holdingPeriod,
+      openAtEnd: trade.openAtEnd,
+      fees: trade.fees,
+    })),
+    tradesTruncated: run.trades.length > BACKTEST_TRADE_DETAIL_LIMIT,
+    costs: { ...run.costs },
   };
 }
 

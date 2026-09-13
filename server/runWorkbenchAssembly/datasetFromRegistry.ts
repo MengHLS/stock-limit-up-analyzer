@@ -29,7 +29,9 @@
  *     `post`(rd≥1) 段**不进入 rows**（它们是未来信息，逐日 PIT 面板禁止混入）。
  *     ⇒ 语义上等价于「T+N 观察窗口不可见」的窄面板，**不足以支撑需要 post 窗口的回测撮合**。
  *     若策略/配方要求 post 窗口，本桥会在 gateNotes 中明确标注 `POST_WINDOW_NOT_PROJECTED`，
- *     由调用方决定是否回落 `buildResearchDataset`。
+ *     由调用方决定是否回落 `buildResearchDataset`。**调用方的机器可读判据 = 返回值
+ *     `executionBarsAvailable === false`** —— 2026-09-13 起 `assemble.ts#resolveDataset`
+ *     会据此自动回落（此前无此判据，界面「运行策略」实测恒 0 成交，见该字段注释）。
  *   - 本桥只投影 `prefix` 中的 OHLCV + `event` 中的时点属性；`st` / `industryName` /
  *     `lifecycleVerdict` 等 Registry 未落库的列，一律按**「未知」**忠实表达
  *     （`UNKNOWN` / null），不猜测、不填默认值。
@@ -291,6 +293,22 @@ export interface BuildDatasetFromRegistryResult {
   readonly dataset: ResearchDataset;
   readonly version: DatasetVersion;
   readonly definition: DatasetDefinition;
+  /**
+   * 🔴 本投影是否携带「**执行日行情**」（= 撮合阶段能不能成交）。
+   *
+   * 恒为 `false`（2026-09-13 明示）：本桥只投影 `prefix` 的 `rd=0`（事件日当天行情），
+   * `post`（rd≥1）段**不进 rows** ⇒ 任何证券在其**事件日之外**都没有行，而交易模拟在
+   * **决策日的下一交易日**执行订单（`simulator/engine.ts` 第 9(c) 步按
+   * `dayBars.get(securityId)` 取执行日 bar）⇒ 执行日无行时一律按 `SUSPENDED` 拒单。
+   *
+   * 实测（`docs/evidence/_probe_backtest_zero_trades.mts`，390002 / 2025-01-02~03-31）：
+   * `registry` 路径 **59 单 → 59 单 SUSPENDED → 0 成交 → 权益曲线恒平**；
+   * 同策略同窗口走 `rebuild` 则 **133 笔成交 / 期末 112,169（+12.17%）**。
+   *
+   * ⇒ 调用方（`assemble.ts#resolveDataset`）**必须**据此回落 `buildResearchDataset`，
+   * 否则「界面运行策略」会静默产出全 0 结果。
+   */
+  readonly executionBarsAvailable: boolean;
   /** 直读实况（供装配摘要如实展示「从已落库数据集读了什么」）。 */
   readonly stats: {
     readonly eventCount: number;
@@ -441,6 +459,8 @@ export async function buildResearchDatasetFromRegistry(
     },
     version,
     definition,
+    // post 未投影 ⇒ 执行日无行情，撮合必拒（见字段注释与 `_probe_backtest_zero_trades.mts`）。
+    executionBarsAvailable: false,
     stats: {
       eventCount: events.length,
       rowCount: rows.length,

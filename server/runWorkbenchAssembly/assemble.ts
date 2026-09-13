@@ -207,7 +207,18 @@ export type DatasetSourcePolicy = "prefer-registry" | "rebuild";
  * 解析数据集：优先直读已绑定 `datasetVersionId` 的已落库 `ds_*` 数据集；
  * 直读不可用（未绑定 / 非 READY / 体系不支持 / 超护栏 / DB 不可用）→ 回落从零重建。
  *
- * 🔴 回落是**缓存未命中**语义，不是「校验通过」：事实会写进 `sourceNote` 如实暴露。
+ * 🔴 **2026-09-13 增补第二类回落：直读成功但「不可撮合」**（`executionBarsAvailable === false`）。
+ * 原因：直读桥的投影是「首板**事件窗口**」形状 —— 只含事件日 `rd=0` 的行情，`post`（rd≥1）
+ * 不进 rows ⇒ 任何证券在其事件日之外**没有任何行**；而交易模拟在**决策日的下一交易日**
+ * 执行订单（`simulator/engine.ts` 第 9(c) 步按执行日 `dayBars.get(securityId)` 取价），
+ * 取不到即按 `SUSPENDED` 拒单 ⇒ 界面「运行策略」会**静默产出全 0 结果**。
+ * 实测（`docs/evidence/_probe_backtest_zero_trades.mts`，390002 / 2025-01-02~03-31）：
+ *   - `registry`：59 单 → **59 单 SUSPENDED** → 0 成交 → 权益曲线恒平 100,000；
+ *   - `rebuild`（同策略同窗口）：**133 笔成交 / 期末 112,169（+12.17%）**，仅 6 单因现金不足被拒。
+ * ⇒ 「研究/候选」阶段与「撮合」阶段对数据面的要求不同，而两阶段**必须共用同一份 dataset**
+ * （`runTradeSimulation` 强校验 `datasetVersion` 一致）⇒ 只要本次运行包含撮合，就必须用
+ * 具备执行日行情的逐日面板。回落事实与原因如实写进 `datasetSourceNote`。
+ *
  * 除 `RegistryDatasetBridgeError`（可预期的「不该直读」情形）外，其他错误一律上抛 ——
  * 不能把代码 bug 伪装成「直读不可用」。
  */
@@ -229,7 +240,24 @@ async function resolveDataset(
         name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
         ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
       });
-      return { dataset: registry.dataset, source: "registry", sourceNote: null, registry };
+      if (registry.executionBarsAvailable) {
+        return { dataset: registry.dataset, source: "registry", sourceNote: null, registry };
+      }
+      // 直读成功但**不可撮合**：事件窗口形状缺执行日行情 ⇒ 按桥的既定契约回落重建。
+      const rebuilt = await rebuildDataset(request);
+      return {
+        dataset: rebuilt,
+        source: "rebuild",
+        sourceNote:
+          `直读成功但该数据集不可用于撮合（dataset_version.id=${registry.version.id} / ` +
+          `${registry.stats.rowCount} 行）：它是「首板事件窗口」投影（只含事件日 rd=0 行情，` +
+          `post/T+N 行情未并入 rows）⇒ 交易模拟在决策日下一交易日取不到行情，订单会被全部拒为 ` +
+          `SUSPENDED（0 成交、曲线恒平）。已回落 buildResearchDataset 重建逐日面板。`,
+        // 保留 registry：装配摘要须仍能显示「策略绑定的是哪个 dataset_version.id」，
+        // 否则界面会误读成「这个策略根本没绑数据集」。本次**实际使用**的面板由
+        // source=rebuild 与 sourceNote 表达。
+        registry,
+      };
     } catch (error) {
       if (!(error instanceof RegistryDatasetBridgeError)) throw error;
       // 可预期的「不该直读」：如实记录原因，回落重建（不静默、不冒充）。

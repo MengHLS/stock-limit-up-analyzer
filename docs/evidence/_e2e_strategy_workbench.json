@@ -1,0 +1,120 @@
+{
+  "at": "2026-09-13T13:43:02.409Z",
+  "checks": [
+    {
+      "name": "端点存在 research.strategy.list",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "端点存在 research.strategy.listVersions",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "端点存在 research.strategy.load",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "端点存在 research.strategy.loadVersion",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "端点存在 research.strategy.compare",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "端点存在 research.strategy.setVersionStatus",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "客户端顺序常量 == shared 权威值",
+      "ok": true,
+      "detail": "8 项"
+    },
+    {
+      "name": "8 个状态全部通过 setVersionStatus 入参契约",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "list 返回数组",
+      "ok": true,
+      "detail": "共 9 条"
+    },
+    {
+      "name": "至少 1 条可用于「加载并运行」的策略（strategyId + latestVersion 齐备）",
+      "ok": true,
+      "detail": "可用 9 / 共 9"
+    },
+    {
+      "name": "listVersions 返回非空数组",
+      "ok": true,
+      "detail": "共 1 个版本"
+    },
+    {
+      "name": "版本行的 status 全部落在 §23 八态内（否则页头徽标会落到灰）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "版本行带 fingerprint / createdAt（版本历史表要显示）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "load → 裸 StrategyDocument（顶层直接有 strategyId / version）",
+      "ok": true,
+      "detail": "strategyId=cand-360008 version=1.0.0"
+    },
+    {
+      "name": "load 的返回值**没有** .strategy 外壳",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "loadVersion → §17 版本记录（文档在 .strategy 下）",
+      "ok": true,
+      "detail": "record 顶层键：backtestConfig,codeVersion,costModel,createdAt,datasetVersion,executionModel…"
+    },
+    {
+      "name": "load 的文档 == loadVersion(.strategy) 的文档（剥壳后等价）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "同一文档自比 → equal=true",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "改一个字段 → equal=false 且能定位到 name",
+      "ok": true,
+      "detail": "差异 1 处"
+    },
+    {
+      "name": "往返后 compare.equal=true（否则「比较」会把噪声报成改动）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "往返后顶层键集合不变",
+      "ok": true,
+      "detail": "18 键"
+    },
+    {
+      "name": "往返保留 fingerprint 与 version（compare 恰好忽略的两项，单独钉住）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "ViewModel 读出了关键字段（页头/编辑器真的有事可显示）",
+      "ok": true,
+      "detail": "cand-360008@1.0.0 名称=[CAND-4GROUPS] ④-c 回撤深度≤10%（深回踩） · 守线+缩量≤30% 入场规则=2"
+    }
+  ]
+}

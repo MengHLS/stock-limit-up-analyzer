@@ -1,0 +1,364 @@
+{
+  "generatedAt": "2026-09-13T14:16:37.426Z",
+  "window": {
+    "startDate": "2025-01-02",
+    "endDate": "2025-03-31"
+  },
+  "reports": [
+    {
+      "label": "A. 文档配方（首板回踩·守线+缩量≤30%）· registry 直读",
+      "strategyId": "cand-360001",
+      "strategyVersion": "1.0.0",
+      "ok": true,
+      "datasetSource": "registry",
+      "datasetSourceNote": null,
+      "datasetRowCount": 23978,
+      "datasetDateCount": 484,
+      "recipeId": "first-limit-pullback-hold-shrink",
+      "recipeSource": "strategy-document",
+      "decisionDayCount": 57,
+      "candidateSlotCount": 64,
+      "tradeCount": 0,
+      "equityPointCount": 57,
+      "initialCapital": 100000,
+      "finalEquity": 100000,
+      "executionStats": {
+        "totalSignals": 59,
+        "totalOrders": 59,
+        "totalFills": 0,
+        "rejectedOrders": 59,
+        "partialFills": 0,
+        "byReason": {
+          "SUSPENDED": 59
+        }
+      },
+      "skippedByCode": {
+        "NON_LONG_DIRECTION": 4,
+        "NO_NEXT_TRADING_DAY": 1
+      },
+      "executionRowAudit": {
+        "intentCount": 60,
+        "intentsWithExecutionRow": 0,
+        "intentsWithoutExecutionRow": 60,
+        "sampleMissing": [
+          "2025-01-02→2025-01-03 600322.SH",
+          "2025-01-02→2025-01-03 000981.SZ",
+          "2025-01-03→2025-01-06 002713.SZ",
+          "2025-01-03→2025-01-06 000573.SZ",
+          "2025-01-07→2025-01-08 002379.SZ",
+          "2025-01-08→2025-01-09 603990.SH",
+          "2025-01-10→2025-01-13 600657.SH",
+          "2025-01-10→2025-01-13 002534.SZ"
+        ]
+      },
+      "stages": [
+        {
+          "stageId": "data",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "research",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "strategy",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "backtest",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "evaluation",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "optimization",
+          "state": "BLOCKED",
+          "reasonCode": "CL_RUNNER_NOT_INJECTED"
+        },
+        {
+          "stageId": "robustness",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "oos",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "overfitting",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "regime",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "paper",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "review",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "discipline",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "finalize",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        }
+      ]
+    },
+    {
+      "label": "B. 同上 · **强制 rebuild 重建**",
+      "strategyId": "cand-360001",
+      "strategyVersion": "1.0.0",
+      "ok": true,
+      "datasetSource": "rebuild",
+      "datasetSourceNote": "调用方显式指定 datasetSourcePolicy=rebuild（强制重建，未直读已绑定数据集）。",
+      "datasetRowCount": 292489,
+      "datasetDateCount": 57,
+      "recipeId": "first-limit-pullback-hold-shrink",
+      "recipeSource": "strategy-document",
+      "decisionDayCount": 57,
+      "candidateSlotCount": 263,
+      "tradeCount": 133,
+      "equityPointCount": 57,
+      "initialCapital": 100000,
+      "finalEquity": 112169.43214019999,
+      "executionStats": {
+        "totalSignals": 266,
+        "totalOrders": 266,
+        "totalFills": 260,
+        "rejectedOrders": 6,
+        "partialFills": 0,
+        "byReason": {
+          "INSUFFICIENT_CASH": 6
+        }
+      },
+      "skippedByCode": {
+        "NON_LONG_DIRECTION": 8,
+        "FROZEN_EXIT_DEFERRED": 91,
+        "BUDGET_BELOW_MIN_LOT": 9,
+        "NO_NEXT_TRADING_DAY": 7
+      },
+      "executionRowAudit": {
+        "intentCount": 255,
+        "intentsWithExecutionRow": 250,
+        "intentsWithoutExecutionRow": 5,
+        "sampleMissing": [
+          "2025-03-31→null sec_acc40874-093c-42c2-9e48-d419838bf16d",
+          "2025-03-31→null sec_6ac4dc38-afde-4da7-bbb9-c0d0173eccc0",
+          "2025-03-31→null sec_23a896b4-4ad6-4cf2-870a-625bc6e1c3de",
+          "2025-03-31→null sec_061a5b83-740f-41e9-b919-1d7a9ebb0816",
+          "2025-03-31→null sec_fcdbff8a-d9fb-42f0-8799-9414de625f0e"
+        ]
+      },
+      "stages": [
+        {
+          "stageId": "data",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "research",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "strategy",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "backtest",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "evaluation",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "optimization",
+          "state": "BLOCKED",
+          "reasonCode": "CL_RUNNER_NOT_INJECTED"
+        },
+        {
+          "stageId": "robustness",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "oos",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "overfitting",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "regime",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "paper",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "review",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "discipline",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "finalize",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        }
+      ]
+    },
+    {
+      "label": "C. 存量无 recipe 文档（兜底配方）· registry 直读",
+      "strategyId": "cand-270001",
+      "strategyVersion": "1.0.0",
+      "ok": true,
+      "datasetSource": "registry",
+      "datasetSourceNote": null,
+      "datasetRowCount": 23978,
+      "datasetDateCount": 484,
+      "recipeId": "leader-candidate-baseline",
+      "recipeSource": "explicit-request",
+      "decisionDayCount": 57,
+      "candidateSlotCount": 285,
+      "tradeCount": 0,
+      "equityPointCount": 57,
+      "initialCapital": 100000,
+      "finalEquity": 100000,
+      "executionStats": {
+        "totalSignals": 280,
+        "totalOrders": 280,
+        "totalFills": 0,
+        "rejectedOrders": 280,
+        "partialFills": 0,
+        "byReason": {
+          "SUSPENDED": 280
+        }
+      },
+      "skippedByCode": {
+        "NO_NEXT_TRADING_DAY": 5
+      },
+      "executionRowAudit": {
+        "intentCount": 285,
+        "intentsWithExecutionRow": 0,
+        "intentsWithoutExecutionRow": 285,
+        "sampleMissing": [
+          "2025-01-02→2025-01-03 601010.SH",
+          "2025-01-02→2025-01-03 000882.SZ",
+          "2025-01-02→2025-01-03 000619.SZ",
+          "2025-01-02→2025-01-03 002193.SZ",
+          "2025-01-02→2025-01-03 002306.SZ",
+          "2025-01-03→2025-01-06 603072.SH",
+          "2025-01-03→2025-01-06 002426.SZ",
+          "2025-01-03→2025-01-06 002076.SZ"
+        ]
+      },
+      "stages": [
+        {
+          "stageId": "data",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "research",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "strategy",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "backtest",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "evaluation",
+          "state": "EXECUTED",
+          "reasonCode": null
+        },
+        {
+          "stageId": "optimization",
+          "state": "BLOCKED",
+          "reasonCode": "CL_RUNNER_NOT_INJECTED"
+        },
+        {
+          "stageId": "robustness",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "oos",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "overfitting",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "regime",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "paper",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "review",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "discipline",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        },
+        {
+          "stageId": "finalize",
+          "state": "BLOCKED",
+          "reasonCode": "CL_UPSTREAM_BLOCKED"
+        }
+      ]
+    }
+  ]
+}
