@@ -1,0 +1,123 @@
+{
+  "registeredRecipes": [
+    "leader-candidate-baseline"
+  ],
+  "findings": [
+    {
+      "strategyId": "cand-270001",
+      "version": "1.0.0",
+      "status": "Draft",
+      "name": "正式数据，首板回踩与未来收益的关系 — 自动结论（REJECTED）",
+      "hasCostModel": true,
+      "costModel": {
+        "commissionRate": 0.0003,
+        "lotSize": 100,
+        "minCommission": 5,
+        "slippageBps": 10,
+        "stampDutyRate": 0.001,
+        "transferFeeRate": 0.00001
+      },
+      "executionModel": "NEXT_OPEN",
+      "backtestConfig": {
+        "initialCapital": 100000
+      },
+      "hasRecipe": false,
+      "recipe": null,
+      "parameters": {
+        "parameters": []
+      },
+      "hasDefinition": true,
+      "datasetVersion": "v2"
+    },
+    {
+      "strategyId": "limit-up-baseline",
+      "version": "1.1.0",
+      "status": "Draft",
+      "name": "涨停候选基线",
+      "hasCostModel": true,
+      "costModel": {
+        "commissionRate": 0.0003,
+        "lotSize": 100,
+        "minCommission": 5,
+        "slippageBps": 10,
+        "stampDutyRate": 0.001,
+        "transferFeeRate": 0.00001
+      },
+      "executionModel": "NEXT_OPEN",
+      "backtestConfig": {
+        "initialCapital": 100000,
+        "maxPositions": 5
+      },
+      "hasRecipe": false,
+      "recipe": null,
+      "parameters": {
+        "parameters": [
+          {
+            "defaultValue": 5,
+            "description": "选股数",
+            "max": 20,
+            "min": 1,
+            "name": "topN",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "defaultValue": null,
+            "description": "分数阈值",
+            "name": "minScore",
+            "nullable": true,
+            "required": false,
+            "type": "number"
+          }
+        ]
+      },
+      "hasDefinition": false,
+      "datasetVersion": "v2"
+    },
+    {
+      "strategyId": "limit-up-baseline",
+      "version": "1.0.0",
+      "status": "Draft",
+      "name": "涨停候选基线",
+      "hasCostModel": true,
+      "costModel": {
+        "commissionRate": 0.0003,
+        "lotSize": 100,
+        "minCommission": 5,
+        "slippageBps": 10,
+        "stampDutyRate": 0.001,
+        "transferFeeRate": 0.00001
+      },
+      "executionModel": "NEXT_OPEN",
+      "backtestConfig": {
+        "initialCapital": 100000,
+        "maxPositions": 5
+      },
+      "hasRecipe": false,
+      "recipe": null,
+      "parameters": {
+        "parameters": [
+          {
+            "defaultValue": 5,
+            "description": "选股数",
+            "max": 20,
+            "min": 1,
+            "name": "topN",
+            "required": true,
+            "type": "number"
+          },
+          {
+            "defaultValue": null,
+            "description": "分数阈值",
+            "name": "minScore",
+            "nullable": true,
+            "required": false,
+            "type": "number"
+          }
+        ]
+      },
+      "hasDefinition": false,
+      "datasetVersion": "v2"
+    }
+  ]
+}

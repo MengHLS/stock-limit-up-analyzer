@@ -1,0 +1,126 @@
+{
+  "dataset": {
+    "datasetVersion": "rd-1.0.0-1-26eddd5804da6d15",
+    "gate": "PASS",
+    "rowCount": 2400
+  },
+  "seriesDayCount": 8,
+  "seriesDates": [
+    "2025-06-03",
+    "2025-06-04",
+    "2025-06-05",
+    "2025-06-06",
+    "2025-06-09",
+    "2025-06-10",
+    "2025-06-11",
+    "2025-06-12"
+  ],
+  "firstDayFacts": {
+    "tradeDate": "2025-06-03",
+    "asOf": "2025-06-03",
+    "sampleSize": 298,
+    "advancingCount": 167,
+    "decliningCount": 104,
+    "limitUpCount": 1,
+    "limitClassifiableCount": 298,
+    "totalAmount": 71952457.62200004,
+    "meanTurnoverRate": 2.088383892617448,
+    "indexCloses": {
+      "000001.SH": 3361.9755,
+      "000300.SH": 3852.0127,
+      "399001.SZ": 10057.1702
+    },
+    "sentiment": null
+  },
+  "run": {
+    "regimeRunId": "REGIME-PROBE-0001",
+    "datasetVersion": "rd-1.0.0-1-26eddd5804da6d15",
+    "coverage": {
+      "startDate": "2025-06-03",
+      "endDate": "2025-06-12",
+      "tradingDayCount": 8
+    },
+    "tagCount": 8,
+    "unassessedStats": {
+      "totalTagCount": 56,
+      "totalUnassessedCount": 48,
+      "byDimension": {
+        "trend": 8,
+        "volatility": 8,
+        "liquidity": 8,
+        "breadth": 4,
+        "sentiment": 8,
+        "indexState": 8,
+        "limitUpEnv": 4
+      },
+      "byReasonCode": {
+        "REGIME_INSUFFICIENT_HISTORY": 44,
+        "REGIME_SENTIMENT_SOURCE_MISSING": 4
+      }
+    },
+    "fingerprint": "a8150622a2814e04cef08d7426b1dd9a0a6233298e82bd24fb574c0893437c7b",
+    "benchmarkIndexCode": "000300.SH"
+  },
+  "regimeRef": {
+    "kind": "regimeRef",
+    "handoffVersion": 1,
+    "synthetic": false,
+    "source": {
+      "module": "marketRegime",
+      "moduleRunKind": "MARKET_REGIME_RUN",
+      "runId": "REGIME-PROBE-0001",
+      "fingerprint": "a8150622a2814e04cef08d7426b1dd9a0a6233298e82bd24fb574c0893437c7b"
+    },
+    "coverage": {
+      "assessedDayCount": 8,
+      "unassessedDayCount": 0
+    },
+    "compositeSummary": [
+      {
+        "compositeKey": "trend=NA:REGIME_INSUFFICIENT_HISTORY|volatility=NA:REGIME_INSUFFICIENT_HISTORY|liquidity=NA:REGIME_INSUFFICIENT_HISTORY|breadth=NA:REGIME_INSUFFICIENT_HISTORY|sentiment=NA:REGIME_INSUFFICIENT_HISTORY|indexState=NA:REGIME_INSUFFICIENT_HISTORY|limitUpEnv=NA:REGIME_INSUFFICIENT_HISTORY",
+        "dayCount": 4
+      },
+      {
+        "compositeKey": "trend=NA:REGIME_INSUFFICIENT_HISTORY|volatility=NA:REGIME_INSUFFICIENT_HISTORY|liquidity=NA:REGIME_INSUFFICIENT_HISTORY|breadth=mixed|sentiment=NA:REGIME_SENTIMENT_SOURCE_MISSING|indexState=NA:REGIME_INSUFFICIENT_HISTORY|limitUpEnv=normal",
+        "dayCount": 4
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "series 非空",
+      "ok": true,
+      "detail": "days=8"
+    },
+    {
+      "name": "tags 数 = 交易日数",
+      "ok": true,
+      "detail": "8 vs 8"
+    },
+    {
+      "name": "coverage 相加 = 总天数",
+      "ok": true,
+      "detail": "8+0=8"
+    },
+    {
+      "name": "compositeSummary 加总 = assessedDayCount",
+      "ok": true,
+      "detail": "8 vs 8"
+    },
+    {
+      "name": "compositeSummary 键升序",
+      "ok": true,
+      "detail": "2 keys"
+    },
+    {
+      "name": "unassessedStats 七维齐全（7）",
+      "ok": true,
+      "detail": "trend=8 volatility=8 liquidity=8 breadth=4 sentiment=8 indexState=8 limitUpEnv=4"
+    },
+    {
+      "name": "coverage 区间与 series 一致",
+      "ok": true,
+      "detail": "2025-06-03~2025-06-12"
+    }
+  ]
+}

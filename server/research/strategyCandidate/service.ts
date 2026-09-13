@@ -47,6 +47,7 @@ import {
   PROMOTE_INITIAL_VERSION_STATUS,
   buildExecutionAssumptions,
   buildStrategyDefinition,
+  buildStrategyRecipe,
   deriveStrategyId,
   deriveUniverseIdForDataset,
   validateBuiltStrategyDefinition,
@@ -940,6 +941,11 @@ export function createStrategyCandidateService(
       // ---- 8. 文档级执行假设（无法从 definition 派生，同样只能来自草稿）----
       const executionAssumptions = buildExecutionAssumptions(candidate);
 
+      // ---- 8b. 执行配方引用（同样只能来自草稿；缺省 = 未声明）----
+      // 🔴 缺 `recipe` ⇒ 装配层落 DEFAULT_STRATEGY_RECIPE_ID（「按涨跌幅取前 5 名」）
+      // ⇒ 声明「守线 + 缩量」的策略在回测里跑的是别的东西。这是本次改造消灭的断点。
+      const recipe = buildStrategyRecipe(candidate);
+
       const strategyId = deriveStrategyId(candidateId);
       const version = PROMOTE_INITIAL_STRATEGY_VERSION;
 
@@ -955,6 +961,7 @@ export function createStrategyCandidateService(
         universe: { universeId: deriveUniverseIdForDataset(executionDataset.label) },
         definition,
         executionAssumptions,
+        ...(recipe === undefined ? {} : { recipe }),
       });
 
       // ---- 10. 写 provenance（跨存储第二步）----

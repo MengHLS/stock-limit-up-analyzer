@@ -15,10 +15,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: [
-      "server/**/*.test.ts",
-      "server/**/*.spec.ts",
-      "shared/**/*.test.ts",
-      "client/src/**/*.test.ts",
+      // 测试文件统一收拢在仓库根 tests/（镜像 server / client/src / shared 结构）
+      "tests/**/*.test.ts",
+      "tests/**/*.test.tsx",
+      "tests/**/*.spec.ts",
     ],
   },
 });

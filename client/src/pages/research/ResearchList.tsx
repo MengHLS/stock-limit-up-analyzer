@@ -63,8 +63,7 @@ export default function ResearchList() {
               <FlaskConical className="h-4 w-4" /> 研究实验
             </CardTitle>
             <CardDescription>
-              实验绑定一个固定的 Dataset 版本；一次实验可包含多次 Run，每次 Run 下挂多个分析。
-              引擎只读 Dataset，绝不修改它。
+              一个实验绑定一份 Dataset 版本；可含多次 Run，每次 Run 下挂多个分析。
             </CardDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">

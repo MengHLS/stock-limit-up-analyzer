@@ -28,8 +28,20 @@ import type {
 // 变量角色（PIT 的关键：FEATURE 只允许 T 及之前，OUTCOME 只允许 T 之后）
 // ---------------------------------------------------------------------------
 
-/** 变量角色。`FEATURE` = PIT 安全（≤ T）；`OUTCOME` = 未来结果（> T）。 */
-export const RESEARCH_VARIABLE_ROLES = ["FEATURE", "OUTCOME"] as const;
+/**
+ * 变量角色。
+ *
+ * - `FEATURE` = PIT 安全（≤ T）；
+ * - `OUTCOME` = 未来结果（> T，**事后**才知道，只能当标签）；
+ * - `OBSERVATION` = 观察日变量（T+k，k ≥ 1）——**在信号时点当时已可见**，因此**可以当条件**。
+ *
+ * `OBSERVATION` 与 `OUTCOME` 的区别**不是「是否未来」，而是「是否在信号时点可见」**。
+ * 例如「回踩到 T+3 时的最低价」在 T+3 收盘就已观测到，可以写成「T+3 最低价 ≥ 事件日最低价 →
+ * T+4 开盘买入」这样的规则；而「T+1..T+5 的收益」只有事后才知道，只能当标签。
+ * 二者的 Sources 类型互不包含（`ObservationSources` 只有 post/event 两根 K 线，
+ * 没有任何 path/outcome），因此「拿结果当条件」在编译期即被拒绝。
+ */
+export const RESEARCH_VARIABLE_ROLES = ["FEATURE", "OUTCOME", "OBSERVATION"] as const;
 export type ResearchVariableRole = (typeof RESEARCH_VARIABLE_ROLES)[number];
 
 /**
@@ -46,8 +58,16 @@ export interface ResearchSample {
   tradeDate: string;
   /** PIT 安全特征（≤ T）。 */
   features: Record<string, number | null>;
-  /** 未来结果（> T）。 */
+  /** 未来结果（> T，事后才知道，只能当标签）。 */
   outcomes: Record<string, number | null>;
+  /**
+   * 观察日变量（T+k，k ≥ 1）——在**信号时点当时已可见**，可以当条件。
+   *
+   * 与 `outcomes` 同一批 post K 线来源，但语义不同：`outcomes` 是「路径结果」，
+   * `observations` 是「到了 T+k 那一天你屏幕上能看到的东西」。每个名字自带
+   * `availableFromOffset`，条件求值时会校验「求值日 k 不得引用 > k 的观察日」。
+   */
+  observations: Record<string, number | null>;
   /** 分组维度（year / month / quarter / board / market / regime…）。 */
   dimensions: Record<string, string | number | null>;
 }
@@ -62,6 +82,8 @@ export interface ResearchVariableRequirement {
   features: readonly string[];
   /** 结果变量名（未来）。 */
   outcomes: readonly string[];
+  /** 观察日变量名（T+k 可观测）。 */
+  observations?: readonly string[];
   /** 需要额外解析的分组维度键（year / board / regime…）。 */
   dimensions?: readonly string[];
 }
@@ -136,8 +158,17 @@ export interface AnalysisVariableRequirementContext {
 export interface ResearchVariableCatalogLike {
   hasFeature(name: string): boolean;
   hasOutcome(name: string): boolean;
+  hasObservation(name: string): boolean;
   listFeatures(): string[];
   listOutcomes(): string[];
+  listObservations(): string[];
+  /**
+   * 观察日变量的最早可观测偏移（T+k 的 k）。未登记或非观察日变量返回 `null`。
+   *
+   * Engine 用它做 PIT 校验：在「求值日 = k」的条件里引用 `availableFromOffset > k`
+   * 的观察日变量 = 用了未来信息 → 必须拒绝。
+   */
+  observationOffsetOf?(name: string): number | null;
 }
 
 /** 分析执行器（策略模式；一类分析一个实现）。 */
@@ -417,4 +448,9 @@ export interface ResearchDatasetVersionContext {
   horizons: number[];
   /** path.relativeDay 的真实取值范围（无 path 数据为 null）。 */
   pathRelativeDayRange: { min: number; max: number } | null;
+  /**
+   * post.relativeDay 的真实取值范围（无 post 数据为 null）——**观察日**变量族的可用上界。
+   * 缺失即「该数据集没有观察日数据」⇒ `obs_*` / `pullback_*` 全部不可用（不是默认 20）。
+   */
+  postRelativeDayRange: { min: number; max: number } | null;
 }

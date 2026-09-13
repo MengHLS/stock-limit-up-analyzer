@@ -213,30 +213,35 @@ const SEGMENT_READONLY: Record<SketchSegmentKey, (drafts: CandidateSketchDrafts)
     );
   },
 
-  when: (drafts) => {
+  condition: (drafts) => {
     const filter = drafts.filterRule;
+    if (filter.kind !== "structured") {
+      return (
+        <Row label="买入条件">
+          <span className="text-muted-foreground">无 —— 观察窗口内出现事件即买</span>
+        </Row>
+      );
+    }
+    return <FilterRuleReadonly groups={filter.draft} />;
+  },
+
+  when: (drafts) => {
     const entry = drafts.entryRule;
-    if (filter.kind !== "structured" && entry.kind !== "structured") return <EmptySegment />;
-    const draft = entry.kind === "structured" ? entry.draft : null;
-    const win = draft?.observationWindow;
+    if (entry.kind !== "structured") return <EmptySegment />;
+    const win = entry.draft.observationWindow;
     return (
       <>
-        {filter.kind === "structured" && <FilterRuleReadonly groups={filter.draft} />}
-        {draft !== null && win !== undefined && (
-          <>
-            <Row label="入场时点">{labelOf(CANDIDATE_ENTRY_TIMING_OPTIONS, draft.timing)}</Row>
-            <Row label="观察窗口">
-              {[win.start, win.end, win.unit].every((text) => text.trim() === "") ? (
-                <Dash />
-              ) : (
-                <span className="font-mono">
-                  第 {win.start || "?"} ~ {win.end || "?"} {labelOf(CANDIDATE_WINDOW_UNIT_OPTIONS, win.unit)}
-                </span>
-              )}
-            </Row>
-            <Row label="触发时点">{labelOf(CANDIDATE_TRIGGER_OPTIONS, draft.trigger)}</Row>
-          </>
-        )}
+        <Row label="入场时点">{labelOf(CANDIDATE_ENTRY_TIMING_OPTIONS, entry.draft.timing)}</Row>
+        <Row label="观察窗口">
+          {[win.start, win.end, win.unit].every((text) => text.trim() === "") ? (
+            <Dash />
+          ) : (
+            <span className="font-mono">
+              第 {win.start || "?"} ~ {win.end || "?"} {labelOf(CANDIDATE_WINDOW_UNIT_OPTIONS, win.unit)}
+            </span>
+          )}
+        </Row>
+        <Row label="触发时点">{labelOf(CANDIDATE_TRIGGER_OPTIONS, entry.draft.trigger)}</Row>
       </>
     );
   },
@@ -408,9 +413,9 @@ export function CandidateSketchCard({
 
   return (
     <SectionCard
-      title="研究草图（Research Candidate Sketch）"
+      title="研究草图"
       icon={Braces}
-      description="从研究结论提炼出的入场 / 出场 / 仓位 / 成本草案，按「下单时的思路」排列。它还不是 StrategyDefinition —— 转正时由后端转换并校验，任何缺失字段都会在转正时被响亮拒绝。"
+      description="按「下单时的思路」排列；还不是 StrategyDefinition，转正时由后端转换并校验。"
       right={right}
     >
       <div className="space-y-2">
@@ -477,9 +482,7 @@ export function CandidateSketchCard({
 
       {gaps.length > 0 && (
         <div className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2">
-          <p className="text-[11px] font-medium text-sky-900">
-            距离「可转正」还差 {gaps.length} 项（转正时后端会逐条拒绝）
-          </p>
+          <p className="text-[11px] font-medium text-sky-900">距离可转正还差 {gaps.length} 项</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[11px] text-sky-900">
             {statuses
               .filter((status) => status.gapCount > 0)
@@ -497,9 +500,7 @@ export function CandidateSketchCard({
       )}
       {warnings.length > 0 && (
         <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2">
-          <p className="text-[11px] font-medium text-amber-900">
-            内容合法、转正也会通过，但结果可能与你的意图不同：
-          </p>
+          <p className="text-[11px] font-medium text-amber-900">转正会通过，但结果可能与你的意图不同：</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[11px] text-amber-900">
             {warnings.map((warning, index) => (
               <li key={index}>{warning}</li>

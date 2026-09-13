@@ -69,6 +69,23 @@ export interface ResearchPrefixBarQuery {
   columns?: readonly string[];
 }
 
+/**
+ * 观察日（post）行情查询。
+ *
+ * `post` 与 `prefix` 表**逐字段同构**（仅 `relativeDay` 取值域不同：prefix ≤ 0、post ≥ 1），
+ * 因此复用同一个 `loadRawBarsBatch("post", …)` 通路，不新增第二套读取实现。
+ *
+ * 🔴 PIT：本查询只返回**事件日之后**的行情；调用方（装配层）必须按观察窗口终点裁剪
+ * `relativeDays`，且条件求值必须遵守「求值日 k 只能看 offsets ≤ k」。
+ */
+export interface ResearchPostBarQuery {
+  datasetVersionId: number;
+  eventIds: readonly string[];
+  relativeDays?: readonly number[];
+  /** 列投影：只取这些列（省略 = 全列）。 */
+  columns?: readonly string[];
+}
+
 /** Dataset 读取契约（Research 内唯一入口）。 */
 export interface ResearchDatasetReader {
   /** 版本上下文（含 READY 状态与真实视界）；版本不存在返回 null。 */
@@ -81,6 +98,13 @@ export interface ResearchDatasetReader {
   loadPaths(query: ResearchPathQuery): Promise<FirstLimitPullbackPath[]>;
   /** 按 eventId 集合批量读 prefix 原始行情（≤ T，PIT 安全）。 */
   loadPrefixBars(query: ResearchPrefixBarQuery): Promise<FirstLimitPullbackRawBar[]>;
+  /**
+   * 按 eventId 集合批量读 post 原始行情（T+1..T+N，**观察日**）。
+   *
+   * 与 `loadPrefixBars` 的关系：同一张「bar」形状、不同的时间域。返回的行可安全用于
+   * 构造 `ObservationSources.postBars`（在 T+k 收盘时点可观测，不是事后标签）。
+   */
+  loadPostBars(query: ResearchPostBarQuery): Promise<FirstLimitPullbackRawBar[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,9 +131,10 @@ export class RegistryResearchDatasetReader implements ResearchDatasetReader {
     const version = await withReadRetry("getVersionById", () => this.registryRepo.getVersionById(datasetVersionId));
     if (!version) return null;
     const definition = await withReadRetry("getDefinitionById", () => this.registryRepo.getDefinitionById(version.datasetId));
-    const [counts, pathRange] = await Promise.all([
+    const [counts, pathRange, postRange] = await Promise.all([
       withReadRetry("getVersionCounts", () => this.dataReader.getVersionCounts(datasetVersionId)),
       withReadRetry("getPathRelativeDayRange", () => this.dataReader.getPathRelativeDayRange(datasetVersionId)),
+      withReadRetry("getPostRelativeDayRange", () => this.dataReader.getPostRelativeDayRange(datasetVersionId)),
     ]);
     return {
       datasetVersionId,
@@ -123,6 +148,7 @@ export class RegistryResearchDatasetReader implements ResearchDatasetReader {
       totalEvents: version.totalEvents ?? counts.eventCount,
       horizons: counts.horizons,
       pathRelativeDayRange: pathRange,
+      postRelativeDayRange: postRange,
     };
   }
 
@@ -165,6 +191,15 @@ export class RegistryResearchDatasetReader implements ResearchDatasetReader {
       ...(query.columns !== undefined ? { columns: query.columns } : {}),
     }));
   }
+
+  async loadPostBars(query: ResearchPostBarQuery): Promise<FirstLimitPullbackRawBar[]> {
+    return withReadRetry("loadPostBars", () => this.dataReader.loadRawBarsBatch("post", {
+      datasetVersionId: query.datasetVersionId,
+      eventIds: query.eventIds,
+      ...(query.relativeDays !== undefined ? { relativeDays: query.relativeDays } : {}),
+      ...(query.columns !== undefined ? { columns: query.columns } : {}),
+    }));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +212,8 @@ export interface InMemoryResearchDatasetReaderSeed {
   paths?: readonly FirstLimitPullbackPath[];
   outcomes?: readonly FirstLimitPullbackOutcome[];
   prefixBars?: readonly FirstLimitPullbackRawBar[];
+  /** 观察日行情（`relativeDay` ≥ 1）。缺省表示该数据集无 post 数据 ⇒ 观察日变量全部不可用。 */
+  postBars?: readonly FirstLimitPullbackRawBar[];
 }
 
 export class InMemoryResearchDatasetReader implements ResearchDatasetReader {
@@ -184,6 +221,7 @@ export class InMemoryResearchDatasetReader implements ResearchDatasetReader {
   readonly paths: FirstLimitPullbackPath[];
   readonly outcomes: FirstLimitPullbackOutcome[];
   readonly prefixBars: FirstLimitPullbackRawBar[];
+  readonly postBars: FirstLimitPullbackRawBar[];
   private readonly context: ResearchDatasetVersionContext;
 
   /** 便于断言「读取层确实按版本 / 按批下推」，而不是把全部数据无脑塞回去。 */
@@ -195,6 +233,7 @@ export class InMemoryResearchDatasetReader implements ResearchDatasetReader {
     this.paths = [...(seed.paths ?? [])];
     this.outcomes = [...(seed.outcomes ?? [])];
     this.prefixBars = [...(seed.prefixBars ?? [])];
+    this.postBars = [...(seed.postBars ?? [])];
   }
 
   async getVersionContext(datasetVersionId: number): Promise<ResearchDatasetVersionContext | null> {
@@ -259,6 +298,19 @@ export class InMemoryResearchDatasetReader implements ResearchDatasetReader {
     const ids = new Set(query.eventIds);
     const days = query.relativeDays ? new Set(query.relativeDays) : null;
     return this.prefixBars.filter(
+      (b) =>
+        b.datasetVersionId === query.datasetVersionId &&
+        ids.has(b.eventId) &&
+        (days === null || days.has(b.relativeDay)),
+    );
+  }
+
+  async loadPostBars(query: ResearchPostBarQuery): Promise<FirstLimitPullbackRawBar[]> {
+    if (query.eventIds.length === 0) return [];
+    this.callLog.push({ method: "loadPostBars", datasetVersionId: query.datasetVersionId, ids: query.eventIds.length });
+    const ids = new Set(query.eventIds);
+    const days = query.relativeDays ? new Set(query.relativeDays) : null;
+    return this.postBars.filter(
       (b) =>
         b.datasetVersionId === query.datasetVersionId &&
         ids.has(b.eventId) &&

@@ -2,14 +2,26 @@
  * 闭环装配层 — 覆盖率探测（**取代硬编码 `executorBound = false`**）。
  *
  * 纯函数、零 IO：给定「被请求的阶段集 + 调用方真实入参」，逐阶段判定是否**真的能跑**。
- * 判定链：`wired`（本层有没有真执行器）∧ `satisfyVia` 至少一个来源成立。
+ * 判定链：`wired`（本层有没有真执行器）∧ `satisfyVia` 至少一个来源成立 ∧ **canonical 前驱已覆盖**。
  *
  * `artifact` 类来源是**静态可判**的：某阶段需要上游产物时，只要该产物的产生阶段
  * （`CLOSED_LOOP_ARTIFACT_PRODUCER`）**在本次请求的链内、位于本阶段之前、且自身已覆盖**，
  * 就认为该产物在运行期必然可得——否则执行器会在运行期抛 `ClosedLoopWiringError`。
+ *
+ * 🔴 **canonical 前驱门（2026-09-13 补）**：除旁路产物外，编排器还有一条**独立硬规则** ——
+ * 任一阶段阻塞则其后继全部 `CL_UPSTREAM_BLOCKED`（`orchestrator.ts:338-350`），判据是
+ * `CLOSED_LOOP_STAGE_CONSUMED_KIND` 定义的 canonical 交接链，**与 satisfyVia 声明的旁路产物无关**。
+ * 因此 `regime` 这类「只声明 dataset 旁路产物、但 canonical 前驱是未装配的 overfitting」的阶段，
+ * 若不加这道门，探测会宣称「可跑」而编排器实际必然阻塞 —— 正是本文件开头承诺的「探针不说假话」的反例。
  */
 
-import { CLOSED_LOOP_STAGE_IDS, closedLoopStageIndex, type ClosedLoopStageId } from "../closedLoop/types";
+import {
+  CLOSED_LOOP_STAGE_CONSUMED_KIND,
+  CLOSED_LOOP_STAGE_IDS,
+  CLOSED_LOOP_STAGE_PRODUCED_KIND,
+  closedLoopStageIndex,
+  type ClosedLoopStageId,
+} from "../closedLoop/types";
 import {
   CLOSED_LOOP_STAGE_WIRING_REQUIREMENTS,
   closedLoopStageWiringRequirement,
@@ -28,6 +40,14 @@ import {
 /** 排序为 canonical 顺序（调用方给什么顺序都归一为拓扑序，便于「上游在前」判断）。 */
 function canonicalOrder(stageIds: readonly ClosedLoopStageId[]): ClosedLoopStageId[] {
   return [...stageIds].sort((a, b) => closedLoopStageIndex(a) - closedLoopStageIndex(b));
+}
+
+/** 消费 kind → 其**产生**阶段（= canonical 前驱）。本层内联实现，避免 import 闭环模块的运行时函数。 */
+function predecessorOfKind(kind: string): ClosedLoopStageId | null {
+  for (const stageId of CLOSED_LOOP_STAGE_IDS) {
+    if (CLOSED_LOOP_STAGE_PRODUCED_KIND[stageId] === kind) return stageId;
+  }
+  return null;
 }
 
 /** 调用方入参是否已提供（判据：键存在且值非 undefined / null）。 */
@@ -144,7 +164,18 @@ export function assessClosedLoopWiringCoverage(
 
     const hasSource = requirement.satisfyVia.length > 0;
     const inputsSatisfied = hasSource && satisfiedSource !== null;
-    const covered = requirement.wired && inputsSatisfied;
+
+    // canonical 前驱门：编排器「上游阻塞 ⇒ 后继全阻塞」是独立硬规则，探测必须同步。
+    // 前驱 = 消费 kind 的产生阶段；data 无前驱（consumed = null）故恒放行。
+    const consumedKind = CLOSED_LOOP_STAGE_CONSUMED_KIND[stageId];
+    const predecessorId =
+      consumedKind === null ? null : predecessorOfKind(consumedKind);
+    const predecessorCovered =
+      predecessorId === null ||
+      !ordered.includes(predecessorId) ||
+      coveredInOrder.has(predecessorId);
+
+    const covered = requirement.wired && inputsSatisfied && predecessorCovered;
     if (covered) coveredInOrder.add(stageId);
 
     const gaps = { missingInputs: [...missingInputs], missingArtifacts: [...missingArtifacts] };
@@ -158,7 +189,11 @@ export function assessClosedLoopWiringCoverage(
       missingArtifacts: gaps.missingArtifacts,
       covered,
       blockedReasonCode: covered ? null : closedLoopWiringMissingReasonCode(stageId),
-      note: covered ? null : noteFor(requirement, gaps),
+      note: covered
+        ? null
+        : inputsSatisfied && !predecessorCovered
+          ? `canonical 前驱未覆盖：${String(predecessorId)}（编排器将按上游阻塞发出 CL_UPSTREAM_BLOCKED）`
+          : noteFor(requirement, gaps),
     });
   }
 

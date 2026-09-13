@@ -1,0 +1,24 @@
+{
+  "未填日期（前端初始态）": {
+    "ms": 3,
+    "uiState": "运行失败提示（runError）",
+    "message": "[ { \"origin\": \"string\", \"code\": \"too_small\", \"minimum\": 1, \"inclusive\": true, \"path\": [ \"dateRange\", \"startDate\" ], \"message\": \"startDate 必填\" }, { \"origin\": \"string\", \"code\": \"too_small\", \"minimum\": 1, \"inclusive\": true, \"path\": [ \"dateRange\", \"endDate\" ], \"message\": \"endDate 必填\" } ]"
+  },
+  "填了日期": {
+    "ms": 6,
+    "uiState": "渲染结果面板",
+    "adapterParsed": true,
+    "vm": {
+      "status": "NO_STAGE_EXECUTED",
+      "counts": {
+        "executed": 0,
+        "blocked": 14,
+        "skipped": 0
+      },
+      "firstBlockedReasonCode": "CL_DATA_NOT_INJECTED",
+      "evaluation": null,
+      "footerNote": "首阻塞 data（CL_DATA_NOT_INJECTED）：真实数据链未注入（缺 data 执行器 / dataProvider）；不伪造 datasetSummary——接真实 DB 在 VALIDATED 阶段"
+    }
+  },
+  "generatedAt": "2026-09-13T05:56:15.304Z"
+}

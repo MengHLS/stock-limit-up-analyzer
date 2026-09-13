@@ -1,0 +1,88 @@
+{
+  "generatedAt": "2026-09-13T12:27:15.993Z",
+  "results": [
+    {
+      "label": "① 守线+缩量≤30%（文档配方）",
+      "strategyId": "cand-360001",
+      "ms": 11623,
+      "ok": true,
+      "recipeSource": "strategy-document",
+      "recipeId": "first-limit-pullback-hold-shrink",
+      "recipeFeatureIds": [
+        "haircutFromEventLow",
+        "volumeRatio",
+        "isBullish",
+        "momentumFromEventClose"
+      ],
+      "datasetSource": "registry",
+      "datasetRowCount": 23978,
+      "blockedReasonCodes": []
+    },
+    {
+      "label": "② 守线+缩量≤50%+红盘（文档配方）",
+      "strategyId": "cand-360002",
+      "ms": 11633,
+      "ok": true,
+      "recipeSource": "strategy-document",
+      "recipeId": "first-limit-pullback-hold-shrink",
+      "recipeFeatureIds": [
+        "haircutFromEventLow",
+        "volumeRatio",
+        "isBullish",
+        "momentumFromEventClose"
+      ],
+      "datasetSource": "registry",
+      "datasetRowCount": 23978,
+      "blockedReasonCodes": []
+    },
+    {
+      "label": "④-c 回撤≤10%（文档配方）",
+      "strategyId": "cand-360008",
+      "ms": 15162,
+      "ok": true,
+      "recipeSource": "strategy-document",
+      "recipeId": "first-limit-pullback-hold-shrink",
+      "recipeFeatureIds": [
+        "haircutFromEventLow",
+        "volumeRatio",
+        "isBullish",
+        "momentumFromEventClose"
+      ],
+      "datasetSource": "registry",
+      "datasetRowCount": 23978,
+      "blockedReasonCodes": []
+    },
+    {
+      "label": "反事实：存量无 recipe 文档",
+      "strategyId": "cand-270001",
+      "ms": 12617,
+      "ok": true,
+      "recipeSource": "explicit-request",
+      "recipeId": "leader-candidate-baseline",
+      "recipeFeatureIds": [
+        "pctChange"
+      ],
+      "datasetSource": "registry",
+      "datasetRowCount": 23978,
+      "blockedReasonCodes": []
+    },
+    {
+      "label": "优先级：文档 recipe 优先于显式 recipeId",
+      "strategyId": "cand-360001",
+      "ms": 18419,
+      "ok": true,
+      "recipeSource": "strategy-document",
+      "recipeId": "first-limit-pullback-hold-shrink",
+      "recipeFeatureIds": [
+        "haircutFromEventLow",
+        "volumeRatio",
+        "isBullish",
+        "momentumFromEventClose"
+      ],
+      "datasetSource": "registry",
+      "datasetRowCount": 23978,
+      "blockedReasonCodes": []
+    }
+  ],
+  "failures": 0
+}

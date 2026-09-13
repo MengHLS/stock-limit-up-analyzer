@@ -41,6 +41,7 @@ import {
   buildMatrix,
   buildMatrixIndex,
   pickDefaultSelection,
+  selectFetchCells,
   summarizeRows,
   type MatrixCellVm,
   type MatrixSelection,
@@ -246,21 +247,36 @@ export function ResearchMatrixView({ analyses, onSelectAnalysis }: ResearchMatri
     );
   }, [index, selection]);
 
-  // 只拉「当前选中族」的结果；切族时其余 100 个分析一个请求都不发
+  /**
+   * 首屏只取前 `MATRIX_INITIAL_FETCH` 格，避免 30 个并发把页面堵住 ~10s。
+   * `fetchAll` 由用户点「载入其余 N 格」置位 —— 是**用户显式选择**，不是静默截断。
+   */
+  const [fetchAll, setFetchAll] = useState(false);
+  useEffect(() => {
+    // 切口径 / 切族后回到保守首屏，避免上一次的「全部」把新族也一次性打满。
+    setFetchAll(false);
+  }, [selection?.scopeKey, selection?.familyKey]);
+
+  const pendingCells = useMemo(
+    () => selectFetchCells(activeCells, fetchAll),
+    [activeCells, fetchAll],
+  );
+
+  // 只拉「当前选中族」的结果；切族时其余 100 个分析一个请求都不发。
   const queries = useQueries({
-    queries: activeCells.map((e) =>
+    queries: pendingCells.map((e) =>
       utils.researchEngine.getAnalysisResults.queryOptions({ analysisId: e.analysisId }),
     ),
   });
 
   const rowsById = useMemo(() => {
     const map = new Map<number, readonly ResultRowLike[]>();
-    activeCells.forEach((e, i) => {
+    pendingCells.forEach((e, i) => {
       const data = queries[i]?.data;
       if (data !== undefined) map.set(e.analysisId, data as ResultRowLike[]);
     });
     return map;
-  }, [activeCells, queries]);
+  }, [pendingCells, queries]);
 
   const vm = useMemo(
     () => (selection === null ? null : buildMatrix(index, selection, rowsById)),
@@ -308,8 +324,7 @@ export function ResearchMatrixView({ analyses, onSelectAnalysis }: ResearchMatri
               <Grid3x3 className="h-4 w-4" /> 矩阵视图
             </CardTitle>
             <CardDescription className="text-xs">
-              把这一批「决策日 × 回撤桶」分析的结果拼成一张表。数值、样本数、p 值均取自落库结果，
-              前端不重算；点任一格可切到「逐分析」看该格的口径与逐指标明细。
+              决策日 × 回撤桶 拼成一张表；数值直接取自落库结果，前端不重算。
             </CardDescription>
           </div>
           {vm !== null && (
@@ -321,6 +336,16 @@ export function ResearchMatrixView({ analyses, onSelectAnalysis }: ResearchMatri
               {loading && <div>结果加载中…</div>}
               {errored > 0 && (
                 <div className="text-amber-700 dark:text-amber-400">{errored} 格结果加载失败</div>
+              )}
+              {!fetchAll && activeCells.length > pendingCells.length && (
+                <button
+                  type="button"
+                  onClick={() => setFetchAll(true)}
+                  className="mt-1 rounded border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/60"
+                  title="其余格子会在点开后按需取数"
+                >
+                  载入其余 {activeCells.length - pendingCells.length} 格
+                </button>
               )}
             </div>
           )}
@@ -379,10 +404,10 @@ export function ResearchMatrixView({ analyses, onSelectAnalysis }: ResearchMatri
 
         {vm !== null && vm.metricCode !== null && (
           <p className="text-[11px] text-muted-foreground">
-            主指标：<span className="font-medium">{vm.metricLabel}</span>（格子左上）；
-            小字为该格的**条件组样本数**。<span className="font-semibold">*</span> / <span className="font-semibold">**</span>
-            {" "}= 与「全样本」的差值在 5% / 1% 水平显著，<span className="font-mono">n.s.</span> = 不显著。
-            颜色按 A 股习惯：<span className={UP_TEXT}>红 = 高于全样本</span>、
+            <span className="font-medium">{vm.metricLabel}</span>（格左上）· 小字为条件组样本数 ·{" "}
+            <span className="font-semibold">*</span>/<span className="font-semibold">**</span> = 与全样本差异
+            5%/1% 显著，<span className="font-mono">n.s.</span> = 不显著 ·{" "}
+            <span className={UP_TEXT}>红 = 高于全样本</span>、
             <span className={DOWN_TEXT}>绿 = 低于全样本</span>。
           </p>
         )}
@@ -402,41 +427,34 @@ export function ResearchMatrixView({ analyses, onSelectAnalysis }: ResearchMatri
           <details className="rounded-md border bg-muted/20 px-3 py-2">
             <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
               <Info className="h-3 w-3 shrink-0" />
-              这张表怎么读 / 已知边界（点开）
+              怎么读 / 已知边界
             </summary>
-            <div className="mt-2 space-y-1.5 text-xs text-muted-foreground">
-              <p>
+            <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+              <li>
                 <span className="font-medium text-foreground">口径</span>：{vm.scope.label} —— {vm.scope.description}
-              </p>
-              <p>
-                <span className="font-medium text-foreground">显著性基准是「全样本」</span>
-                （全部首板事件，含未回撤的），<span className="font-semibold">不是相邻桶</span>。
-                因此「显著为负」= 比全部首板事件差，而不是比隔壁那一格差。
-              </p>
-              <p>
-                <span className="font-medium text-foreground">未做多重比较校正</span>
-                ，且各格窗口互相重叠 —— 25 个格子逐个检验时，纯靠运气也会出现若干「显著」。
-                本视图给的是**线索**，不是结论；要成立仍须 Parameter Search → Backtest → Evaluation →
-                Robustness → OOS → Walk-forward。
-              </p>
-              <p>
-                <span className="font-medium text-foreground">归组依据</span>
-                ：分析名的「`T+d` + 回撤桶」与 `target` 变量（两者决策日必须一致）。
-                <span className="font-semibold">给分析改名会让它脱离矩阵</span>，这时它会出现在下方「未归类」里并写明原因。
-              </p>
-              <p>
-                <span className="font-medium text-foreground">缺格不隐藏</span>
-                ：「未建」= 该 Run 没有这一格的分析；「无结果」= 有分析但结果里没有可用的条件组统计（未跑完 / 条件组为空）。
-              </p>
-              <p>
-                <span className="font-medium text-foreground">行小结</span>
-                只给「格数 / 样本数合计 / 显著格数」——这三样是加法与计数。**不做按样本数加权平均**：
-                各格样本是否互斥、并集是否等于全集取决于建批方式，前端无从校验，宁可不算。
-              </p>
-              <p className="flex items-center gap-1.5">
-                <MousePointerClick className="h-3 w-3" /> 点任一格 → 切到「逐分析」看该格的完整口径与逐指标明细。
-              </p>
-            </div>
+              </li>
+              <li>
+                <span className="font-medium text-foreground">显著性是跟「全样本」比</span>（含未回撤的全部首板事件），
+                <span className="font-semibold">不是相邻桶</span>。
+              </li>
+              <li>
+                <span className="font-medium text-foreground">未做多重比较校正</span>，各格窗口还互相重叠 —— 纯靠运气也会出「显著」。
+                这是<span className="font-semibold">线索，不是结论</span>。
+              </li>
+              <li>
+                <span className="font-medium text-foreground">归组看名字与 target</span>（决策日须一致）；
+                <span className="font-semibold">改名会脱离矩阵</span>，落到下方「未归类」并写明原因。
+              </li>
+              <li>
+                <span className="font-medium text-foreground">缺格不隐藏</span>：「未建」= 没建这一格；「无结果」= 建了但没跑完或条件组为空。
+              </li>
+              <li>
+                <span className="font-medium text-foreground">行小结</span>只给格数 / 样本合计 / 显著格数 —— 不做按样本数加权平均（互斥性前端无从校验）。
+              </li>
+              <li className="flex items-center gap-1.5">
+                <MousePointerClick className="h-3 w-3" /> 点任一格 → 切到「逐分析」看完整口径与逐指标明细。
+              </li>
+            </ul>
           </details>
         )}
 

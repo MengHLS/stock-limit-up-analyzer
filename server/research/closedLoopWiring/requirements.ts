@@ -135,11 +135,16 @@ export const CLOSED_LOOP_STAGE_WIRING_REQUIREMENTS: readonly ClosedLoopStageWiri
     "overfittingDetection/run.ts:69 需要「候选 × 分区」指标矩阵（PBO 输入），factorAblation/run.ts:39 需要 IS/OOS 双轨评估器；均依赖 OOS 链先行。",
     ["server/research/overfittingDetection/run.ts:69", "server/research/factorAblation/run.ts:39"],
   ),
-  notWired(
+  wired(
     "regime",
     "marketRegime",
-    "marketRegime/run.ts:75 runMarketRegimeAnalysis 需要 `RegimeDayFacts[]` 序列（可由 marketRegime/facts.ts:238 buildRegimeDayFactsFromDatasetRows 从数据集行构建）。仅差「facts 装配 + regimeRef 投影（coverage / compositeSummary 需按 compositeKey 聚合 tags）」两件事，是本表中**最易补齐**的一项，留作下一增量。",
-    ["server/research/marketRegime/run.ts:75", "server/research/marketRegime/facts.ts:238"],
+    [viaArtifact(["dataset"])],
+    [
+      "server/research/closedLoopWiring/executors.ts  buildRegimeDayFactsSeries(dataset) → 逐日切片 facts（行级 PIT 由 facts.ts 逐行断言）",
+      "server/research/marketRegime/facts.ts:238  buildRegimeDayFactsFromDatasetRows({ tradeDate, rows })",
+      "server/research/marketRegime/run.ts:75    runMarketRegimeAnalysis({ regimeRunId, series, datasetVersion, createdAt })",
+      "server/research/closedLoopWiring/executors.ts  projectRegimeRef(run) → regimeRef（coverage + 按 compositeKey 聚合的 compositeSummary）",
+    ],
   ),
   notWired(
     "paper",

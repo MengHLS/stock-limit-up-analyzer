@@ -27,14 +27,17 @@ import type {
   ClosedLoopStageExecutor,
   ClosedLoopStageRunnerMap,
   ClosedLoopStrategyDocRef,
-} from "../closedLoop/types";
-import { RESEARCH_DATASET_BUILDER_VERSION, RESEARCH_DATASET_ROW_SCHEMA_VERSION } from "../../researchDataset/types";
+} from "../closedLoop/types";import { RESEARCH_DATASET_BUILDER_VERSION, RESEARCH_DATASET_ROW_SCHEMA_VERSION } from "../../researchDataset/types";
 import { evaluatePerformance } from "../performanceMetrics/evaluate";
 import { evaluateRiskAdjustedMetrics } from "../riskAdjustedMetrics/evaluate";
 import { evaluateTradeQualityMetrics } from "../tradeQualityMetrics/evaluate";
 import { runCandidateEngine } from "../signalEngine/engine";
 import { computeCandidateEvaluationRunFingerprint } from "../signalEngine/serialize";
 import { runTradeSimulation } from "../simulator/engine";
+import { buildRegimeDayFactsFromDatasetRows } from "../marketRegime/facts";
+import { runMarketRegimeAnalysis } from "../marketRegime/run";
+import type { RegimeDayFacts } from "../marketRegime/types";
+import type { ClosedLoopRegimeRef } from "../closedLoop/types";
 import { createStrategyDocument, createStrategyVersionRecord } from "../strategySchema/map";
 import { computeStrategyVersionRecordFingerprint } from "../strategySchema/serialize";
 import { closedLoopStageWiringRequirement } from "./requirements";
@@ -126,6 +129,84 @@ function requireDataset(artifacts: ClosedLoopWiringArtifacts, inputs: ClosedLoop
     );
   }
   return dataset;
+}
+
+// ---------------------------------------------------------------------------
+// regime 阶段：日级事实装配 + regimeRef 投影
+// ---------------------------------------------------------------------------
+
+/**
+ * 由 ResearchDataset 行构建 **日级事实序列**（regime 七维计算的唯一输入单元）。
+ *
+ * 纪律：
+ *   - 按 tradeDate 切片（数据集行已按 (tradeDate, securityId) 升序），**逐日只喂当日行**
+ *     —— `buildRegimeDayFactsFromDatasetRows` 内部会对每行做 `assertRowPitInvariant`
+ *     （asOf ≠ tradeDate 立即抛错），混日期喂进去会被 FAIL FAST 拒绝；
+ *   - 输出按 tradeDate **严格升序且无重复**（`runMarketRegimeAnalysis` 的
+ *     `assertRegimeSeriesOrdered` 前置条件）；
+ *   - `sentiment` 不注入 ⇒ 情绪维恒为 unassessed（SENTIMENT_SOURCE_MISSING）——如实留空，
+ *     绝不启用涨跌停家数代理（代理口径需显式 opt-in，见 facts.ts 的
+ *     `REGIME_SENTIMENT_DEFAULT_ALLOW_LIMIT_UP_PROXY` 与 `deriveRegimeSentimentFromLimitUp`）。
+ */
+export function buildRegimeDayFactsSeries(dataset: {
+  rows: readonly import("../../researchDataset/types").ResearchDatasetRow[];
+}): readonly RegimeDayFacts[] {
+  const rowsByDate = new Map<string, import("../../researchDataset/types").ResearchDatasetRow[]>();
+  for (const row of dataset.rows) {
+    const bucket = rowsByDate.get(row.tradeDate);
+    if (bucket === undefined) {
+      rowsByDate.set(row.tradeDate, [row]);
+    } else {
+      bucket.push(row);
+    }
+  }
+  const dates = [...rowsByDate.keys()].sort();
+  return dates.map(tradeDate =>
+    buildRegimeDayFactsFromDatasetRows({ tradeDate, rows: rowsByDate.get(tradeDate)! }),
+  );
+}
+
+/**
+ * regime 阶段交接投影：把真实 `MarketRegimeRun` 投影为 `regimeRef`。
+ *
+ * 覆盖 `guards.ts` 要求的两个必备键（`coverage` / `compositeSummary`）：
+ *   - `coverage.assessedDayCount` = 有复合状态的交易日数（tags 中 composite ≠ null）；
+ *     `unassessedDayCount` = 其余（含 enableComposite=false 的全部）。
+ *   - `compositeSummary` = 按 `compositeKey` **聚合** tags，键升序（确定性）。
+ *     复合状态整体缺失的交易日无法归入任何 key ⇒ 只计入 unassessedDayCount，不伪造 key。
+ */
+export function projectRegimeRef(run: {
+  regimeRunId: string;
+  datasetVersion: string | null;
+  fingerprint: string;
+  tags: readonly { composite: { compositeKey: string } | null }[];
+}): ClosedLoopRegimeRef {
+  const keyCounts = new Map<string, number>();
+  let assessedDayCount = 0;
+  for (const tag of run.tags) {
+    if (tag.composite === null) continue;
+    assessedDayCount += 1;
+    const key = tag.composite.compositeKey;
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
+  return {
+    kind: "regimeRef",
+    handoffVersion: 1,
+    synthetic: false,
+    source: {
+      module: "marketRegime",
+      moduleRunKind: "MARKET_REGIME_RUN",
+      runId: run.regimeRunId,
+      fingerprint: run.fingerprint,
+    },
+    coverage: {
+      assessedDayCount,
+      unassessedDayCount: run.tags.length - assessedDayCount,
+    },
+    compositeSummary: [...keyCounts.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .map(([compositeKey, dayCount]) => ({ compositeKey, dayCount })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -327,8 +408,7 @@ function buildExecutor(
     }
     case "evaluation": {
       return (() => {
-        const backtestRun = artifacts.tradeSimulationRun;
-        let backtestFingerprint: string;
+        const backtestRun = artifacts.tradeSimulationRun;        let backtestFingerprint: string;
         let equityCurve: readonly EquityPoint[];
         let trades: readonly Trade[] | undefined;
         let annualizationFactor: number | undefined;
@@ -390,6 +470,23 @@ function buildExecutor(
           riskAdjusted,
           tradeQuality,
         }) as ClosedLoopHandoff;
+      }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
+    }
+    case "regime": {
+      return ((ctx) => {
+        const dataset = requireArtifact(artifacts, "dataset", "regime");
+        // 1. 日级事实序列（逐日切片；行级 PIT 不变量由 facts.ts 逐行断言）
+        const series = buildRegimeDayFactsSeries(dataset);
+        // 2. 真实调用 C-22.1 编排（纯函数；regimeRunId / createdAt 由阶段上下文注入，
+        //    模块自身禁 Date.now）
+        const run = runMarketRegimeAnalysis({
+          regimeRunId: `REGIME-${ctx.runId}`,
+          series,
+          datasetVersion: dataset.datasetVersion,
+          createdAt: ctx.createdAt,
+        });
+        // 3. 投影为 regimeRef（coverage 需要按 compositeKey 聚合 tags，见 projectRegimeRef）
+        return projectRegimeRef(run) as ClosedLoopHandoff;
       }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
     }
     default:

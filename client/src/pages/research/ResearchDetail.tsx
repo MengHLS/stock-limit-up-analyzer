@@ -15,6 +15,7 @@ import {
   BarChart3,
   Braces,
   FileText,
+  Filter,
   FlaskConical,
   Grid3x3,
   History,
@@ -56,14 +57,17 @@ import {
   ConfirmDeleteButton,
   CreateAnalysisDialog,
   ExperimentActions,
+  ObservationFunnelView,
   ResearchMatrixView,
   RunEngineButton,
   RunExecutionBatches,
   RunIncrementalButton,
   VariableCatalogCard,
+  clientPagination,
   incrementalRunForm,
   researchTypeLabelOf,
 } from "@/components/research";
+import { PaginationBar } from "@/components/PaginationBar";
 
 export default function ResearchDetail() {
   const params = useParams();
@@ -113,8 +117,13 @@ export default function ResearchDetail() {
    *
    * `single`：原有逐分析视图，负责「**这一格**里到底筛了什么、逐指标是多少」。
    * 矩阵里点任一格会切到这里并选中该分析。
+   *
+   * `funnel`：「**规则链**每级各贡献了什么」—— 与矩阵互补而非替代。
+   * 矩阵的坐标是二维的（决策日 × 回撤桶），但用户的策略（守线 → 缩量 → 企稳放量）
+   * 是**一维逐级收紧**的规则链；「守线单独筛掉多少」「加了缩量是变好还是只变少」
+   * 这类**逐级边际贡献**在二维矩阵里无处安放。
    */
-  const [resultView, setResultView] = useState<"matrix" | "single">("matrix");
+  const [resultView, setResultView] = useState<"matrix" | "funnel" | "single">("matrix");
   const [analysisQuery, setAnalysisQuery] = useState("");
 
   /** 矩阵视图只需要 name / target / status（解析规则见 `researchMatrix.ts`）。 */
@@ -131,6 +140,56 @@ export default function ResearchDetail() {
     if (q.length === 0) return analyses;
     return analyses.filter((a) => a.name.toLowerCase().includes(q) || String(a.id).includes(q));
   }, [analyses, analysisQuery]);
+
+  /**
+   * 分页（**纯前端内存分页**）。
+   *
+   * 为什么不改后端：`getRun` 已一次性返回该 Run 的**全部分析**（实测最多的
+   * 一个 Run = 180 条），后端加 limit/offset 属于改 `server/**` —— 会热重启并
+   * 杀死在途 Run，代价远大于收益。前端切片即可让首屏只渲染 20 行。
+   *
+   * 三张长表各自独立分页，互不影响：
+   *   - `runPage`：Run 列表（8 条起，会持续增长）；
+   *   - `analysisPage`：分析列表（本页最主要的 180 行）；
+   *   - `analysisPickPage`：「结果 → 逐分析」的按钮组（同样吃 `visibleAnalyses`）。
+   */
+  const [runPage, setRunPage] = useState(1);
+  const [runPageSize, setRunPageSize] = useState(clientPagination.DEFAULT_PAGE_SIZE);
+  const [analysisPage, setAnalysisPage] = useState(1);
+  const [analysisPageSize, setAnalysisPageSize] = useState(clientPagination.DEFAULT_PAGE_SIZE);
+  const [analysisPickPage, setAnalysisPickPage] = useState(1);
+
+  const runSlice = useMemo(
+    () => clientPagination.paginate(runs, runPage, runPageSize),
+    [runs, runPage, runPageSize],
+  );
+  const analysisSlice = useMemo(
+    () => clientPagination.paginate(analyses, analysisPage, analysisPageSize),
+    [analyses, analysisPage, analysisPageSize],
+  );
+  const analysisPickSlice = useMemo(
+    () => clientPagination.paginate(visibleAnalyses, analysisPickPage, analysisPageSize),
+    [visibleAnalyses, analysisPickPage, analysisPageSize],
+  );
+
+  // 页码被夹取（删行 / 调大每页条数）后写回 state，避免持有越界值导致表空。
+  useEffect(() => {
+    if (runSlice.page !== runPage) setRunPage(runSlice.page);
+  }, [runSlice.page, runPage]);
+  useEffect(() => {
+    if (analysisSlice.page !== analysisPage) setAnalysisPage(analysisSlice.page);
+  }, [analysisSlice.page, analysisPage]);
+  useEffect(() => {
+    if (analysisPickSlice.page !== analysisPickPage) setAnalysisPickPage(analysisPickSlice.page);
+  }, [analysisPickSlice.page, analysisPickPage]);
+
+  // 切换 Run / 改过滤词后回到第 1 页（否则会停在旧页看上不相关的行）。
+  useEffect(() => {
+    setAnalysisPage(1);
+  }, [selectedRunId]);
+  useEffect(() => {
+    setAnalysisPickPage(1);
+  }, [selectedRunId, analysisQuery]);
 
   const createRun = trpc.researchEngine.createRun.useMutation();
   const removeRun = trpc.researchEngine.deleteRun.useMutation();
@@ -267,7 +326,7 @@ export default function ResearchDetail() {
         </TabsList>
 
         <TabsContent value="pipeline" className="space-y-4 pt-3">
-          <SectionCard title="假设" icon={Lightbulb} description="结论会挂在假设上；没有假设时自动结论仍然生成，但无法回答「假设是否被支持」。">
+          <SectionCard title="假设" icon={Lightbulb} description="结论挂在假设上；没有假设也会出结论，但答不了「假设是否被支持」。">
             {hypotheses.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 这个实验没有登记假设。可以新建实验时同时登记，或在「新建实验」对话框中补一条。
@@ -290,7 +349,7 @@ export default function ResearchDetail() {
           <SectionCard
             title="运行（Run）"
             icon={Layers}
-            description="一次 Run = 一次可复现的执行。已 COMPLETED 的 Run 不会被覆盖；新增的分析用下方列表里的「补跑」，要整轮重跑请新建 Run。"
+            description="一次 Run = 一次可复现执行。已完成的 Run 不覆盖：新增分析走「补跑」，整轮重跑请新建 Run。"
             right={
               selectedRun && (
                 <RunEngineButton
@@ -315,7 +374,7 @@ export default function ResearchDetail() {
               <EmptyState
                 icon={Layers}
                 title="还没有 Run"
-                description="Run 是分析的容器。先新建一个 Run，再添加分析并执行。"
+                description="Run 是分析的容器。先建 Run，再加分析并执行。"
                 action={
                   <Button size="sm" onClick={handleCreateRun} disabled={createRun.isPending}>
                     <Plus className="mr-1.5 h-4 w-4" /> 新建 Run
@@ -336,7 +395,7 @@ export default function ResearchDetail() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {runs.map((r) => (
+                  {runSlice.rows.map((r) => (
                     <TableRow
                       key={r.id}
                       onClick={() => setSelectedRunId(r.id)}
@@ -371,14 +430,11 @@ export default function ResearchDetail() {
                           title={`删除 Run #${r.runNo}？`}
                           consequence={
                             <div className="space-y-1.5 text-xs">
-                              <p>会连带删除该 Run 下的全部分析（含条件、指标定义、结果行）。</p>
+                              <p>连带删除该 Run 下的全部分析（含条件、指标定义、结果行）。</p>
                               <p>
-                                结论是「实验级」实体（不带 runId），服务端按结论证据里的 analysisId
-                                精确判定归属：只删由本 Run 的分析产出的结论；归属无法判定的结论会保留并计数上报。
+                                结论按 evidence 里的 analysisId 判定归属：只删由本 Run 产出的；判不了的保留并计数上报。
                               </p>
-                              <p className="text-amber-800">
-                                执行中（RUNNING）的 Run 会被拒绝删除。
-                              </p>
+                              <p className="text-amber-800">RUNNING 的 Run 会被拒绝删除。</p>
                             </div>
                           }
                           onConfirm={async () => {
@@ -402,6 +458,24 @@ export default function ResearchDetail() {
               </Table>
             )}
 
+            {runs.length > 0 && runs.length > runSlice.pageSize && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                <span className="text-[11px] text-muted-foreground">
+                  {clientPagination.pageRangeLabel(runSlice)}
+                </span>
+                <PaginationBar
+                  page={runSlice.page}
+                  totalPages={runSlice.totalPages}
+                  pageSize={runSlice.pageSize}
+                  onPageChange={setRunPage}
+                  onPageSizeChange={(size) => {
+                    setRunPageSize(size);
+                    setRunPage(1);
+                  }}
+                />
+              </div>
+            )}
+
             {selectedRun && (
               <div className="mt-4 space-y-2 border-t pt-3">
                 <div className="flex items-center gap-2">
@@ -409,8 +483,7 @@ export default function ResearchDetail() {
                   <p className="text-xs font-medium">执行批次（Run #{selectedRun.runNo}）</p>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
-                  一条 Run 的结果可能来自多个批次：整轮执行落定基准，之后新增的分析走「补跑」。
-                  批次日志是追加式的历史事实，不随分析删除而改写。
+                  一条 Run 可跨多个批次：整轮执行落定基准，新增分析走「补跑」。批次日志是追加式的。
                 </p>
                 <RunExecutionBatches log={selectedRun.executionLog ?? null} />
               </div>
@@ -421,7 +494,7 @@ export default function ResearchDetail() {
             <SectionCard
               title={`分析（Run #${selectedRun.runNo}）`}
               icon={Sigma}
-              description="每个分析独立实现、独立落库。变量选项来自当前 Dataset 版本的真实视界。"
+              description="每个分析独立实现、独立落库；变量选项来自当前 Dataset 版本的真实视界。"
               right={
                 <div className="flex items-center gap-2">
                   <CreateAnalysisDialog
@@ -450,7 +523,7 @@ export default function ResearchDetail() {
                 <EmptyState
                   icon={Sigma}
                   title="这个 Run 还没有分析"
-                  description="引擎需要至少一个分析才能执行。先新建分析，再点「运行引擎」。"
+                  description="引擎需要至少一个分析。先新建分析，再运行引擎。"
                   action={
                     <CreateAnalysisDialog
                       datasetVersionId={experiment.datasetVersionId}
@@ -476,7 +549,7 @@ export default function ResearchDetail() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {analyses.map((a) => (
+                    {analysisSlice.rows.map((a) => (
                       <TableRow
                         key={a.id}
                         onClick={() => setSelectedAnalysisId(a.id!)}
@@ -516,9 +589,9 @@ export default function ResearchDetail() {
                               title={`删除分析 #${a.id}（${a.analysisType}）？`}
                               consequence={
                                 <div className="space-y-1.5 text-xs">
-                                  <p>会删除该分析的条件、指标定义与全部结果行。</p>
-                                  <p>证据指向该分析的结论也会一并删除；其所属 Run 保留不动。</p>
-                                  <p className="text-amber-800">执行中（RUNNING）的分析会被拒绝删除。</p>
+                                  <p>删除该分析的条件、指标定义与全部结果行。</p>
+                                  <p>证据指向它的结论一并删除；所属 Run 保留。</p>
+                                  <p className="text-amber-800">RUNNING 的分析会被拒绝删除。</p>
                                 </div>
                               }
                               onConfirm={async () => {
@@ -541,13 +614,31 @@ export default function ResearchDetail() {
                   </TableBody>
                 </Table>
               )}
+
+              {analyses.length > analysisSlice.pageSize && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                  <span className="text-[11px] text-muted-foreground">
+                    {clientPagination.pageRangeLabel(analysisSlice)}
+                  </span>
+                  <PaginationBar
+                    page={analysisSlice.page}
+                    totalPages={analysisSlice.totalPages}
+                    pageSize={analysisSlice.pageSize}
+                    onPageChange={setAnalysisPage}
+                    onPageSizeChange={(size) => {
+                      setAnalysisPageSize(size);
+                      setAnalysisPage(1);
+                    }}
+                  />
+                </div>
+              )}
             </SectionCard>
           )}
         </TabsContent>
 
         <TabsContent value="results" className="space-y-3 pt-3">
           {!selectedRun ? (
-            <EmptyState icon={BarChart3} title="请先选择一个 Run" />
+            <EmptyState icon={BarChart3} title="先选一个 Run" />
           ) : analyses.length === 0 ? (
             <EmptyState icon={BarChart3} title="该 Run 下还没有分析" />
           ) : (
@@ -563,6 +654,13 @@ export default function ResearchDetail() {
                   </Button>
                   <Button
                     size="sm"
+                    variant={resultView === "funnel" ? "default" : "outline"}
+                    onClick={() => setResultView("funnel")}
+                  >
+                    <Filter className="mr-1.5 h-3.5 w-3.5" /> 信号漏斗
+                  </Button>
+                  <Button
+                    size="sm"
                     variant={resultView === "single" ? "default" : "outline"}
                     onClick={() => setResultView("single")}
                   >
@@ -570,13 +668,20 @@ export default function ResearchDetail() {
                   </Button>
                 </div>
                 <span className="text-[11px] text-muted-foreground">
-                  该 Run 共 {analyses.length} 个分析
+                  共 {analyses.length} 个分析
                   {resultView === "single" && selectedAnalysisId !== null ? ` · 当前 #${selectedAnalysisId}` : ""}
-                </span>
-              </div>
+                </span>              </div>
 
               {resultView === "matrix" ? (
                 <ResearchMatrixView
+                  analyses={matrixAnalyses}
+                  onSelectAnalysis={(id) => {
+                    setSelectedAnalysisId(id);
+                    setResultView("single");
+                  }}
+                />
+              ) : resultView === "funnel" ? (
+                <ObservationFunnelView
                   analyses={matrixAnalyses}
                   onSelectAnalysis={(id) => {
                     setSelectedAnalysisId(id);
@@ -591,13 +696,13 @@ export default function ResearchDetail() {
                       <input
                         value={analysisQuery}
                         onChange={(e) => setAnalysisQuery(e.target.value)}
-                        placeholder="按名称或 ID 过滤分析…"
+                        placeholder="按名称或 ID 过滤…"
                         className="w-full rounded border bg-background py-1 pl-7 pr-2 text-xs"
                       />
                     </div>
                   )}
                   <div className="flex flex-wrap items-center gap-2">
-                    {visibleAnalyses.map((a) => (
+                    {analysisPickSlice.rows.map((a) => (
                       <Button
                         key={a.id}
                         size="sm"
@@ -609,9 +714,26 @@ export default function ResearchDetail() {
                       </Button>
                     ))}
                     {visibleAnalyses.length === 0 && (
-                      <span className="text-xs text-muted-foreground">没有匹配「{analysisQuery}」的分析</span>
+                      <span className="text-xs text-muted-foreground">没有匹配「{analysisQuery}」的</span>
                     )}
                   </div>
+                  {analysisPickSlice.totalPages > 1 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] text-muted-foreground">
+                        {clientPagination.pageRangeLabel(analysisPickSlice)}
+                      </span>
+                      <PaginationBar
+                        page={analysisPickSlice.page}
+                        totalPages={analysisPickSlice.totalPages}
+                        pageSize={analysisPickSlice.pageSize}
+                        onPageChange={setAnalysisPickPage}
+                        onPageSizeChange={(size) => {
+                          setAnalysisPageSize(size);
+                          setAnalysisPickPage(1);
+                        }}
+                      />
+                    </div>
+                  )}
                   {selectedAnalysisId !== null && <AnalysisResultsView analysisId={selectedAnalysisId} />}
                 </>
               )}

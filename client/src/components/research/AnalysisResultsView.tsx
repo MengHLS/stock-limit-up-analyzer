@@ -228,7 +228,7 @@ export function AnalysisResultsView({ analysisId }: { analysisId: number }) {
       <EmptyState
         icon={BarChart3}
         title="该分析尚无结果"
-        description="可能原因：分析还未执行（点击「运行引擎」），或执行时失败。运行失败的具体原因记录在 Run 的 errorCode / errorMessage。"
+        description="分析还没执行（去点「运行引擎」）或执行失败；失败原因记在 Run 的 errorCode / errorMessage。"
       />
     );
   }
@@ -294,8 +294,7 @@ export function AnalysisResultsView({ analysisId }: { analysisId: number }) {
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              这只是**统计关系**，不是交易信号；显著性未做多重比较校正，且涨停事件窗口互相重叠，
-              独立性假设不严格成立。需经 Backtest / 稳健性 / OOS 验证后才可作策略判断。
+              只是**统计关系**，不是交易信号；未做多重比较校正，窗口还互相重叠 —— 须经 Backtest / 稳健性 / OOS 才可当策略用。
             </p>
           </CardContent>
         </Card>
@@ -306,9 +305,7 @@ export function AnalysisResultsView({ analysisId }: { analysisId: number }) {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">{variableSeries.familyLabel}逐日走势</CardTitle>
             <CardDescription className="text-xs">
-              {variableSeries.points.length} 个滞后日（
-              {variableSeries.points.map((p) => `T+${p.lag}`).join(" → ")}）· 中位数与均值同时给出（重尾
-              分布下二者可能方向相反）· 悬停可看分位与样本数
+              中位数与均值同给（重尾下可能反向）；悬停看分位与样本数
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -322,8 +319,7 @@ export function AnalysisResultsView({ analysisId }: { analysisId: number }) {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">分组对比图</CardTitle>
             <CardDescription className="text-xs">
-              {headline.metricLabel} · 每组一根条，共用一个包含 0 的横轴（红 = 正、绿 = 负）；
-              悬停可看该组的变量区间与样本数
+              {headline.metricLabel} · 每组一根条，共用含 0 的横轴（红 = 正、绿 = 负）
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -496,20 +492,12 @@ export function AnalysisResultsView({ analysisId }: { analysisId: number }) {
       <details className="rounded-md border bg-muted/20 px-3 py-2">
         <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
           <Info className="h-3 w-3 shrink-0" />
-          表格怎么读（点开）
+          怎么读
         </summary>
         <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-          <p>
-            「—」表示该指标在该分组下**无法计算**（样本不足或变量缺失），不是 0。
-          </p>
-          <p>
-            同一分组内不同指标的样本数**可以不同**（例如平均收益的分母是收益序列长度，
-            而最大回撤的分母只是回撤列非空的那些事件）；分母不一致时每个数值下方都会单独标 <span className="font-mono">n=</span>。
-          </p>
-          <p>
-            分析级的注意事项（分组退化、变量缺失说明、小样本门槛）由引擎写入结论的 evidence，
-            可在「结论」页签查看。
-          </p>
+          <p>「—」= 该指标在该分组下**算不出来**（样本不足或变量缺失），不是 0。</p>
+          <p>同一分组内不同指标的样本数**可以不同**；分母不一致时每个数值下方单独标 <span className="font-mono">n=</span>。</p>
+          <p>分析级注意事项（分组退化 / 变量缺失 / 小样本门槛）在「结论」页签。</p>
         </div>
       </details>
     </div>

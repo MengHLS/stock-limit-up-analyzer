@@ -117,6 +117,30 @@ const ALL_PULLBACK_KEYWORD = "已回撤";
 export const SIGNIFICANCE_LEVEL = 0.05;
 export const STRONG_SIGNIFICANCE_LEVEL = 0.01;
 
+/**
+ * 矩阵首屏**最多同时取数**的格数。
+ *
+ * 背景（2026-09-13 交错 3 轮实测）：`getAnalysisResults` 单次约 1.4s，
+ * 一个族最多 30 格 ⇒ **30 并发整体 ~10s**，这段时间页面表现为「打不开」。
+ * 首屏只取前 12 格可把等待压到 ~1/3，其余由用户显式点「载入其余」补齐。
+ *
+ * ⚠️ 这是**取数上限**，不是数据截断：未取的格照常按「缺格不隐藏」显示，
+ * 只是暂时没有数值（显示「结果加载中…」），不会被静默丢弃。
+ */
+export const MATRIX_INITIAL_FETCH = 12;
+
+/**
+ * 给定当前族全部格与「是否已载入其余」，返回**本次实际要发请求**的格子。
+ *
+ * 纯函数（可直接单测）：不读时间、不改入参。
+ * `fetchAll = false` 时取前 `MATRIX_INITIAL_FETCH` 个；`true` 时全取。
+ */
+export function selectFetchCells<T>(cells: readonly T[], fetchAll: boolean, limit = MATRIX_INITIAL_FETCH): readonly T[] {
+  if (fetchAll) return cells;
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  return cells.slice(0, Math.trunc(limit));
+}
+
 // ---------------------------------------------------------------------------
 // 解析：分析 → 二维坐标
 // ---------------------------------------------------------------------------

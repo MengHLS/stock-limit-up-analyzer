@@ -1,0 +1,106 @@
+{
+  "elapsedMs": 43369,
+  "overall": {
+    "status": "PARTIAL_BLOCKED",
+    "executedStageCount": 4,
+    "blockedStageCount": 1,
+    "skippedStageCount": 9,
+    "firstBlockedReasonCode": "CL_STAGE_INPUT_MISSING",
+    "synthetic": false,
+    "note": "首阻塞 regime（CL_STAGE_INPUT_MISSING）：阶段 regime 需要输入交接 overfittingRef（产生阶段 overfitting 未被请求）；请提供 seed 或纳入前序阶段"
+  },
+  "runnerInjected": [
+    "data",
+    "research",
+    "strategy",
+    "backtest",
+    "regime"
+  ],
+  "stages": [
+    {
+      "stageId": "data",
+      "state": "EXECUTED",
+      "outputKind": "datasetSummary",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "research",
+      "state": "EXECUTED",
+      "outputKind": "researchSummary",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "strategy",
+      "state": "EXECUTED",
+      "outputKind": "strategyDocRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "backtest",
+      "state": "EXECUTED",
+      "outputKind": "backtestSummary",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "evaluation",
+      "state": "SKIPPED",
+      "outputKind": "evaluationRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "optimization",
+      "state": "SKIPPED",
+      "outputKind": "optimizationRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "robustness",
+      "state": "SKIPPED",
+      "outputKind": "robustnessRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "oos",
+      "state": "SKIPPED",
+      "outputKind": "oosRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "overfitting",
+      "state": "SKIPPED",
+      "outputKind": "overfittingRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "regime",
+      "state": "BLOCKED",
+      "outputKind": "regimeRef",
+      "blockedReasonCode": "CL_STAGE_INPUT_MISSING",
+      "output": null
+    },
+    {
+      "stageId": "paper",
+      "state": "SKIPPED",
+      "outputKind": "paperRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "review",
+      "state": "SKIPPED",
+      "outputKind": "reviewRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "discipline",
+      "state": "SKIPPED",
+      "outputKind": "disciplineRef",
+      "blockedReasonCode": null
+    },
+    {
+      "stageId": "finalize",
+      "state": "SKIPPED",
+      "outputKind": "finalizeRef",
+      "blockedReasonCode": null
+    }
+  ]
+}

@@ -73,6 +73,7 @@ export function AnalysisConditionEditor({
     features: variables.data?.features ?? [],
     outcomes: variables.data?.outcomes ?? [],
     dimensions: variables.data?.dimensions ?? [],
+    observations: variables.data?.observations,
   };
 
   const save = trpc.researchEngine.setAnalysisConditions.useMutation();

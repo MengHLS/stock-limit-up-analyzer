@@ -190,7 +190,7 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
   }
 
   return router({
-    // ---- 变量目录（供前端构造合法配置；一次拿到特征 / 结果 / 维度）----
+    // ---- 变量目录（供前端构造合法配置；一次拿到特征 / 结果 / 观察日 / 维度）----
     listVariables: publicProcedure
       .input(z.object({ datasetVersionId: z.number().int().positive() }))
       .query(async ({ input }) => {
@@ -201,11 +201,66 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
               (_, i) => context.pathRelativeDayRange!.min + i,
             )
           : [];
-        const catalog = new ResearchVariableCatalog(context.horizons, pathHorizons);
+        // 观察日视界来自 post.relativeDay 的真实覆盖（**不是**写死 20）：
+        // 数据集没有 post 数据时，这里返回空数组，前端下拉里就不该出现任何 `obs_*`。
+        const postHorizons = context.postRelativeDayRange
+          ? Array.from(
+              { length: context.postRelativeDayRange.max - Math.max(1, context.postRelativeDayRange.min) + 1 },
+              (_, i) => Math.max(1, context.postRelativeDayRange!.min) + i,
+            )
+          : [];
+        const catalog = new ResearchVariableCatalog(context.horizons, pathHorizons, postHorizons);
+        const observationMaxOffset = catalog.observationMaxOffset;
         return {
           datasetVersion: context,
           features: catalog.listFeatures(),
           outcomes: catalog.listOutcomes(),
+          /**
+           * 观察日变量（T+k 可观测，可当条件）。数量随 `observationMaxOffset` 二次增长
+           * （逐日 8 + 累积 6 每 offset），因此**另附分组清单**供前端做「先选天数、再选字段」
+           * 的两级下拉，避免一次性渲染 280 项。
+           */
+          observations: {
+            variables: catalog.listObservations(),
+            maxOffset: observationMaxOffset,
+            /**
+             * 逐日字段（每个 offset 都有这 8 个）。
+             * 名字模板里的 `{k}` 由前端替换成选中的天数。
+             */
+            dayFields: [
+              { field: "open", label: "当日开盘价", unit: "元" },
+              { field: "high", label: "当日最高价", unit: "元" },
+              { field: "low", label: "当日最低价", unit: "元" },
+              { field: "close", label: "当日收盘价", unit: "元" },
+              { field: "volume", label: "当日成交量", unit: "股" },
+              { field: "amount", label: "当日成交额", unit: "元" },
+              { field: "return_from_event_close", label: "相对首板日收盘涨跌幅", unit: "比例" },
+              { field: "volume_ratio", label: "相对首板日成交量比", unit: "比例" },
+            ],
+            /**
+             * 累积口径（覆盖 T+1..T+k 整段，而不是单看某一天）。
+             * 这是「回调形态」这一类判断的主力：单日最低价没有意义，
+             * 「回调期间最低价」才对应「是否跌破首板日最低价」。
+             */
+            pullbackStats: [
+              { stat: "min_low", label: "回调期间最低价", unit: "元" },
+              { stat: "max_high", label: "回调期间最高价", unit: "元" },
+              { stat: "close", label: "回调末日收盘价", unit: "元" },
+              { stat: "close_ratio", label: "回调末日收盘 / 首板日收盘", unit: "比例" },
+              { stat: "min_volume", label: "回调期间最小成交量（绝对量，慎用于比较）", unit: "股" },
+              {
+                stat: "min_volume_ratio",
+                label: "回调期间最小量能比 / 首板日成交量（缩量验证用这个）",
+                unit: "比例",
+              },
+              { stat: "last_volume_ratio", label: "回调末日量能比 / 首板日成交量", unit: "比例" },
+              { stat: "holds_event_low", label: "回调期间未破首板日最低价（1=未破 / 0=已破）", unit: "0/1" },
+            ],
+          },
+          /** 观察日条件在 T+k 判定时的 PIT 上限（前端据此提示「在 T+3 判定只能用 ≤ T+3 的字段」）。 */
+          observationsUnavailable: observationMaxOffset === 0
+            ? [{ key: "observations", reason: "该 Dataset 没有 post（观察日）数据，无法用 T+k 可观测变量做条件" }]
+            : [],
           dimensions: ["year", "month", "quarter", "board", "market", "industry"],
           /** regime 维度需要注入标签源；当前 Dataset 未提供，故不列入默认可选维度。 */
           unavailableDimensions: [{ key: "regime", reason: "当前 Dataset 未提供市场环境列，且未接入 RegimeTagProvider" }],

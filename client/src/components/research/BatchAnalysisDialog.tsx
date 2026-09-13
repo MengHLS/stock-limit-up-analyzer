@@ -456,13 +456,11 @@ export function BatchAnalysisDialog({
             <Sigma className="h-4 w-4" /> 批量 / 模板建分析
           </DialogTitle>
           <DialogDescription>
-            一次提交生成一组分析。分析属于某个 Run；变量选项来自当前 Dataset 版本的真实视界
+            一次提交生成一组分析；变量选项来自当前 Dataset
             {variables.data
               ? `（${catalog.features.length} 个特征 / ${catalog.outcomes.length} 个结果变量）`
               : "（加载中…）"}。
-            <span className="mt-1 block text-amber-700">
-              批量创建**只建不跑**：建完仍需显式触发整轮执行或补跑；补跑批次不生成结论（本批不产结论）。
-            </span>
+            <span className="mt-1 block text-amber-700">批量创建只建不跑；需另行触发整轮执行或补跑。</span>
           </DialogDescription>
         </DialogHeader>
 
@@ -597,7 +595,7 @@ export function BatchAnalysisDialog({
                     }}
                   />
                   <p className="text-xs text-muted-foreground">
-                    视界来自 Dataset 的真实 `path.relativeDay`；不硬编码 T+1/3/5/10/20。
+                    视界来自 Dataset 真实存在的 `path.relativeDay`。
                   </p>
                 </div>
               )}
@@ -645,7 +643,7 @@ export function BatchAnalysisDialog({
                   setMatrix((prev) => ({ ...prev, conditions: next }));
                 }}
                 catalog={catalog}
-                title="条件（可选；填写后条件分析才会计入本批）"
+                title="条件（可选；填了才包含条件分析）"
               />
 
               <BatchPreview
@@ -686,8 +684,8 @@ export function BatchAnalysisDialog({
             {/* ------------------------------ 套件 ------------------------------ */}
             <TabsContent value="suite" className="space-y-4">
               <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                套件会替你铺开一套**标准**分析（描述统计 / 分位 / 事件研究 / 稳定性 / 条件）。
-                它替你做了一部分研究设计，所以下面会把**将创建的每一条**先列出来，确认后再创建。
+                套件会替你铺开一套标准分析（描述统计 / 分位 / 事件研究 / 稳定性 / 条件）—— 因此下面先把
+                <span className="font-medium">将创建的每一条</span>列出来，确认后再建。
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -773,9 +771,7 @@ export function BatchAnalysisDialog({
                   <div className="min-w-[240px] flex-1">
                     <p className="text-xs font-medium">从例子开始 —— 点一下直接建到当前 Run</p>
                     <p className="text-[11px] leading-relaxed text-muted-foreground">
-                      每张卡是一道配好的研究问题；卡上那行小字就是
-                      <span className="font-medium">实际会写进分析的内容</span>
-                      （从待建条目反推，不是另抄一份说明）。建完**不自动执行**，仍需显式触发整轮执行或增量补跑。
+                      卡上小字就是<span className="font-medium">实际写进分析的内容</span>（从待建条目反推）。建完不自动执行。
                     </p>
                   </div>
                   <Button
@@ -856,8 +852,7 @@ export function BatchAnalysisDialog({
                 {templatesQuery.isLoading && <p className="text-xs text-muted-foreground">正在读取模板…</p>}
                 {!templatesQuery.isLoading && templates.length === 0 && (
                   <p className="text-xs text-muted-foreground">
-                    还没有模板。可以点上面示例卡里的「存为模板」，或在「矩阵展开」页签调好清单后用底部的
-                    「存为模板」把这份配方存下来。
+                    还没有模板。可用示例卡里的「存为模板」，或在「矩阵展开」调好清单后点底部「存为模板」。
                   </p>
                 )}
 

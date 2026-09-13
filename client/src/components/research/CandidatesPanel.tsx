@@ -40,10 +40,10 @@ export function CandidatesPanel({ experimentId }: { experimentId: number }) {
     <SectionCard
       title="策略候选"
       icon={Trophy}
-      description="候选是从研究结论走向正式策略的中间产物：带上研究来源快照、人写的规则草图与状态机。它本身还不是策略。"
+      description="从研究结论走向正式策略的中间产物；本身还不是策略。"
       right={
         <Link href={`/research/${experimentId}`} className="text-xs text-muted-foreground hover:underline">
-          在「结论」标签页登记候选
+          去「结论」登记
         </Link>
       }
     >
@@ -54,8 +54,8 @@ export function CandidatesPanel({ experimentId }: { experimentId: number }) {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={Trophy}
-          title="这个实验还没有登记策略候选"
-          description="候选不会自动产生：请到「结论」标签页，对目标结论点「创建策略候选」。登记后回到这里即可看到，并进入候选详情补写规则草图、推进状态流转。"
+          title="还没有候选"
+          description="候选不会自动产生 —— 去「结论」标签页对目标结论点「创建策略候选」。"
         />
       ) : (
         <Table>

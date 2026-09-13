@@ -65,7 +65,11 @@ import type {
   ResearchEngineRunResult,
   ResearchVariableRequirement,
 } from "./types";
-import { ResearchVariableCatalog, type RegimeTagProvider } from "./variables";
+import {
+  ResearchVariableCatalog,
+  assertObservationConditionsPitSafe,
+  type RegimeTagProvider,
+} from "./variables";
 
 export interface ResearchEngineDeps {
   repos: ResearchRepositories;
@@ -625,12 +629,20 @@ export class ResearchEngine {
   // 共用执行核心
   // =-------------------------------------------------------------------------
 
-  /** 变量目录：视界来自 Dataset 的**真实值**（outcome.horizon 与 path.relativeDay 范围）。 */
+  /** 变量目录：视界来自 Dataset 的**真实值**（outcome.horizon、path.relativeDay、post.relativeDay 范围）。 */
   private buildCatalog(versionContext: ResearchDatasetVersionContext): ResearchVariableCatalog {
     const pathHorizons = versionContext.pathRelativeDayRange
       ? rangeInclusive(1, versionContext.pathRelativeDayRange.max)
       : [];
-    return new ResearchVariableCatalog(versionContext.horizons, pathHorizons);
+    // 观察日（OBSERVATION）视界来自 post.relativeDay 的真实覆盖，**不写死 20**：
+    // 数据集换成只有 T+1..T+5 的版本时，`obs_9d.close` 必须当场不可用。
+    const postHorizons = versionContext.postRelativeDayRange
+      ? rangeInclusive(
+          Math.max(1, versionContext.postRelativeDayRange.min),
+          versionContext.postRelativeDayRange.max,
+        )
+      : [];
+    return new ResearchVariableCatalog(versionContext.horizons, pathHorizons, postHorizons);
   }
 
   /** 条件集（仅 CONDITIONAL 需要；其余分析为空集），并校验字段可解析。 */
@@ -673,6 +685,7 @@ export class ResearchEngine {
       const requirement = executor.requiredVariables(config, { catalog, conditionSet });
       for (const name of requirement.features) catalog.resolveFeature(name);
       for (const name of requirement.outcomes) catalog.resolveOutcome(name);
+      for (const name of requirement.observations ?? []) catalog.resolveObservation(name);
       resolved.push({ analysis, config, requirement, executor });
     }
     return resolved;
@@ -750,11 +763,20 @@ export class ResearchEngine {
     return { outcomes, summaries, resultCount };
   }
 
-  /** 条件字段必须能解析（特征 / 结果 / 合法维度之一），否则早失败。 */
+  /**
+   * 条件字段必须能解析（特征 / 结果 / **观察日** / 合法维度之一），否则早失败。
+   *
+   * 观察日变量必须进白名单：否则「T+3 最低价 ≥ 事件日最低价」这类**完全合法**的条件
+   * 会在装配前被判 `UNKNOWN_VARIABLE`，用户看到的是「这个字段不存在」——而真实原因是
+   * 白名单漏了一整个角色。这类错误的信息量与真实原因严重不匹配。
+   *
+   * 白名单通过后立即做 **PIT 护栏**：观察日条件引用的 offset 不得晚于该条件的判定日。
+   */
   private assertConditionFieldsKnown(set: ResearchConditionSet, catalog: ResearchVariableCatalog): void {
     const known = new Set<string>([
       ...catalog.listFeatures(),
       ...catalog.listOutcomes(),
+      ...catalog.listObservations(),
       ...["year", "month", "quarter", "board", "market", "industry", "regime"],
     ]);
     for (const group of set.groups) {
@@ -766,7 +788,31 @@ export class ResearchEngine {
           { fieldName: condition.fieldName },
         );
       }
+      this.assertGroupPitSafe(group, catalog);
     }
+  }
+
+  /**
+   * 逐条件组做观察日 PIT 校验。
+   *
+   * **判定日如何确定**：一个条件组里若出现观察日变量，该组最早只能在
+   * `max(组内观察日变量的 offset)` 收盘才可判定 —— 因为组内是 AND/OR 组合，
+   * 最晚那个成员没出现之前，整组的真假未知。空组（无观察日变量）不约束。
+   *
+   * 这一条挡住的正是最危险、也最容易悄悄发生的错误：**用 T+5 的形态去筛 T+3 该买的样本**。
+   * 它不会报错、不会变 null，只会给出一组漂亮但不可交易的数字。
+   */
+  private assertGroupPitSafe(
+    group: ResearchConditionSet["groups"][number],
+    catalog: ResearchVariableCatalog,
+  ): void {
+    const fields = group.conditions.map((c) => c.fieldName);
+    const offsets = fields
+      .map((f) => catalog.observationOffsetOf?.(f) ?? null)
+      .filter((o): o is number => o !== null);
+    if (offsets.length === 0) return;
+    const evaluationOffset = Math.max(...offsets);
+    assertObservationConditionsPitSafe({ catalog, fields, evaluationOffset });
   }
 }
 
@@ -779,6 +825,7 @@ function unionRequirementOf(resolved: readonly ResolvedAnalysis[]): ResearchVari
   return {
     features: [...new Set(resolved.flatMap((r) => r.requirement.features))],
     outcomes: [...new Set(resolved.flatMap((r) => r.requirement.outcomes))],
+    observations: [...new Set(resolved.flatMap((r) => r.requirement.observations ?? []))],
     dimensions: [...new Set(resolved.flatMap((r) => r.requirement.dimensions ?? []))],
   };
 }
@@ -792,6 +839,7 @@ function mergeRequirements(
   return {
     features: [...new Set([...base.features, ...extra.features])],
     outcomes: [...new Set([...base.outcomes, ...extra.outcomes])],
+    observations: [...new Set([...(base.observations ?? []), ...(extra.observations ?? [])])],
     dimensions: [...new Set([...(base.dimensions ?? []), ...(extra.dimensions ?? [])])],
   };
 }

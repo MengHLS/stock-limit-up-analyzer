@@ -99,7 +99,7 @@ function CandidateDetailBody({
       <SectionCard
         title="研究来源"
         icon={FlaskConical}
-        description="来源是登记当时的快照（不是外键）：上游被删除后仍能回答「这个候选从哪来」，缺失项由后端如实标注。"
+        description="登记当时的快照，不是外键 —— 上游删了也能看出「从哪来」。"
       >
         <div className="space-y-0">
           <SourceRow label="来源结论">
@@ -132,7 +132,7 @@ function CandidateDetailBody({
           <SourceRow label="Research Run">
             {source.runId === null ? (
               <span className="text-muted-foreground">
-                提不出（结论证据里没有唯一 Run —— 来源快照如实为空，不伪造）
+                <span className="font-mono">#{source.runId}</span>
               </span>
             ) : (
               <span className="font-mono">#{source.runId}</span>
@@ -157,9 +157,7 @@ function CandidateDetailBody({
           </SourceRow>
 
           <SourceRow label="数据集用途">
-            <span className="text-muted-foreground">
-              这是「研究来源」坐标；正式策略执行绑定哪份 Dataset，在转正时确定（两者允许不同，不同必须有分歧原因）。
-            </span>
+            <span className="text-muted-foreground">研究来源坐标；执行绑定哪份在转正时定。</span>
           </SourceRow>
 
           {vm.sourceDatasetDivergenceReason && (
@@ -183,7 +181,7 @@ function CandidateDetailBody({
         <SectionCard
           title="转正为 Strategy"
           icon={Radio}
-          description="候选已采纳，可以转正。转正由后端执行：构建 StrategyDefinition → 校验 → 绑定执行 Dataset → 写入 Strategy Version 与来源溯源。前端只提交候选 ID、执行 Dataset 坐标与（必要时）分歧原因。"
+          description="后端构建 StrategyDefinition 并校验；前端只提交候选 ID、执行 Dataset 与分歧原因。"
         >
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-3">
@@ -198,13 +196,8 @@ function CandidateDetailBody({
                 }}
                 onPromoted={onSaved}
               />
-              <span className="text-[11px] text-muted-foreground">
-                转正后本页状态由后端改写为「已转正」，页面随即变为只读。
-              </span>
+              <span className="text-[11px] text-muted-foreground">转正后本页变为只读。</span>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              「研究来源 Dataset」用于形成研究结论；Strategy 的「执行」Dataset 在转正时确定，两者允许不同。
-            </p>
           </div>
         </SectionCard>
       )}
@@ -212,10 +205,7 @@ function CandidateDetailBody({
       {vm.status === "CONVERTED" && (
         <p className="flex items-start gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
           <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" />
-          <span>
-            该候选已转正，产出的 Strategy 版本独立于 Research 存在 ——
-            策略侧的执行不依赖研究模块是否可用。
-          </span>
+          <span>已转正；产出的 Strategy 独立于研究模块存在。</span>
         </p>
       )}
     </div>
@@ -302,7 +292,7 @@ export default function StrategyCandidateDetail() {
     <div className="p-4 md:p-6">
       <CandidateDetailBody vm={vm} raw={detail.data.candidate} onSaved={() => void detail.refetch()} />
       <p className="mt-4 text-[11px] text-muted-foreground">
-        本页面只读展示后端事实：候选状态、来源快照与草图均由后端写入。
+        后端事实只读展示。
         <Badge variant="outline" className="ml-2 text-[10px]">
           草图 ≠ StrategyDefinition
         </Badge>

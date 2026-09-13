@@ -54,7 +54,7 @@ export function VariableCatalogCard({ datasetVersionId }: { datasetVersionId: nu
       <CardContent className="space-y-3">
         <div>
           <p className="mb-1.5 text-xs font-medium">
-            特征变量 <span className="text-muted-foreground">（T 日及之前可观测，PIT 安全）</span>
+            特征变量 <span className="text-muted-foreground">（T 日及之前，PIT 安全）</span>
           </p>
           <div className="flex flex-wrap gap-1.5">
             {data.features.map((f) => (
@@ -114,7 +114,6 @@ export function VariableCatalogCard({ datasetVersionId }: { datasetVersionId: nu
             <span className="font-mono">
               {data.datasetVersion.horizons.length > 0 ? data.datasetVersion.horizons.join("/") : "无"}
             </span>
-            。变量按 Dataset 的真实视界推导，不会为不存在的视界发明变量。
           </p>
         )}
       </CardContent>

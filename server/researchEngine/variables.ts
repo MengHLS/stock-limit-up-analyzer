@@ -6,13 +6,26 @@
  *
  *   - `FEATURE_VARIABLES` 的 `resolve` 只能拿到 `FeatureSources`（event + prefix，全部 ≤ T）；
  *   - `OUTCOME_VARIABLES` 的 `resolve` 只能拿到 `OutcomeSources`（path + outcome，全部 > T）；
- *   - 两个 Sources 类型**互不包含**，因此「在特征里写 `path.closeFromEventClose`」在
- *     TypeScript 编译期就不成立；运行期再叠加 `assertFeatureName` 的**具名拒绝**
- *     （把 outcome 变量名当 feature 用 → `VARIABLE_ROLE_VIOLATION`，不静默返回 null）。
+ *   - `OBSERVATION_VARIABLES` 的 `resolve` 只能拿到 `ObservationSources`（post 的 T+1..T+N）。
+ *   - 三个 Sources 类型**互不包含**，因此「在特征里写 `post.rd3.low`」在
+ *     TypeScript 编译期就不成立；运行期再叠加 `resolveFeature` 的**具名拒绝**
+ *     （把 outcome / observation 变量名当 feature 用 → `VARIABLE_ROLE_VIOLATION`）。
  *
  * 与 Dataset 层的对应关系（**复用，不重新定义时间逻辑**）：
  *   - Dataset 物理表分层 event / prefix / post / path / outcome 已经把「≤T / >T」编码进表；
  *   - 本层只是把该分层**照搬到变量解析函数的入参上**，不新增一套 availability 规则。
+ *
+ * 🔴 OBSERVATION 角色存在的理由（2026-09-13 新增，用户「观察日」条件需求）：
+ *   「T 日首板 → 未来 N 日为观察日 → 观察日满足条件就买入」这类策略，其**信号条件**发生在
+ *   T+k（k ≥ 1），而不是 T 日或之前。既有 FEATURE（≤ T）与 OUTCOME（> T，含 path/outcome 的
+ *   前视标签）都无法表达「第 k 个观察日**当日可观测**的行情」：
+ *     - FEATURE 表达不了（会破 PIT）——它读不到未来；
+ *     - OUTCOME 表达不了（语义不同）——它读的是**事件后的结果标签**（未来收益 / 回撤 / 是否突破），
+ *       而不是「在 T+k 那天做决策时，屏幕上真实可见的那根 bar」。
+ *   因此新增第三角色：**在 T+k 收盘时点可观测**（`availableFromOffset = k`）的行情量。
+ *   它与 OUTCOME 的关键区别不是「是否未来」，而是「**是否在信号时点可见**」：
+ *   观察日变量在 T+k **当时**就已知（所以可以当条件）；结果变量只有在事后才知道
+ *   （所以只能当标签）。
  *
  * 口径唯一：每个变量都必须写清 `definition`（进结果 metadata 与报告），
  * 避免「同一个名字两种口径」导致研究结论不可复现。
@@ -60,6 +73,32 @@ export interface OutcomeSources {
   readonly eventBar: FirstLimitPullbackRawBar | undefined;
 }
 
+/**
+ * 观察日解析可用数据：**事件日之后的行情**（post 表，relativeDay ≥ 1）。
+ *
+ * 🔴 与 `OutcomeSources` 的本质区别：这里给的是「**在 T+k 收盘时点真实可见**」的行情，
+ * 而不是事后才知道的标签。因此它可以承载**信号条件**（如「观察日缩量」「观察日未破
+ * 首板日最低价」），而 outcome / path 只能当标签。
+ *
+ * 🔴 PIT 纪律（本角色的唯一防线）：每个观察日变量都必须声明 `availableFromOffset = k`
+ * （该值最早在 T+k 收盘可观测）。装配层据此校验：
+ *   - 只加载 `relativeDay ≤ 观察窗口终点` 的 post 行（不多取，避免无谓传输）；
+ *   - 条件求值时，**求值日 k 只能看到 offsets ≤ k 的观察日数据**
+ *     （否则就是「在 T+2 用 T+5 的信息做判断」= 事后筛选冒充信号）。
+ */
+export interface ObservationSources {
+  /** key = post.relativeDay（≥ 1）。 */
+  readonly postBars: ReadonlyMap<number, FirstLimitPullbackRawBar>;
+  /**
+   * 事件日当天那根 K 线（`prefix.relativeDay = 0`）—— 只作为**比较基准**
+   * （如「观察日最低价是否跌破首板日最低价」里的「首板日最低价」）。
+   *
+   * 🔴 为什么观察日变量可以读 T 日：基准值在 T 日就已确定，T+k 时点读它**不引入未来信息**。
+   * 缺该行时为 `undefined`，依赖它的变量如实返回 `null`（不臆造基准）。
+   */
+  readonly eventBar: FirstLimitPullbackRawBar | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // 定义类型
 // ---------------------------------------------------------------------------
@@ -96,6 +135,34 @@ export interface OutcomeVariableDefinition {
 }
 
 export type ResearchVariableDefinition = FeatureVariableDefinition | OutcomeVariableDefinition;
+
+/**
+ * 观察日变量定义（T+k 收盘时点可观测）。
+ *
+ * `availableFromOffset` 是本角色的**核心声明**：它同时被
+ *   ① 装配层用于「只加载 ≤ 窗口终点」的范围裁剪；
+ *   ② 条件求值用于「求值日 k 不得引用 > k 的观察日」的 PIT 校验。
+ * 任何新增的观察日变量都**必须**如实声明它 —— 缺省（undefined）按 0 处理会导致
+ * 窗口内的逐日变量被当成「T 日就可见」，从而在条件里偷看未来。
+ */
+export interface ObservationVariableDefinition {
+  readonly name: string;
+  readonly role: "OBSERVATION";
+  readonly label: string;
+  /** 精确口径（进结果 metadata / 报告）。 */
+  readonly definition: string;
+  readonly unit?: string;
+  /**
+   * 该值最早在**事件日后第几个交易日收盘**可观测（k ≥ 1）。
+   * 例：`obs_3d.close` → 3；`pullback_min_low_3d`（T+1..T+3 的累计最低价）→ 3。
+   */
+  readonly availableFromOffset: number;
+  /** 需要加载的 post 相对日（缺省 = 不需要 post，仅用基准）。 */
+  readonly postRelativeDays?: readonly number[];
+  /** 是否需要事件日 K 线（prefix rd=0）作为比较基准。 */
+  readonly needsEventBar?: boolean;
+  readonly resolve: (sources: ObservationSources) => number | null;
+}
 
 /** 价格相对量 → 收益率（防除零 + 非有限值；分母 ≤ 0 视为不可用）。 */
 function toReturn(numerator: number | null | undefined, denominator: number | null | undefined): number | null {
@@ -331,6 +398,329 @@ const FIXED_FEATURE_VARIABLES: readonly FeatureVariableDefinition[] = [
 export const FEATURE_VARIABLES: Readonly<Record<string, FeatureVariableDefinition>> = Object.freeze(
   Object.fromEntries(FIXED_FEATURE_VARIABLES.map((v) => [v.name, v])),
 );
+
+// ---------------------------------------------------------------------------
+// OBSERVATION 变量（观察日 T+k，k ≥ 1；只读 post + 事件日基准）
+// ---------------------------------------------------------------------------
+
+/**
+ * 观察日变量的**最大视界**（T+1..T+N）。
+ *
+ * 取值依据：`ds_*` 的 `post` 表相对日实测为 `[1, 20]`（471,816 行，每事件最多 20 日）。
+ * 本常量只用于**枚举目录**（逐日变量按 offset 1..N 展开）；真实可用性由
+ * 装配范围（观察窗口终点 / 数据集实际覆盖）决定，超界行缺失时 `resolve` 如实返回 `null`。
+ */
+export const OBSERVATION_MAX_OFFSET = 20;
+
+/** 相对量 → 比率（防除零；分母 ≤ 0 视为不可用）。与 `toReturn` 分开命名以明示语义。 */
+function toRatio(numerator: number | null | undefined, denominator: number | null | undefined): number | null {
+  if (numerator === null || numerator === undefined) return null;
+  if (denominator === null || denominator === undefined || !Number.isFinite(denominator) || denominator <= 0) return null;
+  const value = numerator / denominator;
+  return Number.isFinite(value) ? value : null;
+}
+
+/** 观察日 bar 取值（缺失 → null）。 */
+function postBarField(
+  s: ObservationSources,
+  offset: number,
+  field: "open" | "high" | "low" | "close" | "volume" | "amount",
+): number | null {
+  const bar = s.postBars.get(offset);
+  if (bar === undefined) return null;
+  const value = bar[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 观察日变量名模式：
+ *   - 逐日：`obs_{k}d.{field}`（field ∈ open/high/low/close/volume/amount/return_from_event_close/volume_ratio）
+ *   - 累积：`pullback_{stat}_{k}d`（stat ∈ min_low/max_high/close/close_ratio/min_volume/holds_event_low）
+ */
+const OBS_DAY_RE = /^obs_(\d+)d\.([a-z_]+)$/;
+const PULLBACK_STAT_RE = /^pullback_([a-z_]+)_(\d+)d$/;
+
+/** 逐日观察日变量支持的字段。 */
+const OBS_DAY_FIELDS = [
+  "open",
+  "high",
+  "low",
+  "close",
+  "volume",
+  "amount",
+  "return_from_event_close",
+  "volume_ratio",
+] as const;
+type ObsDayField = (typeof OBS_DAY_FIELDS)[number];
+
+/** 累积（回调期）观察日统计口径。 */
+export const PULLBACK_STATS = [
+  "min_low",
+  "max_high",
+  "close",
+  "close_ratio",
+  "min_volume",
+  "min_volume_ratio",
+  "last_volume_ratio",
+  "holds_event_low",
+  "last_is_bullish",
+] as const;
+export type PullbackStat = (typeof PULLBACK_STATS)[number];
+
+const PULLBACK_STAT_LABEL: Record<PullbackStat, string> = {
+  min_low: "回调期最低价",
+  max_high: "回调期最高价",
+  close: "回调期最新收盘",
+  close_ratio: "回调期收盘相对首板日收盘",
+  min_volume: "回调期最小成交量",
+  min_volume_ratio: "回调期最小量能比（相对首板日）",
+  last_volume_ratio: "回调末日量能比（相对首板日）",
+  holds_event_low: "回调期未破首板日最低价",
+  last_is_bullish: "回调末日为阳线（红盘）",
+};
+
+const PULLBACK_STAT_DEFINITION: Record<PullbackStat, string> = {
+  min_low: "min(post.low[T+1..T+k])：回调窗口内**累计**最低价。用于「生命线」判定（是否跌破首板日最低价）。",
+  max_high: "max(post.high[T+1..T+k])：回调窗口内**累计**最高价。",
+  close: "post.close[T+k]：回调窗口**最新一天**的收盘价。",
+  close_ratio: "post.close[T+k] / prefix(rd=0).close：回调期最新收盘相对首板日收盘的比率（<1 表示仍低于首板日收盘）。",
+  min_volume: "min(post.volume[T+1..T+k])：回调窗口内**累计**最小成交量（**绝对量，单位股**）。",
+  min_volume_ratio:
+    "min(post.volume[T+1..T+k]) / prefix(rd=0).volume：回调窗口内**累计**最小成交量相对首板日成交量的比率。"
+    + "这是「持续缩量」的**唯一可用于条件比较**的口径 ——"
+    + "`min_volume` 是绝对股数，与常量 0.5 比较恒为假，必须换算成比率才能表达「≤ 首板日 50% / 30%」。",
+  last_volume_ratio:
+    "post.volume[T+k] / prefix(rd=0).volume：回调**末日**当天的量能比。"
+    + "对应「企稳放量阳线」里的放量确认（>1 = 当日量超过首板日）。",
+  holds_event_low: "回调窗口内 min(post.low[T+1..T+k]) ≥ prefix(rd=0).low 时取 1，否则 0；缺数据为 null。"
+    + "**1 = 回调期内始终未破首板日最低价**（即策略的「生命线」守卫）。",
+  last_is_bullish: "post.close[T+k] > post.open[T+k] 时取 1，否则 0；缺任一分量为 null。"
+    + "**1 = 回调末日当日为阳线（收盘 > 开盘）** —— 即用户口径的「红盘」。"
+    + "⚠️ 与 `pullback_close_ratio_*`（收盘相对**首板日**收盘）**不是**同一件事："
+    + "本口径只看**当日** K 线实体方向，与首板日价格无关。",
+};
+
+/** 构造一个**逐日**观察日变量定义。 */
+function buildObsDayVariable(offset: number, field: ObsDayField): ObservationVariableDefinition {
+  const base = {
+    name: `obs_${offset}d.${field}` as const,
+    role: "OBSERVATION" as const,
+    availableFromOffset: offset,
+    postRelativeDays: [offset] as readonly number[],
+  };
+  switch (field) {
+    case "open":
+    case "high":
+    case "low":
+    case "close":
+    case "volume":
+    case "amount": {
+      const unit = field === "volume" ? "股" : field === "amount" ? "元" : "元";
+      const label = { open: "开盘价", high: "最高价", low: "最低价", close: "收盘价", volume: "成交量", amount: "成交额" }[field];
+      return {
+        ...base,
+        label: `T+${offset} 观察日${label}`,
+        definition: `post(rd=${offset}).${field}：事件日后第 ${offset} 个交易日的${label}（在 T+${offset} 收盘时点可观测）。`,
+        unit,
+        resolve: (s) => postBarField(s, offset, field),
+      };
+    }
+    case "return_from_event_close":
+      return {
+        ...base,
+        label: `T+${offset} 相对首板日收盘涨幅`,
+        definition: `post(rd=${offset}).close / prefix(rd=0).close − 1：第 ${offset} 个观察日收盘相对首板日收盘的涨跌幅。`,
+        unit: "比例",
+        needsEventBar: true,
+        resolve: (s) => toReturn(postBarField(s, offset, "close"), s.eventBar?.close),
+      };
+    case "volume_ratio":
+      return {
+        ...base,
+        label: `T+${offset} 相对首板日量能比`,
+        definition: `post(rd=${offset}).volume / prefix(rd=0).volume：第 ${offset} 个观察日成交量相对首板日成交量的比率（<1 = 缩量）。`,
+        needsEventBar: true,
+        resolve: (s) => toRatio(postBarField(s, offset, "volume"), s.eventBar?.volume),
+      };
+  }
+}
+
+/** 构造一个**累积**（回调期 T+1..T+k）观察日变量定义。 */
+function buildPullbackVariable(stat: PullbackStat, offset: number): ObservationVariableDefinition {
+  const days = dayWindow(1, offset);
+  const base = {
+    name: `pullback_${stat}_${offset}d` as const,
+    role: "OBSERVATION" as const,
+    availableFromOffset: offset,
+    postRelativeDays: days,
+  };
+  const needsEventBar =
+    stat === "close_ratio" || stat === "holds_event_low"
+    || stat === "min_volume_ratio" || stat === "last_volume_ratio";
+  const withBase = needsEventBar ? { ...base, needsEventBar: true as const } : base;
+
+  switch (stat) {
+    case "min_low":
+      return {
+        ...withBase,
+        label: `回调 T+1..T+${offset} 最低价`,
+        definition: PULLBACK_STAT_DEFINITION.min_low,
+        unit: "元",
+        resolve: (s) => {
+          const values = days.map((d) => postBarField(s, d, "low")).filter((v): v is number => v !== null);
+          return values.length === 0 ? null : Math.min(...values);
+        },
+      };
+    case "max_high":
+      return {
+        ...withBase,
+        label: `回调 T+1..T+${offset} 最高价`,
+        definition: PULLBACK_STAT_DEFINITION.max_high,
+        unit: "元",
+        resolve: (s) => {
+          const values = days.map((d) => postBarField(s, d, "high")).filter((v): v is number => v !== null);
+          return values.length === 0 ? null : Math.max(...values);
+        },
+      };
+    case "close":
+      return {
+        ...withBase,
+        label: `回调 T+${offset} 收盘价`,
+        definition: PULLBACK_STAT_DEFINITION.close,
+        unit: "元",
+        resolve: (s) => postBarField(s, offset, "close"),
+      };
+    case "close_ratio":
+      return {
+        ...withBase,
+        label: `回调 T+${offset} 收盘 / 首板日收盘`,
+        definition: PULLBACK_STAT_DEFINITION.close_ratio,
+        resolve: (s) => toRatio(postBarField(s, offset, "close"), s.eventBar?.close),
+      };
+    case "min_volume":
+      return {
+        ...withBase,
+        label: `回调 T+1..T+${offset} 最小成交量`,
+        definition: PULLBACK_STAT_DEFINITION.min_volume,
+        unit: "股",
+        resolve: (s) => {
+          const values = days.map((d) => postBarField(s, d, "volume")).filter((v): v is number => v !== null);
+          return values.length === 0 ? null : Math.min(...values);
+        },
+      };
+    case "min_volume_ratio":
+      return {
+        ...withBase,
+        label: `回调 T+1..T+${offset} 最小量能比`,
+        definition: PULLBACK_STAT_DEFINITION.min_volume_ratio,
+        unit: "比例",
+        resolve: (s) => {
+          const base = s.eventBar?.volume;
+          if (typeof base !== "number" || !Number.isFinite(base) || base <= 0) return null;
+          const values = days.map((d) => postBarField(s, d, "volume")).filter((v): v is number => v !== null);
+          if (values.length === 0) return null;
+          const ratio = Math.min(...values) / base;
+          return Number.isFinite(ratio) ? ratio : null;
+        },
+      };
+    case "last_volume_ratio":
+      return {
+        ...withBase,
+        label: `回调末日 T+${offset} 量能比`,
+        definition: PULLBACK_STAT_DEFINITION.last_volume_ratio,
+        unit: "比例",
+        resolve: (s) => toRatio(postBarField(s, offset, "volume"), s.eventBar?.volume),
+      };
+    case "holds_event_low":
+      return {
+        ...withBase,
+        label: `回调 T+1..T+${offset} 未破首板日最低价`,
+        definition: PULLBACK_STAT_DEFINITION.holds_event_low,
+        resolve: (s) => {
+          const floor = s.eventBar?.low;
+          if (typeof floor !== "number" || !Number.isFinite(floor)) return null;
+          const values = days.map((d) => postBarField(s, d, "low")).filter((v): v is number => v !== null);
+          if (values.length === 0) return null;
+          return Math.min(...values) >= floor - PRICE_EPS ? 1 : 0;
+        },
+      };
+    case "last_is_bullish":
+      return {
+        ...withBase,
+        label: `回调末日 T+${offset} 为阳线（红盘）`,
+        definition: PULLBACK_STAT_DEFINITION.last_is_bullish,
+        resolve: (s) => {
+          const close = postBarField(s, offset, "close");
+          const open = postBarField(s, offset, "open");
+          if (close === null || open === null) return null;
+          return close > open + PRICE_EPS ? 1 : 0;
+        },
+      };
+  }
+}
+
+/** 枚举全部观察日变量（逐日 + 累积）。 */
+function buildObservationVariables(maxOffset: number = OBSERVATION_MAX_OFFSET): ObservationVariableDefinition[] {
+  const out: ObservationVariableDefinition[] = [];
+  const upper = Math.max(1, Math.floor(maxOffset));
+  for (let k = 1; k <= upper; k += 1) {
+    for (const field of OBS_DAY_FIELDS) out.push(buildObsDayVariable(k, field));
+    for (const stat of PULLBACK_STATS) out.push(buildPullbackVariable(stat, k));
+  }
+  return out;
+}
+
+/**
+ * 观察日变量表的**类型常量**（静态、可枚举，供前端下拉与文档展示）。
+ *
+ * ⚠️ 与 `buildOutcomeVariables` 不同，观察日变量是**有限且可枚举**的：
+ * 逐日 8 字段 + 累积 9 口径，共 17 个/offset；offset 上限由 `OBSERVATION_MAX_OFFSET` 决定
+ * （默认 20 ⇒ 340 个名字）。这不会让目录变成噪音源，但也因此**必须**在装配层按窗口裁剪。
+ */
+export function buildObservationVariableList(maxOffset: number = OBSERVATION_MAX_OFFSET): ObservationVariableDefinition[] {
+  return buildObservationVariables(maxOffset);
+}
+
+/** 解析观察日变量名（逐日或累积）；不匹配返回 null。 */
+export function parseObservationVariableName(
+  name: string,
+): { kind: "day"; offset: number; field: ObsDayField } | { kind: "pullback"; stat: PullbackStat; offset: number } | null {
+  const day = OBS_DAY_RE.exec(name);
+  if (day !== null) {
+    const offset = Number(day[1]);
+    const field = day[2] as ObsDayField;
+    if (!Number.isInteger(offset) || offset < 1) return null;
+    if (!(OBS_DAY_FIELDS as readonly string[]).includes(field)) return null;
+    return { kind: "day", offset, field };
+  }
+  const pb = PULLBACK_STAT_RE.exec(name);
+  if (pb !== null) {
+    const stat = pb[1] as PullbackStat;
+    const offset = Number(pb[2]);
+    if (!Number.isInteger(offset) || offset < 1) return null;
+    if (!(PULLBACK_STATS as readonly string[]).includes(stat)) return null;
+    return { kind: "pullback", stat, offset };
+  }
+  return null;
+}
+
+/** 按名字构造一个观察日变量定义（用于按需解析，不依赖静态枚举）。 */
+export function buildObservationVariableDefinition(name: string): ObservationVariableDefinition | null {
+  const parsed = parseObservationVariableName(name);
+  if (parsed === null) return null;
+  if (parsed.kind === "day") return buildObsDayVariable(parsed.offset, parsed.field);
+  return buildPullbackVariable(parsed.stat, parsed.offset);
+}
+
+/** 观察日变量的稳定排序键（供目录稳定输出与前端分组）。 */
+export function observationVariableSortKey(name: string): string {
+  const parsed = parseObservationVariableName(name);
+  if (parsed === null) return name;
+  const kindRank = parsed.kind === "day" ? "0" : "1";
+  const offset = String(parsed.offset).padStart(3, "0");
+  const tail = parsed.kind === "day" ? parsed.field : parsed.stat;
+  return `${kindRank}-${offset}-${tail}`;
+}
 
 // ---------------------------------------------------------------------------
 // OUTCOME 变量（> T；只读 path + outcome）
@@ -829,11 +1219,19 @@ export class ResearchVariableCatalog {
    */
   readonly segmentRange: { readonly min: number; readonly max: number } | null;
 
+  /**
+   * 观察日可用的相对日范围（`post.relativeDay` 的真实取值包围盒）。
+   * `null` = 该 Dataset Version 没有任何 post 数据 ⇒ **一切观察日变量都不可用**（不虚构）。
+   */
+  readonly postRange: { readonly min: number; readonly max: number } | null;
+
   constructor(
     /** outcome.horizon 的真实取值（升序）。 */
     readonly outcomeHorizons: readonly number[],
     /** path.relativeDay 的真实可用视界（升序）；缺省 = 无 path 数据。 */
     readonly pathHorizons: readonly number[],
+    /** post.relativeDay 的真实可用视界（升序）；缺省 = 无 post 数据（观察日变量全部不可用）。 */
+    postHorizons: readonly number[] = [],
   ) {
     this.outcomes = new Map(buildOutcomeVariables(pathHorizons, outcomeHorizons).map((v) => [v.name, v]));
     const usable = [...pathHorizons]
@@ -842,6 +1240,12 @@ export class ResearchVariableCatalog {
     // 需要至少两个相对日才可能构成一个 `from < to` 的窗。
     this.segmentRange =
       usable.length >= 2 ? { min: usable[0]!, max: usable[usable.length - 1]! } : null;
+
+    const postUsable = [...postHorizons]
+      .filter((d) => Number.isInteger(d) && d >= 1)
+      .sort((a, b) => a - b);
+    this.postRange =
+      postUsable.length >= 1 ? { min: postUsable[0]!, max: postUsable[postUsable.length - 1]! } : null;
   }
 
   /**
@@ -863,6 +1267,82 @@ export class ResearchVariableCatalog {
   /** 是否已知特征变量。 */
   hasFeature(name: string): boolean {
     return Object.prototype.hasOwnProperty.call(FEATURE_VARIABLES, name);
+  }
+
+  /**
+   * 是否已知**观察日**变量（`obs_{k}d.*` / `pullback_*_{k}d`）。
+   *
+   * 判据 = 名字可解析 **且** offset 不超过本数据集的真实 post 视界上限
+   * （`observationMaxOffset`）。上界来自 `post.relativeDay` 的实际覆盖，
+   * 而不是写死的 20 —— 数据集换成只有 T+1..T+5 的版本时，`obs_9d.close` 必须不可用。
+   */
+  hasObservation(name: string): boolean {
+    const parsed = parseObservationVariableName(name);
+    if (parsed === null) return false;
+    return parsed.offset >= 1 && parsed.offset <= this.observationMaxOffset;
+  }
+
+  /** 该数据集可用的观察日最大 offset（0 = 无 post 数据 ⇒ 一切观察日变量不可用）。 */
+  get observationMaxOffset(): number {
+    return this.postRange === null ? 0 : this.postRange.max;
+  }
+
+  /**
+   * 观察日变量的 `availableFromOffset`（= T+k 的 k）。未登记 / 非观察日变量返回 `null`。
+   *
+   * 供 Engine 做条件求值期的 PIT 校验：「在 T+k 做判断时，不得引用 > k 的观察日变量」。
+   */
+  observationOffsetOf(name: string): number | null {
+    const parsed = parseObservationVariableName(name);
+    if (parsed === null) return null;
+    return this.hasObservation(name) ? parsed.offset : null;
+  }
+
+  /** 全部观察日变量名（稳定排序；逐日在前、按 offset 升序）。 */
+  listObservations(): string[] {
+    const max = this.observationMaxOffset;
+    if (max <= 0) return [];
+    return buildObservationVariables(max)
+      .map((v) => v.name)
+      .sort((a, b) => observationVariableSortKey(a).localeCompare(observationVariableSortKey(b)));
+  }
+
+  /**
+   * 解析一个**观察日**变量名。
+   *
+   * 三条具名拒绝（都**不**静默返回 null）：
+   *   - 名字属于特征 / 结果 → `VARIABLE_ROLE_VIOLATION`（角色用反，可能是 PIT 意图错误）；
+   *   - offset 超出该数据集 post 视界 → `UNKNOWN_VARIABLE`（该天根本没有数据）；
+   *   - 名字格式不认识 → `UNKNOWN_VARIABLE`。
+   */
+  resolveObservation(name: string): ObservationVariableDefinition {
+    const parsed = parseObservationVariableName(name);
+    if (parsed !== null) {
+      engineAssert(
+        this.hasObservation(name),
+        "UNKNOWN_VARIABLE",
+        this.postRange === null
+          ? `观察日变量 "${name}" 不可用：该 Dataset Version 没有任何 post（观察日）数据`
+          : `观察日变量 "${name}" 的 offset=${parsed.offset} 超出该 Dataset 的真实 post 视界`
+            + `（可用 1..${this.postRange.max}）`,
+        { variable: name, role: "OBSERVATION", postRange: this.postRange },
+      );
+      const def = buildObservationVariableDefinition(name);
+      engineAssert(def !== null, "UNKNOWN_VARIABLE", `无法构造观察日变量 "${name}"`, { variable: name });
+      return def;
+    }
+    engineAssert(
+      !this.hasFeature(name) && !this.hasOutcome(name),
+      "VARIABLE_ROLE_VIOLATION",
+      `变量 "${name}" 不是观察日变量（它是 ${this.hasFeature(name) ? "FEATURE" : "OUTCOME"}），`
+        + `禁止当作观察日（OBSERVATION）使用`,
+      { variable: name, role: "OBSERVATION" },
+    );
+    engineAssert(false, "UNKNOWN_VARIABLE", `未登记的观察日变量："${name}"`, {
+      variable: name,
+      role: "OBSERVATION",
+      knownSample: this.listObservations().slice(0, 20),
+    });
   }
 
   /** 是否已知结果变量（含**按需构造**的分段变量）。 */
@@ -902,6 +1382,13 @@ export class ResearchVariableCatalog {
       `变量 "${name}" 是未来结果（OUTCOME），禁止作为 PIT 安全特征（FEATURE）使用`,
       { variable: name, role: "FEATURE" },
     );
+    engineAssert(
+      !this.hasObservation(name),
+      "VARIABLE_ROLE_VIOLATION",
+      `变量 "${name}" 是观察日变量（OBSERVATION，T+k 时点可观测），`
+        + `禁止当作 PIT 安全特征（FEATURE）使用 —— 特征只能读 T 及之前`,
+      { variable: name, role: "FEATURE" },
+    );
     engineAssert(false, "UNKNOWN_VARIABLE", `未登记的特征变量："${name}"`, {
       variable: name,
       role: "FEATURE",
@@ -935,6 +1422,14 @@ export class ResearchVariableCatalog {
       `变量 "${name}" 是 PIT 安全特征（FEATURE），不能当作未来结果（OUTCOME）使用`,
       { variable: name, role: "OUTCOME" },
     );
+    engineAssert(
+      !this.hasObservation(name),
+      "VARIABLE_ROLE_VIOLATION",
+      `变量 "${name}" 是观察日变量（OBSERVATION，T+k 时点**可观测**），`
+        + `不能当作未来结果（OUTCOME，事后标签）使用 —— 二者语义不同：观察日变量可在 T+k 当天做条件，`
+        + `结果变量只能做事后评价`,
+      { variable: name, role: "OUTCOME" },
+    );
     engineAssert(false, "UNKNOWN_VARIABLE", `未登记的结果变量："${name}"`, {
       variable: name,
       role: "OUTCOME",
@@ -951,6 +1446,48 @@ export function assertFeatureVariableName(catalog: ResearchVariableCatalog, name
 /** 断言「该名字只能当结果用」。 */
 export function assertOutcomeVariableName(catalog: ResearchVariableCatalog, name: string): void {
   catalog.resolveOutcome(name);
+}
+
+/** 断言「该名字只能当观察日变量用」（供 Analysis 配置校验）。 */
+export function assertObservationVariableName(catalog: ResearchVariableCatalog, name: string): void {
+  catalog.resolveObservation(name);
+}
+
+/**
+ * 观察日条件的 PIT 护栏 —— **「在 T+evaluationOffset 做判断时，不得引用 > evaluationOffset 的观察日」**。
+ *
+ * 这是整个 OBSERVATION 角色存在的**唯一防线**。没有它，「用 T+5 的形态筛出 T+3 该买的样本」
+ * 会静默产生一组漂亮但不可交易的数字：每个样本在纸面上都满足条件，实盘那天却看不到这个条件。
+ *
+ * 语义（刻意保守）：
+ *   - `evaluationOffset` = 由调用方给出的「这个条件组最早能在第几个交易日收盘判定」；
+ *   - 引用 `availableFromOffset ≤ evaluationOffset` 的观察日变量 → 合法（当时已可见）；
+ *   - 引用 `availableFromOffset > evaluationOffset` → `VARIABLE_ROLE_VIOLATION`（未来信息）；
+ *   - 特征 / 结果 / 维度变量**不受本护栏约束**（它们各有自己的 PIT 规则：
+ *     特征是 ≤T 天然安全；结果当条件已由 `requiredVariables` 显式登记，属用户主动选择）。
+ *
+ * 返回参与判定的观察日变量及其 offset，供上层写入追溯信息（**不静默通过**）。
+ */
+export function assertObservationConditionsPitSafe(args: {
+  catalog: ResearchVariableCatalog;
+  fields: readonly string[];
+  evaluationOffset: number;
+}): Array<{ variable: string; availableFromOffset: number }> {
+  const { catalog, fields, evaluationOffset } = args;
+  const used: Array<{ variable: string; availableFromOffset: number }> = [];
+  for (const field of fields) {
+    const offset = catalog.observationOffsetOf(field);
+    if (offset === null) continue;
+    engineAssert(
+      offset <= evaluationOffset,
+      "VARIABLE_ROLE_VIOLATION",
+      `观察日变量 "${field}" 要等到事件后第 ${offset} 个交易日收盘才可见，`
+        + `但该条件组最早在第 ${evaluationOffset} 个交易日判定 —— 用未来信息当条件是 PIT 违规`,
+      { variable: field, role: "OBSERVATION", availableFromOffset: offset, evaluationOffset },
+    );
+    used.push({ variable: field, availableFromOffset: offset });
+  }
+  return used;
 }
 
 // ---------------------------------------------------------------------------

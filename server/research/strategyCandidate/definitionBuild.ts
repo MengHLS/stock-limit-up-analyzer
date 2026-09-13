@@ -56,6 +56,8 @@ import {
   type StrategySignalTiming,
   type StrategyWindowUnit,
 } from "../strategySchema/definition";
+import type { StrategyRecipe } from "../strategySchema/types";
+import type { ResearchParameterValue } from "../types";
 import { validateCanonicalStrategyDefinition } from "../strategySchema/definitionValidation";
 import { STRATEGY_CANDIDATE_ERROR, StrategyCandidateError } from "./candidateTypes";
 
@@ -75,6 +77,18 @@ export const CANDIDATE_SKETCH_EXTENSION_KEYS = [
   "position",
   "risk",
   "document",
+  /**
+   * 🔴 2026-09-13 新增：**执行配方引用**（`StrategyRecipe` 的可序列化面）。
+   *
+   * 为什么必须开这个槽：策略文档的 `recipe` 是「可序列化面 → 真实可执行实例」的唯一钥匙
+   * （见 `recipeRegistry.ts`）。缺它时装配层只能落到 `DEFAULT_STRATEGY_RECIPE_ID`
+   * （= 「按涨跌幅取前 5 名」），于是**声明「守线 + 缩量」的策略在回测里跑的是别的东西** ——
+   * 这正是 `docs/evidence/_probe_promoted_entry_conditions.mts` 取证的断点。
+   *
+   * ⇒ 候选草稿必须能声明「我该用哪个配方跑」。否则 promote 出来的文档永远缺 `recipe`，
+   *   条件就永远进不了回测。
+   */
+  "recipe",
 ] as const;
 export type CandidateSketchExtensionKey = (typeof CANDIDATE_SKETCH_EXTENSION_KEYS)[number];
 
@@ -370,6 +384,46 @@ function buildParameters(parameterSpace: unknown): ParameterDefinition[] {
       );
     }
 
+    /**
+     * 🔴 **`defaultValue` 是执行层的必需输入，不是装饰**（2026-09-13 新增）：
+     * 运行工作台装配时 `StrategyRecipeRuntime.resolveParameters(schema)` 取**每个参数的
+     * `defaultValue`** 作为本次运行的参数集；缺 `defaultValue` ⇒ 抛 `RECIPE_PARAMETER_NO_DEFAULT`。
+     * 此前本函数**不透传** `defaultValue`（草稿写了也被静默丢弃）⇒ 带门槛参数的配方
+     * （如「守线 + 缩量 ≤ X%」）转正后**一定会运行失败**。
+     *
+     * 这里做**类型与范围**校验后原样透传（**不替草稿补默认值** —— 缺失仍然缺失，
+     * 由 `resolveParameters` 在运行时响亮失败，而不是在这里编一个值）。
+     */
+    let defaultValue: ResearchParameterValue | undefined;
+    if (spec.defaultValue !== undefined && spec.defaultValue !== null) {
+      if (dataType === "number") {
+        defaultValue = requireFiniteNumber(spec.defaultValue, `${path}.defaultValue`);
+      } else if (dataType === "boolean") {
+        if (typeof spec.defaultValue !== "boolean") {
+          invalid(`${path}.defaultValue`, `boolean 参数的默认值必须是布尔值，实际：${typeof spec.defaultValue}`);
+        }
+        defaultValue = spec.defaultValue;
+      } else {
+        if (typeof spec.defaultValue !== "string") {
+          invalid(`${path}.defaultValue`, `string 参数的默认值必须是字符串，实际：${typeof spec.defaultValue}`);
+        }
+        defaultValue = spec.defaultValue;
+      }
+      const min = spec.min === undefined ? undefined : requireFiniteNumber(spec.min, `${path}.min`);
+      const max = spec.max === undefined ? undefined : requireFiniteNumber(spec.max, `${path}.max`);
+      if (typeof defaultValue === "number") {
+        if (min !== undefined && defaultValue < min) {
+          invalid(`${path}.defaultValue`, `默认值 ${defaultValue} 小于 min ${min}`);
+        }
+        if (max !== undefined && defaultValue > max) {
+          invalid(`${path}.defaultValue`, `默认值 ${defaultValue} 大于 max ${max}`);
+        }
+      }
+      if (allowedValues !== undefined && typeof defaultValue === "string" && !allowedValues.includes(defaultValue)) {
+        invalid(`${path}.defaultValue`, `默认值 ${JSON.stringify(defaultValue)} 不在 allowedValues 内`);
+      }
+    }
+
     definitions.push({
       code,
       name: code,
@@ -383,6 +437,7 @@ function buildParameters(parameterSpace: unknown): ParameterDefinition[] {
       ...(spec.max === undefined ? {} : { max: requireFiniteNumber(spec.max, `${path}.max`) }),
       ...(spec.step === undefined ? {} : { step: requireFiniteNumber(spec.step, `${path}.step`) }),
       ...(allowedValues === undefined ? {} : { allowedValues }),
+      ...(defaultValue === undefined ? {} : { defaultValue }),
       required: false,
       description: `由候选草稿 parameterSpace.${code} 声明（待 Parameter Search 搜索）`,
     });
@@ -769,6 +824,89 @@ export function deriveUniverseIdForDataset(executionDatasetLabel: string): strin
 /** 由候选 id 派生策略身份（确定性；见 006.3 实施报告「为何不按 name 派生」）。 */
 export function deriveStrategyId(candidateId: number): string {
   return `cand-${candidateId}`;
+}
+
+/**
+ * 由候选草稿解出 **`StrategyRecipe`**（可序列化执行配方引用）。
+ *
+ * 🔴 为什么需要这一步（2026-09-13）：`recipe` 是策略文档里唯一能让装配层解析到**真实可执行
+ * 实例**的钥匙。缺 `recipe` 时 `requireRecipe()` 只能落到 `DEFAULT_STRATEGY_RECIPE_ID`
+ * （=「按涨跌幅取前 5 名」）⇒ **声明「守线 + 缩量」的策略在回测里跑的是别的东西**。
+ *
+ * 与 `buildExecutionAssumptions` 同性质：纯函数、从草稿读、缺什么就**响亮失败**（不猜）。
+ * 放在 `entryRule.extra.recipe`（候选草稿唯一的具名扩展槽）。
+ *
+ * 返回 `undefined` 表示草稿**未声明**配方。此时不报错 —— 既有候选（如 #270001）本就没有该槽，
+ * 强制要求会让它们无法重新 promote。但调用方（`promote`）必须把「未声明配方」这一事实
+ * 如实写进 provenance / 版本记录，且**装配层会在缺 recipe 时用默认配方**（口径漂移风险
+ * 由 `assembly.recipeSource` 显式暴露，不静默）。
+ */
+export function buildStrategyRecipe(candidate: ResearchStrategyCandidate): StrategyRecipe | undefined {
+  const entryRule = requireRecord(candidate.entryRule, "entryRule");
+  const extra = optionalRecord(entryRule.extra, "entryRule.extra") ?? {};
+  const raw = optionalRecord(extra.recipe, "entryRule.extra.recipe");
+  if (raw === undefined) return undefined;
+
+  const kind = requireEnum(raw.kind, ["signalEngine"] as const, "entryRule.extra.recipe.kind");
+  const recipeId = requireNonEmptyString(raw.recipeId, "entryRule.extra.recipe.recipeId");
+  const point = requireEnum(raw.point, ["open", "close"] as const, "entryRule.extra.recipe.point");
+  const signalFrequency = requireEnum(
+    raw.signalFrequency,
+    ["daily", "weekly", "intraday"] as const,
+    "entryRule.extra.recipe.signalFrequency",
+  );
+
+  const featureVersionsRaw = raw.featureVersions;
+  if (!Array.isArray(featureVersionsRaw)) {
+    incomplete("entryRule.extra.recipe.featureVersions", "必须是数组（featureId → version）");
+  }
+  const featureVersions = (featureVersionsRaw as unknown[]).map((item, index) => {
+    const path = `entryRule.extra.recipe.featureVersions[${index}]`;
+    const record = asRecord(item, path);
+    return {
+      featureId: requireNonEmptyString(record.featureId, `${path}.featureId`),
+      version: requireNonEmptyString(record.version, `${path}.version`),
+    };
+  });
+
+  const requiredDataRaw = raw.requiredData;
+  if (!Array.isArray(requiredDataRaw)) {
+    incomplete("entryRule.extra.recipe.requiredData", "必须是字符串数组（数据域，如 OHLCV）");
+  }
+  const requiredData = (requiredDataRaw as unknown[]).map((item, index) =>
+    requireNonEmptyString(item, `entryRule.extra.recipe.requiredData[${index}]`),
+  );
+
+  const rankingConfig = requireRecord(raw.rankingConfig, "entryRule.extra.recipe.rankingConfig");
+  const higherIsBetter = rankingConfig.higherIsBetter;
+  if (typeof higherIsBetter !== "boolean") {
+    invalid("entryRule.extra.recipe.rankingConfig.higherIsBetter", "必须是布尔值");
+  }
+
+  const selectionConfig = requireRecord(raw.selectionConfig, "entryRule.extra.recipe.selectionConfig");
+  const method = requireRecord(selectionConfig.method, "entryRule.extra.recipe.selectionConfig.method");
+  const methodKind = requireEnum(
+    method.kind,
+    ["topN", "topPercentile"] as const,
+    "entryRule.extra.recipe.selectionConfig.method.kind",
+  );
+  const resolvedMethod = methodKind === "topN"
+    ? { kind: "topN" as const, n: requireFiniteNumber(method.n, "entryRule.extra.recipe.selectionConfig.method.n") }
+    : { kind: "topPercentile" as const, pct: requireFiniteNumber(method.pct, "entryRule.extra.recipe.selectionConfig.method.pct") };
+
+  return {
+    kind,
+    recipeId,
+    point,
+    signalFrequency,
+    ...(typeof raw.signalDescription === "string" && raw.signalDescription.trim() !== ""
+      ? { signalDescription: raw.signalDescription.trim() }
+      : {}),
+    featureVersions,
+    rankingConfig: { higherIsBetter },
+    selectionConfig: { method: resolvedMethod },
+    requiredData,
+  };
 }
 
 /** promote 产出的首个版本号（006.0 §11.3：缺省 `1.0.0`）。 */

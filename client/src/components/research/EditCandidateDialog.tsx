@@ -97,9 +97,7 @@ export function EditCandidateDialog({
           <DialogHeader>
             <DialogTitle>编辑候选草图</DialogTitle>
             <DialogDescription>
-              只允许修改研究草图字段。状态、来源实验 / 结论、来源 Dataset 与证据快照不可经此修改
-              —— 它们分别由状态流转与转正入口写入。草图是**结构化**的：枚举项即后端词表，
-              转正不认识的取值不会出现在选项里。
+              只改研究草图；状态与来源快照由状态流转 / 转正入口写入。选项即后端词表，不支持的取值不会出现。
             </DialogDescription>
           </DialogHeader>
 
@@ -123,7 +121,6 @@ export function EditCandidateDialog({
               />
               <p className="text-[11px] text-muted-foreground">清空 = 提交 null（显式清空，不是「未填写」）。</p>
             </div>
-
             {blockingErrors.length > 0 && (
               <ul className="list-disc space-y-0.5 rounded-md border border-red-200 bg-red-50 px-3 py-2 pl-7 text-xs text-red-700">
                 {blockingErrors.map((error) => (
@@ -137,7 +134,7 @@ export function EditCandidateDialog({
             {sketchValidation.gaps.length === 0 && sketchValidation.errors.length === 0 && (
               <p className="flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900">
                 <CheckCircle2 className="h-3 w-3" />
-                转正所需的必填项看起来都齐了（最终仍由后端逐字段校验；这里只做提示）。
+                转正所需的必填项看起来都齐了（最终仍由后端逐字段校验）。
               </p>
             )}
           </div>

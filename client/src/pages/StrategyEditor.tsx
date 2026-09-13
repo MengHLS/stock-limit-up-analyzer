@@ -10,7 +10,10 @@
  * - **不重算任何量化判定**：validate / bump / compare / lifecycle 全部来自后端纯函数端点，
  *   页面只做只读展示与结构化编辑，不复制 schema、不重算 fingerprint / chain hash；
  * - **后端为权威**：编辑结果经 `viewModelToStrategy` 序列化后交后端校验；
- * - **不伪造**：「保存 / 保存新版本 / 运行」端点后端尚未暴露 → 禁用态 + tooltip。
+ * - **不伪造**：端点**已全部真实接线** —— 保存/保存新版本 → `research.strategy.save|createVersion`
+ *   （真实持久化）、运行 → `researchRun.loopRun`（闭环编排器）。此前「后端尚未暴露 → 禁用态」
+ *   的说法已过期，2026-09-13 一并订正；顶部 `StrategyHeader` 那个硬编码禁用的「运行」按钮已删除，
+ *   运行入口唯一收敛到「运行工作台」页签。
  */
 
 import {
@@ -952,6 +955,32 @@ function LifecycleTab({
 // Tab 4 · 运行工作台（FE-4：真实接线 researchRun.loopRun）
 // ---------------------------------------------------------------------------
 
+/**
+ * 把后端返回的错误文本转成人话（🔴 2026-09-13）。
+ *
+ * 起因：`loopRun` 的入参校验失败时，tRPC 会把 zod 的 issue 数组 **原样 JSON 序列化**成
+ * 一条多行消息（形如 `[\n {\n "origin": "string", ... "message": "startDate 必填" } ]`）。
+ * 用户看到的就是这坨东西 —— 它既不说明「哪一步没做」，也不说明「下一步该干嘛」。
+ *
+ * 这里**只做展示层归纳**：不改错误语义、不掩盖失败、原文仍完整保留在控制台。
+ */
+function humanizeRunError(message: string): string {
+  // zod issue 数组（含中文 message）→ 抽取全部 message 字段
+  if (message.trimStart().startsWith("[")) {
+    const messages = [...message.matchAll(/"message"\s*:\s*"([^"]+)"/g)].map(
+      m => m[1]
+    );
+    if (messages.length > 0) {
+      return `入参校验未通过（${messages.length} 项）：${messages.join("；")}。请在「回测配置」中补齐后重试。`;
+    }
+  }
+  if (message.includes("超出数据集窗口")) return message;
+  if (message.includes("experimentId")) {
+    return `${message}（这是运行标识格式问题，通常刷新页面后重试即可；若重复出现请反馈。）`;
+  }
+  return message;
+}
+
 function RunWorkbenchTab({ vm }: { vm: StrategyViewModel }) {
   // 未发起运行 / 运行失败 → 空态（沿用既有结构预留面板；此处是唯一的 emptyRunResult 用途）
   const [runResult, setRunResult] = useState<ClosedLoopRunViewModel | null>(null);
@@ -976,7 +1005,7 @@ function RunWorkbenchTab({ vm }: { vm: StrategyViewModel }) {
       setRunResult(parsed);
     },
     onError: e => {
-      setRunError(e.message);
+      setRunError(humanizeRunError(e.message));
       setRunResult(null);
     },
   });
@@ -993,6 +1022,19 @@ function RunWorkbenchTab({ vm }: { vm: StrategyViewModel }) {
       strategyVersion: vm.version,
       dateRange: { startDate: config.startDate, endDate: config.endDate },
       executionModel: config.executionModel,
+      // 「加载真实数据」开关：打开后由服务端真实构建 ResearchDataset、真实读策略文档、
+      // 按配方装配五阶段入参（data / research / strategy / backtest / evaluation）。
+      // 关闭时行为与既有完全一致（只透传显式入参 → 入参缺失的阶段如实 BLOCKED）。
+      ...(config.useRealData
+        ? {
+            useRealData: true as const,
+            // 数据集护栏：先小步验证链路，再放大窗口。
+            datasetGuards: config.dataReady
+              ? { dataReady: true as const }
+              : {},
+            ...(config.recipeId ? { recipeId: config.recipeId } : {}),
+          }
+        : {}),
     });
   };
 

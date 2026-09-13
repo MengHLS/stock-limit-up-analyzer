@@ -992,55 +992,70 @@ export type SketchBlockKey = keyof typeof SKETCH_BLOCK_LABELS;
  * 界面段。**按人下单时的思路排序**，而不是按后端字段名排序。
  *
  * 为什么要有这一层：后端只有 5 个 `*Json` 列 —— 那是**存储**边界，不是给人看的目录。
- * 人想的是「买什么 → 什么价买 → 怎么卖 → 买多少 → 成本」。直接拿列名当标题，
+ * 人想的是「买什么 → 什么条件买 → 什么时候买 → 怎么卖 → 买多少 → 成本」。直接拿列名当标题，
  * 用户面对的就是一堆 `entryRule.extra.position.maxExposure` 级别的选择。
  *
  * 🔴 段**不是**第二套存储语义：它只是 5 块草图上的一个视图，写入仍然只落那 5 列。
- *    特别注意 `entryRule` 一块同时承载 ①②④⑤ 四段（事件 / 窗口与时点 / 仓位执行 / 文档成本），
+ *    特别注意 `entryRule` 一块同时承载 ①②③⑤⑥ 五段（事件 / 时点窗口 / 仓位执行 / 文档成本），
  *    所以「某一块变成只读」会同时影响多段。
+ *
+ * ## 为什么 ② 要拆成两段（2026-09-13）
+ *
+ * 原先 `when`（什么价买）一段同时装两件**性质相反**的事：
+ *   - 「什么条件买」（`filterRule`，**可留空** —— 空 = 出现事件就买）；
+ *   - 「什么时候买」（`entryRule` 的 timing / observationWindow / trigger，**三项全必填**）。
+ *
+ * 后果可复现：用户在②段填完了看得见的条件，以为这段齐了，而三项必填被压在长 hint 下面；
+ * 段徽标停在「还差 N 项」却看不出差谁 —— 这正是「什么价买永远还差一箱校验」的结构性原因。
+ * 拆开后每段只回答一个问题：`condition` 段可空、`when` 段 4 项必填。
  */
 export const SKETCH_SEGMENTS = [
   {
     key: "what",
     title: "买什么",
-    hint: "先定「什么样的机会值得看」。事件类型是转正必填。",
+    hint: "观察哪一类事件。",
     blocks: ["entryRule"],
     initBlocks: ["entryRule"],
   },
   {
+    key: "condition",
+    title: "什么条件买",
+    hint: "可留空；留空 = 出现事件就买。",
+    blocks: ["filterRule"],
+    initBlocks: [],
+  },
+  {
     key: "when",
-    title: "什么价买",
-    hint:
-      "「什么条件买」+「什么时候买」两件事："
-      + "买入条件决定「哪一天算满足」，入场时点 / 观察窗口 / 触发时点决定「满足之后在哪根 bar 成交」。",
-    blocks: ["entryRule", "filterRule"],
+    title: "什么时候买",
+    hint: "信号哪天出、在哪根 bar 成交。三项都必填。",
+    blocks: ["entryRule"],
     initBlocks: ["entryRule"],
   },
   {
     key: "exit",
     title: "怎么卖",
-    hint: "止损 / 止盈 / 持有交易日数；三者都可留空（留空 = 持有到回测期末）",
+    hint: "可留空；留空 = 持有到回测期末。",
     blocks: ["exitRule"],
     initBlocks: ["exitRule"],
   },
   {
     key: "sizing",
     title: "买多少 · 最多持几只",
-    hint: "仓位方式、下单口径、每手股数与最大同时持仓数",
+    hint: "仓位与下单口径。三项必填。",
     blocks: ["entryRule", "riskRule"],
     initBlocks: ["entryRule", "riskRule"],
   },
   {
     key: "cost",
     title: "成本与资金",
-    hint: "初始资金与六项成本费率；可用「A 股标准」一键套用",
+    hint: "初始资金与六项费率，可用一键预设。",
     blocks: ["entryRule"],
     initBlocks: ["entryRule"],
   },
   {
     key: "parameters",
     title: "参数搜索空间",
-    hint: "留给后续参数搜索的取值域（可选；不填就不做参数搜索）",
+    hint: "可选；不填就不做参数搜索。",
     blocks: ["parameterSpace"],
     initBlocks: ["parameterSpace"],
   },
@@ -1069,6 +1084,7 @@ export function sketchSegmentTitle(segment: SketchSegmentKey): string {
  */
 export const SKETCH_SEGMENT_REQUIRED: Record<SketchSegmentKey, boolean> = {
   what: true,
+  condition: false,
   when: true,
   exit: false,
   sizing: true,
@@ -1089,13 +1105,13 @@ export function sketchSegmentInitBlocks(segment: SketchSegmentKey): readonly Ske
 /**
  * 块 → 它**首次**出现的段（只读块的原始内容挂在这里显示一次，不重复四遍）。
  *
- * ⚠️ `filterRule` 的归属段是 **`when`（什么价买）** 而不是 `what`（买什么）——
- * 因为它表达的是「满足什么条件才买」，与「观察哪类事件」不是一件事。
- * 这个归属同时决定只读时原始 JSON 挂在哪一段。
+ * ⚠️ `filterRule` 的归属段是 **`condition`（什么条件买）**，不是 `what`（买什么）、
+ * 也不是 `when`（什么时候买）：它表达的是「满足什么条件才买」，与
+ * 「观察哪类事件」「信号哪天出」都是不同的问题。这个归属同时决定只读时原始 JSON 挂在哪一段。
  */
 export const SKETCH_BLOCK_HOME_SEGMENT: Record<SketchBlockKey, SketchSegmentKey> = {
   entryRule: "what",
-  filterRule: "when",
+  filterRule: "condition",
   exitRule: "exit",
   riskRule: "sizing",
   parameterSpace: "parameters",
@@ -1195,9 +1211,20 @@ function summarizeWhat(drafts: CandidateSketchDrafts): string {
   } else if (entry.kind === "raw") {
     parts.push("入场规则（只读）");
   }
-  // ⚠️ 条件**不在这里**：`filterRule` 表达的是「买入条件（满足才买）」，归属「什么价买」段。
-  //    第 ① 段（买什么）只讲「观察哪一类事件」，这样两段的折叠摘要各自回答一个问题。
+  // ⚠️ 条件**不在这里**：`filterRule` 表达的是「买入条件（满足才买）」，归属 `condition` 段。
+  //    第 ① 段（买什么）只讲「观察哪一类事件」，这样各段的折叠摘要各自回答一个问题。
   return joinSummary(parts);
+}
+
+/** ② 什么条件买 —— 只有一件事：条件组（可空）。 */
+function summarizeCondition(drafts: CandidateSketchDrafts): string {
+  const filter = drafts.filterRule;
+  if (filter.kind === "structured") {
+    const text = describeFilterGroups(filter.draft);
+    return text === "" ? "" : text;
+  }
+  if (filter.kind === "raw") return "买入条件（只读）";
+  return "";
 }
 
 /**
@@ -1246,19 +1273,11 @@ export function conditionsUseNonConjunction(groups: readonly ConditionGroupDraft
   );
 }
 
+/** ③ 什么时候买 —— 只有 entryRule 的时点 / 窗口 / 触发三项（条件已挪去 `condition` 段）。 */
 function summarizeWhen(drafts: CandidateSketchDrafts): string {
-  const filter = drafts.filterRule;
-  let conditionsText: string | null = null;
-  if (filter.kind === "structured") {
-    const text = describeFilterGroups(filter.draft);
-    conditionsText = text === "" ? null : `买入条件：${text}`;
-  } else if (filter.kind === "raw") {
-    conditionsText = "买入条件（只读，表单表达不了）";
-  }
-
   const entry = drafts.entryRule;
-  if (entry.kind === "raw") return joinSummary([RAW_SUMMARY, conditionsText]);
-  if (entry.kind !== "structured") return joinSummary([conditionsText]);
+  if (entry.kind === "raw") return RAW_SUMMARY;
+  if (entry.kind !== "structured") return "";
   const draft = entry.draft;
   const win = draft.observationWindow;
   const windowText =
@@ -1271,7 +1290,6 @@ function summarizeWhen(drafts: CandidateSketchDrafts): string {
     draft.trigger.trim() === ""
       ? null
       : `${candidateOptionLabel(CANDIDATE_TRIGGER_OPTIONS, draft.trigger)}触发`,
-    conditionsText,
   ]);
 }
 
@@ -1350,6 +1368,8 @@ export function summarizeSketchSegment(
   switch (segment) {
     case "what":
       return summarizeWhat(drafts);
+    case "condition":
+      return summarizeCondition(drafts);
     case "when":
       return summarizeWhen(drafts);
     case "exit":
@@ -1487,7 +1507,7 @@ function validateEntryRule(draft: EntryRuleDraft, errors: string[], gaps: Sketch
       gaps.push(
         gap(
           "when",
-          "观察窗口：起始 / 结束 / 单位要一起填（单位不会替你默认）",
+          "观察窗口：起始 / 结束 / 单位",
           "entryRule.observationWindow",
         ),
       );
@@ -1515,12 +1535,12 @@ function validateEntryRule(draft: EntryRuleDraft, errors: string[], gaps: Sketch
 
   const exec = draft.execution;
   if (exec.quantityMethod.trim() === "") {
-    gaps.push(gap("sizing", "下单口径 quantityMethod（转正必填）", "entryRule.execution.quantityMethod"));
+    gaps.push(gap("sizing", "下单口径", "entryRule.execution.quantityMethod"));
   } else {
     checkEnumIfPresent(exec.quantityMethod, "执行方式", QUANTITY_VALUES, errors);
   }
   if (exec.lotSize.trim() === "") {
-    gaps.push(gap("sizing", "每手股数 lotSize（转正必填）", "entryRule.execution.lotSize"));
+    gaps.push(gap("sizing", "每手股数", "entryRule.execution.lotSize"));
   } else {
     requireInt(exec.lotSize, "每手股数 lotSize", errors);
   }
@@ -1559,7 +1579,7 @@ function validateEntryRule(draft: EntryRuleDraft, errors: string[], gaps: Sketch
 
   const doc = draft.document;
   if (doc.initialCapital.trim() === "") {
-    gaps.push(gap("cost", "初始资金 initialCapital（转正必填）", "entryRule.document.initialCapital"));
+    gaps.push(gap("cost", "初始资金", "entryRule.document.initialCapital"));
   } else {
     const v = Number(doc.initialCapital);
     if (!Number.isFinite(v) || v <= 0) errors.push("回测初始资金必须是 > 0 的数字");
@@ -1571,7 +1591,7 @@ function validateEntryRule(draft: EntryRuleDraft, errors: string[], gaps: Sketch
     gaps.push(
       gap(
         "cost",
-        "成本假设六项（佣金 / 印花税 / 过户费 / 滑点基点 / 每手股数 / 最低佣金）",
+        "成本假设六项：佣金 / 印花税 / 过户费 / 滑点基点 / 每手股数 / 最低佣金",
         "entryRule.document.costModel",
       ),
     );
@@ -1579,7 +1599,7 @@ function validateEntryRule(draft: EntryRuleDraft, errors: string[], gaps: Sketch
     gaps.push(
       gap(
         "cost",
-        `成本假设还差：${missingCost.join(" / ")}（六项必须齐全）`,
+        `成本假设还差：${missingCost.join(" / ")}`,
         "entryRule.document.costModel",
       ),
     );
@@ -1730,11 +1750,11 @@ export function validateSketchDrafts(drafts: CandidateSketchDrafts): SketchValid
     /**
      * 「入场规则整块没填」按**段**拆成四句。
      *
-     * 后端只有 `entryRule` 一个列，但界面上它被切成 ①买什么 / ②什么价买 / ④买多少 / ⑤成本
+     * 后端只有 `entryRule` 一个列，但界面上它被切成 ①买什么 / ③什么时候买 / ⑤买多少 / ⑥成本
      * 四段；一句笼统的「入场规则整块还没填」在分段界面里没法定位到任何一段。
      */
     gapDetails.push(
-      gap("what", "入场事件类型（转正必填）", "entryRule.event"),
+      gap("what", "事件类型（转正必填）", "entryRule.event"),
       gap(
         "when",
         "入场时点 / 观察窗口 / 触发时点（转正必填）",
@@ -1787,7 +1807,7 @@ export function validateSketchDrafts(drafts: CandidateSketchDrafts): SketchValid
       gapDetails.push(
         gap(
           SKETCH_BLOCK_HOME_SEGMENT[key],
-          `${SKETCH_BLOCK_LABELS[key]}含表单无法表达的内容，本次不会被提交（原因见该块提示）`,
+          `${SKETCH_BLOCK_LABELS[key]}：含表单表达不了的内容，本次不会提交`,
         ),
       );
     }

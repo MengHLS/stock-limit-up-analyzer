@@ -2,11 +2,15 @@
  * FE-1 — 数据域健康看板 前后端契约（唯一来源）。
  *
  * 纪律（§0.2 / §27 Frontend Audit）：
- * - **只读真实证据**：数据来源于 `docs/step12-evidence/*.json`（由 `scripts/step12_certify_gate.mjs`
- *   只读 TiDB 生成），后端只做「读取 + 解析 + 派生展示字段」，**不重新计算 gate 判定**；
+ * - **只读真实证据**：判定来源于 `docs/researchReadyGate/research_ready_gate.json`
+ *   （由 `scripts/step12_certify_gate.mjs` 只读 TiDB 生成）；后端只做「读取 + 解析 + 派生展示字段」，
+ *   **不计算 gate 判定**；
  * - **不粉饰**：gate 的 FAIL / PENDING 原样透传，前端不得改写成 PASS；
  * - **认证态 vs 实况态分离**：`researchReadyGate` 是**认证快照**（有 capturedAt，可复现）；
- *   `liveCounts` 是**未认证实况**（查库，仅用于观察回填进度，不得当作 gate 依据）。
+ *   `liveCounts` 是**未认证实况**（查库，仅用于观察回填进度，不得当作 gate 依据）；
+ * - **唯一带副作用的入径 = `recertify`**：它只「重跑那条既有只读脚本 + 读回产物」，
+ *   判定逻辑仍 100% 在脚本里（服务端零复制），入参里没有任何字段能让调用方给出状态。
+ *   见 `server/researchReadyGate/recertify.ts`。
  */
 
 import { z } from "zod";
@@ -177,3 +181,51 @@ export const liveCountsResultSchema = z.object({
   error: z.string().nullable(),
 });
 export type LiveCountsResult = z.infer<typeof liveCountsResultSchema>;
+
+/** 产出认证 gate 快照的脚本（相对仓库根）；服务端与前端展示的唯一坐标。 */
+export const RECERTIFY_SCRIPT_REL = "scripts/step12_certify_gate.mjs";
+
+/** 与 `recertify` 所执行的完全同源的人工命令（供前端原样展示、可复制）。 */
+export const RECERTIFY_MANUAL_COMMAND = `node ${RECERTIFY_SCRIPT_REL}`;
+
+/**
+ * 「重跑认证」结果（`dataHealth.recertify`）。
+ *
+ * 铁律（**由 schema 结构强制**，不靠调用方自觉）：
+ *   - `ok === true`  ⟺  `snapshot !== null`：`snapshot` 只可能来自「脚本 exitCode=0 + 产物解析通过」；
+ *   - `ok === false` ⇒ `snapshot` 恒为 `null`，且带回 `error` 原文 —— 即使磁盘上还留着上一次的
+ *     产物文件，也**绝不回传**，免得被当成「本次认证结果」（§0.2 禁止粉饰）。
+ *
+ * 本结果**不承载任何判定入参**：没有字段能让调用方指定 PASS/FAIL。
+ */
+export const recertifyGateResultSchema = z.object({
+  ok: z.boolean(),
+  /** 子进程退出码；被信号（超时/中断）终止时为 null。 */
+  exitCode: z.number().int().nullable(),
+  /** 是否因超时而终止。 */
+  timedOut: z.boolean(),
+  /** 本次等待耗时（毫秒）。 */
+  durationMs: z.number().int().nonnegative(),
+  /** true = 本次未新起进程，而是复用同一时刻在途的运行（并发触发时）。 */
+  sharedWithInFlight: z.boolean(),
+  script: z.string(),
+  manualCommand: z.string(),
+  /** 失败原因（人类可读）；`ok === true` 时为 null。 */
+  error: z.string().nullable(),
+  /** 本次运行产出的快照摘要；`ok === false` 时恒为 null。 */
+  snapshot: z
+    .object({
+      capturedAt: z.string(),
+      researchReady: z.boolean(),
+      dataFoundationReady: z.boolean().nullable(),
+      productionReady: z.boolean().nullable(),
+      summary: gateSummarySchema,
+      gates: z.record(z.string(), gateLevelSchema).nullable(),
+    })
+    .nullable(),
+  /** 子进程 stdout 末尾若干字符（仅排障，不参与任何判定）。 */
+  stdoutTail: z.string(),
+  /** 子进程 stderr 末尾若干字符（仅排障，不参与任何判定）。 */
+  stderrTail: z.string(),
+});
+export type RecertifyGateResult = z.infer<typeof recertifyGateResultSchema>;

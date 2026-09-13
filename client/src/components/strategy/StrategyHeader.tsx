@@ -2,20 +2,20 @@
  * StrategyHeader — 策略头（任务 §3.1 / STEP STRATEGY-002 接通持久化）。
  *
  * 一级信息：策略名称 / ID / 版本 / 数据集 / 状态 + 右侧操作条
- * [校验] [保存] [保存新版本] [运行]。
+ * [校验] [保存] [保存新版本]。
  *
  * STEP STRATEGY-002 起，「保存 / 保存新版本」接入真实持久化链路
- * （save → DB / createVersion → DB）；「运行」仍为结构预留（Phase 6 禁用态）。
+ * （save → DB / createVersion → DB）。
+ *
+ * 🔴 2026-09-13：「运行」按钮**已删除** —— 它原为 `runDisabled = true` 硬编码占位
+ * （Phase 6 结构预留），而后端闭环运行端点**早已真实可用**（`server/researchRunRouter.ts#loopRun`）。
+ * 唯一入口收敛到本页「运行工作台」页签内的 `RunConfigPanel`「运行策略」按钮（按「是否注入 onRun」
+ * 门控，**不**按 readiness 门控）。保留一个永远点不动的同名按钮，只会让人误判「运行功能没做完」。
  */
 
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/common";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Play, Save, Tag } from "lucide-react";
+import { Save, Tag } from "lucide-react";
 import type { StrategyViewModel } from "@/adapters/strategyAdapter";
 
 export function StrategyHeader({
@@ -37,8 +37,6 @@ export function StrategyHeader({
   creatingVersion: boolean;
   onCreateVersion: () => void;
 }) {
-  const runDisabled = true; // 后端无运行端点（Phase 6 结构预留）
-
   const field = (label: string, value: React.ReactNode) => (
     <div className="min-w-0">
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -89,18 +87,6 @@ export function StrategyHeader({
         >
           <Tag className="mr-1.5 h-3.5 w-3.5" /> 保存新版本
         </Button>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span>
-              <Button size="sm" disabled={runDisabled}>
-                <Play className="mr-1.5 h-3.5 w-3.5" /> 运行
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            运行端点尚未就绪（见 Run Workbench 结构预留）
-          </TooltipContent>
-        </Tooltip>
       </div>
     </div>
   );

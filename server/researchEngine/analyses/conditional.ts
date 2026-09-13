@@ -40,17 +40,24 @@ export const conditionalExecutor = {
   /**
    * 条件研究的变量需求**由条件字段推导**：
    *   - 条件字段是特征变量 → 加入 features（PIT 安全地过滤）；
+   *   - 条件字段是**观察日变量** → 加入 observations（「到了 T+k 能看到的东西」，可当条件）；
    *   - 条件字段是结果变量 → 加入 outcomes（允许「按 T+5 收益分档」这类未来条件，但必须显式登记）；
    *   - 其余字段必须是合法分组维度（由 Engine 在配置校验阶段把关），加入 dimensions；
    *   - 结果变量 target + 同视界的 max_drawdown 变量（若存在）必加载。
+   *
+   * 分流顺序有意义：**先查观察日**。观察日变量名（`obs_3d.close`）与结果变量名
+   * （`future_return_3d`）在字符串上不可能撞车，但把 OBSERVATION 排在 OUTCOME 之前
+   * 表明「同一根 post K 线读出来的东西，优先按『当时可见』解释」这一口径。
    */
   requiredVariables(config: ResolvedEngineAnalysisConfig, context: AnalysisVariableRequirementContext) {
     const fields = [...new Set(context.conditionSet.groups.flatMap((g) => g.conditions.map((c) => c.fieldName)))];
     const features: string[] = [];
+    const observations: string[] = [];
     const outcomes: string[] = [];
     const dimensions: string[] = [];
     for (const field of fields) {
       if (context.catalog.hasFeature(field)) features.push(field);
+      else if (context.catalog.hasObservation(field)) observations.push(field);
       else if (context.catalog.hasOutcome(field)) outcomes.push(field);
       else dimensions.push(field);
     }
@@ -60,7 +67,12 @@ export const conditionalExecutor = {
     // 必须按目录确认存在后再请求，否则引擎在解析需求阶段就会 UNKNOWN_VARIABLE 失败。
     const drawdown = drawdownVariableFor(config.targetVariable);
     if (drawdown && context.catalog.hasOutcome(drawdown)) outcomes.push(drawdown);
-    return { features: [...new Set(features)], outcomes: [...new Set(outcomes)], dimensions: [...new Set(dimensions)] };
+    return {
+      features: [...new Set(features)],
+      observations: [...new Set(observations)],
+      outcomes: [...new Set(outcomes)],
+      dimensions: [...new Set(dimensions)],
+    };
   },
 
   async execute(context: AnalysisExecutionContext): Promise<AnalysisExecutionResult> {
@@ -76,17 +88,24 @@ export const conditionalExecutor = {
       );
     }
 
-    // 条件字段解析器：先查特征变量，再查分组维度，最后查结果变量（显式失败，不返回 undefined 蒙混）
+    // 条件字段解析器：先查特征变量，再查分组维度，再查观察日变量，最后查结果变量
+    // （显式失败，不返回 undefined 蒙混）
     const fieldResolver = (field: string): number | string | null => {
       const sample = currentSample;
       if (sample === null) return null;
       if (Object.prototype.hasOwnProperty.call(sample.features, field)) return sample.features[field] ?? null;
       if (Object.prototype.hasOwnProperty.call(sample.dimensions, field)) return sample.dimensions[field] ?? null;
+      if (Object.prototype.hasOwnProperty.call(sample.observations, field)) {
+        // 观察日变量：到了 T+k 那一天屏幕上就能看到的值 —— 这是「什么条件买」的主力字段。
+        return sample.observations[field] ?? null;
+      }
       if (Object.prototype.hasOwnProperty.call(sample.outcomes, field)) {
         // 允许用结果变量做条件（例如「T+5 收益 > 0」），但必须显式登记过，避免手滑。
         return sample.outcomes[field] ?? null;
       }
-      throw new ResearchResultError(`条件字段 "${field}" 未在样本中登记（既非特征变量、也非维度、也非已加载结果变量）`);
+      throw new ResearchResultError(
+        `条件字段 "${field}" 未在样本中登记（既非特征变量、也非维度、也非观察日变量、也非已加载结果变量）`,
+      );
     };
 
     let currentSample: (typeof context.samples)[number] | null = null;

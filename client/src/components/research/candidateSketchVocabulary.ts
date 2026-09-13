@@ -171,6 +171,7 @@ export const CANDIDATE_SKETCH_EXTENSION_KEYS = [
   "position",
   "risk",
   "document",
+  "recipe",
 ] as const;
 export type CandidateSketchExtensionKey = (typeof CANDIDATE_SKETCH_EXTENSION_KEYS)[number];
 

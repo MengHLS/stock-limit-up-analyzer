@@ -4,8 +4,12 @@
  * 纪律（§27 Frontend Audit / §31 禁止项）：
  * - **不重新计算任何量化判定**：页面只消费后端 `dataHealth.overview`（源自 certify 脚本只读 TiDB 生成的
  *   认证 gate JSON），不在此处推导 gate 状态、不把 PENDING 显示成 PASS；
+ * - **认证可「重跑」，但不由前端计算**：右上「重跑认证」只是让服务端执行既有的只读认证脚本
+ *   （`scripts/step12_certify_gate.mjs`）并读回产物，页面自身不参与任何判定；它与「重读快照」
+ *   （只重新读取磁盘文件）是两件不同的事，故两个按钮文案必须能区分；
  * - **认证态 / 实况态分离**：`实况查库` Tab 明确标注「未认证」，且默认不自动查询（手动触发）；
- * - **诚实空态**：证据文件缺失 / 解析失败 → 明示错误与修复命令，不展示 0 值冒充「无问题」。
+ * - **诚实空态**：证据文件缺失 / 解析失败 → 明示错误与修复命令，不展示 0 值冒充「无问题」；
+ *   重跑失败 → 原样展示服务端返回的错误，**绝不把失败渲染成成功**。
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -39,8 +43,10 @@ import {
   Clock,
   Database,
   FileJson,
+  Loader2,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
   XCircle,
 } from "lucide-react";
 
@@ -102,6 +108,12 @@ function fmtStale(min: number | null | undefined): {
   const h = min / 60;
   if (h < 24) return { text: `${h.toFixed(1)} 小时前`, warn: true };
   return { text: `${(h / 24).toFixed(1)} 天前`, warn: true };
+}
+
+/** 耗时展示（仅格式化，不参与判定）。 */
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 /** 紧凑展示 gate 项的 current / threshold（原样透传，不改写数值）。 */
@@ -337,9 +349,19 @@ export default function DataHealth() {
   const live = trpc.dataHealth.liveCounts.useQuery(undefined, {
     enabled: false,
   });
+  // 重跑认证：会让服务端真实执行只读认证脚本（可能数十秒），故只由用户显式触发；
+  // 完成后重读快照，让页面显示的是刚生成的那一份。
+  const recertify = trpc.dataHealth.recertify.useMutation({
+    onSuccess: () => {
+      void overview.refetch();
+    },
+  });
 
   const data = overview.data;
   const stale = fmtStale(data?.source.staleMinutes);
+  // 重跑结果 + 本次快照摘要（`snapshot` 只在 ok=true 时存在，schema 已从结构上保证）。
+  const recertifyResult = recertify.data;
+  const recertifySnapshot = recertifyResult?.ok ? recertifyResult.snapshot : null;
 
   return (
     <div className="space-y-4">
@@ -360,7 +382,7 @@ export default function DataHealth() {
             只读 TiDB 生成）
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {data && (
             <div
               className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 ${
@@ -389,18 +411,79 @@ export default function DataHealth() {
             </div>
           )}
           <Button
+            size="sm"
+            onClick={() => recertify.mutate()}
+            disabled={recertify.isPending}
+            title="让服务端执行 scripts/step12_certify_gate.mjs（只读查库，可能数十秒），生成新的认证快照后自动重读"
+          >
+            {recertify.isPending ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {recertify.isPending ? "正在重跑认证…" : "重跑认证"}
+          </Button>
+          <Button
             variant="outline"
             size="sm"
             onClick={() => void overview.refetch()}
             disabled={overview.isFetching}
+            title="只重新读取磁盘上的认证快照文件，不重跑认证、不查库"
           >
             <RefreshCw
               className={`mr-1.5 h-3.5 w-3.5 ${overview.isFetching ? "animate-spin" : ""}`}
             />
-            刷新
+            重读快照
           </Button>
         </div>
       </div>
+
+      {/* 重跑认证的结果：成功给摘要，失败给原始错误 —— 绝不把失败渲染成成功（§0.2） */}
+      {recertifyResult && (
+        <Card
+          className={
+            recertifyResult.ok ? "border-emerald-300 bg-emerald-50" : "border-red-300 bg-red-50"
+          }
+        >
+          <CardContent className="flex items-start gap-2 py-3 text-sm">
+            {recertifyResult.ok ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            ) : (
+              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+            )}
+            <div className={recertifyResult.ok ? "text-emerald-800" : "text-red-700"}>
+              {recertifySnapshot ? (
+                <>
+                  <p className="font-medium">
+                    认证已重跑（耗时 {fmtDuration(recertifyResult.durationMs)}
+                    {recertifyResult.sharedWithInFlight ? "，复用了同一时刻在途的那次运行" : ""}）
+                  </p>
+                  <p className="mt-0.5 text-xs">
+                    新快照 {fmtTime(recertifySnapshot.capturedAt)} · RESEARCH_READY ={" "}
+                    {recertifySnapshot.researchReady ? "TRUE" : "FALSE"} · G0{" "}
+                    {recertifySnapshot.dataFoundationReady ? "PASS" : "GAP"} · 判定{" "}
+                    {recertifySnapshot.summary.PASS} PASS / {recertifySnapshot.summary.PENDING}{" "}
+                    PENDING / {recertifySnapshot.summary.FAIL} FAIL
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-medium">认证重跑失败 —— 本次未产生任何认证结论</p>
+                  <p className="mt-1 font-mono text-xs">
+                    {recertifyResult.error ?? "未知错误"}
+                  </p>
+                  <p className="mt-1.5 text-xs">
+                    等价人工命令（仓库根）：
+                    <code className="ml-1 rounded bg-white/60 px-1 font-mono">
+                      {recertifyResult.manualCommand}
+                    </code>
+                  </p>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 加载态 */}
       {overview.isLoading && (
@@ -437,8 +520,9 @@ export default function DataHealth() {
             <div>
               <p className="font-medium">认证证据文件缺失，无数据可展示</p>
               <p className="mt-1 text-xs">{data.source.parseError}</p>
-              <p className="mt-2 font-mono text-xs">
-                修复：node scripts/step12_certify_gate.mjs
+              <p className="mt-2 text-xs">
+                修复：点右上「重跑认证」生成，或在仓库根执行：
+                <code className="ml-1 font-mono">node scripts/step12_certify_gate.mjs</code>
               </p>
             </div>
           </CardContent>
@@ -495,7 +579,7 @@ export default function DataHealth() {
             </span>
             {stale.warn && (
               <span className="text-amber-700">
-                快照已过期，建议重跑 certify 脚本后刷新
+                快照已过期，点右上「重跑认证」重新生成
               </span>
             )}
           </div>

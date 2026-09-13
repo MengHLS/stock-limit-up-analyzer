@@ -187,7 +187,7 @@ export function PromoteCandidateDialog({
             <DialogDescription>
               {result
                 ? "以下信息全部来自服务端返回值。"
-                : "转正会把候选草稿转换成正式的 StrategyDefinition，并创建一个 Strategy 版本。这是不可逆的跨模块写入。"}
+                : "转正会由后端把草图转换成 StrategyDefinition 并建一个 Strategy 版本，不可逆。"}
             </DialogDescription>
           </DialogHeader>
 
@@ -219,7 +219,7 @@ export function PromoteCandidateDialog({
 
               {!promotable && (
                 <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-                  当前状态不是 ACCEPTED，后端会以 CANDIDATE_NOT_ACCEPTED 拒绝。请先在候选页完成状态流转。
+                  当前状态不是 ACCEPTED，后端会以 CANDIDATE_NOT_ACCEPTED 拒绝。请先在候选页做状态流转。
                 </p>
               )}
 
@@ -322,8 +322,7 @@ export function PromoteCandidateDialog({
                         </SelectContent>
                       </Select>
                       <p className="text-[11px] text-muted-foreground">
-                        提交的是 <code className="font-mono">datasetVersionId</code>；label / datasetCode
-                        仅用于显示，不作为坐标。
+                        提交的是 <code className="font-mono">datasetVersionId</code>；label / datasetCode 仅用于显示。
                       </p>
                     </div>
                   </div>
@@ -456,7 +455,7 @@ function PromoteResultView({ result }: { result: PromoteResultVm }) {
       </dl>
 
       <p className="text-[11px] text-muted-foreground">
-        策略版本的 Research 溯源可在「查看 Strategy Version」页面以只读方式查看。
+        Research 溯源可在「查看 Strategy Version」页只读查看。
       </p>
     </div>
   );
@@ -476,7 +475,7 @@ function PromoteFailureView({ failure }: { failure: PromoteFailureVm }) {
       </div>
       {failure.writeback !== null && (
         <div className="rounded border border-red-200 bg-white/60 px-2 py-1.5 font-mono text-[11px]">
-          <p className="font-sans font-medium">已产出的 Strategy（不会被删除）</p>
+          <p className="font-sans font-medium">已产出的 Strategy（不会删除）</p>
           <p>strategyId={failure.writeback.strategyId ?? "—"}</p>
           <p>strategyVersionId={failure.writeback.strategyVersionId ?? "—"}</p>
           <p>strategyVersion={failure.writeback.strategyVersion ?? "—"}</p>

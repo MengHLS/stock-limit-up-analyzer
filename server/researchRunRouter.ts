@@ -61,9 +61,63 @@ import {
   type ResearchRunReadinessVerdict,
 } from "../shared/researchContracts";
 import type { ResearchStrategyDefinition } from "./research/strategyContract";
+import { StrategyService } from "./research/strategyPersistence/service";
+import { DbStrategyRepository } from "./research/strategyPersistence/db";
+import {
+  assembleRunWorkbenchInputs,
+  LoopRunAssemblyError,
+  type LoopRunAssemblySummary,
+} from "./runWorkbenchAssembly";
+import type { StrategyDocument } from "./research/strategySchema/types";
+import { StrategyRecipeRuntimeError } from "./research/recipeErrors";
 
 // 幂等启动装配：把内置研究策略注册进单例注册中心（已注册则跳过）。
 registerBuiltInResearchStrategies(researchStrategyRegistry);
+
+/**
+ * 策略持久化读取服务（**只读**用途：`useRealData=true` 时按 `strategyId@version` 取
+ * 真实策略文档）。与 `researchRouter.ts` 各自 new 一份 `StrategyService` —— 该服务是
+ * 无状态编排（依赖注入 Repository），重复实例化只多一个轻对象，换来的是两个 router
+ * 之间零 import 耦合。
+ */
+const runWorkbenchStrategyService = new StrategyService(new DbStrategyRepository(), {
+  codeVersion: "unknown",
+});
+
+/**
+ * 从策略文档取已绑定的 Dataset Registry 坐标（`dataset_version.id`）。
+ *
+ * 唯一坐标纪律（`PROJECT_RULES`）：`datasetVersionId` 是 Dataset 的**唯一**坐标，
+ * 故优先取 Canonical `definition.datasets` 中 `role=PRIMARY` 那一条；无 definition 的
+ * 历史 / UI 文档退到 doc 级镜像 `document.datasetVersionId`（与
+ * `datasetBindingValidation.collectStrategyDatasetBindingRequests` 同口径）。
+ *
+ * 拿不到 → 返回 undefined（调用方据此走「从零重建」并在摘要里如实说明）。
+ */
+function primaryDatasetVersionIdOf(document: StrategyDocument): number | undefined {
+  const datasets = document.definition?.datasets;
+  if (datasets !== undefined && datasets.length > 0) {
+    const primary = datasets.find(d => d.role === "PRIMARY") ?? datasets[0];
+    if (primary !== undefined && primary.datasetVersionId !== undefined && primary.datasetVersionId !== null) {
+      return primary.datasetVersionId;
+    }
+  }
+  const mirrored = document.datasetVersionId;
+  return mirrored !== undefined && mirrored !== null ? mirrored : undefined;
+}
+
+/** 装配失败 → TRPCError（稳定错误码进 message 前缀，前端可直接展示）。 */
+function toAssemblyTrpcError(error: unknown): TRPCError {  if (error instanceof LoopRunAssemblyError || error instanceof StrategyRecipeRuntimeError) {
+    return new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `[${error.code}] ${error.message}`,
+    });
+  }
+  if (error instanceof Error) {
+    return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+  }
+  return new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: String(error) });
+}
 
 /** 策略定义 → 目录条目（轻量元数据；参数明细不进 payload）。 */
 function toCatalogItem(
@@ -239,7 +293,7 @@ export const researchRunRouter = router({
   loopRun: publicProcedure
     .input(closedLoopRunInputSchema)
     .output(closedLoopRunResultSchema)
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const createdAt = input.createdAt ?? new Date().toISOString();
       const runId =
         input.runId ?? `clrun-${createdAt.replace(/[^0-9]/g, "").slice(0, 17)}`;
@@ -297,6 +351,54 @@ export const researchRunRouter = router({
           : {}),
         ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
       };
+
+      // ------------------------------------------------------------------
+      // 运行工作台「真实跑通」（useRealData=true）
+      //
+      // 与上方「只透传」是**互斥的两条路**：本分支由服务端真实构建数据集 + 真实读策略
+      // 文档 + 真实装配配方，因此 data / research / backtest / evaluation / regime 五阶段
+      // 可以真的执行。任何一环失败 → 抛 PRECONDITION_FAILED（附稳定错误码），
+      // **绝不**降级成「用占位数据跑一遍」。
+      // ------------------------------------------------------------------
+      let assemblySummary: LoopRunAssemblySummary | null = null;
+      if (input.useRealData === true) {
+        let assembled;
+        try {
+          const versionRecord = await runWorkbenchStrategyService.loadVersion(
+            input.strategyId,
+            input.strategyVersion,
+          );
+          assembled = await assembleRunWorkbenchInputs({
+            strategyId: input.strategyId,
+            strategyVersion: input.strategyVersion,
+            startDate: input.dateRange.startDate,
+            endDate: input.dateRange.endDate,
+            createdAt,
+            codeVersion: input.codeVersion ?? "unknown",
+            strategyDocument: versionRecord.strategy,
+            // 已绑定的 Dataset Registry 坐标（PRIMARY）——有就用它直读已落库 ds_* 数据集，
+            // 而不是从零重算。事实（含回落原因）由装配层写进 assembly.datasetSource*。
+            ...(primaryDatasetVersionIdOf(versionRecord.strategy) !== undefined
+              ? { datasetVersionId: primaryDatasetVersionIdOf(versionRecord.strategy)! }
+              : {}),
+            ...(input.recipeId !== undefined ? { recipeId: input.recipeId } : {}),
+            ...(input.datasetGuards?.dataReady !== undefined
+              ? { dataReady: input.datasetGuards.dataReady }
+              : {}),
+            ...(input.datasetGuards?.maxTradingDays !== undefined
+              ? { maxTradingDays: input.datasetGuards.maxTradingDays }
+              : {}),
+            ...(input.datasetGuards?.maxSecuritiesPerDay !== undefined
+              ? { maxSecuritiesPerDay: input.datasetGuards.maxSecuritiesPerDay }
+              : {}),
+          });
+        } catch (error) {
+          throw toAssemblyTrpcError(error);
+        }
+        // 装配成功：把真实入参合并进 wiringInputs（覆盖同名的空位）
+        Object.assign(wiringInputs, assembled.inputs);
+        assemblySummary = assembled.assembly;
+      }
 
       const seedHandoffs: ClosedLoopSeedHandoff[] = [];
       if (input.backtestSummarySeed !== undefined) {
@@ -381,6 +483,31 @@ export const researchRunRouter = router({
           errorMessage: item.errorMessage,
         })),
         wiring: toWiringSummary(wiringInputs, requested),
+        assembly:
+          assemblySummary === null
+            ? null
+            : {
+                datasetVersion: assemblySummary.datasetVersion,
+                datasetGate: assemblySummary.datasetGate,
+                datasetRowCount: assemblySummary.datasetRowCount,
+                datasetSecurityCount: assemblySummary.datasetSecretCount,
+                datasetSource: assemblySummary.datasetSource,
+                datasetSourceNote: assemblySummary.datasetSourceNote,
+                datasetVersionId: assemblySummary.datasetVersionId,
+                dateRange: { ...assemblySummary.dateRange },
+                strategyId: assemblySummary.strategyId,
+                strategyVersion: assemblySummary.strategyVersion,
+                recipeId: assemblySummary.recipeId,
+                recipeSource: assemblySummary.recipeSource,
+                recipeFeatureIds: [...assemblySummary.recipeFeatureIds],
+                selectionSummary: assemblySummary.selectionSummary,
+                simulation: {
+                  initialCapital: assemblySummary.simulation.initialCapital,
+                  maxPositions: assemblySummary.simulation.maxPositions,
+                  executionModel: assemblySummary.simulation.executionModel,
+                  costModel: { ...assemblySummary.simulation.costModel },
+                },
+              },
       };
     }),
 });

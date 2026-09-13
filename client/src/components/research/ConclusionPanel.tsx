@@ -90,7 +90,7 @@ function ConclusionCard({ vm }: { vm: ConclusionVm }) {
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-md border p-3">
-            <p className="mb-2 text-xs font-medium">判定阈值（可复核）</p>
+            <p className="mb-2 text-xs font-medium">判定阈值</p>
             <dl className="space-y-1 text-xs">
               <div className="flex justify-between">
                 <dt className="text-muted-foreground">显著性水平 α</dt>
@@ -161,7 +161,7 @@ function ConclusionCard({ vm }: { vm: ConclusionVm }) {
               </dl>
             ) : (
               <p className="text-xs text-muted-foreground">
-                本次没有任何分析产出可比较的主效应（样本缺失或分组退化）。
+                本次没有可比较的主效应（样本缺失或分组退化）。
               </p>
             )}
             {evidence.primarySelectionRule && (
@@ -174,7 +174,7 @@ function ConclusionCard({ vm }: { vm: ConclusionVm }) {
 
         {evidence.ruleTrace.length > 0 && (
           <div>
-            <p className="mb-2 text-xs font-medium">判定轨迹（按顺序短路）</p>
+            <p className="mb-2 text-xs font-medium">判定轨迹（按序短路）</p>
             <ol className="space-y-1.5">
               {evidence.ruleTrace.map((r) => (
                 <li key={r.rule} className="flex items-start gap-2 text-xs">
@@ -264,7 +264,7 @@ export function ConclusionPanel({ experimentId }: { experimentId: number }) {
       <EmptyState
         icon={FileText}
         title="尚无结论"
-        description="结论由引擎在 Run 完成后自动生成。请先创建 Run、添加分析并点击「运行引擎」。"
+        description="Run 跑完后引擎自动生成结论。"
       />
     );
   }
@@ -273,7 +273,7 @@ export function ConclusionPanel({ experimentId }: { experimentId: number }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          共 {list.length} 条结论（按创建时间倒序由后端给出）。
+          共 {list.length} 条结论 · 一次 Run 只产一条，配合「结果」页签一起读。
         </p>
         <Button
           size="sm"
@@ -303,19 +303,22 @@ export function ConclusionPanel({ experimentId }: { experimentId: number }) {
         </Button>
       </div>
       {policy.data && (
-        <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-          <Info className="mt-0.5 h-3 w-3 shrink-0" />
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <Info className="h-3 w-3 shrink-0" />
           <span>
-            当前引擎默认阈值：α=
-            <span className="font-mono">{policy.data.alpha}</span>，最小实际效应=
-            <span className="font-mono">
-              {formatMetricValue("DIFFERENCE", policy.data.materialityAbs)}
-            </span>
-            ，单组最小样本=
-            <span className="font-mono">{policy.data.minSampleCount}</span>，方向一致性下限=
-            <span className="font-mono">{policy.data.stabilityMinConsistentRatio}</span>。
-            阈值可在运行时覆盖，实际生效值以每份结论 evidence 中的 policy 为准。
+            引擎默认阈值 α=<span className="font-mono">{policy.data.alpha}</span>
           </span>
+          <span>
+            最小实际效应=
+            <span className="font-mono">{formatMetricValue("DIFFERENCE", policy.data.materialityAbs)}</span>
+          </span>
+          <span>
+            单组最小样本=<span className="font-mono">{policy.data.minSampleCount}</span>
+          </span>
+          <span>
+            方向一致性下限=<span className="font-mono">{policy.data.stabilityMinConsistentRatio}</span>
+          </span>
+          <span className="text-[11px]">（实际生效值以每份结论 evidence 的 policy 为准）</span>
         </p>
       )}
       {list.map((vm) => (

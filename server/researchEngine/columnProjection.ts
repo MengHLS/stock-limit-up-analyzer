@@ -39,6 +39,7 @@ import {
   DATASET_EVENT_COLUMNS,
   DATASET_OUTCOME_COLUMNS,
   DATASET_PATH_COLUMNS,
+  DATASET_POST_COLUMNS,
   DATASET_PREFIX_COLUMNS,
 } from "../datasetRegistry/query";
 import { engineAssert } from "./errors";
@@ -46,17 +47,26 @@ import {
   resolveDimensionValue,
   type FeatureSources,
   type FeatureVariableDefinition,
+  type ObservationSources,
+  type ObservationVariableDefinition,
   type OutcomeSources,
   type OutcomeVariableDefinition,
 } from "./variables";
 
-/** 四张物理表的角色（与 Dataset Registry 的分层一一对应）。 */
-export type ProjectionRole = "event" | "prefix" | "path" | "outcome";
+/** 五张物理表的角色（与 Dataset Registry 的分层一一对应）。 */
+export type ProjectionRole = "event" | "prefix" | "post" | "path" | "outcome";
 
-/** 各角色全部列名（从 drizzle 表对象派生，见 datasetRegistry/query.ts）。 */
+/**
+ * 各角色全部列名（从 drizzle 表对象派生，见 datasetRegistry/query.ts）。
+ *
+ * 🔴 `post` 与 `prefix` **逐字段同构**（仅 `relativeDay` 取值域不同：prefix ≤ 0、post ≥ 1），
+ * 因此两者共用同一份列清单常量。这里显式复制而不是引用同一个数组，是为了让
+ * `finalizeRole` 的「按 schema 声明顺序输出」对两个角色都成立（顺序相同但语义独立）。
+ */
 export const PROJECTION_FULL_COLUMNS: Readonly<Record<ProjectionRole, readonly string[]>> = Object.freeze({
   event: DATASET_EVENT_COLUMNS,
   prefix: DATASET_PREFIX_COLUMNS,
+  post: DATASET_POST_COLUMNS,
   path: DATASET_PATH_COLUMNS,
   outcome: DATASET_OUTCOME_COLUMNS,
 });
@@ -71,6 +81,7 @@ export const PROJECTION_FULL_COLUMNS: Readonly<Record<ProjectionRole, readonly s
 const STRUCTURAL_COLUMNS: Readonly<Record<ProjectionRole, readonly string[]>> = Object.freeze({
   event: ["datasetVersionId", "eventId", "symbol", "tradeDate"],
   prefix: ["datasetVersionId", "eventId", "relativeDay"],
+  post: ["datasetVersionId", "eventId", "relativeDay"],
   path: ["datasetVersionId", "eventId", "relativeDay"],
   outcome: ["datasetVersionId", "eventId", "horizon"],
 });
@@ -86,10 +97,12 @@ const IGNORED_PROBE_KEYS = new Set([
   "inspect",
 ]);
 
-/** 一次装配实际需要加载的列清单（四张表各一份）。 */
+/** 一次装配实际需要加载的列清单（五张表各一份）。 */
 export interface ResearchColumnProjection {
   readonly event: readonly string[];
   readonly prefix: readonly string[];
+  /** 观察日（post）表列清单；与 prefix 同构但独立记录。 */
+  readonly post: readonly string[];
   readonly path: readonly string[];
   readonly outcome: readonly string[];
 }
@@ -99,6 +112,7 @@ export function fullColumnProjection(): ResearchColumnProjection {
   return {
     event: PROJECTION_FULL_COLUMNS.event,
     prefix: PROJECTION_FULL_COLUMNS.prefix,
+    post: PROJECTION_FULL_COLUMNS.post,
     path: PROJECTION_FULL_COLUMNS.path,
     outcome: PROJECTION_FULL_COLUMNS.outcome,
   };
@@ -151,11 +165,16 @@ const EVENT_PROBE_OVERRIDES: Record<string, unknown> = {
 function buildProbeSources(
   params: {
     prefixDays: readonly number[];
+    postDays: readonly number[];
     pathDays: readonly number[];
     outcomeHorizons: readonly number[];
   },
   seen: Record<ProjectionRole, Set<string>>,
-): { featureSources: FeatureSources; outcomeSources: OutcomeSources } {
+): {
+  featureSources: FeatureSources;
+  outcomeSources: OutcomeSources;
+  observationSources: ObservationSources;
+} {
   const event = buildProbeRow("event", seen.event, EVENT_PROBE_OVERRIDES) as unknown as FirstLimitPullbackEvent;
 
   const prefixBars = new Map<number, FirstLimitPullbackRawBar>();
@@ -167,6 +186,20 @@ function buildProbeSources(
         eventId: "probe-event",
         symbol: "600000.SH",
         tradeDate: "2024-03-15",
+        relativeDay,
+      }) as unknown as FirstLimitPullbackRawBar,
+    );
+  }
+
+  const postBars = new Map<number, FirstLimitPullbackRawBar>();
+  for (const relativeDay of params.postDays) {
+    postBars.set(
+      relativeDay,
+      buildProbeRow("post", seen.post, {
+        datasetVersionId: 1,
+        eventId: "probe-event",
+        symbol: "600000.SH",
+        tradeDate: "2024-03-18",
         relativeDay,
       }) as unknown as FirstLimitPullbackRawBar,
     );
@@ -216,6 +249,10 @@ function buildProbeSources(
   return {
     featureSources: { event, prefixBars },
     outcomeSources: { pathRows, outcomeRows, eventBar: eventBarProbe },
+    // 🔴 观察日源的事件日基准**无条件提供**（同 `eventBarProbe` 的理由）：若因调用方
+    // 未传 rd=0 而让 eventBar 为 undefined，依赖它的观察日变量（如 holds_event_low）
+    // 会提前 return null，`low` 列就不会被记录 ⇒ 投影偏小 ⇒ 真实装配时被裁掉 ⇒ 静默全 null。
+    observationSources: { postBars, eventBar: eventBarProbe },
   };
 }
 
@@ -228,10 +265,14 @@ export interface DeriveColumnProjectionInput {
   readonly featureDefs: readonly FeatureVariableDefinition[];
   /** 本次装配用到的结果变量定义（已过变量目录校验）。 */
   readonly outcomeDefs: readonly OutcomeVariableDefinition[];
+  /** 本次装配用到的观察日变量定义（已过变量目录校验）。 */
+  readonly observationDefs?: readonly ObservationVariableDefinition[];
   /** 需要额外解析的分组维度键（year / board / regime…）。 */
   readonly dimensionKeys: readonly string[];
   /** 需要用到的 prefix 相对日（并集）。 */
   readonly prefixDays: readonly number[];
+  /** 需要用到的 post 相对日（并集；观察日变量）。 */
+  readonly postDays?: readonly number[];
   /** 需要用到的 path 相对日（并集）。 */
   readonly pathDays: readonly number[];
   /** 需要用到的 outcome 视界（并集）。 */
@@ -248,11 +289,20 @@ export function deriveColumnProjection(input: DeriveColumnProjectionInput): Rese
   const seen: Record<ProjectionRole, Set<string>> = {
     event: new Set<string>(),
     prefix: new Set<string>(),
+    post: new Set<string>(),
     path: new Set<string>(),
     outcome: new Set<string>(),
   };
 
-  const { featureSources, outcomeSources } = buildProbeSources(input, seen);
+  const { featureSources, outcomeSources, observationSources } = buildProbeSources(
+    {
+      prefixDays: input.prefixDays,
+      postDays: input.postDays ?? [],
+      pathDays: input.pathDays,
+      outcomeHorizons: input.outcomeHorizons,
+    },
+    seen,
+  );
 
   // 取值本身不重要（探针数据没有业务含义），重要的是「读了哪些列」。
   // resolve 抛错也不吞掉整条派生流程 —— 只记录已发生的访问。真正的口径错误由分析层负责暴露。
@@ -270,6 +320,15 @@ export function deriveColumnProjection(input: DeriveColumnProjectionInput): Rese
       /* 同上 */
     }
   }
+  // 🔴 观察日变量同样必须跑一遍：否则它们的 post 列（如 low / volume）不会被记入投影，
+  // 真实装配时被裁掉，变量静默全 null。
+  for (const def of input.observationDefs ?? []) {
+    try {
+      def.resolve(observationSources);
+    } catch {
+      /* 同上 */
+    }
+  }
   for (const key of input.dimensionKeys) {
     try {
       resolveDimensionValue(key, featureSources, undefined);
@@ -281,6 +340,7 @@ export function deriveColumnProjection(input: DeriveColumnProjectionInput): Rese
   return {
     event: finalizeRole("event", seen.event),
     prefix: finalizeRole("prefix", seen.prefix),
+    post: finalizeRole("post", seen.post),
     path: finalizeRole("path", seen.path),
     outcome: finalizeRole("outcome", seen.outcome),
   };

@@ -64,6 +64,9 @@ import {
 import { TTLCache, stableHash } from './backtestCache';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
 import { parseStoredMarketYi } from './marketFactors';
+// 跨境链路瞬时错误的有界重试（只读安全；见 `server/researchEngine/readRetry.ts` 头注释）。
+// 此前仅 researchEngine 用了它，龙头候选池等直连查询裸跑 ⇒ 一次 `read ECONNRESET` 直接冒到 UI。
+import { withReadRetry } from './researchEngine/readRetry';
 import { runMonkeyBenchmark, runCostSensitivity } from './overfittingGuard';
 import {
   advancePaperTradingDay,
@@ -89,6 +92,24 @@ function resolvePoolSize(): number {
   const raw = Number(process.env.DB_POOL_SIZE);
   if (Number.isFinite(raw) && raw >= 1) return Math.min(Math.floor(raw), 64);
   return 16;
+}
+
+/**
+ * 空闲连接回收阈值（`DB_IDLE_TIMEOUT_MS` 可覆盖）。
+ *
+ * 🔴 为什么默认是 **10 分钟**而不是 mysql2 惯用的 60s：跨境 TiDB 建连成本高（实测首连 1.3~3.0s），
+ * 而本应用是**交互式页面**（用户看盘/思考的间隔经常 > 60s）。若按 60s 回收，用户每次操作都要
+ * 重新握手（1.3~3.0s 白等），把「抖动」换成了「稳定地慢」——这不是改善。
+ * 10 分钟的依据：与对端（TiDB Cloud / 中间 LB）的常见 idle 断连窗口同量级且更短，既能回收
+ * 真过期的死连接，又不惩罚交互式使用；`enableKeepAlive` 仍在链路上持续保活，双保险。
+ *
+ * 注意（配合下方 `maxIdle`）：本值时**只有在 `maxIdle < connectionLimit` 时才会被读取**
+ * —— mysql2 的回收定时器可选择性启动，见 `node_modules/mysql2/lib/base/pool.js:29-32`。
+ */
+function resolveIdleTimeoutMs(): number {
+  const raw = Number(process.env.DB_IDLE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 1_000) return Math.floor(raw);
+  return 600_000;
 }
 
 /**
@@ -146,10 +167,22 @@ export async function getDb() {
           //   - connectTimeout：避免坏链路把整个请求无限挂住；
           //   - compress：MySQL 压缩协议。跨境链路是**吞吐受限**（RTT 208ms 只占总耗时 ~2%），
           //     压缩直接减少在途字节数，是本题最大的单点杠杆（实测 4.66×~6.00×，对小查询无副作用）。
+          //
+          // 🔴 maxIdle 必须 < connectionLimit（2026-09-13 修复「Failed query: … ECONNRESET」）：
+          //   mysql2 的 idle 回收定时器**只在 maxIdle < connectionLimit 时启动**
+          //   （`lib/base/pool.js`：`if (this.config.maxIdle < this.config.connectionLimit) this._removeIdleTimeoutConnections()`）。
+          //   此前二者都设为 poolSize ⇒ `idleTimeout: 60_000` 是**死配置**，空闲连接永不回收；
+          //   而 `getConnection()` 从 `_freeConnections` 直接 `pop()`、**不做存活探测/ping**
+          //   ⇒ 被对端（TiDB / 中间 LB）断掉的死连接留在池里、被原样发出，首条语句抛
+          //   `read ECONNRESET`，Drizzle 包成 `Failed query: …`。
+          //   取 `poolSize - 1`（下限 1）恢复 idle 回收；被回收的连接即便残留，下一次取用由
+          //   既有 `withReadRetry` 兜住（但先从源头减少「取出死连接」的概率才是正解）。
+          //   `idleTimeout` 默认放宽到 10 分钟：跨境建连贵，60s 会让交互式页面频繁重握手
+          //   （见 `resolveIdleTimeoutMs` 注释）。
           waitForConnections: true,
           connectionLimit: poolSize,
-          maxIdle: poolSize,
-          idleTimeout: 60_000,
+          maxIdle: Math.max(1, poolSize - 1),
+          idleTimeout: resolveIdleTimeoutMs(),
           queueLimit: 0,
           enableKeepAlive: true,
           keepAliveInitialDelay: 0,
@@ -694,22 +727,28 @@ export type LeaderCandidateMarketFactorRow = {
 };
 
 export async function getLeaderCandidateMarketFactorRows(): Promise<LeaderCandidateMarketFactorRow[]> {
+  const cached = marketFactorRowsCache.get(MARKET_FACTOR_ROWS_CACHE_KEY);
+  if (cached) return cached;
   const db = await getDb();
   if (!db) return [];
   const [limitUpCounts, marketRows] = await Promise.all([
-    db.select({
-      dataDate: limitUpRecords.limitUpDate,
-      limitUpCount: count(),
-    }).from(limitUpRecords).groupBy(limitUpRecords.limitUpDate),
-    db.select({
-      dataDate: marketData.dataDate,
-      turnover: marketData.turnover,
-      marginBalance: marketData.marginBalance,
-      note: marketData.note,
-    }).from(marketData),
+    withReadRetry("leaderCandidateMarketFactors.limitUpCounts", () =>
+      db.select({
+        dataDate: limitUpRecords.limitUpDate,
+        limitUpCount: count(),
+      }).from(limitUpRecords).groupBy(limitUpRecords.limitUpDate),
+    ),
+    withReadRetry("leaderCandidateMarketFactors.marketRows", () =>
+      db.select({
+        dataDate: marketData.dataDate,
+        turnover: marketData.turnover,
+        marginBalance: marketData.marginBalance,
+        note: marketData.note,
+      }).from(marketData),
+    ),
   ]);
   const marketByDate = new Map(marketRows.map((row) => [row.dataDate, row]));
-  return limitUpCounts.map((row) => {
+  const result = limitUpCounts.map((row) => {
     const market = marketByDate.get(row.dataDate);
     return {
       dataDate: row.dataDate,
@@ -719,6 +758,8 @@ export async function getLeaderCandidateMarketFactorRows(): Promise<LeaderCandid
       note: market?.note ?? null,
     };
   });
+  marketFactorRowsCache.set(MARKET_FACTOR_ROWS_CACHE_KEY, result);
+  return result;
 }
 
 function buildVerifiedMarketFactorMap(rows: LeaderCandidateMarketFactorRow[]) {
@@ -1911,40 +1952,75 @@ export async function getSentimentCycleAnalysis() {
   return buildSentimentCycleAnalysis(records);
 }
 
-/** 获取最新交易日的主板龙头候选池。 */
-export async function getLeaderCandidates() {
+/** `getLeaderCandidates` 的实际计算体（无缓存、无单飞），由下面的包装函数调用。 */
+async function buildLeaderCandidatesResult() {
   const db = await getDb();
   if (!db) return buildLeaderCandidates([]);
 
-  const records = await db.select({
-    stockCode: limitUpRecords.stockCode,
-    stockName: limitUpRecords.stockName,
-    limitUpDate: limitUpRecords.limitUpDate,
-    limitUpTime: limitUpRecords.limitUpTime,
-    sector: limitUpRecords.sector,
-    turnover: limitUpRecords.turnover,
-    circulationValue: limitUpRecords.circulationValue,
-    keywords: limitUpRecords.keywords,
-  }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
+  const records = await withReadRetry("getLeaderCandidates.records", () =>
+    db.select({
+      stockCode: limitUpRecords.stockCode,
+      stockName: limitUpRecords.stockName,
+      limitUpDate: limitUpRecords.limitUpDate,
+      limitUpTime: limitUpRecords.limitUpTime,
+      sector: limitUpRecords.sector,
+      turnover: limitUpRecords.turnover,
+      circulationValue: limitUpRecords.circulationValue,
+      keywords: limitUpRecords.keywords,
+    }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime),
+  );
 
   const latestDate = records[0]?.limitUpDate;
   if (!latestDate) return buildLeaderCandidates(records);
+  // 信号日行情与涨停聚合相互独立 ⇒ 并行取数，省掉一次串行往返。
+  // 涨停聚合走 `getLeaderCandidateMarketFactorRows`（已带缓存），
+  // 即便缓存未命中也不会与 records 查询争抢同一连接。
+  const [signalDayPrices, marketFactorRows] = await Promise.all([
+    withReadRetry("getLeaderCandidates.signalDayPrices", () =>
+      db.select({
+        stockCode: stockDailyPrices.stockCode,
+        tradeDate: stockDailyPrices.tradeDate,
+        openPrice: stockDailyPrices.openPrice,
+        closePrice: stockDailyPrices.closePrice,
+        highPrice: stockDailyPrices.highPrice,
+        lowPrice: stockDailyPrices.lowPrice,
+        amount: stockDailyPrices.amount,
+        volume: stockDailyPrices.volume,
+        preClosePrice: stockDailyPrices.preClosePrice,
+      }).from(stockDailyPrices).where(eq(stockDailyPrices.tradeDate, latestDate)),
+    ),
+    getLeaderCandidateMarketFactorRows(),
+  ]);
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
-  const signalDayPrices = await db.select({
-    stockCode: stockDailyPrices.stockCode,
-    tradeDate: stockDailyPrices.tradeDate,
-    openPrice: stockDailyPrices.openPrice,
-    closePrice: stockDailyPrices.closePrice,
-    highPrice: stockDailyPrices.highPrice,
-    lowPrice: stockDailyPrices.lowPrice,
-    amount: stockDailyPrices.amount,
-    volume: stockDailyPrices.volume,
-    preClosePrice: stockDailyPrices.preClosePrice,
-  }).from(stockDailyPrices).where(eq(stockDailyPrices.tradeDate, latestDate));
   const priceByStockDate = buildLeaderCandidateDailyPriceMap(signalDayPrices);
-  const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
+  const marketFactorsByDate = buildVerifiedMarketFactorMap(marketFactorRows);
   return buildLeaderCandidates(records, { phaseByDate, priceByStockDate, marketFactorsByDate });
+}
+
+/**
+ * 获取最新交易日的主板龙头候选池。
+ *
+ * 2026-09-13 性能修复：页面首屏关键路径上唯一的端点，此前无缓存
+ * （实测热调用仍需 23.7s，因为每次重跑全表 GROUP BY + 情绪周期重算）。
+ * 现在加两层：进程内 TTL 结果缓存 + 单飞去重；数据写入由
+ * `invalidateLeaderCandidateBacktestCaches()` 主动失效。
+ */
+export async function getLeaderCandidates() {
+  const cached = leaderCandidatesResultCache.get(LEADER_CANDIDATES_CACHE_KEY);
+  if (cached) return cached;
+  const inFlight = leaderCandidatesInFlight.get(LEADER_CANDIDATES_CACHE_KEY);
+  if (inFlight) return inFlight;
+  const promise = buildLeaderCandidatesResult()
+    .then((result) => {
+      leaderCandidatesResultCache.set(LEADER_CANDIDATES_CACHE_KEY, result);
+      return result;
+    })
+    .finally(() => {
+      leaderCandidatesInFlight.delete(LEADER_CANDIDATES_CACHE_KEY);
+    });
+  leaderCandidatesInFlight.set(LEADER_CANDIDATES_CACHE_KEY, promise);
+  return promise;
 }
 
 type BacktestBaseContext = {
@@ -1973,12 +2049,53 @@ export function invalidateLeaderCandidateBacktestCaches(): void {
   backtestCacheGeneration += 1;
   backtestResultCache.clear();
   backtestBaseContextCache.clear();
+  // 候选池结果缓存 / 聚合缓存同样依赖涨停记录与行情，必须一并失效。
+  // ⚠️ 不在此清 `dailyPriceCoverageCache`：该缓存 TTL 仅 10 分钟，而清空会让下一次读取
+  // 重跑 890 万行全表聚合（~9s）；而本函数在批量写入时是逐批调用的（见
+  // createLimitUpRecordsBatch），逐批清空会把一次回填变成数十次全表扫描。
+  leaderCandidatesResultCache.clear();
+  marketFactorRowsCache.clear();
   clearLeaderCandidateBacktestSnapshotsSync();
 }
 // 价格覆盖率是对 890 万行 stock_daily_prices 的全表聚合扫描（~9s），且仅在回填后变化。
 // 用独立长 TTL 缓存（10 分钟）解耦于 base context 的 3 分钟 TTL，避免每次冷缓存回测都重扫。
 const dailyPriceCoverageCache = new TTLCache<LeaderCandidateDailyPriceCoverage>(10 * 60 * 1000, 4);
 const DAILY_PRICE_COVERAGE_CACHE_KEY = "coverage";
+
+/**
+ * 「最新交易日龙头候选池」结果缓存（2026-09-13 性能修复）。
+ *
+ * 背景：`getLeaderCandidates` 是页面首屏关键路径上唯一的端点（页头四个统计卡片 +
+ * 当日评分列表 + 图表全部依赖它），但此前**完全没有缓存**。实测（跨境 TiDB）：
+ *   · 冷调用 32.4s、热调用仍 23.7s —— 「热」并不快，因为它每次都在重跑
+ *     「涨停记录全表 GROUP BY + 情绪周期全量重算」。
+ * 对比：同页的 `getLeaderCandidateBacktest` 有 30 分钟结果缓存（367s → 0ms）。
+ *
+ * 本缓存只存「结果」，不含业务语义；数据写入时由
+ * `invalidateLeaderCandidateBacktestCaches()` 主动清空，保证上传新数据后页面立即刷新。
+ */
+const leaderCandidatesResultCache = new TTLCache<Awaited<ReturnType<typeof buildLeaderCandidatesResult>>>(5 * 60 * 1000, 4);
+const LEADER_CANDIDATES_CACHE_KEY = "latest";
+
+/**
+ * 单飞（single-flight）：同一 key 的并发/密集重复请求共享同一次计算。
+ *
+ * 必要性：候选池计算耗时数十秒，前端在 `staleTime` 之前若发生重挂载、
+ * 多标签页或 React Query 重试，会并发打入多个请求。无单飞时每个请求各跑一遍
+ * 全表扫描，既拖慢页面又争抢跨境连接池。单飞让后来者直接复用首个 Promise。
+ */
+const leaderCandidatesInFlight = new Map<string, Promise<Awaited<ReturnType<typeof buildLeaderCandidatesResult>>>>();
+
+/**
+ * 涨停记录按日聚合（`getLeaderCandidateMarketFactorRows` 的原始输出）缓存。
+ *
+ * 该查询是对 `limit_up_records` 的**全表 GROUP BY**，且被两处调用：
+ *   ① `getLeaderCandidates`（每次页面加载）
+ *   ② `loadBacktestBaseContext`（冷缓存回测）
+ * 此前无任何缓存，属于纯重复劳动 —— 聚合结果只在涨停记录写入时变化。
+ */
+const marketFactorRowsCache = new TTLCache<LeaderCandidateMarketFactorRow[]>(10 * 60 * 1000, 4);
+const MARKET_FACTOR_ROWS_CACHE_KEY = "all";
 
 /** 日期字符串（YYYY-MM-DD）按日历日平移 days 天（UTC，避免本地时区偏移）。 */
 function shiftDate(dateStr: string, days: number): string {

@@ -303,7 +303,7 @@ export function parseConditionValue(
 /** 校验单个条件草稿，返回错误清单（空 = 可用）。 */
 export function validateConditionDraft(
   draft: ConditionDraft,
-  catalog: { features: readonly string[]; outcomes: readonly string[]; dimensions: readonly string[] },
+  catalog: { features: readonly string[]; outcomes: readonly string[]; dimensions: readonly string[]; observations?: { readonly variables: readonly string[] } },
 ): string[] {
   const errors: string[] = [];
   const field = draft.fieldName.trim();
@@ -314,7 +314,8 @@ export function validateConditionDraft(
   const known =
     catalog.features.includes(field) ||
     catalog.outcomes.includes(field) ||
-    catalog.dimensions.includes(field);
+    catalog.dimensions.includes(field) ||
+    (catalog.observations?.variables.includes(field) ?? false);
   if (!known) {
     errors.push(`条件字段 "${field}" 不在当前 Dataset 的变量目录中`);
   }
@@ -345,7 +346,12 @@ export function validateConditionDraft(
  */
 export function validateConditionGroups(
   groups: ReadonlyArray<ConditionGroupDraft>,
-  catalog: { features: readonly string[]; outcomes: readonly string[]; dimensions: readonly string[] },
+  catalog: {
+    features: readonly string[];
+    outcomes: readonly string[];
+    dimensions: readonly string[];
+    observations?: { readonly variables: readonly string[] };
+  },
 ): string[] {
   const errors: string[] = [];
   const effective = conditionGroupsToPayload(groups);
@@ -783,6 +789,13 @@ export interface AnalysisFormCatalog {
   features: readonly string[];
   outcomes: readonly string[];
   dimensions: readonly string[];
+  /** 观察日变量目录（T+k 可观测，可当条件）；缺省 = 该 Dataset 没有 post 数据。 */
+  observations?: {
+    readonly variables: readonly string[];
+    readonly maxOffset: number;
+    readonly dayFields: readonly { field?: string; stat?: string; label: string; unit: string }[];
+    readonly pullbackStats: readonly { field?: string; stat?: string; label: string; unit: string }[];
+  };
   /** 分段窗可用范围（来自 Dataset 真实 path 视界；缺省/null = 不可用）。 */
   segmentRange?: SegmentWindowRange | null;
 }

@@ -91,6 +91,14 @@ import { DATASET_PAGE_LIMIT_DEFAULT } from "../../shared/datasetRegistryContract
 export const DATASET_EVENT_COLUMNS: readonly string[] = Object.keys(getTableColumns(firstLimitPullbackEvents));
 /** `ds_first_limit_pullback_prefix` 全部列名（post 表与之同构，共用本清单）。 */
 export const DATASET_PREFIX_COLUMNS: readonly string[] = Object.keys(getTableColumns(firstLimitPullbackPrefixes));
+/**
+ * `ds_first_limit_pullback_post` 全部列名。
+ *
+ * 与 `DATASET_PREFIX_COLUMNS` **逐字段同构**（仅 `relativeDay` 取值域不同：prefix ≤ 0、post ≥ 1）。
+ * 独立派生而不复用同一数组，理由：列投影的 `finalizeRole` 按「该角色自己的 schema 顺序」输出，
+ * 且未来若 post 表单独增列（如加 `limitUpCount`），此处能自动跟随而不会污染 prefix 的投影。
+ */
+export const DATASET_POST_COLUMNS: readonly string[] = Object.keys(getTableColumns(firstLimitPullbackPosts));
 /** `ds_first_limit_pullback_path` 全部列名。 */
 export const DATASET_PATH_COLUMNS: readonly string[] = Object.keys(getTableColumns(firstLimitPullbackPaths));
 /** `ds_first_limit_pullback_outcome` 全部列名。 */
@@ -350,6 +358,13 @@ export interface DatasetDataReader {
   loadRawBarsBatch(role: DatasetRawBarRole, query: RawBarBatchQuery): Promise<FirstLimitPullbackRawBar[]>;
   /** 该版本 `path.relativeDay` 的真实取值范围（供 Research 判断可用视界；无数据返回 null）。 */
   getPathRelativeDayRange(datasetVersionId: number): Promise<{ min: number; max: number } | null>;
+  /**
+   * 该版本 `post.relativeDay` 的真实取值范围（供 Research 判断**观察日**可用视界；无数据返回 null）。
+   *
+   * 与 `getPathRelativeDayRange` 并列：path 是「事后路径（打标签用）」，post 是「观察日 K 线
+   * （T+k 当时可见，可当条件）」。二者虽然常同值，但语义不同、可缺其一，因此**不复用同一个查询**。
+   */
+  getPostRelativeDayRange(datasetVersionId: number): Promise<{ min: number; max: number } | null>;
 }
 
 // ===========================================================================
@@ -511,6 +526,12 @@ export class InMemoryDatasetDataReader implements DatasetDataReader {
 
   async getPathRelativeDayRange(datasetVersionId: number): Promise<{ min: number; max: number } | null> {
     const days = this.paths.filter((p) => p.datasetVersionId === datasetVersionId).map((p) => p.relativeDay);
+    if (days.length === 0) return null;
+    return { min: Math.min(...days), max: Math.max(...days) };
+  }
+
+  async getPostRelativeDayRange(datasetVersionId: number): Promise<{ min: number; max: number } | null> {
+    const days = this.posts.filter((p) => p.datasetVersionId === datasetVersionId).map((p) => p.relativeDay);
     if (days.length === 0) return null;
     return { min: Math.min(...days), max: Math.max(...days) };
   }
@@ -851,6 +872,27 @@ export class DbDatasetDataReader implements DatasetDataReader {
         })
         .from(firstLimitPullbackPaths)
         .where(eq(firstLimitPullbackPaths.datasetVersionId, datasetVersionId));
+      const mn = agg[0]?.mn;
+      const mx = agg[0]?.mx;
+      if (mn === null || mn === undefined || mx === null || mx === undefined) return null;
+      return { min: Number(mn), max: Number(mx) };
+    } catch (err) {
+      if (isTableMissingError(err)) return null;
+      throw err;
+    }
+  }
+
+  async getPostRelativeDayRange(datasetVersionId: number): Promise<{ min: number; max: number } | null> {
+    const db = await getDb();
+    if (!db) return null;
+    try {
+      const agg = await db
+        .select({
+          mn: sql<number | null>`MIN(${firstLimitPullbackPosts.relativeDay})`,
+          mx: sql<number | null>`MAX(${firstLimitPullbackPosts.relativeDay})`,
+        })
+        .from(firstLimitPullbackPosts)
+        .where(eq(firstLimitPullbackPosts.datasetVersionId, datasetVersionId));
       const mn = agg[0]?.mn;
       const mx = agg[0]?.mx;
       if (mn === null || mn === undefined || mx === null || mx === undefined) return null;

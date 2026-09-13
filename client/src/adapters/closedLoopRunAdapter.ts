@@ -49,6 +49,49 @@ export interface ClosedLoopEvaluationScalars {
   completedTradeCount: number | null;
 }
 
+/**
+ * 真实数据装配摘要（仅当本次以 `useRealData=true` 装配成功时非 null）。
+ *
+ * 全部字段**直搬**后端 `assembly`，前端不做任何换算 / 补齐 / 推断。
+ * 该摘要回答一个关键问题：「这次运行，数据集与策略到底从哪来、长什么样」。
+ */
+export interface ClosedLoopRunAssemblyViewModel {
+  datasetVersion: string;
+  /** 数据集 gate 判定：PASS / FAIL / INCONCLUSIVE（后端原样透传）。 */
+  datasetGate: string;
+  datasetRowCount: number | null;
+  datasetSecurityCount: number | null;
+  /** 数据来源：`registry`（直读策略已绑定的 ds_* 数据集）| `rebuild`（按窗口从零重建）。 */
+  datasetSource: string;
+  /** `rebuild` 且由「直读失败」引起时的原因（否则 null）。 */
+  datasetSourceNote: string | null;
+  /** 直读命中时的已落库数据集坐标（`dataset_version.id`）；重建时为 null。 */
+  datasetVersionId: number | null;
+  /** `YYYY-MM-DD`。 */
+  startDate: string;
+  endDate: string;
+  strategyId: string;
+  strategyVersion: string;
+  recipeId: string;
+  /** 配方来源：策略文档内自带 / 请求显式指定。 */
+  recipeSource: string;
+  recipeFeatureIds: string[];
+  selectionSummary: string | null;
+  simulation: {
+    initialCapital: number | null;
+    maxPositions: number | null;
+    executionModel: string;
+    costModel: {
+      commissionRate?: number | null;
+      minCommission?: number | null;
+      stampDutyRate?: number | null;
+      transferFeeRate?: number | null;
+      slippageBps?: number | null;
+      impactBps?: number | null;
+    } | null;
+  };
+}
+
 export interface ClosedLoopRunViewModel {
   /** 是否已有一次真实运行结果（无 → UI 展示空态）。 */
   hasResult: boolean;
@@ -75,6 +118,8 @@ export interface ClosedLoopRunViewModel {
   stages: ClosedLoopStageRowViewModel[];
   /** 评估标量：仅当 evaluation 阶段真实 EXECUTED 且产出 evaluationRef 时非 null。 */
   evaluation: ClosedLoopEvaluationScalars | null;
+  /** 真实数据装配摘要；未使用真实装配（或装配失败）→ null。 */
+  assembly: ClosedLoopRunAssemblyViewModel | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +181,7 @@ export function emptyClosedLoopRun(): ClosedLoopRunViewModel {
     },
     stages: [],
     evaluation: null,
+    assembly: null,
   };
 }
 
@@ -172,6 +218,57 @@ function extractEvaluationScalars(
     winRatePct: quality ? asNum(quality.winRatePct) : null,
     profitFactor: quality ? asNum(quality.profitFactor) : null,
     completedTradeCount: quality ? asNum(quality.completedTradeCount) : null,
+  };
+}
+
+/**
+ * 解析真实数据装配摘要。
+ *
+ * 防御策略（与全文件一致）：非对象 / 缺 `datasetVersion` → null；
+ * 缺字段一律降级为 null 或空值，绝不臆造（例如缺 datasetVersion 即视为「无装配信息」）。
+ */
+function extractAssembly(
+  raw: unknown
+): ClosedLoopRunAssemblyViewModel | null {
+  if (!isRecord(raw)) return null;
+  const datasetVersion = asStr(raw.datasetVersion);
+  if (datasetVersion === null) return null;
+
+  const sim = isRecord(raw.simulation) ? raw.simulation : null;
+  const costRaw =
+    sim && isRecord(sim.costModel) ? sim.costModel : null;
+
+  return {
+    datasetVersion,
+    datasetGate: asStr(raw.datasetGate) ?? "UNKNOWN",
+    datasetRowCount: asNum(raw.datasetRowCount),
+    datasetSecurityCount: asNum(raw.datasetSecurityCount),
+    datasetSource: asStr(raw.datasetSource) ?? "UNKNOWN",
+    datasetSourceNote: asStr(raw.datasetSourceNote),
+    datasetVersionId: asNum(raw.datasetVersionId),
+    startDate: asStr(raw.startDate) ?? "",
+    endDate: asStr(raw.endDate) ?? "",
+    strategyId: asStr(raw.strategyId) ?? "",
+    strategyVersion: asStr(raw.strategyVersion) ?? "",
+    recipeId: asStr(raw.recipeId) ?? "",
+    recipeSource: asStr(raw.recipeSource) ?? "UNKNOWN",
+    recipeFeatureIds: asStrArray(raw.recipeFeatureIds),
+    selectionSummary: asStr(raw.selectionSummary),
+    simulation: {
+      initialCapital: sim ? asNum(sim.initialCapital) : null,
+      maxPositions: sim ? asNum(sim.maxPositions) : null,
+      executionModel: sim ? asStr(sim.executionModel) ?? "—" : "—",
+      costModel: costRaw
+        ? {
+            commissionRate: asNum(costRaw.commissionRate),
+            minCommission: asNum(costRaw.minCommission),
+            stampDutyRate: asNum(costRaw.stampDutyRate),
+            transferFeeRate: asNum(costRaw.transferFeeRate),
+            slippageBps: asNum(costRaw.slippageBps),
+            impactBps: asNum(costRaw.impactBps),
+          }
+        : null,
+    },
   };
 }
 
@@ -229,6 +326,7 @@ export function buildClosedLoopRunViewModel(
     },
     stages,
     evaluation: extractEvaluationScalars(stages, rawStages),
+    assembly: extractAssembly(raw.assembly),
   };
 }
 

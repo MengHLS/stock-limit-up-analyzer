@@ -44,5 +44,13 @@ export * as promoteForm from "./promoteForm";
 export { ResearchMatrixView } from "./ResearchMatrixView";
 export * as researchMatrix from "./researchMatrix";
 
+// 信号漏斗视图（把「守线 → 缩量 → 量价共振」这类**规则链**画成逐级漏斗；
+// 与矩阵视图互补：矩阵回答「哪一格」，漏斗回答「每一级各贡献了什么」）
+export { ObservationFunnelView } from "./ObservationFunnelView";
+export * as observationFunnel from "./observationFunnel";
+
 // 批量建分析（RESEARCH-002C）：矩阵 / 标准套件 / 我的模板
 export { BatchAnalysisDialog } from "./BatchAnalysisDialog";
+
+// 前端内存分页（长表格用；纯函数可单测）。服务端分页仍走 `PaginationBar` + limit/offset。
+export * as clientPagination from "./clientPagination";

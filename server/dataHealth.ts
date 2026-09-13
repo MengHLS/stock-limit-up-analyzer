@@ -4,7 +4,9 @@
  * 纪律（§0.2 证据优先级 / §27 Frontend Audit / §31 禁止项）：
  * - **只读真实证据**：一切判定来自 `docs/researchReadyGate/research_ready_gate.json`
  *   （由 `scripts/step12_certify_gate.mjs` 只读 TiDB 生成）。本模块**不重新计算 gate 判定**，
- *   只做「读取 → schema 校验 → 派生展示字段（域聚合/覆盖率/陈旧度）」；
+ *   只做「读取 → schema 校验 → 派生展示字段（域聚合/覆盖率/陈旧度）」。
+ *   「重跑认证」由 `server/researchReadyGate/recertify.ts` 承担：它同样**不计算**判定，
+ *   只是以服务端身份执行同一个脚本并读回产物 —— 唯一 SoT 始终是那个脚本；
  * - **不粉饰**：FAIL / PENDING 原样透传；文件缺失或 schema 不匹配 → 返回 `parseError`，
  *   **绝不构造一份「看起来正常」的假 gate**；
  * - **认证态 vs 实况态分离**：`readCertifiedGate()` 为认证快照（可复现，带 capturedAt）；
@@ -51,7 +53,11 @@ function resolveProjectRoot(): string {
   return candidates[0] ?? process.cwd();
 }
 
-const PROJECT_ROOT = resolveProjectRoot();
+/**
+ * 仓库根（对外导出：`server/researchReadyGate/recertify.ts` 需要同一坐标定位脚本与产物，
+ * 不得各自再算一套 —— 路径解析必须单源）。
+ */
+export const PROJECT_ROOT = resolveProjectRoot();
 
 /** 认证 gate 证据文件（唯一权威判定来源）。 */
 export const GATE_EVIDENCE_PATH = join(EVIDENCE_REL_DIR, "research_ready_gate.json");

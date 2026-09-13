@@ -741,6 +741,37 @@ export const closedLoopRunInputSchema = z.object({
   codeVersion: z.string().nullish(),
   executionModel: z.string().nullish(),
   parameterSet: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * 运行工作台「真实跑通」开关（FE-4 扩展）。
+   *
+   * `true` = 服务端按 `dateRange` **真实构建** ResearchDataset、真实读取
+   * `strategyId@strategyVersion` 的策略文档、并据此装配 data / research / backtest /
+   * evaluation / regime 五阶段的真实入参（见 `server/runWorkbenchAssembly/`）。
+   *
+   * 纪律：这是**唯一**允许服务端自行装配入参的开关；关闭（缺省）时行为与既有
+   * 完全一致 —— 只注入调用方显式声明的入参，拿不到的一律 BLOCKED。
+   * 装配任何一环失败（策略文档缺失 / recipe 未注册 / 成本模型缺失等）→ 抛错并附
+   * 稳定错误码，**绝不**降级为「假装跑过」。
+   */
+  useRealData: z.boolean().optional(),
+  /**
+   * 数据集构建护栏（仅 `useRealData=true` 时生效；对齐 `researchDataset.build` 选项）。
+   *
+   * 用途：先小步验证链路（如 10 个交易日 × 200 只证券）再放大 —— 真实全窗口构建在
+   * 跨境库上可能很慢。**不得**用护栏值冒充「全量已验证」。
+   */
+  datasetGuards: z
+    .object({
+      dataReady: z.boolean().optional(),
+      maxTradingDays: z.number().int().positive().optional(),
+      maxSecuritiesPerDay: z.number().int().positive().optional(),
+    })
+    .optional(),
+  /**
+   * 显式指定的执行配方 id（仅策略文档没有 `recipe` 时生效；见 `recipeRegistry`）。
+   * 缺省 → 服务端用显式声明的默认配方常量，并把事实写进 `assembly.recipeSource`。
+   */
+  recipeId: z.string().min(1).optional(),
   /** 阶段选择（缺省 = canonical 全 14 阶段；必须为保序子集）。 */
   stageIds: z.array(closedLoopStageIdSchema).optional(),
   /** evaluation 阶段的直供入参（权益曲线 + 可选交易明细 + 口径参数）。 */
@@ -802,6 +833,51 @@ export const closedLoopRunResultSchema = z.object({
   blockedSummary: z.array(closedLoopRunBlockedItemSchema),
   /** 本次装配覆盖率（与 readiness.wiring 同一探测函数）。 */
   wiring: closedLoopWiringSummarySchema,
+  /**
+   * 本次「真实跑通」装配摘要（`useRealData=true` 且装配成功时才有；否则 null）。
+   *
+   * 用途：让界面能如实说明「这次跑的数据从哪来、多大规模、按什么成本口径」——
+   * 没有这段，用户看到非 0 执行也无法判断数字是否可信。
+   */
+  assembly: z
+    .object({
+      datasetVersion: z.string(),
+      datasetGate: z.string(),
+      datasetRowCount: z.number().int().nonnegative(),
+      datasetSecurityCount: z.number().int().nonnegative(),
+      /**
+       * 数据来源：`registry`（直读策略已绑定的 ds_* 数据集）| `rebuild`（按窗口从零重建）。
+       * 界面据此如实展示「这次跑的到底是不是你绑定的那份数据」。
+       */
+      datasetSource: z.enum(["registry", "rebuild"]),
+      /** `rebuild` 且由「直读失败」引起时的原因（否则 null）。 */
+      datasetSourceNote: z.string().nullable(),
+      /** 直读命中时的已落库数据集坐标（`dataset_version.id`）；重建时为 null。 */
+      datasetVersionId: z.number().int().positive().nullable(),
+      dateRange: closedLoopDateRangeSchema,
+      strategyId: z.string(),
+      strategyVersion: z.string(),
+      recipeId: z.string(),
+      /** 配方来源：文档声明 | 调用方指定（含默认常量兜底）。 */
+      recipeSource: z.enum(["strategy-document", "explicit-request"]),
+      recipeFeatureIds: z.array(z.string()),
+      selectionSummary: z.string(),
+      simulation: z.object({
+        initialCapital: z.number(),
+        maxPositions: z.number().nullable(),
+        executionModel: z.string(),
+        /** 成本模型六字段（口径自描述，避免界面只能显示「已配置」）。 */
+        costModel: z.object({
+          commissionRate: z.number(),
+          stampDutyRate: z.number(),
+          transferFeeRate: z.number(),
+          slippageBps: z.number(),
+          lotSize: z.number(),
+          minCommission: z.number(),
+        }),
+      }),
+    })
+    .nullable(),
 });
 export type ClosedLoopRunResult = z.infer<typeof closedLoopRunResultSchema>;
 export type ResearchRunReadiness = z.infer<typeof researchRunReadinessSchema>;

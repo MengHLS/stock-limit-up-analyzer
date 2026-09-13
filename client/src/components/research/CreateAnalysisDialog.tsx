@@ -25,7 +25,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ChevronDown, Loader2, Plus, Sigma, TriangleAlert } from "lucide-react";
+import { ChevronDown, Loader2, Plus, Sigma, Sparkles, TriangleAlert } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -182,8 +182,8 @@ function WindowEditor({
       </div>
       {/* 把口径摊开：同一个「前 5 日最大跌幅」，锚在 T 与锚在 T+1 是两个不同的变量 */}
       <p className="text-[11px] text-muted-foreground">
-        实际使用的变量：<span className="font-mono">{variable}</span>
-        {reuses ? "（Dataset 既有口径，除以事件日收盘）" : "（以本窗起点收盘为基准）"}
+        实际变量：<span className="font-mono">{variable}</span>
+        {reuses ? "（Dataset 既有口径 ÷ 事件日收盘）" : "（以本窗起点收盘为基准）"}
       </p>
     </div>
   );
@@ -216,6 +216,7 @@ export function CreateAnalysisDialog({
       outcomes: variables.data?.outcomes ?? [],
       dimensions: variables.data?.dimensions ?? [],
       segmentRange,
+      ...(variables.data?.observations !== undefined ? { observations: variables.data.observations } : {}),
     }),
     [variables.data, segmentRange],
   );
@@ -364,23 +365,44 @@ export function CreateAnalysisDialog({
             <Sigma className="h-4 w-4" /> 新建分析
           </DialogTitle>
           <DialogDescription>
-            分析属于当前 Run。变量选项来自这个 Dataset 版本真实存在的数据（
+            分析属于当前 Run；变量选项来自这份 Dataset 真实存在的数据
             {variables.data
-              ? `${catalog.features.length} 个 T 日可观测变量 / ${catalog.outcomes.length} 个未来结果变量`
-              : "加载中…"}
-            ）。
+              ? `（${catalog.features.length} 个 T 日变量 / ${catalog.outcomes.length} 个未来结果）`
+              : "（加载中…）"}
+            。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
+          <div className="space-y-2">
+            <SectionTitle index="①" title="你想回答什么问题" hint="选一句最贴近的，参数按它展开。" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              {ANALYSIS_TYPE_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => switchType(o.value)}
+                  className={`rounded-md border p-2 text-left text-xs transition-colors ${
+                    form.analysisType === o.value ? "border-primary bg-muted/60" : "hover:bg-muted/40"
+                  }`}
+                >
+                  <span className="block font-medium">{o.question}</span>
+                  <span className="mt-0.5 block text-muted-foreground">{o.hint}</span>
+                  <span className="mt-1 block text-[10px] text-muted-foreground/80">
+                    类型：{o.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {variables.data && (
-            <div className="space-y-2">
-              <SectionTitle
-                index="⓪"
-                title="从例子开始（可选）"
-                hint="点一下就把下面的参数全部填好；也可以完全跳过，自己配。"
-              />
-              <div className="grid gap-2 sm:grid-cols-2">
+            <details className="rounded-md border bg-muted/20 px-3 py-2">
+              <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                <Sparkles className="h-3 w-3 shrink-0" />
+                从例子开始（点一下填好全部参数）
+              </summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
                 {ANALYSIS_EXAMPLES.map((example) => {
                   const missing = missingVariablesForExample(example, {
                     features: catalog.features,
@@ -410,30 +432,8 @@ export function CreateAnalysisDialog({
                   );
                 })}
               </div>
-            </div>
+            </details>
           )}
-
-          <div className="space-y-2">
-            <SectionTitle index="①" title="你想回答什么问题" hint="选一句最贴近的问题，参数会按它来展开。" />
-            <div className="grid gap-2 sm:grid-cols-2">
-              {ANALYSIS_TYPE_OPTIONS.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => switchType(o.value)}
-                  className={`rounded-md border p-2 text-left text-xs transition-colors ${
-                    form.analysisType === o.value ? "border-primary bg-muted/60" : "hover:bg-muted/40"
-                  }`}
-                >
-                  <span className="block font-medium">{o.question}</span>
-                  <span className="mt-0.5 block text-muted-foreground">{o.hint}</span>
-                  <span className="mt-1 block text-[10px] text-muted-foreground/80">
-                    类型：{o.label}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
 
           {!catalogReady && open && (
             <p className="text-xs text-muted-foreground">
@@ -449,8 +449,8 @@ export function CreateAnalysisDialog({
                   title="需要哪些参数"
                   hint={
                     form.analysisType === "SEGMENT_RELATION"
-                      ? "把行情切成先后两段：前一段用来分档，后一段用来看表现。两段不能重叠。"
-                      : "只有这类分析必填的字段会出现在这里。"
+                      ? "把行情切成先后两段：前段分档，后段看表现；两段不能重叠。"
+                      : "只出现这类分析必填的字段。"
                   }
                 />
 
@@ -486,7 +486,7 @@ export function CreateAnalysisDialog({
                           onChange={(e) => update({ windowBands: e.target.value })}
                         />
                         <p className="text-xs text-muted-foreground">
-                          相同取值不会被拆到不同档，实际档数可能少于设定值（结果会如实说明）。
+                          相同取值不拆档，实际档数可能少于设定值（结果会说明）。
                         </p>
                       </div>
                     </div>
@@ -544,7 +544,7 @@ export function CreateAnalysisDialog({
                         onChange={(e) => update({ quantileGroups: e.target.value })}
                       />
                       <p className="text-xs text-muted-foreground">
-                        相同取值不会被拆到不同档，实际档数可能少于设定值（结果会如实说明）。
+                        相同取值不拆档，实际档数可能少于设定值（结果会说明）。
                       </p>
                     </div>
                   )}
@@ -642,7 +642,7 @@ export function CreateAnalysisDialog({
                       })}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      可选视界来自这个 Dataset 真实存在的天数；MFE / MAE / 最大回撤只在它们存在的视界产出。
+                      可选视界来自这份 Dataset 真实存在的天数；MFE / MAE / 最大回撤只在其存在的视界产出。
                     </p>
                   </div>
                 )}
@@ -666,7 +666,7 @@ export function CreateAnalysisDialog({
                   <span className="space-y-0.5">
                     <span className="block text-xs font-medium">
                       <span className="mr-1.5 text-muted-foreground">③</span>
-                      高级设置（默认不需要动）
+                      名称与条件（可不动）
                       {optionalConditions && (
                         <span className="ml-2 text-muted-foreground">
                           {conditionCount > 0 ? `已设 ${conditionCount} 条条件` : "未设条件"}
@@ -674,7 +674,7 @@ export function CreateAnalysisDialog({
                       )}
                     </span>
                     <span className="block text-xs text-muted-foreground">
-                      分析名称（留空将自动命名）、以及可选的样本条件。
+                      分析名称留空会自动命名；条件不设 = 用全部样本。
                     </span>
                   </span>
                   <ChevronDown
@@ -695,9 +695,7 @@ export function CreateAnalysisDialog({
                         placeholder={suggestedName}
                         maxLength={200}
                       />
-                      <p className="text-xs text-muted-foreground">
-                        留空将命名为「{suggestedName}」
-                      </p>
+                      <p className="text-xs text-muted-foreground">留空将命名为「{suggestedName}」</p>
                     </div>
 
                     {optionalConditions && (
@@ -706,7 +704,7 @@ export function CreateAnalysisDialog({
                         onChange={(next) => update({ conditions: next })}
                         catalog={catalog}
                         title="样本条件（可选）"
-                        hint="不设条件 = 用全部样本；加了条件就只看满足条件的样本。"
+                        hint="不设 = 用全部样本；设了 = 只看满足条件的样本。"
                       />
                     )}
                   </div>

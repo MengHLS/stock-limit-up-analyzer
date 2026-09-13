@@ -1,0 +1,7 @@
+{
+  "lines": [
+    "策略数 = 2",
+    "  cand-270001 → 1.0.0(Draft)",
+    "  limit-up-baseline → 1.1.0(Draft), 1.0.0(Draft)"
+  ]
+}

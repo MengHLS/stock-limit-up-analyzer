@@ -571,7 +571,7 @@ export function CandidateSketchFields({
         status={statuses[0]}
         open={isOpen(statuses[0])}
         onToggle={() => toggle("what", !isOpen(statuses[0]))}
-        hint="这一步只定「观察哪一类事件」。事件类型是转正必填；事件参数可以留空。"
+        hint="观察哪一类事件。"
       >
         {entryRaw !== null ? (
           <RawBlockNotice state={entryRaw} onDiscard={() => setBlock("entryRule", { kind: "empty" })} />
@@ -594,8 +594,7 @@ export function CandidateSketchFields({
 
             {entryStructured?.event === "CUSTOM_EVENT" && (
               <p className="text-[11px] text-amber-800">
-                自定义事件本身没有语义，转正后只认得一个空的 CUSTOM_EVENT —— 请在下面的
-                「事件参数」里给出 eventCode 之类的具体标识。
+                自定义事件在转正后只留一个空 CUSTOM_EVENT，请在「事件参数」里给出 eventCode。
               </p>
             )}
 
@@ -604,13 +603,12 @@ export function CandidateSketchFields({
               hint={
                 (entryStructured?.eventParams ?? []).filter((r) => r.key.trim() !== "").length > 0
                   ? `${(entryStructured?.eventParams ?? []).filter((r) => r.key.trim() !== "").length} 项`
-                  : "没有就不用展开"
+                  : undefined
               }
             >
               <div className="space-y-1">
                 <p className="text-[10px] text-muted-foreground">
-                  键名**没有白名单**：服务端对 `eventParams` 的键名不作限制，会**原样**透传到
-                  `definition.entry.event.params`。下面是两个常见键，点「填入」直接加一行。
+                  键名无白名单，会原样透传给策略；下面是两个常见键。
                 </p>
                 <ul className="space-y-1">
                   {CANDIDATE_EVENT_PARAM_HINTS.map((hint) => (
@@ -649,41 +647,41 @@ export function CandidateSketchFields({
         )}
       </SegmentShell>
 
-      {/* ② 什么价买 -------------------------------------------------------- */}
+      {/* ② 什么条件买（可空） ------------------------------------------------ */}
       <SegmentShell
         index={2}
         status={statuses[1]}
         open={isOpen(statuses[1])}
-        onToggle={() => toggle("when", !isOpen(statuses[1]))}
-        hint="这一段有「什么条件买」和「什么时候买」两组东西。买入条件决定「哪一天算满足」；下面三项是**三个互不相同的必填项**：观察窗口（看事件后哪几根）、触发时点（哪天产生信号）、入场时点（信号出现后在哪根 bar 成交）。三项都没有默认值，缺哪一项就看段首那条琥珀清单。"
+        onToggle={() => toggle("condition", !isOpen(statuses[1]))}
+        hint="留空 = 观察窗口里出现事件就买。加了条件 = 窗口内第一个全部满足的交易日才是买入信号。"
       >
-        <Section title="满足这些条件才买（全部满足才产生买入信号）">
-          {filterRaw !== null ? (
-            <RawBlockNotice state={filterRaw} onDiscard={() => setBlock("filterRule", { kind: "empty" })} />
-          ) : drafts.filterRule.kind === "empty" ? (
-            <div className="space-y-2">
-              <p className="text-[10px] text-muted-foreground">
-                留空 = 「观察窗口里出现事件就买」，不加任何价格/量能条件。
-                要表达「T 日涨停 → 观察 5 日 → 回撤到某个价位才买」，就在这里加条件
-                —— 窗口内**第一个**同时满足全部条件的交易日就是买入信号日（配合下面的触发时点）。
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setBlock("filterRule", { kind: "structured", draft: emptyFilterRuleGroups() })}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" /> 添加买入条件
-              </Button>
-            </div>
-          ) : (
-            <FilterRuleForm
-              groups={filterGroups}
-              onChange={(next) => setBlock("filterRule", { kind: "structured", draft: next })}
-            />
-          )}
-        </Section>
+        {filterRaw !== null ? (
+          <RawBlockNotice state={filterRaw} onDiscard={() => setBlock("filterRule", { kind: "empty" })} />
+        ) : drafts.filterRule.kind === "empty" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setBlock("filterRule", { kind: "structured", draft: emptyFilterRuleGroups() })}
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" /> 添加买入条件
+          </Button>
+        ) : (
+          <FilterRuleForm
+            groups={filterGroups}
+            onChange={(next) => setBlock("filterRule", { kind: "structured", draft: next })}
+          />
+        )}
+      </SegmentShell>
 
+      {/* ③ 什么时候买（三项必填） -------------------------------------------- */}
+      <SegmentShell
+        index={3}
+        status={statuses[2]}
+        open={isOpen(statuses[2])}
+        onToggle={() => toggle("when", !isOpen(statuses[2]))}
+        hint="三项互不相同、都必填，没有默认值。缺哪一项看段首清单。"
+      >
         {entryRaw !== null ? (
           <RawBlockNotice state={entryRaw} onDiscard={() => setBlock("entryRule", { kind: "empty" })} />
         ) : (
@@ -693,18 +691,13 @@ export function CandidateSketchFields({
               name="entryRule.timing"
               valueKey={entryStructured?.timing}
               missing={missingAt("when", "entryRule.timing")}
-              hint={
-                CANDIDATE_ENTRY_TIMING_OPTIONS.find((o) => o.value === entryStructured?.timing)?.note
-                ?? "决定「信号在哪根 bar、成交在哪根 bar、按什么价成交」。"
-                  + "**与下面的「触发时点」不是同一个字段**：触发时点回答「什么时候产生信号」，"
-                  + "这一项回答「信号出现后在哪根 bar 成交」。两个都要选。"
-              }
+              hint={CANDIDATE_ENTRY_TIMING_OPTIONS.find((o) => o.value === entryStructured?.timing)?.note}
             >
               <EnumSelect
                 value={entryStructured?.timing ?? ""}
                 options={CANDIDATE_ENTRY_TIMING_OPTIONS}
                 onChange={(value) => setEntry({ timing: value })}
-                emptyLabel="选一个入场时点"
+                emptyLabel="信号出现后在哪根 bar 成交"
               />
             </Field>
 
@@ -713,7 +706,7 @@ export function CandidateSketchFields({
               missing={missingAt("when", "entryRule.observationWindow")}
             >
               <div className="grid gap-3 sm:grid-cols-3">
-                <Field label="起始" name="…observationWindow.start" hint="≥ 1 的整数">
+                <Field label="起始" name="…observationWindow.start">
                   <NumInput
                     value={entryStructured?.observationWindow.start ?? ""}
                     placeholder="如 1"
@@ -724,7 +717,7 @@ export function CandidateSketchFields({
                     }
                   />
                 </Field>
-                <Field label="结束" name="…observationWindow.end" hint="≥ 起始">
+                <Field label="结束" name="…observationWindow.end">
                   <NumInput
                     value={entryStructured?.observationWindow.end ?? ""}
                     placeholder="如 3"
@@ -735,7 +728,7 @@ export function CandidateSketchFields({
                     }
                   />
                 </Field>
-                <Field label="单位" name="…observationWindow.unit" hint="必须显式选，不会被默认">
+                <Field label="单位" name="…observationWindow.unit" hint="交易日 / 自然日">
                   <EnumSelect
                     value={entryStructured?.observationWindow.unit ?? ""}
                     options={CANDIDATE_WINDOW_UNIT_OPTIONS}
@@ -755,44 +748,40 @@ export function CandidateSketchFields({
               name="entryRule.extra.trigger"
               valueKey={entryStructured?.trigger}
               missing={missingAt("when", "entryRule.trigger")}
-              hint={
-                CANDIDATE_TRIGGER_OPTIONS.find((o) => o.value === entryStructured?.trigger)?.note
-                ?? "条件满足后，在哪一天产生信号。要表达「T 日涨停 → 观察 5 日 → 回踩到位才买」，"
-                  + "选「首个有效日」。**与上面的「入场时点」是两件事**，两个都要选。"
-              }
+              hint={CANDIDATE_TRIGGER_OPTIONS.find((o) => o.value === entryStructured?.trigger)?.note}
             >
               <EnumSelect
                 value={entryStructured?.trigger ?? ""}
                 options={CANDIDATE_TRIGGER_OPTIONS}
                 onChange={(value) => setEntry({ trigger: value })}
-                emptyLabel="选一个触发时点"
+                emptyLabel="条件满足后哪天出信号"
               />
             </Field>
           </>
         )}
       </SegmentShell>
 
-      {/* ③ 怎么卖 ---------------------------------------------------------- */}
+      {/* ④ 怎么卖 ---------------------------------------------------------- */}
       <SegmentShell
-        index={3}
-        status={statuses[2]}
-        open={isOpen(statuses[2])}
-        onToggle={() => toggle("exit", !isOpen(statuses[2]))}
-        hint="三项都是可选的。**转正不要求**这里非空 —— 但三项都留空等于「没有出场规则」，回测会一路持有到期末，通常不是你想表达的。"
+        index={4}
+        status={statuses[3]}
+        open={isOpen(statuses[3])}
+        onToggle={() => toggle("exit", !isOpen(statuses[3]))}
+        hint="三项都可留空；都留空 = 持有到回测期末。"
       >
         {exitRaw !== null ? (
           <RawBlockNotice state={exitRaw} onDiscard={() => setBlock("exitRule", { kind: "empty" })} />
         ) : (
           <>
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="止损" name="exitRule.stopLoss" hint="比例，0.05 = 亏 5% 卖出">
+              <Field label="止损" name="exitRule.stopLoss" hint="0.05 = 亏 5%">
                 <NumInput
                   value={exitStructured?.stopLoss ?? ""}
                   placeholder="如 0.05"
                   onChange={(value) => setExit({ stopLoss: value })}
                 />
               </Field>
-              <Field label="止盈" name="exitRule.takeProfit" hint="比例，0.10 = 赚 10% 卖出">
+              <Field label="止盈" name="exitRule.takeProfit" hint="0.10 = 赚 10%">
                 <NumInput
                   value={exitStructured?.takeProfit ?? ""}
                   placeholder="如 0.1"
@@ -812,20 +801,20 @@ export function CandidateSketchFields({
                 (text) => text.trim() === "",
               )) && (
               <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] text-sky-900">
-                三项都为空：这份草图**没有出场规则**。这不是错误（转正会接受），但请确认这就是你的意思。
+                没有出场规则，会一路持有到回测期末。转正会接受，确认这是你要的即可。
               </p>
             )}
           </>
         )}
       </SegmentShell>
 
-      {/* ④ 买多少 · 最多持几只 ---------------------------------------------- */}
+      {/* ⑤ 买多少 · 最多持几只 ---------------------------------------------- */}
       <SegmentShell
-        index={4}
-        status={statuses[3]}
-        open={isOpen(statuses[3])}
-        onToggle={() => toggle("sizing", !isOpen(statuses[3]))}
-        hint="「最多同时持有几只」是转正必填，且它是 position.maxPositions 的唯一来源；其余三项也是必填。"
+        index={5}
+        status={statuses[4]}
+        open={isOpen(statuses[4])}
+        onToggle={() => toggle("sizing", !isOpen(statuses[4]))}
+        hint="三项必填。"
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
@@ -873,7 +862,6 @@ export function CandidateSketchFields({
                 name="…position.sizingMethod"
                 valueKey={entryStructured?.position.sizingMethod}
                 missing={missingAt("sizing", "entryRule.position.sizingMethod")}
-                hint="怎么决定每只买多少钱"
               >
                 <EnumSelect
                   value={entryStructured?.position.sizingMethod ?? ""}
@@ -901,8 +889,7 @@ export function CandidateSketchFields({
                 name="…execution.lotSize"
                 missing={missingAt("sizing", "entryRule.execution.lotSize")}
                 hint="A 股是 100"
-              >
-                <NumInput
+              >                <NumInput
                   value={entryStructured?.execution.lotSize ?? ""}
                   placeholder="如 100"
                   onChange={(value) => setEntry({ execution: { ...(entryStructured ?? emptyEntryRuleDraft()).execution, lotSize: value } })}
@@ -910,10 +897,9 @@ export function CandidateSketchFields({
               </Field>
             </div>
 
-            <Advanced title="进阶：其他仓位与风控落点（一般不用填）" hint="与上方语义重叠，转正时不能两处都填">
+            <Advanced title="进阶：其他仓位与风控落点" hint="与上方语义重叠，两处都填会被拒">
               <p className="text-[10px] text-muted-foreground">
-                这些是后端定义里另几个可选的落点。它们与上面的字段**说的是同一件事的不同位置**
-                （比如「单标的仓位上限」这里也有一份），两处都填会在转正时被明确拒绝。
+                这些是后端定义里另几个可选的落点，与上面的字段说的是同一件事的不同位置。
               </p>
               <div className="grid gap-3 sm:grid-cols-3">
                 <Field label="单笔比例" name="position.positionRatio">
@@ -1001,13 +987,13 @@ export function CandidateSketchFields({
         )}
       </SegmentShell>
 
-      {/* ⑤ 成本与资金 ------------------------------------------------------- */}
+      {/* ⑥ 成本与资金 ------------------------------------------------------- */}
       <SegmentShell
-        index={5}
-        status={statuses[4]}
-        open={isOpen(statuses[4])}
-        onToggle={() => toggle("cost", !isOpen(statuses[4]))}
-        hint="初始资金与六项成本费率都是转正必填，而且**没有默认值** —— 所以这里给了一键套用，但你得自己按下去。"
+        index={6}
+        status={statuses[5]}
+        open={isOpen(statuses[5])}
+        onToggle={() => toggle("cost", !isOpen(statuses[5]))}
+        hint="初始资金与六项费率，都没有默认值 —— 用一键预设也得你自己按下去。"
       >
         {entryRaw !== null ? (
           <RawBlockNotice state={entryRaw} onDiscard={() => setBlock("entryRule", { kind: "empty" })} />
@@ -1025,13 +1011,13 @@ export function CandidateSketchFields({
         )}
       </SegmentShell>
 
-      {/* ⑥ 参数搜索空间 ----------------------------------------------------- */}
+      {/* ⑦ 参数搜索空间 ----------------------------------------------------- */}
       <SegmentShell
-        index={6}
-        status={statuses[5]}
-        open={isOpen(statuses[5])}
-        onToggle={() => toggle("parameters", !isOpen(statuses[5]))}
-        hint="这一段是**可选**的：不填就是「不做参数搜索」。填了的参数角色恒为「待搜索（TUNABLE）」，因此数值参数必须给出 min 与 max。"
+        index={7}
+        status={statuses[6]}
+        open={isOpen(statuses[6])}
+        onToggle={() => toggle("parameters", !isOpen(statuses[6]))}
+        hint="可选；填了就必须给 min 与 max。"
       >
         {parameterRaw !== null ? (
           <RawBlockNotice state={parameterRaw} onDiscard={() => setBlock("parameterSpace", { kind: "empty" })} />
@@ -1412,13 +1398,12 @@ function FilterRuleForm({
       </div>
 
       {conditionsUseNonConjunction(groups) && (
-        <p className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] text-amber-900">
+        <p
+          className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] text-amber-900"
+          title="Strategy 的 entry.conditions 是一个纯 AND 列表，没有逻辑运算符字段（definitionBuild#buildConditions）。"
+        >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-          <span>
-            你用了「或者 / 并且不」。⚠️ **转正会把所有条件当成「并且」** —— Strategy 的条件模型里没有逻辑
-            运算符的位置（`entry.conditions` 就是一个 AND 列表），所以「或」会被静默变成「且」，含义会变，
-            而且**不会报错**。若这不是你要的，请拆成多条独立条件，或只保留「并且」。
-          </span>
+          <span>「或 / 且非」在转正时会被当成「且」，不报错但含义会变。</span>
         </p>
       )}
 

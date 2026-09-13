@@ -41,6 +41,11 @@ export interface SyntheticDatasetOptions {
   maxPathDay?: number;
   /** 是否生成 prefix（-20..0）；缺省 true。 */
   withPrefix?: boolean;
+  /**
+   * 是否生成 post（1..maxPathDay，观察日 K 线）；缺省跟随 `withPrefix`。
+   * 设为 `false` 可造出「有 path 但无 post」的数据集，用于验证**观察日变量确实不可用**。
+   */
+  withPost?: boolean;
 }
 
 export interface SyntheticDataset {
@@ -50,6 +55,8 @@ export interface SyntheticDataset {
   paths: FirstLimitPullbackPath[];
   outcomes: FirstLimitPullbackOutcome[];
   prefixBars: FirstLimitPullbackRawBar[];
+  /** 观察日 K 线（T+1..T+maxPathDay）。`withPost === false` 时为空数组。 */
+  postBars: FirstLimitPullbackRawBar[];
   reader: InMemoryResearchDatasetReader;
 }
 
@@ -72,6 +79,8 @@ export function buildSyntheticDataset(options: SyntheticDatasetOptions): Synthet
   const paths: FirstLimitPullbackPath[] = [];
   const outcomes: FirstLimitPullbackOutcome[] = [];
   const prefixBars: FirstLimitPullbackRawBar[] = [];
+  const postBars: FirstLimitPullbackRawBar[] = [];
+  const withPost = options.withPost ?? withPrefix;
 
   for (const spec of options.events) {
     const tradeDate = dateOf(spec.index, spec.tradeDate);
@@ -118,6 +127,25 @@ export function buildSyntheticDataset(options: SyntheticDatasetOptions): Synthet
 
     for (let rd = 1; rd <= maxPathDay; rd += 1) {
       const ret = spec.futureReturn(rd);
+      // 观察日 K 线（T+1..T+maxPathDay）：与 path 同源同值，但**角色不同**——
+      // path 是「事后路径（打标签）」，post 是「到了那天能看到的东西（可当条件）」。
+      // 夹具让二者同值，是为了让「用 post 变量算出的值」可被 path 交叉验证。
+      if (withPost) {
+        const px = close * (1 + (ret ?? 0));
+        postBars.push({
+          datasetVersionId,
+          eventId,
+          symbol,
+          tradeDate,
+          relativeDay: rd,
+          open: px,
+          high: px + 0.05,
+          low: px - 0.05,
+          close: px,
+          volume: 1_000_000,
+          amount: 10_000_000,
+        });
+      }
       paths.push({
         datasetVersionId,
         eventId,
@@ -162,10 +190,11 @@ export function buildSyntheticDataset(options: SyntheticDatasetOptions): Synthet
     totalEvents: events.length,
     horizons,
     pathRelativeDayRange: events.length === 0 ? null : { min: 1, max: maxPathDay },
+    postRelativeDayRange: events.length === 0 || !withPost ? null : { min: 1, max: maxPathDay },
   };
 
-  const reader = new InMemoryResearchDatasetReader({ context, events, paths, outcomes, prefixBars });
-  return { datasetVersionId, context, events, paths, outcomes, prefixBars, reader };
+  const reader = new InMemoryResearchDatasetReader({ context, events, paths, outcomes, prefixBars, postBars });
+  return { datasetVersionId, context, events, paths, outcomes, prefixBars, postBars, reader };
 }
 
 /** 生成 N 个事件：turnover 均匀递增 1..N，future return 随 turnover 线性递增。 */

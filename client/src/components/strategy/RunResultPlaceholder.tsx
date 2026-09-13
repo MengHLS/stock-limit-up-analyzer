@@ -91,7 +91,7 @@ export function RunResultPlaceholder({
       description={
         result.hasData
           ? "运行结果（真实数据）"
-          : "后端运行端点尚未就绪，以下为结构预留（Empty State）"
+          : "尚未发起运行 —— 点上方「运行策略」后此处渲染真实执行轨迹；入参未齐备的阶段会如实标为 BLOCKED。"
       }
     >
       {/* 指标卡（无数据时全部「—」，不伪造） */}

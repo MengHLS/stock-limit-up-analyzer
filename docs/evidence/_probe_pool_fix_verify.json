@@ -1,0 +1,30 @@
+{
+  "poolConfig": {
+    "connectionLimit": 16,
+    "maxIdle": 15,
+    "idleTimeout": 600000,
+    "recycleTimerArmed": true
+  },
+  "getLeaderCandidates": {
+    "ok": true,
+    "elapsedMs": 47103,
+    "date": "2026-09-10",
+    "totalMainBoardLimitUps": 34,
+    "candidateCount": 20
+  },
+  "transientRecovery": {
+    "ok": true,
+    "attempts": 2,
+    "value": "recovered"
+  },
+  "semanticNoRetry": {
+    "threw": true,
+    "attempts": 1,
+    "noRetry": true
+  },
+  "transientClassifierSelfCheck": {
+    "econnreset": true,
+    "wrapped": true,
+    "semantic": false
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "checkedAt": "2026-09-13T06:04:15.139Z",
+  "experiments": {
+    "error": "Unknown column 'name' in 'field list'"
+  },
+  "runs": [
+    {
+      "id": 2,
+      "experimentId": "EXP-E2E-B9F42F",
+      "status": "succeeded"
+    },
+    {
+      "id": 1,
+      "experimentId": "EXP-E2E-6450E1",
+      "status": "succeeded"
+    }
+  ],
+  "research_datasets_cols": [
+    "id",
+    "datasetId",
+    "datasetVersion",
+    "name",
+    "startDate",
+    "endDate",
+    "asOfPerTradeDate",
+    "asOf",
+    "rowsFingerprint",
+    "policySetFingerprint",
+    "versionSnapshotFingerprint",
+    "versionSnapshotJson",
+    "dataSnapshotJson",
+    "universeDefinitionJson",
+    "rowCount",
+    "gate",
+    "gateNotesJson",
+    "createdAt",
+    "rowsTableName"
+  ],
+  "research_datasets_brief": [
+    {
+      "id": 150001,
+      "name": "partitioned-dataset",
+      "datasetVersion": "rd-1.0.0-1-3f2f5ebed044dd52",
+      "rowCount": 1000
+    },
+    {
+      "id": 120001,
+      "name": "partitioned-dataset",
+      "datasetVersion": "rd-1.0.0-1-affb630f930df2a9",
+      "rowCount": 163
+    },
+    {
+      "id": 90002,
+      "name": "e2e-tradable-daily-certified",
+      "datasetVersion": "rd-1.0.0-1-fd1c487f2fe19e27",
+      "rowCount": 25618
+    },
+    {
+      "id": 90001,
+      "name": "e2e-tradable-daily",
+      "datasetVersion": "rd-1.0.0-1-0ee362e62d94505a",
+      "rowCount": 25618
+    },
+    {
+      "id": 60001,
+      "name": "e2e-tradable-daily",
+      "datasetVersion": "rd-1.0.0-1-a7c8a5bc93f7d663",
+      "rowCount": 25618
+    },
+    {
+      "id": 30001,
+      "name": "universe-tradable-daily",
+      "datasetVersion": "rd-1.0.0-1-6d8b8d3d9e3a989a",
+      "rowCount": 20391
+    },
+    {
+      "id": 1,
+      "name": "universe-tradable-daily",
+      "datasetVersion": "rd-1.0.0-1-a8ad818811f2a010",
+      "rowCount": 0
+    }
+  ],
+  "dataset_version": {
+    "error": "Unknown column 'label' in 'field list'"
+  },
+  "dataset_definition": [
+    {
+      "id": 120001,
+      "datasetCode": "first_limit_pullback",
+      "name": "首板回踩"
+    }
+  ]
+}

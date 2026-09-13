@@ -105,6 +105,8 @@ export interface AssembledSampleSet {
   /** 真正加载的变量清单。 */
   features: string[];
   outcomes: string[];
+  /** 真正加载的**观察日**变量清单（T+k 可观测）。 */
+  observations: string[];
   /** 本次装配实际使用的列投影（性能证据；可用于核对是否发生了裁剪）。 */
   columnProjection: ResearchColumnProjection;
   /** 装配耗时（毫秒）。 */
@@ -115,6 +117,7 @@ export interface AssembledSampleSet {
 interface PreparedChunk {
   items: FirstLimitPullbackEvent[];
   prefixBars: FirstLimitPullbackRawBar[];
+  postBars: FirstLimitPullbackRawBar[];
   pathRows: FirstLimitPullbackPath[];
   outcomeRows: FirstLimitPullbackOutcome[];
 }
@@ -168,9 +171,12 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
 
   const featureDefs = requirement.features.map((name) => catalog.resolveFeature(name));
   const outcomeDefs = requirement.outcomes.map((name) => catalog.resolveOutcome(name));
+  const observationDefs = (requirement.observations ?? []).map((name) => catalog.resolveObservation(name));
 
   const prefixDays = new Set<number>();
   for (const def of featureDefs) for (const d of def.prefixRelativeDays ?? []) prefixDays.add(d);
+  const postDays = new Set<number>();
+  for (const def of observationDefs) for (const d of def.postRelativeDays ?? []) postDays.add(d);
   const pathDays = new Set<number>();
   const outcomeHorizons = new Set<number>();
   for (const def of outcomeDefs) {
@@ -180,7 +186,9 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
   // 结果变量若以**事件日 K 线**为比较基准（声明了 `needsEventBar`），必须把相对日 0
   // 一并并入 prefix 装载范围 —— 否则 `OutcomeSources.eventBar` 恒为 undefined，
   // 这类变量会静默全 null（既不报错也不告警，正是最难发现的那种失败）。
+  // 观察日变量的 `needsEventBar` 同理（它们读的是同一根 rd=0 基准线）。
   if (outcomeDefs.some((def) => def.needsEventBar === true)) prefixDays.add(0);
+  if (observationDefs.some((def) => def.needsEventBar === true)) prefixDays.add(0);
 
   // ---- 列投影：从变量定义自动派生（读取即声明），再下推到读取层 ----
   const projection: ResearchColumnProjection = options.columnProjection === "all"
@@ -188,8 +196,10 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
     : (options.columnProjection ?? deriveColumnProjection({
         featureDefs,
         outcomeDefs,
+        observationDefs,
         dimensionKeys,
         prefixDays: [...prefixDays],
+        postDays: [...postDays],
         pathDays: [...pathDays],
         outcomeHorizons: [...outcomeHorizons],
       }));
@@ -229,9 +239,12 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
       const items = page.items;
       // 不 await：让这一批的窗口数据与下一批的事件分页同时在飞（流水线的全部意义所在）。
       pending.push((async (): Promise<PreparedChunk> => {
-        const [prefixBars, pathRows, outcomeRows] = await Promise.all([
+        const [prefixBars, postBars, pathRows, outcomeRows] = await Promise.all([
           prefixDays.size > 0
             ? reader.loadPrefixBars({ datasetVersionId, eventIds, relativeDays: [...prefixDays], columns: projection.prefix })
+            : Promise.resolve([] as FirstLimitPullbackRawBar[]),
+          postDays.size > 0
+            ? reader.loadPostBars({ datasetVersionId, eventIds, relativeDays: [...postDays], columns: projection.post })
             : Promise.resolve([] as FirstLimitPullbackRawBar[]),
           pathDays.size > 0
             ? reader.loadPaths({ datasetVersionId, eventIds, relativeDays: [...pathDays], columns: projection.path })
@@ -240,7 +253,7 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
             ? reader.loadOutcomes({ datasetVersionId, eventIds, horizons: [...outcomeHorizons], columns: projection.outcome })
             : Promise.resolve([] as FirstLimitPullbackOutcome[]),
         ]);
-        return { items, prefixBars, pathRows, outcomeRows };
+        return { items, prefixBars, postBars, pathRows, outcomeRows };
       })());
     }
   };
@@ -251,19 +264,22 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
       const nextChunk = pending.shift();
       if (nextChunk === undefined) break;
 
-      const { items, prefixBars, pathRows, outcomeRows } = await nextChunk;
+      const { items, prefixBars, postBars, pathRows, outcomeRows } = await nextChunk;
       chunkCount += 1;
 
       // 守卫只在首批打开（默认）：真实数据 + 几乎零成本，用于捕获「只在特定取值下才读某列」的分支。
       const guard = guardAll || (guardFirstChunk && chunkCount === 1) ? guardRow : identityGuard;
 
       const prefixByEvent = indexByEventId(prefixBars);
+      const postByEvent = indexByEventId(postBars);
       const pathByEvent = indexByEventId(pathRows);
       const outcomeByEvent = indexByEventId(outcomeRows);
 
       for (const event of items) {
         const prefixMap = new Map<number, FirstLimitPullbackRawBar>();
         for (const bar of prefixByEvent.get(event.eventId) ?? []) prefixMap.set(bar.relativeDay, guard(bar, "prefix"));
+        const postMap = new Map<number, FirstLimitPullbackRawBar>();
+        for (const bar of postByEvent.get(event.eventId) ?? []) postMap.set(bar.relativeDay, guard(bar, "post"));
         const pathMap = new Map<number, FirstLimitPullbackPath>();
         for (const row of pathByEvent.get(event.eventId) ?? []) pathMap.set(row.relativeDay, guard(row, "path"));
         const outcomeMap = new Map<number, FirstLimitPullbackOutcome>();
@@ -274,6 +290,8 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
         // 依赖它的结果变量会如实返回 null（不臆造基准线）。是否需要它由变量定义
         // 的 `needsEventBar` 决定，上面已据此把 rd=0 并入 prefixDays。
         const outcomeSources = { pathRows: pathMap, outcomeRows: outcomeMap, eventBar: prefixMap.get(0) };
+        // 观察日源：post（T+1..T+N）+ 同一根 rd=0 基准线。
+        const observationSources = { postBars: postMap, eventBar: prefixMap.get(0) };
 
         const features: Record<string, number | null> = {};
         for (const def of featureDefs) {
@@ -287,6 +305,12 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
           outcomes[def.name] = typeof value === "number" && Number.isFinite(value) ? value : null;
         }
 
+        const observations: Record<string, number | null> = {};
+        for (const def of observationDefs) {
+          const value = def.resolve(observationSources);
+          observations[def.name] = typeof value === "number" && Number.isFinite(value) ? value : null;
+        }
+
         const dimensions: Record<string, string | number | null> = {};
         for (const key of dimensionKeys) {
           dimensions[key] = resolveDimensionValue(
@@ -296,7 +320,7 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
           );
         }
 
-        samples.push({ eventId: event.eventId, symbol: event.symbol, tradeDate: event.tradeDate, features, outcomes, dimensions });
+        samples.push({ eventId: event.eventId, symbol: event.symbol, tradeDate: event.tradeDate, features, outcomes, observations, dimensions });
         eventCount += 1;
       }
 
@@ -319,6 +343,7 @@ export async function buildSampleSet(options: BuildSampleSetOptions): Promise<As
     chunkCount,
     features: requirement.features.slice(),
     outcomes: requirement.outcomes.slice(),
+    observations: (requirement.observations ?? []).slice(),
     columnProjection: projection,
     buildMs: Date.now() - startedAt,
   };

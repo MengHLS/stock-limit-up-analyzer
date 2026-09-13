@@ -21,6 +21,7 @@ import { StrategyDatasetBindingError } from "../strategyPersistence/datasetBindi
 import type { StrategyRepository } from "../strategyPersistence/contract";
 import { createStrategyDocumentFromDefinition } from "../strategySchema/map";
 import type { StrategyDefinitionInput } from "../strategySchema/definition";
+import type { StrategyRecipe } from "../strategySchema/types";
 import { ResearchValidationError } from "../experimentValidation";
 import {
   STRATEGY_CANDIDATE_ERROR,
@@ -80,6 +81,14 @@ export interface CreatePromotedStrategyVersionInput {
       readonly minCommission: number;
     };
   };
+  /**
+   * 🔴 执行配方引用（`StrategyRecipe` 可序列化面）；由 `definitionBuild#buildStrategyRecipe`
+   * 从候选草稿的 `entryRule.extra.recipe` 读出。
+   *
+   * 缺省 = 草稿未声明配方（既有候选即如此）。此时文档不带 `recipe`，装配层会落
+   * `DEFAULT_STRATEGY_RECIPE_ID` —— 这一口径漂移由 `assembly.recipeSource` 显式暴露。
+   */
+  readonly recipe?: StrategyRecipe;
   // ⚠️ `codeVersion` / `createdAt` **不由调用方传入**：它们属于 §17 版本追溯记录，
   //    由端口在构造时注入（`StrategyPromotionPortOptions`），避免同一事实两处声明。
 }
@@ -169,6 +178,9 @@ export class StrategyServicePromotionPort implements StrategyPromotionPort {
           universe: input.universe,
           definition: input.definition,
           executionAssumptions: input.executionAssumptions,
+          // 🔴 2026-09-13：把草稿声明的执行配方带进文档。缺它 ⇒ 装配层只能落默认配方
+          // （「按涨跌幅取前 5 名」），条件永远进不了回测（见 `_probe_promoted_entry_conditions.mts`）。
+          ...(input.recipe === undefined ? {} : { recipe: input.recipe }),
         });
       } catch (error) {
         if (error instanceof StrategyCandidateError) throw error;

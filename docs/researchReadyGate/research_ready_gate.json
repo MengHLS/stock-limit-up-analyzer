@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-09-09T15:07:48.854Z",
+  "capturedAt": "2026-09-12T19:15:44.796Z",
   "researchReady": true,
   "productionReady": false,
   "dataFoundationReady": true,
@@ -101,7 +101,7 @@
       "status": "PASS",
       "reason": null,
       "checks": {
-        "researchDatasetsRows": 5
+        "researchDatasetsRows": 7
       }
     },
     "G3": {
@@ -213,17 +213,17 @@
       "dataScope": true,
       "status": "PASS",
       "current": {
-        "distinctTradeDates": 1866,
+        "distinctTradeDates": 1867,
         "canonicalDays": 1863,
         "gapDays": 0,
         "duplicateKeys": 0,
-        "coveragePct": 100.16
+        "coveragePct": 100.21
       },
       "threshold": {
         "distinctTradeDates": 1863,
         "duplicateKeys": 0
       },
-      "detail": "覆盖 1866/1863 交易日（缺口 0 日），重复键 0"
+      "detail": "覆盖 1867/1863 交易日（缺口 0 日），重复键 0"
     },
     {
       "id": 4,
@@ -444,7 +444,7 @@
     }
   ],
   "snapshot": {
-    "capturedAt": "2026-09-09T15:05:25.059Z",
+    "capturedAt": "2026-09-12T19:14:19.218Z",
     "migrationLedgerRows": 24,
     "migrationLast": {
       "id": "414155",
@@ -452,11 +452,11 @@
       "created_at": "1788676035482"
     },
     "stock_daily_prices": {
-      "rows": 8891942,
+      "rows": 8893077,
       "min_tradeDate": "2019-01-02",
-      "max_tradeDate": "2026-09-09",
+      "max_tradeDate": "2026-09-10",
       "min_sourceUpdatedAt": "2026-09-06",
-      "max_sourceUpdatedAt": "2026-09-09"
+      "max_sourceUpdatedAt": "2026-09-11"
     },
     "research_securities": {
       "rows": 5552,
@@ -530,9 +530,9 @@
     },
     "ohlcvRange": {
       "min": "2019-01-02",
-      "max": "2026-09-09"
+      "max": "2026-09-10"
     },
-    "ohlcvDistinctStocks": 5796,
+    "ohlcvDistinctStocks": 5797,
     "ohlcvDuplicateKeys": 0,
     "ohlcvByYear": [
       {
@@ -579,9 +579,9 @@
       },
       {
         "year": 2026,
-        "rows": 902650,
-        "tradingDays": 167,
-        "stocks": 5576
+        "rows": 903785,
+        "tradingDays": 168,
+        "stocks": 5577
       }
     ],
     "checkpoints": [
