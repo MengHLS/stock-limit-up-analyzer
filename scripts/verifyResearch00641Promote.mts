@@ -666,7 +666,7 @@ try {
     });
     check("前端结果标题 = 「转正成功」", vm.title === "转正成功", vm.title);
     check("前端结果里含 Strategy 坐标与执行 Dataset", vm.summary.includes(result.strategyId) && vm.summary.includes(String(result.executionDatasetVersionId)), vm.summary);
-    check("「查看 Strategy Version」落点是现有策略页 + 坐标参数", vm.path === `/strategy-editor?strategyId=${encodeURIComponent(result.strategyId)}&version=1.0.0`, vm.path);
+    check("「查看 Strategy Version」落点是策略详情页 + 版本参数", vm.path === `/strategies/${encodeURIComponent(result.strategyId)}?version=1.0.0`, vm.path);
   }
 
   // ---- §9 / §19 候选详情从服务端重读 ----

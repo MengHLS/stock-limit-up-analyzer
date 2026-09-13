@@ -57,19 +57,19 @@ function fmtBps(v: number | null): string {
 /** 人话解释：把首阻塞码翻译成「为什么没跑 / 怎么才能跑」。 */
 const BLOCKED_REASON_HUMAN: Readonly<Record<string, string>> = {
   CL_DATA_NOT_INJECTED:
-    "本次没有注入真实数据集（未开启「使用真实数据」）→ 后续所有阶段无法获得数据，故全部阻塞。开启后重跑即可。",
+    "服务端未拿到数据集 → 后续阶段无数据可用。",
   CL_DATASET_GATE_NOT_PASS:
-    "数据集预检未通过（通常是「数据完整性已确认」未勾选，预检恒为 INCONCLUSIVE）→ 数据阶段如实阻塞。勾选后重跑即可。",
+    "数据集预检未通过（库内 dataset_version.status 非 READY）→ 数据阶段阻塞。",
   CL_RUNNER_NOT_INJECTED:
-    "该阶段尚无真实执行器（未装配），因此无法执行 → 其下游阶段按编排器规则一并阻塞。属功能未覆盖，非运行错误。",
+    "该阶段尚无真实执行器 → 下游一并阻塞。属功能未覆盖，非运行错误。",
   CL_UPSTREAM_BLOCKED:
-    "上游阶段阻塞（任一阶段阻塞则其后继全部阻塞，禁止伪造中间产物）→ 需先解决上游问题。",
+    "上游阶段阻塞 → 先解决上游（禁止伪造中间产物）。",
   CL_WIRING_ARTIFACT_MISSING:
-    "装配层缺少该阶段所需的重对象（旁路产物）→ 装配不完整，属配置问题。",
+    "装配层缺少该阶段所需的重对象。",
   CL_STAGE_INPUT_MISSING:
-    "该阶段所需的上游交接物在本链中未产出 → 依赖顺序未满足，属链路装配问题。",
+    "该阶段所需的上游交接物未产出。",
   CL_LIFECYCLE_CONFIG_MISSING:
-    "生命周期配置缺失 → 该阶段无法确定评估口径。",
+    "生命周期配置缺失，无法确定评估口径。",
 };
 
 export function ClosedLoopRunResultPanel({
@@ -90,7 +90,7 @@ export function ClosedLoopRunResultPanel({
   return (
     <SectionCard
       title="闭环运行结果"
-      description="真实执行轨迹（researchRun.loopRun）：入参齐备的阶段真跑，缺入参/无执行器的阶段如实 BLOCKED。"
+      description="真实执行轨迹：入参齐备的阶段真跑，缺入参 / 无执行器的如实标为 BLOCKED。"
       right={<StatusBadge status={result.status} />}
     >
       {/* 全链概要 */}
@@ -112,13 +112,10 @@ export function ClosedLoopRunResultPanel({
         <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
           <p className="flex items-start gap-1.5 font-medium">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              本次运行 {total} 个阶段无一执行 —— 不是「卡住」，也不是「代码没写完」。
-            </span>
+            <span>本次 {total} 个阶段无一执行。</span>
           </p>
           <p className="mt-1.5 pl-5">
-            {blockedHuman ??
-              "原因见下方「阻塞原因」列：每个阶段都如实说明了缺哪一项入参。"}
+            {blockedHuman ?? "原因见下方「阻塞原因」列。"}
           </p>
           {result.firstBlockedReasonCode && (
             <p className="mt-1 pl-5 font-mono text-[11px] text-amber-800">

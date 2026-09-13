@@ -10,6 +10,9 @@
  * `researchRun.loopRun`（封闭循环编排器）。按钮**不因 executorBound=false 锁死**——
  * 运行请求会真跑入参齐备的阶段、如实 BLOCKED 其余阶段，这是有诊断价值的真实执行；
  * 未就绪原因只在 Tooltip 里提示，不阻断发起。
+ *
+ * 🔴 2026-09-13：原「加载真实数据」「声明数据链已就绪」两个用户开关已**移除**，
+ * 恒为真（点运行 = 跑真数据）。理由见下方 `RealDataBlock` 注释。
  */
 
 import { Input } from "@/components/ui/input";
@@ -27,7 +30,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Switch } from "@/components/ui/switch";
 import { Database, Loader2, Play, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import type { StrategyViewModel } from "@/adapters/strategyAdapter";
@@ -53,23 +55,6 @@ export interface RunConfigViewModel {
   slippageBps: number;
   maxPositions: number;
   executionModel: string;
-  /**
-   * 「加载真实数据」开关（FE-4 扩展）。
-   *
-   * `true` → 服务端真实构建 ResearchDataset、真实读策略文档、按配方装配入参，
-   * 五阶段（data / research / strategy / backtest / evaluation）可真跑。
-   * `false` → 与既有行为一致（只透传显式入参，其余如实 BLOCKED）。
-   */
-  useRealData: boolean;
-  /**
-   * 是否声明「数据链已就绪」（`buildResearchDataset({ dataReady })`）。
-   *
-   * 🔴 这是**用户声明**，不是探测结果：`dataReady=false` 时构建出的数据集 gate 恒为
-   * `INCONCLUSIVE`（冒烟口径），data 阶段会以 `CL_DATASET_GATE_NOT_PASS` 阻塞；
-   * `dataReady=true` 且无覆盖缺口时才 PASS。因此本开关默认**关闭**——
-   * 绝不替用户宣称「数据链已就绪」。
-   */
-  dataReady: boolean;
   /** 显式执行配方 id（策略文档无 recipe 时生效；空串 = 用服务端默认常量）。 */
   recipeId: string;
 }
@@ -100,8 +85,6 @@ function initRunConfig(vm: StrategyViewModel): RunConfigViewModel {
     slippageBps: vm.costModel.slippageBps,
     maxPositions: vm.positionSizing.maxPositions,
     executionModel: vm.executionModel,
-    useRealData: false,
-    dataReady: false,
     recipeId: "",
   };
 }
@@ -115,16 +98,16 @@ function precheckRunConfig(
   vm: StrategyViewModel
 ): string | null {
   if (config.startDate.trim() === "" || config.endDate.trim() === "") {
-    return "时间范围（起始 / 结束）都是必填 —— 后端契约要求非空日期，留空会被直接拒绝。已预置默认窗口，请确认或修改后再运行。";
+    return "时间范围必填。";
   }
   if (config.startDate > config.endDate) {
     return `时间范围倒序：起始 ${config.startDate} 晚于结束 ${config.endDate}。`;
   }
   if (vm.strategyId.trim() === "" || vm.version.trim() === "") {
-    return "策略坐标不完整（strategyId / version 缺失）—— 请先「加载」或「保存」一个真实落库的策略版本再运行。";
+    return "策略尚未落库（缺 strategyId / version），先「保存」再运行。";
   }
-  if (config.useRealData && vm.datasetVersionId === null) {
-    return "本策略未绑定 Dataset Registry 版本（datasetVersionId 为空）—— 打开「加载真实数据」时服务端需要该坐标，请先在策略编辑器绑定数据集。";
+  if (vm.datasetVersionId === null) {
+    return "未绑定数据集版本 —— 先在「策略定义 → 基础信息」里选一个 READY 版本。";
   }
   return null;
 }
@@ -163,7 +146,7 @@ function ReadinessBlock({ readiness }: { readiness: RunReadinessOutput }) {
       {readiness.canRun ? (
         <p className="mt-1.5 flex items-center gap-1 text-xs text-emerald-700">
           <ShieldCheck className="h-3.5 w-3.5" />
-          数据域已认证、策略已注册、执行器已绑定 —— 可发起研究 run。
+          就绪，可运行。
         </p>
       ) : (
         <ul className="mt-1.5 space-y-1">
@@ -224,12 +207,12 @@ export function RunConfigPanel({
   const reasonHint =
     readiness && readiness.reasons.length > 0 ? readiness.reasons[0] : null;
   const tooltip = !wired
-    ? "运行端点未接线（本页未注入 onRun）"
+    ? "运行入口未接线"
     : running
-      ? "正在执行闭环运行…"
+      ? "正在运行…"
       : reasonHint
-        ? `点击执行：入参齐备的阶段会真实运行；不可执行阶段将如实 BLOCKED。当前首因：${reasonHint}`
-        : "点击执行闭环运行（真实调用封闭循环编排器）";
+        ? `入参齐备的阶段真跑，其余如实标为 BLOCKED。首因：${reasonHint}`
+        : "运行闭环（读取真实数据）";
 
   const handleClick = () => {
     const blocked = precheckRunConfig(config, vm);
@@ -241,7 +224,6 @@ export function RunConfigPanel({
   return (
     <SectionCard
       title="回测配置"
-      description="策略 → 数据集 → 回测配置 → 运行 → 结果"
       right={
         <Tooltip>
           <TooltipTrigger asChild>
@@ -268,7 +250,7 @@ export function RunConfigPanel({
     >
       <div className="space-y-4">
         {readinessLoading && (
-          <p className="text-xs text-muted-foreground">正在探测运行就绪状态…</p>
+          <p className="text-xs text-muted-foreground">探测就绪状态…</p>
         )}
         {!readinessLoading && readiness && (
           <ReadinessBlock readiness={readiness} />
@@ -281,9 +263,7 @@ export function RunConfigPanel({
         {precheckError && (
           <p className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              <b>尚未发起运行</b>：{precheckError}
-            </span>
+            <span>{precheckError}</span>
           </p>
         )}
 
@@ -321,9 +301,7 @@ export function RunConfigPanel({
               重置为默认窗口
             </Button>
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              两格必填，且窗口须落在数据集窗口
-              （<code className="font-mono">2024-09-01 ~ 2026-09-01</code>）内；
-              越界会被后端直接拒绝。
+              两格必填，且须落在 <code className="font-mono">2024-09-01 ~ 2026-09-01</code> 内。
             </p>
           </div>
           <div className="space-y-1.5">
@@ -393,85 +371,67 @@ export function RunConfigPanel({
           </div>
         </div>
 
-        <RealDataBlock config={config} set={set} />
+        <RealDataBlock vm={vm} config={config} set={set} />
       </div>
     </SectionCard>
   );
 }
 
 /**
- * 「加载真实数据」区块（FE-4 扩展）。
+ * 「本次运行会跑什么」态势区（🔴 2026-09-13：原「加载真实数据 / 声明数据链已就绪」
+ * 两个用户开关已**移除**）。
  *
- * 这一段回答的是**用户最关心的那个问题**：「我点运行，到底跑的是真数据还是空转？」
- *
- * 诚实的三个开关：
- *   ① 加载真实数据：打开后服务端真构建数据集 + 真读策略文档 + 真装配配方；
- *   ② 声明数据链已就绪：**用户声明**（默认关）—— 关着时 gate 恒 INCONCLUSIVE，
- *      data 阶段会以 CL_DATASET_GATE_NOT_PASS 阻塞。这是如实反馈，不是 bug；
- *   ③ 执行配方：文档没写配方时用哪个（留空 = 服务端默认常量）。
+ * 移除理由（用户侧原话：「什么乱七八糟的选项」）：这两个开关的「关闭态」产出的
+ * 是一份**没有任何诊断价值**的结果 ——
+ *   ① 关掉「加载真实数据」⇒ 服务端拿不到数据集 ⇒ `data` 阶段 `CL_DATA_NOT_INJECTED`
+ *      ⇒ 其后 13 阶段全部 `CL_UPSTREAM_BLOCKED`，用户看到「14 阶段无一执行」；
+ *   ② 关掉「声明数据链已就绪」⇒ 数据集 gate 被**人为**压成 `INCONCLUSIVE`
+ *      ⇒ 真实可用的数据集也跑不动。
+ * 两者都不是用户能/应该做的决策，且第 ② 个的名字与实现不符（它实际只是「是否读取
+ * 库内 `dataset_version.status`」，不是任何「声明」）。⇒ 改为恒真，并把事实**展示**出来。
  */
 function RealDataBlock({
+  vm,
   config,
   set,
 }: {
+  vm: StrategyViewModel;
   config: RunConfigViewModel;
   set: (patch: Partial<RunConfigViewModel>) => void;
 }) {
+  const bound =
+    vm.datasetVersionId === null
+      ? "未绑定数据集（运行会被前置检查拦下）"
+      : `已绑定 datasetVersionId=${vm.datasetVersionId}`;
   return (
     <div className="rounded-md border bg-muted/20 px-3 py-3">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="run-realdata" className="flex items-center gap-1.5">
-            <Database className="h-3.5 w-3.5" />
-            加载真实数据
-          </Label>
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            打开后，服务端按时间范围<b>真实构建</b> ResearchDataset、读取该版本的策略文档，
-            并按执行配方装配入参 —— data / research / strategy / backtest / evaluation
-            五个阶段可以真的跑起来。
-          </p>
-        </div>
-        <Switch
-          id="run-realdata"
-          checked={config.useRealData}
-          onCheckedChange={v => set({ useRealData: v })}
-        />
+      <div className="space-y-1">
+        <Label className="flex items-center gap-1.5">
+          <Database className="h-3.5 w-3.5" />
+          本次运行使用真实数据
+        </Label>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          按时间范围读取该策略绑定的数据集（{bound}）与已落库策略文档，再按配方装配入参；
+          未装配执行器的阶段会如实标为 BLOCKED —— 是实现边界，不是本次运行的错误。
+        </p>
       </div>
 
-      {config.useRealData && (
-        <div className="mt-3 space-y-2.5 border-t pt-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor="run-dataready">声明数据链已就绪</Label>
-              <p className="text-[11px] leading-relaxed text-muted-foreground">
-                这是<b>你的声明</b>，不是系统探测结果。关闭时构建出的数据集
-                gate 恒为 <code className="font-mono">INCONCLUSIVE</code>（冒烟口径），
-                data 阶段将以 <code className="font-mono">CL_DATASET_GATE_NOT_PASS</code>{" "}
-                阻塞；打开且无覆盖缺口时才判 <code className="font-mono">PASS</code>。
-              </p>
-            </div>
-            <Switch
-              id="run-dataready"
-              checked={config.dataReady}
-              onCheckedChange={v => set({ dataReady: v })}
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="run-recipe">执行配方 id（可留空）</Label>
-            <Input
-              id="run-recipe"
-              placeholder="留空 = 使用服务端已注册的默认配方"
-              value={config.recipeId}
-              onChange={e => set({ recipeId: e.target.value })}
-            />
-            <p className="text-[11px] text-muted-foreground">
-              策略文档里写了 <code className="font-mono">recipe</code> 时以文档为准；
-              没写时用此处的值。实际用了哪个会显示在结果里。
-            </p>
-          </div>
+      <details className="mt-2.5 border-t pt-2.5">
+        <summary className="cursor-pointer text-[11px] text-muted-foreground">
+          高级：指定执行配方 id（可留空）
+        </summary>
+        <div className="mt-2 space-y-1.5">
+          <Input
+            id="run-recipe"
+            placeholder="留空 = 使用服务端已注册的默认配方"
+            value={config.recipeId}
+            onChange={e => set({ recipeId: e.target.value })}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            文档里有 <code className="font-mono">recipe</code> 时以文档为准；实际用了哪个会显示在结果里。
+          </p>
         </div>
-      )}
+      </details>
     </div>
   );
 }

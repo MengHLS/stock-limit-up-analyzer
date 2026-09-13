@@ -14,7 +14,7 @@
  *     不是编辑器；编辑器替用户填的前提是用户按了那个按钮。
  *   - 预设数值 = 仓库**既有口径**，不另立第二套：
  *     `client/src/adapters/strategyAdapter.ts#parseCostModel` 的兜底值与
- *     `client/src/pages/StrategyEditor.tsx` 模板的 `executionAssumptions` 用的是同一组数字。
+ *     `client/src/pages/StrategyDetail.tsx` 模板的 `executionAssumptions` 用的是同一组数字。
  *     任何一处改动都应视为「口径变更」，三处一起看。
  *   - 本机记忆走 `localStorage`。读写失败（隐私模式 / 配额 / 非浏览器环境）一律**静默降级**
  *     为「没有记忆」，绝不因此阻断编辑。

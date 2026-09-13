@@ -329,15 +329,15 @@ describe("promoteResultToVm", () => {
 });
 
 describe("strategyVersionPath", () => {
-  it("8-a) 落点是**现有**策略页 + 坐标查询参数 —— 不新增第二套 Strategy Version 页面", () => {
+  it("8-a) 落点是策略**详情页** `/strategies/:strategyId` + 版本参数（列表与详情分家）", () => {
     expect(strategyVersionPath("cand-180001", "1.0.0")).toBe(
-      "/strategy-editor?strategyId=cand-180001&version=1.0.0",
+      "/strategies/cand-180001?version=1.0.0",
     );
   });
 
   it("8-b) 坐标做 URL 编码（不裸拼，特殊字符不会串位）", () => {
     const path = strategyVersionPath("a b/c", "1.0.0+build");
-    expect(path).toContain("strategyId=a%20b%2Fc");
+    expect(path).toContain("/strategies/a%20b%2Fc");
     expect(path).toContain("version=1.0.0%2Bbuild");
   });
 

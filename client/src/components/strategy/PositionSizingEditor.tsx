@@ -59,7 +59,6 @@ export function PositionSizingEditor({
     <SectionCard
       title="仓位与资金规则"
       icon={Percent}
-      description="声明式仓位分派与初始资金，不执行；执行由后续回测引擎消费"
     >
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <div className="space-y-1.5">
@@ -77,9 +76,6 @@ export function PositionSizingEditor({
               })
             }
           />
-          <p className="text-[11px] text-muted-foreground">
-            回测账户起点资金，用于计算仓位数与收益率。
-          </p>
         </div>
 
         <div className="space-y-1.5">
@@ -110,9 +106,6 @@ export function PositionSizingEditor({
             value={p.maxPositions}
             onChange={e => setMaxPositions(Number(e.target.value))}
           />
-          <p className="text-[11px] text-muted-foreground">
-            同时持有的最大股票数量。
-          </p>
         </div>
 
         {p.kind === "fixed-fraction" && (
@@ -139,7 +132,7 @@ export function PositionSizingEditor({
               }
             />
             <p className="text-[11px] text-muted-foreground">
-              每只占用初始资金的固定比例（如 0.1 = 10%）。
+              如 0.1 = 10%。
             </p>
           </div>
         )}

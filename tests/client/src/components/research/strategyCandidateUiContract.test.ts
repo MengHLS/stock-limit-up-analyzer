@@ -43,7 +43,7 @@ const CANDIDATE_CALL_SITE_FILES = [
  *   - `ConclusionPanel.tsx` 只嵌入 `CreateCandidateDialog`（自身不发候选请求）；
  *   - `CandidatesPanel.tsx` 用实验维度的既有只读端点 `researchEngine.listCandidates`；
  *   - `promoteForm.ts` / `candidateForm.ts` / 适配层是纯函数模块，不发请求；
- *   - `pages/StrategyEditor.tsx` 只**渲染**溯源区（请求由面板组件发出），故不算调用点。
+ *   - `pages/StrategyDetail.tsx` 只**渲染**溯源区（请求由面板组件发出），故不算调用点。
  * 「禁止词汇」与「不得直写 Strategy」扫描用这份全集。
  */
 const CANDIDATE_UI_FILES = [

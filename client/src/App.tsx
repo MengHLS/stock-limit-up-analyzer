@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch, Redirect } from "wouter";
+import { Route, Switch, Redirect, useSearch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import AppShell from "./components/AppShell";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -27,8 +27,11 @@ import {
   VersionList,
   VersionDetail,
 } from "./pages/datasets";
-// FE-4 — 研究链路：策略编辑器 + 运行工作台
-import StrategyEditor from "./pages/StrategyEditor";
+// FE-4 — 研究链路：策略**列表**与**详情**分家（2026-09-13）
+//   列表 `/strategies`            → 有哪些策略、各自什么状态
+//   详情 `/strategies/:strategyId` → 这一个策略长什么样、跑不跑得动
+import StrategyList from "./pages/StrategyList";
+import StrategyDetail from "./pages/StrategyDetail";
 // FE-5 — 研究链路：绩效仪表盘（骨架线）
 import PerformanceDashboard from "./pages/PerformanceDashboard";
 // FE-6 — 研究链路：参数搜索 + 鲁棒性（骨架线）
@@ -42,6 +45,27 @@ import ReviewWorkbench from "./pages/ReviewWorkbench";
 // RESEARCH-002 — 研究引擎：实验 / Run / 分析 / 结果 / 结论 工作台
 // RESEARCH-006.4.1 — Research → Candidate 前端闭环：候选详情（结论 → 候选 → 状态流转）
 import { ResearchList, ResearchDetail, StrategyCandidateDetail } from "./pages/research";
+
+/**
+ * 旧链接兼容：`/strategy-editor?strategyId=…&version=…`。
+ *
+ * 候选转正页等历史入口曾把坐标拼在这条 URL 上；详情页迁到 `/strategies/:strategyId` 之后，
+ * 这里只做一次**静态改写**（不渲染第二套策略页面），旧书签与旧链接继续可用。
+ */
+function LegacyStrategyRedirect() {
+  const search = useSearch();
+  const params = new URLSearchParams(search);
+  const strategyId = params.get("strategyId");
+  const version = params.get("version");
+  if (strategyId === null || strategyId === "") {
+    return <Redirect to="/strategies" />;
+  }
+  const suffix =
+    version === null || version === ""
+      ? ""
+      : `?version=${encodeURIComponent(version)}`;
+  return <Redirect to={`/strategies/${encodeURIComponent(strategyId)}${suffix}`} />;
+}
 
 function Router() {
   return (
@@ -68,7 +92,10 @@ function Router() {
       <Route path="/datasets/:datasetId" component={DatasetDetail} />
       <Route path="/datasets/:datasetId/versions" component={VersionList} />
       <Route path="/datasets/:datasetId/versions/:versionId" component={VersionDetail} />
-      <Route path="/strategy-editor" component={StrategyEditor} />
+      {/* 策略：列表 / 详情分家；旧 /strategy-editor 仅做兼容改写 */}
+      <Route path="/strategies" component={StrategyList} />
+      <Route path="/strategies/:strategyId" component={StrategyDetail} />
+      <Route path="/strategy-editor" component={LegacyStrategyRedirect} />
       <Route path="/performance" component={PerformanceDashboard} />
       <Route path="/parameter-search" component={ParameterSearch} />
       <Route path="/walk-forward" component={WalkForwardAnalysis} />

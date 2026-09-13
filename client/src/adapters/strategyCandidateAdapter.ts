@@ -456,14 +456,15 @@ export interface PromoteResultVm {
 }
 
 /**
- * 现有 Strategy 页的坐标式落点。
+ * 策略**详情页**的坐标式落点：`/strategies/:strategyId?version=…`。
  *
- * 为什么用查询参数而不是新路由：仓库**只有一个**策略页（`/strategy-editor`），
- * 任务 §17 / §20 明确「不要新增无必要的 Strategy 页面 / 不要新建第二套 Strategy Version 页面」
- * ⇒ 由 `StrategyEditor` 读取这两个参数定位版本。
+ * 2026-09-13 起策略页拆成「列表 + 详情」两页：`strategyId` 进路径（详情页的唯一身份），
+ * `version` 留作查询参数（同一策略内可切换、可回退、可分享）。旧
+ * `/strategy-editor?strategyId=…&version=…` 由 `App.tsx` 的兼容路由改写过来，
+ * 因此**没有**第二套策略页面，只是同一个详情页换了更清晰的地址。
  */
 export function strategyVersionPath(strategyId: string, version: string): string {
-  return `/strategy-editor?strategyId=${encodeURIComponent(strategyId)}&version=${encodeURIComponent(version)}`;
+  return `/strategies/${encodeURIComponent(strategyId)}?version=${encodeURIComponent(version)}`;
 }
 
 export interface PromoteResultOptions {

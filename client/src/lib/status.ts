@@ -93,7 +93,7 @@ const STATUS_TONE: Record<string, StatusTone> = {
   PENDING: "warning",
   FAIL: "danger",
 
-  // 生命周期状态（StrategyEditor §23）
+  // 生命周期状态（策略详情页 §23）
   Draft: "neutral",
   Research: "info",
   Candidate: "info",
@@ -159,6 +159,29 @@ const STATUS_TONE: Record<string, StatusTone> = {
   NO_STAGE_EXECUTED: "danger",
 };
 
+
+/**
+ * 策略版本生命周期状态（§23 八态）—— **客户端顺序常量**，供下拉选项与顺序展示使用
+ * （本文件的 `STATUS_TONE` 只管颜色，不管顺序与可用性）。
+ *
+ * 🔴 **为什么不在客户端直接 import 后端 / shared 的值**：`shared/researchContracts.ts`
+ * 运行时依赖 `zod`，`client/**` 一旦 import 它的运行时值，`zod` 就会被打进浏览器包。
+ * 因此按项目既有口径落成「**本地常量表 + 对表测试**」：漂移哨兵见
+ * `tests/client/src/lib/statusVocabulary.test.ts`（后端词表一变，该测试先红）。
+ */
+export const STRATEGY_VERSION_STATUS_OPTIONS = [
+  "Draft",
+  "Research",
+  "Candidate",
+  "Validated",
+  "Paper",
+  "Approved",
+  "Production",
+  "Retired",
+] as const;
+
+export type StrategyVersionStatus =
+  (typeof STRATEGY_VERSION_STATUS_OPTIONS)[number];
 
 /** 状态字符串 → 语义色。空值 / 未收录 → neutral。 */
 export function toneForStatus(status: string | null | undefined): StatusTone {

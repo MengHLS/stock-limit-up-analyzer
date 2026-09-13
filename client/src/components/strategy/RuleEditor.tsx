@@ -241,8 +241,8 @@ export function RuleEditor({
       <p className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <Sparkles className="h-3 w-3 shrink-0" />
         规则之间为{" "}
-        <span className="font-medium text-foreground">AND（全部满足）</span>{" "}
-        关系；「说明」是唯一完整语义，字段/操作符/数值为机器可读片段（供审计与未来执行器引用）。
+        <span className="font-medium text-foreground">AND（全部满足）</span>
+        ；「说明」是唯一完整语义。
       </p>
     </SectionCard>
   );

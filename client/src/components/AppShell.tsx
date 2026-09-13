@@ -90,7 +90,7 @@ const navGroups: NavGroup[] = [
       { label: "历史状态查询", path: "/historical-state", icon: History },
       { label: "数据集构建", path: "/datasets", icon: Boxes },
       { label: "研究实验", path: "/research", icon: FlaskConical },
-      { label: "策略工作台", path: "/strategy-editor", icon: ClipboardList },
+      { label: "策略", path: "/strategies", icon: ClipboardList },
       { label: "绩效仪表盘", path: "/performance", icon: Activity },
       { label: "参数搜索", path: "/parameter-search", icon: SlidersHorizontal },
       { label: "WFO/OOS 分析", path: "/walk-forward", icon: Workflow },

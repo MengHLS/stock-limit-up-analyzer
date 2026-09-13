@@ -117,7 +117,7 @@ export function StrategyBasicInfo({
     <SectionCard
       title="基础信息"
       icon={FileText}
-      description="策略身份与数据绑定（§16 identity；Dataset 坐标来自 Dataset Registry）"
+      description="策略身份与数据绑定"
     >
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
@@ -269,9 +269,7 @@ export function StrategyBasicInfo({
             )}
 
           <p className="text-[11px] text-muted-foreground">
-            绑定保存的是 <code className="font-mono">datasetVersionId（dataset_version.id）</code>
-            ；<code className="font-mono">datasetVersion</code> 只是显示 / 快照 label。
-            保存时后端会查 Dataset Registry 校验「存在 且 READY 且属于该数据集」，不通过即拒绝保存。
+            绑定存的是 <code className="font-mono">datasetVersionId</code>；保存时后端校验「存在且 READY」，不通过即拒绝。
           </p>
         </div>
 
@@ -285,9 +283,7 @@ export function StrategyBasicInfo({
             placeholder="research-dataset:<datasetVersion>"
           />
           <p className="text-[11px] text-muted-foreground">
-            派生股票池须等于{" "}
-            <code className="font-mono">research-dataset:&lt;datasetVersion&gt;</code>
-            ，选择数据集版本时自动同步；静态白名单可用显式 members（暂不在本页编辑）。
+            须等于 <code className="font-mono">research-dataset:&lt;datasetVersion&gt;</code>，选版本时自动同步。
           </p>
         </div>
 

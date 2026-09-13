@@ -254,3 +254,61 @@
 
 
 
+
+## 🔴 配方与参数（`recipeRegistry.ts` 与配方契约）
+
+> 2026-09-13 由 `MEMORY.md` 移入（该项目为「注入上限 ~8000 字符」的体积治理，内容零丢失）。
+
+- 已注册 **2 个**配方：`leader-candidate-baseline`（`weighted`，`pctChange` + `topN:5`）；**`first-limit-pullback-hold-shrink`**（`gated`，4 特征 + 3 参数 `max_volume_ratio` / `max_drawdown` / `require_bullish`）。
+- 🔴 **门槛型条件必须用 `gated`**：加权和里「守线失败」只让分数变小、**不剔除** ⇒ 属**口径错误**（不是实现 bug，是配方类型选错）。
+- 🔴 **`requireRecipe` 的优先级**：**文档已声明 `recipe` ⇒ 文档优先**，显式传入的 `recipeId` **不得覆盖**；只在文档**无** `recipe` 时兜底。**禁改成「调用方覆写优先」。**
+- 🔴 **`signalBuilder` 是工厂函数 `buildSignalBuilder(parameters)`** ⇒ **必须先 `resolveParameters` 再构造 `strategy13`**（顺序错会拿到未解析的参数）。
+- 🔴 **数值参数必须同时给 `min` 与 `max`**（草稿 `parameterRole` 恒 `TUNABLE`，否则 `PROMOTE_SKETCH_INCOMPLETE`）；非数值参数须给非空 `allowedValues`；无 `defaultValue` ⇒ `RECIPE_PARAMETER_NO_DEFAULT`。
+- 🔴 **`ResearchDataset.rows[]` 没有 `bars` 字段** ⇒ **禁手搓 `row.bars` 复算特征**（会得 0 候选 + 假「特征全缺失」）。正确做法 = **走真实引擎 `runCandidateEngine`**，再用 `visibleBars(...)` 独立复算核对。
+- ⚠️ **`CandidateEvaluationRun` 只是候选层统计（不含成交 / 收益）** ⇒ **真正「逐日撮合出收益曲线」的回测仍未做**（实测 `tradeCount=0` ⇒ 曲线恒等于初始资金、指标全 0）。
+
+## 基础设施坑（细则）
+
+> 索引与一句话判据在 `MEMORY.md`「基础设施坑」；本节收细则，供排查时逐条对照。
+
+- **mysql2 `idleTimeout` 只在 `maxIdle < connectionLimit` 时生效**。两者相等 ⇒ **死配置**：
+  `getConnection()` 直接 `pop()`、**不做 ping** ⇒ 跨境链路下已被对端关掉的死连接被**原样发出**，
+  症状 = `Failed query` + `cause` 链里的 `ECONNRESET`。**修复 = `maxIdle: poolSize - 1`**（已修）。
+  ⚠️ 探针**跨轮次重复查询**也会撞上 ⇒ **重跑一次**再定性。
+- 🔴 **「全端点一致 DB 失败 + 零 DB 端点正常」= 池内死连接** ⇒ **先查池、别改代码**。
+  对照手段：无 DB 的 `readiness` 端点返回 200；实测 **t+75s 自行恢复**⇒ **别当成自己改出来的回归**。
+- 🔴 **`withReadRetry`（`researchEngine/readRetry.ts`）= 只读安全的有界瞬时错误重试**：
+  3 次、300→900ms 退避、**语义错误不重试**。**跨境只读瞬时错误是常态** ⇒ **单次失败 ≠ 代码缺陷**；
+  判据 = **独立复现 + `information_schema` 核对**（而非「重跑一次就好了」）。
+  脚本顶层 catch **必须摊开 `cause` 链**（Drizzle 会把真实错误包成 `DrizzleQueryError`）。
+- 🔴 **真实列名（禁凭记忆写 SQL）** —— 探针 `docs/evidence/_probe_table_columns.mts`：
+  - `research_analysis`：**无 `startedAt`**；
+  - `research_analysis_condition`：`analysisId` / `groupNo` / `sortOrder` / `fieldName` / `operator` /
+    `valueJson` / `logicalOperator` / `groupLogicalOperator`（**不是** `groupIndex` / `field`）；
+  - 结果表叫 **`research_result`**（**不是** `research_analysis_result`）；
+  - `research_conclusion`：**无 `runId`**；
+  - `research_strategy_candidate`：`experimentId` / `conclusionId` / `strategyDefinitionId`；
+  - **`research_analyses`（复数）不存在**。
+
+## 页面坐标：策略「列表 / 详情」分家（2026-09-13）
+
+> 索引与一句话判据在 `MEMORY.md`「页面坐标」。
+
+- **两页两路由**：列表 `/strategies`（`client/src/pages/StrategyList.tsx`）与详情
+  `/strategies/:strategyId`（`client/src/pages/StrategyDetail.tsx`）。**列表只回答「有哪些策略」，
+  详情只回答「这一个策略长什么样」**。
+- **URL 是详情的唯一坐标源**：`strategyId` 进**路径**、`version` 进**查询参数** ⇒ 换版本 = 改 URL
+  （可回退 / 可分享 / 可刷新）。`?version` 缺省 = 该策略最新版本（走 `load`，而非 `loadVersion`）。
+  旧实现里 `pendingLoad` / `loadLatest` / `loadPinned` / `urlHandled` / `autoPicked` / `touched`
+  **六个互相牵制的本地状态已全部移除**；换策略靠外层 `key={strategyId}` 重挂载归零。
+- **旧地址 `/strategy-editor?strategyId=&version=` 保留为兼容路由**（`App.tsx` 的
+  `LegacyStrategyRedirect` 做静态改写）⇒ 候选转正页的历史深链与书签继续可用，且**不渲染第二套页面**。
+  侧栏导航为「策略」→ `/strategies`；深链生成器 `strategyVersionPath`（`strategyCandidateAdapter.ts`）
+  已改指详情页，`scripts/verifyResearch00641Promote.mts` 的落点断言同步更新。
+- 🔴 **详情页不调 `research.strategy.list`**（结构性地不承载全库浏览）—— 有契约测试守着
+  （`tests/client/src/pages/strategyListDetailSplit.test.ts`）。
+- 🔴 **新建草稿必须清空身份字段**：模板 `TEMPLATE_DOCUMENT` 的 `strategyId`（`limit-up-baseline`）
+  **确实存在于真实库**（探针 `_e2e_strategy_list_detail.mts` 第 3 节实证）⇒ 直接拿模板保存会
+  **变成给既有策略加版本**而不是新建。
+- **口径不变**：`load` → 裸 `StrategyDocument`；`loadVersion` → §17 记录（文档在 `.strategy` 下）
+  ⇒ 经 `toStrategyDocument()` 归一（两条分支都被探针独立证明）。

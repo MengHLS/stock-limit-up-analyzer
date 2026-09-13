@@ -75,7 +75,7 @@ export function StrategyJsonEditor({
   return (
     <SectionCard
       title="JSON 高级模式"
-      description="透传完整 StrategyDocument；fingerprint 为占位，真实指纹由后端序列化重算"
+      description="真实指纹由后端重算"
       icon={ScrollText}
       right={
         <div className="flex items-center gap-2">

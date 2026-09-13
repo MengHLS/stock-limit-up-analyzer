@@ -48,7 +48,7 @@ export function StrategyResearchProvenancePanel({
     <SectionCard
       title="Research 溯源（只读）"
       icon={ShieldCheck}
-      description={`${strategyId}@${version} —— 这条策略是从哪一次研究推导出来的`}
+      description={`${strategyId}@${version} · 只读`}
     >
       {query.isLoading && (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -59,9 +59,7 @@ export function StrategyResearchProvenancePanel({
       {query.error && (
         // 读取失败**不等于**策略不可用：如实说明，并明确「不影响策略读取与执行」。
         <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-          溯源读取失败：{query.error.message}
-          <br />
-          这不影响该策略的读取与执行 —— 溯源只是附加信息。
+          溯源读取失败：{query.error.message}（不影响策略的读取与执行）
         </p>
       )}
 
@@ -69,10 +67,9 @@ export function StrategyResearchProvenancePanel({
         <div className="space-y-3">
           {!vm.hasProvenance ? (
             <p className="rounded-md border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
-              该版本没有 Research 溯源记录。
               {vm.strategyVersionId === null
-                ? "（版本行也没读到 —— 请确认策略 ID 与版本号。）"
-                : "（这条策略不是由研究候选转正产生的，或溯源行已被清理。）"}
+                ? "没有溯源记录（版本行也没读到 —— 请确认策略 ID 与版本号）。"
+                : "没有溯源记录（不是由研究候选转正产生的，或溯源行已清理）。"}
             </p>
           ) : (
             <>
@@ -123,8 +120,7 @@ export function StrategyResearchProvenancePanel({
               {vm.sourceDatasetDivergenceReason ?? "—（执行数据集与研究来源一致，或无记录）"}
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              执行绑定是「Strategy 侧」事实（落 <code className="font-mono">strategy_version_datasets</code>）；
-              来源 Dataset 是 promote 时刻的快照 —— 两者可以不同，这正是「研究用一份数据、执行覆盖另一份」的合法路径。
+              执行绑定是 Strategy 侧事实，来源 Dataset 是 promote 时刻快照 —— 两者可以不同（研究用一份、执行覆盖另一份）。
             </p>
           </div>
 

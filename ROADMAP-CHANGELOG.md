@@ -1506,3 +1506,59 @@ cond-2: bar.volume LESS_THAN              "prefix.rd0.volume"  (FIELD_REFERENCE)
 ### 七、边界
 
 `server/**` **一行未改**、零迁移 / 零新端点 / 零新依赖；本轮只改 `client/**` 2 文件 + 新增 1 个探针。
+
+---
+
+## 2026-09-13 21:32 — 「策略工作台」页面重设计：4 页签平铺 → 3 页签按工作流分层，并接出三个「后端早已可用、前端却看不见」的真实能力（纯 `client/**`，VALIDATED）
+
+用户指令：「**重新设计策略工作台页面，现在过于混乱**」。页面坐标 = `/strategy-editor`（`AppShell.tsx` 的「策略工作台」）。
+
+### 一、先把「混乱」量化（读源码，不是观感）
+
+| 具体问题 | 证据 |
+| --- | --- |
+| 「日常三件事」与「元数据家务」压在同一层级 | 4 个**平铺**页签 `editor` / `workbench` / `versions` / `lifecycle` |
+| 高频动作被埋 | 首屏被「已保存策略」表格占据，**载入 / 运行**在下方 |
+| 页头状态是**假的** | 硬编码 `useState("Draft")`，**从不反映 DB** |
+| 默认载入的不是真实最新版 | 硬编码 `TEMPLATE_DOCUMENT`（`limit-up-baseline@1.0.0`），真实库最新 = **`1.1.0`** |
+| 未运行先给 6 个空页签 | `RunResultPlaceholder` |
+| UI 暴露开发编号 | `FE-4` / `STEP 13/15/16` / `§16·§17·§23` |
+
+### 二、改法（纯 `client/**`：3 改 + 1 新增 + 1 删除）
+
+把页签收敛为 **「策略定义 / 运行回测 / 版本与状态」**，并新增 `StrategyHeader`（当前策略上下文条，**策略选择器 + 版本选择器取代首屏表格**，徽章改读**真实后端 status**）、`StrategyVersionPanel`（把 `listVersions` / `compare` / `setVersionStatus` 三个**真实能力**接出来，`compare` **取代手贴 JSON**）、`StrategyAdvancedTools`（`bump` 结果可**一键「采用」回填** + §23 生命周期账本，收进默认折叠的「技术细节」并**明确标注账本不落库**）；删除 `RunResultPlaceholder` 改为诚实空态；默认载入改为**自动选真实库最新策略**（消费一次）；新增 URL 入口 `?strategyId=…&version=…`（**不新增第二个策略页**）；开发编号从 UI 文案**全部移除**。
+
+### 三、顺带抓到一个真实行为缺陷（不是样式问题）
+
+`load` 返回**裸 `StrategyDocument`**，而 `loadVersion` 返回 **§17 版本记录（文档嵌在 `.strategy` 下）** ⇒ 若直接把 `loadVersion` 的返回喂编辑器，界面会**读到一个空文档**。已用 `toStrategyDocument()` 归一，并由探针**独立证明**「`load` 的文档 == `loadVersion(.strategy)` 剥壳后等价」。附带修掉：「反复点击同一**已缓存**版本 ⇒ 返回**同一对象引用** ⇒ 依赖该引用的 effect 不再触发 ⇒ `pendingLoad` 永不清空」。
+
+### 四、`client/**` 的硬边界（本轮复用到）
+
+**不能 import `server/**` / `shared/**` 的运行时值**（会把 `zod` 打进前端包）⇒ 8 态状态词表用「**本地常量表 + 表比对测试**」当漂移哨兵（新增 `tests/client/src/lib/statusVocabulary.test.ts` 4 例）。
+
+### 五、验收（四层全绿）
+
+`npx tsc --noEmit` **exit 0 / 零输出**；`npx vitest run tests/client` **21 文件 / 519 例全通过**（基线 20 文件 / 515 例，**+4 新例、0 新失败**）；`npx vite build` **exit 0**（3029 modules / `index-D5OwfrZD.js` 2,557.21 kB，gzip 626.72 kB）。真实库端到端探针 `docs/evidence/_e2e_strategy_workbench.mts` **23/23 PASS**：`list` 返回 **9 条**真实策略（`cand-360008@1.0.0(Draft)` … `limit-up-baseline@1.1.0(Draft)`）、`load` 裸文档 / `loadVersion` 剥壳、往返后 `compare.equal=true`、VM 读出关键字段（入场规则 2 条）。产物符号核对：新文案在包内、旧文案已消失（`FE-4 · STEP 13/15/16` ×0）。
+
+### 六、边界与诚实登记
+
+- `server/**` **一行未改**、零迁移 / 零新端点 / 零新依赖；本轮只改 `client/**` 3 文件 + 新增 2 文件 + 删除 1 文件 + 新增 1 探针 + 1 测试。
+- ⚠️ 本机 `agent-browser` 不可用、仓库无 `jsdom` ⇒ **无浏览器截图**；前端验收口径恒为「真实 tRPC 取数 + 纯函数复用 + 真实 DB」。
+- 登记（非本轮范围）：§44.5 队列存在 **`9v` 编号重复**（行 2221 / 2227，并行会话撞号），且 `9ae` 因插入顺序落在 `9v` 之前 ⇒ **§44.5 编号非严格递增**，新编号须按「下一个未占用」判定、**禁按「末条 +1」**。
+
+---
+
+## 2026-09-13 22:07 GMT+8 — 「策略」页列表 / 详情分家：单页（列表塞进下拉框）→ `/strategies` + `/strategies/:strategyId`，并清掉 44 处解释性长文案（纯 `client/**`，VALIDATED）
+
+用户指令：「**不是，你把策略列表跟策略详情给分开啊，这是什么乱七八糟的页面，能不能从用户体感上来设计，还有太多无用的文字说明**」。
+- **上一版错在哪（用户判断正确）**：2026-09-13 21:32 那轮把「已保存策略大表」换成了**详情页顶部的一个策略下拉框** —— 治了「表格占首屏」，没治「两类活动混在一页」：进页面就被自动塞进某个「最近更新」的策略，既看不到库里有哪几条，也不知道为什么停在这一条上。**列表（浏览全库）与详情（编辑一条）本质是两件事**。
+- **改动清单**：新增 `client/src/pages/StrategyList.tsx`（`/strategies`，卡片网格：名称 / 状态 / 策略 ID / 最新版本 / 更新时间，整卡可点，右上「新建策略」）+ 新增 `client/src/pages/StrategyDetail.tsx`（`/strategies/:strategyId`，**删掉策略下拉框**、保留版本选择器、加「← 策略列表」、标题 + 元信息压到 2 行）；`App.tsx` 新增两条路由并把旧 `/strategy-editor` 变为`LegacyStrategyRedirect`（静态改写，不渲染第二套页面）；`AppShell.tsx` 导航「策略工作台」→「策略」(`/strategies`)；`strategyCandidateAdapter.ts` 的 `strategyVersionPath` 改指详情路由；删除 `pages/StrategyEditor.tsx`。
+- **状态机简化（可验证）**：URL 成为唯一坐标源（`strategyId` 进路径、`version` 进查询参数）⇒ 旧实现里 `pendingLoad` / `loadLatest` / `loadPinned` / `urlHandled` / `autoPicked` / `touched` **六个互相牵制的本地状态全部移除**；外层 `key={strategyId}` ⇒ 换策略即重挂载，草稿 / 脏标记自然归零。
+- **文案治理（第二个诉求，量化后逐条）**：只读探针先量化用户可见长文案（连续 ≥10 汉字行：`RunConfigPanel` 219 字、旧详情页 224 字、`ClosedLoopRunResultPanel` 121 字、`StrategyVersionPanel` 104 字、`PositionSizingEditor` 58 字、溯源面板 57 字，合计 **867 字**）；再按「只删解释性长句、不删硬事实」执行 **44 处 / 13 文件**替换，并以「**每条恰好命中 1 次**」断言脚本落地（0 次报错退出，杜绝静默 no-op）；保留后端契约硬事实、失败 / 阻塞真实原因、`⚠️ 真实写库` 警告。
+- **顺手修正两条过期文案（会误导用户）**：`ClosedLoopRunResultPanel` 的阻塞原因原写「未开启「使用真实数据」」「「数据完整性已确认」未勾选」，而这两个开关已于 2026-09-13 从 UI 移除 ⇒ 用户会去找不存在的开关；已按真实语义改写（`CL_DATASET_GATE_NOT_PASS` = 库内 `dataset_version.status` 非 READY）。
+- **新建流程陷阱（探针实证）**：模板 `strategyId` = `limit-up-baseline` **确实已在真实库中** ⇒ 原样保存会变成「给既有策略加版本」；已改为新增草稿清空 `strategyId` / `name` / `description`，由用户显式填写。
+- **验收（四层全绿，真实数字）**：`npx tsc --noEmit` **exit 0 / 零输出**；`npx vitest run tests/client` **22 文件 / 528 例全通过**（基线 21/519 ⇒ +1 文件 / +9 例、0 新失败）；**完整回归 `npx vitest run` = 235 文件（7 失败 / 228 通过，16 例失败）**，失败**文件集合**与登记基线**逐项相同**（`dataHealth` / `image.uploadAndRecognize` / `limitUp` / `limitUp.watch` / `marketData` / `tushare.secret` / `tushareTradingCalendar`）⇒ **零新增回归**；`npx vite build` **exit 0**（3024 modules，`index-C81AAFbW.js` **2,549.40 kB** / gzip 623.74 kB，比上一版 2,557.21 kB **−7.81 kB**）；真实库探针 `docs/evidence/_e2e_strategy_list_detail.mts` **14/14 PASS**（`list` 9 条、5 字段齐备、`updatedAt` 形如 `YYYY-MM-DD…`、排序可复现、status 全在客户端 8 态词表内、`limit-up-baseline` 在库、`load` 裸文档 vs `loadVersion` §17 剥壳同坐标、深链命中同一版本）。
+- **新增结构契约测试** `tests/client/src/pages/strategyListDetailSplit.test.ts`（9 例）：两条独立路由、旧路由仍可达且页面目录**已无 `StrategyEditor.tsx`**（防退化成两套页面）、导航指向列表页、深链不产出旧地址、详情页**不调 `research.strategy.list`**、7 端点真实存在、新建草稿清空身份、已移除开关不再出现在用户可见文案。
+- `server/**` **一行未改**、零迁移 / 零新端点 / 零新依赖；本轮改 `client/**` 4 文件 + 新增 2 文件 + 删除 1 文件 + 新增 1 探针 + 1 测试（另更新 1 测试断言与 1 验证脚本落点断言）。
+- ⚠️ 本机 `agent-browser` 不可用、仓库无 `jsdom` ⇒ **无浏览器截图**；前端验收口径恒为「真实 tRPC 取数 + 纯函数复用 + 真实 DB」。
+- 登记：§44.5 队列编号非严格递增（存在 `9v` 重复、`9ae` 因插入顺序错位于 `9v` 之前）⇒ 新编号必须按「**下一个未占用**」判定，**禁「末条 +1」**；本轮取 `9ag`（`9af` 已被上一轮占用）。

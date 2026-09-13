@@ -275,7 +275,51 @@ export interface ClosedLoopStrategyDocRef extends ClosedLoopHandoffBase {
   };
 }
 
-/** backtest → 产出 backtestSummary（复用 C-14.1 TradeSimulationRun 摘要字段）。 */
+/** 权益曲线上的一个点（backtestSummary 明细投影；字段与 `backtest/types.EquityPoint` 同名直搬）。 */
+export interface ClosedLoopBacktestEquityPoint {
+  readonly date: string;
+  readonly equity: number;
+  readonly cash: number;
+  readonly marketValue: number;
+  readonly openPositions: number;
+}
+
+/** 撮合执行统计（`TradeSimulationRun.executionStats` 的直接投影，不重算）。 */
+export interface ClosedLoopBacktestExecutionStats {
+  readonly totalSignals: number;
+  readonly totalOrders: number;
+  readonly totalFills: number;
+  readonly rejectedOrders: number;
+  readonly partialFills: number;
+  /** 拒单原因 → 笔数（`SUSPENDED` / `LIMIT_UP` / `INSUFFICIENT_CASH` / `T_PLUS_1` …）。 */
+  readonly byReason: Readonly<Record<string, number>>;
+}
+
+/** 单笔成交投影（`backtest/types.Trade` 的子集；字段同名直搬）。 */
+export interface ClosedLoopBacktestTrade {
+  readonly securityId: string;
+  readonly entryTime: string;
+  readonly entryPrice: number;
+  readonly exitTime: string | null;
+  readonly exitPrice: number | null;
+  readonly quantity: number;
+  readonly netPnl: number | null;
+  readonly returnPct: number | null;
+  readonly holdingPeriod: number | null;
+  readonly openAtEnd: boolean;
+  readonly fees: number;
+}
+
+/**
+ * backtest → 产出 backtestSummary（复用 C-14.1 TradeSimulationRun 摘要字段）。
+ *
+ * 🔴 2026-09-13 增补「真实产出明细」——**全部可选**（种子路径 / 既有产物可缺省，不破坏任何
+ * 既有构造点）。增补理由：此前本摘要只投影 12 个数字，而 `TradeSimulationRun` 里**唯一能解释
+ * 「为什么 0 笔成交」**的 `executionStats.byReason` 与 `skipped` 被整体丢弃 ⇒ 界面跑出
+ * 「0 成交 / 曲线全平」时，用户与排查者都无从得知原因（实测：直读事件面板时 **59/59 单全部
+ * `SUSPENDED`**，见 `docs/evidence/_probe_backtest_zero_trades.mts`）。
+ * 明细一律是真实 run 的**投影**：本层不重算指标、不推算缺失值。
+ */
 export interface ClosedLoopBacktestSummary extends ClosedLoopHandoffBase {
   readonly kind: "backtestSummary";
   readonly datasetVersion: string;
@@ -286,6 +330,18 @@ export interface ClosedLoopBacktestSummary extends ClosedLoopHandoffBase {
   readonly decisionDayCount: number;
   readonly equityCurvePointCount: number;
   readonly tradeCount: number;
+  /** 权益曲线（逐模拟交易日，升序）——「策略产出的曲线」本体。 */
+  readonly equityCurve?: readonly ClosedLoopBacktestEquityPoint[];
+  /** 撮合统计（含拒单原因分布）——「为什么没成交」的唯一答案来源。 */
+  readonly executionStats?: ClosedLoopBacktestExecutionStats;
+  /** 计划层跳过原因 → 笔数（`MAX_POSITIONS_REACHED` / `FROZEN_EXIT_DEFERRED` …）。 */
+  readonly skippedCounts?: readonly { readonly code: string; readonly count: number }[];
+  /** 成交明细（有上限，见 `tradesTruncated`）。 */
+  readonly trades?: readonly ClosedLoopBacktestTrade[];
+  /** 成交笔数超过明细上限时为 true（**不得**把截断后的条数当成总笔数）。 */
+  readonly tradesTruncated?: boolean;
+  /** 成本汇总（佣金 / 印花税 / 过户费 / 滑点 / 合计）。 */
+  readonly costs?: Readonly<Record<string, number>>;
 }
 
 /** evaluation → 产出 evaluationRef（C-16.1/16.2/16.3 记录引用 + 标量结论，不重算）。 */
