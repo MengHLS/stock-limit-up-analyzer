@@ -25,6 +25,18 @@
  *      **不参与提交**，只能由用户显式「丢弃」。表单化最隐蔽的回归不是崩溃，而是静默丢键。
  *   3. **不做默认值**。留空就是留空 —— 转正会响亮拒绝「缺必填」，不替你猜。
  *      唯一例外是成本段那个**用户自己按下去的**「套用 A 股标准」：按了才算他声明的。
+ *
+ * ## 2026-09-13：段表单原语已上移到公共层
+ *
+ * `Field` / `Section` / `Advanced` / `EnumSelect` / `NumInput` / `KeyValueRows` /
+ * `SegmentGapList` / `SegmentShell` / `SegmentGapCapsules` 全部来自
+ * `@/components/common/SegmentForm`。
+ *
+ * 起因：策略详情页也要一个「按下单思路分段」的编辑器（写 `StrategyDocument.definition`），
+ * 而用户明确要求它「与研究草图的规则对齐」。两份编辑器**词表与去向必须不同**，
+ * 但**外壳、折叠、缺口胶囊、中文优先的字段行**没有任何理由各写一份 ——
+ * 抄一份的结果是两处随各自的下一次改动缓慢漂移，而漂移时不会有任何测试红。
+ * ⇒ 只把**纯展示**的壳抽出去；本文件剩下的全是「草图特有的词表 / 去向 / 纪律」。
  */
 
 import { useMemo, useState } from "react";
@@ -32,7 +44,6 @@ import {
   AlertTriangle,
   Ban,
   BookmarkPlus,
-  Check,
   ChevronRight,
   Plus,
   Trash2,
@@ -40,7 +51,17 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  Advanced,
+  EnumSelect,
+  Field,
+  KeyValueRows,
+  NumInput,
+  SegmentGapCapsules,
+  SegmentShell,
+  Section,
+  segmentDomId,
+} from "@/components/common/SegmentForm";
 import {
   CANDIDATE_CONDITION_ARITHMETIC_NOTE,
   CANDIDATE_CONDITION_FIELD_EXAMPLES,
@@ -107,228 +128,6 @@ import {
   type ConditionGroupDraft,
 } from "./createAnalysisForm";
 
-// ---------------------------------------------------------------------------
-// 基础控件（本文件私有）
-// ---------------------------------------------------------------------------
-
-/**
- * 一个字段的标签行：**中文在前，英文键名在后**。
- *
- * 英文键名不删 —— 它是与后端错误信息、`definitionBuild` 源码对照的唯一锚点；
- * 但它是小字灰字，不抢视线。`valueKey` 用来回显枚举当前选中的**原始值**（同样是给对照用的）。
- *
- * `missing` = 「转正必填但还没填」：由该段缺口的 `anchors` 驱动（**不是**另立一张必填表），
- * 因此清单说缺哪一项，琥珀标记就一定落在哪一项上。
- */
-function Field({
-  label,
-  name,
-  valueKey,
-  hint,
-  missing = false,
-  children,
-}: {
-  label: string;
-  name?: string;
-  valueKey?: string;
-  hint?: string;
-  missing?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap items-baseline gap-x-1.5">
-        <Label className="text-xs">{label}</Label>
-        {missing && (
-          <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-px text-[10px] leading-tight text-amber-800">
-            必填未填
-          </span>
-        )}
-        {name !== undefined && (
-          <code className="font-mono text-[10px] text-muted-foreground/70">{name}</code>
-        )}
-        {valueKey !== undefined && valueKey.trim() !== "" && (
-          <code className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
-            {valueKey}
-          </code>
-        )}
-      </div>
-      <div className={missing ? "rounded-md ring-1 ring-amber-300" : undefined}>{children}</div>
-      {hint !== undefined && hint.trim() !== "" && (
-        <p className="text-[10px] text-muted-foreground">{hint}</p>
-      )}
-    </div>
-  );
-}
-
-/** 段内分节：细标题 + 分隔线，**不再套一层框**（第一版三层框套框的噪音主要来自这里）。 */
-function Section({
-  title,
-  missing = false,
-  children,
-}: {
-  title: string;
-  missing?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <p className="flex flex-wrap items-baseline gap-1.5 text-[11px] font-medium text-muted-foreground">
-        <span>{title}</span>
-        {missing && (
-          <span className="rounded-full border border-amber-300 bg-amber-50 px-1.5 py-px text-[10px] leading-tight font-normal text-amber-800">
-            必填未填
-          </span>
-        )}
-      </p>
-      <div className={missing ? "rounded-md p-1 ring-1 ring-amber-300" : undefined}>{children}</div>
-    </div>
-  );
-}
-
-/** 折叠的「进阶」区（原生 `details`，无状态、可被浏览器搜索）。 */
-function Advanced({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <details className="rounded-md border border-dashed border-muted-foreground/30">
-      <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[11px] text-muted-foreground hover:text-foreground">
-        {title}
-        {hint !== undefined && <span className="ml-1.5 text-[10px] opacity-80">{hint}</span>}
-      </summary>
-      <div className="space-y-3 border-t px-2.5 py-2.5">{children}</div>
-    </details>
-  );
-}
-
-/**
- * 枚举下拉。
- *
- * 用**原生 `select`** 而非 Radix：这里多数枚举是「可选」的，需要一个**真正的空选项**
- * 表示「不填」，而 Radix 的 `SelectItem` 不接受空值。
- * 选项文字只放中文 —— 原始值改由 `Field` 的 `valueKey` 回显，避免每项都拖着
- * 一串 `FIRST_LIMIT_UP` 把下拉撑得很吵。
- */
-function EnumSelect({
-  value,
-  options,
-  onChange,
-  emptyLabel = "未选择",
-}: {
-  value: string;
-  options: readonly SketchOption[];
-  onChange: (next: string) => void;
-  emptyLabel?: string;
-}) {
-  return (
-    <select
-      className="h-8 w-full rounded-md border bg-background px-2 text-xs"
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">{emptyLabel}</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value} disabled={option.disabled === true}>
-          {option.label}
-          {option.disabled === true ? "（当前不可选）" : ""}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function NumInput({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <Input
-      className="h-8 font-mono text-xs"
-      value={value}
-      placeholder={placeholder ?? "留空 = 不填"}
-      onChange={(event) => onChange(event.target.value)}
-    />
-  );
-}
-
-/** 键值行编辑（事件参数 / 风控具名阈值共用）。 */
-function KeyValueRows({
-  rows,
-  onChange,
-  keyPlaceholder,
-  addLabel,
-}: {
-  rows: KeyValueRowDraft[];
-  onChange: (next: KeyValueRowDraft[]) => void;
-  keyPlaceholder: string;
-  addLabel: string;
-}) {
-  return (
-    <div className="space-y-1.5">
-      {rows.map((row, index) => (
-        <div key={index} className="flex items-center gap-1.5">
-          <Input
-            className="h-8 w-40 font-mono text-xs"
-            value={row.key}
-            placeholder={keyPlaceholder}
-            onChange={(event) =>
-              onChange(rows.map((r, i) => (i === index ? { ...r, key: event.target.value } : r)))
-            }
-          />
-          <select
-            className="h-8 shrink-0 rounded-md border bg-background px-1.5 text-xs"
-            value={row.valueType}
-            onChange={(event) =>
-              onChange(
-                rows.map((r, i) =>
-                  i === index
-                    ? { ...r, valueType: event.target.value as KeyValueRowDraft["valueType"] }
-                    : r,
-                ),
-              )
-            }
-          >
-            <option value="string">文本</option>
-            <option value="number">数字</option>
-            <option value="boolean">布尔</option>
-          </select>
-          <Input
-            className="h-8 flex-1 font-mono text-xs"
-            value={row.value}
-            placeholder="值"
-            onChange={(event) =>
-              onChange(rows.map((r, i) => (i === index ? { ...r, value: event.target.value } : r)))
-            }
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0"
-            aria-label="删除该行"
-            onClick={() => onChange(rows.filter((_, i) => i !== index))}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      ))}
-      <Button type="button" size="sm" variant="ghost" onClick={() => onChange([...rows, emptyKeyValueRow()])}>
-        <Plus className="mr-1 h-3.5 w-3.5" /> {addLabel}
-      </Button>
-    </div>
-  );
-}
 
 /**
  * 只读块提示：表单表达不了这一块 ⇒ 原样展示 + 不参与提交。
@@ -362,96 +161,14 @@ function rawOf(drafts: CandidateSketchDrafts, block: SketchBlockKey): SketchRawS
   return state.kind === "raw" ? state : null;
 }
 
-const segmentDomId = (segment: SketchSegmentKey) => `candidate-sketch-segment-${segment}`;
-
-// ---------------------------------------------------------------------------
-// 段外壳：折叠 + 摘要 + 缺口徽标
-// ---------------------------------------------------------------------------
 
 /**
- * 段内「转正还差」清单：把 `status.gaps` 的逐条文案原样列出来。
+ * 段 DOM id 前缀。
  *
- * 🔴 这一段不是装饰。编辑器此前只在段上显示「还差 N 项」这个**数量**，
- * 于是用户把段里看得见的东西都填完之后，徽标仍停在「还差 1 项」而完全无从下手
- * （真实案例：`when` 段缺 `entryRule.timing`，而它与「触发时点」看着像同一件事）。
- * 逐条列出「差的是谁」是这一段最基本的可用性要求。
+ * 与策略定义编辑器（`strategy/DefinitionFields.tsx`）**刻意用不同的前缀**：
+ * 两者都可能是同一应用里的长列表，前缀相同就是重复 DOM id（`scrollIntoView` 会跳错段）。
  */
-function SegmentGapList({ gaps }: { gaps: readonly SketchGap[] }) {
-  if (gaps.length === 0) return null;
-  return (
-    <ul className="space-y-0.5 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-900">
-      {gaps.map((item, index) => (
-        <li key={`${index}-${item.label}`} className="flex gap-1.5">
-          <span className="shrink-0 tabular-nums">{index + 1}.</span>
-          <span>{item.label}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SegmentShell({
-  index,
-  status,
-  open,
-  onToggle,
-  hint,
-  children,
-}: {
-  index: number;
-  status: SketchSegmentStatus;
-  open: boolean;
-  onToggle: () => void;
-  hint: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      id={segmentDomId(status.segment)}
-      data-sketch-segment={status.segment}
-      className="scroll-mt-2 rounded-lg border bg-card"
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
-      >
-        <ChevronRight
-          className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
-        />
-        <span className="shrink-0 text-sm font-medium">
-          <span className="mr-1 text-muted-foreground">{index}</span>
-          {status.title}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-          {status.summary === "" ? "还没填任何内容" : status.summary}
-        </span>
-        {status.gapCount > 0 ? (
-          <span className="shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800">
-            还差 {status.gapCount} 项
-          </span>
-        ) : status.required ? (
-          <span className="shrink-0 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-800">
-            <Check className="mr-0.5 inline h-2.5 w-2.5" />
-            齐了
-          </span>
-        ) : (
-          <span className="shrink-0 rounded-full border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-            可选
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="space-y-3 border-t px-3 py-3">
-          <SegmentGapList gaps={status.gaps} />
-          <p className="text-[11px] text-muted-foreground">{hint}</p>
-          {children}
-        </div>
-      )}
-    </section>
-  );
-}
+const SEGMENT_DOM_PREFIX = "candidate-sketch-segment";
 
 // ---------------------------------------------------------------------------
 // 入口
@@ -486,7 +203,7 @@ export function CandidateSketchFields({
     setOverrides((prev) => ({ ...prev, [segment]: true }));
     // 等一帧让 `details`/条件渲染的 DOM 出来再滚。
     requestAnimationFrame(() => {
-      document.getElementById(segmentDomId(segment))?.scrollIntoView({ block: "start", behavior: "smooth" });
+      document.getElementById(segmentDomId(SEGMENT_DOM_PREFIX, segment))?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
   };
 
@@ -536,37 +253,20 @@ export function CandidateSketchFields({
 
   return (
     <div className="space-y-2">
-      {totalGaps > 0 && (
-        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2">
-          <p className="text-[11px] font-medium text-sky-900">
-            距离「可转正」还差 {totalGaps} 项（不影响保存；点一下跳到那一段）
-          </p>
-          {/*
-            ⚠️ 这里必须列**逐条文案**而不是「段名 · 数量」。
-            只给数量时，用户把段里看得见的东西都填完、徽标仍停在「还差 1 项」，
-            就只能靠猜 —— 这正是「永远还差一项、没法继续」的根因。
-          */}
-          <ul className="mt-1.5 space-y-0.5">
-            {statuses
-              .filter((status) => status.gapCount > 0)
-              .map((status) => (
-                <li key={status.segment}>
-                  <button
-                    type="button"
-                    onClick={() => focusSegment(status.segment)}
-                    className="text-left text-[11px] text-sky-900 underline decoration-dotted underline-offset-2 hover:text-sky-700"
-                  >
-                    <span className="font-medium">{status.title}：</span>
-                    {status.gaps.map((item) => item.label).join("；")}
-                  </button>
-                </li>
-              ))}
-          </ul>
-        </div>
-      )}
+      {/*
+        ⚠️ 这里必须列**逐条文案**而不是「段名 · 数量」。
+        只给数量时，用户把段里看得见的东西都填完、徽标仍停在「还差 1 项」，
+        就只能靠猜 —— 这正是「永远还差一项、没法继续」的根因。
+      */}
+      <SegmentGapCapsules
+        statuses={statuses}
+        onFocus={focusSegment}
+        lead={`距离「可转正」还差 ${totalGaps} 项（不影响保存；点一下跳到那一段）`}
+      />
 
       {/* ① 买什么 ---------------------------------------------------------- */}
       <SegmentShell
+        domIdPrefix={SEGMENT_DOM_PREFIX}
         index={1}
         status={statuses[0]}
         open={isOpen(statuses[0])}
@@ -639,6 +339,7 @@ export function CandidateSketchFields({
               <KeyValueRows
                 rows={entryStructured?.eventParams ?? []}
                 onChange={(rows) => setEntry({ eventParams: rows })}
+                newRow={emptyKeyValueRow}
                 keyPlaceholder="如 eventCode"
                 addLabel="加一条事件参数"
               />
@@ -649,6 +350,7 @@ export function CandidateSketchFields({
 
       {/* ② 什么条件买（可空） ------------------------------------------------ */}
       <SegmentShell
+        domIdPrefix={SEGMENT_DOM_PREFIX}
         index={2}
         status={statuses[1]}
         open={isOpen(statuses[1])}
@@ -676,6 +378,7 @@ export function CandidateSketchFields({
 
       {/* ③ 什么时候买（三项必填） -------------------------------------------- */}
       <SegmentShell
+        domIdPrefix={SEGMENT_DOM_PREFIX}
         index={3}
         status={statuses[2]}
         open={isOpen(statuses[2])}
@@ -763,6 +466,7 @@ export function CandidateSketchFields({
 
       {/* ④ 怎么卖 ---------------------------------------------------------- */}
       <SegmentShell
+        domIdPrefix={SEGMENT_DOM_PREFIX}
         index={4}
         status={statuses[3]}
         open={isOpen(statuses[3])}
@@ -810,6 +514,7 @@ export function CandidateSketchFields({
 
       {/* ⑤ 买多少 · 最多持几只 ---------------------------------------------- */}
       <SegmentShell
+        domIdPrefix={SEGMENT_DOM_PREFIX}
         index={5}
         status={statuses[4]}
         open={isOpen(statuses[4])}
@@ -951,6 +656,7 @@ export function CandidateSketchFields({
                 <KeyValueRows
                   rows={entryStructured?.risk.extensions ?? []}
                   onChange={(rows) => setEntry({ risk: { ...(entryStructured ?? emptyEntryRuleDraft()).risk, extensions: rows } })}
+                  newRow={emptyKeyValueRow}
                   keyPlaceholder="如 maxBoardHeight"
                   addLabel="加一条具名阈值"
                 />
@@ -989,6 +695,7 @@ export function CandidateSketchFields({
 
       {/* ⑥ 成本与资金 ------------------------------------------------------- */}
       <SegmentShell
+        domIdPrefix={SEGMENT_DOM_PREFIX}
         index={6}
         status={statuses[5]}
         open={isOpen(statuses[5])}
@@ -1013,6 +720,7 @@ export function CandidateSketchFields({
 
       {/* ⑦ 参数搜索空间 ----------------------------------------------------- */}
       <SegmentShell
+        domIdPrefix={SEGMENT_DOM_PREFIX}
         index={7}
         status={statuses[6]}
         open={isOpen(statuses[6])}

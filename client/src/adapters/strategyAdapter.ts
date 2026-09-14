@@ -360,9 +360,42 @@ export function strategyToViewModel(raw: unknown): StrategyViewModel {
   };
 }
 
+/**
+ * 序列化时的覆盖项（`viewModelToStrategy` 的可选第二参）。
+ *
+ * 🔴 存在的理由：`StrategyDocument` 的 v1 视图（`entryRules` / `exitRules` / `riskRules` /
+ * `positionSizing` / `parameters`）是 Canonical `definition` 的**单向派生结果**。两者同时下发
+ * 且不一致时，服务端 `map.ts#alignDefinitionViews` 会报 `SCHEMA_DEFINITION_VIEW_CONFLICT`
+ * —— 而且它是**深度比对**，所以只要在 v1 层动过一个字符就必然撞上。
+ *
+ * 服务端自己就是这么处理的：`strategyPersistence/service.ts#patchToInput`（STRATEGY-004）
+ * 在 patch 带 `definition` 时**不再传递** v1 视图。这里保持同一口径：
+ * **提供了 `definition` ⇒ 删掉 v1 视图，让组装层按定义重新派生**。
+ *
+ * 同理，`executionAssumptions.backtestConfig` / `.costModel` **无法**从 `definition` 派生，
+ * 服务端在提供 `definition` 时**要求显式提供**（`SCHEMA_DEFINITION_EXECUTION_ASSUMPTIONS_REQUIRED`），
+ * 所以这两项也在覆盖项里一起给出。
+ */
+export interface StrategySerializationOverrides {
+  /** Canonical 定义。提供它 ⇒ 本次序列化**不下发 v1 兼容视图**。 */
+  definition?: Record<string, unknown>;
+  /** 文档级执行假设（成本模型 + 回测配置）。提供它 ⇒ 整段替换。 */
+  executionAssumptions?: Record<string, unknown>;
+}
+
+/** 提供 `definition` 时被剔除的 v1 派生视图（与 `patchToInput` 的 `views` 一一对应）。 */
+const DERIVED_VIEW_KEYS = [
+  "entryRules",
+  "exitRules",
+  "riskRules",
+  "positionSizing",
+  "parameters",
+] as const;
+
 /** 前端 ViewModel → wire（提交给 validate / compare）。已知字段覆盖 extra，未知字段透传。 */
 export function viewModelToStrategy(
-  vm: StrategyViewModel
+  vm: StrategyViewModel,
+  overrides?: StrategySerializationOverrides
 ): Record<string, unknown> {
   const universe: Record<string, unknown> = { universeId: vm.universeId };
   if (vm.universeMembers.length > 0) universe.members = vm.universeMembers;
@@ -373,13 +406,13 @@ export function viewModelToStrategy(
   };
   if (vm.maxPositions !== null) backtestConfig.maxPositions = vm.maxPositions;
 
-  const executionAssumptions: Record<string, unknown> = {
+  const executionAssumptions: Record<string, unknown> = overrides?.executionAssumptions ?? {
     backtestConfig,
     costModel: { ...vm.costModel },
     executionModel: vm.executionModel,
   };
 
-  return {
+  const out: Record<string, unknown> = {
     ...vm.extra,
     recordKind: (vm.extra.recordKind as string) ?? "STRATEGY_DOCUMENT",
     recordVersion: (vm.extra.recordVersion as number) ?? 1,
@@ -401,6 +434,13 @@ export function viewModelToStrategy(
     executionAssumptions,
     fingerprint: vm.fingerprint,
   };
+
+  if (overrides?.definition !== undefined) {
+    for (const key of DERIVED_VIEW_KEYS) delete out[key];
+    out.definition = overrides.definition;
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------

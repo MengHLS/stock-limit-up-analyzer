@@ -72,7 +72,11 @@ import {
   advancePaperTradingDay,
   buildForwardPreparedBuys,
   buildPaperTradingSummary,
+  classifyAdvanceKind,
   createInitialPaperTradingState,
+  paperTradingAdvanceDiagnosis,
+  PaperTradingCalendarStaleError,
+  type PaperTradingAdvanceDiagnosis,
   type PaperTradingState,
   type PaperTradingStrategyKey,
   type PaperTradingSummary,
@@ -2589,6 +2593,17 @@ export async function createPaperTradingRun(
   const dates = Array.from(new Set(records.map((record) => record.limitUpDate))).sort();
   const startDate = dates.at(-1);
   if (!startDate) return 0;
+  // 🔴 建运行前置校验（2026-09-14）：推进集合只按 `index_daily` 交易日历取，最新信号日一旦越过日历末端，
+  // 这条运行**从创建起就不可能被推进**（真实事故：2026-09-14 建的运行锚在 09-14，而日历停在 09-04）。
+  // 宁可在创建时响亮失败，也不留一条永远不动、且只能靠「提示成功」掩盖的新运行。
+  const calendarLastDate = context.tradingDates?.at(-1) ?? null;
+  if (calendarLastDate === null || startDate > calendarLastDate) {
+    throw new PaperTradingCalendarStaleError(
+      `最新信号日 ${startDate} 已越过交易日历末端 ${calendarLastDate ?? "（无数据）"}，`
+        + "该运行无法被推进。请先同步指数日线（index_daily）后再创建。",
+      { signalDate: startDate, calendarLastDate },
+    );
+  }
   const normalized = normalizePaperTradingOptions(options, initialCapital);
   const state = buildInitialForwardState(records, context, normalized, strategyKey, startDate, initialCapital);
   const inserted = await db.insert(paperTradingRuns).values({
@@ -2667,30 +2682,63 @@ async function persistPaperTradingRunState(id: number, state: PaperTradingState)
   }).where(eq(paperTradingRuns.id, id));
 }
 
+/** 一次推进的完整结果：摘要（失败时为 null）+ 明确的诊断（为什么推进了 / 为什么没动）。 */
+export type PaperTradingAdvanceResult = {
+  summary: PaperTradingSummary | null;
+  diagnosis: PaperTradingAdvanceDiagnosis;
+};
+
 /**
  * 把一次运行推进到「已有日线行情的最新交易日」。
  * 逐日：开盘成交既有准备清单 → 收盘止盈止损出清 → 标记市值 → 生成下一交易日清单。
- * 若该运行已推进到最新日期，则原样返回当前摘要。
+ *
+ * 🔴 不再「静默返回旧摘要」：推进集合按 `index_daily` 交易日历取，日历一旦滞后于行情就恒为空；
+ * 此时必须把 `calendar-stale` 如实报出（调用方据此提示），否则表现为「提示成功但结果没动」。
  */
-export async function advancePaperTradingRunToLatest(id: number): Promise<PaperTradingSummary | null> {
+export async function advancePaperTradingRunToLatest(id: number): Promise<PaperTradingAdvanceResult> {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) {
+    return { summary: null, diagnosis: paperTradingAdvanceDiagnosis({ kind: "database-unavailable" }) };
+  }
   const run = await getPaperTradingRun(id);
-  if (!run || run.status !== "active") return null;
+  if (!run) {
+    return { summary: null, diagnosis: paperTradingAdvanceDiagnosis({ kind: "run-not-found" }) };
+  }
+  if (run.status !== "active") {
+    return {
+      summary: null,
+      diagnosis: paperTradingAdvanceDiagnosis({ kind: "run-not-active", lastProcessedDate: run.state.lastProcessedDate }),
+    };
+  }
   // 纸面交易为前向功能：从 lastProcessedDate 往前留 45 天上下文即可正确推进，
   // 无需加载 2019 年以来的全量历史（回填后全量会命中 489 万行价格并卡死）。
   const lastProcessed = run.state.lastProcessedDate;
-  const { records, context } = await loadBacktestBaseContext(
+  const { records, rawRows, context } = await loadBacktestBaseContext(
     lastProcessed ? { startDate: shiftDate(lastProcessed, -45) } : recentBacktestRange(365),
   );
   const priceByStockDate = context.priceByStockDate ?? new Map<string, LeaderCandidateDailyPrice>();
   const tradingDates = context.tradingDates ?? [];
-  if (tradingDates.length === 0) return run.summary;
+  // 日历末端 = 推进集合的上界；行情末端 = 已加载候选股日线的最后一天。两者不一致即「日历落后」。
+  const calendarLastDate = tradingDates.at(-1) ?? null;
+  const marketLastDate = rawRows.reduce<string>((max, row) => (row.tradeDate > max ? row.tradeDate : max), "") || null;
+  const datesToAdvance = tradingDates.filter((date) => lastProcessed === null || date > lastProcessed);
+
+  const diagnose = (advancedDates: readonly string[]) => paperTradingAdvanceDiagnosis({
+    kind: classifyAdvanceKind({ advancedDates, calendarLastDate, marketLastDate }),
+    lastProcessedDate: lastProcessed,
+    advancedDates,
+    calendarLastDate,
+    marketLastDate,
+  });
+
+  if (datesToAdvance.length === 0) {
+    // 空转必须区分「已是最新」与「日历落后」（前者合法、后者是环境故障）。
+    return { summary: run.summary, diagnosis: diagnose([]) };
+  }
 
   const options = run.options;
   const realistic = options.realistic ?? {};
   const downside = options.downsideRisk ?? {};
-  const datesToAdvance = tradingDates.filter((date) => lastProcessed === null || date > lastProcessed);
 
   let state = run.state;
   for (const today of datesToAdvance) {
@@ -2711,20 +2759,20 @@ export async function advancePaperTradingRunToLatest(id: number): Promise<PaperT
   }
 
   await persistPaperTradingRunState(id, state);
-  return buildPaperTradingSummary(state, run.initialCapital);
+  return { summary: buildPaperTradingSummary(state, run.initialCapital), diagnosis: diagnose(datesToAdvance) };
 }
 
-/** 推进所有 active 运行到最新交易日，供每日定时任务调用。 */
-export async function advanceAllActivePaperTradingRuns(): Promise<Array<{ runId: number; label: string; summary: PaperTradingSummary | null }>> {
+/** 推进所有 active 运行到最新交易日，供每日定时任务调用（逐条带诊断，便于调度器显式告警）。 */
+export async function advanceAllActivePaperTradingRuns(): Promise<Array<{ runId: number; label: string; summary: PaperTradingSummary | null; diagnosis: PaperTradingAdvanceDiagnosis }>> {
   const db = await getDb();
   if (!db) return [];
   const rows = await db.select({ id: paperTradingRuns.id, label: paperTradingRuns.label })
     .from(paperTradingRuns)
     .where(eq(paperTradingRuns.status, "active"));
-  const results: Array<{ runId: number; label: string; summary: PaperTradingSummary | null }> = [];
+  const results: Array<{ runId: number; label: string; summary: PaperTradingSummary | null; diagnosis: PaperTradingAdvanceDiagnosis }> = [];
   for (const row of rows) {
-    const summary = await advancePaperTradingRunToLatest(row.id);
-    results.push({ runId: row.id, label: row.label, summary });
+    const { summary, diagnosis } = await advancePaperTradingRunToLatest(row.id);
+    results.push({ runId: row.id, label: row.label, summary, diagnosis });
   }
   return results;
 }

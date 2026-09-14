@@ -1,0 +1,489 @@
+{
+  "mode": "apply",
+  "statementsTotal": 1,
+  "executed": [
+    "table:closed_loop_backtest_run"
+  ],
+  "skipped": [],
+  "newTable": {
+    "exists": true,
+    "rows": 0,
+    "columns": [
+      {
+        "column": "id",
+        "present": true,
+        "type": "bigint",
+        "nullable": "NO",
+        "key": "PRI",
+        "ok": true
+      },
+      {
+        "column": "runId",
+        "present": true,
+        "type": "varchar(80)",
+        "nullable": "NO",
+        "key": "UNI",
+        "ok": true
+      },
+      {
+        "column": "experimentId",
+        "present": true,
+        "type": "varchar(80)",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "strategyId",
+        "present": true,
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "key": "MUL",
+        "ok": true
+      },
+      {
+        "column": "strategyVersion",
+        "present": true,
+        "type": "varchar(32)",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "startDate",
+        "present": true,
+        "type": "date",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "endDate",
+        "present": true,
+        "type": "date",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "datasetVersion",
+        "present": true,
+        "type": "varchar(96)",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "datasetVersionId",
+        "present": true,
+        "type": "bigint",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "datasetSource",
+        "present": true,
+        "type": "varchar(16)",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "recipeId",
+        "present": true,
+        "type": "varchar(96)",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "status",
+        "present": true,
+        "type": "varchar(24)",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "executedStageCount",
+        "present": true,
+        "type": "int",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "blockedStageCount",
+        "present": true,
+        "type": "int",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "skippedStageCount",
+        "present": true,
+        "type": "int",
+        "nullable": "NO",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "firstBlockedReasonCode",
+        "present": true,
+        "type": "varchar(64)",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "initialCapital",
+        "present": true,
+        "type": "double",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "finalEquity",
+        "present": true,
+        "type": "double",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "tradeCount",
+        "present": true,
+        "type": "int",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "equityCurvePointCount",
+        "present": true,
+        "type": "int",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "summaryJson",
+        "present": true,
+        "type": "text",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "resultJson",
+        "present": true,
+        "type": "longtext",
+        "nullable": "YES",
+        "key": "",
+        "ok": true
+      },
+      {
+        "column": "createdAt",
+        "present": true,
+        "type": "timestamp",
+        "nullable": "NO",
+        "key": "MUL",
+        "ok": false
+      }
+    ],
+    "indexes": [
+      {
+        "name": "uq_closed_loop_backtest_run_run",
+        "present": true,
+        "unique": true,
+        "columns": "runId",
+        "ok": true
+      },
+      {
+        "name": "idx_closed_loop_backtest_run_created",
+        "present": true,
+        "unique": false,
+        "columns": "createdAt",
+        "ok": true
+      },
+      {
+        "name": "idx_closed_loop_backtest_run_strategy",
+        "present": true,
+        "unique": false,
+        "columns": "strategyId,createdAt",
+        "ok": true
+      }
+    ]
+  },
+  "fk": {
+    "newTable": 0,
+    "schemaTotal": 0
+  },
+  "existingTablesUnchanged": [
+    {
+      "table": "backtest_runs",
+      "ok": true,
+      "columns": 6
+    },
+    {
+      "table": "paper_trading_runs",
+      "ok": true,
+      "columns": 10
+    },
+    {
+      "table": "strategies",
+      "ok": true,
+      "columns": 10
+    },
+    {
+      "table": "strategy_versions",
+      "ok": true,
+      "columns": 15
+    },
+    {
+      "table": "strategy_version_datasets",
+      "ok": true,
+      "columns": 11
+    },
+    {
+      "table": "strategy_research_provenance",
+      "ok": true,
+      "columns": 13
+    },
+    {
+      "table": "research_experiment",
+      "ok": true,
+      "columns": 12
+    },
+    {
+      "table": "research_run",
+      "ok": true,
+      "columns": 13
+    },
+    {
+      "table": "research_analysis",
+      "ok": true,
+      "columns": 9
+    },
+    {
+      "table": "research_result",
+      "ok": true,
+      "columns": 9
+    },
+    {
+      "table": "research_conclusion",
+      "ok": true,
+      "columns": 11
+    },
+    {
+      "table": "research_strategy_candidate",
+      "ok": true,
+      "columns": 18
+    },
+    {
+      "table": "research_artifact",
+      "ok": true,
+      "columns": 9
+    },
+    {
+      "table": "dataset_definition",
+      "ok": true,
+      "columns": 15
+    },
+    {
+      "table": "dataset_version",
+      "ok": true,
+      "columns": 14
+    },
+    {
+      "table": "dataset_build_job",
+      "ok": true,
+      "columns": 16
+    },
+    {
+      "table": "ds_first_limit_pullback_event",
+      "ok": true,
+      "columns": 18
+    },
+    {
+      "table": "ds_first_limit_pullback_prefix",
+      "ok": true,
+      "columns": 13
+    },
+    {
+      "table": "ds_first_limit_pullback_post",
+      "ok": true,
+      "columns": 13
+    },
+    {
+      "table": "ds_first_limit_pullback_path",
+      "ok": true,
+      "columns": 15
+    },
+    {
+      "table": "ds_first_limit_pullback_outcome",
+      "ok": true,
+      "columns": 10
+    },
+    {
+      "table": "users",
+      "ok": true,
+      "columns": 9
+    },
+    {
+      "table": "stock_daily_prices",
+      "ok": true,
+      "columns": 14
+    }
+  ],
+  "rowCounts": {
+    "diff": [
+      {
+        "table": "backtest_runs",
+        "before": 1,
+        "after": 1,
+        "changed": false
+      },
+      {
+        "table": "paper_trading_runs",
+        "before": 1,
+        "after": 1,
+        "changed": false
+      },
+      {
+        "table": "strategies",
+        "before": 9,
+        "after": 9,
+        "changed": false
+      },
+      {
+        "table": "strategy_versions",
+        "before": 10,
+        "after": 10,
+        "changed": false
+      },
+      {
+        "table": "strategy_version_datasets",
+        "before": 8,
+        "after": 8,
+        "changed": false
+      },
+      {
+        "table": "strategy_research_provenance",
+        "before": 8,
+        "after": 8,
+        "changed": false
+      },
+      {
+        "table": "research_experiment",
+        "before": 2,
+        "after": 2,
+        "changed": false
+      },
+      {
+        "table": "research_run",
+        "before": 12,
+        "after": 12,
+        "changed": false
+      },
+      {
+        "table": "research_analysis",
+        "before": 248,
+        "after": 248,
+        "changed": false
+      },
+      {
+        "table": "research_result",
+        "before": 4299,
+        "after": 4299,
+        "changed": false
+      },
+      {
+        "table": "research_conclusion",
+        "before": 11,
+        "after": 11,
+        "changed": false
+      },
+      {
+        "table": "research_strategy_candidate",
+        "before": 9,
+        "after": 9,
+        "changed": false
+      },
+      {
+        "table": "research_artifact",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "dataset_definition",
+        "before": 1,
+        "after": 1,
+        "changed": false
+      },
+      {
+        "table": "dataset_version",
+        "before": 2,
+        "after": 2,
+        "changed": false
+      },
+      {
+        "table": "dataset_build_job",
+        "before": 4,
+        "after": 4,
+        "changed": false
+      },
+      {
+        "table": "ds_first_limit_pullback_event",
+        "before": 25108,
+        "after": 25108,
+        "changed": false
+      },
+      {
+        "table": "ds_first_limit_pullback_prefix",
+        "before": 527268,
+        "after": 527268,
+        "changed": false
+      },
+      {
+        "table": "ds_first_limit_pullback_post",
+        "before": 487692,
+        "after": 487692,
+        "changed": false
+      },
+      {
+        "table": "ds_first_limit_pullback_path",
+        "before": 487692,
+        "after": 487692,
+        "changed": false
+      },
+      {
+        "table": "ds_first_limit_pullback_outcome",
+        "before": 75324,
+        "after": 75324,
+        "changed": false
+      },
+      {
+        "table": "users",
+        "before": 1,
+        "after": 1,
+        "changed": false
+      },
+      {
+        "table": "stock_daily_prices",
+        "before": 8893547,
+        "after": 8893547,
+        "changed": false
+      }
+    ]
+  },
+  "notes": [],
+  "failures": [
+    "列键不符：createdAt 实际 MUL，期望 "
+  ],
+  "pass": false
+}

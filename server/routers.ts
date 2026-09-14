@@ -123,6 +123,8 @@ import {
   EMOTION_LEVELS,
   getEmotionLevel,
 } from "./db";
+// 建运行前置校验的领域错误（日历落后）；领域码必须经 message 跨过 tRPC 边界。
+import { PaperTradingCalendarStaleError } from "./paperTrading";
 
 const limitUpTimeInput = z.string().refine(isValidLimitUpTime, {
   message: "涨停时间应为HH:MM或HH:MM:SS格式",
@@ -1414,15 +1416,25 @@ export const appRouter = router({
             message: "仅管理员可创建前向纸面交易运行",
           });
         }
-        const id = await createPaperTradingRun(
-          input.label,
-          input.strategyKey,
-          input.options ?? {},
-          input.initialCapital ?? 100_000
-        );
-        return { id };
+        try {
+          const id = await createPaperTradingRun(
+            input.label,
+            input.strategyKey,
+            input.options ?? {},
+            input.initialCapital ?? 100_000
+          );
+          return { id };
+        } catch (error) {
+          // 🔴 领域码必须写进 message（经 tRPC 边界后 cause 不可见）⇒ 前端才能按码分流提示。
+          if (error instanceof PaperTradingCalendarStaleError) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: `[${error.code}] ${error.message}`,
+            });
+          }
+          throw error;
+        }
       }),
-
     // 列出全部前向纸面交易运行（含扁平摘要）。
     listPaperTradingRuns: publicProcedure
       .input(
@@ -1461,6 +1473,7 @@ export const appRouter = router({
       }),
 
     // 手动把一条运行推进到最新交易日。
+    // 🔴 返回 `{ summary, diagnosis }`：诊断必须透出，否则「日历落后导致空转」会被前端当成成功。
     advancePaperTradingRun: protectedProcedure
       .input(z.object({ id: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
@@ -1470,8 +1483,7 @@ export const appRouter = router({
             message: "仅管理员可手动推进纸面交易",
           });
         }
-        const summary = await advancePaperTradingRunToLatest(input.id);
-        return { summary };
+        return await advancePaperTradingRunToLatest(input.id);
       }),
 
     // 管理员手动触发首轮历史回填或最近交易日补齐，外部行情密钥仅保留在服务端。

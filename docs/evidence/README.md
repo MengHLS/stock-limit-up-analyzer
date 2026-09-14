@@ -250,3 +250,96 @@ npx tsx docs/evidence/_r007_run_engine.mts
 | `_probe_condition_mapping.mts` | 🔴 **决定性：用户策略可完整表达并通过定义校验器** —— `validateCanonicalStrategyDefinition` 返回 **`valid = true, issues = 0`**（6 条入场条件 + 硬止损 + 时间止损）。逐条解析：`event.daysSincePreviousLimit`/`event.isFirstLimit` = `eventDay`；`prefix.rd0.*` = `preEvent rd=0`；`bar.*` = `currentBar`；`resolveSignalTimeline(FIRST_VALID_DAY, {1,5})` ⇒ `earliestSignalOffset=1` / `resolvable=true`。⚠️ **首跑 5 条 issue 全是探针写错枚举**（`schemaVersion` 正确为 `"1.0"`；`signalTiming` = `T_OPEN\|T_CLOSE`；`executionTiming` = `T_CLOSE\|T_PLUS_1_OPEN\|…`；`quantityMethod` = `FIXED_SHARES\|TARGET_WEIGHT\|AMOUNT`；`STOP_LOSS` 需 `threshold`）—— **策略条件本身零 issue** | `STRATEGY-SPEC-first-limit-pullback.md` + 本轮回答 |
 | `_probe_semantic_gaps.mts` | 🔴 **量化 3 处语义偏差**（校验器只查结构、不查语义）：**G1**「回调期间最低价」= 累积约束 `min(low[T+1..T+k])`，逐日条件 `bar.low>=prefix.rd0.low` 只是近似 —— 实测差 **T+1=0 / T+2=201 / T+3=630 / T+4=993 / T+5=1,393**（逐日 76.0% vs 累积 70.2%，**高估 5.8%**）；**G2** 前5日均量需 rd=-5..-1 聚合、**单一字段引用表达不了**（但 **23,978/23,978 事件前5日 prefix 完整**）；**G3** 「反包前一日」需窗口内相对引用 `T+k-1`、**框架无此能力**；另实查 `close=high`（实体涨停）= 23,907/23,978（99.7%）、一字板 706、`marketCap`/`floatMarketCap` **100% NULL**、`industryCode` 空 99.5% | `STRATEGY-SPEC-first-limit-pullback.md` + 本轮回答 |
 
+
+---
+
+### `backtestpersist` —— 5 组（2026-09-13 闭环回测「零成交」根因修复 + 2026-09-14「每次回测自动留档」）
+
+> **背景**：用户先报「运行策略后前端没有任何东西产生」（2026-09-13），修复后又报
+> 「每次回测的结果应该保存，并有地方可以展示」（2026-09-14）。两轮指向同一件事：
+> **闭环 `loopRun` 此前是无状态调用，跑完即弃** —— 结果既不展示、也不落库。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_backtest_zero_trades.mts` | 🔴 **「0 成交」根因取证（改动前）**：registry 直读 23,978 行 ⇒ **59/59 单全 `SUSPENDED`、0 成交、权益曲线恒 100,000**；同一策略同窗口强制 rebuild ⇒ **133 笔成交 / 期末 112,169.43（+12.17%）**；「执行日有没有行」逐单核对：registry 意图 60 → 有行 **0**、rebuild 意图 255 → 有行 **250** | `ROADMAP.md` §44 |
+| `_probe_after_fix_backtest_output.mts` + `.json` | ✅ **修复后真实 tRPC 复验（6/6 PASS，8m21s）**：`datasetSource=rebuild` / **292,489 行** / `tradeCount=133` / `finalEquity=112169.43` / 曲线 57 点中 **54 个不同取值（非平）** / `byReason={INSUFFICIENT_CASH:6}`（**零 `SUSPENDED`**） | `ROADMAP.md` §44 |
+| `_probe_backtest_storage_state.mts` + `.json` | 🔴 **留档现状取证**：legacy `backtest_runs` 真实库**存在但仅 1 行**（2026-09-04 16:27，单条 `resultJson` **5,610,196 字符 ≈ 5.6MB**）；`research_run` 实查 13 列（`executionLogJson` 是**批次日志**、非结果）⇒ 证明闭环结果**无处可落** | 本轮 `ROADMAP.md` §44 |
+| `_probe_closed_loop_persist_e2e.mts` + `.json` | ✅ **留档端到端（真实 tRPC + 真库）**：跑一次 ⇒ 留档 **+1 行**；列表摘要**逐字段等于**运行结果（9 项比对）；详情含完整 `stages`（14 阶段）与权益曲线/成交明细；**列表不携带长文本结果**；同 `runId` 写两次**仍只有一行**（幂等收敛），且探针自清理不留污染 | 本轮 `ROADMAP.md` §44 |
+| `_probe_clbr_rows.mts` | 🔧 **留档行巡检 / 残留清理**（默认**只读**）：列出每行坐标 + 状态 + 成交 + `resultJson` 字符数，用于判断产品页是否有探针残留。⚠️ 加 `--clean-probe-rows` 时按**双重命名守卫**（`experimentId LIKE 'EXP-PROBE%'` **且** `strategyId LIKE 'probe-%'`）删除，并额外列出「**只命中单侧守卫**」的可疑行**不自动删**（防止守卫放宽后误删真实运行）。已清掉首跑崩溃留下的 1 行幂等残留（`EXP-PROBE-IDEM` / `resultJson` 仅 451 字符）⇒ 现留档 **2 行全为真实运行**（`cand-360001@1.0.0`，39,808 字符） | 本轮 `ROADMAP.md` §44 + `ROADMAP-CHANGELOG.md` |
+
+### `seclabels` —— 5 个（2026-09-14 成交明细「证券名称 + 代码」）
+
+> 触发 = 用户「**成交明细我需要展示股票的名称及代码**」（2026-09-14）。
+> 核心事实：闭环结果 `trades[].securityId` 是 `sec_<uuid>`（**不是**代码），而真实库
+> **没有证券名称主数据表** ⇒ 必须两步解析（`identifier_history` → `limit_up_records`）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_symbol_name_source.mts` + `.log` | 🔴 **键形状取证**：`trades[].securityId` 实测为 **`sec_<uuid>`**（3 次留档共 **388** 笔 / **251** 个唯一值），与 `limit_up_records.stockCode`（`603439.SH` 形式）**匹配率 0** ⇒ 直接印在表格里毫无可读性；`Trade` 字段并集 = 11 个、**不含任何名称类字段**；`limit_up_records` = **99,617** 行 / **4,324** 个 distinct code | 本轮 `ROADMAP.md` §44 |
+| `_probe_symbol_identity_bridge.mts` + `.log` | ✅ **身份桥可用性**：`research_securities` **5,552** 行、`research_security_identifier_history` **5,552** 行（`distinctIds == distinctCodes` ⇒ **无 code reuse**）⇒ `sec_<uuid>` → 代码 **251/251 全覆盖**；经名称源后 **158/251** 能取到名称 | 同上 |
+| `_probe_name_tables.mts` + `.log` | 🔴 **名称源穷举**：真实库 **60 张表**中，含 name 的列共 **26** 个，其中**只有** `limit_up_records.stockName` 承载股票名称（`stock_watchlist.stockName` 仅 6 行）；**确认不存在证券名称主数据表** | 同上 |
+| `_probe_name_gap_diagnosis.mts` + `.log` | 🔴 **缺口根因**：93 个缺名称的代码去 `limit_up_records` 精确查 **0 命中** ⇒ **收录口径问题、非键匹配 bug**；缺口集中在**创业板 300/301（74/152）与科创板 688（19/35）**，而沪主板 **0/30**、深主板 **0/34** 全有 | 同上 |
+| `_probe_security_labels_e2e.mts` + `.json` + `.log` | ✅ **端到端（真实 tRPC + 真库）· 0 失败 PASS**：端点返回 251 条与入参去重数一致；**251/251** 译成 canonical 代码、**格式/交易所冲突 0**；名称覆盖 **158/251 = 62.9%**（缺口 93，且缺口内**非法代码 0** ⇒ 是收录问题）；空数组与 **501** 个 id **实测被 zod 拒**；端点与仓储直调**逐条零差异** | 同上 |
+
+### `runrestore` —— 3 个（2026-09-14 「运行结果刷新即丢」诊断 + 展示层修复）
+
+> 触发 = 用户「**我刚才跑过的回测，结果又没了，是什么问题**」（2026-09-14）。
+> 核心事实：**数据没丢**（留档 `id=60001` 完整在库），丢的是**展示层**（结果只存 `useState`，而 `dev` 是单进程 `tsx watch` ⇒ 整页重载即丢）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_run_tab_hydration.mts` + `.json` | ✅ **刷新恢复路径（真实 tRPC + 真库）· 0 失败 PASS**：`listBacktests({strategyId,limit:1})` 按策略命中且**倒序**；**列表行不带 `result`**；详情摘要与列表**逐字段一致**；`buildClosedLoopRunViewModel`（**前端同一函数**）构建成功 ⇒ `stages=14`、`trades=208/208`、曲线 57 点；首笔 `sec_314d87cf-…` → **欣天科技 300615.SZ**；同时实查 `closed_loop_backtest_run#id=60001`（`cand-270001@1.0.0`、208 笔、期末 96,481.05）证明「数据没丢」 | 本轮 `ROADMAP.md` §44 |
+| `tests/client/src/pages/strategyRunResultPersist.test.ts`（**不在本目录**，登记于此便于溯源） | ✅ **7/7 通过**：静态扫真实源码 + 真实 `appRouter` 端点断言，钉住「留档恢复存在 / 按策略取最近一次 / **本次结果优先**（分支顺序）/ 复用同一套 VM + 面板 / 空态**禁**谎称「还没跑过」/ `resultJson` 为空必须明说 / 跑完 `invalidate`」 | 同上 |
+| `_dev_boot_check.log` | 🔴 **端口取证**：实测 `Port 3000 is busy, using port 3101 instead` ⇒ 3000 落在 Windows 保留段 `2980–3079`（`node` 直接 `listen(3000)` = **`EACCES`**、**非** `EADDRINUSE`；`netstat` **看不到**占用者）⇒ **必须按启动日志打印的端口访问** | 同上 |
+
+### `datasetscope` —— 4 组（2026-09-14：数据集范围继承 + 成交代码译码正确性）
+
+| 文件 | 结论 | 引用于 |
+|---|---|---|
+| `_probe_dataset_scope_inherit_e2e.mts` + `.json` | ✅ **PASS / 0 失败（真实 tRPC `loopRun`，112,525ms）**：证券池 **5146 → 3180**（主板）；`datasetSourceNote` 含「已继承该数据集的 universe 约束：板块=main、排除 ST/*ST（来源=build-config）」；成交 **185 笔 / 159 只 distinct，{main: 159}，非主板 0**；留档旁路 1 行、自清理 0 残留 | 本轮 `ROADMAP.md` §44 / §44.5 `9am` |
+| `_probe_dataset_board_scope.mts` + `.log` | 数据集声明实查：`dataset_version.id=390002` → `universeDefinitionJson={"universe":"all-a-shares","source":"stock_daily_prices","boards":["main"],"excludeSt":true}`；`dataset_build_config_board = main`；三条留档 `datasetSource=rebuild` + `datasetSecurityCount` 5146/5133 | 同上 |
+| `_probe_trade_code_correctness.mts` + `.log` | 译码无歧义：`cand-270001` 的 188 只 distinct 中 **「同一 `securityId` 有多条 primary 行」= 0** ⇒ 排除张冠李戴；前缀分布 300×105 / 301×46 / 688×32 | 同上 |
+| `tests/server/runWorkbenchAssembly/universeConstraint.test.ts`（**不在本目录**，登记于此便于溯源） | ✅ **8/8**：权威优先（build_config > universeDefinitionJson）、不猜（形状不符 → `none`）、非法板块抛 `UniverseConstraintError`（含 `unknown`）、`excludeSt` 只认严格 `true` | 同上 |
+
+### `datasetwindow` —— 6 组（2026-09-14：运行**真正从绑定数据集取数** + 直读桥键域修正）
+
+> 触发 = 用户「**策略运行的时候是需要从数据集中取数据啊**」（纠正上一轮把「每次运行都回落重建」当既成事实的登记）。
+> 核心事实：**数据一直在** —— `ds_*_post`（rd≥1）实测 **471,816 行完整 OHLCV**、rd=+1 覆盖全部 23,978 个事件；
+> 是**投影口径过窄**（旧桥只投 `prefix` 的 rd=0，每事件恰 1 行 = 23,978 行 ⇒ `executionBarsAvailable=false` ⇒ 必然回落重建）。
+> 顺带抓到并修掉一条被本次改动**激活**的潜伏缺陷：旧桥把代码同时写进 `securityId` 与 `code`（键域违规）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_dataset_window_coverage.mts` | ✅ 证数据集**有**撮合行情：post rd∈[1,20] **471,816 行**；rd=+1 覆盖全部 23,978 事件；rd∈[0,20] 合成逐日面板 **354,544 行**；**102,727** 个重复 `(symbol, tradeDate)` 组的 `close` 极差合计 **= 0** ⇒ 无损去重 | §44 / §44.5 `9an` / `PROJECT_RULES.md` |
+| `_probe_bridge_window_cost.mts` | 成本实测：全窗口直读 ≈ **16.5s** vs 重建 **60.6s**（~**3.7×**）；旧口径（仅 rd=0）1.8s / 23,978 行；护栏由 20 万提到 **40 万**（计量对象改 `rows.length`） | 同上 |
+| `_probe_symbol_identity_coverage.mts` + `.log` | ✅ **100%（2,967 / 2,967）** 事件 symbol 可在其事件日解析到唯一 `sec_<uuid>`（`NO_IDENTIFIER=0` / `AMBIGUOUS=0`）；`research_security_identifier_history` 仅 **5,552 行**、1.1s 可全量载入 | 同上 |
+| `_probe_symbol_identity_bridge.mts` + `.log` | 键域分叉的证据基础：`ds_*` 三表**只有 `symbol`（代码域）**、canonical 身份在 `research_securities.securityId`（`sec_<uuid>`）；`ResearchDatasetRow` 的 `securityId`（身份）与 `code`（完整代码）是**两个字段** | 同上 |
+| `_probe_dataset_window_run_e2e.mts` + `.json` + `.log` | ✅ **ALL PASS / 0 失败**（真实 tRPC `loopRun`，`cand-360004@1.0.0`，14.3s）：`datasetSource="registry"` / `note=null` / `versionId=390002` / 面板 **112,920 行 / 2,967 证券** / `backtest=EXECUTED` / **真实成交 35 笔**（修复前恒 **0 笔 / 全 SUSPENDED**）/ 期末 73,207.86；**身份域**：35/35 成交键全 `sec_<uuid>`（「代码形态」= **0**）、`researchRun.securityLabels` 解析 **35/35 = 100%**、板块 `{main: 35}`；留档 1 行、自清理 **0** | 同上 |
+| `tests/server/runWorkbenchAssembly/windowProjection.test.ts`（**不在本目录**，登记于此便于溯源） | ✅ **18/18**：窗口解析 5（未声明 ⇒ null / 合法 / 非 `TRADING_DAY` / 五种非法值 / 非对象）+ 面板投影 9（rd 0..4、**决策日资格 = rd∈[1,3]**、`preClose` 链式、观察日流动性 null、**重叠无损合并**、数值冲突即抛 `REGISTRY_WINDOW_ROW_CONFLICT`、缺中间相对日、**`securityId` 取自身份映射且 `code ≠ securityId`**、缺身份即抛）+ 身份桥接 4（区间内/外、**code reuse**、歧义即拒、非法 symbol） | 同上 |
+
+> 归档脚本（同轮）：`_append_archive_dataset_window.py`（`ROADMAP.md` §44 插入 + §44.5 `9an` + `ROADMAP-CHANGELOG.md` append）、
+> `_append_rules_dataset_window.py`（`PROJECT_RULES.md` 追加两节：数据集窗口投影 / 键域 = `sec_<uuid>`）。
+
+### `papertradingadvance` —— 7 个（2026-09-14：前向纸面交易「推进」按钮「提示成功但没变化」）
+
+> 触发 = 用户「**前向交易闭环，推荐按钮有点问题**」（澄清后 = 「**推进 / 推进到最新**」按钮；现象「**提示成功但结果明显不对**」）。
+> 核心事实：推进的**交易日历唯一来源 = `index_daily`**，而它**只有手动脚本写入、全仓无自动同步**，实查停更在 **2026-09-04**，而行情表已到 **2026-09-14**；
+> 推进集合 `tradingDates.filter(d => d > lastProcessedDate)` 因此**恒为空** ⇒ 结构性 no-op 却报成功（`updatedAt == createdAt` 是「从未落过新状态」的旁证）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_paper_trading_state.mts` | ✅ 只读实查：列运行状态 + `stateJson` 解析规模 + **三个日历末端对比**（`index_daily` 09-04 vs `stock_daily_prices` 09-14 vs `limit_up_records` 09-14）；两条运行 `lastProcessedDate` 均在日历末端之后、`updatedAt == createdAt` | `ROADMAP.md` §44 17:38 条 |
+| `_probe_paper_trading_advance_dryrun.mts` | 内存干跑推进循环（**不 persist**，复刻 `db.ts` 循环）⇒ `datesToAdvance = []` ⇒ 证明「无待推日」是**结构性的**、不是撮合失败 | 同上 |
+| `_probe_index_daily_freshness.mts` | `index_daily` 新鲜度：行数 / distinct 日 / 末端 / `retrievedAt` ⇒ 定位「日历停更」这一**数据面**根因 | 同上 |
+| `_probe_paper_advance_e2e.mts` | ✅ **17 / 17 PASS**（真实 tRPC `appRouter.createCaller`）：补数后 `#1` **推进 09-11、09-14 两日**（`filled=5` / `open=3` / `exited=2` / `finalEquity=100,468.08` / `tradingDayCount=2`）、`stateJson` **1,960 → 3,466**、`equityCurve` 2 点；二次推进**如实 `already-latest`**；坏 id ⇒ `run-not-found`。⚠️ **会写入** `paper_trading_runs`（推进职责所在，已在文件头声明） | 同上 |
+| `_probe_paper_create_guard.mts` | ✅ **5 / 5 PASS**：建运行**正向路径**（信号日 ≤ 日历末端）可正常创建 ⇒ 证明新守卫**不会误锁**新建运行；探针行按**可识别命名域** `PROBE-CALENDAR-GUARD-` 自清理、零残留 | 同上 |
+| `_append_memory_paper_advance_diag.py` | 17:15 **诊断**小节追加脚本（append-only + 纯 LF 双向断言） | `.workbuddy/memory/2026-09-14.md` |
+| `_append_memory_paper_advance_fix.py` | 17:38 **修复 + 实证 + 归档**小节追加脚本（同上纪律，含前缀不变断言「非 append-only」） | 同上 |
+
+| 关联测试（**不在本目录**，登记于此便于溯源） | 结论要点 |
+|---|---|
+| `tests/server/paperTrading.test.ts` | ✅ **22 / 22**（原 10 例 + 新增 12 例）：`classifyAdvanceKind` 三态判定 5（含事故现场常量 `CALENDAR_END=2026-09-04` / `MARKET_END=2026-09-14`）+ `paperTradingAdvanceDiagnosis` 人话结论 6 + `PaperTradingCalendarStaleError` 1 |
+
+> 归档脚本（同轮）：`_append_archive_paper_advance.py`（`ROADMAP.md` §44 插入 + §44.5 `9ao` + `ROADMAP-CHANGELOG.md` append + 本 README 分组）、`_append_rules_paper_advance.py`（`PROJECT_RULES.md`：数据源与回填补一条 + 新增一节）、
+`_append_memory_paper_advance_diag.py` / `_append_memory_paper_advance_fix.py`（当日日志 append）、
+`_verify_archive_paper_advance.py`（**回读校验**：锚点 / 编号先后 / 行尾 / 旧条目零改写，**ALL PASS**）。

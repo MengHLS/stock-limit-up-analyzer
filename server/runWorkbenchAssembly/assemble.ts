@@ -22,8 +22,12 @@
 import { buildResearchDataset, type ResearchDataset } from "../researchDataset";
 import {
   buildResearchDatasetFromRegistry,
+  readDatasetUniverseConstraint,
+  resolveObservationWindow,
   RegistryDatasetBridgeError,
   type BuildDatasetFromRegistryResult,
+  type DatasetUniverseConstraint,
+  type ObservationWindowSpec,
 } from "./datasetFromRegistry";
 import type { CostModel } from "../engine/domain";
 import type { ExecutionModelId } from "../backtest/types";
@@ -205,19 +209,31 @@ export type DatasetSourcePolicy = "prefer-registry" | "rebuild";
 
 /**
  * 解析数据集：优先直读已绑定 `datasetVersionId` 的已落库 `ds_*` 数据集；
- * 直读不可用（未绑定 / 非 READY / 体系不支持 / 超护栏 / DB 不可用）→ 回落从零重建。
+ * 直读不可用（未绑定 / 非 READY / 体系不支持 / 超护栏 / **策略未声明观察窗口** /
+ * 观察窗口超出该数据集 post 上限 / DB 不可用）→ 回落从零重建。
  *
- * 🔴 **2026-09-13 增补第二类回落：直读成功但「不可撮合」**（`executionBarsAvailable === false`）。
- * 原因：直读桥的投影是「首板**事件窗口**」形状 —— 只含事件日 `rd=0` 的行情，`post`（rd≥1）
- * 不进 rows ⇒ 任何证券在其事件日之外**没有任何行**；而交易模拟在**决策日的下一交易日**
- * 执行订单（`simulator/engine.ts` 第 9(c) 步按执行日 `dayBars.get(securityId)` 取价），
- * 取不到即按 `SUSPENDED` 拒单 ⇒ 界面「运行策略」会**静默产出全 0 结果**。
- * 实测（`docs/evidence/_probe_backtest_zero_trades.mts`，390002 / 2025-01-02~03-31）：
- *   - `registry`：59 单 → **59 单 SUSPENDED** → 0 成交 → 权益曲线恒平 100,000；
- *   - `rebuild`（同策略同窗口）：**133 笔成交 / 期末 112,169（+12.17%）**，仅 6 单因现金不足被拒。
- * ⇒ 「研究/候选」阶段与「撮合」阶段对数据面的要求不同，而两阶段**必须共用同一份 dataset**
- * （`runTradeSimulation` 强校验 `datasetVersion` 一致）⇒ 只要本次运行包含撮合，就必须用
- * 具备执行日行情的逐日面板。回落事实与原因如实写进 `datasetSourceNote`。
+ * 🔴 **2026-09-14：直读桥已能支撑撮合，「回落」不再是常态**（这是对 2026-09-13 §「不可撮合
+ * 必回落」的收口）。旧桥只投影 `prefix` 的 rd=0 ⇒ 任何证券在其事件日之外没有行 ⇒
+ * 交易模拟在决策日下一交易日取不到行情 ⇒ 全部拒单（实测 59 单全 `SUSPENDED`、
+ * 0 成交、曲线恒平），因此当时只能回落。现在桥按策略声明的观察窗口把
+ * rd=0（首板日，特征基准）+ rd ∈ [1, end+1]（观察日 + 次日执行日）一并投影为**逐日面板**
+ * ⇒ `executionBarsAvailable === true` ⇒ 运行**真正消费被绑定的数据集**，不再回查
+ * `stock_daily_prices` / `liquidity_daily`。
+ *
+ * 仍保留回落（且**只在下列可预期情形**触发，原因如实写进 `datasetSourceNote`）：
+ *   - `REGISTRY_OBSERVATION_WINDOW_UNDECLARED` —— 策略文档没有 `definition` /
+ *     `entry.observationWindow`（如 `limit-up-baseline` 这类 legacy 文档）⇒ 桥不知道要投影
+ *     多少 T+N，**不代猜**；
+ *   - `REGISTRY_OBSERVATION_WINDOW_INVALID` / `REGISTRY_POST_WINDOW_TOO_SHORT` —— 声明非法，
+ *     或声明的窗口超出该数据集 post 的容量（夹取 = 悄悄改窄策略，故拒绝）；
+ *   - `REGISTRY_VERSION_NOT_FOUND` / `NOT_READY` / `DEFINITION_MISSING` /
+ *     `DATASET_CODE_UNSUPPORTED` / `EMPTY_VERSION` / `POST_WINDOW_MISSING` /
+ *     `ROW_BUDGET_EXCEEDED` —— 数据集本身不可用；
+ *   - `REGISTRY_SECURITY_IDENTITY_UNRESOLVED` —— 事件 symbol 无法在其 tradeDate 桥接到唯一
+ *     canonical `sec_<uuid>`（无生效标识符 / 多段歧义）。**不退回用代码冒充身份**（那会让
+ *     成交明细与留档的键域和重建路径分叉），故回落重建；
+ *   - `REGISTRY_WINDOW_ROW_CONFLICT` —— 同一 `(securityId, tradeDate)` 的多个事件来源给出
+ *     不一致的严格列（OHLCV/量额）⇒ 拒绝编造取舍，回落重建。
  *
  * 除 `RegistryDatasetBridgeError`（可预期的「不该直读」情形）外，其他错误一律上抛 ——
  * 不能把代码 bug 伪装成「直读不可用」。
@@ -233,26 +249,45 @@ async function resolveDataset(
   const policy: DatasetSourcePolicy = request.datasetSourcePolicy ?? "prefer-registry";
   const boundId = request.datasetVersionId;
 
+  /**
+   * 🔴 策略声明的观察窗口 ⇒ 直读桥投影多少 T+N 行情。
+   *
+   * **必须来自策略文档**（`definition.entry.observationWindow`）：它同时决定
+   * ①哪些行情进面板（rd=0 + rd ∈ [1, end+1]，撮合可行性的来源）、
+   * ②哪些交易日有决策日资格（rd ∈ [start, end]，候选产生的位置）。
+   *
+   * 解析失败（值存在但非法）会抛 `REGISTRY_OBSERVATION_WINDOW_INVALID`；未声明返回 null，
+   * 桥会以 `REGISTRY_OBSERVATION_WINDOW_UNDECLARED` 拒绝直读 ⇒ 均回落重建并如实记录原因。
+   * 本层**不给缺省窗口**（代猜窗口 = 让数据面与策略声明不一致）。
+   */
+  const observationWindow: ObservationWindowSpec | null = resolveObservationWindow(
+    request.strategyDocument.definition?.entry?.observationWindow,
+  );
+
   if (policy === "prefer-registry" && boundId !== undefined) {
     try {
       const registry = await buildResearchDatasetFromRegistry({
         datasetVersionId: boundId,
         name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
+        observationWindow,
         ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
       });
       if (registry.executionBarsAvailable) {
         return { dataset: registry.dataset, source: "registry", sourceNote: null, registry };
       }
-      // 直读成功但**不可撮合**：事件窗口形状缺执行日行情 ⇒ 按桥的既定契约回落重建。
-      const rebuilt = await rebuildDataset(request);
+      // 直读成功但**不可撮合**（本桥当前只在「读不到 post 行」时走到这里）：按契约回落重建。
+      // 🔴 回落前先继承该数据集的 universe 约束（板块 / ST）：重建默认是全市场证券池。
+      const constraint = await readDatasetUniverseConstraint(boundId);
+      const rebuilt = await rebuildDataset(request, constraint);
       return {
         dataset: rebuilt,
         source: "rebuild",
         sourceNote:
           `直读成功但该数据集不可用于撮合（dataset_version.id=${registry.version.id} / ` +
-          `${registry.stats.rowCount} 行）：它是「首板事件窗口」投影（只含事件日 rd=0 行情，` +
-          `post/T+N 行情未并入 rows）⇒ 交易模拟在决策日下一交易日取不到行情，订单会被全部拒为 ` +
-          `SUSPENDED（0 成交、曲线恒平）。已回落 buildResearchDataset 重建逐日面板。`,
+          `${registry.stats.rowCount} 行）：读不到可执行的 T+N 行情（post 行为空）` +
+          `⇒ 交易模拟在决策日下一交易日取不到行情，订单会被全部拒为 SUSPENDED（0 成交、曲线恒平）。` +
+          `已回落 buildResearchDataset 重建逐日面板。` +
+          constraintNote(constraint),
         // 保留 registry：装配摘要须仍能显示「策略绑定的是哪个 dataset_version.id」，
         // 否则界面会误读成「这个策略根本没绑数据集」。本次**实际使用**的面板由
         // source=rebuild 与 sourceNote 表达。
@@ -261,23 +296,29 @@ async function resolveDataset(
     } catch (error) {
       if (!(error instanceof RegistryDatasetBridgeError)) throw error;
       // 可预期的「不该直读」：如实记录原因，回落重建（不静默、不冒充）。
-      const rebuilt = await rebuildDataset(request);
+      const constraint = await readDatasetUniverseConstraint(boundId);
+      const rebuilt = await rebuildDataset(request, constraint);
       return {
         dataset: rebuilt,
         source: "rebuild",
-        sourceNote: `直读已绑定数据集失败（${error.code}）：${error.message}`,
+        sourceNote:
+          `直读已绑定数据集失败（${error.code}）：${error.message}` + constraintNote(constraint),
         registry: null,
       };
     }
   }
 
-  const rebuilt = await rebuildDataset(request);
+  // 走到这里说明「未直读」：可能是显式强制重建、未绑定、或已绑定但被上面的分支处理。
+  // 只要**绑定了** datasetVersionId，仍要继承它的 universe 约束（强制重建不该改变证券范围）。
+  const constraint = boundId === undefined ? null : await readDatasetUniverseConstraint(boundId);
+  const rebuilt = await rebuildDataset(request, constraint);
   return {
     dataset: rebuilt,
     source: "rebuild",
     sourceNote:
       policy === "rebuild"
-        ? "调用方显式指定 datasetSourcePolicy=rebuild（强制重建，未直读已绑定数据集）。"
+        ? "调用方显式指定 datasetSourcePolicy=rebuild（强制重建，未直读已绑定数据集）。" +
+          constraintNote(constraint)
         : boundId === undefined
           ? "策略文档未绑定 datasetVersionId（无已落库数据集可直读），按窗口从零重建。"
           : null,
@@ -285,23 +326,59 @@ async function resolveDataset(
   };
 }
 
-/** 从零重建数据集（原路径；窗口 = 调用方给的决策窗口）。 */
-function rebuildDataset(request: AssembleRunWorkbenchInputsRequest): Promise<ResearchDataset> {
-  return buildResearchDataset(
-    {
-      name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
-      startDate: request.startDate,
-      endDate: request.endDate,
-      asOfPerTradeDate: true,
-    },
-    {
-      ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
-      ...(request.maxTradingDays !== undefined ? { maxTradingDays: request.maxTradingDays } : {}),
-      ...(request.maxSecuritiesPerDay !== undefined
-        ? { maxSecuritiesPerDay: request.maxSecuritiesPerDay }
-        : {}),
-    },
-  );
+/**
+ * 把「本次重建继承了什么 universe 约束」写进审计说明（可审计，不靠猜）。
+ *
+ * 🔴 无约束时**必须明说**：那是一句「本次跑的是全板块」的诚实声明 —— 否则用户会以为
+ * 结果仍然出自他绑定的主板数据集。
+ */
+function constraintNote(constraint: DatasetUniverseConstraint | null): string {
+  if (constraint === null) {
+    return "本次重建未继承任何板块约束（数据源未声明）⇒ 证券池为全板块（含创业板 300/301、科创板 688、北交所）。";
+  }
+  const parts: string[] = [];
+  if (constraint.boards.length > 0) parts.push(`板块=${[...constraint.boards].sort().join("/")}`);
+  if (constraint.excludeSt) parts.push("排除 ST/*ST");
+  if (parts.length === 0) {
+    return `本次重建沿用该数据集声明的 universe 约束：未限定板块、不排除 ST ⇒ 证券池为全板块（来源=${constraint.source}）。`;
+  }
+  return `本次重建已继承该数据集的 universe 约束：${parts.join("、")}（来源=${constraint.source}）。`;
+}
+
+/**
+ * 从零重建数据集（原路径；窗口 = 调用方给的决策窗口）。
+ *
+ * 🔴 `constraint` = **从已绑定数据集继承的 universe 约束**（板块 / ST），必须继承：
+ * 重建路径的默认证券池是**全市场**，不继承就等于把「用户绑定的主板数据集」**悄悄换成**
+ * 全市场面板。实测（2026-09-14）：`dataset_version.id=390002` 声明 `boards:["main"]`，
+ * 回落重建却产出 `datasetSecurityCount=5146` 且成交明细含 300/301/688 标的。
+ *
+ * 无约束（`null` / 全空）时**不传** `universeFilter` —— 与既有行为及版本指纹保持一致。
+ */
+function rebuildDataset(
+  request: AssembleRunWorkbenchInputsRequest,
+  constraint: DatasetUniverseConstraint | null,
+): Promise<ResearchDataset> {
+  const base = {
+    name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
+    startDate: request.startDate,
+    endDate: request.endDate,
+    asOfPerTradeDate: true,
+  };
+  const narrowed =
+    constraint !== null && (constraint.boards.length > 0 || constraint.excludeSt)
+      ? {
+          ...base,
+          universeFilter: { boards: [...constraint.boards], excludeSt: constraint.excludeSt },
+        }
+      : base;
+  return buildResearchDataset(narrowed, {
+    ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
+    ...(request.maxTradingDays !== undefined ? { maxTradingDays: request.maxTradingDays } : {}),
+    ...(request.maxSecuritiesPerDay !== undefined
+      ? { maxSecuritiesPerDay: request.maxSecuritiesPerDay }
+      : {}),
+  });
 }
 
 /** 由策略文档的 recipe 解析真实可执行配方；文档无 recipe 时按显式请求 / 默认值兜底。 */

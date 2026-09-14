@@ -24,6 +24,7 @@
  */
 
 import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import { publicProcedure, router } from "./_core/trpc";
 import {
   registerBuiltInResearchStrategies,
@@ -51,10 +52,16 @@ import type {
 } from "./research/lifecycle/types";
 import type { ResearchParameterSet } from "./research/types";
 import {
+  closedLoopBacktestRunDetailSchema,
+  closedLoopBacktestRunListInputSchema,
+  closedLoopBacktestRunRecordSchema,
   closedLoopRunInputSchema,
   closedLoopRunResultSchema,
   researchCatalogItemSchema,
   researchRunReadinessSchema,
+  securityLabelsInputSchema,
+  securityLabelsOutputSchema,
+  type ClosedLoopRunResult,
   type ClosedLoopWiringSummary,
   type ResearchCatalogItem,
   type ResearchDatasetGateSummary,
@@ -70,6 +77,12 @@ import {
 } from "./runWorkbenchAssembly";
 import type { StrategyDocument } from "./research/strategySchema/types";
 import { StrategyRecipeRuntimeError } from "./research/recipeErrors";
+import {
+  getClosedLoopBacktestRun,
+  listClosedLoopBacktestRuns,
+  saveClosedLoopBacktestRun,
+} from "./closedLoopBacktestRun/repository";
+import { loadSecurityLabels } from "./closedLoopBacktestRun/securityLabels";
 
 // 幂等启动装配：把内置研究策略注册进单例注册中心（已注册则跳过）。
 registerBuiltInResearchStrategies(researchStrategyRegistry);
@@ -219,6 +232,40 @@ function describeWiringGap(wiring: ClosedLoopWiringSummary): string {
   );
 }
 
+/**
+ * CLOSED-LOOP-BACKTEST-PERSIST-001 — 把一次闭环运行结果留档（**best-effort，绝不阻断回测**）。
+ *
+ * 为什么吞掉错误：这是一次昂贵且真实的执行（跨境库取数 + 逐日撮合，分钟级），
+ * 结果已经算出来了 —— **不能因为写一张留档表失败就把结果丢掉**。故此处只记录日志、不抛。
+ * 代价是「留档失败 ⇒ 历史列表里少这一条」，这是**如实可见**的降级（不是假装存了）；
+ * 另外 `runId` 唯一键保证重试幂等收敛，不会因重试堆出重复记录。
+ */
+async function persistClosedLoopBacktestRun(options: {
+  experimentId: string;
+  strategyId: string;
+  strategyVersion: string;
+  startDate: string;
+  endDate: string;
+  result: ClosedLoopRunResult;
+}): Promise<void> {
+  try {
+    await saveClosedLoopBacktestRun({
+      experimentId: options.experimentId,
+      strategyId: options.strategyId,
+      strategyVersion: options.strategyVersion,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      result: options.result,
+    });
+  } catch (error) {
+    const detail =
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.warn(
+      `[loopRun] 闭环回测结果留档失败（不影响本次运行结果，历史列表将缺此条）：${detail}`,
+    );
+  }
+}
+
 export const researchRunRouter = router({
   /** 已注册研究策略目录（v1：leader-candidate-baseline 等内置策略）。 */
   catalog: router({
@@ -228,6 +275,60 @@ export const researchRunRouter = router({
         return researchStrategyRegistry.list().map(toCatalogItem);
       }),
   }),
+
+  /**
+   * CLOSED-LOOP-BACKTEST-PERSIST-001 — 历史留档列表（只读）。
+   *
+   * 闭环 `loopRun` 每次执行都会**自动留档**一行；这里按留档时间倒序返回**摘要级**列表，
+   * **不含**完整结果（单条可达数百 KB，列表页搬运它纯属浪费）。要看完整轨迹用 `getBacktest`。
+   *
+   * 🔴 与 legacy `sentiment.listBacktestRuns` 不是同一套：那条读的是龙头候选回测
+   * （`backtest_runs` 表），本条读闭环运行留档（`closed_loop_backtest_run` 表）。
+   */
+  listBacktests: publicProcedure
+    .input(closedLoopBacktestRunListInputSchema)
+    .output(closedLoopBacktestRunRecordSchema.array())
+    .query(async ({ input }) => {
+      return await listClosedLoopBacktestRuns({
+        ...(input?.limit !== undefined ? { limit: input.limit } : {}),
+        ...(input?.strategyId !== undefined ? { strategyId: input.strategyId } : {}),
+      });
+    }),
+
+  /**
+   * 单条留档详情（含完整运行结果）。不存在 → `null`（不抛错，前端据此显示「记录不存在」）。
+   *
+   * ⚠️ 留档行存在但 `resultJson` 损坏时会**抛错**（不静默降级成「没有结果」）——
+   * 「记录坏了」与「本次没留结果」是两件不同的事。
+   */
+  getBacktest: publicProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .output(closedLoopBacktestRunDetailSchema.nullable())
+    .query(async ({ input }) => {
+      return await getClosedLoopBacktestRun(input.id);
+    }),
+
+  /**
+   * 成交明细的「证券名称 + 代码」字典（只读）。
+   *
+   * 为什么单独开一个端点：闭环结果里 `trades[].securityId` 是 `sec_<uuid>`，把它翻成
+   * 「海鸥股份 603269.SH」要跨两张表（identifier history → limit_up_records）。放在
+   * 这里而不是塞进 `loopRun` / `getBacktest` 的返回体，是为了：
+   *   ① 不改 `ClosedLoopRunResult` 契约（回测产物是**算出来的**，名称是**贴上去的**）；
+   *   ② 运行工作台与「回测历史」详情**共用同一个查询** ⇒ 零口径漂移。
+   *
+   * 🔴 取不到名称时 `name` 为 `null`（名称源只收录涨停过的股票，回测 universe 是全市场）
+   * —— 如实返回空洞，前端显示「—」。
+   */
+  securityLabels: publicProcedure
+    .input(securityLabelsInputSchema)
+    .output(securityLabelsOutputSchema)
+    .query(async ({ input }) => {
+      const labels = await loadSecurityLabels(input.securityIds);
+      const byId: Record<string, (typeof labels)[number]> = {};
+      for (const label of labels) byId[label.securityId] = label;
+      return byId;
+    }),
 
   /**
    * 运行就绪探测（只读）。
@@ -289,7 +390,13 @@ export const researchRunRouter = router({
       };
     }),
 
-  /** 闭环真实执行（无状态、不落库；一次调用的完整可审计轨迹）。 */
+  /**
+   * 闭环真实执行（一次调用的完整可审计轨迹）。
+   *
+   * 留档（2026-09-14 起，CLOSED-LOOP-BACKTEST-PERSIST-001）：每次执行后**自动留档**一行到
+   * `closed_loop_backtest_run`，供「回测历史」页回看（`listBacktests` / `getBacktest`）。
+   * 留档是**旁路**：失败不影响本次运行的返回结果，也不改动任何编排语义。
+   */
   loopRun: publicProcedure
     .input(closedLoopRunInputSchema)
     .output(closedLoopRunResultSchema)
@@ -450,7 +557,7 @@ export const researchRunRouter = router({
         ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
       });
 
-      return {
+      const result: ClosedLoopRunResult = {
         runId: run.runId,
         createdAt: run.createdAt,
         chainFingerprint: run.chainFingerprint,
@@ -509,6 +616,19 @@ export const researchRunRouter = router({
                 },
               },
       };
+
+      // CLOSED-LOOP-BACKTEST-PERSIST-001 — 每次运行都留档，供「回测历史」页回看。
+      // best-effort：留档失败不抛（详见 persistClosedLoopBacktestRun 的说明）。
+      await persistClosedLoopBacktestRun({
+        experimentId: input.experimentId,
+        strategyId: input.strategyId,
+        strategyVersion: input.strategyVersion,
+        startDate: input.dateRange.startDate,
+        endDate: input.dateRange.endDate,
+        result,
+      });
+
+      return result;
     }),
 });
 

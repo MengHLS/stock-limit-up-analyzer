@@ -17,6 +17,27 @@
  *    归一，否则会把版本记录的**外壳**当成文档（所有字段读空）。
  * 5. **文案从简**：正文只留「是什么 / 缺什么」，后端契约与实现边界的说明收进
  *    组件内的 Tooltip / 折叠区，不再占据首屏。
+ * 6. 🔴 **规则编辑只有一条路：Canonical `definition`**（2026-09-13，纯 `client/**`）。
+ *    - 旧版此页签编辑的是 v1 兼容视图（`entryRules` / `exitRules` / `riskRules`），
+ *      配一张自造字段表（`candidate.rank` / `price.pctChange` …）。实测真实库 9 个策略：
+ *      **8 个带 Canonical 定义**，真正进回测的是它的 `entry.conditions`；v1 视图是有损派生，
+ *      回测侧对 `entryRules` 的引用数为 **0**，且对它做**任何**编辑都会在保存时撞
+ *      `SCHEMA_DEFINITION_VIEW_CONFLICT`（`alignDefinitionViews` 是深度比对）
+ *      ⇒ 那一层既不是真相来源、也存不下去。
+ *    - 现在的编辑走 `DefinitionFields`（与研究草图**同序同标题的七段**、同一套渲染外壳、
+ *      同一批词表）；提交时删掉 v1 派生视图（与服务端 `patchToInput` 同口径）。
+ *    - **「JSON 高级模式」已移除**：它让用户直接编辑 wire 文档，绕开一切约束，
+ *      还制造出「JSON 里改了、页面上没改」的第二种真相。
+ *    - **没有 Canonical 定义的文档**（legacy `limit-up-baseline`、新建模板）**保留**
+ *      兼容视图编辑，并在页面上明说原因 —— 替用户凭空造一个定义会比现状更糟
+ *      （见 `LegacyDefinitionNotice`）。这一条是已知缺口，须单独排期处理新建流程。
+ * 7. 🔴 **运行结果不再只活在内存里**（2026-09-14，修「跑过的回测刷新后就没了」）。
+ *    此前 `RunTab` 把结果只存进 `useState`，而 `dev` 是单进程 `tsx watch`（改 `server/**`
+ *    即整站热重启）⇒ 整页重载后结果消失，且空态还写着「还没跑过」——看起来就像
+ *    「跑过的回测又没了」。现在：**本次运行结果优先；无本次结果时，从「回测留档」
+ *    （`researchRun.listBacktests` + `getBacktest`）恢复该策略最近一次运行**。
+ *    恢复路径与运行工作台共用 `buildClosedLoopRunViewModel` + `ClosedLoopRunResultPanel`
+ *    ⇒ 零口径漂移；且**绝不**在无留档时伪造「看起来跑过」的字段。
  */
 
 import { Button } from "@/components/ui/button";
@@ -24,17 +45,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ClosedLoopRunResultPanel,
+  DefinitionFields,
   PositionSizingEditor,
   RuleEditor,
   RunConfigPanel,
   StrategyAdvancedTools,
   StrategyBasicInfo,
   StrategyHeader,
-  StrategyJsonEditor,
   StrategyVersionPanel,
   type LoadedTarget,
   type RunConfigViewModel,
 } from "@/components/strategy";
+import {
+  draftsToDefinition,
+  backtestConfigFromDrafts,
+  costModelFromDrafts,
+  definitionToDrafts,
+  syncPrimaryDatasetBinding,
+  withDocumentLevelDrafts,
+  type DefinitionDraftState,
+  type DefinitionDrafts,
+} from "@/components/strategy/definitionDraft";
 import { StrategyResearchProvenancePanel } from "@/components/research/StrategyResearchProvenancePanel";
 import { trpc } from "@/lib/trpc";
 import {
@@ -47,19 +78,21 @@ import {
   deriveExperimentId,
   type ClosedLoopRunViewModel,
 } from "@/adapters/closedLoopRunAdapter";
+import { formatLocalDateTime } from "@/adapters/closedLoopBacktestRunAdapter";
 import {
   ArrowLeft,
   ArrowRight,
   ClipboardList,
   History,
+  Info,
+  Loader2,
   LogIn,
   Play,
-  ScrollText,
   ShieldAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useLocation, useParams, useSearch } from "wouter";
+import { Link, useLocation, useParams, useSearch } from "wouter";
 
 // ---------------------------------------------------------------------------
 // 后端权威模板（开发期用后端纯函数生成一次；前端只透传，不重算 hash / fingerprint）
@@ -161,8 +194,6 @@ const TEMPLATE_DOCUMENT = {
     "c8f0996d95e372e3eba56081ef0df5a607f48313e7e370916d0009af3bcbdb02",
 } as const;
 
-const json = (v: unknown) => JSON.stringify(v, null, 2);
-
 function asRecord(v: unknown): Record<string, unknown> {
   return (typeof v === "object" && v !== null ? v : {}) as Record<string, unknown>;
 }
@@ -199,79 +230,62 @@ function emptyDraftDocument(): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// 页签 1 · 策略定义（可视化 / JSON 高级 双模式）
+// 页签 1 · 策略定义（Canonical `definition`；与研究草图同一套交互）
 // ---------------------------------------------------------------------------
+
+/**
+ * 没有 Canonical 定义时的说明。
+ *
+ * 🔴 **不能**在这种情况下把定义编辑器顶上去：`definitionToDrafts` 会返回 `raw`，
+ * 而我们一旦提交一个（空的 / 猜的）`definition`，就同时触发三件事：
+ *   1. 满屏的错误（事件类型 / 窗口 / 触发时点 / 仓位 / 费率全是空的）；
+ *   2. `map.ts#alignDefinitionViews` 开始对账 v1 视图 ⇒ 原有 `entryRules` 立刻冲突；
+ *   3. 文档级 `datasetVersionId` 与「不存在的 PRIMARY 绑定」对不上 ⇒ 又一个响亮的拒绝。
+ * 也就是说：**替用户凭空造一个定义，比让他继续编辑兼容视图更糟**。
+ * 所以这里明说原因，并把旧的兼容视图编辑器原样保留（今天它能存下去，因为没有 definition
+ * ⇒ `alignDefinitionViews` 直接返回，不做任何对账）。
+ */
+function LegacyDefinitionNotice({ reason }: { reason: string }) {
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+      <p className="flex items-start gap-1.5 text-[12px] font-medium text-amber-900">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>这个版本没有 Canonical 定义，下面的编辑器改的是「兼容视图」</span>
+      </p>
+      <p className="mt-1 pl-5 text-[11px] text-amber-900">{reason}</p>
+      <p className="mt-1 pl-5 text-[11px] text-amber-900">
+        「兼容视图」是给人和后端错误信息对照用的**有损派生结果**，回测不读它 ——
+        所以在这一层做条件编辑，只有在这个文档确实没有 Canonical 定义时才有意义。
+        带定义的策略（研究候选转正后的都是）请用定义编辑器改，那里改的才是回测真正读的规则。
+      </p>
+    </div>
+  );
+}
 
 function DefinitionTab({
   vm,
   onVmChange,
-  jsonText,
-  onJsonTextChange,
-  onValidateResult,
+  legacyReason,
+  syncedDrafts,
+  onDefinitionChange,
 }: {
   vm: StrategyViewModel;
   onVmChange: (next: StrategyViewModel) => void;
-  jsonText: string;
-  onJsonTextChange: (t: string) => void;
-  onValidateResult: (valid: boolean | null) => void;
+  /** 「这份文档没有 Canonical 定义」的**具体原因**；有定义时为 `null`。 */
+  legacyReason: string | null;
+  /** **已同步数据集坐标**的定义草稿；`null` ⇒ 走兼容视图编辑。 */
+  syncedDrafts: DefinitionDrafts | null;
+  onDefinitionChange: (next: DefinitionDrafts) => void;
 }) {
-  const [mode, setMode] = useState<"visual" | "json">("visual");
-
-  function switchMode(next: "visual" | "json") {
-    if (next === mode) return;
-    if (next === "json") {
-      onJsonTextChange(json(viewModelToStrategy(vm)));
-    } else {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(jsonText);
-      } catch (e) {
-        toast.error("JSON 解析失败，无法切换回可视化编辑", {
-          description: (e as Error).message,
-        });
-        return;
-      }
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        toast.error("JSON 解析失败，无法切换回可视化编辑", {
-          description: "内容不是对象",
-        });
-        return;
-      }
-      onVmChange(strategyToViewModel(parsed));
-    }
-    setMode(next);
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-1 rounded-lg border bg-muted/40 p-1">
-        <button
-          onClick={() => switchMode("visual")}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            mode === "visual"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <LogIn className="h-3.5 w-3.5" /> 可视化编辑
-        </button>
-        <button
-          onClick={() => switchMode("json")}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            mode === "json"
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          <ScrollText className="h-3.5 w-3.5" /> JSON 高级模式
-        </button>
-      </div>
+      <StrategyBasicInfo vm={vm} onChange={onVmChange} />
 
-      {mode === "visual" ? (
-        <div className="space-y-4">
-          <StrategyBasicInfo vm={vm} onChange={onVmChange} />
+      {syncedDrafts === null ? (
+        <>
+          <LegacyDefinitionNotice reason={legacyReason ?? "该版本未携带 Canonical 定义。"} />
           <RuleEditor
-            title="入场规则"
+            title="入场规则（兼容视图）"
             icon={LogIn}
             category="entry"
             rules={vm.entryRules}
@@ -280,7 +294,7 @@ function DefinitionTab({
             fieldPlaceholder="如 candidate.rank"
           />
           <RuleEditor
-            title="退出规则"
+            title="退出规则（兼容视图）"
             icon={ArrowRight}
             category="exit"
             rules={vm.exitRules}
@@ -290,7 +304,7 @@ function DefinitionTab({
           />
           <PositionSizingEditor vm={vm} onChange={onVmChange} />
           <RuleEditor
-            title="风险规则"
+            title="风险规则（兼容视图）"
             icon={ShieldAlert}
             category="risk"
             rules={vm.riskRules}
@@ -298,13 +312,9 @@ function DefinitionTab({
             defaultKind="state"
             fieldPlaceholder="如 position.count"
           />
-        </div>
+        </>
       ) : (
-        <StrategyJsonEditor
-          text={jsonText}
-          onTextChange={onJsonTextChange}
-          onResult={onValidateResult}
-        />
+        <DefinitionFields drafts={syncedDrafts} onChange={onDefinitionChange} />
       )}
     </div>
   );
@@ -339,10 +349,55 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
   const [runResult, setRunResult] = useState<ClosedLoopRunViewModel | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
+  const utils = trpc.useUtils();
+
   const readinessQuery = trpc.researchRun.readiness.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  /**
+   * 已留档的最近一次运行 —— 修「刷新 / 整页重载后结果就没了」（2026-09-14）。
+   *
+   * 结果此前**只**存在 `runResult` 这份组件内存里；而 `dev` 是单进程
+   * `tsx watch server/_core/index.ts`，任何 `server/**` 改动触发的热重启、或用户手动刷新，
+   * 都会整页重载 ⇒ 结果消失，空态还写着「还没跑过」。
+   *
+   * 现在：**本次运行结果优先；无本次结果时，从留档表恢复该策略最近一次运行**。
+   * 取数走 `listBacktests({strategyId, limit:1})` → `getBacktest({id})`，构建走运行工作台
+   * **同一个** `buildClosedLoopRunViewModel` ⇒ 零口径漂移。
+   */
+  const historyQuery = trpc.researchRun.listBacktests.useQuery(
+    { strategyId: vm.strategyId, limit: 1 },
+    { retry: false, refetchOnWindowFocus: false }
+  );
+  const latestRun = historyQuery.data?.[0] ?? null;
+  const detailQuery = trpc.researchRun.getBacktest.useQuery(
+    { id: latestRun?.id ?? 0 },
+    { enabled: latestRun !== null, retry: false, refetchOnWindowFocus: false }
+  );
+
+  /** 本次运行结果不存在时，才用留档恢复（本次结果永远优先，不被旧留档顶掉）。 */
+  const restoredFromArchive = useMemo(() => {
+    if (runResult !== null) return null;
+    const raw = detailQuery.data?.result;
+    if (raw === null || raw === undefined) return null;
+    return buildClosedLoopRunViewModel(raw);
+  }, [runResult, detailQuery.data]);
+
+  /**
+   * 「有留档但恢复不出来」的原因 —— 必须明说，**不能**伪装成「还没跑过」。
+   * 只在下述两种情况非 null：详情读取失败 / 留档里本就没有完整结果。
+   */
+  const latestDetail = detailQuery.data ?? null;
+  const archiveBlockedReason: string | null =
+    latestRun === null
+      ? null
+      : detailQuery.error
+        ? `回测留档详情读取失败：${detailQuery.error.message}`
+        : latestDetail !== null && latestDetail.result === null
+          ? "这条留档没有完整结果明细（本次运行的 resultJson 为空）。"
+          : null;
 
   const loopRun = trpc.researchRun.loopRun.useMutation({
     onSuccess: raw => {
@@ -354,6 +409,8 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
       }
       setRunError(null);
       setRunResult(parsed);
+      // 本次运行已自动留档 ⇒ 让「最近一次留档」立刻对齐，下次刷新即从这里恢复。
+      void utils.researchRun.listBacktests.invalidate();
     },
     onError: e => {
       setRunError(humanizeRunError(e.message));
@@ -395,15 +452,59 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
         running={loopRun.isPending}
         runError={runError}
       />
-      {runResult === null ? (
+      {runResult !== null ? (
+        <ClosedLoopRunResultPanel result={runResult} />
+      ) : restoredFromArchive !== null ? (
+        <div className="space-y-2">
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-dashed px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            <History className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              以下是从回测留档载入的最近一次运行
+              {latestRun !== null
+                ? `（${latestRun.strategyVersion} · ${formatLocalDateTime(latestRun.createdAt)}）`
+                : ""}
+              —— 刷新页面不会丢。
+            </span>
+            <Link to="/backtest-runs" className="underline underline-offset-2 hover:text-foreground">
+              查看全部回测历史
+            </Link>
+          </p>
+          <ClosedLoopRunResultPanel result={restoredFromArchive} />
+        </div>
+      ) : archiveBlockedReason !== null ? (
+        <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/40 px-6 py-8 text-center">
+          <Info className="mx-auto h-5 w-5 text-amber-600" />
+          <p className="mt-2 text-sm text-amber-900">{archiveBlockedReason}</p>
+          <Link to="/backtest-runs">
+            <Button variant="outline" size="sm" className="mt-4">
+              去回测历史
+            </Button>
+          </Link>
+        </div>
+      ) : historyQuery.isLoading || latestRun !== null ? (
         <div className="rounded-lg border border-dashed px-6 py-10 text-center">
-          <Play className="mx-auto h-5 w-5 text-muted-foreground" />
-          <p className="mt-2 text-sm text-muted-foreground">
-            还没跑过。点上方「运行策略」后，这里显示真实执行轨迹。
+          <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+          <p className="mt-2 text-sm text-muted-foreground">正在读取这个策略的历史回测…</p>
+        </div>
+      ) : historyQuery.error ? (
+        <div className="rounded-lg border border-dashed border-rose-200 bg-rose-50/40 px-6 py-8 text-center">
+          <Info className="mx-auto h-5 w-5 text-rose-600" />
+          <p className="mt-2 text-sm text-rose-800">
+            读取历史回测失败：{historyQuery.error.message}
           </p>
         </div>
       ) : (
-        <ClosedLoopRunResultPanel result={runResult} />
+        <div className="rounded-lg border border-dashed px-6 py-10 text-center">
+          <Play className="mx-auto h-5 w-5 text-muted-foreground" />
+          <p className="mt-2 text-sm text-muted-foreground">
+            这个策略还没有运行记录。点上方「运行策略」跑一次 —— 跑完结果会自动留档，刷新也不会丢。
+          </p>
+          <Link to="/backtest-runs">
+            <Button variant="outline" size="sm" className="mt-4">
+              去回测历史
+            </Button>
+          </Link>
+        </div>
       )}
     </div>
   );
@@ -437,7 +538,24 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
   const [vm, setVm] = useState<StrategyViewModel>(() =>
     strategyToViewModel(initialDocument())
   );
-  const [jsonText, setJsonText] = useState(() => json(initialDocument()));
+  /**
+   * Canonical 定义的草稿状态（规则编辑的唯一真相来源）。
+   *
+   * 🔴 它与 `vm` 是**两份状态**，但规则的真相比只有一份：
+   *   - `definition` 是权威 —— 回测读的是它的 `entry.conditions`（不是 v1 的 `entryRules`）；
+   *   - `vm` 承载身份字段、v1 兼容视图，以及文档级 `executionAssumptions`。
+   * 提交时由 `draftDocument` 把两者合成一份文档，并在提供 `definition` 时**删掉 v1 视图**
+   * —— 与服务端 `strategyPersistence/service.ts#patchToInput`（STRATEGY-004）同一口径。
+   *
+   * 文档级成本 / 回测配置不在 `definition` 里（服务端明确拒绝把它们塞进去），
+   * 所以它们从 `executionAssumptions` 单独取出，与定义草稿装在同一个状态里一起编辑。
+   */
+  const [definitionState, setDefinitionState] = useState<DefinitionDraftState>(() =>
+    withDocumentLevelDrafts(
+      definitionToDrafts(asRecord(initialDocument()).definition),
+      asRecord(initialDocument()).executionAssumptions
+    )
+  );
   const [validateStatus, setValidateStatus] = useState<boolean | null>(null);
   /** 最近一次「加载 / 保存」得到的**已落库**文档（差异对比的左值）；`null` = 无对照物。 */
   const [savedDocument, setSavedDocument] = useState<Record<string, unknown> | null>(null);
@@ -490,7 +608,12 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     appliedKeyRef.current = key;
     const doc = toStrategyDocument(loadData);
     setVm(strategyToViewModel(doc));
-    setJsonText(json(doc));
+    setDefinitionState(
+      withDocumentLevelDrafts(
+        definitionToDrafts(doc.definition),
+        doc.executionAssumptions
+      )
+    );
     setSavedDocument(doc);
     setLoadedTarget({
       strategyId: String(doc.strategyId ?? strategyId),
@@ -508,7 +631,42 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     return rows.find(v => v.version === loadedTarget.version)?.status ?? null;
   }, [loadedTarget, versionList.data]);
 
-  const draftDocument = useMemo(() => viewModelToStrategy(vm), [vm]);
+  /**
+   * 提交给后端的文档 = 身份 / 视图（`vm`）+ Canonical 定义（草稿）。
+   *
+   * 🔴 提交前必须把「基础信息」里的数据集坐标**同步进 `definition.datasets` 的 PRIMARY 绑定**：
+   * 服务端会双向对账 doc 级 `datasetVersion(Id)` 与 PRIMARY 绑定（`map.ts#alignDefinitionViews`），
+   * 只改「基础信息」不改绑定 ⇒ `SCHEMA_DEFINITION_DATASET_VERSION(_ID)_MISMATCH`。
+   * 这是纯派生（`DefinitionFields` 也让同一份同步后的草稿渲染），不会写坏状态。
+   */
+  const draftDocument = useMemo(() => {
+    if (definitionState.kind !== "structured") return viewModelToStrategy(vm);
+    const drafts = syncPrimaryDatasetBinding(definitionState.drafts, {
+      datasetVersionId: vm.datasetVersionId,
+      datasetVersion: vm.datasetVersion,
+    });
+    return viewModelToStrategy(vm, {
+      definition: draftsToDefinition(drafts),
+      executionAssumptions: {
+        costModel: costModelFromDrafts(drafts),
+        backtestConfig: backtestConfigFromDrafts(drafts),
+      },
+    });
+  }, [vm, definitionState]);
+
+  /**
+   * 定义编辑器渲染用的草稿 —— 与提交用的是**同一份**（已同步数据集坐标）。
+   *
+   * 若让界面渲染未同步的那份，用户会看到绑定行写着旧版本、而提交出去的是新版本，
+   * 这种「显示与提交不一致」正是最难查的一类问题。
+   */
+  const visibleDefinitionDrafts = useMemo(() => {
+    if (definitionState.kind !== "structured") return null;
+    return syncPrimaryDatasetBinding(definitionState.drafts, {
+      datasetVersionId: vm.datasetVersionId,
+      datasetVersion: vm.datasetVersion,
+    });
+  }, [vm.datasetVersionId, vm.datasetVersion, definitionState]);
 
   const goToVersion = (version: string) =>
     setLocation(
@@ -531,9 +689,9 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     setDirty(true);
     setVm(next);
   };
-  const updateJsonText = (t: string) => {
+  const updateDefinitionDrafts = (next: DefinitionDrafts) => {
     setDirty(true);
-    setJsonText(t);
+    setDefinitionState({ kind: "structured", drafts: next });
   };
 
   function onValidate() {
@@ -546,7 +704,8 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
             toast.success("校验通过");
           } else {
             toast.error(`校验未通过：${r.issues.length} 项问题`, {
-              description: r.issues[0]?.message ?? "详情见「策略定义 → JSON 高级模式」",
+              description:
+                r.issues[0]?.message ?? "详情见「策略定义」页签顶部的红色清单",
             });
           }
         },
@@ -561,7 +720,9 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     const id = String(doc.strategyId ?? "");
     const version = String(doc.version ?? "");
     setVm(strategyToViewModel(doc));
-    setJsonText(json(doc));
+    setDefinitionState(
+      withDocumentLevelDrafts(definitionToDrafts(doc.definition), doc.executionAssumptions)
+    );
     setSavedDocument(doc);
     setLoadedTarget({ strategyId: id, version });
     setValidateStatus(true);
@@ -650,9 +811,9 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
               <DefinitionTab
                 vm={vm}
                 onVmChange={updateVm}
-                jsonText={jsonText}
-                onJsonTextChange={updateJsonText}
-                onValidateResult={setValidateStatus}
+                legacyReason={definitionState.kind === "raw" ? definitionState.reason : null}
+                syncedDrafts={visibleDefinitionDrafts}
+                onDefinitionChange={updateDefinitionDrafts}
               />
             </TabsContent>
 

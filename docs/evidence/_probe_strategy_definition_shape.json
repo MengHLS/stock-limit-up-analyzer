@@ -1,0 +1,1234 @@
+{
+  "cand-360008": {
+    "strategyId": "cand-360008",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recipe",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": true,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 3
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 3,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN_OR_EQUAL",
+          "value": "prefix.rd0.volume * 0.3",
+          "valueType": "CONSTANT",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_OPEN",
+        "lotSize": 100,
+        "priceType": "OPEN",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 3,
+      "parameterSample": [
+        {
+          "code": "max_drawdown",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "max_volume_ratio",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "require_bullish",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        }
+      ],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "cand-360007": {
+    "strategyId": "cand-360007",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recipe",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": true,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 3
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 3,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN_OR_EQUAL",
+          "value": "prefix.rd0.volume * 0.3",
+          "valueType": "CONSTANT",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_OPEN",
+        "lotSize": 100,
+        "priceType": "OPEN",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 3,
+      "parameterSample": [
+        {
+          "code": "max_drawdown",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "max_volume_ratio",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "require_bullish",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        }
+      ],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "cand-360006": {
+    "strategyId": "cand-360006",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recipe",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": true,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 3
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 3,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN_OR_EQUAL",
+          "value": "prefix.rd0.volume * 0.3",
+          "valueType": "CONSTANT",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_OPEN",
+        "lotSize": 100,
+        "priceType": "OPEN",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 3,
+      "parameterSample": [
+        {
+          "code": "max_drawdown",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "max_volume_ratio",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "require_bullish",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        }
+      ],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "cand-360005": {
+    "strategyId": "cand-360005",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recipe",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": true,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 3
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 3,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN_OR_EQUAL",
+          "value": "prefix.rd0.volume * 0.3",
+          "valueType": "CONSTANT",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_CLOSE",
+        "lotSize": 100,
+        "priceType": "CLOSE",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 3,
+      "parameterSample": [
+        {
+          "code": "max_drawdown",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "max_volume_ratio",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "require_bullish",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        }
+      ],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "cand-360004": {
+    "strategyId": "cand-360004",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recipe",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": true,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 3
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 3,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN_OR_EQUAL",
+          "value": "prefix.rd0.volume * 0.3",
+          "valueType": "CONSTANT",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_OPEN",
+        "lotSize": 100,
+        "priceType": "OPEN",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 3,
+      "parameterSample": [
+        {
+          "code": "max_drawdown",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "max_volume_ratio",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "require_bullish",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        }
+      ],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "cand-360002": {
+    "strategyId": "cand-360002",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recipe",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": true,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 3
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 3,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN_OR_EQUAL",
+          "value": "prefix.rd0.volume * 0.5",
+          "valueType": "CONSTANT",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_OPEN",
+        "lotSize": 100,
+        "priceType": "OPEN",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 3,
+      "parameterSample": [
+        {
+          "code": "max_drawdown",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "max_volume_ratio",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "require_bullish",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        }
+      ],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "cand-360001": {
+    "strategyId": "cand-360001",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recipe",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": true,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 3
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 3,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN_OR_EQUAL",
+          "value": "prefix.rd0.volume * 0.3",
+          "valueType": "CONSTANT",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_OPEN",
+        "lotSize": 100,
+        "priceType": "OPEN",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 3,
+      "parameterSample": [
+        {
+          "code": "max_drawdown",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "max_volume_ratio",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        },
+        {
+          "code": "require_bullish",
+          "dataType": "number",
+          "parameterRole": "TUNABLE",
+          "required": false
+        }
+      ],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "cand-270001": {
+    "strategyId": "cand-270001",
+    "version": "1.0.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "definition",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": true,
+    "hasRecipe": false,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 2,
+      "exitRules": 2,
+      "riskRules": 0,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 0
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": true,
+    "definition": {
+      "schemaVersion": "1.0",
+      "definitionKeys": [
+        "datasets",
+        "entry",
+        "execution",
+        "exit",
+        "parameters",
+        "position",
+        "risk",
+        "schemaVersion"
+      ],
+      "entryKeys": [
+        "conditions",
+        "event",
+        "observationWindow",
+        "trigger"
+      ],
+      "eventType": "FIRST_LIMIT_UP",
+      "eventParamsKeys": [
+        "limitUpRatio"
+      ],
+      "observationWindow": {
+        "start": 1,
+        "end": 4,
+        "unit": "TRADING_DAY"
+      },
+      "triggerType": "NEXT_TRADING_DAY",
+      "conditionCount": 2,
+      "conditionSample": [
+        {
+          "field": "bar.low",
+          "operator": "GREATER_THAN_OR_EQUAL",
+          "value": "prefix.rd0.open",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        },
+        {
+          "field": "bar.volume",
+          "operator": "LESS_THAN",
+          "value": "prefix.rd0.volume",
+          "valueType": "FIELD_REFERENCE",
+          "enabled": true
+        }
+      ],
+      "exitRuleCount": 2,
+      "exitRuleSample": [
+        {
+          "type": "STOP_LOSS",
+          "trigger": "INTRADAY",
+          "threshold": 0.05,
+          "thresholdUnit": "RATIO",
+          "priority": 1,
+          "enabled": true
+        },
+        {
+          "type": "TIME_EXIT",
+          "trigger": "ON_CLOSE",
+          "threshold": 5,
+          "thresholdUnit": "TRADING_DAY",
+          "priority": 3,
+          "enabled": true
+        }
+      ],
+      "position": {
+        "sizingMethod": "EQUAL_WEIGHT",
+        "maxPositions": 5,
+        "positionRatio": null,
+        "maxExposure": null,
+        "maxSinglePosition": 0.2
+      },
+      "riskKeys": [],
+      "risk": {},
+      "execution": {
+        "commissionModel": "BPS",
+        "executionTiming": "T_PLUS_1_OPEN",
+        "lotSize": 100,
+        "priceType": "OPEN",
+        "quantityMethod": "TARGET_WEIGHT",
+        "signalTiming": "T_CLOSE",
+        "slippageModel": "BPS"
+      },
+      "parameterCount": 0,
+      "parameterSample": [],
+      "datasetCount": 1,
+      "datasets": [
+        {
+          "datasetId": "first_limit_pullback",
+          "datasetVersion": "v2",
+          "datasetVersionId": 390002,
+          "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+          "role": "PRIMARY"
+        }
+      ]
+    }
+  },
+  "limit-up-baseline": {
+    "strategyId": "limit-up-baseline",
+    "version": "1.1.0",
+    "recordKind": "STRATEGY_DOCUMENT",
+    "documentKeys": [
+      "datasetVersion",
+      "datasetVersionId",
+      "description",
+      "entryRules",
+      "executionAssumptions",
+      "exitRules",
+      "fingerprint",
+      "name",
+      "parameters",
+      "positionSizing",
+      "recordKind",
+      "recordVersion",
+      "riskRules",
+      "strategyId",
+      "universe",
+      "version"
+    ],
+    "hasDefinition": false,
+    "hasRecipe": false,
+    "datasetVersion": "v2",
+    "datasetVersionId": 390002,
+    "v1Views": {
+      "entryRules": 5,
+      "exitRules": 4,
+      "riskRules": 4,
+      "positionSizingKind": "equal-weight",
+      "parametersCount": 2
+    },
+    "v1PositionSizingMaxPositions": 5,
+    "v1ViewsMatchDefinition": null
+  }
+}

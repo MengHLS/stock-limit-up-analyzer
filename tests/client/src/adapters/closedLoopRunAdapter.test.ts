@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildClosedLoopRunViewModel,
+  classifyRebuildScope,
   closedLoopRunToRunResult,
   deriveExperimentId,
   emptyClosedLoopRun,
@@ -327,5 +328,86 @@ describe("closedLoopRunAdapter — experimentId 派生", () => {
     expect(deriveExperimentId("s1", range, "NEXT_OPEN", now)).not.toBe(
       deriveExperimentId("s1", range, "NEXT_OPEN", next)
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DATASET-SCOPE-INHERIT-001 — 重建结果的「证券范围是否已确认」
+// ---------------------------------------------------------------------------
+
+describe("classifyRebuildScope — 成交明细范围的可信度判定", () => {
+  const inheritingNote =
+    "直读成功但该数据集不可用于撮合（dataset_version.id=390002 / 23978 行）：它是「首板事件窗口」投影" +
+    "（只含事件日 rd=0 行情，post/T+N 行情未并入 rows）⇒ …已回落 buildResearchDataset 重建逐日面板。" +
+    "本次重建已继承该数据集的 universe 约束：板块=main、排除 ST/*ST（来源=build-config）。";
+  const legacyNote =
+    "直读成功但该数据集不可用于撮合（dataset_version.id=390002 / 23978 行）：它是「首板事件窗口」投影" +
+    "（只含事件日 rd=0 行情，post/T+N 行情未并入 rows）⇒ …已回落 buildResearchDataset 重建逐日面板。";
+
+  it("A. 有继承声明（或「沿用该数据集声明的约束」）→ inherited", () => {
+    expect(classifyRebuildScope(inheritingNote)).toBe("inherited");
+    expect(
+      classifyRebuildScope(
+        "本次重建沿用该数据集声明的 universe 约束：未限定板块、不排除 ST ⇒ 证券池为全板块（来源=build-config）。"
+      )
+    ).toBe("inherited");
+  });
+
+  it("B. 明说「未继承任何板块约束」→ declared-unscoped（已知全板块，不是未知）", () => {
+    expect(
+      classifyRebuildScope(
+        "本次重建未继承任何板块约束（数据源未声明）⇒ 证券池为全板块（含创业板 300/301、科创板 688、北交所）。"
+      )
+    ).toBe("declared-unscoped");
+  });
+
+  it("C. 🔴 修复前的历史 note（无任何范围声明）→ unknown：这正是用户看到 300/688 的那条", () => {
+    expect(classifyRebuildScope(legacyNote)).toBe("unknown");
+  });
+
+  it("D. null / 空 → unknown（不说话 ≠ 已确认）", () => {
+    expect(classifyRebuildScope(null)).toBe("unknown");
+    expect(classifyRebuildScope("")).toBe("unknown");
+  });
+
+  it("E. 只有 rebuild 才判定：直读命中 → rebuildScope = null", () => {
+    const direct = buildClosedLoopRunViewModel(
+      rawRun({
+        assembly: {
+          datasetVersion: "ds_390002",
+          datasetSource: "registry",
+          datasetSourceNote: null,
+          datasetVersionId: 390002,
+        },
+      })
+    );
+    expect(direct?.assembly?.datasetSource).toBe("registry");
+    expect(direct?.rebuildScope).toBeNull();
+  });
+
+  it("F. 端到端形态：rebuild + 修复后 note ⇒ inherited；rebuild + 修复前 note ⇒ unknown", () => {
+    const after = buildClosedLoopRunViewModel(
+      rawRun({
+        assembly: {
+          datasetVersion: "rd-1.0.0-1-c014a852fd8c8a5d",
+          datasetSource: "rebuild",
+          datasetSourceNote: inheritingNote,
+          datasetVersionId: 390002,
+        },
+      })
+    );
+    expect(after?.rebuildScope).toBe("inherited");
+
+    const before = buildClosedLoopRunViewModel(
+      rawRun({
+        assembly: {
+          datasetVersion: "rd-1.0.0-1-31c7934ee0be9cd9",
+          datasetSource: "rebuild",
+          datasetSourceNote: legacyNote,
+          datasetVersionId: 390002,
+        },
+      })
+    );
+    expect(before?.rebuildScope).toBe("unknown");
   });
 });

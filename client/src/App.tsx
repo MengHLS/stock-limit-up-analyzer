@@ -13,6 +13,8 @@ import SentimentAlerts from "./pages/SentimentAlerts";
 import SentimentAnalysis from "./pages/SentimentAnalysis";
 import LeaderCandidates from "./pages/LeaderCandidates";
 import Backtest from "./pages/Backtest";
+// CLOSED-LOOP-BACKTEST-PERSIST-001 — 闭环回测留档历史（与上行 legacy /backtest 不同源）
+import BacktestRuns from "./pages/BacktestRuns";
 import PaperTrading from "./pages/PaperTrading";
 import OperationLogs from "./pages/OperationLogs";
 import StockSync from "./pages/StockSync";
@@ -78,6 +80,8 @@ function Router() {
       <Route path="/sentiment-analysis" component={SentimentAnalysis} />
       <Route path="/leader-candidates" component={LeaderCandidates} />
       <Route path="/backtest" component={Backtest} />
+      {/* 闭环回测留档：每次「运行策略」的产出都留档在这里（自动保存，无需手动点） */}
+      <Route path="/backtest-runs" component={BacktestRuns} />
       <Route path="/paper-trading" component={PaperTrading} />
       <Route path="/operation-logs" component={OperationLogs} />
       <Route path="/stock-sync" component={StockSync} />

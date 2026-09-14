@@ -1,0 +1,12 @@
+{
+  "listCount": 3,
+  "targetStrategyId": "cand-270001",
+  "filteredCount": 1,
+  "vmRunId": "clrun-20260914053421006",
+  "vmStageCount": 14,
+  "vmTradeCount": 208,
+  "firstSecurityId": "sec_314d87cf-70ab-40f1-86a7-061e52da403d",
+  "strategyVersionRows": 1,
+  "failures": 0,
+  "result": "PASS"
+}

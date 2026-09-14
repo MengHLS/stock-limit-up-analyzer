@@ -61,7 +61,7 @@
 
 ## 启动与本机环境（工具坑，高频）
 - 启动 = `pnpm run dev`（=`tsx watch server/_core/index.ts`）。🔴 脚本**禁写 `NODE_ENV=xxx tsx ...` 前置赋值**（Windows 下 npm 用 cmd.exe，报 `'NODE_ENV' 不是内部或外部命令`）；模式由 `server/_core/env.ts#resolveRuntimeNodeEnv` 运行时判定（仅 `NODE_ENV=production`/`--production` 为生产）；`npm start` = `node dist/index.js --production`。
-- 端口取 `.env` 的 `PORT`，本机 **3000**。🔴 **8000~9000 段不可用**（Windows 保留段，bind 报 `EACCES` 而非 `EADDRINUSE` ⇒ 连扫 20 个全败并报「No available port found starting from 8080」）；查段 `netsh interface ipv4 show excludedportrange protocol=tcp`。
+- 端口取 `.env` 的 `PORT`（= **3000**），但 **2026-09-14 起 `2980~3079` 亦进 Windows 保留段** ⇒ `bind(3000)` 直接 **`EACCES`**（**不是** `EADDRINUSE`，且 `netstat` **看不到**任何进程占用它 ⇒ 极易误判成「服务没起」）⇒ `server/_core/index.ts#findAvailablePort` **静默回落**（实测落 **3100 / 3101**），只打一行 `Port 3000 is busy, using port <n> instead`。🔴 **访问端口必须取启动日志里打印的那个**；访问 `:3000` = 全站不可达（前端表现是 **Failed to fetch / 白屏**，不是错误码）。🔴 保留段会变 ⇒ **每次启动先看日志**；查段 `netsh interface ipv4 show excludedportrange protocol=tcp`（带 `*` 者为受管段）。另：**8000~9000 段亦不可用**（同 `EACCES`，连扫 20 个全败报「No available port found starting from 8080」）。
 - 验启动须「启动 + 探测在**同一次** Bash 调用内」（调用结束进程即回收）；`kill $!` 只杀 npm/tsx 包装，**底层 node 泄漏且仍占端口** ⇒ 用 PowerShell 工具 `Stop-Process -Id <netstat 的 PID>`。
 - 工具：**PowerShell 工具只回退出码不回 stdout**（读输出用 Bash）；**沙箱禁 `pnpm/npm install`**（SIGTERM）与「Bash 调 powershell.exe」⇒ 方案不得新增依赖。Bash 须前置 `export PATH=/c/Users/A/.workbuddy/binaries/PortableGit/versions/1.2.0/usr/bin:/c/Windows/System32:$PATH`，否则 `head`/`dirname` not found。
 - `npx tsx -e` **静默无输出** ⇒ 探针落文件；探针**禁 import `server/data/boardRules.ts`**（会拉 `server/engine/execution` 而挂起）⇒ 内联等价实现（纯 `node -e` 可用）。**`ROADMAP.md` 一律用 Read/Grep 工具，禁 `sed`/`head`/`cut`**（中文乱码；`ROADMAP-CHANGELOG.md` 同）。
@@ -98,6 +98,7 @@
 - OHLCV 用 **Tushare**，其余 6 域 **BaoStock**；**BaoStock 单账号单活跃会话 ⇒ 回填必须串行**。`stock_basic` 2000 行分页 ⇒ universe 一律 `--universe-from-db`。回填脚本需 `MARKETDATA_PYTHON=<venv>`。
 - 🔴 **跨境 TiDB ~1.4 万行/s**：`stock_daily_prices`（889 万行）全表取回 700s ⇒ **批量读取不可行**，只能缓存 + 增量。
 - **行情对位索引**一律 `server/stockPriceIndex.ts#hasStockDailyPrice`（O(1)），**禁用 @deprecated 的 `db.getStockDailyPricePairs()`**；快照 `.cache/stock-price-day-index.json`（冷建 `GROUP_CONCAT(DATEDIFF(...))` **必须事务内** `SET SESSION group_concat_max_len=4294967295`，否则静默截断）；写后统一 `invalidateStockPriceSyncCache()`。
+- 🔴 **`index_daily` 全仓无自动同步**：它是**前向纸面交易推进 / 回测的交易日历唯一来源**，但**只有手动脚本 `scripts/backfillIndex.ts` 写入**（没有任何定时同步）⇒ 它一停更，推进就**静默恒 no-op**（详见下节 `PAPER-TRADING-ADVANCE-NOOP-001`）。补数**必须加 `--force`** —— `isCoverageFresh` 容忍「末端相差 ≤ 30 天」即判「已覆盖」⇒ 默认会**误判为无需回填**；补完必须复核「`index_daily` 末端 == 行情末端」。
 
 ## 🔴 数据完整性（001/002/003）
 - **原始表**防线 = **DB 级唯一约束 + `ON DUPLICATE KEY UPDATE` 幂等覆盖**（非应用层 if-duplicate）⇒ 重叠窗口回填**不产重复行**；代价 = `updatedAt` 刷新 + 缓存失效 = **缓存抖动**。
@@ -247,13 +248,32 @@
 
 **四、投影口径（🔴 改这里前必读，否则会静默错）**：
 - `ds_*` 是**事件级窗口**（`relativeDay ∈ [-pre, +post]`），与 `ResearchDataset` 的**逐日全市场面板**形状不同。桥**每事件恰产出一行**（`tradeDate = event.tradeDate`，OHLCV 取 `prefix` 的 **rd=0** 行）—— rd<0 是过去特征、rd>0 是未来信息，**都不构成决策日行**（否则 `(tradeDate, securityId)` 唯一键必破）。
-- 🔴 **`post`（rd≥1）不并入 rows**（未来信息，逐日 PIT 面板禁止混入）；桥在 `gateNotes` 标注 **`POST_WINDOW_NOT_PROJECTED`**。需要 T+N 窗口撮合的策略**必须**走重建路径。
+- 🔴 **`post`（rd≥1）不并入 rows**（未来信息，逐日 PIT 面板禁止混入）；桥在 `gateNotes` 标注 **`POST_WINDOW_NOT_PROJECTED`**。需要 T+N 窗口撮合的策略**必须**走重建路径 —— 🔴 **2026-09-13 起此约束已由装配层自动执行**（桥回填 `executionBarsAvailable: false` ⇒ `resolveDataset` 自动回落重建），见本节 §五。
 - Registry 未落库的列（`securityType` / `st` / `industryName` / `lifecycleVerdict` / `corporateActions` / `indexClose`）一律**忠实「未知」**（`UNKNOWN` / null / 0 / `{}`），**不猜不填零**；逐项进 `knowledge`。
 - `datasetVersion` 由 `computeDatasetVersion(request, universeDefinition, rows)` 对**本次投影内容**重算 ⇒ 与 `bindResearchDataset` 的 `asOf === tradeDate` / 排序唯一 / `universeDefinition.days` 升序 / `dataSnapshot.request.start|endDate` 存在 四项强校验自洽。**装配层必须把同一份 dataset 对象同时喂给 `experimentConfig` 与 `inputs`**（`assertDatasetVersionConsistent` 要求两者 `datasetVersion` 相等）。
 - 🔴 **只读性能（实测拆分的定案值，勿凭感觉改）**：事件分页 `limit=5000`（5.3s，优于 2000 的 8.8s 与 10000 的 7.9s）；rd=0 批读 `batch=1000 / conc=池上限`（1.4s）。**并发用池上限而非工具默认 8** —— 本桥批读是完全独立的只读语句，实测 conc 8→16 有 1.5~2.4× 收益。改这些常量前须按「交错重复 ≥3 轮」判据重测。
 
 
 
+
+**五、2026-09-13 二次修复：直读桥「不可撮合」必须自动回落重建（🔴 本节踩到静默回归）**：
+- **症状**：接上「优先直读」后，用户报「**策略运行后在前端没有任何东西产生**」。
+- **根因**：桥产物是「首板**事件窗口**」形状（每事件仅一行、OHLCV 取 `prefix` rd=0），而 `runTradeSimulation` 在**决策日的下一交易日**取执行 bar（`simulator/engine.ts` 第 9(c) 步按执行日 `dayBars.get(securityId)`，取不到 ⇒ 拒单 `SUSPENDED`）⇒ 执行日不在 rows 内 ⇒ **59/59 单全 `SUSPENDED`**、0 成交、`equityCurve` 恒 = 100,000、指标全 0。**同一策略同窗口强制 rebuild = 133 笔 / 期末 112,169（+12.17%）**。
+- **取证**：探针 `docs/evidence/_probe_backtest_zero_trades.mts`（含「执行日是否有行」逐单核对：registry 意图 60 → 有行 **0**；rebuild 意图 255 → 有行 **250**）+ `docs/evidence/_probe_after_fix_backtest_output.mts`（修复后走真实 tRPC 复验）。
+- **修复**：① 桥显式回填 **`executionBarsAvailable: false`**（`BuildDatasetFromRegistryResult`）；② `assemble.ts#resolveDataset` 在「直读成功但 `executionBarsAvailable === false`」时**回落 `rebuildDataset`**，并把不可撮合原因如实写进 `datasetSourceNote`（**保留 `registry` 对象**，`datasetVersionId` 仍可显示）；③ 明细投影：`closedLoop/adapters.ts#summarizeTradeSimulationRun` 由 12 标量扩为「标量 + `equityCurve` + `trades`(≤500，`BACKTEST_TRADE_DETAIL_LIMIT`) + `executionStats.byReason` + `skippedCounts` + `costs`」；④ 前端 `ClosedLoopRunResultPanel` 新增「策略产出」区块，阶段表**只列 EXECUTED**、其余折叠（14 阶段仅 6 个有执行器）。
+- 🔴 **判据落点**：**「能不能撮合」由装配层 `resolveDataset` 判定，不是把直读一禁了之**；桥只负责**如实声明自身能力**。**禁把「消费侧缺执行日行情」误判成「`ds_*` 表要重设计」。**
+- 🔴 **推广**：桥产物**只可用于「研究 / 候选」语义**；任何需要 **T+N 窗口撮合 / 逐日持仓估值** 的消费方，一律以 `executionBarsAvailable` 为闸门回落重建。
+
+## 🔴 策略定义枚举（凭记忆必错；2026-09-13 由 `MEMORY.md` 移入，内容零丢失）
+
+> 改 `entry` / `exitRule` / `observationWindow` / `execution` 前必读本节。
+
+- **枚举**：`schemaVersion` = **`"1.0"`**；`signalTiming` = `T_OPEN|T_CLOSE`；`executionTiming` = `T_CLOSE|T_PLUS_1_OPEN|T_PLUS_1_CLOSE|T_PLUS_2_OPEN`；`execution.quantityMethod` = `FIXED_SHARES|TARGET_WEIGHT|AMOUNT`（🔴 **≠** `position.sizingMethod`，两者别混）；🔴 **`exitRule` 除条件外必须给 `threshold` 或 `parameter`**。
+- 🔴 **`ENTRY_TIMING_TO_EXECUTION` 映射**：`NEXT_OPEN` → `T_PLUS_1_OPEN` / `OPEN`；`NEXT_CLOSE` → `T_PLUS_1_CLOSE` / `CLOSE`；**`SAME_CLOSE` 硬拒**。
+- ✅ `validateCanonicalStrategyDefinition` 的错误在 **`result.issues`（不是 `errors`）**；🔴 它**只查「结构合法」，不查「语义等价」⇒ 必须人工复核**。
+- ✅ **「首板 → 未来 5 日观察 → 满足条件买入」为原生支持**：`entry.observationWindow {1,5,TRADING_DAY}` + `trigger: FIRST_VALID_DAY`。🔴 **`post.rd{n}` 仅在 `n <= earliestSignalOffset` 时放行**；`path.*` / `outcome.*` 属 `labelOnly`，**作信号条件必拒**。
+- 🔴 **`ds_*`(390002) 列可用性**：`prefix` rd ∈ [-20,0] / `post` rd ∈ [1,20]；**`marketCap` / `floatMarketCap` 100% NULL、`industryCode` 空 99.5%、`indexClose` / 分时 / 开板次数不存在** ⇒ 「高位股 / 大盘环境 / 板块题材」**无法验证**，结论**不得声称已验证**。
+- 🔴 **`load` vs `loadVersion` 形状不同**（会静默读空）：`load()` → **裸 `StrategyDocument`**；`loadVersion()` → **§17 记录，文档嵌在 `.strategy` 下** ⇒ **必须剥壳**。`compareStrategyDocuments` **忽略 `version` / `fingerprint`** ⇒ 只有草稿↔落库 diff 才有意义。
 
 ## 🔴 配方与参数（`recipeRegistry.ts` 与配方契约）
 
@@ -265,7 +285,7 @@
 - 🔴 **`signalBuilder` 是工厂函数 `buildSignalBuilder(parameters)`** ⇒ **必须先 `resolveParameters` 再构造 `strategy13`**（顺序错会拿到未解析的参数）。
 - 🔴 **数值参数必须同时给 `min` 与 `max`**（草稿 `parameterRole` 恒 `TUNABLE`，否则 `PROMOTE_SKETCH_INCOMPLETE`）；非数值参数须给非空 `allowedValues`；无 `defaultValue` ⇒ `RECIPE_PARAMETER_NO_DEFAULT`。
 - 🔴 **`ResearchDataset.rows[]` 没有 `bars` 字段** ⇒ **禁手搓 `row.bars` 复算特征**（会得 0 候选 + 假「特征全缺失」）。正确做法 = **走真实引擎 `runCandidateEngine`**，再用 `visibleBars(...)` 独立复算核对。
-- ⚠️ **`CandidateEvaluationRun` 只是候选层统计（不含成交 / 收益）** ⇒ **真正「逐日撮合出收益曲线」的回测仍未做**（实测 `tradeCount=0` ⇒ 曲线恒等于初始资金、指标全 0）。
+- ✅ **逐日撮合回测已闭环（2026-09-13 定案）**：`runTradeSimulation` 真实产出 `equityCurve` / `trades` / `executionStats.byReason` / `skippedCounts` / `costs`（经 `closedLoop/adapters.ts` 投影进交接摘要）。🔴 **此前实测 `tradeCount=0` 不是「回测未做」**，而是**直读桥取不到执行日 bar** 导致的全单 `SUSPENDED`（详见「运行工作台必须优先直读已绑定数据集」§五）。⚠️ `CandidateEvaluationRun` 本身仍只是**候选层**统计（不含成交 / 收益），两者不要混谈。
 
 ## 基础设施坑（细则）
 
@@ -312,3 +332,121 @@
   **变成给既有策略加版本**而不是新建。
 - **口径不变**：`load` → 裸 `StrategyDocument`；`loadVersion` → §17 记录（文档在 `.strategy` 下）
   ⇒ 经 `toStrategyDocument()` 归一（两条分支都被探针独立证明）。
+
+
+## 🔴 闭环回测留档（CLOSED-LOOP-BACKTEST-PERSIST-001 · 2026-09-14）
+
+**判据：闭环 `loopRun` 每次执行都必须留下一行可回看的记录。** 页面 = `/backtest-runs`（侧栏「量化回测」组的「回测历史」）。
+
+- **表 = `closed_loop_backtest_run`**（迁移 `0037`；**23 列 / 3 索引 / 零 FK**）。坐标列（`runId` **UNIQUE** / `experimentId` / `strategyId` / `strategyVersion` / `startDate` / `endDate` / `datasetVersion` / `datasetVersionId` / `datasetSource` / `recipeId`）+ 摘要列 + `resultJson`(longtext) + `createdAt`。
+- 🔴 **禁与 legacy `backtest_runs` 互灌**：后者只服务龙头候选 `LeaderCandidateBacktestResult`（真实库仅 **1 行**、`resultJson` **5.6MB**），**不同表、不同口径**。`research_run.executionLogJson` 是**批次日志**（非结果）⇒ **也不能复用**。
+- 🔴 **落档是 best-effort 旁路**：`loopRun` 尾部的 `await persistClosedLoopBacktestRun(...)` **try/catch 吞错 + `console.warn`** ⇒ **留档失败绝不阻断回测**（结果已算出来，不能因写历史失败而丢弃）。代价 = 「**历史少一条**」，是**如实可见的降级**；目前**只在服务端日志可见、前端未提示**。
+- 🔴 **幂等靠 `runId` UNIQUE + `ON DUPLICATE KEY UPDATE`**（除 `runId` 外全列覆盖）⇒ **同一次运行的重试收敛为一行**，读回的是**后一次**的值。
+- 🔴 **列表端点禁读 `resultJson`**：`listClosedLoopBacktestRuns` 只 SELECT 摘要列（limit 收敛 **1..200**、默认 50）；长文本只在 `getClosedLoopBacktestRun(id)`。⇒ **「列表轻」是结构性保证，不是口头承诺。**
+- 🔴 **坏记录要响亮报错**：`resultJson` 为 `NULL` = 「本次未留完整结果」；文本存在但解析失败 / 结构非法 ⇒ **抛错**（**不把「记录坏了」伪装成「没跑过」**）。
+- 🔴 **摘要取值不做隐式转换**（`summary.ts#asFiniteNumber` 只接受 `number` 且有限；字符串 `"133"` 一律 `null`）；**「真实 0」与「取不到」必须区分**（`backtest` 阶段非 `EXECUTED` ⇒ 权益 / 成交为 `null` **而非 `0`**）。
+- **前端**：`client/src/pages/BacktestRuns.tsx`，URL 坐标 `?id=<留档行 id>`（点同一行再点 = 收起）；详情**复用** `buildClosedLoopRunViewModel` + `ClosedLoopRunResultPanel` ⇒ 与运行工作台**同一套渲染、零口径漂移**；列表**不显示收益率**（需重算口径）⇒ 只并列展示「初始资金 / 期末权益」**原始值**；缺失显示「—」**不显示 0**。
+- **探针**：`docs/evidence/_probe_closed_loop_persist_e2e.mts`（端到端 **19 项断言** + 幂等）、`_probe_clbr_rows.mts`（行巡检；`--clean-probe-rows` 按**双重命名守卫**「`experimentId LIKE 'EXP-PROBE%'` **且** `strategyId LIKE 'probe-%'`」清理，**只命中单侧守卫的行只列出、不自动删**）。
+- ⚠️ **探针必须自清理，且清理判据要绑「可识别命名域」而不是「本次 `runId`」**：首跑崩溃时注入的幂等行（`EXP-PROBE-IDEM`）**次跑的自清理删不掉**（它只删自己那次的新 `runId`）⇒ 残留会污染产品页。
+
+## 🔴 成交明细「证券名称 + 代码」（2026-09-14 实查 · 三处口径对齐）
+
+背景：闭环回测结果里的「成交明细」表格此前只印 `trades[].securityId`，而该字段是
+Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户读不懂。
+
+**唯一链路（两步，都复用既有实现，禁造第二套）**：
+1. `sec_<uuid>` → 6 位代码：读 `research_security_identifier_history` 的 **primary** 标识
+   （语义 = `server/security/engineKeyBridge.ts`）。
+2. 代码 → 名称：**全库唯一的名称源是 `limit_up_records.stockName`**（真实库 60 张表里
+   **没有**证券名称主数据表；`research_securities` **不含 name**，schema 注释明确
+   「name history 与 identifier history 严格独立」）。复用既有纯函数
+   `shared/stockDataNormalization.ts#buildLatestStockNameMap`。
+
+🔴 **`canonicalCode` 只做字符串拼接、不校验交易所一致性**（它会产出 `000001.SH` 这种错代码）；
+**必须用 `normalizeSecurityCode`**（= `parseSecurityCode` 带后缀路径，冲突即抛错）⇒ 宁可
+`code = null` 也不产出错代码（错代码会顺带查错名称）。
+
+🔴 **名称覆盖率 62.9%（158/251）是数据现实，不是实现缺陷**：`limit_up_records` 只收录
+有过涨停记录的股票（4,324 个 distinct code），回测 universe 是全市场（5,552 只）。
+缺口**集中在创业板/科创板**（实查：创业板 300/301 缺 **74/152**、科创板 688 缺 **19/35**；
+沪主板 60x **0/30**、深主板 00x **0/34** 全有）。根因判据：93 个缺失代码去
+`limit_up_records` 精确查 **0 命中** ⇒ **收录口径问题，非键匹配 bug**（诊断脚本
+`docs/evidence/_probe_name_gap_diagnosis.mts`）。
+
+🔴 **绝不用代码冒充名称**：取不到就 `name = null`，UI 显示「—」，**代码照常显示**。
+
+**落点**：
+- 服务端 `server/closedLoopBacktestRun/securityLabels.ts`（纯函数 `buildSecurityLabels` +
+  取数 `loadSecurityLabels`，**只按涉及代码查名称源，不整表扫 9.9 万行**）；
+- 契约 `shared/researchContracts.ts`（`securityLabelSchema` / `securityLabelsInputSchema`
+  **1..500** / `securityLabelsOutputSchema` = `z.record`）；
+- 端点 `researchRun.securityLabels`（**只读**；output 契约真实校验：空数组 / 501 个 id 实测被拒）；
+- 前端 `client/src/hooks/useSecurityLabels.ts`（`staleTime` 5 分钟、`retry: false`、
+  **查询失败不抛错** ⇒ 表格回退显示原始 `securityId`，不让「查不到名字」带崩整块结果）；
+- 展示 `SecurityCell`（`ClosedLoopRunResultPanel.tsx` 内）= **名称在上、canonical 代码在下
+  （mono 灰色小字）** —— 与 legacy `/backtest` 页既有规范**逐字一致**。
+
+🔴 **三处「成交明细」的现状必须分清（勿重复造）**：
+| 位置 | 键 | 名称状态 |
+| --- | --- | --- |
+| 闭环面板 `ClosedLoopRunResultPanel` | `sec_<uuid>` | **本轮修**（此前名称、代码都没有） |
+| legacy `/backtest` 页 | `stockCode` | **早已**是「名称 + 代码」 |
+| 绩效页 `PerformanceDashboard` | `t.stockCode`（**本身就是代码**） | 只缺名称，**本轮未改** |
+
+## 🔴 运行结果「刷新即丢」（RUN-RESULT-RESTORE-001 · 2026-09-14）
+
+**症状**：用户报「我刚才跑过的回测，结果又没了」。**实查结论：数据没丢，丢的是展示层。**
+
+- **根因（展示层）**：`client/src/pages/StrategyDetail.tsx#RunTab` 把 `loopRun` 结果**只**写进 `useState`；而 `dev` = **单进程** `tsx watch server/_core/index.ts` ⇒ 任何 `server/**` 改动触发的**整站热重启**（或用户手动刷新）都会**整页重载** ⇒ 结果从内存消失，而空态原文写着「**还没跑过。**」——**看起来就像「跑过的回测又没了」**。⇒ **判据：凡「跑完才有」的结果，绝不能只活在前端内存里**，必须有「可回查的落点」+「重载后能恢复」。
+- **定案（恢复口径）**：`RunTab` 现为 **本次运行结果优先；无本次结果时，从「回测留档」恢复该策略最近一次**：`researchRun.listBacktests({strategyId, limit:1})` → `researchRun.getBacktest({id})` → `buildClosedLoopRunViewModel` → `ClosedLoopRunResultPanel`（与运行工作台**同一函数 + 同一面板**）⇒ 零口径漂移。
+- **展示优先级（固定，勿改序）**：**本次运行结果 → 留档恢复 → 明说原因 → 读取中 → 空态**。（本次结果永不被旧留档顶掉。）
+- 🔴 **禁谎**：无留档时空态只能写「这个策略还**没有运行记录**」，**禁**写「还没跑过」（有留档但未恢复时会变成假话）；「有留档但 `resultJson` 为空」必须**明说**，**不得**伪装成「没跑过」。
+- 落点：`tests/client/src/pages/strategyRunResultPersist.test.ts`（**静态扫源码 + 真实 `appRouter` 端点断言**，7 例）钉住上述不变量；端到端走 `docs/evidence/_probe_run_tab_hydration.mts`。
+- 同类症状排查顺序（**先环境、再展示层、最后才怀疑引擎**）：① 端口是否回落（看启动日志）；② 前端结果是否只活内存；③ 库中留档是否真有那行（`docs/evidence/_probe_clbr_rows.mts`）。
+
+## 🔴 数据集范围继承（DATASET-SCOPE-INHERIT-001 · 2026-09-14 实查）
+
+- 🔴 **回落重建必须继承被回落数据集的 universe 约束**：`assemble.ts#resolveDataset` 在「直读不可撮合」「直读失败」「显式 rebuild」三条路径上都会走 `buildResearchDataset`，而它的默认证券池是**全市场**（`ResearchDatasetRequest.universeFilter` 只表达 `tDayCondition` / `pullback`，**没有板块维度**）。实查后果：绑定 `dataset_version.id=390002`（`boards:["main"]`）却产出 `datasetSecurityCount=5146` 的全市场面板，成交明细出现 300/301/688。
+- 权威来源优先级：`dataset_build_config`（+ `dataset_build_config_board`，生成参数）> `dataset_version.universeDefinitionJson.boards`（版本自述）> 无约束。取数走 `datasetFromRegistry.ts#readDatasetUniverseConstraint`（只读；复用 `DbDatasetRegistry.getVersionById` / `getBuildConfig`，**禁第二套实现**）。
+- 🔴 **约束解析错误必须用 `UniverseConstraintError`，不得用 `RegistryDatasetBridgeError`**：后者是「可预期的不该直读」信号，会被 `resolveDataset` 的 catch 吞掉并回落重建 ⇒ 若约束也用它，就会在「约束读不出来」时**静默按全市场跑**（正是要堵的漏洞）。
+- 🔴 **板块白名单不含 `unknown`**：`classifyBoard` 对无法归类的代码返回 `unknown`，放进白名单 = 放行一切无法识别的标的。非法取值**响亮抛错**，不静默丢弃（丢弃 = 放宽范围）。
+- 🔴 继承事实必须进 `assembly.datasetSourceNote`；**无约束时必须明说「证券池为全板块（含创业板/科创板/北交所）」**，不得沉默。
+- 前端判据：`closedLoopRunAdapter.ts#classifyRebuildScope(note)` → `inherited` / `declared-unscoped` / `unknown`；`unknown` = 修复前落库的历史结果，面板在成交明细上方提示「范围未确认，请重新运行」。落点：`tests/client/src/adapters/closedLoopRunAdapter.test.ts`。
+- 排查顺序（症状 = 「成交明细出现我数据集里没有的股票」）：① 查数据集真实声明（`_probe_dataset_board_scope.mts`）；② 查本次是否回落重建（`assembly.datasetSource` / `datasetSourceNote`）；③ 查成交代码译码是否张冠李戴（`_probe_trade_code_correctness.mts` —— 至今零歧义）。
+- 落地：`tests/server/runWorkbenchAssembly/universeConstraint.test.ts`（8 例）钉住「权威优先 / 不猜 / 非法即抛 / `unknown` 不进白名单」。
+## 🔴 数据集窗口投影 / 决策日资格（DATASET-WINDOW-PROJECTION-001 · 2026-09-14 实查）
+
+- 投影口径（🔴 改 `datasetFromRegistry.ts#buildWindowRows` 前必读）：面板 = `rd=0`（首板日，来自 `prefix`，充当 `pullbackFeatures` 的特征基准 `bars[0]`）+ `rd ∈ [1, observationWindow.end + 1]`（来自 `post`，观察日 + **次日执行日**）。
+- 🔴 **决策日资格 = `rd ∈ [start, end]`**（取值来自**策略声明** `definition.entry.observationWindow`）。**`rd=0` 不进决策日** —— 否则首板日当天 `bars` 只有一根 ⇒ 特征必然退化（`volumeRatio=1` / `haircut=intraday`）⇒ 凭空造出「打板式」候选；同时这也让「`bars[0]` = 首板日、序列末根 = 决策日」从近似变**精确成立**。
+- 🔴 `end + 1` 是**撮合的最小充分条件**：`simulator/engine.ts` 第 9(c) 步在**决策日的下一交易日**按执行日 bar 取价（取不到即拒单 `SUSPENDED`）。`prefix` 的 rd<0 与 `post` 的 rd>end+1 **不进 `rows`**（既不构成决策日、也非执行日；rd<0 并入会让同一证券/日期出现 rd=-20..-1 的重复候选，违反 `(tradeDate, securityId)` 唯一键）。
+- 🔴 **窗口不猜**：唯一取值口 `resolveObservationWindow()`，由 `assemble.ts` 从 `strategyDocument.definition.entry.observationWindow` 读取后传入。未声明 ⇒ `REGISTRY_OBSERVATION_WINDOW_UNDECLARED`；非 `TRADING_DAY` / 非整数 / `start<1` / `end>DATASET_POST_MAX_RELATIVE_DAY(20)` ⇒ `REGISTRY_OBSERVATION_WINDOW_INVALID`；超该版本 post 真实容量 ⇒ `REGISTRY_POST_WINDOW_TOO_SHORT`。**一律不夹取**（夹取 = 悄悄改窄策略）。
+- 护栏：`REGISTRY_BRIDGE_MAX_ROWS = 400_000`，**计量对象 = `rows.length`**（不是事件数 —— 原先误按事件数计量）。390002 / `end=20` 最坏情形实测 354,544 行。
+- 去重：`(tradeDate, securityId)` 唯一。🔴 **严格列 = 行的身份** = `open/high/low/close/volume/amount`，多来源不一致即抛 `REGISTRY_WINDOW_ROW_CONFLICT`；🔴 **`preClose` 是派生列**（实库 **15 / 112,920 键 = 0.0133%** 来源不一致，样例 `601236.SH@2024-10-11`：`8.33` vs `8.38`，而**同一根 K 线的 OHLCV 完全一致**）⇒ 确定性取基准行（rd 最小者）的值 + **如实登记** `PRECLOSE_SOURCE_MISMATCH` / `stats.preCloseMismatchKeys`，**既不中止直读、也不编造取舍**。
+- 🔴 **观察日（rd≥1）的 `turnoverRate` / `circulationMarketCap` / `totalMarketCap` 必为 null**：`ds_*_post` 的 DDL 只承载原始日线（结构性 PIT 防线，`plugins.ts#rawBarCreateSql`），把首板日数值盖到观察日上就是**编数据** ⇒ 如实记 `knowledge.liquidity = "UNKNOWN"` + `OBSERVATION_DAY_LIQUIDITY_UNKNOWN`。
+- 🔴 **窗口末持仓**（rd=end 决策建仓）在数据集内没有「下一决策日」⇒ 以 `openAtEnd` 收尾（期末按最后可得收盘价估值）。这是「数据集只覆盖事件窗口」的**固有边界**，不是撮合失败。
+- 事件窗口重叠是常态（`ds_*` 是事件级窗口，同一根 K 线可被多个事件覆盖）：实库 390002 有 **102,727 个重复组**，合并后 **354,544 行**；重复对 OHLCV 数值完全一致（close 极差合计 = 0）⇒ **无损去重**。
+- 成本（实测 `_probe_bridge_window_cost.mts`）：全窗口直读 ≈ **16.5s** vs 重建 **60.6s**（~3.7×）。
+- 落地：`tests/server/runWorkbenchAssembly/windowProjection.test.ts`（**18 例**：窗口解析 5 / 面板投影 9 / 身份桥接 4）；探针 `_probe_dataset_window_run_e2e.mts`（ALL PASS）、`_probe_dataset_window_coverage.mts`、`_probe_bridge_window_cost.mts`。
+
+## 🔴 成交 / 数据键域 = canonical `sec_<uuid>`（SECURITY-ID-DOMAIN-001 · 2026-09-14 实查）
+
+- 🔴 `ResearchDatasetRow` 有**两个**字段，不可互换：`securityId` = **身份**（canonical `sec_<uuid>`，见 `drizzle/schema.ts#researchSecurities` 注释「永久身份（系统分配，如 sec_<uuid>）」）；`code: string | null` = 「**该日生效完整代码**（如 `600000.SH`）」。
+- 🔴 `ds_*` 三表（`event` / `prefix` / `post`）**只有 `symbol`（代码域）**，没有身份列。直读桥必须经 **Identifier History 显式桥接**：复用既有单一实现 `server/security/engineKeyBridge.ts#resolveSecurityIdByEngineKey`（asOf-aware、PIT-safe、歧义即拒），🔴 **逐事件按自己的 `tradeDate` 解析**（code reuse：同一代码在不同历史区间属不同证券）。失败抛 `REGISTRY_SECURITY_IDENTITY_UNRESOLVED`，**绝不退回用代码冒充身份**。
+- 实库覆盖（`_probe_symbol_identity_coverage.mts`）：390002 的 **2,967 个 distinct symbol 100%** 可在其事件日解析到唯一 `sec_<uuid>`；`research_security_identifier_history` 仅 **5,552 行**（1.1s 可全量载入）。
+- 🔴 **下游一律用 `row.code` 解析板块**（`classifyBoard(row.code ?? "")` —— `datasetRegistry/detection.ts` / `researchDataset/tDayFilter.ts` / `researchDataset/universe.ts`），全仓**没有**任何地方把 `securityId` 当代码解析。
+- 留档 / 展示侧：成交明细 `trades[].securityId` = `sec_<uuid>` ⇒ 名称解析走 `researchRun.securityLabels`（名称源覆盖 **62.9%**，缺口显「—」，**不用代码冒充名称**）。
+- 症状自检：**若成交明细名称全为「—」或 `securityLabels` 解析率 = 0 ⇒ 先查 `securityId` 是否被写成了代码**（断言 `/^sec_/` 形态，见 `_probe_dataset_window_run_e2e.mts` 第 3 段）。
+- 落地：`windowProjection.test.ts` 的「身份桥接」4 例（含 code reuse 与歧义即拒）+ e2e 第 3 段（35/35 全 `sec_<uuid>`、解析率 100%、板块 `{main: 35}`）。
+
+
+## 🔴 前向纸面交易「推进」恒 no-op 却报成功（PAPER-TRADING-ADVANCE-NOOP-001 · 2026-09-14 实查）
+
+- 🔴 **前向推进的交易日历唯一来源 = `index_daily`**（`server/db.ts#loadBacktestTradingDates` 取 `distinct tradeDate`），**刻意与候选价格行解耦** —— 它只回答「哪些日子是可推进的市场日」；若改成从个股价格行取，某些标的停牌 / 窗口不连续就会让**全局持仓推进链断掉**。⇒ **改推进逻辑前，先确认这张表的新鲜度**。
+- 🔴 **症状学（症状 = 「推进按钮提示成功但什么都没变」）**：**第一件事**是比对三个末端 —— `index_daily` vs `stock_daily_prices` vs `limit_up_records`（探针 `docs/evidence/_probe_paper_trading_state.mts`，只读）。2026-09-14 实查：`index_daily` 停更在 **2026-09-04**（`retrievedAt=2026-09-06 09:22:54`），而另两表已到 **2026-09-14** ⇒ 日历落后 **6 个交易日**；两条运行 `lastProcessedDate`（09-10 / 09-14）**均在日历末端之后**，且 **`updatedAt == createdAt`** = 「首次创建后从未成功落过新状态」的铁证。
+- 🔴 **「空推进」必须分两种情况，不得都报成功**：① `already-latest`（本来就已最新，正常）；② `calendar-stale`（日历落后行情，**是缺陷**）。判据 = `marketLastDate > calendarLastDate`（**行情末端才是参照物** —— 「日历该不该更长」只能由行情回答）。唯一实现 = `server/paperTrading.ts#classifyAdvanceKind()`（**纯函数、零 IO**，可被单测与真实 E2E 双向驱动），产物 = `paperTradingAdvanceDiagnosis()` 的 `kind` + 人话 `message`。
+- 🔴 **建运行必须前置拒绝「越界锚点」**：新建运行的锚点取「最新涨停信号日」（与价格表对齐），**可以越过日历末端** ⇒ 一创建就是「注定推不动」的孤儿运行。`db.ts#createPaperTradingRun` 在 `signalDate > calendarLastDate`（或日历为空）时抛 `PaperTradingCalendarStaleError`（`code = "PAPER_TRADING_CALENDAR_STALE"`），**不落库**。
+- 🔴 **领域码跨 tRPC 边界只能靠 `message`**（既有铁律的又一次应用）：`toTrpcError` **只透传 `message`、不带 `cause`** ⇒ 必须把码写成 `[PAPER_TRADING_CALENDAR_STALE] <原文>`，前端才抠得到（`rpcErrorToDigest`，正则 `/[([A-Z_]{3,})]/`）。
+- 🔴 **前端不得把「成功」当默认结论**：`PaperTrading.tsx#advanceMutation.onSuccess` 按 `diagnosis.kind` **分流**（`calendar-stale → toast.warning` + 页面内三色 `advanceNotice` 横幅 / `advanced → success` / 其余 `info`）。**凡是服务端已能如实说出原因的情形，UI 都不许一律报成功。**
+- 落点：`tests/server/paperTrading.test.ts`（**22 例** = 原 10 + 新增 12：三态判定 5，含事故现场常量 `CALENDAR_END=2026-09-04` / `MARKET_END=2026-09-14`；人话结论 6；错误类 1）；e2e `docs/evidence/_probe_paper_advance_e2e.mts`（真实 tRPC **17/17**，⚠️ **会写入** `paper_trading_runs`）；建运行正向 `docs/evidence/_probe_paper_create_guard.mts`（**5/5**，按命名域自清理）。
+- ⚠️ **未取证**：建运行守卫的**反向分支**（日历真落后 ⇒ 真抛 `PAPER_TRADING_CALENDAR_STALE`）需**篡改日历数据**才能构造，本轮未取证；已证的是**正向路径不受影响**（不会误锁新建运行）。
+- **排查顺序（推进后什么都没变）**：① 三个末端是否一致 → ② `stateJson.lastProcessedDate` 是否已在末端之后 → ③ `updatedAt == createdAt` 是否说明「从未落过新状态」→ ④ 建运行锚点是否越界。

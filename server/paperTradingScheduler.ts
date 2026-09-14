@@ -1,5 +1,5 @@
 import { advanceAllActivePaperTradingRuns } from "./db";
-import type { PaperTradingSummary } from "./paperTrading";
+import type { PaperTradingAdvanceDiagnosis, PaperTradingSummary } from "./paperTrading";
 
 /**
  * 前向纸面交易每日推进调度器（四-P1）。
@@ -16,7 +16,7 @@ export type PaperTradingAdvanceOutcome = {
   ok: boolean;
   /** 推进被跳过/失败的原因。 */
   skipped?: string;
-  results?: Array<{ runId: number; label: string; summary: PaperTradingSummary | null }>;
+  results?: Array<{ runId: number; label: string; summary: PaperTradingSummary | null; diagnosis: PaperTradingAdvanceDiagnosis }>;
   at: string;
 };
 
@@ -28,7 +28,14 @@ export async function advancePaperTradingOnce(): Promise<PaperTradingAdvanceOutc
   advancing = true;
   try {
     const results = await advanceAllActivePaperTradingRuns();
-    console.log(`[PaperTrading] 推进 ${results.length} 条运行`);
+    console.log(`[PaperTrading] 推进 ${results.length} 条运行：${results
+      .map((r) => `#${r.runId}=${r.diagnosis.kind}(${r.diagnosis.advancedDates.length}日)`)
+      .join(" ")}`);
+    // 🔴 日历落后是**环境故障**、不是「已推进完成」；以前的静默版本让这件事无人发现（2026-09-04~14 全程空转）。
+    const stale = results.filter((r) => r.diagnosis.calendarStale);
+    if (stale.length > 0) {
+      console.warn(`[PaperTrading] ⚠️ 交易日历落后，${stale.length}/${results.length} 条运行无法推进：${stale[0]!.diagnosis.message}`);
+    }
     return { ok: true, results, at: new Date().toISOString() };
   } catch (error) {
     const skipped = error instanceof Error ? error.message : String(error);

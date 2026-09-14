@@ -1,0 +1,1172 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/pages/PaperTrading.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/@fs/C:/work/sourcecode/stock-limit-up-analyzer/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=328634ba"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+var _s = $RefreshSig$();
+import { Button } from "/src/components/ui/button.tsx";
+import { Input } from "/src/components/ui/input.tsx";
+import { trpc } from "/src/lib/trpc.ts";
+import { toast } from "/@fs/C:/work/sourcecode/stock-limit-up-analyzer/node_modules/.vite/deps/sonner.js?v=328634ba";
+import { useAuth } from "/src/_core/hooks/useAuth.ts";
+import { AlertTriangle, BarChart3, Loader2, Play, Pause, Plus, RefreshCw, WalletCards } from "/@fs/C:/work/sourcecode/stock-limit-up-analyzer/node_modules/.vite/deps/lucide-react.js?v=328634ba";
+import __vite__cjsImport7_react from "/@fs/C:/work/sourcecode/stock-limit-up-analyzer/node_modules/.vite/deps/react.js?v=328634ba"; const useMemo = __vite__cjsImport7_react["useMemo"]; const useState = __vite__cjsImport7_react["useState"];
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "/@fs/C:/work/sourcecode/stock-limit-up-analyzer/node_modules/.vite/deps/recharts.js?v=328634ba";
+const STRATEGY_LABELS = {
+  baseline: "原始策略",
+  riskPenalty: "风险扣分策略",
+  hardFilter: "高风险硬过滤",
+  qualityBlend: "质量复合评分",
+  qualityGate: "质量门控策略"
+};
+function Metric({ label, value, tone = "text-slate-800" }) {
+  return /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:22", className: "rounded-xl border border-slate-200 bg-white p-4 shadow-sm", children: [
+    /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:23", className: "text-xs text-slate-500", children: label }, void 0, false, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 23,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:24", className: `mt-1 text-lg font-bold ${tone}`, children: value }, void 0, false, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 24,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+    lineNumber: 22,
+    columnNumber: 5
+  }, this);
+}
+_c = Metric;
+const returnTone = (value) => value === null || value === void 0 || value === 0 ? "text-slate-800" : value > 0 ? "text-rose-600" : "text-emerald-700";
+export default function PaperTrading() {
+  _s();
+  const { user, isAuthenticated } = useAuth();
+  const isAdmin = isAuthenticated && user?.role === "admin";
+  const utils = trpc.useUtils();
+  const [selectedId, setSelectedId] = useState(null);
+  const [label, setLabel] = useState("");
+  const [strategyKey, setStrategyKey] = useState("baseline");
+  const [initialCapital, setInitialCapital] = useState("100000");
+  const [advanceNotice, setAdvanceNotice] = useState(null);
+  const listQuery = trpc.sentiment.listPaperTradingRuns.useQuery({ limit: 50 });
+  const detailQuery = trpc.sentiment.getPaperTradingRun.useQuery(
+    { id: selectedId ?? 0 },
+    { enabled: selectedId !== null }
+  );
+  const createMutation = trpc.sentiment.createPaperTradingRun.useMutation({
+    onSuccess: (data) => {
+      toast.success(`已创建运行 #${data.id}`);
+      setSelectedId(data.id);
+      setLabel("");
+      void listQuery.refetch();
+    },
+    onError: (error) => toast.error(error.message)
+  });
+  const advanceMutation = trpc.sentiment.advancePaperTradingRun.useMutation({
+    onSuccess: (data) => {
+      const { diagnosis } = data;
+      if (diagnosis.calendarStale) {
+        toast.warning(diagnosis.message);
+        setAdvanceNotice({ tone: "warning", text: diagnosis.message });
+      } else if (diagnosis.kind === "advanced") {
+        toast.success(diagnosis.message);
+        setAdvanceNotice({ tone: "success", text: diagnosis.message });
+      } else {
+        toast.info(diagnosis.message);
+        setAdvanceNotice({ tone: "info", text: diagnosis.message });
+      }
+      void detailQuery.refetch();
+      void listQuery.refetch();
+    },
+    onError: (error) => toast.error(error.message)
+  });
+  const statusMutation = trpc.sentiment.setPaperTradingRunStatus.useMutation({
+    onSuccess: () => {
+      void detailQuery.refetch();
+      void listQuery.refetch();
+    },
+    onError: (error) => toast.error(error.message)
+  });
+  const runs = listQuery.data ?? [];
+  const detail = detailQuery.data;
+  const curveData = useMemo(() => (detail?.state.equityCurve ?? []).map((point) => ({
+    date: point.date.slice(5),
+    equity: point.equity,
+    cash: point.cash
+  })), [detail]);
+  const orders = useMemo(() => [...detail?.state.orders ?? []].reverse(), [detail]);
+  const onCreate = () => {
+    const capital = Number(initialCapital);
+    if (!Number.isFinite(capital) || capital < 1e4) {
+      toast.error("初始资金需为不小于 10000 的整数");
+      return;
+    }
+    createMutation.mutate({ label: label.trim() || `${STRATEGY_LABELS[strategyKey]}·前向纸面`, strategyKey, initialCapital: Math.floor(capital) });
+  };
+  return /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:110", className: "mx-auto max-w-7xl space-y-5", children: [
+    /* @__PURE__ */ jsxDEV("section", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:111", className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7", children: /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:112", className: "flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between", children: [
+      /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:113", children: [
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:114", className: "flex items-center gap-2 text-orange-700", children: [
+          /* @__PURE__ */ jsxDEV(BarChart3, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:115", className: "h-5 w-5" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 115,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("span", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:116", className: "text-xs font-bold tracking-[0.18em]", children: "FORWARD PAPER TRADING" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 116,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 114,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("h1", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:118", className: "mt-2 text-2xl font-bold tracking-tight sm:text-3xl", children: "前向纸面交易闭环" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 118,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:119", className: "mt-2 max-w-3xl text-sm leading-6 text-slate-600", children: "用真实样本外兜底历史回测：T 日收盘生成次日准备买入清单 → 次日开盘按真实开盘价成交 → 持仓按止盈止损逐日出清 → 累积真实前向曲线，与历史回测对比。" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 119,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 113,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:123", className: "rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-right", children: [
+        /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:124", className: "text-xs text-orange-700", children: "前向口径" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 124,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:125", className: "mt-1 font-semibold text-orange-900", children: "仅使用信号日及以前信息 · 固定权重" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 125,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 123,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 112,
+      columnNumber: 9
+    }, this) }, void 0, false, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 111,
+      columnNumber: 7
+    }, this),
+    advanceNotice && /* @__PURE__ */ jsxDEV(
+      "section",
+      {
+        "data-loc": "client\\src\\pages\\PaperTrading.tsx:131",
+        className: `rounded-2xl border p-4 text-sm ${advanceNotice.tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-900" : advanceNotice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`,
+        children: /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:140", className: "flex items-start gap-3", children: [
+          /* @__PURE__ */ jsxDEV(
+            AlertTriangle,
+            {
+              "data-loc": "client\\src\\pages\\PaperTrading.tsx:141",
+              className: `mt-0.5 h-4 w-4 shrink-0 ${advanceNotice.tone === "warning" ? "text-amber-600" : advanceNotice.tone === "success" ? "text-emerald-600" : "text-slate-400"}`
+            },
+            void 0,
+            false,
+            {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 141,
+              columnNumber: 13
+            },
+            this
+          ),
+          /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:146", className: "leading-6", children: advanceNotice.text }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 146,
+            columnNumber: 13
+          }, this),
+          /* @__PURE__ */ jsxDEV("button", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:147", type: "button", className: "ml-auto shrink-0 text-xs text-slate-400 hover:text-slate-600", onClick: () => setAdvanceNotice(null), children: "关闭" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 147,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 140,
+          columnNumber: 11
+        }, this)
+      },
+      void 0,
+      false,
+      {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 131,
+        columnNumber: 7
+      },
+      this
+    ),
+    isAdmin && /* @__PURE__ */ jsxDEV("section", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:155", className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm", children: [
+      /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:156", className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxDEV(Plus, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:157", className: "h-4 w-4 text-orange-700" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 157,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("h2", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:158", className: "font-semibold", children: "新建前向运行" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 158,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 156,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:160", className: "mt-4 flex flex-wrap items-end gap-3", children: [
+        /* @__PURE__ */ jsxDEV("label", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:161", className: "text-xs text-slate-600", children: [
+          "运行名称",
+          /* @__PURE__ */ jsxDEV(Input, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:163", value: label, onChange: (event) => setLabel(event.target.value), placeholder: "如：前向纸面-原始策略", className: "mt-1 h-9 w-56 bg-white" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 163,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 161,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("label", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:165", className: "text-xs text-slate-600", children: [
+          "策略",
+          /* @__PURE__ */ jsxDEV(
+            "select",
+            {
+              "data-loc": "client\\src\\pages\\PaperTrading.tsx:167",
+              value: strategyKey,
+              onChange: (event) => setStrategyKey(event.target.value),
+              className: "mt-1 h-9 w-48 rounded-md border border-input bg-white px-3 text-sm",
+              children: Object.keys(STRATEGY_LABELS).map(
+                (key) => /* @__PURE__ */ jsxDEV("option", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:173", value: key, children: STRATEGY_LABELS[key] }, key, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 173,
+                  columnNumber: 15
+                }, this)
+              )
+            },
+            void 0,
+            false,
+            {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 167,
+              columnNumber: 15
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 165,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("label", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:177", className: "text-xs text-slate-600", children: [
+          "初始资金（元）",
+          /* @__PURE__ */ jsxDEV(Input, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:179", value: initialCapital, onChange: (event) => setInitialCapital(event.target.value), className: "mt-1 h-9 w-36 bg-white" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 179,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 177,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(Button, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:181", size: "sm", className: "gap-2 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700", onClick: onCreate, disabled: createMutation.isPending, children: [
+          createMutation.isPending ? /* @__PURE__ */ jsxDEV(Loader2, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:182", className: "h-4 w-4 animate-spin" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 182,
+            columnNumber: 43
+          }, this) : /* @__PURE__ */ jsxDEV(Plus, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:182", className: "h-4 w-4" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 182,
+            columnNumber: 139
+          }, this),
+          "创建"
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 181,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 160,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 155,
+      columnNumber: 7
+    }, this),
+    /* @__PURE__ */ jsxDEV("section", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:189", className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm", children: [
+      /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:190", className: "flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxDEV(WalletCards, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:191", className: "h-4 w-4 text-orange-700" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 191,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("h2", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:192", className: "font-semibold", children: "运行列表" }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 192,
+          columnNumber: 11
+        }, this),
+        /* @__PURE__ */ jsxDEV("span", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:193", className: "ml-auto text-xs text-slate-400", children: [
+          "共 ",
+          runs.length,
+          " 条"
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 193,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 190,
+        columnNumber: 9
+      }, this),
+      listQuery.isLoading ? /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:196", className: "p-6 text-center text-sm text-slate-500", children: "加载中…" }, void 0, false, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 196,
+        columnNumber: 9
+      }, this) : runs.length === 0 ? /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:198", className: "p-6 text-center text-sm text-slate-500", children: "暂无前向运行。管理员可创建一条运行开始真实样本外闭环。" }, void 0, false, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 198,
+        columnNumber: 9
+      }, this) : /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:200", className: "mt-4 overflow-auto rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxDEV("table", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:201", className: "w-full min-w-[820px] text-xs", children: [
+        /* @__PURE__ */ jsxDEV("thead", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:202", className: "bg-slate-100 text-left text-slate-500", children: /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:203", children: [
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:204", className: "px-3 py-2", children: "运行" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 204,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:205", className: "px-3 py-2", children: "策略" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 205,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:206", className: "px-3 py-2", children: "状态" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 206,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:207", className: "px-3 py-2", children: "已推进到" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 207,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:208", className: "px-3 py-2", children: "前向收益" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 208,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:209", className: "px-3 py-2", children: "最大回撤" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 209,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:210", className: "px-3 py-2", children: "胜率" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 210,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:211", className: "px-3 py-2", children: "操作" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 211,
+            columnNumber: 19
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 203,
+          columnNumber: 17
+        }, this) }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 202,
+          columnNumber: 15
+        }, this),
+        /* @__PURE__ */ jsxDEV("tbody", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:214", children: runs.map(
+          (run) => /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:216", className: `border-t border-slate-100 ${run.id === selectedId ? "bg-orange-50/60" : ""}`, children: [
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:217", className: "px-3 py-2", children: [
+              /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:218", className: "font-medium text-slate-800", children: run.label }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 218,
+                columnNumber: 23
+              }, this),
+              /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:219", className: "mt-0.5 text-slate-400", children: [
+                "#",
+                run.id
+              ] }, void 0, true, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 219,
+                columnNumber: 23
+              }, this)
+            ] }, void 0, true, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 217,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:221", className: "px-3 py-2", children: STRATEGY_LABELS[run.strategyKey] ?? run.strategyKey }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 221,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:222", className: "px-3 py-2", children: /* @__PURE__ */ jsxDEV("span", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:223", className: `rounded px-2 py-0.5 text-[10px] font-medium ${run.status === "active" ? "bg-emerald-100 text-emerald-700" : run.status === "paused" ? "bg-amber-100 text-amber-700" : "bg-slate-200 text-slate-600"}`, children: run.status === "active" ? "进行中" : run.status === "paused" ? "已暂停" : "已结束" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 223,
+              columnNumber: 23
+            }, this) }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 222,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:227", className: "px-3 py-2 font-mono text-slate-600", children: run.lastProcessedDate ?? "-" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 227,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:228", className: `px-3 py-2 font-semibold ${returnTone(run.summary?.totalReturn)}`, children: run.summary?.totalReturn === null || run.summary?.totalReturn === void 0 ? "-" : `${run.summary.totalReturn}%` }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 228,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:229", className: "px-3 py-2 font-medium text-emerald-700", children: run.summary?.maxDrawdown === null || run.summary?.maxDrawdown === void 0 ? "-" : `${run.summary.maxDrawdown}%` }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 229,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:230", className: "px-3 py-2", children: run.summary?.winRate === null || run.summary?.winRate === void 0 ? "-" : `${run.summary.winRate}%` }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 230,
+              columnNumber: 21
+            }, this),
+            /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:231", className: "px-3 py-2", children: /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:232", className: "flex gap-1", children: [
+              /* @__PURE__ */ jsxDEV(Button, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:233", size: "sm", variant: "outline", onClick: () => setSelectedId(run.id), children: "查看" }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 233,
+                columnNumber: 25
+              }, this),
+              isAdmin && run.status === "active" && /* @__PURE__ */ jsxDEV(Button, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:235", size: "sm", variant: "outline", className: "gap-1", onClick: () => advanceMutation.mutate({ id: run.id }), disabled: advanceMutation.isPending, children: [
+                /* @__PURE__ */ jsxDEV(Play, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:236", className: "h-3.5 w-3.5" }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 236,
+                  columnNumber: 29
+                }, this),
+                "推进"
+              ] }, void 0, true, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 235,
+                columnNumber: 21
+              }, this),
+              isAdmin && (run.status === "active" || run.status === "paused") && /* @__PURE__ */ jsxDEV(Button, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:240", size: "sm", variant: "ghost", onClick: () => statusMutation.mutate({ id: run.id, status: run.status === "active" ? "paused" : "active" }), disabled: statusMutation.isPending, children: run.status === "active" ? /* @__PURE__ */ jsxDEV(Pause, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:241", className: "h-3.5 w-3.5" }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 241,
+                columnNumber: 56
+              }, this) : /* @__PURE__ */ jsxDEV(Play, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:241", className: "h-3.5 w-3.5" }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 241,
+                columnNumber: 141
+              }, this) }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 240,
+                columnNumber: 21
+              }, this)
+            ] }, void 0, true, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 232,
+              columnNumber: 23
+            }, this) }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 231,
+              columnNumber: 21
+            }, this)
+          ] }, run.id, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 216,
+            columnNumber: 15
+          }, this)
+        ) }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 214,
+          columnNumber: 15
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 201,
+        columnNumber: 13
+      }, this) }, void 0, false, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 200,
+        columnNumber: 9
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 189,
+      columnNumber: 7
+    }, this),
+    selectedId !== null && detailQuery.isLoading && /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:255", className: "p-6 text-center text-sm text-slate-500", children: [
+      /* @__PURE__ */ jsxDEV(Loader2, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:255", className: "mr-2 inline h-4 w-4 animate-spin" }, void 0, false, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 255,
+        columnNumber: 110
+      }, this),
+      "加载运行详情…"
+    ] }, void 0, true, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 255,
+      columnNumber: 7
+    }, this),
+    detail && /* @__PURE__ */ jsxDEV(Fragment, { children: [
+      /* @__PURE__ */ jsxDEV("section", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:260", className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm", children: [
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:261", className: "flex flex-wrap items-start gap-3", children: [
+          /* @__PURE__ */ jsxDEV(BarChart3, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:262", className: "mt-0.5 h-5 w-5 text-orange-700" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 262,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:263", className: "mr-auto", children: [
+            /* @__PURE__ */ jsxDEV("h2", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:264", className: "font-semibold", children: [
+              detail.label,
+              " · ",
+              STRATEGY_LABELS[detail.strategyKey]
+            ] }, void 0, true, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 264,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:265", className: "mt-1 text-xs text-slate-500", children: [
+              "初始资金 ¥",
+              detail.initialCapital.toLocaleString(),
+              " · 已推进到 ",
+              detail.lastProcessedDate ?? "-",
+              " · 状态 ",
+              detail.status === "active" ? "进行中" : detail.status === "paused" ? "已暂停" : "已结束"
+            ] }, void 0, true, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 265,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 263,
+            columnNumber: 15
+          }, this),
+          isAdmin && detail.status === "active" && /* @__PURE__ */ jsxDEV(Button, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:268", size: "sm", variant: "outline", className: "gap-2", onClick: () => advanceMutation.mutate({ id: detail.id }), disabled: advanceMutation.isPending, children: [
+            /* @__PURE__ */ jsxDEV(RefreshCw, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:269", className: `h-4 w-4 ${advanceMutation.isPending ? "animate-spin" : ""}` }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 269,
+              columnNumber: 19
+            }, this),
+            "推进到最新"
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 268,
+            columnNumber: 13
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 261,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:273", className: "mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4", children: [
+          /* @__PURE__ */ jsxDEV(Metric, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:274", label: "前向总市值", value: `¥${(detail.summary?.finalEquity ?? 0).toLocaleString()}` }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 274,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(Metric, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:275", label: "前向累计收益", value: detail.summary?.totalReturn === null || detail.summary?.totalReturn === void 0 ? "-" : `${detail.summary.totalReturn}%`, tone: returnTone(detail.summary?.totalReturn) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 275,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(Metric, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:276", label: "最大回撤", value: detail.summary?.maxDrawdown === null || detail.summary?.maxDrawdown === void 0 ? "-" : `${detail.summary.maxDrawdown}%`, tone: "text-emerald-700" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 276,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(Metric, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:277", label: "已出清 / 胜率", value: `${detail.summary?.exitedCount ?? 0} 笔 · ${detail.summary?.winRate === null || detail.summary?.winRate === void 0 ? "-" : `${detail.summary.winRate}%`}` }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 277,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 273,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:279", className: "mt-4 grid gap-3 sm:grid-cols-3", children: [
+          /* @__PURE__ */ jsxDEV(Metric, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:280", label: "已成交订单", value: String(detail.summary?.filledCount ?? 0) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 280,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(Metric, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:281", label: "当前持仓", value: String(detail.summary?.openPositionCount ?? 0) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 281,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(Metric, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:282", label: "前向交易日数", value: String(detail.summary?.tradingDayCount ?? 0) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 282,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 279,
+          columnNumber: 13
+        }, this),
+        curveData.length > 0 && /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:285", className: "mt-5 h-[300px] w-full", children: /* @__PURE__ */ jsxDEV(ResponsiveContainer, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:286", width: "100%", height: "100%", children: /* @__PURE__ */ jsxDEV(LineChart, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:287", data: curveData, margin: { top: 12, right: 20, bottom: 8, left: 4 }, children: [
+          /* @__PURE__ */ jsxDEV(CartesianGrid, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:288", strokeDasharray: "3 3", stroke: "#e2e8f0", vertical: false }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 288,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV(XAxis, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:289", dataKey: "date", minTickGap: 24, tick: { fontSize: 11, fill: "#64748b" } }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 289,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV(YAxis, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:290", tick: { fontSize: 11, fill: "#64748b" }, tickFormatter: (value) => `¥${(Number(value) / 1e3).toFixed(0)}k`, width: 64 }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 290,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV(Tooltip, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:291", formatter: (value) => [`¥${value.toLocaleString()}`, "总市值"] }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 291,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV(Legend, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:292", wrapperStyle: { fontSize: 12 } }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 292,
+            columnNumber: 21
+          }, this),
+          /* @__PURE__ */ jsxDEV(Line, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:293", type: "monotone", dataKey: "equity", name: "前向总市值", stroke: "#f97316", strokeWidth: 2.25, dot: false, activeDot: { r: 4 }, isAnimationActive: false, connectNulls: true }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 293,
+            columnNumber: 21
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 287,
+          columnNumber: 19
+        }, this) }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 286,
+          columnNumber: 17
+        }, this) }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 285,
+          columnNumber: 11
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 260,
+        columnNumber: 11
+      }, this),
+      detail.state.pendingBuys.length > 0 && /* @__PURE__ */ jsxDEV("section", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:301", className: "rounded-2xl border border-orange-200 bg-white p-5 shadow-sm", children: [
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:302", className: "flex items-start gap-3", children: [
+          /* @__PURE__ */ jsxDEV(BarChart3, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:303", className: "mt-0.5 h-5 w-5 text-orange-700" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 303,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:304", children: [
+            /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:305", className: "text-xs font-bold tracking-[0.16em] text-orange-700", children: "NEXT-DAY BUY LIST" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 305,
+              columnNumber: 19
+            }, this),
+            /* @__PURE__ */ jsxDEV("h2", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:306", className: "mt-1 font-semibold", children: "下一交易日准备买入清单" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 306,
+              columnNumber: 19
+            }, this),
+            /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:307", className: "mt-1 text-xs leading-5 text-slate-500", children: [
+              "以 ",
+              detail.state.pendingBuys[0]?.signalDate ?? "-",
+              " 收盘信息生成，按策略优先级排序，未承诺成交。"
+            ] }, void 0, true, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 307,
+              columnNumber: 19
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 304,
+            columnNumber: 17
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 302,
+          columnNumber: 15
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:310", className: "mt-4 overflow-auto rounded-xl border border-orange-100", children: /* @__PURE__ */ jsxDEV("table", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:311", className: "w-full min-w-[760px] text-xs", children: [
+          /* @__PURE__ */ jsxDEV("thead", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:312", className: "bg-orange-50 text-left text-orange-900", children: /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", children: [
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", className: "px-3 py-2", children: "#" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 313,
+              columnNumber: 74
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", className: "px-3 py-2", children: "股票" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 313,
+              columnNumber: 155
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", className: "px-3 py-2", children: "题材" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 313,
+              columnNumber: 237
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", className: "px-3 py-2", children: "板数" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 313,
+              columnNumber: 319
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", className: "px-3 py-2", children: "策略分" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 313,
+              columnNumber: 401
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", className: "px-3 py-2", children: "风险" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 313,
+              columnNumber: 484
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:313", className: "px-3 py-2", children: "信号日收盘" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 313,
+              columnNumber: 566
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 313,
+            columnNumber: 21
+          }, this) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 312,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("tbody", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:315", children: detail.state.pendingBuys.map(
+            (buy) => /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:317", className: "border-t border-slate-100", children: [
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:318", className: "px-3 py-2 text-slate-400", children: buy.rank }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 318,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:319", className: "px-3 py-2", children: [
+                /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:319", className: "font-medium text-slate-800", children: buy.stockName }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 319,
+                  columnNumber: 100
+                }, this),
+                /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:319", className: "mt-0.5 font-mono text-slate-500", children: buy.stockCode }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 319,
+                  columnNumber: 210
+                }, this)
+              ] }, void 0, true, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 319,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:320", className: "px-3 py-2", children: buy.sector }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 320,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:321", className: "px-3 py-2", children: [
+                buy.boards,
+                "板"
+              ] }, void 0, true, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 321,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:322", className: "px-3 py-2 font-semibold text-slate-800", children: buy.strategyScore }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 322,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:323", className: "px-3 py-2", children: /* @__PURE__ */ jsxDEV("span", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:323", className: buy.riskTier === "高风险" ? "text-rose-600" : buy.riskTier === "中风险" ? "text-amber-600" : "text-emerald-700", children: buy.riskTier }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 323,
+                columnNumber: 100
+              }, this) }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 323,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:324", className: "px-3 py-2 font-mono", children: buy.signalClosePrice ?? "-" }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 324,
+                columnNumber: 25
+              }, this)
+            ] }, buy.stockCode, true, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 317,
+              columnNumber: 17
+            }, this)
+          ) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 315,
+            columnNumber: 19
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 311,
+          columnNumber: 17
+        }, this) }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 310,
+          columnNumber: 15
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 301,
+        columnNumber: 9
+      }, this),
+      detail.state.positions.length > 0 && /* @__PURE__ */ jsxDEV("section", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:334", className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm", children: [
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:335", className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsxDEV(WalletCards, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:336", className: "h-4 w-4 text-orange-700" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 336,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV("h2", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:337", className: "font-semibold", children: [
+            "当前持仓（",
+            detail.state.positions.length,
+            "）"
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 337,
+            columnNumber: 17
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 335,
+          columnNumber: 15
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:339", className: "mt-4 overflow-auto rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxDEV("table", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:340", className: "w-full min-w-[640px] text-xs", children: [
+          /* @__PURE__ */ jsxDEV("thead", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:341", className: "bg-slate-100 text-left text-slate-500", children: /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:342", children: [
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:342", className: "px-3 py-2", children: "股票" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 342,
+              columnNumber: 74
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:342", className: "px-3 py-2", children: "信号日" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 342,
+              columnNumber: 156
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:342", className: "px-3 py-2", children: "成交日" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 342,
+              columnNumber: 239
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:342", className: "px-3 py-2", children: "成交价" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 342,
+              columnNumber: 322
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:342", className: "px-3 py-2", children: "股数" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 342,
+              columnNumber: 405
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:342", className: "px-3 py-2", children: "成本" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 342,
+              columnNumber: 487
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 342,
+            columnNumber: 21
+          }, this) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 341,
+            columnNumber: 19
+          }, this),
+          /* @__PURE__ */ jsxDEV("tbody", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:344", children: detail.state.positions.map(
+            (position) => /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:346", className: "border-t border-slate-100", children: [
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:347", className: "px-3 py-2", children: [
+                /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:347", className: "font-medium text-slate-800", children: position.stockName }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 347,
+                  columnNumber: 100
+                }, this),
+                /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:347", className: "mt-0.5 font-mono text-slate-500", children: position.stockCode }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 347,
+                  columnNumber: 215
+                }, this)
+              ] }, void 0, true, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 347,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:348", className: "px-3 py-2 font-mono", children: position.signalDate }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 348,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:349", className: "px-3 py-2 font-mono", children: position.entryDate }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 349,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:350", className: "px-3 py-2 font-mono", children: position.entryPrice.toFixed(3) }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 350,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:351", className: "px-3 py-2", children: position.shares }, void 0, false, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 351,
+                columnNumber: 25
+              }, this),
+              /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:352", className: "px-3 py-2 font-mono", children: [
+                "¥",
+                position.capitalCost.toFixed(0)
+              ] }, void 0, true, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 352,
+                columnNumber: 25
+              }, this)
+            ] }, `${position.stockCode}-${position.entryDate}`, true, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 346,
+              columnNumber: 17
+            }, this)
+          ) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 344,
+            columnNumber: 19
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 340,
+          columnNumber: 17
+        }, this) }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 339,
+          columnNumber: 15
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 334,
+        columnNumber: 9
+      }, this),
+      /* @__PURE__ */ jsxDEV("section", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:361", className: "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm", children: [
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:362", className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsxDEV(BarChart3, { "data-loc": "client\\src\\pages\\PaperTrading.tsx:363", className: "h-4 w-4 text-orange-700" }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 363,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("h2", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:364", className: "font-semibold", children: [
+            "逐笔订单（",
+            orders.length,
+            "）"
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 364,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 362,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:366", className: "mt-4 overflow-auto rounded-xl border border-slate-200", children: /* @__PURE__ */ jsxDEV("table", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:367", className: "w-full min-w-[980px] text-xs", children: [
+          /* @__PURE__ */ jsxDEV("thead", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:368", className: "bg-slate-100 text-left text-slate-500", children: /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", children: [
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", className: "px-3 py-2", children: "信号日 / 股票" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 369,
+              columnNumber: 72
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", className: "px-3 py-2", children: "状态" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 369,
+              columnNumber: 160
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", className: "px-3 py-2", children: "成交日 / 价" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 369,
+              columnNumber: 242
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", className: "px-3 py-2", children: "出清日 / 价" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 369,
+              columnNumber: 329
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", className: "px-3 py-2", children: "股数" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 369,
+              columnNumber: 416
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", className: "px-3 py-2", children: "净收益" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 369,
+              columnNumber: 498
+            }, this),
+            /* @__PURE__ */ jsxDEV("th", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:369", className: "px-3 py-2", children: "原因" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 369,
+              columnNumber: 581
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 369,
+            columnNumber: 19
+          }, this) }, void 0, false, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 368,
+            columnNumber: 17
+          }, this),
+          /* @__PURE__ */ jsxDEV("tbody", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:371", children: [
+            orders.map(
+              (order, index) => /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:373", className: "border-t border-slate-100 align-top", children: [
+                /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:374", className: "px-3 py-2", children: [
+                  /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:374", className: "font-medium text-slate-800", children: order.stockName }, void 0, false, {
+                    fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                    lineNumber: 374,
+                    columnNumber: 98
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:374", className: "mt-0.5 font-mono text-slate-500", children: order.stockCode }, void 0, false, {
+                    fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                    lineNumber: 374,
+                    columnNumber: 210
+                  }, this),
+                  /* @__PURE__ */ jsxDEV("p", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:374", className: "mt-0.5 text-slate-400", children: order.signalDate }, void 0, false, {
+                    fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                    lineNumber: 374,
+                    columnNumber: 327
+                  }, this)
+                ] }, void 0, true, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 374,
+                  columnNumber: 23
+                }, this),
+                /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:375", className: "px-3 py-2", children: /* @__PURE__ */ jsxDEV("span", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:376", className: `rounded px-2 py-0.5 text-[10px] font-medium ${order.status === "exited" ? "bg-slate-200 text-slate-600" : order.status === "filled" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`, children: order.status === "exited" ? "已出清" : order.status === "filled" ? "持仓中" : "未成交" }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 376,
+                  columnNumber: 25
+                }, this) }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 375,
+                  columnNumber: 23
+                }, this),
+                /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:380", className: "px-3 py-2 font-mono", children: [
+                  order.entryDate ?? "-",
+                  order.entryPrice === null ? "" : ` @ ${order.entryPrice}`
+                ] }, void 0, true, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 380,
+                  columnNumber: 23
+                }, this),
+                /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:381", className: "px-3 py-2 font-mono", children: [
+                  order.exitDate ?? "-",
+                  order.exitPrice === null ? "" : ` @ ${order.exitPrice}`
+                ] }, void 0, true, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 381,
+                  columnNumber: 23
+                }, this),
+                /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:382", className: "px-3 py-2", children: order.shares }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 382,
+                  columnNumber: 23
+                }, this),
+                /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:383", className: `px-3 py-2 font-semibold ${order.netReturn === null ? "text-slate-400" : order.netReturn >= 0 ? "text-rose-600" : "text-emerald-700"}`, children: order.netReturn === null ? "-" : `${order.netReturn}%` }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 383,
+                  columnNumber: 23
+                }, this),
+                /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:386", className: "px-3 py-2 text-slate-500", children: order.reason ?? "-" }, void 0, false, {
+                  fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                  lineNumber: 386,
+                  columnNumber: 23
+                }, this)
+              ] }, `${order.stockCode}-${order.entryDate}-${index}`, true, {
+                fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+                lineNumber: 373,
+                columnNumber: 17
+              }, this)
+            ),
+            orders.length === 0 && /* @__PURE__ */ jsxDEV("tr", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:389", children: /* @__PURE__ */ jsxDEV("td", { "data-loc": "client\\src\\pages\\PaperTrading.tsx:389", colSpan: 7, className: "p-6 text-center text-slate-500", children: "暂无订单。" }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 389,
+              columnNumber: 96
+            }, this) }, void 0, false, {
+              fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+              lineNumber: 389,
+              columnNumber: 43
+            }, this)
+          ] }, void 0, true, {
+            fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+            lineNumber: 371,
+            columnNumber: 17
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 367,
+          columnNumber: 15
+        }, this) }, void 0, false, {
+          fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+          lineNumber: 366,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+        lineNumber: 361,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+      lineNumber: 259,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx",
+    lineNumber: 110,
+    columnNumber: 5
+  }, this);
+}
+_s(PaperTrading, "7xCrSrJ/enRxaggDPqDyNP+fTCo=", true, function() {
+  return [useAuth, trpc.useUtils];
+});
+_c2 = PaperTrading;
+var _c, _c2;
+$RefreshReg$(_c, "Metric");
+$RefreshReg$(_c2, "PaperTrading");
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+function $RefreshReg$(type, id) {
+  return RefreshRuntime.register(type, "C:/work/sourcecode/stock-limit-up-analyzer/client/src/pages/PaperTrading.tsx " + id);
+}
+function $RefreshSig$() {
+  return RefreshRuntime.createSignatureFunctionForTransform();
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUEsT0E1Uko7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQThSQTtBQUVKO0FBQUN4RSxHQTlXdUJELGNBQVk7QUFBQSxVQUNBaEMsU0FFcEJGLEtBQUt5QyxRQUFRO0FBQUE7QUFBQWlILE1BSEx4SDtBQUFZLElBQUFILElBQUEySDtBQUFBQyxhQUFBNUgsSUFBQTtBQUFBNEgsYUFBQUQsS0FBQSIsIm5hbWVzIjpbIkJ1dHRvbiIsIklucHV0IiwidHJwYyIsInRvYXN0IiwidXNlQXV0aCIsIkFsZXJ0VHJpYW5nbGUiLCJCYXJDaGFydDMiLCJMb2FkZXIyIiwiUGxheSIsIlBhdXNlIiwiUGx1cyIsIlJlZnJlc2hDdyIsIldhbGxldENhcmRzIiwidXNlTWVtbyIsInVzZVN0YXRlIiwiQ2FydGVzaWFuR3JpZCIsIkxlZ2VuZCIsIkxpbmUiLCJMaW5lQ2hhcnQiLCJSZXNwb25zaXZlQ29udGFpbmVyIiwiVG9vbHRpcCIsIlhBeGlzIiwiWUF4aXMiLCJTVFJBVEVHWV9MQUJFTFMiLCJiYXNlbGluZSIsInJpc2tQZW5hbHR5IiwiaGFyZEZpbHRlciIsInF1YWxpdHlCbGVuZCIsInF1YWxpdHlHYXRlIiwiTWV0cmljIiwibGFiZWwiLCJ2YWx1ZSIsInRvbmUiLCJfYyIsInJldHVyblRvbmUiLCJ1bmRlZmluZWQiLCJQYXBlclRyYWRpbmciLCJfcyIsInVzZXIiLCJpc0F1dGhlbnRpY2F0ZWQiLCJpc0FkbWluIiwicm9sZSIsInV0aWxzIiwidXNlVXRpbHMiLCJzZWxlY3RlZElkIiwic2V0U2VsZWN0ZWRJZCIsInNldExhYmVsIiwic3RyYXRlZ3lLZXkiLCJzZXRTdHJhdGVneUtleSIsImluaXRpYWxDYXBpdGFsIiwic2V0SW5pdGlhbENhcGl0YWwiLCJhZHZhbmNlTm90aWNlIiwic2V0QWR2YW5jZU5vdGljZSIsImxpc3RRdWVyeSIsInNlbnRpbWVudCIsImxpc3RQYXBlclRyYWRpbmdSdW5zIiwidXNlUXVlcnkiLCJsaW1pdCIsImRldGFpbFF1ZXJ5IiwiZ2V0UGFwZXJUcmFkaW5nUnVuIiwiaWQiLCJlbmFibGVkIiwiY3JlYXRlTXV0YXRpb24iLCJjcmVhdGVQYXBlclRyYWRpbmdSdW4iLCJ1c2VNdXRhdGlvbiIsIm9uU3VjY2VzcyIsImRhdGEiLCJzdWNjZXNzIiwicmVmZXRjaCIsIm9uRXJyb3IiLCJlcnJvciIsIm1lc3NhZ2UiLCJhZHZhbmNlTXV0YXRpb24iLCJhZHZhbmNlUGFwZXJUcmFkaW5nUnVuIiwiZGlhZ25vc2lzIiwiY2FsZW5kYXJTdGFsZSIsIndhcm5pbmciLCJ0ZXh0Iiwia2luZCIsImluZm8iLCJzdGF0dXNNdXRhdGlvbiIsInNldFBhcGVyVHJhZGluZ1J1blN0YXR1cyIsInJ1bnMiLCJkZXRhaWwiLCJjdXJ2ZURhdGEiLCJzdGF0ZSIsImVxdWl0eUN1cnZlIiwibWFwIiwicG9pbnQiLCJkYXRlIiwic2xpY2UiLCJlcXVpdHkiLCJjYXNoIiwib3JkZXJzIiwicmV2ZXJzZSIsIm9uQ3JlYXRlIiwiY2FwaXRhbCIsIk51bWJlciIsImlzRmluaXRlIiwibXV0YXRlIiwidHJpbSIsIk1hdGgiLCJmbG9vciIsImV2ZW50IiwidGFyZ2V0IiwiT2JqZWN0Iiwia2V5cyIsImtleSIsImlzUGVuZGluZyIsImxlbmd0aCIsImlzTG9hZGluZyIsInJ1biIsInN0YXR1cyIsImxhc3RQcm9jZXNzZWREYXRlIiwic3VtbWFyeSIsInRvdGFsUmV0dXJuIiwibWF4RHJhd2Rvd24iLCJ3aW5SYXRlIiwidG9Mb2NhbGVTdHJpbmciLCJmaW5hbEVxdWl0eSIsImV4aXRlZENvdW50IiwiU3RyaW5nIiwiZmlsbGVkQ291bnQiLCJvcGVuUG9zaXRpb25Db3VudCIsInRyYWRpbmdEYXlDb3VudCIsInRvcCIsInJpZ2h0IiwiYm90dG9tIiwibGVmdCIsImZvbnRTaXplIiwiZmlsbCIsInRvRml4ZWQiLCJyIiwicGVuZGluZ0J1eXMiLCJzaWduYWxEYXRlIiwiYnV5IiwicmFuayIsInN0b2NrTmFtZSIsInN0b2NrQ29kZSIsInNlY3RvciIsImJvYXJkcyIsInN0cmF0ZWd5U2NvcmUiLCJyaXNrVGllciIsInNpZ25hbENsb3NlUHJpY2UiLCJwb3NpdGlvbnMiLCJwb3NpdGlvbiIsImVudHJ5RGF0ZSIsImVudHJ5UHJpY2UiLCJzaGFyZXMiLCJjYXBpdGFsQ29zdCIsIm9yZGVyIiwiaW5kZXgiLCJleGl0RGF0ZSIsImV4aXRQcmljZSIsIm5ldFJldHVybiIsInJlYXNvbiIsIl9jMiIsIiRSZWZyZXNoUmVnJCJdLCJpZ25vcmVMaXN0IjpbXSwic291cmNlcyI6WyJQYXBlclRyYWRpbmcudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IEJ1dHRvbiB9IGZyb20gXCJAL2NvbXBvbmVudHMvdWkvYnV0dG9uXCI7XG5pbXBvcnQgeyBJbnB1dCB9IGZyb20gXCJAL2NvbXBvbmVudHMvdWkvaW5wdXRcIjtcbmltcG9ydCB7IHRycGMgfSBmcm9tIFwiQC9saWIvdHJwY1wiO1xuaW1wb3J0IHsgdG9hc3QgfSBmcm9tIFwic29ubmVyXCI7XG5pbXBvcnQgeyB1c2VBdXRoIH0gZnJvbSBcIkAvX2NvcmUvaG9va3MvdXNlQXV0aFwiO1xuaW1wb3J0IHsgQWxlcnRUcmlhbmdsZSwgQmFyQ2hhcnQzLCBMb2FkZXIyLCBQbGF5LCBQYXVzZSwgUGx1cywgUmVmcmVzaEN3LCBXYWxsZXRDYXJkcyB9IGZyb20gXCJsdWNpZGUtcmVhY3RcIjtcbmltcG9ydCB7IHVzZU1lbW8sIHVzZVN0YXRlIH0gZnJvbSBcInJlYWN0XCI7XG5pbXBvcnQgeyBDYXJ0ZXNpYW5HcmlkLCBMZWdlbmQsIExpbmUsIExpbmVDaGFydCwgUmVzcG9uc2l2ZUNvbnRhaW5lciwgVG9vbHRpcCwgWEF4aXMsIFlBeGlzIH0gZnJvbSBcInJlY2hhcnRzXCI7XG5cbnR5cGUgU3RyYXRlZ3lLZXkgPSBcImJhc2VsaW5lXCIgfCBcInJpc2tQZW5hbHR5XCIgfCBcImhhcmRGaWx0ZXJcIiB8IFwicXVhbGl0eUJsZW5kXCIgfCBcInF1YWxpdHlHYXRlXCI7XG5cbmNvbnN0IFNUUkFURUdZX0xBQkVMUzogUmVjb3JkPFN0cmF0ZWd5S2V5LCBzdHJpbmc+ID0ge1xuICBiYXNlbGluZTogXCLljp/lp4vnrZbnlaVcIixcbiAgcmlza1BlbmFsdHk6IFwi6aOO6Zmp5omj5YiG562W55WlXCIsXG4gIGhhcmRGaWx0ZXI6IFwi6auY6aOO6Zmp56Gs6L+H5rukXCIsXG4gIHF1YWxpdHlCbGVuZDogXCLotKjph4/lpI3lkIjor4TliIZcIixcbiAgcXVhbGl0eUdhdGU6IFwi6LSo6YeP6Zeo5o6n562W55WlXCIsXG59O1xuXG5mdW5jdGlvbiBNZXRyaWMoeyBsYWJlbCwgdmFsdWUsIHRvbmUgPSBcInRleHQtc2xhdGUtODAwXCIgfTogeyBsYWJlbDogc3RyaW5nOyB2YWx1ZTogc3RyaW5nOyB0b25lPzogc3RyaW5nIH0pIHtcbiAgcmV0dXJuIChcbiAgICA8ZGl2IGNsYXNzTmFtZT1cInJvdW5kZWQteGwgYm9yZGVyIGJvcmRlci1zbGF0ZS0yMDAgYmctd2hpdGUgcC00IHNoYWRvdy1zbVwiPlxuICAgICAgPHAgY2xhc3NOYW1lPVwidGV4dC14cyB0ZXh0LXNsYXRlLTUwMFwiPntsYWJlbH08L3A+XG4gICAgICA8cCBjbGFzc05hbWU9e2BtdC0xIHRleHQtbGcgZm9udC1ib2xkICR7dG9uZX1gfT57dmFsdWV9PC9wPlxuICAgIDwvZGl2PlxuICApO1xufVxuXG5jb25zdCByZXR1cm5Ub25lID0gKHZhbHVlOiBudW1iZXIgfCBudWxsIHwgdW5kZWZpbmVkKSA9PlxuICB2YWx1ZSA9PT0gbnVsbCB8fCB2YWx1ZSA9PT0gdW5kZWZpbmVkIHx8IHZhbHVlID09PSAwID8gXCJ0ZXh0LXNsYXRlLTgwMFwiIDogdmFsdWUgPiAwID8gXCJ0ZXh0LXJvc2UtNjAwXCIgOiBcInRleHQtZW1lcmFsZC03MDBcIjtcblxuZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gUGFwZXJUcmFkaW5nKCkge1xuICBjb25zdCB7IHVzZXIsIGlzQXV0aGVudGljYXRlZCB9ID0gdXNlQXV0aCgpO1xuICBjb25zdCBpc0FkbWluID0gaXNBdXRoZW50aWNhdGVkICYmIHVzZXI/LnJvbGUgPT09IFwiYWRtaW5cIjtcbiAgY29uc3QgdXRpbHMgPSB0cnBjLnVzZVV0aWxzKCk7XG5cbiAgY29uc3QgW3NlbGVjdGVkSWQsIHNldFNlbGVjdGVkSWRdID0gdXNlU3RhdGU8bnVtYmVyIHwgbnVsbD4obnVsbCk7XG4gIGNvbnN0IFtsYWJlbCwgc2V0TGFiZWxdID0gdXNlU3RhdGUoXCJcIik7XG4gIGNvbnN0IFtzdHJhdGVneUtleSwgc2V0U3RyYXRlZ3lLZXldID0gdXNlU3RhdGU8U3RyYXRlZ3lLZXk+KFwiYmFzZWxpbmVcIik7XG4gIGNvbnN0IFtpbml0aWFsQ2FwaXRhbCwgc2V0SW5pdGlhbENhcGl0YWxdID0gdXNlU3RhdGUoXCIxMDAwMDBcIik7XG4gIC8qKiDmnIDov5HkuIDmrKHmjqjov5vnmoTlpoLlrp7nu5PorrrvvIjmjqjov5vmiJDlip8gLyDlt7LmmK/mnIDmlrAgLyDkuqTmmJPml6XljobokL3lkI7vvInjgIIgKi9cbiAgY29uc3QgW2FkdmFuY2VOb3RpY2UsIHNldEFkdmFuY2VOb3RpY2VdID0gdXNlU3RhdGU8eyB0b25lOiBcInN1Y2Nlc3NcIiB8IFwid2FybmluZ1wiIHwgXCJpbmZvXCI7IHRleHQ6IHN0cmluZyB9IHwgbnVsbD4obnVsbCk7XG5cbiAgY29uc3QgbGlzdFF1ZXJ5ID0gdHJwYy5zZW50aW1lbnQubGlzdFBhcGVyVHJhZGluZ1J1bnMudXNlUXVlcnkoeyBsaW1pdDogNTAgfSk7XG4gIGNvbnN0IGRldGFpbFF1ZXJ5ID0gdHJwYy5zZW50aW1lbnQuZ2V0UGFwZXJUcmFkaW5nUnVuLnVzZVF1ZXJ5KFxuICAgIHsgaWQ6IHNlbGVjdGVkSWQgPz8gMCB9LFxuICAgIHsgZW5hYmxlZDogc2VsZWN0ZWRJZCAhPT0gbnVsbCB9LFxuICApO1xuXG4gIGNvbnN0IGNyZWF0ZU11dGF0aW9uID0gdHJwYy5zZW50aW1lbnQuY3JlYXRlUGFwZXJUcmFkaW5nUnVuLnVzZU11dGF0aW9uKHtcbiAgICBvblN1Y2Nlc3M6IChkYXRhKSA9PiB7XG4gICAgICB0b2FzdC5zdWNjZXNzKGDlt7LliJvlu7rov5DooYwgIyR7ZGF0YS5pZH1gKTtcbiAgICAgIHNldFNlbGVjdGVkSWQoZGF0YS5pZCk7XG4gICAgICBzZXRMYWJlbChcIlwiKTtcbiAgICAgIHZvaWQgbGlzdFF1ZXJ5LnJlZmV0Y2goKTtcbiAgICB9LFxuICAgIG9uRXJyb3I6IChlcnJvcikgPT4gdG9hc3QuZXJyb3IoZXJyb3IubWVzc2FnZSksXG4gIH0pO1xuXG4gIC8vIPCflLQg5o6o6L+b5o+Q56S65b+F6aG75oyJ5pyN5Yqh56uv6K+K5pat5aaC5a6e5YiG5rWB77yIMjAyNi0wOS0xNCDkuovmlYXvvInvvJrmraTliY3ml6DmnaHku7bmiqXjgIzlt7Lmjqjov5vliLDmnIDmlrDkuqTmmJPml6XjgI3vvIxcbiAgLy8g6ICM5Lqk5piT5pel5Y6G77yI5oyH5pWw5pel57q/77yJ6JC95ZCO5pe25o6o6L+b5oGS5Li656m66L2sIOKHkiDmj5DnpLrkuI7kuovlrp7nm7jlj43jgIJcbiAgY29uc3QgYWR2YW5jZU11dGF0aW9uID0gdHJwYy5zZW50aW1lbnQuYWR2YW5jZVBhcGVyVHJhZGluZ1J1bi51c2VNdXRhdGlvbih7XG4gICAgb25TdWNjZXNzOiAoZGF0YSkgPT4ge1xuICAgICAgY29uc3QgeyBkaWFnbm9zaXMgfSA9IGRhdGE7XG4gICAgICBpZiAoZGlhZ25vc2lzLmNhbGVuZGFyU3RhbGUpIHtcbiAgICAgICAgdG9hc3Qud2FybmluZyhkaWFnbm9zaXMubWVzc2FnZSk7XG4gICAgICAgIHNldEFkdmFuY2VOb3RpY2UoeyB0b25lOiBcIndhcm5pbmdcIiwgdGV4dDogZGlhZ25vc2lzLm1lc3NhZ2UgfSk7XG4gICAgICB9IGVsc2UgaWYgKGRpYWdub3Npcy5raW5kID09PSBcImFkdmFuY2VkXCIpIHtcbiAgICAgICAgdG9hc3Quc3VjY2VzcyhkaWFnbm9zaXMubWVzc2FnZSk7XG4gICAgICAgIHNldEFkdmFuY2VOb3RpY2UoeyB0b25lOiBcInN1Y2Nlc3NcIiwgdGV4dDogZGlhZ25vc2lzLm1lc3NhZ2UgfSk7XG4gICAgICB9IGVsc2Uge1xuICAgICAgICB0b2FzdC5pbmZvKGRpYWdub3Npcy5tZXNzYWdlKTtcbiAgICAgICAgc2V0QWR2YW5jZU5vdGljZSh7IHRvbmU6IFwiaW5mb1wiLCB0ZXh0OiBkaWFnbm9zaXMubWVzc2FnZSB9KTtcbiAgICAgIH1cbiAgICAgIHZvaWQgZGV0YWlsUXVlcnkucmVmZXRjaCgpO1xuICAgICAgdm9pZCBsaXN0UXVlcnkucmVmZXRjaCgpO1xuICAgIH0sXG4gICAgb25FcnJvcjogKGVycm9yKSA9PiB0b2FzdC5lcnJvcihlcnJvci5tZXNzYWdlKSxcbiAgfSk7XG5cbiAgY29uc3Qgc3RhdHVzTXV0YXRpb24gPSB0cnBjLnNlbnRpbWVudC5zZXRQYXBlclRyYWRpbmdSdW5TdGF0dXMudXNlTXV0YXRpb24oe1xuICAgIG9uU3VjY2VzczogKCkgPT4ge1xuICAgICAgdm9pZCBkZXRhaWxRdWVyeS5yZWZldGNoKCk7XG4gICAgICB2b2lkIGxpc3RRdWVyeS5yZWZldGNoKCk7XG4gICAgfSxcbiAgICBvbkVycm9yOiAoZXJyb3IpID0+IHRvYXN0LmVycm9yKGVycm9yLm1lc3NhZ2UpLFxuICB9KTtcblxuICBjb25zdCBydW5zID0gbGlzdFF1ZXJ5LmRhdGEgPz8gW107XG4gIGNvbnN0IGRldGFpbCA9IGRldGFpbFF1ZXJ5LmRhdGE7XG5cbiAgY29uc3QgY3VydmVEYXRhID0gdXNlTWVtbygoKSA9PiAoZGV0YWlsPy5zdGF0ZS5lcXVpdHlDdXJ2ZSA/PyBbXSkubWFwKChwb2ludCkgPT4gKHtcbiAgICBkYXRlOiBwb2ludC5kYXRlLnNsaWNlKDUpLFxuICAgIGVxdWl0eTogcG9pbnQuZXF1aXR5LFxuICAgIGNhc2g6IHBvaW50LmNhc2gsXG4gIH0pKSwgW2RldGFpbF0pO1xuXG4gIGNvbnN0IG9yZGVycyA9IHVzZU1lbW8oKCkgPT4gWy4uLihkZXRhaWw/LnN0YXRlLm9yZGVycyA/PyBbXSldLnJldmVyc2UoKSwgW2RldGFpbF0pO1xuXG4gIGNvbnN0IG9uQ3JlYXRlID0gKCkgPT4ge1xuICAgIGNvbnN0IGNhcGl0YWwgPSBOdW1iZXIoaW5pdGlhbENhcGl0YWwpO1xuICAgIGlmICghTnVtYmVyLmlzRmluaXRlKGNhcGl0YWwpIHx8IGNhcGl0YWwgPCAxMF8wMDApIHtcbiAgICAgIHRvYXN0LmVycm9yKFwi5Yid5aeL6LWE6YeR6ZyA5Li65LiN5bCP5LqOIDEwMDAwIOeahOaVtOaVsFwiKTtcbiAgICAgIHJldHVybjtcbiAgICB9XG4gICAgY3JlYXRlTXV0YXRpb24ubXV0YXRlKHsgbGFiZWw6IGxhYmVsLnRyaW0oKSB8fCBgJHtTVFJBVEVHWV9MQUJFTFNbc3RyYXRlZ3lLZXldfcK35YmN5ZCR57q46Z2iYCwgc3RyYXRlZ3lLZXksIGluaXRpYWxDYXBpdGFsOiBNYXRoLmZsb29yKGNhcGl0YWwpIH0pO1xuICB9O1xuXG4gIHJldHVybiAoXG4gICAgPGRpdiBjbGFzc05hbWU9XCJteC1hdXRvIG1heC13LTd4bCBzcGFjZS15LTVcIj5cbiAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT1cInJvdW5kZWQtMnhsIGJvcmRlciBib3JkZXItc2xhdGUtMjAwIGJnLXdoaXRlIHAtNSBzaGFkb3ctc20gc206cC03XCI+XG4gICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZmxleCBmbGV4LWNvbCBnYXAtNCBsZzpmbGV4LXJvdyBsZzppdGVtcy1lbmQgbGc6anVzdGlmeS1iZXR3ZWVuXCI+XG4gICAgICAgICAgPGRpdj5cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTIgdGV4dC1vcmFuZ2UtNzAwXCI+XG4gICAgICAgICAgICAgIDxCYXJDaGFydDMgY2xhc3NOYW1lPVwiaC01IHctNVwiIC8+XG4gICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cInRleHQteHMgZm9udC1ib2xkIHRyYWNraW5nLVswLjE4ZW1dXCI+Rk9SV0FSRCBQQVBFUiBUUkFESU5HPC9zcGFuPlxuICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8aDEgY2xhc3NOYW1lPVwibXQtMiB0ZXh0LTJ4bCBmb250LWJvbGQgdHJhY2tpbmctdGlnaHQgc206dGV4dC0zeGxcIj7liY3lkJHnurjpnaLkuqTmmJPpl63njq88L2gxPlxuICAgICAgICAgICAgPHAgY2xhc3NOYW1lPVwibXQtMiBtYXgtdy0zeGwgdGV4dC1zbSBsZWFkaW5nLTYgdGV4dC1zbGF0ZS02MDBcIj5cbiAgICAgICAgICAgICAg55So55yf5a6e5qC35pys5aSW5YWc5bqV5Y6G5Y+y5Zue5rWL77yaVCDml6XmlLbnm5jnlJ/miJDmrKHml6Xlh4blpIfkubDlhaXmuIXljZUg4oaSIOasoeaXpeW8gOebmOaMieecn+WunuW8gOebmOS7t+aIkOS6pCDihpIg5oyB5LuT5oyJ5q2i55uI5q2i5o2f6YCQ5pel5Ye65riFIOKGkiDntK/np6/nnJ/lrp7liY3lkJHmm7Lnur/vvIzkuI7ljoblj7Llm57mtYvlr7nmr5TjgIJcbiAgICAgICAgICAgIDwvcD5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cInJvdW5kZWQteGwgYm9yZGVyIGJvcmRlci1vcmFuZ2UtMTAwIGJnLW9yYW5nZS01MCBweC00IHB5LTMgdGV4dC1yaWdodFwiPlxuICAgICAgICAgICAgPHAgY2xhc3NOYW1lPVwidGV4dC14cyB0ZXh0LW9yYW5nZS03MDBcIj7liY3lkJHlj6PlvoQ8L3A+XG4gICAgICAgICAgICA8cCBjbGFzc05hbWU9XCJtdC0xIGZvbnQtc2VtaWJvbGQgdGV4dC1vcmFuZ2UtOTAwXCI+5LuF5L2/55So5L+h5Y+35pel5Y+K5Lul5YmN5L+h5oGvIMK3IOWbuuWumuadg+mHjTwvcD5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9kaXY+XG4gICAgICA8L3NlY3Rpb24+XG5cbiAgICAgIHthZHZhbmNlTm90aWNlICYmIChcbiAgICAgICAgPHNlY3Rpb25cbiAgICAgICAgICBjbGFzc05hbWU9e2Byb3VuZGVkLTJ4bCBib3JkZXIgcC00IHRleHQtc20gJHtcbiAgICAgICAgICAgIGFkdmFuY2VOb3RpY2UudG9uZSA9PT0gXCJ3YXJuaW5nXCJcbiAgICAgICAgICAgICAgPyBcImJvcmRlci1hbWJlci0yMDAgYmctYW1iZXItNTAgdGV4dC1hbWJlci05MDBcIlxuICAgICAgICAgICAgICA6IGFkdmFuY2VOb3RpY2UudG9uZSA9PT0gXCJzdWNjZXNzXCJcbiAgICAgICAgICAgICAgICA/IFwiYm9yZGVyLWVtZXJhbGQtMjAwIGJnLWVtZXJhbGQtNTAgdGV4dC1lbWVyYWxkLTkwMFwiXG4gICAgICAgICAgICAgICAgOiBcImJvcmRlci1zbGF0ZS0yMDAgYmctc2xhdGUtNTAgdGV4dC1zbGF0ZS03MDBcIlxuICAgICAgICAgIH1gfVxuICAgICAgICA+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLXN0YXJ0IGdhcC0zXCI+XG4gICAgICAgICAgICA8QWxlcnRUcmlhbmdsZVxuICAgICAgICAgICAgICBjbGFzc05hbWU9e2BtdC0wLjUgaC00IHctNCBzaHJpbmstMCAke1xuICAgICAgICAgICAgICAgIGFkdmFuY2VOb3RpY2UudG9uZSA9PT0gXCJ3YXJuaW5nXCIgPyBcInRleHQtYW1iZXItNjAwXCIgOiBhZHZhbmNlTm90aWNlLnRvbmUgPT09IFwic3VjY2Vzc1wiID8gXCJ0ZXh0LWVtZXJhbGQtNjAwXCIgOiBcInRleHQtc2xhdGUtNDAwXCJcbiAgICAgICAgICAgICAgfWB9XG4gICAgICAgICAgICAvPlxuICAgICAgICAgICAgPHAgY2xhc3NOYW1lPVwibGVhZGluZy02XCI+e2FkdmFuY2VOb3RpY2UudGV4dH08L3A+XG4gICAgICAgICAgICA8YnV0dG9uIHR5cGU9XCJidXR0b25cIiBjbGFzc05hbWU9XCJtbC1hdXRvIHNocmluay0wIHRleHQteHMgdGV4dC1zbGF0ZS00MDAgaG92ZXI6dGV4dC1zbGF0ZS02MDBcIiBvbkNsaWNrPXsoKSA9PiBzZXRBZHZhbmNlTm90aWNlKG51bGwpfT5cbiAgICAgICAgICAgICAg5YWz6ZetXG4gICAgICAgICAgICA8L2J1dHRvbj5cbiAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgPC9zZWN0aW9uPlxuICAgICAgKX1cblxuICAgICAge2lzQWRtaW4gJiYgKFxuICAgICAgICA8c2VjdGlvbiBjbGFzc05hbWU9XCJyb3VuZGVkLTJ4bCBib3JkZXIgYm9yZGVyLXNsYXRlLTIwMCBiZy13aGl0ZSBwLTUgc2hhZG93LXNtXCI+XG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBnYXAtMlwiPlxuICAgICAgICAgICAgPFBsdXMgY2xhc3NOYW1lPVwiaC00IHctNCB0ZXh0LW9yYW5nZS03MDBcIiAvPlxuICAgICAgICAgICAgPGgyIGNsYXNzTmFtZT1cImZvbnQtc2VtaWJvbGRcIj7mlrDlu7rliY3lkJHov5DooYw8L2gyPlxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXQtNCBmbGV4IGZsZXgtd3JhcCBpdGVtcy1lbmQgZ2FwLTNcIj5cbiAgICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJ0ZXh0LXhzIHRleHQtc2xhdGUtNjAwXCI+XG4gICAgICAgICAgICAgIOi/kOihjOWQjeensFxuICAgICAgICAgICAgICA8SW5wdXQgdmFsdWU9e2xhYmVsfSBvbkNoYW5nZT17KGV2ZW50KSA9PiBzZXRMYWJlbChldmVudC50YXJnZXQudmFsdWUpfSBwbGFjZWhvbGRlcj1cIuWmgu+8muWJjeWQkee6uOmdoi3ljp/lp4vnrZbnlaVcIiBjbGFzc05hbWU9XCJtdC0xIGgtOSB3LTU2IGJnLXdoaXRlXCIgLz5cbiAgICAgICAgICAgIDwvbGFiZWw+XG4gICAgICAgICAgICA8bGFiZWwgY2xhc3NOYW1lPVwidGV4dC14cyB0ZXh0LXNsYXRlLTYwMFwiPlxuICAgICAgICAgICAgICDnrZbnlaVcbiAgICAgICAgICAgICAgPHNlbGVjdFxuICAgICAgICAgICAgICAgIHZhbHVlPXtzdHJhdGVneUtleX1cbiAgICAgICAgICAgICAgICBvbkNoYW5nZT17KGV2ZW50KSA9PiBzZXRTdHJhdGVneUtleShldmVudC50YXJnZXQudmFsdWUgYXMgU3RyYXRlZ3lLZXkpfVxuICAgICAgICAgICAgICAgIGNsYXNzTmFtZT1cIm10LTEgaC05IHctNDggcm91bmRlZC1tZCBib3JkZXIgYm9yZGVyLWlucHV0IGJnLXdoaXRlIHB4LTMgdGV4dC1zbVwiXG4gICAgICAgICAgICAgID5cbiAgICAgICAgICAgICAgICB7KE9iamVjdC5rZXlzKFNUUkFURUdZX0xBQkVMUykgYXMgU3RyYXRlZ3lLZXlbXSkubWFwKChrZXkpID0+IChcbiAgICAgICAgICAgICAgICAgIDxvcHRpb24ga2V5PXtrZXl9IHZhbHVlPXtrZXl9PntTVFJBVEVHWV9MQUJFTFNba2V5XX08L29wdGlvbj5cbiAgICAgICAgICAgICAgICApKX1cbiAgICAgICAgICAgICAgPC9zZWxlY3Q+XG4gICAgICAgICAgICA8L2xhYmVsPlxuICAgICAgICAgICAgPGxhYmVsIGNsYXNzTmFtZT1cInRleHQteHMgdGV4dC1zbGF0ZS02MDBcIj5cbiAgICAgICAgICAgICAg5Yid5aeL6LWE6YeR77yI5YWD77yJXG4gICAgICAgICAgICAgIDxJbnB1dCB2YWx1ZT17aW5pdGlhbENhcGl0YWx9IG9uQ2hhbmdlPXsoZXZlbnQpID0+IHNldEluaXRpYWxDYXBpdGFsKGV2ZW50LnRhcmdldC52YWx1ZSl9IGNsYXNzTmFtZT1cIm10LTEgaC05IHctMzYgYmctd2hpdGVcIiAvPlxuICAgICAgICAgICAgPC9sYWJlbD5cbiAgICAgICAgICAgIDxCdXR0b24gc2l6ZT1cInNtXCIgY2xhc3NOYW1lPVwiZ2FwLTIgYmctZ3JhZGllbnQtdG8tciBmcm9tLW9yYW5nZS01MDAgdG8tcmVkLTYwMCBob3Zlcjpmcm9tLW9yYW5nZS02MDAgaG92ZXI6dG8tcmVkLTcwMFwiIG9uQ2xpY2s9e29uQ3JlYXRlfSBkaXNhYmxlZD17Y3JlYXRlTXV0YXRpb24uaXNQZW5kaW5nfT5cbiAgICAgICAgICAgICAge2NyZWF0ZU11dGF0aW9uLmlzUGVuZGluZyA/IDxMb2FkZXIyIGNsYXNzTmFtZT1cImgtNCB3LTQgYW5pbWF0ZS1zcGluXCIgLz4gOiA8UGx1cyBjbGFzc05hbWU9XCJoLTQgdy00XCIgLz59XG4gICAgICAgICAgICAgIOWIm+W7ulxuICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvc2VjdGlvbj5cbiAgICAgICl9XG5cbiAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT1cInJvdW5kZWQtMnhsIGJvcmRlciBib3JkZXItc2xhdGUtMjAwIGJnLXdoaXRlIHAtNSBzaGFkb3ctc21cIj5cbiAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLWNlbnRlciBnYXAtMlwiPlxuICAgICAgICAgIDxXYWxsZXRDYXJkcyBjbGFzc05hbWU9XCJoLTQgdy00IHRleHQtb3JhbmdlLTcwMFwiIC8+XG4gICAgICAgICAgPGgyIGNsYXNzTmFtZT1cImZvbnQtc2VtaWJvbGRcIj7ov5DooYzliJfooag8L2gyPlxuICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cIm1sLWF1dG8gdGV4dC14cyB0ZXh0LXNsYXRlLTQwMFwiPuWFsSB7cnVucy5sZW5ndGh9IOadoTwvc3Bhbj5cbiAgICAgICAgPC9kaXY+XG4gICAgICAgIHtsaXN0UXVlcnkuaXNMb2FkaW5nID8gKFxuICAgICAgICAgIDxwIGNsYXNzTmFtZT1cInAtNiB0ZXh0LWNlbnRlciB0ZXh0LXNtIHRleHQtc2xhdGUtNTAwXCI+5Yqg6L295Lit4oCmPC9wPlxuICAgICAgICApIDogcnVucy5sZW5ndGggPT09IDAgPyAoXG4gICAgICAgICAgPHAgY2xhc3NOYW1lPVwicC02IHRleHQtY2VudGVyIHRleHQtc20gdGV4dC1zbGF0ZS01MDBcIj7mmoLml6DliY3lkJHov5DooYzjgILnrqHnkIblkZjlj6/liJvlu7rkuIDmnaHov5DooYzlvIDlp4vnnJ/lrp7moLfmnKzlpJbpl63njq/jgII8L3A+XG4gICAgICAgICkgOiAoXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtdC00IG92ZXJmbG93LWF1dG8gcm91bmRlZC14bCBib3JkZXIgYm9yZGVyLXNsYXRlLTIwMFwiPlxuICAgICAgICAgICAgPHRhYmxlIGNsYXNzTmFtZT1cInctZnVsbCBtaW4tdy1bODIwcHhdIHRleHQteHNcIj5cbiAgICAgICAgICAgICAgPHRoZWFkIGNsYXNzTmFtZT1cImJnLXNsYXRlLTEwMCB0ZXh0LWxlZnQgdGV4dC1zbGF0ZS01MDBcIj5cbiAgICAgICAgICAgICAgICA8dHI+XG4gICAgICAgICAgICAgICAgICA8dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+6L+Q6KGMPC90aD5cbiAgICAgICAgICAgICAgICAgIDx0aCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj7nrZbnlaU8L3RoPlxuICAgICAgICAgICAgICAgICAgPHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPueKtuaAgTwvdGg+XG4gICAgICAgICAgICAgICAgICA8dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+5bey5o6o6L+b5YiwPC90aD5cbiAgICAgICAgICAgICAgICAgIDx0aCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj7liY3lkJHmlLbnm4o8L3RoPlxuICAgICAgICAgICAgICAgICAgPHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuacgOWkp+WbnuaSpDwvdGg+XG4gICAgICAgICAgICAgICAgICA8dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+6IOc546HPC90aD5cbiAgICAgICAgICAgICAgICAgIDx0aCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj7mk43kvZw8L3RoPlxuICAgICAgICAgICAgICAgIDwvdHI+XG4gICAgICAgICAgICAgIDwvdGhlYWQ+XG4gICAgICAgICAgICAgIDx0Ym9keT5cbiAgICAgICAgICAgICAgICB7cnVucy5tYXAoKHJ1bikgPT4gKFxuICAgICAgICAgICAgICAgICAgPHRyIGtleT17cnVuLmlkfSBjbGFzc05hbWU9e2Bib3JkZXItdCBib3JkZXItc2xhdGUtMTAwICR7cnVuLmlkID09PSBzZWxlY3RlZElkID8gXCJiZy1vcmFuZ2UtNTAvNjBcIiA6IFwiXCJ9YH0+XG4gICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj5cbiAgICAgICAgICAgICAgICAgICAgICA8cCBjbGFzc05hbWU9XCJmb250LW1lZGl1bSB0ZXh0LXNsYXRlLTgwMFwiPntydW4ubGFiZWx9PC9wPlxuICAgICAgICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT1cIm10LTAuNSB0ZXh0LXNsYXRlLTQwMFwiPiN7cnVuLmlkfTwvcD5cbiAgICAgICAgICAgICAgICAgICAgPC90ZD5cbiAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPntTVFJBVEVHWV9MQUJFTFNbcnVuLnN0cmF0ZWd5S2V5XSA/PyBydW4uc3RyYXRlZ3lLZXl9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPlxuICAgICAgICAgICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT17YHJvdW5kZWQgcHgtMiBweS0wLjUgdGV4dC1bMTBweF0gZm9udC1tZWRpdW0gJHtydW4uc3RhdHVzID09PSBcImFjdGl2ZVwiID8gXCJiZy1lbWVyYWxkLTEwMCB0ZXh0LWVtZXJhbGQtNzAwXCIgOiBydW4uc3RhdHVzID09PSBcInBhdXNlZFwiID8gXCJiZy1hbWJlci0xMDAgdGV4dC1hbWJlci03MDBcIiA6IFwiYmctc2xhdGUtMjAwIHRleHQtc2xhdGUtNjAwXCJ9YH0+XG4gICAgICAgICAgICAgICAgICAgICAgICB7cnVuLnN0YXR1cyA9PT0gXCJhY3RpdmVcIiA/IFwi6L+b6KGM5LitXCIgOiBydW4uc3RhdHVzID09PSBcInBhdXNlZFwiID8gXCLlt7LmmoLlgZxcIiA6IFwi5bey57uT5p2fXCJ9XG4gICAgICAgICAgICAgICAgICAgICAgPC9zcGFuPlxuICAgICAgICAgICAgICAgICAgICA8L3RkPlxuICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yIGZvbnQtbW9ubyB0ZXh0LXNsYXRlLTYwMFwiPntydW4ubGFzdFByb2Nlc3NlZERhdGUgPz8gXCItXCJ9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT17YHB4LTMgcHktMiBmb250LXNlbWlib2xkICR7cmV0dXJuVG9uZShydW4uc3VtbWFyeT8udG90YWxSZXR1cm4pfWB9PntydW4uc3VtbWFyeT8udG90YWxSZXR1cm4gPT09IG51bGwgfHwgcnVuLnN1bW1hcnk/LnRvdGFsUmV0dXJuID09PSB1bmRlZmluZWQgPyBcIi1cIiA6IGAke3J1bi5zdW1tYXJ5LnRvdGFsUmV0dXJufSVgfTwvdGQ+XG4gICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTIgZm9udC1tZWRpdW0gdGV4dC1lbWVyYWxkLTcwMFwiPntydW4uc3VtbWFyeT8ubWF4RHJhd2Rvd24gPT09IG51bGwgfHwgcnVuLnN1bW1hcnk/Lm1heERyYXdkb3duID09PSB1bmRlZmluZWQgPyBcIi1cIiA6IGAke3J1bi5zdW1tYXJ5Lm1heERyYXdkb3dufSVgfTwvdGQ+XG4gICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj57cnVuLnN1bW1hcnk/LndpblJhdGUgPT09IG51bGwgfHwgcnVuLnN1bW1hcnk/LndpblJhdGUgPT09IHVuZGVmaW5lZCA/IFwiLVwiIDogYCR7cnVuLnN1bW1hcnkud2luUmF0ZX0lYH08L3RkPlxuICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+XG4gICAgICAgICAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGdhcC0xXCI+XG4gICAgICAgICAgICAgICAgICAgICAgICA8QnV0dG9uIHNpemU9XCJzbVwiIHZhcmlhbnQ9XCJvdXRsaW5lXCIgb25DbGljaz17KCkgPT4gc2V0U2VsZWN0ZWRJZChydW4uaWQpfT7mn6XnnIs8L0J1dHRvbj5cbiAgICAgICAgICAgICAgICAgICAgICAgIHtpc0FkbWluICYmIHJ1bi5zdGF0dXMgPT09IFwiYWN0aXZlXCIgJiYgKFxuICAgICAgICAgICAgICAgICAgICAgICAgICA8QnV0dG9uIHNpemU9XCJzbVwiIHZhcmlhbnQ9XCJvdXRsaW5lXCIgY2xhc3NOYW1lPVwiZ2FwLTFcIiBvbkNsaWNrPXsoKSA9PiBhZHZhbmNlTXV0YXRpb24ubXV0YXRlKHsgaWQ6IHJ1bi5pZCB9KX0gZGlzYWJsZWQ9e2FkdmFuY2VNdXRhdGlvbi5pc1BlbmRpbmd9PlxuICAgICAgICAgICAgICAgICAgICAgICAgICAgIDxQbGF5IGNsYXNzTmFtZT1cImgtMy41IHctMy41XCIgLz7mjqjov5tcbiAgICAgICAgICAgICAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgICAgICAgICAgICAge2lzQWRtaW4gJiYgKHJ1bi5zdGF0dXMgPT09IFwiYWN0aXZlXCIgfHwgcnVuLnN0YXR1cyA9PT0gXCJwYXVzZWRcIikgJiYgKFxuICAgICAgICAgICAgICAgICAgICAgICAgICA8QnV0dG9uIHNpemU9XCJzbVwiIHZhcmlhbnQ9XCJnaG9zdFwiIG9uQ2xpY2s9eygpID0+IHN0YXR1c011dGF0aW9uLm11dGF0ZSh7IGlkOiBydW4uaWQsIHN0YXR1czogcnVuLnN0YXR1cyA9PT0gXCJhY3RpdmVcIiA/IFwicGF1c2VkXCIgOiBcImFjdGl2ZVwiIH0pfSBkaXNhYmxlZD17c3RhdHVzTXV0YXRpb24uaXNQZW5kaW5nfT5cbiAgICAgICAgICAgICAgICAgICAgICAgICAgICB7cnVuLnN0YXR1cyA9PT0gXCJhY3RpdmVcIiA/IDxQYXVzZSBjbGFzc05hbWU9XCJoLTMuNSB3LTMuNVwiIC8+IDogPFBsYXkgY2xhc3NOYW1lPVwiaC0zLjUgdy0zLjVcIiAvPn1cbiAgICAgICAgICAgICAgICAgICAgICAgICAgPC9CdXR0b24+XG4gICAgICAgICAgICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICAgICAgICA8L3RkPlxuICAgICAgICAgICAgICAgICAgPC90cj5cbiAgICAgICAgICAgICAgICApKX1cbiAgICAgICAgICAgICAgPC90Ym9keT5cbiAgICAgICAgICAgIDwvdGFibGU+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgICl9XG4gICAgICA8L3NlY3Rpb24+XG5cbiAgICAgIHtzZWxlY3RlZElkICE9PSBudWxsICYmIGRldGFpbFF1ZXJ5LmlzTG9hZGluZyAmJiAoXG4gICAgICAgIDxwIGNsYXNzTmFtZT1cInAtNiB0ZXh0LWNlbnRlciB0ZXh0LXNtIHRleHQtc2xhdGUtNTAwXCI+PExvYWRlcjIgY2xhc3NOYW1lPVwibXItMiBpbmxpbmUgaC00IHctNCBhbmltYXRlLXNwaW5cIiAvPuWKoOi9vei/kOihjOivpuaDheKApjwvcD5cbiAgICAgICl9XG5cbiAgICAgIHtkZXRhaWwgJiYgKFxuICAgICAgICA8PlxuICAgICAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT1cInJvdW5kZWQtMnhsIGJvcmRlciBib3JkZXItc2xhdGUtMjAwIGJnLXdoaXRlIHAtNSBzaGFkb3ctc21cIj5cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZmxleCBmbGV4LXdyYXAgaXRlbXMtc3RhcnQgZ2FwLTNcIj5cbiAgICAgICAgICAgICAgPEJhckNoYXJ0MyBjbGFzc05hbWU9XCJtdC0wLjUgaC01IHctNSB0ZXh0LW9yYW5nZS03MDBcIiAvPlxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cIm1yLWF1dG9cIj5cbiAgICAgICAgICAgICAgICA8aDIgY2xhc3NOYW1lPVwiZm9udC1zZW1pYm9sZFwiPntkZXRhaWwubGFiZWx9IMK3IHtTVFJBVEVHWV9MQUJFTFNbZGV0YWlsLnN0cmF0ZWd5S2V5XX08L2gyPlxuICAgICAgICAgICAgICAgIDxwIGNsYXNzTmFtZT1cIm10LTEgdGV4dC14cyB0ZXh0LXNsYXRlLTUwMFwiPuWIneWni+i1hOmHkSDCpXtkZXRhaWwuaW5pdGlhbENhcGl0YWwudG9Mb2NhbGVTdHJpbmcoKX0gwrcg5bey5o6o6L+b5YiwIHtkZXRhaWwubGFzdFByb2Nlc3NlZERhdGUgPz8gXCItXCJ9IMK3IOeKtuaAgSB7ZGV0YWlsLnN0YXR1cyA9PT0gXCJhY3RpdmVcIiA/IFwi6L+b6KGM5LitXCIgOiBkZXRhaWwuc3RhdHVzID09PSBcInBhdXNlZFwiID8gXCLlt7LmmoLlgZxcIiA6IFwi5bey57uT5p2fXCJ9PC9wPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAge2lzQWRtaW4gJiYgZGV0YWlsLnN0YXR1cyA9PT0gXCJhY3RpdmVcIiAmJiAoXG4gICAgICAgICAgICAgICAgPEJ1dHRvbiBzaXplPVwic21cIiB2YXJpYW50PVwib3V0bGluZVwiIGNsYXNzTmFtZT1cImdhcC0yXCIgb25DbGljaz17KCkgPT4gYWR2YW5jZU11dGF0aW9uLm11dGF0ZSh7IGlkOiBkZXRhaWwuaWQgfSl9IGRpc2FibGVkPXthZHZhbmNlTXV0YXRpb24uaXNQZW5kaW5nfT5cbiAgICAgICAgICAgICAgICAgIDxSZWZyZXNoQ3cgY2xhc3NOYW1lPXtgaC00IHctNCAke2FkdmFuY2VNdXRhdGlvbi5pc1BlbmRpbmcgPyBcImFuaW1hdGUtc3BpblwiIDogXCJcIn1gfSAvPuaOqOi/m+WIsOacgOaWsFxuICAgICAgICAgICAgICAgIDwvQnV0dG9uPlxuICAgICAgICAgICAgICApfVxuICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cIm10LTQgZ3JpZCBnYXAtMyBzbTpncmlkLWNvbHMtMiBsZzpncmlkLWNvbHMtNFwiPlxuICAgICAgICAgICAgICA8TWV0cmljIGxhYmVsPVwi5YmN5ZCR5oC75biC5YC8XCIgdmFsdWU9e2DCpSR7KGRldGFpbC5zdW1tYXJ5Py5maW5hbEVxdWl0eSA/PyAwKS50b0xvY2FsZVN0cmluZygpfWB9IC8+XG4gICAgICAgICAgICAgIDxNZXRyaWMgbGFiZWw9XCLliY3lkJHntK/orqHmlLbnm4pcIiB2YWx1ZT17ZGV0YWlsLnN1bW1hcnk/LnRvdGFsUmV0dXJuID09PSBudWxsIHx8IGRldGFpbC5zdW1tYXJ5Py50b3RhbFJldHVybiA9PT0gdW5kZWZpbmVkID8gXCItXCIgOiBgJHtkZXRhaWwuc3VtbWFyeS50b3RhbFJldHVybn0lYH0gdG9uZT17cmV0dXJuVG9uZShkZXRhaWwuc3VtbWFyeT8udG90YWxSZXR1cm4pfSAvPlxuICAgICAgICAgICAgICA8TWV0cmljIGxhYmVsPVwi5pyA5aSn5Zue5pKkXCIgdmFsdWU9e2RldGFpbC5zdW1tYXJ5Py5tYXhEcmF3ZG93biA9PT0gbnVsbCB8fCBkZXRhaWwuc3VtbWFyeT8ubWF4RHJhd2Rvd24gPT09IHVuZGVmaW5lZCA/IFwiLVwiIDogYCR7ZGV0YWlsLnN1bW1hcnkubWF4RHJhd2Rvd259JWB9IHRvbmU9XCJ0ZXh0LWVtZXJhbGQtNzAwXCIgLz5cbiAgICAgICAgICAgICAgPE1ldHJpYyBsYWJlbD1cIuW3suWHuua4hSAvIOiDnOeOh1wiIHZhbHVlPXtgJHtkZXRhaWwuc3VtbWFyeT8uZXhpdGVkQ291bnQgPz8gMH0g56yUIMK3ICR7ZGV0YWlsLnN1bW1hcnk/LndpblJhdGUgPT09IG51bGwgfHwgZGV0YWlsLnN1bW1hcnk/LndpblJhdGUgPT09IHVuZGVmaW5lZCA/IFwiLVwiIDogYCR7ZGV0YWlsLnN1bW1hcnkud2luUmF0ZX0lYH1gfSAvPlxuICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cIm10LTQgZ3JpZCBnYXAtMyBzbTpncmlkLWNvbHMtM1wiPlxuICAgICAgICAgICAgICA8TWV0cmljIGxhYmVsPVwi5bey5oiQ5Lqk6K6i5Y2VXCIgdmFsdWU9e1N0cmluZyhkZXRhaWwuc3VtbWFyeT8uZmlsbGVkQ291bnQgPz8gMCl9IC8+XG4gICAgICAgICAgICAgIDxNZXRyaWMgbGFiZWw9XCLlvZPliY3mjIHku5NcIiB2YWx1ZT17U3RyaW5nKGRldGFpbC5zdW1tYXJ5Py5vcGVuUG9zaXRpb25Db3VudCA/PyAwKX0gLz5cbiAgICAgICAgICAgICAgPE1ldHJpYyBsYWJlbD1cIuWJjeWQkeS6pOaYk+aXpeaVsFwiIHZhbHVlPXtTdHJpbmcoZGV0YWlsLnN1bW1hcnk/LnRyYWRpbmdEYXlDb3VudCA/PyAwKX0gLz5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAge2N1cnZlRGF0YS5sZW5ndGggPiAwICYmIChcbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtdC01IGgtWzMwMHB4XSB3LWZ1bGxcIj5cbiAgICAgICAgICAgICAgICA8UmVzcG9uc2l2ZUNvbnRhaW5lciB3aWR0aD1cIjEwMCVcIiBoZWlnaHQ9XCIxMDAlXCI+XG4gICAgICAgICAgICAgICAgICA8TGluZUNoYXJ0IGRhdGE9e2N1cnZlRGF0YX0gbWFyZ2luPXt7IHRvcDogMTIsIHJpZ2h0OiAyMCwgYm90dG9tOiA4LCBsZWZ0OiA0IH19PlxuICAgICAgICAgICAgICAgICAgICA8Q2FydGVzaWFuR3JpZCBzdHJva2VEYXNoYXJyYXk9XCIzIDNcIiBzdHJva2U9XCIjZTJlOGYwXCIgdmVydGljYWw9e2ZhbHNlfSAvPlxuICAgICAgICAgICAgICAgICAgICA8WEF4aXMgZGF0YUtleT1cImRhdGVcIiBtaW5UaWNrR2FwPXsyNH0gdGljaz17eyBmb250U2l6ZTogMTEsIGZpbGw6IFwiIzY0NzQ4YlwiIH19IC8+XG4gICAgICAgICAgICAgICAgICAgIDxZQXhpcyB0aWNrPXt7IGZvbnRTaXplOiAxMSwgZmlsbDogXCIjNjQ3NDhiXCIgfX0gdGlja0Zvcm1hdHRlcj17KHZhbHVlKSA9PiBgwqUkeyhOdW1iZXIodmFsdWUpIC8gMTAwMCkudG9GaXhlZCgwKX1rYH0gd2lkdGg9ezY0fSAvPlxuICAgICAgICAgICAgICAgICAgICA8VG9vbHRpcCBmb3JtYXR0ZXI9eyh2YWx1ZTogbnVtYmVyKSA9PiBbYMKlJHt2YWx1ZS50b0xvY2FsZVN0cmluZygpfWAsIFwi5oC75biC5YC8XCJdfSAvPlxuICAgICAgICAgICAgICAgICAgICA8TGVnZW5kIHdyYXBwZXJTdHlsZT17eyBmb250U2l6ZTogMTIgfX0gLz5cbiAgICAgICAgICAgICAgICAgICAgPExpbmUgdHlwZT1cIm1vbm90b25lXCIgZGF0YUtleT1cImVxdWl0eVwiIG5hbWU9XCLliY3lkJHmgLvluILlgLxcIiBzdHJva2U9XCIjZjk3MzE2XCIgc3Ryb2tlV2lkdGg9ezIuMjV9IGRvdD17ZmFsc2V9IGFjdGl2ZURvdD17eyByOiA0IH19IGlzQW5pbWF0aW9uQWN0aXZlPXtmYWxzZX0gY29ubmVjdE51bGxzIC8+XG4gICAgICAgICAgICAgICAgICA8L0xpbmVDaGFydD5cbiAgICAgICAgICAgICAgICA8L1Jlc3BvbnNpdmVDb250YWluZXI+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKX1cbiAgICAgICAgICA8L3NlY3Rpb24+XG5cbiAgICAgICAgICB7ZGV0YWlsLnN0YXRlLnBlbmRpbmdCdXlzLmxlbmd0aCA+IDAgJiYgKFxuICAgICAgICAgICAgPHNlY3Rpb24gY2xhc3NOYW1lPVwicm91bmRlZC0yeGwgYm9yZGVyIGJvcmRlci1vcmFuZ2UtMjAwIGJnLXdoaXRlIHAtNSBzaGFkb3ctc21cIj5cbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGl0ZW1zLXN0YXJ0IGdhcC0zXCI+XG4gICAgICAgICAgICAgICAgPEJhckNoYXJ0MyBjbGFzc05hbWU9XCJtdC0wLjUgaC01IHctNSB0ZXh0LW9yYW5nZS03MDBcIiAvPlxuICAgICAgICAgICAgICAgIDxkaXY+XG4gICAgICAgICAgICAgICAgICA8cCBjbGFzc05hbWU9XCJ0ZXh0LXhzIGZvbnQtYm9sZCB0cmFja2luZy1bMC4xNmVtXSB0ZXh0LW9yYW5nZS03MDBcIj5ORVhULURBWSBCVVkgTElTVDwvcD5cbiAgICAgICAgICAgICAgICAgIDxoMiBjbGFzc05hbWU9XCJtdC0xIGZvbnQtc2VtaWJvbGRcIj7kuIvkuIDkuqTmmJPml6Xlh4blpIfkubDlhaXmuIXljZU8L2gyPlxuICAgICAgICAgICAgICAgICAgPHAgY2xhc3NOYW1lPVwibXQtMSB0ZXh0LXhzIGxlYWRpbmctNSB0ZXh0LXNsYXRlLTUwMFwiPuS7pSB7ZGV0YWlsLnN0YXRlLnBlbmRpbmdCdXlzWzBdPy5zaWduYWxEYXRlID8/IFwiLVwifSDmlLbnm5jkv6Hmga/nlJ/miJDvvIzmjInnrZbnlaXkvJjlhYjnuqfmjpLluo/vvIzmnKrmib/or7rmiJDkuqTjgII8L3A+XG4gICAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cIm10LTQgb3ZlcmZsb3ctYXV0byByb3VuZGVkLXhsIGJvcmRlciBib3JkZXItb3JhbmdlLTEwMFwiPlxuICAgICAgICAgICAgICAgIDx0YWJsZSBjbGFzc05hbWU9XCJ3LWZ1bGwgbWluLXctWzc2MHB4XSB0ZXh0LXhzXCI+XG4gICAgICAgICAgICAgICAgICA8dGhlYWQgY2xhc3NOYW1lPVwiYmctb3JhbmdlLTUwIHRleHQtbGVmdCB0ZXh0LW9yYW5nZS05MDBcIj5cbiAgICAgICAgICAgICAgICAgICAgPHRyPjx0aCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj4jPC90aD48dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+6IKh56WoPC90aD48dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+6aKY5p2QPC90aD48dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+5p2/5pWwPC90aD48dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+562W55Wl5YiGPC90aD48dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+6aOO6ZmpPC90aD48dGggY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+5L+h5Y+35pel5pS255uYPC90aD48L3RyPlxuICAgICAgICAgICAgICAgICAgPC90aGVhZD5cbiAgICAgICAgICAgICAgICAgIDx0Ym9keT5cbiAgICAgICAgICAgICAgICAgICAge2RldGFpbC5zdGF0ZS5wZW5kaW5nQnV5cy5tYXAoKGJ1eSkgPT4gKFxuICAgICAgICAgICAgICAgICAgICAgIDx0ciBrZXk9e2J1eS5zdG9ja0NvZGV9IGNsYXNzTmFtZT1cImJvcmRlci10IGJvcmRlci1zbGF0ZS0xMDBcIj5cbiAgICAgICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTIgdGV4dC1zbGF0ZS00MDBcIj57YnV5LnJhbmt9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj48cCBjbGFzc05hbWU9XCJmb250LW1lZGl1bSB0ZXh0LXNsYXRlLTgwMFwiPntidXkuc3RvY2tOYW1lfTwvcD48cCBjbGFzc05hbWU9XCJtdC0wLjUgZm9udC1tb25vIHRleHQtc2xhdGUtNTAwXCI+e2J1eS5zdG9ja0NvZGV9PC9wPjwvdGQ+XG4gICAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+e2J1eS5zZWN0b3J9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj57YnV5LmJvYXJkc33mnb88L3RkPlxuICAgICAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMiBmb250LXNlbWlib2xkIHRleHQtc2xhdGUtODAwXCI+e2J1eS5zdHJhdGVneVNjb3JlfTwvdGQ+XG4gICAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+PHNwYW4gY2xhc3NOYW1lPXtidXkucmlza1RpZXIgPT09IFwi6auY6aOO6ZmpXCIgPyBcInRleHQtcm9zZS02MDBcIiA6IGJ1eS5yaXNrVGllciA9PT0gXCLkuK3po47pmalcIiA/IFwidGV4dC1hbWJlci02MDBcIiA6IFwidGV4dC1lbWVyYWxkLTcwMFwifT57YnV5LnJpc2tUaWVyfTwvc3Bhbj48L3RkPlxuICAgICAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMiBmb250LW1vbm9cIj57YnV5LnNpZ25hbENsb3NlUHJpY2UgPz8gXCItXCJ9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICA8L3RyPlxuICAgICAgICAgICAgICAgICAgICApKX1cbiAgICAgICAgICAgICAgICAgIDwvdGJvZHk+XG4gICAgICAgICAgICAgICAgPC90YWJsZT5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8L3NlY3Rpb24+XG4gICAgICAgICAgKX1cblxuICAgICAgICAgIHtkZXRhaWwuc3RhdGUucG9zaXRpb25zLmxlbmd0aCA+IDAgJiYgKFxuICAgICAgICAgICAgPHNlY3Rpb24gY2xhc3NOYW1lPVwicm91bmRlZC0yeGwgYm9yZGVyIGJvcmRlci1zbGF0ZS0yMDAgYmctd2hpdGUgcC01IHNoYWRvdy1zbVwiPlxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImZsZXggaXRlbXMtY2VudGVyIGdhcC0yXCI+XG4gICAgICAgICAgICAgICAgPFdhbGxldENhcmRzIGNsYXNzTmFtZT1cImgtNCB3LTQgdGV4dC1vcmFuZ2UtNzAwXCIgLz5cbiAgICAgICAgICAgICAgICA8aDIgY2xhc3NOYW1lPVwiZm9udC1zZW1pYm9sZFwiPuW9k+WJjeaMgeS7k++8iHtkZXRhaWwuc3RhdGUucG9zaXRpb25zLmxlbmd0aH3vvIk8L2gyPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtdC00IG92ZXJmbG93LWF1dG8gcm91bmRlZC14bCBib3JkZXIgYm9yZGVyLXNsYXRlLTIwMFwiPlxuICAgICAgICAgICAgICAgIDx0YWJsZSBjbGFzc05hbWU9XCJ3LWZ1bGwgbWluLXctWzY0MHB4XSB0ZXh0LXhzXCI+XG4gICAgICAgICAgICAgICAgICA8dGhlYWQgY2xhc3NOYW1lPVwiYmctc2xhdGUtMTAwIHRleHQtbGVmdCB0ZXh0LXNsYXRlLTUwMFwiPlxuICAgICAgICAgICAgICAgICAgICA8dHI+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuiCoeelqDwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuS/oeWPt+aXpTwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuaIkOS6pOaXpTwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuaIkOS6pOS7tzwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuiCoeaVsDwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuaIkOacrDwvdGg+PC90cj5cbiAgICAgICAgICAgICAgICAgIDwvdGhlYWQ+XG4gICAgICAgICAgICAgICAgICA8dGJvZHk+XG4gICAgICAgICAgICAgICAgICAgIHtkZXRhaWwuc3RhdGUucG9zaXRpb25zLm1hcCgocG9zaXRpb24pID0+IChcbiAgICAgICAgICAgICAgICAgICAgICA8dHIga2V5PXtgJHtwb3NpdGlvbi5zdG9ja0NvZGV9LSR7cG9zaXRpb24uZW50cnlEYXRlfWB9IGNsYXNzTmFtZT1cImJvcmRlci10IGJvcmRlci1zbGF0ZS0xMDBcIj5cbiAgICAgICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj48cCBjbGFzc05hbWU9XCJmb250LW1lZGl1bSB0ZXh0LXNsYXRlLTgwMFwiPntwb3NpdGlvbi5zdG9ja05hbWV9PC9wPjxwIGNsYXNzTmFtZT1cIm10LTAuNSBmb250LW1vbm8gdGV4dC1zbGF0ZS01MDBcIj57cG9zaXRpb24uc3RvY2tDb2RlfTwvcD48L3RkPlxuICAgICAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMiBmb250LW1vbm9cIj57cG9zaXRpb24uc2lnbmFsRGF0ZX08L3RkPlxuICAgICAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMiBmb250LW1vbm9cIj57cG9zaXRpb24uZW50cnlEYXRlfTwvdGQ+XG4gICAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yIGZvbnQtbW9ub1wiPntwb3NpdGlvbi5lbnRyeVByaWNlLnRvRml4ZWQoMyl9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj57cG9zaXRpb24uc2hhcmVzfTwvdGQ+XG4gICAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yIGZvbnQtbW9ub1wiPsKle3Bvc2l0aW9uLmNhcGl0YWxDb3N0LnRvRml4ZWQoMCl9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICA8L3RyPlxuICAgICAgICAgICAgICAgICAgICApKX1cbiAgICAgICAgICAgICAgICAgIDwvdGJvZHk+XG4gICAgICAgICAgICAgICAgPC90YWJsZT5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICA8L3NlY3Rpb24+XG4gICAgICAgICAgKX1cblxuICAgICAgICAgIDxzZWN0aW9uIGNsYXNzTmFtZT1cInJvdW5kZWQtMnhsIGJvcmRlciBib3JkZXItc2xhdGUtMjAwIGJnLXdoaXRlIHAtNSBzaGFkb3ctc21cIj5cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZmxleCBpdGVtcy1jZW50ZXIgZ2FwLTJcIj5cbiAgICAgICAgICAgICAgPEJhckNoYXJ0MyBjbGFzc05hbWU9XCJoLTQgdy00IHRleHQtb3JhbmdlLTcwMFwiIC8+XG4gICAgICAgICAgICAgIDxoMiBjbGFzc05hbWU9XCJmb250LXNlbWlib2xkXCI+6YCQ56yU6K6i5Y2V77yIe29yZGVycy5sZW5ndGh977yJPC9oMj5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJtdC00IG92ZXJmbG93LWF1dG8gcm91bmRlZC14bCBib3JkZXIgYm9yZGVyLXNsYXRlLTIwMFwiPlxuICAgICAgICAgICAgICA8dGFibGUgY2xhc3NOYW1lPVwidy1mdWxsIG1pbi13LVs5ODBweF0gdGV4dC14c1wiPlxuICAgICAgICAgICAgICAgIDx0aGVhZCBjbGFzc05hbWU9XCJiZy1zbGF0ZS0xMDAgdGV4dC1sZWZ0IHRleHQtc2xhdGUtNTAwXCI+XG4gICAgICAgICAgICAgICAgICA8dHI+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuS/oeWPt+aXpSAvIOiCoeelqDwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPueKtuaAgTwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuaIkOS6pOaXpSAvIOS7tzwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuWHuua4heaXpSAvIOS7tzwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuiCoeaVsDwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuWHgOaUtuebijwvdGg+PHRoIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPuWOn+WboDwvdGg+PC90cj5cbiAgICAgICAgICAgICAgICA8L3RoZWFkPlxuICAgICAgICAgICAgICAgIDx0Ym9keT5cbiAgICAgICAgICAgICAgICAgIHtvcmRlcnMubWFwKChvcmRlciwgaW5kZXgpID0+IChcbiAgICAgICAgICAgICAgICAgICAgPHRyIGtleT17YCR7b3JkZXIuc3RvY2tDb2RlfS0ke29yZGVyLmVudHJ5RGF0ZX0tJHtpbmRleH1gfSBjbGFzc05hbWU9XCJib3JkZXItdCBib3JkZXItc2xhdGUtMTAwIGFsaWduLXRvcFwiPlxuICAgICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTJcIj48cCBjbGFzc05hbWU9XCJmb250LW1lZGl1bSB0ZXh0LXNsYXRlLTgwMFwiPntvcmRlci5zdG9ja05hbWV9PC9wPjxwIGNsYXNzTmFtZT1cIm10LTAuNSBmb250LW1vbm8gdGV4dC1zbGF0ZS01MDBcIj57b3JkZXIuc3RvY2tDb2RlfTwvcD48cCBjbGFzc05hbWU9XCJtdC0wLjUgdGV4dC1zbGF0ZS00MDBcIj57b3JkZXIuc2lnbmFsRGF0ZX08L3A+PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yXCI+XG4gICAgICAgICAgICAgICAgICAgICAgICA8c3BhbiBjbGFzc05hbWU9e2Byb3VuZGVkIHB4LTIgcHktMC41IHRleHQtWzEwcHhdIGZvbnQtbWVkaXVtICR7b3JkZXIuc3RhdHVzID09PSBcImV4aXRlZFwiID8gXCJiZy1zbGF0ZS0yMDAgdGV4dC1zbGF0ZS02MDBcIiA6IG9yZGVyLnN0YXR1cyA9PT0gXCJmaWxsZWRcIiA/IFwiYmctZW1lcmFsZC0xMDAgdGV4dC1lbWVyYWxkLTcwMFwiIDogXCJiZy1hbWJlci0xMDAgdGV4dC1hbWJlci03MDBcIn1gfT5cbiAgICAgICAgICAgICAgICAgICAgICAgICAge29yZGVyLnN0YXR1cyA9PT0gXCJleGl0ZWRcIiA/IFwi5bey5Ye65riFXCIgOiBvcmRlci5zdGF0dXMgPT09IFwiZmlsbGVkXCIgPyBcIuaMgeS7k+S4rVwiIDogXCLmnKrmiJDkuqRcIn1cbiAgICAgICAgICAgICAgICAgICAgICAgIDwvc3Bhbj5cbiAgICAgICAgICAgICAgICAgICAgICA8L3RkPlxuICAgICAgICAgICAgICAgICAgICAgIDx0ZCBjbGFzc05hbWU9XCJweC0zIHB5LTIgZm9udC1tb25vXCI+e29yZGVyLmVudHJ5RGF0ZSA/PyBcIi1cIn17b3JkZXIuZW50cnlQcmljZSA9PT0gbnVsbCA/IFwiXCIgOiBgIEAgJHtvcmRlci5lbnRyeVByaWNlfWB9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yIGZvbnQtbW9ub1wiPntvcmRlci5leGl0RGF0ZSA/PyBcIi1cIn17b3JkZXIuZXhpdFByaWNlID09PSBudWxsID8gXCJcIiA6IGAgQCAke29yZGVyLmV4aXRQcmljZX1gfTwvdGQ+XG4gICAgICAgICAgICAgICAgICAgICAgPHRkIGNsYXNzTmFtZT1cInB4LTMgcHktMlwiPntvcmRlci5zaGFyZXN9PC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPXtgcHgtMyBweS0yIGZvbnQtc2VtaWJvbGQgJHtvcmRlci5uZXRSZXR1cm4gPT09IG51bGwgPyBcInRleHQtc2xhdGUtNDAwXCIgOiBvcmRlci5uZXRSZXR1cm4gPj0gMCA/IFwidGV4dC1yb3NlLTYwMFwiIDogXCJ0ZXh0LWVtZXJhbGQtNzAwXCJ9YH0+XG4gICAgICAgICAgICAgICAgICAgICAgICB7b3JkZXIubmV0UmV0dXJuID09PSBudWxsID8gXCItXCIgOiBgJHtvcmRlci5uZXRSZXR1cm59JWB9XG4gICAgICAgICAgICAgICAgICAgICAgPC90ZD5cbiAgICAgICAgICAgICAgICAgICAgICA8dGQgY2xhc3NOYW1lPVwicHgtMyBweS0yIHRleHQtc2xhdGUtNTAwXCI+e29yZGVyLnJlYXNvbiA/PyBcIi1cIn08L3RkPlxuICAgICAgICAgICAgICAgICAgICA8L3RyPlxuICAgICAgICAgICAgICAgICAgKSl9XG4gICAgICAgICAgICAgICAgICB7b3JkZXJzLmxlbmd0aCA9PT0gMCAmJiA8dHI+PHRkIGNvbFNwYW49ezd9IGNsYXNzTmFtZT1cInAtNiB0ZXh0LWNlbnRlciB0ZXh0LXNsYXRlLTUwMFwiPuaaguaXoOiuouWNleOAgjwvdGQ+PC90cj59XG4gICAgICAgICAgICAgICAgPC90Ym9keT5cbiAgICAgICAgICAgICAgPC90YWJsZT5cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgIDwvc2VjdGlvbj5cbiAgICAgICAgPC8+XG4gICAgICApfVxuICAgIDwvZGl2PlxuICApO1xufVxuIl0sImZpbGUiOiJDOi93b3JrL3NvdXJjZWNvZGUvc3RvY2stbGltaXQtdXAtYW5hbHl6ZXIvY2xpZW50L3NyYy9wYWdlcy9QYXBlclRyYWRpbmcudHN4In0=

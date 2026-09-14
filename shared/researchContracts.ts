@@ -880,4 +880,97 @@ export const closedLoopRunResultSchema = z.object({
     .nullable(),
 });
 export type ClosedLoopRunResult = z.infer<typeof closedLoopRunResultSchema>;
+
+// ---------------------------------------------------------------------------
+// CLOSED-LOOP-BACKTEST-PERSIST-001 — 闭环回测留档（历史列表 / 详情）
+//
+// 与 `closedLoopRunResultSchema` 的关系：那张是**一次运行的完整可审计轨迹**（重、含明细），
+// 这里是**它的留档条目**（轻摘要 + 可选的完整结果）。二者不可互相替代：
+// 列表页只读前者派生的摘要，详情页才加载完整轨迹。
+// ---------------------------------------------------------------------------
+
+/**
+ * 留档条目的展示字段（列表页与详情页头部共用；**不含**长文本结果）。
+ *
+ * 字段与 `closed_loop_backtest_run` 的结构化列一一对应；`null` 表示「本次确实没有这个量」
+ * （例如 backtest 阶段被阻塞 ⇒ 没有期末权益），**不是 0**。
+ */
+export const closedLoopBacktestRunRecordSchema = z.object({
+  id: z.number().int().positive(),
+  runId: z.string().min(1),
+  /** 留档时间（ISO-8601，UTC）。 */
+  createdAt: z.string(),
+  experimentId: z.string(),
+  strategyId: z.string(),
+  strategyVersion: z.string(),
+  /** 回测窗口（含两端，YYYY-MM-DD）。 */
+  startDate: z.string(),
+  endDate: z.string(),
+  /** 整体状态：ALL_EXECUTED / PARTIAL_BLOCKED / NO_STAGE_EXECUTED。 */
+  status: z.string(),
+  executedStageCount: z.number().int().nonnegative(),
+  blockedStageCount: z.number().int().nonnegative(),
+  skippedStageCount: z.number().int().nonnegative(),
+  firstBlockedReasonCode: z.string().nullable(),
+  /** Dataset label 快照（仅显示）。 */
+  datasetVersion: z.string().nullable(),
+  /** 真实 Dataset 坐标 → `dataset_version.id`。 */
+  datasetVersionId: z.number().int().positive().nullable(),
+  /** 数据来源：registry（直读已落库数据集）| rebuild（回落从零重建）。 */
+  datasetSource: z.string().nullable(),
+  /** 装配层如实记录的回落原因；未回落为 null。 */
+  datasetSourceNote: z.string().nullable(),
+  recipeId: z.string().nullable(),
+  initialCapital: z.number().nullable(),
+  finalEquity: z.number().nullable(),
+  tradeCount: z.number().int().nullable(),
+  equityCurvePointCount: z.number().int().nullable(),
+});
+export type ClosedLoopBacktestRunRecordDto = z.infer<typeof closedLoopBacktestRunRecordSchema>;
+
+/** 留档详情：在条目之上带完整运行结果（`result` 为 null = 本次未留完整结果）。 */
+export const closedLoopBacktestRunDetailSchema = closedLoopBacktestRunRecordSchema.extend({
+  result: closedLoopRunResultSchema.nullable(),
+});
+export type ClosedLoopBacktestRunDetailDto = z.infer<typeof closedLoopBacktestRunDetailSchema>;
+
+/** 留档列表查询入参（按留档时间倒序；可按策略过滤）。 */
+export const closedLoopBacktestRunListInputSchema = z
+  .object({
+    limit: z.number().int().min(1).max(200).optional(),
+    strategyId: z.string().min(1).optional(),
+  })
+  .optional();
+
+/**
+ * 成交明细的「证券名称 + 代码」标签。
+ *
+ * 动因：闭环回测 `trades[].securityId` 是 `sec_<uuid>`（Research canonical identity），
+ * 直接展示用户看不懂。名称与代码都由服务端解析后补上 —— 前端**不做**任何身份翻译。
+ *
+ * 🔴 `code` / `name` 允许为 `null`：名称源（`limit_up_records`）只收录有过涨停记录的
+ * 股票，回测 universe 是全市场 ⇒ 必然存在取不到名称的标的。**如实返回 null**，
+ * 前端显示「—」，绝不用代码冒充名称。
+ */
+export const securityLabelSchema = z.object({
+  securityId: z.string().min(1),
+  /** canonical 代码（`6位数字.交易所`）。 */
+  code: z.string().nullable(),
+  /** 股票名称。 */
+  name: z.string().nullable(),
+  /** 交易所（SH / SZ / BJ）。 */
+  exchange: z.string().nullable(),
+});
+
+/** 证券标签查询入参：一次最多 500 个 identity（够覆盖单次回测的全部成交标的）。 */
+export const securityLabelsInputSchema = z.object({
+  securityIds: z.array(z.string().min(1)).min(1).max(500),
+});
+
+/** 查询出参：按 `securityId` 索引的标签表。 */
+export const securityLabelsOutputSchema = z.record(z.string(), securityLabelSchema);
+
+export type SecurityLabelDto = z.infer<typeof securityLabelSchema>;
+export type SecurityLabelsInput = z.infer<typeof securityLabelsInputSchema>;
+
 export type ResearchRunReadiness = z.infer<typeof researchRunReadinessSchema>;

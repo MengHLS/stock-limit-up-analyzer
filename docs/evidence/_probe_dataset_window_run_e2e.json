@@ -1,0 +1,21 @@
+{
+  "experimentId": "EXP-20260914-PROBEWIN01",
+  "elapsedMs": 14313,
+  "datasetSource": "registry",
+  "datasetVersionId": 390002,
+  "datasetVersion": "rd-1.0.0-1-3cc90deaf6e0fdaf",
+  "datasetRowCount": 112920,
+  "datasetSecurityCount": 2967,
+  "backtestState": "EXECUTED",
+  "trades": 35,
+  "initialCapital": 100000,
+  "finalEquity": 73207.86025830002,
+  "tradedIdentityCount": 35,
+  "tradedCodeLikeCount": 0,
+  "securityLabelResolved": 35,
+  "securityLabelNameHits": 35,
+  "boardCount": {
+    "main": 35
+  },
+  "failures": 0
+}

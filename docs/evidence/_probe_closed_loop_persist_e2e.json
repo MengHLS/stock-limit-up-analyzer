@@ -1,0 +1,30 @@
+{
+  "generatedAt": "2026-09-14T05:22:51.310Z",
+  "partA": {
+    "runId": "clrun-20260914052059240",
+    "elapsedMs": 108961,
+    "rowsBefore": 2,
+    "rowsAfter": 3,
+    "overall": {
+      "status": "PARTIAL_BLOCKED",
+      "executedStageCount": 5,
+      "blockedStageCount": 9,
+      "skippedStageCount": 0,
+      "firstBlockedReasonCode": "CL_RUNNER_NOT_INJECTED",
+      "synthetic": false,
+      "note": "首阻塞 optimization（CL_RUNNER_NOT_INJECTED）：阶段 optimization 执行器未注入（注入式执行器表缺 optimization 项）；无法执行该阶段"
+    },
+    "datasetSource": "rebuild",
+    "datasetRowCount": 184656,
+    "tradeCount": 90,
+    "finalEquity": 97718.8467249,
+    "listSize": 3
+  },
+  "partB": {
+    "rowsBeforeIdem": 3,
+    "rowsAfterIdem": 4,
+    "rowsAfterCleanup": 3
+  },
+  "failures": 0,
+  "pass": true
+}

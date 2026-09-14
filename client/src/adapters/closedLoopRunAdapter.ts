@@ -50,6 +50,72 @@ export interface ClosedLoopEvaluationScalars {
 }
 
 /**
+ * 键 → 计数（拒单原因 / 跳过原因 / 成本科目）。
+ *
+ * 统一用一个形状承载三类「同一个东西的分布」，UI 才能用同一段渲染逻辑；
+ * 语义差异由字段名（`byReason` / `skippedCounts` / `costs`）表达。
+ */
+export interface ClosedLoopKeyedCount {
+  key: string;
+  count: number;
+}
+
+/** 权益曲线上的一个点（直搬 `backtest/types.EquityPoint` 的数值字段）。 */
+export interface ClosedLoopEquityPointView {
+  date: string;
+  equity: number;
+  cash: number | null;
+  marketValue: number | null;
+  openPositions: number | null;
+}
+
+/** 单笔成交（直搬 `backtest/types.Trade` 子集）。 */
+export interface ClosedLoopTradeView {
+  securityId: string;
+  entryTime: string;
+  entryPrice: number | null;
+  exitTime: string | null;
+  exitPrice: number | null;
+  quantity: number | null;
+  netPnl: number | null;
+  returnPct: number | null;
+  holdingPeriod: number | null;
+  openAtEnd: boolean;
+  fees: number | null;
+}
+
+/** 撮合执行统计（含**拒单原因分布** —— 「为什么没成交」的唯一答案来源）。 */
+export interface ClosedLoopExecutionStatsView {
+  totalSignals: number | null;
+  totalOrders: number | null;
+  totalFills: number | null;
+  rejectedOrders: number | null;
+  partialFills: number | null;
+  byReason: ClosedLoopKeyedCount[];
+}
+
+/**
+ * backtest 阶段产出的**真实明细**（2026-09-13 新增）。
+ *
+ * 存在理由：早前 backtest 交接只含 12 个标量，于是「0 成交 / 曲线全平」在界面上**无法解释**。
+ * 后端现已把权益曲线、撮合统计、跳过原因、成交明细一并投影出来，本层负责**直搬**它们。
+ * 🔴 严守「展示层不做估计」：本层只搬字段，**不**由成交明细反算胜率 / 盈亏比（那些由后端
+ * 评估器给出），也**不**把截断后的条数当作总笔数（`tradesTruncated` 单独表达）。
+ */
+export interface ClosedLoopBacktestArtifactsView {
+  tradeCount: number;
+  initialCapital: number | null;
+  finalEquity: number | null;
+  decisionDayCount: number | null;
+  equityCurve: ClosedLoopEquityPointView[];
+  executionStats: ClosedLoopExecutionStatsView | null;
+  skippedCounts: ClosedLoopKeyedCount[];
+  costs: ClosedLoopKeyedCount[];
+  trades: ClosedLoopTradeView[];
+  tradesTruncated: boolean;
+}
+
+/**
  * 真实数据装配摘要（仅当本次以 `useRealData=true` 装配成功时非 null）。
  *
  * 全部字段**直搬**后端 `assembly`，前端不做任何换算 / 补齐 / 推断。
@@ -92,6 +158,37 @@ export interface ClosedLoopRunAssemblyViewModel {
   };
 }
 
+/**
+ * 本次**重建**有没有继承「绑定数据集声明的证券范围约束」（板块 / ST）。
+ *
+ * 为什么需要它（2026-09-14 实查，用户实报）：回落重建在修复前**不继承**
+ * `dataset_version.universeDefinitionJson.boards` / `dataset_build_config.excludeSt`，
+ * 实测把绑定的「主板数据集」（`boards:["main"]`）重建成了**全市场**面板
+ * （`datasetSecurityCount=5146`），成交明细里出现 300/301/688 标的。
+ * 修复后 `datasetSourceNote` 会带上继承声明；**修复前落库的历史结果没有这句** ⇒
+ * 范围无法确认 ⇒ UI 必须如实提示，而不是让用户以为结果是按他的数据集跑的。
+ */
+export type RebuildScopeVerdict = "inherited" | "declared-unscoped" | "unknown";
+
+/**
+ * 纯函数：从后端 `datasetSourceNote` 判定重建范围是否**已确认**。
+ *
+ * - `inherited`：明确继承了约束（或明确「沿用该数据集声明的约束 = 全板块」）；
+ * - `declared-unscoped`：明确说明「未继承任何板块约束」（数据源未声明）——已知的全板块；
+ * - `unknown`：**没有说话** ⇒ 无法确认（历史结果），需要提示用户重跑。
+ */
+export function classifyRebuildScope(note: string | null): RebuildScopeVerdict {
+  const text = note ?? "";
+  if (
+    text.includes("已继承该数据集的 universe 约束") ||
+    text.includes("沿用该数据集声明的 universe 约束")
+  ) {
+    return "inherited";
+  }
+  if (text.includes("未继承任何板块约束")) return "declared-unscoped";
+  return "unknown";
+}
+
 export interface ClosedLoopRunViewModel {
   /** 是否已有一次真实运行结果（无 → UI 展示空态）。 */
   hasResult: boolean;
@@ -118,8 +215,15 @@ export interface ClosedLoopRunViewModel {
   stages: ClosedLoopStageRowViewModel[];
   /** 评估标量：仅当 evaluation 阶段真实 EXECUTED 且产出 evaluationRef 时非 null。 */
   evaluation: ClosedLoopEvaluationScalars | null;
+  /** backtest 真实明细（曲线 / 撮合统计 / 成交明细）；未执行 backtest → null。 */
+  backtest: ClosedLoopBacktestArtifactsView | null;
   /** 真实数据装配摘要；未使用真实装配（或装配失败）→ null。 */
   assembly: ClosedLoopRunAssemblyViewModel | null;
+  /**
+   * 重建路径的证券范围是否**已确认**继承自绑定数据集；非重建 / 未装配 → null。
+   * `unknown` = 历史结果（修复前落库，note 里没有继承声明）⇒ UI 须提示重跑。
+   */
+  rebuildScope: RebuildScopeVerdict | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +285,9 @@ export function emptyClosedLoopRun(): ClosedLoopRunViewModel {
     },
     stages: [],
     evaluation: null,
+    backtest: null,
     assembly: null,
+    rebuildScope: null,
   };
 }
 
@@ -218,6 +324,108 @@ function extractEvaluationScalars(
     winRatePct: quality ? asNum(quality.winRatePct) : null,
     profitFactor: quality ? asNum(quality.profitFactor) : null,
     completedTradeCount: quality ? asNum(quality.completedTradeCount) : null,
+  };
+}
+
+/**
+ * 解析 backtest 阶段的真实明细（曲线 / 撮合统计 / 跳过原因 / 成交）。
+ *
+ * 只在 `stageId="backtest"` 且 `state="EXECUTED"` 时读取；字段缺失一律降级（空数组 / null），
+ * **绝不**构造节点或臆造数值 —— 与 `extractEvaluationScalars` 同一防御口径。
+ */
+function extractBacktestArtifacts(
+  stages: readonly ClosedLoopStageRowViewModel[],
+  rawStages: readonly unknown[],
+): ClosedLoopBacktestArtifactsView | null {
+  const index = stages.findIndex(s => s.stageId === "backtest" && s.state === "EXECUTED");
+  if (index < 0) return null;
+  const rawStage = rawStages[index];
+  const output = isRecord(rawStage) && isRecord(rawStage.output) ? rawStage.output : null;
+  if (output === null || output.kind !== "backtestSummary") return null;
+
+  const curve: ClosedLoopEquityPointView[] = [];
+  if (Array.isArray(output.equityCurve)) {
+    for (const point of output.equityCurve) {
+      if (!isRecord(point)) continue;
+      const date = asStr(point.date);
+      const equity = asNum(point.equity);
+      // 曲线点缺日期或缺权益值 → 该点无意义，跳过（不补 0：补 0 会画出不存在的暴跌）
+      if (date === null || equity === null) continue;
+      curve.push({
+        date,
+        equity,
+        cash: asNum(point.cash),
+        marketValue: asNum(point.marketValue),
+        openPositions: asNum(point.openPositions),
+      });
+    }
+  }
+
+  const asKeyedCounts = (v: unknown): ClosedLoopKeyedCount[] => {
+    if (Array.isArray(v)) {
+      return v
+        .filter(isRecord)
+        .map(item => ({
+          key: asStr(item.code) ?? asStr(item.key) ?? "",
+          count: asNum(item.count) ?? asNum(item.value) ?? 0,
+        }))
+        .filter(item => item.key !== "");
+    }
+    if (isRecord(v)) {
+      return Object.entries(v)
+        .filter(([, value]) => typeof value === "number" && Number.isFinite(value))
+        .map(([key, value]) => ({ key, count: value as number }));
+    }
+    return [];
+  };
+
+  const statsRaw = isRecord(output.executionStats) ? output.executionStats : null;
+  const executionStats: ClosedLoopExecutionStatsView | null =
+    statsRaw === null
+      ? null
+      : {
+          totalSignals: asNum(statsRaw.totalSignals),
+          totalOrders: asNum(statsRaw.totalOrders),
+          totalFills: asNum(statsRaw.totalFills),
+          rejectedOrders: asNum(statsRaw.rejectedOrders),
+          partialFills: asNum(statsRaw.partialFills),
+          byReason: asKeyedCounts(statsRaw.byReason).sort((a, b) => b.count - a.count),
+        };
+
+  const trades: ClosedLoopTradeView[] = [];
+  if (Array.isArray(output.trades)) {
+    for (const trade of output.trades) {
+      if (!isRecord(trade)) continue;
+      const securityId = asStr(trade.securityId);
+      const entryTime = asStr(trade.entryTime);
+      if (securityId === null || entryTime === null) continue;
+      trades.push({
+        securityId,
+        entryTime,
+        entryPrice: asNum(trade.entryPrice),
+        exitTime: asStr(trade.exitTime),
+        exitPrice: asNum(trade.exitPrice),
+        quantity: asNum(trade.quantity),
+        netPnl: asNum(trade.netPnl),
+        returnPct: asNum(trade.returnPct),
+        holdingPeriod: asNum(trade.holdingPeriod),
+        openAtEnd: trade.openAtEnd === true,
+        fees: asNum(trade.fees),
+      });
+    }
+  }
+
+  return {
+    tradeCount: asNum(output.tradeCount) ?? trades.length,
+    initialCapital: asNum(output.initialCapital),
+    finalEquity: asNum(output.finalEquity),
+    decisionDayCount: asNum(output.decisionDayCount),
+    equityCurve: curve,
+    executionStats,
+    skippedCounts: asKeyedCounts(output.skippedCounts).sort((a, b) => b.count - a.count),
+    costs: asKeyedCounts(output.costs),
+    trades,
+    tradesTruncated: output.tradesTruncated === true,
   };
 }
 
@@ -302,6 +510,7 @@ export function buildClosedLoopRunViewModel(
 
   const wiringRaw = isRecord(raw.wiring) ? raw.wiring : {};
   const overall = isRecord(raw.overall) ? raw.overall : {};
+  const assemblyVm = extractAssembly(raw.assembly);
 
   return {
     hasResult: true,
@@ -326,7 +535,12 @@ export function buildClosedLoopRunViewModel(
     },
     stages,
     evaluation: extractEvaluationScalars(stages, rawStages),
-    assembly: extractAssembly(raw.assembly),
+    backtest: extractBacktestArtifacts(stages, rawStages),
+    assembly: assemblyVm,
+    rebuildScope:
+      assemblyVm !== null && assemblyVm.datasetSource === "rebuild"
+        ? classifyRebuildScope(assemblyVm.datasetSourceNote)
+        : null,
   };
 }
 

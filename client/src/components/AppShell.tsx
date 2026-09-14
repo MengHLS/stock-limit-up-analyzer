@@ -41,6 +41,7 @@ import {
   WalletCards,
   Workflow,
   FileText,
+  FileClock,
   BookOpenCheck,
   FlaskConical,
 } from "lucide-react";
@@ -72,6 +73,8 @@ const navGroups: NavGroup[] = [
     label: "量化回测",
     items: [
       { label: "组合回测", path: "/backtest", icon: WalletCards },
+      // CLOSED-LOOP-BACKTEST-PERSIST-001 — 闭环回测留档（每次「运行策略」自动存一条）
+      { label: "回测历史", path: "/backtest-runs", icon: FileClock },
       { label: "前向纸面交易", path: "/paper-trading", icon: TrendingUp },
     ],
   },

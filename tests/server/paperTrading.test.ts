@@ -4,7 +4,10 @@ import {
   advancePaperTradingDay,
   buildForwardPreparedBuys,
   buildPaperTradingSummary,
+  classifyAdvanceKind,
   createInitialPaperTradingState,
+  paperTradingAdvanceDiagnosis,
+  PaperTradingCalendarStaleError,
   type PaperPendingBuy,
   type PaperTradingState,
 } from "../../server/paperTrading";
@@ -274,5 +277,122 @@ describe("buildPaperTradingSummary 前向曲线汇总", () => {
     expect(summary.winRate).toBe(50);
     expect(summary.netProfit).toBe(50);
     expect(summary.tradingDayCount).toBe(2);
+  });
+});
+
+// 事故背景（2026-09-14）：「推进」在交易日历落后时恒为空转，却报「已推进到最新交易日」。
+// 这一组是防回归闸门：**空转必须区分**「合法已最新」与「日历落后（环境故障）」。
+describe("classifyAdvanceKind 推进三态判定", () => {
+  const CALENDAR_END = "2026-09-04"; // 事故现场：指数日线停更日
+  const MARKET_END = "2026-09-14"; // 涨停记录 / 日线行情末端
+
+  it("有推进日期 ⇒ advanced（日历仍落后也照样是 advanced）", () => {
+    expect(classifyAdvanceKind({ advancedDates: ["2026-09-11"], calendarLastDate: CALENDAR_END, marketLastDate: MARKET_END }))
+      .toBe("advanced");
+    expect(classifyAdvanceKind({ advancedDates: ["2026-09-11"], calendarLastDate: CALENDAR_END, marketLastDate: CALENDAR_END }))
+      .toBe("advanced");
+  });
+
+  it("无推进且日历末端 = 行情末端 ⇒ already-latest（合法空转）", () => {
+    expect(classifyAdvanceKind({ advancedDates: [], calendarLastDate: MARKET_END, marketLastDate: MARKET_END }))
+      .toBe("already-latest");
+  });
+
+  it("无推进且日历早于行情 ⇒ calendar-stale（事故真实形态，不得报成功）", () => {
+    expect(classifyAdvanceKind({ advancedDates: [], calendarLastDate: CALENDAR_END, marketLastDate: MARKET_END }))
+      .toBe("calendar-stale");
+  });
+
+  it("交易日历取不到末端 ⇒ calendar-stale，绝不伪装成「已是最新」", () => {
+    expect(classifyAdvanceKind({ advancedDates: [], calendarLastDate: null, marketLastDate: MARKET_END }))
+      .toBe("calendar-stale");
+    expect(classifyAdvanceKind({ advancedDates: [], calendarLastDate: null, marketLastDate: null }))
+      .toBe("calendar-stale");
+  });
+
+  it("行情末端取不到时不臆测日历落后（只按日历自身判定）", () => {
+    expect(classifyAdvanceKind({ advancedDates: [], calendarLastDate: MARKET_END, marketLastDate: null }))
+      .toBe("already-latest");
+  });
+});
+
+describe("paperTradingAdvanceDiagnosis 人话结论", () => {
+  it("advanced：带推进天数与日期，且不误报日历落后", () => {
+    const diagnosis = paperTradingAdvanceDiagnosis({
+      kind: "advanced",
+      lastProcessedDate: "2026-09-10",
+      advancedDates: ["2026-09-11", "2026-09-14"],
+      calendarLastDate: "2026-09-14",
+      marketLastDate: "2026-09-14",
+    });
+    expect(diagnosis.advancedDates).toEqual(["2026-09-11", "2026-09-14"]);
+    expect(diagnosis.calendarStale).toBe(false);
+    expect(diagnosis.message).toContain("已推进 2 个交易日");
+    expect(diagnosis.message).toContain("2026-09-11、2026-09-14");
+  });
+
+  it("advanced 但日历仍落后：calendarStale=true 且文案要求先同步指数日线", () => {
+    const diagnosis = paperTradingAdvanceDiagnosis({
+      kind: "advanced",
+      lastProcessedDate: "2026-08-01",
+      advancedDates: ["2026-09-04"],
+      calendarLastDate: "2026-09-04",
+      marketLastDate: "2026-09-14",
+    });
+    expect(diagnosis.kind).toBe("advanced");
+    expect(diagnosis.calendarStale).toBe(true);
+    expect(diagnosis.message).toContain("同步指数日线");
+  });
+
+  it("calendar-stale：同时给出日历末端与行情末端", () => {
+    const diagnosis = paperTradingAdvanceDiagnosis({
+      kind: "calendar-stale",
+      lastProcessedDate: "2026-09-10",
+      calendarLastDate: "2026-09-04",
+      marketLastDate: "2026-09-14",
+    });
+    expect(diagnosis.calendarStale).toBe(true);
+    expect(diagnosis.message).toContain("2026-09-04");
+    expect(diagnosis.message).toContain("2026-09-14");
+    expect(diagnosis.message).toContain("指数日线");
+  });
+
+  it("取不到日历时给出「无数据」而非「已是最新」", () => {
+    const diagnosis = paperTradingAdvanceDiagnosis({
+      kind: "calendar-stale",
+      lastProcessedDate: "2026-09-10",
+      calendarLastDate: null,
+      marketLastDate: null,
+    });
+    expect(diagnosis.message).toContain("没有数据");
+    expect(diagnosis.message).not.toContain("已是最新");
+  });
+
+  it("already-latest / 三类失败态各有明确文案（都不伪装成成功）", () => {
+    const latest = paperTradingAdvanceDiagnosis({ kind: "already-latest", lastProcessedDate: "2026-09-14" });
+    expect(latest.message).toContain("2026-09-14");
+    expect(latest.calendarStale).toBe(false);
+
+    expect(paperTradingAdvanceDiagnosis({ kind: "run-not-found" }).message).toContain("运行不存在");
+    expect(paperTradingAdvanceDiagnosis({ kind: "run-not-active" }).message).toContain("不能推进");
+    expect(paperTradingAdvanceDiagnosis({ kind: "database-unavailable" }).message).toContain("数据库不可用");
+  });
+
+  it("message 可覆盖默认文案（调用方定制）", () => {
+    const diagnosis = paperTradingAdvanceDiagnosis({ kind: "already-latest", message: "自定义说明" });
+    expect(diagnosis.message).toBe("自定义说明");
+  });
+});
+
+describe("PaperTradingCalendarStaleError 建运行前置校验", () => {
+  it("带稳定领域码与细节，便于路由把码写进 message", () => {
+    const error = new PaperTradingCalendarStaleError("最新信号日越过日历末端", {
+      signalDate: "2026-09-14",
+      calendarLastDate: "2026-09-04",
+    });
+    expect(error.code).toBe("PAPER_TRADING_CALENDAR_STALE");
+    expect(error.name).toBe("PaperTradingCalendarStaleError");
+    expect(error.details).toEqual({ signalDate: "2026-09-14", calendarLastDate: "2026-09-04" });
+    expect(error).toBeInstanceOf(Error);
   });
 });

@@ -687,3 +687,121 @@ export function buildPaperTradingSummary(state: PaperTradingState, initialCapita
     tradingDayCount: state.equityCurve.length,
   };
 }
+
+/**
+ * 推进结果的三态诊断（纯函数、无 IO）。
+ *
+ * 背景（2026-09-14 实查）：推进集合 = `tradingDates.filter(d => d > lastProcessedDate)`，
+ * 而交易日历的**唯一来源**是 `index_daily`（指数日线，项目内没有自动同步任务）。
+ * 日历一旦滞后于行情，该集合恒为空 ⇒ 推进变成**静默 no-op**，而调用方（前端 / 盘后调度器）
+ * 只看到「成功」。本函数把「已是最新」与「日历落后」显式分开，杜绝「提示成功但结果没动」。
+ */
+export type PaperTradingAdvanceKind =
+  | "advanced"
+  | "already-latest"
+  | "calendar-stale"
+  | "run-not-found"
+  | "run-not-active"
+  | "database-unavailable";
+
+export type PaperTradingAdvanceDiagnosis = {
+  kind: PaperTradingAdvanceKind;
+  /** 推进前的最后处理日（未找到运行时为 null）。 */
+  lastProcessedDate: string | null;
+  /** 本次真正推进过的交易日（升序）。 */
+  advancedDates: string[];
+  /** 交易日历末端（`index_daily` 在本窗口内的最后一天；无数据时为 null）。 */
+  calendarLastDate: string | null;
+  /** 已加载行情的末端（候选股日线最后一天）。 */
+  marketLastDate: string | null;
+  /** 日历是否落后于行情；`kind === "advanced"` 时也可能为 true（只推进了一段）。 */
+  calendarStale: boolean;
+  /** 人话结论，供 UI / 日志直接展示。 */
+  message: string;
+};
+
+/** 三态判定（纯函数）：有推进 ⇒ `advanced`；否则再按「日历是否落后」区分空转原因。 */
+export function classifyAdvanceKind(input: {
+  advancedDates: readonly string[];
+  calendarLastDate: string | null;
+  marketLastDate: string | null;
+}): "advanced" | "already-latest" | "calendar-stale" {
+  if (input.advancedDates.length > 0) return "advanced";
+  // 日历末端取不到（本窗口内 index_daily 无数据）或落后于行情末端 ⇒ 属环境故障，**不是**「已是最新」。
+  if (input.calendarLastDate === null) return "calendar-stale";
+  if (input.marketLastDate !== null && input.marketLastDate > input.calendarLastDate) return "calendar-stale";
+  return "already-latest";
+}
+
+/** 按 kind 生成默认人话文案（纯函数）。 */
+function defaultAdvanceMessage(input: {
+  kind: PaperTradingAdvanceKind;
+  advancedDates: readonly string[];
+  lastProcessedDate: string | null;
+  calendarLastDate: string | null;
+  marketLastDate: string | null;
+}): string {
+  switch (input.kind) {
+    case "advanced": {
+      const head = `已推进 ${input.advancedDates.length} 个交易日（${input.advancedDates.join("、")}）`;
+      return input.calendarLastDate !== null && input.marketLastDate !== null && input.marketLastDate > input.calendarLastDate
+        ? `${head}；但交易日历（指数日线）只到 ${input.calendarLastDate}、行情已到 ${input.marketLastDate}，仍落后 —— 请先同步指数日线`
+        : head;
+    }
+    case "already-latest":
+      return input.lastProcessedDate === null
+        ? "没有可推进的交易日"
+        : `已是最新交易日（${input.lastProcessedDate}），没有新的交易日可推进`;
+    case "calendar-stale":
+      return input.calendarLastDate === null
+        ? "交易日历（指数日线 index_daily）在本窗口内没有数据，无法推进；请先同步指数日线"
+        : `交易日历（指数日线）只到 ${input.calendarLastDate}，而行情已到 ${input.marketLastDate ?? "未知"} ⇒ 没有交易日可推进；请先同步指数日线`;
+    case "run-not-found":
+      return "运行不存在，无法推进";
+    case "run-not-active":
+      return "运行已暂停或已结束，不能推进（请先恢复为进行中）";
+    case "database-unavailable":
+      return "数据库不可用，推进未执行";
+  }
+}
+
+/** 组装诊断（纯函数）；`message` 可覆盖默认文案。 */
+export function paperTradingAdvanceDiagnosis(input: {
+  kind: PaperTradingAdvanceKind;
+  lastProcessedDate?: string | null;
+  advancedDates?: readonly string[];
+  calendarLastDate?: string | null;
+  marketLastDate?: string | null;
+  message?: string;
+}): PaperTradingAdvanceDiagnosis {
+  const advancedDates = [...(input.advancedDates ?? [])];
+  const lastProcessedDate = input.lastProcessedDate ?? null;
+  const calendarLastDate = input.calendarLastDate ?? null;
+  const marketLastDate = input.marketLastDate ?? null;
+  return {
+    kind: input.kind,
+    lastProcessedDate,
+    advancedDates,
+    calendarLastDate,
+    marketLastDate,
+    calendarStale: input.kind === "calendar-stale"
+      || (calendarLastDate !== null && marketLastDate !== null && marketLastDate > calendarLastDate),
+    message: input.message ?? defaultAdvanceMessage({ kind: input.kind, advancedDates, lastProcessedDate, calendarLastDate, marketLastDate }),
+  };
+}
+
+/**
+ * 建运行前置校验失败：最新信号日已**越过交易日历末端** ⇒ 这条运行从创建起就不可能被推进
+ * （推进集合按日历取，日历里没有比它更晚的交易日）。宁可在创建时响亮失败，也不留一条永远不动的新运行。
+ */
+export class PaperTradingCalendarStaleError extends Error {
+  readonly code = "PAPER_TRADING_CALENDAR_STALE";
+
+  constructor(
+    message: string,
+    readonly details: { signalDate: string; calendarLastDate: string | null },
+  ) {
+    super(message);
+    this.name = "PaperTradingCalendarStaleError";
+  }
+}

@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { BarChart3, Loader2, Play, Pause, Plus, RefreshCw, WalletCards } from "lucide-react";
+import { AlertTriangle, BarChart3, Loader2, Play, Pause, Plus, RefreshCw, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -38,6 +38,8 @@ export default function PaperTrading() {
   const [label, setLabel] = useState("");
   const [strategyKey, setStrategyKey] = useState<StrategyKey>("baseline");
   const [initialCapital, setInitialCapital] = useState("100000");
+  /** 最近一次推进的如实结论（推进成功 / 已是最新 / 交易日历落后）。 */
+  const [advanceNotice, setAdvanceNotice] = useState<{ tone: "success" | "warning" | "info"; text: string } | null>(null);
 
   const listQuery = trpc.sentiment.listPaperTradingRuns.useQuery({ limit: 50 });
   const detailQuery = trpc.sentiment.getPaperTradingRun.useQuery(
@@ -55,9 +57,21 @@ export default function PaperTrading() {
     onError: (error) => toast.error(error.message),
   });
 
+  // 🔴 推进提示必须按服务端诊断如实分流（2026-09-14 事故）：此前无条件报「已推进到最新交易日」，
+  // 而交易日历（指数日线）落后时推进恒为空转 ⇒ 提示与事实相反。
   const advanceMutation = trpc.sentiment.advancePaperTradingRun.useMutation({
-    onSuccess: () => {
-      toast.success("已推进到最新交易日");
+    onSuccess: (data) => {
+      const { diagnosis } = data;
+      if (diagnosis.calendarStale) {
+        toast.warning(diagnosis.message);
+        setAdvanceNotice({ tone: "warning", text: diagnosis.message });
+      } else if (diagnosis.kind === "advanced") {
+        toast.success(diagnosis.message);
+        setAdvanceNotice({ tone: "success", text: diagnosis.message });
+      } else {
+        toast.info(diagnosis.message);
+        setAdvanceNotice({ tone: "info", text: diagnosis.message });
+      }
       void detailQuery.refetch();
       void listQuery.refetch();
     },
@@ -112,6 +126,30 @@ export default function PaperTrading() {
           </div>
         </div>
       </section>
+
+      {advanceNotice && (
+        <section
+          className={`rounded-2xl border p-4 text-sm ${
+            advanceNotice.tone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : advanceNotice.tone === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-slate-200 bg-slate-50 text-slate-700"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle
+              className={`mt-0.5 h-4 w-4 shrink-0 ${
+                advanceNotice.tone === "warning" ? "text-amber-600" : advanceNotice.tone === "success" ? "text-emerald-600" : "text-slate-400"
+              }`}
+            />
+            <p className="leading-6">{advanceNotice.text}</p>
+            <button type="button" className="ml-auto shrink-0 text-xs text-slate-400 hover:text-slate-600" onClick={() => setAdvanceNotice(null)}>
+              关闭
+            </button>
+          </div>
+        </section>
+      )}
 
       {isAdmin && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
