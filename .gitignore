@@ -104,6 +104,12 @@ vitest.config.ts.timestamp-*.mjs
 tmp/
 temp/
 
+# 本地调试临时产物（验收截图 / CDP 脚本 / 探针结果），不入库
+_*.png
+_*.jpg
+_*.jpeg
+_*.webp
+
 # 本地性能索引快照（可随时由服务端重建）
 
 # Database

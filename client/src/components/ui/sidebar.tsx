@@ -24,6 +24,22 @@ import { cva, VariantProps } from "class-variance-authority";
 import { PanelLeftIcon } from "lucide-react";
 import * as React from "react";
 
+/**
+ * 【本项目定制】侧栏高度不足时"挤压重叠"的修复说明
+ *
+ * `client/src/index.css` 里有一条全局规则 `@layer components { .flex { min-height: 0 } }`，
+ * 它会给**所有** display:flex 的容器强制 `min-height: 0`，抹掉 flex 子项默认的自动最小高度
+ * （`min-height: auto`），使它们可以被压缩到内容高度以下。
+ *
+ * 后果（高度不足时）：
+ *   SidebarContent(flex-1 + overflow-auto) → SidebarGroup(flex) → SidebarMenu(flex) → li
+ *   中间的 group / menu 被压扁，而 `li` 不受该规则影响、不压缩 ⇒ 菜单项溢出父容器造成重叠；
+ *   又因为子项自己缩到了容器高度以内，`overflow-auto` 认为"装得下"，滚动条不出现。
+ *
+ * 修复：让侧栏内部这些容器显式 `shrink-0`（不可压缩），把溢出交给 `SidebarContent` 滚动。
+ * 触达点：SidebarHeader / SidebarFooter（保持钉住不压缩）、SidebarGroup / SidebarMenu / SidebarMenuSub。
+ */
+
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
@@ -344,7 +360,7 @@ function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sidebar-header"
       data-sidebar="header"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn("flex shrink-0 flex-col gap-2 p-2", className)}
       {...props}
     />
   );
@@ -355,7 +371,7 @@ function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sidebar-footer"
       data-sidebar="footer"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn("flex shrink-0 flex-col gap-2 p-2", className)}
       {...props}
     />
   );
@@ -394,7 +410,7 @@ function SidebarGroup({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sidebar-group"
       data-sidebar="group"
-      className={cn("relative flex w-full min-w-0 flex-col p-2", className)}
+      className={cn("relative flex w-full min-w-0 shrink-0 flex-col p-2", className)}
       {...props}
     />
   );
@@ -463,7 +479,7 @@ function SidebarMenu({ className, ...props }: React.ComponentProps<"ul">) {
     <ul
       data-slot="sidebar-menu"
       data-sidebar="menu"
-      className={cn("flex w-full min-w-0 flex-col gap-1", className)}
+      className={cn("flex w-full min-w-0 shrink-0 flex-col gap-1", className)}
       {...props}
     />
   );
@@ -650,7 +666,7 @@ function SidebarMenuSub({ className, ...props }: React.ComponentProps<"ul">) {
       data-slot="sidebar-menu-sub"
       data-sidebar="menu-sub"
       className={cn(
-        "border-sidebar-border mx-3.5 flex min-w-0 translate-x-px flex-col gap-1 border-l px-2.5 py-0.5",
+        "border-sidebar-border mx-3.5 flex min-w-0 shrink-0 translate-x-px flex-col gap-1 border-l px-2.5 py-0.5",
         "group-data-[collapsible=icon]:hidden",
         className
       )}

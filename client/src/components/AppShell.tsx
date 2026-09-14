@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { getLoginUrl } from "@/const";
 import { SentimentAlertBell } from "@/components/SentimentAlertBell";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import {
   Activity,
@@ -167,12 +168,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </SidebarContent>
 
         <SidebarFooter>
-          <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center">
+          {/* 折叠态（icon）下侧栏内容宽仅 ~32px，三个控件并排放不下 ⇒ 竖排 */}
+          <div className="flex items-center gap-2 px-1 group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1.5">
             <SentimentAlertBell />
+            <ThemeToggle />
             {isAuthenticated && user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sidebar-accent transition-colors w-full text-left group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:w-auto focus:outline-none">
+                  <button className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sidebar-accent transition-colors min-w-0 flex-1 text-left group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:flex-none focus:outline-none">
                     <Avatar className="h-8 w-8 border shrink-0">
                       <AvatarFallback className="text-xs font-medium">
                         {user.name?.charAt(0).toUpperCase() ?? "U"}

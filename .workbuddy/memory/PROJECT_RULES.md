@@ -80,7 +80,14 @@
 ## 前端（recharts / 分层 / 验收）
 - ⚠️ 图表一律 **recharts**（已在 deps ⇒ **禁新增图表库**，沙箱也装不了）。四个坑：① 自定义坐标轴刻度**只有写成箭头函数**才会注入 `x/y/payload` —— 写 `tick={<C/>}` 走 `cloneElement`，自定义 props 传不进去且 **TS 报 `not assignable to type 'IntrinsicAttributes'`**；② tick 组件的 props 类型**不能是 `unknown`**（那样 JSX 会拒绝一切属性）；③ **`Tooltip` 的 `content` 同理** —— `<Tip lines={x}/>` 若 Tip 的 props 是 `unknown` 直接 `TS2322`，解法是 `content={(p) => renderTip(p, x)}` **普通函数调用**；④ `Line` 取值用**展平到顶层的字符串 `dataKey`**（`v_<code>`），**不用函数式 `dataKey`**（跨版本行为不一致）。横向条形图**横轴必须含 0** + `ReferenceLine x={0}`；折线图的基准线要画在**语义基准**上（量比 = 1 倍「持平」，不是 0）。
 - ⚠️ **展示层能做恒等变形、不能做估计**（判据见 `docs/research/LAYER_CONVENTIONS.md`「前端工作台」段）：能从已落库数值**无损还原**的量可以算 —— 均值可以，**胜率也可以**（它就是 0/1 的均值），如 `estimateExcludedGroupMean` 反推条件分析缺的「对照组」，但**必须标注来源**（图上标「（反推）」）。中位数 / 标准差 / 分位数是非线性统计量，反推即估计 ⇒ 一律返回 `null`。**禁重算引擎口径**（如按「结果值最大/最小」自行挑顶底档 —— 引擎 `SPREAD_TOP_BOTTOM` 是「末档 − 首档」）；**能搬运就不要重算**。
-- 🔴 **`agent-browser` 在本机不可用**（`open about:blank` 与本地页面**均挂起零输出**，沙箱起不了 Chromium）；且仓库**无 `jsdom` / `@testing-library`**、安装被沙箱禁 ⇒ **前端任务不得把「浏览器截图」写进验收路径**。等价手段：① 组件真实数据源走**真实 tRPC** 取数；② 组件真实判定函数若在 **React-free 纯函数模块**（如 `client/src/components/research/*Form.ts`、`client/src/adapters/*.ts`）可直接从 Node/tsx 脚本 `import` 复用，**禁另写一套口径**；③ 真实 adapter 往返（`xxxToViewModel` → `viewModelToXxx`）+ 真实 DB 校验。分层纪律 = `API(DTO) → Adapter → ViewModel → UI`，**不把裸 JSON 漏给视图层**。
+- 🔴 **`agent-browser` 技能在本机不可用**（`open about:blank` 与本地页面**均挂起零输出**）；且仓库**无 `jsdom` / `@testing-library`**。
+  ✅ **但「无头 Chrome + CDP」可用 —— 前端 UI 任务的真实渲染可以进验收路径**（2026-09-15 实测两次：矮屏侧栏挤压、日历格子间距，均以此为准；**本文旧版「不得把浏览器截图写进验收路径」已作废**）：
+  - 起浏览器：`"/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new --disable-gpu --no-proxy-server --no-first-run --disable-extensions --user-data-dir=<临时目录> --remote-debugging-port=<port> --window-size=W,H <url>`（Edge 亦可）。
+  - 驱动：**Node 22 内置全局 `WebSocket`**（零依赖）连 `/json/list` 给的 `webSocketDebuggerUrl`；`Runtime.evaluate` **量 DOM 几何**（比截图硬），`Page.captureScreenshot` 出图并可带 `clip:{x,y,width,height,scale}` **放大特写**，再 `Read` 该 PNG 肉眼核。
+  - 前后对比：**运行时注入 `<style>`** 即可在同页还原「修复前」，**不必改仓库代码**。
+  - ⚠️ 坑：`--user-data-dir` 必填；必须 `--no-proxy-server`（本机全局代理否则代理走掉）；`--window-size=W,H` 实测**视口比设定值小**（1600,1000 → 1574×900）。
+  - ⚠️ **别在 Bash 末尾接 `| tail`**（输出全被缓冲，进程看着像卡死）；探针脚本落盘日志再读。
+- 非 UI 的等价手段：① 组件真实数据源走**真实 tRPC** 取数；② 组件真实判定函数若在 **React-free 纯函数模块**（如 `client/src/components/research/*Form.ts`、`client/src/adapters/*.ts`）可直接从 Node/tsx 脚本 `import` 复用，**禁另写一套口径**；③ 真实 adapter 往返（`xxxToViewModel` → `viewModelToXxx`）+ 真实 DB 校验。分层纪律 = `API(DTO) → Adapter → ViewModel → UI`，**不把裸 JSON 漏给视图层**。
 
 ## 🔴 真实 tRPC 全链 E2E（不必起 HTTP）
 - `appRouter.createCaller(ctx)`（手构造 admin ctx：`user.role="admin"` + `req={protocol,headers:{}}` + `res={clearCookie:()=>{}}`）即可覆盖「tRPC → Service → Repository → TiDB」。
@@ -450,3 +457,23 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - 落点：`tests/server/paperTrading.test.ts`（**22 例** = 原 10 + 新增 12：三态判定 5，含事故现场常量 `CALENDAR_END=2026-09-04` / `MARKET_END=2026-09-14`；人话结论 6；错误类 1）；e2e `docs/evidence/_probe_paper_advance_e2e.mts`（真实 tRPC **17/17**，⚠️ **会写入** `paper_trading_runs`）；建运行正向 `docs/evidence/_probe_paper_create_guard.mts`（**5/5**，按命名域自清理）。
 - ⚠️ **未取证**：建运行守卫的**反向分支**（日历真落后 ⇒ 真抛 `PAPER_TRADING_CALENDAR_STALE`）需**篡改日历数据**才能构造，本轮未取证；已证的是**正向路径不受影响**（不会误锁新建运行）。
 - **排查顺序（推进后什么都没变）**：① 三个末端是否一致 → ② `stateJson.lastProcessedDate` 是否已在末端之后 → ③ `updatedAt == createdAt` 是否说明「从未落过新状态」→ ④ 建运行锚点是否越界。
+
+## 🔴 暗色模式与 Tailwind v4 覆盖层级（THEME-DARKMODE-001 · 2026-09-15 实查）
+
+- **本项目暗色早已「就绪但未激活」**：`client/src/index.css` 的 `.dark` 令牌块与 `@custom-variant dark (&:is(.dark *))` 一直存在，上游 shadcn 基元也自带 `dark:` 变体；唯一原因是 `App.tsx` 的 `<ThemeProvider defaultTheme="light">` 从未把 `.dark` 挂到 `<html>`。**排查「暗色不生效」先看这里，不要去找 CSS。**
+- 🔴 **层级顺序优先于特异性（最容易白干的一个坑）**：Tailwind v4 的工具类位于 `@layer utilities`。**任何 `@layer` 里的规则，无论特异性多高，都永远覆盖不到它。** 想覆盖工具类，规则必须写在**无 `@layer`** 的顶层。写在 `@layer components` 里会**静默地完全不生效**（不报错、不提示）。
+- 🔴 **不能改调色板变量来做暗色**：`bg-slate-800`（选中态深色药丸 + 白字）与 `text-slate-800`（深色正文）**共用同一个 `--color-slate-800`**，暗色下诉求**相反**。⇒ 只能按「**utility 族 × 色阶**」逐类写 `.dark .<族>-<色相>-<档位>`。
+  （前提是成立的：实测 Tailwind v4 工具类**一律**引用变量 —— `.text-slate-700{color:var(--color-slate-700)}`、`.bg-white{background-color:var(--color-white)}`。）
+- **映射方向 = 「把色阶搬进暗色可读区间并保持层级方向」，不是亮度反相**：亮色下「编号越大越重」在暗色下仍是「编号越大越亮/越实」。反相会把 `text-slate-400` 这类「弱化文字」压得更暗 → 暗底上不可读。
+- **深色面单独排表**：`bg-slate-700/800/900` 在亮色下是**深色面**（进度条填充 / 选中 tab / 深色 tooltip），语义与 `text-*` 相反，**不能跟着一起映射**。
+- **焦点环与强调色不下沉**：`ring-*-500`、`bg-*-500/600` 在暗色下本就清晰，下沉反而让焦点环更暗。
+- 🔴 **recharts 图表不必改 13 个 `client/**` 文件**：图表把颜色写成 **SVG 表现属性**（`stroke="#e2e8f0"` / `fill="#64748b"` / `tick={{fill:'#64748b'}}`），而**表现属性优先级低于任意 CSS 规则** ⇒ 一条 `.dark .recharts-cartesian-grid line{stroke:…}` 即可覆盖。例外：recharts **默认 tooltip 是内联样式**写死白底，必须 `!important`。
+- **兼容层产物与维护**：`client/src/theme/darkCompatibility.css`（751 行，`.dark` 级）+ `scripts/generateDarkCompatibility.mjs`（扫源码实际类名清单生成，映射表在脚本 `NEUTRAL_*` / `COLOR_*`）。⚠️ **新增页面若用了清单外的硬编码色类，必须重跑生成器**，否则该处不跟随暗色 —— **这是本方案的固有维护面**。
+- **上游显式 `dark:` 优先**：每条兼容规则都带 `:not([class*="dark:<族>-"])` 守卫，让位给上游已手写的 `dark:text-amber-400` 之类配对（约 25 处）。
+- **首屏不闪白**：`client/index.html` 内联脚本必须**早于样式表与 React 挂载**挂 `.dark`；它和 `ThemeContext` **共用同一 localStorage key（`theme`）**，改逻辑要两边同步。优先级 = localStorage 显式选择 > 系统 `prefers-color-scheme`（实时跟随）> `defaultTheme`。
+- **sonner Toast 不走本项目主题**：`components/ui/sonner.tsx` 从 **`next-themes`** 取主题，而本项目**未挂** next-themes Provider ⇒ 必须在 `App.tsx` 显式把本项目主题透传给 `Toaster`。
+- **可复用的验收手法**：无头 Chrome + CDP 量 **computed style**；`Emulation.setEmulatedMedia` 验首屏默认；**残留扫描判据** = 遍历可见元素，把 `oklch/oklab` 的 **L 分量**当感知亮度（`rgb()` 走 sRGB 相对亮度），背景 L>0.85 / 文字 L<0.40 / 边框 L>0.9 即判残留。
+  ⚠️ 侧栏折叠态**没有 `SidebarTrigger`**，设 `sidebar_state` cookie **无效** ⇒ 只能用 CDP `Input.dispatchKeyEvent` 发 **Ctrl+B** 才能真实折叠。
+- ⚠️ **Tailwind 编译产物是多行缩进**（`\n  .bg-white {\n    background-color: …`）⇒ 用单行正则 `\.bg-white{[^}]*}` 去 grep 会**误判为「类不存在」**。查产物请允许缩进或直接看变量名。
+- **本机系统偏好实测 = dark**（`prefers-color-scheme: dark` 为真）⇒ 无任何模拟时页面默认进入暗色，属预期，不是 bug。
+

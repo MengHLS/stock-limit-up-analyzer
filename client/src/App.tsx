@@ -4,7 +4,7 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch, Redirect, useSearch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import AppShell from "./components/AppShell";
-import { ThemeProvider } from "./contexts/ThemeContext";
+import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Upload from "./pages/Upload";
 import Market from "./pages/Market";
@@ -117,12 +117,21 @@ function Router() {
   );
 }
 
+/**
+ * Toaster 包装：shadcn 的 sonner 封装默认从 next-themes 取主题（本项目没挂那个 Provider），
+ * 这里显式把本项目的实际主题透传下去，保证 Toast 与页面主题一致。
+ */
+function ThemedToaster() {
+  const { theme } = useTheme();
+  return <Toaster theme={theme} />;
+}
+
 function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
-          <Toaster />
+          <ThemedToaster />
           <AppShell>
             <Router />
           </AppShell>

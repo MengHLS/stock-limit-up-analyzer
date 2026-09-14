@@ -1,5 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+/* 暗色兼容层：把散落在组件里的硬编码调色板类（bg-white / text-slate-700 …）在 .dark 下重映射。
+   必须放在 Tailwind 之后、且自身不套 @layer —— Tailwind 工具类位于 @layer utilities，
+   任何 @layer 规则都低于它，只有无 layer 的规则才能覆盖。详见该文件头部说明。 */
+@import "./theme/darkCompatibility.css";
 
 @custom-variant dark (&:is(.dark *));
 

@@ -31,6 +31,36 @@ import { toast } from "sonner";
 
 const EMPTY_ARRAY: any[] = [];
 
+/**
+ * 「选择日期」日历的网格间距覆盖（react-day-picker v9）。
+ *
+ * 问题：v9 默认周行是 `flex w-full mt-2`，**列方向没有 gap** —— 7 个日期格子各占
+ * 1/7 宽度首尾贴合（实测相邻格子横向间距 = 0px），整月渲染成一整块没有缝的色块。
+ *
+ * 为什么不能「只加 gap」：`day`（格子 td）是 `w-full` 且 **flex 子项默认
+ * `min-width: auto`**，格子压不下去，加 gap 会把整行撑到 322.7px 而卡片内宽只有
+ * 298.7px（实测溢出 24px）。所以必须同时给格子放开 `min-w-0`。
+ *
+ * 落点选择：**不改 `components/ui/calendar.tsx`**（共享基元，改了会与上游同步冲突），
+ * 用 `classNames` 在首页局部覆盖。本项目 calendar.tsx 里 `classNames` 是「整体替换」
+ * 语义（`{...默认值, ...传入}` 展开在最后），故覆盖时需把原值一并写上。
+ * 取值为固定字面量，放在模块作用域避免每次渲染重建对象。
+ */
+const CALENDAR_CLASS_NAMES = {
+  /** 根节点：v9/calendar.tsx 默认 `w-fit`，但放开 `min-w-0` 后 `fit-content` 会缩成
+   *  内容宽度（实测只剩 249px、右侧空出 57px），故改为撑满卡片。
+   *  `max-w-[320px]` 与首页栅格首列 `lg:grid-cols-[320px_1fr]` 同宽：桌面端卡片本身
+   *  就是 320px（这一条不生效），窄屏下卡片变整行时用它兜住，避免日历被拉成大格子。
+   *  `rdp-root` 是库默认类，保留。 */
+  root: "w-full max-w-[320px] rdp-root",
+  /** 周行：补列间距；行距从 v9 默认的 mt-2 收成 mt-1.5，与列间距同宽（6px 统一网格）。 */
+  week: "flex w-full mt-1.5 gap-1.5 rdp-week",
+  /** 星期表头行：与日期列用同样的 gap，保证表头与日期列对齐。 */
+  weekdays: "flex gap-1.5 rdp-weekdays",
+  /** 日期格子：仅加 `min-w-0`（其余原样复制自 calendar.tsx 的 `day`）。 */
+  day: "relative min-w-0 w-full h-full p-0 text-center [&:first-child[data-selected=true]_button]:rounded-l-md [&:last-child[data-selected=true]_button]:rounded-r-md group/day aspect-square select-none rdp-day",
+} as const;
+
 export default function Home() {
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -268,7 +298,7 @@ export default function Home() {
           {...buttonProps}
           type="button"
           className={`
-            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-300 p-2 text-sm font-medium gap-1 cursor-pointer
+            relative flex flex-col items-center justify-center w-full aspect-square rounded-lg transition-all duration-300 p-1 text-sm font-medium gap-0.5 cursor-pointer
             ${hasData 
               ? isSelected
                 ? 'bg-gradient-to-br from-orange-400 via-orange-500 to-red-500 text-white shadow-xl border border-orange-300 hover:shadow-2xl hover:scale-105'
@@ -281,11 +311,11 @@ export default function Home() {
             }
           `}
         >
-          <span className={`font-bold leading-none text-xl ${hasData && isSelected ? "text-white" : hasData ? "text-orange-800" : "text-slate-800"}`}>
+          <span className={`font-bold leading-none text-lg ${hasData && isSelected ? "text-white" : hasData ? "text-orange-800" : "text-slate-800"}`}>
             {day?.date.getDate()}
           </span>
           {hasData && (
-            <span className={`text-xs font-semibold leading-none ${isSelected ? "text-orange-100" : "text-orange-600"}`}>
+            <span className={`text-[10px] font-semibold leading-none ${isSelected ? "text-orange-100" : "text-orange-600"}`}>
               {count}
             </span>
           )}
@@ -406,6 +436,7 @@ export default function Home() {
                       modifiers={modifiers}
                       modifiersClassNames={modifiersClassNames}
                       className="rounded-lg"
+                      classNames={CALENDAR_CLASS_NAMES}
                       components={{
                         DayButton: CustomDayButton as any,
                       }}
