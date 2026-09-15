@@ -50,10 +50,12 @@ import {
   STRATEGY_CONDITION_OPERATORS,
   STRATEGY_CONDITION_VALUE_TYPES,
   STRATEGY_COST_MODELS,
+  STRATEGY_CURRENT_BAR_FIELDS,
   STRATEGY_DATASET_ROLES,
   STRATEGY_DATASET_VERSION_LABEL_RE,
   isValidDatasetVersionId,
   STRATEGY_DEFINITION_SCHEMA_VERSIONS,
+  STRATEGY_DERIVED_BAR_FIELDS,
   STRATEGY_EVENT_FIELDS,
   STRATEGY_EVENT_TYPES,
   STRATEGY_EXECUTION_TIMINGS,
@@ -154,7 +156,11 @@ function checkFieldReference(
   if (!isKnownFieldReference(reference)) {
     const whitelist = reference.kind === "eventDay"
       ? `event 层白名单：${[...STRATEGY_EVENT_FIELDS].join(" | ")}`
-      : `prefix / post / bar 层白名单：${[...STRATEGY_BAR_FIELDS].join(" | ")}`;
+      : reference.kind === "currentBar"
+        ? `bar 层白名单：${[...STRATEGY_CURRENT_BAR_FIELDS].join(" | ")}`
+          + `（其中 ${[...STRATEGY_DERIVED_BAR_FIELDS].join(" / ")} 是**派生字段**：`
+          + "在当前 bar 上相对事件日基准求值，用于表达「缩量比 / 回撤深度」这类比值）"
+        : `prefix / post 层白名单：${[...STRATEGY_BAR_FIELDS].join(" | ")}`;
     issues.push(issue(
       "UNKNOWN_FIELD_REFERENCE",
       path,

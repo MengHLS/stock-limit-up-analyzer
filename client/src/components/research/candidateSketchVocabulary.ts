@@ -311,7 +311,10 @@ export const CANDIDATE_EVENT_FIELD_OPTIONS: readonly string[] = [
   "floatMarketCap",
 ];
 
-/** bar 字段白名单（服务端 `STRATEGY_BAR_FIELDS`），`prefix.*` / `bar.*` / `post.*` 共用。 */
+/**
+ * bar 层**原始行情列**白名单 —— 逐字对应服务端 `STRATEGY_BAR_FIELDS`。
+ * `prefix.*` / `post.*` 与 `bar.*` 共用这一组；`bar.*` 另有**派生字段**（见下）。
+ */
 export const CANDIDATE_BAR_FIELD_OPTIONS: readonly string[] = [
   "open",
   "high",
@@ -321,6 +324,21 @@ export const CANDIDATE_BAR_FIELD_OPTIONS: readonly string[] = [
   "amount",
   "tradeDate",
   "relativeDay",
+];
+
+/**
+ * **派生字段**（只在 `bar.*` 可用）—— 逐字对应服务端 `STRATEGY_DERIVED_BAR_FIELDS`。
+ *
+ * 它们是「在**当前 bar** 上相对事件日基准求值」的比值，唯一目的是让配方门槛写得下来：
+ * 例如「缩量 ≤ 首板量能 × 比例」= `bar.volumeRatio <= max_volume_ratio`（右值用**参数引用**）。
+ * 🔴 `prefix.*` / `post.*` 不提供这些字段 —— 服务端同样不认（它们只在当前 bar 这一语义下成立）。
+ * 命名唯一真源 = 配方特征 id（`recipeRegistry.PULLBACK_FEATURE_IDS`），与执行侧同名同义。
+ */
+export const CANDIDATE_DERIVED_BAR_FIELD_OPTIONS: readonly string[] = [
+  "volumeRatio",
+  "haircutFromEventLow",
+  "isBullish",
+  "momentumFromEventClose",
 ];
 
 // ---------------------------------------------------------------------------
@@ -353,24 +371,53 @@ const CANDIDATE_BAR_FIELD_LABELS: Readonly<Record<string, string>> = {
   amount: "成交额",
   tradeDate: "交易日",
   relativeDay: "相对第几根",
+  // 派生字段（只在 bar.* 出现）：与执行侧配方特征同名同义，见 CANDIDATE_DERIVED_BAR_FIELD_OPTIONS。
+  volumeRatio: "量能比（当日 ÷ 首板日成交量）",
+  haircutFromEventLow: "回撤深度（相对首板日开盘价，正数=跌破）",
+  isBullish: "是否红盘（收 > 开 记 1）",
+  momentumFromEventClose: "相对首板日收盘的涨幅",
 };
 
 /**
- * `bar.*` / `prefix.*` / `post.*` 的字段下拉（**值集与 `CANDIDATE_BAR_FIELD_OPTIONS` 同源**，
+ * `prefix.*` / `post.*` 的字段下拉（**值集与 `CANDIDATE_BAR_FIELD_OPTIONS` 同源**，
  * 由它派生 ⇒ 不可能漂移；对表测试另锁一层）。
  */
 export const CANDIDATE_BAR_FIELD_CHOICES: readonly SketchOption[] = CANDIDATE_BAR_FIELD_OPTIONS.map(
   (value) => ({ value, label: CANDIDATE_BAR_FIELD_LABELS[value] ?? value }),
 );
 
+/** 派生字段的下拉（值集与 `CANDIDATE_DERIVED_BAR_FIELD_OPTIONS` 同源）。 */
+export const CANDIDATE_DERIVED_BAR_FIELD_CHOICES: readonly SketchOption[] =
+  CANDIDATE_DERIVED_BAR_FIELD_OPTIONS.map(
+    (value) => ({ value, label: CANDIDATE_BAR_FIELD_LABELS[value] ?? value }),
+  );
+
+/**
+ * 当前 bar（`bar.*`）的字段下拉 = 原始行情列 + 派生字段。
+ *
+ * 顺序与服务端 `STRATEGY_CURRENT_BAR_FIELDS` 逐字一致
+ * （`[...STRATEGY_BAR_FIELDS, ...STRATEGY_DERIVED_BAR_FIELDS]`），由对表测试锁死。
+ */
+export const CANDIDATE_CURRENT_BAR_FIELD_CHOICES: readonly SketchOption[] = [
+  ...CANDIDATE_BAR_FIELD_CHOICES,
+  ...CANDIDATE_DERIVED_BAR_FIELD_CHOICES,
+];
+
 /** `event.*` 的字段下拉（值集与 `CANDIDATE_EVENT_FIELD_OPTIONS` 同源）。 */
 export const CANDIDATE_EVENT_FIELD_CHOICES: readonly SketchOption[] = CANDIDATE_EVENT_FIELD_OPTIONS.map(
   (value) => ({ value, label: CANDIDATE_EVENT_FIELD_LABELS[value] ?? value }),
 );
 
-/** 某个部位下该取哪张字段表。 */
+/**
+ * 某个部位下该取哪张字段表。
+ *
+ * 🔴 `currentBar` 多一组**派生字段**（只在当前 bar 上成立的比值）；`prefix.*` / `post.*`
+ * 只有原始行情列 —— 与服务端 `isKnownFieldReference` 的分支逐字对称，不多给也不给错。
+ */
 export function candidateFieldChoicesOf(kind: string): readonly SketchOption[] {
-  return kind === "eventDay" ? CANDIDATE_EVENT_FIELD_CHOICES : CANDIDATE_BAR_FIELD_CHOICES;
+  if (kind === "eventDay") return CANDIDATE_EVENT_FIELD_CHOICES;
+  if (kind === "currentBar") return CANDIDATE_CURRENT_BAR_FIELD_CHOICES;
+  return CANDIDATE_BAR_FIELD_CHOICES;
 }
 
 /**
@@ -520,9 +567,13 @@ export function splitCandidateFieldReference(
 /**
  * 条件右值的三种语法种类 —— **逐字对应**服务端 `STRATEGY_CONDITION_VALUE_TYPES`。
  *
- * ⚠️ 这不是「格式偏好」：转正时 `definitionBuild#inferValueType` 会按
- * 「能当字段引用解析 ⇒ FIELD_REFERENCE；命中参数名 ⇒ PARAMETER_REFERENCE；其余 ⇒ CONSTANT」
+ * ⚠️ 这不是「格式偏好」：转正时 `definitionBuild#resolveConditionValueType` 会按
+ * 「能当字段引用解析 ⇒ FIELD_REFERENCE；命中参数名 ⇒ PARAMETER_REFERENCE；其余标量 ⇒ CONSTANT」
  * **自动判定**。让用户自己声明，是为了让他知道「我这句话会变成哪种比较」。
+ *
+ * 🔴 2026-09-16 起：右值写成「字段引用 + 尾巴」的**算术表达式**（如 `prefix.rd0.volume * 0.3`）
+ * 会被转正**拒绝**（不再静默降级成字符串常量）；带系数的比较改走「派生字段 + 参数引用」，
+ * 见 `CANDIDATE_CONDITION_ARITHMETIC_NOTE`。
  */
 export const CANDIDATE_CONDITION_VALUE_TYPE_OPTIONS: readonly SketchOption[] = [
   { value: "CONSTANT", label: "一个固定值", note: "直接给数值或文本，如 0.1 / main" },
@@ -594,7 +645,10 @@ export interface CandidateConditionPreset {
  *   - 前两条直接摘自后端 golden sample（`server/research/strategySchema/goldenSample.ts`
  *     的 `FIRST_BOARD_PULLBACK_DEFINITION`）—— 那是仓库里**唯一**一份「首板回踩」的权威表达；
  *   - 其余各条的字段都落在 `STRATEGY_BAR_FIELDS` 白名单内、引用文法合法、无前视；
- *   - ⚠️ **不带任何「百分比回撤」条目**：见文件末尾关于算术缺口的说明。
+ *   - ⚠️ **模板里不带「百分比回撤」条目**：这类比较改用**派生字段 + 参数引用**表达
+ *     （`bar.volumeRatio <= max_volume_ratio` / `bar.haircutFromEventLow <= max_drawdown`）——
+ *     模板刻意不预置参数名，因为参数名由用户自己的 `parameterSpace` 决定；
+ *     写法见文件末尾 `CANDIDATE_CONDITION_ARITHMETIC_NOTE`。
  */
 export const CANDIDATE_CONDITION_PRESETS: readonly CandidateConditionPreset[] = [
   {
@@ -668,21 +722,27 @@ export const CANDIDATE_EVENT_PARAM_HINTS = [
 ] as const;
 
 /**
- * ⚠️ **已知表达能力边界（如实告知，不在界面上造假选项）**：
+ * ✅ **2026-09-16：带算术的比较现在表达得了**（旧「表达能力边界」已消除）。
  *
- * 「相对事件日回撤 **X%**」这种**带算术**的比较，用当前的 `ConditionDefinition` **表达不了** ——
- * 它的右值只有三种语法种类（常量 / 字段引用 / 参数引用），**没有表达式**，所以写不出
- * `bar.close <= prefix.rd0.close * (1 - 0.05)`。
+ * 旧状态：`ConditionDefinition` 的右值只有三种语法种类（常量 / 字段引用 / 参数引用）、**没有表达式**，
+ * 所以 `bar.close <= prefix.rd0.close * (1 - 0.05)` 写不出来；而硬把算式写进右值，会被转正转换器
+ * **静默降级成字符串常量** —— 声明与执行口径不一致（`BRIDGE-CONDITION-EXPRESSION-001`）。
  *
- * 现有词表能表达的等价物是**价格锚点**（首板日的开 / 高 / 低 / 收，即上面 5 个模板），
- * 或者把「幅度」做成一个**参数**去搜索 —— 但参数是全局常量，无法表达「每个标的名自 ×0.95」。
+ * 现状态：新增**派生字段**（服务端 `STRATEGY_DERIVED_BAR_FIELDS`，只在 `bar.*` 可用），
+ * 在**当前 bar** 上相对事件日基准求值，与配方门槛**同名同义**：
+ *   - `bar.volumeRatio`            = 当日成交量 ÷ 首板日成交量          ⇒ 缩量：`<= max_volume_ratio`
+ *   - `bar.haircutFromEventLow`    = (首板日开盘 − 当日最低) ÷ 首板日开盘 ⇒ 守线：`<= max_drawdown`
+ *   - `bar.isBullish`              = 当日收 > 开 ? 1 : 0                 ⇒ 红盘：`>= 1`
+ *   - `bar.momentumFromEventClose` = 当日收盘 ÷ 首板日收盘 − 1
  *
- * 要真正支持百分比回撤，需要给后端加「条件右值表达式」或一个形如
- * `bar.drawdownFromEventClose` 的**派生字段**；两条路都要改 `server/**`，属后续排期项。
+ * 🔑 系数一律写成**参数**（右值类型选「参数搜索空间里的参数」）—— 这样它进了 `parameterSpace`
+ * 就能被参数搜索，而不是把某个具体取值焊死在条件里（旧写法 `* 0.3` 正是把 0.3 焊死了）。
  */
 export const CANDIDATE_CONDITION_ARITHMETIC_NOTE =
-  "⚠️ 「回撤 X%」这种带乘法的比较当前表达不了：条件的比较值只能是「一个固定值 / 另一处行情值 / 参数」，没有算式。"
-  + "请用上面的价格锚点模板（首板日的开/高/低/收）代替，或把幅度做成参数。";
+  "带系数的比较（「缩量 ≤ 首板量能 × 比例」「回撤深度 ≤ X」）请用**派生字段**写："
+  + "左值选 bar.volumeRatio / bar.haircutFromEventLow / bar.isBullish，"
+  + "右值类型选「参数搜索空间里的参数」再填参数名（如 max_volume_ratio / max_drawdown）——"
+  + "这样转正后它才能被参数搜索。⚠️ 直接把算式（prefix.rd0.volume * 0.3）填进比较值会被转正拒绝。";
 
 /**
  * 条件字段的**示例**（`datalist` 联想用，不是白名单 —— 白名单在服务端）。
@@ -696,6 +756,10 @@ export const CANDIDATE_CONDITION_FIELD_EXAMPLES: readonly string[] = [
   "prefix.rd-1.marketCap",
   "bar.close",
   "bar.volume",
+  // 派生字段（只在 bar.*）：让「带系数的比较」在界面上看得见该怎么写。
+  "bar.volumeRatio",
+  "bar.haircutFromEventLow",
+  "bar.isBullish",
   "event.turnover",
   "event.isFirstLimit",
   "event.boardType",

@@ -226,7 +226,7 @@ export const STRATEGY_EVENT_FIELDS = [
   "floatMarketCap",
 ] as const;
 
-/** 原始行情 bar 字段白名单（对齐 `DatasetRawBarItem` 的纯日线列，prefix / post 同构）。 */
+/** 原始行情 bar 字段白名单（对齐 `DatasetRawBarItem` 的纯日线列，prefix / post / bar 同构）。 */
 export const STRATEGY_BAR_FIELDS = [
   "open",
   "high",
@@ -236,6 +236,58 @@ export const STRATEGY_BAR_FIELDS = [
   "amount",
   "tradeDate",
   "relativeDay",
+] as const;
+
+/**
+ * **派生行情字段**（**只**在 `bar.*` / 当前 bar 上成立，见 `STRATEGY_CURRENT_BAR_FIELDS`）。
+ *
+ * ## 为什么需要它
+ *
+ * 配方的门槛（`FeatureGate`）大多是**相对事件日基准**的量（「缩量 ≤ 首板量能 × 比例」「回撤深度 ≤ X」），
+ * 而原始行情列只能表达「与另一处行情值**直接**比较」—— 写不出 `bar.volume <= prefix.rd0.volume * 0.3`：
+ * `ConditionDefinition` 的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用）。
+ * 2026-09-16 实测：这类写法会被转正转换器**静默降级成字符串常量**（`"prefix.rd0.volume * 0.3"`），
+ * 于是「声明」与「执行」口径不一致 —— 见 `BRIDGE-CONDITION-EXPRESSION-001`。
+ *
+ * ## 命名唯一真源 = 配方特征 id（`recipeRegistry.PULLBACK_FEATURE_IDS`）
+ *
+ * | 本表字段（`bar.*`） | 配方特征（执行侧） | 在当前 bar 上的口径 |
+ * |---|---|---|
+ * | `volumeRatio` | `volumeRatio` | 当日成交量 / 事件日成交量（< 1 为缩量） |
+ * | `haircutFromEventLow` | `haircutFromEventLow` | (事件日开盘价 − 当日最低价) / 事件日开盘价（**正数 = 跌破**） |
+ * | `isBullish` | `isBullish` | 当日收盘 > 当日开盘 ? 1 : 0（用 0/1 数值，便于与常量比较） |
+ * | `momentumFromEventClose` | `momentumFromEventClose` | 当日收盘 / 事件日收盘 − 1 |
+ *
+ * ## 时间域与 PIT 安全
+ *
+ * 全部按 **`CURRENT_BAR`** 求值：只用「当前 bar + 事件日基准」⇒ **按构造不含任何前视**。
+ * 注意与 Dataset `path` 层的同名派生列（`path.volumeRatio` / `path.pullbackFromEventHigh` …，
+ * 见 `datasetRegistry/path.ts`）**口径相同、取数语义不同**：`path.*` 是**固定的 rd ≥ 1 行**、
+ * 属「前视，仅打标签」层 ⇒ **禁止**作为信号条件；派生字段则是「在任意当前 bar 上重算」⇒ 信号日可安全使用。
+ *
+ * ## 边界（如实声明，不夸大）
+ *
+ * 本表只登记「执行侧已实现（配方特征已存在）」的派生量，对齐表能逐行对上配方特征；
+ * Promote 阶段**不求值**它们（求值是执行侧的事），本表的作用是让「声明」写得下、
+ * 且与执行**同名同义**（可校验、不漂移）。
+ */
+export const STRATEGY_DERIVED_BAR_FIELDS = [
+  "volumeRatio",
+  "haircutFromEventLow",
+  "isBullish",
+  "momentumFromEventClose",
+] as const;
+
+/**
+ * 当前 bar（`bar.*`）可用字段白名单 = 原始行情列 + 派生字段。
+ *
+ * `prefix.*` / `post.*` **只**用原始列（`STRATEGY_BAR_FIELDS`）：派生量只在「当前 bar」这一语义下成立，
+ * 不允许写成 `prefix.rd0.volumeRatio` / `post.rd3.volumeRatio` —— 那会凭空放宽「可以引用什么」，
+ * 而白名单的语义是「**真实可提供**的字段」，不是「名字听起来合理」。
+ */
+export const STRATEGY_CURRENT_BAR_FIELDS = [
+  ...STRATEGY_BAR_FIELDS,
+  ...STRATEGY_DERIVED_BAR_FIELDS,
 ] as const;
 
 /** 字段引用的解析结果（判别联合）。 */
@@ -314,7 +366,8 @@ export function isKnownFieldReference(reference: StrategyFieldReference): boolea
     case "eventDay":
       return (STRATEGY_EVENT_FIELDS as readonly string[]).includes(reference.field);
     case "currentBar":
-      return (STRATEGY_BAR_FIELDS as readonly string[]).includes(reference.field);
+      // 当前 bar 额外允许**派生字段**（相对事件日基准的比值），见 STRATEGY_DERIVED_BAR_FIELDS。
+      return (STRATEGY_CURRENT_BAR_FIELDS as readonly string[]).includes(reference.field);
     case "labelOnly":
     case "unknown":
       return false;

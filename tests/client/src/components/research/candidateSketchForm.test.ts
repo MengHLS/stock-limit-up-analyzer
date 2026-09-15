@@ -18,6 +18,7 @@ import {
   STRATEGY_BAR_FIELDS,
   STRATEGY_CONDITION_VALUE_TYPES,
   STRATEGY_COST_MODELS,
+  STRATEGY_DERIVED_BAR_FIELDS,
   STRATEGY_EVENT_FIELDS,
   STRATEGY_EVENT_TYPES,
   STRATEGY_PARAMETER_DATA_TYPES,
@@ -39,6 +40,9 @@ import {
   CANDIDATE_CONDITION_PRESETS,
   CANDIDATE_CONDITION_VALUE_TYPE_OPTIONS,
   CANDIDATE_COST_MODEL_OPTIONS,
+  CANDIDATE_CURRENT_BAR_FIELD_CHOICES,
+  CANDIDATE_DERIVED_BAR_FIELD_CHOICES,
+  CANDIDATE_DERIVED_BAR_FIELD_OPTIONS,
   CANDIDATE_ENTRY_TIMING_OPTIONS,
   CANDIDATE_EVENT_FIELD_CHOICES,
   CANDIDATE_EVENT_OPTIONS,
@@ -913,12 +917,23 @@ describe("字段引用的双向构造（把手写 `prefix.rd0.close` 换成三�
     expect(CANDIDATE_FIELD_ROOT_OPTIONS.map((o) => o.kind).sort()).toEqual(
       ["currentBar", "eventDay", "forwardBar", "preEvent"],
     );
-    // 字段下拉的值集 ≡ 服务端白名单（逐字；不是「常见写法」）。
+    // 原始行情列下拉的值集 ≡ 服务端 STRATEGY_BAR_FIELDS（逐字；不是「常见写法」）。
     expect(CANDIDATE_BAR_FIELD_CHOICES.map((o) => o.value)).toEqual([...STRATEGY_BAR_FIELDS]);
     expect(CANDIDATE_EVENT_FIELD_CHOICES.map((o) => o.value)).toEqual([...STRATEGY_EVENT_FIELDS]);
     expect(CANDIDATE_BAR_FIELD_CHOICES.map((o) => o.value)).toEqual([...CANDIDATE_BAR_FIELD_OPTIONS]);
+    // 派生字段下拉的值集 ≡ 服务端 STRATEGY_DERIVED_BAR_FIELDS（逐字）。
+    expect(CANDIDATE_DERIVED_BAR_FIELD_CHOICES.map((o) => o.value)).toEqual([...STRATEGY_DERIVED_BAR_FIELDS]);
+    expect(CANDIDATE_DERIVED_BAR_FIELD_OPTIONS).toEqual([...STRATEGY_DERIVED_BAR_FIELDS]);
+    // 🔴 **分部位**：`currentBar` = 原始列 + 派生字段；`preEvent` / `forwardBar` **只有**原始列
+    //    （与服务端 `isKnownFieldReference` 的分支逐字对称 —— `prefix.*` / `post.*` 不能写派生字段）。
+    expect(CANDIDATE_CURRENT_BAR_FIELD_CHOICES.map((o) => o.value)).toEqual([
+      ...STRATEGY_BAR_FIELDS,
+      ...STRATEGY_DERIVED_BAR_FIELDS,
+    ]);
     expect(candidateFieldChoicesOf("eventDay")).toBe(CANDIDATE_EVENT_FIELD_CHOICES);
-    expect(candidateFieldChoicesOf("currentBar")).toBe(CANDIDATE_BAR_FIELD_CHOICES);
+    expect(candidateFieldChoicesOf("currentBar")).toBe(CANDIDATE_CURRENT_BAR_FIELD_CHOICES);
+    expect(candidateFieldChoicesOf("preEvent")).toBe(CANDIDATE_BAR_FIELD_CHOICES);
+    expect(candidateFieldChoicesOf("forwardBar")).toBe(CANDIDATE_BAR_FIELD_CHOICES);
   });
 
   it("右值类型词表 ≡ 服务端 STRATEGY_CONDITION_VALUE_TYPES（逐字）", () => {

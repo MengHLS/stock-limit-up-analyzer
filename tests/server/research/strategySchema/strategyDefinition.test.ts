@@ -27,9 +27,12 @@ import {
   deserializeStrategyDocument,
   normalizeStrategyDefinition,
   parseStrategyFieldReference,
+  resolveFieldTimeDomain,
   resolveSignalTimeline,
   serializeStrategyDefinition,
   serializeStrategyDocument,
+  STRATEGY_CURRENT_BAR_FIELDS,
+  STRATEGY_DERIVED_BAR_FIELDS,
   validateCanonicalStrategyDefinition,
   validateStrategyDocument,
   type ConditionDefinition,
@@ -40,6 +43,7 @@ import {
   FIRST_BOARD_PULLBACK_DEFINITION,
   FIRST_BOARD_PULLBACK_DOCUMENT_INPUT,
 } from "../../../../server/research/strategySchema/goldenSample";
+import { PULLBACK_FEATURE_IDS } from "../../../../server/research/recipeRegistry";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -1068,5 +1072,50 @@ describe("H. 字段引用解析与信号时间线", () => {
     expect(views.positionSizing).toEqual({ kind: "fixed-fraction", fraction: 0.2, maxPositions: 5 });
     expect(views.entryRules).toHaveLength(2);
     expect(views.parameters.parameters.map((item) => item.name)).toContain("limitUpThreshold");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I. BRIDGE-CONDITION-EXPRESSION-001 —— 派生字段 + 声明/执行对齐
+// ---------------------------------------------------------------------------
+
+describe("BRIDGE-CONDITION-EXPRESSION-001 · 派生 bar 字段与「声明 ↔ 执行」对齐", () => {
+  const baseCondition = FIRST_BOARD_PULLBACK_DEFINITION.entry.conditions[0]!;
+
+  /** 跑**真校验器**，返回 issue 码集合（不自己实现判定）。 */
+  const issueCodes = (definition: StrategyDefinitionInput): string[] =>
+    validateCanonicalStrategyDefinition(normalizeStrategyDefinition(definition)).issues.map(
+      (item) => item.code,
+    );
+
+  it("`bar.<派生字段>` 是合法条件引用（CURRENT_BAR，既非未知字段、也非前视）", () => {
+    expect(STRATEGY_DERIVED_BAR_FIELDS.length).toBeGreaterThan(0);
+    for (const name of STRATEGY_DERIVED_BAR_FIELDS) {
+      const codesFor = issueCodes(withConditions([{ ...baseCondition, field: `bar.${name}` }]));
+      expect(codesFor, name).not.toContain("UNKNOWN_FIELD_REFERENCE");
+      expect(codesFor, name).not.toContain("UNKNOWN_FIELD_TIME_DOMAIN");
+      expect(codesFor, name).not.toContain("INVALID_FUTURE_REFERENCE");
+      // 时间域必须是**当前 bar** —— 派生量（相对事件日基准的比值）只在当前 bar 上成立。
+      expect(resolveFieldTimeDomain(parseStrategyFieldReference(`bar.${name}`)), name).toBe("CURRENT_BAR");
+    }
+  });
+
+  it("🔴 派生字段**不**放宽 `prefix.*` / `post.*`（白名单只加在当前 bar 这一层）", () => {
+    for (const name of STRATEGY_DERIVED_BAR_FIELDS) {
+      expect(
+        issueCodes(withConditions([{ ...baseCondition, field: `prefix.rd0.${name}` }])),
+        `prefix.rd0.${name} 必须被拒`,
+      ).toContain("UNKNOWN_FIELD_REFERENCE");
+    }
+  });
+
+  it("🔴 对齐不变量：配方的每个门槛特征都必须是**可声明**的字段（防「执行有、声明无」再漂移）", () => {
+    const declarable = new Set<string>(STRATEGY_CURRENT_BAR_FIELDS);
+    const features = Object.entries(PULLBACK_FEATURE_IDS);
+    // 前提自检：这份不变量必须真的在检查东西（空集合会让断言假绿）。
+    expect(features.length).toBeGreaterThanOrEqual(4);
+    for (const [key, featureId] of features) {
+      expect(declarable.has(featureId), `配方特征 ${key}=${featureId} 在声明侧无法表达`).toBe(true);
+    }
   });
 });

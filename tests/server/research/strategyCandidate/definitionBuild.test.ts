@@ -279,6 +279,36 @@ describe("RESEARCH-006.3 · definitionBuild 正常映射（§9）", () => {
     expect(PROMOTE_INITIAL_STRATEGY_VERSION).toBe("1.0.0");
     expect(PROMOTE_INITIAL_VERSION_STATUS).toBe("Draft");
   });
+
+  it("1-k) 派生字段 + 参数引用：把「带系数的比较」写成可搜索的条件（声明与执行同名同义）", () => {
+    const draft = mutateDraft((d) => {
+      (d.parameterSpace as Record<string, unknown>).max_volume_ratio = {
+        type: "number",
+        min: 0.05,
+        max: 1,
+        step: 0.05,
+        defaultValue: 0.3,
+      };
+      const rows = (
+        d.filterRule as { groups: Array<{ conditions: Array<Record<string, unknown>> }> }
+      ).groups[0].conditions;
+      // 旧写法（只表达「有缩量」）：`bar.volume < prefix.rd0.volume` —— 写不出「缩到 N% 以内」。
+      // 新写法：左值用**派生字段**（在当前 bar 上求值），右值用**参数引用** ⇒ 系数进搜索空间。
+      rows[1].fieldName = "bar.volumeRatio";
+      rows[1].operator = "<=";
+      rows[1].value = "max_volume_ratio";
+    });
+    const built = buildStrategyDefinition(input(draft));
+    expect(built.entry.conditions[1]).toMatchObject({
+      field: "bar.volumeRatio",
+      operator: "LESS_THAN_OR_EQUAL",
+      value: "max_volume_ratio",
+      valueType: "PARAMETER_REFERENCE",
+    });
+    // 派生字段必须在**真实校验器**里合法（不是「构建器自己觉得合法」）。
+    const normalized = validateBuiltStrategyDefinition(built);
+    expect(normalized.entry.conditions[1]?.field).toBe("bar.volumeRatio");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -547,6 +577,38 @@ describe("RESEARCH-006.3 · 不可无损映射 ⇒ PROMOTE_SKETCH_INVALID（§8 
       STRATEGY_CANDIDATE_ERROR.PROMOTE_SKETCH_INVALID,
       "entryRule.event",
     );
+  });
+
+  it("3-k) 右值写成算术表达式 ⇒ 响亮拒绝（不再静默降级成字符串常量）", async () => {
+    const withValue = (value: unknown) =>
+      mutateDraft((d) => {
+        const rows = (
+          d.filterRule as { groups: Array<{ conditions: Array<Record<string, unknown>> }> }
+        ).groups[0].conditions;
+        rows[1].value = value;
+      });
+
+    // ① 以字段引用开头、尾巴是算式 —— **真实库里 8 条已转正策略的写法**（BRIDGE-CONDITION-EXPRESSION-001）
+    const leading = await expectSketchError(
+      () => buildStrategyDefinition(input(withValue("prefix.rd0.volume * 0.3"))),
+      STRATEGY_CANDIDATE_ERROR.PROMOTE_SKETCH_INVALID,
+      "filterRule.groups[0].conditions[1].value",
+    );
+    expect(leading.message).toContain("没有算术形态");
+    // 错误信息必须**可操作**：点名派生字段与参数写法，而不是只说「非法」。
+    expect(leading.message).toContain("bar.volumeRatio");
+    expect(leading.message).toContain("max_volume_ratio");
+
+    // ② 算式不以字段引用开头（`(1 - x) * field`）—— 只查「前缀」的判据会漏掉，这里锁住
+    await expectSketchError(
+      () => buildStrategyDefinition(input(withValue("(1 - 0.05) * prefix.rd0.close"))),
+      STRATEGY_CANDIDATE_ERROR.PROMOTE_SKETCH_INVALID,
+      "conditions[1].value",
+    );
+
+    // ③ 反向控制：**普通字符串常量不受影响**（判据不能误伤枚举式常量）
+    const ok = buildStrategyDefinition(input(withValue("FIRST_LIMIT_UP")));
+    expect(ok.entry.conditions[1]).toMatchObject({ value: "FIRST_LIMIT_UP", valueType: "CONSTANT" });
   });
 });
 

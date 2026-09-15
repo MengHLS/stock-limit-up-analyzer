@@ -35,6 +35,7 @@ import type { ResearchStrategyCandidate } from "../../researchCore";
 import {
   STRATEGY_DEFINITION_SCHEMA_VERSION,
   STRATEGY_COST_MODELS,
+  STRATEGY_DERIVED_BAR_FIELDS,
   STRATEGY_EVENT_TYPES,
   STRATEGY_POSITION_SIZING_METHODS,
   STRATEGY_QUANTITY_METHODS,
@@ -264,18 +265,99 @@ function parameterCodes(parameterSpace: unknown): Set<string> {
 }
 
 /**
- * 推断条件的**右值类型**（`valueType`）。
+ * 「以字段引用开头」的**探测**正则 —— **只用于诊断定位，不是解析器**（解析器唯一权威实现 =
+ * `parseStrategyFieldReference`）。命中的是**前缀**，允许后面还有内容。
+ */
+const FIELD_REFERENCE_LEADING_RE =
+  /^(?:prefix\.rd-?\d+|post\.rd\d+|bar|event|path|outcome)\.[A-Za-z][A-Za-z0-9_]*/;
+
+/** 「串里出现过字段引用」的探测正则（同上，只用于诊断定位）。 */
+const FIELD_REFERENCE_TOKEN_RE =
+  /(?:prefix\.rd-?\d+|post\.rd\d+|bar|event|path|outcome)\.[A-Za-z][A-Za-z0-9_]*/;
+
+/**
+ * 算术运算符探测。
+ *
+ * ⚠️ 含 `-` 是**故意**的：一个**普通字符串常量**（如 `"MAIN"` / `"2026-09-01"`）不会同时
+ * 含「字段引用 + 运算符」，所以这条只在下面第二条规则里与字段引用**同时**命中才生效。
+ */
+const ARITHMETIC_OPERATOR_RE = /[*+\/-]/;
+
+/**
+ * 判定一个字符串是不是「算术表达式尝试」；是则返回用于错误信息定位的字段引用片段。
+ *
+ * 两条判据（**只认这两种**，避免误伤普通字符串常量）：
+ *   ① 以合法字段引用开头、但整串不是合法引用（有多余尾巴）—— 如 `prefix.rd0.volume * 0.3`；
+ *   ② 串里**同时**出现字段引用与算术运算符 —— 如 `(1 - 0.05) * prefix.rd0.close`。
+ *
+ * 反例（**必须放行**）：`"FIRST_LIMIT_UP"` / `"MAIN"` / `"2026-09-01"` / `"T+1"` ——
+ * 它们不含字段引用、或（`T+1`）不含字段引用，因此两条都不命中。
+ */
+function expressionAttemptOf(text: string): string | null {
+  const trimmed = text.trim();
+  const leading = FIELD_REFERENCE_LEADING_RE.exec(trimmed);
+  if (leading !== null && leading[0].length < trimmed.length) return leading[0];
+  if (ARITHMETIC_OPERATOR_RE.test(trimmed) && FIELD_REFERENCE_TOKEN_RE.test(trimmed)) {
+    const token = FIELD_REFERENCE_TOKEN_RE.exec(trimmed);
+    return token === null ? trimmed : token[0];
+  }
+  return null;
+}
+
+/**
+ * 右值属于「算术表达式尝试」（或字段引用笔误）⇒ 一律响亮失败
+ * （详见 `resolveConditionValueType` 的注释）。
+ *
+ * `IN` / `NOT_IN` 的数组右值逐元素检查（不给数组留后门）。
+ */
+function rejectExpressionAttempt(value: unknown, path: string): void {
+  const texts: readonly string[] = typeof value === "string"
+    ? [value]
+    : Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [];
+  for (const text of texts) {
+    const token = expressionAttemptOf(text);
+    if (token === null) continue;
+    const derived = STRATEGY_DERIVED_BAR_FIELDS.map((name) => `bar.${name}`).join(" / ");
+    invalid(
+      path,
+      `右值 ${JSON.stringify(text)} 不是合法字段引用、也不是已声明的参数 code，`
+        + `但含字段引用 ${JSON.stringify(token)} 与算术运算符：这看起来是「字段 × 系数」的算术表达式，`
+        + "而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。"
+        + "Promote 拒绝把它静默降级成字符串常量，请改写为："
+        + `① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：${derived}；`
+        + "② 或把系数写进 `parameterSpace` 做成参数，再用**参数引用**指向它"
+        + "（例如 bar.volume LESS_THAN_OR_EQUAL max_volume_ratio）—— 转正后即可被 Parameter Search 搜索。",
+    );
+  }
+}
+
+/**
+ * 解析条件的**右值类型**（`valueType`）。
  *
  * 这是「机械翻译」而非「猜测语义」：`valueType` 描述的是右值的**语法种类**，而本项目已有
  * 唯一权威的字段引用文法（`parseStrategyFieldReference`）与参数词表，因此它的种类是可判定的。
  * 判定顺序（确定性，已文档化）：可被字段引用文法解析 ⇒ `FIELD_REFERENCE`；
- * 命中候选参数 code ⇒ `PARAMETER_REFERENCE`；其余 ⇒ `CONSTANT`。
+ * 命中候选参数 code ⇒ `PARAMETER_REFERENCE`；其余标量 ⇒ `CONSTANT`。
+ *
+ * 🔴 **2026-09-16 修正：取消「静默降级」**（`BRIDGE-CONDITION-EXPRESSION-001`）。
+ *
+ * 旧实现把「其余」一律降级成 `CONSTANT`，于是 `"prefix.rd0.volume * 0.3"` 这种**算术表达式**被原样
+ * 写成一个**字符串常量** —— 数值字段与字符串常量比较（语义无意义），而且与配方门槛
+ * （`volumeRatio <= max_volume_ratio`）**口径不一致**：声明说 A、执行做 B。这与本转换器一贯纪律
+ * （「闭集，不静默忽略 / 不静默丢弃」）相悖，故改为**响亮失败**并要求作者改写（见上条错误信息）。
  */
-function inferValueType(value: unknown, codes: ReadonlySet<string>): StrategyConditionValueType {
+function resolveConditionValueType(
+  value: unknown,
+  codes: ReadonlySet<string>,
+  path: string,
+): StrategyConditionValueType {
   if (typeof value === "string") {
     if (parseStrategyFieldReference(value).kind !== "unknown") return "FIELD_REFERENCE";
     if (codes.has(value)) return "PARAMETER_REFERENCE";
   }
+  rejectExpressionAttempt(value, path);
   return "CONSTANT";
 }
 
@@ -329,7 +411,7 @@ function buildConditions(filterRule: unknown, codes: ReadonlySet<string>): Condi
         field,
         operator,
         value: row.value as ConditionDefinition["value"],
-        valueType: inferValueType(row.value, codes),
+        valueType: resolveConditionValueType(row.value, codes, `${path}.value`),
         enabled: true,
         ...(typeof row.note === "string" && row.note.trim() !== "" ? { description: row.note.trim() } : {}),
       });
