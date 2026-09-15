@@ -10,7 +10,7 @@
 
 ## 1. 症状（真库证据，非推断）
 
-`strategy_versions` 里 8 条已转正策略的 `strategyDocumentJson → definition.entry.conditions` 第 2 条**恒为**：
+**8 条已转正策略中，7 条**的 `strategyDocumentJson → definition.entry.conditions` 第 2 条**恒为**（第 8 条 `cand-270001` 用的是合法字段引用 `prefix.rd0.volume`，**本来就干净** —— 见 §8.1 的逐条清单）：
 
 ```text
 id=cond-2  field=bar.volume  operator=LESS_THAN_OR_EQUAL  value="prefix.rd0.volume * 0.3"  valueType=CONSTANT
@@ -268,7 +268,7 @@ strategy_versions 行数 = 10 / research_strategy_candidate 行数 = 9
 
 ## 11. 遗留（如实声明，不夸大）
 
-1. **既有 8 条策略的落库声明未回填**：本轮只修「未来写法」与「读路径兼容」，**没有**去 UPDATE 已转正版本的 `strategyDocumentJson`（该表内容一经写入禁止 UPDATE —— 改内容必须新建版本，是 §8 铁律）。因此**历史 7 条策略的声明仍是旧写法**。按纪律，正确做法是**重新转正**（新版本），而非原地改写；
+1. **既有 7 条策略的落库声明未回填**（已转正 8 条中，`cand-270001` 本身就干净、无需处理）：本轮只修「未来写法」与「读路径兼容」，**没有**去 UPDATE 已转正版本的 `strategyDocumentJson`（该表内容一经写入禁止 UPDATE —— 改内容必须新建版本，是 §8 铁律）。因此**这 7 条的声明仍是旧写法**。按纪律，正确做法是**重新转正**（新版本），而非原地改写；
    - 本轮探针已证明：把这些草稿按**旧写法**重新转正会**响亮失败** ⇒ 用户必须改用派生字段写法，这**正是期望行为**（把选择权与改写责任交回作者，而不是替它猜）。
 2. **派生字段只登记「执行侧已实现」的 4 个**：`momentumFromEventClose` 目前**只用于排序**、未作为任何门槛；如将来需要「回撤新低」「突破前高」等派生量，仍需**先在配方侧实现特征**，再登记进本表（本表**不是**「愿望清单」）。
 3. **`path.*` 同名派生列仍是前视层**：本轮的派生字段与 Dataset `path` 列口径相同但取数不同，**未**放宽 Look-Ahead 闸门；若将来有人把 `path.volumeRatio` 写进信号条件，仍会被 `INVALID_FUTURE_REFERENCE` 拦下（已有测试覆盖）。
