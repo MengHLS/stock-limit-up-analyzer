@@ -63,3 +63,9 @@
 - 🔴 **门槛型条件必须 `gated` 配方**；`signalBuilder` 是工厂 ⇒ **先 `resolveParameters`**；**禁手搓 `row.bars`**。
 - 🔴 `client/**` 禁 import `server/**`/`shared/**` **运行时值** ⇒ 镜像词表用「本地常量 + 表比对测试」。免责声明不得删；`RESEARCH_READY` 不因「结果可看」变 TRUE。
 - 🔴 性能只认「**交错 ≥3 轮取中位**」；「**热调用 ≈0ms**」才是缓存判据。「**全端点 DB 失败 + 零 DB 端点正常**」⇒ **先查池**。真实列名**禁凭记忆**写 SQL。
+
+## 大盘数据同步（成交额 / 两融余额，`/market` 页）
+- 🔴 **`market_data` 一行两列（`turnover` + `marginBalance` 均 NOT NULL）= 只能整行写** ⇒ 两融取不到就**整天不写**（禁占位值）。上交所 `rzrqjygkYYYYMMDD.xls` 实测 `Last-Modified` **恒为 T+1 日 07:40 北京时**，深交所 T 日 21:00 仍只回表头无数据行 ⇒ **盘后 16:00/17:30 同步必然失败**：原实现自上线写入 **0 行**（库内 201 行全部来自一次性回填脚本）。
+- ✅ 已修（2026-09-15）：`server/marketSync.ts` 目标日由「今天」改为「窗口内所有缺失交易日」（升序补齐）；`MARKET_SYNC_TIMES` = 北京时 **08:30 / 12:30**；窗口 30 天（启动兜底 10 天）；连续失败 3 天中止。交易日历 = **`index_daily` ∪ `limit_up_records` 并集**（单靠 `index_daily` 会继承它「停更即静默 no-op」的隐患）。写数必带 `note` 含「上交所/深交所公开两融汇总」。
+- 🔴 **「最新一个交易日的两融尚缺」≠ 故障**（交易所发布滞后，预期态）。判据 = `getSyncStatus.pendingDates`，**>1 个才是缺口**。前端禁用 `hasTodayData` 当「今日已就绪」（它几乎恒 false）；状态文案读 `latestDataDate` + `pendingDates`。
+- 探针：`docs/evidence/_probe_market_data_gap.mts`（覆盖 vs 涨停日差集）、`_run_market_sync_backfill.mts [lookbackDays]`（等价页面「立即同步」）、`_probe_market_page_render.mjs`（无头 Edge 量 DOM）。细则见 `PROJECT_RULES.md`「大盘数据同步」。

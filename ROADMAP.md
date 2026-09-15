@@ -1,7 +1,7 @@
 # QUANT RESEARCH MASTER CONTROL SPEC V2
 
 > **目录**：见下方一级标题；本文件是项目**唯一 Master Control**。
-> 🔴 铁律：§44 为「覆盖式」状态区（**只保留最近 1 条「上轮实查」**，历史条目在 `ROADMAP-CHANGELOG.md`）；§44.5 为**未完成**队列（编号按「下一个未占用」，已用至 `9ap`）；§47 为 append-only 更新记录。
+> 🔴 铁律：§44 为「覆盖式」状态区（**只保留最近 1 条「上轮实查」**，历史条目在 `ROADMAP-CHANGELOG.md`）；§44.5 为**未完成**队列（编号按「下一个未占用」，已用至 `9aq`）；§47 为 append-only 更新记录。
 > 逐字节原文备份（2026-09-15 整理前）：`.cache/ROADMAP.md.before-cleanup-20260915`。
 
 ## 0. 任务身份
@@ -2118,7 +2118,7 @@ BaoStock 单 Session 串行约束（§30）：`G → C+E → D`（禁止并发�
 
 > 完整的分阶段开发路线、依赖关系、范围与验收标准见 **§48**。此处仅为即时动作队列。
 
-> 🔴 **编号台账（禁「末条 +1」）**：编号已用至 **`9ap`** ⇒ **下一个未占用 = `9aq`**。已完成的 `1~9` 与 `9a~9ap`、以及第 10~27 项中的 ✅ 已完成项，已**全部移入 `ROADMAP-CHANGELOG.md`**（原样搬运）。本项目历来按「**下一个未占用**」取号，**禁按「末条 +1」推算**。
+> 🔴 **编号台账（禁「末条 +1」）**：编号已用至 **`9aq`** ⇒ **下一个未占用 = `9ar`**。已完成的 `1~9` 与 `9a~9ap`、以及第 10~27 项中的 ✅ 已完成项，已**全部移入 `ROADMAP-CHANGELOG.md`**（原样搬运）。本项目历来按「**下一个未占用**」取号，**禁按「末条 +1」推算**。
 > 检索已归档条目：`grep "9a" ROADMAP-CHANGELOG.md` 或直接 grep 任务 ID。
 
 5. ~~G 数据质量修复 + H gate 重跑~~ ⏸️ 部分完成（gate 17/17 全 PASS、`RESEARCH_READY=TRUE`；G 的 securityId 全 NULL + effectiveFrom 单点两质量待办仍 PENDING，属 STEP 12.5 PIT 审计前必修 → §48 P0-3）
@@ -2147,6 +2147,8 @@ BaoStock 单 Session 串行约束（§30）：`G → C+E → D`（禁止并发�
    ⑤ ⬜ **未做**：`completeJob → markReady` 合并单事务（既有已知项）；`batchSize` 速度标定并固化进 `dataset_build_config`。
 
 19. **（闭环运行缺口）界面「运行策略」恒 0 执行 —— 首阻塞 `CL_DATA_NOT_INJECTED` 的真实成因（2026-09-13 02:55 实查登记，**零代码改动**）**：触发 = 用户实报「首阻塞：CL_DATA_NOT_INJECTED」（承接 9ad —— 删掉顶部占位按钮后，运行入口唯一收敛到「运行工作台」页签，用户随即点了「运行策略」）。**一、完整链路（读代码实查，非推断）**：`client/src/pages/StrategyEditor.tsx:989-999` 的 `handleRun` 只送 experimentId / strategyId / strategyVersion / dateRange / executionModel ⇒ `server/researchRunRouter.ts:288-299` 只从入参取 `evaluationInput`(+seed) 与 `lifecycle` 填 `wiringInputs` ⇒ 得 `{}` ⇒ `server/research/closedLoopWiring/executors.ts:187-201` 对 `data` 阶段（需 `via(["researchDataset"])`，同目录 `requirements.ts:66-75`）判定不成立 ⇒ 不注册执行器 ⇒ `server/research/closedLoop/orchestrator.ts:371-385` 门禁 1 发 `CL_DATA_NOT_INJECTED` 且 `firstBlocked = data` ⇒ 其后 13 阶段被 `orchestrator.ts:338-350` 短路为 `CL_UPSTREAM_BLOCKED` ⇒ `overall.status = NO_STAGE_EXECUTED`、`executedStageCount = 0`、`runnerInjected = []`。**二、🔴 结论：当前接线状态下界面运行恒为「执行 0 / 阻塞 14」** ⇒ FE-4/9e 解锁该按钮时所论证的「有诊断价值」实际未兑现（每次诊断结论完全相同）。这是**架构缺口、非代码 bug**；设计侧早有明说 —— `docs/research/RESEARCH-002-report.md:1018` 与 `:1479`：「从 UI 发起的运行在 `data` 阶段必然 `CL_DATA_NOT_INJECTED`（这是如实状态，不是缺陷）」。**三、为何界面补不了**：`closedLoopRunInputSchema`（`shared/researchContracts.ts:730-752`，共 **15 个字段**）**没有 `researchDataset`**；其中的 `datasetVersion` 只是谱系标签（`researchRunRouter.ts:331` 写进 metadata），**不触发任何数据集加载**；`server/researchDatasetRouter.ts:6-8` 明说 rows 百万级、经 RPC 传输不可行 ⇒ **数据必须由服务端解析，不可能由界面传**。**四、修法（已定位，未实施）**：「data 阶段不构建数据集」约束的是**装配层**（`closedLoopWiring` 保持纯函数、零 IO）—— 应由**路由器层**承担解析：`loopRun` 新增 `datasetVersionId` 入参，在 `createClosedLoopWiring` **之前**把版本解析成真实 `ResearchDataset` 并注入 `wiringInputs.researchDataset`，**装配层零改动**。现成零件齐备：`buildResearchDataset`（`server/researchDataset/builder.ts:173`）、`persistResearchDataset`（`persist.ts:54`）、`readRowsStreaming`（`rowsTable.ts:139`，可把已认证数据集读回）、`certify`（`researchDatasetRouter.ts:121`，「创建正式 Dataset 版本」的唯一入口）。**五、🔴 第二道门（勿忘，决定修复顺序）**：即便注入了数据集，`research` 阶段仍要求 `ds.gate === "PASS"`，否则首阻塞只会**推后一格**成 `CL_DATASET_GATE_NOT_PASS`（`orchestrator.ts:411-424`）⇒ 本修复必须排在数据域 G0 认证之后。**六、可顺带做的纯前端改进（零风险）**：结果面板未展示后端**已经算好并回传**的逐阶段缺口 —— `result.wiring.stages[].note` 会直说「缺调用方入参：researchDataset / experimentConfig / strategyContract / strategy13 …」（`server/research/closedLoopWiring/coverage.ts:96-98`），而 `client/src/components/strategy/ClosedLoopRunResultPanel.tsx` 当前只显示编排器的通用 detail（「真实数据链未注入…」）。**七、状态**：🔴 **仅登记，用户裁定「只登记，暂不动代码」**；`server/**`、`client/**` 一行未改、零迁移、零新端点。修法属 `server/**` ⇒ 会 `tsx watch` 热重启并杀死在途研究 Run，**须单独排期**。证据已同步 `.workbuddy/memory/2026-09-13.md` 02:55 条 + `MEMORY.md` 地雷第 14 条。
+
+- **9aq. （LEADER-BACKTEST-STALENESS-001 · 体验补口）回测冷算 20 分钟仍会「阻塞页面」** ⬜ **待做（须排期）**：2026-09-15 已修掉「历史候选池回测结果不随时间更新」的**正确性**缺口（缓存键纳入**数据戳** ⇒ 外部写入也能自愈，详见 `ROADMAP-CHANGELOG.md` 同名条目），但冷算**空载实测 1201.67s**（旧记录 305~413s 已失效）⇒ 数据一变，下一个打开 `/leader-candidates` 的人要**白屏等 20 分钟**（handler 不会被 `server.requestTimeout` 切断 —— 实测 1201s 仍返回 200，该属性只约束「接收请求」阶段）。**正解 = stale-while-revalidate**：数据戳不匹配时**立即返回上一版快照**并带 `stale` / `recomputing` 标记，同时在服务端后台跑重算（复用已加的**单飞**），完成后原子替换快照 ⇒ 页面永不空等。**两条硬约束**：① 标记必须在页面渲染成**显式横幅**（**禁静默显示旧数据**）；② 旧快照要**保留可读**（当前实现「key 不匹配即未命中」，旧文件虽在盘上但读不到）。**同根因家族（一并排期）**：连接池地雷「`maxIdle === connectionLimit` ⇒ `idleTimeout` 是死配置」会让 20 分钟冷算在中途以 `read ECONNRESET` 崩掉（2026-09-15 实遇一次，重灾区 = `loadBacktestPriceRows` 的 1.52M 行查询）；本轮已给该路径加读重试，**根因未修**。
 
 # 45. Entry Criteria / Exit Criteria（实例化）
 

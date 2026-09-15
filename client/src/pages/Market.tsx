@@ -28,10 +28,17 @@ export default function MarketPage() {
 
   const syncNowMutation = trpc.market.syncNow.useMutation({
     onSuccess: (result) => {
-      if (result.ok) {
-        toast.success(`大盘数据已同步：成交额 ${result.turnoverYi} 亿、两融余额 ${result.marginBalanceYi} 亿`);
+      const filledCount = result.filledDates?.length ?? 0;
+      if (filledCount > 0) {
+        const pendingCount = result.failedDates?.length ?? 0;
+        const pendingSuffix = pendingCount > 0 ? `；另有 ${pendingCount} 个交易日尚未发布` : "";
+        toast.success(
+          `大盘数据已补齐 ${filledCount} 天（最新 ${result.date}）：成交额 ${result.turnoverYi} 亿、两融余额 ${result.marginBalanceYi} 亿${pendingSuffix}`,
+        );
+      } else if (result.upToDate) {
+        toast.success(`大盘数据已是最新（${result.date}）`);
       } else {
-        toast.warning(result.skipped || "同步已跳过");
+        toast.warning(result.skipped || "暂无可补齐的大盘数据");
       }
       void utils.market.getSyncStatus.invalidate();
       void utils.market.getLimitUpWithMarketData.invalidate();
@@ -94,14 +101,24 @@ export default function MarketPage() {
           <h1 className="text-lg font-semibold">大盘分析</h1>
         </div>
         <div className="flex items-center gap-3">
-          {syncStatus?.hasTodayData ? (
-            <span className="flex items-center gap-1 text-xs text-emerald-600">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              今日数据已就绪（{syncStatus.today}）
+          {!syncStatus ? null : syncStatus.pendingDates.length > 1 ? (
+            <span
+              className="text-xs text-amber-600"
+              title={`待补交易日：${syncStatus.pendingDates.join("、")}${syncStatus.lastSync?.skipped ? `｜最近一次同步：${syncStatus.lastSync.skipped}` : ""}`}
+            >
+              市场数据缺 {syncStatus.pendingDates.length} 个交易日（最新 {syncStatus.latestDataDate ?? "—"}）
+            </span>
+          ) : syncStatus.pendingDates.length === 1 ? (
+            <span
+              className="text-xs text-muted-foreground"
+              title={syncStatus.lastSync?.skipped ?? `最近同步 ${formatSyncAt(syncStatus.lastSync!.at)}`}
+            >
+              市场数据最新 {syncStatus.latestDataDate ?? "—"}（{syncStatus.pendingDates[0]} 待交易所发布）
             </span>
           ) : (
-            <span className="text-xs text-muted-foreground">
-              {syncStatus?.lastSync ? `上次同步 ${formatSyncAt(syncStatus.lastSync.at)}` : "尚未自动同步"}
+            <span className="flex items-center gap-1 text-xs text-emerald-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              市场数据已是最新（{syncStatus.latestDataDate ?? "—"}）
             </span>
           )}
           <Button
@@ -182,15 +199,17 @@ export default function MarketPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle>大盘综合分析</CardTitle>
-                    <CardDescription>涨停数、成交额、两融余额展示</CardDescription>
+                    <CardDescription>
+                      涨停数、成交额、两融余额展示（交易所两融汇总次日早晨才发布，最新一日的成交额与两融会稍后补齐）
+                    </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <ResponsiveContainer width="100%" height={500}>
                       <LineChart data={limitUpWithMarketData?.map(item => ({
                         date: item.date.substring(5),
                         涨停数: item.limitUpCount,
-                        成交额: item.turnover ? parseFloat(item.turnover) : 0,
-                        两融余额: item.marginBalance ? parseFloat(item.marginBalance) : 0,
+                        成交额: item.turnover ? parseFloat(item.turnover) : null,
+                        两融余额: item.marginBalance ? parseFloat(item.marginBalance) : null,
                       })) || []}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="date" tick={{ fontSize: 12 }} />

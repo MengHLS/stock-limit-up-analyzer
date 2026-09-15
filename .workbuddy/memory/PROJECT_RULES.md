@@ -54,6 +54,7 @@
 
 ## 昂贵回测与风控口径
 - **龙头候选全区间回测 305~413s（冷）**。**明细必须走分页** `getLeaderCandidateHistoryPage`；快照 `leaderCandidateBacktestSnapshot.ts`（TTL 6h），**写路径必须失效** `db.invalidateLeaderCandidateBacktestCaches()`。⚠️ 收窄价格窗口换提速会经 `strategyBacktest.ts` 的 `rawRows` 日期并集**裁剪最早候选回溯窗口** ⇒ 须 A/B 后才可改。
+- 🔴 **龙头候选回测缓存键 = 参数哈希 + 「数据戳」**（2026-09-15 `LEADER-BACKTEST-STALENESS-001`）：`getLeaderCandidateBacktest` 的键现为 `stableHash({ params, dataStamp })`；戳 = 三条链末端的 `MAX()`（`limit_up_records.limitUpDate` / `index_daily.tradeDate` / `stock_daily_prices.tradeDate`，三者**均有索引**；**合并成 1 条语句 = 1 次往返 ≈214ms 中位**，另有 **15s 备忘**把热路径拉回 0ms，写入时随失效清掉）。**动机 = 只靠「写入钩子」失效会漏掉绕过服务端的写入**（外部脚本 / Python 写同一个跨境 TiDB ⇒ 旧结果被无限复用、页面停在旧日期）。**配套三条（缺一不可）**：① `upsertIndexDaily` **必须**调 `invalidateLeaderCandidateBacktestCaches()`（它是此前**唯一没挂失效钩子的写路径**，而 `index_daily` 是 T+N 观察日的**唯一来源**）；② 该函数已加**单飞**（聚合端点与明细分页共用同一 key，无单飞则冷算翻倍）；③ `loadBacktestBaseContext` 五路并行读**各自带 `withReadRetry`**（此前任一瞬时失败即让整轮作废）。⚠️ **冷算实测已从 305~413s 涨到 1201.67s（空载）** ⇒ 「数据一变就等 20 分钟」是当前**真实代价**，体验修复见 §44.5 `9aq`。⚠️ **`server.requestTimeout` 不约束 handler 时长**（实测 handler 跑 1201.67s 仍返回 200，该属性只管「接收请求」）—— 别再拿它解释或治理长端点。
 - ✅ **`getLeaderCandidates()` 已于 2026-09-13 修复**（此前 **32.4s 冷 / 23.7s 热**，零缓存）。现为：**TTL 结果缓存（5min）+ 单飞 + 并行取数**，实测 **冷 45.3s → 热 1ms**、6 并发共享同一 Promise。**三条连带事实（改这里前必读）**：① 该函数是首屏**唯一**关键路径端点（喂页头 4 卡 + 评分列表 + 图表）；② 其内部 `getLeaderCandidateMarketFactorRows()` 也已加 TTL 缓存，**且被 `loadBacktestBaseContext` 共用**；③ 新增缓存必须挂进 `invalidateLeaderCandidateBacktestCaches()`（正确性）。⚠️ **冷启动首次仍慢** —— 缓存只消除重复计算，不减少单次固有成本。
 - 🔴 **缓存设计铁律（2026-09-13 沉淀）**：① **「热调用 ≈0ms」才是缓存生效的判据**；某条「有缓存」的路径热调用仍需数十秒 ⇒ 等于没有缓存（本次真瓶颈即此）。② **TTL 缓存与单飞解决不同问题**：TTL 消除「时间上重复」、单飞消除「空间上并发」；**耗时数十秒的计算两者都要**（前端重挂载/多标签/React Query 重试会并发打入）。③ 🔴 **失效要精准，不是越多越好** —— 把 `dailyPriceCoverageCache`（890 万行全表聚合 ~9s）加进失效清单**是错的**：`createLimitUpRecordsBatch` 是**逐批（每 100 条）调用失效函数**，逐批清空会把一次回填放大成数十次全表扫描。**加失效前先问「这个写入函数的调用频率」**。④ 性能修复**先测速再动刀** —— 用户提的「分页 / 缓存」是线索不是结论（本次分页早已做完，真瓶颈在无人看的地方）。
 - **连板高度风险唯一权威 = `shared/boardHeightRisk.ts`**（**禁别处重写**）。仓位缩放走 `positionScale`，只在 `realisticBacktest.ts` 的 `plannedBudget` 上向下缩放 ⇒ **不改排序、不删候选**；`baseline` **恒不施加高位约束**。
@@ -540,3 +541,23 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - `closed_loop_backtest_run` 留档的 `startDate/endDate` 是**用户当时选的回测区间** ⇒ 若 `endDate` 早于目标日，「没有目标日数据」与数据集 / 行情**全都无关**，先看这条。
 - `stock_daily_prices` 近端每日 400~600 只是**设计**（`server/stockPriceSync.ts`：「涨停记录 × 信号日 + `futureTradingDayCount=10` 观察窗」增量）⇒ **先问「这天是不是候选池日」**。实证：09-14 涨停 55 只 → 54 只在 09-15 行情内；09-11 涨停 40 只 → 40/40。
 - DB 时区 = **UTC**（`@@system_time_zone` = `UTC`）⇒ `createdAt` / `retrievedAt` / `sourceUpdatedAt` **+8 才是北京时**（易把盘后 18:30 误判成盘中快照）。
+
+## 大盘数据同步（成交额 / 两融余额）与「外部发布时刻」纪律（2026-09-15）
+
+**事故**：`/market` 大盘综合分析图的成交额与两融余额在 2026-08-25 之后不再更新（图上两条线消失）。
+
+**根因**：`market_data` 的 `turnover` 与 `marginBalance` 是**同一行的两列、均 NOT NULL**，且设计上**禁写占位值** ⇒ **两融取不到 = 整天不写**。而上交所两融汇总文件 `rzrqjygkYYYYMMDD.xls` 的 `Last-Modified` **恒为「T 日 23:40 UTC」= T+1 日 07:40 北京时**（09-09/10/11/14 四例一致）；深交所同源接口在 T 日 21:12 仍只返回**表头无数据行**（`rowCount=1, firstDataRow=null`）。原 `SYNC_TIMES` = 北京时 16:00 / 17:30，且 `syncMarketDataOnce` **只写「今天」、无补缺** ⇒ **每天必然失败、失败日永久缺口**；实查 `market_data` 中 `note like '自动同步%'` **命中 0 行**，且 `max(dataDate)` = 08-25 而 `limit_up_records` / `index_daily` 末端 = 09-15（缺 15 个交易日）。
+
+**🔴 可复用的诊断顺序（比翻代码快得多）**：
+1. `curl -I <数据源文件 URL>` 读 **`Last-Modified`** —— 直接问「几点发布的」，别猜。
+2. 对「同一行多列 NOT NULL」的表，先问「**最慢的那一列几点才可取**」⇒ 同步时刻必须以它为准（本次差 ≈ 14 小时）。
+3. `select left(note,20) as p, count(*) from <表> group by p` —— 若「自动同步」前缀 **0 命中**，说明自动同步**从未成功**，别被 UI 的「上次同步 HH:mm」骗。
+4. 逐日复测三个来源，区分「源不可用」与「时刻错」：本次 09-14/09-11/09-10/09-09/09-08/09-07/08-25 **三源全可用** ⇒ 是时刻错，不是源坏。
+
+**修法（已落地）**：`server/marketSync.ts` 目标日 = 窗口内**所有缺失交易日**（升序补齐，旧缺口不阻塞、新发布日不拖累）；`MARKET_SYNC_TIMES` = 北京时 **08:30 / 12:30**；`MARKET_SYNC_LOOKBACK_DAYS` = 30（启动兜底 `MARKET_SYNC_STARTUP_LOOKBACK_DAYS` = 10）；`MARKET_SYNC_MAX_CONSECUTIVE_FAILURES` = 3（连续失败即中止，省 Tushare 配额）。交易日历 = **`index_daily` ∪ `limit_up_records` 并集**（`db.ts#getMarketDataGapInputs`）—— 刻意取并集，避免继承 `index_daily`「停更即静默 no-op」的既有隐患；两个来源都没有的日期（周末/节假日）不入集，故不会去空打。`existingDates` 按「存在即尊重」判定（手工录入行不被自动同步覆盖，与页面匹配口径一致）。`note` 必须含「上交所/深交所公开两融汇总」（`db.ts#buildVerifiedMarketFactorMap` 靠它认可信来源）。`syncMarketDataOnce` / `syncMarketDataIfMissing` / `startMarketSyncScheduler` **名字保留**（cron 端点 `/api/scheduled/syncMarketData` 与启动兜底不受影响）。
+
+**接口/判据**：`getMarketDataGapStatus()` → `latestDataDate` / `pendingDates`；`market.getSyncStatus` 已透出 `latestDataDate` / `pendingDates` / `lookbackDays`。🔴 **`pendingDates.length === 1` 是预期态**（最后一个交易日要等次日早晨），**>1 才是缺口**；前端**禁**用 `hasTodayData` 当「今日数据已就绪」。
+
+**前端**：`Market.tsx` 图表缺口值由 `0` 改 **`null`** —— 旧行为把缺口画成 0，连带把右轴 `domain={[7500,'auto']}` 之外的点全部裁掉，视觉上「两条线消失」；`null` 让 recharts 断线。
+
+**验收**：`npx tsc --noEmit` 0 错；`npx vitest run` 失败文件集合 == 基线 7 文件（新增 `tests/server/marketSync.test.ts` 11 例全过）；`npx vite build` exit 0；`node docs/evidence/_probe_market_page_render.mjs`（无头 Edge + CDP，量 DOM 与右轴刻度上界 ≥ 25000）**ALL PASS**。数据侧：`market_data` **201 → 215 行**，末端 **08-25 → 09-14**。

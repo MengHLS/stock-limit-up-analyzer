@@ -53,6 +53,7 @@ import {
   syncMarketDataOnce,
   getLastMarketSyncResult,
   getBeijingDateString,
+  getMarketDataGapStatus,
 } from "./marketSync";
 import { lookupStockByTencent, normalizeStockCode } from "./stockIdentity";
 import {
@@ -1245,14 +1246,19 @@ export const appRouter = router({
       return await syncMarketDataOnce();
     }),
 
-    // 查询大盘数据最近一次同步状态与今日是否已有数据
+    // 查询大盘数据同步状态：最新数据日 / 待补交易日 / 今日是否有数据 / 最近一次同步结果
     getSyncStatus: publicProcedure.query(async () => {
-      const today = getBeijingDateString();
-      const todayData = await getMarketDataByDate(today);
+      const [gap, todayData] = await Promise.all([
+        getMarketDataGapStatus(),
+        getMarketDataByDate(getBeijingDateString()),
+      ]);
       return {
-        today,
-        hasTodayData: !!todayData,
+        today: gap.today,
+        hasTodayData: gap.hasTodayData,
         todayData,
+        latestDataDate: gap.latestDataDate,
+        pendingDates: gap.pendingDates,
+        lookbackDays: gap.lookbackDays,
         lastSync: getLastMarketSyncResult(),
       };
     }),

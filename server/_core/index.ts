@@ -63,11 +63,6 @@ async function findAvailablePort(startPort: number = 3000, span: number = 200): 
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  // 2026-09-15 修复：Node 默认 `requestTimeout` = 300s，而「龙头候选全区间回测」冷算
-  // 实测 305~413s（99,577 条涨停记录 × ±44 天价格并集）⇒ 冷算请求**必然**在算完之前
-  // 被切断：页面拿到 500，数据其实算完并落盘了（下一次打开才看得到），用户只看到报错。
-  // 抬到 15 分钟，让冷算能跑完并把结果直接回传；其余端点毫秒级返回，不受影响。
-  server.requestTimeout = 900_000;
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));

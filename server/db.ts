@@ -1,4 +1,4 @@
-import { eq, desc, like, or, sql, gte, count, and, inArray, notInArray } from "drizzle-orm";
+import { eq, desc, asc, like, or, sql, gte, count, and, inArray, notInArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { lte } from "drizzle-orm";
 import { normalizeStockCode } from "./stockIdentity";
@@ -802,6 +802,58 @@ export async function deleteMarketData(id: number): Promise<boolean> {
 
   const result = await db.delete(marketData).where(eq(marketData.id, id));
   return result[0].affectedRows > 0;
+}
+
+/** market_data 全表最新一条数据的日期；空表返回 null。 */
+export async function getLatestMarketDataDate(): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [row] = await db.select({ date: marketData.dataDate })
+    .from(marketData)
+    .orderBy(desc(marketData.dataDate))
+    .limit(1);
+  return row?.date ?? null;
+}
+
+/**
+ * 大盘数据补缺所需的两个只读输入（均为 [startDate, endDate] 内的日期，升序去重）：
+ *
+ * - `calendarDates`：可视为交易日的**日期并集**
+ *   = `index_daily` 的交易日（项目交易日历唯一权威）∪ `limit_up_records` 的涨停记录日。
+ *   ⚠️ 刻意取并集：`index_daily` 全仓无自动同步（停更即静默 no-op），单靠它会继承同一隐患
+ *   ⇒ 任一来源停更都不至于让大盘数据补缺静默卡死。任一方都没有的日期（周末/节假日）不会入集。
+ * - `existingDates`：`market_data` 已有数据行的日期。**按「存在即尊重」判定**，
+ *   与页面 `getLimitUpWithMarketData` 的匹配口径一致（手工录入行不会被自动同步覆盖）。
+ */
+export async function getMarketDataGapInputs(startDate: string, endDate: string): Promise<{
+  calendarDates: string[];
+  existingDates: string[];
+}> {
+  const db = await getDb();
+  if (!db) return { calendarDates: [], existingDates: [] };
+
+  const range = and(gte(marketData.dataDate, startDate), lte(marketData.dataDate, endDate));
+  const [indexRows, limitUpRows, existingRows] = await Promise.all([
+    db.selectDistinct({ date: indexDaily.tradeDate })
+      .from(indexDaily)
+      .where(and(gte(indexDaily.tradeDate, startDate), lte(indexDaily.tradeDate, endDate))),
+    db.selectDistinct({ date: limitUpRecords.limitUpDate })
+      .from(limitUpRecords)
+      .where(and(gte(limitUpRecords.limitUpDate, startDate), lte(limitUpRecords.limitUpDate, endDate))),
+    db.selectDistinct({ date: marketData.dataDate })
+      .from(marketData)
+      .where(range),
+  ]);
+
+  const calendarDates = Array.from(
+    new Set([...indexRows.map(r => r.date), ...limitUpRows.map(r => r.date)]),
+  ).sort((a, b) => a.localeCompare(b));
+
+  return {
+    calendarDates,
+    existingDates: existingRows.map(r => r.date).sort((a, b) => a.localeCompare(b)),
+  };
 }
 
 // ==================== Stock Daily Price Functions ====================
