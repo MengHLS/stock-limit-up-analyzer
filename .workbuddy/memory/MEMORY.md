@@ -12,7 +12,7 @@
 - 🔴 Bash 须自带长 PATH：git 在 `PortableGit/versions/1.2.0/cmd`、Unix 工具在**同版本 `usr/bin`**，缺一即 `command not found`。PowerShell 可用但 stdout 不回显 ⇒ 写文件再读。
 - 🔴 `node -e` / `git` **不认 MSYS `/c/...` 路径**（解析成 `D:\c\...`）⇒ 传 `C:/...`。
 - 🔴 后台服务用 `run_in_background=true`，末尾**禁 `&`**（`nohup &`/`Start-Process` 随会话回收 ⇒ 假「没起来」）。
-- 🔴 **git 写入可能被外部回滚**（2026-09-15 实测：`.git/refs` 整个目录消失 + 会话内 loose 对象全丢；`fetch`/`update-ref` 打印成功但 ref 不落地，手工 `printf > .git/refs/…` 反而持久）⇒ **每次 git 操作后复核 `git rev-parse HEAD` + `git cat-file -e <sha>`**；见 `bad object HEAD` 立即停手、先把工作区复制到仓库外。抢救现场 `D:\_repo_rescue_20260915\`。
+- 🔴 **git 写入可能被外部回滚**（2026-09-15 实测：`.git/refs` 整个目录消失 + 会话内 loose 对象全丢；`fetch`/`update-ref` 打印成功但 ref 不落地，手工 `printf > .git/refs/…` 反而持久）⇒ **每次 git 操作后复核 `git rev-parse HEAD` + `git cat-file -e <sha>`**；见 `bad object HEAD` 立即停手、先把工作区复制到仓库外（如 `D:\_repo_rescue_<日期>\`，用完即删）。
 - 🔴 改文件用 Python `read_bytes()`+`write_bytes()`，**先 `encode()` 再打开 + `os.replace` 原子替换**（否则抛错清成 **0 B**），改完回读核对（`Edit` 曾静默不生效）。
 - 🔴 源码字面量禁 `\uXXXX` 代理转义（⇒ `compile()` 抛 `UnicodeEncodeError`，零输出即死）；emoji 写字面量；模板字符串内禁嵌反引号。
 - 🔴 行数组手术：锚点须**连续行块**；`.tsx`/总控改完 `git diff --stat` 断言增删数，错了 `git checkout --` 复位重跑。
