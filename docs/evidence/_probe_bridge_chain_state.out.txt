@@ -1,0 +1,160 @@
+=== 0. 表存在性与行数 ===
+dataset_version : rows=2
+    cols=id, datasetId, version, status, startDate, endDate, universeDefinitionJson, filterDefinitionJson, featureVersion, sourceVersion, totalEvents, totalRows, createdAt, completedAt
+dataset_definition : rows=1
+    cols=id, datasetCode, name, description, datasetType, storageType, status, eventTableName, prefixTableName, postTableName, pathTableName, outcomeTableName, featureTableName, createdAt, updatedAt
+research_experiment : rows=2
+    cols=id, datasetVersionId, name, description, researchType, status, configJson, sampleCount, startedAt, completedAt, createdAt, updatedAt
+research_run : rows=13
+    cols=id, experimentId, runNo, status, configJson, inputSnapshotJson, sampleCount, startedAt, completedAt, errorCode, errorMessage, createdAt, executionLogJson
+research_analysis : rows=248
+    cols=id, runId, analysisType, name, target, configJson, status, createdAt, completedAt
+research_result : rows=4299
+    cols=id, analysisId, resultType, dimensionJson, metricCode, metricValue, sampleCount, resultJson, createdAt
+research_conclusion : rows=11
+    cols=id, experimentId, hypothesisId, conclusionType, title, conclusion, evidenceJson, confidence, status, createdAt, updatedAt
+research_strategy_candidate : rows=9
+    cols=id, experimentId, conclusionId, strategyDefinitionId, name, description, entryRuleJson, filterRuleJson, exitRuleJson, riskRuleJson, parameterSpaceJson, status, createdAt, updatedAt, sourceDatasetVersionId, sourceResearchRunId, sourceTraceJson, sourceDatasetDivergenceReason
+strategy_research_provenance : rows=8
+    cols=id, strategyVersionId, strategyId, strategyVersion, sourceCandidateId, sourceConclusionId, sourceExperimentId, sourceResearchRunId, sourceDatasetVersionId, sourceDatasetLabel, sourceSnapshotJson, origin, createdAt
+strategies : rows=9
+    cols=id, strategyId, name, latestVersion, status, createdAt, updatedAt, description, strategyType, currentVersionId
+strategy_versions : rows=10
+    cols=id, strategyId, version, strategyDocumentJson, versionRecordJson, fingerprint, datasetVersion, universeId, codeVersion, createdAt, parentVersionId, status, description, updatedAt, datasetVersionId
+strategy_parameters : rows=21
+    cols=id, strategyVersionId, strategyId, strategyVersion, code, name, dataType, parameterRole, defaultValueJson, minValue, maxValue, stepValue, unit, description, required, ordinal, createdAt
+strategy_entry_rules : rows=16
+    cols=id, strategyVersionId, strategyId, strategyVersion, ruleId, ruleType, eventType, windowStart, windowEnd, windowUnit, triggerType, conditionJson, conditionCount, priority, enabled, createdAt
+strategy_exit_rules : rows=16
+    cols=id, strategyVersionId, strategyId, strategyVersion, ruleId, ruleType, triggerType, thresholdValue, thresholdUnit, parameterCode, conditionJson, priority, enabled, ordinal, createdAt
+strategy_execution_rules : rows=8
+    cols=id, strategyVersionId, strategyId, strategyVersion, signalTiming, executionTiming, priceType, quantityMethod, lotSize, slippageModel, commissionModel, executionConstraintsJson, createdAt
+strategy_version_datasets : rows=8
+    cols=id, strategyVersionId, strategyId, strategyVersion, datasetId, datasetVersion, role, note, ordinal, createdAt, datasetVersionId
+
+=== 1. dataset_version（数据源）===
+  {"id":390001,"datasetId":120001,"version":"v1","status":"READY","startDate":"2026-07-31T16:00:00.000Z","endDate":"2026-08-30T16:00:00.000Z","createdAt":"2026-09-10T04:16:35.000Z"}
+  {"id":390002,"datasetId":120001,"version":"v2","status":"READY","startDate":"2024-08-31T16:00:00.000Z","endDate":"2026-08-31T16:00:00.000Z","createdAt":"2026-09-10T04:38:14.000Z"}
+
+=== 2. research_experiment（实验 = 研究输入边界）===
+  {"id":180001,"name":"首板换手率与未来五日收益的关系","status":"COMPLETED","datasetVersionId":390001,"createdAt":"2026-09-11T02:37:19.000Z"}
+  {"id":240002,"name":"正式数据，首板回踩与未来收益的关系","status":"COMPLETED","datasetVersionId":390002,"createdAt":"2026-09-11T06:40:21.000Z"}
+
+=== 3. research_run（每个实验的 Run 数与状态）===
+  {"experimentId":180001,"status":"COMPLETED","n":4,"minId":270001,"maxId":330002}
+  {"experimentId":240002,"status":"COMPLETED","n":7,"minId":390001,"maxId":570001}
+  {"experimentId":240002,"status":"FAILED","n":1,"minId":330003,"maxId":330003}
+  {"experimentId":240002,"status":"PENDING","n":1,"minId":600001,"maxId":600001}
+
+=== 4. research_analysis / research_result（按 Run 聚合）===
+  analysis {"runId":270001,"n":7,"done":"7"}
+  analysis {"runId":270002,"n":1,"done":"1"}
+  analysis {"runId":300001,"n":1,"done":"1"}
+  analysis {"runId":330002,"n":1,"done":"1"}
+  analysis {"runId":330003,"n":1,"done":"0"}
+  analysis {"runId":390001,"n":1,"done":"1"}
+  analysis {"runId":420001,"n":2,"done":"2"}
+  analysis {"runId":450001,"n":5,"done":"5"}
+  analysis {"runId":480001,"n":7,"done":"7"}
+  analysis {"runId":510001,"n":29,"done":"29"}
+  analysis {"runId":540001,"n":180,"done":"180"}
+  analysis {"runId":570001,"n":13,"done":"13"}
+  research_result 总行数 = [{"n":4299}]
+
+=== 5. research_conclusion（结论：取最近 10 条）===
+  {"id":510001,"experimentId":240002,"title":"正式数据，首板回踩与未来收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","createdAt":"2026-09-13T02:43:17.000Z"}
+  {"id":480001,"experimentId":240002,"title":"正式数据，首板回踩与未来收益的关系 — 自动结论（REJECTED）","status":"DRAFT","createdAt":"2026-09-12T05:30:16.000Z"}
+  {"id":390003,"experimentId":240002,"title":"正式数据，首板回踩与未来收益的关系 — 自动结论（REJECTED）","status":"DRAFT","createdAt":"2026-09-12T04:38:35.000Z"}
+  {"id":360001,"experimentId":240002,"title":"正式数据，首板回踩与未来收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","createdAt":"2026-09-12T03:29:32.000Z"}
+  {"id":330001,"experimentId":240002,"title":"正式数据，首板回踩与未来收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","createdAt":"2026-09-12T00:31:34.000Z"}
+  {"id":300001,"experimentId":240002,"title":"正式数据，首板回踩与未来收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","createdAt":"2026-09-12T00:11:54.000Z"}
+  {"id":270001,"experimentId":240002,"title":"正式数据，首板回踩与未来收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","createdAt":"2026-09-11T23:37:26.000Z"}
+  {"id":210002,"experimentId":180001,"title":"首板换手率与未来五日收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","createdAt":"2026-09-11T06:38:28.000Z"}
+  {"id":210001,"experimentId":180001,"title":"首板换手率与未来五日收益的关系 — 自动结论（PARTIALLY_SUPPORTED）","status":"DRAFT","createdAt":"2026-09-11T06:31:58.000Z"}
+  {"id":180002,"experimentId":180001,"title":"首板换手率与未来五日收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","createdAt":"2026-09-11T05:40:05.000Z"}
+
+=== 6. research_strategy_candidate（候选：全部）===
+  {"id":270001,"name":"正式数据，首板回踩与未来收益的关系 — 自动结论（REJECTED）","status":"CONVERTED","experimentId":240002,"conclusionId":480001,"sourceResearchRunId":540001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 5936> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 523> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_OPEN\",\"extra\":{\"obs…","filterRuleJson":"<len 364> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":null,"strategyDefinitionId":"cand-270001","createdAt":"2026-09-12T08:31:17.000Z","updatedAt":"2026-09-12T10:08:34.000Z"}
+  {"id":360001,"name":"[CAND-4GROUPS] ① 守线+极致缩量≤30% · T+3观察 · T+1开盘买","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 981> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_OPEN\",\"extra\":{\"obs…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 249> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":"cand-360001","createdAt":"2026-09-13T03:59:46.000Z","updatedAt":"2026-09-13T04:00:01.000Z"}
+  {"id":360002,"name":"[CAND-4GROUPS] ② 守线+缩量≤50%+红盘 · T+3观察 · T+1开盘买","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 981> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_OPEN\",\"extra\":{\"obs…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 249> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":"cand-360002","createdAt":"2026-09-13T04:00:07.000Z","updatedAt":"2026-09-13T04:00:20.000Z"}
+  {"id":360003,"name":"[CAND-4GROUPS] ③-a 买入时点=T日收盘 · 守线+缩量≤30%","status":"ARCHIVED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 982> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"SAME_CLOSE\",\"extra\":{\"ob…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 249> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":null,"createdAt":"2026-09-13T04:00:26.000Z","updatedAt":"2026-09-13T04:04:44.000Z"}
+  {"id":360004,"name":"[CAND-4GROUPS] ③-a 买入时点=T+1开盘 · 守线+缩量≤30%","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 981> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_OPEN\",\"extra\":{\"obs…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 249> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":"cand-360004","createdAt":"2026-09-13T04:01:26.000Z","updatedAt":"2026-09-13T04:01:38.000Z"}
+  {"id":360005,"name":"[CAND-4GROUPS] ③-b 买入时点=T+1收盘 · 守线+缩量≤30%","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 982> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_CLOSE\",\"extra\":{\"ob…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 249> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":"cand-360005","createdAt":"2026-09-13T04:01:45.000Z","updatedAt":"2026-09-13T04:01:57.000Z"}
+  {"id":360006,"name":"[CAND-4GROUPS] ④-a 回撤深度≤2%（浅回踩） · 守线+缩量≤30%","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 981> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_OPEN\",\"extra\":{\"obs…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 249> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":"cand-360006","createdAt":"2026-09-13T04:02:02.000Z","updatedAt":"2026-09-13T04:02:14.000Z"}
+  {"id":360007,"name":"[CAND-4GROUPS] ④-b 回撤深度≤5%（标准回踩） · 守线+缩量≤30%","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 981> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_OPEN\",\"extra\":{\"obs…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 249> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":"cand-360007","createdAt":"2026-09-13T04:02:21.000Z","updatedAt":"2026-09-13T04:02:32.000Z"}
+  {"id":360008,"name":"[CAND-4GROUPS] ④-c 回撤深度≤10%（深回踩） · 守线+缩量≤30%","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"sourceTraceJson":"<len 3503> {\"snapshotKind\":\"research_conclusion_evidence\",\"snapshotForm…","entryRuleJson":"<len 981> {\"event\":\"FIRST_LIMIT_UP\",\"timing\":\"NEXT_OPEN\",\"extra\":{\"obs…","filterRuleJson":"<len 424> {\"groups\":[{\"groupNo\":0,\"groupLogicalOperator\":\"AND\",\"condit…","exitRuleJson":"{\"stopLoss\":0.05,\"holdingDays\":5}","riskRuleJson":"{\"maxPositions\":5,\"maxPositionWeight\":0.2}","parameterSpaceJson":"<len 248> {\"max_volume_ratio\":{\"type\":\"number\",\"min\":0.05,\"max\":1,\"ste…","strategyDefinitionId":"cand-360008","createdAt":"2026-09-13T04:02:38.000Z","updatedAt":"2026-09-13T04:03:41.000Z"}
+
+  最新候选 sourceTraceJson 全文：
+  {"snapshotKind":"research_conclusion_evidence","snapshotFormatVersion":1,"conclusionId":510001,"experimentId":240002,"hypothesisId":null,"conclusionType":"SUPPORTED","conclusionStatus":"DRAFT","confidence":0.7,"confidenceIsNotPValue":true,"hypothesisStatement":"(未登记假设陈述)","primaryAnalysis":{"analysisId":540001,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.024480517056474613,"pValue":0,"tStat":19.17786493338828,"sampleCount":23751,"minGroupSampleCount":19080,"groupCount":2,"directionConsistency":null},"contributingAnalyses":[{"analysisId":540001,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.024480517056474613,"pValue":0,"sampleCount":23751},{"analysisId":540002,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":-0.1001193668218138,"pValue":0,"sampleCount":23751},{"analysisId":540003,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":-0.026026276236156644,"pValue":0,"sampleCount":23751},{"analysisId":540004,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":-0.05128123085588128,"pValue":0,"sampleCount":23751},{"analysisId":540005,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":-0.08816161808114892,"pValue":0,"sampleCount":23751},{"analysisId":540006,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.05637301293028803,"pValue":0,"sampleCount":23751},{"analysisId":540007,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.19679054108605834,"pValue":0,"sampleCount":23751},{"analysisId":540008,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.019118891387961582,"pValue":0,"sampleCount":23751},{"analysisId":540009,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.17462340387883746,"pValue":0,"sampleCount":23751},{"analysisId":540010,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.1627914138223453,"pValue":0,"sampleCount":23751},{"analysisId":540011,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.07708925429054327,"pValue":0,"sampleCount":23751},{"analysisId":540012,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.015291765461347667,"pValue":0,"sampleCount":23751},{"analysisId":540013,"analysisType":"CONDITIONAL","effectLabel":"条件组 − 全样本的 future_return_5d 均值差","effect":0.04035757692029468,"pValue":0,"sampleCount":23751}],"contributingAnalysesTruncated":false,"contributingAnalysesCount":13,"runResolution":{"sourceResearchRunId":570001,"path":"PRIMARY_ANALYSIS","analysisIds":[540001,540002,540003,540004,540005,540006,540007,540008,540009,540010,540011,540012,540013],"distinctRunIds":[570001],"missingAnalysisIds":[]},"evidenceShape":{"hasEvidence":true,"topLevelKeys":["confidenceBasis","confidenceIsNotPValue","contributingAnalyses","disclaimer","hypothesisId","hypothesisStatement","policy","primaryAnalysis","primarySelectionRule","ruleTrace"],"ruleTraceCount":4,"legacyAnalysesKeyUsed":false},"policy":{"alpha":0.05,"materialityAbs":0.005,"minSampleCount":30,"stabilityMinConsistentRatio":0.6,"strongSampleMultiple":2},"disclaimer":"⚠️ 自动结论仅为**研究辅助**，不等同于统计显著性或交易有效性；任何策略性判断必须经 Backtest / 稳健性 / OOS 验证后才可成立，本阶段不产出交易结论。","generatedFrom":"research_conclusion.evidenceJson"}
+
+=== 7. strategy_research_provenance（溯源切面）===
+  {"id":150001,"strategyVersionId":390001,"strategyId":"cand-270001","strategyVersion":"1.0.0","sourceCandidateId":270001,"sourceConclusionId":480001,"sourceExperimentId":240002,"sourceResearchRunId":540001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 5936>","origin":"DIRECT","createdAt":"2026-09-12T10:08:33.000Z"}
+  {"id":180001,"strategyVersionId":420001,"strategyId":"cand-360001","strategyVersion":"1.0.0","sourceCandidateId":360001,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 3503>","origin":"DIRECT","createdAt":"2026-09-13T04:00:01.000Z"}
+  {"id":180002,"strategyVersionId":420002,"strategyId":"cand-360002","strategyVersion":"1.0.0","sourceCandidateId":360002,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 3503>","origin":"DIRECT","createdAt":"2026-09-13T04:00:19.000Z"}
+  {"id":180003,"strategyVersionId":420003,"strategyId":"cand-360004","strategyVersion":"1.0.0","sourceCandidateId":360004,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 3503>","origin":"DIRECT","createdAt":"2026-09-13T04:01:37.000Z"}
+  {"id":180004,"strategyVersionId":420004,"strategyId":"cand-360005","strategyVersion":"1.0.0","sourceCandidateId":360005,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 3503>","origin":"DIRECT","createdAt":"2026-09-13T04:01:56.000Z"}
+  {"id":180005,"strategyVersionId":420005,"strategyId":"cand-360006","strategyVersion":"1.0.0","sourceCandidateId":360006,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 3503>","origin":"DIRECT","createdAt":"2026-09-13T04:02:13.000Z"}
+  {"id":180006,"strategyVersionId":420006,"strategyId":"cand-360007","strategyVersion":"1.0.0","sourceCandidateId":360007,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 3503>","origin":"DIRECT","createdAt":"2026-09-13T04:02:31.000Z"}
+  {"id":180007,"strategyVersionId":420007,"strategyId":"cand-360008","strategyVersion":"1.0.0","sourceCandidateId":360008,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","sourceSnapshotJson":"<len 3503>","origin":"DIRECT","createdAt":"2026-09-13T04:02:49.000Z"}
+
+=== 8. strategies / strategy_versions ===
+  strategy {"id":360001,"name":"涨停候选基线","status":"Draft","createdAt":"2026-09-12T08:25:37.000Z"}
+  strategy {"id":390001,"name":"正式数据，首板回踩与未来收益的关系 — 自动结论（REJECTED）","status":"Draft","createdAt":"2026-09-12T10:08:31.000Z"}
+  strategy {"id":420001,"name":"[CAND-4GROUPS] ① 守线+极致缩量≤30% · T+3观察 · T+1开盘买","status":"Draft","createdAt":"2026-09-13T03:59:58.000Z"}
+  strategy {"id":420002,"name":"[CAND-4GROUPS] ② 守线+缩量≤50%+红盘 · T+3观察 · T+1开盘买","status":"Draft","createdAt":"2026-09-13T04:00:18.000Z"}
+  strategy {"id":420003,"name":"[CAND-4GROUPS] ③-a 买入时点=T+1开盘 · 守线+缩量≤30%","status":"Draft","createdAt":"2026-09-13T04:01:36.000Z"}
+  strategy {"id":420004,"name":"[CAND-4GROUPS] ③-b 买入时点=T+1收盘 · 守线+缩量≤30%","status":"Draft","createdAt":"2026-09-13T04:01:55.000Z"}
+  strategy {"id":420005,"name":"[CAND-4GROUPS] ④-a 回撤深度≤2%（浅回踩） · 守线+缩量≤30%","status":"Draft","createdAt":"2026-09-13T04:02:12.000Z"}
+  strategy {"id":420006,"name":"[CAND-4GROUPS] ④-b 回撤深度≤5%（标准回踩） · 守线+缩量≤30%","status":"Draft","createdAt":"2026-09-13T04:02:30.000Z"}
+  strategy {"id":420007,"name":"[CAND-4GROUPS] ④-c 回撤深度≤10%（深回踩） · 守线+缩量≤30%","status":"Draft","createdAt":"2026-09-13T04:02:48.000Z"}
+  version {"id":360001,"strategyId":"limit-up-baseline","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-12T08:25:34.000Z"}
+  version {"id":360002,"strategyId":"limit-up-baseline","version":"1.1.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-12T08:26:46.000Z"}
+  version {"id":390001,"strategyId":"cand-270001","version":"1.0.0","status":"Validated","datasetVersionId":390002,"createdAt":"2026-09-12T10:08:28.000Z"}
+  version {"id":420001,"strategyId":"cand-360001","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-13T03:59:53.000Z"}
+  version {"id":420002,"strategyId":"cand-360002","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-13T04:00:14.000Z"}
+  version {"id":420003,"strategyId":"cand-360004","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-13T04:01:33.000Z"}
+  version {"id":420004,"strategyId":"cand-360005","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-13T04:01:52.000Z"}
+  version {"id":420005,"strategyId":"cand-360006","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-13T04:02:09.000Z"}
+  version {"id":420006,"strategyId":"cand-360007","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-13T04:02:27.000Z"}
+  version {"id":420007,"strategyId":"cand-360008","version":"1.0.0","status":"Draft","datasetVersionId":390002,"createdAt":"2026-09-13T04:02:45.000Z"}
+
+=== 9. 投影表（按 strategyVersionId 聚合）===
+  strategy_parameters {"v":420001,"n":3}
+  strategy_parameters {"v":420002,"n":3}
+  strategy_parameters {"v":420003,"n":3}
+  strategy_parameters {"v":420004,"n":3}
+  strategy_parameters {"v":420005,"n":3}
+  strategy_parameters {"v":420006,"n":3}
+  strategy_parameters {"v":420007,"n":3}
+  strategy_entry_rules {"v":390001,"n":2}
+  strategy_entry_rules {"v":420001,"n":2}
+  strategy_entry_rules {"v":420002,"n":2}
+  strategy_entry_rules {"v":420003,"n":2}
+  strategy_entry_rules {"v":420004,"n":2}
+  strategy_entry_rules {"v":420005,"n":2}
+  strategy_entry_rules {"v":420006,"n":2}
+  strategy_entry_rules {"v":420007,"n":2}
+  strategy_exit_rules {"v":390001,"n":2}
+  strategy_exit_rules {"v":420001,"n":2}
+  strategy_exit_rules {"v":420002,"n":2}
+  strategy_exit_rules {"v":420003,"n":2}
+  strategy_exit_rules {"v":420004,"n":2}
+  strategy_exit_rules {"v":420005,"n":2}
+  strategy_exit_rules {"v":420006,"n":2}
+  strategy_exit_rules {"v":420007,"n":2}
+  strategy_execution_rules {"v":390001,"n":1}
+  strategy_execution_rules {"v":420001,"n":1}
+  strategy_execution_rules {"v":420002,"n":1}
+  strategy_execution_rules {"v":420003,"n":1}
+  strategy_execution_rules {"v":420004,"n":1}
+  strategy_execution_rules {"v":420005,"n":1}
+  strategy_execution_rules {"v":420006,"n":1}
+  strategy_execution_rules {"v":420007,"n":1}
+  strategy_version_datasets {"v":390001,"n":1}
+  strategy_version_datasets {"v":420001,"n":1}
+  strategy_version_datasets {"v":420002,"n":1}
+  strategy_version_datasets {"v":420003,"n":1}
+  strategy_version_datasets {"v":420004,"n":1}
+  strategy_version_datasets {"v":420005,"n":1}
+  strategy_version_datasets {"v":420006,"n":1}
+  strategy_version_datasets {"v":420007,"n":1}

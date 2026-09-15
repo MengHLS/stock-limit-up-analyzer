@@ -1,0 +1,16 @@
+candidate 360001 (CONVERTED) : [CAND-4GROUPS] ① 守线+极致缩量≤30% · T+3观察 · T+1开盘买
+
+===== entryRuleJson =====
+{"event":"FIRST_LIMIT_UP","timing":"NEXT_OPEN","extra":{"observationWindow":{"start":1,"end":3,"unit":"TRADING_DAY"},"trigger":"NEXT_TRADING_DAY","eventParams":{"limitUpRatio":0.1},"execution":{"quantityMethod":"TARGET_WEIGHT","lotSize":100,"slippageModel":"BPS","commissionModel":"BPS"},"position":{"sizingMethod":"EQUAL_WEIGHT"},"document":{"backtestConfig":{"initialCapital":100000},"costModel":{"commissionRate":0.0003,"stampDutyRate":0.001,"transferFeeRate":0.00001,"slippageBps":10,"lotSize":100,"minCommission":5}},"recipe":{"kind":"signalEngine","recipeId":"first-limit-pullback-hold-shrink","point":"close","signalFrequency":"daily","featureVersions":[{"featureId":"haircutFromEventLow","version":"1.0.0"},{"featureId":"volumeRatio","version":"1.0.0"},{"featureId":"isBullish","version":"1.0.0"},{"featureId":"momentumFromEventClose","version":"1.0.0"}],"rankingConfig":{"higherIsBetter":true},"selectionConfig":{"method":{"kind":"topN","n":5}},"requiredData":["OHLCV"]}}}
+
+===== filterRuleJson =====
+{"groups":[{"groupNo":0,"groupLogicalOperator":"AND","conditions":[{"groupNo":0,"sortOrder":0,"fieldName":"bar.low","operator":">=","value":"prefix.rd0.open","logicalOperator":"AND","groupLogicalOperator":"AND","note":"守线：观察日未破首板日开盘价"},{"groupNo":0,"sortOrder":1,"fieldName":"bar.volume","operator":"<=","value":"prefix.rd0.volume * 0.3","logicalOperator":"AND","groupLogicalOperator":"AND","note":"缩量：观察日量能 ≤ 首板日的 30%"}]}]}
+
+===== exitRuleJson =====
+{"stopLoss":0.05,"holdingDays":5}
+
+===== riskRuleJson =====
+{"maxPositions":5,"maxPositionWeight":0.2}
+
+===== parameterSpaceJson =====
+{"max_volume_ratio":{"type":"number","min":0.05,"max":1,"step":0.05,"defaultValue":0.3},"max_drawdown":{"type":"number","min":0,"max":0.3,"step":0.01,"defaultValue":0.02},"require_bullish":{"type":"number","min":0,"max":1,"step":1,"defaultValue":0}}

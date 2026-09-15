@@ -1,0 +1,85 @@
+
+=== 0. 前置：真实研究坐标自证 + 清理上次残留 ===
+  基线行数 {"candidates":9,"strategies":9,"versions":10,"provenance":8,"params":21}
+  ok   前置：无在途 RUNNING 研究 Run（有则禁改 server） — RUNNING=0
+  ok   前置：实验存在且 Dataset 坐标 = 390002 — {"id":240002,"datasetVersionId":390002,"status":"COMPLETED"}
+  ok   前置：来源 Dataset Version 存在且 READY — {"id":390002,"status":"READY","version":"v2"}
+  预清理同名残留：0 行
+
+=== 1. §12① Conclusion → Candidate（provenance 五件套） ===
+  ok   创建成功且 status = DRAFT（不自动 ACCEPTED）
+  ok   sourceDatasetVersionId 复制自 Experiment（唯一 Dataset 坐标） — 390002
+  ok   sourceResearchRunId 由结论证据两跳解析得到 — 570001
+  ok   conclusionId / experimentId 锚定正确
+  ok   一致时 sourceDatasetDivergenceReason 必须为 NULL
+  ok   sourceTrace 可解析且是「最小充分」结论证据快照 — ["snapshotKind","snapshotFormatVersion","conclusionId","experimentId","hypothesisId","conclusionType","conclusionStatus"
+  ok   sourceTrace 可追溯到 analysis / result 层（primaryAnalysis.analysisId） — analysisId=540001
+  ok   sourceTrace 含 experiment / conclusion 坐标（Finding 可追溯） — conclusionId=510001 experimentId=240002
+  ok   sourceTrace 内 runResolution 指向真实 Run — {"sourceResearchRunId":570001,"path":"PRIMARY_ANALYSIS","analysisIds":[540001,540002,540003,540004,540005,540006,540007,
+  ok   🔴 统计结果没有被机械复制成交易规则（结论自带「本阶段不产出交易结论」边界声明）
+
+=== 2. §12② Promote 前编辑交易假设 ===
+  ok   出场假设可改并落库（holdingDays 5 → 8） — {"stopLoss":0.05,"takeProfit":0.15,"holdingDays":8}
+  ok   参数空间可改并落库（max_volume_ratio 默认值 0.3 → 0.5） — {"max_volume_ratio":{"type":"number","min":0.05,"max":1,"step":0.05,"defaultValue":0.5},"max_drawdown":{"type":"number","min":0,"max":0.3,"step":0.01,"defaultValue":0.08},"require_bullish":{"type":"number","min":0,"max":1,"step":1,"defaultValue":1}}
+  ok   三项参数均带搜索界 + 默认值（TUNABLE 完整性） — keys=max_volume_ratio,max_drawdown,require_bullish
+  ok   买入条件（Entry 的 Condition）原样保留，未被编辑动作顺带改写
+
+=== 3. §12③ 非 ACCEPTED → promote 一律拒绝（且零 Strategy 数据） ===
+  ok   DRAFT 直接 promote 被拒，领域码 = STRATEGY_CANDIDATE_NOT_ACCEPTED — STRATEGY_CANDIDATE_NOT_ACCEPTED
+  ok   拒绝后零 Strategy 数据（strategies / versions 行数未变）
+
+=== 4. §12④ Dataset 分歧三例（ACCEPTED 之前先验 gate） ===
+  ok   状态机 DRAFT → REVIEW → ACCEPTED 生效
+  ok   异库 + 无原因 → DATASET_DIVERGENCE_REASON_REQUIRED — STRATEGY_CANDIDATE_DATASET_DIVERGENCE_REASON_REQUIRED
+  ok   Dataset Version 不存在 → DATASET_VERSION_NOT_FOUND — STRATEGY_CANDIDATE_DATASET_VERSION_NOT_FOUND
+  ok   同库却填分歧原因 → STRATEGY_CANDIDATE_INVALID_INPUT — STRATEGY_CANDIDATE_INVALID_INPUT
+  ok   三例失败后仍零 Strategy 数据
+
+=== 5. §12⑤ ACCEPTED + 完整草稿 → promote 生成 Strategy Version ===
+  strategyId=cand-390002 version=1.0.0 strategyVersionId=450002 fingerprint=d2956a288c34c463…
+  ok   strategyId 确定性派生 = cand-<candidateId> — cand-390002
+  ok   版本号固定 1.0.0（Promote 不产多版本）
+  ok   候选终态 = CONVERTED
+  ok   strategyDefinitionId 指向该策略（两处一致）
+  ok   provenance 行存在且唯一 — {"strategyVersionId":450002,"strategyId":"cand-390002","sourceCandidateId":390002,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","origin":"DIRECT"}
+  ok   provenance 五项上游锚全部落库（candidate/conclusion/experiment/run/datasetVersion）
+  ok   provenance origin = DIRECT（首代，非继承）
+
+=== 6. §12⑥⑦ 投影 ↔ Canonical 一致 + Canonical 零污染 ===
+  ok   Strategy 侧读口可取到版本 + 投影 bundle
+  ok   投影与 Canonical Definition 零漂移（5 张投影逐字段比对）
+  投影行数：parameters=3 entryRules=2 exitRules=3 executionRule=1 datasets=1
+  ok   五张投影表均有行（parameters / entry / exit / execution / datasets）
+  ok   参数投影保留 parameterRole = TUNABLE（供 Parameter Search 消费） — max_drawdown:TUNABLE,max_volume_ratio:TUNABLE,require_bullish:TUNABLE
+  ok   执行绑定 = 研究来源 Dataset（390002，role 为主库） — [390002]
+  ok   Canonical 零污染：strategies / strategy_versions 无任何 research/candidate/conclusion 列
+
+=== 7. §12⑧ promote 幂等：第二次不产生第二个版本 ===
+  第一次：strategyId=cand-390002 version=1.0.0 versionId=450002 fp=d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c idempotent=false
+  第二次：strategyId=cand-390002 version=1.0.0 versionId=450002 fp=d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c idempotent=true
+  ok   第二次 promote 未新建（idempotent = true）
+  ok   第二次返回同一 strategyId — cand-390002 vs cand-390002
+  ok   第二次返回同一 version — 1.0.0 vs 1.0.0
+  ok   第二次返回同一 versionId
+  ok   第二次返回同一 fingerprint（来自真实版本行，不编值） — d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c vs d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c
+  ok   未产生第二个 Strategy Version
+  ok   未产生第二条 provenance
+
+=== 8. §12⑨ 运行时独立性（只用 Strategy 侧读口 + 真配方参数解析） ===
+  ok   真实配方能从转正产物解析出本次运行参数集（不抛 RECIPE_PARAMETER_NO_DEFAULT） — {"max_drawdown":0.08,"max_volume_ratio":0.5,"require_bullish":1}
+  由转正产物解析出的参数集 = {"max_drawdown":0.08,"max_volume_ratio":0.5,"require_bullish":1}
+  ok   策略版本行不携带研究坐标（研究可删/冻结而策略仍可运行） — id,strategyId,version,strategyDocumentJson,versionRecordJson,fingerprint,datasetVersion,universeId,codeVersion,createdAt,parentVersionId,status,description,updatedAt,datasetVersionId
+
+=== 9. §13⑩ Look-ahead 负向闸门（真校验器） ===
+  ok   合法 prefix / event / observation 组合通过（无 INVALID_FUTURE_REFERENCE）
+  ok   条件引用 `path.*`（前视标签层）→ INVALID_FUTURE_REFERENCE — INVALID_FUTURE_REFERENCE
+  ok   条件引用 `outcome.*`（前视标签层）→ INVALID_FUTURE_REFERENCE — INVALID_FUTURE_REFERENCE
+  ok   越界前视 `post.rd6`（超出最早信号日 T+1 可观察范围）→ INVALID_FUTURE_REFERENCE — INVALID_FUTURE_REFERENCE
+  ok   无法判定时间域的引用 → 默认拒绝（不是黑名单放过） — UNKNOWN_FIELD_TIME_DOMAIN
+
+=== 10. 收尾：删除本探针自建的行，断言行数守恒 ===
+  清理后行数 {"candidates":9,"strategies":9,"versions":10,"provenance":8,"params":21}
+  ok   行数守恒（候选 / 策略 / 版本 / 溯源 / 参数 全部回到基线）
+  ok   研究侧记录未被本探针改动（实验 / 结论仍在）
+
+== ALL PASS == checks=53 failures=0

@@ -173,10 +173,41 @@ for (const t of TABLES) {
   console.log(`  ${same ? "✓" : "✗"} ${t}: ${before[t]} → ${after[t]}`);
 }
 if (!conserved) failures.push("行数未守恒（自建自清失败）");
-const provRows = after.strategy_research_provenance;
-const candRows = after.research_strategy_candidate;
-if (provRows !== 0) failures.push(`strategy_research_provenance 应回到 0 行，实际 ${provRows}`);
-if (candRows !== 0) failures.push(`research_strategy_candidate 应回到 0 行，实际 ${candRows}`);
+
+/**
+ * ⚠️ 2026-09-16 修正（原判据已过期）：这里原本断言 `strategy_research_provenance` /
+ * `research_strategy_candidate` 跑完「应回到 **0 行**」—— 那是 **RESEARCH-006.1 阶段的事实**：
+ * 当时桥刚建表、业务线路未接，全库确实 0 行。006.2 / 006.3 / 006.4 接通候选与转正业务后，
+ * 真实库已有真实候选与溯源行 ⇒ 「绝对 0 行」变成**假失败**（实测 9 / 8 行，
+ * 而那 19 张表的「前后逐表比对」全部守恒，证明脚本根本没动用户数据）。
+ *
+ * 正确判据 = **自建自清**：① 逐表行数守恒（上一段已证）；② **本脚本自己的哨兵行**必须已删净。
+ * 一律用哨兵标记去查，**禁止**再用「整表必须为 0」这种会被真实业务数据打假的绝对断言。
+ */
+const sentinelProvRows = Number(
+  ((
+    await conn.query("SELECT COUNT(*) n FROM strategy_research_provenance WHERE strategyId = ?", [
+      SENTINEL_STRATEGY_ID,
+    ])
+  )[0] as Array<{ n: number }>)[0].n,
+);
+const sentinelCandRows = Number(
+  ((
+    await conn.query("SELECT COUNT(*) n FROM research_strategy_candidate WHERE name LIKE '0061-%'")
+  )[0] as Array<{ n: number }>)[0].n,
+);
+if (sentinelProvRows !== 0) {
+  failures.push(
+    `本脚本的哨兵溯源行未清除（strategyId=${SENTINEL_STRATEGY_ID}），实际 ${sentinelProvRows} 行`,
+  );
+}
+if (sentinelCandRows !== 0) {
+  failures.push(`本脚本的哨兵候选行未清除（name LIKE '0061-%'），实际 ${sentinelCandRows} 行`);
+}
+console.log(
+  `  ✓ 哨兵自建自清：provenance(${SENTINEL_STRATEGY_ID})=${sentinelProvRows} 行、`
+  + `candidate(0061-%)=${sentinelCandRows} 行`,
+);
 
 console.log("\n" + JSON.stringify({ failures, pass: failures.length === 0 }, null, 2));
 await conn.end();
