@@ -29,7 +29,7 @@
 
 1. 把「已存在但从未被一次性真实验收过」的闭环，用**真库 + 真 tRPC + 真转换器 + 真投影校验 + 真配方参数解析**跑通并留档（§11）；
 2. 发现并修正 **1 处真实缺陷**：`scripts/verifyResearchStrategyBridge.mts` 的过期绝对断言（详见 §12.1）；
-3. 发现并留证 **1 处真正阻塞后续 Parameter Search / Backtest 的缺陷**：条件右值无算术被静默降级成 `CONSTANT` 字符串（详见 §12.2，属已登记地雷，须单独排期）。
+3. 发现并留证 **1 处真正阻塞后续 Parameter Search / Backtest 的缺陷**：条件右值无算术被静默降级成 `CONSTANT` 字符串（详见 §12.2，属已登记地雷，须单独排期）。**✅ 已于 2026-09-16 由 `9ar` / BRIDGE-CONDITION-EXPRESSION-001 修复**（派生 bar 字段 + 转换器响亮失败），见 `docs/research/BRIDGE-CONDITION-EXPRESSION-001-implementation.md`。
 
 ---
 
@@ -347,7 +347,14 @@ npx tsc --noEmit   →  TSC_EXIT=0
 - **修法**：判据改为**自建自清** —— ① 逐表行数守恒（已有）；② 本脚本自己的哨兵行必须删净（`strategyId='c-0061-verify'` 与 `name LIKE '0061-%'`）。**禁止**再用「整表必须为 0」这类会被真实业务数据打假的绝对断言。
 - **验证**：复跑 → `{"failures": [], "pass": true}`，EXIT=0。
 
-### 12.2 🔴 未修（**真正阻塞 Parameter Search / Backtest**）：条件右值无算术 ⇒ 被**静默降级**成 `CONSTANT` 字符串
+### 12.2 ✅ **已修**（2026-09-16 · `9ar` / BRIDGE-CONDITION-EXPRESSION-001）：条件右值无算术 ⇒ 曾被**静默降级**成 `CONSTANT` 字符串
+
+> **状态：已修。** 本条登记为 `ROADMAP.md` §44.5 的 `9ar`，已由后续任务关闭（本条已归档进 `ROADMAP-CHANGELOG.md`）。
+> **修法** = 「加**派生 bar 字段**（`bar.volumeRatio` / `bar.haircutFromEventLow` / `bar.isBullish` / `bar.momentumFromEventClose`，与配方特征 **同名**）+ 转换器**取消静默降级**（算术右值**响亮拒绝** `PROMOTE_SKETCH_INVALID` 并给出改写方向）」。
+> **取证与验收**：真库只读取证（16 条条件 / **7 条历史残留** / 8 条草稿重放**全部响亮拒绝**）+ 端到端复验（**27 断言 ALL PASS**、投影零漂移、`bar.volumeRatio <= max_volume_ratio` 与配方门槛**同名同义**）+ 全量测试失败集合与基线**逐字一致**。
+> 详见独立报告 **`docs/research/BRIDGE-CONDITION-EXPRESSION-001-implementation.md`**。
+>
+> ⚠️ 以下内容保留为**修复前的现场记录（历史）**，勿据此判断当前行为。
 
 - **严重性**：这是「已转正的 8 条策略全部带着一条**语义无意义**的入场条件」—— 不修则「回测读 `entry.conditions`」与「回测读 `recipe` 门槛」两条路径**口径不一致**，Parameter Search 会在错误的前提上搜索。
 - **真实证据**（`npx tsx docs/evidence/_probe_promoted_entry_conditions.mts`，策略版本 420001~420007 全同）：

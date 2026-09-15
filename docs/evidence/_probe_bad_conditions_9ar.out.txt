@@ -1,0 +1,114 @@
+
+=== 0. 真实库存量与坐标 ===
+  strategy_versions 行数 = 10
+  research_strategy_candidate 行数 = 9
+  配方特征 haircutFromEventLow / volumeRatio / isBullish / momentumFromEventClose
+  配方参数 max_volume_ratio / max_drawdown / require_bullish
+  bar.* 声明白名单 = open / high / low / close / volume / amount / tradeDate / relativeDay / volumeRatio / haircutFromEventLow / isBullish / momentumFromEventClose
+
+=== 1. 「前」历史残留：已落库的 entry.conditions（原样列出） ===
+
+  [versionId=360001] limit-up-baseline@1.0.0 status=Draft datasetVersionId=390002 conditions=0
+    （无 entry.conditions）
+
+  [versionId=360002] limit-up-baseline@1.1.0 status=Draft datasetVersionId=390002 conditions=0
+    （无 entry.conditions）
+
+  [versionId=390001] cand-270001@1.0.0 status=Validated datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN "prefix.rd0.volume" [valueType=FIELD_REFERENCE]
+
+  [versionId=420001] cand-360001@1.0.0 status=Draft datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN_OR_EQUAL "prefix.rd0.volume * 0.3" [valueType=CONSTANT]  <<< 形如算术表达式（已落库）
+         命中字段引用片段 = "prefix.rd0.volume"
+
+  [versionId=420002] cand-360002@1.0.0 status=Draft datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN_OR_EQUAL "prefix.rd0.volume * 0.5" [valueType=CONSTANT]  <<< 形如算术表达式（已落库）
+         命中字段引用片段 = "prefix.rd0.volume"
+
+  [versionId=420003] cand-360004@1.0.0 status=Draft datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN_OR_EQUAL "prefix.rd0.volume * 0.3" [valueType=CONSTANT]  <<< 形如算术表达式（已落库）
+         命中字段引用片段 = "prefix.rd0.volume"
+
+  [versionId=420004] cand-360005@1.0.0 status=Draft datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN_OR_EQUAL "prefix.rd0.volume * 0.3" [valueType=CONSTANT]  <<< 形如算术表达式（已落库）
+         命中字段引用片段 = "prefix.rd0.volume"
+
+  [versionId=420005] cand-360006@1.0.0 status=Draft datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN_OR_EQUAL "prefix.rd0.volume * 0.3" [valueType=CONSTANT]  <<< 形如算术表达式（已落库）
+         命中字段引用片段 = "prefix.rd0.volume"
+
+  [versionId=420006] cand-360007@1.0.0 status=Draft datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN_OR_EQUAL "prefix.rd0.volume * 0.3" [valueType=CONSTANT]  <<< 形如算术表达式（已落库）
+         命中字段引用片段 = "prefix.rd0.volume"
+
+  [versionId=420007] cand-360008@1.0.0 status=Draft datasetVersionId=390002 conditions=2
+    #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+    #1 bar.volume LESS_THAN_OR_EQUAL "prefix.rd0.volume * 0.3" [valueType=CONSTANT]  <<< 形如算术表达式（已落库）
+         命中字段引用片段 = "prefix.rd0.volume"
+
+  小结：条件总数=16（FIELD_REFERENCE=9 / PARAMETER_REFERENCE=0 / CONSTANT=7）
+  其中「形如算术表达式」的历史残留 = 7 条
+
+=== 2. 「后」修正生效：用**真转换器**重放真库草稿的 filterRule ===
+
+  [candidateId=270001] "正式数据，首板回踩与未来收益的关系 — 自动结论（REJECTED）" status=CONVERTED strategyDefinitionId=cand-270001（已转正）
+    重放结果 = 产出成功（2 条条件，valueType 均可判定）
+      #0 bar.low GREATER_THAN_OR_EQUAL "prefix.rd0.open" [valueType=FIELD_REFERENCE]
+      #1 bar.volume LESS_THAN "prefix.rd0.volume" [valueType=FIELD_REFERENCE]
+
+  [candidateId=360001] "[CAND-4GROUPS] ① 守线+极致缩量≤30% · T+3观察 · T+1开盘买" status=CONVERTED strategyDefinitionId=cand-360001（已转正）
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.3" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  [candidateId=360002] "[CAND-4GROUPS] ② 守线+缩量≤50%+红盘 · T+3观察 · T+1开盘买" status=CONVERTED strategyDefinitionId=cand-360002（已转正）
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.5" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  [candidateId=360003] "[CAND-4GROUPS] ③-a 买入时点=T日收盘 · 守线+缩量≤30%" status=ARCHIVED strategyDefinitionId=null
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.3" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  [candidateId=360004] "[CAND-4GROUPS] ③-a 买入时点=T+1开盘 · 守线+缩量≤30%" status=CONVERTED strategyDefinitionId=cand-360004（已转正）
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.3" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  [candidateId=360005] "[CAND-4GROUPS] ③-b 买入时点=T+1收盘 · 守线+缩量≤30%" status=CONVERTED strategyDefinitionId=cand-360005（已转正）
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.3" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  [candidateId=360006] "[CAND-4GROUPS] ④-a 回撤深度≤2%（浅回踩） · 守线+缩量≤30%" status=CONVERTED strategyDefinitionId=cand-360006（已转正）
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.3" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  [candidateId=360007] "[CAND-4GROUPS] ④-b 回撤深度≤5%（标准回踩） · 守线+缩量≤30%" status=CONVERTED strategyDefinitionId=cand-360007（已转正）
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.3" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  [candidateId=360008] "[CAND-4GROUPS] ④-c 回撤深度≤10%（深回踩） · 守线+缩量≤30%" status=CONVERTED strategyDefinitionId=cand-360008（已转正）
+    重放结果 = **响亮失败** STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID
+      路径/原因 = 候选草稿内容非法：filterRule.groups[0].conditions[1].value — 右值 "prefix.rd0.volume * 0.3" 不是合法字段引用、也不是已声明的参数 code，但含字段引用 "prefix.rd0.volume" 与算术运算符：这看起来是「字段 × 系数」的算术表达式，而条件的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用 三种语法种类）。Promote 拒绝把它静默降级成字符串常量，请改写为：① **派生字段**（在当前 bar 上相对事件日基准求值，与配方门槛同名同义）：bar.volumeRatio / bar.haircutFromEventLow / ba
+
+  小结：重放成功=1 / 响亮拒绝(PROMOTE_SKETCH_INVALID)=8 / 其他失败=0
+  被响亮拒绝的草稿（修正后的新增拦截面）：
+    candidateId=360001 "[CAND-4GROUPS] ① 守线+极致缩量≤30% · T+3观察 · T+1开盘买" status=CONVERTED
+    candidateId=360002 "[CAND-4GROUPS] ② 守线+缩量≤50%+红盘 · T+3观察 · T+1开盘买" status=CONVERTED
+    candidateId=360003 "[CAND-4GROUPS] ③-a 买入时点=T日收盘 · 守线+缩量≤30%" status=ARCHIVED
+    candidateId=360004 "[CAND-4GROUPS] ③-a 买入时点=T+1开盘 · 守线+缩量≤30%" status=CONVERTED
+    candidateId=360005 "[CAND-4GROUPS] ③-b 买入时点=T+1收盘 · 守线+缩量≤30%" status=CONVERTED
+    candidateId=360006 "[CAND-4GROUPS] ④-a 回撤深度≤2%（浅回踩） · 守线+缩量≤30%" status=CONVERTED
+    candidateId=360007 "[CAND-4GROUPS] ④-b 回撤深度≤5%（标准回踩） · 守线+缩量≤30%" status=CONVERTED
+    candidateId=360008 "[CAND-4GROUPS] ④-c 回撤深度≤10%（深回踩） · 守线+缩量≤30%" status=CONVERTED
+
+=== 3. 对齐不变量复核：派生声明 bar.<x> 与配方 featureIds 同名；原始列照旧合法 ===
+  不变量：配方 featureIds ⊆ bar.* 声明白名单 —— 不可声明者 = 无（对齐）
+  已落库策略中 bar.<x> 声明 = 16 条（原始 OHLCV 列=16 / 配方派生字段=0 / 漂移=0）
+  参数引用指向未声明的配方参数 = 0 条
+
+== 取证完成（只读，未写任何表） ==
