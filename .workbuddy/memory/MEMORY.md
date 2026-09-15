@@ -38,6 +38,12 @@
 - 🔴 `loopRun`：`dateRange` 必填；`experimentId` 须 `EXP-YYYYMMDD-XXXXXXXX`；**14 阶段仅 6 有执行器**；**同步长请求**。
 - 🔴 成交明细键 = **`sec_<uuid>`（非代码）** ⇒ 名称走 `researchRun.securityLabels`（覆盖 62.9%、缺口显「—」）；解析**必用 `normalizeSecurityCode`**。
 
+## git 行尾（core.autocrlf）
+- 🔴 **仓库本地 `core.autocrlf=false`**（2026-09-15 由 `true` 改），位于 `.git/config`；**系统级** `PortableGit/etc/gitconfig` 仍是 `true`（**勿改，属公共工具链**），本地配置获胜。
+- 含义：工作区行尾 = 磁盘真身；`git checkout --` / `git restore` **不再把 CRLF 洗成 LF**，也不再触发整文件重写（sha256 已实测不变）。
+- ⚠️ **HEAD blob 内部仍是 LF**（历史遗留）⇒ 恢复内容仍用 `git cat-file -p <rev>:<path>`；行尾判据仍须**逐文件实测** `count(b"\r\n")` vs `count(b"\n")`。
+- ⚠️ 单向性：已被洗成 LF 的文件不会自动补回 CRLF；新建文件按目标文件的实测行尾写。
+
 ## 前向纸面交易（`/paper-trading`）与指数同步（`/stock-sync`）
 - 🔴 推进（含回测）交易日历**唯一来源 = `index_daily`**（与候选价格行**刻意解耦**）；2026-09-15 起可在 `/stock-sync` 同步，此前**只有 CLI `scripts/backfillIndex.ts`** 一条写入路径（`indexProviders` 在生产代码**零消费**）⇒ 停更即 **`datesToAdvance` 恒空 ⇒ 静默 no-op 却报成功**。补数**必须 `--force`**（`isCoverageFresh` 容忍末端差 ≤ 30 天 ⇒ 默认误判「已覆盖」）。
 - ✅ 页面入口（`INDEX-SYNC-PAGE-001`）：`sentiment.getIndexSyncStatus`（public 只读）/ `sentiment.syncIndexDaily`（admin）；服务层 `server/marketData/indexSync.ts`。沿用 4 只（`000001.SH`/`399001.SZ`/`000300.SH`/`000905.SH`），默认 tushare（配额 **5 次/天 + 1 次/分钟**，逐只 65s）⇒ 省配额靠**智能增量**（已齐平 0 请求；仅末端落后只补 `[末日+1, end]`）。

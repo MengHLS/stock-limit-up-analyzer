@@ -31,7 +31,6 @@ import {
   ClipboardList,
   CloudDownload,
   Crown,
-  Database,
   LayoutDashboard,
   LogOut,
   History,
@@ -83,7 +82,6 @@ const navGroups: NavGroup[] = [
     label: "数据录入",
     items: [
       { label: "上传图片", path: "/upload", icon: Upload },
-      { label: "录入大盘数据", path: "/market-data-input", icon: Database },
     ],
   },
   // FE-1 — 研究链路导航分组（在 legacy 壳上增量新增，不重置既有页面）

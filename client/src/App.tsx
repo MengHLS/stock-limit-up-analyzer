@@ -8,7 +8,6 @@ import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Upload from "./pages/Upload";
 import Market from "./pages/Market";
-import MarketDataInput from "./pages/MarketDataInput";
 import SentimentAlerts from "./pages/SentimentAlerts";
 import SentimentAnalysis from "./pages/SentimentAnalysis";
 import LeaderCandidates from "./pages/LeaderCandidates";
@@ -75,7 +74,6 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/upload"} component={Upload} />
       <Route path={"/market"} component={Market} />
-      <Route path="/market-data-input" component={MarketDataInput} />
       <Route path="/sentiment-alerts" component={SentimentAlerts} />
       <Route path="/sentiment-analysis" component={SentimentAnalysis} />
       <Route path="/leader-candidates" component={LeaderCandidates} />
