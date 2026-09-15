@@ -21,4 +21,22 @@ describe("行情同步检查页面", () => {
     expect(pageSource).toContain("全量同步");
     expect(pageSource).toContain("同步最近8个交易日");
   });
+
+  it("提供指数行情同步入口并透出交易日历落后量", () => {
+    const pageSource = readFileSync(resolve(import.meta.dirname, "../../client/src/pages/StockSync.tsx"), "utf8");
+    expect(pageSource).toContain("getIndexSyncStatus");
+    expect(pageSource).toContain("syncIndexDaily");
+    expect(pageSource).toContain("指数行情同步");
+    expect(pageSource).toContain("同步指数");
+    expect(pageSource).toContain("强制重拉");
+    expect(pageSource).toContain("仅补这只");
+    expect(pageSource).toContain("calendarStale");
+  });
+
+  it("指数同步端点在路由层注册，且写入路径要求管理员", () => {
+    const routerSource = readFileSync(resolve(import.meta.dirname, "../../server/routers.ts"), "utf8");
+    expect(routerSource).toContain("getIndexSyncStatus: publicProcedure");
+    expect(routerSource).toContain("syncIndexDaily: protectedProcedure");
+    expect(routerSource).toContain("仅管理员可同步指数行情");
+  });
 });

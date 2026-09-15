@@ -390,3 +390,43 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > 无头 Edge + CDP，断言「每日最高连板明细」整块已不存在 / 龙头列表默认折叠且卡片数 ≤ 6 /
 > 点「展开其余 N 只」后卡片数 == 总数）**已补登记进 git 跟踪**，与另 11 个已跟踪 `.mjs` 探针一致
 > （本节上文第一段的计数「`.mjs` 12」本已含它）。
+
+> ⚠️ 本目录内的 `_probe_backtest_default_range.mjs`（2026-09-15 新建：**组合回测页默认回测区间验收** ——
+> 无头 Edge + CDP，只读断言 `/backtest` 的「回测开始日期」输入框默认 `value == 2025-09-01`、
+> 「回测结束日期」== 当天且 ≥ 起点；不点击、不触发回测）**已登记进 git 跟踪**，与其它已跟踪 `.mjs` 探针一致。
+
+> ⚠️ 本目录内的 `_probe_backtest_trade_diff_removed.mjs`（2026-09-15 新建：**组合回测页「逐笔交易差异对比」删除验收** ——
+> A 阶段真机 dev server 取 `Backtest.tsx` 模块（HTTP 200）断言产物不含 `data-trade-difference-table` / `逐笔交易差异对比` / `TradeDiffCell`，
+> 仍含 `fullCycleTradeDifferences` 与 `ReturnLineChart`；B 阶段无头 Edge + CDP 真机渲染，等「全周期五策略收益对比」出现后断言
+> `[data-trade-difference-table]` 元素数 == 0 且正文无该文案 / 「仅看有差异订单」，**同屏仍渲染全周期对比** = 「不存在」不是「没渲染」）
+> **已登记进 git 跟踪**，与其它已跟踪 `.mjs` 探针一致。
+
+> ⚠️ 本目录内的 `_probe_index_coverage.mts`（2026-09-15 新建：**指数行情同步「服务层」验收** ——
+> 真库**只读**直调 `getIndexSyncOverview()`，打印 `index_daily` 覆盖、日历末端 vs 行情末端、
+> 落后自然日/交易日、逐指数计划动作与区间、provider 可用性；**不发任何外部请求**）与
+> `_probe_index_sync_page.mjs`（2026-09-15 新建：**`/stock-sync` 指数区块真机渲染验收** ——
+> 无头 Edge + CDP，13 项断言含「落后告警 ↔ 本次计划」**口径一致性**，**只读、绝不点击同步**
+> 以免消耗 tushare 配额；🔴 随机端口 + `taskkill /F /T` 杀整棵进程树，
+> 避免残留渲染子进程导致 CDP 连到空白页而全部假失败）
+> **已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_today_gap.mts`（2026-09-15 新建、同日扩至 15 节；**「某天为何不出现」总诊断**）——
+> 真库**只读**一次性读齐「某天为何不出现」的**判据链**：① 日历末端（`index_daily`）② bar 覆盖（`stock_daily_prices`）
+> ③ **数据集窗口**（`dataset_version`；🔴 **仅 `registry` 直读路径**是硬边界，`rebuild` 回落用用户窗口）④ 运行推进进度（`paper_trading_runs.lastProcessedDate`）；
+> 另附 **DB 时区校准**（判「盘后」还是「盘中」快照）、**「涨停记录驱动」覆盖实证**、**组合回测留档窗口**、
+> 以及 **legacy「原来的」回测（`/backtest`）专段**：`limit_up_records` 末端（它的信号源）、
+> **信号日资格复刻**（`leaderCandidates.ts:951-958` 的 `if (!nextDate) continue` ⇒ 可回测末日 = 日历倒数第 `observationDays+1` 个交易日，**当天必然缺席**）、
+> 昨日信号的 **T+1 观察数据是否就位**；**不写库、不发任何外部请求**；**已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_dataset_vs_today.mts`（2026-09-15 新建，**「组合回测跟数据集有没有关系」判定**）——
+> 真库**只读**一次读齐：`dataset_version` **声明窗口** vs `ds_*` 三表**内容**实际覆盖（event / post 的 min·max `tradeDate`）、
+> 目标日当天有无行、各策略的 `datasetVersionId` 绑定与 `observationWindow` 声明、
+> **判定表**（`dateRange` 终点设目标日时各策略走 `registry` 还是回落 `rebuild`、是否越界）、
+> 以及 `closed_loop_backtest_run` 留档的 `datasetSource`；**不写库、不发任何外部请求**；
+> **已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_assemble_window_bounds.mts`（2026-09-15 新建，**装配层 / 会话层「窗口边界」分层实证**）——
+> 同一策略、同一份文档，只改 `endDate` 跑**两个对照用例**（`2026-09-15` 越界 vs `2026-09-01` 窗口末），
+> 各打印装配结果（`datasetSource` / 行数 / 直读产物窗口）并调用 `createDatasetSession` 观察是否 FAIL FAST；
+> 实测结论 = **装配层不校验、会话层抛「超出数据集窗口」**；每次约 11s（直读 390002 投影约 11 万行）；
+> **不写库、不发任何外部请求**；**已登记进 git 跟踪**，与其它已跟踪探针一致。

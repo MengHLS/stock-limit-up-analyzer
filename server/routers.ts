@@ -40,6 +40,10 @@ import {
   inferStockSuspensionWindows,
 } from "./stockPriceSync";
 import {
+  getIndexSyncOverview,
+  runIndexSync,
+} from "./marketData/indexSync";
+import {
   ensureStockPriceIndex,
   isStockPriceIndexReady,
   refreshStockPriceIndex,
@@ -1650,6 +1654,44 @@ export const appRouter = router({
         });
         invalidateStockPriceSyncCache();
         return { ...result, operationLogId };
+      }),
+
+    // 指数行情同步 —— 只读概览：index_daily 覆盖、与行情末端的落后量、待请求指数个数。
+    // 背景：index_daily 是「前向纸面交易推进」的交易日历唯一来源，它落后 ⇒ 推进静默 no-op。
+    getIndexSyncStatus: publicProcedure
+      .input(
+        z
+          .object({
+            provider: z.string().max(32).optional(),
+            startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+            endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          })
+          .optional()
+      )
+      .query(async ({ input }) => getIndexSyncOverview(input ?? {})),
+
+    // 手动同步指数日线（默认 4 只核心指数 + 智能增量：已齐平的指数 0 请求，省配额）。
+    // 🔴 长请求：tushare 逐指数间隔 65s，服务层内置时间预算，命中配额限制会如实透出。
+    syncIndexDaily: protectedProcedure
+      .input(
+        z
+          .object({
+            provider: z.string().max(32).optional(),
+            indexCodes: z.array(z.string().max(32)).max(20).optional(),
+            startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+            endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+            force: z.boolean().optional(),
+          })
+          .optional()
+      )
+      .mutation(async ({ ctx, input }) => {
+        if (ctx.user.role !== "admin") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "仅管理员可同步指数行情",
+          });
+        }
+        return runIndexSync(input ?? {});
       }),
 
     // 用腾讯行情按代码反查真实名称，供人工校正前验证代码是否正确

@@ -2051,6 +2051,8 @@ let backtestCacheGeneration = 0;
  */
 export function invalidateLeaderCandidateBacktestCaches(): void {
   backtestCacheGeneration += 1;
+  // 数据戳备忘必须同时清掉，否则钩子失效后仍会命中 15s 内的旧戳。
+  backtestDataStampMemo = null;
   backtestResultCache.clear();
   backtestBaseContextCache.clear();
   // 候选池结果缓存 / 聚合缓存同样依赖涨停记录与行情，必须一并失效。
@@ -2272,12 +2274,15 @@ export async function loadBacktestBaseContext(range?: { startDate?: string; endD
   }
   recordsQuery.orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
 
+  // 2026-09-15 修复：五路并行读**各自带读重试**。跨境链路偶发 ECONNRESET，而这里任一路
+  // 失败都会让整轮回测（冷算 305~413s）作废。现场：`stock_suspension_windows` 的一次瞬时
+  // 读失败直接冒成 tRPC 500，用户等了两分钟只拿到报错。
   const [records, rawRows, dailyPriceCoverage, marketFactorRows, suspensionWindows] = await Promise.all([
-    recordsQuery,
-    loadBacktestPriceRows(range),
-    getLeaderCandidateDailyPriceCoverage(),
-    getLeaderCandidateMarketFactorRows(),
-    getStockSuspensionWindows(),
+    withReadRetry("loadBacktestBaseContext.records", () => recordsQuery),
+    withReadRetry("loadBacktestBaseContext.priceRows", () => loadBacktestPriceRows(range)),
+    withReadRetry("loadBacktestBaseContext.dailyPriceCoverage", () => getLeaderCandidateDailyPriceCoverage()),
+    withReadRetry("loadBacktestBaseContext.marketFactorRows", () => getLeaderCandidateMarketFactorRows()),
+    withReadRetry("loadBacktestBaseContext.suspensionWindows", () => getStockSuspensionWindows()),
   ]);
 
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
@@ -2301,6 +2306,69 @@ export async function loadBacktestBaseContext(range?: { startDate?: string; endD
 }
 
 /**
+ * 龙头候选回测的「数据版本戳」。
+ *
+ * ## 为什么需要（2026-09-15 实查 · 页面「历史候选池回测」不随时间更新）
+ *
+ * 缓存命中判定此前只认「参数哈希 + TTL」⇒ **绕过服务端的写入**（Python / 外部脚本往同一个
+ * 跨境 TiDB 写行情）不会触发 `invalidateLeaderCandidateBacktestCaches()`，旧结果被无限复用。
+ * 本次现场：`index_daily` 于 19:03 推进到 2026-09-15，而 18:59 算出的快照（样本最新日
+ * 2026-09-11）继续被返回；该页「越常看越不更新」还叠了第二条 —— 命中磁盘快照会把内存
+ * TTL 重新计时 30 分钟。
+ *
+ * ## 口径（三条链末端，与「某天为何不出现」的判据链一一对应）
+ *
+ *   ① `limit_up_records.MAX(limitUpDate)`  —— 涨停信号末端（出现新的候选日）
+ *   ② `index_daily.MAX(tradeDate)`         —— 交易日历末端（= T+N 观察日的唯一来源；
+ *                                              它推进后，末端信号日才可能凑齐观察日）
+ *   ③ `stock_daily_prices.MAX(tradeDate)`  —— 日线行情末端（T+1 溢价的数据前提）
+ *
+ * 正常同步下三者只增不减 ⇒ 任一推进即换键 ⇒ 快照与内存缓存自然未命中，**不依赖任何钩子**，
+ * 因而对「绕过应用的外部写入」同样自愈。成本只有 1 次往返的查询。
+ *
+ * ⚠️ 不用 `COUNT(*)` / `CREATE_TIME`：`stock_daily_prices` 890 万行，聚合扫描实测 ≈9s
+ * （见 `PROJECT_RULES.md` 的缓存失效铁律）。三个 `MAX()` 均有索引
+ * （`idx_limit_up_date` / `idx_index_daily_trade_date` / `idx_stock_daily_price_trade_date`），
+ * 合并成一条语句后实测 5 轮交错中位 ≈214ms。
+ */
+const BACKTEST_DATA_STAMP_SQL = `
+SELECT
+  (SELECT MAX(limitUpDate) FROM limit_up_records)   AS lu,
+  (SELECT MAX(tradeDate)   FROM index_daily)        AS cal,
+  (SELECT MAX(tradeDate)   FROM stock_daily_prices) AS px`;
+
+/**
+ * 数据戳备忘 TTL。
+ *
+ * 数据戳查询要 1 次跨境往返（实测 ≈214ms），直接挂在「热调用 ≈0ms」的命中路径上不可接受。
+ * 15s 备忘把热路径拉回 0ms，同时把「外部写入 → 页面可见」的延迟上界钉在 15s；
+ * 应用内写入走 `invalidateLeaderCandidateBacktestCaches()` 立即清备忘，不受此 TTL 影响。
+ */
+const BACKTEST_DATA_STAMP_TTL_MS = 15 * 1000;
+let backtestDataStampMemo: { value: string; expiresAt: number } | null = null;
+
+/** 读取数据版本戳；读失败返回常量 `unknown`（退回「只靠 TTL / 写入钩子」的旧口径，绝不阻断回测）。 */
+async function readBacktestDataStamp(): Promise<string> {
+  const now = Date.now();
+  if (backtestDataStampMemo && now < backtestDataStampMemo.expiresAt) return backtestDataStampMemo.value;
+  const db = await getDb();
+  if (!db) return "unknown";
+  try {
+    const rows = await db.execute(sql.raw(BACKTEST_DATA_STAMP_SQL));
+    const row = (rows as unknown as Array<Array<Record<string, unknown>>>)?.[0]?.[0];
+    const value = row ? `lu:${row.lu ?? "-"}|cal:${row.cal ?? "-"}|px:${row.px ?? "-"}` : "unknown";
+    backtestDataStampMemo = { value, expiresAt: now + BACKTEST_DATA_STAMP_TTL_MS };
+    return value;
+  } catch (error) {
+    console.warn("[LeaderCandidateBacktest] 数据戳读取失败，本次退回旧口径（仅靠 TTL / 写入钩子失效）:", error);
+    return "unknown";
+  }
+}
+
+/** 单飞表：同一缓存键的并发请求共享同一次计算（冷算 305~413s，不能让页面重复触发）。 */
+const backtestInFlight = new Map<string, Promise<LeaderCandidateBacktestResult>>();
+
+/**
  * 获取基于历史候选池的T+1连板延续回测结果（按参数哈希做结果缓存）。
  *
  * 正式生产入口（STEP 5 P2-2 边界）：结果由 Strategy Engine 新链路产出——
@@ -2312,9 +2380,27 @@ export async function loadBacktestBaseContext(range?: { startDate?: string; endD
  * legacy 交易模拟器调用为 0。完整分析报表请调用 getLeaderCandidateResearch。
  */
 export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktestOptions = {}): Promise<LeaderCandidateBacktestResult> {
-  const cacheKey = stableHash(options);
+  // 缓存键 = 参数哈希 **+ 数据戳**：两者任一变化都必须重算（见 BACKTEST_DATA_STAMP_SQL 注释）。
+  const cacheKey = stableHash({ params: options, dataStamp: await readBacktestDataStamp() });
   const cached = backtestResultCache.get(cacheKey);
   if (cached) return cached;
+  // 单飞：页面会同时打「聚合」（getLeaderCandidateBacktest）与「明细分页」
+  // （getLeaderCandidateHistoryPage → 本函数）两个端点，二者共用同一 key。
+  // 无单飞时两条并发请求各跑一遍全量模拟，把跨境库的负载直接翻倍。
+  const inFlight = backtestInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+  const promise = buildLeaderCandidateBacktest(cacheKey, options).finally(() => {
+    backtestInFlight.delete(cacheKey);
+  });
+  backtestInFlight.set(cacheKey, promise);
+  return promise;
+}
+
+/** 实际计算路径（缓存键与单飞判定已由 `getLeaderCandidateBacktest` 完成）。 */
+async function buildLeaderCandidateBacktest(
+  cacheKey: string,
+  options: LeaderCandidateBacktestOptions,
+): Promise<LeaderCandidateBacktestResult> {
   // 磁盘快照：进程重启 / 内存 TTL 过期后仍可秒回（实测全区间重算 ≈305s）。
   // 命中条件由快照层负责（key + 版本 + TTL），数据写入时会被主动清空。
   const snapshot = await readLeaderCandidateBacktestSnapshot<LeaderCandidateBacktestResult>(cacheKey);

@@ -507,4 +507,36 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - 🔴 **`ROADMAP.md` / `README.MD` / `ROADMAP-CHANGELOG.md` / `.workbuddy/memory/**` 全部是纯 CRLF**（不是 LF！），`drizzle/schema.ts`、`client/src/**/*.tsx` 亦然 ⇒ 改这些一律 `read_bytes()` + `write_bytes()`，**禁 `read_text` / 禁 `Edit` 盲改**，写前写后各断言行尾。⚠️ **同一目录里行尾也不同**：`.workbuddy/memory/PROJECT_RULES.md` 是 **CRLF**，同目录的逐日日志却是 **LF**。
 - ⚠️ **结构化文件用「行数组手术 + 断言」**：条目按「**编号行分块**」（**不是**按空行分块 —— §44.5 的 `9x` 区域是连续行、无空行，按空行会一次吞掉 61 KB）；分块后**块级判定**（含 `✅` 且不含 `⬜` / `⏳` / `⏸️` 才归档；`⚠️` / `待决策` / `未做` 在正文里太常见，**不能**当判据）。
 - **`ROADMAP.md` 结构不变量**（整理后已满足，改动后请复验）：① 一级编号 `1..49` **连续且升序**（曾存在 §48 夹在 §44.5 与 §45 之间的唯一逆序对）；② `# 40.` 内的输出模板标题用 `### ` 而非 `## `（否则大纲工具会把模板误认成章节）；③ §44.5 条目**顶格**（无多余缩进）。
-- **备份坐标**：`.cache/ROADMAP.before-47-split.md`（§47 拆分前，852 KB）与 `.cache/ROADMAP.md.before-cleanup-20260915`（本轮整理前，538,568 B）**都不可删**。
+
+## 🔴 「某天为何不出现」三条链分工 × 组合回测边界分叉 × legacy 回测末日（2026-09-15 实查 · `DIAG-TODAY-GAP-001` / `LEGACY-BACKTEST-T1-001`）
+
+> 本条只记 2026-09-15 的**新增**结论。窗口投影细节见上文「数据集窗口投影 / 决策日资格（DATASET-WINDOW-PROJECTION-001）」；日历停更症状见「前向纸面交易『推进』恒 no-op（PAPER-TRADING-ADVANCE-NOOP-001）」。
+
+### 三条链分工（互不相干，先分清再排查）
+- **前向纸面推进**（`/paper-trading`）：日历唯一来源 = `index_daily`；进度 = `paper_trading_runs.lastProcessedDate`。**补日历只解除阻塞，不会自动触发推进**（须手动点）。
+- **组合回测（闭环）**（策略页；留档页 `/backtest-runs`）：读**数据集**；留档表 `closed_loop_backtest_run.datasetSource` **直接记录**该次走 `registry` 还是 `rebuild`（不用推算）。
+- **legacy「原来的」回测**（`/backtest`，`getLeaderCandidateBacktest` / `getLeaderCandidateResearch`）：信号 = `limit_up_records`、价格 = `stock_daily_prices`、日历 = `index_daily`，**与 `dataset_version` 完全无关**。
+
+### 组合回测的边界分叉（🔴 先读 `datasetSource`）
+- **`registry`（直读，现为默认）**：`handle` 窗口 = `dataset_version.startDate/endDate`（`runWorkbenchAssembly/datasetFromRegistry.ts:1046-1047` 取 `version.*`），与用户选的 `dateRange` **无关** ⇒ 越界 **FAIL FAST**，两处：`research/datasetAccess/session.ts:52-57`、`research/simulator/engine.ts:303-312`（码 `SIM_RANGE_OUT_OF_DATASET`；原文含「禁止以部分数据集冒充全窗口运行」）。
+- **`rebuild`（未绑定数据集 / 直读被拒回落）**：`handle` 窗口 = **用户决策窗口**（`assemble.ts:296-326`）⇒ **不可能越界**，此时组合回测与数据集无关，但内容受 `stock_daily_prices` 覆盖面限制。**用户说「回测跟数据集没关系」时，指的是这条路的语义。**
+- ⚠️ **装配层不校验窗口**：`assemble.ts:481 / 496`（以及 `rebuildDataset`）直接用 `request.startDate/endDate` ⇒ **别在装配层找边界**，边界在会话 / 仿真层。
+- 实测对照（`_probe_assemble_window_bounds.mts`，同一策略同一文档只改 endDate）：`endDate=2026-09-15` ⇒ 装配**成功**（11.5s / registry / 112,920 行）但会话层抛「实验日期范围 [2025-09-01, 2026-09-15] 超出数据集窗口 [2024-09-01, 2026-09-01]」；`endDate=2026-09-01` ⇒ 通过 ⇒ **是响亮报错，不是静默截断**。
+
+### 数据集窗口有两个上限，取更小者才是有效上限
+**声明窗口**（`dataset_version.startDate/endDate`）vs **内容**（`ds_*`）。实测 390002（v2 · READY）：声明 `2024-09-01 ~ 2026-09-01`；内容 event（首板日）max = 2026-09-01、post（观察日）max = 2026-09-04 ⇒ **声明窗口先触顶 ⇒ 有效上限 = 2026-09-01**。
+全部活跃策略都绑 390002 ⇒ `cand-*` 全走直读、被 09-01 卡住；**唯一例外 = `limit-up-baseline`**（未声明 `observationWindow` ⇒ 直读被 `REGISTRY_OBSERVATION_WINDOW_UNDECLARED` 拒绝 ⇒ 回落 rebuild ⇒ 按用户窗口）。⚠️ UI 未暴露 `datasetSourcePolicy` ⇒ 无法从页面强制 rebuild ⇒ **要跑到 09-01 之后必须新建 / 重建数据集版本并重新绑定策略**。
+⚠️ **重建前先决策**：9 月 `stock_daily_prices` 每日仅 418~504 只（候选池增量所致），重建出的数据集 9 月会稀疏，「首板」判定可能失真。
+
+### 🔴 legacy「原来的」回测可回测末日 = 日历倒数第 (obs+1) 个交易日
+- 信号日只来自 `limit_up_records`（`candidateTradingDates` = 区间内 distinct `limitUpDate`）；`marketTradingDates` = `index_daily` 在 `[minLimitUpDate-45, maxLimitUpDate+7]` 的 distinct `tradeDate`。
+- `server/leaderCandidates.ts:951-958`：`nextDate = marketTradingDates[idx(信号日) + observationDays]`，随后 **`if (!nextDate) continue;`**（注释原文：「最后 observationDays 个实际交易日缺少完整观察结果，主动排除，确保结果位于信号日之后」）⇒ **日历末端那天永远不能当信号日**，可回测末日恰好后退 `observationDays`（默认 1）个交易日。**与数据是否同步无关。**
+- 实测（2026-09-15）：`limit_up_records` 已有 **09-15 的 32 条**（`createdAt 10:30:36` UTC = 北京时 **18:30**，与当日行情同批）⇒ **数据不缺**；复刻资格规则：09-15 = `EXCLUDED（无 T+1 观察日）`、09-14 = `INCLUDED（nextTradingDay = 2026-09-15）` ⇒ **明细止于 09-14 是设计使然**。09-14 信号的 T+1 观察数据已就位：55 只涨停股中 **54** 只有 09-15 行情。
+- ⚠️ 页面「覆盖区间」按**全部涨停记录**聚合（`shared/fieldAvailability.ts#buildFieldCoverageReport:173/219-220`）⇒ 它会显示到 09-15，而**明细行（信号日）止于 09-14**；两处日期不同**不矛盾**。
+- 想看**当天**候选池用 `/leader-candidates`（`buildLeaderCandidatesResult` 取 `records[0].limitUpDate`，**不需要 T+1**）。
+- 探针：`npx tsx docs/evidence/_probe_today_gap.mts`（第 12 / 14 / 15 节 = 涨停记录末端 / 信号日资格复刻 / 观察数据就位）。
+
+### 高频误判前提（先排除再深挖）
+- `closed_loop_backtest_run` 留档的 `startDate/endDate` 是**用户当时选的回测区间** ⇒ 若 `endDate` 早于目标日，「没有目标日数据」与数据集 / 行情**全都无关**，先看这条。
+- `stock_daily_prices` 近端每日 400~600 只是**设计**（`server/stockPriceSync.ts`：「涨停记录 × 信号日 + `futureTradingDayCount=10` 观察窗」增量）⇒ **先问「这天是不是候选池日」**。实证：09-14 涨停 55 只 → 54 只在 09-15 行情内；09-11 涨停 40 只 → 40/40。
+- DB 时区 = **UTC**（`@@system_time_zone` = `UTC`）⇒ `createdAt` / `retrievedAt` / `sourceUpdatedAt` **+8 才是北京时**（易把盘后 18:30 误判成盘中快照）。

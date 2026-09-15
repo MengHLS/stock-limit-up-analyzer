@@ -58,10 +58,7 @@ describe("独立组合资金回测页面", () => {
       "qualityBlend",
       "qualityGate",
       "strategyColors",
-      "逐笔交易差异对比",
-      "data-trade-difference-table",
       "fullCycleTradeDifferences",
-      "仅看有差异订单",
       "高风险过滤",
       "风险扣分策略表现归因",
       "data-risk-penalty-attribution",
@@ -184,7 +181,8 @@ describe("独立组合资金回测页面", () => {
     expect(researchSource).toContain("日线成交额");
     expect(pageSource).toContain("date >= startDate");
     expect(pageSource).toContain("downsideRiskResearch?.fullCycle.startDate");
-    expect(styleSource).toContain("[data-trade-difference-table] > div:last-child");
+    expect(styleSource).not.toContain("[data-trade-difference-table]");
+    expect(pageSource).not.toContain("data-trade-difference-table");
     expect(styleSource).toContain("[data-all-simulated-orders] .orders-scroll-container");
     expect(styleSource).toContain("max-height: 42rem");
     expect(styleSource).toContain("position: sticky");

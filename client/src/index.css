@@ -224,17 +224,6 @@
     @apply text-lg font-bold;
   }
 
-  [data-trade-difference-table] > div:last-child {
-    max-height: 42rem;
-    overflow: auto;
-  }
-
-  [data-trade-difference-table] thead {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-  }
-
   [data-all-simulated-orders] .orders-scroll-container {
     max-height: 42rem;
     overflow: auto;

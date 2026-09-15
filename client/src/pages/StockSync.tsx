@@ -19,6 +19,7 @@ import {
   ArrowDown,
   ArrowUp,
   CalendarOff,
+  CalendarClock,
   CalendarRange,
   CheckCircle2,
   ChevronLeft,
@@ -28,6 +29,7 @@ import {
   CloudDownload,
   Database,
   Loader2,
+  LineChart,
   Pencil,
   RefreshCw,
   Search,
@@ -74,6 +76,49 @@ function describeSyncResult(result: SyncResultLike): { kind: "success" | "error"
   }
   return { kind: "success", text: `已同步 ${result.savedPriceRows} 条日线价格${result.missingPricePairs > 0 ? `，仍缺 ${result.missingPricePairs} 个` : ""}` };
 }
+type IndexSyncResultLike = {
+  provider: string;
+  persisted: number;
+  skipped: number;
+  rejected: number;
+  failed: number;
+  savedRows: number;
+  rateLimited: boolean;
+  truncated: boolean;
+  pendingIndexCodes: string[];
+  details: Array<{ indexCode: string; outcome: string; reason: string }>;
+};
+
+/** 指数同步结果 → 一句人话 + 语义色。注意 `skipped`（已齐平、未发请求）是成功语义，不是失败。 */
+function describeIndexSyncResult(result: IndexSyncResultLike): { kind: "success" | "error" | "info"; text: string } {
+  if (result.rateLimited) {
+    return { kind: "error", text: "命中数据源配额/频次限制，已中止后续指数；稍后重试或改用 sina 数据源" };
+  }
+  if (result.failed > 0) {
+    const first = result.details.find((item) => item.outcome === "failed");
+    return {
+      kind: "error",
+      text: `${result.failed} 只指数同步失败${first ? `（${first.indexCode}：${first.reason}）` : ""}`,
+    };
+  }
+  if (result.truncated) {
+    return {
+      kind: "info",
+      text: `已处理 ${result.persisted + result.skipped} 只，剩余 ${result.pendingIndexCodes.length} 只超出单次时间预算，再点一次继续`,
+    };
+  }
+  if (result.savedRows === 0 && result.rejected > 0) {
+    return { kind: "info", text: `${result.rejected} 只被数据源拒绝（非交易日或数据源未发布），未写入新数据` };
+  }
+  if (result.savedRows === 0) {
+    return { kind: "info", text: `已是最新，未产生请求（跳过 ${result.skipped} 只已齐平指数）` };
+  }
+  return {
+    kind: "success",
+    text: `已写入 ${result.savedRows} 行指数日线（更新 ${result.persisted} 只${result.skipped > 0 ? `，跳过 ${result.skipped} 只已齐平` : ""}）`,
+  };
+}
+
 
 export default function StockSync() {
   const [onlyMissing, setOnlyMissing] = useState(true);
@@ -86,6 +131,8 @@ export default function StockSync() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [indexProvider, setIndexProvider] = useState("tushare");
+  const [indexSyncingCode, setIndexSyncingCode] = useState<string | null>(null);
 
   // 搜索防抖：避免每敲一个字就打一次接口（筛选在服务端做）。
   useEffect(() => {
@@ -128,6 +175,39 @@ export default function StockSync() {
   });
 
   // 筛选/搜索/排序/每页条数变化时回到第一页，避免停留在越界页码。
+
+  // 指数行情同步：`index_daily` 是「前向纸面交易推进」的交易日历唯一来源，
+  // 它落后于行情末端 ⇒ advance 的 datesToAdvance 恒空、静默空转，故落后量必须显式可见。
+  const indexStatus = trpc.sentiment.getIndexSyncStatus.useQuery(
+    { provider: indexProvider },
+    { staleTime: 30_000 }
+  );
+
+  const syncIndexMutation = trpc.sentiment.syncIndexDaily.useMutation({
+    onSuccess: (result) => {
+      const message = describeIndexSyncResult(result);
+      if (message.kind === "success") toast.success(message.text);
+      else if (message.kind === "info") toast.info(message.text);
+      else toast.error(message.text);
+      setIndexSyncingCode(null);
+      void indexStatus.refetch();
+    },
+    onError: (error) => {
+      toast.error(`指数同步失败：${error.message}`);
+      setIndexSyncingCode(null);
+    },
+  });
+
+  const indexOverview = indexStatus.data ?? null;
+  const indexSyncBusy = syncIndexMutation.isPending;
+  const indexPending = indexOverview?.pendingIndexCount ?? 0;
+  const indexProviderInfo = indexOverview?.providers.find((item) => item.name === indexProvider) ?? null;
+  /** 预计耗时（分钟）= 待请求指数个数 × provider 请求间隔（tushare 为 65s/只）。 */
+  const indexEtaMinutes =
+    indexProviderInfo && indexPending > 0 && indexProviderInfo.intervalMs > 0
+      ? Math.ceil((indexPending * indexProviderInfo.intervalMs) / 60_000)
+      : 0;
+
   useEffect(() => {
     setPage(1);
   }, [onlyMissing, debouncedSearch, pageSize, sortDir]);
@@ -241,6 +321,171 @@ export default function StockSync() {
             </Card>
           </div>
         )}
+        {/* 指数行情同步：index_daily 是「前向纸面交易推进」的交易日历唯一来源，落后即空转 */}
+        <Card className="shadow-sm border-slate-200">
+          <CardHeader className="py-3 px-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <LineChart className="h-4 w-4 text-indigo-500" />
+                  指数行情同步
+                  <span className="inline-flex items-center gap-1 rounded bg-indigo-50 px-1.5 py-0.5 text-[11px] font-normal text-indigo-600">
+                    <CalendarClock className="h-3 w-3" />
+                    交易日历
+                  </span>
+                </CardTitle>
+                <CardDescription className="text-xs mt-1">
+                  index_daily 是「前向纸面交易推进」的交易日历唯一来源；它一旦落后于行情末端，推进的待推进日期集合就是空的、表现为静默空转，因此把落后量直接摆在这里。
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={indexProvider} onValueChange={setIndexProvider}>
+                  <SelectTrigger size="sm" className="h-8 w-[104px] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(indexOverview?.providers ?? []).map((item) => (
+                      <SelectItem key={item.name} value={item.name} className="text-xs" disabled={!item.available}>
+                        {item.name}
+                        {item.available ? "" : "（未配置）"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={indexSyncBusy}
+                  onClick={() => syncIndexMutation.mutate({ provider: indexProvider })}
+                >
+                  {indexSyncBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                  同步指数
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={indexSyncBusy}
+                  onClick={() => syncIndexMutation.mutate({ provider: indexProvider, force: true })}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  强制重拉
+                </Button>
+                <Button variant="ghost" size="sm" className="gap-2" onClick={() => void indexStatus.refetch()}>
+                  {indexStatus.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  刷新
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 pt-0 space-y-3">
+            {indexOverview && indexOverview.calendarStale && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-medium">
+                    交易日历落后行情 {indexOverview.lagTradingDays ?? 0} 个交易日
+                    {indexOverview.lagDays != null ? `（自然日 ${indexOverview.lagDays} 天）` : ""}
+                  </div>
+                  <div className="mt-0.5 text-amber-700">
+                    日历末端 {indexOverview.calendarLastDate ?? "—"}，行情末端 {indexOverview.marketLastDate ?? "—"}。补齐前，前向纸面交易的「推进」会因待推进日期为空而空转。
+                  </div>
+                </div>
+              </div>
+            )}
+            {indexOverview && !indexOverview.calendarStale && (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" />
+                交易日历与行情末端齐平（{indexOverview.calendarLastDate ?? "—"}）。
+              </div>
+            )}
+
+            {indexProviderInfo && (
+              <div className="text-[11px] text-slate-500">
+                数据源 <span className="font-medium text-slate-600">{indexProvider}</span>：{indexProviderInfo.note}
+                {indexPending > 0
+                  ? ` 当前待请求 ${indexPending} 只${indexEtaMinutes > 0 ? `，预计耗时约 ${indexEtaMinutes} 分钟（逐只串行 + 限频间隔）` : "，预计数秒完成"}。`
+                  : " 当前无需请求任何指数。"}
+              </div>
+            )}
+
+            {indexStatus.isError && (
+              <div className="text-xs text-rose-600">指数状态加载失败，请刷新重试</div>
+            )}
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>指数代码</TableHead>
+                  <TableHead>名称</TableHead>
+                  <TableHead>已覆盖区间</TableHead>
+                  <TableHead>行数</TableHead>
+                  <TableHead>相对行情末端</TableHead>
+                  <TableHead>本次计划</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(indexOverview?.targets ?? []).map((target) => {
+                  const isSyncing = indexSyncingCode === target.indexCode;
+                  return (
+                    <TableRow key={target.indexCode}>
+                      <TableCell className="font-mono text-xs">{target.indexCode}</TableCell>
+                      <TableCell className="text-sm">{target.indexName || "—"}</TableCell>
+                      <TableCell className="text-xs">
+                        {target.firstDate && target.lastDate ? `${target.firstDate} ~ ${target.lastDate}` : "无数据"}
+                      </TableCell>
+                      <TableCell className="text-xs">{target.rowCount.toLocaleString("zh-CN")}</TableCell>
+                      <TableCell className="text-xs">
+                        {target.lagDays == null ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : target.lagDays <= 0 ? (
+                          <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">已齐平</Badge>
+                        ) : (
+                          <Badge className="bg-amber-50 text-amber-700 border-amber-200">落后 {target.lagDays} 天</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs max-w-[300px]" title={target.plan.reason}>
+                        {target.plan.range === null ? (
+                          <span className="text-emerald-600">跳过（不发请求）</span>
+                        ) : (
+                          <span className="text-slate-600">
+                            {target.plan.range.startDate} ~ {target.plan.range.endDate}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1 h-8"
+                          disabled={isSyncing || indexSyncBusy}
+                          title={target.plan.reason}
+                          onClick={() => {
+                            setIndexSyncingCode(target.indexCode);
+                            syncIndexMutation.mutate({ provider: indexProvider, indexCodes: [target.indexCode] });
+                          }}
+                        >
+                          {isSyncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="h-3.5 w-3.5" />}
+                          仅补这只
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            {indexOverview && (
+              <div className="text-[11px] text-slate-400">
+                请求窗口 {indexOverview.window.startDate} ~ {indexOverview.window.endDate}
+                （终点默认对齐行情末端；「强制重拉」忽略已有覆盖、按整段重取，用于换源修数）
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
 
         {pageResult && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">

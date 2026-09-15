@@ -19,7 +19,7 @@ import {
   type InsertIndexDaily,
   type InsertIndexMaster,
 } from "../../drizzle/schema";
-import { getDb } from "../db";
+import { getDb, invalidateLeaderCandidateBacktestCaches } from "../db";
 import type { IndexDailyBar, IndexMasterEntry } from "./types";
 
 /** 幂等键（与 uq_index_daily_code_date 对齐）。纯函数。 */
@@ -133,6 +133,12 @@ export async function upsertIndexDaily(bars: IndexDailyBar[]): Promise<number> {
       },
     });
   }
+  // 2026-09-15 修复（页面「历史候选池回测」不随时间更新）
+  // 🔴 index_daily 是龙头候选回测「T+N 观察日」的唯一来源（`db.ts#loadBacktestTradingDates`）。
+  // 日历不推进 ⇒ 末端信号日会因「观察日不存在」被静默丢弃（`leaderCandidates.ts` 的
+  // `if (!nextDate) continue`），页面表现为「数据明明同步了、结果却停在旧日期」。
+  // 本条此前是唯一没挂缓存失效钩子的写入路径（涨停记录 / 日线行情两条都已挂）。
+  if (bars.length > 0) invalidateLeaderCandidateBacktestCaches();
   return bars.length;
 }
 
