@@ -22,7 +22,7 @@
 - ✅ 前端验收 = 无头 Chrome/Edge `--headless=new --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node 22 内置 `WebSocket` 直连 CDP；量 DOM 比截图硬；`taskkill /F /T`。⚠️ 探针输出**必须同步落盘**（异步 pipe 被杀时未 flush ⇒ 空 stdout）。`agent-browser`/`jsdom` 不可用。
 
 ## 行尾（**逐文件实测，禁推断**；仓库本地 `core.autocrlf=false`）
-- 🔴 **CRLF**：`client/src/**/*.tsx`、`client/src/App.tsx`、`PROJECT_RULES.md`；**LF**：`MEMORY.md`、逐日日志、`docs/evidence/*`、`server/**`、`client/src/index.css`、`vite.config.ts`。判据 = `count(b"\r\n")` vs `count(b"\n")`。⚠️ 曾误记「全仓纯 LF」（`8bbe8b3` 已改回 CRLF）⇒ **别再按纯 LF 写**。
+- 🔴 **CRLF 只有 3 个**：`.workbuddy/memory/PROJECT_RULES.md`、`client/src/App.tsx`、`client/src/components/AppShell.tsx`；**其余全是纯 LF**（含 `ROADMAP.md`、`ROADMAP-CHANGELOG.md`、`README.MD`、`drizzle/schema.ts`、`client/**` 其余 200 个、`server/**`、`docs/**`、`tests/**`、`scripts/**`、`MEMORY.md`、逐日日志、`index.css`）。判据 = `count(b"\r\n")` vs `count(b"\n")` **现场实测，禁按文件名推断**。⚠️ 曾两个方向都错过（先「全仓纯 LF」、后「`client/src/**/*.tsx` 全 CRLF」）⇒ 只认实测。
 - `core.autocrlf=false` 在 `.git/config`（系统级 gitconfig 仍 `true`，**勿改**）⇒ 工作区行尾 = 磁盘真身。⚠️ **HEAD blob 内部仍 LF** ⇒ 恢复用 `git cat-file -p <rev>:<path>`；单向：被洗过的文件不自愈。
 
 ## 总控
