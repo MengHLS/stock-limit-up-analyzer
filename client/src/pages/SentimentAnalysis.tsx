@@ -5,7 +5,7 @@ import { ContinuousRangeSlider } from "@/components/ContinuousRangeSlider";
 import { buildDistinctHighBoardLabels } from "@/lib/highBoardLabels";
 import { trpc } from "@/lib/trpc";
 import { DEFAULT_VISIBLE_TRADING_DAYS, getDefaultVisibleRange, normalizeVisibleRange } from "@/lib/visibleRange";
-import { Activity, CalendarDays, Crown, Flame, GitBranch, Loader2, TrendingUp } from "lucide-react";
+import { Activity, CalendarDays, ChevronDown, ChevronUp, Crown, Flame, GitBranch, Loader2, TrendingUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   CartesianGrid,
@@ -16,6 +16,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+
+/** 龙头列表默认折叠，仅展示最近确认的 N 只，其余展开后可见。 */
+const LEADER_LIST_PREVIEW_COUNT = 6;
 
 function formatDate(date: string) {
   return date.replace(/^(\d{4})-/, "$1年").replace(/-(\d{2})$/, "月$1日");
@@ -40,6 +43,7 @@ function ChartTooltip({ active, payload }: any) {
 
 export default function SentimentAnalysisPage() {
   const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 });
+  const [leaderListExpanded, setLeaderListExpanded] = useState(false);
   const { data: trend = [], isLoading, isError, refetch } =
     trpc.sentiment.getMaxConnectionBoardTrend.useQuery(undefined, {
       staleTime: 60_000,
@@ -74,6 +78,8 @@ export default function SentimentAnalysisPage() {
   const visiblePeakBoards = visibleChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
   const visibleHighBoardLabels = buildDistinctHighBoardLabels(visibleChartData);
   const latestCycleDay = cycleAnalysis?.days.at(-1);
+  const leaderList = cycleAnalysis?.leaderList ?? [];
+  const visibleLeaderList = leaderListExpanded ? leaderList : leaderList.slice(0, LEADER_LIST_PREVIEW_COUNT);
 
   return (
     <div className="container max-w-7xl py-6">
@@ -259,42 +265,33 @@ export default function SentimentAnalysisPage() {
                 <Card className="border-rose-100 bg-white/85 shadow-sm">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base"><GitBranch className="h-4 w-4 text-rose-600" />龙头列表</CardTitle>
-                    <CardDescription>覆盖数据库内全部已记录交易日，汇总全部已确认主板龙头；同一股票只展示一行。原生龙仅指未被穿越周期龙或补涨龙身份覆盖的独立来源类型。</CardDescription>
+                    <CardDescription>覆盖数据库内全部已记录交易日，汇总全部已确认主板龙头，同一股票只展示一行；默认仅显示最近确认的 6 只，可展开查看全部。原生龙仅指未被穿越周期龙或补涨龙身份覆盖的独立来源类型。</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {cycleAnalysis.leaderList.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">当前样本尚未出现已确认的主板龙头。</p> : <div className="space-y-2">{cycleAnalysis.leaderList.map((leader) => (
+                    {leaderList.length === 0 ? <p className="py-6 text-center text-sm text-slate-500">当前样本尚未出现已确认的主板龙头。</p> : <div className="space-y-2">{visibleLeaderList.map((leader) => (
                       <article key={leader.stockCode} className="rounded-xl border border-rose-100 bg-rose-50/25 p-3">
                         <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-sm font-semibold text-slate-800">{leader.stockName}</p><p className="mt-1 text-xs text-slate-500">{leader.sector} · 首次确认 {formatDate(leader.firstLeaderDate)}</p></div><span className="rounded-md bg-rose-100 px-2 py-1 text-xs font-semibold text-rose-700">最高 {leader.highestBoards}板</span></div>
                         <div className="mt-2 flex flex-wrap gap-1.5">{leader.leaderTypes.map((type) => <Badge key={type} variant="outline" className={type === "原生龙" ? "border-amber-200 bg-amber-50 text-amber-800" : type === "穿越周期龙" ? "border-violet-200 bg-violet-50 text-violet-800" : type === "补涨龙" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-white text-rose-700"}>{type}</Badge>)}</div>
                         <p className="mt-2 text-xs leading-5 text-slate-600">{leader.sourceNotes.join("；")}</p>
                       </article>
                     ))}</div>}
+                    {leaderList.length > LEADER_LIST_PREVIEW_COUNT && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="mt-3 w-full gap-2 border-rose-200 text-rose-700 hover:bg-rose-50"
+                        onClick={() => setLeaderListExpanded((previous) => !previous)}
+                      >
+                        {leaderListExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        {leaderListExpanded
+                          ? `收起（共 ${leaderList.length} 只）`
+                          : `展开其余 ${leaderList.length - LEADER_LIST_PREVIEW_COUNT} 只（共 ${leaderList.length} 只）`}
+                      </Button>
+                    )}
                   </CardContent>
                 </Card>
               </div>
             )}
-
-            <Card className="border-slate-200 bg-white/80 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-base">每日最高连板明细</CardTitle>
-                <CardDescription>用于查看折线图标注之外的完整日期与股票名称。</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {chartData.slice().reverse().map((point) => (
-                    <div key={point.date} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-slate-700">{formatDate(point.date)}</span>
-                        <Badge className="bg-orange-100 text-orange-700 hover:bg-orange-100">{point.maxBoards}板</Badge>
-                      </div>
-                      <p className="mt-1 truncate text-xs text-slate-500" title={point.stockNames.join("、")}>
-                        {point.stockNames.length > 0 ? point.stockNames.join("、") : "暂无股票名称"}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
           </div>
         )}
     </div>

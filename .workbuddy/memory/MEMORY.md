@@ -9,9 +9,13 @@
 
 ## 环境
 - 🔴 端口**只认启动日志打的**：本机 **3000 在 Windows 保留段 `2980–3079`**（`listen` 报 `EACCES` 非忙）⇒ dev 静默回落 3100/3101；错端口 = 全站不可达。**读输出须 Bash + 长 PATH**。
-- 🔴 行尾因文件而异：`ROADMAP.md`、`drizzle/schema.ts` **纯 CRLF**；其余**纯 LF** ⇒ `splitlines(keepends=True)` + 前后断言。
+- 🔴 **行尾必须逐文件实测**（`b.count(b"\r\n")` vs `b.count(b"\n")`）—— **禁按「除某几文件外都是 LF」推断**：已实测 `ROADMAP.md`、`ROADMAP-CHANGELOG.md`、`drizzle/schema.ts`、**`client/src/**/*.tsx`（`SentimentAnalysis.tsx` 302/302）** 均**纯 CRLF**（工作区 = git `autocrlf` 后的形态，HEAD blob 是 LF）；`.workbuddy/memory/*.md` 与逐日日志**纯 LF**。改法 = `splitlines(keepends=True)` + **写前写后各断言「CRLF 行数 == 总行数」**。
 - 🔴 改总控用 Python **`read_bytes()`+`write_bytes()`**（`read_text` **静默把 CRLF 转 LF**）；🔴 **`Edit` 曾静默不生效** ⇒ 改完**回读**。
-- 🔴 无 `agent-browser`/`jsdom` ⇒ **禁「浏览器截图」**；前端验收 = 真实 tRPC + **真机 dev server 取模块** + 真库。
+- 🔴 **落盘必须「先编码后打开」+ 原子替换**（`cleanup_root_scratch.py` 血的教训）：`io.open(p, "wb")` **先截断**，若随后的 `encode()` 抛错 ⇒ 文件被清成 **0 B**。正确写法 = `data = text.encode("utf-8")` → 写 `p + ".tmp-write"` → `os.replace(tmp, p)`。
+- 🔴 **源码字面量里禁 `\uXXXX` 代理转义**：Python **不合并**分离代理对（`"\ud83d\udd34"` = 两个孤立代理码位，**不是** emoji）⇒ `compile()` 直接抛 `UnicodeEncodeError: surrogates not allowed`，**脚本在任何语句执行前就死**（stdout 0 B、连 traceback 都打不出）。**emoji 一律写字面量**；⚠️ **文件字节探测查不出这类问题**（磁盘上就是纯 ASCII 的 `\u` 文本），须 `compile()` 后遍历 `co_consts`。
+- 🔴 **`git checkout -- <path>` 不能用来「恢复工作区行尾」**：本项目 `core.autocrlf=true` ⇒ 检出的是 **CRLF** 形态；而 `docs/evidence/README.md` 的 blob 与目标工作区形态都是 **LF**（该文件由脚本以 LF 直写，工作区形态比 blob 形态「更真」）⇒ 直接检出会引入 N 处 `\r`、`git diff` 表现为**整文件重写**。恢复内容请用 `git cat-file -p <rev>:<path>`（**不过 smudge 过滤器**）。
+- 🔴 **改 `.tsx` / 总控都走「行数组手术 + 断言」，禁手抄超长行**：锚点**必须是连续行块**（首行 + 尾行拼接会得到**非子串** ⇒ `str.count` 为 0，而两端各自都能命中 —— 就是这个症状）；删 JSX 块时**闭合 `)}` / `</div>` 极易连坐**（与待删块常只隔一个空行）⇒ 删完**必回读 + `git diff --stat` 断言增删数**，错了 `git checkout -- <file>` 复位重跑（改前先 `git status --short -- <file>` 确认那次 `M` 就是自己）。
+- 🔴 **前端真实渲染可进验收路径**（旧「禁浏览器截图」条已作废，细则见 `PROJECT_RULES.md`「前端」段）：Edge `--headless=new --no-proxy-server --user-data-dir=<tmp> --remote-debugging-port=N --window-size=W,H <url>` + Node 22 内置全局 `WebSocket` 直连 CDP，**量 DOM 计数 / `innerText` 比截图硬**；`agent-browser` 仍不可用、仓库无 `jsdom`。另一层验收 = 真实 tRPC + **真机 dev server 取模块** + 真库。
 - 🔴 探针 = `docs/evidence/`（不进 tsc/vitest）；项目根执行；长跑后台 + 重定向日志；🔴 **清理判据绑「可识别命名域」、不绑 `runId`**。
 - ⚠️ 测试 = `tests/`；**基线 = 7 文件失败**，判据是**失败文件集合**。
 

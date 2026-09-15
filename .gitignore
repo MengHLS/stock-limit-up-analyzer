@@ -127,3 +127,14 @@ scripts/_baostock_stock_basic_dump.json
 .git.broken/
 .workbuddy/
 .manus/
+
+# 一次性过程脚本（Python 行手术 / 追加 / 巡检）—— 应写到仓外 C:\work\sourcecode\_scratch\  [REPO-HYGIENE-PY-SCRIPTS-001]
+# 本仓库技术栈不含 Python；scripts/providers/*.py 是产品依赖（server 的 pythonBridge 子进程调用），不受本规则影响
+_*.py
+
+# 根目录 `_*` 过程文件（一次性迁移/回滚脚本、测试输出产物）—— 应写到仓外 C:\work\sourcecode\_scratch\  [REPO-HYGIENE-ROOT-SCRATCH-001]
+# 本仓库技术栈不含 Python；scripts/providers/*.py 是产品依赖（server 的 pythonBridge 子进程调用），不受本规则影响
+# ⚠️ 锚定根目录（前导 /）是刻意的：docs/evidence/ 下的 `_*_probe.mjs` 是已跟踪真探针，不能被忽略
+/_*.mts
+/_*.mjs
+/_*.json

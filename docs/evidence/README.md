@@ -343,3 +343,50 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > 归档脚本（同轮）：`_append_archive_paper_advance.py`（`ROADMAP.md` §44 插入 + §44.5 `9ao` + `ROADMAP-CHANGELOG.md` append + 本 README 分组）、`_append_rules_paper_advance.py`（`PROJECT_RULES.md`：数据源与回填补一条 + 新增一节）、
 `_append_memory_paper_advance_diag.py` / `_append_memory_paper_advance_fix.py`（当日日志 append）、
 `_verify_archive_paper_advance.py`（**回读校验**：锚点 / 编号先后 / 行尾 / 旧条目零改写，**ALL PASS**）。
+
+## 🔴 2026-09-15 清理：`.py` 过程脚本全部移除（49 个 / 407.8 KB）
+
+> **判据** = 引用扫描分桶（本仓库铁律：**按引用关系而非文件类别**）：**D 零引用 34** + **B2 仅本目录自身索引 4** + **B 仅被 `ROADMAP-CHANGELOG.md` / 当日日志提及 11** = **49 个**；**A 组 4 个全部保留**。（`REPO-HYGIENE-PY-SCRIPTS-001`）
+>
+> **性质**：这 49 个 `.py` **全部是一次性过程脚本**，**不含任何测量结论** ⇒ 不属于本目录要留存的「证据」：
+> `_apply_*` 18（改 `ROADMAP.md` 字节级行手术）/ `_append_*` 18（追加日志与记忆文档）/ `_inspect_*` 7（只读打印行号找锚点）/ `_edit_*` `_fix_*` `_migrate_*` `_verify_*` 6（改源码、迁移组件、回读校验）。
+>
+> **根因（为什么会攒出 49 个）**：本仓库文档是**纯 CRLF 行尾**且禁用 `prettier --write` ⇒ 每次改文档都要临时写一个 Python **字节级行手术**脚本；又因 Windows 的 Python **看不到 Git Bash 的 `/tmp`**，它们被丢进本目录（当时唯一不进 `tsc` / `vitest` 的地方），自 2026-09-13 起累积 **49 个 / 407.8 KB**。
+>
+> **保留（A 组，一个没动）**：`scripts/providers/baostock_probe.py` / `baostock_corporate_actions.py` / `akshare_sw_probe.py` —— **本仓库技术栈确实不含 Python，但这三个是产品依赖**（`server/marketData/providers/pythonBridge.ts` / `akshare.ts` / `baostock.ts`、`server/security/baostock.ts`、`scripts/backfillCorporateActionsBaostock.ts` 经 `runPythonScript()` 子进程调用，删则切断 BaoStock / AkShare 数据桥）；`docs/legacy/upload_script_example.py` = 面人类 legacy 示例。
+>
+> **未动（一个没删）**：本目录全部**真探针**（`.mts` 121 / `.mjs` 12）与**运行结果**（`.log` 61 / `.json` 31 / `.md` 24 / `.txt` 6）；`server/**` `client/**` `shared/**` `drizzle/**` 零改动。
+>
+> **方式** = 用户裁定**真删除**：43 个原已被 git 跟踪 ⇒ 内容永久留存于 git 历史，`git checkout -- <path>` 可随时恢复；6 个未跟踪的是本轮新建的临时脚本，无需留档。
+>
+> **防复发**：一次性过程脚本**一律写到仓外** `C:\work\sourcecode\_scratch\`；细则见 `.workbuddy/memory/PROJECT_RULES.md`「🔴 过程脚本纪律（2026-09-15 起，强制）」；`.gitignore` 已加 `_*.py` 兜底。
+>
+> ⚠️ **本文件上文各分组里对 `_append_*.py` / `_verify_*.py` / `_apply_*.py` 的提及属历史记载** —— `PROJECT_RULES.md`「历史条目零改写」纪律要求不改写它们，但其指向的文件已于 2026-09-15 删除。
+
+### 补充（2026-09-15，`REPO-HYGIENE-ROADMAP-TRIM-001`）：ROADMAP.md 整理带出的两件事
+
+1. **有 3 个已删 `.py` 是被 `ROADMAP.md` 引用的**（上一轮的引用扫描漏判了，见当日日志的「扫描假阴性」自纠）：`_apply_schema_clbr.py`、`_edit_sentiment_page_leaderlist.py`、`_migrate_sketch_primitives.py`。它们出现在 `ROADMAP.md` §44「上轮实查」条目里，形式是「**该次手术由带 N 处断言的脚本执行**」—— 属**过程叙述，不是可复核的证据数据**。按用户裁定**保持已删**，与 CHANGELOG 里那 3 处的处理方式一致。
+2. 🔴 这三处提及所在的 §44 历史条目，已在本轮 ROADMAP 整理中**整体移入 `ROADMAP-CHANGELOG.md`**（见其「ROADMAP.md §44 / §44.5 历史条目归档」小节）⇒ **这些 `.py` 的提及现在位于 CHANGELOG 的历史归档区**，属「历史记载」，其指向的文件已于 2026-09-15 删除。ROADMAP.md 整理前逐字节备份：`.cache/ROADMAP.md.before-cleanup-20260915`。
+
+### 补充二（2026-09-15，`REPO-HYGIENE-ROOT-SCRATCH-001`）：根目录 3 个 `_*` 过程文件清理
+
+| 文件 | 体量 | 性质 | 外部引用 |
+|---|---|---|---|
+| `_vitest_final.json` | 1,379,602 B | vitest 全量输出产物 | **零** |
+| `_moveTestsToRoot.mts` | 7,473 B | 已执行的一次性迁移脚本（tests 迁至根目录） | 仅被下一行提及 |
+| `_migrate_tests_rollback.mjs` | 2,059 B | 前者的物理逆操作（回滚保险） | **零** |
+
+**判据**：本仓库铁律 —— **按引用关系而非文件类别**。全库（排除 `node_modules/`）grep 三个文件名，
+**唯一命中** = `_migrate_tests_rollback.mjs` 自身注释里提到 `_moveTestsToRoot.mts` ⇒ 零外部引用。
+三者**均已 git 跟踪** ⇒ `git rm` 后内容永久留存历史，`git checkout <commit> -- <path>` 可恢复。
+
+**方式** = 用户裁定**三个全删**；同时裁定把「过程脚本一律写到仓外」的担保规则
+**从 `_*.py` 扩到根目录锁定的 `/_*.mts` / `/_*.mjs` / `/_*.json`**。
+⚠️ **锁定根目录（前导 `/`）是刻意的**：本目录下 11 个 `_*_probe.mjs` 是**已跟踪的真探针**，
+若用无锚的 `_*.mjs` 会连它们一起忽略。已核对根目录 `components.json` / `package.json` /
+`tsconfig.json` **不以 `_` 开头**、不受影响。细则见 `.workbuddy/memory/PROJECT_RULES.md`「🔴 过程脚本纪律」。
+
+> ⚠️ 本目录内的 `_probe_sentiment_page_render.mjs`（2026-09-15 新建：情绪分析页真机渲染验收 ——
+> 无头 Edge + CDP，断言「每日最高连板明细」整块已不存在 / 龙头列表默认折叠且卡片数 ≤ 6 /
+> 点「展开其余 N 只」后卡片数 == 总数）**已补登记进 git 跟踪**，与另 11 个已跟踪 `.mjs` 探针一致
+> （本节上文第一段的计数「`.mjs` 12」本已含它）。

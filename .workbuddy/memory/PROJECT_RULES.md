@@ -89,6 +89,14 @@
   - ⚠️ **别在 Bash 末尾接 `| tail`**（输出全被缓冲，进程看着像卡死）；探针脚本落盘日志再读。
 - 非 UI 的等价手段：① 组件真实数据源走**真实 tRPC** 取数；② 组件真实判定函数若在 **React-free 纯函数模块**（如 `client/src/components/research/*Form.ts`、`client/src/adapters/*.ts`）可直接从 Node/tsx 脚本 `import` 复用，**禁另写一套口径**；③ 真实 adapter 往返（`xxxToViewModel` → `viewModelToXxx`）+ 真实 DB 校验。分层纪律 = `API(DTO) → Adapter → ViewModel → UI`，**不把裸 JSON 漏给视图层**。
 
+### 🔴 行尾与「行数组手术」编辑纪律（2026-09-15 固化）
+- **行尾必须逐文件实测**，禁按「除某几文件外都是 LF」推断。实测：`ROADMAP.md`、`ROADMAP-CHANGELOG.md`、`drizzle/schema.ts`、**`client/src/**/*.tsx`（`SentimentAnalysis.tsx` 302/302 CRLF）** 均**纯 CRLF**；`.workbuddy/memory/*.md` 与逐日日志**纯 LF**。工作区是 git `autocrlf` 转换后的形态（HEAD blob 是 LF）⇒ **判据只能是 `b.count(b"\r\n")` vs `b.count(b"\n")`**。
+- **改 `.tsx` / 总控一律用「带断言的 Python 行数组手术」**：`splitlines(keepends=True)` → 定位（**断言命中数 == 1**）→ 增删 → 写回（**断言「CRLF 行数 == 总行数」**）→ **回读比对字节**。参考实现 `docs/evidence/_edit_sentiment_page_leaderlist.py`。
+- 🔴 **锚点必须是连续行块**：把「首行 + 尾行」拼成锚点会得到**非子串** ⇒ 命中 0（而两端单独 grep 都能命中 —— 这就是症状）。JSX 多层缩进极易漏贴中间行 ⇒ **宁可用「唯一前缀谓词 / 行号」定位，不手抄超长行**。
+- 🔴 **删 JSX 块时闭合行极易连坐**：待删 `<Card>` 与「上层 `{cond && (` 的闭合 `)}`」之间**常常只隔一个空行** ⇒ 「向上搜第一个 `)}`」必然删错。删完**必回读 + `git diff --stat` 断言增删数符合预期**；错了 `git checkout -- <file>` 复位重跑（**改前先 `git status --short -- <file>` 确认那次 `M` 就是自己**，否则会吞掉用户改动）。
+- **前端真实渲染可进验收路径**（旧「禁浏览器截图」条已作废）：`<Edge> --headless=new --disable-gpu --no-proxy-server --no-first-run --disable-extensions --user-data-dir=<临目录> --remote-debugging-port=N --window-size=W,H <url>`；用 **Node 22 内置全局 `WebSocket`** 连 `/json/list` 给的 `webSocketDebuggerUrl`，`Runtime.evaluate` **量 DOM**（`querySelectorAll('article').length` / `document.body.innerText.includes(...)`）+ 点按钮后复测 ⇒ 比截图硬、无需视觉判读。参考实现 `docs/evidence/_probe_sentiment_page_render.mjs`（零依赖、`ALL PASS` / `FAILURES(n)` 收尾、`process.exit`）。
+- ⚠️ **`python -c "…"` 正文含反引号会被 bash 命令替换**（实测：把 `` `npx vite build` `` 当命令跑掉）⇒ 含反引号或长中文的脚本**一律先 `Write` 成 `.py` 再执行**。
+
 ## 🔴 真实 tRPC 全链 E2E（不必起 HTTP）
 - `appRouter.createCaller(ctx)`（手构造 admin ctx：`user.role="admin"` + `req={protocol,headers:{}}` + `res={clearCookie:()=>{}}`）即可覆盖「tRPC → Service → Repository → TiDB」。
 - ⚠️ **tRPC 把领域错误包成 `TRPCError(code="INTERNAL_SERVER_ERROR")`，原始错误码在 `cause` 链上** ⇒ 断言错误码必须**穿透 cause 链**再比对，只看 `err.code` 会永远看到 `INTERNAL_SERVER_ERROR`。
@@ -477,3 +485,26 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - ⚠️ **Tailwind 编译产物是多行缩进**（`\n  .bg-white {\n    background-color: …`）⇒ 用单行正则 `\.bg-white{[^}]*}` 去 grep 会**误判为「类不存在」**。查产物请允许缩进或直接看变量名。
 - **本机系统偏好实测 = dark**（`prefers-color-scheme: dark` 为真）⇒ 无任何模拟时页面默认进入暗色，属预期，不是 bug。
 
+## 🔴 过程脚本纪律（2026-09-15 起，强制）
+
+> 触发：用户「**为什么多了很多py文件。我这个项目技术不包含Python技术栈，而且每次任务有很多过程文件，我需要你把过程文件删除掉**」。落地 = `REPO-HYGIENE-PY-SCRIPTS-001`：`docs/evidence/` 下 **49 个** `.py` 过程脚本已全部移除（判据 = 引用扫描分桶 D34 + B2 4 + B11；详见 `docs/evidence/README.md` 同名小节）。
+
+- 🔴 **一次性过程脚本不得写进仓库**。凡「为完成一次交付而临时写的脚本」（改文档行 / 追加日志 / 扫描行号找锚点 / 迁移文件 / 回读校验 / 批量改名 / 生成中间清单），**一律写到仓外** `C:\work\sourcecode\_scratch\`。
+- 🔴 **路径必须用 Windows 绝对路径，禁用 Git Bash 的 `/tmp`** —— Windows 的 Python **看不到** `/tmp`。这正是 2026-09-13 起 49 个 `.py` 落进 `docs/evidence/` 的**直接原因**（当时为「能跑」而就近写了）。
+- 🔴 **`docs/evidence/` 只准放两类东西**：① **真探针**（`.mts` / `.mjs` —— 有测量逻辑、跑真库或真 tRPC、产出可复核结论）；② **运行结果**（`.log` / `.json` / `.md` / `.txt`）。**`.py` 过程脚本不准进**（2026-09-15 已清空 49 个）。
+- ⚠️ **例外（产品依赖，禁删）**：`scripts/providers/baostock_probe.py` / `baostock_corporate_actions.py` / `akshare_sw_probe.py`。**本仓库技术栈确实不含 Python，但这三个是 `server/**` 的子进程桥**（`server/marketData/providers/pythonBridge.ts` 的 `runPythonScript()`；调用方另有 `akshare.ts` / `baostock.ts` / `server/security/baostock.ts` / `scripts/backfillCorporateActionsBaostock.ts`），**删掉 = 切断 BaoStock / AkShare 数据源**。
+  ⇒ 判断「某个 `.py` 能不能删」**一律 `grep -rn "\.py" server/ scripts/` 取证，禁按「项目没有 Python 技术栈」推断**。
+- **兜底**（`.gitignore`，2026-09-15 扩到根目录）：`_*.py`（任意层级）+ **`/_*.mts` / `/_*.mjs` / `/_*.json`（仅根目录）** 不入库，防误提交。⚠️ **锁定根目录是刻意的**：`docs/evidence/` 下的 `_*_probe.mjs` 是**已跟踪的真探针**，不能被忽略。
+- 🔴 **根目录 `_*` 过程文件同在禁令内**（`REPO-HYGIENE-ROOT-SCRATCH-001`，2026-09-15）：`_moveTestsToRoot.mts`（已执行的一次性迁移脚本）、`_migrate_tests_rollback.mjs`（其物理逆操作）、`_vitest_final.json`（1.38 MB vitest 输出产物）—— 三个**全库零引用**（彼此之外无任何引用）。**迁移 / 回滚脚本不留仓内**（需要时从 git 历史取；三者均已被跟踪过，`git checkout <commit> -- <path>` 可恢复）。
+
+## 🔴 总控文档整理纪律（2026-09-15 起，强制）
+
+> 触发：用户「**readme.md跟roadmap.md 内容太混乱了，需要你整理删除**」。落地 = `REPO-HYGIENE-ROADMAP-TRIM-001`：`ROADMAP.md` **538,568 B → 135,779 B（-74.8%）**，`ROADMAP-CHANGELOG.md` 增厚至 **1,101,088 B**（归档，非删除）。
+
+- 🔴 **`ROADMAP.md` §44 头部只允许有 1 条 `上轮实查`**。这是本节自己的规则；2026-09-15 整理时发现有 **24 条**巨型条目（合计 **230 KB**，占全文 43%）都顶着「上轮实查 / 最后实查 / 此前实查 / 最新实查」的名字 ⇒ **已全部归档**。以后每轮只更新那 1 条，旧条目**当轮就移入 `ROADMAP-CHANGELOG.md`**，不要再往里堆。
+- 🔴 **§44.5 只放「未完成」**：`✅ 已完成` 的条目**当轮归档**，不留积压（整理前积压 58 条 / 177 KB）。**必须保留「编号台账」行**（现为「已用至 `9ap` ⇒ 下一个未占用 = `9aq`」），否则后人会按「末条 +1」取号而撞号。
+- 🔴 **归档而不是删除**：整理总控前必须先逐字节备份到 `.cache/`（命名 `<文件名>.before-cleanup-<YYYYMMDD>`），再把条目**原样搬运**进 `ROADMAP-CHANGELOG.md`（append-only 允许追加）。**永不**因为「看起来过时」就删掉 Master Control 的历史条目。
+- 🔴 **`ROADMAP.md` / `README.MD` / `ROADMAP-CHANGELOG.md` / `.workbuddy/memory/**` 全部是纯 CRLF**（不是 LF！），`drizzle/schema.ts`、`client/src/**/*.tsx` 亦然 ⇒ 改这些一律 `read_bytes()` + `write_bytes()`，**禁 `read_text` / 禁 `Edit` 盲改**，写前写后各断言行尾。⚠️ **同一目录里行尾也不同**：`.workbuddy/memory/PROJECT_RULES.md` 是 **CRLF**，同目录的逐日日志却是 **LF**。
+- ⚠️ **结构化文件用「行数组手术 + 断言」**：条目按「**编号行分块**」（**不是**按空行分块 —— §44.5 的 `9x` 区域是连续行、无空行，按空行会一次吞掉 61 KB）；分块后**块级判定**（含 `✅` 且不含 `⬜` / `⏳` / `⏸️` 才归档；`⚠️` / `待决策` / `未做` 在正文里太常见，**不能**当判据）。
+- **`ROADMAP.md` 结构不变量**（整理后已满足，改动后请复验）：① 一级编号 `1..49` **连续且升序**（曾存在 §48 夹在 §44.5 与 §45 之间的唯一逆序对）；② `# 40.` 内的输出模板标题用 `### ` 而非 `## `（否则大纲工具会把模板误认成章节）；③ §44.5 条目**顶格**（无多余缩进）。
+- **备份坐标**：`.cache/ROADMAP.before-47-split.md`（§47 拆分前，852 KB）与 `.cache/ROADMAP.md.before-cleanup-20260915`（本轮整理前，538,568 B）**都不可删**。
