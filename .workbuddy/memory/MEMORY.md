@@ -11,9 +11,9 @@
 - 🔴 端口只认启动日志（3000 正常绑定；旧「保留段 ⇒ 回落 3100/3101」不成立）。LAN `192.168.6.21`。
 - 🔴 Bash 须自带长 PATH：git 在 `PortableGit/versions/1.2.0/cmd`、Unix 工具在**同版本 `usr/bin`**，缺一即 `command not found`。PowerShell 可用但 stdout 不回显 ⇒ 写文件再读。
 - 🔴 `node -e` / `git` **不认 MSYS `/c/...` 路径**（解析成 `D:\c\...`）⇒ 传 `C:/...`。
-- 🔴 后台服务用 `run_in_background=true`，末尾**禁 `&`**（`nohup &`/`Start-Process` 随会话回收 ⇒ 假「没起来」）。
+- 🔴 后台服务用 `run_in_background=true`，末尾**禁 `&`**（`nohup &` 随会话回收 ⇒ 假「没起来」）。
 - 🔴 **git 写入可能被外部回滚**（实测：`.git/refs` 目录会消失、会话内 loose 对象全丢；`fetch`/`update-ref` 打印成功但 ref 不落地）⇒ **每次 git 操作后复核 `git rev-parse HEAD` + `git cat-file -e <sha>`**；见 `bad object HEAD` 立即停手、先复制工作区到仓库外。另：`refs/remotes/origin/*` 每次 `git push` 后必被清掉 ⇒ 远端跟踪值写进 **`packed-refs`**（持久层，实测存活）；真值以 `git ls-remote` 为准。
-- 🔴 **本环境会自发批量删文件**：实测一次抹掉 `server/**` **522 个**（dev 随即崩 `ERR_MODULE_NOT_FOUND server/_core/index.ts`、3000 掉线）⇒ 判据 `find server -type f | wc -l` ≈ **553**；恢复 `git restore --worktree -- server/`。**删/git 操作后立即复查文件数与 `git status`**。
+- 🔴 **工作区有并发会话/快照同步在动文件**（非「自发」）：实测抹掉 `server/**` **522 个**（dev 崩 `ERR_MODULE_NOT_FOUND`、3000 掉线），同期**他会话探针文件凭空出现**、`.git/refs` 反复消失⇒ 判据 `find server -type f | wc -l` ≈ **553**；恢复 `git restore --worktree -- server/`；**操作后立即复查文件数 + 状态 + 有无他会话新文件**。
 - 🔴 改文件用 Python `read_bytes()`+`write_bytes()`，**先 `encode()` 再打开 + `os.replace` 原子替换**（否则抛错清成 **0 B**），改完回读核对（`Edit` 曾静默不生效）。
 - 🔴 源码字面量禁 `\uXXXX` 代理转义（⇒ `compile()` 抛 `UnicodeEncodeError`，零输出即死）；emoji 写字面量；模板字符串内禁嵌反引号。
 - 🔴 行数组手术：锚点须**连续行块**；`.tsx`/总控改完 `git diff --stat` 断言增删数，错了 `git checkout --` 复位重跑。
@@ -22,7 +22,7 @@
 - ✅ 前端验收 = 无头 Chrome/Edge `--headless=new --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node 22 内置 `WebSocket` 直连 CDP；量 DOM 比截图硬；`taskkill /F /T`。⚠️ 探针输出**必须同步落盘**（异步 pipe 被杀时未 flush ⇒ 空 stdout）。`agent-browser`/`jsdom` 不可用。
 
 ## 行尾（**逐文件实测，禁推断**；仓库本地 `core.autocrlf=false`）
-- 🔴 **CRLF**：`client/src/**/*.tsx`、`client/src/App.tsx`、`PROJECT_RULES.md`；**LF**：`MEMORY.md`、逐日日志、`docs/evidence/*`、`server/**`、`client/src/index.css`、`vite.config.ts`。判据 = `count(b"\r\n")` vs `count(b"\n")`。⚠️ 曾误记「全仓纯 LF」（远端 `8bbe8b3` 已改回 CRLF）⇒ **别再按纯 LF 写**。
+- 🔴 **CRLF**：`client/src/**/*.tsx`、`client/src/App.tsx`、`PROJECT_RULES.md`；**LF**：`MEMORY.md`、逐日日志、`docs/evidence/*`、`server/**`、`client/src/index.css`、`vite.config.ts`。判据 = `count(b"\r\n")` vs `count(b"\n")`。⚠️ 曾误记「全仓纯 LF」（`8bbe8b3` 已改回 CRLF）⇒ **别再按纯 LF 写**。
 - `core.autocrlf=false` 在 `.git/config`（系统级 gitconfig 仍 `true`，**勿改**）⇒ 工作区行尾 = 磁盘真身。⚠️ **HEAD blob 内部仍 LF** ⇒ 恢复用 `git cat-file -p <rev>:<path>`；单向：被洗过的文件不自愈。
 
 ## 总控
@@ -51,7 +51,7 @@
 - 🔴 四环节缺一即不出：① 日历末端 ≥ 目标日 → ② bar/`ds_*` 覆盖 → ③ 数据集窗口含目标日（**仅 registry 路径**，越界 FAIL FAST `SIM_RANGE_OUT_OF_DATASET`）→ ④ 已推进。⚠️ 装配层不校验窗口（`assemble.ts:481/496`）。
 - 🔴 数据集窗口取**两上限小者**（390002 ⇒ 有效 09-01）；越过后须**重建数据集 + 重绑策略**。legacy 可回测末日 = 日历倒数第 (obs+1) 个交易日；看当天候选池用 `/leader-candidates`。
 - 🔴 `stock_daily_prices` **不是全市场快照**（近端每日仅 400~600 只）⇒ **先问「这天是不是候选池日」，别判同步故障**；DB 时区 = UTC（+8 才是北京时）。
-- ⚠️ 留档 `startDate/endDate` = 用户当时选的区间。探针 `_probe_today_gap.mts`／`_probe_dataset_vs_today.mts`／`_probe_assemble_window_bounds.mts`。
+- ⚠️ 留档 `startDate/endDate` 为用户当时所选。探针 `_probe_today_gap.mts`／`_probe_dataset_vs_today.mts`／`_probe_assemble_window_bounds.mts`。
 
 ## 页面 / 口径 / 暗色 / 侧栏 / 主题
 - 🔴 **侧栏高亮 = 分段精确匹配 + 全局取最长命中**（`AppShell.tsx#isPathActive`；**禁 `startsWith`**）；详情页仍点亮父项。探针 `docs/evidence/_probe_sidebar_active_highlight.mjs`。
@@ -59,7 +59,7 @@
 - 策略页分家 `/strategies` + `/strategies/:strategyId`（新建草稿须清空 `strategyId`）；规则编辑 = 七段表单（**JSON 模式已删**），有 `definition` 时禁回送五个 v1 视图（`SCHEMA_DEFINITION_VIEW_CONFLICT`）。
 - 🔴 运算符两形：定义侧**名称形**（`GREATER_THAN_OR_EQUAL`）vs 草图**符号形**（`>=`），只在 `definitionBuild.ts#CONDITION_OPERATOR_MAP` 译。换数据集**同动三处**：doc 坐标 + `definition.datasets` PRIMARY + `universe.universeId`。
 - 🔴 门槛型条件必须 `gated` 配方；`signalBuilder` 是工厂 ⇒ **先 `resolveParameters`**；禁手搓 `row.bars`。`client/**` 禁 import `server/**`/`shared/**` 运行时值；免责声明不得删；`RESEARCH_READY` 不因「结果可看」变 TRUE。
-- 🔴 性能只认「**交错 ≥3 轮取中位**」；真实列名**禁凭记忆**写 SQL；「全端点 DB 失败 + 零 DB 端点正常」⇒ 先查池。
+- 🔴 性能只认「**交错 ≥3 轮取中位**」；真实列名**禁凭记忆**写 SQL；「全端点 DB 失败 + 零 DB 正常」⇒ 先查池。
 - 🔴 **暗色兼容层**：`client/src/theme/darkCompatibility.css` 是**生成物禁手改**（`scripts/generateDarkCompatibility.mjs`）；**新增 Tailwind 颜色类必须重跑生成器**。令牌在 `client/src/index.css` 的 `.dark`；抗刺眼靠 `color-mix(in oklab, …)` 压低色度。
 
 ## 大盘数据同步（成交额/两融，`/market`）
