@@ -1,0 +1,19 @@
+== 主题自动加载探针 == 2026-09-15T15:48:31.135Z
+BASE=http://127.0.0.1:3300 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe
+页面就绪，origin = http://127.0.0.1:3300
+  PASS  无记忆 + 设备暗色  => 期望 dark
+        期望生效=dark | DOM html.dark=true（实际 dark） | 按钮 data-theme=dark | colorScheme=dark | matchMedia.dark=true | localStorage="null"
+  PASS  无记忆 + 设备亮色  => 期望 light
+        期望生效=light | DOM html.dark=false（实际 light） | 按钮 data-theme=light | colorScheme=light | matchMedia.dark=false | localStorage="null"
+  PASS  记忆=system + 设备暗色 => 期望 dark
+        期望生效=dark | DOM html.dark=true（实际 dark） | 按钮 data-theme=dark | colorScheme=dark | matchMedia.dark=true | localStorage="system"
+  PASS  记忆=light + 设备暗色 => 期望 light（显式优先）
+        期望生效=light | DOM html.dark=false（实际 light） | 按钮 data-theme=light | colorScheme=light | matchMedia.dark=true | localStorage="light"
+  PASS  记忆=dark + 设备亮色 => 期望 dark（显式优先）
+        期望生效=dark | DOM html.dark=true（实际 dark） | 按钮 data-theme=dark | colorScheme=dark | matchMedia.dark=false | localStorage="dark"
+
+--- 运行时切换设备配色（无记忆 + 跟随系统，应实时生效）---
+  PASS  light=false -> 切暗色=true -> 切回亮色=false（期望 false -> true -> false）
+
+=== 汇总：PASS 6 / FAIL 0 ⇒ ALL PASS ===
+结果留档：D:\_integrate_push_20260915\docs\evidence\_probe_theme_autoload.out.txt

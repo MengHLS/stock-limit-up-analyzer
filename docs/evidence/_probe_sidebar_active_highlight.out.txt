@@ -1,0 +1,46 @@
+== 侧栏高亮回归探针 == 2026-09-15T15:47:21.169Z
+BASE=http://127.0.0.1:3300 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=25427
+CDP 已连接
+
+--- 1/4 导航路由（22 条）---
+  PASS  /                                    期望唯一高亮=[涨停复盘]  实际=["涨停复盘"]
+  PASS  /market                              期望唯一高亮=[大盘分析]  实际=["大盘分析"]
+  PASS  /sentiment-analysis                  期望唯一高亮=[情绪分析]  实际=["情绪分析"]
+  PASS  /leader-candidates                   期望唯一高亮=[龙头候选]  实际=["龙头候选"]
+  PASS  /backtest                            期望唯一高亮=[组合回测]  实际=["组合回测"]
+  PASS  /backtest-runs                       期望唯一高亮=[回测历史]  实际=["回测历史"]
+  PASS  /paper-trading                       期望唯一高亮=[前向纸面交易]  实际=["前向纸面交易"]
+  PASS  /upload                              期望唯一高亮=[上传图片]  实际=["上传图片"]
+  PASS  /data-health                         期望唯一高亮=[数据域健康]  实际=["数据域健康"]
+  PASS  /historical-state                    期望唯一高亮=[历史状态查询]  实际=["历史状态查询"]
+  PASS  /datasets                            期望唯一高亮=[数据集构建]  实际=["数据集构建"]
+  PASS  /research                            期望唯一高亮=[研究实验]  实际=["研究实验"]
+  PASS  /strategies                          期望唯一高亮=[策略]  实际=["策略"]
+  PASS  /performance                         期望唯一高亮=[绩效仪表盘]  实际=["绩效仪表盘"]
+  PASS  /parameter-search                    期望唯一高亮=[参数搜索]  实际=["参数搜索"]
+  PASS  /walk-forward                        期望唯一高亮=[WFO/OOS 分析]  实际=["WFO/OOS 分析"]
+  PASS  /regime-report                       期望唯一高亮=[Regime/报告]  实际=["Regime/报告"]
+  PASS  /review-workbench                    期望唯一高亮=[复盘工作台]  实际=["复盘工作台"]
+  PASS  /stock-sync                          期望唯一高亮=[行情同步]  实际=["行情同步"]
+  PASS  /sentiment-alerts                    期望唯一高亮=[情绪预警]  实际=["情绪预警"]
+  PASS  /operation-logs                      期望唯一高亮=[操作日志]  实际=["操作日志"]
+
+--- 2/4 详情路由（5 条，应点亮父项）---
+  PASS  /strategies/__probe__                期望唯一高亮=[策略]  实际=["策略"]
+  PASS  /research/__probe__                  期望唯一高亮=[研究实验]  实际=["研究实验"]
+  PASS  /research/candidates/__probe__       期望唯一高亮=[研究实验]  实际=["研究实验"]
+  PASS  /datasets/__probe__                  期望唯一高亮=[数据集构建]  实际=["数据集构建"]
+  PASS  /datasets/__probe__/versions         期望唯一高亮=[数据集构建]  实际=["数据集构建"]
+
+--- 3/4 反向断言（4 条，同前缀板块不得互亮）---
+  PASS  [反向] /backtest-runs                   不得点亮[组合回测]  实际高亮=["回测历史"]
+  PASS  [反向] /backtest                        不得点亮[回测历史]  实际高亮=["组合回测"]
+
+--- 4/4 点击流（6 条）---
+  PASS  从 /backtest 点[回测历史] -> path=/backtest-runs（期望 /backtest-runs）高亮=["回测历史"]（期望唯一 [回测历史]）clicked=clicked
+  PASS  从 /backtest-runs 点[组合回测] -> path=/backtest（期望 /backtest）高亮=["组合回测"]（期望唯一 [组合回测]）clicked=clicked
+  PASS  从 / 点[策略] -> path=/strategies（期望 /strategies）高亮=["策略"]（期望唯一 [策略]）clicked=clicked
+  PASS  从 /strategies 点[研究实验] -> path=/research（期望 /research）高亮=["研究实验"]（期望唯一 [研究实验]）clicked=clicked
+
+=== 汇总：PASS 32 / FAIL 0 / SKIP 0 ⇒ ALL PASS ===
+结果留档：D:\_integrate_push_20260915\docs\evidence\_probe_sidebar_active_highlight.out.txt

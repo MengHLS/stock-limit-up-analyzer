@@ -110,9 +110,41 @@ const navGroups: NavGroup[] = [
   },
 ];
 
+/**
+ * 侧栏高亮判定（2026-09-15 修）。
+ *
+ * 旧实现是 `location.startsWith(item.path)` —— 字符串前缀匹配，会把「前缀相同但完全
+ * 不同的板块」一起点亮（`/backtest-runs` 回测历史命中 `/backtest` 组合回测）。
+ * 现改为**按路径分段**匹配：路径相等、或当前路径以「item.path + `/`」开头才算命中，
+ * 于是详情页（`/datasets/:id`、`/strategies/:id`、`/research/:id`）依然点亮父级菜单项。
+ */
+function normalizePath(raw: string): string {
+  // wouter 的 location 可能带 `?query` / `#hash`，也可能带尾部 `/`，先统一剥掉
+  const stripped = raw.split("?")[0].split("#")[0];
+  if (stripped.length > 1) return stripped.replace(/\/+$/, "");
+  return stripped === "" ? "/" : stripped;
+}
+
+function isPathActive(currentPath: string, itemPath: string): boolean {
+  const target = normalizePath(itemPath);
+  if (target === "/") return currentPath === "/";
+  return currentPath === target || currentPath.startsWith(target + "/");
+}
+
+/** 所有导航项（跨分组拉平），用于「取最长命中」的全局判定 */
+const allNavItems: NavItem[] = navGroups.flatMap(group => group.items);
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useLocation();
   const { user, isAuthenticated, logout } = useAuth();
+  // 唯一高亮项 = 「所有命中项里路径最长」的那一个（详情页因此点亮父项，同前缀板块不会互亮）
+  const currentPath = normalizePath(location);
+  const activeNavPath =
+    allNavItems
+      .filter(item => isPathActive(currentPath, item.path))
+      .sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length)[0]
+      ?.path ?? null;
+
 
   const handleNavigate = (path: string) => {
     if (path !== location) setLocation(path);
@@ -141,10 +173,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
               <SidebarMenu>
                 {group.items.map(item => {
-                  const isActive =
-                    item.path === "/"
-                      ? location === "/"
-                      : location.startsWith(item.path);
+                  const isActive = item.path === activeNavPath;
                   return (
                     <SidebarMenuItem key={item.path}>
                       <SidebarMenuButton
