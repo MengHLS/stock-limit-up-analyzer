@@ -12,17 +12,17 @@
 - 🔴 Bash 须自带长 PATH：git 在 `PortableGit/versions/1.2.0/cmd`、Unix 工具在**同版本 `usr/bin`**，缺一即 `command not found`。PowerShell 可用但 stdout 不回显 ⇒ 写文件再读。
 - 🔴 `node -e` / `git` **不认 MSYS `/c/...` 路径**（解析成 `D:\c\...`）⇒ 传 `C:/...`。
 - 🔴 后台服务用 `run_in_background=true`，末尾**禁 `&`**（`nohup &`/`Start-Process` 随会话回收 ⇒ 假「没起来」）。
-- 🔴 **git 写入可能被外部回滚**（2026-09-15 实测：`.git/refs` 整个目录消失 + 会话内 loose 对象全丢；`fetch`/`update-ref` 打印成功但 ref 不落地，手工 `printf > .git/refs/…` 反而持久）⇒ **每次 git 操作后复核 `git rev-parse HEAD` + `git cat-file -e <sha>`**；见 `bad object HEAD` 立即停手、先把工作区复制到仓库外（如 `D:\_repo_rescue_<日期>\`，用完即删）。
+- 🔴 **git 写入可能被外部回滚**（实测：`.git/refs` 目录会消失、会话内 loose 对象全丢；`fetch`/`update-ref` 打印成功但 ref 不落地）⇒ **每次 git 操作后复核 `git rev-parse HEAD` + `git cat-file -e <sha>`**；见 `bad object HEAD` 立即停手、先把工作区复制到仓库外（如 `D:\_repo_rescue_<日期>\`，用完即删）。另：`refs/remotes/origin/*` 每次 `git push` 后必被清掉 ⇒ 远端跟踪值写进 **`packed-refs`**（持久层，实测存活）；真值以 `git ls-remote` 为准。
 - 🔴 改文件用 Python `read_bytes()`+`write_bytes()`，**先 `encode()` 再打开 + `os.replace` 原子替换**（否则抛错清成 **0 B**），改完回读核对（`Edit` 曾静默不生效）。
 - 🔴 源码字面量禁 `\uXXXX` 代理转义（⇒ `compile()` 抛 `UnicodeEncodeError`，零输出即死）；emoji 写字面量；模板字符串内禁嵌反引号。
 - 🔴 行数组手术：锚点须**连续行块**；`.tsx`/总控改完 `git diff --stat` 断言增删数，错了 `git checkout --` 复位重跑。
 - 🔴 探针放 `docs/evidence/`（不在 tsconfig scope）；测试 = `tests/`，**基线 7 文件失败**，判据 = **失败文件集合**。
-- ✅ dev 首屏慢已修（`vite.config.ts` 删 manus 插件 + `optimizeDeps.include` + `holdUntilCrawlEnd:false`；`server/_core/vite.ts` 预热，⚠️ 须**先 `await depsOptimizer.init()`**）。
-- ✅ 前端验收 = 无头 Chrome/Edge `--headless=new --no-proxy-server --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node 22 内置 `WebSocket` 直连 CDP；量 DOM 比截图硬；`taskkill /F /T`。⚠️ 探针输出**必须 `fs.appendFileSync` 同步落盘**（异步 pipe 被 SIGTERM 杀时未 flush ⇒ 空 stdout）。`agent-browser`/`jsdom` 不可用。
+- ✅ dev 首屏慢已修（`vite.config.ts` 删 manus 插件 + `optimizeDeps.include` + `holdUntilCrawlEnd:false`；`server/_core/vite.ts` 预热须先 `await depsOptimizer.init()`）。
+- ✅ 前端验收 = 无头 Chrome/Edge `--headless=new --no-proxy-server --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node 22 内置 `WebSocket` 直连 CDP；量 DOM 比截图硬；`taskkill /F /T`。⚠️ 探针输出**必须同步落盘**（异步 pipe 被 SIGTERM 杀时未 flush ⇒ 空 stdout）。`agent-browser`/`jsdom` 不可用。
 
 ## 行尾（**逐文件实测，禁推断**；仓库本地 `core.autocrlf=false`）
 - 🔴 **CRLF**：`client/src/**/*.tsx`、`client/src/App.tsx`、`PROJECT_RULES.md`；**LF**：`MEMORY.md`、逐日日志、`docs/evidence/*`、`server/**`、`client/src/index.css`、`vite.config.ts`。判据 = `count(b"\r\n")` vs `count(b"\n")`。⚠️ 曾误记「全仓纯 LF」（远端 `8bbe8b3` 已改回 CRLF）⇒ **别再按纯 LF 写**。
-- `core.autocrlf=false` 在 `.git/config`（系统级 `PortableGit/etc/gitconfig` 仍 `true`，**勿改**）⇒ 工作区行尾 = 磁盘真身，`checkout --`/`restore` 不再洗成 LF。⚠️ **HEAD blob 内部仍 LF** ⇒ 恢复用 `git cat-file -p <rev>:<path>`；单向性：被洗过的文件不自愈。
+- `core.autocrlf=false` 在 `.git/config`（系统级 gitconfig 仍 `true`，**勿改**）⇒ 工作区行尾 = 磁盘真身。⚠️ **HEAD blob 内部仍 LF** ⇒ 恢复用 `git cat-file -p <rev>:<path>`；单向：被洗过的文件不自愈。
 
 ## 总控
 - `ROADMAP.md` 唯一 Master Control（§44 覆盖式 + §44.5 + §47 append-only）；**仅 `RESEARCH_READY=TRUE` 才允许策略结论**。
@@ -41,7 +41,7 @@
 - 🔴 `loopRun`：`dateRange` 必填；`experimentId` 须 `EXP-YYYYMMDD-XXXXXXXX`；14 阶段仅 6 有执行器；同步长请求。
 
 ## 前向纸面 `/paper-trading` / 指数同步 `/stock-sync`
-- 🔴 交易日历**唯一来源 = `index_daily`**（停更 ⇒ `datesToAdvance` 恒空、**静默 no-op 却报成功**；补数**必须 `--force`**）。入口 `sentiment.getIndexSyncStatus` / `syncIndexDaily`，服务层 `server/marketData/indexSync.ts`；tushare 配额 5 次/天 + 1 次/分钟 ⇒ 靠智能增量。
+- 🔴 交易日历**唯一来源 = `index_daily`**（停更 ⇒ `datesToAdvance` 恒空、**静默 no-op 却报成功**；补数**必须 `--force`**）。入口 `sentiment.getIndexSyncStatus`/`syncIndexDaily`（`server/marketData/indexSync.ts`）；tushare 配额 5 次/天 ⇒ 靠智能增量。
 - 🔴 **齐平判定必须传 `referenceDate`**（= `stock_daily_prices` 最大 `tradeDate`），否则 30 天容差会把「落后恰好 1 个交易日」判成已齐平。
 - 🔴 `classifyAdvanceKind` 三态 `advanced`/`already-latest`/`calendar-stale`，判据 = `marketLastDate > calendarLastDate`；越界抛 `PaperTradingCalendarStaleError`（码须写进 message 才跨 tRPC）；前端按 `diagnosis` 分流 toast。
 
