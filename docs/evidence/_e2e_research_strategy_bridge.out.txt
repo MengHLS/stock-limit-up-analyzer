@@ -36,12 +36,12 @@
   ok   三例失败后仍零 Strategy 数据
 
 === 5. §12⑤ ACCEPTED + 完整草稿 → promote 生成 Strategy Version ===
-  strategyId=cand-390002 version=1.0.0 strategyVersionId=450002 fingerprint=d2956a288c34c463…
-  ok   strategyId 确定性派生 = cand-<candidateId> — cand-390002
+  strategyId=cand-480001 version=1.0.0 strategyVersionId=510001 fingerprint=708b7a739c161751…
+  ok   strategyId 确定性派生 = cand-<candidateId> — cand-480001
   ok   版本号固定 1.0.0（Promote 不产多版本）
   ok   候选终态 = CONVERTED
   ok   strategyDefinitionId 指向该策略（两处一致）
-  ok   provenance 行存在且唯一 — {"strategyVersionId":450002,"strategyId":"cand-390002","sourceCandidateId":390002,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","origin":"DIRECT"}
+  ok   provenance 行存在且唯一 — {"strategyVersionId":510001,"strategyId":"cand-480001","sourceCandidateId":480001,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2","origin":"DIRECT"}
   ok   provenance 五项上游锚全部落库（candidate/conclusion/experiment/run/datasetVersion）
   ok   provenance origin = DIRECT（首代，非继承）
 
@@ -55,13 +55,13 @@
   ok   Canonical 零污染：strategies / strategy_versions 无任何 research/candidate/conclusion 列
 
 === 7. §12⑧ promote 幂等：第二次不产生第二个版本 ===
-  第一次：strategyId=cand-390002 version=1.0.0 versionId=450002 fp=d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c idempotent=false
-  第二次：strategyId=cand-390002 version=1.0.0 versionId=450002 fp=d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c idempotent=true
+  第一次：strategyId=cand-480001 version=1.0.0 versionId=510001 fp=708b7a739c16175172e5b4d5a44bf2e2e5a6b45d64284d76d6fb5968a646d958 idempotent=false
+  第二次：strategyId=cand-480001 version=1.0.0 versionId=510001 fp=708b7a739c16175172e5b4d5a44bf2e2e5a6b45d64284d76d6fb5968a646d958 idempotent=true
   ok   第二次 promote 未新建（idempotent = true）
-  ok   第二次返回同一 strategyId — cand-390002 vs cand-390002
+  ok   第二次返回同一 strategyId — cand-480001 vs cand-480001
   ok   第二次返回同一 version — 1.0.0 vs 1.0.0
   ok   第二次返回同一 versionId
-  ok   第二次返回同一 fingerprint（来自真实版本行，不编值） — d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c vs d2956a288c34c46355baeec2c0aa27206ebb7f1f87d68d58e2a4fbc9ad3bb24c
+  ok   第二次返回同一 fingerprint（来自真实版本行，不编值） — 708b7a739c16175172e5b4d5a44bf2e2e5a6b45d64284d76d6fb5968a646d958 vs 708b7a739c16175172e5b4d5a44bf2e2e5a6b45d64284d76d6fb5968a646d958
   ok   未产生第二个 Strategy Version
   ok   未产生第二条 provenance
 
