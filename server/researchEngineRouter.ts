@@ -296,6 +296,15 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
               },
               { stat: "last_volume_ratio", label: "回调末日量能比 / 首板日成交量", unit: "比例" },
               { stat: "holds_event_low", label: "回调期间未破首板日最低价（1=未破 / 0=已破）", unit: "0/1" },
+              /**
+               * RESEARCH-PLANNER-001 新增 —— 与 `holds_event_low` 平行，只换基准字段。
+               *
+               * 为什么必须并列出现：`low(T) ≤ open(T)` 恒成立，因此「未破开盘价」严格强于
+               * 「未破最低价」，两者筛出的样本不同。任务书 §27 的验收问题问的是**开盘价**，
+               * 若下拉里只有 `holds_event_low`，用户只能选到含义不同的口径。
+               */
+              { stat: "holds_event_open", label: "回调期间未破首板日开盘价（1=未破 / 0=已破）", unit: "0/1" },
+              { stat: "last_is_bullish", label: "回调末日为阳线（1=是 / 0=否）", unit: "0/1" },
             ],
           },
           /** 观察日条件在 T+k 判定时的 PIT 上限（前端据此提示「在 T+3 判定只能用 ≤ T+3 的字段」）。 */

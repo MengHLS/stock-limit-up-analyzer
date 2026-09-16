@@ -131,6 +131,10 @@ export const RESEARCH_CANDIDATE_IMMUTABLE_FIELDS = [
   "conclusionId",
   "sourceDatasetVersionId",
   "sourceResearchRunId",
+  // RESEARCH-PLANNER-001：来源 Research Plan id —— 与 `sourceResearchRunId` 同属历史事实快照。
+  // 允许普通 update 改写它 = 可以把「自动规划产出的候选」改写成「专家手工产出的候选」，
+  // 属于伪造历史。只经 create 写入。
+  "sourceResearchPlanId",
   "sourceTraceJson",
   "sourceDatasetDivergenceReason",
 ] as const;

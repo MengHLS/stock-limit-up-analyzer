@@ -9,6 +9,7 @@ import { researchRouter } from "./researchRouter";
 import { datasetRegistryRouter } from "./datasetRegistry/router";
 // RESEARCH-002 — Research Engine API（Experiment/Run/Analysis/Result/Conclusion；真实执行入口）
 import { researchEngineRouter } from "./researchEngineRouter";
+import { researchPlannerRouter } from "./researchPlannerRouter";
 // FE-0 扩展 — 研究 run 目录与就绪探测
 import { researchRunRouter } from "./researchRunRouter";
 // FE-1 — 数据域健康看板（STEP 12 gate 认证证据，只读）
@@ -293,6 +294,8 @@ export const appRouter = router({
   datasetRegistry: datasetRegistryRouter,
   // RESEARCH-002 — Research Engine（Experiment/Hypothesis/Run/Analysis/Result/Conclusion + 真实执行）
   researchEngine: researchEngineRouter,
+  // RESEARCH-PLANNER-001 — 自动研究编排（研究问题 → 计划 → 自动建分析 → 执行 → 结论视图）
+  researchPlanner: researchPlannerRouter,
   // FE-0 扩展 — 研究 run 目录与就绪探测（只读；真实执行待数据认证后装配）
   researchRun: researchRunRouter,
   // FE-1 — 数据域健康看板
