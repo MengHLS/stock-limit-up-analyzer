@@ -6,6 +6,8 @@ export { CreateExperimentDialog } from "./CreateExperimentDialog";
 export { CreateAnalysisDialog } from "./CreateAnalysisDialog";
 export { AnalysisResultsView } from "./AnalysisResultsView";
 export { ConclusionPanel } from "./ConclusionPanel";
+export { FindingsPanel } from "./FindingsPanel";
+export { CreateHypothesisDialog } from "./CreateHypothesisDialog";
 export { RunEngineButton } from "./RunEngineButton";
 export { RunIncrementalButton } from "./RunIncrementalButton";
 export { RunExecutionBatches, skippedConclusionNotes } from "./RunExecutionBatches";

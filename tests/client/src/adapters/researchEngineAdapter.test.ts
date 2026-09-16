@@ -19,6 +19,8 @@ import {
   dimensionSortKey,
   estimateExcludedGroupMean,
   experimentToVm,
+  findingToVm,
+  findingTypeLabelOf,
   formatDuration,
   formatMetricValue,
   groupRangeLabelOf,
@@ -587,6 +589,107 @@ describe("researchEngineAdapter — 结论 evidence", () => {
       expect(vm.evidence.primaryAnalysis).toBeNull();
       expect(vm.evidence.ruleTrace).toEqual([]);
     }
+  });
+});
+
+describe("researchEngineAdapter — Finding → VM（RESEARCH-FINDING-001）", () => {
+  it("findingTypeLabelOf 覆盖六维类型；未收录回退原值", () => {
+    expect(findingTypeLabelOf("EFFECT")).toBe("效应");
+    expect(findingTypeLabelOf("MONOTONIC_RELATION")).toBe("单调关系");
+    expect(findingTypeLabelOf("PEAK_RELATION")).toBe("峰值反转");
+    expect(findingTypeLabelOf("VALLEY_RELATION")).toBe("谷值回升");
+    expect(findingTypeLabelOf("HORIZON_PATTERN")).toBe("视界形态");
+    expect(findingTypeLabelOf("STABILITY")).toBe("时间稳定性");
+    expect(findingTypeLabelOf("INTERACTION")).toBe("条件组合");
+    expect(findingTypeLabelOf("UNKNOWN_TYPE")).toBe("UNKNOWN_TYPE");
+  });
+
+  it("数值原样映射；缺失即 null，不在前端重算", () => {
+    const vm = findingToVm({
+      id: 7,
+      experimentId: 1,
+      runId: 2,
+      primaryAnalysisId: 3,
+      findingType: "EFFECT",
+      title: "回撤 5~8% 组未来 5 日收益更高",
+      status: "DISCOVERED",
+      target: "future_return_5d",
+      sourceResultIds: [101, 102],
+      effect: {
+        groupReturn: 0.021,
+        benchmarkReturn: 0.015,
+        excessReturn: 0.006,
+        benchmarkUnavailable: false,
+        benchmarkSource: "experiment-baseline:analysis=3",
+        medianReturn: 0.018,
+        winRate: 0.62,
+        buckets: [
+          { label: "Q1", metricValue: 0.010, sampleCount: 100 },
+          { label: "Q2", metricValue: 0.021, sampleCount: 100 },
+        ],
+      },
+      sample: { sampleCount: 200, grade: "MEDIUM", thresholds: { weak: 100, medium: 300, strong: 1000 } },
+      effectStrength: 0.6,
+      sampleStrength: 0.4,
+      stabilityStrength: null,
+      horizonConsistency: null,
+      monotonicityStrength: null,
+      researchStrength: 0.5,
+      researchStrengthGrade: "MEDIUM",
+    });
+
+    expect(vm.id).toBe(7);
+    expect(vm.findingTypeLabel).toBe("效应");
+    expect(vm.headline.excessReturn).toBe(0.006);
+    expect(vm.headline.benchmarkUnavailable).toBe(false);
+    expect(vm.headline.sampleCount).toBe(200);
+    expect(vm.headline.sampleGrade).toBe("MEDIUM");
+    expect(vm.strength.total).toBe(0.5);
+    expect(vm.strength.grade).toBe("MEDIUM");
+    expect(vm.strength.stability).toBeNull();
+    expect(vm.buckets).toHaveLength(2);
+    expect(vm.buckets[0]!.metricValue).toBe(0.010);
+    expect(vm.sourceResultIds).toEqual([101, 102]);
+  });
+
+  it("基准不可得时显式标记 benchmarkUnavailable，而不是假装有基准", () => {
+    const vm = findingToVm({
+      id: 8,
+      experimentId: 1,
+      findingType: "EFFECT",
+      title: "无基准的效应",
+      status: "DISCOVERED",
+      effect: {
+        groupReturn: 0.02,
+        benchmarkReturn: null,
+        excessReturn: null,
+        benchmarkUnavailable: true,
+        benchmarkSource: "unavailable",
+        medianReturn: null,
+        winRate: null,
+        buckets: [],
+      },
+    });
+    expect(vm.headline.benchmarkUnavailable).toBe(true);
+    expect(vm.headline.excessReturn).toBeNull();
+  });
+
+  it("档位明细优先级：effect.buckets > monotonicity.buckets > horizon.points", () => {
+    const vm = findingToVm({
+      id: 9,
+      experimentId: 1,
+      findingType: "MONOTONIC_RELATION",
+      title: "单调",
+      status: "DISCOVERED",
+      monotonicity: {
+        pattern: "MONOTONIC_INCREASING",
+        reversalAt: null,
+        rankCorrelation: 0.8,
+        buckets: [{ label: "Q1", metricValue: 0.01, sampleCount: 10 }],
+      },
+    });
+    expect(vm.buckets).toHaveLength(1);
+    expect(vm.headline.rankCorrelation).toBe(0.8);
   });
 });
 

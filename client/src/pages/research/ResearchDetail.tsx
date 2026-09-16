@@ -57,6 +57,7 @@ import {
   ConfirmDeleteButton,
   CreateAnalysisDialog,
   ExperimentActions,
+  FindingsPanel,
   ObservationFunnelView,
   ResearchMatrixView,
   RunEngineButton,
@@ -316,6 +317,9 @@ export default function ResearchDetail() {
           </TabsTrigger>
           <TabsTrigger value="conclusion" className="flex items-center gap-1.5">
             <FileText className="h-3.5 w-3.5" /> 结论
+          </TabsTrigger>
+          <TabsTrigger value="findings" className="flex items-center gap-1.5">
+            <FlaskConical className="h-3.5 w-3.5" /> 发现
           </TabsTrigger>
           <TabsTrigger value="candidates" className="flex items-center gap-1.5">
             <Trophy className="h-3.5 w-3.5" /> 策略候选
@@ -743,6 +747,10 @@ export default function ResearchDetail() {
 
         <TabsContent value="conclusion" className="pt-3">
           <ConclusionPanel experimentId={experimentId} />
+        </TabsContent>
+
+        <TabsContent value="findings" className="pt-3">
+          <FindingsPanel experimentId={experimentId} />
         </TabsContent>
 
         <TabsContent value="candidates" className="pt-3">

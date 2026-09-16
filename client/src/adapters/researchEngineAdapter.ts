@@ -1250,6 +1250,180 @@ export function conclusionToVm(c: {
 }
 
 // ---------------------------------------------------------------------------
+// 发现层（RESEARCH-FINDING-001）
+// ---------------------------------------------------------------------------
+
+/** Finding 类型 → 中文标签（研究事实，不是策略评分）。 */
+export function findingTypeLabelOf(findingType: string): string {
+  switch (findingType) {
+    case "EFFECT":
+      return "效应";
+    case "MONOTONIC_RELATION":
+      return "单调关系";
+    case "PEAK_RELATION":
+      return "峰值反转";
+    case "VALLEY_RELATION":
+      return "谷值回升";
+    case "HORIZON_PATTERN":
+      return "视界形态";
+    case "STABILITY":
+      return "时间稳定性";
+    case "INTERACTION":
+      return "条件组合";
+    default:
+      return findingType;
+  }
+}
+
+/** Finding 五维强度（各 [0,1]，null = 该维度不可用）。 */
+export interface FindingStrengthVm {
+  effect: number | null;
+  sample: number | null;
+  stability: number | null;
+  horizon: number | null;
+  monotonicity: number | null;
+}
+
+/** Finding 展示形态。 */
+export interface FindingVm {
+  id: number;
+  experimentId: number;
+  runId: number | null;
+  primaryAnalysisId: number | null;
+  findingType: string;
+  findingTypeLabel: string;
+  title: string;
+  summary: string | null;
+  status: string;
+  target: string | null;
+  dimension: Record<string, string | number> | null;
+  sourceResultIds: number[];
+  /** 五维分项 + 合成总分（研究优先级，不是策略评分）。 */
+  strength: FindingStrengthVm & { total: number | null; grade: string | null };
+  /** 主要证据数值（首屏摘要）。 */
+  headline: {
+    groupReturn: number | null;
+    excessReturn: number | null;
+    benchmarkReturn: number | null;
+    benchmarkUnavailable: boolean;
+    sampleCount: number | null;
+    sampleGrade: string | null;
+    rankCorrelation: number | null;
+    peakHorizon: number | null;
+    stable: boolean | null;
+  };
+  /** 逐档位明细（供柱状/折线图直出，不重算）。 */
+  buckets: Array<{ label: string; metricValue: number | null; sampleCount: number | null }>;
+  limitations: string[];
+  evidenceText: string;
+  createdAt: string | null;
+}
+
+function bucketList(v: unknown): Array<{ label: string; metricValue: number | null; sampleCount: number | null }> {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((item) => {
+    const rec = asRecord(item);
+    if (!rec) return [];
+    const label = str(rec.label) ?? str(rec.horizon) ?? "";
+    if (!label) return [];
+    return [
+      {
+        label,
+        metricValue: num(rec.metricValue),
+        sampleCount: num(rec.sampleCount),
+      },
+    ];
+  });
+}
+
+/** ResearchFinding（领域对象）→ FindingVm。数值原样展示，缺失即 null，不在前端重算。 */
+export function findingToVm(f: {
+  id?: number | undefined;
+  experimentId: number;
+  runId?: number | null | undefined;
+  primaryAnalysisId?: number | null | undefined;
+  findingType: string;
+  title: string;
+  summary?: string | null | undefined;
+  status: string;
+  target?: string | null | undefined;
+  dimension?: Record<string, string | number> | null | undefined;
+  sourceResultIds?: number[] | null | undefined;
+  effect?: unknown;
+  sample?: unknown;
+  horizon?: unknown;
+  stability?: unknown;
+  monotonicity?: unknown;
+  effectStrength?: number | null | undefined;
+  sampleStrength?: number | null | undefined;
+  stabilityStrength?: number | null | undefined;
+  horizonConsistency?: number | null | undefined;
+  monotonicityStrength?: number | null | undefined;
+  researchStrength?: number | null | undefined;
+  researchStrengthGrade?: string | null | undefined;
+  limitations?: string[] | null | undefined;
+  evidence?: unknown;
+  createdAt?: string | undefined;
+}): FindingVm {
+  const effect = asRecord(f.effect);
+  const sample = asRecord(f.sample);
+  const horizon = asRecord(f.horizon);
+  const stability = asRecord(f.stability);
+  const monotonicity = asRecord(f.monotonicity);
+  const evidence = asRecord(f.evidence);
+
+  // 逐档位明细：优先 effect.buckets（§6），其次 monotonicity.buckets（§9），再 horizon.points（§10）
+  const buckets =
+    bucketList(effect?.buckets).length > 0
+      ? bucketList(effect?.buckets)
+      : bucketList(monotonicity?.buckets).length > 0
+        ? bucketList(monotonicity?.buckets)
+        : bucketList(horizon?.points);
+
+  const sampleCount = num(sample?.sampleCount);
+  const stableFlag = stability ? (stability.stable === true ? true : stability.stable === false ? false : null) : null;
+
+  return {
+    id: f.id ?? 0,
+    experimentId: f.experimentId,
+    runId: f.runId ?? null,
+    primaryAnalysisId: f.primaryAnalysisId ?? null,
+    findingType: f.findingType,
+    findingTypeLabel: findingTypeLabelOf(f.findingType),
+    title: f.title,
+    summary: f.summary ?? null,
+    status: f.status,
+    target: f.target ?? null,
+    dimension: f.dimension ?? null,
+    sourceResultIds: Array.isArray(f.sourceResultIds) ? f.sourceResultIds.filter((x): x is number => typeof x === "number") : [],
+    strength: {
+      effect: f.effectStrength ?? null,
+      sample: f.sampleStrength ?? null,
+      stability: f.stabilityStrength ?? null,
+      horizon: f.horizonConsistency ?? null,
+      monotonicity: f.monotonicityStrength ?? null,
+      total: f.researchStrength ?? null,
+      grade: f.researchStrengthGrade ?? null,
+    },
+    headline: {
+      groupReturn: num(effect?.groupReturn),
+      excessReturn: num(effect?.excessReturn),
+      benchmarkReturn: num(effect?.benchmarkReturn),
+      benchmarkUnavailable: effect?.benchmarkUnavailable === true,
+      sampleCount,
+      sampleGrade: str(sample?.grade),
+      rankCorrelation: num(monotonicity?.rankCorrelation),
+      peakHorizon: num(horizon?.peakHorizon),
+      stable: stableFlag,
+    },
+    buckets,
+    limitations: strArray(f.limitations),
+    evidenceText: str(evidence?.text) ?? str(evidence?.summary) ?? f.summary ?? "",
+    createdAt: f.createdAt ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 分析模板（RESEARCH-002C）
 // ---------------------------------------------------------------------------
 
