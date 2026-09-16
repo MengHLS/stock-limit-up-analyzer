@@ -1,0 +1,26 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/stock-limit-up-analyzer[39m
+
+ [31m❯[39m tests/server/researchCore/conclusions.test.ts [2m([22m[2m10 tests[22m[2m | [22m[31m1 failed[39m[2m | [22m[33m9 skipped[39m[2m)[22m[90m 11[2mms[22m[39m
+[31m   [31m×[31m §15 结论状态机[2m > [22mDRAFT / FINAL 可互转；SUPERSEDED 是终态[90m 10[2mms[22m[31m[39m
+[31m     → expected function to throw an error, but it didn't[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 1 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchCore/conclusions.test.ts[2m > [22m§15 结论状态机[2m > [22mDRAFT / FINAL 可互转；SUPERSEDED 是终态
+[31m[1mAssertionError[22m: expected function to throw an error, but it didn't[39m
+[36m [2m❯[22m tests/server/researchCore/conclusions.test.ts:[2m32:66[22m[39m
+    [90m 30| [39m    [34mexpect[39m(() [33m=>[39m [34massertConclusionTransition[39m([32m"DRAFT"[39m[33m,[39m [32m"DRAFT"[39m))[33m.[39mnot[33m.[39m[34mtoT[39m…
+    [90m 31| [39m    [35mfor[39m ([35mconst[39m to [35mof[39m [33mRESEARCH_CONCLUSION_STATUSES[39m) {
+    [90m 32| [39m      [34mexpect[39m(() [33m=>[39m [34massertConclusionTransition[39m([32m"SUPERSEDED"[39m[33m,[39m to))[33m.[39m[34mtoThr[39m…
+    [90m   | [39m                                                                 [31m^[39m
+    [90m 33| [39m    }
+    [90m 34| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[33m9 skipped[39m[90m (10)[39m
+[2m   Start at [22m 19:02:40
+[2m   Duration [22m 9.81s[2m (transform 990ms, setup 0ms, collect 2.39s, tests 11ms, environment 0ms, prepare 913ms)[22m
+

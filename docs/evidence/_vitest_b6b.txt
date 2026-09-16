@@ -1,0 +1,218 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/stock-limit-up-analyzer[39m
+
+ [31m❯[39m tests/server/researchEngineRouterFinding.test.ts [2m([22m[2m9 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[90m 130[2mms[22m[39m
+[31m   [31m×[31m researchEngineRouter — Hypothesis 补充端点[2m > [22mtestHypothesis 状态机：形式化后可逐级推进；跳级被拒[90m 16[2mms[22m[31m[39m
+[31m     → [
+  {
+    "code": "invalid_value",
+    "values": [
+      ">",
+      ">=",
+      "<",
+      "<=",
+      "==",
+      "!=",
+      "IN",
+      "NOT_IN",
+      "BETWEEN",
+      "IS_NULL",
+      "IS_NOT_NULL"
+    ],
+    "path": [
+      "conditions",
+      "groups",
+      0,
+      "conditions",
+      0,
+      "operator"
+    ],
+    "message": "Invalid option: expected one of \">\"|\">=\"|\"<\"|\"<=\"|\"==\"|\"!=\"|\"IN\"|\"NOT_IN\"|\"BETWEEN\"|\"IS_NULL\"|\"IS_NOT_NULL\""
+  }
+][39m
+[31m   [31m×[31m researchEngineRouter — Candidate 从假设转出[2m > [22mSUPPORTED 假设可转出 DRAFT 候选，并落谱系锚（sourceHypothesisId / sourceFindingIds）[90m 13[2mms[22m[31m[39m
+[31m     → [
+  {
+    "code": "invalid_value",
+    "values": [
+      ">",
+      ">=",
+      "<",
+      "<=",
+      "==",
+      "!=",
+      "IN",
+      "NOT_IN",
+      "BETWEEN",
+      "IS_NULL",
+      "IS_NOT_NULL"
+    ],
+    "path": [
+      "conditions",
+      "groups",
+      0,
+      "conditions",
+      0,
+      "operator"
+    ],
+    "message": "Invalid option: expected one of \">\"|\">=\"|\"<\"|\"<=\"|\"==\"|\"!=\"|\"IN\"|\"NOT_IN\"|\"BETWEEN\"|\"IS_NULL\"|\"IS_NOT_NULL\""
+  }
+][39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 2 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Hypothesis 补充端点[2m > [22mtestHypothesis 状态机：形式化后可逐级推进；跳级被拒
+[31m[1mTRPCError[22m: [
+  {
+    "code": "invalid_value",
+    "values": [
+      ">",
+      ">=",
+      "<",
+      "<=",
+      "==",
+      "!=",
+      "IN",
+      "NOT_IN",
+      "BETWEEN",
+      "IS_NULL",
+      "IS_NOT_NULL"
+    ],
+    "path": [
+      "conditions",
+      "groups",
+      0,
+      "conditions",
+      0,
+      "operator"
+    ],
+    "message": "Invalid option: expected one of \">\"|\">=\"|\"<\"|\"<=\"|\"==\"|\"!=\"|\"IN\"|\"NOT_IN\"|\"BETWEEN\"|\"IS_NULL\"|\"IS_NOT_NULL\""
+  }
+][39m
+[90m [2m❯[22m inputValidatorMiddleware node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/middleware.ts:[2m191:15[22m[39m
+[90m [2m❯[22m callRecursive node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m633:20[22m[39m
+[90m [2m❯[22m callRecursive node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m633:20[22m[39m
+[90m [2m❯[22m procedure node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m673:20[22m[39m
+[90m [2m❯[22m node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:[2m474:20[22m[39m
+[36m [2m❯[22m tests/server/researchEngineRouterFinding.test.ts:[2m160:24[22m[39m
+    [90m158| [39m    })[33m;[39m
+    [90m159| [39m    [90m// 建一个已形式化的假设（含条件/目标/视界/方向）[39m
+    [90m160| [39m    [35mconst[39m hypothesis [33m=[39m [35mawait[39m caller[33m.[39m[34mcreateHypothesis[39m({
+    [90m   | [39m                       [31m^[39m
+    [90m161| [39m      experimentId[33m:[39m experiment[33m.[39mid[33m![39m[33m,[39m
+    [90m162| [39m      name[33m:[39m [32m"H-形式化"[39m[33m,[39m
+
+[31m[1mCaused by: ZodError[22m: [
+  {
+    "code": "invalid_value",
+    "values": [
+      ">",
+      ">=",
+      "<",
+      "<=",
+      "==",
+      "!=",
+      "IN",
+      "NOT_IN",
+      "BETWEEN",
+      "IS_NULL",
+      "IS_NOT_NULL"
+    ],
+    "path": [
+      "conditions",
+      "groups",
+      0,
+      "conditions",
+      0,
+      "operator"
+    ],
+    "message": "Invalid option: expected one of \">\"|\">=\"|\"<\"|\"<=\"|\"==\"|\"!=\"|\"IN\"|\"NOT_IN\"|\"BETWEEN\"|\"IS_NULL\"|\"IS_NOT_NULL\""
+  }
+][39m
+[90m [2m❯[22m inputValidatorMiddleware node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/middleware.ts:[2m189:29[22m[39m
+[90m [2m❯[22m callRecursive node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m633:20[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22m[39m
+[31m[1mSerialized Error:[22m[39m [90m{ _zod: { traits: { constructor: 'Function<Set>', has: 'Function<has>', add: 'Function<add>', delete: 'Function<delete>', clear: 'Function<clear>', entries: 'Function<entries>', forEach: 'Function<forEach>', size: 2, values: 'Function<values>', keys: 'Function<values>', union: 'Function<union>', intersection: 'Function<intersection>', difference: 'Function<difference>', symmetricDifference: 'Function<symmetricDifference>', isSubsetOf: 'Function<isSubsetOf>', isSupersetOf: 'Function<isSupersetOf>', isDisjointFrom: 'Function<isDisjointFrom>' }, constr: 'Function<ZodError>', def: [ { code: 'invalid_value', values: [ '>', '>=', '<', '<=', '==', '!=', 'IN', 'NOT_IN', 'BETWEEN', 'IS_NULL', 'IS_NOT_NULL' ], path: [ 'conditions', 'groups', +0, 'conditions', +0, 'operator' ], message: 'Invalid option: expected one of ">"|">="|"<"|"<="|"=="|"!="|"IN"|"NOT_IN"|"BETWEEN"|"IS_NULL"|"IS_NOT_NULL"' } ], deferred: [] }, issues: [ { code: 'invalid_value', values: [ '>', '>=', '<', '<=', '==', '!=', 'IN', 'NOT_IN', 'BETWEEN', 'IS_NULL', 'IS_NOT_NULL' ], path: [ 'conditions', 'groups', +0, 'conditions', +0, 'operator' ], message: 'Invalid option: expected one of ">"|">="|"<"|"<="|"=="|"!="|"IN"|"NOT_IN"|"BETWEEN"|"IS_NULL"|"IS_NOT_NULL"' } ], format: 'Function<value>', flatten: 'Function<value>', addIssue: 'Function<value>', addIssues: 'Function<value>', isEmpty: false }[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Candidate 从假设转出[2m > [22mSUPPORTED 假设可转出 DRAFT 候选，并落谱系锚（sourceHypothesisId / sourceFindingIds）
+[31m[1mTRPCError[22m: [
+  {
+    "code": "invalid_value",
+    "values": [
+      ">",
+      ">=",
+      "<",
+      "<=",
+      "==",
+      "!=",
+      "IN",
+      "NOT_IN",
+      "BETWEEN",
+      "IS_NULL",
+      "IS_NOT_NULL"
+    ],
+    "path": [
+      "conditions",
+      "groups",
+      0,
+      "conditions",
+      0,
+      "operator"
+    ],
+    "message": "Invalid option: expected one of \">\"|\">=\"|\"<\"|\"<=\"|\"==\"|\"!=\"|\"IN\"|\"NOT_IN\"|\"BETWEEN\"|\"IS_NULL\"|\"IS_NOT_NULL\""
+  }
+][39m
+[90m [2m❯[22m inputValidatorMiddleware node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/middleware.ts:[2m191:15[22m[39m
+[90m [2m❯[22m callRecursive node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m633:20[22m[39m
+[90m [2m❯[22m callRecursive node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m633:20[22m[39m
+[90m [2m❯[22m procedure node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m673:20[22m[39m
+[90m [2m❯[22m node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/router.ts:[2m474:20[22m[39m
+[36m [2m❯[22m tests/server/researchEngineRouterFinding.test.ts:[2m230:24[22m[39m
+    [90m228| [39m      researchType[33m:[39m [32m"FEATURE"[39m[33m,[39m
+    [90m229| [39m    })[33m;[39m
+    [90m230| [39m    [35mconst[39m hypothesis [33m=[39m [35mawait[39m caller[33m.[39m[34mcreateHypothesis[39m({
+    [90m   | [39m                       [31m^[39m
+    [90m231| [39m      experimentId[33m:[39m experiment[33m.[39mid[33m![39m[33m,[39m
+    [90m232| [39m      name[33m:[39m [32m"H-已验证"[39m[33m,[39m
+
+[31m[1mCaused by: ZodError[22m: [
+  {
+    "code": "invalid_value",
+    "values": [
+      ">",
+      ">=",
+      "<",
+      "<=",
+      "==",
+      "!=",
+      "IN",
+      "NOT_IN",
+      "BETWEEN",
+      "IS_NULL",
+      "IS_NOT_NULL"
+    ],
+    "path": [
+      "conditions",
+      "groups",
+      0,
+      "conditions",
+      0,
+      "operator"
+    ],
+    "message": "Invalid option: expected one of \">\"|\">=\"|\"<\"|\"<=\"|\"==\"|\"!=\"|\"IN\"|\"NOT_IN\"|\"BETWEEN\"|\"IS_NULL\"|\"IS_NOT_NULL\""
+  }
+][39m
+[90m [2m❯[22m inputValidatorMiddleware node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/middleware.ts:[2m189:29[22m[39m
+[90m [2m❯[22m callRecursive node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m633:20[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22m[39m
+[31m[1mSerialized Error:[22m[39m [90m{ _zod: { traits: { constructor: 'Function<Set>', has: 'Function<has>', add: 'Function<add>', delete: 'Function<delete>', clear: 'Function<clear>', entries: 'Function<entries>', forEach: 'Function<forEach>', size: 2, values: 'Function<values>', keys: 'Function<values>', union: 'Function<union>', intersection: 'Function<intersection>', difference: 'Function<difference>', symmetricDifference: 'Function<symmetricDifference>', isSubsetOf: 'Function<isSubsetOf>', isSupersetOf: 'Function<isSupersetOf>', isDisjointFrom: 'Function<isDisjointFrom>' }, constr: 'Function<ZodError>', def: [ { code: 'invalid_value', values: [ '>', '>=', '<', '<=', '==', '!=', 'IN', 'NOT_IN', 'BETWEEN', 'IS_NULL', 'IS_NOT_NULL' ], path: [ 'conditions', 'groups', +0, 'conditions', +0, 'operator' ], message: 'Invalid option: expected one of ">"|">="|"<"|"<="|"=="|"!="|"IN"|"NOT_IN"|"BETWEEN"|"IS_NULL"|"IS_NOT_NULL"' } ], deferred: [] }, issues: [ { code: 'invalid_value', values: [ '>', '>=', '<', '<=', '==', '!=', 'IN', 'NOT_IN', 'BETWEEN', 'IS_NULL', 'IS_NOT_NULL' ], path: [ 'conditions', 'groups', +0, 'conditions', +0, 'operator' ], message: 'Invalid option: expected one of ">"|">="|"<"|"<="|"=="|"!="|"IN"|"NOT_IN"|"BETWEEN"|"IS_NULL"|"IS_NOT_NULL"' } ], format: 'Function<value>', flatten: 'Function<value>', addIssue: 'Function<value>', addIssues: 'Function<value>', isEmpty: false }[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m7 passed[39m[22m[90m (9)[39m
+[2m   Start at [22m 19:49:07
+[2m   Duration [22m 8.16s[2m (transform 1.03s, setup 0ms, collect 2.33s, tests 130ms, environment 0ms, prepare 212ms)[22m
+

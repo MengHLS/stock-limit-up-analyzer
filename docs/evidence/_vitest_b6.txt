@@ -1,0 +1,48 @@
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/stock-limit-up-analyzer[39m
+
+ [31m❯[39m tests/server/researchEngineRouterFinding.test.ts [2m([22m[2m9 tests[22m[2m | [22m[31m7 failed[39m[2m)[22m[90m 119[2mms[22m[39m
+[31m   [31m×[31m researchEngineRouter — Finding 端点[2m > [22mrunEngine 收口自动检测 Finding；listFindings / getFinding 可查回[90m 22[2mms[22m[31m[39m
+[31m     → 未找到 Dataset Version：900002[39m
+[31m   [31m×[31m researchEngineRouter — Finding 端点[2m > [22mdetectFindings 端点幂等：重跑不翻倍（fingerprint 去重）[90m 17[2mms[22m[31m[39m
+[31m     → 未找到 Dataset Version：900002[39m
+[31m   [31m×[31m researchEngineRouter — Finding 端点[2m > [22mreviewFinding 状态机：DISCOVERED → REVIEWED → SUPPORTED 合法；跳级被拒[90m 10[2mms[22m[31m[39m
+[31m     → 未找到 Dataset Version：900002[39m
+[31m   [31m×[31m researchEngineRouter — Hypothesis 补充端点[2m > [22mgetHypothesis 查回；testHypothesis 置 TESTABLE 需三件套[90m 8[2mms[22m[31m[39m
+[31m     → 未找到 Dataset Version：900002[39m
+[31m   [31m×[31m researchEngineRouter — Hypothesis 补充端点[2m > [22mtestHypothesis 状态机：形式化后可逐级推进；跳级被拒[90m 12[2mms[22m[31m[39m
+[31m     → 未找到 Dataset Version：900002[39m
+[31m   [31m×[31m researchEngineRouter — Candidate 从假设转出[2m > [22m非 SUPPORTED 假设不能转候选（§26 不要自动生成 Strategy）[90m 11[2mms[22m[31m[39m
+[31m     → 未找到 Dataset Version：900002[39m
+[31m   [31m×[31m researchEngineRouter — Candidate 从假设转出[2m > [22mSUPPORTED 假设可转出 DRAFT 候选，并落谱系锚（sourceHypothesisId / sourceFindingIds）[90m 10[2mms[22m[31m[39m
+[31m     → 未找到 Dataset Version：900002[39m
+ [32m✓[39m tests/server/researchEngineRouter.test.ts [2m([22m[2m43 tests[22m[2m)[22m[33m 418[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 7 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Finding 端点[2m > [22mrunEngine 收口自动检测 Finding；listFindings / getFinding 可查回
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Finding 端点[2m > [22mdetectFindings 端点幂等：重跑不翻倍（fingerprint 去重）
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Finding 端点[2m > [22mreviewFinding 状态机：DISCOVERED → REVIEWED → SUPPORTED 合法；跳级被拒
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Hypothesis 补充端点[2m > [22mgetHypothesis 查回；testHypothesis 置 TESTABLE 需三件套
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Hypothesis 补充端点[2m > [22mtestHypothesis 状态机：形式化后可逐级推进；跳级被拒
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Candidate 从假设转出[2m > [22m非 SUPPORTED 假设不能转候选（§26 不要自动生成 Strategy）
+[31m[1m[7m FAIL [27m[22m[39m tests/server/researchEngineRouterFinding.test.ts[2m > [22mresearchEngineRouter — Candidate 从假设转出[2m > [22mSUPPORTED 假设可转出 DRAFT 候选，并落谱系锚（sourceHypothesisId / sourceFindingIds）
+[31m[1mTRPCError[22m: 未找到 Dataset Version：900002[39m
+[36m [2m❯[22m requireVersionContext server/researchEngineRouter.ts:[2m220:13[22m[39m
+    [90m218| [39m    [35mconst[39m context [33m=[39m [35mawait[39m reader[33m.[39m[34mgetVersionContext[39m(datasetVersionId)[33m;[39m
+    [90m219| [39m    [35mif[39m ([33m![39mcontext) {
+    [90m220| [39m      [35mthrow[39m [35mnew[39m [33mTRPCError[39m({ code[33m:[39m [32m"NOT_FOUND"[39m[33m,[39m message[33m:[39m [32m`未找到 Datase[39m…
+    [90m   | [39m            [31m^[39m
+    [90m221| [39m    }
+    [90m222| [39m    [35mreturn[39m context[33m;[39m
+[90m [2m❯[22m server/researchEngineRouter.ts:[2m323:9[22m[39m
+[90m [2m❯[22m resolveMiddleware node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m571:22[22m[39m
+[90m [2m❯[22m callRecursive node_modules/.pnpm/@trpc+server@11.6.0_typescript@5.9.3/node_modules/@trpc/server/src/unstable-core-do-not-import/procedureBuilder.ts:[2m633:20[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m7 failed[39m[22m[2m | [22m[1m[32m45 passed[39m[22m[90m (52)[39m
+[2m   Start at [22m 19:44:45
+[2m   Duration [22m 11.45s[2m (transform 3.46s, setup 0ms, collect 7.61s, tests 538ms, environment 0ms, prepare 537ms)[22m
+
