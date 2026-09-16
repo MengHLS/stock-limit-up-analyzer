@@ -1,0 +1,19 @@
+RESEARCH-FINDING-001 B8 — 闭环集成测试（Analysis → Result → Finding → Hypothesis → Candidate）
+
+## 范围
+单元测试（六维 / 状态机 / 假设校验 / 前视）在 B4/B5/B6 已逐层覆盖；B8 补**集成层**：
+把五段闭环跑通并逐跳断言「谱系锚点」（provenance）真实存在，而非只断言数量。
+
+## 新增
+- `tests/server/researchFindingIntegration.test.ts`（2 用例）：
+  1. **五段闭环正路**：Experiment → Run → Analysis(QUANTILE) → runEngine（Result + Finding）
+     → listFindings（断言 status=DISCOVERED、runId、primaryAnalysisId/sourceResultIds 指向真实产物）
+     → createHypothesis（sourceFindingIds 指向真实 Finding）→ testHypothesis 逐级
+     （TESTABLE→TESTED→SUPPORTED）→ createCandidateFromHypothesis
+     （sourceHypothesisId / sourceFindingIds / sourceDatasetVersionId 谱系锚）
+     → listCandidates 可查回。
+  2. **非法跳转守卫**：DRAFT 假设直接转候选 ⇒ PRECONDITION_FAILED（闭环在 Hypothesis→Candidate 段被卡住）。
+
+## 校验
+- `npx tsc --noEmit` = 0（B7 已覆盖 client + server）。
+- `vitest run tests/server/researchFindingIntegration.test.ts` → 2/2 全绿。
