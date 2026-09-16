@@ -1,0 +1,22 @@
+RESEARCH-FINDING-001 B10 — 实施报告 + Master Control 收口（16 节报告 + ROADMAP + PROJECT_RULES）
+
+## 范围
+B1~B9 已完成（迁移/领域/仓储/引擎/接线/API/前端/测试/真实数据验收），B10 收口：
+单一 16 节实施报告 + ROADMAP 三件套 + PROJECT_RULES 硬规则。
+
+## 交付
+- `docs/research/RESEARCH-FINDING-001-implementation.md`（16 节，§36 要求的唯一实施报告）：
+  Architecture Audit / Existing Reuse / DB Changes / Domain Model / Finding Engine / Hypothesis Engine /
+  API / Frontend / Look-ahead / Performance / Test Results / Real Dataset Validation /
+  真实 ID 链 / Remaining Issues / Legacy Handling / 下一阶段。
+- `ROADMAP.md`：§44.5 编号台账「已用至 9ar ⇒ 下一个 9as」→「已用至 9as ⇒ 下一个 9at」
+  （含文件头铁律行同步）；§44.5 增 `9as` 完成条目。
+- `ROADMAP-CHANGELOG.md`：追加 9as 完成记录（append-only）。
+- `.workbuddy/memory/PROJECT_RULES.md`：新增「发现层（RESEARCH-FINDING-001）」硬规则段
+  （只读 research_result / 引擎只能写 DISCOVERED / provenance 硬锚 / FINAL 需 Finding /
+  §26 逐级推进 / 运算符两形 / 标题用字段名）。
+
+## 校验
+- `npx tsc --noEmit` = 0。
+- 研究套件 26 files / 433 tests 全绿（B6~B8 已验）；全量 4106 passed / 16 failed（既有基线）。
+- 行尾零漂移：ROADMAP.md / ROADMAP-CHANGELOG.md 纯 LF 保持；PROJECT_RULES.md 纯 CRLF 保持（564→577）。

@@ -562,3 +562,16 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 **前端**：`Market.tsx` 图表缺口值由 `0` 改 **`null`** —— 旧行为把缺口画成 0，连带把右轴 `domain={[7500,'auto']}` 之外的点全部裁掉，视觉上「两条线消失」；`null` 让 recharts 断线。
 
 **验收**：`npx tsc --noEmit` 0 错；`npx vitest run` 失败文件集合 == 基线 7 文件（新增 `tests/server/marketSync.test.ts` 11 例全过）；`npx vite build` exit 0；`node docs/evidence/_probe_market_page_render.mjs`（无头 Edge + CDP，量 DOM 与右轴刻度上界 ≥ 25000）**ALL PASS**。数据侧：`market_data` **201 → 215 行**，末端 **08-25 → 09-14**。
+
+## 发现层（RESEARCH-FINDING-001，2026-09-16）
+
+- 🔴 **Finding Engine 只消费 `research_result`**（`repos.results.list({analysisId})`），**绝不重扫 Dataset**（禁 import `datasetReader`、禁触碰 `dataset_*` / `limit_up_records`）—— §28 性能铁律，也是「无重复主链路」的关键。
+- 🔴 **引擎只能写 `DISCOVERED`**（`assertEngineFindingCreationStatus` 兜底）；`SUPPORTED`/`WEAK`/`CONTRADICTED`/`REJECTED` 只能由用户 review 流转（`FINDING_STATUS_TRANSITIONS`）。
+- 🔴 **Finding 必须有 Result provenance**：`primaryAnalysisId` 或 `sourceResultIds` 至少一个非空（`assertResearchFinding`）；基准取**真实 Result 行**（DESCRIPTIVE `MEAN` / STABILITY `ALL` / CONDITIONAL `ALL`），拿不到即 `benchmarkUnavailable=true`，**不虚构**。
+- 🔴 **materiality 门槛以下不产 Finding**（§27「没有发现就必须如实显示」）；§12 组合条件**无真实 Result 支撑只回传 `untestedInteractions`，不产 Finding**。
+- 🔴 **结论 FINAL 必须引用 ≥1 Finding**（`assertConclusionFinalizable`），否则只能停 DRAFT；`SUPERSEDED` 是终态。
+- 🔴 **§26 假设回写逐级推进**（`planHypothesisStatusPath`，禁跳级 DRAFT→SUPPORTED）；结论类型→假设状态映射：SUPPORTED→SUPPORTED / REJECTED→REJECTED / PARTIALLY_SUPPORTED·INCONCLUSIVE→TESTED（**绝不把「部分支持/无定论」升格为 SUPPORTED**）。
+- 🔴 **五维研究强度缺失维度「重归一化」**（不补 0 惩罚）；`researchStrength` 是**研究优先级**，不是策略评分、不构成买卖建议。
+- ⚠️ **运算符两形**：`RESEARCH_CONDITION_OPERATORS` 闭集 = **符号形**（`>` `>=` `<` …）；名称形（`GREATER_THAN` 等）只在 `definitionBuild#CONDITION_OPERATOR_MAP` 翻译。写 Hypothesis.conditions / 测试 fixture 用符号形。
+- ⚠️ **Finding 标题用字段名**（`pullback_close_ratio` / `pullback_holds_event_low`），**不是中文关键词**（「回撤/破位」）；按落库字段语义分类，不按人读中文匹配。
+- 真实验收链（可复核）：Dataset **390002** → Experiment **240002** → Run **570001** → Analysis 540001~540013 → Finding **1~13**（EFFECT，DISCOVERED）。

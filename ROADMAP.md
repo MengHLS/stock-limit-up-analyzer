@@ -1,7 +1,7 @@
 # QUANT RESEARCH MASTER CONTROL SPEC V2
 
 > **目录**：见下方一级标题；本文件是项目**唯一 Master Control**。
-> 🔴 铁律：§44 为「覆盖式」状态区（**只保留最近 1 条「上轮实查」**，历史条目在 `ROADMAP-CHANGELOG.md`）；§44.5 为**未完成**队列（编号按「下一个未占用」，已用至 `9ar`）；§47 为 append-only 更新记录。
+> 🔴 铁律：§44 为「覆盖式」状态区（**只保留最近 1 条「上轮实查」**，历史条目在 `ROADMAP-CHANGELOG.md`）；§44.5 为**未完成**队列（编号按「下一个未占用」，已用至 `9as`）；§47 为 append-only 更新记录。
 > 逐字节原文备份（2026-09-15 整理前）：`.cache/ROADMAP.md.before-cleanup-20260915`。
 
 ## 0. 任务身份
@@ -2118,12 +2118,14 @@ BaoStock 单 Session 串行约束（§30）：`G → C+E → D`（禁止并发�
 
 > 完整的分阶段开发路线、依赖关系、范围与验收标准见 **§48**。此处仅为即时动作队列。
 
-> 🔴 **编号台账（禁「末条 +1」）**：编号已用至 **`9ar`** ⇒ **下一个未占用 = `9as`**。已完成的 `1~9` 与 `9a~9ap`、以及第 10~27 项中的 ✅ 已完成项，已**全部移入 `ROADMAP-CHANGELOG.md`**（原样搬运）。本项目历来按「**下一个未占用**」取号，**禁按「末条 +1」推算**。
+> 🔴 **编号台账（禁「末条 +1」）**：编号已用至 **`9as`** ⇒ **下一个未占用 = `9at`**。已完成的 `1~9` 与 `9a~9as`、以及第 10~27 项中的 ✅ 已完成项，已**全部移入 `ROADMAP-CHANGELOG.md`**（原样搬运）。本项目历来按「**下一个未占用**」取号，**禁按「末条 +1」推算**。
 > 检索已归档条目：`grep "9a" ROADMAP-CHANGELOG.md` 或直接 grep 任务 ID。
 
 5. ~~G 数据质量修复 + H gate 重跑~~ ⏸️ 部分完成（gate 17/17 全 PASS、`RESEARCH_READY=TRUE`；G 的 securityId 全 NULL + effectiveFrom 单点两质量待办仍 PENDING，属 STEP 12.5 PIT 审计前必修 → §48 P0-3）
 
 7. **（业务数据待办，02:50 登记）limit_up_records 6,518 条名称对齐**：当日真实 10% 涨停但名称被回填套上当前 ST 名（208 只，清单 `scripts/backup/st_name_fix_targets.json`）。需 Tushare namechange 改回当日真实名称；实测限频 **1 次/小时**（当前 token 档位），约需 208+ 小时。工具就绪（provider + 清单），待更高积分 token / 配额放宽后执行（用户选定暂缓）。
+
+- **9as. （RESEARCH-FINDING-001 · Research Finding & Hypothesis Engine）** ✅ **已完成（2026-09-16）**：Result → Finding → Conclusion → Hypothesis → Candidate 五段闭环。B1~B10 全落地：B1 迁移（`research_finding` 表 + 3 表扩列）、B2/B3 领域 + 仓储、B4 六维确定性 Finding Engine（只消费 `research_result`，绝不重扫 Dataset）、B5 结论升级 + 引擎接线（`writebackHypothesisStatus` 逐级推进）、B6 tRPC 端点（finding/hypothesis/candidate）、B7 前端（FindingsPanel + 提假设弹窗 + findingToVm）、B8 闭环集成测试、B9 真实数据验收（dataset 390002 / Run 570001 / Finding 1~13，§27 三问全检出）、B10 报告 + 总控。验收：`tsc`=0；研究套件 26 files / 433 tests 全绿；全量 4106 passed / 16 failed（失败全在既有基线文件）。报告 `docs/research/RESEARCH-FINDING-001-implementation.md`。**遗留**：20 条未覆盖组合回传 `untestedInteractions`（§12 如实，不造 Finding）。详见 `ROADMAP-CHANGELOG.md` 同名条目。
 
 - **9h. （RESEARCH-002D，待决策）为研究 Run 补「启动时回收孤儿 `RUNNING`」钩子** ⏳ **未开始**：**动机 = 2026-09-11 22:48 真实事故** —— `dev` 脚本是 `tsx watch server/_core/index.ts`，改任何 `server/**` 文件触发热重启 ⇒ **在途研究 Run 的执行器随进程消亡，Run 永久停在 `RUNNING`**；而 `run()` 要求 `PENDING|FAILED|CANCELLED`、`runIncremental` 要求非 `RUNNING` ⇒ **实验被完全锁死，且无任何产品级恢复入口**（本轮只能人工脚本收敛）。**同构参照（已落地）**：dataset 构建侧 `reclaimOrphanBuildJobs()` 由 `server/_core/index.ts` 在 `server.listen` 后调用（判据 = `RUNNING` 且 `updatedAt` 停更 > `DATASET_RECLAIM_STALE_MINUTES`，默认 10 分钟），DATASET-LIFECYCLE-001 已用它自动解困卡死 23h 的 v2 幽灵作业 ⇒ **研究 Run 侧缺失同样兜底**。**待决策的两个判据（须先定）**：① **boot 时任何 `RUNNING` Run 即孤儿**（最严格、最贴合「执行器随进程消亡」的语义；但多实例部署下会误杀另一实例的在途 Run）；② **复用停更阈值**（与 dataset 侧一致；但对「5 分钟即被热重启杀掉」的 Run 要等到 10 分钟才回收，期间 UI 仍显示执行中）。⚠️ 需同时决定**是否确立「单实例假设」**（项目对 dataset 构建已按单实例处理）。**落地要点**：收敛时须一并写 `errorCode`（如 `RUN_ORPHANED`）+ `errorMessage`（写明「被进程重启中断」）+ `completedAt`，并把 Experiment 一并置 `FAILED`（与引擎「执行中失败 → Experiment FAILED」口径一致）；**禁**只改 status 不清残留（这正是本轮修掉的缺陷）。**验收应含**：boot 回收幂等、不误杀非 `RUNNING`、回收后 Run 可重新执行。⚠️ **该缺口已第二次产生真实卡死实例**：2026-09-12 15:37 人工收敛 Run 330003（`RUN_ORPHANED`，见 §47 15:40 条）；在此之前它已停更约 16.6 小时。
 
