@@ -36,9 +36,13 @@
  */
 
 import type {
+  FindingPolicy,
   ResearchAnalysis,
+  ResearchConclusionType,
   ResearchConditionSet,
   ResearchExperimentStatus,
+  ResearchFinding,
+  ResearchHypothesis,
   ResearchRepositories,
   ResearchRun,
   ResearchRunExecutionLogEntry,
@@ -46,15 +50,19 @@ import type {
 } from "../researchCore";
 import {
   appendExecutionLogEntry,
+  assertHypothesisTestable,
+  deriveHypothesisTargetStatus,
   groupConditions,
   nextExecutionSequence,
+  planHypothesisStatusPath,
   settleExecutionLogEntry,
 } from "../researchCore";
 import { createDefaultAnalysisExecutorRegistry, type AnalysisExecutorRegistry } from "./analyses/registry";
 import { resolveEngineAnalysisConfig } from "./analysisConfig";
-import { buildConclusion, type ConclusionPolicy } from "./conclusion";
+import { buildConclusion, type ConclusionFindingInput, type ConclusionPolicy } from "./conclusion";
 import type { ResearchDatasetReader } from "./datasetReader";
 import { ResearchEngineError, engineAssert, toResearchEngineError } from "./errors";
+import { detectAndPersistFindings } from "./finding/findingEngine";
 import { DEFAULT_EVENT_PAGE_SIZE, DEFAULT_MAX_SAMPLES, buildSampleSet } from "./sampleSet";
 import type {
   AnalysisExecutionContext,
@@ -86,6 +94,10 @@ export interface ResearchEngineDeps {
   maxSamples?: number;
   /** 是否在执行前清空该 Run 下既有结果（重跑幂等）。缺省 true。 */
   resetExistingResults?: boolean;
+  /** 执行完成后是否自动跑 Finding 检测（缺省 true）。 */
+  detectFindingsOnRun?: boolean;
+  /** Finding 引擎策略覆盖（缺省走 `resolveFindingPolicy(null)`）。 */
+  findingPolicy?: Partial<FindingPolicy>;
 }
 
 export interface ResearchEngineRunInput {
@@ -140,6 +152,8 @@ export class ResearchEngine {
   private readonly eventPageSize: number;
   private readonly maxSamples: number;
   private readonly resetExistingResults: boolean;
+  private readonly detectFindingsOnRun: boolean;
+  private readonly findingPolicy: Partial<FindingPolicy> | undefined;
 
   constructor(deps: ResearchEngineDeps) {
     this.repos = deps.repos;
@@ -150,6 +164,8 @@ export class ResearchEngine {
     this.eventPageSize = deps.eventPageSize ?? DEFAULT_EVENT_PAGE_SIZE;
     this.maxSamples = deps.maxSamples ?? DEFAULT_MAX_SAMPLES;
     this.resetExistingResults = deps.resetExistingResults ?? true;
+    this.detectFindingsOnRun = deps.detectFindingsOnRun ?? true;
+    this.findingPolicy = deps.findingPolicy;
   }
 
   // =-------------------------------------------------------------------------
@@ -303,13 +319,20 @@ export class ResearchEngine {
         conditionSets,
       });
 
-      // ---- 9. Generate conclusion ----
+      // ---- 8.5 RESEARCH-FINDING-001 §34：Result → Finding（自动识别）----
+      // 放在结论之前：结论要**引用真实的 Finding id**（§15），因此必须先落 Finding。
+      // 🔴 失败不抛：Finding 只消费已落库 Result，它的失败不该把一条已跑出结果的 Run 判死。
+      const findingOutcome = await this.detectFindingsPhase({ experimentId: experiment.id!, runId: run.id! });
+
+      // ---- 9. Generate conclusion（升级：引用 Finding / 研究问题 / 局限 / 后续问题，§15）----
       const hypotheses = await this.repos.hypotheses.listByExperiment(experiment.id!);
       const hypothesis = hypotheses[0] ?? null;
       const built = buildConclusion({
         experiment: { id: experiment.id, name: experiment.name, researchType: experiment.researchType },
         hypothesis,
         analyses: summaries,
+        findings: findingOutcome.conclusionFindings,
+        researchQuestion: hypothesis?.researchQuestion ?? hypothesis?.statement ?? null,
         ...(this.conclusionPolicy !== undefined ? { policy: this.conclusionPolicy } : {}),
       });
       const conclusion = await this.repos.conclusions.create({
@@ -320,8 +343,16 @@ export class ResearchEngine {
         conclusion: built.draft.conclusion,
         evidence: built.draft.evidence,
         confidence: built.draft.confidence,
+        researchQuestion: built.draft.researchQuestion ?? null,
+        evidenceSummary: built.draft.evidenceSummary ?? null,
+        findingIds: built.draft.findingIds ?? [],
+        limitations: built.draft.limitations ?? [],
+        nextQuestions: built.draft.nextQuestions ?? [],
         status: "DRAFT",
       });
+
+      // ---- 9.5 §26：结论 → 假设状态回写（带守卫；走不通就如实记原因，不静默、不强写）----
+      const hypothesisWriteback = await this.writebackHypothesisStatus(hypothesis, conclusion.conclusionType);
 
       // ---- 10. Update Run / Experiment ----
       const completedAt = new Date().toISOString();
@@ -358,6 +389,10 @@ export class ResearchEngine {
         analyses: analysisOutcome,
         sampleBuildMs: sampleSet.buildMs,
         durationMs: Date.now() - startedAt,
+        findingCount: findingOutcome.findingIds.length,
+        findingIds: findingOutcome.findingIds,
+        findingDetection: findingOutcome.detection,
+        hypothesisWriteback,
       };
     } catch (err) {
       const e = toResearchEngineError(err);
@@ -626,6 +661,91 @@ export class ResearchEngine {
   }
 
   // =-------------------------------------------------------------------------
+  // RESEARCH-FINDING-001（§34 自动识别 / §26 假设状态回写）
+  // =-------------------------------------------------------------------------
+
+  /**
+   * Run 完成后自动识别 Finding（`Result → Finding`）。
+   *
+   * 🔴 三条纪律：
+   *   ① **只消费已落库的 Result** —— 由 `FindingEngine` 自己逐分析读 `research_result`，
+   *      本方法不传样本、不传 Dataset，从结构上杜绝重扫 Dataset（任务书 §28）；
+   *   ② **失败不抛** —— Finding 层的失败只记录原因，不影响 Run 已经产出的 Result 与结论；
+   *   ③ **0 条是合法结果** —— 如实回传空数组，不造数（任务书 §27）。
+   */
+  private async detectFindingsPhase(input: { experimentId: number; runId: number }): Promise<{
+    detection: { status: "OK" | "SKIPPED" | "FAILED"; reason?: string };
+    findingIds: number[];
+    conclusionFindings: ConclusionFindingInput[];
+  }> {
+    if (!this.detectFindingsOnRun) {
+      return {
+        detection: { status: "SKIPPED", reason: "引擎配置 detectFindingsOnRun=false（本次只产出 Result）" },
+        findingIds: [],
+        conclusionFindings: [],
+      };
+    }
+    try {
+      await detectAndPersistFindings(
+        { repos: this.repos, ...(this.findingPolicy !== undefined ? { policy: this.findingPolicy } : {}) },
+        { experimentId: input.experimentId, runId: input.runId },
+      );
+      // 从库里回读（而不是拿 detect 的返回值）：保证结论引用的是**真正落库**的 id。
+      const rows = await this.repos.findings.list({ runId: input.runId });
+      return {
+        detection: { status: "OK" },
+        findingIds: rows.map((f) => f.id!).filter((id) => Number.isInteger(id)).sort((a, b) => a - b),
+        conclusionFindings: rows.map(toConclusionFinding),
+      };
+    } catch (err) {
+      const e = toResearchEngineError(err);
+      return {
+        detection: { status: "FAILED", reason: `${e.code}: ${e.message}` },
+        findingIds: [],
+        conclusionFindings: [],
+      };
+    }
+  }
+
+  /**
+   * §26 —— 依据结论类型把假设推进到对应状态。
+   *
+   * 为什么不直接 `update({ status: target })`：状态机只允许**逐级推进**
+   * （`DRAFT → TESTABLE → TESTED → {SUPPORTED|REJECTED}`，「已测」不可跳级）。
+   * 本方法取合法路径并逐级写入，每一步都是真实的阶段推进；任何一步走不通
+   * （典型：假设尚未形式化 ⇒ 不满足 `TESTABLE` 的四件套要求）就**停止并如实记原因**，
+   * 绝不为了「链条好看」而强写状态。
+   */
+  private async writebackHypothesisStatus(
+    hypothesis: ResearchHypothesis | null,
+    conclusionType: ResearchConclusionType,
+  ): Promise<{ status: "WRITTEN" | "SKIPPED" | "NO_HYPOTHESIS"; reason?: string; path?: string[] }> {
+    if (hypothesis === null || hypothesis.id === undefined) return { status: "NO_HYPOTHESIS" };
+
+    const target = deriveHypothesisTargetStatus(conclusionType);
+    if (target === null) return { status: "SKIPPED", reason: `结论类型 ${conclusionType} 无对应的假设状态` };
+    if (hypothesis.status === target) return { status: "SKIPPED", reason: `假设已处于 ${target}` };
+
+    const path = planHypothesisStatusPath(hypothesis.status, target);
+    if (path === null) {
+      return { status: "SKIPPED", reason: `不存在从 ${hypothesis.status} 到 ${target} 的合法状态链` };
+    }
+
+    let current = hypothesis;
+    for (const step of path.slice(1)) {
+      try {
+        // 「可测」闸门：进入 TESTABLE 必须具备 conditions / target / horizon 四件套（§17）。
+        if (step === "TESTABLE") assertHypothesisTestable(current);
+        current = await this.repos.hypotheses.update(current.id!, { status: step });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        return { status: "SKIPPED", reason: `推进到 ${step} 失败：${reason}`, path };
+      }
+    }
+    return { status: "WRITTEN", path };
+  }
+
+  // =-------------------------------------------------------------------------
   // 共用执行核心
   // =-------------------------------------------------------------------------
 
@@ -816,13 +936,31 @@ export class ResearchEngine {
   }
 }
 
+/**
+ * Finding 行 → 结论要引用的最小视图。
+ *
+ * ⚠️ 刻意**不**把整条 Finding 塞进结论：结论只需要「引用了谁 + 谁更值得研究 + 自带什么局限」，
+ * 复制整条会造成同一事实两份存储（迟早不一致）。完整证据由 `findingIds` 回溯 `research_finding`。
+ */
+function toConclusionFinding(f: ResearchFinding): ConclusionFindingInput {
+  return {
+    id: f.id!,
+    findingType: f.findingType,
+    title: f.title,
+    researchStrength: f.researchStrength ?? null,
+    researchStrengthGrade: f.researchStrengthGrade ?? null,
+    sampleCount: f.sample?.sampleCount ?? null,
+    limitations: f.limitations ?? null,
+    stabilityContradicted: f.stability?.contradicted ?? false,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 纯函数辅助
 // ---------------------------------------------------------------------------
 
 /** 变量需求并集（去重，保持出现顺序）。 */
-function unionRequirementOf(resolved: readonly ResolvedAnalysis[]): ResearchVariableRequirement {
-  return {
+function unionRequirementOf(resolved: readonly ResolvedAnalysis[]): ResearchVariableRequirement {  return {
     features: [...new Set(resolved.flatMap((r) => r.requirement.features))],
     outcomes: [...new Set(resolved.flatMap((r) => r.requirement.outcomes))],
     observations: [...new Set(resolved.flatMap((r) => r.requirement.observations ?? []))],

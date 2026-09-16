@@ -41,6 +41,7 @@ import {
   assertFindingTransition,
   assertResearchFinding,
 } from "../findings";
+import { assertConclusionFinalizable, assertConclusionTransition } from "../conclusions";
 import { assertHypothesisTransition } from "../hypotheses";
 import { assertResearchResult } from "../results";
 import { decodeJson, encodeJson, toDate, toIso } from "../serialization";
@@ -1058,6 +1059,22 @@ export function createDbResearchRepositories(): ResearchRepositories {
     },
     async update(id, patch) {
       const db = await requireDb();
+      // RESEARCH-FINDING-001 —— 结论状态守卫（与 Hypothesis / Finding / Candidate 同一纪律）：
+      //   ① 状态转移必须过状态机（DRAFT ↔ FINAL，SUPERSEDED 为终态）；
+      //   ② 转 FINAL 必须**已引用 Finding** —— §15「Conclusion 不允许凭空产生」。
+      if (patch.status !== undefined) {
+        const current = await conclusions.getById(id);
+        if (!current) {
+          throw new ResearchReferenceError(
+            RESEARCH_REFERENCE_ERROR.CONCLUSION_NOT_FOUND,
+            `更新失败，Conclusion 不存在：${id}`,
+          );
+        }
+        assertConclusionTransition(current.status, patch.status);
+        if (patch.status === "FINAL") {
+          assertConclusionFinalizable({ findingIds: patch.findingIds ?? current.findingIds });
+        }
+      }
       await db
         .update(researchConclusion)
         .set({

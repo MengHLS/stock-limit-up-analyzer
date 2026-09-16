@@ -40,7 +40,7 @@ import type {
 
 export interface FindingEngineDeps {
   repos: ResearchRepositories;
-  /** 判定策略覆盖（缺省 `DEFAULT_FINDING_POLICY`）；最终快照进每条 Finding 的 `policyJson`。 */
+  /** 判定策略覆盖（缺省走 `resolveFindingPolicy(null)`）；最终快照进每条 Finding 的 `policyJson`。 */
   policy?: Partial<FindingPolicy>;
 }
 

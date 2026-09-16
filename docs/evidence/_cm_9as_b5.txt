@@ -1,0 +1,49 @@
+RESEARCH-FINDING-001 B5 — 结论升级 + 引擎接线（Finding→Conclusion→Hypothesis 收口）
+
+## 范围
+B4 已落地「六维确定性 Finding 引擎」（结果→发现），但尚未接线到 Run 收口；
+且 Conclusion 仍是「只有 DRAFT、不引用 Finding」的旧形态。B5 打通两条链：
+
+  1. Run 完成后自动跑 Finding 检测（失败不杀 Run，落 FAILED 诊断）；
+  2. Conclusion 升级为「可引用 Finding、可定稿、可回写假设状态」的收口实体。
+
+## 新增
+- `server/researchCore/conclusions.ts`
+  - §15 结论状态机：`DRAFT ↔ FINAL`、`SUPERSEDED` 终态（`assertConclusionTransition`）。
+  - §15 定稿资格：`FINAL` 必须已引用 ≥1 条 Finding（`assertConclusionFinalizable`，
+    「无证据支撑的结论只能停 DRAFT」—— 任务书 §15「Conclusion 不允许凭空产生」）。
+  - §26 确定性映射：结论类型 → 假设应回写状态
+    （SUPPORTED→SUPPORTED、REJECTED→REJECTED、PARTIALLY_SUPPORTED/INCONCLUSIVE→TESTED）。
+  - `assertHypothesisWriteback`（过假设状态机的语义包装）+ `planHypothesisStatusPath`
+    （DRAFT→…→SUPPORTED 的**逐级合法链**，BFS；`forward` 图是 `HYPOTHESIS_STATUS_TRANSITIONS`
+    的声明子集，测试有漂移守卫）。
+- `tests/server/researchCore/conclusions.test.ts`（10 用例：状态机 / 定稿闸门 / §26 映射 / 状态链 / 漂移守卫）。
+
+## 接线（engine.ts）
+- `ResearchEngineDeps` 增 `detectFindingsOnRun?`（默认 true）+ `findingPolicy?`。
+- `run()` 收口顺序：分析 → `detectFindingsPhase`（`detectAndPersistFindings`，try/catch 落
+  `FINDING_DETECTION_FAILED` 但 Run 继续）→ `buildConclusion(findingIds)` → `writebackHypothesisStatus`
+  （逐级 `planHypothesisStatusPath`，TESTABLE 前先 `assertHypothesisTestable`）。
+- Run 结果新增 `findingCount` / `findingIds` / `findingDetection` / `hypothesisWriteback`。
+
+## 结论仓储守卫（db.ts / inMemory.ts）
+- conclusion `update` 过 `assertConclusionTransition`；定稿（FINAL）过 `assertConclusionFinalizable`。
+
+## 校验
+- `npx tsc --noEmit` 退出 0。
+- `vitest run tests/server/researchCore tests/server/researchEngine tests/server/researchEngineRouter.test.ts`
+  → 25 files / 424 tests 全绿。
+
+## 修复（本批次发现的 6 处静默未生效编辑）
+Edit 工具在本仓曾「锚点匹配但不落盘」。本批次逐一回读核对并原子重写：
+  - conclusion.ts 补 `ResearchConclusionType` 导入 + `findings`/`researchQuestion` 作用域；
+  - db.ts 补 `assertConclusionTransition/Finalizable` 导入；
+  - engine.ts 补 `ResearchEngineDeps` 两字段；
+  - findingEngine.ts 修正不存在的 `DEFAULT_FINDING_POLICY` 常量引用（实为 `resolveFindingPolicy(null)`）；
+  - conclusions.test.ts 修正两处：`assertHypothesisWriteback` 错从 hypotheses 导入（实属 conclusions）、
+    `SUPERSEDED→SUPERSEDED` 同态 no-op 不应抛（终态语义 = 禁止「离开」，不含恒等）。
+
+## 后续（未做，属 B6+）
+- tRPC procedure：finding.{list,detail,detect,review,status.update} +
+  hypothesis.{list,detail,create,update,test} + strategyCandidate.createFromHypothesis —— B6。
+- 前端 FindingsPanel / Hypothesis 弹窗 / 证据图 —— B7。

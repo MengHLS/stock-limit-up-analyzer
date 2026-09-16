@@ -28,5 +28,6 @@ export * from "./executionLog";
 export * from "./candidates";
 export * from "./findings";
 export * from "./hypotheses";
+export * from "./conclusions";
 export * from "./serialization";
 export * from "./repository";

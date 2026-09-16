@@ -28,6 +28,7 @@ import {
   assertResearchFinding,
 } from "../findings";
 import { assertHypothesisTransition } from "../hypotheses";
+import { assertConclusionFinalizable, assertConclusionTransition } from "../conclusions";
 import {
   RESEARCH_REFERENCE_ERROR,
   ResearchConflictError,

@@ -18,7 +18,14 @@
  *   6. 全部通过                          → SUPPORTED
  */
 
-import type { ResearchAnalysisType, ResearchHypothesis, ResearchExperiment } from "../researchCore";
+import type {
+  ResearchAnalysisType,
+  ResearchConclusionType,
+  ResearchExperiment,
+  ResearchFindingType,
+  ResearchHypothesis,
+  ResearchStrengthGrade,
+} from "../researchCore";
 import type { AnalysisSummary, ResearchConclusionDraft } from "./types";
 
 /** 结论判定策略（全部可覆盖，且会原样写入 evidence）。 */
@@ -62,11 +69,40 @@ const DISCLAIMER =
   "⚠️ 自动结论仅为**研究辅助**，不等同于统计显著性或交易有效性；"
   + "任何策略性判断必须经 Backtest / 稳健性 / OOS 验证后才可成立，本阶段不产出交易结论。";
 
+/**
+ * RESEARCH-FINDING-001 §15 —— 结论要引用的 Finding 的**最小只读视图**。
+ *
+ * 为什么只取这几个字段：结论需要的是「引用了谁 + 谁更值得继续研究 + 谁自带什么局限」，
+ * 而不是把整条 Finding 复制进结论（那会造成同一事实两份存储，迟早不一致）。
+ * 完整证据仍在 `research_finding`，由 `findingIds` 回溯。
+ */
+export interface ConclusionFindingInput {
+  id: number;
+  findingType: ResearchFindingType;
+  title: string;
+  researchStrength: number | null;
+  researchStrengthGrade: ResearchStrengthGrade | null;
+  sampleCount: number | null;
+  limitations: string[] | null;
+  /** 是否被判定为「切片方向明显冲突」（驱动 nextQuestions）。 */
+  stabilityContradicted: boolean;
+}
+
 export interface ConclusionBuildInput {
   experiment: Pick<ResearchExperiment, "id" | "name" | "researchType">;
   hypothesis?: Pick<ResearchHypothesis, "id" | "name" | "statement"> | null;
   /** 各分析摘要（含 analysisId，便于证据回溯）。 */
   analyses: Array<{ analysisId: number; analysisType: ResearchAnalysisType; summary: AnalysisSummary }>;
+  /**
+   * RESEARCH-FINDING-001 §15 —— 本次 Run 检出的 Finding。
+   *
+   * 缺省（`undefined`）= **Finding 层未参与**（例如 Finding 检测被关闭或失败）：
+   * 此时结论照旧产出，但 `findingIds` 为空、`evidenceSummary` 如实写明「本次结论不含 Finding 证据」，
+   * 且**不允许定稿**。**不允许**用「假装有 Finding」来掩盖这一步缺失。
+   */
+  findings?: ConclusionFindingInput[];
+  /** 研究问题原文（来自假设或显式传入）。 */
+  researchQuestion?: string | null;
   policy?: Partial<ConclusionPolicy>;
 }
 
@@ -115,12 +151,16 @@ function buildEvidence(input: {
   analyses: ConclusionBuildInput["analyses"];
   trace: Array<{ rule: string; passed: boolean; detail: string }>;
   confidenceBasis: string;
+  // ---- RESEARCH-FINDING-001 §15：结论必须可回溯到 Finding ----
+  researchQuestion: string | null;
+  findings: readonly ConclusionFindingInput[];
 }) {
   return {
     disclaimer: DISCLAIMER,
     policy: input.policy,
     hypothesisId: input.hypothesisId,
     hypothesisStatement: input.hypothesisStatement,
+    researchQuestion: input.researchQuestion,
     primaryAnalysis: input.primary,
     primarySelectionRule: `按 ${PRIMARY_PRIORITY.join(" → ")} 的固定优先级选择主分析（不按效应大小挑选，避免选择性报告）`,
     contributingAnalyses: input.analyses.map((a) => ({
@@ -135,13 +175,103 @@ function buildEvidence(input: {
     ruleTrace: input.trace,
     confidenceBasis: input.confidenceBasis,
     confidenceIsNotPValue: true as const,
+    /**
+     * §15 Finding 引用。`findingCount = 0` 是**如实**表达「本次结论不建立在任何 Finding 上」，
+     * 而不是让键消失 —— 与 `primaryAnalysis: null` 同一纪律（两个分支键集必须一致）。
+     */
+    findingIds: input.findings.map((f) => f.id),
+    findingCount: input.findings.length,
+    findings: input.findings.map((f) => ({
+      id: f.id,
+      findingType: f.findingType,
+      title: f.title,
+      researchStrength: f.researchStrength,
+      researchStrengthGrade: f.researchStrengthGrade,
+      sampleCount: f.sampleCount,
+      stabilityContradicted: f.stabilityContradicted,
+    })),
+    /** 结论的局限来源：各 Finding 自带局限的并集（去重）。 */
+    findingLimitations: [...new Set(input.findings.flatMap((f) => f.limitations ?? []))],
   };
+}
+
+// ---------------------------------------------------------------------------
+// §15 结论的三件配套文本（证据摘要 / 局限 / 后续问题）
+//
+// 为什么单独成函数而不是内联进模板串：这三段是**结论的结构化字段**（落库列），
+// 前端与报告会分别渲染；内联进正文会导致「正文与字段两份措辞」逐渐漂移。
+// ---------------------------------------------------------------------------
+
+/** 证据摘要（人读；机器可读证据在 `evidence`）。 */
+function buildEvidenceSummary(args: {
+  findings: readonly ConclusionFindingInput[];
+  conclusionType: ResearchConclusionType;
+  verdict: string;
+}): string {
+  const { findings, conclusionType, verdict } = args;
+  if (findings.length === 0) {
+    return `判定 ${conclusionType}（${verdict}）。本次 Run **未引用任何 Finding** `
+      + "（Finding 层未参与或未检出达标发现）—— 结论仅基于 Analysis 层面的统计摘要。";
+  }
+  const lines = findings
+    .slice(0, 8)
+    .map(
+      (f) =>
+        `- Finding #${f.id} [${f.findingType}] ${f.title}`
+        + `（研究强度 ${f.researchStrength === null ? "不可评估" : f.researchStrength.toFixed(3)}`
+        + `${f.researchStrengthGrade === null ? "" : ` / ${f.researchStrengthGrade}`}，样本 ${f.sampleCount ?? "未知"}）`,
+    );
+  if (findings.length > 8) lines.push(`- …（另有 ${findings.length - 8} 条，见 findings 面板）`);
+  return `判定 ${conclusionType}（${verdict}）。引用 ${findings.length} 条 Finding：\n${lines.join("\n")}`;
+}
+
+/** 局限并集（Finding 自带局限 + 结论层局限）。 */
+function buildLimitations(findings: readonly ConclusionFindingInput[]): string[] {
+  const out = [
+    "自动结论为**规则型**研究辅助，不等同于统计显著性，也不构成交易结论。",
+    "跨分析未做多重比较校正；事件样本重叠视界使独立性假设不严格成立。",
+  ];
+  for (const f of findings) for (const l of f.limitations ?? []) out.push(l);
+  return [...new Set(out)];
+}
+
+/** 后续待答问题（驱动下一轮研究 → 新假设）。 */
+function buildNextQuestions(
+  findings: readonly ConclusionFindingInput[],
+  conclusionType: ResearchConclusionType,
+): string[] {
+  const out: string[] = [];
+  const hasRelation = findings.some((f) =>
+    ["MONOTONIC_RELATION", "PEAK_RELATION", "VALLEY_RELATION"].includes(f.findingType),
+  );
+  if (hasRelation) {
+    out.push("对上述分档关系做**门槛 / 条件组合**验证：新建覆盖该区间的 CONDITIONAL 分析，比较单条件与组合条件效应。");
+  }
+  if (findings.some((f) => f.stabilityContradicted)) {
+    out.push("存在方向明显冲突的时间 / 结构切片：复核这些切片的样本构成，并考虑按市场状态分层重做。");
+  }
+  if (findings.some((f) => f.findingType === "HORIZON_PATTERN")) {
+    out.push("按有效视界区间确定持有期假设（Entry / Exit Timing），并在假设中显式登记 target 与 horizon。");
+  }
+  if (conclusionType === "PARTIALLY_SUPPORTED") {
+    out.push("统计强度不足：扩大样本窗口或降低共线性后再复验，不要以当前证据进入策略化。");
+  }
+  if (conclusionType === "INCONCLUSIVE") {
+    out.push("证据不足 / 方向不稳定：先补齐 Data 覆盖与变量缺失，再重跑本实验。");
+  }
+  if (findings.length === 0) {
+    out.push("本次未检出达标发现：检查 analysisDefaults 与变量覆盖是否足以支撑该研究问题。");
+  }
+  return out;
 }
 
 /** 主体判定。 */
 export function buildConclusion(input: ConclusionBuildInput): ConclusionBuildResult {
   const policy: ConclusionPolicy = { ...DEFAULT_CONCLUSION_POLICY, ...(input.policy ?? {}) };
   const trace: Array<{ rule: string; passed: boolean; detail: string }> = [];
+  /** §15 引用的 Finding（可空）：结论必须能回溯到「哪个发现支撑了它」。 */
+  const findings: readonly ConclusionFindingInput[] = input.findings ?? [];
+  const researchQuestion = input.researchQuestion ?? null;
 
   const comparable = input.analyses.filter(
     (a) => a.summary.effect !== null && (a.summary.groupCount === null || a.summary.groupCount >= 2),
@@ -176,8 +306,15 @@ export function buildConclusion(input: ConclusionBuildInput): ConclusionBuildRes
           analyses: input.analyses,
           trace,
           confidenceBasis: "证据不足（无可用主效应），不计算主观置信度（固定 0）",
+          researchQuestion,
+          findings,
         }),
         confidence: 0,
+        researchQuestion,
+        evidenceSummary: buildEvidenceSummary({ findings, conclusionType: "INCONCLUSIVE", verdict: "无法评估" }),
+        findingIds: findings.map((f) => f.id),
+        limitations: buildLimitations(findings),
+        nextQuestions: buildNextQuestions(findings, "INCONCLUSIVE"),
       },
       trace,
     };
@@ -283,6 +420,8 @@ export function buildConclusion(input: ConclusionBuildInput): ConclusionBuildRes
     analyses: input.analyses,
     trace,
     confidenceBasis: parts.join("；"),
+    researchQuestion,
+    findings,
   });
 
   const numbers =

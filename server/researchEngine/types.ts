@@ -337,6 +337,30 @@ export interface ResearchEngineRunResult {
   sampleBuildMs: number;
   /** 真实耗时（毫秒）：装配 + 全部分析 + 结论 + 落库。 */
   durationMs: number;
+  // ---- RESEARCH-FINDING-001 §34：Result → Finding 自动识别（可选，向后兼容）----
+  /**
+   * 本次 Run 检出 / 复用的 Finding 数。
+   *
+   * ⚠️ **0 是合法结果**（任务书 §27：如实显示「没有发现」，不得为演示造数）。
+   */
+  findingCount?: number;
+  /** 本次 Run 的 Finding id（升序）。 */
+  findingIds?: number[];
+  /**
+   * Finding 阶段的终态。
+   * `FAILED` **不影响** Run 的 COMPLETED —— Finding 只消费已落库的 Result，
+   * 它的失败不应把一条已经跑出结果的 Run 判死（原因见 `reason`）。
+   */
+  findingDetection?: {
+    status: "OK" | "SKIPPED" | "FAILED";
+    reason?: string;
+  };
+  /** §26：结论 → 假设状态回写的真实结果（写不进去时如实说明，不静默）。 */
+  hypothesisWriteback?: {
+    status: "WRITTEN" | "SKIPPED" | "NO_HYPOTHESIS";
+    reason?: string;
+    path?: string[];
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -434,6 +458,22 @@ export interface ResearchConclusionDraft {
   conclusion: string;
   evidence: unknown;
   confidence: number | null;
+  // ---- RESEARCH-FINDING-001 §15 升级（全部可选 ⇒ 既有 12 条结论的读路径零影响）----
+  /** 结论回答的**研究问题**原文（来自假设或显式传入）。 */
+  researchQuestion?: string | null;
+  /** 证据**人读**摘要（机器可读证据仍在 `evidence`，不重复存储）。 */
+  evidenceSummary?: string | null;
+  /**
+   * 引用的 Finding id。
+   *
+   * 🔴 任务书 §15：「Conclusion 不允许凭空产生，必须能够引用相关 Finding」。
+   * 「定稿（FINAL）」额外要求本数组非空 —— 见 `researchCore/conclusions.ts#assertConclusionFinalizable`。
+   */
+  findingIds?: number[];
+  /** 局限性（**必须如实列**，不允许留空凑数）。 */
+  limitations?: string[];
+  /** 后续待答问题（驱动下一轮研究 / 假设）。 */
+  nextQuestions?: string[];
 }
 
 // ---------------------------------------------------------------------------
