@@ -46,14 +46,26 @@ export const RESEARCH_EXPERIMENT_STATUSES = [
 ] as const;
 export type ResearchExperimentStatus = (typeof RESEARCH_EXPERIMENT_STATUSES)[number];
 
-/** 假设状态。 */
+/**
+ * 假设状态 —— **严格取 RESEARCH-FINDING-001 §16 的 6 态**。
+ *
+ * 与 RESEARCH-001 原 6 态（`DRAFT/TESTING/SUPPORTED/PARTIALLY_SUPPORTED/REJECTED/INCONCLUSIVE`）
+ * 的**差异是有意为之**（用户 2026-09-16 拍板「严格改为任务书 6 值」）：
+ *   - 主轴从「结论强度」改为「**研究阶段**」：DRAFT → TESTABLE → TESTED → {SUPPORTED|REJECTED} → PROMOTED；
+ *   - 废弃 `TESTING`（被 `TESTED` 的完成态语义取代）、`PARTIALLY_SUPPORTED` / `INCONCLUSIVE`
+ *     （这两个是「结论强度」，属 `RESEARCH_CONCLUSION_TYPES`，不该出现在假设阶段轴上）；
+ *   - 新增 `PROMOTED` —— 假设已转成 Strategy Candidate（**唯一**由 `Hypothesis → Candidate` 入口到达）。
+ *
+ * ⚠️ 该表迁移前 **0 行**（见 `docs/research/RESEARCH-FINDING-001-audit.md` §1.2），
+ *    故本次收敛**无数据迁移负担**，也不存在「既有值无解释」问题。
+ */
 export const RESEARCH_HYPOTHESIS_STATUSES = [
   "DRAFT",
-  "TESTING",
+  "TESTABLE",
+  "TESTED",
   "SUPPORTED",
-  "PARTIALLY_SUPPORTED",
   "REJECTED",
-  "INCONCLUSIVE",
+  "PROMOTED",
 ] as const;
 export type ResearchHypothesisStatus = (typeof RESEARCH_HYPOTHESIS_STATUSES)[number];
 
@@ -116,6 +128,75 @@ export type ResearchConclusionType = (typeof RESEARCH_CONCLUSION_TYPES)[number];
 /** 结论记录状态（草稿 / 定稿 / 被取代）。 */
 export const RESEARCH_CONCLUSION_STATUSES = ["DRAFT", "FINAL", "SUPERSEDED"] as const;
 export type ResearchConclusionStatus = (typeof RESEARCH_CONCLUSION_STATUSES)[number];
+
+// ---------------------------------------------------------------------------
+// RESEARCH-FINDING-001 —— Finding（Result 与 Conclusion 之间的**发现层**）
+// ---------------------------------------------------------------------------
+
+/**
+ * 发现类型（任务书 §9 的 `MONOTONIC_RELATION / PEAK_RELATION / VALLEY_RELATION` + §6/§10/§11/§12）。
+ *
+ * 纪律（任务书 §9 末句「不要为了类型数量而过度设计」）：只登记**引擎真实产出**的类型，
+ * 不做愿望清单。`EFFECT` 是兜底型（有显著分组差异但不符合更具体的形态时）。
+ */
+export const RESEARCH_FINDING_TYPES = [
+  /** 分组间存在明显差异（§6 Effect）。 */
+  "EFFECT",
+  /** 连续单调上升 / 下降（§9）。 */
+  "MONOTONIC_RELATION",
+  /** 局部峰值后反转（§9 例：0~2 → 2~4 → 4~6 → 6~8 → 8%+ 掉头）。 */
+  "PEAK_RELATION",
+  /** 局部谷值后回升。 */
+  "VALLEY_RELATION",
+  /** 跨视界形态（§10：效果集中在 T+3~T+10）。 */
+  "HORIZON_PATTERN",
+  /** 时间切片稳定性（§11）。 */
+  "STABILITY",
+  /** 条件组合（§12 Interaction / Conditional Finding）。 */
+  "INTERACTION",
+] as const;
+export type ResearchFindingType = (typeof RESEARCH_FINDING_TYPES)[number];
+
+/**
+ * 发现状态（任务书 §13）。
+ *
+ * 🔴 「不要让系统自动把所有 Finding 标记为 SUPPORTED」—— 引擎产出一律 `DISCOVERED`；
+ * `SUPPORTED` / `WEAK` / `CONTRADICTED` / `REJECTED` 只能由**用户**经 review 流转。
+ */
+export const RESEARCH_FINDING_STATUSES = [
+  "DISCOVERED",
+  "REVIEWED",
+  "SUPPORTED",
+  "WEAK",
+  "CONTRADICTED",
+  "REJECTED",
+] as const;
+export type ResearchFindingStatus = (typeof RESEARCH_FINDING_STATUSES)[number];
+
+/** 研究强度分级（**研究优先级**，不是策略评分 —— 任务书 §14）。 */
+export const RESEARCH_STRENGTH_GRADES = ["WEAK", "MEDIUM", "STRONG"] as const;
+export type ResearchStrengthGrade = (typeof RESEARCH_STRENGTH_GRADES)[number];
+
+/** 样本充分性分级（任务书 §7：<100 INSUFFICIENT / 100~299 WEAK / 300~999 MEDIUM / >=1000 STRONG）。 */
+export const RESEARCH_SAMPLE_GRADES = ["INSUFFICIENT", "WEAK", "MEDIUM", "STRONG"] as const;
+export type ResearchSampleGrade = (typeof RESEARCH_SAMPLE_GRADES)[number];
+
+/** 假设的预期方向（任务书 §17 `Expected: positive`）。 */
+export const RESEARCH_EXPECTED_DIRECTIONS = ["POSITIVE", "NEGATIVE", "NON_MONOTONIC", "NEUTRAL"] as const;
+export type ResearchExpectedDirection = (typeof RESEARCH_EXPECTED_DIRECTIONS)[number];
+
+/**
+ * 单调性形态（任务书 §9）。
+ * `NONE` = 未观察到连续关系（**如实标注**，不是失败）。
+ */
+export const RESEARCH_MONOTONICITY_PATTERNS = [
+  "MONOTONIC_INCREASING",
+  "MONOTONIC_DECREASING",
+  "PEAK",
+  "VALLEY",
+  "NONE",
+] as const;
+export type ResearchMonotonicityPattern = (typeof RESEARCH_MONOTONICITY_PATTERNS)[number];
 
 /** 策略候选状态。 */
 export const RESEARCH_CANDIDATE_STATUSES = [
@@ -183,6 +264,49 @@ export const RESEARCH_GROUP_LOGICAL_OPERATORS = ["AND", "OR"] as const;
 export type ResearchGroupLogicalOperator = (typeof RESEARCH_GROUP_LOGICAL_OPERATORS)[number];
 
 // ---------------------------------------------------------------------------
+// 条件形态（RESEARCH-FINDING-001 起迁入本文件）
+//
+// 为什么迁移：这些是**领域类型**，而本文件自述为「Research 领域类型唯一权威来源」。
+// 原先定义在 `conditions.ts` 导致 `types.ts` 无法引用 `ResearchConditionSet`
+// （Hypothesis.conditions / Finding.interaction 都需要它），只能造出
+// `types → conditions → types` 的循环依赖。迁到此处后 `conditions.ts` 只保留
+// **规则**（校验 / 互转 / 渲染），职责反而更清晰；`conditions.ts` 继续 re-export 以保持向后兼容。
+// ---------------------------------------------------------------------------
+
+/** 条件值形态（与 `research_analysis_condition.valueJson` 一一对应）。 */
+export type ResearchConditionValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ReadonlyArray<string | number>
+  | readonly [number, number];
+
+/** 单条条件（领域形态，未落库；`analysisId` / `id` 由 Repository 补）。 */
+export interface ResearchConditionSpec {
+  groupNo: number;
+  sortOrder: number;
+  fieldName: string;
+  operator: ResearchConditionOperator;
+  value: ResearchConditionValue;
+  logicalOperator: ResearchLogicalOperator;
+  groupLogicalOperator: ResearchGroupLogicalOperator;
+}
+
+/** 条件组（由同一 `groupNo` 的扁平行聚合而成）。 */
+export interface ResearchConditionGroup {
+  groupNo: number;
+  /** 与**前一条件组**的连接符（首个组无前序，值被忽略但保留以维持列非空）。 */
+  groupLogicalOperator: ResearchGroupLogicalOperator;
+  conditions: ResearchConditionSpec[];
+}
+
+/** 条件组集合（前端 / Hypothesis / Candidate 规则复用同一形态）。 */
+export interface ResearchConditionSet {
+  groups: ResearchConditionGroup[];
+}
+
+// ---------------------------------------------------------------------------
 // 领域对象（Repository 出参 / 入参；不直接暴露 Drizzle Row 类型）
 // ---------------------------------------------------------------------------
 
@@ -205,14 +329,41 @@ export interface ResearchExperiment {
   updatedAt?: string;
 }
 
-/** 研究假设（研究意图；**不是** Analysis，也**不是** Conclusion）。 */
+/**
+ * 研究假设（研究意图；**不是** Analysis，也**不是** Conclusion）。
+ *
+ * RESEARCH-FINDING-001 §17 —— **必须结构化**：不允许只存 `description` 式的自然语言。
+ * `conditions` / `target` / `horizon` / `expectedDirection` 四件套齐备才可能进 Candidate。
+ * 其中 `conditions` **不得**引用 Outcome 变量（前视约束，见 `researchEngine/types.ts#ResearchVariableRole`）。
+ */
 export interface ResearchHypothesis {
   id?: number;
   experimentId: number;
+  /** 软引用 `research_run.id`（可空 —— 假设可先于 Run 提出）。 */
+  runId?: number | null;
   name: string;
   statement: string;
   nullHypothesis?: string | null;
   alternativeHypothesis?: string | null;
+  /** 结构化研究问题（人读；与 Conclusion 的 researchQuestion 呼应）。 */
+  researchQuestion?: string | null;
+  /**
+   * **结构化条件**（与 `research_analysis_condition` / Candidate 草图同构）。
+   * 允许为空（探索性假设尚未完全形式化），但**空条件无法进入 Candidate**。
+   */
+  conditions?: ResearchConditionSet | null;
+  /** 目标变量（如 `future_return`）。 */
+  target?: string | null;
+  /** 验证视界（如 `T+5`）。 */
+  horizon?: string | null;
+  /** 预期方向。 */
+  expectedDirection?: ResearchExpectedDirection | null;
+  /** 预期效应的**人读**描述（不是数值承诺）。 */
+  expectedEffect?: string | null;
+  /** 来源 Finding id（软引用 `research_finding.id`）。 */
+  sourceFindingIds?: number[] | null;
+  /** 来源 Conclusion（软引用 `research_conclusion.id`，可空）。 */
+  sourceConclusionId?: number | null;
   status: ResearchHypothesisStatus;
   /** 速记备注；正式结论落 `ResearchConclusion`。 */
   conclusion?: string | null;
@@ -356,8 +507,24 @@ export interface ResearchConclusion {
   conclusionType: ResearchConclusionType;
   title: string;
   conclusion: string;
+  /** 机器可读证据（唯一构造入口 `conclusionBuilder#buildEvidence`）。 */
   evidence?: unknown;
+  /** 主观置信度 [0,1]（**非 p-value**）。 */
   confidence?: number | null;
+  /** RESEARCH-FINDING-001 —— 结论回答的**研究问题**原文。 */
+  researchQuestion?: string | null;
+  /** RESEARCH-FINDING-001 —— 证据**人读**摘要（机器可读证据仍在 `evidence`，不重复存储）。 */
+  evidenceSummary?: string | null;
+  /**
+   * RESEARCH-FINDING-001 —— 引用的 Finding id。
+   * **不允许凭空产生结论**：非空即代表结论建立在可回溯的 Finding 上。
+   * 空数组 ≠ 无结论，仅表示「该结论不依赖 Finding」（既有 12 条即如此）。
+   */
+  findingIds?: number[] | null;
+  /** RESEARCH-FINDING-001 —— 局限性（必须如实列，禁留空凑数）。 */
+  limitations?: string[] | null;
+  /** RESEARCH-FINDING-001 —— 后续待答问题。 */
+  nextQuestions?: string[] | null;
   status: ResearchConclusionStatus;
   createdAt?: string;
   updatedAt?: string;
@@ -407,6 +574,17 @@ export interface ResearchStrategyCandidate {
    * 一致时**必须为 null**，禁止填无意义默认文本凑数。
    */
   sourceDatasetDivergenceReason?: string | null;
+  /**
+   * RESEARCH-FINDING-001 —— 来源 Hypothesis（软引用 `research_hypothesis.id`，可空）。
+   *
+   * 为空 = 该候选走 `Conclusion → Candidate` 老路径（无假设环节）。**不 backfill 伪造**。
+   */
+  sourceHypothesisId?: number | null;
+  /**
+   * RESEARCH-FINDING-001 —— 来源 Finding id（软引用 `research_finding.id`）。
+   * 与 `sourceTraceJson` 的分工：后者是**证据快照**，本字段是**可检索的谱系锚点**。
+   */
+  sourceFindingIds?: number[] | null;
   status: ResearchCandidateStatus;
   createdAt?: string;
   updatedAt?: string;
@@ -426,6 +604,144 @@ export interface ResearchArtifact {
   checksum?: string | null;
   metadata?: unknown;
   createdAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// RESEARCH-FINDING-001 —— 发现层（Result → Finding）
+//
+// 三层职责（严格区分，任务书 §3.1）：
+//   Result    = 某一次 Analysis 得到的**原始统计证据**（不解释）；
+//   Finding   = 从**一个或多个 Result** 中识别出的、具有研究意义的**统计发现**（保留 provenance）；
+//   Conclusion = 针对 Research Question 对**多个 Finding** 综合后的**研究判断**。
+//
+// 🔴 Finding 不允许脱离 Result 独立存在：`primaryAnalysisId` + `sourceResultIds` 是硬锚点。
+// 🔴 一切数值来自 `research_result` 实际行，**禁止虚构 / 禁止为 Demo 造数**（任务书 §35.8）。
+// ---------------------------------------------------------------------------
+
+/** Effect 证据（§6 效果 / §8 基准）。 */
+export interface ResearchFindingEffect {
+  /** 条件组收益（`MEAN_RETURN`）。 */
+  groupReturn: number | null;
+  /** 基准收益。**无 benchmark 能力时为 null**，并置 `benchmarkUnavailable = true`。 */
+  benchmarkReturn: number | null;
+  /** 超额 = groupReturn − benchmarkReturn（任一分量为 null 即为 null，**不补 0**）。 */
+  excessReturn: number | null;
+  /** §8：拿不到基准就**明确标记**，不得强行虚构。 */
+  benchmarkUnavailable: boolean;
+  /** 基准来源说明（如 `experiment-baseline:analysis=123` / `unavailable`）。 */
+  benchmarkSource: string;
+  medianReturn: number | null;
+  winRate: number | null;
+  /** 逐分组明细（如回撤分档），供前端柱状图直接消费。 */
+  buckets: Array<{ label: string; metricValue: number | null; sampleCount: number | null }>;
+}
+
+/** 样本充分性（§7）。阈值**配置化**，不得硬编码在 UI。 */
+export interface ResearchFindingSample {
+  sampleCount: number;
+  grade: ResearchSampleGrade;
+  /** 判定所用阈值快照（可复核）。 */
+  thresholds: { weak: number; medium: number; strong: number };
+}
+
+/** 视界一致性（§10）。数据来源 = 同一 metricCode 在各 `dimension.horizon` 上的 Result 行。 */
+export interface ResearchFindingHorizon {
+  peakHorizon: number | null;
+  /** 效果「较明显」的连续视界区间（如 `[3,10]`）。 */
+  effectiveHorizonRange: [number, number] | null;
+  /** 方向一致性 [0,1]（各视界效应符号与峰值方向一致的比例）。 */
+  directionConsistency: number | null;
+  points: Array<{ horizon: number; metricValue: number | null; sampleCount: number | null }>;
+}
+
+/** 时间稳定性（§11）。第一版至少完成**时间**维度（年）。 */
+export interface ResearchFindingStability {
+  /** 切片维度键（第一版 = `year`）。 */
+  dimensionKey: string;
+  slices: Array<{ label: string; metricValue: number | null; sampleCount: number | null }>;
+  /** 方向是否稳定（各切片同号且通过一致性下限）。 */
+  stable: boolean;
+  /** 是否出现明显冲突（§13 `CONTRADICTED` 的客观依据）。 */
+  contradicted: boolean;
+  /** 方向一致性 [0,1]。 */
+  consistentRatio: number | null;
+}
+
+/** 单调性（§9）。 */
+export interface ResearchFindingMonotonicity {
+  pattern: ResearchMonotonicityPattern;
+  /** 反转点档位标签（`PEAK` / `VALLEY` 时有值，其余为 null）。 */
+  reversalAt: string | null;
+  /** 有序档位明细（按自然顺序排列）。 */
+  buckets: Array<{ label: string; metricValue: number | null; sampleCount: number | null }>;
+  /** 有序档位上的秩相关（[−1,1]；样本不足算不出为 null，**不编造**）。 */
+  rankCorrelation: number | null;
+}
+
+/** Interaction / Conditional Finding（§12）。 */
+export interface ResearchFindingInteraction {
+  /** 参与组合的 Finding id。 */
+  findingIds: number[];
+  /** 组合后的结构化条件（单条件为 `groups[0]`）。 */
+  combinedConditions: ResearchConditionSet | null;
+  singleEffect: number | null;
+  combinedEffect: number | null;
+  /**
+   * 组合结果**是否真实存在于 Result**。
+   * 🔴 `false` ⇒ **不允许产 Finding**，只能产 `UNTESTED_HYPOTHESIS`（任务书 §12）。
+   */
+  tested: boolean;
+  /** 未测试时的原因（人读）。 */
+  untestedReason: string | null;
+}
+
+/**
+ * Research 发现（**研究事实**，非策略、非评分推荐）。
+ *
+ * §14 纪律：`researchStrength` 是**研究优先级指标**，禁止变成「策略评分 / 推荐买入」。
+ */
+export interface ResearchFinding {
+  id?: number;
+  experimentId: number;
+  runId?: number | null;
+  /**
+   * 主证据分析（固定优先级单选，**不按效应大小挑**，避免选择性报告）。
+   */
+  primaryAnalysisId?: number | null;
+  findingType: ResearchFindingType;
+  title: string;
+  summary?: string | null;
+  status: ResearchFindingStatus;
+  /** 目标变量（与 Analysis.target 同口径）。 */
+  target?: string | null;
+  /** 分析维度（如 `{feature:"pullback_depth", bucket:"3%~5%", horizon:5}`）。 */
+  dimension?: Record<string, string | number> | null;
+  /** **provenance 锚点**：依据的 `research_result.id`。 */
+  sourceResultIds?: number[] | null;
+  effect?: ResearchFindingEffect | null;
+  sample?: ResearchFindingSample | null;
+  horizon?: ResearchFindingHorizon | null;
+  stability?: ResearchFindingStability | null;
+  monotonicity?: ResearchFindingMonotonicity | null;
+  interaction?: ResearchFindingInteraction | null;
+  /** 五维研究强度分项（各 [0,1]）—— 与 DB 列 1:1，不嵌套。 */
+  effectStrength?: number | null;
+  sampleStrength?: number | null;
+  stabilityStrength?: number | null;
+  horizonConsistency?: number | null;
+  monotonicityStrength?: number | null;
+  /** 加权合成总分（[0,1]）。 */
+  researchStrength?: number | null;
+  researchStrengthGrade?: ResearchStrengthGrade | null;
+  /** 判定阈值快照（`FindingPolicy`，可复核 / 可调参 / 可复现）。 */
+  policy?: unknown;
+  limitations?: string[] | null;
+  /** 人读证据摘要 + 免责声明（机器可读证据在各 `effect/sample/...` 字段）。 */
+  evidence?: unknown;
+  /** 确定性指纹（幂等；同 Run 重复 detect 不产生重复行）。 */
+  fingerprint?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // ---------------------------------------------------------------------------

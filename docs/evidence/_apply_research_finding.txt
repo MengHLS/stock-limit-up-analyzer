@@ -1,0 +1,767 @@
+{
+  "mode": "apply",
+  "statementsTotal": 25,
+  "executed": [
+    "table:research_finding",
+    "index:research_finding.idx_research_finding_experiment",
+    "index:research_finding.idx_research_finding_run",
+    "index:research_finding.idx_research_finding_status",
+    "index:research_finding.idx_research_finding_type",
+    "index:research_finding.idx_research_finding_strength",
+    "index:research_finding.idx_research_finding_analysis",
+    "column:research_hypothesis.runId",
+    "column:research_hypothesis.researchQuestion",
+    "column:research_hypothesis.conditionsJson",
+    "column:research_hypothesis.target",
+    "column:research_hypothesis.horizon",
+    "column:research_hypothesis.expectedDirection",
+    "column:research_hypothesis.expectedEffect",
+    "column:research_hypothesis.sourceFindingIdsJson",
+    "column:research_hypothesis.sourceConclusionId",
+    "index:research_hypothesis.idx_research_hypothesis_run",
+    "column:research_conclusion.researchQuestion",
+    "column:research_conclusion.evidenceSummary",
+    "column:research_conclusion.findingIdsJson",
+    "column:research_conclusion.limitationsJson",
+    "column:research_conclusion.nextQuestionsJson",
+    "column:research_strategy_candidate.sourceHypothesisId",
+    "column:research_strategy_candidate.sourceFindingIdsJson",
+    "index:research_strategy_candidate.idx_research_candidate_hypothesis"
+  ],
+  "skipped": [],
+  "finding": {
+    "exists": true,
+    "rows": 0,
+    "columns": [
+      {
+        "name": "id",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "ok": true
+      },
+      {
+        "name": "experimentId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "ok": true
+      },
+      {
+        "name": "runId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "primaryAnalysisId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "findingType",
+        "present": true,
+        "type": "varchar(32)",
+        "expectedType": "varchar(32)",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "ok": true
+      },
+      {
+        "name": "title",
+        "present": true,
+        "type": "varchar(300)",
+        "expectedType": "varchar(300)",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "ok": true
+      },
+      {
+        "name": "summary",
+        "present": true,
+        "type": "text",
+        "expectedType": "text",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "status",
+        "present": true,
+        "type": "varchar(20)",
+        "expectedType": "varchar(20)",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "ok": true
+      },
+      {
+        "name": "target",
+        "present": true,
+        "type": "varchar(200)",
+        "expectedType": "varchar(200)",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "dimensionJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "sourceResultIdsJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "effectJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "sampleJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "horizonJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "stabilityJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "monotonicityJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "interactionJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "effectStrength",
+        "present": true,
+        "type": "double",
+        "expectedType": "double",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "sampleStrength",
+        "present": true,
+        "type": "double",
+        "expectedType": "double",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "stabilityStrength",
+        "present": true,
+        "type": "double",
+        "expectedType": "double",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "horizonConsistency",
+        "present": true,
+        "type": "double",
+        "expectedType": "double",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "monotonicityStrength",
+        "present": true,
+        "type": "double",
+        "expectedType": "double",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "researchStrength",
+        "present": true,
+        "type": "double",
+        "expectedType": "double",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "researchStrengthGrade",
+        "present": true,
+        "type": "varchar(16)",
+        "expectedType": "varchar(16)",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "policyJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "limitationsJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "evidenceJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "fingerprint",
+        "present": true,
+        "type": "varchar(64)",
+        "expectedType": "varchar(64)",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "ok": true
+      },
+      {
+        "name": "createdAt",
+        "present": true,
+        "type": "timestamp",
+        "expectedType": "timestamp",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "ok": true
+      },
+      {
+        "name": "updatedAt",
+        "present": true,
+        "type": "timestamp",
+        "expectedType": "timestamp",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "ok": true
+      }
+    ],
+    "indexes": [
+      {
+        "name": "uq_research_finding_fingerprint",
+        "present": true,
+        "unique": true,
+        "expectedUnique": true,
+        "columns": "fingerprint",
+        "expectedColumns": "fingerprint",
+        "ok": true
+      },
+      {
+        "name": "idx_research_finding_experiment",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "experimentId",
+        "expectedColumns": "experimentId",
+        "ok": true
+      },
+      {
+        "name": "idx_research_finding_run",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "runId",
+        "expectedColumns": "runId",
+        "ok": true
+      },
+      {
+        "name": "idx_research_finding_status",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "status",
+        "expectedColumns": "status",
+        "ok": true
+      },
+      {
+        "name": "idx_research_finding_type",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "findingType",
+        "expectedColumns": "findingType",
+        "ok": true
+      },
+      {
+        "name": "idx_research_finding_strength",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "researchStrength",
+        "expectedColumns": "researchStrength",
+        "ok": true
+      },
+      {
+        "name": "idx_research_finding_analysis",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "primaryAnalysisId",
+        "expectedColumns": "primaryAnalysisId",
+        "ok": true
+      }
+    ]
+  },
+  "hypothesisColumns": [
+    {
+      "name": "runId",
+      "present": true,
+      "type": "bigint",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "researchQuestion",
+      "present": true,
+      "type": "text",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "conditionsJson",
+      "present": true,
+      "type": "longtext",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "target",
+      "present": true,
+      "type": "varchar(200)",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "horizon",
+      "present": true,
+      "type": "varchar(32)",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "expectedDirection",
+      "present": true,
+      "type": "varchar(16)",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "expectedEffect",
+      "present": true,
+      "type": "varchar(200)",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "sourceFindingIdsJson",
+      "present": true,
+      "type": "longtext",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "sourceConclusionId",
+      "present": true,
+      "type": "bigint",
+      "nullable": "YES",
+      "ok": true
+    }
+  ],
+  "hypothesisIndex": {
+    "name": "idx_research_hypothesis_run",
+    "columns": "runId",
+    "present": true
+  },
+  "conclusionColumns": [
+    {
+      "name": "researchQuestion",
+      "present": true,
+      "type": "text",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "evidenceSummary",
+      "present": true,
+      "type": "text",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "findingIdsJson",
+      "present": true,
+      "type": "longtext",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "limitationsJson",
+      "present": true,
+      "type": "longtext",
+      "nullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "nextQuestionsJson",
+      "present": true,
+      "type": "longtext",
+      "nullable": "YES",
+      "ok": true
+    }
+  ],
+  "candidateColumns": [
+    {
+      "name": "sourceHypothesisId",
+      "present": true,
+      "type": "bigint",
+      "expectedType": "bigint",
+      "nullable": "YES",
+      "expectedNullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "sourceFindingIdsJson",
+      "present": true,
+      "type": "longtext",
+      "expectedType": "longtext",
+      "nullable": "YES",
+      "expectedNullable": "YES",
+      "ok": true
+    }
+  ],
+  "candidateIndex": {
+    "name": "idx_research_candidate_hypothesis",
+    "columns": "sourceHypothesisId",
+    "present": true
+  },
+  "fk": {
+    "research_finding": 0,
+    "research_hypothesis": 0,
+    "research_conclusion": 0,
+    "research_strategy_candidate": 0,
+    "schemaTotal": 0
+  },
+  "schemaUnchanged": [
+    {
+      "table": "research_experiment",
+      "ok": true,
+      "expected": 12,
+      "actual": 12
+    },
+    {
+      "table": "research_run",
+      "ok": true,
+      "expected": 13,
+      "actual": 13
+    },
+    {
+      "table": "research_analysis",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_analysis_condition",
+      "ok": true,
+      "expected": 10,
+      "actual": 10
+    },
+    {
+      "table": "research_analysis_metric",
+      "ok": true,
+      "expected": 7,
+      "actual": 7
+    },
+    {
+      "table": "research_result",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_artifact",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_analysis_template",
+      "ok": true,
+      "expected": 6,
+      "actual": 6
+    },
+    {
+      "table": "research_analysis_template_item",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_hypothesis",
+      "ok": true,
+      "expected": 19,
+      "actual": 19
+    },
+    {
+      "table": "research_conclusion",
+      "ok": true,
+      "expected": 16,
+      "actual": 16
+    },
+    {
+      "table": "research_strategy_candidate",
+      "ok": true,
+      "expected": 20,
+      "actual": 20
+    }
+  ],
+  "rowCounts": {
+    "before": {
+      "research_experiment": 2,
+      "research_hypothesis": 0,
+      "research_run": 13,
+      "research_analysis": 266,
+      "research_analysis_condition": 630,
+      "research_analysis_metric": 0,
+      "research_result": 5083,
+      "research_conclusion": 12,
+      "research_strategy_candidate": 9,
+      "research_artifact": 0,
+      "research_analysis_template": 0,
+      "research_analysis_template_item": 0,
+      "strategy_versions": 10,
+      "strategy_version_datasets": 8,
+      "strategy_parameters": 21,
+      "strategy_entry_rules": 16,
+      "strategy_exit_rules": 16,
+      "strategy_execution_rules": 8,
+      "strategy_research_provenance": 8,
+      "dataset_version": 2,
+      "dataset_definition": 1
+    },
+    "after": {
+      "research_experiment": 2,
+      "research_hypothesis": 0,
+      "research_run": 13,
+      "research_analysis": 266,
+      "research_analysis_condition": 630,
+      "research_analysis_metric": 0,
+      "research_result": 5083,
+      "research_conclusion": 12,
+      "research_strategy_candidate": 9,
+      "research_artifact": 0,
+      "research_analysis_template": 0,
+      "research_analysis_template_item": 0,
+      "strategy_versions": 10,
+      "strategy_version_datasets": 8,
+      "strategy_parameters": 21,
+      "strategy_entry_rules": 16,
+      "strategy_exit_rules": 16,
+      "strategy_execution_rules": 8,
+      "strategy_research_provenance": 8,
+      "dataset_version": 2,
+      "dataset_definition": 1
+    },
+    "diff": [
+      {
+        "table": "research_experiment",
+        "before": 2,
+        "after": 2,
+        "changed": false
+      },
+      {
+        "table": "research_hypothesis",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_run",
+        "before": 13,
+        "after": 13,
+        "changed": false
+      },
+      {
+        "table": "research_analysis",
+        "before": 266,
+        "after": 266,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_condition",
+        "before": 630,
+        "after": 630,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_metric",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_result",
+        "before": 5083,
+        "after": 5083,
+        "changed": false
+      },
+      {
+        "table": "research_conclusion",
+        "before": 12,
+        "after": 12,
+        "changed": false
+      },
+      {
+        "table": "research_strategy_candidate",
+        "before": 9,
+        "after": 9,
+        "changed": false
+      },
+      {
+        "table": "research_artifact",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_template",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_template_item",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "strategy_versions",
+        "before": 10,
+        "after": 10,
+        "changed": false
+      },
+      {
+        "table": "strategy_version_datasets",
+        "before": 8,
+        "after": 8,
+        "changed": false
+      },
+      {
+        "table": "strategy_parameters",
+        "before": 21,
+        "after": 21,
+        "changed": false
+      },
+      {
+        "table": "strategy_entry_rules",
+        "before": 16,
+        "after": 16,
+        "changed": false
+      },
+      {
+        "table": "strategy_exit_rules",
+        "before": 16,
+        "after": 16,
+        "changed": false
+      },
+      {
+        "table": "strategy_execution_rules",
+        "before": 8,
+        "after": 8,
+        "changed": false
+      },
+      {
+        "table": "strategy_research_provenance",
+        "before": 8,
+        "after": 8,
+        "changed": false
+      },
+      {
+        "table": "dataset_version",
+        "before": 2,
+        "after": 2,
+        "changed": false
+      },
+      {
+        "table": "dataset_definition",
+        "before": 1,
+        "after": 1,
+        "changed": false
+      }
+    ]
+  },
+  "notes": [
+    "research_finding 行数 = 0"
+  ],
+  "failures": [],
+  "pass": true
+}

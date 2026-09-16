@@ -12,47 +12,30 @@ import {
   RESEARCH_GROUP_LOGICAL_OPERATORS,
   RESEARCH_LOGICAL_OPERATORS,
   type ResearchAnalysisCondition,
+  type ResearchConditionGroup,
   type ResearchConditionOperator,
+  type ResearchConditionSet,
+  type ResearchConditionSpec,
+  type ResearchConditionValue,
   type ResearchGroupLogicalOperator,
   type ResearchLogicalOperator,
 } from "./types";
 
 // ---------------------------------------------------------------------------
-// 类型
+// 类型（RESEARCH-FINDING-001：定义已迁入 `types.ts`，此处 re-export 保持向后兼容）
+//
+// 迁移理由见 `types.ts` 同名段落注释：`types.ts` 才是领域类型的唯一权威来源；
+// 原先在此定义会造出 `types → conditions → types` 的循环依赖，挡住
+// `ResearchHypothesis.conditions` / `ResearchFindingInteraction.combinedConditions` 的引用。
+// 本文件从此只保留**规则**（校验 / 互转 / 渲染），职责更清晰。
 // ---------------------------------------------------------------------------
 
-/** 条件值形态（与 `valueJson` 一一对应）。 */
-export type ResearchConditionValue =
-  | string
-  | number
-  | boolean
-  | null
-  | ReadonlyArray<string | number>
-  | readonly [number, number];
-
-/** 单条条件（领域形态，未落库；`analysisId` / `id` 由 Repository 补）。 */
-export interface ResearchConditionSpec {
-  groupNo: number;
-  sortOrder: number;
-  fieldName: string;
-  operator: ResearchConditionOperator;
-  value: ResearchConditionValue;
-  logicalOperator: ResearchLogicalOperator;
-  groupLogicalOperator: ResearchGroupLogicalOperator;
-}
-
-/** 条件组（由同一 `groupNo` 的扁平行聚合而成）。 */
-export interface ResearchConditionGroup {
-  groupNo: number;
-  /** 与**前一条件组**的连接符（首个组无前序，值被忽略但保留以维持列非空）。 */
-  groupLogicalOperator: ResearchGroupLogicalOperator;
-  conditions: ResearchConditionSpec[];
-}
-
-/** 条件组集合（前端 / Candidate 规则复用同一形态）。 */
-export interface ResearchConditionSet {
-  groups: ResearchConditionGroup[];
-}
+export type {
+  ResearchConditionValue,
+  ResearchConditionSpec,
+  ResearchConditionGroup,
+  ResearchConditionSet,
+};
 
 // ---------------------------------------------------------------------------
 // 常量集合（供校验使用）

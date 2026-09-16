@@ -9,7 +9,7 @@
  *   - 不写 `strategies` / `strategy_versions`（Candidate 只软引用）。
  */
 
-import { and, asc, desc, eq, gt, inArray, max } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, max } from "drizzle-orm";
 import { getDb } from "../../db";
 import {
   datasetVersions,
@@ -21,6 +21,7 @@ import {
   researchArtifact,
   researchConclusion,
   researchExperiment,
+  researchFinding,
   researchHypothesis,
   researchResult,
   researchRun,
@@ -35,6 +36,12 @@ import {
 } from "../candidates";
 import { assertConditionSet, groupConditions } from "../conditions";
 import { assertResearchRunExecutionLog, parseResearchRunExecutionLog } from "../executionLog";
+import {
+  assertEngineFindingCreationStatus,
+  assertFindingTransition,
+  assertResearchFinding,
+} from "../findings";
+import { assertHypothesisTransition } from "../hypotheses";
 import { assertResearchResult } from "../results";
 import { decodeJson, encodeJson, toDate, toIso } from "../serialization";
 import {
@@ -50,10 +57,15 @@ import type {
   ResearchAnalysisTemplateItem,
   ResearchArtifact,
   ResearchConclusion,
+  ResearchExpectedDirection,
   ResearchExperiment,
+  ResearchFinding,
   ResearchHypothesis,
+  ResearchMonotonicityPattern,
   ResearchResult,
   ResearchRun,
+  ResearchSampleGrade,
+  ResearchStrengthGrade,
   ResearchStrategyCandidate,
 } from "../types";
 import type {
@@ -69,6 +81,8 @@ import type {
   ResearchConclusionRepository,
   ResearchExperimentListFilter,
   ResearchExperimentRepository,
+  ResearchFindingListFilter,
+  ResearchFindingRepository,
   ResearchHypothesisRepository,
   ResearchRelationshipQueries,
   ResearchRepositories,
@@ -189,6 +203,7 @@ type MetricRow = typeof researchAnalysisMetric.$inferSelect;
 type ResultRow = typeof researchResult.$inferSelect;
 type ConclusionRow = typeof researchConclusion.$inferSelect;
 type CandidateRow = typeof researchStrategyCandidate.$inferSelect;
+type FindingRow = typeof researchFinding.$inferSelect;
 type ArtifactRow = typeof researchArtifact.$inferSelect;
 type TemplateRow = typeof researchAnalysisTemplate.$inferSelect;
 type TemplateItemRow = typeof researchAnalysisTemplateItem.$inferSelect;
@@ -214,10 +229,20 @@ function mapHypothesis(r: HypothesisRow): ResearchHypothesis {
   return {
     id: r.id,
     experimentId: r.experimentId,
+    runId: r.runId,
     name: r.name,
     statement: r.statement,
     nullHypothesis: r.nullHypothesis,
     alternativeHypothesis: r.alternativeHypothesis,
+    // RESEARCH-FINDING-001 —— 结构化假设（§17）
+    researchQuestion: r.researchQuestion,
+    conditions: decodeJson(r.conditionsJson, "research_hypothesis.conditionsJson") as ResearchHypothesis["conditions"],
+    target: r.target,
+    horizon: r.horizon,
+    expectedDirection: (r.expectedDirection ?? null) as ResearchExpectedDirection | null,
+    expectedEffect: r.expectedEffect,
+    sourceFindingIds: decodeJson(r.sourceFindingIdsJson, "research_hypothesis.sourceFindingIdsJson") as ResearchHypothesis["sourceFindingIds"],
+    sourceConclusionId: r.sourceConclusionId,
     status: r.status as ResearchHypothesis["status"],
     conclusion: r.conclusion,
     createdAt: toIso(r.createdAt) ?? undefined,
@@ -308,6 +333,12 @@ function mapConclusion(r: ConclusionRow): ResearchConclusion {
     conclusion: r.conclusion,
     evidence: decodeJson(r.evidenceJson, "research_conclusion.evidenceJson"),
     confidence: r.confidence,
+    // RESEARCH-FINDING-001 —— 结论引用 Finding（§15）
+    researchQuestion: r.researchQuestion,
+    evidenceSummary: r.evidenceSummary,
+    findingIds: decodeJson(r.findingIdsJson, "research_conclusion.findingIdsJson") as ResearchConclusion["findingIds"],
+    limitations: decodeJson(r.limitationsJson, "research_conclusion.limitationsJson") as ResearchConclusion["limitations"],
+    nextQuestions: decodeJson(r.nextQuestionsJson, "research_conclusion.nextQuestionsJson") as ResearchConclusion["nextQuestions"],
     status: r.status as ResearchConclusion["status"],
     createdAt: toIso(r.createdAt) ?? undefined,
     updatedAt: toIso(r.updatedAt) ?? undefined,
@@ -332,7 +363,52 @@ function mapCandidate(r: CandidateRow): ResearchStrategyCandidate {
     sourceResearchRunId: r.sourceResearchRunId,
     sourceTraceJson: decodeJson(r.sourceTraceJson, "research_strategy_candidate.sourceTraceJson"),
     sourceDatasetDivergenceReason: r.sourceDatasetDivergenceReason,
+    // RESEARCH-FINDING-001 —— Hypothesis / Finding 谱系锚（只经 create / 语义入口写，禁普通 update）。
+    sourceHypothesisId: r.sourceHypothesisId,
+    sourceFindingIds: decodeJson(r.sourceFindingIdsJson, "research_strategy_candidate.sourceFindingIdsJson") as ResearchStrategyCandidate["sourceFindingIds"],
     status: r.status as ResearchStrategyCandidate["status"],
+    createdAt: toIso(r.createdAt) ?? undefined,
+    updatedAt: toIso(r.updatedAt) ?? undefined,
+  };
+}
+
+/**
+ * Row → ResearchFinding。
+ *
+ * 注意：`policy` / `evidence` 是**开放 JSON**（`unknown`），不做结构断言 ——
+ * 结构正确性由 Finding Engine 在**写入前**用 `assertResearchFinding` + 域规则保证，
+ * 读取端如实搬运（不做「猜测修复」，避免把坏数据读成好数据）。
+ */
+function mapFinding(r: FindingRow): ResearchFinding {
+  return {
+    id: r.id,
+    experimentId: r.experimentId,
+    runId: r.runId,
+    primaryAnalysisId: r.primaryAnalysisId,
+    findingType: r.findingType as ResearchFinding["findingType"],
+    title: r.title,
+    summary: r.summary,
+    status: r.status as ResearchFinding["status"],
+    target: r.target,
+    dimension: decodeJson(r.dimensionJson, "research_finding.dimensionJson") as ResearchFinding["dimension"],
+    sourceResultIds: decodeJson(r.sourceResultIdsJson, "research_finding.sourceResultIdsJson") as ResearchFinding["sourceResultIds"],
+    effect: decodeJson(r.effectJson, "research_finding.effectJson") as ResearchFinding["effect"],
+    sample: decodeJson(r.sampleJson, "research_finding.sampleJson") as ResearchFinding["sample"],
+    horizon: decodeJson(r.horizonJson, "research_finding.horizonJson") as ResearchFinding["horizon"],
+    stability: decodeJson(r.stabilityJson, "research_finding.stabilityJson") as ResearchFinding["stability"],
+    monotonicity: decodeJson(r.monotonicityJson, "research_finding.monotonicityJson") as ResearchFinding["monotonicity"],
+    interaction: decodeJson(r.interactionJson, "research_finding.interactionJson") as ResearchFinding["interaction"],
+    effectStrength: r.effectStrength,
+    sampleStrength: r.sampleStrength,
+    stabilityStrength: r.stabilityStrength,
+    horizonConsistency: r.horizonConsistency,
+    monotonicityStrength: r.monotonicityStrength,
+    researchStrength: r.researchStrength,
+    researchStrengthGrade: (r.researchStrengthGrade ?? null) as ResearchStrengthGrade | null,
+    policy: decodeJson(r.policyJson, "research_finding.policyJson"),
+    limitations: decodeJson(r.limitationsJson, "research_finding.limitationsJson") as ResearchFinding["limitations"],
+    evidence: decodeJson(r.evidenceJson, "research_finding.evidenceJson"),
+    fingerprint: r.fingerprint,
     createdAt: toIso(r.createdAt) ?? undefined,
     updatedAt: toIso(r.updatedAt) ?? undefined,
   };
@@ -465,10 +541,20 @@ export function createDbResearchRepositories(): ResearchRepositories {
       const id = await insertAndGetId(
                 db.insert(researchHypothesis).values({
           experimentId: input.experimentId,
+          runId: input.runId ?? null,
           name: input.name,
           statement: input.statement,
           nullHypothesis: input.nullHypothesis ?? null,
           alternativeHypothesis: input.alternativeHypothesis ?? null,
+          // RESEARCH-FINDING-001 —— 结构化假设（§17）
+          researchQuestion: input.researchQuestion ?? null,
+          conditionsJson: encodeJson(input.conditions ?? null, "research_hypothesis.conditionsJson"),
+          target: input.target ?? null,
+          horizon: input.horizon ?? null,
+          expectedDirection: input.expectedDirection ?? null,
+          expectedEffect: input.expectedEffect ?? null,
+          sourceFindingIdsJson: encodeJson(input.sourceFindingIds ?? null, "research_hypothesis.sourceFindingIdsJson"),
+          sourceConclusionId: input.sourceConclusionId ?? null,
           status: input.status ?? "DRAFT",
           conclusion: input.conclusion ?? null,
         }),
@@ -493,15 +579,45 @@ export function createDbResearchRepositories(): ResearchRepositories {
     },
     async update(id, patch) {
       const db = await requireDb();
+      // RESEARCH-FINDING-001 —— 状态机守卫（与 Candidate 同一纪律：守卫落在 Repository，
+      // 让所有写入方共用一条判据）。读当前行 → 校验转移合法性 → 再写。
+      if (patch.status !== undefined) {
+        const current = await hypotheses.getById(id);
+        if (!current) {
+          throw new ResearchReferenceError(
+            RESEARCH_REFERENCE_ERROR.HYPOTHESIS_NOT_FOUND,
+            `更新失败，Hypothesis 不存在：${id}`,
+          );
+        }
+        assertHypothesisTransition(current.status, patch.status);
+      }
       await db
         .update(researchHypothesis)
         .set({
+          ...(patch.runId === undefined ? {} : { runId: patch.runId }),
           ...(patch.name === undefined ? {} : { name: patch.name }),
           ...(patch.statement === undefined ? {} : { statement: patch.statement }),
           ...(patch.nullHypothesis === undefined ? {} : { nullHypothesis: patch.nullHypothesis }),
           ...(patch.alternativeHypothesis === undefined
             ? {}
             : { alternativeHypothesis: patch.alternativeHypothesis }),
+          // RESEARCH-FINDING-001 —— 结构化假设（§17）
+          ...(patch.researchQuestion === undefined ? {} : { researchQuestion: patch.researchQuestion }),
+          ...(patch.conditions === undefined
+            ? {}
+            : { conditionsJson: encodeJson(patch.conditions, "conditionsJson") }),
+          ...(patch.target === undefined ? {} : { target: patch.target }),
+          ...(patch.horizon === undefined ? {} : { horizon: patch.horizon }),
+          ...(patch.expectedDirection === undefined
+            ? {}
+            : { expectedDirection: patch.expectedDirection }),
+          ...(patch.expectedEffect === undefined ? {} : { expectedEffect: patch.expectedEffect }),
+          ...(patch.sourceFindingIds === undefined
+            ? {}
+            : { sourceFindingIdsJson: encodeJson(patch.sourceFindingIds, "sourceFindingIdsJson") }),
+          ...(patch.sourceConclusionId === undefined
+            ? {}
+            : { sourceConclusionId: patch.sourceConclusionId }),
           ...(patch.status === undefined ? {} : { status: patch.status }),
           ...(patch.conclusion === undefined ? {} : { conclusion: patch.conclusion }),
         })
@@ -910,6 +1026,12 @@ export function createDbResearchRepositories(): ResearchRepositories {
           conclusion: input.conclusion,
           evidenceJson: encodeJson(input.evidence, "research_conclusion.evidenceJson"),
           confidence: input.confidence ?? null,
+          // RESEARCH-FINDING-001 —— 结论引用 Finding（§15）
+          researchQuestion: input.researchQuestion ?? null,
+          evidenceSummary: input.evidenceSummary ?? null,
+          findingIdsJson: encodeJson(input.findingIds ?? null, "research_conclusion.findingIdsJson"),
+          limitationsJson: encodeJson(input.limitations ?? null, "research_conclusion.limitationsJson"),
+          nextQuestionsJson: encodeJson(input.nextQuestions ?? null, "research_conclusion.nextQuestionsJson"),
           status: input.status ?? "DRAFT",
         }),
       );
@@ -945,6 +1067,18 @@ export function createDbResearchRepositories(): ResearchRepositories {
           ...(patch.conclusion === undefined ? {} : { conclusion: patch.conclusion }),
           ...(patch.evidence === undefined ? {} : { evidenceJson: encodeJson(patch.evidence, "evidenceJson") }),
           ...(patch.confidence === undefined ? {} : { confidence: patch.confidence }),
+          // RESEARCH-FINDING-001 —— 结论引用 Finding（§15）
+          ...(patch.researchQuestion === undefined ? {} : { researchQuestion: patch.researchQuestion }),
+          ...(patch.evidenceSummary === undefined ? {} : { evidenceSummary: patch.evidenceSummary }),
+          ...(patch.findingIds === undefined
+            ? {}
+            : { findingIdsJson: encodeJson(patch.findingIds, "findingIdsJson") }),
+          ...(patch.limitations === undefined
+            ? {}
+            : { limitationsJson: encodeJson(patch.limitations, "limitationsJson") }),
+          ...(patch.nextQuestions === undefined
+            ? {}
+            : { nextQuestionsJson: encodeJson(patch.nextQuestions, "nextQuestionsJson") }),
           ...(patch.status === undefined ? {} : { status: patch.status }),
         })
         .where(eq(researchConclusion.id, id));
@@ -1003,6 +1137,9 @@ export function createDbResearchRepositories(): ResearchRepositories {
           sourceResearchRunId: input.sourceResearchRunId ?? null,
           sourceTraceJson: encodeJson(input.sourceTraceJson, "sourceTraceJson"),
           sourceDatasetDivergenceReason: input.sourceDatasetDivergenceReason ?? null,
+          // RESEARCH-FINDING-001 —— Hypothesis / Finding 谱系锚（写入即定格）。
+          sourceHypothesisId: input.sourceHypothesisId ?? null,
+          sourceFindingIdsJson: encodeJson(input.sourceFindingIds ?? null, "sourceFindingIdsJson"),
           status,
         }),
       );
@@ -1303,6 +1440,131 @@ export function createDbResearchRepositories(): ResearchRepositories {
     },
   };
 
+  // ---- finding（RESEARCH-FINDING-001）----
+  const findings: ResearchFindingRepository = {
+    async create(input) {
+      const db = await requireDb();
+      await requireExperimentRow(db, input.experimentId);
+      if (input.runId !== null && input.runId !== undefined) {
+        await requireRunRow(db, input.runId);
+      }
+      if (input.primaryAnalysisId !== null && input.primaryAnalysisId !== undefined) {
+        await requireAnalysisRow(db, input.primaryAnalysisId);
+      }
+      // 域规则：必须有 Result provenance（primaryAnalysisId 或 sourceResultIds 至少一个）。
+      // 发现「出生即 DISCOVERED」；显式传入其它状态一律拒绝。
+      const status = input.status ?? "DISCOVERED";
+      assertResearchFinding({ ...input, status });
+      assertEngineFindingCreationStatus(status);
+
+      // 幂等：同 fingerprint 已存在则直接返回既有行（重复 detect 不产生重复 Finding）。
+      if (input.fingerprint !== null && input.fingerprint !== undefined && input.fingerprint.length > 0) {
+        const existing = await db
+          .select()
+          .from(researchFinding)
+          .where(eq(researchFinding.fingerprint, input.fingerprint))
+          .limit(1);
+        if (existing[0]) return mapFinding(existing[0]);
+      }
+
+      const id = await insertAndGetId(
+        db.insert(researchFinding).values({
+          experimentId: input.experimentId,
+          runId: input.runId ?? null,
+          primaryAnalysisId: input.primaryAnalysisId ?? null,
+          findingType: input.findingType,
+          title: input.title,
+          summary: input.summary ?? null,
+          status,
+          target: input.target ?? null,
+          dimensionJson: encodeJson(input.dimension ?? null, "dimensionJson"),
+          sourceResultIdsJson: encodeJson(input.sourceResultIds ?? null, "sourceResultIdsJson"),
+          effectJson: encodeJson(input.effect ?? null, "effectJson"),
+          sampleJson: encodeJson(input.sample ?? null, "sampleJson"),
+          horizonJson: encodeJson(input.horizon ?? null, "horizonJson"),
+          stabilityJson: encodeJson(input.stability ?? null, "stabilityJson"),
+          monotonicityJson: encodeJson(input.monotonicity ?? null, "monotonicityJson"),
+          interactionJson: encodeJson(input.interaction ?? null, "interactionJson"),
+          effectStrength: input.effectStrength ?? null,
+          sampleStrength: input.sampleStrength ?? null,
+          stabilityStrength: input.stabilityStrength ?? null,
+          horizonConsistency: input.horizonConsistency ?? null,
+          monotonicityStrength: input.monotonicityStrength ?? null,
+          researchStrength: input.researchStrength ?? null,
+          researchStrengthGrade: input.researchStrengthGrade ?? null,
+          policyJson: encodeJson(input.policy ?? null, "policyJson"),
+          limitationsJson: encodeJson(input.limitations ?? null, "limitationsJson"),
+          evidenceJson: encodeJson(input.evidence ?? null, "evidenceJson"),
+          fingerprint: input.fingerprint ?? null,
+        }),
+      );
+      const created = await findings.getById(id);
+      if (!created) throw new Error(`Finding 创建后读取失败：${id}`);
+      return created;
+    },
+    async getById(id) {
+      const db = await requireDb();
+      const rows = await db.select().from(researchFinding).where(eq(researchFinding.id, id)).limit(1);
+      return rows[0] ? mapFinding(rows[0]) : undefined;
+    },
+    async list(filter: ResearchFindingListFilter = {}) {
+      const db = await requireDb();
+      const conds = [];
+      if (filter.experimentId !== undefined) conds.push(eq(researchFinding.experimentId, filter.experimentId));
+      if (filter.runId !== undefined) conds.push(eq(researchFinding.runId, filter.runId));
+      if (filter.primaryAnalysisId !== undefined) {
+        conds.push(eq(researchFinding.primaryAnalysisId, filter.primaryAnalysisId));
+      }
+      if (filter.status !== undefined) conds.push(eq(researchFinding.status, filter.status));
+      if (filter.findingType !== undefined) conds.push(eq(researchFinding.findingType, filter.findingType));
+      if (filter.minResearchStrength !== undefined) {
+        conds.push(gte(researchFinding.researchStrength, filter.minResearchStrength));
+      }
+      const rows = await (conds.length > 0
+        ? db.select().from(researchFinding).where(and(...conds))
+        : db.select().from(researchFinding)
+      ).orderBy(desc(researchFinding.researchStrength), asc(researchFinding.id));
+      return rows.map(mapFinding);
+    },
+    async update(id, patch) {
+      const db = await requireDb();
+      const current = await findings.getById(id);
+      if (!current) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.FINDING_NOT_FOUND,
+          `更新失败，Finding 不存在：${id}`,
+        );
+      }
+      if (patch.status !== undefined) {
+        assertFindingTransition(current.status, patch.status);
+        await db.update(researchFinding).set({ status: patch.status }).where(eq(researchFinding.id, id));
+      }
+      const updated = await findings.getById(id);
+      if (!updated) throw new Error(`Finding 更新后读取失败：${id}`);
+      return updated;
+    },
+    async delete(id) {
+      const db = await requireDb();
+      const res = await db.delete(researchFinding).where(eq(researchFinding.id, id));
+      if (res[0].affectedRows === 0) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.FINDING_NOT_FOUND,
+          `删除失败，Finding 不存在：${id}`,
+        );
+      }
+    },
+    async deleteByRun(runId) {
+      const db = await requireDb();
+      const res = await db.delete(researchFinding).where(eq(researchFinding.runId, runId));
+      return res[0].affectedRows;
+    },
+    async deleteByExperiment(experimentId) {
+      const db = await requireDb();
+      const res = await db.delete(researchFinding).where(eq(researchFinding.experimentId, experimentId));
+      return res[0].affectedRows;
+    },
+  };
+
   // ---- 关系查询 ----
   const relationships: ResearchRelationshipQueries = {
     async getExperimentWithRuns(experimentId) {
@@ -1334,6 +1596,9 @@ export function createDbResearchRepositories(): ResearchRepositories {
     async getCandidatesByExperiment(experimentId) {
       return candidates.list({ experimentId });
     },
+    async getFindingsByExperiment(experimentId) {
+      return findings.list({ experimentId });
+    },
   };
 
   return {
@@ -1348,6 +1613,7 @@ export function createDbResearchRepositories(): ResearchRepositories {
     candidates,
     artifacts,
     templates,
+    findings,
     relationships,
   };
 }

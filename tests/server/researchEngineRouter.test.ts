@@ -487,11 +487,13 @@ describe("researchEngineRouter — 维护端点（更新 / 级联删除）", () 
     const { experiment, hypothesis, run } = await seedThroughRouter(caller);
     await caller.runEngine({ experimentId: experiment.id!, runId: run.id! });
 
+    // RESEARCH-FINDING-001：状态收敛为严格 6 态。原 TESTING 已废弃；
+    // 此处走 DRAFT → REJECTED（「研究人员明确否定」是合法且无需结构化三件套的转移）。
     const updated = await caller.updateHypothesis({
       hypothesisId: hypothesis.id!,
-      status: "TESTING",
+      status: "REJECTED",
     });
-    expect(updated.status).toBe("TESTING");
+    expect(updated.status).toBe("REJECTED");
 
     const { counts } = await caller.deleteHypothesis({ hypothesisId: hypothesis.id! });
     expect(counts.hypotheses).toBe(1);

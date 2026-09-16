@@ -1,0 +1,38 @@
+feat(research): RESEARCH-FINDING-001 B1-B3 — Finding 表/领域/仓储 + 假设结构化
+
+RESEARCH-FINDING-001（Result → Finding → Hypothesis → Candidate 闭环）第一阶段：
+数据库 + 领域层 + 仓储层。零 FK、零新依赖、读路径向后兼容。
+
+B1 DB（migration 0038 + applyResearchFinding.mjs）
+- 新建 research_finding（30 列 + 1 UNIQUE(fingerprint) + 6 索引）—— 全库此前无任何
+  含 finding 的表名/列名，故这是本任务唯一真正新增的实体；
+- research_hypothesis +9 列（runId / researchQuestion / conditionsJson / target /
+  horizon / expectedDirection / expectedEffect / sourceFindingIdsJson / sourceConclusionId）
+  + 1 索引：假设从「文字容器」升级为**结构化可验证域**（任务书 §17）；
+- research_conclusion +5 列（researchQuestion / evidenceSummary / findingIdsJson /
+  limitationsJson / nextQuestionsJson）：结论升级为「引用 Finding 的综合判断」（§15）；
+- research_strategy_candidate +2 列（sourceHypothesisId / sourceFindingIdsJson）+ 1 索引：
+  Hypothesis → Candidate 谱系锚（§18）。既有 9 条候选如实为 NULL，不 backfill 伪造。
+- 幂等 apply 脚本：--check / --dry-run / apply 三态 + information_schema 逐列断言 +
+  零 FK 断言 + 列签名基线比对 + 行数守恒。实测 apply 25 条语句 / pass=True / 零失败，
+  复跑 0 executed / 25 skipped（幂等成立）。
+
+B2 领域层
+- 假设状态**严格收敛为任务书 §16 的 6 态**（DRAFT / TESTABLE / TESTED / SUPPORTED /
+  REJECTED / PROMOTED），废弃 TESTING / PARTIALLY_SUPPORTED / INCONCLUSIVE
+  （后两者是「结论强度」，属 RESEARCH_CONCLUSION_TYPES；该表迁移前 0 行，无数据负担）；
+- 新增 researchCore/findings.ts：FindingPolicy（样本/效应/稳定性/单调性阈值全部配置化）、
+  样本分级、五维强度合成（缺失维度**重归一化**而非补 0，避免把「没测」当「测得差」）、
+  6 态状态机、结构校验（必须有 Result provenance）；
+- 新增 researchCore/hypotheses.ts：阶段状态机、结构化三件套校验（TESTABLE 门槛）、
+  进 Candidate 资格（须 SUPPORTED）、条件前视护栏（Outcome 禁入 Signal 条件）；
+- 条件形态（ResearchConditionValue/Spec/Group/Set）从 conditions.ts 迁入 types.ts，
+  消除 types → conditions → types 循环依赖。
+
+B3 仓储层
+- ResearchFindingRepository（contract + db + inMemory）：create 幂等（fingerprint 命中即返回
+  既有行）、update **只接受 status** 并过状态机、deleteByRun / deleteByExperiment 供级联；
+- 假设 update 补状态机守卫（与 Candidate 同一纪律：守卫落在 Repository）；
+- 三表新增列的 db.ts 映射与 JSON 编解码；inMemory 深拷贝阻断引用改写。
+
+验证：npx tsc --noEmit = 0 输出 / exit 0；research 相关 22 文件 / 376 测试全通过。

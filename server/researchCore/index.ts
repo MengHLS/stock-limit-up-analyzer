@@ -26,5 +26,7 @@ export * from "./conditions";
 export * from "./results";
 export * from "./executionLog";
 export * from "./candidates";
+export * from "./findings";
+export * from "./hypotheses";
 export * from "./serialization";
 export * from "./repository";

@@ -79,14 +79,14 @@ describe("Research 领域枚举（集中管理）", () => {
     ]);
   });
 
-  it("hypothesis status 覆盖指令 §5 的 6 态", () => {
+  it("hypothesis status 收敛为 RESEARCH-FINDING-001 §16 的 6 态", () => {
     expect([...RESEARCH_HYPOTHESIS_STATUSES]).toEqual([
       "DRAFT",
-      "TESTING",
+      "TESTABLE",
+      "TESTED",
       "SUPPORTED",
-      "PARTIALLY_SUPPORTED",
       "REJECTED",
-      "INCONCLUSIVE",
+      "PROMOTED",
     ]);
   });
 

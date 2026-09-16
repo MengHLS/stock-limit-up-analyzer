@@ -23,6 +23,12 @@ import {
 import { assertConditionSet, groupConditions } from "../conditions";
 import { assertResearchResult } from "../results";
 import {
+  assertEngineFindingCreationStatus,
+  assertFindingTransition,
+  assertResearchFinding,
+} from "../findings";
+import { assertHypothesisTransition } from "../hypotheses";
+import {
   RESEARCH_REFERENCE_ERROR,
   ResearchConflictError,
   ResearchReferenceError,
@@ -38,6 +44,7 @@ import type {
   ResearchConclusion,
   ResearchExperiment,
   ResearchExperimentWithRuns,
+  ResearchFinding,
   ResearchHypothesis,
   ResearchResult,
   ResearchRun,
@@ -60,6 +67,8 @@ import type {
   ResearchConclusionRepository,
   ResearchExperimentListFilter,
   ResearchExperimentRepository,
+  ResearchFindingListFilter,
+  ResearchFindingRepository,
   ResearchHypothesisRepository,
   ResearchRelationshipQueries,
   ResearchRepositories,
@@ -80,6 +89,7 @@ interface Store {
   results: Array<ResearchResult & { id: number }>;
   conclusions: Array<ResearchConclusion & { id: number }>;
   candidates: Array<ResearchStrategyCandidate & { id: number }>;
+  findings: Array<ResearchFinding & { id: number }>;
   artifacts: Array<ResearchArtifact & { id: number }>;
   templates: Array<ResearchAnalysisTemplate & { id: number }>;
   templateItems: Array<ResearchAnalysisTemplateItem & { id: number }>;
@@ -134,6 +144,7 @@ export function createInMemoryResearchRepositories(
     results: [],
     conclusions: [],
     candidates: [],
+    findings: [],
     artifacts: [],
     templates: [],
     templateItems: [],
@@ -280,6 +291,10 @@ export function createInMemoryResearchRepositories(
           RESEARCH_REFERENCE_ERROR.HYPOTHESIS_NOT_FOUND,
           `更新失败，Hypothesis 不存在：${id}`,
         );
+      }
+      // RESEARCH-FINDING-001 —— 与 db.ts **同一判据**：状态转移必须过状态机。
+      if (patch.status !== undefined) {
+        assertHypothesisTransition(found.status, patch.status);
       }
       Object.assign(found, patch, { updatedAt: stamp() });
       return { ...found };
@@ -872,6 +887,135 @@ export function createInMemoryResearchRepositories(
   };
 
   // -------------------------------------------------------------------------
+  // finding（RESEARCH-FINDING-001）
+  //
+  // 与 db.ts **严格对齐**的语义：
+  //   - 创建即校验 Result provenance（`assertResearchFinding`）且**只允许 DISCOVERED**；
+  //   - `fingerprint` 命中即返回既有行（幂等）；
+  //   - `update` **只**接受 `status`，并过 `assertFindingTransition`；
+  //   - 深拷贝开放 JSON，阻断「调用方持引用改写内部状态」（内存替身纪律）。
+  // -------------------------------------------------------------------------
+  const findings: ResearchFindingRepository = {
+    async create(input) {
+      await requireExperiment(input.experimentId);
+      if (input.runId !== null && input.runId !== undefined) {
+        await requireRun(input.runId);
+      }
+      if (input.primaryAnalysisId !== null && input.primaryAnalysisId !== undefined) {
+        await requireAnalysis(input.primaryAnalysisId);
+      }
+      // 域规则：必须有 Result provenance；发现「出生即 DISCOVERED」。
+      const status = input.status ?? "DISCOVERED";
+      assertResearchFinding({ ...input, status });
+      assertEngineFindingCreationStatus(status);
+
+      if (
+        input.fingerprint !== null &&
+        input.fingerprint !== undefined &&
+        input.fingerprint.length > 0
+      ) {
+        const existing = store.findings.find((f) => f.fingerprint === input.fingerprint);
+        if (existing) return { ...existing };
+      }
+
+      const at = stamp();
+      const row: ResearchFinding & { id: number } = {
+        ...input,
+        id: nextId("finding"),
+        status,
+        runId: input.runId ?? null,
+        primaryAnalysisId: input.primaryAnalysisId ?? null,
+        summary: input.summary ?? null,
+        target: input.target ?? null,
+        dimension: cloneJson(input.dimension ?? null),
+        sourceResultIds: cloneJson(input.sourceResultIds ?? null),
+        effect: cloneJson(input.effect ?? null),
+        sample: cloneJson(input.sample ?? null),
+        horizon: cloneJson(input.horizon ?? null),
+        stability: cloneJson(input.stability ?? null),
+        monotonicity: cloneJson(input.monotonicity ?? null),
+        interaction: cloneJson(input.interaction ?? null),
+        policy: cloneJson(input.policy ?? null),
+        limitations: cloneJson(input.limitations ?? null),
+        evidence: cloneJson(input.evidence ?? null),
+        fingerprint: input.fingerprint ?? null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      store.findings.push(row);
+      return { ...row };
+    },
+    async getById(id) {
+      const found = store.findings.find((f) => f.id === id);
+      return found ? { ...found } : undefined;
+    },
+    async list(filter: ResearchFindingListFilter = {}) {
+      return store.findings
+        .filter(
+          (f) =>
+            (filter.experimentId === undefined || f.experimentId === filter.experimentId) &&
+            (filter.runId === undefined || f.runId === filter.runId) &&
+            (filter.primaryAnalysisId === undefined ||
+              f.primaryAnalysisId === filter.primaryAnalysisId) &&
+            (filter.status === undefined || f.status === filter.status) &&
+            (filter.findingType === undefined || f.findingType === filter.findingType) &&
+            (filter.minResearchStrength === undefined ||
+              (f.researchStrength ?? -Infinity) >= filter.minResearchStrength),
+        )
+        .map((f) => ({ ...f }))
+        .sort(
+          (a, b) =>
+            (b.researchStrength ?? -Infinity) - (a.researchStrength ?? -Infinity) || a.id - b.id,
+        );
+    },
+    async update(id, patch) {
+      const found = store.findings.find((f) => f.id === id);
+      if (!found) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.FINDING_NOT_FOUND,
+          `更新失败，Finding 不存在：${id}`,
+        );
+      }
+      if (patch.status !== undefined) {
+        assertFindingTransition(found.status, patch.status);
+        found.status = patch.status;
+        found.updatedAt = stamp();
+      }
+      return { ...found };
+    },
+    async delete(id) {
+      const idx = store.findings.findIndex((f) => f.id === id);
+      if (idx < 0) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.FINDING_NOT_FOUND,
+          `删除失败，Finding 不存在：${id}`,
+        );
+      }
+      store.findings.splice(idx, 1);
+    },
+    async deleteByRun(runId) {
+      let removed = 0;
+      for (let i = store.findings.length - 1; i >= 0; i -= 1) {
+        if (store.findings[i]!.runId === runId) {
+          store.findings.splice(i, 1);
+          removed += 1;
+        }
+      }
+      return removed;
+    },
+    async deleteByExperiment(experimentId) {
+      let removed = 0;
+      for (let i = store.findings.length - 1; i >= 0; i -= 1) {
+        if (store.findings[i]!.experimentId === experimentId) {
+          store.findings.splice(i, 1);
+          removed += 1;
+        }
+      }
+      return removed;
+    },
+  };
+
+  // -------------------------------------------------------------------------
   // 关系查询
   // -------------------------------------------------------------------------
   const relationships: ResearchRelationshipQueries = {
@@ -904,6 +1048,9 @@ export function createInMemoryResearchRepositories(
     async getCandidatesByExperiment(experimentId) {
       return candidates.list({ experimentId });
     },
+    async getFindingsByExperiment(experimentId) {
+      return findings.list({ experimentId });
+    },
   };
 
   return {
@@ -918,6 +1065,7 @@ export function createInMemoryResearchRepositories(
     candidates,
     artifacts,
     templates,
+    findings,
     relationships,
   };
 }

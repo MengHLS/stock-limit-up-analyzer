@@ -96,8 +96,10 @@ describe("Research Repository — Hypothesis CRUD", () => {
     });
     expect(h.status).toBe("DRAFT");
 
-    const updated = await repos.hypotheses.update(h.id as number, { status: "TESTING" });
-    expect(updated.status).toBe("TESTING");
+    // RESEARCH-FINDING-001：状态收敛为严格 6 态；仓储层只做**状态机**校验
+    // （DRAFT → TESTABLE 合法）。结构化三件套的门槛在 Router 层（见 hypotheses.ts#assertHypothesisTestable）。
+    const updated = await repos.hypotheses.update(h.id as number, { status: "TESTABLE" });
+    expect(updated.status).toBe("TESTABLE");
 
     expect((await repos.hypotheses.listByExperiment(exp.id as number)).length).toBe(1);
     expect((await repos.hypotheses.listByExperiment(999)).length).toBe(0);
@@ -699,6 +701,11 @@ describe("Research Repository — 指令 §25 完整领域链路", () => {
       confidence: 0.72,
       status: "FINAL",
     });
+    // 7b. 假设沿**研究阶段轴**推进（RESEARCH-FINDING-001 §16 严格 6 态）：
+    //     DRAFT → TESTABLE → TESTED → SUPPORTED。仓储层状态机拒绝跳级
+    //     （旧写法 DRAFT → SUPPORTED 现在会抛 ResearchHypothesisError）。
+    await repos.hypotheses.update(h.id as number, { status: "TESTABLE" });
+    await repos.hypotheses.update(h.id as number, { status: "TESTED" });
     await repos.hypotheses.update(h.id as number, { status: "SUPPORTED" });
     await repos.experiments.update(exp.id as number, {
       status: "COMPLETED",

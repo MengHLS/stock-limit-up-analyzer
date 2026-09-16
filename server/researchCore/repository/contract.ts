@@ -17,6 +17,7 @@ import type {
   ResearchConclusion,
   ResearchExperiment,
   ResearchExperimentWithRuns,
+  ResearchFinding,
   ResearchHypothesis,
   ResearchResult,
   ResearchRun,
@@ -127,6 +128,28 @@ export type ResearchArtifactCreateInput = Omit<ResearchArtifact, "id" | "created
   storageType?: ResearchArtifact["storageType"];
 };
 
+/**
+ * RESEARCH-FINDING-001 —— Finding 创建入参。
+ *
+ * `status` 可省略；**缺省即 `DISCOVERED`**。实现方须拒绝任何非 `DISCOVERED` 的创建
+ * （见 `findings.ts#assertEngineFindingCreationStatus`）—— 发现是「被识别出来的」，
+ * 不存在「一出生就是 SUPPORTED」这种状态（那要经用户 review）。
+ */
+export type ResearchFindingCreateInput = Omit<
+  ResearchFinding,
+  "id" | "createdAt" | "updatedAt" | "status"
+> & { status?: ResearchFinding["status"] };
+
+/**
+ * RESEARCH-FINDING-001 —— Finding 普通更新补丁：**只允许改 `status`**。
+ *
+ * 为什么比 Candidate 还严：Finding 的 `effect` / `sample` / `stability` … 都是**引擎算出的事实**，
+ * 人能做的只有「看过（REVIEWED）/ 认可（SUPPORTED）/ 判弱（WEAK）/ 判冲突（CONTRADICTED）/
+ * 否定（REJECTED）」这一件事。放开其它字段等于允许篡改研究事实。
+ * 取值必须过 `assertFindingTransition`（状态机）。
+ */
+export type ResearchFindingUpdatePatch = Partial<Pick<ResearchFinding, "status">>;
+
 // ---------------------------------------------------------------------------
 // 列表过滤
 // ---------------------------------------------------------------------------
@@ -173,6 +196,17 @@ export interface ResearchResultListFilter {
   analysisId?: number;
   metricCode?: string;
   resultType?: ResearchResult["resultType"];
+}
+
+/** RESEARCH-FINDING-001 —— Finding 列表过滤。 */
+export interface ResearchFindingListFilter {
+  experimentId?: number;
+  runId?: number;
+  primaryAnalysisId?: number;
+  status?: ResearchFinding["status"];
+  findingType?: ResearchFinding["findingType"];
+  /** 研究强度下界（「只看值得进一步研究的」场景）。 */
+  minResearchStrength?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +270,25 @@ export interface ResearchResultRepository {
   createMany(inputs: ReadonlyArray<ResearchResultCreateInput>): Promise<ResearchResult[]>;
   list(filter?: ResearchResultListFilter): Promise<ResearchResult[]>;
   deleteByAnalysis(analysisId: number): Promise<number>;
+}
+
+/**
+ * RESEARCH-FINDING-001 —— Finding 仓储。
+ *
+ * 纪律：
+ *   - `create` 必须**幂等**：`fingerprint` 命中既有行即返回该行（同一 Run 重复 detect 不产生重复）。
+ *     这正是「重跑一次不会把 Finding 数量翻倍」的保证；
+ *   - `update` **只**接受 `status`（见 `ResearchFindingUpdatePatch`），并过 `assertFindingTransition`；
+ *   - `deleteByRun` / `deleteByExperiment` 供级联清理（零 FK，级联须显式做）。
+ */
+export interface ResearchFindingRepository {
+  create(input: ResearchFindingCreateInput): Promise<ResearchFinding>;
+  getById(id: number): Promise<ResearchFinding | undefined>;
+  list(filter?: ResearchFindingListFilter): Promise<ResearchFinding[]>;
+  update(id: number, patch: ResearchFindingUpdatePatch): Promise<ResearchFinding>;
+  delete(id: number): Promise<void>;
+  deleteByRun(runId: number): Promise<number>;
+  deleteByExperiment(experimentId: number): Promise<number>;
 }
 
 export interface ResearchConclusionRepository {
@@ -313,6 +366,8 @@ export interface ResearchRelationshipQueries {
   getExperimentConclusions(experimentId: number): Promise<ResearchConclusion[]>;
   getHypothesisConclusions(hypothesisId: number): Promise<ResearchConclusion[]>;
   getCandidatesByExperiment(experimentId: number): Promise<ResearchStrategyCandidate[]>;
+  /** RESEARCH-FINDING-001 —— 某实验下的全部 Finding（按研究强度降序由实现方决定）。 */
+  getFindingsByExperiment(experimentId: number): Promise<ResearchFinding[]>;
 }
 
 /** 完整仓储集合（便于一次性注入 / 测试替身）。 */
@@ -329,5 +384,7 @@ export interface ResearchRepositories {
   artifacts: ResearchArtifactRepository;
   /** 分析模板（跨实验复用的建分析配方）。 */
   templates: ResearchAnalysisTemplateRepository;
+  /** RESEARCH-FINDING-001 —— 发现层（Result → Finding）。 */
+  findings: ResearchFindingRepository;
   relationships: ResearchRelationshipQueries;
 }

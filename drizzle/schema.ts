@@ -1537,17 +1537,53 @@ export type InsertResearchExperimentRow = typeof researchExperiment.$inferInsert
 
 /**
  * Research 假设（「我要验证什么」）。**Hypothesis 是研究意图，不是 Analysis，也不是 Conclusion**。
+ *
+ * 🔴 RESEARCH-FINDING-001（2026-09-16）—— **结构化升级**：假设必须能表达
+ * `Condition / Target / Horizon / Expected`，否则进不了 Candidate。新增列全部可空（既有 0 行，
+ * 无回填负担），既有 4 列（`statement` / `nullHypothesis` / `alternativeHypothesis` / `conclusion`）
+ * **语义不变**。
+ *
+ * 状态集**严格**取 RESEARCH-FINDING-001 §16 的 6 态（`DRAFT / TESTABLE / TESTED / SUPPORTED /
+ * REJECTED / PROMOTED`），**废弃** RESEARCH-001 的 `TESTING` / `PARTIALLY_SUPPORTED` / `INCONCLUSIVE`
+ * —— 见 `researchCore/types.ts#RESEARCH_HYPOTHESIS_STATUSES`。以「研究阶段」为主轴，不再混用
+ * 「结论强度」语汇（那是 `research_conclusion.conclusionType` 的职责）。
  */
 export const researchHypothesis = mysqlTable("research_hypothesis", {
   id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
   /** 软引用 research_experiment.id。 */
   experimentId: bigint("experimentId", { mode: "number" }).notNull(),
+  /**
+   * RESEARCH-FINDING-001 —— 软引用 research_run.id（**可空**）。
+   * 假设可以在 Run 之前提出（探索性），故允许为空；不得伪造。
+   */
+  runId: bigint("runId", { mode: "number" }),
   name: varchar("name", { length: 200 }).notNull(),
   /** 假设陈述。 */
   statement: text("statement").notNull(),
   nullHypothesis: text("nullHypothesis"),
   alternativeHypothesis: text("alternativeHypothesis"),
-  /** DRAFT / TESTING / SUPPORTED / PARTIALLY_SUPPORTED / REJECTED / INCONCLUSIVE。 */
+  /** RESEARCH-FINDING-001 —— 结构化研究问题（人读；与 Conclusion 的 researchQuestion 呼应）。 */
+  researchQuestion: text("researchQuestion"),
+  /**
+   * RESEARCH-FINDING-001 —— **结构化条件**（JSON）。
+   *
+   * 形态与 `research_analysis_condition` 同构（`{groups:[{groupNo,conditions:[{fieldName,operator,value}]}]}`），
+   * 便于直接转成 Analysis / Candidate 的 filterRule。**禁止只存不可解析的自然语言**。
+   */
+  conditionsJson: longtext("conditionsJson"),
+  /** RESEARCH-FINDING-001 —— 目标变量（如 `future_return`），与 Analysis.target 同口径。 */
+  target: varchar("target", { length: 200 }),
+  /** RESEARCH-FINDING-001 —— 验证视界（如 `T+5`）。 */
+  horizon: varchar("horizon", { length: 32 }),
+  /** RESEARCH-FINDING-001 —— 预期方向：POSITIVE / NEGATIVE / NON_MONOTONIC / NEUTRAL。 */
+  expectedDirection: varchar("expectedDirection", { length: 16 }),
+  /** RESEARCH-FINDING-001 —— 预期效应的**人读**描述（不是数值承诺，禁当作验收门槛）。 */
+  expectedEffect: varchar("expectedEffect", { length: 200 }),
+  /** RESEARCH-FINDING-001 —— 来源 Finding id 数组（JSON；软引用 research_finding.id）。 */
+  sourceFindingIdsJson: longtext("sourceFindingIdsJson"),
+  /** RESEARCH-FINDING-001 —— 来源 Conclusion（软引用 research_conclusion.id，可空）。 */
+  sourceConclusionId: bigint("sourceConclusionId", { mode: "number" }),
+  /** DRAFT / TESTABLE / TESTED / SUPPORTED / REJECTED / PROMOTED。 */
   status: varchar("status", { length: 32 }).notNull().default("DRAFT"),
   /** 速记备注；**正式结论落 research_conclusion**。 */
   conclusion: text("conclusion"),
@@ -1555,6 +1591,7 @@ export const researchHypothesis = mysqlTable("research_hypothesis", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({
   experimentIdx: index("idx_research_hypothesis_experiment").on(table.experimentId),
+  runIdx: index("idx_research_hypothesis_run").on(table.runId),
   statusIdx: index("idx_research_hypothesis_status").on(table.status),
 }));
 
@@ -1720,6 +1757,11 @@ export type InsertResearchResultRow = typeof researchResult.$inferInsert;
  * Research 结论（研究必须形成结论，而非停留在统计数字）。
  * `confidence` = **主观置信度 [0,1]，不是 p-value**；统计显著性走 research_result 的
  * `p_value` / `t_stat` / 置信区间。
+ *
+ * 🔴 RESEARCH-FINDING-001（2026-09-16）—— **结论升级为「引用 Finding 的综合判断」**：
+ * Conclusion 不允许凭空产生，必须能引用相关 Finding ⇒ 新增 `findingIdsJson` 等 5 列。
+ * 既有 `evidenceJson` 语义不变（仍由 `conclusionBuilder#buildEvidence` 唯一构造）。
+ * `status` 现补上写入口（`researchEngineRouter.updateConclusion`）：`DRAFT → FINAL → SUPERSEDED`。
  */
 export const researchConclusion = mysqlTable("research_conclusion", {
   id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
@@ -1735,6 +1777,16 @@ export const researchConclusion = mysqlTable("research_conclusion", {
   evidenceJson: longtext("evidenceJson"),
   /** 主观置信度 [0,1]（**非 p-value**）。 */
   confidence: double("confidence"),
+  /** RESEARCH-FINDING-001 —— 结论回答的**研究问题**原文。 */
+  researchQuestion: text("researchQuestion"),
+  /** RESEARCH-FINDING-001 —— 证据**人读**摘要（机器可读证据仍走 `evidenceJson`，不重复存储）。 */
+  evidenceSummary: text("evidenceSummary"),
+  /** RESEARCH-FINDING-001 —— 引用的 Finding id 数组（JSON）。**空数组 ≠ 无结论**，是「结论不依赖 Finding」。 */
+  findingIdsJson: longtext("findingIdsJson"),
+  /** RESEARCH-FINDING-001 —— 局限性数组（JSON string[]），必须如实列，禁留空凑数。 */
+  limitationsJson: longtext("limitationsJson"),
+  /** RESEARCH-FINDING-001 —— 后续待答问题数组（JSON string[]）。 */
+  nextQuestionsJson: longtext("nextQuestionsJson"),
   /** DRAFT / FINAL / SUPERSEDED。 */
   status: varchar("status", { length: 20 }).notNull().default("DRAFT"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -1810,6 +1862,22 @@ export const researchStrategyCandidate = mysqlTable("research_strategy_candidate
   sourceDatasetDivergenceReason: varchar("sourceDatasetDivergenceReason", { length: 512 }),
   /** DRAFT / REVIEW / ACCEPTED / REJECTED / CONVERTED / ARCHIVED。 */
   status: varchar("status", { length: 20 }).notNull().default("DRAFT"),
+  /**
+   * RESEARCH-FINDING-001（2026-09-16）—— 来源 Hypothesis（软引用 `research_hypothesis.id`，可空）。
+   *
+   * 为什么可空：本列生效前已存在的 9 条 Candidate 走的是 `Conclusion → Candidate` 老路径，
+   * 没有假设环节。**不 backfill 伪造**，如实置 NULL（= 该候选无假设来源）。
+   * 新路径 `Hypothesis → Candidate`（`service.createFromHypothesis`）必须写入本列。
+   */
+  sourceHypothesisId: bigint("sourceHypothesisId", { mode: "number" }),
+  /**
+   * RESEARCH-FINDING-001 —— 来源 Finding id 数组（JSON；软引用 `research_finding.id`）。
+   *
+   * 与 `sourceTraceJson` 的区别：`sourceTraceJson` 是**证据快照**（防 Result 被重算覆盖），
+   * 本列是**可检索的谱系锚点**（回答「这条候选能回溯到哪几条发现」）。
+   * 允许为空数组（= 该候选不经 Finding 直接由 Conclusion 产生）。
+   */
+  sourceFindingIdsJson: longtext("sourceFindingIdsJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({
@@ -1817,6 +1885,7 @@ export const researchStrategyCandidate = mysqlTable("research_strategy_candidate
   conclusionIdx: index("idx_research_candidate_conclusion").on(table.conclusionId),
   statusIdx: index("idx_research_candidate_status").on(table.status),
   strategyIdx: index("idx_research_candidate_strategy").on(table.strategyDefinitionId),
+  hypothesisIdx: index("idx_research_candidate_hypothesis").on(table.sourceHypothesisId),
   sourceDatasetVersionIdx: index("idx_research_candidate_source_dataset_version").on(
     table.sourceDatasetVersionId,
   ),
@@ -1977,3 +2046,107 @@ export const closedLoopBacktestRun = mysqlTable("closed_loop_backtest_run", {
 
 export type ClosedLoopBacktestRunRow = typeof closedLoopBacktestRun.$inferSelect;
 export type InsertClosedLoopBacktestRunRow = typeof closedLoopBacktestRun.$inferInsert;
+
+
+// ===========================================================================
+// Research Finding（RESEARCH-FINDING-001，2026-09-16）
+//
+// 定位：**Result 与 Conclusion 之间的桥梁**。
+//   Result = 某一次 Analysis 得到的原始统计证据（不解释）；
+//   Finding = 从**一个或多个 Result** 中识别出的、具有研究意义的统计发现（**保留 provenance**）；
+//   Conclusion = 针对 Research Question 对**多个 Finding** 综合后的研究判断。
+//
+// 🔴 硬约束（违反即架构错误）：
+//   - 本表**只由确定性 Finding Engine 写入**（`server/researchEngine/finding/`）；
+//     **禁止 LLM 决定 Finding**（无任何文本模型调用路径）；
+//   - 一切数值 / 样本量 / 区间 / 时间窗口 / 稳定性**必须来自 `research_result` 实际行**，
+//     并由 `sourceResultIdsJson` 可回溯。**禁止为了 Demo 人工制造统计结果**；
+//   - Finding **不得**脱离 Result 独立存在（`experimentId` + `primaryAnalysisId` + `sourceResultIdsJson`
+//     三层锚点缺一即视为脏数据）；
+//   - Outcome 数据**只能**作为被评价的目标变量 / 证据，**绝不能**进入 Strategy Signal
+//     （前视约束见 §21；本表不存 Signal，条件由 `research_hypothesis.conditionsJson` 承载）；
+//   - **零 FK**（项目既有原则）：`experimentId` / `runId` / `primaryAnalysisId` 均为 soft reference，
+//     引用合法性由 `server/researchCore` 的 Domain / Repository 保证。
+//
+// 与 `research_result` 的分工：Result 是**统计层**（一行 = 一个 metricCode × 一个维度取值），
+// Finding 是**发现层**（一行 = 一条被识别出来的、跨维度/跨视界的关系）。二者不是 1:1。
+//
+// 幂等：`fingerprint` = 确定性发现指纹（experimentId + runId + findingType + 维度签名），
+// UNIQUE 兜底 ⇒ 同一 Run 重复 detect 不产生重复行（`ON DUPLICATE KEY` 语义由 Repository 实现）。
+// ===========================================================================
+
+/** Research 发现（Result → Finding 的产物；**研究事实**，非策略、非评分推荐）。 */
+export const researchFinding = mysqlTable("research_finding", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 软引用 research_experiment.id（必填 —— Finding 必须挂在某次实验下）。 */
+  experimentId: bigint("experimentId", { mode: "number" }).notNull(),
+  /** 软引用 research_run.id（可空 —— 探索性发现可能不来自某次具体 Run）。 */
+  runId: bigint("runId", { mode: "number" }),
+  /**
+   * 主证据分析（软引用 research_analysis.id，可空）。
+   * 与 `research_conclusion.evidenceJson.primaryAnalysis` 同款「固定优先级单选」纪律：
+   * **不按「效应最大」挑**，避免选择性报告。
+   */
+  primaryAnalysisId: bigint("primaryAnalysisId", { mode: "number" }),
+  /**
+   * 发现类型：
+   *   EFFECT（分组差异）/ MONOTONIC_RELATION（单调关系）/ PEAK_RELATION（局部峰值）/
+   *   VALLEY_RELATION（局部谷值）/ HORIZON_PATTERN（跨视界形态）/ STABILITY（稳定性）/
+   *   INTERACTION（条件组合，即 Conditional Finding）。
+   */
+  findingType: varchar("findingType", { length: 32 }).notNull(),
+  title: varchar("title", { length: 300 }).notNull(),
+  /** 人读摘要（一句话说清「哪个变量、哪个区间、产生了什么效果」）。 */
+  summary: text("summary"),
+  /** DISCOVERED / REVIEWED / SUPPORTED / WEAK / CONTRADICTED / REJECTED。 */
+  status: varchar("status", { length: 20 }).notNull().default("DISCOVERED"),
+  /** 目标变量（如 `future_return_5d` / `future_return`），与 Analysis.target 同口径。 */
+  target: varchar("target", { length: 200 }),
+  /** 分析维度（如 `{feature:"pullback_depth", bucket:"3%~5%", horizon:5}`）。 */
+  dimensionJson: longtext("dimensionJson"),
+  /** **provenance 锚点**：本条 Finding 依据的 `research_result.id` 数组（JSON number[]）。 */
+  sourceResultIdsJson: longtext("sourceResultIdsJson"),
+  /** Effect 证据：`groupReturn` / `benchmarkReturn` / `excessReturn` / `benchmarkUnavailable`。 */
+  effectJson: longtext("effectJson"),
+  /** 样本充分性：`sampleCount` / `grade`（INSUFFICIENT|WEAK|MEDIUM|STRONG）/ 所用阈值。 */
+  sampleJson: longtext("sampleJson"),
+  /** 视界一致性：`peakHorizon` / `effectiveHorizonRange` / `directionConsistency` / 逐视界明细。 */
+  horizonJson: longtext("horizonJson"),
+  /** 时间稳定性：逐切片（年）明细 + `stabilityGrade` + `contradicted` 标记。 */
+  stabilityJson: longtext("stabilityJson"),
+  /** 单调性：逐档位明细 + `pattern`（MONOTONIC_INCREASING|PEAK|VALLEY|NONE）+ 反转点。 */
+  monotonicityJson: longtext("monotonicityJson"),
+  /** 交互 / 条件组合：单条件效果 vs 组合条件效果 + 是否**真实存在于 Result**。 */
+  interactionJson: longtext("interactionJson"),
+  /** 五维研究强度分项（各自 [0,1]）—— **研究优先级指标，不是策略评分**。 */
+  effectStrength: double("effectStrength"),
+  sampleStrength: double("sampleStrength"),
+  stabilityStrength: double("stabilityStrength"),
+  horizonConsistency: double("horizonConsistency"),
+  monotonicityStrength: double("monotonicityStrength"),
+  /** 加权合成总分 researchStrength（[0,1]）。**禁产「推荐买入」类结论**。 */
+  researchStrength: double("researchStrength"),
+  /** 研究强度分级：WEAK / MEDIUM / STRONG。 */
+  researchStrengthGrade: varchar("researchStrengthGrade", { length: 16 }),
+  /** 判定阈值**快照**（`FindingPolicy`）—— 可复核、可调参、可复现。 */
+  policyJson: longtext("policyJson"),
+  /** 局限性（JSON string[]）—— 必须如实列，禁留空凑数。 */
+  limitationsJson: longtext("limitationsJson"),
+  /** 人读证据摘要 + 强制免责声明（机器可读证据在 effect/sample/horizon/... 各 Json 列）。 */
+  evidenceJson: longtext("evidenceJson"),
+  /** 确定性发现指纹（experimentId + runId + findingType + 维度签名）；UNIQUE 保幂等。 */
+  fingerprint: varchar("fingerprint", { length: 64 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  fingerprintUnique: uniqueIndex("uq_research_finding_fingerprint").on(table.fingerprint),
+  experimentIdx: index("idx_research_finding_experiment").on(table.experimentId),
+  runIdx: index("idx_research_finding_run").on(table.runId),
+  statusIdx: index("idx_research_finding_status").on(table.status),
+  typeIdx: index("idx_research_finding_type").on(table.findingType),
+  strengthIdx: index("idx_research_finding_strength").on(table.researchStrength),
+  analysisIdx: index("idx_research_finding_analysis").on(table.primaryAnalysisId),
+}));
+
+export type ResearchFindingRow = typeof researchFinding.$inferSelect;
+export type InsertResearchFindingRow = typeof researchFinding.$inferInsert;

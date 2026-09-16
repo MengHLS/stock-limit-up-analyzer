@@ -133,11 +133,23 @@ const STATUS_TONE: Record<string, StatusTone> = {
   ARCHIVED: "neutral",
 
   // Research（RESEARCH-002 前端工作台）：假设状态 / 结论类型
-  // RESEARCH_HYPOTHESIS_STATUSES 的 DRAFT/REJECTED/INCONCLUSIVE 已在上方收录，此处补差集。
-  TESTING: "info",
+  // RESEARCH-FINDING-001：假设状态收敛为**严格 6 态**
+  // （DRAFT / TESTABLE / TESTED / SUPPORTED / REJECTED / PROMOTED）；
+  // DRAFT / REJECTED 已在上方收录，此处补差集 TESTABLE / TESTED / SUPPORTED / PROMOTED。
+  // ⚠️ 原 TESTING 已废弃（被 TESTED 的完成态语义取代），不可再作为假设状态使用。
+  TESTABLE: "info",
+  TESTED: "info",
   SUPPORTED: "success",
-  // 「部分支持」按语义必须落在 warning：它有方向证据但未过门槛，不能显示成 success。
+  PROMOTED: "success",
+  // 「部分支持」/「不确定」是**结论类型**（RESEARCH_CONCLUSION_TYPES）而非假设状态：
+  // 它有方向证据但未过门槛，按语义必须落在 warning，不能显示成 success。
   PARTIALLY_SUPPORTED: "warning",
+  // RESEARCH-FINDING-001 —— Finding 状态（DISCOVERED / REVIEWED / SUPPORTED / WEAK / CONTRADICTED / REJECTED）
+  // REVIEWED / SUPPORTED / REJECTED 已在上方收录；此处补 DISCOVERED / WEAK / CONTRADICTED。
+  // 「弱」与「冲突」都必须显性告警：前者证据不足，后者不同切片互相打架，都不该显示成中性绿。
+  DISCOVERED: "info",
+  WEAK: "warning",
+  CONTRADICTED: "danger",
   // RESEARCH_CONCLUSION_STATUSES
   FINAL: "success",
   SUPERSEDED: "neutral",
