@@ -23,19 +23,30 @@ import { DbDatasetRegistry } from "./datasetRegistry/db";
 import {
   RESEARCH_ANALYSIS_TYPES,
   RESEARCH_CONDITION_OPERATORS,
+  RESEARCH_EXPECTED_DIRECTIONS,
   RESEARCH_EXPERIMENT_STATUSES,
+  RESEARCH_FINDING_STATUSES,
   RESEARCH_GROUP_LOGICAL_OPERATORS,
   RESEARCH_HYPOTHESIS_STATUSES,
   RESEARCH_LOGICAL_OPERATORS,
   RESEARCH_TYPES,
+  ResearchCandidateError,
   ResearchConflictError,
+  ResearchFindingError,
+  ResearchHypothesisError,
+  assertHypothesisReadyForCandidate,
+  assertHypothesisTestable,
+  assertHypothesisTransition,
   createDbResearchRepositories,
   type ResearchAnalysisType,
+  type ResearchConditionSet,
   type ResearchRepositories,
 } from "./researchCore";
 import { RegistryResearchDatasetReader, type ResearchDatasetReader } from "./researchEngine/datasetReader";
 import { ResearchEngine } from "./researchEngine/engine";
 import { ResearchEngineError } from "./researchEngine/errors";
+import { FindingEngine } from "./researchEngine/finding/findingEngine";
+import { assertFindingTransition } from "./researchCore";
 import { createAnalysesBatch } from "./researchEngine/batchCreate";
 import {
   assertTemplateDraft,
@@ -67,6 +78,36 @@ const conditionInputSchema = z.object({
   logicalOperator: z.enum(RESEARCH_LOGICAL_OPERATORS).optional(),
   groupLogicalOperator: z.enum(RESEARCH_GROUP_LOGICAL_OPERATORS).optional(),
 });
+
+/**
+ * 已序列化的 `ResearchConditionSet`（`{ groups: [...] }` 形态）。
+ *
+ * 供 Hypothesis 的 `conditions` 入参复用 —— 与 Candidate 草图同构，
+ * 由 `assertConditionSet` 做领域级校验（本 schema 只做结构收敛）。
+ *
+ * `value` 用 `z.unknown()`（条件右值可为字符串/数字/布尔/null/数组/二元组），
+ * 结构收敛后经 `as ResearchConditionSet` 落领域形态 —— 真正的取值合法性由
+ * `assertConditionSet`（Repository 层）把关，不在这里重复造 zod 联合。
+ */
+const conditionSetSchema: z.ZodType<ResearchConditionSet> = z.object({
+  groups: z.array(
+    z.object({
+      groupNo: z.number().int().min(0),
+      groupLogicalOperator: z.enum(RESEARCH_GROUP_LOGICAL_OPERATORS),
+      conditions: z.array(
+        z.object({
+          groupNo: z.number().int().min(0),
+          sortOrder: z.number().int().min(0),
+          fieldName: z.string().min(1),
+          operator: z.enum(RESEARCH_CONDITION_OPERATORS),
+          value: z.unknown(),
+          logicalOperator: z.enum(RESEARCH_LOGICAL_OPERATORS),
+          groupLogicalOperator: z.enum(RESEARCH_GROUP_LOGICAL_OPERATORS),
+        }),
+      ),
+    }),
+  ),
+}) as z.ZodType<ResearchConditionSet>;
 
 /**
  * 单个分析的定义（**单建与批量建共用同一份 schema**）。
@@ -374,6 +415,14 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
           statement: z.string().min(1),
           nullHypothesis: z.string().optional(),
           alternativeHypothesis: z.string().optional(),
+          researchQuestion: z.string().optional(),
+          conditions: conditionSetSchema.optional(),
+          target: z.string().optional(),
+          horizon: z.string().optional(),
+          expectedDirection: z.enum(RESEARCH_EXPECTED_DIRECTIONS).optional(),
+          expectedEffect: z.string().optional(),
+          sourceFindingIds: z.array(z.number().int().positive()).optional(),
+          sourceConclusionId: z.number().int().positive().optional(),
         }),
       )
       .mutation(async ({ input }) =>
@@ -383,6 +432,14 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
           statement: input.statement,
           nullHypothesis: input.nullHypothesis ?? null,
           alternativeHypothesis: input.alternativeHypothesis ?? null,
+          researchQuestion: input.researchQuestion ?? null,
+          conditions: input.conditions ?? null,
+          target: input.target ?? null,
+          horizon: input.horizon ?? null,
+          expectedDirection: input.expectedDirection ?? null,
+          expectedEffect: input.expectedEffect ?? null,
+          sourceFindingIds: input.sourceFindingIds ?? null,
+          sourceConclusionId: input.sourceConclusionId ?? null,
         }),
       ),
 
@@ -395,6 +452,13 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
           statement: z.string().min(1).optional(),
           nullHypothesis: z.string().nullable().optional(),
           alternativeHypothesis: z.string().nullable().optional(),
+          researchQuestion: z.string().nullable().optional(),
+          conditions: conditionSetSchema.nullable().optional(),
+          target: z.string().nullable().optional(),
+          horizon: z.string().nullable().optional(),
+          expectedDirection: z.enum(RESEARCH_EXPECTED_DIRECTIONS).nullable().optional(),
+          expectedEffect: z.string().nullable().optional(),
+          sourceFindingIds: z.array(z.number().int().positive()).nullable().optional(),
           status: z.enum(RESEARCH_HYPOTHESIS_STATUSES).optional(),
           conclusion: z.string().nullable().optional(),
         }),
@@ -409,6 +473,13 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
         if (input.statement !== undefined) patch.statement = input.statement;
         if (input.nullHypothesis !== undefined) patch.nullHypothesis = input.nullHypothesis;
         if (input.alternativeHypothesis !== undefined) patch.alternativeHypothesis = input.alternativeHypothesis;
+        if (input.researchQuestion !== undefined) patch.researchQuestion = input.researchQuestion;
+        if (input.conditions !== undefined) patch.conditions = input.conditions;
+        if (input.target !== undefined) patch.target = input.target;
+        if (input.horizon !== undefined) patch.horizon = input.horizon;
+        if (input.expectedDirection !== undefined) patch.expectedDirection = input.expectedDirection;
+        if (input.expectedEffect !== undefined) patch.expectedEffect = input.expectedEffect;
+        if (input.sourceFindingIds !== undefined) patch.sourceFindingIds = input.sourceFindingIds;
         if (input.status !== undefined) patch.status = input.status;
         if (input.conclusion !== undefined) patch.conclusion = input.conclusion;
         if (Object.keys(patch).length === 0) {
@@ -731,6 +802,202 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
     listCandidates: publicProcedure
       .input(z.object({ experimentId: z.number().int().positive() }))
       .query(async ({ input }) => repos.relationships.getCandidatesByExperiment(input.experimentId)),
+
+    // ---- Finding（RESEARCH-FINDING-001）----
+    /**
+     * GET /research/findings —— 列出 Finding（按实验 / Run / 类型 / 状态 / 强度下界过滤）。
+     *
+     * Finding 是「Result → Finding」的**发现层**产物；只读端点，不做任何统计。
+     */
+    listFindings: publicProcedure
+      .input(
+        z.object({
+          experimentId: z.number().int().positive().optional(),
+          runId: z.number().int().positive().optional(),
+          findingType: z.string().optional(),
+          status: z.enum(RESEARCH_FINDING_STATUSES).optional(),
+          minResearchStrength: z.number().min(0).max(1).optional(),
+        }),
+      )
+      .query(async ({ input }) =>
+        repos.findings.list({
+          ...(input.experimentId !== undefined ? { experimentId: input.experimentId } : {}),
+          ...(input.runId !== undefined ? { runId: input.runId } : {}),
+          ...(input.findingType !== undefined ? { findingType: input.findingType as never } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.minResearchStrength !== undefined ? { minResearchStrength: input.minResearchStrength } : {}),
+        }),
+      ),
+
+    /** GET /research/findings/:id —— 单条 Finding 明细。 */
+    getFinding: publicProcedure
+      .input(z.object({ findingId: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        const finding = await repos.findings.getById(input.findingId);
+        if (!finding) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Finding：${input.findingId}` });
+        }
+        return finding;
+      }),
+
+    /**
+     * POST /research/findings/detect —— 对某 Run 重新运行 Finding 检测并落库。
+     *
+     * 🔴 只读 `research_result`（任务书 §28），**绝不重扫 Dataset**；
+     * 引擎只能产出 `DISCOVERED` 状态，重跑幂等（fingerprint 去重）。
+     */
+    detectFindings: adminProcedure
+      .input(
+        z.object({
+          experimentId: z.number().int().positive(),
+          runId: z.number().int().positive(),
+          analysisIds: z.array(z.number().int().positive()).optional(),
+          resetExisting: z.boolean().optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          const findingEngine = new FindingEngine({ repos });
+          return await findingEngine.detect({
+            experimentId: input.experimentId,
+            runId: input.runId,
+            ...(input.analysisIds !== undefined ? { analysisIds: input.analysisIds } : {}),
+            ...(input.resetExisting !== undefined ? { resetExisting: input.resetExisting } : {}),
+          });
+        } catch (e) {
+          toTrpcError(e);
+        }
+      }),
+
+    /**
+     * POST /research/findings/:id/review —— 用户 review 一条 Finding（状态流转）。
+     *
+     * 🔴 任务书 §13「不要让系统自动把所有 Finding 标记为 SUPPORTED」：
+     *    `SUPPORTED` / `WEAK` / `CONTRADICTED` / `REJECTED` 只能由**用户**在此流转；
+     *    转移必须过 `assertFindingTransition`（状态机）。
+     */
+    reviewFinding: adminProcedure
+      .input(
+        z.object({
+          findingId: z.number().int().positive(),
+          status: z.enum(RESEARCH_FINDING_STATUSES),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const existing = await repos.findings.getById(input.findingId);
+        if (!existing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Finding：${input.findingId}` });
+        }
+        try {
+          assertFindingTransition(existing.status, input.status);
+        } catch (e) {
+          if (e instanceof ResearchFindingError) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+          }
+          throw e;
+        }
+        return repos.findings.update(input.findingId, { status: input.status });
+      }),
+
+    // ---- Hypothesis 补充（create/update/delete 已存在）----
+    /** GET /research/hypotheses/:id —— 单条假设明细。 */
+    getHypothesis: publicProcedure
+      .input(z.object({ hypothesisId: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        const hypothesis = await repos.hypotheses.getById(input.hypothesisId);
+        if (!hypothesis) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Hypothesis：${input.hypothesisId}` });
+        }
+        return hypothesis;
+      }),
+
+    /**
+     * POST /research/hypotheses/:id/test —— 假设进入「可测」或「已测」状态（§26）。
+     *
+     * - 置 `TESTABLE`：三件套（conditions / target / horizon）必须齐备（`assertHypothesisTestable`）；
+     * - 其余转移走 `assertHypothesisTransition`（状态机，禁止跳级）。
+     *
+     * 🔴 本端点**只改状态**，不跑任何统计；实际验证由 `runEngine`（Run 收口时回写）完成。
+     */
+    testHypothesis: adminProcedure
+      .input(
+        z.object({
+          hypothesisId: z.number().int().positive(),
+          status: z.enum(RESEARCH_HYPOTHESIS_STATUSES),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const existing = await repos.hypotheses.getById(input.hypothesisId);
+        if (!existing) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Hypothesis：${input.hypothesisId}` });
+        }
+        try {
+          if (input.status === "TESTABLE") {
+            assertHypothesisTestable(existing);
+          }
+          assertHypothesisTransition(existing.status, input.status);
+        } catch (e) {
+          if (e instanceof ResearchHypothesisError) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+          }
+          throw e;
+        }
+        return repos.hypotheses.update(input.hypothesisId, { status: input.status });
+      }),
+
+    // ---- Strategy Candidate：从假设转正（RESEARCH-FINDING-001 §26）----
+    /**
+     * POST /research/strategy-candidates/from-hypothesis —— 把一条 `SUPPORTED` 假设转成候选草稿。
+     *
+     * 🔴 任务书 §26「不要自动生成 Strategy」：只允许 `SUPPORTED` / `PROMOTED` 假设转候选
+     *    （`assertHypothesisReadyForCandidate`）；产物是 `DRAFT` 候选，**不**自动转正 Strategy。
+     *    候选继承假设的条件/目标/视界/方向，并落 `sourceHypothesisId` + `sourceFindingIds` 谱系锚。
+     */
+    createCandidateFromHypothesis: adminProcedure
+      .input(
+        z.object({
+          hypothesisId: z.number().int().positive(),
+          name: z.string().min(1).max(200).optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const hypothesis = await repos.hypotheses.getById(input.hypothesisId);
+        if (!hypothesis) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Hypothesis：${input.hypothesisId}` });
+        }
+        try {
+          assertHypothesisReadyForCandidate(hypothesis);
+        } catch (e) {
+          if (e instanceof ResearchHypothesisError) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
+          }
+          throw e;
+        }
+        const experiment = await repos.experiments.getById(hypothesis.experimentId);
+        if (!experiment) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Experiment：${hypothesis.experimentId}` });
+        }
+        try {
+          const candidate = await repos.candidates.create({
+            experimentId: hypothesis.experimentId,
+            conclusionId: hypothesis.sourceConclusionId ?? null,
+            name: input.name ?? `${hypothesis.name}（候选）`,
+            description: `由假设「${hypothesis.name}」转出（§26）。${hypothesis.statement}`,
+            filterRule: hypothesis.conditions ?? undefined,
+            sourceDatasetVersionId: experiment.datasetVersionId ?? null,
+            sourceResearchRunId: hypothesis.runId ?? null,
+            sourceHypothesisId: hypothesis.id ?? null,
+            sourceFindingIds: hypothesis.sourceFindingIds ?? null,
+            status: "DRAFT",
+          });
+          return candidate;
+        } catch (e) {
+          if (e instanceof ResearchCandidateError) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: e.message });
+          }
+          throw e;
+        }
+      }),
 
     /** 引擎默认策略（供前端展示阈值口径）。 */
     getConclusionPolicy: publicProcedure.query(() => DEFAULT_CONCLUSION_POLICY),
