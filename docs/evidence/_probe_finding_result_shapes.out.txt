@@ -1,0 +1,1239 @@
+{
+  "generatedAt": "2026-09-16T09:17:14.756Z",
+  "experiments": [
+    {
+      "id": 240002,
+      "name": "正式数据，首板回踩与未来收益的关系",
+      "datasetVersionId": 390002,
+      "researchType": "FEATURE",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 180001,
+      "name": "首板换手率与未来五日收益的关系",
+      "datasetVersionId": 390001,
+      "researchType": "FEATURE",
+      "status": "COMPLETED"
+    }
+  ],
+  "runs": [
+    {
+      "id": 600001,
+      "experimentId": 240002,
+      "runNo": 9,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 570001,
+      "experimentId": 240002,
+      "runNo": 8,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 540001,
+      "experimentId": 240002,
+      "runNo": 7,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 510001,
+      "experimentId": 240002,
+      "runNo": 6,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 480001,
+      "experimentId": 240002,
+      "runNo": 5,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 450001,
+      "experimentId": 240002,
+      "runNo": 4,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 420001,
+      "experimentId": 240002,
+      "runNo": 3,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 390001,
+      "experimentId": 240002,
+      "runNo": 2,
+      "status": "COMPLETED",
+      "sampleCount": 23978
+    },
+    {
+      "id": 330003,
+      "experimentId": 240002,
+      "runNo": 1,
+      "status": "FAILED",
+      "sampleCount": null
+    },
+    {
+      "id": 330002,
+      "experimentId": 180001,
+      "runNo": 4,
+      "status": "COMPLETED",
+      "sampleCount": 1130
+    },
+    {
+      "id": 300001,
+      "experimentId": 180001,
+      "runNo": 3,
+      "status": "COMPLETED",
+      "sampleCount": 1130
+    },
+    {
+      "id": 270002,
+      "experimentId": 180001,
+      "runNo": 2,
+      "status": "COMPLETED",
+      "sampleCount": 1130
+    }
+  ],
+  "perRun": [
+    {
+      "runId": 600001,
+      "analysisType": "DESCRIPTIVE",
+      "analyses": 2,
+      "results": 76
+    },
+    {
+      "runId": 600001,
+      "analysisType": "EVENT_STUDY",
+      "analyses": 2,
+      "results": 310
+    },
+    {
+      "runId": 600001,
+      "analysisType": "QUANTILE",
+      "analyses": 2,
+      "results": 66
+    },
+    {
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "analyses": 12,
+      "results": 332
+    },
+    {
+      "runId": 570001,
+      "analysisType": "CONDITIONAL",
+      "analyses": 13,
+      "results": 208
+    },
+    {
+      "runId": 540001,
+      "analysisType": "CONDITIONAL",
+      "analyses": 180,
+      "results": 2616
+    },
+    {
+      "runId": 510001,
+      "analysisType": "CONDITIONAL",
+      "analyses": 15,
+      "results": 210
+    },
+    {
+      "runId": 510001,
+      "analysisType": "SEGMENT_RELATION",
+      "analyses": 14,
+      "results": 424
+    },
+    {
+      "runId": 480001,
+      "analysisType": "CONDITIONAL",
+      "analyses": 3,
+      "results": 48
+    },
+    {
+      "runId": 480001,
+      "analysisType": "SEGMENT_RELATION",
+      "analyses": 4,
+      "results": 119
+    },
+    {
+      "runId": 450001,
+      "analysisType": "CONDITIONAL",
+      "analyses": 3,
+      "results": 48
+    },
+    {
+      "runId": 450001,
+      "analysisType": "DESCRIPTIVE",
+      "analyses": 1,
+      "results": 95
+    },
+    {
+      "runId": 450001,
+      "analysisType": "SEGMENT_RELATION",
+      "analyses": 1,
+      "results": 31
+    },
+    {
+      "runId": 420001,
+      "analysisType": "CONDITIONAL",
+      "analyses": 1,
+      "results": 16
+    },
+    {
+      "runId": 420001,
+      "analysisType": "DESCRIPTIVE",
+      "analyses": 1,
+      "results": 95
+    },
+    {
+      "runId": 390001,
+      "analysisType": "SEGMENT_RELATION",
+      "analyses": 1,
+      "results": 31
+    },
+    {
+      "runId": 330003,
+      "analysisType": "EVENT_STUDY",
+      "analyses": 1,
+      "results": 0
+    },
+    {
+      "runId": 330002,
+      "analysisType": "EVENT_STUDY",
+      "analyses": 1,
+      "results": 50
+    },
+    {
+      "runId": 300001,
+      "analysisType": "QUANTILE",
+      "analyses": 1,
+      "results": 53
+    },
+    {
+      "runId": 270002,
+      "analysisType": "EVENT_STUDY",
+      "analyses": 1,
+      "results": 73
+    },
+    {
+      "runId": 270001,
+      "analysisType": "CONDITIONAL",
+      "analyses": 5,
+      "results": 76
+    },
+    {
+      "runId": 270001,
+      "analysisType": "QUANTILE",
+      "analyses": 2,
+      "results": 106
+    }
+  ],
+  "samples": {
+    "QUANTILE": [
+      {
+        "id": 540425,
+        "analysisId": 570010,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "P_VALUE_DIFFERENCE",
+        "metricValue": 2.223901613973567e-7,
+        "sampleCount": 23751,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"metricDefinition\":\"由 Welch t 统计量经**正态近似**得到的双尾 p 值（与 T_STAT 的 p 值同一近似口径）。未做多重比较校正"
+      },
+      {
+        "id": 540424,
+        "analysisId": 570010,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "T_STAT_DIFFERENCE",
+        "metricValue": 5.1799257597167,
+        "sampleCount": 23751,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"metricDefinition\":\"Welch 两样本 t 统计量 (m₁ − m₂)/√(s₁²/n₁ + s₂²/n₂)（left − right）。**不"
+      },
+      {
+        "id": 540423,
+        "analysisId": 570010,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "SPREAD_TOP_BOTTOM",
+        "metricValue": 0.04033644960074884,
+        "sampleCount": 23751,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"metricDefinition\":\"**最高分位组均值 − 最低分位组均值**（left = 最高分位组，right = 最低分位组）。\",\"topGroup\""
+      },
+      {
+        "id": 540422,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":10}",
+        "metricCode": "STD_RETURN",
+        "metricValue": 0.2136553000130216,
+        "sampleCount": 762,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":10,\"lowSample\":false,\"metricDefinition\":\"有限样本的标准差（除以 n−1，作用于收益型变量）"
+      },
+      {
+        "id": 540421,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":10}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.536745406824147,
+        "sampleCount": 762,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":10,\"lowSample\":false,\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v "
+      },
+      {
+        "id": 540420,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":10}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": 0.012483847060164904,
+        "sampleCount": 762,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":10,\"lowSample\":false,\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540419,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":10}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.054252701828964016,
+        "sampleCount": 762,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":10,\"lowSample\":false,\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540418,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":10}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 762,
+        "sampleCount": 762,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":10,\"lowSample\":false,\"metricDefinition\":\"过滤非有限值后的样本数。\"}"
+      },
+      {
+        "id": 540417,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":1}",
+        "metricCode": "STD_RETURN",
+        "metricValue": 0.1297396030709991,
+        "sampleCount": 22989,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":1,\"lowSample\":false,\"metricDefinition\":\"有限样本的标准差（除以 n−1，作用于收益型变量）。"
+      },
+      {
+        "id": 540416,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":1}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.4720953499499761,
+        "sampleCount": 22989,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":1,\"lowSample\":false,\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v ="
+      },
+      {
+        "id": 540415,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":1}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.006201550387596904,
+        "sampleCount": 22989,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":1,\"lowSample\":false,\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540414,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":1}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.013916252228215176,
+        "sampleCount": 22989,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":1,\"lowSample\":false,\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540413,
+        "analysisId": 570010,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"quantile\":1}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 22989,
+        "sampleCount": 22989,
+        "detailsHead": "{\"featureVariable\":\"is_one_word_hold\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[0,0,0,0,0,0,0,0,0],\"pairCount\":23751,\"excludedForMissing\":227,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) − mean(最低分位组)。\",\"quantileGroup\":1,\"lowSample\":false,\"metricDefinition\":\"过滤非有限值后的样本数。\"}"
+      },
+      {
+        "id": 540053,
+        "analysisId": 570001,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "P_VALUE_DIFFERENCE",
+        "metricValue": 0,
+        "sampleCount": 4750,
+        "detailsHead": "{\"featureVariable\":\"turnover\",\"outcomeVariable\":\"future_return_5d\",\"requestedGroups\":10,\"actualGroups\":10,\"cutPoints\":[2.46854,3.5884800000000006,4.631849999999999,5.73026,6.950749999999999,8.40292,10.274239999999997,12.997,17.88239999999999],\"pairCount\":23748,\"excludedForMissing\":230,\"groupingRule\":\"group(v) = 1 + |{k : v > percentile(feature, k/G)}|；相同特征值不劈开分组。\",\"spreadDefinition\":\"SPREAD_TOP_BOTTOM = mean(最高分位组) −"
+      }
+    ],
+    "CONDITIONAL": [
+      {
+        "id": 510208,
+        "analysisId": 540013,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "P_VALUE_DIFFERENCE",
+        "metricValue": 0,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"由 Welch t 统计量经**正态近似**得到的双尾 p 值（与 T_STAT 的"
+      },
+      {
+        "id": 510207,
+        "analysisId": 540013,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "T_STAT_DIFFERENCE",
+        "metricValue": 15.591229420232446,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"Welch 两样本 t 统计量 (m₁ − m₂)/√(s₁²/n₁ + s₂²/n"
+      },
+      {
+        "id": 510206,
+        "analysisId": 540013,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "RELATIVE_DIFFERENCE",
+        "metricValue": 2.6532951609684057,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"(条件组均值 − 全样本均值) / |全样本均值|；基准均值为 0 时返回 null"
+      },
+      {
+        "id": 510205,
+        "analysisId": 540013,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "DIFFERENCE",
+        "metricValue": 0.04035757692029468,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"**条件组均值 − 全部样本均值**（left = 条件组，right = 全样本）"
+      },
+      {
+        "id": 510204,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"CONDITION\"}",
+        "metricCode": "MAX_DRAWDOWN",
+        "metricValue": -0.012673930630239383,
+        "sampleCount": 4504,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）"
+      },
+      {
+        "id": 510203,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"ALL\"}",
+        "metricCode": "MAX_DRAWDOWN",
+        "metricValue": -0.03714995650032536,
+        "sampleCount": 23931,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）"
+      },
+      {
+        "id": 510202,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"CONDITION\"}",
+        "metricCode": "STD_RETURN",
+        "metricValue": 0.1633106605022593,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"有限样本的标准差（除以 n−1，作用于收益型变量）。\",\"group\":\"CONDI"
+      },
+      {
+        "id": 510201,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"CONDITION\"}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.4614011601963409,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。"
+      },
+      {
+        "id": 510200,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"CONDITION\"}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.007032930185232344,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\",\"group\":\"CONDITION\"}"
+      },
+      {
+        "id": 510199,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"CONDITION\"}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.05556793780059904,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\",\"group\":\"CONDITION\"}"
+      },
+      {
+        "id": 510198,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"CONDITION\"}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 4482,
+        "sampleCount": 4482,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"过滤非有限值后的样本数。\",\"group\":\"CONDITION\"}"
+      },
+      {
+        "id": 510197,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"ALL\"}",
+        "metricCode": "STD_RETURN",
+        "metricValue": 0.13343730914141402,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"有限样本的标准差（除以 n−1，作用于收益型变量）。\",\"group\":\"ALL\"}"
+      },
+      {
+        "id": 510196,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"ALL\"}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.47416950865226726,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。"
+      },
+      {
+        "id": 510195,
+        "analysisId": 540013,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"group\":\"ALL\"}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.005747126436781614,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"conditionRule\":\"pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5\",\"conditionCount\":2,\"totalSampleCount\":23751,\"conditionSampleCount\":4482,\"differenceDefinition\":\"DIFFERENCE = mean(条件样本) − mean(全样本)。\",\"relativeDifferenceDefinition\":\"RELATIVE_DIFFERENCE = DIFFERENCE / |mean(全样本)|；全样本均值为 0 时不可算。\",\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\",\"group\":\"ALL\"}"
+      }
+    ],
+    "EVENT_STUDY": [
+      {
+        "id": 540580,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "MEAN_DAYS_TO_BREAKOUT",
+        "metricValue": 1.3303913043478262,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"对 `days_to_breakout_{h}d` 变量取均值（仅统计已突破样本；未突破为 null 不参与）。\",\"variable\":\"days_to_breakout_20d\",\"horizon\":20}"
+      },
+      {
+        "id": 540579,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "BREAKOUT_RATE",
+        "metricValue": 0.9592126115605972,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"对 0/1 型 `is_breakout_{h}d` 变量取均值（[T+1, T+h] 区间内突破事件日高点的比例）。\",\"variable\":\"is_breakout_20d\",\"horizon\":20}"
+      },
+      {
+        "id": 540578,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "MAX_DRAWDOWN",
+        "metricValue": -0.09951547056431302,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。\",\"variable\":\"max_drawdown_20d\",\"horizon\":20}"
+      },
+      {
+        "id": 540577,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "MAX_ADVERSE_EXCURSION",
+        "metricValue": -0.12096918761405634,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"对事件级 `min_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大不利偏移）。\",\"variable\":\"min_return_20d\",\"horizon\":20}"
+      },
+      {
+        "id": 540576,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "MAX_FAVORABLE_EXCURSION",
+        "metricValue": 0.20814418062142329,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"对事件级 `max_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大有利偏移）。\",\"variable\":\"max_return_20d\",\"horizon\":20}"
+      },
+      {
+        "id": 540575,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "P_VALUE",
+        "metricValue": 0.000002353168678359552,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"正态近似的双尾 p 值 2·(1−Φ(|t|))（由 HAC t 统计量推出）。**不是**多重比较校正后的值。\",\"variable\":\"future_return_20d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":20,\"lowSample\":false,\"availableVariables\":[\"future_return_20d\",\"max_return_20d\",\"min_return_20d\",\"max_drawdown_20d\",\"is_breakout_20d\",\"days_to_breakout_20d\"],\"unavailableVariables\":[]}"
+      },
+      {
+        "id": 540574,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "T_STAT",
+        "metricValue": 4.720696784609775,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"Newey-West HAC 稳健 t 统计量（shared/quant-stats.neweyWestMeanTStat，默认滞后 L=floor(4·(n/100)^(2/9))）。**仅作研究辅助**：事件样本存在重叠视界，独立性假设不严格成立。\",\"variable\":\"future_return_20d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":20,\"lowSample\":false,\"availableVariables\":[\"future_return_20d\",\"max_return_20d\",\"min_return_20d\",\"max_drawdown_20d\",\"is_breakout_20d\",\"days_to_breakout_20d"
+      },
+      {
+        "id": 540573,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.4402379195067946,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。\",\"variable\":\"future_return_20d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":20,\"lowSample\":false,\"availableVariables\":[\"future_return_20d\",\"max_return_20d\",\"min_return_20d\",\"max_drawdown_20d\",\"is_breakout_20d\",\"days_to_breakout_20d\"],\"unavailableVariables\":[]}"
+      },
+      {
+        "id": 540572,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "STD_RETURN",
+        "metricValue": 0.22864613637163236,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"有限样本的标准差（除以 n−1，作用于收益型变量）。\",\"variable\":\"future_return_20d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":20,\"lowSample\":false,\"availableVariables\":[\"future_return_20d\",\"max_return_20d\",\"min_return_20d\",\"max_drawdown_20d\",\"is_breakout_20d\",\"days_to_breakout_20d\"],\"unavailableVariables\":[]}"
+      },
+      {
+        "id": 540571,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.02218300983110669,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\",\"variable\":\"future_return_20d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":20,\"lowSample\":false,\"availableVariables\":[\"future_return_20d\",\"max_return_20d\",\"min_return_20d\",\"max_drawdown_20d\",\"is_breakout_20d\",\"days_to_breakout_20d\"],\"unavailableVariables\":[]}"
+      },
+      {
+        "id": 540570,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.01290959940552959,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\",\"variable\":\"future_return_20d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":20,\"lowSample\":false,\"availableVariables\":[\"future_return_20d\",\"max_return_20d\",\"min_return_20d\",\"max_drawdown_20d\",\"is_breakout_20d\",\"days_to_breakout_20d\"],\"unavailableVariables\":[]}"
+      },
+      {
+        "id": 540569,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":20}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 23033,
+        "sampleCount": 23033,
+        "detailsHead": "{\"metricDefinition\":\"过滤非有限值后的样本数。\",\"variable\":\"future_return_20d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":20,\"lowSample\":false,\"availableVariables\":[\"future_return_20d\",\"max_return_20d\",\"min_return_20d\",\"max_drawdown_20d\",\"is_breakout_20d\",\"days_to_breakout_20d\"],\"unavailableVariables\":[]}"
+      },
+      {
+        "id": 540568,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":19}",
+        "metricCode": "P_VALUE",
+        "metricValue": 8.539574147814477e-7,
+        "sampleCount": 23113,
+        "detailsHead": "{\"metricDefinition\":\"正态近似的双尾 p 值 2·(1−Φ(|t|))（由 HAC t 统计量推出）。**不是**多重比较校正后的值。\",\"variable\":\"future_return_19d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":19,\"lowSample\":false,\"availableVariables\":[\"future_return_19d\"],\"unavailableVariables\":[\"max_return_19d\",\"min_return_19d\",\"max_drawdown_19d\",\"is_breakout_19d\",\"days_to_breakout_19d\"]}"
+      },
+      {
+        "id": 540567,
+        "analysisId": 570011,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"horizon\":19}",
+        "metricCode": "T_STAT",
+        "metricValue": 4.922900622845687,
+        "sampleCount": 23113,
+        "detailsHead": "{\"metricDefinition\":\"Newey-West HAC 稳健 t 统计量（shared/quant-stats.neweyWestMeanTStat，默认滞后 L=floor(4·(n/100)^(2/9))）。**仅作研究辅助**：事件样本存在重叠视界，独立性假设不严格成立。\",\"variable\":\"future_return_19d\",\"definition\":\"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。\",\"horizon\":19,\"lowSample\":false,\"availableVariables\":[\"future_return_19d\"],\"unavailableVariables\":[\"max_return_19d\",\"min_return_19d\",\"max_drawdown_19d\",\"is_breakout_1"
+      }
+    ],
+    "STABILITY": [
+      {
+        "id": 540746,
+        "analysisId": 570017,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"industry\":\"ALL\"}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.015210360880304351,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"industry\",\"dimensionKey\":\"industry\",\"groupCount\":0,\"excludedForMissingDimension\":23751,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"ALL\",\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540745,
+        "analysisId": 570016,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "STABILITY_RATIO",
+        "metricValue": 1,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"metricDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\"}"
+      },
+      {
+        "id": 540744,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"ALL\"}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.015210360880304351,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"ALL\",\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540743,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SZ\"}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.4681313173502632,
+        "sampleCount": 11971,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SZ\",\"lowSample\":false,\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。\"}"
+      },
+      {
+        "id": 540742,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SZ\"}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.0068587105624142415,
+        "sampleCount": 11971,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SZ\",\"lowSample\":false,\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540741,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SZ\"}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.014510895680295347,
+        "sampleCount": 11971,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SZ\",\"lowSample\":false,\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540740,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SZ\"}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 11971,
+        "sampleCount": 11971,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SZ\",\"lowSample\":false,\"metricDefinition\":\"过滤非有限值后的样本数。\"}"
+      },
+      {
+        "id": 540739,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SH\"}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.4803056027164686,
+        "sampleCount": 11780,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SH\",\"lowSample\":false,\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。\"}"
+      },
+      {
+        "id": 540738,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SH\"}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.004631246744492407,
+        "sampleCount": 11780,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SH\",\"lowSample\":false,\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540737,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SH\"}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.015921167154439135,
+        "sampleCount": 11780,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SH\",\"lowSample\":false,\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540736,
+        "analysisId": 570016,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"market\":\"SH\"}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 11780,
+        "sampleCount": 11780,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"market\",\"dimensionKey\":\"market\",\"groupCount\":2,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"SH\",\"lowSample\":false,\"metricDefinition\":\"过滤非有限值后的样本数。\"}"
+      },
+      {
+        "id": 540735,
+        "analysisId": 570015,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"board\":\"ALL\"}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": 0.015210360880304351,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"board\",\"dimensionKey\":\"board\",\"groupCount\":1,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"ALL\",\"metricDefinition\":\"有限样本的算术平均（作用于收益型变量）。\"}"
+      },
+      {
+        "id": 540734,
+        "analysisId": 570015,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"board\":\"main\"}",
+        "metricCode": "WIN_RATE",
+        "metricValue": 0.47416950865226726,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"board\",\"dimensionKey\":\"board\",\"groupCount\":1,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"main\",\"lowSample\":false,\"metricDefinition\":\"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。\"}"
+      },
+      {
+        "id": 540733,
+        "analysisId": 570015,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"board\":\"main\"}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.005747126436781614,
+        "sampleCount": 23751,
+        "detailsHead": "{\"outcomeVariable\":\"future_return_5d\",\"dimension\":\"board\",\"dimensionKey\":\"board\",\"groupCount\":1,\"excludedForMissingDimension\":0,\"excludedForMissingOutcome\":227,\"stabilityRatioDefinition\":\"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。\",\"period\":\"main\",\"lowSample\":false,\"metricDefinition\":\"有限样本的中位数（作用于收益型变量）。\"}"
+      }
+    ],
+    "SEGMENT_RELATION": [
+      {
+        "id": 390564,
+        "analysisId": 450024,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "P_VALUE_DIFFERENCE",
+        "metricValue": 0,
+        "sampleCount": 9418,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390563,
+        "analysisId": 450024,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "T_STAT_DIFFERENCE",
+        "metricValue": -16.262459219514053,
+        "sampleCount": 9418,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390562,
+        "analysisId": 450024,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "SPREAD_TOP_BOTTOM",
+        "metricValue": -0.026575808241840096,
+        "sampleCount": 9418,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390561,
+        "analysisId": 450024,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "PAIR_SAMPLE_COUNT",
+        "metricValue": 23544,
+        "sampleCount": 23544,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390560,
+        "analysisId": 450024,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "PAIR_RANK_CORRELATION",
+        "metricValue": -0.12712206255407263,
+        "sampleCount": 23544,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390559,
+        "analysisId": 450024,
+        "resultType": "SCALAR",
+        "dimensionJson": null,
+        "metricCode": "PAIR_CORRELATION",
+        "metricValue": -0.13287768070570072,
+        "sampleCount": 23544,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390558,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":5}",
+        "metricCode": "STD_RETURN",
+        "metricValue": 0.09145441421344004,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390557,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":5}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.07299270072992703,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390556,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":5}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": -0.07164500024661472,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390555,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":5}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 4709,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390554,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":4}",
+        "metricCode": "STD_RETURN",
+        "metricValue": 0.06523054032443788,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390553,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":4}",
+        "metricCode": "MEDIAN_RETURN",
+        "metricValue": -0.04658886894075409,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390552,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":4}",
+        "metricCode": "MEAN_RETURN",
+        "metricValue": -0.050797707861734445,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      },
+      {
+        "id": 390551,
+        "analysisId": 450024,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"windowA\":4}",
+        "metricCode": "SAMPLE_COUNT",
+        "metricValue": 4709,
+        "sampleCount": 4709,
+        "detailsHead": "{\"windowA\":{\"window\":[0,3],\"stat\":\"return\",\"variable\":\"future_return_3d\"},\"windowB\":{\"window\":[3,8],\"stat\":\"max_drawdown\",\"variable\":\"segment_max_drawdown_3_8d\"},\"valueWindowA\":[1,3],\"valueWindowB\":[4,8],\"requestedBands\":5,\"actualBands\":5,\"cutPoints\":[-0.05842928597060944,-0.017499327052489876,0.021777003943219762,0.08358641479849932],\"pairCount\":23544,\"excludedForMissing\":434,\"bandingRule\":\"band(v) = 1 + |{k : v > p"
+      }
+    ],
+    "DESCRIPTIVE": [
+      {
+        "id": 540784,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"future_return_5d\"}",
+        "metricCode": "KURTOSIS",
+        "metricValue": 3.898767516638003,
+        "sampleCount": 23751,
+        "detailsHead": "{\"metricDefinition\":\"adjusted Fisher-Pearson g2；n < 4 返回 null。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540783,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"is_one_word_hold\"}",
+        "metricCode": "KURTOSIS",
+        "metricValue": 26.219605253730645,
+        "sampleCount": 23978,
+        "detailsHead": "{\"metricDefinition\":\"adjusted Fisher-Pearson g2；n < 4 返回 null。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540782,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"future_return_5d\"}",
+        "metricCode": "SKEWNESS",
+        "metricValue": 1.4046902489339537,
+        "sampleCount": 23751,
+        "detailsHead": "{\"metricDefinition\":\"adjusted Fisher-Pearson g1；n < 3 返回 null。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540781,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"is_one_word_hold\"}",
+        "metricCode": "SKEWNESS",
+        "metricValue": 5.312006992549253,
+        "sampleCount": 23978,
+        "detailsHead": "{\"metricDefinition\":\"adjusted Fisher-Pearson g1；n < 3 返回 null。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540780,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"future_return_5d\"}",
+        "metricCode": "P99",
+        "metricValue": 0.5261210976523042,
+        "sampleCount": 23751,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540779,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"is_one_word_hold\"}",
+        "metricCode": "P99",
+        "metricValue": 1,
+        "sampleCount": 23978,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540778,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"future_return_5d\"}",
+        "metricCode": "P95",
+        "metricValue": 0.2670496594119521,
+        "sampleCount": 23751,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540777,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"is_one_word_hold\"}",
+        "metricCode": "P95",
+        "metricValue": 0,
+        "sampleCount": 23978,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540776,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"future_return_5d\"}",
+        "metricCode": "P90",
+        "metricValue": 0.17121588089330012,
+        "sampleCount": 23751,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540775,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"is_one_word_hold\"}",
+        "metricCode": "P90",
+        "metricValue": 0,
+        "sampleCount": 23978,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540774,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"future_return_5d\"}",
+        "metricCode": "P75",
+        "metricValue": 0.06607482117686211,
+        "sampleCount": 23751,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540773,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"is_one_word_hold\"}",
+        "metricCode": "P75",
+        "metricValue": 0,
+        "sampleCount": 23978,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540772,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"future_return_5d\"}",
+        "metricCode": "P50",
+        "metricValue": -0.005747126436781614,
+        "sampleCount": 23751,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数（= 分位定义下的中位数）。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      },
+      {
+        "id": 540771,
+        "analysisId": 570018,
+        "resultType": "GROUPED",
+        "dimensionJson": "{\"variable\":\"is_one_word_hold\"}",
+        "metricCode": "P50",
+        "metricValue": 0,
+        "sampleCount": 23978,
+        "detailsHead": "{\"metricDefinition\":\"线性插值分位数（= 分位定义下的中位数）。\",\"groupBy\":\"variable\",\"roles\":{\"is_one_word_hold\":\"FEATURE\",\"future_return_5d\":\"OUTCOME\"}}"
+      }
+    ]
+  },
+  "latestRunAnalyses": [
+    {
+      "id": 570001,
+      "runId": 600001,
+      "analysisType": "QUANTILE",
+      "name": "分位分析：turnover 分 10 组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570002,
+      "runId": 600001,
+      "analysisType": "EVENT_STUDY",
+      "name": "事件研究：T+1 / T+2 / T+3 / T+4 / T+5 / T+6 / T+7 / T+8 / T+9 / T+10 / T+11 / T+12 / T+13 / T+14 / T+15 / T+16 / T+17 / T+18 / T+19 / T+20",
+      "target": null,
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570003,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 year 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570004,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 month 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570005,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 quarter 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570006,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 board 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570007,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 market 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570008,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 industry 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570009,
+      "runId": 600001,
+      "analysisType": "DESCRIPTIVE",
+      "name": "描述统计：2 个变量",
+      "target": null,
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570010,
+      "runId": 600001,
+      "analysisType": "QUANTILE",
+      "name": "分位分析：is_one_word_hold 分 10 组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570011,
+      "runId": 600001,
+      "analysisType": "EVENT_STUDY",
+      "name": "事件研究：T+1 / T+2 / T+3 / T+4 / T+5 / T+6 / T+7 / T+8 / T+9 / T+10 / T+11 / T+12 / T+13 / T+14 / T+15 / T+16 / T+17 / T+18 / T+19 / T+20",
+      "target": null,
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570012,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 year 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570013,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 month 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570014,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 quarter 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570015,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 board 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570016,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 market 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570017,
+      "runId": 600001,
+      "analysisType": "STABILITY",
+      "name": "稳定性分析：按 industry 分组 → future_return_5d",
+      "target": "future_return_5d",
+      "status": "COMPLETED"
+    },
+    {
+      "id": 570018,
+      "runId": 600001,
+      "analysisType": "DESCRIPTIVE",
+      "name": "描述统计：2 个变量",
+      "target": null,
+      "status": "COMPLETED"
+    }
+  ]
+}

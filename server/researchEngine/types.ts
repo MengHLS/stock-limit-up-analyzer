@@ -301,6 +301,14 @@ export const RESEARCH_ENGINE_ERROR_CODES = [
   "TEMPLATE_NAME_CONFLICT",
   /** 模板内容不合法（空模板 / 明细项类型未实现 / 名字为空）。 */
   "TEMPLATE_VALIDATION_FAILED",
+  // ---- 发现层（RESEARCH-FINDING-001）----
+  /**
+   * Finding 检测失败。
+   *
+   * ⚠️ 与「Run 执行失败」**不是一回事**：Finding 层只消费已落库的 Result，
+   * 它的失败**不应**把一条已经跑出结果的 Run 判死（见 `engine.ts` 的写入点注释）。
+   */
+  "FINDING_DETECTION_FAILED",
   "INTERNAL_ERROR",
 ] as const;
 export type ResearchEngineErrorCode = (typeof RESEARCH_ENGINE_ERROR_CODES)[number];

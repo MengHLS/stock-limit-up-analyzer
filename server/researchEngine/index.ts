@@ -35,3 +35,5 @@ export * from "./engine";
 export * from "./maintenance";
 export * from "./batchCreate";
 export * from "./templates";
+// RESEARCH-FINDING-001 B4 —— 发现层（Result → Finding；只消费 Result，绝不重扫 Dataset）。
+export * from "./finding";
