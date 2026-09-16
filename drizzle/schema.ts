@@ -1657,12 +1657,26 @@ export const researchAnalysis = mysqlTable("research_analysis", {
   configJson: longtext("configJson"),
   /** PENDING / RUNNING / COMPLETED / FAILED / CANCELLED。 */
   status: varchar("status", { length: 20 }).notNull().default("PENDING"),
+  // ---- RESEARCH-PLANNER-001：本分析由哪份研究计划生成（自动生成必须可追溯）----
+  // 刻意**加在 `research_analysis` 上**而不是另建 `research_plan_analysis` 关系表：
+  // 「一个分析一个生命周期」是硬纪律，第二张表会立刻造出第二套生命周期与第二份优先级口径。
+  /** 软引用 research_plan.id；NULL = 人工逐个创建（高级 / 专家模式）。 */
+  planId: bigint("planId", { mode: "number" }),
+  /** 生成它的 Research Module 键（研究方法，如 PULLBACK_EFFECTIVENESS）；NULL = 非计划生成。 */
+  moduleKey: varchar("moduleKey", { length: 64 }),
+  /** P0 / P1 / P2 —— 规模裁剪顺序（NULL = 未分级，人工创建）。 */
+  priority: varchar("priority", { length: 4 }),
+  /** 这条分析要回答什么（人读；来自计划的 purpose）。 */
+  purpose: varchar("purpose", { length: 300 }),
+  /** 是否为计划中的必需项（裁剪时 P0 必需项永不丢弃）。 */
+  requiredFlag: boolean("requiredFlag"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   completedAt: timestamp("completedAt"),
 }, (table) => ({
   runIdx: index("idx_research_analysis_run").on(table.runId),
   analysisTypeIdx: index("idx_research_analysis_type").on(table.analysisType),
   statusIdx: index("idx_research_analysis_status").on(table.status),
+  planIdx: index("idx_research_analysis_plan").on(table.planId),
 }));
 
 export type ResearchAnalysisTableRow = typeof researchAnalysis.$inferSelect;
@@ -1845,6 +1859,22 @@ export const researchStrategyCandidate = mysqlTable("research_strategy_candidate
    * research_analysis.runId` 两跳解析；**解析不出即 NULL，禁止伪造**（空值 = 如实承认缺失）。
    */
   sourceResearchRunId: bigint("sourceResearchRunId", { mode: "number" }),
+  /**
+   * RESEARCH-PLANNER-001 — 来源 Research Plan id（软引用 `research_plan.id`，**可空**）。
+   *
+   * 🔴 任务书 §16 要求 Candidate 保留完整 provenance：
+   * `researchId / researchRunId / researchPlanId / datasetVersionId / findingIds / conclusionId`。
+   * 前五项在本表已有对应列，只有 `researchPlanId` 缺位 —— 而它恰恰是**唯一能回答
+   * 「这条候选是按哪份自动生成的计划做出来的」**的锚点：没有它，事后无法区分
+   * 「自动规划产出的候选」与「专家手工堆分析产出的候选」，也无法回看当时被裁剪掉了什么。
+   *
+   * 为什么是**列**而不是塞进 `sourceTraceJson`：本表已确立的分工是
+   * 「JSON 存证据快照，列存**可检索的谱系锚点**」。计划 id 需要被反查
+   * （「这份计划产出了哪些候选」），属于锚点而非快照。
+   *
+   * 可空且**不 backfill**：本列生效前的候选走的是人工路径，没有计划来源，如实置 NULL。
+   */
+  sourceResearchPlanId: bigint("sourceResearchPlanId", { mode: "number" }),
   /**
    * RESEARCH-006.1 — 研究证据**快照**（provenance snapshot，不是 `research_result` 的第二份存储）。
    *
@@ -2150,3 +2180,113 @@ export const researchFinding = mysqlTable("research_finding", {
 
 export type ResearchFindingRow = typeof researchFinding.$inferSelect;
 export type InsertResearchFindingRow = typeof researchFinding.$inferInsert;
+
+// ===========================================================================
+// RESEARCH-PLANNER-001 — 自动研究编排层（Research Question + Research Plan）
+// ===========================================================================
+//
+// 存在的理由：当前 Research 是「用户手工配置大量 Analysis 参数的实验平台」。
+// 本层把入口上移为「用户提出研究问题 → 系统设计并生成实验」。
+//
+// 🔴 三条边界（违反即架构错误）
+//   1. **不新建第二套 Analysis 生命周期**：计划项落库仍写 `research_analysis`，
+//      计划只登记「优先级 / 用途 / 是否必需 / 由哪个研究方法生成」。
+//   2. **不建第二套 Dataset 坐标**：`datasetVersionId = dataset_version.id`，软引用、零 FK。
+//   3. **Research Module 不入库**：它是「研究方法」的代码级注册表
+//      （`server/researchEngine/planner/moduleRegistry.ts`），不是数据。
+//      计划只快照「本次用了哪些键」，避免「注册表改了、历史计划认不出来」。
+//
+// 零 FK：跨表引用合法性由 `server/researchCore` 的 Domain / Repository 保证（项目既有原则）。
+
+/**
+ * 研究问题（RESEARCH-PLANNER-001 的**核心业务对象**）。
+ *
+ * 用户的输入只有两样：Dataset Version + 一句研究问题。其余（Feature / Target /
+ * Horizon / Baseline / Grouping / Stability）由 Research Planner 自动补全。
+ * `questionText` 是**用户原话**，禁止改写 / 归一化后落库 —— 它是后续一切溯源的根。
+ */
+export const researchQuestion = mysqlTable("research_question", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 软引用 dataset_version.id（唯一 Dataset 坐标）。 */
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
+  /** 用户原话（业务对象本体，**禁改写**）。 */
+  questionText: text("questionText").notNull(),
+  /** 自动识别出的研究类型（`RESEARCH_TYPES` 闭集）；识别不出时取 CUSTOM。 */
+  researchType: varchar("researchType", { length: 32 }).notNull(),
+  /** 发起方：USER / WORKBUDDY / SYSTEM（用于区分「谁设计了这个实验」）。 */
+  createdBy: varchar("createdBy", { length: 16 }).notNull().default("USER"),
+  /** 意图识别证据（命中关键词 / 未识别的分句 / 选中的方法），JSON —— 可复核，不输出黑箱。 */
+  intentJson: longtext("intentJson"),
+  /** DRAFT → PLANNED → RUNNING → COMPLETED；任一阶段失败 → FAILED；用户明确放弃 → REJECTED。 */
+  status: varchar("status", { length: 20 }).notNull().default("DRAFT"),
+  /** 软引用 research_experiment.id（编排时创建；未创建即 NULL，禁伪造）。 */
+  experimentId: bigint("experimentId", { mode: "number" }),
+  /** 软引用 research_plan.id（当前计划）。 */
+  planId: bigint("planId", { mode: "number" }),
+  /** 软引用 research_run.id（实际执行的那一轮）。 */
+  runId: bigint("runId", { mode: "number" }),
+  /** 软引用 research_conclusion.id（本次研究产出的结论）。 */
+  conclusionId: bigint("conclusionId", { mode: "number" }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  datasetVersionIdx: index("idx_research_question_dataset_version").on(table.datasetVersionId),
+  statusIdx: index("idx_research_question_status").on(table.status),
+  experimentIdx: index("idx_research_question_experiment").on(table.experimentId),
+  createdIdx: index("idx_research_question_created").on(table.createdAt),
+}));
+
+export type ResearchQuestionRow = typeof researchQuestion.$inferSelect;
+export type InsertResearchQuestionRow = typeof researchQuestion.$inferInsert;
+
+/**
+ * 研究计划（Research Question → 一组待执行的 Analysis）。
+ *
+ * `planJson` 是**执行前可预览的完整计划**（含每条分析的 priority / purpose / required /
+ * moduleKey），`research_analysis` 行是它的**落成物** —— 两者不是同一份数据：
+ * 计划可以先存在、被用户调整、再落成；也可以只预览不执行。
+ *
+ * `notesJson` 记录「哪些分句没被采纳、为什么」—— 自动编排必须如实告知理解偏差，
+ * 否则用户会对着一个看起来完整、实际答错问题的计划做决策。
+ */
+export const researchPlan = mysqlTable("research_plan", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 软引用 research_question.id。 */
+  questionId: bigint("questionId", { mode: "number" }).notNull(),
+  /** 软引用 research_experiment.id。 */
+  experimentId: bigint("experimentId", { mode: "number" }).notNull(),
+  /** 软引用 research_run.id（落成分析时必须先有 Run）。 */
+  runId: bigint("runId", { mode: "number" }),
+  /** 软引用 dataset_version.id（与 Question 一致，快照以便计划独立可读）。 */
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
+  /** 选中的 Research Module 键（JSON string[]；注册表改动不影响历史计划）。 */
+  moduleKeysJson: longtext("moduleKeysJson"),
+  /** 完整 Analysis Plan（JSON）：`ResearchPlanItem[]`。 */
+  planJson: longtext("planJson"),
+  /** 计划项总数（裁剪前）。 */
+  plannedCount: int("plannedCount").notNull().default(0),
+  /** 实际落成 `research_analysis` 的行数。 */
+  materializedCount: int("materializedCount").notNull().default(0),
+  /** 因规模上限被裁剪掉的数量（如实登记，不静默丢）。 */
+  droppedCount: int("droppedCount").notNull().default(0),
+  /** 本次生效的规模上限（快照；默认值改了不影响历史计划）。 */
+  maxAnalysisPerPlan: int("maxAnalysisPerPlan").notNull().default(0),
+  /** 是否因上限发生过裁剪。 */
+  capApplied: boolean("capApplied").notNull().default(false),
+  /** 计划由谁生成：USER / WORKBUDDY / SYSTEM。 */
+  generatedBy: varchar("generatedBy", { length: 16 }).notNull().default("SYSTEM"),
+  /** PLANNED → MATERIALIZED → EXECUTED；异常 → FAILED。 */
+  status: varchar("status", { length: 20 }).notNull().default("PLANNED"),
+  /** 未采纳的分句 / 降级说明（JSON object）—— 可复核，不含统计结论。 */
+  notesJson: longtext("notesJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  questionIdx: index("idx_research_plan_question").on(table.questionId),
+  experimentIdx: index("idx_research_plan_experiment").on(table.experimentId),
+  runIdx: index("idx_research_plan_run").on(table.runId),
+  statusIdx: index("idx_research_plan_status").on(table.status),
+}));
+
+export type ResearchPlanRow = typeof researchPlan.$inferSelect;
+export type InsertResearchPlanRow = typeof researchPlan.$inferInsert;

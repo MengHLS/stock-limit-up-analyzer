@@ -264,6 +264,43 @@ export const RESEARCH_GROUP_LOGICAL_OPERATORS = ["AND", "OR"] as const;
 export type ResearchGroupLogicalOperator = (typeof RESEARCH_GROUP_LOGICAL_OPERATORS)[number];
 
 // ---------------------------------------------------------------------------
+// RESEARCH-PLANNER-001 — 自动研究编排层枚举（唯一权威）
+// ---------------------------------------------------------------------------
+
+/** 研究问题状态（业务对象自身的生命周期）。 */
+export const RESEARCH_QUESTION_STATUSES = [
+  "DRAFT",
+  "PLANNED",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+  "REJECTED",
+] as const;
+export type ResearchQuestionStatus = (typeof RESEARCH_QUESTION_STATUSES)[number];
+
+/** 研究计划状态。 */
+export const RESEARCH_PLAN_STATUSES = ["PLANNED", "MATERIALIZED", "EXECUTED", "FAILED"] as const;
+export type ResearchPlanStatus = (typeof RESEARCH_PLAN_STATUSES)[number];
+
+/**
+ * 分析优先级（规模控制时的裁剪顺序）。
+ *
+ * 语义刻意只有三档且**有序**：P0 核心实验 / P1 辅助实验 / P2 探索实验。
+ * 裁剪只从 P2 开始，且**永不丢弃 P0 必需项** —— 见 `planner/analysisPlan.ts#applyPlanCap`。
+ */
+export const RESEARCH_ANALYSIS_PRIORITIES = ["P0", "P1", "P2"] as const;
+export type ResearchAnalysisPriority = (typeof RESEARCH_ANALYSIS_PRIORITIES)[number];
+
+/**
+ * 「这份研究由谁设计」。
+ *
+ * `SYSTEM` = Planner 自动生成；`WORKBUDDY` = 由外部智能体经 API 发起；`USER` = 人工在界面创建。
+ * 记录它只为一件事：**事后能分清「这实验是谁设计的」**，不参与任何统计判定。
+ */
+export const RESEARCH_GENERATED_BY = ["USER", "WORKBUDDY", "SYSTEM"] as const;
+export type ResearchGeneratedBy = (typeof RESEARCH_GENERATED_BY)[number];
+
+// ---------------------------------------------------------------------------
 // 条件形态（RESEARCH-FINDING-001 起迁入本文件）
 //
 // 为什么迁移：这些是**领域类型**，而本文件自述为「Research 领域类型唯一权威来源」。
@@ -446,6 +483,17 @@ export interface ResearchAnalysis {
   target?: string | null;
   config?: unknown;
   status: ResearchAnalysisStatus;
+  // ---- RESEARCH-PLANNER-001：计划溯源（人工创建时为 null，专家模式不受影响）----
+  /** 由哪份研究计划生成（软引用 `research_plan.id`）。 */
+  planId?: number | null;
+  /** 由哪个 Research Module 生成（研究方法键，如 `PULLBACK_EFFECTIVENESS`）。 */
+  moduleKey?: string | null;
+  /** 规模裁剪顺序（P0 / P1 / P2）。 */
+  priority?: ResearchAnalysisPriority | null;
+  /** 这条分析要回答什么（人读）。 */
+  purpose?: string | null;
+  /** 是否为计划中的必需项。 */
+  requiredFlag?: boolean | null;
   createdAt?: string;
   completedAt?: string | null;
 }
@@ -567,6 +615,17 @@ export interface ResearchStrategyCandidate {
    * research_analysis.runId` 两跳解析；**解析不出即 null，禁止伪造**。
    */
   sourceResearchRunId?: number | null;
+  /**
+   * RESEARCH-PLANNER-001 —— 来源 Research Plan id（软引用 `research_plan.id`，**可空**）。
+   *
+   * 补齐任务书 §16 要求的 Candidate 六项 provenance 中唯一缺位的一项。
+   * 它的作用是把「自动规划产出的候选」与「专家手工堆分析产出的候选」区分开，
+   * 并支持反查「这份计划产出了哪些候选」。
+   *
+   * 与 `sourceResearchRunId` 同属**历史事实快照**：只经 create 写入，
+   * 被 `RESEARCH_CANDIDATE_IMMUTABLE_FIELDS` 硬拒于普通 update 之外。
+   */
+  sourceResearchPlanId?: number | null;
   /** 研究证据**快照**（provenance snapshot，非 `research_result` 第二份存储；Result 会被重算覆盖）。 */
   sourceTraceJson?: unknown;
   /**
@@ -812,4 +871,191 @@ export interface ResearchAnalysisTemplate {
   items: ResearchAnalysisTemplateItem[];
   createdAt?: string;
   updatedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// RESEARCH-PLANNER-001 — 研究问题 / 研究计划
+// ---------------------------------------------------------------------------
+
+/**
+ * 意图识别证据（可复核，**不是黑箱**）。
+ *
+ * 自动编排最危险的不是「没识别出来」，而是「识别错了却不告诉用户」。
+ * 因此本结构强制记录三样东西：
+ *   - `matchedModuleKeys`：最终选中的 Research Module（按确定性打分排序，禁随机）；
+ *   - `matchedClauses`：问题文本里**被采纳**的分句及其命中的关键词；
+ *   - `unresolvedClauses`：**没被任何规则采纳**的分句 —— 必须原样回显给用户，
+ *     否则用户会对着一个「看起来完整、实际没回答我的问题」的计划做决策。
+ */
+export interface ResearchIntentEvidence {
+  matchedModuleKeys: string[];
+  matchedClauses: Array<{
+    clause: string;
+    keyword: string;
+    /** 命中的方法键（同一分句可提示多个方法）。 */
+    moduleKeys: string[];
+  }>;
+  unresolvedClauses: string[];
+  /** 逐关键词的命中记录（含未命中已登记关键词 —— 用于解释「为什么没选中某方法」）。 */
+  keywordHits: Array<{ moduleKey: string; keyword: string; matched: boolean }>;
+}
+
+/** 研究问题（RESEARCH-PLANNER-001 的核心业务对象）。 */
+export interface ResearchQuestion {
+  id?: number;
+  /** 软引用 `dataset_version.id`（唯一 Dataset 坐标）。 */
+  datasetVersionId: number;
+  /** 用户原话（**禁改写**）。 */
+  questionText: string;
+  researchType: ResearchType;
+  createdBy: ResearchGeneratedBy;
+  intent?: ResearchIntentEvidence | null;
+  status: ResearchQuestionStatus;
+  experimentId?: number | null;
+  planId?: number | null;
+  runId?: number | null;
+  conclusionId?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * 计划中的一条分析（落成后的 `research_analysis` 行是它的物化形态）。
+ *
+ * 这里的字段与 `ResearchAnalysis` **有意重叠**（analysisType / name / target / config /
+ * conditions），因为它是「同一条分析在执行前的描述」。区别只有三样：优先级、用途、是否必需。
+ * 不另造 `research_plan_analysis` 表，理由见 `drizzle/0039_research_planner.sql` 头部。
+ */
+export interface ResearchPlanItem {
+  /** 计划内确定性顺序（= `sortOrder`，保证复现性）。 */
+  sortOrder: number;
+  analysisType: ResearchAnalysisType;
+  /** 展开后的分析名（用户可在预览里改）。 */
+  name: string;
+  target?: string | null;
+  config?: unknown;
+  conditions?: ResearchConditionSpec[];
+  priority: ResearchAnalysisPriority;
+  /** 这条分析回答什么（人读；写进 `research_analysis.purpose`）。 */
+  purpose: string;
+  required: boolean;
+  /** 生成它的研究方法键。 */
+  moduleKey: string;
+}
+
+/** 计划构造过程中被丢弃的理由（**如实登记，不静默丢**）。 */
+export interface ResearchPlanDropNote {
+  moduleKey: string;
+  analysisType: ResearchAnalysisType;
+  name: string;
+  /** `CAP_EXCEEDED` = 规模上限裁剪；`CAPABILITY_MISSING` = 该 Dataset 没有所需数据能力。 */
+  reason: "CAP_EXCEEDED" | "CAPABILITY_MISSING";
+  detail: string;
+}
+
+/** 研究计划（执行前可预览，落成后每条对应一行 `research_analysis`）。 */
+export interface ResearchPlan {
+  id?: number;
+  questionId: number;
+  experimentId: number;
+  runId?: number | null;
+  datasetVersionId: number;
+  moduleKeys: string[];
+  items: ResearchPlanItem[];
+  plannedCount: number;
+  materializedCount: number;
+  droppedCount: number;
+  maxAnalysisPerPlan: number;
+  capApplied: boolean;
+  generatedBy: ResearchGeneratedBy;
+  status: ResearchPlanStatus;
+  /** 未采纳分句 + 丢弃项 + 能力缺口说明。 */
+  notes?: ResearchPlanNotes | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** RESEARCH-PLANNER-001 — 一个变量在这份计划里扮演的角色。 */
+export type PlanVariableRole = "condition" | "grouping" | "descriptive" | "target";
+
+/** 变量在计划中的使用登记（同一个变量可能同时是「条件」与「描述」）。 */
+export interface PlanVariableUse {
+  variable: string;
+  roles: PlanVariableRole[];
+  /** 有多少条分析用到了它（不是「值」的条数）。 */
+  analysisCount: number;
+  /** 人读口径（能翻译成中文的才有；翻不出来的留下空数组，**不编造**）。 */
+  readbacks: string[];
+  /** 结果变量才有：计划覆盖的视界（升序去重）。 */
+  horizons: number[];
+}
+
+/**
+ * RESEARCH-PLANNER-001（§7）—— Analysis Plan 的**结构化登记**。
+ *
+ * §7 要求计划记录 `analysisTypes / featureMapping / targetMapping / horizons / segments /
+ * baseline / condition / stabilityPlan / interactionPlan`，只有这样「执行前预览」才能回答
+ * 「系统到底打算算什么」，而不是让用户去逐条读 28 个分析名。
+ *
+ * 🔴 为什么不给 `research_plan` 加列：该表已确立的分工是
+ *    「列存**可检索的谱系锚点**（questionId / runId / status / 计数），JSON 存**计划形状**」。
+ *    本结构的九个字段全部是这份计划**自己的形状**（不可检索、不外键、随分析类型演进），
+ *    加列等于把它们冻结进 schema，与「Research Module 可扩展」（§3）直接冲突。
+ *    因此登记在 `notesJson.spec`，与 `planJson` 同属计划形状。
+ *
+ * 🔴 它由 `items` **确定性推导**（见 `buildPlanSpec`）：
+ *    - **不含任何统计结论**（本结构在「执行前」就已存在，那时还没有任何数字）；
+ *    - **不臆造**意图 —— `baseline` / `condition` / `segments` 都指向计划里**真实存在**的那几条分析；
+ *    - 翻译不出来的口径留空数组，不写近似说法。
+ */
+export interface ResearchPlanSpec {
+  /** 采用的研究方法（主方法恒为 `[0]`）。 */
+  researchModule: { primary: string; primaryLabel: string; secondary: string[] };
+  datasetVersionId: number;
+  /** 计划实际采用的分析类型（升序去重）。 */
+  analysisTypes: string[];
+  /** 特征侧：条件 / 分组 / 描述用到的变量。 */
+  featureMapping: PlanVariableUse[];
+  /** 结果侧：被当作结果变量使用的变量（含视界）。 */
+  targetMapping: PlanVariableUse[];
+  /** 计划覆盖的收益视界（升序去重）。 */
+  horizons: number[];
+  /** SEGMENT_RELATION 的分段窗口（A / B 不重叠 —— 这是该分析类型的前提）。 */
+  segments: Array<{
+    analysisName: string;
+    windowA: number[];
+    windowB: number[];
+    windowAStat: string;
+    windowBStat: string;
+  }>;
+  /** 比较基准：全样本无条件事件研究。没有它，任何「条件更好」都无法归因。 */
+  baseline: { analysisName: string; horizons: number[]; note: string } | null;
+  /** 主条件口径：P0 必需分析的条件表达式 + 人读回执（用户核对口径的地方）。 */
+  condition: Array<{ analysisName: string; expressions: string[]; readbacks: string[] }>;
+  /** 稳定性分析计划（哪个维度、哪条分析）。 */
+  stabilityPlan: Array<{ dimension: string; dimensionLabel: string; analysisName: string }>;
+  /** 关系 / 分布类分析计划（分段关系、分位关系、描述统计）。 */
+  interactionPlan: Array<{ analysisName: string; analysisType: string; description: string }>;
+}
+
+/** 计划说明（可复核；**不含任何统计结论**）。 */
+export interface ResearchPlanNotes {
+  unresolvedClauses: string[];
+  dropped: ResearchPlanDropNote[];
+  /** 用到的条件字段 → 人读口径（用户要能核对「系统理解的和我说的是一回事吗」）。 */
+  conditionReadback: Array<{ fieldName: string; operator: string; value: unknown; readback: string }>;
+  /** 目标变量 / 视界的选取理由。 */
+  selectionRationale: string[];
+  /** §7 结构化登记（可选：RESEARCH-PLANNER-001 之前的计划没有这一项）。 */
+  spec?: ResearchPlanSpec;
+  /**
+   * **与用户提问侧重直接相关**的分析名（§13 / §15 / §28）。
+   *
+   * 由「强调词命中的精修配方」生成、且**最终被保留在计划里**的那些分析名。
+   * 消费方 = `buildResearchOutcome`：据此产出 `questionAlignedFindings`，
+   * 并在结论正文里显式分段回答「你问的那件事」。**不含任何统计结果**。
+   *
+   * 可选：RESEARCH-PLANNER-001 修复前的计划没有这一项（如实缺省，不回填）。
+   */
+  emphasisAnalysisNames?: string[];
 }

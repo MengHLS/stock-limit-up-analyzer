@@ -138,3 +138,4 @@ _*.py
 /_*.mts
 /_*.mjs
 /_*.json
+/.workbuddy/

@@ -575,3 +575,66 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - ⚠️ **运算符两形**：`RESEARCH_CONDITION_OPERATORS` 闭集 = **符号形**（`>` `>=` `<` …）；名称形（`GREATER_THAN` 等）只在 `definitionBuild#CONDITION_OPERATOR_MAP` 翻译。写 Hypothesis.conditions / 测试 fixture 用符号形。
 - ⚠️ **Finding 标题用字段名**（`pullback_close_ratio` / `pullback_holds_event_low`），**不是中文关键词**（「回撤/破位」）；按落库字段语义分类，不按人读中文匹配。
 - 真实验收链（可复核）：Dataset **390002** → Experiment **240002** → Run **570001** → Analysis 540001~540013 → Finding **1~13**（EFFECT，DISCOVERED）。
+
+---
+
+## 自动研究编排层（RESEARCH-PLANNER-001，2026-09-17；`ROADMAP.md` §44.5 `9at`）
+
+### 坐标与入口
+- 用户入口 `/research/ask` —— 🔴 **路由必须排在 `/research/:experimentId` 之前**，否则被实验详情页吃掉；侧栏「提问研究」。
+- 真实入参只有 `{datasetVersionId, researchQuestion}`。单次闭环 = `researchPlanner.runFromQuestion`；两段式 = `createQuestion → runResearchDetached → getOutcome`（怕超时时用）。
+- 计划 / 问题 / 结论的载体在 `research_plan.notesJson`（`ResearchPlanNotes`）⇒ **新增字段一律 optional**：老计划没有该字段，**如实缺省、不回填**、不按新代码重新推断。
+
+### 🔴 意图识别是**加权**打分，不是等权关键词匹配
+- `"不破"` **匹配不到** `"不跌破"` ⇒ 关键词要拆到位（`不破 / 未破 / 不跌破 / 没跌破 / 守住 / 支撑 / 破位`）。
+- 泛化词（收益 / 表现）与专指词（回踩 / 缩量 / 深度）**等权会把两问算成平手** ⇒ 两档权重（专指 `PRIMARY_KEYWORD_WEIGHT = 3` / 泛化 `GENERIC_KEYWORD_WEIGHT = 1`）+ 三级排序。
+  （实测症状：两个验收问题都被识别成 `EVENT_RETURN_RESEARCH`、计划里 0 条守护条件分析，从 8 条变 28 条才修好。）
+- 🔴 **`emphasisKeywords` 是精修配方的排序锚**：配方 label 分词后往往对不上用户原话（label「回踩深度落在 <0.95]」分词得「回踩深度落在 / 0.95」，而问题里只有「深度」）⇒ **每条配方必须显式给强调词**。
+- 🔴 **先排序，再裁剪**：`rankRecipesByQuestion(recipes.slice(0, 6), q)` 是**错的** —— 注册序第 7/8 位永远进不了计划（深度分档恰在那）。正确写法 = `rankRecipesByQuestion(recipes, q).slice(0, MAX_REFINEMENT_RECIPES)`。
+
+### 🔴 结论必须锚定用户提问，否则「用户问的问题在自己页面上读不到答案」
+- 根因：`researchStrength` 在 **1.0 处饱和** + 样本量降序 ⇒ 小样本但正是答案的那条 Finding 会被大样本挤到第 6 名之后。
+- 正解三段：计划侧记 `emphasisAnalysisNames` → 聚合侧筛 `questionAlignedFindings` + `questionAlignment{source: EMPHASIS | REQUIRED_FALLBACK | NONE}` → 结论正文三段（【研究问题】/【针对该问题】/【统计判定】）；**只筛选排序、零重算统计量**。
+- 🔴 **必须注册 hypothesis**：引擎从「实验的第一条假设」推导 `researchQuestion`；缺假设 ⇒ 结论正文出现占位符「(未登记假设陈述)」、`research_conclusion.researchQuestion` 落成 `null`。写失败落 `HYPOTHESIS_WRITE_FAILED` 并中止。
+
+### 🔴 `research_result` 的分组行与基准行**无法按列区分**
+列 = `id / analysisId / resultType / dimensionJson / metricCode / metricValue / sampleCount / resultJson / createdAt`。
+分组行与基准行的 `resultType` **同为 `GROUPED`**、`metricCode` **同名**（`SAMPLE_COUNT` / `MEAN_RETURN` …）、`dimensionJson` **同为 `null`** —— **仅靠行序区分**（前若干行 = 全样本基准，后若干行 = 条件组）。
+⇒ 消费方**必须走 Finding 层**（`effect.groupReturn / benchmarkReturn / buckets`）；按 `metricCode` 抓第一行**必抓错**（实测：`/mean/i` 抓到了基准行）。
+
+### 🔴 布尔族条件的值必须是数字 `1` / `0`
+`conditionEvaluator.ts#asNumber()` 只接受 `typeof === "number"`；传布尔 / 字符串**不报错**，只是恒 0 命中（静默）。另外口径回执文案要按运算符加语义前缀 —— 布尔族 `== 0` 是「未跌破」，别写成反的。
+
+### 🔴 「零结果」≠「检查通过」
+§22 的 `dataValidity` 必须把「分析登记了但一条结果都没有」也算失败（典型：`market_cap` 列全 NULL 时的市值分位分析）。只数 `failedCount` 会给出「✓ Passed」这种**误导性真话**。正解 = 新增 `emptyResultCount` / `emptyResultAnalyses`，`passed` 改三条件。
+
+### 🔴 诊断 / 注入类钩子：定义了 ≠ 被调用了
+`withDisclaimer` 曾被定义但**从未被调用**（用户看到的结论缺免责声明）。新增「装饰 / 注入类」函数后必须 grep 调用点或加断言，别信「写了就在用」。
+
+### 前端默认模式验收：判据要扫「控件」，不是扫「全文」
+- 禁用词（特征变量 / 目标变量 / 视界 / 分组维度 / …）**天然出现在说明性文案里**（「**不要**填写特征名、目标变量、视界」「…**全部由系统设计**」「自动铺开多**视界**」）—— 这些话恰恰在告诉用户**不用填**，是卖点不是缺陷。判据 = **控件扫描**（label / placeholder / aria-label + Radix bubble `<select>` 要按 `aria-hidden` 排除），文本扫描只作兜底且**排除含 `不要/无需/由系统/自动` 的说明句**（加 `请输入/请填写/…` 反制层防误吞）。
+- 计数类判据别依赖易碎前缀（三条示例 hint 里**只有两条**同为 `→ 会识别成`）⇒ 按**区块结构**取数（含锚点文案的 `<p>` 的父容器下全部 `button`）+ 用标志性文本分别断言。
+- 「是否进入第 N 步」**不能**用步骤条标签判定 —— `RESEARCH_ASK_STEP_LABELS` 是遍历渲染、**恒在页面上**，判据恒 true。要用该步**独有内容**（预览页的「预计分析数」）或**独有控件**（`#ask-question`）。
+- 四张步骤卡片是 `{step === "XX" && (...)}` **条件渲染** ⇒ 非当前步的卡片不在 DOM 里，不会污染文本扫描（别假设它们在）。
+
+### 探针 / 清理器（都在 `docs/evidence/`，不在 tsconfig scope）
+- `_probe_planner_dryrun.mts`（零 IO 干跑 —— 🔴 **记得传 `questionText`**，否则排序恒等于注册顺序，「排序是否生效」从未被验过）。
+- `_probe_run_findings.mts` / `_probe_analysis_metrics.mts` / `_probe_result_schema.mts`（读数与列名核对）。
+- `_e2e_research_planner.mts`（§27）/ `_e2e_research_second_question.mts`（§28）—— 🔴 **`writeFileSync` 必须放在所有 `say()` 之后**，否则 `.out.txt` 读不到「检查项 / 失败 / 结论」汇总行。
+- `_cleanup_research_planner_trials.mts` —— **默认 dry-run**，`--apply` 才落刀，`--keep=<ids>` 保留；只认 `research_experiment.name like '[自动研究]%'`（不可能误删手工实验）；**已转正候选不删**。
+- `_probe_research_ask_page_render.mjs` —— 无头 Edge + CDP 真机渲染验收（`--headless=new --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node 内置 `WebSocket` 直连 CDP）。
+- 总控 / 记忆改字的**降险写法**（脚本本身按纪律放仓外 `C:\work\sourcecode\_scratch\`，不入库）：`read_bytes` → 断言 `crlf == 0`（CRLF 文件则断言 `crlf == lf`）→ 改 → `encode()` **先完成**再打开写 → `os.replace` 原子替换 → 回读核对；**追加型**脚本还要断言「前缀字节未变」以证明没动历史，**覆盖型**（如 §44 上轮实查只留 1 条）要断言全文只命中 1 处再替换。
+- ⚠️ **本轮踩到并已修的纪律欠账**：`docs/evidence/` 下曾又攒了 **8 个** `.py` 过程脚本（本轮 3 个改字脚本 + 1 个前端接线脚本 + 4 个此前 market-data 遗留），全部**未跟踪**（被 `.gitignore` 的 `_*.py` 挡住，所以 `git status` 看不见）⇒ 已移到 `C:\work\sourcecode\_scratch\research-planner-001\`，现 `docs/evidence/*.py` = **0**。**教训：`.gitignore` 让违规文件在 `git status` 里隐身，只能用 `ls docs/evidence/*.py` 这类物理检查发现。**
+## 🔴 「创建候选」取错分析导致恒失败（RESEARCH-PLANNER-001 缺陷 780001，2026-09-17 实查；`ROADMAP.md` §44.5 `9au`）
+- **现象**：`/research/ask` 结论页点「创建 Candidate」→「分析 780001 没有任何条件，无法导出候选题筛选条件。」，**100% 复现、100% 失败**。
+- 🔴 **根因**：前端自己挑「用哪条分析导条件」，判据是 `find(a => a.priority === "P0")`；而 `analysisPlan.ts#generateAnalysisPlan` 的**第一条 `push`** 正是 `EVENT_STUDY 全样本基准`（`priority="P0"` + `requiredFlag=true`），它天然**没有** `research_analysis_condition` 行 ⇒ 服务端按设计拒。**「哪条分析有条件」是数据库事实，调用方无从猜测**（§20 契约只有 `{datasetVersionId, researchQuestion}`，Workbuddy 拿不到库内主键）。
+- 🔴 **为什么 E2E 全绿**：`_e2e_research_planner.mts` 自己写了更严的判据 `priority==="P0" && analysisType==="CONDITIONAL"`，并**显式传** `deriveFilterFromAnalysisId` ⇒ **绕开了产品的真实调用路径**。**教训：测试比产品严 ⇒ 通过只证明测试的挑法对，不证明产品可用**。验收必须走产品真正发出去的载荷（`{questionId, name, description}`，**不含** analysisId）。
+- **唯一实现**：`aggregate.ts#rankCandidateSourceAnalyses()`（硬门槛 `conditionCount > 0` → 提问点名 → `requiredFlag` → `P0/P1/P2` → `CONDITIONAL` → `analysisId` 升序），结果落在 `ResearchOutcome.candidateEligibleAnalyses`；`createCandidate` 不传 analysisId 时取第 0 条。前端**不再挑**，只读回执 `filterRuleSource`。条件行数与结果行数**并发**取（往返次数不变 ⇒ 零额外延迟）。
+- 🔴 **`getOutcome` 两种定位入口必须等价**：旧实现只在 `questionId` 路径解析 plan/question ⇒ 按 `runId` 调用会丢 `planId` / `datasetVersionId` / `moduleKeys` / `plan.notes.emphasisAnalysisNames`（⇒ §13 提问锚点失效 + §16 provenance 不齐，实测 `provenance.complete === false`）。修法 = 顺 `research_analysis.planId` 反查补齐（`planId` 就是「这条分析由哪份计划生成」的权威记录，不加第二套映射）。
+- **零条件时不许静默**：本 Run 一条可导出条件的分析都没有 ⇒ 候选照建但 `filterRule` 留空 + `filterRuleSource.origin = "NONE"` + 明确警告（前端用琥珀色渲染）。静默给个空口径才是错的。
+- 🔴 **错误信息必须可操作**：显式传了无条件的分析时，除了拒绝，还要**列出**「本 Run 可导出条件的分析」。旧文案是个死胡同 —— 用户知道失败了却不知道该换哪条。
+- 探针：`_verify_candidate_filter_source.mts`（**41 / 0**，直接跑在用户真实失败的 Run 780002 上）/ `_probe_analysis_780001.mts`（复现根因）/ `_e2e_candidate_button_real_ui.mjs`（**真机点按钮**全流程，4 次真实运行；末次在 **v2 数据集**上 `ALL PASS`、Candidate `#750001`）/ `_probe_radix_select_drive.mjs`（合成事件 5 种全败）/ `_probe_radix_select_drive_native.mjs`（原生输入管道生效）。
+- ⚠️ **CDP 探针两条硬纪律**：① `document.body` 在 CDP 刚连上时可能为 **null** ⇒ 必须防御 + 重试（实测第一次求值就抛 `TypeError: Cannot read properties of null (reading 'innerText')`，探针在页面渲染之前整体退出、`docs/evidence/*.out.txt` 只剩 **0 字节空文件**）；② **长跑探针必须逐行 `appendFileSync` 落盘**，末尾一次性 `writeFileSync` 的写法在被信号打断时会**丢掉全部证据**。
+- 🔴 **Radix Select 的可靠驱动方式 = CDP 原生输入 `Input.dispatchMouseEvent`（禁 `Runtime.evaluate` 合成事件）**。三段演进全部实测过：**① 原生 bubble `<select>` 根本不存在** —— `@radix-ui/react-select@2.2` 只在 `isFormControl`（传了 `name` prop）时才渲染 `SelectBubbleInput`（那个隐藏原生 select），本仓 `/research/ask` 的两个下拉**都没传 `name`** ⇒ DOM 里没有 select。⚠️ **本行旧版写的 `trigger.closest('div').parentElement.querySelector('select')` 是错的**，实测直接报 `{"ok":false,"why":"找不到原生 select"}`（已于 2026-09-17 更正）。**② `Runtime.evaluate` 派发 `PointerEvent('pointerdown'|'pointerup', { pointerType: 'mouse' })` 半成功** —— 下拉**确实能打开**（Trigger 的 `onPointerDown` 认这个 pointerType）、`[role="option"]` 也读得到（`aria-selected` 正确），但**选项点击始终不生效**；5 种组合（`pointerdown+up` / `+pointermove` / `HTMLElement.click()` / `focus+Enter` / `pointerId=0`）**全部无效**（证据 `docs/evidence/_probe_radix_select_drive.mjs` = 5 个 `✗ 未生效`）。根因：`dispatchEvent(new PointerEvent(...))` 造出来的是**不可信事件**（`isTrusted === false`），React 19 的合成事件委托不按真实手势路径处理。**③ `Input.dispatchMouseEvent`（`mouseMoved` → `mousePressed` → `mouseReleased`，`button="left"`、`pointerType="mouse"`、`clickCount=1`）✅ 生效** —— 这是浏览器**真实输入管线**，Blink 据此生成 `isTrusted: true` 的 mouse 事件**并自动派生 `pointerType: "mouse"` 的 pointer 事件**（证据 `docs/evidence/_probe_radix_select_drive_native.mjs`：`✅ 下拉已打开` + `✅ 生效`）。坐标用 `getBoundingClientRect()` 取元素中心点（Trigger 与 `[role="option"]` 各一次）。**推广：凡依赖「真实用户手势」的组件（Radix / Headless UI / 自研手势层），`Runtime.evaluate` 里的 `dispatchEvent` 一律不可靠 ⇒ 必须用 `Input.*`。** 另仍须**先等「数据集列表异步加载完成」**（触发器文案不再含「加载中」），否则连打开都谈不上。
+- ⚠️ **`reachedXxx` 型判据禁用「步骤条标签」**：`RESEARCH_ASK_STEP_LABELS` 四标签**恒渲染**（本仓已踩两次）。同理 `document.body.innerText.includes('④ 研究结论')` 恒为 true。
+

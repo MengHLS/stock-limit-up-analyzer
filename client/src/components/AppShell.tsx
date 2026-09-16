@@ -44,6 +44,7 @@ import {
   FileClock,
   BookOpenCheck,
   FlaskConical,
+  Sparkles,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { type LucideIcon } from "lucide-react";
@@ -91,6 +92,8 @@ const navGroups: NavGroup[] = [
       { label: "数据域健康", path: "/data-health", icon: ShieldCheck },
       { label: "历史状态查询", path: "/historical-state", icon: History },
       { label: "数据集构建", path: "/datasets", icon: Boxes },
+      // RESEARCH-PLANNER-001 — 默认入口放在最前：先提问，再（必要时）进实验工作台。
+      { label: "提问研究", path: "/research/ask", icon: Sparkles },
       { label: "研究实验", path: "/research", icon: FlaskConical },
       { label: "策略", path: "/strategies", icon: ClipboardList },
       { label: "绩效仪表盘", path: "/performance", icon: Activity },
