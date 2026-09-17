@@ -10,6 +10,7 @@ import {
   type OpenExpectationTier,
   type OpenExpectationTierOutcome,
 } from "./openExpectation";
+import { allocatePlannedBudgets } from "./positionBudget";
 import { isPriceAtLimitDown, isPriceAtLimitUp } from "./data/boardRules";
 
 export type PositionSizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
@@ -417,16 +418,19 @@ export function simulateRealisticTPlus1ToTPlus2(
     const available = expectationEligibleRows.filter((row) => !heldCodes.has(row.stockCode));
     const slots = Math.max(0, maxPositions - positions.size);
     const selected = available.slice(0, slots);
+    // 分仓口径唯一权威 = server/positionBudget#allocatePlannedBudgets（展示层回显同一函数）。
+    // 此处刻意**不**传 positionScale：高位连板的缩放仍留在下方 plannedBudget 处施加，
+    // 以保证本次抽取前后行为逐字节不变。
+    const allocatedBudgets = allocatePlannedBudgets({
+      strategy: positionSizingStrategy,
+      cash,
+      initialCapital,
+      fixedPositionPercent,
+      targets: selected.map((row) => ({ score: row.score })),
+    });
     const budgetByRow = new Map<LeaderCandidateBacktestRow, number>();
-    if (positionSizingStrategy === "scoreWeighted") {
-      const scoreTotal = selected.reduce((sum, row) => sum + Math.max(row.score, 0), 0);
-      for (const row of selected) {
-        budgetByRow.set(row, scoreTotal > 0 ? cash * Math.max(row.score, 0) / scoreTotal : cash / selected.length);
-      }
-    } else if (positionSizingStrategy === "fixedPercent") {
-      for (const row of selected) budgetByRow.set(row, initialCapital * fixedPositionPercent / 100);
-    } else {
-      for (const row of selected) budgetByRow.set(row, cash / selected.length);
+    for (let budgetIndex = 0; budgetIndex < selected.length; budgetIndex += 1) {
+      budgetByRow.set(selected[budgetIndex]!, allocatedBudgets[budgetIndex] ?? 0);
     }
     for (const row of available) {
       if (selected.includes(row)) continue;

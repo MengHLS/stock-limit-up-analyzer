@@ -8,9 +8,10 @@ import {
   type FieldCoverageCounts,
   type FieldCoverageReport,
 } from "../shared/fieldAvailability";
-import { boardHeightPositionScale, isBoardParticipationRestricted } from "../shared/boardHeightRisk";
+import { DEFAULT_MAX_PARTICIPATING_BOARDS, boardHeightPositionScale, isBoardParticipationRestricted } from "../shared/boardHeightRisk";
 import { buildDownsideRiskResearch, calculateQualityBlendScoreForRisk, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult, type DownsideRiskStrategyKey } from "./downsideRisk";
-import type { RealisticBacktestOptions, RealisticBacktestResult } from "./realisticBacktest";
+import type { PositionSizingStrategy, RealisticBacktestOptions, RealisticBacktestResult } from "./realisticBacktest";
+import { allocatePlannedBudgets } from "./positionBudget";
 import { RESEARCH_LEGACY_SIMULATION_SOURCE } from "./research/legacyTransactionSimulator";
 import { computeTechnicalFactorValues, evaluateFactorEffectiveness } from "./technicalFactors";
 import type { FactorEffectivenessReport, TechnicalFactorKey } from "./technicalFactors";
@@ -244,8 +245,53 @@ export type LeaderCandidatePreparedBuy = {
   riskScore: number;
   riskTier: "低风险" | "中风险" | "高风险";
   strategyScore: number;
+  /**
+   * 高位连板仓位缩放系数（1 = 未降仓；0.6 = 5 板；0.3 = 6 板及以上；0 = 连板高度超过参与上限）。
+   * 与模拟器 `LeaderCandidateBacktestRow.positionScale` 同源（`shared/boardHeightRisk`）；
+   * 原始策略作为对照基准不施加该约束，恒为 1。
+   */
+  positionScale: number;
+  /**
+   * 该笔计划预算上限（元）= 分仓口径预算 × positionScale。
+   * ⚠️ 这是**预算上限**而非成交额：股数还要由次日开盘价、整手与费用约束共同决定，
+   * 开盘前不可知，故不在此回显股数（禁以假设价格估算）。
+   */
+  plannedBudget: number;
+  /** 计划预算占该策略当前可用现金的比例（%），保留 2 位小数。 */
+  plannedBudgetRatio: number;
   reasons: string[];
   conditions: string[];
+};
+
+/**
+ * 准备买入的「计划骨架」：仓位字段（positionScale / plannedBudget / plannedBudgetRatio）
+ * 由 `buildLeaderCandidateStrategyPortfolioSnapshot` 在选定清单后按分仓口径统一补算，
+ * 故此处先以本类型约束候选来源字段，避免骨架阶段就伪造仓位数值。
+ */
+export type LeaderCandidatePreparedBuyPlan = Omit<
+  LeaderCandidatePreparedBuy,
+  "positionScale" | "plannedBudget" | "plannedBudgetRatio"
+>;
+
+/** 「下一交易日准备买入」清单的仓位口径回显：只描述**已知**信息，不含对次日行情的任何假设。 */
+export type LeaderCandidatePositionSizing = {
+  /** 分仓口径（与 `RealisticBacktestOptions.positionSizingStrategy` 同源）。 */
+  strategy: PositionSizingStrategy;
+  /** 固定单笔比例（百分数）；仅 `fixedPercent` 口径有意义。 */
+  fixedPositionPercent: number;
+  /** 组合初始资金；仅 `fixedPercent` 口径的分母。 */
+  initialCapital: number;
+  /** 分配所依据的可用现金（= 该策略期末现金），与模拟器下一决策日所见一致。 */
+  cash: number;
+  /** 参与分配的笔数（= 分配分母）。 */
+  plannedCount: number;
+  /** 高位连板参与上限；原始策略不施加该约束（其逐笔系数恒为 1）。 */
+  maxParticipatingBoards: number;
+  /** 本批被降低仓位的笔数（`positionScale < 1`，含被风控置 0 的笔）。 */
+  positionScaledCount: number;
+  /** 计划预算合计（元）与占可用现金比例（%）。固定比例口径可能超过 100%，如实呈现、不夹取。 */
+  totalPlannedBudget: number;
+  totalPlannedBudgetRatio: number;
 };
 
 export type LeaderCandidateStrategyPortfolio = {
@@ -261,6 +307,8 @@ export type LeaderCandidateStrategyPortfolio = {
   preparedBuys: LeaderCandidatePreparedBuy[];
   candidateCount: number;
   excludedHighRiskCount: number;
+  /** 上述准备买入清单的仓位口径回显（前端据此说明「比例是怎么算出来的」）。 */
+  plannedPositionSizing: LeaderCandidatePositionSizing;
   note: string;
 };
 
@@ -748,9 +796,12 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     rollingWindows: Array<Pick<DownsideRiskResearchResult["rollingWindows"][number], "validationStartDate" | "validationEndDate" | "autoTunedPenaltyWeight">>;
     priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
     historicalRows: LeaderCandidateBacktestRow[];
+    /** 高位连板参与上限；缺省取 `shared/boardHeightRisk` 默认值（与模拟器一致）。 */
+    maxParticipatingBoards?: number;
   },
 ): LeaderCandidateStrategyPortfolioSnapshot {
   const latestSignalDate = latestCandidates.date;
+  const maxParticipatingBoards = options.maxParticipatingBoards ?? DEFAULT_MAX_PARTICIPATING_BOARDS;
   const candidatePool = latestCandidates.candidates.filter((candidate) => (
     options.appliedMinScore === null || candidate.score >= options.appliedMinScore
   ));
@@ -859,7 +910,35 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
           simulation?.assumptions.blockLimitUpBuys ? "开盘接近涨停时按保守规则不追买" : "需按实际开盘价与整手资金约束核算",
           "以开盘时可用资金、最大持仓与策略排序为准，未承诺成交",
         ],
-      } satisfies LeaderCandidatePreparedBuy));
+      } satisfies LeaderCandidatePreparedBuyPlan));
+    // 计划仓位：口径唯一权威 = server/positionBudget（与交易模拟器同一实现，禁在此重写公式）。
+    // 决策时点可用现金 = 该策略期末现金，与模拟器「下一决策日」所见一致。
+    const planCash = simulation?.equityCurve.at(-1)?.cash ?? simulation?.initialCapital ?? 0;
+    const planStrategy = simulation?.assumptions.positionSizingStrategy ?? "equal";
+    const planFixedPercent = simulation?.assumptions.fixedPositionPercent ?? 0;
+    const planInitialCapital = simulation?.assumptions.initialCapital ?? 0;
+    // 高位连板降仓：原始策略作为对照基准不施加（恒 1）；其余策略与模拟器同一规则、同一系数。
+    const planScales = preparedBuys.map((plan) => (
+      key === "baseline" ? 1 : boardHeightPositionScale(plan.boards, maxParticipatingBoards)
+    ));
+    // 权重用「策略生效分」（strategyScore）：与模拟器实际用于加权的 row.score 同源。
+    const planBudgets = allocatePlannedBudgets({
+      strategy: planStrategy,
+      cash: planCash,
+      initialCapital: planInitialCapital,
+      fixedPositionPercent: planFixedPercent,
+      targets: preparedBuys.map((plan, index) => ({ score: plan.strategyScore, positionScale: planScales[index]! })),
+    });
+    const plannedBuys = preparedBuys.map((plan, index) => {
+      const plannedBudget = snapshotRound(planBudgets[index] ?? 0);
+      return {
+        ...plan,
+        positionScale: planScales[index]!,
+        plannedBudget,
+        plannedBudgetRatio: planCash > 0 ? snapshotRound((plannedBudget / planCash) * 100) : 0,
+      };
+    });
+    const totalPlannedBudget = snapshotRound(plannedBuys.reduce((sum, plan) => sum + plan.plannedBudget, 0));
 
     return {
       key,
@@ -871,9 +950,20 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
       openPositionCount: holdings.length,
       availableSlots,
       currentHoldings: holdings,
-      preparedBuys,
+      preparedBuys: plannedBuys,
       candidateCount: strategyCandidates.length,
       excludedHighRiskCount,
+      plannedPositionSizing: {
+        strategy: planStrategy,
+        fixedPositionPercent: planFixedPercent,
+        initialCapital: planInitialCapital,
+        cash: snapshotRound(planCash),
+        plannedCount: plannedBuys.length,
+        maxParticipatingBoards,
+        positionScaledCount: planScales.filter((scale) => scale < 1).length,
+        totalPlannedBudget,
+        totalPlannedBudgetRatio: planCash > 0 ? snapshotRound((totalPlannedBudget / planCash) * 100) : 0,
+      },
       note: key === "riskPenalty"
         ? `最新信号日使用风险扣分权重 ${appliedPenaltyWeight}；若该日不在已完成验证窗口内，则使用手动回退权重。`
         : key === "hardFilter"
@@ -1147,6 +1237,7 @@ export function buildLeaderCandidateBacktest(
         rollingWindows: downsideRiskResearch?.rollingWindows ?? [],
         priceByStockDate: context.priceByStockDate,
         historicalRows: appliedRows,
+        maxParticipatingBoards: downsideRiskResearch?.boardHeightRiskControl.maxParticipatingBoards,
       },
     )
     : null;
