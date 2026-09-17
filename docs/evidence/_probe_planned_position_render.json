@@ -1,0 +1,202 @@
+{
+  "url": "http://127.0.0.1:3000/backtest",
+  "waitSec": 2400,
+  "stages": [
+    {
+      "stage": "click-tab-交易明细",
+      "at": "2026-09-17T14:52:14.208Z"
+    },
+    {
+      "stage": "snapshot-rendered",
+      "waitedSec": 20,
+      "activeStrategy": "原始评分基准"
+    }
+  ],
+  "perStrategy": {
+    "原始评分基准": {
+      "hasSection": true,
+      "hasLegacyBlock": false,
+      "hasLegacyChips": false,
+      "hasProvenance": true,
+      "holdingsHead": "股票 / 题材 信号 / 买入日 数量 / 买入价 / 成本金额 估值价 / 浮动 持仓市值 / 占总权益 ＝ 截止日收盘价 × 股数 ÷ 该策略截止日总权益 续持说明",
+      "holdingsRows": [
+        "闽东电力 000993.SZ 风电 2026年09月15日 2026年09月16日 100 股 ¥17.2458 成本 ¥1,725 ¥17.97 4.2% ¥1,797 0.39% 动态止盈已启动：峰值收益7.16%，当前回撤-2.76%，继续持有；回测结束仍持仓，按2026-09-17收盘价期末估值"
+      ],
+      "holdingsFoot": "合计 1 只 成本 ¥1,725 浮动 +¥72 市值 ¥1,797 占总权益 0.39% 现金 ¥460,838 总权益 ¥462,635",
+      "holdingsCash": 460838,
+      "holdingsMarket": 1797,
+      "holdingsEquity": 462635,
+      "holdingsWeightPercent": 0.39,
+      "planHead": "优先级 / 股票 题材 / 板数 原始 / 策略分 风险 计划仓位 / 预算上限 占可用现金 · 等权分仓 开盘前置条件",
+      "planRowTexts": [
+        "#1 华瓷股份 001216.SZ 其他 3 板 · 2026年09月17日 原始 67 策略 67 低风险 12 50.00% ¥230,419 下一实际交易日开盘涨幅不低于-2%；需按实际开盘价与整手资金约束核算；以开盘时可用资金、最大持仓与策略排序为准，未承诺成交",
+        "#2 澳弘电子 605058.SH PCB 5 板 · 2026年09月17日 原始 66 策略 66 中风险 42 50.00% ¥230,419 下一实际交易日开盘涨幅不低于-2%；需按实际开盘价与整手资金约束核算；以开盘时可用资金、最大持仓与策略排序为准，未承诺成交"
+      ],
+      "planFoot": "合计 2 笔 · 等权分仓 —— 可用现金 ÷ 计划买入笔数；股数待次日开盘价确定，开盘前不预估 100.00% ¥460,838 可用现金 ¥460,838",
+      "planCells": 2,
+      "planPercents": [
+        50,
+        50
+      ],
+      "planAmounts": [
+        230419,
+        230419
+      ],
+      "planScales": [
+        1,
+        1
+      ],
+      "planFootRatio": 100,
+      "planFootBudget": 460838,
+      "activeStrategy": "原始评分基准",
+      "mentionsOpenPriceReason": true,
+      "pageErr": false,
+      "loading": false
+    },
+    "风险扣分策略": {
+      "hasSection": true,
+      "hasLegacyBlock": false,
+      "hasLegacyChips": false,
+      "hasProvenance": true,
+      "holdingsHead": "股票 / 题材 信号 / 买入日 数量 / 买入价 / 成本金额 估值价 / 浮动 持仓市值 / 占总权益 ＝ 截止日收盘价 × 股数 ÷ 该策略截止日总权益 续持说明",
+      "holdingsRows": [
+        "闽东电力 000993.SZ 电力 2026年09月11日 2026年09月14日 3700 股 ¥14.5318 成本 ¥53,768 ¥17.97 23.66% ¥66,489 8.95% 动态止盈已启动：峰值收益27.17%，当前回撤-2.76%，继续持有；回测结束仍持仓，按2026-09-17收盘价期末估值",
+        "澳弘电子 605058.SH PCB 2026年09月16日 2026年09月17日 3100 股 ¥47.0705 成本 ¥145,919 ¥48.76 3.59% ¥151,156 20.34% 回测结束仍持仓，按2026-09-17收盘价期末估值"
+      ],
+      "holdingsFoot": "合计 2 只 成本 ¥199,686 浮动 +¥17,959 市值 ¥217,645 占总权益 29.28% 现金 ¥525,596 总权益 ¥743,241",
+      "holdingsCash": 525596,
+      "holdingsMarket": 217645,
+      "holdingsEquity": 743241,
+      "holdingsWeightPercent": 29.28,
+      "planHead": "优先级 / 股票 题材 / 板数 原始 / 策略分 风险 计划仓位 / 预算上限 占可用现金 · 等权分仓 开盘前置条件",
+      "planRowTexts": [
+        "#1 华瓷股份 001216.SZ 其他 3 板 · 2026年09月17日 原始 67 策略 62.8 低风险 12 100.00% ¥525,596 下一实际交易日开盘涨幅不低于-2%；需按实际开盘价与整手资金约束核算；以开盘时可用资金、最大持仓与策略排序为准，未承诺成交"
+      ],
+      "planFoot": "合计 1 笔 · 等权分仓 —— 可用现金 ÷ 计划买入笔数；股数待次日开盘价确定，开盘前不预估 100.00% ¥525,596 可用现金 ¥525,596",
+      "planCells": 1,
+      "planPercents": [
+        100
+      ],
+      "planAmounts": [
+        525596
+      ],
+      "planScales": [
+        1
+      ],
+      "planFootRatio": 100,
+      "planFootBudget": 525596,
+      "activeStrategy": "风险扣分策略",
+      "mentionsOpenPriceReason": true,
+      "pageErr": false,
+      "loading": false
+    },
+    "高风险硬过滤": {
+      "hasSection": true,
+      "hasLegacyBlock": false,
+      "hasLegacyChips": false,
+      "hasProvenance": true,
+      "holdingsHead": "股票 / 题材 信号 / 买入日 数量 / 买入价 / 成本金额 估值价 / 浮动 持仓市值 / 占总权益 ＝ 截止日收盘价 × 股数 ÷ 该策略截止日总权益 续持说明",
+      "holdingsRows": [
+        "闽东电力 000993.SZ 电力 2026年09月11日 2026年09月14日 2200 股 ¥14.5318 成本 ¥31,970 ¥17.97 23.66% ¥39,534 8.71% 动态止盈已启动：峰值收益27.17%，当前回撤-2.76%，继续持有；回测结束仍持仓，按2026-09-17收盘价期末估值",
+        "澳弘电子 605058.SH PCB 2026年09月16日 2026年09月17日 1900 股 ¥47.0705 成本 ¥89,434 ¥48.76 3.59% ¥92,644 20.42% 回测结束仍持仓，按2026-09-17收盘价期末估值"
+      ],
+      "holdingsFoot": "合计 2 只 成本 ¥121,404 浮动 +¥10,774 市值 ¥132,178 占总权益 29.13% 现金 ¥321,574 总权益 ¥453,752",
+      "holdingsCash": 321574,
+      "holdingsMarket": 132178,
+      "holdingsEquity": 453752,
+      "holdingsWeightPercent": 29.13,
+      "planHead": "优先级 / 股票 题材 / 板数 原始 / 策略分 风险 计划仓位 / 预算上限 占可用现金 · 等权分仓 开盘前置条件",
+      "planRowTexts": [
+        "#1 华瓷股份 001216.SZ 其他 3 板 · 2026年09月17日 原始 67 策略 67 低风险 12 100.00% ¥321,574 下一实际交易日开盘涨幅不低于-2%；需按实际开盘价与整手资金约束核算；以开盘时可用资金、最大持仓与策略排序为准，未承诺成交"
+      ],
+      "planFoot": "合计 1 笔 · 等权分仓 —— 可用现金 ÷ 计划买入笔数；股数待次日开盘价确定，开盘前不预估 100.00% ¥321,574 可用现金 ¥321,574",
+      "planCells": 1,
+      "planPercents": [
+        100
+      ],
+      "planAmounts": [
+        321574
+      ],
+      "planScales": [
+        1
+      ],
+      "planFootRatio": 100,
+      "planFootBudget": 321574,
+      "activeStrategy": "高风险硬过滤",
+      "mentionsOpenPriceReason": true,
+      "pageErr": false,
+      "loading": false
+    },
+    "质量复合评分": {
+      "hasSection": true,
+      "hasLegacyBlock": false,
+      "hasLegacyChips": false,
+      "hasProvenance": true,
+      "holdingsHead": "股票 / 题材 信号 / 买入日 数量 / 买入价 / 成本金额 估值价 / 浮动 持仓市值 / 占总权益 ＝ 截止日收盘价 × 股数 ÷ 该策略截止日总权益 续持说明",
+      "holdingsRows": [
+        "闽东电力 000993.SZ 电力 2026年09月11日 2026年09月14日 3700 股 ¥14.5318 成本 ¥53,768 ¥17.97 23.66% ¥66,489 8.90% 动态止盈已启动：峰值收益27.17%，当前回撤-2.76%，继续持有；回测结束仍持仓，按2026-09-17收盘价期末估值",
+        "澳弘电子 605058.SH PCB 2026年09月16日 2026年09月17日 3200 股 ¥47.0705 成本 ¥150,626 ¥48.76 3.59% ¥156,032 20.90% 回测结束仍持仓，按2026-09-17收盘价期末估值"
+      ],
+      "holdingsFoot": "合计 2 只 成本 ¥204,393 浮动 +¥18,128 市值 ¥222,521 占总权益 29.80% 现金 ¥524,172 总权益 ¥746,693",
+      "holdingsCash": 524172,
+      "holdingsMarket": 222521,
+      "holdingsEquity": 746693,
+      "holdingsWeightPercent": 29.8,
+      "planHead": "优先级 / 股票 题材 / 板数 原始 / 策略分 风险 计划仓位 / 预算上限 占可用现金 · 等权分仓 开盘前置条件",
+      "planRowTexts": [
+        "#1 华瓷股份 001216.SZ 其他 3 板 · 2026年09月17日 原始 67 策略 67 低风险 12 100.00% ¥524,172 下一实际交易日开盘涨幅不低于-2%；需按实际开盘价与整手资金约束核算；以开盘时可用资金、最大持仓与策略排序为准，未承诺成交"
+      ],
+      "planFoot": "合计 1 笔 · 等权分仓 —— 可用现金 ÷ 计划买入笔数；股数待次日开盘价确定，开盘前不预估 100.00% ¥524,172 可用现金 ¥524,172",
+      "planCells": 1,
+      "planPercents": [
+        100
+      ],
+      "planAmounts": [
+        524172
+      ],
+      "planScales": [
+        1
+      ],
+      "planFootRatio": 100,
+      "planFootBudget": 524172,
+      "activeStrategy": "质量复合评分",
+      "mentionsOpenPriceReason": true,
+      "pageErr": false,
+      "loading": false
+    },
+    "质量门控策略": {
+      "hasSection": true,
+      "hasLegacyBlock": false,
+      "hasLegacyChips": false,
+      "hasProvenance": true,
+      "holdingsHead": "股票 / 题材 信号 / 买入日 数量 / 买入价 / 成本金额 估值价 / 浮动 持仓市值 / 占总权益 ＝ 截止日收盘价 × 股数 ÷ 该策略截止日总权益 续持说明",
+      "holdingsRows": [],
+      "holdingsFoot": "合计 0 只 成本 ¥0 浮动待补 市值 ¥0 占总权益 待补 现金 ¥154,707 总权益 ¥154,707",
+      "holdingsCash": 154707,
+      "holdingsMarket": 0,
+      "holdingsEquity": 154707,
+      "holdingsWeightPercent": null,
+      "planHead": "优先级 / 股票 题材 / 板数 原始 / 策略分 风险 计划仓位 / 预算上限 占可用现金 · 等权分仓 开盘前置条件",
+      "planRowTexts": [
+        "#1 华瓷股份 001216.SZ 其他 3 板 · 2026年09月17日 原始 67 策略 67 低风险 12 100.00% ¥154,707 下一实际交易日开盘涨幅不低于-2%；需按实际开盘价与整手资金约束核算；以开盘时可用资金、最大持仓与策略排序为准，未承诺成交"
+      ],
+      "planFoot": "合计 1 笔 · 等权分仓 —— 可用现金 ÷ 计划买入笔数；股数待次日开盘价确定，开盘前不预估 100.00% ¥154,707 可用现金 ¥154,707",
+      "planCells": 1,
+      "planPercents": [
+        100
+      ],
+      "planAmounts": [
+        154707
+      ],
+      "planScales": [
+        1
+      ],
+      "planFootRatio": 100,
+      "planFootBudget": 154707,
+      "activeStrategy": "质量门控策略",
+      "mentionsOpenPriceReason": true,
+      "pageErr": false,
+      "loading": false
+    }
+  }
+}

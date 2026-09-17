@@ -430,3 +430,59 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > 各打印装配结果（`datasetSource` / 行数 / 直读产物窗口）并调用 `createDatasetSession` 观察是否 FAIL FAST；
 > 实测结论 = **装配层不校验、会话层抛「超出数据集窗口」**；每次约 11s（直读 390002 投影约 11 万行）；
 > **不写库、不发任何外部请求**；**已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_planned_position_render.mjs`（2026-09-17 新建，**「组合回测 → 交易明细」快照面板「比例在表格里」验收**）——
+> 无头 Chrome + CDP **零依赖**、**只读**（不点任何写操作按钮）：点开「交易明细」页签 → 等
+> `[data-strategy-portfolio-snapshot]` 与「准备买入」表渲染 → 读两张表的表头 / 行 / `tfoot` → 再逐个切换五策略复读。
+> 断言含：① **反证段落钩子**（`[data-planned-position-sizing]` 与 `[data-planned-position-chips]` 必须**不存在**，
+> 即比例只能出现在表格里）；② 当前持仓表头含「持仓市值 / 占总权益」，逐行同时给金额与 `x.xx%`；
+> ③ **资金恒等式** `合计行现金 + 持仓市值 ≈ 总权益`（±1%）—— 这是「占比」分母正确的硬证据；
+> ④ 准备买入表头含「计划仓位」，逐行 `[data-planned-position]` 单元格含 `x.xx%` 与 `¥金额`，
+> `Σ(逐只比例) ≈ 合计行总比例`，合计行回显口径与「股数待次日开盘价确定，开盘前不预估」；
+> ⑤ 口径来源徽标 `[data-portfolio-provenance]` 存在 —— 如实标注该快照由 **research-legacy 交易模拟器**
+> 产出、与「回测总览」的 **生产 Strategy Engine 段非等价**（🔴 引擎段每笔固定 100 股、**不读分仓下拉**；
+> 实证 = 生产核心快照 1232 笔成交 `shares` 全为 100，详见 `ROADMAP-CHANGELOG.md` 的 `9av` 条）。
+> ⚠️ `/backtest` 走 `getLeaderCandidateResearch`（**仅内存缓存**，进程重启即冷）⇒ **冷算数分钟到 20 分钟**，
+> 本探针按 `WAIT_SEC`（默认 1800s）耐心等待，并把中间结果**同步落盘** `_probe_planned_position_render.json`。
+> 另有 `CDP_PORT` / `PAGE_URL` 两个旋钮（并发跑别的探针时改端口）。**已登记进 git 跟踪**。
+> 同面板的截图探针 = `_shot_planned_position_panel.mjs`（就绪判据已随之改为 `[data-strategy-portfolio-snapshot] tfoot`）。
+
+> ⚠️ 本目录内的 `_probe_app_boot_render.mjs`（2026-09-17 新建，**「服务起来了但页面是不是白屏」全站启动渲染验收**）——
+> 无头 Chrome（注意：用 `chrome.exe`，非 Edge）+ CDP **零依赖**，单浏览器实例逐路由
+> `Page.navigate` → 轮询 DOM 直到有内容或超时 → 量 `innerText` 长度 / `h1,h2` / 侧栏链接数 /
+> **`Failed to fetch` / `加载异常`文案** / `window.__errs`（经 `addScriptToEvaluateOnNewDocument` 钩住
+> `error` / `unhandledrejection` / `console.error`）；结果**同步落盘** `_probe_app_boot_render.json`（探针被中断日志仍在）。
+> **两个 env 旋钮**：`ROUTES=/a,/b`（默认 11 条主路由）、`WAIT_SEC=N`（默认 25s）。
+> ⚠️ **实测 `/stock-sync` 冷启动 > 25s 才出内容**（该路由首屏慢是既有事实，不是白屏）⇒ 复测它必须 `WAIT_SEC=70`。
+> **只读、零写入、不点按钮**；**已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 favicon 工具链（2026-09-17 新建，**标签页图标 = 首页左上角侧栏 Logo 的矢量复刻**）——
+> 三件套须按顺序跑：`_gen_favicon_svg.mts`（**生成器**：从 `node_modules/tailwindcss/theme.css` 取
+> `orange-500` / `red-600` 的 oklch 令牌、从 `client/src/index.css` 取 `--radius`、从 `AppShell.tsx` 取
+> 类名与图标名、从 `lucide-react` 取字形节点 ⇒ 生成 `client/public/favicon.svg`，**生成物禁手改**）
+> → `_gen_favicon_assets.mjs`（无头 Chrome 把该 SVG 栅格化成 `favicon-16x16.png` / `favicon-32x32.png` /
+> `apple-touch-icon.png` / `favicon.ico`，**不引入任何依赖**：本机既无 Pillow 也无 ImageMagick）
+> → `_probe_favicon_render.mjs`（**验收**：与真机 4× 实拍逐像素对拍）。
+> 🔴 **两个踩过的坑**：① XML 注释里出现**连续两个短横线**（当时顺手写了 `--radius-lg`）⇒ 整份 SVG
+> 解析失败、图标根本不显示；② 页面的 `bg-gradient-to-br` 在 CSS Color 4 下**按 oklab 插值**，而 SVG 渐变
+> 只能按 sRGB 插值 ⇒ 只给两个端点色标时**中调偏差达 12/255**，生成器改为用 12 个色标折线逼近 oklab 曲线后
+> 降到 **≤1/255**（色标位置**自适应插入**：真曲线在 sRGB 色域边界有折角，均匀分段压不下去）。
+> 验收口径 = **日间**主题下对拍（夜间态被 `darkCompatibility.css` 用 `color-mix` 压低色度，属主题差异而非图标差异）：
+> 纯背景区峰值差 **2/255**、字形掩膜 **IoU 0.9984**、渐变端点与中调 **≤1/255**、5 个资源均 200 且
+> PNG/ICO 头部尺寸与声明一致；`WAIT_SEC` / `CDP_PORT` 两个旋钮可调。**只读**，唯一输出 = 证据图 `_evidence_favicon.png`。
+
+> ⚠️ **分仓口径核对**（2026-09-17 新建，回答「页面为什么显示 100%」）—— `_probe_position_sizing_caliber.mts`：
+> 用**唯一权威实现** `server/positionBudget#allocatePlannedBudgets` 喂真机渲染抓到的真实运行时数字，
+> 把 **等权 / 评分加权 / 固定单笔比例 20%** 三种口径在同一批计划上并列复算。
+> 🔴 实测结论（**全部断言通过**）：
+> ① **等权 = 可用现金 ÷ 本批笔数** ⇒ 当日只有 1 只入选时，该笔必然吃掉 **100% 可用现金**；
+> ② **评分加权在单笔时退化为满仓**（合计分 = 本笔分），与等权同值；
+> ③ **固定单笔比例 = 初始资金 × 20%**，**与权益增长脱钩**（真机数据里 = ¥20,000/笔，
+> 只相当于**当前权益的 2.69%** —— 这是「每笔恒定比例」而非「1/5 当前资金」）；
+> ④ 两笔时等权各 1/2 且**合计恰为全部可用现金**（¥230,419 × 2 = ¥460,838）。
+> ⇒ 页面上的 100% **不是计算错误，是「等权」在该情形下的定义结果**；
+> **系统里目前没有任何口径给出「单只 = 当前权益 ÷ 最大持仓数」**（该语义只能作为**单标的上限**引入，
+> 而用户已明确**不设上限**）。
+> ⚠️ 影响面（按快照 `historicalRows` 实测按 `nextDayDate` 分组）：745 个决策日里 **384 天只有 1 只候选**；
+> **2019–2024 日均候选仅 1.2–1.8 只**（多数日子等价于满仓单票），2025 起才变密（2026 日均 44.9 只、0% 的日子候选 <5）。
+> **只读**：不连库、不发请求、不写任何文件；数字改动需同步改 5 个策略的常量。
