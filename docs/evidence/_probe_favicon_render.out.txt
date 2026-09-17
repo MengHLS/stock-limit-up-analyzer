@@ -1,0 +1,29 @@
+PASS  serving /favicon.svg  — HTTP 200, image/svg+xml, 2098 字节
+PASS  serving /favicon-32x32.png  — HTTP 200, image/png, 1453 字节, {"width":32,"height":32}
+PASS  serving /favicon-16x16.png  — HTTP 200, image/png, 572 字节, {"width":16,"height":16}
+PASS  serving /apple-touch-icon.png  — HTTP 200, image/png, 30522 字节, {"width":180,"height":180}
+PASS  serving /favicon.ico  — HTTP 200, image/x-icon, 2063 字节
+PASS  favicon.ico 内含 16 与 32 两个尺寸  — [{"width":16,"height":16,"bytes":572,"offset":38},{"width":32,"height":32,"bytes":1453,"offset":610}]
+PASS  对拍口径 = 日间主题（页面无 .dark）  — html.class="", matchMedia dark=false, localStorage.theme=null
+PASS  页面已加载 favicon 声明（link 标签数 ≥ 4）  — icon:/favicon.svg | icon:/favicon-32x32.png | icon:/favicon-16x16.png | shortcut icon:/favicon.ico | apple-touch-icon:/apple-touch-icon.png
+PASS  SVG 优先声明存在且指向 /favicon.svg
+PASS  页面零未捕获异常
+PASS  favicon.svg 是合法 XML（可被 DOMParser 解析）
+PASS  渐变两端与页面实拍一致（单通道 ≤ 2/255）  — 实拍 #ff6800 → #e7000b vs svg #ff6900 → #e7000b；偏差 1
+PASS  渐变中调与页面实拍一致（单通道 ≤ 3/255，sRGB 折线逼近 oklab 的精度）  — t=0.25 实拍 #fd5600/svg #fd5600 差 0  |  t=0.5 实拍 #f54100/svg #f64100 差 1  |  t=0.75 实拍 #ee2600/svg #ef2600 差 1
+INFO  页面声明的渐变  — linear-gradient(to right bottom, oklch(0.705 0.213 47.604) 0%, oklch(0.577 0.245 27.325) 100%)
+PASS  渐变方向为左上→右下（对角）  — 页面 "to right bottom"  vs  svg 对角 0,0→32,32
+PASS  圆角比例一致（圆角 = 边长 × 0.25）  — 页面 8px / 方块 32px  vs  svg rx=8/32
+PASS  字形点位与页面 lucide 图标逐字节相同  — 页面 ["22 7 13.5 15.5 8.5 10.5 2 17","16 7 22 7 22 13"]  vs  svg ["22 7 13.5 15.5 8.5 10.5 2 17","16 7 22 7 22 13"]
+PASS  字形缩放比一致（= 图标渲染尺寸 ÷ 24）  — svg scale=0.75  vs  页面 18px/24 = 0.7500
+PASS  字形居中偏移一致  — svg translate=7  vs  期望 7
+PASS  描边颜色（白）与线帽/线接（圆）一致  — svg #ffffff/2  vs  页面 rgb(255, 255, 255)/2px/round
+PASS  日间：纯背景区逐像素一致（峰值 ≤ 6/255）  — 均值 0.636，峰值 2，样本 3143（已剔除字形影响带 953 像素）
+PASS  字形结构一致（掩膜 IoU ≥ 0.93）  — IoU 0.9984，真机白像素 620，矢量 621
+INFO  整个内区的原始差分（含字形边缘半覆盖像素，故仅作记录）  — 均值 1.417 峰值 66，超 8 的像素 129/4096 —— 差异全部集中在字形边缘 1~2px
+INFO  夜间态（仅记录）  — 色块中心 日间 #f54000 vs 夜间 #783122 —— 差异由暗色兼容层压色造成
+
+证据图已保存：docs/evidence/_evidence_favicon.png
+INFO  浏览器选定图标读取为空  — headless 无标签栏，Favicon 域不返回图像；改用「声明存在 + 资源可取 + 能解码」三重判据
+
+===== 21/21 PASS =====

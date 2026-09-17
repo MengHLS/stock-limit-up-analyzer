@@ -8,6 +8,14 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>股票涨停分析助手</title>
+    <!-- 标签页图标：与首页左上角侧栏 Logo 同一枚图标（矢量复刻见 client/public/favicon.svg）。
+         顺序即优先级：SVG 供现代浏览器取用（矢量、任意缩放不糊）；PNG 与 ICO 兜底老 Safari 与爬虫；
+         apple-touch-icon 供 iOS 加入主屏（满幅版本，圆角交由系统裁切）。 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <!-- 首屏防闪白：必须在样式表与 React 挂载之前定好 .dark，否则暗色用户会先看到一帧白底。
          读取逻辑与 client/src/contexts/ThemeContext.tsx 保持一致（同一 storage key）。 -->
     <script>
