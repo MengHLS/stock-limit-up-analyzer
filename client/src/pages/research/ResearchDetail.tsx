@@ -501,6 +501,18 @@ export default function ResearchDetail() {
               description="每个分析独立实现、独立落库；变量选项来自当前 Dataset 版本的真实视界。"
               right={
                 <div className="flex items-center gap-2">
+                  {/*
+                    PATTERN-LIBRARY-001 补 —— 为什么需要这个入口：
+                    「提问研究」页的步骤状态是纯内存态，刷新即回到 ASK，
+                    于是库里已完成的 Run 在页面上没有任何入口能回到结论步骤
+                    （而「交易模式」下拉只在那个步骤里）。后端 getOutcome
+                    本就接受 runId，这里只是把入口补上。
+                  */}
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/research/ask?runId=${selectedRun.id}`}>
+                      看结论 / 创建候选
+                    </Link>
+                  </Button>
                   <CreateAnalysisDialog
                     datasetVersionId={experiment.datasetVersionId}
                     runId={selectedRun.id}

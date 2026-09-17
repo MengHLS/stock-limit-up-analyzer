@@ -608,6 +608,69 @@ export const researchRunReadinessSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// research · chain health（STEP 0-3 · RESEARCH-CHAIN-HEALTH-001）
+// ---------------------------------------------------------------------------
+
+/**
+ * 研究链七环计数（与 `server/researchChainHealth.ts` 1:1）。
+ *
+ * 契约单测（`tests/researchChainHealth.test.ts`）断言二者形状一致，
+ * **禁止漂移** —— 体检的全部价值在于「读数可信」。
+ */
+export const researchChainHealthCountsSchema = z.object({
+  questions: z.number().int().nonnegative(),
+  plans: z.number().int().nonnegative(),
+  hypotheses: z.number().int().nonnegative(),
+  runs: z.number().int().nonnegative(),
+  analyses: z.number().int().nonnegative(),
+  results: z.number().int().nonnegative(),
+  findings: z.number().int().nonnegative(),
+  conclusions: z.number().int().nonnegative(),
+  candidates: z.number().int().nonnegative(),
+});
+
+export const researchChainExperimentSummarySchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string(),
+  status: z.string(),
+  researchType: z.string(),
+  datasetVersionId: z.number().int(),
+  sampleCount: z.number().int().nullable(),
+  createdAt: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+
+export const researchChainLatestRunSchema = z.object({
+  id: z.number().int().positive(),
+  runNo: z.number().int(),
+  status: z.string(),
+  createdAt: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+});
+
+/**
+ * 研究链体检结果（**只读**；`gaps` 为空数组 = 七环齐全且已产出结果）。
+ *
+ * `experiment` 为 null 表示实验不存在 —— **不伪造空链**，调用方据此提示「实验不存在」。
+ */
+export const researchChainHealthSchema = z.object({
+  experimentId: z.number().int().positive(),
+  experiment: researchChainExperimentSummarySchema.nullable(),
+  counts: researchChainHealthCountsSchema,
+  /** Run 状态分布（如 `{ COMPLETED: 9, FAILED: 1 }`）。 */
+  runByStatus: z.record(z.string(), z.number()),
+  /** Analysis 状态分布。 */
+  analysisByStatus: z.record(z.string(), z.number()),
+  latestRun: researchChainLatestRunSchema.nullable(),
+  /** 断环清单（人读；只依赖「计数为 0」与「存在未终态」，不引入新阈值）。 */
+  gaps: z.array(z.string()),
+});
+
+// ---------------------------------------------------------------------------
 // research · metrics（FE-5 · C-16.1 / C-16.2 / C-16.3 绩效评估）
 // ---------------------------------------------------------------------------
 
@@ -849,7 +912,7 @@ export const closedLoopRunResultSchema = z.object({
        * 数据来源：`registry`（直读策略已绑定的 ds_* 数据集）| `rebuild`（按窗口从零重建）。
        * 界面据此如实展示「这次跑的到底是不是你绑定的那份数据」。
        */
-      datasetSource: z.enum(["registry", "rebuild"]),
+      datasetSource: z.enum(["registry", "rebuild", "injected"]),
       /** `rebuild` 且由「直读失败」引起时的原因（否则 null）。 */
       datasetSourceNote: z.string().nullable(),
       /** 直读命中时的已落库数据集坐标（`dataset_version.id`）；重建时为 null。 */
@@ -858,8 +921,16 @@ export const closedLoopRunResultSchema = z.object({
       strategyId: z.string(),
       strategyVersion: z.string(),
       recipeId: z.string(),
-      /** 配方来源：文档声明 | 调用方指定（含默认常量兜底）。 */
-      recipeSource: z.enum(["strategy-document", "explicit-request"]),
+      /**
+       * 配方来源（三条诚实路径）：`strategy-document`（文档带 recipe）|
+       * `strategy-declarative-conditions`（文档无 recipe，由声明式条件现场合成）|
+       * `explicit-request`（调用方指定 / 默认常量）。
+       */
+      recipeSource: z.enum([
+        "strategy-document",
+        "strategy-declarative-conditions",
+        "explicit-request",
+      ]),
       recipeFeatureIds: z.array(z.string()),
       selectionSummary: z.string(),
       simulation: z.object({
@@ -974,3 +1045,50 @@ export type SecurityLabelDto = z.infer<typeof securityLabelSchema>;
 export type SecurityLabelsInput = z.infer<typeof securityLabelsInputSchema>;
 
 export type ResearchRunReadiness = z.infer<typeof researchRunReadinessSchema>;
+
+// ---------------------------------------------------------------------------
+// RESEARCH-PLANNER-001 — 自动研究编排（§5 研究问题 / §9 规模控制 / §19–§20 调用入口）
+// ---------------------------------------------------------------------------
+
+/**
+ * 研究问题的长度边界。
+ *
+ * 🔴 放在 shared 而不是前后端各写一份：前端要在**提交前**就拦住过短 / 过长的问题
+ *    （不该让用户点一下按钮才被拒），后端 `planResearchQuestion` 也必须拦
+ *    （不能只靠前端 —— 前端不是可信边界）。两处若各写一份，
+ *    「前端放过去、后端拒绝」这类体验裂缝只是时间问题。
+ *
+ * `MIN = 4`：短于 4 个字的一句话无法定位研究方法，系统**选择不猜**（`QUESTION_TOO_SHORT`）。
+ * `MAX = 2000`：与 `research_question.questionText` 的列宽一致。
+ */
+export const RESEARCH_QUESTION_MIN_LENGTH = 4;
+export const RESEARCH_QUESTION_MAX_LENGTH = 2000;
+
+/**
+ * 单份自动计划的规模边界（§9）。
+ * `MIN = 20`：低于它必然丢掉核心问题（基线 + 守卫 + 对照组就占掉大半）。
+ * `MAX = 50`：高于它会退化成「批量跑」，探索超大组合属于高级/专家模式。
+ */
+export const RESEARCH_PLAN_MIN_ANALYSIS = 20;
+export const RESEARCH_PLAN_MAX_ANALYSIS = 50;
+
+/**
+ * 单份自动计划的**默认**上限（§9 建议区间 20~50 内的取值）。
+ * 为什么落在 30：实测单条分析均摊 ≈ 3.1s（跨境 TiDB，RTT ≈ 208ms），30 条 ≈ 95s，
+ * 是「用户愿意在页面上等」的量级。
+ */
+export const RESEARCH_PLAN_DEFAULT_ANALYSIS = 30;
+
+/** 研究问题文本校验（前后端同源；后端领域层另有 `assertQuestionText` 给出可读理由）。 */
+export const researchQuestionTextSchema = z
+  .string()
+  .trim()
+  .min(RESEARCH_QUESTION_MIN_LENGTH, `研究问题至少要 ${RESEARCH_QUESTION_MIN_LENGTH} 个字`)
+  .max(RESEARCH_QUESTION_MAX_LENGTH, `研究问题不能超过 ${RESEARCH_QUESTION_MAX_LENGTH} 个字符`);
+
+/** `maxAnalysisPerPlan` 校验（§9：只允许在建议区间内显式指定）。 */
+export const researchPlanCapSchema = z
+  .number()
+  .int()
+  .min(RESEARCH_PLAN_MIN_ANALYSIS)
+  .max(RESEARCH_PLAN_MAX_ANALYSIS);

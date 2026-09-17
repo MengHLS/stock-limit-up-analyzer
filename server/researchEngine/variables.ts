@@ -463,6 +463,13 @@ export const PULLBACK_STATS = [
   "min_volume_ratio",
   "last_volume_ratio",
   "holds_event_low",
+  // RESEARCH-PLANNER-001 — 「不破首板日**开盘价**」是**另一个口径**，不是 `holds_event_low` 的别名：
+  // 首板日 `low(T) ≤ open(T)` 恒成立，故「不破开盘价」严格强于「不破最低价」，
+  // 两者筛出的样本不同（前端 researchMatrix.ts 已登记这条差异）。
+  // 新增它的直接动因：任务书 §27 的验收问题原文是「不破首板**开盘价**」——
+  // 用 `holds_event_low` 顶替会得到含义不同的数字，属于读数不实。
+  // 与 `holds_event_low` 平行：同一 `post` 窗口取值、同一 `prefix(rd=0)` 基准日，只换基准字段。
+  "holds_event_open",
   "last_is_bullish",
 ] as const;
 export type PullbackStat = (typeof PULLBACK_STATS)[number];
@@ -476,6 +483,7 @@ const PULLBACK_STAT_LABEL: Record<PullbackStat, string> = {
   min_volume_ratio: "回调期最小量能比（相对首板日）",
   last_volume_ratio: "回调末日量能比（相对首板日）",
   holds_event_low: "回调期未破首板日最低价",
+  holds_event_open: "回调期未破首板日开盘价",
   last_is_bullish: "回调末日为阳线（红盘）",
 };
 
@@ -494,6 +502,9 @@ const PULLBACK_STAT_DEFINITION: Record<PullbackStat, string> = {
     + "对应「企稳放量阳线」里的放量确认（>1 = 当日量超过首板日）。",
   holds_event_low: "回调窗口内 min(post.low[T+1..T+k]) ≥ prefix(rd=0).low 时取 1，否则 0；缺数据为 null。"
     + "**1 = 回调期内始终未破首板日最低价**（即策略的「生命线」守卫）。",
+  holds_event_open: "回调窗口内 min(post.low[T+1..T+k]) ≥ prefix(rd=0).open 时取 1，否则 0；缺数据为 null。"
+    + "**1 = 回调期内始终未破首板日开盘价**（比 `holds_event_low` 更严格：`low(T) ≤ open(T)`，"
+    + "所以「没破开盘价」必然「没破最低价」，反之不成立）。缺数据为 null，不插补。",
   last_is_bullish: "post.close[T+k] > post.open[T+k] 时取 1，否则 0；缺任一分量为 null。"
     + "**1 = 回调末日当日为阳线（收盘 > 开盘）** —— 即用户口径的「红盘」。"
     + "⚠️ 与 `pullback_close_ratio_*`（收盘相对**首板日**收盘）**不是**同一件事："
@@ -555,7 +566,7 @@ function buildPullbackVariable(stat: PullbackStat, offset: number): ObservationV
     postRelativeDays: days,
   };
   const needsEventBar =
-    stat === "close_ratio" || stat === "holds_event_low"
+    stat === "close_ratio" || stat === "holds_event_low" || stat === "holds_event_open"
     || stat === "min_volume_ratio" || stat === "last_volume_ratio";
   const withBase = needsEventBar ? { ...base, needsEventBar: true as const } : base;
 
@@ -638,6 +649,19 @@ function buildPullbackVariable(stat: PullbackStat, offset: number): ObservationV
         definition: PULLBACK_STAT_DEFINITION.holds_event_low,
         resolve: (s) => {
           const floor = s.eventBar?.low;
+          if (typeof floor !== "number" || !Number.isFinite(floor)) return null;
+          const values = days.map((d) => postBarField(s, d, "low")).filter((v): v is number => v !== null);
+          if (values.length === 0) return null;
+          return Math.min(...values) >= floor - PRICE_EPS ? 1 : 0;
+        },
+      };
+    case "holds_event_open":
+      return {
+        ...withBase,
+        label: `回调 T+1..T+${offset} 未破首板日开盘价`,
+        definition: PULLBACK_STAT_DEFINITION.holds_event_open,
+        resolve: (s) => {
+          const floor = s.eventBar?.open;
           if (typeof floor !== "number" || !Number.isFinite(floor)) return null;
           const values = days.map((d) => postBarField(s, d, "low")).filter((v): v is number => v !== null);
           if (values.length === 0) return null;

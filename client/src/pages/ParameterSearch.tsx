@@ -180,6 +180,17 @@ function heatCellStyle(returnPct: number | null, failed: boolean): React.CSSProp
 export default function ParameterSearch() {
   const [mode, setMode] = useState<SearchMode>("grid");
   const [searchSeed, setSearchSeed] = useState("42");
+  /**
+   * 策略评估路径的四项入参（STEP B 落点②）。
+   *
+   * 齐备且库中确有该版本时，后端把评估改走**策略评估端口**（真实闭环 data→research→
+   * strategy→backtest→evaluation），参数空间也改为从策略文档 `parameters` 派生；
+   * 否则走 legacy 生产回测 —— 结果区会如实显示 evaluationSource，不做静默替换。
+   */
+  const [evalStrategyId, setEvalStrategyId] = useState("");
+  const [evalStrategyVersion, setEvalStrategyVersion] = useState("");
+  const [evalStartDate, setEvalStartDate] = useState("");
+  const [evalEndDate, setEvalEndDate] = useState("");
   const [axis, setAxis] = useState<string>("cost");
   const [stochMethod, setStochMethod] = useState<string>("monteCarlo");
   const [stochSeed, setStochSeed] = useState("1");
@@ -204,6 +215,14 @@ export default function ParameterSearch() {
 
   const describe = describeQuery.data ?? null;
   const searchRun: SearchRun | null = runMutation.data ?? null;
+  /**
+   * 原始返回（tRPC 推断类型，含 `evaluationSource` / `evaluationNote` /
+   * `effectiveParameterSpace`）。
+   *
+   * 🔴 必须是**局部变量**：JSX 里直接写 `runMutation.data.xxx` 无法通过 TS 收窄
+   * （属性访问每次求值都可能不同）—— 实测报 TS18048。
+   */
+  const searchRunRaw = runMutation.data ?? null;
   const rollingRun: RollingRun | null = rollMutation.data ?? null;
   const robustnessRun: RobustnessRun | null = robMutation.data ?? null;
   const stochasticRun: StochasticRun | null = stochMutation.data ?? null;
@@ -238,9 +257,20 @@ export default function ParameterSearch() {
       });
       return;
     }
+    const strategyIdentity =
+      evalStrategyId.trim() !== "" && evalStrategyVersion.trim() !== ""
+        ? {
+            strategyId: evalStrategyId.trim(),
+            strategyVersion: evalStrategyVersion.trim(),
+            ...(evalStartDate.trim() !== "" && evalEndDate.trim() !== ""
+              ? { startDate: evalStartDate.trim(), endDate: evalEndDate.trim() }
+              : {}),
+          }
+        : {};
     runMutation.mutate({
       method: mode,
       parameterSpace: space,
+      ...strategyIdentity,
       ...(mode === "random" ? { seed: parseIntInput(searchSeed, 42) } : {}),
     });
   };
@@ -337,6 +367,56 @@ export default function ParameterSearch() {
             )}
           </div>
 
+          {/* 策略评估路径：四项齐备 ⇒ 后端改走策略评估端口（真实闭环），参数空间从文档派生 */}
+          <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-2 text-xs font-semibold text-slate-700">
+              策略评估路径（可选）：填齐策略身份与决策窗口后，评估标量改由真实闭环产出，
+              参数空间亦改为从策略文档声明派生
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted-foreground">策略 ID</p>
+                <Input
+                  value={evalStrategyId}
+                  onChange={(e) => setEvalStrategyId(e.target.value)}
+                  placeholder="cand-360001"
+                  className="h-8 w-40 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted-foreground">版本</p>
+                <Input
+                  value={evalStrategyVersion}
+                  onChange={(e) => setEvalStrategyVersion(e.target.value)}
+                  placeholder="1.0.0"
+                  className="h-8 w-24 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted-foreground">决策起（YYYY-MM-DD）</p>
+                <Input
+                  value={evalStartDate}
+                  onChange={(e) => setEvalStartDate(e.target.value)}
+                  placeholder="2026-08-22"
+                  className="h-8 w-28 font-mono text-xs"
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-xs font-medium text-muted-foreground">决策止</p>
+                <Input
+                  value={evalEndDate}
+                  onChange={(e) => setEvalEndDate(e.target.value)}
+                  placeholder="2026-09-01"
+                  className="h-8 w-28 font-mono text-xs"
+                />
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+              决策窗口必须落在策略所绑定数据集的窗口内（越界会被后端 FAIL FAST 拒绝）。
+              留空则走 legacy 生产回测 —— 结果区会如实显示评估口径，不做静默替换。
+            </p>
+          </div>
+
           {/* 参数空间（describe 默认） */}
           <div>
             <p className="mb-1 text-xs font-medium text-muted-foreground">
@@ -381,6 +461,17 @@ export default function ParameterSearch() {
           {rollMutation.isError && (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               {runErr(rollMutation.error)}
+            </div>
+          )}
+
+          {/* 评估口径：如实显示数字从哪来（策略评估端口 / legacy 生产回测） */}
+          {searchRunRaw !== null && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+              评估口径：<span className="font-mono">{String(searchRunRaw.evaluationSource ?? "（后端未标注）")}</span>
+              {searchRunRaw.evaluationNote ? ` —— ${String(searchRunRaw.evaluationNote)}` : ""}
+              <span className="ml-1 font-mono">
+                {`｜搜索键：${searchRunRaw.effectiveParameterSpace.parameters.map((p) => p.name).join(" / ") || "（无）"}`}
+              </span>
             </div>
           )}
 

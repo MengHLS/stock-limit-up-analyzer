@@ -1,0 +1,28 @@
+[dotenv@17.2.3] injecting env (5) from .env -- tip: 🗂️ backup and recover secrets: https://dotenvx.com/ops
+=== 分析 #630001 条件核对（Dataset 390002，目标 future_return_10d）===
+
+[0] 可用样本基础
+  全样本（有 T+10 收益）                 n= 23543  T→T+10=   1.35%  T+5→T+10=  -0.14%  (n_seg=23479)
+
+[1] 当前存的条件
+  holds_event_low_5d==1 且 obs_1d.open==0 n=     0  T→T+10=       -  T+5→T+10=       -  (n_seg=null)
+  仅 obs_1d.open==0               n=     0  T→T+10=       -  T+5→T+10=       -  (n_seg=null)
+  obs_1d.open 为 NULL（非 0）        n=    40  T→T+10=   7.53%  T+5→T+10=   2.53%  (n_seg=14)
+  仅 holds_event_low_5d==1        n= 16515  T→T+10=   5.60%  T+5→T+10=  -0.21%  (n_seg=16482)
+
+[2] 本该填的条件（is_breakout_5d==0）
+  holds5==1 且 is_breakout_5d==0  n=   356  T→T+10=  -5.10%  T+5→T+10=   0.58%  (n_seg=356)
+  仅 is_breakout_5d==0            n=  1498  T→T+10= -11.20%  T+5→T+10=   0.40%  (n_seg=1470)
+
+[3] 反面参照
+  is_breakout_5d==1（冲高过首板价）      n= 22045  T→T+10=   2.20%  T+5→T+10=  -0.17%  (n_seg=22009)
+  holds5==1 且 is_breakout_5d==1  n= 16159  T→T+10=   5.84%  T+5→T+10=  -0.22%  (n_seg=16126)
+  holds_event_low_5d==0（已破位）     n=  7002  T→T+10=  -8.71%  T+5→T+10=   0.03%  (n_seg=6997)
+
+[4] 逐条结论（pp = 百分点）
+  当前存的条件组                                        = 无样本（n=0），条件组统计不可用
+  正确条件组(holds5=1 且 breakout_5d=0) − 全样本           = 0.72pp   （纯未来段 T+5→T+10）
+  仅 holds5=1 − 全样本                                   = -0.07pp   （纯未来段）
+  仅 breakout_5d=0 − 全样本                              = 0.53pp   （纯未来段）
+  breakout_5d=1 − 全样本                                 = -0.04pp   （纯未来段）
+  holds5=0（破位） − 全样本                              = 0.16pp   （纯未来段）

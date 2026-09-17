@@ -113,7 +113,8 @@ describe("FE-4 · 闭环阶段 id 传输契约", () => {
 });
 
 describe("FE-0 · researchRun.readiness（真实装配探测）", () => {
-  it("executorBound 来自覆盖率探测，不再硬编码：14 阶段中 7 装配 / 7 无执行器", async () => {
+  // optimization 于 STEP B 落点③ 接线（同步评估器 + 文档派生搜索空间）⇒ 8 装配 / 6 无执行器。
+  it("executorBound 来自覆盖率探测，不再硬编码：14 阶段中 8 装配 / 6 无执行器", async () => {
     const r = await caller.researchRun.readiness();
     // 静态装配能力（与后端 wiredClosedLoopStages 同源）
     expect(r.wiring.requestedStages).toHaveLength(14);
@@ -123,11 +124,11 @@ describe("FE-0 · researchRun.readiness（真实装配探测）", () => {
       "strategy",
       "backtest",
       "evaluation",
+      "optimization",
       "regime",
       "finalize",
     ]);
     expect(r.wiring.unwiredStages).toEqual([
-      "optimization",
       "robustness",
       "oos",
       "overfitting",

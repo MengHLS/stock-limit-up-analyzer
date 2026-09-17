@@ -1,0 +1,115 @@
+[dotenv@17.2.3] injecting env (5) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+=== 最近 15 条 research_analysis ===
+
+#630001  run=630002 exp=360002  类型=CONDITIONAL  状态=PENDING
+   名称   = 没跌破涨停日最低价的
+   目标   = future_return_10d
+   实验   = 首板后 5 日区间内震荡 → T+10 收益  ds=390002 [DRAFT]  runStatus=PENDING err=-
+   建于   = Wed Sep 16 2026 15:59:21 GMT+0800 (中国标准时间)  完成于 -
+   config = {"targetField":"future_return_10d"}
+
+#600001  run=630001 exp=360001  类型=SEGMENT_RELATION  状态=COMPLETED
+   名称   = 在首板后T+1日到T+5日，最低收盘价不低于首板涨停价
+   目标   = null
+   实验   = 首板后不破涨停日当天收盘价实验v0.1  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 15:32:50 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 15:34:14 GMT+0800 (中国标准时间)
+   config = {"windowA":[1,5],"windowB":[5,10],"windowAStat":"max_drawdown","windowBStat":"max_return","windowBands":5}
+
+#570018  run=600001 exp=240002  类型=DESCRIPTIVE  状态=COMPLETED
+   名称   = 描述统计：2 个变量
+   目标   = null
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:56 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:57 GMT+0800 (中国标准时间)
+   config = {"variables":["is_one_word_hold","future_return_5d"]}
+
+#570017  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 industry 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:56 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:55 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"industry"}
+
+#570016  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 market 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:55 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:53 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"market"}
+
+#570015  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 board 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:54 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:51 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"board"}
+
+#570014  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 quarter 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:54 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:49 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"quarter"}
+
+#570013  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 month 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:53 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:46 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"month"}
+
+#570012  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 year 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:52 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:44 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"year"}
+
+#570011  run=600001 exp=240002  类型=EVENT_STUDY  状态=COMPLETED
+   名称   = 事件研究：T+1 / T+2 / T+3 / T+4 / T+5 / T+6 / T+7 / T+8 / T+9 / T+10 / T+11 / T+12 / T+13 / T+14 / T+15 / T+16 / T+17 / T+18 / T+19 / T+20
+   目标   = null
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:51 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:42 GMT+0800 (中国标准时间)
+   config = {"horizons":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]}
+
+#570010  run=600001 exp=240002  类型=QUANTILE  状态=COMPLETED
+   名称   = 分位分析：is_one_word_hold 分 10 组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:51 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:39 GMT+0800 (中国标准时间)
+   config = {"featureField":"is_one_word_hold","targetField":"future_return_5d","quantileGroups":10}
+
+#570009  run=600001 exp=240002  类型=DESCRIPTIVE  状态=COMPLETED
+   名称   = 描述统计：2 个变量
+   目标   = null
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:14 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:37 GMT+0800 (中国标准时间)
+   config = {"variables":["turnover","future_return_5d"]}
+
+#570008  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 industry 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:13 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:34 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"industry"}
+
+#570007  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 market 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:13 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:32 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"market"}
+
+#570006  run=600001 exp=240002  类型=STABILITY  状态=COMPLETED
+   名称   = 稳定性分析：按 board 分组 → future_return_5d
+   目标   = future_return_5d
+   实验   = 正式数据，首板回踩与未来收益的关系  ds=390002 [COMPLETED]  runStatus=COMPLETED err=-
+   建于   = Wed Sep 16 2026 01:27:12 GMT+0800 (中国标准时间)  完成于 Wed Sep 16 2026 01:28:30 GMT+0800 (中国标准时间)
+   config = {"targetField":"future_return_5d","stabilityDimension":"board"}
+
+=== 条件明细 ===
+  a#630001 g0 s0  holds_event_low_5d == 1   (组内=AND 组间=AND)
+  a#630001 g0 s1  obs_1d.open == 0   (组内=AND 组间=AND)
+  a#600001 g0 s0  obs_1d.open >= 0.01   (组内=AND 组间=AND)
+
+=== 指标定义 ===
+  (无)

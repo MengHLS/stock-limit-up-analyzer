@@ -149,13 +149,15 @@ describe("closedLoopWiring — 装配声明表", () => {
     }
   });
 
-  it("已装配清单 = data / research / strategy / backtest / evaluation / finalize / regime", () => {
+  it("已装配清单 = data / research / strategy / backtest / evaluation / optimization / regime / finalize", () => {
+    // optimization 于 STEP B 落点③ 接线（评估器 = strategyEvaluation/evaluator.ts，同步）。
     expect([...wiredClosedLoopStages()]).toEqual([
       "data",
       "research",
       "strategy",
       "backtest",
       "evaluation",
+      "optimization",
       "regime",
       "finalize",
     ]);
@@ -275,14 +277,15 @@ describe("closedLoopWiring — 覆盖率探测（取代硬编码 executorBound�
     expect(row.satisfiedBy).toBe("input:evaluationInput");
   });
 
-  it("未装配阶段（optimization）无论给什么入参都不覆盖，note = 未装配原因", () => {
-    const coverage = assessClosedLoopWiringCoverage(ALL_INPUTS_PRESENT, ["optimization"]);
-    const row = coverage.stages.find((s) => s.stageId === "optimization")!;
+  // 标的用 robustness：optimization 已于 STEP B 落点③ 接线，不再是未装配阶段。
+  it("未装配阶段（robustness）无论给什么入参都不覆盖，note = 未装配原因", () => {
+    const coverage = assessClosedLoopWiringCoverage(ALL_INPUTS_PRESENT, ["robustness"]);
+    const row = coverage.stages.find((s) => s.stageId === "robustness")!;
     expect(row.wired).toBe(false);
     expect(row.inputsSatisfied).toBe(false);
     expect(row.covered).toBe(false);
     expect(row.blockedReasonCode).toBe("CL_RUNNER_NOT_INJECTED");
-    expect(row.note).toBe(closedLoopStageWiringRequirement("optimization").notWiredReason);
+    expect(row.note).toBe(closedLoopStageWiringRequirement("robustness").notWiredReason);
   });
 
   it("被请求阶段归一为拓扑序（乱序输入不影响判定）", () => {

@@ -26,6 +26,11 @@ import type {
   ResearchStrategyCandidate,
   ResearchAnalysisTemplate,
   ResearchAnalysisTemplateItem,
+  // RESEARCH-PLANNER-001 —— 研究问题 / 研究计划
+  ResearchQuestion,
+  ResearchPlan,
+  ResearchPlanItem,
+  ResearchPlanNotes,
 } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -169,6 +174,14 @@ export interface ResearchAnalysisListFilter {
   runId?: number;
   analysisType?: ResearchAnalysis["analysisType"];
   status?: ResearchAnalysis["status"];
+  /**
+   * RESEARCH-PLANNER-001 —— 按「由哪份计划生成」过滤。
+   *
+   * 用途：`materializePlan` 的**幂等分支**需要回答「这份计划已经落成过哪些分析」。
+   * 没有这个过滤就只能拿 runId 全量查再在内存里筛 —— 那会把「计划 → 分析」的对应关系
+   * 变成前端 / 编排层的口径，而不是数据库的事实。
+   */
+  planId?: number;
 }
 
 export interface ResearchConclusionListFilter {
@@ -207,6 +220,21 @@ export interface ResearchFindingListFilter {
   findingType?: ResearchFinding["findingType"];
   /** 研究强度下界（「只看值得进一步研究的」场景）。 */
   minResearchStrength?: number;
+}
+
+/** RESEARCH-PLANNER-001 —— 研究问题列表过滤。 */
+export interface ResearchQuestionListFilter {
+  datasetVersionId?: number;
+  status?: ResearchQuestion["status"];
+  experimentId?: number;
+}
+
+/** RESEARCH-PLANNER-001 —— 研究计划列表过滤。 */
+export interface ResearchPlanListFilter {
+  questionId?: number;
+  experimentId?: number;
+  runId?: number;
+  status?: ResearchPlan["status"];
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +384,59 @@ export interface ResearchAnalysisTemplateRepository {
   delete(id: number): Promise<void>;
 }
 
+// ---------------------------------------------------------------------------
+// RESEARCH-PLANNER-001 —— 研究问题 / 研究计划
+// ---------------------------------------------------------------------------
+
+export type ResearchQuestionCreateInput = Omit<
+  ResearchQuestion,
+  "id" | "createdAt" | "updatedAt" | "status"
+> & { status?: ResearchQuestion["status"] };
+
+/**
+ * 问题更新补丁。
+ *
+ * **硬排除** `questionText` / `datasetVersionId`：前者是用户原话（改写即篡改溯源根），
+ * 后者是输入边界（项目既有铁律：Dataset 坐标创建即冻结）。
+ * 允许改的是「编排推进状态」与 `intent`（重新识别一次意图并如实覆盖）。
+ */
+export type ResearchQuestionUpdatePatch = Partial<
+  Omit<ResearchQuestion, "id" | "questionText" | "datasetVersionId" | "createdAt" | "updatedAt">
+>;
+
+export type ResearchPlanCreateInput = Omit<
+  ResearchPlan,
+  "id" | "createdAt" | "updatedAt" | "status"
+> & { status?: ResearchPlan["status"] };
+
+/**
+ * 计划更新补丁。
+ *
+ * **硬排除** `questionId` / `experimentId` / `datasetVersionId`：结构锚，改它等于把计划挂到别的
+ * 问题上（历史不可改写）。可改的是 `runId`（落成时才产生）、`items` / 计数 / 状态 / notes。
+ */
+export type ResearchPlanUpdatePatch = Partial<
+  Omit<ResearchPlan, "id" | "questionId" | "experimentId" | "datasetVersionId" | "createdAt" | "updatedAt">
+>;
+
+export interface ResearchQuestionRepository {
+  create(input: ResearchQuestionCreateInput): Promise<ResearchQuestion>;
+  getById(id: number): Promise<ResearchQuestion | undefined>;
+  list(filter?: ResearchQuestionListFilter): Promise<ResearchQuestion[]>;
+  update(id: number, patch: ResearchQuestionUpdatePatch): Promise<ResearchQuestion>;
+  delete(id: number): Promise<void>;
+}
+
+export interface ResearchPlanRepository {
+  create(input: ResearchPlanCreateInput): Promise<ResearchPlan>;
+  getById(id: number): Promise<ResearchPlan | undefined>;
+  list(filter?: ResearchPlanListFilter): Promise<ResearchPlan[]>;
+  /** 最近一份计划（同一问题重试时用；无则 `undefined`）。 */
+  latestForQuestion(questionId: number): Promise<ResearchPlan | undefined>;
+  update(id: number, patch: ResearchPlanUpdatePatch): Promise<ResearchPlan>;
+  delete(id: number): Promise<void>;
+}
+
 /**
  * 关系查询（指令 §18 要求；由实现方**组合**单实体 Repository，不引入新的持久化职责）。
  */
@@ -386,5 +467,9 @@ export interface ResearchRepositories {
   templates: ResearchAnalysisTemplateRepository;
   /** RESEARCH-FINDING-001 —— 发现层（Result → Finding）。 */
   findings: ResearchFindingRepository;
+  /** RESEARCH-PLANNER-001 —— 研究问题（核心业务对象）。 */
+  questions: ResearchQuestionRepository;
+  /** RESEARCH-PLANNER-001 —— 研究计划（Question → 一组待执行 Analysis）。 */
+  plans: ResearchPlanRepository;
   relationships: ResearchRelationshipQueries;
 }

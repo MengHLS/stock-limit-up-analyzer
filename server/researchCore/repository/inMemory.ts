@@ -47,6 +47,9 @@ import type {
   ResearchExperimentWithRuns,
   ResearchFinding,
   ResearchHypothesis,
+  ResearchPlan,
+  ResearchPlanItem,
+  ResearchQuestion,
   ResearchResult,
   ResearchRun,
   ResearchRunExecutionLogEntry,
@@ -71,6 +74,10 @@ import type {
   ResearchFindingListFilter,
   ResearchFindingRepository,
   ResearchHypothesisRepository,
+  ResearchPlanListFilter,
+  ResearchPlanRepository,
+  ResearchQuestionListFilter,
+  ResearchQuestionRepository,
   ResearchRelationshipQueries,
   ResearchRepositories,
   ResearchResultListFilter,
@@ -94,6 +101,9 @@ interface Store {
   artifacts: Array<ResearchArtifact & { id: number }>;
   templates: Array<ResearchAnalysisTemplate & { id: number }>;
   templateItems: Array<ResearchAnalysisTemplateItem & { id: number }>;
+  // ---- RESEARCH-PLANNER-001 ----
+  questions: Array<ResearchQuestion & { id: number }>;
+  plans: Array<ResearchPlan & { id: number }>;
 }
 
 export interface InMemoryResearchOptions {
@@ -149,11 +159,25 @@ export function createInMemoryResearchRepositories(
     artifacts: [],
     templates: [],
     templateItems: [],
+    questions: [],
+    plans: [],
   };
 
   const stamp = (): string => toIso(now()) ?? new Date().toISOString();
 
   // ---- 引用完整性 ----
+  /** RESEARCH-PLANNER-001 —— 研究计划必须挂在真实研究问题上（零 FK 下应用层校验）。 */
+  async function requireQuestion(id: number): Promise<ResearchQuestion & { id: number }> {
+    const found = store.questions.find((q) => q.id === id);
+    if (!found) {
+      throw new ResearchReferenceError(
+        RESEARCH_REFERENCE_ERROR.QUESTION_NOT_FOUND,
+        `研究问题不存在：${id}`,
+      );
+    }
+    return found;
+  }
+
   async function requireExperiment(id: number): Promise<ResearchExperiment & { id: number }> {
     const found = store.experiments.find((e) => e.id === id);
     if (!found) {
@@ -409,7 +433,9 @@ export function createInMemoryResearchRepositories(
           (a) =>
             (filter.runId === undefined || a.runId === filter.runId) &&
             (filter.analysisType === undefined || a.analysisType === filter.analysisType) &&
-            (filter.status === undefined || a.status === filter.status),
+            (filter.status === undefined || a.status === filter.status) &&
+            // RESEARCH-PLANNER-001：按计划溯源过滤（与 db.ts 逐字同口径）。
+            (filter.planId === undefined || a.planId === filter.planId),
         )
         .map((a) => ({ ...a }))
         .sort((a, b) => a.id - b.id);
@@ -658,6 +684,8 @@ export function createInMemoryResearchRepositories(
         // RESEARCH-006.1 —— 研究来源快照：与 db.ts 同语义（缺省归一为 null，不落 undefined）。
         sourceDatasetVersionId: input.sourceDatasetVersionId ?? null,
         sourceResearchRunId: input.sourceResearchRunId ?? null,
+        // RESEARCH-PLANNER-001 —— 来源研究计划（与 db.ts 同语义：缺省归一为 null）。
+        sourceResearchPlanId: input.sourceResearchPlanId ?? null,
         sourceTraceJson: input.sourceTraceJson ?? null,
         sourceDatasetDivergenceReason: input.sourceDatasetDivergenceReason ?? null,
         createdAt: at,
@@ -1019,6 +1047,141 @@ export function createInMemoryResearchRepositories(
   // -------------------------------------------------------------------------
   // 关系查询
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // RESEARCH-PLANNER-001 — Research Question / Research Plan
+  // -------------------------------------------------------------------------
+
+  const questions: ResearchQuestionRepository = {
+    async create(input) {
+      if (options.datasetVersionExists) {
+        const ok = await options.datasetVersionExists(input.datasetVersionId);
+        if (!ok) {
+          throw new ResearchReferenceError(
+            RESEARCH_REFERENCE_ERROR.DATASET_VERSION_NOT_FOUND,
+            `创建研究问题失败，Dataset Version 不存在：${input.datasetVersionId}`,
+          );
+        }
+      }
+      const row: ResearchQuestion & { id: number } = {
+        ...input,
+        id: nextId("question"),
+        status: input.status ?? "DRAFT",
+        intent: input.intent ?? null,
+        experimentId: input.experimentId ?? null,
+        planId: input.planId ?? null,
+        runId: input.runId ?? null,
+        conclusionId: input.conclusionId ?? null,
+        createdAt: stamp(),
+        updatedAt: stamp(),
+      };
+      store.questions.push(row);
+      return { ...row };
+    },
+    async getById(id) {
+      const found = store.questions.find((q) => q.id === id);
+      return found ? { ...found } : undefined;
+    },
+    async list(filter: ResearchQuestionListFilter = {}) {
+      return store.questions
+        .filter(
+          (q) =>
+            (filter.datasetVersionId === undefined || q.datasetVersionId === filter.datasetVersionId) &&
+            (filter.status === undefined || q.status === filter.status) &&
+            (filter.experimentId === undefined || q.experimentId === filter.experimentId),
+        )
+        .map((q) => ({ ...q }))
+        .sort((a, b) => b.id - a.id);
+    },
+    async update(id, patch) {
+      const found = store.questions.find((q) => q.id === id);
+      if (!found) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.QUESTION_NOT_FOUND,
+          `更新失败，研究问题不存在：${id}`,
+        );
+      }
+      Object.assign(found, patch, { updatedAt: stamp() });
+      return { ...found };
+    },
+    async delete(id) {
+      const idx = store.questions.findIndex((q) => q.id === id);
+      if (idx < 0) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.QUESTION_NOT_FOUND,
+          `删除失败，研究问题不存在：${id}`,
+        );
+      }
+      store.questions.splice(idx, 1);
+    },
+  };
+
+  const plans: ResearchPlanRepository = {
+    async create(input) {
+      await requireQuestion(input.questionId);
+      await requireExperiment(input.experimentId);
+      const row: ResearchPlan & { id: number } = {
+        ...input,
+        id: nextId("plan"),
+        status: input.status ?? "PLANNED",
+        runId: input.runId ?? null,
+        moduleKeys: [...input.moduleKeys],
+        // 深拷贝：内存替身必须阻断「调用方持引用改写内部状态」（与 cloneJson 同一纪律）。
+        items: cloneJson(input.items as ResearchPlanItem[]) ?? [],
+        notes: cloneJson(input.notes ?? null),
+        createdAt: stamp(),
+        updatedAt: stamp(),
+      };
+      store.plans.push(row);
+      return { ...row, items: cloneJson(row.items) ?? [] };
+    },
+    async getById(id) {
+      const found = store.plans.find((p) => p.id === id);
+      return found ? { ...found, items: cloneJson(found.items) ?? [] } : undefined;
+    },
+    async list(filter: ResearchPlanListFilter = {}) {
+      return store.plans
+        .filter(
+          (p) =>
+            (filter.questionId === undefined || p.questionId === filter.questionId) &&
+            (filter.experimentId === undefined || p.experimentId === filter.experimentId) &&
+            (filter.runId === undefined || p.runId === filter.runId) &&
+            (filter.status === undefined || p.status === filter.status),
+        )
+        .map((p) => ({ ...p, items: cloneJson(p.items) ?? [] }))
+        .sort((a, b) => b.id - a.id);
+    },
+    async latestForQuestion(questionId) {
+      const found = store.plans.filter((p) => p.questionId === questionId).sort((a, b) => b.id - a.id)[0];
+      return found ? { ...found, items: cloneJson(found.items) ?? [] } : undefined;
+    },
+    async update(id, patch) {
+      const found = store.plans.find((p) => p.id === id);
+      if (!found) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.PLAN_NOT_FOUND,
+          `更新失败，研究计划不存在：${id}`,
+        );
+      }
+      Object.assign(found, patch, { updatedAt: stamp() });
+      if (patch.items !== undefined) found.items = cloneJson(patch.items) ?? [];
+      return { ...found, items: cloneJson(found.items) ?? [] };
+    },
+    async delete(id) {
+      const idx = store.plans.findIndex((p) => p.id === id);
+      if (idx < 0) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.PLAN_NOT_FOUND,
+          `删除失败，研究计划不存在：${id}`,
+        );
+      }
+      store.plans.splice(idx, 1);
+    },
+  };
+
+  // -------------------------------------------------------------------------
+  // 关系查询
+  // -------------------------------------------------------------------------
+
   const relationships: ResearchRelationshipQueries = {
     async getExperimentWithRuns(experimentId) {
       const experiment = await experiments.getById(experimentId);
@@ -1067,6 +1230,8 @@ export function createInMemoryResearchRepositories(
     artifacts,
     templates,
     findings,
+    questions,
+    plans,
     relationships,
   };
 }

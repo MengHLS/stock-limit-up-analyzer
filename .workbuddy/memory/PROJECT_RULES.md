@@ -33,7 +33,9 @@
 - 三条最常咬人的：① `future_/high_/low_return_*` 来自 **path(1..20)**，`max_return_*`/`max_drawdown_*`/`is_breakout_*` 来自 **outcome（仅 {5,10,20}）** ⇒ **禁一把梭请求**；② 条件组号**必须连续 0..n-1**；③ `research_conclusion` **无 `runId`** ⇒ 归属靠 `evidence` 提 `analysisId` 求交，**提不出 id 绝不删**、**禁 `?? 0`**。
 - ⚠️ 遗留**复数** `research_experiments`/`_runs`/`_datasets`（STEP 6.x）与新**单数** `research_*`（0031）**仅差一个 s**，极易误引。`docs/researchReadyGate/research_ready_gate.json` 为 `researchReady=true` ⇒ `dataHealth.test.ts` **1 例既有失败**，**禁**为过测试改快照或期望。
 - `createRun` **只创建不执行** ⇒ 空 Run 永不出结果，须走 `runIncremental`（复用 `inputSnapshot` 冻结基准、不产结论、日志空则下一批从 **2** 起、不 backfill）。
-- 🔴 **运行纪律（2026-09-11 事故）**：`npm run dev` = `tsx watch server/_core/index.ts` ⇒ **改任何 `server/**` 都会热重启并杀死在途研究 Run**（v2 单次装配 ≈ 9 分钟极易撞上；被杀 Run **永久卡 `RUNNING`** 且**无产品级恢复入口**）。**用户在用页面时禁改 server 文件、禁跑重型真实库脚本**（`verifyResearchEngine.mts --all` ~9 分钟且抢跨境 TiDB）。⚠️ dataset 侧有 `reclaimOrphanBuildJobs()` 兜底，**研究 Run 侧尚无**（待补，同构）。
+- 🔴 **运行纪律（2026-09-11 事故）**：`npm run dev` = `tsx watch server/_core/index.ts` ⇒ **改任何 `server/**` 都会热重启并杀死在途研究 Run**（v2 单次装配 ≈ 9 分钟极易撞上；被杀 Run **永久卡 `RUNNING`**）。**用户在用页面时禁改 server 文件、禁跑重型真实库脚本**（`verifyResearchEngine.mts --all` ~9 分钟且抢跨境 TiDB）。✅ **两侧兜底均已落地**：dataset 侧 `reclaimOrphanBuildJobs()`；**研究 Run 侧 `reclaimOrphanResearchWork()`**（2026-09-17 STEP 0 补齐，boot 挂载于 `server/_core/index.ts`，与 `createDbResearchRepositories()` 组合）。
+- 🔴 **「在途」判据只认 `RUNNING`（2026-09-17 实查坐实 —— 别再把 `PENDING` 当在途）**：`server/researchEngine/engine.ts` 在**全部校验通过之后**才置 `RUNNING`，且 `runIncremental` 有 `RUN_ALREADY_RUNNING` 守卫 ⇒ **`PENDING` 恒等于「尚未进入执行」**，热重启**杀不到它**（既不是残骸、也不是死锁）。两种合法 `PENDING`：① 已建计划但**从未执行**（`inputSnapshot` 与 `startedAt` 皆空 —— 实测 `research_run 630002` 属此类，实验 360002 至今 DRAFT）；② 增量批次跑完但**仍有未完成分析**（`engine.ts` 会把 Run 置回 `PENDING`）。⇒ **两类都禁回收**。因此「零在途才能改 `server/**`」= **零 `RUNNING`**；旧口径把 `PENDING` 也算，会误判成「不能动手」并诱使人去写库收敛**用户的合法草稿**（2026-09-17 审计初稿曾据此误判，已纠正）。
+- **研究链孤儿回收（2026-09-17 STEP 0 · 唯一实现 `server/researchEngine/reclaim.ts`）**：双判据 —— ① 父 Run 已终态且**过 30 分钟缓冲**（`DEFAULT_ORPHAN_GRACE_MINUTES`，隔离「刚失败、用户正要点重跑」的竞争）⇒ 子 Analysis 置 `CANCELLED`（**「父终态子未终态」是唯一硬证据孤儿**）；② Run 置 `RUNNING` 后**停更超 12 小时**（`DEFAULT_STALE_RUNNING_MINUTES`）⇒ Run 置 `FAILED` + `errorCode=RUN_ORPHANED` + 子分析收敛 + Experiment 回滚 `FAILED`（仅当该实验下再无其它 `RUNNING` Run）。**源头已修**：`engine.ts` 两处 catch 经 `settleAbandonedAnalyses()` 一并收敛子分析 ⇒ **不再产生新孤儿**。⚠️ 父 Run `PENDING` 一律不动，且把被保留的草稿**如实回报**（`skippedUnexecutedRuns`），不静默。
 - ⚠️ 数据集/版本的行数、装配耗时等**状态数字一律归 `ROADMAP.md` §44**，此处不记（曾据旧数字误判「v2 未建完」）。
 
 - 🔴 **分析层「能表达什么」的落差清单（2026-09-12 实查，RESEARCH-010）**：一个 `research_analysis` = **一种统计方法 + 一个目标变量**，**没有**「Feature/Target/Horizon/Descriptive 四段配置」的分析对象，**没有编码列**（`code` 无处可落 ⇒ 只能塞进 Run 的 `configJson.note`），**没有多视界矩阵**（`horizons` 只有 `EVENT_STUDY` 用且不带分组 ⇒ 1D/3D/5D/10D 必须 **×4 份分析**），**没有二维分组**（「第几天 × 深度」只能拆成「每天一张分档表 + 逐格 `CONDITIONAL`」）。分组类分析（`QUANTILE`/`SEGMENT_RELATION`/`CONDITIONAL`/`STABILITY`）**只产 5 个指标** `SAMPLE_COUNT / MEAN_RETURN / MEDIAN_RETURN / STD_RETURN / WIN_RATE` —— **无 P25/P75、无组内极值**（分位数只有 `DESCRIPTIVE` 有）；`max_return`/`min_return` 口径**仍产 `WIN_RATE`（不是胜率，见 §44.5 第 9s 条）**。**一 Run 只产一条结论**，主分析 = `PRIMARY_PRIORITY` 固定优先级**取首个命中** ⇒ 大批量分析里只有 1 个进结论，**结论页必须配合结果页读**（否则会把「一格不显著」误读成「整条规律不成立」）。
@@ -98,6 +100,9 @@
 - 🔴 **删 JSX 块时闭合行极易连坐**：待删 `<Card>` 与「上层 `{cond && (` 的闭合 `)}`」之间**常常只隔一个空行** ⇒ 「向上搜第一个 `)}`」必然删错。删完**必回读 + `git diff --stat` 断言增删数符合预期**；错了 `git checkout -- <file>` 复位重跑（**改前先 `git status --short -- <file>` 确认那次 `M` 就是自己**，否则会吞掉用户改动）。
 - **前端真实渲染可进验收路径**（旧「禁浏览器截图」条已作废）：`<Edge> --headless=new --disable-gpu --no-proxy-server --no-first-run --disable-extensions --user-data-dir=<临目录> --remote-debugging-port=N --window-size=W,H <url>`；用 **Node 22 内置全局 `WebSocket`** 连 `/json/list` 给的 `webSocketDebuggerUrl`，`Runtime.evaluate` **量 DOM**（`querySelectorAll('article').length` / `document.body.innerText.includes(...)`）+ 点按钮后复测 ⇒ 比截图硬、无需视觉判读。参考实现 `docs/evidence/_probe_sentiment_page_render.mjs`（零依赖、`ALL PASS` / `FAILURES(n)` 收尾、`process.exit`）。
 - ⚠️ **`python -c "…"` 正文含反引号会被 bash 命令替换**（实测：把 `` `npx vite build` `` 当命令跑掉）⇒ 含反引号或长中文的脚本**一律先 `Write` 成 `.py` 再执行**。
+- 🔴 **2026-09-17 实测：行尾会「静默漂移」，而 `Edit` 工具并不是元凶** —— STEP 0 交付时发现 `server/_core/index.ts`（+228/-197）与 `tests/server/researchEngine/engine.test.ts`（+420/-418）**整文件重写**，而其真实改动只有 **+31** 与 **+5/-3** ⇒ 两者工作区被翻成纯 CRLF（HEAD blob 仍是 LF）。**已归一化回 LF，`git diff --numstat` 恢复最小**。排查时**先对照 `git diff --numstat` 与 `git diff --ignore-cr-at-eol --numstat`**：若前者「增删数 ≈ 文件行数」而后者骤降 ⇒ 是行尾问题，**不是**你的改动。⚠️ 已用「LF 临时文件 → `Read` → `Edit`」实测 `Edit`/`Write` 工具**会保留 LF**，**别把锅扣在工具上**（真凶未定，工作区存在外部同步/并发会话）。
+- 🔴 **行尾哨兵（唯一实现）：`node scripts/checkEolDrift.mjs`** —— 报告「工作区 ≠ HEAD」的已跟踪文件（判据 = 普通 diff 改动量 ≫ 忽略 CR 后改动量）；`--fix` 按 HEAD blob 的行尾归一化（原子替换，修完自动复查、退出码 0）；`--strict` 把未跟踪新文件的 CRLF 也判失败。**每次改完 `server/**` 或总控后跑一次**，比事后逐文件数行尾快得多。
+- ⚠️ **读 CRLF 文件做行数组手术时必须 `open(path, encoding=..., newline="")`** —— 用默认的文本模式会触发 universal-newlines 把 `\r\n` 折成 `\n`，`split("\r\n")` 直接退化成 **1 行**（本轮实测踩到：643 行的文件被读成 1 行）。
 
 ## 🔴 真实 tRPC 全链 E2E（不必起 HTTP）
 - `appRouter.createCaller(ctx)`（手构造 admin ctx：`user.role="admin"` + `req={protocol,headers:{}}` + `res={clearCookie:()=>{}}`）即可覆盖「tRPC → Service → Repository → TiDB」。
@@ -303,6 +308,28 @@
 - 🔴 **数值参数必须同时给 `min` 与 `max`**（草稿 `parameterRole` 恒 `TUNABLE`，否则 `PROMOTE_SKETCH_INCOMPLETE`）；非数值参数须给非空 `allowedValues`；无 `defaultValue` ⇒ `RECIPE_PARAMETER_NO_DEFAULT`。
 - 🔴 **`ResearchDataset.rows[]` 没有 `bars` 字段** ⇒ **禁手搓 `row.bars` 复算特征**（会得 0 候选 + 假「特征全缺失」）。正确做法 = **走真实引擎 `runCandidateEngine`**，再用 `visibleBars(...)` 独立复算核对。
 - ✅ **逐日撮合回测已闭环（2026-09-13 定案）**：`runTradeSimulation` 真实产出 `equityCurve` / `trades` / `executionStats.byReason` / `skippedCounts` / `costs`（经 `closedLoop/adapters.ts` 投影进交接摘要）。🔴 **此前实测 `tradeCount=0` 不是「回测未做」**，而是**直读桥取不到执行日 bar** 导致的全单 `SUSPENDED`（详见「运行工作台必须优先直读已绑定数据集」§五）。⚠️ `CandidateEvaluationRun` 本身仍只是**候选层**统计（不含成交 / 收益），两者不要混谈。
+
+## 🔴 声明式条件 → 回测信号（STEP A / `9aw`，2026-09-17）
+
+- **唯一实现** = `server/research/conditionSignal/compile.ts#compileConditionRecipe`（`ConditionDefinition[]` → `StrategyRecipeRuntime`）。装配层 `runWorkbenchAssembly/assemble.ts#requireRecipe` **三条诚实路径**：①文档带 `recipe` ⇒ 注册表 ②**无 `recipe` 但 `definition.entry.conditions` 非空** ⇒ 现场编译 ③两者皆无 ⇒ 显式兜底；`assembly.recipeSource` 依次为 `strategy-document` / `strategy-declarative-conditions` / `explicit-request`（第三值须与 `shared/researchContracts.ts` 的 zod 闭集同步，否则 tRPC `.output()` 拒值）。
+- 🔴 **路径顺序不可调换：① 必须先于 ②**。库里 7 份 `cand-3600xx` 文档 `hasRecipe=true`（`first-limit-pullback-hold-shrink`）但条件里是**转正期遗留的字符串常量**（`"prefix.rd0.volume * 0.3"`，现行 schema 下已是死写法）⇒ 提前会让它们从「能跑」变「一跑就报错」（= 把修缺陷变成引入回归）。
+- 🔴 **等价改写是方向翻转的**：`bar.low >= prefix.rd0.open`（守线）等价于 `haircut <= 0`，**不是** `haircut >= 0`（后者是「跌破首板开盘价」）。表 `EQUIVALENT_REWRITES` 的数据结构是 `targetBySourceKind: Map<源运算符, {目标门槛, bound}>` —— **源运算符 ≠ 目标门槛种类**；表外方向一律抛错。改这张表**必须同步改注释里的 8 条数学证明**（前提 `o0>0, v0>0, c0>0`，与 `eventBaselineOf` 的非零约束一致）。
+- 🔴 **三张表都是闭集**：表外字段 / 表外运算符（`NOT_EQUAL` / `IN` / `NOT_IN` 在执行侧无等价门槛）/ 非有限右值 ⇒ `CONDITION_NOT_MAPPABLE`，消息**逐条列出**并定位「第 N 条条件」。**禁**静默丢弃、**禁**回落默认配方（静默回落正是 P0-1 缺陷的成因）。`enabled === false` 的条件按声明**跳过**，跳过条数进 `signalDescription`。
+- **右值三类**：`CONSTANT`（须有限数字；**字符串常量一律拒**，含存量死写法）/ `PARAMETER_REFERENCE`（须在该文档 `parameters` 里声明；取值发生在 `buildGates(parameters)` 时经 `requireNumericParameter`，缺值 / 非有限抛 `RECIPE_PARAMETER_INVALID` —— 这是「阈值来自参数」的正解）/ `FIELD_REFERENCE`（**仅**等价改写路径允许）。
+- **合成配方不注册**：`recipeId = "strategy-declared-conditions"` **不进** `REGISTERED_RECIPES`（否则「已注册配方清单」失真），但**共用** `recipeRegistry.makeStrategyRecipeRuntime` ⇒ 注册期校验与运行时行为一份口径；特征提供器共用 `buildPullbackFeatureProviders`。`signalDescription` **只写门槛形状、不写参数取值**（避免「先建构造器再解析参数」的口径漂移）。
+- 🔴 **改 `recipeRegistry.ts` 的运行时时 `conditionSignal` 会一起变**（两者共用 `makeStrategyRecipeRuntime`）⇒ 必须复跑 `tests/server/research/conditionSignal/compile.test.ts`（28 用例）。该单测走**行为断言**（`SignalBuilder` 公开语义，`null` = 不进候选），不依赖编译器内部表示，并含「真实文档形态（`cand-270001` 两条 `FIELD_REFERENCE` 条件）」回归用例。
+- ⚠️ **未做**：端到端 `loopRun`（同步长请求且会写 `closed_loop_backtest_run`）⇒ 判据「同一数据集下 signals 与独立复算逐日一致」**尚无整链证据**；当前替代证据 = 装配层 `signalBuilder` 的 `signalDescription` 与「直编同一份文档」逐字一致。
+
+## 🔴 评价 / 绩效 / 参数跑在策略文档上（STEP B / `9ax`，进行中）
+
+- 🔴 **`resolveParameters(schema, overrides?)` 已支持参数覆写**（`recipeRegistry.ts`）。覆写键**必须存在于** `document.parameters`，否则抛 **`RECIPE_PARAMETER_UNKNOWN`**。这是「未收录维度被静默忽略」这条缺陷的对症修法 —— **禁**改成忽略（静默忽略会让「调用方以为参与寻优的维度」与「实际参与计算的维度」不一致，而产物看起来完全正常）。无覆写时行为与既往逐字一致。
+- 🔴 **`DatasetSourceKind` 三值**：`registry`（直读已绑定 ds_*）| `rebuild`（从零重建，分钟级）| **`injected`**（调用方注入已构建数据集，同一份复用 N 次）。`assembleRunWorkbenchInputs` 的 `researchDataset` 入参给定时**跳过一切解析**（短路在 `resolveDataset` 最前面）。参数搜索 / 走查**必须**用注入路径，否则 N 组参数 = N × 分钟级重建。
+- 🔴 **4 个 notWired 阶段（`optimization`/`robustness`/`oos`/`overfitting`）缺的是同一个东西**：一个「**参数集 → 绩效标量**」的 evaluator（`requirements.ts` 里写明的理由：「那等于在本层再搭一条 dataset→signalEngine→simulator→evaluate 的子链」）⇒ 新评估端口就位后，这 4 个阶段应改为 `wired`，并在 `executors.ts#buildExecutor` 补 4 个 case。
+- 🔴 **评估端口要复用、不要重写**：`closedLoopWiring/executors.ts` 的 `backtest` case（真调 `runTradeSimulation`）与 `evaluation` case（真调三个 `evaluate*` + `composeClosedLoopEvaluationRef`）**已经是完整实现**，评估端口应经 `createClosedLoopWiring` + `runClosedLoop` 复用它们，而不是自己再拼一遍 dataset→engine→simulator→evaluate。
+- ⚠️ 现状（2026-09-17 实查）：`paramSearchRouter` / `walkForwardRouter` / `marketRegimeRouter` **仍走 legacy `getLeaderCandidateBacktest`**；`paramSearchRouter.ts:129-140` 的 `MAPPABLE_PARAMETER_DICTIONARY` 是**固定 8 字段白名单**，`:206-207` 的 `switch` 落 `default: break` ⇒ 未收录维度静默忽略。
+- 🔴 **`dataReady` 缺省 `false` ⇒ 走闭环 `data` 阶段的调用方必须显式传 `true`**（2026-09-17 实测，`9ax` 第 2 批）：`server/historicalState/audit/runAudit.ts:74` 是 `const dataReady = options.dataReady ?? false;`，而 `:145-149` 的 `gate === "PASS"` 判据要求 `hasFail=false && sampleErrors=0 && samplesQueried>0 && dataReady` ⇒ **不传就永远拿不到 `PASS`**；闭环 `data` 阶段随即以 `CL_DATASET_GATE_NOT_PASS` 阻塞其后全部阶段（`orchestrator.ts:539-545`）。`assemble.ts` 把 `request.dataReady` 透传给 `buildResearchDataset`。⚠️ **极易误判成「数据链就绪认证未达成」/既有数据域问题** —— 本会话真实误判过一次（还写进了总控与 `MEMORY.md`），随后回源码逐行核对才更正 ⇒ **遇到 `CL_DATASET_GATE_NOT_PASS` 先查「本次有没有传 `dataReady`」，再怀疑数据域**。
+- 🔴 **参数搜索构造搜索空间必须按 `schema` 的 `[min,max]` 夹取**（2026-09-17 实测）：`strategy` 阶段的参数校验会拒超界值（`[VALUE_ABOVE_MAX] parameterSet.max_volume_ratio: 参数 = 3 大于 max 1`）⇒ 不夹取会让**整批候选**被拒；这是 schema 边界被真正尊重的证据，不是缺陷。
+- ✅ **`server/research/strategyEvaluation/` 是「策略回测评估端口」唯一实现**（`9ax` 落点①）：子链 = `data`/`research`/`strategy`/`backtest`/`evaluation` 五阶段（经 `createClosedLoopWiring` + `runClosedLoop`，**不手写** dataset→engine→simulator→evaluate），输出 `ClosedLoopEvaluationRef`。实测：**参数覆写真的改变标量**（`{max_drawdown:0.02, max_volume_ratio:0.3, require_bullish:0}` → `{0.05, 0.75, 1}` 使 `totalReturnPct` 由 **−3.49% 变为 +2.27%**）；**注入数据集复用无损**（`datasetSource` 变 `injected`，四项标量指纹逐位不变）。
 
 ## 基础设施坑（细则）
 
@@ -575,3 +602,138 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - ⚠️ **运算符两形**：`RESEARCH_CONDITION_OPERATORS` 闭集 = **符号形**（`>` `>=` `<` …）；名称形（`GREATER_THAN` 等）只在 `definitionBuild#CONDITION_OPERATOR_MAP` 翻译。写 Hypothesis.conditions / 测试 fixture 用符号形。
 - ⚠️ **Finding 标题用字段名**（`pullback_close_ratio` / `pullback_holds_event_low`），**不是中文关键词**（「回撤/破位」）；按落库字段语义分类，不按人读中文匹配。
 - 真实验收链（可复核）：Dataset **390002** → Experiment **240002** → Run **570001** → Analysis 540001~540013 → Finding **1~13**（EFFECT，DISCOVERED）。
+
+---
+
+## 自动研究编排层（RESEARCH-PLANNER-001，2026-09-17；`ROADMAP.md` §44.5 `9at`）
+
+### 坐标与入口
+- 用户入口 `/research/ask` —— 🔴 **路由必须排在 `/research/:experimentId` 之前**，否则被实验详情页吃掉；侧栏「提问研究」。
+- 真实入参只有 `{datasetVersionId, researchQuestion}`。单次闭环 = `researchPlanner.runFromQuestion`；两段式 = `createQuestion → runResearchDetached → getOutcome`（怕超时时用）。
+- 计划 / 问题 / 结论的载体在 `research_plan.notesJson`（`ResearchPlanNotes`）⇒ **新增字段一律 optional**：老计划没有该字段，**如实缺省、不回填**、不按新代码重新推断。
+
+### 🔴 意图识别是**加权**打分，不是等权关键词匹配
+- `"不破"` **匹配不到** `"不跌破"` ⇒ 关键词要拆到位（`不破 / 未破 / 不跌破 / 没跌破 / 守住 / 支撑 / 破位`）。
+- 泛化词（收益 / 表现）与专指词（回踩 / 缩量 / 深度）**等权会把两问算成平手** ⇒ 两档权重（专指 `PRIMARY_KEYWORD_WEIGHT = 3` / 泛化 `GENERIC_KEYWORD_WEIGHT = 1`）+ 三级排序。
+  （实测症状：两个验收问题都被识别成 `EVENT_RETURN_RESEARCH`、计划里 0 条守护条件分析，从 8 条变 28 条才修好。）
+- 🔴 **`emphasisKeywords` 是精修配方的排序锚**：配方 label 分词后往往对不上用户原话（label「回踩深度落在 <0.95]」分词得「回踩深度落在 / 0.95」，而问题里只有「深度」）⇒ **每条配方必须显式给强调词**。
+- 🔴 **先排序，再裁剪**：`rankRecipesByQuestion(recipes.slice(0, 6), q)` 是**错的** —— 注册序第 7/8 位永远进不了计划（深度分档恰在那）。正确写法 = `rankRecipesByQuestion(recipes, q).slice(0, MAX_REFINEMENT_RECIPES)`。
+
+### 🔴 结论必须锚定用户提问，否则「用户问的问题在自己页面上读不到答案」
+- 根因：`researchStrength` 在 **1.0 处饱和** + 样本量降序 ⇒ 小样本但正是答案的那条 Finding 会被大样本挤到第 6 名之后。
+- 正解三段：计划侧记 `emphasisAnalysisNames` → 聚合侧筛 `questionAlignedFindings` + `questionAlignment{source: EMPHASIS | REQUIRED_FALLBACK | NONE}` → 结论正文三段（【研究问题】/【针对该问题】/【统计判定】）；**只筛选排序、零重算统计量**。
+- 🔴 **必须注册 hypothesis**：引擎从「实验的第一条假设」推导 `researchQuestion`；缺假设 ⇒ 结论正文出现占位符「(未登记假设陈述)」、`research_conclusion.researchQuestion` 落成 `null`。写失败落 `HYPOTHESIS_WRITE_FAILED` 并中止。
+
+### 🔴 `research_result` 的分组行与基准行**无法按列区分**
+列 = `id / analysisId / resultType / dimensionJson / metricCode / metricValue / sampleCount / resultJson / createdAt`。
+分组行与基准行的 `resultType` **同为 `GROUPED`**、`metricCode` **同名**（`SAMPLE_COUNT` / `MEAN_RETURN` …）、`dimensionJson` **同为 `null`** —— **仅靠行序区分**（前若干行 = 全样本基准，后若干行 = 条件组）。
+⇒ 消费方**必须走 Finding 层**（`effect.groupReturn / benchmarkReturn / buckets`）；按 `metricCode` 抓第一行**必抓错**（实测：`/mean/i` 抓到了基准行）。
+
+### 🔴 布尔族条件的值必须是数字 `1` / `0`
+`conditionEvaluator.ts#asNumber()` 只接受 `typeof === "number"`；传布尔 / 字符串**不报错**，只是恒 0 命中（静默）。另外口径回执文案要按运算符加语义前缀 —— 布尔族 `== 0` 是「未跌破」，别写成反的。
+
+### 🔴 「零结果」≠「检查通过」
+§22 的 `dataValidity` 必须把「分析登记了但一条结果都没有」也算失败（典型：`market_cap` 列全 NULL 时的市值分位分析）。只数 `failedCount` 会给出「✓ Passed」这种**误导性真话**。正解 = 新增 `emptyResultCount` / `emptyResultAnalyses`，`passed` 改三条件。
+
+### 🔴 诊断 / 注入类钩子：定义了 ≠ 被调用了
+`withDisclaimer` 曾被定义但**从未被调用**（用户看到的结论缺免责声明）。新增「装饰 / 注入类」函数后必须 grep 调用点或加断言，别信「写了就在用」。
+
+### 前端默认模式验收：判据要扫「控件」，不是扫「全文」
+- 禁用词（特征变量 / 目标变量 / 视界 / 分组维度 / …）**天然出现在说明性文案里**（「**不要**填写特征名、目标变量、视界」「…**全部由系统设计**」「自动铺开多**视界**」）—— 这些话恰恰在告诉用户**不用填**，是卖点不是缺陷。判据 = **控件扫描**（label / placeholder / aria-label + Radix bubble `<select>` 要按 `aria-hidden` 排除），文本扫描只作兜底且**排除含 `不要/无需/由系统/自动` 的说明句**（加 `请输入/请填写/…` 反制层防误吞）。
+- 计数类判据别依赖易碎前缀（三条示例 hint 里**只有两条**同为 `→ 会识别成`）⇒ 按**区块结构**取数（含锚点文案的 `<p>` 的父容器下全部 `button`）+ 用标志性文本分别断言。
+- 「是否进入第 N 步」**不能**用步骤条标签判定 —— `RESEARCH_ASK_STEP_LABELS` 是遍历渲染、**恒在页面上**，判据恒 true。要用该步**独有内容**（预览页的「预计分析数」）或**独有控件**（`#ask-question`）。
+- 四张步骤卡片是 `{step === "XX" && (...)}` **条件渲染** ⇒ 非当前步的卡片不在 DOM 里，不会污染文本扫描（别假设它们在）。
+
+### 探针 / 清理器（都在 `docs/evidence/`，不在 tsconfig scope）
+- `_probe_planner_dryrun.mts`（零 IO 干跑 —— 🔴 **记得传 `questionText`**，否则排序恒等于注册顺序，「排序是否生效」从未被验过）。
+- `_probe_run_findings.mts` / `_probe_analysis_metrics.mts` / `_probe_result_schema.mts`（读数与列名核对）。
+- `_e2e_research_planner.mts`（§27）/ `_e2e_research_second_question.mts`（§28）—— 🔴 **`writeFileSync` 必须放在所有 `say()` 之后**，否则 `.out.txt` 读不到「检查项 / 失败 / 结论」汇总行。
+- `_cleanup_research_planner_trials.mts` —— **默认 dry-run**，`--apply` 才落刀，`--keep=<ids>` 保留；只认 `research_experiment.name like '[自动研究]%'`（不可能误删手工实验）；**已转正候选不删**。
+- `_probe_research_ask_page_render.mjs` —— 无头 Edge + CDP 真机渲染验收（`--headless=new --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node 内置 `WebSocket` 直连 CDP）。
+- 总控 / 记忆改字的**降险写法**（脚本本身按纪律放仓外 `C:\work\sourcecode\_scratch\`，不入库）：`read_bytes` → 断言 `crlf == 0`（CRLF 文件则断言 `crlf == lf`）→ 改 → `encode()` **先完成**再打开写 → `os.replace` 原子替换 → 回读核对；**追加型**脚本还要断言「前缀字节未变」以证明没动历史，**覆盖型**（如 §44 上轮实查只留 1 条）要断言全文只命中 1 处再替换。
+- ⚠️ **本轮踩到并已修的纪律欠账**：`docs/evidence/` 下曾又攒了 **8 个** `.py` 过程脚本（本轮 3 个改字脚本 + 1 个前端接线脚本 + 4 个此前 market-data 遗留），全部**未跟踪**（被 `.gitignore` 的 `_*.py` 挡住，所以 `git status` 看不见）⇒ 已移到 `C:\work\sourcecode\_scratch\research-planner-001\`，现 `docs/evidence/*.py` = **0**。**教训：`.gitignore` 让违规文件在 `git status` 里隐身，只能用 `ls docs/evidence/*.py` 这类物理检查发现。**
+## 🔴 「创建候选」取错分析导致恒失败（RESEARCH-PLANNER-001 缺陷 780001，2026-09-17 实查；`ROADMAP.md` §44.5 `9au`）
+- **现象**：`/research/ask` 结论页点「创建 Candidate」→「分析 780001 没有任何条件，无法导出候选题筛选条件。」，**100% 复现、100% 失败**。
+- 🔴 **根因**：前端自己挑「用哪条分析导条件」，判据是 `find(a => a.priority === "P0")`；而 `analysisPlan.ts#generateAnalysisPlan` 的**第一条 `push`** 正是 `EVENT_STUDY 全样本基准`（`priority="P0"` + `requiredFlag=true`），它天然**没有** `research_analysis_condition` 行 ⇒ 服务端按设计拒。**「哪条分析有条件」是数据库事实，调用方无从猜测**（§20 契约只有 `{datasetVersionId, researchQuestion}`，Workbuddy 拿不到库内主键）。
+- 🔴 **为什么 E2E 全绿**：`_e2e_research_planner.mts` 自己写了更严的判据 `priority==="P0" && analysisType==="CONDITIONAL"`，并**显式传** `deriveFilterFromAnalysisId` ⇒ **绕开了产品的真实调用路径**。**教训：测试比产品严 ⇒ 通过只证明测试的挑法对，不证明产品可用**。验收必须走产品真正发出去的载荷（`{questionId, name, description}`，**不含** analysisId）。
+- **唯一实现**：`aggregate.ts#rankCandidateSourceAnalyses()`（硬门槛 `conditionCount > 0` → 提问点名 → `requiredFlag` → `P0/P1/P2` → `CONDITIONAL` → `analysisId` 升序），结果落在 `ResearchOutcome.candidateEligibleAnalyses`；`createCandidate` 不传 analysisId 时取第 0 条。前端**不再挑**，只读回执 `filterRuleSource`。条件行数与结果行数**并发**取（往返次数不变 ⇒ 零额外延迟）。
+- 🔴 **`getOutcome` 两种定位入口必须等价**：旧实现只在 `questionId` 路径解析 plan/question ⇒ 按 `runId` 调用会丢 `planId` / `datasetVersionId` / `moduleKeys` / `plan.notes.emphasisAnalysisNames`（⇒ §13 提问锚点失效 + §16 provenance 不齐，实测 `provenance.complete === false`）。修法 = 顺 `research_analysis.planId` 反查补齐（`planId` 就是「这条分析由哪份计划生成」的权威记录，不加第二套映射）。
+- **零条件时不许静默**：本 Run 一条可导出条件的分析都没有 ⇒ 候选照建但 `filterRule` 留空 + `filterRuleSource.origin = "NONE"` + 明确警告（前端用琥珀色渲染）。静默给个空口径才是错的。
+- 🔴 **错误信息必须可操作**：显式传了无条件的分析时，除了拒绝，还要**列出**「本 Run 可导出条件的分析」。旧文案是个死胡同 —— 用户知道失败了却不知道该换哪条。
+- 探针：`_verify_candidate_filter_source.mts`（**41 / 0**，直接跑在用户真实失败的 Run 780002 上）/ `_probe_analysis_780001.mts`（复现根因）/ `_e2e_candidate_button_real_ui.mjs`（**真机点按钮**全流程，4 次真实运行；末次在 **v2 数据集**上 `ALL PASS`、Candidate `#750001`）/ `_probe_radix_select_drive.mjs`（合成事件 5 种全败）/ `_probe_radix_select_drive_native.mjs`（原生输入管道生效）。
+- ⚠️ **CDP 探针两条硬纪律**：① `document.body` 在 CDP 刚连上时可能为 **null** ⇒ 必须防御 + 重试（实测第一次求值就抛 `TypeError: Cannot read properties of null (reading 'innerText')`，探针在页面渲染之前整体退出、`docs/evidence/*.out.txt` 只剩 **0 字节空文件**）；② **长跑探针必须逐行 `appendFileSync` 落盘**，末尾一次性 `writeFileSync` 的写法在被信号打断时会**丢掉全部证据**。
+- 🔴 **Radix Select 的可靠驱动方式 = CDP 原生输入 `Input.dispatchMouseEvent`（禁 `Runtime.evaluate` 合成事件）**。三段演进全部实测过：**① 原生 bubble `<select>` 根本不存在** —— `@radix-ui/react-select@2.2` 只在 `isFormControl`（传了 `name` prop）时才渲染 `SelectBubbleInput`（那个隐藏原生 select），本仓 `/research/ask` 的两个下拉**都没传 `name`** ⇒ DOM 里没有 select。⚠️ **本行旧版写的 `trigger.closest('div').parentElement.querySelector('select')` 是错的**，实测直接报 `{"ok":false,"why":"找不到原生 select"}`（已于 2026-09-17 更正）。**② `Runtime.evaluate` 派发 `PointerEvent('pointerdown'|'pointerup', { pointerType: 'mouse' })` 半成功** —— 下拉**确实能打开**（Trigger 的 `onPointerDown` 认这个 pointerType）、`[role="option"]` 也读得到（`aria-selected` 正确），但**选项点击始终不生效**；5 种组合（`pointerdown+up` / `+pointermove` / `HTMLElement.click()` / `focus+Enter` / `pointerId=0`）**全部无效**（证据 `docs/evidence/_probe_radix_select_drive.mjs` = 5 个 `✗ 未生效`）。根因：`dispatchEvent(new PointerEvent(...))` 造出来的是**不可信事件**（`isTrusted === false`），React 19 的合成事件委托不按真实手势路径处理。**③ `Input.dispatchMouseEvent`（`mouseMoved` → `mousePressed` → `mouseReleased`，`button="left"`、`pointerType="mouse"`、`clickCount=1`）✅ 生效** —— 这是浏览器**真实输入管线**，Blink 据此生成 `isTrusted: true` 的 mouse 事件**并自动派生 `pointerType: "mouse"` 的 pointer 事件**（证据 `docs/evidence/_probe_radix_select_drive_native.mjs`：`✅ 下拉已打开` + `✅ 生效`）。坐标用 `getBoundingClientRect()` 取元素中心点（Trigger 与 `[role="option"]` 各一次）。**推广：凡依赖「真实用户手势」的组件（Radix / Headless UI / 自研手势层），`Runtime.evaluate` 里的 `dispatchEvent` 一律不可靠 ⇒ 必须用 `Input.*`。** 另仍须**先等「数据集列表异步加载完成」**（触发器文案不再含「加载中」），否则连打开都谈不上。
+- ⚠️ **`reachedXxx` 型判据禁用「步骤条标签」**：`RESEARCH_ASK_STEP_LABELS` 四标签**恒渲染**（本仓已踩两次）。同理 `document.body.innerText.includes('④ 研究结论')` 恒为 true。
+
+## 🔴 行尾漂移的「git 不可见性」与哨兵盲区（2026-09-17 实测；`REPO-HYGIENE-EOL-DRIFT-002`）
+
+### 事实（字节级实测，非推断）
+- 全仓 **402 个已跟踪文件**：**工作区纯 CRLF**（`count(b"CRLF") == count(b"LF")`），
+  而 **`git cat-file -s HEAD:<path>` 给出的 blob 是 LF**（例：`client/src/pages/Home.tsx` HEAD 45819 B / 工作区 46777 B，差值恰 = 行数）。
+- 🔴 **但 `git status` / `git diff` / `git diff-files` 对这个差异全部报「空」**。原因：外部进程改写文件时**保留了 mtime** ⇒ git 先比 stat（mtime 命中即认为未变），**不读内容**。
+  判据（任一成立即证）：
+  - `git hash-object <file>` **≠** `git rev-parse HEAD:<file>`（内容确实不同）
+  - 而 `git diff-files --numstat -- <file>` **为空**（git 认为未变）
+  - `git update-index --refresh` 后 `git status` **条目数会突变**（本机实测：干净 → **289 项**）
+- ⇒ 一旦某文件**被改动**，git 被迫重算内容，`git diff --numstat` 立刻显示 **「增删数 ≈ 文件行数」**（本机实测 `+500/-497`），而 `git diff --ignore-cr-at-eol --numstat` 只有 **`+8/-5`** ⇒ 真实改动被淹没。
+
+### 🔴 由此得出的三条硬纪律
+1. **`scripts/checkEolDrift.mjs` 有盲区**：它只看 `git diff` ⇒ **只覆盖「已修改」文件**。
+   **未修改**文件的漂移它**永远看不到**。⇒ 它报「漂移 0」**不等于**全仓行尾健康。
+2. 🔴 **改任何文件之前先跑一次哨兵**（而不是改完再跑）。理由：若目标文件处于漂移态，
+   哨兵**只在你改过它之后**才会报；那时你已经把漂移当成基准写了一遍。
+   **顺序：先 `node scripts/checkEolDrift.mjs` → 有漂移先 `--fix` → 再改。**
+3. **「实测行尾」只回答「我读到的行尾是什么」，不回答「这个行尾是不是对的」** ——
+   两者在漂移态下会给出**相反**的结论。判断「对不对」的唯一依据是 **`HEAD` blob 的行尾**：
+   `git cat-file blob HEAD:<path> > <仓外临时文件>`（⚠️ **必须重定向到文件再读**，
+   经管道可能被转换；读取用 Python 二进制模式），或对已修改文件用 `git diff --numstat` 与
+   `git diff --ignore-cr-at-eol --numstat` 对比。
+
+### `--fix` 的语义（已读源码确认）
+`checkEolDrift.mjs --fix` 是**内容保留**的行尾归一化（`raw.toString("latin1").replace(CRLF, LF)`，
+再按目标行尾重写），**不是**用 `HEAD` blob 覆盖 ⇒ **不会丢改动**，可安全用于已修改文件。
+修完它会重新 `detectDrift()` 复查并据此决定退出码。⚠️ 但它**只处理 `drifted`（= `git diff` 里的文件）**，
+**修不了未修改文件的漂移**（那需要手工字节替换 行尾 -> LF）。
+
+### 本轮的处置（可复用）
+- 只归一化**本轮直接触及**的文件；**不擅自批量归一化**其余文件（规模大、非本轮引入、需用户决策）。
+- 归零验证：`git diff --numstat` 与 `git diff --ignore-cr-at-eol --numstat` 必须**完全一致**。
+
+### 另一条（同一根源，同样危险）
+用 **Python 写文件必须显式控制换行**：`open(path, "w", encoding="utf-8")` 在 Windows 会把 LF 写成 CRLF。
+写探针输出 / JSON 归档一律用**二进制模式** `open(path, "wb")` + `.encode("utf-8")`，
+写完实测 `crlf` 计数（本机实测踩到：归档 JSON 被判「未跟踪新文件中 CRLF」）。
+
+## 循环 import 与顶层常量（PATTERN-LIBRARY-001 · 2026-09-17 实测）
+
+- 🔴 **两个模块互相 `import` 时，任一方在模块顶层执行读取对方的表达式 ⇒ 运行时炸，而 `tsc --noEmit = 0`**。
+  实测：`moduleRegistry.ts` 顶层 `export const DEFAULT_RESEARCH_MODULE_REGISTRY = createDefaultResearchModuleRegistry();`
+  而 `patternLibrary/project.ts` 又 import 了 `moduleRegistry` ⇒ vitest 报 `TypeError: buildPatternModuleSpecs is not a function`
+  （对方还在求值中，函数绑定尚未发生）。**类型检查看不出求值顺序问题**，只有真跑才暴露。
+- **两个手法（按优先级）**：
+  1. **把共用原子下移到中立文件**（首选）—— 本轮新建 `server/research/recipeRegistryAtoms.ts`，
+     两边都指向它，依赖单向、无循环；原文件用 `export { ... } from` re-export 保持导出面不变。
+  2. **惰性单例**（确实无法拆时）—— `function xxx()` + `let cache = null`，首次调用才构造。
+     ⚠️ 顶层 `const X = f()` 是反例；`export const` 改 `export function` 会牵连调用方（本轮 3 处）。
+- 🔴 **排查顺序**：`tsc` 全绿但测试报 `xxx is not a function` / `undefined` ⇒ **先查模块顶层有没有跨模块调用**，
+  而不是先怀疑构建工具或 mock。
+
+## 「声明了却无效」是最高频的静默失效（同上）
+
+- 🔴 **凡是新增的声明字段，必须同时找到它的消费者；找不到就不要声明**。
+  实测两例：`definitionBuild.ts#buildParameters` 把 `parameterRole` **恒置为 `TUNABLE`**
+  ⇒ 草稿声明为「固定」的参数只要带了 `min`/`max`/`step` 就会被搜索（本轮已改为透传，缺省仍 TUNABLE）；
+  库里 `limit-up-baseline` 文档声明的 `topN` / `minScore`，配方**一个都不读**（`selectionConfig` 里 `topN: 5` 是硬编码）。
+- **判据**：新增字段时写一条单测，断言「改这个字段 ⇒ 产物真的不同」。断言不了，就说明它没有消费者。
+## 本机 `curl` 走 HTTP 代理（2026-09-17 实测，极易误判成「后端崩了」）
+
+- 🔴 **本机 `curl` 走 HTTP 代理**：`curl http://localhost:3000/api/trpc/...` 会返回 **502**
+  （代理措辞 `upstream connect failed: 由于目标计算机积极拒绝`）——
+  读起来像「后端进程挂了」，实际是**代理**在报。`--noproxy '*'` 也**不可靠**（实测可能返回**空响应**）。
+- ⇒ **live 端点探测一律用 Node 内置 `fetch`**（Node ≥ 18 自带，无代理）：
+  `node -e "fetch('http://localhost:<port>/api/trpc/<router>.<proc>').then(async r => console.log(r.status, (await r.text()).slice(0,400)))"`。
+- ⇒ 主机名优先用 **`localhost`**：2026-09-17 实测 `127.0.0.1:4001` 被**另一个进程**占用（`netstat` 可见两个 PID），
+  只有 `localhost` 通；`127.0.0.1` 会 `fetch failed`。
+- ⇒ **端口只认启动日志**（再次验证）：`npm run dev` 实测输出 `Port 4000 is busy, using port 4001 instead` +
+  `Server running on http://localhost:4001/` —— 别按惯例当成 3000/4000。
+- ⚠️ 判据顺序：先 `netstat -ano | grep ':4001'` 看有没有 LISTENING，再用 `fetch` 探 —— **不要**用 `curl` 的成败下结论。

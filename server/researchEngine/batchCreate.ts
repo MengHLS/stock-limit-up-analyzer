@@ -152,6 +152,13 @@ export async function createAnalysesBatch(
         name,
         target: item.target ?? null,
         config: item.config ?? null,
+        // RESEARCH-PLANNER-001：计划溯源原样透传。缺省即 null（**不给「看起来像计划」的默认值**：
+        // 人工创建的分析若被写成 `priority = "P0"`，规模裁剪就会把它当成必需项处理）。
+        planId: item.planId ?? null,
+        moduleKey: item.moduleKey ?? null,
+        priority: item.priority ?? null,
+        purpose: item.purpose ?? null,
+        requiredFlag: item.requiredFlag ?? null,
       });
       analysisId = analysis.id;
       if (analysisId === undefined) {

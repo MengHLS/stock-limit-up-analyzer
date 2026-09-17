@@ -7,8 +7,9 @@
 
 import { useState } from "react";
 import { Link } from "wouter";
-import { FlaskConical } from "lucide-react";
+import { FlaskConical, Sparkles } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -64,6 +65,8 @@ export default function ResearchList() {
             </CardTitle>
             <CardDescription>
               一个实验绑定一份 Dataset 版本；可含多次 Run，每次 Run 下挂多个分析。
+              这里是<strong>专家模式</strong>：需要你手工指定特征 / 目标 / 视界 / 条件。
+              只想「提一个问题让系统自己设计研究」，用右上角的「提问式研究」。
             </CardDescription>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -80,6 +83,12 @@ export default function ResearchList() {
               </SelectContent>
             </Select>
             <CreateExperimentDialog />
+            {/* RESEARCH-PLANNER-001 — 默认模式的入口：不填任何底层分析字段。 */}
+            <Button asChild size="sm" variant="outline">
+              <Link href="/research/ask">
+                <Sparkles className="mr-1.5 h-4 w-4" /> 提问式研究
+              </Link>
+            </Button>
           </div>
         </CardHeader>
       </Card>

@@ -23,6 +23,8 @@ import {
   researchExperiment,
   researchFinding,
   researchHypothesis,
+  researchPlan,
+  researchQuestion,
   researchResult,
   researchRun,
   researchStrategyCandidate,
@@ -63,6 +65,10 @@ import type {
   ResearchFinding,
   ResearchHypothesis,
   ResearchMonotonicityPattern,
+  ResearchPlan,
+  ResearchPlanItem,
+  ResearchPlanNotes,
+  ResearchQuestion,
   ResearchResult,
   ResearchRun,
   ResearchSampleGrade,
@@ -85,6 +91,10 @@ import type {
   ResearchFindingListFilter,
   ResearchFindingRepository,
   ResearchHypothesisRepository,
+  ResearchPlanListFilter,
+  ResearchPlanRepository,
+  ResearchQuestionListFilter,
+  ResearchQuestionRepository,
   ResearchRelationshipQueries,
   ResearchRepositories,
   ResearchResultListFilter,
@@ -199,6 +209,9 @@ type ExperimentRow = typeof researchExperiment.$inferSelect;
 type HypothesisRow = typeof researchHypothesis.$inferSelect;
 type RunRow = typeof researchRun.$inferSelect;
 type AnalysisRow = typeof researchAnalysis.$inferSelect;
+/** RESEARCH-PLANNER-001 —— 研究问题行 / 研究计划行。 */
+type QuestionRow = typeof researchQuestion.$inferSelect;
+type PlanRow = typeof researchPlan.$inferSelect;
 type ConditionRow = typeof researchAnalysisCondition.$inferSelect;
 type MetricRow = typeof researchAnalysisMetric.$inferSelect;
 type ResultRow = typeof researchResult.$inferSelect;
@@ -278,8 +291,62 @@ function mapAnalysis(r: AnalysisRow): ResearchAnalysis {
     target: r.target,
     config: decodeJson(r.configJson, "research_analysis.configJson"),
     status: r.status as ResearchAnalysis["status"],
+    // RESEARCH-PLANNER-001：计划溯源（人工创建的分析全为 null，语义 = 非计划生成）
+    planId: r.planId,
+    moduleKey: r.moduleKey,
+    priority: (r.priority ?? null) as ResearchAnalysis["priority"],
+    purpose: r.purpose,
+    requiredFlag: r.requiredFlag,
     createdAt: toIso(r.createdAt) ?? undefined,
     completedAt: toIso(r.completedAt),
+  };
+}
+
+/** RESEARCH-PLANNER-001 —— 研究问题行 → 领域对象。 */
+function mapQuestion(r: QuestionRow): ResearchQuestion {
+  return {
+    id: r.id,
+    datasetVersionId: r.datasetVersionId,
+    questionText: r.questionText,
+    researchType: r.researchType as ResearchQuestion["researchType"],
+    createdBy: r.createdBy as ResearchQuestion["createdBy"],
+    intent: decodeJson(r.intentJson, "research_question.intentJson"),
+    status: r.status as ResearchQuestion["status"],
+    experimentId: r.experimentId,
+    planId: r.planId,
+    runId: r.runId,
+    conclusionId: r.conclusionId,
+    createdAt: toIso(r.createdAt) ?? undefined,
+    updatedAt: toIso(r.updatedAt) ?? undefined,
+  };
+}
+
+/**
+ * RESEARCH-PLANNER-001 —— 研究计划行 → 领域对象。
+ *
+ * ⚠️ `items` 从 `planJson` 解出；解析失败**响亮抛错**（`decodeJson` 的既有纪律），
+ * 不退回「空计划」—— 空计划会被读成「这次研究没有内容」，与事实相反。
+ */
+function mapPlan(r: PlanRow): ResearchPlan {
+  const items = (decodeJson(r.planJson, "research_plan.planJson") ?? []) as ResearchPlanItem[];
+  return {
+    id: r.id,
+    questionId: r.questionId,
+    experimentId: r.experimentId,
+    runId: r.runId,
+    datasetVersionId: r.datasetVersionId,
+    moduleKeys: (decodeJson(r.moduleKeysJson, "research_plan.moduleKeysJson") ?? []) as string[],
+    items: Array.isArray(items) ? items : [],
+    plannedCount: r.plannedCount,
+    materializedCount: r.materializedCount,
+    droppedCount: r.droppedCount,
+    maxAnalysisPerPlan: r.maxAnalysisPerPlan,
+    capApplied: r.capApplied,
+    generatedBy: r.generatedBy as ResearchPlan["generatedBy"],
+    status: r.status as ResearchPlan["status"],
+    notes: decodeJson(r.notesJson, "research_plan.notesJson") as ResearchPlanNotes | null,
+    createdAt: toIso(r.createdAt) ?? undefined,
+    updatedAt: toIso(r.updatedAt) ?? undefined,
   };
 }
 
@@ -362,6 +429,8 @@ function mapCandidate(r: CandidateRow): ResearchStrategyCandidate {
     // RESEARCH-006.1 —— 研究来源快照（只读语义；写入只经 create，见 update 的边界断言）。
     sourceDatasetVersionId: r.sourceDatasetVersionId,
     sourceResearchRunId: r.sourceResearchRunId,
+    // RESEARCH-PLANNER-001 —— 来源 Research Plan id（只经 create 写，禁普通 update）。
+    sourceResearchPlanId: r.sourceResearchPlanId,
     sourceTraceJson: decodeJson(r.sourceTraceJson, "research_strategy_candidate.sourceTraceJson"),
     sourceDatasetDivergenceReason: r.sourceDatasetDivergenceReason,
     // RESEARCH-FINDING-001 —— Hypothesis / Finding 谱系锚（只经 create / 语义入口写，禁普通 update）。
@@ -765,6 +834,12 @@ export function createDbResearchRepositories(): ResearchRepositories {
           target: input.target ?? null,
           configJson: encodeJson(input.config, "research_analysis.configJson"),
           status: input.status ?? "PENDING",
+          // RESEARCH-PLANNER-001：缺省即 null（= 非计划生成），**不给「看起来像计划」的默认值**。
+          planId: input.planId ?? null,
+          moduleKey: input.moduleKey ?? null,
+          priority: input.priority ?? null,
+          purpose: input.purpose ?? null,
+          requiredFlag: input.requiredFlag ?? null,
           completedAt: toDate(input.completedAt),
         }),
       );
@@ -783,6 +858,8 @@ export function createDbResearchRepositories(): ResearchRepositories {
       if (filter.runId !== undefined) conds.push(eq(researchAnalysis.runId, filter.runId));
       if (filter.analysisType !== undefined) conds.push(eq(researchAnalysis.analysisType, filter.analysisType));
       if (filter.status !== undefined) conds.push(eq(researchAnalysis.status, filter.status));
+      // RESEARCH-PLANNER-001：按计划溯源过滤（materializePlan 的幂等分支用）。
+      if (filter.planId !== undefined) conds.push(eq(researchAnalysis.planId, filter.planId));
       const rows = await (conds.length > 0
         ? db.select().from(researchAnalysis).where(and(...conds))
         : db.select().from(researchAnalysis)
@@ -799,6 +876,12 @@ export function createDbResearchRepositories(): ResearchRepositories {
           ...(patch.target === undefined ? {} : { target: patch.target }),
           ...(patch.config === undefined ? {} : { configJson: encodeJson(patch.config, "configJson") }),
           ...(patch.status === undefined ? {} : { status: patch.status }),
+          // RESEARCH-PLANNER-001：计划落成时把溯源列一次写齐（落成后不再改）。
+          ...(patch.planId === undefined ? {} : { planId: patch.planId }),
+          ...(patch.moduleKey === undefined ? {} : { moduleKey: patch.moduleKey }),
+          ...(patch.priority === undefined ? {} : { priority: patch.priority }),
+          ...(patch.purpose === undefined ? {} : { purpose: patch.purpose }),
+          ...(patch.requiredFlag === undefined ? {} : { requiredFlag: patch.requiredFlag }),
           ...(patch.completedAt === undefined ? {} : { completedAt: toDate(patch.completedAt) }),
         })
         .where(eq(researchAnalysis.id, id));
@@ -1152,6 +1235,8 @@ export function createDbResearchRepositories(): ResearchRepositories {
           // RESEARCH-006.1 —— 研究来源快照：写入时定格，之后不再由任何路径 UPDATE。
           sourceDatasetVersionId: input.sourceDatasetVersionId ?? null,
           sourceResearchRunId: input.sourceResearchRunId ?? null,
+          // RESEARCH-PLANNER-001 —— 来源研究计划（可空；人工路径没有计划来源，如实 NULL）。
+          sourceResearchPlanId: input.sourceResearchPlanId ?? null,
           sourceTraceJson: encodeJson(input.sourceTraceJson, "sourceTraceJson"),
           sourceDatasetDivergenceReason: input.sourceDatasetDivergenceReason ?? null,
           // RESEARCH-FINDING-001 —— Hypothesis / Finding 谱系锚（写入即定格）。
@@ -1618,6 +1703,193 @@ export function createDbResearchRepositories(): ResearchRepositories {
     },
   };
 
+  // ---- RESEARCH-PLANNER-001：研究问题 ----
+  const questions: ResearchQuestionRepository = {
+    async create(input) {
+      const db = await requireDb();
+      // Dataset 坐标是**输入边界**：零 FK 之下必须显式校验它真实存在（否则研究无从谈起）。
+      // 复用既有唯一权威 helper，不另写一遍 SQL。
+      await requireDatasetVersion(db, input.datasetVersionId);
+      const id = await insertAndGetId(
+        db.insert(researchQuestion).values({
+          datasetVersionId: input.datasetVersionId,
+          questionText: input.questionText,
+          researchType: input.researchType,
+          createdBy: input.createdBy,
+          intentJson: encodeJson(input.intent ?? null, "research_question.intentJson"),
+          status: input.status ?? "DRAFT",
+          experimentId: input.experimentId ?? null,
+          planId: input.planId ?? null,
+          runId: input.runId ?? null,
+          conclusionId: input.conclusionId ?? null,
+        }),
+      );
+      const created = await questions.getById(id);
+      if (!created) throw new Error(`研究问题创建后读取失败：${id}`);
+      return created;
+    },
+    async getById(id) {
+      const db = await requireDb();
+      const rows = await db.select().from(researchQuestion).where(eq(researchQuestion.id, id)).limit(1);
+      return rows[0] ? mapQuestion(rows[0]) : undefined;
+    },
+    async list(filter: ResearchQuestionListFilter = {}) {
+      const db = await requireDb();
+      const conds = [];
+      if (filter.datasetVersionId !== undefined) {
+        conds.push(eq(researchQuestion.datasetVersionId, filter.datasetVersionId));
+      }
+      if (filter.status !== undefined) conds.push(eq(researchQuestion.status, filter.status));
+      if (filter.experimentId !== undefined) conds.push(eq(researchQuestion.experimentId, filter.experimentId));
+      const rows = await (conds.length > 0
+        ? db.select().from(researchQuestion).where(and(...conds))
+        : db.select().from(researchQuestion)
+      ).orderBy(desc(researchQuestion.id));
+      return rows.map(mapQuestion);
+    },
+    async update(id, patch) {
+      const db = await requireDb();
+      await db
+        .update(researchQuestion)
+        .set({
+          ...(patch.researchType === undefined ? {} : { researchType: patch.researchType }),
+          ...(patch.createdBy === undefined ? {} : { createdBy: patch.createdBy }),
+          ...(patch.intent === undefined
+            ? {}
+            : { intentJson: encodeJson(patch.intent, "research_question.intentJson") }),
+          ...(patch.status === undefined ? {} : { status: patch.status }),
+          ...(patch.experimentId === undefined ? {} : { experimentId: patch.experimentId }),
+          ...(patch.planId === undefined ? {} : { planId: patch.planId }),
+          ...(patch.runId === undefined ? {} : { runId: patch.runId }),
+          ...(patch.conclusionId === undefined ? {} : { conclusionId: patch.conclusionId }),
+        })
+        .where(eq(researchQuestion.id, id));
+      const updated = await questions.getById(id);
+      if (!updated) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.QUESTION_NOT_FOUND,
+          `更新失败，研究问题不存在：${id}`,
+        );
+      }
+      return updated;
+    },
+    async delete(id) {
+      const db = await requireDb();
+      const res = await db.delete(researchQuestion).where(eq(researchQuestion.id, id));
+      if (res[0].affectedRows === 0) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.QUESTION_NOT_FOUND,
+          `删除失败，研究问题不存在：${id}`,
+        );
+      }
+    },
+  };
+
+  // ---- RESEARCH-PLANNER-001：研究计划 ----
+  const plans: ResearchPlanRepository = {
+    async create(input) {
+      const db = await requireDb();
+      const question = await questions.getById(input.questionId);
+      if (!question) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.QUESTION_NOT_FOUND,
+          `创建研究计划失败，研究问题不存在：${input.questionId}`,
+        );
+      }
+      await requireExperimentRow(db, input.experimentId);
+      const id = await insertAndGetId(
+        db.insert(researchPlan).values({
+          questionId: input.questionId,
+          experimentId: input.experimentId,
+          runId: input.runId ?? null,
+          datasetVersionId: input.datasetVersionId,
+          moduleKeysJson: encodeJson(input.moduleKeys, "research_plan.moduleKeysJson"),
+          planJson: encodeJson(input.items, "research_plan.planJson"),
+          plannedCount: input.plannedCount,
+          materializedCount: input.materializedCount,
+          droppedCount: input.droppedCount,
+          maxAnalysisPerPlan: input.maxAnalysisPerPlan,
+          capApplied: input.capApplied,
+          generatedBy: input.generatedBy,
+          status: input.status ?? "PLANNED",
+          notesJson: encodeJson(input.notes ?? null, "research_plan.notesJson"),
+        }),
+      );
+      const created = await plans.getById(id);
+      if (!created) throw new Error(`研究计划创建后读取失败：${id}`);
+      return created;
+    },
+    async getById(id) {
+      const db = await requireDb();
+      const rows = await db.select().from(researchPlan).where(eq(researchPlan.id, id)).limit(1);
+      return rows[0] ? mapPlan(rows[0]) : undefined;
+    },
+    async list(filter: ResearchPlanListFilter = {}) {
+      const db = await requireDb();
+      const conds = [];
+      if (filter.questionId !== undefined) conds.push(eq(researchPlan.questionId, filter.questionId));
+      if (filter.experimentId !== undefined) conds.push(eq(researchPlan.experimentId, filter.experimentId));
+      if (filter.runId !== undefined) conds.push(eq(researchPlan.runId, filter.runId));
+      if (filter.status !== undefined) conds.push(eq(researchPlan.status, filter.status));
+      const rows = await (conds.length > 0
+        ? db.select().from(researchPlan).where(and(...conds))
+        : db.select().from(researchPlan)
+      ).orderBy(desc(researchPlan.id));
+      return rows.map(mapPlan);
+    },
+    async latestForQuestion(questionId) {
+      const db = await requireDb();
+      const rows = await db
+        .select()
+        .from(researchPlan)
+        .where(eq(researchPlan.questionId, questionId))
+        .orderBy(desc(researchPlan.id))
+        .limit(1);
+      return rows[0] ? mapPlan(rows[0]) : undefined;
+    },
+    async update(id, patch) {
+      const db = await requireDb();
+      await db
+        .update(researchPlan)
+        .set({
+          ...(patch.runId === undefined ? {} : { runId: patch.runId }),
+          ...(patch.moduleKeys === undefined
+            ? {}
+            : { moduleKeysJson: encodeJson(patch.moduleKeys, "research_plan.moduleKeysJson") }),
+          ...(patch.items === undefined
+            ? {}
+            : { planJson: encodeJson(patch.items, "research_plan.planJson") }),
+          ...(patch.plannedCount === undefined ? {} : { plannedCount: patch.plannedCount }),
+          ...(patch.materializedCount === undefined ? {} : { materializedCount: patch.materializedCount }),
+          ...(patch.droppedCount === undefined ? {} : { droppedCount: patch.droppedCount }),
+          ...(patch.maxAnalysisPerPlan === undefined ? {} : { maxAnalysisPerPlan: patch.maxAnalysisPerPlan }),
+          ...(patch.capApplied === undefined ? {} : { capApplied: patch.capApplied }),
+          ...(patch.generatedBy === undefined ? {} : { generatedBy: patch.generatedBy }),
+          ...(patch.status === undefined ? {} : { status: patch.status }),
+          ...(patch.notes === undefined ? {} : { notesJson: encodeJson(patch.notes, "research_plan.notesJson") }),
+        })
+        .where(eq(researchPlan.id, id));
+      const updated = await plans.getById(id);
+      if (!updated) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.PLAN_NOT_FOUND,
+          `更新失败，研究计划不存在：${id}`,
+        );
+      }
+      return updated;
+    },
+    async delete(id) {
+      const db = await requireDb();
+      const res = await db.delete(researchPlan).where(eq(researchPlan.id, id));
+      if (res[0].affectedRows === 0) {
+        throw new ResearchReferenceError(
+          RESEARCH_REFERENCE_ERROR.PLAN_NOT_FOUND,
+          `删除失败，研究计划不存在：${id}`,
+        );
+      }
+    },
+  };
+
   return {
     experiments,
     hypotheses,
@@ -1631,6 +1903,8 @@ export function createDbResearchRepositories(): ResearchRepositories {
     artifacts,
     templates,
     findings,
+    questions,
+    plans,
     relationships,
   };
 }

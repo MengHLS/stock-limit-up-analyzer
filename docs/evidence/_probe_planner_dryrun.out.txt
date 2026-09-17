@@ -1,0 +1,325 @@
+=== [0] READY Dataset Version 候选（按事件数降序）===
+  id=390002 code=first_limit_pullback v=v2 events=23978 2024-09-01..2026-09-01
+  id=390001 code=first_limit_pullback v=v1 events=1130 2026-08-01..2026-08-31
+
+>>> 使用 datasetVersionId = 390002
+
+=== [1] Dataset 真实事实（loadPlanDataFacts）===
+{
+  "datasetVersionId": 390002,
+  "status": "READY",
+  "startDate": "2024-09-01",
+  "endDate": "2026-09-01",
+  "totalEvents": 23978,
+  "outcomeHorizons": [
+    5,
+    10,
+    20
+  ],
+  "pathHorizons": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20
+  ],
+  "postRelativeDayRange": {
+    "min": 1,
+    "max": 20
+  },
+  "observationMaxOffset": 20,
+  "featureCount": 17,
+  "dimensions": [
+    "year",
+    "month",
+    "quarter",
+    "board",
+    "market",
+    "industry"
+  ]
+}
+
+=== [2] 关键变量可用性（新增口径 holds_event_open 必须为 true）===
+  pullback_holds_event_open_2d       OBSERVATION
+  pullback_holds_event_open_3d       OBSERVATION
+  pullback_holds_event_open_5d       OBSERVATION
+  pullback_holds_event_low_3d        OBSERVATION
+  pullback_min_volume_ratio_3d       OBSERVATION
+  pullback_last_volume_ratio_3d      OBSERVATION
+  pullback_last_is_bullish_3d        OBSERVATION
+  pullback_close_ratio_3d            OBSERVATION
+  obs_3d.return_from_event_close     OBSERVATION
+  future_return_5d                   OUTCOME
+  future_return_10d                  OUTCOME
+  future_return_20d                  OUTCOME
+  max_drawdown_5d                    OUTCOME
+  segment_max_drawdown_0_3d          UNKNOWN
+  segment_return_3_8d                OUTCOME
+  segment_max_drawdown_1_3d          OUTCOME
+  segment_return_4_8d                OUTCOME
+  turnover                           FEATURE
+  limit_up_premium                   FEATURE
+  market_cap                         FEATURE
+  pre_volatility_20d                 FEATURE
+
+==============================================================================
+研究问题：首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？
+==============================================================================
+主方法：PULLBACK_EFFECTIVENESS（回踩有效性研究） fallback=false
+  · 识别到研究方法：回踩有效性研究（PULLBACK_EFFECTIVENESS）
+  · 判定依据：加权分 6（专指词命中 2 个，命中词：回踩 / 跌破）
+  · 同时命中其它方法（作为辅助）：事件后收益研究（EVENT_RETURN_RESEARCH，加权分 1）
+
+精修配方排序（注册 8 条 → 排序后取前 6 条）：
+  ✓ [ 0] shrink_50              回踩期最小量能比 ≤ 0.5（缩量）
+  ✓ [ 1] shrink_30              回踩期最小量能比 ≤ 0.3（缩量）
+  ✓ [ 2] last_expansion         回踩末日量能比 > 1（放量确认）
+  ✓ [ 3] last_bullish           回踩末日为阳线（红盘）
+  ✓ [ 4] above_event_close      回踩末期收盘仍在首板日收盘之上
+  ✓ [ 5] depth_shallow          回踩深度落在 [0.98, 1]
+  ✗ [ 6] depth_normal           回踩深度落在 [0.95, 0.98]
+  ✗ [ 7] depth_deep             回踩深度落在 <0.95]
+
+生成的计划：28 条（上限 30，裁剪=false），丢弃 0 条
+  [P0]* EVENT_STUDY      全样本基准 · 事件后收益 T+5/T+10/T+20
+       目标: -
+  [P1]  DESCRIPTIVE      全样本分布 · future_return_5d / turnover / limit_up_premium
+       目标: -
+  [P1]  STABILITY        基准稳定性 · 按 year 分组
+       目标: -
+  [P0]* CONDITIONAL      回踩期未破首板日开盘价（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1
+       目标: future_return_5d
+  [P0]* CONDITIONAL      回踩期未破首板日开盘价（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1
+       目标: future_return_5d
+  [P0]* CONDITIONAL      回踩期未破首板日开盘价（T+5） → T+5 收益
+       条件: pullback_holds_event_open_5d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日最低价（T+2） → T+5 收益
+       条件: pullback_holds_event_low_2d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日最低价（T+3） → T+5 收益
+       条件: pullback_holds_event_low_3d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日最低价（T+5） → T+5 收益
+       条件: pullback_holds_event_low_5d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_min_volume_ratio_2d <= 0.5
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_min_volume_ratio_2d <= 0.3
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_last_volume_ratio_2d > 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_last_is_bullish_2d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_close_ratio_2d >= 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_close_ratio_2d >= 0.98 且 pullback_close_ratio_2d <= 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_min_volume_ratio_3d <= 0.5
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_min_volume_ratio_3d <= 0.3
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_last_volume_ratio_3d > 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_last_is_bullish_3d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_close_ratio_3d >= 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_close_ratio_3d >= 0.98 且 pullback_close_ratio_3d <= 1
+       目标: future_return_5d
+  [P2]  CONDITIONAL      回踩期已破首板日开盘价（对照组）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 0
+       目标: future_return_5d
+  [P2]  CONDITIONAL      回踩期已破首板日最低价（对照组）（T+2） → T+5 收益
+       条件: pullback_holds_event_low_2d == 0
+       目标: future_return_5d
+  [P1]  QUANTILE         turnover 分位 → T+5 收益（5 档）
+       目标: -
+  [P1]  QUANTILE         limit_up_premium 分位 → T+5 收益（5 档）
+       目标: -
+  [P1]  QUANTILE         market_cap 分位 → T+5 收益（5 档）
+       目标: -
+  [P1]  SEGMENT_RELATION T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系）
+       目标: -
+  [P2]  STABILITY        事件后收益研究 · 按 year 分组稳定性复核
+       目标: -
+
+  条件口径回执：
+   · pullback_holds_event_open_2d == 1 ⇒ 截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_open_3d == 1 ⇒ 截至 T+3，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_open_5d == 1 ⇒ 截至 T+5，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_low_2d == 1 ⇒ 截至 T+2，回调期间最低价始终未跌破**首板日最低价**
+   · pullback_holds_event_low_3d == 1 ⇒ 截至 T+3，回调期间最低价始终未跌破**首板日最低价**
+   · pullback_holds_event_low_5d == 1 ⇒ 截至 T+5，回调期间最低价始终未跌破**首板日最低价**
+   · pullback_min_volume_ratio_2d <= 0.5 ⇒ T+1..T+2 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_min_volume_ratio_2d <= 0.3 ⇒ T+1..T+2 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_last_volume_ratio_2d > 1 ⇒ T+2 当日成交量 / 首板日成交量（> 1 = 放量）
+   · pullback_last_is_bullish_2d == 1 ⇒ T+2 当日为阳线（收盘 > 开盘）
+   · pullback_close_ratio_2d >= 1 ⇒ T+2 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_2d >= 0.98 ⇒ T+2 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_2d <= 1 ⇒ T+2 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_min_volume_ratio_3d <= 0.5 ⇒ T+1..T+3 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_min_volume_ratio_3d <= 0.3 ⇒ T+1..T+3 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_last_volume_ratio_3d > 1 ⇒ T+3 当日成交量 / 首板日成交量（> 1 = 放量）
+   · pullback_last_is_bullish_3d == 1 ⇒ T+3 当日为阳线（收盘 > 开盘）
+   · pullback_close_ratio_3d >= 1 ⇒ T+3 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_3d >= 0.98 ⇒ T+3 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_3d <= 1 ⇒ T+3 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_holds_event_open_2d == 0 ⇒ **不成立（已破位/非阳线）**：截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_low_2d == 0 ⇒ **不成立（已破位/非阳线）**：截至 T+2，回调期间最低价始终未跌破**首板日最低价**
+
+==============================================================================
+研究问题：首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？
+==============================================================================
+主方法：PULLBACK_EFFECTIVENESS（回踩有效性研究） fallback=false
+  · 识别到研究方法：回踩有效性研究（PULLBACK_EFFECTIVENESS）
+  · 判定依据：加权分 3（专指词命中 1 个，命中词：回踩）
+  · 同时命中其它方法（作为辅助）：事件后收益研究（EVENT_RETURN_RESEARCH，加权分 1）
+
+精修配方排序（注册 8 条 → 排序后取前 6 条）：
+  ✓ [ 0] depth_deep             回踩深度落在 <0.95]
+  ✓ [ 1] depth_shallow          回踩深度落在 [0.98, 1]
+  ✓ [ 2] shrink_50              回踩期最小量能比 ≤ 0.5（缩量）
+  ✓ [ 3] shrink_30              回踩期最小量能比 ≤ 0.3（缩量）
+  ✓ [ 4] last_expansion         回踩末日量能比 > 1（放量确认）
+  ✓ [ 5] last_bullish           回踩末日为阳线（红盘）
+  ✗ [ 6] above_event_close      回踩末期收盘仍在首板日收盘之上
+  ✗ [ 7] depth_normal           回踩深度落在 [0.95, 0.98]
+
+生成的计划：28 条（上限 30，裁剪=false），丢弃 0 条
+  [P0]* EVENT_STUDY      全样本基准 · 事件后收益 T+5/T+10/T+20
+       目标: -
+  [P1]  DESCRIPTIVE      全样本分布 · future_return_5d / turnover / limit_up_premium
+       目标: -
+  [P1]  STABILITY        基准稳定性 · 按 year 分组
+       目标: -
+  [P0]* CONDITIONAL      回踩期未破首板日开盘价（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1
+       目标: future_return_5d
+  [P0]* CONDITIONAL      回踩期未破首板日开盘价（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1
+       目标: future_return_5d
+  [P0]* CONDITIONAL      回踩期未破首板日开盘价（T+5） → T+5 收益
+       条件: pullback_holds_event_open_5d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日最低价（T+2） → T+5 收益
+       条件: pullback_holds_event_low_2d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日最低价（T+3） → T+5 收益
+       条件: pullback_holds_event_low_3d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日最低价（T+5） → T+5 收益
+       条件: pullback_holds_event_low_5d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_close_ratio_2d <= 0.95
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_close_ratio_2d >= 0.98 且 pullback_close_ratio_2d <= 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_min_volume_ratio_2d <= 0.5
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_min_volume_ratio_2d <= 0.3
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_last_volume_ratio_2d > 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 1 且 pullback_last_is_bullish_2d == 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_close_ratio_3d <= 0.95
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_close_ratio_3d >= 0.98 且 pullback_close_ratio_3d <= 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_min_volume_ratio_3d <= 0.5
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_min_volume_ratio_3d <= 0.3
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_last_volume_ratio_3d > 1
+       目标: future_return_5d
+  [P1]  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益
+       条件: pullback_holds_event_open_3d == 1 且 pullback_last_is_bullish_3d == 1
+       目标: future_return_5d
+  [P2]  CONDITIONAL      回踩期已破首板日开盘价（对照组）（T+2） → T+5 收益
+       条件: pullback_holds_event_open_2d == 0
+       目标: future_return_5d
+  [P2]  CONDITIONAL      回踩期已破首板日最低价（对照组）（T+2） → T+5 收益
+       条件: pullback_holds_event_low_2d == 0
+       目标: future_return_5d
+  [P1]  QUANTILE         turnover 分位 → T+5 收益（5 档）
+       目标: -
+  [P1]  QUANTILE         limit_up_premium 分位 → T+5 收益（5 档）
+       目标: -
+  [P1]  QUANTILE         market_cap 分位 → T+5 收益（5 档）
+       目标: -
+  [P1]  SEGMENT_RELATION T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系）
+       目标: -
+  [P2]  STABILITY        事件后收益研究 · 按 year 分组稳定性复核
+       目标: -
+
+  条件口径回执：
+   · pullback_holds_event_open_2d == 1 ⇒ 截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_open_3d == 1 ⇒ 截至 T+3，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_open_5d == 1 ⇒ 截至 T+5，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_low_2d == 1 ⇒ 截至 T+2，回调期间最低价始终未跌破**首板日最低价**
+   · pullback_holds_event_low_3d == 1 ⇒ 截至 T+3，回调期间最低价始终未跌破**首板日最低价**
+   · pullback_holds_event_low_5d == 1 ⇒ 截至 T+5，回调期间最低价始终未跌破**首板日最低价**
+   · pullback_close_ratio_2d <= 0.95 ⇒ T+2 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_2d >= 0.98 ⇒ T+2 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_2d <= 1 ⇒ T+2 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_min_volume_ratio_2d <= 0.5 ⇒ T+1..T+2 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_min_volume_ratio_2d <= 0.3 ⇒ T+1..T+2 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_last_volume_ratio_2d > 1 ⇒ T+2 当日成交量 / 首板日成交量（> 1 = 放量）
+   · pullback_last_is_bullish_2d == 1 ⇒ T+2 当日为阳线（收盘 > 开盘）
+   · pullback_close_ratio_3d <= 0.95 ⇒ T+3 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_3d >= 0.98 ⇒ T+3 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_close_ratio_3d <= 1 ⇒ T+3 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+   · pullback_min_volume_ratio_3d <= 0.5 ⇒ T+1..T+3 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_min_volume_ratio_3d <= 0.3 ⇒ T+1..T+3 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+   · pullback_last_volume_ratio_3d > 1 ⇒ T+3 当日成交量 / 首板日成交量（> 1 = 放量）
+   · pullback_last_is_bullish_3d == 1 ⇒ T+3 当日为阳线（收盘 > 开盘）
+   · pullback_holds_event_open_2d == 0 ⇒ **不成立（已破位/非阳线）**：截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+   · pullback_holds_event_low_2d == 0 ⇒ **不成立（已破位/非阳线）**：截至 T+2，回调期间最低价始终未跌破**首板日最低价**
+
+==============================================================================
+§9 裁剪压力测试：把上限压到 10，验证 P0 必需项永不丢弃
+  上限 10 ⇒ 保留 10 条（其中必需 4 条 / 全量必需 4 条）
+  capApplied=true，被裁 17 条
+  保留项优先级分布：P0=4 P1=6 P2=0
+  必需项是否全部保留：✓ 是

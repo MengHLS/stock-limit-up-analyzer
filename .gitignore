@@ -138,3 +138,12 @@ _*.py
 /_*.mts
 /_*.mjs
 /_*.json
+/.workbuddy/
+
+# scripts/ 下的一次性探针脚本（2026-09-17 实测：10 个零引用 ad-hoc DB 探针堆在生产脚本目录里）
+# 应写到仓外 C:\work\sourcecode\_scratch\  [REPO-HYGIENE-SCRIPTS-SCRATCH-001]
+# ⚠️ 只锚定 scripts/ 直下、且以 _ 开头的 .ts/.mts/.mjs —— 不动 scripts/providers/*.py（产品依赖）、
+#    也不动 scripts/_dump/（被 backfillStatusLiquidity_sql.ts 引用）
+/scripts/_*.ts
+/scripts/_*.mts
+/scripts/_*.mjs

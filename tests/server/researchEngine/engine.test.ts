@@ -239,7 +239,7 @@ describe("ResearchEngine", () => {
     expect(afterRun!.errorMessage).toBeNull();
   });
 
-  it("执行期失败 → Run 落 FAILED 且 errorCode / errorMessage 已保存，Analysis 落 FAILED", async () => {
+  it("执行期失败 → Run 落 FAILED 且 errorCode / errorMessage 已保存，未完成 Analysis 收敛为 CANCELLED", async () => {
     const repos = makeRepos();
     const { experiment, run, analyses } = await seed(repos, [
       { analysisType: "DESCRIPTIVE", config: { variables: ["turnover"] } },
@@ -264,8 +264,10 @@ describe("ResearchEngine", () => {
     expect(afterRun!.errorCode).toBe("INTERNAL_ERROR");
     expect(afterRun!.errorMessage).toContain("模拟读取中断");
     expect((await repos.experiments.getById(experiment.id!))!.status).toBe("FAILED");
-    // 失败发生在第一个 analysis 执行之前（装配阶段），因此 analysis 未被置为 FAILED
-    expect((await repos.analyses.getById(analyses[0]!.id!))!.status).toBe("PENDING");
+    // 失败发生在第一个 analysis 执行之前（装配阶段）⇒ 该分析从未执行。
+    // RESEARCH-ORPHAN-RECLAIM-001：Run 一旦收敛为终态，其下未完成的 Analysis 必须一并收敛，
+    // 否则留下「父终态、子未终态」的孤儿（曾使状态计数虚高、UI 显示「永远在做」）。
+    expect((await repos.analyses.getById(analyses[0]!.id!))!.status).toBe("CANCELLED");
   });
 
   it("分析执行器内部失败 → Run FAILED + errorCode=ANALYSIS_FAILED", async () => {

@@ -37,8 +37,10 @@ import type { Strategy13 } from "../research/signalEngine/types";
 import type { SimulationConfig } from "../research/simulator/types";
 import type { ClosedLoopWiringInputs } from "../research/closedLoopWiring/types";
 import { resolveStrategyRecipe, resolveStrategyRecipeById, DEFAULT_STRATEGY_RECIPE_ID, type StrategyRecipeRuntime } from "../research/recipeRegistry";
+import { compileConditionRecipe } from "../research/conditionSignal";
 import { normalizeStrategyExecutionModel } from "./executionModel";
 import type { StrategyDocument, StrategyDocumentInput } from "../research/strategySchema/types";
+import type { ResearchParameterSet } from "../research/types";
 import type { StrategyVersionRecordInput } from "../research/strategySchema/map";
 import type { LifecycleConfigInput } from "./lifecycleConfig";
 import { buildLifecycleConfig } from "./lifecycleConfig";
@@ -93,6 +95,16 @@ export interface AssembleRunWorkbenchInputsRequest {
   /** 数据源策略：`prefer-registry`（默认，优先直读）| `rebuild`（强制重建，用于对照/排障）。 */
   readonly datasetSourcePolicy?: DatasetSourcePolicy;
   /**
+   * **注入已构建数据集**（给定时跳过一切解析 —— 直读与重建都不做）。
+   *
+   * 用途：参数搜索 / 走查 / 稳健性检验要在**同一份数据**上跑 N 组参数组合。
+   * 每次都重新解析的代价是「分钟级重建 × N」（见 `PROJECT_RULES.md` 的运行工作台性能账），
+   * 因此这些场景必须先建一次、再复用 N 次。
+   *
+   * 🔴 复用时 `assembly.datasetSource` 会**如实**标成 `injected`，不会伪装成 `registry` / `rebuild`。
+   */
+  readonly researchDataset?: ResearchDataset;
+  /**
    * 数据集护栏（对齐 `buildResearchDataset` 选项；用于「先小步验证再放大」）。
    * 缺省不限，与既有 `researchDataset.build` 端点口径一致。
    */
@@ -100,13 +112,27 @@ export interface AssembleRunWorkbenchInputsRequest {
   readonly maxTradingDays?: number;
   readonly maxSecuritiesPerDay?: number;
   /**
-   * 显式指定的执行配方 id（**仅当策略文档没有 `recipe` 时生效**）。
+   * 显式指定的执行配方 id（**仅当策略文档既没有 `recipe`、也没有声明式条件时生效**）。
    *
-   * 为什么需要：库里既有策略文档都还没有 recipe 字段（配方编辑入口属后续增量），
-   * 而「按哪个配方跑」是必须被声明的事实。缺省用 `DEFAULT_STRATEGY_RECIPE_ID`
+   * 「按哪个配方跑」是必须被声明的事实。缺省用 `DEFAULT_STRATEGY_RECIPE_ID`
    * （显式常量，不是猜测），并把来源写进 `assembly.recipeSource`。
+   *
+   * ⚠️ 2026-09-17 实查更正：本段旧文案写「库里既有策略文档都还没有 recipe 字段」，与事实不符 ——
+   * 10 份文档里 7 份**已带** `recipe`（`first-limit-pullback-hold-shrink`），
+   * 1 份（`strategy_versions#390001`）无 `recipe` 但**声明了条件**（走声明式条件编译路径），
+   * 2 份 `limit-up-baseline` 既无 `recipe` 也无条件（这才是真正的兜底路径）。
    */
   readonly recipeId?: string;
+  /**
+   * 本次运行的**参数覆写**（缺省 = 全部取策略文档的 `defaultValue`）。
+   *
+   * 用途：参数搜索 / 走查 / 稳健性检验需要在**同一份策略**上跑不同参数组合；
+   * 没有这个入口时，那些功能只能另接一套 legacy 回测（= 审计报告 P0-2 缺陷）。
+   *
+   * 🔴 覆写键必须**存在于** `document.parameters`，否则 `resolveParameters` 抛
+   * `RECIPE_PARAMETER_UNKNOWN` —— 拒绝「以为某维度参与了寻优、实际被丢掉」。
+   */
+  readonly parameterOverrides?: ResearchParameterSet;
   /** 生命周期推进配置（finalize 阶段；缺省不注入 ⇒ 编排器以 CL_LIFECYCLE_CONFIG_MISSING 阻塞）。 */
   readonly lifecycle?: AssembleLifecycleRequest | null;
 }
@@ -132,8 +158,9 @@ export interface LoopRunAssemblySummary {
   readonly datasetRowCount: number;
   readonly datasetSecretCount: number;
   /**
-   * 数据来源：`registry`（直读已绑定 ds_* 数据集）| `rebuild`（从零重建）。
-   * 前端据此如实展示「本次跑的是哪份数据」，绝不让重建伪装成「用了你绑定的数据集」。
+   * 数据来源：`registry`（直读已绑定 ds_* 数据集）| `rebuild`（从零重建）|
+   * `injected`（调用方注入的已构建数据集，同一份被多次复用）。
+   * 前端据此如实展示「本次跑的是哪份数据」，绝不让重建 / 复用伪装成「用了你绑定的数据集」。
    */
   readonly datasetSource: DatasetSourceKind;
   /** 直读失败并回落重建时的原因（`rebuild` 且为直读失败所致时非 null）。 */
@@ -144,7 +171,11 @@ export interface LoopRunAssemblySummary {
   readonly strategyId: string;
   readonly strategyVersion: string;
   readonly recipeId: string;
-  /** 配方来源：`strategy-document`（文档里写着）| `explicit-request`（调用方指定 / 默认常量）。 */
+  /**
+   * 配方来源（三条诚实路径）：`strategy-document`（文档带 recipe）|
+   * `strategy-declarative-conditions`（文档无 recipe，由 `definition.entry.conditions` 现场合成）|
+   * `explicit-request`（调用方指定 / 默认常量）。
+   */
   readonly recipeSource: RecipeResolutionSource;
   readonly recipeFeatureIds: readonly string[];
   readonly selectionSummary: string;
@@ -195,14 +226,26 @@ function requireExecutionModel(document: StrategyDocument): ExecutionModelId {
 // ---------------------------------------------------------------------------
 
 /** 配方来源（进审计摘要：让人一眼看出「这次按哪个配方跑的、这个配方是哪儿来的」）。 */
-export type RecipeResolutionSource = "strategy-document" | "explicit-request";
+export type RecipeResolutionSource =
+  | "strategy-document"
+  | "strategy-declarative-conditions"
+  | "explicit-request";
 
 // ---------------------------------------------------------------------------
 // 数据来源（进审计摘要：让人一眼看出「这次跑的是哪份数据」）
 // ---------------------------------------------------------------------------
 
-/** 数据来源：直读已绑定数据集 / 从零重建。 */
-export type DatasetSourceKind = "registry" | "rebuild";
+/**
+ * 数据来源：
+ *   - `registry`：直读策略已绑定的已落库 `ds_*` 数据集；
+ *   - `rebuild`：按窗口从零重建（分钟级）；
+ *   - `injected`：**调用方注入的已构建数据集**（同一份数据被多次复用，未重新解析）。
+ *
+ * 🔴 之所以单列 `injected` 而不是复用 `rebuild`：参数搜索 / 走查要在同一份数据上跑 N 组参数，
+ * 若每次都重新解析，代价是分钟级 × N；而复用事实若伪装成 `rebuild`，审计时无法分辨
+ * 「这份数据是本次刚建的」还是「被复用的」—— 那正是最不该含糊的地方。
+ */
+export type DatasetSourceKind = "registry" | "rebuild" | "injected";
 
 /** 数据源策略：优先直读（默认）/ 强制重建。 */
 export type DatasetSourcePolicy = "prefer-registry" | "rebuild";
@@ -246,6 +289,18 @@ async function resolveDataset(
   sourceNote: string | null;
   registry: BuildDatasetFromRegistryResult | null;
 }> {
+  // 🔴 注入路径优先：调用方已构建好数据集（参数搜索 / 走查等需要在同一份数据上跑 N 组参数）
+  //    ⇒ 直接复用，并**如实**标记来源。放在最前面：注入时不重新解析，也不需要观察窗口。
+  if (request.researchDataset !== undefined) {
+    return {
+      dataset: request.researchDataset,
+      source: "injected",
+      sourceNote:
+        "调用方注入的已构建数据集（同一份数据被多次复用，未重新解析）—— 参数搜索 / 走查等场景的正常路径。",
+      registry: null,
+    };
+  }
+
   const policy: DatasetSourcePolicy = request.datasetSourcePolicy ?? "prefer-registry";
   const boundId = request.datasetVersionId;
 
@@ -381,7 +436,24 @@ function rebuildDataset(
   });
 }
 
-/** 由策略文档的 recipe 解析真实可执行配方；文档无 recipe 时按显式请求 / 默认值兜底。 */
+/**
+ * 由策略文档解析**真实可执行**配方（三条诚实路径，优先级自上而下）：
+ *
+ *   1. 文档带 `recipe` ⇒ 按注册表解析（既有链，不改）；
+ *   2. 文档不带 `recipe`，但 `definition.entry.conditions` **声明了条件** ⇒
+ *      现场编译成执行门槛（`compileConditionRecipe`）—— 这是「声明与执行同源」；
+ *   3. 两者都没有 ⇒ 调用方显式指定 / 显式默认常量（诚实兜底，绝不伪装成「文档声明」）。
+ *
+ * 🔴 路径 2 的存在理由（修复「条件进不了回测」）：此前「无 recipe 但有条件」会静默落到
+ * `DEFAULT_STRATEGY_RECIPE_ID`（涨跌幅加权取前 5 名），让「守线 + 缩量」的文档实际跑成
+ * 另一个模式 —— 产物看起来完全正常，是最难发现的那种错。
+ * 现在该分支**真编译**；编译不出来就**响亮抛错并逐条列出**，绝不回落默认配方。
+ *
+ * 🔴 顺序约束（零回归，勿调换）：路径 1 必须先于路径 2。库里 8 份 `cand-3600xx` 文档
+ * `hasRecipe=true`（recipeId=first-limit-pullback-hold-shrink），而它们的 conditions 里
+ * 存有转正期遗留的**字符串常量**（`"prefix.rd0.volume * 0.3"`，现行 schema 下已是死写法）。
+ * 若把条件编译提到 recipe 之前，这 8 份会从「能跑」变成「一跑就报错」。
+ */
 function requireRecipe(
   document: StrategyDocument,
   explicitRecipeId: string | undefined,
@@ -390,9 +462,23 @@ function requireRecipe(
   if (recipe !== undefined && recipe !== null) {
     return { runtime: resolveStrategyRecipe(recipe), source: "strategy-document" };
   }
-  // 文档里没有配方（当前库里 3 份文档全部如此 —— 见 docs/evidence/_probe_strategy_doc_shape.json）。
-  // 两条诚实路径：① 调用方显式指定；② 显式声明的默认配方常量。
-  // 无论哪条，事实都进 `assembly.recipeSource`，绝不让「隐式兜底」伪装成「文档声明」。
+
+  // -- 路径 2：文档没带 recipe，但**声明了条件** ⇒ 现场编译（不回落默认配方）--
+  //    只判「有没有条件」，「有没有**启用**的条件」由编译器唯一裁定（禁两套口径）。
+  const declaredConditions = document.definition?.entry.conditions ?? [];
+  if (declaredConditions.length > 0) {
+    return {
+      runtime: compileConditionRecipe({
+        strategyId: document.strategyId,
+        strategyVersion: document.version,
+        conditions: declaredConditions,
+        parameters: document.parameters,
+      }),
+      source: "strategy-declarative-conditions",
+    };
+  }
+
+  // -- 路径 3：既无 recipe 又无条件 ⇒ 两条诚实兜底，事实都进 `assembly.recipeSource` --
   if (explicitRecipeId !== undefined && explicitRecipeId.trim().length > 0) {
     return { runtime: resolveStrategyRecipeById(explicitRecipeId), source: "explicit-request" };
   }
@@ -407,24 +493,43 @@ function requireRecipe(
 // ---------------------------------------------------------------------------
 
 /**
- * 装配一次「真实跑通」的全部入参。
- *
- * 步骤（每步都可能响亮抛错，绝不静默降级）：
- *   1. 真实构建 `ResearchDataset`（窗口 = 用户所选决策窗口）；
- *   2. 真实读取策略文档 → 成本模型 / 执行模型 / 初始资金 / 持仓上限；
- *   3. 解析已注册配方 → 特征提供器 / 信号构造器 / 排序与选择配置；
- *   4. 组装 `experimentConfig` / `strategyContract` / `strategy13` / `simulationConfig`；
- *   5. （可选）组装 `lifecycle`（finalize 阶段；回测指纹由本层从真实产物回填）。
+ * 「策略侧」装配产物（**全部同步可得**，不含任何数据集内容）。
  */
-export async function assembleRunWorkbenchInputs(
-  request: AssembleRunWorkbenchInputsRequest,
-): Promise<AssembleRunWorkbenchInputsResult> {
-  // -- 1. 数据集：优先直读已绑定 datasetVersionId 的已落库 ds_* 数据集；缺失才回落重建 --
-  //    （原路径无条件重建 ⇒ 无视已绑定数据集、分钟级等待、产物可能漂移；见模块头与
-  //     docs/evidence/_probe_ds_rows.mts。）
-  const datasetResolution = await resolveDataset(request);
-  const dataset = datasetResolution.dataset;
+export interface AssembledStrategySide {
+  readonly recipeRuntime: StrategyRecipeRuntime;
+  readonly recipeSource: RecipeResolutionSource;
+  readonly parameterSet: ResearchParameterSet;
+  readonly costModel: CostModel;
+  readonly executionModel: ExecutionModelId;
+  readonly strategyContract: StrategyContract;
+  readonly strategy13: Strategy13;
+  readonly experimentConfig: ExperimentConfig;
+  readonly simulationConfig: SimulationConfig;
+  readonly strategyDocumentInput: StrategyDocumentInput;
+  readonly strategyVersionRecordInput: StrategyVersionRecordInput;
+  readonly lifecycle: ClosedLoopWiringInputs["lifecycle"] | undefined;
+}
 
+/**
+ * **同步**装配「策略侧」全部入参（**完全不碰数据集**）。
+ *
+ * 🔴 存在的理由（STEP B 落点③ 的解锁点）：闭环的 `ClosedLoopStageExecutor` 与
+ * `parameterSearch` / `robustness` 的 `evaluator` **都是同步**的，而本模块的
+ * `assembleRunWorkbenchInputs` 只是因为**数据集解析**（`resolveDataset`，可能是分钟级重建）
+ * 才是 `async`。把这层剥出来后，闭环内的「参数集 → 绩效标量」评估器就能**同步**装配，
+ * 而不必手写第二条 `dataset→signalEngine→simulator→evaluate` 子链 ——
+ * 那正是 `requirements.ts` 拒绝为 `optimization`/`robustness`/`oos`/`overfitting` 接线的理由。
+ *
+ * ⚠️ `assembleRunWorkbenchInputs` 必须调本函数（唯一实现，**禁复制第二份**）。
+ *
+ * @param request       与主入口同一份请求（本函数不读其数据集相关字段）。
+ * @param datasetVersion 数据集内容指纹 —— `experimentConfig.datasetVersion` 需要它，
+ *                       由调用方从已解析的数据集传入（本函数自己不做任何数据集解析）。
+ */
+export function assembleStrategySide(
+  request: AssembleRunWorkbenchInputsRequest,
+  datasetVersion: string,
+): AssembledStrategySide {
   // -- 2. 策略文档：身份必须与请求一致（防「读错版本」这种最危险的静默错误）--
   const document = request.strategyDocument;
   if (document.strategyId !== request.strategyId) {
@@ -448,7 +553,7 @@ export async function assembleRunWorkbenchInputs(
   // 顺序理由（2026-09-13）：门槛型配方（「守线 + 缩量 ≤ X%」）的门槛值来自策略文档参数，
   // 若先建构造器再解析参数，就会「文档声明 0.3、实际按登记时常量跑」= 口径漂移。
   // 参数集同时喂 experimentConfig 与 §17 版本记录 —— 两处必须是同一份，只解析一次。
-  const parameterSet = recipeRuntime.resolveParameters(document.parameters);
+  const parameterSet = recipeRuntime.resolveParameters(document.parameters, request.parameterOverrides);
 
   // -- 3. 装配四入参 --
   const strategyContract: StrategyContract = {
@@ -473,11 +578,11 @@ export async function assembleRunWorkbenchInputs(
   };
 
   const experimentConfig: ExperimentConfig = {
-    datasetVersion: dataset.datasetVersion,
+    datasetVersion: datasetVersion,
     strategyId: document.strategyId,
     strategyVersion: document.version,
     parameters: parameterSet,
-    universe: { universeId: deriveDatasetUniverseId(dataset.datasetVersion) },
+    universe: { universeId: deriveDatasetUniverseId(datasetVersion) },
     dateRange: { startDate: request.startDate, endDate: request.endDate },
     costModel,
     randomSeed: recipeRuntime.randomSeed,
@@ -533,16 +638,68 @@ export async function assembleRunWorkbenchInputs(
     parameterSet,
   };
 
-  const inputs: ClosedLoopWiringInputs = {
-    researchDataset: dataset,
-    experimentConfig,
+
+  return {
+    recipeRuntime,
+    recipeSource,
+    parameterSet,
+    costModel,
+    executionModel,
     strategyContract,
     strategy13,
+    experimentConfig,
+    simulationConfig,
     strategyDocumentInput,
     strategyVersionRecordInput,
-    simulationConfig,
-    ...(lifecycle !== undefined ? { lifecycle } : {}),
+    lifecycle,
   };
+}
+
+/**
+ * 组装 `ClosedLoopWiringInputs`（**唯一实现**：主入口与闭环内的参数评估器共用）。
+ *
+ * 抽出来的理由：`strategyEvaluation` 的同步评估需要在**不重建数据集**的前提下组装
+ * 同一份 wiring inputs；若在那边再拼一遍，就是「第二套装配」（违反唯一实现纪律）。
+ */
+export function buildClosedLoopWiringInputs(
+  dataset: ResearchDataset,
+  side: AssembledStrategySide,
+): ClosedLoopWiringInputs {
+  return {
+    researchDataset: dataset,
+    experimentConfig: side.experimentConfig,
+    strategyContract: side.strategyContract,
+    strategy13: side.strategy13,
+    strategyDocumentInput: side.strategyDocumentInput,
+    strategyVersionRecordInput: side.strategyVersionRecordInput,
+    simulationConfig: side.simulationConfig,
+    ...(side.lifecycle !== undefined ? { lifecycle: side.lifecycle } : {}),
+  };
+}
+
+/**
+ * 装配一次「真实跑通」的全部入参。
+ *
+ * 步骤（每步都可能响亮抛错，绝不静默降级）：
+ *   1. 真实构建 `ResearchDataset`（窗口 = 用户所选决策窗口）；
+ *   2. 真实读取策略文档 → 成本模型 / 执行模型 / 初始资金 / 持仓上限；
+ *   3. 解析已注册配方 → 特征提供器 / 信号构造器 / 排序与选择配置；
+ *   4. 组装 `experimentConfig` / `strategyContract` / `strategy13` / `simulationConfig`；
+ *   5. （可选）组装 `lifecycle`（finalize 阶段；回测指纹由本层从真实产物回填）。
+ */
+export async function assembleRunWorkbenchInputs(
+  request: AssembleRunWorkbenchInputsRequest,
+): Promise<AssembleRunWorkbenchInputsResult> {
+  // -- 1. 数据集：优先直读已绑定 datasetVersionId 的已落库 ds_* 数据集；缺失才回落重建 --
+  //    （原路径无条件重建 ⇒ 无视已绑定数据集、分钟级等待、产物可能漂移；见模块头与
+  //     docs/evidence/_probe_ds_rows.mts。）
+  const datasetResolution = await resolveDataset(request);
+  const dataset = datasetResolution.dataset;
+
+  // -- 2~5. 策略侧装配（**同步**；抽成 `assembleStrategySide` 供闭环内的参数评估器复用）--
+  const side = assembleStrategySide(request, dataset.datasetVersion);
+
+  const inputs = buildClosedLoopWiringInputs(dataset, side);
 
   const distinctSecurities = new Set(dataset.rows.map(row => row.securityId));
 
@@ -558,17 +715,17 @@ export async function assembleRunWorkbenchInputs(
       datasetSourceNote: datasetResolution.sourceNote,
       datasetVersionId: datasetResolution.registry?.version.id ?? null,
       dateRange: { startDate: request.startDate, endDate: request.endDate },
-      strategyId: document.strategyId,
-      strategyVersion: document.version,
-      recipeId: recipeRuntime.recipeId,
-      recipeSource,
-      recipeFeatureIds: recipeRuntime.features.map(feature => feature.featureId),
-      selectionSummary: recipeRuntime.selectionSummary,
+      strategyId: request.strategyDocument.strategyId,
+      strategyVersion: request.strategyDocument.version,
+      recipeId: side.recipeRuntime.recipeId,
+      recipeSource: side.recipeSource,
+      recipeFeatureIds: side.recipeRuntime.features.map(feature => feature.featureId),
+      selectionSummary: side.recipeRuntime.selectionSummary,
       simulation: {
-        initialCapital: simulationConfig.initialCapital,
-        maxPositions: simulationConfig.maxPositions ?? null,
-        executionModel,
-        costModel,
+        initialCapital: side.simulationConfig.initialCapital,
+        maxPositions: side.simulationConfig.maxPositions ?? null,
+        executionModel: side.executionModel,
+        costModel: side.costModel,
       },
     },
   };

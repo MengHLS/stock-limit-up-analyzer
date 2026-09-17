@@ -17,6 +17,7 @@
 
 import type {
   ResearchAnalysis,
+  ResearchAnalysisPriority,
   ResearchAnalysisType,
   ResearchConditionSet,
   ResearchConclusionType,
@@ -424,6 +425,21 @@ export interface ResearchBatchAnalysisItem {
     logicalOperator?: string;
     groupLogicalOperator?: string;
   }>;
+  // ---- RESEARCH-PLANNER-001：计划溯源（可选 ⇒ 既有调用方逐字兼容）----
+  //
+  // 为什么把这五个字段挂在**批量创建项**上而不是另开一个「按计划建分析」的函数：
+  // 「从计划建分析」与「手工批量建分析」必须是**同一条落库路径**（预检整批拒绝 /
+  // 部分失败如实回显 / 补偿删除全部自动继承）。开第二条路径 = 第二套行为，迟早漂移。
+  /** 由哪份研究计划生成（软引用 `research_plan.id`）。 */
+  planId?: number | null;
+  /** 由哪个 Research Module 生成。 */
+  moduleKey?: string | null;
+  /** 规模裁剪顺序（P0 / P1 / P2）。 */
+  priority?: ResearchAnalysisPriority | null;
+  /** 这条分析要回答什么（人读）。 */
+  purpose?: string | null;
+  /** 是否为计划中的必需项。 */
+  requiredFlag?: boolean | null;
 }
 
 /**
