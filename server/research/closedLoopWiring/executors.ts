@@ -1,5 +1,5 @@
 /**
- * 闭环装配层 — 真实阶段执行器（装配 `data / research / strategy / backtest / evaluation`）。
+ * 闭环装配层 — 真实阶段执行器（装配 `data / research / strategy / backtest / evaluation / optimization`）。
  *
  * 纪律（与 §17「不造假」一致）：
  *   - 每个执行器**只调用真实模块**（`runCandidateEngine` / `createStrategyDocument` /
@@ -37,7 +37,17 @@ import { runTradeSimulation } from "../simulator/engine";
 import { buildRegimeDayFactsFromDatasetRows } from "../marketRegime/facts";
 import { runMarketRegimeAnalysis } from "../marketRegime/run";
 import type { RegimeDayFacts } from "../marketRegime/types";
-import type { ClosedLoopRegimeRef } from "../closedLoop/types";
+import type { ClosedLoopOptimizationRef, ClosedLoopRegimeRef } from "../closedLoop/types";
+import { runParameterSearch } from "../parameterSearch/run";
+import type { CandidateRegionVerdict } from "../parameterSearch/types";
+import {
+  createStrategyParameterEvaluator,
+  type StrategyParameterEvaluatorInput,
+} from "../strategyEvaluation/evaluator";
+import {
+  deriveParameterSpaceFromDocument,
+  type ParameterSpaceDerivation,
+} from "../strategyEvaluation/parameterSpaceFromDocument";
 import { createStrategyDocument, createStrategyVersionRecord } from "../strategySchema/map";
 import { computeStrategyVersionRecordFingerprint } from "../strategySchema/serialize";
 import { closedLoopStageWiringRequirement } from "./requirements";
@@ -206,6 +216,101 @@ export function projectRegimeRef(run: {
     compositeSummary: [...keyCounts.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
       .map(([compositeKey, dayCount]) => ({ compositeKey, dayCount })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// optimization 阶段：搜索空间派生 + optimizationRef 投影
+// ---------------------------------------------------------------------------
+
+/**
+ * 闭环 optimization 阶段的**固定采样预算与种子**。
+ *
+ * 🔴 为什么默认 `random` 而非 `grid`：闭环执行器是**同步**的，每次评估都是一次完整
+ * `research → backtest → evaluation` 回测。真实文档（`cand-3600xx`）三参数的全网格是
+ * **1240 组**（31 × 20 × 2；实查见 `docs/evidence/_probe_optimization_parameter_space.out.json`），
+ * 按每次回测数秒计就是**小时级同步阻塞** —— 那会拖垮整个 Node 事件循环（tRPC 全挂）。
+ * ⇒ 闭环内用**固定种子的 random 采样**：确定性可复现、预算可控。
+ * 需要全网格时由调用方离线另跑，**不在同步阶段里做**。
+ */
+const CLOSED_LOOP_OPTIMIZATION_SEED = 17;
+const CLOSED_LOOP_OPTIMIZATION_BUDGET = 12;
+/** 闭环内不读 package.json / git（与 `assemble.ts:76` 的既有口径一致）。 */
+const CLOSED_LOOP_OPTIMIZATION_CODE_VERSION = "unknown";
+
+/**
+ * optimization 阶段交接投影：把真实 `ParameterSearchRun` 投影为 `optimizationRef`。
+ *
+ * 覆盖 `guards.ts:117` 要求的四个必备键（存在性校验；`method` 与 `consistency.status`
+ * 另有取值闭集校验）。
+ *
+ * 🔴 `consistency.note` 是**如实交代本次搜索边界**的唯一位置，因此它必须写清：
+ * 评估了多少组 / 全网格多大 / 稳定区 verdict / 产出几个候选，以及
+ * **哪些文档声明的参数没有进搜索空间**（逐条原因）。少了最后一句，调用方就无从知道
+ * 优化**没覆盖**哪些维度 —— 那正是 P0-2 的病（未收录维度被静默忽略）。
+ */
+export function projectOptimizationRef(
+  run: {
+    searchRunId: string;
+    fingerprint: string;
+    method: "grid" | "random" | "rolling";
+    combinationCount: number;
+    sampleCount: number;
+    region: {
+      verdict: CandidateRegionVerdict;
+      qualifiedCount: number;
+      badPointRatePct: number | null;
+    };
+    candidates: readonly { readonly parameterSet: Record<string, unknown> }[];
+  },
+  derivation: ParameterSpaceDerivation,
+): ClosedLoopOptimizationRef {
+  const searchedKeys = derivation.space.parameters.map(parameter => parameter.name);
+  // 候选策略**实际调动**的参数键（无候选 ⇒ 空数组；不用「搜了什么」冒充「候选是什么」）
+  const candidateParameterKeys = [
+    ...new Set(run.candidates.flatMap(candidate => Object.keys(candidate.parameterSet))),
+  ].sort();
+
+  let status: ClosedLoopOptimizationRef["consistency"]["status"];
+  if (run.region.verdict === "stable" && run.candidates.length > 0) {
+    status = "candidate";
+  } else if (run.region.verdict === "degraded-bad-point-rate") {
+    status = "degraded";
+  } else {
+    status = "noStableRegion";
+  }
+
+  const budgetNote =
+    run.method === "random"
+      ? `random 采样 ${run.sampleCount} / 全网格 ${run.combinationCount} 组（固定种子，确定性）`
+      : `共评估 ${run.sampleCount} 组`;
+  const excludedNote =
+    derivation.excluded.length === 0
+      ? "全部声明参数均进搜索空间"
+      : `未进搜索空间的参数：${derivation.excluded
+          .map(item => `${item.name}（${item.reason}）`)
+          .join("；")}`;
+  const badPointNote =
+    run.region.badPointRatePct === null ? "不适用" : `${run.region.badPointRatePct}%`;
+  const note =
+    `${budgetNote}；稳定区 verdict=${run.region.verdict}、合格 ${run.region.qualifiedCount} 组、`
+    + `坏点率 ${badPointNote}、产出候选 ${run.candidates.length} 个`
+    + `（搜索键：${searchedKeys.join(" / ") || "无"}）；${excludedNote}`;
+
+  return {
+    kind: "optimizationRef",
+    handoffVersion: 1,
+    synthetic: false,
+    source: {
+      module: "parameterSearch",
+      moduleRunKind: "PARAMETER_SEARCH_RUN",
+      runId: run.searchRunId,
+      fingerprint: run.fingerprint,
+    },
+    method: run.method,
+    candidateParameterKeys,
+    evaluatedCandidateCount: run.sampleCount,
+    consistency: { status, note },
   };
 }
 
@@ -470,6 +575,62 @@ function buildExecutor(
           riskAdjusted,
           tradeQuality,
         }) as ClosedLoopHandoff;
+      }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
+    }
+    case "optimization": {
+      return ((ctx) => {
+        const dataset = requireArtifact(artifacts, "dataset", "optimization");
+        const document = requireArtifact(artifacts, "strategyDocument", "optimization");
+
+        // 1. 搜索空间**只由文档 `parameters` 派生**（未收录维度如实记入 excluded，禁静默丢弃）
+        const derivation = deriveParameterSpaceFromDocument(document);
+        if (derivation.space.parameters.length === 0) {
+          throw new ClosedLoopWiringError(
+            "CL_OPTIMIZATION_PARAMETER_SPACE_EMPTY",
+            // 🔴 码必须写进 message：编排器只把 `ClosedLoopError` 的 code 原样保留，
+            //    其余异常一律归并成 `CL_STAGE_EXECUTION_ERROR`（orchestrator.ts:523-526）
+            //    ⇒ 不带码的话，调用方跨编排器后就**无法**知道「这是参数空间的问题」，
+            //    而这正是需要调用方回去改文档参数的错误。
+            `[CL_OPTIMIZATION_PARAMETER_SPACE_EMPTY] 装配层：optimization 阶段无可搜索参数 —— `
+              + `文档 ${document.strategyId}@${document.version} `
+              + `声明了 ${derivation.declaredParameterNames.length} 个参数`
+              + `（${derivation.declaredParameterNames.join(" / ") || "无"}），`
+              + "但没有一个同时具备 min / max / step。逐条原因："
+              + (derivation.excluded
+                  .map(item => `${item.name} → ${item.reason}`)
+                  .join("；") || "（文档未声明任何参数）")
+              + "。",
+          );
+        }
+
+        // 2. 同步评估器：数据集与策略文档都已由上游阶段持有 ⇒ 直接复用（**不重新构建数据集**）
+        const evaluatorInput: StrategyParameterEvaluatorInput = {
+          dataset,
+          document,
+          dateRange: {
+            startDate: dataset.dataSnapshot.request.startDate,
+            endDate: dataset.dataSnapshot.request.endDate,
+          },
+          createdAt: ctx.createdAt,
+          codeVersion: CLOSED_LOOP_OPTIMIZATION_CODE_VERSION,
+          runIdPrefix: `OPT-${ctx.runId}`,
+        };
+
+        // 3. 真实调用搜索模块（搜索器本身是纯函数，回测由注入的 evaluator 完成）
+        const run = runParameterSearch({
+          method: "random",
+          strategyId: document.strategyId,
+          strategyVersion: document.version,
+          parameterSpace: derivation.space,
+          evaluator: createStrategyParameterEvaluator(evaluatorInput),
+          seed: CLOSED_LOOP_OPTIMIZATION_SEED,
+          budget: CLOSED_LOOP_OPTIMIZATION_BUDGET,
+          searchRunId: `OPT-${ctx.runId}`,
+          createdAt: ctx.createdAt,
+        });
+
+        // 4. 投影为 optimizationRef（consistency.note 如实交代搜索边界）
+        return projectOptimizationRef(run, derivation) as ClosedLoopHandoff;
       }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
     }
     case "regime": {

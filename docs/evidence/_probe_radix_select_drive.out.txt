@@ -1,0 +1,39 @@
+起始状态：dataset="首板回踩（first_limit_pullback）" version="v12026-08-01 ~ 2026-08-311,130 事件READY"
+（v2 必须可选：说明下拉本身没问题，问题只在「怎么点」）
+
+=== A. pointerdown+pointerup(mouse) ===
+  打开后 options=[{"text":"v12026-08-01 ~ 2026-08-311,130 事件READY","state":"checked","selected":"true"},{"text":"v22024-09-01 ~ 2026-09-0123,978 事件READY","state":"unchecked","selected":"false"}]
+  fired={}
+  选后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"
+  ✗ 未生效
+  （复位后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"）
+
+=== B. pointermove+down+up(mouse) ===
+  打开后 options=[{"text":"v12026-08-01 ~ 2026-08-311,130 事件READY","state":"checked","selected":"true"},{"text":"v22024-09-01 ~ 2026-09-0123,978 事件READY","state":"unchecked","selected":"false"}]
+  fired={}
+  选后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"
+  ✗ 未生效
+  （复位后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"）
+
+=== C. HTMLElement.click() ===
+  打开后 options=[{"text":"v12026-08-01 ~ 2026-08-311,130 事件READY","state":"checked","selected":"true"},{"text":"v22024-09-01 ~ 2026-09-0123,978 事件READY","state":"unchecked","selected":"false"}]
+  fired={}
+  选后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"
+  ✗ 未生效
+  （复位后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"）
+
+=== D. focus item + Enter keydown ===
+  打开后 options=[{"text":"v12026-08-01 ~ 2026-08-311,130 事件READY","state":"checked","selected":"true"},{"text":"v22024-09-01 ~ 2026-09-0123,978 事件READY","state":"unchecked","selected":"false"}]
+  fired={}
+  选后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"
+  ✗ 未生效
+  （复位后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"）
+
+=== E. focus item + pointerdown/up(pointerId=0) ===
+  打开后 options=[{"text":"v12026-08-01 ~ 2026-08-311,130 事件READY","state":"checked","selected":"true"},{"text":"v22024-09-01 ~ 2026-09-0123,978 事件READY","state":"unchecked","selected":"false"}]
+  fired={}
+  选后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"
+  ✗ 未生效
+  （复位后 version="v12026-08-01 ~ 2026-08-311,130 事件READY"）
+
+（只读诊断：没有点「开始研究」，不产生任何研究数据。）

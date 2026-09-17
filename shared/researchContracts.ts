@@ -608,6 +608,69 @@ export const researchRunReadinessSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// research · chain health（STEP 0-3 · RESEARCH-CHAIN-HEALTH-001）
+// ---------------------------------------------------------------------------
+
+/**
+ * 研究链七环计数（与 `server/researchChainHealth.ts` 1:1）。
+ *
+ * 契约单测（`tests/researchChainHealth.test.ts`）断言二者形状一致，
+ * **禁止漂移** —— 体检的全部价值在于「读数可信」。
+ */
+export const researchChainHealthCountsSchema = z.object({
+  questions: z.number().int().nonnegative(),
+  plans: z.number().int().nonnegative(),
+  hypotheses: z.number().int().nonnegative(),
+  runs: z.number().int().nonnegative(),
+  analyses: z.number().int().nonnegative(),
+  results: z.number().int().nonnegative(),
+  findings: z.number().int().nonnegative(),
+  conclusions: z.number().int().nonnegative(),
+  candidates: z.number().int().nonnegative(),
+});
+
+export const researchChainExperimentSummarySchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string(),
+  status: z.string(),
+  researchType: z.string(),
+  datasetVersionId: z.number().int(),
+  sampleCount: z.number().int().nullable(),
+  createdAt: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+});
+
+export const researchChainLatestRunSchema = z.object({
+  id: z.number().int().positive(),
+  runNo: z.number().int(),
+  status: z.string(),
+  createdAt: z.string().nullable(),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+});
+
+/**
+ * 研究链体检结果（**只读**；`gaps` 为空数组 = 七环齐全且已产出结果）。
+ *
+ * `experiment` 为 null 表示实验不存在 —— **不伪造空链**，调用方据此提示「实验不存在」。
+ */
+export const researchChainHealthSchema = z.object({
+  experimentId: z.number().int().positive(),
+  experiment: researchChainExperimentSummarySchema.nullable(),
+  counts: researchChainHealthCountsSchema,
+  /** Run 状态分布（如 `{ COMPLETED: 9, FAILED: 1 }`）。 */
+  runByStatus: z.record(z.string(), z.number()),
+  /** Analysis 状态分布。 */
+  analysisByStatus: z.record(z.string(), z.number()),
+  latestRun: researchChainLatestRunSchema.nullable(),
+  /** 断环清单（人读；只依赖「计数为 0」与「存在未终态」，不引入新阈值）。 */
+  gaps: z.array(z.string()),
+});
+
+// ---------------------------------------------------------------------------
 // research · metrics（FE-5 · C-16.1 / C-16.2 / C-16.3 绩效评估）
 // ---------------------------------------------------------------------------
 
@@ -849,7 +912,7 @@ export const closedLoopRunResultSchema = z.object({
        * 数据来源：`registry`（直读策略已绑定的 ds_* 数据集）| `rebuild`（按窗口从零重建）。
        * 界面据此如实展示「这次跑的到底是不是你绑定的那份数据」。
        */
-      datasetSource: z.enum(["registry", "rebuild"]),
+      datasetSource: z.enum(["registry", "rebuild", "injected"]),
       /** `rebuild` 且由「直读失败」引起时的原因（否则 null）。 */
       datasetSourceNote: z.string().nullable(),
       /** 直读命中时的已落库数据集坐标（`dataset_version.id`）；重建时为 null。 */
@@ -858,8 +921,16 @@ export const closedLoopRunResultSchema = z.object({
       strategyId: z.string(),
       strategyVersion: z.string(),
       recipeId: z.string(),
-      /** 配方来源：文档声明 | 调用方指定（含默认常量兜底）。 */
-      recipeSource: z.enum(["strategy-document", "explicit-request"]),
+      /**
+       * 配方来源（三条诚实路径）：`strategy-document`（文档带 recipe）|
+       * `strategy-declarative-conditions`（文档无 recipe，由声明式条件现场合成）|
+       * `explicit-request`（调用方指定 / 默认常量）。
+       */
+      recipeSource: z.enum([
+        "strategy-document",
+        "strategy-declarative-conditions",
+        "explicit-request",
+      ]),
       recipeFeatureIds: z.array(z.string()),
       selectionSummary: z.string(),
       simulation: z.object({

@@ -1,0 +1,344 @@
+{
+  "generatedAt": "2026-09-17T12:32:46.945Z",
+  "scannedDocumentCount": 10,
+  "numberParameterVerdicts": [
+    "可搜索",
+    "缺 step(>0)",
+    "缺 min/max/step(>0)"
+  ],
+  "documentsWithUsableSpace": [
+    "cand-360001",
+    "cand-360002",
+    "cand-360004",
+    "cand-360005",
+    "cand-360006",
+    "cand-360007",
+    "cand-360008"
+  ],
+  "documents": [
+    {
+      "id": 390001,
+      "strategyId": "cand-270001",
+      "version": "1.0.0",
+      "status": "Validated",
+      "parameterCount": 0,
+      "usableForSearchCount": 0,
+      "parameters": []
+    },
+    {
+      "id": 420001,
+      "strategyId": "cand-360001",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 3,
+      "usableForSearchCount": 3,
+      "parameters": [
+        {
+          "name": "max_drawdown",
+          "type": "number",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01,
+          "defaultValue": 0.02,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "max_volume_ratio",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "defaultValue": 0.3,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "require_bullish",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "defaultValue": 0,
+          "verdict": "可搜索"
+        }
+      ]
+    },
+    {
+      "id": 420002,
+      "strategyId": "cand-360002",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 3,
+      "usableForSearchCount": 3,
+      "parameters": [
+        {
+          "name": "max_drawdown",
+          "type": "number",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01,
+          "defaultValue": 0.02,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "max_volume_ratio",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "defaultValue": 0.5,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "require_bullish",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "defaultValue": 1,
+          "verdict": "可搜索"
+        }
+      ]
+    },
+    {
+      "id": 420003,
+      "strategyId": "cand-360004",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 3,
+      "usableForSearchCount": 3,
+      "parameters": [
+        {
+          "name": "max_drawdown",
+          "type": "number",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01,
+          "defaultValue": 0.02,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "max_volume_ratio",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "defaultValue": 0.3,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "require_bullish",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "defaultValue": 0,
+          "verdict": "可搜索"
+        }
+      ]
+    },
+    {
+      "id": 420004,
+      "strategyId": "cand-360005",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 3,
+      "usableForSearchCount": 3,
+      "parameters": [
+        {
+          "name": "max_drawdown",
+          "type": "number",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01,
+          "defaultValue": 0.02,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "max_volume_ratio",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "defaultValue": 0.3,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "require_bullish",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "defaultValue": 0,
+          "verdict": "可搜索"
+        }
+      ]
+    },
+    {
+      "id": 420005,
+      "strategyId": "cand-360006",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 3,
+      "usableForSearchCount": 3,
+      "parameters": [
+        {
+          "name": "max_drawdown",
+          "type": "number",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01,
+          "defaultValue": 0.02,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "max_volume_ratio",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "defaultValue": 0.3,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "require_bullish",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "defaultValue": 0,
+          "verdict": "可搜索"
+        }
+      ]
+    },
+    {
+      "id": 420006,
+      "strategyId": "cand-360007",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 3,
+      "usableForSearchCount": 3,
+      "parameters": [
+        {
+          "name": "max_drawdown",
+          "type": "number",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01,
+          "defaultValue": 0.05,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "max_volume_ratio",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "defaultValue": 0.3,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "require_bullish",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "defaultValue": 0,
+          "verdict": "可搜索"
+        }
+      ]
+    },
+    {
+      "id": 420007,
+      "strategyId": "cand-360008",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 3,
+      "usableForSearchCount": 3,
+      "parameters": [
+        {
+          "name": "max_drawdown",
+          "type": "number",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01,
+          "defaultValue": 0.1,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "max_volume_ratio",
+          "type": "number",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05,
+          "defaultValue": 0.3,
+          "verdict": "可搜索"
+        },
+        {
+          "name": "require_bullish",
+          "type": "number",
+          "min": 0,
+          "max": 1,
+          "step": 1,
+          "defaultValue": 0,
+          "verdict": "可搜索"
+        }
+      ]
+    },
+    {
+      "id": 360001,
+      "strategyId": "limit-up-baseline",
+      "version": "1.0.0",
+      "status": "Draft",
+      "parameterCount": 2,
+      "usableForSearchCount": 0,
+      "parameters": [
+        {
+          "name": "topN",
+          "type": "number",
+          "min": 1,
+          "max": 20,
+          "step": null,
+          "defaultValue": 5,
+          "verdict": "缺 step(>0)"
+        },
+        {
+          "name": "minScore",
+          "type": "number",
+          "min": null,
+          "max": null,
+          "step": null,
+          "defaultValue": null,
+          "verdict": "缺 min/max/step(>0)"
+        }
+      ]
+    },
+    {
+      "id": 360002,
+      "strategyId": "limit-up-baseline",
+      "version": "1.1.0",
+      "status": "Draft",
+      "parameterCount": 2,
+      "usableForSearchCount": 0,
+      "parameters": [
+        {
+          "name": "topN",
+          "type": "number",
+          "min": 1,
+          "max": 20,
+          "step": null,
+          "defaultValue": 5,
+          "verdict": "缺 step(>0)"
+        },
+        {
+          "name": "minScore",
+          "type": "number",
+          "min": null,
+          "max": null,
+          "step": null,
+          "defaultValue": null,
+          "verdict": "缺 min/max/step(>0)"
+        }
+      ]
+    }
+  ]
+}

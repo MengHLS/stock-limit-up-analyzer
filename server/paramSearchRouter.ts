@@ -29,6 +29,12 @@ import { publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getLeaderCandidateBacktest } from "./db";
+import { DbStrategyRepository } from "./research/strategyPersistence/db";
+import {
+  createStrategyBacktestBridge,
+  deriveParameterSpaceFromDocument,
+  type StrategyBacktestBridge,
+} from "./research/strategyEvaluation";
 import type { LeaderCandidateBacktestOptions } from "./leaderCandidates";
 import type { RealisticBacktestOptions, RealisticBacktestResult } from "./realisticBacktest";
 import { ResearchValidationError } from "./research/experimentValidation";
@@ -90,6 +96,15 @@ import {
 
 /** 技术预览参数空间组合数上限：超过即拒绝，避免预计算过多回测拖慢响应。 */
 const PREVIEW_MAX_COMBINATIONS = 64;
+/**
+ * 策略评估路径的组合数上限。
+ *
+ * 🔴 为什么比预览的 64 更严：策略评估每组参数都是**一次完整闭环回测**
+ * （`data → research → strategy → backtest → evaluation`，实测数秒级），
+ * 64 组就是分钟级同步阻塞。要搜更大空间请用 `method = "random"` + `budget`
+ * （另跑离线全网格不在本端点职责内）。
+ */
+const STRATEGY_EVALUATION_MAX_COMBINATIONS = 16;
 
 /**
  * 技术预览回测区间（最近约 2 年）：收敛价格行到可交互量级（对齐 STEP 7.3 内存安全铁律——
@@ -239,10 +254,17 @@ function toSearchOutcome(sim: RealisticBacktestResult): ParameterSearchSampleOut
 async function precomputeParameterSetOutcomes(
   parameterSets: readonly ResearchParameterSet[],
   range: { startDate: string; endDate: string } = previewRange(),
+  bridge?: StrategyBacktestBridge,
 ): Promise<Map<string, ParameterSearchSampleOutcome>> {
   const map = new Map<string, ParameterSearchSampleOutcome>();
   for (const set of parameterSets) {
     const key = parameterSetKey(set);
+    if (bridge !== undefined) {
+      // 策略评估路径：真实闭环（桥内部按区间复用数据集；禁第二套子链）
+      const sample = await bridge.evaluate(set, range);
+      map.set(key, sample.outcome);
+      continue;
+    }
     try {
       const result = await getLeaderCandidateBacktest({
         ...parameterSetToBacktestOptions(set),
@@ -254,6 +276,101 @@ async function precomputeParameterSetOutcomes(
     }
   }
   return map;
+}
+
+/** 策略评估路径的解析结果（bridge 缺省即回落 legacy，`note` 必须如实说明原因）。 */
+interface ResolvedStrategyEvaluation {
+  readonly source: "strategy-document" | "legacy-leader-candidate-backtest";
+  readonly note: string;
+  readonly bridge?: StrategyBacktestBridge;
+  /** 仅策略路径给出：从文档派生的参数空间（legacy 路径为 undefined）。 */
+  readonly derivedSpace?: ParameterSpace;
+}
+
+/**
+ * 判断本次能否走**策略评估**（真实闭环），能则建桥。
+ *
+ * 🔴 四个条件缺一不可（缺哪个都在 note 里写明，**不静默回落**）：
+ *   1. 入参给了 `strategyId` + `strategyVersion`；
+ *   2. 库中确实能读到该版本的策略文档；
+ *   3. 入参给了 `startDate` + `endDate` —— 策略评估必须落在**数据集窗口内**
+ *      （预览缺省是「最近约 2 年」，直接拿去撞数据集窗口会 FAIL FAST `SIM_RANGE_OUT_OF_DATASET`）；
+ *   4. 文档 `parameters` 能派生出**非空**搜索空间（全是 legacy 维度的话，
+ *      覆写会因 `RECIPE_PARAMETER_UNKNOWN` 被拒 —— 那是「参数不在文档里」的正确拒绝）。
+ */
+async function resolveStrategyEvaluation(input: {
+  readonly strategyId?: string;
+  readonly strategyVersion?: string;
+  readonly startDate?: string;
+  readonly endDate?: string;
+  readonly createdAt: string;
+  readonly codeVersion: string;
+}): Promise<ResolvedStrategyEvaluation> {
+  const legacy: ResolvedStrategyEvaluation = {
+    source: "legacy-leader-candidate-backtest",
+    note:
+      "legacy 生产回测（realisticSimulation 查表）；非 RESEARCH_READY 口径。",
+  };
+  if (input.strategyId === undefined || input.strategyVersion === undefined) {
+    return { ...legacy, note: `${legacy.note}未走策略评估：入参缺 strategyId / strategyVersion。` };
+  }
+  if (input.startDate === undefined || input.endDate === undefined) {
+    return {
+      ...legacy,
+      note:
+        `${legacy.note}未走策略评估：入参缺 startDate / endDate —— `
+          + "策略评估必须显式给决策窗口（预览缺省区间是最近约 2 年，会越出数据集窗口被判 SIM_RANGE_OUT_OF_DATASET）。",
+    };
+  }
+
+  let document;
+  try {
+    const record = await new DbStrategyRepository().getVersion(input.strategyId, input.strategyVersion);
+    document = record?.strategy;
+  } catch (error) {
+    return {
+      ...legacy,
+      note: `${legacy.note}未走策略评估：读取策略版本失败（${errorMessage(error)}）。`,
+    };
+  }
+  if (document === undefined) {
+    return {
+      ...legacy,
+      note: `${legacy.note}未走策略评估：库中不存在 ${input.strategyId}@${input.strategyVersion} 的策略文档。`,
+    };
+  }
+
+  const derivation = deriveParameterSpaceFromDocument(document);
+  if (derivation.space.parameters.length === 0) {
+    return {
+      ...legacy,
+      note:
+        `${legacy.note}未走策略评估：文档 ${input.strategyId}@${input.strategyVersion} 的参数`
+          + `（${derivation.declaredParameterNames.join(" / ") || "无"}）无一可派生搜索空间`
+          + `（需同时具备 min / max / step）。`,
+    };
+  }
+
+  const primary = document.definition?.datasets?.find(d => d.role === "PRIMARY") ?? document.definition?.datasets?.[0];
+  const datasetVersionId = primary?.datasetVersionId ?? document.datasetVersionId ?? undefined;
+  const bridge = createStrategyBacktestBridge({
+    document,
+    codeVersion: input.codeVersion,
+    defaultRange: { startDate: input.startDate, endDate: input.endDate },
+    createdAt: input.createdAt,
+    ...(datasetVersionId !== undefined && datasetVersionId !== null ? { datasetVersionId } : {}),
+  });
+  return {
+    source: "strategy-document",
+    note:
+      `策略评估端口（真实闭环 data→research→strategy→backtest→evaluation）—— 参数空间由文档派生`
+        + `（${derivation.space.parameters.map(p => p.name).join(" / ")}）`
+        + (derivation.excluded.length === 0
+            ? "；全部声明参数均进搜索空间。"
+            : `；未进搜索空间：${derivation.excluded.map(item => item.name + "（" + item.reason + "）").join("；")}。`),
+    bridge,
+    derivedSpace: derivation.space,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -420,11 +537,21 @@ const thresholdsSchema = z
   })
   .optional();
 
+const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
 const runInputSchema = z.object({
   method: z.enum(["grid", "random"]),
   strategyId: z.string().min(1).optional(),
   strategyVersion: z.string().min(1).optional(),
   parameterSpace: parameterSpaceSchema,
+  /**
+   * 决策窗口（**策略评估路径必需**）。
+   *
+   * 给了 `strategyId` + `strategyVersion` + 本组两个日期，且库中确有该版本时，
+   * 评估改走**策略评估端口**（真实闭环），参数空间亦改为**从文档派生**（入参 parameterSpace 仅 legacy 路径使用）。
+   */
+  startDate: dateStringSchema.optional(),
+  endDate: dateStringSchema.optional(),
   seed: z.number().int().optional(),
   budget: z.number().int().min(1).optional(),
   maxCombinations: z.number().int().min(1).optional(),
@@ -502,6 +629,18 @@ export const paramSearchRouter = router({
         minIterationsForVerdict: STOCHASTIC_DEFAULT_MIN_ITERATIONS_FOR_VERDICT,
       },
     },
+    /** 策略评估路径说明（入参齐备时评估标量改由**真实闭环**产出，参数空间从文档派生）。 */
+    strategyEvaluation: {
+      requiredInputs: [
+        "strategyId",
+        "strategyVersion",
+        "startDate",
+        "endDate",
+      ] as const,
+      note:
+        "四者齐备且库中存在该版本时：评估标量来自策略评估端口（真实闭环 data→research→strategy→backtest→evaluation），"
+          + "参数空间从文档 parameters 派生；否则回落 legacy 生产回测，返回里的 evaluationSource 会如实标注。",
+    },
     preview: {
       maxCombinations: PREVIEW_MAX_COMBINATIONS,
       range: previewRange(),
@@ -513,16 +652,44 @@ export const paramSearchRouter = router({
   /** C-17.1 Grid / Random 参数搜索：预计算回测 → 查表求值器 → runParameterSearch。 */
   run: publicProcedure.input(runInputSchema).mutation(async ({ input }) => {
     const space = input.parameterSpace;
-    const total = calculateCombinationCount(space);
-    if (total > PREVIEW_MAX_COMBINATIONS) {
+    const createdAt = new Date().toISOString();
+    const evaluation = await resolveStrategyEvaluation({
+      strategyId: input.strategyId,
+      strategyVersion: input.strategyVersion,
+      startDate: input.startDate,
+      endDate: input.endDate,
+      createdAt,
+      codeVersion: "unknown",
+    });
+    // 🔴 策略评估路径下参数空间**以文档为准**（入参那个是 legacy 8 维度，对策略文档不存在）。
+    const effectiveSpace = evaluation.derivedSpace ?? space;
+    // 🔴 上限按路径分档：策略评估每组都是一次完整闭环回测（数秒级），
+    //    沿用预览的 64 组会变成分钟级同步阻塞；legacy 路径保持原上限不变。
+    const strategyPath = evaluation.bridge !== undefined;
+    const combinationLimit = strategyPath ? STRATEGY_EVALUATION_MAX_COMBINATIONS : PREVIEW_MAX_COMBINATIONS;
+    const total = calculateCombinationCount(effectiveSpace);
+    // 🔴 判据是**实际计划评估数**而非全组合数：random 只采样 min(budget, 全组合) 组，
+    //    按全组合判会把「1240 组空间 × budget=12」这种完全正当的请求误拦。
+    const plannedEvaluations =
+      input.method === "grid" ? total : Math.min(input.budget ?? DEFAULT_RANDOM_SEARCH_BUDGET, total);
+    if (plannedEvaluations > combinationLimit) {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: `参数空间组合数 ${total} 超过技术预览上限 ${PREVIEW_MAX_COMBINATIONS}，请缩小参数空间（维度 × 档数）。`,
+        message:
+          `本次计划评估 ${plannedEvaluations} 组（参数空间全组合 ${total}）`
+            + `超过${strategyPath ? "策略评估" : "技术预览"}上限 ${combinationLimit}`
+            + "，请缩小参数空间（维度 × 档数）"
+            + (strategyPath
+                ? "；或改用 method=random 并调小 budget —— 策略评估每组都是一次完整闭环回测（数秒级）。"
+                : "。"),
       });
     }
-    // 全组合枚举（total <= 上限，无截断）；random 采样落在同一离散格点上，查表覆盖。
-    const parameterSets = gridParameterSets(space);
-    const outcomes = await precomputeParameterSetOutcomes(parameterSets);
+    const range =
+      input.startDate !== undefined && input.endDate !== undefined
+        ? { startDate: input.startDate, endDate: input.endDate }
+        : previewRange();
+    const parameterSets = gridParameterSets(effectiveSpace);
+    const outcomes = await precomputeParameterSetOutcomes(parameterSets, range, evaluation.bridge);
 
     const evaluator: ParameterSearchEvaluator = (set) =>
       outcomes.get(parameterSetKey(set)) ?? {
@@ -531,17 +698,24 @@ export const paramSearchRouter = router({
       };
 
     try {
-      return runParameterSearch({
+      const run = runParameterSearch({
         method: input.method,
         strategyId: input.strategyId ?? DEFAULT_STRATEGY_ID,
         strategyVersion: input.strategyVersion ?? DEFAULT_STRATEGY_VERSION,
-        parameterSpace: space,
+        parameterSpace: effectiveSpace,
         evaluator,
         seed: input.seed,
         budget: input.budget,
         maxCombinations: input.maxCombinations,
         analysis: input.analysis,
       });
+      // 🔴 如实标注口径来源（禁静默）：调用方据此分辨「数字是不是真实策略闭环来的」
+      return {
+        ...run,
+        evaluationSource: evaluation.source,
+        evaluationNote: evaluation.note,
+        effectiveParameterSpace: effectiveSpace,
+      };
     } catch (error) {
       throw toTrpcError(error);
     }

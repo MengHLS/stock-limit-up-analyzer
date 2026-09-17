@@ -18,22 +18,44 @@
  *     与 `docs/evidence/_probe_dataset_*` 系列取证所用口径一致。
  */
 
-import type { CanonicalMarketBar, DecisionPoint } from "../data";
+import type { DecisionPoint } from "../data";
 import type { ResearchParameterSchema, ResearchParameterSet } from "./types";
-import type { FeatureProvider, RankingConfig, SelectionConfig } from "./framework/contract";
-import type { SignalFrequency } from "./framework/contract";
-import { makeBarFeatureProvider } from "./framework/featureProvider";
+import type {
+  FeatureProvider,
+  RankingConfig,
+  SelectionConfig,
+  SignalFrequency,
+} from "./framework/contract";
 import { makeWeightedSignalBuilder, type SignalBuilder } from "./framework/signal";
 import { makeGatedSignalBuilder, type FeatureGate } from "./framework/gatedSignal";
-import {
-  computeCloseReturnFromEventClose,
-  computeHaircutFromEventLow,
-  computeIsBullish,
-  computeVolumeRatio,
-  eventBaselineOf,
-} from "./recipeFeatures/pullbackFeatures";
 import type { StrategyRecipe } from "./strategySchema/types";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
+import { PULLBACK_PARAMETER_IDS, requireNumericParameter } from "./recipeRegistryAtoms";
+import { buildPatternRecipeDefinitions } from "./patternLibrary/projectRecipe";
+
+// ---------------------------------------------------------------------------
+// 导出面（保持不变）
+// ---------------------------------------------------------------------------
+
+/**
+ * 🔴 下列运行时原子已下移到 `recipeRegistryAtoms.ts`（2026-09-17）。
+ *
+ * 为什么搬：`patternLibrary/project.ts` 投影执行配方时要用同一批原子，若它们留在本文件
+ * 就会形成 `recipeRegistry → patternLibrary → recipeRegistry` 的**真循环**（运行时依赖）。
+ * 下移后依赖单向：两边都 → `recipeRegistryAtoms.ts`。
+ *
+ * 这里**逐名 re-export**，因此本模块的对外导出面与迁移前**完全一致** ——
+ * `conditionSignal/compile.ts` 等既有消费方不需要任何改动。
+ */
+export {
+  PCT_CHANGE_FEATURE_ID,
+  PCT_CHANGE_FEATURE_VERSION,
+  PULLBACK_FEATURE_IDS,
+  PULLBACK_PARAMETER_IDS,
+  buildPctChangeFeatureProvider,
+  buildPullbackFeatureProviders,
+  requireNumericParameter,
+} from "./recipeRegistryAtoms";
 
 // ---------------------------------------------------------------------------
 // 运行时配方
@@ -68,12 +90,17 @@ export interface StrategyRecipeRuntime {
   /**
    * 由参数 schema 解析出**本次运行使用的参数集**。
    *
-   * 规则：取 schema 中每个参数的 `defaultValue`；缺省值缺失 → 响亮抛错。
-   * 为什么不是「让用户填」：本增量只打通链路，参数覆写属后续增量；此处保证
-   * 「策略文档声明什么默认值，就以什么跑」，并且这一事实进入 `ExperimentConfig.parameters`
-   * 与结果记录，可复现。
+   * 规则：
+   *   1. 逐参数取值：`overrides` 里有就用覆写值，否则用 schema 的 `defaultValue`；
+   *      两者都没有 ⇒ **响亮抛错**（绝不编值 —— 那会在结果里留下不可复现的参数）。
+   *   2. 🔴 `overrides` 里出现 schema **未声明**的参数 ⇒ **响亮抛错**
+   *      （`RECIPE_PARAMETER_UNKNOWN`）。这是「未收录维度被静默忽略」这条缺陷的对症修法：
+   *      宁可拒绝，也不让调用方以为某个维度参与了寻优、实际却被丢掉。
+   *
+   * 无覆写时行为与既往**完全一致**（全取 `defaultValue`）；解析结果进
+   * `ExperimentConfig.parameters` 与结果记录 ⇒ 可复现。
    */
-  resolveParameters(schema: ResearchParameterSchema): ResearchParameterSet;
+  resolveParameters(schema: ResearchParameterSchema, overrides?: ResearchParameterSet): ResearchParameterSet;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +117,7 @@ export interface StrategyRecipeRuntime {
  * 🔴 为什么必须分开而不是都退回加权：加权和里「守线失败」只是让分数变小，**不会剔除**该证券
  * ⇒ 会放行「守线失败但其他特征极高」的样本 —— 这是口径错误，不是实现细节。
  */
-type StrategyRecipeDefinition = StrategyRecipeDefinitionCommon &
+export type StrategyRecipeDefinition = StrategyRecipeDefinitionCommon &
   (
     | {
         readonly signalKind: "weighted";
@@ -118,160 +145,6 @@ interface StrategyRecipeDefinitionCommon {
   readonly selectionConfig: SelectionConfig;
 }
 
-/** 当日涨跌幅特征 id / 版本（决定「按什么排序」；语义见下方 compute）。 */
-export const PCT_CHANGE_FEATURE_ID = "pctChange";
-export const PCT_CHANGE_FEATURE_VERSION = "1.0.0";
-
-/**
- * 特征「当日涨跌幅」：`close / preClose − 1`。
- *
- * 口径来源：`scripts/runResearchDatasetE2E.mts` 的既有真实 E2E 特征（同一实现，不另立口径）。
- * 取窗口内**最后一根** bar（bars 已按 as-of 过滤），缺失任一价格或 preClose 为 0 → null。
- */
-function computePctChange(bars: readonly CanonicalMarketBar[]): number | null {
-  const last = bars[bars.length - 1];
-  if (last === undefined || last.close === null || last.preClose === null || last.preClose === 0) {
-    return null;
-  }
-  return last.close / last.preClose - 1;
-}
-
-/** 「当日涨跌幅」可用性（同点可见：决策所需数据与可用时点都是决策日同一时点）。 */
-function samePointAvailability(point: DecisionPoint) {
-  // availability 是绝对时点，而决策日逐日变化 —— 框架要求「必须覆盖整个决策窗口」。
-  // 用「最早可能决策时点」表达会过窄，因此按框架语义用「不晚于最早决策时点」的写法：
-  // 见 `framework/leakage.ts` 的 FeatureAvailability 契约（requiredDataThrough 表示
-  // 该特征需要的最新数据时点，availableAt 表示该值何时可知）。
-  // 逐日 PIT 数据集保证每一行的 asOf === tradeDate，因此「同点可见」是恒成立的。
-  return {
-    requiredDataThrough: { date: EPOCH_FLOOR_DATE, point },
-    availableAt: { date: EPOCH_FLOOR_DATE, point },
-  };
-}
-
-/**
- * 可用性声明的日期下界。
- *
- * 为什么是一个很早的固定日而不是动态日期：`FeatureAvailability` 是**静态绝对时点**，
- * 引擎在运行前用它做「是否覆盖整个决策窗口」的泄漏预检（见 `signalEngine/engine.ts`
- * 的 `assertValidStrategy13` 与 framework `LeakageGuard`）。这里声明「该特征不需要任何
- * 未来数据、且在决策日同点即可知」——即要求的数据不晚于任何决策日。
- * 用固定下界表达「不约束到具体某天」，与 `scripts/runResearchDatasetE2E.mts` 用首日表达的
- * 语义一致（都要求「不晚于最早决策时点」），但对任意窗口都成立。
- */
-const EPOCH_FLOOR_DATE = "1990-01-01";
-
-// ---------------------------------------------------------------------------
-// 「首板回踩 · 守线 + 缩量」配方 — 特征 id / 版本 与 计算包装
-// ---------------------------------------------------------------------------
-
-/**
- * 首板回踩配方的特征 id（口径逐字对齐 `researchEngine/variables.ts` 的同名观察日变量，
- * 见 `recipeFeatures/pullbackFeatures.ts` 的对齐表）。
- */
-export const PULLBACK_FEATURE_IDS = {
-  /** 回撤深度：`(首板日开盘价 − 决策日最低价) / 首板日开盘价`。≤ 阈值即「守线」。 */
-  haircut: "haircutFromEventLow",
-  /** 量能比：`决策日成交量 / 首板日成交量`。< 1 为缩量。 */
-  volumeRatio: "volumeRatio",
-  /** 当日阳线（「红盘」）：决策日收盘 > 决策日开盘 取 1，否则 0。 */
-  isBullish: "isBullish",
-  /** 收盘相对首板日收盘涨幅（供排序）。 */
-  momentum: "momentumFromEventClose",
-} as const;
-
-const PULLBACK_FEATURE_VERSION = "1.0.0";
-
-/**
- * 构造首板回踩配方的四个特征提供器。
- *
- * 🔴 所有特征共用同一基准（`bars[0]` = 首板日）。基准缺失时**全部返回 null**
- * ⇒ 该证券不进候选（不臆造基准、不填默认值）。
- */
-function buildPullbackFeatures(point: DecisionPoint): readonly FeatureProvider[] {
-  const availability = samePointAvailability(point);
-  const withBaseline = (
-    featureId: string,
-    compute: (
-      bars: readonly CanonicalMarketBar[],
-      baseline: NonNullable<ReturnType<typeof eventBaselineOf>>,
-    ) => number | null,
-  ) =>
-    makeBarFeatureProvider({
-      featureId,
-      version: PULLBACK_FEATURE_VERSION,
-      availability,
-      compute: (bars) => {
-        const baseline = eventBaselineOf(bars);
-        if (baseline === null) return null;
-        return compute(bars, baseline);
-      },
-    });
-
-  return [
-    withBaseline(PULLBACK_FEATURE_IDS.haircut, computeHaircutFromEventLow),
-    withBaseline(PULLBACK_FEATURE_IDS.volumeRatio, computeVolumeRatio),
-    // 「红盘」只读决策日当根 bar，不需要首板日基准。
-    makeBarFeatureProvider({
-      featureId: PULLBACK_FEATURE_IDS.isBullish,
-      version: PULLBACK_FEATURE_VERSION,
-      availability,
-      compute: computeIsBullish,
-    }),
-    withBaseline(PULLBACK_FEATURE_IDS.momentum, computeCloseReturnFromEventClose),
-  ];
-}
-
-/**
- * 首板回踩配方参数 id（进 `StrategyDocument.parameters`，供 Parameter Search 搜索）。
- *
- * 🔴 用户裁定「四组一起做成参数化配方」⇒ 买入时点与回撤深度都是**参数**，
- * 不同取值即不同策略变体，无需各建一个 recipeId。
- */
-export const PULLBACK_PARAMETER_IDS = {
-  /** 缩量阈值：量能比 ≤ 该值才算「缩量」。0.3 = ≤30%，0.5 = ≤50%。 */
-  maxVolumeRatio: "max_volume_ratio",
-  /** 回撤深度阈值：回撤比例 ≤ 该值才算「守线」。0.02 = 允许跌破首板日开盘价 2% 以内。 */
-  maxDrawdown: "max_drawdown",
-  /** 是否要求当日阳线（「红盘」）。1 = 要求，0 = 不要求。 */
-  requireBullish: "require_bullish",
-} as const;
-
-/** 由参数集数值读取助手（缺失/非有限 → 响亮抛错，**不静默取默认**）。 */
-function requireNumericParameter(parameters: ResearchParameterSet, name: string): number {
-  const value = parameters[name];
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new StrategyRecipeRuntimeError(
-      "RECIPE_PARAMETER_INVALID",
-      `配方参数 \`${name}\` 必须是有限数字，实际 ${JSON.stringify(value)}（拒绝静默取默认值）。`,
-    );
-  }
-  return value;
-}
-
-/**
- * 由运行期参数集构造「守线 + 缩量（+ 红盘）」的门槛列表。
- *
- * 语义（**AND**，顺序即短路顺序，属语义一部分）：
- *   ① `haircutFromEventLow <= maxDrawdown` —— 守线（回撤未超阈值）；
- *   ② `volumeRatio <= maxVolumeRatio` —— 缩量；
- *   ③ `isBullish >= 1` —— 红盘（仅当 `require_bullish = 1`）。
- */
-function buildPullbackGates(parameters: ResearchParameterSet): readonly FeatureGate[] {
-  const maxVolumeRatio = requireNumericParameter(parameters, PULLBACK_PARAMETER_IDS.maxVolumeRatio);
-  const maxDrawdown = requireNumericParameter(parameters, PULLBACK_PARAMETER_IDS.maxDrawdown);
-  const requireBullish = requireNumericParameter(parameters, PULLBACK_PARAMETER_IDS.requireBullish);
-
-  const gates: FeatureGate[] = [
-    { kind: "lte", featureId: PULLBACK_FEATURE_IDS.haircut, bound: maxDrawdown, label: "守线" },
-    { kind: "lte", featureId: PULLBACK_FEATURE_IDS.volumeRatio, bound: maxVolumeRatio, label: "缩量" },
-  ];
-  if (requireBullish >= 1) {
-    gates.push({ kind: "gte", featureId: PULLBACK_FEATURE_IDS.isBullish, bound: 1, label: "红盘" });
-  }
-  return gates;
-}
-
 /**
  * 注册表：`recipeId → 可执行配方`。
  *
@@ -280,135 +153,143 @@ function buildPullbackGates(parameters: ResearchParameterSet): readonly FeatureG
  * `first-limit-pullback-hold-shrink` 是 2026-09-13 新增：承载「守线 + 缩量（+ 红盘）」
  * 的真实可执行条件（此前该条件**无任何配方可执行**，见 `docs/evidence/_probe_promoted_entry_conditions.mts`）。
  */
-const STRATEGY_RECIPE_DEFINITIONS: readonly StrategyRecipeDefinition[] = [
-  {
-    recipeId: "leader-candidate-baseline",
-    point: "close",
-    signalFrequency: "daily",
-    signalDescription: "按当日涨跌幅择优（long-only 候选研究，close 决策）",
-    requiredData: ["OHLCV"],
-    selectionSummary: "按当日涨跌幅由高到低取前 5 名",
-    randomSeed: 7,
-    signalKind: "weighted",
-    features: [
-      makeBarFeatureProvider({
-        featureId: PCT_CHANGE_FEATURE_ID,
-        version: PCT_CHANGE_FEATURE_VERSION,
-        availability: samePointAvailability("close"),
-        compute: computePctChange,
-      }),
-    ],
-    defaultWeights: { [PCT_CHANGE_FEATURE_ID]: 1 },
-    rankingConfig: { higherIsBetter: true },
-    selectionConfig: { method: { kind: "topN", n: 5 } },
-  },
-  {
-    recipeId: "first-limit-pullback-hold-shrink",
-    point: "close",
-    signalFrequency: "daily",
-    signalDescription:
-      "首板回踩守线 + 缩量（+ 红盘）：观察日未跌破首板日开盘价超过阈值、且量能相对首板日收缩到阈值以内",
-    requiredData: ["OHLCV"],
-    selectionSummary: "在满足「守线 + 缩量（+ 红盘）」的候选中，按相对首板日收盘的涨幅由高到低取前 N 名",
-    randomSeed: 11,
-    signalKind: "gated",
-    features: buildPullbackFeatures("close"),
-    buildGates: buildPullbackGates,
-    rankFeatureId: PULLBACK_FEATURE_IDS.momentum,
-    rankingConfig: { higherIsBetter: true },
-    selectionConfig: { method: { kind: "topN", n: 5 } },
-  },
-];
+/**
+ * 配方定义清单（**惰性**，理由同 `moduleRegistry.defaultResearchModuleRegistry`：
+ * 顶层表达式会撞上互相 import 的求值顺序问题）。
+ */
+let definitionsCache: readonly StrategyRecipeDefinition[] | null = null;
+function strategyRecipeDefinitions(): readonly StrategyRecipeDefinition[] {
+  if (definitionsCache === null) definitionsCache = buildPatternRecipeDefinitions();
+  return definitionsCache;
+}
 
 // ---------------------------------------------------------------------------
 // 注册与解析
 // ---------------------------------------------------------------------------
 
-const REGISTERED_RECIPES: ReadonlyMap<string, StrategyRecipeRuntime> = new Map(
-  STRATEGY_RECIPE_DEFINITIONS.map(definition => {
-    // 注册期强制「声明的特征都真实产出」——防「文档声明了却没人算」的静默降级。
-    const produced = new Set(definition.features.map(feature => feature.featureId));
-    /**
-     * 注册期强制「声明的特征都真实产出」（防「文档声明了却没人算」的静默降级）。
-     *
-     * 两种信号风格各自要校验的引用面：
-     *   - `weighted`：每个权重键必须是某 FeatureProvider 的 featureId；
-     *   - `gated`：门槛引用 + 排序特征都必须是已产出特征。
-     * 注意 `gated` 的门槛由**运行期参数**构造，因此这里用「无参时空门槛探测 + 参数面清单」
-     * 的方式无法穷尽 —— 改为**对全部已产出特征做一次构造校验**（见下方 `assertGatedReferences`）。
-     */
-    if (definition.signalKind === "weighted") {
-      for (const featureId of Object.keys(definition.defaultWeights)) {
-        if (!produced.has(featureId)) {
-          throw new StrategyRecipeRuntimeError(
-            "RECIPE_FEATURE_NOT_PRODUCED",
-            `配方 ${definition.recipeId}：信号权重引用了未被任何 FeatureProvider 产出的特征 \`${featureId}\`（注册即拒绝）。`,
-          );
-        }
-      }
-    } else {
-      if (!produced.has(definition.rankFeatureId)) {
+
+/**
+ * 由配方定义构造可执行运行时。
+ *
+ * 🔴 注册表与「声明式条件合成」（`conditionSignal/compile.ts`，STEP A-1）**共用本函数** ——
+ * 运行时构造与注册期校验只有这一份实现（禁第二套）。
+ */
+function makeStrategyRecipeRuntime(definition: StrategyRecipeDefinition): StrategyRecipeRuntime {
+  // 注册期强制「声明的特征都真实产出」——防「文档声明了却没人算」的静默降级。
+  const produced = new Set(definition.features.map(feature => feature.featureId));
+  /**
+   * 注册期强制「声明的特征都真实产出」（防「文档声明了却没人算」的静默降级）。
+   *
+   * 两种信号风格各自要校验的引用面：
+   *   - `weighted`：每个权重键必须是某 FeatureProvider 的 featureId；
+   *   - `gated`：门槛引用 + 排序特征都必须是已产出特征。
+   * 注意 `gated` 的门槛由**运行期参数**构造，因此这里用「无参时空门槛探测 + 参数面清单」
+   * 的方式无法穷尽 —— 改为**对全部已产出特征做一次构造校验**（见下方 `assertGatedReferences`）。
+   */
+  if (definition.signalKind === "weighted") {
+    for (const featureId of Object.keys(definition.defaultWeights)) {
+      if (!produced.has(featureId)) {
         throw new StrategyRecipeRuntimeError(
           "RECIPE_FEATURE_NOT_PRODUCED",
-          `配方 ${definition.recipeId}：排序特征 \`${definition.rankFeatureId}\` 未被任何 FeatureProvider 产出（注册即拒绝）。`,
+          `配方 ${definition.recipeId}：信号权重引用了未被任何 FeatureProvider 产出的特征 \`${featureId}\`（注册即拒绝）。`,
         );
       }
-      /**
-       * 门槛引用的特征同样必须真实产出。
-       *
-       * ⚠️ 门槛由**运行期参数**构造，注册期拿不到真实参数 ⇒ 用一个「探测参数集」调一次
-       * `buildGates`，把它引用的 featureId 逐一核对。探测参数只用于**取引用面**，不参与
-       * 任何计算与落库；若某配方在特定参数下才引用某特征，本校验会漏 —— 因此
-       * `buildGates` 的实现被要求「引用面与参数取值无关」（本项目两个配方都满足）。
-       */
-      const probe = buildGatesProbe(definition);
-      for (const gate of probe) {
-        if (!produced.has(gate.featureId)) {
+    }
+  } else {
+    if (!produced.has(definition.rankFeatureId)) {
+      throw new StrategyRecipeRuntimeError(
+        "RECIPE_FEATURE_NOT_PRODUCED",
+        `配方 ${definition.recipeId}：排序特征 \`${definition.rankFeatureId}\` 未被任何 FeatureProvider 产出（注册即拒绝）。`,
+      );
+    }
+    /**
+     * 门槛引用的特征同样必须真实产出。
+     *
+     * ⚠️ 门槛由**运行期参数**构造，注册期拿不到真实参数 ⇒ 用一个「探测参数集」调一次
+     * `buildGates`，把它引用的 featureId 逐一核对。探测参数只用于**取引用面**，不参与
+     * 任何计算与落库；若某配方在特定参数下才引用某特征，本校验会漏 —— 因此
+     * `buildGates` 的实现被要求「引用面与参数取值无关」（本项目两个配方都满足）。
+     */
+    const probe = buildGatesProbe(definition);
+    for (const gate of probe) {
+      if (!produced.has(gate.featureId)) {
+        throw new StrategyRecipeRuntimeError(
+          "RECIPE_FEATURE_NOT_PRODUCED",
+          `配方 ${definition.recipeId}：门槛条件引用了未被任何 FeatureProvider 产出的特征 \`${gate.featureId}\`（注册即拒绝）。`,
+        );
+      }
+    }
+  }
+  const runtime: StrategyRecipeRuntime = {
+    recipeId: definition.recipeId,
+    point: definition.point,
+    signalFrequency: definition.signalFrequency,
+    signalDescription: definition.signalDescription,
+    features: definition.features,
+    buildSignalBuilder(parameters: ResearchParameterSet): SignalBuilder {
+      if (definition.signalKind === "weighted") {
+        return makeWeightedSignalBuilder(definition.defaultWeights);
+      }
+      return makeGatedSignalBuilder({
+        gates: definition.buildGates(parameters),
+        rankFeatureId: definition.rankFeatureId,
+      });
+    },
+    rankingConfig: definition.rankingConfig,
+    selectionConfig: definition.selectionConfig,
+    requiredData: definition.requiredData,
+    selectionSummary: definition.selectionSummary,
+    randomSeed: definition.randomSeed,
+    resolveParameters(
+      schema: ResearchParameterSchema,
+      overrides?: ResearchParameterSet,
+    ): ResearchParameterSet {
+      const resolved: Record<string, unknown> = {};
+      for (const parameter of schema.parameters) {
+        const overridden = overrides?.[parameter.name];
+        // 用 `overridden !== undefined` 而非真值判断：nullable 参数的合法值可以是 null。
+        const value = overridden !== undefined ? overridden : parameter.defaultValue;
+        if (value === undefined) {
           throw new StrategyRecipeRuntimeError(
-            "RECIPE_FEATURE_NOT_PRODUCED",
-            `配方 ${definition.recipeId}：门槛条件引用了未被任何 FeatureProvider 产出的特征 \`${gate.featureId}\`（注册即拒绝）。`,
+            "RECIPE_PARAMETER_NO_DEFAULT",
+            `配方 ${definition.recipeId}：参数 \`${parameter.name}\` 既没有本次覆写值，` +
+              `schema 里也没有 defaultValue（拒绝在结果里留下不可复现的参数）。` +
+              `请在策略文档中为该参数声明 defaultValue，或在本次调用里显式传入覆写值。`,
+          );
+        }
+        resolved[parameter.name] = value;
+      }
+      // 🔴 未知覆写参数：响亮拒绝，绝不静默忽略
+      //    （静默忽略会让「调用方以为参与寻优的维度」与「实际参与计算的维度」不一致 —— 那正是 P0-2 缺陷的成因）
+      for (const name of Object.keys(overrides ?? {})) {
+        if (!(name in resolved)) {
+          throw new StrategyRecipeRuntimeError(
+            "RECIPE_PARAMETER_UNKNOWN",
+            `配方 ${definition.recipeId}：本次覆写提供了参数 \`${name}\`，但它不在策略文档的参数 schema 里` +
+              `（已声明：${schema.parameters.map(item => item.name).join("、") || "（无）"}）。` +
+              `拒绝静默忽略 —— 那会让调用方以为该维度参与了寻优、实际却被丢掉。`,
           );
         }
       }
-    }
-    const runtime: StrategyRecipeRuntime = {
-      recipeId: definition.recipeId,
-      point: definition.point,
-      signalFrequency: definition.signalFrequency,
-      signalDescription: definition.signalDescription,
-      features: definition.features,
-      buildSignalBuilder(parameters: ResearchParameterSet): SignalBuilder {
-        if (definition.signalKind === "weighted") {
-          return makeWeightedSignalBuilder(definition.defaultWeights);
-        }
-        return makeGatedSignalBuilder({
-          gates: definition.buildGates(parameters),
-          rankFeatureId: definition.rankFeatureId,
-        });
-      },
-      rankingConfig: definition.rankingConfig,
-      selectionConfig: definition.selectionConfig,
-      requiredData: definition.requiredData,
-      selectionSummary: definition.selectionSummary,
-      randomSeed: definition.randomSeed,
-      resolveParameters(schema: ResearchParameterSchema): ResearchParameterSet {
-        const resolved: Record<string, unknown> = {};
-        for (const parameter of schema.parameters) {
-          if (parameter.defaultValue === undefined) {
-            throw new StrategyRecipeRuntimeError(
-              "RECIPE_PARAMETER_NO_DEFAULT",
-              `配方 ${definition.recipeId}：参数 schema 中的 \`${parameter.name}\` 没有 defaultValue，` +
-                `本增量不提供参数覆写入口（会在结果里留下不可复现的参数）。请在策略文档中为该参数声明 defaultValue。`,
-            );
-          }
-          resolved[parameter.name] = parameter.defaultValue;
-        }
-        return resolved as ResearchParameterSet;
-      },
-    };
-    return [definition.recipeId, runtime] as const;
-  }),
-);
+      return resolved as ResearchParameterSet;
+    },
+  };
+  return runtime;
+}
+
+let registeredRecipesCache: ReadonlyMap<string, StrategyRecipeRuntime> | null = null;
+
+/** 已注册配方（**惰性单例**；理由同上）。 */
+function registeredRecipes(): ReadonlyMap<string, StrategyRecipeRuntime> {
+  if (registeredRecipesCache === null) {
+    registeredRecipesCache = new Map(
+      strategyRecipeDefinitions().map(
+        definition => [definition.recipeId, makeStrategyRecipeRuntime(definition)] as const,
+      ),
+    );
+  }
+  return registeredRecipesCache;
+}
 
 /**
  * 门槛引用面探测（仅注册期校验用）。
@@ -432,7 +313,7 @@ function buildGatesProbe(definition: StrategyRecipeDefinition): readonly Feature
 
 /** 已注册的配方 id（升序；供 UI 下拉与诊断）。 */
 export function registeredStrategyRecipeIds(): readonly string[] {
-  return [...REGISTERED_RECIPES.keys()].sort();
+  return [...registeredRecipes().keys()].sort();
 }
 
 /**
@@ -452,7 +333,7 @@ export function resolveStrategyRecipe(recipe: StrategyRecipe): StrategyRecipeRun
       `配方：本增量只支持 recipe.kind="signalEngine"，实际 ${String(recipe.kind)}。`,
     );
   }
-  const runtime = REGISTERED_RECIPES.get(recipe.recipeId);
+  const runtime = registeredRecipes().get(recipe.recipeId);
   if (runtime === undefined) {
     throw new StrategyRecipeRuntimeError(
       "RECIPE_NOT_REGISTERED",
@@ -486,7 +367,7 @@ export function resolveStrategyRecipe(recipe: StrategyRecipe): StrategyRecipeRun
 
 /** 由 recipeId 直接解析（供「调用方显式指定配方」路径；不读策略文档的 recipe 字段）。 */
 export function resolveStrategyRecipeById(recipeId: string): StrategyRecipeRuntime {
-  const runtime = REGISTERED_RECIPES.get(recipeId);
+  const runtime = registeredRecipes().get(recipeId);
   if (runtime === undefined) {
     throw new StrategyRecipeRuntimeError(
       "RECIPE_NOT_REGISTERED",
@@ -507,3 +388,25 @@ export function resolveStrategyRecipeById(recipeId: string): StrategyRecipeRunti
  * 因此新转正的策略**必须**在文档里带 `recipe`（由候选草稿的扩展槽提供）。
  */
 export const DEFAULT_STRATEGY_RECIPE_ID = "leader-candidate-baseline";
+
+/**
+ * 门槛型配方定义（判别联合的 `gated` 支；导出以便 `conditionSignal` 构造合成配方）。
+ */
+export type GatedRecipeDefinition = Extract<
+  StrategyRecipeDefinition,
+  { readonly signalKind: "gated" }
+>;
+
+/**
+ * 由「门槛 + 排序特征」构造可执行配方，**不注册进 `REGISTERED_RECIPES`**。
+ *
+ * 唯一消费方 = `server/research/conditionSignal/compile.ts`（STEP A-1 声明式条件编译）。
+ * 走的是与注册表**同一份** `makeStrategyRecipeRuntime` ⇒ 注册期校验（排序特征 / 门槛引用面
+ * 必须真实产出）与运行时行为逐字一致，不产生第二套口径。
+ *
+ * 之所以不注册：它由**某一份策略文档的条件**现场合成，recipeId 不表征任何全局身份；
+ * 注册表只放「能真跑的全局配方」，把合成配方塞进去会让「已注册配方清单」失真。
+ */
+export function buildGatedRecipeRuntime(definition: GatedRecipeDefinition): StrategyRecipeRuntime {
+  return makeStrategyRecipeRuntime(definition);
+}

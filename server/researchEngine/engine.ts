@@ -422,6 +422,14 @@ export class ResearchEngine {
             // Experiment 仍保持原状态，修正配置后可直接重跑。
             await this.repos.experiments.update(input.experimentId, { status: "FAILED" });
           }
+          // 源头修复（RESEARCH-ORPHAN-RECLAIM-001）：Run 既然收敛为终态，其下未完成的
+          // Analysis 必须一起收敛，否则留下「父终态、子未终态」的孤儿（详见 reclaim.ts 文件头）。
+          const settled = await this.settleAbandonedAnalyses(input.runId);
+          if (settled > 0) {
+            console.warn(
+              `[ResearchEngine] Run ${input.runId} 异常终止：已把 ${settled} 条未完成分析收敛为 CANCELLED（不留孤儿）。`,
+            );
+          }
         } catch {
           // 有意忽略：原始错误优先。
         }
@@ -652,12 +660,48 @@ export class ResearchEngine {
               status: previousExperimentStatus,
             });
           }
+          // 源头修复（RESEARCH-ORPHAN-RECLAIM-001）：与整轮执行同一纪律 ——
+          // Run 收敛为终态时，其下未完成的 Analysis 一并收敛，不留孤儿。
+          const settled = await this.settleAbandonedAnalyses(input.runId);
+          if (settled > 0) {
+            console.warn(
+              `[ResearchEngine] Run ${input.runId} 增量批次异常终止：已把 ${settled} 条未完成分析收敛为 CANCELLED（不留孤儿）。`,
+            );
+          }
         } catch {
           // 有意忽略：原始错误优先。
         }
       }
       throw e;
     }
+  }
+
+  /**
+   * 收敛该 Run 下**仍未终态**的 Analysis（`RUNNING` / `PENDING` ⇒ `CANCELLED`）。
+   *
+   * 🔴 为什么必须做（RESEARCH-ORPHAN-RECLAIM-001，2026-09-17 实查）：
+   *   两个入口的失败收敛路径此前**只**写 Run 的 `FAILED`，不动子 Analysis。
+   *   于是异常终止后留下「父 Run 已终态、子 Analysis 未终态」的自相矛盾状态 ——
+   *   它会污染状态计数、在 UI 上表现为「永远在做」，且没有任何产品入口能纠正。
+   *   实测现场：`research_run 330003` = FAILED，其 `research_analysis 270008` 停在 PENDING 至今。
+   *
+   * 为什么置 `CANCELLED` 而不是 `FAILED`：这些分析**根本没轮到自己执行**（或执行到一半被中断），
+   * 不属于「这条分析自己算错了」。两者在 `RUNNABLE_ANALYSIS_STATUSES` 里都可重跑，语义上
+   * `CANCELLED` 更准；具体原因由父 Run 的 `errorCode` / `errorMessage` 承载（Analysis 表无该列）。
+   *
+   * 失败不抛：本方法在 catch 内「尽力而为」，任何异常都不许掩盖原始错误（调用处已包裹）。
+   */
+  private async settleAbandonedAnalyses(runId: number): Promise<number> {
+    const analyses = await this.repos.analyses.list({ runId });
+    const completedAt = new Date().toISOString();
+    let settled = 0;
+    for (const analysis of analyses) {
+      if (analysis.id === undefined) continue;
+      if (analysis.status !== "RUNNING" && analysis.status !== "PENDING") continue;
+      await this.repos.analyses.update(analysis.id, { status: "CANCELLED", completedAt });
+      settled += 1;
+    }
+    return settled;
   }
 
   // =-------------------------------------------------------------------------

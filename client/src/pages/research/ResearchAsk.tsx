@@ -22,7 +22,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { toast } from "sonner";
 import {
   AlertTriangle,
@@ -92,13 +92,48 @@ const toneClass: Record<"good" | "warn" | "bad", string> = {
   bad: "border-rose-300 bg-rose-50 text-rose-800",
 };
 
+/**
+ * PATTERN-LIBRARY-001 补 —— 深链解析（`?runId=` / `?questionId=`）。
+ *
+ * 为什么必须有它：`step` 与 `questionId` 原本都是内存态，而
+ * `getOutcome` 的 `enabled` 依赖 `questionId !== null` ⇒ **刷新页面就回到 ASK**，
+ * 「结论」步骤永远出不来 —— 而「交易模式」下拉只存在于那个步骤里，
+ * 于是库里的历史 Run 在页面上没有任何入口。
+ *
+ * 后端口径不用改：`researchPlanner.getOutcome` 本就同时接受 `questionId` 与 `runId`。
+ * 这里只把 URL 上的 id 读成初始 state，并让 `step` 直接进 RUNNING ——
+ * outcome 一到手、`isRunReportable` 成立就自动切到 OUTCOME。
+ */
+function readDeepLink(search: string): { questionId: number | null; runId: number | null } {
+  const params = new URLSearchParams(search);
+  const parse = (key: string): number | null => {
+    const raw = params.get(key);
+    if (raw === null || raw === "") return null;
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  };
+  return { questionId: parse("questionId"), runId: parse("runId") };
+}
+
 export default function ResearchAsk() {
-  const [step, setStep] = useState<ResearchAskStep>("ASK");
+  const search = useSearch();
+  const [, setLocation] = useLocation();
+  /**
+   * 深链带进来的 Run id（用 state 固定首次解析结果：用户点「重置」清掉 URL 后，
+   * 不应再被 URL 变化带回去）。
+   */
+  const [entryRunId, setEntryRunId] = useState<number | null>(() => readDeepLink(search).runId);
+  const [step, setStep] = useState<ResearchAskStep>(() => {
+    const link = readDeepLink(search);
+    return link.runId !== null || link.questionId !== null ? "RUNNING" : "ASK";
+  });
   const [form, setForm] = useState(createDefaultResearchAskForm);
   const [errors, setErrors] = useState<string[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [planned, setPlanned] = useState<ResearchPlannedView | null>(null);
-  const [questionId, setQuestionId] = useState<number | null>(null);
+  const [questionId, setQuestionId] = useState<number | null>(
+    () => readDeepLink(search).questionId,
+  );
   const [candidateId, setCandidateId] = useState<number | null>(null);
   /**
    * §16 候选创建回执（含 `filterRuleSource`）。
@@ -106,6 +141,16 @@ export default function ResearchAsk() {
    * 人工确认候选时必须能核这件事（此前只能从报错里知道条件没导出成）。
    */
   const [candidateSource, setCandidateSource] = useState<CandidateFilterSourceView | null>(null);
+  /**
+   * PATTERN-LIBRARY-001 —— 选中的**交易模式**（空串 = 不指定，走既有路径）。
+   *
+   * 选了模式 ⇒ 入场窗口 / 触发时点 / 执行配方引用 / 参数空间由模式声明派生（同源），
+   * 且筛选语义由**执行配方的门槛**承载（不再从研究侧条件导出 `filterRule` ——
+   * 研究侧变量名没有策略侧翻译，写进去会让转正必然失败）。
+   */
+  const [patternId, setPatternId] = useState<string>("");
+  /** 本次建候选的实际门槛摘要（从 `candidate.sourceTraceJson.patternGateSummary` 读回）。 */
+  const [patternGateSummary, setPatternGateSummary] = useState<readonly string[]>([]);
   const [capOverride, setCapOverride] = useState(String(RESEARCH_PLAN_DEFAULT_ANALYSIS));
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -146,11 +191,18 @@ export default function ResearchAsk() {
   const createQuestion = trpc.researchPlanner.createQuestion.useMutation();
   const startRun = trpc.researchPlanner.runResearchDetached.useMutation();
   const createCandidate = trpc.researchPlanner.createCandidate.useMutation();
+  // 交易模式清单（只读）。只列**可转正**的，避免用户选到一个建完候选也转不了正的模式。
+  const patternsQuery = trpc.researchPlanner.listPatterns.useQuery();
+  const patternOptions = useMemo(
+    () => (patternsQuery.data ?? []).filter((pattern) => pattern.promotable),
+    [patternsQuery.data],
+  );
 
   const outcomeQuery = trpc.researchPlanner.getOutcome.useQuery(
-    { questionId: questionId ?? 0 },
+    // 深链回看（runId）与当次跑完（questionId）走同一个端点 —— 它本就两者皆收。
+    entryRunId !== null ? { runId: entryRunId } : { questionId: questionId ?? 0 },
     {
-      enabled: questionId !== null,
+      enabled: entryRunId !== null || questionId !== null,
       // 执行期轮询：进度由后端逐条写 `research_analysis.status`（§23），前端只是读。
       refetchInterval: step === "RUNNING" ? 3000 : false,
     },
@@ -222,7 +274,31 @@ export default function ResearchAsk() {
   }
 
   function handleCreateCandidate() {
-    if (questionId === null || outcome === null) return;
+    /**
+     * 🔴 身份（questionId / runId）**择一即可** —— 服务端 `createCandidate`
+     *    内部走 `buildResearchOutcome(repos, { questionId? | runId? })`，两者皆收
+     *    （`researchPlannerRouter.ts:463-497`）。
+     *
+     * 修的是一个真实缺陷：原判据写死 `questionId === null` 就 return，
+     * 而经深链（`?runId=`）进入时 `questionId` 恒为 null
+     * ⇒ 点「创建候选」**静默无反应**（用户反馈「点了之后没反应」）。
+     * 同时把静默 return 改成响亮提示：宁可报错，也不要让按钮看起来是坏的。
+     */
+    const identity =
+      questionId !== null
+        ? ({ questionId } as const)
+        : entryRunId !== null
+          ? ({ runId: entryRunId } as const)
+          : null;
+    if (outcome === null || identity === null) {
+      toast.error("无法创建候选", {
+        description:
+          outcome === null
+            ? "本次研究的结论尚未就绪（Run 可能还在执行）。"
+            : "既没有 questionId 也没有 runId —— 请先发起一次研究，或用带 runId 的链接打开本页。",
+      });
+      return;
+    }
     /**
      * 🔴 **这里不再自己挑分析** —— 这是本缺陷的现场。
      *
@@ -244,14 +320,17 @@ export default function ResearchAsk() {
      */
     createCandidate.mutate(
       {
-        questionId,
+        ...identity,
         name: (outcome.questionText ?? "自动研究").slice(0, 80),
         description: `由研究问题自动规划并执行（planId=${outcome.planId}）。`,
+        // 空串**不传** ⇒ 服务端保持既有行为（从研究条件导出 filterRule），零回归。
+        ...(patternId.length > 0 ? { patternId } : {}),
       },
       {
         onSuccess: (data) => {
           setCandidateId(data.candidate.id ?? null);
           setCandidateSource(data.filterRuleSource);
+          setPatternGateSummary(readPatternGateSummary(data.candidate));
           const s = data.filterRuleSource;
           toast.success(`已创建候选草稿 #${data.candidate.id}`, {
             description:
@@ -275,8 +354,13 @@ export default function ResearchAsk() {
     setSubmitError(null);
     setPlanned(null);
     setQuestionId(null);
+    setEntryRunId(null);
+    // 清掉深链参数，否则刷新又会回到刚才那个 Run 的结论页。
+    setLocation("/research/ask");
     setCandidateId(null);
     setCandidateSource(null);
+    setPatternGateSummary([]);
+    setPatternId("");
     setStartedAt(null);
   }
 
@@ -483,6 +567,12 @@ export default function ResearchAsk() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {entryRunId !== null && (
+              <p className="rounded-md border border-sky-300 bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                正在读取 Run #{entryRunId} 的结论（来自链接）。该 Run 若已结束，稍候会自动切到结论页
+                —— 那里可以选「交易模式」并创建候选。
+              </p>
+            )}
             {progress === null || progress.total === 0 ? (
               <div className="space-y-2">
                 <Skeleton className="h-4 w-56" />
@@ -515,6 +605,10 @@ export default function ResearchAsk() {
           creatingCandidate={createCandidate.isPending}
           onCreateCandidate={handleCreateCandidate}
           onReset={resetAll}
+          patternOptions={patternOptions}
+          patternId={patternId}
+          onPatternIdChange={setPatternId}
+          patternGateSummary={patternGateSummary}
         />
       )}
     </div>
@@ -785,6 +879,20 @@ function PlanBucket({
 // ④ 结论视图（§12–§15 / §29 第 5 步）
 // ---------------------------------------------------------------------------
 
+/**
+ * 从候选行读「本次实际使用的执行门槛摘要」。
+ *
+ * `sourceTraceJson` 是 `unknown`（provenance 快照，结构随版本演进）⇒ 必须窄化，
+ * 读不到就返回空数组（**不抛错** —— 它是展示信息，缺了不该让页面崩）。
+ */
+function readPatternGateSummary(candidate: { readonly sourceTraceJson?: unknown }): readonly string[] {
+  const trace = candidate.sourceTraceJson;
+  if (trace === null || typeof trace !== "object") return [];
+  const value = (trace as Record<string, unknown>)["patternGateSummary"];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
 function OutcomeView({
   outcome,
   candidateId,
@@ -792,6 +900,10 @@ function OutcomeView({
   creatingCandidate,
   onCreateCandidate,
   onReset,
+  patternOptions,
+  patternId,
+  onPatternIdChange,
+  patternGateSummary,
 }: {
   outcome: ResearchOutcomeView;
   candidateId: number | null;
@@ -799,8 +911,19 @@ function OutcomeView({
   creatingCandidate: boolean;
   onCreateCandidate: () => void;
   onReset: () => void;
+  /** 可转正的交易模式（由服务端 `researchPlanner.listPatterns` 提供，前端不复制清单）。 */
+  patternOptions: ReadonlyArray<{
+    readonly patternId: string;
+    readonly label: string;
+    readonly gates: readonly string[];
+  }>;
+  patternId: string;
+  onPatternIdChange: (value: string) => void;
+  patternGateSummary: readonly string[];
 }) {
   const stage = recommendationStageStyleOf(outcome.recommendation.stage);
+  const selectedPattern =
+    patternOptions.find((option) => option.patternId === patternId) ?? null;
   const riskNotes = buildRiskNotes(outcome);
   const evidenceRows = buildKeyEvidenceRows(outcome);
 
@@ -1114,6 +1237,43 @@ function OutcomeView({
               </p>
             ) : (
               <>
+                {/* PATTERN-LIBRARY-001 —— 交易模式（可选） */}
+                <div className="mt-2 rounded-md border border-dashed p-2">
+                  <label className="text-xs font-medium" htmlFor="research-pattern-select">
+                    交易模式（可选）
+                  </label>
+                  <select
+                    id="research-pattern-select"
+                    className="mt-1 w-full rounded-md border bg-transparent px-2 py-1 text-sm"
+                    value={patternId}
+                    disabled={creatingCandidate}
+                    onChange={(event) => onPatternIdChange(event.target.value)}
+                  >
+                    <option value="">不指定 —— 沿用「从研究条件导出筛选条件」的既有路径</option>
+                    {patternOptions.map((option) => (
+                      <option key={option.patternId} value={option.patternId}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedPattern === null ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      选了模式后，入场窗口 / 触发时点 / 执行配方引用 / 参数空间由**模式声明**派生，
+                      且筛选语义改由**执行配方的门槛**承载 —— 这样转正出的策略文档才带 recipe，
+                      回测里跑的才是这个模式本身。
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      <span className="font-medium">执行门槛：</span>
+                      {selectedPattern.gates.length === 0
+                        ? "（该模式无门槛）"
+                        : selectedPattern.gates.join("；")}
+                      <br />
+                      选定后**不再**从研究条件导出筛选条件 —— 研究侧变量名没有策略侧翻译，
+                      写进去会让转正必然失败；筛选语义由上面的门槛承载。
+                    </p>
+                  )}
+                </div>
                 <p>
                   <span className="font-medium">
                     创建候选时会自动使用「{outcome.candidateEligibleAnalyses[0]!.name}」的
@@ -1146,10 +1306,22 @@ function OutcomeView({
                   候选 #{candidateId} 的筛选条件：
                 </span>
                 {candidateSource.origin === "NONE" ? (
-                  <span className="text-amber-800">
-                    ⚠️ 未导出（{candidateFilterOriginLabelOf(candidateSource.origin)}）——
-                    {candidateSource.note}
-                  </span>
+                  patternGateSummary.length > 0 ? (
+                    /**
+                     * 选了交易模式时，研究侧条件**刻意不导出**（筛选语义由执行门槛承载）。
+                     * ⇒ 这里不能再喊「口径为空、等于全市场」—— 那是**误导**：
+                     * 下方「执行门槛」就是本次的真实筛选条件。
+                     */
+                    <span className="text-muted-foreground">
+                      未导出研究侧条件（{candidateFilterOriginLabelOf(candidateSource.origin)}）——
+                      本次筛选语义由下方「执行门槛」承载。
+                    </span>
+                  ) : (
+                    <span className="text-amber-800">
+                      ⚠️ 未导出（{candidateFilterOriginLabelOf(candidateSource.origin)}）——
+                      {candidateSource.note}
+                    </span>
+                  )
                 ) : (
                   <>
                     来自「{candidateSource.analysisName}」
@@ -1161,16 +1333,39 @@ function OutcomeView({
                 )}
               </p>
             )}
+            {patternGateSummary.length > 0 && (
+              <p className="mt-1 border-t pt-1">
+                <span className="font-medium">候选 #{candidateId} 的执行门槛：</span>
+                {patternGateSummary.join("；")}
+                <span className="text-muted-foreground">
+                  （筛选语义由执行配方的门槛承载，故不写研究侧筛选条件）
+                </span>
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button variant="outline" onClick={onReset}>
               <RotateCcw className="mr-1.5 h-4 w-4" /> 换个问题
             </Button>
+              {/*
+                🔴 pending 时**必须换文案**，不能只把按钮变灰。
+                实测 `createCandidate` 在服务端要跑一次完整的结论聚合（`buildResearchOutcome`），
+                耗时十余秒到数十秒；旧写法只 `disabled` + 一个不起眼的小 spinner、文案不变
+                ⇒ 用户以为「点了没反应」（真实反馈）。
+              */}
             {candidateId === null ? (
               <Button onClick={onCreateCandidate} disabled={creatingCandidate}>
-                {creatingCandidate && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-                <FlaskConical className="mr-1.5 h-4 w-4" /> 创建 Candidate
+                {creatingCandidate ? (
+                  <>
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    正在创建候选…（需重建本次结论，约 10~30 秒）
+                  </>
+                ) : (
+                  <>
+                    <FlaskConical className="mr-1.5 h-4 w-4" /> 创建 Candidate
+                  </>
+                )}
               </Button>
             ) : (
               <Button asChild variant="outline">

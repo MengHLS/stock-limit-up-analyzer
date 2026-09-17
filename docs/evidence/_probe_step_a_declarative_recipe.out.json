@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-09-17T05:06:18.312Z",
+  "latestTradeDate": "2026-09-16",
+  "probeWindow": {
+    "startDate": "2026-09-06",
+    "endDate": "2026-09-16"
+  },
+  "noRecipeWithConditionsIds": [
+    {
+      "id": 390001,
+      "strategyId": "cand-270001",
+      "conditionCount": 2
+    }
+  ],
+  "directCompilation": [
+    {
+      "id": 390001,
+      "strategyId": "cand-270001",
+      "compiled": true,
+      "recipeId": "strategy-declared-conditions",
+      "signalDescription": "由策略文档的声明式条件现场合成（共 2 条门槛）：haircutFromEventLow lte 0 且 volumeRatio lt 1",
+      "featureIds": [
+        "haircutFromEventLow",
+        "isBullish",
+        "momentumFromEventClose",
+        "volumeRatio"
+      ],
+      "probes": {
+        "守线且缩量": true,
+        "跌破开盘价": false,
+        "放量": false
+      }
+    }
+  ],
+  "assemblyProbes": [
+    {
+      "id": 390001,
+      "strategyId": "cand-270001",
+      "ok": true,
+      "recipeId": "strategy-declared-conditions",
+      "recipeSource": "strategy-declarative-conditions",
+      "recipeFeatureIds": [
+        "haircutFromEventLow",
+        "isBullish",
+        "momentumFromEventClose",
+        "volumeRatio"
+      ],
+      "selectionSummary": "在满足文档声明的 2 条门槛的候选中，按相对首板日收盘的涨幅由高到低取前 5 名",
+      "datasetSource": "rebuild",
+      "datasetRowCount": 150,
+      "datasetSecurityCount": 30,
+      "signalDescription": "由策略文档的声明式条件现场合成（共 2 条门槛）：haircutFromEventLow lte 0 且 volumeRatio lt 1"
+    }
+  ],
+  "negativeCase": {
+    "threw": true,
+    "errorName": "StrategyRecipeRuntimeError",
+    "errorCode": "CONDITION_NOT_MAPPABLE",
+    "errorMessage": "装配层：策略 cand-270001@1.0.0 的条件无法全部编译成执行门槛。\n无法映射的条件共 1 条（拒绝静默回落默认配方）：\n  1. 第 3 条条件 `event.limitUpPrice` GREATER_THAN —— 字段 event.limitUpPrice 既不是「执行侧已实现的特征」，也不是已证明等价的原始行情写法（原始行情写法只支持 bar.low vs prefix.rd0.open / bar.volume vs prefix.rd0.volume / bar.close vs prefix.rd0.close）\n可编译的字段（执行侧已实现特征对应的 `bar.*` 字段名）：bar.haircutFromEventLow / bar.volumeRatio / bar.isBullish / bar.momentumFromEventClose\n可编译的原始行情写法（与上述特征**数学等价**，已证明）：bar.low >= prefix.rd0.open（守线） / bar.volume <= prefix.rd0.volume（不缩量） / bar.close >= prefix.rd0.close（不低于首板收盘）\n可编译的运算符：GREATER_THAN / GREATER_THAN_OR_EQUAL / LESS_THAN / LESS_THAN_OR_EQUAL / EQUAL（NOT_EQUAL / IN / NOT_IN 在执行侧没有等价门槛，一律拒绝而非静默丢弃）\n右值只接受「常量」或「文档参数 code」；字段引用（如与 prefix.rd0.close 比较）无法在特征层表达。"
+  }
+}

@@ -1,0 +1,360 @@
+
+==============================================================================
+[0] 用户输入（只有两项 —— 与 §27 完全同构，没有任何底层分析字段）
+==============================================================================
+  datasetVersionId = 390002
+  researchQuestion = 首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？
+  未传：feature / target / horizon / descriptiveVariable / segment / grouping / condition / analysisType
+  入口：researchPlanner.runFromQuestion（§20 Workbuddy 单次调用入口，同步长请求）
+
+==============================================================================
+[1] §20 runFromQuestion —— 单次调用返回 @20 约定的出参
+==============================================================================
+  researchId     = 480003
+  researchPlanId = 90003
+  researchRunId  = 750003
+  questionId     = 90003
+  analysisCount  = 28
+  findings       = 8 条（Total 23）
+  conclusion     = SUPPORTED
+  单次调用总耗时 = 166.6s
+  ok   §20 出参含 researchId — 480003
+  ok   §20 出参含 researchPlanId — 90003
+  ok   §20 出参含 analysisCount — 28
+  ok   §20 出参含 findings 数组
+  ok   §20 出参含 conclusion
+
+==============================================================================
+[2] 意图识别复核（系统自己判定「问的是什么」）
+==============================================================================
+  主方法      = PULLBACK_EFFECTIVENESS（回踩有效性研究）  fallback=false
+  研究类型    = FEATURE
+  回落基线    = 否
+  命中分句（分句 → 关键词 → 方法）：
+    · 「首板后回踩深度是否影响后续收益」 命中「收益」 → EVENT_RETURN_RESEARCH
+    · 「首板后回踩深度是否影响后续收益」 命中「回踩」 → PULLBACK_EFFECTIVENESS
+    · 「回踩得深一点是不是更值得买入」 命中「回踩」 → PULLBACK_EFFECTIVENESS
+    · 「还是回踩浅一点更好」 命中「回踩」 → PULLBACK_EFFECTIVENESS
+  已登记关键词命中：EVENT_RETURN_RESEARCH:收益 / PULLBACK_EFFECTIVENESS:回踩
+  未命中关键词（用于解释「为什么没选某方法」）：BREAKOUT_SUCCESS_RESEARCH:突破 / BREAKOUT_SUCCESS_RESEARCH:新高 / BREAKOUT_SUCCESS_RESEARCH:冲高 / BREAKOUT_SUCCESS_RESEARCH:创新高 / BREAKOUT_SUCCESS_RESEARCH:breakout / BREAKOUT_SUCCESS_RESEARCH:new high / ENTRY_TIMING_RESEARCH:入场 / ENTRY_TIMING_RESEARCH:时点 / ENTRY_TIMING_RESEARCH:什么时候买 / ENTRY_TIMING_RESEARCH:第几天 / ENTRY_TIMING_RESEARCH:确认 / ENTRY_TIMING_RESEARCH:等 / ENTRY_TIMING_RESEARCH:追高 / ENTRY_TIMING_RESEARCH:timing / ENTRY_TIMING_RESEARCH:entry / ENTRY_TIMING_RESEARCH:when to buy / ENTRY_TIMING_RESEARCH:等确认 / ENTRY_TIMING_RESEARCH:入场时点 / EVENT_RETURN_RESEARCH:涨幅 / EVENT_RETURN_RESEARCH:基准 / EVENT_RETURN_RESEARCH:全样本 / EVENT_RETURN_RESEARCH:分布 / EVENT_RETURN_RESEARCH:表现 / EVENT_RETURN_RESEARCH:return / EVENT_RETURN_RESEARCH:baseline / EVENT_RETURN_RESEARCH:event study / HOLDING_PERIOD_RESEARCH:持有 / HOLDING_PERIOD_RESEARCH:拿几天 / HOLDING_PERIOD_RESEARCH:多久 / HOLDING_PERIOD_RESEARCH:视界 / HOLDING_PERIOD_RESEARCH:周期 / HOLDING_PERIOD_RESEARCH:持有期 / HOLDING_PERIOD_RESEARCH:holding / HOLDING_PERIOD_RESEARCH:horizon / HOLDING_PERIOD_RESEARCH:days to hold / HOLDING_PERIOD_RESEARCH:几天最好 / MARKET_REGIME_STABILITY:稳定 / MARKET_REGIME_STABILITY:一致性 / MARKET_REGIME_STABILITY:不同年份 / MARKET_REGIME_STABILITY:分年 / MARKET_REGIME_STABILITY:市场环境 / MARKET_REGIME_STABILITY:牛熊 / MARKET_REGIME_STABILITY:regime / MARKET_REGIME_STABILITY:stability / MARKET_REGIME_STABILITY:consistent / PULLBACK_EFFECTIVENESS:回调 / PULLBACK_EFFECTIVENESS:洗盘 / PULLBACK_EFFECTIVENESS:不破 / PULLBACK_EFFECTIVENESS:未破 / PULLBACK_EFFECTIVENESS:破位 / PULLBACK_EFFECTIVENESS:支撑 / PULLBACK_EFFECTIVENESS:缩量 / PULLBACK_EFFECTIVENESS:放量 / PULLBACK_EFFECTIVENESS:pullback / PULLBACK_EFFECTIVENESS:dip / PULLBACK_EFFECTIVENESS:retrace / PULLBACK_EFFECTIVENESS:跌破 / PULLBACK_EFFECTIVENESS:守住 / PULLBACK_EFFECTIVENESS:生命线 / PULLBACK_EFFECTIVENESS:支撑位 / STOP_LOSS_RESEARCH:止损 / STOP_LOSS_RESEARCH:离场 / STOP_LOSS_RESEARCH:破位 / STOP_LOSS_RESEARCH:割肉 / STOP_LOSS_RESEARCH:走坏 / STOP_LOSS_RESEARCH:stop loss / STOP_LOSS_RESEARCH:exit / STOP_LOSS_RESEARCH:break down / STOP_LOSS_RESEARCH:破位就走
+  未采纳分句：（无）
+  ok   §5 与 §27 同 Dataset 但问题不同 ⇒ 仍识别为 PULLBACK_EFFECTIVENESS — PULLBACK_EFFECTIVENESS
+  ok   §5 未回落基线（关键词真的命中了，不是兜底）
+
+==============================================================================
+[3] §28 核心判据：计划里同时存在「深档」与「浅档」深度分档
+==============================================================================
+  计划条数 = 28（上限 30，裁剪=false）
+  优先级分布：P0 4 / P1 21 / P2 3
+
+  含「回踩深度」条件的分析共 4 条：
+    [P1] 回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2） → T+5 收益
+        条件：pullback_holds_event_open_2d == 1 且 pullback_close_ratio_2d <= 0.95
+    [P1] 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+        条件：pullback_holds_event_open_2d == 1 且 pullback_close_ratio_2d >= 0.98 且 pullback_close_ratio_2d <= 1
+    [P1] 回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+3） → T+5 收益
+        条件：pullback_holds_event_open_3d == 1 且 pullback_close_ratio_3d <= 0.95
+    [P1] 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益
+        条件：pullback_holds_event_open_3d == 1 且 pullback_close_ratio_3d >= 0.98 且 pullback_close_ratio_3d <= 1
+
+  ⇒ 深档（close_ratio <= 0.95）2 条 / 浅档（close_ratio >= 0.98）2 条
+  ok   §28 计划里存在「深档」深度分档分析 — deep=2
+  ok   §28 计划里存在「浅档」深度分档分析 — shallow=2
+  ok   §28 深档与浅档都在同一个 Dataset 上可比（各 ≥ 1 条）
+
+  精修配方最终采纳顺序（上限 6 条）：
+    1. depth_deep             回踩深度落在 <0.95]
+    2. depth_shallow          回踩深度落在 [0.98, 1]
+    3. shrink_50              回踩期最小量能比 ≤ 0.5（缩量）
+    4. shrink_30              回踩期最小量能比 ≤ 0.3（缩量）
+    5. last_expansion         回踩末日量能比 > 1（放量确认）
+    6. last_bullish           回踩末日为阳线（红盘）
+  ok   §28 排序生效：深度分档位于精修序列的第 1 位（修复前它在末位且被裁掉） — 第 1 位 = depth_deep
+  ok   §28 深档与浅档同时被采纳（都落在精修上限之内） — depth_deep / depth_shallow
+
+  落库的 selectionRationale（用户可核对系统为什么这么理解）：
+    · 研究方法：回踩有效性研究（PULLBACK_EFFECTIVENESS）
+    · 识别到研究方法：回踩有效性研究（PULLBACK_EFFECTIVENESS）
+    · 判定依据：加权分 3（专指词命中 1 个，命中词：回踩）
+    · 同时命中其它方法（作为辅助）：事件后收益研究（EVENT_RETURN_RESEARCH，加权分 1）
+    · 采用收益视界：T+5 / T+10 / T+20
+    · 主目标取 T+5 收盘收益（future_return_5d）—— 它是最直观、也最容易与「全样本基准」对照的量。
+
+==============================================================================
+[4] 复用证据：没有第二套统计实现、没有新执行器、没有新入口
+==============================================================================
+  执行器注册表里的分析类型（6 个）：
+    · CONDITIONAL
+    · DESCRIPTIVE
+    · EVENT_STUDY
+    · QUANTILE
+    · SEGMENT_RELATION
+    · STABILITY
+  ok   复用①：执行器集合 = RESEARCH-002 原样的 6 类（PLANNER-001 未新增执行器） — CONDITIONAL/DESCRIPTIVE/EVENT_STUDY/QUANTILE/SEGMENT_RELATION/STABILITY
+
+  本计划用到的分析类型（6 类）：CONDITIONAL / DESCRIPTIVE / EVENT_STUDY / QUANTILE / SEGMENT_RELATION / STABILITY
+  其中未注册的：（无）
+  ok   复用②：计划只用到已注册的执行器（无 UNKNOWN_ANALYSIS_TYPE）
+
+  §27 那一轮（Run 720001，28 条分析）用到的类型：CONDITIONAL / DESCRIPTIVE / EVENT_STUDY / QUANTILE / SEGMENT_RELATION / STABILITY
+  两问共用的执行器：CONDITIONAL / DESCRIPTIVE / EVENT_STUDY / QUANTILE / SEGMENT_RELATION / STABILITY
+  ok   复用③：两个验收问题共用同一批执行器（不是各写一套） — shared=6
+
+==============================================================================
+[5] 真实执行（物化 → 逐条执行 → Finding → Conclusion）
+==============================================================================
+  runId=750003 runStatus=COMPLETED 冻结样本数=23978
+  完成 28 / 失败 0 / 未完成 0（共 28）
+  结果行合计 528
+  ok   §23 执行已收尾（无未完成项） — pending=0
+  ok   零失败 — failed=0
+  ok   执行条数 = 计划条数（预览即所跑） — 28 vs 28
+  零结果分析：#750082
+  §22 数据有效性：passed=false 失败=0 未完成=0 零结果=1
+    · 存在 1 条分析未通过有效性检查（失败 0 条、未完成 0 条、执行完成但**零结果** 1 条），共 28 条。
+    · 「执行完成但零结果」既不是成功也不是失败：执行器跑完了，但没有任何可报告的分组 / 样本。常见成因有两类 —— ① 条件把样本筛成了 0 条；② 该分析引用的特征在该 Dataset 上全为空。这类分析**没有进入任何 Finding 的证据**，因此不要把它当作「已验证」或「已排除」。
+  ok   §22 passed 与三个缺口维度自洽 — passed=false
+
+==============================================================================
+[6] §28 两个方向的证据（深档 / 浅档都必须有可读数字）
+==============================================================================
+    ✓ deep    结果  16 行  #750066 回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2） → T+5 收益
+    ✓ shallow 结果  16 行  #750067 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+    ✓ deep    结果  16 行  #750072 回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+3） → T+5 收益
+    ✓ shallow 结果  16 行  #750073 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益
+
+  ok   §28 深档分析全部落了库并跑出结果（否则「深一点好不好」无从判断） — 2/2
+  ok   §28 浅档分析全部落了库并跑出结果 — 2/2
+  ok   §28 计划项与落库分析一一对应（无丢失） — missing=0
+  深档 / 浅档 的 T+5 收益对照（同一 Dataset、同一求值日口径；数值取自 Finding 层）：
+    deep    回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2）
+        条件组收益 -6.97 个百分点   全样本基准 1.52 个百分点   超额 -8.49 个百分点
+          · 组「ALL」 n=23751  均值 1.52 个百分点
+          · 组「CONDITION」 n=1602  均值 -6.97 个百分点
+    deep    回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+3）
+        条件组收益 -6.91 个百分点   全样本基准 1.52 个百分点   超额 -8.43 个百分点
+          · 组「ALL」 n=23751  均值 1.52 个百分点
+          · 组「CONDITION」 n=1753  均值 -6.91 个百分点
+    shallow 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2）
+        条件组收益 -1.42 个百分点   全样本基准 1.52 个百分点   超额 -2.94 个百分点
+          · 组「ALL」 n=23751  均值 1.52 个百分点
+          · 组「CONDITION」 n=2841  均值 -1.42 个百分点
+    shallow 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3）
+        条件组收益 -1.08 个百分点   全样本基准 1.52 个百分点   超额 -2.60 个百分点
+          · 组「ALL」 n=23751  均值 1.52 个百分点
+          · 组「CONDITION」 n=2280  均值 -1.08 个百分点
+
+==============================================================================
+[7] Finding 聚合 → 结论 → 建议
+==============================================================================
+  问题：首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？
+  研究方法：PULLBACK_EFFECTIVENESS / EVENT_RETURN_RESEARCH
+  Finding：共 23 条，去重合并 1 条，默认展示 8 条（折叠 15 条）
+  ok   §12–§14 Finding 已聚合且默认只展示 Top N — 23 → 8
+
+--- Top Findings ---
+
+  ── #90055 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_low_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0245）
+     来自分析 #750064（CONDITIONAL）「回踩期未破首板日最低价（T+3） → T+5 收益」
+     样本：n=19080（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.039690877936778966,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.024480517056474613,
+  "winRate": 0.5518343815513627,
+  "benchmarkUnavailable": false
+}
+
+  ── #90052 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_open_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0288）
+     来自分析 #750061（CONDITIONAL）「回踩期未破首板日开盘价（T+3） → T+5 收益」
+     样本：n=18041（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.04397165008970606,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.02876128920940171,
+  "winRate": 0.5672634554625575,
+  "benchmarkUnavailable": false
+}
+
+  ── #90056 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_low_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0434）
+     来自分析 #750065（CONDITIONAL）「回踩期未破首板日最低价（T+5） → T+5 收益」
+     样本：n=16698（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.0586010275167809,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.04339066663647655,
+  "winRate": 0.6242064917954246,
+  "benchmarkUnavailable": false
+}
+
+  ── #90053 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_open_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0492）
+     来自分析 #750062（CONDITIONAL）「回踩期未破首板日开盘价（T+5） → T+5 收益」
+     样本：n=15535（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.06442810407209941,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.04921774319179506,
+  "winRate": 0.6480205986482137,
+  "benchmarkUnavailable": false
+}
+
+  ── #90061 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_open_2d == 1 AND pullback_last_volume_ratio_2d > 1」的样本在 future_return_5d 上优于全样本（超额 0.0328）
+     来自分析 #750070（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益」
+     样本：n=11531（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.048045788100885306,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.03283542722058096,
+  "winRate": 0.6072326771312115,
+  "benchmarkUnavailable": false
+}
+
+  ── #90062 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_open_2d == 1 AND pullback_last_is_bullish_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0393）
+     来自分析 #750071（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益」
+     样本：n=9661（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.05455914213052407,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.03934878125021972,
+  "winRate": 0.6305765448711314,
+  "benchmarkUnavailable": false
+}
+
+  ── #90067 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_open_3d == 1 AND pullback_last_volume_ratio_3d > 1」的样本在 future_return_5d 上优于全样本（超额 0.0578）
+     来自分析 #750076（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益」
+     样本：n=9272（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.07300607968810624,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.05779571880780189,
+  "winRate": 0.6934857635893011,
+  "benchmarkUnavailable": false
+}
+
+  ── #90068 [EFFECT] 强度 1（STRONG）
+     标题：满足条件「pullback_holds_event_open_3d == 1 AND pullback_last_is_bullish_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0526）
+     来自分析 #750077（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益」
+     样本：n=8856（STRONG）  视界 T+?
+     效果：{
+  "groupReturn": 0.06785874097821962,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.05264838009791527,
+  "winRate": 0.6745709123757905,
+  "benchmarkUnavailable": false
+}
+
+--- 提问锚点（§13 / §15 / §28）---
+  source        = EMPHASIS
+  note          = 按提问侧重锁定 4 条分析（计划里标注为与问题直接相关）。
+  候选分析条数  = 4
+  相关 Finding  = 4 条
+    · #90058 满足条件「pullback_holds_event_open_2d == 1 AND pullback_close_ratio_2d >= 0.98 AND pullback_close_ratio_2d <= 1」的样本在 future_return_5d 上优于全样本（超额 -0.0294）
+        来自 #750067（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益」  n=2841
+    · #90064 满足条件「pullback_holds_event_open_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1」的样本在 future_return_5d 上优于全样本（超额 -0.0260）
+        来自 #750073（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益」  n=2280
+    · #90063 满足条件「pullback_holds_event_open_3d == 1 AND pullback_close_ratio_3d <= 0.95」的样本在 future_return_5d 上优于全样本（超额 -0.0843）
+        来自 #750072（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+3） → T+5 收益」  n=1753
+    · #90057 满足条件「pullback_holds_event_open_2d == 1 AND pullback_close_ratio_2d <= 0.95」的样本在 future_return_5d 上优于全样本（超额 -0.0849）
+        来自 #750066（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2） → T+5 收益」  n=1602
+  ok   §28 提问锚点锁定的是「强调词命中的分析」（source=EMPHASIS，不是回落） — EMPHASIS
+  ok   §28 深度分档的证据被列进「针对你的问题」区块（用户不必翻折叠区） — alignedDepth=4 / alignedTotal=4
+
+--- §15 结论 ---
+{
+  "id": 660003,
+  "conclusionType": "SUPPORTED",
+  "title": "[自动研究] 首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？ — 自动结论（SUPPORTED）",
+  "conclusion": "【研究问题】首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？\n\n【针对该问题】以下 4 条是按提问侧重筛出的直接证据：\n  · 满足条件「pullback_holds_event_open_2d == 1 AND pullback_close_ratio_2d >= 0.98 AND pullback_close_ratio_2d <= 1」的样本在 future_return_5d 上优于全样本（超额 -0.0294）（n=2841，超额 -2.94 个百分点，稳定性未评估）\n  · 满足条件「pullback_holds_event_open_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1」的样本在 future_return_5d 上优于全样本（超额 -0.0260）（n=2280，超额 -2.60 个百分点，稳定性未评估）\n  · 满足条件「pullback_holds_event_open_3d == 1 AND pullback_close_ratio_3d <= 0.95」的样本在 future_return_5d 上优于全样本（超额 -0.0843）（n=1753，超额 -8.43 个百分点，稳定性未评估）\n  · 满足条件「pullback_holds_event_open_2d == 1 AND pullback_close_ratio_2d <= 0.95」的样本在 future_return_5d 上优于全样本（超额 -0.0849）（n=1602，超额 -8.49 个百分点，稳定性未评估）\n\n【统计判定】\n假设：「首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？」\n\n判定：**在预设规则下支持该假设**（样本、效应量、统计量、方向稳定性四项均达标）。\n\n关键量：Q5 − Q1 的 future_return_5d 均值差 = -0.0281；p = 0.0000；t = -9.5539；样本 23748（最小分组 4749）；方向一致性 0.750。\n\n判定依据（按顺序短路）：\n1. [通过] R2_样本达标 —— 总样本 23748（门槛 30），最小分组样本 4749（门槛 30）\n2. [通过] R3_效应达到最小实际阈值 —— |效应| = 0.0281，阈值 0.005\n3. [通过] R4_统计量达标 —— p = 0.0000，alpha = 0.05\n4. [通过] R5_方向稳定 —— 一致性 0.750，下限 0.6\n\n⚠️ 自动结论仅为**研究辅助**，不等同于统计显著性或交易有效性；任何策略性判断必须经 Backtest / 稳健性 / OOS 验证后才可成立，本阶段不产出交易结论。\n\n⚠️ 本结论仅说明「这批研究证据是否值得进入下一阶段」，**不构成任何盈利能力判断、不构成投资建议**。统计关系不等于可交易策略：样本内关系可能在样本外失效，交易成本 / 流动性 / 涨跌停无法成交等约束尚未纳入。",
+  "evidenceSummary": null,
+  "researchQuestion": "首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？",
+  "findingIds": [],
+  "limitations": [],
+  "nextQuestions": [],
+  "confidence": 0.85,
+  "status": "DRAFT"
+}
+  ok   §15 结论已生成
+  ok   §15 结论锚定了研究问题（researchQuestion 非空且为原文） — 首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？
+  ok   §15 结论正文含「【研究问题】」段（视图层拼装生效）
+  ok   §15 结论正文含「【针对该问题】」段（显式回答用户问的事）
+  ok   §15 结论正文不再出现占位符「(未登记假设陈述)」（假设已注册，结论锚定问题原文）
+
+--- §15 建议（只能表示「是否值得进入下一研究阶段」）---
+  stage = NEEDS_MORE_RESEARCH
+  text  = 本轮研究有 1 条分析虽然执行完成，但没有产出任何结果 ——这意味着计划的证据不完整。建议先核对这些分析引用的字段在该 Dataset 上的填充率，再评估是否进入下一阶段。
+    · 有 1 条分析执行完成但**零结果** ⇒ 计划的一部分证据缺失（常见成因：条件筛出 0 条样本，或该特征在该 Dataset 上全为空）。
+  免责声明：⚠️ 本结论仅说明「这批研究证据是否值得进入下一阶段」，**不构成任何盈利能力判断、不构成投资建议**。统计关系不等于可交易策略：样本内关系可能在样本外失效，交易成本 / 流动性 / 涨跌停无法成交等约束尚未纳入。
+  ok   §15 建议不含「稳赚 / 必涨 / 保证收益 / 一定盈利」类断言
+  ok   §15 建议附独立免责声明字段
+  ok   §15 结论正文已拼接免责声明（withDisclaimer 生效）
+
+==============================================================================
+[8] §16 createCandidate（研究 → 候选，状态仍为 DRAFT）
+==============================================================================
+  candidateId = 570003 status=DRAFT
+  provenance  = {
+  "candidateId": 570003,
+  "researchId": 480003,
+  "researchRunId": 750003,
+  "researchPlanId": 90003,
+  "datasetVersionId": 390002,
+  "findingIds": [
+    90055,
+    90052,
+    90056,
+    90053,
+    90061,
+    90062,
+    90067,
+    90068
+  ],
+  "conclusionId": 660003,
+  "complete": true
+}
+  filterRule  = {
+  "groups": [
+    {
+      "groupNo": 0,
+      "groupLogicalOperator": "AND",
+      "conditions": [
+        {
+          "groupNo": 0,
+          "sortOrder": 0,
+          "fieldName": "pullback_holds_event_open_2d",
+          "operator": "==",
+          "value": 1,
+          "logicalOperator": "AND",
+          "groupLogicalOperator": "AND"
+        }
+      ]
+    }
+  ]
+}
+  ok   §16 provenance 六项齐备
+  ok   §16 候选状态为 DRAFT（不自动进 Strategy） — DRAFT
+  ok   §16 sourceResearchPlanId 指向本轮计划 — 90003 vs 90003
+
+==============================================================================
+[9] §28 验收判据
+==============================================================================
+  ① 输入只有 datasetVersionId + researchQuestion：✓（runFromQuestion 的全部入参）
+  ② 系统识别为：PULLBACK_EFFECTIVENESS（用户未填 Feature/Target/Horizon/Descriptive/Segment）
+  ③ 计划由系统生成：28 条（P0 4 / P1 21 / P2 3）
+  ④ 「深 vs 浅」两档都在计划里：深档 2 条 / 浅档 2 条
+  ⑤ 分析真实执行：完成 28 / 28，结果行合计 528
+  ⑥ Finding 聚合：23 条 → 默认展示 8 条（其中「针对你的问题」4 条，深度分档 4 条）
+  ⑦ 结论已生成：SUPPORTED；建议阶段：NEEDS_MORE_RESEARCH
+  ⑧ Candidate 可创建且带全套 provenance：✓ #570003
+  ⑨ 复用：执行器仍为 RESEARCH-002 的 6 类，未新增任何执行器 / 表 / 入口
+
+==============================================================================
+检查项：36  失败：0
+结论：✓ 第二问题（§28 回踩深度）E2E 全部通过
+==============================================================================

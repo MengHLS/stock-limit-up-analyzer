@@ -111,11 +111,19 @@ export const CLOSED_LOOP_STAGE_WIRING_REQUIREMENTS: readonly ClosedLoopStageWiri
       "server/research/tradeQualityMetrics/evaluate.ts:87  evaluateTradeQualityMetrics(input): TradeQualityEvaluationRun",
     ],
   ),
-  notWired(
+  // optimization：评估器已就绪 —— `strategyEvaluation/evaluator.ts`（同步；复用同链
+  // research / backtest / evaluation 三支执行器，不手写第二套子链）。
+  // 搜索空间**只由文档 `parameters` 派生**（`strategyEvaluation/parameterSpaceFromDocument.ts`），
+  // 缺 min/max/step 的维度**如实进 `consistency.note`**，不静默丢弃。
+  wired(
     "optimization",
-    "parameterSearch + rollingOptimization",
-    "模块本身是「参数空间 + 注入式 evaluator」的纯函数（parameterSearch/run.ts:132 runParameterSearch、rollingOptimization/run.ts:148 runRollingOptimization），装配必须自带一个「参数集 → 绩效标量」的 evaluator——那等于在本层再搭一条 dataset→signalEngine→simulator→evaluate 的子链。在候选/回测链尚未端到端验证前装配它，会产出一条**无法被独立复算**的 optimizationRef。待 backtest 链有真实 E2E 证据后再接。",
-    ["server/research/parameterSearch/run.ts:132", "server/research/rollingOptimization/run.ts:148"],
+    "parameterSearch",
+    [viaArtifact(["dataset", "strategyDocument"])],
+    [
+      "server/research/parameterSearch/run.ts:132  runParameterSearch(request): ParameterSearchRun（闭环内 method=random + 固定 seed/budget，理由见 executors.ts 常量注释）",
+      "server/research/strategyEvaluation/evaluator.ts:73  createStrategyParameterEvaluator(input)（同步；复用闭环 research/backtest/evaluation 三支执行器）",
+      "server/research/strategyEvaluation/parameterSpaceFromDocument.ts:52  deriveParameterSpaceFromDocument(document)（搜索空间只由文档 parameters 派生）",
+    ],
   ),
   notWired(
     "robustness",
