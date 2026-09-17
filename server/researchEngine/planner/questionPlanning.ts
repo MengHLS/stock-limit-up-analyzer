@@ -50,7 +50,7 @@ import type { ResearchBatchAnalysisItem, ResearchBatchCreateResult } from "../ty
 import { generateAnalysisPlan, type GeneratedAnalysisPlan, type PlanDataFacts } from "./analysisPlan";
 import { ResearchPlannerError } from "./errors";
 import { describeIntent, detectResearchIntent, type ResearchIntentResult } from "./intent";
-import { DEFAULT_RESEARCH_MODULE_REGISTRY, type ResearchModuleRegistry } from "./moduleRegistry";
+import { defaultResearchModuleRegistry, type ResearchModuleRegistry } from "./moduleRegistry";
 
 /**
  * 研究问题的长度边界。
@@ -155,7 +155,7 @@ export async function planResearchQuestion(
 ): Promise<PlanResearchQuestionResult> {
   const { repos } = input;
   const questionText = assertQuestionText(input.questionText);
-  const registry = input.registry ?? DEFAULT_RESEARCH_MODULE_REGISTRY;
+  const registry = input.registry ?? defaultResearchModuleRegistry();
 
   // ---- 意图识别 ----
   const intent = detectResearchIntent(questionText, registry);

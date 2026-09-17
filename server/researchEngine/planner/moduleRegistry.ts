@@ -28,6 +28,8 @@
  *      具体求值一律交给既有 Analysis Executor（§2.1 不推翻现有 Analysis Engine）。
  */
 
+// 🔴 内容来自模式声明库；本文件只保留机制（注册表类 / 规格类型 / 条件配方构造器）。
+import { buildPatternModuleSpecs } from "../../research/patternLibrary/project";
 import type {
   ResearchAnalysisPriority,
   ResearchAnalysisType,
@@ -538,285 +540,46 @@ export function buildObsDayRecipe(
 }
 
 // ---------------------------------------------------------------------------
-// 内置 7 个 Research Module（初始内容，不是最终列表）
+// 默认注册表
 // ---------------------------------------------------------------------------
 
-/** 全部内置模块共用的深度分档（浅 / 标准 / 深）。 */
-const DEPTH_BANDS = {
-  shallow: [0.98, 1.0] as const,
-  normal: [0.95, 0.98] as const,
-  deep: [null, 0.95] as const,
-};
-
-function pullbackModule(): ResearchModuleSpec {
-  return {
-    key: "PULLBACK_EFFECTIVENESS",
-    label: "回踩有效性研究",
-    purpose:
-      "检验「首板之后出现回踩，只要没跌破某个支撑位，后续收益是否仍优于全样本」——"
-      + "即回踩是「洗盘」还是「走坏」。",
-    whenToUse: [
-      "研究问题里出现「回踩 / 回调 / 洗盘 / 不破某价位 / 缩量」等表述",
-      "想验证一条「等回踩再买」的入场逻辑是否真的比直接追首板好",
-    ],
-    researchType: "FEATURE",
-    requiredCapabilities: ["post", "path", "outcome"],
-    keywords: [
-      "回踩", "回调", "洗盘", "不破", "未破", "破位", "支撑", "缩量", "放量",
-      "pullback", "dip", "retrace",
-    ],
-    primaryKeywords: [
-      "回踩", "回调", "洗盘", "缩量", "放量", "不破", "未破", "跌破", "守住", "生命线", "支撑位",
-    ],
-    primaryAnalysisType: "CONDITIONAL",
-    recommendedAnalysisTypes: ["CONDITIONAL", "SEGMENT_RELATION", "STABILITY", "QUANTILE", "EVENT_STUDY", "DESCRIPTIVE"],
-    targetKinds: ["future_return", "max_drawdown", "min_return"],
-    preferredHorizons: [5, 10, 20],
-    entryEvaluations: [2, 3, 5],
-    guardRecipes: [buildGuardRecipe("open"), buildGuardRecipe("low")],
-    refinementRecipes: [
-      buildShrinkVolumeRecipe(0.5, "50"),
-      buildShrinkVolumeRecipe(0.3, "30"),
-      buildVolumeExpansionRecipe(),
-      buildLastBullishRecipe(),
-      buildAboveEventCloseRecipe(),
-      buildDepthBandRecipe(0, ...DEPTH_BANDS.shallow, "shallow"),
-      buildDepthBandRecipe(0, ...DEPTH_BANDS.normal, "normal"),
-      buildDepthBandRecipe(0, ...DEPTH_BANDS.deep, "deep"),
-    ],
-    controlRecipes: [buildGuardControlRecipe("open"), buildGuardControlRecipe("low")],
-    quantileFeatures: ["turnover", "limit_up_premium", "market_cap", "pre_volatility_20d"],
-    groupingDimensions: ["year", "board"],
-    stabilityDimension: "year",
-    conclusionTypes: ["SUPPORTED", "INCONCLUSIVE", "REJECTED"],
-    minSampleCount: 100,
-    primaryTargetKinds: ["future_return"],
-    defaultPriority: "P0",
-  };
-}
-
-function eventReturnModule(): ResearchModuleSpec {
-  return {
-    key: "EVENT_RETURN_RESEARCH",
-    label: "事件后收益研究",
-    purpose: "刻画「首板事件本身」之后不同视界的收益分布与基准水平，为其它研究提供参照系。",
-    whenToUse: [
-      "研究问题是开放式的「首板之后会怎样」",
-      "需要先拿到全样本基准，才能判断某个条件下的样本是否真的更好",
-    ],
-    researchType: "EVENT_STUDY",
-    requiredCapabilities: ["path", "outcome"],
-    keywords: ["收益", "涨幅", "基准", "全样本", "分布", "表现", "return", "baseline", "event study"],
-    primaryKeywords: [],
-    primaryAnalysisType: "EVENT_STUDY",
-    recommendedAnalysisTypes: ["EVENT_STUDY", "DESCRIPTIVE", "STABILITY", "QUANTILE"],
-    targetKinds: ["future_return", "max_drawdown", "min_return"],
-    preferredHorizons: [5, 10, 20],
-    entryEvaluations: [],
-    guardRecipes: [],
-    refinementRecipes: [],
-    controlRecipes: [],
-    quantileFeatures: ["turnover", "limit_up_premium", "historical_limit_count"],
-    groupingDimensions: ["year"],
-    stabilityDimension: "year",
-    conclusionTypes: ["INCONCLUSIVE", "SUPPORTED"],
-    minSampleCount: 100,
-    primaryTargetKinds: ["future_return"],
-    defaultPriority: "P0",
-  };
-}
-
-function entryTimingModule(): ResearchModuleSpec {
-  return {
-    key: "ENTRY_TIMING_RESEARCH",
-    label: "入场时点研究",
-    purpose: "检验「等 T+k 再入场」与「更早/更晚入场」相比，后续收益是否有系统性差异。",
-    whenToUse: [
-      "研究问题里出现「什么时候买 / 第几天买 / 确认后买 / 等几天」",
-      "想回答「早买 vs 等确认」的取舍",
-    ],
-    researchType: "FEATURE",
-    requiredCapabilities: ["post", "path", "outcome"],
-    keywords: ["入场", "时点", "什么时候买", "第几天", "确认", "等", "追高", "timing", "entry", "when to buy"],
-    primaryKeywords: ["入场", "什么时候买", "第几天", "追高", "等确认", "入场时点"],
-    primaryAnalysisType: "CONDITIONAL",
-    recommendedAnalysisTypes: ["CONDITIONAL", "EVENT_STUDY", "STABILITY", "SEGMENT_RELATION"],
-    targetKinds: ["future_return", "max_drawdown"],
-    preferredHorizons: [5, 10],
-    entryEvaluations: [1, 2, 3, 4, 5],
-    guardRecipes: [],
-    refinementRecipes: [
-      buildObsDayRecipe(
-        "above_event_close",
-        "T+k 收盘仍高于首板日收盘",
-        "「还没跌回首板日收盘」——检验强势整理是否比弱势整理更值得等。",
-        "return_from_event_close",
-        ">",
-        0,
-      ),
-      buildObsDayRecipe(
-        "below_event_close",
-        "T+k 收盘已低于首板日收盘（对照组）",
-        "对照组：已经跌回首板日收盘之下的样本后续如何走。",
-        "return_from_event_close",
-        "<=",
-        0,
-      ),
-    ],
-    controlRecipes: [],
-    quantileFeatures: ["turnover", "limit_up_premium"],
-    groupingDimensions: ["year"],
-    stabilityDimension: "year",
-    conclusionTypes: ["SUPPORTED", "INCONCLUSIVE", "REJECTED"],
-    minSampleCount: 100,
-    primaryTargetKinds: ["future_return"],
-    defaultPriority: "P0",
-  };
-}
-
-function holdingPeriodModule(): ResearchModuleSpec {
-  return {
-    key: "HOLDING_PERIOD_RESEARCH",
-    label: "持有期研究",
-    purpose: "比较不同持有视界的收益 / 回撤，回答「持有多久性价比最高」。",
-    whenToUse: [
-      "研究问题里出现「持有 / 拿几天 / 多久 / 短线几天」",
-      "需要在多个视界之间做取舍",
-    ],
-    researchType: "EVENT_STUDY",
-    requiredCapabilities: ["path", "outcome"],
-    keywords: ["持有", "拿几天", "多久", "视界", "周期", "持有期", "holding", "horizon", "days to hold"],
-    primaryKeywords: ["持有", "拿几天", "多久", "持有期", "几天最好"],
-    primaryAnalysisType: "EVENT_STUDY",
-    recommendedAnalysisTypes: ["EVENT_STUDY", "QUANTILE", "SEGMENT_RELATION", "STABILITY"],
-    targetKinds: ["future_return", "max_drawdown", "min_return"],
-    preferredHorizons: [1, 2, 3, 5, 10, 20],
-    entryEvaluations: [],
-    guardRecipes: [],
-    refinementRecipes: [],
-    controlRecipes: [],
-    quantileFeatures: ["turnover", "limit_up_premium"],
-    groupingDimensions: ["year"],
-    stabilityDimension: "year",
-    conclusionTypes: ["INCONCLUSIVE", "SUPPORTED"],
-    minSampleCount: 100,
-    primaryTargetKinds: ["future_return", "max_drawdown"],
-    defaultPriority: "P0",
-  };
-}
-
-function breakoutSuccessModule(): ResearchModuleSpec {
-  return {
-    key: "BREAKOUT_SUCCESS_RESEARCH",
-    label: "突破成功率研究",
-    purpose: "检验「T+h 窗口内是否突破首板日高点」的驱动因素，以及突破之后的表现。",
-    whenToUse: [
-      "研究问题里出现「突破 / 新高 / 创新高 / 冲高」",
-      "想回答「什么样的首板更容易再上台阶」",
-    ],
-    researchType: "FEATURE",
-    requiredCapabilities: ["path", "outcome", "features"],
-    keywords: ["突破", "新高", "冲高", "创新高", "breakout", "new high"],
-    primaryKeywords: ["突破", "新高", "冲高", "创新高"],
-    primaryAnalysisType: "QUANTILE",
-    recommendedAnalysisTypes: ["QUANTILE", "CONDITIONAL", "STABILITY", "EVENT_STUDY", "DESCRIPTIVE"],
-    targetKinds: ["is_breakout", "future_return"],
-    preferredHorizons: [5, 10],
-    entryEvaluations: [3],
-    guardRecipes: [buildGuardRecipe("low")],
-    refinementRecipes: [buildAboveEventCloseRecipe(), buildShrinkVolumeRecipe(0.5, "50")],
-    controlRecipes: [],
-    quantileFeatures: [
-      "limit_up_premium",
-      "turnover",
-      "float_market_cap",
-      "historical_limit_count",
-      "pre_volatility_20d",
-      "pre_volume_ratio_5d_20d",
-    ],
-    groupingDimensions: ["year", "board"],
-    stabilityDimension: "year",
-    conclusionTypes: ["SUPPORTED", "INCONCLUSIVE", "REJECTED"],
-    minSampleCount: 100,
-    primaryTargetKinds: ["is_breakout"],
-    defaultPriority: "P0",
-  };
-}
-
-function stopLossModule(): ResearchModuleSpec {
-  return {
-    key: "STOP_LOSS_RESEARCH",
-    label: "破位 / 止损研究",
-    purpose: "检验「跌破支撑位之后是否应当离场」——破位样本的后续收益与回撤代价。",
-    whenToUse: [
-      "研究问题里出现「止损 / 离场 / 破位 / 破了就走 / 割」",
-      "想给一条入场逻辑配一个可量化的离场条件",
-    ],
-    researchType: "FEATURE",
-    requiredCapabilities: ["post", "path", "outcome"],
-    keywords: ["止损", "离场", "破位", "割肉", "走坏", "stop loss", "exit", "break down"],
-    primaryKeywords: ["止损", "离场", "割肉", "走坏", "破位就走"],
-    primaryAnalysisType: "CONDITIONAL",
-    recommendedAnalysisTypes: ["CONDITIONAL", "SEGMENT_RELATION", "STABILITY"],
-    targetKinds: ["future_return", "max_drawdown", "min_return"],
-    preferredHorizons: [5, 10],
-    entryEvaluations: [2, 3, 5],
-    guardRecipes: [],
-    refinementRecipes: [],
-    controlRecipes: [buildGuardControlRecipe("low"), buildGuardControlRecipe("open")],
-    quantileFeatures: [],
-    groupingDimensions: ["year"],
-    stabilityDimension: "year",
-    conclusionTypes: ["SUPPORTED", "INCONCLUSIVE", "REJECTED"],
-    minSampleCount: 100,
-    primaryTargetKinds: ["future_return", "max_drawdown"],
-    defaultPriority: "P0",
-  };
-}
-
-function marketRegimeModule(): ResearchModuleSpec {
-  return {
-    key: "MARKET_REGIME_STABILITY",
-    label: "稳定性 / 市场环境研究",
-    purpose: "检验某个结论是否只在特定年份 / 板块成立（跨期一致性），而不是全样本平均出来的假象。",
-    whenToUse: [
-      "研究问题里出现「稳定 / 一直有效 / 不同年份 / 不同市场 / 环境」",
-      "任何研究在进入 Candidate 之前的稳定性复核",
-    ],
-    researchType: "REGIME",
-    requiredCapabilities: ["outcome"],
-    keywords: ["稳定", "一致性", "不同年份", "分年", "市场环境", "牛熊", "regime", "stability", "consistent"],
-    primaryKeywords: ["稳定", "一致性", "不同年份", "分年", "牛熊", "市场环境"],
-    primaryAnalysisType: "STABILITY",
-    recommendedAnalysisTypes: ["STABILITY", "QUANTILE", "DESCRIPTIVE"],
-    targetKinds: ["future_return"],
-    preferredHorizons: [5, 10],
-    entryEvaluations: [],
-    guardRecipes: [],
-    refinementRecipes: [],
-    controlRecipes: [],
-    quantileFeatures: ["turnover"],
-    groupingDimensions: ["year", "board"],
-    stabilityDimension: "year",
-    conclusionTypes: ["INCONCLUSIVE", "SUPPORTED", "REJECTED"],
-    minSampleCount: 100,
-    primaryTargetKinds: ["future_return"],
-    defaultPriority: "P0",
-  };
-}
-
-/** 内置 7 个 Research Module（初始内容）。新增方法 = 在此 `registry.register(...)`。 */
+/**
+ * 默认注册表 —— 模块内容来自 `research/patternLibrary`（交易模式声明库）。
+ *
+ * 🔴 2026-09-17 起，内置模块**不再手写在本文件**：它们是「交易模式声明」的研究侧投影
+ * （见 `server/research/patternLibrary/patterns/*.ts`）。本文件只保留**机制**
+ * （注册表类 / 规格类型 / 条件配方构造器），内容一律由声明库提供。
+ *
+ * ⇒ 「新增一种研究方法」= 在声明库里加一个模式文件（`patterns/index.ts` 登记一行），
+ *   不需要改本文件、不需要改 Planner、不需要改路由、不需要改前端。
+ *   此前本文件只做到了「可以 register」，内容仍然是写死的 —— 那正是「研究模块过于复杂」
+ *   的一环：加一种方法要改 3 个地方。
+ *
+ * ⚠️ 关于循环 import：本文件与 `patternLibrary/project.ts` 互相 import，但
+ * `project.ts` **只在函数体内**调用本文件的构造器（`buildGuardRecipe` 等），
+ * 本文件也**只在函数体内**调用 `buildPatternModuleSpecs()` ⇒ 两边都是在对方
+ * 求值完成之后才真正执行，ESM 下安全。反例（会炸）是任一方在**模块顶层**调用对方。
+ */
 export function createDefaultResearchModuleRegistry(): ResearchModuleRegistry {
   const registry = new ResearchModuleRegistry();
-  registry.register(eventReturnModule());
-  registry.register(pullbackModule());
-  registry.register(entryTimingModule());
-  registry.register(holdingPeriodModule());
-  registry.register(breakoutSuccessModule());
-  registry.register(stopLossModule());
-  registry.register(marketRegimeModule());
+  for (const spec of buildPatternModuleSpecs()) registry.register(spec);
   return registry;
 }
 
-/** 默认注册表（只读复用；模块是无状态数据，可安全共享）。 */
-export const DEFAULT_RESEARCH_MODULE_REGISTRY = createDefaultResearchModuleRegistry();
+let defaultRegistryCache: ResearchModuleRegistry | null = null;
+
+/**
+ * 默认注册表（**惰性单例**；模块是无状态数据，可安全共享）。
+ *
+ * 🔴 为什么不是顶层常量（2026-09-17 实测踩到）：本文件与 `patternLibrary/project.ts`
+ * 互相 import。若在任何模块里把构造写成**顶层表达式**，就会出现
+ * 「A 还在求值中，B 已经调用 A 的函数」⇒ 运行时 `TypeError: ... is not a function`
+ * （而 `tsc --noEmit` 完全看不出来 —— 类型是对的，只是绑定还没发生）。
+ * 惰性化之后，首次调用一定发生在**两边都已求值完**之后。
+ */
+export function defaultResearchModuleRegistry(): ResearchModuleRegistry {
+  if (defaultRegistryCache === null) {
+    defaultRegistryCache = createDefaultResearchModuleRegistry();
+  }
+  return defaultRegistryCache;
+}

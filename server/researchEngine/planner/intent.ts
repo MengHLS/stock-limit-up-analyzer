@@ -26,7 +26,7 @@
  */
 
 import {
-  DEFAULT_RESEARCH_MODULE_REGISTRY,
+  defaultResearchModuleRegistry,
   GENERIC_KEYWORD_WEIGHT,
   PRIMARY_KEYWORD_WEIGHT,
   type ResearchModuleRegistry,
@@ -104,7 +104,7 @@ export interface ResearchIntentResult {
  */
 export function detectResearchIntent(
   questionText: string,
-  registry: ResearchModuleRegistry = DEFAULT_RESEARCH_MODULE_REGISTRY,
+  registry: ResearchModuleRegistry = defaultResearchModuleRegistry(),
 ): ResearchIntentResult {
   const clauses = splitQuestionClauses(questionText);
   const modules = registry.list();

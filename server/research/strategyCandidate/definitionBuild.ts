@@ -60,6 +60,10 @@ import {
 import type { StrategyRecipe } from "../strategySchema/types";
 import type { ResearchParameterValue } from "../types";
 import { validateCanonicalStrategyDefinition } from "../strategySchema/definitionValidation";
+import {
+  STRATEGY_PARAMETER_ROLES,
+  type StrategyParameterRole,
+} from "../strategySchema/definition";
 import { STRATEGY_CANDIDATE_ERROR, StrategyCandidateError } from "./candidateTypes";
 
 // ---------------------------------------------------------------------------
@@ -377,11 +381,44 @@ function buildConditions(filterRule: unknown, codes: ReadonlySet<string>): Condi
   const conditions: ConditionDefinition[] = [];
   (groups as unknown[]).forEach((rawGroup, groupIndex) => {
     const group = asRecord(rawGroup, `filterRule.groups[${groupIndex}]`);
+    /**
+     * 🔴 组间连接符必须为 AND（P0-1）。
+     *
+     * 研究侧的 `groupLogicalOperator` 支持 OR（`researchEngine/conditionEvaluator.ts:130` 会真算），
+     * 而 `StrategyDefinition.ConditionDefinition` **没有逻辑运算符字段**（`strategySchema/definition.ts:461-472`）。
+     * 原先这里**不读**该字段 ⇒ 用户写「A 或 B」在策略侧被**静默压成**「A 且 B」：条件变严、
+     * 回测样本骤减、**不报错不留痕** —— 属语义篡改。⇒ 此处**响亮拒绝**，绝不静默降级。
+     * ⚠️ 首个组没有前序，其 `groupLogicalOperator` 按引擎口径被忽略。
+     */
+    if (groupIndex > 0) {
+      const groupOperator = group.groupLogicalOperator;
+      if (typeof groupOperator === "string" && groupOperator !== "AND") {
+        invalid(
+          `filterRule.groups[${groupIndex}].groupLogicalOperator`,
+          `策略侧条件只支持 AND 连接，实际为 ${JSON.stringify(groupOperator)}：`
+            + "把「或」静默当成「且」会让条件变严、回测样本骤减且不报错（语义篡改），因此这里直接拒绝。"
+            + "StrategyDefinition 的 ConditionDefinition 目前没有逻辑运算符字段，无法表达 OR/NOT；"
+            + "请改写为单组 AND，或让研究侧只产出 AND 语义的条件。",
+        );
+      }
+    }
     const rows = group.conditions;
     if (!Array.isArray(rows)) invalid(`filterRule.groups[${groupIndex}].conditions`, "必须是数组");
     (rows as unknown[]).forEach((rawRow, rowIndex) => {
       const path = `filterRule.groups[${groupIndex}].conditions[${rowIndex}]`;
       const row = asRecord(rawRow, path);
+      // 🔴 组内连接符同样必须为 AND（P0-1）。首条无前序 ⇒ 按引擎口径忽略（`conditionEvaluator.ts:8`）。
+      if (rowIndex > 0) {
+        const rowOperator = row.logicalOperator;
+        if (typeof rowOperator === "string" && rowOperator !== "AND") {
+          invalid(
+            `${path}.logicalOperator`,
+            `第 ${rowIndex + 1} 条条件的组内连接符为 ${JSON.stringify(rowOperator)}，策略侧只支持 AND：`
+              + "OR 会被静默当成 AND（条件变严、样本骤减且不报错）；NOT 亦无对应表达。"
+              + "ConditionDefinition 没有逻辑运算符字段，请改写为 AND 语义。",
+          );
+        }
+      }
       const field = requireNonEmptyString(row.fieldName, `${path}.fieldName`);
       /**
        * 字段引用必须是**既有权威文法**可解析的引用（`prefix.rd-1.close` / `event.turnover` / `bar.close`）。
@@ -391,10 +428,25 @@ function buildConditions(filterRule: unknown, codes: ReadonlySet<string>): Condi
        * 语义层（字段是否在白名单 / Look-Ahead L1–L8）交给既能校验器，职责不重叠。
        */
       if (parseStrategyFieldReference(field).kind === "unknown") {
+        /**
+         * 🔴 研究侧变量名（P0-2 / P0-3）：两侧不是**改名关系**而是**语义关系**。
+         *
+         * 研究侧条件名（如 `pullback_holds_event_open_2d`）与策略侧字段引用（如 `bar.haircutFromEventLow`）
+         * 之间**没有翻译层**：策略引用必含 `.`，不含点的基本就是研究侧变量名。
+         * 而且二者**语义常常不同构** —— 研究侧可能是「T+1..T+k 全程不破」的**窗口布尔**，
+         * 策略侧 `haircutFromEventLow` 是**单日**连续量。机械翻译会**静默引入语义错误**，
+         * 所以这里不猜、也不翻译，只把事实摆清楚，由人决定用哪个策略字段表达。
+         */
+        const looksLikeResearchVariable = !field.includes(".");
         invalid(
           `${path}.fieldName`,
           `必须写成 Strategy 字段引用（如 prefix.rd-1.close / event.turnover / bar.close），`
-            + `实际：${JSON.stringify(field)}；Promote 不会替你猜字段属于哪个时间域`,
+            + `实际：${JSON.stringify(field)}；Promote 不会替你猜字段属于哪个时间域。`
+            + (looksLikeResearchVariable
+                ? `⚠️ \`${field}\` 看起来是**研究侧变量名**（策略引用一定含 "."）：两侧没有自动翻译，`
+                  + "且语义常常不同构（研究侧「T+1..T+k 全程不破」是窗口布尔，策略侧 bar.haircutFromEventLow 是单日连续量）"
+                  + "⇒ 必须由你决定用哪个策略字段表达，Promote 不做机械翻译。"
+                : ""),
         );
       }
       const rawOperator = requireNonEmptyString(row.operator, `${path}.operator`);
@@ -432,6 +484,20 @@ function buildParameters(parameterSpace: unknown): ParameterDefinition[] {
     const path = `parameterSpace.${code}`;
     const spec = asRecord(record[code], path);
     const dataType = requireEnum(spec.type, ["number", "string", "boolean"] as const, `${path}.type`);
+    /**
+     * 🔴 参数角色（2026-09-17 新增，PATTERN-LIBRARY-001）。
+     *
+     * 迁移前本函数把 `parameterRole` **恒置为 `TUNABLE`** ⇒ 草稿里声明为「固定」的参数
+     * 只要带了 min/max/step 就会被 Parameter Search 搜索，而结果看起来完全正常 ——
+     * 这是「声明了却对计算毫无影响」的静默失效（`RESEARCH-STRATEGY-GAP-AUDIT-001.md` P1-1）。
+     *
+     * 现在草稿可显式给出 `parameterRole`；**缺省仍是 `TUNABLE`**
+     * ⇒ 既有草稿（无该键）行为逐字不变，零回归。
+     */
+    const parameterRole: StrategyParameterRole =
+      spec.parameterRole === undefined
+        ? "TUNABLE"
+        : requireEnum(spec.parameterRole, STRATEGY_PARAMETER_ROLES, `${path}.parameterRole`);
     const allowedRaw = spec.allowedValues;
     let allowedValues: string[] | undefined;
     if (allowedRaw !== undefined && allowedRaw !== null) {
@@ -451,19 +517,23 @@ function buildParameters(parameterSpace: unknown): ParameterDefinition[] {
      * 非数值参数要有非空 allowedValues）。**在这里提前响亮失败**，
      * 比让它到 definition 校验阶段变成一句结构性错误更容易定位；同样**不补默认范围**。
      */
-    if (dataType === "number") {
-      if (spec.min === undefined || spec.max === undefined) {
+    // 范围完整性只对**待搜索**（TUNABLE）参数成立：FIXED / DERIVED 参数不进搜索空间，
+    // 要求它们给出 min/max 反而是错的（把「固定值」逼成「带范围的待搜值」）。
+    if (parameterRole === "TUNABLE") {
+      if (dataType === "number") {
+        if (spec.min === undefined || spec.max === undefined) {
+          incomplete(
+            `${path}.min / ${path}.max`,
+            "TUNABLE（待 Parameter Search）参数的范围必须由草稿声明 —— "
+              + "数值参数要同时给出 min 与 max，Promote 不会替你给搜索空间定界",
+          );
+        }
+      } else if (allowedValues === undefined || allowedValues.length === 0) {
         incomplete(
-          `${path}.min / ${path}.max`,
-          "草稿参数的角色恒为 TUNABLE（待 Parameter Search），因此范围必须由草稿声明 —— "
-            + "数值参数要同时给出 min 与 max，Promote 不会替你给搜索空间定界",
+          `${path}.allowedValues`,
+          `TUNABLE 的非数值参数（${dataType}）必须声明非空 allowedValues（搜索候选集合）`,
         );
       }
-    } else if (allowedValues === undefined || allowedValues.length === 0) {
-      incomplete(
-        `${path}.allowedValues`,
-        `TUNABLE 的非数值参数（${dataType}）必须声明非空 allowedValues（搜索候选集合）`,
-      );
     }
 
     /**
@@ -511,10 +581,11 @@ function buildParameters(parameterSpace: unknown): ParameterDefinition[] {
       name: code,
       dataType,
       /**
-       * 🔴 草稿里的参数是**待搜空间**（Research 只声明、不搜索），因此角色恒为 `TUNABLE`：
-       * 这正是 006.0 §14 的技术要点 2 —— 不许把「回测最优值」固化成正式规则而让搜索空间提前坍缩。
+       * 🔴 草稿参数默认是**待搜空间**（Research 只声明、不搜索），缺省角色 `TUNABLE` ——
+       * 这正是 006.0 §14 的技术要点 2：不许把「回测最优值」固化成正式规则而让搜索空间提前坍缩。
+       * 但**草稿可以显式声明 `FIXED`**（见上方 `parameterRole` 的取值逻辑）：那时它不进搜索空间。
        */
-      parameterRole: "TUNABLE",
+      parameterRole,
       ...(spec.min === undefined ? {} : { min: requireFiniteNumber(spec.min, `${path}.min`) }),
       ...(spec.max === undefined ? {} : { max: requireFiniteNumber(spec.max, `${path}.max`) }),
       ...(spec.step === undefined ? {} : { step: requireFiniteNumber(spec.step, `${path}.step`) }),

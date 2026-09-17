@@ -21,6 +21,11 @@
  *    不重复实现任何一条已有端点。
  */
 
+import {
+  listTradingPatterns,
+  projectCandidateSketch,
+  requireTradingPattern,
+} from "./research/patternLibrary";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { adminProcedure, publicProcedure, router } from "./_core/trpc";
@@ -50,7 +55,7 @@ import {
 } from "./researchEngine/planner/questionPlanning";
 import type { GeneratedAnalysisPlan, PlanDataFacts } from "./researchEngine/planner/analysisPlan";
 import {
-  DEFAULT_RESEARCH_MODULE_REGISTRY,
+  defaultResearchModuleRegistry,
   type ResearchModuleRegistry,
 } from "./researchEngine/planner/moduleRegistry";
 
@@ -124,7 +129,7 @@ const detachedRuns = new Map<number, { runId: number; startedAt: string; promise
 
 export function buildResearchPlannerRouter(deps: ResearchPlannerRouterDeps) {
   const { repos, reader } = deps;
-  const registry = deps.registry ?? DEFAULT_RESEARCH_MODULE_REGISTRY;
+  const registry = deps.registry ?? defaultResearchModuleRegistry();
 
   const engine = new ResearchEngine({
     repos,
@@ -472,6 +477,13 @@ export function buildResearchPlannerRouter(deps: ResearchPlannerRouterDeps) {
            *    `{ datasetVersionId, researchQuestion }`，Workbuddy 拿不到库内主键。
            */
           deriveFilterFromAnalysisId: z.number().int().positive().optional(),
+          /**
+           * PATTERN-LIBRARY-001 —— 交易模式 id（可选）。
+           *
+           * 给了它，入场事件 / 决策窗口 / 执行配方引用 / 参数空间就**由模式声明派生**
+           * （与研究侧同源，不需要人工翻译）；不给则保持既有行为（全部由调用方自填）。
+           */
+          patternId: z.string().min(1).optional(),
           entryRule: z.unknown().optional(),
           exitRule: z.unknown().optional(),
           riskRule: z.unknown().optional(),
@@ -500,8 +512,82 @@ export function buildResearchPlannerRouter(deps: ResearchPlannerRouterDeps) {
            */
           const source = await resolveCandidateFilterSource(repos, outcome, input.deriveFilterFromAnalysisId);
 
+          /**
+           * ---- PATTERN-LIBRARY-001：候选草图由「交易模式声明」投影 ----
+           *
+           * 🔴 这是「分析 → 转成正式策略」能跑通的关键一步：转正
+           * （`buildStrategyDefinition`）要求候选带 `entryRule.extra.recipe`，
+           * 否则策略文档缺 `recipe` ⇒ 装配层只能落 `DEFAULT_STRATEGY_RECIPE_ID`
+           * （「按当日涨跌幅取前 5 名」）⇒ **用户研究出来的条件进不了回测，
+           * 而产物看起来完全正常**（P0-4 的现场）。
+           *
+           * 迁移前这个槽位只能由调用方手工填（= 人工翻译）；现在调用方只需给出 `patternId`，
+           * 入场事件 / 决策窗口 / 触发时点 / 配方引用 / 参数空间 / 执行假设全部由声明派生 ⇒ 与研究侧同源。
+           *
+           * ⚠️ `entryRule` 由调用方给出时按 **`extra` 逐键浅合并**（声明为底、调用方覆盖），
+           *    见下方 create 调用处。
+           */
+          let patternSketch: {
+            readonly entryRule: unknown;
+            readonly parameterSpace: unknown;
+            readonly exitRule: unknown;
+            readonly riskRule: unknown;
+          } | null = null;
+          let patternIdEcho: string | null = null;
+          let patternNotes: readonly string[] = [];
+          let patternGateSummary: readonly string[] = [];
+          if (input.patternId !== undefined) {
+            const pattern = requireTradingPattern(input.patternId);
+            const sketch = projectCandidateSketch(pattern);
+            if (sketch === null) {
+              throw new Error(
+                `交易模式 \`${pattern.patternId}\` 尚不具备可执行形态（缺 execution 或 sketch 声明），`
+                  + "无法据此创建候选。请先在该模式的声明文件里补全。",
+              );
+            }
+            patternSketch = {
+              entryRule: sketch.entryRule,
+              parameterSpace: sketch.parameterSpace,
+              exitRule: sketch.exitRule,
+              riskRule: sketch.riskRule,
+            };
+            patternIdEcho = pattern.patternId;
+            patternNotes = sketch.notes;
+            // 门槛摘要（人读；进 provenance，让「筛选条件是什么」在候选上可见 ——
+            // 因为 patternId 路径不写 research 侧 filterRule）。
+            const execution = pattern.execution;
+            patternGateSummary =
+              execution !== null && execution.signalKind === "gated"
+                ? execution.gates.map(
+                    gate =>
+                      `${gate.label}：${gate.feature} ${gate.kind} `
+                        + `${gate.bound.kind === "parameter" ? gate.bound.parameter : String(gate.bound.value)}`,
+                  )
+                : [];
+          }
           let filterRule: ResearchConditionSet | undefined;
-          if (source.analysisId !== null) {
+          if (patternSketch !== null && input.deriveFilterFromAnalysisId === undefined) {
+            /**
+             * 🔴 **patternId 路径：不写研究侧 filterRule**（写空组）。
+             *
+             * 为什么必须这样（2026-09-17 真机全链实测）：`filterRule` 由研究侧分析条件导出，
+             * 其 `fieldName` 是**研究侧变量名**（如 `pullback_holds_event_open_2d`），
+             * 而 promote 要求策略字段引用（必含 "."）⇒ 必然抛
+             * `STRATEGY_CANDIDATE_PROMOTE_SKETCH_INVALID`。两侧**没有自动翻译**，
+             * 且语义常常不同构（研究侧「T+1..T+k 全程不破」是窗口布尔，
+             * 策略侧 `haircutFromEventLow` 是单日连续量）——
+             * 机械翻译会静默引入语义错误，所以 promote 拒绝替你猜（见缺口报告 P0-2 / P0-3）。
+             *
+             * 条件**不会因此丢失**：候选带了 `entryRule.extra.recipe` ⇒ 转正后文档带 `recipe`
+             * ⇒ 装配层用该配方的 `buildGates` 真筛证券。筛选语义由**执行侧门槛**承载 ——
+             * 这正是「同源构造」：同一份模式声明同时给出研究侧条件与执行侧门槛，
+             * 不需要在候选上再抄一遍。门槛摘要写进 `sourceTraceJson.patternGateSummary` 供人查看。
+             *
+             * ⚠️ 显式传了 `deriveFilterFromAnalysisId` 时仍按调用方意愿走既有路径
+             *    （那会因上述原因在 promote 阶段失败，属调用方的显式选择，不静默改写）。
+             */
+            filterRule = { groups: [] };
+          } else if (source.analysisId !== null) {
             // `groupConditions` 是条件分组的**唯一权威**（按 groupNo 归组、组内按 sortOrder），
             // 这里直接复用其结果，不另写一份分组逻辑。
             filterRule = { groups: groupConditions(source.rows) };
@@ -513,9 +599,45 @@ export function buildResearchPlannerRouter(deps: ResearchPlannerRouterDeps) {
             name: input.name,
             description: input.description ?? outcome.questionText ?? null,
             ...(filterRule !== undefined ? { filterRule } : {}),
-            ...(input.entryRule !== undefined ? { entryRule: input.entryRule } : {}),
-            ...(input.exitRule !== undefined ? { exitRule: input.exitRule } : {}),
-            ...(input.riskRule !== undefined ? { riskRule: input.riskRule } : {}),
+            /**
+             * 🔴 **`extra` 逐键浅合并**（声明为底、调用方覆盖），而不是整体替换。
+             *
+             * 为什么：`entryRule.extra` 里既有**语义面**（`observationWindow` / `trigger` /
+             * `recipe` —— 由模式声明投影），也有**执行假设面**（`execution` / `position` /
+             * `risk` / `document` —— 调用方常要覆盖）。若整体替换，调用方只想补一个执行键，
+             * 就会把声明投影出的 `recipe` 一起丢掉 ⇒ 转正产出的文档缺 `recipe`
+             * ⇒ 装配层落 `DEFAULT_STRATEGY_RECIPE_ID` ⇒ **条件又进不了回测**。
+             * 2026-09-17 真实库全链验收实测到这条路径（补 `trigger` 时 recipe 消失）。
+             */
+            ...(() => {
+              const fromPattern = patternSketch?.entryRule as
+                | { event?: unknown; timing?: unknown; extra?: Record<string, unknown> }
+                | undefined;
+              const explicit = input.entryRule as
+                | { event?: unknown; timing?: unknown; extra?: Record<string, unknown> }
+                | undefined;
+              if (fromPattern === undefined) return explicit === undefined ? {} : { entryRule: explicit };
+              if (explicit === undefined) return { entryRule: fromPattern };
+              return {
+                entryRule: {
+                  ...fromPattern,
+                  ...explicit,
+                  extra: { ...(fromPattern.extra ?? {}), ...(explicit.extra ?? {}) },
+                },
+              };
+            })(),
+            ...(patternSketch !== null ? { parameterSpace: patternSketch.parameterSpace } : {}),
+            // 退出 / 风控：显式入参优先，未传则用模式声明投影出的文档级默认（promote 的必填段）。
+            ...(input.exitRule !== undefined
+              ? { exitRule: input.exitRule }
+              : patternSketch !== null
+                ? { exitRule: patternSketch.exitRule }
+                : {}),
+            ...(input.riskRule !== undefined
+              ? { riskRule: input.riskRule }
+              : patternSketch !== null
+                ? { riskRule: patternSketch.riskRule }
+                : {}),
             // ---- 全套 provenance（§16）----
             sourceDatasetVersionId: outcome.datasetVersionId,
             sourceResearchRunId: outcome.runId,
@@ -532,6 +654,13 @@ export function buildResearchPlannerRouter(deps: ResearchPlannerRouterDeps) {
               dataValidityPassed: outcome.dataValidity.passed,
               recommendationStage: outcome.recommendation.stage,
               recommendationReasons: outcome.recommendation.reasons,
+              patternGateSummary: [...patternGateSummary],
+              filterRuleOmittedReason:
+                patternSketch !== null && input.deriveFilterFromAnalysisId === undefined
+                  ? "筛选条件由执行配方的门槛（recipe.buildGates）承载，故候选不写研究侧 filterRule"
+                  : null,
+              patternId: patternIdEcho,
+              patternNotes: [...patternNotes],
               derivedFilterFromAnalysisId: source.analysisId,
               filterRuleOrigin: source.origin,
               snapshotAt: new Date().toISOString(),
@@ -558,6 +687,55 @@ export function buildResearchPlannerRouter(deps: ResearchPlannerRouterDeps) {
       }),
 
     // ---- ⑨ 模块目录（只读：让前端能展示「系统会哪些研究方法」）----
+    /**
+     * PATTERN-LIBRARY-001 —— 已声明的**交易模式**清单（只读）。
+     *
+     * 与 `listModules` 的分工：`listModules` 回答「系统会从哪些**研究角度**去分析」；
+     * 本端点回答「有哪几种**可转正的交易模式**」—— 即「建候选时该挂哪个 `patternId`」。
+     *
+     * 为什么必须由服务端暴露：模式声明是 `server/research/patternLibrary/` 里的**代码常量**，
+     * 前端拿不到；而「有哪些模式可选」又是纯展示信息，不应让前端复制一份清单
+     * （复制 = 第二套列表，必然漂移）。
+     *
+     * 传 `patternId` 建候选 ⇒ 入场事件 / 入场时点 / 触发时点 / 决策窗口 / 执行配方引用 /
+     * 参数空间全部由**模式声明**派生（与研究侧同源）；转正后文档带 `recipe`
+     * ⇒ 装配层用该配方的 `buildGates` 真筛证券 ⇒ **条件真进回测**。
+     */
+    listPatterns: publicProcedure.query(() =>
+      listTradingPatterns().map((pattern) => {
+        const execution = pattern.execution;
+        const sketch = pattern.sketch ?? null;
+        return {
+          patternId: pattern.patternId,
+          label: pattern.label,
+          purpose: pattern.purpose,
+          whenToUse: pattern.whenToUse,
+          researchModuleKey: pattern.research?.moduleKey ?? null,
+          recipeId: execution?.recipeId ?? null,
+          /**
+           * 能否转正 = 有执行形态（可跑的配方）**且**声明了 sketch
+           * （入场事件 / 时点 / 触发 / 窗口）—— 与 `projectCandidateSketch` 返回 null 的两个条件同源。
+           */
+          promotable: execution !== null && sketch !== null,
+          /** 门槛摘要（人读）。筛选语义由配方的 `buildGates` 承载，故这里是它的可读投影。 */
+          gates:
+            execution !== null && execution.signalKind === "gated"
+              ? execution.gates.map(
+                  gate =>
+                    `${gate.label}：${gate.feature} ${gate.kind} `
+                      + `${gate.bound.kind === "parameter" ? gate.bound.parameter : String(gate.bound.value)}`,
+                )
+              : [],
+          parameterNames: execution === null ? [] : execution.parameters.map(item => item.name),
+          entryEvent: sketch?.event ?? null,
+          entryTiming: sketch?.timing ?? null,
+          entryTrigger: sketch?.trigger ?? null,
+          observationWindow: sketch?.observationWindow ?? null,
+          notes: [...(sketch?.notes ?? [])],
+        };
+      }),
+    ),
+
     listModules: publicProcedure.query(() =>
       registry.list().map((m) => ({
         key: m.key,
