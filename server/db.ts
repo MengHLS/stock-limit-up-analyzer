@@ -75,8 +75,11 @@ import {
   classifyAdvanceKind,
   createInitialPaperTradingState,
   paperTradingAdvanceDiagnosis,
+  resolveEffectivePaperSettings,
   PaperTradingCalendarStaleError,
   type PaperTradingAdvanceDiagnosis,
+  type PaperTradingEffectiveSettings,
+  type PaperTradingRunOptions,
   type PaperTradingState,
   type PaperTradingStrategyKey,
   type PaperTradingSummary,
@@ -2643,7 +2646,9 @@ export type PaperTradingRunSummary = {
 
 export type PaperTradingRunDetail = PaperTradingRunSummary & {
   initialCapital: number;
-  options: LeaderCandidateBacktestOptions;
+  options: PaperTradingRunOptions;
+  /** 该运行**实际生效**的退出/仓位/成交约束参数（含缺省回落），供页面如实展示。 */
+  effectiveSettings: PaperTradingEffectiveSettings;
   state: PaperTradingState;
 };
 
@@ -2660,7 +2665,18 @@ function parsePaperTradingState(json: string | null, initialCapital: number): Pa
     // 结构兜底：老数据缺字段时补默认值，避免推进崩溃。
     return {
       cash: parsed.cash ?? initialCapital,
-      positions: Array.isArray(parsed.positions) ? parsed.positions : [],
+      // 🔴 `equityAtEntry` 是 2026-09-18 新增字段（组合无条件止损的分母）：
+      // 之前落库的持仓没有它 ⇒ 在这里补为「初始资金」。
+      // 这是**近似**（真实分母是建仓当日的账户总权益），所以补值这件事必须写在持久化边界上、
+      // 而不是散落在判定函数里 —— 否则「哪些持仓是近似的」在数据层就再也看不出来了。
+      positions: Array.isArray(parsed.positions)
+        ? parsed.positions.map((position) => ({
+          ...position,
+          equityAtEntry: Number.isFinite(position?.equityAtEntry) && (position?.equityAtEntry ?? 0) > 0
+            ? position.equityAtEntry
+            : initialCapital,
+        }))
+        : [],
       pendingBuys: Array.isArray(parsed.pendingBuys) ? parsed.pendingBuys : [],
       orders: Array.isArray(parsed.orders) ? parsed.orders : [],
       equityCurve: Array.isArray(parsed.equityCurve) ? parsed.equityCurve : [],
@@ -2713,7 +2729,7 @@ function buildInitialForwardState(
 }
 
 /** 归一化参数：把初始资金并入 realistic，确保固定仓位占比等口径一致。 */
-function normalizePaperTradingOptions(options: LeaderCandidateBacktestOptions, initialCapital: number): LeaderCandidateBacktestOptions {
+function normalizePaperTradingOptions(options: PaperTradingRunOptions, initialCapital: number): PaperTradingRunOptions {
   return { ...options, realistic: { ...(options.realistic ?? {}), initialCapital: Math.floor(initialCapital) } };
 }
 
@@ -2721,7 +2737,7 @@ function normalizePaperTradingOptions(options: LeaderCandidateBacktestOptions, i
 export async function createPaperTradingRun(
   label: string,
   strategyKey: PaperTradingStrategyKey,
-  options: LeaderCandidateBacktestOptions,
+  options: PaperTradingRunOptions,
   initialCapital: number,
 ): Promise<number> {
   const db = await getDb();
@@ -2782,9 +2798,9 @@ export async function getPaperTradingRun(id: number): Promise<PaperTradingRunDet
   const rows = await db.select().from(paperTradingRuns).where(eq(paperTradingRuns.id, id));
   const row = rows[0];
   if (!row) return null;
-  let options: LeaderCandidateBacktestOptions = {};
+  let options: PaperTradingRunOptions = {};
   try {
-    options = JSON.parse(row.paramsJson ?? "{}") as LeaderCandidateBacktestOptions;
+    options = JSON.parse(row.paramsJson ?? "{}") as PaperTradingRunOptions;
   } catch {
     options = {};
   }
@@ -2799,6 +2815,9 @@ export async function getPaperTradingRun(id: number): Promise<PaperTradingRunDet
     summary: buildPaperTradingSummary(state, row.initialCapital),
     initialCapital: row.initialCapital,
     options,
+    // 🔴 生效参数必须由服务端算好下发（唯一缺省源在 paperTrading.ts）：
+    // 让页面自己再写一遍缺省值，就是 D2「参数恒为硬编码缺省而页面零处展示」的成因。
+    effectiveSettings: resolveEffectivePaperSettings(options),
     state,
   };
 }
@@ -2889,6 +2908,9 @@ export async function advancePaperTradingRunToLatest(id: number): Promise<PaperT
       tradingDates,
       strategyKey: run.strategyKey,
       realistic,
+      // 纸面专属设置：缺字段时由 advancePaperTradingDay 内部按缺省常量解析
+      // ⇒ 旧运行（paramsJson 里没有 paperTrading 块）**零写库**即按「开盘+收盘 / 组合止损 3%」生效。
+      paperTrading: options.paperTrading,
       appliedMinScore: options.minScore ?? null,
       penaltyWeight: downside.penaltyWeight,
       hardRiskThreshold: downside.hardRiskThreshold ?? 0,

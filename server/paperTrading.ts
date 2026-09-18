@@ -1,9 +1,10 @@
 import type {
   LeaderCandidate,
+  LeaderCandidateBacktestOptions,
   LeaderCandidateBacktestRow,
   LeaderCandidateDailyPrice,
 } from "./leaderCandidates";
-import type { RealisticBacktestOptions } from "./realisticBacktest";
+import type { PositionSizingStrategy, RealisticBacktestOptions } from "./realisticBacktest";
 import type { DownsideRiskStrategyKey } from "./downsideRisk";
 import { calculateQualityBlendScoreForRisk, defaultDownsideRiskPenaltyWeight } from "./downsideRisk";
 import {
@@ -25,11 +26,61 @@ import { isPriceAtLimitDown, isPriceAtLimitUp } from "./data/boardRules";
  *
  * 关键约束：
  * - Point-in-time：候选评分只读 ≤ 信号日的数据，且惩罚权重使用固定值（不做基于未来窗口的自动调参），杜绝未来函数。
- * - 成交与退出规则镜像 realisticBacktest，保证前向曲线与回测口径可比。
  * - 本模块为纯函数，不触碰数据库；持久化由 db.ts 承担。
+ *
+ * 🔴 与组合回测（realisticBacktest）的口径关系 —— **逐条声明，禁止含混**（2026-09-18 修正）：
+ *
+ * | 退出规则 | 组合回测 | 前向纸面 |
+ * | --- | --- | --- |
+ * | 开盘止损（开盘价 ≤ 成本×(1−stopLoss%)） | 有 | **有**（`exitJudgementPhase` 含 open 时；2026-09-18 前**没有**，是 D1 结构性缺陷） |
+ * | 收盘止损 | 有 | 有 |
+ * | 盘中止损（最低价触及，需开关） | 有 | 有 |
+ * | 动态回撤止盈 | 有（仅收盘） | 有（开盘/收盘按 `exitJudgementPhase`） |
+ * | 强势续持 / 最多续持 | 有（仅收盘） | 有（仅收盘） |
+ * | **组合无条件止损（单票浮亏 > 建仓总权益×N%）** | **无** | **有**（纸面专属，缺省 3%） |
+ *
+ * ⇒ 默认参数下两端**只在「组合无条件止损」这一条上不同**，且默认就是不同的。
+ * 这是**用户明确要求的口径分叉**（只加在纸面、不动回测以免重算全部历史回测数值），
+ * 不是遗漏：任何「纸面曲线与回测可比」的表述都必须附带这条差异。
+ * 把 `portfolioStopLossPercent` 设为 0 即关闭该规则，可回到「仅剩时点差异」的等价形态。
  */
 
 export type PaperTradingStrategyKey = DownsideRiskStrategyKey;
+
+// ==================== 纸面专属设置（回测侧不消费） ====================
+// 这些设置放在运行 options 的 `paperTrading` 块下，而不是塞进 `realistic`：
+// `realistic` 是与组合回测**共用**的参数容器，往里加只有纸面认识的字面量，
+// 等于制造「回测参数里躺着它不消费的字段」这种最难发现的漂移。边界必须由类型来表达。
+
+/** 止损 / 动态回撤止盈的判定时点。缺省 `both`（开盘与收盘各判一次）。 */
+export type PaperTradingExitPhase = "open" | "close" | "both";
+
+export const PAPER_TRADING_EXIT_PHASES = ["open", "close", "both"] as const;
+
+/** 缺省判定时点：开盘 + 收盘（与组合回测「开盘判一次、收盘再判一次」对齐）。 */
+export const PAPER_TRADING_DEFAULT_EXIT_PHASE: PaperTradingExitPhase = "both";
+
+/**
+ * 缺省「组合无条件止损」阈值（%）。
+ *
+ * 语义：单笔持仓的浮亏（市值 − 建仓成本，含买入费用）达到「**建仓时账户总权益**」的 3% 时，
+ * **无条件**出清 —— 不受「强势续持 / 动态回撤止盈已激活 / 最多续持未到」等豁免影响。
+ *
+ * 🔴 这是**纸面专属**规则，组合回测侧不存在 ⇒ 默认参数下两端不再逐笔等价。
+ * 设 **0 = 关闭**（关闭后回到「与回测仅剩时点差异」的形态）。
+ */
+export const PAPER_TRADING_DEFAULT_PORTFOLIO_STOP_LOSS_PERCENT = 3;
+
+/** 纸面运行专属设置；缺字段一律按上面的缺省常量解析（旧运行零写库即生效）。 */
+export type PaperTradingSettings = {
+  exitJudgementPhase?: PaperTradingExitPhase;
+  portfolioStopLossPercent?: number;
+};
+
+/** 纸面运行的 options：与回测共用同一份基础参数，外加一个纸面专属设置块。 */
+export type PaperTradingRunOptions = LeaderCandidateBacktestOptions & {
+  paperTrading?: PaperTradingSettings;
+};
 
 export type PaperPendingBuy = {
   rank: number;
@@ -61,6 +112,12 @@ export type PaperPosition = {
   /** 建仓以来最高收盘价（含建仓价），用于动态回撤止盈。 */
   highestClosePrice: number;
   entryTradingDateIndex: number;
+  /**
+   * 建仓时账户总权益（现金 + 存续持仓按最近可见收盘估值），**冻结在建仓那一刻**。
+   * 这是「组合无条件止损」的分母，与组合回测 `RealisticTrade.pnlToEquityRatio` 同一口径。
+   * ⚠️ 2026-09-18 之前落库的持仓没有这个字段（旧 stateJson）⇒ 读取端回落为初始资金（见 db.ts#parsePaperTradingState）。
+   */
+  equityAtEntry: number;
 };
 
 export type PaperOrder = {
@@ -122,6 +179,8 @@ export type PaperTradingAdvanceInput = {
   tradingDates: string[];
   strategyKey: PaperTradingStrategyKey;
   realistic: RealisticBacktestOptions;
+  /** 纸面专属设置（判定时点 / 组合无条件止损阈值）；缺省按 PAPER_TRADING_DEFAULT_* 解析。 */
+  paperTrading?: PaperTradingSettings;
   appliedMinScore?: number | null;
   penaltyWeight?: number;
   hardRiskThreshold?: number;
@@ -287,9 +346,233 @@ function createSkippedOrder(pending: PaperPendingBuy, entryDate: string, reason:
   };
 }
 
+// ==================== 参数解析（唯一缺省源） ====================
+// ⚠️ 缺省值与夹取范围**只能在这里写一次**。此前推进逻辑内联缺省、而页面零处展示生效参数，
+// 结果是「真库里 4 条运行全部是硬编码缺省，而没有人知道」——这类『口径漂移』靠纪律防不住，只能靠结构。
+
+/** `realistic` 解析后的确定值（缺省回落 + 夹取已完成）。 */
+export type ResolvedPaperRealisticOptions = {
+  initialCapital: number;
+  maxPositions: number;
+  commissionRate: number;
+  stampDutyRate: number;
+  transferFeeRate: number;
+  slippageBps: number;
+  lotSize: number;
+  blockLimitUpBuys: boolean;
+  blockLimitDownSells: boolean;
+  enableOneWordLimitDownProbability: boolean;
+  oneWordLimitDownSellProbability: number;
+  positionSizingStrategy: PositionSizingStrategy;
+  fixedPositionPercent: number;
+  trailingProfitActivationPercent: number;
+  trailingDrawdownPercent: number;
+  stopLossPercent: number;
+  strongHoldMinReturn: number;
+  maxHoldingDays: number;
+  minimumExpectedOpenChangePercent: number;
+  expectationTierEnabled: boolean;
+  expectationTable: OpenExpectationTable;
+  blockOneWordLimitUpBuys: boolean;
+  enableIntradayStopLoss: boolean;
+  maxPositionAmountRatio: number;
+};
+
+const clampPercent = (value: number | undefined, fallback: number) => Math.min(100, Math.max(0, value ?? fallback));
+
+/** 解析 `realistic`（缺省回落 + 夹取）。推进逻辑与「生效参数面板」共用，杜绝两套缺省。 */
+export function resolvePaperRealisticOptions(realistic: RealisticBacktestOptions): ResolvedPaperRealisticOptions {
+  return {
+    initialCapital: realistic.initialCapital ?? 100_000,
+    maxPositions: Math.max(1, Math.floor(realistic.maxPositions ?? 5)),
+    commissionRate: realistic.commissionRate ?? 0.0003,
+    stampDutyRate: realistic.stampDutyRate ?? 0.0005,
+    transferFeeRate: realistic.transferFeeRate ?? 0.00001,
+    slippageBps: realistic.slippageBps ?? 10,
+    lotSize: Math.max(1, Math.floor(realistic.lotSize ?? 100)),
+    blockLimitUpBuys: realistic.blockLimitUpBuys ?? false,
+    blockLimitDownSells: realistic.blockLimitDownSells ?? false,
+    enableOneWordLimitDownProbability: realistic.enableOneWordLimitDownProbability ?? false,
+    oneWordLimitDownSellProbability: clampPercent(realistic.oneWordLimitDownSellProbability, 0),
+    positionSizingStrategy: realistic.positionSizingStrategy ?? "equal",
+    fixedPositionPercent: Math.min(100, Math.max(1, realistic.fixedPositionPercent ?? 20)),
+    trailingProfitActivationPercent: clampPercent(realistic.trailingProfitActivationPercent, 6),
+    trailingDrawdownPercent: clampPercent(realistic.trailingDrawdownPercent, 3),
+    stopLossPercent: clampPercent(realistic.stopLossPercent, 5),
+    strongHoldMinReturn: clampPercent(realistic.strongHoldMinReturn, 3),
+    maxHoldingDays: Math.max(2, Math.floor(realistic.maxHoldingDays ?? 5)),
+    minimumExpectedOpenChangePercent: Math.min(100, Math.max(-50, realistic.minimumExpectedOpenChangePercent ?? -2)),
+    expectationTierEnabled: realistic.expectationTierEnabled ?? false,
+    expectationTable: realistic.expectationTable ?? OPEN_EXPECTATION_DEFAULT_TABLE,
+    blockOneWordLimitUpBuys: realistic.blockOneWordLimitUpBuys ?? false,
+    enableIntradayStopLoss: realistic.enableIntradayStopLoss ?? false,
+    maxPositionAmountRatio: Math.max(0, realistic.maxPositionAmountRatio ?? 0),
+  };
+}
+
 /**
- * 逐日推进状态机：开盘成交既有准备清单 → 收盘更新最高价并止盈止损出清 → 标记市值 → 生成次日准备清单。
- * 返回新状态与当日事件。纯函数，不修改入参。
+ * 解析纸面专属设置。
+ * 缺字段 ⇒ 按缺省常量（`both` / 3%）⇒ **旧运行零写库即生效**；认不出的值同样回落（不静默变成 undefined）。
+ */
+export function resolvePaperTradingSettings(settings: PaperTradingSettings | undefined): {
+  exitJudgementPhase: PaperTradingExitPhase;
+  portfolioStopLossPercent: number;
+} {
+  const phase = settings?.exitJudgementPhase;
+  return {
+    exitJudgementPhase: phase === "open" || phase === "close" || phase === "both"
+      ? phase
+      : PAPER_TRADING_DEFAULT_EXIT_PHASE,
+    portfolioStopLossPercent: clampPercent(settings?.portfolioStopLossPercent, PAPER_TRADING_DEFAULT_PORTFOLIO_STOP_LOSS_PERCENT),
+  };
+}
+
+/** 页面上要展示的「该运行实际生效的参数」。 */
+export type PaperTradingEffectiveSettings = {
+  exitJudgementPhase: PaperTradingExitPhase;
+  portfolioStopLossPercent: number;
+  maxPositions: number;
+  positionSizingStrategy: PositionSizingStrategy;
+  fixedPositionPercent: number;
+  stopLossPercent: number;
+  strongHoldMinReturn: number;
+  maxHoldingDays: number;
+  trailingProfitActivationPercent: number;
+  trailingDrawdownPercent: number;
+  enableIntradayStopLoss: boolean;
+  blockLimitUpBuys: boolean;
+  blockOneWordLimitUpBuys: boolean;
+  blockLimitDownSells: boolean;
+  enableOneWordLimitDownProbability: boolean;
+  oneWordLimitDownSellProbability: number;
+  maxPositionAmountRatio: number;
+  /** paramsJson 里**显式写过**的路径（其余为服务端缺省回落）⇒ 页面据此标注「你设的 / 默认的」。 */
+  explicitKeys: string[];
+};
+
+/**
+ * 由运行 options 算出「实际生效的参数」（含缺省回落）。
+ * 这是 D2 的根治点：页面不再自己维护一套缺省值去猜服务端。
+ */
+export function resolveEffectivePaperSettings(options: PaperTradingRunOptions): PaperTradingEffectiveSettings {
+  const realistic = options.realistic ?? {};
+  const resolved = resolvePaperRealisticOptions(realistic);
+  const settings = resolvePaperTradingSettings(options.paperTrading);
+  const explicitKeys = [
+    ...Object.keys(realistic).map((key) => `realistic.${key}`),
+    ...Object.keys(options.paperTrading ?? {}).map((key) => `paperTrading.${key}`),
+  ];
+  return {
+    exitJudgementPhase: settings.exitJudgementPhase,
+    portfolioStopLossPercent: settings.portfolioStopLossPercent,
+    maxPositions: resolved.maxPositions,
+    positionSizingStrategy: resolved.positionSizingStrategy,
+    fixedPositionPercent: resolved.fixedPositionPercent,
+    stopLossPercent: resolved.stopLossPercent,
+    strongHoldMinReturn: resolved.strongHoldMinReturn,
+    maxHoldingDays: resolved.maxHoldingDays,
+    trailingProfitActivationPercent: resolved.trailingProfitActivationPercent,
+    trailingDrawdownPercent: resolved.trailingDrawdownPercent,
+    enableIntradayStopLoss: resolved.enableIntradayStopLoss,
+    blockLimitUpBuys: resolved.blockLimitUpBuys,
+    blockOneWordLimitUpBuys: resolved.blockOneWordLimitUpBuys,
+    blockLimitDownSells: resolved.blockLimitDownSells,
+    enableOneWordLimitDownProbability: resolved.enableOneWordLimitDownProbability,
+    oneWordLimitDownSellProbability: resolved.oneWordLimitDownSellProbability,
+    maxPositionAmountRatio: resolved.maxPositionAmountRatio,
+    explicitKeys,
+  };
+}
+
+/**
+ * 退出原因的**字面量**前缀表。
+ *
+ * 🔴 为什么不用 `${phaseLabel}触发止损（…）` 拼串：那样运行期文案一样，但源码里搜不到
+ * 「开盘触发止损」这个字面量 —— 而跨文件对拍（`grep -c "开盘触发止损"` 回测 3 / 纸面 0）
+ * 正是 D1 当初被发现的方式。**可被 grep 的事实才是可审计的事实**，所以时点前缀必须是字面量。
+ */
+const HARD_EXIT_PREFIX = {
+  开盘: { stop: "开盘触发止损", portfolio: "开盘触发组合止损", trailing: "开盘触发动态回撤止盈" },
+  收盘: { stop: "收盘触发止损", portfolio: "收盘触发组合止损", trailing: "收盘触发动态回撤止盈" },
+} as const;
+
+export type PaperHardExitInput = {
+  /** 「开盘」/「收盘」：决定原因文案前缀（缺省时点由 `exitJudgementPhase` 决定）。 */
+  phaseLabel: "开盘" | "收盘";
+  /** 判定用价格（开盘阶段 = 开盘价）。盘中止损另有 `enableIntradayStopLoss` 开关，不走本函数。 */
+  price: number;
+  position: PaperPosition;
+  stopLossPercent: number;
+  trailingProfitActivationPercent: number;
+  trailingDrawdownPercent: number;
+  portfolioStopLossPercent: number;
+  /** 旧持仓缺 `equityAtEntry`（2026-09-18 前落库）时的兜底分母 = 初始资金。 */
+  fallbackEquityBase: number;
+};
+
+/**
+ * 硬性退出判定（无状态纯函数）：单票比例止损 → 组合无条件止损 → 动态回撤止盈。
+ *
+ * 「硬性」= 不受「强势续持 / 回撤止盈已激活 / 最多续持未到」等豁免影响，
+ * **但仍受「一字跌停卖不出」这一物理约束**（该守卫在调用方，不在本函数）。
+ * 返回出清原因；无触发返回 null。
+ *
+ * 开盘与收盘两个阶段共用本函数 ⇒ 「同一套规则两个阶段各判一次」，不会各自漂移。
+ */
+export function evaluateHardExitRules(input: PaperHardExitInput): string | null {
+  const {
+    phaseLabel,
+    price,
+    position,
+    stopLossPercent,
+    trailingProfitActivationPercent,
+    trailingDrawdownPercent,
+    portfolioStopLossPercent,
+    fallbackEquityBase,
+  } = input;
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(position.entryPrice) || position.entryPrice <= 0) return null;
+  const prefix = HARD_EXIT_PREFIX[phaseLabel];
+
+  // ① 单票固定比例止损：文案与组合回测逐字同形（仅前缀的开盘/收盘不同），便于两端对拍。
+  const returnPercent = ((price - position.entryPrice) / position.entryPrice) * 100;
+  if (returnPercent <= -stopLossPercent) {
+    return `${prefix.stop}（${round(returnPercent)}% ≤ -${stopLossPercent}%）`;
+  }
+
+  // ② 组合无条件止损（纸面专属）：优先于回撤止盈 —— 先把「亏损封顶」做完，再谈「利润保护」。
+  //    分母 = 建仓时账户总权益（与回测 pnlToEquityRatio 同源），冻结在建仓那一刻，不受后续浮盈浮亏与后续买卖影响。
+  if (portfolioStopLossPercent > 0) {
+    const equityBase = Number.isFinite(position.equityAtEntry) && position.equityAtEntry > 0
+      ? position.equityAtEntry
+      : fallbackEquityBase;
+    if (equityBase > 0) {
+      // 浮亏口径 = 市值 − 建仓成本（成本含买入费用）；正数=盈利。
+      const portfolioLossPercent = ((price * position.shares - position.capitalCost) / equityBase) * 100;
+      if (portfolioLossPercent <= -portfolioStopLossPercent) {
+        return `${prefix.portfolio}（该笔浮亏占建仓总权益 ${Math.abs(round(portfolioLossPercent))}%，达 ${portfolioStopLossPercent}% 无条件出清）`;
+      }
+    }
+  }
+
+  // ③ 动态回撤止盈
+  const peakClosePrice = position.highestClosePrice;
+  if (!Number.isFinite(peakClosePrice) || peakClosePrice <= 0) return null;
+  const peakReturnPercent = ((peakClosePrice - position.entryPrice) / position.entryPrice) * 100;
+  const drawdownFromPeakPercent = ((price - peakClosePrice) / peakClosePrice) * 100;
+  if (peakReturnPercent >= trailingProfitActivationPercent
+    && drawdownFromPeakPercent < 0
+    && drawdownFromPeakPercent <= -trailingDrawdownPercent) {
+    return `${prefix.trailing}（峰值收益${round(peakReturnPercent)}%，${phaseLabel}回撤${round(drawdownFromPeakPercent)}% ≤ -${trailingDrawdownPercent}%）`;
+  }
+  return null;
+}
+
+/**
+ * 逐日推进状态机（阶段顺序不可换）：
+ * 开盘①已有持仓的硬性退出（止损/回撤止盈，受 `exitJudgementPhase` 控制）
+ * → 开盘②成交既有准备清单（释放的现金可参与同日开盘买入）
+ * → 收盘更新最高价 + 硬性退出 + 续持类规则（强势续持/最多续持）
+ * → 标记市值 → 生成次日准备清单。纯函数，不修改入参。
  */
 export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state: PaperTradingState; events: PaperTradingDayEvent } {
   const {
@@ -305,36 +588,42 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
     hardRiskThreshold,
   } = input;
 
-  const initialCapital = realistic.initialCapital ?? 100_000;
-  const maxPositions = Math.max(1, Math.floor(realistic.maxPositions ?? 5));
-  const commissionRate = realistic.commissionRate ?? 0.0003;
-  const stampDutyRate = realistic.stampDutyRate ?? 0.0005;
-  const transferFeeRate = realistic.transferFeeRate ?? 0.00001;
-  const slippageBps = realistic.slippageBps ?? 10;
-  const lotSize = Math.max(1, Math.floor(realistic.lotSize ?? 100));
-  const blockLimitUpBuys = realistic.blockLimitUpBuys ?? false;
-  const blockLimitDownSells = realistic.blockLimitDownSells ?? false;
-  const enableOneWordLimitDownProbability = realistic.enableOneWordLimitDownProbability ?? false;
-  const oneWordLimitDownSellProbability = Math.min(100, Math.max(0, realistic.oneWordLimitDownSellProbability ?? 0));
-  const positionSizingStrategy = realistic.positionSizingStrategy ?? "equal";
-  const fixedPositionPercent = Math.min(100, Math.max(1, realistic.fixedPositionPercent ?? 20));
-  const trailingProfitActivationPercent = Math.min(100, Math.max(0, realistic.trailingProfitActivationPercent ?? 6));
-  const trailingDrawdownPercent = Math.min(100, Math.max(0, realistic.trailingDrawdownPercent ?? 3));
-  const stopLossPercent = Math.min(100, Math.max(0, realistic.stopLossPercent ?? 5));
-  const strongHoldMinReturn = Math.min(100, Math.max(0, realistic.strongHoldMinReturn ?? 3));
-  const maxHoldingDays = Math.max(2, Math.floor(realistic.maxHoldingDays ?? 5));
-  const minimumExpectedOpenChangePercent = Math.min(100, Math.max(-50, realistic.minimumExpectedOpenChangePercent ?? -2));
-  const expectationTierEnabled = realistic.expectationTierEnabled ?? false;
-  const expectationTable: OpenExpectationTable = realistic.expectationTable ?? OPEN_EXPECTATION_DEFAULT_TABLE;
-  const blockOneWordLimitUpBuys = realistic.blockOneWordLimitUpBuys ?? false;
-  const enableIntradayStopLoss = realistic.enableIntradayStopLoss ?? false;
-  const maxPositionAmountRatio = Math.max(0, realistic.maxPositionAmountRatio ?? 0);
+  // 缺省回落 + 夹取只写一次：推进逻辑与「生效参数面板」共用同一个解析器。
+  // （D2 的成因正是「页面展示的」与「真正算进去的」各自维护一套缺省值。）
+  const resolved = resolvePaperRealisticOptions(realistic);
+  const initialCapital = resolved.initialCapital;
+  const maxPositions = resolved.maxPositions;
+  const commissionRate = resolved.commissionRate;
+  const stampDutyRate = resolved.stampDutyRate;
+  const transferFeeRate = resolved.transferFeeRate;
+  const slippageBps = resolved.slippageBps;
+  const lotSize = resolved.lotSize;
+  const blockLimitUpBuys = resolved.blockLimitUpBuys;
+  const blockLimitDownSells = resolved.blockLimitDownSells;
+  const enableOneWordLimitDownProbability = resolved.enableOneWordLimitDownProbability;
+  const oneWordLimitDownSellProbability = resolved.oneWordLimitDownSellProbability;
+  const positionSizingStrategy = resolved.positionSizingStrategy;
+  const fixedPositionPercent = resolved.fixedPositionPercent;
+  const trailingProfitActivationPercent = resolved.trailingProfitActivationPercent;
+  const trailingDrawdownPercent = resolved.trailingDrawdownPercent;
+  const stopLossPercent = resolved.stopLossPercent;
+  const strongHoldMinReturn = resolved.strongHoldMinReturn;
+  const maxHoldingDays = resolved.maxHoldingDays;
+  const minimumExpectedOpenChangePercent = resolved.minimumExpectedOpenChangePercent;
+  const expectationTierEnabled = resolved.expectationTierEnabled;
+  const expectationTable: OpenExpectationTable = resolved.expectationTable;
+  const blockOneWordLimitUpBuys = resolved.blockOneWordLimitUpBuys;
+  const enableIntradayStopLoss = resolved.enableIntradayStopLoss;
+  const maxPositionAmountRatio = resolved.maxPositionAmountRatio;
+  const { exitJudgementPhase, portfolioStopLossPercent } = resolvePaperTradingSettings(input.paperTrading);
+  const judgeStopAtOpen = exitJudgementPhase === "open" || exitJudgementPhase === "both";
+  const judgeStopAtClose = exitJudgementPhase === "close" || exitJudgementPhase === "both";
 
   const tradingDateIndex = new Map(tradingDates.map((date, index) => [date, index]));
   const todayIndex = tradingDateIndex.get(today) ?? 0;
 
   let cash = state.cash;
-  const positions: PaperPosition[] = state.positions.map((position) => ({ ...position }));
+  let positions: PaperPosition[] = state.positions.map((position) => ({ ...position }));
   const orders: PaperOrder[] = state.orders.map((order) => ({ ...order }));
   const equityCurve: PaperEquityPoint[] = state.equityCurve.map((point) => ({ ...point }));
 
@@ -368,8 +657,67 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
     }
   };
 
-  // ===== 开盘：成交既有准备买入清单 =====
+  // ===== 开盘①：先跑已有持仓的退出判定（止损 / 回撤止盈） =====
+  // 🔴 顺序不可颠倒，逐条对齐组合回测 `realisticBacktest.ts:352-376`：
+  //   1) 退出必须先于买入 —— 开盘止损释放的现金要能参与**同一开盘时点**的候选买入；
+  //   2) 退出结算后、买入之前取一次「建仓时账户总权益」—— 当日所有买入共用同一个分母。
+  // 2026-09-18 前这里没有这段循环：纸面只有收盘退出，而页面与模块自述都写「开盘触发止损即按开盘出清」
+  // ⇒ 声明与实现相反（D1 结构性缺陷）。缺口现在补齐，且判定时点由 `exitJudgementPhase` 决定。
+  if (judgeStopAtOpen) {
+    const survivors: PaperPosition[] = [];
+    for (const position of positions) {
+      // 建仓当日不做退出（与收盘段 `todayIndex > entryTradingDateIndex` 同一道闸）。
+      if (todayIndex <= position.entryTradingDateIndex) {
+        survivors.push(position);
+        continue;
+      }
+      const openPrice = priceByStockDate.get(`${position.stockCode}::${today}`)?.openPrice ?? null;
+      if (!validPrice(openPrice)) {
+        // 开盘行情缺失：无法判定，顺延到收盘段处理，不臆测成交价。
+        survivors.push(position);
+        continue;
+      }
+      const reason = evaluateHardExitRules({
+        phaseLabel: "开盘",
+        price: openPrice,
+        position,
+        stopLossPercent,
+        trailingProfitActivationPercent,
+        trailingDrawdownPercent,
+        portfolioStopLossPercent,
+        fallbackEquityBase: initialCapital,
+      });
+      if (reason === null) {
+        survivors.push(position);
+        continue;
+      }
+      // 物理约束优先于策略意图：开盘即跌停时报不出货（与回测开盘分支同款守卫），
+      // 但**如实写下原因**，不留「今天为什么没动」的黑洞。
+      const opensAtLimitDown = isPriceAtLimitDown({
+        stockCode: position.stockCode,
+        stockName: position.stockName,
+        price: openPrice,
+        referencePrice: position.previousClosePrice,
+      }) === true;
+      if (blockLimitDownSells && opensAtLimitDown) {
+        const order = findOrder(position.stockCode, position.entryDate);
+        if (order) order.reason = `${reason}；但开盘即跌停，等待收盘确认可成交性`;
+        survivors.push(position);
+        continue;
+      }
+      settlePosition(position, today, openPrice, reason);
+    }
+    positions = survivors;
+  }
+
+  // ===== 开盘②：成交既有准备买入清单 =====
   const heldCodes = new Set(positions.map((position) => position.stockCode));
+  // 「建仓时账户总权益」：开盘退出已结算、当日买入尚未发生 ⇒ 现金 + 存续持仓按最近可见收盘估值。
+  // 与组合回测 `equityAtEntry` 逐字同口径，是组合无条件止损与 pnlToEquityRatio 的共同分母。
+  const equityAtEntry = cash + positions.reduce((sum, position) => {
+    const valuation = validPrice(position.previousClosePrice) ? position.previousClosePrice : position.entryPrice;
+    return sum + valuation * position.shares;
+  }, 0);
   const selectedBuys = state.pendingBuys.slice();
   const scoreTotal = selectedBuys.reduce((sum, pending) => sum + Math.max(pending.strategyScore, 0), 0);
   const budgetByCode = new Map<string, number>();
@@ -472,6 +820,8 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
       previousClosePrice: null,
       highestClosePrice: slippedEntry,
       entryTradingDateIndex: todayIndex,
+      // 当日所有买入共用同一分母（回测同款）：组合无条件止损据此判断这笔亏损占组合多少。
+      equityAtEntry,
     };
     positions.push(position);
     heldCodes.add(position.stockCode);
@@ -559,25 +909,35 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
 
     const peakClosePrice = position.highestClosePrice;
     const peakReturnPercent = ((peakClosePrice - position.entryPrice) / position.entryPrice) * 100;
-    const drawdownFromPeakPercent = peakClosePrice === 0 ? 0 : ((closePrice - peakClosePrice) / peakClosePrice) * 100;
     const trailingArmed = peakReturnPercent >= trailingProfitActivationPercent;
-    let exitTriggerReason: string | null = null;
-    if (closeReturnPercent <= -stopLossPercent) {
-      exitTriggerReason = `收盘触发止损（${round(closeReturnPercent)}% ≤ -${stopLossPercent}%）`;
-    } else if (trailingArmed && drawdownFromPeakPercent < 0 && drawdownFromPeakPercent <= -trailingDrawdownPercent) {
-      exitTriggerReason = `动态回撤止盈（峰值收益${round(peakReturnPercent)}%，回撤${round(drawdownFromPeakPercent)}% ≤ -${trailingDrawdownPercent}%）`;
-    } else {
+    // 硬性退出（单票比例止损 / 组合无条件止损 / 动态回撤止盈）：是否在收盘判定由 exitJudgementPhase 决定。
+    let exitTriggerReason: string | null = judgeStopAtClose
+      ? evaluateHardExitRules({
+        phaseLabel: "收盘",
+        price: closePrice,
+        position,
+        stopLossPercent,
+        trailingProfitActivationPercent,
+        trailingDrawdownPercent,
+        portfolioStopLossPercent,
+        fallbackEquityBase: initialCapital,
+      })
+      : null;
+    if (exitTriggerReason === null) {
+      // 续持类规则（强势续持 / 最多续持）**永远只在收盘判**：它们本身就是收盘语义，
+      // 且判定时点设为「仅开盘」时若把它们也拿掉，持仓将失去收盘退出路径。
       const strongClose = closeReturnPercent >= strongHoldMinReturn
         && (!validPrice(position.previousClosePrice) || closePrice >= position.previousClosePrice);
       if (holdingDays >= maxHoldingDays) {
         exitTriggerReason = `达到最多续持${maxHoldingDays}个交易日`;
       } else if (!trailingArmed && !strongClose) {
         exitTriggerReason = "收盘未满足强势续持条件";
-      } else {
-        position.previousClosePrice = closePrice;
-        remainingPositions.push(position);
-        continue;
       }
+    }
+    if (exitTriggerReason === null) {
+      position.previousClosePrice = closePrice;
+      remainingPositions.push(position);
+      continue;
     }
     settlePosition(position, today, closePrice, oneWordProbabilityFill
       ? `一字跌停保守成交概率${oneWordLimitDownSellProbability}%命中，实际交易日出清`

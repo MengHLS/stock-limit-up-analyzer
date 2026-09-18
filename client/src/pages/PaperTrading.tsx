@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { AlertTriangle, BarChart3, Loader2, Play, Pause, Plus, RefreshCw, WalletCards } from "lucide-react";
+import { AlertTriangle, BarChart3, Loader2, Play, Pause, Plus, RefreshCw, SlidersHorizontal, WalletCards } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -15,6 +15,111 @@ const STRATEGY_LABELS: Record<StrategyKey, string> = {
   hardFilter: "高风险硬过滤",
   qualityBlend: "质量复合评分",
   qualityGate: "质量门控策略",
+};
+
+/** 止损 / 动态回撤止盈的判定时点：与 server/paperTrading.ts#PAPER_TRADING_EXIT_PHASES 同源（此处只做展示映射，不实现语义）。 */
+type ExitPhase = "open" | "close" | "both";
+
+const EXIT_PHASE_LABELS: Record<ExitPhase, string> = {
+  both: "开盘 + 收盘（缺省）",
+  open: "仅开盘",
+  close: "仅收盘",
+};
+
+type SizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
+
+const SIZING_LABELS: Record<SizingStrategy, string> = {
+  equal: "等权（现金 ÷ 本批笔数）",
+  fixedPercent: "固定单笔比例（初始资金 × 比例）",
+  scoreWeighted: "按策略分加权",
+};
+
+/**
+ * 数值型设置项的声明表 —— 表单渲染与提交前校验**共用同一份声明**。
+ * 双份维护（渲染一套、校验一套）正是「页面显示 5%、服务端算 6%」这类漂移的温床。
+ */
+type NumericFieldKey =
+  | "portfolioStopLossPercent"
+  | "stopLossPercent"
+  | "strongHoldMinReturn"
+  | "maxHoldingDays"
+  | "trailingProfitActivationPercent"
+  | "trailingDrawdownPercent"
+  | "maxPositions"
+  | "fixedPositionPercent"
+  | "oneWordLimitDownSellProbability"
+  | "maxPositionAmountRatio";
+
+type NumberFieldSpec = {
+  key: NumericFieldKey;
+  label: string;
+  hint?: string;
+  min: number;
+  max: number;
+  step?: number;
+  /** 服务端 schema 为 .int() 的字段：提交前取整，避免撞出难读的校验错误。 */
+  integer?: boolean;
+};
+
+const EXIT_FIELDS: NumberFieldSpec[] = [
+  { key: "portfolioStopLossPercent", label: "组合无条件止损（%）", hint: "单票浮亏达建仓总权益的该比例即无条件出清；纸面专属、回测无；0=关闭", min: 0, max: 100, step: 0.5 },
+  { key: "stopLossPercent", label: "单票止损比例（%）", hint: "相对建仓成本的固定比例止损", min: 0, max: 100, step: 0.5 },
+  { key: "strongHoldMinReturn", label: "强势续持阈值（%）", hint: "收盘收益不低于该值且收盘≥前收 ⇒ 继续持有", min: 0, max: 100, step: 0.5 },
+  { key: "maxHoldingDays", label: "最多续持（交易日）", hint: "达到即出清", min: 2, max: 30, step: 1, integer: true },
+  { key: "trailingProfitActivationPercent", label: "回撤止盈激活（%）", hint: "峰值收益达到该值后武装回撤止盈", min: 0, max: 100, step: 0.5 },
+  { key: "trailingDrawdownPercent", label: "回撤止盈回撤（%）", hint: "自峰值回撤达到该值即止盈出清", min: 0, max: 100, step: 0.5 },
+];
+
+const POSITION_FIELDS: NumberFieldSpec[] = [
+  { key: "maxPositions", label: "最大持仓数", min: 1, max: 100, step: 1, integer: true },
+  { key: "fixedPositionPercent", label: "固定单笔比例（%）", hint: "仅「固定单笔比例」仓位方式生效：初始资金 × 该比例", min: 1, max: 100, step: 1 },
+];
+
+/** 成交可行性开关（不改止损逻辑，只改变能不能买到 / 能不能卖出 / 能买多少）。默认与改动前一致 = 全关。 */
+const CONSTRAINT_TOGGLES: Array<{ key: ConstraintToggleKey; label: string; hint: string }> = [
+  { key: "enableIntradayStopLoss", label: "盘中止损", hint: "开盘未破位、但当日最低价触及止损价 ⇒ 按止损价出清" },
+  { key: "blockLimitUpBuys", label: "禁追涨停买入", hint: "次日开盘价已达涨停 ⇒ 放弃买入" },
+  { key: "blockOneWordLimitUpBuys", label: "禁一字涨停买入", hint: "开盘即封死一字涨停 ⇒ 跳过该笔" },
+  { key: "blockLimitDownSells", label: "一字跌停卖不出", hint: "一字跌停无法出清 ⇒ 顺延到下一交易日（会如实写原因）" },
+  { key: "enableOneWordLimitDownProbability", label: "一字跌停按概率可卖", hint: "不用「一定卖不掉」，改按确定性哈希概率判定当天能否卖出" },
+];
+
+const CONSTRAINT_FIELDS: NumberFieldSpec[] = [
+  { key: "oneWordLimitDownSellProbability", label: "一字跌停可卖概率（%）", hint: "仅在上一个开关开启时生效", min: 0, max: 100, step: 5 },
+  { key: "maxPositionAmountRatio", label: "单笔成交额占比上限", hint: "0=不限；0.05=不超过当日成交额 5%（容量约束，只改股数）", min: 0, max: 1, step: 0.01 },
+];
+
+type ConstraintToggleKey =
+  | "enableIntradayStopLoss"
+  | "blockLimitUpBuys"
+  | "blockOneWordLimitUpBuys"
+  | "blockLimitDownSells"
+  | "enableOneWordLimitDownProbability";
+
+type PaperSettingsForm = Record<NumericFieldKey, string> & {
+  exitJudgementPhase: ExitPhase;
+  positionSizingStrategy: SizingStrategy;
+} & Record<ConstraintToggleKey, boolean>;
+
+/** 缺省值 = 服务端缺省（server/paperTrading.ts#resolvePaperRealisticOptions / resolvePaperTradingSettings）。 */
+const DEFAULT_SETTINGS: PaperSettingsForm = {
+  exitJudgementPhase: "both",
+  portfolioStopLossPercent: "3",
+  stopLossPercent: "5",
+  strongHoldMinReturn: "3",
+  maxHoldingDays: "5",
+  trailingProfitActivationPercent: "6",
+  trailingDrawdownPercent: "3",
+  maxPositions: "5",
+  positionSizingStrategy: "equal",
+  fixedPositionPercent: "20",
+  enableIntradayStopLoss: false,
+  blockLimitUpBuys: false,
+  blockOneWordLimitUpBuys: false,
+  blockLimitDownSells: false,
+  enableOneWordLimitDownProbability: false,
+  oneWordLimitDownSellProbability: "0",
+  maxPositionAmountRatio: "0",
 };
 
 function Metric({ label, value, tone = "text-slate-800" }: { label: string; value: string; tone?: string }) {
@@ -38,6 +143,9 @@ export default function PaperTrading() {
   const [label, setLabel] = useState("");
   const [strategyKey, setStrategyKey] = useState<StrategyKey>("baseline");
   const [initialCapital, setInitialCapital] = useState("100000");
+  /** 建运行时的策略设置（退出与止损 / 仓位 / 成交约束）；缺省值与服务端缺省一一对应。 */
+  const [settings, setSettings] = useState<PaperSettingsForm>(DEFAULT_SETTINGS);
+  const [showSettings, setShowSettings] = useState(false);
   /** 最近一次推进的如实结论（推进成功 / 已是最新 / 交易日历落后）。 */
   const [advanceNotice, setAdvanceNotice] = useState<{ tone: "success" | "warning" | "info"; text: string } | null>(null);
 
@@ -103,8 +211,143 @@ export default function PaperTrading() {
       toast.error("初始资金需为不小于 10000 的整数");
       return;
     }
-    createMutation.mutate({ label: label.trim() || `${STRATEGY_LABELS[strategyKey]}·前向纸面`, strategyKey, initialCapital: Math.floor(capital) });
+    // 数值项按同一张声明表统一校验：任一非法即整体拒绝 —— 不做「悄悄用缺省顶上」的兜底，
+    // 否则用户以为自己设了 2% 止损、实际跑的是 5%，而页面上看不出差别。
+    const numeric = {} as Record<NumericFieldKey, number>;
+    for (const spec of [...EXIT_FIELDS, ...POSITION_FIELDS, ...CONSTRAINT_FIELDS]) {
+      const raw = settings[spec.key].trim();
+      const parsedRaw = raw === "" ? Number(DEFAULT_SETTINGS[spec.key]) : Number(raw);
+      const value = spec.integer ? Math.round(parsedRaw) : parsedRaw;
+      if (!Number.isFinite(value) || value < spec.min || value > spec.max) {
+        toast.error(`「${spec.label}」需为 ${spec.min} ~ ${spec.max} 之间的数字`);
+        return;
+      }
+      numeric[spec.key] = value;
+    }
+    createMutation.mutate({
+      label: label.trim() || `${STRATEGY_LABELS[strategyKey]}·前向纸面`,
+      strategyKey,
+      initialCapital: Math.floor(capital),
+      options: {
+        realistic: {
+          maxPositions: numeric.maxPositions,
+          positionSizingStrategy: settings.positionSizingStrategy,
+          fixedPositionPercent: numeric.fixedPositionPercent,
+          stopLossPercent: numeric.stopLossPercent,
+          strongHoldMinReturn: numeric.strongHoldMinReturn,
+          maxHoldingDays: numeric.maxHoldingDays,
+          trailingProfitActivationPercent: numeric.trailingProfitActivationPercent,
+          trailingDrawdownPercent: numeric.trailingDrawdownPercent,
+          enableIntradayStopLoss: settings.enableIntradayStopLoss,
+          blockLimitUpBuys: settings.blockLimitUpBuys,
+          blockOneWordLimitUpBuys: settings.blockOneWordLimitUpBuys,
+          blockLimitDownSells: settings.blockLimitDownSells,
+          enableOneWordLimitDownProbability: settings.enableOneWordLimitDownProbability,
+          oneWordLimitDownSellProbability: numeric.oneWordLimitDownSellProbability,
+          maxPositionAmountRatio: numeric.maxPositionAmountRatio,
+        },
+        // 🔴 纸面专属设置：组合回测不认识这个块（它在回测参数容器之外），边界由类型表达。
+        paperTrading: {
+          exitJudgementPhase: settings.exitJudgementPhase,
+          portfolioStopLossPercent: numeric.portfolioStopLossPercent,
+        },
+      },
+    });
   };
+
+  const updateSetting = <K extends keyof PaperSettingsForm>(key: K, value: PaperSettingsForm[K]) => {
+    setSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  const renderNumberField = (spec: NumberFieldSpec) => (
+    <label key={spec.key} className="block text-xs text-slate-600">
+      {spec.label}
+      <Input
+        type="number"
+        min={spec.min}
+        max={spec.max}
+        step={spec.step ?? 1}
+        value={settings[spec.key]}
+        onChange={(event) => updateSetting(spec.key, event.target.value)}
+        className="mt-1 h-9 w-full bg-white"
+      />
+      {spec.hint && <span className="mt-1 block text-[10px] font-normal leading-4 text-slate-400">{spec.hint}</span>}
+    </label>
+  );
+
+  const renderToggle = (toggle: { key: ConstraintToggleKey; label: string; hint: string }) => (
+    <label key={toggle.key} className="flex items-start gap-2 text-xs text-slate-600">
+      <input
+        type="checkbox"
+        checked={settings[toggle.key]}
+        onChange={(event) => updateSetting(toggle.key, event.target.checked)}
+        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+      />
+      <span>
+        {toggle.label}
+        <span className="mt-0.5 block text-[10px] leading-4 text-slate-400">{toggle.hint}</span>
+      </span>
+    </label>
+  );
+
+  // 「该运行实际生效的参数」：值全部来自服务端（唯一缺省源），页面只做标签映射 —— 不在这里再写一遍缺省值。
+  const effectiveRows = useMemo(() => {
+    const data = detail?.effectiveSettings;
+    if (!data) return [];
+    const rows: Array<{ label: string; value: string; paths: string[]; note?: string }> = [
+      { label: "止损 / 回撤止盈判定时点", value: EXIT_PHASE_LABELS[data.exitJudgementPhase], paths: ["paperTrading.exitJudgementPhase"] },
+      {
+        label: "组合无条件止损",
+        value: data.portfolioStopLossPercent > 0 ? `${data.portfolioStopLossPercent}%` : "已关闭",
+        paths: ["paperTrading.portfolioStopLossPercent"],
+        note: "纸面专属，回测无此规则",
+      },
+      { label: "单票止损比例", value: `${data.stopLossPercent}%`, paths: ["realistic.stopLossPercent"] },
+      { label: "强势续持阈值", value: `${data.strongHoldMinReturn}%`, paths: ["realistic.strongHoldMinReturn"] },
+      { label: "最多续持", value: `${data.maxHoldingDays} 个交易日`, paths: ["realistic.maxHoldingDays"] },
+      {
+        label: "回撤止盈",
+        value: `激活 ${data.trailingProfitActivationPercent}% / 回撤 ${data.trailingDrawdownPercent}%`,
+        paths: ["realistic.trailingProfitActivationPercent", "realistic.trailingDrawdownPercent"],
+      },
+      { label: "最大持仓数", value: String(data.maxPositions), paths: ["realistic.maxPositions"] },
+      {
+        label: "仓位方式",
+        value: data.positionSizingStrategy === "fixedPercent"
+          ? `固定单笔比例（初始资金 × ${data.fixedPositionPercent}%）`
+          : SIZING_LABELS[data.positionSizingStrategy],
+        paths: ["realistic.positionSizingStrategy", "realistic.fixedPositionPercent"],
+      },
+      {
+        label: "盘中止损",
+        value: data.enableIntradayStopLoss ? "开启" : "关闭",
+        paths: ["realistic.enableIntradayStopLoss"],
+      },
+      {
+        label: "成交约束",
+        value: (() => {
+          const parts = [
+            data.blockLimitUpBuys ? "禁追涨停" : null,
+            data.blockOneWordLimitUpBuys ? "禁一字涨停买入" : null,
+            data.blockLimitDownSells ? "一字跌停卖不出" : null,
+            data.enableOneWordLimitDownProbability ? `一字跌停按 ${data.oneWordLimitDownSellProbability}% 概率可卖` : null,
+            data.maxPositionAmountRatio > 0 ? `单笔成交额上限 ${data.maxPositionAmountRatio}` : null,
+          ].filter((part): part is string => part !== null);
+          return parts.length === 0 ? "全部关闭（不施加成交可行性约束）" : parts.join(" · ");
+        })(),
+        paths: [
+          "realistic.blockLimitUpBuys",
+          "realistic.blockOneWordLimitUpBuys",
+          "realistic.blockLimitDownSells",
+          "realistic.enableOneWordLimitDownProbability",
+          "realistic.maxPositionAmountRatio",
+        ],
+      },
+    ];
+    return rows;
+  }, [detail]);
+
+  const explicitKeySet = useMemo(() => new Set(detail?.effectiveSettings.explicitKeys ?? []), [detail]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
@@ -118,6 +361,13 @@ export default function PaperTrading() {
             <h1 className="mt-2 text-2xl font-bold tracking-tight sm:text-3xl">前向纸面交易闭环</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
               用真实样本外兜底历史回测：T 日收盘生成次日准备买入清单 → 次日开盘按真实开盘价成交 → 持仓按止盈止损逐日出清 → 累积真实前向曲线，与历史回测对比。
+            </p>
+            {/* 🔴 口径分叉必须写在页面上：默认参数下纸面与回测**不逐笔等价**，
+                含混一句「与回测口径可比」就是 D3 那类「描述了一个不存在的机制」的翻版。 */}
+            <p className="mt-2 max-w-3xl text-xs leading-5 text-orange-800">
+              与组合回测的差异（逐条声明）：纸面比回测多一条「组合无条件止损」——单票浮亏达「建仓时账户总权益」的设定比例即无条件出清，缺省 3%
+              （该规则组合回测不存在，只加在纸面；设为 0 即关闭，可回到与回测仅剩判定时点差异的形态）；
+              止损与动态回撤止盈的判定时点可在建仓时选择「开盘 / 收盘 / 开盘+收盘」，组合回测固定为开盘+收盘。
             </p>
           </div>
           <div className="rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-right">
@@ -153,9 +403,18 @@ export default function PaperTrading() {
 
       {isAdmin && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Plus className="h-4 w-4 text-orange-700" />
             <h2 className="font-semibold">新建前向运行</h2>
+            <span className="text-xs text-slate-400">下列设置写入该运行的参数快照，逐日推进时生效</span>
+            <button
+              type="button"
+              onClick={() => setShowSettings((current) => !current)}
+              className="ml-auto inline-flex items-center gap-1 text-xs text-slate-500 hover:text-orange-700"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              {showSettings ? "收起策略设置" : "展开策略设置"}
+            </button>
           </div>
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="text-xs text-slate-600">
@@ -182,7 +441,73 @@ export default function PaperTrading() {
               {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               创建
             </Button>
+            {showSettings && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-xs text-slate-500"
+                onClick={() => setSettings(DEFAULT_SETTINGS)}
+              >
+                恢复默认设置
+              </Button>
+            )}
           </div>
+
+          {showSettings && (
+            <div className="mt-5 grid gap-4 lg:grid-cols-3" data-paper-settings>
+              <fieldset className="rounded-xl border border-slate-200 p-3" data-paper-settings-group="exit">
+                <legend className="px-1 text-xs font-semibold text-orange-700">退出与止损</legend>
+                <div className="grid gap-3">
+                  <label className="block text-xs text-slate-600">
+                    止损 / 回撤止盈判定时点
+                    <select
+                      value={settings.exitJudgementPhase}
+                      onChange={(event) => updateSetting("exitJudgementPhase", event.target.value as ExitPhase)}
+                      className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
+                    >
+                      {(Object.keys(EXIT_PHASE_LABELS) as ExitPhase[]).map((phase) => (
+                        <option key={phase} value={phase}>{EXIT_PHASE_LABELS[phase]}</option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[10px] font-normal leading-4 text-slate-400">
+                      仅控制「止损 / 动态回撤止盈」；强势续持与最多续持永远只在收盘判定
+                    </span>
+                  </label>
+                  {EXIT_FIELDS.map(renderNumberField)}
+                </div>
+              </fieldset>
+
+              <fieldset className="rounded-xl border border-slate-200 p-3" data-paper-settings-group="position">
+                <legend className="px-1 text-xs font-semibold text-orange-700">仓位</legend>
+                <div className="grid gap-3">
+                  <label className="block text-xs text-slate-600">
+                    仓位方式
+                    <select
+                      value={settings.positionSizingStrategy}
+                      onChange={(event) => updateSetting("positionSizingStrategy", event.target.value as SizingStrategy)}
+                      className="mt-1 h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
+                    >
+                      {(Object.keys(SIZING_LABELS) as SizingStrategy[]).map((key) => (
+                        <option key={key} value={key}>{SIZING_LABELS[key]}</option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[10px] font-normal leading-4 text-slate-400">
+                      等权按「现金 ÷ 本批笔数」分配；系统不设单笔仓位上限
+                    </span>
+                  </label>
+                  {POSITION_FIELDS.map(renderNumberField)}
+                </div>
+              </fieldset>
+
+              <fieldset className="rounded-xl border border-slate-200 p-3" data-paper-settings-group="constraint">
+                <legend className="px-1 text-xs font-semibold text-orange-700">成交约束</legend>
+                <div className="grid gap-3">
+                  {CONSTRAINT_TOGGLES.map(renderToggle)}
+                  {CONSTRAINT_FIELDS.map(renderNumberField)}
+                </div>
+              </fieldset>
+            </div>
+          )}
         </section>
       )}
 
@@ -295,6 +620,33 @@ export default function PaperTrading() {
                 </ResponsiveContainer>
               </div>
             )}
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" data-paper-effective-settings>
+            <div className="flex flex-wrap items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-orange-700" />
+              <h2 className="font-semibold">该运行实际生效的参数</h2>
+              <span className="ml-auto text-xs text-slate-400">
+                值由服务端按 paramsJson + 缺省回落算出；标「默认」= 该键未显式写入
+              </span>
+            </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {effectiveRows.map((row) => {
+                const isExplicit = row.paths.some((path) => explicitKeySet.has(path));
+                return (
+                  <div key={row.label} className="rounded-xl border border-slate-200 px-3 py-2" data-paper-effective-row={row.label} data-explicit={isExplicit ? "true" : "false"}>
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-slate-500">{row.label}</p>
+                      <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium ${isExplicit ? "bg-orange-100 text-orange-800" : "bg-slate-100 text-slate-500"}`}>
+                        {isExplicit ? "你设的" : "默认"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-slate-800">{row.value}</p>
+                    {row.note && <p className="mt-0.5 text-[10px] leading-4 text-slate-400">{row.note}</p>}
+                  </div>
+                );
+              })}
+            </div>
           </section>
 
           {detail.state.pendingBuys.length > 0 && (
