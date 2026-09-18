@@ -219,6 +219,22 @@ export const CANDIDATE_PARAMETER_TYPE_OPTIONS: readonly SketchOption[] = [
   { value: "boolean", label: "布尔", note: "必须给出非空候选集合" },
 ];
 
+/**
+ * 参数角色（与 `server/research/strategySchema/definition.ts` 的
+ * `STRATEGY_PARAMETER_ROLES = ["FIXED","TUNABLE","DERIVED"]` 对齐）。
+ *
+ * 🔴 **不是装饰**：`definitionBuild.ts#buildParameters` 读 `spec.parameterRole`
+ * 决定该参数是否进 Parameter Search；缺省 `TUNABLE`。声明成 `FIXED` 却仍带
+ * min/max/step 的参数，此前会被照常搜索（P1-1 的现场）。
+ *
+ * ⚠️ 空值 = **不声明角色** ⇒ 服务端按缺省 `TUNABLE` 处理（零回归路径）。
+ */
+export const CANDIDATE_PARAMETER_ROLE_OPTIONS: readonly SketchOption[] = [
+  { value: "TUNABLE", label: "待搜索 TUNABLE", note: "进 Parameter Search；数值参数必须给 min 与 max" },
+  { value: "FIXED", label: "固定 FIXED", note: "不进搜索空间；不要求 min / max" },
+  { value: "DERIVED", label: "派生 DERIVED", note: "由其他参数推导；不进搜索空间" },
+];
+
 // ---------------------------------------------------------------------------
 // 字段引用文法（`filterRule` 的 fieldName 必须写成的形状）
 // ---------------------------------------------------------------------------

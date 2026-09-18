@@ -493,3 +493,79 @@ toast     = 已创建候选草稿 #930003 …（2 条，系统自动选择）…
 | 只监听 `Network.responseReceived` | 「请求已发出、响应未回」时判成「完全没反应」⇒ 必须同时听 `requestWillBeSent` |
 | 点击后 `sleep(9000)` 才取一次 toast | sonner 默认 **4 秒**消失 ⇒ 必然取空 ⇒ 必须**高频轮询**（400ms 一次） |
 | 模板字符串里写正则 `\s` | 反斜杠被吃掉 ⇒ 匹配恒失败（探针报 `matchCount = 0` 而按钮明明在） |
+
+## 13. `parameterSpace` 的三个键被表单拒收（2026-09-18）
+
+### 13.1 用户报错（原文）
+
+> 该块含结构化表单表达不了的内容，原样展示：
+> `parameterSpace.max_volume_ratio 出现未收录的键：parameterRole、defaultValue、description`
+
+来源坐标：`client/src/components/research/CandidateSketchCard.tsx:92`（候选详情页 `/research/candidates/:id`
+的只读卡片），由 `candidateSketchForm.ts:608` 产出 reason。
+
+### 13.2 真因：前端白名单比服务端契约窄
+
+| 位置 | 事实 |
+|---|---|
+| `candidateSketchForm.ts:317` | `PARAMETER_SPACE_ROW_KEYS = ["type","min","max","step","allowedValues"]` —— **只有 5 键** |
+| `definitionBuild.ts:497` | 读 `spec.parameterRole`（决定是否进 Parameter Search；缺省 `TUNABLE`）—— **服务端消费** |
+| `definitionBuild.ts:550` | 读 `spec.defaultValue`（`:540-543` 注明「执行层必需输入，缺了抛 `RECIPE_PARAMETER_NO_DEFAULT`」）—— **服务端消费** |
+| `definitionBuild.ts:595` | `description` 由服务端**自己生成**（不读 `spec.description`）；保留它只是为了不丢声明里的语义说明 |
+
+⇒ 含这三键的参数行触发 `unknownKeysOf` ⇒ **整块降级 `raw`**（原样展示 JSON）。
+
+### 13.3 影响面（真实库实测 · `_probe_paramspace_keys.mts`）
+
+13 条候选中：`withRole = 1`、`withDescription = 1`、`withDefault = 9`。
+即 **三键齐全的只有 1 条**（`960001`，用户 12:56 创建 —— 说明上一轮「点击没反应」的修复已生效），
+而 `defaultValue` **早就存在**于 9 条候选 ⇒ 这个降级**不是本轮引入**，只是 `parameterRole`
+（`12.jj` 那轮新加）让它第一次以三键齐出的形式暴露。
+
+**严重度 = P1**（不是 P0）：`buildSketchPatch` 对 `raw` 块 `continue`（`:1861`）⇒ **不进 patch、不丢数据**；
+`gaps` 只用于绿色提示（`EditCandidateDialog.tsx:134`），保存按钮由 `patch.ok` 决定（`:153`）⇒ 不阻塞保存与转正。
+受伤的是**可见性与可编辑性**：用户既看不到也改不了参数角色与默认值。
+
+### 13.4 修复（4 个文件，仅 `client/**`）
+
+| 文件 | 改动 |
+|---|---|
+| `candidateSketchVocabulary.ts` | 新增 `CANDIDATE_PARAMETER_ROLE_OPTIONS`（与 `STRATEGY_PARAMETER_ROLES` 对齐） |
+| `candidateSketchForm.ts` | 白名单 5 → **8** 键；`ParameterRowDraft` 加 `parameterRole` / `defaultValueText` / `description`；解析（非字符串一律降级并说明）；序列化（**空串一律省略** —— 不声明 ≠ 声明成空值）；校验（**角色决定范围是否必需**） |
+| `CandidateSketchFields.tsx`（可编辑） | 参数行加 3 个输入（角色下拉 / 默认值 / 说明） |
+| `CandidateSketchCard.tsx`（只读） | 参数表加 3 列（角色 / 默认值 / 说明）—— 能读到的字段就必须看得见 |
+
+**顺带修正一处语义错误**：旧校验文案「数值参数的 min 与 max 都要给（**参数角色恒为 TUNABLE**）」
+在角色可显式声明 `FIXED` 之后就不成立了（那时要求范围反而把「固定值」逼成「带范围的待搜值」）。
+现在改为「先定角色、再按角色决定范围是否必需」，与服务端 `buildParameters:522` 的
+`if (parameterRole === "TUNABLE")` 同一口径。
+
+### 13.5 取证（无头 Chrome + CDP，`_probe_candidate_param_block.out.json`）
+
+打开 `/research/candidates/960001`（真实库候选）：
+
+```
+参数名            类型     取值域                        角色            默认值  说明
+max_volume_ratio  number   min 0.05 · max 1 · step 0.05  待搜索 TUNABLE  0.3    缩量阈值：…
+max_drawdown      number   min 0 · max 0.3 · step 0.01   待搜索 TUNABLE  0.02   守线阈值：…
+require_bullish   number   min 0 · max 1 · step 1        待搜索 TUNABLE  0      是否要求决策日为阳线：…
+```
+
+`hasRawNotice = false`（不再是「原样展示」）、零 `pageError` / 零 `consoleError`。
+
+### 13.6 验收
+
+`tsc --noEmit` = **exit 0**；`candidateSketchForm.test.ts` **63/63**（+5 新用例）；
+全量 `vitest run` = **8 failed / 17，失败文件集合与基线逐项一致 ⇒ 零新增**；
+行尾哨兵 0 漂移；改动面 numstat 与 `--ignore-cr-at-eol` **完全一致**
+（`candidateSketchForm.ts` +136/-7、`candidateSketchVocabulary.ts` +16、
+`CandidateSketchFields.tsx` +41、`CandidateSketchCard.tsx` +21、测试 +97）。
+
+⚠️ `CandidateSketchFields.tsx` 实测「工作区纯 CRLF / HEAD blob 纯 LF」（字节差 1298 == 行数 ⇒ **纯行尾漂移**），
+本轮**按 HEAD 归一化为 LF** 后再改 ⇒ numstat 只有 41 行而不是 1300+。
+
+### 13.7 边界（如实）
+
+- **未回填**任何已落库候选的 `parameterSpaceJson` —— 前端读取时就地兼容，历史数据不动
+- `description` 服务端**不消费**（`:595` 自行生成），保留它是为了不丢声明里的语义说明；本次把它接进表单/只读表也**不改服务端行为**
+- 只改了「候选草图」这一条链路；`definitionBuild` 与策略编辑七段表单未动

@@ -19,6 +19,7 @@ import {
   CANDIDATE_COST_MODEL_OPTIONS,
   CANDIDATE_ENTRY_TIMING_OPTIONS,
   CANDIDATE_EVENT_OPTIONS,
+  CANDIDATE_PARAMETER_ROLE_OPTIONS,
   CANDIDATE_PARAMETER_TYPE_OPTIONS,
   CANDIDATE_QUANTITY_METHOD_OPTIONS,
   CANDIDATE_SIZING_METHOD_OPTIONS,
@@ -194,6 +195,19 @@ export interface ParameterRowDraft {
   max: string;
   step: string;
   allowedValuesText: string;
+  /**
+   * 参数角色（`TUNABLE` / `FIXED` / `DERIVED`）。**空串 = 不声明**
+   * ⇒ 服务端按缺省 `TUNABLE` 处理（与「不写该键」等价，避免伪造角色）。
+   */
+  parameterRole: string;
+  /**
+   * 默认值（文本形式）。**空串 = 不声明** ⇒ 运行时会抛 `RECIPE_PARAMETER_NO_DEFAULT`
+   * （宁可让它在那儿响亮失败，也不在前端编一个值）。
+   * 解析按同行 `type` 决定：number → 有限数、boolean → `true`/`false`、string → 原文。
+   */
+  defaultValueText: string;
+  /** 人读说明（服务端当前自行生成 description，此键仅保留声明里的语义说明，不丢信息）。 */
+  description: string;
 }
 
 export interface CandidateSketchDrafts {
@@ -253,7 +267,17 @@ export function emptyRiskRuleDraft(): RiskRuleDraft {
 }
 
 export function emptyParameterRow(): ParameterRowDraft {
-  return { code: "", type: "number", min: "", max: "", step: "", allowedValuesText: "" };
+  return {
+    code: "",
+    type: "number",
+    min: "",
+    max: "",
+    step: "",
+    allowedValuesText: "",
+    parameterRole: "",
+    defaultValueText: "",
+    description: "",
+  };
 }
 
 /** 全部片段为空 ⇒ 该块视为「未填写」，JSON 里直接省略（而不是写一堆空对象）。 */
@@ -314,7 +338,25 @@ const CONDITION_ROW_KEYS = [
 ] as const;
 const EXIT_RULE_KEYS = ["stopLoss", "takeProfit", "holdingDays"] as const;
 const RISK_RULE_KEYS = ["maxPositions", "maxPositionWeight"] as const;
-const PARAMETER_SPACE_ROW_KEYS = ["type", "min", "max", "step", "allowedValues"] as const;
+/**
+ * 参数行**可被表单承载**的键（闭集）。
+ *
+ * 🔴 这三个键（`parameterRole` / `defaultValue` / `description`）**不是可选项**：
+ * 服务端 `definitionBuild.ts#buildParameters` 读 `parameterRole`（决定是否进搜索空间）
+ * 与 `defaultValue`（执行层必需，缺了抛 `RECIPE_PARAMETER_NO_DEFAULT`）——
+ * 白名单少了它们，整块会降级为「原样展示」，用户既看不到也改不了
+ * （实测报错：「parameterSpace.max_volume_ratio 出现未收录的键：parameterRole、defaultValue、description」）。
+ */
+const PARAMETER_SPACE_ROW_KEYS = [
+  "type",
+  "min",
+  "max",
+  "step",
+  "allowedValues",
+  "parameterRole",
+  "defaultValue",
+  "description",
+] as const;
 
 const OPERATOR_VALUES: readonly string[] = CANDIDATE_CONDITION_OPERATOR_OPTIONS.map((o) => o.value);
 const EVENT_VALUES: readonly string[] = CANDIDATE_EVENT_OPTIONS.map((o) => o.value);
@@ -324,6 +366,8 @@ const TRIGGER_VALUES: readonly string[] = CANDIDATE_TRIGGER_OPTIONS.map((o) => o
 const QUANTITY_VALUES: readonly string[] = CANDIDATE_QUANTITY_METHOD_OPTIONS.map((o) => o.value);
 const SIZING_VALUES: readonly string[] = CANDIDATE_SIZING_METHOD_OPTIONS.map((o) => o.value);
 const PARAMETER_TYPE_VALUES: readonly string[] = CANDIDATE_PARAMETER_TYPE_OPTIONS.map((o) => o.value);
+/** 参数角色可选值（与 `STRATEGY_PARAMETER_ROLES` 对齐）。 */
+const PARAMETER_ROLE_VALUES: readonly string[] = CANDIDATE_PARAMETER_ROLE_OPTIONS.map((o) => o.value);
 /** 滑点 / 佣金模型的可选值（`STRATEGY_COST_MODELS`）。 */
 const COST_MODEL_VALUES: readonly string[] = CANDIDATE_COST_MODEL_OPTIONS.map((o) => o.value);
 
@@ -628,6 +672,43 @@ export function toParameterSpaceState(value: unknown): SketchFieldState<Paramete
       }
       row.allowedValuesText = (spec.allowedValues as string[]).join(",");
     }
+    /**
+     * 角色：**只在确实是字符串时才读**（非字符串交给服务端的 enum 校验响亮报错，
+     * 前端不猜、不静默丢弃）。
+     */
+    if (spec.parameterRole !== undefined && spec.parameterRole !== null) {
+      if (typeof spec.parameterRole !== "string") {
+        return {
+          kind: "raw",
+          rawText: JSON.stringify(value, null, 2),
+          reason: `parameterSpace.${code}.parameterRole 必须是字符串`,
+        };
+      }
+      row.parameterRole = spec.parameterRole;
+    }
+    /** 默认值：文本化（number / boolean / string 都是合法形态；对象/数组不承载）。 */
+    if (spec.defaultValue !== undefined && spec.defaultValue !== null) {
+      const dv = spec.defaultValue;
+      if (typeof dv === "number" || typeof dv === "boolean" || typeof dv === "string") {
+        row.defaultValueText = String(dv);
+      } else {
+        return {
+          kind: "raw",
+          rawText: JSON.stringify(value, null, 2),
+          reason: `parameterSpace.${code}.defaultValue 只承载 number / boolean / string`,
+        };
+      }
+    }
+    if (spec.description !== undefined && spec.description !== null) {
+      if (typeof spec.description !== "string") {
+        return {
+          kind: "raw",
+          rawText: JSON.stringify(value, null, 2),
+          reason: `parameterSpace.${code}.description 必须是字符串`,
+        };
+      }
+      row.description = spec.description;
+    }
     rows.push(row);
   }
   if (rows.length === 0) return { kind: "empty" };
@@ -871,6 +952,25 @@ export function parameterSpaceDraftToJson(rows: readonly ParameterRowDraft[]): J
     if (step !== undefined) spec.step = step;
     const allowed = csvToList(row.allowedValuesText);
     if (allowed.length > 0) spec.allowedValues = allowed;
+    /**
+     * 三个**服务端真实消费**（或承载语义）的键，空串一律**省略**
+     * —— 省略 = 不声明 = 保持服务端缺省，绝不用空值冒充「声明过」。
+     */
+    const role = row.parameterRole.trim();
+    if (role !== "") spec.parameterRole = role;
+    const dvText = row.defaultValueText.trim();
+    if (dvText !== "") {
+      if (row.type === "number") {
+        const n = Number(dvText);
+        if (Number.isFinite(n)) spec.defaultValue = n;
+      } else if (row.type === "boolean") {
+        spec.defaultValue = dvText === "true";
+      } else {
+        spec.defaultValue = dvText;
+      }
+    }
+    const desc = row.description.trim();
+    if (desc !== "") spec.description = desc;
     out[code] = spec;
   }
   return out;
@@ -1718,18 +1818,47 @@ function validateParameterSpace(rows: readonly ParameterRowDraft[], errors: stri
     checkFiniteIfPresent(row.min, `${at} min`, errors);
     checkFiniteIfPresent(row.max, `${at} max`, errors);
     checkFiniteIfPresent(row.step, `${at} step`, errors);
+    /**
+     * 🔴 **先定角色，再按角色决定「范围 / 候选集合」是否必需。**
+     *
+     * 旧实现无条件断言「数值参数的 min 与 max 都要给（角色恒为 TUNABLE）」——
+     * 而角色现在可显式声明 `FIXED` / `DERIVED`（不进搜索空间），那时要求范围反而是错的
+     * （把「固定值」逼成「带范围的待搜值」）。
+     * 服务端 `definitionBuild.ts#buildParameters` 的 `if (parameterRole === "TUNABLE")`
+     * 是同一口径，这里保持一致、不另立判据。
+     */
+    const role = row.parameterRole.trim();
+    if (role !== "") checkEnumIfPresent(role, `${at} 参数角色`, PARAMETER_ROLE_VALUES, errors);
+    /** 空串 = 未声明 ⇒ 服务端按缺省 `TUNABLE` 处理。 */
+    const tunable = role === "" || role === "TUNABLE";
     if (row.type === "number") {
-      if (row.min.trim() === "" || row.max.trim() === "") {
-        errors.push(`${at}：数值参数的 min 与 max 都要给（参数角色恒为 TUNABLE，转正不会替你定界）`);
-      } else {
+      const hasMin = row.min.trim() !== "";
+      const hasMax = row.max.trim() !== "";
+      if (tunable && (!hasMin || !hasMax)) {
+        errors.push(`${at}：待搜索（TUNABLE）数值参数必须同时给出 min 与 max —— 转正不会替你给搜索空间定界`);
+      } else if (hasMin !== hasMax) {
+        // 半截范围比「没有范围」更容易误读（服务端只认成对的范围）。
+        errors.push(`${at}：给了范围就要成对 —— min 与 max 必须同时给出`);
+      } else if (hasMin && hasMax) {
         const min = Number(row.min);
         const max = Number(row.max);
         if (Number.isFinite(min) && Number.isFinite(max) && min >= max) {
           errors.push(`${at}：min 必须小于 max`);
         }
       }
-    } else if (csvToList(row.allowedValuesText).length === 0) {
-      errors.push(`${at}：${row.type} 参数必须给出非空候选集合（逗号分隔）`);
+    } else if (tunable && csvToList(row.allowedValuesText).length === 0) {
+      errors.push(`${at}：待搜索（TUNABLE）的 ${row.type} 参数必须给出非空候选集合（逗号分隔）`);
+    }
+    /** 默认值（可选键）：必须能被同行 `type` 解析，否则**响亮报错**（不静默丢弃）。 */
+    const dvText = row.defaultValueText.trim();
+    if (dvText !== "") {
+      if (row.type === "number") {
+        if (!Number.isFinite(Number(dvText))) errors.push(`${at}：默认值 ${JSON.stringify(dvText)} 不是有效数值`);
+      } else if (row.type === "boolean") {
+        if (dvText !== "true" && dvText !== "false") {
+          errors.push(`${at}：布尔参数的默认值只能是 true / false，实际 ${JSON.stringify(dvText)}`);
+        }
+      }
     }
   });
 }

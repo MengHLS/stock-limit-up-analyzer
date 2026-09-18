@@ -1,100 +1,93 @@
 # stock-limit-up-analyzer 硬禁令索引
 
-> **唯一细则源 = `.workbuddy/memory/PROJECT_RULES.md`**；本文只是压缩索引，条目均为硬判据。
+> 细则真源 = `.workbuddy/memory/PROJECT_RULES.md`。本文只留跨会话必须复用的判据。
 
 ## 三门
-1. 🔴 改 `server/**` 会热重启并**杀死在途 Run** ⇒ 用户在用页面时禁改 server、禁跑重库脚本。**在途 = `RUNNING`（唯一）**（`engine.ts` 全校验通过才置）；`PENDING` 且 `inputSnapshot`/`startedAt` 空 = **未执行草稿、禁收敛**。改 `client/**` 只走 HMR。
+1. 🔴 改 `server/**` 热重启会**杀死在途 Run** ⇒ 用户在用时禁改 server、禁跑重库脚本。**在途 = `RUNNING`（唯一）**；`PENDING` + 空 `inputSnapshot`/`startedAt` = 未执行草稿、禁收敛。`client/**` 只走 HMR。
 2. 🔴 禁 `pnpm/npm install`、新增依赖、`prettier --write`、`db:push`、`drizzle-kit generate`、手写 `_journal.json`。
 
-## 环境（本机）
-- 端口只认启动日志（另一路会话 4000 常 busy ⇒ 实跑 4001；本轮实测 :3000 可直接绑定，旧「保留段 ⇒ 回落」说法不成立）。**`curl` 走 HTTP 代理**且 `--noproxy '*'` 不可靠（连 `127.0.0.1:3000` 都会得 502）⇒ 探端点用 **Node `fetch` + `localhost`**。
-- Bash 须自带长 PATH（git 在 `PortableGit/versions/1.2.0/cmd`、Unix 工具在**同版本 `usr/bin`**）；`node -e`/`git` 不认 MSYS `/c/...` ⇒ 传 `C:/...`；后台服务用 `run_in_background`、末尾禁 `&`。
-- **git 写入可能被外部回滚** ⇒ 每次 git 操作后复核 `git rev-parse HEAD`。有并发会话动文件 ⇒ 以 `find server -type f | wc -l` 的**前后比对**为判据。
-- 🔴 **`refs/remotes/origin/main` 会丢**（2026-09-17 实测：`git fetch` 打印 `806b083..1a2d806 main -> origin/main`，但 `git rev-parse origin/main` 仍返回旧值 `806b083`）⇒ 合并/推送**别信 `origin/main`**，用 `git ls-remote` 的真值或 `FETCH_HEAD`。
-- 🔴 **GitHub 只在「非沙箱 + 清空代理 env」下可达**：`github.com` 解析到 **fake-IP `198.18.x.x`**（路由器 TUN 代理）；沙箱内本地代理会 `CONNECT 200 Connection Established` 之后 `schannel: failed to receive handshake`，沙箱外不清 `HTTP(S)_PROXY` 同样失败 ⇒ 网络类 git 命令须 `dangerouslyDisableSandbox` + `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy git …`。
-- 改文件用 Python bytes + `os.replace` 原子写 + 回读核对。源码字面量禁 `\uXXXX`（⇒ `UnicodeEncodeError`）；🔴 **模板字符串内禁嵌反引号**（实测改崩过文件）。
-- 行数组手术：**连续行块**锚点、**按索引降序替换**、插入新函数前断言「在模块顶层」；改完 `git diff --stat` 断言增删数。
-- 🔴 **裸子串断言会假失败**（新注释常刻意引用旧标识符）⇒ 判据要带形态（`**旧文**`/括号/「恰好 N 次且确在引用内」）。本会话踩过 5 次。
-- 探针放 `docs/evidence/`；测试 = `tests/`，**基线 8 文件失败 / 17 用例**（判据 = **失败文件集合**，非失败数）。
-- ✅ 前端验收 = 无头 Chrome/Edge `--headless=new --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node 22 内置 `WebSocket` 直连 CDP，**量 DOM**；Chrome 在 `C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`；⚠️ 探针输出**必须同步落盘**。`agent-browser`/`jsdom` 不可用。
-- ⚠️ PowerShell 可用但 **stdout 不回显** ⇒ 写文件再读。
+## 环境 / 工具链
+- 端口每轮会变 ⇒ 先 `netstat | grep LISTENING`。**`curl` 走代理**（连 127.0.0.1 都 502，`--noproxy` 不可靠）⇒ 用 **Node `fetch` + `localhost`** 探端点。
+- Bash 须自带长 PATH（git = `PortableGit/versions/1.2.0/cmd`、Unix 工具 = 同版 `usr/bin`）；git/node 不认 MSYS `/c/...` ⇒ 传 `C:/...`；后台用 `run_in_background`（末尾禁 `&`）；PowerShell stdout 不回显 ⇒ 写文件再读。
+- git 写入可能被外部回滚 ⇒ 每次操作后复核 `rev-parse HEAD`；并发改文件用 `find server -type f | wc -l` 前后比。🔴 `refs/remotes/origin/main` 会丢 ⇒ 只信 `git ls-remote` / `FETCH_HEAD`；合流 `ls-remote` → `fetch` → `merge --no-ff`，`ROADMAP*`/memory 冲突**两侧都保留**。
+- 🔴 GitHub 只在「非沙箱 + 清空 `*_PROXY`」可达 ⇒ `dangerouslyDisableSandbox` + `env -u HTTP_PROXY … git …`。
+- 写文件用 Python bytes + `os.replace` + 回读。源码禁 `\uXXXX`；🔴 模板字符串内禁嵌反引号。
+- 🔴 裸子串断言会假失败（新注释常引用旧标识符）⇒ 判据带形态。DOM 文本判据禁短词（`'参数'` 会被侧栏「参数搜索」抢先）⇒ 用主体唯一长锚点。
+- 探针 → `docs/evidence/`；一次性脚本 → `C:\work\sourcecode\_scratch\`；报告 → `docs/research/`。测试基线 **8 文件失败 / 17 用例**（判据 = 失败**文件集合**）。
+- ✅ 前端验收 = 无头 Chrome `--headless=new --user-data-dir=<tmp> --remote-debugging-port=<随机>` + Node `WebSocket` 直连 CDP **量 DOM**；⚠️ 探针输出必须落盘。`agent-browser`/`jsdom` 不可用。
+- 🔴 CDP 三坑：只听 `responseReceived` 会漏在途请求（并听 `requestWillBeSent`）；toast 须高频轮询（4 秒消失）；模板串里正则 `\s` 会被吃 ⇒ 用 `includes`。
 
-## 行尾（**逐文件实测，禁推断**；`core.autocrlf=false`）
-- 🔴 **禁按「清单」判行尾**：工作区多为**纯 CRLF** 而 HEAD blob 是**纯 LF**，且 `git status`/`diff`/`diff-files` **全看不见**（外部改写保留 mtime ⇒ stat 快速路径跳过）⇒ 改任何文件前先跑 `node scripts/checkEolDrift.mjs`（**只看「已修改」文件，报 0 ≠ 全仓健康**）；唯一依据 = **HEAD blob**；恢复用 `git cat-file -p <rev>:<path>`。
-- 🔴 写文件必须 `open(p,"wb")`+`.encode("utf-8")`（Python 文本模式在 Windows 把 LF 写成 CRLF）。**纯 CRLF**：`PROJECT_RULES.md`（改完断言 `crlf == lf`）；**实测纯 LF**：`ROADMAP*.md`、`.workbuddy/memory/*.md`、`docs/research/*.md`。
-- 🔴 改完必跑哨兵（曾 `numstat` 报 **+228/-197** 而真实只 **+31**）；排查先比 `git diff --numstat` 与 `--ignore-cr-at-eol`。
-- ⚠️ 读 CRLF 文件做行手术须 `open(..., newline="")`（否则 `split("\r\n")` 退化成 1 行）。
-- 🔴 **判行尾禁用 `grep -c $'\r'`**（2026-09-17 实测：4 个**纯 LF** 文件被它全报成「每行都有 CR」）⇒ 只认 Python `b.count(b"\r\n")` vs `b.count(b"\n")`；同日逐文件实测 **纯 CRLF** = `client/src/App.tsx` / `client/src/components/AppShell.tsx` / `.workbuddy/memory/PROJECT_RULES.md`（577/577），其余（`ROADMAP*` / `server/**` / `client/**` 其余 / `docs/**`）纯 LF。
+## 行尾（逐文件实测，禁推断）
+- 🔴 工作区多为纯 CRLF 而 HEAD blob 纯 LF，`git status/diff` **全看不见** ⇒ 改前先 `node scripts/checkEolDrift.mjs`（只看「已修改」文件，报 0 ≠ 全仓健康）；唯一依据 = HEAD blob，恢复用 `git cat-file -p <rev>:<path>`。
+- 🔴 HEAD 与工作区**字节差 == 行数** ⇒ 纯行尾漂移（归一化后 numstat 才真实）。
+- 🔴 写文件必须 `open(p,"wb")` + `.encode("utf-8")`。**纯 LF**：`ROADMAP*`、`.workbuddy/memory/*`、`docs/**`、`server/**`、`client/**`；**纯 CRLF**：`client/src/App.tsx`、`client/src/components/AppShell.tsx`、`.workbuddy/memory/PROJECT_RULES.md` ⇒ 仍须实测。
+- ⚠️ 读 CRLF 做行手术须 `open(..., newline="")`；🔴 判行尾禁 `grep -c $'\r'` ⇒ 只认 Python `b.count(b"\r\n")` vs `b.count(b"\n")`。
 
 ## 总控
-- `ROADMAP.md` 唯一 Master Control（§44 覆盖式 + §44.5 队列 + §47 append-only）；**仅 `RESEARCH_READY=TRUE` 允许策略结论**。
-- §44.5 取号真源 = 「编号台账」行（**禁「末条 +1」**）；§44「上轮实查」每轮只留 1 条。禁同批次并发多 Edit。
-- 🔴 **取号前先对远端台账**：本地台账会陈旧 —— 2026-09-17 本地写「已用至 `9av`」时，远端另一路工作已用至 **`9az`** ⇒ 撞号 ⇒ 本轮三条记录顺延为 **`9ba`/`9bb`/`9bc`**（下一个未占用 = **`9bd`**）。`ROADMAP.md` **文件头铁律行 + §44.5 台账行两处都要同步**。
-- 🔴 **分叉合流**：远端有我方没有的提交时，先 `git ls-remote` 取真值 → `fetch` → `merge --no-ff`，文档冲突按「**两侧内容都保留**」（`ROADMAP*` / memory 都是 append-only 插入），**禁**整份 `--ours`/`--theirs` 覆盖。
-- 一次性脚本写仓外 `C:\work\sourcecode\_scratch\`；`docs/research/` 放实施报告，`docs/evidence/` 只放探针。
+- `ROADMAP.md` 唯一 Master Control（§44 覆盖式 / §44.5 队列 / §47 append-only）；**仅 `RESEARCH_READY=TRUE` 允许策略结论**。
+- §44.5 取号真源 = 「编号台账」行（禁「末条 +1」）且**先对远端台账**；文件头铁律行 + 台账行**两处都同步**。禁同批次并发多 Edit。
 
 ## 回测 / 评估端口
 - Dataset 坐标 = `dataset_version.id`；Strategy SoT = `strategy_versions.strategyDocumentJson`；**零 FK**；`promote` 是唯一 `CONVERTED` 入口。
-- ✅ **条件进回测已修（`9aw`）**：`assemble.ts#requireRecipe` ①带 `recipe`→注册表 ②**有条件无 recipe**→现场编译（`conditionSignal/compile.ts`）③皆无→显式兜底；`recipeSource` 第三值 `strategy-declarative-conditions`。🔴 **① 必须先于 ②**；🔴 等价改写**方向翻转**（`bar.low >= prefix.rd0.open` ⇒ `haircut lte 0`）；表外写法抛 `CONDITION_NOT_MAPPABLE` 逐条列出，**禁回落默认配方**。
-- 🔴 **评估端口 = `server/research/strategyEvaluation/`**（唯一实现）：`evaluateStrategyParameters({strategyDocument, parameterOverrides?, dateRange, dataset?, datasetVersionId?, dataReady?, createdAt, codeVersion})`；子链 = 前 5 阶段（其余如实 `SKIPPED`）；主输出字段是 **`evaluation`**（`ClosedLoopEvaluationRef`，含 `equityCurve`），**不是** `performance`。**禁**手写 dataset→engine→simulator→evaluate 子链。
-- 🔴 **`dataReady: true` 必须显式传**（`runAudit.ts:74` 缺省 `false`；`:145-149` 的 `PASS` 判据含它）⇒ 否则 `gate = INCONCLUSIVE`、闭环 `data` 阶段以 `CL_DATASET_GATE_NOT_PASS` 阻塞。⚠️ **极易误判成「数据链认证未达成」**。
-- 🔴 `resolveParameters(schema, overrides?)`：覆写键**必须在** `document.parameters` 里，否则抛 `RECIPE_PARAMETER_UNKNOWN`。
-- 🔴 `DatasetSourceKind` 三值 `registry` / `rebuild` / **`injected`**；给 `researchDataset` 则**跳过一切数据集解析**。
-- 🔴 `backtestBridge.ts#createStrategyBacktestBridge` = 「参数集 × 区间 → 标量 + 权益曲线」唯一实现（按区间缓存数据集）。
-- 🔴 策略路径参数空间**必须从文档派生**（`deriveParameterSpaceFromDocument`）；legacy 8 维度对策略文档不存在。
-- 🔴 单组策略评估约 **3 分钟** ⇒ 参数搜索只能 `random` + 小 `budget`；全网格 1240 组会**同步阻塞**。
-- ⚠️ **长跑后 DB 查询会瞬时失败**（连接池）⇒ 先单独验证读函数，别当代码缺陷。
-- 🔴 **`marketRegimeRouter` 不是参数评估 router**（无 `MAPPABLE_PARAMETER_DICTIONARY`）⇒ 落点② 只涉及 `paramSearchRouter` + `walkForwardRouter`。
-- 🔴 性能只认「**交错 ≥3 轮取中位**」；真实列名**禁凭记忆**写 SQL；「全端点 DB 失败 + 零 DB 正常」⇒ 先查池。
+- ✅ `assemble.ts#requireRecipe` 三路：①带 `recipe` → 注册表 ②**有条件无 recipe** → 现场编译 ③皆无 → 显式兜底；`recipeSource` 第三值 `strategy-declarative-conditions`。🔴 ①必须先于②；🔴 等价改写**方向翻转**（`haircut lte 0`）；表外写法抛 `CONDITION_NOT_MAPPABLE`，禁回落默认配方。
+- 🔴 **唯一评估端口 = `server/research/strategyEvaluation/`**：`evaluateStrategyParameters({strategyDocument, parameterOverrides?, dateRange, dataset?, datasetVersionId?, dataReady?, createdAt, codeVersion})`；子链 = 前 5 阶段；主输出字段是 **`evaluation`**（含 `equityCurve`），不是 `performance`。禁手写 dataset→engine→simulator 子链。
+- 🔴 **`dataReady: true` 必须显式传**（`runAudit.ts:74` 缺省 false）⇒ 否则 `gate = INCONCLUSIVE` + `CL_DATASET_GATE_NOT_PASS`（易误判成「数据链未认证」）。
+- 🔴 `resolveParameters` 覆写键必须在 `document.parameters` 内，否则 `RECIPE_PARAMETER_UNKNOWN`。
+- 🔴 `DatasetSourceKind` = `registry` / `rebuild` / **`injected`**；给 `researchDataset` 则跳过一切数据集解析。
+- 🔴 `backtestBridge.ts#createStrategyBacktestBridge` = 「参数集 × 区间 → 标量 + 权益曲线」唯一实现（按区间缓存）。
+- 🔴 策略参数空间必须 `deriveParameterSpaceFromDocument` 派生；legacy 8 维度对策略文档不存在。
+- 🔴 单组评估约 3 分钟 ⇒ 搜索只能 `random` + 小 `budget`；1240 组全网格会同步阻塞。⚠️ 长跑后 DB 查询会瞬时失败（连接池）；真实列名禁凭记忆写 SQL；性能只认「交错 ≥3 轮取中位」。
+- 🔴 `marketRegimeRouter` 不是参数评估 router ⇒ 落点②只涉及 `paramSearchRouter` + `walkForwardRouter`。
 
-## 运行工作台 / 留档 / 成交明细
-- 🔴 直读桥 = `runWorkbenchAssembly/datasetFromRegistry.ts`（**禁第二套实现**）；决策日资格 = `rd ∈ [obs.start, obs.end]`；窗口**只认策略声明**。
-- 🔴 `securityId` = canonical `sec_<uuid>`（`engineKeyBridge` 按自身 `tradeDate` 桥接）；**板块判定用 `row.code`**。
+## 运行工作台 / 留档
+- 🔴 直读桥 = `runWorkbenchAssembly/datasetFromRegistry.ts`（禁第二套实现）；决策日资格 = `rd ∈ [obs.start, obs.end]`；窗口只认策略声明。
+- 🔴 `securityId` = canonical `sec_<uuid>`（`engineKeyBridge` 按自身 `tradeDate` 桥接）；板块判定用 `row.code`。
 - 🔴 回落重建须继承 universe 约束并抛 `UniverseConstraintError`（错用 `RegistryDatasetBridgeError` 会被吞 ⇒ 静默全市场）。
-- 🔴 `loopRun` 留档 `closed_loop_backtest_run`（与 legacy `backtest_runs` **不同表、禁互灌**）；`dateRange` 必填；`experimentId` 须 `EXP-YYYYMMDD-XXXXXXXX`；14 阶段**有执行器 8 个**。
+- 🔴 `loopRun` 留档 `closed_loop_backtest_run`（与 legacy `backtest_runs` 不同表、禁互灌）；`dateRange` 必填；`experimentId` 须 `EXP-YYYYMMDD-XXXXXXXX`；14 阶段有执行器 8 个。
 
-## 前向纸面 / 指数同步 / 大盘
-- 🔴 交易日历**唯一来源 = `index_daily`**（停更 ⇒ `datesToAdvance` 恒空、**静默 no-op 却报成功**；补数**必须 `--force`**）。
-- 🔴 **齐平判定必须传 `referenceDate`**（= `stock_daily_prices` 最大 `tradeDate`），否则 30 天容差把「落后 1 个交易日」判成已齐平。
-- 🔴 `market_data` 一行两列（`turnover` + `marginBalance` 均 NOT NULL）⇒ **只能整行写**，两融取不到就整天不写（**禁占位值**）；已修：按「窗口内缺失交易日」升序补齐、北京时 08:30/12:30、日历 = `index_daily` ∪ `limit_up_records`；缺口判据 = `getSyncStatus.pendingDates`（**>1 才缺口**，禁用 `hasTodayData`）。探针 `_probe_market_data_gap.mts` / `_run_market_sync_backfill.mts` / `_probe_market_page_render.mjs`。
-- 「某天为何不出现」：三链互不相干（前向纸面 / 组合回测 / legacy）；四环节缺一即不出（日历末端 / bar 覆盖 / 数据集窗口 / 已推进）。详版见 `PROJECT_RULES.md`。
+## 前向纸面 / 指数同步
+- 🔴 交易日历唯一来源 = `index_daily`（停更 ⇒ `datesToAdvance` 恒空、**静默 no-op 却报成功**；补数必须 `--force`）。
+- 🔴 齐平判定必须传 `referenceDate`（= `stock_daily_prices` 最大 `tradeDate`），否则 30 天容差把「落后 1 日」判成已齐平。
+- 🔴 `market_data` 两列均 NOT NULL ⇒ **只能整行写**（禁占位值）；缺口判据 = `getSyncStatus.pendingDates`（>1 才缺口，禁 `hasTodayData`）。
+- 「某天为何不出现」：三链互不相干（前向纸面 / 组合回测 / legacy）；四环节缺一即不出（日历末端 / bar 覆盖 / 数据集窗口 / 已推进）。
 
 ## 页面 / 口径 / 暗色
-- 🔴 **侧栏高亮 = 分段精确匹配 + 取最长命中**（`AppShell.tsx#isPathActive`；**禁 `startsWith`**）；详情页仍点亮父项。探针 `_probe_sidebar_active_highlight.mjs`。
-- 🔴 **主题**：`localStorage["theme"]` 显式值优先，否则跟设备（`client/index.html` 内联脚本防闪白）；**点一次切换即写死偏好** ⇒ 报「设备暗色没生效」先查该键。探针 `_probe_theme_autoload.mjs`。
-- 🔴 运算符两形：定义侧**名称形** vs 草图**符号形**，只在 `definitionBuild.ts#CONDITION_OPERATOR_MAP` 译；换数据集**同动三处**。
-- 🔴 门槛型条件必须 `gated` 配方；`signalBuilder` 是工厂 ⇒ 先 `resolveParameters`；禁手搓 `row.bars`。`client/**` 禁 import `server/**`/`shared/**` 运行时值；**免责声明不得删**；`RESEARCH_READY` 不因「结果可看」变 TRUE。
-- 策略页分家 `/strategies` + `/strategies/:strategyId`（新建草稿须清空 `strategyId`）；规则编辑 = 七段表单（**JSON 模式已删**），有 `definition` 时禁回送五个 v1 视图（`SCHEMA_DEFINITION_VIEW_CONFLICT`）。
-- 🔴 **暗色兼容层** `client/src/theme/darkCompatibility.css` 是**生成物禁手改**（新增 Tailwind 颜色类须重跑生成器）；令牌在 `client/src/index.css` 的 `.dark`；抗刺眼靠 `color-mix(in oklab, …)` 压低色度。
-- 🔴 **标签页图标 = 侧栏 Logo 的生成物** `client/public/favicon.svg`（生成器 `docs/evidence/_gen_favicon_svg.mts`，**禁手改**；位图由 `_gen_favicon_assets.mjs` 经无头 Chrome 栅格化）；两个坑：**XML 注释内禁出现连续两个短横线**（否则整份 SVG 非法 ⇒ 图标不显示）；**CSS 渐变按 oklab 插值而 SVG 只能 sRGB** ⇒ 只给端点两色标中调偏 12/255，须多色标折线逼近；对拍必须先设**日间** `prefers-color-scheme`（夜间被兼容层压色）。探针 `_probe_favicon_render.mjs`。
+- 🔴 侧栏高亮 = 分段精确匹配 + **取最长命中**（`AppShell.tsx#isPathActive`，禁 `startsWith`）；详情页点亮父项。
+- 🔴 主题：`localStorage["theme"]` 显式值优先，否则跟设备（`client/index.html` 内联脚本防闪白）；**点一次即写死偏好**。
+- 🔴 运算符两形：定义侧名称形 vs 草图符号形，只在 `definitionBuild.ts#CONDITION_OPERATOR_MAP` 译；换数据集同动三处。
+- 🔴 门槛型条件必须 `gated` 配方；`signalBuilder` 是工厂 ⇒ 先 `resolveParameters`。`client/**` 禁 import `server/**`/`shared/**` 运行时值；免责声明不得删；`RESEARCH_READY` 不因「结果可看」变 TRUE。
+- 🔴 策略页 `/strategies` + `/strategies/:strategyId`（新建草稿须清空 `strategyId`）；规则编辑 = 七段表单（JSON 模式已删），有 `definition` 时禁回送五个 v1 视图（`SCHEMA_DEFINITION_VIEW_CONFLICT`）。
+- 🔴 生成物禁手改：`client/src/theme/darkCompatibility.css`（新增 Tailwind 颜色类须重跑生成器）；favicon（`_gen_favicon_svg.mts` / `_gen_favicon_assets.mjs`）。坑：XML 注释内禁连续两个短横线；CSS oklab vs SVG sRGB 须多色标逼近，对拍先设**日间**配色。
 
-## 组合回测分仓口径（`9bc` · 2026-09-17）
-- 🔴 **`/backtest` 一个页面并存两套交易语义**：① 快照面板（当前持仓 / 准备买入 / 全部模拟订单 / 策略对比 / 风险归因）来自 **research-legacy 交易模拟器**，**完整套用分仓下拉**，口径唯一权威 = `server/positionBudget.ts#allocatePlannedBudgets`（等权 = 现金 ÷ 笔数）；② 顶层 `realisticSimulation`（「回测总览」资金与仓位审计）来自 **生产 Strategy Engine**，**每笔固定 100 股**（`runBacktestWithRisk` 未注入 PositionSizer ⇒ `engine.ts:117` 取 `signal.quantity` = `LEADER_CANDIDATE_PRODUCTION_REQUESTED_QUANTITY`），**不读分仓下拉**（`assumptions.positionSizingStrategy` 仅回显，见 `leaderCandidateStrategyBacktest.ts:80`）。实证：生产核心快照 **1232 笔成交 `shares` 全 = 100**；同页 legacy 段同一标的股数随策略变化（100 / 2200 / 3100 / 3200 / 3700）。⚠️ 两段**非等价**（`server/research/engineNonEquivalence.test.ts` 已固定），页面已加 `[data-portfolio-provenance]` 徽标如实标注。
-- 🔴 **「准备买入」显示 100% 不是算错**：等权 = **可用现金 ÷ 本批笔数** ⇒ 当日**只有 1 只入选就必然吃掉 100% 可用现金**；评分加权单笔时同样退化。**固定单笔比例 = 初始资金 × 20%**（**与权益增长脱钩**）⇒ 真机 ¥20,000/笔、仅当前权益 2.69%，它才是「每笔恒定比例」。**系统内不存在「权益 ÷ maxPositions」口径**；**用户已明确不设上限 ⇒ 禁自行加 cap**。影响面：745 个决策日里 **384 天只有 1 只候选**，2019–2024 日均候选 **1.2–1.8 只**，2025 起才变密。探针 `_probe_position_sizing_caliber.mts`。
-- ⚠️ 改分仓口径会**重算全部历史回测数值**（研究段 selectPenaltyWeight / tradeQuality / 归因都依赖）⇒ 必先经用户授权。
-- 🔴 **比例只在表格里（禁回独立段落）**：当前持仓表 = 成本金额 / 持仓市值 / 占总权益 + `tfoot` 合计（分母 = **同一模拟器同一截止日的 `finalCapital`**；真机**资金恒等式 `现金 + 持仓市值 = 总权益` 偏差 0.000%**）；准备买入表 = 计划仓位 / 预算上限列 + 合计行（回显口径 + 「股数待次日开盘价确定」，**禁以假设价格估算股数**）。钩子 `[data-planned-position-sizing]` / `[data-planned-position-chips]` **已删**（探针含反证断言）。探针 `_probe_planned_position_render.mjs`（18 断言，五策略逐个切换）。
-- ⚠️ **待收敛**：`server/paperTrading.ts:374-386` 内联了**第二份**与 `positionBudget` 逐字等价的分配实现（前向纸面**生效**）⇒ 违反「唯一权威实现」。
+## 组合回测分仓（`9bc`）
+- 🔴 `/backtest` 并存两套交易语义：①快照面板 = legacy 模拟器，套用分仓下拉（权威 = `positionBudget.ts#allocatePlannedBudgets`，等权 = 现金 ÷ 笔数）；②`realisticSimulation` = 生产 Engine，**每笔固定 100 股**（`engine.ts:117`），不读分仓。⚠️ 非等价（`engineNonEquivalence.test.ts`），页面已加 `[data-portfolio-provenance]`。
+- 🔴 「准备买入」显示 100% 不是算错：等权 = 现金 ÷ 本批笔数。**固定单笔 = 初始资金 × 20%**；系统内无「权益 ÷ maxPositions」口径；**用户已明确不设上限 ⇒ 禁自行加 cap**。⚠️ 改分仓口径会重算全部历史回测数值 ⇒ 必先经用户授权。
+- 🔴 比例只在表格里：持仓表 tfoot 分母 = 同一模拟器同一截止日 `finalCapital`；准备买入表含「股数待次日开盘价确定」，禁以假设价格估算股数。
+- ⚠️ 待收敛：`server/paperTrading.ts:374-386` 内联了第二份等价分配实现（违反唯一权威）。
 
-## 交易模式单一真源（PATTERN-LIBRARY-001 · 2026-09-17）
-- 🔴 **模式唯一真源 = `server/research/patternLibrary/patterns/*.ts`**；新增一种模式 = 1 个声明文件 + `patterns/index.ts` 1 行。**禁**再往 `moduleRegistry.ts` 写工厂、**禁**再往 `recipeRegistry.ts` 写配方字面量。
-- 🔴 声明层（`patternLibrary/types.ts` + `patterns/**`）**只允许 `import type`**；投影唯一 = `project.ts` + `projectRecipe.ts`。
-- 🔴 **顶层常量 + 互相 import ⇒ 运行时炸而 `tsc = 0`**（`TypeError: buildPatternModuleSpecs is not a function`）⇒ 注册表都是**惰性单例**：`defaultResearchModuleRegistry()` / `registeredRecipes()`。
-- 🔴 执行侧运行时原子在 `server/research/recipeRegistryAtoms.ts`；`recipeRegistry.ts` 只 re-export。
-- 🔴 **候选创建可传 `patternId`**（`researchPlannerRouter.ts#createCandidate`）⇒ 自动带 `entryRule.extra.recipe` + `parameterSpace`；不传则与既往完全一致。
+## 交易模式单一真源（PATTERN-LIBRARY-001）
+- 🔴 模式唯一真源 = `server/research/patternLibrary/patterns/*.ts`；新增一种 = 1 个声明文件 + `patterns/index.ts` 1 行。禁再往 `moduleRegistry.ts` 写工厂、禁再往 `recipeRegistry.ts` 写配方字面量。
+- 🔴 声明层只允许 `import type`；投影唯一 = `project.ts` + `projectRecipe.ts`。
+- 🔴 顶层常量互相 import ⇒ **运行时炸而 `tsc = 0`** ⇒ 注册表必须惰性单例；执行侧运行时原子在 `recipeRegistryAtoms.ts`，`recipeRegistry.ts` 只 re-export。
+- 🔴 候选创建可传 `patternId`（`researchPlannerRouter.ts#createCandidate`）⇒ 自动带 `entryRule.extra.recipe` + `parameterSpace`；不传则与既往完全一致。
 
-## 策略文档坐标（PATTERN-LIBRARY-001 全链验收实测）
-- 🔴 **配方引用在 `document.recipe`（顶层）**，**不是** `document.definition.entry.recipe`（后者不存在）⇒ `assemble.ts:461` 读的正是 `document.recipe`。⚠️ 断言位置必须回源码核对。
-- 🔴 **`strategies` 表两个身份列**：`id`(INT 自增) 与 `strategyId`(varchar) ⇒ 清理一律用 `strategyId`；对 `id` 传字符串报 `Truncated incorrect INTEGER value`（**会让行数守恒假装通过**）。
-- 🔴 **`patternId` 路径下候选写 `filterRule:{groups:[]}` 是刻意的**：研究侧变量名无策略侧翻译，写进去 promote 必失败；筛选语义由 `buildGates` 承载，摘要进 `sourceTraceJson.patternGateSummary`。
-- 🔴 **P0-1 已修（响亮拒绝）**：`definitionBuild.ts#buildConditions` 读 `logicalOperator`/`groupLogicalOperator`，非 AND ⇒ 抛错；**组内首条必须放行**（引擎本就忽略它，误拒反而错）。`ConditionDefinition` **没有**逻辑位字段。
+## 策略文档 / 候选草图坐标
+- 🔴 配方引用在 **`document.recipe`（顶层）**，不是 `document.definition.entry.recipe`（不存在）；`assemble.ts:461` 读它。
+- 🔴 `strategies` 表两个身份列：`id`(INT) 与 `strategyId`(varchar) ⇒ 清理一律用 `strategyId`；对 `id` 传字符串报 `Truncated incorrect INTEGER value`（会让行数守恒假装通过）。
+- 🔴 `patternId` 路径下候选写 `filterRule:{groups:[]}` 是刻意的：研究侧变量名无策略侧翻译；筛选由 `buildGates` 承载，摘要进 `sourceTraceJson.patternGateSummary`。
+- 🔴 `buildConditions` 读 `logicalOperator`/`groupLogicalOperator`，非 AND ⇒ 响亮抛错；**组内首条必须放行**。`ConditionDefinition` 无逻辑位字段。
+- 🔴 候选草图的键白名单必须与服务端契约**等宽**（`candidateSketchForm.ts`）：`PARAMETER_SPACE_ROW_KEYS` 8 键，其中 `parameterRole`/`defaultValue` 真被读（`definitionBuild.ts:497`/`:550`，缺 `defaultValue` 抛 `RECIPE_PARAMETER_NO_DEFAULT`），少一个整块降级为「原样展示」；⚠️ `CONDITION_ROW_KEYS` **仍缺 `note`**（`:468` 读它写 `condition.description`）⇒ 已转正候选（如 360008）的 filterRule 块仍降级。🔴 **改服务端参数/条件契约必须同查前端三处**：白名单 / `CandidateSketchFields.tsx` / `CandidateSketchCard.tsx`。空串 = 不声明，禁伪造。
 
-## 前端可达性（2026-09-17）
-- 🔴 `/research/ask` 的 `step`/`questionId` 是**内存态**（`ResearchAsk.tsx:96/101`）且 `getOutcome` 的 `enabled` 依赖后者 ⇒ **刷新页面永远回不到 `OUTCOME` 步骤** —— 而「交易模式」下拉只在那里（`:1162`，包在 `candidateEligibleAnalyses.length > 0` 分支里）。
-- 🔴 已补**深链** `/research/ask?runId=N`（或 `?questionId=N`）：`readDeepLink(search)` ⇒ `step` 直接进 `RUNNING`，`isRunReportable` 成立即自动切 `OUTCOME`。后端 `getOutcome`（`researchPlannerRouter.ts:380-391`）**本就同时接受 `questionId` 与 `runId`**。
-- 🔴 入口在实验详情页 `/research/:experimentId` 的 Run 面板（`ResearchDetail.tsx`）。下拉前置 = 该 Run 至少一条带条件分析（判据 `aggregate.ts:301-305` 的 `conditionCount > 0`）；诊断探针 `_probe_visible_pattern_entry.mts`。
-- 🔴 `isRunReportable` = `analysisCount > 0 && pendingCount === 0 && runStatus ∈ {COMPLETED, FAILED}`（`researchAskForm.ts:286-290`）。
-- 🔴 **教训：「接线完成」≠「用户够得到」** ⇒ 交付前必须用无头浏览器量一次 DOM。
-- 🔴 **`createCandidate` 实测 13.2 秒**（服务端跑 `buildResearchOutcome` 全量聚合）⇒ 长请求按钮**必须换文案**（只 `disabled` + 小 spinner 会被当成「坏了」）；前端身份判据必须 **`questionId ?? runId` 择一**（服务端 `:463-497` 两者皆收）—— 硬判 `questionId === null` 会在深链模式下**静默 return**（本轮真踩）。
-- 🔴 `Link` 包 `Button` 必须写 **`<Button asChild><Link>`**（否则渲染成 `<a><button>` 非法嵌套）；既有范式见 `ResearchList.tsx:87-91`。
-- 🔴 **CDP 探针三坑**：只监听 `Network.responseReceived` 会漏「已发出未响应」⇒ 同时听 `requestWillBeSent`；取 toast 必须**高频轮询**（sonner 默认 4 秒消失，等 9 秒必空）；**模板字符串里的正则 `\s` 反斜杠会被吃掉**（用 `includes` 替代）。
-- 🔴 验收清理测试数据前先查引用面：`information_schema.COLUMNS where COLUMN_NAME='candidateId'` —— 本仓 **0 命中** ⇒ 删候选行不留孤儿。
+## 前端可达性
+- 🔴 `/research/ask` 的 `step`/`questionId` 是内存态 ⇒ 刷新回不到 `OUTCOME`；已补深链 `/research/ask?runId=N`（入口在实验详情页 Run 面板）。后端 `getOutcome` 两身份皆收。
+- 🔴 **「接线完成」≠「用户够得到」** ⇒ 前端改动必须用无头浏览器按真实导航路径量一次 DOM。
+- 🔴 `createCandidate` 实测 13.2 秒 ⇒ 长请求按钮**必须换文案**；身份判据必须 `questionId ?? runId` 择一（硬判单字段会在另一条路径**静默 return**）。**静默 return 一律换响亮提示**。
+- 🔴 `Link` 包 `Button` 必须 `<Button asChild><Link>`（否则 `<a><button>` 非法嵌套）。
+- 🔴 清理测试数据前先查引用面（`information_schema.COLUMNS where COLUMN_NAME='candidateId'` —— 本仓 **0 命中**）。
+- 🔴 **候选 → 策略可达性**：`/strategies` 只列 `strategies` 表（`strategyService.list()`）⇒ **未转正候选不出现**（符合设计）；候选详情页 `ACCEPTED` 才有「转正为策略」入口，`CONVERTED` 后只写一句「已转正」，**无 `/strategies/:strategyId` 链接** ⇒ 研究侧看不到产物（真实缺口）。
+
+## 研究 Run 运行态 / 孤儿回收（2026-09-18 实测）
+- 🔴 **僵尸 RUNNING 的第三种形态**：`reclaim.ts` 的 RUNNING 兜底分支**只在遍历「非终态分析」时**收集父 Run ⇒ **「父 RUNNING + 子分析全终态 + 有结果」永不被自动收敛**（热重启杀在收尾时刻的样子）。实测 `run 930001`：stale 882 分钟、子 28/28 COMPLETED、510 结果行、execLog batch1 停 `RUNNING`，回收器真实调用 = `reclaimedRuns: []`（零写入）⇒ 只能**人工收敛**（`FAILED` + `RUN_ORPHANED` + `completedAt` + Experiment 回滚）。
+- 🔴 排查僵尸 Run 顺序：`startedAt` 距今（**库内时间戳是 UTC 墙钟，别再减 8 小时**）→ 子分析状态分布 → `research_result` 行数 → `executionLogJson` 末批 `status/completedAt` → **进程证据**（`Get-Process -Id <pid> | Select StartTime`；⚠️ PowerShell 里 `$pid` 是保留变量）。进程启动晚于 `startedAt` ⇒ 执行者已消亡。
+- ✅ **写保护代理取证法**：把真实仓储包 Proxy（方法名命中 `^(create|update|delete|remove|insert|upsert|save|replace|set|purge)` 即抛错，**其余必须 `.bind(obj)`**）后照常调**真实函数** ⇒ 同时得到「真实返回值 + 是否零写入 + 本来要写什么」，避免只读复刻判据造成第二套实现。
+- 🔴 **判「候选能否转正」用只读试跑**：`buildStrategyDefinition()` + `validateBuiltStrategyDefinition()` 是纯函数不写库（`_probe_candidate_promote_dryrun.mts`）。已拒形态：条件右值写**算术表达式**（`prefix.rd0.volume * 0.3`）⇒ `PROMOTE_SKETCH_INVALID`。

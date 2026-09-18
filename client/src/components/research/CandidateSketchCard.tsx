@@ -22,6 +22,7 @@ import { SectionCard } from "@/components/common";
 import type { CandidateRawLike } from "@/adapters/strategyCandidateAdapter";
 import {
   CANDIDATE_COST_MODEL_OPTIONS,
+  CANDIDATE_PARAMETER_ROLE_OPTIONS,
   CANDIDATE_ENTRY_TIMING_OPTIONS,
   CANDIDATE_EVENT_OPTIONS,
   CANDIDATE_QUANTITY_METHOD_OPTIONS,
@@ -178,6 +179,14 @@ function ParameterSpaceReadonly({ drafts }: { drafts: CandidateSketchDrafts }) {
           <th className="py-1 text-left font-normal">参数名</th>
           <th className="py-1 text-left font-normal">类型</th>
           <th className="py-1 text-left font-normal">取值域</th>
+          {/*
+            角色 / 默认值 / 说明 —— 这三个键服务端**真的会读**
+            （`parameterRole` 决定是否进 Parameter Search；`defaultValue` 是运行必需输入）。
+            此前它们不在此表 ⇒ 用户既看不到也（曾）不能在表单里改。
+          */}
+          <th className="py-1 text-left font-normal">角色</th>
+          <th className="py-1 text-left font-normal">默认值</th>
+          <th className="py-1 text-left font-normal">说明</th>
         </tr>
       </thead>
       <tbody>
@@ -189,6 +198,18 @@ function ParameterSpaceReadonly({ drafts }: { drafts: CandidateSketchDrafts }) {
               {row.type === "number"
                 ? `min ${row.min || "?"} · max ${row.max || "?"}${row.step.trim() === "" ? "" : ` · step ${row.step}`}`
                 : row.allowedValuesText || "（未填写）"}
+            </td>
+            {/* 空串 = **未声明**（服务端按缺省 TUNABLE 处理），不是「未填写」 */}
+            <td className="py-1">
+              {row.parameterRole.trim() === ""
+                ? "未声明（按待搜索）"
+                : labelOf(CANDIDATE_PARAMETER_ROLE_OPTIONS, row.parameterRole)}
+            </td>
+            <td className="py-1 font-mono">
+              {row.defaultValueText.trim() === "" ? "—" : row.defaultValueText}
+            </td>
+            <td className="max-w-[260px] py-1 text-muted-foreground">
+              {row.description.trim() === "" ? "—" : row.description}
             </td>
           </tr>
         ))}

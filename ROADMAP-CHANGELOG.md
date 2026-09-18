@@ -2355,3 +2355,61 @@ P1（9 条）/ P2（6 条）一条未动；P0-2/P0-3 的**彻底解**（翻译�
 > 本节约对 append-only，**禁止删除/覆盖历史记录**。每完成一个任务追加一条。
 
 - **2026-09-17 23:55** — **`9bc` / PORTFOLIO-HOLDINGS-POSITION-001 完成：分仓口径核查 + 当前持仓金额/占比入表 + 比例从段落搬进表格**。触发 = 用户三问：「确认一下前面写的分仓策略是不是有问题」「现在策略回测的都是按照这个分仓策略吗」「把当前持仓的总金额与仓位比例展示出来；不要单独展示这一段文字，而是在表格中展示比例」。**一、🔴 核查结论（实证，非推断）**：`/backtest` 一个页面**并存两套交易语义** —— `getLeaderCandidateResearch` → `runLeaderCandidateResearchReport`：① `downsideRiskResearch.fullCycle.experiments`（= `strategyPortfolioSnapshot` 的当前持仓 / 准备买入 / 全部模拟订单 / 策略对比 / 风险归因）由 **research-legacy 交易模拟器**产出，**完整套用分仓下拉**（等权 / 评分加权 / 固定单笔比例，口径唯一权威 = `server/positionBudget.ts#allocatePlannedBudgets`）；② 顶层 `realisticSimulation`（「回测总览」的资金与仓位审计）由**生产 Strategy Engine** 产出（`runLeaderCandidateEngineProbe` 经 `realisticSimulationOverride` 注入）。🔴 **引擎段每笔固定 100 股**：`runBacktestWithRisk` 未注入 PositionSizer ⇒ `engine.ts:117` 取 `signal.quantity` = `LEADER_CANDIDATE_PRODUCTION_REQUESTED_QUANTITY` = 100，风控只做整手 / 最大持仓 / 容量 / 现金裁决 ⇒ **分仓下拉对引擎段不生效**，`assumptions.positionSizingStrategy` 仅作回显（源码注释已自陈「仅用于回显输入口径」，见 `leaderCandidateStrategyBacktest.ts:80`）。**实证 A（静）**：生产核心磁盘快照 `.cache/leader-candidate-backtest/ab9e871b…json` 的 **1232 笔成交 `shares` 全部 = 100**。**实证 B（动，真机五策略逐个切换）**：legacy 段同一标的股数随策略变化 —— 闽东电力 **100 / 3700 / 2200 / 3700** 股、澳弘电子 **3100 / 1900 / 3200** 股；准备买入预算 = 现金 ÷ 笔数（¥460,838 ÷ 2 = ¥230,419）。⇒ 结论：**不是「都按这个分仓策略」**，且两段**非等价**（`server/research/engineNonEquivalence.test.ts` 已固定该立场）。**二、改动（纯前端；`server/**` 零改动 —— 用户在用页面，按三门第 2 条禁改 server）**：① 「当前持仓」表把 `数量 / 成本` 扩为 `数量 / 买入价 / 成本金额`，**新增「持仓市值 / 占总权益」列**，并加 `tfoot` 合计行（成本 / 浮动 / 市值 / 占总权益 / 现金 / 总权益）；② 「下一交易日准备买入」**删除**标题下方三行口径段落与逐只胶囊，比例与预算上限改为**表格列 + `tfoot` 合计行**（口径移入列头副标题与 `title`，降仓徽标保留在行内，完整公式在合计行回显）；③ 新增 `[data-portfolio-provenance]` 徽标，如实标注该快照由研究-legacy 模拟器产出、与「回测总览」的生产引擎段**非等价**；④ 新增 8 个模块级纯函数（金额 / 占比 / 汇总 / 口径短标签 / 降仓文案）。**三、口径不新造**：金额 = 价 × 量、占比 = 持仓市值 ÷ **同一模拟器同一截止日**的 `finalCapital` ⇒ 纯**展示层恒等变形**（价缺失如实回显「待补」，**禁估计**）。**四、验收**：`npx tsc --noEmit` = **0**；`client/src/pages/Backtest.tsx` **+24/−1 行**；全量 `vitest run` = **4113 passed / 16 failed**，失败文件集合（`dataHealth` / `image.uploadAndRecognize` / `limitUp` / `limitUp.watch` / `marketData` / `tushare.secret` / `tushareTradingCalendar`）与既有基线**逐字一致**，零新增失败；真机 `docs/evidence/_probe_planned_position_render.mjs`（**已改写为新契约**，无头 Chrome + CDP，零依赖、只读）**ALL PASS / 18 断言** —— 关键硬证据 = **合计行资金恒等式 `现金 ¥460,838 + 持仓市值 ¥1,797 = 总权益 ¥462,635`，偏差 0.000%**（证明「占总权益」的分母取对），另有**反证断言**「`[data-planned-position-sizing]` 与 `[data-planned-position-chips]` 必须不存在」、「当前持仓逐行含金额与 `x.xx%`」、「`Σ(逐只比例) ≈ 合计行总比例`」、「合计行回显口径 + 股数待次日开盘价确定」。证据图 `docs/evidence/_evidence_planned_position_panel.png`（截图探针就绪判据同步改为 `[data-strategy-portfolio-snapshot] tfoot`）。**五、遗留（未夹带）**：① `server/paperTrading.ts:374-386` 内联了**第二份**与 `positionBudget` 逐字等价的分配实现（前向纸面交易**生效**）⇒ 违反「唯一权威实现」、须在用户不用页面时收敛；② 是否让引擎段也读分仓下拉（把 PositionSizer 接进 `runBacktestWithRisk`）属**架构级改动**（会改写全部历史回测数值）⇒ 须用户决策后再动，本轮**只做如实呈现、不改引擎**。
+## 2026-09-18 · 候选草图 `parameterSpace` 三键被表单拒收（已修）
+
+**2026-09-18 13:10 GMT+8**。用户报错「该块含结构化表单表达不了的内容，原样展示：parameterSpace.max_volume_ratio 出现未收录的键：parameterRole、defaultValue、description」。
+
+- **真因**：前端白名单（`candidateSketchForm.ts:317`）只有 5 键，而服务端 `buildParameters` 真的读 `parameterRole`（`:497`，决定是否进 Parameter Search）与 `defaultValue`（`:550`，执行层必需）⇒ 含这三键的参数行让**整块降级为原样展示 JSON**。
+- **影响面**：13 条候选中 1 条三键齐全（`960001`）、9 条含 `defaultValue` ⇒ 该降级并非本轮引入，而是 `parameterRole` 新加后首次三键齐出。**严重度 P1**（不丢数据、不阻塞保存/转正，但用户看不到也改不了）。
+- **修复**（4 文件，仅 `client/**`）：白名单 5→8；草稿模型 +3 字段；解析/序列化（空串一律省略）；校验改为「先定角色、再决定范围是否必需」；可编辑表单 +3 输入；只读卡片 +3 列。
+- **取证**：无头 CDP 打开 `/research/candidates/960001` ⇒ 六列表格渲染、`hasRawNotice=false`、零 pageError。
+- **验收**：`tsc`=0；聚焦测试 63/63；全量 8 failed / 17（零新增）；行尾 0 漂移。
+
+## 2026-09-18 13:50 GMT+8 — 排查在途 Run（发现并人工收敛僵尸 `930001`）+ 登记回收死角 `9bd` + 用户授权把候选 `960001` 转正为正式策略
+
+**用户指令**：「排查（库里那个 `RUNNING` 的 Run）」，以及「我在策略中还是没看见那条数据」。（零产品代码改动：本轮**未改** `server/**` / `client/**` 任何一行。）
+
+### 一、在途 Run 排查：真实在途 = 1 条，且是**僵尸**
+
+| Run | 状态 | startedAt（UTC 墙钟） | 停更 | 子分析 | 结果行 | `executionLog` |
+|---|---|---|---|---|---|---|
+| **930001**（exp 660001） | `RUNNING` | 2026-09-17 14:51:06 | **886 分钟** | **28/28 COMPLETED** | **510** | 批次 1 停 `RUNNING`/`completedAt=null` |
+| 630002（exp 360002） | `PENDING` | 无 | — | 1 条 PENDING | 0 | 空（`inputSnapshot`/`startedAt` 皆空） |
+| 330003（exp 240002） | `FAILED / RUN_ORPHANED` | — | — | 子分析 270008 早前已收口 | — | 2026-09-12 人工收敛 |
+
+- **判据链（实测，非推断）**：`startedAt` 距今 886 分钟 → 子分析 **28/28 COMPLETED** → `research_result` **510 行** → `executionLogJson` 批次 1 `status=RUNNING` 且 `completedAt=null`（收尾从未写入）→ **进程证据**：监听 `:3000` 的 node 进程 `StartTime = 2026-09-18 12:59:13`，**晚于**该 Run 的 `startedAt` ⇒ 执行者必然已消亡。
+- `630002` 属**未执行草稿**（三项全空）⇒ 按硬判据**保留，不收敛**。
+
+### 二、🔴 发现回收器死角并登记为 `9bd`（本轮最重要的技术发现）
+
+- `server/researchEngine/reclaim.ts` 的 `RUNNING` 兜底分支**只在遍历「非终态分析」时**才收集父 Run ⇒ **「父 `RUNNING` + 子分析全终态 + 有结果」这一形态永远进不了视野**（恰好是「热重启杀在收尾那一刻」的形状）。
+- **取证手法（新，可复用）**：把真实仓储包成「**写即抛错**」的 Proxy（方法名命中 `^(create|update|delete|remove|insert|upsert|save|replace|set|purge)` 即抛错并记录，其余 `bind`），再调用**真实** `reclaimOrphanResearchWork()` ⇒ 实测 `reclaimedRuns: []`、`writeAttempts: []`（**确实零写入**）、`skippedUnexecutedRuns` 如实回报 `630002`。探针 `docs/evidence/_probe_reclaim_blindspot.mts`。
+- ⚠️ 注意与 `9h`/`9av` 的差别：`9av` 覆盖的是「父终态子未终态」；**本形态是第三个**，回收器**不覆盖**。
+
+### 三、僵尸 Run 收敛（**用户授权**，口径完全沿用 2026-09-12 收敛 `330003` 的既有做法）
+
+脚本 `docs/evidence/_ops_converge_orphan_run_930001.mts`（前置断言：必须 `RUNNING` 且无任何非 COMPLETED 子分析，否则拒绝执行）：
+
+- `research_run 930001`：`RUNNING` → **`FAILED`**，`errorCode='RUN_ORPHANED'`，`completedAt` **取日志内最后活动时间戳 `2026-09-17T14:52:28Z`（刻意不用 `NOW()`** —— 否则把「停更 14.8 小时」伪装成「刚刚结束」）；`executionLogJson` 批次 1 同步收敛为 `FAILED` + `completedAt` + `errorCode` + `errorMessage`；`sampleCount` 保持 `null`。
+- `research_experiment 660001`：`RUNNING` → **`FAILED`**（仅当该实验下再无其它 `RUNNING` Run —— 已断言）。
+- **原样保留**：28 条分析与 510 行结果（**不删任何行**）。
+- **收敛后**：全库 `RUNNING` 计数 = **0**（真机复核 `remainingRunningRuns: []`）。
+
+### 四、候选 `960001` 转正（**用户授权**）
+
+- **先判「能不能转正」**（只读试跑 `_probe_candidate_promote_dryrun.mts`，调纯函数 `buildStrategyDefinition` + `validateBuiltStrategyDefinition`，不写库）：**两步全通过**、执行数据集继承 `390002`（v2 / READY / `first_limit_pullback`）、预期身份 `cand-960001`。
+  - 对照组 `360004`（已转正）**反而构建失败**：`filterRule.groups[0].conditions[1].value = "prefix.rd0.volume * 0.3"` 是**算术表达式**，条件右值只接受「常量 / 字段引用 / 参数引用」⇒ `PROMOTE_SKETCH_INVALID`。**说明该候选的草稿在转正之后被改过**（当前草稿已不是当初转正时那份）。
+- **真机弹窗取证**（`_probe_promote_dialog_ready.mjs`，**不点提交**）：`/research/candidates/960001` 点「转正为策略」后弹窗正常打开，显示「继承研究来源数据集」+「本次将用于执行的 Dataset：#390002」，「确认转正」**可用**，零网络失败、零 pageError ⇒ **UI 路径完全可用**，「点了没反应」不成立。
+- **执行**：`docs/evidence/_ops_promote_candidate_960001.mts` 走**与端点同一套实现**（`createStrategyCandidateService().promote()`，不传 `overrides` = 与弹窗默认项一致），`codeVersion` 经同一个 `composeCodeVersion` 注入。结果：`strategyId=cand-960001`、`strategyVersionId=600001`、`strategyVersion=1.0.0`、`provenanceId=390001`、`origin=DIRECT`、`datasetDivergence=false`、`fingerprint=0486c8b5…a574`、`idempotent=false`；候选 → `CONVERTED` + `strategyDefinitionId=cand-960001`。
+- **真机复核**（`_probe_candidate_strategy_visibility.mjs`，**ALL PASS**，零 pageError）：`/strategies` **10 张卡**（含 `cand-960001` v1.0.0）；`/research/candidates/960001` 显示「已转正」、**不再有**转正入口、参数表**六列齐全**且无降级；`/strategies/cand-960001` 可打开（非 404）。
+
+### 五、顺带记账的两个**仍未修**的可达性/契约缺口
+
+1. **研究 → 策略单向断链**：已转正候选详情页**没有任何指向 `/strategies/:strategyId` 的链接**（实测链接数 = 0），只写一句「已转正；产出的 Strategy 独立于研究模块存在」⇒ 用户找不到自己产出的策略。
+2. **前端白名单仍比服务端契约窄一处**：`candidateSketchForm.ts#CONDITION_ROW_KEYS` **缺 `note`**，而 `definitionBuild.ts:468` 真的读它写 `condition.description` ⇒ 已转正候选 `360008` 的 `filterRule` 块仍降级为「原样展示」（与 09-18 上午修的 `parameterSpace` 是**同一类**缺陷）。
+
+### 六、验收与边界
+
+- **零产品代码改动**：`server/**` 与 `client/**` 一行未改、零迁移、零新端点、零新依赖 ⇒ 不存在热重启风险。
+- 新增 **8 个只读/运维脚本 + 证据**（全部在 `docs/evidence/`）：`_probe_candidate_to_strategy_chain.mts`、`_probe_candidate_strategy_visibility.mjs`、`_probe_candidate_paramspace_keysets.mts`、`_probe_candidate_promote_dryrun.mts`、`_probe_promote_dialog_ready.mjs`、`_probe_inflight_run_detail.mts`、`_probe_reclaim_blindspot.mts`、两个 `_ops_*`。
+- **`9bd` 已登记**（`ROADMAP.md` §44.5，含验收判据与「须排在无在途 Run 时段」的约束）；编号台账两处（文件头铁律行 + §44.5 台账行）同步为「已用至 `9bd` ⇒ 下一个未占用 = `9be`」，**取号前已对远端**（`git ls-remote` 实测 `main = 4c7250f5…`，与本地 HEAD 一致 ⇒ 本地台账不陈旧）。

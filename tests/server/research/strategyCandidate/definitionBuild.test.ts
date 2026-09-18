@@ -702,3 +702,65 @@ describe("RESEARCH-006.3 · validateBuiltStrategyDefinition（§10）", () => {
     }
   });
 });
+describe("P0 · 逻辑位不得静默降级 + 研究侧变量名必须说清（2026-09-17）", () => {
+  it("P0-1a) 组内第 2 条 logicalOperator=OR ⇒ 拒绝（此前被静默压成 AND）", async () => {
+    const draft = mutateDraft((d) => {
+      const groups = (d.filterRule as { groups: Array<{ conditions: Array<Record<string, unknown>> }> }).groups;
+      groups[0].conditions[1].logicalOperator = "OR";
+    });
+    const err = await expectSketchError(
+      () => buildStrategyDefinition(input(draft)),
+      STRATEGY_CANDIDATE_ERROR.PROMOTE_SKETCH_INVALID,
+    );
+    expect(err.message).toContain("logicalOperator");
+    expect(err.message).toContain("OR");
+  });
+
+  it("P0-1b) 组间 groupLogicalOperator=OR ⇒ 拒绝", async () => {
+    const draft = mutateDraft((d) => {
+      const groups = (d.filterRule as { groups: Array<Record<string, unknown>> }).groups;
+      groups.push({
+        groupNo: 1,
+        groupLogicalOperator: "OR",
+        conditions: [
+          {
+            groupNo: 1,
+            sortOrder: 0,
+            fieldName: "bar.volume",
+            operator: "<",
+            value: "prefix.rd0.volume",
+            logicalOperator: "AND",
+            groupLogicalOperator: "OR",
+          },
+        ],
+      });
+    });
+    const err = await expectSketchError(
+      () => buildStrategyDefinition(input(draft)),
+      STRATEGY_CANDIDATE_ERROR.PROMOTE_SKETCH_INVALID,
+    );
+    expect(err.message).toContain("groupLogicalOperator");
+  });
+
+  it("P0-1c) 首条 logicalOperator=OR **允许**（引擎口径：首条无前序，连接符本就被忽略）", () => {
+    const draft = mutateDraft((d) => {
+      const groups = (d.filterRule as { groups: Array<{ conditions: Array<Record<string, unknown>> }> }).groups;
+      groups[0].conditions[0].logicalOperator = "OR";
+    });
+    // buildStrategyDefinition 是**同步**的（唯一转换器 = 纯函数）⇒ 用 not.toThrow 而非 .resolves
+    expect(() => buildStrategyDefinition(input(draft))).not.toThrow();
+  });
+
+  it("P0-2) 研究侧变量名 ⇒ 拒绝且消息点名「研究侧变量名」（不做机械翻译）", async () => {
+    const draft = mutateDraft((d) => {
+      const groups = (d.filterRule as { groups: Array<{ conditions: Array<Record<string, unknown>> }> }).groups;
+      groups[0].conditions[0].fieldName = "pullback_holds_event_open_2d";
+    });
+    const err = await expectSketchError(
+      () => buildStrategyDefinition(input(draft)),
+      STRATEGY_CANDIDATE_ERROR.PROMOTE_SKETCH_INVALID,
+    );
+    expect(err.message).toContain("研究侧变量名");
+    expect(err.message).toContain("pullback_holds_event_open_2d");
+  });
+});

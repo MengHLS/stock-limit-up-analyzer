@@ -73,6 +73,7 @@ import {
   sketchDraftsToJson,
   sketchSegmentBlocks,
   sketchSegmentStatuses,
+  parameterSpaceDraftToJson,
   sketchValuesEqual,
   summarizeSketchSegment,
   toSketchDrafts,
@@ -1053,5 +1054,101 @@ describe("成本预设", () => {
     expect(text).toContain("印花税 千1");
     expect(text).toContain("100 股/手");
     expect(text).toContain("最低 5 元");
+  });
+});
+
+describe("parameterSpace 的三个真实键（parameterRole / defaultValue / description）", () => {
+  it("含这三个键时**不降级**，且能被表单读出（回归：实测报错「出现未收录的键」）", () => {
+    const drafts = toSketchDrafts({
+      parameterSpace: {
+        maxDrawdown: {
+          type: "number",
+          min: 0,
+          max: 0.3,
+          step: 0.01,
+          parameterRole: "FIXED",
+          defaultValue: 0.02,
+          description: "守线阈值",
+        },
+      },
+    });
+    expect(drafts.parameterSpace.kind).toBe("structured");
+    if (drafts.parameterSpace.kind === "structured") {
+      const row = drafts.parameterSpace.draft[0]!;
+      expect(row.parameterRole).toBe("FIXED");
+      expect(row.defaultValueText).toBe("0.02");
+      expect(row.description).toBe("守线阈值");
+    }
+  });
+
+  it("往返：草稿 → JSON 保留三键，且默认值按同行 type 还原类型", () => {
+    const json = parameterSpaceDraftToJson([
+      {
+        code: "a",
+        type: "number",
+        min: "0",
+        max: "1",
+        step: "0.1",
+        allowedValuesText: "",
+        parameterRole: "TUNABLE",
+        defaultValueText: "0.5",
+        description: "n",
+      },
+      {
+        code: "b",
+        type: "boolean",
+        min: "",
+        max: "",
+        step: "",
+        allowedValuesText: "true,false",
+        parameterRole: "",
+        defaultValueText: "true",
+        description: "",
+      },
+    ]);
+    expect(json["a"]).toEqual({
+      type: "number",
+      min: 0,
+      max: 1,
+      step: 0.1,
+      parameterRole: "TUNABLE",
+      defaultValue: 0.5,
+      description: "n",
+    });
+    expect(json["b"]).toEqual({ type: "boolean", allowedValues: ["true", "false"], defaultValue: true });
+  });
+
+  it("空串一律**省略**该键（不声明 ≠ 声明成空值）", () => {
+    const json = parameterSpaceDraftToJson([
+      {
+        code: "a",
+        type: "number",
+        min: "0",
+        max: "1",
+        step: "",
+        allowedValuesText: "",
+        parameterRole: "",
+        defaultValueText: "",
+        description: "",
+      },
+    ]);
+    expect(json["a"]).toEqual({ type: "number", min: 0, max: 1 });
+  });
+
+  it("FIXED 参数不再被要求 min / max（与服务端 TUNABLE-only 口径一致）", () => {
+    const fixed = toSketchDrafts({
+      parameterSpace: { a: { type: "number", parameterRole: "FIXED", defaultValue: 1 } },
+    });
+    const status = validateSketchDrafts(fixed);
+    expect(status.errors.filter((e) => e.includes("min 与 max"))).toHaveLength(0);
+  });
+
+  it("非法默认值 / 未知角色 → 校验响亮报错（不静默丢弃）", () => {
+    const bad = toSketchDrafts({
+      parameterSpace: { a: { type: "number", min: 0, max: 1, defaultValue: "abc", parameterRole: "WHATEVER" } },
+    });
+    const status = validateSketchDrafts(bad);
+    expect(status.errors.some((e) => e.includes("不是有效数值"))).toBe(true);
+    expect(status.errors.some((e) => e.includes("参数角色"))).toBe(true);
   });
 });

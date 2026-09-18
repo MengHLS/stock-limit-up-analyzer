@@ -73,6 +73,7 @@ import {
   CANDIDATE_EVENT_OPTIONS,
   CANDIDATE_EVENT_PARAM_HINTS,
   CANDIDATE_FIELD_ROOT_OPTIONS,
+  CANDIDATE_PARAMETER_ROLE_OPTIONS,
   CANDIDATE_PARAMETER_TYPE_OPTIONS,
   CANDIDATE_QUANTITY_METHOD_OPTIONS,
   CANDIDATE_SIZING_METHOD_OPTIONS,
@@ -1283,6 +1284,46 @@ function ParameterSpaceForm({
                 }
               />
             )}
+          </div>
+          {/*
+            🔴 这三个键**不是可选项**（2026-09-17 修）：服务端 `buildParameters` 读
+            `parameterRole`（决定该参数是否进 Parameter Search）与 `defaultValue`
+            （执行层必需，缺了运行会抛 `RECIPE_PARAMETER_NO_DEFAULT`）；`description`
+            保留声明里的语义说明。此前表单不认它们 ⇒ 整块降级为「原样展示」。
+            空串一律表示「不声明」（提交时省略该键），绝不用空值冒充声明过。
+          */}
+          <div className="grid gap-1.5 sm:grid-cols-3">
+            <select
+              className="h-8 rounded-md border bg-background px-1.5 text-xs"
+              value={row.parameterRole}
+              title="参数角色：待搜索才进 Parameter Search；固定 / 派生不进"
+              onChange={(event) =>
+                onChange(rows.map((r, i) => (i === index ? { ...r, parameterRole: event.target.value } : r)))
+              }
+            >
+              <option value="">角色：未声明（按待搜索处理）</option>
+              {CANDIDATE_PARAMETER_ROLE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <Input
+              className="h-8 font-mono text-xs"
+              value={row.defaultValueText}
+              placeholder="默认值（运行必填）"
+              onChange={(event) =>
+                onChange(rows.map((r, i) => (i === index ? { ...r, defaultValueText: event.target.value } : r)))
+              }
+            />
+            <Input
+              className="h-8 text-xs"
+              value={row.description}
+              placeholder="说明（可选）"
+              onChange={(event) =>
+                onChange(rows.map((r, i) => (i === index ? { ...r, description: event.target.value } : r)))
+              }
+            />
           </div>
         </div>
       ))}
