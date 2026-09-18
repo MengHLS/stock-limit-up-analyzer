@@ -392,24 +392,57 @@ function calculatePeriodProfitability(equityPoints: RealisticBacktestResult["equ
   return ratio(returns.filter((value) => value > 0).length, returns.length);
 }
 
-function calculateDrawdownDurations(equities: number[]) {
+/**
+ * 回撤区间的「持续」与「收复」用时。
+ *
+ * 🔴 口径（2026-09-18 用户裁定）：锁定**最大回撤那一次**区间，两个指标都取自**同一个**区间 ——
+ *   - `maxDrawdownDurationTradingDays` = 峰值日 → 谷底日的交易日数（下跌持续）；
+ *   - `longestRecoveryTradingDays`     = 谷底日 → 收复前高的交易日数（未收复则计至期末）。
+ * 二者相加恒等于「峰值日 → 收复日」的总交易日数（见 `tests/server/downsideRiskDrawdownDurations.test.ts`）。
+ * 并列最深时取**最早**那一次（渲染稳定）；全期无回撤 / 空序列 ⇒ 两项皆 `null`。
+ *
+ * ⚠️ 已废弃的旧口径：曾在**全期各区间上分别取最大** ⇒ 两个数字可能来自**不同**区间（典型 154 / 153），
+ * 且「谷底在期末仍未收复」时会报出「已收复 0 天」以外的语义歧义。
+ * ⚠️ 字段名沿用旧名以免跨端 schema 改动，`longestRecoveryTradingDays` **不再**表示「全期最长恢复」，
+ * 语义以本注释为准。
+ */
+export function calculateDrawdownDurations(equities: number[]) {
   if (equities.length === 0) return { maxDrawdownDurationTradingDays: null, longestRecoveryTradingDays: null };
+  let bestDepthRatio = Number.POSITIVE_INFINITY; // 谷底 ÷ 峰值，越小越深
+  let bestDuration: number | null = null;
+  let bestRecovery: number | null = null;
   let peak = equities[0]!;
-  let drawdownStart: number | null = null;
-  let maxDuration = 0;
-  let longestRecovery = 0;
+  let peakIndex = 0;
+  let trough = peak;
+  let troughIndex = 0;
+
+  /** 收口当前区间；`recoveryIndex` = 收复前高的那根权益索引，未被收复传 `null`（计至期末）。 */
+  const settle = (recoveryIndex: number | null) => {
+    if (troughIndex <= peakIndex || peak <= 0) return;
+    const depthRatio = trough / peak;
+    if (depthRatio >= bestDepthRatio) return; // 严格小于 ⇒ 并列时保留更早的一次
+    bestDepthRatio = depthRatio;
+    bestDuration = troughIndex - peakIndex;
+    bestRecovery = (recoveryIndex ?? equities.length - 1) - troughIndex;
+  };
+
   equities.forEach((equity, index) => {
     if (equity >= peak) {
-      if (drawdownStart !== null) longestRecovery = Math.max(longestRecovery, index - drawdownStart);
+      settle(index);
       peak = equity;
-      drawdownStart = null;
+      peakIndex = index;
+      trough = equity;
+      troughIndex = index;
       return;
     }
-    if (drawdownStart === null) drawdownStart = index;
-    maxDuration = Math.max(maxDuration, index - drawdownStart + 1);
+    if (equity < trough) {
+      trough = equity;
+      troughIndex = index;
+    }
   });
-  if (drawdownStart !== null) longestRecovery = Math.max(longestRecovery, equities.length - 1 - drawdownStart);
-  return { maxDrawdownDurationTradingDays: maxDuration || null, longestRecoveryTradingDays: longestRecovery || null };
+  settle(null);
+
+  return { maxDrawdownDurationTradingDays: bestDuration, longestRecoveryTradingDays: bestRecovery };
 }
 
 export function calculateStrategyEvaluation(

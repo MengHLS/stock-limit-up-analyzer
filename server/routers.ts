@@ -133,7 +133,7 @@ import {
   getEmotionLevel,
 } from "./db";
 // 建运行前置校验的领域错误（日历落后）；领域码必须经 message 跨过 tRPC 边界。
-import { PaperTradingCalendarStaleError } from "./paperTrading";
+import { PaperTradingCalendarStaleError, PAPER_TRADING_EXIT_PHASES } from "./paperTrading";
 
 const limitUpTimeInput = z.string().refine(isValidLimitUpTime, {
   message: "涨停时间应为HH:MM或HH:MM:SS格式",
@@ -214,6 +214,28 @@ const backtestOptionsSchema = z.object({
       maxParticipatingBoards: z.number().int().min(1).max(20).optional(),
     })
     .optional(),
+});
+
+/**
+ * 前向纸面运行**专属**设置块。
+ *
+ * 为什么单独一块、而不是塞进 `realistic`：`realistic` 是与组合回测**共用**的参数容器，
+ * 往里加只有纸面认识的字面量，就会变成「回测参数里躺着它不消费的字段」——
+ * 这类漂移在审计里最难发现（D3 就是这么来的）。纸面专属的东西放在自己的命名空间下，
+ * 边界由类型表达，读代码的人一眼能看出「这条规则回测没有」。
+ *
+ * 缺字段 ⇒ 服务端缺省：判定时点 = 开盘+收盘，组合无条件止损 = 3%。
+ */
+const paperTradingSettingsSchema = z.object({
+  /** 止损 / 动态回撤止盈的判定时点。`both` = 开盘与收盘各判一次。 */
+  exitJudgementPhase: z.enum(PAPER_TRADING_EXIT_PHASES).optional(),
+  /** 组合无条件止损阈值（%）：单票浮亏达「建仓时账户总权益」的该比例即无条件出清；0 = 关闭。 */
+  portfolioStopLossPercent: z.number().min(0).max(100).optional(),
+});
+
+/** 纸面运行参数 = 回测参数超集 + 纸面专属设置块。 */
+const paperTradingOptionsSchema = backtestOptionsSchema.extend({
+  paperTrading: paperTradingSettingsSchema.optional(),
 });
 
 async function beginOperationLog(
@@ -1440,7 +1462,7 @@ export const appRouter = router({
             "qualityBlend",
             "qualityGate",
           ]),
-          options: backtestOptionsSchema.optional(),
+          options: paperTradingOptionsSchema.optional(),
           initialCapital: z
             .number()
             .int()

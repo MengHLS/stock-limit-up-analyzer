@@ -79,8 +79,8 @@ export function StrategyEvaluationPanel({ fullCycleExperiments, walkForwardExper
     { label: "Rolling Sharpe", definition: `最近${experiments[0]?.strategyEvaluation.stability.rollingWindowTradingDays ?? 63}个交易日权益窗口的夏普。`, value: (e) => display(e.stability.latestRollingSharpe, "", 3) },
     { label: "Rolling Calmar", definition: "最近滚动窗口的年化收益÷窗口内最大回撤。", value: (e) => display(e.stability.latestRollingCalmar, "", 3) },
     { label: "Rolling CAGR", definition: "最近滚动窗口按252交易日年化的收益。", value: (e) => display(e.stability.latestRollingCagr, "%") },
-    { label: "最大回撤持续时间", definition: "从进入回撤到创出新高或期末的最长交易日数。", value: (e) => display(e.stability.maxDrawdownDurationTradingDays, " 个交易日", 0) },
-    { label: "最长恢复时间", definition: "从回撤开始到恢复前高，或未恢复至期末的最长交易日数。", value: (e) => display(e.stability.longestRecoveryTradingDays, " 个交易日", 0) },
+    { label: "最大回撤持续时间", definition: "最大回撤那一次，从峰值日到谷底日的交易日数。", value: (e) => display(e.stability.maxDrawdownDurationTradingDays, " 个交易日", 0) },
+    { label: "最大回撤恢复时间", definition: "最大回撤那一次，从谷底日回到前高的交易日数；未收复则计至期末。", value: (e) => display(e.stability.longestRecoveryTradingDays, " 个交易日", 0) },
     { label: "收益集中度", definition: "收益为正日中，前5个最大正收益日占全部正收益日收益的比例。", value: (e) => display(e.stability.topFivePositiveDayReturnContribution, "%", 1) },
   ];
   const realism: MetricRow[] = [

@@ -118,6 +118,17 @@ describe("独立组合资金回测页面", () => {
       "一字跌停保守成交概率",
       "trailingProfitActivationPercent",
       "trailingDrawdownPercent",
+      "各策略回撤与收益特征",
+      "data-full-cycle-risk-blocks",
+      "data-full-cycle-risk-card=",
+      "fullCycleRiskBlocks",
+      "buildFullCycleRiskBlocks",
+      "maxDrawdownDurationTradingDays",
+      "longestRecoveryTradingDays",
+      "回撤持续时间",
+      "收复回撤所用时间",
+      "最大收益",
+      "当前收益",
     ]) {
       expect(pageSource).toContain(requiredText);
     }
@@ -165,7 +176,7 @@ describe("独立组合资金回测页面", () => {
       "第一层：核心结果", "CAGR", "Total Return", "Max Drawdown", "Sharpe", "Sortino", "Calmar", "Ulcer Index",
       "第二层：交易质量", "Win Rate", "Profit Factor", "Expectancy", "Avg Win", "Avg Loss", "Payoff Ratio", "Max Consecutive Losses", "Trade Count",
       "第三层：尾部风险", "VaR 95%", "CVaR 95%", "VaR 99%", "CVaR 99%", "Skewness", "Excess Kurtosis", "Worst Day", "Worst Trade",
-      "第四层：稳定性", "盈利月份比例", "Rolling Sharpe", "Rolling Calmar", "Rolling CAGR", "最大回撤持续时间", "最长恢复时间", "收益集中度",
+      "第四层：稳定性", "盈利月份比例", "Rolling Sharpe", "Rolling Calmar", "Rolling CAGR", "最大回撤持续时间", "最大回撤恢复时间", "收益集中度",
       "第五层：鲁棒性", "Walk Forward OOS Sharpe", "IS/OOS 夏普衰减率", "参数稳定性", "参数敏感度", "不同市场环境表现",
       "第六层：交易现实性", "手续费", "滑点", "换手率", "平均持仓时间", "资金利用率", "平均仓位", "最大仓位", "市场冲击",
       "data-strategy-evaluation", "SIX-LAYER STRATEGY EVALUATION", "严格样本外", "连续资金账户", "无风险收益率为0%", "252交易日",
@@ -186,5 +197,56 @@ describe("独立组合资金回测页面", () => {
     expect(styleSource).toContain("[data-all-simulated-orders] .orders-scroll-container");
     expect(styleSource).toContain("max-height: 42rem");
     expect(styleSource).toContain("position: sticky");
+  });
+
+  /**
+   * 页签归属回归（2026-09-18 需求「优化组合回测页面」）：
+   *   ① 回测总览 = 全周期五策略收益对比 + 当前持仓与下一交易日准备买入 + 全部模拟订单（含分页）；
+   *   ② 高位连板风控生效情况 → 风险归因；③ 统一策略评价 → 策略对比；④ 资金与仓位审计 → 交易明细。
+   * 断言方式：取锚点所在行，要求该行的渲染条件恰为目标 activeTab（防「搬了但搬错页签」）。
+   */
+  it("页签归属与模拟订单分页符合 2026-09-18 需求", () => {
+    const pageSource = readFileSync(resolve(projectRoot, "client/src/pages/Backtest.tsx"), "utf8");
+    const lineBefore = (anchor: string) => {
+      const index = pageSource.indexOf(anchor);
+      expect(index, `未找到锚点 ${anchor}`).toBeGreaterThan(-1);
+      return pageSource.slice(pageSource.lastIndexOf("\n", index) + 1, index);
+    };
+    const expectations: Array<[string, string]> = [
+      ["data-full-cycle-comparison", "overview"],
+      ["data-full-cycle-risk-blocks", "overview"],
+      ["data-strategy-portfolio-snapshot", "overview"],
+      ["<FullOrdersSection", "overview"],
+      ["<StrategyEvaluationSection", "compare"],
+      ["data-board-height-impact", "risk"],
+      ["data-capital-position-audit", "trades"],
+    ];
+    for (const [anchor, tab] of expectations) {
+      expect(lineBefore(anchor), `${anchor} 应挂在「${tab}」页签`).toContain(`activeTab === "${tab}"`);
+    }
+    // 容器类护栏：`StrategyEvaluationPanel` 的根节点自带卡片样式但**不带**页面容器类
+    // （本页其余卡片把 `mx-auto max-w-7xl px-4 pt-5 sm:px-6` 写在自己的 `<section>` 上），
+    // 迁入时若不显式套同一层容器，卡片会铺满整屏、宽度/左边距与邻卡不一致
+    // —— 2026-09-18 用户实报「策略对比下的样式乱了」，此处钉死。
+    expect(lineBefore("<StrategyEvaluationSection")).toContain("mx-auto max-w-7xl px-4 pt-5 sm:px-6");
+    // 每块只有一个渲染点（迁出后不得在旧页签残留第二份）。
+    expect(pageSource.match(/<StrategyEvaluationSection/g)).toHaveLength(1);
+    expect(pageSource.match(/data-capital-position-audit/g)).toHaveLength(1);
+    expect(pageSource.match(/data-strategy-portfolio-snapshot/g)).toHaveLength(1);
+    expect(pageSource.match(/<FullOrdersSection$/gm)).toHaveLength(1);
+    // 折线图下方的收益/回撤区块：渲染点唯一，且必须与折线图同处一张卡片内
+    // （区块自身不写 `mx-auto max-w-7xl` 容器类，靠 `<FullCycleRiskBlocks>` 的根节点承接卡片内边距）。
+    expect(pageSource.match(/data-full-cycle-risk-blocks/g)).toHaveLength(1);
+    expect(pageSource.match(/<FullCycleRiskBlocks/g)).toHaveLength(1);
+    expect(lineBefore("<FullCycleRiskBlocks")).toContain("data-full-cycle-risk-blocks");
+    expect(pageSource.match(/data-full-cycle-risk-card=/g)).toHaveLength(1);
+    // 全部模拟订单分页：前端切片，不新增端点、不改变筛选后笔数口径。
+    for (const requiredText of [
+      "PaginationBar", "data-orders-pagination", "data-orders-range", "pagedOrders",
+      "setPageSize", "没有符合当前筛选条件的订单", "Math.ceil(displayedOrders.length / pageSize)",
+    ]) {
+      expect(pageSource).toContain(requiredText);
+    }
+    expect(pageSource).toContain("{pagedOrders.map((order, index) => {");
   });
 });

@@ -6,7 +6,9 @@ import {
   buildPaperTradingSummary,
   classifyAdvanceKind,
   createInitialPaperTradingState,
+  evaluateHardExitRules,
   paperTradingAdvanceDiagnosis,
+  resolvePaperTradingSettings,
   PaperTradingCalendarStaleError,
   type PaperPendingBuy,
   type PaperTradingState,
@@ -394,5 +396,264 @@ describe("PaperTradingCalendarStaleError 建运行前置校验", () => {
     expect(error.name).toBe("PaperTradingCalendarStaleError");
     expect(error.details).toEqual({ signalDate: "2026-09-14", calendarLastDate: "2026-09-04" });
     expect(error).toBeInstanceOf(Error);
+  });
+});
+
+/**
+ * 组合无条件止损 + 止损判定时点可配（2026-09-18，用户要求；**纸面专属**）。
+ *
+ * 口径（必须钉死，否则数值会漂）：
+ * - 分母 = **建仓时账户总权益**（冻结在建仓那一刻），与回测 `pnlToEquityRatio` 同源；
+ * - 浮亏 = 市值 − 建仓成本（成本含买入费用）；
+ * - 触发 = 浮亏占建仓总权益的比例 ≤ −阈值，**无条件**（不受强势续持 / 回撤止盈已激活 / 最多续持未到豁免）；
+ * - 缺省：判定时点 `both`、阈值 `3%`；旧运行 paramsJson 缺字段 ⇒ 零写库即生效。
+ *
+ * 本组用例的建仓算术（固定种子，便于人工复核）：
+ *   开盘 10.00 → 滑点 10bp → 成交价 10.01；9900 股；建仓成本 99,129.72；建仓时账户总权益 100,000。
+ *   ⇒ 组合止损阈值 3% ⇒ 3,000 元；单票比例止损阈值 5% ⇒ 价格 9.5095。
+ *   ⇒ 收盘 9.68（单票 −3.30% > −5% **不触发**比例止损；浮亏 −3,297.72 = 建仓总权益的 −3.30% **触发**组合止损）。
+ */
+describe("advancePaperTradingDay 组合止损与判定时点", () => {
+  const tradingDates = ["2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21", "2026-08-22"];
+  const realistic = { initialCapital: 100_000, maxPositions: 5, slippageBps: 10, lotSize: 100 };
+
+  const makePending = (overrides: Partial<PaperPendingBuy> = {}): PaperPendingBuy => ({
+    rank: 1,
+    stockCode: "600001.SH",
+    stockName: "测试股",
+    sector: "题材A",
+    boards: 2,
+    signalDate: "2026-08-18",
+    signalClosePrice: 10,
+    score: 80,
+    riskScore: 20,
+    riskTier: "低风险",
+    strategyScore: 80,
+    reasons: [],
+    ...overrides,
+  });
+
+  /** 建仓日（08-19）+ 待判日（08-20）：建仓算术在注释里已固定，便于断言精确数值。 */
+  const run = (
+    day2Open: number,
+    day2Close: number,
+    paperTrading?: { exitJudgementPhase?: "open" | "close" | "both"; portfolioStopLossPercent?: number },
+    extraRealistic: Record<string, unknown> = {},
+  ) => {
+    const priceByStockDate = new Map<string, LeaderCandidateDailyPrice>([
+      ["600001.SH::2026-08-19", price(10.0, 10.0)],
+      ["600001.SH::2026-08-20", price(day2Open, day2Close)],
+    ]);
+    let state: PaperTradingState = { ...createInitialPaperTradingState(100_000), pendingBuys: [makePending()] };
+    const advance = (today: string) => {
+      const result = advancePaperTradingDay({
+        state,
+        today,
+        signalCandidates: [],
+        priceByStockDate,
+        tradingDates,
+        strategyKey: "baseline",
+        realistic: { ...realistic, ...extraRealistic },
+        paperTrading,
+      });
+      state = result.state;
+      return result;
+    };
+    const day1 = advance("2026-08-19");
+    const day2 = advance("2026-08-20");
+    return { day1, day2, state };
+  };
+
+  it("建仓算术基线：成交价/股数/建仓成本/建仓时账户总权益", () => {
+    const { day1 } = run(10.0, 10.0);
+    expect(day1.events.filledCount).toBe(1);
+    const filled = day1.events.filledOrders[0]!;
+    expect(filled.shares).toBe(9900);
+    expect(filled.entryPrice).toBeCloseTo(10.01, 4);
+    expect(filled.totalFees).toBeCloseTo(30.72, 2);
+    // 建仓当日不判退出（T+1 闸），且已冻结「建仓时账户总权益」= 100,000。
+    expect(day1.events.exitedCount).toBe(0);
+    expect(day1.state.positions).toHaveLength(1);
+    expect(day1.state.positions[0]!.equityAtEntry).toBe(100_000);
+  });
+
+  it("组合止损在收盘触发：浮亏占建仓总权益 3.3% ⇒ 无条件出清（单票比例止损此时并未触发）", () => {
+    // 开盘 10.01（与原价持平，不触发任何退出）→ 收盘 9.68：单票 −3.30% > −5%，只有组合止损成立。
+    const { day2, state } = run(10.01, 9.68);
+    expect(day2.events.exitedCount).toBe(1);
+    const exited = day2.events.exitedOrders[0]!;
+    expect(exited.exitDate).toBe("2026-08-20");
+    expect(exited.exitPrice).toBeCloseTo(9.6703, 4);
+    expect(exited.reason).toContain("收盘触发组合止损");
+    // 分母必须是「建仓时账户总权益 100,000」：3.3%（而非按成本算的 3.33%）就是这条口径的指纹。
+    expect(exited.reason).toContain("占建仓总权益 3.3%");
+    expect(exited.reason).toContain("无条件出清");
+    expect(exited.reason).not.toContain("触发止损（");
+    expect(state.positions).toHaveLength(0);
+  });
+
+  it("组合止损在开盘触发：开盘 9.68 ⇒ 按开盘价出清（不是等到收盘）", () => {
+    const { day2 } = run(9.68, 10.60);
+    expect(day2.events.exitedCount).toBe(1);
+    const exited = day2.events.exitedOrders[0]!;
+    expect(exited.reason).toContain("开盘触发组合止损");
+    // 关键差异：按开盘 9.68 出清；若等收盘（10.60）则反而是浮盈。
+    expect(exited.exitPrice).toBeCloseTo(9.6703, 4);
+  });
+
+  it("判定时点=收盘 ⇒ 跳空破位不在开盘出清（保住旧语义），收盘缺口仍在收盘出清", () => {
+    const { day2 } = run(9.30, 9.20, { exitJudgementPhase: "close" });
+    expect(day2.events.exitedCount).toBe(1);
+    const exited = day2.events.exitedOrders[0]!;
+    expect(exited.reason).toContain("收盘触发止损");
+    expect(exited.exitPrice).toBeCloseTo(9.1908, 4);
+  });
+
+  it("判定时点=开盘 ⇒ 跳空破位按开盘价出清（补上 D1 的开盘分支）", () => {
+    const { day2 } = run(9.30, 10.60, { exitJudgementPhase: "open" });
+    expect(day2.events.exitedCount).toBe(1);
+    const exited = day2.events.exitedOrders[0]!;
+    expect(exited.reason).toContain("开盘触发止损");
+    expect(exited.exitPrice).toBeCloseTo(9.2907, 4);
+  });
+
+  it("判定时点=开盘 ⇒ 收盘不再判硬性止损，但续持类规则仍生效（否则持仓没有收盘退出路径）", () => {
+    // 开盘 10.50 不触发；收盘 9.40 本应「收盘触发止损」，但时点设为仅开盘 ⇒ 落到续持判定。
+    const { day2 } = run(10.50, 9.40, { exitJudgementPhase: "open" });
+    expect(day2.events.exitedCount).toBe(1);
+    const exited = day2.events.exitedOrders[0]!;
+    expect(exited.reason).toContain("收盘未满足强势续持条件");
+    expect(exited.reason).not.toContain("止损");
+  });
+
+  it("判定时点=开盘+收盘 ⇒ 同一日既有开盘判定也有收盘判定（缺省行为）", () => {
+    const both = run(9.30, 10.60, { exitJudgementPhase: "both" });
+    expect(both.day2.events.exitedOrders[0]!.reason).toContain("开盘触发止损");
+    const closeOnly = run(10.50, 9.40, { exitJudgementPhase: "both" });
+    expect(closeOnly.day2.events.exitedOrders[0]!.reason).toContain("收盘触发止损");
+  });
+
+  it("动态回撤止盈进入开盘判定：峰值 +9.89% 后开盘回撤 4.55% ⇒ 按开盘价止盈", () => {
+    const priceByStockDate = new Map<string, LeaderCandidateDailyPrice>([
+      ["600001.SH::2026-08-19", price(10.0, 11.0)],
+      ["600001.SH::2026-08-20", price(10.5, 10.6)],
+    ]);
+    let state: PaperTradingState = { ...createInitialPaperTradingState(100_000), pendingBuys: [makePending()] };
+    const advance = (today: string) => {
+      const result = advancePaperTradingDay({
+        state, today, signalCandidates: [], priceByStockDate, tradingDates,
+        strategyKey: "baseline", realistic,
+      });
+      state = result.state;
+      return result;
+    };
+    advance("2026-08-19"); // 建仓日：收盘 11.00 计入峰值，不判退出。
+    const day2 = advance("2026-08-20");
+    expect(day2.events.exitedCount).toBe(1);
+    const exited = day2.events.exitedOrders[0]!;
+    expect(exited.reason).toContain("开盘触发动态回撤止盈");
+    expect(exited.exitPrice).toBeCloseTo(10.4895, 4);
+  });
+
+  it("阈值设为 0 ⇒ 关闭组合止损，行为回落到「仅比例止损 + 续持」", () => {
+    const { day2 } = run(10.01, 9.68, { portfolioStopLossPercent: 0 });
+    expect(day2.events.exitedCount).toBe(1);
+    const exited = day2.events.exitedOrders[0]!;
+    expect(exited.reason).toContain("收盘未满足强势续持条件");
+    expect(exited.reason).not.toContain("组合止损");
+  });
+
+  it("一字跌停卖不出时不假装出清，且如实写下原因（不留黑洞）", () => {
+    // 涨停板跌停价 = 前收 10.00 × 0.9 = 9.00；开盘即跌停。
+    const priceByStockDate = new Map<string, LeaderCandidateDailyPrice>([
+      ["600001.SH::2026-08-19", price(10.0, 10.0)],
+      ["600001.SH::2026-08-20", price(9.0, 9.0)],
+    ]);
+    let state: PaperTradingState = { ...createInitialPaperTradingState(100_000), pendingBuys: [makePending()] };
+    const advance = (today: string) => {
+      const result = advancePaperTradingDay({
+        state, today, signalCandidates: [], priceByStockDate, tradingDates,
+        strategyKey: "baseline", realistic: { ...realistic, blockLimitDownSells: true },
+      });
+      state = result.state;
+      return result;
+    };
+    advance("2026-08-19");
+    const day2 = advance("2026-08-20");
+    expect(day2.events.exitedCount).toBe(0);
+    expect(state.positions).toHaveLength(1);
+    expect(state.orders[0]!.status).toBe("filled");
+    expect(state.orders[0]!.reason).toContain("等待收盘确认可成交性");
+  });
+});
+
+describe("resolvePaperTradingSettings 缺省解析（旧运行零写库即生效）", () => {
+  it("完全不传 ⇒ 缺省「开盘+收盘 / 组合止损 3%」", () => {
+    expect(resolvePaperTradingSettings(undefined)).toEqual({
+      exitJudgementPhase: "both",
+      portfolioStopLossPercent: 3,
+    });
+  });
+
+  it("显式 0 表示关闭组合止损（不是「回落成缺省」）", () => {
+    expect(resolvePaperTradingSettings({ portfolioStopLossPercent: 0 }).portfolioStopLossPercent).toBe(0);
+  });
+
+  it("认不出的时点值回落为缺省，不静默变成 undefined", () => {
+    expect(resolvePaperTradingSettings({ exitJudgementPhase: "intraday" as never }).exitJudgementPhase).toBe("both");
+  });
+
+  it("阈值超界被夹取到 [0, 100]", () => {
+    expect(resolvePaperTradingSettings({ portfolioStopLossPercent: 999 }).portfolioStopLossPercent).toBe(100);
+    expect(resolvePaperTradingSettings({ portfolioStopLossPercent: -5 }).portfolioStopLossPercent).toBe(0);
+  });
+});
+
+describe("evaluateHardExitRules 纯判定（优先级：比例止损 → 组合止损 → 回撤止盈）", () => {
+  const position = {
+    stockCode: "600001.SH",
+    stockName: "测试股",
+    signalDate: "2026-08-18",
+    entryDate: "2026-08-19",
+    entryPrice: 10.01,
+    shares: 9900,
+    capitalCost: 99_129.72,
+    previousClosePrice: 10,
+    highestClosePrice: 10.01,
+    entryTradingDateIndex: 1,
+    equityAtEntry: 100_000,
+  };
+
+  const base = {
+    position,
+    stopLossPercent: 5,
+    trailingProfitActivationPercent: 6,
+    trailingDrawdownPercent: 3,
+    portfolioStopLossPercent: 3,
+    fallbackEquityBase: 100_000,
+  } as const;
+
+  it("价格无效 / 非正 ⇒ 不判定（不臆测成交价）", () => {
+    expect(evaluateHardExitRules({ ...base, phaseLabel: "开盘", price: Number.NaN })).toBeNull();
+    expect(evaluateHardExitRules({ ...base, phaseLabel: "开盘", price: 0 })).toBeNull();
+  });
+
+  it("单票比例止损优先于组合止损（两者同时成立时给出前者）", () => {
+    // 9.40 ⇒ 单票 −6.09% ≤ −5% 且组合 −6.09% ≤ −3%，必须报比例止损。
+    const reason = evaluateHardExitRules({ ...base, phaseLabel: "开盘", price: 9.4 });
+    expect(reason).toContain("开盘触发止损");
+    expect(reason).not.toContain("组合止损");
+  });
+
+  it("旧持仓缺 equityAtEntry 时回落为传入的兜底分母（初始资金）", () => {
+    const legacy = { ...position, equityAtEntry: undefined as unknown as number };
+    const reason = evaluateHardExitRules({ ...base, phaseLabel: "收盘", price: 9.68, position: legacy });
+    expect(reason).toContain("收盘触发组合止损");
+    expect(reason).toContain("占建仓总权益 3.3%");
+  });
+
+  it("分组名与阈值都写进原因，便于事后读日志判口径", () => {
+    const reason = evaluateHardExitRules({ ...base, phaseLabel: "收盘", price: 9.68 });
+    expect(reason).toBe("收盘触发组合止损（该笔浮亏占建仓总权益 3.3%，达 3% 无条件出清）");
   });
 });
