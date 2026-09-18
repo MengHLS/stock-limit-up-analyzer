@@ -38,6 +38,8 @@ import {
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
+// 连板梯队情绪评分公式（单一真源，见 shared/boardEmotionScore.ts）
+import { computeBoardEmotionScore } from '../shared/boardEmotionScore';
 import { normalizeSectorName } from '../shared/stockDataNormalization';
 import {
   buildLeaderCandidates,
@@ -1313,6 +1315,52 @@ export async function getIndexDailyTradeDates(startDate?: string, endDate?: stri
   return rows.map((row) => row.tradeDate);
 }
 
+/** 指数日线序列的一根 bar（大盘日线走势图的数据源形状）。 */
+export interface IndexDailySeriesPoint {
+  tradeDate: string;
+  /** 指数点位（点）。 */
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  /** 成交额（千元，index_daily 原始单位）；缺失为 null，不插值不伪造。 */
+  amount: number | null;
+  /** 成交量（手）。 */
+  volume: number | null;
+}
+
+/**
+ * 读取**单个指数**的日线序列（升序），供「大盘日线走势图」使用。
+ *
+ * 口径：`index_daily` 里该 indexCode 最近 `days` 个**交易日**（按 tradeDate 取，不按自然日）。
+ * 缺字段（close/amount 为 null）原样返回 null，由前端断点 —— 不插值、不推导。
+ * 实测成本：60 个交易日 ≈ 1.1s（2026-09-18，见 docs/evidence/_probe_market_page_timing.out.json）。
+ */
+export async function getIndexDailySeries(
+  indexCode: string,
+  days: number = 60,
+): Promise<IndexDailySeriesPoint[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({
+      tradeDate: indexDaily.tradeDate,
+      open: indexDaily.open,
+      high: indexDaily.high,
+      low: indexDaily.low,
+      close: indexDaily.close,
+      amount: indexDaily.amount,
+      volume: indexDaily.volume,
+    })
+    .from(indexDaily)
+    .where(eq(indexDaily.indexCode, indexCode))
+    .orderBy(desc(indexDaily.tradeDate))
+    .limit(days);
+
+  return rows.reverse();
+}
+
 /** 返回本地已存在的实际交易日集合，用于外部交易日历限频时的安全回退。 */
 export async function getStockDailyPriceTradeDates(startDate?: string, endDate?: string): Promise<string[]> {
   const db = await getDb();
@@ -1626,19 +1674,8 @@ export async function getConnectionBoardStats(date: string) {
   const maxBoards = stocksWithBoards.length > 0 ? Math.max(...stocksWithBoards.map(s => s.boards)) : 0;
   const board3Plus = stocksWithBoards.filter(s => s.boards >= 3).length;
   
-  // 情绪评分计算公式
-  let emotionScore = 0;
-  if (totalLimitUp > 0) {
-    const connectionRatio = connectionBoards / totalLimitUp;
-    const maxBoardScore = Math.min(maxBoards / 10, 1);
-    const board3PlusRatio = connectionBoards > 0 ? board3Plus / connectionBoards : 0;
-    
-    emotionScore = Math.round(
-      connectionRatio * 40 + 
-      maxBoardScore * 30 + 
-      board3PlusRatio * 30
-    );
-  }
+  // 情绪评分公式：与 「连板梯队名录」(server/boardRoster.ts) 共用同一实现（shared/boardEmotionScore）
+  const emotionScore = computeBoardEmotionScore({ totalLimitUp, connectionBoards, maxBoards, board3Plus });
 
   return {
     distribution,

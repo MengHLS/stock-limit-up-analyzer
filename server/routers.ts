@@ -19,6 +19,8 @@ import { paramSearchRouter } from "./paramSearchRouter";
 import { walkForwardRouter } from "./walkForwardRouter";
 import { marketRegimeRouter } from "./marketRegimeRouter";
 import { reviewRouter } from "./reviewRouter";
+// MARKET-PAGE-REWORK：连板梯队名录（连板股 + 断板股）—— 有界窗口取数，替代全表 select
+import { getBoardRoster } from "./boardRoster";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -97,6 +99,7 @@ import {
   getRecentMarketData,
   deleteMarketData,
   getLimitUpWithMarketData,
+  getIndexDailySeries,
   getSectorHeatmapData,
   getConnectionBoardStats,
   getMaxConnectionBoardTrend,
@@ -460,6 +463,15 @@ export const appRouter = router({
       .input(z.object({ date: z.string() }))
       .query(async ({ input }) => {
         return await getConnectionBoardStats(input.date);
+      }),
+
+    // MARKET-PAGE-REWORK —— 连板梯队名录（连板股 + 断板股），大盘分析页「连板梯队」大表格用。
+    // 与上行 getConnectionBoardStats 的区别只在**取数范围**：这里照窗口取（默认 60 自然日），
+    // 不再全表 select（实测 68.3s）；连板判定规则与情绪评分公式与既有实现完全一致。
+    getBoardRoster: publicProcedure
+      .input(z.object({ date: z.string(), lookbackDays: z.number().int().min(10).max(240).optional() }))
+      .query(async ({ input }) => {
+        return await getBoardRoster(input.date, { lookbackDays: input.lookbackDays });
       }),
   }),
 
@@ -1271,6 +1283,21 @@ export const appRouter = router({
       .input(z.object({ days: z.number().optional() }))
       .query(async ({ input }) => {
         return await getLimitUpWithMarketData(input.days || 30);
+      }),
+
+    // MARKET-PAGE-REWORK —— 指数日线序列（升序），供「大盘日线走势图」使用。
+    // 只读；默认上证指数（000001.SH）最近 60 个交易日。缺字段原样返回 null，不插值。
+    getIndexDailySeries: publicProcedure
+      .input(
+        z
+          .object({
+            indexCode: z.string().min(1).optional(),
+            days: z.number().int().min(20).max(500).optional(),
+          })
+          .optional(),
+      )
+      .query(async ({ input }) => {
+        return await getIndexDailySeries(input?.indexCode ?? "000001.SH", input?.days ?? 60);
       }),
   }),
 

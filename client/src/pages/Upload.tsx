@@ -573,11 +573,11 @@ export default function UploadPage() {
                 </ScrollArea>
 
                 <div className="mt-4 flex justify-end">
-                  <Link href="/">
-                    <Button>
-                      查看全部数据
-                    </Button>
-                  </Link>
+                  {/* HOMEPAGE-001：根路径已改为首页，明细页迁至 /limit-up；
+                      同时修掉 Link 包 Button 的非法嵌套（须 Button asChild + Link） */}
+                  <Button asChild>
+                    <Link href="/limit-up">查看全部数据</Link>
+                  </Button>
                 </div>
               </CardContent>
             </Card>

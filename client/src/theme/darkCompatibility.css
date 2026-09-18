@@ -609,8 +609,32 @@
 .dark .text-fuchsia-900:not([class*="dark:text-"]) {
   color: color-mix(in oklab, var(--color-fuchsia-300) 62%, var(--dk-t5));
 }
+.dark .text-blue-600:not([class*="dark:text-"]) {
+  color: color-mix(in oklab, var(--color-blue-500) 62%, var(--dk-t5));
+}
 .dark .border-amber-400:not([class*="dark:border-"]) {
   border-color: var(--color-amber-500);
+}
+.dark .border-red-100:not([class*="dark:border-"]) {
+  border-color: var(--color-red-900);
+}
+.dark .bg-sky-600:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, var(--color-sky-500) 52%, var(--background));
+}
+.dark .from-sky-50:not([class*="dark:from-"]) {
+  --tw-gradient-from: color-mix(in oklab, var(--color-sky-500) 8%, var(--background));
+}
+.dark .to-violet-50:not([class*="dark:to-"]) {
+  --tw-gradient-to: color-mix(in oklab, var(--color-violet-500) 8%, var(--background));
+}
+.dark .to-amber-50\/30:not([class*="dark:to-"]) {
+  --tw-gradient-to: color-mix(in oklab, color-mix(in oklab, var(--color-amber-500) 8%, var(--background)) 30%, transparent);
+}
+.dark .from-amber-400:not([class*="dark:from-"]) {
+  --tw-gradient-from: color-mix(in oklab, var(--color-amber-500) 28%, var(--background));
+}
+.dark .to-orange-500:not([class*="dark:to-"]) {
+  --tw-gradient-to: color-mix(in oklab, var(--color-orange-500) 42%, var(--background));
 }
 .dark .from-orange-400:not([class*="dark:from-"]) {
   --tw-gradient-from: color-mix(in oklab, var(--color-orange-500) 28%, var(--background));
@@ -674,9 +698,6 @@
 .dark .from-blue-50:not([class*="dark:from-"]) {
   --tw-gradient-from: color-mix(in oklab, var(--color-blue-500) 8%, var(--background));
 }
-.dark .text-blue-600:not([class*="dark:text-"]) {
-  color: color-mix(in oklab, var(--color-blue-500) 62%, var(--dk-t5));
-}
 .dark .from-blue-500:not([class*="dark:from-"]) {
   --tw-gradient-from: color-mix(in oklab, var(--color-blue-500) 42%, var(--background));
 }
@@ -688,9 +709,6 @@
 }
 .dark .to-slate-600:not([class*="dark:to-"]) {
   --tw-gradient-to: var(--dk-e1);
-}
-.dark .to-orange-500:not([class*="dark:to-"]) {
-  --tw-gradient-to: color-mix(in oklab, var(--color-orange-500) 42%, var(--background));
 }
 .dark .from-red-500:not([class*="dark:from-"]) {
   --tw-gradient-from: color-mix(in oklab, var(--color-red-500) 42%, var(--background));
@@ -788,24 +806,6 @@
 .dark .text-green-600:not([class*="dark:text-"]) {
   color: color-mix(in oklab, var(--color-green-500) 62%, var(--dk-t5));
 }
-.dark .border-red-100:not([class*="dark:border-"]) {
-  border-color: var(--color-red-900);
-}
-.dark .bg-sky-600:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, var(--color-sky-500) 52%, var(--background));
-}
-.dark .from-sky-50:not([class*="dark:from-"]) {
-  --tw-gradient-from: color-mix(in oklab, var(--color-sky-500) 8%, var(--background));
-}
-.dark .to-violet-50:not([class*="dark:to-"]) {
-  --tw-gradient-to: color-mix(in oklab, var(--color-violet-500) 8%, var(--background));
-}
-.dark .to-amber-50\/30:not([class*="dark:to-"]) {
-  --tw-gradient-to: color-mix(in oklab, color-mix(in oklab, var(--color-amber-500) 8%, var(--background)) 30%, transparent);
-}
-.dark .from-amber-400:not([class*="dark:from-"]) {
-  --tw-gradient-from: color-mix(in oklab, var(--color-amber-500) 28%, var(--background));
-}
 .dark .to-slate-100:not([class*="dark:to-"]) {
   --tw-gradient-to: var(--dk-n2);
 }
@@ -837,12 +837,12 @@
   color: color-mix(in oklab, var(--color-indigo-300) 62%, var(--dk-t5));
 }
 
-/* ---- 日历（首页「选择日期」自定义 DayButton）----
- * Home.tsx 的 CustomDayButton 里选中态硬编码了亮渐变 from-orange-400 via-orange-500 to-red-500
+/* ---- 日历（涨停复盘明细页「选择日期」自定义 DayButton）----
+ * LimitUpReview.tsx（原 Home.tsx）的 CustomDayButton 里选中态硬编码了亮渐变 from-orange-400 via-orange-500 to-red-500
  * （400/500 档本层有意不覆盖），暗色下依旧全亮，是整页最刺眼的一块之一。
  *
  * ⚠️ 不能用 [data-selected-single="true"] 定位：该属性由 shadcn 的 DayButton 输出，
- * 而 Home.tsx 用 CustomDayButton **整个替换**了 DayButton，自定义实现并不输出这个属性
+ * 而 LimitUpReview.tsx 用 CustomDayButton **整个替换**了 DayButton，自定义实现并不输出这个属性
  * ⇒ 写了也永远匹配不到（曾据此写了一版，实测零命中）。改为认它真正渲染出来的渐变类。
  */
 .dark .rdp-day button[class*="from-orange-400"] {

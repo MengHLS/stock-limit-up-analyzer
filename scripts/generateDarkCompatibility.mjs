@@ -113,7 +113,8 @@ const calmText = (colorVar) => `color-mix(in oklab, ${colorVar} 62%, var(--dk-t5
  *
  * 为什么不直接落 *-900 / *-950：那是**高饱和深色块**（实测 `bg-orange-50` → `orange-900`
  * 的色度 = 0.123、`blue-900` = 0.146）。单看一块还行，但本页有**整屏**级的用途：
- * 首页包裹层 `from-slate-50 via-blue-50 to-indigo-50` 覆盖 1136×1323 px ⇒ 整块内容区
+ * 涨停复盘明细页（`LimitUpReview.tsx`，原 `Home.tsx`）包裹层
+ * `from-slate-50 via-blue-50 to-indigo-50` 覆盖 1136×1323 px ⇒ 整块内容区
  * 变成一条高饱和蓝→紫渐变；卡片标题条同样是大面积饱和色带 ⇒ 观感「又闷又刺」。
  *
  * 做法：把该色相的 500 档按小比例混进 `--background`。色度随之降到 0.02~0.09，
@@ -273,12 +274,12 @@ const HEADER = `/**
 `;
 
 const TRAILER = `
-/* ---- 日历（首页「选择日期」自定义 DayButton）----
- * Home.tsx 的 CustomDayButton 里选中态硬编码了亮渐变 from-orange-400 via-orange-500 to-red-500
+/* ---- 日历（涨停复盘明细页「选择日期」自定义 DayButton）----
+ * LimitUpReview.tsx（原 Home.tsx）的 CustomDayButton 里选中态硬编码了亮渐变 from-orange-400 via-orange-500 to-red-500
  * （400/500 档本层有意不覆盖），暗色下依旧全亮，是整页最刺眼的一块之一。
  *
  * ⚠️ 不能用 [data-selected-single="true"] 定位：该属性由 shadcn 的 DayButton 输出，
- * 而 Home.tsx 用 CustomDayButton **整个替换**了 DayButton，自定义实现并不输出这个属性
+ * 而 LimitUpReview.tsx 用 CustomDayButton **整个替换**了 DayButton，自定义实现并不输出这个属性
  * ⇒ 写了也永远匹配不到（曾据此写了一版，实测零命中）。改为认它真正渲染出来的渐变类。
  */
 .dark .rdp-day button[class*="from-orange-400"] {

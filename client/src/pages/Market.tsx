@@ -111,7 +111,11 @@ export default function MarketPage() {
           ) : syncStatus.pendingDates.length === 1 ? (
             <span
               className="text-xs text-muted-foreground"
-              title={syncStatus.lastSync?.skipped ?? `最近同步 ${formatSyncAt(syncStatus.lastSync!.at)}`}
+              title={
+                syncStatus.lastSync
+                  ? (syncStatus.lastSync.skipped ?? `最近同步 ${formatSyncAt(syncStatus.lastSync.at)}`)
+                  : "本次服务启动后尚未执行过同步"
+              }
             >
               市场数据最新 {syncStatus.latestDataDate ?? "—"}（{syncStatus.pendingDates[0]} 待交易所发布）
             </span>

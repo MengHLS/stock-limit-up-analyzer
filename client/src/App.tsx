@@ -5,7 +5,10 @@ import { Route, Switch, Redirect, useSearch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import AppShell from "./components/AppShell";
 import { ThemeProvider, useTheme } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
+// HOMEPAGE-001（编号 9be）—— 首页 = 行情复盘总览，接管路由 `/`
+//   原 `/` 的涨停复盘明细迁至 `/limit-up`（文件同时由 Home.tsx 更名为 LimitUpReview.tsx）
+import Dashboard from "./pages/Dashboard";
+import LimitUpReview from "./pages/LimitUpReview";
 import Upload from "./pages/Upload";
 import Market from "./pages/Market";
 import SentimentAlerts from "./pages/SentimentAlerts";
@@ -71,7 +74,9 @@ function LegacyStrategyRedirect() {
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
+      <Route path={"/"} component={Dashboard} />
+      {/* 原 `/` 的涨停复盘明细（HOMEPAGE-001 后迁到此处） */}
+      <Route path={"/limit-up"} component={LimitUpReview} />
       <Route path={"/upload"} component={Upload} />
       <Route path={"/market"} component={Market} />
       <Route path="/sentiment-alerts" component={SentimentAlerts} />

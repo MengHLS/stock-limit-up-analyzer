@@ -31,6 +31,7 @@ import {
   ClipboardList,
   CloudDownload,
   Crown,
+  Flame,
   LayoutDashboard,
   LogOut,
   History,
@@ -64,7 +65,9 @@ const navGroups: NavGroup[] = [
   {
     label: "复盘分析",
     items: [
-      { label: "涨停复盘", path: "/", icon: LayoutDashboard },
+      // HOMEPAGE-001：首页 = 行情复盘总览（接管 `/`）；原 `/` 的涨停复盘明细迁至 `/limit-up`
+      { label: "首页", path: "/", icon: LayoutDashboard },
+      { label: "涨停复盘", path: "/limit-up", icon: Flame },
       { label: "大盘分析", path: "/market", icon: BarChart3 },
       { label: "情绪分析", path: "/sentiment-analysis", icon: Activity },
       { label: "龙头候选", path: "/leader-candidates", icon: Crown },
