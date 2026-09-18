@@ -159,7 +159,7 @@
 - `ROADMAP.md` = 唯一 Master Control：**§44 真实状态（覆盖式）**、**§44.5 任务队列**、**§47 更新记录（append-only + 时间戳）**。每任务完成必须更新三者并定下一任务。
   - 🔴 **§47 的正文自 2026-09-13 起独立为根目录 `ROADMAP-CHANGELOG.md`**（原 §47 日志 718 行 / 约 500 KB = 全文 59%，拆出后 `ROADMAP.md` 852 KB → 约 332 KB）。**追加一律写进 `ROADMAP-CHANGELOG.md` 的文件末尾**；`ROADMAP.md` 里的 §47 只剩指针（**禁在 ROADMAP 里重建日志**）。历史条目零改写；拆分同时修掉了「`# 49.` 标题把日志割成两段」的错位。
 - 7 态 `DESIGN/CODE_READY/DATA_READY/VALIDATED/RESEARCH_READY/PRODUCTION_READY/BLOCKED`；**只有 `RESEARCH_READY=TRUE` 才允许正式策略结论**（代码存在 ≠ VALIDATED，测试通过 ≠ Research Ready）。
-- ⚠️ **同一文件禁同批次并发多个 Edit**（静默丢改动）；本仓库**常有并行会话** ⇒ 唯一锚点 + 单次 Edit；**并行会话改动的文件不得混淆归属**（判据用 `find -newermt`）。
+- ⚠️ **同一文件禁同批次并发多个 Edit**（静默丢改动）；本仓库**常有并行会话** ⇒ 唯一锚点 + 单次 Edit；**并行会话改动的文件不得混淆归属**（判据用 `find -newermt`）。🔴 **2026-09-18 `9bj` 实测增量（判据修正）**：两笔 `Edit` 并行发往同一 `client/src/pages/Dashboard.tsx`，**两笔各自都报「成功」**，但「加 import」那笔被后写**静默覆盖**，靠 `tsc --noEmit` 报 `TS2304 Cannot find name` 才暴露 ⇒ **判据不是「工具回话说改好了」，而是「改完 `grep` 回读符号出现次数」**；危险度与替换块大小成反比（`import` / 常量 / 函数名这类只出现 1~2 次的短行最易被吞，成块替换反而不易同时中招）⇒ 同一文件的多处修改**串行**做，逐个回读。
 - 命名（§49）：模块/文件/目录**禁带 STEP/C-task 编号或数字后缀**，纯语义小驼峰；命名前先全库查重。
 - ⚠️ **STEP 编号会撞车**：`RESEARCH-006/007/008` 已被 §47（现 `ROADMAP-CHANGELOG.md`）的**结果页可读性前端任务**占用；架构线用 `RESEARCH-006.0/.1/…` 子号区分。
 
@@ -668,6 +668,7 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - 🔴 **错误信息必须可操作**：显式传了无条件的分析时，除了拒绝，还要**列出**「本 Run 可导出条件的分析」。旧文案是个死胡同 —— 用户知道失败了却不知道该换哪条。
 - 探针：`_verify_candidate_filter_source.mts`（**41 / 0**，直接跑在用户真实失败的 Run 780002 上）/ `_probe_analysis_780001.mts`（复现根因）/ `_e2e_candidate_button_real_ui.mjs`（**真机点按钮**全流程，4 次真实运行；末次在 **v2 数据集**上 `ALL PASS`、Candidate `#750001`）/ `_probe_radix_select_drive.mjs`（合成事件 5 种全败）/ `_probe_radix_select_drive_native.mjs`（原生输入管道生效）。
 - ⚠️ **CDP 探针两条硬纪律**：① `document.body` 在 CDP 刚连上时可能为 **null** ⇒ 必须防御 + 重试（实测第一次求值就抛 `TypeError: Cannot read properties of null (reading 'innerText')`，探针在页面渲染之前整体退出、`docs/evidence/*.out.txt` 只剩 **0 字节空文件**）；② **长跑探针必须逐行 `appendFileSync` 落盘**，末尾一次性 `writeFileSync` 的写法在被信号打断时会**丢掉全部证据**。
+- 🔴 **CDP 探针新四坑（2026-09-18 `9bi` 首页验收实测）**：① **主机侧正则被「习惯性二次转义」** —— 探针文件里直接写的 `/^\\d+\\s*板$/` 实际匹配「反斜杠 + d」⇒ **全部假 FAIL**；而**同一探针内、写在传给浏览器的模板串里的**正则**必须**保留 `\\d`（否则被 JS 字符串吃掉）。判据 = **这段正则最终由谁解析**。② **recharts 的 Legend 图标也是 `svg.recharts-surface`**（宽约 14px）⇒ `querySelectorAll('.recharts-surface')` 会把图例算成绘图面（「联数」虚高、`.recharts-cartesian-grid` 读出 `null`）⇒ 必须**按尺寸过滤**（取 `width > 300`）。③ `jsonEval` 的表达式若写成 `(function(){...})` **忘了末尾 `()`** ⇒ CDP 把函数对象序列化成 `undefined` ⇒ 断言**静默记 SKIP**（不是 FAIL）⇒ **SKIP 绝不能掉以轻心、必须逐条看清楚**。④ 断板股首行的涨跌幅可能因**行情缺失**呈现「—」⇒ 断言必须允许该形态（这正是「不推算」的正确表现），只断言「含 %」会把正确实现判成 FAIL。
 - 🔴 **Radix Select 的可靠驱动方式 = CDP 原生输入 `Input.dispatchMouseEvent`（禁 `Runtime.evaluate` 合成事件）**。三段演进全部实测过：**① 原生 bubble `<select>` 根本不存在** —— `@radix-ui/react-select@2.2` 只在 `isFormControl`（传了 `name` prop）时才渲染 `SelectBubbleInput`（那个隐藏原生 select），本仓 `/research/ask` 的两个下拉**都没传 `name`** ⇒ DOM 里没有 select。⚠️ **本行旧版写的 `trigger.closest('div').parentElement.querySelector('select')` 是错的**，实测直接报 `{"ok":false,"why":"找不到原生 select"}`（已于 2026-09-17 更正）。**② `Runtime.evaluate` 派发 `PointerEvent('pointerdown'|'pointerup', { pointerType: 'mouse' })` 半成功** —— 下拉**确实能打开**（Trigger 的 `onPointerDown` 认这个 pointerType）、`[role="option"]` 也读得到（`aria-selected` 正确），但**选项点击始终不生效**；5 种组合（`pointerdown+up` / `+pointermove` / `HTMLElement.click()` / `focus+Enter` / `pointerId=0`）**全部无效**（证据 `docs/evidence/_probe_radix_select_drive.mjs` = 5 个 `✗ 未生效`）。根因：`dispatchEvent(new PointerEvent(...))` 造出来的是**不可信事件**（`isTrusted === false`），React 19 的合成事件委托不按真实手势路径处理。**③ `Input.dispatchMouseEvent`（`mouseMoved` → `mousePressed` → `mouseReleased`，`button="left"`、`pointerType="mouse"`、`clickCount=1`）✅ 生效** —— 这是浏览器**真实输入管线**，Blink 据此生成 `isTrusted: true` 的 mouse 事件**并自动派生 `pointerType: "mouse"` 的 pointer 事件**（证据 `docs/evidence/_probe_radix_select_drive_native.mjs`：`✅ 下拉已打开` + `✅ 生效`）。坐标用 `getBoundingClientRect()` 取元素中心点（Trigger 与 `[role="option"]` 各一次）。**推广：凡依赖「真实用户手势」的组件（Radix / Headless UI / 自研手势层），`Runtime.evaluate` 里的 `dispatchEvent` 一律不可靠 ⇒ 必须用 `Input.*`。** 另仍须**先等「数据集列表异步加载完成」**（触发器文案不再含「加载中」），否则连打开都谈不上。
 - ⚠️ **`reachedXxx` 型判据禁用「步骤条标签」**：`RESEARCH_ASK_STEP_LABELS` 四标签**恒渲染**（本仓已踩两次）。同理 `document.body.innerText.includes('④ 研究结论')` 恒为 true。
 
@@ -743,3 +744,110 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 - ⇒ **端口只认启动日志**（再次验证）：`npm run dev` 实测输出 `Port 4000 is busy, using port 4001 instead` +
   `Server running on http://localhost:4001/` —— 别按惯例当成 3000/4000。
 - ⚠️ 判据顺序：先 `netstat -ano | grep ':4001'` 看有没有 LISTENING，再用 `fetch` 探 —— **不要**用 `curl` 的成败下结论。
+
+## 🔴 组合回测 / 止损一致性 / 总览回撤区块（`9bc`~`9bh`，2026-09-18 · 由 `MEMORY.md` 下移的详版）
+
+> 本节是 2026-09-18 为把 `MEMORY.md` 压缩回可注入体量而下移的明细。硬判据仍在 `MEMORY.md`，此处是完整口径与命令。
+
+### 止损一致性（`9bd` 审计 · `9be` 修 D1/D2）
+
+- 🔴 **三个互不相通的落点**：① `server/realisticBacktest.ts`（研究-legacy 组合回测，真执行**全部**退出规则）；② `server/paperTrading.ts`（前向纸面交易，`9be` 起**已补开盘止损**）；③ `server/engine/**`（生产 Strategy Engine，`hold-while-selected` 语义，**完全不执行任何止损** —— `grep -rn "stopLoss" server/engine server/risk` = **0**）。
+- ✅ **D1 已修（`9be`）**：`advancePaperTradingDay` 在**买入之前**插入开盘退出循环 —— **不可换序**，因为「开盘止损释放的现金必须参与同一开盘时点的买入排序」。退出判定抽成无状态纯函数 `evaluateHardExitRules()`（开/收**共用一份**）；时点由 `executionAssumptions.exitJudgementPhase`（`open` / `close` / `both`，缺省 `both`）控制；原因文案用 `HARD_EXIT_PREFIX` **字面量表**（**禁模板拼串**）⇒ `grep -c "开盘触发止损" server/paperTrading.ts` 由 0 变 **4**。等价探针 `docs/evidence/_probe_stoploss_divergence.mts` 的断言已翻转为「两端等价 + 唯一刻意分叉」，全 PASS。
+- 🔴 **纸面专属「组合无条件止损」**（按用户评论要求新增）：`portfolioStopLossPercent` 缺省 **3**、`0` = 关闭；分母 = **建仓时的账户总权益**（`PaperPosition.equityAtEntry` 冻结）⇒ `grep -c "组合止损" server/realisticBacktest.ts` = **0**，即「**有意分叉**」：**不动回测**以免重算全部历史数值。
+- ✅ **D2 已修（`9be`）**：前向纸面「策略设置」UI（3 组 / 10 个数值 / 5 个开关）+ 生效参数面板 `data-paper-effective-settings`（带「你设的 / 默认」徽标）；默认值**单一真源** = `resolveEffectivePaperSettings`。
+- 🔴 **仍未修**：`client/src/pages/Backtest.tsx:701` 的文案在描述生产引擎里**不存在**的止损；纸面遇「一字跌停 / 缺收盘」**不写 reason**；`paperTrading.ts` 里 `?? 0` 兜底 ⇒ 日期不在日历会**静默永不出清**。⚠️ `server/executionAssumptions.ts:44,67` 的 `stopLoss: 0.08` 与模拟器缺省 **5%** 不一致 ⇒ 权威数**待用户裁定**。报告 `docs/research/STOPLOSS-PARITY-AUDIT-001.md`（§11）；方案 C/D/E/F **未实施**。
+
+### 组合回测分仓口径（`9bc`）
+
+- 🔴 **`/backtest` 一页并存两套交易语义**：① 「快照面板」（当前持仓 / 准备买入 / 模拟订单 / 策略对比 / 风险归因）来自 **research-legacy 模拟器**，**完整套用分仓下拉**，唯一权威 = `server/positionBudget.ts#allocatePlannedBudgets`（**等权 = 现金 ÷ 本批笔数**）；② 顶层 `realisticSimulation` 来自**生产 Strategy Engine**，**每笔固定 100 股**、**不读分仓下拉**（只回显）。⚠️ 两段**非等价**（`tests/server/engineNonEquivalence.test.ts`）。
+- 🔴 **「准备买入」显示 100% 不是算错**（等权口径 = 现金 ÷ 本批笔数）。**固定单笔比例 = 初始资金 × 20%**。**系统内不存在「权益 ÷ maxPositions」口径**；**用户已明确不设上限 ⇒ 禁自行加 cap**。探针 `docs/evidence/_probe_position_sizing_caliber.mts`。
+- 🔴 **比例只在表格里（禁回独立段落）**；持仓表分母 = 同模拟器同截止日 `finalCapital`；准备买入表**禁以假设价格估算股数**。探针 `docs/evidence/_probe_planned_position_render.mjs`。
+- ⚠️ 改分仓口径会**重算全部历史回测数值** ⇒ 必先经用户授权。⚠️ 待收敛：`server/paperTrading.ts:374-386` 内联了**第二份**等价分配实现。
+
+### `/backtest`（组合回测）页签坐标（`9bf`）
+
+- 🔴 **总览 = 全周期五策略收益对比 + 当前持仓与下一交易日准备买入 + 全部模拟订单（含分页）**；迁出物：统一策略评价 → **策略对比**、高位连板风控生效情况 → **风险归因**、资金与仓位审计 → **交易明细**（+ 迁移提示）。锚点 `data-full-cycle-comparison` / `data-strategy-portfolio-snapshot` / `data-all-simulated-orders` / `data-orders-pagination` / `data-orders-range` / `data-trades-relocated-note` / `data-capital-position-audit`。
+- 🔴 **订单分页 = 纯前端切片**（复用 `client/src/components/PaginationBar.tsx`；默认 20，可选 10/20/50/100；筛选 / 排序 / 策略变更均回第 1 页）⇒ **禁**改成服务端分页、**禁**改动「显示 X/Y 笔」口径（仍按筛选后全集计）。探针 `docs/evidence/_probe_backtest_layout_pagination.mjs`（自带空闲端口探测）。
+- 🔴 **卡片容器类是承重件**：本页卡片把 `mx-auto max-w-7xl px-4 pt-5 sm:px-6` 写在**自己的 `<section>`** 上；**不自带该类的组件（如 `StrategyEvaluationPanel`）迁入时必须显式套一层同款 `<div>`**，否则卡片宽 48px、左移 24px（实测 `[304,1207]` vs `[280,1255]`）—— 2026-09-18 用户实报「策略对比下的样式乱了」即此。探针 H / H2 是常驻护栏。
+- ✅ **端口判据**：本机常备 **4001 = 上轮残留无头 Chrome 的僵尸调试端口**（TCP 可连、HTTP `fetch failed`）⇒「端口在听」≠「服务活着」，只认 `fetch http://127.0.0.1:<port>/` 返 **200**；dev server 实跑端口以启动日志为准（`9bf` 轮 = **3000**）。`/backtest` 研究查询实测只等 **15~30 s**（非 `9aq` 记的 20 分钟）。
+
+### 总览「各策略回撤与收益特征」区块（`9bg` / 时长口径修订 `9bh` · 事项 `rZPX8O`）
+
+- 🔴 **五项指标** = 最大回撤 / 回撤持续时间 / 收复回撤所用时间 / 最大收益 / 当前收益；位于「全周期五策略收益对比」折线图**下方**、**同一张卡片内**；锚点 `data-full-cycle-risk-blocks`（区块本体，**挂在页面主 JSX 行**以保住 `backtestPage.test.ts` 的页签归属护栏）+ `data-full-cycle-risk-card={<key>}`（每张策略卡）；**渲染点唯一**。⚠️ **勿用** `data-full-cycle-risk-block` 作每卡锚点 —— 它是 `…-blocks` 的前缀，会让唯一性断言假失败。
+- 🔴 **禁另立回撤口径**：最大回撤取 `realisticSimulation.maxDrawdown`；回撤持续 / 收复用时取 `strategyEvaluation.stability.maxDrawdownDurationTradingDays` / `longestRecoveryTradingDays`（🔴 **`9bh` 起口径 = 锁定「最大回撤那一次」区间**：回撤持续 = **峰值日→谷底日**、收复用时 = **谷底日→收复前高**（未收复计至期末）⇒ Σ 恒等于「峰→收复」总时长；并列最深取**最早**；**禁改回「全期最长的那一次」** —— 单测 `tests/server/downsideRiskDrawdownDurations.test.ts` 已钉死该口径与恒等式。与「策略对比 → 六层评价」逐字同源。⚠️ 字段名沿用旧名：`longestRecoveryTradingDays` **不再**表示「全期最长恢复」），**只在展示层搬运**；收益两项由 `client/src/lib/fullCycleRiskBlocks.ts` 从**该策略自身完整权益曲线**恒等派生 —— 🔴 **不按图表起始日裁剪曲线**（图表为对齐 `fullCycle.startDate` 做了 `date >= startDate` 过滤，照抄会让同一张卡里出现两个不同区间的数字）；非法权益点剔除，`initialCapital <= 0` 或曲线无有效点 ⇒ **全空、展示「样本不足」**（禁 0 兜底、禁拿上一笔权益顶替）。
+- 探针 `docs/evidence/_probe_full_cycle_risk_blocks.mjs` + `.out.txt` = **PASS 37 / FAIL 0 / SKIP 0 ⇒ ALL PASS**，含 **D 段口径交叉核对 20 / 20**（区块四项与「策略对比 → 六层评价」同一策略列的 `Max Drawdown` / `最大回撤持续时间` / `最大回撤恢复时间` / `Total Return` **数值逐个相等**）与 **E 段几何**（5 张卡同排等宽 223px、同一 top；行左边缘 325 与折线图 325 逐像素对齐、行宽 1165 = 折线图宽 1165）。🔴 **探针输出禁止接管道** —— 沙箱 Bash 无 `head` / `tail` ⇒ 管道读端立刻关闭 ⇒ 探针 `console.log` 抛 `EPIPE` 触发 `uncaughtException` **提前中止**，且其开头的 `fs.writeFileSync(OUT,'')` 已把上一份好结果**清空**（本轮真踩）。另有两条探针自身断言缺陷：① 卡片标题取**服务端 `label`**，首项是**「原始策略」**（不是订单页签用的「原始评分基准」）；② 卡片脚注必须取 `querySelectorAll('p')` 的**最后一个** `p` —— `p:last-of-type` 按**各自父节点**判定，会先命中卡内 flex 容器里那个唯一的标签 `p`。
+- 🔴 **`9bh` 时长口径修订（2026-09-18 · 用户裁定）**：`server/downsideRisk.ts#calculateDrawdownDurations` 由「全期各区间**分别**取最大」改为「**锁定最深那一次**回撤区间」⇒ 实测原始策略 `68 / 68` → **`19 / 16`**、质量门控 `154 / 153` → **`111 / 43`**（Σ=154 与旧「最长」值自洽）；探针重跑 **PASS 37 / FAIL 0 ⇒ ALL PASS**，D 段交叉核对 **20 / 20 仍全绿**（两侧同源，故改口径后交叉核对依然成立），E 段几何无回归。**同步改 4 处**：① 该函数已 **`export`**（为单测）；② 六层评价第四层**标签「最长恢复时间」→「最大回撤恢复时间」**+ 两条定义文案（🔴 旧标签在新口径下是错误命名）；③ `client/src/lib/fullCycleRiskBlocks.ts` 与 `client/src/pages/Backtest.tsx` 口径注释/区块文案；④ `tests/server/backtestPage.test.ts` 标签断言。🔴 **已核**：`DownsideRiskStrategyEvaluation.stability` 在**服务端无其它消费者**（`server/research/strategyEvaluation/` 是**另一个模块**，同名不同物）⇒ 本改**不影响评分 / 门控 / 排名**。🔴 **改 server 前的闸门**：`docs/evidence/_probe_inflight_runs.mts` 扫全库含 `status` 列的表，实测仅 `research_question:270001` 为 `RUNNING` 且时间戳停在 **32 小时前 ⇒ 历史僵死**，Run 载体表全 0 ⇒ 可安全热重启；**判据是时间戳，不是「有没有 RUNNING 字样」**。🔴 **工具链坑**：本机 `node_modules/.bin/tsc` / `vitest` 的 shim 依赖 `sed` / `dirname` / `uname` ⇒ 在缺 coreutils 的 Bash 里会以 `MODULE_NOT_FOUND` **假失败**，必须改走 `node node_modules/typescript/bin/tsc` 与 `node node_modules/vitest/vitest.mjs`。
+
+
+## 🔴 首页（`/`）连板梯队与题材热力（HOMEPAGE-003 · `9bk`，2026-09-19 · 用户裁定）
+- 🔴 **高度口径 = 「若该股本日涨停会达到的连板数」**：本日仍涨停 ⇒ 本日板数；**本日未涨停（含「首板未续」）⇒ 上一记录交易日板数 + 1**。唯一实现 `shared/ladderHeight.ts`（`brokenKind ? boards + 1 : boards`）。`server/boardRoster.ts#boards` 与 `metrics.maxBoards` 是**已实现**口径、**未改**（喂情绪评分）⇒ 梯队左列最高值**可高于** `maxBoards`，属**口径不同而非冲突**。⚠️ 库内 `limit_up_records.boardCount` 基本全 NULL ⇒ **不可作真源**。
+- 🔴 **排序唯一实现 = `shared/sectorHeatOrder.ts`**（`buildSectorHeatLookup` / `sectorHeatOf` / `compareBySectorHeat` / `sortBySectorHeat`）：梯队**行内**与热力图**行序**都按**题材当日**涨停家数降序。缺热度取 **-1**（必须**低于**「当日 0 家」的真值 0）。🔴 **合计不是排序键**（只作同热度次键）；🔴 **与是否断板无关**（禁再把断板格统一排前/排尾）。数据源 `limitUp.getSectorDistribution`（服务端已 `normalizeSectorName`，与名录题材同名；与热力日历**同一 query key ⇒ 共用缓存**）。
+- 🔴 **梯队折叠 = 组内**（`9bl`；**`9bk` 的「整梯队高度行折叠」已作废**）：判据是**该高度组自己的网格行数**（> 3 ⇒ 该组默认折到 3 行，本组按钮展开/收起），**不是整个梯队的高度行数**；行↔格换算必须读 `getComputedStyle(grid).gridTemplateColumns` 的 token 数（断点不另立一套；`ResizeObserver` 里**只在值真变时** `setState`，否则渲染环）。锚点 = `data-ladder-grid` / `data-ladder-grid-rows-total` / `-rows-visible` + 按钮 `data-homepage-ladder-group-toggle`（`aria-expanded` 是**字符串**）；旧锚点 `data-homepage-ladder-toggle` / `-rows-total` 已删。⚠️ 探针纪律：**折叠态断言必须逐组展开后再跑全量版式断言**（顺序 F → D → G），否则少渲染的格数会让断言静默变 SKIP。⚠️ 另：**JSX 正文不吃 Markdown**，文案里写 `**加粗**` 会原样渲染成星号。
+- 🔴 **认知纪律（`9bk` 真踩）**：**「参考图/附件里可见的那部分不含某类」≠「该图不含该类」**。上一轮据「附件 2 板行 8 格零删除线」推断「参考工具不把首板未续并入 2 板行」，并写进**单测 + 免责声明 + 探针断言**，本轮被用户裁定推翻（那 8 格只是 38 格的**子集**）⇒ 凡**由参考图反推**的口径一律在单测/文案里标「**推断 · 待用户确认**」，且开关必须收敛到**一处**（本轮 `ladderHeight` 翻转成本 = 1 行）。
+- 🔴 **探针纪律追加**：产物的**默认折叠/默认收起**会让「全量」断言静默变成 **SKIP** ⇒ 探针必须**先断言默认态、再点按钮展开**后才跑全量断言；`aria-expanded` 比字符串；原生 `<button>` 用 DOM `el.click()` 即可（只有 Radix 受控控件才必须走 CDP 真实鼠标）。
+
+## 🔴 MEMORY.md 原文下移（2026-09-19，超限压缩前留档）
+
+> MEMORY.md 当日字符数 **8439**，超过会话注入上限（实测注入时被截断 ⇒ 后续会话看不到尾部硬规则）。按项目已有惯例（`9bc`~`9bh` 曾同样下移），将原文**逐字节搬运**至此，MEMORY.md 已重写为压缩索引。以下为下移原文（未改写）。
+
+# stock-limit-up-analyzer 硬禁令索引
+
+> **压缩索引**；唯一细则源 = `.workbuddy/memory/PROJECT_RULES.md`（`9bc`~`9bh` 整章已下移）。动手前读本文 + 当日日报，再 grep 细则源。
+
+## 三门
+1. 🔴 改 `server/**` 热重启并**杀死在途 Run**（在途 = `RUNNING`；`PENDING` 且 `inputSnapshot`/`startedAt` 空 = 未执行草稿、**禁收敛**）⇒ 用户在用页面时禁改 server、禁跑重库脚本。改 `client/**` 只走 HMR。
+2. 🔴 禁 `install`/新依赖/`prettier --write`/`db:push`/`drizzle-kit generate`/手写 `_journal.json`。
+
+## 环境 / Git
+- 端口只认启动日志（另一路常占 4000 ⇒ 实跑 **4001**；也常被残留无头 Chrome 占：TCP 通但 fetch 失败）；探端点用 Node `fetch` + `localhost`（curl 走代理）。
+- 沙箱 Bash 缺 `ls`/`head`/`tail`/`git` ⇒ 用**绝对路径**（git = `PortableGit/versions/1.2.0/cmd/git.exe`），或先 `export` 该版本 `cmd`+`usr/bin` 进 PATH；后台服务用 `run_in_background`；`git`/`node` 不认 MSYS `/c/...` ⇒ 传 `C:/...`；Win stdout 常不返回、`*>` 出 **UTF-16** ⇒ 落文件用 Python 读。
+- 🔴 **长任务输出禁接管道**（读端不存在 ⇒ EPIPE ⇒ 被测脚本中止并清空自身留档）。
+- 🔴 改文件 = Python bytes + `os.replace` + 回读；源码禁 `\uXXXX`；模板串内禁嵌反引号。行手术 = 连续行块锚点 + 索引降序。**裸子串断言假失败** ⇒ 判据带形态。测试基线 = **8 失败文件 / 17 用例**（判据 = 失败**文件集合**）。
+- ✅ 前端验收 = 无头 Chrome `--headless=new --remote-debugging-port=<实测空闲>` + Node 22 `WebSocket` 直连 CDP 量 DOM；输出**必须落盘**；`agent-browser`/`jsdom` 不可用。
+- 🔴 沙箱出站普遍被拦 ⇒ 真库/外网脚本一律 `dangerouslyDisableSandbox`，GitHub 另清空代理 env（`env -u HTTP_PROXY -u HTTPS_PROXY git …`）；**TiDB 冷启动掐断首连 ⇒ 重跑即通**；`.env` 的 `?ssl={...}` 须按 JSON 提取以对象传入；端口缺省 4000。
+- 🔴 git 写入可能被外部回滚 ⇒ 每次复核 `git rev-parse HEAD`；`origin/main` 会丢 ⇒ 用 `ls-remote`/`FETCH_HEAD`；`update-ref` 不落地 ⇒ 改 `.git/packed-refs`。
+- 🔴 **禁按清单判行尾**（工作区常 CRLF 而 HEAD blob 是 LF，`status`/`diff` 看不见）⇒ 先跑 `node scripts/checkEolDrift.mjs`（0 ≠ 全仓健康），唯一依据 = **HEAD blob**。写用 `open(p,"wb")`，读 CRLF 行手术用 `newline=""`。纯 CRLF 仅 3 文件：`PROJECT_RULES.md`、`client/src/App.tsx`、`AppShell.tsx`。
+- one-off 脚本写仓外 `_scratch\`（仓外解析不到仓内 `node_modules`）；报告 `docs/research/`、探针 `docs/evidence/`（须登记 `README.md`）。🔴 `client/**` 只禁 import `server/**` **运行时值**；`@shared/*` 运行时值**允许且在用**。
+
+## 总控
+- `ROADMAP.md` 唯一 Master Control：§44 覆盖式 + §44.5 队列 + §47 append-only（正文在 `ROADMAP-CHANGELOG.md`）；**仅 `RESEARCH_READY=TRUE` 允许策略结论**。
+- 🔴 §44.5 取号真源 = 「编号台账」行（**禁「末条 +1」**）；**文件头铁律行 + 台账行两处同步**；**取号前先对远端**。现用至 `9bk` ⇒ 下一个 `9bl`。
+- 🔴 分叉合流：`ls-remote` → `fetch` → `merge --no-ff`；文档冲突**两侧都保留**，禁整份 `--ours`/`--theirs`；丢文件 `git ls-files -d -z | xargs -0 git checkout --`。
+
+## 回测 / 评估端口
+- Dataset 坐标 = `dataset_version.id`；Strategy SoT = `strategy_versions.strategyDocumentJson`；**零 FK**；`promote` 唯一 `CONVERTED` 入口。
+- ✅ 条件进回测（`9aw`）：`assemble.ts#requireRecipe` ①带 recipe→注册表 ②有条件无 recipe→现场编译 ③皆无→兜底。🔴 **① 先于 ②**；等价改写**方向翻转**；表外写法抛 `CONDITION_NOT_MAPPABLE`，**禁回落默认配方**。
+- 🔴 评估端口 = `server/research/strategyEvaluation/`（唯一）；主输出字段 **`evaluation`**（含 `equityCurve`），**不是** `performance`；**禁**手写子链。
+- 🔴 **`dataReady: true` 必须显式传**（`runAudit.ts:74` 缺省 false）⇒ 否则 `gate = INCONCLUSIVE`（易误判为「数据链未认证」）。
+- 🔴 `resolveParameters` 覆写键必须在 `document.parameters` 里；`DatasetSourceKind` = registry/rebuild/**injected**；`backtestBridge.ts#createStrategyBacktestBridge` 是「参数集 × 区间 → 标量 + 曲线」唯一实现，参数空间**必须从文档派生**。
+- 🔴 单组评估约 **3 分钟** ⇒ 只能 `random` + 小 `budget`；长跑后 DB 查询瞬时失败（池）；性能只认「**交错 ≥3 轮取中位**」；真实列名**禁凭记忆**写 SQL。
+
+## 运行工作台 / 留档
+- 🔴 直读桥 = `runWorkbenchAssembly/datasetFromRegistry.ts`（**禁第二套**）；决策日资格 = `rd ∈ [obs.start, obs.end]`；窗口只认策略声明。🔴 `securityId` = `sec_<uuid>`；**板块判定用 `row.code`**；回落重建须继承 universe 约束并抛 `UniverseConstraintError`（错用 `RegistryDatasetBridgeError` 会被吞 ⇒ 静默全市场）。
+- 🔴 `loopRun` 留档 `closed_loop_backtest_run`（与 legacy `backtest_runs` **禁互灌**）；`dateRange` 必填；`experimentId` 须 `EXP-YYYYMMDD-XXXXXXXX`；14 阶段**有执行器 8 个**。
+
+## 前向纸面 / 指数同步
+- 🔴 交易日历**唯一来源 = `index_daily`**（停更 ⇒ `datesToAdvance` 恒空、**静默 no-op 却报成功**；补数**必须 `--force`**）；🔴 **齐平判定必须传 `referenceDate`**。🔴 `market_data` 两列均 NOT NULL ⇒ **只能整行写**，取不到整天不写（**禁占位值**）；缺口判据 = `pendingDates`（**>1 才缺口**）；探针 `_probe_market_data_gap.mts`。
+
+## 组合回测 / 止损 / `9bg`+`9bh` 回撤区块 —— **明细见细则源同名章**
+- 🔴 **止损三落点互不相通**：① `realisticBacktest.ts`（真执行全部退出规则）② `paperTrading.ts`（`9be` 起已补**开盘**止损：`evaluateHardExitRules()` 开/收共用、**买入之前**不可换序）③ `server/engine/**`（**完全不执行止损**）。纸面**专属**「组合无条件止损」（缺省 3、`0`=关，分母 = 建仓时总权益）⇒ **有意分叉，不动回测**。⚠️ 未修：`Backtest.tsx:701` 文案描述不存在的止损；`?? 0` ⇒ **静默永不出清**；`stopLoss` 8% vs 5% **待用户定**（报告 `docs/research/STOPLOSS-PARITY-AUDIT-001.md`）。
+- 🔴 **`/backtest` 并存两套交易语义**（**非等价**）：快照面板 = research-legacy（权威 `server/positionBudget.ts#allocatePlannedBudgets`，**等权 = 现金 ÷ 笔数**）；顶层 `realisticSimulation` = 生产引擎（**固定 100 股、不读分仓下拉**）。「准备买入」100% **不是算错**；**不存在「权益 ÷ maxPositions」口径**；用户不设上限 ⇒ **禁加 cap**；比例只在表格里。⚠️ 改口径 ⇒ **重算全部历史数值**，须先授权。
+- 🔴 **`/backtest` 页签**：总览 = 五策略收益对比 + 持仓与准备买入 + 模拟订单（纯前端分页）；🔴 **卡片容器类是承重件**（迁入须套 `mx-auto max-w-7xl px-4 pt-5 sm:px-6`，否则宽 48px、左移 24px）。
+- 🔴 **「各策略回撤与收益特征」（`9bg` / 事项 `rZPX8O`）**：五项 = 最大回撤 / 回撤持续时间 / 收复回撤所用时间 / 最大收益 / 当前收益，在折线图下方**同一张卡内**；锚点 `data-full-cycle-risk-blocks` + `data-full-cycle-risk-card={<key>}`（**勿用** `…-block`）。🔴 **禁另立回撤口径**：回撤三项**搬运** `realisticSimulation.maxDrawdown` / `strategyEvaluation.stability.*`（🔴 `9bh` 起两项时长 = 锁定**最大回撤那一次**区间：持续＝峰→谷、收复＝谷→收复前高（未收复计至期末），**禁改回「全期最长」**，单测 `downsideRiskDrawdownDurations.test.ts` 已钉死；字段名沿用旧名 ⇒ `longestRecoveryTradingDays` **不是**全期最长恢复；六层评价第四层标签已改「**最大回撤恢复时间**」）；收益两项由 `client/src/lib/fullCycleRiskBlocks.ts` 从**完整权益曲线**恒等派生（**不按图表起始日裁剪**；无效点剔除、初始资金非正 ⇒ 全空「样本不足」）。探针 `_probe_full_cycle_risk_blocks.mjs`（37/37）。
+- 🔴 **事项闭环**：未委派事项（`todo_delegate_status` = `idle`）**无 dispatch id** ⇒ `todo_task_complete` 不可用；正确 = `todo_add_comment` + `todo_transition`。
+
+## 页面 / 口径 / 暗色
+- 🔴 侧栏高亮 = **分段精确匹配 + 取最长命中**（`AppShell.tsx#isPathActive`；**禁 `startsWith`**；详情页点亮父项）；主题 = `localStorage["theme"]` 显式值优先，否则跟设备，**点一次即写死偏好**。探针 `_probe_sidebar_active_highlight.mjs` / `_probe_theme_autoload.mjs`。
+- 🔴 首页 `/` = `client/src/pages/Dashboard.tsx`（`9bi` 起）：四指数并列迷你卡（各 **120 交易日**）+ 共享分类轴的**上下两联图**（右轴**仅成交额一条**，两融独占下联左轴）+ 连板梯队「**高度 × 网格**」（断板加删除线 + 显当日涨跌幅、一字板红标）。锚点：`data-homepage-index-card` / `-market-chart` / `-ladder` / `-heatmap`、`data-ladder-group`、`data-ladder-stock`。梯队字段 `firstBoardStocks` / `changePct` / `oneWordBoard`（一字板判据 = 当日 `open==high==low`）。🔴 `9bl` 起（**`9bk` 的「整梯队高度行折叠」已作废**）：折叠是**组内**的 —— 每个高度组各自判断，该组网格行数 > 3 时默认折到 3 行（`LADDER_GROUP_VISIBLE_ROWS=3`，≈ 3 × **实测列数** 格；列数读 `grid-template-columns` 的 token 数，断点不另立一套）；锚点 `data-ladder-grid` + `data-ladder-grid-rows-total/-visible`、按钮 `data-homepage-ladder-group-toggle` + `aria-expanded`（**字符串**）；**整个梯队高度行永远全量渲染**（旧锚点 `data-homepage-ladder-toggle` / `-rows-total/-visible` 已删除）。梯队**行内**与热力图**行序**均按**题材当日热力**降序（缺口 = 所选日期的涨停家数），合计/板块热度不是键（唯一实现 `shared/sectorHeatOrder.ts`，缺热度取 **-1**）。
+- 🔴 运算符两形（定义侧**名称形** / 草图**符号形**）只在 `definitionBuild.ts#CONDITION_OPERATOR_MAP` 译；换数据集**同动三处**。门槛型条件必须 `gated` 配方；`signalBuilder` 是工厂 ⇒ 先 `resolveParameters`；禁手搓 `row.bars`；**免责声明不得删**。
+- 🔴 `darkCompatibility.css` 与 `client/public/favicon.svg` 是**生成物禁手改**（生成器 `_gen_favicon_svg.mts` / `_gen_favicon_assets.mjs`）；坑：XML 注释内禁连续两短横线；CSS 渐变 oklab vs SVG sRGB。探针 `_probe_favicon_render.mjs`。
+
+- 🔴 **连板梯队「高度」=「若该股本日涨停会达到的连板数」**（用户 2026-09-18 裁定，`9bj`）：本日仍涨停 ⇒ 本日连板数；**连板中断 ⇒ 上一记录交易日连板数 + 1**；**首板未续也 +1**（用户 **2026-09-19** 裁定，`9bk`）—— 上一轮「据附件图 2 板行零删除线 ⇒ 不 +1」的推断**已作废**：那 8 格只是 38 格的**子集**（子集可见 ≠ 全集不含）。唯一实现 = `shared/ladderHeight.ts`（🔴 `client/**` 禁 import `server/**` 运行时值 ⇒ 口径函数必须落 `shared/`），单测 `tests/shared/ladderHeight.test.ts`；`server/boardRoster.ts#boards` 与 `metrics.maxBoards` 是**已实现**口径、**未改**（喂 `shared/boardEmotionScore`）⇒ 梯队左列最高值**可高于** `maxBoards`，属**口径不同而非冲突**。⚠️ 库内 `limit_up_records.boardCount` **基本全 NULL**（只首板行填 1）⇒ **不可作真源**。
+## 模式库（PATTERN-LIBRARY-001）
+- 🔴 模式真源 = `server/research/patternLibrary/patterns/*.ts`（新增 = 1 声明文件 + `patterns/index.ts` 1 行）；禁往 `moduleRegistry.ts` 写工厂、`recipeRegistry.ts` 写配方字面量；声明层只允许 `import type`；投影唯一 = `project.ts` + `projectRecipe.ts`。
+- 🔴 顶层常量 + 互相 import ⇒ 运行时炸而 `tsc=0` ⇒ 注册表须**惰性单例**。配方引用在 `document.recipe`（**顶层**），不是 `document.definition.entry.recipe`（`assemble.ts:461`）。
+- 🔴 `strategies` 两身份列 `id`(INT)/`strategyId`(varchar) ⇒ 清理一律用 `strategyId`。P0-1 已修：`buildConditions` 非 AND 抛错、组内首条放行；`ConditionDefinition` **无**逻辑位字段；候选可传 `patternId` ⇒ 自动带 recipe + `parameterSpace`。
+
+## 前端可达性
+- 🔴 **「接线完成」≠「用户够得到」** ⇒ 交付前必须无头量 DOM；`createCandidate` 实测 **13.2 秒** ⇒ 长请求按钮**必须换文案**；身份判据 `questionId ?? runId`；`Link` 包 `Button` 须 `<Button asChild><Link>`；`/research/ask` 的 `step`/`questionId` 是**内存态** ⇒ 已补深链 `?runId=N`。
+- 🔴 **CDP 五坑**：① 兼听 `requestWillBeSent` ② toast 须**高频轮询** ③ 模板串正则 `\s` 会被吃（用 `includes`）④ **Radix Select / 受控控件只认 `pointerdown`** ⇒ 必须 `Input.dispatchMouseEvent` 真实鼠标；受控 input 须原型 native value setter + `input` 事件 ⑤ 端口必须**实测空闲**。

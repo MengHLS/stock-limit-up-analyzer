@@ -1,0 +1,84 @@
+{
+  "latestLimitUpDate": "2026-09-18",
+  "quoteCoverageOnLatest": [
+    {
+      "limitUpStocks": 78,
+      "withQuote": 78,
+      "withChangeable": 78
+    }
+  ],
+  "brokenScenarioCoverage": [
+    {
+      "prevDate": "2026-09-16",
+      "prevLimitUpStocks": 89,
+      "prevStocksWithQuoteOnLatest": 88
+    },
+    {
+      "prevDate": "2026-09-17",
+      "prevLimitUpStocks": 47,
+      "prevStocksWithQuoteOnLatest": 46
+    }
+  ],
+  "oneWordBoardCandidates": [
+    {
+      "stockCode": "001376.SZ",
+      "stockName": "百通能源",
+      "openPrice": "12.66",
+      "highPrice": "12.66",
+      "lowPrice": "12.66",
+      "closePrice": "12.66",
+      "preClosePrice": "11.51",
+      "pct": 9.99
+    },
+    {
+      "stockCode": "301390.SZ",
+      "stockName": "经纬股份",
+      "openPrice": "54",
+      "highPrice": "54",
+      "lowPrice": "54",
+      "closePrice": "54",
+      "preClosePrice": "45",
+      "pct": 20
+    },
+    {
+      "stockCode": "600448.SH",
+      "stockName": "华纺股份",
+      "openPrice": "3.54",
+      "highPrice": "3.54",
+      "lowPrice": "3.54",
+      "closePrice": "3.54",
+      "preClosePrice": "3.22",
+      "pct": 9.94
+    }
+  ],
+  "latestPctDistribution": [
+    {
+      "pct": 10,
+      "c": 59
+    },
+    {
+      "pct": 9.9,
+      "c": 6
+    },
+    {
+      "pct": 20,
+      "c": 5
+    },
+    {
+      "pct": 10.1,
+      "c": 5
+    },
+    {
+      "pct": 10.3,
+      "c": 1
+    },
+    {
+      "pct": 9.8,
+      "c": 1
+    },
+    {
+      "pct": 30,
+      "c": 1
+    }
+  ]
+}

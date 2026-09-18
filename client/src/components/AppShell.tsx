@@ -32,7 +32,6 @@ import {
   CloudDownload,
   Crown,
   Flame,
-  LayoutDashboard,
   LogOut,
   History,
   ShieldCheck,
@@ -65,8 +64,8 @@ const navGroups: NavGroup[] = [
   {
     label: "复盘分析",
     items: [
-      // HOMEPAGE-001：首页 = 行情复盘总览（接管 `/`）；原 `/` 的涨停复盘明细迁至 `/limit-up`
-      { label: "首页", path: "/", icon: LayoutDashboard },
+      // HOMEPAGE-005：首页（`/`）入口 = 左上角网站标题（详见 SidebarHeader），侧栏不再单列「首页」项
+      // （原 `/` 的涨停复盘明细已在 HOMEPAGE-001 迁至 `/limit-up`）
       { label: "涨停复盘", path: "/limit-up", icon: Flame },
       { label: "大盘分析", path: "/market", icon: BarChart3 },
       { label: "情绪分析", path: "/sentiment-analysis", icon: Activity },
@@ -161,8 +160,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar collapsible="icon">
         <SidebarHeader className="h-16 justify-center">
           <button
+            type="button"
+            data-slot="sidebar-home-link"
+            title="返回首页"
+            aria-label="返回首页"
             onClick={() => handleNavigate("/")}
-            className="flex items-center gap-2.5 px-2 py-1.5 w-full rounded-lg hover:bg-sidebar-accent transition-colors group-data-[collapsible=icon]:justify-center"
+            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:justify-center"
           >
             <div className="h-8 w-8 shrink-0 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center">
               <TrendingUp className="h-4.5 w-4.5 text-white" />

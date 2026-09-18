@@ -1,0 +1,717 @@
+{
+  "columns": [
+    "id:int",
+    "stockCode:varchar(20)",
+    "stockName:varchar(50)",
+    "limitUpDate:date",
+    "limitUpTime:varchar(20)",
+    "boardCount:varchar(20)",
+    "circulationValue:varchar(20)",
+    "turnover:varchar(20)",
+    "sector:varchar(100)",
+    "keywords:text",
+    "createdBy:int",
+    "createdAt:timestamp",
+    "updatedAt:timestamp"
+  ],
+  "vendorColumn": "boardCount",
+  "tradingDatesInWindow": 45,
+  "daily": [
+    "2026-09-18:78",
+    "2026-09-17:47",
+    "2026-09-16:89",
+    "2026-09-15:32",
+    "2026-09-14:55",
+    "2026-09-11:40",
+    "2026-09-10:35",
+    "2026-09-09:48",
+    "2026-09-08:73",
+    "2026-09-07:93",
+    "2026-09-04:39",
+    "2026-09-03:44",
+    "2026-09-02:52",
+    "2026-09-01:83",
+    "2026-08-31:88",
+    "2026-08-28:82",
+    "2026-08-27:77",
+    "2026-08-26:52",
+    "2026-08-25:65",
+    "2026-08-24:46",
+    "2026-08-21:54",
+    "2026-08-20:79",
+    "2026-08-19:36",
+    "2026-08-18:79",
+    "2026-08-17:106"
+  ],
+  "prevDate": "2026-09-17",
+  "vendorVsMineMismatchCount": 952,
+  "vendorVsMineMismatches": [
+    {
+      "code": "301567.SZ",
+      "name": "兴欣新材",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "003032.SZ",
+      "name": "传智教育",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "000428.SZ",
+      "name": "华天酒店",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "000566.SZ",
+      "name": "海南海药",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "002173.SZ",
+      "name": "创新医疗",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "603716.SH",
+      "name": "塞力医疗",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "600775.SH",
+      "name": "南京熊猫",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "603358.SH",
+      "name": "华达科技",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "002969.SZ",
+      "name": "嘉美包装",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "605068.SH",
+      "name": "明新旭腾",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "603400.SH",
+      "name": "华之杰",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "603580.SH",
+      "name": "艾艾精工",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "002199.SZ",
+      "name": "东晶电子",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "603389.SH",
+      "name": "亚振家居",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "000533.SZ",
+      "name": "顺钠股份",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 4,
+      "delta": null
+    },
+    {
+      "code": "605162.SH",
+      "name": "新中港",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "000301.SZ",
+      "name": "东方新能",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "603221.SH",
+      "name": "爱丽家居",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 6,
+      "delta": null
+    },
+    {
+      "code": "002388.SZ",
+      "name": "新亚制程",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 3,
+      "delta": null
+    },
+    {
+      "code": "002309.SZ",
+      "name": "中利集团",
+      "date": "2026-07-28",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "000428.SZ",
+      "name": "华天酒店",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 3,
+      "delta": null
+    },
+    {
+      "code": "605179.SH",
+      "name": "一鸣食品",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "600693.SH",
+      "name": "东方集团",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "003032.SZ",
+      "name": "N智教教育",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 3,
+      "delta": null
+    },
+    {
+      "code": "002212.SZ",
+      "name": "天融信",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "002083.SZ",
+      "name": "孚日股份",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "002580.SZ",
+      "name": "圣阳股份",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "603399.SH",
+      "name": "永祺车业",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "003001.SZ",
+      "name": "中岩大地",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "002141.SZ",
+      "name": "贤丰控股",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "605068.SH",
+      "name": "新明珠B",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 3,
+      "delta": null
+    },
+    {
+      "code": "603400.SH",
+      "name": "华之杰",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "002298.SZ",
+      "name": "中电鑫龙",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "002498.SZ",
+      "name": "汉缆股份",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "002112.SZ",
+      "name": "三变科技",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "000668.SZ",
+      "name": "荣丰控股",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "600722.SH",
+      "name": "金牛化工",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "600844.SH",
+      "name": "丹化科技",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 1,
+      "delta": null
+    },
+    {
+      "code": "603580.SH",
+      "name": "艾艾精工",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    },
+    {
+      "code": "002199.SZ",
+      "name": "东晶电子",
+      "date": "2026-07-29",
+      "vendor": null,
+      "mine": 2,
+      "delta": null
+    }
+  ],
+  "watchDetail": [
+    {
+      "name": "澳弘电子",
+      "code": "605058.SH",
+      "rows": [
+        {
+          "date": "2026-09-11",
+          "time": "10:20:17",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-14",
+          "time": "13:38:18",
+          "vendor": null,
+          "mine": 2
+        },
+        {
+          "date": "2026-09-15",
+          "time": "14:41:47",
+          "vendor": null,
+          "mine": 3
+        },
+        {
+          "date": "2026-09-16",
+          "time": "09:37:54",
+          "vendor": null,
+          "mine": 4
+        },
+        {
+          "date": "2026-09-17",
+          "time": "13:22:40",
+          "vendor": null,
+          "mine": 5
+        }
+      ]
+    },
+    {
+      "name": "中晶科技",
+      "code": "003026.SZ",
+      "rows": [
+        {
+          "date": "2026-09-15",
+          "time": "13:19:24",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-16",
+          "time": "09:34:48",
+          "vendor": null,
+          "mine": 2
+        },
+        {
+          "date": "2026-09-17",
+          "time": "09:59:39",
+          "vendor": null,
+          "mine": 3
+        }
+      ]
+    },
+    {
+      "name": "共达电声",
+      "code": "002655.SZ",
+      "rows": [
+        {
+          "date": "2026-08-21",
+          "time": "10:04:03",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-16",
+          "time": "13:34:18",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-17",
+          "time": "10:28:27",
+          "vendor": null,
+          "mine": 2
+        }
+      ]
+    },
+    {
+      "name": "中岩大地",
+      "code": "003001.SZ",
+      "rows": [
+        {
+          "date": "2026-09-16",
+          "time": "09:30:00",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-17",
+          "time": "13:44:06",
+          "vendor": null,
+          "mine": 2
+        }
+      ]
+    },
+    {
+      "name": "万向德农",
+      "code": "600371.SH",
+      "rows": [
+        {
+          "date": "2026-08-25",
+          "time": "13:32:49",
+          "vendor": null,
+          "mine": 1
+        },
+        {
+          "date": "2026-08-26",
+          "time": "10:53:24",
+          "vendor": null,
+          "mine": 2
+        },
+        {
+          "date": "2026-08-27",
+          "time": "09:30:06",
+          "vendor": null,
+          "mine": 3
+        },
+        {
+          "date": "2026-08-28",
+          "time": "09:25:00",
+          "vendor": null,
+          "mine": 4
+        },
+        {
+          "date": "2026-08-31",
+          "time": "09:25:00",
+          "vendor": null,
+          "mine": 5
+        },
+        {
+          "date": "2026-09-01",
+          "time": "09:34:27",
+          "vendor": null,
+          "mine": 6
+        },
+        {
+          "date": "2026-09-07",
+          "time": "14:37:54",
+          "vendor": null,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-16",
+          "time": "09:40:23",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-17",
+          "time": "13:09:13",
+          "vendor": null,
+          "mine": 2
+        }
+      ]
+    },
+    {
+      "name": "华瓷股份",
+      "code": "001216.SZ",
+      "rows": [
+        {
+          "date": "2026-09-15",
+          "time": "09:30:15",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-17",
+          "time": "09:30:36",
+          "vendor": null,
+          "mine": 3
+        },
+        {
+          "date": "2026-09-18",
+          "time": "09:56:39",
+          "vendor": null,
+          "mine": 4
+        }
+      ]
+    },
+    {
+      "name": "锡华科技",
+      "code": "603248.SH",
+      "rows": [
+        {
+          "date": "2026-09-15",
+          "time": "14:44:32",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-17",
+          "time": "14:02:57",
+          "vendor": null,
+          "mine": 3
+        },
+        {
+          "date": "2026-09-18",
+          "time": "09:52:55",
+          "vendor": null,
+          "mine": 4
+        }
+      ]
+    },
+    {
+      "name": "世联行",
+      "code": "002285.SZ",
+      "rows": [
+        {
+          "date": "2026-09-08",
+          "time": "14:56:24",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-16",
+          "time": "13:34:39",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-17",
+          "time": "10:21:18",
+          "vendor": null,
+          "mine": 2
+        },
+        {
+          "date": "2026-09-18",
+          "time": "13:25:06",
+          "vendor": null,
+          "mine": 3
+        }
+      ]
+    },
+    {
+      "name": "内蒙新华",
+      "code": "603230.SH",
+      "rows": [
+        {
+          "date": "2026-09-16",
+          "time": "09:38:25",
+          "vendor": 1,
+          "mine": 1
+        },
+        {
+          "date": "2026-09-17",
+          "time": "09:25:00",
+          "vendor": null,
+          "mine": 2
+        },
+        {
+          "date": "2026-09-18",
+          "time": "14:13:07",
+          "vendor": null,
+          "mine": 3
+        }
+      ]
+    }
+  ],
+  "brokenCount": 35,
+  "brokenByHeight": {
+    "2": 30,
+    "3": 3,
+    "4": 1,
+    "6": 1
+  },
+  "brokenTop": [
+    {
+      "code": "605058.SH",
+      "name": "澳弘电子",
+      "boardsPrevDate": 5,
+      "heightPlusOne": 6
+    },
+    {
+      "code": "003026.SZ",
+      "name": "中晶科技",
+      "boardsPrevDate": 3,
+      "heightPlusOne": 4
+    },
+    {
+      "code": "002655.SZ",
+      "name": "共达电声",
+      "boardsPrevDate": 2,
+      "heightPlusOne": 3
+    },
+    {
+      "code": "003001.SZ",
+      "name": "中岩大地",
+      "boardsPrevDate": 2,
+      "heightPlusOne": 3
+    },
+    {
+      "code": "600371.SH",
+      "name": "万向德农",
+      "boardsPrevDate": 2,
+      "heightPlusOne": 3
+    },
+    {
+      "code": "000868.SZ",
+      "name": "安凯客车",
+      "boardsPrevDate": 1,
+      "heightPlusOne": 2
+    },
+    {
+      "code": "000920.SZ",
+      "name": "沃顿科技",
+      "boardsPrevDate": 1,
+      "heightPlusOne": 2
+    },
+    {
+      "code": "000980.SZ",
+      "name": "众泰汽车",
+      "boardsPrevDate": 1,
+      "heightPlusOne": 2
+    },
+    {
+      "code": "000981.SZ",
+      "name": "山子高科",
+      "boardsPrevDate": 1,
+      "heightPlusOne": 2
+    },
+    {
+      "code": "001365.SZ",
+      "name": "天海电子",
+      "boardsPrevDate": 1,
+      "heightPlusOne": 2
+    },
+    {
+      "code": "002321.SZ",
+      "name": "华英农业",
+      "boardsPrevDate": 1,
+      "heightPlusOne": 2
+    },
+    {
+      "code": "002339.SZ",
+      "name": "积成电子",
+      "boardsPrevDate": 1,
+      "heightPlusOne": 2
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+=== 含 status 列的候选表（23 张）===
+  backfill_checkpoints               RUNNING = 0
+  closed_loop_backtest_run           RUNNING = 0
+  dataset_build_job                  RUNNING = 0
+  dataset_definition                 RUNNING = 0
+  dataset_version                    RUNNING = 0
+  operation_logs                     RUNNING = 0
+  paper_trading_runs                 RUNNING = 0
+  research_analysis                  RUNNING = 0
+  research_conclusion                RUNNING = 0
+  research_experiment                RUNNING = 0
+  research_experiment_batches        RUNNING = 0
+  research_experiments               RUNNING = 0
+  research_finding                   RUNNING = 0
+  research_hypothesis                RUNNING = 0
+  research_plan                      RUNNING = 0
+  research_question                  RUNNING = 1
+  research_run                       RUNNING = 0
+  research_runs                      RUNNING = 0
+  research_securities                RUNNING = 0
+  research_strategy_candidate        RUNNING = 0
+  strategies                         RUNNING = 0
+  strategy_versions                  RUNNING = 0
+  uploaded_images                    RUNNING = 0
+
+=== research_question 命中行明细 ===
+  {"id":270001,"createdAt":"2026-09-17T06:48:02.000Z","updatedAt":"2026-09-17T06:50:58.000Z"}
+
+=== 结论 ===
+⚠️ 存在 RUNNING 行（research_question:270001）
+   请按上方时间戳判断是「真在途」还是「历史僵死」：
+   - 时间戳在近几分钟内 ⇒ 真在途 ⇒ 禁止改 server/**、禁止跑重库脚本；
+   - 时间戳停在数小时/数天前 ⇒ 僵死状态，热重启不会打断任何真实进度。

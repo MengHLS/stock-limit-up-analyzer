@@ -1,0 +1,78 @@
+== /backtest 页签归属 + 模拟订单分页 探针 == 2026-09-18T14:46:36.890Z
+BASE=http://127.0.0.1:3000 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=26044 DATA_WAIT=40min
+CDP 已连接
+
+--- A. 页签导航 ---
+  PASS  页签数量 = 6  → ["回测总览","参数配置","策略对比","风险归因","交易明细","历史记录"]
+  PASS  页签标签与顺序正确  → ["回测总览","参数配置","策略对比","风险归因","交易明细","历史记录"]
+  PASS  默认页签 = 回测总览  → 回测总览
+
+--- 等待 /backtest 研究数据（冷算可能数十分钟） ---
+  ... 已等待 0s（仍无 [data-full-cycle-comparison]）
+  数据就绪=true，等待 15s
+
+--- B. 回测总览（默认页签）---
+  PASS  总览含 全周期五策略收益对比
+  PASS  总览含文字「全周期五策略收益对比」
+  PASS  总览含 当前持仓与下一交易日准备买入
+  PASS  总览含文字「当前持仓与下一交易日准备买入」
+  PASS  总览含 全部模拟订单
+  PASS  总览不得再出现 统一策略评价  → selector=[data-strategy-evaluation]
+  PASS  总览不得再出现 高位连板风控生效情况  → selector=[data-board-height-impact]
+  PASS  总览不得再出现 资金与仓位审计  → selector=[data-capital-position-audit]
+
+--- C. 全部模拟订单分页（真实鼠标事件）---
+  PASS  [data-orders-range] 文案格式正确  → "本页第 1–20 笔（当前筛选共 1029 笔 / 全部 1029 笔）"
+  PASS  存在 [data-orders-pagination]
+  PASS  第 1 页行数 = min(20, 筛选后笔数)  → rows=20 total=1029
+  PASS  页指示 = 1 / ceil(N/20)  → indicator=1 / 52
+  PASS  点「下一页」→ 第 2 页  → indicator=2 / 52
+  PASS  第 2 页行数正确  → rows=20
+  PASS  第 2 页首行与第 1 页不同（确有切片）  → "2026年09月17日华瓷股份001216.SZ67已成交109002026年09月18日 / " vs "2026年09月08日海欣食品002702.SZ67未成交-- / 2026年09月10日- /"
+  PASS  点「最后一页」→ 末页  → indicator=52 / 52
+  PASS  末页行数 = N - (pages-1)*20  → rows=9 expected=9
+  PASS  切换每页条数后回到第 1 页  → indicator=1 / 103 size=10 条
+  PASS  切换每页条数后行数 = min(新条数, N)  → rows=10 size=10 N=1029
+  PASS  筛选输入可用  → typed
+  PASS  筛选后页码回到第 1 页  → indicator=1 / 57
+  PASS  筛选后 range 文案重新解析  → "本页第 1–10 笔（当前筛选共 567 笔 / 全部 1029 笔）"
+  PASS  筛选后行数 = 页内区间长度（第 a–b 笔 ⇒ b-a+1 行）  → rows=10 range=1–10 pageSize=10
+  PASS  筛选后行数 = min(每页条数, 筛选后笔数)  → rows=10 pageSize=10 filteredTotal=567
+  PASS  筛选确实收窄了笔数  → 567 <= 1029
+
+--- D. 策略对比 ---
+  PASS  策略对比含 统一策略评价（data-strategy-evaluation）
+  PASS  策略对比含文字「统一策略评价」
+  PASS  策略对比含 样本外累计拼接曲线
+  PASS  策略对比不得出现 全部模拟订单  → selector=[data-all-simulated-orders]
+  PASS  策略对比不得出现 持仓快照  → selector=[data-strategy-portfolio-snapshot]
+
+--- E. 风险归因 ---
+  PASS  风险归因含 高位连板风控生效情况（data-board-height-impact）
+  PASS  风险归因含文字「高位连板风控生效情况」
+  PASS  风险归因不得出现 全部模拟订单  → selector=[data-all-simulated-orders]
+  PASS  风险归因不得出现 资金与仓位审计  → selector=[data-capital-position-audit]
+
+--- F. 交易明细 ---
+  PASS  交易明细含 资金与仓位审计（data-capital-position-audit）
+  PASS  交易明细含文字「资金与仓位审计」
+  PASS  交易明细含迁移提示（data-trades-relocated-note）
+  PASS  交易明细不得出现 全部模拟订单  → selector=[data-all-simulated-orders]
+  PASS  交易明细不得出现 持仓快照  → selector=[data-strategy-portfolio-snapshot]
+
+--- G. 参数配置 / 历史记录（零回归）---
+  PASS  参数配置含 高位连板风控参数卡
+  PASS  参数配置含 次日开盘预期三档卡
+  PASS  参数配置含文字「回测参数」
+  PASS  历史记录含「历史回测记录」
+
+--- H. 卡片几何一致性（左边距 / 宽度）---
+  PASS  回测总览 同屏卡片 左边距/宽度 一致（±1px）  → 基准=["[data-full-cycle-comparison]",304,1207] 全部=["304/1207","304/1207","304/1207"]
+  PASS  策略对比 同屏卡片 左边距/宽度 一致（±1px）  → 基准=["[data-strategy-evaluation]",304,1207] 全部=["304/1207","304/1207","304/1207","304/1207"]
+  PASS  风险归因 同屏卡片 左边距/宽度 一致（±1px）  → 基准=["[data-board-height-impact]",304,1207] 全部=["304/1207","304/1207"]
+
+--- H2. 反事实对照（剥掉容器类，验证修复是承重的）---
+  PASS  剥掉容器类后卡片显著变宽（还原用户报告的形态）  → 套容器=[304,1207] 剥容器=[280,1255]
+
+=== 汇总：PASS 50 / FAIL 0 / SKIP 0 ⇒ ALL PASS ===
+结果留档：D:\stock-limit-up-analyzer\docs\evidence\_probe_backtest_layout_pagination.out.txt

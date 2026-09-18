@@ -1,0 +1,577 @@
+{
+  "indexDailyByCode": [
+    {
+      "indexCode": "000300.SH",
+      "rowsCnt": 1873,
+      "minDate": "2019-01-02",
+      "maxDate": "2026-09-18",
+      "nullClose": "0"
+    },
+    {
+      "indexCode": "000905.SH",
+      "rowsCnt": 1873,
+      "minDate": "2019-01-02",
+      "maxDate": "2026-09-18",
+      "nullClose": "0"
+    },
+    {
+      "indexCode": "399001.SZ",
+      "rowsCnt": 1873,
+      "minDate": "2019-01-02",
+      "maxDate": "2026-09-18",
+      "nullClose": "0"
+    },
+    {
+      "indexCode": "000001.SH",
+      "rowsCnt": 1873,
+      "minDate": "2019-01-02",
+      "maxDate": "2026-09-18",
+      "nullClose": "0"
+    }
+  ],
+  "indexMaster": [
+    {
+      "indexCode": "000001.SH",
+      "indexName": "上证指数",
+      "provider": "sina",
+      "firstDate": "2026-09-18",
+      "lastDate": "2026-09-18"
+    },
+    {
+      "indexCode": "000001.SH",
+      "indexName": "上证指数",
+      "provider": "baostock",
+      "firstDate": "2026-09-07",
+      "lastDate": "2026-09-14"
+    },
+    {
+      "indexCode": "000001.SH",
+      "indexName": "上证指数",
+      "provider": "tushare",
+      "firstDate": "2026-09-16",
+      "lastDate": "2026-09-16"
+    },
+    {
+      "indexCode": "000300.SH",
+      "indexName": "沪深300",
+      "provider": "sina",
+      "firstDate": "2026-09-18",
+      "lastDate": "2026-09-18"
+    },
+    {
+      "indexCode": "000300.SH",
+      "indexName": "沪深300",
+      "provider": "baostock",
+      "firstDate": "2026-09-07",
+      "lastDate": "2026-09-14"
+    },
+    {
+      "indexCode": "000905.SH",
+      "indexName": "中证500",
+      "provider": "sina",
+      "firstDate": "2026-09-18",
+      "lastDate": "2026-09-18"
+    },
+    {
+      "indexCode": "000905.SH",
+      "indexName": "中证500",
+      "provider": "baostock",
+      "firstDate": "2026-09-07",
+      "lastDate": "2026-09-14"
+    },
+    {
+      "indexCode": "399001.SZ",
+      "indexName": "深证成指",
+      "provider": "sina",
+      "firstDate": "2026-09-18",
+      "lastDate": "2026-09-18"
+    },
+    {
+      "indexCode": "399001.SZ",
+      "indexName": "深证成指",
+      "provider": "baostock",
+      "firstDate": "2026-09-07",
+      "lastDate": "2026-09-14"
+    }
+  ],
+  "limitUpRecent20": [
+    {
+      "d": "2026-09-18",
+      "c": 78,
+      "stocks": 78
+    },
+    {
+      "d": "2026-09-17",
+      "c": 47,
+      "stocks": 47
+    },
+    {
+      "d": "2026-09-16",
+      "c": 89,
+      "stocks": 89
+    },
+    {
+      "d": "2026-09-15",
+      "c": 32,
+      "stocks": 32
+    },
+    {
+      "d": "2026-09-14",
+      "c": 55,
+      "stocks": 55
+    },
+    {
+      "d": "2026-09-11",
+      "c": 40,
+      "stocks": 40
+    },
+    {
+      "d": "2026-09-10",
+      "c": 35,
+      "stocks": 35
+    },
+    {
+      "d": "2026-09-09",
+      "c": 48,
+      "stocks": 48
+    },
+    {
+      "d": "2026-09-08",
+      "c": 73,
+      "stocks": 73
+    },
+    {
+      "d": "2026-09-07",
+      "c": 93,
+      "stocks": 93
+    },
+    {
+      "d": "2026-09-04",
+      "c": 39,
+      "stocks": 39
+    },
+    {
+      "d": "2026-09-03",
+      "c": 44,
+      "stocks": 44
+    },
+    {
+      "d": "2026-09-02",
+      "c": 52,
+      "stocks": 52
+    },
+    {
+      "d": "2026-09-01",
+      "c": 83,
+      "stocks": 83
+    },
+    {
+      "d": "2026-08-31",
+      "c": 88,
+      "stocks": 88
+    },
+    {
+      "d": "2026-08-28",
+      "c": 82,
+      "stocks": 82
+    },
+    {
+      "d": "2026-08-27",
+      "c": 77,
+      "stocks": 77
+    },
+    {
+      "d": "2026-08-26",
+      "c": 52,
+      "stocks": 52
+    },
+    {
+      "d": "2026-08-25",
+      "c": 65,
+      "stocks": 64
+    },
+    {
+      "d": "2026-08-24",
+      "c": 46,
+      "stocks": 46
+    }
+  ],
+  "keywordsSample": [
+    {
+      "keywords": "连锁百货+IP经济+黄金+参股券商",
+      "c": 7
+    },
+    {
+      "keywords": "玉米杂交种子+转基因",
+      "c": 5
+    },
+    {
+      "keywords": "PCB+HDI+AI算力+汽车电子",
+      "c": 5
+    },
+    {
+      "keywords": "百货商场+物业租赁+资产注入预期",
+      "c": 5
+    },
+    {
+      "keywords": "黄酒+中报增长+新消费+电商",
+      "c": 5
+    },
+    {
+      "keywords": "汽车整车+达成债务和解+整车复产",
+      "c": 5
+    },
+    {
+      "keywords": "绿色电力+福建+持股海峡股权交易中心+稀土",
+      "c": 4
+    },
+    {
+      "keywords": "化肥+生态农业+磷矿+硫磺制酸",
+      "c": 4
+    },
+    {
+      "keywords": "数据中心液冷CDU+干冷器",
+      "c": 4
+    },
+    {
+      "keywords": "AI安全+深圳国资+数据要素+算力数据网络监测",
+      "c": 4
+    },
+    {
+      "keywords": "人形机器人+工业机器人+小家电",
+      "c": 4
+    },
+    {
+      "keywords": "玉米种子+中报增长+农作物种子+酒泉国资",
+      "c": 4
+    },
+    {
+      "keywords": "PCB+定增通过+存储+先进封装",
+      "c": 3
+    },
+    {
+      "keywords": "农业种植+小米辣涨价+玉米种子+钨矿(传)",
+      "c": 3
+    },
+    {
+      "keywords": "液冷导热硅油+柔性生产+商业航空+集装箱密封胶",
+      "c": 3
+    },
+    {
+      "keywords": "短剧+AI应用+网络游戏+影视",
+      "c": 3
+    },
+    {
+      "keywords": "出版传媒+教育服务",
+      "c": 3
+    },
+    {
+      "keywords": "热电联产+储能+虚拟电厂",
+      "c": 3
+    },
+    {
+      "keywords": "PCB+光模块+苹果",
+      "c": 3
+    },
+    {
+      "keywords": "玻璃基板+光伏组件+光伏玻璃+央企",
+      "c": 3
+    },
+    {
+      "keywords": "半导体硅片+半导体功率芯片",
+      "c": 3
+    },
+    {
+      "keywords": "风电齿轮箱+注塑机+大兆瓦产品+次新股",
+      "c": 3
+    },
+    {
+      "keywords": "远洋捕捞+国资+水产预制菜",
+      "c": 3
+    },
+    {
+      "keywords": "豆粕减量替代+猪饲料+合成生物",
+      "c": 3
+    },
+    {
+      "keywords": "MLCC+氧化锆+陶瓷基板+压电陶瓷(OCS)+特高压输电",
+      "c": 3
+    },
+    {
+      "keywords": "AI漫剧+短视频+人工智能+黑龙江国资",
+      "c": 3
+    },
+    {
+      "keywords": "液冷导热硅脂+柔性生产+商业航空+集装箱密封胶",
+      "c": 3
+    },
+    {
+      "keywords": "AI教育+DeepSeek+数据要素",
+      "c": 3
+    },
+    {
+      "keywords": "卫浴+智能马桶+外贸",
+      "c": 3
+    },
+    {
+      "keywords": "旅游(广西)+AI文旅+元宇宙",
+      "c": 3
+    },
+    {
+      "keywords": "AI影视+影视+上海国资+动漫IP+游戏",
+      "c": 3
+    },
+    {
+      "keywords": "煤炭+算力+资产注入预期+智能矿山",
+      "c": 3
+    },
+    {
+      "keywords": "智能电网+南网业务恢复+储能",
+      "c": 3
+    },
+    {
+      "keywords": "中医药+利托那韦+医药电商",
+      "c": 3
+    },
+    {
+      "keywords": "煤炭+焦化+甲醇+电力",
+      "c": 3
+    },
+    {
+      "keywords": "PCB+定增扩产+汽车电子",
+      "c": 2
+    },
+    {
+      "keywords": "VLCC油运+LNG船舶+干散货运输+原油运输",
+      "c": 2
+    },
+    {
+      "keywords": "固态电池铜箔+复合集流体+快消品包装",
+      "c": 2
+    },
+    {
+      "keywords": "两岸统一+福建+林业+台资合作+医美",
+      "c": 2
+    },
+    {
+      "keywords": "机器人零部件+PCB+小鹏汇天",
+      "c": 2
+    }
+  ],
+  "keywordNullStats": [
+    {
+      "total": 896,
+      "emptyKeywords": "0"
+    }
+  ],
+  "boardCountSample": [
+    {
+      "boardCount": "1",
+      "c": 59
+    },
+    {
+      "boardCount": "2天2板",
+      "c": 6
+    },
+    {
+      "boardCount": "5天2板",
+      "c": 3
+    },
+    {
+      "boardCount": "3天2板",
+      "c": 2
+    },
+    {
+      "boardCount": "4天4板",
+      "c": 2
+    },
+    {
+      "boardCount": "3天3板",
+      "c": 2
+    },
+    {
+      "boardCount": "4天2板",
+      "c": 1
+    },
+    {
+      "boardCount": "11天5板",
+      "c": 1
+    },
+    {
+      "boardCount": "5天3板",
+      "c": 1
+    },
+    {
+      "boardCount": "6天3板",
+      "c": 1
+    }
+  ],
+  "stockDailyPriceCoverage": [
+    {
+      "tradeDate": "2026-09-18",
+      "rowsCnt": 441
+    },
+    {
+      "tradeDate": "2026-09-17",
+      "rowsCnt": 416
+    },
+    {
+      "tradeDate": "2026-09-16",
+      "rowsCnt": 426
+    },
+    {
+      "tradeDate": "2026-09-15",
+      "rowsCnt": 418
+    },
+    {
+      "tradeDate": "2026-09-14",
+      "rowsCnt": 456
+    },
+    {
+      "tradeDate": "2026-09-11",
+      "rowsCnt": 470
+    },
+    {
+      "tradeDate": "2026-09-10",
+      "rowsCnt": 482
+    },
+    {
+      "tradeDate": "2026-09-09",
+      "rowsCnt": 482
+    },
+    {
+      "tradeDate": "2026-09-08",
+      "rowsCnt": 504
+    },
+    {
+      "tradeDate": "2026-09-07",
+      "rowsCnt": 491
+    },
+    {
+      "tradeDate": "2026-09-04",
+      "rowsCnt": 5548
+    },
+    {
+      "tradeDate": "2026-09-03",
+      "rowsCnt": 5549
+    },
+    {
+      "tradeDate": "2026-09-02",
+      "rowsCnt": 5547
+    },
+    {
+      "tradeDate": "2026-09-01",
+      "rowsCnt": 5546
+    },
+    {
+      "tradeDate": "2026-08-31",
+      "rowsCnt": 5545
+    }
+  ],
+  "marketDataRecent": [
+    {
+      "dataDate": "2026-09-17",
+      "turnover": "18230.32",
+      "marginBalance": "26307.61",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-16",
+      "turnover": "18390.09",
+      "marginBalance": "26284.52",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-15",
+      "turnover": "16126.02",
+      "marginBalance": "26191.94",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-14",
+      "turnover": "16290.29",
+      "marginBalance": "26185.35",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-11",
+      "turnover": "19716.63",
+      "marginBalance": "26233.43",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-10",
+      "turnover": "16469.71",
+      "marginBalance": "26380",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-09",
+      "turnover": "18554.28",
+      "marginBalance": "26402.22",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-08",
+      "turnover": "19601.44",
+      "marginBalance": "26430.85",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-07",
+      "turnover": "19458.19",
+      "marginBalance": "26410.4",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-04",
+      "turnover": "20304.41",
+      "marginBalance": "26293.59",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-03",
+      "turnover": "17586.99",
+      "marginBalance": "26482.15",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-02",
+      "turnover": "17908.79",
+      "marginBalance": "26525.03",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-09-01",
+      "turnover": "20328.97",
+      "marginBalance": "26581.46",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-08-31",
+      "turnover": "21305.63",
+      "marginBalance": "26563.78",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    },
+    {
+      "dataDate": "2026-08-28",
+      "turnover": "21014.72",
+      "marginBalance": "26507.78",
+      "note": "自动同步：Tushare daily（沪深成交额）+ 上交所/深交所公开两融汇总"
+    }
+  ],
+  "marketDataStats": [
+    {
+      "rowsTotal": 218,
+      "minDate": "2024-12-31",
+      "maxDate": "2026-09-17"
+    }
+  ],
+  "brokenQuoteFeasibility": [
+    {
+      "limitUpDate": "2026-09-11",
+      "limitUpStocks": 40,
+      "missingQuote": "0"
+    }
+  ]
+}

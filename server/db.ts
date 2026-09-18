@@ -1440,7 +1440,14 @@ export async function getLeaderCandidateDailyPriceCoverage(): Promise<LeaderCand
   return coverage;
 }
 
-/** 获取涨停数与大盘数据的关联统计（最近N天）*/
+/**
+ * 获取涨停数与大盘数据的关联统计（最近N天）。
+ *
+ * 性能（HOMEPAGE 优化，2026-09-18）：原实现 `db.select().from(limitUpRecords)` 会把窗口内
+ * ~2000 行的**全部列**（含 `keywords` TEXT）拉回内存再在 JS 里累加，实测中位 **925ms**。
+ * 改为**服务端聚合** —— 只回「日期 + 条数」与「日期 + 成交额/两融」两张小结果集（各 ~23 行），
+ * 口径**逐字不变**（仍是 `count(*)` 行数、仍按日期升序、仍按同一 startDate 截断）。
+ */
 export async function getLimitUpWithMarketData(days: number = 30): Promise<{
   date: string;
   limitUpCount: number;
@@ -1455,20 +1462,22 @@ export async function getLimitUpWithMarketData(days: number = 30): Promise<{
   startDate.setDate(startDate.getDate() - days);
   const startDateStr = startDate.toISOString().split('T')[0];
 
-  // 获取涨停数据
-  const limitUpRecordsData = await db.select().from(limitUpRecords)
+  // 获取涨停数据：服务端按日期聚合，只回「日期 + 条数」
+  const limitUpStats = await db
+    .select({
+      date: limitUpRecords.limitUpDate,
+      limitUpCount: sql<number>`COUNT(*)`,
+    })
+    .from(limitUpRecords)
     .where(gte(limitUpRecords.limitUpDate, startDateStr))
-    .orderBy(desc(limitUpRecords.limitUpDate));
+    .groupBy(limitUpRecords.limitUpDate);
 
-  // 按日期统计涨停数
-  const dateMap = new Map<string, number>();
-  for (const record of limitUpRecordsData) {
-    const date = record.limitUpDate;
-    dateMap.set(date, (dateMap.get(date) || 0) + 1);
-  }
-
-  // 获取大盘数据
-  const marketDataList = await db.select().from(marketData)
+  // 获取大盘数据：只取展示需要的三列
+  const marketDataList = await db.select({
+    dataDate: marketData.dataDate,
+    turnover: marketData.turnover,
+    marginBalance: marketData.marginBalance,
+  }).from(marketData)
     .where(gte(marketData.dataDate, startDateStr))
     .orderBy(desc(marketData.dataDate));
 
@@ -1482,11 +1491,11 @@ export async function getLimitUpWithMarketData(days: number = 30): Promise<{
   }
 
   // 合并数据，按日期排序
-  const result = Array.from(dateMap.entries())
-    .map(([date, limitUpCount]) => ({
-      date,
-      limitUpCount,
-      ...marketDataMap.get(date),
+  const result = limitUpStats
+    .map((row) => ({
+      date: row.date,
+      limitUpCount: Number(row.limitUpCount),
+      ...marketDataMap.get(row.date),
     }))
     .sort((a, b) => a.date.localeCompare(b.date)); // 按日期升序
 
