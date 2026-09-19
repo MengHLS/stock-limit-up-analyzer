@@ -169,6 +169,16 @@ const STATUS_TONE: Record<string, StatusTone> = {
   ALL_EXECUTED: "success",
   PARTIAL_BLOCKED: "warning",
   NO_STAGE_EXECUTED: "danger",
+
+  // ROBUSTNESS-001 — 单组合稳健性判定（Search-Result Robustness Analysis）
+  // 🔴 语义纪律（规格 §4 / §11）：这些只是**稳定性判定**，不是「该参数好不好」；
+  //    `INSUFFICIENT_*` 必须落在 warning / neutral（**证据不足 ≠ 不稳定**，也 ≠ 稳健），
+  //    `SOURCE_RESULT_UNAVAILABLE` 落在 neutral（无数据 ≠ 失败）。
+  STABLE: "success",
+  UNSTABLE: "warning",
+  INSUFFICIENT_TRADING_ACTIVITY: "neutral",
+  INSUFFICIENT_NEIGHBORHOOD: "neutral",
+  SOURCE_RESULT_UNAVAILABLE: "neutral",
 };
 
 

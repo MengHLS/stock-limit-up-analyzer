@@ -1,11 +1,16 @@
-=== 含 status 列的候选表（23 张）===
+=== 含 status 列的候选表（30 张）===
   backfill_checkpoints               RUNNING = 0
   closed_loop_backtest_run           RUNNING = 0
   dataset_build_job                  RUNNING = 0
   dataset_definition                 RUNNING = 0
   dataset_version                    RUNNING = 0
+  oos_validation_result              RUNNING = 0
+  oos_validation_run                 RUNNING = 0
   operation_logs                     RUNNING = 0
   paper_trading_runs                 RUNNING = 0
+  parameter_search_combination       RUNNING = 0
+  parameter_search_result            RUNNING = 0
+  parameter_search_run               RUNNING = 0
   research_analysis                  RUNNING = 0
   research_conclusion                RUNNING = 0
   research_experiment                RUNNING = 0
@@ -19,6 +24,8 @@
   research_runs                      RUNNING = 0
   research_securities                RUNNING = 0
   research_strategy_candidate        RUNNING = 0
+  search_robustness_result           RUNNING = 0
+  search_robustness_run              RUNNING = 0
   strategies                         RUNNING = 0
   strategy_versions                  RUNNING = 0
   uploaded_images                    RUNNING = 0

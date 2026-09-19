@@ -2290,3 +2290,658 @@ export const researchPlan = mysqlTable("research_plan", {
 
 export type ResearchPlanRow = typeof researchPlan.$inferSelect;
 export type InsertResearchPlanRow = typeof researchPlan.$inferInsert;
+
+
+// ===========================================================================
+// Parameter Search（PARAMETER-001，2026-09-19）
+//
+// 定位：把参数搜索从「一次性内存调用、结果跑完即弃」变成**可回看、可续跑、可重试**的实验留档。
+//
+// 🔴 硬约束（违反即架构错误）：
+//   - 三张表**不参与任何执行路径**：清空它们不影响回测正确性，只影响「能不能回看 / 续跑」；
+//   - **零 FK**（项目既有原则）：`strategyId` / `datasetVersionId` / `backtestRunId` 等全为
+//     soft reference（id 列 + 应用层保证）；
+//   - **不回填历史 Run、不修改已有结果行**：`parameter_search_result` 只 INSERT；
+//     重跑同一 `(searchRunId, parameterHash)` 走 `ON DUPLICATE KEY UPDATE` 收敛为一行
+//     （语义 = 重试覆盖该组合的结果，`attemptCount` 递增，历史 attempt 数如实记录）；
+//   - 指标列**只写评估端口读数**（`canonicalMetrics` 优先）—— 本表不做任何派生计算；
+//   - `parameterSpaceJson` 是**参数空间快照**：未来策略版本被修改后，历史 Run 的快照
+//     **不得**被重新解释（写入即冻结，永不 UPDATE）。
+//
+// 三表分工：
+//   `parameter_search_run`          —— Run 头（身份 / 快照 / FIXED 坐标 / 计数 / 状态）
+//   `parameter_search_combination`  —— 计划层（笛卡尔积成员 + 执行状态，resume/retry 的判据）
+//   `parameter_search_result`       —— 产物层（六指标 + 可追溯引用 + 失败原因）
+// ===========================================================================
+
+/**
+ * Search Run（PARAMETER-001 §7）。
+ *
+ * `searchRunId` 为业务身份且 UNIQUE：**唯一的幂等锚点**（重复创建同一 id 走
+ * `ON DUPLICATE KEY UPDATE` 收敛，不产生第二行）。
+ */
+export const parameterSearchRun = mysqlTable("parameter_search_run", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 业务身份（`PSRUN-YYYYMMDD-XXXXXXXX`）；UNIQUE：重试 / 重放幂等收敛为一行。 */
+  searchRunId: varchar("searchRunId", { length: 80 }).notNull(),
+  /** 策略坐标快照（软引用，无 FK）。规格里的 `strategyVersionId` = 本对（见 parameterHash.ts）。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  strategyVersion: varchar("strategyVersion", { length: 32 }).notNull(),
+  /** 🔴 运行时**唯一权威**数据集坐标 → `dataset_version.id`（软引用）；legacy 绑定为 NULL。 */
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }),
+  /** Dataset label 快照（**仅展示**，不是坐标）。 */
+  datasetVersionLabel: varchar("datasetVersionLabel", { length: 96 }),
+  /** 回测窗口（FIXED 参数：搜索过程中不变）。 */
+  startDate: date("startDate", { mode: "string" }).notNull(),
+  endDate: date("endDate", { mode: "string" }).notNull(),
+  /** 搜索方法：**本阶段只有 `GRID_SEARCH`**；其余为已登记未实现（入参层拒绝）。 */
+  searchMethod: varchar("searchMethod", { length: 24 }).notNull(),
+  /** 状态机：CREATED / RUNNING / COMPLETED / FAILED / CANCELLED。 */
+  status: varchar("status", { length: 16 }).notNull().default("CREATED"),
+  /** 参数空间快照（富定义 JSON；**写入即冻结**，永不 UPDATE）。 */
+  parameterSpaceJson: longtext("parameterSpaceJson").notNull(),
+  /** 快照指纹（sha256；覆盖策略身份 + 富定义，见 `searchRun.ts#computeRunSpaceSnapshotFingerprint`）。 */
+  parameterSpaceFingerprint: varchar("parameterSpaceFingerprint", { length: 64 }).notNull(),
+  /** FIXED 坐标快照（JSON：strategyVersionId / datasetVersionId / 窗口 / 执行政策 / 评估配置指纹）。 */
+  fixedCoordinatesJson: text("fixedCoordinatesJson").notNull(),
+  /** 回测执行政策版本（cache 判据之一；来自 `BACKTEST_EXECUTION_POLICY_VERSION`）。 */
+  executionPolicyVersion: int("executionPolicyVersion").notNull(),
+  /** 评估配置指纹（cache 判据之一；sha256）。 */
+  evaluationConfigFingerprint: varchar("evaluationConfigFingerprint", { length: 64 }).notNull(),
+  /** 组合总数（笛卡尔积基数）。 */
+  combinationCount: int("combinationCount").notNull(),
+  /** 已**评估成功**的组合数（= 结果行 status = SUCCEEDED 的条数）。 */
+  completedCount: int("completedCount").notNull().default(0),
+  /** 已**评估失败**的组合数。与 completedCount 互斥；SKIPPED 不计入任一边。 */
+  failedCount: int("failedCount").notNull().default(0),
+  /** 全部组合的稳定指纹（证明「这次生成的组合集没变」）。 */
+  combinationSetFingerprint: varchar("combinationSetFingerprint", { length: 64 }).notNull(),
+  /** 运行说明（JSON 数组；cache 命中数 / resume 跳过数 / 派生说明；如实记录不静默）。 */
+  notesJson: longtext("notesJson"),
+  /**
+   * PARAMETER-002 继承字段（ROBUSTNESS-001 §12）—— 源 Run 是否做过「死参数」筛查。
+   *
+   * `NULL` = 本列加入之前落库的历史行 ⇒ 下游（稳健性分析）必须如实标「未验证」，
+   * **不得**回读当前策略版本来补算（那会把历史搜索用未来版本重新解释）。
+   */
+  referenceCheckApplied: boolean("referenceCheckApplied"),
+  /** 被排除的死参数 code 快照（JSON 数组；NULL = 未知 / 无）。 */
+  unreferencedTunableCodesJson: text("unreferencedTunableCodesJson"),
+  /** 失败原因码（状态 FAILED 时非空）。 */
+  errorCode: varchar("errorCode", { length: 64 }),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  /** 首次进入 RUNNING 的时间（UTC 墙钟）。 */
+  startedAt: timestamp("startedAt"),
+  /** 进入终态的时间（UTC 墙钟；**不填 NOW() 冒充**，由调用方给真实完成时刻）。 */
+  completedAt: timestamp("completedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  runUnique: uniqueIndex("uq_parameter_search_run_id").on(table.searchRunId),
+  createdIdx: index("idx_parameter_search_run_created").on(table.createdAt),
+  strategyIdx: index("idx_parameter_search_run_strategy").on(table.strategyId, table.createdAt),
+  statusIdx: index("idx_parameter_search_run_status").on(table.status),
+}));
+
+export type ParameterSearchRunRow = typeof parameterSearchRun.$inferSelect;
+export type InsertParameterSearchRunRow = typeof parameterSearchRun.$inferInsert;
+
+/**
+ * 参数组合（PARAMETER-001 §6）—— 「计划层」。
+ *
+ * 一行 = 一个笛卡尔积成员。`(searchRunId, parameterHash)` UNIQUE ⇒
+ * 「同一 Run 内同一参数组合」只有一行，重复生成 / 重试都收敛到它（幂等）。
+ * 执行状态是 resume（跳过已成功）与 retry（单独重跑失败）的**唯一判据**。
+ */
+export const parameterSearchCombination = mysqlTable("parameter_search_combination", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  searchRunId: varchar("searchRunId", { length: 80 }).notNull(),
+  /** 组合序号（生成顺序，从 0 起；仅展示与稳定排序）。 */
+  combinationIndex: int("combinationIndex").notNull(),
+  /** 🔴 稳定参数哈希（身份；`sha256(strategyVersionId + 规范化参数值)`）。 */
+  parameterHash: varchar("parameterHash", { length: 64 }).notNull(),
+  /** 参数取值（JSON object；键 = 参数名）。 */
+  parametersJson: longtext("parametersJson").notNull(),
+  /** PENDING / RUNNING / SUCCEEDED / FAILED / SKIPPED。 */
+  status: varchar("status", { length: 16 }).notNull().default("PENDING"),
+  /** 尝试次数（retry 递增；用于区分「首次失败」与「反复失败」）。 */
+  attemptCount: int("attemptCount").notNull().default(0),
+  /** 最近一次失败原因（成功时置 NULL —— 收敛为当前事实，不保留过期错误）。 */
+  lastError: text("lastError"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  combinationUnique: uniqueIndex("uq_parameter_search_combination_hash").on(
+    table.searchRunId,
+    table.parameterHash,
+  ),
+  runIdx: index("idx_parameter_search_combination_run").on(table.searchRunId, table.combinationIndex),
+  statusIdx: index("idx_parameter_search_combination_status").on(table.searchRunId, table.status),
+}));
+
+export type ParameterSearchCombinationRow = typeof parameterSearchCombination.$inferSelect;
+export type InsertParameterSearchCombinationRow = typeof parameterSearchCombination.$inferInsert;
+
+/**
+ * 单组合评估产物（PARAMETER-001 §9/§10）—— 「产物层」。
+ *
+ * 一行 = 一个组合的评估结果。`(searchRunId, parameterHash)` UNIQUE ⇒
+ * 重试覆盖同一行（`attemptCount` 在 combination 表递增，历史 attempt 数不丢）。
+ *
+ * 🔴 六个指标列**只写评估端口读数**（`canonicalMetrics` 优先，缺省回落 evaluators 面），
+ *   本表**不做任何派生计算**；缺失一律 NULL，**禁止编 0 / 1**。
+ */
+export const parameterSearchResult = mysqlTable("parameter_search_result", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  searchRunId: varchar("searchRunId", { length: 80 }).notNull(),
+  combinationIndex: int("combinationIndex").notNull(),
+  parameterHash: varchar("parameterHash", { length: 64 }).notNull(),
+  /** 参数取值快照（冗余自 combination，便于结果页单表读取）。 */
+  parametersJson: longtext("parametersJson").notNull(),
+  /** SUCCEEDED / FAILED（判据 = 评估引用是否存在，不看指标是否为 null）。 */
+  status: varchar("status", { length: 16 }).notNull(),
+  /** 失败原因（结构化字符串）；成功时 NULL。 */
+  error: text("error"),
+  // ---- §10 指标（**读数**，禁止派生计算）----
+  totalReturnPct: double("totalReturnPct"),
+  annualizedReturnPct: double("annualizedReturnPct"),
+  maxDrawdownPct: double("maxDrawdownPct"),
+  tradeCount: int("tradeCount"),
+  winRatePct: double("winRatePct"),
+  profitFactor: double("profitFactor"),
+  /** canonical | evaluators（指标来源自述；不静默降级）。 */
+  metricsSource: varchar("metricsSource", { length: 16 }).notNull(),
+  /** 年化基数自述（TRADING_DAYS / daysPerYear）；canonical 缺省时为 NULL。 */
+  annualizationBasisJson: text("annualizationBasisJson"),
+  // ---- §9 可追溯 ----
+  /** 本次撮合指纹（`ClosedLoopEvaluationRef#backtestFingerprint`）。 */
+  backtestFingerprint: varchar("backtestFingerprint", { length: 64 }),
+  /**
+   * **落库**回测 run id（→ `closed_loop_backtest_run.runId`，软引用）。
+   * ⚠️ 本阶段评估端口走的是**内存态 5 阶段闭环**，不落 `closed_loop_backtest_run` 行 ⇒ 恒为 NULL。
+   * 追溯改用 `backtestFingerprint` + `evaluationId` + Run 坐标（如实登记，**不伪造 id**）。
+   */
+  backtestRunId: varchar("backtestRunId", { length: 80 }),
+  /** 评估产物身份（`deriveExperimentId`）。 */
+  evaluationId: varchar("evaluationId", { length: 80 }),
+  /** 内存态闭环 run id（`<前缀>::<experimentId>`）。 */
+  evaluationRunId: varchar("evaluationRunId", { length: 160 }),
+  /** 完整评估引用投影（canonical metrics 原始面 + 指纹；长文本）。 */
+  evaluationJson: longtext("evaluationJson"),
+  /** 复现要素快照（JSON：执行政策 / 评估配置指纹 / 数据集坐标）。 */
+  reproductionJson: text("reproductionJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  resultUnique: uniqueIndex("uq_parameter_search_result_hash").on(
+    table.searchRunId,
+    table.parameterHash,
+  ),
+  runIdx: index("idx_parameter_search_result_run").on(table.searchRunId, table.combinationIndex),
+  statusIdx: index("idx_parameter_search_result_status").on(table.searchRunId, table.status),
+}));
+
+export type ParameterSearchResultRow = typeof parameterSearchResult.$inferSelect;
+export type InsertParameterSearchResultRow = typeof parameterSearchResult.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// ROBUSTNESS-001 — Search-Result Robustness Analysis（三表）
+//
+// 🔴 与 C-18.1（`server/research/robustness/**`，四轴扰动重估）**并存但不同物**：
+//   C-18.1 需**重跑评估**、其记录类型是内存态 `ROBUSTNESS_RUN`，目前**无落库**；
+//   本组三表只服务「**消费已算完的 Parameter Search 结果**」的稳定性分析（零重跑）。
+//   表名带 `search_` 前缀，是为了让「哪一种鲁棒性」在表名上就无歧义。
+//
+// 纪律：0 FK（软引用）；参数空间快照**写入即冻结**（ON DUPLICATE KEY UPDATE 不含它）；
+//   所有指标列都是**源 `parameter_search_result` 的冻结副本**，本层不做任何派生计算。
+// ---------------------------------------------------------------------------
+
+/**
+ * 稳健性分析运行（ROBUSTNESS-001 §14）。
+ *
+ * `robustnessRunId` UNIQUE ⇒ 重放 / 重跑幂等收敛为一行（不会堆重复 Run）。
+ */
+export const searchRobustnessRun = mysqlTable("search_robustness_run", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 业务身份（`SROB-YYYYMMDD-XXXXXXXX`）。 */
+  robustnessRunId: varchar("robustnessRunId", { length: 80 }).notNull(),
+  /** 🔴 唯一输入事实源（规格 §8）：只有这一个 Search Run 的冻结结果可进入本 Run。 */
+  sourceSearchRunId: varchar("sourceSearchRunId", { length: 80 }).notNull(),
+  /** 策略 / 数据集坐标快照（原样继承自源 Run；软引用无 FK）。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  strategyVersion: varchar("strategyVersion", { length: 32 }).notNull(),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }),
+  datasetVersionLabel: varchar("datasetVersionLabel", { length: 96 }),
+  startDate: date("startDate", { mode: "string" }).notNull(),
+  endDate: date("endDate", { mode: "string" }).notNull(),
+  searchMethod: varchar("searchMethod", { length: 24 }).notNull(),
+  /** 源 Run 的**参数空间冻结快照**（规格 §9：不从当前 Strategy Version 重新解释）。 */
+  searchSnapshotJson: longtext("searchSnapshotJson").notNull(),
+  searchSnapshotFingerprint: varchar("searchSnapshotFingerprint", { length: 64 }).notNull(),
+  /** 源 Run 的 FIXED 坐标快照（原样继承）。 */
+  fixedCoordinatesJson: text("fixedCoordinatesJson").notNull(),
+  executionPolicyVersion: int("executionPolicyVersion").notNull(),
+  evaluationConfigFingerprint: varchar("evaluationConfigFingerprint", { length: 64 }).notNull(),
+  /**
+   * 源 Search Run 是否做过死参数筛查（继承 PARAMETER-002）。
+   * `NULL` = 源 Run 落库时还没有该字段（历史行）⇒ 分析侧如实标
+   * `ROBUSTNESS_PARAMETER_REFERENCE_UNVERIFIED`，不假装参数被消费。
+   */
+  sourceReferenceCheckApplied: boolean("sourceReferenceCheckApplied"),
+  /** 源 Run 排除掉的死参数 code 快照（JSON 数组；NULL = 未知 / 无）。 */
+  sourceUnreferencedCodesJson: text("sourceUnreferencedCodesJson"),
+  /** 稳定性判定口径（**持久化**；规格 §5.3 要求可配置且不写死前端）。 */
+  analysisConfigJson: text("analysisConfigJson").notNull(),
+  /** CREATED / RUNNING / COMPLETED / FAILED / CANCELLED。 */
+  status: varchar("status", { length: 16 }).notNull().default("CREATED"),
+  /** 汇总快照（JSON；`stableCount` 等关键计数另有独立列，便于列表页免解析）。 */
+  summaryJson: longtext("summaryJson"),
+  analyzedCount: int("analyzedCount").notNull().default(0),
+  stableCount: int("stableCount").notNull().default(0),
+  unstableCount: int("unstableCount").notNull().default(0),
+  /** 结论不可用类的计数（活动不足 / 邻域不足 / 源结果不可用；如实单列，不并入 unstable）。 */
+  insufficientCount: int("insufficientCount").notNull().default(0),
+  /** 邻域不完整的组合数（`NEIGHBORHOOD_INCOMPLETE`）。 */
+  neighborhoodIncompleteCount: int("neighborhoodIncompleteCount").notNull().default(0),
+  /** 参数引用未验证（源 Run 无筛查记录）⇒ 前端必须提示，不得沉默。 */
+  parameterReferenceUnverified: boolean("parameterReferenceUnverified").notNull().default(false),
+  notesJson: longtext("notesJson"),
+  errorCode: varchar("errorCode", { length: 64 }),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  startedAt: timestamp("startedAt"),
+  /** 进入终态的时间（由调用方给真实完成时刻，不用 `now()` 冒充）。 */
+  completedAt: timestamp("completedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  runUnique: uniqueIndex("uq_search_robustness_run_id").on(table.robustnessRunId),
+  sourceIdx: index("idx_search_robustness_run_source").on(table.sourceSearchRunId),
+  createdIdx: index("idx_search_robustness_run_created").on(table.createdAt),
+  statusIdx: index("idx_search_robustness_run_status").on(table.status),
+}));
+
+export type SearchRobustnessRunRow = typeof searchRobustnessRun.$inferSelect;
+export type InsertSearchRobustnessRunRow = typeof searchRobustnessRun.$inferInsert;
+
+/**
+ * 单组合稳健性结果（ROBUSTNESS-001 §15）。
+ *
+ * `(robustnessRunId, parameterHash)` UNIQUE ⇒ 同一 Run 内同一组合只有一行；
+ * 重复 start 覆盖同一行（确定性重算），不会堆重复行。
+ */
+export const searchRobustnessResult = mysqlTable("search_robustness_result", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  robustnessRunId: varchar("robustnessRunId", { length: 80 }).notNull(),
+  /** 源 Search Run（冗余自 Run，便于单表排查；软引用无 FK）。 */
+  sourceSearchRunId: varchar("sourceSearchRunId", { length: 80 }).notNull(),
+  /** 🔴 组合身份唯一权威 = 源组合的 `parameterHash`（本层**不重算**）。 */
+  parameterHash: varchar("parameterHash", { length: 64 }).notNull(),
+  combinationIndex: int("combinationIndex").notNull(),
+  parametersJson: longtext("parametersJson").notNull(),
+  /** 指标读数（源结果**冻结副本**；本层零派生计算）。 */
+  totalReturnPct: double("totalReturnPct"),
+  annualizedReturnPct: double("annualizedReturnPct"),
+  maxDrawdownPct: double("maxDrawdownPct"),
+  tradeCount: int("tradeCount"),
+  winRatePct: double("winRatePct"),
+  profitFactor: double("profitFactor"),
+  metricsSource: varchar("metricsSource", { length: 16 }).notNull(),
+  /** STABLE / UNSTABLE / INSUFFICIENT_TRADING_ACTIVITY / INSUFFICIENT_NEIGHBORHOOD / SOURCE_RESULT_UNAVAILABLE。 */
+  status: varchar("status", { length: 32 }).notNull(),
+  /** `true` 仅当状态为 STABLE；其余（含证据不足）一律 false，不冒充。 */
+  stable: boolean("stable").notNull().default(false),
+  stabilityRatio: double("stabilityRatio"),
+  stableNeighborCount: int("stableNeighborCount").notNull().default(0),
+  validNeighborCount: int("validNeighborCount").notNull().default(0),
+  expectedNeighborCount: int("expectedNeighborCount").notNull().default(0),
+  presentNeighborCount: int("presentNeighborCount").notNull().default(0),
+  neighborhoodIncomplete: boolean("neighborhoodIncomplete").notNull().default(false),
+  statusReason: text("statusReason"),
+  /** 邻域明细（含缺失格原因；**不补值**）。 */
+  neighborsJson: longtext("neighborsJson").notNull(),
+  dispersionJson: longtext("dispersionJson").notNull(),
+  sensitivityJson: longtext("sensitivityJson").notNull(),
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  resultUnique: uniqueIndex("uq_search_robustness_result_hash").on(
+    table.robustnessRunId,
+    table.parameterHash,
+  ),
+  runIdx: index("idx_search_robustness_result_run").on(table.robustnessRunId, table.combinationIndex),
+  statusIdx: index("idx_search_robustness_result_status").on(table.robustnessRunId, table.status),
+}));
+
+export type SearchRobustnessResultRow = typeof searchRobustnessResult.$inferSelect;
+export type InsertSearchRobustnessResultRow = typeof searchRobustnessResult.$inferInsert;
+
+/**
+ * 单参数稳健性分析（ROBUSTNESS-001 §13 的 `robustness_parameter_analysis`）。
+ *
+ * 一行 = 一个**参与搜索的参数**（不是组合）。`(robustnessRunId, parameterName)` UNIQUE。
+ */
+export const searchRobustnessParameterAnalysis = mysqlTable("search_robustness_parameter_analysis", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  robustnessRunId: varchar("robustnessRunId", { length: 80 }).notNull(),
+  sourceSearchRunId: varchar("sourceSearchRunId", { length: 80 }).notNull(),
+  parameterName: varchar("parameterName", { length: 64 }).notNull(),
+  domainMode: varchar("domainMode", { length: 24 }).notNull(),
+  domainValueCount: int("domainValueCount").notNull(),
+  numeric: boolean("numeric").notNull(),
+  analyzedValueCount: int("analyzedValueCount").notNull().default(0),
+  stableCombinationCount: int("stableCombinationCount").notNull().default(0),
+  unstableCombinationCount: int("unstableCombinationCount").notNull().default(0),
+  /** sensitive / insensitive / insufficient（**描述性**，不是「该参数好不好」）。 */
+  verdict: varchar("verdict", { length: 16 }).notNull(),
+  sensitivityJson: longtext("sensitivityJson").notNull(),
+  valueDispersionJson: longtext("valueDispersionJson").notNull(),
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  parameterUnique: uniqueIndex("uq_search_robustness_parameter_name").on(
+    table.robustnessRunId,
+    table.parameterName,
+  ),
+  runIdx: index("idx_search_robustness_parameter_run").on(table.robustnessRunId),
+}));
+
+export type SearchRobustnessParameterAnalysisRow =
+  typeof searchRobustnessParameterAnalysis.$inferSelect;
+export type InsertSearchRobustnessParameterAnalysisRow =
+  typeof searchRobustnessParameterAnalysis.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// OOS-001 — Out-of-Sample Validation（两表：Run + Result）
+//
+// 🔴 与 `search_robustness_*`（ROBUSTNESS-001）的**语义相反**，必须分清：
+//   - `search_robustness_*`：冻结结果上的邻域稳定性 —— **零重跑、零重算**；
+//   - `oos_validation_*`：在**样本外窗口真正重跑 Backtest** 并**真正重算指标**（规格 §9）。
+//   两者共享「消费 Parameter Search 结果」这一输入姿态，故表名同族、语义不同。
+//
+// 纪律：0 FK（软引用）；`resolvedParameterSetJson` / `searchSnapshotJson` **写入即冻结**
+//   （`ON DUPLICATE KEY UPDATE` 集合里不含它们）；参数值**不由调用方提供**，
+//   一律从源 `parameter_search_combination` 读出并复核 hash（规格 §5）。
+// ---------------------------------------------------------------------------
+
+/**
+ * OOS 验证运行（OOS-001 §13）。
+ *
+ * `oosRunId` UNIQUE ⇒ 重放 / 重跑幂等收敛为一行（不会堆重复 Run）。
+ */
+export const oosValidationRun = mysqlTable("oos_validation_run", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 业务身份（`OOSV-YYYYMMDD-XXXXXXXX`）。 */
+  oosRunId: varchar("oosRunId", { length: 80 }).notNull(),
+  /** 源 Parameter Search Run（唯一输入事实源，规格 §4 第 1 问）。 */
+  sourceSearchRunId: varchar("sourceSearchRunId", { length: 80 }).notNull(),
+  /**
+   * 被验证的冻结候选在本域**唯一的身份** = 源组合的 `parameterHash`（本层**不重算**）。
+   * `combinationIndex` 只作展示与稳定排序，**不作身份**。
+   */
+  sourceParameterHash: varchar("sourceParameterHash", { length: 64 }).notNull(),
+  sourceCombinationIndex: int("sourceCombinationIndex"),
+  /** 策略坐标快照（原样继承自源 Run；软引用无 FK）。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  strategyVersion: varchar("strategyVersion", { length: 32 }).notNull(),
+  /** `strategyId@strategyVersion`（规格 §4 第 3 问的完整身份）。 */
+  strategyVersionId: varchar("strategyVersionId", { length: 96 }).notNull(),
+  /** 策略定义指纹（创建时冻结；执行时复核，漂移即响亮拒绝）。 */
+  strategyDefinitionFingerprint: varchar("strategyDefinitionFingerprint", { length: 64 }),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }),
+  datasetVersionLabel: varchar("datasetVersionLabel", { length: 96 }),
+  /** IS / Search 窗口快照（隔离判定的另一半；缺失就无法证明「不重叠」）。 */
+  searchStartDate: date("searchStartDate", { mode: "string" }).notNull(),
+  searchEndDate: date("searchEndDate", { mode: "string" }).notNull(),
+  /** OOS 窗口（规格 §6：`oosStart > searchEnd`，默认禁止重叠）。 */
+  oosStartDate: date("oosStartDate", { mode: "string" }).notNull(),
+  oosEndDate: date("oosEndDate", { mode: "string" }).notNull(),
+  /** 源 Run 的参数空间**冻结快照**（不从当前策略版本重新解释；规格 §5）。 */
+  searchSnapshotJson: longtext("searchSnapshotJson").notNull(),
+  searchSnapshotFingerprint: varchar("searchSnapshotFingerprint", { length: 64 }).notNull(),
+  fixedCoordinatesJson: text("fixedCoordinatesJson").notNull(),
+  executionPolicyVersion: int("executionPolicyVersion").notNull(),
+  evaluationConfigFingerprint: varchar("evaluationConfigFingerprint", { length: 64 }).notNull(),
+  /** **冻结参数集**（写入即冻结，永不 UPDATE）—— OOS 执行只允许用它。 */
+  resolvedParameterSetJson: longtext("resolvedParameterSetJson").notNull(),
+  /** 指标版本自述（规格 §4 第 8 问；由年化口径常量拼出，不写死数字）。 */
+  metricsVersion: varchar("metricsVersion", { length: 48 }).notNull(),
+  /** 决策引擎版本自述（规格 §4 第 8 问）。 */
+  engineVersion: varchar("engineVersion", { length: 48 }).notNull(),
+  /** CREATED / RUNNING / COMPLETED / FAILED / CANCELLED。 */
+  status: varchar("status", { length: 16 }).notNull().default("CREATED"),
+  /** 运行内容指纹（时间戳不参与）。 */
+  runFingerprint: varchar("runFingerprint", { length: 64 }).notNull(),
+  notesJson: longtext("notesJson"),
+  errorCode: varchar("errorCode", { length: 64 }),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  startedAt: timestamp("startedAt"),
+  /** 进入终态的时间（由调用方给真实完成时刻，不用 `now()` 冒充）。 */
+  completedAt: timestamp("completedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  runUnique: uniqueIndex("uq_oos_validation_run_id").on(table.oosRunId),
+  sourceIdx: index("idx_oos_validation_run_source").on(table.sourceSearchRunId),
+  createdIdx: index("idx_oos_validation_run_created").on(table.createdAt),
+  statusIdx: index("idx_oos_validation_run_status").on(table.status),
+}));
+
+export type OosValidationRunRow = typeof oosValidationRun.$inferSelect;
+export type InsertOosValidationRunRow = typeof oosValidationRun.$inferInsert;
+
+/**
+ * OOS 验证结果（OOS-001 §13）。
+ *
+ * 一行 = 一个「IS 基线 × OOS 重跑」的对照产物。
+ * `(oosRunId, sourceParameterHash)` UNIQUE ⇒ 重复 start 覆盖同一行（确定性重算），不堆重复行。
+ *
+ * 🔴 IS 侧六列是 `parameter_search_result` 的**冻结副本**（零重算）；
+ *   OOS 侧六列是**本次重跑的真实读数**（绝不复制 IS 侧的值）。
+ */
+export const oosValidationResult = mysqlTable("oos_validation_result", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  oosRunId: varchar("oosRunId", { length: 80 }).notNull(),
+  /** 溯源冗余（便于单表排查；软引用无 FK）。 */
+  sourceSearchRunId: varchar("sourceSearchRunId", { length: 80 }).notNull(),
+  sourceParameterHash: varchar("sourceParameterHash", { length: 64 }).notNull(),
+  sourceCombinationIndex: int("sourceCombinationIndex"),
+  strategyVersionId: varchar("strategyVersionId", { length: 96 }).notNull(),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }),
+  resolvedParameterSetJson: longtext("resolvedParameterSetJson").notNull(),
+  searchStartDate: date("searchStartDate", { mode: "string" }).notNull(),
+  searchEndDate: date("searchEndDate", { mode: "string" }).notNull(),
+  oosStartDate: date("oosStartDate", { mode: "string" }).notNull(),
+  oosEndDate: date("oosEndDate", { mode: "string" }).notNull(),
+  /** IS 读数（源结果**冻结副本**；本层零派生计算）。 */
+  isTotalReturnPct: double("isTotalReturnPct"),
+  isAnnualizedReturnPct: double("isAnnualizedReturnPct"),
+  isMaxDrawdownPct: double("isMaxDrawdownPct"),
+  isTradeCount: int("isTradeCount"),
+  isWinRatePct: double("isWinRatePct"),
+  isProfitFactor: double("isProfitFactor"),
+  isMetricsSource: varchar("isMetricsSource", { length: 16 }).notNull(),
+  isAnnualizationBasisJson: text("isAnnualizationBasisJson"),
+  /** OOS 读数（**本次重跑**的真实产物；六项全不可用时如实为 NULL，不编造）。 */
+  oosTotalReturnPct: double("oosTotalReturnPct"),
+  oosAnnualizedReturnPct: double("oosAnnualizedReturnPct"),
+  oosMaxDrawdownPct: double("oosMaxDrawdownPct"),
+  oosTradeCount: int("oosTradeCount"),
+  oosWinRatePct: double("oosWinRatePct"),
+  oosProfitFactor: double("oosProfitFactor"),
+  oosMetricsSource: varchar("oosMetricsSource", { length: 16 }).notNull(),
+  oosAnnualizationBasisJson: text("oosAnnualizationBasisJson"),
+  /** IS / OOS 对照（**事实与比较**，不含「最优 / 推荐」结论）。 */
+  comparisonJson: longtext("comparisonJson").notNull(),
+  /** SUCCEEDED / FAILED（判据 = 是否产出可用 evaluation 引用）。 */
+  status: varchar("status", { length: 16 }).notNull(),
+  error: text("error"),
+  /** 本次 OOS 撮合指纹（确定性判据）。 */
+  backtestFingerprint: varchar("backtestFingerprint", { length: 64 }),
+  /** 本次 OOS 评估产物身份（`deriveExperimentId`）。 */
+  evaluationId: varchar("evaluationId", { length: 80 }),
+  evaluationRunId: varchar("evaluationRunId", { length: 160 }),
+  executionPolicyVersion: int("executionPolicyVersion").notNull(),
+  metricsVersion: varchar("metricsVersion", { length: 48 }).notNull(),
+  engineVersion: varchar("engineVersion", { length: 48 }).notNull(),
+  /** 内容指纹（确定性判据：同输入 ⇒ 同指纹）。 */
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  notesJson: longtext("notesJson").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  resultUnique: uniqueIndex("uq_oos_validation_result_candidate").on(
+    table.oosRunId,
+    table.sourceParameterHash,
+  ),
+  runIdx: index("idx_oos_validation_result_run").on(table.oosRunId, table.sourceCombinationIndex),
+  statusIdx: index("idx_oos_validation_result_status").on(table.oosRunId, table.status),
+}));
+
+export type OosValidationResultRow = typeof oosValidationResult.$inferSelect;
+export type InsertOosValidationResultRow = typeof oosValidationResult.$inferInsert;
+
+
+// ---------------------------------------------------------------------------
+// WALK-FORWARD-001 —— Walk-Forward 验证闭环（规格 §8 / §9）
+//
+// 编排层，**不是新引擎**：每个 Fold 的搜索与样本外验证分别调用既有
+// `parameter_search_*` 与 `oos_validation_*` 的 application service
+// （不经 HTTP 自调用，规格 §15）。本域只落「排程 + Fold 冻结坐标 + 两个子 Run 的软引用 + 读数快照」。
+//
+// 纪律：0 FK（软引用）；窗口 / 策略指纹 / 选择策略 / 排程 **写入即冻结**
+//   （`ON DUPLICATE KEY UPDATE` 集合里不含它们）；Fold 的 IS 与 OOS 永不重叠
+//   （创建时由几何断言 + 泄漏守卫双重保证，规格 §11）。
+// 表数量刻意只有两张：Fold 的结果快照（IS / OOS 读数 + 对照）不足以撑起第三张表。
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk-Forward 运行（规格 §8 Run 字段）。
+ *
+ * `walkForwardRunId` UNIQUE ⇒ 重放幂等收敛为一行；`scheduleJson` 冻结整份窗口排程
+ * （配置 + 交易日序列 + 全部 Fold 端点），因此**不需**依赖「当前策略 / 当前数据集」重建历史。
+ */
+export const walkForwardRun = mysqlTable("walk_forward_run", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 业务身份（`WFV-YYYYMMDD-XXXXXXXX`）。 */
+  walkForwardRunId: varchar("walkForwardRunId", { length: 80 }).notNull(),
+  /** 被滚动的策略坐标（创建时冻结，**不是** latest）。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  strategyVersion: varchar("strategyVersion", { length: 32 }).notNull(),
+  /** `strategyId@strategyVersion` 完整身份。 */
+  strategyVersionId: varchar("strategyVersionId", { length: 96 }).notNull(),
+  /** 策略定义指纹（创建时冻结；执行前复核，漂移即响亮拒绝）。 */
+  strategyFingerprint: varchar("strategyFingerprint", { length: 64 }),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }),
+  datasetVersionLabel: varchar("datasetVersionLabel", { length: 96 }),
+  /** 窗口排程**冻结快照**（配置 + 交易日序列 + Fold 端点 + 排程指纹）。 */
+  scheduleJson: longtext("scheduleJson").notNull(),
+  /** 排程指纹（跨运行稳定：不含 Run id / 时间戳 ⇒ 可作确定性判据，规格 §16）。 */
+  scheduleFingerprint: varchar("scheduleFingerprint", { length: 64 }).notNull(),
+  /** 候选选择策略快照（规格 §7：**必须**写入快照，否则无从审计「怎么挑的」）。 */
+  selectionPolicyJson: text("selectionPolicyJson").notNull(),
+  /** 每 Fold 的搜索方法（复用 PS 词表）。 */
+  searchMethod: varchar("searchMethod", { length: 32 }).notNull(),
+  /** 每 Fold 的组合数上限（NULL = 不设上限）。 */
+  maxCombinationsPerFold: int("maxCombinationsPerFold"),
+  totalFoldCount: int("totalFoldCount").notNull(),
+  completedFoldCount: int("completedFoldCount").notNull().default(0),
+  failedFoldCount: int("failedFoldCount").notNull().default(0),
+  /** 当前推进到的 Fold 序号（全部完成 / 失败后为 NULL）。 */
+  currentFoldIndex: int("currentFoldIndex"),
+  /** 指标版本自述（沿用 OOS 域同一条，唯一口径 = canonical）。 */
+  metricsVersion: varchar("metricsVersion", { length: 48 }).notNull(),
+  /** 决策引擎版本自述。 */
+  engineVersion: varchar("engineVersion", { length: 48 }).notNull(),
+  /** CREATED / RUNNING / COMPLETED / FAILED / CANCELLED。 */
+  status: varchar("status", { length: 16 }).notNull().default("CREATED"),
+  /** 运行内容指纹（时间戳与计数不参与）。 */
+  runFingerprint: varchar("runFingerprint", { length: 64 }).notNull(),
+  /** 多 Fold 汇总（**只做描述性统计**；未完成时为 NULL）。 */
+  aggregateJson: longtext("aggregateJson"),
+  notesJson: text("notesJson"),
+  errorCode: varchar("errorCode", { length: 64 }),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  startedAt: timestamp("startedAt"),
+  completedAt: timestamp("completedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  runUnique: uniqueIndex("uq_walk_forward_run_id").on(table.walkForwardRunId),
+  strategyIdx: index("idx_walk_forward_run_strategy").on(table.strategyId, table.strategyVersion),
+  createdIdx: index("idx_walk_forward_run_created").on(table.createdAt),
+  statusIdx: index("idx_walk_forward_run_status").on(table.status),
+}));
+
+export type WalkForwardRunRow = typeof walkForwardRun.$inferSelect;
+export type InsertWalkForwardRunRow = typeof walkForwardRun.$inferInsert;
+
+/**
+ * Walk-Forward 单个 Fold（规格 §8 Fold 字段）。
+ *
+ * `(walkForwardRunId, foldIndex)` UNIQUE ⇒ 重执行覆盖同一行，不堆重复 Fold。
+ * `isStart/isEnd/oosStart/oosEnd` 用 `date(..., { mode: "string" })`（北京业务日字符串，
+ * 与 PS / OOS 的窗口列同口径 —— 不用 timestamp，避免时区把窗口挪一天）。
+ */
+export const walkForwardFold = mysqlTable("walk_forward_fold", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  walkForwardRunId: varchar("walkForwardRunId", { length: 80 }).notNull(),
+  foldIndex: int("foldIndex").notNull(),
+  /** 该 Fold 的 IS 窗口（**搜索窗口必须等于它**，泄漏守卫会断言）。 */
+  isStart: date("isStart", { mode: "string" }).notNull(),
+  isEnd: date("isEnd", { mode: "string" }).notNull(),
+  /** 该 Fold 的 OOS 窗口（硬约束 `isEnd < oosStart`）。 */
+  oosStart: date("oosStart", { mode: "string" }).notNull(),
+  oosEnd: date("oosEnd", { mode: "string" }).notNull(),
+  /** 该 Fold **自己的** Parameter Search Run（每个 Fold 独立搜索，规格 §11）。 */
+  sourceSearchRunId: varchar("sourceSearchRunId", { length: 80 }),
+  searchStartDate: date("searchStartDate", { mode: "string" }),
+  searchEndDate: date("searchEndDate", { mode: "string" }),
+  /** 冻结的候选身份（组合序号 + hash；参数值由 hash 复核）。 */
+  sourceCombinationIndex: int("sourceCombinationIndex"),
+  parameterHash: varchar("parameterHash", { length: 64 }),
+  /** **冻结参数快照**（写入即冻结，永不 UPDATE）。 */
+  resolvedParameterSetJson: longtext("resolvedParameterSetJson"),
+  strategyVersionId: varchar("strategyVersionId", { length: 96 }).notNull(),
+  strategyFingerprint: varchar("strategyFingerprint", { length: 64 }),
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }),
+  /** 该 Fold **自己的** OOS Run（软引用 → `oos_validation_run.oosRunId`）。 */
+  oosRunId: varchar("oosRunId", { length: 80 }),
+  oosWindowStartDate: date("oosWindowStartDate", { mode: "string" }),
+  oosWindowEndDate: date("oosWindowEndDate", { mode: "string" }),
+  /** WINDOW_CREATED / SEARCH_RUNNING / SEARCH_COMPLETED / CANDIDATE_FROZEN / OOS_RUNNING / OOS_COMPLETED / FAILED。 */
+  status: varchar("status", { length: 24 }).notNull().default("WINDOW_CREATED"),
+  /** PENDING / SUCCEEDED / INSUFFICIENT_TRADING_ACTIVITY / FAILED（结果语义，与生命周期正交）。 */
+  outcome: varchar("outcome", { length: 32 }).notNull().default("PENDING"),
+  /** IS 读数快照（源 Search 结果的冻结副本；本域零重算）。 */
+  isMetricsJson: longtext("isMetricsJson"),
+  isMetricsSource: varchar("isMetricsSource", { length: 16 }),
+  /** OOS 读数快照（本次真实重跑读数，来自 OOS 结果行）。 */
+  oosMetricsJson: longtext("oosMetricsJson"),
+  oosMetricsSource: varchar("oosMetricsSource", { length: 16 }),
+  /** IS/OOS 对照（复用 OOS 域既有对照，零重算）。 */
+  comparisonJson: longtext("comparisonJson"),
+  /** 本次 OOS 撮合指纹（证明「真在不同数据上重跑」的主判据）。 */
+  oosBacktestFingerprint: varchar("oosBacktestFingerprint", { length: 64 }),
+  /** Fold 级执行指纹（窗口 + 冻结坐标 + 两个子 Run 身份）。 */
+  executionFingerprint: varchar("executionFingerprint", { length: 64 }).notNull(),
+  errorCode: varchar("errorCode", { length: 64 }),
+  errorMessage: text("errorMessage"),
+  notesJson: text("notesJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  foldUnique: uniqueIndex("uq_walk_forward_fold_index").on(
+    table.walkForwardRunId,
+    table.foldIndex,
+  ),
+  runIdx: index("idx_walk_forward_fold_run").on(table.walkForwardRunId, table.foldIndex),
+  statusIdx: index("idx_walk_forward_fold_status").on(table.walkForwardRunId, table.status),
+  searchIdx: index("idx_walk_forward_fold_search").on(table.sourceSearchRunId),
+  oosIdx: index("idx_walk_forward_fold_oos").on(table.oosRunId),
+}));
+
+export type WalkForwardFoldRow = typeof walkForwardFold.$inferSelect;
+export type InsertWalkForwardFoldRow = typeof walkForwardFold.$inferInsert;

@@ -149,6 +149,8 @@ TradeSimulationRun
 | 指标端点 | `research.metrics.evaluate:279` | **可达** | `PerformanceDashboard.tsx:292` |
 | 参数搜索 | `paramSearch.run:701` / `rolling:761` | **可达（技术预览）** | `paramSearchRouter.ts:648` 自述非 RESEARCH_READY 口径 |
 | 稳健性 / 随机化 | `paramSearch.robustness:794` / `stochastic:840` | **可达（技术预览）** | — |
+| **搜索结果邻域稳定性** | `paramSearch.createRobustnessRun` / `listRobustnessRuns` / `getRobustnessRun` / `startRobustnessRun` / `cancelRobustnessRun` / `getRobustnessResults` | **可达（已持久化）** | 状态机同 PS（CREATED/RUNNING/COMPLETED/FAILED/CANCELLED，**复用唯一权威迁移表**） |
+| | | | ⚠️ 执行语义**不重跑**：只读 `parameter_search_*` 冻结结果 → 纯函数分析 → 落三表 |
 | WFO / OOS / 过拟合 | `walkForward.run:561` / `oos:605` / `overfit:698` | **可达（技术预览）** | `walkForwardRouter.ts:444` 自述 |
 | Regime | `marketRegime.run:266` | **可达** | 闭环 `regime` 阶段亦已装配 |
 | 纸面交易（legacy） | `sentiment.createPaperTradingRun` 等 5 端点 + `_core/index.ts:169` 调度 | **可达** | `PaperTrading.tsx` |
@@ -211,3 +213,84 @@ TradeSimulationRun
 **可达性总表（§5）补充**：
 `paramSearch.createSearch` / `listSearches` / `getSearch` / `getSearchResults` = 可达（只读 / 创建）；
 `paramSearch.startSearch` / `cancelSearch` / `retrySearchCombination` = 可达（写；真实回测，长请求）。
+
+---
+
+## E-91 OOS-001 增量：样本外验证执行链（2026-09-19 · `9bv`）
+
+基线主链（§1 `researchRun.loopRun` / §2 backtest 内部 / §3 指标→评估→留档）**未改动**，
+E-90（参数搜索）也**一行未改**。本节登记**新增的一条并行执行链** —— 它是全仓**唯一**
+「消费搜索结果且**必须重跑回测**」的边：
+
+| 跳 | 落点 | 说明 |
+|---|---|---|
+| 1 | `paramSearch.createOosRun` | **只冻结配置，不执行**：读源 Run / 组合 / 结果 → 复核 `parameterHash` → 窗口隔离 → 落 `oos_validation_run`（`CREATED`）。**接口层没有参数值位置** ⇒ 顺手传「更好的参数」无处可写 |
+| 2 | `oosValidation/run.ts#assertOosRunCanExecute` | 🔴 `COMPLETED` ⇒ `OOS_RUN_ALREADY_COMPLETED`（**不允许再次执行**）；`RUNNING` ⇒ `OOS_RUN_ALREADY_RUNNING`。状态迁移走既有 `PARAMETER_SEARCH_RUN_TRANSITIONS` 口径 |
+| 3 | `paramSearch.startOosRun` | 状态 `CREATED → RUNNING`；已 `COMPLETED` 时**幂等返回**既有结果（`executed = false`，不重跑不重算） |
+| 4 | `oosValidation/gate.ts#assertOosSourceGate` | 源 Run `COMPLETED` ∧ 有组合 ∧ 有结果 ∧ 选中组合读数 `canonical`，否则四条领域码**响亮拒绝** |
+| 5 | `strategyEvaluation/backtestBridge#createStrategyBacktestBridge` | **复用唯一权威回测入口**（不自建第二套引擎）；在 **OOS 窗口**上真实执行 |
+| 6 | `parameterSearch/searchResult.ts#projectCanonicalMetrics` | OOS 侧指标**必须重算**；IS 侧取 `toResultView` 的**冻结副本** |
+| 7 | `oosValidation/comparison.ts#buildOosComparison` | 六项逐项 delta / ratio（IS = 0 ⇒ ratio 为 `null`，**不编数**）+ 三项派生（收益退化 / 回撤变化 / 交易笔数变化）；`comparable = isAvailable ∧ comparableCount > 0` |
+| 8 | `persistence#upsertOosValidationResult` + `updateOosValidationRun` | 落结果行 + Run 转 `COMPLETED` |
+| 9 | `paramSearch.getOosRun` / `getOosResult` / `listOosRuns` | 服务端只读查询（**不产出「最佳 / 最优 / 推荐」结论**） |
+
+**守卫方向（与 E-90 / ROBUSTNESS-001 相反，这是本链的结构特征）**：
+`oosValidation/**` 的 import 集被**必含清单**正向钉死 —— 必须出现 `createStrategyBacktestBridge`
+与 `projectCanonicalMetrics`。`searchRobustness/**` 则被**黑名单**钉死不得出现它们。
+两条守卫**镜像相反** ⇒ 实现不可互相搬移。
+
+**可达性总表（§5）补充**：
+`paramSearch.createOosRun` / `listOosRuns` / `getOosRun` / `getOosResult` = 可达（只读 / 创建）；
+`paramSearch.startOosRun` / `cancelOosRun` = 可达（写；**真实重跑回测，长请求**，前端按钮 pending 必须换文案）；
+`/parameter-search` 页内 OOS 面板 = 可达（深链 `?oosRunId=` 可自渲染，已量 DOM）。
+
+## E-92 WALK-FORWARD-001 增量：滚动窗口验证执行链（2026-09-19 · `9bw`）
+
+### 链路
+
+```
+paramSearchRouter（组合根）
+  │  用【既有】PS / OOS application service 实现三个钩子
+  ▼
+WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
+  ▼
+walkForward/executor.ts   ← 逐 Fold 串行编排（零回测代码、零 HTTP 自调用）
+  ├─ Fold i : 校验窗口（leakage） → hooks.runFoldSearch(该 Fold 的 IS 窗口)
+  │            → 冻结候选（源组合行 + parameterHash 复核）
+  │            → hooks.runFoldOos(紧邻 OOS 窗口, 冻结参数)
+  │            → 读 canonical 指标 → 落 walk_forward_fold
+  ▼
+多 Fold 全部走完 → aggregate（描述性）→ 落 walk_forward_run
+```
+
+### 🔴 与 E-90（PARAMETER-001）/ E-91（OOS-001）的并列关系
+
+- E-90 = 参数搜索主链（**写 `parameter_search_*`**）；
+- E-91 = 单窗口样本外（**消费 E-90 的产物 + 必须重跑**，写 `oos_validation_*`）；
+- **E-92 = 滚动编排（本链）**：**每一折各造一个 E-90 链与一个 E-91 链**，自己只写 `walk_forward_*`。
+  ⇒ E-92 **不新建引擎**，而是**把既有两条链按时间轴串起来**；三条链的产物表**互不重叠**。
+
+### 接缝（本链最关键的架构事实）
+
+- 🔴 域层**不得** import 回测 / 评估 / 闭环执行面；**执行只能经由 `hooks`**。
+  ⇒ 静态守卫同时钉死「黑名单」与「唯一通路」两件事。
+- 🔴 域层**允许** import `oosValidation/types`（只为 `OOS_ENGINE_VERSION` / `OOS_METRICS_VERSION` 两个常量）；
+  这是**规格要求的复用**，守卫因此留了后缀级窄豁免并断言豁免面最小。
+- 🔴 明禁 `WalkForward → HTTP → OOS API → HTTP → Backtest`：本链**零 HTTP 自调用**。
+
+### 可达性
+
+`paramSearch.createWalkForwardRun` = 可达（写；**只冻结**，不跑回测，秒级）；
+`paramSearch.startWalkForwardRun` = 可达（写；**逐 Fold 真实搜索 + 真实样本外，长请求，分钟级**，
+前端 `#wf-start-button` pending **必须换文案**为「执行中…（逐 Fold 真实回测，分钟级）」）；
+`cancelWalkForwardRun` = 可达（写；**在下一个 Fold 边界生效**）；
+`getWalkForwardRun` / `getWalkForwardFold` / `listWalkForwardRuns` = 可达（只读）；
+`/parameter-search` 页内 Walk-Forward 面板 = 可达（**深链 `?walkForwardRunId=…&foldIndex=…` 可自渲染，且连 Fold 选中一并还原**，已量 DOM）。
+
+### 幂等与确定性（三层，逐层加严）
+
+1. **同进程**：`COMPLETED` 后重复 `start` ⇒ `executed=false`，Fold 行**逐字节不变**（不重跑不重算）；
+2. **跨进程**（本轮新增判据 W15）：**换一个进程**再执行 ⇒ `executed=false`、耗时 **7 s**、**零新增行**；
+   且全部读取判据在新进程里**逐条复现一致**（含四条撮合指纹）。
+   🔴 二者不可互相替代：若「已完成」的判定依赖内存态，第 1 层会绿、第 2 层会露馅；
+3. **创建级**：同冻结配置的副 Run ⇒ `scheduleFingerprint` / fold 坐标一致。

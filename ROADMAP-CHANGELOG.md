@@ -2534,3 +2534,105 @@ P1（9 条）/ P2（6 条）一条未动；P0-2/P0-3 的**彻底解**（翻译�
 - **验收**：`tsc` 0 error；`tests/server/backtest` 9 文件 / 105 用例全绿；`tests/server/strategyCore` 10 文件 / 158 用例全绿；`tests/server/research/executionConstraints` 1 文件 / 27 用例全绿；全量 vitest **8 失败文件 / 17 用例 = 基线集合逐项一致**（用例 4304 → 4538）；`vite build` 成功；`checkEolDrift` 0 漂移（过程中按哨兵 `--fix` 归一化 1 处由并行会话引入的 CRLF 漂移）。
 - **DB**：Schema 变更 = 0 / migration = 0；唯一写库动作 = `loopRun` 正常路径产生 1 条新 Run；历史 6 条留档**零改动**（含 `backtest` 段者 = 0）。
 - ⚠️ **R-06（新，中）**：同一真实 Run 从 ARCH-002 前的 **14.3 s** 变为 **593~627 s**（≈41×）；实测 Core 单次求值 ≈381 µs（20,000 次）⇒ 只占 **8.7%**，主因**未定位**；且**耗时与请求窗口无关**（1 个月窗口 616 s）⇒ **PARAMETER-001 开工前必须先做阶段级 profile**。
+
+---
+
+## 2026-09-19 · PARAMETER-001（Parameter Search 完整实现）（编号 `9bs`）
+
+**§47 UPDATE（append-only）**
+
+- **§44 覆盖**：上一条「BACKTEST-002 收尾二（`9br`）」移入本文件（按 §44 头部归档说明，不算丢历史）。
+- **§44.5 队列**：新增已完成条目 `9bs`（插在同类「✅ 已完成」项之上）；**编号台账两处同步**：文件头铁律行 `已用至 9br` → `9bs`，台账行 `已用至 9br ⇒ 下一个未占用 = 9bs` → `已用至 9bs ⇒ 下一个未占用 = 9bt`。
+- **本任务一句话**：把仓库既有的 `server/research/parameterSearch/**`（纯函数引擎）+ `paramSearchRouter`（零写库技术预览）**收敛**为
+  「可回看 / 可续跑 / 可重试」的持久化 Parameter Search 闭环，**不新建第二套体系**、**不新开第二个 router**、**不重算任何指标**。
+- **真实验收数字**：`tsc` 0 error；新增单测 1 文件 / 38 用例全绿；全量 vitest 失败文件集合 **8→8 零新增**（用例 4538→4581）；
+  `vite build` 成功；`checkEolDrift` 0 漂移；真库迁移幂等（第二次 0 executed / 3 skipped、pass=true）；
+  真实库全链探针 **37 项 / 0 失败**（4 组合 39 s、4-4 成功、二次 start `evaluated=0 / skipped=4`）；前端 DOM 可达性探针 `pass=true`（0 page error）。
+- **过程中抓到的真实判据错（已修）**：`dataset_version` 日期列是 UTC 时间戳 ⇒ 探针按 `toISOString()` 取日少一天 ⇒ 窗口越界、4 组合全失败。
+  这是**验收判据错，不是产品缺陷**；改正后 4-4 成功。
+- **遗留（未做，如实登记）**：前置「窗口 ⊆ 数据集窗口」校验；4 组合指标逐位相同且 `tradeCount=0`（评估端口行为，PS 未加工）；
+  `backtestRunId` 恒 NULL（评估端口不落 `closed_loop_backtest_run` 行，追溯改用指纹 + 坐标）。
+- **报告**：`docs/parameter-search/PARAMETER-001-REPORT.md`。
+
+---
+
+## 2026-09-19 · PARAMETER-002（Parameter Search 有效性 Gate 与 Robustness 前置验收）（编号 `9bt`）
+
+**§47 UPDATE（append-only）**
+
+- **§44 覆盖**：上一条「PARAMETER-001（`9bs`）」移入本文件（按 §44 头部归档说明，不算丢历史）。
+- **§44.5 队列**：新增已完成条目 `9bt`（插在同类「✅ 已完成」项之上）；**编号台账两处同步**：文件头铁律行 `已用至 9bs` → `9bt`，台账行 `已用至 9bs ⇒ 下一个未占用 = 9bt` → `已用至 9bt ⇒ 下一个未占用 = 9bu`。
+- **本任务一句话**：证明「参数不影响执行结果」的根因是**策略文档的规则图不引用参数**（不是 Parameter Search 的缺陷），
+  并把 PS 侧唯一可修的部分修掉（拒绝对「死参数」创建搜索 + 前置窗口校验），同时明确两套派生器的收敛状态。
+- **真实验收数字**：`tsc` 0 error；新增单测 16 例；Parameter Search 三文件 84/84；全量 vitest 失败文件集合 **8→8 零新增**（用例 4597）；
+  真实 tRPC E2E **13/13 PASS**；前端可达性 `pass=true`（0 page error）；`checkEolDrift` 0 漂移。
+- **行为变更（新预期行为，不是回归）**：对「参数全为死参数」的历史候选（`cand-3600xx`）创建搜索**会被拒绝**。
+  PARAMETER-001 的 `_e2e_parameter_search.mts` 已加「被本任务取代」的头注。
+- **遗留**：① 闭环 `optimization` 阶段仍用旧派生器（切换属主链改动）；② 历史策略文档不可变 ⇒ 现有 10 份候选参数仍是死参数，
+  要用参数搜索须改写为**参数引用**并生成新版本；③ N-03（`backtestRunId` 恒 NULL）保持 DEFERRED。
+- **报告**：`docs/parameter-search/PARAMETER-002-REPORT.md`。
+
+## 2026-09-19 20:05 GMT+8 · ROBUSTNESS-001（Parameter Search 结果稳健性分析完整实现）· 编号 `9bu`
+
+- **目标**：消费**已经算完**的 Parameter Search 结果，判断「邻近取值是否还在相近水平」——为 Robustness / OOS / Walk-Forward 提供**前置有效性 gate**。
+- **收敛而非新建**：新增并列兄弟域 `server/research/searchRobustness/**`（10 文件），与既有 `robustness/**`（C-18.1 四轴扰动**重估**）与 `stochasticRobustness/**`（C-18.2 随机化**重估**）**并列不合并** —— 本域语义相反：**只在冻结快照上做统计与判定，零重跑、零指标重算**。
+- **判定口径（全部持久化到 Run）**：`returnTolerancePct` / `drawdownTolerancePct` / `neighborDistance` / `minValidNeighbors`；`stabilityRatio = stableNeighborCount / validNeighborCount`（**无有效邻居时为 `null`，不是 0**）。
+- **诚实边界**：缺格 `MISSING_COMBINATION`（**不补值**）；`tradeCount = 0` → `INSUFFICIENT_TRADING_ACTIVITY`（既不判稳也不判不稳）；有效邻居不足 → `INSUFFICIENT_NEIGHBORHOOD`；源结果缺失 → `SOURCE_RESULT_UNAVAILABLE`；>2 个可变参数时矩阵命中多条 ⇒ `AMBIGUOUS`（不挑代表）。
+- **新增表**：`search_robustness_run`(33) / `search_robustness_result`(28) / `search_robustness_parameter_analysis`(16)，**0 FK**，手工幂等 SQL `drizzle/0042_search_robustness.sql` + `scripts/applySearchRobustness.mjs`（零 DML 静态断言）；并 **ALTER `parameter_search_run` 补 `referenceCheckApplied` / `unreferencedTunableCodesJson`** —— 让下游能从**冻结快照**继承 PARAMETER-002 的死参数筛查结论，而不必回读当前策略版本。
+- **API**：**同域扩 6 端点**（`createRobustnessRun` / `listRobustnessRuns` / `getRobustnessRun` / `startRobustnessRun` / `cancelRobustnessRun` / `getRobustnessResults`），**零新 router**；排序只有描述性字段，**无「最佳 / 最优 / 推荐」**（静态守卫钉住）。
+- **前端**：`client/src/components/robustness/SearchRobustnessPanel.tsx` 挂在 `/parameter-search`；含创建 / 详情 / 单参数分析 / **二维稳定性矩阵**（不用颜色表达「好坏」）/ 结果表排序过滤 / 「查看邻域」；**深链 `?robRunId=`**（刷新与分享可回到同一份详情）。
+- **验收**：真实 2×2 E2E **42/42 PASS**（A~G 七条：未重跑回测 / 未重算指标 / 确定性 / 口径可变而源不变 / 缺格不补值 / 零成交不误判 / 不串线）；§12 真实历史数据（`cand-360001` 的 `referenceCheckApplied = NULL` 行）**9/9 PASS**；新增单测 **59/59**；全量 vitest 失败文件集合 **8→8 零新增**；`vite build` 成功；`checkEolDrift` **0 漂移**。
+- **真实 E2E 抓到的产品缺陷（已修 + 回归测试）**：基组合**不可判**（无成交 / 源结果缺失）时实现曾**提前返回空邻域** ⇒ `expectedNeighborCount` 被报成 0（谎称「搜索空间里没有邻居」）；同源问题使 `stabilityRatio` 被算成 **0**（把「没数据」伪装成「邻居全不稳」）。两处均修：**邻域结构恒为事实，只有 delta / 容差判定依赖基准读数**。
+- **未做**：性能优化一行未碰（归外部 Agent）；未改任何历史 Run / Evaluation / Dataset / 策略版本；自建自清（探针专用的策略 / Search Run / Robustness Run 全部归零，仅保留用户自有的 `cand-360001` 历史 Run）。
+- **报告**：`docs/robustness/ROBUSTNESS-001-REPORT.md`。
+
+## 2026-09-19 20:50 GMT+8 · OOS-001（Out-of-Sample Validation 完整实现）· 编号 `9bv`
+
+- **目标**：把某次参数搜索**冻结下来的候选参数**，放到**它没参与过的数据窗口**上**真实重跑回测并重算 canonical 指标**，给出样本内外对照。铁律：**IS / Search 用于发现参数；OOS 只用于验证，不能再次调参**。
+- **并列而语义相反**：新增 `server/research/oosValidation/**`（10 文件），与上轮 `searchRobustness/**`（**零重跑**）**并列不合并** —— 后者在**冻结快照**上做邻域统计，本域必须**真重跑 + 真重算**。两者静态守卫**镜像相反**：`searchRobustness` = import **黑名单**（不得够到回测 / 评估端口）；`oosValidation` = **必含清单**（必须出现 `createStrategyBacktestBridge` 与 `projectCanonicalMetrics`）⇒ **把实现从一域搬到另一域会让对侧测试立刻变红**。
+- **参数冻结（规格 §5）**：OOS **只认**「源 Search Run + `parameterHash`」；参数值一律由服务端从源组合行读出并**重算 `computeParameterHash` 复核**。**冻结信息不足 ⇒ 显式失败**，**不允许**静默回读**当前**策略版本来补全（§9）。契约层 `createOosValidationInputSchema` **只有 4 个键**（`sourceSearchRunId` / `parameterHash` / `oosWindow` / `metricsVersion?`）—— 让「顺手传一组更好的参数」在**类型层与 UI 层同时无处可写**（DOM 实测创建区 `<input>` 恰为 4 个）。
+- **窗口隔离（规格 §6）**：`oosStart > searchEnd` 且默认**禁止重叠** ⇒ `OOS_WINDOW_OVERLAP`；`oosStart < oosEnd`；源窗口自身倒挂 ⇒ `OOS_SEARCH_WINDOW_INVALID`；越出绑定数据集可用区间 ⇒ `OOS_WINDOW_OUT_OF_DATASET_RANGE`。
+- **状态机（规格 §12）**：`CREATED → RUNNING → COMPLETED / FAILED / CANCELLED`；非法迁移**响亮拒绝**；`COMPLETED` **不允许再次执行**（重复 `start` 幂等返回既有结果，`executed=false`，不重跑不重算）。
+- **真重跑 + 真重算（规格 §9）**：回测复用**唯一权威** `strategyEvaluation/backtestBridge#createStrategyBacktestBridge`（**不自建第二套引擎**）；指标走 `projectCanonicalMetrics` **必须重算**，**不是**复制源结果。IS 侧读数取源 Search 结果的**冻结副本**（`toResultView`）⇒ 两侧同表头对齐、口径差异看得见。
+- **对照（规格 §10）**：六项逐项 `delta` / `ratio`（IS = 0 ⇒ `ratio` 为 `null`，**不编数**）+ 三项派生（收益退化 / 回撤变化 / 交易笔数变化）；`comparable = isAvailable ∧ comparableCount > 0`；**不定义「优秀 / 最优 / 推荐」**（源码扫描守卫 + 负例自测钉住）。
+- **新增表**：`oos_validation_run`(32 列) / `oos_validation_result`(41 列)，**0 FK、0 DML、0 ALTER**，手工幂等 SQL `drizzle/0043_oos_validation.sql` + `scripts/applyOosValidation.mjs`（`-- @guard:` 指令 + 零 DML 静态断言 + 列签名逐列比对；首跑 2 executed / 次跑 0 executed + 2 skipped）。`resolvedParameterSetJson` / `searchSnapshotJson` **写入即冻结**（UPDATE 集合不含它们）。
+- **API（规格 §14）**：**同域扩 6 端点**（`createOosRun` / `listOosRuns` / `getOosRun` / `startOosRun` / `cancelOosRun` / `getOosResult`），**零新 router**；**create 与 start 必须分开**（创建便宜、执行昂贵）。
+- **前端（规格 §15）**：`client/src/components/oos/OosValidationPanel.tsx` 挂在 `/parameter-search`（与 `SearchRobustnessPanel` 同页、语义正好相反）；六项冻结坐标 + 冻结参数集 + 固定坐标 + 运行内容指纹 + IS×OOS 对照表（6 行）+ 三项派生 + 三处读数来源；**长请求按钮 pending 换文案**（「正在样本外真实重跑（分钟级）…」）；**深链 `?oosRunId=`**（刷新 / 分享可回到同一份详情）。
+- **验收**：真实 E2E（真实 tRPC + 真实 TiDB + 真实回测）阶段一 **2/2 PASS**（搜索真实耗时 42 s）、阶段二 **12/12 PASS**、**跨进程二次独立重跑 12/12 PASS**；源三表 digest 三次采样（创建前 / 创建后 / 执行后）**逐字节相同**；新增单测 **65/65**（域 51 + 静态守卫 14：写点白名单 / 源只读白名单 / **必含清单** / 措辞守卫 / **命名不遮蔽**）；全量 vitest 失败文件集合 **8→8 零新增**、失败用例 **17→17 零新增**；`vite build` 成功（3041 modules / 17.81 s）；前端可达性 `pass=true`、0 page error；`checkEolDrift` **0 漂移**。
+- **真实读数（E2E 判据）**：IS `2025-01-02..2025-02-28` = `-10.36% / 年化 -54.50% / 回撤 10.54% / 8 笔 / 胜率 50% / 盈亏比 0.172`；OOS `2025-03-01..2025-04-30` = `+7.30% / 年化 +54.18% / 回撤 3.99% / 2 笔 / 胜率 50% / 盈亏比 3.179`；**撮合指纹 `edfb2bc3…` ≠ `0c94868c…`** ⇒ 真在不同数据上重跑（**主判据是撮合指纹差异**，因为零成交时两侧指标天然相等）。
+- **抓到的两条「判据错 ≠ 产品缺陷」（探针侧，已修）**：① 首版 DOM 探针把「锚点出现」当成「数据到位」—— `/parameter-search` 页三块面板，OOS 列表查询在 dev **冷启**下要 ~20 s（热态 6 s ⇒ 是 Vite 冷编译，不是查询慢）⇒ 判据必须等**目标行数 > 0** 且「点不中就一直重试」；② pass 表达式误用「面板就绪」那一帧的快照判 `runRowCount > 0`（该帧列表**必然**未落地）⇒ **快照必须取「已达标的那一步」**。另修 `clean` 模式两处：零断言却报 FAIL（判据改为「无致命异常」）、对已删除策略抛错（改为**幂等跳过**）。
+- **未做**：性能优化一行未碰；**未改**任何历史 Search Run / Backtest Run / Evaluation / Dataset / 策略版本；未做 Walk-Forward / Paper / Live / Broker / 自动策略推荐 / 自动参数选择 / 多策略排名（§19 范围外）；自建自清（探针专用的策略版本 / Search Run / 3 个 OOS Run 全部归零，`oos_validation_*` 两表 = 0 行、`parameter_search_run` 回到 3 行基线）。
+- **报告**：`docs/research/OOS-001-implementation.md`。
+
+## 2026-09-19 21:10 GMT+8 · OOS-001 收尾（证据卫生）· 编号 `9bv`（**同轮，不另取号**）
+
+- **发现并修复一处证据工具缺陷**：`docs/evidence/_e2e_oos_validation.mts` 原先在 `clean` 模式下把结论写进**通用** `.out.json` / `.out.txt` ⇒ 清理阶段会**静默覆盖**主阶段的结构化结论（12/12 判据 + 源三表 digest）。已改为**按模式落盘**（`clean` ⇒ `*.clean.out.json` / `*.clean.out.txt`），与兄弟脚本 `_e2e_robustness_search.mts`（`*.cleanonly.out.json`）的约定对齐；删除 2 个误命名重复件（与正确命名件 md5 差异**仅** `finishedAt`），并重跑 `clean` 验证（exit=0、幂等）。**教训：证据脚本的产物命名必须让「每个阶段各留一份」成为结构事实**，否则「最后一跑覆盖前几跑」是静默丢档。
+- **登记修正**：`docs/evidence/README.md` 的 OOS-001 索引表把「已被覆盖的 `.out.json` 行」换成**归零阶段**行（`.clean.out.json` / `.clean.out.txt`），新增「坑三」说明，`_probe_oos_source_scan` 行补 `.out.txt`；`docs/research/OOS-001-implementation.md` 交付物清单同步。⇒ **证据文件 12 个，与实际磁盘逐个对齐**。
+- **记忆**：`MEMORY.md`「环境 / 工具」段新增一条 🔴（证据脚本结论必须按模式落盘）；14893 → 15091 B，🔴 计数 63 → 64，0 CRLF。当日日报追加 OOS-001 简报（50830 → 53664 B）。
+- **未改**：任何 `server/**` / 迁移 / 产品代码一行未碰（**纯证据与文档卫生**）；`tsc` / 单测 / `vite build` 不受影响，`checkEolDrift` 仍 **0 漂移**。
+
+
+## §44 归档 · 「上轮实查」历史条目（原样搬运，非删除）
+
+> 依 §44 铁律「**只保留最近 1 条「上轮实查」**」，本项目每轮把被覆盖的那一条**逐字节**搬到这里。
+> 检索：`grep "上轮实查" ROADMAP-CHANGELOG.md`。
+
+> 上轮实查：**2026-09-19 20:50 GMT+8 · OOS-001（Out-of-Sample Validation 完整实现）（用户规格）**（编号 `9bv`；`tsc` 0 error、新增单测 **65/65**（域 51 + 静态守卫 14）、全量 vitest 失败文件集合 **8→8 零新增**、**真实 E2E 阶段一 2/2 + 阶段二 12/12，且跨进程二次独立重跑 12/12 PASS**、前端可达性 `pass=true` 0 page error、`vite build` 成功、migration 幂等 2→0 executed、`checkEolDrift` 0 漂移）。**新增平行边**：`server/research/oosValidation/**`（10 文件 + 契约 + 前端面板 + 两表）—— 全仓**第一条「消费搜索结果且必须重跑回测」**的执行边，与上轮 `searchRobustness/**`（**零重跑**）**并列且语义正好相反**：一个在**冻结快照**上做邻域统计，一个必须在**它没见过的窗口**上**真重跑 + 真重算**；两者的静态守卫**镜像相反**（前者是 **黑名单**：禁止够到回测 / 评估端口；后者是 **必含清单**：必须够到 `createStrategyBacktestBridge` 与 `projectCanonicalMetrics`）⇒ 实现**不可互相搬移**（搬了就对侧测试立刻变红）。**交付**：参数冻结（只认「源 Search Run + `parameterHash`」，参数值由服务端从源组合行读出并**重算哈希复核**；冻结信息不足 ⇒ **显式失败，不允许静默回读当前策略版本补全**）、接口层**没有参数值位置**（`createOosValidationInputSchema` 只有 4 个键）、窗口隔离（`oosStart > searchEnd` 且默认禁重叠 ⇒ `OOS_WINDOW_OVERLAP`；源窗口自身倒挂 ⇒ `OOS_SEARCH_WINDOW_INVALID`；越出数据集 ⇒ `OOS_WINDOW_OUT_OF_DATASET_RANGE`）、五态状态机（`COMPLETED` **不允许再次执行**，重复 `start` 幂等返回 `executed=false`）、**真重跑**（复用唯一权威 `createStrategyBacktestBridge`，不自建第二套引擎）+ **真重算**（`projectCanonicalMetrics`）、IS/OOS 六项逐项对照 + 三项派生（收益退化 / 回撤变化 / 交易笔数变化）**但不产出任何「好 / 坏」结论**、两表（32 / 41 列、**0 FK、0 DML、0 ALTER**、手工幂等 SQL `drizzle/0043_oos_validation.sql` + `scripts/applyOosValidation.mjs`）、**同域扩 6 端点**（零新 router，且 **create 与 start 必须分开**）。**真实 E2E 判据全过**：IS `2025-01-02..2025-02-28` → `-10.36% / 年化 -54.50% / 回撤 10.54% / 8 笔 / 胜率 50% / 盈亏比 0.172`；OOS `2025-03-01..2025-04-30` → `+7.30% / 年化 +54.18% / 回撤 3.99% / 2 笔 / 胜率 50% / 盈亏比 3.179`；源三表 digest 三次采样（创建前 / 创建后 / 执行后）**逐字节相同** ⇒ **不污染源**；**撮合指纹 `edfb2bc3…` ≠ OOS 撮合指纹 `0c94868c…`** ⇒ 确实在**不同数据**上重跑（主判据是**撮合指纹差异**而非指标差异 —— 零成交时两侧指标天然相等）；`comparable = true`、`comparableCount = 6/6`。**未做任何性能优化**；**未改**任何历史 Search Run / Backtest Run / 策略版本；自建自清（探针专用的策略版本 / Search Run / 3 个 OOS Run 全部归零）。报告 = `docs/research/OOS-001-implementation.md`。
+
+## 2026-09-19 22:25 GMT+8 · WALK-FORWARD-001（Walk-Forward 验证完整闭环）· 编号 `9bw`
+
+- **取号依据**：`ROADMAP.md` §44.5 台账行原文「编号已用至 **`9bv`** ⇒ **下一个未占用 = `9bw`**」（**禁「末条 +1」**）；随后台账行与文件头铁律行**两处同步**改为「已用至 `9bw` ⇒ 下一个未占用 = `9bx`」。
+- **定位**：Walk-Forward 是**编排层**，不是新引擎 —— 时间滚动编排 + Fold 隔离 + 结果汇总 + 可追溯。链路 `历史数据 → IS Window → Parameter Search → 冻结候选 → 紧邻 OOS Window → 真实 Strategy Runtime + Backtest → OOS Metrics → 下一个 Window → 多 Fold 汇总`。
+- **新增第三条执行边与前两域的镜像关系（本任务最重要的架构事实）**：本仓现有三条并列执行边 —— ① `searchRobustness/**`（`9bu`）= **零重跑**：只在 `parameter_search_*` 冻结快照上做邻域统计，import **黑名单**钉死「够不到回测 / 评估端口」；② `oosValidation/**`（`9bv`）= **必须重跑 + 必须重算**：import **必含清单**钉死「必须够到 `createStrategyBacktestBridge` 与 `projectCanonicalMetrics`」；③ `walkForward/**`（`9bw`）= **黑名单 +「执行只能经由注入钩子」**：允许 import `oosValidation/types`（只为复用 `OOS_ENGINE_VERSION` / `OOS_METRICS_VERSION` 两个常量），但**不得** import 回测 / 评估 / 闭环执行面，且**不得**自建第二套执行路径 ⇒ 执行依赖在一个明确接缝上被反转（`WalkForwardExecutionHooks` 由组合根 `paramSearchRouter` 实现）。**三套守卫互不可搬移**：把本域实现搬进 `searchRobustness/**` 会对侧静态守卫立刻变红。
+- **命名不遮蔽（真踩并修）**：本域 `computeWalkForwardRunFingerprint` 与 C-19.1 `server/research/walkForwardRun/serialize.ts` **真实重名**（barrel 的 `export *` 会**静默互相遮蔽**）⇒ 改名 `computeWalkForwardValidationRunFingerprint`（类型同步改 `WalkForwardValidationRunFingerprintInput`）；并把「本域与 `walkForwardRun/**` 刻意不并入全域 `export *`、一律按文件路径 import」写进 `index.ts`（与 `oosValidation` / `searchRobustness` 同策略）。
+- **杀掉一个「被接受但从未生效」的死旋钮**：`createWalkForwardValidationInputSchema` 原暴露 `parameterSearchSpace`，但 WF 端点与执行钩子**从不读它**（`grep -rn parameterSearchSpace` 只命中 PS 端点 `paramSearchRouter.ts:1259` 与契约声明）⇒ 从契约**删除**该字段，并新增守卫「每个创建键都必须被域执行器 `request.${key}` 或 Router 端点段 `input.${key}` 真实读到」防再犯。**规格 §13 的「无死旋钮」由此从纪律变成断言。**
+- **窗口几何不重写**：复用既有 `generateWalkForwardSplits(tradeDates, config)`（`rolling` / `anchored`）；单位是**交易日个数**不是日历天；`oosStart = isEnd + 1 个交易日` 由 E2E 在**落库值**上核对，不只在内存里算过。
+- **真实 E2E 的确定性证据（三层，逐层加严）**：① 同进程（W13）`COMPLETED` 后重复 `start` ⇒ `executed=false`、Fold 行逐字节不变；② **跨进程**（W15，新增 `rerun` 模式）**换一个进程**再执行 ⇒ `executed=false`、耗时 7 s、**零新增行**（PS +0 / OOS +0），且 W4~W12 全部在新进程里**逐条复现一致**（含四条撮合指纹）；③ 创建阶段同配置副 Run 指纹一致（W11）。🔴 **W13 与 W15 不可互相替代**：若「已完成」的判定依赖内存态，W13 会绿、W15 会露馅。
+- **判据必须用撮合指纹而不是指标**：`tradeCount = 0` 时两侧指标天然相等（Fold#1 的 IS 就是 0 笔）⇒ 只比指标会把「真重跑」误判成「没重跑」。主判据 = `backtestFingerprint` 双侧不同。
+- **本轮连续 4 次证明「探针缺陷 ≠ 产品缺陷」分类法的价值（全部按要求先定性再动手，未放宽任何守卫）**：E2E `run` 首轮 7/10（W9/W10 同一根因 = `OWN_STRATEGY_ID` 用 `Date.now()` 生成导致跨进程重算 `parameterHash` 时用错 `strategyVersionId`；W12 = 把 `completedFoldCount` 错当成 `SUCCEEDED` 计数，读 `aggregate.ts` 确认 `completed = status === "OOS_COMPLETED"`、`contributing = outcome === "SUCCEEDED"` ⇒ `completed=2 / contributing=0` 本就是**正确**行为）+ DOM 首轮 2 条（作用域过宽 + 禁词判据未区分否定式免责）。修完第二轮 `run` **10/10**、`rerun` **11/11**、DOM **`pass=true`**。
+- **DOM 探针的两条推广性教训**：⒜ **作用域必须收窄到被测面板子树** —— `/parameter-search` 同页挂**四块**面板，兄弟面板的**免责文案本身就含禁词**（参数搜索面板「本产品不产出『最佳参数』结论」），整页 `innerText` 扫禁词会把**别的域判成本域违规**；`table tbody tr` 也会把兄弟面板的指标表一起数进来（实测 6 → 12）。收窄后**必须自证**（根节点 `data-slot` + 是否含兄弟面板按钮 + 文本长度随交互增长 800→2593→4328）。⒝ **禁词扫描要区分「否定式免责」与「肯定式结论」** —— 本面板**自己渲染的服务端 notes** 原文即「也不称任何 Fold 为「最好 / 最差」（规格 §12）」⇒ 裸词表扫描会把**正确的免责声明**判成违规；判据改为**双轨**（自由文本里含禁词的**行**必须同时含否定标记；标题 / 表头 / 按钮 / 徽标这些**结论承载面**一律不得出现）。
+- **工具链真踩（已记入 `MEMORY.md`）**：在**模板字符串内部**写注释时写了反引号 ⇒ 模板串提前闭合 ⇒ `SyntaxError`；而磁盘上仍是**上一版** `*.out.json`，极易把 stale 产物当成新结论读（本轮连读两次 stale）。⇒ 证据脚本写完先 `node --check`，且**必须先确认 stdout 有内容**再解析产物。
+- **验收（五件套 + 三层证据全绿）**：`tsc --noEmit` = **exit 0**；新增单测 **84/84**（域 48 + 静态边界 36）；全量 `vitest run` = **8 failed files / 17 failed tests**（283 文件 / 4805 用例），失败文件集合与基线**逐项一致 ⇒ 新失败 0**；`npm run build` = **exit 0**（`✓ 3042 modules transformed`、`dist/index.js 3.2mb`）；`checkEolDrift` = **0 漂移**；真实 TiDB E2E `create` **7/7** + `run` **10/10** + `rerun` **11/11** + `clean` 归零；前端可达性 DOM 探针 **`pass=true` / 0 page error / 深链连 Fold 选中一并还原**。
+- **边界**：零新依赖 / 零 `db:push` / 零 `drizzle-kit generate` / 零 FK / 零 ALTER / 未改任何历史数据；`server/**` 改动集中在 `drizzle/schema.ts`(2 表) + `server/paramSearchRouter.ts`(+6 端点 + 钩子实现) + 新增 `server/research/walkForward/**`(11 文件)；`client/**` 新增 1 面板 + 1 处挂载。**未再拆 `WALK-FORWARD-001.x`**（用户明确要求一次完成）。
+- **规格 §22 严格禁止清单逐条遵守**：未新建 Backtest / Metrics / Strategy Runtime / Parameter Search Engine；未复制 OOS Engine；未改历史结果；未自动推荐参数；未自动选最佳策略；未做策略评级；未隐藏 best-candidate；未用未来数据；未「先全量搜索后切 OOS」。
+

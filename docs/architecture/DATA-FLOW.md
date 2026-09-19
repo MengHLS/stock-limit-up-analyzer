@@ -197,6 +197,26 @@ ClosedLoopEvaluationRef.canonicalMetrics（唯一读数面）
         │  只读投影（searchResult.ts#projectCanonicalMetrics，**零重算**）
         ▼
 parameter_search_result（六指标 + metricsSource + backtestFingerprint + evaluationId）
+
+```text
+# ROBUSTNESS-001 —— Parameter Search → Robustness（**新增数据流**）
+parameter_search_run（冻结参数空间快照 + FIXED 坐标 + 评估配置指纹）
+parameter_search_combination（组合成员 + parameterHash）
+parameter_search_result（六指标读数，metricsSource = canonical）
+        │  ↓ **只读消费**（Validity Gate：源 Run 必须 COMPLETED ∧ 有结果 ∧ 全部 canonical ∧ 不跨 Run 混行）
+        │  ↓ 冻结继承（规格 §9：**不重读当前 Strategy Version**）
+        ▼
+searchRobustness/analysis.ts#analyzeSearchRobustness（**纯函数**）
+        · domainValues：冻结搜索域 → 有序取值序列（决定「相邻」的含义）
+        · neighborhood：轴对齐 ±1..±N 步邻域（缺失格 MISSING_COMBINATION，**不补值**）
+        · 稳定性（双容差，口径随 Run 持久化）· 敏感性 · 六指标离散度 · 二维稳定性矩阵
+        ▼
+search_robustness_run / search_robustness_result / search_robustness_parameter_analysis
+```
+
+🔴 **本流不产生任何反向边**：稳健性分析**不写** `parameter_search_*`、**不调用** Backtest / 评估端口、**不重算** canonical metrics（源结果全列快照在分析前后逐字节相等，已由真实 E2E 断言）。
+🔴 **唯一新增的反向字段**：`parameter_search_run.referenceCheckApplied` / `unreferencedTunableCodesJson`（由 PARAMETER-001/002 的创建路径写入），目的是让稳健性分析能从**冻结快照**继承「参数是否真被策略消费」的结论，而不是回读当前策略版本。
+
         │
         ▼
 getSearchResults（服务端排序 / 过滤）→ 前端
@@ -208,3 +228,69 @@ getSearchResults（服务端排序 / 过滤）→ 前端
 - `datasetVersionId` 是唯一权威数据集坐标；`datasetVersionLabel` 仅展示（与基线 §1 口径一致）。
 - 缓存判据 = 策略版本 + 数据集坐标 + `parameterHash` + 执行政策版本 + 评估配置指纹（**含回测窗口**）。
 - `parameter_search_result.backtestRunId` 恒 NULL（评估端口不落 `closed_loop_backtest_run` 行）⇒ 追溯用指纹 + 坐标。
+
+---
+
+# OOS-001 —— Parameter Search → OOS Validation（**新增数据流，且是唯一“必须重跑”的消费边**）
+
+```text
+parameter_search_run（COMPLETED）
+parameter_search_combination（parameterHash → **冻结候选身份**）
+parameter_search_result（六指标冻结副本，metricsSource = canonical ⇒ OOS 的 IS 基线）
+        │  ↓ **只读消费 + 身份三重复核**（源 Run COMPLETED ∧ 有结果 ∧ 选中组合的读数 canonical）
+        │  ↓ 参数冻结：读源组合行 → **重算 parameterHash 复核** → 冻结成 resolvedParameterSet
+        │  ↓ 窗口隔离：oosStart > searchEnd ∧ 不重叠 ∧ 落在绑定数据集可用区间内
+        ▼
+oos_validation_run（先落库，state = CREATED；**此时还没跑任何回测**）
+        │  ↓ 显式 start（**create 与 start 必须分开**：创建便宜、执行昂贵）
+        ▼
+strategyEvaluation/backtestBridge#createStrategyBacktestBridge（**唯一权威回测入口**）
+        → 在 **OOS 窗口**上真实执行（不是复用 IS 结果、不是缩放 IS 结果）
+        ▼
+projectCanonicalMetrics（**必须重算**，metricsSource = canonical）
+        ▼
+oos_validation_result（OOS 六指标 + IS 冻结副本 + 六项 delta/ratio + 三项派生对照 + 撮合指纹）
+```
+
+🔴 **唯一反向边 = 零**：本流**不写** `parameter_search_*`、**不改**历史 Backtest Run、
+**不修改**源 Run 的任何一行（已由真实 E2E 对源三表做**表级 digest** 三次采样、逐字节相等断言）。
+🔴 **主判据是撮合指纹差异**（`backtestFingerprint`）：OOS 的指纹与源指纹**不同**才证明「真在不同数据上重跑」——
+只看指标差异会误判，因为 `tradeCount = 0` 时两侧指标**天然全相等**。
+⚠️ `IS` 侧读数来自 `toResultView` 的**冻结副本**（建库时已要求 canonical），**不是**此刻回读当前策略版本重算的。
+
+# WALK-FORWARD-001 —— Parameter Search × OOS 的**滚动编排**数据流（2026-09-19 · `9bw`）
+
+```
+datasetVersionId ──┐
+                   ├─→ windowSchedule（交易日序列 → Fold 坐标 + 双重指纹，创建时冻结）
+strategyVersion ───┘        │
+                            ▼
+              ┌── Fold #0 ──┬─ IS 窗口 → parameter_search_run → 候选组合行 → 冻结（parameterHash 复核）
+              │             └─ OOS 窗口 + 冻结参数 → oos_validation_run → canonical 指标
+              │                        ↓
+              │             walk_forward_fold（窗口 / 状态 / 子 Run 身份 / 冻结候选 / 双侧指标 / 撮合指纹）
+              ├── Fold #1 ── （同上，**独立搜索、独立 OOS Run，不共享任何候选**）
+              ▼
+        walk_forward_run（六项冻结坐标 + scheduleJson + aggregateJson 描述性汇总）
+```
+
+## 坐标传递
+
+- 🔴 **运行时权威坐标仍是 `datasetVersionId`**；`windowSchedule` 只承载**几何**（哪些交易日属于哪一折）。
+- 🔴 **切窗不拉全量 OHLC**：Node 侧只取**交易日序列**（`index_daily`），切窗是**下标运算**；
+  真实行情只在服务端既有回测引擎内按窗口取用（规格 §20）。
+- 🔴 **六项冻结坐标随 Fold 行一起落库**（不只存在 Run 行上）⇒ 单看一个 Fold 行即可自证「没漂移」。
+
+## 与前两条消费边的区别（**三条边产物表互不重叠**）
+
+| 边 | 输入 | 输出表 | 是否重跑 |
+|---|---|---|---|
+| ROBUSTNESS-001 | `parameter_search_*` 冻结快照 | `search_robustness_*` | ❌ 零重跑 |
+| OOS-001 | 源 Search Run + `parameterHash` + 一个 OOS 窗口 | `oos_validation_*` | ✅ 重跑一次 |
+| **WALK-FORWARD-001** | 冻结配置 + 交易日序列（自己派生子窗口） | **`walk_forward_*`** | ✅ **逐 Fold 各重跑一次** |
+
+⚠️ **「真在不同数据上重跑」的主判据是撮合指纹 `backtestFingerprint` 差异，不是指标差异** ——
+因为 `tradeCount = 0` 时两侧指标**天然全相等**（本项目实测 Fold#1 的 IS 就是 0 笔）。
+
+⚠️ **禁「先跑整个 Parameter Search 再把结果切成多 OOS Fold」**：每 Fold 必须**独立搜索**
+（`WALK_FORWARD_SEARCH_NOT_INDEPENDENT`）；E2E 以「两 Fold 的 `sourceSearchRunId` 互不相同」为判据。

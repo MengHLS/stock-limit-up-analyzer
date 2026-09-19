@@ -146,7 +146,7 @@
 | 项 | 内容 |
 |---|---|
 | 负责 | 收益 / 风险 / 回撤 / 交易质量指标；策略参数评估端口；闭环 evaluation 阶段 |
-| 不负责 | 撮合（属 Backtest）；稳健性扰动（属 Robustness） |
+| 不负责 | 撮合（属 Backtest）；稳健性扰动（属 Robustness）；**搜索结果的邻域稳定性分析**（属 Robustness 的 `searchRobustness` 子模块，**只读**本域结果） |
 | 权威入口 | `server/research/strategyEvaluation/**`（5 文件）：`evaluateStrategyParameters`（`evaluate.ts:159`）、`createStrategyParameterEvaluator`、`deriveParameterSpaceFromDocument`、`createStrategyBacktestBridge` |
 | 主输出字段 | `StrategyEvaluationResult.evaluation: ClosedLoopEvaluationRef` |
 | 指标出口 | `performanceMetrics/evaluate.ts:100` · `riskAdjustedMetrics/evaluate.ts:83` · `tradeQualityMetrics/evaluate.ts:87` |
@@ -168,6 +168,7 @@
 |---|---|---|---|
 | 扰动重估 | `server/research/robustness/**`（8 文件） | 成本 / 滑点 / 参数 / 执行四轴扰动 + 漂移归因 | ✅ `paramSearchRouter.ts:794` |
 | 随机化 | `server/research/stochasticRobustness/**`（12 文件） | Monte Carlo / Bootstrap / 成交顺序随机化 | ✅ `paramSearchRouter.ts:840` |
+| **搜索结果邻域稳定性**（ROBUSTNESS-001） | `server/research/searchRobustness/**`（11 文件） | 消费**已算完**的 Parameter Search 结果，在**冻结快照**上做邻域稳定性 / 敏感性 / 离散度 / 二维稳定性矩阵分析 —— **零重跑回测、零重算指标**（结构性不可重跑，静态守卫测试钉住）；结论落三表并通过 6 个端点可达 | ✅ `paramSearchRouter.ts`（`createRobustnessRun` / `listRobustnessRuns` / `getRobustnessRun` / `startRobustnessRun` / `cancelRobustnessRun` / `getRobustnessResults`） |
 | 因子消融 | `server/research/factorAblation/**`（9 文件） | IS-OOS 双轨因子消融 + 贡献 | ❌ **仅测试可达**（CODE_READY） |
 | legacy 守卫 | `server/overfittingGuard.ts` | DSR / PSR / bootstrap / monkey / cost-sensitivity | ✅ `db.ts:74`、`leaderCandidates.ts:1271`、`factorScore.ts:3` |
 
@@ -283,3 +284,66 @@
 - **不产出系统性结论**：只提供数据 + 排序 / 过滤能力；默认排序是 `combinationIndex`（**刻意不是收益降序**），
   前端与报告都**不得**出现「最佳参数 / 最优策略 / 推荐参数」这类措辞。
 - **指标口径**：唯一读数面仍是 `ClosedLoopEvaluationRef#canonicalMetrics`（六项只读投影，**零重算**）。
+
+---
+
+## 15. OOS-001 增量（2026-09-19 · `9bv`）
+
+**§8 OOS 的更新**（其余章节不变；§7 Robustness 的**新增一条并列模块**见下）：
+
+- **新增模块**：`server/research/oosValidation/**`（10 文件）—— **冻结候选参数的样本外真实重跑验证**。
+- **新增能力**：OOS Run 五态状态机（`CREATED / RUNNING / COMPLETED / FAILED / CANCELLED`）；
+  **参数冻结可复核**（源组合行重算 `parameterHash`）；**真进闭环重跑回测**并重算 canonical 指标；
+  **IS/OOS 六项逐项对照** + 三项派生（收益退化 / 回撤变化 / 交易笔数变化）；落两表。
+- **新增入口**（同域，**不新开 router**）：`server/research/oosValidation/executor.ts#createOosValidationRun` /
+  `#startOosValidationRun` / `#cancelOosValidationRun` / `#readOosValidationRun` / `#readOosValidationResult`；
+  端点 `paramSearch.{createOosRun,listOosRuns,getOosRun,startOosRun,cancelOosRun,getOosResult}`。
+- 🔴 **与 §7 Robustness 的并列关系（语义正好相反，不许合并）**：
+
+| 模块 | 问题 | 是否重跑 | 守卫方向 |
+|---|---|---|---|
+| `searchRobustness/**`（§7，`9bu`） | 「同一份结果**邻域**稳不稳？」 | ❌ 零重跑零重算 | import **黑名单** |
+| `oosValidation/**`（本节，`9bv`） | 「换到**没见过**的数据上**还成立吗**？」 | ✅ **必须重跑 + 重算** | import **必含清单** |
+
+- **与仓库既有四套 OOS 模块的分工**（**不重复实现**）：
+  `research/trainValidationOos.ts`（纯模型，不可执行）· `research/validationSelection.ts`（进程内计划候选
+  `FrozenOosCandidate`）· `research/oosEvaluation.ts`（自述「不实现任何回测 / 交易」）·
+  `research/oosIsolation/**`（记录 / 检查层，无重跑语义）。
+  本域的**根本差别四条**：① Run 身份与状态机；② 参数冻结**可复核**；③ **真进闭环重跑**；④ **落库可追溯**。
+- **域边界**：**不负责**挑参数（参数择优属 Parameter Search）；**不修改**源 Search Run / 结果 / 历史 Backtest Run；
+  **不产出**「最佳 / 最优 / 推荐」结论；**不定义** Walk-Forward 编排（下一阶段才可能）。
+- **指标口径**：OOS 侧**必须重算**（`projectCanonicalMetrics` 经闭环重跑读数），
+  IS 侧取源 Search 结果的**冻结副本**（`toResultView`）⇒ 两侧同表头对齐，口径差异**看得见**。
+- 🔴 **`null` ≠ `0`**：算不出来显示「—」，不用 0 顶替；`averageWin` / `averageLoss` **两侧都拿不到**
+  ⇒ 如实登记为 Known Risk，**不补值**。
+
+---
+
+## 16. WALK-FORWARD-001 增量（2026-09-19 · `9bw`）
+
+**新增模块**：`server/research/walkForward/**`（11 文件）—— **持久化滚动窗口验证的编排层**。
+
+- **新增能力**：窗口排程冻结（`ROLLING` / `EXPANDING`；四个几何量单位 = **交易日个数**）+ 双重指纹；
+  Fold 六态生命周期；**Leakage Guard**；候选冻结（源组合行重算 `parameterHash` 复核）；
+  **逐 Fold 独立搜索 + 紧邻样本外真实重跑**；多 Fold **描述性**汇总；落两表。
+- **新增入口**（同域，**不新开 router**）：`server/research/walkForward/executor.ts#createWalkForwardValidationRun` /
+  `#startWalkForwardValidationRun` / `#cancelWalkForwardValidationRun` / `#readWalkForwardValidationRun` /
+  `#readWalkForwardValidationFold` / `#listWalkForwardValidationRuns`；
+  端点 `paramSearch.{createWalkForwardRun,listWalkForwardRuns,getWalkForwardRun,getWalkForwardFold,startWalkForwardRun,cancelWalkForwardRun}`。
+- 🔴 **与 §7 / §15 的三方并列关系（语义各不相同，禁合并、禁互相搬移）**：
+
+| 模块 | 问题 | 是否重跑 | 守卫方向 |
+|---|---|---|---|
+| `searchRobustness/**`（§7，`9bu`） | 「同一份结果**邻域**稳不稳？」 | ❌ 零重跑零重算 | import **黑名单** |
+| `oosValidation/**`（§15，`9bv`） | 「换到**没见过**的一个窗口上还成立吗？」 | ✅ 必须重跑 + 重算 | import **必含清单** |
+| `walkForward/**`（本节，`9bw`） | 「**滚动一串窗口**、每折各自独立搜参后，还成立吗？」 | ✅ 必须**逐 Fold** 重跑（每 Fold 一个独立搜索 + 一个独立 OOS Run） | **黑名单 +「执行只能经由注入钩子」** |
+
+- **与 C-19.1 `server/research/walkForwardRun/**` 的分工**（**不重复实现**）：后者是**内存态窗口几何原语**
+  （`generateWalkForwardSplits`，id 前缀 `WFA`），无持久化、无状态机、无冻结、无重跑；
+  本域**复用它的切窗函数**（`windowSchedule.ts`），并在其上叠加「身份 / 状态机 / 冻结 / 真实重跑 / 落库」。
+  ⇒ 两者**刻意不并入同一个 barrel**（同名导出会静默遮蔽）。
+- **域边界**：**不负责**挑参数（参数择优属 Parameter Search）；**不修改**源 Search Run / 结果 / 历史 Backtest / OOS Run；
+  **不产出**「最佳 / 推荐 / 最优 Fold」结论，**不做**策略评级，**不自动淘汰**任何 Fold；
+  取消只在**下一个 Fold 边界**生效（逐 Fold 串行）。
+- 🔴 **`null` ≠ `0`**：可用 Fold 为 0 时六项统计量全 `null`、`availableCount = 0`，**不退化成 0**；
+  `INSUFFICIENT_TRADING_ACTIVITY` 是**事实**（既不算成功也不算失败），**不计入**均值 / 中位数。

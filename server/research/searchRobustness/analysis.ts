@@ -189,7 +189,18 @@ export function analyzeSearchRobustness(
     }),
   );
 
-  const matrix = buildRobustnessMatrix({ axes, results, index });
+  const matrix = buildRobustnessMatrix({
+    axes,
+    rows: results.map((result) => ({
+      parameterHash: result.parameterHash,
+      parameters: result.parameters,
+      status: result.status,
+      stable: result.stable,
+      stabilityRatio: result.stabilityRatio,
+      totalReturnPct: result.metrics.totalReturnPct,
+      tradeCount: result.metrics.tradeCount,
+    })),
+  });
 
   const accumulator = new RobustnessSummaryAccumulator();
   for (const result of results) accumulator.add(result.status, result.neighborhoodIncomplete);

@@ -230,23 +230,28 @@ export interface NeighborhoodAssessment {
 /**
  * 构造并评估一个基组合的邻域（轴对齐、±1..±distance 步）。
  *
- * `baseParameters` 里的轴上取值必须能在冻结序列里定位；定位不到的轴记一条
- * `unresolvedAxes` 说明（**不猜**），该轴不产生邻居。
+ * 🔴 **邻域结构与稳定性判定必须解耦**（ROBUSTNESS-001 E2E 实测修正）：
+ *   即使基组合自身不可判（`tradeCount = 0` / 源结果缺失 ⇒ 两个基准指标为 `null`），
+ *   **邻域仍然必须被完整构造** —— 否则 `expectedNeighborCount` 会被报成 0，
+ *   读起来像「这个组合在搜索空间里没有邻居」，而事实是邻域存在、只是**基准**没有读数。
+ *   ⇒ `expectedNeighborCount` / `presentNeighborCount` / 缺格明细**恒为事实**；
+ *     只有 `delta*` / `withinTolerance` 依赖于基准指标（基准为 `null` 时它们全为 `null`）。
  */
 export function assessNeighborhood(input: {
   readonly baseParameters: Readonly<Record<string, RobustnessParameterValue>>;
   readonly axes: readonly NeighborhoodAxis[];
   readonly index: SourceIndex;
   readonly config: ResolvedRobustnessAnalysisConfig;
-  /** 基准侧的容差衡量指标（已确认可用）。 */
-  readonly baseTotalReturnPct: number;
-  readonly baseMaxDrawdownPct: number;
+  /** 基准侧的容差衡量指标；基准不可判时为 `null`（此时只输出邻域结构，不做容差判定）。 */
+  readonly baseTotalReturnPct: number | null;
+  readonly baseMaxDrawdownPct: number | null;
 }): NeighborhoodAssessment & { readonly unresolvedAxes: readonly string[] } {
   const { axes, index, config } = input;
   const neighbors: RobustnessNeighbor[] = [];
   const unresolvedAxes: string[] = [];
   const seenKeys = new Set<string>();
   const baseKey = combinationLookupKey(input.baseParameters);
+  const baseUsable = input.baseTotalReturnPct !== null && input.baseMaxDrawdownPct !== null;
 
   for (const axis of axes) {
     const baseValue = input.baseParameters[axis.parameter] ?? null;
@@ -279,11 +284,11 @@ export function assessNeighborhood(input: {
       let deltaTotalReturnPct: number | null = null;
       let deltaMaxDrawdownPct: number | null = null;
       let withinTolerance: boolean | null = null;
-      if (usability.usable && result !== undefined) {
+      if (usability.usable && result !== undefined && baseUsable) {
         const totalReturnPct = result.metrics.totalReturnPct as number;
         const maxDrawdownPct = result.metrics.maxDrawdownPct as number;
-        deltaTotalReturnPct = totalReturnPct - input.baseTotalReturnPct;
-        deltaMaxDrawdownPct = maxDrawdownPct - input.baseMaxDrawdownPct;
+        deltaTotalReturnPct = totalReturnPct - (input.baseTotalReturnPct as number);
+        deltaMaxDrawdownPct = maxDrawdownPct - (input.baseMaxDrawdownPct as number);
         withinTolerance =
           Math.abs(deltaTotalReturnPct) <= config.returnTolerancePct
           && Math.abs(deltaMaxDrawdownPct) <= config.drawdownTolerancePct;
@@ -485,19 +490,24 @@ export function assessBaseCombination(input: {
       : { ...result.metrics };
 
   const usability = judgeMetricUsability({ presentCombination: true, result });
-  const emptyNeighborhood: NeighborhoodAssessment = {
-    neighbors: [],
-    expectedNeighborCount: 0,
-    presentNeighborCount: 0,
-    validNeighborCount: 0,
-    stableNeighborCount: 0,
-    stabilityRatio: null,
-  };
 
   let status: SearchRobustnessResult["status"];
   let statusReason: string | null;
-  let neighborhood = emptyNeighborhood;
   const sensitivityEntries: RobustnessSensitivityEntry[] = [];
+
+  /**
+   * 🔴 **邻域恒被构造**（E2E 实测修正）：基准不可判（无成交 / 源结果缺失）**不是**「没有邻域」。
+   *   只有 `delta*` / `withinTolerance` 依赖基准指标 ⇒ 基准不可判时它们为 `null`，
+   *   而 `expectedNeighborCount` / `presentNeighborCount` / 缺格明细仍是**事实**。
+   */
+  const neighborhood = assessNeighborhood({
+    baseParameters: combination.parameters,
+    axes: input.axes,
+    index,
+    config,
+    baseTotalReturnPct: usability.usable ? (metrics.totalReturnPct as number) : null,
+    baseMaxDrawdownPct: usability.usable ? (metrics.maxDrawdownPct as number) : null,
+  });
 
   if (!usability.usable) {
     status =
@@ -505,44 +515,39 @@ export function assessBaseCombination(input: {
         ? "INSUFFICIENT_TRADING_ACTIVITY"
         : "SOURCE_RESULT_UNAVAILABLE";
     statusReason = usability.reason;
+    if (neighborhood.unresolvedAxes.length > 0) {
+      statusReason =
+        `${statusReason ?? ""} 基组合的取值在冻结搜索域里定位不到`
+        + `（轴：${neighborhood.unresolvedAxes.join(" / ")}）⇒ 该轴不产生邻居，如实登记，不猜测。`;
+    }
   } else {
     const baseTotalReturnPct = metrics.totalReturnPct as number;
-    const baseMaxDrawdownPct = metrics.maxDrawdownPct as number;
-    const assessed = assessNeighborhood({
-      baseParameters: combination.parameters,
-      axes: input.axes,
-      index,
-      config,
-      baseTotalReturnPct,
-      baseMaxDrawdownPct,
-    });
-    neighborhood = assessed;
     for (const axis of input.axes) {
-      for (const neighbor of assessed.neighbors) {
+      for (const neighbor of neighborhood.neighbors) {
         if (neighbor.axis !== axis.parameter) continue;
         sensitivityEntries.push(
           toSensitivityEntry({ axis, neighbor, baseTotalReturnPct }),
         );
       }
     }
-    if (assessed.validNeighborCount < config.minValidNeighbors) {
+    if (neighborhood.validNeighborCount < config.minValidNeighbors) {
       status = "INSUFFICIENT_NEIGHBORHOOD";
       statusReason =
-        `有效邻居 ${String(assessed.validNeighborCount)} < 要求 ${String(config.minValidNeighbors)}`
-        + `（理论邻居 ${String(assessed.expectedNeighborCount)}，其中源 Search 实存 `
-        + `${String(assessed.presentNeighborCount)}）⇒ 证据不足，既判不稳也不判不稳（规格 §3.2/§11）。`;
-    } else if (assessed.stableNeighborCount === assessed.validNeighborCount) {
+        `有效邻居 ${String(neighborhood.validNeighborCount)} < 要求 ${String(config.minValidNeighbors)}`
+        + `（理论邻居 ${String(neighborhood.expectedNeighborCount)}，其中源 Search 实存 `
+        + `${String(neighborhood.presentNeighborCount)}）⇒ 证据不足，既判不稳也不判不稳（规格 §3.2/§11）。`;
+    } else if (neighborhood.stableNeighborCount === neighborhood.validNeighborCount) {
       status = "STABLE";
       statusReason = null;
     } else {
       status = "UNSTABLE";
       statusReason =
-        `有效邻居中 ${String(assessed.validNeighborCount - assessed.stableNeighborCount)} 条超出容差`
+        `有效邻居中 ${String(neighborhood.validNeighborCount - neighborhood.stableNeighborCount)} 条超出容差`
         + `（收益 ±${String(config.returnTolerancePct)} 个百分点 / 回撤 ±${String(config.drawdownTolerancePct)} 个百分点）。`;
     }
-    if (assessed.unresolvedAxes.length > 0) {
+    if (neighborhood.unresolvedAxes.length > 0) {
       const suffix =
-        `基组合的取值在冻结搜索域里定位不到（轴：${assessed.unresolvedAxes.join(" / ")}）`
+        `基组合的取值在冻结搜索域里定位不到（轴：${neighborhood.unresolvedAxes.join(" / ")}）`
         + `⇒ 该轴不产生邻居，如实登记，不猜测。`;
       statusReason = statusReason === null ? suffix : `${statusReason} ${suffix}`;
     }
@@ -568,7 +573,14 @@ export function assessBaseCombination(input: {
     metricsSource: input.metricsSource,
     status,
     stable: status === "STABLE",
-    stabilityRatio: neighborhood.stabilityRatio,
+    /**
+     * 🔴 基准不可判时比例**必须为 `null`**（E2E 实测修正）：`assessNeighborhood` 会把
+     *   基线不可判的邻居全部记 `withinTolerance = null` ⇒ `stableNeighborCount = 0`，
+     *   于是比例算出来是 **0/valid = 0**，读起来像「邻居全不稳」=
+     *   把一个「没数据」伪装成「最坏结论」（规格 §11 明确禁止）。
+     *   邻域结构（理论 / 实存 / 有效邻居数）仍是事实，比例只表达**可判**的稳定性强度。
+     */
+    stabilityRatio: usability.usable ? neighborhood.stabilityRatio : null,
     stableNeighborCount: neighborhood.stableNeighborCount,
     validNeighborCount: neighborhood.validNeighborCount,
     expectedNeighborCount: neighborhood.expectedNeighborCount,

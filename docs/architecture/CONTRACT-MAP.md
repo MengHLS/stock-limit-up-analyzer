@@ -187,3 +187,82 @@
    契约层**不得**新增任何派生指标字段。
 2. 🔴 **`searchMethod` 的扩展位是「已登记未实现」**：`PARAMETER_SEARCH_METHODS` 含 `RANDOM_SEARCH` / `BAYESIAN` / `TPE`，
    但 `IMPLEMENTED_PARAMETER_SEARCH_METHODS` 只有 `GRID_SEARCH` ⇒ 未实现的方法**入参层响亮拒绝**，**不静默降级**为 GRID_SEARCH。
+
+## C-91 ROBUSTNESS-001 增量：新增契约 `shared/searchRobustnessContracts.ts`（2026-09-19 · `9bu`）
+
+| 项 | 内容 |
+|---|---|
+| 定义位置 | `shared/searchRobustnessContracts.ts`（zod schema + `z.infer` 派生类型，**同文件**） |
+| producer | `server/research/searchRobustness/{analysis,executor,persistence,run}.ts` |
+| consumer | `server/paramSearchRouter.ts`（6 端点入参 / 出参校验）、`client/src/components/robustness/SearchRobustnessPanel.tsx` |
+| 复用（**不重复定义**） | `parameterSearchValueSchema`（参数值同域）、`parameterSearchSpaceDefinitionSchema`（冻结快照同域）、`parameterSearchRunStatusSchema`（状态机同词表） |
+| 持久化 | **是**：Run 视图 ↔ `search_robustness_run`；Result 视图 ↔ `search_robustness_result`；参数分析视图 ↔ `search_robustness_parameter_analysis` |
+| Breaking | **否**：全新文件；`C-90` 只**向后兼容**新增两个**可选**字段（`referenceCheckApplied` / `unreferencedTunableCodes`）⇒ 历史行读取不炸 |
+
+### 契约纪律（本契约特有）
+
+1. 🔴 **不得出现结论性词汇**（「最佳 / 最优 / 推荐 / winner / best / optimal」）：排序字段只有描述性维度（`combinationIndex` / 六指标 / `stabilityRatio`）。该禁令由 `tests/server/research/searchRobustness/robustnessBoundary.test.ts` 以**源码扫描 + 负例自测**钉住（守卫自身失效也会被抓到）。
+2. 🔴 **`null` 就是 `null`**：指标不可用、`stabilityRatio` 无有效邻居 / 基准不可判、`withinTolerance` 无基准 —— 契约里全部显式 `.nullable()`，**禁止**用 0 / 100 冒充。
+3. ⚠️ 矩阵单元格 `status` 的私有取值 `MISSING` / `AMBIGUOUS` **不属于**运行期判定枚举（`ROBUSTNESS_COMBINATION_STATUSES`）—— 它们是「矩阵投影层」的格状态，刻意分开，避免下游把「源 Search 缺该组合」误当「判定结论」。
+
+## C-92 OOS-001 增量：新增契约 `shared/oosValidationContracts.ts`（2026-09-19 · `9bv`）
+
+| 项 | 内容 |
+|---|---|
+| 定义位置 | `shared/oosValidationContracts.ts`（zod schema + `z.infer` 派生类型，**同文件**） |
+| producer | `server/research/oosValidation/{freeze,window,gate,comparison,run,definitionFingerprint,persistence,executor}.ts` |
+| consumer | `server/paramSearchRouter.ts`（6 端点入参 / 出参校验）、`client/src/components/oos/OosValidationPanel.tsx` |
+| 复用（**不重复定义**） | `parameterSearchValueSchema`（参数值同域）、`PARAMETER_SEARCH_RUN_STATUSES`（**状态机同词表**：`OOS_VALIDATION_RUN_STATUSES = PARAMETER_SEARCH_RUN_STATUSES`） |
+| 持久化 | **是**：Run 视图 ↔ `oos_validation_run`；Result 视图 ↔ `oos_validation_result` |
+| Breaking | **否**：全新文件；**未改动**任何既有契约（`C-90` / `C-91` 本轮零改动） |
+
+### 契约纪律（本契约特有）
+
+1. 🔴 **创建入参只有 4 个键**（`sourceSearchRunId` / `parameterHash` / `oosWindow` / `metricsVersion?`）
+   —— **没有放参数值的位置**。这是规格 §5「OOS 不允许再调参」在**契约层**的落地：
+   让「顺手传一组更好的参数」**在类型层面就无处可写**（UI 侧由 DOM 探针实测「创建区 `<input>` 恰为 4 个」）。
+2. 🔴 **`create` 与 `start` 是两个入参 / 两个端点**：`createOosValidationInputSchema` 只冻结配置，
+   执行由 `oosValidationRunIdInputSchema` + `startOosRun` 单独触发 ⇒ 契约层就**不允许**「创建即执行」。
+3. 🔴 **不得出现结论性词汇**（「最佳 / 最优 / 推荐 / winner / best / optimal」）：
+   `oosComparisonSchema` 只承载 **delta / ratio / 退化 / 回撤变化** 这类**描述性量**，
+   **不含**任何 verdict 字段。该禁令由 `tests/server/research/oosValidation/oosValidationBoundary.test.ts`
+   以**源码扫描**钉住。
+4. 🔴 **`null` 就是 `null`**：`oosMetricsSchema` 六项全部 `.nullable()`；
+   `ratio` 在 IS = 0 时**必须**为 `null`（**不许**用 0 / 100 冒充）；
+   `comparisonJson` 的 `notes` 显式说明「为何不可比」⇒ 不静默。
+5. ⚠️ `oosComparisonSchema` **不是索引签名**而是**显式命名字段**（`totalReturnPctDelta` / `…Ratio` …）
+   ⇒ 新增指标时**必须同时**改契约与前端 `METRIC_ROWS`，否则前端显示「—」而不是编一个数
+   （这个「漏改就显示 —」的性质是**刻意**的，不是疏漏）。
+6. ⚠️ `OosContractAssertion<A, B>` 类型断言用于把「视图类型」与「领域层返回类型」钉成同一份，
+   避免两处各自漂移。
+
+## C-93 WALK-FORWARD-001 增量：新增契约 `shared/walkForwardContracts.ts`（2026-09-19 · `9bw`）
+
+| 项 | 内容 |
+|---|---|
+| 定义位置 | `shared/walkForwardContracts.ts`（zod schema + `z.infer` 派生类型，**同文件**） |
+| producer | `server/research/walkForward/{types,windowSchedule,lifecycle,leakage,freeze,selection,aggregate,run,persistence,executor}.ts` |
+| consumer | `server/paramSearchRouter.ts`（6 端点入参 / 出参校验）、`client/src/components/walkForward/WalkForwardPanel.tsx` |
+| 复用（**不重复定义**） | `parameterSearchValueSchema`（参数值同域）、`PARAMETER_SEARCH_RUN_STATUSES` 家族（**状态机同词表**）、`OOS_ENGINE_VERSION` / `OOS_METRICS_VERSION`（**只取常量**，见 §契约纪律 5） |
+| 持久化 | **是**：Run 视图 ↔ `walk_forward_run`；Fold 视图 ↔ `walk_forward_fold` |
+| Breaking | **否**：全新文件；**未改动**任何既有契约（`C-90` / `C-91` / `C-92` 本轮零改动） |
+
+### 契约纪律（本契约特有）
+
+1. 🔴 **窗口几何四键的单位是「交易日个数」**（`isWindowDays` / `oosWindowDays` / `stepDays` + `windowMode`）——
+   不是日历天。契约层与 UI 层（`#wf-is-days` 旁的单位提示）**双处写明**。
+2. 🔴 **`create` 与 `start` 是两个入参 / 两个端点**：`createWalkForwardValidationInputSchema` 只冻结排程与身份，
+   执行由 `walkForwardRunIdInputSchema` + `startWalkForwardRun` 单独触发 ⇒ 契约层就**不允许**「创建即执行」。
+3. 🔴 **无死旋钮**：创建入参里的**每一个键**都必须被真实读到 —— 要么进域执行器的
+   `request.${key}`，要么进 Router 端点段 `input.${key}`。该断言由
+   `tests/server/research/walkForward/walkForwardBoundary.test.ts` §13 **逐键扫描**钉住。
+   （本轮据此**删除**了原本「被接受但从未生效」的 `parameterSearchSpace`。）
+4. 🔴 **不得出现结论性词汇**（「最佳 / 最优 / 推荐 / winner / best / optimal / 评级 / 择优」）：
+   `walkForwardSelectionPolicySchema` 只承载**位置规则**（`FIRST_ELIGIBLE_COMBINATION` / `EXPLICIT_PARAMETER_HASH`），
+   `walkForwardAggregateSchema` 只承载**描述性统计**（`foldCount` / 各计数 / `isStats` / `oosStats`），
+   **不含**任何 verdict 字段。源码扫描守卫钉住。
+5. 🔴 **跨域只取常量、不取实现**：本契约与域层引用 `oosValidation/types` 仅为
+   `OOS_ENGINE_VERSION` / `OOS_METRICS_VERSION` ⇒ 静态守卫为这条路径留**后缀级窄豁免**，
+   并**断言豁免面恰为 `["../oosValidation/types"]`**（豁免面扩大即测试变红）。
+6. 🔴 **冻结坐标六项**：创建时冻结 `strategyFingerprint` / `datasetVersionId` / `windowSchedule` /
+   `selectionPolicy` / `engineVersion` / `metricsVersion`；运行期任一不一致 ⇒ **FAIL LOUDLY**，**不自动修复**。

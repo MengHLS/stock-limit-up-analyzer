@@ -237,3 +237,84 @@ strategy_versions ──(闭环运行)─ closed_loop_backtest_run (strategyId, 
 - 🔴 **不改历史**：`parameter_search_run.parameterSpaceJson`（参数空间快照）**写入即冻结** —— `ON DUPLICATE KEY UPDATE` 集合中**不含**它，
   未来策略版本修改后历史 Run 的搜索空间**不会被重新解释**。
 - 三表**不参与任何执行路径**：清空它们不影响回测正确性，只影响「能不能回看 / 续跑」。
+
+---
+
+## D-91 ROBUSTNESS-001 增量：新增 3 张表 + 源表 2 列（2026-09-19 · `9bu`）
+
+| 表 | 列数 | 角色 | 索引 |
+|---|---|---|---|
+| `search_robustness_run` | 33 | 稳健性分析运行头（源 Search Run 坐标 + **冻结参数空间快照** + 判定口径 + 汇总计数 + 状态 + 时间戳） | `uq_search_robustness_run_id (robustnessRunId)` UNIQUE · `idx_..._source (sourceSearchRunId)` · `idx_..._created` · `idx_..._status` |
+| `search_robustness_result` | 28 | 单组合稳健性结果（六指标**冻结副本** + 稳定性判定 + 邻域 / 离散度 / 敏感性 JSON） | `uq_search_robustness_result_hash (robustnessRunId, parameterHash)` UNIQUE · `idx_..._run` · `idx_..._status` |
+| `search_robustness_parameter_analysis` | 16 | 单参数分析（域形态 + 取值数 + 稳定/不稳组合数 + 敏感性 + 取值维离散度 + verdict） | `uq_search_robustness_parameter_name (robustnessRunId, parameterName)` UNIQUE · `idx_..._run` |
+
+**源表列追加（唯一一处 `ALTER`）**：
+
+| 表 | 新增列 | 类型 | 语义 |
+|---|---|---|---|
+| `parameter_search_run` | `referenceCheckApplied` | `boolean NULL` | PARAMETER-002 死参数筛查是否执行；**`NULL` = 该列之前落库的历史行（未知）** |
+| `parameter_search_run` | `unreferencedTunableCodesJson` | `longtext NULL` | 被排除的死参数 code 快照（JSON 数组） |
+
+🔴 **为什么必须补这两列**：PARAMETER-002 的死参数筛查结论原先**只进 API 回执、没有落库**；而 ROBUSTNESS-001 §12 要求下游**继承**它，§9 又禁止回读**当前**策略版本来重新解释历史搜索。补列后：新 Run 写 `true/false`，历史行保持 `NULL` ⇒ 下游如实标 `ROBUSTNESS_PARAMETER_REFERENCE_UNVERIFIED`，**不伪造「已验证」**。
+
+**约束遵守（与 §1 / §5 / §6 一致）**：
+- **零 FK**：三张新表 0 个外键；全库 FK 总数仍为 **0**（apply 脚本断言）。
+- **幂等**：手写 SQL `drizzle/0042_search_robustness.sql`（`-- @guard: column|table ...`）+ `scripts/applySearchRobustness.mjs`；首跑 **4 executed**、第二次 **0 executed / 4 skipped**、`pass=true`。
+- 🔴 **零 DML 静态断言**：apply 脚本剥掉注释后只允许 `CREATE TABLE IF NOT EXISTS` 与 `ALTER TABLE ... ADD COLUMN`，出现 `DROP` / `MODIFY` / `CHANGE COLUMN` / `RENAME` / `TRUNCATE` 即失败 ⇒ 「不改历史行」是**可静态断言**的事实。
+- **真库比对**：既有 16 张邻接表列签名**逐表完全一致**；`parameter_search_run` 只允许追加**预期的那两列**（幂等判据 = 「尚未存在的预期列被追加到末尾」，因此第二次运行不会假失败）。
+- **禁 `db:push` / `drizzle-kit generate`**：`drizzle/meta/_journal.json` 仍止于 0023，未改动。
+- 🔴 **快照与口径冻结**：`searchSnapshotJson` / `analysisConfigJson` 的 `ON DUPLICATE KEY UPDATE` 集合中**不含**它们。
+- 三张新表**不参与任何执行路径**：清空它们不影响回测正确性，只影响「能不能回看稳定性结论」。
+- ⚠️ **物理列序**：`ALTER ... ADD COLUMN` 把两列追加到**表末**（与 `drizzle/schema.ts` 的声明位置不同序）；drizzle 一律显式列名查询 ⇒ 不影响读写，apply 脚本按「原签名 + 追加列」比对。
+
+---
+
+## D-92 OOS-001 增量：新增 2 张表（2026-09-19 · `9bv`）
+
+| 表 | 列数 | 角色 | 索引 |
+|---|---|---|---|
+| `oos_validation_run` | 32 | OOS 验证运行头（源 Search Run 坐标 + **冻结候选身份** + 策略 / 数据集快照 + 定义指纹 + **IS / OOS 双窗口** + 冻结参数集 + 固定坐标 + 口径 / 引擎版本 + 状态 + 时间戳） | `uq_oos_validation_run_id (oosRunId)` UNIQUE · `idx_..._source (sourceSearchRunId)` · `idx_..._created` · `idx_..._status` |
+| `oos_validation_result` | 41 | 单 Run 结果（**IS 六项冻结副本** + **OOS 六项重跑读数** + 两侧口径来源与年化基数 + `comparisonJson` + 撮合 / 评估指纹 + 状态） | `uq_oos_validation_result_candidate (oosRunId, sourceParameterHash)` UNIQUE · `idx_..._run (oosRunId, sourceCombinationIndex)` · `idx_..._status (oosRunId, status)` |
+
+🔴 **与 D-91（`search_robustness_*`）的关系：并存、同族、语义相反** ——
+前者是「冻结结果上的邻域稳定性（**零重跑零重算**）」，本表是「样本外**真重跑 + 真重算**」。
+两族**表名同族**（都以源 Search Run 为输入姿态），因此**不可**把 `oos_validation_*` 当
+`search_robustness_*` 的第二版来读。
+
+**约束遵守（与 §1 / §5 / §6 一致）**：
+- **零 FK**：两张新表 0 个外键；全库 FK 总数仍为 **0**（apply 脚本断言）。
+- **零 DML、零 ALTER、零 DROP**：`drizzle/0043_oos_validation.sql` 只有两条
+  `CREATE TABLE IF NOT EXISTS` ⇒ 「不改任何历史行」是**可静态断言**的事实
+  （apply 脚本剥注释后只允许 CREATE TABLE，出现 DML / `DROP` / `MODIFY` / `CHANGE` / `RENAME` / `TRUNCATE` 即失败）。
+- **幂等**：手写 SQL（`-- @guard: table` × 2）+ `scripts/applyOosValidation.mjs`；
+  首跑 **2 executed**、第二次 **0 executed / 2 skipped**、`pass=true`。
+- **真库比对**：既有 **20 张**邻接表列签名**逐表完全一致**；`ALTERED_TABLES = {}`（本轮**零 ALTER**）。
+- **禁 `db:push` / `drizzle-kit generate`**：`drizzle/meta/_journal.json` 仍止于 0023，未改动。
+- 🔴 **写入即冻结**：`resolvedParameterSetJson` / `searchSnapshotJson` 的 `ON DUPLICATE KEY UPDATE`
+  集合中**不含**它们 —— 这是规格 §5「OOS 不允许调参」在**持久化层**的落地。
+- 两张新表**不参与任何执行路径**：清空它们不影响回测正确性，只影响「能不能回看这次样本外验证」。
+- ⚠️ **`datasetVersionId` 可空**：源 Run 若走「回落重建」路径会得到 `null`，此时 **口径与正常路径不同**
+  （只继承 `boards` / `excludeSt`）⇒ 表里保留 `NULL` 而不是编一个坐标。
+
+## D-93 WALK-FORWARD-001 增量：新增 2 张表（2026-09-19 · `9bw`）
+
+| 表 | 列数 | 说明 |
+|---|---|---|
+| `walk_forward_run` | **33** | 一次滚动验证的 Run：身份 / 状态 / 六项冻结坐标 / `scheduleJson`（整份窗口排程）/ Fold 计数 / 汇总 `aggregateJson` |
+| `walk_forward_fold` | **36** | 单个 Fold：窗口坐标 / 状态与结果 / 子 Run 身份（`sourceSearchRunId` / `oosRunId`）/ 冻结候选（组合序号 + `parameterHash` + `resolvedParameterSetJson`）/ IS 与 OOS 六项 canonical 指标及来源 / 撮合指纹 |
+
+- 🔴 **0 FK / 0 DML / 0 ALTER**：手工幂等 SQL `drizzle/0044_walk_forward.sql`
+  （两条 `CREATE TABLE IF NOT EXISTS`，9618 B）+ `scripts/applyWalkForward.mjs`
+  （`-- @guard:` 指令 + 零 DML 静态断言 + **列签名逐列比对** + **索引比对** + 0 FK 校验；三模式 `--check` / `--dry-run` / apply）。
+  ⇒ **第二次执行安全**。
+- 🔴 **唯一约束即幂等机制**：`uq_walk_forward_run_id`（`walkForwardRunId`）⇒ 重放收敛为一行；
+  `(walkForwardRunId, foldIndex)` ⇒ 重执行**覆盖同一 Fold**，不堆重复行。
+- 🔴 **写入面白名单**：本域**只写** `walk_forward_*` 两表；
+  为自己的 Fold 建 PS / OOS Run 是**通过既有 PS / OOS application service**完成的（记在 W14 计数里），
+  **不改**任何源 Search Run / 结果 / 历史 Backtest / OOS 行。
+- ⚠️ **`datasetVersionId` 参与冻结**：运行期读数与冻结值不一致 ⇒ `WALK_FORWARD_DATASET_VERSION_DRIFT`（FAIL LOUDLY），
+  表里保留真值而**不**回填一个「看起来对」的坐标。
+
+🔴 **与 D-91（`search_robustness_*`）/ D-92（`oos_validation_*`）的关系：三族并存、语义各不相同** ——
+D-91 是**冻结快照的邻域统计**（零重跑），D-92 是**单窗口的真实重跑**，D-93 是**多窗口滚动的真实重跑 + 描述性汇总**。
+三者的守卫方向互不相同，**实现不得互相搬移**。

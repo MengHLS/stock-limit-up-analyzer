@@ -1,6 +1,6 @@
 # SYSTEM-BASELINE — 全局架构基线
 
-> **Baseline Version：`v1.1.1`**（patch：PARAMETER-002 实现细节 + 行为修正；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
+> **Baseline Version：`v1.4.0`**（minor：WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
 > **Last Audit Time：`2026-09-19`**（SYSTEM-BASELINE-001，一次性全局审计）
 > **Last Change Time：`2026-09-19`**（见 `CHANGE-AUDIT.md`）
 > **审计方式**：真实代码 + 真实库（只读探针）+ 既有测试基线；**代码变更 = 0 / DB 变更 = 0 / migration = 0**。
@@ -85,9 +85,10 @@
 | **Parameter Search** | 参数空间搜索、稳定区判定、滚动优化 | 定义策略、产出 Production | **PREPARATION / PARTIAL** |
 | **Backtest** | 历史执行模拟 | 策略发现、参数择优 | **READY** |
 | **Evaluation** | 收益/风险/回撤/交易质量指标 | 撮合、稳健性扰动 | **PARTIAL** |
-| **Robustness** | 成本/滑点/参数/执行扰动、随机化 | OOS 隔离、PBO | **FACT**（技术预览） |
-| **OOS** | IS/OOS 隔离与账本 | 参数择优 | **FACT**（技术预览） |
+| **Robustness** | 成本/滑点/参数/执行扰动、随机化、**搜索结果邻域稳定性（ROBUSTNESS-001，零重跑）** | OOS 隔离、PBO | **FACT**（扰动/随机化为技术预览；`searchRobustness` **已落库持久化**） |
+| **OOS** | IS/OOS 隔离与账本；**冻结候选参数的样本外真实重跑验证（OOS-001，必须重跑）** | 参数择优 | **FACT**（隔离账本为技术预览；`oosValidation` **已落库持久化**） |
 | **Walk-Forward** | Train→Optimize→Freeze→Test 编排 | 参数择优算法 | **FACT**（技术预览） |
+| **Walk-Forward（持久化滚动验证）** | **逐 Fold 独立搜索 → 冻结候选 → 紧邻样本外真实重跑 → 多 Fold 描述性汇总（WALK-FORWARD-001，编排层）** | 参数择优 / 自动选最佳 Fold / 评级 | **FACT**（`walkForward/**` **已落库持久化**；C-19.1 内存态几何原语仍为技术预览） |
 | **Overfitting** | CSCV-PBO + 参数敏感性 | — | **FACT**（技术预览） |
 | **Simulation (Paper)** | 贴近实盘的模拟账户 + 前向纸面 | 真实下单（无实现） | **FACT** + 编排引擎 CODE_READY |
 | **Production** | 完整闭环部署 / 实盘 | — | **PLANNED** |
@@ -584,3 +585,147 @@ Baseline says A  ∧  实际代码是 B
    `SCHEMA_DEFINITION_VIEW_CONFLICT` / `_VIEW_DRIFT`（校验器**正确拒绝**）。
 5. ⚠️ `dataset_version.startDate/endDate` 是 **UTC 时间戳** ⇒ 取业务日期必须按**北京时区**
    （PARAMETER-001 已登记；本任务把该口径落进了 `readDatasetVersionWindow`，成为**单一实现**）。
+
+## ROBUSTNESS-001 增量（2026-09-19 · 编号 `9bu`）
+
+> 本节只登记**本轮真实发生的变化**。逐项清单见 `CHANGE-AUDIT.md` 同名条目。
+
+### 新增「并列兄弟」子模块（**收敛而非新建第二套**）
+
+`robustness:` 域下现在有**三个并列模块**，语义互不重叠：
+
+| 模块 | 语义 | 是否重跑 | 落库 |
+|---|---|---|---|
+| `server/research/robustness/**`（C-18.1） | 成本/滑点/参数/执行**四轴扰动重估** | ✅ 需注入 evaluator | ❌（内存态 `ROBUSTNESS_RUN`） |
+| `server/research/stochasticRobustness/**`（C-18.2） | Monte Carlo / Bootstrap / 成交顺序随机化**重估** | ✅ | ❌ |
+| `server/research/searchRobustness/**`（ROBUSTNESS-001） | **冻结 Parameter Search 结果上的邻域稳定性分析** | ❌ **零重跑、零指标重算** | ✅ 三表 |
+
+🔴 **「零重跑」不是承诺而是结构事实**：`searchRobustness/**` 的 import 集被静态守卫测试钉死（不得出现 `backtest` / `strategyEvaluation` / `closedLoop` / `strategyCore` / `runWorkbenchAssembly` / `researchEngine`）。
+
+### 新增表与列
+
+- `search_robustness_run`(33 列) / `search_robustness_result`(28 列) / `search_robustness_parameter_analysis`(16 列)，**0 FK**；
+- `parameter_search_run` **ADD COLUMN** `referenceCheckApplied` / `unreferencedTunableCodesJson`（NULLable）。
+  🔴 **为什么必须补列**：PARAMETER-002 的死参数筛查结论原先**只进 API 回执、没有落库**，而下游稳健性分析要继承它（规格 §12）却不能回读**当前**策略版本（规格 §9 禁止用未来版本重新解释历史搜索）。补列后：新 Run 写入 `true/false`，**历史行保持 `NULL` = 未知** ⇒ 下游如实标 `ROBUSTNESS_PARAMETER_REFERENCE_UNVERIFIED`。
+
+### 行为语义（不知道就会读错）
+
+1. 🔴 `stabilityRatio` **无有效邻居时为 `null`**（不是 0）；基准不可判时同样为 `null`。`null` 与 `0` 的区别是「没有可判的邻居」与「邻居全都不稳」。
+2. 🔴 **邻域结构（理论 / 实存 / 有效邻居数、缺格明细）恒为事实** —— 即使基准组合自己 `tradeCount = 0` 或源结果缺失，也照常报告邻域（**本次 E2E 抓到的缺陷正是这里**）。
+3. 🔴 `tradeCount = 0` ⇒ `INSUFFICIENT_TRADING_ACTIVITY`，**既不判稳定也不判不稳定**，且**不计入** `validNeighborCount`。
+4. 🔴 缺格（源 Search 中不存在该邻居组合）恒为 `MISSING_COMBINATION` + 全 `null`，**禁止补值 / 插值**。
+5. ⚠️ 搜索空间含 **> 2 个可变参数**时，二维矩阵一个格子会命中多条组合 ⇒ 如实标 `AMBIGUOUS`（不挑一条代表），被略过的参数名进 `omittedParameters`。
+6. ⚠️ 数值型 `ENUM` 搜索域**不可编译**（PARAMETER-001 既有口径：数值域只支持**等步长区间**）⇒ 写 E2E 时须用 `DECIMAL_RANGE` 得到 2 个取值。
+7. 🔴 **系统不产出「最佳 / 最优 / 推荐参数」**：排序只有描述性字段（含 `stabilityRatio`），该禁令由源码扫描测试钉住（**含负例自测**，防止守卫自身失效）。
+
+### 前端可达性（`接线完成 ≠ 用户够得到`）
+
+- 面板挂在 `/parameter-search`；详情 / 结果 / 矩阵被 `selectedRunId !== null` 包着 ⇒ 必须真点「查看详情」才可达；
+- 🔴 **深链 `?robRunId=<id>`**：直接用 URL 打开即自动选中该 Run（刷新 / 分享不丢上下文），已量 DOM 验证；
+- 🔴 二维矩阵**不用颜色表达「好坏」**：缺格用虚线边框、状态用文字，配色只跟随**状态种类**。
+
+## OOS-001 增量（2026-09-19 · 编号 `9bv`）
+
+> 本节只登记**本轮真实发生的变化**。逐项清单见 `CHANGE-AUDIT.md` 同名条目。
+
+### 新增模块：`server/research/oosValidation/**`（10 文件）
+
+**唯一职责**：把**某次参数搜索冻结下来的候选参数**，放到**它没参与过的数据窗口**上
+**真实重跑回测并重算 canonical 指标**，给出样本内外对照。
+
+🔴 **与 Robustness 的边界（两者是并列兄弟域，语义正好相反，不许合并）**：
+
+| 维度 | `searchRobustness/**`（ROBUSTNESS-001） | `oosValidation/**`（OOS-001） |
+|---|---|---|
+| 问的问题 | 「同一份结果**邻域**稳不稳？」 | 「换到**没见过**的数据上**还成立吗**？」 |
+| 是否重跑回测 | ❌ **零重跑、零指标重算** | ✅ **必须重跑**（并重算 canonical 指标） |
+| 数据 | 冻结的 Search 结果（原地） | **新的 OOS 窗口**（与 IS 不重叠） |
+| 守卫方向 | import **黑名单**（禁 `backtest`/`strategyEvaluation`/…） | import **白名单 + 必含清单**（必须出现 `createStrategyBacktestBridge` 与 `projectCanonicalMetrics`） |
+| 落库 | `search_robustness_*` 三表 | `oos_validation_*` 两表 |
+
+🔴 **「必须真重跑」不是承诺而是结构事实**：`oosValidation/**` 的 import 集被
+`tests/server/research/oosValidation/oosValidationBoundary.test.ts` 的**必含清单**正向钉死
+（`searchRobustness` 是反向黑名单，两者**镜像**）⇒ 把实现塞进 `searchRobustness/**` 会让守卫立刻变红。
+
+### 与仓库既有四套 OOS 模块的边界（**不重复实现，只补上「可执行 + 可追溯」**）
+
+| 既有模块 | STEP | 与本域差别 |
+|---|---|---|
+| `research/trainValidationOos.ts` | 6.4 | 纯模型，**不可执行、不落库** |
+| `research/validationSelection.ts` | 6.4 | `FrozenOosCandidate` = **进程内计划候选** |
+| `research/oosEvaluation.ts` | 6.4 | 文件头自述「**不实现任何回测 / 交易**」 |
+| `research/oosIsolation/**` | 19 (C-19.2) | **记录 / 检查层**，无重跑语义 |
+
+本域与它们的根本差别**四条**：① Run 身份与状态机；② 参数冻结**可复核**；
+③ **真进闭环重跑**；④ **落库可追溯**。
+
+### 新增表
+
+- `oos_validation_run` / `oos_validation_result`，**0 FK**、0 ALTER、0 DML（`drizzle/0043_oos_validation.sql`）。
+
+### 行为语义（不知道就会读错）
+
+1. 🔴 **冻结信息不足 ⇒ 显式失败**：OOS 只认 `源 Search Run + parameterHash`；参数值一律由服务端
+   从源组合行读出并**重算哈希复核**。**不允许**静默回读**当前**策略版本补全。
+2. 🔴 **接口层没有参数值位置**：`createOosValidationInputSchema` **只有 4 个键**
+   （`sourceSearchRunId` / `parameterHash` / `oosWindow` / `metricsVersion?`）——
+   让「顺手传一组更好的参数」在**契约层与 UI 层同时无处可写**（UI 侧由 DOM 探针实测「创建区 `<input>` 恰为 4 个」）。
+3. 🔴 **窗口隔离**：`oosStart > searchEnd`，默认**禁止重叠** ⇒ `OOS_WINDOW_OVERLAP`；
+   源窗口自身倒挂报 `OOS_SEARCH_WINDOW_INVALID`；越出数据集报 `OOS_WINDOW_OUT_OF_DATASET_RANGE`。
+4. 🔴 **`COMPLETED` 不允许再次执行**：重复 `start` 幂等返回既有结果（`executed=false`），
+   不重跑、不重算。
+5. 🔴 **「真在不同数据上重跑」的主判据 = 撮合指纹差异**（`backtestFingerprint`），
+   **优于看指标差异** —— 因为 `tradeCount = 0` 时两侧指标**天然全相等**，看指标会误判为「没重跑」。
+6. 🔴 **系统不产出「最佳 / 最优 / 推荐」**：排序 / 展示只有描述性字段；该禁令由源码扫描测试钉住。
+7. ⚠️ `null` ≠ `0`：算不出来显示「—」，**不用 0 顶替**。
+
+### 前端可达性（`接线完成 ≠ 用户够得到`）
+
+- 面板挂在 `/parameter-search`（**与 `SearchRobustnessPanel` 同一页、语义正好相反**：
+  一个零重跑、一个必须重跑）；
+- 🔴 **深链 `?oosRunId=<id>`**：直接用 URL 打开即自动选中该 Run（刷新 / 分享不丢上下文），已量 DOM 验证；
+- 🔴 **长请求按钮必须换文案**：「执行样本外验证」pending 时文案变成「正在样本外真实重跑（分钟级）…」。
+
+## WALK-FORWARD-001 增量（2026-09-19 · 编号 `9bw`）
+
+**基线 `v1.3.0` → `v1.4.0`**（minor）。新增**第三条并列执行边** `server/research/walkForward/**`（11 文件）
++ 契约 `shared/walkForwardContracts.ts` + 两表 + 同域 6 端点 + 1 前端面板。
+
+### 定位（一句话）
+
+Walk-Forward 是**编排层**，不是新引擎：时间滚动编排 + Fold 隔离 + 结果汇总 + 可追溯。
+链路 = `历史数据 → IS Window → Parameter Search → 冻结候选 → 紧邻 OOS Window → 真实 Strategy Runtime + Backtest → OOS Metrics → 下一个 Window → 多 Fold 汇总`。
+
+### 🔴 三方向镜像守卫（本仓现有三条并列执行边）
+
+| 执行边 | 编号 | 问题 | 是否重跑 | 守卫方向 |
+|---|---|---|---|---|
+| `searchRobustness/**` | `9bu` | 「同一份结果**邻域**稳不稳？」 | ❌ 零重跑零重算 | import **黑名单** |
+| `oosValidation/**` | `9bv` | 「换到**没见过**的数据上**还成立吗**？」 | ✅ 必须重跑 + 重算 | import **必含清单** |
+| `walkForward/**` | `9bw` | 「**滚动切窗**后每一折都独立成立吗？」 | ✅ 必须**逐 Fold** 重跑 | **黑名单 +「执行只能经由注入钩子」** |
+
+🔴 **三套守卫互不可搬移**：把本域实现搬进 `searchRobustness/**` 会对侧静态守卫立刻变红。
+
+### 执行接缝（为什么必须注入）
+
+```ts
+WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
+```
+
+由**组合根**（`server/paramSearchRouter.ts`）用**既有** PS / OOS application service 实现
+⇒ **零复制策略 IO、零 HTTP 自调用**，规格 §15 明禁的 `WalkForward → HTTP → OOS API → HTTP → Backtest` **不成立**。
+域层**允许** import `oosValidation/types`（只为复用 `OOS_ENGINE_VERSION` / `OOS_METRICS_VERSION` 两个常量），
+**不得** import 回测 / 评估 / 闭环执行面，也**不得**自建第二套执行路径。
+
+### 版本常量与命名不遮蔽
+
+- 新增 `WALK_FORWARD_VALIDATION_RUN_ID_PREFIX = "WFV"`（C-19.1 既有 `WALK_FORWARD_RUN_ID_PREFIX = "WFA"`）。
+- 🔴 本域 `computeWalkForwardValidationRunFingerprint`（原名 `computeWalkForwardRunFingerprint` 与
+  `walkForwardRun/serialize.ts` **真实重名**）⇒ 已改名。ESM `export *` 遇同名导出**静默遮蔽**
+  ⇒ **本域与 `walkForwardRun/**` 刻意不并入全域 `export *`，一律按文件路径 import**（与 `oosValidation` / `searchRobustness` 同策略）。
+
+### 已登记 Known Risk（继承既有结构性事实）
+
+- 全仓库 **11 个既有策略版本的 `ruleGraphRefs` 全为空** ⇒ 搜历史候选必被拒（`PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER`）；
+- `cand-360001@1.0.0` 的 3 个 TUNABLE 笛卡尔积 **1240 > 256** ⇒ `MAX_COMBINATIONS_EXCEEDED`（**禁截断**）；
+- `LeakageGuard` 对配方特征**恒通过** ⇒ 策略层无独立未来函数防护，安全全靠数据层 PIT（本域 future-leak 防护为**几何级**）。

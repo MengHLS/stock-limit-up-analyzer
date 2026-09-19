@@ -1,6 +1,31 @@
 /**
  * 由策略文档的 `parameters` 派生**参数搜索空间**（STEP B 落点③ 的接线件）。
  *
+ * ## 🔴 状态标记：`LEGACY / PREVIEW`（PARAMETER-002 判定，2026-09-19）
+ *
+ * 本文件是**旧派生器**：它读 `document.parameters`（**legacy v1 有损视图**，
+ * `ResearchParameterSchema` 里**没有 `parameterRole` 字段**）⇒ 只要 `FIXED` 参数带
+ * `min/max/step`，它就会**照样进搜索空间**（R-05 的机制）。
+ *
+ * ### 仍然保留的原因（实查有真实消费者，**不是死代码**）
+ *
+ * | 消费者 | 场景 | 为什么不能立刻切到新派生器 |
+ * |---|---|---|
+ * | `server/paramSearchRouter.ts`（`describe` / `run` 的 effectiveSpace） | **技术预览**端点 | 预览的入参是「调用方给的一张 `ParameterSpace`」，本就不是按 role 派生的语义 |
+ * | `server/research/closedLoopWiring/executors.ts`（**optimization 阶段**） | 闭环 14 阶段主链之一 | 该阶段只持有 `document`，**不持有** `strategy_parameters` 投影行；新派生器要求 projection（含 role）。切换属于**主链改动**，不在 PARAMETER-002 范围内（登记为遗留） |
+ *
+ * ### 🔴 PARAMETER-001/002 的持久化搜索**永远**使用新的 role-aware 派生器
+ *
+ * 唯一实现 = `server/research/parameterSearch/searchSpace.ts#deriveParameterSearchSpaceFromProjection`：
+ *   - 读 **`strategy_parameters` 投影的 `parameterRole`** ⇒ `FIXED` 不进搜索空间、`DERIVED` 不得直接搜索；
+ *   - 读**规则图参数引用面** ⇒ 排除「死参数」（声明为 TUNABLE 但决策引擎读不到）。
+ *
+ * **禁止**把 `server/research/parameterSearch/**` 切回本文件 —— 由
+ * `tests/server/research/parameterSearch/parameterSearchEffectiveness.test.ts` 的
+ * **静态源码守卫**钉住（一旦回退，测试立刻变红）。
+ *
+ * ---
+ *
  * ## 为什么必须从文档派生
  *
  * `paramSearchRouter.ts` 的 `MAPPABLE_PARAMETER_DICTIONARY` 是一张**固定 8 字段白名单**，

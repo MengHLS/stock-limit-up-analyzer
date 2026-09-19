@@ -324,3 +324,80 @@
 - **GLOBAL AUDIT REQUIRED**：**NONE**。
 
 ---
+
+## 2026-09-19 · ROBUSTNESS-001
+
+- **Task**：Parameter Search 结果稳健性分析完整实现（`9bu`）—— 在**冻结快照**上判断参数邻域的稳定性 / 敏感性 / 离散度，**零重跑回测、零重算指标**。
+- **Changed Domains**：`Robustness`（新增第三个并列子模块 `searchRobustness`）；`Parameter Search`（源表补两列 + 只读消费面）；`Frontend`（新面板 + 深色/浅色矩阵）。
+- **Changed Files**：
+  - 新增域：`server/research/searchRobustness/{types,canonical,domainValues,neighborhood,matrix,gate,analysis,run,persistence,executor,index}.ts`；
+  - 新增契约：`shared/searchRobustnessContracts.ts`；
+  - 新增前端：`client/src/components/robustness/SearchRobustnessPanel.tsx`；
+  - 新增迁移：`drizzle/0042_search_robustness.sql` + `scripts/applySearchRobustness.mjs`；
+  - 改既有：`server/paramSearchRouter.ts`（+6 端点、零新 router）、`drizzle/schema.ts`（+3 表 +2 列）、`server/research/parameterSearch/{persistence,executor}.ts`（补两列的写入 / 读出 + `finiteOrNull` 导出复用）、`shared/parameterSearchContracts.ts`（视图补两个**可选**字段）、`client/src/pages/ParameterSearch.tsx`（挂载面板）、`client/src/lib/status.ts`（+5 个状态语义色）。
+- **Changed Contracts**：新增 `C-91`（`shared/searchRobustnessContracts.ts`）；`C-90` 视图**向后兼容**新增两个可选字段（`referenceCheckApplied` / `unreferencedTunableCodes`）。
+- **Changed DB**：新增三表 `search_robustness_run`(33) / `search_robustness_result`(28) / `search_robustness_parameter_analysis`(16)，**0 FK**；`parameter_search_run` **ADD COLUMN** 两列（`referenceCheckApplied` / `unreferencedTunableCodesJson`，均 NULLable ⇒ 历史行为 `NULL` = 未知）。
+- **Changed Execution Path**：`paramSearch` router 新增 6 个端点；**既有执行链一行未改**（`searchRobustness` 结构性不 import 回测 / 评估端口，静态守卫测试钉住）。
+- **Potential Baseline Drift**：无（`GLOBAL AUDIT REQUIRED: NONE`）。⚠️ 须知道：① 稳健性分析**依赖**源 Search Run 为 `COMPLETED` 且结果全为 `canonical`（否则响亮拒绝）；② 对历史 Run（`referenceCheckApplied = NULL`）结论会带 `ROBUSTNESS_PARAMETER_REFERENCE_UNVERIFIED` 标记，含义是「不保证被分析的参数真的被策略消费」。
+- **Regression Result**：
+  - `npx tsc --noEmit`：**0 error**；
+  - 新增单测：`tests/server/research/searchRobustness/searchRobustness.test.ts` **54/54**、`robustnessBoundary.test.ts`（静态守卫）**5/5**；
+  - 全量 `vitest run`：失败文件集合 **8 → 8（零新增）**；
+  - `npx vite build`：成功；
+  - 真实 2×2 E2E：`_e2e_robustness_search.mts` → **42/42 PASS**；
+  - §12 真实历史数据路径：`_probe_robustness_unverified_reference.mts` → **9/9 PASS**；
+  - 前端可达性：`_probe_robustness_dom.mjs` → `pass=true`、0 page error、深链可自渲染（**无回归**）；
+  - migration：`scripts/applySearchRobustness.mjs` 首跑 4 executed / 次跑 **0 executed / 4 skipped**（幂等）、零 DML、0 FK；
+  - `node scripts/checkEolDrift.mjs`：**0 漂移**。
+- **Baseline Impact**：`v1.1.1` → **`v1.2.0`**（**minor**：新增 Domain 子模块 + 3 张表 + 1 份契约 + 6 个端点，既有执行链与核心契约**零破坏**）。已更新：`SYSTEM-BASELINE.md`（版本行 + 增量节 + §5 Robustness 行）、`system-manifest.yaml`（`robustness` 域三处）、`DOMAIN-MAP.md` §7、`DATA-FLOW.md`、`EXECUTION-FLOW.md`、`DATABASE-MAP.md`、`CONTRACT-MAP.md`（C-91）、`DEPENDENCY-MAP.md`、本文件。
+- **GLOBAL AUDIT REQUIRED**：**NONE**。
+
+---
+
+## 2026-09-19 · OOS-001
+
+- **Task**：Out-of-Sample Validation 完整实现（`9bv`）—— 把某次参数搜索冻结下来的候选参数，放到**它没参与过的数据窗口**上**真实重跑回测并重算 canonical 指标**，给出样本内外对照。核心原则：**IS / Search 用于发现参数；OOS 只用于验证，不能再次调参**。
+- **Changed Domains**：`OOS`（新增 `oosValidation` 模块 —— 全仓**第一条「消费搜索结果且必须重跑回测」**的执行边）；`Frontend`（`/parameter-search` 新增 OOS 面板）。
+- **Changed Files**：
+  - 新增域：`server/research/oosValidation/{types,window,freeze,gate,comparison,run,definitionFingerprint,persistence,executor,index}.ts`（10 文件）；
+  - 新增契约：`shared/oosValidationContracts.ts`；
+  - 新增前端：`client/src/components/oos/OosValidationPanel.tsx`；
+  - 新增迁移：`drizzle/0043_oos_validation.sql` + `scripts/applyOosValidation.mjs`；
+  - 改既有：`server/paramSearchRouter.ts`（+6 端点、零新 router）、`drizzle/schema.ts`（+2 表）、`client/src/pages/ParameterSearch.tsx`（挂载面板）。
+  - 🔴 **未改**：`server/research/parameterSearch/**` 的读写语义、`searchRobustness/**`（一行未动）、任何历史 Backtest / Search 数据行。
+- **Changed Contracts**：新增 `C-92`（`shared/oosValidationContracts.ts`）。`C-90` / `C-91` 本轮**零改动**。
+- **Changed DB**：新增两表 `oos_validation_run`(32 列) / `oos_validation_result`(41 列)，**0 FK、0 DML、0 ALTER、0 DROP**；既有 20 张邻接表列签名逐表一致。
+- **Changed Execution Path**：`paramSearch` router 新增 6 个端点（`createOosRun` / `listOosRuns` / `getOosRun` / `startOosRun` / `cancelOosRun` / `getOosResult`）；**新增一条并行执行链 E-91**；既有主链与 E-90 **零改动**。
+- **Potential Baseline Drift**：无（`GLOBAL AUDIT REQUIRED: NONE`）。⚠️ 须知道：① OOS Run **只认**「源 Search Run + `parameterHash`」，冻结信息不足时**显式失败**，**不允许**回读**当前**策略版本补全；② `COMPLETED` 后**不允许再次执行**（重复 `start` 幂等返回，`executed=false`）；③ 「真在不同数据上重跑」的**主判据是撮合指纹差异**，不是指标差异（零成交时两侧指标天然相等）；④ `averageWin` / `averageLoss` **两侧都拿不到** ⇒ 如实登记为 Known Risk，**不补值**。
+- **Regression Result**：
+  - `npx tsc --noEmit`：**0 error**（含 router 接线 / 重命名 / 前端面板 / DOM 锚点四轮改动后各复验一次）；
+  - 新增单测：`tests/server/research/oosValidation/oosValidation.test.ts` **51/51**、`oosValidationBoundary.test.ts`（静态守卫：写点白名单 / 源只读白名单 / **必含清单** / 措辞守卫 / **命名不遮蔽**）**14/14**，合计 **65/65**；
+  - 全量 `vitest run`：**失败文件集合 8 → 8（零新增）**，失败用例 **17 → 17（零新增）**；`oosValidation` 零命中；
+  - `npx vite build`：成功（3041 modules，17.81 s）；
+  - 真实 E2E（真实 tRPC + 真实 TiDB + 真实回测）：阶段一 `_e2e_oos_validation.search.out.txt` **2/2 PASS**（搜索真实耗时 42 s），阶段二 `.oos.out.txt` **12/12 PASS**，跨进程二次重跑 `.rerun.out.txt` **12/12 PASS**；源三表 digest 三次采样（创建前 / 创建后 / 执行后）**逐字节相同**；
+  - 前端可达性：`_probe_oos_dom.mjs` → **`pass=true`、0 page error**、深链 `?oosRunId=` 无需点击即自渲染；创建区 `<input>` **恰为 4 个**（规格 §5 的 DOM 级证据）；
+  - migration：`scripts/applyOosValidation.mjs` 首跑 **2 executed** / 次跑 **0 executed / 2 skipped**（幂等）、零 DML、`fk=0`、`altered=[]`；
+  - `node scripts/checkEolDrift.mjs`：**0 漂移**。
+- **Baseline Impact**：`v1.2.0` → **`v1.3.0`**（**minor**：新增 Domain 子模块 + 2 张表 + 1 份契约 + 6 个端点 + 1 个前端面板，既有执行链与核心契约**零破坏**）。已更新：`SYSTEM-BASELINE.md`（版本行 + 增量节 + §5 OOS 行）、`system-manifest.yaml`（`oos` 域）、`DOMAIN-MAP.md` §15、`DATA-FLOW.md`、`EXECUTION-FLOW.md`（新增 E-91）、`DATABASE-MAP.md`（D-92）、`CONTRACT-MAP.md`（C-92）、`DEPENDENCY-MAP.md`、本文件。
+- **GLOBAL AUDIT REQUIRED**：**NONE**。
+
+---
+
+## 2026-09-19 · WALK-FORWARD-001
+
+- **Task**：Walk-Forward 验证完整闭环（用户规格 24 节；编号 `9bw`）—— 滚动窗口编排 + Fold 隔离 + 结果汇总 + 可追溯。
+- **Changed Domains**：新增 `walkForward` 域（`server/research/walkForward/**`，11 文件）。既有域**零逻辑改动**（唯一边界接触点 = `paramSearchRouter` 新增 6 端点 + 实现注入钩子）。
+- **Changed Files**：
+  - 新增 `server/research/walkForward/{types,windowSchedule,lifecycle,leakage,freeze,selection,aggregate,run,persistence,executor,index}.ts`
+  - 新增 `shared/walkForwardContracts.ts` · `drizzle/0044_walk_forward.sql` · `scripts/applyWalkForward.mjs`
+  - 新增 `client/src/components/walkForward/WalkForwardPanel.tsx`
+  - 改 `server/paramSearchRouter.ts`（+6 端点 + 钩子实现）· `drizzle/schema.ts`（+2 表）· `client/src/pages/ParameterSearch.tsx`（挂载）
+  - 新增测试 `tests/server/research/walkForward/{walkForward,walkForwardBoundary}.test.ts`（84 例）
+  - 新增证据 `docs/evidence/_e2e_walk_forward.mts` + `_probe_wf001_recon.mts` + `_probe_walk_forward_dom.mjs`
+- **Changed Contracts**：新增 `C-93`（`shared/walkForwardContracts.ts`）。`C-90` / `C-91` / `C-92` 本轮**零改动**。🔴 **删除**了创建入参里「被接受但从未生效」的 `parameterSearchSpace`（新增「无死旋钮」守卫防再犯）。
+- **Changed DB**：新增 `D-93` 两表（`walk_forward_run` 33 列 / `walk_forward_fold` 36 列，**0 FK / 0 DML / 0 ALTER**，手工幂等 SQL `0044` + apply 脚本三模式）。**未** `db:push`、**未** `drizzle-kit generate`、**未**改任何历史数据。
+- **Changed Execution Path**：`paramSearch` router 新增 6 个端点（`createWalkForwardRun` / `listWalkForwardRuns` / `getWalkForwardRun` / `getWalkForwardFold` / `startWalkForwardRun` / `cancelWalkForwardRun`）；**新增一条并行执行链 E-92**（每折各造一条 E-90 + 一条 E-91）；既有主链 / E-90 / E-91 **零改动**。
+- **Potential Baseline Drift**：**无**。三条并列执行边的守卫方向已在本轮显式对齐（黑名单 / 必含清单 / 黑名单+注入），并把「命名不遮蔽」纪律写入 `DEPENDENCY-MAP.md`。
+- **Regression Result**：`tsc --noEmit` = **exit 0**；新增单测 **84/84**；全量 `vitest run` = **8 failed files / 17 failed tests = 既有基线，零新增**（283 文件 / 4805 用例，失败文件集合逐项一致）；`npm run build` = **exit 0**；`checkEolDrift` = **0 漂移**；真实 TiDB E2E `create` **7/7** + `run` **10/10** + 跨进程 `rerun` **11/11** + `clean` 归零；DOM 探针 **`pass=true`** / 0 page error。
+- **Baseline Impact**：`v1.3.0` → **`v1.4.0`**（**minor**：新增 Domain 子模块 + 2 张表 + 1 份契约 + 6 个端点 + 1 个前端面板，既有执行链与核心契约**零破坏**）。已更新：`SYSTEM-BASELINE.md`（版本行 + 域行 + 增量节）、`system-manifest.yaml`（`walkForwardValidation` 域）、`DOMAIN-MAP.md` §16、`CONTRACT-MAP.md`（C-93）、`DATABASE-MAP.md`（D-93）、`EXECUTION-FLOW.md`（E-92）、`DEPENDENCY-MAP.md`（D-91）、`DATA-FLOW.md`、本文件。
+- **GLOBAL AUDIT REQUIRED**：**NONE**。

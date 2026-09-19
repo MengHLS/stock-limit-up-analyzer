@@ -28,7 +28,7 @@ import { randomBytes } from "node:crypto";
 import { publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getLeaderCandidateBacktest } from "./db";
+import { getIndexDailyTradeDates, getLeaderCandidateBacktest } from "./db";
 import { DbStrategyRepository } from "./research/strategyPersistence/db";
 import {
   createStrategyBacktestBridge,
@@ -89,6 +89,48 @@ import {
   createExecutionConstraintDeclaration,
   type ExecutionConstraintDeclaration,
 } from "./research/executionConstraints";
+// ---------------------------------------------------------------------------
+// PARAMETER-001 — 持久化 Parameter Search（创建 / 列表 / 详情 / 启动 / 取消 / 结果 / 重试）
+// ---------------------------------------------------------------------------
+import {
+  createParameterSearchInputSchema,
+  executeParameterSearchInputSchema,
+  listParameterSearchResultsInputSchema,
+  listParameterSearchRunsInputSchema,
+  parameterSearchCreateResultSchema,
+  parameterSearchExecuteOutcomeSchema,
+  parameterSearchResultPageSchema,
+  parameterSearchRunDetailSchema,
+  parameterSearchRunIdInputSchema,
+  parameterSearchRunViewSchema,
+  retryParameterSearchCombinationInputSchemaV2,
+  type ParameterSearchMethod,
+} from "../shared/parameterSearchContracts";
+import {
+  cancelParameterSearchRun,
+  createParameterSearchRun,
+  executeParameterSearchRun,
+  listParameterSearchCombinations,
+  listParameterSearchResults,
+  listParameterSearchRuns,
+  readParameterSearchRun,
+  retryParameterSearchCombination,
+} from "./research/parameterSearch/executor";
+import {
+  resolvePrimaryDatasetVersionId,
+  resolvePrimaryDatasetVersionLabel,
+} from "./research/parameterSearch/coordinates";
+import { computeRunProgress } from "./research/parameterSearch/searchRun";
+// PARAMETER-002 — 死参数筛查（唯一权威收集器 = strategyCore/ruleGraph）与数据集窗口前置校验
+import { collectRuleParameterReferences } from "./strategyCore/ruleGraph";
+import { coreVersionFromDocument } from "./strategyCore/production/versionFromDocument";
+import {
+  getParameterSearchRunRow,
+  listParameterSearchCombinationRows,
+  listParameterSearchResultRows,
+  readDatasetVersionWindow,
+} from "./research/parameterSearch/persistence";
+import type { StrategyDocument } from "./research/strategySchema/types";
 
 // ---------------------------------------------------------------------------
 // 技术预览常量
@@ -373,6 +415,157 @@ async function resolveStrategyEvaluation(input: {
   };
 }
 
+/**
+ * PARAMETER-001 — 读取策略版本包（canonical 文档 + 5 类投影 + §17 追溯记录）。
+ *
+ * 🔴 为什么必须 `hasDefinition = true`：FIXED / TUNABLE / DERIVED 分类**只**存在于 canonical
+ *   `definition.parameters[].parameterRole`；历史 v1 文档的 `parameters`（有损视图）**没有 role**。
+ *   缺定义时若回落 legacy 视图 = 凭猜测决定「谁能被搜索」——那正是 R-05 要根治的缺陷。
+ *   ⇒ 响亮拒绝，并要求先补 canonical 定义。
+ */
+async function loadStrategyBundle(
+  strategyId: string,
+  strategyVersion: string,
+): Promise<Awaited<ReturnType<DbStrategyRepository["getVersionBundle"]>> & object> {
+  const bundle = await new DbStrategyRepository().getVersionBundle(strategyId, strategyVersion);
+  if (bundle === undefined) {
+    throw new ResearchValidationError([
+      {
+        code: "PARAMETER_SEARCH_STRATEGY_VERSION_NOT_FOUND",
+        path: "strategyVersion",
+        message: `库中不存在策略版本 ${strategyId}@${strategyVersion}`,
+      },
+    ]);
+  }
+  if (!bundle.hasDefinition) {
+    throw new ResearchValidationError([
+      {
+        code: "PARAMETER_SEARCH_STRATEGY_DEFINITION_MISSING",
+        path: "strategyVersion",
+        message:
+          `${strategyId}@${strategyVersion} 缺 canonical 富定义（历史 v1 文档）⇒ 无 parameterRole 可读，`
+          + `无法区分 FIXED / TUNABLE / DERIVED；禁止凭 legacy 有损视图猜测可搜索性。`,
+      },
+    ]);
+  }
+  return bundle;
+}
+
+/**
+ * PARAMETER-002 — 策略**规则图实际引用**的参数 code（决定一个 TUNABLE 参数是不是「死参数」）。
+ *
+ * 唯一权威收集器 = `strategyCore/ruleGraph.ts#collectRuleParameterReferences`（入口规则图 +
+ * 出场规则图），另加声明式出场规则（阈值型出场可携带 `parameterCode`）。
+ *
+ * 🔴 为什么必须有这一层：参数「声明在 schema 里」**不等于**「决策引擎会读它」。
+ *   实测 `cand-360001@1.0.0` 声明 3 个 TUNABLE 参数、规则图引用 **0** 个 ⇒
+ *   3 组不同取值产出的权益曲线**逐字节相同**。
+ *
+ * 决策引擎不可构造（存量 v1 文档 / Core 构造失败）⇒ 返回 `null`（**不做**筛查并如实说明），
+ * 绝不假装查过。
+ */
+function referencedParameterCodesOf(document: StrategyDocument): {
+  readonly refs: ReadonlySet<string> | null;
+  readonly note: string;
+} {
+  const core = coreVersionFromDocument({ document, createdAt: new Date().toISOString() });
+  if (!core.ok) {
+    return {
+      refs: null,
+      note:
+        `⚠️ 未做死参数筛查：Core 定义不可构造（${core.reason}）⇒ 决策引擎为既有配方，`
+        + "参数由配方门槛消费，本层无法枚举其引用面。",
+    };
+  }
+  const refs = new Set<string>(collectRuleParameterReferences(core.version.definition.ruleGraph));
+  const exitGraph = core.version.definition.exitRuleGraph;
+  if (exitGraph !== null) {
+    for (const code of collectRuleParameterReferences(exitGraph)) refs.add(code);
+  }
+  for (const rule of core.version.definition.exitRules) {
+    const code = (rule as { readonly parameterCode?: unknown }).parameterCode;
+    if (typeof code === "string" && code !== "") refs.add(code);
+  }
+  return {
+    refs,
+    note:
+      `死参数筛查已启用：规则图引用 ${String(refs.size)} 个参数`
+      + `（${[...refs].sort().join(" / ") || "（无）"}）。`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ROBUSTNESS-001 — 稳健性分析（下游消费者；零重跑、零指标重算）
+// ---------------------------------------------------------------------------
+import {
+  createRobustnessRunInputSchema,
+  listRobustnessResultsInputSchema,
+  listRobustnessRunsInputSchema,
+  robustnessRunIdInputSchema,
+  searchRobustnessCreateResultSchema,
+  searchRobustnessExecuteOutcomeSchema,
+  searchRobustnessResultPageSchema,
+  searchRobustnessRunDetailSchema,
+  searchRobustnessRunViewSchema,
+} from "../shared/searchRobustnessContracts";
+import {
+  buildMatrixForRun,
+  cancelSearchRobustnessRun,
+  computeRobustnessProgress,
+  createSearchRobustnessRun,
+  listSearchRobustnessParameterAnalyses,
+  listSearchRobustnessResults,
+  listSearchRobustnessRuns,
+  readSearchRobustnessRun,
+  startSearchRobustnessRun,
+} from "./research/searchRobustness";
+import {
+  createOosValidationInputSchema,
+  getOosResultInputSchema,
+  listOosValidationRunsInputSchema,
+  oosValidationCreateResultSchema,
+  oosValidationExecuteOutcomeSchema,
+  oosValidationResultViewSchema,
+  oosValidationRunDetailSchema,
+  oosValidationRunIdInputSchema,
+  oosValidationRunViewSchema,
+} from "../shared/oosValidationContracts";
+import {
+  cancelOosValidationRun,
+  createOosValidationRun,
+  definitionFingerprintOfDocument,
+  listOosValidationRuns,
+  readOosValidationResult,
+  readOosValidationRun,
+  startOosValidationRun,
+} from "./research/oosValidation";
+// WALK-FORWARD-001 — Walk-Forward 验证（时间滚动编排层；**只调用**上面两个域的
+// application service，不走 HTTP 自调用、不新建 Router）。
+import {
+  cancelWalkForwardRun as cancelWalkForwardValidationRun,
+  createWalkForwardRun as createWalkForwardValidationRunService,
+  listWalkForwardRuns as listWalkForwardValidationRunsService,
+  readWalkForwardFold as readWalkForwardValidationFoldService,
+  readWalkForwardRunDetail,
+  startWalkForwardRun as startWalkForwardValidationRunService,
+} from "./research/walkForward/executor";
+import type {
+  WalkForwardExecutionHooks,
+  WalkForwardRunView,
+} from "./research/walkForward/types";
+import {
+  createWalkForwardValidationInputSchema,
+  listWalkForwardRunsInputSchema,
+  walkForwardCancelOutcomeSchema,
+  walkForwardCreateResultSchema,
+  walkForwardExecuteOutcomeSchema,
+  walkForwardFoldInputSchema,
+  walkForwardFoldViewSchema,
+  walkForwardRunDetailSchema,
+  walkForwardRunIdInputSchema,
+  walkForwardRunViewSchema,
+} from "../shared/walkForwardContracts";
+
 // ---------------------------------------------------------------------------
 // 鲁棒性：扰动生成 + 扰动条目 → 回测选项映射
 // ---------------------------------------------------------------------------
@@ -606,6 +799,169 @@ const stochasticInputSchema = z.object({
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// WALK-FORWARD-001 — 执行钩子装配（组合根）
+// ---------------------------------------------------------------------------
+
+/**
+ * 装配 Walk-Forward 的执行钩子（规格 §15：**复用** OOS-001 与 Parameter Search 的
+ * application service；**禁止** `WalkForward → HTTP → OOS API → HTTP → Backtest`）。
+ *
+ * 本函数就是「零复制」的落点：
+ *   - 每个 Fold 的搜索 = `createParameterSearchRun` + `executeParameterSearchRun`
+ *     （搜索窗口**硬绑**该 Fold 的 IS 区间）；
+ *   - 每个 Fold 的样本外 = `createOosValidationRun` + `startOosValidationRun`
+ *     （候选只能用 `parameterHash` 指定 —— 参数值由 OOS 域从源组合行读出并**重算 hash 复核**）。
+ *
+ * 🔴 回执里的坐标一律**从落库的行读回**（`getParameterSearchRunRow` / `executed.run`），
+ *   不是把请求参数原样回传 —— 否则领域层的泄漏守卫就退化成「自己证明自己」。
+ */
+async function buildWalkForwardExecutionHooks(
+  run: WalkForwardRunView,
+): Promise<WalkForwardExecutionHooks> {
+  const bundle = await loadStrategyBundle(run.strategyId, run.strategyVersion);
+  const document = bundle.document;
+  const reference = referencedParameterCodesOf(document);
+  const datasetWindow =
+    run.datasetVersionId === null ? null : await readDatasetVersionWindow(run.datasetVersionId);
+  const documentFingerprint = definitionFingerprintOfDocument(document);
+  const codeVersion = bundle.versionRecord.codeVersion;
+
+  return {
+    readCurrentContext: async () => {
+      // 重新按**冻结的** strategyId@version 读一次策略包（不是「当前最新版本」）
+      const fresh = await loadStrategyBundle(run.strategyId, run.strategyVersion);
+      const fingerprint = definitionFingerprintOfDocument(fresh.document);
+      /**
+       * 🔴 数据集坐标的「当前值」按**两处权威的一致性**取，而不是直接把冻结值回传
+       *   （否则 `assertDatasetVersionUnchanged` 就成了恒真的空转）：
+       *     - Run 行上冻结的 `datasetVersionId`（运行时唯一权威坐标）；
+       *     - **当前**策略文档解析出的主数据集绑定。
+       *   两者都非空且不相等 ⇒ 文档绑定在执行前被改过 ⇒ 返回文档侧的值，
+       *   让领域层以 `WALK_FORWARD_DATASET_VERSION_DRIFT` 响亮拒绝（规格 §10：不自动修复）。
+       *   只在「两个权威打架」时才报，不对「调用方显式指定了与文档不同的数据集」误报。
+       */
+      const documentBoundDatasetId = resolvePrimaryDatasetVersionId(fresh.document);
+      const conflicted =
+        run.datasetVersionId !== null
+        && documentBoundDatasetId !== null
+        && documentBoundDatasetId !== run.datasetVersionId;
+      return {
+        strategyFingerprint: fingerprint.fingerprint,
+        datasetVersionId: conflicted ? documentBoundDatasetId : run.datasetVersionId,
+        datasetVersionLabel: run.datasetVersionLabel,
+        // 窗口按**冻结坐标**重新读一次 ⇒ 泄漏守卫用的是「此刻真实可用的数据范围」
+        datasetWindow,
+      };
+    },
+
+    runFoldSearch: async (request) => {
+      const created = await createParameterSearchRun({
+        strategyId: request.strategyId,
+        strategyVersion: request.strategyVersion,
+        datasetVersionId: run.datasetVersionId,
+        datasetVersionLabel: run.datasetVersionLabel,
+        // 🔴 搜索窗口 = 该 Fold 的 IS 窗口（唯一取值来源；不得放宽，也不得看未来）
+        startDate: request.isWindow.startDate,
+        endDate: request.isWindow.endDate,
+        searchMethod: run.searchMethod as ParameterSearchMethod,
+        projectionParameters: bundle.projections.parameters,
+        ...(reference.refs === null ? {} : { referencedParameterCodes: reference.refs }),
+        ...(datasetWindow === null ? {} : { datasetWindow }),
+        ...(request.maxCombinations === null ? {} : { maxCombinations: request.maxCombinations }),
+      });
+      const searchRunId = created.run.searchRunId;
+      const executed = await executeParameterSearchRun(searchRunId, {
+        document,
+        codeVersion,
+        ...(request.maxCombinations === null ? {} : { maxCombinations: request.maxCombinations }),
+      });
+      const [runRow, combinations, results] = await Promise.all([
+        getParameterSearchRunRow(searchRunId),
+        listParameterSearchCombinationRows(searchRunId),
+        listParameterSearchResultRows(searchRunId),
+      ]);
+      if (runRow === null) {
+        throw new ResearchValidationError([
+          {
+            code: "WALK_FORWARD_FOLD_SEARCH_ROW_MISSING",
+            path: "sourceSearchRunId",
+            message: `Fold 搜索 Run ${searchRunId} 落库后回读为空 ⇒ 拒绝把不存在的搜索当作已执行。`,
+          },
+        ]);
+      }
+      const searchStart = String(runRow.startDate);
+      const searchEnd = String(runRow.endDate);
+      return {
+        searchRunId,
+        // 从落库行读回的真实窗口（泄漏守卫判据 ①）
+        searchWindow: { startDate: searchStart, endDate: searchEnd },
+        // 该窗口内**真实存在的交易日**（唯一日历来源 = index_daily）⇒ 让判据 ⑤ 真正生效
+        searchTradeDates: await getIndexDailyTradeDates(searchStart, searchEnd),
+        combinations: combinations.map((row) => ({
+          combinationIndex: row.combinationIndex,
+          parameterHash: row.parameterHash,
+          parametersJson: row.parametersJson,
+        })),
+        results: results.map((row) => ({
+          combinationIndex: row.combinationIndex,
+          parameterHash: row.parameterHash,
+          status: row.status,
+          metrics: {
+            totalReturnPct: row.totalReturnPct,
+            annualizedReturnPct: row.annualizedReturnPct,
+            maxDrawdownPct: row.maxDrawdownPct,
+            tradeCount: row.tradeCount,
+            winRatePct: row.winRatePct,
+            profitFactor: row.profitFactor,
+          },
+          metricsSource: row.metricsSource,
+        })),
+        notes: [
+          `该 Fold 的**独立**搜索 Run = ${searchRunId}（窗口 ${searchStart}..${searchEnd}，`
+            + `组合 ${String(combinations.length)} 个，本次评估 ${String(executed.evaluatedCount)} 次、`
+            + `跳过 ${String(executed.skippedCount)} 次、缓存复用 ${String(executed.reusedFromCacheCount)} 次）`,
+          reference.note,
+          ...created.derivationNotes,
+          ...executed.notes,
+        ],
+      };
+    },
+
+    runFoldOos: async (request) => {
+      const created = await createOosValidationRun({
+        sourceSearchRunId: request.sourceSearchRunId,
+        parameterHash: request.parameterHash,
+        oosWindow: request.oosWindow,
+        strategyDefinitionFingerprint: documentFingerprint.fingerprint,
+        definitionFingerprintNote: documentFingerprint.note,
+      });
+      const oosRunId = created.run.oosRunId;
+      const executed = await startOosValidationRun(oosRunId, {
+        document,
+        codeVersion,
+        currentDefinitionFingerprint: documentFingerprint.fingerprint,
+      });
+      const result = executed.result;
+      return {
+        oosRunId,
+        executed: executed.executed,
+        // 从落库的 Run 视图读回真实窗口（不是回传入参；泄漏守卫判据 ④）
+        oosWindow: {
+          startDate: executed.run.oosWindow.startDate,
+          endDate: executed.run.oosWindow.endDate,
+        },
+        oosRunStatus: executed.run.status,
+        oosMetrics: result === null ? null : result.oosMetrics,
+        oosMetricsSource: result === null ? null : result.oosMetricsSource,
+        comparison: result === null ? null : result.comparison,
+        oosBacktestFingerprint: result === null ? null : result.backtestFingerprint,
+        notes: [...created.notes, ...executed.notes],
+      };
+    },
+  };
+}
 
 export const paramSearchRouter = router({
   /** 引擎配置默认值 / 参数空间字典 / 方法枚举（供前端表单填充，字段名逐字取自引擎常量）。 */
@@ -860,6 +1216,660 @@ export const paramSearchRouter = router({
       throw toTrpcError(error);
     }
   }),
+
+  // =========================================================================
+  // PARAMETER-001 — Parameter Search 完整闭环（持久化）
+  //
+  // 与上方技术预览端点（run / rolling / robustness / stochastic）的分工：
+  //   - 上方：**内存态**技术预览，结果跑完即弃（不落库）；
+  //   - 本组：**持久化**搜索 Run（可回看 / 可续跑 / 可重试），执行链同样复用评估端口。
+  // 两组共用同一 domain（`server/research/parameterSearch/**`），不构成第二套体系。
+  // =========================================================================
+
+  /** 创建 Search Run：只落 Run + 组合计划（**不执行回测**；执行走 `startSearch`）。 */
+  createSearch: publicProcedure
+    .input(createParameterSearchInputSchema)
+    .output(parameterSearchCreateResultSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const bundle = await loadStrategyBundle(input.strategyId, input.strategyVersion);
+        const document = bundle.document;
+        const datasetVersionId =
+          input.datasetVersionId ?? resolvePrimaryDatasetVersionId(document);
+        /**
+         * PARAMETER-002 §9（N-01）— **前置窗口校验**：读数据集窗口，越界即拒。
+         *
+         * 目的是避免「创建 Search → N 个组合全部因窗口越界失败 → 白付 N 次回测」
+         * （N-02 排查中实测：4 个组合 62 s 全失败）。日期口径按**北京业务日**比较
+         * （`dataset_version.startDate/endDate` 是 UTC 时间戳，直接取日会少一天）。
+         */
+        const datasetWindow =
+          datasetVersionId === null ? null : await readDatasetVersionWindow(datasetVersionId);
+        /** PARAMETER-002 — 死参数筛查引用面（Core 规则图）。 */
+        const reference = referencedParameterCodesOf(document);
+        const created = await createParameterSearchRun({
+          strategyId: input.strategyId,
+          strategyVersion: input.strategyVersion,
+          datasetVersionId,
+          datasetVersionLabel: resolvePrimaryDatasetVersionLabel(document),
+          startDate: input.startDate,
+          endDate: input.endDate,
+          searchMethod: input.searchMethod,
+          projectionParameters: bundle.projections.parameters,
+          ...(input.parameterSearchSpace === undefined
+            ? {}
+            : {
+                domainOverrides: input.parameterSearchSpace.map((item) => ({
+                  name: item.name,
+                  domain: item.domain,
+                })),
+              }),
+          ...(reference.refs === null ? {} : { referencedParameterCodes: reference.refs }),
+          ...(datasetWindow === null ? {} : { datasetWindow }),
+          ...(input.maxCombinations === undefined ? {} : { maxCombinations: input.maxCombinations }),
+          ...(input.datasetSourcePolicy === undefined
+            ? {}
+            : { datasetSourcePolicy: input.datasetSourcePolicy }),
+        });
+        return {
+          run: created.run,
+          summary: {
+            searchable: [...created.summary.searchable],
+            fixed: [...created.summary.fixed],
+            derived: [...created.summary.derived],
+            excluded: created.summary.excluded.map((item) => ({ ...item })),
+          },
+          derivationNotes: [reference.note, ...created.derivationNotes],
+          referenceCheckApplied: created.referenceCheckApplied,
+          unreferencedTunableCodes: [...created.unreferencedTunableCodes],
+        };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** Search 列表（不含参数空间快照长文本）。 */
+  listSearches: publicProcedure
+    .input(listParameterSearchRunsInputSchema)
+    .output(parameterSearchRunViewSchema.array())
+    .query(async ({ input }) => {
+      try {
+        return await listParameterSearchRuns({
+          limit: input.limit ?? 50,
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+          ...(input.strategyId === undefined ? {} : { strategyId: input.strategyId }),
+        });
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** Search 详情：Run（含参数空间快照）+ 进度 + 组合计划。 */
+  getSearch: publicProcedure
+    .input(parameterSearchRunIdInputSchema)
+    .output(parameterSearchRunDetailSchema)
+    .query(async ({ input }) => {
+      try {
+        const run = await readParameterSearchRun(input.searchRunId);
+        if (run === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `[PARAMETER_SEARCH_RUN_NOT_FOUND] searchRunId: Search Run 不存在：${input.searchRunId}`,
+          });
+        }
+        return {
+          run,
+          progress: computeRunProgress({
+            combinationCount: run.combinationCount,
+            completedCount: run.completedCount,
+            failedCount: run.failedCount,
+          }),
+          combinations: await listParameterSearchCombinations(input.searchRunId),
+        };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 启动 / 续跑（Resume + Cache）。 */
+  startSearch: publicProcedure
+    .input(executeParameterSearchInputSchema)
+    .output(parameterSearchExecuteOutcomeSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const run = await readParameterSearchRun(input.searchRunId);
+        if (run === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `[PARAMETER_SEARCH_RUN_NOT_FOUND] searchRunId: Search Run 不存在：${input.searchRunId}`,
+          });
+        }
+        const bundle = await loadStrategyBundle(run.strategyId, run.strategyVersion);
+        return await executeParameterSearchRun(input.searchRunId, {
+          document: bundle.document,
+          codeVersion: bundle.versionRecord.codeVersion,
+          ...(input.maxCombinations === undefined ? {} : { maxCombinations: input.maxCombinations }),
+        });
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 取消（对正在执行的循环生效：下一个组合前重读状态即停）。 */
+  cancelSearch: publicProcedure
+    .input(parameterSearchRunIdInputSchema)
+    .output(parameterSearchRunViewSchema)
+    .mutation(async ({ input }) => {
+      try {
+        return await cancelParameterSearchRun(input.searchRunId);
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 结果列表（排序 / 过滤在服务端做；**不产出「最佳参数」结论**）。 */
+  getSearchResults: publicProcedure
+    .input(listParameterSearchResultsInputSchema)
+    .output(parameterSearchResultPageSchema)
+    .query(async ({ input }) => {
+      try {
+        return await listParameterSearchResults(input.searchRunId, {
+          ...(input.sortBy === undefined ? {} : { sortBy: input.sortBy }),
+          ...(input.sortDirection === undefined ? {} : { sortDirection: input.sortDirection }),
+          ...(input.status === undefined ? {} : { status: input.status }),
+          ...(input.minTradeCount === undefined ? {} : { minTradeCount: input.minTradeCount }),
+          ...(input.maxDrawdownPct === undefined ? {} : { maxDrawdownPct: input.maxDrawdownPct }),
+          ...(input.minTotalReturnPct === undefined
+            ? {}
+            : { minTotalReturnPct: input.minTotalReturnPct }),
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+        });
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 重试单个失败组合（`force` 才允许重跑已成功的组合 —— 那会覆盖已有结果）。 */
+  retrySearchCombination: publicProcedure
+    .input(retryParameterSearchCombinationInputSchemaV2)
+    .output(parameterSearchExecuteOutcomeSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const run = await readParameterSearchRun(input.searchRunId);
+        if (run === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `[PARAMETER_SEARCH_RUN_NOT_FOUND] searchRunId: Search Run 不存在：${input.searchRunId}`,
+          });
+        }
+        const bundle = await loadStrategyBundle(run.strategyId, run.strategyVersion);
+        return await retryParameterSearchCombination(input.searchRunId, input.parameterHash, {
+          document: bundle.document,
+          codeVersion: bundle.versionRecord.codeVersion,
+          ...(input.force === undefined ? {} : { force: input.force }),
+        });
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+  // =========================================================================
+  // ROBUSTNESS-001 — Search-Result Robustness Analysis（消费冻结结果 · 零重跑）
+  //
+  // 🔴 与上方技术预览端点（`robustness` / `stochastic`）的**分工必须分清**：
+  //   - `robustness` / `stochastic`：C-18.1 / C-18.2，对**一条已评估策略**做
+  //     扰动 / 随机化**重估** ⇒ 内部注入 evaluator 并**重跑**回测；
+  //   - 本组：消费**已经算完**的 Parameter Search 结果，在**冻结快照**上做邻域稳定性分析
+  //     ⇒ **零重跑、零指标重算**（判据：`searchRobustness/**` 不 import 任何 backtest /
+  //     评估端口，只读 `parameter_search_*` 三表）。
+  // 两组同属 `robustness:` 域，但输入与执行语义不同，因此**并列不合并**
+  //   （同 `robustness` 与 `stochasticRobustness` 的既有并列关系；见 searchRobustness/index.ts 文件头）。
+  // 另外：本组**不产出**「最佳 / 最优 / 推荐参数」——只给稳定性、敏感性、离散度与描述性排序。
+  // =========================================================================
+
+  /** 创建分析：对某个**已完成**的 Search Run 建稳健性分析（只做 gate + 冻结快照 + 落 Run 行）。 */
+  createRobustnessRun: publicProcedure
+    .input(createRobustnessRunInputSchema)
+    .output(searchRobustnessCreateResultSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const created = await createSearchRobustnessRun({
+          sourceSearchRunId: input.sourceSearchRunId,
+          ...(input.analysisConfig === undefined ? {} : { analysisConfig: input.analysisConfig }),
+        });
+        return { run: created.run, notes: [...created.notes] };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 分析列表（可按源 Search Run 过滤；不取冻结快照长文本）。 */
+  listRobustnessRuns: publicProcedure
+    .input(listRobustnessRunsInputSchema)
+    .output(searchRobustnessRunViewSchema.array())
+    .query(async ({ input }) => {
+      try {
+        return await listSearchRobustnessRuns({
+          limit: input.limit ?? 50,
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+          ...(input.sourceSearchRunId === undefined
+            ? {}
+            : { sourceSearchRunId: input.sourceSearchRunId }),
+        });
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 分析详情：Run（含冻结快照与口径）+ 进度 + 单参数分析 + 二维稳定性矩阵。 */
+  getRobustnessRun: publicProcedure
+    .input(robustnessRunIdInputSchema)
+    .output(searchRobustnessRunDetailSchema)
+    .query(async ({ input }) => {
+      try {
+        const run = await readSearchRobustnessRun(input.robustnessRunId);
+        if (run === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `[ROBUSTNESS_RUN_NOT_FOUND] robustnessRunId: 稳健性分析不存在：${input.robustnessRunId}`,
+          });
+        }
+        return {
+          run,
+          progress: computeRobustnessProgress({
+            sourceCombinationCount: run.summary.sourceCombinationCount,
+            analyzedCombinationCount: run.summary.analyzedCombinationCount,
+          }),
+          parameterAnalyses: await listSearchRobustnessParameterAnalyses(input.robustnessRunId),
+          matrix: await buildMatrixForRun(input.robustnessRunId),
+        };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 执行分析（重跑 = 确定性重算并覆盖同一批行；幂等键 = `(robustnessRunId, parameterHash)`）。 */
+  startRobustnessRun: publicProcedure
+    .input(robustnessRunIdInputSchema)
+    .output(searchRobustnessExecuteOutcomeSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const outcome = await startSearchRobustnessRun({
+          robustnessRunId: input.robustnessRunId,
+        });
+        return {
+          run: outcome.run,
+          resultCount: outcome.resultCount,
+          parameterCount: outcome.parameterCount,
+          notes: [...outcome.notes],
+        };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 取消（只允许从 CREATED / RUNNING 出发；同态重放幂等）。 */
+  cancelRobustnessRun: publicProcedure
+    .input(robustnessRunIdInputSchema)
+    .output(searchRobustnessRunViewSchema)
+    .mutation(async ({ input }) => {
+      try {
+        return await cancelSearchRobustnessRun(input.robustnessRunId);
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 结果列表（排序 / 过滤在服务端做；**只提供描述性排序，不产出推荐**）。 */
+  getRobustnessResults: publicProcedure
+    .input(listRobustnessResultsInputSchema)
+    .output(searchRobustnessResultPageSchema)
+    .query(async ({ input }) => {
+      try {
+        return await listSearchRobustnessResults(input.robustnessRunId, {
+          ...(input.sortBy === undefined ? {} : { sortBy: input.sortBy }),
+          ...(input.sortDirection === undefined ? {} : { sortDirection: input.sortDirection }),
+          ...(input.status === undefined ? {} : { status: input.status }),
+          ...(input.neighborhoodIncompleteOnly === undefined
+            ? {}
+            : { neighborhoodIncompleteOnly: input.neighborhoodIncompleteOnly }),
+          ...(input.minTradeCount === undefined ? {} : { minTradeCount: input.minTradeCount }),
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+        });
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  // =========================================================================
+  // OOS-001 — Out-of-Sample Validation（消费冻结结果 · **必须重跑**）
+  //
+  // 🔴 与上方 ROBUSTNESS-001 的**分工必须分清**（两者语义相反，不是同一件事的两种做法）：
+  //   - `searchRobustness/**`：冻结结果上的邻域稳定性分析 ⇒ **零重跑、零重算**；
+  //   - 本组：在**未参与搜索**的 OOS 窗口上**重新执行 Backtest 并重算 canonical metrics**
+  //     ⇒ **必须重跑**（判据：本组 import `backtestBridge` / `projectCanonicalMetrics`，
+  //     而 `searchRobustness/**` 被静态守卫测试钉死不 import 任何回测 / 评估端口）。
+  // 两组同属「消费 Parameter Search 结果」的输入姿态，因此**并列不合并**
+  //   （同 `robustness` 与 `stochasticRobustness` 的既有并列关系；见
+  //   `server/research/oosValidation/index.ts` 文件头）。
+  //
+  // 🔴 本组**不产出**「最佳 / 最优 / 推荐 / 更优参数」：
+  //   `createOosRun` 的入参里**没有参数值位置**（只有 `parameterHash`）⇒
+  //   「OOS 不允许调参」是接口层事实，而不是注释里的承诺（规格 §5）。
+  // =========================================================================
+
+  /**
+   * 创建 OOS 验证：**只冻结配置，不执行**（规格 §14：`create` 与 `start` 必须区分）。
+   *
+   * 本端点只做「读源 → 窗口隔离 → 冻结候选 → IS 读数 canonical 门禁 → 落 Run 行」，
+   * **不跑任何回测**。真正执行必须显式再调 `startOosRun`。
+   */
+  createOosRun: publicProcedure
+    .input(createOosValidationInputSchema)
+    .output(oosValidationCreateResultSchema)
+    .mutation(async ({ input }) => {
+      try {
+        /**
+         * 先自读一次源 Run：**只为**拿到 `strategyId@version` 去 load 策略文档，
+         * 好在**创建时**就把「定义指纹」冻进 Run 行（规格 §8 要求记录 definition fingerprint）。
+         * 真正的门禁判定仍全部在领域层做 —— 这里读到 null 就按同一领域码响亮拒绝。
+         */
+        const sourceRunRow = await getParameterSearchRunRow(input.sourceSearchRunId);
+        if (sourceRunRow === null) {
+          throw new ResearchValidationError([
+            {
+              code: "OOS_SOURCE_RUN_NOT_FOUND",
+              path: "sourceSearchRunId",
+              message: `源 Parameter Search Run 不存在：${input.sourceSearchRunId}`,
+            },
+          ]);
+        }
+        const bundle = await loadStrategyBundle(
+          sourceRunRow.strategyId,
+          sourceRunRow.strategyVersion,
+        );
+        const definitionFingerprint = definitionFingerprintOfDocument(bundle.document);
+        const created = await createOosValidationRun({
+          sourceSearchRunId: input.sourceSearchRunId,
+          parameterHash: input.parameterHash,
+          oosWindow: input.oosWindow,
+          strategyDefinitionFingerprint: definitionFingerprint.fingerprint,
+          definitionFingerprintNote: definitionFingerprint.note,
+          ...(input.metricsVersion === undefined ? {} : { metricsVersion: input.metricsVersion }),
+        });
+        return { run: created.run, notes: [...created.notes] };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** OOS Run 列表（可按源 Search Run 过滤；不取冻结快照长文本）。 */
+  listOosRuns: publicProcedure
+    .input(listOosValidationRunsInputSchema)
+    .output(oosValidationRunViewSchema.array())
+    .query(async ({ input }) => {
+      try {
+        return await listOosValidationRuns({
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+          ...(input.sourceSearchRunId === undefined
+            ? {}
+            : { sourceSearchRunId: input.sourceSearchRunId }),
+        });
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** OOS Run 详情：Run（含冻结快照 / 窗口 / 口径）+ Result（可为 null —— `CREATED` 态的正常形态）。 */
+  getOosRun: publicProcedure
+    .input(oosValidationRunIdInputSchema)
+    .output(oosValidationRunDetailSchema)
+    .query(async ({ input }) => {
+      try {
+        const run = await readOosValidationRun(input.oosRunId);
+        if (run === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `[OOS_RUN_NOT_FOUND] oosRunId: OOS 验证不存在：${input.oosRunId}`,
+          });
+        }
+        return { run, result: await readOosValidationResult(input.oosRunId) };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /**
+   * 执行 OOS 验证（**真正重跑 Backtest、真正重算 canonical metrics**；规格 §9）。
+   *
+   * 🔴 `COMPLETED` 不允许再次执行（规格 §12）：已完成的 Run 走**幂等返回**
+   *   （`executed: false` + 既有结果），既有的 OOS 产物不会被重跑覆盖。
+   */
+  startOosRun: publicProcedure
+    .input(oosValidationRunIdInputSchema)
+    .output(oosValidationExecuteOutcomeSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const run = await readOosValidationRun(input.oosRunId);
+        if (run === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: `[OOS_RUN_NOT_FOUND] oosRunId: OOS 验证不存在：${input.oosRunId}`,
+          });
+        }
+        /**
+         * 策略文档按 **Run 行上冻结的 `strategyId@strategyVersion`** 加载
+         * —— **不是**「当前最新版本」（规格 §8）。
+         * 领域层还会再比对一次身份（`OOS_STRATEGY_VERSION_MISMATCH`）并复核定义指纹
+         * （`OOS_STRATEGY_DEFINITION_DRIFT`），所以这一步不构成「信任调用方」。
+         */
+        const bundle = await loadStrategyBundle(run.strategyId, run.strategyVersion);
+        const currentFingerprint = definitionFingerprintOfDocument(bundle.document);
+        const outcome = await startOosValidationRun(input.oosRunId, {
+          document: bundle.document,
+          codeVersion: bundle.versionRecord.codeVersion,
+          currentDefinitionFingerprint: currentFingerprint.fingerprint,
+        });
+        return {
+          run: outcome.run,
+          executed: outcome.executed,
+          result: outcome.result,
+          notes: [...outcome.notes],
+        };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 取消（只允许从 CREATED / RUNNING 出发；`COMPLETED` 不可取消；同态重放幂等）。 */
+  cancelOosRun: publicProcedure
+    .input(oosValidationRunIdInputSchema)
+    .output(oosValidationRunViewSchema)
+    .mutation(async ({ input }) => {
+      try {
+        return await cancelOosValidationRun(input.oosRunId);
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 读取 OOS 结果（IS / OOS 逐项指标 + derived 对照；不存在 ⇒ `null`）。 */
+  getOosResult: publicProcedure
+    .input(getOosResultInputSchema)
+    .output(oosValidationResultViewSchema.nullable())
+    .query(async ({ input }) => {
+      try {
+        return await readOosValidationResult(input.oosRunId);
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  // =========================================================================
+  // WALK-FORWARD-001 — Walk-Forward 验证（时间滚动编排；规格 §13）
+  //
+  // 定位：**编排层**，不是新引擎。它只负责「时间滚动 + Fold 隔离 + 结果汇总 + 可追溯」，
+  // 每一步的策略求值 / 回测 / 指标都由既有唯一权威完成（规格 §3 / §6 / §15）。
+  //
+  // 🔴 本组**不产出**「最佳 / 最优 / 推荐 Fold」、不做策略评级、不自动淘汰 ——
+  //   候选选择策略是**显式声明并写进快照**的（见 `WALK_FORWARD_SELECTION_POLICIES`），
+  //   多 Fold 汇总**只做描述性统计**（规格 §7 / §12）。
+  //
+  // 🔴 本组**不**新建独立 Router：与 PS / OOS / 稳健性端点同挂本 Router（规格 §13）。
+  // =========================================================================
+
+  /**
+   * 创建 Walk-Forward 验证：**只冻结排程与身份，不执行**（规格 §6 Step A / §14）。
+   *
+   * 本端点只做「读策略文档 → 读数据集窗口 → 读交易日序列 → 生成 Fold → 落两表」，
+   * **不跑任何搜索、任何回测**。真正执行必须显式再调 `startWalkForwardRun`。
+   */
+  createWalkForwardRun: publicProcedure
+    .input(createWalkForwardValidationInputSchema)
+    .output(walkForwardCreateResultSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const bundle = await loadStrategyBundle(input.strategyId, input.strategyVersion);
+        const document = bundle.document;
+        const datasetVersionId = input.datasetVersionId ?? resolvePrimaryDatasetVersionId(document);
+        const fingerprint = definitionFingerprintOfDocument(document);
+        const created = await createWalkForwardValidationRunService({
+          request: input,
+          strategyVersionId: `${input.strategyId}@${input.strategyVersion}`,
+          strategyFingerprint: fingerprint.fingerprint,
+          datasetVersionId,
+          datasetVersionLabel: resolvePrimaryDatasetVersionLabel(document),
+          /**
+           * 交易日序列唯一来源 = `index_daily`（既有约定）；取样区间 = 窗口配置的
+           * `startDate..endDate`，域层会再按该区间投影一次（两侧都收口，不重复实现日历）。
+           */
+          tradeDates: await getIndexDailyTradeDates(
+            input.windowConfig.startDate,
+            input.windowConfig.endDate,
+          ),
+          datasetWindow:
+            datasetVersionId === null ? null : await readDatasetVersionWindow(datasetVersionId),
+        });
+        return { run: created.run, folds: [...created.folds], notes: [...created.notes] };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** Walk-Forward Run 列表（可按策略过滤；不取排程 / 汇总长文本之外的额外内容）。 */
+  listWalkForwardRuns: publicProcedure
+    .input(listWalkForwardRunsInputSchema)
+    .output(walkForwardRunViewSchema.array())
+    .query(async ({ input }) => {
+      try {
+        return [...(await listWalkForwardValidationRunsService(input))];
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** Run 详情：Run（含冻结排程 / 选择策略 / 汇总）+ 全部 Fold（按序号升序）。 */
+  getWalkForwardRun: publicProcedure
+    .input(walkForwardRunIdInputSchema)
+    .output(walkForwardRunDetailSchema)
+    .query(async ({ input }) => {
+      try {
+        const detail = await readWalkForwardRunDetail(input.walkForwardRunId);
+        if (detail === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message:
+              `[WALK_FORWARD_RUN_NOT_FOUND] walkForwardRunId: Walk-Forward 验证不存在：`
+              + input.walkForwardRunId,
+          });
+        }
+        return { run: detail.run, folds: [...detail.folds] };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /** 单个 Fold 详情（不含地给出它自己的 Search Run / OOS Run 身份，便于逐 Fold 追溯）。 */
+  getWalkForwardFold: publicProcedure
+    .input(walkForwardFoldInputSchema)
+    .output(walkForwardFoldViewSchema)
+    .query(async ({ input }) => {
+      try {
+        const fold = await readWalkForwardValidationFoldService(input);
+        if (fold === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message:
+              `[WALK_FORWARD_FOLD_NOT_FOUND] foldIndex: Fold 不存在：`
+              + `${input.walkForwardRunId}/folds[${String(input.foldIndex)}]`,
+          });
+        }
+        return fold;
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /**
+   * 执行 Walk-Forward 验证（**逐 Fold 串行真跑搜索 + 真跑样本外**；规格 §6 Step B~D）。
+   *
+   * 🔴 `COMPLETED` 不允许再次执行（规格 §12）：已完成的 Run 走**幂等返回**
+   *   （`executed: false` + 既有 Fold），既不重跑也不重算。
+   */
+  startWalkForwardRun: publicProcedure
+    .input(walkForwardRunIdInputSchema)
+    .output(walkForwardExecuteOutcomeSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const detail = await readWalkForwardRunDetail(input.walkForwardRunId);
+        if (detail === null) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message:
+              `[WALK_FORWARD_RUN_NOT_FOUND] walkForwardRunId: Walk-Forward 验证不存在：`
+              + input.walkForwardRunId,
+          });
+        }
+        /**
+         * 策略文档按 **Run 行上冻结的 `strategyId@strategyVersion`** 加载，**不是**「当前最新版本」；
+         * 域层还会在执行前比对定义指纹与数据集坐标（规格 §10 FAIL LOUDLY），
+         * 所以这一步不构成「信任调用方」。
+         */
+        const hooks = await buildWalkForwardExecutionHooks(detail.run);
+        const outcome = await startWalkForwardValidationRunService({
+          walkForwardRunId: input.walkForwardRunId,
+          hooks,
+        });
+        return {
+          run: outcome.run,
+          executed: outcome.executed,
+          folds: [...outcome.folds],
+          notes: [...outcome.notes],
+        };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
+
+  /**
+   * 取消（**协作式**：在当前 Fold 走完后的下一个 Fold 边界生效；`COMPLETED` 不可取消）。
+   *
+   * 为什么不是「立即中止」：执行是一个进程内的串行 Fold 循环，无法从外部打断已经发出的一次
+   * 搜索 / 回测；假装立即停止会让 Fold 行出现无法审计的中间态（规格 §9：不得改语义）。
+   */
+  cancelWalkForwardRun: publicProcedure
+    .input(walkForwardRunIdInputSchema)
+    .output(walkForwardCancelOutcomeSchema)
+    .mutation(async ({ input }) => {
+      try {
+        const cancelled = await cancelWalkForwardValidationRun(input);
+        return { run: cancelled.run, notes: [...cancelled.notes] };
+      } catch (error) {
+        throw toTrpcError(error);
+      }
+    }),
 });
 
 export type ParamSearchRouter = typeof paramSearchRouter;

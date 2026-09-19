@@ -350,50 +350,73 @@ domains:
   robustness:
     status: FACT_TECHNICAL_PREVIEW
     marker: FACT
-    purpose: 成本/滑点/参数/执行四轴扰动 + Monte Carlo/Bootstrap/成交顺序随机化 + 因子消融
+    purpose: 成本/滑点/参数/执行四轴扰动 + Monte Carlo/Bootstrap/成交顺序随机化 + 因子消融 + 搜索结果邻域稳定性分析（ROBUSTNESS-001，零重跑）
     sourcePaths:
       - server/research/robustness/**
       - server/research/stochasticRobustness/**
+      - server/research/searchRobustness/**
       - server/research/factorAblation/**
       - server/overfittingGuard.ts
     entryPoints:
       - server/research/robustness/evaluate.ts#runRobustnessStress
       - server/research/stochasticRobustness/run.ts#runStochasticRobustness
+      - server/research/searchRobustness/executor.ts#createSearchRobustnessRun
+      - server/research/searchRobustness/executor.ts#startSearchRobustnessRun
+      - server/research/searchRobustness/analysis.ts#analyzeSearchRobustness
       - server/research/factorAblation/run.ts#runAblationAssessment
       - server/overfittingGuard.ts#buildOverfittingGuardReport
-    inputs: [参数集, 回测配置, 扰动规格]
-    outputs: [扰动重估结果, 漂移归因, 随机化结论]
+    inputs: [参数集, 回测配置, 扰动规格, parameter_search_run/combination/result（冻结快照）]
+    outputs: [扰动重估结果, 漂移归因, 随机化结论, 邻域稳定性/敏感性/离散度/二维稳定性矩阵]
     consumers: [frontend]
-    persistence: []
+    persistence:
+      - search_robustness_run
+      - search_robustness_result
+      - search_robustness_parameter_analysis
+    router: server/paramSearchRouter.ts（同域扩 6 端点：createRobustnessRun / listRobustnessRuns / getRobustnessRun / startRobustnessRun / cancelRobustnessRun / getRobustnessResults）
+    contract: shared/searchRobustnessContracts.ts
     tests:
       - tests/server/research/robustness/**
       - tests/server/research/stochasticRobustness/**
+      - tests/server/research/searchRobustness/**
       - tests/server/research/factorAblation/**
     knownRisks:
       - "factorAblation 仅测试可达（CODE_READY 未接线，AR-10）"
       - "闭环 robustness 阶段未装配 ⇒ CL_RUNNER_NOT_INJECTED"
+      - "ROBUSTNESS-001 只消费 COMPLETED 且结果全为 canonical 的 Search Run（否则响亮拒绝）；对 referenceCheckApplied 为 NULL 的历史 Run 会如实标 ROBUSTNESS_PARAMETER_REFERENCE_UNVERIFIED（不保证参数真的被策略消费）"
+      - "数值型 ENUM 搜索域不可编译（PARAMETER-001 口径：数值域只支持等步长区间）⇒ 小规模穷举须用 INTEGER_RANGE / DECIMAL_RANGE 表达"
+      - "二维稳定性矩阵在搜索空间含 > 2 个可变参数时只取前两个，多命中格标 AMBIGUOUS（不挑代表）"
     legacyPaths: []
 
   oos:
     status: FACT_TECHNICAL_PREVIEW
     marker: FACT
-    purpose: IS/OOS 隔离记录与归档账本
+    purpose: IS/OOS 隔离记录与归档账本 + 冻结候选参数的样本外真实重跑验证（OOS-001，必须重跑）
     sourcePaths:
       - server/research/oosIsolation/**
+      - server/research/oosValidation/**      # OOS-001
       - server/research/oosEvaluation.ts     # LEGACY 6.4
     entryPoints:
       - server/research/oosIsolation/run.ts#runOosIsolation
+      - server/research/oosValidation/executor.ts#createOosValidationRun
+      - server/research/oosValidation/executor.ts#startOosValidationRun
       - server/walkForwardRouter.ts#oos
-    inputs: [IS/OOS 切分, 参数集, 评估结果]
-    outputs: [OOS 记录, 隔离账本]
+    inputs: [IS/OOS 切分, 参数集, 评估结果, 源 parameter_search_run + parameterHash + oosWindow]
+    outputs: [OOS 记录, 隔离账本, OOS Run 冻结坐标 + IS/OOS 逐项对照]
     consumers: [frontend]
-    persistence: []
+    persistence:
+      - oos_validation_run
+      - oos_validation_result
+    router: server/paramSearchRouter.ts（同域扩 6 端点：createOosRun / listOosRuns / getOosRun / startOosRun / cancelOosRun / getOosResult）
+    contract: shared/oosValidationContracts.ts
     tests:
       - tests/server/research/oosIsolation/**
+      - tests/server/research/oosValidation/**
       - tests/server/research/oosEvaluation.test.ts
     knownRisks:
       - "闭环 oos 阶段未装配 ⇒ CL_RUNNER_NOT_INJECTED"
       - "oosEvaluation.ts（legacy 6.4）仅测试可达"
+      - "OOS-001 与 searchRobustness 是并列兄弟域且语义相反（前者必须重跑、后者结构性零重跑）⇒ 实现不得互相搬移；两侧守卫方向镜像（一为黑名单、一为必含清单）"
+      - "OOS-001 的 IS 侧六项指标里 averageWin / averageLoss 两侧都拿不到（源 canonical 面与 OOS 重算面均不产出）⇒ 恒为 null，不补值"
     legacyPaths: [server/research/oosEvaluation.ts, server/research/trainValidationOos.ts]
 
   walkForward:
@@ -424,6 +447,35 @@ domains:
       - server/research/walkForward.ts
       - server/research/walkForwardService.ts
       - server/research/datasetSplit.ts（部分）
+
+  walkForwardValidation:
+    status: FACT
+    marker: FACT
+    purpose: 滚动窗口验证的编排层（WALK-FORWARD-001）—— 逐 Fold 独立搜索 → 冻结候选 → 紧邻样本外真实重跑 → 多 Fold 描述性汇总
+    sourcePaths:
+      - server/research/walkForward/**
+    entryPoints:
+      - server/research/walkForward/executor.ts#createWalkForwardValidationRun
+      - server/research/walkForward/executor.ts#startWalkForwardValidationRun
+      - server/research/walkForward/windowSchedule.ts#buildWalkForwardSchedule
+    inputs: [冻结配置(策略版本 + datasetVersionId + 窗口几何 + selectionPolicy), 交易日序列]
+    outputs: [窗口排程 + 双重指纹, Fold 坐标与状态, 冻结候选, IS/OOS canonical 指标, 描述性汇总]
+    consumers: [frontend]
+    persistence:
+      - walk_forward_run
+      - walk_forward_fold
+    router: server/paramSearchRouter.ts（同域扩 6 端点：createWalkForwardRun / listWalkForwardRuns / getWalkForwardRun / getWalkForwardFold / startWalkForwardRun / cancelWalkForwardRun；零新 router）
+    contract: shared/walkForwardContracts.ts
+    executionSeam: WalkForwardExecutionHooks（由组合根 paramSearchRouter 用既有 PS / OOS application service 实现；域层零复制策略 IO、零 HTTP 自调用）
+    tests:
+      - tests/server/research/walkForward/**
+    knownRisks:
+      - "三方向镜像守卫：searchRobustness=黑名单+零重跑 / oosValidation=必含清单+必须重跑 / walkForward=黑名单+「执行只能经由注入钩子」⇒ 三套实现不得互相搬移"
+      - "本域与 C-19.1 walkForwardRun/** 刻意不并入全域 export *（同名导出会被静默遮蔽）；both 一律按文件路径 import"
+      - "全仓库 11 个既有策略版本的 ruleGraphRefs 全为空 ⇒ 搜历史候选必被 PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER 拒绝；要真搜参数必须自建含参数引用的新版本"
+      - "cand-360001@1.0.0 的 3 个 TUNABLE 笛卡尔积 1240 > 256 ⇒ MAX_COMBINATIONS_EXCEEDED（禁截断）"
+      - "LeakageGuard 对配方特征恒通过 ⇒ 策略层无独立未来函数防护；本域 future-leak 防护为几何级（窗口不重叠 + 搜索不越界 + 每 Fold 独立搜索）"
+    legacyPaths: []
 
   overfitting:
     status: FACT_TECHNICAL_PREVIEW

@@ -50,6 +50,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 // PARAMETER-001 — 持久化参数搜索面板（创建 / 详情 / 结果；与上方技术预览共存于同页）
 import PersistedParameterSearchPanel from "@/components/parameterSearch/PersistedParameterSearchPanel";
+import SearchRobustnessPanel from "@/components/robustness/SearchRobustnessPanel";
+import OosValidationPanel from "@/components/oos/OosValidationPanel";
+import WalkForwardPanel from "@/components/walkForward/WalkForwardPanel";
 import { trpc } from "@/lib/trpc";
 import { createTRPCReact } from "@trpc/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
@@ -322,6 +325,20 @@ export default function ParameterSearch() {
 
       {/* ---- PARAMETER-001：持久化参数搜索（创建 → 执行 → 回看 → 重试）---- */}
       <PersistedParameterSearchPanel />
+
+      {/* ---- ROBUSTNESS-001：稳健性分析（消费已完成的搜索结果；零重跑）---- */}
+      <SearchRobustnessPanel />
+
+      {/* ---- OOS-001：样本外验证（消费冻结候选；**必须真重跑**）
+           与上一块语义**正好相反**：稳健性在冻结结果上做邻域稳定性（零重跑），
+           本块在与搜索窗口不重叠的数据上真实重跑回测并重算 canonical 指标。 ---- */}
+      <OosValidationPanel />
+
+      {/* ---- WALK-FORWARD-001：Walk-Forward 验证（时间滚动**编排层**）
+           与上面两块的关系：它把「搜索 → 冻结候选 → 样本外」这条链**按时间滚动重复 N 次**，
+           每个 Fold 各自独立搜索、各自独立样本外，最后只做描述性汇总。
+           编排层不新增任何引擎：搜索走 PARAMETER-001、样本外走 OOS-001（规格 §3 / §6 / §15）。 ---- */}
+      <WalkForwardPanel />
 
       {/* ---- 搜索配置 + 结果 ---- */}
       <SectionCard

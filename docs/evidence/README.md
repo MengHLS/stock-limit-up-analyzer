@@ -766,3 +766,106 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > `createStrategyDocumentFromDefinition`（v1 视图单向派生）—— 那条纪律是对的，不是坑。
 > 🔴 坑三：**显式搜索域覆盖能把「死参数」重新塞回搜索空间**（实测：三个死参数被覆盖后 `searchable` 又变 3 个）
 > ⇒ 死参数剥离必须放在**覆盖之后**（`派生 → 覆盖 → 剥离 → 校验`），并为「给死参数赋会变化的搜索域」加响亮拒绝。
+
+## ROBUSTNESS-001（Search-Result Robustness Analysis · `9bu`）· 2026-09-19
+
+| 文件 | 用途 | 判据 |
+|---|---|---|
+| `_e2e_robustness_search.mts` | **真实 tRPC + TiDB 端到端**（2 参数 × 2 值 = 4 组合）：自建含**参数引用**的新策略版本 → 真实 2×2 搜索（真跑回测）→ 创建/执行稳健性分析 → 落库 → 查询；覆盖规格 §21 的 A~G 七条判据（未重跑回测 / 未重算指标 / 确定性 / 口径可变而源不变 / 缺格不补值 / 零成交不误判 / 不串线）。自建自清（`ROBUSTNESS001_KEEP=1` 保留、`ROBUSTNESS001_CLEAN_ONLY=1` 只清理）。 | **42/42 PASS** |
+| `_e2e_robustness_search.out.json` | 上述探针的完整结论（含逐条断言、汇总、清理结果） | — |
+| `_probe_robustness_unverified_reference.mts` | **§12 参数引用未验证**：在**用户自有的真实历史 Run**（`cand-360001`，`referenceCheckApplied = NULL`）上创建并执行稳健性分析，断言标记与说明文本（含领域码）正确、执行后标记不丢、源 Run **逐字节未被改写**；只创建一个自建 Run 并自清。 | **9/9 PASS** |
+| `_probe_robustness_unverified_reference.out.json` | 上述探针结论 | — |
+| `_probe_robustness_dom.mjs` | **前端可达性（量 DOM，不截图）**：面板锚点 → 等列表查询落地 → 点「查看详情」（COMPLETED 行）→ 断言详情 / **二维稳定性矩阵 4 格** / 结果行 4 条 / 排序过滤控件 → 点「查看邻域」→ 断言邻域明细；再**深链 `?robRunId=` 直接打开**，断言无需点击即自渲染且 0 page error。 | `pass=true`、0 page error |
+| `_probe_robustness_dom.out.json` | 上述探针结论（含每步 DOM 快照与深链检查） | — |
+| `_probe_rob001_template.mts` | 只读：模板策略 `cand-360001@1.0.0` 的 `definition`（条件 / 事件 / 观测窗口）与声明的参数投影（用于挑「可被参数引用」的参数） | 只读诊断 |
+| `_probe_rob001_ps_runs.mts` | 只读：库里现存的 Parameter Search Run 清单（含 `referenceCheckApplied`、canonical 结果行数）—— 判断「前端是否有真实数据可用」 | 只读诊断 |
+
+⚠️ **前置**：`_probe_robustness_dom.mjs` 需要库里有 **COMPLETED + 全 canonical 结果**的 Search Run，且至少要有一条 **COMPLETED 的 Robustness Run** 才有东西可点：
+先跑 `ROBUSTNESS001_KEEP=1 node --import tsx docs/evidence/_e2e_robustness_search.mts`，验收完再跑 `ROBUSTNESS001_CLEAN_ONLY=1 node --import tsx docs/evidence/_e2e_robustness_search.mts` 归零。
+
+## OOS-001（Out-of-Sample Validation · `9bv`）· 2026-09-19
+
+> **与 ROBUSTNESS-001 的关系**：两者是**并列兄弟域**，语义**正好相反** ——
+> `searchRobustness/**` 对冻结结果做邻域稳定性判断（**零重跑零重算**，import 黑名单守卫钉死）；
+> `oosValidation/**` 必须在**它没见过的数据窗口**上**真实重跑回测并重算 canonical 指标**
+> （import **白名单 + 必含清单**守卫钉死，必须出现 `createStrategyBacktestBridge` 与 `projectCanonicalMetrics`）。
+> 两个域的守卫方向**镜像相反**，故本域实现**不允许**放进 `searchRobustness/**`。
+
+| 文件 | 用途 | 判据 |
+|---|---|---|
+| `_e2e_oos_validation.mts` | **真实 tRPC + TiDB 端到端**，五模式（`search` / `oos` / `full` / `verify` / `clean`）。链路：自建含**参数引用**的策略版本 → 真实 2×2 参数搜索（真跑回测）→ 冻结候选（源 Run + `parameterHash` + OOS 窗口）→ 创建 OOS Run → **在 OOS 窗口真实重跑回测** → canonical 重算 → 落库 → IS/OOS 对照。IS 窗口 `2025-01-02..2025-02-28`、OOS 窗口 `2025-03-01..2025-04-30`、`datasetVersionId = 390002`。自建自清（`OOS001_KEEP=1` 保留；`OOS001_MODE=clean` 按 id 精确删、连带自建策略）。 | 阶段一 **2/2**、阶段二 **12/12 PASS** |
+| `_e2e_oos_validation.search.out.txt` | 阶段一（`OOS001_MODE=search`）日志：S1 搜索达 `COMPLETED`（2/2 组合）、S2 存在 canonical 结果行（OOS 的 IS 基线有源）。真实回测耗时 **42 s** | **2/2 PASS** |
+| `_e2e_oos_validation.oos.out.txt` | 阶段二（`OOS001_MODE=oos`）日志：V1~V10 共 12 条判据（参数冻结可复核 / 禁调参 / 窗口隔离 / canonical 重算 / 撮合指纹差异 / 源三表**未被改写** / 幂等 / 不串线 / 状态机 / 对照成立） | **12/12 PASS** |
+| `_e2e_oos_validation.rerun.out.txt` | **跨进程确定性证据**：阶段二**再独立跑一遍**，12 条判据全部复现 | **12/12 PASS**（与上一份逐项一致） |
+| `_e2e_oos_validation.clean.out.txt` + `.clean.out.json` | **归零阶段**（`OOS001_MODE=clean`）的日志与结构化结论：按 id 精确删除自建 OOS Run／自建策略（级联），打印四表残留计数并校验 `PASS（mode=clean）`。**幂等**：对已删除的 id 复跑不抛错（`未找到策略，无法删除` ⇒ 记为「已不存在（幂等跳过）」） | `PASS（mode=clean）`、自建行残留 0 |
+| `_e2e_oos_validation.state.json` | **跨阶段交接坐标**（`searchRunId` / `oosRunId` / 自建 `strategyId`）—— 阶段二与 `clean` 模式都依赖它，否则会漏删自建策略 | — |
+| `_probe_oos_source_scan.mts` + `.out.json` / `.out.txt` | 只读：扫描 `parameter_search_run` 全表（含窗口、`datasetId`/`version`）+ 各自组合/结果行 + 策略版本的**参数引用可过性**（复算 `ruleGraphRefs`）—— 用于在第 ① 步实测「仓库全部既有策略版本都没有可搜索参数」这一**结构性事实** | 只读诊断 |
+| `_probe_oos_dom.mjs` | **前端可达性（量 DOM，不截图）**：面板锚点 → 等列表查询落地 → 点「已完成」行打开详情 → 断言**六项冻结坐标** / 冻结参数集 / 固定坐标 / 运行内容指纹 / **IS×OOS 对照表 6 行** / 三项派生对照 / 三处读数来源；并断言**创建区块内 `<input>` 恰为 4 个**（规格 §5：界面上无处可写参数值）；再**深链 `?oosRunId=` 直接打开**，断言无需点击即自渲染且 0 page error。**只读**：绝不点「执行样本外验证」 | `pass=true`、0 page error |
+| `_probe_oos_dom.out.json` | 上述探针结论（含每步 DOM 快照、`startButtonNeverClicked`、深链检查） | — |
+
+⚠️ **前置**：`_probe_oos_dom.mjs` 需要库里至少有一条**已 `COMPLETED` 的 OOS Run**（且其源组合有 canonical 结果）才有东西可点：
+先跑 `OOS001_KEEP=1 OOS001_MODE=search` → `OOS001_MODE=oos`（两阶段），验收完再跑 `OOS001_MODE=clean` 归零。
+
+> 🔴 坑一（本轮真踩，**探针判据错不是产品缺陷**）：首版 DOM 探针把「锚点出现」当成「数据到位」。
+> `/parameter-search` 页同时挂三块面板，OOS 列表查询在 **dev 冷启**下落地要 **~20 s**（实测 22 s；
+> 同机热态复跑只需 6 s ⇒ 是 Vite 冷编译，不是查询慢）。⇒ 判据必须等到**目标行数 > 0**，
+> 并且「点不中就一直重试」，否则会点在 `加载中…` 上、看起来像「详情不可达」。
+> 🔴 坑二（同类）：pass 表达式里误用了「面板就绪」那一帧的快照去判 `runRowCount > 0` ——
+> 那一帧列表**必然**还没落地。**快照必须取「已达标的那一步」，不能取第一帧。**
+>
+> 🔴 坑三（**证据工具缺陷，已修**）：脚本原先在 `clean` 模式下把结论写到**通用**文件名
+> `.out.json` / `.out.txt`，于是最后一跑清理会**覆盖**主阶段的结构化结论（12/12 判据 + 源三表 digest）。
+> 已改为按模式落盘（`clean` ⇒ `.clean.out.json` / `.clean.out.txt`），与兄弟脚本
+> `_e2e_robustness_search.mts`（`*.cleanonly.out.json`）的约定对齐。主阶段逐条断言完整保存在
+> `.oos.out.txt` / `.rerun.out.txt`：含 12 条 `[PASS]`、`digest(run/combination/result)=7abdb690/26fc7cb6/b74772d3`
+> （创建/执行两阶段各采样一次、逐字节不变）、IS/OOS 对照 JSON、`backtestFingerprint` 双侧读数、
+> 以及 `executed=false` 的幂等复核。
+
+## WALK-FORWARD-001（Walk-Forward Validation · 编号 `9bw`）· 2026-09-19
+
+> **三方向镜像守卫（本仓第三条执行边）**：`searchRobustness/**` = import **黑名单**（禁够到回测/评估端口，
+> **零重跑**）；`oosValidation/**` = **必含清单**（必须够到 `createStrategyBacktestBridge` +
+> `projectCanonicalMetrics`，**必须重跑**）；`walkForward/**` = **黑名单 + 「执行只能经由注入钩子」**
+> （可以 import OOS **类型**以复用版本常量，但**不得**自行 import 回测/评估/闭环执行面，
+> 也**不得**自建第二套执行路径）。三套守卫**互不可搬移**。
+>
+> 本域与 `walkForwardRun/**`（C-19.1 内存态几何原语，id 前缀 `WFA`）**刻意不并入全域 `export *`**：
+> ESM 的 `export *` 遇同名导出**静默遮蔽**（不报错）⇒ 本域一律**按文件路径 import**。
+
+| 文件 | 用途 | 判据 |
+|---|---|---|
+| `_e2e_walk_forward.mts` | **真实 tRPC + TiDB 端到端**，六模式（`create` / `run` / `full` / `verify` / `rerun` / `clean`）。链路：自建含**参数引用**的策略版本 → 建 Walk-Forward Run（只冻结）→ **执行**：逐 Fold 真实搜索（**搜索窗口 == 该 Fold 的 IS**）→ 冻结候选（源组合行 + `parameterHash` 复核）→ 在**紧邻的、没见过的** OOS 窗口真实重跑 → canonical 指标 → 多 Fold 描述性汇总。`datasetVersionId = 390002`；`WINDOW_CONFIG = {2025-01-02..2025-06-30, IS 40 / OOS 25 / step 25, ROLLING, maxFolds 2}`；`SELECTION_POLICY = FIRST_ELIGIBLE_COMBINATION`。自建自清（`WF001_KEEP=1` 保留；`WF001_MODE=clean` **以 DB 为准**按 `strategyId` 精确删）。 | `create` **7/7**、`run` **10/10**、`rerun` **11/11** |
+| `_e2e_walk_forward.out.txt` + `.out.json` | `create` + `run` 日志与结构化结论。实测 Fold 坐标：**#0 IS `2025-01-02..2025-03-06` / OOS `2025-03-07..2025-04-11`**、**#1 IS `2025-02-14..2025-04-11` / OOS `2025-04-14..2025-05-21`**（由真实交易日序列推导，非硬编码）；`scheduleFingerprint = e3451bfc…d2bd7`。执行耗时 **193 s**（第二轮） | `run` **10/10 PASS** |
+| `_e2e_walk_forward.rerun.out.txt` + `.rerun.out.json` | **跨进程确定性 / 幂等证据**（`WF001_MODE=rerun`，**换进程**再执行同一个已 `COMPLETED` 的 Run）：W15 断言 `executed=false`、状态仍 `COMPLETED`；W4~W12 全部在新进程里**逐条复现一致**（含四条撮合指纹）；W14 断言**零新增行**（PS +0 / OOS +0）。耗时 **7 s** | `rerun` **11/11 PASS** |
+| `_e2e_walk_forward.clean.out.txt` + `.clean.out.json` | **归零阶段**：两表 + 自建策略 / 策略版本全部删除，打印残留计数 `{"walkForwardRun":0,"walkForwardFold":0,"strategies":0,"strategyVersions":0}`。**幂等**（对已删 id 复跑不抛错） | `PASS（mode=clean）`、残留 0 |
+| `_e2e_walk_forward.state.json` | **跨阶段交接坐标**（`walkForwardRunId` / `determinismRunId` / `ownStrategyId`）—— `run` / `rerun` / `clean` 都依赖它；🔴 `ownStrategyId` **必须**从这里解析（见坑四） | — |
+| `_probe_wf001_recon.mts` | 施工前**只读**侦察：数据集 `390002` 可用区间与交易日计数（`2024-10-01..2025-06-30` 有 **178** 个交易日）、模板 `cand-360001@1.0.0` 的 TUNABLE 清单、**`entryRuleGraph` 引用参数 = `[]`**、不带引用筛查 ⇒ `MAX_COMBINATIONS_EXCEEDED`（**1240 > 256**）、参数声明在 `definition.parameters[]`（**不是** `definition.parameterSpace`） | 只读诊断 |
+| `_probe_walk_forward_dom.mjs` + `.out.json` | **前端可达性（量 DOM，不截图）**：面板锚点 → 等**列表查询落地**（Run 行 > 0 且至少一条「已完成」）→ 点行打开详情（窗口排程 + 两条指纹 + 选择策略 + Fold 窗口清单 + **Fold 矩阵 2 行**）→ 点 Fold 行（**Fold 详情**五项齐备）→ **深链 `?walkForwardRunId=…&foldIndex=0` 无需点击**即渲染详情**且 Fold 选中一并还原** → 负向**双轨**禁词判据 → 汇总表**恰 6 行**（在汇总区块内数）。含**作用域自证**：`rootDataSlot="card"` / `rootHasOosCreateButton=false` / `rootTextLen` 随详情展开 800→2593→**4328**。**只读**：`neverClickedWriteButtons=true` | `pass=true`、0 page error |
+
+⚠️ **前置**：`_probe_walk_forward_dom.mjs` 需要库里至少有一条**已完成**的 Walk-Forward Run：
+先跑 `WF001_MODE=create` → `WF001_MODE=run`（两阶段），**跑完 DOM 探针之后**再 `WF001_MODE=clean` 归零。
+
+> 🔴 坑四（本轮真踩，**探针缺陷不是产品缺陷**）：`run` 第一轮 **7/10**，FAIL = W9/W10/W12，逐条核实**全是探针自身缺陷**：
+> - **W9**：`OWN_STRATEGY_ID` 原先用 `Date.now()` 生成 ⇒ `run` 阶段（**新进程**）重算 `parameterHash` 时
+>   **用错了 strategyId**（`computeParameterHash` 的 `strategyVersionId` 参与哈希）⇒ 哈希必然不等。
+>   修法：`ownStrategyId` **跨阶段从状态文件解析**（环境变量 > 状态文件 > 新生成）。
+> - **W10**：同根因（比对的是 `create` 阶段的旧 id）。修法：`resolveOwnStrategyId(state)` + 把 W10 重写为
+>   「Run 行与逐 Fold 行自洽 + 与同配置副 Run 一致」。
+> - **W12**：把 `completedFoldCount` 错当成 `SUCCEEDED` 计数。读 `aggregate.ts` 确认
+>   `completed = status === "OOS_COMPLETED"`、`contributing = outcome === "SUCCEEDED"`
+>   ⇒ 实测 `completed=2 / contributing=0` 是**正确**行为。修法：**分别按生命周期字段与结果字段**核对。
+> - **附带发现（非缺陷）**：首轮选中的候选是 `{"max_volume_ratio":0.3}`（参数域下界），两个 Fold 都 0 成交
+>   ⇒ 汇总退化为「无贡献」。已把参数域抬到 `[1, 1.75]` 以取得有经济学含义的对照。
+>
+> 🔴 坑五（**工具链真踩**）：在**模板字符串内部**写注释时写了反引号 ⇒ 模板串提前闭合 ⇒ `SyntaxError`，
+> **探针根本没跑**；而磁盘上仍是**上一版**的 `*.out.json`，极易把 stale 产物当成新结论读。
+> ⇒ 证据脚本写完先 `node --check`，且**必须先确认 stdout 有内容**再解析产物。
+>
+> 🔴 坑六（**判据设计真踩**）：`/parameter-search` 页同时挂**四块**面板 ⇒
+> ⒜ 整页 `innerText` 里含兄弟面板的**免责文案**（如参数搜索面板「不产出「最佳参数」结论」），
+> 整页扫禁词会**把别的域判成本域违规**；⒝ `table tbody tr` 会把兄弟面板的指标表一起数进来（实测 6 → 12）。
+> 修法：作用域收窄到**本面板卡片子树**（`data-slot="card"`）并**自证**（根节点自述 + 文本长度随交互增长）。
+> 另：本面板**自己渲染的服务端 notes** 原文即「也不称任何 Fold 为「最好 / 最差」（规格 §12）」
+> ⇒ 裸词表扫描会把**正确的免责声明**判成违规 ⇒ 禁词判据改为**双轨**
+> （自由文本里含禁词的**行**必须同时含否定标记；标题 / 表头 / 按钮 / 徽标这些**结论承载面**一律不得出现）。
+

@@ -60,6 +60,8 @@ import {
   type SearchRobustnessRunRow,
 } from "./persistence";
 import { analyzeSearchRobustness } from "./analysis";
+import { buildRobustnessMatrix } from "./matrix";
+import { buildNeighborhoodAxes } from "./neighborhood";
 import {
   assertRobustnessRunTransition,
   computeSearchRobustnessRunFingerprint,
@@ -633,6 +635,55 @@ export async function listSearchRobustnessRuns(options: {
 export async function listSearchRobustnessParameterAnalyses(robustnessRunId: string) {
   const rows = await listSearchRobustnessParameterAnalysisRows(robustnessRunId);
   return rows.map(toSearchRobustnessParameterAnalysisView);
+}
+
+/**
+ * 读详情页的二维矩阵（**纯投影**：用已落库的结果行 + 冻结快照，**不重算任何判定**）。
+ *
+ * 🔴 为什么不落库矩阵：矩阵是 `结果行 × 冻结轴` 的**确定性投影**。落库等于把同一事实存两份，
+ *   而两份一旦不同步，前端看到的矩阵与结果表就会互相矛盾 —— 那是最难排查的一类缺陷。
+ */
+export async function buildMatrixForRun(robustnessRunId: string): Promise<RobustnessMatrixView> {
+  const row = await getSearchRobustnessRunRow(robustnessRunId);
+  if (row === null) return toMatrixView(emptyMatrix());
+  if (row.searchSnapshotJson === null || row.searchSnapshotJson === "") {
+    return toMatrixView(emptyMatrix());
+  }
+  const snapshot = parseFrozenSnapshot(row.searchSnapshotJson);
+  const { axes } = buildNeighborhoodAxes(snapshot);
+  const resultRows = await listSearchRobustnessResultRows(robustnessRunId, { includeDetail: false });
+  return toMatrixView(
+    buildRobustnessMatrix({
+      axes,
+      rows: resultRows.map((result) => ({
+        parameterHash: result.parameterHash,
+        parameters: parseJsonObject(
+          result.parametersJson,
+          "search_robustness_result.parametersJson",
+        ),
+        status: result.status,
+        stable: result.stable,
+        stabilityRatio: result.stabilityRatio,
+        totalReturnPct: result.totalReturnPct,
+        tradeCount: result.tradeCount,
+      })),
+    }),
+  );
+}
+
+/**
+ * 领域矩阵 → wire 视图（仅把 `readonly` 数组摊平为 wire 形态；**不改任何取值**）。
+ *
+ * 领域层全程 `readonly`（防误改），wire 契约由 zod 派生（可变数组）⇒ 这一层是**唯一**转换点。
+ */
+function toMatrixView(matrix: RobustnessMatrix): RobustnessMatrixView {
+  return {
+    rowAxis: { ...matrix.rowAxis, values: [...matrix.rowAxis.values] },
+    columnAxis: { ...matrix.columnAxis, values: [...matrix.columnAxis.values] },
+    cells: matrix.cells.map((cell) => ({ ...cell })),
+    parameterCount: matrix.parameterCount,
+    omittedParameters: [...matrix.omittedParameters],
+  };
 }
 
 /** 读结果（服务端排序 / 过滤；**只做描述性排序，不产出推荐**）。 */

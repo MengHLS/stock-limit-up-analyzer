@@ -31,15 +31,31 @@
  */
 
 import type { EquityPoint } from "../../backtest/types";
+import type { ClosedLoopEvaluationRef } from "../closedLoop/types";
 import type { ParameterSearchSampleOutcome } from "../parameterSearch/types";
 import type { StrategyDocument } from "../strategySchema/types";
 import type { ResearchParameterSet } from "../types";
 import { evaluateStrategyParameters } from "./evaluate";
 
-/** 一次评估的产物：绩效标量 + 该次撮合的权益曲线（走查需要曲线做 OOS 拼接）。 */
+/**
+ * 一次评估的产物：绩效标量 + 该次撮合的权益曲线（走查需要曲线做 OOS 拼接）。
+ *
+ * PARAMETER-001 追加（**只增不改**，既有消费者只读 `outcome` / `equityCurve`）：
+ * `evaluation` / `experimentId` / `evaluationRunId` / `backtestFingerprint` 是
+ * 「参数组合 → Backtest → Evaluation」可追溯所需的原始引用。它们**直接来自评估端口返回值**，
+ * 不重算、不派生。
+ */
 export interface StrategyBacktestSample {
   readonly outcome: ParameterSearchSampleOutcome;
   readonly equityCurve: readonly EquityPoint[];
+  /** 完整评估引用（canonical metrics 唯一读数面）；失败路径为 null。 */
+  readonly evaluation: ClosedLoopEvaluationRef | null;
+  /** 评估端口派生的实验 id（`deriveExperimentId`）；失败路径为 null。 */
+  readonly experimentId: string | null;
+  /** 闭环 run id（`<runIdPrefix>::<experimentId>`）；**内存态**，非落库 run 行；失败路径为 null。 */
+  readonly evaluationRunId: string | null;
+  /** 本次撮合指纹（`ClosedLoopEvaluationRef#backtestFingerprint`）；失败路径为 null。 */
+  readonly backtestFingerprint: string | null;
 }
 
 export interface StrategyBacktestBridgeOptions {
@@ -126,6 +142,12 @@ export function createStrategyBacktestBridge(
       const performance = result.evaluation.performance;
       const totalReturnPct = performance?.totalReturnPct ?? null;
       const maxDrawdownPct = performance?.maxDrawdownPct ?? null;
+      const trace = {
+        evaluation: result.evaluation,
+        experimentId: result.experimentId,
+        evaluationRunId: result.runId,
+        backtestFingerprint: result.backtestFingerprint,
+      };
       if (totalReturnPct === null || maxDrawdownPct === null) {
         return {
           outcome: {
@@ -135,6 +157,7 @@ export function createStrategyBacktestBridge(
               `（策略 ${options.document.strategyId}@${options.document.version}；拒绝编造标量）`,
           },
           equityCurve: result.equityCurve,
+          ...trace,
         };
       }
       return {
@@ -147,6 +170,7 @@ export function createStrategyBacktestBridge(
           },
         },
         equityCurve: result.equityCurve,
+        ...trace,
       };
     } catch (error) {
       // 契约要求结构化失败（不抛错）：单个参数集失败不应中断整批搜索
@@ -156,6 +180,10 @@ export function createStrategyBacktestBridge(
           error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
         },
         equityCurve: [],
+        evaluation: null,
+        experimentId: null,
+        evaluationRunId: null,
+        backtestFingerprint: null,
       };
     }
   };

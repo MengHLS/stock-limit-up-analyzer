@@ -24,3 +24,25 @@ export * from "./region";
 export * from "./candidate";
 export * from "./serialize";
 export * from "./run";
+
+// ---------------------------------------------------------------------------
+// PARAMETER-001 — 持久化搜索层（**刻意不在本 barrel 里 re-export**）
+// ---------------------------------------------------------------------------
+//
+// 新增模块（按依赖方向自底向上）：
+//   searchSpace.ts    参数空间定义（FIXED/TUNABLE/DERIVED 分类 + 派生 + 校验 + 编译）
+//   parameterHash.ts  稳定 parameterHash + cache 判据
+//   combination.ts    笛卡尔积组合（复用 combinationGenerator）+ 去重
+//   searchRun.ts      Run 状态机 + 进度 + FIXED 坐标
+//   searchResult.ts   canonical metrics 只读投影（不重算）
+//   persistence.ts    三表仓储（读写唯一落点）
+//   executor.ts       编排：Resume / Retry / Cache + 复用评估端口
+//
+// 🔴 为什么不做 `export * from "./executor"`：
+//   `executor.ts` 运行时 import `strategyEvaluation/backtestBridge`，
+//   而后者所在子图会回到 `closedLoopWiring/executors`（它又 import 本 barrel）。
+//   把执行层塞进 barrel ⇒ **运行时循环 import**（本项目已真实踩过「顶层互相 import ⇒
+//   `tsc` 绿但运行时报 `X is not a function`」。）
+//   ⇒ 消费方一律**按显式路径**引用（`./executor` / `./persistence`），
+//     与本仓「桥只允许显式引用具体模块」的既有纪律一致。
+

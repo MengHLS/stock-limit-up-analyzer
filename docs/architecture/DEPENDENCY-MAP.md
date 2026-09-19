@@ -181,13 +181,73 @@
 | `server/paramSearchRouter.ts` → `server/research/parameterSearch/{executor,coordinates,searchRun}` | 7 端点的域层落点 |
 | `server/research/parameterSearch/executor.ts` → `drizzle/schema` / `server/db` | 新增三表的读写（**唯一落点** = `persistence.ts`） |
 | `client/src/components/parameterSearch/**` → `shared/parameterSearchContracts`（类型） + `@/lib/trpc` | **不 import `server/**` 运行时值**（只经 `ParamSearchRouter` 的**类型**推断） |
+| `server/research/searchRobustness/**` → `server/research/parameterSearch/{persistence,searchRun}` | **只读复用**既有读函数与状态机迁移表（唯一权威）⇒ 不新写一套 SQL、不新建第二张迁移表 |
+| `server/research/searchRobustness/**` → `server/researchDataset/version#canonicalStringify` / `shared/quant-stats`（mean/median/standardDeviation） / `server/research/experimentValidation` | 复用 canonical 序列化、统计与错误类型的**唯一权威** |
+| `server/paramSearchRouter.ts` → `server/research/searchRobustness/{executor,analysis,run,persistence}` | 6 端点的域层落点（**同域扩端点，零新 router**） |
+| `client/src/components/robustness/**` → `shared/searchRobustnessContracts`（类型） + `@/lib/trpc` | **不 import `server/**` 运行时值** |
+| `server/research/oosValidation/**` → `server/research/parameterSearch/{persistence,executor,searchRun,parameterHash}` | **只读复用**：源 Run / 组合 / 结果读函数、`toResultView`（IS 冻结副本）、状态机迁移表、`computeParameterHash`（**重算复核**）⇒ 不新写一套 SQL、不新建第二张迁移表、不重定义状态机 |
+| `server/research/oosValidation/**` → `server/research/strategyEvaluation/backtestBridge#createStrategyBacktestBridge` + `server/research/parameterSearch/searchResult#projectCanonicalMetrics` | 🔴 **必含边**：这两条 import **必须存在** —— 它们是「**真重跑 + 真重算**」的结构证据（与下面 robustness 的黑名单**镜像相反**） |
+| `server/research/oosValidation/**` → `server/researchDataset/version#canonicalStringify` + `server/research/experimentValidation#ResearchValidationError` | 复用 canonical 序列化与错误类型的**唯一权威**（不自造错误类、不自造指纹算法） |
+| `server/paramSearchRouter.ts` → `server/research/oosValidation/{executor,freeze,window,gate,comparison,run}` | 6 端点的域层落点（**同域扩端点，零新 router**） |
+| `client/src/components/oos/**` → `shared/oosValidationContracts`（类型） + `@/lib/trpc` | **不 import `server/**` 运行时值** |
+| 🔴 **禁止边（结构性不存在）** | `server/research/searchRobustness/**` **不得** import `backtest` / `strategyEvaluation` / `closedLoop` / `strategyCore` / `runWorkbenchAssembly` / `researchEngine` / `leaderCandidates` —— 这是「**零重跑**」的**结构证据**，由静态守卫测试（import 白名单 + 黑名单）钉死；反之 `robustness/**`（C-18.1）**允许**注入式评估器（那正是两者语义差别的来源） |
+| 🔴 **镜像边（两域守卫方向相反，是本仓的一条架构判据）** | `searchRobustness/**` = **黑名单**（必须**够不到**回测 / 评估端口）；`oosValidation/**` = **必含清单**（必须**够得到** `createStrategyBacktestBridge` 与 `projectCanonicalMetrics`）。两侧测试文件亦**镜像**（`robustnessBoundary.test.ts` vs `oosValidationBoundary.test.ts`）⇒ **任何**把实现从一域搬到另一域的动作都会让对侧测试立刻变红 |
+| 🔴 **写入面白名单** | `oosValidation/**` 只允许写两张表：`oos_validation_run` / `oos_validation_result`（由 `oosValidationBoundary.test.ts` 以词边界正则扫描钉死，避开 `updateOosValidationRun(` 这类函数名的误判）；对 `parameter_search_*` **只读** |
 
 **未新增（刻意）**：
 - ❌ `server/research/**` → `server/strategyCore/**`：**零新增**。搜索域派生需要「谁能被搜索」的判据，
   但为避免给 `server/research/**` 引入跨域生产依赖，改为在投影层实现同一判据并由**测试**断言与
   `strategyCore/parameterResolver.ts#listSearchableParameters` 等价（测试可以跨域，生产代码不跨）。
 - ❌ 未新建 `backtestCore/**`、未建第二个 `paramSearch` router、未建第二套 `canonicalMetrics`。
+- ❌ **OOS-001 未新建第二套回测**：`oosValidation/**` 全部回测都经由既有
+  `strategyEvaluation/backtestBridge`（唯一权威入口）⇒ 「样本外重跑」与「参数搜索内评估」
+  跑的是**同一条链**，只是窗口与参数来源不同（这正是「可比」的前提）。
+- ❌ **OOS-001 未新建第二套状态机**：`OOS_VALIDATION_RUN_STATUSES = PARAMETER_SEARCH_RUN_STATUSES`
+  （**同词表**），迁移表复用既有 `PARAMETER_SEARCH_RUN_TRANSITIONS`。
+- ⚠️ **命名不遮蔽**：`oosValidation/**` 的三个导出与本仓既有同名符号**刻意改名**以免 ESM `export *`
+  静默遮蔽：`FrozenCandidateSnapshot`（原 `FrozenOosCandidate`，与 `validationSelection.ts` 同名）、
+  `oosFingerprintOf`（与 2 处同名）、`oosCalendarDaysBetween`（与 1 处同名）。
+  该纪律由 `oosValidationBoundary.test.ts` 的**命名不遮蔽守卫**钉住（比对 `server/**` + `shared/**` 的顶层导出名）。
 
 **`index.ts` barrel 纪律**：`server/research/parameterSearch/index.ts` **刻意不 re-export** `executor.ts` / `persistence.ts` ——
 因为执行层运行时 import 的评估端口子图会**回到** `closedLoopWiring/executors`（它又 import 本 barrel）⇒ 会形成运行时循环导入。
 消费方一律**按显式路径**引用，与「桥只允许显式引用具体模块」的既有纪律一致。
+
+## D-91 WALK-FORWARD-001 增量：新增依赖边 + 第三方向镜像边（2026-09-19 · `9bw`）
+
+### 新增边
+
+| 边 | 方向 | 说明 |
+|---|---|---|
+| `paramSearchRouter` → `walkForward/executor` | 组合根 → 域 | 6 端点入口 |
+| `paramSearchRouter` **实现** `WalkForwardExecutionHooks` | 组合根 → 域（**注入**） | 用**既有** PS / OOS application service 实现；域层只见接口 |
+| `walkForward/windowSchedule` → `walkForwardRun/windows#generateWalkForwardSplits` | 域 → 既有原语 | **复用切窗算法**，不重写 |
+| `walkForward/*` → `oosValidation/types` | 域 → 域（**仅常量**） | `OOS_ENGINE_VERSION` / `OOS_METRICS_VERSION`；守卫留**后缀级窄豁免** |
+| `client/components/walkForward` → `shared/walkForwardContracts` | 前端 → 契约 | 类型与校验同源 |
+
+### 🔴 禁止边（静态守卫钉住）
+
+- ❌ `walkForward/**` → `backtest/**` / `strategyEvaluation/**` / `closedLoop*` / `strategyCore` / `searchRobustness/**`；
+- ❌ `walkForward/**` → `runWorkbenchAssembly` / `researchEngine` / `leaderCandidates`；
+- ❌ **域层绕过 `hooks` 自行触达执行面**（「执行只能经由注入钩子」）；
+- ❌ `WalkForward → HTTP → OOS API → HTTP → Backtest` 自调用链。
+
+### 第三方向镜像边（本任务最重要的依赖事实）
+
+三条并列执行边的守卫方向**互不相同，不可搬移**：
+
+| 执行边 | 守卫形态 | 关键词 |
+|---|---|---|
+| `searchRobustness/**`（`9bu`） | import **黑名单** | 禁够到回测 / 评估端口 ⇒ **零重跑** |
+| `oosValidation/**`（`9bv`） | import **必含清单** | 必须够到 `createStrategyBacktestBridge` + `projectCanonicalMetrics` ⇒ **必须重跑** |
+| `walkForward/**`（`9bw`） | **黑名单 +「执行只能经由注入钩子」** | 可 import OOS **类型**，但不得自行触达执行面 ⇒ **逐 Fold 重跑且零复制** |
+
+把任一域的实现搬进另一域，对侧静态守卫会**立刻变红**。
+
+### 命名不遮蔽纪律（本任务新增）
+
+🔴 ESM 的 `export *` 遇**同名导出**会**静默遮蔽**（不报错）。本域与 C-19.1 `walkForwardRun/**`
+存在近同名符号（`WALK_FORWARD_VALIDATION_*` vs `WALK_FORWARD_*`；
+`computeWalkForwardValidationRunFingerprint` vs `computeWalkForwardRunFingerprint`）
+⇒ **本域与 `walkForwardRun/**` 刻意不并入全域 `export *`，一律按文件路径 import**
+（与 `oosValidation` / `searchRobustness` 同策略；本轮已把一个真实重名函数改名）。
