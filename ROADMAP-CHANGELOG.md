@@ -2454,3 +2454,13 @@ P1（9 条）/ P2（6 条）一条未动；P0-2/P0-3 的**彻底解**（翻译�
 - **零产品代码改动**：`server/**` 与 `client/**` 一行未改、零迁移、零新端点、零新依赖 ⇒ 不存在热重启风险。
 - 新增 **8 个只读/运维脚本 + 证据**（全部在 `docs/evidence/`）：`_probe_candidate_to_strategy_chain.mts`、`_probe_candidate_strategy_visibility.mjs`、`_probe_candidate_paramspace_keysets.mts`、`_probe_candidate_promote_dryrun.mts`、`_probe_promote_dialog_ready.mjs`、`_probe_inflight_run_detail.mts`、`_probe_reclaim_blindspot.mts`、两个 `_ops_*`。
 - **`9bd` 已登记**（`ROADMAP.md` §44.5，含验收判据与「须排在无在途 Run 时段」的约束）；编号台账两处（文件头铁律行 + §44.5 台账行）同步为「已用至 `9bd` ⇒ 下一个未占用 = `9be`」，**取号前已对远端**（`git ls-remote` 实测 `main = 4c7250f5…`，与本地 HEAD 一致 ⇒ 本地台账不陈旧）。
+
+---
+
+## §47 更新记录 — 2026-09-19 13:40 GMT+8
+
+- **STRATEGY-ARCH-001（`9bi`）· Strategy Core 一次性实施**：新增 `server/strategyCore/**`（20 文件 / 6806 行）与 `tests/server/strategyCore/**`（6 测试文件 + 2 夹具 / 112 用例）。**零已跟踪文件改动**（`git status --porcelain` 只有 `??` 新文件）、零迁移、零新端点、零前端改动。
+- 验收：`tsc --noEmit` = 0；聚焦 112/112 全绿；全量 `vitest run` 失败**文件集合**与基线逐项一致（8 文件 / 17 用例，4304 → 4416 用例，**零新增失败**）；`vite build` 成功；`checkEolDrift` 0 漂移。
+- 实施期修掉的 4 个 Core 自身缺陷（均在测试中暴露后回源码定性，再改产品代码）：① 特征注册的聚合抛错把 `lookback`/`leakage` 类问题误报成 `FEATURE_NOT_REGISTERED`；② `bar.<派生字段>` 的 availability 未纳入泄漏审计（桥接表未参与收集）⇒ 「close 可得却在 open 用」可绕过守卫；③ 无 WINDOW 节点时静态 A4 界被编造为 0 ⇒ 误杀「纯条件 + post.rd{n}」的合法定义（已改为：静态层证不出就不设界，交运行时关卡判定）；④ `collectRuleFeatureReferences` 漏掉派生字段桥接 ⇒ `featureRequirements` 空声明却在运行时抛 `FEATURE_NOT_REGISTERED`。
+- **未完成（如实登记）**：Core 未接入生产 tRPC 链路（`loopRun` / 评估端口仍走 legacy `assemble` + `signalEngine`）；阈值型出场规则（TAKE_PROFIT / STOP_LOSS / TIME_EXIT）需要「入场价 / 入场日」运行态引用，仍在 `exitRules` 以声明形式保留、未进 `exitRuleGraph`。
+- 报告：`docs/research/STRATEGY-ARCH-001-IMPLEMENTATION-REPORT.md`；Phase A 映射底稿：`docs/research/STRATEGY-ARCH-001-IMPLEMENTATION-MAP.md`。

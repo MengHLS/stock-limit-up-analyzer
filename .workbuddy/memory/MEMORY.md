@@ -61,3 +61,23 @@
 ## 研究 Run 运行态 / 孤儿回收（2026-09-18 实测）
 - 🔴 **僵尸 RUNNING 第三形态**：`reclaim.ts` 的 RUNNING 兜底分支**只在遍历「非终态分析」时**收集父 Run ⇒ **「父 RUNNING + 子分析全终态 + 有结果」永不被自动收敛**（实测零写入）⇒ 只能**人工收敛**（`FAILED` + `RUN_ORPHANED` + `completedAt` + Experiment 回滚）。⚠️ `9bd` 待做。
 - 🔴 排查顺序：`startedAt` 距今（**库内时间戳是 UTC 墙钟，别再减 8 小时**）→ 子分析状态分布 → `research_result` 行数 → `executionLogJson` 末批 → **进程证据**（`Get-Process -Id <pid> | Select StartTime`）。✅ **写保护代理取证法**：真实仓储包 Proxy（方法名命中 `^(create|update|delete|remove|insert|upsert|save|replace|set|purge)` 即抛错，其余 `.bind(obj)`）后照常调真实函数 ⇒ 得「真实返回值 + 是否零写入」。
+
+## Strategy 域运行坐标 / 参数链路（STRATEGY-AUDIT-001 实查 2026-09-19）
+- 🔴 运行时**唯一权威数据集坐标 = `datasetVersionId`**（`researchRunRouter.ts#primaryDatasetVersionIdOf` → `datasetFromRegistry.ts`）；`datasetVersion`(label) 仅展示。⚠️ 回落重建时 `datasetVersionId = null` 且**只继承 boards/excludeSt**，不继承 event/window/tDayCondition ⇒ 口径不同。
+- 🔴 **`loopRun` 的 `parameterSet` 入参是死字段**：只进 `metadata`（`researchRunRouter.ts:564`），既不过 `assembly` 也不落库；参数覆写唯一活路 = `assemble.ts:135 parameterOverrides`（由 `strategyEvaluation/backtestBridge.ts` 与 `evaluator.ts` 传）。前端也不提交它。
+- 🔴 **运行级复现快照缺失**：`closed_loop_backtest_run` 无 `parameterSet`/`codeVersion`/`engineVersion`/`seed`/`Universe`/`startedAt`；实测 6/6 行 `resultJson` 里这些键**零命中**。`strategy_versions.codeVersion` 实测 **11/11 = `1.0.0+gunknown`**（有列、不可用）。
+- 🔴 **`LeakageGuard` 对配方特征恒通过**：`recipeRegistryAtoms.ts#samePointAvailability` 把可用性恒置 `EPOCH_FLOOR_DATE="1990-01-01"`；`validateStrategy13` 不拒 future 变量；`conditionSignal/compile.ts` 零 `leakage` 引用 ⇒ **策略层没有独立未来函数防护**，安全性全靠数据层 PIT（`datasetAccess/invariants.ts`）。
+- 🔴 参数：`parameterRole` 的**运行期派生器 `parameterSpaceFromDocument.ts` 完全不读它**（FIXED 也会被搜）；`derivedFrom` **无求值器**（仅人类可读）；执行层用**有损的 v1 `document.parameters`**（`legacyViews.ts:157` 丢弃 code/role/unit/derivedFrom）。`paramSearchRouter.ts` 全文**零写库调用** ⇒ 搜索结果不落库、无 datasetVersion 字段。
+- 🔴 `setVersionStatus` 只校验「属于八态」，**不吃 §23 迁移表**（迁移表只在纯函数 `research/lifecycle/transition.ts`）⇒ `Draft→Production` 跳级在写入路径上不被拒。
+- ⚠️ 全平台实测仅 **1 个 `dataset_definition`**（`first_limit_pullback`）、2 个 `dataset_version`；`strategies` 10 行全 Draft、无 Production；闭环留档 6/6 `PARTIAL_BLOCKED`。审计全文 = `docs/research/STRATEGY-AUDIT-001.md`。
+
+## Strategy Core 语义权威（STRATEGY-ARCH-001 实建，`9bi`）
+- 🔴 **Core 唯一入口 = `server/strategyCore/`**（`StrategyRuntime.evaluate(version, parameterSet, context)` → `StrategyDecision`）。它是**语义**权威；legacy `StrategyDefinition` 降级为**存储编码**，靠 `adapters/legacyDefinition.ts` **双向**翻译（`legacy→Core→legacy→Core` 指纹逐字节相等，有测试）。
+- 🔴 **`WINDOW` 只考虑「当前决策日及之前」的窗口日**（更晚的进 `futureSkipped`）⇒ `evaluate` **必须逐决策日调用**；`FIRST_VALID_DAY` 在条件第一次成立那天发信号。这条让「`evaluate(T)` 不读 T+1」成为**结构性事实**，不是约定。
+- 🔴 **`updateVersionDefinition()` 恒抛 `VERSION_IMMUTABLE`** —— 把「不存在第二条改内容的路径」做成**可断言**约束。改内容只能 `applyDefinitionChange()` → 新版本（指纹相同 ⇒ `unchanged` 幂等）。
+- 🔴 **事件判定必须由运行方注入**（`context.resolveEvent` / `setEventOccurrenceResolver`）：**未注入即抛错**，不静默返回 false（否则「没接事件源」被伪装成「当日无事件」）。
+- 🔴 **Definition 内不得出现 Dataset / 引擎坐标**（`DATASET_BINDING_IN_DEFINITION_FORBIDDEN`，机器可查）；`datasetVersionId` 只允许在 `StrategyRunSnapshot.datasetReference`。
+- 🔴 特征 `availability` 是**相对当前 bar**的声明（`usesForwardData` 必须 false、`dataThroughRelativeDay ≤ 0`）；`usesForwardData=true` **无法注册** ⇒ 未来结果类变量进不了策略特征。
+- ⚠️ **`bar.<派生字段>` 经桥接表映射为特征 id**（`DERIVED_BAR_FIELD_TO_FEATURE_ID`）⇒ 改桥接表必须同查 3 处：`ruleGraph.collectRuleFeatureReferences`（已纳入桥接）/ `fieldReference.parseCoreFieldReference` / `featureRegistry` 内置特征。
+- ⚠️ **静态泄漏审计只在证得出时报警**：无 `WINDOW` 时不设 A4 界（交运行时关卡），避免误杀合法定义。
+- 🔴 **接产未做（N-02，高）**：`loopRun(useRealData)` / `strategyEvaluation` / `conditionSignal/compile.ts` **仍走 legacy** ⇒ Core「已建成未通电」。另 `StrategyRunSnapshot` **未落库**（N-01）、阈值型出场（TAKE_PROFIT/STOP_LOSS/TIME_EXIT）因需「入场价/入场日」运行态引用**仍在 `exitRules` 以声明保留**（N-03）。
