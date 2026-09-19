@@ -1,0 +1,625 @@
+<!-- 由 `scripts/genTestDocs.mts` 生成（`pnpm run docs:tests`），禁手改。 -->
+
+# 测试模块：tests/client/src/components
+
+- 测试文件 **16** 个 ｜ 用例声明 **422** 个
+- 涉及源码目录：`client/src/adapters/` · `client/src/components/datasetRegistry/` · `client/src/components/research/` · `client/src/components/strategy/` · `server/` · `server/research/strategyCandidate/` · `server/research/strategySchema/` · `server/researchCore/` · `shared/`
+
+## 怎么跑
+
+```bash
+pnpm exec vitest run tests/client/src/components                   # 本模块（vitest 位置过滤 = 路径子串匹配）
+pnpm exec vitest run tests/server/xxx.test.ts          # 单个文件（路径见下方「逐文件」）
+pnpm run test:changed                                  # 只跑改动相关（日常推荐）
+```
+
+> ℹ️ 本组含 `components/research` / `components/strategy` / `components/datasetRegistry` 三个子目录，文档按文件全路径区分。
+
+> ℹ️ 本模块有 **3** 个「源码文本断言」测试（`readFileSync` 源码 + 字符串匹配），
+> 改个变量名就可能变红，且不验证行为；详见 `docs/testing/README.md` 的「测试分类」一节。
+
+## 逐文件
+
+### `tests/client/src/components/datasetRegistry/BuildVersionDialog.test.ts`
+- 27 行 ｜ 用例声明 3 ｜ describe 1
+- 被测源码：`client/src/components/datasetRegistry/BuildVersionDialog.tsx`
+- 单跑：`pnpm exec vitest run tests/client/src/components/datasetRegistry/BuildVersionDialog.test.ts`
+- 用例树：
+- **suggestNextVersion**
+  - 无版本 → v1
+  - 全部为 v{n} → max+1（不因缺口而回填）
+  - 存在非 v{n} 标签 → count+1（不回填、不冲突）
+
+### `tests/client/src/components/datasetRegistry/datasetFilterForm.test.ts`
+- 276 行 ｜ 用例声明 26 ｜ describe 8
+- 被测源码：`shared/datasetRegistryContracts.ts` · `client/src/components/datasetRegistry/datasetFilterForm.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/datasetRegistry/datasetFilterForm.test.ts`
+- 用例树：
+- **createDefaultFilterForm（与后端权威默认同源）**
+  - 默认 = 全板块 / 含 ST / T 日首板 / t-0..t+20
+  - 默认表单必须直接通过校验（默认即合法，不能出现「一打开就报错」）
+  - 每次生成独立行 key（React list key 不冲突）
+- **选项生成**
+  - relativeDayOptions 覆盖 0..min（升序，含 T 日文案）
+  - boardOptions / eventKindOptions 与契约枚举一一对应且带中文标签
+- **toggleBoard（保持规范顺序、天然去重）**
+  - 勾选 / 取消勾选
+  - 结果始终按 DATASET_BOARDS 规范顺序（勾选顺序不影响载荷）
+  - 不产生重复项
+- **事件维度行增删改**
+  - addEventRow 自动挑未使用的组合，避免「一加就重复报错」
+  - removeEventRow 保底 1 条（不允许删空）
+  - updateEventRow 只改目标行
+  - formatEventRow 文案（T 日 / T-n 日）
+- **validateFilterForm（构建门禁）**
+  - 事件维度为空 → 拒绝（「未完成筛选配置不得构建」）
+  - 超过事件维度上限 → 拒绝
+  - 相对日非法 / 越界 → 拒绝
+  - 事件维度重复 → 拒绝（与后端 superRefine 同口径）
+  - 前后窗口越界 / 非整数 → 拒绝
+  - 结果视界空 / 越界 / 重复 → 拒绝
+  - 批大小非法 → 拒绝
+  - 合法组合（板块 + 排除 ST + 多事件 + 前置窗口）→ 通过
+- **buildFilterPayload（表单 → wire）**
+  - 数字字符串转 number，事件按相对日升序，视界去重升序
+  - 默认表单 → 与后端权威默认等值载荷
+  - payload 必须能被同一校验放过（校验与整形口径一致）
+- **parseNumberList**
+  - 忽略空白项并转数字
+- **describeFilterForm（唯一文案来源）**
+  - 默认摘要含全板块 / 含ST / T日首板 / t-0..t+20
+  - 自定义摘要反映板块 / 排除ST / 多事件
+
+### `tests/client/src/components/datasetRegistry/datasetManagement.test.ts`
+- 62 行 ｜ 用例声明 8 ｜ describe 2
+- 被测源码：`client/src/components/datasetRegistry/CreateDatasetDialog.tsx` · `client/src/components/datasetRegistry/DeleteDatasetDialog.tsx`
+- 单跑：`pnpm exec vitest run tests/client/src/components/datasetRegistry/datasetManagement.test.ts`
+- 用例树：
+- **validateDatasetCodeInput**
+  - 空串不报错（由提交按钮 disabled 兜底）
+  - 合法 lowercase snake_case → null
+  - 含大写 / 连字符 / 空格 / 驼峰 → 报错
+  - 以数字开头 → 报错
+  - 禁止模式：版本号后缀 / 纯数字后缀 → 报错（防同一数据集被拆成多个 code）
+  - 超长（>64）→ 报错
+- **isDeleteDatasetConfirmed**
+  - 完全一致 → true
+  - 空串 / 前后空白 / 大小写不同 / 子串 → false
+
+### `tests/client/src/components/research/analysisBatchForm.test.ts`
+- 505 行 ｜ 用例声明 38 ｜ describe 10
+- 被测源码：`client/src/components/research/analysisBatchForm.ts` · `client/src/components/research/createAnalysisForm.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/analysisBatchForm.test.ts`
+- 用例树：
+- **expandAnalysisMatrix — 矩阵基数**
+  - QUANTILE × 3 个目标 → 3 项，名称各自带目标变量
+  - STABILITY = 目标 × 维度 的笛卡尔积，且名称含目标变量（防重名）
+  - EVENT_STUDY 只有一项，视界一次给全（不是每视界一项）
+  - DESCRIPTIVE 只有一项，variables 原样传入
+  - 多类型混合：5 类同时选且输入齐备时按各规则累加
+- **expandAnalysisMatrix — 缺输入时不静默少建**
+  - 未勾选的类型既不产出、也不算 skipped（那是用户的明确选择）
+  - QUANTILE 缺特征 → 跳过并说明原因
+  - CONDITIONAL 无条件 → 跳过，且原因必须点明「空条件等于全样本」
+  - CONDITIONAL 有条件 → 每个目标一项，且条件载荷逐项一致
+  - 每组条件只算一次并复用同一载荷（不产生组号断号）
+  - EVENT_STUDY 无视界 / STABILITY 无维度 / DESCRIPTIVE 无变量 → 各自被跳过
+- **expandAnalysisMatrix — 上限截断**
+  - 超过单批上限时截断，且如实报告 truncated 数量
+- **toBatchCreatePayload**
+  - 无目标的类型不发 target 键（与单建「没有就不发」一致）
+  - 无条件时不发 conditions 键（避免服务端把空数组当成条件集）
+  - 带目标 / 条件的类型如实携带
+- **createDefaultBatchMatrixForm**
+  - 默认填的是目录里真实存在的变量（绝不发明变量）
+- **buildSuitePlan**
+  - 视界取自真实目录，不硬编码 1/3/5/10/20
+  - 无条件时明确说明「不含条件分析」，而不是悄悄少一项
+  - 套件展开后 CONDITIONAL 被跳过并给出原因，但其余成员都在
+  - 填了条件后 CONDITIONAL 进入清单
+  - 空维度目录时如实说明稳定性分析缺席
+- **templatePreviewRows**
+  - 按 sortOrder 升序，且不推导、不改名
+- **validateBatchMatrixForm / validateTemplateName**
+  - 未选类型即报错
+  - 勾了 QUANTILE 但没特征 → 报错
+  - 分组数越界 → 报错
+  - 输入齐备 → 无错误
+  - 模板名空 / 过长
+- **formStateToBatchItem — 内置示例 → 批量条目**
+  - CONDITIONAL：名称取示例标题，条件按「组」转成载荷行
+  - 不传 nameOverride（或传空白）时退回 suggestAnalysisName，不臆造名字
+  - DESCRIPTIVE：变量进 config，不产出 target 也不产出 conditions
+  - SEGMENT_RELATION：四个窗参数进 config（不落 target / conditions）
+  - 每个内置示例都满足服务端批量预检口径（点下去就能建，不是点了才报错）
+  - 示例标题可直接当模板名（≤120 字符，与库列宽 / 唯一索引口径一致）
+  - 示例载荷过 toBatchCreatePayload 后条件与目标不丢
+  - 缺变量判定按 requiredVariables 走（示例卡据此置灰并写出缺什么）
+- **describeBatchItem — 卡片上那行「实际会写进分析的内容」**
+  - 条件 + 目标变量都看得见
+  - 变量多于 3 个时缩略成「首 … 末（共 N 个）」
+  - 分段窗写成人读的 T+ 区间
+
+### `tests/client/src/components/research/candidateForm.test.ts`
+- 335 行 ｜ 用例声明 23 ｜ describe 4
+- 被测源码：`server/research/strategyCandidate/candidateTypes.ts` · `server/researchCore/index.ts` · `client/src/components/research/candidateForm.ts` · `client/src/components/research/candidateSketchForm.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/candidateForm.test.ts`
+- 用例树：
+- **与后端常量对表（防漂移）**
+  - 0-a) 前端可编辑字段 ≡ 后端 CANDIDATE_EDITABLE_FIELDS
+  - 0-b) 前端可登记结论状态 ≡ 后端 CANDIDATE_ELIGIBLE_CONCLUSION_STATUSES
+  - 0-c) 前端流转目标 ≡ 后端「API 开放目标 ∩ 状态机允许迁移」；CONVERTED 永不出现
+  - 0-d) 未收录/空状态一律不给流转入口（不猜）
+  - 0-e) REVIEW → DRAFT 后端状态机允许但 API 未开放 ⇒ 前端不得提供
+- **Conclusion → Candidate（登记）**
+  - 1-a) 初值 = 后端缺省（结论标题 / 结论正文）
+  - 1-b) 用户未改动时**只提交 conclusionId** —— 默认值由后端负责
+  - 1-c) 改动候选名 / 描述时才提交对应键
+  - 1-d) 入参**永远不含**结构锚 / 来源快照 / 状态（这些由后端负责）
+  - 1-e) 候选名为空 → 校验失败（不静默用缺省名）
+  - 1-f) 结论资格：DRAFT / FINAL 允许，其余给出原因
+- **草图编辑（结构化表单，白名单）**
+  - 2-a) 初值 = 后端原值：可表达的块解析成草稿，未填写的块是「未填写」（不是空文本）
+  - 2-b) 未改动 → 拒绝空补丁（后端亦拒绝）
+  - 2-c) 改名 / 清空一块为 null（原本就有值的块才谈得上「清空」）
+  - 2-d) 清空描述 → 提交 null（显式清空，不是「未提供」）
+  - 2-e) 结构化修改 → 提交结构 JSON（只有改动过的块进入补丁）
+  - 2-f) 草稿里填了非法值 → 错误定位到具体字段（不静默存下去）
+  - 2-g) 多个字段同时出错 → 一次列全（不挤牙膏）
+  - 2-h) 补丁键全部落在白名单内（含清空场景）
+  - 2-i) 🔴 表单表达不了的块 → 整块只读，且**永不提交**（不静默丢键）
+- **状态流转文案与转正入口**
+  - 4-a) 已收录目标的文案与说明齐备
+  - 4-b) 未收录目标回退原文 + 通用说明（不编语义）
+  - 4-c) 只有 ACCEPTED 展示转正入口（Phase A 不实现转正本身）
+
+### `tests/client/src/components/research/candidateSketchForm.test.ts`
+- 1155 行 ｜ 用例声明 63 ｜ describe 13 ｜ 📄 源码文本断言
+- 被测源码：`server/research/strategySchema/definition.ts` · `server/research/strategyCandidate/definitionBuild.ts` · `client/src/components/research/candidateSketchVocabulary.ts` · `client/src/components/research/candidateSketchForm.ts` · `client/src/components/research/candidateSketchCostPreset.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/candidateSketchForm.test.ts`
+- 用例树：
+- **词表与服务端逐字对表（防漂移）**
+  - 事件类型 / 窗口单位 / 触发 / 数量口径 / 成本模型 / 仓位方式 / 参数类型 ≡ 服务端常量
+  - 入场时点 ≡ 服务端 ENTRY_TIMING_TO_EXECUTION 的键（多一个都不得提供）
+  - extra 扩展槽闭集 ≡ 服务端 CANDIDATE_SKETCH_EXTENSION_KEYS
+  - 🔴 条件运算符 ≡ 服务端 CONDITION_OPERATOR_MAP 的键（BETWEEN / IS_NULL 不得出现）
+  - 字段引用解析 ≡ 服务端 parseStrategyFieldReference（逐例）
+- **JSON → 草稿**
+  - 全部可表达 → 五块都是 structured，且值原样搬运
+  - null / 缺失 → empty（不是空对象草稿）
+  - 未知键 / 非法类型 → 整块 raw，并说明原因（不静默截断）
+  - exitRule.extra / riskRule.regimeGate 非空 → raw，且原因是「服务端会明确拒绝」
+  - 🔴 filterRule 含转正不支持的运算符（BETWEEN）→ raw，且点名该运算符
+  - filterRule 组号 / sortOrder 乱序也能收敛到规范草稿（往返不再漂）
+- **草稿 → JSON（往返幂等）**
+  - FULL_SKETCH → 草稿 → JSON ⇒ 逐块与原值语义相等
+  - 未填写的块 → null；raw 块 → 不产出键（永不提交）
+  - 空草稿 → 五块全为 null（清空语义，不是省略键）
+- **校验：错误（填了但不合法）与缺口（转正必填但没填）**
+  - 空草稿 → 全是缺口，没有错误（本来就没填，谈不上填错）
+  - 🔴 exitRule 为空**不是**转正缺口（后端只校验 exit.rules 是数组，无「至少一条」约束）
+  - 缺口带段归属，且六段的缺口数之和 = 总缺口数（没有缺口掉在段外）
+  - 整行空白不算「填错」：空的条件行 / 空的参数行都不进 errors
+  - 填了但不合法 → 进 errors（阻止保存），缺口仍单独列出
+  - 观察窗口只填一半 → 进缺口（不替你默认单位）
+  - 条件字段不是 Strategy 字段引用 → 进 errors，并说明「不会被猜成某个时间域」
+  - 数值参数缺 max → 进 errors（TUNABLE 必须自带搜索界）
+- **patch 构造**
+  - 只提交改动过的块；未改动 → 拒绝空补丁
+  - 🔴 raw 块永不进入补丁（无论其它块怎么改）
+  - 填了非法值 → 补丁整体失败（不产出一半）
+- **界面段（按交易决策顺序）**
+  - 段的定义自洽：键唯一、块全覆盖、必填性表覆盖所有段
+  - 段的顺序就是「下单时的思路」：买什么 → 什么条件买 → 什么时候买 → 怎么卖 → 买多少 → 成本 → 参数
+  - 完整草图 → 七段摘要都是人话，且必填段全部「齐了」
+  - 空草图 → 摘要基本为空；③ 怎么卖 例外，它会明说「未设置」（那是提醒，不是假摘要）
+  - 入场规则整块变 raw → 承载它的四段都标出只读块（不只在第一段报）
+- **缺口落点（anchors）**
+  - 段状态携带逐条缺口明细，且与总清单同源同序（不出现两套说法）
+  - 锚点必须都是声明过的那几个 —— 空草稿恰好用满全部锚点（穷尽性）
+  - 整块未填时，一条缺口可以对应多个输入框（时点 / 窗口 / 触发三件套）
+  - 观察窗口只填一半 → 落点是窗口本身（不是时点 / 触发）
+  - 🔴 回归：窗口 / 触发 / 买入条件都填了、只缺「入场时点」时，缺口必须指名道姓
+- **入场时点 / 触发时点：取值语义与「选了必然被拒」的陷阱**
+  - 🔴 `SAME_CLOSE` 的自相矛盾是**服务端事实**，不是前端的判断
+  - 该取值仍留在表里（对表哨兵不被关掉），但置灰并写明原因
+  - 其余入场时点都不置灰，且映射出的三元组自洽（成交不早于信号）
+  - 触发时点的四条说明 ≡ 服务端 `resolveSignalTimeline` 的真实行为（不是我自己的解释）
+- **买入条件（filterRule）：语义是「满足才买」，不是「剔除」**
+  - 🔴 归属段是 condition（什么条件买），不是 what（买什么）也不是 when（什么时候买）；标签也必须说人话
+  - 条件整句是人话：字段翻中文，比较值不是引用则原样显示（不编造）
+  - 条件组摘要照实翻逻辑连接符（OR 用的是草稿原意，由别处警告兜底）
+  - 🔴 OR / NOT 会被转正静默压成 AND —— 必须给出警告，但不阻断保存
+  - 只用「并且」时不给警告（避免狼来了；整套 fixture 的 warnings 必须为空）
+  - 条件段落空 = 出现事件即视为满足，但**不是**转正缺口（entry.conditions 可为空数组）
+- **字段引用的双向构造（把手写 `prefix.rd0.close` 换成三格选择）**
+  - build → parse 回到同一组输入（四个部位全覆盖）
+  - 相对日留空 → 用该部位默认日（prefix 用 0、post 用 1），绝不拼出半成品
+  - 四个部位恰好覆盖服务端解析器的四个具名分支（不含 labelOnly / unknown）
+  - 右值类型词表 ≡ 服务端 STRATEGY_CONDITION_VALUE_TYPES（逐字）
+- **常用买入条件模板**
+  - 🔴 前两条与后端 golden sample 的「首板回踩」逐字一致（不是我自己编的口径）
+  - 每个模板都是「合法引用 + 转正支持的运算符 + 无前视 + 有说明」
+  - ⚠️ 不提供「回撤 X%」模板，且所有模板的右值都不含算式（词表里根本没有运算符）
+- **成本预设**
+  - A 股标准 = 仓库既有数字（与 strategyAdapter 兜底值 / StrategyEditor 模板同源，不另立第二套）
+  - 比例渲染成 A 股读法：千 / 万 优先，顺序不能反（0.001 是「千1」不是「万10」）
+  - 金额渲染：整万写「N 万」，非整万加千分位
+  - 套用只覆盖七项，绝不动 maxPositions
+  - matchCostPreset 不把「看起来齐了但不是同一套」误判成命中
+  - 描述串覆盖七项（供折叠态与按钮副标题共用）
+- **parameterSpace 的三个真实键（parameterRole / defaultValue / description）**
+  - 含这三个键时**不降级**，且能被表单读出（回归：实测报错「出现未收录的键」）
+  - 往返：草稿 → JSON 保留三键，且默认值按同行 type 还原类型
+  - 空串一律**省略**该键（不声明 ≠ 声明成空值）
+  - FIXED 参数不再被要求 min / max（与服务端 TUNABLE-only 口径一致）
+  - 非法默认值 / 未知角色 → 校验响亮报错（不静默丢弃）
+
+### `tests/client/src/components/research/clientPagination.test.ts`
+- 163 行 ｜ 用例声明 20 ｜ describe 5
+- 被测源码：`client/src/components/research/clientPagination.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/clientPagination.test.ts`
+- 用例树：
+- **totalPagesOf**
+  - 空集合算 1 页（与 PaginationBar 的 Math.max(1, …) 同源）
+  - 整除与不整除都向上取整
+  - 180 条 / 每页 20 = 9 页（真实 Run #7 的规模）
+  - 非法 pageSize / totalCount 一律回落到 1 页，不抛异常、不返回 NaN
+- **clampPage**
+  - 把越界页码夹进 [1, totalPages]
+  - 合法页码原样返回
+  - 非法页码（NaN / ±Infinity）一律回落到第 1 页
+  - 小数页码向下取整
+- **paginate**
+  - 切出首页且行数正确
+  - 最后一页只取余下的行（180 = 9×20 恰好整除）
+  - 不整除时最后一页取余数
+  - 🔴 越界页码被夹取后仍返回真实行，绝不返回空页
+  - 每页条数调大后旧页码同样被夹取
+  - 空集合：1 页、0 行、序号为 0
+  - startIndex / endIndex 是 1-based 且与当前页对齐
+  - 纯函数：不改入参、同输入同输出
+  - 每页条数非法时回落到默认值
+- **pageRangeLabel**
+  - 非空集合给出「第 a ~ b 条 · 共 n 条」
+  - 空集合只说条数，不编造区间
+- **常量纪律**
+  - 默认每页 20，且档位升序包含默认值
+
+### `tests/client/src/components/research/createAnalysisForm.test.ts`
+- 896 行 ｜ 用例声明 61 ｜ describe 11
+- 被测源码：`client/src/components/research/createAnalysisForm.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/createAnalysisForm.test.ts`
+- 用例树：
+- **createAnalysisForm — 分析类型**
+  - 只暴露引擎已实现的 6 类，且不含 IC / DISTRIBUTION
+  - 主分析优先级与后端 PRIMARY_PRIORITY 一致（QUANTILE 第一，DESCRIPTIVE 不参与）
+  - 类型名（label）保持短名，问题句（question）另存 —— 名字会进持久化的分析名
+  - 每类分析的必填项要求互不相同且符合规格
+  - 默认表单按类型给不同初始值
+- **createAnalysisForm — 目录推荐**
+  - 优先验收案例口径 turnover / future_return_5d
+  - 没有 5d 时退回任意 future_return_*，仍没有才取第一个；空目录返回空串
+  - 可用视界由目录推导，不硬编码
+- **createAnalysisForm — 条件值类型**
+  - 运算符元数映射正确
+  - 标量解析：数字转 number，文本保留字符串，空串为 null
+  - 列表解析兼容中英文逗号与顿号
+  - 条件值形态由运算符决定
+- **createAnalysisForm — 条件校验**
+  - 合法条件通过
+  - 空字段名直接返回
+  - 目录外的字段被拒（防手打不存在的变量）
+  - 缺少比较值 / 区间缺界 / 下界大于上界 / 空列表 都被拦下
+  - IS_NULL 不需要值
+- **createAnalysisForm — 表单校验**
+  - QUANTILE 齐备时通过
+  - QUANTILE 缺名称 / 特征 / 目标 / 分组数 各自报错
+  - 分组数必须 ≥2 且 ≤100
+  - 目标变量选成特征变量 → PIT 违规被拦
+  - CONDITIONAL 空条件被拒（等于「等于全样本」）
+  - CONDITIONAL 条件存在但字段名未填 → 仍算未填
+  - CONDITIONAL 有一个完整条件时通过
+  - DESCRIPTIVE 未选变量被拒；选了目录外变量也被拒
+  - STABILITY 维度必须在可用列表内
+  - EVENT_STUDY 至少一个视界
+- **createAnalysisForm — payload**
+  - config 只包含该分析类型相关的键
+  - target 列只在需要目标变量时给出
+  - 条件行：groupNo / sortOrder / 连接符 正确，空字段被跳过且组号重排为连续
+  - IS_NULL 条件发送 value=null（键必须存在，省略会被 tRPC 入参校验拒绝）
+- **createAnalysisForm — 建议名称**
+  - 明确写出用了哪些变量，不生成含糊名称
+- **createAnalysisForm — 条件载荷往返**
+  - 编号规则：组号 0 基、组内序号紧凑，空字段名行被跳过且不占位
+  - BETWEEN / IN / IS_NULL 的领域值形态正确，且 value 键必须存在
+  - 往返幂等：草稿 → 载荷 → 回填草稿 → 载荷，两次载荷逐字段一致
+  - 回填保留组间 / 组内连接符，并按 groupNo、sortOrder 升序整理乱序输入
+  - 组内 sortOrder 有空洞时会被压紧，但相对顺序不变
+  - 空行列表回填为 []（不臆造一个空组）
+  - 组号必须连续 0..n-1：中间夹空组也要重排（否则后端 assertConditionSet 拒收）
+  - 全为空组 → 载荷为空数组（不产出任何行，也不报错）
+  - 往返是「数值稳定」而非「文本稳定」：5.0 → 5、1e9 → 1000000000
+- **createAnalysisForm — 条件组校验（新建与编辑共用）**
+  - 没有任何可落库条件 → 明确拒绝，并给出替代做法
+  - 逐条错误带「第 N 组第 M 条」定位（组号 1 基）
+  - 空字段名的行不会被静默忽略，而是同样被点名
+  - 合法条件组（含维度字段）→ 无错误
+- **createAnalysisForm — 分段窗**
+  - 镜像与后端同式：取值区间、重叠判定、变量命名都对得上
+  - 默认窗 = 紧邻的两段（锚在 T 的 5 日 + 之后 15 日），且可用范围越窄越保守
+  - 相对日只认整数（不把 5.6 悄悄变成 6，也不接受空白）
+  - 校验覆盖四项：形态 / 止大于起 / 越界 / 重叠
+  - 分档数必须是 2..100 的整数
+  - payload 带上五个窗字段，且把分档数与相对日转成数字
+  - 建议名与描述用人话写出两个窗，并显示映射到的真实变量
+  - 新建 SEGMENT_RELATION 时默认不带条件（窗参数才是它的必填项）
+- **createAnalysisForm — 内置示例**
+  - 示例 id 唯一，且都带了标题 / 说明 / 关键变量（没有「只有参数没有理由」的卡）
+  - 目录齐全 ⇒ 全部可用；缺关键变量 ⇒ 精确报出缺哪些
+  - 套用示例后表单**直接通过校验**（不是「点了还要自己修」）
+  - 套用示例不预填分析名（让建议名按最终参数生成，避免名实不符）
+  - CONDITIONAL 示例：条件与目标落到表单，且不把 SEGMENT 专用字段写进 config
+  - 量能示例用的是**结果**侧条件（量比要 T+1 收盘才可观测，不能当分组特征）
+  - 分段窗示例按真实视界钳制：上界不足时既不留越界窗、也不留非法窗
+  - 描述统计示例：变量清单完整落到表单
+
+### `tests/client/src/components/research/createExperimentForm.test.ts`
+- 193 行 ｜ 用例声明 16 ｜ describe 4
+- 被测源码：`client/src/components/research/createExperimentForm.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/createExperimentForm.test.ts`
+- 用例树：
+- **createExperimentForm — 枚举与常量**
+  - 研究类型选项穷尽后端 ResearchType（8 种）且不重复
+  - 只有 READY 是可研究状态
+- **createExperimentForm — 版本推荐**
+  - 在 READY 中选事件数最多的
+  - 没有任何 READY 版本时返回 null（绝不推荐不可用版本）
+  - 事件数缺失时不崩，退化为取 id 最大
+- **createExperimentForm — 校验**
+  - 未选数据集直接返回
+  - 合法表单通过
+  - 选中的版本不属于当前数据集 → 明确报错
+  - 选中非 READY 版本 → 报出真实状态，而不是笼统「不可用」
+  - 数据集下无任何版本 与 有版本但都不可用 → 提示文案不同
+  - 名称必填且有长度上限
+  - 假设必须成对填写（半填会污染结论链路）
+- **createExperimentForm — payload**
+  - description 为空时不发送空字符串（让后端落 NULL 而不是 ''）
+  - datasetVersionId 转成 number
+  - 假设项为空时返回 null（调用方跳过创建）
+  - 从陈述生成默认假设名：取首句 + 截断
+
+### `tests/client/src/components/research/incrementalRunForm.test.ts`
+- 122 行 ｜ 用例声明 12 ｜ describe 3
+- 被测源码：`client/src/components/research/incrementalRunForm.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/incrementalRunForm.test.ts`
+- 用例树：
+- **incrementalRunForm — 状态判定**
+  - 可补跑状态 = PENDING / FAILED / CANCELLED
+  - Run 忙碌状态 = RUNNING
+- **incrementalRunForm — 补跑门禁**
+  - Run 整轮完成 + 分析待跑 + 有基准快照 → 可补跑，且说明「复用基准 / 不重跑 / 不生成结论」
+  - FAILED / CANCELLED 的分析同样可补跑
+  - RUNNING 的 Run → 不可补跑，原因指明「正在执行中」
+  - 已 COMPLETED 的分析 → 不可补跑，原因说清「不覆盖、要重跑请新建 Run」
+  - 没有基准快照（从未整轮执行）→ 不可补跑，且引导去点「运行引擎」
+  - RUNNING 的判定优先级高于快照缺失（先说最直接的原因）
+  - 分析状态非法（RUNNING）→ 不可补跑
+- **incrementalRunForm — 待补跑计数（Run 卡片引导用）**
+  - 只数尚无有效结果的分析
+  - Run 忙碌 / 无快照 → 计 0（避免给出无法执行的引导）
+  - 全部完成 → 0
+
+### `tests/client/src/components/research/observationFunnel.test.ts`
+- 458 行 ｜ 用例声明 32 ｜ describe 4
+- 被测源码：`client/src/components/research/observationFunnel.ts` · `client/src/adapters/researchEngineAdapter.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/observationFunnel.test.ts`
+- 用例树：
+- **observationFunnel — 归组纪律**
+  - 真实 Run 的 13 条分析全部能归组，一个都不落进 unclassified
+  - 主链 11 级 / 对照组 2 级（已破位 + 未缩量）
+  - 🔴 主链起点「守线」必须在链里，不能掉进对照组（nested 语义 = 属于主链，非「是子集」）
+  - 主链严格按「用户思考规则的顺序」排列，与样本量无关
+  - 🔴 最具体的级不能被较宽松的级吃掉（缩量+末日放量 vs 缩量）
+  - 🔴 「守线 + 极致缩量」不能被「守线 + 缩量」先吃掉
+  - 对照组与主链互斥：nested=false，且 sampleCount 不参与「逐级缩减」计算
+  - 识别不出的分析名进 unclassified 且带原因（绝不静默丢弃）
+- **observationFunnel — 真实数值（Run #570001 落库金标准）**
+  - 🔴 全样本基准 23,751 / 均值 +1.52%（与探针输出逐字一致）
+  - 🔴 ① 守线：n=19,080（80.3%），均值 +3.97%，差值 +2.45pp
+  - 🔴 ② 守线 + 缩量≤50%：n=2,746（11.6%），均值 +7.16%、胜率 49.53%
+  - 🔴 ②a 极致缩量≤30%：n=705（3.0%）—— 「极致缩量」是最高均值的一级之一
+  - 🔴 全链最优级 = 极致缩量≤30%（+21.2%），高于「缩量+价强」(+18.98%)
+  - 🔴 ③ 守线 + 缩量 + 价强：n=1,376（5.8%），均值 +18.98%、胜率 83.79%
+  - 🔴 ③a 守线 + 缩量 + 末日放量（用户「信号B」）：n=723，均值 +17.80%
+  - 🔴 对照组·已破位：n=4,664（19.6%），均值 -8.49%（逻辑证伪成立）
+  - 🔴 对照组·守线但未缩量：n=16,334（68.8%）—— 说明「缩量」才是真正的筛选器
+  - 🔴 守线 + 破位 = 全样本（闭集闭环：19080 + 4664 ≈ 23751，差值为缺 T+3 数据的样本）
+  - 逐级缩减比：守线 → 缩量 保留 14.4%（这才是「筛掉」的真实力度）
+  - 🔴 深浅回撤三级的父级都是「守线」（不是链里前一个），保留比均 <100%
+  - 父级本 Run 未建分析时回落到前驱，并如实标注比较对象（不静默给错分母）
+  - 🔴 T+2 早确认必须没有「保留比」（它是平行窗口变体，样本比守线还多 107.6%）
+  - 🔴 任何「保留比」都必须 <100%（子集不可能大于父集）—— 全链回归护栏
+  - 中位数 / 胜率 / 标准差均已解析（不是 —）
+  - 规则原文从 details.conditionRule 解析出来（可展开查看）
+  - targetVariable 取自有 target 的分析（全为 future_return_5d）
+- **observationFunnel — 缺结果与口径保护**
+  - 还没跑出结果的分析仍出现在漏斗里（status 如实显示，值显示 —）
+  - target 与结果行自报的 outcomeVariable 不一致时整行排除（口径保护网）
+  - summarizeFunnel 在全无结果时给出 null 而非 0（不伪造）
+  - summarizeFunnel 的链末端取「最后一个有结果的级」
+- **observationFunnel — 格式化**
+  - formatShare：极小值不显示成 0.0%（保留 <0.05% 标记）
+  - formatRatio：小比率保留更多精度（避免小样本缩减比失真）
+
+### `tests/client/src/components/research/promoteForm.test.ts`
+- 394 行 ｜ 用例声明 34 ｜ describe 5
+- 被测源码：`client/src/adapters/strategyCandidateAdapter.ts` · `server/research/strategyCandidate/candidateTypes.ts` · `server/researchCore/types.ts` · `client/src/components/research/promoteForm.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/promoteForm.test.ts`
+- 用例树：
+- **isPromotableStatus（§8 / §27.1）**
+  - 1-a) 唯一可转正状态是 ACCEPTED（与后端 CANDIDATE_NOT_ACCEPTED 门槛镜像）
+  - 1-b) 其余每一个状态都不可转正（逐个取后端常量，不手抄清单）
+  - 1-c) 已转正（CONVERTED）不再显示可执行入口 —— 幂等由后端闸门负责，不是「再点一次」
+  - 1-d) 空值 / 大小写不符 / 未知状态一律不可转正（不猜、不兜底放行）
+  - 1-e) 展示用黑名单与后端状态机不漂移：并集**恰好**等于后端六态
+- **validatePromoteForm（§10 ~ §12 / §27.2）**
+  - 2-a) 继承模式（默认）：执行 = 研究来源，无分歧，不需要显式绑定
+  - 2-b) 继承模式但候选提不出来源坐标 → 提前拦住（后端必报 DATASET_VERSION_INVALID）
+  - 2-c) 显式选「与来源相同」的版本 → 不构成分歧、不需要原因、也不需要提交绑定
+  - 2-d) 显式选「与来源不同」但未填原因 → 不通过（后端 DATASET_DIVERGENCE_REASON_REQUIRED）
+  - 2-e) 原因只有空白 / 换行 / 制表符 → 仍然不通过（trim 判据，不是 length > 0）
+  - 2-f) 不同 + 有实质原因 → 通过，且明确要求提交显式绑定
+  - 2-g) 显式模式但没选版本 → 不通过
+  - 2-h) 来源为空时填了原因 → 不通过（不存在分歧，后端要求 reason 必须是 NULL）
+  - 2-i) 来源为空 + 显式选版本 + 不填原因 → 通过且**不**算分歧（与后端口径一致）
+  - 2-j) 来源为空时**永远**不判为分歧（diverges 的判据含 `来源 !== null`）
+- **buildPromoteInput（§14 / §27.3）**
+  - 3-a) 继承模式：入参只有 candidateId，**不**提交 overrides（继承规则留在后端）
+  - 3-b) 执行与来源一致：仍然不提交 datasetBinding（等价于继承，不重复表述）
+  - 3-c) 构成分歧：overrides 恰好两个键，原因已 trim，坐标只有 datasetVersionId
+  - 3-d) 校验不通过时**不产出**输入，只回报错误（绝不带着半成品去调后端）
+  - 3-e) 🔴 提交体绝不可能出现 StrategyDefinition 相关字段（键白名单 + 序列化双向断言）
+  - 3-f) 构造器**不修改**传入的表单与上下文（纯函数，无隐藏状态）
+- **PROMOTE_DOMAIN_HINTS ↔ 后端错误码（§27.4 前置）**
+  - 4-a) 提示表里每个 key 都是后端**真实存在**的领域码（防抄错 / 防后端改名静默失效）
+  - 4-b) 转正链路的 15 个领域码**全部**有针对性解释（一个都不漏）
+  - 4-c) 这些码的解释**两两不同**（≥7 个不同诊断，不能拿一句话糊弄所有失败）
+  - 4-d) 每条提示都有非空标题与可执行解释（不出现空壳条目）
+  - 4-e) 写回失败必须原话提示「不要创建新 Candidate + 可再次 Promote 恢复」（§11）
+  - 4-f) 「草图缺内容」必须指向「回去补草稿」而不是「在转正时另给定义」
+  - 4-g) 「入参不合法」必须写明「策略定义由服务端生成、调用方不得提交」（§14）
+- **Dataset 版本选项（§11 / §27.2）**
+  - 5-a) 坐标只有 datasetVersionId；label / datasetCode 仅用于显示
+  - 5-b) 非 READY 版本照样列出但标记 usable=false（看见「还不能用」而不是消失）
+  - 5-c) 只有等于研究来源坐标的选项被标 isSource
+  - 5-d) 无研究来源时任何选项都不是 isSource（不误标「继承」）
+  - 5-e) 选项标签含 #id / code / label / status —— 界面上不会只剩一个看不出坐标的 label
+  - 5-f) 按坐标回查 label 找不到即 null（不猜、不退回第一个）
+
+### `tests/client/src/components/research/researchMatrix.test.ts`
+- 465 行 ｜ 用例声明 30 ｜ describe 7
+- 被测源码：`client/src/components/research/researchMatrix.ts` · `client/src/adapters/researchEngineAdapter.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/researchMatrix.test.ts`
+- 用例树：
+- **parseMatrixCoordinate**
+  - 组 B 格子：T+d + 桶 + target 一致 → 坐标正确
+  - 组 A：无桶但写「已回撤」→ 参照列
+  - 组 C：带「未破」→ 独立口径，仍保留桶
+  - 组 C 的参照列：「未破」与「已回撤」同现 → 加资格口径 × 参照列（不被误判成桶）
+  - 其他指标族：max_return_5 / max_drawdown_5 / horizon=1
+  - 名称决策日与 target 起始日不一致 → 拒绝（并说明原因）
+  - 没有 target / 名称无箭头 → 拒绝
+- **buildMatrixIndex**
+  - 归类 + 未归类分别落表，族清单按固定顺序
+  - 口径清单只收录实际存在的口径
+  - 默认选择优先「无资格约束 × 之后 5 日收益」
+- **extractMatrixCell**
+  - 取条件组主指标与全样本参照，并原样带出差值口径
+  - 排除 variable 与 target 不一致的附送行（MAX_DRAWDOWN）并计数
+  - outcomeVariable 与 target 不同 → 该行不计入
+  - 显著性：p<0.05 且非小样本才标显著；小样本一律不标
+  - 没有条件组统计 → null（不补 0）
+  - 条件组为空（主指标全为 null）→ null
+- **buildMatrix**
+  - 行列固定顺序 + 缺格上报 + coverage
+  - 口径隔离：EVENT_LOW_GUARD 的格子不混进 BARE 矩阵
+  - 族与口径缺失时给出空矩阵而不是抛错
+  - 未归类清单随矩阵一起带出（不静默丢弃）
+- **summarizeRows**
+  - 样本数求和与显著格计数（不做加权平均）
+  - 有格缺样本数 → 不给合计（宁可缺，不给可疑数）
+- **固定桶顺序**
+  - 桶顺序常量与解析结果一致（含 8%+）
+- **selectFetchCells — 矩阵首屏取数上限**
+  - 默认只取前 MATRIX_INITIAL_FETCH 个（30 格 → 12 个请求，不是 30 个）
+  - fetchAll = true 时取全部（用户显式要求，不是静默截断）
+  - 格数少于上限时全取
+  - 空集合返回空，不抛异常
+  - 非法 limit 回落到「不发请求」而不是全发
+  - 纯函数：不改入参
+  - 上限是正的常量（防止被误改成 0 导致矩阵永不取数）
+
+### `tests/client/src/components/research/strategyCandidateUiContract.test.ts`
+- 183 行 ｜ 用例声明 9 ｜ describe 1 ｜ 📄 源码文本断言
+- 被测源码：`server/routers.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/strategyCandidateUiContract.test.ts`
+- 用例树：
+- **候选 / 转正 UI ↔ 后端端点契约**
+  - 1) 前端调用的每个候选端点都真实存在（端点名写错会当场失败）
+  - 2) 调用点全部落在声明的文件内（没有鬼祟的第二处调用）
+  - 3) 后端共开放 6 个候选端点：4 个候选能力 + 唯一 promote + 只读溯源
+  - 4) 转正以外不存在任何「转换 / 克隆 / 发布 / 继承」端点（防第二套转换逻辑）
+  - 5) 🔴 promote 只被**唯一一个**文件调用（转正弹窗）—— 不存在第二处转换入口
+  - 6) 溯源读取是**只读**的：不存在 update / delete / setProvenance 端点
+  - 7) 候选 UI 不直接写 Strategy（不给「绕过候选桥」留后门）
+  - 8) 禁止词汇：候选 / 转正 UI 不出现 researchDataset / rd-* 当坐标 / strategy_drafts / 第二套定义列
+  - 9) 转正提交体不得携带 StrategyDefinition（前端永远不构造定义）
+
+### `tests/client/src/components/strategy/definitionDraft.test.ts`
+- 560 行 ｜ 用例声明 39（含 `.each` 展开） ｜ describe 7 ｜ 📄 源码文本断言
+- 被测源码：`server/research/strategySchema/goldenSample.ts` · `client/src/components/research/candidateSketchForm.ts` · `client/src/components/strategy/definitionDraft.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/strategy/definitionDraft.test.ts`
+- 用例树：
+- **① 定义七段 ↔ 研究草图七段：对齐是被测试锁住的，不是「看起来像」**
+  - 1) 段的 key **逐位相同**（同序）——顺序是用户看到的填写路径，不能各排各的
+  - 2) 每段标题**逐字相同**
+  - 3) 每段必填性**逐段相同**（决定徽标是「还差 N 项」还是「可选」）
+  - 4) `hint` 只要求非空，**不要求逐字相同** —— 两边的说明本来就在讲不同的事
+  - 5) 段状态是**穷尽**的：七段每段都有一条状态，且带得出标题 / 必填性 / 摘要
+- **② definition → 草稿 → definition：真实 golden sample 必须逐字往返**
+  - 6) 🔴 往返**深等于**原对象（含表单不编辑的 id / description / unit / note）
+  - 7) 再走一圈**幂等** —— 防「每保存一次就漂一点」
+  - 8) 往返后仍在意的键确实还在（不靠 toEqual 一条断言糊过去）
+  - 9) 文档级成本 / 回测配置同样往返（它们不在 definition 里，是独立一段）
+  - 10) 表单不编辑的键会被**列出**（而不是悄悄保留）
+  - 11) 无法表达的值 ⇒ 该区降级只读 + 出 warning，但**不丢键**
+- **③ 形状不符 ⇒ 整份降级只读（绝不猜着解析半份）**
+  - 12) %s ⇒ raw，且原因里说得出是哪一处
+  - 13) 合法但几乎全空的定义 ⇒ 仍是 structured（不误判成 raw）
+  - 14) raw 态带上原文，界面才有东西可展示
+- **④ 缺口锚点：清单说缺哪一项，界面上那一格就必须亮**
+  - 15) 锚点词表是**闭集**：新增锚点必须同时加进测试，否则这里先红
+  - 16) 每条静态文案都查得到锚点；未知文案回空数组（渲染层退化成只亮清单）
+  - 17) 「成本假设还差：…」是**动态**文案 ⇒ 靠前缀回落命中
+  - 18) 🔴 校验器实跑产出的**每一条** gap 都能查到锚点（改文案不改这里 ⇒ 这里红）
+  - 19) 🔴 锚点必须落到**真实输入框**（扫源码：每个锚点都要有 missingAt 调用点）
+- **⑤ 校验：把「必然被后端拒」的组合提前说出来**
+  - 20) 空的必填项算 gap 而不是 error（本地不拦用户存草稿）
+  - 21) 🔴 出场优先级重复 ⇒ error（后端 SCHEMA_DEFINITION_EXIT_RULE_PRIORITY_DUPLICATE）
+  - 22) 空行工厂给的优先级是**结构性初值**，第二条不会自动撞上第一条
+  - 23) 🔴 出场规则三者（threshold / parameter / condition）一个都不给 ⇒ error
+  - 24) TIME_EXIT 的阈值必须是 ≥1 的整数交易日；按比例表达时必须在 (0,1)
+  - 25) 🔴 L6：信号与成交都在 T 日收盘 ⇒ error（后端 SIGNAL_EXECUTION_TIMING_CONFLICT）
+  - 26) 🔴 L7：触发时点是次一交易日 + 同 bar 成交 ⇒ error
+  - 27) TUNABLE 数值参数必须同时给 min / max；给了就必须 min < max
+  - 28) DERIVED 角色必须给 derivedFrom（不编辑的键，只从 original 读）
+  - 29) 回测并发上限与策略 maxPositions 不一致 ⇒ **warning** 而不是 error（含义不同，不强行统一）
+  - 30) 条件右值是前视引用且超出可解析偏移 ⇒ 拦下（防「事后筛选冒充信号」）
+  - 31) `path.*` / `outcome.*` 是标签层 ⇒ 作买入条件必拒
+  - 32) 前视偏移的复刻口径与服务端一致（FIRST/EVERY → 起点；LAST → 终点；NEXT → 起点+1）
+- **⑥ 基础信息改数据集 ⇒ 必须同步进 definition.datasets 的 PRIMARY 绑定**
+  - 33) 🔴 改写 PRIMARY 行的坐标，**连 `original` 一起改**（original 才是重建时被放回的）
+  - 34) 不改输入对象（纯函数）
+  - 35) 坐标为空 / 没有绑定行 ⇒ 原样返回（那种情况下 doc 级坐标必须缺省）
+  - 36) 只碰 PRIMARY 行、不增删行（非 PRIMARY 绑定原样保留）
+  - 37) 没有 PRIMARY 时退化为第 0 行；已是目标坐标时不产生新对象（幂等）
+- **⑦ 新增的 client 模块不得把服务端模块拉进浏览器包**
+  - 38) 三个新模块里没有任何**非 type** 的 server/shared 导入
+  - 39) 镜像词表必须**在客户端本地**，不得转手导出服务端对象
+
+### `tests/client/src/components/strategy/definitionVocabulary.test.ts`
+- 210 行 ｜ 用例声明 8 ｜ describe 1
+- 被测源码：`server/research/strategySchema/definition.ts` · `client/src/components/research/candidateSketchVocabulary.ts` · `client/src/components/strategy/definitionVocabulary.ts`
+- 单跑：`pnpm exec vitest run tests/client/src/components/strategy/definitionVocabulary.test.ts`
+- 用例树：
+- **定义侧词表 ↔ 服务端逐字对表（防漂移）**
+  - 1) 与草图共用的那批表：值集逐字相同
+  - 2) 定义侧独有的那批表：值集逐字相同
+  - 3) 🔴 条件运算符：定义侧是**服务端名称**（不是草图那一套符号）
+  - 4) 🔴 定义侧运算符表里**不得出现符号形**（这正是本轮修掉的那个真 bug）
+  - 5) 符号 → 名称的翻译表：值域 ≡ 服务端运算符，键域 ≡ 草图运算符
+  - 6) `arity`（单值 / 列表）与草图侧对同一运算符的判断一致
+  - 7) 标签查询：未知取值**原样返回**，绝不编造一个看着对的中文名
+  - 8) 运算符的符号形只用于显示：已知值有人话，未知值原样回显

@@ -10,7 +10,12 @@
  *
  * 本探针用**无头 Chrome + CDP 直连量 DOM**（项目既有范式），不做任何「代码看起来对」的推断：
  *   A. 四指数并列（4 张卡、code 集合、同一行、各自有图、窗口 ≥ 100 个交易日）
- *   B. 三合图上联右轴**只有一条**；两联的左轴宽度对齐（绘图区 x 起点一致）
+ *   B. 大盘三图结构（2026-09-19 第四轮改版后**重写**断言）：
+ *      · 图 1 = 涨停家数**柱状图独立成图**（有柱、无折线）；
+ *      · 图 2 = 成交额 + 两融余额**两条折线合并到一图**（左轴 = 成交额、右轴 = 两融余额，两轴各自定域）；
+ *      · 两图绘图区左右边界与宽度一致（柱与折线竖直方向对齐）；
+ *      · **0 个旋转轴标题**（`.recharts-yAxis .recharts-label`）—— 旧版 `angle: ±90` 的轴标题与刻度数字重叠，
+ *        用户反馈「根本看不见」⇒ 单位改由**每图小标题**与**图例名称**承载（本节一并断言）。
  *   C. 连板梯队**在**题材热力日历**之上**（位置交换）
  *   D. 梯队版式 = 「高度 × 网格」：左列高度标签、格内三行、断板格有删除线 + 涨跌幅、存在「一字板」标
  *   E. 首屏不被单一 spinner 堵住：导航后短时限内两个重卡片容器已在 DOM（骨架屏占位），且数据随后补齐
@@ -24,6 +29,17 @@
  *      · 梯队每个高度行内，题材当日涨停家数**非递增**；且断板格与涨停格**交错**（不再统一排前/排尾）；
  *      · 热力日历行顺序按**第一数据列（当日）**非递增，且该列显示值 = 服务端当日真实值。
  *   H. 「首板未续」并入 2 板行（+1 口径）：2 板行内必须同时存在涨停格与断板格
+ *
+ * 第四轮追加（2026-09-19，用户口述四条 + 一条）：
+ *   I. 柱色随主题：亮色 = 红-500（#ef4444）、暗色 = 红-700（#b91c1c）——
+ *      以 `[data-theme-toggle]` 所在的真实主题切换（写 localStorage + reload）后量 `getComputedStyle(fill)`，
+ *      并比较感知亮度，证明「夜间不刺眼」不是靠肉眼声称。
+ *   J. 梯队折叠按钮旁**不再有**「已折叠本组 x 行（默认只显示前 3 行）」冗余说明文字。
+ *
+ * 第五轮追加（2026-09-19，用户口述：「首页最下面有四个大的跳转按钮没用 去掉」）：
+ *   K. 首页底部四张「快捷入口」卡片（涨停复盘明细 / 大盘分析 / 情绪分析 / 上传图片）**整体移除**
+ *      ⇒ 反证断言：`a[href]` 命中这四个路由的条数 = 0、卡片容器内含这些文案的条数 = 0。
+ *      注意只断言「首页不再有这四张卡」，**不断言这四个路由本身可达**（侧栏入口仍在）。
  *
  * ⚠️ 顺序纪律：F（折叠态断言 + 逐组展开）**必须先于** D/G 的全量版式断言，
  *    否则被折叠的组会少渲染格数 ⇒ 全量断言静默变成假 SKIP/假失败。
@@ -189,53 +205,108 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
     check('每张图有日期刻度', tickCounts.every((n) => n >= 2), JSON.stringify(tickCounts));
   }
 
-  // ---------- B. 三合图纵轴 ----------
+  // ---------- B. 大盘三图结构（第四轮：柱独立 + 双折线合一图 + 无旋转轴标题） ----------
   log('');
-  log('--- B. 成交量 / 两融 / 涨停数：右侧只保留一条纵轴 ---');
+  log('--- B. 涨停家数（柱，独立图）｜成交额 + 两融余额（两条折线，一图两轴）---');
   const market = await jsonEval(`(function(){
     var card = document.querySelector('[data-homepage-market-chart]');
     if (!card) return null;
-    var svgs = Array.from(card.querySelectorAll('svg.recharts-surface')).filter(function(s){
-      // ⚠️ recharts 的 Legend 图标也是 svg.recharts-surface（宽约 14px）⇒ 必须按尺寸剔除，
-      //    否则会把图例图标误当「绘图面」，联数统计虚高、绘图区左边界读出 null。
-      return s.getBoundingClientRect().width > 300;
+    var blocks = Array.from(card.querySelectorAll('[data-homepage-chart]')).map(function(b){
+      var svg = b.querySelector('svg.recharts-surface');
+      var grid = b.querySelector('.recharts-cartesian-grid');
+      var gb = grid ? grid.getBoundingClientRect() : null;
+      var sb = svg ? svg.getBoundingClientRect() : null;
+      var isNum = function(t){ return /^-?\\d+(\\.\\d+)?$/.test((t.textContent || '').trim()); };
+      var yAxes = Array.from(b.querySelectorAll('.recharts-yAxis')).map(function(g){
+        var texts = Array.from(g.querySelectorAll('text')).filter(isNum);
+        var rects = texts.map(function(t){ return t.getBoundingClientRect(); });
+        var xs = rects.map(function(r){ return r.left + r.width / 2; });
+        return {
+          side: (rects.length && sb && Math.min.apply(null, xs) > sb.left + sb.width / 2) ? 'right' : 'left',
+          numeric: rects.length,
+          ticks: texts.map(function(t){ return (t.textContent || '').trim(); }),
+          // 刻度文字是否完整落在 SVG 内（越界即被裁 ⇒ 用户「看不见」）
+          insideSvg: !sb || rects.every(function(r){ return r.left >= sb.left - 0.5 && r.right <= sb.right + 0.5; }),
+          // 左侧轴刻度必须整段落在**绘图区左边界**之外（否则与绘图区/曲线重叠）
+          clearOfPlot: !gb || rects.every(function(r){ return r.right <= gb.left + 0.5; })
+        };
+      });
+      var barPath = b.querySelector('.recharts-bar-rectangle path');
+      var cap = b.querySelector('div');
+      return {
+        kind: b.getAttribute('data-homepage-chart'),
+        bars: b.querySelectorAll('.recharts-bar-rectangle').length,
+        lines: b.querySelectorAll('.recharts-line-curve').length,
+        barFill: barPath ? getComputedStyle(barPath).fill : null,
+        yAxes: yAxes,
+        rotatedTitles: b.querySelectorAll('.recharts-yAxis .recharts-label').length,
+        caption: cap ? (cap.textContent || '').trim() : '',
+        legend: Array.from(b.querySelectorAll('.recharts-legend-item-text')).map(function(t){ return (t.textContent || '').trim(); }),
+        plotLeft: gb ? Math.round(gb.left) : null,
+        plotWidth: gb ? Math.round(gb.width) : null
+      };
     });
-    var out = { svgCount: svgs.length, panels: [] };
-    svgs.forEach(function(svg, i){
-      var box = svg.getBoundingClientRect();
-      var axes = Array.from(svg.querySelectorAll('.recharts-yAxis')).map(function(g){
-        var texts = Array.from(g.querySelectorAll('text'));
-        if (!texts.length) return null;
-        var xs = texts.map(function(t){ return t.getBoundingClientRect().left + t.getBoundingClientRect().width/2; });
-        var numeric = texts.filter(function(t){ return /^-?\\d+(\\.\\d+)?$/.test((t.textContent||'').trim()); }).length;
-        return { midX: Math.round((Math.min.apply(null,xs)+Math.max.apply(null,xs))/2), textCount: texts.length, numeric: numeric, sample: texts.map(function(t){return (t.textContent||'').trim()}).slice(0,3).join('|') };
-      }).filter(Boolean);
-      var plotLeft = null;
-      var grid = svg.querySelector('.recharts-cartesian-grid');
-      if (grid) plotLeft = Math.round(grid.getBoundingClientRect().left);
-      out.panels.push({ index: i, width: Math.round(box.width), yAxes: axes, plotLeft: plotLeft, labels: Array.from(svg.querySelectorAll('text')).map(function(t){return (t.textContent||'').trim()}).filter(function(t){return /(亿|家数)/.test(t)}) });
-    });
-    return JSON.stringify(out);
+    return JSON.stringify({ blocks: blocks });
   })()`);
-  if (!market) {
-    skipCheck('B 三合图', '区块未渲染');
+  if (!market || !Array.isArray(market.blocks) || market.blocks.length !== 2) {
+    skipCheck('B 大盘三图结构', '区块未渲染或不是「一柱图 + 一折线图」两张图');
   } else {
-    check('三合图为上下两联（2 个绘图面）', market.svgCount === 2, 'svgCount=' + market.svgCount);
-    const rightAxes = [];
-    const leftAxes = [];
-    market.panels.forEach((p) => {
-      const half = p.width / 2;
-      p.yAxes.forEach((a) => { (a.midX > half ? rightAxes : leftAxes).push({ panel: p.index, ...a }); });
-    });
-    const rightWithTicks = rightAxes.filter((a) => a.numeric >= 2);
-    check('右侧带刻度的纵轴只有 1 条（原来有 2 条）', rightWithTicks.length === 1, JSON.stringify(rightAxes));
-    check('左侧带刻度的纵轴有 2 条（涨停家数 + 两融余额，各自独立量纲）', leftAxes.filter((a) => a.numeric >= 2).length === 2, JSON.stringify(leftAxes.map((a) => a.sample)));
-    const labelText = JSON.stringify(market.panels.map((p) => p.labels));
-    check('存在「成交额(亿)」轴标签', /成交额\(亿\)/.test(labelText), labelText);
-    check('存在「两融余额(亿)」轴标签', /两融余额\(亿\)/.test(labelText), labelText);
-    check('存在「涨停家数」轴标签', /涨停家数/.test(labelText), labelText);
-    const plotLefts = market.panels.map((p) => p.plotLeft);
-    check('两联绘图区左边界对齐（下联留了占位右轴）', plotLefts.every((v) => v !== null) && new Set(plotLefts).size === 1, JSON.stringify(plotLefts));
+    const [barBlock, lineBlock] = market.blocks;
+    check(
+      '图 1 = 涨停家数**柱状图独立成图**（有柱、无折线）',
+      barBlock.kind === 'limit-up-bar' && barBlock.bars > 0 && barBlock.lines === 0,
+      JSON.stringify({ kind: barBlock.kind, bars: barBlock.bars, lines: barBlock.lines }),
+    );
+    check(
+      '柱状图左轴刻度 = 整数家数（≥2 个数字刻度）',
+      barBlock.yAxes.filter((a) => a.side === 'left' && a.numeric >= 2).length === 1,
+      JSON.stringify(barBlock.yAxes.map((a) => a.side + ':' + a.ticks.join('/'))),
+    );
+    check(
+      '图 2 = **两条折线合到一图**（成交额 + 两融余额），且无柱',
+      lineBlock.kind === 'market-lines' && lineBlock.lines === 2 && lineBlock.bars === 0,
+      JSON.stringify({ kind: lineBlock.kind, bars: lineBlock.bars, lines: lineBlock.lines }),
+    );
+    const lineLeft = lineBlock.yAxes.filter((a) => a.side === 'left' && a.numeric >= 2);
+    const lineRight = lineBlock.yAxes.filter((a) => a.side === 'right' && a.numeric >= 2);
+    check(
+      '图 2 左右各一条带刻度的纵轴（成交额 / 两融余额，各自定域）',
+      lineLeft.length === 1 && lineRight.length === 1,
+      JSON.stringify(lineBlock.yAxes.map((a) => a.side + ':' + a.ticks.join('/'))),
+    );
+    check(
+      '两图绘图区左右边界与宽度一致（柱与折线竖直对齐）',
+      barBlock.plotLeft !== null &&
+        barBlock.plotLeft === lineBlock.plotLeft &&
+        barBlock.plotWidth === lineBlock.plotWidth,
+      JSON.stringify({ bar: [barBlock.plotLeft, barBlock.plotWidth], line: [lineBlock.plotLeft, lineBlock.plotWidth] }),
+    );
+    check(
+      '两图都不再画旋转的轴标题（0 个 .recharts-yAxis .recharts-label）',
+      barBlock.rotatedTitles === 0 && lineBlock.rotatedTitles === 0,
+      JSON.stringify({ bar: barBlock.rotatedTitles, line: lineBlock.rotatedTitles }),
+    );
+    check(
+      '所有纵轴刻度文字完整可见（不越出 SVG、不与绘图区/曲线重叠）',
+      barBlock.yAxes.every((a) => a.insideSvg) &&
+        lineBlock.yAxes.every((a) => a.insideSvg && (a.side !== 'left' || a.clearOfPlot)),
+      JSON.stringify({
+        bar: barBlock.yAxes.map((a) => ({ side: a.side, ticks: a.ticks, insideSvg: a.insideSvg, clearOfPlot: a.clearOfPlot })),
+        line: lineBlock.yAxes.map((a) => ({ side: a.side, ticks: a.ticks, insideSvg: a.insideSvg, clearOfPlot: a.clearOfPlot })),
+      }),
+    );
+    check(
+      '单位由**每图小标题**承载（柱=家 / 折线=左轴亿·右轴亿）',
+      /涨停家数（柱，左轴：家）/.test(barBlock.caption) &&
+        /成交额（左轴：亿）/.test(lineBlock.caption) &&
+        /两融余额（右轴：亿）/.test(lineBlock.caption),
+      JSON.stringify({ bar: barBlock.caption, line: lineBlock.caption }),
+    );
+    check(
+      '图例名称带单位（成交额(亿) / 两融余额(亿)）',
+      lineBlock.legend.join('|') === '成交额(亿)|两融余额(亿)',
+      JSON.stringify(lineBlock.legend),
+    );
   }
 
   // ---------- C. 位置交换 ----------
@@ -302,6 +373,28 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
       '行数 ≤ 3 的组不出现按钮、行数也不被裁',
       within.length > 0 && within.every((g) => !g.toggle && g.rowsVisible === g.rowsTotal),
       JSON.stringify(within.map((g) => g.label + ' ' + g.rowsTotal + '行 按钮=' + g.toggle)),
+    );
+
+    // 第四轮诉求：折叠按钮旁**不再有**冗余说明文字（只留按钮本身）。
+    const toggleBleed = await jsonEval(`(function(){
+      var btn = document.querySelector('[data-homepage-ladder] [data-homepage-ladder-group-toggle]');
+      if (!btn) return JSON.stringify({ found: false });
+      var box = btn.parentElement;
+      var others = Array.from(box.children).filter(function(c){ return c !== btn; });
+      return JSON.stringify({
+        found: true,
+        siblings: others.map(function(c){ return (c.textContent || '').trim(); }),
+        boxText: (box.textContent || '').trim(),
+        btnText: (btn.textContent || '').trim()
+      });
+    })()`);
+    check(
+      '折叠按钮旁不再有「已折叠本组 x 行（默认只显示前 3 行）」这类说明文字',
+      !!toggleBleed &&
+        toggleBleed.found === true &&
+        toggleBleed.siblings.length === 0 &&
+        !/已折叠|已展开本组|默认只显示前/.test(toggleBleed.boxText),
+      toggleBleed ? JSON.stringify({ siblings: toggleBleed.siblings, box: toggleBleed.boxText }) : 'n/a',
     );
 
     // 关键回归：折叠**不再**发生在整个梯队的高度行上（旧实现会默认藏掉「2 板」「首板」两行）。
@@ -564,16 +657,75 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
     heatTable: !!document.querySelector('[data-homepage-heatmap] table'),
     heatHeader: !!Array.from(document.querySelectorAll('[data-homepage-heatmap] th')).find(function(t){return (t.textContent||'').trim() === '合计'}),
     shortcuts: Array.from(document.querySelectorAll('a')).filter(function(a){return /\\/(limit-up|market|sentiment-analysis|upload)$/.test(a.getAttribute('href')||'')}).length,
+    shortcutCards: Array.from(document.querySelectorAll('[data-slot="card"]')).filter(function(c){return /涨停复盘明细|录入当日涨停复盘图|情绪周期与龙头候选/.test(c.textContent||'')}).length,
     disclaimer: /免责声明/.test(document.body.innerText),
     h1: (document.querySelector('h1')||{}).textContent || '',
     skeletonLeft: document.querySelectorAll('[data-slot="skeleton"]').length,
     indexCards: document.querySelectorAll('[data-homepage-index-card]').length
   })`);
   check('题材热力日历表格保留（含「合计」列）', misc.heatTable && misc.heatHeader, JSON.stringify({ t: misc.heatTable, h: misc.heatHeader }));
-  check('快捷入口 4 个', misc.shortcuts === 4, String(misc.shortcuts));
+  // 第五轮（2026-09-19，用户口述）：「首页最下面有四个大的跳转按钮没用，去掉」
+  //   ⇒ 反证断言：底部 0 张快捷入口卡片、0 条指向这四个页面的跳转链（改回即红）。
+  check('首页底部四个快捷入口卡片已移除', misc.shortcuts === 0 && misc.shortcutCards === 0, JSON.stringify({ links: misc.shortcuts, cards: misc.shortcutCards }));
   check('免责声明保留', misc.disclaimer === true, String(misc.disclaimer));
   check('页面标题为「行情总览」', String(misc.h1).indexOf('行情总览') >= 0, String(misc.h1));
   check('数据补齐后无残留骨架屏', misc.skeletonLeft === 0, String(misc.skeletonLeft));
+
+
+  // ---------- 零回归检查跑完再验主题相关项（本段含两次 reload，会重置其它区块的加载态） ----------
+  // ---------- I. 柱色随主题（第四轮：「柱状图的红色在夜间模式太刺眼」） ----------
+  log('');
+  log('--- I. 涨停家数柱色：亮色红-500 / 暗夜红-700（压暗）---');
+  const readBarFill = async () => jsonEval(`(function(){
+    var p = document.querySelector('[data-homepage-chart="limit-up-bar"] .recharts-bar-rectangle path');
+    if (!p) return null;
+    var c = getComputedStyle(p).fill;
+    var m = /rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/.exec(c) || [];
+    var lin = function(v){ return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var lum = 0;
+    if (m.length) {
+      var r = Number(m[1]) / 255, g = Number(m[2]) / 255, b = Number(m[3]) / 255;
+      lum = Number((0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)).toFixed(4));
+    }
+    var t = document.querySelector('[data-theme-toggle]');
+    return JSON.stringify({
+      fill: c,
+      luminance: lum,
+      htmlDark: document.documentElement.classList.contains('dark'),
+      btnTheme: t && t.dataset ? t.dataset.theme : null
+    });
+  })()`);
+  const switchTheme = async (theme) => {
+    await evalJs(`localStorage.setItem('theme', ${JSON.stringify(theme)})`);
+    await send('Page.reload', { ignoreCache: false });
+    for (let i = 0; i < 80; i += 1) {
+      await sleep(250);
+      const ok = await evalJs(`!!document.querySelector('[data-homepage-chart="limit-up-bar"] .recharts-bar-rectangle path')`);
+      if (ok) { await sleep(400); return true; }
+    }
+    return false;
+  };
+  const lightOk = await switchTheme('light');
+  const lightFill = lightOk ? await readBarFill() : null;
+  const darkOk = await switchTheme('dark');
+  const darkFill = darkOk ? await readBarFill() : null;
+  log('  亮色：' + JSON.stringify(lightFill));
+  log('  暗夜：' + JSON.stringify(darkFill));
+  if (!lightFill || !darkFill) {
+    skipCheck('I 柱色随主题', '切换主题后柱未渲染');
+  } else {
+    check('亮色主题下柱色 = 红-500（rgb(239, 68, 68)）', lightFill.fill === 'rgb(239, 68, 68)' && lightFill.htmlDark === false, lightFill.fill + ' / htmlDark=' + lightFill.htmlDark);
+    check('暗夜主题下柱色 = 红-700（rgb(185, 28, 28)）', darkFill.fill === 'rgb(185, 28, 28)' && darkFill.htmlDark === true, darkFill.fill + ' / htmlDark=' + darkFill.htmlDark);
+    check(
+      '暗夜柱色感知亮度显著低于亮色（「不刺眼」的量化判据）',
+      darkFill.luminance > 0 && darkFill.luminance < lightFill.luminance * 0.7,
+      'dark=' + darkFill.luminance + ' vs light=' + lightFill.luminance,
+    );
+  }
+  // 复位成跟随系统，避免给后续手工查看留下「显式 light/dark」的残留偏好
+  await evalJs(`localStorage.removeItem('theme')`);
+  await send('Page.reload', { ignoreCache: false });
+  await sleep(1500);
 
   log('');
   log('=== 汇总：PASS=' + pass + ' FAIL=' + fail + ' SKIP=' + skip + ' ===');

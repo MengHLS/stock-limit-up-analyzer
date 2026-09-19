@@ -310,6 +310,16 @@ export const RESEARCH_ENGINE_ERROR_CODES = [
    * 它的失败**不应**把一条已经跑出结果的 Run 判死（见 `engine.ts` 的写入点注释）。
    */
   "FINDING_DETECTION_FAILED",
+  // ---- 报告产物（PHASE-A-001）----
+  /**
+   * 该 Run 不是 COMPLETED，不能产出「最终报告」。
+   *
+   * 为什么必须显式拒绝而不是「先出一版、之后再说」：报告的价值在于**可回归对照**。
+   * 若 Analysis / Finding / Conclusion 任一未完成就先落一份 REPORT artifact，
+   * 后续它会被 Supersede 覆盖，而任何按「同 run ⇒ 同 checksum」做的回归都会失败得莫名其妙。
+   * 因此报告只建立在**已完成的 Run** 上（PHASE-A-001 §9）。
+   */
+  "REPORT_RUN_NOT_COMPLETED",
   "INTERNAL_ERROR",
 ] as const;
 export type ResearchEngineErrorCode = (typeof RESEARCH_ENGINE_ERROR_CODES)[number];

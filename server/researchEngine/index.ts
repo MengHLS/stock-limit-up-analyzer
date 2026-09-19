@@ -39,3 +39,5 @@ export * from "./templates";
 export * from "./finding";
 // RESEARCH-ORPHAN-RECLAIM-001 —— 孤儿回收（父终态子未终态 ⇒ 收敛；未执行草稿一律保留）。
 export * from "./reclaim";
+// PHASE-A-001 —— 研究报告产物（纯投影：既有 Result / Finding / Conclusion → REPORT artifact）。
+export * from "./report";

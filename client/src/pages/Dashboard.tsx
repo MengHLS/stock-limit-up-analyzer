@@ -1,17 +1,17 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
 import { ladderHeight } from "@shared/ladderHeight";
 import { normalizeLimitUpTime } from "@shared/limitUpTime";
 import { buildSectorHeatLookup, sortBySectorHeat } from "@shared/sectorHeatOrder";
-import { Link } from "wouter";
 import { TrendingUp } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
+  BarChart,
   CartesianGrid,
-  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -56,6 +56,17 @@ import {
  *   9. **题材热力日历改按「当日」排序**：行顺序由「窗口内合计」改为「**当日**（最新一列）涨停家数」降序，
  *      合计只作同热度时的次键；取前 N 也随之按当日序。
  *
+ * 2026-09-19 第四轮修订（用户口述：图表拆合 + 暗夜柱色 + 坐标轴可读性 + 去掉折叠说明文字）：
+ *   10. **柱状图独立成图**：涨停家数从「上下两联」里拆出来独占一张图（左轴「家」，日期轴由下方折线图承载）。
+ *   11. **两条折线合并为一图两轴**：成交额（左轴，亿）与两融余额（右轴，亿）合到同一张图 ——
+ *       两轴各自定域（`dataMin/dataMax ± 常数`）。实测 30 日窗口：成交额 16,126~19,716 亿、
+ *       两融 26,185~26,380 亿，**量级相近但波动幅度差两个数量级**，共轴会把两融压成直线。
+ *   12. **暗夜柱色压暗**：`#ef4444`（红-500）在大面积柱体上于暗底色会「发光」刺眼 ⇒ 暗夜改用 `#b91c1c`（红-700）；
+ *       取色依据是 `useTheme()` 解析后的**实际生效主题**，不是「是否跟随系统」的推断。
+ *   13. **不再画旋转的轴标题**：`label={{ angle: ±90 }}` 在轴宽不足时与刻度数字重叠（用户反馈「根本看不见」）
+ *       ⇒ 单位改由**每张图的小标题**与**图例名称**承载，轴内只留刻度数字。
+ *   14. **去掉梯队折叠的状态说明文字**（「已折叠本组 x 行（默认只显示前 3 行）」），只留展开 / 收起按钮。
+ *
  * 数据口径约束：
  *   · 板数 = 「连续记录交易日涨停的天数」；连板股取当日口径、断板股取**上一记录交易日**口径。
  *   · 梯队左列「高度」= **若该股本日涨停会达到的连板数**（断板 ⇒ 上一记录日板数 + 1，**含首板未续**，
@@ -95,18 +106,13 @@ const LADDER_GRID_FALLBACK_COLS = 6;
 const READONLY_STALE_MS = 5 * 60_000;
 
 const CHART_COLORS = {
-  limitUpCount: "#ef4444",
+  /** 涨停家数（柱）：日间红-500。 */
+  limitUpBarLight: "#ef4444",
+  /** 同上，暗夜用红-700 —— 大面积柱体上的高饱和红在暗底色会「发光」刺眼。 */
+  limitUpBarDark: "#b91c1c",
   turnover: "#3b82f6",
   marginBalance: "#f59e0b",
 };
-
-/** 快捷入口（复盘闭环的实际去路）。 */
-const SHORTCUTS = [
-  { label: "涨停复盘明细", description: "逐日涨停记录、题材与个股筛选", href: "/limit-up" },
-  { label: "大盘分析", description: "累计统计与大盘数据同步", href: "/market" },
-  { label: "情绪分析", description: "情绪周期与龙头候选", href: "/sentiment-analysis" },
-  { label: "上传图片", description: "录入当日涨停复盘图", href: "/upload" },
-];
 
 /** 由收盘序列计算 N 日均线；不足 N 日或窗口内含空值处返回 null（不插值）。 */
 function movingAverage(values: Array<number | null>, window: number): Array<number | null> {
@@ -325,12 +331,23 @@ function IndexTrendSection() {
   );
 }
 
-/** ② 涨停数 · 成交额 · 两融余额：共享分类轴的两联图（右侧只保留一条纵轴）。 */
+/**
+ * ② 涨停家数（柱，独立一图）＋ 成交额 / 两融余额（两条折线，一图两轴）。
+ *
+ * 为什么柱与线分家：柱的量纲是「家数」、线的量纲是「金额」，读数方式不同，叠在一个坐标系里图表显得拥挤。
+ * 为什么两条折线是**两轴**而不是一轴：两者量级相近（都是亿）但**波动幅度差两个数量级**
+ *   —— 实测 30 日窗口 成交额 16,126~19,716 亿、两融 26,185~26,380 亿 ⇒ 共用一根轴时两融会被压成直线。
+ * 两图共用同一份 `chartData` 与 `syncId` ⇒ 悬浮明细与日期一一对应；左右内边距刻意对齐
+ *   （左 = 轴宽 52；右 = 8 + 轴宽 56 = 64）⇒ 柱与折线在竖直方向对得上位。
+ * 单位**不下沉到旋转的轴标题**（轴宽不足时会与刻度数字重叠，用户反馈「根本看不见」）
+ *   ⇒ 改由每张图的小标题 + 图例名称承载。
+ */
 function MarketOverviewSection() {
   const { data, isLoading } = trpc.market.getLimitUpWithMarketData.useQuery(
     { days: MARKET_CHART_DAYS },
     { staleTime: READONLY_STALE_MS, refetchInterval: 300_000 },
   );
+  const { theme } = useTheme();
 
   const chartData = useMemo(
     () =>
@@ -344,15 +361,19 @@ function MarketOverviewSection() {
     [data],
   );
 
+  /** 柱色随**实际生效**主题切换（`useTheme()` 给的是 light/dark，不是「是否跟随系统」）。 */
+  const barColor = theme === "dark" ? CHART_COLORS.limitUpBarDark : CHART_COLORS.limitUpBarLight;
+
   return (
     <Card data-homepage-market-chart>
       <CardHeader className="pb-3">
         <CardTitle>大盘成交量 · 两融数据 · 涨停数</CardTitle>
         <CardDescription>
-          上下两联共享同一条日期轴：上联 = 涨停家数（左轴，柱）+ 成交额（右轴，线）—— 右轴只有成交额一条；
-          下联 = 两融余额（独占左轴，亿）。两融量级小、日常波动只有 ±1%，与成交额挤在同一根轴上会被压成直线，
-          因此各自独用坐标系；两侧左轴宽度对齐，两联的日期刻度严格对齐。交易所两融汇总次日早晨才发布，
-          最新一日的两融暂缺（断点，不插值）。
+          上下两张图共用同一条日期轴与同一个悬浮明细：上图 = 涨停家数（柱，左轴「家」）；下图 =
+          成交额（左轴，亿）＋ 两融余额（右轴，亿）两条折线。成交额与两融量级相近，但波动幅度差两个数量级
+          （实测 30 日窗口 16,126~19,716 亿 vs 26,185~26,380 亿），共用一根轴会把两融压成直线，
+          故两轴各自定域。单位由每张图的小标题与图例承载，不再画轴标题 —— 旋转的轴标题在轴宽不足时会与
+          刻度数字挤在一起。交易所两融汇总次日早晨才发布，最新一日的两融暂缺（断点，不插值）。
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -361,65 +382,82 @@ function MarketOverviewSection() {
         ) : chartData.length === 0 ? (
           <div className="py-12 text-center text-sm text-muted-foreground">暂无大盘数据</div>
         ) : (
-          <div className="space-y-1">
-            <ResponsiveContainer width="100%" height={210}>
-              <ComposedChart data={chartData} syncId="homepageMarket" margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" hide />
-                <YAxis
-                  yAxisId="count"
-                  tick={{ fontSize: 12 }}
-                  width={44}
-                  label={{ value: "涨停家数", angle: -90, position: "insideLeft", style: { fontSize: 11 } }}
-                />
-                <YAxis
-                  yAxisId="turnover"
-                  orientation="right"
-                  width={56}
-                  domain={["dataMin - 1200", "dataMax + 1200"]}
-                  tick={{ fontSize: 12 }}
-                  label={{ value: "成交额(亿)", angle: 90, position: "insideRight", style: { fontSize: 11 } }}
-                />
-                <Tooltip content={<MarketChartTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar yAxisId="count" dataKey="涨停数" fill={CHART_COLORS.limitUpCount} radius={[2, 2, 0, 0]} />
-                <Line
-                  yAxisId="turnover"
-                  type="monotone"
-                  dataKey="成交额"
-                  stroke={CHART_COLORS.turnover}
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls={false}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+          <div className="space-y-4">
+            {/* 图 1：涨停家数（柱）—— 独占一张图，不与金额量纲混在一个坐标系里。 */}
+            <div data-homepage-chart="limit-up-bar">
+              <div className="mb-1 text-xs font-medium text-muted-foreground">涨停家数（柱，左轴：家）</div>
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart
+                  data={chartData}
+                  syncId="homepageMarket"
+                  margin={{ top: 8, right: 64, bottom: 0, left: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" hide />
+                  <YAxis width={52} tick={{ fontSize: 12 }} allowDecimals={false} />
+                  <Tooltip content={<MarketChartTooltip />} />
+                  <Bar dataKey="涨停数" name="涨停家数" fill={barColor} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
 
-            <ResponsiveContainer width="100%" height={120}>
-              <ComposedChart data={chartData} syncId="homepageMarket" margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={16} />
-                <YAxis
-                  yAxisId="margin"
-                  tick={{ fontSize: 12 }}
-                  width={44}
-                  domain={["dataMin - 60", "dataMax + 60"]}
-                  label={{ value: "两融余额(亿)", angle: -90, position: "insideLeft", style: { fontSize: 11 } }}
-                />
-                {/* 占位右轴：只为把下联绘图区宽度对齐上联（上联右轴宽 56），不承载数据。 */}
-                <YAxis yAxisId="pad" orientation="right" width={56} tick={false} axisLine={false} tickLine={false} />
-                <Line
-                  yAxisId="margin"
-                  type="monotone"
-                  dataKey="两融余额"
-                  name="两融余额"
-                  stroke={CHART_COLORS.marginBalance}
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls={false}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+            {/*
+              图 2：成交额 + 两融余额 —— 两条折线一图两轴（左 = 成交额，右 = 两融余额）。
+              刻度一律取整：`16,126.02` 这类带小数的 8 字符刻度在 52px 轴宽里会被裁掉首位数字
+              （用户反馈「坐标轴数字看不见」），量纲是亿，整数刻度足够读数。
+            */}
+            <div data-homepage-chart="market-lines">
+              <div className="mb-1 text-xs font-medium text-muted-foreground">
+                成交额（左轴：亿）· 两融余额（右轴：亿）
+              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart
+                  data={chartData}
+                  syncId="homepageMarket"
+                  margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={16} />
+                  <YAxis
+                    yAxisId="turnover"
+                    width={52}
+                    domain={["dataMin - 1200", "dataMax + 1200"]}
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={(value: number) => value.toFixed(0)}
+                  />
+                  <YAxis
+                    yAxisId="margin"
+                    orientation="right"
+                    width={56}
+                    domain={["dataMin - 60", "dataMax + 60"]}
+                    tick={{ fontSize: 12 }}
+                    tickFormatter={(value: number) => value.toFixed(0)}
+                  />
+                  <Tooltip content={<MarketChartTooltip />} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Line
+                    yAxisId="turnover"
+                    type="monotone"
+                    dataKey="成交额"
+                    name="成交额(亿)"
+                    stroke={CHART_COLORS.turnover}
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls={false}
+                  />
+                  <Line
+                    yAxisId="margin"
+                    type="monotone"
+                    dataKey="两融余额"
+                    name="两融余额(亿)"
+                    stroke={CHART_COLORS.marginBalance}
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
       </CardContent>
@@ -553,11 +591,6 @@ function LadderGroupGrid({ groupKey, items }: { groupKey: string; items: LadderI
       </div>
       {collapsible ? (
         <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-          <span className="text-[11px] text-muted-foreground">
-            {expanded
-              ? `已展开本组全部 ${totalRows} 行`
-              : `已折叠本组 ${totalRows - LADDER_GROUP_VISIBLE_ROWS} 行（默认只显示前 ${LADDER_GROUP_VISIBLE_ROWS} 行）`}
-          </span>
           <button
             type="button"
             data-homepage-ladder-group-toggle={groupKey}
@@ -920,7 +953,7 @@ export default function DashboardPage() {
         {/* ① 大盘日线走势图（四指数并列） */}
         <IndexTrendSection />
 
-        {/* ② 涨停数 · 成交额 · 两融余额（两联图） */}
+        {/* ② 涨停家数（柱，独立一图）+ 成交额 / 两融余额（双轴折线图） */}
         <MarketOverviewSection />
 
         {/* ③ 连板梯队（高度 × 网格） */}
@@ -929,22 +962,7 @@ export default function DashboardPage() {
         {/* ④ 题材热力日历 */}
         <SectorHeatmapSection />
 
-        {/* ⑤ 快捷入口 + 免责声明 */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {SHORTCUTS.map((shortcut) => (
-            <Link key={shortcut.href} href={shortcut.href}>
-              <Card className="cursor-pointer transition-colors hover:bg-muted/40">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">{shortcut.label}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-muted-foreground">{shortcut.description}</p>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
-
+        {/* ⑤ 免责声明 */}
         <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
           免责声明：本页仅用于历史复盘与研究辅助，所有统计基于已记录的涨停记录与指数日线，不构成投资建议；板数口径为「连续
           记录交易日涨停的天数」，与行情软件口径可能存在差异；一字板判据为当日开盘 = 最高 = 最低，行情缺失时不标记；
