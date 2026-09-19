@@ -1,12 +1,12 @@
-== 首页（/）第二轮改造验收探针（事项 rKRNzQ）== 2026-09-19T13:57:06.216Z
-BASE=http://127.0.0.1:3001 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=25205
+== 首页（/）第二轮改造验收探针（事项 rKRNzQ）== 2026-09-19T15:32:30.321Z
+BASE=http://127.0.0.1:3000 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=28584
 CDP 已连接
 
 --- E. 首屏加载形式（重卡片容器必须先于数据出现）---
-  首屏时间线：指数卡 562ms · 首个图表 8311ms · 两重卡片容器同存 562ms · 梯队表 9513ms · 热力表 9513ms
-  PASS  两个重区块的卡片容器在 1.5s 内同存（不再是「等全部数据」的全页 spinner）  → 562ms
-  PASS  指数卡在 1.5s 内出现  → 562ms
-  PASS  指数图表先于连板梯队表就绪（分块渲染，非串行阻塞）  → chart=8311 ladder=9513
+  首屏时间线：指数卡 636ms · 首个图表 1471ms · 两重卡片容器同存 636ms · 梯队表 2560ms · 热力表 2560ms
+  PASS  两个重区块的卡片容器在 1.5s 内同存（不再是「等全部数据」的全页 spinner）  → 636ms
+  PASS  指数卡在 1.5s 内出现  → 636ms
+  PASS  指数图表先于连板梯队表就绪（分块渲染，非串行阻塞）  → chart=1471 ladder=2560
 
 --- A. 大盘日线走势图：四指数并列 ---
   PASS  指数卡数量 = 4  → got 4
@@ -29,7 +29,7 @@ CDP 已连接
   PASS  图例名称带单位（成交额(亿) / 两融余额(亿)）  → ["成交额(亿)","两融余额(亿)"]
 
 --- C. 连板梯队 与 题材热力日历 位置交换 ---
-  PASS  连板梯队排在题材热力日历之前  → {"ladderTop":1111,"heatTop":2272}
+  PASS  连板梯队排在题材热力日历之前  → {"ladderTop":1111,"heatTop":2288}
 
 --- F. 梯队「**组内**网格行 > 3 ⇒ 该组默认折叠到 3 行」（非整个梯队整体收起）---
   默认态：
@@ -42,6 +42,7 @@ CDP 已连接
   PASS  行数 > 3 的组出现**本组**折叠按钮、默认折叠、且恰好收成 3 行（= 3 × 实测列数 格）  → ["2 板 7行→3行/18格(列6)","首板(66) 11行→3行/18格(列6)"]
   PASS  行数 ≤ 3 的组不出现按钮、行数也不被裁  → ["6 板 1行 按钮=false","4 板 1行 按钮=false","3 板 1行 按钮=false"]
   PASS  折叠按钮旁不再有「已折叠本组 x 行（默认只显示前 3 行）」这类说明文字  → {"siblings":[],"box":"展开本组全部 7 行"}
+  PASS  折叠按钮居中（按钮中心 ↔ 本组网格中心 对齐 ±2px，且父容器 justify-content=center）  → {"found":true,"btnCenter":954,"gridCenter":954,"delta":0,"justifyContent":"center"}
   PASS  整个梯队的高度行不再整体收起（默认态即可见全部高度行，「2 板」「首板」都在）  → {"renderedRows":5,"grids":5,"labels":["6 板","4 板","3 板","2 板","首板(66)"]}
   PASS  点击某组按钮后**只有该组**展开，其余可折叠组保持折叠（组内开关，非全局）  → ["6 板:1/1@null","4 板:1/1@null","3 板:1/1@null","2 板:7/7@true","首板(66):3/11@false"]
   PASS  展开态按钮文案 = 「收起」  → 收起
@@ -81,11 +82,27 @@ CDP 已连接
   PASS  页面标题为「行情总览」  → 行情总览
   PASS  数据补齐后无残留骨架屏  → 0
 
---- I. 涨停家数柱色：亮色红-500 / 暗夜红-700（压暗）---
+--- I. 涨停家数柱色：亮色红-500（不变）/ 暗夜灰调砖红 #a04e4e（降饱和 + 压暗）---
   亮色：{"fill":"rgb(239, 68, 68)","luminance":0.229,"htmlDark":false,"btnTheme":"light"}
-  暗夜：{"fill":"rgb(185, 28, 28)","luminance":0.1123,"htmlDark":true,"btnTheme":"dark"}
+  暗夜：{"fill":"rgb(160, 78, 78)","luminance":0.1347,"htmlDark":true,"btnTheme":"dark"}
   PASS  亮色主题下柱色 = 红-500（rgb(239, 68, 68)）  → rgb(239, 68, 68) / htmlDark=false
-  PASS  暗夜主题下柱色 = 红-700（rgb(185, 28, 28)）  → rgb(185, 28, 28) / htmlDark=true
-  PASS  暗夜柱色感知亮度显著低于亮色（「不刺眼」的量化判据）  → dark=0.1123 vs light=0.229
+  PASS  暗夜主题下柱色 = 灰调砖红 #a04e4e（rgb(160, 78, 78)，降饱和后仍守住压暗口径）  → rgb(160, 78, 78) / htmlDark=true
+  PASS  暗夜柱色感知亮度显著低于亮色（「不刺眼」的量化判据）  → dark=0.1347 vs light=0.229
 
-=== 汇总：PASS=54 FAIL=0 SKIP=0 ===
+--- J. 组内「展开 → 收起」后向上回滚 88px 落点 + 平滑动画 ---
+  收起前：{"scrollY":2217,"gridTop":-200} / 组行数=11
+  采样 scrollY：[2193,2180,2090,1982,1956,1936,1931,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929]
+  收起后：{"scrollY":1929,"gridTop":88,"rowsVisible":3,"rowsTotal":11,"expanded":"false"}
+  PASS  收起后确实**向上**滚动  → start=2217 end=1929
+  PASS  是**渐进动画**而非瞬跳（存在严格介于首尾之间的采样）  → [2193,2180,2090,1982,1956,1936,1931,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929,1929]
+  PASS  落点 = 本组网格顶部距视口顶 88px（±6px）  → gridTop=88
+  PASS  该组同时收成 3 行（滚动与折叠是同一动作的两面）  → {"scrollY":1929,"gridTop":88,"rowsVisible":3,"rowsTotal":11,"expanded":"false"}
+
+--- N. 断板格 vs 连板格：形状通道（虚线描边）+ 两主题可读性门槛 ---
+  light：{"dark":false,"counts":{"broken":17,"normal":28},"brokenWithOutline":17,"normalWithOutline":0,"brokenOutlineStyle":"dashed","brokenOutlineMinVsCard":3.82,"textSep":3.03,"brokenMeanLum":0.1256,"normalMeanLum":0.008}
+  dark：{"dark":true,"counts":{"broken":17,"normal":28},"brokenWithOutline":17,"normalWithOutline":0,"brokenOutlineStyle":"dashed","brokenOutlineMinVsCard":4.61,"textSep":2,"brokenMeanLum":0.3635,"normalMeanLum":0.7769}
+  PASS  形状通道：**两种主题**下断板格全部带虚线描边，且连板格一个都没有  → {"light":["17/17","0/28","dashed"],"dark":["17/17","0/28","dashed"]}
+  PASS  🔴 **夜间可读性门槛**：描边合成色 vs 卡片底色的对比度 **两主题都 ≥ 3:1**  → light=3.82:1 / dark=4.61:1
+  PASS  既有文字通道不退化：夜间文本分离度 ≥ 1.7:1 且不低于日间的 60%  → light=3.03:1 / dark=2:1（比值 0.66）
+
+=== 汇总：PASS=62 FAIL=0 SKIP=0 ===

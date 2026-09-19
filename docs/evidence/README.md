@@ -886,3 +886,64 @@ npx tsx docs/evidence/_r007_run_engine.mts
 |---|---|---|
 | `_probe_lc_slowpath.mjs` + `.out.txt` | 只读：数据戳 / 规模 / **分段与全区间真实取回**。全区间 **22,827 ms / 1,529,449 行 / ≈248 MB**（`fetchAll=19.3s`）；年内 4.0s / 20.8 万行 / 34 MB ⇒ 链路 ≈12.9 MB/s，**不是带宽瓶颈** | `docs/research/LEADER-CANDIDATE-LOADFAIL-DIAG-001.md` §3 |
 | `_probe_db_tcp.mjs` + `.out.txt` | 只读：TCP 到 TiDB gateway 通（2~20 ms，实为本地代理应答）、`cloudflare/google/npmjs` 全 200 ⇒ **不是网络中断**；TiDB 走真实公网 IP（非 fake-IP），GitHub 才走 198.18.x.x | 同上 §3 |
+---
+
+### `ladderselreadability` —— 2 个（2026-09-19：首页连板梯队「选择日期」夜间模式文字看不清）
+
+> 用户原话：「首页连板梯队日期选择器夜间模式文字看不清，调整一下」。
+> **根因**：该 `<select>` 只写了 `border border-border`，`background-color` 落到 Tailwind preflight 的**透明**
+> ⇒ 控件表面与**展开的选项弹层**一律由 UA / 平台决定；而 `option` 的文字色是 `inherit` 来的 `--foreground`
+> （暗色近白）。Windows Chrome 的选项弹层是浏览器进程按**平台主题**绘制的独立窗口，与页面 CSS 不共享表面
+> ⇒ 平台表面为浅色时即「浅字浅底」。
+> **修法**（`client/src/pages/Dashboard.tsx`）：`border-input bg-background text-foreground`
+> + `[&>option]:bg-popover [&>option]:text-popover-foreground` + 键盘焦点 `ring`
+> （表面不再依赖平台默认色）。⚠️ `Market.tsx` 的同名下拉是同一种写法、同一缺陷，本轮**未动**（用户只报了首页）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_ladder_date_select_dark.mjs` + `.out.txt` | 亮 / 暗两套主题量 `select` / `option` / `label` 的 computed 与**真实绘制色**（颜色用 canvas 反解，因为本仓令牌是 `oklch()`）。**改前 5 PASS / 2 FAIL**：`select` 与 `option` 的 `backgroundColor` 均为 `rgba(0,0,0,0)`（表面交给 UA / 平台）；**若平台弹层为纯白，暗色文字对比度仅 1.27**（AA 需 ≥ 4.5）。**改后 7 PASS / 0 FAIL**：`select` 底 = `oklch(0.185 0.004 286)`（暗）/ `oklch(0.985 0.002 240)`（亮）、`option` 底 = `oklch(0.255 0.005 286)` 且 `backdropFrom=option`（作者可控）、对比度 **14.74 / 12.93 / 17.32** | `ROADMAP.md` 同名条目、`.workbuddy/memory/2026-09-19.md` |
+| `_probe_ladder_date_select_dark.BEFORE.txt` | 修复**前**的同名输出留档（同一探针、改前跑的那一次），用于「2 FAIL → 0 FAIL」的前后对照 | 同上 |
+| `_probe_ladder_date_select_popup.mjs` + `.out.txt` | 🔴 **负结论（省时间用）**：原生 `<select>` 的**展开弹层在 Windows 上无法用 CDP 截图**，`Input.dispatchMouseEvent` 合成点击也点不开（`:open` 恒 `false`，`activeElement` 仍是 `BODY`）⇒ 别在这上面耗时间；改用 `option` 的 computed `backgroundColor` / `color` 作可断言代理 | 同上 |
+| `_shot_ladder_date_select.light.png` / `_shot_ladder_date_select.dark.png` | 目视附件：选择器 + 首个选项在亮 / 暗两套主题下的真实像素（`_*.png` 被 `.gitignore` 排除在库外） | 同上（目视附件） |
+| `_shot_ladder_date_select_popup.*.png` | 弹层取证的副产物截图（闭合态可用；`*.open.png` 里**没有**弹层 —— 正是上面那条负结论） | 同上（目视附件） |
+
+> 🔴 **同轮偶发事故（已修复，登记备查）**：清理本轮 png 时用 `glob('docs/evidence/*.png')` 误删了
+> 3 张历史目视附件（`_shot_homepage_full.png` / `_shot_homepage_ladder.png` / `_shot_homepage_nav9bm.png`）。
+> 三者均**未被 git 跟踪**（`.gitignore:108` 的 `_*.png`），故无法从版本库恢复 ⇒ 已用其产出脚本
+> `_shot_homepage.mjs` **按原名重新截图补回**（2026-09-19 23:12，`contentHeight=3258`；`ladder` 版用第 4 参裁剪
+> `[data-homepage-ladder]`）。⚠️ 教训：**清仓内图片一律按文件名逐个指定，禁用 `*.png` 通配**。
+---
+
+### `selectsurface` —— 2 个（2026-09-19：全仓原生 `<select>` 表面 / 选项配色的系统性收口）
+
+> 用户原话：「同一写法缺陷一起修复」（承接上一条：首页连板梯队「选择日期」夜间看不清）。
+> **盘点结论**：全仓 `<select>` **47 处 / 16 个文件**，其中 **6 处没有任何 `bg-*`**（`Backtest.tsx` ×4、
+> `Dashboard.tsx`、`Market.tsx`），且 **47/47 处都没有给 `option` 上过色** ⇒ 控件表面与**展开的选项弹层**
+> 一律交给 UA / 平台决定（Windows 弹层是浏览器进程按**平台主题**画的独立窗口），暗色下即「浅字浅底」。
+> **修法 = 一条全局规则**（`client/src/index.css` 的 `@layer base`）：
+>
+> ```css
+> select { background-color: var(--background); color: var(--foreground); }
+> select option, select optgroup { background-color: var(--popover); color: var(--popover-foreground); }
+> ```
+>
+> 放 `base` 层 ⇒ **任何显式工具类（`bg-white` / `bg-transparent` / `text-slate-600` …）照旧覆盖它**，
+> 它只补「作者没声明」的空档 ⇒ **不必逐个改 47 处**。首页那处仍保留等价的行内类
+> （显式优先，与 `OperationLogs.tsx` 的既有写法一致）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_select_surface_dark.mjs` + `.out.txt` | 按**真实导航**巡检 6 条路由（`/` · `/market` · `/operation-logs` · `/backtest` · `/paper-trading` · `/review-workbench`）的全部可见 select：自身表面是否不透明、文字对「真实绘制底」的对比度、选项的底/字/对比度。**改前 10 PASS / 5 FAIL / 1 SKIP → 改后 18 PASS / 0 FAIL / 1 SKIP**。暗色实测：`/backtest` 两个**无 `bg` 类**的选择器由 `rgba(0,0,0,0)` 变 **`oklch(0.185 0.004 286)`**；`/` 的 **1873 个选项**与其余路由的选项全部 **`oklch(0.255 0.005 286)` + `oklch(0.93 0.002 286)`（对比度 12.93）**；选择器文字对比度 **12.8~14.74**。**规则作用域自证**：注入一个**没有任何 class** 的 `<select>`（与 `Market` / `Backtest` 同形态）→ 同样拿到令牌色（14.74 / 12.93）⇒ 证明覆盖是**全局**的，与「本轮是否走到该元素」无关 | `ROADMAP.md` 同名条目、`.workbuddy/memory/2026-09-19.md` |
+| `_shot_select_surface.backtest.png` / `_shot_select_surface.home.png` | 目视附件：暗色下 `/backtest`（**原本没有任何 `bg` 类**，表面由平台决定 ⇒ 改动前是 `rgba(0,0,0,0)`）与 `/` 的选择器真实像素 —— 均为「深底 + 浅字 + 清晰下拉箭头」。 `_*.png` 由 `.gitignore` 排除在库外 | 同上（目视附件） |
+| `_probe_select_surface_dark.BEFORE.txt` | 把 `index.css` 那条规则**临时移除**后重跑的同一探针输出（A/B 对照；移除/复原各断言字节数 7995 / 9542、md5 回 `969d26cf…`） | 同上 |
+
+> ⚠️ **覆盖边界（不隐瞒）**：47 处 select 中有 **30 处**位于 research / strategy / parameterSearch / walkForward
+> 等页面的**面板或弹窗内部**，需逐级操作才可达 ⇒ 本轮按 6 条路由取证。
+> `/market` 那条**等不到**（SKIP）：它的「选择日期」子组件用 `limitUp.getConnectionBoardStats` —— **全表扫
+> `limit_up_records`** 的旧端点（实测约 68s，且当前 dev server 连接池有死连接 ⇒ 更久），选择器落在骨架屏之后，
+> 150s 预算内未出现。该处写法**无任何 `bg` 类**，已被同一条规则覆盖；旁证 = `/backtest` 两个同形态选择器的
+> 实测 + 无 class 注入自证。
+>
+> 🔴 **A/B 对照的操作教训**：把「被移除的规则块」在复原时**从同一文件里再取出来是错的** —— 移除后它就没了。
+> 正确做法 = 移除时把块**存侧车文件**，复原时从侧车读回（本轮脚本因这个 bug 把 `apply` 卡住，
+> 一度让工作区处于「规则已移除」状态；已用插入脚本按 md5 `969d26cf…` 复原并断言）。

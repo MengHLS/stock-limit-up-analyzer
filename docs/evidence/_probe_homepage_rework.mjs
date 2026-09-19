@@ -31,11 +31,25 @@
  *   H. 「首板未续」并入 2 板行（+1 口径）：2 板行内必须同时存在涨停格与断板格
  *
  * 第四轮追加（2026-09-19，用户口述四条 + 一条）：
- *   I. 柱色随主题：亮色 = 红-500（#ef4444）、暗色 = 红-700（#b91c1c）——
+ *   I. 柱色随主题：亮色 = 红-500（#ef4444，**用户 2026-09-19 明确「只改夜间」后恢复原值**）、
+ *      暗色 = 灰调砖红 #a04e4e（`hsl(0,34%,47%)`，饱和度 74%→34% 且压暗）——
  *      以 `[data-theme-toggle]` 所在的真实主题切换（写 localStorage + reload）后量 `getComputedStyle(fill)`，
  *      并比较感知亮度，证明「夜间不刺眼」不是靠肉眼声称。
  *   J. 梯队折叠按钮旁**不再有**「已折叠本组 x 行（默认只显示前 3 行）」冗余说明文字。
- *
+ * 第六轮追加（2026-09-19，用户口述：「只改夜间模式」+「折叠按钮居中 + 好看一点」+「折叠后向上回滚带动画」）：
+ *   I（修订）. 亮色柱色**恢复红-500 原值**（此前一轮曾连带改淡，已被用户驳回）；
+ *   L. 折叠按钮**居中**（`btn.parentElement` 的 `justify-center`，且该容器仍只含按钮一个子元素）；
+ *   M. 展开 → **收起**后：`window.scrollY` 向上变化、过程中存在严格介于首尾的采样（证明是平滑动画而非瞬跳）、
+ *      落点 = 本组网格顶部距视口顶 88px（±6px，常量 `LADDER_COLLAPSE_SCROLL_TOP`）；已在舒适线以下时**不**回滚。
+ *      ⚠️ 采样必须在 **Node 侧**做 —— 本探针的 `evalJs` 是 `awaitPromise:false`，页内 Promise 收不到值。
+ *   N. 🔴 **断板格 vs 连板格的「双通道」+ 夜间可读性硬门槛**：断板格必须带**虚线描边**（形状通道，
+ *      两主题下全部断板格都有、连板格一个都没有），且**描边合成色 vs 卡片底色的 WCAG 对比度两种主题都 ≥ 3:1**；
+ *      文字通道不得退化（夜间 ≥ 1.7:1 且 ≥ 日间 × 0.6）。
+ *      依据：暗色 `--foreground`/`--muted-foreground` 只差 0.205 ⇒ 文本对比仅 **2.00:1**（亮色 3.03:1），
+ *      且再压暗断板名会伤其自身可读性 ⇒ 必须由形状通道承担主要区分。用户原话：「夜间模式下断板划线展示
+ *      和连板个股区分度太低，换一种更明显的，**后续 UI 设计都要考虑夜间模式的可读性**」。
+ *      ⚠️ 取色必须经 **canvas 合成**成真实 sRGB —— Chrome 把计算颜色报成 `oklch()/oklab()`，按 `rgb()` 正则解析会全 null。
+
  * 第五轮追加（2026-09-19，用户口述：「首页最下面有四个大的跳转按钮没用 去掉」）：
  *   K. 首页底部四张「快捷入口」卡片（涨停复盘明细 / 大盘分析 / 情绪分析 / 上传图片）**整体移除**
  *      ⇒ 反证断言：`a[href]` 命中这四个路由的条数 = 0、卡片容器内含这些文案的条数 = 0。
@@ -397,6 +411,33 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
       toggleBleed ? JSON.stringify({ siblings: toggleBleed.siblings, box: toggleBleed.boxText }) : 'n/a',
     );
 
+    // ---------- L. 折叠按钮**居中**（用户 2026-09-19：「折叠按钮改到居中显示」） ----------
+    // 判据取**几何**而不是类名：按钮中心 x 与本组网格中心 x 对齐（±2px）⇒ 真的居中，
+    // 而不是"写了 justify-center 但被宽度/外边距带偏"。
+    const toggleCentering = await jsonEval(`(function(){
+      var btn = document.querySelector('[data-homepage-ladder] [data-homepage-ladder-group-toggle]');
+      if (!btn) return JSON.stringify({ found: false });
+      var grid = btn.closest('[data-ladder-group]').querySelector('[data-ladder-grid]');
+      var b = btn.getBoundingClientRect();
+      var g = grid.getBoundingClientRect();
+      var pc = getComputedStyle(btn.parentElement).justifyContent;
+      return JSON.stringify({
+        found: true,
+        btnCenter: Math.round(b.left + b.width / 2),
+        gridCenter: Math.round(g.left + g.width / 2),
+        delta: Math.round(Math.abs((b.left + b.width / 2) - (g.left + g.width / 2))),
+        justifyContent: pc
+      });
+    })()`);
+    check(
+      '折叠按钮居中（按钮中心 ↔ 本组网格中心 对齐 ±2px，且父容器 justify-content=center）',
+      !!toggleCentering &&
+        toggleCentering.found === true &&
+        toggleCentering.delta <= 2 &&
+        toggleCentering.justifyContent === 'center',
+      toggleCentering ? JSON.stringify(toggleCentering) : 'n/a',
+    );
+
     // 关键回归：折叠**不再**发生在整个梯队的高度行上（旧实现会默认藏掉「2 板」「首板」两行）。
     const tableShape = await jsonEval(`(function(){
       var table = document.querySelector('[data-homepage-ladder] table');
@@ -675,7 +716,7 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
   // ---------- 零回归检查跑完再验主题相关项（本段含两次 reload，会重置其它区块的加载态） ----------
   // ---------- I. 柱色随主题（第四轮：「柱状图的红色在夜间模式太刺眼」） ----------
   log('');
-  log('--- I. 涨停家数柱色：亮色红-500 / 暗夜红-700（压暗）---');
+  log('--- I. 涨停家数柱色：亮色红-500（不变）/ 暗夜灰调砖红 #a04e4e（降饱和 + 压暗）---');
   const readBarFill = async () => jsonEval(`(function(){
     var p = document.querySelector('[data-homepage-chart="limit-up-bar"] .recharts-bar-rectangle path');
     if (!p) return null;
@@ -715,7 +756,7 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
     skipCheck('I 柱色随主题', '切换主题后柱未渲染');
   } else {
     check('亮色主题下柱色 = 红-500（rgb(239, 68, 68)）', lightFill.fill === 'rgb(239, 68, 68)' && lightFill.htmlDark === false, lightFill.fill + ' / htmlDark=' + lightFill.htmlDark);
-    check('暗夜主题下柱色 = 红-700（rgb(185, 28, 28)）', darkFill.fill === 'rgb(185, 28, 28)' && darkFill.htmlDark === true, darkFill.fill + ' / htmlDark=' + darkFill.htmlDark);
+    check('暗夜主题下柱色 = 灰调砖红 #a04e4e（rgb(160, 78, 78)，降饱和后仍守住压暗口径）', darkFill.fill === 'rgb(160, 78, 78)' && darkFill.htmlDark === true, darkFill.fill + ' / htmlDark=' + darkFill.htmlDark);
     check(
       '暗夜柱色感知亮度显著低于亮色（「不刺眼」的量化判据）',
       darkFill.luminance > 0 && darkFill.luminance < lightFill.luminance * 0.7,
@@ -726,6 +767,179 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
   await evalJs(`localStorage.removeItem('theme')`);
   await send('Page.reload', { ignoreCache: false });
   await sleep(1500);
+
+  // ---------- J. 收起后的回滚（用户 2026-09-19：「点击折叠后页面向上回滚至合适位置，带滚动动画」） ----------
+  log('');
+  log('--- J. 组内「展开 → 收起」后向上回滚 88px 落点 + 平滑动画 ---');
+  // 用**最后一个**可折叠组（首板组，展开态最高）做样本：收起造成的落差最大，动画最容易采到中间帧。
+  // 先轮询等折叠按钮出现 —— 本节紧跟在「切回跟随系统 + reload」之后，页面可能还在首屏加载。
+  let toggleReady = false;
+  for (let i = 0; i < 40 && !toggleReady; i += 1) {
+    toggleReady = (await jsonEval(`JSON.stringify({ n: document.querySelectorAll('[data-homepage-ladder] [data-homepage-ladder-group-toggle]').length })`))?.n > 0;
+    if (!toggleReady) await sleep(250);
+  }
+  const prepCollapse = await jsonEval(`(function(){
+    var bs = Array.from(document.querySelectorAll('[data-homepage-ladder] [data-homepage-ladder-group-toggle]'));
+    if (!bs.length) return null;
+    var btn = bs[bs.length - 1];
+    if (btn.getAttribute('aria-expanded') === 'false') btn.click();
+    return JSON.stringify({ count: bs.length });
+  })()`);
+  await sleep(800);
+  // 把本组网格顶部顶到舒适线（88px）以上 200px ⇒ 收起后必然需要向上回滚约 288px（动画足够长，能采到中间帧）。
+  const scrollState = await jsonEval(`(function(){
+    var bs = Array.from(document.querySelectorAll('[data-homepage-ladder] [data-homepage-ladder-group-toggle]'));
+    var btn = bs[bs.length - 1];
+    var grid = btn.closest('[data-ladder-group]').querySelector('[data-ladder-grid]');
+    window.scrollBy(0, grid.getBoundingClientRect().top + 200);
+    return JSON.stringify({ expanded: btn.getAttribute('aria-expanded'), rowsTotal: grid.getAttribute('data-ladder-grid-rows-total') });
+  })()`);
+  await sleep(400);
+  const beforeCollapse = await jsonEval(`(function(){
+    var bs = Array.from(document.querySelectorAll('[data-homepage-ladder] [data-homepage-ladder-group-toggle]'));
+    var btn = bs[bs.length - 1];
+    var grid = btn.closest('[data-ladder-group]').querySelector('[data-ladder-grid]');
+    return JSON.stringify({ scrollY: Math.round(window.scrollY), gridTop: Math.round(grid.getBoundingClientRect().top) });
+  })()`);
+  if (!prepCollapse || !beforeCollapse || beforeCollapse.gridTop >= 88) {
+    skipCheck('J 收起后回滚', '前置条件未成立：' + JSON.stringify({ prepCollapse, beforeCollapse }));
+  } else {
+    log('  收起前：' + JSON.stringify(beforeCollapse) + ' / 组行数=' + (scrollState ? scrollState.rowsTotal : 'n/a'));
+    // 点「收起」（触发平滑滚动），随后由 Node 侧高频采样 window.scrollY —— 探针的 evalJs 是
+    // `awaitPromise:false`，所以采样必须在页面外做，不能靠页内 Promise 收集。
+    await evalJs(`(function(){
+      var bs = Array.from(document.querySelectorAll('[data-homepage-ladder] [data-homepage-ladder-group-toggle]'));
+      bs[bs.length - 1].click();
+      return true;
+    })()`);
+    const series = [];
+    for (let i = 0; i < 30; i += 1) {
+      series.push(await jsonEval(`JSON.stringify({ y: Math.round(window.scrollY) })`));
+      await sleep(30);
+    }
+    const ys = series.filter(Boolean).map((s) => s.y);
+    const startY = beforeCollapse.scrollY;
+    const endY = ys.length ? ys[ys.length - 1] : null;
+    const afterCollapse = await jsonEval(`(function(){
+      var bs = Array.from(document.querySelectorAll('[data-homepage-ladder] [data-homepage-ladder-group-toggle]'));
+      var btn = bs[bs.length - 1];
+      var grid = btn.closest('[data-ladder-group]').querySelector('[data-ladder-grid]');
+      return JSON.stringify({
+        scrollY: Math.round(window.scrollY),
+        gridTop: Math.round(grid.getBoundingClientRect().top),
+        rowsVisible: Number(grid.getAttribute('data-ladder-grid-rows-visible')),
+        rowsTotal: Number(grid.getAttribute('data-ladder-grid-rows-total')),
+        expanded: btn.getAttribute('aria-expanded')
+      });
+    })()`);
+    log('  采样 scrollY：' + JSON.stringify(ys));
+    log('  收起后：' + JSON.stringify(afterCollapse));
+    check('收起后确实**向上**滚动', endY !== null && endY < startY, 'start=' + startY + ' end=' + endY);
+    check(
+      '是**渐进动画**而非瞬跳（存在严格介于首尾之间的采样）',
+      ys.some((y) => y < startY && y > endY),
+      JSON.stringify(ys),
+    );
+    check(
+      '落点 = 本组网格顶部距视口顶 88px（±6px）',
+      !!afterCollapse && Math.abs(afterCollapse.gridTop - 88) <= 6,
+      afterCollapse ? 'gridTop=' + afterCollapse.gridTop : 'n/a',
+    );
+    check(
+      '该组同时收成 3 行（滚动与折叠是同一动作的两面）',
+      !!afterCollapse && afterCollapse.rowsVisible === 3 && afterCollapse.rowsTotal > 3 && afterCollapse.expanded === 'false',
+      JSON.stringify(afterCollapse),
+    );
+  }
+
+  // ---------- N. 断板 vs 连板：双通道 + **夜间可读性硬门槛**（用户 2026-09-19） ----------
+  // 「夜间模式下断板划线展示和连板个股区分度太低，换一种更明显的，后续 UI 设计都要考虑夜间模式的可读性」
+  // 量化根因：暗色 --foreground oklch(0.92) / --muted-foreground oklch(0.715) 只差 0.205 ⇒ 文本对比 2.00:1，
+  // 而亮色是 3.03:1（夜间仅为日间的 66%）；且再压暗断板名会伤它自己的可读性 ⇒ 文字通道已到顶。
+  // 故新增**形状通道**（断板格虚线描边，layout-neutral 的 outline），并在此设硬门槛。
+  log('');
+  log('--- N. 断板格 vs 连板格：形状通道（虚线描边）+ 两主题可读性门槛 ---');
+  const LADDER_CHANNEL_READ = `(function(){
+    var cv = document.createElement('canvas'); cv.width = cv.height = 1;
+    var ctx = cv.getContext('2d', { willReadFrequently: true });
+    var lin = function(v){ v/=255; return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); };
+    // ⚠️ Chrome 现在把颜色算成 oklch()/oklab()，正则匹配 rgb 会全 null ⇒ 一律经 canvas 合成成真实 sRGB 像素。
+    var over = function(color, base){
+      ctx.clearRect(0,0,1,1);
+      ctx.fillStyle = base; ctx.fillRect(0,0,1,1);
+      ctx.fillStyle = color; ctx.fillRect(0,0,1,1);
+      var d = ctx.getImageData(0,0,1,1).data;
+      return Number((0.2126*lin(d[0])+0.7152*lin(d[1])+0.0722*lin(d[2])).toFixed(4));
+    };
+    var ratio = function(a,b){ var hi=Math.max(a,b), lo=Math.min(a,b); return Number(((hi+0.05)/(lo+0.05)).toFixed(2)); };
+    var cells = Array.from(document.querySelectorAll('[data-homepage-ladder] [data-ladder-stock]'));
+    var cardEl = document.querySelector('[data-homepage-ladder]');
+    if (!cells.length || !cardEl) return null;
+    var cardBg = getComputedStyle(cardEl).backgroundColor;
+    var cardLum = over(cardBg, 'rgb(255,255,255)');
+    var items = cells.map(function(c){
+      var nameEl = c.children[1]; if (!nameEl) return null;
+      var cs = getComputedStyle(nameEl), ccs = getComputedStyle(c);
+      var hasOutline = ccs.outlineStyle !== 'none' && parseFloat(ccs.outlineWidth) > 0;
+      return {
+        broken: cs.textDecorationLine.indexOf('line-through') >= 0,
+        nameLum: over(cs.color, cardBg),
+        outline: hasOutline,
+        outlineStyle: ccs.outlineStyle,
+        outlineVsCard: hasOutline ? ratio(over(ccs.outlineColor, cardBg), cardLum) : null
+      };
+    }).filter(Boolean);
+    var bset = items.filter(function(x){ return x.broken; });
+    var nset = items.filter(function(x){ return !x.broken; });
+    var mean = function(a){ return a.length ? Number((a.reduce(function(s,x){return s+x;},0)/a.length).toFixed(4)) : null; };
+    var bLum = mean(bset.map(function(x){ return x.nameLum; }));
+    var nLum = mean(nset.map(function(x){ return x.nameLum; }));
+    var outlineRatios = bset.filter(function(x){ return x.outlineVsCard !== null; }).map(function(x){ return x.outlineVsCard; });
+    return JSON.stringify({
+      dark: document.documentElement.classList.contains('dark'),
+      counts: { broken: bset.length, normal: nset.length },
+      brokenWithOutline: bset.filter(function(x){ return x.outline; }).length,
+      normalWithOutline: nset.filter(function(x){ return x.outline; }).length,
+      brokenOutlineStyle: bset.length ? bset[0].outlineStyle : null,
+      brokenOutlineMinVsCard: outlineRatios.length ? Math.min.apply(null, outlineRatios) : null,
+      textSep: (bLum !== null && nLum !== null) ? ratio(bLum, nLum) : null,
+      brokenMeanLum: bLum, normalMeanLum: nLum
+    });
+  })()`;
+  const expandAllLadderGroups = () =>
+    evalJs(`(function(){ var bs = Array.from(document.querySelectorAll('[data-homepage-ladder] [data-homepage-ladder-group-toggle]')); bs.forEach(function(b){ if (b.getAttribute('aria-expanded') === 'false') b.click(); }); return bs.length; })()`);
+  const ladderByTheme = {};
+  for (const theme of ['light', 'dark']) {
+    const ok = await switchTheme(theme);
+    if (!ok) { ladderByTheme[theme] = null; continue; }
+    await expandAllLadderGroups();
+    await sleep(900);
+    ladderByTheme[theme] = await jsonEval(LADDER_CHANNEL_READ);
+    log('  ' + theme + '：' + JSON.stringify(ladderByTheme[theme]));
+  }
+  const lightL = ladderByTheme.light, darkL = ladderByTheme.dark;
+  if (!lightL || !darkL) {
+    skipCheck('N 断板/连板双通道', '切主题后梯队未渲染：' + JSON.stringify(ladderByTheme));
+  } else {
+    check(
+      '形状通道：**两种主题**下断板格全部带虚线描边，且连板格一个都没有',
+      lightL.brokenWithOutline === lightL.counts.broken && lightL.normalWithOutline === 0 &&
+        darkL.brokenWithOutline === darkL.counts.broken && darkL.normalWithOutline === 0 &&
+        lightL.brokenOutlineStyle === 'dashed' && darkL.brokenOutlineStyle === 'dashed',
+      JSON.stringify({ light: [lightL.brokenWithOutline + '/' + lightL.counts.broken, lightL.normalWithOutline + '/' + lightL.counts.normal, lightL.brokenOutlineStyle],
+        dark: [darkL.brokenWithOutline + '/' + darkL.counts.broken, darkL.normalWithOutline + '/' + darkL.counts.normal, darkL.brokenOutlineStyle] }),
+    );
+    check(
+      '🔴 **夜间可读性门槛**：描边合成色 vs 卡片底色的对比度 **两主题都 ≥ 3:1**',
+      lightL.brokenOutlineMinVsCard >= 3 && darkL.brokenOutlineMinVsCard >= 3,
+      'light=' + lightL.brokenOutlineMinVsCard + ':1 / dark=' + darkL.brokenOutlineMinVsCard + ':1',
+    );
+    check(
+      '既有文字通道不退化：夜间文本分离度 ≥ 1.7:1 且不低于日间的 60%',
+      darkL.textSep >= 1.7 && darkL.textSep >= lightL.textSep * 0.6,
+      'light=' + lightL.textSep + ':1 / dark=' + darkL.textSep + ':1（比值 ' + Number((darkL.textSep / lightL.textSep).toFixed(2)) + '）',
+    );
+  }
 
   log('');
   log('=== 汇总：PASS=' + pass + ' FAIL=' + fail + ' SKIP=' + skip + ' ===');
