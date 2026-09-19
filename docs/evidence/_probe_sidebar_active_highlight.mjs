@@ -7,8 +7,14 @@
  *   现实现 = 「剥 query/hash/尾斜杠 → 分段精确匹配（相等 或 target + `/`）→ 全局取最长命中」。
  *
  * 本探针用**真实浏览器渲染**断言「任何时刻侧栏恰好只有 1 项高亮，且是正确的那一项」，
- * 覆盖 21 条导航路由 + 5 条详情路由（应点亮父项）+ 2 条反向断言（同前缀板块不得互亮）
+ * 覆盖 22 条导航路由 + 5 条详情路由（应点亮父项）+ 2 条反向断言（同前缀板块不得互亮）
  * + 4 条点击流（用户实际点击路径）。
+ *
+ * ⚠️ HOMEPAGE-005（2026-09-19）：首页（`/`）入口由左上角网站标题承担，侧栏「复盘分析」组
+ *    不再单列「首页」项 ⇒ `/` 的期望高亮从 `[首页]` 改为 **`[]`（无任何高亮）**；
+ *    同时新增第 5/6、6/6 两段：侧栏确无「首页」项、标题按钮形态正确、点题回首页。
+ *    旧断言 `['/', '涨停复盘']` 早已过期（HOMEPAGE-001 起 `/` 就不再是涨停复盘明细页），一并纠正。
+ *    顺带补齐漏登记的 `/limit-up`（涨停复盘）与 `/research/ask`（提问研究）两条路由。
  *
  * ⚠️ 2026-09-15 远端提交 `8bbe8b3` 已删除「录入大盘数据」页（其路由 `/market-` + `data-input`），
  *    故该前缀的导航项 / 反向断言 / 点击流用例一并移除；同前缀碰撞对只剩 `/backtest-runs` ↔ `/backtest`。
@@ -56,7 +62,7 @@ process.on('unhandledRejection', e => { logErr('unhandledRejection:', (e && e.st
 
 /** 应高亮的导航项（path → 唯一期望高亮文案）—— 与 AppShell.tsx#navGroups 一一对应 */
 const ROUTES = [
-  ['/', '涨停复盘'],
+  ['/limit-up', '涨停复盘'],
   ['/market', '大盘分析'],
   ['/sentiment-analysis', '情绪分析'],
   ['/leader-candidates', '龙头候选'],
@@ -67,6 +73,7 @@ const ROUTES = [
   ['/data-health', '数据域健康'],
   ['/historical-state', '历史状态查询'],
   ['/datasets', '数据集构建'],
+  ['/research/ask', '提问研究'],
   ['/research', '研究实验'],
   ['/strategies', '策略'],
   ['/performance', '绩效仪表盘'],
@@ -179,19 +186,19 @@ const CLICK = label => `(()=>{const b=Array.from(document.querySelectorAll('[dat
   };
 
   log('');
-  log('--- 1/4 导航路由（22 条）---');
+  log('--- 1/6 导航路由（22 条）---');
   for (const [p, e] of ROUTES) await runRoute(p, e);
 
   log('');
-  log('--- 2/4 详情路由（5 条，应点亮父项）---');
+  log('--- 2/6 详情路由（5 条，应点亮父项）---');
   for (const [p, e] of DETAIL_ROUTES) await runRoute(p, e);
 
   log('');
-  log('--- 3/4 反向断言（4 条，同前缀板块不得互亮）---');
+  log('--- 3/6 反向断言（2 条，同前缀板块不得互亮）---');
   for (const [p, e] of MUST_NOT_HIGHLIGHT) await runRoute(p, e, 'must-not');
 
   log('');
-  log('--- 4/4 点击流（6 条）---');
+  log('--- 4/6 点击流（4 条）---');
   for (const [from, label, expectLabel, expectPath] of CLICK_FLOWS) {
     await gotoAndWait(from);
     await sleep(350);
@@ -204,6 +211,45 @@ const CLICK = label => `(()=>{const b=Array.from(document.querySelectorAll('[dat
     ok ? pass++ : fail++;
     log('  ' + (ok ? 'PASS' : 'FAIL') + '  从 ' + from + ' 点[' + label + '] -> path=' + loc + '（期望 ' + expectPath + '）高亮=' + JSON.stringify(act) + '（期望唯一 [' + expectLabel + ']）clicked=' + clicked);
   }
+
+  // HOMEPAGE-005：首页入口 = 左上角网站标题；侧栏不再单列「首页」⇒ `/` 无任何高亮
+  log('');
+  log('--- 5/6 首页入口（HOMEPAGE-005）---');
+  if (await gotoAndWait('/')) {
+    await sleep(300);
+    const s = await snap();
+    const act = s ? s.act : ['<snapshot 失败>'];
+    const okNone = Array.isArray(act) && act.length === 0;
+    okNone ? pass++ : fail++;
+    log('  ' + (okNone ? 'PASS' : 'FAIL') + '  / 首页侧栏无高亮项  实际=' + JSON.stringify(act));
+
+    const hasHomeItem = await evalJs(`Array.from(document.querySelectorAll('[data-slot="sidebar-menu-button"]')).some(b=>(b.innerText||'').trim()==='首页')`);
+    hasHomeItem === false ? pass++ : fail++;
+    log('  ' + (hasHomeItem === false ? 'PASS' : 'FAIL') + '  侧栏不含「首页」导航项  实际=' + JSON.stringify(hasHomeItem));
+
+    const home = await evalJs(`(()=>{const b=document.querySelector('[data-slot="sidebar-home-link"]');if(!b)return 'missing';return JSON.stringify({text:(b.innerText||'').trim(),title:b.getAttribute('title'),aria:b.getAttribute('aria-label'),cursor:getComputedStyle(b).cursor,display:getComputedStyle(b).display});})()`);
+    let homeOk = false;
+    try {
+      const h = JSON.parse(home);
+      homeOk = h.text === '涨停复盘助手' && h.title === '返回首页' && h.aria === '返回首页' && h.cursor === 'pointer';
+    } catch { }
+    homeOk ? pass++ : fail++;
+    log('  ' + (homeOk ? 'PASS' : 'FAIL') + '  左上角标题按钮 = 首页入口（文案/提示/手型光标）  ' + home);
+  } else { skip++; log('  SKIP  /  (侧栏未渲染)'); }
+
+  log('');
+  log('--- 6/6 首页入口点击流（1 条）---');
+  if (await gotoAndWait('/strategies')) {
+    await sleep(350);
+    const clicked = await evalJs(`(()=>{const b=document.querySelector('[data-slot="sidebar-home-link"]');if(!b)return 'btn-not-found';b.click();return 'clicked';})()`);
+    await sleep(1000);
+    const s = await snap();
+    const act = s ? s.act : [];
+    const loc = s ? s.path : '?';
+    const ok = clicked === 'clicked' && loc === '/' && Array.isArray(act) && act.length === 0;
+    ok ? pass++ : fail++;
+    log('  ' + (ok ? 'PASS' : 'FAIL') + '  从 /strategies 点左上角标题 -> path=' + loc + '（期望 /）高亮=' + JSON.stringify(act) + '（期望 []）clicked=' + clicked);
+  } else { skip++; log('  SKIP  点击流(左上角标题)'); }
 
   log('');
   const verdict = fail === 0 && skip === 0 ? 'ALL PASS' : 'HAS FAILURE';

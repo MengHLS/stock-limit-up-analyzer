@@ -1,0 +1,72 @@
+=== 前向纸面运行（真库，最近 4 条）===
+
+#90002 质量复合评分·前向纸面
+  策略=qualityBlend 状态=active 最近处理日=Thu Sep 17 2026 00:00:00 GMT+0800 (中国标准时间) 初始资金=100000
+  paramsJson 顶层键 = ["realistic"]
+  realistic 实际键 = ["initialCapital"]
+  paperTrading 实际键 = （空 ⇒ 按缺省解析：判定时点=开盘+收盘 / 组合止损=3%）
+    paperTrading.exitJudgementPhase         = （缺省回落）
+    paperTrading.portfolioStopLossPercent   = （缺省回落）
+  生效的退出参数：
+    stopLossPercent                  = （缺省）
+    trailingProfitActivationPercent  = （缺省）
+    trailingDrawdownPercent          = （缺省）
+    strongHoldMinReturn              = （缺省）
+    maxHoldingDays                   = （缺省）
+    enableIntradayStopLoss           = （缺省）
+    blockLimitDownSells              = （缺省）
+#90001 质量复合评分·前向纸面
+  策略=qualityBlend 状态=active 最近处理日=Fri Sep 18 2026 00:00:00 GMT+0800 (中国标准时间) 初始资金=100000
+  paramsJson 顶层键 = ["realistic"]
+  realistic 实际键 = ["initialCapital"]
+  paperTrading 实际键 = （空 ⇒ 按缺省解析：判定时点=开盘+收盘 / 组合止损=3%）
+    paperTrading.exitJudgementPhase         = （缺省回落）
+    paperTrading.portfolioStopLossPercent   = （缺省回落）
+  生效的退出参数：
+    stopLossPercent                  = （缺省）
+    trailingProfitActivationPercent  = （缺省）
+    trailingDrawdownPercent          = （缺省）
+    strongHoldMinReturn              = （缺省）
+    maxHoldingDays                   = （缺省）
+    enableIntradayStopLoss           = （缺省）
+    blockLimitDownSells              = （缺省）
+#30001 风险扣分策略·前向纸面
+  策略=riskPenalty 状态=active 最近处理日=Fri Sep 18 2026 00:00:00 GMT+0800 (中国标准时间) 初始资金=100000
+  paramsJson 顶层键 = ["realistic"]
+  realistic 实际键 = ["initialCapital"]
+  paperTrading 实际键 = （空 ⇒ 按缺省解析：判定时点=开盘+收盘 / 组合止损=3%）
+    paperTrading.exitJudgementPhase         = （缺省回落）
+    paperTrading.portfolioStopLossPercent   = （缺省回落）
+  生效的退出参数：
+    stopLossPercent                  = （缺省）
+    trailingProfitActivationPercent  = （缺省）
+    trailingDrawdownPercent          = （缺省）
+    strongHoldMinReturn              = （缺省）
+    maxHoldingDays                   = （缺省）
+    enableIntradayStopLoss           = （缺省）
+    blockLimitDownSells              = （缺省）
+#1 原始策略·前向纸面
+  策略=baseline 状态=active 最近处理日=Fri Sep 18 2026 00:00:00 GMT+0800 (中国标准时间) 初始资金=100000
+  paramsJson 顶层键 = ["realistic"]
+  realistic 实际键 = ["initialCapital"]
+  paperTrading 实际键 = （空 ⇒ 按缺省解析：判定时点=开盘+收盘 / 组合止损=3%）
+    paperTrading.exitJudgementPhase         = （缺省回落）
+    paperTrading.portfolioStopLossPercent   = （缺省回落）
+  生效的退出参数：
+    stopLossPercent                  = （缺省）
+    trailingProfitActivationPercent  = （缺省）
+    trailingDrawdownPercent          = （缺省）
+    strongHoldMinReturn              = （缺省）
+    maxHoldingDays                   = （缺省）
+    enableIntradayStopLoss           = （缺省）
+    blockLimitDownSells              = （缺省）
+
+=== 已出清订单的退出原因分布（共 10 笔）===
+  强势续持             8
+  收盘触发止损           2
+
+⇒ 真库历史中「开盘触发止损」出现 0 次、「组合止损」出现 0 次。
+   判读规则（勿混淆）：这两个数只说明**历史上触发过没有**。纸面状态逐日推进并落库，
+   已推进过的日子不可回溯 ⇒ 修复前（2026-09-18 `9be` 之前）的历史必然是 0 次；
+   分支**是否存在**请看源码断言（grep -c "开盘触发止损" server/paperTrading.ts）与
+   _probe_stoploss_divergence.mts 的同路径对拍，不要用本数字下结论。

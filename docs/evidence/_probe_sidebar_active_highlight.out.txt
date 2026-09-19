@@ -1,9 +1,9 @@
-== 侧栏高亮回归探针 == 2026-09-15T15:47:21.169Z
-BASE=http://127.0.0.1:3300 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=25427
+== 侧栏高亮回归探针 == 2026-09-18T16:46:40.311Z
+BASE=http://127.0.0.1:4002 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=38734
 CDP 已连接
 
---- 1/4 导航路由（22 条）---
-  PASS  /                                    期望唯一高亮=[涨停复盘]  实际=["涨停复盘"]
+--- 1/6 导航路由（22 条）---
+  PASS  /limit-up                            期望唯一高亮=[涨停复盘]  实际=["涨停复盘"]
   PASS  /market                              期望唯一高亮=[大盘分析]  实际=["大盘分析"]
   PASS  /sentiment-analysis                  期望唯一高亮=[情绪分析]  实际=["情绪分析"]
   PASS  /leader-candidates                   期望唯一高亮=[龙头候选]  实际=["龙头候选"]
@@ -14,6 +14,7 @@ CDP 已连接
   PASS  /data-health                         期望唯一高亮=[数据域健康]  实际=["数据域健康"]
   PASS  /historical-state                    期望唯一高亮=[历史状态查询]  实际=["历史状态查询"]
   PASS  /datasets                            期望唯一高亮=[数据集构建]  实际=["数据集构建"]
+  PASS  /research/ask                        期望唯一高亮=[提问研究]  实际=["提问研究"]
   PASS  /research                            期望唯一高亮=[研究实验]  实际=["研究实验"]
   PASS  /strategies                          期望唯一高亮=[策略]  实际=["策略"]
   PASS  /performance                         期望唯一高亮=[绩效仪表盘]  实际=["绩效仪表盘"]
@@ -25,22 +26,30 @@ CDP 已连接
   PASS  /sentiment-alerts                    期望唯一高亮=[情绪预警]  实际=["情绪预警"]
   PASS  /operation-logs                      期望唯一高亮=[操作日志]  实际=["操作日志"]
 
---- 2/4 详情路由（5 条，应点亮父项）---
+--- 2/6 详情路由（5 条，应点亮父项）---
   PASS  /strategies/__probe__                期望唯一高亮=[策略]  实际=["策略"]
   PASS  /research/__probe__                  期望唯一高亮=[研究实验]  实际=["研究实验"]
   PASS  /research/candidates/__probe__       期望唯一高亮=[研究实验]  实际=["研究实验"]
   PASS  /datasets/__probe__                  期望唯一高亮=[数据集构建]  实际=["数据集构建"]
   PASS  /datasets/__probe__/versions         期望唯一高亮=[数据集构建]  实际=["数据集构建"]
 
---- 3/4 反向断言（4 条，同前缀板块不得互亮）---
+--- 3/6 反向断言（2 条，同前缀板块不得互亮）---
   PASS  [反向] /backtest-runs                   不得点亮[组合回测]  实际高亮=["回测历史"]
   PASS  [反向] /backtest                        不得点亮[回测历史]  实际高亮=["组合回测"]
 
---- 4/4 点击流（6 条）---
+--- 4/6 点击流（4 条）---
   PASS  从 /backtest 点[回测历史] -> path=/backtest-runs（期望 /backtest-runs）高亮=["回测历史"]（期望唯一 [回测历史]）clicked=clicked
   PASS  从 /backtest-runs 点[组合回测] -> path=/backtest（期望 /backtest）高亮=["组合回测"]（期望唯一 [组合回测]）clicked=clicked
   PASS  从 / 点[策略] -> path=/strategies（期望 /strategies）高亮=["策略"]（期望唯一 [策略]）clicked=clicked
   PASS  从 /strategies 点[研究实验] -> path=/research（期望 /research）高亮=["研究实验"]（期望唯一 [研究实验]）clicked=clicked
 
-=== 汇总：PASS 32 / FAIL 0 / SKIP 0 ⇒ ALL PASS ===
-结果留档：D:\_integrate_push_20260915\docs\evidence\_probe_sidebar_active_highlight.out.txt
+--- 5/6 首页入口（HOMEPAGE-005）---
+  PASS  / 首页侧栏无高亮项  实际=[]
+  PASS  侧栏不含「首页」导航项  实际=false
+  PASS  左上角标题按钮 = 首页入口（文案/提示/手型光标）  {"text":"涨停复盘助手","title":"返回首页","aria":"返回首页","cursor":"pointer","display":"flex"}
+
+--- 6/6 首页入口点击流（1 条）---
+  PASS  从 /strategies 点左上角标题 -> path=/（期望 /）高亮=[]（期望 []）clicked=clicked
+
+=== 汇总：PASS 37 / FAIL 0 / SKIP 0 ⇒ ALL PASS ===
+结果留档：D:\stock-limit-up-analyzer\docs\evidence\_probe_sidebar_active_highlight.out.txt

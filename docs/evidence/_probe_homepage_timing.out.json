@@ -1,0 +1,69 @@
+{
+  "latestDate": "2026-09-18",
+  "rounds": 3,
+  "results": [
+    {
+      "label": "① 单只 getIndexDailySeries ×1 (120)",
+      "samplesMs": [
+        281,
+        297,
+        296
+      ],
+      "medianMs": 296
+    },
+    {
+      "label": "② 四指数 串行",
+      "samplesMs": [
+        1123,
+        1211,
+        1197
+      ],
+      "medianMs": 1197
+    },
+    {
+      "label": "③ 四指数 并行 Promise.all",
+      "samplesMs": [
+        2084,
+        303,
+        296
+      ],
+      "medianMs": 303
+    },
+    {
+      "label": "④ 四指数 单条窗口函数 SQL",
+      "samplesMs": [
+        359,
+        324,
+        349
+      ],
+      "medianMs": 349
+    },
+    {
+      "label": "⑤ getLimitUpWithMarketData(30)",
+      "samplesMs": [
+        927,
+        742,
+        925
+      ],
+      "medianMs": 925
+    },
+    {
+      "label": "⑥ getSectorDistribution",
+      "samplesMs": [
+        466,
+        452,
+        477
+      ],
+      "medianMs": 466
+    },
+    {
+      "label": "⑦ getBoardRoster(2026-09-18)",
+      "samplesMs": [
+        446,
+        435,
+        448
+      ],
+      "medianMs": 446
+    }
+  ]
+}

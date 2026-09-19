@@ -19,8 +19,8 @@
  *   （`boardsAsOfDate === prevDate`）。2 板及以上标 `brokenKind = "connection"`（连板中断），
  *   1 板标 `"first"`（首板未续）—— 两者含义不同，前端分开呈现，不做合并。
  */
-import { and, gte, lte } from "drizzle-orm";
-import { limitUpRecords } from "../drizzle/schema";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
+import { limitUpRecords, stockDailyPrices } from "../drizzle/schema";
 import { computeBoardEmotionScore } from "../shared/boardEmotionScore";
 import { normalizeSectorName } from "../shared/stockDataNormalization";
 import { getDb } from "./db";
@@ -37,7 +37,7 @@ export interface BoardRosterRecord {
   limitUpTime: string | null;
 }
 
-/** 名录里的一行（连板股 / 断板股共用同一形状）。 */
+/** 名录里的一行（连板股 / 断板股 / 首板股共用同一形状）。 */
 export interface BoardRosterRow {
   stockCode: string;
   stockName: string;
@@ -51,7 +51,27 @@ export interface BoardRosterRow {
   boardsAsOfDate: string;
   /** 仅断板股有值：`connection` = 2 板及以上中断；`first` = 首板未续。 */
   brokenKind?: "connection" | "first";
+  /**
+   * 目标交易日涨跌幅（%），保留 2 位。
+   * 只在传入 `quotes`（`getBoardRoster` 会查当日行情）时有值，否则 null；
+   * 行情缺失同样为 null —— **不推算、不插值**。
+   */
+  changePct: number | null;
+  /**
+   * 一字板标记：当日「开盘 = 最高 = 最低」（开盘即封死、全天未打开）。
+   * 只在传入 `quotes` 且有完整 OHLC 时有值，否则 null。
+   */
+  oneWordBoard: boolean | null;
 }
+
+/** 单只股票在目标交易日的行情补充字段（来自 `stock_daily_prices`）。 */
+export interface BoardRosterQuote {
+  changePct: number | null;
+  oneWordBoard: boolean | null;
+}
+
+/** stockCode → 当日行情补充字段。 */
+export type BoardRosterQuoteMap = Map<string, BoardRosterQuote>;
 
 export interface BoardRosterMetrics {
   /** 当日涨停家数（同一股票同日重复记录只算一只）。 */
@@ -80,6 +100,8 @@ export interface BoardRoster {
   prevDate: string | null;
   /** 连板股（当日在榜且 2 板及以上），板数降序。 */
   connectionStocks: BoardRosterRow[];
+  /** 首板股（当日在榜且 1 板），封板时间升序 —— 「首板(N)」梯队的单元格来源。 */
+  firstBoardStocks: BoardRosterRow[];
   /** 断板股（上一记录交易日涨停、当日未涨停），板数降序。 */
   brokenStocks: BoardRosterRow[];
   metrics: BoardRosterMetrics;
@@ -130,6 +152,7 @@ export function buildBoardRoster(
   records: BoardRosterRecord[],
   date: string,
   window: { lookbackDays: number; startDate: string },
+  quotes: BoardRosterQuoteMap = new Map(),
 ): BoardRoster {
   // 窗口内的记录交易日（降序：新 → 旧）
   const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate))).sort((a, b) =>
@@ -166,6 +189,9 @@ export function buildBoardRoster(
     ? dedupeByStock(records.filter((r) => r.limitUpDate === date))
     : [];
 
+  /** 当日行情补充字段（缺行情 ⇒ 两个字段都为 null，不推算）。 */
+  const quoteOf = (stockCode: string): BoardRosterQuote => quotes.get(stockCode) ?? { changePct: null, oneWordBoard: null };
+
   const allRows: BoardRosterRow[] = rowsOnDate.map((record) => ({
     stockCode: record.stockCode,
     stockName: record.stockName,
@@ -173,9 +199,11 @@ export function buildBoardRoster(
     limitUpTime: record.limitUpTime ?? "",
     boards: boardsAt(record.stockCode, date),
     boardsAsOfDate: date,
+    ...quoteOf(record.stockCode),
   }));
 
   const connectionStocks = allRows.filter((row) => row.boards >= 2).sort(compareRows);
+  const firstBoardStocks = allRows.filter((row) => row.boards === 1).sort(compareRows);
   const currentCodes = new Set(allRows.map((row) => row.stockCode));
 
   // ⚠️ 目标日**没有涨停记录**时（dateIndex 未命中）：不推断「上一记录日」，
@@ -194,6 +222,7 @@ export function buildBoardRoster(
             boards,
             boardsAsOfDate: prevDate,
             brokenKind: boards >= 2 ? ("connection" as const) : ("first" as const),
+            ...quoteOf(record.stockCode),
           };
         })
         .sort(compareRows)
@@ -211,6 +240,7 @@ export function buildBoardRoster(
     date,
     prevDate,
     connectionStocks,
+    firstBoardStocks,
     brokenStocks,
     metrics: {
       totalLimitUp,
@@ -233,8 +263,60 @@ export function buildBoardRoster(
 }
 
 /**
+ * 取目标交易日的行情补充字段（涨跌幅 / 一字板），供梯队单元格展示。
+ *
+ * 口径：
+ *   · `changePct` = (closePrice - preClosePrice) / preClosePrice × 100，保留 2 位；
+ *   · `oneWordBoard` = 开盘 = 最高 = 最低（开盘即封死、全天未打开）；
+ *   · 任一价格缺失 ⇒ 对应字段为 null（**不推算、不插值**）。
+ * 有界查询：只取目标日 + 名录内代码，实测 ≤ 100 行。
+ */
+async function loadBoardRosterQuotes(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  date: string,
+  codes: string[],
+): Promise<BoardRosterQuoteMap> {
+  const quotes: BoardRosterQuoteMap = new Map();
+  if (codes.length === 0) return quotes;
+
+  const rows = await db
+    .select({
+      stockCode: stockDailyPrices.stockCode,
+      openPrice: stockDailyPrices.openPrice,
+      highPrice: stockDailyPrices.highPrice,
+      lowPrice: stockDailyPrices.lowPrice,
+      closePrice: stockDailyPrices.closePrice,
+      preClosePrice: stockDailyPrices.preClosePrice,
+    })
+    .from(stockDailyPrices)
+    .where(and(eq(stockDailyPrices.tradeDate, date), inArray(stockDailyPrices.stockCode, codes)));
+
+  for (const row of rows) {
+    const open = Number.parseFloat(row.openPrice);
+    const high = Number.parseFloat(row.highPrice ?? "");
+    const low = Number.parseFloat(row.lowPrice ?? "");
+    const close = Number.parseFloat(row.closePrice);
+    const preClose = Number.parseFloat(row.preClosePrice);
+
+    const changePct =
+      Number.isFinite(close) && Number.isFinite(preClose) && preClose !== 0
+        ? Number((((close - preClose) / preClose) * 100).toFixed(2))
+        : null;
+    const oneWordBoard =
+      Number.isFinite(open) && Number.isFinite(high) && Number.isFinite(low) ? open === high && high === low : null;
+
+    quotes.set(row.stockCode, { changePct, oneWordBoard });
+  }
+
+  return quotes;
+}
+
+/**
  * 读库入口：**只读**，有界窗口（默认 60 自然日）。
  * 无库（未配置 DATABASE_URL）时返回 null，由上层决定如何降级，不编造数据。
+ *
+ * 两遍构造：先算出名录、拿到「当日需要行情的股票代码」，再去 `stock_daily_prices`
+ * 取一次有界行情，最后重建名录 —— 纯函数开销可忽略，换来**只查一次行情**。
  */
 export async function getBoardRoster(
   date: string,
@@ -257,5 +339,13 @@ export async function getBoardRoster(
     .from(limitUpRecords)
     .where(and(gte(limitUpRecords.limitUpDate, startDate), lte(limitUpRecords.limitUpDate, date)));
 
-  return buildBoardRoster(records, date, { lookbackDays, startDate });
+  const draft = buildBoardRoster(records, date, { lookbackDays, startDate });
+  const codes = Array.from(
+    new Set(
+      [...draft.connectionStocks, ...draft.firstBoardStocks, ...draft.brokenStocks].map((row) => row.stockCode),
+    ),
+  );
+  const quotes = await loadBoardRosterQuotes(db, date, codes);
+
+  return buildBoardRoster(records, date, { lookbackDays, startDate }, quotes);
 }
