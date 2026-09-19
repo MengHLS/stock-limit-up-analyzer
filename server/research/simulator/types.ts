@@ -77,7 +77,11 @@ export type PlanSkipCode =
   /** 现金预算不足一手（含费用估算后不足 lotSize）。 */
   | "BUDGET_BELOW_MIN_LOT"
   /** 方向策略为 longOnly，short/neutral 候选不可交易（不建仓）。 */
-  | "NON_LONG_DIRECTION";
+  | "NON_LONG_DIRECTION"
+  /** BACKTEST-002（B-02）：策略声明的仓位口径给出的目标资金为 0 ⇒ 不建仓。 */
+  | "POSITION_SIZING_ZERO_BUDGET"
+  /** BACKTEST-002（B-05）：执行日成交量为 0（或缺失）⇒ 不可成交。 */
+  | "ZERO_VOLUME";
 
 /** 被计划层跳过（未下单）的意图条目。 */
 export interface SkippedIntentEntry {
@@ -131,6 +135,30 @@ export interface SimulationConfig {
   };
   /** 是否允许部分成交（缺省 false：全额成交或整单拒绝）。 */
   readonly allowPartialFill?: boolean;
+  /**
+   * BACKTEST-002（B-02）— 策略声明的**仓位口径**（透传给 `planDecisionDay`）。
+   *
+   * 缺省 = 等权现金预算（= 改造前行为）。声明 `fixed-fraction` / `fixed-amount` 时
+   * **真正收窄**每笔订单的成交预算 —— 这是「参数搜索改仓位参数、结果才会变」的前提。
+   */
+  readonly positionSizing?: {
+    readonly sizingMethod:
+      | "EQUAL_WEIGHT"
+      | "FIXED_FRACTION"
+      | "RANK_WEIGHTED"
+      | "FIXED_AMOUNT"
+      | "FIXED_RATIO"
+      | "RISK_BASED";
+    readonly fraction: number | null;
+    readonly fixedAmount: number | null;
+  };
+  /**
+   * BACKTEST-002（B-05）— 成交量为 0 时的执行政策。
+   *
+   * `REJECT`（缺省，保守）= 执行日 `volume` 为 0 / 缺失 / 非有限 ⇒ **不可成交**（拒单）；
+   * `IGNORE` = 不看成交量（= 改造前行为，仅显式声明时使用）。
+   */
+  readonly zeroVolumePolicy?: "REJECT" | "IGNORE";
   /**
    * 板块覆盖（securityId → board），用于涨跌停幅度解析；
    * 缺省按 main ±10% 处理（与 dataset 行不含 board 的口径一致）。

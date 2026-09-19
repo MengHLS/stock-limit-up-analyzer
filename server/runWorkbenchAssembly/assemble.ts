@@ -38,6 +38,24 @@ import type { SimulationConfig } from "../research/simulator/types";
 import type { ClosedLoopWiringInputs } from "../research/closedLoopWiring/types";
 import { resolveStrategyRecipe, resolveStrategyRecipeById, DEFAULT_STRATEGY_RECIPE_ID, type StrategyRecipeRuntime } from "../research/recipeRegistry";
 import { compileConditionRecipe } from "../research/conditionSignal";
+// STRATEGY-ARCH-002 — Strategy Core 生产接线（决策引擎 + 运行留档）。
+import {
+  createCoreDecisionSource,
+  createDatasetEventResolver,
+  coreVersionFromDocument,
+  type CoreDecisionSource,
+  type CoreVersionFromDocumentResult,
+  type EventAnchorPolicy,
+} from "../strategyCore/production";
+// BACKTEST-001 — Backtest Core 执行政策（G1：生产此前不传 executionRules ⇒ 涨跌停默认关闭）。
+import {
+  BACKTEST_EXECUTION_POLICY_VERSION,
+  DEFAULT_BACKTEST_EXECUTION_POLICY,
+  checkExecutionSemantics,
+  describeExecutionPolicy,
+  mapPositionSizing,
+  toExecutionRuleSet,
+} from "../backtest/context";
 import { normalizeStrategyExecutionModel } from "./executionModel";
 import type { StrategyDocument, StrategyDocumentInput } from "../research/strategySchema/types";
 import type { ResearchParameterSet } from "../research/types";
@@ -56,6 +74,64 @@ export class LoopRunAssemblyError extends Error {
     super(message);
     this.name = "LoopRunAssemblyError";
     this.code = code;
+  }
+}
+
+/**
+ * BACKTEST-002（R-02）— 文档 `positionSizing` 声明 → 执行层仓位口径（**唯一映射实现**）。
+ *
+ * 为什么抽成具名纯函数：装配层此前的内联 IIFE 无法被测试直接触及，导致「声明 → 执行口径」
+ * 这一步只能靠读代码确认。抽出来后测试可以逐 kind 断言，且装配层仍只调用这一份实现
+ * （不产生第二套映射）。
+ *
+ * 映射表（**机械映射，不猜、不补默认**）：
+ *   equal-weight    → EQUAL_WEIGHT
+ *   fixed-fraction  → FIXED_FRACTION（带 fraction）
+ *   rank-weighted   → RANK_WEIGHTED
+ *   fixed-amount    → FIXED_AMOUNT（带 fixedAmount；**缺失 / ≤ 0 ⇒ 响亮抛错**）
+ *   其它            → 响亮抛错（拒绝猜）
+ */
+export function mapDeclaredPositionSizing(declared: unknown): {
+  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
+  readonly fraction: number | null;
+  readonly fixedAmount: number | null;
+} {
+  const sizing = (declared ?? {}) as {
+    readonly kind?: string;
+    readonly fraction?: number;
+    readonly fixedAmount?: number;
+  };
+  switch (sizing.kind) {
+    case "equal-weight":
+      return { sizingMethod: "EQUAL_WEIGHT", fraction: null, fixedAmount: null };
+    case "fixed-fraction":
+      return {
+        sizingMethod: "FIXED_FRACTION",
+        fraction: typeof sizing.fraction === "number" ? sizing.fraction : null,
+        fixedAmount: null,
+      };
+    case "rank-weighted":
+      return { sizingMethod: "RANK_WEIGHTED", fraction: null, fixedAmount: null };
+    case "fixed-amount": {
+      // 金额必须为正数（文档校验也会拒，这里再兜一层：避免绕过校验的文档把
+      // 「无金额的固定金额」带进执行层 ⇒ 静默退化成等权预算）。
+      const amount = sizing.fixedAmount;
+      if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+        throw new LoopRunAssemblyError(
+          "LOOP_RUN_ASSEMBLY_POSITION_SIZING_AMOUNT_INVALID",
+          "装配层：fixed-amount 需要正的 fixedAmount（元），实际 " +
+            JSON.stringify(amount ?? null) +
+            " —— 拒绝静默退化为等权预算。",
+        );
+      }
+      return { sizingMethod: "FIXED_AMOUNT", fraction: null, fixedAmount: amount };
+    }
+    default:
+      throw new LoopRunAssemblyError(
+        "LOOP_RUN_ASSEMBLY_UNKNOWN_POSITION_SIZING",
+        "装配层：未知的仓位声明 kind=" + JSON.stringify(sizing.kind ?? null) +
+          "（已登记：equal-weight / fixed-fraction / rank-weighted / fixed-amount）—— 拒绝猜。",
+      );
   }
 }
 
@@ -149,6 +225,14 @@ export interface AssembleRunWorkbenchInputsResult {
   readonly inputs: ClosedLoopWiringInputs;
   readonly dataset: ResearchDataset;
   readonly assembly: LoopRunAssemblySummary;
+  /**
+   * STRATEGY-ARCH-002 — 策略侧装配产物（含 Core 决策源；**非序列化**）。
+   *
+   * 为什么要出网到调用方：运行留档（`strategyRun`）必须在**运行结束后**才能组（决策摘要在跑完才有），
+   * 而它需要的 Core 版本对象 / 决策源 / 事件判定器都住在策略侧 ⇒ 不暴露就只能在路由层重建一份
+   * （= 第二套装配）。
+   */
+  readonly side: AssembledStrategySide;
 }
 
 /** 装配摘要（供前端如实展示「数据从哪来、规模多大」，不参与任何计算）。 */
@@ -179,6 +263,15 @@ export interface LoopRunAssemblySummary {
   readonly recipeSource: RecipeResolutionSource;
   readonly recipeFeatureIds: readonly string[];
   readonly selectionSummary: string;
+  /**
+   * STRATEGY-ARCH-002 — **本次运行的策略判定引擎**。
+   *
+   * - `strategy-core`：判定由 `StrategyRuntime.evaluate` 产出（Core 为唯一执行入口）；
+   * - `legacy-recipe`：Core 定义无法从该文档构造（如存量 `limit-up-baseline` 缺 `definition` 段）
+   *   ⇒ 回落既有配方判定器，**原因写在 `strategyDecisionEngineNote`，绝不静默**。
+   */
+  readonly strategyDecisionEngine: "strategy-core" | "legacy-recipe";
+  readonly strategyDecisionEngineNote: string;
   readonly simulation: {
     readonly initialCapital: number;
     readonly maxPositions: number | null;
@@ -493,6 +586,25 @@ function requireRecipe(
 // ---------------------------------------------------------------------------
 
 /**
+ * STRATEGY-ARCH-002 — 策略运行上下文（**非序列化**；留在内存侧供 `loopRun` 落 Run Record）。
+ *
+ * 为什么不放进 `LoopRunAssemblySummary`：摘要要经由 tRPC 契约（zod）出网，
+ * 而这里带着 `CoreDecisionSource`（闭包）与 Core 版本对象。落库走
+ * `strategyCore/production/runRecord.ts`，摘要只出「用了哪个引擎」这类可序列化事实。
+ */
+export interface StrategyRunContext {
+  readonly engine: "strategy-core" | "legacy-recipe";
+  readonly note: string;
+  readonly coreDecisionSource: CoreDecisionSource | null;
+  readonly coreVersion: CoreVersionFromDocumentResult | null;
+  readonly point: "close" | "open";
+  readonly anchorPolicy: EventAnchorPolicy;
+  readonly eventTypes: readonly string[];
+  readonly limitUpRatio: number | null;
+  readonly universeId: string;
+}
+
+/**
  * 「策略侧」装配产物（**全部同步可得**，不含任何数据集内容）。
  */
 export interface AssembledStrategySide {
@@ -508,6 +620,8 @@ export interface AssembledStrategySide {
   readonly strategyDocumentInput: StrategyDocumentInput;
   readonly strategyVersionRecordInput: StrategyVersionRecordInput;
   readonly lifecycle: ClosedLoopWiringInputs["lifecycle"] | undefined;
+  /** STRATEGY-ARCH-002 — 判定引擎与运行留档所需的非序列化上下文。 */
+  readonly strategyRunContext: StrategyRunContext;
 }
 
 /**
@@ -566,15 +680,103 @@ export function assembleStrategySide(
     signalFrequency: recipeRuntime.signalFrequency,
   };
 
+  // ------------------------------------------------------------------
+  // STRATEGY-ARCH-002 — 策略判定引擎：Strategy Core 优先（**唯一执行入口**）
+  //
+  // 契约：策略「要不要出信号」这件事由 `StrategyRuntime.evaluate` 决定。
+  // 装配层只做三件事：把落库文档翻译成 Core 版本（`coreVersionFromDocument`）、
+  // 按数据集事件源构造事件判定器、把 Core 决策源接到既有的 `strategy13.signalBuilder` 槽位。
+  //
+  // 🔴 回落是**例外而非常态**，且必须带原因出网：
+  //    存量 `limit-up-baseline`（2 份）文档没有 `definition` 段 ⇒ 无法构造 Core 定义。
+  //    此时继续用既有配方判定器，并把原因写进 `assembly.strategyDecisionEngineNote`。
+  // ------------------------------------------------------------------
+  const legacySignalBuilder = recipeRuntime.buildSignalBuilder(parameterSet);
+  const coreVersionResult = coreVersionFromDocument({
+    document,
+    createdAt: request.createdAt,
+  });
+
+  let coreDecisionSource: CoreDecisionSource | null = null;
+  let strategyDecisionEngine: "strategy-core" | "legacy-recipe" = "legacy-recipe";
+  let strategyDecisionEngineNote: string;
+
+  if (!coreVersionResult.ok) {
+    strategyDecisionEngineNote =
+      "Core 定义不可构造（" + coreVersionResult.reason + "）：" + coreVersionResult.detail +
+      " ⇒ 本次回落既有配方判定器（" + recipeRuntime.recipeId + "）。";
+  } else {
+    const eventTypes = coreVersionResult.eventType === null ? [] : [coreVersionResult.eventType];
+    if (eventTypes.length === 0) {
+      strategyDecisionEngineNote =
+        "Core 定义可构造，但文档未声明事件类型 ⇒ 事件判定器不参与（纯条件策略）。";
+    } else {
+      strategyDecisionEngineNote =
+        "Core 定义可构造（事件 " + eventTypes.join("、") + "）⇒ 事件判定器由本层按数据集事件源注入。";
+    }
+    try {
+      // 事件源声明：本层是唯一知道「这份数据集是不是事件窗」的层（它绑定了 dataset 坐标）。
+      // 数据集与策略都来自同一份已落库文档 + 已绑定 datasetVersionId ⇒ 声明为事件窗。
+      const eventResolver =
+        eventTypes.length === 0
+          ? undefined
+          : createDatasetEventResolver({
+              eventAnchored: true,
+              eventTypes,
+              limitUpRatio: coreVersionResult.limitUpRatio,
+              declaredBy:
+                "runWorkbenchAssembly：策略文档 " + document.strategyId + "@" + document.version +
+                " 声明事件类型，" + (request.datasetVersionId !== undefined
+                  ? "且已绑定 datasetVersionId=" + String(request.datasetVersionId)
+                  : "数据集由本层解析"),
+            });
+      coreDecisionSource = createCoreDecisionSource({
+        version: coreVersionResult.version,
+        parameterSet,
+        rankFeatureId: recipeRuntime.rankFeatureId,
+        point: recipeRuntime.point,
+        ...(eventResolver !== undefined ? { eventResolver } : {}),
+        ...(eventTypes.length > 0 ? { eventTypes } : {}),
+      });
+      strategyDecisionEngine = "strategy-core";
+    } catch (error) {
+      const detail = error instanceof Error ? error.name + ": " + error.message : String(error);
+      coreDecisionSource = null;
+      strategyDecisionEngineNote =
+        "Core 决策源构造失败（" + detail + "）⇒ 本次回落既有配方判定器（" + recipeRuntime.recipeId + "）。";
+    }
+  }
+
   const strategy13: Strategy13 = {
     point: recipeRuntime.point,
     features: recipeRuntime.features,
-    signalBuilder: recipeRuntime.buildSignalBuilder(parameterSet),
+    signalBuilder: coreDecisionSource?.signalBuilder ?? legacySignalBuilder,
     rankingConfig: recipeRuntime.rankingConfig,
     selectionConfig: recipeRuntime.selectionConfig,
     ...(recipeRuntime.signalDescription !== undefined
       ? { signalDescription: recipeRuntime.signalDescription }
       : {}),
+  };
+
+  // BACKTEST-002（B-01）— 执行政策（含**版本号**）在此固定下来：
+  // 它既是执行输入，也是「这条历史结果按哪套政策跑的」的可复现坐标。
+  const backtestPolicy = DEFAULT_BACKTEST_EXECUTION_POLICY;
+
+  const strategyRunContext: StrategyRunContext = {
+    engine: strategyDecisionEngine,
+    note:
+      strategyDecisionEngineNote +
+      " / 回测执行政策 v" + String(BACKTEST_EXECUTION_POLICY_VERSION) + "：" +
+      describeExecutionPolicy(backtestPolicy).join("；") +
+      " / 仓位口径：" + "见 assembly.positionSizingNote",
+    coreDecisionSource,
+    coreVersion: coreVersionResult.ok ? coreVersionResult : null,
+    point: recipeRuntime.point,
+    anchorPolicy: "SERIES_START",
+    eventTypes:
+      coreVersionResult.ok && coreVersionResult.eventType !== null ? [coreVersionResult.eventType] : [],
+    limitUpRatio: coreVersionResult.ok ? coreVersionResult.limitUpRatio : null,
+    universeId: document.universe.universeId,
   };
 
   const experimentConfig: ExperimentConfig = {
@@ -596,6 +798,36 @@ export function assembleStrategySide(
     );
   }
 
+  // ------------------------------------------------------------------
+  // BACKTEST-001 — 执行政策 / 执行语义校验 / 仓位口径如实登记
+  //
+  // 🔴 三件事在这里一次做完（都是 Phase A 实测出的真实缺口）：
+  //    G1 政策显式化并传下去（此前不传 ⇒ 涨跌停默认关闭）；
+  //    G3 执行语义与实现的一致性校验（此前 signalTiming/executionTiming/priceReference 全仓零消费）；
+  //    G2 仓位口径映射（positionRatio/fixedAmount 在引擎里无消费者 ⇒ 如实登记，不静默）。
+  // ------------------------------------------------------------------
+  const executionSemanticsCheck = checkExecutionSemantics({
+    signalTiming: document.definition?.execution?.signalTiming ?? "T_CLOSE",
+    executionTiming: document.definition?.execution?.executionTiming ?? "T_PLUS_1_OPEN",
+    priceReference: document.definition?.execution?.priceType ?? "OPEN",
+    decisionPoint: recipeRuntime.point,
+  });
+  if (!executionSemanticsCheck.supported) {
+    // 规格 §9：声明与实现不一致时**绝不静默按默认口径跑**。
+    throw new LoopRunAssemblyError(
+      "LOOP_RUN_ASSEMBLY_EXECUTION_SEMANTICS_UNSUPPORTED",
+      "装配层：" + executionSemanticsCheck.detail,
+    );
+  }
+  // BACKTEST-002（B-02/R-02）— 文档声明的仓位口径 → 执行层口径（**唯一实现**，见 `mapDeclaredPositionSizing`）。
+  const declaredPositionSizing = mapDeclaredPositionSizing(document.positionSizing);
+  const positionSizingMapping = mapPositionSizing({
+    sizingMethod: declaredPositionSizing.sizingMethod,
+    maxPositions: backtestConfig.maxPositions ?? null,
+    positionRatio: declaredPositionSizing.fraction,
+    fixedAmount: declaredPositionSizing.fixedAmount,
+  });
+
   const simulationConfig: SimulationConfig = {
     name: `run-workbench-${document.strategyId}@${document.version}`,
     dateRange: { startDate: request.startDate, endDate: request.endDate },
@@ -604,6 +836,18 @@ export function assembleStrategySide(
     executionModel,
     maxPositions: backtestConfig.maxPositions ?? null,
     directionPolicy: "longOnly",
+    // 🔴 BACKTEST-001（G1）：此前不传 ⇒ 走默认 false ⇒ 涨停买得进、跌停卖得出。
+    //    改为显式传保守口径，并把政策写进 Run Record（可解释「为什么这笔没成交」）。
+    executionRules: toExecutionRuleSet(backtestPolicy),
+    allowPartialFill: backtestPolicy.allowPartialFill,
+    // BACKTEST-002（B-02）— 把策略文档声明的仓位口径真正传进执行层。
+    positionSizing: {
+      sizingMethod: declaredPositionSizing.sizingMethod,
+      fraction: declaredPositionSizing.fraction,
+      fixedAmount: declaredPositionSizing.fixedAmount,
+    },
+    // BACKTEST-002（B-05）— 零成交量政策（保守：不可成交）。
+    zeroVolumePolicy: backtestPolicy.zeroVolumePolicy,
   };
 
   // -- 4.（可选）finalize 生命周期配置 --
@@ -652,6 +896,7 @@ export function assembleStrategySide(
     strategyDocumentInput,
     strategyVersionRecordInput,
     lifecycle,
+    strategyRunContext,
   };
 }
 
@@ -706,6 +951,7 @@ export async function assembleRunWorkbenchInputs(
   return {
     inputs,
     dataset,
+    side,
     assembly: {
       datasetVersion: dataset.datasetVersion,
       datasetGate: dataset.gate,
@@ -721,6 +967,15 @@ export async function assembleRunWorkbenchInputs(
       recipeSource: side.recipeSource,
       recipeFeatureIds: side.recipeRuntime.features.map(feature => feature.featureId),
       selectionSummary: side.recipeRuntime.selectionSummary,
+      strategyDecisionEngine: side.strategyRunContext.engine,
+      strategyDecisionEngineNote:
+        side.strategyRunContext.note +
+        " / 回测执行政策 v" + String(BACKTEST_EXECUTION_POLICY_VERSION) + "：" +
+        describeExecutionPolicy(DEFAULT_BACKTEST_EXECUTION_POLICY).join("；") +
+        " / 仓位口径（B-02 起真正参与成交预算）：" +
+        "sizingMethod=" + String(side.simulationConfig.positionSizing?.sizingMethod ?? "（未声明=等权）") +
+        "；fraction=" + String(side.simulationConfig.positionSizing?.fraction ?? "—") +
+        "（预算 = min(等权现金预算, 初始资金 × fraction)）",
       simulation: {
         initialCapital: side.simulationConfig.initialCapital,
         maxPositions: side.simulationConfig.maxPositions ?? null,

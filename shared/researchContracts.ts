@@ -874,6 +874,152 @@ export const closedLoopRunBlockedItemSchema = z.object({
   errorMessage: z.string().nullable(),
 });
 
+/**
+ * STRATEGY-ARCH-002 — 运行留档里的「策略运行记录」。
+ *
+ * 承载的是 Core 的 `StrategyRunSnapshot` + `StrategyDecisionDigest` + 执行元数据。
+ * 落点在**既有** `closed_loop_backtest_run.resultJson`（零 schema 变更），
+ * 因此这里只做**形状校验**，不引入新表 / 新列。
+ */
+export const strategyRunRecordSchema = z.object({
+  /** 一次执行的可复现坐标（Core `StrategyRunSnapshot`）。 */
+  strategyRunSnapshot: z.object({
+    snapshotVersion: z.number().int().positive(),
+    runId: z.string(),
+    strategyId: z.string(),
+    strategyVersion: z.string(),
+    /** 行为级定义指纹（`computeDefinitionFingerprint`）。 */
+    definitionFingerprint: z.string(),
+    /** 调用方提供的原始参数（未解析）。 */
+    parameterSet: z.record(z.string(), z.unknown()),
+    /** 解析后的参数（含 DERIVED 结果）——复现的主判据。 */
+    resolvedParameterSet: z.record(z.string(), z.unknown()),
+    engineVersion: z.string(),
+    codeVersion: z.string(),
+    executionSemanticsVersion: z.string(),
+    universe: z.object({
+      universeId: z.string(),
+      members: z.array(z.string()).nullable(),
+    }),
+    datasetReference: z
+      .object({
+        datasetVersionId: z.number().int().positive().nullable(),
+        datasetLabel: z.string().nullable(),
+        datasetSource: z.enum(["registry", "rebuild", "injected"]),
+        datasetContentFingerprint: z.string().nullable(),
+      })
+      .nullable(),
+    seed: z.number().nullable(),
+    runtimeConfig: z.object({
+      evaluationDate: z.string(),
+      evaluationPoint: z.enum(["open", "close"]),
+      currentRelativeDay: z.number().int(),
+      maxRelativeDay: z.number().int(),
+    }),
+    createdAt: z.string(),
+  }),
+  /** 行为面摘要（全量计数 + 滚动指纹 + 有界样本）。 */
+  strategyDecision: z.object({
+    decisionCount: z.number().int().nonnegative(),
+    emittedSignalCount: z.number().int().nonnegative(),
+    totalSignalCount: z.number().int().nonnegative(),
+    totalEventHitCount: z.number().int().nonnegative(),
+    totalConditionCount: z.number().int().nonnegative(),
+    totalSatisfiedConditionCount: z.number().int().nonnegative(),
+    insufficientDataCount: z.number().int().nonnegative(),
+    droppedNoSignalCount: z.number().int().nonnegative(),
+    droppedMissingRankValueCount: z.number().int().nonnegative(),
+    undecidableAnchorCount: z.number().int().nonnegative(),
+    occurredEventCount: z.number().int().nonnegative(),
+    notOccurredEventCount: z.number().int().nonnegative(),
+    minBarCount: z.number().int().nonnegative(),
+    maxBarCount: z.number().int().nonnegative(),
+    maxRelativeDayObserved: z.number().int(),
+    decisionDigestFingerprint: z.string(),
+    samples: z.array(
+      z.object({
+        securityId: z.string(),
+        tradeDate: z.string(),
+        currentRelativeDay: z.number().int(),
+        barCount: z.number().int().nonnegative(),
+        eventCount: z.number().int().nonnegative(),
+        conditionCount: z.number().int().nonnegative(),
+        satisfiedConditionCount: z.number().int().nonnegative(),
+        signalCount: z.number().int().nonnegative(),
+        entryIntentCount: z.number().int().nonnegative(),
+        insufficientData: z.boolean(),
+        emitted: z.boolean(),
+        rankValue: z.number().nullable(),
+        explanation: z.array(z.string()),
+      }),
+    ),
+  }),
+  /** 执行元数据（谁跑的 / 怎么接的）。 */
+  executionMetadata: z.object({
+    decisionSource: z.literal("strategy-core"),
+    engineVersion: z.string(),
+    codeVersion: z.string(),
+    anchorPolicy: z.string(),
+    notes: z.array(z.string()),
+    unmappedExitRuleIds: z.array(z.string()),
+  }),
+});
+export type StrategyRunRecordDto = z.infer<typeof strategyRunRecordSchema>;
+
+/**
+ * BACKTEST-002（B-03）— 回测结果留档载荷（**有界**：摘要 + 有界样本 + 全量指纹）。
+ *
+ * 🔴 与 `backtestResult.ts` 的 `BacktestRunPayload` 同形：**不重新设计结果结构**。
+ * 明细刻意 `z.unknown()`（形状由 Core 侧类型约束）—— 这里只校验**必须存在的标量与指纹**，
+ * 避免契约层变成第二个数据模型。
+ */
+export const backtestRunPayloadSchema = z.object({
+  /** Canonical Metrics（唯一读数面；`NOT_AVAILABLE` 为字符串标记，不是 0）。 */
+  canonicalMetrics: z.object({
+    totalReturnPct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+    annualizedReturnPct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+    maxDrawdownPct: z.number(),
+    tradeCount: z.number().int().nonnegative(),
+    winRatePct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+    averageWinPct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+    averageLossPct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+    profitFactor: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+    /** 已平仓笔数（胜率 / 盈亏比的分母；口径可辨）。 */
+    completedTradeCount: z.number().int().nonnegative(),
+    /** 期末未平仓笔数（不进胜率 / 盈亏比）。 */
+    openAtEndCount: z.number().int().nonnegative(),
+    /** BACKTEST-002（B-04）— 年化口径自述（规格 §2C）。 */
+    annualizationBasis: z.object({
+      type: z.literal("TRADING_DAYS"),
+      daysPerYear: z.number().int().positive(),
+    }),
+  }),
+  summary: z.object({
+    initialCapital: z.number(),
+    finalEquity: z.number(),
+    totalReturnPct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+    equityPointCount: z.number().int().nonnegative(),
+    tradingDayCount: z.number().int().nonnegative(),
+  }).passthrough(),
+  /** 有界样本（≤ 上限；**全量明细不进这里**）。 */
+  equitySamples: z.array(z.unknown()),
+  tradeSamples: z.array(z.unknown()),
+  truncated: z.object({ equity: z.boolean(), trades: z.boolean() }),
+  equityDigest: z.string(),
+  tradeDigest: z.string(),
+  notes: z.array(z.string()),
+  /** 回测执行元数据（政策版本 / 成本模型 / 初始资金等）。 */
+  executionMetadata: z.object({
+    executionPolicyVersion: z.number().int().positive(),
+    engineVersion: z.string(),
+    codeVersion: z.string(),
+    initialCapital: z.number(),
+    sampleLimit: z.number().int().positive(),
+    notes: z.array(z.string()),
+  }).passthrough().optional(),
+});
+export type BacktestRunPayloadDto = z.infer<typeof backtestRunPayloadSchema>;
+
 /** 闭环运行结果（一次真实执行的完整可审计轨迹）。 */
 export const closedLoopRunResultSchema = z.object({
   runId: z.string(),
@@ -933,6 +1079,15 @@ export const closedLoopRunResultSchema = z.object({
       ]),
       recipeFeatureIds: z.array(z.string()),
       selectionSummary: z.string(),
+      /**
+       * STRATEGY-ARCH-002 — 本次运行的策略判定引擎。
+       *
+       * `strategy-core`：判定由 `StrategyRuntime.evaluate` 产出；
+       * `legacy-recipe`：Core 定义无法从该文档构造 ⇒ 回落既有配方判定器（原因见下一字段）。
+       */
+      strategyDecisionEngine: z.enum(["strategy-core", "legacy-recipe"]),
+      /** 回落原因 / 接线事实（**必填**，防「回落了但界面看不出来」）。 */
+      strategyDecisionEngineNote: z.string(),
       simulation: z.object({
         initialCapital: z.number(),
         maxPositions: z.number().nullable(),
@@ -949,6 +1104,19 @@ export const closedLoopRunResultSchema = z.object({
       }),
     })
     .nullable(),
+  /**
+   * STRATEGY-ARCH-002 — 策略运行记录（**每次运行必留**；未接线 / 未装配时为 null）。
+   *
+   * 落点 = 本对象（`closed_loop_backtest_run.resultJson`），**零 schema 变更**。
+   */
+  strategyRun: strategyRunRecordSchema.nullable().optional(),
+  /**
+   * BACKTEST-002（B-03）— 回测结果留档（**有界**）。
+   *
+   * 与 `strategyRun` 并列，**不覆盖**后者（ARCH-002 已持久化的 StrategyRunSnapshot 保持原样）。
+   * 未跑 backtest 阶段（无 `artifacts.tradeSimulationRun`）时为 null / 缺省。
+   */
+  backtest: backtestRunPayloadSchema.nullable().optional(),
 });
 export type ClosedLoopRunResult = z.infer<typeof closedLoopRunResultSchema>;
 

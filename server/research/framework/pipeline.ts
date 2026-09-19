@@ -110,7 +110,16 @@ export function runResearchPipeline(input: ResearchPipelineInput): ResearchPipel
       features[provider.featureId] = provider.compute({ securityId, decisionTime, data });
     }
 
-    const signal = signalBuilder({ securityId, date: decisionTime.date, features });
+    const signal = signalBuilder({
+      securityId,
+      date: decisionTime.date,
+      features,
+      // STRATEGY-ARCH-002：把「已 as-of 过滤的 bar」与决策时点一并交给构造器 ——
+      // Strategy Core 的 RuleGraph 需要读原始行情字段（`bar.low` / `prefix.rd0.open`）。
+      // 既有构造器不读这两项，行为不变。
+      bars,
+      point: decisionTime.point,
+    });
     if (signal === null) {
       dropped.push({ securityId, reason: "INSUFFICIENT_FEATURES" });
       continue;

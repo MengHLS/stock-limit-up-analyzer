@@ -2484,3 +2484,53 @@ P1（9 条）/ P2（6 条）一条未动；P0-2/P0-3 的**彻底解**（翻译�
 - 实施期修掉的 4 个 Core 自身缺陷（均在测试中暴露后回源码定性，再改产品代码）：① 特征注册的聚合抛错把 `lookback`/`leakage` 类问题误报成 `FEATURE_NOT_REGISTERED`；② `bar.<派生字段>` 的 availability 未纳入泄漏审计（桥接表未参与收集）⇒ 「close 可得却在 open 用」可绕过守卫；③ 无 WINDOW 节点时静态 A4 界被编造为 0 ⇒ 误杀「纯条件 + post.rd{n}」的合法定义（已改为：静态层证不出就不设界，交运行时关卡判定）；④ `collectRuleFeatureReferences` 漏掉派生字段桥接 ⇒ `featureRequirements` 空声明却在运行时抛 `FEATURE_NOT_REGISTERED`。
 - **未完成（如实登记）**：Core 未接入生产 tRPC 链路（`loopRun` / 评估端口仍走 legacy `assemble` + `signalEngine`）；阈值型出场规则（TAKE_PROFIT / STOP_LOSS / TIME_EXIT）需要「入场价 / 入场日」运行态引用，仍在 `exitRules` 以声明形式保留、未进 `exitRuleGraph`。
 - 报告：`docs/research/STRATEGY-ARCH-001-IMPLEMENTATION-REPORT.md`；Phase A 映射底稿：`docs/research/STRATEGY-ARCH-001-IMPLEMENTATION-MAP.md`。
+
+## 2026-09-19 13:55 — STRATEGY-ARCH-002（编号 `9bn`）
+
+- 完成 Strategy Core 的**生产接线 + 运行留档**：判定入口收敛到 `StrategyRuntime.evaluate`，`StrategyRunSnapshot`/决策摘要进既有 `closed_loop_backtest_run.resultJson`（零 schema 变更）。
+- 新增 `server/strategyCore/production/**`（6 文件）+ `tests/server/strategyCore/production/**`（4 文件 / 46 用例）。
+- 验收：`tsc` 0 error；聚焦 10 文件 / 158 用例全绿；全量 vitest 失败文件集合 8→8（零新增，用例 4304→4471）；`vite build` 成功。
+- 如实登记：Legacy/Core 存在**一处已定位语义差异**（legacy 逐日重复信号 vs Core 首个成立日）+ 新增剩余项 N-05~N-08。
+- 报告 = `docs/research/STRATEGY-ARCH-002-IMPLEMENTATION-REPORT.md`。
+
+## 2026-09-19 14:21 — BACKTEST-001（编号 `9bo`）
+
+- Phase A：`server/backtest/**` **即 Backtest Core**（生产 `runTradeSimulation` 全量复用）⇒ 未新建 `backtestCore/**`；`runBacktestEngine2` 生产不可达。
+- Phase B：补 G1（生产不传 `executionRules` ⇒ 涨跌停默认关闭，改显式保守口径，**行为变更**）/ G3（执行语义零消费 ⇒ 新增一致性校验，不支持即拒）/ G2（`positionSizing` 无消费者 ⇒ 如实登记）。
+- 新增 `backtest/context.ts` + `backtest/backtestResult.ts` + `tests/server/backtest/backtestCore.test.ts`（19 用例）。
+- 验收：`tsc` 0 error；`tests/server/backtest` 5 文件 / 59 用例全绿；全量 vitest 失败集合 8→8（零新增，用例 4304→4491）；`vite build` 成功。
+- 判定 **NOT COMPLETE**：§29 C/D/E/H/K/L 未新增对照、§30 Legacy 对比未做、B-02/B-03 未解决。
+
+## 2026-09-19 14:40 — BACKTEST-002（编号 `9bp`）
+
+- B-01 COMPLETE：执行政策集中到 `backtest/context.ts` + 新增 `BACKTEST_EXECUTION_POLICY_VERSION = 1`，政策全文入 Run Record（零 schema 变更）。
+- B-02 COMPLETE：`plan.ts#applyPositionSizing` 真正参与成交预算；`assemble.ts` 机械映射文档声明 → SimulationConfig → planDecisionDay；缺 fraction 响亮抛错、RISK_BASED 拒绝。执行层测试证明 0.3→0.6 下单股数约翻倍。
+- B-05 COMPLETE：`zeroVolumePolicy=REJECT` 默认，在 simulator T+1 执行循环统一把关。
+- B-03 / B-04 NOT DONE（结果未入 resultJson；两套 Metrics 未统一）⇒ **判定 NOT COMPLETE**。
+- 验收：tsc 0 error；`tests/server/backtest` 6 文件 / 74 用例全绿；全量 vitest 失败集合 8→8（零新增，用例 4304→4506）；vite build 成功；DB Schema 变更 = 0。
+
+## 2026-09-19 14:56 — BACKTEST-002 收尾（编号 `9bq`）
+
+- B-03 COMPLETE：`loopRun` 捕获 `createClosedLoopWiring` 的 `artifacts`（此前被丢弃）⇒ 完整 `TradeSimulationRun` 可落库；`resultJson.backtest` = canonicalMetrics + summary + 有界样本(≤60) + equityDigest/tradeDigest + executionMetadata（含 executionPolicyVersion）。契约新增 `backtestRunPayloadSchema`，与 `strategyRun` 并列互不覆盖。
+- B-04 PARTIAL：新增 `canonicalMetrics()` / `diffCanonicalMetrics()` 作为唯一实现；`buildBacktestResult` 内部同源。闭环 evaluation 阶段**未改**（需先决策年化基数 244 vs 252，且不得删除 Sharpe/Sortino 等指标）。
+- 验收：tsc 0 error；`tests/server/backtest` 7 文件 / 84 用例全绿；全量 vitest 失败集合 8→8（零新增，用例 4304→4516）；vite build 成功；DB Schema 变更 = 0；本轮零写库。
+- 判定 **NOT COMPLETE（5/6）**：唯一阻塞 = R-01（evaluation 消费 canonical）。
+
+## 2026-09-19 16:12 — BACKTEST-002 收尾二（编号 `9br`）
+
+- **判定 BACKTEST-002 = COMPLETE**（B-01/B-02/B-03/B-04/B-05/R-02 全 COMPLETE；B-06/B-07/B-08 按规格 §23 DEFERRED）。
+- **B-04 收口（本轮的实质产出是「消灭两套口径」）**：
+  - 年化基数 `244 → 252`，并改用全项目唯一原语 `shared/quant-stats#annualizedReturnFromEquityCurve`（`n = 权益点数 − 1`）；
+  - `maxDrawdownPct` 由**负数**改为**正数幅度**（对齐 `performanceMetrics.analyzeDrawdown.depthPct` / `riskAdjusted` calmar / `engine/performance` / `downsideRisk`；逐点 `drawdownPct` 仍为有符号水下深度，两者分别断言）；
+  - 收益率算式形式统一为 `(end/start − 1) × 100`（代数等价但浮点不同 ⇒ 闭环既有测试的 `expected 5.3 to be 5.299999999999994` 暴露了它）；
+  - `canonicalMetrics()` 为唯一实现；闭环 `evaluation` 的 5 个重叠标量 + `completedTradeCount` 改取它；新增 `evaluationRef.canonicalMetrics / metricsSource / annualizationBasis`，未接线时如实标 `"evaluators"`、`NOT_AVAILABLE` 不被评估器数值顶替；
+  - 契约新增 `backtestRunPayloadSchema.canonicalMetrics.{completedTradeCount,openAtEndCount,annualizationBasis}`（`backtest` 整体可选 ⇒ 历史留档不受影响）。
+- **R-02**：`fixed-amount` 进入 Strategy Schema（`types`/`validate`/`legacyViews`/`assemble` 映射/前端），缺或非法金额一律响亮拒绝；装配层映射抽出具名纯函数 `mapDeclaredPositionSizing` 以可测。
+- **B-03**：真实 tRPC `loopRun` 端到端（`cand-360004@1.0.0` / `dataset_version.id=390002`）⇒ `resultJson.backtest` 落库；`BT002_VERIFY_ONLY=1` 只读复核 **20 项断言全绿 / `failures=0`**；两次独立运行（593.3 s / 626.7 s）`equityDigest`/`tradeDigest` **逐字节相同**。
+- 🔴 **抓出并修掉一个真实缺陷（R-05）**：长算后池中连接被静默重置，而留档**只尝试一次** ⇒ **长运行每次都静默丢档**；`persistClosedLoopBacktestRun` 改**有界重试**（≤3 次、线性退避），仍 best-effort、不抛。
+- **R-04**：新增执行日 `volume = 0` 端到端测试（`NEXT_OPEN` / `NEXT_CLOSE` / `VWAP_PROXY` 三模型一致拒单：`NO_LIQUIDITY` / 无成交 / 无静默建仓），并把 `SeedSpec` 加 `volume?` 覆盖位。
+- **新增/修改测试**：`tests/server/backtest/canonicalMetricsParity.test.ts`（口径一致性 + 投影来源）、`tests/server/backtest/positionSizingFixedAmountSchema.test.ts`（R-02，12 用例）、`backtestPersistence.test.ts` / `backtestCore.test.ts` 判据随有意行为变更更新。
+- **新增探针**：`docs/evidence/_probe_backtest_closeout_e2e.mts`（真实 Run 端到端 + 只读复核）、`docs/evidence/_probe_core_eval_perf.mts`（单次 Core 求值成本，用于**否证**「41× 主因在 Core」的初始推断）。
+- **验收**：`tsc` 0 error；`tests/server/backtest` 9 文件 / 105 用例全绿；`tests/server/strategyCore` 10 文件 / 158 用例全绿；`tests/server/research/executionConstraints` 1 文件 / 27 用例全绿；全量 vitest **8 失败文件 / 17 用例 = 基线集合逐项一致**（用例 4304 → 4538）；`vite build` 成功；`checkEolDrift` 0 漂移（过程中按哨兵 `--fix` 归一化 1 处由并行会话引入的 CRLF 漂移）。
+- **DB**：Schema 变更 = 0 / migration = 0；唯一写库动作 = `loopRun` 正常路径产生 1 条新 Run；历史 6 条留档**零改动**（含 `backtest` 段者 = 0）。
+- ⚠️ **R-06（新，中）**：同一真实 Run 从 ARCH-002 前的 **14.3 s** 变为 **593~627 s**（≈41×）；实测 Core 单次求值 ≈381 µs（20,000 次）⇒ 只占 **8.7%**，主因**未定位**；且**耗时与请求窗口无关**（1 个月窗口 616 s）⇒ **PARAMETER-001 开工前必须先做阶段级 profile**。

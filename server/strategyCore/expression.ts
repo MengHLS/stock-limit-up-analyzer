@@ -299,11 +299,25 @@ export function validateExpression(
 type Token =
   | { readonly kind: "number"; readonly text: string }
   | { readonly kind: "ident"; readonly text: string }
+  /** 字段引用（`bar.low` / `prefix.rd0.open` / `post.rd3.close` / `event.limitUpPrice`）。 */
+  | { readonly kind: "field"; readonly text: string }
   | { readonly kind: "op"; readonly text: string }
   | { readonly kind: "lparen" }
   | { readonly kind: "rparen" };
 
 const IDENT_RE = /[A-Za-z_][A-Za-z0-9_]*/;
+
+/**
+ * 字段引用记号（STRATEGY-ARCH-002 追加）。
+ *
+ * 🔴 为什么要加：库里**真实的**策略文档里存在把字段引用写进表达式文本的情况，例如
+ * `definition.entry.conditions[].value = "prefix.rd0.volume * 0.3"`（`valueType` 被标成
+ * `CONSTANT`）。没有这条记号，该表达式无法解析 ⇒ 只能退化成「数字与字符串比较」，
+ * 语义完全丢失。加它是**阻塞性缺陷修复**，不是语法扩张。
+ *
+ * 只认四种字段根（与 `fieldReference.ts` 的目录一致）；其余带点写法仍然抛错（不猜）。
+ */
+const FIELD_REF_RE = /^(?:prefix|post|bar|event)\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/;
 
 function tokenize(source: string): readonly Token[] {
   const tokens: Token[] = [];
@@ -344,6 +358,13 @@ function tokenize(source: string): readonly Token[] {
       continue;
     }
     const rest = source.slice(index);
+    // 字段引用必须**先于** ident 判定（否则 `bar.low` 会被切成人名 `bar` 再在 `.` 处抛错）。
+    const field = FIELD_REF_RE.exec(rest);
+    if (field !== null && field.index === 0) {
+      tokens.push({ kind: "field", text: field[0] });
+      index += field[0].length;
+      continue;
+    }
     const ident = IDENT_RE.exec(rest);
     if (ident !== null && ident.index === 0) {
       tokens.push({ kind: "ident", text: ident[0] });
@@ -439,6 +460,11 @@ class ExpressionParser {
       }
       return { kind: "CONSTANT", value };
     }
+    if (token.kind === "field") {
+      // 字段引用直接成节点；是否**可用**由 fieldReference / LeakageGuard 判定，
+      // 解析层不做时间域判断（分层纪律）。
+      return { kind: "FIELD_REFERENCE", field: token.text };
+    }
     if (token.kind === "ident") {
       const lowered = token.text.toLowerCase();
       if (lowered === "null") return { kind: "CONSTANT", value: null };
@@ -467,8 +493,10 @@ class ExpressionParser {
 /**
  * 把文本表达式解析为结构化表达式。
  *
- * 🔴 支持的文法：`number` · `ident`（⇒ 参数引用）· `null/true/false` · `+ - * /` · `()` · 一元 `-`。
- * **不支持**函数调用 / 属性访问 / 数组 / 比较 —— 遇到即抛 `PARAMETER_DERIVED_UNPARSEABLE`（不猜语义）。
+ * 🔴 支持的文法：`number` · `ident`（⇒ 参数引用）· **字段引用**（`bar.low` / `prefix.rd0.open` /
+ * `post.rd{n}.{col}` / `event.{field}`，STRATEGY-ARCH-002 追加）· `null/true/false` · `+ - * /`
+ * · `()` · 一元 `-`。
+ * **不支持**函数调用 / 任意属性访问 / 数组 / 比较 —— 遇到即抛 `PARAMETER_DERIVED_UNPARSEABLE`（不猜语义）。
  */
 export function parseExpression(source: string): ValueExpression {
   if (typeof source !== "string" || source.trim() === "") {

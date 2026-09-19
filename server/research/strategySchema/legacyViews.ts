@@ -114,6 +114,24 @@ function resolveExitThreshold(rule: ExitRuleDefinition, definition: StrategyDefi
 }
 
 /** 仓位比例解析：显式 positionRatio 优先，其次由 `parameter` 的 defaultValue 解析。 */
+/**
+ * `FIXED_AMOUNT` 的金额读取（**必须为正数**）。
+ *
+ * 🔴 缺失 / 非法一律抛错：若静默返回 0 或 undefined，声明会被投影成「固定比例」或等权，
+ * 那就是**悄悄改写了策略的仓位语义**（规格 §4 明文禁止）。
+ */
+function requireFixedAmount(position: PositionDefinition): number {
+  const amount = position.fixedAmount;
+  if (typeof amount !== "number" || !Number.isFinite(amount) || amount <= 0) {
+    throw new Error(
+      "legacyViews: sizingMethod=FIXED_AMOUNT 需要正的 fixedAmount（元），实际 " +
+        JSON.stringify(amount ?? null) +
+        " —— 拒绝静默退化为等权 / 固定比例（那会改写策略语义）。",
+    );
+  }
+  return amount;
+}
+
 function resolvePositionRatio(position: PositionDefinition, definition: StrategyDefinition): number | undefined {
   if (typeof position.positionRatio === "number") return position.positionRatio;
   if (typeof position.parameter === "string") {
@@ -219,11 +237,15 @@ export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegac
   const position = definition.position;
   const resolvedRatio = resolvePositionRatio(position, definition);
   const fraction = resolvedRatio ?? (1 / position.maxPositions);
+  // BACKTEST-002（R-02）：`FIXED_AMOUNT` 现在有对应的 `fixed-amount` 声明（此前被静默投影为
+  // `fixed-fraction`，等于改写了策略语义）。缺金额 ⇒ **响亮抛错**，不退化成等权/固定比例。
   const positionSizing: PositionSizingDeclaration = position.sizingMethod === "EQUAL_WEIGHT"
     ? { kind: "equal-weight", maxPositions: position.maxPositions }
     : position.sizingMethod === "RISK_BASED"
       ? { kind: "rank-weighted", maxPositions: position.maxPositions }
-      : { kind: "fixed-fraction", fraction, maxPositions: position.maxPositions };
+      : position.sizingMethod === "FIXED_AMOUNT"
+        ? { kind: "fixed-amount", fixedAmount: requireFixedAmount(position), maxPositions: position.maxPositions }
+        : { kind: "fixed-fraction", fraction, maxPositions: position.maxPositions };
 
   const parameters: ResearchParameterSchema = {
     parameters: definition.parameters.map((parameter: ParameterDefinition) => ({

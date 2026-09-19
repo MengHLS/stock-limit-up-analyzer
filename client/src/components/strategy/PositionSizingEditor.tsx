@@ -2,8 +2,8 @@
  * PositionSizingEditor — 仓位与资金规则（任务 §3.5）。
  *
  * 可视化仓位模式 + 初始资金 + 最大持仓数 + 每仓资金比例。
- * 模式严格映射后端 PositionSizingDeclaration 三值
- * （equal-weight / fixed-fraction / rank-weighted），不引入契约外的「Custom」。
+ * 模式严格映射后端 PositionSizingDeclaration 四值
+ * （equal-weight / fixed-fraction / rank-weighted / fixed-amount），不引入契约外的「Custom」。
  * 「最大持仓数」同时同步 executionAssumptions.backtestConfig.maxPositions（§17 追溯一致）。
  */
 
@@ -42,6 +42,7 @@ export function PositionSizingEditor({
         ...p,
         kind,
         fraction: kind === "fixed-fraction" ? (p.fraction ?? 0.05) : p.fraction,
+        fixedAmount: kind === "fixed-amount" ? (p.fixedAmount ?? 10_000) : p.fixedAmount,
       },
     });
 
@@ -107,6 +108,31 @@ export function PositionSizingEditor({
             onChange={e => setMaxPositions(Number(e.target.value))}
           />
         </div>
+
+        {p.kind === "fixed-amount" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="ps-amount">每仓固定金额（元）</Label>
+            <Input
+              id="ps-amount"
+              type="number"
+              step={1000}
+              min={0}
+              value={p.fixedAmount ?? 0}
+              onChange={e =>
+                onChange({
+                  ...vm,
+                  positionSizing: {
+                    ...p,
+                    fixedAmount: Math.max(0, Number(e.target.value) || 0),
+                  },
+                })
+              }
+            />
+            <p className="text-[11px] text-muted-foreground">
+              每只候选最多投入该金额；不足一手的金额不会建仓。
+            </p>
+          </div>
+        )}
 
         {p.kind === "fixed-fraction" && (
           <div className="space-y-1.5">

@@ -267,6 +267,18 @@ function checkPositionSizing(positionSizing: unknown, issues: ResearchValidation
       issues.push(issue("SCHEMA_POSITION_SIZING_FRACTION_INVALID", "positionSizing.fraction", "fixed-fraction.fraction 必须是 (0, 1] 的有限数字"));
     }
   }
+  if (kind === "fixed-amount") {
+    // BACKTEST-002（R-02）：`fixed-amount` 必须携带正数金额；**缺失 / ≤ 0 一律拒绝**
+    //（规格 §4：不得静默退化成 equal-weight）。
+    const fixedAmount = ps.fixedAmount;
+    if (typeof fixedAmount !== "number" || !Number.isFinite(fixedAmount) || fixedAmount <= 0) {
+      issues.push(issue(
+        "SCHEMA_POSITION_SIZING_FIXED_AMOUNT_INVALID",
+        "positionSizing.fixedAmount",
+        `fixed-amount.fixedAmount 必须是 > 0 的有限数字（元），实际：${String(fixedAmount)}`,
+      ));
+    }
+  }
 }
 
 /** Universe 声明 + 与 datasetVersion 的派生一致性。 */

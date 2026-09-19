@@ -18,3 +18,33 @@ export * from "./audit";
 export * from "./serialization";
 export * from "./result";
 export * from "./engine";
+
+// BACKTEST-001 — Backtest Core 补全面（Context / 执行政策 / OrderIntent / 统一结果）。
+// ⚠️ 不 `export *`：`backtestResult.ts` 的 `BacktestRunResult` 与 `types.ts` 的
+// `BacktestResult` 同域不同形，显式点名导出避免歧义（见 backtestResult.ts 文件头登记）。
+export * from "./context";
+export {
+  // B-04：年化口径（唯一常量 + 可序列化描述）。
+  BACKTEST_ANNUALIZATION_BASIS,
+  BACKTEST_ANNUALIZATION_DAYS,
+  CANONICAL_METRIC_KEYS,
+  DEFAULT_BACKTEST_SAMPLE_LIMIT,
+  NOT_AVAILABLE,
+  analyzeEquityCurve,
+  buildBacktestResult,
+  buildBacktestRunPayload,
+  canonicalMetrics,
+  computeTradeMetrics,
+  diffCanonicalMetrics,
+} from "./backtestResult";
+export type {
+  AnnualizationBasis,
+  BacktestMetrics,
+  BacktestRunPayload,
+  BacktestRunResult,
+  CanonicalMetricKey,
+  CanonicalMetrics,
+  CanonicalMetricsDetail,
+  EquityCurveAnalysis,
+  Unavailable,
+} from "./backtestResult";

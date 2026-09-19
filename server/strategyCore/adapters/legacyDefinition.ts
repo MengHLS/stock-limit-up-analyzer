@@ -143,12 +143,48 @@ function unsupported(what: string, detail: string): never {
 // 条件
 // ---------------------------------------------------------------------------
 
-function mapValueExpression(condition: ConditionDefinition): ValueExpression {
+/**
+ * 判断「`valueType=CONSTANT` 但值其实是**表达式文本**」。
+ *
+ * 🔴 为什么需要这条（STRATEGY-ARCH-002 实测阻塞项）：库里真实的策略文档里，
+ * `definition.entry.conditions` 有一条
+ * `{ field: "bar.volume", operator: "LESS_THAN_OR_EQUAL", valueType: "CONSTANT",
+ *    value: "prefix.rd0.volume * 0.3" }` —— 值被标成 CONSTANT，实际是**算术表达式**。
+ * 按字面翻译会得到「数字与字符串比较」，语义完全丢失。
+ *
+ * 判定规则**保守且显式**（不是「试着解析一下看行不行」）：
+ *   - 数值 / 布尔字面量 ⇒ 常量（不变）；
+ *   - 字符串里出现 `prefix.` / `post.` / `bar.` / `event.` 这类**字段根**，
+ *     或出现算术运算符 `+ - * /`，或出现括号 ⇒ 交给 `parseExpression` 解析（Core 既有实现）；
+ *   - 其余字符串 ⇒ 保持**字符串常量**（枚举名之类）。
+ */
+function looksLikeExpressionText(value: string): boolean {
+  const text = value.trim();
+  if (text === "") return false;
+  if (/^(true|false|null)$/i.test(text)) return false;
+  if (Number.isFinite(Number(text))) return false;
+  return /(?:^|[^A-Za-z0-9_])(prefix|post|bar|event)\./.test(text) || /[+\-*/()]/.test(text);
+}
+
+function mapValueExpression(
+  condition: ConditionDefinition,
+  notes?: string[],
+): ValueExpression {
   const value = condition.value;
   switch (condition.valueType) {
     case "CONSTANT": {
       if (Array.isArray(value)) {
         return Expr.array(value as readonly CoreValue[]);
+      }
+      if (typeof value === "string" && looksLikeExpressionText(value)) {
+        // legacy 把算术表达式写进了 CONSTANT ⇒ 用 Core 既有解析器还原。
+        // 不猜、不降级：解析失败即抛（原来的行为是「悄悄比字符串」，更糟）。
+        const expression = parseExpression(value);
+        notes?.push(
+          "条件 " + (condition.id ?? condition.field) + "：valueType=CONSTANT 的值是表达式文本 " +
+            JSON.stringify(value) + " ⇒ 已按 Core 表达式解析（不是字符串常量）",
+        );
+        return expression;
       }
       return Expr.constant((value ?? null) as CoreValue);
     }
@@ -170,12 +206,16 @@ function mapValueExpression(condition: ConditionDefinition): ValueExpression {
 }
 
 /** legacy 条件 → Core CONDITION 节点（**不做算术改写、不翻转方向**）。 */
-export function conditionToRuleNode(condition: ConditionDefinition, id: string): RuleNode {
+export function conditionToRuleNode(
+  condition: ConditionDefinition,
+  id: string,
+  notes?: string[],
+): RuleNode {
   const operator = LEGACY_OPERATOR_TO_CORE[condition.operator];
   if (operator === undefined) {
     unsupported("条件运算符", "未知或未登记的运算符 " + String(condition.operator));
   }
-  const right = mapValueExpression(condition);
+  const right = mapValueExpression(condition, notes);
   if ((operator === "IN" || operator === "NOT_IN") && right.kind !== "ARRAY") {
     unsupported("IN / NOT_IN 的右值", "必须是常量数组（legacy 的 value 数组形态）");
   }
@@ -245,7 +285,7 @@ function mapParameter(parameter: LegacyParameterDefinition): CoreParameterDefini
 // 出场规则
 // ---------------------------------------------------------------------------
 
-function mapExitRule(rule: ExitRuleDefinition, index: number): DeclaredExitRule {
+function mapExitRule(rule: ExitRuleDefinition, index: number, notes?: string[]): DeclaredExitRule {
   const type = rule.type;
   if (!(EXIT_RULE_TYPES as readonly string[]).includes(type)) {
     unsupported("出场规则类型", "未知类型 " + String(type));
@@ -266,7 +306,7 @@ function mapExitRule(rule: ExitRuleDefinition, index: number): DeclaredExitRule 
     threshold: rule.threshold ?? null,
     thresholdUnit: unit,
     parameter: rule.parameter ?? null,
-    condition: rule.condition === undefined ? null : conditionToRuleNode(rule.condition, resolvedId + ".condition"),
+    condition: rule.condition === undefined ? null : conditionToRuleNode(rule.condition, resolvedId + ".condition", notes),
     priority: rule.priority,
     enabled: rule.enabled,
     ...(rule.description === undefined ? {} : { description: rule.description }),
@@ -295,7 +335,7 @@ export function fromLegacyStrategyDefinition(
     notes.push("legacy 有 " + String(disabledCount) + " 条 disabled 条件未进规则图（如实跳过，不静默当成成立）");
   }
   const conditionNodes = enabledConditions.map((condition, index) =>
-    conditionToRuleNode(condition, condition.id ?? "cond-" + String(index + 1)),
+    conditionToRuleNode(condition, condition.id ?? "cond-" + String(index + 1), notes),
   );
 
   const quantifier = LEGACY_TRIGGER_TO_QUANTIFIER[entry.trigger.type];
@@ -323,7 +363,7 @@ export function fromLegacyStrategyDefinition(
   const parameterSchema = legacy.parameters.map(mapParameter);
 
   // ---- 出场 ----
-  const exitRules = legacy.exit.rules.map((rule, index) => mapExitRule(rule, index));
+  const exitRules = legacy.exit.rules.map((rule, index) => mapExitRule(rule, index, notes));
   const executableConditions: RuleNode[] = [];
   for (const rule of exitRules) {
     if (!rule.enabled || rule.condition === null) continue;

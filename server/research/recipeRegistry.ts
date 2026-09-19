@@ -79,6 +79,14 @@ export interface StrategyRecipeRuntime {
    * 保证既有行为逐字不变。
    */
   buildSignalBuilder(parameters: ResearchParameterSet): SignalBuilder;
+  /**
+   * STRATEGY-ARCH-002 — 本配方的**排序特征 id**（`gated` 支才有；`weighted` 支为 null）。
+   *
+   * 为什么要暴露：Core 的 `StrategyDecision` **不产出排序值**（ranking 属消费方职责，
+   * 见规格 §12 / §13）⇒ 生产接线需要把「横截面排序取哪个特征」这件事**读**出来，
+   * 而不是在接线层按配方名硬编码（那会形成第二套口径）。
+   */
+  readonly rankFeatureId: string | null;
   readonly rankingConfig: RankingConfig;
   readonly selectionConfig: SelectionConfig;
   /** 该配方运行所需数据域（进 `StrategyContract.requiredData`）。 */
@@ -236,6 +244,7 @@ function makeStrategyRecipeRuntime(definition: StrategyRecipeDefinition): Strate
       });
     },
     rankingConfig: definition.rankingConfig,
+    rankFeatureId: definition.signalKind === "gated" ? definition.rankFeatureId : null,
     selectionConfig: definition.selectionConfig,
     requiredData: definition.requiredData,
     selectionSummary: definition.selectionSummary,

@@ -348,6 +348,31 @@ export interface ClosedLoopBacktestSummary extends ClosedLoopHandoffBase {
 export interface ClosedLoopEvaluationRef extends ClosedLoopHandoffBase {
   readonly kind: "evaluationRef";
   readonly backtestFingerprint: string;
+  /**
+   * BACKTEST-002（B-04）— **Canonical Metrics（唯一读数面）**。
+   *
+   * 🔴 下面 `performance` / `tradeQuality` 两节里的 **5 个重叠标量**
+   * （`totalReturnPct` / `cagrPct` / `maxDrawdownPct` / `winRatePct` / `profitFactor`）
+   * 与 `completedTradeCount` **均取自此处**，不再由三个评估器各自计算。
+   * 三个评估器仍保留其**非重叠**指标（Sharpe / Sortino / Calmar / 波动率 / 回撤段等）。
+   *
+   * 缺省 `null` = 未接线（历史留档 / 直供路径未给 canonical）⇒ 此时 `metricsSource = "evaluators"`。
+   */
+  readonly canonicalMetrics: {
+    readonly totalReturnPct: number | null;
+    readonly cagrPct: number | null;
+    readonly maxDrawdownPct: number | null;
+    readonly winRatePct: number | null;
+    readonly profitFactor: number | null;
+    readonly completedTradeCount: number | null;
+    /** 年化口径自述（B-04 规格 §2C）。 */
+    readonly annualizationBasis: {
+      readonly type: "TRADING_DAYS";
+      readonly daysPerYear: number;
+    };
+  } | null;
+  /** 指标来源：`"canonical"` = 重叠标量取自 canonical Metrics；`"evaluators"` = 未接线（降级，如实标记）。 */
+  readonly metricsSource: "canonical" | "evaluators";
   readonly performance: {
     readonly fingerprint: string | null;
     readonly inputFingerprint: string | null;

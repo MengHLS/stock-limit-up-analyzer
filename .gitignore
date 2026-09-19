@@ -147,3 +147,4 @@ _*.py
 /scripts/_*.ts
 /scripts/_*.mts
 /scripts/_*.mjs
+/.workbuddy/

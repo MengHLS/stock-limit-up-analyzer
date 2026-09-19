@@ -73,6 +73,13 @@ interface SeedSpec {
   open: number;
   close: number;
   preClose: number;
+  /**
+   * 成交量覆写（默认 100_000）。
+   *
+   * BACKTEST-002（R-04）：用于构造「执行日成交量为 0」的场景，验证
+   * `zeroVolumePolicy=REJECT` 在**所有执行模型**下都拦住成交。
+   */
+  volume?: number;
 }
 
 function makeRow(seed: SeedSpec): ResearchDatasetRow {
@@ -102,7 +109,7 @@ function makeRow(seed: SeedSpec): ResearchDatasetRow {
     low,
     close,
     preClose: seed.preClose,
-    volume: 100_000,
+    volume: seed.volume ?? 100_000,
     // 成交额足够大（≥ 2,000,000 千元），使滑点分层加成 = 0（fixture 零滑点）。
     amount: 5_000_000,
     corporateActionsEffectiveCount: 0,
@@ -913,6 +920,97 @@ describe("约束生效端到端（runTradeSimulation）", () => {
     }
   });
 });
+
+  // -------------------------------------------------------------------------
+  // BACKTEST-002（R-04）— 成交量为 0 ⇒ 不可成交（zeroVolumePolicy=REJECT）
+  // -------------------------------------------------------------------------
+  it("执行日 volume=0 ⇒ 拒单不成交（NO_LIQUIDITY），且三种执行模型都拦得住", () => {
+    /**
+     * 构造思路：决策日 U1 收盘选 B；执行日 U2 的 B 行 `volume = 0`。
+     * 对照（volume=100000）必须成交 —— 用来证明「零成交量政策是唯一的拒绝原因」，
+     * 而不是该场景本身买不进。
+     *
+     * 🔴 为什么必须逐模型跑：改造前只有 `VWAP_PROXY` 会看 volume
+     * （`backtest/execution.ts` 要求 volume>0 才用 VWAP，否则回落 OHLC 均值），
+     * `NEXT_OPEN` / `NEXT_CLOSE` **完全不看** ⇒ 零成交日会按正常价成交。
+     */
+    const buildScenario = (executionVolume: number | undefined) => {
+      const seeds: readonly SeedSpec[] = [
+        { date: U1, sec: "A", open: 10.0, close: 10.1, preClose: 10.0 },
+        { date: U1, sec: "B", open: 9.9, close: 10.0, preClose: 9.7 },
+        // 执行日：B 的成交量为 0（或被覆写为正常量作对照）
+        { date: U2, sec: "A", open: 10.1, close: 10.0, preClose: 10.1 },
+        {
+          date: U2,
+          sec: "B",
+          open: 10.5,
+          close: 10.5,
+          preClose: 10.0,
+          ...(executionVolume === undefined ? { volume: 0 } : { volume: executionVolume }),
+        },
+      ];
+      const built = buildDataset(seeds, "excon-zerovol-v1");
+      const candidate = runCandidates(built, "excon-zerovol-v1", U1, U1, 1);
+      expect(candidate.days[0]!.selected[0]!.securityId).toBe("B");
+      return built;
+    };
+
+    for (const executionModel of ["NEXT_OPEN", "NEXT_CLOSE", "VWAP_PROXY"] as const) {
+      // 对照组：成交量正常 ⇒ 必须成交（证明零成交量政策是唯一原因）
+      const builtOk = buildScenario(100_000);
+      const candidateOk = runCandidates(builtOk, "excon-zerovol-v1", U1, U1, 1);
+      const runOk = runTradeSimulation({
+        dataset: builtOk.dataset,
+        sourceRun: candidateOk,
+        simConfig: assertMapExecutionConstraintDeclaration(
+          createExecutionConstraintDeclaration({
+            label: "vol-ok-" + executionModel,
+            initialCapital: 1_000_000,
+            // allowPartialFill=true：本场景的名义量已接近 bar 流动性上限，
+            // 不允许部分成交会因「无法足量」被拒 —— 那会掩盖「零成交量」这个唯一变量。
+            timing: { executionModel, allowPartialFill: true },
+          }),
+          COST,
+          { dateRange: { startDate: U1, endDate: U2 } },
+        ),
+      });
+      expect(runOk.executionStats.totalFills, `${executionModel} 对照应成交`).toBe(1);
+      expect(runOk.executionStats.rejectedOrders).toBe(0);
+
+      // 实验组：执行日 volume=0 ⇒ 拒单、零成交
+      const builtZero = buildScenario(undefined);
+      const candidateZero = runCandidates(builtZero, "excon-zerovol-v1", U1, U1, 1);
+      const runZero = runTradeSimulation({
+        dataset: builtZero.dataset,
+        sourceRun: candidateZero,
+        simConfig: assertMapExecutionConstraintDeclaration(
+          createExecutionConstraintDeclaration({
+            label: "vol-zero-" + executionModel,
+            initialCapital: 1_000_000,
+            // allowPartialFill=true：本场景的名义量已接近 bar 流动性上限，
+            // 不允许部分成交会因「无法足量」被拒 —— 那会掩盖「零成交量」这个唯一变量。
+            timing: { executionModel, allowPartialFill: true },
+          }),
+          COST,
+          { dateRange: { startDate: U1, endDate: U2 } },
+        ),
+      });
+
+      expect(runZero.executionStats.totalFills, `${executionModel} 零成交量不得成交`).toBe(0);
+      expect(runZero.executionStats.rejectedOrders, `${executionModel} 应产生 1 笔拒单`).toBe(1);
+      expect(runZero.executionStats.byReason.NO_LIQUIDITY, `${executionModel} 原因应为 NO_LIQUIDITY`).toBe(1);
+
+      const rejected = runZero.audit.orders.find(o => o.status === "REJECTED")!;
+      expect(rejected.securityId).toBe("B");
+      expect(rejected.side).toBe("buy");
+      expect(rejected.rejectionReason, `${executionModel} 拒单原因`).toBe("NO_LIQUIDITY");
+      expect(rejected.filledQuantity).toBe(0);
+      // 拒单说明必须点名是「零成交量政策」拦的（可解释，不是黑箱）。
+      expect(String(rejected.explanation)).toContain("zeroVolumePolicy=REJECT");
+      // 没有静默建仓。
+      expect(runZero.positions.find(p => p.securityId === "B")).toBeUndefined();
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // (e) 确定性

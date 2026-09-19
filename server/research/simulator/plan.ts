@@ -75,6 +75,88 @@ export interface PlanDecisionInput {
   readonly amountBySecurity: ReadonlyMap<string, number | null>;
   readonly cost: CostModel;
   readonly directionPolicy: DirectionPolicy;
+  /**
+   * BACKTEST-002（B-02）— **仓位口径**（策略声明的 `positionSizing`，由引擎透传）。
+   *
+   * 🔴 此前这里没有它 ⇒ 无论文档声明 `fixed-fraction` 还是 `equal-weight`，
+   * 实际预算恒为「等权现金预算」⇒ **改参数不改变结果**（规格 §7 点名的缺陷形态）。
+   *
+   * 缺省（`undefined`）= 等权现金预算（= 改造前行为，保证既有文档逐字不变）。
+   */
+  readonly positionSizing?: PositionSizingInput;
+  /**
+   * 初始资金（元）—— `fixed-fraction.fraction` 的**计量基数**。
+   *
+   * 基数口径取自项目既有定义：`strategySchema/definition.ts` 的 `PositionDefinition.positionRatio`
+   * 注释为「每仓占**初始资金**比例 (0, 1]」（不是当前权益）⇒ 这里沿用同一口径，
+   * 不另立「按权益」的第二套语义。
+   */
+  readonly initialCapital?: number;
+}
+
+/** 仓位口径（策略声明的最小面；与 `PositionSizingDeclaration` 同义，避免反向依赖）。 */
+export interface PositionSizingInput {
+  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
+  /** `FIXED_FRACTION` / `FIXED_RATIO` 的比例基数（占初始资金，(0,1]）。 */
+  readonly fraction: number | null;
+  /** `FIXED_AMOUNT` 的固定金额（元，> 0）。 */
+  readonly fixedAmount: number | null;
+}
+
+/**
+ * BACKTEST-002（B-02）— 把「等权现金预算」按策略声明的口径收窄。
+ *
+ * 口径（**唯一实现**，逐条可解释）：
+ *   - `EQUAL_WEIGHT` / `RANK_WEIGHTED` / 未声明 ⇒ 原样（= 既有行为）；
+ *     ⚠️ `RANK_WEIGHTED` 当前与等权同口径（研究侧 `weight` 已是 `1/selected.length`），
+ *        属**如实降级**而非实现（见 BACKTEST-002 报告 Remaining Issues）。
+ *   - `FIXED_FRACTION` / `FIXED_RATIO` ⇒ `min(allocatable, initialCapital × fraction)`
+ *     （基数 = **初始资金**，与 `PositionDefinition.positionRatio` 既有定义一致）；
+ *   - `FIXED_AMOUNT` ⇒ `min(allocatable, fixedAmount)`。
+ *
+ * 🔴 **永远只收窄不放大**：`min(...)` 保证「现金不足」仍由既有 `portfolio` 现金约束兜底，
+ *    本函数不会让订单超出可分配现金（否则会绕过既有约束、制造杠杆）。
+ */
+function applyPositionSizing(
+  allocatable: number,
+  sizing: PositionSizingInput | undefined,
+  initialCapital: number | undefined,
+): { readonly budget: number; readonly cappedBy: string | null } {
+  if (sizing === undefined) return { budget: allocatable, cappedBy: null };
+  const finite = (value: number | null | undefined): value is number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0;
+
+  switch (sizing.sizingMethod) {
+    case "FIXED_FRACTION":
+    case "FIXED_RATIO": {
+      if (!finite(sizing.fraction)) {
+        throw new Error(
+          `TradeSimulator: 仓位口径 ${sizing.sizingMethod} 缺有效 fraction（实际 ${JSON.stringify(sizing.fraction)}）` +
+            ` —— 拒绝静默回落到等权预算（那会让「声明了比例」与「实际预算」不一致）`
+        );
+      }
+      if (!finite(initialCapital)) {
+        throw new Error(
+          `TradeSimulator: 仓位口径 ${sizing.sizingMethod} 需要 initialCapital 作为计量基数，实际 ${JSON.stringify(initialCapital)}`
+        );
+      }
+      const target = initialCapital * sizing.fraction;
+      return { budget: Math.min(allocatable, target), cappedBy: sizing.sizingMethod };
+    }
+    case "FIXED_AMOUNT": {
+      if (!finite(sizing.fixedAmount)) {
+        throw new Error(
+          `TradeSimulator: 仓位口径 FIXED_AMOUNT 缺有效 fixedAmount（实际 ${JSON.stringify(sizing.fixedAmount)}）`
+        );
+      }
+      return { budget: Math.min(allocatable, sizing.fixedAmount), cappedBy: "FIXED_AMOUNT" };
+    }
+    case "RISK_BASED":
+      // 风险预算需要止损距离等运行态输入，当前项目未实现 ⇒ 如实拒绝而不是静默当等权。
+      throw new Error("TradeSimulator: 仓位口径 RISK_BASED 未实现（拒绝静默按等权预算执行）");
+    default:
+      return { budget: allocatable, cappedBy: null };
+  }
 }
 
 function commissionFor(gross: number, cost: CostModel): number {
@@ -140,6 +222,8 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     amountBySecurity,
     cost,
     directionPolicy,
+    positionSizing,
+    initialCapital,
   } = input;
 
   // 决策日无候选意图 → 信息不足，持仓不变（不强制清仓），无任何计划。
@@ -269,7 +353,23 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     throw new Error(`TradeSimulator: ${decisionDate} 候选意图权重合计必须为正`);
   }
   for (const intent of entries) {
-    const budget = totalWeight > 0 ? (cash * intent.weight) / totalWeight : 0;
+    // BACKTEST-002（B-02）— 等权现金预算（既有口径，保持不变）
+    const allocatable = totalWeight > 0 ? (cash * intent.weight) / totalWeight : 0;
+    // 再按**策略声明的仓位口径**收窄（只收窄、不放大：绝不超过可分配现金）
+    const sizing = applyPositionSizing(allocatable, positionSizing, initialCapital);
+    const budget = sizing.budget;
+    if (sizing.cappedBy !== null && budget <= 0) {
+      skipped.push(
+        skip(
+          decisionDate,
+          intent.securityId,
+          "buy",
+          "POSITION_SIZING_ZERO_BUDGET",
+          `仓位口径 ${sizing.cappedBy} 给出的目标资金为 0（allocatable=${allocatable.toFixed(2)}），未买入`
+        )
+      );
+      continue;
+    }
     const price = closePriceBySecurity.get(intent.securityId);
     if (price === undefined || !Number.isFinite(price) || price <= 0) {
       throw new Error(

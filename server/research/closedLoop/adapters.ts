@@ -15,6 +15,8 @@ import type { TradeSimulationRun } from "../simulator/types";
 import type { PerformanceEvaluationRun } from "../performanceMetrics/types";
 import type { RiskAdjustedEvaluationRun } from "../riskAdjustedMetrics/types";
 import type { TradeQualityEvaluationRun } from "../tradeQualityMetrics/types";
+// BACKTEST-002（B-04）— canonical Metrics 的唯一实现（本层只投影，不再自算公式）。
+import type { CanonicalMetricsDetail } from "../../backtest/backtestResult";
 import type {
   ClosedLoopBacktestSummary,
   ClosedLoopDatasetGate,
@@ -118,18 +120,53 @@ export interface ClosedLoopComposeEvaluationRefInput {
   readonly performance?: PerformanceEvaluationRun;
   readonly riskAdjusted?: RiskAdjustedEvaluationRun;
   readonly tradeQuality?: TradeQualityEvaluationRun;
+  /**
+   * BACKTEST-002（B-04）— **canonical Metrics**（由调用方从**同源**回测产物算出）。
+   *
+   * 给出后：`performance` / `tradeQuality` 里的 5 个重叠标量与 `completedTradeCount`
+   * **一律取这里**（含 `null`，即 `NOT_AVAILABLE` 不被评估器的数值顶替）；
+   * 未给出：保持既有投影（`metricsSource = "evaluators"`，如实标记未接线）。
+   */
+  readonly canonicalMetrics?: CanonicalMetricsDetail;
 }
 
 /** 由 C-16.x 三个评估 run 组装 evaluationRef（缺省者对应节 = null；不重算指标）。 */
 export function composeClosedLoopEvaluationRef(input: ClosedLoopComposeEvaluationRefInput): ClosedLoopEvaluationRef {
   const evaluatorsCovered: string[] = [];
+
+  // B-04：canonical 投影（`NOT_AVAILABLE` → null，与本 ref 既有可空约定一致）。
+  const scalar = (value: number | string | undefined): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const canonicalProjection =
+    input.canonicalMetrics === undefined
+      ? null
+      : {
+          totalReturnPct: scalar(input.canonicalMetrics.totalReturnPct),
+          cagrPct: scalar(input.canonicalMetrics.annualizedReturnPct),
+          maxDrawdownPct: scalar(input.canonicalMetrics.maxDrawdownPct),
+          winRatePct: scalar(input.canonicalMetrics.winRatePct),
+          profitFactor: scalar(input.canonicalMetrics.profitFactor),
+          completedTradeCount: input.canonicalMetrics.completedTradeCount,
+          annualizationBasis: input.canonicalMetrics.annualizationBasis,
+        };
+
   const performance = input.performance
     ? {
         fingerprint: input.performance.fingerprint,
         inputFingerprint: input.performance.inputFingerprint,
-        totalReturnPct: input.performance.metrics.returns.totalReturnPct,
-        cagrPct: input.performance.metrics.returns.cagrPct,
-        maxDrawdownPct: input.performance.metrics.drawdown.maxDrawdownPct,
+        // 🔴 B-04：重叠标量取自 canonical（无 canonical 时才回落评估器自身值）。
+        totalReturnPct:
+          canonicalProjection === null
+            ? input.performance.metrics.returns.totalReturnPct
+            : canonicalProjection.totalReturnPct,
+        cagrPct:
+          canonicalProjection === null
+            ? input.performance.metrics.returns.cagrPct
+            : canonicalProjection.cagrPct,
+        maxDrawdownPct:
+          canonicalProjection === null
+            ? input.performance.metrics.drawdown.maxDrawdownPct
+            : canonicalProjection.maxDrawdownPct,
       }
     : null;
   if (input.performance) evaluatorsCovered.push("performanceMetrics");
@@ -145,9 +182,19 @@ export function composeClosedLoopEvaluationRef(input: ClosedLoopComposeEvaluatio
   const tradeQuality = input.tradeQuality
     ? {
         fingerprint: input.tradeQuality.fingerprint,
-        winRatePct: input.tradeQuality.metrics.tradeQuality?.winRatePct ?? null,
-        profitFactor: input.tradeQuality.metrics.tradeQuality?.profitFactor ?? null,
-        completedTradeCount: input.tradeQuality.metrics.tradeQuality?.completedTradeCount ?? null,
+        // 🔴 B-04：同上，三处重叠量取自 canonical。
+        winRatePct:
+          canonicalProjection === null
+            ? (input.tradeQuality.metrics.tradeQuality?.winRatePct ?? null)
+            : canonicalProjection.winRatePct,
+        profitFactor:
+          canonicalProjection === null
+            ? (input.tradeQuality.metrics.tradeQuality?.profitFactor ?? null)
+            : canonicalProjection.profitFactor,
+        completedTradeCount:
+          canonicalProjection === null
+            ? (input.tradeQuality.metrics.tradeQuality?.completedTradeCount ?? null)
+            : canonicalProjection.completedTradeCount,
       }
     : null;
   if (input.tradeQuality) evaluatorsCovered.push("tradeQualityMetrics");
@@ -162,6 +209,8 @@ export function composeClosedLoopEvaluationRef(input: ClosedLoopComposeEvaluatio
       fingerprint: input.performance?.fingerprint ?? null,
     },
     backtestFingerprint: input.backtestFingerprint,
+    canonicalMetrics: canonicalProjection,
+    metricsSource: canonicalProjection === null ? "evaluators" : "canonical",
     performance,
     riskAdjusted,
     tradeQuality,

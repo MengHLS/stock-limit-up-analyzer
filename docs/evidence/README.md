@@ -634,3 +634,24 @@ npx tsx docs/evidence/_r007_run_engine.mts
 | 文件 | 结论要点 | 被引用于 |
 |---|---|---|
 | `_shot_homepage_nav9bm.png` | 首页（`/`）整页截图，目视核对「侧栏『复盘分析』组已无『首页』项 + 左上角标题为首页入口」；内容高 **3290px**，与 `9bl` 完全一致 ⇒ 本轮只动入口、**未影响版式** | 同上（目视附件） |
+
+---
+
+### `bt002closeout` —— 2 个（2026-09-19：BACKTEST-002 收尾「BacktestResult 真正落库」+ 首个真实 Run 的性能量级）
+
+> **背景**：BACKTEST-002 收尾要求「**真实 Run → `closed_loop_backtest_run.resultJson.backtest`**」的
+> 端到端证据（此前只有内存级契约测试），并顺带回答「Backtest 能不能当参数搜索底座」。
+> 两个探针各管一件事：**落库端到端** 与 **单次 Run 耗时量级**（不混在一起，避免互相掩盖）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_backtest_closeout_e2e.mts` + `.json` | ✅ **ALL PASS / 0 失败**（真实 tRPC `loopRun`，`cand-360004@1.0.0` / `dataset_version.id=390002`，窗口 `2025-01-02~2025-03-31`，耗时 **593.3s**）：① 返回含 `backtest` 与 `strategyRun`（**并列不覆盖**）；② `stages=14`、`backtest=EXECUTED`、**真实成交 3 笔**；③ 有界：`equitySamples=57` / `tradeSamples=3`（≤60）、两个 digest 均 sha256、`backtest` 段 **10,775B**、段内**无** `equityCurve/tradeLedger/trades/positions/orders`；④ **B-04 真实链路**：`evaluationRef.metricsSource="canonical"`，5 个重叠标量与 `backtest.canonicalMetrics` **逐项相等**，`annualizationBasis={TRADING_DAYS,252}`；⑤ 真库只读核验：留档 **1 行**、`resultJson.backtest` 存在、落库段与内存段**序列化逐字节相同**、历史 6 条**含 backtest 段 = 0**、`strategies/strategy_versions` 行数未变 | `ROADMAP.md` §44 `9br` / §44.5、`docs/research/BACKTEST-002-IMPLEMENTATION-REPORT.md` §7 §9 §12 |
+| `_probe_core_eval_perf.mts` + `.json` | ⚠️ **实测（非推断）**：`StrategyRuntime.evaluateWithDetail` 单次 **≈381µs**（20,000 次，含预热）⇒ 按真实调用量（每决策日 **2 次**：当日 + 截到昨天）推算 **≈52s**，只占同窗口观测耗时 593.3s 的 **8.7%** ⇒ **41×  slowdown 的主因不在 Core 求值层**（本条**否证**了"ARCH-002 逐决策日求值 = 主因"的初始猜测）；剩余 ~541s 未定位；同日 `tushare*` 用例整片超时 ⇒ 环境因素不可排除 | 同上 §13 R-06 |
+
+> 🔴 坑一（本轮真踩，且**两次复现**）：**「留档只尝试一次」在长运行下必然失败** ——
+> 计算阶段 593~616s 完全不碰 DB ⇒ 结束时池中连接已被链路静默重置 ⇒ 唯一一次 `insert` 失败，
+> **长运行每次都静默丢掉留档**。判据不是"报错文案"，而是「紧随其后的只读 SELECT 首发也失败、
+> **重试即成功**」。修法 = `persistClosedLoopBacktestRun` 改**有界重试**（≤3 次、线性退避），
+> 语义仍是 best-effort（**不抛**：把"历史列表少一条"升级成"回测结果丢失"是更坏的交易）。
+> ⚠️ 坑二：**耗时与请求窗口无关** —— 3 个月窗口 593.3s、1 个月窗口 616.4s（同路径同策略）
+> ⇒ 瓶颈在**数据集装载**（112,920 行），不在逐决策日扫描；别再用"缩小窗口"当加速手段。

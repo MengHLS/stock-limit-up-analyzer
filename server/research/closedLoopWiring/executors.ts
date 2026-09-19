@@ -19,6 +19,8 @@ import {
   composeClosedLoopEvaluationRef,
   summarizeTradeSimulationRun,
 } from "../closedLoop/adapters";
+// BACKTEST-002（B-04）— canonical Metrics 唯一实现 + 年化基数唯一常量。
+import { BACKTEST_ANNUALIZATION_DAYS, canonicalMetrics } from "../../backtest/backtestResult";
 import { CLOSED_LOOP_STAGE_IDS, closedLoopStageIndex, type ClosedLoopStageId } from "../closedLoop/types";
 import type {
   ClosedLoopDatasetSummary,
@@ -547,33 +549,70 @@ function buildExecutor(
           rfAnnualPct = provided.rfAnnualPct;
         }
 
-        // 三个评估器都真实调用；可选参数仅在调用方给出时才传（不替模块决定缺省口径）
+        // ------------------------------------------------------------------
+        // BACKTEST-002（B-04）— 年化基数唯一化
+        //
+        // 🔴 规格 §2A 禁止「Backtest = 252 / Evaluation = 244」这类混合口径。
+        //    唯一权威常量在 `backtest/backtestResult.ts`。调用方若显式给出**不同**基数，
+        //    这里**响亮抛错**而不是静默改用（静默会让「同一批结果的年化」出现两种含义）。
+        // ------------------------------------------------------------------
+        if (annualizationFactor !== undefined && annualizationFactor !== BACKTEST_ANNUALIZATION_DAYS) {
+          throw new ClosedLoopWiringError(
+            "CL_WIRING_ANNUALIZATION_BASIS_MISMATCH",
+            "装配层：evaluation 的年化基数必须与 canonical Metrics 一致（" +
+              String(BACKTEST_ANNUALIZATION_DAYS) +
+              " 交易日/年），实际传入 " +
+              String(annualizationFactor) +
+              " —— 拒绝同一批结果出现两套年化口径。",
+          );
+        }
+        const effectiveAnnualizationFactor = BACKTEST_ANNUALIZATION_DAYS;
+
+        // ------------------------------------------------------------------
+        // BACKTEST-002（B-04）— canonical Metrics（唯一读数面）
+        //
+        // 锚点取 `simulationConfig.initialCapital`（同链真实配置）；直供路径无该字段时
+        // 回落到 `equityCurve[0].equity` —— 与 `performanceMetrics` 的既有锚点口径一致
+        // （该等价性已在 `performanceMetrics/analyze.ts:15-17` 文档化）。
+        // ------------------------------------------------------------------
+        const canonicalAnchor = inputs.simulationConfig?.initialCapital ?? equityCurve[0]?.equity;
+        const canonical =
+          canonicalAnchor === undefined
+            ? undefined
+            : canonicalMetrics({
+                equityCurve,
+                tradeLedger: trades ?? [],
+                initialCapital: canonicalAnchor,
+              });
+
+        // 三个评估器都真实调用（保留其**非重叠**指标：Sharpe / Sortino / Calmar / 波动率 / 回撤段等）
         const performance = evaluatePerformance({
           equityCurve,
           ...(trades !== undefined ? { trades } : {}),
-          ...(annualizationFactor !== undefined ? { annualizationFactor } : {}),
+          annualizationFactor: effectiveAnnualizationFactor,
           ...(drawdownThresholdPct !== undefined ? { drawdownThresholdPct } : {}),
           ...(downsideTarget !== undefined ? { downsideTarget } : {}),
         });
         const riskAdjusted = evaluateRiskAdjustedMetrics({
           equityCurve,
           ...(trades !== undefined ? { trades } : {}),
-          ...(annualizationFactor !== undefined ? { annualizationFactor } : {}),
+          annualizationFactor: effectiveAnnualizationFactor,
           ...(rfAnnualPct !== undefined ? { rfAnnualPct } : {}),
           ...(downsideTarget !== undefined ? { downsideTarget } : {}),
         });
         const tradeQuality = evaluateTradeQualityMetrics({
           equityCurve,
           ...(trades !== undefined ? { trades } : {}),
-          ...(annualizationFactor !== undefined ? { annualizationFactor } : {}),
+          annualizationFactor: effectiveAnnualizationFactor,
         });
 
-        // 复用既有适配器组装（含 backtestFingerprint 绑定 + 三节标量投影）
+        // 复用既有适配器组装：重叠标量改由 canonical 供给（B-04）。
         return composeClosedLoopEvaluationRef({
           backtestFingerprint,
           performance,
           riskAdjusted,
           tradeQuality,
+          ...(canonical !== undefined ? { canonicalMetrics: canonical } : {}),
         }) as ClosedLoopHandoff;
       }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
     }

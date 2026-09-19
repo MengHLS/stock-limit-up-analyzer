@@ -84,6 +84,23 @@ import {
   saveClosedLoopBacktestRun,
 } from "./closedLoopBacktestRun/repository";
 import { loadSecurityLabels } from "./closedLoopBacktestRun/securityLabels";
+// STRATEGY-ARCH-002 — 策略运行留档（零 schema 变更：进既有 resultJson）。
+import {
+  buildStrategyRunRecord,
+  runtimeConfigSnapshot,
+} from "./strategyCore/production";
+// BACKTEST-002（B-03/B-04）— 回测结果有界载荷 + canonical 指标 + 执行政策版本。
+import {
+  DEFAULT_BACKTEST_SAMPLE_LIMIT,
+  buildBacktestResult,
+  buildBacktestRunPayload,
+} from "./backtest/backtestResult";
+import {
+  BACKTEST_EXECUTION_POLICY_VERSION,
+  DEFAULT_BACKTEST_EXECUTION_POLICY,
+  describeExecutionPolicy,
+} from "./backtest/context";
+import type { AssembledStrategySide } from "./runWorkbenchAssembly/assemble";
 import { describeResearchChainHealth } from "./researchChainHealth";
 
 // 幂等启动装配：把内置研究策略注册进单例注册中心（已注册则跳过）。
@@ -241,7 +258,19 @@ function describeWiringGap(wiring: ClosedLoopWiringSummary): string {
  * 结果已经算出来了 —— **不能因为写一张留档表失败就把结果丢掉**。故此处只记录日志、不抛。
  * 代价是「留档失败 ⇒ 历史列表里少这一条」，这是**如实可见**的降级（不是假装存了）；
  * 另外 `runId` 唯一键保证重试幂等收敛，不会因重试堆出重复记录。
+ *
+ * 🔴 BACKTEST-002 收尾实测（本轮）：**只尝试一次是不够的**。
+ *    一次真实运行（`cand-360004@1.0.0`）计算阶段约 **593~616 s**，其间完全不碰 DB；
+ *    计算结束时连接池里那条连接已被链路（TiDB Cloud / 本地代理）**静默重置**，于是
+ *    **唯一的一次 insert 必然失败** ⇒ 长运行**每次都静默丢掉留档**（历史列表恒缺这条）。
+ *    证据：同样条件下紧随其后的只读 SELECT 首发也失败、**重试即成功** ⇒ 池在失败后能拿到新连接。
+ *    ⇒ 修法 = **有界重试**（首次失败后换连接再试），语义仍是 best-effort（不抛、不阻断回测）。
+ *    ⚠️ 不要把它改成「失败即抛」：那会把「历史列表少一条」升级成「回测结果丢失」。
  */
+const CLOSED_LOOP_PERSIST_ATTEMPTS = 3;
+/** 重试退避（线性）：给池一点时间销毁死连接并新开一条。 */
+const CLOSED_LOOP_PERSIST_RETRY_DELAY_MS = 300;
+
 async function persistClosedLoopBacktestRun(options: {
   experimentId: string;
   strategyId: string;
@@ -250,22 +279,39 @@ async function persistClosedLoopBacktestRun(options: {
   endDate: string;
   result: ClosedLoopRunResult;
 }): Promise<void> {
-  try {
-    await saveClosedLoopBacktestRun({
-      experimentId: options.experimentId,
-      strategyId: options.strategyId,
-      strategyVersion: options.strategyVersion,
-      startDate: options.startDate,
-      endDate: options.endDate,
-      result: options.result,
-    });
-  } catch (error) {
-    const detail =
-      error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    console.warn(
-      `[loopRun] 闭环回测结果留档失败（不影响本次运行结果，历史列表将缺此条）：${detail}`,
-    );
+  let lastDetail = "（未捕获到错误详情）";
+  for (let attempt = 1; attempt <= CLOSED_LOOP_PERSIST_ATTEMPTS; attempt += 1) {
+    try {
+      await saveClosedLoopBacktestRun({
+        experimentId: options.experimentId,
+        strategyId: options.strategyId,
+        strategyVersion: options.strategyVersion,
+        startDate: options.startDate,
+        endDate: options.endDate,
+        result: options.result,
+      });
+      if (attempt > 1) {
+        console.warn(
+          `[loopRun] 闭环回测结果留档在第 ${attempt} 次尝试成功（前面是长算后连接被重置，属已知现象）。`,
+        );
+      }
+      return;
+    } catch (error) {
+      lastDetail =
+        error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      if (attempt < CLOSED_LOOP_PERSIST_ATTEMPTS) {
+        console.warn(
+          `[loopRun] 留档第 ${attempt}/${CLOSED_LOOP_PERSIST_ATTEMPTS} 次尝试失败，${CLOSED_LOOP_PERSIST_RETRY_DELAY_MS * attempt}ms 后重试：${lastDetail}`,
+        );
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, CLOSED_LOOP_PERSIST_RETRY_DELAY_MS * attempt);
+        });
+      }
+    }
   }
+  console.warn(
+    `[loopRun] 闭环回测结果留档失败（已尝试 ${CLOSED_LOOP_PERSIST_ATTEMPTS} 次；不影响本次运行结果，历史列表将缺此条）：${lastDetail}`,
+  );
 }
 
 export const researchRunRouter = router({
@@ -487,6 +533,8 @@ export const researchRunRouter = router({
       // **绝不**降级成「用占位数据跑一遍」。
       // ------------------------------------------------------------------
       let assemblySummary: LoopRunAssemblySummary | null = null;
+      // STRATEGY-ARCH-002 — 策略侧产物（Core 决策源 / 版本 / 事件判定器）留到跑完后组 Run Record。
+      let assembledSide: AssembledStrategySide | null = null;
       if (input.useRealData === true) {
         let assembled;
         try {
@@ -524,6 +572,7 @@ export const researchRunRouter = router({
         // 装配成功：把真实入参合并进 wiringInputs（覆盖同名的空位）
         Object.assign(wiringInputs, assembled.inputs);
         assemblySummary = assembled.assembly;
+        assembledSide = assembled.side;
       }
 
       const seedHandoffs: ClosedLoopSeedHandoff[] = [];
@@ -564,7 +613,10 @@ export const researchRunRouter = router({
         parameterSet: (input.parameterSet ?? {}) as unknown as Readonly<ResearchParameterSet>,
       };
 
-      const { stageRunners } = createClosedLoopWiring(wiringInputs, { requested });
+      // BACKTEST-002（B-03）— 🔴 此前这里把 `artifacts` 丢掉了 ⇒ 完整的
+      // `TradeSimulationRun`（含 equityCurve / trades）跑完即弃，无法落库。
+      // 捕获它即打通 artifact propagation：**不重算、不复制引擎**，只用同一个产物。
+      const { stageRunners, artifacts } = createClosedLoopWiring(wiringInputs, { requested });
 
       const run = runClosedLoop({
         runId,
@@ -576,7 +628,7 @@ export const researchRunRouter = router({
         ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
       });
 
-      const result: ClosedLoopRunResult = {
+      const resultOut: ClosedLoopRunResult = {
         runId: run.runId,
         createdAt: run.createdAt,
         chainFingerprint: run.chainFingerprint,
@@ -627,6 +679,8 @@ export const researchRunRouter = router({
                 recipeSource: assemblySummary.recipeSource,
                 recipeFeatureIds: [...assemblySummary.recipeFeatureIds],
                 selectionSummary: assemblySummary.selectionSummary,
+                strategyDecisionEngine: assemblySummary.strategyDecisionEngine,
+                strategyDecisionEngineNote: assemblySummary.strategyDecisionEngineNote,
                 simulation: {
                   initialCapital: assemblySummary.simulation.initialCapital,
                   maxPositions: assemblySummary.simulation.maxPositions,
@@ -636,6 +690,100 @@ export const researchRunRouter = router({
               },
       };
 
+      // ------------------------------------------------------------------
+      // STRATEGY-ARCH-002 — Strategy Run Record（**每次运行必留**，零 schema 变更）
+      //
+      // 落点 = 上面这个 `result` 对象 ⇒ 由既有 `persistClosedLoopBacktestRun` 写进
+      // `closed_loop_backtest_run.resultJson`。只有真的走了 Core 判定（`strategy-core`）
+      // 才留档 —— 回落 legacy 配方时留一份「其实是 legacy 跑的」记录只会误导。
+      // ------------------------------------------------------------------
+      if (assembledSide !== null && assembledSide.strategyRunContext.engine === "strategy-core") {
+        const context = assembledSide.strategyRunContext;
+        const source = context.coreDecisionSource;
+        const coreVersion = context.coreVersion;
+        if (source !== null && coreVersion !== null && coreVersion.ok) {
+          const codeVersion = input.codeVersion ?? "unknown";
+          const digest = source.digest();
+          const record = buildStrategyRunRecord({
+            runId: run.runId,
+            version: coreVersion.version,
+            parameterSet: assembledSide.parameterSet as unknown as Record<string, never>,
+            resolvedParameterSet: source.resolvedParameterSet().values,
+            codeVersion,
+            universe: { universeId: context.universeId, members: null },
+            datasetReference: {
+              datasetVersionId: assemblySummary?.datasetVersionId ?? null,
+              datasetLabel: assemblySummary?.datasetVersion ?? null,
+              datasetSource: (assemblySummary?.datasetSource ?? "rebuild") as
+                | "registry"
+                | "rebuild"
+                | "injected",
+              datasetContentFingerprint: assemblySummary?.datasetVersion ?? null,
+            },
+            seed: null,
+            runtimeConfig: runtimeConfigSnapshot({
+              startDate: input.dateRange.startDate,
+              point: context.point,
+              maxRelativeDayObserved: digest.maxRelativeDayObserved,
+              horizonRelativeDay: digest.maxRelativeDayObserved,
+            }),
+            createdAt,
+            digest,
+            anchorPolicy: context.anchorPolicy,
+            notes: [
+              context.note,
+              ...source.notes,
+              ...coreVersion.notes,
+              "codeVersion=" + codeVersion + " 由调用方注入（本服务端不读 git / package.json）",
+            ],
+            unmappedExitRuleIds: coreVersion.adaptation.unmappedExitRuleIds,
+          });
+          resultOut.strategyRun = record;
+        }
+      }
+
+      // ------------------------------------------------------------------
+      // BACKTEST-002（B-03）— BacktestRunResult → resultJson.backtest（有界载荷）
+      // ------------------------------------------------------------------
+      const backtestRun = artifacts.tradeSimulationRun;
+      if (backtestRun !== undefined) {
+        const initialCapital = assemblySummary?.simulation.initialCapital ?? null;
+        if (initialCapital !== null) {
+          const result = buildBacktestResult({
+            runId: run.runId,
+            strategyVersionId: input.strategyId + "@" + input.strategyVersion,
+            datasetVersionId: assemblySummary?.datasetVersionId ?? null,
+            parameterSet: (input.parameterSet ?? {}) as Readonly<Record<string, unknown>>,
+            initialCapital,
+            equityCurve: backtestRun.equityCurve,
+            tradeLedger: backtestRun.trades,
+            notes: [
+              "权益曲线 / 成交台账来自同链 backtest 阶段的真实产物（artifacts.tradeSimulationRun）",
+              "明细**不全量入库**：见 equitySamples / tradeSamples（有界）与 equityDigest / tradeDigest（全量指纹）",
+            ],
+          });
+          const payload = buildBacktestRunPayload({ result });
+          resultOut.backtest = {
+            canonicalMetrics: payload.canonicalMetrics,
+            summary: payload.summary,
+            equitySamples: [...payload.equitySamples],
+            tradeSamples: [...payload.tradeSamples],
+            truncated: payload.truncated,
+            equityDigest: payload.equityDigest,
+            tradeDigest: payload.tradeDigest,
+            notes: [...payload.notes],
+            executionMetadata: {
+              executionPolicyVersion: BACKTEST_EXECUTION_POLICY_VERSION,
+              engineVersion: "strategy-core/1.0.0",
+              codeVersion: input.codeVersion ?? "unknown",
+              initialCapital,
+              sampleLimit: DEFAULT_BACKTEST_SAMPLE_LIMIT,
+              notes: [...describeExecutionPolicy(DEFAULT_BACKTEST_EXECUTION_POLICY)],
+            },
+          };
+        }
+      }
+
       // CLOSED-LOOP-BACKTEST-PERSIST-001 — 每次运行都留档，供「回测历史」页回看。
       // best-effort：留档失败不抛（详见 persistClosedLoopBacktestRun 的说明）。
       await persistClosedLoopBacktestRun({
@@ -644,10 +792,10 @@ export const researchRunRouter = router({
         strategyVersion: input.strategyVersion,
         startDate: input.dateRange.startDate,
         endDate: input.dateRange.endDate,
-        result,
+        result: resultOut,
       });
 
-      return result;
+      return resultOut;
     }),
 });
 

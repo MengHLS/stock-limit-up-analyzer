@@ -34,6 +34,8 @@ export const POSITION_SIZING_KINDS = [
   "equal-weight",
   "fixed-fraction",
   "rank-weighted",
+  // BACKTEST-002（R-02）：执行层已支持固定金额（每仓 fixedAmount 元）。
+  "fixed-amount",
 ] as const;
 export type PositionSizingKind = (typeof POSITION_SIZING_KINDS)[number];
 
@@ -58,6 +60,8 @@ export interface PositionSizingViewModel {
   maxPositions: number;
   /** 仅 fixed-fraction 使用。 */
   fraction: number | null;
+  /** 仅 fixed-amount 使用（元，> 0）。 */
+  fixedAmount: number | null;
 }
 
 export interface ParameterViewModel {
@@ -215,6 +219,7 @@ function parsePositionSizing(raw: unknown): PositionSizingViewModel {
     kind,
     maxPositions: asNum(r.maxPositions, 1),
     fraction: asNullableNum(r.fraction),
+    fixedAmount: asNullableNum(r.fixedAmount),
   };
 }
 
@@ -225,6 +230,14 @@ function serializePositionSizing(
     return {
       kind: "fixed-fraction",
       fraction: p.fraction ?? 0,
+      maxPositions: p.maxPositions,
+    };
+  }
+  if (p.kind === "fixed-amount") {
+    // 金额原样带出（不补默认值）：缺失会让文档校验响亮拒绝，而不是被静默当成等权。
+    return {
+      kind: "fixed-amount",
+      fixedAmount: p.fixedAmount ?? 0,
       maxPositions: p.maxPositions,
     };
   }
@@ -466,6 +479,8 @@ export function positionSizingLabel(kind: string): string {
       return "固定比例";
     case "rank-weighted":
       return "按排名加权";
+    case "fixed-amount":
+      return "固定金额";
     default:
       return kind || "—";
   }
@@ -480,6 +495,8 @@ export function positionSizingDescription(kind: string): string {
       return "每只固定占用初始资金的一定比例，超出部分留作现金。";
     case "rank-weighted":
       return "按候选排名高低分配权重，排名越靠前仓位越重。";
+    case "fixed-amount":
+      return "每只固定占用指定金额（元），剩余资金留作现金；金额不足一手时该笔不建仓。";
     default:
       return "";
   }

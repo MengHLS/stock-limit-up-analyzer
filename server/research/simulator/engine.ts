@@ -364,6 +364,8 @@ export function runTradeSimulation(
   const marketRules = DEFAULT_MARKET_RULES;
   const executionRules = resolveExecutionRules(simConfig);
   const allowPartialFill = simConfig.allowPartialFill ?? false;
+  // BACKTEST-002（B-05）— 成交量为 0 的政策：缺省 REJECT（保守）；只有显式声明才 IGNORE。
+  const zeroVolumePolicy = simConfig.zeroVolumePolicy ?? "REJECT";
   const maxPositions = simConfig.maxPositions ?? null;
   const directionPolicy = simConfig.directionPolicy ?? "longOnly";
   const securityBoards = simConfig.securityBoards;
@@ -462,6 +464,36 @@ export function runTradeSimulation(
           explanation: "停牌/当日非 universe 成员无行情，无法成交",
         });
         continue;
+      }
+
+      // BACKTEST-002（B-05）— 成交量为 0（或缺失）⇒ 不可成交。
+      //
+      // 🔴 为什么必须在这里拦：改造前只有 `VWAP_PROXY` 会看 volume（`backtest/execution.ts:93-101`
+      // 要求 volume>0，否则回落 OHLC 均值），其余执行模型**完全不看成交量** ⇒
+      // 零成交日会按正常价成交（规格 §19 点名的缺陷形态）。政策显式化后由本关卡统一兜住。
+      if (zeroVolumePolicy === "REJECT") {
+        const volume = bar.volume;
+        if (volume === null || volume === undefined || !Number.isFinite(volume) || volume <= 0) {
+          stats.rejectedOrders += 1;
+          // 具名原因沿用既有词表（`backtest/types.ts:51` 的 `NO_LIQUIDITY` =
+          // 「无流动性（成交量为 0 / 无有效价格）」）——不新造一套原因码，
+          // 「因为 zeroVolumePolicy 拒的」这层信息由 explanation 如实带出。
+          stats.byReason.NO_LIQUIDITY = (stats.byReason.NO_LIQUIDITY ?? 0) + 1;
+          audit.recordOrder({
+            orderId: entry.orderId,
+            securityId: entry.securityId,
+            tradeDate: entry.tradeDate,
+            side: entry.side,
+            requestedQuantity: entry.quantity,
+            filledQuantity: 0,
+            status: "REJECTED",
+            rejectionReason: "NO_LIQUIDITY",
+            explanation:
+              "执行日成交量为 0 / 缺失（zeroVolumePolicy=REJECT）⇒ 不可成交；" +
+              "成交量=" + JSON.stringify(volume ?? null),
+          });
+          continue;
+        }
       }
 
       const ruleContext = resolveExecutionRuleContext(
@@ -639,6 +671,9 @@ export function runTradeSimulation(
         amountBySecurity,
         cost,
         directionPolicy,
+        // BACKTEST-002（B-02）— 仓位口径与计量基数透传（min 收窄，不放大）。
+        ...(simConfig.positionSizing !== undefined ? { positionSizing: simConfig.positionSizing } : {}),
+        initialCapital: simConfig.initialCapital,
       });
 
       for (const item of plan.orders as readonly PlannedOrder[]) {
