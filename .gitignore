@@ -125,6 +125,8 @@ scripts/_baostock_stock_basic_dump.json
 
 # Git 恢复时损坏 .git 的备份（含 reflog，供对照历史提交消息，确认后可删）
 .git.broken/
+# WorkBuddy 工作区数据（记忆 / 细则）—— 只存在于本地，⚠️ 禁止 `git add -f` 强制加入
+# [REPO-HYGIENE-WORKBUDDY-UNTRACK-001] 2026-09-19：曾被两次强制加回（a0cc3c6 删除 → 0e90fc1 复加）
 .workbuddy/
 .manus/
 
@@ -138,7 +140,6 @@ _*.py
 /_*.mts
 /_*.mjs
 /_*.json
-/.workbuddy/
 
 # scripts/ 下的一次性探针脚本（2026-09-17 实测：10 个零引用 ad-hoc DB 探针堆在生产脚本目录里）
 # 应写到仓外 C:\work\sourcecode\_scratch\  [REPO-HYGIENE-SCRIPTS-SCRATCH-001]
@@ -147,4 +148,3 @@ _*.py
 /scripts/_*.ts
 /scripts/_*.mts
 /scripts/_*.mjs
-/.workbuddy/
