@@ -1,0 +1,294 @@
+{
+  "pagePath": "/research/480003",
+  "base": "http://localhost:3000",
+  "blankHref": "about:blank",
+  "finalUrl": "http://localhost:3000/research/480003",
+  "title": "股票涨停分析助手",
+  "textLength": 169,
+  "bodyText": "涨停复盘助手\n复盘分析\n涨停复盘\n大盘分析\n情绪分析\n龙头候选\n量化回测\n组合回测\n回测历史\n前向纸面交易\n数据录入\n上传图片\n研究数据\n数据域健康\n历史状态查询\n数据集构建\n提问研究\n研究实验\n策略\n绩效仪表盘\n参数搜索\nWFO/OOS 分析\nRegime/报告\n复盘工作台\n数据管理\n行情同步\n情绪预警\n操作日志\n切换到日间模式\n登录",
+  "bodyHtml": "\n    <div id=\"root\"><section aria-label=\"Notifications alt+T\" tabindex=\"-1\" aria-live=\"polite\" aria-relevant=\"additions text\" aria-atomic=\"false\"></section><div data-loc=\"client\\src\\components\\AppShell.tsx:159\" data-slot=\"sidebar-wrapper\" class=\"group/sidebar-wrapper has-data-[variant=inset]:bg-sidebar flex min-h-svh w-full\" style=\"--sidebar-width: 16rem; --sidebar-width-icon: 3rem;\"><div data-loc=\"client\\src\\components\\ui\\sidebar.tsx:226\" class=\"group peer text-sidebar-foreground hidden md:block\" data-state=\"expanded\" data-collapsible=\"\" data-variant=\"sidebar\" data-side=\"left\" data-slot=\"sidebar\"><div data-loc=\"client\\src\\components\\ui\\sidebar.tsx:235\" data-slot=\"sidebar-gap\" class=\"relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear group-data-[collapsible=offcanvas]:w-0 group-data-[side=right]:rotate-180 group-data-[collapsible=icon]:w-(--sidebar-width-icon)\"></div><div data-loc=\"client\\src\\components\\AppShell.tsx:160\" data-slot=\"sidebar-container\" class=\"fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) md:flex transition-[left,right,width] duration-200 ease-linear left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)] group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l\"><div data-loc=\"client\\src\\components\\ui\\sidebar.tsx:267\" data-sidebar=\"sidebar\" data-slot=\"sidebar-inner\" class=\"bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm\"><div data-loc=\"client\\src\\components\\AppShell.tsx:161\" data-slot=\"sidebar-header\" data-sidebar=\"header\" class=\"flex shrink-0 flex-col gap-2 p-2 h-16 justify-center\"><button data-loc=\"client\\src\\components\\AppShell.tsx:162\" type=\"button\" data-slot=\"sidebar-home-link\" title=\"返回首页\" aria-label=\"返回首页\" class=\"flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-data-[collapsible=icon]:justify-center\"><div data-loc=\"client\\src\\components\\AppShell.tsx:170\" class=\"h-8 w-8 shrink-0 rounded-lg bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" class=\"lucide lucide-trending-up h-4.5 w-4.5 text-white\" data-loc=\"client\\src\\components\\AppShell.tsx:171\"><polyline points=\"22 7 13.5 15.5 8.5 10.5 2 17\"></polyline><polyline points=\"16 7 22 7 22 13\"></polyline></svg></div><span data-loc=\"client\\src\\components\\AppShell.tsx:173\" class=\"font-bold text-base bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent group-data-[collapsible=icon]:hidden truncate\">涨停复盘助手</span></button></div><div data-loc=\"client\\src\\components\\AppShell.tsx:179\" data-slot=\"sidebar-content\" data-sidebar=\"content\" class=\"flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden\"><div data-loc=\"client\\src\\components\\AppShell.tsx:181\" data-slot=\"sidebar-group\" data-sidebar=\"group\" class=\"relative flex w-full min-w-0 shrink-0 flex-col p-2\"><div data-loc=\"client\\src\\components\\AppShell.tsx:182\" data-slot=\"sidebar-group-label\" data-sidebar=\"group-label\" class=\"text-sidebar-foreground/70 ring-sidebar-ring flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&amp;&gt;svg]:size-4 [&amp;&gt;svg]:shrink-0 group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0\">复盘分析</div><ul data-loc=\"client\\src\\components\\AppShell.tsx:183\" data-slot=\"sidebar-menu\" data-sidebar=\"menu\" class=\"flex w-full min-w-0 shrink-0 flex-col gap-1\"><li data-loc=\"client\\src\\componen",
+  "hasRoot": true,
+  "rootChildren": 2,
+  "fetchAuthMe": "{\"result\":{\"data\":{\"json\":{\"id\":1,\"openId\":\"local-dev-user\",\"name\":\"本地开发\",\"email\":null,\"loginMethod\":null,\"role\":\"admin\",\"createdAt\":\"2026-09-19T14:01:34.341Z\",\"updatedAt\":\"2026-09-19T14:01:34.341Z\",\"lastSignedIn\":\"2026-09-19T14:01:34.341Z\"},\"meta\":{\"values\":{\"createdAt\":[\"Date\"],\"updatedAt\":[\"Date\"],\"lastSignedIn\":[\"Date\"]}}}}}",
+  "localStorage": "{\"info\":\"undefined\"}",
+  "fetchAuthMe2": "{\"result\":{\"data\":{\"json\":{\"id\":1,\"openId\":\"local-dev-user\",\"name\":\"本地开发\",\"email\":null,\"loginMethod\":null,\"role\":\"admin\",\"createdAt\":\"2026-09-19T14:01:34.341Z\",\"updatedAt\":\"2026-09-19T14:01:34.341Z\",\"lastSignedIn\":\"2026-09-19T14:01:34.341Z\"},\"meta\":{\"values\":{\"createdAt\":[\"Date\"],\"updatedAt\":[\"Date\"],\"lastSignedIn\":[\"Date\"]}}}}}",
+  "textAfterWait": 174,
+  "localStorage2": "{\"id\":1,\"openId\":\"local-dev-user\",\"name\":\"本地开发\",\"email\":null,\"loginMethod\":null,\"role\":\"admin\",\"createdAt\":\"2026-09-19T14:01:34.341Z\",\"updatedAt\":\"2026-09-19T14:01:34.341Z\",\"lastSignedIn\":\"2026-09-19T14:01:34.341Z\"}",
+  "consoleLogs": [
+    {
+      "type": "debug",
+      "text": "[vite] connecting..."
+    },
+    {
+      "type": "debug",
+      "text": "[vite] connected."
+    },
+    {
+      "type": "info",
+      "text": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold"
+    }
+  ],
+  "networkFailures": [],
+  "apiResponses": [
+    {
+      "type": "Fetch",
+      "url": "http://localhost:3000/api/trpc/auth.me?input=%7B%7D",
+      "status": 200,
+      "mimeType": "application/json"
+    },
+    {
+      "type": "Fetch",
+      "url": "http://localhost:3000/api/trpc/auth.me,sentiment.getUnreadCount,researchEngine.getExperiment?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%2C%22meta%22%3A%7B%22values%22%3A%5B%22undefined%22%5D%7D%7D%2C%221%22%3A%7B%22json%22%3Anull%2C%22meta%22%3A%7B%22values%22%3A%5B%22undefined%22%5D%7D%7D%2C%222%22%3A%7B%22json%22%3A%7B%22experimentId%22%3A480003%7D%7D%7D",
+      "status": 207,
+      "mimeType": "application/json"
+    },
+    {
+      "type": "Fetch",
+      "url": "http://localhost:3000/api/trpc/auth.me?input=%7B%7D",
+      "status": 200,
+      "mimeType": "application/json"
+    }
+  ],
+  "jsResponses": [
+    {
+      "type": "Document",
+      "url": "http://localhost:3000/research/480003",
+      "status": 200,
+      "mimeType": "text/html"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@vite/client",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/main.tsx?v=QcMbcioDkV6waKjlM3v5S",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@react-refresh",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.pnpm/vite@7.1.9_@types+node@24.7_61597552e415200265e44ff54b51c03e/node_modules/vite/dist/client/env.mjs",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/lib/trpc.ts",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/shared/const.ts",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/@tanstack_react-query.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/@trpc_client.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/const.ts",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/App.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/superjson.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/chunk-IKZWERSR.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/chunk-HLYKEPLF.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/@trpc_react-query.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/index.css",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/chunk-CSSIXMTF.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/react-dom_client.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/components/ui/sonner.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/chunk-UUQJQNZN.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/components/ui/tooltip.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/NotFound.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/wouter.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/@fs/D:/stock-limit-up-analyzer/node_modules/.vite/deps/chunk-CKY6MJWX.js?v=0b4b4b5e",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/components/ErrorBoundary.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/contexts/ThemeContext.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/components/AppShell.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/Dashboard.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/LimitUpReview.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/Upload.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/SentimentAlerts.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/Market.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/SentimentAnalysis.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/BacktestRuns.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/LeaderCandidates.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/OperationLogs.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/PaperTrading.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/datasets/index.ts",
+      "status": 200,
+      "mimeType": "text/javascript"
+    },
+    {
+      "type": "Script",
+      "url": "http://localhost:3000/src/pages/StockSync.tsx",
+      "status": 200,
+      "mimeType": "text/javascript"
+    }
+  ]
+}

@@ -62,6 +62,8 @@ import {
   replaceConditionsAndInvalidate,
 } from "./researchEngine/maintenance";
 import { DEFAULT_CONCLUSION_POLICY, type ConclusionPolicy } from "./researchEngine/conclusion";
+// PHASE-A-001 —— 报告产物的**只读**读取器（本 router 不提供任何报告写端点，见 `getReport`）。
+import { readReportPayload, readReportTraceability } from "./researchEngine/report";
 import { ResearchVariableCatalog } from "./researchEngine/variables";
 import { DEFAULT_EVENT_PAGE_SIZE, DEFAULT_MAX_SAMPLES } from "./researchEngine/sampleSet";
 
@@ -191,6 +193,8 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
         case "DATASET_TOO_LARGE":
         // 增量补跑：缺少整轮执行落定的基准快照（应先整轮执行）
         case "RUN_SNAPSHOT_MISSING":
+        // 报告产物（PHASE-A-001）：Run 未完成 → 不出最终报告
+        case "REPORT_RUN_NOT_COMPLETED":
           throw new TRPCError({ code: "PRECONDITION_FAILED", message: e.message });
         case "INVALID_ANALYSIS_CONFIG":
         case "UNKNOWN_VARIABLE":
@@ -544,6 +548,74 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
         if (!run) throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Run：${input.runId}` });
         const withAnalyses = await repos.relationships.getRunWithAnalyses(input.runId);
         return { run, analyses: withAnalyses?.analyses ?? [] };
+      }),
+
+    /**
+     * GET /research/runs/:id/report —— 该 Run 的 `artifactType = REPORT` 报告产物（**只读**）。
+     *
+     * PHASE-A-001 §10 的四条硬约束，逐条对应实现：
+     *   1. **只读** —— 本端点不写任何表；报告的**生成**发生在
+     *      `ResearchEngine.run()` 收口时（`emitReportArtifact`）或显式回填脚本
+     *      `scripts/generateResearchReport.mts`；
+     *   2. **不创建新的 Research Run**、**不重新计算 Research** —— 只 `list` 既有 artifact；
+     *   3. **找不到报告时返回明确错误** —— `NOT_FOUND` + 「为什么没有」，
+     *      而不是返回一个空对象让前端猜；
+     *   4. **不允许通过 API 修改 artifact** —— 本 router 内没有任何 artifact 写端点
+     *      （create / update / delete 均不暴露）。
+     *
+     * 同 Run 若存在多份 REPORT artifact（历史遗留，正常路径下 `report/service.ts` 会保证只有一份），
+     * 这里取 **id 最大**的一份（= 最近一次生成的），并把全部 id 一并回显，便于人工核对。
+     */
+    getReport: publicProcedure
+      .input(z.object({ runId: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        const run = await repos.runs.getById(input.runId);
+        if (!run) {
+          throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Research Run：${input.runId}` });
+        }
+
+        const artifacts = await repos.artifacts.list({ runId: input.runId, artifactType: "REPORT" });
+        const ordered = [...artifacts].sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+        const artifact = ordered[0];
+        if (!artifact) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message:
+              `Run ${input.runId} 尚未生成研究报告（没有 artifactType=REPORT 的产物）。`
+              + (run.status === "COMPLETED"
+                ? " 该 Run 已完成但报告缺失，可用 scripts/generateResearchReport.mts 回填。"
+                : ` 该 Run 当前状态为 ${run.status}，只有 COMPLETED 的 Run 才会产出最终报告。`),
+          });
+        }
+
+        return {
+          run: {
+            id: run.id!,
+            experimentId: run.experimentId,
+            runNo: run.runNo,
+            status: run.status,
+            sampleCount: run.sampleCount ?? null,
+            startedAt: run.startedAt ?? null,
+            completedAt: run.completedAt ?? null,
+          },
+          artifact: {
+            id: artifact.id ?? null,
+            artifactType: artifact.artifactType,
+            storageType: artifact.storageType,
+            uri: artifact.uri,
+            checksum: artifact.checksum ?? null,
+            /** 产物落库时间 = 报告**生成时间**（正文自身不含时钟读数，见 `report/generator.ts`）。 */
+            createdAt: artifact.createdAt ?? null,
+          },
+          /** 溯源字段（已去掉正文本体，避免同一响应里正文出现两遍）。 */
+          traceability: readReportTraceability(artifact.metadata),
+          report: readReportPayload(artifact.metadata),
+          /** 该 Run 下 REPORT artifact 的全部 id（升序为空视为单份；多份即需人工核对）。 */
+          reportArtifactIds: ordered
+            .map((a) => a.id)
+            .filter((id): id is number => typeof id === "number")
+            .sort((a, b) => a - b),
+        };
       }),
 
     /**

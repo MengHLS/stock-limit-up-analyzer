@@ -181,6 +181,24 @@
 - 回滚：**首选 `git checkout -- server client/src shared && git clean -fd tests`**（一步还原位置 + import 路径，不会漏改）；`_migrate_tests_rollback.mjs` 只做物理搬运、路径需另改。迁移脚本 `_moveTestsToRoot.mts`（在根目录，保留作证据）。
 - ⚠️ **迁移中间态曾出现 9 个新增失败**（16 文件 / 28 例 vs 基线 7/15），全部来自上述第 3/4/5 类漏改 ⇒ **判定「迁移成功」的唯一标准 = 失败文件集合恰好等于基线集合**，不是「文件都搬过去了」。
 
+## 🔴 测试资产与增量测试纪律（2026-09-19 起，强制 · 事项 `rFCOuv`）
+
+> 触发 = 用户「对测试文件进行整理」「因为每次任务完成都要进行全局的测试，只对有改动的进行测试」。
+
+- 🔴 **日常禁跑全量**：每个任务收尾跑 `pnpm run test:changed`（`scripts/testChanged.mts`）。全量 `pnpm test` 只在**版本验收 / 合并前**跑一次。
+- **反向依赖图有两条边，语义不同，禁混用**：
+  - `import` 边（**可传递**）：AST 抽取，且 🔴 **必须剔除纯类型引用**（`import type …` / 花括号内全部 `type X`）。本仓 `client/**` 对 `server/**` 全是 `import type { AppRouter }`（10 处实测）⇒ 若算类型边，改任一 server 文件都会把 `client/**` 整片拉成「受影响」，增量退化成全量。vitest 走 esbuild 只转译不查类型，剔除是安全的。
+  - `reads` 边（**只认直接命中、不进闭包**）：测试用**字符串路径** `readFileSync` 读源码（现存 21 个「源码文本断言」测试）⇒ import 边完全看不到，必须另扫字符串字面量。但从 `App.tsx` 读到的内容**不由 `App.tsx` 的依赖决定**，故该边不传递。
+- **三种情形回退全量**（刻意保守）：① 命中 `vitest.config.ts` / `tsconfig.json` / `package.json` / `pnpm-lock.yaml` / `vite.config.ts`；② 拿不到 git；③ 受影响测试 ≥ 全量 60%。
+- 🔴 **「无测试文件依赖这些改动」是响亮提示，不是静默通过** —— 它说明该源码**没有任何测试 import 它**（例：`client/src/pages/Dashboard.tsx`，首页覆盖只经 `shared/ladderHeight.ts` / `shared/sectorHeatOrder.ts` 到达）。要补覆盖，**禁用 `--all` 掩盖**。
+- 调试：`pnpm run test:changed -- --seed <仓库相对路径> --list` 直接验依赖图（绕过 git）。
+- 🔴 **`tsc --noEmit` 基线 = 23 条错误**（2026-09-19 21:35 实测，全部落在**在研区**：13 `client/src/components/parameterSearch/PersistedParameterSearchPanel.tsx`、4 `server/research/parameterSearch/executor.ts`、3 `server/research/parameterSearch/persistence.ts`、3 `server/research/searchRobustness/persistence.ts`）⇒ 判据 = **错误集合不变**（把两次输出落盘后 `diff`，看「集合」而不是条数）。⚠️ 多轮旧日志写的「`tsc`=0」是**那些轮次的快照**，不是当前判据 —— 别据它判定「谁弄坏了编译」。
+- 🔴 **dry-run 开关必须在「所有」出口生效**：`--list` 曾只在最后一条分支被尊重，而 `--all` / 命中全局触发文件 / 拿不到 git / 受影响达阈值这**四条回退全量路径**都直接 `runVitest([])` ⇒ `--list` 会**真跑全量**（2026-09-19 实测：只想要清单却触发 47s 全量，含真 MySQL / 真 Tushare / 真证据文件测试，恰好违反本事项第 3 条的初衷）。现统一经 `runOrList()` 收敛，源码中 `runVitest([])` **零残留**。任何「干跑 / 预览 / 只列出」类开关同理。
+- **模块测试文档 = `docs/testing/**`**，**镜像 `tests/**`**，由 `pnpm run docs:tests`（`scripts/genTestDocs.mts`）生成。🔴 **禁手改生成物**；要改内容改生成器模板后重跑。新增/删除测试后必须重跑，否则文档与 `tests/**` 静默分叉（生成器整体重建目录，不留旧文档）。
+- 🔴 **测试基线（2026-09-19 裁定：保持现状，不删 / 不改期望 / 不加 skip）**：全量恒定 **8 个失败文件 / 17 例**（20:36 实测：277 文件 → **8 failed / 269 passed**；4597 例 → **17 failed / 4580 passed**，47s）＝ **7 个环境依赖**（真 MySQL：`marketData` / `limitUp` / `limitUp.watch` / `image.uploadAndRecognize`；真 Tushare 网络：`tushare.secret` / `tushareTradingCalendar`；真实证据文件：`dataHealth`）＋ **1 个已知失效**（`tests/server/research/parameterSearch/parameterSearchEffectiveness.test.ts`：期望旧派生器 `parameterSpaceFromDocument.ts` 头注释带 `LEGACY / PREVIEW` 标记而当前没有，属 parameterSearch 在研区，本轮未处置）。逐项依赖见 `docs/testing/README.md` 登记表。判据仍是**失败文件集合**，不是案数。
+  - 同日修掉的原第 8 个：`tests/server/researchCore/candidates.updateBoundary.test.ts` —— 源码按 RESEARCH-PLANNER-001 给 `RESEARCH_CANDIDATE_IMMUTABLE_FIELDS` 加了 `sourceResearchPlanId`（6→7 项），测试期望没跟上。**此处源码是权威**，改期望属正当；「禁为过测试改期望」禁的是**环境依赖型**失败，两者别混。
+- **测试 / 运行产物纪律**：跑测日志（`_dev.log` / `_dev_probe.log` / `_vitest_probe.log`）与 `.cache/**`（运行时快照，可由服务端重建）**不入库、随跑随清**。2026-09-19 清理根目录 3 个日志 + `.cache/`（合计 **55.0 MB**，根文件 0 改动）。
+
 ## 🔴 前端候选草图（RESEARCH-006.4.1-C 系列 · 纯 `client/**`）
 
 - **`filterRule` 的正名与归位**（C.3 / **归属段 2026-09-13 改**）：🔴 它的**唯一去向是 `entry.conditions`**（`definitionBuild.ts:506-508`）=「全部满足才产生买入信号」⇒ 它**是「买入条件」、不是「剔除条件」**（`SKETCH_BLOCK_LABELS.filterRule = "买入条件"`）；**归属段是 `condition`（什么条件买，2026-09-13 由 `when` 改过来）、不是 `what`**（`SKETCH_BLOCK_HOME_SEGMENT.filterRule = "condition"`）。🔴 **禁把它折回 `when`（什么时候买）段，也禁标成「剔除」** —— 前者会让「**可空的条件**」与「**三项全必填的时点**」共用一个段徽标，用户填完看得见的条件后徽标仍停在「还差 N 项」、且清单里那几项看不出属于同一段 ⇒ 这就是用户连续四轮投诉「什么价买永远还差一箱校验」的**真实机理**（**结构问题不能用压文案解决**）；后者会让用户把方向写反（去写 `NOT_IN` 才买）。条件模板 `CANDIDATE_CONDITION_PRESETS` 前两条**逐字取自后端 golden sample** `FIRST_BOARD_PULLBACK_DEFINITION`（`bar.low >= prefix.rd0.open` / `bar.volume < prefix.rd0.volume`）⇒ **禁自己编口径**；条件行**禁退回裸字段引用输入框**（用「部位 + 相对日 + 字段」三格选择器 + 人话预览 + 小字回显原始引用；不可解析的既有值退回自由文本且**绝不重建** —— 防静默丢数据）。
@@ -851,3 +869,142 @@ Research canonical identity **`sec_<uuid>`**（不是股票代码）⇒ 用户�
 ## 前端可达性
 - 🔴 **「接线完成」≠「用户够得到」** ⇒ 交付前必须无头量 DOM；`createCandidate` 实测 **13.2 秒** ⇒ 长请求按钮**必须换文案**；身份判据 `questionId ?? runId`；`Link` 包 `Button` 须 `<Button asChild><Link>`；`/research/ask` 的 `step`/`questionId` 是**内存态** ⇒ 已补深链 `?runId=N`。
 - 🔴 **CDP 五坑**：① 兼听 `requestWillBeSent` ② toast 须**高频轮询** ③ 模板串正则 `\s` 会被吃（用 `includes`）④ **Radix Select / 受控控件只认 `pointerdown`** ⇒ 必须 `Input.dispatchMouseEvent` 真实鼠标；受控 input 须原型 native value setter + `input` 事件 ⑤ 端口必须**实测空闲**。
+
+## 🔴 MEMORY.md 原文下移 #2（2026-09-19 · STRATEGY-AUDIT-001 / ARCH-001-002 / BACKTEST-002 / PARAMETER-001-002 / PARAMETER-001-PRE / SYSTEM-BASELINE-001 / 扩展能力 PLAN）
+
+> 第 2 次下移：第 1 次下移之后，各轮任务（见章名）继续往 MEMORY.md 追加，当日已达 **20759 B**，再次超过会话注入上限（注入时被截断 ⇒ 后续会话看不到尾部硬规则）。按项目惯例把原文**逐字节搬运**至此，MEMORY.md 重写为压缩索引。以下为下移原文（未改写）。
+
+# stock-limit-up-analyzer 硬禁令索引
+
+> **压缩索引**；🔴 **唯一细则源 = `.workbuddy/memory/PROJECT_RULES.md`**（194 KB，末章「MEMORY.md 原文下移」保有旧全文）。动手前读本文 + 当日日报，再按章名 grep。
+
+## 三门（违反即事故）
+1. 🔴 改 `server/**` ⇒ `tsx watch` 热重启并**杀死在途 Run**（在途 = `RUNNING`；`PENDING` + 空 `inputSnapshot` 的草稿**禁收敛**）⇒ 用户在用页面时禁改 server、禁跑重库脚本。改 `client/**` 只走 HMR。
+2. 🔴 禁 `install` / 新依赖 / `prettier --write` / `db:push` / `drizzle-kit generate` / 手写 `_journal.json`。
+3. 🔴 **同一文件的多处编辑必须串行** —— 并行两个 `Edit` ⇒ 后写覆盖先写、前者**静默丢失**。
+
+## 环境 / 工具
+- 端口只认启动日志（常被占 ⇒ 实测过 3000/4000/4001/4002；残留无头 Chrome 会「TCP 通但 fetch 失败」）；探端点用 Node `fetch` / `curl`。
+- 沙箱 Bash 缺 coreutils ⇒ 命令前置 `export PATH=/c/Users/A/.workbuddy/binaries/PortableGit/versions/1.2.0/usr/bin:/c/Windows/System32:$PATH`；`git`/`node` 不认 `/c/...` ⇒ 传 `C:/...`；Win stdout 常不返回 ⇒ 落盘用 Python 读。
+- 🔴 **长任务输出禁接管道**（EPIPE ⇒ 脚本中止并清空自身留档）；后台用 `run_in_background` + 读 `.out.txt`。
+- 🔴 改文件 = Python bytes + `os.replace` + 回读；裸 `str.replace` 必须 `assert count==1`（否则静默 no-op）。测试基线 = **8 失败文件 / 17 用例**（判据 = 失败**文件集合**，先剥 ANSI 颜色码）。
+- 🔴 行尾唯一依据 = **HEAD blob**（`git hash-object` ≠ `git rev-parse HEAD:<f>` 而 `git diff-files` 为空 ⇒ 漂移看不见）。改前改后跑 `scripts/checkEolDrift.mjs`（`--fix` 按 HEAD 归一化）。CRLF 仅：`PROJECT_RULES.md`、`.gitignore`；其余（含 `ROADMAP.md`/`MEMORY.md`/`client|server|docs|tests|scripts/**`）为 LF。⚠️ 读 CRLF 须 `open(..., newline="")`；写探针/JSON 一律 `"wb"`。
+- ✅ 前端验收 = 无头 Chrome/Edge + Node `WebSocket` 直连 CDP **量 DOM**（`agent-browser` 本机不可用）；端口**实测空闲**、输出**必须落盘**。
+- one-off 脚本写仓外 `C:\work\sourcecode\_scratch\`；报告 `docs/research/`、探针 `docs/evidence/`（须登记 `README.md`，**只准** `.mts/.mjs/.log/.json/.md/.txt`，收尾 `ls docs/evidence/*.py` 应为空）。🔴 `client/**` 只禁 import `server/**` **运行时值**；`@shared/*` 允许。
+
+## 总控
+- `ROADMAP.md` 唯一 Master Control（§44 覆盖式：**只保留最近 1 条**；§44.5 队列；§47 append-only → 写 `ROADMAP-CHANGELOG.md`）；仅 `RESEARCH_READY=TRUE` 允许策略结论（已 TRUE，gate 17/17）。
+- 🔴 取号真源 = 「编号台账」行（**禁「末条 +1」**，禁凭记忆）；**文件头铁律行 + 台账行两处同步**；**取号前先对远端**。⚠️ 并行会话会推进台账。**「完成一条已登记项」不取新号**，就地改完成态。
+- 🔴 **台账已滞后（2026-09-19 实查）**：两处仍写「已用至 `9br`、下一个 `9bs`」，但 `9bs`（PARAMETER-001）/ `9bt`（PARAMETER-002）已在用（见 `docs/parameter-search/*-REPORT.md`、`SYSTEM-BASELINE.md` 增量、`CHANGE-AUDIT.md`）⇒ **下一个未占用 = `9bu`**。修它属 Drift 处置（**改文档不改代码**）。
+- 🔴 分叉合流：`ls-remote` → `fetch` → `merge --no-ff`；文档冲突**两侧都保留**；丢文件 `git ls-files -d -z | xargs -0 git checkout --`。
+
+## 领域口径（最易踩）
+1. 评估端口 = `server/research/strategyEvaluation/`（唯一），主输出字段 **`evaluation`**；**`dataReady: true` 必须显式传**（缺省 false ⇒ 否则 `INCONCLUSIVE`）。
+2. 交易日历唯一来源 = `index_daily`（**停更 ⇒ 静默 no-op 却报成功**，补数须 `--force`）。
+3. `/backtest` **并存两套交易语义**（快照 = 等权；顶层 = 固定 100 股）⇒ **禁加 cap**。
+4. **止损三落点互不相通**（`realisticBacktest.ts` / `paperTrading.ts` / `server/engine/**` **完全不执行**）。
+- 事项闭环：`todo_delegate_status = idle` ⇒ 无 dispatch id ⇒ 用 `todo_add_comment`+`todo_transition`。
+
+## 页面
+- 🔴 侧栏高亮 = **分段精确匹配 + 取最长命中**（`AppShell.tsx#isPathActive`，禁 `startsWith`，详情页点亮父项）。首页 `/` 入口 = 左上角网站标题（`data-slot="sidebar-home-link"`）⇒ 站在 `/` 侧栏**零高亮**。探针 `_probe_sidebar_active_highlight.mjs`。
+- 🔴 首页 = `client/src/pages/Dashboard.tsx`：四指数迷你卡（各 120 交易日）+ 共享分类轴两联图（右轴**仅成交额**）+ 连板梯队「高度 × 网格」+ 题材热力图。
+- 🔴 梯队「高度」= **「若该股本日涨停会达到的连板数」**（断板 +1；**首板未续也 +1**）⇒ 唯一实现 `shared/ladderHeight.ts`（口径函数须落 `shared/`）。折叠是**组内**的（`LADDER_GROUP_VISIBLE_ROWS=3`）。行序按**题材当日热力**降序（`shared/sectorHeatOrder.ts`，缺热度 **-1**）。⚠️ `limit_up_records.boardCount` 基本全 NULL ⇒ **不可作真源**。
+- 🔴 生成物禁手改：`darkCompatibility.css` / `favicon.svg`。运算符两形只在 `definitionBuild.ts#CONDITION_OPERATOR_MAP` 译；**免责声明不得删**。
+- 🔴 **「接线完成」≠「用户够得到」** ⇒ 交付前必须**按正常导航**量 DOM；长请求按钮 **pending 必须换文案**；`<Button asChild><Link>`；静默 `return` 换响亮 toast。凡靠内存态才能到达的界面必须有 URL 深链。
+- 🔴 **CDP 五坑**：兼听 `requestWillBeSent`；toast 每 400ms 轮询（4s 消失）；模板串正则 `\s` 被吃（用 `includes`）；Radix/受控控件只认真实鼠标；端口**实测空闲**。DOM 锚点须**页面主体唯一长锚点**（禁侧栏短词）。
+
+## Strategy 域运行坐标 / 参数链路（STRATEGY-AUDIT-001，2026-09-19）
+- 🔴 运行时**唯一权威数据集坐标 = `datasetVersionId`**（`researchRunRouter.ts#primaryDatasetVersionIdOf` → `datasetFromRegistry.ts`）；`datasetVersion`(label) 仅展示。⚠️ 回落重建时 `datasetVersionId = null` 且**只继承 boards/excludeSt**，不继承 event/window/tDayCondition ⇒ 口径不同。
+- 🔴 **`loopRun` 的 `parameterSet` 入参是死字段**（只进 `metadata`，不落库）；参数覆写唯一活路 = `assemble.ts:135 parameterOverrides`（前端也不提交）。
+- 🔴 **`parameterRole` 的运行期派生器 `parameterSpaceFromDocument.ts` 完全不读它**（FIXED 也会被搜）；`derivedFrom` **无求值器**；执行层用**有损的 v1 `document.parameters`**（`legacyViews.ts:157` 丢弃 code/role/unit/derivedFrom）；`paramSearchRouter.ts` 全文**零写库调用**。
+- 🔴 **运行级复现快照缺失**：`closed_loop_backtest_run` 无 `parameterSet`/`codeVersion`/`engineVersion`/`seed`/`Universe`/`startedAt`；`strategy_versions.codeVersion` 实测 **11/11 = `1.0.0+gunknown`**。
+- 🔴 **`LeakageGuard` 对配方特征恒通过**（`recipeRegistryAtoms.ts#samePointAvailability` 恒置 `1990-01-01`）⇒ 策略层没有独立未来函数防护，安全全靠数据层 PIT。
+- 🔴 `setVersionStatus` 只校验「属于八态」，**不吃 §23 迁移表** ⇒ `Draft→Production` 跳级不被拒。
+- ⚠️ 实测仅 **1 个 `dataset_definition`**（`first_limit_pullback`）、2 个 `dataset_version`；`strategies` 10 行全 Draft；闭环留档 6/6 `PARTIAL_BLOCKED`。全文 = `docs/research/STRATEGY-AUDIT-001.md`。
+
+## Strategy Core 语义权威（STRATEGY-ARCH-001/002）
+- 🔴 **Core 唯一入口 = `server/strategyCore/`**（`StrategyRuntime.evaluate(version, parameterSet, context)` → `StrategyDecision`）＝**语义**权威；legacy `StrategyDefinition` 降级为**存储编码**，靠 `adapters/legacyDefinition.ts` **双向**翻译（指纹逐字节相等，有测试）。两出口分开：`strategyCore/index.ts`（Core）与 `strategyCore/production/index.ts`（生产；唯一调 Runtime 处 = `production/coreDecision.ts`）。
+- 🔴 **`WINDOW` 只考虑「当前决策日及之前」**（更晚的进 `futureSkipped`）⇒ `evaluate` **必须逐决策日调用**；`FIRST_VALID_DAY` 在条件首次成立那天发信号；「今天出不出信号」= **今天成立 ∧ 昨天尚未成立**（`coreDecision.ts` 用**不计数**的 `resolveQuiet` 再求一次截到昨天的窗口）。
+- 🔴 **`updateVersionDefinition()` 恒抛 `VERSION_IMMUTABLE`**；改内容只能 `applyDefinitionChange()` → 新版本。
+- 🔴 **事件判定必须由运行方注入**（`context.resolveEvent`）：**未注入即抛错**，绝不静默返回 false。生产注入 = `production/eventSource.ts#createDatasetEventResolver`（锚定 bar=rd0，按 `limitUpRatio` 判涨停，缺 OHLC ⇒ `UNDECIDABLE`）；`setEventOccurrenceResolver` **无生产调用方**。**N-07**：`eventAnchored` 是装配层约定，**未从 `dataset_definition` 机器读取**。
+- 🔴 **Definition 内不得出现 Dataset / 引擎坐标**（`DATASET_BINDING_IN_DEFINITION_FORBIDDEN`）；`datasetVersionId` 只允许在 `StrategyRunSnapshot.datasetReference`。
+- 🔴 特征 `availability` 是**相对当前 bar** 的声明（`usesForwardData` 必须 false、`dataThroughRelativeDay ≤ 0`）；`usesForwardData=true` **无法注册**（`LEAKAGE_LOOK_AHEAD`）；`availableAtPoint=close` 的特征在 `T_OPEN` 决策时被**运行期**关卡拒。
+- ⚠️ **`bar.<派生字段>` 经 `DERIVED_BAR_FIELD_TO_FEATURE_ID` 映射为特征 id**（4 键：`volumeRatio`/`haircutFromEventLow`/`isBullish`/`momentumFromEventClose`）⇒ 改它必须同步 **6 处**：`featureRegistry`（映射表**+** `makePullbackFeatures` 实现）/ `strategySchema/definition.ts#STRATEGY_DERIVED_BAR_FIELDS` / `definition.ts#validateCoreDefinition` 的跳过表 / `recipeRegistryAtoms.ts#PULLBACK_FEATURE_IDS` / `conditionSignal/compile.ts` / `client/**candidateSketchVocabulary.ts`。⚠️ 后 3 处是**既成的第二套映射**（禁再新增）。
+- 🔴 **接产已完成（ARCH-002）**：`loopRun(useRealData)` / 闭环 `research` 阶段 / 参数评估器三条路径共用同一装配，判定由 Core 产出；留档落 `closed_loop_backtest_run.resultJson.strategyRun`（**零 schema 变更**；全量决策会撑爆 `resultJson` ⇒ 只存摘要 + 有界样本 24 条）。回落仍在（`assembleStrategySide`：Core 优先，失败 ⇒ `legacy-recipe` + `strategyDecisionEngineNote` reason code）⇒ **新模式验收须断言 `strategyDecisionEngine === "strategy-core"`**。
+- ⚠️ 遗留 N-03（阈值型出场仍在 `exitRules` 声明、未进 `exitRuleGraph`）/ N-04（`ALL_DAYS` legacy 不可表达 ⇒ 一律译 `ANY_DAY`）/ N-05（`runtimeConfig` 运行级而评估逐决策日 ⇒ 不能单独复现全量）/ N-06（`datasetHorizonRelativeDay` 逐决策日不可知）/ N-08（「首板性」不在事件窗内可验证）。实测语义差异：同 bars legacy 出 `[2,3]`、Core 出 `[2]`，首日一致 ⇒ **历史回测数字不可直接对比**（未抹平，已登记）。
+
+## Backtest 口径与留档（BACKTEST-002，2026-09-19）
+- 🔴 **年化口径唯一 = 252 交易日/年**（`server/backtest/backtestResult.ts#BACKTEST_ANNUALIZATION_DAYS`），**必须复用** `shared/quant-stats#annualizedReturnFromEquityCurve`（`n = 权益点数 − 1`）。别再写 244。
+- 🔴 **`maxDrawdownPct` = 正数幅度**；**逐点 `drawdownPct` 才是有符号（≤0）**，两者不同量。
+- 🔴 **算式形式也算口径**：`(end/start − 1)×100` 与 `((end − start)/start)×100` 浮点不同（`5.3` vs `5.299999999999994`）⇒ 跨模块统一必须连算式一起。
+- 🔴 **canonical 唯一面 = `canonicalMetrics()`**；**`NOT_AVAILABLE` 不得被评估器数值顶替**。
+- 🔴 **留档写入必须重试**：真实 Run 计算 593~627 s 期间不碰 DB ⇒ 结束时单次 `insert` 必然失败（判据 = 紧随 SELECT 首发也失败、**重试即成功**）。`researchRunRouter#persistClosedLoopBacktestRun` 已有界重试 ≤3 次（best-effort、**不抛**）。⚠️ 别改成「失败即抛」。
+- ⚠️ **探针读 `closed_loop_backtest_run.resultJson` 拿到的是字符串** ⇒ 必须 `JSON.parse` 兜住；长算探针应支持只读复核模式（如 `XXX_VERIFY_ONLY=1`）。
+
+## Parameter Search（PARAMETER-001 / 002，2026-09-19）
+- 🔴 **参数「声明在 schema 里」≠「决策引擎会读它」** ⇒ **唯一判据 = `strategyCore/ruleGraph.ts#collectRuleParameterReferences`**（入口 + 出场规则图）。实测 `cand-360001@1.0.0` 声明 3 个 TUNABLE 而 `PARAMETER_REFERENCE = 0` ⇒ 3 组极端取值产出**逐字节相同**的权益曲线。「今天是否可搜」唯一落点 = `searchSpace.ts#isSearchableStrategyParameter`（`role === "TUNABLE"`）。
+- 🔴 **`createParameterSearchRun`（用户口中的 `createSearch`）会因死参数响亮拒绝**：`PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER`；给死参数赋会变化的搜索域另拒 `PARAMETER_SEARCH_OVERRIDE_ON_UNREFERENCED_PARAMETER`；前置窗口校验 `PARAMETER_SEARCH_WINDOW_OUT_OF_DATASET_RANGE`。⇒ 旧探针搜 `cand-3600xx` 现在会被拒，**这是新预期行为，不是回归**。
+- 🔴 **顺序纪律：`派生 → 覆盖 → 死参数剥离 → 校验`**（显式搜索域覆盖**能**把死参数重新塞回搜索空间，实测踩到）。⚠️ `TUNABLE 缺搜索域` 只在**无 `exclusionReason`** 时报错。
+- 🔴 要真搜参数：文档里用**参数引用**（如 `bar.volumeRatio <= max_volume_ratio`，右值写成参数 code、`valueType=PARAMETER_REFERENCE`）并生成**新版本**（旧版本不可变）。⚠️ 左值必须**同量纲**：比值参数配 `bar.volumeRatio`，写成 `bar.volume` 会恒为假。
+- 🔴 **搜索空间派生的 role 真源 = `strategy_parameters` 投影**（`parameterRole`），**不是** `document.parameters`（legacy v1 有损视图，**无 role**）。**同时存在两条派生器**：`strategyEvaluation/parameterSpaceFromDocument.ts`（旧/无 role = LEGACY/PREVIEW，消费者含闭环 optimization 阶段）与 `parameterSearch/searchSpace.ts#deriveParameterSearchSpaceFromProjection`（新/带 role，PARAMETER-001/002 唯一使用，有静态源码守卫测试）。
+- 🔴 **`parameterHash` 拒绝 NaN/Infinity**（静默转 null ⇒ 两组参数撞同一身份 ⇒ resume/retry/cache 全错位）；撞 hash **响亮抛错**。**Run 计数唯一真源 = 结果行重算**（`persistence#recomputeRunCounters`）。
+- 🔴 **`server/research/parameterSearch/index.ts` 刻意不 re-export 执行层**（会经评估端口子图回到 `closedLoopWiring/executors` 形成运行时循环导入）；消费方按显式路径引用。**`adminProcedure` 全仓零使用**（实测 0 命中）⇒ 新增写端点沿用 `publicProcedure`。
+- ⚠️ **`dataset_version.startDate/endDate` 是 UTC 时间戳**（北京日 2024-09-01 存成 `2024-08-31T16:00:00Z`）⇒ 取业务日期**必须按北京时区**，`toISOString().slice(0,10)` 会少一天。
+- ⚠️ 三表 `parameter_search_run` / `_combination` / `_result`（26/10/23 列、0 FK、快照写入即冻结）；迁移 = `drizzle/0041_parameter_search.sql` + `scripts/applyParameterSearch.mjs`。遗留：`backtestRunId` 恒 NULL（评估端口走内存态 5 阶段闭环）。
+
+## 参数搜索性能（PARAMETER-001-PRE，2026-09-19）
+- 🔴 **真实 Run 三个分母**（同输入实测）：`optimization` **92.83%** · 数据集装载 **2.61%** · 留档写库 **3.36%** · **主链只 0.97%**（6.4 s）。DB 往返仅 61 次（无 N+1）；CPU 采样 ≈ 墙钟 ⇒ 纯 CPU-bound。全文 = `docs/parameter/PARAMETER-001-PRE-PROFILE.md`。✅ 旧结论「Core 只占 8.7%、主因在数据集读取」**已被否证**（Core 实际 **85.8%**）。
+- 🔴 **R-06 根因 = 窗口不在请求里**：`optimization` 的样本窗口 = 数据集版本窗口（484 决策日），不是运行窗口 ⇒ **9.28×**。**DEFECT-1 已定位未修**（改它会改 `optimizationRef`，违反 §10 Before==After）。
+- 🔴 **定义指纹必须缓存**：`strategyCore/runtime.ts` 原在**每次求值**里对**整份定义**算 **2 次** `computeDefinitionFingerprint` ⇒ `canonical.ts` 占 **44.30% CPU**。已改为按 definition `WeakMap` 缓存 + 每求值取 1 次（**逐字节等价**，有回归测试）⇒ **2.07×（计算路径）**。
+- 🔴 **`db.read_ms` 是「并发求和」不是墙钟**（48 条批读并发 16）⇒ 拿它当网络占比会差 6 倍。占比一律用 `dataset.resolve` / `persistence.db_write` 的**墙钟**。**Before/After 必须同条件**（插桩 + 1 ms 采样把 593.3 s 变 657.8 s，+11%）⇒ 跨报告引用数字必须写明条件。
+- 🔴 **特征不可跨参数预计算**（`runtime.ts` 把 `resolved.values` 传给 `featureDefinition.compute`）⇒ 除非先补「特征→参数依赖」声明，否则预计算 = 静默改结果。
+- 🔴 **搜索边际成本（AFTER 实测）**：**2,500 ms/组**（用户窗口 57 日 / 7,731 成员槽）⇒ 1000 组串行 ≈ **42 min**；数据集必须**一次装载多组复用**。插桩开关 `PARAM_PROFILE=1`（**默认关**）；探针 `_probe_param001_pre_profile.mts` / `_probe_param001_stage_bench.mts`（零写库，**须 `process.exit()`**）/ `_probe_param001_recon.mts`。
+
+## Architecture Baseline 入口（SYSTEM-BASELINE-001，2026-09-19）
+- 🔴 **后续任务默认入口 = `docs/architecture/SYSTEM-BASELINE.md`**（+ `system-manifest.yaml` + `CHANGE-AUDIT.md`）⇒ **除非触发 12 条 `GLOBAL AUDIT REQUIRED`，禁再全局重扫**。Agent 规范见 `docs/architecture/AGENT-GUIDE.md`（14 条禁止行为 + 16 条陷阱）。文档头 = **v1.1.1**（`system-manifest.yaml` 仍写 v1.0.0，既有不一致）。增量一律**追加在文件末尾**，编号 `<前缀>-90`。
+- 🔴 **基线描述的是「工作区」，不是 HEAD**；**行号只是 auditedAt 快照 ⇒ 定位一律用「路径 + 符号名」**；**采样值必须带时间戳**。
+- 各域状态：Dataset/Research/Strategy/Backtest/Parameter Search/MarketRegime = **READY**；**Evaluation = PARTIAL**；Robustness/OOS/WFA/Overfitting/Lifecycle = FACT(技术预览)；Simulation = FACT；**Production = PLANNED**。闭环 14 阶段**实装 8**（未装 robustness/oos/overfitting/paper/review/discipline ⇒ `CL_RUNNER_NOT_INJECTED`；上游缺 ⇒ `CL_UPSTREAM_BLOCKED`）。
+- 🔴 **三个语义权威**：策略 = `server/strategyCore/**` · 执行/成本/持仓 = `server/backtest/**`（**禁新建 backtestCore**）· 指标 = `backtestResult.ts#canonicalMetrics()`（**唯一**）。
+- ⚠️ **DB 事实**：真实库 **63** 张基表；**0 外键**（全软引用）；**drizzle 发布链路自 0024 停摆**（journal 止 0023 / snapshot 止 0015）⇒ `db:push` 不可用，只能手写 SQL + `scripts/apply*.mjs`。⚠️ `prefix`/`post`/`path`/`outcome` 物理表**不在 drizzle 链内**（权威 = `datasetRegistry/plugins.ts` 声明式 DDL）。
+- 🔴 **探针纪律**：`ds_*` 全表 COUNT 相加 ≠ 应看**按 `datasetVersionId` 分组**；`resultJson LIKE '%"backtest"%'` **不是**「有 backtest 段」的判据（会误命中 `backtestFingerprint`）⇒ 用 `$.backtest.executionMetadata.executionPolicyVersion`。
+
+## 扩展能力（PLAN-STRATEGY-MODULE-EXTENSION-001，**方案未实施**）
+- 全文 = `docs/research/PLAN-STRATEGY-MODULE-EXTENSION-001.md`。**既有**扩展骨架三处：`research/patternLibrary`（交易模式单一声明 → 四投影；加模式 = 加声明文件 + `patterns/index.ts` 一行）、`researchEngine/analyses/registry.ts`、`datasetRegistry/plugins.ts`。
+- 🔴 四个**真缺口**：① **报告无落地产物**（`research_artifact(REPORT)` + Repository 齐备，但 `server/**` 里 `artifacts.create` **零命中**；无生成器/无端点；今天只有前端渲染）② **分析类型闭集**（声明 12 种 / 实现 6 种，新增要改 `researchCore/types.ts` + `analysisConfig.ts` 两处 Core 代码）③ **数据集插件手工注册**（`createDefaultPluginRegistry()` 一行 `register`；无 glob/codegen；`feature` 角色已预留零实现）④ **两条决策路径并存**。
+- 🔴 纪律：**AI 只生成纯数据声明，执行代码必须走 9 个具名槽**（S1 特征 / S2 条件 / S3 事件 / S4 出场 / S5 分析执行器 / S6 变量 / S7 报告渲染 / S8 数据集插件 / S9 次级派生）；缺槽**响亮拒绝**，禁静默回落。分期 P0（报告产物）/P1（分析类型注册表化 + `PATH`）/P2（插件发现 + `extension:verify`）/P3（决策路径收敛）/P4（派生字段桥单一化，风险最高）。
+## 组合回测页（/backtest）加载性能（2026-09-19 · 🔴 **瓶颈 = 取数，不是计算**）
+
+**方案文档（唯一推荐入口）**：`docs/research/PLAN-BACKTEST-COLD-START-001.md`（P0 服务端快照 / P1 价格行本地镜像 / P2 显式「开始回测」）。
+**现行实现 = HEAD**：`getLeaderCandidateResearch` 无磁盘快照、不剥离明细、无单飞（2026-09-19 曾补齐并通过全部验收，随后按用户要求回退，勿据旧记录重做）。
+
+**链路**：`client/src/pages/Backtest.tsx` → `sentiment.getLeaderCandidateResearch` → `db.getLeaderCandidateResearch` → `loadBacktestBaseContext` + `runLeaderCandidateResearchReport`。
+
+### 🔴 实测阶段耗时（2026-09-19 · 冷进程 · 区间 2025-09-01~2026-09-19）
+| 阶段 | 耗时 |
+|---|---|
+| `dailyPriceCoverage`（`stock_daily_prices` **8,895,704 行全表聚合**） | **18.24s**（第 2 次 0.00s；TTL 10 分钟） |
+| `marketFactorRows`（`limit_up_records` 全表 GROUP BY → 1,873 行） | **10.30s**（第 2 次 0.00s） |
+| `suspensionWindows`（全表 → 182 行） | 0.33s（🔴 **零缓存**） |
+| `loadBacktestBaseContext` 1 年 / 2 年 | **46.48s**（280,922 rawRows）/ **137.95s**（514,510 rawRows） |
+| `runLeaderCandidateEngineProbe`（生产引擎） | **2.10s** |
+| 生产核心报表（`includeResearch:false`） | **1.80s** |
+| **研究段增量**（~140 次 research-legacy 模拟） | **2.31s** |
+| **计算合计** | **≈6.2s** |
+
+**端到端（真实 dev server）**：1 年区间 **21.0s / 57.9s（同日两次，波动 2.8×）**；
+🔴 **2 年区间 = 500 `connect ETIMEDOUT`，等 256.9s 后失败**。`rawRows` 1 年 = **52.15MB JSON**（≈190B/行）；跨境 **3.7~6.2 千行/秒**。
+
+### 铁律
+1. 🔴 **瓶颈是取数**：计算只 ≈6.2s。任何「优化」若不减少跨境搬运的行数 / 不把已取数据持久化，都是小修小补。**禁止**再把重心放在结果缓存与载荷剥离上（研究段只 2.31s）。
+2. 🔴 **价格行必须存到 (股票, 日期) 行级**才能跨区间复用；**按区间做快照对「换区间」无效**（换区间 = 新键 = 重拉）。
+3. 🔴 **改写价格取数必须 A/B 逐字段对比后才可改**（既有口径）：同区间「本地读 vs 直连远端」，比 `rawRows` 全部 8 个字段 + 结果指纹，**作为准入门槛，不通过不合并**。
+4. 🔴 `dailyPriceCoverage` 的内存缓存**被刻意排除**在 `invalidateLeaderCandidateBacktestCaches()` 之外（写入路径是**逐批**调用的，逐批清空会退化成数十次全表聚合）
+   ⇒ 给它加快照的正解是**「快照自带数据戳 + 读时比对」**，不是挂"写入即清空"。
+5. 🔴 `getLeaderCandidateResearch` 与生产核心 `getLeaderCandidateBacktest` **能力不对称**（后者有剥离/快照/单飞）⇒ **凡 `getXxx` 与 `getXxxResearch` 成对出现，三件套必须成对检查**。
+6. 🔴 缓存键会当文件名时**禁含 `:`**（Windows 非法；`writeLeaderCandidateBacktestSnapshot` 的 catch 是**静默降级**）⇒ 用 `stableHash` 纯十六进制键。
+7. 🔴 **`tsx watch` 在连续快速文件变动后可能整体退出**（端口静默无监听）⇒ 取基线优先 `git stash`；**改完 `server/**` 必须确认启动日志仍有 `Server running on http://localhost:3000/`**。
+
+### 现状缺陷（与是否回退无关，均为真）
+- 前端 `staleTime = 30min` 但 React Query 默认 `gcTime = 5min` ⇒ 离开 >5 分钟缓存即被回收、必重拉。
+- `downsideRiskResearch.rollingWindows` 每窗口 5 个实验内嵌的 `trades` + `equityCurve` 约 **2.4MB（27% 载荷）前端完全不用**（只读 12 个标量列）。
+- 结果载荷 **9.84MB**，其中 `downsideRiskResearch` **7.39MB / 75%**；`historicalRows` 仅 **0.95MB / 10.15%**（1,029 行；「省 10MB」是**全区间 10,336 行**口径的误读）。

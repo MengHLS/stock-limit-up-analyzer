@@ -1,5 +1,5 @@
-== /backtest 页签归属 + 模拟订单分页 探针 == 2026-09-18T14:46:36.890Z
-BASE=http://127.0.0.1:3000 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=26044 DATA_WAIT=40min
+== /backtest 页签归属 + 模拟订单分页 探针 == 2026-09-19T13:44:32.735Z
+BASE=http://127.0.0.1:3000 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=27707 DATA_WAIT=40min
 CDP 已连接
 
 --- A. 页签导航 ---

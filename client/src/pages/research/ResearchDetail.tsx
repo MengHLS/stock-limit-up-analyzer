@@ -502,6 +502,21 @@ export default function ResearchDetail() {
               right={
                 <div className="flex items-center gap-2">
                   {/*
+                    PHASE-A-001 —— 研究报告入口。
+
+                    为什么放在这里而不是「结论」页签里：报告的输入是 **整个 Run**
+                    （分析清单 + 全部结果 + 发现 + 结论），而不是单条结论；放在「分析」
+                    卡片右上角，与「看结论 / 创建候选」并列，语义上就是「这个 Run 还有什么能看」。
+
+                    Run 未完成时也能点：目标页会明确说明「只有 COMPLETED 的 Run 才会产出
+                    最终报告」，比把按钮藏起来更容易理解（灰按钮不解释原因）。
+                  */}
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={`/research/report/${selectedRun.id}`}>
+                      <FileText className="mr-1.5 h-4 w-4" /> 查看研究报告
+                    </Link>
+                  </Button>
+                  {/*
                     PATTERN-LIBRARY-001 补 —— 为什么需要这个入口：
                     「提问研究」页的步骤状态是纯内存态，刷新即回到 ASK，
                     于是库里已完成的 Run 在页面上没有任何入口能回到结论步骤

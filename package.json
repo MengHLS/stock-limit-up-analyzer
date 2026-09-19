@@ -11,6 +11,8 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
+    "test:changed": "tsx scripts/testChanged.mts",
+    "docs:tests": "tsx scripts/genTestDocs.mts",
     "backfill:daily": "tsx scripts/backfillDaily.ts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },

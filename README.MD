@@ -41,9 +41,17 @@ pnpm exec tsx watch server/_core/index.ts
 | 命令 | 作用 |
 |---|---|
 | `pnpm run check` | `tsc --noEmit` 类型检查 |
-| `pnpm test` | `vitest run` 全量测试 |
+| `pnpm run test:changed` | **只跑与本次改动相关的测试**（`tsx scripts/testChanged.mts`）—— **日常开发用这个** |
+| `pnpm test` | `vitest run` 全量测试（含 7 个环境依赖测试，离线恒红；只在版本验收 / 合并前跑一次） |
+| `pnpm exec vitest run <路径>` | 跑单个文件或某个模块目录 |
+| `pnpm run docs:tests` | 重新生成模块测试文档（`tsx scripts/genTestDocs.mts` → `docs/testing/**`） |
 | `pnpm run backfill:daily` | 每日行情回填（`tsx scripts/backfillDaily.ts`） |
 | `pnpm run db:push` | `drizzle-kit generate && drizzle-kit migrate` |
+
+### 🔴 不要再「每个任务完成就跑全量」
+
+全量里有 **8 个恒红文件**（7 个环境依赖：真 MySQL / 真 Tushare / 真实证据文件；＋ 1 个已知失效 `tests/server/research/parameterSearch/parameterSearchEffectiveness.test.ts`）离线**必然失败**，跑它只会让「基线零新增」退化成人工比对文件集合。
+日常请用 `pnpm run test:changed`（按 git 改动 → 反向依赖图 → 只跑受影响的测试）。详见 `docs/testing/README.md`。
 
 ### 🔴 不要跑 `pnpm run format`
 
@@ -53,5 +61,6 @@ pnpm exec tsx watch server/_core/index.ts
 
 - `ROADMAP.md` —— 项目**唯一 Master Control**（§44 覆盖式状态区 / §44.5 未完成队列 / §47 append-only 更新记录）。
 - `ROADMAP-CHANGELOG.md` —— 变更日志与 §44 历史条目归档（append-only）。
+- `docs/testing/` —— **模块测试文档**（镜像 `tests/**` 结构，由 `pnpm run docs:tests` 生成，禁手改）。
 - `docs/evidence/` —— 探针脚本与运行证据（不进 `tsc` / `vitest`）。
 - `.workbuddy/memory/PROJECT_RULES.md` —— 本仓库工程铁律与已知地雷（**动手前必读**）。

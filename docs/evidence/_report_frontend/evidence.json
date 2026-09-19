@@ -1,0 +1,67 @@
+{
+  "generatedAt": "2026-09-19T14:24:01.957Z",
+  "steps": [
+    {
+      "step": "chrome",
+      "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    },
+    {
+      "step": "cdp-ready",
+      "targetId": "6ED83F9B4A29BCECEDF25DE5E766D17B",
+      "url": "about:blank"
+    },
+    {
+      "step": "research-detail",
+      "state": "ready",
+      "href": "/research/480003",
+      "hasAnchor": true,
+      "anchorHref": "/research/report/750003",
+      "textLength": 1191,
+      "waitedMs": 1632
+    },
+    {
+      "step": "report-view",
+      "path": "/research/report/750003",
+      "runId": "750003",
+      "bodyLength": 242481,
+      "hasBasicInfo": true,
+      "hasAnalysis": true,
+      "hasResult": true,
+      "hasFinding": true,
+      "hasConclusion": true,
+      "hasLimitations": true,
+      "createdAtShown": true,
+      "datasetShown": true
+    },
+    {
+      "step": "raw-view",
+      "length": 258105
+    },
+    {
+      "step": "negative-case",
+      "mentionsMissing": true,
+      "hasReportBody": false,
+      "preview": "涨停复盘助手\n复盘分析\n涨停复盘\n大盘分析\n情绪分析\n龙头候选\n量化回测\n组合回测\n回测历史\n前向纸面交易\n数据录入\n上传图片\n研究数据\n数据域健康\n历史状态查询\n数据集构建\n提问研究\n研究实验\n策略\n绩效仪表盘\n参数搜索\nWFO/OOS 分析\nRegime/报告\n复盘工作台\n数据管理\n行情同步\n情绪预警\n操作日志\n切换到日间模式\n本\n\n本地开发\n\n研究报告加载失败\nRPC_ERROR\n\n未找到 "
+    }
+  ],
+  "assertions": {
+    "detailPath": "/research/480003",
+    "detailHasReportEntry": true,
+    "detailAnchorHref": "/research/report/750003",
+    "detailState": "ready",
+    "reportPath": "/research/report/750003",
+    "reportBodyLength": 242481,
+    "reportHasBasicInfo": true,
+    "reportHasAnalysis": true,
+    "reportHasResult": true,
+    "reportHasFinding": true,
+    "reportHasConclusion": true,
+    "reportHasLimitations": true,
+    "reportShowsGeneratedAt": true,
+    "reportShowsDataset": true,
+    "rawViewLength": 258105,
+    "missingReportExplicit": true,
+    "missingReportHasNoBody": true
+  },
+  "ok": true
+}

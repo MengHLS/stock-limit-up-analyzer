@@ -2,7 +2,7 @@
  * RESEARCH-006.1 — Candidate 普通 update 的**写入边界**测试（纯函数层）。
  *
  * 边界分两类（依据 006.0 §10.1 + 006.1 §15/§16/§17）：
- *   - ① **硬拒**：`experimentId` / `conclusionId` / 4 个 `source*`
+ *   - ① **硬拒**：`experimentId` / `conclusionId` / 5 个 `source*`
  *     —— 结构锚与历史事实快照，只能由未来的 `createFromConclusion` / `promote` 写入；
  *   - ② **状态机守卫**：`status` / `strategyDefinitionId`
  *     —— 不是「放开」，而是取值必须过 `assertCandidateTransition` +
@@ -28,6 +28,8 @@ describe("Candidate 普通 update 写入边界（RESEARCH-006.1）", () => {
         "experimentId",
         "sourceDatasetDivergenceReason",
         "sourceDatasetVersionId",
+        // RESEARCH-PLANNER-001 起新增：来源 Research Plan id 同属历史事实快照，仅经 create 写入。
+        "sourceResearchPlanId",
         "sourceResearchRunId",
         "sourceTraceJson",
       ].sort(),

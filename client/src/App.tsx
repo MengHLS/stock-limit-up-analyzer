@@ -48,7 +48,7 @@ import RegimeReport from "./pages/RegimeReport";
 import ReviewWorkbench from "./pages/ReviewWorkbench";
 // RESEARCH-002 — 研究引擎：实验 / Run / 分析 / 结果 / 结论 工作台
 // RESEARCH-006.4.1 — Research → Candidate 前端闭环：候选详情（结论 → 候选 → 状态流转）
-import { ResearchList, ResearchAsk, ResearchDetail, StrategyCandidateDetail } from "./pages/research";
+import { ResearchList, ResearchAsk, ResearchDetail, ReportView, StrategyCandidateDetail } from "./pages/research";
 
 /**
  * 旧链接兼容：`/strategy-editor?strategyId=…&version=…`。
@@ -115,6 +115,9 @@ function Router() {
       <Route path="/research/ask" component={ResearchAsk} />
       {/* RESEARCH-006.4.1 — 候选详情必须先于 `/research/:experimentId` 匹配（同前缀更深路径） */}
       <Route path="/research/candidates/:candidateId" component={StrategyCandidateDetail} />
+      {/* PHASE-A-001 — 研究报告查看页。同样必须先于 `/research/:experimentId` 匹配，
+          否则 wouter 会把 `report` 当成 experimentId 去匹配 ResearchDetail。 */}
+      <Route path="/research/report/:runId" component={ReportView} />
       <Route path="/research/:experimentId" component={ResearchDetail} />
 
       <Route path="/404" component={NotFound} />

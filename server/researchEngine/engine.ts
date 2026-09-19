@@ -63,6 +63,10 @@ import { buildConclusion, type ConclusionFindingInput, type ConclusionPolicy } f
 import type { ResearchDatasetReader } from "./datasetReader";
 import { ResearchEngineError, engineAssert, toResearchEngineError } from "./errors";
 import { detectAndPersistFindings } from "./finding/findingEngine";
+// PHASE-A-001 —— 报告产物：**纯投影**（只读已落库的 Result / Finding / Conclusion，不重算研究）。
+// ⚠️ 依赖方向：report → (researchCore / datasetReader / patternLibrary)，**不反向 import 本文件**，
+// 因此这里不存在 `engine ↔ report` 的循环。
+import { generateResearchReport } from "./report";
 import { DEFAULT_EVENT_PAGE_SIZE, DEFAULT_MAX_SAMPLES, buildSampleSet } from "./sampleSet";
 import type {
   AnalysisExecutionContext,
@@ -98,6 +102,14 @@ export interface ResearchEngineDeps {
   detectFindingsOnRun?: boolean;
   /** Finding 引擎策略覆盖（缺省走 `resolveFindingPolicy(null)`）。 */
   findingPolicy?: Partial<FindingPolicy>;
+  /**
+   * PHASE-A-001 —— Run 落 COMPLETED 之后，是否自动产出 `artifactType = REPORT` 的报告产物。
+   *
+   * 缺省 `true`（「一个完成的 Run 对应一个最终 REPORT Artifact」这条不变量靠它成立）。
+   * 生成是 **best-effort**：失败只 `console.warn`，**绝不**把一条已跑出结果的 Run 判死
+   * （与 Finding 层同一纪律，见 §34）。
+   */
+  generateReportOnRun?: boolean;
 }
 
 export interface ResearchEngineRunInput {
@@ -154,6 +166,8 @@ export class ResearchEngine {
   private readonly resetExistingResults: boolean;
   private readonly detectFindingsOnRun: boolean;
   private readonly findingPolicy: Partial<FindingPolicy> | undefined;
+  /** PHASE-A-001：Run 收口后是否自动产出 REPORT artifact。 */
+  private readonly generateReportOnRun: boolean;
 
   constructor(deps: ResearchEngineDeps) {
     this.repos = deps.repos;
@@ -166,6 +180,7 @@ export class ResearchEngine {
     this.resetExistingResults = deps.resetExistingResults ?? true;
     this.detectFindingsOnRun = deps.detectFindingsOnRun ?? true;
     this.findingPolicy = deps.findingPolicy;
+    this.generateReportOnRun = deps.generateReportOnRun ?? true;
   }
 
   // =-------------------------------------------------------------------------
@@ -377,6 +392,13 @@ export class ResearchEngine {
           : {}),
       });
 
+      // ---- 10.5 PHASE-A-001：研究报告产物（`research_artifact` · artifactType = REPORT）----
+      // 位置刻意放在 Run / Experiment **已落 COMPLETED 之后**：报告只建立在已完成的 Run 上，
+      // 不在 Analysis / Finding / Conclusion 未收敛时提前出「最终报告」（§9）。
+      // 内容 = 只读既有 Result / Finding / Conclusion 的**展示层投影**，不重算任何研究结果（§2.2）。
+      // 🔴 best-effort：见 `emitReportArtifact` 内部 try/catch —— 报告失败不影响 Run 结论。
+      await this.emitReportArtifact(run.id!);
+
       return {
         experimentId: experiment.id!,
         runId: run.id!,
@@ -435,6 +457,47 @@ export class ResearchEngine {
         }
       }
       throw e;
+    }
+  }
+
+  // =-------------------------------------------------------------------------
+  // 报告产物（PHASE-A-001）
+  // =-------------------------------------------------------------------------
+
+  /**
+   * 产出 / 复用该 Run 的 REPORT artifact。
+   *
+   * 三条纪律：
+   *   1. **best-effort**：任何异常只 `console.warn`，绝不向上抛 —— 报告是展示层产物，
+   *      它的失败不该把一条已经跑出结果的 Run 判死（与 Finding 层同一立场）；
+   *   2. **不重算**：全部输入来自已落库的 Result / Finding / Conclusion 与 Dataset 元数据，
+   *      真正的投影逻辑在 `report/generator.ts`（纯函数）；
+   *   3. **幂等**：同 run + 同正文 ⇒ 同 checksum ⇒ 复用既有 artifact，不新增行。
+   *
+   * 可用 `ResearchEngineDeps.generateReportOnRun = false` 关闭（测试 / 特殊回放场景）。
+   */
+  private async emitReportArtifact(runId: number): Promise<void> {
+    if (!this.generateReportOnRun) return;
+    try {
+      const result = await generateResearchReport({ repos: this.repos, reader: this.reader }, runId);
+      if (result.outcome !== "REUSED") {
+        console.info(
+          `[ResearchEngine] Run ${runId} 报告产物已${result.outcome === "CREATED" ? "生成" : "重建"}：`
+          + `artifact=#${result.artifact.id ?? "?"}，checksum=${result.checksum.slice(0, 12)}…，`
+          + `正文 ${result.bodyBytes} 字节`
+          + (result.supersededArtifactIds.length > 0
+            ? `（已 Supersede 旧产物 ${result.supersededArtifactIds.map((id) => `#${id}`).join(", ")}）`
+            : ""),
+        );
+      }
+      for (const warning of result.warnings) {
+        console.warn(`[ResearchEngine] Run ${runId} 报告提示：${warning}`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(
+        `[ResearchEngine] Run ${runId} 报告产物生成失败（不影响 Run 结论与状态）：${message}`,
+      );
     }
   }
 
