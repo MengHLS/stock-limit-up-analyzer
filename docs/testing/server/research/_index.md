@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/research
 
-- 测试文件 **61** 个 ｜ 用例声明 **1565** 个
-- 涉及源码目录：`server/` · `server/backtest/` · `server/data/` · `server/engine/` · `server/research/` · `server/research/closedLoop/` · `server/research/closedLoopWiring/` · `server/research/conditionSignal/` · `server/research/costModel/` · `server/research/datasetAccess/` · `server/research/disciplineFeedback/` · `server/research/executionConstraints/` · `server/research/experimentLineage/` · `server/research/factorAblation/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/marketRegime/` · `server/research/oosIsolation/` · `server/research/overfittingDetection/` · `server/research/paperAccount/` · `server/research/parameterSearch/` · `server/research/patternLibrary/` · `server/research/performanceMetrics/` · `server/research/persistence/` · `server/research/riskAdjustedMetrics/` · `server/research/robustness/` · `server/research/rollingOptimization/` · `server/research/signalEngine/` · `server/research/signalToPnl/` · `server/research/simulator/` · `server/research/stochasticRobustness/` · `server/research/strategyCandidate/` · `server/research/strategyEvaluation/` · `server/research/strategyPersistence/` · `server/research/strategySchema/` · `server/research/tradeJournal/` · `server/research/tradeQualityMetrics/` · `server/research/walkForwardRun/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchDataset/` · `server/researchEngine/planner/` · `server/strategyCore/` · `shared/`
+- 测试文件 **67** 个 ｜ 用例声明 **1773** 个
+- 涉及源码目录：`server/` · `server/backtest/` · `server/data/` · `server/engine/` · `server/research/` · `server/research/closedLoop/` · `server/research/closedLoopWiring/` · `server/research/conditionSignal/` · `server/research/costModel/` · `server/research/datasetAccess/` · `server/research/disciplineFeedback/` · `server/research/executionConstraints/` · `server/research/experimentLineage/` · `server/research/factorAblation/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/marketRegime/` · `server/research/oosIsolation/` · `server/research/oosValidation/` · `server/research/overfittingDetection/` · `server/research/paperAccount/` · `server/research/parameterSearch/` · `server/research/patternLibrary/` · `server/research/performanceMetrics/` · `server/research/persistence/` · `server/research/riskAdjustedMetrics/` · `server/research/robustness/` · `server/research/rollingOptimization/` · `server/research/searchRobustness/` · `server/research/signalEngine/` · `server/research/signalToPnl/` · `server/research/simulator/` · `server/research/stochasticRobustness/` · `server/research/strategyCandidate/` · `server/research/strategyEvaluation/` · `server/research/strategyPersistence/` · `server/research/strategySchema/` · `server/research/tradeJournal/` · `server/research/tradeQualityMetrics/` · `server/research/walkForward/` · `server/research/walkForwardRun/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchDataset/` · `server/researchEngine/planner/` · `server/strategyCore/` · `shared/`
 
 ## 怎么跑
 
@@ -13,7 +13,7 @@ pnpm exec vitest run tests/server/xxx.test.ts          # 单个文件（路径�
 pnpm run test:changed                                  # 只跑改动相关（日常推荐）
 ```
 
-> ℹ️ 本模块有 **5** 个「源码文本断言」测试（`readFileSync` 源码 + 字符串匹配），
+> ℹ️ 本模块有 **6** 个「源码文本断言」测试（`readFileSync` 源码 + 字符串匹配），
 > 改个变量名就可能变红，且不验证行为；详见 `docs/testing/README.md` 的「测试分类」一节。
 
 ## 逐文件
@@ -741,6 +741,97 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - **⑦ 归档账本（OosIsolationLedger）**
   - append-only：重复 runId 拒绝，list 按 runId 字典序
 
+### `tests/server/research/oosValidation/oosValidation.test.ts`
+- 719 行 ｜ 用例声明 51 ｜ describe 9
+- 被测源码：`server/backtest/backtestResult.ts` · `server/research/experimentValidation.ts` · `server/research/parameterSearch/parameterHash.ts` · `server/research/parameterSearch/searchRun.ts` · `server/research/parameterSearch/persistence.ts` · `server/research/types.ts` · `shared/oosValidationContracts.ts` · `server/research/oosValidation/comparison.ts` · `server/research/oosValidation/definitionFingerprint.ts` · `server/research/oosValidation/freeze.ts` · `server/research/oosValidation/gate.ts` · `server/research/oosValidation/run.ts` · `server/research/oosValidation/types.ts` · `server/research/oosValidation/window.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/oosValidation/oosValidation.test.ts`
+- 用例树：
+- **T1 参数冻结（§5）：冻结必须可复核，不足即响亮失败**
+  - 正常路径：冻结出源 Run 的组合身份 + 快照取值 + 有成功结果标记
+  - 组合不存在 ⇒ OOS_SOURCE_COMBINATION_NOT_FOUND（不回读当前策略版本补全）
+  - 组合行属于另一个 Run ⇒ OOS_SOURCE_COMBINATION_NOT_FOUND（T7 防串线）
+  - 落库行被篡改（参数改了、hash 没改）⇒ OOS_PARAMETER_FREEZE_HASH_MISMATCH
+  - 没有成功结果 ⇒ OOS_SOURCE_RESULT_MISSING（没有 IS 基线就没有对照）
+  - 根本没有结果行 ⇒ OOS_SOURCE_RESULT_MISSING
+  - parametersJson 不是 JSON object ⇒ OOS_FROZEN_PARAMETER_SET_MISSING
+  - 执行时复核：落库快照 == 组合行取值 ⇒ 通过
+  - 执行时复核：被并发改写 ⇒ OOS_FROZEN_PARAMETER_SET_CHANGED
+  - canonicalParameterKey：与键序无关，且能区分 0 / null / "0"
+- **T2 参数不可重新搜索（§5）：接口层没有参数值位置**
+  - 入参恰好 4 个键，且**不含** parameters / parameterSet / resolvedParameterSet
+  - 调用方「顺手传一组更好的参数」会被**剥离**（结构上无法到达领域层）
+- **T4 时间窗口隔离（§6）：默认禁止重叠**
+  - 正常路径：oosStart > searchEnd 且落在数据集内 ⇒ 通过并给出间隔天数
+  - 重叠（oosStart < searchEnd）⇒ OOS_WINDOW_OVERLAP
+  - **正好相等**（oosStart == searchEnd）也算重叠 ⇒ OOS_WINDOW_OVERLAP（边界不许「差一点就放过」）
+  - 起止倒挂（oosStart > oosEnd）⇒ OOS_WINDOW_INVALID
+  - 形态非法 / 不存在的日历日 ⇒ OOS_WINDOW_INVALID
+  - 源窗口自身倒挂 ⇒ OOS_SEARCH_WINDOW_INVALID（问题在上游数据，不是调用方给的窗口）
+  - OOS 越出数据集**上界** ⇒ OOS_WINDOW_OUT_OF_DATASET_RANGE
+  - 越出数据集**下界**的情形在语义上不可达（源窗口本身就在数据集内）
+  - datasetWindow = null ⇒ 跳过该层校验且 note 如实说明「缺少这层保护」（不假装查过）
+  - oosCalendarDaysBetween：正/负/零都对
+- **T5 canonical Metrics（§9）：口径不可比就拒绝建立对照**
+  - canonical ⇒ 通过
+  - evaluators ⇒ OOS_SOURCE_METRICS_NOT_CANONICAL（不「如实标注后继续」）
+  - OOS_METRICS_VERSION 由年化常量**拼出**（不写死 252，口径变更会自动跟着变）
+- **T6 确定性（§16 T6）：同输入 ⇒ 同产物**
+  - Run ID 形态 OOSV-YYYYMMDD-xxxxxxxx；同 now + 同 suffix ⇒ 同 ID
+  - 差异只在时间戳 / 指纹列 ⇒ 指纹**不变**（时间戳不参与内容指纹）
+  - 业务字段变一个 ⇒ 指纹变
+  - 键序不影响指纹（canonical 序列化）
+  - 对照：同输入 ⇒ 深度相等（可复现）
+- **T7 结果串线（§16 T7）：跨 Run 的行不得被当作同一实验**
+  - 合格输入 ⇒ Gate 通过
+  - 行里出现别的 searchRunId ⇒ OOS_SOURCE_MISMATCH
+  - 状态不是 COMPLETED / 状态列非法 ⇒ OOS_SOURCE_RUN_NOT_COMPLETED
+  - 无组合 / 无结果 ⇒ OOS_SOURCE_NO_COMBINATIONS / OOS_SOURCE_NO_RESULTS
+- **§12 OOS Run 状态机**
+  - 与 Parameter Search 共用同一张迁移表（逐格比对，防两处漂移）
+  - CREATED / FAILED / CANCELLED 允许执行；RUNNING / COMPLETED 拒绝
+  - 🔴 迁移表**允许** COMPLETED → RUNNING，但本域的执行准入**禁止**它（更严调用，不是第二张表）
+  - 非法迁移 ⇒ OOS_STATUS_TRANSITION_INVALID
+  - 同态重放视为幂等
+  - 状态解析不静默回落（非法值 ⇒ OOS_STATUS_UNKNOWN）
+- **§10 IS / OOS 对照：只给事实与比较，不给结论**
+  - 六项 delta / ratio 逐项正确
+  - 🔴 方向刻进字段名：degradation = IS − OOS（正数=样本外下降）；drawdownChange = OOS − IS（正数=加深）
+  - IS = 0 ⇒ ratio 为 null（**不做除零**），delta 照常，且仍计入 comparableCount
+  - 任一侧 null ⇒ 该项 delta / ratio 均为 null，且计入缺项说明
+  - 全部不可用 ⇒ comparable = false，且**不编造 0**
+  - IS 源不可用 ⇒ comparable = false（语义结论），但 comparableCount 照实报（事实计数）
+  - 样本外笔数更少 ⇒ 如实记录且**明确不做好坏判定**
+- **§8 策略定义指纹：构造不出就如实说「没冻结」，绝不编一个**
+  - legacy 文档（无 canonical 定义）⇒ fingerprint = null 且 note 说明原因
+  - frozen = null ⇒ 执行时不复核，且**如实登记**（不假装复核过）
+  - current = null ⇒ 无法复核，如实登记
+  - 指纹一致 ⇒ ok；漂移 ⇒ ok = false（这就是 OOS_STRATEGY_DEFINITION_DRIFT 的判据）
+
+### `tests/server/research/oosValidation/oosValidationBoundary.test.ts`
+- 323 行 ｜ 用例声明 14 ｜ describe 5
+- 被测源码：**无相对/别名 import**（自足纯函数或读文件断言）
+- 单跑：`pnpm exec vitest run tests/server/research/oosValidation/oosValidationBoundary.test.ts`
+- 用例树：
+- **T3 写点白名单：本域只写 oos_validation_* 两表（不碰源）**
+  - 负例自测：检测器确实抓得到对源表的写操作
+  - 真实模块的写目标全部属于白名单
+  - 写点确实存在（否则上面的白名单检查是空转的）
+- **T3 源只读：从 parameterSearch 只取读函数**
+  - parameterSearch/persistence 的导入名全部属于只读白名单
+  - 🔴 从 parameterSearch/executor 只能取 `toResultView`（那是唯一的 IS 结果行投影）
+  - 🔴 本域不得 import 任何**创建 / 执行 / 重试搜索**的函数（否则就是「再搜一次参数」）
+- **§2/§9 真重跑是结构事实：本域**必须**持有回测桥与指标投影的入口**
+  - 至少一个模块 import 了 createStrategyBacktestBridge（回测唯一入口）
+  - 至少一个模块 import 了 projectCanonicalMetrics（canonical 读数唯一投影）
+  - 镜像对照：本域**允许**出现回测 / 评估端口（searchRobustness 域被钉死禁止）
+- **§10/§15 不产出「最佳 / 最优 / 推荐」型结论**
+  - 负例自测：检测器确实抓得到违规（否则「全绿」证明不了任何事）
+  - OOS 域模块 + shared 契约零命中
+  - paramSearchRouter 的 OOS-001 端点段零命中
+- **命名不遮蔽守卫：本域顶层导出名不得与仓内既有声明重名**
+  - 负例自测：确实能发现重名
+  - 本域导出名与 server/** + shared/** 其余文件的顶层导出名**零交集**
+
 ### `tests/server/research/overfittingAssessment.test.ts`
 - 167 行 ｜ 用例声明 14 ｜ describe 3
 - 被测源码：`server/research/overfittingAssessment.ts` · `server/research/parameterStability.ts` · `server/research/pbo.ts`
@@ -1429,6 +1520,90 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 空 strategyId → 抛错
   - 空参数空间 + 多窗：每窗单空样本、结构化成功（不抛错）
   - 全部窗评估均不达标 → stability 空结论、无候选（结构化，不抛错）
+
+### `tests/server/research/searchRobustness/robustnessBoundary.test.ts`
+- 163 行 ｜ 用例声明 5 ｜ describe 2
+- 被测源码：**无相对/别名 import**（自足纯函数或读文件断言）
+- 单跑：`pnpm exec vitest run tests/server/research/searchRobustness/robustnessBoundary.test.ts`
+- 用例树：
+- **静态守卫：稳健性域结构性不可重跑（§21 A/B）**
+  - 模块内**任何** import 路径都不指向回测 / 评估端口
+  - 模块只从既有的三处只读来源读数据（parameterSearch 读函数 / 本体 schema / shared 契约）
+- **静态守卫：不产出「最佳 / 最优 / 推荐」（§4）**
+  - 负例自测：检测器确实抓得到违规（否则下面的「全绿」证明不了任何事）
+  - 搜索稳健性域（模块 + 契约 + 前端面板）零命中
+  - paramSearchRouter 的 ROBUSTNESS-001 端点段零命中
+
+### `tests/server/research/searchRobustness/searchRobustness.test.ts`
+- 983 行 ｜ 用例声明 54 ｜ describe 11
+- 被测源码：`shared/parameterSearchContracts.ts` · `shared/searchRobustnessContracts.ts` · `server/research/searchRobustness/analysis.ts` · `server/research/searchRobustness/domainValues.ts` · `server/research/searchRobustness/gate.ts` · `server/research/searchRobustness/matrix.ts` · `server/research/searchRobustness/neighborhood.ts` · `server/research/experimentValidation.ts` · `server/research/searchRobustness/run.ts` · `server/research/searchRobustness/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/searchRobustness/searchRobustness.test.ts`
+- 用例树：
+- **稳健性口径解析（§5.3：可配置 / 持久化 / 不写死前端）**
+  - 缺省补齐为平台缺省
+  - 给定即生效（不静默夹取）
+  - 非法口径响亮拒绝（负容差 / 零半径 / 非整数）
+  - 错误码为 ROBUSTNESS_CONFIG_INVALID
+- **Robustness Run 状态机（§14）**
+  - 与 Search Run 共用同一张迁移表（CREATED/RUNNING/COMPLETED/FAILED/CANCELLED）
+  - 非法迁移抛本域领域码
+  - 同态重放视为幂等
+  - 状态解析不静默回落
+  - ID 形态 SROB-YYYYMMDD-<suffix>
+  - 进度：分母为 0 时不得谎报 100%
+- **输入 Validity Gate（§10）**
+  - 合格输入通过
+  - 未完成 ⇒ ROBUSTNESS_SEARCH_RUN_NOT_COMPLETED
+  - 无结果 ⇒ ROBUSTNESS_NO_RESULTS
+  - 非 canonical 结果 ⇒ ROBUSTNESS_INVALID_RESULT_SOURCE（含来源分布）
+  - 跨 Search Run 混行 ⇒ ROBUSTNESS_SOURCE_MISMATCH（§8 / §21 G 防串线）
+  - 无组合 ⇒ ROBUSTNESS_NO_COMBINATIONS
+- **参数引用状态继承（§12）**
+  - 已筛查 ⇒ verified，且说明里带上被排除的死参数
+  - 未筛查 / 历史行 ⇒ unverified 且写明不可假设
+- **冻结搜索域展开（§3.2）**
+  - ENUM 保持声明顺序（不重排）
+  - DECIMAL_RANGE 按 step 定点展开（无浮点漂移）
+  - step <= 0 / min > max 响亮抛错（不静默夹取）
+  - 重复取值按稳定键合并并可审计
+  - indexOfDomainValue 是唯一查找口径（−0 与 0 同键）
+  - 只有 TUNABLE + 带搜索域的才是轴（FIXED / DERIVED 如实登记原因）
+- **离散度（§5.1）**
+  - 六项统计正确
+  - count = 0 ⇒ 统计字段全 null（不编造 0）
+  - 六项指标一个不少
+- **单组合稳定性判定（§6 / §11 / §3.2）**
+  - 全邻居在容差内 ⇒ STABLE，stabilityRatio = 1
+  - 存在邻居超容差 ⇒ UNSTABLE（ratio < 1）
+  - 混合：部分稳部分不稳 ⇒ ratio 落在 (0,1)
+  - 零有效邻居 ⇒ INSUFFICIENT_NEIGHBORHOOD（既不稳也不不稳）
+  - 零成交 ⇒ INSUFFICIENT_TRADING_ACTIVITY（不误判为 robust）
+  - 🔴 回归（E2E 实测抓获）：基组合**不可判**时邻域仍被完整构造
+  - 🔴 回归：基组合**源结果不可用**时同样保留邻域结构
+  - 邻居零成交 ⇒ 不计入 validNeighborCount（但仍是 present）
+  - 缺邻居不被补值（MISSING_COMBINATION + metrics 恒 null）
+  - 源结果失败 / 无结果行 ⇒ SOURCE_RESULT_UNAVAILABLE，且不参与任何「稳定」判定
+  - 容差指标缺一 ⇒ METRICS_INCOMPLETE（不降级为稳定/不稳定）
+  - 间距（neighborDistance=2）会扩大邻域
+- **敏感性（§5.2）**
+  - 数值参数同时给绝对变化与相对变化
+  - 枚举 / 非数值参数不给相对变化（不制造连续意义）
+  - 基准值为 0 时相对变化为 null（无定义，不编造）
+  - 缺邻居的敏感性条目全为 null
+- **多参数二维矩阵（§7）**
+  - 2×2（此处 3×3）全存在 ⇒ 无 MISSING
+  - 缺格 ⇒ MISSING 且**不补值**
+  - 重复 hash / 多于两个轴 ⇒ AMBIGUOUS，不挑一条当代表
+  - 少于两个轴 ⇒ 空矩阵（如实标「不适用」）
+- **确定性（§21 C / §22）**
+  - 同输入 ⇒ 逐字节相同的产物（含指纹）
+  - §21 D：改容差只改稳定性判定，**不改**任何源指标
+  - 源指标是**冻结副本**：分析过程不修改入参
+  - 汇总计数自洽（各状态数之和 = 被分析组合数）
+  - 组合查找键与参数无关（键序稳定）
+  - buildSourceIndex 不重算 hash（直接用行里的 parameterHash）
+- **排序字段（§4：仅描述性）**
+  - 排序字段集合固定且不含任何「排名 / 推荐」语义
 
 ### `tests/server/research/signalEngine/signalEngine.test.ts`
 - 430 行 ｜ 用例声明 18 ｜ describe 3
@@ -2256,6 +2431,119 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 只改 oosRange 结束日期 → 不同 fingerprint
   - config fingerprint 确定性 + 敏感性
   - 重复生成窗口序列完全一致（deterministic）
+
+### `tests/server/research/walkForward/walkForward.test.ts`
+- 927 行 ｜ 用例声明 48 ｜ describe 8
+- 被测源码：`server/research/experimentValidation.ts` · `server/research/walkForward/aggregate.ts` · `server/research/walkForward/freeze.ts` · `server/research/walkForward/leakage.ts` · `server/research/walkForward/lifecycle.ts` · `server/research/walkForward/selection.ts` · `server/research/walkForward/types.ts` · `server/research/walkForward/windowSchedule.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/walkForward/walkForward.test.ts`
+- 用例树：
+- **§4 Window Contract：ROLLING / EXPANDING / 步长 / 边界**
+  - ROLLING：IS 定长且起点随步长推进，四端点与参考实现逐字相等
+  - EXPANDING：IS 起点恒为 0、末点扩张（等价既有几何的 anchored）
+  - 🔴 oosStart 是 isEnd 的**下一个交易日**（交易日相邻，不是日历天相邻）
+  - 同 Fold 内 IS 与 OOS 交易日集合无交集；跨 Fold 的 OOS 段单调推进
+  - gap 把 OOS 推开：gap=3 时 IS 与 OOS 之间空出 3 个交易日（且这些日子不属于任何一侧）
+  - embargo 从 IS 尾部剔除：searchTradeDates = IS − embargo，且 embargo 段不参与搜索
+  - stepDays 决定 Fold 密度：step 变大 ⇒ Fold 变少且 IS 推进更快
+  - maxFolds 是**上限**（生成前强制，不截断语义）
+- **§4 非法配置：响亮失败且给出本域领域码**
+  - 取样区间倒挂 ⇒ WALK_FORWARD_WINDOW_CONFIG_INVALID
+  - embargo 吞掉整个 IS ⇒ WALK_FORWARD_EMBARGO_EXCEEDS_IS_WINDOW
+  - 交易日不足以容纳第 0 个窗口 ⇒ 结构化抛错（不是返回空排程）
+  - Fold 越出数据集可用窗口 ⇒ WALK_FORWARD_WINDOW_OUT_OF_DATASET_RANGE（创建时就拒，不等到执行）
+  - 数据集可用窗口覆盖全部 Fold ⇒ 通过
+- **§16 确定性：同输入 ⇒ 逐字节相同的排程指纹**
+  - 两次独立计算（含深拷贝输入）得到同一指纹
+  - 任一确定性输入变化都会改变指纹（step / mode / embargo）
+  - 指纹与「Run 身份 / 时间戳」无关：同一 config 在不同时刻调用结果相同（无 Date.now 依赖）
+- **§5 生命周期：Fold 状态机 + Run 执行资格（本域唯一收紧）**
+  - Fold 正向链路逐步合法；同态重放视为幂等
+  - 终态无出边；跳级与回退一律响亮拒绝
+  - 非法 Fold 状态不静默回落成 WINDOW_CREATED
+  - 🔴 Run 执行资格：CREATED/FAILED/CANCELLED 可执行，COMPLETED 必须幂等返回而不是重跑
+  - 串行纪律：要跑第 k 个 Fold 时，更早的 Fold 必须都已终态
+- **§11 Leakage Guard：五类泄漏逐一被抓（且干净基线通过）**
+  - 干净基线：搜索 ⊆ IS、IS < OOS、OOS 在数据集内、OOS Run 窗口与排程相等 ⇒ 通过
+  - ① 搜索窗口越出 IS 右端（哪怕只多一个交易日）⇒ WALK_FORWARD_SEARCH_WINDOW_EXCEEDS_IS
+  - ① 搜索窗口早于 IS 左端（偷偷往前取数）同样被抓
+  - ④ OOS Run 的窗口与排程不一致（偷换一个更有利的窗口）⇒ WALK_FORWARD_OOS_WINDOW_MISMATCH
+  - ⑤ 搜索用到了不属于本 Fold IS 的交易日 ⇒ WALK_FORWARD_SEARCH_DATES_OUTSIDE_IS
+  - 🔴 ⑥ 搜索窗口伸进**更晚** Fold 的区间 ⇒ WALK_FORWARD_FUTURE_DATA_LEAK（规格 §11 明禁的形态）
+  - ③ OOS 越出数据集可用区间 ⇒ WALK_FORWARD_WINDOW_OUT_OF_DATASET_RANGE
+  - ② IS 与 OOS 倒挂（isEnd >= oosStart）⇒ WALK_FORWARD_IS_OOS_NOT_ORDERED
+  - 🔴 独立性：同一 Search Run 被两个 Fold 复用 ⇒ WALK_FORWARD_SEARCH_NOT_INDEPENDENT
+  - 独立性：每个 Fold 各自一条 Search Run ⇒ 通过（`null` 不参与比对）
+- **§10/§16 冻结：参数 hash 重算复核 + 策略/数据集漂移**
+  - hash 由**重算**得出，而不是被信任：正确 hash 通过并原样返回
+  - hash 与参数快照不自洽 ⇒ WALK_FORWARD_PARAMETER_HASH_MISMATCH（FAIL LOUDLY，不自动修复）
+  - 策略定义指纹漂移 ⇒ WALK_FORWARD_STRATEGY_DEFINITION_DRIFT；一侧缺失则如实跳过
+  - 数据集坐标漂移 ⇒ WALK_FORWARD_DATASET_VERSION_DRIFT（含「冻结为空、现在有值」）
+- **§7 候选选择：只有两种显式策略，均不读取任何收益 / 风险指标**
+  - FIRST_ELIGIBLE_COMBINATION：取**编号最小且有成功结果**的组合（纯位置规则）
+  - FIRST_ELIGIBLE_COMBINATION：全部失败 ⇒ WALK_FORWARD_NO_ELIGIBLE_CANDIDATE（不代选）
+  - 组合行为空 ⇒ WALK_FORWARD_SEARCH_HAS_NO_COMBINATION
+  - EXPLICIT_PARAMETER_HASH：命中且 SUCCEEDED ⇒ 按人指定的那一个冻结（含字符串形态参数快照）
+  - EXPLICIT 找不到 ⇒ _NOT_FOUND；找到但非 SUCCEEDED ⇒ _NOT_ELIGIBLE（都不回落）
+  - 组合行未按 combinationIndex 升序 ⇒ WALK_FORWARD_COMBINATION_ORDER_UNSTABLE（数据库不保证顺序）
+- **§12 汇总：只做描述性统计，且「不可用」与「等于 0」严格区分**
+  - 🔴 空集合 ⇒ 全 null + availableCount 0（绝不编造成 0）
+  - 数值序列的均值 / 中位数 / 观测区间按定义算（偶数个取中间两个的平均）
+  - 非有限数被剔除，不污染统计（NaN / Infinity 不进统计）
+  - 计数诚实：SUCCEEDED 计入统计；FAILED / 成交不足**如实计数但不进统计**
+  - 无任何贡献 Fold ⇒ 全部统计量为 null，且 notes 如实说明（不静默）
+  - 🔴 汇总结果里**没有任何**排序 / 评级 / 推荐字段（接口层事实）
+  - Fold 序号必须连续且从 0 起（否则汇总的口径无从对齐）
+
+### `tests/server/research/walkForward/walkForwardBoundary.test.ts`
+- 625 行 ｜ 用例声明 36 ｜ describe 9 ｜ 📄 源码文本断言
+- 被测源码：**无相对/别名 import**（自足纯函数或读文件断言）
+- 单跑：`pnpm exec vitest run tests/server/research/walkForward/walkForwardBoundary.test.ts`
+- 用例树：
+- **§22 写点白名单：本域只写 walk_forward_* 两表（不碰历史 Search / OOS 结果）**
+  - 负例自测：检测器确实抓得到对历史表的写操作
+  - 真实模块的写目标全部属于白名单，且两个表都被真正写入
+- **§10/§11 冻结列在类型层不可更新（窗口与身份不因重放 / 重执行而改变）**
+  - `UpdateWalkForwardFoldInput` 完全不含几何 / 身份 / 执行指纹字段
+  - `UpdateWalkForwardRunInput` 不含排程 / 选择策略 / 运行指纹（创建时冻结）
+  - 两处幂等建行的 `ON DUPLICATE KEY UPDATE` 只刷 `updatedAt`
+  - 重执行重置（`resetWalkForwardFoldForExecution`）只清结果列，不动几何 / 指纹
+- **§19/§22 import 黑名单：本域不持有回测 / 评估 / 搜索执行器**
+  - 负例自测：黑名单确实拦得住
+  - 域内模块的 import 全部不在黑名单上
+  - 🔴 豁免面必须是最小的：全仓只有版本自述常量经此进入
+  - 🔴 域内**不存在**任何「自己建搜索 / 自己跑样本外」的调用点
+  - 🔴 执行只能经由注入钩子：executor 调用 hooks，types 声明钩子契约
+- **§2.4/§16 复用是结构事实：窗口几何与 canonical 序列化必须有唯一来源**
+  - 必须 import 既有窗口几何 `walkForwardRun/windows`（本域不重写 rolling / anchored）
+  - 必须 import 既有 canonical 序列化 `researchDataset/version`
+  - 🔴 本域**不得**自己实现窗口生成（不得出现 `generateWindows` / `splitWindows` 之类的自造几何）
+  - 本域**不得**发 HTTP / 自调用 tRPC（规格 §15：禁 WalkForward → HTTP → OOS API）
+  - 本域**不得**注册路由（端点一律挂在既有 Router 上；规格 §13）
+- **§13 无死旋钮：创建入参不得有「被接受但从未生效」的字段**
+  - 负例自测：键抽取器确实抓得到字段
+  - 每个创建入参键都在域执行器（`request.`）或本 Router 端点段（`input.`）里被真的读到
+  - 🔴 契约里不再有「参数空间覆盖」入参（搜索空间唯一来源 = 策略文档派生）
+- **§7/§12 本域不产出「最佳 / 最优 / 推荐」型结论**
+  - 负例自测：检测器确实抓得到违规
+  - 域内模块 + 域内 barrel + shared 契约零命中
+  - 本域契约与汇总对象里**没有**排序 / 评级 / 推荐字段
+  - paramSearchRouter 的 Walk-Forward 端点段零命中
+- **§9 DB 纪律：migration 只建两张表、零 DML、零外键、可重复执行**
+  - 只 CREATE 两张 walk_forward_* 表（不多建第三张）
+  - 负例自测：语句起点检测器抓得到真 DML，且不误伤 `ON UPDATE CURRENT_TIMESTAMP`
+  - 零 DML / 零 DDL 破坏性语句 / 零外键
+  - apply 脚本自带零 DML 断言与幂等模式（--check / --dry-run / apply）
+- **§14 前端：面板不产出排序 / 评级，且按正常导航真的够得到**
+  - 面板文件存在且被挂在既有页面里（接线完成 ≠ 够得到）
+  - 🔴 面板源码（剥注释后）零「最佳 / 最优 / 推荐 / winner / best / optimal / recommend」
+  - 🔴 面板里没有任何**按指标**的排序（`sort` 只用于 Fold 序号与字典键）
+  - 深链：选中 Run / Fold 必须写进 URL（刷新 / 分享可回到同一份详情）
+  - 🔴 长请求按钮 pending 必须换文案（执行是分钟级的逐 Fold 真实回测）
+  - 🔴 客户端不得 import `server/**`（前端只经 tRPC 取数）
+- **命名不遮蔽守卫：本域顶层导出名不得与仓内既有声明重名**
+  - 负例自测：确实能发现重名
+  - 本域导出名与 server/** + shared/** 其余文件的顶层导出名零交集（`WALK_FORWARD_RUN_ID_PREFIX` 类坑）
+  - 🔴 本域 Run ID 前缀与 C-19.1 的 `WFA` 必须不同（否则留档无法区分两个域）
 
 ### `tests/server/research/walkForwardRun/walkForwardRun.test.ts`
 - 350 行 ｜ 用例声明 26 ｜ describe 4

@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/researchEngine
 
-- 测试文件 **17** 个 ｜ 用例声明 **259** 个
-- 涉及源码目录：`server/datasetRegistry/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchEngine/` · `server/researchEngine/analyses/` · `server/researchEngine/finding/`
+- 测试文件 **18** 个 ｜ 用例声明 **269** 个
+- 涉及源码目录：`server/datasetRegistry/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchEngine/` · `server/researchEngine/analyses/` · `server/researchEngine/finding/` · `server/researchEngine/report/`
 
 ## 怎么跑
 
@@ -406,6 +406,24 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - ⑤ 父 Run RUNNING 超阈值 ⇒ 收敛 Run（FAILED / RUN_ORPHANED）+ 子分析 + Experiment 回滚
   - ⑥ 幂等：连跑两次，第二次零写入
   - ⑦ 阈值全关 ⇒ 整体跳过（即使存在真孤儿也不写）
+
+### `tests/server/researchEngine/reportGenerator.test.ts`
+- 436 行 ｜ 用例声明 10 ｜ describe 2
+- 被测源码：`server/researchCore/index.ts` · `server/researchEngine/datasetReader.ts` · `server/researchEngine/report/generator.ts` · `server/researchEngine/report/service.ts` · `server/researchEngine/report/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchEngine/reportGenerator.test.ts`
+- 用例树：
+- **buildResearchReport（纯投影）**
+  - 同输入 ⇒ 同正文 ⇒ 同 checksum（不含任何时钟读数）
+  - 无 Finding 时如实展示「没有发现」，不造数
+  - 取不到模式与结论时，置空并记入 unresolvedTraceFields（不伪造）
+- **generateResearchReport（落库与幂等）**
+  - Run 未 COMPLETED ⇒ REPORT_RUN_NOT_COMPLETED，且一行都不写
+  - 首次生成 → CREATED；artifactType=REPORT / storageType=INLINE；metadata 可溯源
+  - 正文**原样引用** research_result 的数值（未四舍五入、未改名）
+  - 同 Run 重复生成 ⇒ REUSED，artifact 行数不增加（A-2）
+  - 结果变化后重生成 ⇒ SUPERSEDED，仍只有 1 份 REPORT（A-1）
+  - 结论的 primaryAnalysis 不属于本 Run ⇒ conclusionId=null，不拿别的 Run 的结论冒充（A-3）
+  - Dataset 版本上下文不可达 ⇒ 不编造区间/事件数，如实记入 unresolvedTraceFields
 
 ### `tests/server/researchEngine/variables.test.ts`
 - 376 行 ｜ 用例声明 22 ｜ describe 3

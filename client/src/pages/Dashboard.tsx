@@ -5,7 +5,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
 import { ladderHeight } from "@shared/ladderHeight";
 import { normalizeLimitUpTime } from "@shared/limitUpTime";
-import { buildSectorHeatLookup, sortBySectorHeat } from "@shared/sectorHeatOrder";
+import { buildSectorHeatLookup, isTailSector, sortBySectorHeat } from "@shared/sectorHeatOrder";
 import { ChevronDown, TrendingUp } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -715,8 +715,12 @@ function LadderGroupGrid({ groupKey, items }: { groupKey: string; items: LadderI
  * **含「首板未续」**（上一记录日 1 板、当日未续 ⇒ 落到 2 板行，按断板格呈现）。
  * 因此左列最高值可以**高于** `metrics.maxBoards`（后者是当日已实现的最高连板数，喂情绪评分，口径不同）。
  *
- * 行内次序 = 该股题材在**所选日期**的涨停家数降序（唯一实现 = `@shared/sectorHeatOrder`），
- * **与是否断板无关** —— 断板格与涨停格混排，不再固定排前或排尾；同热度内按封板时间升序。
+ * 行内次序 = 该股题材的**题材次序**（唯一实现 = `@shared/sectorHeatOrder#compareSectorOrder`），
+ * **与是否断板无关** —— 断板格与涨停格混排，不再固定排前或排尾：
+ *   ① 非压尾档在前（兜底桶「其他」**固定压到组内最后**）→ ② **当日**涨停家数降序
+ *   → ③ **窗口内合计**降序 → ④ **题材名**升序 → ⑤（仅同一题材内部）封板时间升序 → 代码升序。
+ * 🔴 ①②③④ 与下方「题材热力日历」的行序**是同一段代码** —— 用户 2026-09-19 报「相同热度的题材，
+ * 梯队与热力图排序不同、对不上」；⑤ 只在同题材内部生效，故同一题材的格子仍**挨在一起**。
  *
  * 折叠是**组内**的：每个高度组各自判断，网格行数 > `LADDER_GROUP_VISIBLE_ROWS`（3）时默认只显示前 3 行，
  * 由该组自己的按钮展开/收起（列数实测自计算样式 ⇒ 2/3/4/6 列各断点下都恰好是 3 行）。
@@ -747,12 +751,12 @@ function BoardLadderSection() {
   const emotionLevel = getEmotionLevel(metrics?.emotionScore ?? 0);
 
   /**
-   * 所选日期的「题材 → 当日涨停家数」。
-   * ⚠️ 该接口只覆盖最近 30 自然日：选到更早的日期 ⇒ 空表，行内次序退化为「封板时间升序」，
-   * **不编造热度**（`sectorHeatOf` 对未知题材取 -1，全体并列 ⇒ 由次键决定）。
+   * 所选日期的「题材 → 当日涨停家数 + 窗口内合计」（两个键同一遍扫描，与热力图**同一查表**）。
+   * ⚠️ 该接口只覆盖最近 30 自然日：选到更早的日期 ⇒ 当日热度一律 -1（**不编造热度**），
+   * 次序退化为「窗口内合计降序 → 题材名」——**仍与热力图同序**。
    */
   const heatLookup = useMemo(
-    () => buildSectorHeatLookup(sectorDistribution?.find((day) => day.date === selectedDate)),
+    () => buildSectorHeatLookup(sectorDistribution, selectedDate),
     [sectorDistribution, selectedDate],
   );
 
@@ -775,7 +779,11 @@ function BoardLadderSection() {
       broken: isBroken,
     });
 
-    /** 组内格子 = 涨停格 + 断板格**混排**，按题材当日热力降序（同热度再按封板时间、代码）。 */
+    /**
+     * 组内格子 = 涨停格 + 断板格**混排**，按 `compareSectorOrder`（题材次序，与热力图同源）升序；
+     * `tieBreak` 只作用于**同一题材内部**（封板时间升序 → 代码升序）。
+     * 「其他」压尾由 `sortBySectorHeat` 内部保证（唯一实现，勿在此另写一套）。
+     */
     const buildItems = (up: typeof connection, cut: typeof broken): LadderItem[] =>
       sortBySectorHeat(
         [...up.map((row) => toItem(row, false)), ...cut.map((row) => toItem(row, true))],
@@ -817,7 +825,9 @@ function BoardLadderSection() {
           左列高度 = 「若该股本日涨停会达到的连板数」⇒ 当日仍涨停取本日连板数、当日未涨停（含首板未续）
           取上一记录交易日连板数 + 1，因此左列最高值可以高于「最高板」指标（后者是当日已实现口径）；
           断板股的板数与封板时间为上一记录交易日口径，热力缺失时该格热度视为最低。
-          行内按该股题材当日涨停家数降序排列（与是否断板无关），同热度内按封板时间升序；
+          行内按「题材次序」排列（与是否断板无关）：当日涨停家数降序 → 同热度按窗口合计降序 → 再按题材名，
+          与下方题材热力日历**同序**；同一题材内部按封板时间升序；
+          「其他」（无题材归属的兜底桶）不参与热度名次，固定排在每个高度的最后；
           「首板(N)」的 N = 当日首板家数（首板未续已按 +1 计入 2 板行）。每个高度组各自在网格超过{" "}
           {LADDER_GROUP_VISIBLE_ROWS} 行时默认只显示前 {LADDER_GROUP_VISIBLE_ROWS} 行，可单独展开该组全部。
         </CardDescription>
@@ -946,24 +956,18 @@ function SectorHeatmapSection() {
   const days = data ?? [];
   /**
    * 行（题材）顺序 = **当日**（最新一列，`days[0]`）的涨停家数降序 —— **不是**窗口内合计：
-   * 合计会把 30 天拉平、热点换题材后排序滞后。合计只作同热度时的次键，再按名称兜底。
+   * 合计会把 30 天拉平、热点换题材后排序滞后。合计只作同热度时的次键，再按题材名兜底。
    * 取前 `HEATMAP_SECTOR_LIMIT` 也随该序（当日为 0 的题材会被排到后面，可能因此不入前 N）。
+   * 🔴 与连板梯队**共用唯一比较器** `@shared/sectorHeatOrder#compareSectorOrder`
+   * （当日降序 → 合计降序 → 题材名）⇒ 同一个题材在两处的相对次序不会分叉（用户 2026-09-19 报的「对不上」）。
+   * 兜底桶「其他」不进热力图（它在梯队里压尾，两处都不参与名次）；「合计」列取自同一查表。
    */
   const sectors = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const day of days) {
-      for (const sector of day.sectors) {
-        totals.set(sector.sector, (totals.get(sector.sector) || 0) + sector.count);
-      }
-    }
-    const rows = Array.from(totals.entries())
-      .filter(([sector]) => sector !== "其他")
-      .map(([sector, total]) => ({ sector, total }));
-    // 唯一实现 = `@shared/sectorHeatOrder`（与连板梯队共用同一比较器）。
-    return sortBySectorHeat(rows, buildSectorHeatLookup(days[0]), (left, right) => right.total - left.total || left.sector.localeCompare(right.sector)).slice(
-      0,
-      HEATMAP_SECTOR_LIMIT,
-    );
+    const lookup = buildSectorHeatLookup(days, days[0]?.date);
+    const rows = Array.from(lookup.entries())
+      .filter(([sector]) => !isTailSector(sector))
+      .map(([sector, entry]) => ({ sector, total: entry.windowTotal }));
+    return sortBySectorHeat(rows, lookup).slice(0, HEATMAP_SECTOR_LIMIT);
   }, [days]);
   const maxValue = Math.max(1, ...days.flatMap((day) => day.sectors.map((sector) => sector.count)));
 
@@ -973,8 +977,9 @@ function SectorHeatmapSection() {
         <CardTitle>题材热力日历</CardTitle>
         <CardDescription>
           独立表格展示：列 = 记录交易日（最近 {days.length} 个，新 → 旧），单元格颜色深浅 = 当日该题材涨停数量；
-          行 = 题材，按当日（最新一列）涨停家数降序取前 {HEATMAP_SECTOR_LIMIT}（合计只作同热度时的次键），
-          “合计”列 = 该题材窗口内涨停总数（仅参考，不参与排序）。
+          行 = 题材，按当日（最新一列）涨停家数降序取前 {HEATMAP_SECTOR_LIMIT}，同热度按“合计”降序、再按题材名
+          —— 与上方连板梯队的题材次序**同一套规则**（同一个题材在两处的相对位置一致）；
+          “合计”列 = 该题材窗口内涨停总数（它正是同热度时的次键）。
         </CardDescription>
       </CardHeader>
       <CardContent>

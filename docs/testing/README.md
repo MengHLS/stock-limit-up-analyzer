@@ -2,8 +2,8 @@
 
 # 测试资产总览（tests/ 与 docs/testing/ 的唯一索引）
 
-全仓测试文件 **277** 个 ｜ 用例声明 **4530** 个 ｜ 模块 **28** 个
-其中：环境依赖（离线必失败）**7** 个 ｜ 已知失效 **1** 个 ｜ 源码文本断言 **21** 个
+全仓测试文件 **284** 个 ｜ 用例声明 **4754** 个 ｜ 模块 **28** 个
+其中：环境依赖（离线必失败）**7** 个 ｜ 已知失效 **1** 个 ｜ 源码文本断言 **22** 个
 
 > 本目录由 `pnpm run docs:tests` 生成，**禁手改**；改测试后重跑即同步。
 
@@ -81,6 +81,7 @@
 | `tests/server/research/researchRun.test.ts` |
 | `tests/server/research/strategyCandidate/importBoundary.test.ts` |
 | `tests/server/research/sweep.test.ts` |
+| `tests/server/research/walkForward/walkForwardBoundary.test.ts` |
 | `tests/server/stockDailyPriceUnique.test.ts` |
 | `tests/server/stockPriceSyncPage.test.ts` |
 | `tests/server/strategy/contract.test.ts` |
@@ -106,10 +107,10 @@
 | `server/historicalState` | [`server/historicalState/_index.md`](server/historicalState/_index.md) | 5 | 64 | - | 1 |
 | `server/marketData` | [`server/marketData/_index.md`](server/marketData/_index.md) | 9 | 95 | - | - |
 | `server/portfolio` | [`server/portfolio/_index.md`](server/portfolio/_index.md) | 1 | 17 | - | - |
-| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 61 | 1565 | - | 5 |
+| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 67 | 1773 | - | 6 |
 | `server/researchCore` | [`server/researchCore/_index.md`](server/researchCore/_index.md) | 8 | 125 | - | - |
 | `server/researchDataset` | [`server/researchDataset/_index.md`](server/researchDataset/_index.md) | 9 | 85 | - | - |
-| `server/researchEngine` | [`server/researchEngine/_index.md`](server/researchEngine/_index.md) | 17 | 259 | - | - |
+| `server/researchEngine` | [`server/researchEngine/_index.md`](server/researchEngine/_index.md) | 18 | 269 | - | - |
 | `server/risk` | [`server/risk/_index.md`](server/risk/_index.md) | 2 | 50 | - | - |
 | `server/riskEngine` | [`server/riskEngine/_index.md`](server/riskEngine/_index.md) | 1 | 18 | - | - |
 | `server/runWorkbenchAssembly` | [`server/runWorkbenchAssembly/_index.md`](server/runWorkbenchAssembly/_index.md) | 2 | 26 | - | - |
@@ -117,7 +118,7 @@
 | `server/securityStatus` | [`server/securityStatus/_index.md`](server/securityStatus/_index.md) | 3 | 40 | - | - |
 | `server/strategy` | [`server/strategy/_index.md`](server/strategy/_index.md) | 5 | 54 | - | 1 |
 | `server/strategyCore` | [`server/strategyCore/_index.md`](server/strategyCore/_index.md) | 11 | 163 | - | - |
-| `shared` | [`shared/_index.md`](shared/_index.md) | 6 | 132 | - | - |
+| `shared` | [`shared/_index.md`](shared/_index.md) | 6 | 138 | - | - |
 
 ## 布局铁律（改测试前必读）
 

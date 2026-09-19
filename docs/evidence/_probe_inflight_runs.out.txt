@@ -1,4 +1,4 @@
-=== 含 status 列的候选表（30 张）===
+=== 含 status 列的候选表（32 张）===
   backfill_checkpoints               RUNNING = 0
   closed_loop_backtest_run           RUNNING = 0
   dataset_build_job                  RUNNING = 0
@@ -29,6 +29,8 @@
   strategies                         RUNNING = 0
   strategy_versions                  RUNNING = 0
   uploaded_images                    RUNNING = 0
+  walk_forward_fold                  RUNNING = 0
+  walk_forward_run                   RUNNING = 0
 
 === research_question 命中行明细 ===
   {"id":270001,"createdAt":"2026-09-17T06:48:02.000Z","updatedAt":"2026-09-17T06:50:58.000Z"}
