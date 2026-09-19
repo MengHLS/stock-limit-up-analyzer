@@ -36,6 +36,8 @@ import type { ParameterSearchEvaluator, ParameterSearchSampleOutcome } from "../
 import type { StrategyDocument } from "../strategySchema/types";
 import type { ResearchParameterSet } from "../types";
 import { STRATEGY_EVALUATION_STAGE_IDS, deriveExperimentId } from "./evaluate";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfCount, perfRun } from "../../observability";
 
 /**
  * 🔴 子链**与 async 版完全相同**（复用 `evaluate.ts#STRATEGY_EVALUATION_STAGE_IDS`，共 5 阶段）。
@@ -75,7 +77,8 @@ export function createStrategyParameterEvaluator(
 ): ParameterSearchEvaluator {
   return parameterSet => {
     try {
-      return evaluateOneParameterSet(input, parameterSet);
+      perfCount("optimization.samples");
+      return perfRun("optimization.evaluate_sample", () => evaluateOneParameterSet(input, parameterSet));
     } catch (error) {
       // 契约要求结构化失败（不抛错）：单个参数集失败不应中断整批搜索
       return {

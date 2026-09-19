@@ -62,6 +62,8 @@ import type { ResearchParameterSet } from "../research/types";
 import type { StrategyVersionRecordInput } from "../research/strategySchema/map";
 import type { LifecycleConfigInput } from "./lifecycleConfig";
 import { buildLifecycleConfig } from "./lifecycleConfig";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfCount, perfRun, perfRunAsync } from "../observability";
 
 // ---------------------------------------------------------------------------
 // 错误
@@ -938,15 +940,16 @@ export async function assembleRunWorkbenchInputs(
   // -- 1. 数据集：优先直读已绑定 datasetVersionId 的已落库 ds_* 数据集；缺失才回落重建 --
   //    （原路径无条件重建 ⇒ 无视已绑定数据集、分钟级等待、产物可能漂移；见模块头与
   //     docs/evidence/_probe_ds_rows.mts。）
-  const datasetResolution = await resolveDataset(request);
+  const datasetResolution = await perfRunAsync("dataset.resolve", () => resolveDataset(request));
   const dataset = datasetResolution.dataset;
 
   // -- 2~5. 策略侧装配（**同步**；抽成 `assembleStrategySide` 供闭环内的参数评估器复用）--
-  const side = assembleStrategySide(request, dataset.datasetVersion);
+  const side = perfRun("research.context_build", () => assembleStrategySide(request, dataset.datasetVersion));
 
   const inputs = buildClosedLoopWiringInputs(dataset, side);
 
-  const distinctSecurities = new Set(dataset.rows.map(row => row.securityId));
+  const distinctSecurities = perfRun("research.candidate_preparation", () => new Set(dataset.rows.map(row => row.securityId)));
+  perfCount("research.dataset_rows", dataset.rows.length);
 
   return {
     inputs,

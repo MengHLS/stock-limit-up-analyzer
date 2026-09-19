@@ -74,6 +74,8 @@ import { canonicalCode, parseSecurityCode } from "../security/code";
 import { resolveSecurityIdByEngineKey } from "../security/engineKeyBridge";
 import type { SecurityIdentifier } from "../security/types";
 import { computeDatasetVersion } from "../researchDataset/version";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfCount, perfRun, perfRunAsync } from "../observability";
 import { normalizeResearchDatasetRequest } from "../researchDataset/validate";
 import { derivePolicySet } from "../researchDataset/policy";
 import type {
@@ -708,6 +710,8 @@ async function readEventBars(
           }),
     RAW_BAR_READ_CONCURRENCY,
   );
+  perfCount(`dataset.bar_read.${role}.batches`, batches.length);
+  perfCount(`dataset.bar_read.${role}.concurrency`, RAW_BAR_READ_CONCURRENCY);
   const all: FirstLimitPullbackRawBar[] = [];
   for (const bars of results) for (const bar of bars) all.push(bar);
   return all;
@@ -946,7 +950,9 @@ export async function buildResearchDatasetFromRegistry(
   const reader = new DbDatasetDataReader();
 
   // -- 1. 版本事实（存在 + READY）--
-  const version = await withReadRetry("registry.getVersionById", () => registry.getVersionById(request.datasetVersionId));
+  const version = await perfRunAsync("dataset.version_and_definition", () =>
+    withReadRetry("registry.getVersionById", () => registry.getVersionById(request.datasetVersionId)),
+  );
   if (version === undefined) {
     throw new RegistryDatasetBridgeError(
       "REGISTRY_VERSION_NOT_FOUND",
@@ -960,7 +966,9 @@ export async function buildResearchDatasetFromRegistry(
     );
   }
 
-  const definition = await withReadRetry("registry.getDefinitionById", () => registry.getDefinitionById(version.datasetId));
+  const definition = await perfRunAsync("dataset.definition_read", () =>
+    withReadRetry("registry.getDefinitionById", () => registry.getDefinitionById(version.datasetId)),
+  );
   if (definition === undefined) {
     throw new RegistryDatasetBridgeError(
       "REGISTRY_DEFINITION_MISSING",
@@ -985,7 +993,9 @@ export async function buildResearchDatasetFromRegistry(
   }
 
   // -- 3. 事件（分页读全）--
-  const events = await withReadRetry("registry.listEvents", () => readAllEvents(reader, request.datasetVersionId));
+  const events = await perfRunAsync("dataset.events_page", () =>
+    withReadRetry("registry.listEvents", () => readAllEvents(reader, request.datasetVersionId)),
+  );
   if (events.length === 0) {
     throw new RegistryDatasetBridgeError(
       "REGISTRY_EMPTY_VERSION",
@@ -994,8 +1004,10 @@ export async function buildResearchDatasetFromRegistry(
   }
 
   // -- 4. 该版本 post 的真实相对日范围（决定「观察窗口 + 执行日」能不能被满足）--
-  const postRange = await withReadRetry("registry.getPostRelativeDayRange", () =>
-    reader.getPostRelativeDayRange(request.datasetVersionId),
+  const postRange = await perfRunAsync("dataset.post_range", () =>
+    withReadRetry("registry.getPostRelativeDayRange", () =>
+      reader.getPostRelativeDayRange(request.datasetVersionId),
+    ),
   );
   if (postRange === null) {
     throw new RegistryDatasetBridgeError(
@@ -1018,21 +1030,38 @@ export async function buildResearchDatasetFromRegistry(
   // -- 5. 身份桥接：symbol（代码域）→ canonical securityId（`sec_<uuid>`）--
   //     🔴 必须先解析身份，再投影行 —— 行里的 securityId 是**身份**、code 才是代码；
   //     解析失败（无生效区间 / 多行歧义）响亮抛错，不退回代码冒充身份。
-  const identifiers = await withReadRetry("registry.loadPrimaryIdentifiers", () => loadPrimaryIdentifiers());
-  const securityIds = resolveSecurityIdsByEvent(events, identifiers);
+  const identifiers = await perfRunAsync("dataset.identity_bridge.read_identifiers", () =>
+    withReadRetry("registry.loadPrimaryIdentifiers", () => loadPrimaryIdentifiers()),
+  );
+  const securityIds = perfRun("dataset.identity_bridge.resolve", () =>
+    resolveSecurityIdsByEvent(events, identifiers),
+  );
 
   // -- 6. 行情行：prefix rd=0（首板日，充当特征基准 bars[0]）+ post rd ∈ [1, end+1]（观察日 + 次日执行日）--
   const eventIds = events.map((e) => e.eventId);
   const postRelativeDays = Array.from({ length: neededMaxRelativeDay }, (_, i) => i + 1);
-  const [dayZeroBars, postBars] = await withReadRetry("registry.loadRawBarsBatch", () =>
-    Promise.all([
-      readEventBars(reader, request.datasetVersionId, eventIds, "prefix", [0]),
-      readEventBars(reader, request.datasetVersionId, eventIds, "post", postRelativeDays),
-    ]),
+  const [dayZeroBars, postBars] = await perfRunAsync("dataset.bar_read", () =>
+    withReadRetry("registry.loadRawBarsBatch", () =>
+      Promise.all([
+        perfRunAsync("dataset.bar_read.prefix", () =>
+          readEventBars(reader, request.datasetVersionId, eventIds, "prefix", [0]),
+        ),
+        perfRunAsync("dataset.bar_read.post", () =>
+          readEventBars(reader, request.datasetVersionId, eventIds, "post", postRelativeDays),
+        ),
+      ]),
+    ),
   );
 
   // -- 7. 投影为逐日面板（去重 + 决策日资格）--
-  const projection = buildWindowRows(events, dayZeroBars, postBars, window, securityIds);
+  const projection = perfRun("dataset.projection", () =>
+    buildWindowRows(events, dayZeroBars, postBars, window, securityIds),
+  );
+  perfCount("dataset.events", events.length);
+  perfCount("dataset.rows_raw", projection.candidateCount);
+  perfCount("dataset.rows_deduped", projection.rows.length);
+  perfCount("dataset.bars_prefix", dayZeroBars.length);
+  perfCount("dataset.bars_post", postBars.length);
   const rows = projection.rows;
   if (rows.length > REGISTRY_BRIDGE_MAX_ROWS) {
     throw new RegistryDatasetBridgeError(
@@ -1052,17 +1081,24 @@ export async function buildResearchDatasetFromRegistry(
     asOfPerTradeDate: true,
   });
 
-  const universeDefinition = buildUniverseDefinitionFromRows(rows, projection.memberKeys);
-  const dataSnapshot = buildDataSnapshotFromRegistry(
-    normalizedRequest,
-    version,
-    definition,
-    rows,
-    window,
-    neededMaxRelativeDay,
+  const universeDefinition = perfRun("dataset.universe_build", () =>
+    buildUniverseDefinitionFromRows(rows, projection.memberKeys),
   );
-  const datasetVersion = computeDatasetVersion(normalizedRequest, universeDefinition, rows);
-  const policySet = derivePolicySet(normalizedRequest, dataSnapshot);
+  const dataSnapshot = perfRun("dataset.data_snapshot", () =>
+    buildDataSnapshotFromRegistry(
+      normalizedRequest,
+      version,
+      definition,
+      rows,
+      window,
+      neededMaxRelativeDay,
+    ),
+  );
+  perfCount("dataset.universe_days", universeDefinition.days.length);
+  const datasetVersion = perfRun("dataset.version_fingerprint", () =>
+    computeDatasetVersion(normalizedRequest, universeDefinition, rows),
+  );
+  const policySet = perfRun("dataset.policy_set", () => derivePolicySet(normalizedRequest, dataSnapshot));
 
   const dataReady = request.dataReady ?? false;
   const gate = dataReady ? gateFromVersionStatus(version.status) : "INCONCLUSIVE";

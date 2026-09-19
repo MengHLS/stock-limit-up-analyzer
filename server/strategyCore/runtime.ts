@@ -141,6 +141,43 @@ function isResolvedSet(value: ParameterSet | ResolvedParameterSet): value is Res
   return (value as ResolvedParameterSet).resolved === true && typeof (value as ResolvedParameterSet).values === "object";
 }
 
+/**
+ * PARAMETER-001-PRE（P0）— **定义指纹的进程内缓存**。
+ *
+ * ## 为什么必须有（实测，不是推断）
+ *
+ * `computeDefinitionFingerprint(definition)` = `sha256(canonicalJson(整个定义的行为面))` ——
+ * 它是对**整份策略定义**做一次完整 canonical 序列化 + SHA-256。而 `evaluateWithDetail` 原先在
+ * **每一次求值**里调用它**两次**（`explanation` 里一次、`decision.definitionFingerprint` 一次）。
+ *
+ * 真实 Run 实测（`docs/evidence/_probe_param001_pre_profile.before.cpuprofile.json`，657.8 s）：
+ * `server/strategyCore/canonical.ts` 独占 **44.3% 的 CPU self time**（291.4 s / 657.9 s），
+ * 按 1,707,054 次求值 × 2 次指纹 ≈ 341 万次「canonical 序列化 + sha256」。
+ * ⇒ 这是全链路的**第一热点**，而且它是**纯重复计算**。
+ *
+ * ## 为什么这样做是「逐字节等价」而不是「优化近似」
+ *
+ * 1. `computeDefinitionFingerprint` 是**纯函数**：`definition` 之外不读任何东西
+ *    （无 IO / 无 `Date.now` / 无随机 —— 见 `canonical.ts` 头注释）；
+ * 2. Core 的 `StrategyCoreDefinition` 是**不可变**的（`deepFreezeCoreDefinition`；
+ *    `StrategyVersion` 内容永不可变，改内容只能产出新版本）；
+ * 3. 因此「同一个 definition 对象 ⇒ 同一个指纹字符串」是**函数性质**，不是假设。
+ *    缓存只是省掉重复求值，返回值与原实现**逐字节相同**（同一函数的同一输出）。
+ *
+ * 用 `WeakMap` 而不是带 TTL 的 Map：键是对象身份，**不阻止 GC**、不会跨定义串味、
+ * 也不需要失效逻辑（定义不可变 ⇒ 不存在「过期」）。一次进程内只会有个位数条目
+ * （一次 Run 里主链 1 份定义 + 每个参数搜索样本 1 份）。
+ */
+const definitionFingerprintCache = new WeakMap<StrategyCoreDefinition, string>();
+
+function computeDefinitionFingerprintCached(definition: StrategyCoreDefinition): string {
+  const cached = definitionFingerprintCache.get(definition);
+  if (cached !== undefined) return cached;
+  const computed = computeDefinitionFingerprint(definition);
+  definitionFingerprintCache.set(definition, computed);
+  return computed;
+}
+
 /** 读取 bar 的某一列（不支持的列 ⇒ null，不抛错：列缺失属数据问题，由「不足」上报）。 */
 export function readBarColumnValue(bar: VisibleBar, column: string): CoreValue {
   switch (column) {
@@ -423,6 +460,15 @@ function evaluateWithDetail(
 
   const conditions: DecisionCondition[] = parts.conditionResults.map((condition) => ({ ...condition }));
 
+  /**
+   * PARAMETER-001-PRE（P0）— 定义指纹**每次求值只取一次**（原实现取两次）。
+   *
+   * 同一份 `definition` 对象 ⇒ 同一字符串（纯函数 + 不可变对象），故这两处引用同一个值
+   * 与分别调用 `computeDefinitionFingerprint(definition)` **逐字节相同**；
+   * 差别只是把「每求值 2 次全量 canonical 序列化 + sha256」降为「每定义 1 次」。
+   */
+  const fingerprintOfDefinition = computeDefinitionFingerprintCached(definition);
+
   const explanation: string[] = [];
   explanation.push(
     "在 " +
@@ -434,7 +480,7 @@ function evaluateWithDetail(
       "@" +
       version.version +
       "（定义指纹 " +
-      computeDefinitionFingerprint(definition).slice(0, 12) +
+      fingerprintOfDefinition.slice(0, 12) +
       "…）",
   );
   explanation.push("持仓状态 " + context.state.positionState + "（持仓数 " + String(context.state.openPositions) + "）");
@@ -453,7 +499,7 @@ function evaluateWithDetail(
     decisionTime: context.timestamp,
     strategyId: version.strategyId,
     strategyVersion: version.version,
-    definitionFingerprint: computeDefinitionFingerprint(definition),
+    definitionFingerprint: fingerprintOfDefinition,
     events: events.map((event) => ({ ...event, params: { ...event.params } })),
     conditions,
     signals,

@@ -48,6 +48,8 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+// PARAMETER-001 — 持久化参数搜索面板（创建 / 详情 / 结果；与上方技术预览共存于同页）
+import PersistedParameterSearchPanel from "@/components/parameterSearch/PersistedParameterSearchPanel";
 import { trpc } from "@/lib/trpc";
 import { createTRPCReact } from "@trpc/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
@@ -317,6 +319,9 @@ export default function ParameterSearch() {
           {describe?.preview.maxCombinations ?? 64}；仅用于观察研究引擎口径，不得据此下正式策略结论。
         </span>
       </div>
+
+      {/* ---- PARAMETER-001：持久化参数搜索（创建 → 执行 → 回看 → 重试）---- */}
+      <PersistedParameterSearchPanel />
 
       {/* ---- 搜索配置 + 结果 ---- */}
       <SectionCard

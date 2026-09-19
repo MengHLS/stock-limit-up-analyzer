@@ -71,6 +71,8 @@ import {
   TRADE_SIMULATION_RUN_RECORD_KIND,
   TRADE_SIMULATION_RUN_RECORD_VERSION,
 } from "./types";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfBegin, perfCount, perfEnd, perfRun } from "../../observability";
 
 // ---------------------------------------------------------------------------
 // 引擎错误（code 稳定，供程序化处理）
@@ -278,7 +280,7 @@ export function runTradeSimulation(
   }
 
   // 3. dataset 绑定 + 版本一致性（datasetVersion 内容寻址，必须与来源记录一致）。
-  const handle = bindResearchDataset(dataset);
+  const handle = perfRun("backtest.dataset_bind", () => bindResearchDataset(dataset));
   if (handle.datasetVersion !== sourceRun.datasetVersion) {
     throw new TradeSimulationError(
       "DATASET_VERSION_MISMATCH",
@@ -336,6 +338,7 @@ export function runTradeSimulation(
   //    （卖出依赖持仓，不需要当日行；涨停/停牌等在执行日由无行/报价拒绝显式化。）
   const rowsDateSet = new Set<string>();
   const rowKeys = new Set<string>();
+  const __btPrecheck = perfBegin("backtest.row_precheck");
   for (const row of handle.rows) {
     rowsDateSet.add(row.tradeDate);
     rowKeys.add(`${row.tradeDate}\u0000${row.securityId}`);
@@ -356,6 +359,10 @@ export function runTradeSimulation(
       }
     }
   }
+  perfEnd(__btPrecheck);
+  perfCount("backtest.trading_days", tradingDates.length);
+  perfCount("backtest.decision_days", decisionDates.length);
+  perfCount("backtest.dataset_rows", handle.rows.length);
 
   // 7. 规则/配置装配（冻结快照）。
   const executionModel = createExecutionModel(
@@ -429,6 +436,7 @@ export function runTradeSimulation(
   let lastClosePrices = new Map<string, number>();
 
   // 9. 逐模拟交易日推进（镜像 STEP 8 engine 事件顺序）。
+  const __btDayLoop = perfBegin("backtest.decision_day_loop");
   for (let dateIndex = 0; dateIndex < tradingDates.length; dateIndex += 1) {
     const date = tradingDates[dateIndex]!;
 
@@ -659,7 +667,8 @@ export function runTradeSimulation(
           closePriceBySecurity.set(securityId, bar.close);
         amountBySecurity.set(securityId, bar.amount ?? null);
       }
-      const plan = planDecisionDay({
+      const plan = perfRun("backtest.plan", () =>
+        planDecisionDay({
         decisionDate: date,
         intents,
         holdings,
@@ -674,7 +683,8 @@ export function runTradeSimulation(
         // BACKTEST-002（B-02）— 仓位口径与计量基数透传（min 收窄，不放大）。
         ...(simConfig.positionSizing !== undefined ? { positionSizing: simConfig.positionSizing } : {}),
         initialCapital: simConfig.initialCapital,
-      });
+        }),
+      );
 
       for (const item of plan.orders as readonly PlannedOrder[]) {
         if (!nextDate) {
@@ -737,6 +747,7 @@ export function runTradeSimulation(
     lastClosePrices = closePrices;
     equityCurve.push(portfolio.equityPoint(date, closePrices));
   }
+  perfEnd(__btDayLoop);
 
   // 10. 期末：估值未平仓交易 + 全部交易 + 最终状态。
   portfolio.finalizeOpenTrades(lastClosePrices);
@@ -778,6 +789,8 @@ export function runTradeSimulation(
     skipped: skippedEntries.map(entry => deepFreeze(entry)),
     audit: deepFreeze(audit.snapshot()),
   };
-  const fingerprint = computeTradeSimulationRunFingerprint(body);
+  const fingerprint = perfRun("backtest.fingerprint", () => computeTradeSimulationRunFingerprint(body));
+  perfCount("backtest.trades", trades.length);
+  perfCount("backtest.equity_points", equityCurve.length);
   return deepFreeze<TradeSimulationRun>({ ...body, fingerprint });
 }

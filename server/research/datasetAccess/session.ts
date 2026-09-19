@@ -25,6 +25,8 @@ import {
 import { sliceRowsByDateRange } from "./slice";
 import { createDatasetUniverseProvider } from "./universe";
 import type { ResearchDatasetRow } from "../../researchDataset/types";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfCount, perfRun } from "../../observability";
 
 /** 一次 dataset + config 的只读访问会话（pipeline 输入就绪态）。 */
 export interface DatasetSession {
@@ -38,7 +40,8 @@ export interface DatasetSession {
 
 /** 绑定数据集 + 实验配置，产出 pipeline 可消费的访问会话。 */
 export function createDatasetSession(dataset: ResearchDataset, config: ExperimentConfig): DatasetSession {
-  const handle = bindResearchDataset(dataset);
+  const handle = perfRun("research.session_bind", () => bindResearchDataset(dataset));
+  perfCount("research.session_handle_rows", handle.rows.length);
 
   assertDatasetVersionConsistent(config, handle);
 
@@ -57,9 +60,10 @@ export function createDatasetSession(dataset: ResearchDataset, config: Experimen
     );
   }
 
-  const rows = sliceRowsByDateRange(handle.rows, range);
-  const universe = createDatasetUniverseProvider(handle);
-  const dataSource = createDatasetDataSource(handle);
+  const rows = perfRun("research.session_slice", () => sliceRowsByDateRange(handle.rows, range));
+  const universe = perfRun("research.session_universe", () => createDatasetUniverseProvider(handle));
+  const dataSource = perfRun("research.session_data_source", () => createDatasetDataSource(handle));
+  perfCount("research.session_sliced_rows", rows.length);
 
   return {
     handle,

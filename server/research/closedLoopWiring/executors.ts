@@ -53,6 +53,8 @@ import {
 import { createStrategyDocument, createStrategyVersionRecord } from "../strategySchema/map";
 import { computeStrategyVersionRecordFingerprint } from "../strategySchema/serialize";
 import { closedLoopStageWiringRequirement } from "./requirements";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfRun } from "../../observability";
 import {
   CLOSED_LOOP_ARTIFACT_PRODUCER,
   createClosedLoopWiringArtifacts,
@@ -383,7 +385,11 @@ export function createClosedLoopStageRunners(
 
     const executor = buildExecutor(stageId, artifacts, inputs);
     if (executor !== undefined) {
-      (runners as Record<string, unknown>)[stageId] = executor;
+      // PARAMETER-001-PRE — 每个阶段一个剖析节点（默认关闭 ⇒ 只是一次函数转调）。
+      // 嵌套关系天然成立：参数搜索的每个样本会走自己的 research/backtest/evaluation 子链，
+      // 因此能在同一棵树里看出「主链一次 + 优化阶段 12 次」的真实倍数。
+      (runners as Record<string, unknown>)[stageId] = (ctx: unknown) =>
+        perfRun(`stage.${stageId}`, () => (executor as (c: unknown) => unknown)(ctx));
       registered.add(stageId);
     }
   }

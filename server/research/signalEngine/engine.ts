@@ -38,6 +38,8 @@ import type {
 } from "./types";
 import { CANDIDATE_EVALUATION_RUN_RECORD_KIND, CANDIDATE_EVALUATION_RUN_RECORD_VERSION } from "./types";
 import { assertValidStrategy13 } from "./validate";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfCount, perfRun } from "../../observability";
 
 // ---------------------------------------------------------------------------
 // 引擎错误（code 稳定，供程序化处理）
@@ -192,30 +194,37 @@ export function runCandidateEngine(input: CandidateEngineInput): CandidateEvalua
 
   // 6. 逐决策日驱动单日 pipeline，聚合成 CandidateDayRecord（升序，确定性）。
   const dayRecords: CandidateDayRecord[] = [];
-  for (const date of decisionDates) {
-    const decisionTime: DecisionTime = { date, point: strategy13.point };
-    const result: ResearchPipelineResult = runResearchPipeline({
-      strategy,
-      config,
-      decisionTime,
-      universe: session.universe,
-      featureProviders: strategy13.features,
-      signalBuilder: strategy13.signalBuilder,
-      rankingConfig: strategy13.rankingConfig,
-      selectionConfig: strategy13.selectionConfig,
-      dataSource: session.dataSource,
-    });
-    dayRecords.push(
-      deepFreeze<CandidateDayRecord>({
-        date: decisionTime.date,
-        universeMembers: result.universe,
-        signalCount: result.signals.length,
-        dropped: result.dropped,
-        selected: result.selected,
-        positionIntents: result.positionIntents,
-      }),
-    );
-  }
+  perfCount("research.decision_days", decisionDates.length);
+  perfRun("research.decision_day_loop", () => {
+    for (const date of decisionDates) {
+      const decisionTime: DecisionTime = { date, point: strategy13.point };
+      const result: ResearchPipelineResult = perfRun("research.pipeline_per_day", () =>
+        runResearchPipeline({
+          strategy,
+          config,
+          decisionTime,
+          universe: session.universe,
+          featureProviders: strategy13.features,
+          signalBuilder: strategy13.signalBuilder,
+          rankingConfig: strategy13.rankingConfig,
+          selectionConfig: strategy13.selectionConfig,
+          dataSource: session.dataSource,
+        }),
+      );
+      perfCount("research.universe_member_slots", result.universe.length);
+      perfCount("research.signals_emitted", result.signals.length);
+      dayRecords.push(
+        deepFreeze<CandidateDayRecord>({
+          date: decisionTime.date,
+          universeMembers: result.universe,
+          signalCount: result.signals.length,
+          dropped: result.dropped,
+          selected: result.selected,
+          positionIntents: result.positionIntents,
+        }),
+      );
+    }
+  });
 
   // 7. 候选层统计评价（纯函数，确定性）。
   const evaluation = evaluateCandidateRun(dayRecords);

@@ -53,6 +53,8 @@ import {
   type EventAnchorPolicy,
 } from "./barWindow";
 import type { ProductionEventResolver } from "./eventSource";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfBegin, perfCount, perfEnd } from "../../observability";
 
 // ---------------------------------------------------------------------------
 // 配置
@@ -178,6 +180,8 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
     }
 
     const state: RuntimeState = { positionState: "FLAT", openPositions: 0 };
+    perfCount("strategy.evaluate_calls");
+    const __evalToday = perfBegin("strategy.evaluate");
     const detail = StrategyRuntime.evaluateWithDetail(
       config.version,
       config.parameterSet,
@@ -208,6 +212,7 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
         // 生产路径必须跑数据兼容性校验；此处不跳过。
       },
     );
+    perfEnd(__evalToday);
 
     resolvedParameterSet = detail.resolvedParameters;
     const decision = detail.decision;
@@ -237,6 +242,7 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
     //    代价 = 求值次数 ×2；收益 = 与声明语义（`WINDOW` + `TRIGGER`）逐字一致，且**与调用顺序无关**。
     const currentDay = window.currentRelativeDay;
     const satisfiedToday = detail.ruleEvaluation.satisfied;
+    const __evalPrev = perfBegin("strategy.evaluate_prev_day");
     const satisfiedBefore =
       currentDay <= 0
         ? false
@@ -266,6 +272,7 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
             },
             {},
           ).ruleEvaluation.satisfied;
+    perfEnd(__evalPrev);
 
     /**
      * 触发点 = 首个成立日。`FIRST_VALID_DAY` / `NEXT_TRADING_DAY` 这类「单点触发」语义下，
@@ -292,6 +299,7 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
 
     // 滚动指纹：只吃**行为面**（不含时间戳 / 解释文本里的日期无关部分），
     // 同一配置重跑必得同一指纹。
+    const __fp = perfBegin("strategy.decision_fingerprint");
     rolling = fingerprintOf({
       previous: rolling,
       securityId: input.securityId,
@@ -306,6 +314,7 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
       insufficientData: decision.insufficientData,
       emitted,
     });
+    perfEnd(__fp);
 
     if (samples.length < maxSamples) {
       samples.push({

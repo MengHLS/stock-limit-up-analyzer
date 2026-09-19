@@ -102,6 +102,8 @@ import {
 } from "./backtest/context";
 import type { AssembledStrategySide } from "./runWorkbenchAssembly/assemble";
 import { describeResearchChainHealth } from "./researchChainHealth";
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { perfBegin, perfCount, perfEnd, perfRun, perfRunAsync } from "./observability";
 
 // 幂等启动装配：把内置研究策略注册进单例注册中心（已注册则跳过）。
 registerBuiltInResearchStrategies(researchStrategyRegistry);
@@ -466,6 +468,7 @@ export const researchRunRouter = router({
     .input(closedLoopRunInputSchema)
     .output(closedLoopRunResultSchema)
     .mutation(async ({ input }) => {
+      const __runTotal = perfBegin("run.loopRun_total");
       const createdAt = input.createdAt ?? new Date().toISOString();
       const runId =
         input.runId ?? `clrun-${createdAt.replace(/[^0-9]/g, "").slice(0, 17)}`;
@@ -618,15 +621,17 @@ export const researchRunRouter = router({
       // 捕获它即打通 artifact propagation：**不重算、不复制引擎**，只用同一个产物。
       const { stageRunners, artifacts } = createClosedLoopWiring(wiringInputs, { requested });
 
-      const run = runClosedLoop({
-        runId,
-        createdAt,
-        metadata,
-        stageIds: requested,
-        stageRunners,
-        ...(seedHandoffs.length > 0 ? { seedHandoffs } : {}),
-        ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
-      });
+      const run = perfRun("run.stage_orchestration", () =>
+        runClosedLoop({
+          runId,
+          createdAt,
+          metadata,
+          stageIds: requested,
+          stageRunners,
+          ...(seedHandoffs.length > 0 ? { seedHandoffs } : {}),
+          ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
+        }),
+      );
 
       const resultOut: ClosedLoopRunResult = {
         runId: run.runId,
@@ -749,6 +754,7 @@ export const researchRunRouter = router({
       if (backtestRun !== undefined) {
         const initialCapital = assemblySummary?.simulation.initialCapital ?? null;
         if (initialCapital !== null) {
+          const __metrics = perfBegin("metrics.build_backtest_result");
           const result = buildBacktestResult({
             runId: run.runId,
             strategyVersionId: input.strategyId + "@" + input.strategyVersion,
@@ -762,6 +768,8 @@ export const researchRunRouter = router({
               "明细**不全量入库**：见 equitySamples / tradeSamples（有界）与 equityDigest / tradeDigest（全量指纹）",
             ],
           });
+          perfEnd(__metrics);
+          const __serialize = perfBegin("persistence.payload_serialization");
           const payload = buildBacktestRunPayload({ result });
           resultOut.backtest = {
             canonicalMetrics: payload.canonicalMetrics,
@@ -781,20 +789,25 @@ export const researchRunRouter = router({
               notes: [...describeExecutionPolicy(DEFAULT_BACKTEST_EXECUTION_POLICY)],
             },
           };
+          perfEnd(__serialize);
         }
       }
 
       // CLOSED-LOOP-BACKTEST-PERSIST-001 — 每次运行都留档，供「回测历史」页回看。
       // best-effort：留档失败不抛（详见 persistClosedLoopBacktestRun 的说明）。
-      await persistClosedLoopBacktestRun({
-        experimentId: input.experimentId,
-        strategyId: input.strategyId,
-        strategyVersion: input.strategyVersion,
-        startDate: input.dateRange.startDate,
-        endDate: input.dateRange.endDate,
-        result: resultOut,
-      });
+      await perfRunAsync("persistence.db_write", () =>
+        persistClosedLoopBacktestRun({
+          experimentId: input.experimentId,
+          strategyId: input.strategyId,
+          strategyVersion: input.strategyVersion,
+          startDate: input.dateRange.startDate,
+          endDate: input.dateRange.endDate,
+          result: resultOut,
+        }),
+      );
 
+      perfCount("run.resultJson_bytes", JSON.stringify(resultOut).length);
+      perfEnd(__runTotal);
       return resultOut;
     }),
 });

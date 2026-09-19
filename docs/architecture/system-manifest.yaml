@@ -1,0 +1,632 @@
+# system-manifest.yaml — 机器可读架构基线
+# 由 SYSTEM-BASELINE-001 建立；与 SYSTEM-BASELINE.md 同源同版本。
+# 纪律：所有字段值必须来自真实代码/真实库实查，不得虚构。
+# 归属标记（owner marker）：FACT | DESIGN | PLANNED | LEGACY | BLOCKED | DEPRECATED | OBSERVED
+
+system:
+  name: stock-limit-up-analyzer
+  baselineVersion: v1.0.0
+  auditedAt: "2026-09-19"
+  lastChangeAt: "2026-09-19"
+  stack:
+    frontend: React 19 + Vite 7 + wouter + tRPC client + Tailwind
+    backend: Express + tRPC 11
+    orm: Drizzle ORM (mysql2 / TiDB Cloud)
+    test: Vitest (node environment)
+  scale:
+    serverFiles: 628
+    clientFiles: 215
+    testFiles: 276
+    docsFiles: 534
+    scriptsFiles: 110
+    schemaDeclaredTables: 60
+    realBaseTables: 63
+    migrations: 41
+    appRoutes: 33
+    trpcTopLevelRouters: 21
+  authority:
+    masterControl: ROADMAP.md
+    evidenceHierarchy: ["real DB", "actual runtime", "actual code", "automated tests", "docs", "design assumptions"]
+  invariants:
+    - "canonicalMetrics 是 Backtest 的唯一指标来源"
+    - "Evaluation 在已有 canonical 时不得重新计算重叠指标"
+    - "NOT_AVAILABLE 不得被评估器数值顶替"
+    - "strategy_versions.strategyDocumentJson 是策略定义唯一 SoT；5 张投影表只能单向派生"
+    - "datasetVersionId 是运行时唯一权威数据集坐标"
+    - "禁止 db:push / drizzle-kit generate / 手写 _journal.json"
+    - "历史 Run 不回填"
+    - "未装配阶段必须以 CL_RUNNER_NOT_INJECTED 如实 BLOCKED"
+    - "client/** 不得 import server/** 运行时值（仅 import type 允许）"
+
+domains:
+
+  dataset:
+    status: READY
+    marker: FACT
+    purpose: 原始数据标准化 → 事件检测 → 相对日窗口物化 → 版本化数据集；提供版本坐标与筛选/构建配置
+    sourcePaths:
+      - server/datasetRegistry/**          # A 体系（权威，17 文件）
+      - shared/datasetRegistryContracts.ts # wire 契约
+      - server/runWorkbenchAssembly/datasetFromRegistry.ts # A→研究链唯一读桥
+      - server/researchDataset/**          # B 体系（LEGACY）
+      - server/research/datasetAccess/**   # B 体系访问层（LEGACY）
+    entryPoints:
+      - server/datasetRegistry/registry.ts#DatasetRegistryService.createVersionWithBuildConfig
+      - server/datasetRegistry/runner.ts#DefaultDatasetBuildRunner.start
+      - server/datasetRegistry/query.ts#DatasetQueryService
+      - server/datasetRegistry/router.ts#buildDatasetRegistryRouter  # 24 procedures
+    inputs:
+      - stock_daily_prices
+      - research_securities
+      - research_security_status_history
+      - industry_assignments
+      - liquidity_daily
+      - index_daily (交易日历唯一来源)
+      - FirstLimitPullbackBuildConfig
+    outputs:
+      - dataset_version row (status READY)
+      - ds_first_limit_pullback_{event,prefix,post,path,outcome}
+      - DatasetVersionCounts (totalRows = 五表行数之和)
+    consumers: [research, backtest, frontend]
+    persistence:
+      - dataset_definition (1)
+      - dataset_version (2)
+      - dataset_build_job (4)
+      - dataset_build_config (2) + _event + _board
+      - ds_first_limit_pullback_event (25108)
+      - ds_first_limit_pullback_prefix (527268)
+      - ds_first_limit_pullback_post (487692)
+      - ds_first_limit_pullback_path (487692)
+      - ds_first_limit_pullback_outcome (75324)
+    tests:
+      - tests/server/datasetRegistry/**
+      - tests/server/researchDataset/**
+      - tests/server/research/datasetAccess/**
+      - tests/shared/datasetRegistryContracts.test.ts
+      - tests/client/src/adapters/datasetRegistryAdapter.test.ts
+    knownRisks:
+      - "桥仅支持单一 datasetCode first_limit_pullback (datasetFromRegistry.ts:978)"
+      - "prefix/post 物理表不在 drizzle migration 链内（双源漂移）"
+      - "未注册插件 code 构建抛 BUILDER_NOT_REGISTERED"
+      - "读路径列清单非插件化（query.ts:90-104）"
+    legacyPaths:
+      - server/researchDataset/**（B 体系，内容寻址串 + research_datasets）
+      - rd_rows_05809b1a6d97aa02 / rd_rows_5dce9db1421bec38
+    verifiedFacts:
+      - "五表记账闭合：1,603,084 = v1 60,002 + v2 1,543,082，差 0"
+      - "event 25108 + prefix 527268 + post 487692 + path 487692 + outcome 75324 = 1603084"
+
+  research:
+    status: READY
+    marker: FACT
+    purpose: 从 datasetVersionId 出发的探索性研究：假设→实验→运行→分析→结果→结论→候选策略
+    sourcePaths:
+      - server/researchCore/**      # 单数 10 表领域层（权威）
+      - server/researchEngine/**    # 分析引擎 + planner
+      - server/research/framework/**
+      - server/research/signalEngine/**
+      - server/research/conditionSignal/**
+      - server/research/recipeFeatures/**
+      - server/research/patternLibrary/**
+      - server/research/strategyCandidate/**
+      - shared/researchContracts.ts
+    entryPoints:
+      - server/researchCore/repository/db.ts#createDbResearchRepositories
+      - server/research/signalEngine/engine.ts#runCandidateEngine
+      - server/researchEngineRouter.ts
+      - server/researchPlannerRouter.ts
+      - server/research/strategyCandidate/router.ts#promote
+    inputs:
+      - datasetVersionId
+      - research question / hypothesis / analysis config
+    outputs:
+      - research_conclusion
+      - research_strategy_candidate
+      - StrategyVersion (经 promote)
+    consumers: [strategy, frontend]
+    persistence:
+      - research_experiment (7)
+      - research_hypothesis (5)
+      - research_run (18)
+      - research_analysis (352)
+      - research_analysis_condition (735)
+      - research_analysis_metric (0)
+      - research_result (6680)
+      - research_conclusion (15)
+      - research_strategy_candidate (13)
+      - research_artifact (0)
+      - research_finding (68) / research_question (3) / research_plan (3)
+    tests:
+      - tests/server/researchCore/**
+      - tests/server/researchEngine/**
+      - tests/server/research/strategyCandidate/**
+      - tests/server/researchRunRouter.test.ts
+    knownRisks:
+      - "两套 Research 数据模型并存（单数 vs 复数，仅差一个 s）"
+      - "主 barrel 隐式加载 legacy 死代码"
+      - "research_analysis_metric / research_artifact 0 行"
+    legacyPaths:
+      - server/research/{experiment,run,sweep}*.ts
+      - server/research/persistence/**
+      - server/research/{evaluationService,experimentService,runService,sweepService,status}.ts
+    boundaryGuard:
+      - "tests/server/research/strategyCandidate/importBoundary.test.ts:69-131"
+
+  strategy:
+    status: READY
+    marker: FACT
+    purpose: 策略规则与参数定义、版本化、生命周期；Core 为语义权威，legacy 定义为存储编码
+    sourcePaths:
+      - server/strategyCore/**              # 语义权威（20 文件 / ~6.8k 行）
+      - server/strategyCore/production/**   # 生产接线（6 文件）
+      - server/strategyCore/adapters/legacyDefinition.ts
+      - server/research/strategySchema/**   # 存储编码（12 文件）
+      - server/research/strategyPersistence/**
+      - server/research/lifecycle/**
+      - server/strategy/**                  # LEGACY 引擎策略层
+    entryPoints:
+      - server/strategyCore/runtime.ts#StrategyRuntime.evaluate
+      - server/strategyCore/production/coreDecision.ts#createCoreDecisionSource
+      - server/strategyCore/version.ts#applyDefinitionChange
+      - server/runWorkbenchAssembly/assemble.ts#assembleStrategySide
+      - server/researchRouter.ts#strategy.* / lifecycle.*
+    inputs:
+      - StrategyDocument (strategyDocumentJson)
+      - parameterSet
+      - RuntimeContext
+      - datasetVersionId
+    outputs:
+      - StrategyDecision
+      - StrategyRunSnapshot
+      - strategies / strategy_versions / 5 投影表
+    consumers: [backtest, research, frontend]
+    persistence:
+      - strategies (10)
+      - strategy_versions (11)
+      - strategy_parameters (24)
+      - strategy_entry_rules (17)
+      - strategy_exit_rules (19)
+      - strategy_execution_rules (9)
+      - strategy_version_datasets (9)
+      - strategy_research_provenance (9)
+    tests:
+      - tests/server/strategyCore/** (12 文件)
+      - tests/server/research/strategySchema/**
+      - tests/server/research/strategyPersistence/**
+      - tests/server/strategy/** (legacy)
+    knownRisks:
+      - "setVersionStatus 不吃 §23 迁移表 ⇒ Draft→Production 跳级不被拒 (service.ts:362)"
+      - "codeVersion 11/11 = 1.0.0+gunknown（不可复现）"
+      - "server/strategy/** 与 strategySchema/** 命名撞车"
+      - "ALL_DAYS 在 legacy 侧不可表达（N-04）"
+      - "阈值型出场需入场价/入场日，仍在 exitRules 声明（N-03）"
+    legacyPaths:
+      - server/strategy/**（但经 runBacktestWithRisk 生产可达）
+      - server/research/strategySchema/legacyViews.ts 的 v1 字段
+      - server/research/framework/leakage.ts（恒通过）
+    coreSemantics:
+      - "WINDOW 只考虑当前决策日及之前 ⇒ evaluate 必须逐决策日调用"
+      - "updateVersionDefinition() 恒抛 VERSION_IMMUTABLE"
+      - "事件判定必须由运行方注入，未注入即抛错"
+      - "DATASET_BINDING_IN_DEFINITION_FORBIDDEN（机器可查）"
+
+  parameterSearch:
+    status: READY
+    marker: FACT
+    purpose: 参数空间派生 → Grid 全组合搜索 → 组合执行（复用 Backtest + Evaluation）→ 结果留档；支持续跑 / 重试 / 缓存复用
+    sourcePaths:
+      - server/research/parameterSearch/**
+      - server/research/rollingOptimization/**
+      - server/research/parameterSpace.ts
+      - server/research/parameterStability.ts
+      - server/paramSearchRouter.ts
+      - server/research/strategyEvaluation/parameterSpaceFromDocument.ts
+      - shared/parameterSearchContracts.ts
+    entryPoints:
+      - server/research/parameterSearch/run.ts#runParameterSearch
+      - server/research/parameterSearch/executor.ts#createParameterSearchRun
+      - server/research/parameterSearch/executor.ts#executeParameterSearchRun
+      - server/research/parameterSearch/executor.ts#retryParameterSearchCombination
+      - server/research/parameterSearch/executor.ts#cancelParameterSearchRun
+      - server/research/parameterSearch/searchSpace.ts#deriveParameterSearchSpaceFromProjection
+      - server/research/parameterSearch/parameterHash.ts#computeParameterHash
+      - server/research/rollingOptimization/run.ts#runRollingOptimization
+      - server/paramSearchRouter.ts (技术预览 describe/run/rolling/robustness/stochastic；PARAMETER-001 持久化 createSearch/listSearches/getSearch/startSearch/cancelSearch/getSearchResults/retrySearchCombination)
+    inputs: [StrategyDocument(参数投影 parameterRole), 搜索空间定义, 评估端口, datasetVersionId, 回测窗口]
+    outputs: [PersistedSearchRun, 组合计划, 单组合 canonical metrics, 候选策略(非 production)]
+    consumers: [frontend]
+    persistence:
+      - parameter_search_run
+      - parameter_search_combination
+      - parameter_search_result
+    tests:
+      - tests/server/research/parameterSearch/**
+      - tests/server/research/rollingOptimization/**
+      - tests/server/research/strategyEvaluation/optimizationStage.test.ts
+    knownRisks:
+      - "R-01 已收口（2026-09-19 / 9bs）：搜索结果落库三表，历史 Run 可回看 / 续跑 / 重试"
+      - "R-05 已修复（2026-09-19 / 9bs）：搜索域派生改读 parameterRole ⇒ FIXED 不进搜索空间、DERIVED 不得直接搜索（判据与 listSearchableParameters 等价，有守护测试）"
+      - "N-02 已定性（2026-09-19 / 9bt）= 情况 D：参数「声明在 schema 里」≠「决策引擎会读它」；判据 = strategyCore/ruleGraph.ts#collectRuleParameterReferences。createSearch 已加死参数护栏（PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER + OVERRIDE_ON_UNREFERENCED_PARAMETER）；顺序纪律 = 派生 → 覆盖 → 死参数剥离 → 校验"
+      - "N-01 已修复（2026-09-19 / 9bt）：createSearch 前置窗口校验（dataset_version 日期按北京业务日）⇒ PARAMETER_SEARCH_WINDOW_OUT_OF_DATASET_RANGE"
+      - "N-05 收敛状态（2026-09-19 / 9bt）：parameterSpaceFromDocument.ts = LEGACY/PREVIEW（消费者 = 技术预览端点 + 闭环 optimization 阶段，后者只持有 document、拿不到 role 投影行）；parameterSearch/searchSpace.ts = PS 唯一使用，静态源码守卫测试钉住"
+      - "遗留：parameter_search_result.backtestRunId 恒 NULL（评估端口走内存态 5 阶段闭环、不落 closed_loop_backtest_run 行）；追溯改用 backtestFingerprint + evaluationId + Run 坐标（N-03 = DEFERRED）"
+      - "遗留：历史策略文档不可变 ⇒ 现有候选文档的 TUNABLE 参数多为「死参数」，要用参数搜索须以参数引用改写并生成新版本"
+      - "derivedFrom 仍无求值器（仅人类可读）"
+      - "缓存判据 = 规格 §13 五要素，不含 codeVersion ⇒ 代码变更但未 bump 执行政策版本时 cache 不失效"
+    legacyPaths:
+      - server/research/parameterStability.ts（仅测试可达）
+      - server/research/experimentService.ts / sweepService.ts
+  backtest:
+    status: READY
+    marker: FACT
+    purpose: 历史执行模拟：组合会计、T+1 账本、执行模型、涨跌停/停牌/零成交拦截、成本、审计、canonical 指标
+    sourcePaths:
+      - server/backtest/**                  # 事实上的 Backtest Core（16 文件）
+      - server/research/simulator/**        # 生产撮合编排
+      - server/research/closedLoop/**
+      - server/research/closedLoopWiring/**
+      - server/runWorkbenchAssembly/assemble.ts
+      - server/closedLoopBacktestRun/**
+      - server/researchRunRouter.ts
+    entryPoints:
+      - server/research/simulator/engine.ts#runTradeSimulation
+      - server/research/simulator/plan.ts#planDecisionDay
+      - server/backtest/backtestResult.ts#canonicalMetrics
+      - server/researchRunRouter.ts#loopRun
+      - server/researchRunRouter.ts#persistClosedLoopBacktestRun
+    inputs:
+      - StrategyDecision / signalBuilder
+      - Dataset bars
+      - SimulationConfig (positionSizing, executionPolicy)
+      - initialCapital
+    outputs:
+      - TradeSimulationRun (equityCurve / trades / auditTrail)
+      - CanonicalMetrics
+      - BacktestRunPayload
+      - closed_loop_backtest_run row
+    consumers: [evaluation, frontend]
+    persistence:
+      - closed_loop_backtest_run (7)
+      - backtest_runs (1, legacy)
+    tests:
+      - tests/server/backtest/** (8 文件)
+      - tests/server/research/simulator/**
+      - tests/server/research/closedLoop/**
+      - tests/server/research/closedLoopWiring/**
+      - tests/server/researchRunRouter.test.ts
+    knownRisks:
+      - "三段不可互换执行契约（AR-1）"
+      - "第二套 metrics 口径 backtest/metrics.ts 仍在（AR-6）"
+      - "止损三落点互不相通（AR-3）"
+      - "运行级复现快照缺失（R-02）"
+      - "长运行连接重置曾导致必然丢档（已修：有界重试 ≤3）"
+    legacyPaths:
+      - server/backtest/engine.ts#runBacktestEngine2（仅测试）
+      - server/realisticBacktest.ts#simulateRealisticTPlus1ToTPlus2
+      - server/research/legacyTransactionSimulator.ts
+      - server/engine/adapter.ts（零引用）
+    confirmedFacts:
+      executionPolicyVersion: 1
+      annualizationDays: 252
+      canonicalMetricsKeys: 8
+      zeroVolumePolicyDefault: REJECT
+      maxDrawdownPct: positive magnitude
+      resultJsonSegments: [strategyRun, backtest]
+      persistRetryAttempts: 3
+      historicalRunsBackfilled: false
+
+  evaluation:
+    status: PARTIAL
+    marker: FACT
+    purpose: 收益/风险/回撤/交易质量指标；策略参数评估端口；闭环 evaluation 阶段
+    sourcePaths:
+      - server/research/strategyEvaluation/**
+      - server/research/performanceMetrics/**
+      - server/research/riskAdjustedMetrics/**
+      - server/research/tradeQualityMetrics/**
+      - server/historicalState/audit/**
+    entryPoints:
+      - server/research/strategyEvaluation/evaluate.ts#evaluateStrategyParameters
+      - server/research/performanceMetrics/evaluate.ts#evaluatePerformance
+      - server/research/riskAdjustedMetrics/evaluate.ts#evaluateRiskAdjustedMetrics
+      - server/research/tradeQualityMetrics/evaluate.ts#evaluateTradeQualityMetrics
+      - server/researchRouter.ts#metrics.evaluate
+    inputs: [TradeSimulationRun / equityCurve / trades, CanonicalMetrics]
+    outputs: [ClosedLoopEvaluationRef]
+    consumers: [backtest, frontend]
+    persistence: [closed_loop_backtest_run.summaryJson]
+    tests:
+      - tests/server/backtest/canonicalMetricsParity.test.ts
+      - tests/server/research/performanceMetrics/**
+      - tests/server/research/riskAdjustedMetrics/**
+      - tests/server/research/tradeQualityMetrics/**
+      - tests/server/research/strategyEvaluation/**
+    knownRisks:
+      - "第二套口径 backtest/metrics.ts 未收口（唯一在产消费方 tradeQualityMetrics/analyze.ts:442，read-only）"
+      - "dataReady 默认 false ⇒ 必须显式传 true，否则 INCONCLUSIVE（runAudit.ts:74）"
+      - "未接线时 metricsSource 如实标 evaluators（非缺陷，但意味着指标来源不唯一）"
+    legacyPaths: []
+
+  robustness:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: 成本/滑点/参数/执行四轴扰动 + Monte Carlo/Bootstrap/成交顺序随机化 + 因子消融
+    sourcePaths:
+      - server/research/robustness/**
+      - server/research/stochasticRobustness/**
+      - server/research/factorAblation/**
+      - server/overfittingGuard.ts
+    entryPoints:
+      - server/research/robustness/evaluate.ts#runRobustnessStress
+      - server/research/stochasticRobustness/run.ts#runStochasticRobustness
+      - server/research/factorAblation/run.ts#runAblationAssessment
+      - server/overfittingGuard.ts#buildOverfittingGuardReport
+    inputs: [参数集, 回测配置, 扰动规格]
+    outputs: [扰动重估结果, 漂移归因, 随机化结论]
+    consumers: [frontend]
+    persistence: []
+    tests:
+      - tests/server/research/robustness/**
+      - tests/server/research/stochasticRobustness/**
+      - tests/server/research/factorAblation/**
+    knownRisks:
+      - "factorAblation 仅测试可达（CODE_READY 未接线，AR-10）"
+      - "闭环 robustness 阶段未装配 ⇒ CL_RUNNER_NOT_INJECTED"
+    legacyPaths: []
+
+  oos:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: IS/OOS 隔离记录与归档账本
+    sourcePaths:
+      - server/research/oosIsolation/**
+      - server/research/oosEvaluation.ts     # LEGACY 6.4
+    entryPoints:
+      - server/research/oosIsolation/run.ts#runOosIsolation
+      - server/walkForwardRouter.ts#oos
+    inputs: [IS/OOS 切分, 参数集, 评估结果]
+    outputs: [OOS 记录, 隔离账本]
+    consumers: [frontend]
+    persistence: []
+    tests:
+      - tests/server/research/oosIsolation/**
+      - tests/server/research/oosEvaluation.test.ts
+    knownRisks:
+      - "闭环 oos 阶段未装配 ⇒ CL_RUNNER_NOT_INJECTED"
+      - "oosEvaluation.ts（legacy 6.4）仅测试可达"
+    legacyPaths: [server/research/oosEvaluation.ts, server/research/trainValidationOos.ts]
+
+  walkForward:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: Train → Optimize → Freeze → Test → Move Window 滚动窗编排与留档
+    sourcePaths:
+      - server/research/walkForwardRun/**
+      - server/research/walkForward.ts          # LEGACY 6.5
+      - server/research/walkForwardService.ts   # LEGACY 6.5
+      - server/research/datasetSplit.ts
+      - server/walkForwardRouter.ts
+    entryPoints:
+      - server/research/walkForwardRun/run.ts#runWalkForward
+      - server/research/walkForwardRun/windows.ts#generateWalkForwardSplits
+      - server/walkForwardRouter.ts#run
+    inputs: [窗口规格, 评估端口, 参数空间]
+    outputs: [window id / train period / test period / parameters / result / metrics]
+    consumers: [frontend]
+    persistence: []
+    tests:
+      - tests/server/research/walkForwardRun/**
+      - tests/server/research/walkForward(Service).test.ts
+    knownRisks:
+      - "datasetSplit 为 PARTIAL（工具被生产引用，服务本体无调用）"
+      - "闭环部分阶段未装配"
+    legacyPaths:
+      - server/research/walkForward.ts
+      - server/research/walkForwardService.ts
+      - server/research/datasetSplit.ts（部分）
+
+  overfitting:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: CSCV-PBO + 参数敏感性 + 聚合结论
+    sourcePaths:
+      - server/research/overfittingDetection/**
+      - server/research/pbo.ts                    # LEGACY 6.5
+      - server/research/overfittingAssessment.ts   # LEGACY 6.5
+    entryPoints:
+      - server/research/overfittingDetection/run.ts#runOverfittingDetection
+      - server/walkForwardRouter.ts#overfit
+    inputs: [多配置回测矩阵, IS/OOS 切分]
+    outputs: [PBO, 参数敏感性, 过拟合结论]
+    consumers: [frontend]
+    persistence: []
+    tests:
+      - tests/server/research/overfittingDetection/**
+      - tests/server/research/pbo.test.ts
+      - tests/server/research/overfittingAssessment.test.ts
+    knownRisks:
+      - "legacy pbo/overfittingAssessment 仅测试可达"
+      - "闭环 overfitting 阶段未装配"
+    legacyPaths:
+      - server/research/pbo.ts
+      - server/research/overfittingAssessment.ts
+
+  simulation:
+    status: FACT
+    marker: FACT
+    purpose: 用贴近实盘的 signal/position/execution/risk/capital/cost 口径做模拟交易，并留档
+    sourcePaths:
+      - server/research/paperAccount/**
+      - server/paperTrading.ts
+      - server/paperTradingScheduler.ts
+      - server/research/signalToPnl/**
+    entryPoints:
+      - server/research/paperAccount/run.ts#assemblePaperAccountRun
+      - server/paperTrading.ts#createPaperTradingRun / advancePaperTradingRunToLatest
+      - server/paperTradingScheduler.ts#startPaperTradingScheduler
+      - server/research/signalToPnl/engine.ts#runSignalToPnlLoop
+      - server/reviewRouter.ts#paper.run
+    inputs: [策略版本, 数据集坐标, 交易日历]
+    outputs: [paper run / order / fill / position / PnL]
+    consumers: [review, frontend]
+    persistence: [paper_trading_runs (4)]
+    tests:
+      - tests/server/research/paperAccount/**
+      - tests/server/research/signalToPnl/**
+    knownRisks:
+      - "signalToPnl 编排引擎无生产调用（闭环 paper 阶段 notWired）"
+      - "PaperTrading 走 legacy sentiment.* 语义"
+    legacyPaths: [server/paperTrading.ts（legacy 语义但在产）]
+
+  production:
+    status: PLANNED
+    marker: PLANNED
+    purpose: 完整闭环部署 / 实盘对接
+    sourcePaths: []
+    entryPoints: []
+    inputs: []
+    outputs: []
+    consumers: []
+    persistence: []
+    tests: []
+    knownRisks:
+      - "无任何实现；Live Trading 无实现"
+      - "闭环 6 阶段未装配"
+    legacyPaths: []
+
+  # ── 辅助域（非规格要求，但为完整基线所必需） ──────────────────────────
+
+  marketDataFoundation:
+    status: RESEARCH_READY
+    marker: FACT
+    purpose: STEP 12 A–H 数据地基（OHLCV / Security Master / Status / CorpActions / Liquidity / Index / Industry / Gate）
+    sourcePaths:
+      - scripts/backfill*.ts
+      - server/backfill/**
+      - server/marketData/**
+      - server/security/**
+      - server/data/boardRules.ts
+    entryPoints:
+      - scripts/step12_certify.mjs
+      - scripts/backfillDaily.ts
+    inputs: [BaoStock / Tushare providers]
+    outputs: [stock_daily_prices / research_securities / ...]
+    consumers: [dataset]
+    persistence:
+      - stock_daily_prices (8895704)
+      - index_daily (7492)
+      - research_securities (5552)
+      - industry_assignments (5212)
+      - corporate_actions / adjustment_factors / liquidity_daily
+    tests:
+      - tests/server/backfill/**
+      - tests/server/research/framework/**
+    knownRisks:
+      - "index_daily 是交易日历唯一来源；停更会静默 no-op 却报成功 ⇒ 补数须 --force"
+      - "industry securityId 曾全 NULL；effectiveFrom 单点（BaoStock 只给当前快照）"
+      - "BaoStock 单账号单会话 ⇒ C/E/G 禁并发"
+    legacyPaths: []
+
+  marketRegime:
+    status: FACT
+    marker: FACT
+    purpose: 七维 PIT 市场状态标签 + 归因
+    sourcePaths: [server/research/marketRegime/**, server/marketRegimeRouter.ts]
+    entryPoints: [server/research/marketRegime/run.ts#runMarketRegimeAnalysis]
+    inputs: [dataset rows]
+    outputs: [Regime tags + attribution]
+    consumers: [frontend, closedLoop.regime]
+    persistence: []
+    tests: [tests/server/research/marketRegime/**]
+    knownRisks: []
+    legacyPaths: []
+
+  lifecycleAndReview:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: 策略八态生命周期 + 候选转正 + 交易日志 + 纪律反馈
+    sourcePaths:
+      - server/research/lifecycle/**
+      - server/research/strategyCandidate/**
+      - server/research/tradeJournal/**
+      - server/research/disciplineFeedback/**
+      - server/reviewRouter.ts
+    entryPoints:
+      - server/research/lifecycle/map.ts#applyLifecycleTransition
+      - server/research/strategyCandidate/router.ts#promote
+      - server/research/tradeJournal/reconcile.ts#reconcilePlanVsActual
+      - server/research/disciplineFeedback/run.ts#buildDisciplineFeedbackRun
+    inputs: [strategy version, candidate, paper run, trade records]
+    outputs: [lifecycle ledger, strategy version, journal drafts, discipline report]
+    consumers: [frontend]
+    persistence: [strategies / strategy_versions / strategy_research_provenance]
+    tests:
+      - tests/server/research/lifecycle/**
+      - tests/server/research/strategyCandidate/**
+      - tests/server/research/tradeJournal/**
+      - tests/server/research/disciplineFeedback/**
+    knownRisks:
+      - "setVersionStatus 绕过 §23 迁移表（与 lifecycle.transition 不一致）"
+      - "reviewRouter 头注释称未合并进 appRouter，实际已注册（陈旧注释）"
+    legacyPaths: []
+
+database:
+  sampledAt: "2026-09-19T08:40Z (+ delta recheck 2026-09-19T08:58Z)"
+  closedLoopBacktestRunRows: "7 @08:40Z -> 8 @08:58Z"
+  workspaceCaveat: "审计对象为工作区（working tree），非 HEAD：审计时存在 11 个未提交的 server/** 改动（+254/-79）。行号为 auditedAt 快照，定位以路径+符号名为准。"
+  realBaseTables: 63
+  schemaDeclaredTables: 60
+  deltaExplanation: "__drizzle_migrations (24 rows) + rd_rows_05809b1a6d97aa02 (163) + rd_rows_5dce9db1421bec38 (800)"
+  foreignKeys: 0
+  migrations:
+    files: 41
+    range: "0000-0040"
+    journalStopsAt: "0023"
+    snapshotsStopAt: "0015"
+    __drizzle_migrationsRows: 24
+    dbPushUsable: false
+    applyMechanism: "手写 SQL(-- @guard 幂等) + scripts/apply*.mjs|mts (14 专用 + 1 通用)"
+  hardRules:
+    - "禁 db:push"
+    - "禁 drizzle-kit generate"
+    - "禁手写 _journal.json"
+    - "migration 必须显式"
+    - "不随意修改历史数据"
+    - "历史 Run 不回填"
+  protectedTables:
+    - closed_loop_backtest_run
+    - strategy_versions
+    - dataset_version
+
+testing:
+  baseline:
+    failingFiles: 8
+    failingCases: 17
+    judgement: "失败文件集合逐项一致 = 零新增"
+  framework: Vitest 3 (environment node, no setupFiles, no testTimeout override)
+  include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "tests/**/*.spec.ts"]
+
+openFindings:
+  architectureRisks:
+    AR-1: "三段不可互换执行契约并存"
+    AR-2: "R-06 单次 Run 657.8s：主因已定位（canonical.ts 44.3% CPU / fingerprint 每求值 2 次）并已修（research -52%，digest 不变）；剩余瓶颈 = DB 读取 ≈95s（58 次往返）"
+    AR-3: "止损三落点互不相通；server/engine/** 完全不执行止损"
+    AR-4: "策略层无独立未来函数防护（legacy LeakageGuard 恒通过）"
+  functionalRisks:
+    R-01: "搜索结果不落库"
+    R-02: "运行级复现快照缺失"
+    R-03: "codeVersion 11/11 = 1.0.0+gunknown"
+    R-04: "setVersionStatus 绕过 §23 迁移表"
+    R-05: "parameterRole 门槛未生效"
+    R-06: "两套 Metrics 口径并存"
+    R-07: "数据集桥仅支持单一 datasetCode"
+    R-08: "prefix/post 不在 migration 链内"
+    R-09: "无 FK ⇒ 校验-提交窗口"
+    R-10: "单次运行可复现性不完整（N-05/N-06）"
+
+nextStage:
+  id: ROBUSTNESS-PARAMETER-CONSUMPTION
+  status: PLANNED
+  blocking: "PARAMETER-001（9bs）与 PARAMETER-002（9bt）均已完成：PS 有效性已 gate（死参数护栏 + 前置窗口校验 + 参数引用正例证明执行链正确）。下一步由 Robustness / OOS / Walk-Forward 消费 Parameter Search 结果。⚠️ 遗留：闭环 optimization 阶段仍用旧派生器；历史候选文档的参数需改写为参数引用；N-03 = DEFERRED"
+  createdTasks:
+    - "系统性创建 BACKTEST-003 / BACKTEST-004 = 禁止"

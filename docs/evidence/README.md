@@ -655,3 +655,114 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > 语义仍是 best-effort（**不抛**：把"历史列表少一条"升级成"回测结果丢失"是更坏的交易）。
 > ⚠️ 坑二：**耗时与请求窗口无关** —— 3 个月窗口 593.3s、1 个月窗口 616.4s（同路径同策略）
 > ⇒ 瓶颈在**数据集装载**（112,920 行），不在逐决策日扫描；别再用"缩小窗口"当加速手段。
+
+---
+
+### `baseline001` —— 6 个（2026-09-19：SYSTEM-BASELINE-001 全局架构基线的真实库取证）
+
+> **背景**：SYSTEM-BASELINE-001 要求「必须实际审计整个项目、不得只拼接已有报告」，
+> 且基线必须登记**当前真实 DB 状态**（ROADMAP §36「真实状态优先」）。三个探针各管一件事，
+> **全程 SELECT、零 DML、零 DDL**，互不覆盖，`errors=0`。
+> 纪律：探针跑在**研究 Run 在途之外**；输出全部落盘（Win stdout 不可靠）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_baseline_state.mts` + `.out.json` + `.out.txt` | ✅ **`errors=0`**（2026-09-19T08:40Z）。逐表真实行数：`strategies` 10 / `strategy_versions` 11（Draft 10 + Validated 1，`codeVersion` **11/11 = `1.0.0+gunknown`**，`datasetVersionId` NULL **0**）/ 5 投影表 24·17·19·9·9 / provenance 9 / `research_strategy_candidate` 13（CONVERTED 9、DRAFT 3、ARCHIVED 1；已转正 9）/ `closed_loop_backtest_run` **7**（**7/7 `PARTIAL_BLOCKED`**；`datasetSource` registry 4 + rebuild 3；带 BACKTEST-002 载荷 **1/7**，`policyVer=1`）/ legacy 复数表 `research_experiments` 0 · `research_runs` 2 · `research_experiment_batches` 0 · `research_datasets` 7。行情：`stock_daily_prices` **8,895,704** / `index_daily` 7,492 / `research_securities` 5,552 / `industry_assignments` 5,212。`dataset_definition` 1 / `dataset_version` 2。**BASE TABLE = 63** | `docs/architecture/DATABASE-MAP.md`、`docs/architecture/SYSTEM-BASELINE-001-REPORT.md` §5 |
+| `_probe_baseline_tables.mts` + `.out.json` | ✅ 枚举真实库全部 **63** 张 BASE TABLE ⇒ 与 `drizzle/schema.ts` 声明的 **60** 张相差 **3**：`__drizzle_migrations`（24 行，drizzle 元数据）+ `rd_rows_05809b1a6d97aa02`(163) + `rd_rows_5dce9db1421bec38`(800)（B 体系 legacy 动态行表）。⇒ 同时佐证 **journal 止于 0023 / `__drizzle_migrations` 24 行**、`db:push` 不可用 | `DATABASE-MAP.md` §1 §2 §7 D-1 |
+| `_probe_baseline_ds_accounting.mts` + `.out.json` | ✅ 按 `datasetVersionId` 分组复算 ds_* 五表：v1 = 1130+23,730+15,876+15,876+3,390 = **60,002** = 其 `totalRows`；v2 = 23,978+503,538+471,816+471,816+71,934 = **1,543,082** = 其 `totalRows` ⇒ **逐版本精确闭合，差 0，无孤儿行**。（本条**推翻**了此前由全表 COUNT 相加得出的「疑似差 10,000 行」——那是加法出错；见 §坑一） | `DATABASE-MAP.md` §3.1、`SYSTEM-BASELINE-001-REPORT.md` §1 方法学要点 |
+
+> 🔴 **坑一（本轮真踩，复用价值极高）**：**「看起来不闭合」先复算，不要先写结论**——
+> 全表 COUNT 相加得 `ds_*` = 1,613,084，而 `dataset_version.totalRows` 之和 = 1,603,084，
+> 一度被判定为「10,000 行孤儿数据」的疑似缺陷。改为**按 `datasetVersionId` 分组**复算后，
+> 逐版本精确相等、差为 0 —— **是我自己的加法算错了**。⇒ 登记事实前必须能**复算**；
+> 只登记「能复算的事实」，不登记「看起来像的事实」。
+> ⚠️ 坑二：**只读探针也要避免逐表两次往返** —— 每张表先查 `information_schema` 再 `COUNT(*)`
+> × 39 张表 ⇒ 在 TiDB Cloud 上耗时约 **28s**（`stock_daily_prices` 单表 COUNT 占 5s）；
+> 若只为「有/无」判断，可直接 COUNT 并捕获异常，省一半往返。
+> ⚠️ 坑三：**`resultJson LIKE '%"backtest"%'` 不是「有 backtest 段」的判据** ——
+> `ClosedLoopEvaluationRef` 里存在 `backtestFingerprint`，该模式会**误命中全部 7 行**。
+> 正确判据 = 取 `$.backtest.executionMetadata.executionPolicyVersion`（实测 1/7 非空）。
+
+| `_probe_baseline_delta.mts` + `.out.json` + `.out.txt` | ✅ **增量复核**（2026-09-19T08:58Z，`errors=0`）：只复核「会随在途 Run 变化」的少量量，跑得快。结果：`closed_loop_backtest_run` **7 → 8**（新增 `clrun-20260919083211921` / `EXP-20260919-PARAM001PRE` / `createdAt 08:43:11`）；带 BACKTEST-002 载荷（`policyVer=1` + `strategyRun`）**1/7 → 2/8**；`strategy_versions` 仍 11 / `research_strategy_candidate` 仍 13 / `dataset_version` 未变。**动机**：主采样（08:40Z）时该 Run **正在在途**（08:32 起，约 657s）⇒ 主采样值是该时刻快照，需与复核值分开陈述 | `SYSTEM-BASELINE.md` §7 §16、`DATABASE-MAP.md` §3.5、`SYSTEM-BASELINE-001-REPORT.md` §5 |
+
+> ⚠️ 坑四：**并发环境下的基线必须带时间戳** —— 本轮审计期间**另有会话在跑 PARAMETER-001-PRE**
+> （且在 16:56 改动了 `server/strategyCore/runtime.ts`）⇒ ① 基线描述的是**工作区**不是 HEAD；
+> ② **行号会漂移**，定位改用「路径 + 符号名」；③ 随在途任务变化的采样值（Run 行数、指标）**必须标时间戳**。
+> 该三条已作为 `BASELINE_DRIFT` BD-01 ~ BD-04 登记在 `docs/architecture/CHANGE-AUDIT.md` 与
+> `docs/architecture/SYSTEM-BASELINE.md` §12.5，并写入 `AGENT-GUIDE.md` 陷阱 15/16。
+### `param001pre` —— 8 个（2026-09-19：PARAMETER-001-PRE「参数搜索性能 Profile 与执行架构决定」）
+
+> **背景**：`BACKTEST-002` 收尾留下 R-06（同一条真实链路 `2026-09-14` 实测 14.3 s → `2026-09-19` 593.3 s，
+> ≈41×，且**缩短请求窗口不缩短耗时**），而 PARAMETER-001（Parameter Search）要在同一条链路上跑几百次
+> ⇒ 规格要求先做一轮**完整、可重复**的性能 Profile 再决定架构。
+>
+> 本簇三类探针分工（**互不掩盖**）：**权威 Profile**（真实 Run + V8 CPU 采样）、
+> **阶段级微观基准**（真实数据、**零写库**、可反复跑、含单组参数边际成本 A/B）、**只读侦察**（阶段状态事实）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_param001_pre_profile.mts` | 权威 Profile 探针：真实 tRPC `loopRun` + **进程内 V8 CPU 采样**（1 ms）+ 阶段插桩。`PP_END` 换窗口 / `PP_CPU=0` 关采样 | `docs/parameter/PARAMETER-001-PRE-PROFILE.md` §3 §4 |
+| `_probe_param001_pre_profile.before.out.txt` + `.before.json` + `.before.cpuprofile.json` | **BEFORE 实测**（`cand-360004@1.0.0` / `dataset_version.id=390002` / `2025-01-02~2025-03-31` / 100,000 / policy v1）：墙钟 **657,796 ms**；**`optimization` 阶段占 92.83%**（610,652.5 ms，12 组样本）；主链只占 **0.97%**（6,395.1 ms）；数据集装载 17,145.5 ms（2.61%）；留档写库 22,085.2 ms（3.36%）；**DB 往返仅 61 次 ⇒ 无 N+1**；采样 CPU ≈ 墙钟（`idle` 5.18%）⇒ **纯 CPU-bound**；`canonicalMetrics.tradeCount=3`、`equityDigest=d208a2d0…`（与 BACKTEST-002 落库值逐字节相同） | 同上 §1 §4 §5 §7 |
+| （同上的 `.cpuprofile`） | **CPU 第一热点**：`server/strategyCore/canonical.ts` = **44.30% self**（291.4 s / 657.9 s）；根因 = `runtime.ts` 在**每次** `evaluateWithDetail` 里对**整份定义**算 **2 次** `computeDefinitionFingerprint` ⇒ 853,527 成员槽 × 2 次求值 × 2 次指纹 = **341 万次 canonical JSON + sha256** | 同上 §6 §11 |
+| `_probe_param001_stage_bench.mts` | 阶段级微观基准（真实数据、**零写库**）：数据集装载 / 装配 / research / backtest / evaluation / payload 六段计时 + **单组参数边际成本 A/B**（用户窗口 vs 数据集整窗）+ 一致性判据字段（`canonicalMetrics` / `equityDigest` / `tradeDigest` / 三个评估器）。🔴 **必须 `process.exit()` 收尾**（连接池拖住 event loop） | 同上 §10 §12 |
+| `_probe_param001_stage_bench.before.json` + `.before.out.txt` | **边际成本实测**：用户窗口（57 决策日 / 7,731 成员槽）= **5,039 ms/组**；数据集整窗（484 决策日 / 70,483 成员槽）= **46,739 ms/组** ⇒ **9.28×**；主链 research 5,474.3 ms | 同上 §10 |
+| `_probe_param001_stage_bench.after.json` + `.after.out.txt` | **AFTER（本轮唯一优化后）**：边际成本 **2,500 ms/组**（用户窗口）/ **21,748 ms/组**（整窗）⇒ **2.02× / 2.15×**；`canonicalMetrics` / 两个 digest / 三个评估器 / 样本数 / `truncated` **逐项或逐字节相等**（整窗组 27 笔 −45.00% 的**亏损**曲线覆盖了 `profitFactor` / `averageLossPct` 分支） | 同上 §10 §12 |
+| `_probe_param001_pre_profile.json` + `.cpuprofile.json` + `.after.out.txt` | **AFTER 端到端实测**：墙钟 **365,725 ms**（BEFORE 657,796 ms ⇒ **1.80×**；剔除同期恶化的跨境写库后计算路径 **2.07×**）；`research.decision_days 5,865` / `universe_member_slots 853,527` / `backtest.trades 327` / `resultJson 43,903 B` **逐项与 BEFORE 相同**；两个 digest 逐字节相同 | 同上 §1 §5.4 §12 |
+| `_probe_param001_recon.mts` + `.out.txt` | 只读侦察：7 条留档 Run 的逐条阶段状态 —— **#300001/#270001/#240001 的 `optimization = EXECUTED`；2026-09-14 三条全部 `optimization = CL_RUNNER_NOT_INJECTED`**（R-06 的 41× 关键旁证）；`dataset_version` 仅 2 行（390001/390002，均 READY）；`research_run` 在途 `RUNNING = 0` | 同上 §7.3 §16 RISK-6 |
+
+> 🔴 坑一（本轮真踩，价值高）：**「插桩后变慢」不是优化没生效** —— 同一次运行带插桩 + 1 ms CPU 采样时
+> 是 657.8 s，无插桩的历史实测是 593.3 s（约 +11%）。**Before/After 必须同条件**，
+> 跨报告引用数字时必须写清「带不带插桩 / 带不带采样」。
+> 🔴 坑二：**DB 刻度是「并发求和」不是墙钟** —— `db.read_ms = 101,430 ms` 而 `dataset.resolve` 墙钟只有
+> 17,145 ms，因为 48 条批读以并发 16 飞行，各自的墙钟相加自然大于外层墙钟。
+> 拿 `db.read_ms` 当「网络占比」会得出 6.4 倍的错误结论（真实占比 = 17.1 s / 657.8 s = **2.61%**）。
+> 🔴 坑三：**`process.exit()` 必须显式写** —— 基准探针忘了收尾 ⇒ 输出早已写盘、进程却一直挂着，
+> 直到工具层 SIGTERM（看起来像「跑不完」，其实早就跑完了）。判据 = **产物文件已完整**，不是退出码。
+> 🔴 坑四：**「同一次运行的环境会在两次对照之间变化」** —— AFTER 那轮的跨境 `insert` 从 2 次尝试变成 3 次
+> （22.1 s → 58.7 s），把端到端的 2.07× 稀释成 1.80×。**报数时必须把「环境项」与「计算项」分开算**。
+
+---
+
+## PARAMETER-001（Parameter Search 完整实现 · 编号 `9bs` · 2026-09-19）
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_param001_strategy_inventory.mts` | 只读盘点参数搜索可用的真实上游：`strategy_versions.datasetVersionId` 全部 = `390002`；`strategy_parameters` **24 行全 `TUNABLE`**（`roleDistribution` 只有 TUNABLE 一项，说明真实库还没有 FIXED/DERIVED 样本）；`dataset_version` 仅 2 行（390001 v1 / 390002 v2，均 READY） | `docs/parameter-search/PARAMETER-001-REPORT.md` §3 §9 |
+| `_e2e_parameter_search.mts` + `_e2e_parameter_search.out.json` | **真实库全链**（走 `appRouter.createCaller`，零 mock）：创建 → 4 组合 → 执行 → Backtest → Evaluation → 落档 → 查结果 → Resume。`PARAM001_MODE=create/full/verify`；`PARAM001_CLEAN=1` 自清、缺省保留产物。**实测 37 项 / 0 失败**：4 组合 **39 s** 全成功、`metricsSource=canonical`、二次 `start` ⇒ `evaluated=0 / skipped=4`、结果行不重复 | 同上 §9 §10 |
+| `_probe_parameter_search_dom.mjs` + `.out.json` | **前端可达性（量 DOM，不截图）**：`/parameter-search` 面板锚点命中、3 条真实 Run 行、点「添加参数」出现 4 种搜索形态（`INTEGER_RANGE/DECIMAL_RANGE/ENUM/FIXED`）、点「查看详情」后详情 + 结果区渲染（`startButton`/`cancelButton` 可见）、点「查看组合」展开、**0 page error** | 同上 §8 |
+| `_probe_param001_list.mts` | 只读诊断：`paramSearch.listSearches` 真的返回行（证明「列表空」若出现只能是前端 / 环境问题） | 同上 §8 |
+| `_probe_param001_cdp_health.mjs` | 无头浏览器 CDP 连通性自检（target 列表 / navigate 结果 / body 前 300 字符）；DOM 探针报「锚点未出现」时**先跑它定性** | 同上 §8 §11 |
+
+> 🔴 坑一（本轮真踩，**验收判据错不是产品缺陷**）：`dataset_version.startDate/endDate` 是 **UTC 时间戳**
+> （北京日 2024-09-01 存成 `2024-08-31T16:00:00.000Z`）⇒ 探针用 `toISOString().slice(0,10)` 取业务日期会**少一天**，
+> 于是搜索窗口越界、4 个组合全部 `SIM_RANGE_OUT_OF_DATASET`（62 s 全失败）。**取业务日期必须按北京时区格式化。**
+> 🔴 坑二（第三次踩，务必外化）：**DOM 探针的 JS 模板串里写正则 `\n` / `\s` 会被 JS 当转义吃掉** ⇒
+> `Runtime.evaluate` 直接语法错、`snap` 恒 `undefined` ⇒ 探针报「页面不可达」，而页面其实完全正常。
+> 判据：**探针报「找不到元素」时第一动作是 `console.log` 一次匹配结果**，不要先怀疑产品。
+> 🔴 坑三：**单次 `Page.navigate` 偶发不落地（body 恒空）** ⇒ 轮询里必须**周期性重新导航**，
+> 并以「body 有内容」为前置条件，否则 60 s 全在等一个不会来的锚点。
+> 🔴 坑四：**只杀自己那棵树**（`taskkill /F /T /PID <pid>`），**绝禁按镜像名杀**（`/IM chrome.exe`）——
+> 那会连用户自己的浏览器一起杀掉。本轮实测残留 26 个无头 Edge 进程会占住 CDP 端口。
+> 🔴 坑五：`DataTable`（`@/components/common`）**不接受 `id` 属性** ⇒ DOM 锚点要用**页面主体唯一长文本**或自备包裹元素。
+
+---
+
+## PARAMETER-002（参数有效性 Gate · 2026-09-19）
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_param002_recon.mts` | 只读侦察：**同族策略历史上真出过成交**（`closed_loop_backtest_run`：`cand-360001` 2025-01-02..2025-02-28 **90 笔**、`cand-360006` 35 笔、`cand-960001` 9 笔）；`dataset_version` 只有 2 行（390001/390002，均 READY） | `PARAMETER-002-REPORT.md` §2 §3 |
+| `_probe_param002_recipe.mts` | 只读：候选文档的 `recipe` 全文 —— `first-limit-pullback-hold-shrink` 是**选择型配方**（`selectionConfig.topN=5` + `rankingConfig`），**不含任何参数绑定** | 同上 §2 |
+| `_probe_param002_candidate.mts` | 只读：候选草稿的 `parameterSpaceJson` 里**逐参数写明了语义**（「缩量阈值…0.3 = 相对首板日缩到 30% 以内」）⇒ 参数**本意**就是门槛值；但 `filterRuleJson` 为 NULL | 同上 §2 §5 |
+| `_probe_param002_parameter_sensitivity.mts` + `.out.json` | **决定性证据**。Part 1 链路快照：`Core parameterSchema` 声明 3 个参数、**规则图 `PARAMETER_REFERENCE` = 0 个**；覆写**到达**装配层（A/B 的 `experimentConfig.parameters` 不同）且引擎 = `strategy-core`。Part 2 真实 A/B（同窗口、逐参数隔离）：三组**权益曲线逐字节相同**（`4c9f7a66cb21c94c`）。Part 3 **正对照**：把 `cond-2` 改成 `bar.volumeRatio <= max_volume_ratio`（参数引用）后，A=0.05 → **0 笔**、B=1.0 → **8 笔 / −10.36% / maxDD 10.54% / 胜率 50%** | 同上 §3 §4 §5 §6 |
+| `_e2e_param002_parameter_effect.mts` + `.out.json` | **真实 tRPC 端到端（13/13 PASS）**：① 负例 A —— 对「死参数」策略创建搜索被**响亮拒绝**（`PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER`）；② 负例 B（N-01）—— 窗口越界被拒（`PARAMETER_SEARCH_WINDOW_OUT_OF_DATASET_RANGE`，信息含 **requested window** 与 **dataset window**）；③ 正例 —— 自建「参数引用」策略版本，2 组合真实执行 **21 s**，结果 **出现差异**（0.05 → 0 笔 / 1.0 → **8 笔、−10.36%**）；④ Resume 二次 `start` ⇒ `evaluated=0 / skipped=2`。**自建自清**（策略级联 + 三张 PS 表按 `searchRunId` 删，残留 0） | 同上 §7 §8 |
+
+> 🔴 坑一（本轮真踩，**探针判据错不是产品缺陷**）：正对照首版写成 `bar.volume <= max_volume_ratio`
+> （**成交量 vs 比值**，量纲不同）⇒ 条件**恒为假** ⇒ A/B 都无信号、看起来「参数不影响」。
+> 正确写法是 `bar.volumeRatio <= max_volume_ratio`（派生字段 = 决策日量能 / 首板日量能，与配方门槛同义）。
+> **教训：构造最小差异实验时，先确认「这一维确实可能变化」，否则会把自己的错误当成产品缺陷。**
+> 🔴 坑二：手工改 `definition` 而把 v1 视图（`entryRules`）留在原处 ⇒ 校验器**正确拒绝**
+> （`SCHEMA_DEFINITION_VIEW_CONFLICT` / `_VIEW_DRIFT`）。构造文档必须走
+> `createStrategyDocumentFromDefinition`（v1 视图单向派生）—— 那条纪律是对的，不是坑。
+> 🔴 坑三：**显式搜索域覆盖能把「死参数」重新塞回搜索空间**（实测：三个死参数被覆盖后 `searchable` 又变 3 个）
+> ⇒ 死参数剥离必须放在**覆盖之后**（`派生 → 覆盖 → 剥离 → 校验`），并为「给死参数赋会变化的搜索域」加响亮拒绝。

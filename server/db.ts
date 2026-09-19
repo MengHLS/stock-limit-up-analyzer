@@ -69,6 +69,8 @@ import { parseStoredMarketYi } from './marketFactors';
 // 跨境链路瞬时错误的有界重试（只读安全；见 `server/researchEngine/readRetry.ts` 头注释）。
 // 此前仅 researchEngine 用了它，龙头候选池等直连查询裸跑 ⇒ 一次 `read ECONNRESET` 直接冒到 UI。
 import { withReadRetry } from './researchEngine/readRetry';
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { PERF_DB_HOOK_ENABLED, installDbPerfHook } from './observability';
 import { runMonkeyBenchmark, runCostSensitivity } from './overfittingGuard';
 import {
   advancePaperTradingDay,
@@ -199,6 +201,10 @@ export async function getDb() {
           compress: resolveCompress(),
         },
       });
+      // PARAMETER-001-PRE — 性能剖析（默认关闭）：把底层 mysql2 pool 的 query/execute 包一层
+      // 只做「往返计数 + 墙钟记账」，不改 SQL / 参数 / 返回。关闭时该层完全不存在。
+      // 见 `server/observability/dbHook.ts` 头注释。
+      if (PERF_DB_HOOK_ENABLED) installDbPerfHook((_db as unknown as { $client?: unknown }).$client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
