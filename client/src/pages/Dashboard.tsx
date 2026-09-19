@@ -5,8 +5,8 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { trpc } from "@/lib/trpc";
 import { ladderHeight } from "@shared/ladderHeight";
 import { normalizeLimitUpTime } from "@shared/limitUpTime";
-import { buildSectorHeatLookup, sortBySectorHeat } from "@shared/sectorHeatOrder";
-import { TrendingUp } from "lucide-react";
+import { buildSectorHeatLookup, isTailSector, sortBySectorHeat } from "@shared/sectorHeatOrder";
+import { ChevronDown, TrendingUp } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Bar,
@@ -67,6 +67,22 @@ import {
  *       ⇒ 单位改由**每张图的小标题**与**图例名称**承载，轴内只留刻度数字。
  *   14. **去掉梯队折叠的状态说明文字**（「已折叠本组 x 行（默认只显示前 3 行）」），只留展开 / 收起按钮。
  *
+ * 2026-09-19 第五轮修订（用户口述：「首页最下面有四个大的跳转按钮没用，去掉」）：
+ *   15. **底部四张快捷入口卡片整体移除**（涨停复盘明细 / 大盘分析 / 情绪分析 / 上传图片）——
+ *       侧栏同名入口仍在，只去掉首页这四条重复跳转。
+ *
+ * 2026-09-19 第六轮修订（用户口述：「首页连板梯队日期选择器夜间模式文字看不清」）：
+ *   16. **梯队「选择日期」下拉改为「主题令牌上色」**：原实现只写了 `border border-border`，
+ *       而 `background-color` 落到 Tailwind preflight 的**透明** ⇒ 控件表面与**展开的选项弹层**
+ *       一律交给 UA / 平台决定；偏偏 `option` 的文字色是 `inherit` 来的 `--foreground`（暗色近白）。
+ *       Windows Chrome 的选项弹层是浏览器进程按**平台主题**画的独立窗口，与页面 CSS 不共享表面
+ *       ⇒ 平台表面为浅色时就是「浅字浅底」。无头 Chrome 实测（`_probe_ladder_date_select_dark.mjs`）：
+ *       暗色主题下 `option` 表面 = `rgba(0,0,0,0)`，若平台弹层为纯白，文字对比度仅 **1.27**（AA 需 ≥ 4.5）。
+ *       ⇒ 补齐 `bg-background text-foreground border-input`（与 `OperationLogs.tsx` 的既有写法一致，
+ *       使表面对比度不再依赖平台）+ `[&>option]:bg-popover [&>option]:text-popover-foreground`
+ *       （选项自带不透明底与配套前景色）+ 键盘焦点 `ring`。
+ *       ⚠️ `Market.tsx` 的「选择日期」是同一种写法（同一个缺陷），本轮**未动**（用户只报了首页）。
+ *
  * 数据口径约束：
  *   · 板数 = 「连续记录交易日涨停的天数」；连板股取当日口径、断板股取**上一记录交易日**口径。
  *   · 梯队左列「高度」= **若该股本日涨停会达到的连板数**（断板 ⇒ 上一记录日板数 + 1，**含首板未续**，
@@ -100,16 +116,43 @@ const HEATMAP_SECTOR_LIMIT = 20;
  *    「超过三行折叠是每个高度内超过三行，折叠那个高度到只有三行」。
  */
 const LADDER_GROUP_VISIBLE_ROWS = 3;
+/**
+ * 「展开 → 收起」后的回滚落点：把本组网格顶部停在距视口顶部这么远的地方。
+ *
+ * 为什么需要回滚（用户 2026-09-19）：「点击折叠后，页面向上回滚至合适位置，要带滚动动画」——
+ * 展开态下按钮长在很高的一格网格**下面**，用户为了点它已经滚到很下面；收起后本组瞬间变矮
+ * （首板组 11 行 → 3 行，约 1000px），下方内容整体上移，而浏览器**保留 scrollY** ⇒
+ * 用户眼里"啪"地跳到了别的高度组，找不到自己刚才操作的是哪个。
+ *
+ * 值取 88px：本项目无 sticky 顶栏（`AppShell` 是 `SidebarProvider` + `main`，滚动体是 window），
+ * 88px 只是呼吸留白，保证「本组网格 + 折叠按钮」同屏可见。
+ */
+const LADDER_COLLAPSE_SCROLL_TOP = 88;
 /** 网格列数的初始猜测值；`useLayoutEffect` 会在首帧绘制前用实测值覆盖，不产生可见闪烁。 */
 const LADDER_GRID_FALLBACK_COLS = 6;
 /** 只读行情类查询的 staleTime：回退首页/切页返回时直接用缓存，不再重复打库。 */
 const READONLY_STALE_MS = 5 * 60_000;
 
 const CHART_COLORS = {
-  /** 涨停家数（柱）：日间红-500。 */
+  /**
+   * 涨停家数（柱）· 亮色主题。
+   *
+   * 🔴 日间态**保持原值不动**（用户 2026-09-19 明确：「只改夜间模式」）：白底上的红不刺眼，
+   * 且对白卡对比度 3.76:1，是这几版里最清楚的一档 —— 不要为了"统一"顺手把它一起改淡。
+   */
   limitUpBarLight: "#ef4444",
-  /** 同上，暗夜用红-700 —— 大面积柱体上的高饱和红在暗底色会「发光」刺眼。 */
-  limitUpBarDark: "#b91c1c",
+  /**
+   * 涨停家数（柱）· 暗夜主题（唯一被改的一档）。
+   *
+   * 旧值 = Tailwind `red-700`（`#b91c1c`，`hsl(0,74%,42%)`）—— 深色卡片上一块"沉而艳"的红，用户反馈刺眼。
+   * 现值 `#a04e4e` = `hsl(0,34%,47%)`：色相仍是 0（红涨绿跌是硬口径，不改色相），饱和度 74%→34%，
+   * 退成"灰调砖红"，不再发光。
+   * ⚠️ **必须守住「暗夜比亮日暗」这条既有口径**（`docs/evidence/_probe_homepage_rework.mjs` 的 I 节按
+   * WCAG 相对亮度断言 `dark < light × 0.7`）：现值 0.135 vs 亮日 `#ef4444` 的 0.229 ⇒ 比值 **0.59**，余量 16%。
+   * 改色前先套一遍这条公式 —— 「降饱和」很容易顺手把亮度一起抬上去，从而把两档拉平
+   * （本轮曾误取 `#c88383`，比值 0.81 ⇒ 探针直接红）。
+   */
+  limitUpBarDark: "#a04e4e",
   turnover: "#3b82f6",
   marginBalance: "#f59e0b",
 };
@@ -487,11 +530,31 @@ interface LadderGroup {
   items: LadderItem[];
 }
 
-/** 单格：时间行（或一字板标 / 涨跌幅）+ 名称（断板加删除线）+ 题材。 */
+/**
+ * 单格：时间行（或一字板标 / 涨跌幅）+ 名称（断板划线）+ 题材。
+ *
+ * 🔴 「断板 vs 连板」的区分必须走**双通道**（用户 2026-09-19：「夜间模式下断板划线展示和连板区分度太低，
+ * 换一种更明显的，后续 UI 设计都要考虑夜间模式的可读性」）：
+ *   ① **形状**：断板格加**虚线描边**（`outline` 系列 —— 不占布局 ⇒ 网格对齐与列宽完全不受影响，
+ *      且虚线是"失效/候补"的通用语义，任何主题、任何色觉下都读得出来）；
+ *   ② **文字**：名称删除线加粗到 2px 且去掉 alpha；连板名升为 `font-semibold`（字重也是通道）。
+ *
+ * 为什么**不能**只靠"文字深浅"这一条通道（实测量化，别凭感觉）：
+ *   · 亮色 `--foreground` oklch(0.20) / `--muted-foreground` oklch(0.50) ⇒ 文本对比 **2.93:1**；
+ *   · 暗色 `--foreground` oklch(0.92) / `--muted-foreground` oklch(0.715) ⇒ 文本对比 **1.79:1**
+ *     —— 夜间只有日间的 **61%**，这就是"区分度太低"的根因；
+ *   · 而**再压暗断板名会伤它自己的可读性**（暗色下对卡片 5.18:1，压到 oklch(0.55) 只剩 3.0:1）
+ *     ⇒ 文字通道已到顶，剩下的区分度必须由形状通道承担。
+ */
 function LadderCell({ item }: { item: LadderItem }) {
   const time = normalizeLimitUpTime(item.limitUpTime);
   return (
-    <div className="min-w-0 text-center leading-tight" data-ladder-stock={item.stockCode}>
+    <div
+      className={`min-w-0 rounded-md text-center leading-tight ${
+        item.broken ? "-outline-offset-1 outline-1 outline-dashed outline-muted-foreground/80" : ""
+      }`}
+      data-ladder-stock={item.stockCode}
+    >
       {item.broken ? (
         <div className={`text-[11px] ${pctClass(item.changePct)}`}>{formatPct(item.changePct)}</div>
       ) : item.oneWordBoard ? (
@@ -502,8 +565,10 @@ function LadderCell({ item }: { item: LadderItem }) {
         <div className="text-[11px] text-muted-foreground">{time ? time.slice(0, 5) : "—"}</div>
       )}
       <div
-        className={`truncate text-sm font-medium ${
-          item.broken ? "text-muted-foreground line-through decoration-muted-foreground/70 decoration-[1.5px]" : ""
+        className={`truncate text-sm ${
+          item.broken
+            ? "font-medium text-muted-foreground line-through decoration-muted-foreground decoration-[2px]"
+            : "font-semibold"
         }`}
         title={`${item.stockName} ${item.stockCode}`}
       >
@@ -568,6 +633,33 @@ function LadderGroupGrid({ groupKey, items }: { groupKey: string; items: LadderI
   const gridRef = useRef<HTMLDivElement>(null);
   const cols = useGridColumnCount(gridRef);
   const [expanded, setExpanded] = useState(false);
+  /** 上一帧的展开态：只在「展开 → 收起」这一刻回滚；挂载帧与展开动作都不动滚动条。 */
+  const wasExpandedRef = useRef(false);
+
+  /**
+   * 收起后把本组平滑滚回视野。
+   *
+   * ⚠️ 三个刻意的选择：
+   *   ① 用 `useLayoutEffect` 而不是 `useEffect` —— 必须在浏览器把「变矮后的布局」画出去**之前**算落点，
+   *      否则会先看到一次跳动再滑回来；
+   *   ② **只向上、绝不向下**：本组顶部若已在舒适线以下（用户本来就看得见），一律不滚 ——
+   *      否则点一下收起会把用户的视口往下拽，比不滚更烦；
+   *   ③ 落点夹取到页面最大可滚距离，避免最后一组（首板）收起后滚过头露出空白。
+   */
+  useLayoutEffect(() => {
+    const wasExpanded = wasExpandedRef.current;
+    wasExpandedRef.current = expanded;
+    if (!wasExpanded || expanded) return;
+    const element = gridRef.current;
+    if (!element) return;
+    const top = element.getBoundingClientRect().top;
+    if (top >= LADDER_COLLAPSE_SCROLL_TOP) return;
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const target = Math.min(Math.max(0, window.scrollY + top - LADDER_COLLAPSE_SCROLL_TOP), maxScroll);
+    // 尊重系统的「减弱动态效果」：该偏好打开时改为瞬时定位，不做动画。
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+    window.scrollTo({ top: target, behavior: reduceMotion ? "auto" : "smooth" });
+  }, [expanded]);
 
   const columns = Math.max(1, cols);
   const totalRows = Math.ceil(items.length / columns);
@@ -590,15 +682,20 @@ function LadderGroupGrid({ groupKey, items }: { groupKey: string; items: LadderI
         ))}
       </div>
       {collapsible ? (
-        <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+        // ⚠️ 这个容器**只能有按钮这一个子元素**：`docs/evidence/_probe_homepage_rework.mjs` 断言
+        // `btn.parentElement` 除按钮外无其它子节点（防"已折叠本组 x 行"这类冗余说明文字回流）。
+        // 居中靠容器自身的 `justify-center` 完成，不要再套一层 wrapper。
+        <div className="mt-3 flex items-center justify-center">
           <button
             type="button"
             data-homepage-ladder-group-toggle={groupKey}
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
-            className="rounded-md border border-border px-2 py-1 text-[11px] font-medium transition-colors hover:bg-muted/60"
+            className="inline-flex select-none items-center gap-1.5 rounded-full border border-border bg-muted/40 px-3.5 py-1.5 text-[11px] font-medium text-muted-foreground shadow-sm transition-all hover:border-foreground/20 hover:bg-muted hover:text-foreground hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98]"
           >
-            {expanded ? "收起" : `展开本组全部 ${totalRows} 行`}
+            <span>{expanded ? "收起" : `展开本组全部 ${totalRows} 行`}</span>
+            {/* 箭头随展开态翻转 —— 让"当前是收着还是展开"不只有文字一个信号。 */}
+            <ChevronDown aria-hidden className={`h-3.5 w-3.5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />
           </button>
         </div>
       ) : null}
@@ -618,8 +715,12 @@ function LadderGroupGrid({ groupKey, items }: { groupKey: string; items: LadderI
  * **含「首板未续」**（上一记录日 1 板、当日未续 ⇒ 落到 2 板行，按断板格呈现）。
  * 因此左列最高值可以**高于** `metrics.maxBoards`（后者是当日已实现的最高连板数，喂情绪评分，口径不同）。
  *
- * 行内次序 = 该股题材在**所选日期**的涨停家数降序（唯一实现 = `@shared/sectorHeatOrder`），
- * **与是否断板无关** —— 断板格与涨停格混排，不再固定排前或排尾；同热度内按封板时间升序。
+ * 行内次序 = 该股题材的**题材次序**（唯一实现 = `@shared/sectorHeatOrder#compareSectorOrder`），
+ * **与是否断板无关** —— 断板格与涨停格混排，不再固定排前或排尾：
+ *   ① 非压尾档在前（兜底桶「其他」**固定压到组内最后**）→ ② **当日**涨停家数降序
+ *   → ③ **窗口内合计**降序 → ④ **题材名**升序 → ⑤（仅同一题材内部）封板时间升序 → 代码升序。
+ * 🔴 ①②③④ 与下方「题材热力日历」的行序**是同一段代码** —— 用户 2026-09-19 报「相同热度的题材，
+ * 梯队与热力图排序不同、对不上」；⑤ 只在同题材内部生效，故同一题材的格子仍**挨在一起**。
  *
  * 折叠是**组内**的：每个高度组各自判断，网格行数 > `LADDER_GROUP_VISIBLE_ROWS`（3）时默认只显示前 3 行，
  * 由该组自己的按钮展开/收起（列数实测自计算样式 ⇒ 2/3/4/6 列各断点下都恰好是 3 行）。
@@ -650,12 +751,12 @@ function BoardLadderSection() {
   const emotionLevel = getEmotionLevel(metrics?.emotionScore ?? 0);
 
   /**
-   * 所选日期的「题材 → 当日涨停家数」。
-   * ⚠️ 该接口只覆盖最近 30 自然日：选到更早的日期 ⇒ 空表，行内次序退化为「封板时间升序」，
-   * **不编造热度**（`sectorHeatOf` 对未知题材取 -1，全体并列 ⇒ 由次键决定）。
+   * 所选日期的「题材 → 当日涨停家数 + 窗口内合计」（两个键同一遍扫描，与热力图**同一查表**）。
+   * ⚠️ 该接口只覆盖最近 30 自然日：选到更早的日期 ⇒ 当日热度一律 -1（**不编造热度**），
+   * 次序退化为「窗口内合计降序 → 题材名」——**仍与热力图同序**。
    */
   const heatLookup = useMemo(
-    () => buildSectorHeatLookup(sectorDistribution?.find((day) => day.date === selectedDate)),
+    () => buildSectorHeatLookup(sectorDistribution, selectedDate),
     [sectorDistribution, selectedDate],
   );
 
@@ -678,7 +779,11 @@ function BoardLadderSection() {
       broken: isBroken,
     });
 
-    /** 组内格子 = 涨停格 + 断板格**混排**，按题材当日热力降序（同热度再按封板时间、代码）。 */
+    /**
+     * 组内格子 = 涨停格 + 断板格**混排**，按 `compareSectorOrder`（题材次序，与热力图同源）升序；
+     * `tieBreak` 只作用于**同一题材内部**（封板时间升序 → 代码升序）。
+     * 「其他」压尾由 `sortBySectorHeat` 内部保证（唯一实现，勿在此另写一套）。
+     */
     const buildItems = (up: typeof connection, cut: typeof broken): LadderItem[] =>
       sortBySectorHeat(
         [...up.map((row) => toItem(row, false)), ...cut.map((row) => toItem(row, true))],
@@ -720,7 +825,9 @@ function BoardLadderSection() {
           左列高度 = 「若该股本日涨停会达到的连板数」⇒ 当日仍涨停取本日连板数、当日未涨停（含首板未续）
           取上一记录交易日连板数 + 1，因此左列最高值可以高于「最高板」指标（后者是当日已实现口径）；
           断板股的板数与封板时间为上一记录交易日口径，热力缺失时该格热度视为最低。
-          行内按该股题材当日涨停家数降序排列（与是否断板无关），同热度内按封板时间升序；
+          行内按「题材次序」排列（与是否断板无关）：当日涨停家数降序 → 同热度按窗口合计降序 → 再按题材名，
+          与下方题材热力日历**同序**；同一题材内部按封板时间升序；
+          「其他」（无题材归属的兜底桶）不参与热度名次，固定排在每个高度的最后；
           「首板(N)」的 N = 当日首板家数（首板未续已按 +1 计入 2 板行）。每个高度组各自在网格超过{" "}
           {LADDER_GROUP_VISIBLE_ROWS} 行时默认只显示前 {LADDER_GROUP_VISIBLE_ROWS} 行，可单独展开该组全部。
         </CardDescription>
@@ -731,7 +838,7 @@ function BoardLadderSection() {
           <select
             value={selectedDate}
             onChange={(event) => setSelectedDate(event.target.value)}
-            className="rounded-md border border-border px-3 py-1.5 text-sm"
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background [&>option]:bg-popover [&>option]:text-popover-foreground"
           >
             {availableDates?.map((date) => (
               <option key={date} value={date}>
@@ -849,24 +956,18 @@ function SectorHeatmapSection() {
   const days = data ?? [];
   /**
    * 行（题材）顺序 = **当日**（最新一列，`days[0]`）的涨停家数降序 —— **不是**窗口内合计：
-   * 合计会把 30 天拉平、热点换题材后排序滞后。合计只作同热度时的次键，再按名称兜底。
+   * 合计会把 30 天拉平、热点换题材后排序滞后。合计只作同热度时的次键，再按题材名兜底。
    * 取前 `HEATMAP_SECTOR_LIMIT` 也随该序（当日为 0 的题材会被排到后面，可能因此不入前 N）。
+   * 🔴 与连板梯队**共用唯一比较器** `@shared/sectorHeatOrder#compareSectorOrder`
+   * （当日降序 → 合计降序 → 题材名）⇒ 同一个题材在两处的相对次序不会分叉（用户 2026-09-19 报的「对不上」）。
+   * 兜底桶「其他」不进热力图（它在梯队里压尾，两处都不参与名次）；「合计」列取自同一查表。
    */
   const sectors = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const day of days) {
-      for (const sector of day.sectors) {
-        totals.set(sector.sector, (totals.get(sector.sector) || 0) + sector.count);
-      }
-    }
-    const rows = Array.from(totals.entries())
-      .filter(([sector]) => sector !== "其他")
-      .map(([sector, total]) => ({ sector, total }));
-    // 唯一实现 = `@shared/sectorHeatOrder`（与连板梯队共用同一比较器）。
-    return sortBySectorHeat(rows, buildSectorHeatLookup(days[0]), (left, right) => right.total - left.total || left.sector.localeCompare(right.sector)).slice(
-      0,
-      HEATMAP_SECTOR_LIMIT,
-    );
+    const lookup = buildSectorHeatLookup(days, days[0]?.date);
+    const rows = Array.from(lookup.entries())
+      .filter(([sector]) => !isTailSector(sector))
+      .map(([sector, entry]) => ({ sector, total: entry.windowTotal }));
+    return sortBySectorHeat(rows, lookup).slice(0, HEATMAP_SECTOR_LIMIT);
   }, [days]);
   const maxValue = Math.max(1, ...days.flatMap((day) => day.sectors.map((sector) => sector.count)));
 
@@ -876,8 +977,9 @@ function SectorHeatmapSection() {
         <CardTitle>题材热力日历</CardTitle>
         <CardDescription>
           独立表格展示：列 = 记录交易日（最近 {days.length} 个，新 → 旧），单元格颜色深浅 = 当日该题材涨停数量；
-          行 = 题材，按当日（最新一列）涨停家数降序取前 {HEATMAP_SECTOR_LIMIT}（合计只作同热度时的次键），
-          “合计”列 = 该题材窗口内涨停总数（仅参考，不参与排序）。
+          行 = 题材，按当日（最新一列）涨停家数降序取前 {HEATMAP_SECTOR_LIMIT}，同热度按“合计”降序、再按题材名
+          —— 与上方连板梯队的题材次序**同一套规则**（同一个题材在两处的相对位置一致）；
+          “合计”列 = 该题材窗口内涨停总数（它正是同热度时的次键）。
         </CardDescription>
       </CardHeader>
       <CardContent>

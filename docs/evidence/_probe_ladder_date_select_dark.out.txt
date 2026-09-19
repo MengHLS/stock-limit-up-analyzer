@@ -1,0 +1,264 @@
+== 连板梯队「选择日期」夜间可读性取证 == 2026-09-19T15:32:51.884Z
+BASE=http://127.0.0.1:3000 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=27233
+CDP 已连接
+
+--- 主题 = light ---
+  {
+    "htmlClass": "",
+    "htmlColorScheme": "light",
+    "htmlInlineColorScheme": "light",
+    "storedTheme": "light",
+    "optionCount": 1873,
+    "select": {
+      "text": "2026-09-182026-09-17",
+      "tag": "SELECT",
+      "color": "oklch(0.2 0.02 240)",
+      "colorRgba": {
+        "r": 14,
+        "g": 23,
+        "b": 30,
+        "a": 1
+      },
+      "backgroundColor": "oklch(0.985 0.002 240)",
+      "colorScheme": "light",
+      "appearance": "auto",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "opacity": "1",
+      "borderColor": "oklch(0.9 0.01 240)",
+      "backdrop": "oklch(0.985 0.002 240)",
+      "backdropRgba": {
+        "r": 249,
+        "g": 250,
+        "b": 251,
+        "a": 1
+      },
+      "backdropFrom": "select",
+      "contrast": 17.32
+    },
+    "label": {
+      "text": "选择日期：",
+      "tag": "LABEL",
+      "color": "oklch(0.2 0.02 240)",
+      "colorRgba": {
+        "r": 14,
+        "g": 23,
+        "b": 30,
+        "a": 1
+      },
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "colorScheme": "light",
+      "appearance": "none",
+      "fontSize": "14px",
+      "fontWeight": "500",
+      "opacity": "1",
+      "borderColor": "oklch(0.9 0.01 240)",
+      "backdrop": "oklch(1 0 0)",
+      "backdropRgba": {
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 1
+      },
+      "backdropFrom": "div[data-slot=card]",
+      "contrast": 18.1
+    },
+    "option0": {
+      "text": "2026-09-18",
+      "tag": "OPTION",
+      "color": "oklch(0.2 0.02 240)",
+      "colorRgba": {
+        "r": 14,
+        "g": 23,
+        "b": 30,
+        "a": 1
+      },
+      "backgroundColor": "oklch(1 0 0)",
+      "colorScheme": "light",
+      "appearance": "none",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "opacity": "1",
+      "borderColor": "oklch(0.9 0.01 240)",
+      "backdrop": "oklch(1 0 0)",
+      "backdropRgba": {
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 1
+      },
+      "backdropFrom": "option",
+      "contrast": 18.1
+    },
+    "option1": {
+      "text": "2026-09-17",
+      "tag": "OPTION",
+      "color": "oklch(0.2 0.02 240)",
+      "colorRgba": {
+        "r": 14,
+        "g": 23,
+        "b": 30,
+        "a": 1
+      },
+      "backgroundColor": "oklch(1 0 0)",
+      "colorScheme": "light",
+      "appearance": "none",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "opacity": "1",
+      "borderColor": "oklch(0.9 0.01 240)",
+      "backdrop": "oklch(1 0 0)",
+      "backdropRgba": {
+        "r": 255,
+        "g": 255,
+        "b": 255,
+        "a": 1
+      },
+      "backdropFrom": "option",
+      "contrast": 18.1
+    },
+    "selectText": "2026-09-18",
+    "clip": {
+      "x": 325,
+      "y": 1265,
+      "w": 254,
+      "h": 74
+    }
+  }
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_ladder_date_select.light.png  clip={"x":325,"y":1265,"width":254,"height":74}
+  [判定] light 选择器文字 oklch(0.2 0.02 240) / 实际底 oklch(0.985 0.002 240)（select） ⇒ 对比度 17.32
+  PASS  亮色下 <html> 无 .dark、color-scheme: light  → {"cls":"","cs":"light"}
+  PASS  亮色基线：选择器文字对比度 ≥ 4.5  → contrast=17.32
+
+--- 主题 = dark ---
+  {
+    "htmlClass": "dark",
+    "htmlColorScheme": "dark",
+    "htmlInlineColorScheme": "dark",
+    "storedTheme": "dark",
+    "optionCount": 1873,
+    "select": {
+      "text": "2026-09-182026-09-17",
+      "tag": "SELECT",
+      "color": "oklch(0.92 0.002 286)",
+      "colorRgba": {
+        "r": 228,
+        "g": 228,
+        "b": 230,
+        "a": 1
+      },
+      "backgroundColor": "oklch(0.185 0.004 286)",
+      "colorScheme": "dark",
+      "appearance": "auto",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "opacity": "1",
+      "borderColor": "oklch(1 0 0 / 0.16)",
+      "backdrop": "oklch(0.185 0.004 286)",
+      "backdropRgba": {
+        "r": 18,
+        "g": 18,
+        "b": 20,
+        "a": 1
+      },
+      "backdropFrom": "select",
+      "contrast": 14.74
+    },
+    "label": {
+      "text": "选择日期：",
+      "tag": "LABEL",
+      "color": "oklch(0.92 0.002 286)",
+      "colorRgba": {
+        "r": 228,
+        "g": 228,
+        "b": 230,
+        "a": 1
+      },
+      "backgroundColor": "rgba(0, 0, 0, 0)",
+      "colorScheme": "dark",
+      "appearance": "none",
+      "fontSize": "14px",
+      "fontWeight": "500",
+      "opacity": "1",
+      "borderColor": "oklch(1 0 0 / 0.12)",
+      "backdrop": "oklch(0.245 0.005 286)",
+      "backdropRgba": {
+        "r": 32,
+        "g": 32,
+        "b": 35,
+        "a": 1
+      },
+      "backdropFrom": "div[data-slot=card]",
+      "contrast": 12.8
+    },
+    "option0": {
+      "text": "2026-09-18",
+      "tag": "OPTION",
+      "color": "oklch(0.93 0.002 286)",
+      "colorRgba": {
+        "r": 231,
+        "g": 232,
+        "b": 233,
+        "a": 1
+      },
+      "backgroundColor": "oklch(0.255 0.005 286)",
+      "colorScheme": "dark",
+      "appearance": "none",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "opacity": "1",
+      "borderColor": "oklch(1 0 0 / 0.12)",
+      "backdrop": "oklch(0.255 0.005 286)",
+      "backdropRgba": {
+        "r": 34,
+        "g": 34,
+        "b": 37,
+        "a": 1
+      },
+      "backdropFrom": "option",
+      "contrast": 12.93
+    },
+    "option1": {
+      "text": "2026-09-17",
+      "tag": "OPTION",
+      "color": "oklch(0.93 0.002 286)",
+      "colorRgba": {
+        "r": 231,
+        "g": 232,
+        "b": 233,
+        "a": 1
+      },
+      "backgroundColor": "oklch(0.255 0.005 286)",
+      "colorScheme": "dark",
+      "appearance": "none",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "opacity": "1",
+      "borderColor": "oklch(1 0 0 / 0.12)",
+      "backdrop": "oklch(0.255 0.005 286)",
+      "backdropRgba": {
+        "r": 34,
+        "g": 34,
+        "b": 37,
+        "a": 1
+      },
+      "backdropFrom": "option",
+      "contrast": 12.93
+    },
+    "selectText": "2026-09-18",
+    "clip": {
+      "x": 325,
+      "y": 1265,
+      "w": 254,
+      "h": 74
+    }
+  }
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_ladder_date_select.dark.png  clip={"x":325,"y":1265,"width":254,"height":74}
+  [判定] dark 选择器文字 oklch(0.92 0.002 286) / 实际底 oklch(0.185 0.004 286)（select） ⇒ 对比度 14.74
+  PASS  暗色下 <html> 带 .dark、color-scheme: dark  → {"cls":"dark","cs":"dark"}
+  PASS  暗色：选择器文字对比度 ≥ 4.5（WCAG AA 正文）  → contrast=14.74 · fg=oklch(0.92 0.002 286) · 底=oklch(0.185 0.004 286)（select）
+  PASS  暗色：选择器**自身**有由主题令牌给的不透明底色（表面不再交给 UA / 平台决定）  → backgroundColor=oklch(0.185 0.004 286)
+  PASS  暗色：选项文字对比度 ≥ 4.5  → contrast=12.93 · fg=oklch(0.93 0.002 286) · 底=oklch(0.255 0.005 286)（option）
+  PASS  暗色：`option` 自带不透明底 + 浅字（展开弹层不依赖平台默认色）  → optionBg=oklch(0.255 0.005 286) · optionColor=oklch(0.93 0.002 286) · 对比度=12.93
+
+=== 汇总：PASS=7 FAIL=0 ===

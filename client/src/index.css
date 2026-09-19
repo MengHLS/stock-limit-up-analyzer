@@ -153,6 +153,34 @@
   input[type="radio"]:not(:disabled) {
     @apply cursor-pointer;
   }
+
+  /**
+   * 原生下拉（`<select>`）的表面与选项配色**统一由主题令牌给定**，不交给 UA / 平台。
+   *
+   * 由来（2026-09-19 首页连板梯队「选择日期」夜间模式文字看不清的根因）：
+   *   `select` 若没声明背景，`background-color` 会落到 Tailwind preflight 的 `transparent`
+   *   ⇒ **闭合控件的表面**交给 Blink、**展开的选项弹层**交给浏览器进程按**平台主题**绘制的独立窗口；
+   *   而 `option` 的文字色是 `inherit` 来的 `--foreground`（暗色近白）
+   *   ⇒ 平台表面为浅色时就是「浅字浅底」。无头 Chrome 实测：平台弹层为纯白时文字对比度仅 **1.27**
+   *   （WCAG AA 正文需 ≥ 4.5）。
+   *
+   * 为什么放 `@layer base`：本层优先级低于 `utilities` ⇒ 任何显式工具类
+   *   （`bg-white` / `bg-transparent` / `text-slate-600` …）都照旧覆盖它，
+   *   它只补「作者没声明」的空档；`option` 则全仓 47 处都没人声明过，由本条统一收口。
+   *
+   * ⚠️ 边界：Windows 上的选项弹层是独立平台窗口，**CDP 截不到**（合成点击也点不开，`:open` 恒 false）
+   *   ⇒ 判据只能取 `option` 的 computed `background-color` / `color`（探针
+   *   `docs/evidence/_probe_select_surface_dark.mjs`）。
+   */
+  select {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  select option,
+  select optgroup {
+    background-color: var(--popover);
+    color: var(--popover-foreground);
+  }
 }
 
 @layer components {
