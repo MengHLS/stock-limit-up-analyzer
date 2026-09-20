@@ -13,10 +13,8 @@
  *     「转正结果」，`StrategyDefinition` 的构造始终由 `definitionBuild.ts` 唯一实现。
  */
 
-import {
-  RESEARCH_CANDIDATE_IMMUTABLE_FIELDS,
-  type ResearchStrategyCandidate,
-} from "../../researchCore";
+import { RESEARCH_CANDIDATE_IMMUTABLE_FIELDS } from "../candidateRules";
+import type { ResearchStrategyCandidate } from "../vocabulary";
 
 // ---------------------------------------------------------------------------
 // 写入白名单（普通 update 的**唯一权威**）

@@ -56,6 +56,17 @@ export interface StrategyBacktestSample {
   readonly evaluationRunId: string | null;
   /** 本次撮合指纹（`ClosedLoopEvaluationRef#backtestFingerprint`）；失败路径为 null。 */
   readonly backtestFingerprint: string | null;
+  /**
+   * 🔴 **本次执行真正被消费的参数集**（`= 装配层 resolveParameters 结果`：覆写 ∪ `defaultValue`）。
+   *
+   * FRONTEND-FINAL-001（P0-2）追加。此前该值在 `evaluateStrategyParameters` 的返回体
+   * （`StrategyEvaluationResult.parameterSet`）上已经存在，但本模块构造返回值时**未读取**它 ⇒
+   * 调用方只能看到「请求参数」，看不到「实际被消费的参数」。
+   *
+   * 本字段是**只读投影**：直接搬评估端口的返回值，**不重算、不派生、不二次解析**。
+   * 失败路径（未走到评估端口 / 端口抛错）为 null —— 拒绝伪造一份「解析结果」。
+   */
+  readonly resolvedParameterSet: ResearchParameterSet | null;
 }
 
 export interface StrategyBacktestBridgeOptions {
@@ -147,6 +158,9 @@ export function createStrategyBacktestBridge(
         experimentId: result.experimentId,
         evaluationRunId: result.runId,
         backtestFingerprint: result.backtestFingerprint,
+        // FRONTEND-FINAL-001（P0-2）：把评估端口已经算出来的「实际被消费参数集」透出。
+        // 这是**唯一**产生点（装配层 `resolveParameters`），此处只搬不算。
+        resolvedParameterSet: result.parameterSet,
       };
       if (totalReturnPct === null || maxDrawdownPct === null) {
         return {
@@ -184,6 +198,8 @@ export function createStrategyBacktestBridge(
         experimentId: null,
         evaluationRunId: null,
         backtestFingerprint: null,
+        // 未走到评估端口 ⇒ 没有解析结果。**不猜**（P0-2 明确禁止重跑策略去反推）。
+        resolvedParameterSet: null,
       };
     }
   };

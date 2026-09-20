@@ -46,9 +46,27 @@ import WalkForwardAnalysis from "./pages/WalkForwardAnalysis";
 import RegimeReport from "./pages/RegimeReport";
 // FE-9 — 研究链路：复盘纪律 + 生产闭环（骨架线）
 import ReviewWorkbench from "./pages/ReviewWorkbench";
-// RESEARCH-002 — 研究引擎：实验 / Run / 分析 / 结果 / 结论 工作台
-// RESEARCH-006.4.1 — Research → Candidate 前端闭环：候选详情（结论 → 候选 → 状态流转）
-import { ResearchList, ResearchAsk, ResearchDetail, ReportView, StrategyCandidateDetail } from "./pages/research";
+// RESEARCH-EXPERIMENT-003 — 旧 Research 工作台（`/research` 及其子路由）与
+//   Finding / Conclusion 列表页已**整体删除**：旧 Research 体系不再属于正式系统。
+//   正式研究入口只剩 `/research-experiments`（见下方 RESEARCH-EXPERIMENT-001 注释）。
+// RESEARCH-006.4.1 — Strategy Candidate（研究 → 策略桥）详情页保留：
+//   它是「候选草稿 → 策略」的唯一前端入口，与旧 Analysis/Finding/Conclusion 无关。
+import { StrategyCandidateDetail } from "./pages/candidates";
+// FRONTEND-FINAL-001（P0-1）— 正式验证域：OOS / Walk-Forward / 稳健性的**持久化**口径唯一入口。
+//   审计确认旧 `/walk-forward` 走的是内存态技术预览（不落库），与持久化实现是两套且互不引用
+//   ⇒ 正式口径改由 `/validation/*` 承载，旧页保留代码但从导航移除（见 WalkForwardAnalysis.tsx）。
+import {
+  ValidationIndexPage,
+  RobustnessValidationPage,
+  OosValidationPage,
+  WalkForwardValidationPage,
+} from "./pages/validation";
+// RESEARCH-EXPERIMENT-001 — 独立研究实验体系：实验列表 / 详情（实验自带参数与结果结构，
+//   可直接读 Dataset，**不经过**旧 Research 的 Analysis/Finding/Conclusion 链路）
+import {
+  ResearchExperimentList,
+  ResearchExperimentDetail,
+} from "./pages/researchExperiments";
 
 /**
  * 旧链接兼容：`/strategy-editor?strategyId=…&version=…`。
@@ -105,20 +123,32 @@ function Router() {
       <Route path="/strategy-editor" component={LegacyStrategyRedirect} />
       <Route path="/performance" component={PerformanceDashboard} />
       <Route path="/parameter-search" component={ParameterSearch} />
+      {/* FRONTEND-FINAL-001（P1-6）— 参数搜索深链：`/parameter-search/:runId` 直达某次搜索 Run。
+          与 `?searchRunId=` 等价（两者都支持），刷新 / 分享后都能恢复选中坐标。 */}
+      <Route path="/parameter-search/:runId" component={ParameterSearch} />
+      {/* FRONTEND-FINAL-001（P0-1）— 正式验证域（持久化口径）。旧 `/walk-forward` 仅保留代码，不再是正式入口。 */}
+      <Route path="/validation" component={ValidationIndexPage} />
+      <Route path="/validation/robustness" component={RobustnessValidationPage} />
+      <Route path="/validation/robustness/:runId" component={RobustnessValidationPage} />
+      <Route path="/validation/oos" component={OosValidationPage} />
+      <Route path="/validation/oos/:runId" component={OosValidationPage} />
+      <Route path="/validation/walk-forward" component={WalkForwardValidationPage} />
+      <Route path="/validation/walk-forward/:runId" component={WalkForwardValidationPage} />
+      <Route path="/validation/walk-forward/:runId/folds/:foldIndex" component={WalkForwardValidationPage} />
+      {/* 旧技术预览口径（不落库）。保留可达性以免旧书签 404，但**不在侧栏出现**、页面顶部有醒目降级提示。 */}
       <Route path="/walk-forward" component={WalkForwardAnalysis} />
       <Route path="/regime-report" component={RegimeReport} />
       <Route path="/review-workbench" component={ReviewWorkbench} />
-      {/* RESEARCH-002 — 研究引擎工作台（实验 → Run → 分析 → 结果 → 结论） */}
-      <Route path="/research" component={ResearchList} />
-      {/* RESEARCH-PLANNER-001 — 默认模式：提出问题即研究。必须排在 `/research/:experimentId`
-          之前，否则 wouter 会把 `ask` 当成 experimentId 去匹配。 */}
-      <Route path="/research/ask" component={ResearchAsk} />
-      {/* RESEARCH-006.4.1 — 候选详情必须先于 `/research/:experimentId` 匹配（同前缀更深路径） */}
-      <Route path="/research/candidates/:candidateId" component={StrategyCandidateDetail} />
-      {/* PHASE-A-001 — 研究报告查看页。同样必须先于 `/research/:experimentId` 匹配，
-          否则 wouter 会把 `report` 当成 experimentId 去匹配 ResearchDetail。 */}
-      <Route path="/research/report/:runId" component={ReportView} />
-      <Route path="/research/:experimentId" component={ResearchDetail} />
+      {/* RESEARCH-EXPERIMENT-003 — 旧 Research 路由段（`/research*`、`/findings*`、
+          `/conclusions*`、`/candidates` 列表）已整体移除。候选详情保留一条可达路径
+          （跨实验候选列表页不存在了，但候选详情仍可从策略溯源面板打开）。 */}
+      <Route path="/candidates/:candidateId" component={StrategyCandidateDetail} />
+
+      {/* RESEARCH-EXPERIMENT-001 — **唯一**的正式研究入口：独立实验体系。
+          路径形态 `:group/:key` 对应实验 id 的 `<group>/<key>` 两段（id 内含 `/`，
+          因此不能用一个 `:experimentId` 段匹配）。 */}
+      <Route path="/research-experiments" component={ResearchExperimentList} />
+      <Route path="/research-experiments/:group/:key" component={ResearchExperimentDetail} />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

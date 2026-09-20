@@ -20,7 +20,6 @@
  */
 export * from "./candidateTypes";
 export * from "./definitionBuild";
-export * from "./evidenceTrace";
 export * from "./service";
 export * from "./types";
 export * from "./provenance";

@@ -55,10 +55,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 type LifecycleDescribe = NonNullable<
-  ReturnType<typeof trpc.research.lifecycle.describe.useQuery>["data"]
+  ReturnType<typeof trpc.strategyDomain.lifecycle.describe.useQuery>["data"]
 >;
 type LifecycleTransitionResult = NonNullable<
-  ReturnType<typeof trpc.research.lifecycle.transition.useMutation>["data"]
+  ReturnType<typeof trpc.strategyDomain.lifecycle.transition.useMutation>["data"]
 >;
 
 /**
@@ -99,7 +99,7 @@ const EXAMPLE_LIFECYCLE_RECORD = {
 // ---------------------------------------------------------------------------
 
 function SemverBumpCard({ currentVersion }: { currentVersion: string }) {
-  const bump = trpc.research.strategy.bump.useMutation();
+  const bump = trpc.strategyDomain.strategy.bump.useMutation();
   const [version, setVersion] = useState(currentVersion);
   const [bumped, setBumped] = useState<string | null>(null);
 
@@ -179,10 +179,10 @@ function SemverBumpCard({ currentVersion }: { currentVersion: string }) {
 // ---------------------------------------------------------------------------
 
 function LifecycleLedgerCard() {
-  const describe = trpc.research.lifecycle.describe.useQuery(undefined, {
+  const describe = trpc.strategyDomain.lifecycle.describe.useQuery(undefined, {
     refetchOnWindowFocus: false,
   });
-  const transition = trpc.research.lifecycle.transition.useMutation();
+  const transition = trpc.strategyDomain.lifecycle.transition.useMutation();
 
   const [recordText, setRecordText] = useState(json(EXAMPLE_LIFECYCLE_RECORD));
   const [to, setTo] = useState("Research");

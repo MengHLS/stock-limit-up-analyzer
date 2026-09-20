@@ -23,7 +23,7 @@ import type { FeatureVersionRef } from "../signalEngine/types";
 import type {
   ResearchConditionRecipe,
   ResearchModuleSpec,
-} from "../../researchEngine/planner/moduleRegistry";
+} from "./moduleRegistry";
 import {
   buildAboveEventCloseRecipe,
   buildDepthBandRecipe,
@@ -33,7 +33,7 @@ import {
   buildObsDayRecipe,
   buildShrinkVolumeRecipe,
   buildVolumeExpansionRecipe,
-} from "../../researchEngine/planner/moduleRegistry";
+} from "./moduleRegistry";
 import { projectRecipeDefinition } from "./projectRecipe";
 import type {
   PatternConditionRecipeRef,

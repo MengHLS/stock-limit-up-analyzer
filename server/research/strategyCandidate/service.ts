@@ -24,14 +24,13 @@
 
 import {
   RESEARCH_CANDIDATE_STATUSES,
-  isCandidateTransitionAllowed,
-  type ResearchAnalysisCondition,
   type ResearchCandidateStatus,
-  type ResearchConclusion,
-  type ResearchFinding,
-  type ResearchRepositories,
   type ResearchStrategyCandidate,
-} from "../../researchCore";
+} from "../vocabulary";
+// RESEARCH-EXPERIMENT-003 — 候选的状态机守卫与仓储都在**只服务候选**的模块里
+// （旧 `ResearchRepositories` 聚合体已随旧 Research 删除）。
+import { isCandidateTransitionAllowed } from "../candidateRules";
+import type { ResearchStrategyCandidateRepository } from "../candidateRepository";
 import {
   CANDIDATE_EDITABLE_FIELDS,
   CANDIDATE_ELIGIBLE_CONCLUSION_STATUSES,
@@ -54,28 +53,8 @@ import {
   deriveUniverseIdForDataset,
   validateBuiltStrategyDefinition,
 } from "./definitionBuild";
-import {
-  buildSourceTrace,
-  evidenceAnalysisIdCandidates,
-  parseConclusionEvidence,
-  type RunResolution,
-} from "./evidenceTrace";
 import type { StrategyPromotionPort } from "./strategyPromotionPort";
 import type { StrategyResearchProvenanceRepository } from "./types";
-import {
-  buildDerivationSnapshot,
-  buildSemanticIndex,
-  deriveCandidateRules,
-  emptyDerivation,
-  type CandidateDerivation,
-  type SemanticIndex,
-} from "./evidenceDerivation";
-import {
-  findPatternByResearchModuleKey,
-  projectCandidateSketch,
-  type PatternCandidateSketch,
-} from "../patternLibrary";
-import { listPatternSemantics } from "../patternLibrary/semanticRegistry";
 
 // ---------------------------------------------------------------------------
 // Dataset Registry 只读端口（注入式；缺省实现走真实 Registry）
@@ -220,10 +199,6 @@ export interface PromoteCandidateResult {
 }
 
 export interface StrategyCandidateService {
-  /**
-   * 登记候选（人的动作 ①）。校验链顺序固定，逐条响亮失败（006.0 §11.2）。
-   */
-  createFromConclusion(input: CreateCandidateFromConclusionInput): Promise<StrategyCandidateView>;
   get(candidateId: number): Promise<StrategyCandidateView>;
   /** 普通编辑：**只**改研究草图字段（闭集白名单）。 */
   update(candidateId: number, input: StrategyCandidateUpdateInput): Promise<ResearchStrategyCandidate>;
@@ -270,6 +245,12 @@ export const PROMOTION_MISSING_UPSTREAMS = [
   "SOURCE_EXPERIMENT",
   "SOURCE_RESEARCH_RUN",
   "SOURCE_DATASET_VERSION",
+  /**
+   * RESEARCH-EXPERIMENT-002 —— 独立实验来源的「上游」是**实验定义本身**
+   * （仓库里的 `research-experiments/**`，不是数据库行）。它被改名 / 删除后，
+   * 溯源仍能读（快照值），但要在视图里如实标注 —— 与其它 missing 项同一纪律。
+   */
+  "SOURCE_EXPERIMENT_REF",
 ] as const;
 
 export type PromotionMissingUpstream = (typeof PROMOTION_MISSING_UPSTREAMS)[number];
@@ -294,12 +275,27 @@ export interface PromotionProvenanceView {
   provenance: {
     id: number;
     origin: string;
-    sourceCandidateId: number;
-    sourceConclusionId: number;
-    sourceExperimentId: number;
+    /**
+     * 来源体系（RESEARCH-EXPERIMENT-002）。
+     *   - `RESEARCH_CONCLUSION`：旧 Research 链路 ⇒ 三个旧来源锚非空；
+     *   - `INDEPENDENT_EXPERIMENT`：独立实验体系 ⇒ 三个旧来源锚**必为 null**，
+     *     来源坐标改看 `experimentRef` / `experimentVersion` / `experimentResultDigest`。
+     */
+    sourceKind: string;
+    sourceCandidateId: number | null;
+    sourceConclusionId: number | null;
+    sourceExperimentId: number | null;
     sourceResearchRunId: number | null;
     sourceDatasetVersionId: number | null;
     sourceDatasetLabel: string | null;
+    /** 独立实验 id（`<group>/<key>`）；非独立实验来源时为 `null`。 */
+    experimentRef: string | null;
+    /** 实验自身版本快照。 */
+    experimentVersion: string | null;
+    /** 生成该策略时实际使用的实验参数快照（已归并默认值）。 */
+    experimentParameters: unknown;
+    /** 实验结果 canonical 指纹（服务端真实重跑后算出）。 */
+    experimentResultDigest: string | null;
     createdAt: string | null;
   } | null;
   /** **执行**绑定坐标（Strategy 侧；与来源可不同）。 */
@@ -313,7 +309,8 @@ export interface PromotionProvenanceView {
 }
 
 export interface StrategyCandidateServiceDeps {
-  repos: ResearchRepositories;
+  /** 候选仓储（只服务 `research_strategy_candidate` 一张表）。 */
+  candidates: ResearchStrategyCandidateRepository;
   datasetVersions: DatasetVersionReadPort;
   /**
    * 006.3：Strategy 侧转正端口。**可选** —— 006.2 的四个能力完全不需要它
@@ -322,6 +319,16 @@ export interface StrategyCandidateServiceDeps {
   strategies?: StrategyPromotionPort;
   /** 006.3：Strategy 侧溯源仓储（promote 幂等闸门 + 溯源写入）。 */
   provenance?: StrategyResearchProvenanceRepository;
+  /**
+   * RESEARCH-EXPERIMENT-002：独立实验注册表（只用来回答「`experimentRef` 指向的实验是否还存在」）。
+   *
+   * **可选**：未注入时**不做该探测、也绝不谎报 missing** —— 「没探测」与「探测到不存在」
+   * 是两件事，把前者写成后者会凭空造出一条假告警（本仓反复踩过的「静默/误报」形态）。
+   *
+   * 只要求 `exists`：本层不需要读实验定义，**避免**为了一个存活探测把 DB / researchEngine
+   * 拉进桥的运行时模块图（002 把「生产链不传递依赖旧 Research」做成了图可达性判据）。
+   */
+  experimentDefinitions?: { exists(id: string): boolean };
   // ⚠️ 这里**故意没有** `now`：版本追溯记录里的 `createdAt` / `codeVersion` 属于 Strategy 侧事实，
   //    统一由 `createStrategyPromotionPort({codeVersion, now})` 在端口构造时注入（同一事实只声明一处）。
   //    若在这里再放一个时钟，就会出现「同一次 promote 里两个时间源」的歧义。
@@ -331,19 +338,6 @@ export interface StrategyCandidateServiceDeps {
 // 实现
 // ---------------------------------------------------------------------------
 
-/**
- * Pattern 语义索引的**惰性单例**（PHASE-D-001）。
- *
- * ⚠️ 刻意用惰性函数而不是顶层 `const`：本仓踩过「顶层常量 + 互相 import ⇒ 运行时炸
- * 而 `tsc --noEmit` 为 0」的坑（`moduleRegistry` × `patternLibrary`），惰性求值可彻底规避。
- * `listPatternSemantics()` 自身已缓存展开结果，本层只缓存索引 Map。
- */
-let semanticIndexCache: SemanticIndex | null = null;
-function semanticIndex(): SemanticIndex {
-  semanticIndexCache ??= buildSemanticIndex(listPatternSemantics());
-  return semanticIndexCache;
-}
-
 function isPositiveInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
@@ -351,10 +345,10 @@ function isPositiveInt(value: unknown): value is number {
 export function createStrategyCandidateService(
   deps: StrategyCandidateServiceDeps,
 ): StrategyCandidateService {
-  const { repos, datasetVersions } = deps;
+  const { candidates: candidatesRepo, datasetVersions } = deps;
 
   async function requireCandidate(id: number): Promise<ResearchStrategyCandidate> {
-    const candidate = await repos.candidates.getById(id);
+    const candidate = await candidatesRepo.getById(id);
     if (!candidate) {
       throw new StrategyCandidateError(
         STRATEGY_CANDIDATE_ERROR.CANDIDATE_NOT_FOUND,
@@ -367,31 +361,12 @@ export function createStrategyCandidateService(
   async function buildView(candidate: ResearchStrategyCandidate): Promise<StrategyCandidateView> {
     const sourceMissing: StrategyCandidateSourceMissingReason[] = [];
 
-    const experimentRow = await repos.experiments.getById(candidate.experimentId);
-    const experiment = experimentRow
-      ? {
-          id: experimentRow.id as number,
-          name: experimentRow.name,
-          status: experimentRow.status,
-          datasetVersionId: experimentRow.datasetVersionId,
-        }
-      : null;
-    if (!experiment) sourceMissing.push("EXPERIMENT");
-
-    let conclusion: StrategyCandidateConclusionSummary | null = null;
-    if (isPositiveInt(candidate.conclusionId)) {
-      const row = await repos.conclusions.getById(candidate.conclusionId);
-      conclusion = row
-        ? {
-            id: row.id as number,
-            title: row.title,
-            conclusionType: row.conclusionType,
-            status: row.status,
-            confidence: row.confidence ?? null,
-          }
-        : null;
-      if (!conclusion) sourceMissing.push("CONCLUSION");
-    }
+    // 🔴 RESEARCH-EXPERIMENT-003 —— 上游 Experiment / Conclusion 属**旧 Research**
+    // （表已归档、领域实现已整体删除）⇒ 本视图如实返回 `null`，并且**不再**把它们
+    // 记进 `sourceMissing`：「上游层已经不存在」不是「上游丢了」，否则每条候选都会
+    // 恒定显示「上游缺失」，把一条结构性事实伪装成数据异常。
+    const experiment: StrategyCandidateExperimentSummary | null = null;
+    const conclusion: StrategyCandidateConclusionSummary | null = null;
 
     let dataset: DatasetVersionSnapshot | null = null;
     if (isPositiveInt(candidate.sourceDatasetVersionId)) {
@@ -401,54 +376,6 @@ export function createStrategyCandidateService(
     }
 
     return { candidate, experiment, conclusion, dataset, sourceMissing };
-  }
-
-  /**
-   * `sourceResearchRunId` 的两跳解析（006.0 §8.1 / 006.2 §8）。
-   *
-   * 唯一性判据：参与的 analysisId 反查出的 **去重 runId 集合长度必须为 1**；
-   * 0 个（查不到）/ 多个（跨 Run 的结论）一律 `null`。
-   */
-  async function resolveSourceRun(
-    analysisIds: number[],
-    primaryAnalysisId: number | null,
-  ): Promise<RunResolution> {
-    const distinctRunIds: number[] = [];
-    const missingAnalysisIds: number[] = [];
-    for (const analysisId of analysisIds) {
-      const analysis = await repos.analyses.getById(analysisId);
-      if (!analysis) {
-        missingAnalysisIds.push(analysisId);
-        continue;
-      }
-      if (isPositiveInt(analysis.runId) && !distinctRunIds.includes(analysis.runId)) {
-        distinctRunIds.push(analysis.runId);
-      }
-    }
-    const path: RunResolution["path"] =
-      analysisIds.length === 0
-        ? "NONE"
-        : primaryAnalysisId !== null
-          ? "PRIMARY_ANALYSIS"
-          : "CONTRIBUTING_ANALYSES";
-    return {
-      sourceResearchRunId: distinctRunIds.length === 1 ? (distinctRunIds[0] as number) : null,
-      path,
-      analysisIds,
-      distinctRunIds,
-      missingAnalysisIds,
-    };
-  }
-
-  async function assertConclusionEligible(conclusion: ResearchConclusion): Promise<void> {
-    if (!(CANDIDATE_ELIGIBLE_CONCLUSION_STATUSES as readonly string[]).includes(conclusion.status)) {
-      throw new StrategyCandidateError(
-        STRATEGY_CANDIDATE_ERROR.CONCLUSION_NOT_CANDIDATE_ELIGIBLE,
-        `Conclusion #${conclusion.id} 当前状态为 ${conclusion.status}，`
-          + `只有 ${CANDIDATE_ELIGIBLE_CONCLUSION_STATUSES.join(" / ")} 状态的结论允许登记为候选`
-          + "（已被取代的结论不得进入策略链路）",
-      );
-    }
   }
 
   // =========================================================================
@@ -554,7 +481,7 @@ export function createStrategyCandidateService(
     };
     if (args.divergence && args.divergenceReason !== null) {
       try {
-        await repos.candidates.setSourceDatasetDivergenceReason(args.candidateId, args.divergenceReason);
+        await candidatesRepo.setSourceDatasetDivergenceReason(args.candidateId, args.divergenceReason);
       } catch (error) {
         throw new StrategyCandidateError(
           STRATEGY_CANDIDATE_ERROR.PROMOTE_WRITEBACK_FAILED,
@@ -565,7 +492,7 @@ export function createStrategyCandidateService(
       }
     }
     try {
-      return await repos.candidates.update(args.candidateId, {
+      return await candidatesRepo.update(args.candidateId, {
         status: "CONVERTED",
         strategyDefinitionId: args.strategyId,
       });
@@ -579,246 +506,7 @@ export function createStrategyCandidateService(
     }
   }
 
-  /**
-   * PHASE-D-001 — Evidence → Rule 派生的**装配**（编号 `9cb`）。
-   *
-   * 计算本身在 `evidenceDerivation.ts`（纯函数、唯一实现）；本函数只负责三件**读库**的事：
-   *   ① 按 `conclusion.findingIds` 取 Finding（**查不到即不放进集合，绝不伪造**）；
-   *   ② 经 `Finding → primaryAnalysisId → research_analysis.moduleKey → Pattern` 反查执行侧声明
-   *      —— 这条反查桥在 PHASE-A 复核里被点名「薄弱」（`unresolvedTraceFields.patternId`），
-   *      本轮把它接上（`findPatternByResearchModuleKey` 是既有唯一实现）；
-   *   ③ 取**结构化**条件（`research_analysis_condition`），而不是 `dimensionJson.conditionRule`
-   *      那种人读摘要字符串。
-   */
-  async function deriveCandidateEvidence(args: {
-    conclusion: ResearchConclusion;
-    enabled: boolean;
-    datasetVersionId: number;
-    overrideParameterSpace?: unknown;
-  }): Promise<{ derivation: CandidateDerivation | null; patternSketch: PatternCandidateSketch | null }> {
-    if (!args.enabled) return { derivation: null, patternSketch: null };
-
-    const findingIds = (args.conclusion.findingIds ?? [])
-      .filter((id): id is number => isPositiveInt(id))
-      .sort((a, b) => a - b);
-    const findings: ResearchFinding[] = [];
-    for (const id of findingIds) {
-      const row = await repos.findings.getById(id);
-      if (row !== undefined) findings.push(row);
-    }
-
-    // ---- Pattern 反查（首个能反查到声明的 moduleKey 胜出；顺序由 findingId 升序固定）----
-    let pattern: ReturnType<typeof findPatternByResearchModuleKey>;
-    for (const finding of findings) {
-      const analysisId = finding.primaryAnalysisId;
-      if (!isPositiveInt(analysisId)) continue;
-      const analysis = await repos.analyses.getById(analysisId);
-      const moduleKey = analysis?.moduleKey ?? null;
-      if (moduleKey === null || moduleKey.trim() === "") continue;
-      pattern = findPatternByResearchModuleKey(moduleKey);
-      if (pattern !== undefined) break;
-    }
-    const patternSketch = pattern === undefined ? null : projectCandidateSketch(pattern);
-
-    // ---- 结构化条件（预取；派生器保持纯同步，不接触仓储）----
-    const conditionsByAnalysis = new Map<number, readonly ResearchAnalysisCondition[]>();
-    for (const finding of findings) {
-      const analysisId = finding.primaryAnalysisId;
-      if (!isPositiveInt(analysisId) || conditionsByAnalysis.has(analysisId)) continue;
-      conditionsByAnalysis.set(analysisId, await repos.conditions.listByAnalysis(analysisId));
-    }
-
-    const parameterSpace = args.overrideParameterSpace ?? patternSketch?.parameterSpace ?? null;
-    const parameterCodes = new Set<string>(
-      parameterSpace !== null && typeof parameterSpace === "object" && !Array.isArray(parameterSpace)
-        ? Object.keys(parameterSpace as Record<string, unknown>)
-        : [],
-    );
-
-    if (findings.length === 0) {
-      // 没有 Finding 就没有证据 —— 如实产出**空派生**（不假装派生过）。
-      return {
-        derivation: emptyDerivation({
-          conclusionId: args.conclusion.id as number,
-          datasetVersionId: args.datasetVersionId,
-          findingIds: [],
-        }),
-        patternSketch,
-      };
-    }
-
-    return {
-      derivation: deriveCandidateRules({
-        conclusion: args.conclusion,
-        findings,
-        conditionsOf: (analysisId) => conditionsByAnalysis.get(analysisId) ?? [],
-        semanticIndex: semanticIndex(),
-        parameterCodes,
-        datasetVersionId: args.datasetVersionId,
-      }),
-      patternSketch,
-    };
-  }
-
   return {
-    async createFromConclusion(input) {
-      // ---- 0. 入参 ----
-      if (!isPositiveInt(input.conclusionId)) {
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.INVALID_INPUT,
-          `conclusionId 必须是正整数，实际：${String(input.conclusionId)}`,
-        );
-      }
-      if (input.overrides !== undefined) {
-        assertCandidateOverridesKeys(input.overrides as Record<string, unknown>);
-      }
-
-      // ---- 1. Conclusion 存在 ----
-      const conclusion = await repos.conclusions.getById(input.conclusionId);
-      if (!conclusion) {
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.CONCLUSION_NOT_FOUND,
-          `未找到 Research Conclusion：${input.conclusionId}`,
-        );
-      }
-
-      // ---- 2. 归属 Experiment 存在 ----
-      const experiment = await repos.experiments.getById(conclusion.experimentId);
-      if (!experiment) {
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.EXPERIMENT_NOT_FOUND,
-          `Conclusion #${conclusion.id} 归属的 Experiment 不存在：${conclusion.experimentId}`,
-        );
-      }
-
-      // ---- 3. 研究来源 Dataset 坐标（**只从 Experiment 复制**）----
-      const sourceDatasetVersionId = experiment.datasetVersionId;
-      if (!isPositiveInt(sourceDatasetVersionId)) {
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.DATASET_VERSION_INVALID,
-          `Experiment #${experiment.id} 的 datasetVersionId 非法：${String(sourceDatasetVersionId)}`,
-        );
-      }
-
-      // ---- 4. Dataset Version 存在 ∧ READY ----
-      const datasetVersion = await datasetVersions.getVersionById(sourceDatasetVersionId);
-      if (!datasetVersion) {
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.DATASET_VERSION_NOT_FOUND,
-          `研究来源 Dataset Version 不存在：${sourceDatasetVersionId}`,
-        );
-      }
-      if (datasetVersion.status !== "READY") {
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.DATASET_VERSION_NOT_READY,
-          `研究来源 Dataset Version ${sourceDatasetVersionId}（${datasetVersion.label}）`
-            + `状态为 ${datasetVersion.status}，未 READY，不得作为研究依据登记候选`,
-        );
-      }
-
-      // ---- 5. Conclusion 资格 ----
-      await assertConclusionEligible(conclusion);
-
-      // ---- 6. 重复登记（同结论 + 同名 ⇒ 软拒绝）----
-      const name = assertCandidateName(input.name ?? conclusion.title);
-      const siblings = await repos.candidates.list({ conclusionId: conclusion.id as number });
-      const duplicated = siblings.some((c) => c.name.trim() === name);
-      if (duplicated) {
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.CANDIDATE_ALREADY_EXISTS,
-          `Conclusion #${conclusion.id} 下已存在同名候选「${name}」；`
-            + "如需调整请改用 update（同一结论允许存在多份**不同名**的候选）",
-        );
-      }
-
-      // ---- 7. 证据快照 + Run 两跳解析 ----
-      const parsedEvidence = parseConclusionEvidence(conclusion.evidence);
-      const analysisIds = evidenceAnalysisIdCandidates(parsedEvidence);
-      const primaryAnalysisId = parsedEvidence.primaryAnalysis?.analysisId ?? null;
-      const runResolution = await resolveSourceRun(analysisIds, primaryAnalysisId);
-
-      // ---- 7.5 Evidence → Rule 确定性派生（PHASE-D-001）----
-      //
-      // 🔴 修复前的断链：草图 5 列**只来自 `input.overrides`** ⇒ 人必须把研究结论重新手写一遍
-      // 成策略规则（D.1 的现场）。这里以 Pattern 语义声明为**唯一翻译层**，把 Finding 的
-      // 结构化条件派生成策略侧条件；`overrides` 仍**优先**（派生只是缺省值，不替代人工）。
-      //
-      // 结论的 Finding 谱系锚（**事实**：结论本来就有该列；与是否派生无关）。
-      const conclusionFindingIds = (conclusion.findingIds ?? [])
-        .filter((id): id is number => isPositiveInt(id))
-        .sort((a, b) => a - b);
-
-      const derived = await deriveCandidateEvidence({
-        conclusion,
-        enabled: input.deriveFromEvidence !== false,
-        datasetVersionId: sourceDatasetVersionId,
-        ...(input.overrides?.parameterSpace === undefined
-          ? {}
-          : { overrideParameterSpace: input.overrides.parameterSpace }),
-      });
-
-      // ---- 7.6 证据快照（既有 + 本轮新增 derivation 段）----
-      const sourceTraceJson = {
-        ...buildSourceTrace({
-          conclusionId: conclusion.id as number,
-          experimentId: experiment.id as number,
-          hypothesisId: conclusion.hypothesisId ?? null,
-          conclusionType: conclusion.conclusionType,
-          conclusionStatus: conclusion.status,
-          confidence: conclusion.confidence ?? null,
-          evidence: parsedEvidence,
-          runResolution,
-        }),
-        ...(derived.derivation === null
-          ? {}
-          : { derivation: buildDerivationSnapshot(derived.derivation) }),
-      };
-
-      const derivedRuleCount = derived.derivation?.derivedRules.length ?? 0;
-      // 一条都没派生出来时**不写** filterRule（留 null = 如实表示「没有派生出条件」；
-      // 写空组会让人误读成「有规则但为空」）。
-      const derivedFilterRule = derivedRuleCount > 0 ? derived.derivation?.filterRule : undefined;
-
-      const sketchEntryRule = input.overrides?.entryRule ?? derived.patternSketch?.entryRule;
-      const sketchFilterRule = input.overrides?.filterRule ?? derivedFilterRule;
-      const sketchExitRule = input.overrides?.exitRule ?? derived.patternSketch?.exitRule;
-      const sketchRiskRule = input.overrides?.riskRule ?? derived.patternSketch?.riskRule;
-      const sketchParameterSpace =
-        input.overrides?.parameterSpace ?? derived.patternSketch?.parameterSpace;
-
-      // ---- 8. 落库（初始状态恒为 DRAFT：绝不传 status）----
-      const created = await repos.candidates.create({
-        experimentId: experiment.id as number,
-        conclusionId: conclusion.id as number,
-        name,
-        description: input.description ?? conclusion.conclusion,
-        ...(sketchEntryRule === undefined ? {} : { entryRule: sketchEntryRule }),
-        ...(sketchFilterRule === undefined ? {} : { filterRule: sketchFilterRule }),
-        ...(sketchExitRule === undefined ? {} : { exitRule: sketchExitRule }),
-        ...(sketchRiskRule === undefined ? {} : { riskRule: sketchRiskRule }),
-        ...(sketchParameterSpace === undefined ? {} : { parameterSpace: sketchParameterSpace }),
-        sourceDatasetVersionId,
-        sourceResearchRunId: runResolution.sourceResearchRunId,
-        // PHASE-D-001 —— D.5 的谱系锚：两列**早已存在**（schema + 领域类型 + 仓储映射齐备），
-        // 但 `createFromConclusion` 此前从不写它们 ⇒ 同一张表上「分析条件派生」路径写、
-        // 「结论派生」路径不写，口径不一致。这里按**事实**补齐（结论本来就有这两个锚，
-        // 不存在即写 null / 空数组，**不 backfill 伪造**）。
-        sourceHypothesisId: conclusion.hypothesisId ?? null,
-        sourceFindingIds: conclusionFindingIds,
-        sourceTraceJson,
-      });
-
-      if (created.status !== "DRAFT") {
-        // 不可达：本路径从不传 status（仓储缺省 DRAFT）。真出现即优先级最高的缺陷。
-        throw new StrategyCandidateError(
-          STRATEGY_CANDIDATE_ERROR.INVALID_INPUT,
-          `createFromConclusion 只允许产生 DRAFT 候选，实际得到 ${created.status}`,
-        );
-      }
-
-      return buildView(created);
-    },
-
     async get(candidateId) {
       return buildView(await requireCandidate(candidateId));
     },
@@ -846,7 +534,7 @@ export function createStrategyCandidateService(
       }
       // 状态机 / 结构锚 / 来源快照一律不经此路径：仓储层还会用
       // `assertCandidateUpdatePatchKeys` + `assertCandidateTransition` 再挡一次。
-      return repos.candidates.update(candidateId, patch);
+      return candidatesRepo.update(candidateId, patch);
     },
 
     async transition(input) {
@@ -885,7 +573,7 @@ export function createStrategyCandidateService(
           `非法候选状态迁移：${current.status} → ${target}`,
         );
       }
-      const updated = await repos.candidates.update(input.candidateId, { status: target });
+      const updated = await candidatesRepo.update(input.candidateId, { status: target });
       if (!(RESEARCH_CANDIDATE_STATUSES as readonly string[]).includes(updated.status)) {
         throw new StrategyCandidateError(
           STRATEGY_CANDIDATE_ERROR.TRANSITION_INVALID,
@@ -1263,31 +951,40 @@ export function createStrategyCandidateService(
         : ((await datasetVersions.getVersionById(executionDatasetVersionId))?.label ?? null);
 
       // ④ 上游存活探测 + divergence 原因（**探测失败只记 missing，绝不抛**）。
+      //
+      // 🔴 RESEARCH-EXPERIMENT-002：**只探测非空的来源锚**。
+      //    `INDEPENDENT_EXPERIMENT` 来源的三个旧锚合法为 null（独立实验没有旧 Research
+      //    坐标）⇒ 若照旧无条件探测，会把「本来就没有」误报成 `missingUpstreams`，
+      //    即把「如实的缺失」伪装成「上游丢失」。
       const missing: PromotionMissingUpstream[] = [];
       let divergenceReason: string | null = null;
       if (row !== undefined) {
-        const candidate = await repos.candidates.getById(row.sourceCandidateId);
-        if (candidate === undefined) {
-          missing.push("SOURCE_CANDIDATE");
-        } else {
-          divergenceReason = candidate.sourceDatasetDivergenceReason ?? null;
+        const candidateId = row.sourceCandidateId ?? null;
+        if (candidateId !== null) {
+          const candidate = await candidatesRepo.getById(candidateId);
+          if (candidate === undefined) {
+            missing.push("SOURCE_CANDIDATE");
+          } else {
+            divergenceReason = candidate.sourceDatasetDivergenceReason ?? null;
+          }
         }
-        if ((await repos.conclusions.getById(row.sourceConclusionId)) === undefined) {
-          missing.push("SOURCE_CONCLUSION");
-        }
-        if ((await repos.experiments.getById(row.sourceExperimentId)) === undefined) {
-          missing.push("SOURCE_EXPERIMENT");
-        }
-        const runId = row.sourceResearchRunId ?? null;
-        if (runId !== null && (await repos.runs.getById(runId)) === undefined) {
-          missing.push("SOURCE_RESEARCH_RUN");
-        }
+        // 🔴 RESEARCH-EXPERIMENT-003 —— 旧 Research 的三个来源锚（candidate / conclusion /
+        // experiment / researchRun）**不再探测**：它们指向的表已归档、领域层已删除。
+        // 保留 `sourceCandidateId` 一项（候选仍在系统内，可探测），其余锚只作为**历史快照值**
+        // 原样回显（见下方 provenance 返回体），不再参与「上游存活」判定。
         const sourceDatasetVersionId = row.sourceDatasetVersionId ?? null;
         if (
           sourceDatasetVersionId !== null
           && (await datasetVersions.getVersionById(sourceDatasetVersionId)) === undefined
         ) {
           missing.push("SOURCE_DATASET_VERSION");
+        }
+        // 独立实验来源：探测「实验定义是否仍在注册表里」。
+        // 未注入注册表 ⇒ **不做探测、也不报 missing**（不把「没探测」伪装成「不存在」）。
+        const experimentRef = row.experimentRef ?? null;
+        if (experimentRef !== null && deps.experimentDefinitions !== undefined
+          && !deps.experimentDefinitions.exists(experimentRef)) {
+          missing.push("SOURCE_EXPERIMENT_REF");
         }
       }
 
@@ -1300,12 +997,17 @@ export function createStrategyCandidateService(
           : {
               id: row.id,
               origin: row.origin,
-              sourceCandidateId: row.sourceCandidateId,
-              sourceConclusionId: row.sourceConclusionId,
-              sourceExperimentId: row.sourceExperimentId,
+              sourceKind: row.sourceKind ?? "RESEARCH_CONCLUSION",
+              sourceCandidateId: row.sourceCandidateId ?? null,
+              sourceConclusionId: row.sourceConclusionId ?? null,
+              sourceExperimentId: row.sourceExperimentId ?? null,
               sourceResearchRunId: row.sourceResearchRunId ?? null,
               sourceDatasetVersionId: row.sourceDatasetVersionId ?? null,
               sourceDatasetLabel: row.sourceDatasetLabel ?? null,
+              experimentRef: row.experimentRef ?? null,
+              experimentVersion: row.experimentVersion ?? null,
+              experimentParameters: row.experimentParametersJson ?? null,
+              experimentResultDigest: row.experimentResultDigest ?? null,
               createdAt: row.createdAt ?? null,
             },
         executionDatasetVersionId,

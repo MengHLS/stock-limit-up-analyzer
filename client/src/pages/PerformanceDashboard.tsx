@@ -61,7 +61,7 @@ type ReadinessOutput =
 type ResearchOutput =
   inferRouterOutputs<AppRouter>["sentiment"]["getLeaderCandidateBacktest"];
 type MetricsOutput =
-  inferRouterOutputs<AppRouter>["research"]["metrics"]["evaluate"];
+  inferRouterOutputs<AppRouter>["strategyDomain"]["metrics"]["evaluate"];
 type Simulation = NonNullable<ResearchOutput["realisticSimulation"]>;
 
 // ---------------------------------------------------------------------------
@@ -289,7 +289,7 @@ export default function PerformanceDashboard() {
     undefined,
     { enabled: false }
   );
-  const metricsMutation = trpc.research.metrics.evaluate.useMutation();
+  const metricsMutation = trpc.strategyDomain.metrics.evaluate.useMutation();
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const metrics: MetricsOutput | null = metricsMutation.data ?? null;

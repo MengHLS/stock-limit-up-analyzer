@@ -42,8 +42,10 @@ import type {
   StrategyRepository,
   StrategySummary,
   StrategyVersionBundle,
+  StrategyVersionBundleWithReferences,
   StrategyVersionSummary,
 } from "./contract";
+import { attachParameterReferences } from "./parameterReferenceCheck";
 import type { ResearchValidationResult } from "../experimentValidation";
 
 export interface StrategyServiceOptions {
@@ -222,13 +224,19 @@ export class StrategyService {
     return record;
   }
 
-  /** STRATEGY-003：一次取全（Canonical 本体 + §17 追溯 + 5 类投影），SPEC §32。 */
-  async loadBundle(strategyId: string, version: string): Promise<StrategyVersionBundle> {
+  /**
+   * STRATEGY-003：一次取全（Canonical 本体 + §17 追溯 + 5 类投影），SPEC §32。
+   *
+   * FRONTEND-FINAL-001（P1-1）：读取时**只读**追加参数引用面（`projections.parameters[].referenced`
+   * + `parameterReferenceCheck`）。落库投影行不含该字段（`strategy_parameters` 无此列）；
+   * 判定不可行时以 `parameterReferenceCheck.applied = false` 显性降级，不伪造引用结论。
+   */
+  async loadBundle(strategyId: string, version: string): Promise<StrategyVersionBundleWithReferences> {
     const bundle = await this.repo.getVersionBundle(strategyId, version);
     if (bundle === undefined) {
       throw new Error(`未找到策略版本：${strategyId}@${version}`);
     }
-    return bundle;
+    return attachParameterReferences(bundle, this.now());
   }
 
   async list(): Promise<StrategySummary[]> {

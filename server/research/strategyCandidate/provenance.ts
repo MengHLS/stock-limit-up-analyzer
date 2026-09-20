@@ -15,7 +15,7 @@
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "../../db";
 import { strategyResearchProvenance } from "../../../drizzle/schema";
-import { decodeJson, encodeJson, toIso } from "../../researchCore/serialization";
+import { decodeJson, encodeJson, toIso } from "../jsonCodec";
 import {
   STRATEGY_PROVENANCE_ERROR,
   StrategyProvenanceError,
@@ -39,6 +39,8 @@ function mapRow(r: ProvenanceRow): StrategyResearchProvenance {
     strategyVersionId: r.strategyVersionId,
     strategyId: r.strategyId,
     strategyVersion: r.strategyVersion,
+    // 历史行 sourceKind 为 NULL 时按默认语义读取（与 DB DEFAULT 一致，无需 backfill）。
+    sourceKind: (r.sourceKind ?? "RESEARCH_CONCLUSION") as StrategyResearchProvenance["sourceKind"],
     sourceCandidateId: r.sourceCandidateId,
     sourceConclusionId: r.sourceConclusionId,
     sourceExperimentId: r.sourceExperimentId,
@@ -46,6 +48,13 @@ function mapRow(r: ProvenanceRow): StrategyResearchProvenance {
     sourceDatasetVersionId: r.sourceDatasetVersionId,
     sourceDatasetLabel: r.sourceDatasetLabel,
     sourceSnapshotJson: decodeJson(r.sourceSnapshotJson, "strategy_research_provenance.sourceSnapshotJson"),
+    experimentRef: r.experimentRef,
+    experimentVersion: r.experimentVersion,
+    experimentParametersJson: decodeJson(
+      r.experimentParametersJson,
+      "strategy_research_provenance.experimentParametersJson",
+    ),
+    experimentResultDigest: r.experimentResultDigest,
     origin: r.origin as StrategyResearchProvenance["origin"],
     createdAt: toIso(r.createdAt) ?? undefined,
   };
@@ -79,6 +88,7 @@ export class DbStrategyResearchProvenanceRepository implements StrategyResearchP
         strategyVersionId: input.strategyVersionId,
         strategyId: input.strategyId,
         strategyVersion: input.strategyVersion,
+        sourceKind: input.sourceKind ?? "RESEARCH_CONCLUSION",
         sourceCandidateId: input.sourceCandidateId,
         sourceConclusionId: input.sourceConclusionId,
         sourceExperimentId: input.sourceExperimentId,
@@ -86,6 +96,10 @@ export class DbStrategyResearchProvenanceRepository implements StrategyResearchP
         sourceDatasetVersionId: input.sourceDatasetVersionId ?? null,
         sourceDatasetLabel: input.sourceDatasetLabel ?? null,
         sourceSnapshotJson: encodeJson(input.sourceSnapshotJson, "sourceSnapshotJson"),
+        experimentRef: input.experimentRef ?? null,
+        experimentVersion: input.experimentVersion ?? null,
+        experimentParametersJson: encodeJson(input.experimentParametersJson, "experimentParametersJson"),
+        experimentResultDigest: input.experimentResultDigest ?? null,
         origin: input.origin ?? "DIRECT",
       })) as Array<{ insertId: number }>;
       const id = Number(result[0]?.insertId);

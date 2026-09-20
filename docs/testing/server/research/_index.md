@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/research
 
-- 测试文件 **69** 个 ｜ 用例声明 **1810** 个
+- 测试文件 **70** 个 ｜ 用例声明 **1817** 个
 - 涉及源码目录：`server/` · `server/backtest/` · `server/data/` · `server/engine/` · `server/research/` · `server/research/closedLoop/` · `server/research/closedLoopWiring/` · `server/research/conditionSignal/` · `server/research/costModel/` · `server/research/datasetAccess/` · `server/research/disciplineFeedback/` · `server/research/executionConstraints/` · `server/research/experimentLineage/` · `server/research/factorAblation/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/marketRegime/` · `server/research/oosIsolation/` · `server/research/oosValidation/` · `server/research/overfittingDetection/` · `server/research/paperAccount/` · `server/research/parameterSearch/` · `server/research/patternLibrary/` · `server/research/patternLibrary/patterns/` · `server/research/performanceMetrics/` · `server/research/persistence/` · `server/research/riskAdjustedMetrics/` · `server/research/robustness/` · `server/research/rollingOptimization/` · `server/research/searchRobustness/` · `server/research/signalEngine/` · `server/research/signalToPnl/` · `server/research/simulator/` · `server/research/stochasticRobustness/` · `server/research/strategyCandidate/` · `server/research/strategyEvaluation/` · `server/research/strategyPersistence/` · `server/research/strategySchema/` · `server/research/tradeJournal/` · `server/research/tradeQualityMetrics/` · `server/research/walkForward/` · `server/research/walkForwardRun/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchDataset/` · `server/researchEngine/` · `server/researchEngine/planner/` · `server/strategyCore/` · `shared/`
 
 ## 怎么跑
@@ -1217,7 +1217,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 纯研究模式：有研究模块，但无配方引用
 
 ### `tests/server/research/patternLibrary/patternSemantics.test.ts`
-- 307 行 ｜ 用例声明 18 ｜ describe 6
+- 332 行 ｜ 用例声明 18 ｜ describe 6
 - 被测源码：`shared/patternSemantics.ts` · `server/research/patternLibrary/semanticRegistry.ts` · `server/research/patternLibrary/patterns/index.ts` · `server/researchEngine/semanticProjection.ts` · `server/research/patternLibrary/strategyProjection.ts` · `server/research/recipeRegistryAtoms.ts` · `server/research/framework/leakage.ts`
 - 单跑：`pnpm exec vitest run tests/server/research/patternLibrary/patternSemantics.test.ts`
 - 用例树：
@@ -1245,6 +1245,21 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 🔴 对照：旧 samePointAvailability 的日期恒为 1990-01-01 ⇒ 对任何决策日都不触发泄漏守卫
   - 新可用性用真实决策日 ⇒ 声称「晚于决策日才可知」时**会**被比较器抓到
   - T / T+1 / T+2 的可用性行为：EVENT_BAR 可声明；POST_BAR 在 d=1 被拒、d=2 通过
+
+### `tests/server/research/patternLibrary/strategyConsumption.test.ts`
+- 123 行 ｜ 用例声明 7 ｜ describe 2
+- 被测源码：`server/research/patternLibrary/strategyConsumption.ts` · `server/research/patternLibrary/semanticRegistry.ts` · `server/strategyCore/featureRegistry.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/patternLibrary/strategyConsumption.test.ts`
+- 用例树：
+- **AR-14 · 绑定表来自唯一 Expander 的产物**
+  - 真实 Pattern 的两条语义都给出「语义变量 → 特征 / 阈值参数」绑定
+  - 研究侧变量名与 Research 投影**同名同源**（两侧共用同一份声明）
+  - 真实注册表里两条特征都存在（这条保证「对表」本身不是空转）
+  - 真实模式：`recipeId` 能反查到 Pattern
+- **AR-14 · 两条判据都**可失败****
+  - 声明的执行侧特征不存在 ⇒ FEATURE_NOT_REGISTERED（点名到 semanticId）
+  - 阈值参数不在策略文档里 ⇒ THRESHOLD_PARAM_NOT_DECLARED（该语义无法调参）
+  - 未匹配到 Pattern ⇒ applied=false（不臆造语义，也不报假失败）
 
 ### `tests/server/research/pbo.test.ts`
 - 190 行 ｜ 用例声明 15 ｜ describe 6

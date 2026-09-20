@@ -37,6 +37,25 @@ export type StrategyResearchProvenanceOrigin =
 // ---------------------------------------------------------------------------
 
 /**
+ * 溯源**来源体系**（RESEARCH-EXPERIMENT-002）。
+ *
+ * 为什么需要它：`promote` 出来的策略可能来自两套体系，而这两套的**来源锚形状不同**：
+ *
+ *   - `RESEARCH_CONCLUSION`：旧 Research 链路（`Conclusion → Candidate → Strategy`）。
+ *     来源锚是三个正整数 id（candidate / conclusion / experiment）。
+ *   - `INDEPENDENT_EXPERIMENT`：独立实验体系（`Experiment Result → Strategy`）。
+ *     独立实验**没有数据库行**（001 零新表），因此没有 `conclusionId` / `experimentId`
+ *     可写；其身份是 `experimentRef` 字符串（`<group>/<key>`）。
+ *     三个旧锚写 **NULL**，而不是伪造 0 / 哨兵 id。
+ */
+export const STRATEGY_RESEARCH_PROVENANCE_KINDS = [
+  "RESEARCH_CONCLUSION",
+  "INDEPENDENT_EXPERIMENT",
+] as const;
+export type StrategyResearchProvenanceKind =
+  (typeof STRATEGY_RESEARCH_PROVENANCE_KINDS)[number];
+
+/**
  * 一条 Strategy Version 的 Research 溯源快照。
  *
  * 冗余字段说明（`strategyId` / `strategyVersion`）：与 5 张投影表同风格，
@@ -51,12 +70,17 @@ export interface StrategyResearchProvenance {
   strategyId: string;
   /** semver 冗余快照。 */
   strategyVersion: string;
-  /** 来源 `research_strategy_candidate.id`（快照值，非 FK）。 */
-  sourceCandidateId: number;
-  /** 来源 `research_conclusion.id`（快照值，非 FK）。 */
-  sourceConclusionId: number;
-  /** 来源 `research_experiment.id`（快照值，非 FK）。 */
-  sourceExperimentId: number;
+  /**
+   * 来源体系。缺省（历史行）按 `RESEARCH_CONCLUSION` 读取 —— 与 DB 默认值一致，
+   * 因此既有 9 行无需 backfill。
+   */
+  sourceKind?: StrategyResearchProvenanceKind;
+  /** 来源 `research_strategy_candidate.id`（快照值，非 FK）；**INDEPENDENT_EXPERIMENT 时为 null**。 */
+  sourceCandidateId: number | null;
+  /** 来源 `research_conclusion.id`（快照值，非 FK）；**INDEPENDENT_EXPERIMENT 时为 null**。 */
+  sourceConclusionId: number | null;
+  /** 来源 `research_experiment.id`（快照值，非 FK）；**INDEPENDENT_EXPERIMENT 时为 null**。 */
+  sourceExperimentId: number | null;
   /** 来源 `research_run.id`；**可空**（Conclusion 无 runId 列，部分证据提不出，空值 = 如实承认）。 */
   sourceResearchRunId?: number | null;
   /** 研究**来源** Dataset 坐标快照 → `dataset_version.id`（与 Strategy 执行绑定可不同）。 */
@@ -65,6 +89,14 @@ export interface StrategyResearchProvenance {
   sourceDatasetLabel?: string | null;
   /** `sourceTraceJson` 的副本（含免责声明摘要）。display-only。 */
   sourceSnapshotJson?: unknown;
+  /** 独立实验 id（`<group>/<key>`）；仅 `INDEPENDENT_EXPERIMENT` 有值。 */
+  experimentRef?: string | null;
+  /** 实验自身版本（`descriptor.version`）快照。 */
+  experimentVersion?: string | null;
+  /** 生成该策略时**实际使用**的实验参数快照（已归并默认值；写入即冻结）。 */
+  experimentParametersJson?: unknown;
+  /** 实验结果的 canonical 指纹（sha256 前缀）—— 服务端**真实重跑**后算出，非调用方自报。 */
+  experimentResultDigest?: string | null;
   origin: StrategyResearchProvenanceOrigin;
   createdAt?: string;
 }
@@ -130,14 +162,52 @@ function requireNonEmptyString(value: unknown, field: string): string {
  *
  * 🔴 不校验「上游是否仍存在」：`sourceXxx` 是快照值、**零 FK**，来源存活与否只能**读取时探测**
  * 并如实标注 —— 这正是「快照而非 FK」的全部价值（006.0 §8.3）。
+ *
+ * RESEARCH-EXPERIMENT-002 起按 **sourceKind** 分派必填面（缺省 = 旧体系，历史行为逐字不变）：
+ *   - `RESEARCH_CONCLUSION`（缺省）：三个旧来源锚**必须**是正整数（与 002 之前完全一致）；
+ *   - `INDEPENDENT_EXPERIMENT`：三个旧锚**必须为 null**（如实承认「没有旧 Research 坐标」，
+ *     禁止用一个假 id 凑数），且 `experimentRef` / `experimentVersion` /
+ *     `experimentResultDigest` 必须非空（否则这份溯源回答不了 §6 的任何一问）。
  */
 export function assertProvenanceInput(input: StrategyResearchProvenanceCreateInput): void {
   requirePositiveInt(input.strategyVersionId, "strategyVersionId");
   requireNonEmptyString(input.strategyId, "strategyId");
   requireNonEmptyString(input.strategyVersion, "strategyVersion");
-  requirePositiveInt(input.sourceCandidateId, "sourceCandidateId");
-  requirePositiveInt(input.sourceConclusionId, "sourceConclusionId");
-  requirePositiveInt(input.sourceExperimentId, "sourceExperimentId");
+
+  const kind: StrategyResearchProvenanceKind = input.sourceKind ?? "RESEARCH_CONCLUSION";
+  if (!STRATEGY_RESEARCH_PROVENANCE_KINDS.includes(kind)) {
+    throw new StrategyProvenanceError(
+      STRATEGY_PROVENANCE_ERROR.INVALID_INPUT,
+      `sourceKind 只能是 ${STRATEGY_RESEARCH_PROVENANCE_KINDS.join(" / ")}，实际：${String(kind)}`,
+    );
+  }
+
+  if (kind === "RESEARCH_CONCLUSION") {
+    requirePositiveInt(input.sourceCandidateId, "sourceCandidateId");
+    requirePositiveInt(input.sourceConclusionId, "sourceConclusionId");
+    requirePositiveInt(input.sourceExperimentId, "sourceExperimentId");
+  } else {
+    for (const field of ["sourceCandidateId", "sourceConclusionId", "sourceExperimentId"] as const) {
+      const value = input[field];
+      if (value !== null && value !== undefined) {
+        throw new StrategyProvenanceError(
+          STRATEGY_PROVENANCE_ERROR.INVALID_INPUT,
+          `sourceKind=INDEPENDENT_EXPERIMENT 时 ${field} 必须为 null（独立实验没有旧 Research 坐标，`
+            + `不得用假 id 凑数），实际：${String(value)}`,
+        );
+      }
+    }
+    requireNonEmptyString(input.experimentRef, "experimentRef");
+    requireNonEmptyString(input.experimentVersion, "experimentVersion");
+    requireNonEmptyString(input.experimentResultDigest, "experimentResultDigest");
+    if (input.experimentParametersJson === undefined || input.experimentParametersJson === null) {
+      throw new StrategyProvenanceError(
+        STRATEGY_PROVENANCE_ERROR.INVALID_INPUT,
+        "sourceKind=INDEPENDENT_EXPERIMENT 时必须给 experimentParametersJson（否则「用了什么参数」无从回答）",
+      );
+    }
+  }
+
   if (input.sourceResearchRunId !== null && input.sourceResearchRunId !== undefined) {
     requirePositiveInt(input.sourceResearchRunId, "sourceResearchRunId");
   }

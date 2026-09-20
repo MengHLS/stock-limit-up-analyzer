@@ -1,58 +1,28 @@
 /**
- * Research 工作台子组件 barrel（RESEARCH-002 前端）。
+ * 「研究 → 策略候选」前端子组件 barrel（RESEARCH-EXPERIMENT-003 裁剪）。
+ *
+ * 旧 Research 工作台（Experiment → Run → 分析 → 结果 → 结论）的组件随整条旧体系删除，
+ * 这里只保留**仍被使用**的两簇：
+ *   1. Strategy Candidate 桥的 UI（候选草图编辑 / 状态流转 / 转正 / 溯源只读）；
+ *   2. 策略编辑器复用的**草图词表与草图画布**（`components/strategy/**` 直接依赖它们，
+ *      它们是「规则条件的字段引用词表」，与旧 Analysis 无耦合）。
  */
 
-export { CreateExperimentDialog } from "./CreateExperimentDialog";
-export { CreateAnalysisDialog } from "./CreateAnalysisDialog";
-export { AnalysisResultsView } from "./AnalysisResultsView";
-export { ConclusionPanel } from "./ConclusionPanel";
-export { FindingsPanel } from "./FindingsPanel";
-export { CreateHypothesisDialog } from "./CreateHypothesisDialog";
-export { RunEngineButton } from "./RunEngineButton";
-export { RunIncrementalButton } from "./RunIncrementalButton";
-export { RunExecutionBatches, skippedConclusionNotes } from "./RunExecutionBatches";
-export { VariableCatalogCard } from "./VariableCatalogCard";
-
-// 维护能力（RESEARCH-002 可维护性）：重命名 / 级联删除 / 改口径
-export { ConfirmDeleteButton } from "./ConfirmDeleteButton";
-export { ExperimentActions } from "./ExperimentActions";
-export { AnalysisConditionEditor } from "./AnalysisConditionEditor";
-export { ConditionGroupsEditor } from "./ConditionGroupsEditor";
-export { CandidatesPanel } from "./CandidatesPanel";
-
-// RESEARCH-006.4.1 — Research → Strategy 候选（结论 → 候选 → 状态流转）
-export { CreateCandidateDialog } from "./CreateCandidateDialog";
+// —— Strategy Candidate 桥（研究 → 策略）——
 export { CandidateLifecycleActions } from "./CandidateLifecycleActions";
 export { CandidateSketchCard } from "./CandidateSketchCard";
 export { CandidateSketchFields } from "./CandidateSketchFields";
 export { EditCandidateDialog } from "./EditCandidateDialog";
-
-// RESEARCH-006.4.1-B — Candidate → Strategy 转正（promote）与 Research Provenance 只读切面
 export { PromoteCandidateDialog } from "./PromoteCandidateDialog";
 export { StrategyResearchProvenancePanel } from "./StrategyResearchProvenancePanel";
 
-// 表单纯函数（可单测；与 `datasetRegistry/datasetFilterForm` 同一约定）
-export * from "./createExperimentForm";
+// —— 维护能力 ——
+export { ConfirmDeleteButton } from "./ConfirmDeleteButton";
+
+// —— 表单纯函数（可单测；与 `datasetRegistry/datasetFilterForm` 同一约定）——
 export * as createAnalysisForm from "./createAnalysisForm";
-export * as incrementalRunForm from "./incrementalRunForm";
-export * as analysisBatchForm from "./analysisBatchForm";
 export * as candidateForm from "./candidateForm";
 export * as candidateSketchForm from "./candidateSketchForm";
 export * as candidateSketchVocabulary from "./candidateSketchVocabulary";
 export * as candidateSketchCostPreset from "./candidateSketchCostPreset";
 export * as promoteForm from "./promoteForm";
-
-// 矩阵视图（把「决策日 × 回撤桶」等批量分析拼回一张表；纯函数 + 组件）
-export { ResearchMatrixView } from "./ResearchMatrixView";
-export * as researchMatrix from "./researchMatrix";
-
-// 信号漏斗视图（把「守线 → 缩量 → 量价共振」这类**规则链**画成逐级漏斗；
-// 与矩阵视图互补：矩阵回答「哪一格」，漏斗回答「每一级各贡献了什么」）
-export { ObservationFunnelView } from "./ObservationFunnelView";
-export * as observationFunnel from "./observationFunnel";
-
-// 批量建分析（RESEARCH-002C）：矩阵 / 标准套件 / 我的模板
-export { BatchAnalysisDialog } from "./BatchAnalysisDialog";
-
-// 前端内存分页（长表格用；纯函数可单测）。服务端分页仍走 `PaginationBar` + limit/offset。
-export * as clientPagination from "./clientPagination";

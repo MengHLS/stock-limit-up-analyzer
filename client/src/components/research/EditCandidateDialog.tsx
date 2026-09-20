@@ -55,7 +55,7 @@ export function EditCandidateDialog({
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(() => createDefaultEditForm(candidate));
   const utils = trpc.useUtils();
-  const update = trpc.research.strategyCandidate.update.useMutation();
+  const update = trpc.strategyDomain.strategyCandidate.update.useMutation();
 
   // 弹窗打开时同步一次后端最新值（避免用旧快照覆盖别人刚写的改动）。
   useEffect(() => {
@@ -76,7 +76,7 @@ export function EditCandidateDialog({
         description: "只写入了改动过的字段；状态与来源快照不受影响。",
       });
       setOpen(false);
-      await utils.research.strategyCandidate.get.invalidate({ candidateId });
+      await utils.strategyDomain.strategyCandidate.get.invalidate({ candidateId });
       onSaved?.();
     } catch (e) {
       const diagnostic = candidateErrorDiagnostic(e, "UPDATE_SKETCH");

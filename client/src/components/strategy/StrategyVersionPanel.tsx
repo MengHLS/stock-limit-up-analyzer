@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/table";
 import { SectionCard, StatusBadge } from "@/components/common";
 import { STRATEGY_VERSION_STATUS_OPTIONS } from "@/lib/status";
-import { formatDateTime } from "@/adapters/researchEngineAdapter";
+import { formatDateTime } from "@/lib/displayFormat";
 import { trpc } from "@/lib/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
@@ -57,8 +57,9 @@ import type { StrategyLifecycleStatusValue } from "@shared/researchContracts";
 
 // 类型取自真实 tRPC 路由（与 `RunConfigPanel` 同一种写法），不手写 DTO、不复制口径。
 type RouterOutputs = inferRouterOutputs<AppRouter>;
-type VersionRows = RouterOutputs["research"]["strategy"]["listVersions"];
-type LabeledDiff = RouterOutputs["research"]["strategy"]["compare"];
+// RESEARCH-EXPERIMENT-003 —— 策略域命名空间由 `research.*` 改名 `strategyDomain.*`。
+type VersionRows = RouterOutputs["strategyDomain"]["strategy"]["listVersions"];
+type LabeledDiff = RouterOutputs["strategyDomain"]["strategy"]["compare"];
 
 function shortHash(h: string): string {
   return h.length <= 16 ? h : `${h.slice(0, 12)}…${h.slice(-4)}`;
@@ -96,8 +97,8 @@ export function StrategyVersionPanel({
   /** 当前草稿（`viewModelToStrategy(vm)`）—— 比较的右值。 */
   draftDocument: Record<string, unknown>;
 }) {
-  const compare = trpc.research.strategy.compare.useMutation();
-  const setStatus = trpc.research.strategy.setVersionStatus.useMutation();
+  const compare = trpc.strategyDomain.strategy.compare.useMutation();
+  const setStatus = trpc.strategyDomain.strategy.setVersionStatus.useMutation();
 
   const [nextStatus, setNextStatus] = useState<StrategyLifecycleStatusValue | "">("");
   const [diff, setDiff] = useState<LabeledDiff | null>(null);

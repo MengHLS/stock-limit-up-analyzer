@@ -24,7 +24,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useSearch } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import {
   AlertTriangle,
   Ban,
@@ -45,8 +45,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EmptyState, SectionCard, StatusBadge } from "@/components/common";
+import { ConfirmDialog, EmptyState, SectionCard, StatusBadge } from "@/components/common";
+import { DatasetVersionLink, StrategyVersionIdLink } from "@/components/common/ProvenanceLink";
 import { trpc } from "@/lib/trpc";
+import {
+  buildPanelLocation,
+  DEFAULT_PANEL_BASE_PATH,
+  type PanelLinkOptions,
+} from "@/lib/panelLinks";
 
 // ---------------------------------------------------------------------------
 // 展示层小工具（不参与任何量化判定）
@@ -114,15 +120,31 @@ type MetricsView = Readonly<Record<(typeof METRIC_ROWS)[number]["key"], number |
 // 主面板
 // ---------------------------------------------------------------------------
 
-export default function OosValidationPanel() {
+/**
+ * FRONTEND-FINAL-001（P0-1 / P1-6）：本面板既可作为 `/parameter-search` 的页内块，
+ * 也可被独立路由（`/validation/oos`、`/validation/oos/:runId`）复用。
+ *
+ * 不传 props ⇒ 与改造前**逐字等价**（query 深链写回 `/parameter-search?oosRunId=…`）。
+ */
+export interface OosValidationPanelProps extends Partial<PanelLinkOptions> {
+  /** 由独立路由的路径段给出的选中 run（优先级高于 query）。 */
+  readonly routeRunId?: string | null;
+}
+
+export default function OosValidationPanel({
+  basePath = DEFAULT_PANEL_BASE_PATH,
+  pathStyle = false,
+  routeRunId = null,
+}: OosValidationPanelProps = {}) {
   const search = useSearch();
   const [, setLocation] = useLocation();
 
   /** URL 深链中的选中 OOS Run（刷新 / 分享后仍能回到同一份详情）。 */
   const linkedRunId = useMemo(() => {
+    if (routeRunId !== null && routeRunId !== "") return routeRunId;
     const raw = new URLSearchParams(search).get("oosRunId");
     return raw === null || raw === "" ? null : raw;
-  }, [search]);
+  }, [search, routeRunId]);
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(linkedRunId);
   useEffect(() => {
@@ -137,6 +159,10 @@ export default function OosValidationPanel() {
   });
   const [message, setMessage] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  // FRONTEND-FINAL-001（P2-2）：重操作 / 破坏性操作走统一确认对话框（`common/ConfirmDialog`），
+  // 不再一点就发请求 —— 「执行样本外验证」会真跑分钟级回测，「取消」不可撤销。
+  const [confirmStart, setConfirmStart] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   const runs = trpc.paramSearch.listOosRuns.useQuery({ limit: 50 });
   const detail = trpc.paramSearch.getOosRun.useQuery(
@@ -148,11 +174,10 @@ export default function OosValidationPanel() {
   const startMutation = trpc.paramSearch.startOosRun.useMutation();
   const cancelMutation = trpc.paramSearch.cancelOosRun.useMutation();
 
-  /** 选中并写进 URL（深链）。 */
+  /** 选中并写进 URL（深链）。地址形式由 `pathStyle` / `basePath` 决定（见 `panelLinks.ts`）。 */
   function selectRun(runId: string | null): void {
     setSelectedRunId(runId);
-    if (runId === null) setLocation("/parameter-search");
-    else setLocation(`/parameter-search?oosRunId=${encodeURIComponent(runId)}`);
+    setLocation(buildPanelLocation({ basePath, pathStyle, queryKey: "oosRunId" }, runId));
   }
 
   async function handleCreate(): Promise<void> {
@@ -376,21 +401,38 @@ export default function OosValidationPanel() {
             <div>
               <p className="mb-2 text-sm font-medium">OOS Run 冻结坐标（六项）</p>
               <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                <Field label="① 源 Search Run" value={<span className="font-mono">{selectedRun.sourceSearchRunId}</span>} />
+                <Field
+                  label="① 源 Search Run"
+                  value={
+                    /* FRONTEND-FINAL-001（P1-4）：OOS → Parameter Search 的溯源跳转（用已有 ID，不额外查询）。 */
+                    <Link
+                      href={`/parameter-search/${encodeURIComponent(selectedRun.sourceSearchRunId)}`}
+                      className="font-mono underline-offset-2 hover:underline"
+                      title="打开产生该冻结候选的参数搜索 Run"
+                    >
+                      {selectedRun.sourceSearchRunId}
+                    </Link>
+                  }
+                />
                 <Field
                   label="② 候选身份 parameterHash"
                   value={<span className="font-mono break-all">{selectedRun.sourceParameterHash}</span>}
                 />
                 <Field
                   label="③ 策略身份 strategyVersionId"
-                  value={<span className="font-mono">{selectedRun.strategyVersionId}</span>}
+                  value={<StrategyVersionIdLink strategyVersionId={selectedRun.strategyVersionId} />}
                   hint={selectedRun.strategyDefinitionFingerprint === null
                     ? "未冻结定义指纹（Core 定义不可构造）"
                     : `定义指纹 ${selectedRun.strategyDefinitionFingerprint.slice(0, 16)}…`}
                 />
                 <Field
                   label="④ 数据集坐标 datasetVersionId"
-                  value={<span className="font-mono">{valueText(selectedRun.datasetVersionId)}</span>}
+                  value={
+                    <DatasetVersionLink
+                      datasetVersionId={selectedRun.datasetVersionId}
+                      label={selectedRun.datasetVersionLabel}
+                    />
+                  }
                   hint={selectedRun.datasetVersionLabel === null
                     ? "无 label 快照"
                     : `label ${selectedRun.datasetVersionLabel}（仅展示）`}
@@ -450,7 +492,7 @@ export default function OosValidationPanel() {
               <Button
                 id="oos-start-button"
                 size="sm"
-                onClick={() => void handleStart(selectedRun.oosRunId)}
+                onClick={() => setConfirmStart(true)}
                 disabled={
                   startMutation.isPending
                   || selectedRun.status === "RUNNING"
@@ -468,7 +510,7 @@ export default function OosValidationPanel() {
                 id="oos-cancel-button"
                 size="sm"
                 variant="outline"
-                onClick={() => void handleCancel(selectedRun.oosRunId)}
+                onClick={() => setConfirmCancel(true)}
                 disabled={
                   cancelMutation.isPending
                   || selectedRun.status === "COMPLETED"
@@ -610,6 +652,39 @@ export default function OosValidationPanel() {
           </div>
         )}
       </div>
+
+      {/* FRONTEND-FINAL-001（P2-2）：统一确认对话框。 */}
+      <ConfirmDialog
+        open={confirmStart}
+        onOpenChange={setConfirmStart}
+        title="执行样本外验证？"
+        description={
+          <>
+            这会用**已冻结**的参数在与搜索窗口**不重叠**的数据上真实重跑回测并重算 canonical 指标，
+            耗时可达分钟级。冻结参数集与窗口在执行时**不会被改写**。
+          </>
+        }
+        confirmLabel="执行"
+        pending={startMutation.isPending}
+        onConfirm={() => {
+          setConfirmStart(false);
+          if (selectedRun !== null) void handleStart(selectedRun.oosRunId);
+        }}
+      />
+      <ConfirmDialog
+        open={confirmCancel}
+        onOpenChange={setConfirmCancel}
+        title="取消该 OOS Run？"
+        description="取消后该 Run 记为 CANCELLED，不会产出 OOS 结果行。此操作不可撤销。"
+        confirmLabel="取消运行"
+        cancelLabel="返回"
+        tone="danger"
+        pending={cancelMutation.isPending}
+        onConfirm={() => {
+          setConfirmCancel(false);
+          if (selectedRun !== null) void handleCancel(selectedRun.oosRunId);
+        }}
+      />
     </SectionCard>
   );
 }

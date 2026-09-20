@@ -18,8 +18,8 @@
  * - 🔴 **不产出「最佳参数」结论**：默认排序 = 组合序号（不是收益降序），排序能力交给用户显式选择。
  */
 
-import { useMemo, useState } from "react";
-import { Link } from "wouter";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useSearch } from "wouter";
 import {
   ArrowUpDown,
   ExternalLink,
@@ -28,12 +28,14 @@ import {
   Plus,
   RotateCcw,
   Search,
+  ShieldCheck,
   Trash2,
   XCircle,
 } from "lucide-react";
 import {
   DataTable,
   EmptyState,
+  JsonBlock,
   MetricCard,
   SectionCard,
   StatusBadge,
@@ -49,6 +51,61 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
+import {
+  buildPanelLocation,
+  DEFAULT_PANEL_BASE_PATH,
+  type PanelLinkOptions,
+} from "@/lib/panelLinks";
+import ParameterReferenceCheckCard, {
+  PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER,
+} from "./ParameterReferenceCheckCard";
+
+// ---------------------------------------------------------------------------
+// P0-2：参数消费对照的展示辅助
+//
+// 🔴 判据（MATCHED / DIFFERENT / UNAVAILABLE）一律由**服务端**在投影时算好；
+//   这里只做「可空 → 可读」的转换，**不比较参数值、不做领域判断**。
+// ---------------------------------------------------------------------------
+
+/** 与 `parameterResolutionViewSchema` 同构（此处只用到读侧字段）。 */
+type ResolutionView = {
+  readonly status: "MATCHED" | "DIFFERENT" | "UNAVAILABLE";
+  readonly requestedParameterCount: number;
+  readonly resolvedParameterCount: number;
+  readonly differentParameterCodes: string[];
+  readonly additionalParameterCodes: string[];
+} | null;
+
+/** 留档未记录解析结果（或响应缺该字段）⇒ 视为不可判定。 */
+function isResolutionUnavailable(resolution: ResolutionView): boolean {
+  return resolution === null || resolution.status === "UNAVAILABLE";
+}
+
+function resolutionStatusTone(resolution: ResolutionView): string {
+  if (resolution === null || resolution.status === "UNAVAILABLE") return "UNKNOWN";
+  return resolution.status === "MATCHED" ? "ACCEPTED" : "PARTIAL";
+}
+
+function resolutionStatusLabel(resolution: ResolutionView): string {
+  if (resolution === null || resolution.status === "UNAVAILABLE") {
+    return "未记录实际消费参数（不可判定）";
+  }
+  return resolution.status === "MATCHED" ? "一致（搜索参数 = 实际解析）" : "存在差异（见下）";
+}
+
+function differentCodesText(resolution: ResolutionView): string {
+  if (resolution === null || resolution.status === "UNAVAILABLE") return "—";
+  return resolution.differentParameterCodes.length === 0
+    ? "—"
+    : resolution.differentParameterCodes.join("、");
+}
+
+function additionalCodesText(resolution: ResolutionView): string | null {
+  if (resolution === null || resolution.status === "UNAVAILABLE") return null;
+  if (resolution.additionalParameterCodes.length === 0) return null;
+  return resolution.additionalParameterCodes.join("、");
+}
+
 
 // ---------------------------------------------------------------------------
 // 类型（契约唯一来源 = shared/parameterSearchContracts.ts）
@@ -167,14 +224,48 @@ const SORT_FIELDS: Array<{ key: SortField; label: string }> = [
 // 面板
 // ---------------------------------------------------------------------------
 
-export default function PersistedParameterSearchPanel() {
+/**
+ * FRONTEND-FINAL-001（P1-6）：本面板支持 `?searchRunId=` 与 `/parameter-search/:runId`
+ * 两种深链（刷新 / 分享后恢复到同一份详情）。
+ *
+ * 深链的路径段部分由宿主路由通过 `routeRunId` 注入（见 `pages/ParameterSearchRun.tsx`）；
+ * 不传 props ⇒ 该面板也可独立使用（仅 query 深链）。
+ */
+export interface PersistedParameterSearchPanelProps extends Partial<PanelLinkOptions> {
+  /** 由独立路由的路径段给出的选中 run（优先级高于 query）。 */
+  readonly routeRunId?: string | null;
+}
+
+export default function PersistedParameterSearchPanel({
+  basePath = DEFAULT_PANEL_BASE_PATH,
+  pathStyle = false,
+  routeRunId = null,
+}: PersistedParameterSearchPanelProps = {}) {
+  const search = useSearch();
+  const [, setLocation] = useLocation();
   const [strategyId, setStrategyId] = useState("");
   const [strategyVersion, setStrategyVersion] = useState("");
   const [datasetVersionId, setDatasetVersionId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+  /** URL 深链中的选中搜索 run（路径段优先，其次 query）。 */
+  const linkedRunId = useMemo(() => {
+    if (routeRunId !== null && routeRunId !== "") return routeRunId;
+    const raw = new URLSearchParams(search).get("searchRunId");
+    return raw === null || raw === "" ? null : raw;
+  }, [search, routeRunId]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(linkedRunId);
+  useEffect(() => {
+    if (linkedRunId !== null) setSelectedRunId(linkedRunId);
+  }, [linkedRunId]);
+
+  /** 选中并发起深链写回（唯一入口：所有 setSelectedRunId 都应改走这里）。 */
+  function selectRun(runId: string | null): void {
+    setSelectedRunId(runId);
+    setLocation(buildPanelLocation({ basePath, pathStyle, queryKey: "searchRunId" }, runId));
+  }
   const [sortBy, setSortBy] = useState<SortField>("combinationIndex");
   const [sortDirection, setSortDirection] = useState<"ASC" | "DESC">("ASC");
   const [statusFilter, setStatusFilter] = useState<"" | "SUCCEEDED" | "FAILED">("");
@@ -183,6 +274,11 @@ export default function PersistedParameterSearchPanel() {
   const [expandedHash, setExpandedHash] = useState<string | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [noticeText, setNoticeText] = useState<string | null>(null);
+  /**
+   * FRONTEND-FINAL-001（P1-1）— **发起搜索前**的只读引用面检查开关。
+   * 由用户显式点击打开（避免边输入边打请求），查询坐标取表单里已填的策略 ID / 版本。
+   */
+  const [showReferenceCheck, setShowReferenceCheck] = useState(false);
 
   const listQuery = trpc.paramSearch.listSearches.useQuery(
     { limit: 20 },
@@ -253,7 +349,7 @@ export default function PersistedParameterSearchPanel() {
           ? {}
           : { parameterSearchSpace: validOverrides as never }),
       });
-      setSelectedRunId(created.run.searchRunId);
+      selectRun(created.run.searchRunId);
       setNoticeText(
         `已创建 ${created.run.searchRunId}：计划 ${String(created.run.combinationCount)} 个组合；`
           + `可搜索参数 ${created.summary.searchable.join(" / ") || "（无）"}。`
@@ -556,6 +652,34 @@ export default function PersistedParameterSearchPanel() {
               创建只落「运行 + 组合计划」，不跑回测；执行需显式点「开始执行」。
             </span>
           </div>
+
+          {/* FRONTEND-FINAL-001（P1-1）— 只读「检查引用面」入口。
+              目的：让用户在**发起搜索之前**就能发现「这个策略版本没有被引用的 TUNABLE 参数」，
+              而不是等后端以 PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER 拒绝创建。
+              只读查询既有投影，不新建 / 不修改策略，也不改本面板既有深链与四态。 */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              id="ps-check-reference"
+              onClick={() => setShowReferenceCheck(!showReferenceCheck)}
+              disabled={strategyId.trim() === "" || strategyVersion.trim() === ""}
+            >
+              <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+              {showReferenceCheck ? "收起引用面检查" : "检查引用面（只读）"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              查该策略版本有没有被规则图引用的 TUNABLE 参数；不新建 / 不修改策略。
+            </span>
+          </div>
+          {showReferenceCheck && strategyId.trim() !== "" && strategyVersion.trim() !== "" && (
+            <div className="mt-2">
+              <ParameterReferenceCheckCard
+                strategyId={strategyId.trim()}
+                strategyVersion={strategyVersion.trim()}
+              />
+            </div>
+          )}
         </div>
 
         {/* ---------------- 搜索列表 ---------------- */}
@@ -607,7 +731,7 @@ export default function PersistedParameterSearchPanel() {
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          setSelectedRunId(run.searchRunId);
+                          selectRun(run.searchRunId);
                           setExpandedHash(null);
                         }}
                       >
@@ -744,6 +868,20 @@ export default function PersistedParameterSearchPanel() {
                   </p>
                 )}
 
+                {/* FRONTEND-FINAL-001（P1-1）— 该 Run 因「无被引用 TUNABLE 参数」被后端拒绝时，
+                    把领域码解释成正式业务 UI（参数列表 + 角色 + 是否被引用 + 下一步入口），
+                    而不是只留一个错误码原文。 */}
+                {detail.run.errorCode === PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER && (
+                  <div className="mt-2">
+                    <ParameterReferenceCheckCard
+                      strategyId={detail.run.strategyId}
+                      strategyVersion={detail.run.strategyVersion}
+                      errorCode={detail.run.errorCode}
+                      errorMessage={detail.run.errorMessage}
+                    />
+                  </div>
+                )}
+
                 <div className="mt-3">
                   <p className="mb-1 text-xs font-medium">组合计划（{detail.combinations.length} 个）</p>
                   <DataTable maxHeight={240}>
@@ -761,7 +899,15 @@ export default function PersistedParameterSearchPanel() {
                       {detail.combinations.map((combination) => (
                         <TableRow key={combination.parameterHash}>
                           <TableCell className="text-xs">{combination.combinationIndex}</TableCell>
-                          <TableCell className="font-mono text-xs">{JSON.stringify(combination.parameters)}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {/* P2-7：不再把参数集 `JSON.stringify` 一锅端（键值表 + 可选原文）。 */}
+                            <JsonBlock
+                              value={combination.parameters}
+                              keyHeader="参数"
+                              valueHeader="请求值"
+                              className="min-w-[200px]"
+                            />
+                          </TableCell>
                           <TableCell className="font-mono text-xs">{combination.parameterHash.slice(0, 12)}…</TableCell>
                           <TableCell>
                             <StatusBadge status={combination.status} label={combination.status} />
@@ -868,10 +1014,18 @@ export default function PersistedParameterSearchPanel() {
                   </TableHeader>
                   <TableBody>
                     {page.results.map((result) => (
-                      <>
+                      /* React 要求列表项本身带 key：裸 `<>` 片段不算，会报
+                         "Each child in a list should have a unique key prop"（实测于无头浏览器冒烟）。
+                         改用带 key 的 `Fragment`。 */
+                      <Fragment key={result.parameterHash}>
                         <TableRow key={result.parameterHash}>
-                          <TableCell className="font-mono text-xs">
-                            {JSON.stringify(result.parameters)}
+                          <TableCell className="text-xs">
+                            <JsonBlock
+                              value={result.parameters}
+                              keyHeader="参数"
+                              valueHeader="请求值"
+                              className="min-w-[180px]"
+                            />
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={result.status} label={result.status} />
@@ -911,6 +1065,63 @@ export default function PersistedParameterSearchPanel() {
                         {expandedHash === result.parameterHash && (
                           <TableRow key={`${result.parameterHash}-detail`}>
                             <TableCell colSpan={9} className="bg-muted/30">
+                              {/* 🔴 FRONTEND-FINAL-001（P0-2）：Declared → Actual → Result 三段式。
+                                  用户在这里可以直接回答「我搜索的参数，是否真的改变了策略执行」。
+                                  判据（MATCHED / DIFFERENT / UNAVAILABLE）由**服务端**算好，前端只渲染。 */}
+                              <div className="mb-2 rounded border border-border bg-background p-2 text-xs">
+                                <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                                  <span className="font-medium">参数消费对照（Declared → Actual）</span>
+                                  <StatusBadge
+                                    status={resolutionStatusTone(result.parameterResolution)}
+                                    label={resolutionStatusLabel(result.parameterResolution)}
+                                  />
+                                </div>
+                                {isResolutionUnavailable(result.parameterResolution) ? (
+                                  <p className="text-muted-foreground">
+                                    本次执行**未记录**实际被消费的参数集 —— 该组合未走到评估端口（失败），
+                                    或该留档早于本字段上线（P0-2）。**不推断**、不回填、不据此判定参数是否生效。
+                                  </p>
+                                ) : (
+                                  <>
+                                    <p className="mb-1.5 text-muted-foreground">
+                                      {result.parameterResolution?.status === "MATCHED"
+                                        ? "搜索参数与实际解析参数一致。"
+                                        : `搜索参数与实际解析参数**不一致**：${differentCodesText(result.parameterResolution)}`}
+                                    </p>
+                                    <div className="grid gap-2 md:grid-cols-2">
+                                      <div>
+                                        <p className="mb-0.5 text-muted-foreground">
+                                          Requested（搜索参数 ·{" "}
+                                          {result.parameterResolution?.requestedParameterCount ?? 0} 项）
+                                        </p>
+                                        <JsonBlock value={result.parameters} keyHeader="参数" valueHeader="请求值" />
+                                      </div>
+                                      <div>
+                                        <p className="mb-0.5 text-muted-foreground">
+                                          Resolved / 实际被消费（覆写 ∪ defaultValue，共{" "}
+                                          {result.parameterResolution?.resolvedParameterCount ?? 0} 项）
+                                        </p>
+                                        <JsonBlock
+                                          value={result.resolvedParameterSet}
+                                          keyHeader="参数"
+                                          valueHeader="实际消费值"
+                                          emptyText="（留档中无解析结果）"
+                                        />
+                                      </div>
+                                    </div>
+                                    {additionalCodesText(result.parameterResolution) !== null && (
+                                      <p className="mt-1 text-muted-foreground">
+                                        未参与本次搜索、由声明回落 default 的参数：
+                                        <span className="font-mono">
+                                          {" "}
+                                          {additionalCodesText(result.parameterResolution)}
+                                        </span>
+                                        （预期行为，不计为差异）
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                              </div>
                               <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
                                 <div className="rounded border border-border bg-background p-2 text-xs">
                                   <p className="mb-1 font-medium">组合</p>
@@ -954,14 +1165,13 @@ export default function PersistedParameterSearchPanel() {
                                 <summary className="cursor-pointer text-xs text-muted-foreground">
                                   查看评估产物（canonical metrics 原始面 + 指纹）
                                 </summary>
-                                <pre className="mt-1 max-h-64 overflow-auto rounded bg-background p-2 text-[11px] leading-tight">
-                                  {JSON.stringify(result.evaluation, null, 2)}
-                                </pre>
+                                {/* P2-3：JSON 查看走 JsonBlock（含复制与原文开关），不再是裸 <pre>。 */}
+                                <JsonBlock value={result.evaluation} mode="raw" className="mt-1" />
                               </details>
                             </TableCell>
                           </TableRow>
                         )}
-                      </>
+                      </Fragment>
                     ))}
                   </TableBody>
                 </DataTable>

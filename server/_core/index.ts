@@ -13,8 +13,6 @@ import { ensureStockPriceIndex } from "../stockPriceIndex";
 import { startMarketSyncScheduler, syncMarketDataOnce, syncMarketDataIfMissing } from "../marketSync";
 import { startPaperTradingScheduler, advancePaperTradingOnce } from "../paperTradingScheduler";
 import { reclaimOrphanBuildJobs } from "../datasetRegistry";
-import { reclaimOrphanResearchWork } from "../researchEngine/reclaim";
-import { createDbResearchRepositories } from "../researchCore/repository";
 import { resolveRuntimeNodeEnv } from "./env";
 
 // 统一运行模式（判定口径见 env.ts#resolveRuntimeNodeEnv）。
@@ -192,35 +190,6 @@ async function startServer() {
       })
       .catch((error) => {
         console.error("[DatasetBuild] 孤儿作业回收异常:", error);
-      });
-    // 回收研究链孤儿：Run 的失败收敛路径此前只写 Run 的 FAILED、不收敛子 Analysis，
-    // 于是留下「父终态、子未终态」的孤儿（实测 `research_analysis 270008` 停在 PENDING 至今）。
-    // 判据 = ① 父 Run 已终态且过缓冲期（缺省 30 分钟，让位给「刚失败正要重跑」）；
-    //        ② Run 置 RUNNING 后停更超 12 小时（执行者进程已不存在）。
-    // 🔴 父 Run PENDING 且从未执行（无 inputSnapshot / startedAt）⇒ **是待执行草稿，一律保留**。
-    //    回收器会把「保留了什么、为什么」如实回报给下面这段日志，不静默。
-    void reclaimOrphanResearchWork(createDbResearchRepositories())
-      .then((result) => {
-        for (const r of result.reclaimedRuns) {
-          console.warn(
-            `[ResearchReclaim] 收敛孤儿 Run=${r.runId} experiment=${r.experimentId} ` +
-              `停更=${r.staleMinutes}分钟 随附分析=${r.analysisCount}条`,
-          );
-        }
-        for (const a of result.reclaimedAnalyses) {
-          console.warn(
-            `[ResearchReclaim] 收敛孤儿分析=${a.analysisId} run=${a.runId} ` +
-              `${a.previousStatus}→CANCELLED（${a.reason}）`,
-          );
-        }
-        for (const s of result.skippedUnexecutedRuns) {
-          console.warn(
-            `[ResearchReclaim] 保留未执行草稿 Run=${s.runId} experiment=${s.experimentId}：${s.reason}`,
-          );
-        }
-      })
-      .catch((error) => {
-        console.error("[ResearchReclaim] 孤儿回收异常:", error);
       });
   });
 }

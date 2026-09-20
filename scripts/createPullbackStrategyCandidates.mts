@@ -22,7 +22,7 @@
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import mysql from "mysql2/promise";
-import { createDbResearchRepositories } from "../server/researchCore/repository/db";
+import { createDbResearchRepositories } from "../server/research/candidateRepository";
 import { DbStrategyRepository } from "../server/research/strategyPersistence/db";
 import { RegistryDatasetVersionReadPort } from "../server/research/strategyCandidate/datasetVersionPort";
 import { createStrategyPromotionPort } from "../server/research/strategyCandidate/strategyPromotionPort";

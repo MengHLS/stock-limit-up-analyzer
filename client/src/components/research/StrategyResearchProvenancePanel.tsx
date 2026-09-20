@@ -28,7 +28,7 @@ export function StrategyResearchProvenancePanel({
   strategyId: string;
   version: string;
 }) {
-  const query = trpc.research.strategyCandidate.getVersionProvenance.useQuery(
+  const query = trpc.strategyDomain.strategyCandidate.getVersionProvenance.useQuery(
     { strategyId, version },
     { enabled: strategyId.length > 0 && version.length > 0, refetchOnWindowFocus: false, retry: false },
   );

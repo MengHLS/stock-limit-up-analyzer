@@ -32,7 +32,7 @@ import {
   requireTradingPattern,
   type TradingPatternSpec,
 } from "../../../../server/research/patternLibrary";
-import { createDefaultResearchModuleRegistry } from "../../../../server/researchEngine/planner/moduleRegistry";
+import { createDefaultResearchModuleRegistry } from "../../../../server/research/patternLibrary/moduleRegistry";
 import {
   PULLBACK_FEATURE_IDS,
   registeredStrategyRecipeIds,

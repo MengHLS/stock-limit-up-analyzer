@@ -30,8 +30,8 @@
  * 一句话：Candidate 是唯一中间输入；Definition 只能由本文件生成。
  */
 
-import { assertConditionSet } from "../../researchCore";
-import type { ResearchStrategyCandidate } from "../../researchCore";
+import { assertConditionSet } from "../conditionSet";
+import type { ResearchStrategyCandidate } from "../vocabulary";
 import {
   STRATEGY_DEFINITION_SCHEMA_VERSION,
   STRATEGY_COST_MODELS,

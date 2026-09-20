@@ -51,7 +51,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
-import { createTRPCReact } from "@trpc/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import {
   CartesianGrid,
@@ -66,12 +65,16 @@ import type { AppRouter } from "../../../server/routers";
 import type { ReviewRouter } from "../../../server/reviewRouter";
 
 // ---------------------------------------------------------------------------
-// 类型：review 端点尚未合并进 appRouter，先用类型断言构造 review 客户端；
-// 协调者合并后改回 `trpc.review.*`（预期内的临时类型隔离）。
+// 🔴 FRONTEND-FINAL-001（冒烟实测发现的同类真缺陷）
+//
+// 原写法：类型断言 `trpc as unknown as ReturnType<typeof createTRPCReact<ReviewRouter>>`
+// —— 当时认为 `review` 尚未并入 `appRouter`。
+// 但端点**早已合并**（`server/routers.ts:332` `review: reviewRouter`），断言因此变成错误映射：
+// `review.journal.reconcile` 的请求路径会退化成裸 `journal.reconcile` ⇒ 服务端 404。
+// 修法：直接用真客户端 `trpc.review`。
 // ---------------------------------------------------------------------------
 
-type ReviewClient = ReturnType<typeof createTRPCReact<ReviewRouter>>;
-const review = trpc as unknown as ReviewClient;
+const review = trpc.review;
 
 type ReconcileOutput = inferRouterOutputs<ReviewRouter>["journal"]["reconcile"];
 type DisciplineOutput = inferRouterOutputs<ReviewRouter>["discipline"]["run"];

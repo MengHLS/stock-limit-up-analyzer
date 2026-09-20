@@ -12,3 +12,6 @@ export { ErrorState, type DiagnosticError } from "./ErrorState";
 export { TechnicalDetails } from "./TechnicalDetails";
 export { SectionCard } from "./SectionCard";
 export { DataTable } from "./DataTable";
+export { PageHeader, type BreadcrumbItem, type PageHeaderProps } from "./PageHeader";
+export { ConfirmDialog } from "./ConfirmDialog";
+export { JsonBlock } from "./JsonBlock";

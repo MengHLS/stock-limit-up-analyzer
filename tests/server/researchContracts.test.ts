@@ -25,7 +25,7 @@ import {
 import {
   STRATEGY_LIFECYCLE_STATUSES,
   createStrategyLifecycleRecord,
-} from "../../server/research";
+} from "../../server/research/lifecycle";
 
 /** 最小 ctx（publicProcedure 不需要 user）。 */
 const ctx = { req: {} as never, res: {} as never, user: null };
@@ -45,22 +45,22 @@ describe("FE-0 · appRouter 注册（R6 回归锁）", () => {
   it("historicalState / researchDataset / research 三个 router 均已暴露", () => {
     expect(appRouter).toHaveProperty("historicalState");
     expect(appRouter).toHaveProperty("researchDataset");
-    expect(appRouter).toHaveProperty("research");
+    expect(appRouter).toHaveProperty("strategyDomain");
   });
 
-  it("research 下含 strategy 与 lifecycle 子路由", () => {
-    expect((appRouter as unknown as Record<string, unknown>).research).toBeDefined();
+  it("strategyDomain 下含 strategy 与 lifecycle 子路由", () => {
+    expect((appRouter as unknown as Record<string, unknown>).strategyDomain).toBeDefined();
     const researchShape = (appRouter as any)._def.procedures;
-    expect(Object.keys(researchShape)).toContain("research.strategy.validate");
-    expect(Object.keys(researchShape)).toContain("research.lifecycle.describe");
+    expect(Object.keys(researchShape)).toContain("strategyDomain.strategy.validate");
+    expect(Object.keys(researchShape)).toContain("strategyDomain.lifecycle.describe");
     expect(Object.keys(researchShape)).toContain("historicalState.asOf");
     expect(Object.keys(researchShape)).toContain("researchDataset.build");
   });
 
-  it("research.strategy 下含 STEP STRATEGY-002 CRUD 端点（注册守卫）", () => {
+  it("strategyDomain.strategy 下含 STEP STRATEGY-002 CRUD 端点（注册守卫）", () => {
     const researchShape = (appRouter as any)._def.procedures;
     for (const proc of ["create", "save", "load", "list", "delete", "createVersion", "loadVersion", "listVersions"]) {
-      expect(Object.keys(researchShape)).toContain(`research.strategy.${proc}`);
+      expect(Object.keys(researchShape)).toContain(`strategyDomain.strategy.${proc}`);
     }
   });
 });
@@ -93,26 +93,26 @@ describe("FE-0 · 入参 schema 校验", () => {
 });
 
 describe("FE-0 · 纯函数端点（经 tRPC caller）", () => {
-  it("research.strategy.validate：非法本体返回 valid=false 且不抛异常", async () => {
-    const result = await caller.research.strategy.validate({ document: { recordKind: "WRONG" } });
+  it("strategyDomain.strategy.validate：非法本体返回 valid=false 且不抛异常", async () => {
+    const result = await caller.strategyDomain.strategy.validate({ document: { recordKind: "WRONG" } });
     expect(result.valid).toBe(false);
     expect(result.issues.length).toBeGreaterThan(0);
   });
 
-  it("research.strategy.bump：semver 推进语义正确", async () => {
-    expect(await caller.research.strategy.bump({ version: "1.2.3", bump: "patch" })).toEqual({ version: "1.2.4" });
-    expect(await caller.research.strategy.bump({ version: "1.2.3", bump: "minor" })).toEqual({ version: "1.3.0" });
-    expect(await caller.research.strategy.bump({ version: "1.2.3", bump: "major" })).toEqual({ version: "2.0.0" });
+  it("strategyDomain.strategy.bump：semver 推进语义正确", async () => {
+    expect(await caller.strategyDomain.strategy.bump({ version: "1.2.3", bump: "patch" })).toEqual({ version: "1.2.4" });
+    expect(await caller.strategyDomain.strategy.bump({ version: "1.2.3", bump: "minor" })).toEqual({ version: "1.3.0" });
+    expect(await caller.strategyDomain.strategy.bump({ version: "1.2.3", bump: "major" })).toEqual({ version: "2.0.0" });
   });
 
-  it("research.lifecycle.describe：返回后端权威 8 态与迁移表", async () => {
-    const described = await caller.research.lifecycle.describe();
+  it("strategyDomain.lifecycle.describe：返回后端权威 8 态与迁移表", async () => {
+    const described = await caller.strategyDomain.lifecycle.describe();
     expect(described.statuses).toEqual([...STRATEGY_LIFECYCLE_STATUSES]);
     expect(described.statuses).toHaveLength(8);
     expect(described.transitions).toBeDefined();
   });
 
-  it("research.lifecycle.transition：合法相邻迁移返回新记录（append-only，不改原记录）", async () => {
+  it("strategyDomain.lifecycle.transition：合法相邻迁移返回新记录（append-only，不改原记录）", async () => {
     const record = createStrategyLifecycleRecord({
       strategyId: "STRAT-0001",
       strategyVersion: "1.0.0",
@@ -121,7 +121,7 @@ describe("FE-0 · 纯函数端点（经 tRPC caller）", () => {
       reason: "FE-0 契约单测建壳",
     });
 
-    const next = await caller.research.lifecycle.transition({
+    const next = await caller.strategyDomain.lifecycle.transition({
       record: record as unknown as Record<string, unknown>,
       input: { to: "Research", timestamp: "2026-09-07T01:00:00.000Z", reason: "进入研究态" },
     });
@@ -132,7 +132,7 @@ describe("FE-0 · 纯函数端点（经 tRPC caller）", () => {
     expect(record.status).toBe("Draft");
   });
 
-  it("research.lifecycle.transition：跳级迁移被拒绝（不静默成功）", async () => {
+  it("strategyDomain.lifecycle.transition：跳级迁移被拒绝（不静默成功）", async () => {
     const record = createStrategyLifecycleRecord({
       strategyId: "STRAT-0002",
       strategyVersion: "1.0.0",
@@ -142,7 +142,7 @@ describe("FE-0 · 纯函数端点（经 tRPC caller）", () => {
     });
 
     await expect(
-      caller.research.lifecycle.transition({
+      caller.strategyDomain.lifecycle.transition({
         record: record as unknown as Record<string, unknown>,
         input: { to: "Production", timestamp: "2026-09-07T01:00:00.000Z", reason: "试图跳级" },
       }),

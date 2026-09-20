@@ -44,7 +44,7 @@ export function CandidateLifecycleActions({
   const [open, setOpen] = useState(false);
   const [target, setTarget] = useState<CandidateTransitionTarget | null>(null);
   const utils = trpc.useUtils();
-  const transition = trpc.research.strategyCandidate.transition.useMutation();
+  const transition = trpc.strategyDomain.strategyCandidate.transition.useMutation();
 
   async function handleSubmit() {
     if (target === null || transition.isPending) return;
@@ -55,11 +55,9 @@ export function CandidateLifecycleActions({
       });
       setOpen(false);
       setTarget(null);
-      await Promise.all([
-        utils.research.strategyCandidate.get.invalidate({ candidateId }),
-        utils.researchEngine.listCandidates.invalidate(),
-        utils.researchEngine.getExperiment.invalidate(),
-      ]);
+      // RESEARCH-EXPERIMENT-003：旧 Research 端点（`researchEngine.*`）已删除，
+      // 相应失效调用一并移除（候选详情是唯一消费者，读的就是 `strategyCandidate.get`）。
+      await utils.strategyDomain.strategyCandidate.get.invalidate({ candidateId });
     } catch (e) {
       const diagnostic = candidateErrorDiagnostic(e, "TRANSITION");
       toast.error(diagnostic.title, { description: diagnostic.explanation });

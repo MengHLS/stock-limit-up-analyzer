@@ -20,8 +20,8 @@
 import "dotenv/config";
 import mysql from "mysql2/promise";
 import { readFileSync } from "node:fs";
-import { createDbResearchRepositories } from "../server/researchCore/repository/db";
-import type { ResearchRepositories } from "../server/researchCore/repository/contract";
+import { createDbResearchRepositories } from "../server/research/candidateRepository";
+import type { ResearchRepositories } from "../server/research/candidateRepository";
 import { RegistryDatasetVersionReadPort } from "../server/research/strategyCandidate/datasetVersionPort";
 import {
   STRATEGY_CANDIDATE_ERROR,

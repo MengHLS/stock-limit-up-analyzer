@@ -83,7 +83,11 @@ import {
   type ParameterSearchDeclaredParameter,
   type ParameterSearchSpaceSummary,
 } from "./searchSpace";
-import { buildParameterSearchResult, isMetricsFullyUnavailable } from "./searchResult";
+import {
+  buildParameterSearchResult,
+  compareRequestedWithResolved,
+  isMetricsFullyUnavailable,
+} from "./searchResult";
 import {
   assertSearchRunTransition,
   computeRunProgress,
@@ -539,13 +543,28 @@ export function toResultView(row: ParameterSearchResultRow): ParameterSearchResu
       annualizationBasis = null;
     }
   }
+  // FRONTEND-FINAL-001（P0-2）：从**既有**复现快照列回读「实际被消费的参数集」。
+  // 🔴 P0-2 上线之前写入的行不含该键 ⇒ 如实置 null（推断成「与请求一致」会是伪造）。
+  let resolvedParameterSet: ParameterSearchResultView["resolvedParameterSet"] = null;
+  if (typeof row.reproductionJson === "string" && row.reproductionJson !== "") {
+    try {
+      const snapshot = JSON.parse(row.reproductionJson) as { resolvedParameterSet?: unknown };
+      const candidate = snapshot.resolvedParameterSet;
+      if (candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)) {
+        resolvedParameterSet = candidate as ParameterSearchResultView["resolvedParameterSet"];
+      }
+    } catch {
+      resolvedParameterSet = null;
+    }
+  }
+  const parameters = parseJsonObject(row.parametersJson);
   return {
     recordKind: "PARAMETER_SEARCH_RESULT",
     recordVersion: 1,
     searchRunId: row.searchRunId,
     combinationIndex: row.combinationIndex,
     parameterHash: row.parameterHash,
-    parameters: parseJsonObject(row.parametersJson),
+    parameters,
     status: row.status === "SUCCEEDED" ? "SUCCEEDED" : "FAILED",
     error: row.error,
     backtestFingerprint: row.backtestFingerprint,
@@ -564,6 +583,8 @@ export function toResultView(row: ParameterSearchResultRow): ParameterSearchResu
     metricsSource: row.metricsSource === "canonical" ? "canonical" : "evaluators",
     annualizationBasis,
     evaluationConfigFingerprint: null,
+    resolvedParameterSet,
+    parameterResolution: compareRequestedWithResolved(parameters, resolvedParameterSet),
     createdAt: toIsoString(row.createdAt),
   };
 }
@@ -790,6 +811,9 @@ export async function executeParameterSearchRun(
       evaluationRunId: sample.evaluationRunId,
       backtestFingerprint: sample.backtestFingerprint,
       error: sample.outcome.status === "failed" ? sample.outcome.error : null,
+      // FRONTEND-FINAL-001（P0-2）：评估端口已算出的「实际被消费参数集」原样透出。
+      // 失败路径为 null ⇒ 对照状态记 UNAVAILABLE（**不重跑策略去反推**）。
+      resolvedParameterSet: sample.resolvedParameterSet,
     });
 
     await upsertParameterSearchResult({
@@ -819,6 +843,11 @@ export async function executeParameterSearchRun(
         parameterHash,
         executionPolicyVersion: runRow.executionPolicyVersion,
         evaluationConfigFingerprint,
+        // FRONTEND-FINAL-001（P0-2）：把「实际被消费的参数集」并入**既有**复现快照列。
+        // 刻意复用 `reproductionJson` 而不新增列 —— 该列语义本就是「复现要素快照」，
+        // 且新增列需要 migration（本项目 `db:push` / `drizzle-kit generate` 均禁用）。
+        // 键名与 walk-forward / OOS 的 `resolvedParameterSetJson` 语义对齐（同一 canonical 名）。
+        resolvedParameterSet: result.resolvedParameterSet,
       }),
     });
 

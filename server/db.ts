@@ -66,9 +66,13 @@ import {
 import { TTLCache, stableHash } from './backtestCache';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
 import { parseStoredMarketYi } from './marketFactors';
-// 跨境链路瞬时错误的有界重试（只读安全；见 `server/researchEngine/readRetry.ts` 头注释）。
+// 跨境链路瞬时错误的有界重试（只读安全；实现见 `server/readRetry.ts` 头注释）。
 // 此前仅 researchEngine 用了它，龙头候选池等直连查询裸跑 ⇒ 一次 `read ECONNRESET` 直接冒到 UI。
-import { withReadRetry } from './researchEngine/readRetry';
+// 🔴 RESEARCH-EXPERIMENT-002：原路径是 `./researchEngine/readRetry` —— 那会让「整个库的入口」
+//    在**模块加载期**与旧 Research 目录（`server/researchEngine/**`）挂在一起
+//    （002 的 import 图可达性探针实测命中）。实现与领域无关，已搬到 `server/readRetry.ts`；
+//    旧路径保留为转出口，两者**同一份实现**（零行为变化）。
+import { withReadRetry } from './readRetry';
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
 import { PERF_DB_HOOK_ENABLED, installDbPerfHook } from './observability';
 import { runMonkeyBenchmark, runCostSensitivity } from './overfittingGuard';

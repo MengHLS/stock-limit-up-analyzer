@@ -38,6 +38,12 @@ import type { SimulationConfig } from "../research/simulator/types";
 import type { ClosedLoopWiringInputs } from "../research/closedLoopWiring/types";
 import { resolveStrategyRecipe, resolveStrategyRecipeById, DEFAULT_STRATEGY_RECIPE_ID, type StrategyRecipeRuntime } from "../research/recipeRegistry";
 import { compileConditionRecipe } from "../research/conditionSignal";
+// 9cc · PHASE-D（AR-14）—— Pattern 语义 → 策略侧的**消费点**（唯一 Expander 的执行侧出口）。
+import {
+  resolvePatternIdByRecipeId,
+  verifyStrategyConsumption,
+} from "../research/patternLibrary/strategyConsumption";
+import { getDefaultFeatureRegistry } from "../strategyCore/featureRegistry";
 // STRATEGY-ARCH-002 — Strategy Core 生产接线（决策引擎 + 运行留档）。
 import {
   createCoreDecisionSource,
@@ -759,6 +765,30 @@ export function assembleStrategySide(
       ? { signalDescription: recipeRuntime.signalDescription }
       : {}),
   };
+
+  /**
+   * 9cc · PHASE-D（AR-14）—— **Pattern 语义 → 策略侧的消费点**。
+   *
+   * 修复前的断链（9cc 审计实测）：`patternLibrary/strategyProjection.ts`（PHASE-B-001 交付）
+   * 全仓**只被它自己的单测引用** —— 执行侧从不读语义注册表 ⇒「Research 与 Strategy 用同一份
+   * `pat_*` semantic definition」只在**文件层面**成立，在**执行路径上不成立**。
+   *
+   * 本段把「语义声明里的执行侧投影」与**真实能力面**对表：
+   *   - `strategyProjection.featureId` 必须在 Core 特征注册表里真的登记过；
+   *   - `strategyProjection.thresholdParam` 必须在本文档声明的参数里真的存在。
+   *
+   * 🔴 三条纪律：
+   *   ① **不复制 Expander**：只消费 `listPatternSemantics()`（唯一 Expander 的产物）；
+   *   ② **不改任何计算**：特征值仍由 Core 注册表算，本段**不产出**任何执行用数值；
+   *   ③ **非致命**：结论并进既有的 `strategyDecisionEngineNote`（契约里已有该 string 字段，
+   *      零 schema 变更）；不一致时**点名到 semanticId**，绝不静默。
+   */
+  const semanticConsumption = verifyStrategyConsumption({
+    patternId: resolvePatternIdByRecipeId(recipeRuntime.recipeId),
+    isFeatureRegistered: (featureId) => getDefaultFeatureRegistry().has(featureId),
+    declaredParameterCodes: new Set(document.parameters.parameters.map((parameter) => parameter.name)),
+  });
+  strategyDecisionEngineNote = `${strategyDecisionEngineNote} / ${semanticConsumption.note}`;
 
   // BACKTEST-002（B-01）— 执行政策（含**版本号**）在此固定下来：
   // 它既是执行输入，也是「这条历史结果按哪套政策跑的」的可复现坐标。

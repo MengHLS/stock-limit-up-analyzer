@@ -17,6 +17,7 @@
  */
 
 import { useState } from "react";
+import { Link } from "wouter";
 import {
   Activity,
   AlertTriangle,
@@ -35,21 +36,29 @@ import {
   MetricCard,
   EmptyState,
   TechnicalDetails,
+  PageHeader,
 } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
-import { createTRPCReact } from "@trpc/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { WalkForwardRouter } from "../../../server/walkForwardRouter";
 
 // ---------------------------------------------------------------------------
-// 类型：walkForward 端点尚未合并进 appRouter，先用类型断言构造客户端；
-// 协调者合并后改回 `trpc.walkForward.*`（预期内的临时类型隔离，同 FE-6/9）。
+// 🔴 FRONTEND-FINAL-001（冒烟实测发现的真缺陷）
+//
+// 原写法：类型断言 `trpc as unknown as ReturnType<typeof createTRPCReact<WalkForwardRouter>>`
+// —— 当时认为 `walkForward` 尚未并入 `appRouter`。
+//
+// 但**端点早已合并**（`server/routers.ts:330` `walkForward: walkForwardRouter`），断言因此变成
+// **错误映射**：`walkForward.describe` 发出的请求路径是**裸 `describe`**，服务端恒返回
+// `No procedure found on path "describe"`（无头浏览器实测）⇒ 本页「端点就绪门」永远显示
+// 「不可达」，且运行入参静默落到前端写死的兜底值（即 P1-8 要废止的那种行为）。
+//
+// 修法：直接用真客户端 `trpc.walkForward`（类型同源、路径正确）。
 // ---------------------------------------------------------------------------
 
-type WalkForwardClient = ReturnType<typeof createTRPCReact<WalkForwardRouter>>;
-const walkForward = trpc as unknown as WalkForwardClient;
+const walkForward = trpc.walkForward;
 
 type DescribeOutput = inferRouterOutputs<WalkForwardRouter>["describe"];
 type RunOutput = inferRouterOutputs<WalkForwardRouter>["run"];
@@ -58,25 +67,13 @@ type OverfitRun = inferRouterOutputs<WalkForwardRouter>["overfit"];
 type WalkForwardWindow = RunOutput["run"]["windows"][number];
 
 // ---------------------------------------------------------------------------
-// 本地回退默认值（与 server/walkForwardRouter.ts 预览常量一致；describe 未返回时使用）
+// FRONTEND-FINAL-001（P1-8）— 前端写死兜底**已废止**
+//
+// 改造前：`describe` 不可达时，本页用两份写死常量（参数空间 / 窗口配置）作为入参，**直接**
+// 调用 `walkForward.run` 发起一次真实量化运行 —— 用户无从知晓实际跑的是谁定义的参数。
+// 规格 §十三 明确禁止：「正式产品禁止在用户不知道的情况下使用写死的真实运行参数」，
+// 且优先方案是「失败即阻止」。⇒ 常量删除，改为 `describe` 不可达时**禁止发起运行**。
 // ---------------------------------------------------------------------------
-
-const FALLBACK_PARAMETER_SPACE: DescribeOutput["defaultParameterSpace"] = {
-  parameters: [
-    { type: "integer", name: "maxHoldingDays", min: 3, max: 5, step: 2 },
-    { type: "number", name: "stopLossPercent", min: 5, max: 8, step: 3 },
-  ],
-};
-
-const FALLBACK_SPLIT_CONFIG: DescribeOutput["defaultSplitConfig"] = {
-  mode: "rolling",
-  trainWindow: 20,
-  testWindow: 5,
-  step: 5,
-  gap: 0,
-  embargo: 0,
-  maxWindows: 6,
-};
 
 // ---------------------------------------------------------------------------
 // 数值格式化与着色（中国 A 股约定：涨红跌绿）
@@ -161,14 +158,24 @@ export default function WalkForwardAnalysis() {
   const [flowError, setFlowError] = useState<string | null>(null);
 
   const describe = describeQuery.data ?? null;
-  const parameterSpace = describe?.defaultParameterSpace ?? FALLBACK_PARAMETER_SPACE;
-  const splitConfig = describe?.defaultSplitConfig ?? FALLBACK_SPLIT_CONFIG;
+  // P1-8：`describe` 不可达 ⇒ 参数空间/窗口配置**没有**合法来源 ⇒ 一律为 null 并禁止发起运行。
+  const parameterSpace = describe?.defaultParameterSpace ?? null;
+  const splitConfig = describe?.defaultSplitConfig ?? null;
+  const canRun = describe !== null && parameterSpace !== null && splitConfig !== null;
 
   const loading =
     runMutation.isPending || oosMutation.isPending || overfitMutation.isPending;
 
   /** 全链路：WFO → OOS 隔离 → 过拟合检测（一次按钮触发，逐段存结果）。 */
   const runFullFlow = async () => {
+    // P1-8：失败即阻止 —— 绝不用前端默认值去跑一次真实量化运行。
+    if (!canRun || parameterSpace === null || splitConfig === null) {
+      setFlowError(
+        "端点 walkForward.describe 不可达：无法取得合法的参数空间与窗口配置。"
+        + "已禁止发起运行（不使用前端默认值冒充业务参数）。请先修复端点后重试。",
+      );
+      return;
+    }
     setFlowError(null);
     setRunResult(null);
     setOosResult(null);
@@ -238,15 +245,31 @@ export default function WalkForwardAnalysis() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="flex items-center gap-2 text-xl font-semibold">
-          <FlaskConical className="h-5 w-5" />
-          Walk-Forward / OOS 过拟合分析
-        </h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          FE-7 · WFO 滚动编排（Train→Optimize→Freeze→Test）+ OOS 隔离纪律 + PBO /
-          参数敏感性过拟合判定。数值与判定均来自后端 C-19.1/C-19.2/C-20.1，本页不计算、不判定、不伪造。
-        </p>
+      <PageHeader
+        icon={FlaskConical}
+        title="Walk-Forward / OOS 过拟合分析"
+        description="FE-7 · WFO 滚动编排（Train→Optimize→Freeze→Test）+ OOS 隔离纪律 + PBO / 参数敏感性过拟合判定。数值与判定均来自后端 C-19.1/C-19.2/C-20.1，本页不计算、不判定、不伪造。"
+        breadcrumb={[{ label: "验证", href: "/validation" }, { label: "旧技术预览（不落库）" }]}
+      />
+
+      {/* FRONTEND-FINAL-001（P0-1）：本页**不再是正式 Walk-Forward 入口**。
+          审计确认：本页走的是 `walkForward.*`（内存态技术预览，**不落库**），
+          与正式的 `paramSearch.*WalkForwardRun`（落 `walk_forward_run` / `walk_forward_fold`）是
+          两套互不引用的实现。按规格「正式产品不得同时存在两个同名 Walk-Forward 入口」，
+          此处保留代码（旧书签不 404）但降级 + 显式指向正式入口。 */}
+      <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800">
+        <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          <span className="font-semibold">已降级为 Legacy 技术预览 · 结果不落库、不可追溯。</span>
+          {" "}
+          本页使用内存态端点（<span className="font-mono">walkForward.describe/run/oos/overfit</span>），
+          运行结果**不会**写入 `walk_forward_run` / `walk_forward_fold`，因此无法用于正式验收或 OOS 对比。
+          正式 Walk-Forward 请使用{" "}
+          <Link href="/validation/walk-forward" className="font-medium underline">
+            /validation/walk-forward
+          </Link>
+          （持久化编排 + Fold 级搜索/OOS + 聚合）。
+        </span>
       </div>
 
       {/* 技术预览口径（R7，顶部醒目提示） */}
@@ -326,29 +349,49 @@ export default function WalkForwardAnalysis() {
               用于服务端加载交易日历（index_daily）并划分 WFO 窗口。
             </p>
           </div>
-          {[
-            ["mode", String(splitConfig.mode)],
-            ["trainWindow", String(splitConfig.trainWindow)],
-            ["testWindow", String(splitConfig.testWindow)],
-            ["step", String(splitConfig.step)],
-            ["gap / embargo", `${splitConfig.gap ?? 0} / ${splitConfig.embargo ?? 0}`],
-            ["maxWindows", String(splitConfig.maxWindows)],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-md border bg-muted/20 px-3 py-2">
-              <p className="font-mono text-[11px] font-medium text-foreground">{label}</p>
-              <p className="mt-0.5 text-sm font-semibold tabular-nums">{value}</p>
+          {splitConfig === null || parameterSpace === null ? (
+            /* P1-8：describe 不可达 ⇒ 不展示任何「默认值」，也不允许运行。 */
+            <div className="flex items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-800">
+              <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                端点 <span className="font-mono">walkForward.describe</span> 不可达 ⇒
+                <span className="font-semibold">窗口配置与参数空间没有合法来源，已禁止发起运行</span>。
+                本页**不再**用前端写死的默认值冒充业务参数（FRONTEND-FINAL-001 P1-8）。
+                请在端点恢复后重试。
+              </span>
             </div>
-          ))}
-          <div className="rounded-md border bg-muted/20 px-3 py-2">
-            <p className="font-mono text-[11px] font-medium text-foreground">参数空间</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">
-              {parameterSpace.parameters.map((p) => p.name).join(" × ")}
-            </p>
-          </div>
+          ) : (
+            <>
+              {[
+                ["mode", String(splitConfig.mode)],
+                ["trainWindow", String(splitConfig.trainWindow)],
+                ["testWindow", String(splitConfig.testWindow)],
+                ["step", String(splitConfig.step)],
+                ["gap / embargo", `${splitConfig.gap ?? 0} / ${splitConfig.embargo ?? 0}`],
+                ["maxWindows", String(splitConfig.maxWindows)],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-md border bg-muted/20 px-3 py-2">
+                  <p className="font-mono text-[11px] font-medium text-foreground">{label}</p>
+                  <p className="mt-0.5 text-sm font-semibold tabular-nums">{value}</p>
+                </div>
+              ))}
+              <div className="rounded-md border bg-muted/20 px-3 py-2">
+                <p className="font-mono text-[11px] font-medium text-foreground">参数空间</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {parameterSpace.parameters.map((p) => p.name).join(" × ")}
+                </p>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={runFullFlow} disabled={loading || describeQuery.isLoading}>
+          <Button
+            type="button"
+            onClick={runFullFlow}
+            /* P1-8：describe 加载中**或不可达**都禁止运行（不再用前端默认值兜底）。 */
+            disabled={loading || describeQuery.isLoading || !canRun}
+          >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             {loading ? "运行中…" : "运行 Walk-Forward 全链路"}
           </Button>

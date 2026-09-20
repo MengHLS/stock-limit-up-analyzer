@@ -69,6 +69,13 @@ export const FIRST_LIMIT_PULLBACK_HOLD_SHRINK: TradingPatternSpec = {
         field: "low",
         aggregation: "MIN",
         windowDays: 2,
+        /**
+         * 🔴 AR-12 修复（9cc）：`definition` 写的是**归一化回撤比例**，因此必须显式声明
+         * 归一化。修复前这里没有该声明，Expander 只做 `MIN(low)` —— 取到的是**绝对价格**
+         * （恒为正）⇒「≤ 0 = 全程未跌破」恒为假（0 样本）、「> 0」恒为真（全样本）
+         * ⇒ 以 `pat_pullback_hold_depth_2d` 作条件的 Finding **永远产不出来**。
+         */
+        normalization: { numerator: "DIFFERENCE", referenceField: "open", divisorField: "open" },
         availableFromOffset: 2,
         intent: {
           question: "首板后 2 个交易日内不跌破首板开盘价的样本，后续收益是否优于全样本？",
@@ -92,6 +99,8 @@ export const FIRST_LIMIT_PULLBACK_HOLD_SHRINK: TradingPatternSpec = {
         field: "volume",
         aggregation: "MIN",
         windowDays: 2,
+        /** 🔴 AR-12 修复（9cc）：口径是**比率**（分母 = 首板日成交量），必须声明归一化。 */
+        normalization: { numerator: "DIRECT", divisorField: "volume" },
         availableFromOffset: 2,
         intent: {
           question: "缩量回踩的样本，后续收益是否优于放量回踩？",

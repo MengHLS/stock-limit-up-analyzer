@@ -77,7 +77,24 @@ async function indexExists(table, index) {
   return Number(rows[0].n) > 0;
 }
 
-/** 守卫判定：返回 true 表示**已经存在**（⇒ 跳过）。 */
+/**
+ * 列是否**已经可空**（`IS_NULLABLE = 'YES'`）。
+ *
+ * RESEARCH-EXPERIMENT-002 新增的 guard 种类，用于 `MODIFY COLUMN … NULL` 这类
+ * **放宽约束**的 DDL：重复执行的**效果**幂等，但 `--check` 需要能判定「已经放宽过了」，
+ * 否则该语句在 check 模式下会被当成「无 guard 语句」而总是执行。
+ */
+async function columnNullable(table, column) {
+  const [rows] = await conn.query(
+    "SELECT IS_NULLABLE AS n FROM information_schema.COLUMNS " +
+      "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+    [table, column],
+  );
+  if (rows.length === 0) throw new Error(`@guard nullable 的列不存在：${table}.${column}`);
+  return String(rows[0].n).toUpperCase() === "YES";
+}
+
+/** 守卫判定：返回 true 表示**已经满足**（⇒ 跳过）。 */
 async function guardSatisfied(kind, target) {
   if (kind === "table") return tableExists(target);
   const dot = target.indexOf(".");
@@ -86,6 +103,7 @@ async function guardSatisfied(kind, target) {
   const name = target.slice(dot + 1);
   if (kind === "column") return columnExists(table, name);
   if (kind === "index") return indexExists(table, name);
+  if (kind === "nullable") return columnNullable(table, name);
   throw new Error(`未知 @guard 种类：${kind}`);
 }
 

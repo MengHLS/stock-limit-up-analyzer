@@ -13,7 +13,7 @@
  *      这一层要是错了，引擎会把它当成不成立的条件，静默少算样本 —— 所以在此显式构造并单测。
  */
 
-import type { ResearchAnalysisType, ResearchConditionOperator, SegmentStatKind } from "../../../../server/researchCore";
+import type { ResearchAnalysisType, ResearchConditionOperator, SegmentStatKind } from "../../../../server/research/vocabulary";
 
 // ---------------------------------------------------------------------------
 // 分析类型（只列已实现的 6 类）

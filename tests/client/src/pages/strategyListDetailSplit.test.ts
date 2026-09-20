@@ -14,7 +14,7 @@
  *   2. 旧 `/strategy-editor` 仍可达（只做兼容改写），且**不存在第二个策略页面**；
  *   3. 导航指向列表页；
  *   4. 策略深链只有一个生成器，且指向详情路由；
- *   5. 详情页不承载「全库浏览」（不调 `research.strategy.list`）；
+ *   5. 详情页不承载「全库浏览」（不调 `strategyDomain.strategy.list`）；
  *   6. 用到的端点全部真实存在；
  *   7. 新建草稿不复用模板身份（否则会撞上库里既有策略）；
  *   8. 已移除的运行开关不再出现在文案里（否则用户会去找不存在的开关）。
@@ -68,18 +68,18 @@ describe("策略：列表页 / 详情页分家", () => {
     expect(p).not.toContain("strategy-editor");
   });
 
-  it("5) 详情页不承载「全库浏览」：不调 research.strategy.list", () => {
+  it("5) 详情页不承载「全库浏览」：不调 strategyDomain.strategy.list", () => {
     const detail = read("pages/StrategyDetail.tsx");
-    expect(detail).not.toMatch(/trpc\s*\.\s*research\s*\.\s*strategy\s*\.\s*list\b/);
+    expect(detail).not.toMatch(/trpc\s*\.\s*strategyDomain\s*\.\s*strategy\s*\.\s*list\b/);
     // 且筛选版本列表（listVersions）是允许的 —— 证明上一条不是「整个 strategy.* 都禁」
-    expect(detail).toMatch(/trpc\s*\.\s*research\s*\.\s*strategy\s*\.\s*listVersions\b/);
+    expect(detail).toMatch(/trpc\s*\.\s*strategyDomain\s*\.\s*strategy\s*\.\s*listVersions\b/);
   });
 
   it("6) 列表页走真实只读端点，且该端点确实挂在真实 appRouter 上", () => {
     expect(read("pages/StrategyList.tsx")).toMatch(
-      /trpc\s*\.\s*research\s*\.\s*strategy\s*\.\s*list\b/,
+      /trpc\s*\.\s*strategyDomain\s*\.\s*strategy\s*\.\s*list\b/,
     );
-    expect(PROCEDURES).toContain("research.strategy.list");
+    expect(PROCEDURES).toContain("strategyDomain.strategy.list");
   });
 
   it("7) 两个页面用到的策略端点全部真实存在", () => {
@@ -92,7 +92,7 @@ describe("策略：列表页 / 详情页分家", () => {
       "save",
       "createVersion",
     ];
-    expect(used.filter(x => !PROCEDURES.includes(`research.strategy.${x}`))).toEqual([]);
+    expect(used.filter(x => !PROCEDURES.includes(`strategyDomain.strategy.${x}`))).toEqual([]);
   });
 
   it("8) 新建草稿不复用模板身份（清空 strategyId，避免变成给既有策略加版本）", () => {

@@ -419,3 +419,20 @@
 - **GLOBAL AUDIT REQUIRED**：**#1 + #4 + #7**（本任务即为响应）
 
 ---
+
+## 2026-09-20 · 9cc（Parameter Consumption + Semantic + Provenance + Strategy Projection 四断点闭环）
+
+- **Task**：用户一次性指令（编号 `9cc`）要求收敛四个断点并做真实 DB/E2E。**先审计、再最小修复、再验证**，不拆任务、不跳阶段（任务书 §3）。
+- **Changed Domains**：**无新增 Domain**。改动的域：`Research`（Pattern 语义投影 + 结论写入）、`Strategy`（语义声明的**执行侧消费点**，只读对表）、`runWorkbenchAssembly`（装配期多一次校验 + note）。`Parameter Search` / `Backtest` / `Dataset` **零代码改动**（Phase A 审计结论 = 链上无断点）。
+- **Changed Files**：生产 6 个 —— `shared/patternSemantics.ts`（+归一化声明/校验/透传）、`server/researchEngine/semanticProjection.ts`（+归一化计算 + `needsEventBar`）、`server/research/patternLibrary/patterns/firstLimitPullbackHoldShrink.ts`（两条语义补 `normalization`）、`server/researchEngine/conclusion.ts`（主分支补齐 §15 五件套）、`server/research/patternLibrary/strategyConsumption.ts`（**新增**，执行侧消费点）、`server/runWorkbenchAssembly/assemble.ts`（+2 import + 装配期调用，结论并进既有 note）。测试 4 个（新增 2 / 改 2）。证据 3 个新探针 + 1 个旧探针按修复翻转哨兵。
+- **Changed Contracts**：**1 处，且为纯增量** —— `shared/patternSemantics.ts` 新增 `SemanticNormalization`、`SEMANTIC_BASELINE_FIELDS`、`SemanticIssue` 新码 `INVALID_NORMALIZATION`，并给 `PatternSemanticDeclaration` / `ExpandedSemantic` 加**可选**字段 `normalization`。**既有消费者零破坏**（可选字段；`tsc --noEmit` = 0 错；全量测试零新增失败）。`ResearchConclusionDraft` 的**类型未改**（§15 五件套本就已声明，本任务只是把主分支漏写的地方补上）。其余契约零改动。
+- **Changed DB**：**零**（0 DDL / 0 DML / 0 migration / 0 新表 / 0 新列）。E2E 自建行已按 id 精确清理（`purgedAfter={experiments:1, strategies:1}`、`finalExperimentCount=7`）。历史数据一律未改（`SELECT-first`）。
+- **Changed Execution Path**：装配期新增一次**只读校验**（`verifyStrategyConsumption`：把语义声明的执行侧投影与 Core 特征注册表 + 本文档参数对表）⇒ 结论写进既有 `strategyDecisionEngineNote`（**非致命**、零 schema 变更）。**不改任何决策/撮合计算**，不新增特征值来源。参数消费链本身零改动。
+- **Potential Baseline Drift**：
+  - `BD-08`（**本任务新增，需裁定**）：本任务改动了 `shared/patternSemantics.ts` —— 该文件正是 v2.0.0 认定「核心 Contract 变化」（`GLOBAL AUDIT REQUIRED` #7）的受理对象之一。**本任务的判断**：改动是**纯增量可选字段 + 新增错误码**，无破坏性、无数据流新字段贯穿（不命中 #4，无新 Domain 不命中 #1，DB 零变化）⇒ **按任务书 §21 只做增量记录，未升基线、未追加 `SYSTEM-BASELINE.md` 增量章节**。若基线的判定口径认为「任何核心契约文件被改即需全量重审」，请在下一条指令中指定，本任务未擅自扩大范围。
+  - `BD-09`（**本任务新增**）：AR-12 改变了 `pat_*` 变量的**取值语义**（同名变量：旧 Run = 最低价绝对值、新 Run = 归一化回撤比例）⇒ 已落库的旧统计与修复后的新统计**不可跨期直接比较**。历史行保留（修复不改变历史留档），风险登记在报告 §16 R3。
+- **Regression Result**：`tsc --noEmit` = **exit 0**；全量 `npx vitest run` = **7 failed files / 16 failed tests —— 失败文件集合与既有基线逐个相同 ⇒ 零新增**（283 passed / 290）；`node scripts/checkEolDrift.mjs --strict` = **0 漂移**；真实 DB E2E = **24/24 PASS**（`pass=true`、`fatal=null`）。
+- **Baseline Impact**：**保持 `v2.0.0`**。依据：无新 Domain、DB 零变化、无破坏性契约变更、无核心数据流新字段 ⇒ **不触发 `GLOBAL AUDIT REQUIRED`**。按任务书 §21「否则只做增量记录」处理。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（判定见 `BD-08`，留待人工裁定）。
+
+---

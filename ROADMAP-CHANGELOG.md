@@ -2707,3 +2707,82 @@ P1（9 条）/ P2（6 条）一条未动；P0-2/P0-3 的**彻底解**（翻译�
 - **验收**：`tsc --noEmit` 0 错；新增 24 例全过；全量 vitest 失败集合与基线逐个相同；`checkEolDrift --strict` 0 漂移；真实 DB E2E 13/13 PASS。
 - **边界**：零 migration / 零新表 / 零新列 / 零新依赖；未重写任何既有引擎；未建第二套 SoT；自建自清（`purgedAfter` 已核对）。
 - **遗留（已入 §44.5 `9cb` 条目）**：⒜ `pat_*` 无区分度（PHASE-B 声明侧缺陷，需架构变更才能修）；⒝ 结论不写 `findingIds`（Finding/Conclusion 域）；⒞ 幂等仍按「同结论+同名」；⒟ `researchPlannerRouter` 的 patternId 路径仍写空 filterRule；⒠ 未做带 derivation 的真实候选真机 DOM 验收。
+
+## 更新记录（append-only）· 2026-09-20 9cc 完成
+
+- **取号依据**：`ROADMAP.md` §44.5 台账行原文「编号已用至 **`9cb`** ⇒ **下一个未占用 = `9cc`**」（**禁「末条 +1」**）。取号前已全仓 `grep -o '9[a-z]\{1,2\}\.' ROADMAP.md | sort -u` 实查（`9cc` 零实占）；随后**文件头铁律行（L4）与 §44.5 台账行两处同步**：「已用至 `9cc` ⇒ 下一个未占用 = `9cd`」。
+- **本任务一句话**：把「参数搜索 → 策略 → 回测」与「研究 → 结论 → 候选 → 策略」两条主链一次性收敛，四个断点（Parameter Consumption / AR-12 / AR-13 / AR-14）全部给出真库证据。
+- **🔴 本轮最有价值的认知（可复用）**：⒜ **「链上无断点」不等于「已被证明」** —— 参数消费链本身是通的，但仓库里 **11/11 个策略版本**的规则图都不引用参数 ⇒ 拿现成策略跑参数搜索只会得到「4 组指标逐位相同」的**假证据**；**做参数类 E2E 之前必须先跑「选材探针」**（证明存在能引用参数的策略版本），否则整个验证是空转。⒝ **参数值域要取声明全域的端点**：首轮用 `{0.05, 0.25}`（远窄于 `max_drawdown` 声明域 `[0, 0.3]`）时，两个组合的成交与收益**逐位相同** —— 参数确实被消费（指纹不同）但阈值不咬数据 ⇒ 判据失去分辨力；同时**越界会以 `PARAMETER_OUT_OF_RANGE` 让该组合直接失败**。⒞ **可选字段是「声明了却无效」的温床**：`ResearchConclusionDraft` 的 §15 五件套全是可选 ⇒ 主判定分支漏写全部五个，而 `tsc --noEmit` **0 错**、既有单测全绿；**只有查真库才看得见**。⒟ **旧断言会把缺陷固化成契约**：`patternSemantics.test.ts` 曾断言 `expect(value).toBe(10.0)`（= `MIN(low)` 的绝对值），修 AR-12 时它先变红 —— 修缺陷时**必须同时修正写错的断言**，否则下一个人会以为改动是回归。
+- **真实读数**：AR-12 修复前后同一互补条件对：`pat_pullback_hold_depth_2d <= 0` ⇒ CONDITION **0 → 1436**、`> 0` ⇒ **1718 → 282**（ALL 恒 1718）；AR-13：三个新结论 `findingIdsJson` 由 `[]` ⇒ `[450001]`/`[450002]`/`[450003]`（与本 Run 真实 Finding 逐 id 相等）；闭环一末跳 `cand-1110001@1.0.0` 的规则图引用 `max_volume_ratio`；闭环二 2 组合（`max_volume_ratio` 0.05 / 1）⇒ `tradeCount` **0 → 1**、`totalReturnPct` **0 → −0.6814%**、指纹 `dc5627dce6c7…` ≠ `0f02b2f64d0b…`；§4b 直接复核评估端口 ⇒ 实际 `parameterSet` 与组合**逐键相等**、复核指纹与落库**逐位相同**、实际值**压过文档默认值 0.3**。
+- **验收**：`tsc --noEmit` = **0 错**；新增单测 **17（AR-12）/ 3（AR-13）/ 7（AR-14）** + 改写 **+5** 例；全量 `vitest run` = **7 失败文件 / 16 用例 —— 失败文件集合与基线逐个相同（零新增）**（283 passed / 290）；`checkEolDrift --strict` = **0 漂移**；真实 DB E2E **24/24 PASS**；AR-13 断言做过**负例自测**（临时移除写入 ⇒ 3 条变红 / exit 1，随后字节级复原）。
+- **边界**：**零 migration / 零新表 / 零新列 / 零新依赖 / 零新端点**；`client/**` 与 `scripts/**` 零改动；历史数据一律未改（`SELECT-first`，12 条 NULL / 3 条 `[]` 的历史结论按「修复不改变历史留档」保留）；E2E 自建自清（`purgedAfter={experiments:1, strategies:1}`、`finalExperimentCount=7`）。
+- **遗留（已入 `docs/research/9cc-implementation.md` §16）**：⒜ 历史结论的列上证据链需**重跑**才能拿到（不重写历史行）；⒝ 既有策略版本全部不引用参数 ⇒ 对其做参数搜索会被刻意护栏拒绝，需走「派生候选 → promote」；⒝ AR-12 让同名 `pat_*` 变量跨修复时间点**语义不同**（旧 Run 是绝对值、新 Run 是归一化比例）⇒ 跨期比较前先确认 Run 时间；⒞ `projectSemanticsToStrategy` 的 PIT 闸门仍只在策略投影自己的调用点（装配期拿不到「真实决策日」，本任务只对表「特征 / 阈值参数」）。
+
+
+### 2026-09-20 · `9cd` FRONTEND-FINAL-001（前端完整闭环实现）
+
+- **取号**：`9cd`（台账「下一个未占用」；本条落地后两处台账同步为「已用至 `9cd` ⇒ 下一个未占用 = `9ce`」）。
+- **范围**：`client/**` 为主（新增 8 个页面 + 4 个公共组件 + 1 个链接工具 + 1 个引用面卡片 + 1 个转正资格卡片）；`shared/**` + `server/**` 仅 4 类**只读投影/过滤放宽**（`parameterSearchContracts`、`strategyEvaluation/backtestBridge`、`parameterSearch/{executor,searchResult}`、`strategyPersistence/{contract,service}` + `researchCore/repository/{contract,db,inMemory}`、`researchEngineRouter`）。
+- **真实留档**：`oos_validation_run=2 / oos_validation_result=2 / walk_forward_run=2 / walk_forward_fold=4`（此前四张表**全 0**），来源 `_e2e_walk_forward.mts`（`WF001_MODE=full WF001_KEEP=1`，17/17 PASS / 92 s）。
+- **对照读数**：新搜索 Run 两组合 `tradeCount 0 → 16`；旧 Run（`PSRUN-20260919-15d3afc8`）4 组合指标逐位相同 —— 「假证据」问题在具备**被引用的 TUNABLE** 后不再复现。
+- **修掉的真缺陷**：三处过期类型断言导致 `describe` / `journal.reconcile` 请求路径退化成裸路径（恒 404），使 FE-6 技术预览与 FE-7 端点门长期失效。
+- **未做**：历史结论 §15 五件套**未回填**（按「不修改历史 provenance/留档」保留）；未引入任何新依赖、零 migration、零新表、零新 tRPC 端点。
+
+
+---
+
+## §44 归档（2026-09-20 由 RESEARCH-EXPERIMENT-001 覆盖，原样搬运）
+
+> 上轮实查：**2026-09-19 22:25 GMT+8 · WALK-FORWARD-001（Walk-Forward 验证完整闭环）（用户规格）**（编号 `9bw`；`tsc` 0 error、新增单测 **84/84**（域 48 + 静态边界 36）、全量 vitest 失败文件集合 **8→8 零新增**、**真实 E2E `create` 7/7 + `run` 10/10 + 跨进程 `rerun` 11/11**、前端可达性 DOM 探针 **`pass=true` 0 page error**、`npm run build` exit 0、migration 幂等、`checkEolDrift` 0 漂移）。**新增第三条执行边**：`server/research/walkForward/**`（11 文件 + 契约 + 前端面板 + 两表 + 6 端点）—— 三方向**镜像守卫**：`searchRobustness/**` = import **黑名单 + 零重跑**；`oosValidation/**` = **必含清单 + 必须重跑**；本域 = **黑名单 +「执行只能经由注入钩子」**（`WalkForwardExecutionHooks{readCurrentContext, runFoldSearch, runFoldOos}`，由组合根 `paramSearchRouter` 用**既有** PS / OOS application service 实现）⇒ **零复制策略 IO、零 HTTP 自调用**，规格 §15 明禁的 `WalkForward → HTTP → OOS API → HTTP → Backtest` **不成立**；三套守卫**互不可搬移**。**交付**：窗口契约（`ROLLING` / `EXPANDING`；`isWindowDays`/`oosWindowDays`/`stepDays` **单位为交易日个数**；硬约束 `isEnd < oosStart` 且 `oosStart = isEnd + 1 trading day`；切窗**复用**既有 `generateWalkForwardSplits`，不重写算法）· Fold 六态生命周期（`WINDOW_CREATED→SEARCH_RUNNING→SEARCH_COMPLETED→CANDIDATE_FROZEN→OOS_RUNNING→OOS_COMPLETED` + `FAILED`，非法迁移响亮拒绝）· **Leakage Guard**（`SearchEnd <= ISEnd` / `ISEnd < OOSStart` / `OOSEnd <= DatasetAvailableEnd` / 搜索日期非空且在 IS 内 / **明禁「先跑整个 Parameter Search 再把结果切成多 OOS Fold」** ⇒ `WALK_FORWARD_SEARCH_NOT_INDEPENDENT`）· 候选冻结（只认「源 Search Run + `parameterHash`」，参数值由服务端从**源组合行**读出并**重算 `computeParameterHash` 复核**；冻结信息不足 ⇒ **显式失败**，**禁**静默回读**当前**策略版本补全）· **显式** Candidate Selection Policy（`FIRST_ELIGIBLE_COMBINATION` / `EXPLICIT_PARAMETER_HASH`；**不产出**最佳 / 推荐 / 最优 Fold）· 多 Fold **描述性**汇总（键里无 `best/worst/rank`；生命周期计数与结果计数**各按自己的字段**核对）· 两表（`walk_forward_run` **33 列** / `walk_forward_fold` **36 列**，**0 FK / 0 DML / 0 ALTER**，手工幂等 SQL `drizzle/0044_walk_forward.sql` + `scripts/applyWalkForward.mjs`）· **同域扩 6 端点**（零新 router；`create` 与 `start` **必须分开**）· 前端 Run List + Run Detail + 窗口排程 + Fold 矩阵 + Fold 详情 + 描述性汇总 + **深链 `?walkForwardRunId=…&foldIndex=…`（连 Fold 选中一起还原）**。**真实 E2E 判据全过**：Fold#0 IS `2025-01-02..2025-03-06` → OOS `2025-03-07..2025-04-11`（IS −10.36% / 8 笔 / 盈亏比 0.172 ⇒ OOS +7.30% / 2 笔 / 3.179）；Fold#1 IS `2025-02-14..2025-04-11` → OOS `2025-04-14..2025-05-21`（IS −3.65% / **0 笔** ⇒ OOS +21.66% / 1 笔）；两 Fold 的 `sourceSearchRunId` **互不相同** ⇒ 独立搜索成立；**撮合指纹差异**（`ad5f8dd3…` vs `e2f3665d…`；`c6f112eb…` vs `38f49a28…`）作为「真在不同数据上重跑」的主判据（**不是**指标差异 —— `tradeCount = 0` 时两侧指标天然相等）；`scheduleFingerprint = e3451bfc…d2bd7` 由**真实交易日序列**推导，**未硬编码**（数据集 `390002` 实测 `2024-10-01..2025-06-30` 有 178 个交易日）；执行耗时 193 s；**换进程**再执行 ⇒ `executed=false`、零新增行（**跨进程幂等**，新判据 W15）。**杀掉的真实产品缺陷（1 个）**：`createWalkForwardValidationInputSchema` 的 `parameterSearchSpace` 是**被接受但从未生效**的死旋钮（`grep -rn parameterSearchSpace` 只命中 PS 端点与契约声明）⇒ 从契约**删除** + 新增「无死旋钮」守卫防再犯。**未做任何性能优化**；**未改**任何历史 Search / Backtest / OOS 结果与策略版本；自建自清（探针专用策略 / 版本 / 2 个 Walk-Forward Run / 2 个 PS Run / 2 个 OOS Run 全部归零）。报告 = `docs/research/WALK-FORWARD-001-implementation.md`。
+
+---
+
+## §47 实施日志 · 2026-09-20 · RESEARCH-EXPERIMENT-001（编号 `9ce`）
+
+- **改动面**：新增 `shared/researchExperimentsContracts.ts`、`server/researchExperiments/**`（8 文件）、
+  `research-experiments/**`（manifest + template 4 文件 + 示例 4 文件 + 2 README）、
+  `client/src/researchExperiments/**`（3 文件）、`client/src/pages/researchExperiments/**`（4 文件）、
+  `tests/server/researchExperiments/**`（5 文件）、`docs/research/EXPERIMENT-CODE-SPEC.md`、`docs/research/RESEARCH-EXPERIMENT-001-final.md`、
+  `docs/evidence/_e2e_research_experiments.mts` + `.out.json/.out.txt`、`docs/evidence/_probe_research_experiments_frontend.mjs` + `.out.json/.out.txt`、
+  `docs/evidence/_probe_experiment_dataset_choice.mts`。
+- **改动既有文件（4 个）**：`server/routers.ts`（+1 import +1 路由项）、`server/researchEngine/columnProjection.ts`（`STRUCTURAL_COLUMNS` 改为 `export`，纯导出）、
+  `tsconfig.json`（include + `research-experiments/**/*`；paths + `@experiments/*`）、`vite.config.ts` / `vitest.config.ts`（alias + `@experiments`）、
+  `client/src/App.tsx`（+2 路由）、`client/src/components/AppShell.tsx`（+1 导航项 + 图标 import）。
+- **两处刻意留给后人的说明**：① 探针 CDP 必须先把视口设成桌面尺寸（`Sidebar collapsible="icon"` 在 800×600 下折叠 ⇒ 菜单文字不进 `innerText`，
+  曾把「侧栏没有独立实验」误判为产品缺陷）；② 边界测试只扫 `.ts`/`.tsx`（`.md` 里刻意保留禁用词作说明）。
+- **未做**：结果持久化；文件系统自动发现；性能优化；对物理列（`id`/`createdAt`）的语义白名单。
+- **下一任务**：见报告 §18（旧链路收敛策略 / 研究问题→实验的桥 / 结果持久化取舍 / AI 生成物准入检查器 / 骨架列单一来源 / `decisionOffsetDays` 语义统一 / 新旧结果对照适配层）。
+
+
+---
+
+## §44 归档（2026-09-20 由 RESEARCH-EXPERIMENT-002 覆盖，原样搬运）
+
+> 上轮实查：**2026-09-20 · RESEARCH-EXPERIMENT-001（独立研究实验体系 + AI 接入规范）（用户规格）**（编号 `9ce`；`tsc --noEmit` 0 error、新增单测 **63/63**（Contract 23 + Dataset 桥 10 + Runner 12 + Router 9 + 清单/边界 9）、全量 vitest 失败文件集合 **7→7 / 16→16 零新增**（295 文件 / 4982 例，288 passed）、`vite build` **exit 0**、**真实 E2E 28/28**（19.3 s，含同输入第二次执行**指纹逐字节相等**）、**前端 CDP 冒烟 23/23**（真实点击运行 → 结果页挂载 + 2 张 recharts 图 + 3 张表 + 领域码错误态）、`checkEolDrift` **0 漂移**）。**建立与旧 Research 逻辑隔离的第二条研究链**：`Research/Analysis/Finding/Conclusion`（旧、保留不动）之外新增 **独立实验体系** —— `ExperimentDefinition`（descriptor + `resultSchema` + `run(context)`）· 最小 Registry（显式清单，**无 glob / 无目录扫描**，与 `patternLibrary` 同构）· **Experiment Runner**（load/validate/resolve/execute/capture，**两类失败两条出口**：执行前可判定 ⇒ 抛领域错误；执行中发生 ⇒ 返回 FAILED outcome + 完整执行事实）· **Dataset 桥**（复用 `ResearchDatasetReader` 唯一读取层；列投影 = 骨架列 ∪ 声明列；相对日白名单；`usesForwardData` **结构级 PIT 闸门**；视界超界**不夹取**）· 结果信封（信封 zod + 实验自有 `customPayload` schema + **样本账强制平** `eligible+excluded=candidate` 且原因合计相等）· 页面契约（页面只消费 descriptor/outcome，**不自己发请求**）· 前端通用外壳（`/research-experiments` 列表 + `/:group/:key` 详情运行，**Dataset 坐标进 URL**，pending 换文案，`pageKey` 未注册⇒降级通用渲染器不白屏）· **AI 接入文档** `docs/research/EXPERIMENT-CODE-SPEC.md`（A~O 全 15 节，外部 AI 只读它 + Template + Example 即可生成实验）· 模板 + 完整示例 `first-board-pullback/entry-day`（真实数据：v2 数据集 `maxEvents=400` ⇒ T+1 **399 样本 / 平均 +4.61% / 中位 +2.44% / 胜率 57.9%**）。**零新表 / 零 migration / 零写口**（`drizzle/meta/_journal.json` 仍 24 条；24 张严格守恒表 Δ=0，三个负例前后行数完全一致）。**Strategy Core 零改动**；对既有 `server/**` 的唯一改动 = `server/researchEngine/columnProjection.ts` 把 `STRUCTURAL_COLUMNS` 由 `const` 改 `export const`（纯导出，为本体系复用既有唯一权威）。**真机抓到的真实缺陷（单测发现不了）**：列投影只下推「声明列」⇒ 领域映射器回来 `eventId=undefined` ⇒ 批量取行情**恒 0 行**（`prefixRowCount=0/postRowCount=0`，全部样本以 `MISSING_EVENT_DAY_BAR` 被剔除）；内存读取层**不实现列裁剪**故单测 62/62 全绿 —— 修法是补骨架列，并新增「断言下推查询的 columns 必须含 identity 列」的回归守卫。报告 = `docs/research/RESEARCH-EXPERIMENT-001-final.md`；规范 = `docs/research/EXPERIMENT-CODE-SPEC.md`。
+
+---
+
+## §47 实施日志 · 2026-09-20 · RESEARCH-EXPERIMENT-002（编号 `9cf`）
+
+- **新增**：`docs/research/RESEARCH-EXPERIMENT-002-final.md`、`drizzle/0045_experiment_provenance.sql`、
+  `scripts/verifyExperimentProvenanceMigration.mjs`、`server/readRetry.ts`、`server/research/patternLibrary/catalog.ts`、
+  `server/researchExperiments/{strategyBridge,strategyBridgeRouter,registryDefaults}.ts`、`client/src/components/research/LegacyResearchNotice.tsx`、
+  `tests/server/research/{_importGraph.ts,legacyFreeProductionChain.test.ts}`、`tests/server/researchExperiments/strategyBridge.test.ts`、
+  `docs/evidence/{_e2e_experiment_strategy_chain.mts,_probe_experiment_legacy_reach.mts}` 及其产物。
+- **改动既有**：`server/db.ts` + `runWorkbenchAssembly/datasetFromRegistry.ts`（readRetry 路径）、`server/researchEngine/readRetry.ts`（改为转出口）、
+  `server/research/patternLibrary/{index.ts,strategyConsumption.ts}`（catalog 下移）、`server/research/strategyCandidate/{types,provenance,service,router}.ts`（sourceKind 分派 + 新列）、
+  `server/routers.ts`（+1 router）、`drizzle/schema.ts`（provenance 表列签名）、`client/src/adapters/strategyCandidateAdapter.ts`（按 sourceKind 分派显示面）、
+  `client/src/components/robustness/SearchRobustnessPanel.tsx`（修误跳）、`client/src/components/AppShell.tsx`（旧项标 Legacy）、
+  5 个旧 Research 页面（挂标识条）、`tests/client/src/adapters/strategyCandidateAdapter.test.ts`（断言随之更新 + 新用例）、
+  `tests/server/researchExperiments/manifest.test.ts`（桥的**有界例外 + 补偿断言**）、`scripts/applySqlMigration.mjs`（新增 `nullable` guard 种类）。
+- **两条判据自身的缺陷（都真踩、都已修并写进注释）**：① import 图判据用正则漏掉 `export … from` ⇒ 假 PASS；
+  ② 补偿断言 `\s*(?!null|0)` 因外层 `\s*` 可回溯成零宽而**假通过** ⇒ 改为把空白放进负向断言内部。
+- **未做**：不改 Backtest / OOS / WFA / Robustness / 策略核；不删旧 Research（规格 §16）；未做全窗口验收（本轮为期中窗口）。
+- **下一任务**：见报告 §15（003 删除清单 7 项）与 §16（剩余风险 8 项）。
+
+
+---
+
+## §44 归档（2026-09-20 由 RESEARCH-EXPERIMENT-003 覆盖，原样搬运）
+
+> 上轮实查：**2026-09-20 · RESEARCH-EXPERIMENT-002（生产链迁移与旧 Research 解耦）（用户规格）**（编号 `9cf`；`tsc --noEmit` 0 error、新增单测 **+18**（依赖 Gate 4 + 新体系白名单 3 + 桥 11）、全量 vitest 失败文件 **7 / 16 例 = 既有基线零新增**、`vite build` **exit 0**、**真实 E2E：Experiment→Strategy 11/11 + 全链 9/9**、`checkEolDrift` **0 漂移**）。**审计方式 = 本地 import 图可达性（TS AST），非逐文件 grep**：解耦前实测两条**传递**依赖 —— ① `runWorkbenchAssembly/assemble.ts → patternLibrary/strategyConsumption → patternLibrary/index →`（**`export … from` 再导出**）`→ project → researchEngine/planner/moduleRegistry`；② `server/db.ts → researchEngine/readRetry`（一行工具 import）。**两条均已切断**：查询函数下移到`patternLibrary/catalog.ts`（index 继续再导出 ⇒ 导出面零破坏）；`withReadRetry` 搬到 `server/readRetry.ts`（旧路径保留转出口）。**解耦后可达旧 Research 文件 = 0，到 researchCore / researchEngine 均不可达，从 drizzle/schema import 旧表对象 = 0**。⚠️ 判据工具自身也曾有缺陷：第一版用正则抓 import **漏掉 `export … from`** ⇒ 假 PASS 一次；改用 AST 并正确排除 `import type`。**Strategy 迁移**：新增 Experiment → Strategy 桥（`server/researchExperiments/strategyBridge.ts` + 1 个 tRPC 写端点 `experimentStrategy.createFromExperiment`），**复用**既有唯一转换器（`definitionBuild` 三函数）与既有幂等创建路径（`StrategyPromotionPort.createStrategyVersion`），**不再要求任何旧 Research 行**；`StrategyDefinition` / `StrategyCoreDefinition` / `StrategyVersionRecord` **零改动**。**Experiment provenance**：手工 migration `drizzle/0045_experiment_provenance.sql`（**8 条语句 / 零 DML**：5 ADD COLUMN + 3 放宽为 NULL）落在既有**溯源独立切面** `strategy_research_provenance`（display-only，不参与任何计算）；真库幂等实测 `8 executed → 0 executed/8 skipped`，只读语义断言 **20/20**（`scripts/verifyExperimentProvenanceMigration.mjs`）；§6 六问逐条有答案，`experimentResultDigest` 由**服务端真实重跑**后算出（非调用方自报）；`sourceKind=INDEPENDENT_EXPERIMENT` 时三个旧锚**结构上必须为 null**（填真实 id 即被拒）。**生产链审计结论**：Parameter Search / OOS / WFA / Robustness / Backtest / Paper / Review **对旧 Research 的直接依赖均为零**（其余为 UI 依赖 / 历史数据 / 兼容层，已分类 A~E）。**前端入口收敛**：修掉一处生产误跳（稳健性面板原 `/research?searchRunId=` ⇒ 改走 `buildPanelLocation`）、新增 `LegacyResearchNotice` 标识条并挂到 5 个旧页面、侧栏旧 5 项标注「（Legacy）」、新正式入口 = `/research-experiments`。**遗留（如实登记）**：`researchRun.loopRun(useRealData=true)` 在本策略上被 `coreDecision` 决策源前置挡住（`resolvedParameterSet 尚未产生`，与旧 Research 无关、且规格禁改 Backtest）⇒ Backtest 主判据改用「PS 端口两组合的 `backtestFingerprint` 互不相同」（实测 `6b2c6999…` vs `2495d375…`）；旧 Research 写端点仍在（规格禁删）⇒ 已列入 003 删除清单。报告 = `docs/research/RESEARCH-EXPERIMENT-002-final.md`（§18 全 16 节 + §19 COMPLETE Gate 逐条核对）。

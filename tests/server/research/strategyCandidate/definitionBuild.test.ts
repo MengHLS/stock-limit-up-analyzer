@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { ResearchStrategyCandidate } from "../../../../server/researchCore";
+import type { ResearchStrategyCandidate } from "../../../../server/research/vocabulary";
 import { STRATEGY_CANDIDATE_ERROR, StrategyCandidateError } from "../../../../server/research/strategyCandidate/candidateTypes";
 import {
   buildExecutionAssumptions,

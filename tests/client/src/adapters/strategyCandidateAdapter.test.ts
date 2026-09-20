@@ -498,6 +498,12 @@ function provenanceView(overrides: Partial<PromotionProvenanceLike> = {}): Promo
     provenance: {
       id: 501,
       origin: "DIRECT",
+      // RESEARCH-EXPERIMENT-002 — 来源体系（旧链路）
+      sourceKind: "RESEARCH_CONCLUSION",
+      experimentRef: null,
+      experimentVersion: null,
+      experimentParameters: null,
+      experimentResultDigest: null,
       sourceCandidateId: 180001,
       sourceConclusionId: 12,
       sourceExperimentId: 7,
@@ -515,13 +521,55 @@ function provenanceView(overrides: Partial<PromotionProvenanceLike> = {}): Promo
 }
 
 describe("promotionProvenanceToVm", () => {
-  it("10-a) 完整溯源：来源类型 + 五个上游坐标 + 创建时间，一项不少", () => {
+  it("10-a2) 独立实验来源：**不显示**三个旧锚行，改为显示实验坐标（RESEARCH-EXPERIMENT-002）", () => {
+    const vm = promotionProvenanceToVm(
+      provenanceView({
+        provenance: {
+          id: 1,
+          origin: "DIRECT",
+          sourceKind: "INDEPENDENT_EXPERIMENT",
+          sourceCandidateId: null,
+          sourceConclusionId: null,
+          sourceExperimentId: null,
+          sourceResearchRunId: null,
+          sourceDatasetVersionId: 390002,
+          sourceDatasetLabel: "v2",
+          experimentRef: "first-board-pullback/entry-day",
+          experimentVersion: "1.0.0",
+          experimentParameters: { entryDays: [1, 2, 3] },
+          experimentResultDigest: "exp-sha256:56060f5144c15b40",
+          createdAt: "2026-09-20T10:29:53.000Z",
+        },
+      }) as never,
+    );
+    const labels = vm.rows.map((r) => r.label);
+    // 旧锚行**不出现**（否则页面上会出现「Source Conclusion ID = null」这种看起来像数据坏了的行）
+    expect(labels).not.toContain("Source Candidate ID");
+    expect(labels).not.toContain("Source Conclusion ID");
+    expect(labels).not.toContain("Source Experiment ID");
+    // 实验坐标行出现
+    expect(labels).toContain("Experiment");
+    expect(labels).toContain("Experiment Version");
+    expect(labels).toContain("Experiment Parameters");
+    expect(labels).toContain("Experiment Result Digest");
+    const byLabel = Object.fromEntries(vm.rows.map((r) => [r.label, r]));
+    expect(byLabel["来源体系"]!.value).toContain("独立实验");
+    expect(byLabel["Experiment"]!.value).toBe("first-board-pullback/entry-day");
+    expect(byLabel["Experiment Result Digest"]!.value).toBe("exp-sha256:56060f5144c15b40");
+  });
+
+
+  it("10-a) 完整溯源：来源类型 + 来源体系 + 五个上游坐标 + 创建时间，一项不少", () => {
     const vm = promotionProvenanceToVm(provenanceView());
     expect(vm.hasProvenance).toBe(true);
     expect(vm.originLabel).toBe("DIRECT");
     const byLabel = Object.fromEntries(vm.rows.map((r) => [r.label, r]));
+    // 🔴 2026-09-20（RESEARCH-EXPERIMENT-002）本断言**随之更新**：
+    //    溯源行新增「来源体系」一列（`RESEARCH_CONCLUSION` / `INDEPENDENT_EXPERIMENT`）——
+    //    两套体系共用同一张溯源表，页面必须能区分；这是契约的有意扩展，不是回归。
     expect(Object.keys(byLabel)).toEqual([
       "来源类型",
+      "来源体系",
       "Source Candidate ID",
       "Source Conclusion ID",
       "Source Experiment ID",
@@ -531,6 +579,7 @@ describe("promotionProvenanceToVm", () => {
       "Created At",
     ]);
     expect(byLabel["来源类型"]!.value).toBe("DIRECT");
+    expect(byLabel["来源体系"]!.value).toContain("旧 Research");
     expect(byLabel["Source Candidate ID"]!.value).toBe("180001");
     expect(byLabel["Source Conclusion ID"]!.value).toBe("12");
     expect(byLabel["Source Experiment ID"]!.value).toBe("7");

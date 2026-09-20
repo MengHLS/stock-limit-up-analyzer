@@ -19,8 +19,8 @@
 import "dotenv/config";
 import mysql from "mysql2/promise";
 import { readFileSync } from "node:fs";
-import { createDbResearchRepositories } from "../server/researchCore/repository/db";
-import { createInMemoryResearchRepositories } from "../server/researchCore/repository/inMemory";
+import { createDbResearchRepositories } from "../server/research/candidateRepository";
+import { createInMemoryResearchRepositories } from "../server/research/candidateRepository";
 import { DbStrategyResearchProvenanceRepository } from "../server/research/strategyCandidate/provenance";
 import { createInMemoryStrategyResearchProvenanceRepository } from "../server/research/strategyCandidate/provenance";
 import {

@@ -69,7 +69,9 @@ import { defaultConcurrency, mapWithConcurrency } from "../datasetRegistry/concu
   FirstLimitPullbackRawBar,
 } from "../datasetRegistry/types";
 import { identifierRowToSecurityIdentifier } from "../historicalState/mappers";
-import { withReadRetry } from "../researchEngine/readRetry";
+// 🔴 RESEARCH-EXPERIMENT-002：原先走 `../researchEngine/readRetry`（会把本装配链在模块加载期
+//    与旧 Research 目录挂在一起）；实现与领域无关，已搬到 `server/readRetry.ts`。
+import { withReadRetry } from "../readRetry";
 import { canonicalCode, parseSecurityCode } from "../security/code";
 import { resolveSecurityIdByEngineKey } from "../security/engineKeyBridge";
 import type { SecurityIdentifier } from "../security/types";

@@ -13,7 +13,7 @@
  *      这样「打开编辑、什么都不改、点保存」不会产生任何写入。
  */
 
-import type { ResearchConditionOperator } from "../../../../server/researchCore";
+import type { ResearchConditionOperator } from "../../../../server/research/vocabulary";
 import {
   CANDIDATE_CONDITION_OPERATOR_OPTIONS,
   CANDIDATE_COST_MODEL_OPTIONS,

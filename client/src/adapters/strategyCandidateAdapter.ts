@@ -725,7 +725,9 @@ export type ProvenanceMissingUpstream =
   | "SOURCE_CONCLUSION"
   | "SOURCE_EXPERIMENT"
   | "SOURCE_RESEARCH_RUN"
-  | "SOURCE_DATASET_VERSION";
+  | "SOURCE_DATASET_VERSION"
+  /** RESEARCH-EXPERIMENT-002：独立实验来源的「上游」= 实验定义本身（已不在注册表里）。 */
+  | "SOURCE_EXPERIMENT_REF";
 
 /** 后端 `PromotionProvenanceView` 的只读形状。 */
 export interface PromotionProvenanceLike {
@@ -735,12 +737,24 @@ export interface PromotionProvenanceLike {
   provenance: {
     id: number;
     origin: string;
-    sourceCandidateId: number;
-    sourceConclusionId: number;
-    sourceExperimentId: number;
+    /**
+     * 来源体系（RESEARCH-EXPERIMENT-002）。
+     * `RESEARCH_CONCLUSION` = 旧 Research 链路；`INDEPENDENT_EXPERIMENT` = 独立实验体系。
+     */
+    sourceKind: string;
+    /** 🔴 三个旧来源锚在独立实验来源下**合法为 null**（不是「上游丢失」）。 */
+    sourceCandidateId: number | null;
+    sourceConclusionId: number | null;
+    sourceExperimentId: number | null;
     sourceResearchRunId: number | null;
     sourceDatasetVersionId: number | null;
     sourceDatasetLabel: string | null;
+    /** 独立实验 id（`<group>/<key>`）。 */
+    experimentRef: string | null;
+    experimentVersion: string | null;
+    experimentParameters: unknown;
+    /** 实验结果 canonical 指纹（服务端真实重跑后算出）。 */
+    experimentResultDigest: string | null;
     createdAt: string | null;
   } | null;
   executionDatasetVersionId: number | null;
@@ -779,6 +793,7 @@ const MISSING_UPSTREAM_LABELS: Record<ProvenanceMissingUpstream, string> = {
   SOURCE_EXPERIMENT: "来源实验",
   SOURCE_RESEARCH_RUN: "来源 Research Run",
   SOURCE_DATASET_VERSION: "来源 Dataset 版本",
+  SOURCE_EXPERIMENT_REF: "来源独立实验（已不在实验注册表里）",
 };
 
 /**
@@ -804,18 +819,47 @@ function textOf(value: number | string | null | undefined): string | null {
 /** 🔴 溯源区的固定免责声明（§13 原话要求**必须显示**）。 */
 export const PROVENANCE_DISCLAIMER = "Research Provenance 仅用于来源追溯，不参与 Strategy 执行。";
 
-/** 溯源视图 → ViewModel（**零重算**：只搬运，缺就是缺）。 */
+/**
+ * 溯源视图 → ViewModel（**零重算**：只搬运，缺就是缺）。
+ *
+ * 🔴 RESEARCH-EXPERIMENT-002：按 `sourceKind` 分派**该显示哪几行**。
+ *   旧体系（缺省）显示三个旧来源锚；独立实验来源**不显示**那三行 ——
+ *   否则页面上会出现 `Source Conclusion ID = null` 这种「看起来像数据坏了」的行，
+ *   而真相是「这套来源本来就没有旧 Research 坐标」。
+ */
 export function promotionProvenanceToVm(view: PromotionProvenanceLike): ProvenanceVm {
   const missingUpstreams = [...view.missingUpstreams];
   const missingSet = new Set<string>(missingUpstreams);
   const p = view.provenance;
+  const sourceKind = p?.sourceKind ?? "RESEARCH_CONCLUSION";
+  const isIndependentExperiment = sourceKind === "INDEPENDENT_EXPERIMENT";
   const rows: ProvenanceRowVm[] = p === null
     ? []
     : [
         { label: "来源类型", value: p.origin, missing: false },
-        { label: "Source Candidate ID", value: String(p.sourceCandidateId), missing: missingSet.has("SOURCE_CANDIDATE") },
-        { label: "Source Conclusion ID", value: String(p.sourceConclusionId), missing: missingSet.has("SOURCE_CONCLUSION") },
-        { label: "Source Experiment ID", value: String(p.sourceExperimentId), missing: missingSet.has("SOURCE_EXPERIMENT") },
+        {
+          label: "来源体系",
+          value: isIndependentExperiment ? "独立实验（INDEPENDENT_EXPERIMENT）" : "旧 Research 结论（RESEARCH_CONCLUSION）",
+          missing: false,
+        },
+        ...(isIndependentExperiment
+          ? ([
+              { label: "Experiment", value: textOf(p.experimentRef), missing: missingSet.has("SOURCE_EXPERIMENT_REF") },
+              { label: "Experiment Version", value: textOf(p.experimentVersion), missing: false },
+              {
+                label: "Experiment Parameters",
+                value: p.experimentParameters === null || p.experimentParameters === undefined
+                  ? null
+                  : JSON.stringify(p.experimentParameters),
+                missing: false,
+              },
+              { label: "Experiment Result Digest", value: textOf(p.experimentResultDigest), missing: false },
+            ] as ProvenanceRowVm[])
+          : ([
+              { label: "Source Candidate ID", value: textOf(p.sourceCandidateId), missing: missingSet.has("SOURCE_CANDIDATE") },
+              { label: "Source Conclusion ID", value: textOf(p.sourceConclusionId), missing: missingSet.has("SOURCE_CONCLUSION") },
+              { label: "Source Experiment ID", value: textOf(p.sourceExperimentId), missing: missingSet.has("SOURCE_EXPERIMENT") },
+            ] as ProvenanceRowVm[])),
         { label: "Source Research Run ID", value: textOf(p.sourceResearchRunId), missing: missingSet.has("SOURCE_RESEARCH_RUN") },
         { label: "Source Dataset Version ID", value: textOf(p.sourceDatasetVersionId), missing: missingSet.has("SOURCE_DATASET_VERSION") },
         { label: "Source Dataset Label", value: textOf(p.sourceDatasetLabel), missing: missingSet.has("SOURCE_DATASET_VERSION") },

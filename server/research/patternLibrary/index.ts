@@ -47,54 +47,19 @@ export {
 
 export { buildPatternRecipeDefinitions, projectRecipeDefinition } from "./projectRecipe";
 
-import { ALL_TRADING_PATTERNS } from "./patterns";
-import type { TradingPatternSpec } from "./types";
-
-/** 全部已声明的模式（顺序 = 声明顺序）。 */
-export function listTradingPatterns(): readonly TradingPatternSpec[] {
-  return ALL_TRADING_PATTERNS;
-}
-
-/** 按模式 id 查（不存在 ⇒ `undefined`）。 */
-export function findTradingPattern(patternId: string): TradingPatternSpec | undefined {
-  return ALL_TRADING_PATTERNS.find(pattern => pattern.patternId === patternId);
-}
-
 /**
- * 按模式 id 取，**不存在即抛错**（附上已声明清单）。
+ * 纯查询（零跨域依赖）—— 从 `./catalog` 再导出，**对外导出面不变**。
  *
- * 为什么要有 `require` 版本：调用方拿到 `undefined` 后最可能的动作是「当作没有这个模式，
- * 走一条看起来差不多的默认路径」—— 而「静默回落默认」正是本项目反复踩到的缺陷形态。
+ * 🔴 RESEARCH-EXPERIMENT-002：需要「只查一个模式」的调用方**请直接 import `./catalog`**，
+ * 不要 import 本 barrel —— 本 barrel 会连带求值 `./project`，而它运行时 import
+ * `researchEngine/planner/moduleRegistry`（会把生产链与旧 Research 目录挂在一起）。
+ * `server/research/patternLibrary/strategyConsumption.ts` 就是这条边的原发生点。
  */
-export function requireTradingPattern(patternId: string): TradingPatternSpec {
-  const pattern = findTradingPattern(patternId);
-  if (pattern === undefined) {
-    throw new Error(
-      `未知交易模式：\`${patternId}\`（已声明：`
-        + `${ALL_TRADING_PATTERNS.map(item => item.patternId).join(" / ")}）。`,
-    );
-  }
-  return pattern;
-}
-
-/** 按研究模块键反查模式（用于「这条分析属于哪个模式」）。 */
-export function findPatternByResearchModuleKey(moduleKey: string): TradingPatternSpec | undefined {
-  return ALL_TRADING_PATTERNS.find(pattern => pattern.research?.moduleKey === moduleKey);
-}
-
-/** 按执行配方 id 反查模式（用于「这次回测跑的是哪个模式」）。 */
-export function findPatternByRecipeId(recipeId: string): TradingPatternSpec | undefined {
-  return ALL_TRADING_PATTERNS.find(pattern => pattern.execution?.recipeId === recipeId);
-}
-
-/**
- * 可转正的模式清单（`execution` 与 `sketch` 都齐）。
- *
- * ⚠️ 判据与 `projectCandidateSketch` 返回 `null` 的两个条件**同源** ——
- * 「能转正」不是这里另定的规则，而是「投影能产出草图」的事实。
- */
-export function listPromotablePatternIds(): readonly string[] {
-  return ALL_TRADING_PATTERNS
-    .filter(pattern => pattern.execution !== null && pattern.sketch !== undefined && pattern.sketch !== null)
-    .map(pattern => pattern.patternId);
-}
+export {
+  findPatternByRecipeId,
+  findPatternByResearchModuleKey,
+  findTradingPattern,
+  listPromotablePatternIds,
+  listTradingPatterns,
+  requireTradingPattern,
+} from "./catalog";

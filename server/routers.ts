@@ -4,14 +4,18 @@ import { systemRouter } from "./_core/systemRouter";
 // FE-0 — 研究链路 tRPC 契约（STEP 12.5 / 12.6 / 15 / 21，均 CODE_READY）
 import { historicalStateRouter } from "./historicalStateRouter";
 import { researchDatasetRouter } from "./researchDatasetRouter";
-import { researchRouter } from "./researchRouter";
+import { strategyDomainRouter } from "./strategyDomainRouter";
 // DATASET-002.2 — Dataset Registry 只读 API（新架构；与旧 researchDataset 并存，不互替）
 import { datasetRegistryRouter } from "./datasetRegistry/router";
 // RESEARCH-002 — Research Engine API（Experiment/Run/Analysis/Result/Conclusion；真实执行入口）
-import { researchEngineRouter } from "./researchEngineRouter";
-import { researchPlannerRouter } from "./researchPlannerRouter";
 // FE-0 扩展 — 研究 run 目录与就绪探测
 import { researchRunRouter } from "./researchRunRouter";
+// RESEARCH-EXPERIMENT-001 — 独立研究实验体系（ExperimentDefinition / Registry / Runner；
+//   **与旧 Research 的 Analysis/Finding/Conclusion 链路逻辑隔离**，零新表 / 零写口）
+import { researchExperimentsRouter } from "./researchExperiments/router";
+// RESEARCH-EXPERIMENT-002 — Experiment Result → Strategy 桥（独立实验来源的策略创建 + Experiment provenance）
+import { buildExperimentStrategyRouter } from "./researchExperiments/strategyBridgeRouter";
+import { defaultExperimentStrategyBridge } from "./researchExperiments/defaults";
 // FE-1 — 数据域健康看板（STEP 12 gate 认证证据，只读）
 import { dataHealthRouter } from "./dataHealthRouter";
 // FE-6/7/8/9 — 研究量化链路（参数搜索/鲁棒性、WFO/过拟合、Regime、复盘工作台）
@@ -314,15 +318,17 @@ export const appRouter = router({
   // FE-0 — 研究链路（前端 P0 前置；解除 R6「研究能力未通过 tRPC 暴露」）
   historicalState: historicalStateRouter,
   researchDataset: researchDatasetRouter,
-  research: researchRouter,
+  strategyDomain: strategyDomainRouter,
   // DATASET-002.2 — Dataset Registry 只读 API（Definition/Version/Job/Statistics/Event/Path/Outcome）
   datasetRegistry: datasetRegistryRouter,
   // RESEARCH-002 — Research Engine（Experiment/Hypothesis/Run/Analysis/Result/Conclusion + 真实执行）
-  researchEngine: researchEngineRouter,
   // RESEARCH-PLANNER-001 — 自动研究编排（研究问题 → 计划 → 自动建分析 → 执行 → 结论视图）
-  researchPlanner: researchPlannerRouter,
   // FE-0 扩展 — 研究 run 目录与就绪探测（只读；真实执行待数据认证后装配）
   researchRun: researchRunRouter,
+  // RESEARCH-EXPERIMENT-001 — 独立研究实验体系（list / get / listDatasetVersions / run）
+  researchExperiments: researchExperimentsRouter,
+  // RESEARCH-EXPERIMENT-002 — Experiment → Strategy（一个写端点；读路径复用既有 getVersionProvenance）
+  experimentStrategy: buildExperimentStrategyRouter({ bridge: defaultExperimentStrategyBridge() }),
   // FE-1 — 数据域健康看板
   dataHealth: dataHealthRouter,
   // FE-6/7/8/9 — 研究量化链路（技术预览口径，真实数据注入见各 router 头注释）

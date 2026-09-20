@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/researchEngine
 
-- 测试文件 **19** 个 ｜ 用例声明 **281** 个
-- 涉及源码目录：`server/datasetRegistry/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchEngine/` · `server/researchEngine/analyses/` · `server/researchEngine/finding/` · `server/researchEngine/report/`
+- 测试文件 **20** 个 ｜ 用例声明 **301** 个
+- 涉及源码目录：`server/datasetRegistry/` · `server/research/patternLibrary/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchEngine/` · `server/researchEngine/analyses/` · `server/researchEngine/finding/` · `server/researchEngine/report/` · `shared/`
 
 ## 怎么跑
 
@@ -126,7 +126,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 默认 first-chunk，可显式关闭或全开
 
 ### `tests/server/researchEngine/conclusion.test.ts`
-- 159 行 ｜ 用例声明 12 ｜ describe 1
+- 259 行 ｜ 用例声明 15 ｜ describe 2
 - 被测源码：`server/researchEngine/conclusion.ts` · `server/researchEngine/types.ts` · `server/researchCore/index.ts`
 - 单跑：`pnpm exec vitest run tests/server/researchEngine/conclusion.test.ts`
 - 用例树：
@@ -143,6 +143,10 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 策略阈值原样写入 evidence（可复核 / 可复现）
   - 规则轨迹完整（每一步判定都留痕）
   - evidence 形状在两个分支间保持一致（单一构造入口）
+- **AR-13 · §15 五件套在两个分支都必须写入（主分支回归）**
+  - 主分支草稿带全部 §15 字段（修复前这五个全是 undefined）
+  - 两个分支的 §15 键集完全一致（不出现「一个分支有、另一个没有」）
+  - Finding 层未参与时如实写空数组 / 明确措辞（不装成「有证据」）
 
 ### `tests/server/researchEngine/conditionEvaluator.test.ts`
 - 134 行 ｜ 用例声明 11 ｜ describe 1
@@ -444,6 +448,35 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 结果变化后重生成 ⇒ SUPERSEDED，仍只有 1 份 REPORT（A-1）
   - 结论的 primaryAnalysis 不属于本 Run ⇒ conclusionId=null，不拿别的 Run 的结论冒充（A-3）
   - Dataset 版本上下文不可达 ⇒ 不编造区间/事件数，如实记入 unresolvedTraceFields
+
+### `tests/server/researchEngine/semanticNormalization.test.ts`
+- 279 行 ｜ 用例声明 17 ｜ describe 6
+- 被测源码：`shared/patternSemantics.ts` · `server/research/patternLibrary/index.ts` · `server/researchEngine/semanticProjection.ts` · `server/researchEngine/variables.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchEngine/semanticNormalization.test.ts`
+- 用例树：
+- **AR-12 · 声明侧：归一化进入唯一 Expander 的产物**
+  - 两条语义都被投影出来（名字与既有研究结果里的变量名一致）
+  - 声明了归一化 ⇒ needsEventBar=true（否则基准缺失会让变量静默全 null）
+  - 归一化被带进展开产物（两侧投影共用的同一份数据）
+  - 可用性仍等于窗口末端（归一化不得改变 PIT 声明）
+- **AR-12 · T1 固定 fixture：数值等于声明公式（而不是绝对价格）**
+  - hold_depth = (t0Open − min(Low[T+1..T+2])) / t0Open
+  - shrink_ratio = min(Volume[T+1..T+2]) / Volume(T)
+- **AR-12 · T2 边界值：0 / 负 / 正 / 缺失**
+  - 恰好守平（low == t0Open）⇒ 恰好 0
+  - 全程未跌破 ⇒ 负值（声明语义：≤ 0 = 全程未破位）
+  - 跌破 ⇒ 正值
+  - 基准缺失（eventBar undefined）⇒ null，绝不回落成绝对值
+  - 基准字段非有限 / 分母 ≤ 0 ⇒ null
+  - 窗口内观测值缺失 ⇒ null（不臆造）
+  - shrink_ratio 分母（事件日成交量）≤ 0 ⇒ null
+- **AR-12 · T3 窗口：只读声明窗口内的 bar（不跨窗）**
+  - windowDays=2 时 T+3 的极值不得进入结果
+  - 越窗读取 postBar 会立刻炸（结构性证据：确实只取了 T+1..T+2）
+- **AR-12 · T4 无 look-ahead：只读事件日（T）bar 与声明字段**
+  - resolve 只访问声明里的字段（low / open），不读任何其它列
+- **AR-12 · 区分度（本轮最重要的判据：修复前恒为单侧）**
+  - 同一批事件上 hold_depth 既有 ≤0 也有 >0 —— 变量真的有区分度
 
 ### `tests/server/researchEngine/variables.test.ts`
 - 376 行 ｜ 用例声明 22 ｜ describe 3

@@ -10,7 +10,7 @@
  */
 import "dotenv/config";
 import { readFileSync } from "node:fs";
-import { createDbResearchRepositories } from "../server/researchCore/repository/db";
+import { createDbResearchRepositories } from "../server/research/candidateRepository";
 import { RegistryDatasetVersionReadPort } from "../server/research/strategyCandidate/datasetVersionPort";
 import { createStrategyPromotionPort } from "../server/research/strategyCandidate/strategyPromotionPort";
 import { DbStrategyResearchProvenanceRepository } from "../server/research/strategyCandidate/provenance";

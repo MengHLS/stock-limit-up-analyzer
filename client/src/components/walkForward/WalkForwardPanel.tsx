@@ -48,7 +48,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyState, SectionCard, StatusBadge } from "@/components/common";
+import { DatasetVersionLink, StrategyVersionIdLink } from "@/components/common/ProvenanceLink";
 import { trpc } from "@/lib/trpc";
+import {
+  buildPanelLocation,
+  DEFAULT_PANEL_BASE_PATH,
+  parseFoldIndex,
+  type PanelLinkOptions,
+} from "@/lib/panelLinks";
 
 // ---------------------------------------------------------------------------
 // 展示层小工具（不参与任何量化判定）
@@ -139,21 +146,39 @@ const SELECTION_KINDS = ["FIRST_ELIGIBLE_COMBINATION", "EXPLICIT_PARAMETER_HASH"
 // 主面板
 // ---------------------------------------------------------------------------
 
-export default function WalkForwardPanel() {
+/**
+ * FRONTEND-FINAL-001（P0-1 / P1-6）：本面板既可作为 `/parameter-search` 的页内块，
+ * 也可被独立路由（`/validation/walk-forward[/:runId[/folds/:foldIndex]]`）复用。
+ *
+ * 不传 props ⇒ 与改造前**逐字等价**（query 深链写回 `/parameter-search?walkForwardRunId=…&foldIndex=…`）。
+ */
+export interface WalkForwardPanelProps extends Partial<PanelLinkOptions> {
+  /** 由独立路由的路径段给出的选中 run（优先级高于 query）。 */
+  readonly routeRunId?: string | null;
+  /** 由独立路由的路径段给出的选中 fold（优先级高于 query）。 */
+  readonly routeFoldIndex?: number | null;
+}
+
+export default function WalkForwardPanel({
+  basePath = DEFAULT_PANEL_BASE_PATH,
+  pathStyle = false,
+  routeRunId = null,
+  routeFoldIndex = null,
+}: WalkForwardPanelProps = {}) {
   const search = useSearch();
   const [, setLocation] = useLocation();
 
   const params = useMemo(() => new URLSearchParams(search), [search]);
   const linkedRunId = useMemo(() => {
+    if (routeRunId !== null && routeRunId !== "") return routeRunId;
     const raw = params.get("walkForwardRunId");
     return raw === null || raw === "" ? null : raw;
-  }, [params]);
+  }, [params, routeRunId]);
   const linkedFoldIndex = useMemo(() => {
-    const raw = params.get("foldIndex");
-    if (raw === null || raw === "") return null;
-    const parsedIndex = Number(raw);
-    return Number.isInteger(parsedIndex) && parsedIndex >= 0 ? parsedIndex : null;
-  }, [params]);
+    // 路由段优先（`/validation/walk-forward/:runId/folds/:foldIndex` 无 query）。
+    if (routeFoldIndex !== null) return routeFoldIndex;
+    return parseFoldIndex(params.get("foldIndex"));
+  }, [params, routeFoldIndex]);
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(linkedRunId);
   const [selectedFoldIndex, setSelectedFoldIndex] = useState<number | null>(linkedFoldIndex);
@@ -191,17 +216,13 @@ export default function WalkForwardPanel() {
   const startMutation = trpc.paramSearch.startWalkForwardRun.useMutation();
   const cancelMutation = trpc.paramSearch.cancelWalkForwardRun.useMutation();
 
-  /** 选中并写进 URL（深链）。 */
+  /** 选中并写进 URL（深链）。地址形式由 `pathStyle` / `basePath` 决定（见 `panelLinks.ts`）。 */
   function selectRun(runId: string | null, foldIndex: number | null = null): void {
     setSelectedRunId(runId);
     setSelectedFoldIndex(foldIndex);
-    if (runId === null) {
-      setLocation("/parameter-search");
-      return;
-    }
-    const query = new URLSearchParams({ walkForwardRunId: runId });
-    if (foldIndex !== null) query.set("foldIndex", String(foldIndex));
-    setLocation(`/parameter-search?${query.toString()}`);
+    setLocation(
+      buildPanelLocation({ basePath, pathStyle, queryKey: "walkForwardRunId" }, runId, foldIndex),
+    );
   }
 
   async function handleCreate(): Promise<void> {
@@ -594,11 +615,18 @@ export default function WalkForwardPanel() {
                         label={RUN_STATUS_LABEL[selectedRun.status] ?? selectedRun.status}
                       />
                     </p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {selectedRun.strategyId}@{selectedRun.strategyVersion} · 数据集{" "}
-                      {selectedRun.datasetVersionLabel ?? "—"}（id{" "}
-                      {selectedRun.datasetVersionId ?? "—"}）· 指标口径{" "}
-                      {selectedRun.metricsVersion} · 引擎 {selectedRun.engineVersion}
+                    <p className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                      {/* FRONTEND-FINAL-001（P1-4）：策略版本 / 数据集版本改为可点击溯源。 */}
+                      <StrategyVersionIdLink
+                        strategyVersionId={`${selectedRun.strategyId}@${selectedRun.strategyVersion}`}
+                      />
+                      <span>· 数据集</span>
+                      <DatasetVersionLink
+                        datasetVersionId={selectedRun.datasetVersionId}
+                        label={selectedRun.datasetVersionLabel}
+                      />
+                      <span>· 指标口径 {selectedRun.metricsVersion}</span>
+                      <span>· 引擎 {selectedRun.engineVersion}</span>
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

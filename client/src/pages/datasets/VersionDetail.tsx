@@ -260,7 +260,29 @@ export default function VersionDetail() {
           >
             <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
               <Row k="Version" v={version.version} mono />
-              <Row k="Dataset Version ID" v={version.id} mono />
+              {/* FRONTEND-FINAL-001（P2-6）：Dataset ID / Dataset Version ID 由纯文本改为可点击溯源。 */}
+              <Row
+                k="所属数据集"
+                v={
+                  <Link
+                    href={`/datasets/${String(version.datasetId)}`}
+                    className="font-mono underline-offset-2 hover:underline"
+                  >
+                    #{version.datasetId}
+                  </Link>
+                }
+              />
+              <Row
+                k="Dataset Version ID"
+                v={
+                  <Link
+                    href={`/datasets/${String(version.datasetId)}/versions/${String(version.id)}`}
+                    className="font-mono underline-offset-2 hover:underline"
+                  >
+                    #{version.id}
+                  </Link>
+                }
+              />
               <Row k="Status" v={version.status} mono />
               <Row
                 k="Date Range"

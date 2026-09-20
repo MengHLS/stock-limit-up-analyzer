@@ -38,7 +38,7 @@ function fmtDate(ts: string): string {
 
 export default function StrategyList() {
   const [, setLocation] = useLocation();
-  const list = trpc.research.strategy.list.useQuery(undefined, {
+  const list = trpc.strategyDomain.strategy.list.useQuery(undefined, {
     refetchOnWindowFocus: false,
   });
 

@@ -29,6 +29,7 @@
 import {
   PARAMETER_SEARCH_RESULT_RECORD_KIND,
   PARAMETER_SEARCH_RESULT_RECORD_VERSION,
+  type ParameterResolutionView,
   type ParameterSearchMetricsSource,
   type ParameterSearchMetricsView,
   type ParameterSearchResultView,
@@ -112,6 +113,58 @@ export interface BuildParameterSearchResultInput {
   readonly evaluationRunId: string | null;
   readonly backtestFingerprint: string | null;
   readonly error: string | null;
+  /**
+   * 「实际被消费的参数集」（装配层 `resolveParameters` 产物），来自
+   * `StrategyBacktestSample.resolvedParameterSet`。未走到评估端口时为 `null`。
+   *
+   * FRONTEND-FINAL-001（P0-2）：本字段**只搬不算**，与 `parameters`（请求值）并列存放，
+   * 供搜索页做「请求 vs 实际消费」对照。
+   *
+   * **可选**：未接线的调用方（既有单测按旧契约构造入参）不传即视为「无解析结果」，
+   * 由 `compareRequestedWithResolved` 记 `UNAVAILABLE` —— 不抛错、不推断。
+   */
+  readonly resolvedParameterSet?: ResearchParameterSet | null | undefined;
+}
+
+/**
+ * 请求参数 ↔ 实际被消费参数的对照（**纯函数**，服务端唯一口径）。
+ *
+ * 判据：**只**逐个比较「请求键」，比较用 `Object.is` 语义的严格相等（值域是
+ * `number|string|boolean|null`，无对象嵌套）。解析结果多出的键（未参与搜索的
+ * FIXED / DERIVED 参数回落到 `defaultValue`）是**预期行为**，记入 `additionalParameterCodes`
+ * 但**不计为差异** —— 否则每一条都会因「resolved 比 requested 大」而被误判成 DIFFERENT。
+ *
+ * 🔴 `resolved` 为 `null` **或 `undefined`** 一律记 `UNAVAILABLE`：调用方尚未接线、
+ *   或留档早于本字段上线，两种情形都**没有**可信的解析结果。此处若按 `Object.keys(undefined)`
+ *   直接抛错，会把「字段缺失」升级成整页 500 —— 本项目已实测到（既有单测按旧契约调用）。
+ */
+export function compareRequestedWithResolved(
+  requested: ResearchParameterSet,
+  resolved: ResearchParameterSet | null | undefined,
+): ParameterResolutionView {
+  const requestedCodes = Object.keys(requested).sort();
+  if (resolved === null || resolved === undefined) {
+    return {
+      status: "UNAVAILABLE",
+      requestedParameterCount: requestedCodes.length,
+      resolvedParameterCount: 0,
+      differentParameterCodes: [],
+      additionalParameterCodes: [],
+    };
+  }
+  const resolvedCodes = Object.keys(resolved).sort();
+  const requestedSet = new Set(requestedCodes);
+  const differentParameterCodes = requestedCodes.filter(
+    (code) => !Object.is(requested[code], resolved[code]),
+  );
+  const additionalParameterCodes = resolvedCodes.filter((code) => !requestedSet.has(code));
+  return {
+    status: differentParameterCodes.length === 0 ? "MATCHED" : "DIFFERENT",
+    requestedParameterCount: requestedCodes.length,
+    resolvedParameterCount: resolvedCodes.length,
+    differentParameterCodes,
+    additionalParameterCodes,
+  };
 }
 
 /**
@@ -143,6 +196,10 @@ export function buildParameterSearchResult(
     metricsSource: projection.metricsSource,
     annualizationBasis: projection.annualizationBasis,
     evaluationConfigFingerprint: input.evaluationConfigFingerprint,
+    // FRONTEND-FINAL-001（P0-2）：请求 vs 实际消费的对照，服务端算好
+    // `?? null`：视图契约里该字段是 `| null`（不是 optional），缺省一律落成 null。
+    resolvedParameterSet: input.resolvedParameterSet ?? null,
+    parameterResolution: compareRequestedWithResolved(input.parameters, input.resolvedParameterSet),
     createdAt: input.createdAt,
   };
 }

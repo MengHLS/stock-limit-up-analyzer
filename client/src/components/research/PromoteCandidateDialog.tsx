@@ -81,7 +81,7 @@ export function PromoteCandidateDialog({
   const [result, setResult] = useState<PromoteResultVm | null>(null);
   const [failure, setFailure] = useState<PromoteFailureVm | null>(null);
   const utils = trpc.useUtils();
-  const promote = trpc.research.strategyCandidate.promote.useMutation();
+  const promote = trpc.strategyDomain.strategyCandidate.promote.useMutation();
 
   const source = useMemo(
     () => ({
@@ -154,10 +154,8 @@ export function PromoteCandidateDialog({
       setResult(vm);
       toast.success(vm.title, { description: vm.summary });
       // 🔴 从服务端重读候选（**不**在前端把 status 改成 CONVERTED 伪造状态，§19）。
-      await Promise.all([
-        utils.research.strategyCandidate.get.invalidate({ candidateId: candidate.id }),
-        utils.researchEngine.listCandidates.invalidate(),
-      ]);
+      // RESEARCH-EXPERIMENT-003：`researchEngine.listCandidates` 已随旧 Research 删除。
+      await utils.strategyDomain.strategyCandidate.get.invalidate({ candidateId: candidate.id });
       onPromoted?.();
     } catch (e) {
       setResult(null);
@@ -174,6 +172,7 @@ export function PromoteCandidateDialog({
           promotable
             ? "把这个候选转正为正式策略（唯一入口；定义由后端从草图生成）"
             : `只有 ACCEPTED（已采纳）的候选可以转正，当前状态：${candidate.status}`
+              + "。全部 gate 与当前值见页面上的「Promotion Eligibility」卡片。"
         }
         onClick={() => setOpen(true)}
       >
@@ -220,6 +219,11 @@ export function PromoteCandidateDialog({
               {!promotable && (
                 <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
                   当前状态不是 ACCEPTED，后端会以 CANDIDATE_NOT_ACCEPTED 拒绝。请先在候选页做状态流转。
+                  <span className="mt-1 block">
+                    转正资格的完整说明（每条 gate 的当前值 / 要求 / 失败原因）由候选详情页上的
+                    「Promotion Eligibility」卡片承载 —— 本弹窗只在按钮可用时才会打开，
+                    不承担解释职责。
+                  </span>
                 </p>
               )}
 

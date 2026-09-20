@@ -183,6 +183,41 @@ export type ParameterSearchMetricsView = z.infer<typeof parameterSearchMetricsVi
 export const parameterSearchMetricsSourceSchema = z.enum(["canonical", "evaluators"]);
 export type ParameterSearchMetricsSource = z.infer<typeof parameterSearchMetricsSourceSchema>;
 
+// ---------------------------------------------------------------------------
+// FRONTEND-FINAL-001（P0-2）— 请求参数 vs 实际被消费参数的对照
+// ---------------------------------------------------------------------------
+
+/**
+ * 参数解析状态。
+ *
+ * 语义边界（**唯一口径**；全仓只此一套，不另立 `actualParameters` 等同义字段）：
+ *
+ * - `MATCHED`     —— 请求参数集的**每一个键**，在解析结果上都取到同值
+ *                    （即「搜索参数与实际解析参数一致」）。
+ *                    ⚠️ 解析结果**多出的**键（未参与搜索的 FIXED / DERIVED 等声明参数
+ *                    回落到 `defaultValue`）是**预期行为**，**不计为差异** ——
+ *                    见 `additionalParameterCodes`。用「整集深比较」判差异会把每一条都误判成 DIFFERENT。
+ * - `DIFFERENT`   —— 至少一个请求键的解析值与请求值不同（`differentParameterCodes` 列出）。
+ * - `UNAVAILABLE` —— 该结果行**没有**记录解析结果（组合失败未走到评估端口，
+ *                    或留档早于本字段上线）。**禁止**在此态下推断成 `MATCHED`。
+ */
+export const parameterResolutionStatusSchema = z.enum(["MATCHED", "DIFFERENT", "UNAVAILABLE"]);
+export type ParameterResolutionStatus = z.infer<typeof parameterResolutionStatusSchema>;
+
+/** 请求参数 ↔ 实际被消费参数的对照结论（**服务端计算**，前端只渲染，不在组件里比大小）。 */
+export const parameterResolutionViewSchema = z.object({
+  status: parameterResolutionStatusSchema,
+  /** 比较基数：请求参数集的键数。 */
+  requestedParameterCount: z.number().int().nonnegative(),
+  /** 解析结果覆盖的键数（通常 ≥ 请求数）。 */
+  resolvedParameterCount: z.number().int().nonnegative(),
+  /** 请求键中「解析值 ≠ 请求值」的键（升序）。 */
+  differentParameterCodes: z.array(z.string()),
+  /** 解析结果中多出的键（未参与本次搜索的声明参数；升序）。 */
+  additionalParameterCodes: z.array(z.string()),
+});
+export type ParameterResolutionView = z.infer<typeof parameterResolutionViewSchema>;
+
 /** 单组合评估产物（可追溯到 Backtest Run / Evaluation）。 */
 export const parameterSearchResultViewSchema = z.object({
   recordKind: z.literal(PARAMETER_SEARCH_RESULT_RECORD_KIND),
@@ -212,6 +247,16 @@ export const parameterSearchResultViewSchema = z.object({
     .nullable(),
   /** 复现要素快照（cache 判据的组成部分，如实记录）。 */
   evaluationConfigFingerprint: z.string().nullable(),
+  /**
+   * 「**实际被消费的参数集**」= 装配层 `resolveParameters(document.parameters, overrides)` 的产物
+   * （请求覆写 ∪ `defaultValue`），由评估端口 `StrategyEvaluationResult.parameterSet` 原样透出。
+   *
+   * FRONTEND-FINAL-001（P0-2）追加，**只读投影**：不重算、不二次解析、不为反推而重跑策略。
+   * 留档中没有该记录时为 `null`（历史行 / 失败路径）—— 此时 UI 必须显示 `UNAVAILABLE`，不得猜。
+   */
+  resolvedParameterSet: z.record(z.string(), parameterSearchValueSchema).nullable(),
+  /** 请求参数 ↔ 实际被消费参数的对照结论（服务端算好，前端直接渲染）。 */
+  parameterResolution: parameterResolutionViewSchema.nullable(),
   createdAt: z.string().min(1),
 });
 export type ParameterSearchResultView = z.infer<typeof parameterSearchResultViewSchema>;

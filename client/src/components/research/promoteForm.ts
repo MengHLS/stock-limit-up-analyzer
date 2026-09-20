@@ -12,13 +12,13 @@
  *   - 「能不能转正」只依据**状态字面量**（`ACCEPTED`），不依据任何本地推导；
  *   - 「执行 Dataset」只依据 **`datasetVersionId`**（`dataset_version.id` 唯一坐标），
  *     label / datasetCode 只用于显示；
- *   - 「READY」判定复用 `createExperimentForm#isUsableVersionStatus`（与 Research 新建实验、
+ *   - 「READY」判定复用 `lib/datasetVersionStatus#isUsableVersionStatus`（与策略基本信息卡、
  *     Strategy 基础信息**同一处口径**），不另立一份；
  *   - 提交体**永远不可能**包含 `strategyDefinition` / `definition` / `strategyDocumentJson`
  *     —— 由类型 + 构造流程双重保证（§14）。
  */
 
-import { isUsableVersionStatus } from "./createExperimentForm";
+import { isUsableVersionStatus } from "@/lib/datasetVersionStatus";
 
 /** 唯一允许转正的状态（后端 `CANDIDATE_NOT_ACCEPTED` 门槛的镜像）。 */
 export const PROMOTABLE_STATUS = "ACCEPTED";

@@ -2,7 +2,7 @@
 
 # 测试资产总览（tests/ 与 docs/testing/ 的唯一索引）
 
-全仓测试文件 **288** 个 ｜ 用例声明 **4812** 个 ｜ 模块 **28** 个
+全仓测试文件 **290** 个 ｜ 用例声明 **4839** 个 ｜ 模块 **28** 个
 其中：环境依赖（离线必失败）**7** 个 ｜ 已知失效 **1** 个 ｜ 源码文本断言 **22** 个
 
 > 本目录由 `pnpm run docs:tests` 生成，**禁手改**；改测试后重跑即同步。
@@ -107,10 +107,10 @@
 | `server/historicalState` | [`server/historicalState/_index.md`](server/historicalState/_index.md) | 5 | 64 | - | 1 |
 | `server/marketData` | [`server/marketData/_index.md`](server/marketData/_index.md) | 9 | 95 | - | - |
 | `server/portfolio` | [`server/portfolio/_index.md`](server/portfolio/_index.md) | 1 | 17 | - | - |
-| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 69 | 1810 | - | 6 |
+| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 70 | 1817 | - | 6 |
 | `server/researchCore` | [`server/researchCore/_index.md`](server/researchCore/_index.md) | 8 | 125 | - | - |
 | `server/researchDataset` | [`server/researchDataset/_index.md`](server/researchDataset/_index.md) | 9 | 89 | - | - |
-| `server/researchEngine` | [`server/researchEngine/_index.md`](server/researchEngine/_index.md) | 19 | 281 | - | - |
+| `server/researchEngine` | [`server/researchEngine/_index.md`](server/researchEngine/_index.md) | 20 | 301 | - | - |
 | `server/risk` | [`server/risk/_index.md`](server/risk/_index.md) | 2 | 50 | - | - |
 | `server/riskEngine` | [`server/riskEngine/_index.md`](server/riskEngine/_index.md) | 1 | 18 | - | - |
 | `server/runWorkbenchAssembly` | [`server/runWorkbenchAssembly/_index.md`](server/runWorkbenchAssembly/_index.md) | 2 | 26 | - | - |

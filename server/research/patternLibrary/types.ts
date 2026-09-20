@@ -44,12 +44,12 @@ import type {
   ResearchConditionValue,
   ResearchConclusionType,
   ResearchType,
-} from "../../researchCore";
+} from "../vocabulary";
 import type { PatternSemanticDeclaration } from "../../../shared/patternSemantics";
 import type {
   ResearchModuleCapability,
   ResearchTargetKind,
-} from "../../researchEngine/planner/moduleRegistry";
+} from "./moduleRegistry";
 import type { ResearchParameterDefinition } from "../types";
 
 // ---------------------------------------------------------------------------

@@ -23,12 +23,12 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { adminProcedure, publicProcedure, router } from "../../_core/trpc";
+import { ResearchCandidateError } from "../candidateRules";
 import {
-  ResearchCandidateError,
   ResearchConflictError,
   ResearchReferenceError,
-  createDbResearchRepositories,
-} from "../../researchCore";
+} from "../candidateRepositoryErrors";
+import { createDbResearchCandidateRepository } from "../candidateRepository";
 import {
   STRATEGY_CANDIDATE_ERROR,
   StrategyCandidateError,
@@ -36,6 +36,10 @@ import {
 import { RegistryDatasetVersionReadPort } from "./datasetVersionPort";
 import { DbStrategyResearchProvenanceRepository } from "./provenance";
 import { createStrategyPromotionPort } from "./strategyPromotionPort";
+// RESEARCH-EXPERIMENT-002：独立实验注册表（仅用于溯源视图的「上游存活探测」）。
+// 🔴 引的是**轻量**模块 `registryDefaults`（只依赖注册表 + 清单），
+//    不是 `defaults.ts`（那个会带上 DB 与 researchEngine）。
+import { defaultExperimentRegistry } from "../../researchExperiments/registryDefaults";
 import {
   createStrategyCandidateService,
   type StrategyCandidateService,
@@ -88,24 +92,6 @@ const overridesSchema = z
   })
   .optional();
 
-const createFromConclusionInput = z.strictObject({
-  conclusionId: z.number().int().positive(),
-  name: z.string().min(1).optional(),
-  description: z.string().nullable().optional(),
-  overrides: overridesSchema,
-  /**
-   * PHASE-D-001 —— 是否启用 Evidence → Rule 确定性派生（缺省 true，即**默认派生**）。
-   * 显式 `false` 用于「逐字回到修复前行为」的对照（零回归可断言）。
-   */
-  deriveFromEvidence: z.boolean().optional(),
-});
-
-/**
- * 普通 update 的 patch：**只列可编辑草图字段**。
- *
- * `strictObject` 让 `{ status: ... }` / `{ experimentId: ... }` 这类越界请求在**传输层**即被拒
- * （BAD_REQUEST，`unrecognized_keys`）；服务层的闭集白名单是第二道防线（§15 / §16）。
- */
 const updateInput = z.strictObject({
   candidateId: z.number().int().positive(),
   patch: z.strictObject({
@@ -257,25 +243,6 @@ export function buildStrategyCandidateRouter(deps: StrategyCandidateRouterDeps) 
         }
       }),
 
-    /** 登记候选（人的动作 ①）：Research Conclusion → Strategy Candidate。写操作 → admin。 */
-    createFromConclusion: adminProcedure
-      .input(createFromConclusionInput)
-      .mutation(async ({ input }) => {
-        try {
-          return await service.createFromConclusion({
-            conclusionId: input.conclusionId,
-            ...(input.name === undefined ? {} : { name: input.name }),
-            ...(input.description === undefined ? {} : { description: input.description }),
-            ...(input.overrides === undefined ? {} : { overrides: input.overrides }),
-            ...(input.deriveFromEvidence === undefined
-              ? {}
-              : { deriveFromEvidence: input.deriveFromEvidence }),
-          });
-        } catch (e) {
-          toTrpcError(e);
-        }
-      }),
-
     /** 有限编辑研究草图（白名单闭集；状态 / 结构锚 / 来源快照一律拒绝）。写 → admin。 */
     update: adminProcedure
       .input(updateInput)
@@ -369,12 +336,18 @@ export function createDefaultStrategyCandidateRouter(
 ): StrategyCandidateRouter {
   return buildStrategyCandidateRouter({
     service: createStrategyCandidateService({
-      repos: createDbResearchRepositories(),
+      candidates: createDbResearchCandidateRepository(),
       datasetVersions: new RegistryDatasetVersionReadPort(),
       strategies: createStrategyPromotionPort(
         options.codeVersion === undefined ? {} : { codeVersion: options.codeVersion },
       ),
       provenance: new DbStrategyResearchProvenanceRepository(),
+      // RESEARCH-EXPERIMENT-002：独立实验来源的**上游存活探测**。
+      // 只传 `exists`（不传整个 runner / dataset 桥）—— 避免为一个存活探测把 DB 与
+      // researchEngine 拉进桥的运行时模块图（002 的图可达性判据要求生产链不被污染）。
+      experimentDefinitions: {
+        exists: (id: string) => defaultExperimentRegistry().has(id),
+      },
     }),
   });
 }

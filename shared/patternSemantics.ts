@@ -144,6 +144,56 @@ export interface SemanticStrategyProjection {
 }
 
 /**
+ * 事件日 K 线上可作**基准 / 分母**的字段白名单。
+ *
+ * 🔴 为什么必须白名单：归一化的分母只能取自**事件日（T）已确定**的字段，否则
+ * 「除以什么」本身就可能引入未来信息。白名单外的字段名一律在注册期拒绝。
+ */
+export const SEMANTIC_BASELINE_FIELDS = ["open", "high", "low", "close", "volume", "amount"] as const;
+export type SemanticBaselineField = (typeof SEMANTIC_BASELINE_FIELDS)[number];
+
+/**
+ * **归一化声明**（AR-12 修复 · 9cc）—— 把「来源字段的聚合值」换算成 `definition` 里
+ * 写明的那个**人工可读口径**。
+ *
+ * ## 为什么必须有它（缺陷现场）
+ *
+ * 修复前，`definition` 可以写「(t0Open − min(Low)) / t0Open」这样一个**归一化比例**，
+ * 而 Expander 只会做 `MIN(low)` —— 即**绝对价格**。两者数学意义完全不同：
+ * `min(low)` 恒为正数，于是「≤ 0 = 全程未跌破」恒为假（0 样本）、「> 0」恒为真（全样本）
+ * ⇒ 以它作条件的 Finding **永远产不出来**（真库实测）。这是纯粹的**声明与实现不一致**，
+ * 不是数据问题。
+ *
+ * ## 语义（唯一 Expander 执行；两侧投影共用）
+ *
+ * ```text
+ * aggregation 与 windowDays 先在该语义的窗口上算出 raw = AGG(field, T+1..T+k)
+ * 分子 numerator = numerator === "DIFFERENCE"
+ *                    ? baseline[referenceField] − raw      // 「回撤深度」型：基准 − 现价
+ *                    : raw                                 // 「比率」型：现价本身
+ * 结果 value     = divisorField === undefined ? numerator : numerator / baseline[divisorField]
+ * ```
+ *
+ * `baseline` = **事件日（T）那根 bar**（`needsEventBar`），其值在 T 日已确定 ⇒
+ * 读它**不引入未来信息**（与 `variables.ts` 观察日变量既有做法同口径）。
+ *
+ * 🔴 缺失 / 非有限 / 分母 ≤ 0 一律返回 `null`（**不臆造**）—— 与既有
+ * `toReturn` / `toRatio` 同纪律。
+ */
+export interface SemanticNormalization {
+  /**
+   * 分子形态：
+   *   - `"DIFFERENCE"`（基准 − 聚合值）—— 表达「回撤 / 偏离」这类**有符号**量；
+   *   - `"DIRECT"`（聚合值本身）—— 表达「比率 / 倍数」这类量。
+   */
+  readonly numerator: "DIFFERENCE" | "DIRECT";
+  /** 被减数基准字段（**仅 `DIFFERENCE` 必填**）；必须在 `SEMANTIC_BASELINE_FIELDS` 内。 */
+  readonly referenceField?: SemanticBaselineField;
+  /** 分母基准字段（可省略 = 不做除法）；必须在 `SEMANTIC_BASELINE_FIELDS` 内。 */
+  readonly divisorField?: SemanticBaselineField;
+}
+
+/**
  * **Pattern 受控语义声明**（纯数据）。
  *
  * Pattern 作者只写这个对象；它不含任何可执行内容。
@@ -167,6 +217,12 @@ export interface PatternSemanticDeclaration {
    */
   readonly windowDays?: number;
   /**
+   * **归一化**（AR-12 修复）：省略 = 直接用聚合值，此时 `definition` 必须只描述该字段本身
+   * （例如「窗口内最低成交量」）。凡是 `definition` 写成**比例 / 回撤深度**的语义，
+   * **必须**声明它 —— 否则声明与实现不一致（真库实测：`pat_*` 恒为正 ⇒ 条件无区分度）。
+   */
+  readonly normalization?: SemanticNormalization;
+  /**
    * 该值最早在事件后第几个交易日**收盘**可观测（k ≥ 0）。
    *
    * 🔴 这是本机制的 PIT 核心：`EVENT_BAR`/`PREFIX_BAR` ⇒ 0；`POST_BAR` ⇒ 必须等于 windowDays
@@ -189,6 +245,8 @@ export interface ExpandedSemantic {
   readonly aggregation: SemanticOperator | null;
   /** 窗口（交易日）；单点取值为 1。 */
   readonly windowDays: number;
+  /** 归一化（AR-12）：`null` = 直接用聚合值（声明不得写比例口径）。 */
+  readonly normalization: SemanticNormalization | null;
   /** 该值最早可观测的交易日偏移（= T + 该值收盘）。 */
   readonly availableFromOffset: number;
   readonly definition: string;
@@ -209,6 +267,7 @@ export interface SemanticIssue {
     | "AVAILABILITY_MISMATCHES_WINDOW"
     | "OUTCOME_SOURCE_AS_CONDITION"
     | "MISSING_STRATEGY_FEATURE_ID"
+    | "INVALID_NORMALIZATION"
     | "DUPLICATE_SEMANTIC_ID";
   readonly semanticId: string;
   readonly message: string;
@@ -330,6 +389,67 @@ export function validateSemanticDeclaration(
     }
   }
 
+  /**
+   * 🔴 AR-12 修复（9cc）—— 归一化校验。
+   *
+   * 四条判据（全部是「声明能不能被唯一执行」的必要条件）：
+   *   ① `DIFFERENCE` **必须**给 `referenceField`（否则不知道减谁）；
+   *      `DIRECT` **不得**给 `referenceField`（给了说明作者以为要做差，与声明矛盾 ⇒ 拒绝，不猜）。
+   *   ② `referenceField` / `divisorField` 必须在事件日字段白名单内（白名单外 = 分母来源不可控）。
+   *   ③ 分母字段不得与「分子恒等」的写法混淆：`DIRECT` + 无 `divisorField` 等价于没有归一化
+   *      ⇒ 拒绝（那说明作者本意是归一化却没写完，静默放过会让声明与实现再次不一致）。
+   *   ④ `normalization` 只允许出现在 `POST_BAR` 来源上 —— 事件日 / 前缀来源取的就是 T 日当根，
+   *      本身已经是绝对值，声明里再叠一层归一化只会让口径含糊。
+   */
+  if (declaration.normalization !== undefined) {
+    const norm = declaration.normalization;
+    if (declaration.source !== "POST_BAR") {
+      issues.push({
+        code: "INVALID_NORMALIZATION",
+        semanticId: id,
+        message: `normalization 只允许用于 POST_BAR 来源（实得 ${String(declaration.source)}）—— `
+          + "事件日 / 前缀来源取的就是 T 日当根，不存在「相对基准归一化」的语义",
+      });
+    }
+    if (norm.numerator === "DIFFERENCE" && norm.referenceField === undefined) {
+      issues.push({
+        code: "INVALID_NORMALIZATION",
+        semanticId: id,
+        message: "numerator=DIFFERENCE 必须给出 referenceField（被减数基准字段），否则无从计算",
+      });
+    }
+    if (norm.numerator === "DIRECT" && norm.referenceField !== undefined) {
+      issues.push({
+        code: "INVALID_NORMALIZATION",
+        semanticId: id,
+        message: "numerator=DIRECT 不得给出 referenceField —— "
+          + "两处声明矛盾（会让人无法判断究竟做不做差），拒绝而不是替你选一个",
+      });
+    }
+    const fields: Array<[string, string | undefined]> = [
+      ["referenceField", norm.referenceField],
+      ["divisorField", norm.divisorField],
+    ];
+    for (const [label, field] of fields) {
+      if (field === undefined) continue;
+      if (!(SEMANTIC_BASELINE_FIELDS as readonly string[]).includes(field)) {
+        issues.push({
+          code: "INVALID_NORMALIZATION",
+          semanticId: id,
+          message: `${label}="${String(field)}" 不在事件日字段白名单内（允许：${SEMANTIC_BASELINE_FIELDS.join(" / ")}）`,
+        });
+      }
+    }
+    if (norm.numerator === "DIRECT" && norm.divisorField === undefined) {
+      issues.push({
+        code: "INVALID_NORMALIZATION",
+        semanticId: id,
+        message: "normalization 声明了 DIRECT 却没有 divisorField —— 等于没有归一化；"
+          + "若本意就是取绝对值，请**删掉 normalization** 并把 definition 改成「绝对值」口径",
+      });
+    }
+  }
+
   return issues;
 }
 
@@ -382,6 +502,7 @@ export function expandPatternSemantics(
       field: declaration.field,
       aggregation,
       windowDays,
+      normalization: declaration.normalization ?? null,
       availableFromOffset: declaration.availableFromOffset,
       definition: declaration.definition,
       intent: declaration.intent,

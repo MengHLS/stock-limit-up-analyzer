@@ -21,7 +21,10 @@
  *   - 并发创建同一版本由 DB 唯一约束 (strategyId, version) 兜底。
  */
 
-import type { StrategyProjections } from "../strategySchema/projection";
+import type {
+  StrategyParameterProjectionRow,
+  StrategyProjections,
+} from "../strategySchema/projection";
 import type { StrategyDocument, StrategyVersionRecord } from "../strategySchema/types";
 
 /** 策略实体摘要（列表展示，不含版本内容）。 */
@@ -88,6 +91,56 @@ export interface StrategyVersionBundle {
   readonly createdAt: string;
   readonly updatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// FRONTEND-FINAL-001（P1-1）— loadBundle 的**只读**参数引用面扩展
+// ---------------------------------------------------------------------------
+
+/**
+ * `loadBundle` 的参数投影行 = 持久化投影行 + 规则图**引用面**只读判定。
+ *
+ * 🔴 为什么单独开一个类型而不是改 `StrategyParameterProjectionRow`：
+ *   后者与 `strategy_parameters` 表**逐列一一对应**（见 `strategySchema/projection.ts` 头注），
+ *   而 `strategy_parameters` **没有** `referenced` 列 —— 直接加字段会让「投影行 == DB 行」的
+ *   契约失真，并迫使 db.ts / inMemory.ts 去伪造一个落库值。
+ *   ⇒ 本扩展只在 `StrategyService.loadBundle` 读取时按 canonical 文档即时判定，**不落库**。
+ */
+export interface StrategyParameterBundleRow extends StrategyParameterProjectionRow {
+  /**
+   * 该参数 code 是否被该版本规则图引用（= 执行链会不会读它）。
+   *
+   * ⚠️ 当 `ParameterReferenceCheckSummary.applied === false`（不可判定）时，本字段恒为 `false`，
+   *   **不代表「未被引用」** —— 读取方必须先看 `applied` 再解释本字段。
+   */
+  readonly referenced: boolean;
+}
+
+/** `loadBundle` 的投影集合：除参数行多一个 `referenced` 外，与 `StrategyProjections` 逐字段一致。 */
+export interface StrategyBundleProjections extends Omit<StrategyProjections, "parameters"> {
+  readonly parameters: readonly StrategyParameterBundleRow[];
+}
+
+/**
+ * 参数引用面检查的**可信度说明**（与 `referenced` 配套，二者缺一不可）。
+ *
+ * 🔴 存在的理由（FRONTEND-FINAL-001 规格 §六）：引用面只在「Core 版本可构造」时可判定。
+ *   不可判定时**不得**把 `referenced` 默认成 `true` 或 `false` 冒充结论，
+ *   必须由 `applied = false` + `note` 显性说明，前端据此显示「不可判定」而不是「未被引用」。
+ */
+export interface ParameterReferenceCheckSummary {
+  /** 是否真的完成了引用面判定；`false` = 不可判定（此时 `referencedCodes` 与每行 `referenced` 均无意义）。 */
+  readonly applied: boolean;
+  /** 判定成功时：被规则图（入口 + 出场 + 声明式出场规则）引用的参数 code（去重、稳定升序）。 */
+  readonly referencedCodes: readonly string[];
+  /** 人读的判定口径 / 降级说明（必定非空）。 */
+  readonly note: string;
+}
+
+/** `loadBundle` 的读取结果 = 既有版本包 + 参数引用面（只读派生，不落库、不改变既有字段语义）。 */
+export type StrategyVersionBundleWithReferences = Omit<StrategyVersionBundle, "projections"> & {
+  readonly projections: StrategyBundleProjections;
+  readonly parameterReferenceCheck: ParameterReferenceCheckSummary;
+};
 
 /** saveVersion 的结果（幂等三态）。 */
 export type SaveVersionOutcome = "inserted" | "idempotent-skip" | "conflict";

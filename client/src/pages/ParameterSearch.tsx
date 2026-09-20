@@ -18,6 +18,7 @@
  */
 
 import { useState } from "react";
+import { useParams } from "wouter";
 import {
   Dices,
   Loader2,
@@ -54,17 +55,27 @@ import SearchRobustnessPanel from "@/components/robustness/SearchRobustnessPanel
 import OosValidationPanel from "@/components/oos/OosValidationPanel";
 import WalkForwardPanel from "@/components/walkForward/WalkForwardPanel";
 import { trpc } from "@/lib/trpc";
-import { createTRPCReact } from "@trpc/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { ParamSearchRouter } from "../../../server/paramSearchRouter";
 
 // ---------------------------------------------------------------------------
-// 类型：paramSearch 端点尚未合并进 appRouter，先用类型断言构造客户端；
-// 协调者合并后改回 `trpc.paramSearch.*`（预期内的临时类型隔离）。
+// 🔴 FRONTEND-FINAL-001（冒烟实测发现的真缺陷）
+//
+// 原写法：`type ParamSearchClient = ReturnType<typeof createTRPCReact<ParamSearchRouter>>` +
+// `const paramSearch = trpc as unknown as ParamSearchClient;` —— 当时 `paramSearch` 尚未并入
+// `appRouter`，故用类型断言临时隔离。
+//
+// 但**端点早已合并**（`server/routers.ts:329` `paramSearch: paramSearchRouter`），断言就此变成
+// **错误映射**：`ParamSearchClient` 是「以 paramSearchRouter 为根」的客户端类型，因此
+// `paramSearch.describe` 发出的请求路径是**裸 `describe`**，服务端恒返回
+// `No procedure found on path "describe"`（无头浏览器实测，见
+// `docs/evidence/_probe_ff1_frontend_smoke.out.json`）⇒ 本页 `describe` 永远失败，
+// 组合数上限静默落到写死的 64。
+//
+// 修法：直接用真客户端 `trpc.paramSearch`（类型同源、路径正确）。
 // ---------------------------------------------------------------------------
 
-type ParamSearchClient = ReturnType<typeof createTRPCReact<ParamSearchRouter>>;
-const paramSearch = trpc as unknown as ParamSearchClient;
+const paramSearch = trpc.paramSearch;
 
 type DescribeOutput = inferRouterOutputs<ParamSearchRouter>["describe"];
 type SearchRun = inferRouterOutputs<ParamSearchRouter>["run"];
@@ -182,7 +193,18 @@ function heatCellStyle(returnPct: number | null, failed: boolean): React.CSSProp
 // 页面
 // ---------------------------------------------------------------------------
 
+/**
+ * FRONTEND-FINAL-001（P1-6）：本页同时挂在 `/parameter-search` 与 `/parameter-search/:runId`。
+ *
+ * 🔴 **不用 props 传 runId**：本页是 `wouter` 的 `component` 形态，其 props 由路由注入
+ *   （`RouteComponentProps`），自定义 props 会与之冲突（实测 `TS2322`）。
+ *   ⇒ 与 `DatasetDetail` 等页一致，**组件内部** `useParams()` 读路由段。
+ */
 export default function ParameterSearch() {
+  // `/parameter-search/:runId` 时给出 runId；`/parameter-search` 时为 undefined。
+  const routeParams = useParams<{ runId?: string }>();
+  const searchRunId =
+    routeParams.runId === undefined || routeParams.runId === "" ? null : routeParams.runId;
   const [mode, setMode] = useState<SearchMode>("grid");
   const [searchSeed, setSearchSeed] = useState("42");
   /**
@@ -324,7 +346,10 @@ export default function ParameterSearch() {
       </div>
 
       {/* ---- PARAMETER-001：持久化参数搜索（创建 → 执行 → 回看 → 重试）---- */}
-      <PersistedParameterSearchPanel />
+      <PersistedParameterSearchPanel
+        basePath="/parameter-search"
+        routeRunId={searchRunId}
+      />
 
       {/* ---- ROBUSTNESS-001：稳健性分析（消费已完成的搜索结果；零重跑）---- */}
       <SearchRobustnessPanel />

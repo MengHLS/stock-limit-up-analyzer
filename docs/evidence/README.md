@@ -1003,3 +1003,53 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > ⚠️ 坑六：**审计前先判定「该不该全量审计」** —— 本轮先做 Drift 检测，判定命中
 > `GLOBAL AUDIT REQUIRED` #1（Domain 新增）+ #4（核心数据流变化：判定日）+ #7（核心 Contract 变化：4 份新契约）
 > 才做全量；否则按协议只做增量。
+
+## 9cc · Parameter Consumption + Semantic + Provenance + Projection 四断点闭环
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_probe_9cc_audit.mts` + `.out.json` | **只读**审计（Phase A + C 的证据面）。不猜列名（先读 `information_schema`）。读数：`research_conclusion` **15** 条 —— `findingIdsJson` **12 NULL + 3 空数组（无一非空）**，且 `researchQuestion` / `evidenceSummary` **全 NULL**、`limitationsJson` / `nextQuestionsJson` 全 `[]`；其中 `660001` / `660003` 所属 Run（`750001` / `750003`）**各有 24 条 Finding** ⇒ 证据链在**列上**断开。`research_strategy_candidate` **13** 条、`sourceFindingIdsJson` 非空 **4** 条。`parameter_search_*` = **3 / 12 / 8** 行；唯一 `COMPLETED` 的 Run（`PSRUN-20260919-15d3afc8`）4 个组合 `totalReturnPct` **逐位相同**（`-44.526726784500006`）、`tradeCount=0`，而 `backtestFingerprint` **互不相同** ⇒「参数落库了但执行结果无差异」的现场 | `ROADMAP.md` `9cc` 条目、`docs/research/9cc-implementation.md` §3/§7 |
+| `_probe_9cc_strategy_params.mts` + `.out.json` | **只读**选材探针（Phase A 的**前置**：先找「规则图真的引用了 TUNABLE 参数」的策略版本，否则正例 E2E 只会得到重复结果）。走 `DbStrategyRepository#getVersionBundle`（与 `paramSearchRouter#loadStrategyBundle` 同路径）+ `collectRuleParameterReferences`。读数：**11 个策略版本全部 `referenced = []`** —— 其中 9 个声明了 3 个 TUNABLE（`max_drawdown` / `max_volume_ratio` / `require_bullish`，均带 min/max/step）**却一个都没被规则图引用** ⇒ 印证 `9bt` 的 N-02，也说明**仓库当时不存在可作正例的策略版本**（正例必须由 `createFromConclusion` 派生得到） | 同上 §3 |
+| `_e2e_9cc_closed_loop.mts` + `.out.json` | 🔴 **真实 DB 端到端，24/24 PASS**（走 `appRouter` 真实 tRPC + 真实 TiDB + 真实数据集 + 真实回测）。**§1（AR-12）** 三个 Run（Dataset Version `390002`、窗口 `2025-01-02..2025-02-28`、`decisionOffsetDays=2`）：`pat_pullback_hold_depth_2d <= 0` ⇒ CONDITION **1436**、`> 0` ⇒ **282**、ALL **1718**（**修复前实测为 `0` / `1718`**，见 `_probe_d_conditional_shape.out.json`）⇒ 两侧互补且都有样本。**§1b（AR-13）** 三个结论的 `findingIdsJson` 分别 `[450001]` / `[450002]` / `[450003]`，**与本 Run 真实 Finding 逐 id 相等、零孤儿**（修复前是 `[]`）。**§2–§3（闭环一）** `createFromConclusion` 派生出 `filterRule = [{bar.volumeRatio, <=, max_volume_ratio}]`、`sourceFindingIds=[450003]` → `promote` ⇒ `cand-1110001@1.0.0`，其**规则图引用 `max_volume_ratio`**（`9bt` 指出的历史缺口当场闭合）。**§4（闭环二）** 2 个组合（`max_volume_ratio` = **0.05 / 1**，声明全域两端）真实执行 16 s / 0 失败：`tradeCount` **0 → 1**、`totalReturnPct` **0 → −0.6814%**、撮合指纹 `dc5627dce6c7…` ≠ `0f02b2f64d0b…`。**§4b（实际消费）** 直接调评估端口复核：请求 `{max_volume_ratio:0.05}` ⇒ **实际消费** `{max_drawdown:0.02, max_volume_ratio:0.05, require_bullish:0}`（逐键相等）、复核指纹与落库**逐位相同**、且实际值**压过了文档默认值 0.3**。自建自清（`purgedAfter={experiments:1, strategies:1}`、`finalExperimentCount=7`） | 同上 §11/§12/§13 |
+
+> 🔴 本任务修正的一条**坑**（值得复用）：`9bt` 的「正例」是**手工改文档**的产物，仓库里
+> **没有任何一份已落库的策略版本**能让规则图引用参数（`_probe_9cc_strategy_params` 实测 11/11 引用面为空）。
+> ⇒ 参数消费的 E2E **必须先跑选材探针**，否则会拿「死参数策略」跑出「4 组指标全同」的假证据
+> （真库现存 PS Run 就是这个形态：4 组合指标逐位相同、指纹各异）。
+> ⚠️ 另一条：**参数域要取声明全域的端点**。首轮用 `{0.05, 0.25}`（远窄于 `max_drawdown` 声明域 `[0, 0.3]`）
+> 时两个组合成交/收益**逐位相同** —— 参数确实被消费（指纹不同），但阈值不咬数据 ⇒ 判据失去分辨力。
+> 另：**参数值域越界会以 `PARAMETER_OUT_OF_RANGE` 让该组合失败**（首轮把 `max_drawdown` 抬到 1.0 即踩）。
+
+| `_ops_cleanup_9cc_ps_residue.mts` + `.out.json` | 🔴 **一次性运维脚本（默认只读预览，`--apply` 才删）** —— 清理**本任务 E2E 遗留**的孤儿 Parameter Search 行。**为什么要它（如实登记）**：`_e2e_9cc_closed_loop.mts` 的 §5 自清原只按 `searchRunId` 删，而本会话**第二次试跑在 §4b 抛错**（参数越界）⇒ 没走到 §5 ⇒ 留下 1 run / 2 combinations / 2 results；第三次跑的新进程不知道那个 `searchRunId` ⇒ 永久残留（实测 `parameter_search_run` 由 3 变 **4**）。**判据（三条同时成立才删）**：① `strategyId` 形如 `cand-<正整数>`；② `strategies` 表里**不存在**该 id（孤儿）；③ `createdAt >= --since`（默认 `2026-09-20T00:00:00Z`）。**执行结果**：识别 1 个待删（`PSRUN-20260920-d2d6b9fc` / `cand-1050001`），**3 个用户自有的 `cand-360001` Run 全部保留**；删除 2 results + 2 combinations + 1 run ⇒ `parameter_search_run` 回到 **3**。**附带修掉一个真 bug**：`--since` 是 ISO（`T` 分隔）而 TiDB `createdAt` 是 `YYYY-MM-DD HH:MM:SS`（空格分隔）⇒ **字符串比较恒把「今天」判成窗外**，第一版预览因此报「待删 0 个」（**静默无效的清理**）；改为走 `Date.parse` 后正确。**并把 E2E 的自清改为「按 `strategyId` 也删一次」**（自愈：中途崩溃也不再生孤儿；`_combination`/`_result` 无 `strategyId` 列 ⇒ 先取 `searchRunId` 再删子表） | `ROADMAP.md` `9cc` 条目、`docs/research/9cc-implementation.md` §15 |
+
+## `9cd` · FRONTEND-FINAL-001（前端完整闭环实现）
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_probe_frontend_final_001_state.mts` + `.out.json` | **只读状态探针（阶段一审计的证据面）**。21 张研究/策略/参数/验证表的真实行数 + 关键表真实列名。**读数**：`research_analysis` **351** / `research_finding` **68** / `research_conclusion` **15** / `research_strategy_candidate` **13** / `strategy_versions` **11** / `strategy_parameters` **24**（`distinct parameterRole` **仅 TUNABLE**）/ `parameter_search_run·combination·result` = **3·12·8**；而 🔴 **`oos_validation_run` / `oos_validation_result` / `walk_forward_run` / `walk_forward_fold` / `search_robustness_run` 全部为 0** ⇒ 验证域三块前端面板**从未显示过任何真实数据**。结论 §15 覆盖：`findingIdsJson` 有值 **0**（12 NULL + 3 空数组）、`researchQuestion` / `evidenceSummary` **全 NULL**、`evidenceJson` 有值 15（其中含 finding 且 findingIds 空 = **3 条** = 历史兜底的真实适用对象）。**该探针踩到并已登记的一条坑**：本机 drizzle/TiDB `db.execute()` 返回的是 **`[rows, fields]`**，直接当 rows 用会让**所有 count 读成 0、`information_schema` 读成「表不存在」**，而 `errors` 数组仍为空 ⇒ 静默产出整张假结论（连跑 3 轮才发现） | `docs/research/FRONTEND-FINAL-001-AUDIT.md` |
+| `_probe_9cc_strategy_params.mts` + `.out.json`（重跑） | 选材探针**本轮重跑**以确认 P0-3 的前置条件：**11 个策略版本全部 `referenced = []`、`tunableReferenced = []`、`e2eEligible = false`** ⇒ 按规格 §5.1「不满足则停止真实运行」，**不得**拿现成版本跑参数搜索（否则只会复现「4 组合指标逐位相同」的假证据） | `docs/research/FRONTEND-FINAL-001-REPORT.md` |
+| `_ff1_walk_forward.keep.out.txt` | 🔴 **真实 Walk-Forward 全链**（`WF001_MODE=full WF001_KEEP=1`，**保留留档**）：**17/17 PASS / 真实执行 92 s**。产出 `walk_forward_run=2 / fold=4`、`oos_validation_run=+2 / result=+2`、`parameter_search_run=+2`。Fold 读数：`#0` IS `2025-01-02..2025-03-06` 收益 **−10.36% / 8 笔** → OOS `2025-03-07..2025-04-11` **+7.30% / 2 笔**；`#1` IS `2025-02-14..2025-04-11` **−3.65% / 0 笔** → OOS `2025-04-14..2025-05-21` **+21.66% / 1 笔**。W4~W14 逐条证明「每 Fold 独立搜索（`sourceSearchRunId` 互不相同）+ 独立样本外 + 泄漏窗口不重叠 + 幂等」 | `ROADMAP.md` `9cd` 条目 |
+| `_probe_ff1_backend_verification.mts` + `.out.json` | 🔴 **真实留档复核（只读 + 走 `appRouter.createCaller` 真 tRPC）**。① 表级计数证明「不再全 0」：`oos_validation_run=2 / result=2 / walk_forward_run=2 / fold=4 / parameter_search_run=5 / combination=16 / result=12`。② **P0-2 落库实测**：`parameter_search_result.reproductionJson` 里的 `resolvedParameterSet` **含未被请求的键**（请求 `{max_volume_ratio:1}` ⇒ 解析 `{max_drawdown:0.02, max_volume_ratio:1, require_bullish:0}`）⇒ 证明落的是**真实解析集**而非请求回显。③ **P0-2 对外投影实测**：`getSearchResults` 返回 `parameterResolution = {status:"MATCHED", requestedParameterCount:1, resolvedParameterCount:3, additionalParameterCodes:["max_drawdown","require_bullish"]}`。④ **参数真的改变执行**：同一 Run 两组合 `tradeCount` **0 → 16**、`totalReturnPct` **−3.65% → −2.59%**、`profitFactor` **null → 1.10**（对照：旧 Run `PSRUN-20260919-15d3afc8` 4 组合指标逐位相同） | `docs/research/FRONTEND-FINAL-001-REPORT.md` |
+| `_probe_ff1_frontend_smoke.mjs` + `.out.json` + `_ff1_frontend_smoke.log` | 🔴 **无头 Edge + CDP 前端路由冒烟**：16 条路由逐一导航并**量 DOM 正文**，**16/16 PASS、0 控制台错误**。判据不是「页面能打开」而是「**页面上出现真库里存在的 id**」（`OOSV-20260920-875957a6` / `WFV-20260920-5cceca95` / `PSRUN-20260920-e37d9c2a` 均命中）⇒ 证明页面读的是**真实留档**。**该探针抓到一个真缺陷**：控制台报 `No procedure found on path "describe"` ⇒ `ParameterSearch` / `WalkForwardAnalysis` / `ReviewWorkbench` 三处**过期类型断言**使请求路径退化成裸 `describe` / `journal.reconcile`（恒 404），致 FE-6 技术预览静默吃写死默认值、FE-7「端点就绪门」永远显示不可达；修后 `/parameter-search` 正文 3034 → **4082** 字符。另探针自身两处需注意：CDP 必须取 `/json/list` 的 **page 目标**（浏览器级 ws 不支持 `Page.enable`）；白屏阈值不能定太高（`/datasets` 是紧凑表格页，正文仅 139 字符但**含真实数据行**） | `ROADMAP.md` `9cd` 条目 |
+| `_ff1_test_changed.log` | `pnpm run test:changed` 原始输出：**2 失败文件 / 5 例，全部属既有环境依赖基线（`limitUp` / `limitUp.watch`）⇒ 零新增失败文件**（1504 passed / 1509） | `ROADMAP.md` `9cd` 条目 |
+
+## `9ce` · RESEARCH-EXPERIMENT-001（独立研究实验体系 + AI 接入规范）· 2026-09-20
+
+| 文件 | 作用 | 结论 |
+| --- | --- | --- |
+| `_e2e_research_experiments.mts` | 真库全链 E2E：`appRouter.createCaller` → `researchExperiments.run` → Runner → Registry 桥 → `ds_*` 五表 → 真实计算 → 结果信封 zod 复核；含**确定性第二次执行**与三个负例 | —— |
+| `_e2e_research_experiments.out.json` / `.out.txt` | 上述运行结果 | **28 PASS / 0 FAIL**（墙钟 19.3 s；`eventCount=20000`/`prefixRowCount=20000`/`postRowCount=100000`；样本账 100000=1996+98004；同输入第二次执行指纹**逐字节相等**；**24 张严格守恒表 Δ=0**，负例前后行数一致） |
+| `_probe_research_experiments_frontend.mjs` | 前端可达性冒烟（无头 Edge + CDP，量 DOM）：列表页 / 详情页 / **真实点击运行** / 结果页挂载 / 错误态 / 控制台 | —— |
+| `_probe_research_experiments_frontend.out.json` / `.out.txt` | 上述运行结果 | **23 PASS / 0 FAIL**（挂载 `data-experiment-page` + 3 表 + 2 张 recharts 图 + 执行元数据；不存在实验显示 `EXPERIMENT_NOT_FOUND` 结构化错误态；无 `No procedure found on path`） |
+| `_probe_experiment_dataset_choice.mts` | 只读选材探针：列 `dataset_definition` / `dataset_version` 与 READY 版本五表行数、rd 覆盖、事件与窗口样本（供示例实验选坐标） | 实测 `dataset_version` 仅 `390001 v1`（1130 事件）与 `390002 v2`（23978 事件）两个 READY 版本；prefix rd ∈ [-20,0]、post rd ∈ [1,20] |
+
+**两条留给后人的判据提醒（本会话真踩）**：
+
+1. 🔴 **列投影必须并上骨架列**（`eventId` / `tradeDate` / `symbol` / `relativeDay` / `datasetVersionId`）：
+   只下推「声明列」会把身份列裁掉 ⇒ 领域映射器产出 `eventId: undefined` ⇒ 按 eventId 批量取行情**恒 0 行**
+   （首次 E2E 症状 `prefixRowCount=0` + 全部样本 `MISSING_EVENT_DAY_BAR`）；
+   ⚠️ **单测抓不到** —— `InMemoryResearchDatasetReader` 不实现列裁剪 ⇒ 判据只能是本探针（真库）或
+   `tests/server/researchExperiments/datasetPort.test.ts` 里「断言下推查询的 `columns`」那一例。
+2. 🔴 **CDP 探针必须先设桌面视口**（`Emulation.setDeviceMetricsOverride` 1440×900）：
+   `Sidebar collapsible="icon"` 在默认 800×600 下折叠 ⇒ 菜单文字不进 `innerText`，
+   曾把「侧栏缺导航项」误判为产品缺陷（1440 下 29 项齐全）。

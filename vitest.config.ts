@@ -10,6 +10,9 @@ export default defineConfig({
       "@": path.resolve(templateRoot, "client", "src"),
       "@shared": path.resolve(templateRoot, "shared"),
       "@assets": path.resolve(templateRoot, "attached_assets"),
+      // RESEARCH-EXPERIMENT-001 — 独立研究实验体系根目录（与 vite.config.ts 保持一致；
+      // 两处别名不同步会让「测试里能跑、浏览器里跑不起来」这类问题出现）。
+      "@experiments": path.resolve(templateRoot, "research-experiments"),
     },
   },
   test: {

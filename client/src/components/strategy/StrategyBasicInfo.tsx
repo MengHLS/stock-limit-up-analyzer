@@ -29,8 +29,8 @@ import {
 } from "@/components/ui/select";
 import { FileText, Loader2, RefreshCw } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { formatCount } from "@/adapters/researchEngineAdapter";
-import { isUsableVersionStatus } from "@/components/research/createExperimentForm";
+import { formatCount } from "@/lib/displayFormat";
+import { isUsableVersionStatus } from "@/lib/datasetVersionStatus";
 import type { StrategyViewModel } from "@/adapters/strategyAdapter";
 
 /** 派生 universe 标识（= deriveDatasetUniverseId(datasetVersion)）。 */

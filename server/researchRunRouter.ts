@@ -26,10 +26,10 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { publicProcedure, router } from "./_core/trpc";
-import {
-  registerBuiltInResearchStrategies,
-  researchStrategyRegistry,
-} from "./research";
+// RESEARCH-EXPERIMENT-003 — 研究层 barrel 已删除；本 router 只用到两件东西，
+// 改为显式按文件导入（barrel 会让整个旧 Research 目录进入可达集）。
+import { registerBuiltInResearchStrategies } from "./research/adapter";
+import { researchStrategyRegistry } from "./research/registry";
 import { readCertifiedGate } from "./dataHealth";
 import { runClosedLoop } from "./research/closedLoop/orchestrator";
 import {
@@ -101,7 +101,6 @@ import {
   describeExecutionPolicy,
 } from "./backtest/context";
 import type { AssembledStrategySide } from "./runWorkbenchAssembly/assemble";
-import { describeResearchChainHealth } from "./researchChainHealth";
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
 import { perfBegin, perfCount, perfEnd, perfRun, perfRunAsync } from "./observability";
 
@@ -378,23 +377,6 @@ export const researchRunRouter = router({
       const byId: Record<string, (typeof labels)[number]> = {};
       for (const label of labels) byId[label.securityId] = label;
       return byId;
-    }),
-
-  /**
-   * 研究链体检（**只读**，STEP 0-3 / RESEARCH-CHAIN-HEALTH-001）。
-   *
-   * 一次回答「这个实验的 提问/计划/假设/分析/结果/发现/结论/候选 各多少、**哪一环是空的**」。
-   * 起因：用户实报「分析研究模块过于复杂，导致无法从分析中人工得出结论」——
-   * 复杂本身不是病，**看不见断在哪一环**才是。本端点把断环显式列进 `gaps`。
-   *
-   * 零副作用：只读计数，不写任何行。
-   * 实验不存在 ⇒ `experiment: null` + `gaps` 说明，**不伪造空链**。
-   */
-  chainHealth: publicProcedure
-    .input(z.object({ experimentId: z.number().int().positive() }))
-    .output(researchChainHealthSchema)
-    .query(async ({ input }) => {
-      return await describeResearchChainHealth(input.experimentId);
     }),
 
   /**

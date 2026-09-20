@@ -529,9 +529,9 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
   const urlVersion = new URLSearchParams(search).get("version");
   const pinnedVersion = urlVersion !== null && urlVersion !== "" ? urlVersion : null;
 
-  const validate = trpc.research.strategy.validate.useMutation();
-  const save = trpc.research.strategy.save.useMutation();
-  const createVersion = trpc.research.strategy.createVersion.useMutation();
+  const validate = trpc.strategyDomain.strategy.validate.useMutation();
+  const save = trpc.strategyDomain.strategy.save.useMutation();
+  const createVersion = trpc.strategyDomain.strategy.createVersion.useMutation();
 
   // ---- 编辑器状态 ----
   const initialDocument = () => (isNew ? emptyDraftDocument() : TEMPLATE_DOCUMENT);
@@ -566,7 +566,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
 
   // ---- 后端真实数据源 ----
   const loadEnabled = !isNew;
-  const loadLatest = trpc.research.strategy.load.useQuery(
+  const loadLatest = trpc.strategyDomain.strategy.load.useQuery(
     { strategyId },
     {
       enabled: loadEnabled && pinnedVersion === null,
@@ -574,7 +574,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
       refetchOnWindowFocus: false,
     }
   );
-  const loadPinned = trpc.research.strategy.loadVersion.useQuery(
+  const loadPinned = trpc.strategyDomain.strategy.loadVersion.useQuery(
     { strategyId, version: pinnedVersion ?? "" },
     {
       enabled: loadEnabled && pinnedVersion !== null,
@@ -586,7 +586,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
   const loadFetching = loadLatest.isFetching || loadPinned.isFetching;
   const loadData = pinnedVersion === null ? loadLatest.data : loadPinned.data;
 
-  const versionList = trpc.research.strategy.listVersions.useQuery(
+  const versionList = trpc.strategyDomain.strategy.listVersions.useQuery(
     { strategyId },
     { enabled: loadEnabled, refetchOnWindowFocus: false }
   );
