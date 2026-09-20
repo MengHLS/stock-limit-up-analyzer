@@ -1,0 +1,42 @@
+== 情绪分析页加载耗时 + 首页底部入口 · 真实浏览器探针 == 2026-09-20T14:36:17.167Z
+BASE=http://127.0.0.1:3000 BROWSER=chrome.exe PORT=27837
+CDP 已连接
+
+--- A. /sentiment-analysis 首次加载（服务端结果缓存冷/热各一次）---
+  INFO  第 1 次（可能命中服务端缓存）出图耗时  → 4963ms
+  PASS  页面渲染出「每日最高连板折线图」区块  → count=1
+  PASS  统计卡片「当前最高连板」在 DOM 文本里
+  PASS  统计卡片「历史最高连板」在 DOM 文本里
+  PASS  统计卡片「统计交易日」在 DOM 文本里
+  PASS  统计卡片「当前市场周期」在 DOM 文本里
+  INFO  第 2 次（reload，应命中结果缓存）出图耗时  → 800ms
+  PASS  第 2 次挂载也出图  → ms=800
+  PASS  第 2 次不慢于第 1 次（结果缓存生效）  → 1st=4963ms 2nd=800ms
+  PASS  「情绪周期与周期龙头 / 龙头列表」区块渲染  →  自进入该轮等待起 308ms
+  INFO  页面 console error 计数  → 0
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_sentiment_load.sentiment.chart.png  clip={"x":306,"y":468,"w":1203,"h":668}
+
+--- C. 首页最下面的图表区块（图 + 图下的日期滑块）---
+  PASS  首页底部区块渲染出折线（[data-homepage-sentiment-chart] + .recharts-line-curve）
+  夜间量据：{"isLastChild":true,"hasChart":true,"dots":90,"hasSlider":true,"sliderLabel":"90 个交易日历史最新连续拖动选区，松手","link":{"tag":"a","href":"/sentiment-analysis","text":"情绪周期与龙头列表 →"},"title":{"text":"每日最高连板折线图","color":"oklch(0.92 0.002 286)","colorHex":"#e4e4e6","effBg":"#202023","backdropFrom":"div[data-slot=card]","fontSize":"16px","contrast":12.8},"desc":{"text":"仅统计主板股票；默认显示最近 90 个交易日，并对每段连续高连板仅标注一次股票名","color":"oklch(0.715 0.008 286)","colorHex":"#a2a2a8","effBg":"#202023","backdropFrom":"div[data-slot=card]","fontSize":"14px","contrast":6.4}}
+  PASS  区块是所在容器的**最后一个**子元素（= 页面最下面）  → siblings=["div[card]","div[card]","div[card]","div[card]","div"]
+  PASS  区块内含日期范围滑块（用户点名的「折线图下面的日期选择滑块」）  → slider=90 个交易日历史最新连续拖动选区，松手
+  PASS  区块内含折线本体（不只是标题/跳转）  → dots=90
+  PASS  链接仍指向 /sentiment-analysis  → {"tag":"a","href":"/sentiment-analysis","text":"情绪周期与龙头列表 →"}
+  PASS  夜间：卡片标题对比度 ≥ 4.5  → contrast=12.8 fg=#e4e4e6
+  PASS  夜间：卡片副标题对比度 ≥ 4.5  → contrast=6.4
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_sentiment_load.home.chart.dark.png  clip={"x":306,"y":3201,"w":1203,"h":578}
+
+--- D. 亮色基线（🔴 localStorage=light + reload；只摘 <html>.dark 会让 React 仍用暗色调色板）---
+  亮色量据：{"theme":"light","title":{"text":"每日最高连板折线图","color":"oklch(0.2 0.02 240)","colorHex":"#0e171e","effBg":"#ffffff","backdropFrom":"div[data-slot=card]","fontSize":"16px","contrast":18.1},"desc":{"text":"仅统计主板股票；默认显示最近 90 个交易日，并对每段连续高连板仅标注一次股票名","color":"oklch(0.5 0.02 240)","colorHex":"#59656e","effBg":"#ffffff","backdropFrom":"div[data-slot=card]","fontSize":"14px","contrast":5.98},"dots":90}
+  PASS  亮色：html 无 .dark  → class=
+  PASS  亮色：卡片标题对比度 ≥ 4.5  → contrast=18.1
+  PASS  亮色：卡片副标题对比度 ≥ 4.5  → contrast=5.98
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_sentiment_load.home.chart.light.png  clip={"x":306,"y":3201,"w":1203,"h":578}
+
+--- E. 真鼠标点击区块内链接 ⇒ 路由跳转 ---
+  PASS  点击后路由跳到 /sentiment-analysis  → pathname=/sentiment-analysis
+  INFO  跳转后出图耗时  → 688ms (ok=true)
+  PASS  跳转后图表仍能渲染  → ms=688
+
+=== 汇总：PASS 20 / FAIL 0 / SKIP 0 ===

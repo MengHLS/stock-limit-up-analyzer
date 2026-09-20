@@ -1884,14 +1884,20 @@ export const appRouter = router({
       }),
 
     // 获取每日最高连板趋势及对应股票名称
-    getMaxConnectionBoardTrend: publicProcedure.query(async () => {
-      return await getMaxConnectionBoardTrend();
-    }),
+    // `nonce`：结果缓存键。前端普通挂载用 undefined（= 0，复用缓存）；
+    //「刷新数据」按钮换一个 nonce ⇒ 换键 ⇒ 强制真重算（见 db.ts 的 sentimentTrendCache）。
+    getMaxConnectionBoardTrend: publicProcedure
+      .input(z.object({ nonce: z.number().int().nonnegative().optional() }).optional())
+      .query(async ({ input }) => {
+        return await getMaxConnectionBoardTrend({ nonce: input?.nonce });
+      }),
 
     // 基于最高连板趋势划分情绪阶段，并在原龙头断板日分析新周期候选
-    getSentimentCycleAnalysis: publicProcedure.query(async () => {
-      return await getSentimentCycleAnalysis();
-    }),
+    getSentimentCycleAnalysis: publicProcedure
+      .input(z.object({ nonce: z.number().int().nonnegative().optional() }).optional())
+      .query(async ({ input }) => {
+        return await getSentimentCycleAnalysis({ nonce: input?.nonce });
+      }),
 
     // 获取所有预警记录
     getAlerts: publicProcedure

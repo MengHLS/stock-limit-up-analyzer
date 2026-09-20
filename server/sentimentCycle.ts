@@ -1,4 +1,4 @@
-import { buildLeaderCandidatesForDate, type LeaderCandidateSourceRecord } from "./leaderCandidates";
+import { buildLeaderCandidateSharedIndex, buildLeaderCandidatesForDate, type LeaderCandidateSourceRecord } from "./leaderCandidates";
 import { normalizeSectorName } from "../shared/stockDataNormalization";
 
 /** 情绪周期阶段（弱 → 强 → 退潮）的唯一权威顺序：漏斗展示、服务端筛选 schema 共用。 */
@@ -357,6 +357,40 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
   });
   const nativeLeaders = buildNativeLeaders(tradingDates, recordsByDate, boardsAt, leaders);
   const breakEvents: LeaderBreakEvent[] = [];
+  /**
+   * 断板事件循环会对**每个**断板日调用一次 `buildLeaderCandidatesForDate`（实测 353 次）。
+   * 该函数每次都会自建一遍「截至该日」的全表索引，属纯重复劳动 ⇒ 这里一次性建好全量索引复用。
+   * 语义等价性证明见 `LeaderCandidateSharedIndex` 注释。
+   */
+  const sharedIndex = buildLeaderCandidateSharedIndex(records);
+  /**
+   * 某只股票在给定日期**之后**仍有涨停记录的交易日（升序）。
+   *
+   * ## 为什么改写
+   *
+   * 原实现是 `tradingDates.slice(index + 1).filter((date) => recordsByDate.get(date).some((r) => r.stockCode === code))` ——
+   * 对**每一个**「断板日涨停股」都要扫一遍全量未来交易日，每天还要线性扫当天全部记录。
+   * 实测规模：353 个断板事件 × 每个约 50 只 × 约 1,800 个未来交易日 × 每天数十条记录
+   * ⇒ 十亿级比较，V8 CPU profile 显示它占了 `buildSentimentCycleAnalysis` 全部计算时间的 **79%**。
+   *
+   * ## 为什么等价
+   *
+   * `recordsByDate` 只收录**主板**记录（`buildDailyLeaders` 里的 `mainRecords`），
+   * 而 `sharedIndex.stockDates` 同样是主板口径；`tradingDates` 则是**全量**记录的日期
+   * ⇒ 「未来交易日 ∩ 该股上榜日」=「该股自己的上榜日集合中晚于断板日的那部分」。
+   * 排序保持升序，与 `tradingDates.slice(index + 1)`（升序）一致，因此后续 `.find()`
+   * 取到的首个突破日、以及 `Math.max` 的结果都完全不变
+   * （改造前后对全量真实数据逐字节比对一致，见 `docs/evidence`）。
+   */
+  const stockDatesAscending = new Map<string, string[]>();
+  const subsequentDaysOf = (stockCode: string, afterDate: string): string[] => {
+    let dates = stockDatesAscending.get(stockCode);
+    if (!dates) {
+      dates = Array.from(sharedIndex.stockDates.get(stockCode) ?? []).sort();
+      stockDatesAscending.set(stockCode, dates);
+    }
+    return dates.filter((date) => date > afterDate);
+  };
 
   for (let index = 1; index < leaders.length; index += 1) {
     const previous = leaders[index - 1];
@@ -367,7 +401,7 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
     if (!allOriginalLeadersBroken) continue;
 
     const originalCodes = new Set(previous.stockCodes);
-    const scoreByCode = new Map(buildLeaderCandidatesForDate(records, current.date).candidates
+    const scoreByCode = new Map(buildLeaderCandidatesForDate(records, current.date, { sharedIndex }).candidates
       .filter((candidate) => !originalCodes.has(candidate.stockCode))
       .map((candidate) => [candidate.stockCode, candidate]));
     const candidates = Array.from(scoreByCode.values()).slice(0, 5);
@@ -401,8 +435,7 @@ export function buildSentimentCycleAnalysis(records: SentimentCycleSourceRecord[
       .map((record) => [record.stockCode, record])).values());
     const inspected = breakDayStocks.map((record): PostBreakLeader => {
       const candidate = scoreByCode.get(record.stockCode);
-      const futureDates = tradingDates.slice(index + 1);
-      const subsequentDays = futureDates.filter((date) => (recordsByDate.get(date) ?? []).some((item) => item.stockCode === record.stockCode));
+      const subsequentDays = subsequentDaysOf(record.stockCode, current.date);
       const highestBoardsAfterBreak = Math.max(boardsAt(record.stockCode, current.date), ...subsequentDays.map((date) => boardsAt(record.stockCode, date)));
       const sourceBoards = boardsAt(record.stockCode, current.date);
       const strictBreakthroughDate = subsequentDays.find((date) => boardsAt(record.stockCode, date) > previous.maxBoards) ?? null;

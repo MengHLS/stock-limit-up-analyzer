@@ -1,3 +1,4 @@
+import { MaxConnectionBoardTrendChart } from "@/components/MaxConnectionBoardTrendChart";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,6 +9,7 @@ import { normalizeLimitUpTime } from "@shared/limitUpTime";
 import { buildSectorHeatLookup, isTailSector, sortBySectorHeat } from "@shared/sectorHeatOrder";
 import { ChevronDown, TrendingUp } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link } from "wouter";
 import {
   Bar,
   BarChart,
@@ -82,6 +84,27 @@ import {
  *       使表面对比度不再依赖平台）+ `[&>option]:bg-popover [&>option]:text-popover-foreground`
  *       （选项自带不透明底与配套前景色）+ 键盘焦点 `ring`。
  *       ⚠️ `Market.tsx` 的「选择日期」是同一种写法（同一个缺陷），本轮**未动**（用户只报了首页）。
+ *
+ * 2026-09-20 第七轮修订（用户口述：「我是要把最高连板折线图展示在首页，**包含折线图下面的日期选择滑块**，
+ * 而不是现在这样加个跳转按钮」）：
+ *   17. **底部区块从「跳转窄条」改为「图表本体」**：第 15 轮删掉四张大跳转卡片后，我曾按用户
+ *       「把这个图标加到首页最下面」放回**一条窄条**；用户随后澄清要的是**内容**而不是入口 ⇒
+ *       换成 `SentimentTrendSection`：`/sentiment-analysis` 的同一张「每日最高连板折线图」
+ *       + 图下 `ContinuousRangeSlider`（可拖动日期范围）直接渲染在首页最下面。
+ *       实现抽到 `@/components/MaxConnectionBoardTrendChart` 由两页共用（唯一实现，
+ *       避免 `buildDistinctHighBoardLabels` / `normalizeVisibleRange` 各写一套）。
+ *       该区块**只调** `getMaxConnectionBoardTrend`（不调更重的周期分析端点），
+ *       卡片头仍留一条文本链接进完整情绪周期 / 龙头列表。
+ * 2026-09-20 第八轮修订（用户口述：「首页免责声明去掉」）：
+ *   18. **底部免责声明整体移除**：原 ⑤ 区块（`<p>` 一段四句 = 「不构成投资建议」合规措辞
+ *       + 板数口径 / 一字板判据 / 两融延迟三条口径说明）**整块删除** —— 用户 2026-09-20 在
+ *       「整块删掉 / 只删合规语留口径说明 / 内容不删压成一行小字」三选项中选定**整块删掉**
+ *       ⇒ 首页不再渲染任何免责声明。区块编号随之收拢：原 ⑥（底部折线图区块）⇒ **⑤**。
+ *       ⚠️ 只删**首页这一块**：研究侧的强制免责声明（结论正文 `evidence.disclaimer`、溯源区
+ *       `PROVENANCE_DISCLAIMER`）是规格 §13/§15 的合规件，**一字未动**；`PROJECT_RULES.md` 的
+ *       「免责声明不得删」适用范围同步改写为「仅指研究侧强制件」。
+ *       机器判据同步反转：`_probe_homepage_rework.mjs` 原断言「免责声明保留」改为反证断言
+ *       （首页 `body.innerText` 不再含「免责声明」字样，改回即红）。
  *
  * 数据口径约束：
  *   · 板数 = 「连续记录交易日涨停的天数」；连板股取当日口径、断板股取**上一记录交易日**口径。
@@ -1039,6 +1062,92 @@ function SectorHeatmapSection() {
   );
 }
 
+/**
+ * ⑤ 底部区块 —— 每日最高连板折线图（含图下的日期范围滑块）。
+ *
+ * 用户 2026-09-20 两轮口述的**最终**要求：
+ *   · 第一轮：「把这个图标加到首页最下面」⇒ 当时落成一行跳转窄条；
+ *   · 第二轮（本条）：「我是要把最高连板折线图展示在首页，**包含折线图下面的日期选择滑块**，
+ *     **而不是**现在这样加个跳转按钮」⇒ 窄条换成真正的图表区块。
+ *
+ * 复用 `/sentiment-analysis` 的**同一个组件**（`@/components/MaxConnectionBoardTrendChart`）⇒
+ * 「高连板标注去重」（`buildDistinctHighBoardLabels`）与「窗口对齐」（`normalizeVisibleRange`）
+ * 仍然只有一处实现。四处刻意的差异：
+ *   1. **不拉周期分析**：本区块只调 `getMaxConnectionBoardTrend`（服务端 10 分钟结果缓存 + 单飞，
+ *      且与 `/sentiment-analysis` 共用缓存键 `trend:0`），不调更重的 `getSentimentCycleAnalysis`
+ *      ⇒ 首页不为 tooltip 里的「情绪阶段」多付一次 4.8s 冷启。缺 `phase` 时 tooltip 少一行，别的照旧。
+ *   2. **不画旋转的 Y 轴标题**（`yAxisLabel={null}`）：首页既有硬口径 = 单位由小标题/图例承载
+ *      （见本文件头部第 13 条 —— 旋转轴标题在轴宽不足时会与刻度数字重叠）。
+ *   3. 图高 340（首页区块尺幅，小于情绪分析页的 430）。
+ *   4. 卡片走主题令牌（`bg-card border-border`），与首页其它卡片一致。
+ *
+ * ⚠️ 与第 15 轮修订（删掉底部四张大跳转卡片）不冲突：那次删的是用户评价「没用」的四条跳转，
+ * 本轮是用户点名要的**内容**。`data-homepage-sentiment-entry` 仍挂在卡片头右侧那条文本链接上
+ * （通往完整情绪周期 / 龙头列表），但它已不是本区块的主体 —— 主体是图与滑块。
+ *
+ * 位置：**页面内容容器的最末一个子元素**（沿用用户「最下面」的原话，不插进正文区块之间）——
+ * 第 18 轮删掉其前的免责声明 `p` 之后，本区块自身即最后一项。
+ */
+function SentimentTrendSection() {
+  /**
+   * `nonce: 0` = 服务端缓存的默认键（`trend:${nonce ?? 0}`）⇒ 与 `/sentiment-analysis`
+   * 的普通挂载**共用同一条缓存**，两边互相加热，不会各算一份。
+   */
+  const { data, isLoading, isError } = trpc.sentiment.getMaxConnectionBoardTrend.useQuery(
+    { nonce: 0 },
+    { staleTime: READONLY_STALE_MS },
+  );
+  const points = data ?? [];
+
+  if (isLoading) {
+    return (
+      <Card data-homepage-sentiment-chart>
+        <CardHeader className="pb-3">
+          <CardTitle>每日最高连板折线图</CardTitle>
+          <CardDescription>正在读取主板涨停记录并计算每日最高连板…</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <BlockSkeleton height={340} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isError || points.length === 0) {
+    return (
+      <Card data-homepage-sentiment-chart>
+        <CardHeader className="pb-3">
+          <CardTitle>每日最高连板折线图</CardTitle>
+        </CardHeader>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          {isError ? "最高连板数据加载失败，请稍后重试。" : "暂无最高连板数据：录入涨停记录后这里会自动生成每日趋势。"}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div data-homepage-sentiment-chart>
+      <MaxConnectionBoardTrendChart
+        points={points}
+        chartHeight={340}
+        yAxisLabel={null}
+        className="border-border bg-card shadow-sm"
+        sliderHint="连续拖动选区或两端手柄，松手后会对齐交易日并更新主图；悬浮数据点可查看当日最高连板个股。"
+        headerExtra={(
+          <Link
+            href="/sentiment-analysis"
+            data-homepage-sentiment-entry
+            className="text-xs font-medium text-orange-600 hover:underline"
+          >
+            情绪周期与龙头列表 →
+          </Link>
+        )}
+      />
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   return (
     <div className="container max-w-7xl py-6">
@@ -1064,12 +1173,8 @@ export default function DashboardPage() {
         {/* ④ 题材热力日历 */}
         <SectorHeatmapSection />
 
-        {/* ⑤ 免责声明 */}
-        <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-          免责声明：本页仅用于历史复盘与研究辅助，所有统计基于已记录的涨停记录与指数日线，不构成投资建议；板数口径为「连续
-          记录交易日涨停的天数」，与行情软件口径可能存在差异；一字板判据为当日开盘 = 最高 = 最低，行情缺失时不标记；
-          交易所两融汇总次日早晨发布，最新一日可能缺失。
-        </p>
+        {/* ⑤ 底部 —— 每日最高连板折线图 + 日期范围滑块（用户 2026-09-20 要求，见 `SentimentTrendSection`） */}
+        <SentimentTrendSection />
       </div>
     </div>
   );

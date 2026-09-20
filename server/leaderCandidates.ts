@@ -435,7 +435,53 @@ type LeaderCandidateBuildOptions = {
   riskPenaltyWeight?: number;
   /** 允许参与的最高连板高度；超过的高位连板仅在风险标签中显式提示（默认见 boardHeightRisk）。 */
   maxParticipatingBoards?: number;
+  /**
+   * 复用索引（见 `LeaderCandidateSharedIndex`）。**可选**，不传时保持「每次调用自行构建」的
+   * 原行为，既有调用方语义与性能都不变。
+   */
+  sharedIndex?: LeaderCandidateSharedIndex;
 };
+
+/**
+ * `buildLeaderCandidatesForDate` 的全量索引。
+ *
+ * ## 为什么需要
+ *
+ * 该函数每次调用都要自行做一遍「`records.filter(≤ targetDate)` + 建日期 Set + 建
+ * `stockDates` Map（每股一个 Set）」。实测本项目 99,918 行涨停记录下单次约 **47ms**。
+ * 当调用方需要对**很多个日期**逐个求值时（`buildSentimentCycleAnalysis` 的断板事件循环
+ * 实测 353 次），这份索引就是 353 次重复劳动 —— 占该分析总计算 16.5s 的绝大部分。
+ *
+ * ## 把索引从「截至目标日」放宽到「全量」为什么不改变结果
+ *
+ * `tradingDates` **降序**排列 ⇒ `calculateBoards` 里的 `index + 1` 指向的是**更早**的日期；
+ * `stockDates` 中多出来的「目标日之后」的日期只可能在「从目标日往回走」时被查询，
+ * 而往回走永远不会经过它们；`trajectoryDates` 同样只取目标日及更早的 7 个交易日。
+ * ⇒ 与逐日现算的索引在**被读取的键集合上完全一致**。
+ * （改造前后对全量真实数据逐字节比对，见 `docs/evidence`。）
+ */
+export type LeaderCandidateSharedIndex = {
+  /** 全量交易日，**降序**（与内部口径一致）。 */
+  tradingDates: string[];
+  /** 每只**主板**股票出现过的涨停日期集合。 */
+  stockDates: Map<string, Set<string>>;
+  /** 股票代码 → 最新名称（等价于 `buildLatestStockNameMap(全量 records)`）。 */
+  stockNameByCode: Map<string, string>;
+};
+
+/** 构建可跨日期复用的全量索引（用法见 `LeaderCandidateSharedIndex`）。 */
+export function buildLeaderCandidateSharedIndex(records: LeaderCandidateSourceRecord[]): LeaderCandidateSharedIndex {
+  const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
+    .sort((left, right) => right.localeCompare(left));
+  const stockDates = new Map<string, Set<string>>();
+  for (const record of records) {
+    if (!isMainBoardStock(record.stockCode)) continue;
+    const dates = stockDates.get(record.stockCode) ?? new Set<string>();
+    dates.add(record.limitUpDate);
+    stockDates.set(record.stockCode, dates);
+  }
+  return { tradingDates, stockDates, stockNameByCode: buildLatestStockNameMap(records) };
+}
 
 function isMainBoardStock(stockCode: string) {
   return !/^(300|301|688|920)/.test(stockCode);
@@ -546,25 +592,36 @@ export function buildLeaderCandidatesForDate(
   options: LeaderCandidateBuildOptions = {},
 ): LeaderCandidateResult {
   const recordsAsOfDate = records.filter((record) => record.limitUpDate <= targetDate);
-  const stockNameByCode = options.stockNameByCode ?? buildLatestStockNameMap(records);
+  const stockNameByCode = options.stockNameByCode ?? options.sharedIndex?.stockNameByCode ?? buildLatestStockNameMap(records);
   if (recordsAsOfDate.length === 0) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], allScoredStocks: [], candidates: [] };
   }
 
-  const tradingDates = Array.from(new Set(recordsAsOfDate.map((record) => record.limitUpDate)))
-    .sort((left, right) => right.localeCompare(left));
+  // 交易日与「每股涨停日期集合」优先取自调用方复用的全量索引（见 `LeaderCandidateSharedIndex`）。
+  // 全量降序交易日里，自 `targetDate` 起向后的那一段恰好就是「截至目标日」的交易日集合。
+  const sharedIndex = options.sharedIndex;
+  let tradingDates: string[];
+  let stockDates: Map<string, Set<string>>;
+  if (sharedIndex) {
+    const asOfIndex = sharedIndex.tradingDates.indexOf(targetDate);
+    tradingDates = asOfIndex >= 0 ? sharedIndex.tradingDates.slice(asOfIndex) : sharedIndex.tradingDates;
+    stockDates = sharedIndex.stockDates;
+  } else {
+    tradingDates = Array.from(new Set(recordsAsOfDate.map((record) => record.limitUpDate)))
+      .sort((left, right) => right.localeCompare(left));
+    stockDates = new Map<string, Set<string>>();
+    for (const record of recordsAsOfDate) {
+      if (!isMainBoardStock(record.stockCode)) continue;
+      const dates = stockDates.get(record.stockCode) ?? new Set<string>();
+      dates.add(record.limitUpDate);
+      stockDates.set(record.stockCode, dates);
+    }
+  }
   if (!tradingDates.includes(targetDate)) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], allScoredStocks: [], candidates: [] };
   }
 
   const tradingDateIndex = new Map(tradingDates.map((date, index) => [date, index]));
-  const stockDates = new Map<string, Set<string>>();
-  for (const record of recordsAsOfDate) {
-    if (!isMainBoardStock(record.stockCode)) continue;
-    const dates = stockDates.get(record.stockCode) ?? new Set<string>();
-    dates.add(record.limitUpDate);
-    stockDates.set(record.stockCode, dates);
-  }
 
   const calculateBoards = (stockCode: string, date: string) => {
     const dates = stockDates.get(stockCode);

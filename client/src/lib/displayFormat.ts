@@ -15,6 +15,17 @@ export function formatDateTime(iso: string | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/**
+ * ISO 日期 `YYYY-MM-DD` → 中文 `YYYY年MM月DD日`；null / undefined → "—"。
+ *
+ * 抽出来是因为 `MaxConnectionBoardTrendChart`（情绪分析页与**首页**共用）与两个页面都要用同一口径，
+ * 原先它是 `SentimentAnalysis.tsx` 里的局部函数，首页一旦复用就会复制出第二份。
+ */
+export function formatChineseDate(date: string | null | undefined): string {
+  if (!date) return "—";
+  return date.replace(/^(\d{4})-/, "$1年").replace(/-(\d{2})$/, "月$1日");
+}
+
 /** 千分位整数；null / undefined → "—"。 */
 export function formatCount(n: number | null | undefined): string {
   return n === null || n === undefined ? "—" : n.toLocaleString("en-US");

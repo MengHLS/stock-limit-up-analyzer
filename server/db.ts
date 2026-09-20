@@ -2035,8 +2035,57 @@ export function buildMaxConnectionBoardTrend(records: Array<Pick<LimitUpRecord, 
   });
 }
 
-/** 获取每日最高连板趋势（数据库全量涨停记录）。 */
-export async function getMaxConnectionBoardTrend() {
+/**
+ * 通用「TTL 结果缓存 + 单飞」包装（供情绪分析两个端点使用）。
+ *
+ * 单飞的必要性：两者都是秒级～十秒级的跨境全表读，前端重挂载 / 多标签页 / React Query
+ * 重试都可能并发打入同一份请求；无单飞时每个请求各跑一遍全表扫描，既拖慢页面又争抢
+ * 跨境连接池（与 `getLeaderCandidates` 的 `leaderCandidatesInFlight` 同一理由）。
+ */
+function cachedReadResult<T>(
+  cache: TTLCache<T>,
+  inFlight: Map<string, Promise<T>>,
+  key: string,
+  compute: () => Promise<T>,
+): Promise<T> {
+  const cached = cache.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const promise = compute()
+    .then((result) => {
+      cache.set(key, result);
+      return result;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+  inFlight.set(key, promise);
+  return promise;
+}
+
+/**
+ * 情绪分析两个只读端点的结果缓存（TTL 10 分钟）+ 单飞表。
+ *
+ * 背景（2026-09-20 实测，跨境 TiDB）：这两个端点此前**完全没有缓存**，每次打开
+ * `/sentiment-analysis` 都要重跑「全表取数 + 全量重算」——
+ *   · `getMaxConnectionBoardTrend`：6.2s（取数 2.4s / 99,918 行，计算仅 0.06s）；
+ *   · `getSentimentCycleAnalysis`：取数 2.8s + 计算 16.5s + 1.47MB 序列化。
+ * 两者都只依赖 `limit_up_records`，只在涨停记录写入时变化 ⇒ 适合结果缓存。
+ *
+ * 失效：应用内写入由 `invalidateLeaderCandidateBacktestCaches()` 主动清空；TTL 只作为
+ * 「外部脚本回填（不走应用写入口）」的兜底，与同文件的 `marketFactorRowsCache` 同量级。
+ *
+ * 缓存键：`nonce`。前端「刷新数据」按钮传一个新 nonce ⇒ 换键 ⇒ 真重算（既不绕过、
+ * 也不清空别人的缓存）；普通挂载一律用 `0` 复用。条目数由 TTLCache 的 maxEntries 兜住。
+ */
+const sentimentTrendCache = new TTLCache<Awaited<ReturnType<typeof buildMaxConnectionBoardTrend>>>(10 * 60 * 1000, 4);
+const sentimentCycleCache = new TTLCache<Awaited<ReturnType<typeof buildSentimentCycleAnalysis>>>(10 * 60 * 1000, 4);
+const sentimentTrendInFlight = new Map<string, Promise<Awaited<ReturnType<typeof buildMaxConnectionBoardTrend>>>>();
+const sentimentCycleInFlight = new Map<string, Promise<Awaited<ReturnType<typeof buildSentimentCycleAnalysis>>>>();
+
+/** `getMaxConnectionBoardTrend` 的实际取数与计算体（缓存键与单飞判定在包装函数里）。 */
+async function buildMaxConnectionBoardTrendResult() {
   const db = await getDb();
   if (!db) return [];
 
@@ -2049,8 +2098,18 @@ export async function getMaxConnectionBoardTrend() {
   return buildMaxConnectionBoardTrend(allRecords);
 }
 
-/** 获取基于主板最高连板趋势的情绪周期、原龙头断板和新周期候选分析。 */
-export async function getSentimentCycleAnalysis() {
+/** 获取每日最高连板趋势（数据库全量涨停记录；结果缓存 + 单飞，`nonce` 换键即强制重算）。 */
+export async function getMaxConnectionBoardTrend(options: { nonce?: number } = {}) {
+  return cachedReadResult(
+    sentimentTrendCache,
+    sentimentTrendInFlight,
+    `trend:${options.nonce ?? 0}`,
+    buildMaxConnectionBoardTrendResult,
+  );
+}
+
+/** `getSentimentCycleAnalysis` 的实际取数与计算体（缓存键与单飞判定在包装函数里）。 */
+async function buildSentimentCycleAnalysisResult() {
   const db = await getDb();
   if (!db) return buildSentimentCycleAnalysis([]);
 
@@ -2065,6 +2124,16 @@ export async function getSentimentCycleAnalysis() {
   }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
 
   return buildSentimentCycleAnalysis(records);
+}
+
+/** 获取基于主板最高连板趋势的情绪周期、原龙头断板和新周期候选分析（结果缓存 + 单飞）。 */
+export async function getSentimentCycleAnalysis(options: { nonce?: number } = {}) {
+  return cachedReadResult(
+    sentimentCycleCache,
+    sentimentCycleInFlight,
+    `cycle:${options.nonce ?? 0}`,
+    buildSentimentCycleAnalysisResult,
+  );
 }
 
 /** `getLeaderCandidates` 的实际计算体（无缓存、无单飞），由下面的包装函数调用。 */
@@ -2172,6 +2241,10 @@ export function invalidateLeaderCandidateBacktestCaches(): void {
   // createLimitUpRecordsBatch），逐批清空会把一次回填变成数十次全表扫描。
   leaderCandidatesResultCache.clear();
   marketFactorRowsCache.clear();
+  // 情绪分析两个端点读的也是 `limit_up_records` 全表 ⇒ 同样必须失效，
+  // 否则「上传新数据后页面仍显示旧结果」（与 10 分钟 TTL 叠加会更明显）。
+  sentimentTrendCache.clear();
+  sentimentCycleCache.clear();
   clearLeaderCandidateBacktestSnapshotsSync();
 }
 // 价格覆盖率是对 890 万行 stock_daily_prices 的全表聚合扫描（~9s），且仅在回填后变化。
