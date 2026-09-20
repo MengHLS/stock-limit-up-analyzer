@@ -1053,3 +1053,43 @@ npx tsx docs/evidence/_r007_run_engine.mts
 2. 🔴 **CDP 探针必须先设桌面视口**（`Emulation.setDeviceMetricsOverride` 1440×900）：
    `Sidebar collapsible="icon"` 在默认 800×600 下折叠 ⇒ 菜单文字不进 `innerText`，
    曾把「侧栏缺导航项」误判为产品缺陷（1440 下 29 项齐全）。
+
+## `backtestdarkmode` —— 2 个（2026-09-20：/backtest「各策略回撤与收益特征」五卡片夜间被冲成中间灰）
+
+> 用户原话：「这里的黑暗模式挂了修一下」（附 `/backtest` 回测总览截图；截图里五张卡是**浅灰紫**、
+> 卡内浅色文字糊成一片）。**落地提交 = `78c18cd`「修复组合回测界面黑暗模式」**（31 `+` / 42 `-`，只动
+> `client/src/theme/darkCompatibility.css` 一个文件；**零 `server/**` 改动** ⇒ 不触发热重启）。
+>
+> **根因（单点，已逐条取证，非推断）**：五张卡片写的是 `bg-violet-50/40`
+> （`client/src/pages/Backtest.tsx#FullCycleRiskBlocks`），而 `client/src/theme/darkCompatibility.css`
+> 是**按「源码中实际出现的类名清单」生成**的 —— 生成器上一次运行是 2026-09-17（`9au` 的「顺带修正」），
+> 当时源码里只有 `/60`、`/70`、**没有 `/40`**；而本区块是 **2026-09-18**（`rZPX8O`）才加进页面的。
+> ⇒ 夜间下这条类**零规则命中**，卡片保留 `var(--color-violet-50)` 浅紫 × 40% 透明度，
+> 在近黑页面上合成出 **`#75747b` 的中间灰**（探针实测 lum 0.177），卡内浅色文字随之全部失效。
+> **修法 = 重跑生成器**（`node scripts/generateDarkCompatibility.mjs`；**禁手改生成物**）：
+> 补出包括 `.dark .bg-violet-50\/40` 在内的 **14 条新选择器**（另含源码已出现但生成物缺的
+> `bg-red-600` / `bg-red-500` / `bg-emerald-500` / `bg-amber-500` / `hover:text-orange-700` 系列），
+> 并清掉 **17 条「源码里已不存在」的旧选择器**（`bg-emerald-50/40`、`bg-emerald-500/70`、
+> `bg-red-500/70`、`bg-rose-500/10`、`bg-amber-500/5` 等 —— 已 grep 复核源码确实不再出现）。
+> 🔴 **静态自查（用来证明「不碰亮色」）**：`git diff 87c31c9 78c18cd -- client/src/theme/darkCompatibility.css`
+> 的 **31 行选择器改动 100% 以 `.dark` 开头、非 `.dark` 作用域 0 行** ⇒ 非 dark 渲染在数学上不可能被改动。
+> 另：交叉扫 `client/src` 的 272 个硬编码色类，生成后仍未覆盖的 29 个**全部可解释**
+> （500/700/800 档实心强调色 = 生成器有意不覆盖；其余都是只以 `dark:` 变体形式出现的类；
+> 唯一裸用的 `bg-slate-500` 是 `Dashboard.tsx` 的 2px 分隔线，暗色下本就清晰）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_full_cycle_risk_blocks_dark.mjs` + `.out.txt` | 无头 Chrome + CDP **量 DOM**。同一页面内三态 A/B（**不 reload、不改工作区文件**，避免 skill §9 那条「A/B 别动同一份文件」的坑）：① `dark`（现状）② `light`（in-page 摘掉 `<html>.dark`，实测应用不会自行加回）③ `dark + revert`（注入一条把 `bg-violet-50/40` 还原成亮色取值的规则 ⇒ **复现缺陷**）。判据 = 卡片**真实合成底**（canvas 反解 + 自底向上合成 —— 卡片本身是 40% 半透明，只看 `backgroundColor` 会漏判）的**相对亮度** + 「文字色 vs 真实底」的 **WCAG 对比度**。**改后 13 PASS / 0 FAIL / 0 SKIP**：卡片底 **#1d1d23 / lum 0.0126**（`backdropFrom` = 卡片自身）、项名 7.03、数值最低 **6.29**（20 个样本）、策略名 3.52~7.81、区块标题 11.45、说明段 8.42。**复现态同一量**：卡片底 **#75747b / lum 0.177 —— 与用户截图的像素逐字节同值**、项名 1.94、数值 2.54、策略名 1.03~2.15 ⇒ 缺陷点被精确定位。附 **INFO**（既有水平、非本轮回归项）：亮色下卡片内最低对比度 **4.36**（`+396.43%` 的 `#ec003f` 落在 `#fbfaff` 底上，略低于 AA 4.5，属既有、未修） | `client/src/theme/darkCompatibility.css`（提交 `78c18cd`）、`.workbuddy/memory/2026-09-20.md` |
+| `_shot_full_cycle_risk_dark.dark.before.png` / `.dark.after.png` / `.light.png` | 目视附件：同一区块在「复现态（浅灰紫卡）/ 改后夜间 / 亮色」三态下的真实像素（`_*.png` 被 `.gitignore` 排除在库外） | 同上（目视附件） |
+
+> 🔴 **两条探针自身的坑（都已修，写下来省下一次）**：
+> ① **`Page.captureScreenshot` 的 `clip` 字段名是 `width` / `height`**，写成 `w` / `h` 会被 CDP 以
+>    `Failed to deserialize params.clip.height - BINDINGS: mandatory field missing` 拒掉；而极简 CDP 客户端的
+>    `send()` 通常只把 `m.result` 交回调用方、**失败响应里只有 `m.error`** ⇒ 调用方拿到 `undefined`，
+>    报错点还会偏到下游的 `.slice` 上（本探针因此整段中止过一轮）。
+>    修法 = `ws.onmessage` 里把 `m.error` 也透出（如 `{ __cdpError: m.error }`），并给截图套 try/catch ——
+>    **截图只是目视附件，不许它把「量据 + 断言」的主流程打死**。
+> ② 🔴 **禁用 `captureBeyondViewport: true`**：/backtest 页面极长，整页合成实测会让 CDP 卡死数分钟不返回。
+>    正确做法 = `scrollIntoView({ block: 'center' })` 后按**视口坐标**截（本探针即此法）。
+> ③ `darkCompatibility.css` 这类**生成物与源码同步**的层，**新增硬编码色类后必须重跑生成器**；
+>    本轮的教训是「页面加了新类、没人重跑 ⇒ 夜间静默降级」，而失败形态**不是报错**，是「颜色看着怪」。

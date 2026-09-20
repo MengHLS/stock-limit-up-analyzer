@@ -1,0 +1,52 @@
+== /backtest 总览「各策略回撤与收益特征」五卡片 · 夜间可读性探针 == 2026-09-20T13:24:17.140Z
+BASE=http://127.0.0.1:3000 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=22127 DATA_WAIT=15min
+CDP 已连接
+
+--- 打开 /backtest（先落地站点，才能在 localStorage 写主题）---
+
+--- 等待 /backtest 研究数据（冷算可能数十分钟）---
+  ... 已等待 0s（仍无 [data-full-cycle-risk-card]）
+  数据就绪=true，等待 15s
+
+--- 1/3 主题 dark（现状 = 生成器已补齐）---
+  html={"cls":"dark","cs":"dark","stored":"dark","cards":5}
+  [baseline] 底=#1d1d23（lum 0.0126，backdropFrom=div[data-full-cycle-risk-card=baseline]） · 项名=#a7a7b0/7.03 · 数值=#73d2aa/9.21 · 策略名=#64748b/3.52
+  [riskPenalty] 底=#1d1d23（lum 0.0126，backdropFrom=div[data-full-cycle-risk-card=riskPenalty]） · 项名=#a7a7b0/7.03 · 数值=#73d2aa/9.21 · 策略名=#d946ef/4.85
+  [hardFilter] 底=#1d1d23（lum 0.0126，backdropFrom=div[data-full-cycle-risk-card=hardFilter]） · 项名=#a7a7b0/7.03 · 数值=#73d2aa/9.21 · 策略名=#f59e0b/7.81
+  [qualityBlend] 底=#1d1d23（lum 0.0126，backdropFrom=div[data-full-cycle-risk-card=qualityBlend]） · 项名=#a7a7b0/7.03 · 数值=#73d2aa/9.21 · 策略名=#0284c7/4.09
+  [qualityGate] 底=#1d1d23（lum 0.0126，backdropFrom=div[data-full-cycle-risk-card=qualityGate]） · 项名=#a7a7b0/7.03 · 数值=#73d2aa/9.21 · 策略名=#059669/4.45
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_full_cycle_risk_dark.dark.after.png  clip={"x":317,"y":829,"w":1181,"h":329,"scrollY":341,"viewportH":1300}
+  PASS  夜间：<html> 带 .dark 且 color-scheme: dark  → {"cls":"dark","cs":"dark"}
+  PASS  夜间：5 张策略卡片齐备  → count=5
+  PASS  夜间(改后)：5 张卡片自身都有显式底色（非 transparent）  → cardCount=5
+  PASS  夜间(改后)：5 张卡片真实合成底均为暗面（相对亮度 ≤ 0.10）  → 各卡 ["baseline=#1d1d23/lum0.0126","riskPenalty=#1d1d23/lum0.0126","hardFilter=#1d1d23/lum0.0126","qualityBlend=#1d1d23/lum0.0126","qualityGate=#1d1d23/lum0.0126"]
+  PASS  夜间(改后)：卡片项名（灰字 dt）对比度 ≥ 4.5  → 最低 7.03
+  PASS  夜间(改后)：卡片数值（dd，含最大回撤/时长/收益）对比度 ≥ 4.5  → 样本 20 个，最低 6.29
+  PASS  夜间(改后)：策略名（inline 色）对比度 ≥ 3  → ["baseline=3.52","riskPenalty=4.85","hardFilter=7.81","qualityBlend=4.09","qualityGate=4.45"]
+  PASS  夜间(改后)：区块标题 h3 对比度 ≥ 4.5  → contrast=11.45
+  PASS  夜间(改后)：区块说明段对比度 ≥ 4.5  → contrast=8.42
+
+--- 2/3 亮色基线（in-page 摘掉 .dark，不 reload）---
+  摘掉后 .dark 仍存在？false（若为 true 说明应用又把它加回来了，本步结论不可用）
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_full_cycle_risk_dark.light.png  clip={"x":317,"y":829,"w":1181,"h":329,"scrollY":341,"viewportH":1300}
+  PASS  亮色：卡片底为浅面（相对亮度 > 0.6）  → ["baseline=#fbfaff/lum0.961","riskPenalty=#fbfaff/lum0.961","hardFilter=#fbfaff/lum0.961","qualityBlend=#fbfaff/lum0.961","qualityGate=#fbfaff/lum0.961"]
+  [baseline] 亮色底=#fbfaff · 项名=#62748e/4.59 · 数值=#007a55/5.16 · 策略名=#64748b/4.58
+  [riskPenalty] 亮色底=#fbfaff · 项名=#62748e/4.59 · 数值=#007a55/5.16 · 策略名=#d946ef/3.33
+  [hardFilter] 亮色底=#fbfaff · 项名=#62748e/4.59 · 数值=#007a55/5.16 · 策略名=#f59e0b/2.07
+  [qualityBlend] 亮色底=#fbfaff · 项名=#62748e/4.59 · 数值=#007a55/5.16 · 策略名=#0284c7/3.94
+  [qualityGate] 亮色底=#fbfaff · 项名=#62748e/4.59 · 数值=#007a55/5.16 · 策略名=#059669/3.63
+  INFO  亮色基线：卡片内文字最低对比度（既有水平，非本轮回归项）  → 4.36 · 最弱元素="+396.43%" #ec003f on #fbfaff
+
+--- 3/3 缺陷复现（注入 revert 规则 ⇒ 复现用户截图那一幕）---
+  [baseline] 底=#75747b（lum 0.177）· 项名=#a7a7b0/1.94 · 数值=#73d2aa/2.54 · 策略名=#64748b/1.03
+  [riskPenalty] 底=#75747b（lum 0.177）· 项名=#a7a7b0/1.94 · 数值=#73d2aa/2.54 · 策略名=#d946ef/1.34
+  [hardFilter] 底=#75747b（lum 0.177）· 项名=#a7a7b0/1.94 · 数值=#73d2aa/2.54 · 策略名=#f59e0b/2.15
+  [qualityBlend] 底=#75747b（lum 0.177）· 项名=#a7a7b0/1.94 · 数值=#73d2aa/2.54 · 策略名=#0284c7/1.13
+  [qualityGate] 底=#75747b（lum 0.177）· 项名=#a7a7b0/1.94 · 数值=#73d2aa/2.54 · 策略名=#059669/1.23
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_full_cycle_risk_dark.dark.before.png  clip={"x":317,"y":829,"w":1181,"h":329,"scrollY":341,"viewportH":1300}
+  PASS  复现成立：未补齐时卡片被冲成中间灰（合成底相对亮度 > 0.15）  → 未补齐 lum=0.177（#75747b） vs 已补齐 lum=0.0126（#1d1d23）
+  PASS  复现成立：未补齐时卡片内文字对比度显著低于已补齐  → 未补齐最低=1.73 vs 已补齐最低=6.29
+  PASS  复现成立：未补齐时 5 张卡全部落在「亮面」判据之外（≥0.10）  → [0.177,0.177,0.177,0.177,0.177]
+
+=== 汇总：PASS 13 / FAIL 0 / SKIP 0 ⇒ ALL PASS ===
+结果留档：D:\stock-limit-up-analyzer\docs\evidence\_probe_full_cycle_risk_blocks_dark.out.txt
