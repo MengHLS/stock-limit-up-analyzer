@@ -24,11 +24,13 @@
 import {
   experimentResultEnvelopeSchema,
   type ExperimentDescriptor,
+  type ExperimentArtifactFileSpec,
   type ExperimentResultEnvelope,
   type ExperimentParameterValues,
   type ExperimentRunOutcome,
 } from "@shared/researchExperimentsContracts";
 import { ExperimentError, toExperimentError } from "./errors";
+import { assertSafeRelativeName } from "../artifactStorage/objectKey";
 import type { ExperimentDatasetPort } from "./datasetPort";
 import {
   assertDatasetCodeMatches,
@@ -62,8 +64,22 @@ export interface ExperimentRunner {
   resolveParameters(descriptor: ExperimentDescriptor, provided?: ExperimentParameterValues): ExperimentParameterValues;
   /** 只做「执行前」的全部校验（含 Dataset 解析）；不合规即抛。 */
   prepare(request: ExperimentRunRequest): Promise<PreparedExperimentRun>;
-  /** 完整执行一次实验。 */
+  /** 完整执行一次实验（只返回可下发的 outcome）。 */
   run(request: ExperimentRunRequest): Promise<ExperimentRunOutcome>;
+  /**
+   * 完整执行一次实验，**并把实验声明的文件产物一起交回**（RESEARCH-EXPERIMENT-004）。
+   *
+   * 🔴 与 `run()` 的分工是刻意的（规格 §17）：`outcome` 是发给浏览器的执行事实，
+   *    里面**没有**产物字节；产物字节只经 `runDetailed().artifactFiles` 交给服务层去落对象存储。
+   *    `run()` 就是 `(await runDetailed()).outcome`（单一执行路径，不复制一份逻辑）。
+   */
+  runDetailed(request: ExperimentRunRequest): Promise<ExperimentRunDetailedResult>;
+}
+
+/** 执行结果：可下发的 outcome + （仅服务端可见的）文件产物。 */
+export interface ExperimentRunDetailedResult {
+  outcome: ExperimentRunOutcome;
+  artifactFiles: readonly ExperimentArtifactFileSpec[];
 }
 
 /** 执行前的准备结果（页面上「即将用什么跑」的那一组事实）。 */
@@ -333,18 +349,49 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
     prepare,
 
     async run(request: ExperimentRunRequest): Promise<ExperimentRunOutcome> {
+      return (await executeDetailed(request)).outcome;
+    },
+
+    async runDetailed(request: ExperimentRunRequest): Promise<ExperimentRunDetailedResult> {
+      return executeDetailed(request);
+    },
+  };
+
+  /**
+   * 执行主体（`run` / `runDetailed` 共用，**只有一份**）。
+   *
+   * 把「声明文件产物」的收集器也放在这里：它需要与 `logs` 同样的**执行期**边界 ——
+   * 名字非法要按「实验写错了」处理（当场抛领域错误），而不是静默丢弃那个产物。
+   */
+  async function executeDetailed(request: ExperimentRunRequest): Promise<ExperimentRunDetailedResult> {
       // ---- 执行前：不合规即抛（调用方看到的是参数化领域错误）----
       const prepared = await prepare(request);
       const { definition, descriptor, resolvedParameters, facts } = prepared;
 
       const { access, stats } = datasetPort.createAccess({ descriptor, facts });
       const logs: string[] = [];
+      const artifactFiles: ExperimentArtifactFileSpec[] = [];
       const context: ExperimentRunContext = {
         descriptor,
         parameters: resolvedParameters,
         dataset: access,
         log: (message: string) => {
           if (logs.length < MAX_EXPERIMENT_LOG_LINES) logs.push(message);
+        },
+        artifact: (spec: ExperimentArtifactFileSpec) => {
+          // 🔴 名字在这里就校验（唯一权威 = `artifactStorage/objectKey.ts`）：
+          //    非法名字绝不能等到上传阶段才炸，那时实验结果已经算完了。
+          let safeName: string;
+          try {
+            safeName = assertSafeRelativeName(spec.name);
+          } catch (error) {
+            throw new ExperimentError(
+              "EXPERIMENT_ARTIFACT_KEY_INVALID",
+              `实验 "${descriptor.id}" 声明的产物名字非法：${(error as Error).message}`,
+              { name: spec.name, role: spec.role },
+            );
+          }
+          artifactFiles.push({ ...spec, name: safeName });
         },
       };
 
@@ -398,7 +445,7 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
 
       const finishedAt = now();
 
-      return {
+      const outcome: ExperimentRunOutcome = {
         runStatus: failure === null ? "SUCCEEDED" : "FAILED",
         descriptor,
         execution: {
@@ -434,6 +481,9 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
                 ...(failure.detail !== undefined ? { detail: failure.detail } : {}),
               },
       };
-    },
-  };
+
+      // 🔴 只有成功时才把文件产物交出去：失败的 Run 不产出 Manifest、不落对象存储
+      //    （规格 §12：失败路径只写 `FAILED` + `errorMessage`）。
+      return { outcome, artifactFiles: failure === null ? artifactFiles : [] };
+  }
 }

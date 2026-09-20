@@ -63,9 +63,12 @@ import {
 } from "./pages/validation";
 // RESEARCH-EXPERIMENT-001 — 独立研究实验体系：实验列表 / 详情（实验自带参数与结果结构，
 //   可直接读 Dataset，**不经过**旧 Research 的 Analysis/Finding/Conclusion 链路）
+// RESEARCH-EXPERIMENT-004 — 新增 Run 详情页：只凭 `runId` 打开一条**已持久化**的历史 Run
+//   （Run 元数据在 TiDB、结果与产物在对象存储）。
 import {
   ResearchExperimentList,
   ResearchExperimentDetail,
+  ResearchExperimentRunDetail,
 } from "./pages/researchExperiments";
 
 /**
@@ -149,6 +152,13 @@ function Router() {
           因此不能用一个 `:experimentId` 段匹配）。 */}
       <Route path="/research-experiments" component={ResearchExperimentList} />
       <Route path="/research-experiments/:group/:key" component={ResearchExperimentDetail} />
+      {/* RESEARCH-EXPERIMENT-004 — 持久化 Run 详情。**更具体的路径必须放在
+          `/research-experiments/:group/:key` 之后**（wouter 的 Switch 按顺序匹配，
+          但 `:group` 只吃一段，所以两条互不吞并；顺序放在后面更直观）。 */}
+      <Route
+        path="/research-experiments/:group/:key/runs/:runId"
+        component={ResearchExperimentRunDetail}
+      />
 
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

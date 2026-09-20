@@ -440,6 +440,23 @@ export const EXPERIMENT_ERROR_CODES = [
   "EXPERIMENT_RESULT_INVALID",
   /** 运行器内部失败（含实验 `run()` 抛出的非领域错误）。 */
   "EXPERIMENT_RUN_FAILED",
+  // ---- RESEARCH-EXPERIMENT-004：持久化 / Artifact 存储 ----
+  /** 指定 `runId` 在持久化层不存在。 */
+  "EXPERIMENT_RUN_NOT_FOUND",
+  /** 非法的 Run 状态迁移（如 COMPLETED → RUNNING）。 */
+  "EXPERIMENT_RUN_STATE_INVALID",
+  /** `runId` 已存在（唯一约束；不覆盖历史 Run）。 */
+  "EXPERIMENT_RUN_ID_CONFLICT",
+  /** Artifact Object Key 非法（空 / 绝对路径 / 含 `..` / 与 Run 前缀不符）。 */
+  "EXPERIMENT_ARTIFACT_KEY_INVALID",
+  /** Artifact 在对象存储里不存在（`resultManifestKey` 指向了不存在的对象）。 */
+  "EXPERIMENT_ARTIFACT_NOT_FOUND",
+  /** 对象存储未配置或不可用（MinIO 连接缺失 / 不可达）。 */
+  "EXPERIMENT_ARTIFACT_STORAGE_UNAVAILABLE",
+  /** 对象上传失败（**绝不允许**此时把 Run 标成 COMPLETED）。 */
+  "EXPERIMENT_ARTIFACT_UPLOAD_FAILED",
+  /** `manifest.json` 无法解析 / 不符合 Manifest 契约。 */
+  "EXPERIMENT_MANIFEST_INVALID",
 ] as const;
 export type ExperimentErrorCode = (typeof EXPERIMENT_ERROR_CODES)[number];
 
@@ -531,6 +548,40 @@ export interface ExperimentDatasetAccess {
   observation(relativeDay: number): Promise<readonly ExperimentBarRow[]>;
 }
 
+/**
+ * 实验声明要**落盘为文件**的产物的规格（RESEARCH-EXPERIMENT-004）。
+ *
+ * ## 为什么需要它
+ *
+ * 信封（`tables` / `charts` / `statistics` …）描述的是**页面上的展示形态**，
+ * 它随 `result.json` 一起落对象存储，体积有界。但研究经常要产出**真正的文件**：
+ * 明细 CSV、Parquet、导出的图表、自定义日志。这些不能塞进 `result.json`
+ * （会把一次 Run 的结果体撑到几十 MB，正是规格 §17 要避免的）。
+ *
+ * ## 它怎么被消费
+ *
+ * `context.artifact(spec)` 收集 ⇒ Runner 随执行结果**私下**交给服务层
+ * ⇒ 服务层写到对象存储的 `tables/` `charts/` `logs/` `artifacts/` 段，
+ * 并把索引登记进 `manifest.json`。
+ *
+ * 🔴 **产物内容不进 `outcome`**：`outcome` 是发给浏览器的执行事实，
+ *    里面只有 Manifest 索引（Key / 类型 / 体积），**没有字节**。
+ *    这条边界靠 `runDetailed()` 与 `run()` 的分工在**类型层**兑现，不靠纪律。
+ */
+export interface ExperimentArtifactFileSpec {
+  /** Run 前缀下的**相对名字**（可含子目录，如 `tables/cohort.csv`）。 */
+  readonly name: string;
+  /** 落哪个角色段（决定 Object Key 的固定段）。 */
+  readonly role: "table" | "chart" | "log" | "artifact";
+  /** 内容（文本或字节）。 */
+  readonly body: string | Uint8Array;
+  /** MIME 类型；缺省按扩展名推断（见服务端 `runManifest.ts#inferArtifactDescriptor`）。 */
+  readonly contentType?: string;
+  /** 人读标签（进 Manifest，显示在页面上）。 */
+  readonly label?: string;
+  readonly description?: string;
+}
+
 /** `run()` 的入参。 */
 export interface ExperimentRunContext {
   /** 实验自己的描述符（只读）。 */
@@ -541,6 +592,14 @@ export interface ExperimentRunContext {
   readonly dataset: ExperimentDatasetAccess;
   /** 运行日志（进 `execution.logs` 返回给调用方；**不是** console 输出）。 */
   readonly log: (message: string) => void;
+  /**
+   * 声明一个要落对象存储的文件产物（RESEARCH-EXPERIMENT-004）。
+   *
+   * 不调用就什么都不写 —— 只产 `result.json` + `manifest.json` + `logs/run.log`。
+   * 名字非法（绝对路径 / 含 `..` / 空）会在**收集时**立刻抛领域错误，
+   * 不会等到上传阶段才炸。
+   */
+  readonly artifact: (spec: ExperimentArtifactFileSpec) => void;
 }
 
 /**
@@ -587,3 +646,290 @@ export interface ExperimentDefinition {
   /** 研究内容本体。Runner 负责它的加载、校验、执行、结果校验与错误捕获。 */
   run(context: ExperimentRunContext): Promise<ExperimentResultPayload> | ExperimentResultPayload;
 }
+
+// ---------------------------------------------------------------------------
+// 九、持久化 / Artifact / Manifest 契约（RESEARCH-EXPERIMENT-004）
+// ---------------------------------------------------------------------------
+//
+// 本节的定位（规格 §2 / §10 / §11 / §12）：
+//
+// ```
+// TiDB    ← Run Metadata（轻量：状态 / 时间 / 参数 / Dataset 坐标 / Manifest 引用 / 轻摘要）
+// MinIO   ← Result / Manifest / 表格 / 图表 / 日志等**大产物**
+// Dataset ← 仍然只有一套（`datasetVersionId` 引用，MinIO 不复制 Dataset）
+// ```
+//
+// 🔴 三条硬纪律：
+//   1. **不设计全局固定的实验 Result 表** —— 不同实验的 Result 结构不同，只有「信封」是统一的；
+//      `result.json` 落对象存储，DB 只存它的**引用**与**轻量摘要**；
+//   2. **Artifact 元数据里不出现任何凭据** —— 凭据只存在于服务端 env（规格 §18）；
+//   3. Tool 侧一律不知道 Object Key 的具体拼法细节以外的东西：Key 由
+//      `server/artifactStorage/objectKey.ts` 唯一生成，本契约只描述**形态**。
+
+/** `manifest.json` 自身的结构版本（Manifest 是 Run 的 Artifact 索引）。 */
+export const EXPERIMENT_MANIFEST_SCHEMA_VERSION = "1.0.0";
+
+/** 结果信封落盘时的结构版本（写进 `experiment_run.resultSchemaVersion`）。 */
+export const EXPERIMENT_RESULT_SCHEMA_VERSION = "1.0.0";
+
+/**
+ * 「能不能在页内预览」的判据 —— **两端唯一真源**（规格 §17）。
+ *
+ * 🔴 为什么必须放在契约里而不是各写一份：服务端用这两个常量算
+ *    `ExperimentArtifactMetadata.inlineViewable`（权威裁决），前端用它们决定
+ *    「给不给预览按钮」。若两边各写一份，迟早出现「服务端说不给预览、前端却给」（或反之）
+ *    —— 那就是本仓库明确禁止的「同名不同义」。
+ *
+ * 语义：体积 ≤ 上限 **且** 形态在列表内 ⇒ 可由后端代理**内联**返回并读成文本。
+ * 超限的产物**不是不能看**，只是要用户主动点「下载」在本地打开（§17 大文件策略）。
+ */
+export const EXPERIMENT_ARTIFACT_INLINE_PREVIEW_MAX_BYTES = 256 * 1024;
+
+/** 可内联预览的形态（`format` 字段取值；大小写不敏感比较）。 */
+export const EXPERIMENT_ARTIFACT_INLINE_PREVIEW_FORMATS = [
+  "json",
+  "csv",
+  "tsv",
+  "text",
+  "svg",
+  "html",
+] as const;
+
+/**
+ * Run 生命周期状态（规格 §12）。
+ *
+ * ```
+ * PENDING → RUNNING → COMPLETED
+ *                   ↘ FAILED
+ * ```
+ *
+ * 🔴 `COMPLETED` 的**唯一**含义是「Result 与 Manifest 已确实写入对象存储并通过存在性校验」——
+ * 「DB 说完成了、对象却不在」是不允许出现的状态（规格 §13 情况 A）。
+ */
+export const EXPERIMENT_RUN_LIFECYCLE_STATUSES = [
+  "PENDING",
+  "RUNNING",
+  "COMPLETED",
+  "FAILED",
+] as const;
+export type ExperimentRunLifecycleStatus = (typeof EXPERIMENT_RUN_LIFECYCLE_STATUSES)[number];
+
+/** 合法状态迁移表（唯一权威；Repository 与测试共用）。 */
+export const EXPERIMENT_RUN_ALLOWED_TRANSITIONS: Readonly<
+  Record<ExperimentRunLifecycleStatus, readonly ExperimentRunLifecycleStatus[]>
+> = {
+  PENDING: ["RUNNING", "FAILED"],
+  RUNNING: ["COMPLETED", "FAILED"],
+  COMPLETED: [],
+  FAILED: [],
+};
+
+/** Artifact 种类（决定前端给什么样的入口：预览 / 下载 / 打开）。 */
+export const EXPERIMENT_ARTIFACT_KINDS = [
+  "RESULT",
+  "MANIFEST",
+  "TABLE",
+  "CHART",
+  "CSV",
+  "PARQUET",
+  "LOG",
+  "IMAGE",
+  "OTHER",
+] as const;
+export type ExperimentArtifactKind = (typeof EXPERIMENT_ARTIFACT_KINDS)[number];
+
+/**
+ * 一个 Artifact 的**索引项**（不含内容）。
+ *
+ * `key` 是对象存储里的**完整 Object Key**（= `server/artifactStorage/objectKey.ts` 生成）。
+ * 前端拿到它之后只能经后端 API 取内容（规格 §18），**拿不到任何存储凭据**。
+ */
+export const experimentArtifactRefSchema = z.object({
+  key: z.string().min(1),
+  kind: z.enum(EXPERIMENT_ARTIFACT_KINDS),
+  /** 形态描述（如 `json` / `csv` / `parquet` / `png` / `text`）。 */
+  format: z.string().min(1),
+  contentType: z.string().nullable(),
+  sizeBytes: z.number().int().nonnegative(),
+  /** 写入时间（ISO 8601）。 */
+  createdAt: z.string().nullable(),
+  label: z.string().min(1),
+  description: z.string().nullish(),
+});
+export type ExperimentArtifactRef = z.infer<typeof experimentArtifactRefSchema>;
+
+/**
+ * `manifest.json` —— 本次 Run 的 Artifact 索引（规格 §10）。
+ *
+ * 🔴 Manifest 是「这次 Run 到底产出了什么」的**唯一索引**：前端不猜 Key、不做目录列举，
+ *    一律以 Manifest 为准；也因此 `result` 字段是 Manifest 里的**引用**，不是内容。
+ */
+export const experimentRunManifestSchema = z.object({
+  schemaVersion: z.string().min(1),
+  /** 实验 id（`<group>/<key>`）。 */
+  experimentCode: z.string().min(1),
+  experimentVersion: z.string().min(1),
+  runId: z.string().min(1),
+  /** 本次 Run 使用的唯一 Dataset 版本坐标（**软引用**，非 FK）。 */
+  datasetVersionId: z.number().int().positive(),
+  createdAt: z.string().min(1),
+  /** 结果信封对象（`null` = 本 Run 没有结果，如执行失败）。 */
+  result: experimentArtifactRefSchema.nullable(),
+  tables: z.array(experimentArtifactRefSchema),
+  charts: z.array(experimentArtifactRefSchema),
+  /** 其它产物（CSV / Parquet / 图片 / 日志 / 大型中间结果 …）。 */
+  artifacts: z.array(experimentArtifactRefSchema),
+});
+export type ExperimentRunManifest = z.infer<typeof experimentRunManifestSchema>;
+
+/**
+ * 落进 TiDB 的**轻量摘要**（规格 §2.1「必要的轻量 Summary Metadata」）。
+ *
+ * 为什么要有它：Run 列表页不应该为了显示「候选 328 / 入池 291」而去对象存储拉一次
+ * `result.json`（低带宽环境下这正是规格 §17 要避免的事）。
+ */
+export const experimentRunSummarySchema = z.object({
+  /** Runner 的执行结论（`SUCCEEDED` / `FAILED`）。 */
+  runStatus: z.enum(EXPERIMENT_RUN_STATUSES),
+  candidateCount: z.number().int().nonnegative().nullable(),
+  eligibleCount: z.number().int().nonnegative().nullable(),
+  excludedCount: z.number().int().nonnegative().nullable(),
+  excludedByReason: z.record(z.string(), z.number().int().nonnegative()).nullable(),
+  /** 实际读到的行数（证明「读了什么」）。 */
+  prefixRowCount: z.number().int().nonnegative().nullable(),
+  postRowCount: z.number().int().nonnegative().nullable(),
+  forwardDataRead: z.boolean().nullable(),
+  logLineCount: z.number().int().nonnegative(),
+  /** 本次写出的 Artifact 个数（含 result / manifest）。 */
+  artifactCount: z.number().int().nonnegative(),
+});
+export type ExperimentRunSummary = z.infer<typeof experimentRunSummarySchema>;
+
+/** 一条 Run 的持久化记录（= TiDB 行 + 软引用，**不含 Result 内容**）。 */
+export const experimentRunRecordSchema = z.object({
+  runId: z.string().min(1),
+  /** 实验 id（`<group>/<key>`）。 */
+  experimentId: z.string().min(1),
+  /** 运行时的实验元数据**快照**（代码改了也仍能读懂这条历史 Run）。 */
+  experimentName: z.string().min(1),
+  experimentVersion: z.string().min(1),
+  datasetVersionId: z.number().int().positive(),
+  datasetCode: z.string().min(1),
+  datasetVersionLabel: z.string().min(1),
+  /** **已归并默认值**的参数快照（写入即冻结）。 */
+  parameters: experimentParameterValuesSchema,
+  status: z.enum(EXPERIMENT_RUN_LIFECYCLE_STATUSES),
+  startedAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  errorCode: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+  /** Manifest 对象 Key（`COMPLETED` 时必非空 —— 由 Repository 断言）。 */
+  resultManifestKey: z.string().nullable(),
+  resultSchemaVersion: z.string().nullable(),
+  summary: experimentRunSummarySchema.nullable(),
+  /**
+   * `true` = 该 Run 已长时间停留在 `RUNNING`（超过阈值仍未收敛）。
+   *
+   * 🔴 这是「情况 B：Run 永远 RUNNING」的**可见化**落点：读时不静默改写状态，
+   * 而是如实标注「它可能已经卡住了」，并提供收敛入口（`researchExperiments.reconcileRun`）。
+   */
+  stale: z.boolean(),
+  createdAt: z.string().min(1),
+  updatedAt: z.string().min(1),
+});
+export type ExperimentRunRecord = z.infer<typeof experimentRunRecordSchema>;
+
+/**
+ * 列表摘要：当前 Run + 该实验最近的 Run（列表页一次请求拿全）。
+ *
+ * 🔴 `runsAvailable` / `runsError` 是刻意的：实验**描述符**来自代码里的注册表
+ *    （DB 挂了也拿得到），而 Run 事实来自 TiDB。若不分开报告，DB 不可用时页面只能
+ *    要么整页报错、要么显示「0 个 Run」——后者是**把故障伪装成事实**。
+ *    这里如实说「列表可用，但 Run 事实取不到，原因是 …」。
+ */
+export const experimentSummarySchema = z.object({
+  descriptor: experimentDescriptorSchema,
+  runCount: z.number().int().nonnegative(),
+  latestRun: experimentRunRecordSchema.nullable(),
+  /** Run 事实是否取到（false ⇒ `runCount=0` 与 `latestRun=null` **不代表真的没有 Run**）。 */
+  runsAvailable: z.boolean(),
+  runsError: z.object({ code: z.string(), message: z.string() }).nullable(),
+});
+export type ExperimentSummary = z.infer<typeof experimentSummarySchema>;
+
+/** 实验详情：描述符 + 该实验的全部 Run（按时间降序）。 */
+export const experimentDetailSchema = z.object({
+  descriptor: experimentDescriptorSchema,
+  runs: z.array(experimentRunRecordSchema),
+  /** 同 `experimentSummarySchema`：Run 事实取不到时如实标注，不用空数组冒充「没有 Run」。 */
+  runsAvailable: z.boolean(),
+  runsError: z.object({ code: z.string(), message: z.string() }).nullable(),
+});
+export type ExperimentDetail = z.infer<typeof experimentDetailSchema>;
+
+/** Artifact 的只读元数据（规格 §16：Chart / CSV / Parquet 至少要能查看 metadata）。 */
+export const experimentArtifactMetadataSchema = z.object({
+  ref: experimentArtifactRefSchema,
+  /** 对象在存储里**确实存在**（读时实测，不是靠 DB 声称）。 */
+  present: z.boolean(),
+  sizeBytes: z.number().int().nonnegative().nullable(),
+  contentType: z.string().nullable(),
+  lastModified: z.string().nullable(),
+  etag: z.string().nullable(),
+  /** 是否可由后端直接内联预览（小体积文本 / JSON；大文件一律只给下载）。 */
+  inlineViewable: z.boolean(),
+});
+export type ExperimentArtifactMetadata = z.infer<typeof experimentArtifactMetadataSchema>;
+
+/**
+ * `getRun` 的返回：Run 元数据 + Manifest + Result（+ 每个 Artifact 的存在性）。
+ *
+ * 🔴 Result / Manifest 来自对象存储 ⇒ 当存储不可用时，它们如实为 `null`，
+ *    并由 `artifactsAvailable=false` + `artifactsError` 说明原因；**不伪造空结果**。
+ */
+export const experimentRunDetailSchema = z.object({
+  run: experimentRunRecordSchema,
+  manifest: experimentRunManifestSchema.nullable(),
+  result: experimentResultEnvelopeSchema.nullable(),
+  artifacts: z.array(experimentArtifactMetadataSchema),
+  /** 对象存储是否可读（false 时 manifest/result 必为 null）。 */
+  artifactsAvailable: z.boolean(),
+  /** 不可读时的原因（领域码 + 人读说明）；可读时为 null。 */
+  artifactsError: z.object({ code: z.string(), message: z.string() }).nullable(),
+});
+export type ExperimentRunDetail = z.infer<typeof experimentRunDetailSchema>;
+
+/** Run 执行结果：Runner 的完整事实 + 持久化坐标（`run` 端点的返回值）。 */
+export const experimentRunExecutionResultSchema = z.object({
+  /** 落库坐标；持久化不可用时为 null（此时 outcome 仍如实返回）。 */
+  persisted: z.boolean(),
+  run: experimentRunRecordSchema.nullable(),
+  outcome: experimentRunOutcomeSchema,
+});
+export type ExperimentRunExecutionResult = z.infer<typeof experimentRunExecutionResultSchema>;
+
+// ---- tRPC 入参（§14） ----
+
+export const listRunsInputSchema = z
+  .object({
+    experimentId: experimentIdSchema.optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+  })
+  .optional();
+
+export const getRunInputSchema = z.object({ runId: z.string().min(1) });
+
+export const getRunResultManifestInputSchema = z.object({ runId: z.string().min(1) });
+
+export const getArtifactInputSchema = z.object({
+  runId: z.string().min(1),
+  key: z.string().min(1),
+});
+
+export const reconcileRunInputSchema = z.object({
+  runId: z.string().min(1),
+  /** 收敛原因（必填：收敛一条 RUNNING 是**人为判定**，必须留痕）。 */
+  reason: z.string().min(1).max(500),
+});
+

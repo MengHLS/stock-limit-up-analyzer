@@ -1,31 +1,44 @@
 /**
- * 独立研究实验详情 / 运行页（`/research-experiments/:group/:key`，RESEARCH-EXPERIMENT-001）。
+ * 独立研究实验详情 / 运行页（`/research-experiments/:group/:key`）。
  *
- * ## 平台负责什么（规格 §13 / §7）
+ * RESEARCH-EXPERIMENT-001 建立通用外壳；**RESEARCH-EXPERIMENT-004 给它加了持久化**。
  *
- * 本页是**通用外壳**，与具体实验无关：
+ * ## 平台负责什么
+ *
  *   1. 显示实验元数据（名称 / 版本 / 来源 / 说明）与 Dataset 需求声明；
- *   2. Dataset 版本选择器（**坐标进 URL**，见下）+ 由参数定义自动渲染的参数表单；
- *   3. 「运行」动作（pending 时**换文案**并给出量级，见 `.workbuddy/memory/MEMORY.md` 的
- *      「长请求按钮 pending 必须换文案」）；
- *   4. 执行状态（loading / 成功 / 失败）、执行元数据（耗时 / Dataset 坐标 / 实际参数 / 日志）；
- *   5. 结果：`pageKey` 命中客户端页面注册表 ⇒ 挂载**实验自己的页面**；否则降级到通用渲染器。
+ *   2. Dataset 版本选择器（**坐标进 URL**）+ 由参数定义自动渲染的参数表单；
+ *   3. 「运行」动作（pending 时**换文案**并给出量级）；
+ *   4. 执行状态与「**是否已持久化**」（这是 004 新增的关键区别，见下）；
+ *   5. **运行历史（Run 列表）** —— 可直接打开任何一条历史 Run；
+ *   6. 结果：`pageKey` 命中客户端页面注册表 ⇒ 挂载**实验自己的页面**；否则降级通用渲染器。
  *
- * ## 两条刻意的设计
+ * ## 004 带来的三个行为变化
  *
- * - 🔴 **坐标进 URL**：Dataset 版本来自 `?datasetVersionId=`，默认取最新版本。
- *   刷新 / 分享 / 后退都不会丢坐标 —— 「靠内存态才能到达」是上一轮踩过的坑。
- * - 🔴 **结果不落库（如实告知）**：本体系**不新增数据库表**（规格 §9），
- *   执行是请求内计算，因此**刷新页面后需要重跑**。这一点在页面上明确写出，
- *   而不是让用户对着空结果猜「是不是坏了」。
+ * - 🔴 **结果落库了**：每次「运行」都会先建 Run 行（PENDING → RUNNING → COMPLETED/FAILED），
+ *   产物落对象存储。因此刷新页面**不再丢结果**：历史 Run 列表里点进去就能看。
+ * - 🔴 **「跑成功」≠「存成功」**：实验算完但对象存储写失败时，Run 会是 `FAILED`
+ *   而 outcome 是 `SUCCEEDED`（规格 §13 情况 A 的正确表现）。页面**必须响亮区分这两件事**，
+ *   否则用户会以为「结果显示正常 ⇒ 一定存下来了」。
+ * - 🔴 **Run 事实取不到时如实标注**（`runsAvailable=false`）：实验描述符来自代码注册表，
+ *   DB 挂了也拿得到 ⇒ 不能因为 Run 查不到就整页报错，也不能显示「0 个 Run」假装没有历史。
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearch } from "wouter";
-import { AlertTriangle, Database, FlaskConical, Info, Loader2, Play, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  Database,
+  ExternalLink,
+  FlaskConical,
+  History,
+  Info,
+  Loader2,
+  Play,
+  RefreshCw,
+} from "lucide-react";
 import type {
   ExperimentParameterValues,
-  ExperimentRunOutcome,
+  ExperimentRunExecutionResult,
 } from "@shared/researchExperimentsContracts";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +48,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -47,6 +68,7 @@ import { ErrorState } from "@/components/common";
 import { rpcErrorToDiagnostic } from "@/lib/rpcDiagnostic";
 import { experimentPageOf } from "@/researchExperiments";
 import { GenericExperimentResult } from "./GenericResultView";
+import { MetadataRow, RunStatusBadge, formatDateTime, formatDuration } from "./runShared";
 
 /** 表单原始值（保持字符串形态，避免输入过程中被数字转换吃掉中间态）。 */
 type RawValue = string | boolean;
@@ -57,17 +79,14 @@ function defaultRawValue(kind: string, defaultValue: unknown): RawValue {
   return defaultValue === undefined || defaultValue === null ? "" : String(defaultValue);
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  return `${Math.floor(ms / 60_000)} 分 ${Math.round((ms % 60_000) / 1000)} 秒`;
-}
-
-function formatDateTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+/** 参数摘要（列表页一行显示，太长就截断 —— 细节进 Run 详情）。 */
+function summarizeParameters(parameters: Record<string, unknown>): string {
+  const keys = Object.keys(parameters);
+  if (keys.length === 0) return "—";
+  return keys
+    .sort()
+    .map((key) => `${key}=${JSON.stringify(parameters[key])}`)
+    .join(", ");
 }
 
 export default function ResearchExperimentDetail() {
@@ -75,14 +94,19 @@ export default function ResearchExperimentDetail() {
   const search = useSearch();
   const [, setLocation] = useLocation();
 
-  const experimentId = `${decodeURIComponent(params.group ?? "")}/${decodeURIComponent(params.key ?? "")}`;
-  const basePath = `/research-experiments/${encodeURIComponent(params.group ?? "")}/${encodeURIComponent(params.key ?? "")}`;
+  const group = params.group ?? "";
+  const key = params.key ?? "";
+  const experimentId = `${decodeURIComponent(group)}/${decodeURIComponent(key)}`;
+  const basePath = `/research-experiments/${encodeURIComponent(group)}/${encodeURIComponent(key)}`;
 
-  const descriptorQuery = trpc.researchExperiments.get.useQuery(
+  const utils = trpc.useUtils();
+  const experimentQuery = trpc.researchExperiments.get.useQuery(
     { experimentId },
     { enabled: experimentId !== "/", retry: false },
   );
-  const descriptor = descriptorQuery.data;
+  const detail = experimentQuery.data;
+  const descriptor = detail?.descriptor;
+  const runs = detail?.runs ?? [];
 
   const versionsQuery = trpc.researchExperiments.listDatasetVersions.useQuery(
     { datasetCode: descriptor?.datasetRequirement.datasetCode ?? "" },
@@ -112,20 +136,25 @@ export default function ResearchExperimentDetail() {
   }, [descriptor?.id, descriptor?.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [paramError, setParamError] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<ExperimentRunOutcome | null>(null);
+  const [execution, setExecution] = useState<ExperimentRunExecutionResult | null>(null);
   const [rpcError, setRpcError] = useState<{ message: string } | null>(null);
 
   const runMutation = trpc.researchExperiments.run.useMutation({
     onSuccess: (data) => {
-      setOutcome(data);
+      setExecution(data);
       setRpcError(null);
+      // 新 Run 已落库 ⇒ 刷新历史列表（否则用户看不到刚跑的那一条）。
+      void utils.researchExperiments.get.invalidate({ experimentId });
     },
     onError: (error) => {
-      // 🔴 响亮提示，不静默：tRPC 错误与「执行失败」是两类事实，分开呈现。
+      // 🔴 响亮提示，不静默：tRPC 错误（请求不成立）与「执行失败」是两类事实，分开呈现。
       setRpcError({ message: error.message });
-      setOutcome(null);
+      setExecution(null);
     },
   });
+
+  const outcome = execution?.outcome ?? null;
+  const persistedRun = execution?.run ?? null;
 
   /** 把表单原始值编译成入参；非法即**拒绝提交并提示**（服务端仍会独立校验）。 */
   function buildParameters(): ExperimentParameterValues | null {
@@ -181,7 +210,7 @@ export default function ResearchExperimentDetail() {
     });
   }
 
-  if (descriptorQuery.isLoading) {
+  if (experimentQuery.isLoading) {
     return (
       <div className="space-y-3 p-4 md:p-6">
         <Skeleton className="h-24 w-full" />
@@ -190,11 +219,11 @@ export default function ResearchExperimentDetail() {
     );
   }
 
-  if (descriptorQuery.error || descriptor === undefined) {
+  if (experimentQuery.error || descriptor === undefined) {
     return (
       <div className="space-y-4 p-4 md:p-6">
         <ErrorState
-          error={rpcErrorToDiagnostic(descriptorQuery.error?.message, {
+          error={rpcErrorToDiagnostic(experimentQuery.error?.message, {
             title: "实验不存在或加载失败",
           })}
         />
@@ -247,7 +276,7 @@ export default function ResearchExperimentDetail() {
                 {runMutation.isPending ? (
                   <>
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                    正在运行实验…（读真实 Dataset 并全量计算，可能需要 10~60 秒）
+                    正在运行实验…（读真实 Dataset、全量计算、并写入对象存储；可能需要 10~60 秒）
                   </>
                 ) : (
                   <>
@@ -278,6 +307,49 @@ export default function ResearchExperimentDetail() {
               error={rpcErrorToDiagnostic(rpcError.message, { title: "运行请求被拒绝" })}
             />
           )}
+
+          {/* 🔴 004 新增：跑成功但没存下来 —— 必须与「执行失败」区分开 */}
+          {persistedRun !== null && outcome?.runStatus === "SUCCEEDED" && persistedRun.status !== "COMPLETED" && (
+            <Alert className="border-red-400 bg-red-50">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
+              <AlertTitle className="text-sm">
+                实验算完了，但结果**没能持久化**
+                <Badge variant="outline" className="ml-2 font-mono text-[10px]">
+                  {persistedRun.errorCode ?? "UNKNOWN"}
+                </Badge>
+              </AlertTitle>
+              <AlertDescription className="space-y-1 text-xs">
+                <p>{persistedRun.errorMessage}</p>
+                <p className="text-muted-foreground">
+                  Run <span className="font-mono">{persistedRun.runId}</span> 已被记为 FAILED
+                  （规格要求：产物没落进对象存储，就**不允许**声称完成）。
+                  下方结果仍然显示，因为它确实是本次算出来的 —— 但刷新页面后不会再出现。
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {persistedRun !== null && persistedRun.status === "COMPLETED" && (
+            <Alert className="border-emerald-300 bg-emerald-50">
+              <AlertTitle className="text-sm">已持久化</AlertTitle>
+              <AlertDescription className="space-y-1 text-xs">
+                <p>
+                  Run <span className="font-mono">{persistedRun.runId}</span> · 耗时{" "}
+                  {formatDuration(persistedRun.durationMs)} ·{" "}
+                  <Link
+                    className="underline"
+                    href={`${basePath}/runs/${encodeURIComponent(persistedRun.runId)}`}
+                  >
+                    打开这一条 Run
+                  </Link>
+                </p>
+                <p className="break-all font-mono text-[10px] text-muted-foreground">
+                  manifest = {persistedRun.resultManifestKey}
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
           {outcome && outcome.runStatus === "FAILED" && (
             <Alert className="border-red-300 bg-red-50">
               <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
@@ -286,6 +358,11 @@ export default function ResearchExperimentDetail() {
                 <Badge variant="outline" className="ml-2 font-mono text-[10px]">
                   {outcome.error?.code ?? "UNKNOWN"}
                 </Badge>
+                {persistedRun && (
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                    Run {persistedRun.runId}
+                  </span>
+                )}
               </AlertTitle>
               <AlertDescription className="space-y-1 text-xs">
                 <p>{outcome.error?.message}</p>
@@ -327,8 +404,8 @@ export default function ResearchExperimentDetail() {
                 </p>
                 <p className="mt-2 text-xs">
                   <RefreshCw className="mr-1 inline h-3 w-3" />
-                  本实验体系<strong>不新增数据库表</strong>，执行是请求内计算 ——
-                  刷新页面后结果不会自动恢复，需要重跑（Dataset 坐标保存在 URL 里，不会丢）。
+                  每次运行都会**落库一条 Run**，产物（result.json / manifest.json / 日志）写入对象存储 ——
+                  刷新页面后可在下方「运行历史」里直接打开，不需要重跑。
                 </p>
               </CardContent>
             </Card>
@@ -395,6 +472,87 @@ export default function ResearchExperimentDetail() {
               </CardContent>
             </Card>
           )}
+
+          {/* ⑤ 运行历史（004 新增） */}
+          <Card data-experiment-run-history="true">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <History className="h-4 w-4" /> 运行历史
+                <Badge variant="secondary" className="font-mono text-[10px]">
+                  {runs.length}
+                </Badge>
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Run 元数据保存在 TiDB，产物保存在对象存储 —— 点「打开」可查看任意一条历史 Run
+                的状态、参数、结果与产物。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {detail?.runsAvailable === false && (
+                <Alert className="border-amber-300 bg-amber-50">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                  <AlertTitle className="text-sm">运行历史暂时取不到</AlertTitle>
+                  <AlertDescription className="text-xs">
+                    <span className="font-mono">{detail.runsError?.code}</span>：
+                    {detail.runsError?.message}
+                    <br />
+                    这不代表「没有历史 Run」—— 只是本次没能读到（实验描述符本身不依赖数据库，所以本页仍可打开）。
+                  </AlertDescription>
+                </Alert>
+              )}
+              {detail?.runsAvailable !== false && runs.length === 0 && (
+                <p className="py-2 text-xs text-muted-foreground">
+                  还没有任何 Run。点右上角「运行」会产生第一条。
+                </p>
+              )}
+              {runs.length > 0 && (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Run</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>Dataset</TableHead>
+                      <TableHead>参数</TableHead>
+                      <TableHead>开始</TableHead>
+                      <TableHead className="text-right">耗时</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => (
+                      <TableRow key={run.runId}>
+                        <TableCell className="font-mono text-[11px]">{run.runId}</TableCell>
+                        <TableCell>
+                          <RunStatusBadge run={run} />
+                        </TableCell>
+                        <TableCell className="font-mono text-[11px]">
+                          {run.datasetVersionLabel}
+                          <span className="ml-1 text-muted-foreground">(id={run.datasetVersionId})</span>
+                        </TableCell>
+                        <TableCell className="max-w-[220px] truncate font-mono text-[11px]" title={summarizeParameters(run.parameters)}>
+                          {summarizeParameters(run.parameters)}
+                        </TableCell>
+                        <TableCell className="text-[11px]">{formatDateTime(run.startedAt)}</TableCell>
+                        <TableCell className="text-right font-mono text-[11px] tabular-nums">
+                          {formatDuration(run.durationMs)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button asChild size="sm" variant="outline" className="h-7">
+                            <Link
+                              href={`${basePath}/runs/${encodeURIComponent(run.runId)}`}
+                              data-open-run={run.runId}
+                            >
+                              <ExternalLink className="mr-1 h-3 w-3" /> 打开
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* 右侧：坐标 + 参数 + 声明 */}
@@ -574,15 +732,6 @@ export default function ResearchExperimentDetail() {
           </Card>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MetadataRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-2">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="break-all font-mono">{value}</span>
     </div>
   );
 }

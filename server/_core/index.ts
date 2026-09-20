@@ -14,6 +14,8 @@ import { startMarketSyncScheduler, syncMarketDataOnce, syncMarketDataIfMissing }
 import { startPaperTradingScheduler, advancePaperTradingOnce } from "../paperTradingScheduler";
 import { reclaimOrphanBuildJobs } from "../datasetRegistry";
 import { resolveRuntimeNodeEnv } from "./env";
+// RESEARCH-EXPERIMENT-004 — 实验 Artifact 只读代理（凭据只留在服务端；规格 §18）。
+import { registerExperimentArtifactRoutes } from "../experimentArtifactRoutes";
 
 // 统一运行模式（判定口径见 env.ts#resolveRuntimeNodeEnv）。
 // 必须早于任何读取 process.env.NODE_ENV 的逻辑：下方的 Vite/静态分支、vite.ts#serveStatic、
@@ -68,6 +70,9 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+  // RESEARCH-EXPERIMENT-004 — 实验 Artifact 代理（必须早于 Vite/静态中间件注册，
+  // 否则开发模式下会被 Vite 的 HTML fallback 吃掉）。
+  registerExperimentArtifactRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",

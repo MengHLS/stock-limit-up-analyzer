@@ -2169,3 +2169,90 @@ export const walkForwardFold = mysqlTable("walk_forward_fold", {
 
 export type WalkForwardFoldRow = typeof walkForwardFold.$inferSelect;
 export type InsertWalkForwardFoldRow = typeof walkForwardFold.$inferInsert;
+
+/**
+ * 独立研究实验 · Run 元数据（RESEARCH-EXPERIMENT-004 · migration `0047`）。
+ *
+ * ## 为什么只有这一张表（**刻意的设计决定**）
+ *
+ * 规格 §4 列了 `Experiment` 与 `Experiment Run` 两张候选表。本实现**只建 Run 那张**，理由：
+ *
+ *   1. 本体系的 **Experiment 元数据是「代码声明的」**（`research-experiments/manifest.ts`
+ *      + `server/researchExperiments/registry.ts`）：id / name / version / description /
+ *      参数定义 / Dataset 需求全部随代码走 git，这是比 DB 行更强的持久化与可审计性；
+ *   2. 再建一张 `experiment` 表 ⇒ 立刻出现**两个真源**（代码里的定义 vs DB 里的行），
+ *      两者漂移时无法判定谁对 —— 这与项目「唯一真源」纪律直接冲突；
+ *   3. 规格 §4 自己写了「**优先扩展现有表，不重复创建同义表**」，§20 又明令
+ *      「不为了本任务重做 Experiment Framework」；
+ *   4. 「历史 Run 仍可读懂」由**快照列**兑现：`experimentName` / `experimentVersion` /
+ *      `parametersJson` / `datasetVersionLabel` 都写下运行当时的值 ⇒
+ *      即使之后代码改了实验定义、甚至实验被删除，这条历史 Run 依然自解释。
+ *
+ * ## 与旧 Research 的关系
+ *
+ * 🔴 与已退役的 `research_experiments`（003 已 DROP）**无任何关系**；
+ *    本表是独立实验体系自己的 Run 表，不引用 Analysis / Finding / Conclusion。
+ *
+ * ## 落库边界（规格 §2）
+ *
+ * - **进本表**：Run 身份、实验坐标快照、Dataset 坐标、参数快照、生命周期状态、
+ *   起止时间 / 耗时、错误码与消息、**Manifest 对象 Key**、结果 schema 版本、轻量摘要；
+ * - **不进本表**：结果信封本体、表格 / 图表 / CSV / Parquet / 日志 ——
+ *   这些是「大产物」，一律落对象存储，本表只存**引用**（`resultManifestKey`）。
+ */
+export const researchExperimentRun = mysqlTable("research_experiment_run", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 业务 Run id（`RUN-YYYYMMDD-<8 hex>`）；UNIQUE，**不覆盖历史 Run**。 */
+  runId: varchar("runId", { length: 80 }).notNull(),
+  /** 实验 id（`<group>/<key>`；**软引用**代码里的注册表，非 FK）。 */
+  experimentId: varchar("experimentId", { length: 96 }).notNull(),
+  /** 运行时的实验**名称快照**（代码改名后历史 Run 仍可读懂）。 */
+  experimentName: varchar("experimentName", { length: 200 }).notNull(),
+  /** 运行时的实验**版本快照**（`descriptor.version`）。 */
+  experimentVersion: varchar("experimentVersion", { length: 32 }).notNull(),
+  /** 唯一 Dataset 坐标（**软引用** → `dataset_version.id`；Dataset 不复制、不重建）。 */
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
+  /** 数据集语义代码快照（避免 JOIN 才能显示「用的哪个数据集」）。 */
+  datasetCode: varchar("datasetCode", { length: 64 }).notNull(),
+  /** 数据集版本标签快照（`v1` / `v2` / …；仅显示用，坐标仍是 `datasetVersionId`）。 */
+  datasetVersionLabel: varchar("datasetVersionLabel", { length: 96 }).notNull(),
+  /** **已归并默认值**的参数快照（写入即冻结；JSON 文本，如 `{"n":3}`）。 */
+  parametersJson: longtext("parametersJson").notNull(),
+  /**
+   * 生命周期状态（规格 §12）：`PENDING` / `RUNNING` / `COMPLETED` / `FAILED`。
+   *
+   * 🔴 `COMPLETED` 只能在「Result 与 Manifest 已确实写入对象存储并通过存在性校验」
+   *    之后写入（由 `runRepository` 的状态迁移守卫保证）。
+   */
+  status: varchar("status", { length: 16 }).notNull().default("PENDING"),
+  /** 进入 `RUNNING` 的时刻。 */
+  startedAt: timestamp("startedAt"),
+  /** 进入 `COMPLETED` / `FAILED` 的时刻。 */
+  completedAt: timestamp("completedAt"),
+  /** 执行耗时（毫秒，由 Runner 的时钟给出，与 `startedAt`/`completedAt` 同源）。 */
+  durationMs: int("durationMs"),
+  /** 失败时的领域错误码（成功为 NULL）。 */
+  errorCode: varchar("errorCode", { length: 64 }),
+  /** 失败原因（人读；**不含凭据**）。 */
+  errorMessage: text("errorMessage"),
+  /** Manifest 对象 Key（= 本 Run 全部产物的索引）；`COMPLETED` 时必非空（Repository 断言）。 */
+  resultManifestKey: varchar("resultManifestKey", { length: 512 }),
+  /** 结果信封的结构版本（本任务起为 `1.0.0`）。 */
+  resultSchemaVersion: varchar("resultSchemaVersion", { length: 32 }),
+  /** 轻量摘要（样本账 / 读取行数 / 产物计数）——列表页不必去对象存储拉 result.json。 */
+  summaryJson: longtext("summaryJson"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  /** 一个 Run 一行；`runId` 冲突即拒绝（**不覆盖历史 Run**）。 */
+  runUnique: uniqueIndex("uq_research_experiment_run_id").on(table.runId),
+  /** 按实验列历史 Run（`id` 单调 ⇒ 等价于创建顺序）。 */
+  experimentIdx: index("idx_research_experiment_run_experiment").on(table.experimentId, table.id),
+  /** 收敛「卡在 RUNNING」的 Run（`reconcileRun`）。 */
+  statusIdx: index("idx_research_experiment_run_status").on(table.status),
+  /** 按 Dataset 版本反查用过它的 Run。 */
+  datasetIdx: index("idx_research_experiment_run_dataset").on(table.datasetVersionId),
+}));
+
+export type ResearchExperimentRunRow = typeof researchExperimentRun.$inferSelect;
+export type InsertResearchExperimentRunRow = typeof researchExperimentRun.$inferInsert;

@@ -55,6 +55,7 @@ export {
   createExperimentRunner,
   resolveExperimentParameters,
   validateExperimentResultEnvelope,
+  type ExperimentRunDetailedResult,
   type ExperimentRunner,
   type ExperimentRunnerDeps,
   type ExperimentRunRequest,
@@ -66,3 +67,6 @@ export {
   type ResearchExperimentsRouter,
   type ResearchExperimentsRouterDeps,
 } from "./router";
+
+// RESEARCH-EXPERIMENT-004 — Run 持久化（TiDB 元数据 + 对象存储产物）
+export * from "./persistence";

@@ -52,25 +52,42 @@ export function GenericExperimentResult({
   result,
   pageKey,
   reason,
+  registrationNotice,
 }: {
   result: ExperimentResultEnvelope;
   pageKey: string;
   reason: string;
+  /**
+   * 顶部提示的覆盖（RESEARCH-EXPERIMENT-004 新增，**可选**）。
+   *
+   * 为什么要加：本组件有两个调用场景 ——
+   *   1. 实验页降级路径（`pageKey` 未登记）⇒ 需要提醒「本该有页面」；
+   *   2. **历史 Run 详情页**（004）—— 那里只拿得到结果信封、拿不到执行 outcome，
+   *      所以也走通用渲染，但 `pageKey` 往往是**已登记**的 ⇒ 再报「未注册页面」
+   *      就是**假信息**。
+   * 传 `null` = 完全不显示顶部提示；不传 = 保留 001 的原始行为（向后兼容）。
+   */
+  registrationNotice?: { title: string; description: string } | null;
 }) {
   const summary = result.sampleSummary;
   return (
     <div className="space-y-4" data-generic-result="true">
-      <Alert className="border-amber-300 bg-amber-50">
-        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-        <div className="space-y-1">
-          <AlertTitle className="text-sm">该实验未注册自定义页面，已降级为通用渲染</AlertTitle>
-          <AlertDescription className="text-xs">
-            pageKey = <span className="font-mono">{pageKey}</span>；{reason}
-            结果的通用字段（表格 / 统计量 / 分布 / 比较 / 图表）照常展示；
-            <strong>实验自有结构（customPayload）不在此渲染</strong>，请在其页面里查看。
-          </AlertDescription>
-        </div>
-      </Alert>
+      {registrationNotice !== null && (
+        <Alert className="border-amber-300 bg-amber-50">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <div className="space-y-1">
+            <AlertTitle className="text-sm">
+              {registrationNotice?.title ?? "该实验未注册自定义页面，已降级为通用渲染"}
+            </AlertTitle>
+            <AlertDescription className="text-xs">
+              pageKey = <span className="font-mono">{pageKey}</span>；
+              {registrationNotice?.description ?? reason}
+              结果的通用字段（表格 / 统计量 / 分布 / 比较 / 图表）照常展示；
+              <strong>实验自有结构（customPayload）不在此渲染</strong>，请在其页面里查看。
+            </AlertDescription>
+          </div>
+        </Alert>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -292,9 +309,8 @@ export function GenericExperimentResult({
       <Alert>
         <Info className="h-4 w-4 shrink-0" />
         <AlertDescription className="text-xs">
-          通用渲染器只展示结果信封的通用字段。实验自己的结构（customPayload）请在其自定义页面查看
-          —— 若该实验本该有页面，请检查 `client/src/researchExperiments/pages.ts` 是否登记了
-          <span className="mx-1 font-mono">pageKey</span>。
+          通用渲染器只展示结果信封的通用字段（表格 / 统计量 / 分布 / 比较 / 图表）；
+          实验自己的结构（<span className="font-mono">customPayload</span>）由该实验的页面渲染。
         </AlertDescription>
       </Alert>
     </div>

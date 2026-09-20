@@ -16,10 +16,16 @@
  */
 
 import type { ExperimentDatasetVersionOption } from "@shared/researchExperimentsContracts";
+import { defaultArtifactStorage } from "../artifactStorage/factory";
 import { DbDatasetRegistry } from "../datasetRegistry/db";
 import { DbDatasetDataReader } from "../datasetRegistry/query";
 import { RegistryResearchDatasetReader } from "../researchRuntime/datasetReader";
 import { createRegistryExperimentDatasetPort, type ExperimentDatasetPort } from "./datasetPort";
+import {
+  DbExperimentRunRepository,
+  type ExperimentRunRepository,
+} from "./persistence/runRepository";
+import { createExperimentRunService, type ExperimentRunService } from "./persistence/runService";
 import { createExperimentRunner, type ExperimentRunner } from "./runner";
 // 注册表工厂拆到轻量模块（不 import DB / researchEngine）—— 见该文件头注释。
 import { defaultExperimentRegistry } from "./registryDefaults";
@@ -96,6 +102,8 @@ export function defaultExperimentRunner(): ExperimentRunner {
 export interface ResearchExperimentsDeps {
   runner: ExperimentRunner;
   datasetPort: ExperimentDatasetPort;
+  /** RESEARCH-EXPERIMENT-004：Run 持久化编排（TiDB 元数据 + 对象存储产物）。 */
+  runService: ExperimentRunService;
 }
 
 let depsCache: ResearchExperimentsDeps | null = null;
@@ -105,10 +113,47 @@ export function defaultResearchExperimentsDeps(): ResearchExperimentsDeps {
   depsCache ??= (() => {
     const registry = defaultExperimentRegistry();
     const datasetPort = createDefaultExperimentDatasetPort();
-    return { runner: createExperimentRunner({ registry, datasetPort }), datasetPort };
+    const runner = createExperimentRunner({ registry, datasetPort });
+    return { runner, datasetPort, runService: createDefaultExperimentRunService(runner) };
   })();
   runnerCache = depsCache.runner;
   return depsCache;
+}
+
+// ---------------------------------------------------------------------------
+// RESEARCH-EXPERIMENT-004 — Run 持久化装配
+// ---------------------------------------------------------------------------
+
+let runRepositoryCache: ExperimentRunRepository | null = null;
+
+/** 默认 Run 仓储（TiDB；惰性单例）。 */
+export function defaultExperimentRunRepository(): ExperimentRunRepository {
+  runRepositoryCache ??= new DbExperimentRunRepository();
+  return runRepositoryCache;
+}
+
+/**
+ * 默认 Run 服务。
+ *
+ * 🔴 `resolveStorage` 必须是**惰性闭包**（不是 `defaultArtifactStorage()` 的即时调用）：
+ *    未配置 MinIO 时，实验列表 / 历史 Run / Manifest 之外的只读操作仍应可用，
+ *    只有真正读写产物时才该抛「对象存储未配置」。若在这里 eager 求值，
+ *    整个实验页会因为没配 MinIO 而**整页 500** —— 把「不能持久化」放大成了「不能用」。
+ */
+export function createDefaultExperimentRunService(runner: ExperimentRunner): ExperimentRunService {
+  return createExperimentRunService({
+    runner,
+    repository: defaultExperimentRunRepository(),
+    resolveStorage: () => defaultArtifactStorage(),
+  });
+}
+
+let runServiceCache: ExperimentRunService | null = null;
+
+/** 默认 Run 服务（惰性单例）。 */
+export function defaultExperimentRunService(): ExperimentRunService {
+  runServiceCache ??= createDefaultExperimentRunService(defaultResearchExperimentsDeps().runner);
+  return runServiceCache;
 }
 
 /**
