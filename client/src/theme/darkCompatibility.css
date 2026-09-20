@@ -159,10 +159,6 @@
 .dark .hover\:bg-emerald-50\/70:hover:not([class*="dark:bg-"]) {
   background-color: color-mix(in oklab, color-mix(in oklab, var(--color-emerald-500) 8%, var(--background)) 70%, transparent);
 }
-.dark .bg-emerald-50\/40:not([class*="dark:bg-"]),
-.dark .hover\:bg-emerald-50\/40:hover:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-emerald-500) 8%, var(--background)) 40%, transparent);
-}
 .dark .text-emerald-700:not([class*="dark:text-"]),
 .dark .text-emerald-800:not([class*="dark:text-"]),
 .dark .text-emerald-500:not([class*="dark:text-"]) {
@@ -246,11 +242,13 @@
   color: color-mix(in oklab, var(--color-rose-500) 62%, var(--dk-t5));
 }
 .dark .text-orange-700:not([class*="dark:text-"]),
+.dark .hover\:text-orange-700:hover:not([class*="dark:text-"]),
 .dark .text-orange-800:not([class*="dark:text-"]),
 .dark .text-orange-500:not([class*="dark:text-"]) {
   color: color-mix(in oklab, var(--color-orange-400) 62%, var(--dk-t5));
 }
-.dark .text-orange-700\/70:not([class*="dark:text-"]) {
+.dark .text-orange-700\/70:not([class*="dark:text-"]),
+.dark .hover\:text-orange-700\/70:hover:not([class*="dark:text-"]) {
   color: color-mix(in oklab, color-mix(in oklab, var(--color-orange-400) 62%, var(--dk-t5)) 70%, transparent);
 }
 .dark .text-sky-700:not([class*="dark:text-"]),
@@ -363,6 +361,9 @@
 .dark .hover\:text-amber-600:hover:not([class*="dark:text-"]) {
   color: color-mix(in oklab, var(--color-amber-500) 62%, var(--dk-t5));
 }
+.dark .bg-red-600:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, var(--color-red-500) 52%, var(--background));
+}
 .dark .border-red-300:not([class*="dark:border-"]) {
   border-color: var(--color-red-700);
 }
@@ -440,40 +441,16 @@
 .dark .hover\:from-indigo-600:hover:not([class*="dark:from-"]) {
   --tw-gradient-from: color-mix(in oklab, var(--color-indigo-500) 52%, var(--background));
 }
-.dark .text-red-700:not([class*="dark:text-"]),
-.dark .text-red-800:not([class*="dark:text-"]),
-.dark .text-red-500:not([class*="dark:text-"]) {
-  color: color-mix(in oklab, var(--color-red-400) 62%, var(--dk-t5));
-}
 .dark .border-red-200:not([class*="dark:border-"]) {
   border-color: var(--color-red-800);
 }
-.dark .bg-emerald-500\/70:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-emerald-500) 42%, var(--background)) 70%, transparent);
-}
-.dark .bg-emerald-500\/10:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-emerald-500) 42%, var(--background)) 10%, transparent);
-}
-.dark .bg-emerald-500:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, var(--color-emerald-500) 42%, var(--background));
-}
-.dark .bg-red-500\/70:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-red-500) 42%, var(--background)) 70%, transparent);
-}
-.dark .bg-red-500:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, var(--color-red-500) 42%, var(--background));
-}
-.dark .bg-amber-500\/5:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-amber-500) 42%, var(--background)) 5%, transparent);
-}
-.dark .bg-amber-500:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, var(--color-amber-500) 42%, var(--background));
+.dark .text-red-700:not([class*="dark:text-"]),
+.dark .text-red-500:not([class*="dark:text-"]),
+.dark .text-red-800:not([class*="dark:text-"]) {
+  color: color-mix(in oklab, var(--color-red-400) 62%, var(--dk-t5));
 }
 .dark .text-red-900:not([class*="dark:text-"]) {
   color: color-mix(in oklab, var(--color-red-300) 62%, var(--dk-t5));
-}
-.dark .bg-rose-500\/10:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-rose-500) 42%, var(--background)) 10%, transparent);
 }
 .dark .bg-blue-100:not([class*="dark:bg-"]) {
   background-color: color-mix(in oklab, var(--color-blue-500) 11%, var(--background));
@@ -498,6 +475,9 @@
 }
 .dark .border-cyan-200:not([class*="dark:border-"]) {
   border-color: var(--color-cyan-800);
+}
+.dark .bg-red-500:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, var(--color-red-500) 42%, var(--background));
 }
 .dark .bg-blue-50\/50:not([class*="dark:bg-"]) {
   background-color: color-mix(in oklab, color-mix(in oklab, var(--color-blue-500) 8%, var(--background)) 50%, transparent);
@@ -525,11 +505,29 @@
 .dark .bg-slate-800:not([class*="dark:bg-"]) {
   background-color: var(--dk-e1);
 }
+.dark .bg-emerald-500:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, var(--color-emerald-500) 42%, var(--background));
+}
 .dark .border-blue-300:not([class*="dark:border-"]) {
   border-color: var(--color-blue-700);
 }
+.dark .bg-amber-500:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, var(--color-amber-500) 42%, var(--background));
+}
 .dark .bg-slate-400:not([class*="dark:bg-"]) {
   background-color: var(--dk-n4);
+}
+.dark .bg-violet-50\/40:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-violet-500) 8%, var(--background)) 40%, transparent);
+}
+.dark .bg-violet-50\/60:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-violet-500) 8%, var(--background)) 60%, transparent);
+}
+.dark .bg-violet-50:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, var(--color-violet-500) 8%, var(--background));
+}
+.dark .bg-violet-50\/70:not([class*="dark:bg-"]) {
+  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-violet-500) 8%, var(--background)) 70%, transparent);
 }
 .dark .border-sky-100:not([class*="dark:border-"]) {
   border-color: var(--color-sky-900);
@@ -590,15 +588,6 @@
 }
 .dark .text-teal-600:not([class*="dark:text-"]) {
   color: color-mix(in oklab, var(--color-teal-500) 62%, var(--dk-t5));
-}
-.dark .bg-violet-50\/60:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-violet-500) 8%, var(--background)) 60%, transparent);
-}
-.dark .bg-violet-50:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, var(--color-violet-500) 8%, var(--background));
-}
-.dark .bg-violet-50\/70:not([class*="dark:bg-"]) {
-  background-color: color-mix(in oklab, color-mix(in oklab, var(--color-violet-500) 8%, var(--background)) 70%, transparent);
 }
 .dark .border-fuchsia-100:not([class*="dark:border-"]) {
   border-color: var(--color-fuchsia-900);
