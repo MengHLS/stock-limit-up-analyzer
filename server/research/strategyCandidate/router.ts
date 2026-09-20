@@ -93,6 +93,11 @@ const createFromConclusionInput = z.strictObject({
   name: z.string().min(1).optional(),
   description: z.string().nullable().optional(),
   overrides: overridesSchema,
+  /**
+   * PHASE-D-001 —— 是否启用 Evidence → Rule 确定性派生（缺省 true，即**默认派生**）。
+   * 显式 `false` 用于「逐字回到修复前行为」的对照（零回归可断言）。
+   */
+  deriveFromEvidence: z.boolean().optional(),
 });
 
 /**
@@ -262,6 +267,9 @@ export function buildStrategyCandidateRouter(deps: StrategyCandidateRouterDeps) 
             ...(input.name === undefined ? {} : { name: input.name }),
             ...(input.description === undefined ? {} : { description: input.description }),
             ...(input.overrides === undefined ? {} : { overrides: input.overrides }),
+            ...(input.deriveFromEvidence === undefined
+              ? {}
+              : { deriveFromEvidence: input.deriveFromEvidence }),
           });
         } catch (e) {
           toTrpcError(e);

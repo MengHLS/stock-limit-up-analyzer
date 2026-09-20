@@ -29,6 +29,7 @@ import { CandidateLifecycleActions } from "@/components/research/CandidateLifecy
 import { CandidateSketchCard } from "@/components/research/CandidateSketchCard";
 import { EditCandidateDialog } from "@/components/research/EditCandidateDialog";
 import { PromoteCandidateDialog } from "@/components/research/PromoteCandidateDialog";
+import { RuleDerivationCard } from "@/components/research/RuleDerivationCard";
 
 function SourceRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -176,6 +177,11 @@ function CandidateDetailBody({
       </SectionCard>
 
       <CandidateSketchCard raw={raw} />
+
+      {/* PHASE-D-001 —— 规则派生链（D.9 的 human review gate）：
+          「这条规则从哪几条 Finding 派生、研究侧原文是什么、哪些条件没能翻译」全在这里。
+          老候选没有该段 ⇒ 组件自身不渲染。 */}
+      <RuleDerivationCard raw={raw} />
 
       {vm.status === "ACCEPTED" && (
         <SectionCard

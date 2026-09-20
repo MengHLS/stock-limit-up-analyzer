@@ -199,6 +199,10 @@ export function buildResearchEngineRouter(deps: ResearchEngineRouterDeps) {
         case "INVALID_ANALYSIS_CONFIG":
         case "UNKNOWN_VARIABLE":
         case "VARIABLE_ROLE_VIOLATION":
+        // 观察日 PIT（PHASE-R1-001）：数据集未声明决策日却用观察日条件 → 响亮拒绝
+        case "OBSERVATION_WITHOUT_DECISION_DAY":
+        case "INVALID_DECISION_OFFSET":
+        case "DECISION_OFFSET_CONFLICT":
         case "UNKNOWN_ANALYSIS_TYPE":
         // 分段（两窗）关系：两窗取值区间重叠 → 拒绝执行（见 analysisConfig.ts#resolveSegmentWindows）
         case "WINDOW_OVERLAP":

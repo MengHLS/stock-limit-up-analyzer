@@ -58,6 +58,9 @@ export function normalizeResearchDatasetRequest(
             targetTypes: [...filter.pullback.targetTypes],
             tolerancePercent: filter.pullback.tolerancePercent ?? 2,
             observationWindowDays: filter.pullback.observationWindowDays ?? 5,
+            // 🔴 刻意**不给默认值**：缺省即回到「整窗筛选」的 look-ahead 行为，
+            // 必须由调用方显式声明；缺失 / 非法交给本文件的校验响亮拒绝。
+            decisionOffsetDays: filter.pullback.decisionOffsetDays,
           }
         : null,
     },
@@ -129,6 +132,22 @@ export function validateNormalizedResearchDatasetRequest(
       filter.pullback.observationWindowDays > 10
     ) {
       issues.push(issue("INVALID_PULLBACK_WINDOW", "universeFilter.pullback.observationWindowDays 须为 [1,10] 的整数"));
+    }
+    // 🔴 决策日 = 样本资格的信息边界。缺省 / 越界一律响亮拒绝 ——
+    // 绝不允许「缺省 ⇒ 退回整窗筛选」，那正是本次要修掉的 look-ahead 行为。
+    if (
+      !Number.isInteger(filter.pullback.decisionOffsetDays)
+      || filter.pullback.decisionOffsetDays < 1
+      || filter.pullback.decisionOffsetDays > filter.pullback.observationWindowDays
+    ) {
+      issues.push(
+        issue(
+          "INVALID_PULLBACK_DECISION_OFFSET",
+          "universeFilter.pullback.decisionOffsetDays 须为 [1, observationWindowDays="
+            + `${filter.pullback.observationWindowDays}] 的整数（决策日 = 样本资格的信息边界，"
+            + "缺省即「整窗筛选」的 look-ahead 行为，故不允许省略）`,
+        ),
+      );
     }
   }
   return issues;

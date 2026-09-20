@@ -1,13 +1,13 @@
 {
-  "generatedAt": "2026-09-19T14:24:01.957Z",
+  "generatedAt": "2026-09-19T16:34:36.280Z",
   "steps": [
     {
       "step": "chrome",
-      "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+      "path": "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
     },
     {
       "step": "cdp-ready",
-      "targetId": "6ED83F9B4A29BCECEDF25DE5E766D17B",
+      "targetId": "6FB85E5BBE0007E5FDC80A9001F17233",
       "url": "about:blank"
     },
     {
@@ -17,7 +17,7 @@
       "hasAnchor": true,
       "anchorHref": "/research/report/750003",
       "textLength": 1191,
-      "waitedMs": 1632
+      "waitedMs": 3272
     },
     {
       "step": "report-view",

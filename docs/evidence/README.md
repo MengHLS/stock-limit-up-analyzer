@@ -977,3 +977,29 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > ② **跨日期硬比两处次序会产出假 FAIL**：热力图恒按**最新一列**排，而梯队可选任意日期 ⇒ 只有「梯队所选日期 == 热力图最新列」时
 >    两处**主键**才可比（其余日期只比「同热度次键」）。本轮实测：未收窄时 `2026-09-16` 报 3 条「次序分叉」，逐条复核确认是
 >    **比较对象错了**（当天 PCB 热度 11 > AI硬件 7，而热力图按 `2026-09-18` 把 AI硬件排到 #1），不是产品缺陷 ⇒ 已按此收窄判据。
+
+## PHASE-R1-001 · 观察日 PIT 护栏（编号 `9bz`）
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_e2e_r1_decision_day.mts` + `.out.json` | 真实 DB 端到端**五路**验证（同一 Dataset Version `390002`、窗口 `2025-01-02..2025-02-28`，全部带对照）：**实验 A（无决策日声明）** —— Run#1 观察日条件 `pullback_min_low_2d >= 0` ⇒ 预检拒绝 `OBSERVATION_WITHOUT_DECISION_DAY`（Run `FAILED`、`startedAt=null`、无半成品）；Run#2 同实验换纯特征条件 `turnover >= 3` ⇒ `COMPLETED`、12.9 s、`sampleCount=1720`、`resultCount=16`、`conclusionId=870001`（**对照**：排除「数据集没数据 / 版本不可用 / 引擎坏了」）。**实验 B（`experiment.config.decisionOffsetDays=2`）** —— Run#3 观察日 offset=2（≤ d）⇒ **`COMPLETED`、13.1 s、1720 / 16 / `conclusionId=870002`（正向跑通）**；Run#4 同实验 offset=3（> d）⇒ `VARIABLE_ROLE_VIOLATION`；Run#5 `run.config.decisionOffsetDays=3` 与实验的 2 异值 ⇒ `DECISION_OFFSET_CONFLICT`。三种拒绝**全部发生在预检阶段**（`startedAt=null`）、分析被收敛为 CANCELLED 不留孤儿；自建自清（`purgedAfter=2`）。**副产品（高价值）**：Run#2 真实触发 `emitReportArtifact`（产出 `artifact=#60001`）⇒ 推翻 PHASE-A 复核遗留⒝「钩子从未被观测到触发」 | `ROADMAP.md` `9bz` 条目、`docs/research/PHASE-R1-001-implementation.md`、`.workbuddy/memory/2026-09-20.md` |
+
+## PHASE-D-001 · Evidence → Candidate 确定性派生桥（编号 `9cb`）
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_e2e_d_evidence_bridge.mts` + `.out.json` | 真实 DB 端到端**完整闭环**（走 `appRouter` 真实 tRPC，13/13 PASS）：实验 `decisionOffsetDays=2` → Run `1200002` `COMPLETED`（14.4 s）→ Finding `360002`（EFFECT）→ Conclusion `1080002` → 候选 `1020003` **派生** `filterRule = [{bar.haircutFromEventLow, <=, max_drawdown}]`（条件数 **0 → 1**）、`sourceFindingIds=[360002]`、`skipped=1`、`directionMismatchCount=1`、`patternIds=[first-limit-pullback-hold-shrink]` → `ACCEPTED → promote` 成功（`cand-1020003@1.0.0`、provenance `origin=DIRECT`）。**对照**：同一结论 `deriveFromEvidence:false` ⇒ `filterRule=null` 且无 `derivation` 段（零回归硬证据）。含一条**哨兵断言**（上游结论仍不写 `findingIds` ⇒ 修好后会变红，提醒撤销脚手架回填）。自建自清（`clean` 模式幂等） | `ROADMAP.md` `9cb` 条目、`docs/research/PHASE-D-001-implementation.md` |
+| `_probe_d_evidence_shape.mts` + `.out.json` | 只读形态审计（**纯 SELECT**）：`research_finding` 68 / `research_conclusion` 15 / `research_strategy_candidate` 13 / `research_hypothesis` 5；conclusion `findingIdsJson` **12 NULL + 3 空数组**（无一非空）；candidate `sourceFindingIdsJson` 4 条非空、`sourceHypothesisId` **13 条全 NULL**、`sourceTraceJson` 0 NULL；并给出 finding 的真实 `dimensionJson`（`{dimensionKey:"group", conditionRule:"<字符串>", conditionCount}`）⇒ 佐证「派生只能用 `research_analysis_condition` 的结构化条件，不能解析该字符串」 | 同上 |
+| `_probe_d_conditional_shape.mts` + `.out.json` | 只读+自建自清诊断（3 个 Run，**定位 `pat_*` 无区分度**）：`pat_pullback_hold_depth_2d <= 0` ⇒ CONDITION 桶 **0** 个样本（且无 CONDITION 行）；`> 0` ⇒ **1718 = 全样本**、`DIFFERENCE=0`、`P=1` ⇒ Finding **0**；**内建对照** `pullback_holds_event_open_2d == 1` ⇒ CONDITION **1436**、`DIFFERENCE=0.01566`、`P=0.0005` ⇒ Finding **1**。⇒ 唯一地把原因钉在「`pat_*` 变量本身」而非 config / 数据集 / 引擎 | 同上 |
+| `_probe_d_finding_config.mts` + `.out.json` | 只读诊断（反查「真库**已证明能产 Finding** 的 analysis 配置」）：所有产过 Finding 的 `CONDITIONAL` 分析 config 均为 `{"targetField":"future_return_5d"}`（**不带** `featureField` / `quantileGroups`），条件全用**内建变量**（`pullback_holds_event_open_2d` 等），**没有一个用 `pat_*`** —— 这正是 E2E 第一版产 0 条 Finding 的原因（config 形态错） | 同上 |
+
+| `_probe_baseline_v2_state.mts` + `.out.json` + `.out.txt` | ✅ **round-2 增量复核**（2026-09-20T02:46Z，`errors=0`）。目的 = 复核基线 v1.0.0 之后新增的 10 张表与变化面。读数：BASE TABLE **73**（= schema.ts 声明 **70** + `__drizzle_migrations` + 2 `rd_rows_*`）；`parameter_search_run` 28 列/**3 行** · `parameter_search_combination` 10 列/**12 行** · `parameter_search_result` 23 列/**8 行**；`search_robustness_*`(33/28/16 列) · `oos_validation_*`(32/41 列) · `walk_forward_*`(29/34 列) **全部存在但 0 行**；`research_artifact` **31 行**（全 `REPORT`/`INLINE`）；`closed_loop_backtest_run` **8**（8/8 `PARTIAL_BLOCKED`）；`research_strategy_candidate` 13（`sourceFindingIdsJson` 非空 **4**）；`dataset_version` v1/v2 均 `hasDecisionOffset = 0` ⇒ 老数据集上观察日条件会被拒 | `docs/architecture/SYSTEM-BASELINE-002-REPORT.md` §5、`SYSTEM-BASELINE.md` §19.3 |
+
+> 🔴 坑五（round-2 真踩）：**「一处事实写多处」的文档体系在并发编辑下必然分叉** —— 并发会话把
+> `SYSTEM-BASELINE.md` 升到 `v1.4.0` 并补了 4 份增量章节，**但另 9 份文件仍写 `v1.0.0`**，
+> 且 `63 表 / 60 声明 / 41 migration` 三处规模数字全部过期（实查 `73 / 70 / 45`）。
+> ⇒ ① 引用规模数字前**先实查**（`grep -c mysqlTable drizzle/schema.ts` / `ls drizzle/*.sql`）；
+> ② 版本号要**一次改齐**所有文件；③ 建议后续加 `scripts/checkBaselineConsistency.mts` 自动比对（本任务仅登记）。
+> ⚠️ 坑六：**审计前先判定「该不该全量审计」** —— 本轮先做 Drift 检测，判定命中
+> `GLOBAL AUDIT REQUIRED` #1（Domain 新增）+ #4（核心数据流变化：判定日）+ #7（核心 Contract 变化：4 份新契约）
+> 才做全量；否则按协议只做增量。

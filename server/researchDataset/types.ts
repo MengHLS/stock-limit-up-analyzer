@@ -76,7 +76,7 @@ export const PULLBACK_TARGET_TYPES = ["limitPrice", "t0Open", "t0Low", "ma5"] as
 export type PullbackTargetType = (typeof PULLBACK_TARGET_TYPES)[number];
 
 /**
- * 回踩筛选条件（在「首板」事件 T0 之上，对 T+1~T+N 观察窗口做「触及且不破」判定）。
+ * 回踩筛选条件（在「首板」事件 T0 之上，对 T+1~T+d 观察窗口做「触及且不破」判定）。
  * 纯信号窄化，不改变 eligibility 判定；量化语义（目标位价格 / 触及 / 跌破）由后端权威判定。
  */
 export interface PullbackScreenCondition {
@@ -84,8 +84,19 @@ export interface PullbackScreenCondition {
   targetTypes: PullbackTargetType[];
   /** 触及容差（%）：最低价允许落在 [目标位, 目标位×(1+容差)]。 */
   tolerancePercent: number;
-  /** 观察窗口交易日数 N（T+1 ~ T+N）。 */
+  /** 观察窗口交易日数 N（T+1 ~ T+N）——**数据集携带的观察日数据上界**。 */
   observationWindowDays: number;
+  /**
+   * 决策日偏移 d（交易日，须满足 `1 ≤ d ≤ observationWindowDays`）。
+   *
+   * 🔴 这是**样本资格的唯一信息边界**：判定「该样本是否满足回踩条件」只允许使用 T+1..T+d。
+   * 研究若在 T+d 做决策 / 入场，就不可能在 T+d 当天知道 T+d 之后的结果 —— 用整段 T+1..T+N
+   * 决定样本是否进池，等于在**样本层**使用未来数据（survivor / look-ahead bias：池子被未来
+   * 数据筛过，之后一切统计都建立在「事后已知会成立」的样本上）。
+   *
+   * ⚠️ **必填**：缺省会静默退回「整窗筛选」这一缺陷行为，故不允许省略（`validate` 会响亮拒绝）。
+   */
+  decisionOffsetDays: number;
 }
 
 /**

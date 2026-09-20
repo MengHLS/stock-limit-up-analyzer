@@ -1,12 +1,14 @@
 # DOMAIN-MAP — 领域边界与职责（含「不负责什么」）
 
-> Baseline: **v1.0.0** · auditedAt **2026-09-19** · 唯一细则源 = 代码
+> Baseline: **v2.0.0** · auditedAt **2026-09-20**（round-2 全量审计）· 唯一细则源 = 代码
 > 归属标记：`FACT`（代码已存在并可达） / `PARTIAL` / `PLANNED` / `LEGACY` / `BLOCKED` / `OBSERVED`
 > 本文件只回答「谁负责什么、谁**不**负责什么」。数据流见 `DATA-FLOW.md`，执行链见 `EXECUTION-FLOW.md`。
 
 ---
 
 ## 0. 一句话总览
+
+> 🔄 **round-2（2026-09-20）补充**：四阶段 `A(9by) → R1(9bz) → B(9ca) → D(9cb)` 已全部 COMPLETE。**它们改的是「数据域 / 研究域」内部的语义与信息边界，不改 Domain 划分**（唯一新增的跨域结构物 = `shared/patternSemantics.ts` 语义契约，见 §17）。
 
 本项目的领域链是 **Dataset → Research → Strategy → Parameter Search → Backtest → Evaluation → Robustness/OOS/WFA → Simulation → Production**。
 但**代码里的真实可达性并不等同于这条理想链**：目前**闭环编排器只装配了 8/14 阶段**，其余 6 阶段（robustness / oos / overfitting / paper / review / discipline）虽在编排器内 `notWired`，却各自**另有独立 tRPC 路由**可达（技术预览口径）。判定见每节 `状态`。
@@ -267,6 +269,25 @@
 | Strategy Definition → Dataset / 引擎坐标 | 由 `DATASET_BINDING_IN_DEFINITION_FORBIDDEN` 机器拒绝 | ✅ 合规 |
 
 详见 `DEPENDENCY-MAP.md`。
+
+---
+
+## 17. PHASE-A / R1 / B / D 增量（2026-09-20 · `9by` / `9bz` / `9ca` / `9cb`）
+
+**四个阶段的职责边界变化（唯一表述）**
+
+| 阶段 | 谁的职责被改变 | 变化 | **新增的「不负责」** |
+|---|---|---|---|
+| **A**（`9by`） | Research 域 | 新增 `researchEngine/report/**`：把已完成的 `Result→Finding→Conclusion` 沉淀为可持久化/可追溯/可重看的 `research_artifact(REPORT/INLINE)` | **不产生新结论**（纯投影）；**不改 Run 状态**（best-effort，吞错仅 `console.warn`） |
+| **R1**（`9bz`） | Dataset 域 + Research 域 | **判定日（`decisionOffsetDays`）成为「样本资格的唯一信息边界」**：数据集层按 `T+1..T+d` 截断池子；研究层护栏改为按声明的判定日校验 | Dataset **不负责**声明「本次研究在 T+d 判定」（那是 Run/分析意图）；Research **不负责**替调用方猜判定日（四级全空 ⇒ 拒绝） |
+| **B**（`9ca`） | Pattern 库 + Research/Strategy 两侧 | 新增 `shared/patternSemantics.ts` **语义契约** + `semanticRegistry` **唯一 SoT**；Pattern 声明 → 唯一 Expander → 两侧投影（研究变量目录 / 策略特征） | Pattern 声明**不含实现**（纯数据，无回调/无 SQL）；两侧投影**不得自行展开**语义 |
+| **D**（`9cb`） | Research→Strategy 转正链 | `createFromConclusion` **默认从研究证据派生候选规则**（`evidenceDerivation.ts` 唯一实现），provenance 落 `sourceFindingIdsJson` + `sourceTraceJson.derivation` | **不推断阈值数值**（D.3 禁黑箱）——只产参数引用，取值交 Parameter Search；不可翻译**必须如实登记**，绝不猜 |
+
+**🔴 round-2 新增的域间硬约束**
+
+1. **判定日四方同值**：`analysis.config` / `run.config` / `experiment.config` / `dataset_version.universeDefinition` 四处若都声明，**必须同值**；异值 ⇒ `DECISION_OFFSET_CONFLICT`（不是「按优先级取一个」）。
+2. **Research 域新增对 Pattern 声明库的依赖**：`server/researchEngine/**` → `server/research/patternLibrary/**`（`semanticRegistry`）。**这条边当前未被 `importBoundary.test.ts` 守护**（见 `DEPENDENCY-MAP.md` D-92）。
+3. **`research_artifact` 幂等只在应用层**（无 DB 唯一约束）⇒ 并发/多进程下无 DB 兜底。
 
 ---
 

@@ -2,7 +2,7 @@
 
 # 测试模块：tests/client/src/components
 
-- 测试文件 **16** 个 ｜ 用例声明 **422** 个
+- 测试文件 **17** 个 ｜ 用例声明 **427** 个
 - 涉及源码目录：`client/src/adapters/` · `client/src/components/datasetRegistry/` · `client/src/components/research/` · `client/src/components/strategy/` · `server/` · `server/research/strategyCandidate/` · `server/research/strategySchema/` · `server/researchCore/` · `shared/`
 
 ## 怎么跑
@@ -540,6 +540,18 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 非法 limit 回落到「不发请求」而不是全发
   - 纯函数：不改入参
   - 上限是正的常量（防止被误改成 0 导致矩阵永不取数）
+
+### `tests/client/src/components/research/ruleDerivationCard.test.ts`
+- 127 行 ｜ 用例声明 5 ｜ describe 1
+- 被测源码：`client/src/components/research/RuleDerivationCard.tsx`
+- 单跑：`pnpm exec vitest run tests/client/src/components/research/ruleDerivationCard.test.ts`
+- 用例树：
+- **readDerivation**
+  - 正常快照 ⇒ 逐字段读出，畸形元素被过滤
+  - 没有 sourceTraceJson（老候选）⇒ null（整卡不渲染）
+  - 有 sourceTraceJson 但缺 derivation 段（关闭派生的候选）⇒ null（不兜底）
+  - 畸形输入 ⇒ 保持沉默（返回 null 或空数组，绝不抛）
+  - derivation 存在但字段缺失/类型错 ⇒ 缺的读作 null/空，不编造
 
 ### `tests/client/src/components/research/strategyCandidateUiContract.test.ts`
 - 183 行 ｜ 用例声明 9 ｜ describe 1 ｜ 📄 源码文本断言

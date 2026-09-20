@@ -360,7 +360,9 @@ export async function buildResearchDataset(
   }
 
   const pullbackRule = pullback
-    ? `；首板回踩=[${pullback.targetTypes.join("/")}] 容差${pullback.tolerancePercent}% 窗口T+1~T+${pullback.observationWindowDays}（触及且不破）`
+    ? `；首板回踩=[${pullback.targetTypes.join("/")}] 容差${pullback.tolerancePercent}%`
+      + ` 决策日=T+${pullback.decisionOffsetDays}（样本资格只用 T+1~T+${pullback.decisionOffsetDays}）`
+      + ` 数据窗口T+1~T+${pullback.observationWindowDays}（触及且不破）`
     : "";
   const finalUniverseDefinition = {
     ...universeDefinition,
@@ -369,6 +371,9 @@ export async function buildResearchDataset(
         ? `${universeDefinition.rule}；T日条件=${tDayCondition}${pullbackRule}`
         : universeDefinition.rule,
     days: finalDays,
+    // 🔴 决策日落库（样本池的**信息边界**）。研究引擎据此对观察日变量做 PIT 校验 ——
+    // 存进 universeDefinition 使其随 datasetVersion 一起冻结 / 可追溯，无需新列或迁移。
+    pullbackDecisionOffsetDays: pullback ? pullback.decisionOffsetDays : null,
   };
 
   if (securitiesCappedHit) {

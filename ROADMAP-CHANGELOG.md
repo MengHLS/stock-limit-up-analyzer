@@ -2670,3 +2670,40 @@ P1（9 条）/ P2（6 条）一条未动；P0-2/P0-3 的**彻底解**（翻译�
 - **一次真实的「假 FAIL」与判据收窄**：未收窄时 `2026-09-16` 报 3 条「次序分叉」，逐条复核确认是**比较对象错了**（热力图恒按最新一列 `2026-09-18` 排，而梯队当时选的是 `2026-09-16`；当天 PCB 热度 11 > AI硬件 7 本身是正确排序）⇒ 判据收窄为「日期相同才比行序」，其余日期只比次键。**教训：跨口径对象硬比 = 假 FAIL 制造机，断言必须写清「在什么条件下这两个东西才可比」。**
 - **验收**：`tsc --noEmit` = **0 error**；`tests/shared/sectorHeatOrder.test.ts` **10/10**（新增「次键 = 窗口合计降序」「末键 = 题材名升序」「tieBreak 不把不同题材交错开」「🔴 回归：梯队去重后 == 热力图行序」）；`pnpm run docs:tests` 镜像重跑（**4754** 用例）；`node scripts/checkEolDrift.mjs` = **0 漂移**。
 - **边界**：仍为纯 `client/**` + `shared/**` + `tests/**` + 文档 ⇒ 零 `server/**` 改动、不热重启、不杀在途 Run；零迁移 / 零新表 / 零新依赖 / 零新端点；**未提交 git**。
+
+## 更新记录（append-only）· 2026-09-20 9by 完成
+
+- **取号依据**：`ROADMAP.md` §44.5 台账行原文「编号已用至 **`9bx`** ⇒ **下一个未占用 = `9by`**」（**禁「末条 +1」**）。取号前已**全仓 grep `9by|9bz|9ca|9cb`**（零实占），随后**文件头铁律行（L4）与 §44.5 台账行两处同步**：「已用至 `9by` ⇒ 下一个未占用 = `9bz`」。⚠️ **编号冲突与顺移（必须记住）**：四阶段原分配为 `A=9bx / R1=9by / B=9bz / D=9ca`，但 **`9bx` 已被 HOMEPAGE-007 占用**，而 A 的成果**此前未登记**（`grep PHASE-A|REPORT-ARTIFACT` 在 `ROADMAP.md` 与 `ROADMAP-CHANGELOG.md` 零命中）⇒ 本轮为 A 补登 **`9by`**，因此 **R1 → `9bz`、B → `9ca`、D → `9cb`** 整体顺移。
+- **本任务一句话**：PHASE-A-001 已在另一会话于 2026-09-19 22:48（提交 `0e90fc1`）**实施完毕**；本轮做的是**独立复核 + 收尾登记**，并抓到并修掉一次**环境级 A-4 假绿变红**。
+- **独立复核读数**：15 个 COMPLETED Run 各恰好 1 份 `REPORT/INLINE` artifact（`completedRunsWithoutReport = 0`）；Run 750003 ⇒ artifact `#30001`，正文 336,830 字节 / 渲染 242,481 字符，7 章节齐全；反例 URL 显示明确错误态且无正文。
+- **🔴 本轮最有价值的发现（可复用）**：**「dev server 进程早于 `.vite/deps` 重建」会让 Vite 模块图进入不一致状态** —— 症状是**同一页面出现两个不同的 `?v=` 哈希、且都不等于 `_metadata.json.browserHash`**，进而同一份 React 源码在浏览器里成为**两个模块实例**，表现为 `Invalid hook call` + `Cannot read properties of null (reading 'useId')`（栈顶常落在 `streamdown` 这类第三方组件上）。**判据**：报错组件属第三方 + 后端接口 200 + `?v=` 前缀不一致 ⇒ **先重启 dev server 再谈是不是产品缺陷**，别急着改产品代码。
+- **验收（8 项全部通过，均由复核会话独立实跑）**：A-1 / A-2 / A-3 / A-4 / A-7 / A-8 通过；**A-5 转绿**（`tsc --noEmit` exit 0，原 23 条遗留已被清零）；**A-6 独立复跑** = `vitest run` **7 失败文件 / 16 失败用例（284 文件 → 7 failed / 277 passed）**，失败集合全为环境依赖 ⇒ **零新增失败**，且已知失效 `parameterSearchEffectiveness` 已不再失败（较旧基线 8 文件 / 17 用例各减 1）；`reportGenerator.test.ts` 10/10 通过。
+- **边界**：零 migration / 零新表 / 零新列；`checkEolDrift --strict` = 0 漂移；未新建第二套任何 SoT。本轮**除重启 dev server（获授权）外，未改任何产品代码**。
+- **遗留（已入 §44.5 `9by` 条目）**：⒜ `research_artifact` 无唯一约束 ⇒ 并发回填双写风险未实测；⒝ `emitReportArtifact` 钩子在真实 Run 上**从未被观测到触发**（15 份产物全是回填 CLI 批量产物）；⒞ 13/15 份产物 `patternId = null`（Pattern 反查桥薄弱，与 B/D 相关）；⒟ 单份正文可达 1.38 MB 存 INLINE longtext。
+
+## 更新记录（append-only）· 2026-09-20 9bz 完成
+
+- **取号依据**：`ROADMAP.md` §44.5 台账行原文「编号已用至 **`9by`** ⇒ **下一个未占用 = `9bz`**」（**禁「末条 +1」**）。取号前已**全仓 grep `9bz|9ca|9cb`**（零实占），随后**文件头铁律行（L4）与 §44.5 台账行两处同步**：「已用至 `9bz` ⇒ 下一个未占用 = `9ca`」。⚠️ **编号顺移留档**：本阶段原拟 `9by`，因 PHASE-A-001 补登 `9by`（其原拟 `9bx` 已被 HOMEPAGE-007 占用）⇒ R1 顺移 `9bz`、**B → `9ca`、D → `9cb`**。
+- **本任务一句话**：修掉「用整段 T+1..T+N 的未来数据决定样本是否进池」的 survivor / look-ahead bias —— 且审计发现**第二条更隐蔽的缺陷**：研究层唯一的观察日 PIT 护栏（`assertGroupPitSafe`）**判定日由组内条件反推、恒真、从未生效**。
+- **🔴 本轮最有价值的认知（可复用）**：⒜ **「护栏的判定日必须来自外部声明」** —— 从被检查对象自身反推判定日，等价于没有检查；⒝ **「变量名自带窗口」使截断不需要改 resolver**：只要 `availableFromOffset ≤ 决策日`，累积类观察日变量的取值自然被限制在信息边界内；⒞ **判定日的载体归属要有证据**：先确认「引擎读的到底是哪张表」（registry `dataset_version` vs STEP 12.6 `research_dataset`），再决定字段放哪里 —— 否则字段会落在无人读取的表上。
+- **真实数据读数**：池子 `d=5 → 52 行` / `d=2 → 70 行`（旧池子预先踢掉了 18 只「未来会跌破」的样本，+34.6%）；五路真实 DB E2E 全部符合预期（含实验声明 `d=2` 后观察日条件正向跑通、offset 越界与多处异值均被预检拒绝且 `startedAt=null`）。
+- **验收**：`tsc` 0 错；新增单测 26 例（14 + 12，含两条反证）；全量 vitest **7 失败文件 / 16 用例 = 基线零新增**；`checkEolDrift --strict` 0 漂移。
+- **边界**：零 migration / 零新表 / 零新列；未重写 Dataset / Research / Strategy / Parameter Search / OOS / Walk-Forward；未建第二套任何 SoT；自建自清。
+
+## 更新记录（append-only）· 2026-09-20 9ca 完成
+
+- **取号依据**：`ROADMAP.md` §44.5 台账行原文「编号已用至 **`9bz`** ⇒ **下一个未占用 = `9ca`**」（**禁「末条 +1」**）。取号前已**全仓 grep `9ca|9cb`**（零实占）；随后**铁律行（L4）与台账行两处同步**：「已用至 `9ca` ⇒ 下一个未占用 = `9cb`」。
+- **本任务一句话**：把「Pattern 想表达 Core 还不知道的新语义」从「改五处」收敛成「只加一份纯数据声明 + 唯一 Expander 展开到两侧」。
+- **🔴 本轮最有价值的认知（可复用）**：⒜ **同一份产物的唯一入口胜过约定** —— 两侧投影都只吃 `expandPatternSemantics()` 的输出，比「两边小心别写重」可靠得多；⒝ **声明期能拒绝的，绝不留到执行期** —— 注册期就抛，因为到执行期「声明的可用性」已经被用来放过条件了；⒞ **申报式护栏要区分「不是约束」与「是漏洞」** —— `samePointAvailability` 的恒等日期不是漏洞，但它确实不构成约束；正确做法是另加一条**可失败**的闸门，而不是改掉既有语义。
+- **验收**：`tsc` 0 错；新增 26 例全过；全量 vitest **7 失败文件 / 16 用例 = 基线零新增**；`checkEolDrift --strict` 0 漂移；R1 护栏 12 例继续全过。
+- **边界**：零 migration / 零新表 / 零新列 / 零新依赖；未重写 Dataset / Research / Strategy / Parameter Search / OOS / Walk-Forward；未建第二套任何 SoT。
+
+## 更新记录（append-only）· 2026-09-20 9cb 完成
+
+- **取号依据**：`ROADMAP.md` §44.5 台账行原文「编号已用至 **`9ca`** ⇒ **下一个未占用 = `9cb`**」（**禁「末条 +1」**）。取号前已全仓 `grep 9cb|9cc`（零实占），随后**文件头铁律行（L4）与 §44.5 台账行两处同步**：「已用至 `9cb` ⇒ 下一个未占用 = `9cc`」。
+- **本任务一句话**：PHASE-D-001 把「研究证据 → 策略规则」从**人工重新翻译**变成**声明式确定性派生**，并首次让 `researchPlannerRouter` 之外的第二条入口（`createFromConclusion`）也真正消费 Finding。
+- **真实读数**：`filterRule` 条件数 0 → **1**（`bar.haircutFromEventLow <= max_drawdown`）；候选 `1020003` → Strategy `cand-1020003@1.0.0`（provenance `origin=DIRECT`）；对照关闭派生 ⇒ `filterRule=null`（零回归可断言）。
+- **🔴 本轮最有价值的发现（可复用）**：**「声明写了公式、实现只取值」是比「声明了却无效」更坏的一类静默失效** —— `pat_pullback_hold_depth_2d` 的 `definition` 说「归一化回撤比例」，投影只按 `field+aggregation` 取 ⇒ 实际是**最低价绝对值**，于是该变量作为筛选条件时**要么全中要么全不中**（0 / 1718），任何依赖它的 Finding 都必然产不出来。**判据**：新语义变量上线后，先跑一次「双侧互补条件」的对照 Run —— 若两侧命中数分别为 0 与全样本，说明该变量**没有区分度**，先查声明表达力，别查检测器。
+- **验收**：`tsc --noEmit` 0 错；新增 24 例全过；全量 vitest 失败集合与基线逐个相同；`checkEolDrift --strict` 0 漂移；真实 DB E2E 13/13 PASS。
+- **边界**：零 migration / 零新表 / 零新列 / 零新依赖；未重写任何既有引擎；未建第二套 SoT；自建自清（`purgedAfter` 已核对）。
+- **遗留（已入 §44.5 `9cb` 条目）**：⒜ `pat_*` 无区分度（PHASE-B 声明侧缺陷，需架构变更才能修）；⒝ 结论不写 `findingIds`（Finding/Conclusion 域）；⒞ 幂等仍按「同结论+同名」；⒟ `researchPlannerRouter` 的 patternId 路径仍写空 filterRule；⒠ 未做带 derivation 的真实候选真机 DOM 验收。

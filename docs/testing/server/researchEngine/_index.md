@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/researchEngine
 
-- 测试文件 **18** 个 ｜ 用例声明 **269** 个
+- 测试文件 **19** 个 ｜ 用例声明 **281** 个
 - 涉及源码目录：`server/datasetRegistry/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchEngine/` · `server/researchEngine/analyses/` · `server/researchEngine/finding/` · `server/researchEngine/report/`
 
 ## 怎么跑
@@ -332,6 +332,26 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - PAIR_SAMPLE_COUNT = 真正进入计算的配对样本数（不是任一单侧的样本数）
   - PAIR_CORRELATION / PAIR_RANK_CORRELATION 与 shared/quant-stats 同源
   - 配对指标码同样零漂移（与 RESEARCH_METRIC_CODES 一致），未登记码直接抛错
+
+### `tests/server/researchEngine/observationDecisionDay.test.ts`
+- 191 行 ｜ 用例声明 12 ｜ describe 2
+- 被测源码：`server/researchEngine/variables.ts` · `server/researchEngine/errors.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchEngine/observationDecisionDay.test.ts`
+- 用例树：
+- **PHASE-R1-001 · 观察日 PIT 护栏（判定日由 Dataset 声明）**
+  - 数据集未声明决策日 + 观察日条件 ⇒ OBSERVATION_WITHOUT_DECISION_DAY（响亮拒绝，不放行）
+  - 引用晚于决策日的观察日变量 ⇒ VARIABLE_ROLE_VIOLATION（护栏真的生效）
+  - 引用不晚于决策日的观察日变量 ⇒ 通过，并返回被引用变量（可追溯、不静默）
+  - 只用 T 日及以前的特征 / 结果的组 ⇒ 不受决策日约束（不误伤）
+  - 多组分别判定：任一组的观察日越界即整次拒绝，不因另一组合法而放行
+  - 🔴 反证：旧口径「判定日 = 组内最大 offset」必然放行 ⇒ 它挡不住任何东西
+- **PHASE-R1-001B · 判定日的四级声明解析（分析 → Run → Experiment → Dataset）**
+  - 四级全空 ⇒ null（后续引用观察日变量即被拒绝）
+  - 四级各自单独声明 ⇒ 都生效
+  - 多处声明**同值** ⇒ 通过（不误伤）
+  - 多处声明**异值** ⇒ DECISION_OFFSET_CONFLICT（不按优先级静默取一个）
+  - 存在但非法（0 / -1 / 2.5 / "3" / NaN）⇒ INVALID_DECISION_OFFSET（绝不静默忽略）
+  - 解析结果接进护栏：声明 d=2 时 offset=2 放行、offset=3 拒绝
 
 ### `tests/server/researchEngine/observationVariables.test.ts`
 - 364 行 ｜ 用例声明 18 ｜ describe 6

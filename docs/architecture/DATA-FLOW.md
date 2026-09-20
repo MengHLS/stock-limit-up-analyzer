@@ -1,6 +1,6 @@
 # DATA-FLOW — 数据流与坐标传递
 
-> Baseline **v1.0.0** · auditedAt **2026-09-19**
+> Baseline **v2.0.0** · auditedAt **2026-09-20**（round-2 全量审计）· 首版 v1.0.0 / 2026-09-19
 > 每一跳标注：输入 / 输出 / 关键对象 / DB 表 / API / 调用方 / 被调用方。
 > 逐字节执行细节见 `EXECUTION-FLOW.md`；契约定义位置见 `CONTRACT-MAP.md`。
 
@@ -172,6 +172,58 @@ dataset_version.id
 | 5 | 策略层无独立未来函数防护 | `recipeRegistryAtoms.ts:47` `EPOCH_FLOOR_DATE` 恒置远古日 ⇒ legacy `LeakageGuard` 恒通过 | 安全性全靠数据层 PIT（`datasetAccess/invariants.ts`）；Core 侧守卫**真实生效** |
 | 6 | 数据集视界逐决策日不可知 | N-06 | 兼容性报告不做视界校验 |
 | 7 | `researchDataset`（B 体系）仍在产 | `routers.ts:316` | 认知混淆；桥仅支持单一 datasetCode |
+
+---
+
+## D-94 PHASE-R1-001 增量：**判定日（`decisionOffsetDays`）= 新的信息边界**（2026-09-20 · `9bz`）
+
+> 🔴 这是 round-2 **唯一的「核心数据流变化」**，也是本次触发 `GLOBAL AUDIT REQUIRED` 的主要理由。
+
+```text
+用户构建请求（pullback.decisionOffsetDays = d）
+  └─ researchDataset/validate.ts 校验（[1, observationWindowDays] 整数，非法 ⇒ INVALID_PULLBACK_DECISION_OFFSET）
+     └─ researchDataset/builder.ts 落 universeDefinition.pullbackDecisionOffsetDays（随 dataset_version 冻结，零新列）
+        └─ researchDataset/pullback.ts
+             loadedBars    = T+1 .. T+N（整窗，仅用于装载）
+             decisionBars  = loadedBars.slice(0, d)        ← 🔴 池子资格只用 T+1..T+d
+             windowComplete = decisionBars.length === d && 无缺 bar
+             ⇒ 「在 T+d 决策」的样本层信息边界成立（修复前 = 整窗，含未来）
+                ↓
+                          dataset_version.id（唯一权威坐标，不变）
+                ↓
+Research：researchEngine/datasetReader.ts#extractDecisionOffsetDays()
+  ⇐ 只认真实落库值（universeDefinition / filterDefinition），取不到 = null（**不默认整窗**）
+     ↓
+判定日四级解析：resolveEffectiveDecisionOffset()
+  candidates = [ analysis.config , run.config , experiment.config , datasetVersion.universeDefinition ]
+  distinct.size === 1 ⇒ 通过 ； 异值 ⇒ DECISION_OFFSET_CONFLICT ； 单值非法 ⇒ INVALID_DECISION_OFFSET ； 全空 ⇒ null
+     ↓
+护栏：assertGroupObservationPitSafe({ catalog, groups, decisionOffsetDays })
+  decisionOffsetDays === null 且引用观察日变量 ⇒ OBSERVATION_WITHOUT_DECISION_DAY（**拒绝整个 Run**）
+  否则 assertObservationConditionsPitSafe：offset ≤ 决策日（超出 ⇒ VARIABLE_ROLE_VIOLATION）
+     ↓
+tRPC：researchEngineRouter 三码 → BAD_REQUEST
+```
+
+**为什么「不要给 resolver 加 `asOfOffset`」**：观察日变量**按名字自带窗口**（`pullback_{stat}_{k}d` ⇒ `availableFromOffset = k`、`postRelativeDays = dayWindow(1,k)`），resolver 只读 `1..k`；`obs_{k}d.*` 只读 `postBars.get(k)`。⇒ **只要护栏是真的**，被引用的观察值窗口自然 ⊆ `T+1..T+d`，无需改任何 resolver。加载侧本也按引用收窄（`sampleSet.ts` → `datasetFromRegistry.ts` 只加载到 `neededMaxRelativeDay`）。**「多加载未来 bar」不是问题，护栏管不住才是问题。**
+
+**修复前的两条真缺陷（已修，留档以免回退）**
+
+| # | 层 | 旧行为 | 现行为 |
+|---|---|---|---|
+| ① | Dataset | `buildWindowBars` 整段 `T+1..T+N` 判 `broken`/`hitLow` ⇒ **池子在样本层就用未来** | `decisionBars = slice(0,d)`；`windowComplete` 只看前 d 根 |
+| ② | Research | `assertGroupPitSafe` 取 `evaluationOffset = Math.max(组内 offset)` 再断言 `offset ≤ max` ⇒ **循环定义、恒真、生产永不触发** | 删除；改由外部声明的判定日驱动（`assertGroupObservationPitSafe`，唯一实现在 `variables.ts`） |
+
+**实测的 look-ahead 直接度量（同一窗口 / 同目标位 / 同容差 / N=5，唯一变量 = 决策日）**
+
+| | 决策日 | 入池行数 | PULLBACK_NOT_MATCHED | PULLBACK_INCOMPLETE |
+|---|---|---|---|---|
+| 修复前（等价） | `d=5` | **52** | 333 | 3 |
+| 修复后 | `d=2` | **70** | 317 | 1 |
+
+⇒ 旧池子把 **18 只「未来 5 天内会跌破」的样本预先踢出**（池子 +34.6%）——这正是 survivor / look-ahead bias 的直接度量。
+
+**代价（必须知道）**：① **一次构建 = 一个决策日的池子**（比较 d=1..5 ⇒ 5 个数据集 / 5 次 Run）；② 老数据集（`decisionOffsetDays = null`）上**一切观察日条件现在会被响亮拒绝**，包括 pattern `firstLimitPullbackHoldShrink` 的核心条件 `pullback_holds_event_open_{k}d`。
 
 ---
 

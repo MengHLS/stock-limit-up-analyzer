@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/research
 
-- 测试文件 **67** 个 ｜ 用例声明 **1773** 个
-- 涉及源码目录：`server/` · `server/backtest/` · `server/data/` · `server/engine/` · `server/research/` · `server/research/closedLoop/` · `server/research/closedLoopWiring/` · `server/research/conditionSignal/` · `server/research/costModel/` · `server/research/datasetAccess/` · `server/research/disciplineFeedback/` · `server/research/executionConstraints/` · `server/research/experimentLineage/` · `server/research/factorAblation/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/marketRegime/` · `server/research/oosIsolation/` · `server/research/oosValidation/` · `server/research/overfittingDetection/` · `server/research/paperAccount/` · `server/research/parameterSearch/` · `server/research/patternLibrary/` · `server/research/performanceMetrics/` · `server/research/persistence/` · `server/research/riskAdjustedMetrics/` · `server/research/robustness/` · `server/research/rollingOptimization/` · `server/research/searchRobustness/` · `server/research/signalEngine/` · `server/research/signalToPnl/` · `server/research/simulator/` · `server/research/stochasticRobustness/` · `server/research/strategyCandidate/` · `server/research/strategyEvaluation/` · `server/research/strategyPersistence/` · `server/research/strategySchema/` · `server/research/tradeJournal/` · `server/research/tradeQualityMetrics/` · `server/research/walkForward/` · `server/research/walkForwardRun/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchDataset/` · `server/researchEngine/planner/` · `server/strategyCore/` · `shared/`
+- 测试文件 **69** 个 ｜ 用例声明 **1810** 个
+- 涉及源码目录：`server/` · `server/backtest/` · `server/data/` · `server/engine/` · `server/research/` · `server/research/closedLoop/` · `server/research/closedLoopWiring/` · `server/research/conditionSignal/` · `server/research/costModel/` · `server/research/datasetAccess/` · `server/research/disciplineFeedback/` · `server/research/executionConstraints/` · `server/research/experimentLineage/` · `server/research/factorAblation/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/marketRegime/` · `server/research/oosIsolation/` · `server/research/oosValidation/` · `server/research/overfittingDetection/` · `server/research/paperAccount/` · `server/research/parameterSearch/` · `server/research/patternLibrary/` · `server/research/patternLibrary/patterns/` · `server/research/performanceMetrics/` · `server/research/persistence/` · `server/research/riskAdjustedMetrics/` · `server/research/robustness/` · `server/research/rollingOptimization/` · `server/research/searchRobustness/` · `server/research/signalEngine/` · `server/research/signalToPnl/` · `server/research/simulator/` · `server/research/stochasticRobustness/` · `server/research/strategyCandidate/` · `server/research/strategyEvaluation/` · `server/research/strategyPersistence/` · `server/research/strategySchema/` · `server/research/tradeJournal/` · `server/research/tradeQualityMetrics/` · `server/research/walkForward/` · `server/research/walkForwardRun/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchDataset/` · `server/researchEngine/` · `server/researchEngine/planner/` · `server/strategyCore/` · `shared/`
 
 ## 怎么跑
 
@@ -1216,6 +1216,36 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 基准配方是纯执行模式：无研究模块，但有可用配方
   - 纯研究模式：有研究模块，但无配方引用
 
+### `tests/server/research/patternLibrary/patternSemantics.test.ts`
+- 307 行 ｜ 用例声明 18 ｜ describe 6
+- 被测源码：`shared/patternSemantics.ts` · `server/research/patternLibrary/semanticRegistry.ts` · `server/research/patternLibrary/patterns/index.ts` · `server/researchEngine/semanticProjection.ts` · `server/research/patternLibrary/strategyProjection.ts` · `server/research/recipeRegistryAtoms.ts` · `server/research/framework/leakage.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/patternLibrary/patternSemantics.test.ts`
+- 用例树：
+- **PHASE-B-001 · 正向：真实 Pattern 清单 → 正确展开**
+  - 首板回踩模式声明了 2 条语义，展开名规范、可用性 = 窗口末端
+  - 算子白名单外的一律不是聚合算子（白名单是有限的）
+- **PHASE-B-001 · 负向：非法声明逐条拒绝**
+  - 同一批里 semanticId 重复 ⇒ DUPLICATE_SEMANTIC_ID
+- **PHASE-B-001 · 唯一性与不可变性（B.9）**
+  - 同一 patternId + version 重复注册 ⇒ SEMANTIC_REDEFINITION
+  - 两个 Pattern 抢同一 semanticId ⇒ SEMANTIC_ID_COLLISION
+  - 非法声明 ⇒ INVALID_SEMANTIC_DECLARATION（注册期就拒绝，不留到执行期）
+  - 产物被深冻结：运行期 mutate 不能改变语义（同 Pattern 恒同语义）
+- **PHASE-B-001 · 研究投影（B.6）**
+  - 数据集视界覆盖 ⇒ 产出观察日变量定义，且带自己的 resolve
+  - 数据集 post 视界不足 ⇒ OUT_OF_DATASET_RANGE（不静默 null）
+  - 声明窗口晚于决策日 ⇒ AFTER_DECISION_DAY（复用 R1 的判定日契约）
+  - 核心目录之外的名字仍然被拒绝（白名单没有被放开）
+- **PHASE-B-001 · 策略投影与两侧一致性（B.7 / B.10）**
+  - 同一份声明 → 策略特征，可用性日期取**真实决策日**（不再是 1990-01-01）
+  - 声明窗口晚于决策日 ⇒ AFTER_DECISION_DAY（这是**可失败**的护栏）
+  - 一致性：研究侧与策略侧来自同一份 expanded ⇒ semanticId / 名字一一对应（无双写 SoT）
+  - 只声明研究意图、没有执行侧投影 ⇒ MISSING_STRATEGY_PROJECTION（不臆造执行口径）
+- **PHASE-B-001 · PIT 与「可失败对照」（B.8）**
+  - 🔴 对照：旧 samePointAvailability 的日期恒为 1990-01-01 ⇒ 对任何决策日都不触发泄漏守卫
+  - 新可用性用真实决策日 ⇒ 声称「晚于决策日才可知」时**会**被比较器抓到
+  - T / T+1 / T+2 的可用性行为：EVENT_BAR 可声明；POST_BAR 在 d=1 被拒、d=2 通过
+
 ### `tests/server/research/pbo.test.ts`
 - 190 行 ｜ 用例声明 15 ｜ describe 6
 - 被测源码：`server/research/pbo.ts`
@@ -1804,6 +1834,36 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - P0-1b) 组间 groupLogicalOperator=OR ⇒ 拒绝
   - P0-1c) 首条 logicalOperator=OR **允许**（引擎口径：首条无前序，连接符本就被忽略）
   - P0-2) 研究侧变量名 ⇒ 拒绝且消息点名「研究侧变量名」（不做机械翻译）
+
+### `tests/server/research/strategyCandidate/evidenceDerivation.test.ts`
+- 538 行 ｜ 用例声明 19 ｜ describe 5
+- 被测源码：`server/research/strategyCandidate/evidenceDerivation.ts` · `server/research/patternLibrary/semanticRegistry.ts` · `server/research/strategySchema/definition.ts` · `server/researchCore/index.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/evidenceDerivation.test.ts`
+- 用例树：
+- **正向派生**
+  - Pattern 语义变量 ⇒ 策略侧条件（fieldName 含 '.'，阈值=参数引用）
+  - 多条条件 ⇒ 去重后按 fieldName 升序（确定性），同键保留 findingId 最小者
+  - filterRule 的条件顺序与 derivedRules 一致，且 sortOrder 连续（0,1,…）
+- **确定性**
+  - 同输入 ⇒ 同指纹；finding 顺序颠倒亦同（遍历顺序固定）
+  - 指纹不读时钟：同内容重新构造 ⇒ 指纹逐字节相同
+  - 指纹对「内容变化」敏感：改 value ⇒ 指纹变（可失败对照）
+  - computeDerivationFingerprint 是纯函数（同参同值）
+- **不可翻译一律如实登记（绝不猜）**
+  - 非 Pattern 语义变量（内建观察日变量）⇒ NOT_PATTERN_SEMANTIC_VARIABLE
+  - 分析没有结构化条件 ⇒ NO_STRUCTURED_CONDITIONS（附对照：加一条条件即派生）
+  - Finding 没有 primaryAnalysisId ⇒ NO_STRUCTURED_CONDITIONS
+  - OR 语义 ⇒ LOGICAL_OPERATOR_NOT_EXPRESSIBLE（组内 OR 与多组各一例）
+  - 声明要求的阈值参数不在候选参数空间 ⇒ THRESHOLD_PARAM_NOT_DECLARED
+  - skip 原因全部落在闭集内（无第二套字符串）
+- **方向差异必须「派生 + 登记」，不得静默也不得误杀**
+  - 研究侧 GTE 与声明 LTE 相反 ⇒ 仍然派生，但 directionMismatch=true 并有可读说明
+  - 非比较运算（==）⇒ researchDirection=null 且带说明（不拒绝）
+  - 方向一致 ⇒ 无说明（三者可辨，证明判据有牙齿）
+- **快照**
+  - 快照含 derivationVersion / fingerprint / patternIds / 规则与跳过明细
+  - 没有 Finding ⇒ emptyDerivation（真实反映「没有证据」，不假装派生过）
+  - 读取辅助对非快照输入保持沉默（返回 0 / null，不抛）
 
 ### `tests/server/research/strategyCandidate/importBoundary.test.ts`
 - 218 行 ｜ 用例声明 7 ｜ describe 2 ｜ 📄 源码文本断言

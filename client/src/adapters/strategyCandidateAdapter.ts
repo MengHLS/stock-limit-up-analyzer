@@ -137,6 +137,13 @@ export interface CandidateRawLike {
   sourceDatasetVersionId?: number | null;
   sourceResearchRunId?: number | null;
   sourceDatasetDivergenceReason?: string | null;
+  /**
+   * PHASE-D-001 —— 证据快照（含 `derivation` 段）。
+   *
+   * 形态为 `unknown` 是**刻意**的：本页只把它交给 `RuleDerivationCard` 做防御性读取
+   * （结构未知即整卡不渲染），不在 adapter 层发明第二套 derivation 类型。
+   */
+  sourceTraceJson?: unknown;
   createdAt?: string | null;
   updatedAt?: string | null;
 }

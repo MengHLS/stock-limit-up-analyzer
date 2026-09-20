@@ -401,3 +401,21 @@
 - **Regression Result**：`tsc --noEmit` = **exit 0**；新增单测 **84/84**；全量 `vitest run` = **8 failed files / 17 failed tests = 既有基线，零新增**（283 文件 / 4805 用例，失败文件集合逐项一致）；`npm run build` = **exit 0**；`checkEolDrift` = **0 漂移**；真实 TiDB E2E `create` **7/7** + `run` **10/10** + 跨进程 `rerun` **11/11** + `clean` 归零；DOM 探针 **`pass=true`** / 0 page error。
 - **Baseline Impact**：`v1.3.0` → **`v1.4.0`**（**minor**：新增 Domain 子模块 + 2 张表 + 1 份契约 + 6 个端点 + 1 个前端面板，既有执行链与核心契约**零破坏**）。已更新：`SYSTEM-BASELINE.md`（版本行 + 域行 + 增量节）、`system-manifest.yaml`（`walkForwardValidation` 域）、`DOMAIN-MAP.md` §16、`CONTRACT-MAP.md`（C-93）、`DATABASE-MAP.md`（D-93）、`EXECUTION-FLOW.md`（E-92）、`DEPENDENCY-MAP.md`（D-91）、`DATA-FLOW.md`、本文件。
 - **GLOBAL AUDIT REQUIRED**：**NONE**。
+
+## 2026-09-20 · SYSTEM-BASELINE-002（round-2 全量审计，基线升 `v2.0.0`）
+
+- **Task**：用户要求「再对全系统进行审计」。按 `v1.x` 协议先做 **Baseline Drift 检测**，判定**触发 `GLOBAL AUDIT REQUIRED`**（#4 核心数据流变化 / #7 核心 Contract 变化 / #1 Domain 新增）⇒ 执行 round-2 全量审计
+- **Changed Domains**：**无代码改动**（本任务只读 + 文档）；被审计的域：Dataset · Research · Strategy · Parameter Search · Robustness · OOS · Walk-Forward · Backtest · 基础设施
+- **Changed Files**：`docs/architecture/**` 11 份（版本统一 v2.0.0 + 新增 round-2 章节 + 纠错）；新增 `docs/evidence/_probe_baseline_v2_state.mts` + `.out.json` + `.out.txt`（已登记 `docs/evidence/README.md`）；新增 `docs/architecture/SYSTEM-BASELINE-002-REPORT.md`
+- **Changed Contracts**：**无**（只登记 `shared/patternSemantics.ts` 与 `decisionOffsetDays` 等已存在契约）
+- **Changed DB**：**无**（探针全程 SELECT；0 DDL / 0 DML）
+- **Changed Execution Path**：**无**
+- **Potential Baseline Drift**：**3 条新发现并已修正**
+  - `BD-05` 基线**版本分叉**：同一次变更只升了 `SYSTEM-BASELINE.md`（v1.4.0），另 9 份仍 v1.0.0
+  - `BD-06` 规模数字未同步：`63 表 / 60 声明 / 41 migration` ⇒ 实查 `73 / 70 / 45`
+  - `BD-07` `docs/testing/README.md` 自述「288 文件」但命令表硬编码「277」⇒ **未修**（生成物禁手改，需改 `scripts/genTestDocs.mts:338`）
+- **Regression Result**：未跑测试（本任务零代码变更；引用的是各阶段已跑读数：`tsc` 0 错 / `vitest` 7 文件 16 用例 = 零新增 / 哨兵 0 漂移）；探针 `errors=0`
+- **Baseline Impact**：`v1.4.0` → **`v2.0.0`（major）**，依据 §15「核心数据流 / 核心 Contract / Domain 新增」三类同时命中；11 份文件版本号统一
+- **GLOBAL AUDIT REQUIRED**：**#1 + #4 + #7**（本任务即为响应）
+
+---

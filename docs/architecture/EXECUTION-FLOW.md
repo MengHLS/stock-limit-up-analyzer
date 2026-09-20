@@ -1,6 +1,6 @@
 # EXECUTION-FLOW — 真实执行链（含可达性与阻塞点）
 
-> Baseline **v1.0.0** · auditedAt **2026-09-19**
+> Baseline **v2.0.0** · auditedAt **2026-09-20**（round-2 全量审计）· 首版 v1.0.0 / 2026-09-19
 > 全部结论来自**实际读代码 + grep 引用方**，未修改任何逻辑。可达性判定分三级：
 > `可达` = 生产代码（非测试）真实调用；`仅测试` = 只有 `tests/**` 引用；`死代码` = 零引用。
 > 本文件**只做架构登记**，不重新讨论已确认的设计决策。
@@ -189,6 +189,61 @@ TradeSimulationRun
 | E-7 | **止损三落点互不相通** | `realisticBacktest.ts` / `paperTrading.ts` / `server/engine/**`；`server/engine/**` **完全不执行**止损 | 跨入口止损不可比 |
 | E-8 | `/backtest` 并存两套交易语义（快照 = 等权；顶层 = 固定 100 股） | — | **禁加 cap** |
 | E-9 | `ALL_DAYS` 在 legacy 侧不可表达 | N-04：适配器一律译 `ANY_DAY` 并写入 notes | 语义损失已登记 |
+
+---
+
+## E-93 PHASE-A / R1 / B / D 增量：四条**新执行边**（2026-09-20 · `9by`/`9bz`/`9ca`/`9cb`）
+
+### E-93.1 报告产物（A）—— 挂在既有研究链**收尾**上，不改主链
+
+```text
+ResearchEngine.run() / runIncremental()
+  └─ Finding(engine.ts:340) → Conclusion(:345-367) → Run/Experiment COMPLETED(:374-393)
+       └─ :407 await this.emitReportArtifact(run.id!)        ← 位置 = 「建立在已完成 Run 上」
+            ├─ 开关 generateReportOnRun（缺省 true）
+            ├─ :486-509 try/catch 吞错，仅 console.warn（**不影响 Run 结论与状态**）
+            └─ report/service.ts:215 generateResearchReport()
+                 ├─ loadReportSource(:124) → generator.ts:647 buildResearchReport()（**纯投影、不读时钟**）
+                 └─ 幂等：同 run 的 REPORT 且同 checksum ⇒ REUSED（不写库）；否则 SUPERSEEDED/CREATED
+```
+**可达性**：✅ 生产（已实测真实 Run 触发，产出 `artifact=#60001`）。⚠️ `runIncremental` **不调用**。⚠️ `research_artifact` **无 DB 唯一约束**。
+
+### E-93.2 判定日闸门（R1）—— 见 `DATA-FLOW.md` D-94（执行链在 `engine.ts#loadConditionSets` **逐分析**解析）
+
+**可达性**：✅ 生产（五路真实 DB E2E 全绿：拒绝 / 对照 COMPLETED / 正向 COMPLETED / 超界 VARIABLE_ROLE_VIOLATION / 异值 DECISION_OFFSET_CONFLICT）。
+
+### E-93.3 Pattern 语义投影（B）—— 研究侧已接、策略侧未接
+
+```text
+Pattern 声明（patterns/*.ts 的 semantics?）
+  └─ semanticRegistry.buildPatternSemanticEntries()（深冻结 + 唯一性 + 注册期拒绝）
+       └─ shared/patternSemantics.ts#expandPatternSemantics()（唯一 Expander）
+            ├─ researchEngine/semanticProjection.ts  → 观察日变量目录   ✅ 已接 engine.ts（:885-895）
+            └─ research/patternLibrary/strategyProjection.ts → 策略特征  ❌ **仅测试可达**（生产组装未调用）
+```
+
+### E-93.4 结论→候选派生（D）
+
+```text
+research_conclusion + research_finding
+  └─ strategyCandidate/service.ts#createFromConclusion
+       └─ evidenceDerivation.ts#deriveCandidateRules()（:320）
+            ├─ buildSemanticIndex(listPatternSemantics())    ← 唯一翻译层
+            ├─ 命中 ⇒ filterRule = [{ bar.<featureId>, <op>, <thresholdParam> }]（**参数引用**）
+            ├─ 未命中 ⇒ 闭集 DERIVATION_SKIP_REASONS 如实登记（绝不猜）
+            └─ 落 provenance：sourceFindingIdsJson + sourceTraceJson.derivation
+```
+**可达性**：✅ 生产（真实 tRPC E2E 13/13 PASS；`deriveFromEvidence:false` 对照 ⇒ `filterRule=null` 零回归）。
+
+### E-93 的可达性补充（更新 §5 总表）
+
+| 链 | 入口 | 可达性 |
+|---|---|---|
+| 报告产物 | `researchEngine.getReport`（`researchEngineRouter.ts:573`）+ 前端 `/research/report/:runId` | ✅ 生产 |
+| 判定日闸门 | 研究 Run 预检（`engine.ts` run / runIncremental） | ✅ 生产 |
+| Pattern 语义 → 研究变量 | `engine.ts` `buildCatalog` 注入 | ✅ 生产 |
+| Pattern 语义 → 策略特征 | `strategyProjection.projectSemanticsToStrategy` | ❌ **仅测试**（CODE_READY） |
+| 结论→候选派生 | `research.strategyCandidate.createFromConclusion`（缺省派生） | ✅ 生产 |
 
 ---
 

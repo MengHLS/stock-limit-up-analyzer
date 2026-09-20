@@ -46,6 +46,66 @@ export const FIRST_LIMIT_PULLBACK_HOLD_SHRINK: TradingPatternSpec = {
     ],
   },
 
+  /**
+   * **受控语义声明槽**（PHASE-B-001）。
+   *
+   * 这里声明的两个语义（守线深度 / 缩量比）在研究侧与策略侧**都由这一份声明派生**：
+   *   - 研究侧 → `pat_pullback_hold_depth_2d` / `pat_pullback_shrink_ratio_2d`（观察日变量，PIT 上界 = T+2）；
+   *   - 策略侧 → `haircutFromEventLow` / `volumeRatio`（可用性由 `availableFromOffset` 推导，不再恒用同点下界）。
+   *
+   * 🔴 `availableFromOffset` 必须等于 `windowDays`：窗口末端就是最早可见时点，
+   * 声称更早可见等于把未来数据当成当时已知（注册期强校验）。
+   */
+  semantics: {
+    version: "1.0.0",
+    declarations: [
+      {
+        semanticId: "pullback_hold_depth",
+        label: "回踩守线深度",
+        definition:
+          "事件后窗口 T+1..T+2 内最低价相对首板日开盘价的回撤深度："
+          + "(t0Open − min(Low[T+1..T+2])) / t0Open。≤ 0 表示全程未跌破首板开盘价。",
+        source: "POST_BAR",
+        field: "low",
+        aggregation: "MIN",
+        windowDays: 2,
+        availableFromOffset: 2,
+        intent: {
+          question: "首板后 2 个交易日内不跌破首板开盘价的样本，后续收益是否优于全样本？",
+          suggestedTarget: "future_return_5d",
+        },
+        strategyProjection: {
+          featureId: "haircutFromEventLow",
+          comparison: "LTE",
+          thresholdParam: "max_drawdown",
+          noteAboutResearchDifference:
+            "研究侧是**累积整窗** T+1..T+2 的最低价；执行侧只能看**决策日当日**低点（逐日决策，当日收盘必须定夺）。"
+            + "两者不同构，不得抹平（见本文件顶部「语义强度差异」）。",
+        },
+      },
+      {
+        semanticId: "pullback_shrink_ratio",
+        label: "回踩期缩量比",
+        definition:
+          "事件后窗口 T+1..T+2 内最小成交量 / 首板日成交量（< 1 为缩量）。",
+        source: "POST_BAR",
+        field: "volume",
+        aggregation: "MIN",
+        windowDays: 2,
+        availableFromOffset: 2,
+        intent: {
+          question: "缩量回踩的样本，后续收益是否优于放量回踩？",
+          suggestedTarget: "future_return_5d",
+        },
+        strategyProjection: {
+          featureId: "volumeRatio",
+          comparison: "LTE",
+          thresholdParam: "max_volume_ratio",
+        },
+      },
+    ],
+  },
+
   research: {
     moduleKey: "PULLBACK_EFFECTIVENESS",
     moduleLabel: "回踩有效性研究",

@@ -79,9 +79,12 @@ import type {
 } from "./types";
 import {
   ResearchVariableCatalog,
-  assertObservationConditionsPitSafe,
+  assertGroupObservationPitSafe,
+  resolveEffectiveDecisionOffset,
   type RegimeTagProvider,
 } from "./variables";
+import { projectSemanticsToResearch } from "./semanticProjection";
+import { listExpandedPatternSemantics } from "../research/patternLibrary/semanticRegistry";
 
 export interface ResearchEngineDeps {
   repos: ResearchRepositories;
@@ -258,7 +261,11 @@ export class ResearchEngine {
       );
 
       const catalog = this.buildCatalog(versionContext);
-      const conditionSets = await this.loadConditionSets(analyses, catalog);
+      const conditionSets = await this.loadConditionSets(analyses, catalog, {
+        datasetDecisionOffsetDays: versionContext.decisionOffsetDays,
+        runConfig: run.config ?? null,
+        experimentConfig: experiment.config ?? null,
+      });
 
       // 逐分析解析配置（**在 RUNNING 之前**完成校验，配置错误不留下「跑了一半」的状态）
       const resolved = this.resolveAnalyses({ analyses, experiment, catalog, conditionSets });
@@ -598,7 +605,11 @@ export class ResearchEngine {
       );
 
       const catalog = this.buildCatalog(versionContext);
-      const conditionSets = await this.loadConditionSets(targets, catalog);
+      const conditionSets = await this.loadConditionSets(targets, catalog, {
+        datasetDecisionOffsetDays: versionContext.decisionOffsetDays,
+        runConfig: run.config ?? null,
+        experimentConfig: experiment.config ?? null,
+      });
       const resolved = this.resolveAnalyses({ analyses: targets, experiment, catalog, conditionSets });
 
       // ---- 5. 样本基准：Dataset Version + 日期窗口取自快照；变量投影 = 原批次并集 ∪ 目标需求 ----
@@ -869,20 +880,46 @@ export class ResearchEngine {
           versionContext.postRelativeDayRange.max,
         )
       : [];
-    return new ResearchVariableCatalog(versionContext.horizons, pathHorizons, postHorizons);
+    // PHASE-B-001：把 Pattern 语义声明**投影**进同一个目录（唯一 Expander 的产物）。
+    // 这样「Pattern 声明的新语义」被 Core 接受，而**未声明**的名字仍然被 UNKNOWN_VARIABLE 拒绝。
+    const projected = projectSemanticsToResearch({
+      expanded: listExpandedPatternSemantics(),
+      postRelativeDayRange: versionContext.postRelativeDayRange,
+      decisionOffsetDays: versionContext.decisionOffsetDays,
+    });
+    return new ResearchVariableCatalog(
+      versionContext.horizons,
+      pathHorizons,
+      postHorizons,
+      projected.definitions,
+    );
   }
 
   /** 条件集（仅 CONDITIONAL 需要；其余分析为空集），并校验字段可解析。 */
   private async loadConditionSets(
     analyses: readonly ResearchAnalysis[],
     catalog: ResearchVariableCatalog,
+    decisionSources: {
+      datasetDecisionOffsetDays: number | null;
+      runConfig: unknown;
+      experimentConfig: unknown;
+    },
   ): Promise<Map<number, ResearchConditionSet>> {
     const conditionSets = new Map<number, ResearchConditionSet>();
     for (const analysis of analyses) {
       if (analysis.analysisType !== "CONDITIONAL") continue;
       const rows = await this.repos.conditions.listByAnalysis(analysis.id!);
       const set: ResearchConditionSet = { groups: groupConditions(rows) };
-      this.assertConditionFieldsKnown(set, catalog);
+      // 判定日 = 分析 → Run → Experiment → Dataset 的唯一取值（PHASE-R1-001B，逐分析解析）；
+      // 四级全空 ⇒ null ⇒ 引用观察日变量即被拒绝（绝不退回「整窗可判定」）。
+      const evaluationOffset = resolveEffectiveDecisionOffset({
+        datasetDecisionOffsetDays: decisionSources.datasetDecisionOffsetDays,
+        analysisConfig: analysis.config,
+        runConfig: decisionSources.runConfig,
+        experimentConfig: decisionSources.experimentConfig,
+        analysisId: analysis.id ?? null,
+      });
+      this.assertConditionFieldsKnown(set, catalog, evaluationOffset);
       conditionSets.set(analysis.id!, set);
     }
     return conditionSets;
@@ -998,8 +1035,15 @@ export class ResearchEngine {
    * 白名单漏了一整个角色。这类错误的信息量与真实原因严重不匹配。
    *
    * 白名单通过后立即做 **PIT 护栏**：观察日条件引用的 offset 不得晚于该条件的判定日。
+   *
+   * 判定日 = **该 Run 所用 Dataset Version 声明的 `decisionOffsetDays`**（外部输入），
+   * 不是从组内条件反推出来的（PHASE-R1-001 之前是 `max(组内 offset)`，恒真、永不触发）。
    */
-  private assertConditionFieldsKnown(set: ResearchConditionSet, catalog: ResearchVariableCatalog): void {
+  private assertConditionFieldsKnown(
+    set: ResearchConditionSet,
+    catalog: ResearchVariableCatalog,
+    decisionOffsetDays: number | null,
+  ): void {
     const known = new Set<string>([
       ...catalog.listFeatures(),
       ...catalog.listOutcomes(),
@@ -1015,32 +1059,16 @@ export class ResearchEngine {
           { fieldName: condition.fieldName },
         );
       }
-      this.assertGroupPitSafe(group, catalog);
     }
+    // 观察日 PIT 护栏（判定日 = Dataset 声明的决策日，不由组内条件反推）。
+    // 唯一实现在 `variables.ts#assertGroupObservationPitSafe`，此处只做接线。
+    assertGroupObservationPitSafe({
+      catalog,
+      groups: set.groups,
+      decisionOffsetDays,
+    });
   }
 
-  /**
-   * 逐条件组做观察日 PIT 校验。
-   *
-   * **判定日如何确定**：一个条件组里若出现观察日变量，该组最早只能在
-   * `max(组内观察日变量的 offset)` 收盘才可判定 —— 因为组内是 AND/OR 组合，
-   * 最晚那个成员没出现之前，整组的真假未知。空组（无观察日变量）不约束。
-   *
-   * 这一条挡住的正是最危险、也最容易悄悄发生的错误：**用 T+5 的形态去筛 T+3 该买的样本**。
-   * 它不会报错、不会变 null，只会给出一组漂亮但不可交易的数字。
-   */
-  private assertGroupPitSafe(
-    group: ResearchConditionSet["groups"][number],
-    catalog: ResearchVariableCatalog,
-  ): void {
-    const fields = group.conditions.map((c) => c.fieldName);
-    const offsets = fields
-      .map((f) => catalog.observationOffsetOf?.(f) ?? null)
-      .filter((o): o is number => o !== null);
-    if (offsets.length === 0) return;
-    const evaluationOffset = Math.max(...offsets);
-    assertObservationConditionsPitSafe({ catalog, fields, evaluationOffset });
-  }
 }
 
 /**

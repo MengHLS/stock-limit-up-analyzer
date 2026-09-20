@@ -1,6 +1,6 @@
 # DEPENDENCY-MAP — 依赖图（Domain → Domain / Module → Module）
 
-> Baseline **v1.0.0** · auditedAt **2026-09-19**
+> Baseline **v2.0.0** · auditedAt **2026-09-20**（round-2 全量审计）· 首版 v1.0.0 / 2026-09-19
 > 判定依据 = 实际 `import` 引用 + grep 引用方；**本任务只登记，不重构**。
 
 ---
@@ -168,6 +168,41 @@
 | 死代码 | ⚠️ 存在 5 处（`runBacktestEngine2` / `engine/adapter.ts` / 3 个 Db 仓储 / 5 个 STEP 6.x service / `factorAblation`） |
 | 命名混淆 | ⚠️ 4 处（`adapter.ts` ×4、`research` 单复数、`strategy` ×2、`select` 类） |
 | 隐性加载 | ⚠️ 1 处（主 barrel 混居 legacy） |
+
+---
+
+## D-92 PHASE-A/R1/B/D 增量：新依赖边 + 一处**未被守护**的新边（2026-09-20 · `9by`/`9bz`/`9ca`/`9cb`）
+
+### 新增边
+
+| from | to | 性质 | 守护 |
+|---|---|---|---|
+| `server/researchEngine/**`（`engine.ts` / `semanticProjection.ts`） | `server/research/patternLibrary/**`（`semanticRegistry` / 声明文件） | **研究域首次依赖 Pattern 声明库**（此前二者无依赖） | 🔴 **无** |
+| `server/researchEngine/report/service.ts` | `server/research/patternLibrary/**`（`findPatternByResearchModuleKey`） | 同一方向 | 🔴 **无** |
+| `server/research/strategyCandidate/**`（`service.ts` / `evidenceDerivation.ts`） | `server/research/patternLibrary/semanticRegistry` + `shared/patternSemantics` | 桥的合法上游（桥仍是唯一同时看见研究侧与策略侧的业务层） | ✅ 桥的既有纪律 |
+| `server/research/patternLibrary/strategyProjection.ts` | `shared/patternSemantics` | 策略侧投影 | ⚠️ 无生产消费者，方向未被约束 |
+| `server/researchDataset/**`（`pullback.ts`） | （无新外部边）R1 只改内部窗口构造 | — | — |
+
+### 🔴 本批次最重要的依赖事实：**新边没有被任何测试守护**
+
+`tests/server/research/strategyCandidate/importBoundary.test.ts` 当前约束的方向（`:69-85`、`:102-216`）：
+
+- `researchCore` ↛ `strategyPersistence` / `strategySchema`
+- `research/strategyPersistence` ↛ `researchCore`
+- `datasetRegistry` ↛ `researchCore` / `strategyCandidate` / `strategySchema` / `strategyPersistence`
+- 只有桥可同时 import 两侧；桥不得被反向 import；桥内禁 import `server/research` 主 barrel
+- 桥不得直写 `strategy_versions`；`strategyPersistence` ↛ `researchCore` / `strategyCandidate`
+
+⇒ **它没有任何规则约束 `researchEngine → research/patternLibrary`**，也未约束 `strategyProjection` 的消费方向。
+这是 round-2 引入的**新依赖边 + 零守护**，登记为依赖风险 **AR-9**（不重构，仅登记）。
+
+### 依赖健康度变化
+
+| 维度 | round-1 | round-2 |
+|---|---|---|
+| Domain 方向 | ✅ 单向向下 | ✅ 仍单向（新边在 Research 域内部：研究引擎 → Pattern 声明库） |
+| 跨域收口 | ✅ 唯一桥 | ⚠️ 桥仍唯一，但**研究引擎新增了一条通往 Pattern 库的旁路边** |
+| 循环依赖 | ✅ 无 | ✅ 无（Pattern 库不反向依赖 researchEngine） |
 
 ---
 

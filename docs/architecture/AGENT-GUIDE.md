@@ -1,6 +1,6 @@
 # AGENT-GUIDE — 后续 Agent 使用规范
 
-> Baseline **v1.0.0** · 2026-09-19
+> Baseline **v2.0.0** · 2026-09-20（round-2 全量审计）
 > 面向以后在本仓库工作的 WorkBuddy Agent。
 > 🔴 **你不需要每次重新理解整个项目。**
 
@@ -143,6 +143,10 @@
 | 14 | **`client/**` 只禁 import `server/**` 运行时值**；`@shared/*` 允许 | §9 |
 | 15 | 🔴 **基线里的行号只是 `auditedAt` 快照** —— 本项目 `server/**` 处于高频编辑（且可能有并发会话）⇒ 定位一律用「**路径 + 符号名**」grep，行号对不上**不算 drift** | `SYSTEM-BASELINE.md` §12.5 BD-02 |
 | 16 | 🔴 **基线描述的是「工作区」不是 HEAD** —— 开工前先 `git status --porcelain` 看是否有未提交改动；有则先确认「你审计的是哪一份代码」 | `SYSTEM-BASELINE.md` §12.5 BD-01 |
+| 17 | 🔴 **别再「每个任务完成就跑全量测试」** —— 用 `pnpm run test:changed`（见 §10）；全量只在验收/合并前跑 | `scripts/testChanged.mts` |
+| 18 | 🔴 **改任何「工作树是 CRLF」的已跟踪文件后，收尾必须把该文件转回纯 LF**，否则 `checkEolDrift --strict` 非 0（本机 387 个已跟踪文件的工作树是 CRLF，未改动时不报） | `.workbuddy/memory/2026-09-20.md` |
+| 19 | 🔴 **观察日变量的判定日必须显式声明**（`decisionOffsetDays`）—— 老数据集上引用观察日条件会被**响亮拒绝**（`OBSERVATION_WITHOUT_DECISION_DAY`）。这是刻意行为，别当回归修 | `SYSTEM-BASELINE.md` §19、`CONTRACT-MAP.md` C-94 |
+| 20 | ⚠️ **`docs/architecture/**` 可能存在「版本号已升、数字未同步」的局部漂移**（round-2 已修一轮）⇒ 引用规模数字前先实查（`grep -c mysqlTable drizzle/schema.ts` / `ls drizzle/*.sql`） | `SYSTEM-BASELINE.md` §19 |
 
 ---
 
@@ -159,6 +163,40 @@
 | 探针/报告落点 | one-off 脚本 `_scratch\`（仓外）；报告 `docs/research/`；探针 `docs/evidence/`（**须登记 `README.md`**） |
 
 ---
+
+## 9-A. 工程化命令（2026-09-20 新增，**直接影响任务成本**）
+
+| 命令 | 作用 | 何时用 |
+|---|---|---|
+| `pnpm run test:changed` | **增量测试**：`git diff` 改动 → **反向依赖图** → 只跑受影响测试。`--list` 干跑、`--base <ref>` 指定基线、`--seed <path>` 补种子 | **日常默认**（别跑全量） |
+| `pnpm test` | 全量 vitest | 验收 / 合并前 |
+| `pnpm run docs:tests` | 重新生成 `docs/testing/**`（镜像 `tests/**`，**生成物禁手改**） | 新增/删除测试后**必须**重跑 |
+| `node scripts/checkEolDrift.mjs --strict` | 行尾哨兵 | 改文件后收尾 |
+
+**依赖图两条边的语义（别搞混）**
+- **`import` 边**：可传递；**只收运行时 import**，纯 `import type` 被剔除（否则 `client/**` 对 `server/**` 会退化成全量）。
+- **`reads` 边**：只认**直接命中、不传递**；服务「测试用字符串路径读源码」的那批（`readFileSync`）。
+- **硬回退全量**的三条：命中 `GLOBAL_TRIGGERS`（`vitest.config.ts` / `tsconfig.json` / `package.json` / `pnpm-lock.yaml` / `vite.config.ts`）；拿不到 git；受影响数 ≥ `FULL_RUN_RATIO = 0.6`。
+
+**当前测试基线（2026-09-20 实查）**
+
+| 项 | 值 |
+|---|---|
+| 失败文件 / 用例 | **7 / 16**（**全部环境依赖**：`dataHealth` / `image.uploadAndRecognize` / `limitUp` / `limitUp.watch` / `marketData` / `tushare.secret` / `tushareTradingCalendar`） |
+| 判据 | **零新增失败文件**（先剥 ANSI 颜色码再比对） |
+| `tsc --noEmit` | **0 错 / exit 0**（原 23 条 parameterSearch·searchRobustness 遗留已清零）⇒ 判据回到「**必须 0 错**」 |
+| 测试文件数 | 290（`docs/testing` 声明 288 个用例文件，另 2 个辅助） |
+
+## 9-B. 🔴 项目记忆不再随仓库走（2026-09-20 变更）
+
+`.workbuddy/` 已被 **untrack + 加入 `.gitignore`**（提交 `a0cc3c6` → `65afd39`/`07fcbf4`/`bf06c12`），且 `.gitignore` 注明**禁止 `git add -f`**。
+
+| 影响 | 说明 |
+|---|---|
+| `.workbuddy/memory/**`（`PROJECT_RULES.md` + 每日记忆） | **只在本地磁盘** ⇒ `git clone` / 换机 / 清工作区即丢失 |
+| `.workbuddy/skills/**` | 磁盘上**不存在** |
+| 后果 | 项目记忆**不能**当团队/CI 的持久载体；跨机协作必须靠 `docs/**`（尤其本 `docs/architecture/**`） |
+| ⚠️ 连带 | `README.MD` 仍引用 `.workbuddy/memory/PROJECT_RULES.md`，但该路径**不会被克隆到** |
 
 ## 9. 一句话总结
 

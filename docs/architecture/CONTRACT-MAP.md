@@ -1,6 +1,6 @@
 # CONTRACT-MAP — 核心契约地图
 
-> Baseline **v1.0.0** · auditedAt **2026-09-19**
+> Baseline **v2.0.0** · auditedAt **2026-09-20**（round-2 全量审计）· 首版 v1.0.0 / 2026-09-19
 > 每条契约记录：定义位置 / producer / consumer / schema 或 type / 是否 versioned / 是否持久化 / 是否允许 nullable / 当前状态 / 重要兼容性规则。
 > 🔴 **本文件只建立事实基线，不修改任何逻辑。**
 
@@ -164,6 +164,41 @@
 5. 新增 `resultJson` 段 ⇒ 必须**可选**（zod optional），否则历史留档读取会炸。
 6. 改 Research 表 ⇒ 必须过 `importBoundary.test.ts`（跨域 import 方向）。
 7. 改 Dataset 物理表 ⇒ 必须同步插件声明式 DDL + `apply*` 脚本 + `totalRows` 口径（五表之和）。
+
+---
+
+## C-94 PHASE-R1-001 增量：**判定日契约** `decisionOffsetDays`（2026-09-20 · `9bz`）
+
+| 项 | 内容 |
+|---|---|
+| **定义位置** | wire: `shared/researchContracts.ts` 的 `pullbackScreenConditionSchema.decisionOffsetDays`（**必填、无 default、`.int().min(1).max(10)`**）；领域: `server/researchDataset/types.ts` `PullbackScreenCondition.decisionOffsetDays` |
+| **producer** | 数据集构建请求（用户/tRPC）→ `researchDataset/builder.ts` 落 `universeDefinition.pullbackDecisionOffsetDays`（随版本冻结）；研究侧另有 Run/Experiment/Analysis 三级声明 |
+| **consumer** | `researchDataset/pullback.ts#resolveDecisionOffsetDays`（截断池子）；`researchEngine/variables.ts#resolveEffectiveDecisionOffset` → `assertGroupObservationPitSafe` |
+| **versioned** | ✅ 随 `dataset_version` 冻结（`universeDefinitionJson`，**零新列**） |
+| **持久化** | ✅ `dataset_version.universeDefinitionJson` + `research_run/experiment/analysis.config` JSON |
+| **nullable** | ❌ 数据集侧**必填**；读取侧 `ResearchDatasetVersionContext.decisionOffsetDays: number \| null`（**取不到即 null，不默认整窗**） |
+| **🔴 兼容性铁律** | ① 四级**同值**，异值 ⇒ `DECISION_OFFSET_CONFLICT`；② 存在但非法 ⇒ `INVALID_DECISION_OFFSET`；③ 四级全空 + 引用观察日变量 ⇒ `OBSERVATION_WITHOUT_DECISION_DAY`（**拒绝整个 Run**）；④ `d = N` 时与修复前整窗语义**逐字等价**（判定函数未改 + 窗口集合相同）⇒ 可作修复前后对照；⑤ **老数据集（无声明）上一切观察日条件会被拒绝**（这是刻意行为，不是回归） |
+| **状态** | READY（FACT）；⚠️ 已知缺口：`INVALID_PULLBACK_DECISION_OFFSET`（数据集校验码）**未映射 tRPC code** ⇒ 落 `INTERNAL_SERVER_ERROR` |
+
+## C-95 PHASE-B-001 增量：**Pattern 语义契约** `shared/patternSemantics.ts`（2026-09-20 · `9ca`）
+
+| 项 | 内容 |
+|---|---|
+| **定义位置** | `shared/patternSemantics.ts`（**全新，零依赖纯函数，放 `shared/` 以便两侧共用**）：`SEMANTIC_OPERATORS`（**16 项白名单**：比较 9 + 聚合 7）、`PatternSemanticDeclaration`（**纯数据**）、`expandPatternSemantics()`（**唯一 Expander**）、`buildSemanticVariableName()` |
+| **producer** | Pattern 声明文件（`server/research/patternLibrary/patterns/*.ts` 的 `semantics?`）+ 唯一 SoT 注册表 `server/research/patternLibrary/semanticRegistry.ts`（**深冻结 + 注册期响亮拒绝**：`MISSING_SEMANTICS_VERSION` / `SEMANTIC_REDEFINITION` / `SEMANTIC_ID_COLLISION` / `INVALID_SEMANTIC_DECLARATION`） |
+| **consumer** | 研究侧 `server/researchEngine/semanticProjection.ts`（→ 观察日变量目录，**已接生产** `engine.ts`）；策略侧 `server/research/patternLibrary/strategyProjection.ts`（→ 策略特征，**仅测试可达**）；派生桥 `strategyCandidate/evidenceDerivation.ts` 用它当**唯一翻译层** |
+| **versioned** | ✅ 注册表 fingerprint（sha256 over 键序固定 JSON）+ `patternId@version` 唯一 |
+| **持久化** | ⚠️ 注册表本身在内存（模块级冻结缓存）；投影产物随 `research_artifact` / `sourceTraceJson` 留档 |
+| **nullable** | `TradingPatternSpec.semantics?` 可选（未声明 ⇒ 该 Pattern 的语义变量不进目录） |
+| **🔴 兼容性铁律** | ① 声明**不含实现**（无回调/SQL）；② **唯一 Expander**：两侧只消费展开产物，**不得自行展开**；③ 可用性由**真实决策日**推导 + 投影期 `availableFromOffset ≤ 决策日` **可失败**闸门（**不再用 `1990-01-01` 恒真日期**）；④ 旧 `samePointAvailability`（`recipeRegistryAtoms.ts`）保留但**不再被新投影消费** |
+| **状态** | 研究侧 READY（FACT）；**策略侧 CODE_READY（未接线）** |
+
+## C-96 PHASE-A-001 / PHASE-D-001 增量（2026-09-20 · `9by` / `9cb`）
+
+| Contract | 定义位置 | 关键纪律 | 状态 |
+|---|---|---|---|
+| **Report Artifact**（A） | `server/researchEngine/report/types.ts`（`REPORT_ARTIFACT_TYPE=REPORT` / `REPORT_STORAGE_TYPE=INLINE` / `buildReportUri`）+ `generator.ts`（**纯投影、不读时钟**）+ `service.ts`（装配 + 幂等落库） | checksum = sha256 over **报告正文 utf8**；幂等 = **服务层 checksum 比较**（`CREATED`/`REUSED`/`SUPERSEDED`），**DB 无唯一约束**；`emitReportArtifact` **best-effort 吞错** | READY（FACT，已观测到真实 Run 触发） |
+| **Evidence Derivation**（D） | `server/research/strategyCandidate/evidenceDerivation.ts`（`:302+` 输入、`:320 deriveCandidateRules()`、`:176-200` 输出 `CandidateDerivation`） | 输入 = conclusion + findings + `semanticIndex` + `parameterCodes`；**翻译层 = Pattern 语义声明**；`filterRule` 用 `bar.<featureId>` + `thresholdParam`（**参数引用，不写死数字**）；不可翻译走闭集 `DERIVATION_SKIP_REASONS`（**绝不猜**）；`deriveFromEvidence:false` ⇒ **逐字回到修复前行为**（`filterRule=null`） | READY（FACT） |
 
 ---
 

@@ -137,7 +137,7 @@ export const PULLBACK_TARGET_TYPE_VALUES = [
 export const pullbackTargetTypeSchema = z.enum(PULLBACK_TARGET_TYPE_VALUES);
 export type PullbackTargetTypeValue = (typeof PULLBACK_TARGET_TYPE_VALUES)[number];
 
-/** 回踩筛选条件（首板后 T+1~T+N「触及且不破」）。 */
+/** 回踩筛选条件（首板后 T+1~T+d「触及且不破」）。 */
 export const pullbackScreenConditionSchema = z.object({
   /** 回踩目标位（可多选）。 */
   targetTypes: z
@@ -145,8 +145,21 @@ export const pullbackScreenConditionSchema = z.object({
     .min(1, "至少选择一个回踩目标位"),
   /** 触及容差（%）。 */
   tolerancePercent: z.number().min(0).max(50).default(2),
-  /** 观察窗口交易日数（T+1 ~ T+N）。 */
+  /** 观察窗口交易日数（T+1 ~ T+N）——数据集携带的观察日数据上界。 */
   observationWindowDays: z.number().int().min(1).max(10).default(5),
+  /**
+   * 🔴 决策日偏移 d（交易日）—— **样本资格的唯一信息边界**：
+   * 判定「该样本是否满足回踩条件」只允许使用 T+1..T+d。
+   *
+   * 用整段 T+1..T+N 决定样本是否进池，等于在**样本层**使用未来数据。
+   * 刻意**不给 default**：缺省即静默回到该 look-ahead 行为，必须显式声明；
+   * 跨字段约束 `d ≤ observationWindowDays` 由 `validate` 权威判定。
+   */
+  decisionOffsetDays: z
+    .number()
+    .int()
+    .min(1, "决策日偏移至少为 1（T+1）")
+    .max(10, "决策日偏移最大为 10"),
 });
 export type PullbackScreenConditionInput = z.infer<
   typeof pullbackScreenConditionSchema

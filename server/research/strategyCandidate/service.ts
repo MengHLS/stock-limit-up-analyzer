@@ -25,8 +25,10 @@
 import {
   RESEARCH_CANDIDATE_STATUSES,
   isCandidateTransitionAllowed,
+  type ResearchAnalysisCondition,
   type ResearchCandidateStatus,
   type ResearchConclusion,
+  type ResearchFinding,
   type ResearchRepositories,
   type ResearchStrategyCandidate,
 } from "../../researchCore";
@@ -60,6 +62,20 @@ import {
 } from "./evidenceTrace";
 import type { StrategyPromotionPort } from "./strategyPromotionPort";
 import type { StrategyResearchProvenanceRepository } from "./types";
+import {
+  buildDerivationSnapshot,
+  buildSemanticIndex,
+  deriveCandidateRules,
+  emptyDerivation,
+  type CandidateDerivation,
+  type SemanticIndex,
+} from "./evidenceDerivation";
+import {
+  findPatternByResearchModuleKey,
+  projectCandidateSketch,
+  type PatternCandidateSketch,
+} from "../patternLibrary";
+import { listPatternSemantics } from "../patternLibrary/semanticRegistry";
 
 // ---------------------------------------------------------------------------
 // Dataset Registry 只读端口（注入式；缺省实现走真实 Registry）
@@ -130,13 +146,20 @@ export interface CreateCandidateFromConclusionInput {
   name?: string;
   /** 缺省 = 结论正文（**原样引用**，不做改写）。 */
   description?: string | null;
-  /** 人写的草图；不传即留空（**不自动生成**）。 */
+  /** 人写的草图；**给到哪一项就以哪一项为准**（派生只补未给的部分）。 */
   overrides?: Partial<
     Pick<
       ResearchStrategyCandidate,
       "entryRule" | "filterRule" | "exitRule" | "riskRule" | "parameterSpace"
     >
   >;
+  /**
+   * PHASE-D-001 —— 是否启用 Evidence → Rule 确定性派生（缺省 **true**）。
+   *
+   * 显式传 `false` ⇒ 逐字回到修复前行为（草图 5 列只来自 `overrides`）——
+   * 这条开关存在的唯一目的是让「零回归」可被**断言**，而不是靠描述。
+   */
+  deriveFromEvidence?: boolean;
 }
 
 export interface TransitionCandidateInput {
@@ -307,6 +330,19 @@ export interface StrategyCandidateServiceDeps {
 // ---------------------------------------------------------------------------
 // 实现
 // ---------------------------------------------------------------------------
+
+/**
+ * Pattern 语义索引的**惰性单例**（PHASE-D-001）。
+ *
+ * ⚠️ 刻意用惰性函数而不是顶层 `const`：本仓踩过「顶层常量 + 互相 import ⇒ 运行时炸
+ * 而 `tsc --noEmit` 为 0」的坑（`moduleRegistry` × `patternLibrary`），惰性求值可彻底规避。
+ * `listPatternSemantics()` 自身已缓存展开结果，本层只缓存索引 Map。
+ */
+let semanticIndexCache: SemanticIndex | null = null;
+function semanticIndex(): SemanticIndex {
+  semanticIndexCache ??= buildSemanticIndex(listPatternSemantics());
+  return semanticIndexCache;
+}
 
 function isPositiveInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
@@ -543,6 +579,87 @@ export function createStrategyCandidateService(
     }
   }
 
+  /**
+   * PHASE-D-001 — Evidence → Rule 派生的**装配**（编号 `9cb`）。
+   *
+   * 计算本身在 `evidenceDerivation.ts`（纯函数、唯一实现）；本函数只负责三件**读库**的事：
+   *   ① 按 `conclusion.findingIds` 取 Finding（**查不到即不放进集合，绝不伪造**）；
+   *   ② 经 `Finding → primaryAnalysisId → research_analysis.moduleKey → Pattern` 反查执行侧声明
+   *      —— 这条反查桥在 PHASE-A 复核里被点名「薄弱」（`unresolvedTraceFields.patternId`），
+   *      本轮把它接上（`findPatternByResearchModuleKey` 是既有唯一实现）；
+   *   ③ 取**结构化**条件（`research_analysis_condition`），而不是 `dimensionJson.conditionRule`
+   *      那种人读摘要字符串。
+   */
+  async function deriveCandidateEvidence(args: {
+    conclusion: ResearchConclusion;
+    enabled: boolean;
+    datasetVersionId: number;
+    overrideParameterSpace?: unknown;
+  }): Promise<{ derivation: CandidateDerivation | null; patternSketch: PatternCandidateSketch | null }> {
+    if (!args.enabled) return { derivation: null, patternSketch: null };
+
+    const findingIds = (args.conclusion.findingIds ?? [])
+      .filter((id): id is number => isPositiveInt(id))
+      .sort((a, b) => a - b);
+    const findings: ResearchFinding[] = [];
+    for (const id of findingIds) {
+      const row = await repos.findings.getById(id);
+      if (row !== undefined) findings.push(row);
+    }
+
+    // ---- Pattern 反查（首个能反查到声明的 moduleKey 胜出；顺序由 findingId 升序固定）----
+    let pattern: ReturnType<typeof findPatternByResearchModuleKey>;
+    for (const finding of findings) {
+      const analysisId = finding.primaryAnalysisId;
+      if (!isPositiveInt(analysisId)) continue;
+      const analysis = await repos.analyses.getById(analysisId);
+      const moduleKey = analysis?.moduleKey ?? null;
+      if (moduleKey === null || moduleKey.trim() === "") continue;
+      pattern = findPatternByResearchModuleKey(moduleKey);
+      if (pattern !== undefined) break;
+    }
+    const patternSketch = pattern === undefined ? null : projectCandidateSketch(pattern);
+
+    // ---- 结构化条件（预取；派生器保持纯同步，不接触仓储）----
+    const conditionsByAnalysis = new Map<number, readonly ResearchAnalysisCondition[]>();
+    for (const finding of findings) {
+      const analysisId = finding.primaryAnalysisId;
+      if (!isPositiveInt(analysisId) || conditionsByAnalysis.has(analysisId)) continue;
+      conditionsByAnalysis.set(analysisId, await repos.conditions.listByAnalysis(analysisId));
+    }
+
+    const parameterSpace = args.overrideParameterSpace ?? patternSketch?.parameterSpace ?? null;
+    const parameterCodes = new Set<string>(
+      parameterSpace !== null && typeof parameterSpace === "object" && !Array.isArray(parameterSpace)
+        ? Object.keys(parameterSpace as Record<string, unknown>)
+        : [],
+    );
+
+    if (findings.length === 0) {
+      // 没有 Finding 就没有证据 —— 如实产出**空派生**（不假装派生过）。
+      return {
+        derivation: emptyDerivation({
+          conclusionId: args.conclusion.id as number,
+          datasetVersionId: args.datasetVersionId,
+          findingIds: [],
+        }),
+        patternSketch,
+      };
+    }
+
+    return {
+      derivation: deriveCandidateRules({
+        conclusion: args.conclusion,
+        findings,
+        conditionsOf: (analysisId) => conditionsByAnalysis.get(analysisId) ?? [],
+        semanticIndex: semanticIndex(),
+        parameterCodes,
+        datasetVersionId: args.datasetVersionId,
+      }),
+      patternSketch,
+    };
+  }
+
   return {
     async createFromConclusion(input) {
       // ---- 0. 入参 ----
@@ -619,16 +736,55 @@ export function createStrategyCandidateService(
       const analysisIds = evidenceAnalysisIdCandidates(parsedEvidence);
       const primaryAnalysisId = parsedEvidence.primaryAnalysis?.analysisId ?? null;
       const runResolution = await resolveSourceRun(analysisIds, primaryAnalysisId);
-      const sourceTraceJson = buildSourceTrace({
-        conclusionId: conclusion.id as number,
-        experimentId: experiment.id as number,
-        hypothesisId: conclusion.hypothesisId ?? null,
-        conclusionType: conclusion.conclusionType,
-        conclusionStatus: conclusion.status,
-        confidence: conclusion.confidence ?? null,
-        evidence: parsedEvidence,
-        runResolution,
+
+      // ---- 7.5 Evidence → Rule 确定性派生（PHASE-D-001）----
+      //
+      // 🔴 修复前的断链：草图 5 列**只来自 `input.overrides`** ⇒ 人必须把研究结论重新手写一遍
+      // 成策略规则（D.1 的现场）。这里以 Pattern 语义声明为**唯一翻译层**，把 Finding 的
+      // 结构化条件派生成策略侧条件；`overrides` 仍**优先**（派生只是缺省值，不替代人工）。
+      //
+      // 结论的 Finding 谱系锚（**事实**：结论本来就有该列；与是否派生无关）。
+      const conclusionFindingIds = (conclusion.findingIds ?? [])
+        .filter((id): id is number => isPositiveInt(id))
+        .sort((a, b) => a - b);
+
+      const derived = await deriveCandidateEvidence({
+        conclusion,
+        enabled: input.deriveFromEvidence !== false,
+        datasetVersionId: sourceDatasetVersionId,
+        ...(input.overrides?.parameterSpace === undefined
+          ? {}
+          : { overrideParameterSpace: input.overrides.parameterSpace }),
       });
+
+      // ---- 7.6 证据快照（既有 + 本轮新增 derivation 段）----
+      const sourceTraceJson = {
+        ...buildSourceTrace({
+          conclusionId: conclusion.id as number,
+          experimentId: experiment.id as number,
+          hypothesisId: conclusion.hypothesisId ?? null,
+          conclusionType: conclusion.conclusionType,
+          conclusionStatus: conclusion.status,
+          confidence: conclusion.confidence ?? null,
+          evidence: parsedEvidence,
+          runResolution,
+        }),
+        ...(derived.derivation === null
+          ? {}
+          : { derivation: buildDerivationSnapshot(derived.derivation) }),
+      };
+
+      const derivedRuleCount = derived.derivation?.derivedRules.length ?? 0;
+      // 一条都没派生出来时**不写** filterRule（留 null = 如实表示「没有派生出条件」；
+      // 写空组会让人误读成「有规则但为空」）。
+      const derivedFilterRule = derivedRuleCount > 0 ? derived.derivation?.filterRule : undefined;
+
+      const sketchEntryRule = input.overrides?.entryRule ?? derived.patternSketch?.entryRule;
+      const sketchFilterRule = input.overrides?.filterRule ?? derivedFilterRule;
+      const sketchExitRule = input.overrides?.exitRule ?? derived.patternSketch?.exitRule;
+      const sketchRiskRule = input.overrides?.riskRule ?? derived.patternSketch?.riskRule;
+      const sketchParameterSpace =
+        input.overrides?.parameterSpace ?? derived.patternSketch?.parameterSpace;
 
       // ---- 8. 落库（初始状态恒为 DRAFT：绝不传 status）----
       const created = await repos.candidates.create({
@@ -636,15 +792,19 @@ export function createStrategyCandidateService(
         conclusionId: conclusion.id as number,
         name,
         description: input.description ?? conclusion.conclusion,
-        ...(input.overrides?.entryRule !== undefined ? { entryRule: input.overrides.entryRule } : {}),
-        ...(input.overrides?.filterRule !== undefined ? { filterRule: input.overrides.filterRule } : {}),
-        ...(input.overrides?.exitRule !== undefined ? { exitRule: input.overrides.exitRule } : {}),
-        ...(input.overrides?.riskRule !== undefined ? { riskRule: input.overrides.riskRule } : {}),
-        ...(input.overrides?.parameterSpace !== undefined
-          ? { parameterSpace: input.overrides.parameterSpace }
-          : {}),
+        ...(sketchEntryRule === undefined ? {} : { entryRule: sketchEntryRule }),
+        ...(sketchFilterRule === undefined ? {} : { filterRule: sketchFilterRule }),
+        ...(sketchExitRule === undefined ? {} : { exitRule: sketchExitRule }),
+        ...(sketchRiskRule === undefined ? {} : { riskRule: sketchRiskRule }),
+        ...(sketchParameterSpace === undefined ? {} : { parameterSpace: sketchParameterSpace }),
         sourceDatasetVersionId,
         sourceResearchRunId: runResolution.sourceResearchRunId,
+        // PHASE-D-001 —— D.5 的谱系锚：两列**早已存在**（schema + 领域类型 + 仓储映射齐备），
+        // 但 `createFromConclusion` 此前从不写它们 ⇒ 同一张表上「分析条件派生」路径写、
+        // 「结论派生」路径不写，口径不一致。这里按**事实**补齐（结论本来就有这两个锚，
+        // 不存在即写 null / 空数组，**不 backfill 伪造**）。
+        sourceHypothesisId: conclusion.hypothesisId ?? null,
+        sourceFindingIds: conclusionFindingIds,
         sourceTraceJson,
       });
 

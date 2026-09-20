@@ -1,6 +1,6 @@
 # DATABASE-MAP — 数据库域地图
 
-> Baseline **v1.0.0** · auditedAt **2026-09-19**
+> Baseline **v2.0.0** · auditedAt **2026-09-20**（round-2 全量审计）· 首版 v1.0.0 / 2026-09-19
 > 行数为**真实库实查**（探针 `docs/evidence/_probe_baseline_state.mts` / `_probe_baseline_tables.mts`，2026-09-19T08:40Z，`errors=0`），非 schema 推断、非历史报告。
 
 ---
@@ -9,11 +9,15 @@
 
 | 项 | 值 | 依据 |
 |---|---|---|
-| `drizzle/schema.ts` 行数 | **2292** | 实读 |
-| schema.ts 声明表数 | **60**（`grep -c "mysqlTable("`） | 实查 |
-| **真实库 BASE TABLE 数** | **63** | `information_schema.tables` 实查 |
-| 差异 3 张 | `__drizzle_migrations`（24 行，drizzle 元数据）+ `rd_rows_05809b1a6d97aa02`（163 行）+ `rd_rows_5dce9db1421bec38`（800 行） | `_probe_baseline_tables.out.json` |
-| migration 文件数 | **41**（`drizzle/0000…0040`，编号连续） | 实读 |
+> ⚠️ **下表为 v1.0.0（2026-09-19）读数；round-2（2026-09-20）已复核更新，见本表下方「round-2 复核」行。**
+
+| 项 | 值 | 依据 |
+|---|---|---|
+| `drizzle/schema.ts` 行数 | **2292** → **2947** | 实读 |
+| schema.ts 声明表数 | **60** → **70**（`grep -c "mysqlTable("`） | 实查 |
+| **真实库 BASE TABLE 数** | **63** → **73** | `information_schema.tables` 实查（2026-09-20T02:46Z） |
+| 差异 3 张 | `__drizzle_migrations` + `rd_rows_05809b1a6d97aa02`（163 行）+ `rd_rows_5dce9db1421bec38`（800 行） | `_probe_baseline_tables.out.json` |
+| migration 文件数 | **41** → **45**（`drizzle/0000…0044`，编号连续） | 实读 |
 | **外键约束** | **0**（`foreignKey` / `references(` / `onDelete` 全仓零命中） | grep 实证 |
 | 索引策略 | 全部为 `index` / `uniqueIndex`；跨表关系一律**软引用**（id 列，应用层保证） | schema.ts |
 
@@ -45,7 +49,9 @@
 
 ---
 
-## 3. 表清单（60 张，按域）
+## 3. 表清单（round-1: 60 张 / round-2: **70 张**，按域）
+
+> round-2 新增 10 张见文末 `## D-94`（round-2 增量）与已有的 `D-90~D-93` 增量章节。
 
 ### 3.1 Dataset Registry（11 张）
 

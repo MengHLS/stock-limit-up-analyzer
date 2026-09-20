@@ -1548,6 +1548,37 @@ const ENGINE_ERROR_HINTS: Record<string, { title: string; explanation: string; s
     explanation: "特征变量只能来自 T 日及之前（event / prefix），结果变量只能来自 T+1 及之后（path / outcome）。",
     suggestions: ["把未来收益类变量放到「目标变量」", "把 T 日可观测的变量放到「特征变量」"],
   },
+  OBSERVATION_WITHOUT_DECISION_DAY: {
+    title: "该数据集没有「决策日」，不能用作观察日条件的判定依据",
+    explanation:
+      "观察日变量（obs_* / pullback_*）描述的是事件后第 k 个交易日的状态，"
+      + "必须有明确的「最早在第几个交易日收盘可判定」才有意义。该 Dataset Version 未声明决策日，"
+      + "引擎若放行就只能是「整窗事后回看」——用未来形态筛过去该买的样本，属 look-ahead。",
+    suggestions: [
+      "改用带「首板回踩」筛选、且已声明决策日 d 的数据集（构建时填写 decisionOffsetDays）",
+      "或把该条件换成 T 日及以前可观测的特征变量",
+    ],
+  },
+  INVALID_DECISION_OFFSET: {
+    title: "决策日（decisionOffsetDays）取值非法",
+    explanation:
+      "决策日必须是不小于 1 的整数（在事件后第几个交易日做决策），它决定哪些观察日变量在当时可见。"
+      + "写错的决策日不会被忽略——忽略它就等于退回「事后回看」。",
+    suggestions: [
+      "改成正整数（例如 2 表示在 T+2 判定）",
+      "确认它写在 analysis.config / run.config / experiment.config 的同一语义下",
+    ],
+  },
+  DECISION_OFFSET_CONFLICT: {
+    title: "决策日有多处互相冲突的声明",
+    explanation:
+      "分析 / Run / Experiment / 数据集 都可以声明决策日，但它们必须指向同一个值；"
+      + "多值并存会让同一份样本被两套信息边界解释，引擎因此拒绝执行。",
+    suggestions: [
+      "只保留一处声明（推荐放在 experiment.config.decisionOffsetDays）",
+      "若数据集已按某个决策日筛过池子，则各层的值必须与它一致",
+    ],
+  },
   DATASET_TOO_LARGE: {
     title: "样本量超出引擎上限",
     explanation: "引擎不把整份 Dataset 读进内存；超出 maxSamples 会明确拒绝而不是拖垮进程。",

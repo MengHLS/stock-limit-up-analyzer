@@ -1,12 +1,13 @@
 # SYSTEM-BASELINE — 全局架构基线
 
-> **Baseline Version：`v1.4.0`**（minor：WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
+> **Baseline Version：`v2.0.0`**（**major** —— round-2 全量审计，触发 `GLOBAL AUDIT REQUIRED` 第 4 条（核心数据流变化：判定日 `decisionOffsetDays` 贯穿 Dataset→Run→Experiment→Analysis）+ 第 7 条（核心 Contract 变化：4 份新 shared 契约 + 新增 `shared/patternSemantics.ts`）+ 第 1 条（Domain 新增：`searchRobustness` / `oosValidation` / `walkForward`）。历史：`v1.4.0` = WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
 > **Last Audit Time：`2026-09-19`**（SYSTEM-BASELINE-001，一次性全局审计）
 > **Last Change Time：`2026-09-19`**（见 `CHANGE-AUDIT.md`）
 > **审计方式**：真实代码 + 真实库（只读探针）+ 既有测试基线；**代码变更 = 0 / DB 变更 = 0 / migration = 0**。
 >
 > ⚠️ **两个必须知道的前提（本轮实测）**
-> 1. **审计对象 = 工作区（working tree），不是 HEAD**。审计时工作区已有 **11 个未提交的 `server/**` 改动**（+254/−79，来自 STRATEGY-ARCH-002 / BACKTEST-002 / PARAMETER-001-PRE 等前序与**并发**工作）⇒ 「HEAD 的代码」与「本基线描述的代码」**不是同一个版本**。
+> 1. **审计对象 = 工作区（working tree），不是 HEAD**。round-2（2026-09-20）实测：工作区有 **14 个未提交的 `server/**` 文件 + 1 个 `shared/researchContracts.ts`**（= **PHASE-R1/B/D 三个阶段**的改动尚未提交；而 PARAMETER-001/002 · ROBUSTNESS-001 · OOS-001 · WALK-FORWARD-001 已随 `bb89eb8`/`e6cf717`/`0e90fc1` 等提交入库）⇒ 「HEAD 的代码」与「本基线描述的代码」**不是同一个版本**。
+> 1b. **开工前先 `git status --porcelain`**；若有未提交改动，先确认「你审计/修改的是哪一份代码」。
 > 2. **文件行号是 `auditedAt` 快照，只作定位辅助**。审计期间 `server/strategyCore/runtime.ts` 就被**另一会话**改过（16:56，+48/−2，595 行）⇒ **定位以「路径 + 符号名」为准，行号仅用于快速跳转**；发现行号对不上时按符号名 grep，不要当作 drift。
 >
 > 🔴 **本文件是后续 Agent 理解本项目架构的第一入口。**
@@ -24,10 +25,10 @@
 | 项目名 | `stock-limit-up-analyzer` |
 | 定位 | 从「涨停/股票分析应用」升级为 **个人量化策略研究平台** |
 | 技术栈 | React 19 · Vite 7 · Express · tRPC 11 · Drizzle ORM（mysql2 / TiDB Cloud）· TypeScript strict · Vitest |
-| 规模（实查） | `server/**` 628 文件 · `client/**` 215 文件 · `tests/**` **276** 文件 · `docs/**` 534 文件 · `scripts/**` 110 文件 |
-| DB | **63** 张 BASE TABLE（schema.ts 声明 60 + `__drizzle_migrations` + 2 张 legacy 动态行表）· 41 个 migration |
+| 规模（实查 **2026-09-20**） | `server/**` **676** 个 `.ts` · `client/src/**` **213** 个 `.ts/.tsx` · `tests/**` **290** 个测试文件 · `docs/**` **232** 个 `.md` · `scripts/**` **117** 个 |
+| DB | **73** 张 BASE TABLE（schema.ts 声明 **70** + `__drizzle_migrations` + 2 张 legacy 动态行表）· **45** 个 migration（`0000…0044`） |
 | 前端 | **33** 条路由 · 5 组侧栏导航 · **21** 个 tRPC 顶层 key |
-| 当前阶段 | STEP 12 数据地基已 `RESEARCH_READY = TRUE`；**BACKTEST-002 = COMPLETE**；下一阶段 = **PARAMETER-001（NOT READY，有阻塞）** |
+| 当前阶段 | STEP 12 数据地基 `RESEARCH_READY = TRUE`；**BACKTEST-002 = COMPLETE**；**PARAMETER-001 / ROBUSTNESS-001 / OOS-001 / WALK-FORWARD-001 已全部落地**（`9bs`/`9bt`/`9bu`/`9bv`/`9bw`）；**PHASE-A/R1/B/D 四阶段 COMPLETE**（`9by`/`9bz`/`9ca`/`9cb`）⇒ 下一个未占用编号 = **`9cc`** |
 | 最终目标 | 让用户把主观交易经验 → 明确规则 → 程序化策略 → 历史验证 → 参数优化 → 稳健性/OOS → 模拟交易 → 交易纪律，形成**可信、可复现**的闭环 |
 
 **权威控制文档**：`ROADMAP.md`（唯一 Master Control；§44 覆盖式状态区 / §44.5 未完成队列 / §47 append-only）。
@@ -190,9 +191,9 @@
 
 | 项 | 真实值 |
 |---|---|
-| BASE TABLE 总数 | **63** = schema.ts 声明 **60** + `__drizzle_migrations` + 2 张 `rd_rows_*`（legacy） |
+| BASE TABLE 总数 | **73** = schema.ts 声明 **70** + `__drizzle_migrations` + 2 张 `rd_rows_*`（legacy）（实查 2026-09-20T02:46Z） |
 | 外键约束 | **0**（全软引用） |
-| migration | 41 个（`0000…0040`）；**journal 止 0023 / snapshot 止 0015 / `__drizzle_migrations` 24 行** ⇒ `db:push` **不可用** |
+| migration | **45** 个（`0000…0044`）；**journal 止 0023 / snapshot 止 0015** ⇒ `db:push` **仍不可用**；0041~0044 全部靠 bespoke `scripts/apply*.mjs` 旁路执行（`-- @guard` 幂等 + `--dry-run` / `--check`） |
 | 实际 apply 机制 | 手写 SQL（`-- @guard:` 幂等）+ 14 个专用 `scripts/apply*.mjs\|mts` + 通用 `applySqlMigration.mjs` |
 | 数据集记账 | `ds_*` 五表 = **1,603,084** 行 = Σ `dataset_version.totalRows`（v1 60,002 + v2 1,543,082）⇒ **闭合，差 0** |
 | 策略 | `strategies` 10 / `strategy_versions` 11（Draft 10 + Validated 1）/ 5 投影表 24·17·19·9·9 / provenance 9 |
@@ -454,7 +455,7 @@ Step 10 如果发现 BASELINE_DRIFT：执行 Drift Audit（见 §20）
 
 | 方式 | 需要读的东西 |
 |---|---|
-| ❌ 全量重审计 | 628 server 文件 + 215 client 文件 + 41 migration + 276 测试 + 534 文档 |
+| ❌ 全量重审计 | 676 server 文件 + 213 client 文件 + 45 migration + 290 测试 + 232 文档 |
 | ✅ 增量审计 | `SYSTEM-BASELINE.md` + `system-manifest.yaml` + `CHANGE-AUDIT.md` + 本 Domain 若干文件 |
 
 ---
@@ -729,3 +730,99 @@ WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
 - 全仓库 **11 个既有策略版本的 `ruleGraphRefs` 全为空** ⇒ 搜历史候选必被拒（`PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER`）；
 - `cand-360001@1.0.0` 的 3 个 TUNABLE 笛卡尔积 **1240 > 256** ⇒ `MAX_COMBINATIONS_EXCEEDED`（**禁截断**）；
 - `LeakageGuard` 对配方特征**恒通过** ⇒ 策略层无独立未来函数防护，安全全靠数据层 PIT（本域 future-leak 防护为**几何级**）。
+
+
+---
+
+## 19. Round-2 全量审计（2026-09-20 · 本版本 `v2.0.0`）
+
+> 触发理由（`GLOBAL AUDIT REQUIRED`）：**#4 核心数据流变化**（判定日 `decisionOffsetDays` 贯穿 Dataset→Run→Experiment→Analysis）· **#7 核心 Contract 变化**（4 份新 shared 契约 + 新增 `shared/patternSemantics.ts`）· **#1 Domain 新增**（`searchRobustness` / `oosValidation` / `walkForward`）。
+
+### 19.1 Domain 状态总表（round-2 实查，**以此为准**）
+
+| Domain | round-1 | **round-2** | 决定性的生产调用方 |
+|---|---|---|---|
+| Dataset | READY | **READY** | `datasetRegistry.*`（24 procedure） |
+| Research | READY | **READY** | `researchEngine.*` / `researchPlanner.*` |
+| Strategy | READY | **READY** | `research.strategy.*` / `lifecycle.*` |
+| **Parameter Search** | PREPARATION/PARTIAL | ✅ **READY** | `paramSearch.createSearch/startSearch` → `research/parameterSearch/persistence.ts:144/312/451`（**三层落库**） |
+| Backtest | READY | **READY** | `researchRun.loopRun` |
+| Evaluation | PARTIAL | **PARTIAL** | `research.metrics.evaluate` |
+| **Robustness（searchRobustness）** | FACT（技术预览，无持久化） | ✅ **READY** | `paramSearch.createRobustnessRun/startRobustnessRun` → `searchRobustness/persistence.ts` |
+| **OOS Validation** | FACT（技术预览，无持久化） | ✅ **READY** | `paramSearch.createOosRun/startOosRun` → `oosValidation/persistence.ts` |
+| **Walk-Forward** | FACT（技术预览，无持久化） | ✅ **READY** | `paramSearch.createWalkForwardRun/startWalkForwardRun` → `walkForward/persistence.ts` |
+| Overfitting | FACT（技术预览） | **FACT（技术预览，仍无持久化）** | `walkForward.overfit` / `leaderCandidates.ts:1271` |
+| Simulation (Paper) | FACT | **FACT** | `review.paper.run` + `sentiment.*` + 调度器 |
+| Production | PLANNED | **PLANNED** | — |
+| Market Regime | FACT | **FACT** | `marketRegime.run` |
+| Lifecycle / Candidate / Review / Discipline | FACT（技术预览） | **FACT** | `research.lifecycle.*` / `strategyCandidate.promote` / `review.*` |
+
+**闭环装配度：仍为 8 / 14**（未装配 `robustness` / `oos` / `overfitting` / `paper` / `review` / `discipline`）。⚠️ 但**这 6 个域现在全部另有「持久化端点 + 真实表」**（见 19.3）⇒ 闭环 `notWired` **不再等于**「该域不可用」。
+
+### 19.2 round-2 新增的 4 条执行边
+
+| 阶段 | 新增内容 | 可达性 |
+|---|---|---|
+| **A**（`9by`） | `server/researchEngine/report/**`（4 文件）— Report artifact 纯投影 + 幂等落库；`engine.ts:407 emitReportArtifact`（best-effort） | ✅ 生产（已实测真实 Run 触发，见 `EXECUTION-FLOW.md` E-93.1） |
+| **R1**（`9bz`） | 判定日 `decisionOffsetDays` 双层截断（Dataset 池子 + Research 护栏）；错误码 `OBSERVATION_WITHOUT_DECISION_DAY` / `INVALID_DECISION_OFFSET` / `DECISION_OFFSET_CONFLICT` | ✅ 生产（五路真实 DB E2E 全绿） |
+| **B**（`9ca`） | `shared/patternSemantics.ts` + `semanticRegistry`（唯一 SoT）+ 两侧投影 | 研究侧 ✅ 生产；**策略侧 ❌ 仅测试** |
+| **D**（`9cb`） | `strategyCandidate/evidenceDerivation.ts`；`createFromConclusion` **默认派生**；`deriveFromEvidence:false` 逐字回到修复前 | ✅ 生产（真实 tRPC E2E 13/13） |
+
+### 19.3 round-2 数据库变化（实查 2026-09-20T02:46Z）
+
+| 项 | round-1 | **round-2** |
+|---|---|---|
+| `drizzle/schema.ts` | 2292 行 / 60 表 | **2947 行 / 70 表** |
+| 真实库 BASE TABLE | 63 | **73**（= 70 + `__drizzle_migrations` + 2 张 `rd_rows_*`） |
+| migration | 41（`0000…0040`） | **45**（`0000…0044`） |
+| `db:push` | 不可用 | **仍不可用**（journal 止 0023 / snapshot 止 0015） |
+| `research_artifact` | 未登记 | **31 行**（全 `REPORT`/`INLINE`）；⚠️ **无唯一约束** |
+| `parameter_search_*` | 不存在 | run **3** / combination **12** / result **8** |
+| `search_robustness_*` | 不存在 | 表存在，**全 0 行** |
+| `oos_validation_*` | 不存在 | 表存在，**全 0 行** |
+| `walk_forward_*` | 不存在 | 表存在，**全 0 行** |
+| `closed_loop_backtest_run` | 7（@08:40Z）→ 8 | **8**（8/8 `PARTIAL_BLOCKED`） |
+| `research_strategy_candidate` | 13 | **13**；其中 `sourceFindingIdsJson` 非空 = **4**（PHASE-D 写入） |
+| `strategy_versions` | 11 | **11** |
+| `dataset_version` | 2（v1/v2，均无 `pullbackDecisionOffsetDays`） | **2（同左，`hasDecisionOffset = 0`）** ⇒ ⚠️ 老数据集上观察日条件会被拒 |
+
+### 19.4 round-2 新增架构风险（16 条全表见 §12 与 `system-manifest.yaml` 的 `roundTwo.newRisksRound2`）
+
+**高**
+
+| # | 风险 | 证据 |
+|---|---|---|
+| **AR-12** | `pat_*` 语义变量**无区分度**（声明写「归一化回撤比例」，投影按 `field:"low"+MIN` 取**绝对值** ⇒ 恒 > 0）⇒ 以它作条件的 Finding 必然产不出来 | `PHASE-D-001-implementation.md:128-142` |
+| **AR-13** | **结论不写 `findingIds`**（`engine.ts:370` 正常分支写空数组）⇒ 证据链在列上断裂 | 实查：13 个候选中仅 4 个有 `sourceFindingIdsJson` |
+| **AR-9** | 新依赖边 `researchEngine → research/patternLibrary` **无测试守护** | `importBoundary.test.ts` 无该规则 |
+
+**中**：`AR-10`（`INVALID_PULLBACK_DECISION_OFFSET` 未映射 tRPC code）· `AR-11`（`research_artifact` 无唯一约束）· `AR-14`（`strategyProjection` 未接线）· `AR-15`（内存态预览与持久化端点双轨并存）· `AR-16`（planner `patternId` 路径仍写空 `filterRule`）。
+
+**round-2 已解决/降级**：`R-01`（搜索结果不落库）✅ **已解决** · `R-02`（运行级复现快照）**部分解决**（仍缺 `seed` / `universe` / `codeVersion`）。
+
+### 19.5 round-2 修正的基线自身错误（`BASELINE_DRIFT`）
+
+| # | 原表述 | 实际 | 处置 |
+|---|---|---|---|
+| **BD-05** | 9 份文档版本号为 `v1.0.0`（`SYSTEM-BASELINE.md` 已升 `v1.4.0`）⇒ **同一次变更只升了 1 份文件** | 基线自身**版本分叉** | 11 份文件统一为 **`v2.0.0`** |
+| **BD-06** | `SYSTEM-BASELINE.md:28/193/195/457`、`DATABASE-MAP.md:13/14/16/48`、`system-manifest.yaml:scale` 仍写 **63 表 / 60 声明 / 41 migration** | 实查 **73 / 70 / 45** | 逐处改为双读数（`round-1 → round-2`） |
+| **BD-07** | （新）`docs/testing/README.md` 头写「288 测试文件」，但命令表硬编码「277 个文件」 | `scripts/genTestDocs.mts:338` 硬编码 | **未修**（生成物禁手改）⇒ 登记：改硬编码常量需改脚本 |
+
+### 19.6 round-2 工程化变化（**改变后续所有任务的成本模型**）
+
+| 项 | 内容 |
+|---|---|
+| **增量测试** | `pnpm run test:changed`（`scripts/testChanged.mts`）：git 改动 → **反向依赖图** → 只跑受影响。`import` 边可传递且剔除纯类型；`reads` 边只认直接命中。三条硬回退全量规则见 `AGENT-GUIDE.md` §9-A |
+| **测试文档生成** | `pnpm run docs:tests`（`scripts/genTestDocs.mts`）⇒ `docs/testing/**`，**生成物禁手改** |
+| **性能剖析** | `server/observability/**`（`PARAM_PROFILE=1`）；生产已用、**无专属测试** |
+| **记忆持久性** | `.workbuddy/` **已 untrack + gitignore（禁 `git add -f`）** ⇒ 项目记忆**只在本地**，`git clone` 即丢失；跨机协作只能靠 `docs/**` |
+| **前端口径修复** | `shared/sectorHeatOrder.ts` 升级为**四键全序**（兜底桶压尾 → 当日热度 → 窗口合计 → 题材名），修「梯队 vs 热力图排序对不上」，10 个测试锁定 |
+
+### 19.7 round-2 验证基线
+
+| 项 | round-1 | **round-2** |
+|---|---|---|
+| `tsc --noEmit` | 0 error（但曾长期 23 条遗留） | ✅ **0 error / exit 0**（遗留已清零）⇒ 判据 = **必须 0 错** |
+| `vitest run` | 8 失败文件 / 17 用例 | **7 失败文件 / 16 用例（全部环境依赖）** ⇒ 判据 = **零新增失败文件** |
+| `checkEolDrift --strict` | 0 | **0** |
+| 测试文件总数 | 276 | **290** |

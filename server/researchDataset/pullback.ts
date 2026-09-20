@@ -11,6 +11,10 @@
  *   - 触及且不破：窗口内最低价 minLow 落在 [目标位, 目标位×(1+容差)] 区间内，且全程未跌破目标位。
  *   - 涨停价复用 STEP 5 权威 boardRules.resolveLimitRules / limitUpPrice。
  *   - 保守缺省：目标位数据不足（如 MA5 不足 5 日）→ 该目标位不可判定（hit=false），不伪造命中。
+ *   - 🔴 **信息边界 = 决策日 d**（`condition.decisionOffsetDays`）：样本资格判定**只能**使用
+ *     T+1..T+d。用整段 T+1..T+N 决定样本是否进池，等于在**样本层**使用未来数据
+ *     （survivor / look-ahead bias）——之后所有统计都建立在「事后已知会成立」的样本上。
+ *     `d < N` 时 T+d+1..T+N 的数据仍然加载（供研究侧观察日变量用），但**不参与**入池判定。
  */
 
 import { limitUpPrice, resolveLimitRules } from "../data/boardRules";
@@ -47,6 +51,24 @@ export interface FirstBoardEvent {
 export interface WindowBar {
   tradeDate: string;
   low: number | null;
+}
+
+/**
+ * 解析并校验「决策日偏移 d」。
+ *
+ * 🔴 这是样本资格的信息边界，**唯一实现源**：任何调用方（含绕过 validate 的脚本）都必须经此，
+ * 不允许把非法值静默夹成整窗或空窗 —— 前者保留缺陷、后者是「没数据」伪装成「无命中」。
+ */
+export function resolveDecisionOffsetDays(condition: PullbackScreenCondition): number {
+  const d = condition.decisionOffsetDays;
+  const n = condition.observationWindowDays;
+  if (!Number.isInteger(d) || d < 1 || d > n) {
+    throw new Error(
+      `pullback.decisionOffsetDays 必须是 [1, observationWindowDays=${String(n)}] 的整数，实得 ${String(d)}。`
+        + "该字段是样本资格的唯一信息边界，不允许缺省（缺省即回到「整窗筛选」的 look-ahead 行为）。",
+    );
+  }
+  return d;
 }
 
 /** 单个回踩目标位的判定结果。 */
@@ -239,9 +261,15 @@ export function buildFirstBoardEvent(
 /** 回踩筛选输出（单事件）。 */
 export interface PullbackScreenVerdict {
   event: FirstBoardEvent;
-  windowBars: WindowBar[];
-  /** 观察窗口是否交易日齐备（缺失/停牌导致 low 缺失即不完整）。 */
+  /** 决策日偏移 d（交易日）—— 判定只用 T+1..T+d。 */
+  decisionOffsetDays: number;
+  /** **实际参与样本资格判定**的 bars = T+1..T+d。 */
+  decisionBars: WindowBar[];
+  /** 完整加载窗口 T+1..T+N（供研究侧观察日变量用；**不参与**样本资格判定）。 */
+  loadedBars: WindowBar[];
+  /** **决策窗口**（T+1..T+d）是否交易日齐备（缺失/停牌导致 low 缺失即不完整）。 */
   windowComplete: boolean;
+  /** 决策窗口内缺 bar 的交易日。 */
   missingDates: string[];
   results: PullbackTargetResult[];
   /** 是否至少命中一个目标位（触及且不破）。 */
@@ -261,6 +289,7 @@ export function screenFirstBoardRow(
   calendarDates: readonly string[],
   condition: PullbackScreenCondition,
 ): PullbackScreenVerdict {
+  const decisionOffsetDays = resolveDecisionOffsetDays(condition);
   const event = buildFirstBoardEvent(row, priceByDate, calendarDates);
   if (!event) {
     return {
@@ -275,7 +304,9 @@ export function screenFirstBoardRow(
         board: "unknown",
         ma5: null,
       },
-      windowBars: [],
+      decisionOffsetDays,
+      decisionBars: [],
+      loadedBars: [],
       windowComplete: false,
       missingDates: [],
       results: [],
@@ -283,19 +314,21 @@ export function screenFirstBoardRow(
     };
   }
 
-  const windowBars = buildWindowBars(
+  const loadedBars = buildWindowBars(
     event.securityCode,
     event.eventDate,
     priceByDate,
     calendarDates,
     condition.observationWindowDays,
   );
-  const missingDates = windowBars.filter((b) => b.low === null).map((b) => b.tradeDate);
-  const windowComplete =
-    windowBars.length === condition.observationWindowDays && missingDates.length === 0;
+  // 🔴 信息边界：只用 T+1..T+d 判样本资格。`loadedBars` 的其余部分（T+d+1..T+N）
+  // 只供研究侧观察日变量使用，**绝不**进入入池判定。
+  const decisionBars = loadedBars.slice(0, decisionOffsetDays);
+  const missingDates = decisionBars.filter((b) => b.low === null).map((b) => b.tradeDate);
+  const windowComplete = decisionBars.length === decisionOffsetDays && missingDates.length === 0;
 
   const results = windowComplete
-    ? screenPullback(event, windowBars, condition.targetTypes, condition.tolerancePercent)
+    ? screenPullback(event, decisionBars, condition.targetTypes, condition.tolerancePercent)
     : condition.targetTypes.map((targetType) => ({
         targetType,
         targetPrice: resolveTargetPrice(event, targetType),
@@ -308,7 +341,9 @@ export function screenFirstBoardRow(
 
   return {
     event,
-    windowBars,
+    decisionOffsetDays,
+    decisionBars,
+    loadedBars,
     windowComplete,
     missingDates,
     results,

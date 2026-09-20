@@ -46,6 +46,13 @@ export interface SyntheticDatasetOptions {
    * 设为 `false` 可造出「有 path 但无 post」的数据集，用于验证**观察日变量确实不可用**。
    */
   withPost?: boolean;
+  /**
+   * 数据集声明的**决策日偏移 d**（交易日）—— 样本池的信息边界，也是观察日变量 PIT
+   * 护栏的判定日来源。缺省 = `maxPathDay`（数据集带满观察日数据 ⇒ 判定日取窗口末日，
+   * 既有用例行为不变）；显式传更小的值即可构造「决策日早于数据窗口」的 PIT 用例，
+   * 传 `null` 即可构造「数据集未声明决策日」的拒绝用例。
+   */
+  decisionOffsetDays?: number | null;
 }
 
 export interface SyntheticDataset {
@@ -191,6 +198,8 @@ export function buildSyntheticDataset(options: SyntheticDatasetOptions): Synthet
     horizons,
     pathRelativeDayRange: events.length === 0 ? null : { min: 1, max: maxPathDay },
     postRelativeDayRange: events.length === 0 || !withPost ? null : { min: 1, max: maxPathDay },
+    decisionOffsetDays:
+      options.decisionOffsetDays === undefined ? maxPathDay : options.decisionOffsetDays,
   };
 
   const reader = new InMemoryResearchDatasetReader({ context, events, paths, outcomes, prefixBars, postBars });

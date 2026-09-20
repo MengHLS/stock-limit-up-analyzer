@@ -45,6 +45,7 @@ import type {
   ResearchConclusionType,
   ResearchType,
 } from "../../researchCore";
+import type { PatternSemanticDeclaration } from "../../../shared/patternSemantics";
 import type {
   ResearchModuleCapability,
   ResearchTargetKind,
@@ -324,4 +325,20 @@ export interface TradingPatternSpec {
   readonly sketch?: PatternSketchProjection | null;
   readonly research: PatternResearchProjection | null;
   readonly execution: PatternExecutionProjection | null;
+  /**
+   * **受控语义声明槽**（PHASE-B-001）：让 Pattern 在不改 Core 白名单的前提下，
+   * 声明一个研究 / 策略两侧都能用的新语义字段。
+   *
+   * 省略 ⇒ 该 Pattern 不声明新语义（沿用 Core 已有变量）。
+   * 形态是**纯数据**：`{ version, declarations[] }`，不含任何可执行内容
+   * （见 `shared/patternSemantics.ts` 的三条边界）。
+   */
+  readonly semantics?: PatternSemanticsSection | null;
+}
+
+/** Pattern 的语义声明段（唯一键 = `patternId + version`）。 */
+export interface PatternSemanticsSection {
+  /** 语义版本；与 `patternId` 组成唯一键，注册后**不可重新定义**（见 `semanticRegistry.ts`）。 */
+  readonly version: string;
+  readonly declarations: readonly PatternSemanticDeclaration[];
 }

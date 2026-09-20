@@ -118,6 +118,22 @@ export interface RegistryResearchDatasetReaderDeps {
   registryRepo: DatasetRegistryRepository;
 }
 
+/**
+ * 从 `dataset_version` 冻结的 universe / filter 定义里读「决策日偏移 d」。
+ *
+ * 🔴 只认真实落库值：取不到就是 `null`（**不是**「默认整窗」）。研究引擎据此拒绝
+ * 「数据集未声明决策日却使用观察日变量」的分析 —— 缺省绝不放行。
+ * 先看 universeDefinition（当前写入点），再看 filterDefinition（历史镜像）。
+ */
+function extractDecisionOffsetDays(...definitions: unknown[]): number | null {
+  for (const definition of definitions) {
+    if (definition === null || typeof definition !== "object") continue;
+    const value = (definition as Record<string, unknown>).pullbackDecisionOffsetDays;
+    if (typeof value === "number" && Number.isInteger(value) && value >= 1) return value;
+  }
+  return null;
+}
+
 export class RegistryResearchDatasetReader implements ResearchDatasetReader {
   private readonly dataReader: DatasetDataReader;
   private readonly registryRepo: DatasetRegistryRepository;
@@ -149,6 +165,10 @@ export class RegistryResearchDatasetReader implements ResearchDatasetReader {
       horizons: counts.horizons,
       pathRelativeDayRange: pathRange,
       postRelativeDayRange: postRange,
+      decisionOffsetDays: extractDecisionOffsetDays(
+        version.universeDefinition,
+        version.filterDefinition,
+      ),
     };
   }
 

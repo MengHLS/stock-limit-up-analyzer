@@ -5,24 +5,25 @@
 
 system:
   name: stock-limit-up-analyzer
-  baselineVersion: v1.0.0
-  auditedAt: "2026-09-19"
-  lastChangeAt: "2026-09-19"
+  baselineVersion: v2.0.0
+  auditedAt: "2026-09-20"
+  lastChangeAt: "2026-09-20"
+  baselineHistory: ["v1.0.0 (2026-09-19 SYSTEM-BASELINE-001)", "v1.1.0~v1.4.0 (PARAMETER-001/002, ROBUSTNESS-001, OOS-001, WALK-FORWARD-001)", "v2.0.0 (2026-09-20 round-2: PHASE-A/R1/B/D + 判definit定日数据流变更)"]
   stack:
     frontend: React 19 + Vite 7 + wouter + tRPC client + Tailwind
     backend: Express + tRPC 11
     orm: Drizzle ORM (mysql2 / TiDB Cloud)
     test: Vitest (node environment)
-  scale:
-    serverFiles: 628
-    clientFiles: 215
-    testFiles: 276
-    docsFiles: 534
-    scriptsFiles: 110
-    schemaDeclaredTables: 60
-    realBaseTables: 63
-    migrations: 41
-    appRoutes: 33
+  scale:                       # 实查 2026-09-20（round-2）
+    serverFiles: 676           # server/**/*.ts
+    clientFiles: 213           # client/src/**/*.ts|tsx
+    testFiles: 290
+    docsFiles: 232             # docs/**/*.md
+    scriptsFiles: 117
+    schemaDeclaredTables: 70
+    realBaseTables: 73
+    migrations: 45
+    appRoutes: 34              # 新增 /research/report/:runId
     trpcTopLevelRouters: 21
   authority:
     masterControl: ROADMAP.md
@@ -682,3 +683,58 @@ nextStage:
   blocking: "PARAMETER-001（9bs）与 PARAMETER-002（9bt）均已完成：PS 有效性已 gate（死参数护栏 + 前置窗口校验 + 参数引用正例证明执行链正确）。下一步由 Robustness / OOS / Walk-Forward 消费 Parameter Search 结果。⚠️ 遗留：闭环 optimization 阶段仍用旧派生器；历史候选文档的参数需改写为参数引用；N-03 = DEFERRED"
   createdTasks:
     - "系统性创建 BACKTEST-003 / BACKTEST-004 = 禁止"
+
+# ── round-2 全量审计（2026-09-20）追加登记 ──────────────────────────────
+roundTwo:
+  auditedAt: "2026-09-20"
+  trigger:
+    - "GLOBAL AUDIT REQUIRED #4 核心数据流变化：判定日 decisionOffsetDays 贯穿 Dataset→Run→Experiment→Analysis"
+    - "GLOBAL AUDIT REQUIRED #7 核心 Contract 变化：4 份新 shared 契约 + 新增 shared/patternSemantics.ts"
+    - "GLOBAL AUDIT REQUIRED #1 Domain 新增：searchRobustness / oosValidation / walkForward"
+  phasesCompleted:
+    - "A  (9by) Research Report Artifact 最小闭环 — researchEngine/report/**；真实 Run 已观测到钩子触发"
+    - "R1 (9bz) look-ahead 双层截断 — 数据集层按 T+1..T+d 截断池子 + 研究层护栏改为按声明判定日校验（旧护栏 Math.max 循环定义、恒真）"
+    - "B  (9ca) Pattern 语义槽 — shared/patternSemantics.ts（16 项 operator 白名单 + 唯一 Expander）+ semanticRegistry（唯一 SoT，深冻结）+ 两侧投影"
+    - "D  (9cb) 结论→候选派生桥 — strategyCandidate/evidenceDerivation.ts（唯一实现）；createFromConclusion 默认派生"
+  newContracts:
+    - "shared/parameterSearchContracts.ts (0041)"
+    - "shared/searchRobustnessContracts.ts (0042)"
+    - "shared/oosValidationContracts.ts (0043)"
+    - "shared/walkForwardContracts.ts (0044)"
+    - "shared/patternSemantics.ts (PHASE-B-001, 跨域语义契约)"
+    - "shared/researchContracts.ts 新增 pullbackScreenConditionSchema.decisionOffsetDays (PHASE-R1-001)"
+  newTablesRound2:
+    - "parameter_search_run / parameter_search_combination / parameter_search_result"
+    - "search_robustness_run / search_robustness_result / search_robustness_parameter_analysis"
+    - "oos_validation_run / oos_validation_result"
+    - "walk_forward_run / walk_forward_fold"
+  newErrorCodes:
+    - "OBSERVATION_WITHOUT_DECISION_DAY → BAD_REQUEST"
+    - "INVALID_DECISION_OFFSET → BAD_REQUEST"
+    - "DECISION_OFFSET_CONFLICT → BAD_REQUEST"
+    - "REPORT_RUN_NOT_COMPLETED → PRECONDITION_FAILED"
+    - "INVALID_PULLBACK_DECISION_OFFSET → (未映射, 落 INTERNAL_SERVER_ERROR)"
+  newCrossDomainEdgesUnGuarded:
+    - "server/researchEngine/** → server/research/patternLibrary/** (semanticRegistry / 声明文件) — importBoundary.test.ts 未守护"
+  resolvedRisks:
+    R-01: "搜索结果不落库 ⇒ 已解决：parameter_search_{run,combination,result} 三层落库（persistence.ts:144/312/451）"
+    R-02: "运行级复现快照缺失 ⇒ 部分解决：已有 parameterSpaceJson / datasetVersionId / startDate/endDate / executionPolicyVersion / evaluationConfigFingerprint / metricsVersion / engineVersion / runFingerprint；仍缺 seed / universe / codeVersion"
+  newRisksRound2:
+    AR-9: "新依赖边 researchEngine → research/patternLibrary 无测试守护"
+    AR-10: "INVALID_PULLBACK_DECISION_OFFSET 未映射 tRPC code（与 R1 三码待遇不一致）"
+    AR-11: "research_artifact 无 DB 唯一约束，幂等只靠服务层 checksum（并发/多进程无兜底）"
+    AR-12: "pat_* 语义变量无区分度：声明写归一化回撤比例，投影按 field=low+MIN 取绝对值 ⇒ 恒 > 0（PHASE-B 交付缺陷，未修）"
+    AR-13: "结论不写 findingIds（engine.ts:370 正常分支写空数组）⇒ 证据链在列上断裂，D 阶段靠脚手架回填"
+    AR-14: "strategyProjection 未接生产组装（仅测试可达）⇒ 策略侧语义 PIT 护栏「机制级通过、真实链路未跑」"
+    AR-15: "内存态技术预览端点与持久化端点双轨并存（paramSearch.run/rolling/robustness/stochastic；walkForwardRouter 预览 vs paramSearch.createWalkForwardRun）"
+    AR-16: "planner 的 patternId 路径仍写空 filterRule（未接 Pattern 语义声明）"
+  verificationBaseline:
+    tsc: "0 error / exit 0（原 23 条 parameterSearch·searchRobustness 遗留已清零）"
+    vitest: "7 失败文件 / 16 失败用例（全部环境依赖）⇒ 判据 = 零新增失败文件"
+    eolDrift: "0 漂移"
+  engineeringChanges:
+    - "pnpm run test:changed = scripts/testChanged.mts（增量测试：git diff → 反向依赖图 → 只跑受影响）"
+    - "pnpm run docs:tests = scripts/genTestDocs.mts（生成 docs/testing/**，生成物禁手改）"
+    - "server/observability/** 新增（PARAM_PROFILE=1 性能剖析，生产已用、无专属测试）"
+    - ".workbuddy/ 已 untrack + gitignore（禁止 git add -f）⇒ 项目记忆不再随仓库走"
+    - "shared/sectorHeatOrder.ts 升级为四键全序（修「梯队 vs 热力图排序对不上」，10 个测试锁定）"

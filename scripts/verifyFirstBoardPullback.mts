@@ -27,6 +27,9 @@ async function main() {
           targetTypes: ["limitPrice", "ma5"],
           tolerancePercent: 2,
           observationWindowDays: 5,
+          // PHASE-R1-001：决策日 = 样本资格的信息边界（只允许用 T+1..T+d 判入池）。
+          // 这里取 5 = 窗口末日（与本脚本原「整窗」口径等价，仅用于核对构建链路可跑通）。
+          decisionOffsetDays: 5,
         },
       },
     },

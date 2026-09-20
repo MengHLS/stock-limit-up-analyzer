@@ -1236,6 +1236,8 @@ export function rangesOverlap(a: readonly [number, number], b: readonly [number,
 /** 变量目录：把某个 Dataset Version 的真实可用视界固化下来。 */
 export class ResearchVariableCatalog {
   private readonly outcomes: Map<string, OutcomeVariableDefinition>;
+  /** Pattern 语义投影来的观察日变量（键 = 规范变量名）。 */
+  private readonly patternObservationMap: Map<string, ObservationVariableDefinition>;
 
   /**
    * 分段窗可用的相对日范围（`path.relativeDay` 的真实取值包围盒）。
@@ -1256,7 +1258,15 @@ export class ResearchVariableCatalog {
     readonly pathHorizons: readonly number[],
     /** post.relativeDay 的真实可用视界（升序）；缺省 = 无 post 数据（观察日变量全部不可用）。 */
     postHorizons: readonly number[] = [],
+    /**
+     * PHASE-B-001：**由 Pattern 语义声明投影来的观察日变量**（唯一 Expander 的产物）。
+     *
+     * 🔴 与 Core 变量**同处一个目录**，因此 `assertConditionFieldsKnown` 不需要第二套白名单
+     * （否则就成了双写 SoT）；而未声明的名字依旧被 `UNKNOWN_VARIABLE` 拒绝。
+     */
+    private readonly patternObservations: readonly ObservationVariableDefinition[] = [],
   ) {
+    this.patternObservationMap = new Map(patternObservations.map((d) => [d.name, d]));
     this.outcomes = new Map(buildOutcomeVariables(pathHorizons, outcomeHorizons).map((v) => [v.name, v]));
     const usable = [...pathHorizons]
       .filter((d) => Number.isInteger(d) && d >= 1)
@@ -1301,6 +1311,7 @@ export class ResearchVariableCatalog {
    * 而不是写死的 20 —— 数据集换成只有 T+1..T+5 的版本时，`obs_9d.close` 必须不可用。
    */
   hasObservation(name: string): boolean {
+    if (this.patternObservationMap.has(name)) return true;
     const parsed = parseObservationVariableName(name);
     if (parsed === null) return false;
     return parsed.offset >= 1 && parsed.offset <= this.observationMaxOffset;
@@ -1317,6 +1328,9 @@ export class ResearchVariableCatalog {
    * 供 Engine 做条件求值期的 PIT 校验：「在 T+k 做判断时，不得引用 > k 的观察日变量」。
    */
   observationOffsetOf(name: string): number | null {
+    // Pattern 声明优先：它自带 `availableFromOffset`（不靠名字正则反推）。
+    const pattern = this.patternObservationMap.get(name);
+    if (pattern !== undefined) return pattern.availableFromOffset;
     const parsed = parseObservationVariableName(name);
     if (parsed === null) return null;
     return this.hasObservation(name) ? parsed.offset : null;
@@ -1324,11 +1338,12 @@ export class ResearchVariableCatalog {
 
   /** 全部观察日变量名（稳定排序；逐日在前、按 offset 升序）。 */
   listObservations(): string[] {
+    const patternNames = [...this.patternObservationMap.keys()];
     const max = this.observationMaxOffset;
-    if (max <= 0) return [];
-    return buildObservationVariables(max)
-      .map((v) => v.name)
-      .sort((a, b) => observationVariableSortKey(a).localeCompare(observationVariableSortKey(b)));
+    if (max <= 0) return patternNames.sort();
+    return [...patternNames, ...buildObservationVariables(max).map((v) => v.name)].sort((a, b) =>
+      observationVariableSortKey(a).localeCompare(observationVariableSortKey(b)),
+    );
   }
 
   /**
@@ -1340,6 +1355,9 @@ export class ResearchVariableCatalog {
    *   - 名字格式不认识 → `UNKNOWN_VARIABLE`。
    */
   resolveObservation(name: string): ObservationVariableDefinition {
+    // Pattern 语义声明直接带定义（含自己的 resolve），无需再构造。
+    const patternDef = this.patternObservationMap.get(name);
+    if (patternDef !== undefined) return patternDef;
     const parsed = parseObservationVariableName(name);
     if (parsed !== null) {
       engineAssert(
@@ -1512,6 +1530,130 @@ export function assertObservationConditionsPitSafe(args: {
     used.push({ variable: field, availableFromOffset: offset });
   }
   return used;
+}
+
+/**
+ * 条件组集合的观察日 PIT 护栏（**判定日由外部声明**）。
+ *
+ * 🔴 PHASE-R1-001 修正的真实缺陷：原先判定日是从组内条件**反推**的
+ * （`evaluationOffset = max(组内观察日变量的 offset)`），再断言「每个 offset ≤ 该 max」——
+ * 循环定义、**恒真**，生产路径永不触发。而它正是 `assertObservationConditionsPitSafe`
+ * 自称的「整个 OBSERVATION 角色存在的唯一防线」。即：防线从来没有生效过，
+ * 「用 T+5 的形态筛 T+3 该买的样本」在生产里是被静默放行的。
+ *
+ * 修法：判定日改为**该 Run 所用 Dataset Version 声明的 `decisionOffsetDays`**（外部输入）。
+ * 数据集没声明（`null`）⇒ 引用观察日变量一律拒绝，不退回「整窗可判定」这种假护栏。
+ *
+ * 返回被引用的观察日变量及其 offset，供上层写入追溯信息（**不静默通过**）。
+ */
+export function assertGroupObservationPitSafe(args: {
+  catalog: ResearchVariableCatalog;
+  groups: readonly { readonly conditions: readonly { readonly fieldName: string }[] }[];
+  decisionOffsetDays: number | null;
+}): Array<{ variable: string; availableFromOffset: number }> {
+  const { catalog, groups, decisionOffsetDays } = args;
+  const used: Array<{ variable: string; availableFromOffset: number }> = [];
+  for (const group of groups) {
+    const fields = group.conditions.map((c) => c.fieldName);
+    const observed = fields.filter((f) => catalog.observationOffsetOf(f) !== null);
+    if (observed.length === 0) continue;
+    if (decisionOffsetDays === null) {
+      engineAssert(
+        false,
+        "OBSERVATION_WITHOUT_DECISION_DAY",
+        `条件组引用了观察日变量（${observed.join(", ")}），但该 Run 绑定的 Dataset Version `
+          + "未声明决策日（其 universeFilter 没有首板回踩筛选，因此不存在「第几个交易日做决策」）。"
+          + "观察日变量必须锚定一个明确的判定日才有 PIT 意义；缺了它只能「整窗事后回看」，"
+          + "那正是 look-ahead。可在以下任一处置声明决定日在事件后第几个交易日："
+          + "`analysis.config.decisionOffsetDays` / `run.config.decisionOffsetDays` / "
+          + "`experiment.config.decisionOffsetDays` / 数据集 universeFilter 的回踩决策日；"
+          + "或把该条件换成 T 日及以前可观测的特征变量。",
+        { fields: observed, decisionOffsetDays: null },
+      );
+    }
+    used.push(
+      ...assertObservationConditionsPitSafe({
+        catalog,
+        fields,
+        evaluationOffset: decisionOffsetDays as number,
+      }),
+    );
+  }
+  return used;
+}
+
+// ---------------------------------------------------------------------------
+// 判定日（decisionOffsetDays）声明与解析 —— PHASE-R1-001B
+// ---------------------------------------------------------------------------
+
+/** 各层 config 里声明判定日的键名（分析 / Run / Experiment 共用同一键名）。 */
+export const DECISION_OFFSET_CONFIG_KEY = "decisionOffsetDays";
+
+/**
+ * 从任意 config 对象读取 `decisionOffsetDays`。
+ *
+ * 🔴 语义：**存在但非法必须响亮拒绝** —— 静默忽略一个写错的决策日，
+ * 会让「以为声明了、其实没声明」退化成事后回看，正是本次要修的 look-ahead。
+ */
+export function readDecisionOffsetDays(config: unknown, source: string): number | null {
+  if (config === null || config === undefined || typeof config !== "object") return null;
+  const raw = (config as Record<string, unknown>)[DECISION_OFFSET_CONFIG_KEY];
+  if (raw === undefined || raw === null) return null;
+  engineAssert(
+    typeof raw === "number" && Number.isInteger(raw) && raw >= 1,
+    "INVALID_DECISION_OFFSET",
+    `${source}.${DECISION_OFFSET_CONFIG_KEY} 必须是 ≥ 1 的整数（在事件后第几个交易日做决策），`
+      + `实得 ${JSON.stringify(raw)}。`,
+    { source, value: raw },
+  );
+  return raw as number;
+}
+
+/**
+ * 解析**有效判定日**：分析 → Run → Experiment → Dataset Version 四级，**唯一取值**。
+ *
+ * 为什么判定日可以由多层声明（PHASE-R1-001B）：research 引擎真正读的 registry 数据集
+ * （`first_limit_pullback`）的「池子」= 首板事件本身，**没有任何筛选** —— 决策日只是
+ * 「本研究在 T+d 判定」的分析意图，语义上不属于数据集；而 STEP 12.6 的回踩筛选数据集
+ * 确实按某个 d 筛过池子，于是两边都可能声明。
+ *
+ * 🔴 多值并存 = 拒绝执行：同一份样本被两套信息边界解释，会让「哪些观察日变量合法」
+ * 取决于读哪一处声明，是比缺声明更危险的隐性错误。全空 ⇒ `null`（引用观察日变量即被拒绝）。
+ */
+export function resolveEffectiveDecisionOffset(args: {
+  datasetDecisionOffsetDays: number | null;
+  analysisConfig: unknown;
+  runConfig: unknown;
+  experimentConfig: unknown;
+  analysisId?: number | null;
+}): number | null {
+  const candidates: Array<{ source: string; value: number }> = [];
+  const push = (source: string, config: unknown): void => {
+    const value = readDecisionOffsetDays(config, source);
+    if (value !== null) candidates.push({ source, value });
+  };
+  push("analysis.config", args.analysisConfig);
+  push("run.config", args.runConfig);
+  push("experiment.config", args.experimentConfig);
+  if (args.datasetDecisionOffsetDays !== null) {
+    candidates.push({
+      source: "datasetVersion.universeDefinition",
+      value: args.datasetDecisionOffsetDays,
+    });
+  }
+  if (candidates.length === 0) return null;
+
+  const distinct = new Set(candidates.map((c) => c.value));
+  engineAssert(
+    distinct.size === 1,
+    "DECISION_OFFSET_CONFLICT",
+    `同一个判定日（decisionOffsetDays）出现了互相冲突的声明：`
+      + `${candidates.map((c) => `${c.source}=${c.value}`).join("、")}。`
+      + "判定日决定「哪些观察日变量合法」，多值并存会让同一份样本被两套信息边界解释 ⇒ 拒绝执行。"
+      + "请只保留一处声明（推荐放在 experiment.config）。",
+    { candidates, analysisId: args.analysisId ?? null },
+  );
+  return candidates[0]!.value;
 }
 
 // ---------------------------------------------------------------------------

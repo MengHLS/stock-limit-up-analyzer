@@ -2,7 +2,7 @@
 
 # 测试资产总览（tests/ 与 docs/testing/ 的唯一索引）
 
-全仓测试文件 **284** 个 ｜ 用例声明 **4754** 个 ｜ 模块 **28** 个
+全仓测试文件 **288** 个 ｜ 用例声明 **4812** 个 ｜ 模块 **28** 个
 其中：环境依赖（离线必失败）**7** 个 ｜ 已知失效 **1** 个 ｜ 源码文本断言 **22** 个
 
 > 本目录由 `pnpm run docs:tests` 生成，**禁手改**；改测试后重跑即同步。
@@ -92,7 +92,7 @@
 | 模块 | 文档 | 测试文件 | 用例声明 | 环境依赖 | 文本断言 |
 |---|---|---|---|---|---|
 | `client/src/adapters` | [`client/src/adapters/_index.md`](client/src/adapters/_index.md) | 5 | 147 | - | - |
-| `client/src/components` | [`client/src/components/_index.md`](client/src/components/_index.md) | 16 | 422 | - | 3 |
+| `client/src/components` | [`client/src/components/_index.md`](client/src/components/_index.md) | 17 | 427 | - | 3 |
 | `client/src/lib` | [`client/src/lib/_index.md`](client/src/lib/_index.md) | 3 | 20 | - | - |
 | `client/src/pages` | [`client/src/pages/_index.md`](client/src/pages/_index.md) | 2 | 16 | - | 2 |
 | `server` | [`server/_index.md`](server/_index.md) | 57 | 522 | 7 | 9 |
@@ -107,10 +107,10 @@
 | `server/historicalState` | [`server/historicalState/_index.md`](server/historicalState/_index.md) | 5 | 64 | - | 1 |
 | `server/marketData` | [`server/marketData/_index.md`](server/marketData/_index.md) | 9 | 95 | - | - |
 | `server/portfolio` | [`server/portfolio/_index.md`](server/portfolio/_index.md) | 1 | 17 | - | - |
-| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 67 | 1773 | - | 6 |
+| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 69 | 1810 | - | 6 |
 | `server/researchCore` | [`server/researchCore/_index.md`](server/researchCore/_index.md) | 8 | 125 | - | - |
-| `server/researchDataset` | [`server/researchDataset/_index.md`](server/researchDataset/_index.md) | 9 | 85 | - | - |
-| `server/researchEngine` | [`server/researchEngine/_index.md`](server/researchEngine/_index.md) | 18 | 269 | - | - |
+| `server/researchDataset` | [`server/researchDataset/_index.md`](server/researchDataset/_index.md) | 9 | 89 | - | - |
+| `server/researchEngine` | [`server/researchEngine/_index.md`](server/researchEngine/_index.md) | 19 | 281 | - | - |
 | `server/risk` | [`server/risk/_index.md`](server/risk/_index.md) | 2 | 50 | - | - |
 | `server/riskEngine` | [`server/riskEngine/_index.md`](server/riskEngine/_index.md) | 1 | 18 | - | - |
 | `server/runWorkbenchAssembly` | [`server/runWorkbenchAssembly/_index.md`](server/runWorkbenchAssembly/_index.md) | 2 | 26 | - | - |

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildWindowBars,
   computeMa5FromFacts,
+  resolveDecisionOffsetDays,
   screenFirstBoardRow,
   screenPullback,
   screenSingleTarget,
@@ -181,6 +182,8 @@ describe("screenFirstBoardRow（通用回踩筛选）", () => {
       targetTypes: ["limitPrice"],
       tolerancePercent: 5,
       observationWindowDays: 2,
+      // 决策日 = 窗口末日 ⇒ 与本文件原有断言语义一致（修复前是「整窗」口径）
+      decisionOffsetDays: 2,
     });
     expect(verdict.windowComplete).toBe(true);
     expect(verdict.matched).toBe(true);
@@ -207,8 +210,160 @@ describe("screenFirstBoardRow（通用回踩筛选）", () => {
       targetTypes: ["limitPrice"],
       tolerancePercent: 5,
       observationWindowDays: 2,
+      // 决策日 = 窗口末日 ⇒ 与本文件原有断言语义一致（修复前是「整窗」口径）
+      decisionOffsetDays: 2,
     });
     expect(verdict.windowComplete).toBe(false);
     expect(verdict.matched).toBe(false);
+  });
+});
+
+describe("PHASE-R1-001 · 决策日截断（样本资格的信息边界）", () => {
+  // T0 = 2026-01-06；preClose 10.5 ⇒ 主板涨停价 11.55；容差 1% ⇒ 命中带 [11.55, 11.6655]
+  const calendar = [
+    "2026-01-05",
+    "2026-01-06",
+    "2026-01-07",
+    "2026-01-08",
+    "2026-01-09",
+    "2026-01-12",
+    "2026-01-13",
+  ];
+  const T0 = "2026-01-06";
+  const row = {
+    code: "600001.SH",
+    tradeDate: T0,
+    open: 11.0,
+    high: 11.55,
+    low: 11.0,
+    close: 11.55,
+    preClose: 10.5,
+  };
+
+  /** 逐日 low（T+1 起）。`low = null` 表示该交易日无 bar（停牌 / 数据缺失）。 */
+  function factsFromLows(lows: Array<[string, number | null]>) {
+    const facts = new Map<string, Map<string, CanonicalMarketBar>>();
+    const t0Bar = new Map<string, CanonicalMarketBar>();
+    t0Bar.set(
+      "600001.SH",
+      bar({
+        symbol: "600001.SH",
+        timestamp: T0,
+        open: 11.0,
+        high: 11.55,
+        low: 11.0,
+        close: 11.55,
+        preClose: 10.5,
+      }),
+    );
+    facts.set(T0, t0Bar);
+    for (const [date, low] of lows) {
+      const m = new Map<string, CanonicalMarketBar>();
+      m.set("600001.SH", bar({ symbol: "600001.SH", timestamp: date, low, close: low, preClose: low }));
+      facts.set(date, m);
+    }
+    return facts;
+  }
+
+  // 基准情形逐日最低价：
+  //   T+1 11.80 未触及（高于带外上沿）／T+2 11.58 触及带内／T+3 11.40 跌破／T+4 T+5 继续跌破
+  const LOWS: Array<[string, number | null]> = [
+    ["2026-01-07", 11.8],
+    ["2026-01-08", 11.58],
+    ["2026-01-09", 11.4],
+    ["2026-01-12", 11.0],
+    ["2026-01-13", 10.6],
+  ];
+
+  function verdictFor(d: number, lows: Array<[string, number | null]> = LOWS) {
+    return screenFirstBoardRow(row, factsFromLows(lows), calendar, {
+      targetTypes: ["limitPrice"],
+      tolerancePercent: 1,
+      observationWindowDays: 5,
+      decisionOffsetDays: d,
+    });
+  }
+
+  it("五个决策日各自独立时序：d=1 只看 T+1 … d=5 看 T+1..T+5", () => {
+    const got = [1, 2, 3, 4, 5].map((d) => verdictFor(d));
+
+    // ① 每个决策日**实际判定**用的是自己那一段前缀
+    expect(got.map((v) => v.decisionOffsetDays)).toEqual([1, 2, 3, 4, 5]);
+    expect(got.map((v) => v.decisionBars.length)).toEqual([1, 2, 3, 4, 5]);
+    expect(got.map((v) => v.decisionBars.map((x) => x.tradeDate))).toEqual([
+      ["2026-01-07"],
+      ["2026-01-07", "2026-01-08"],
+      ["2026-01-07", "2026-01-08", "2026-01-09"],
+      ["2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12"],
+      ["2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13"],
+    ]);
+
+    // ② 完整加载窗口恒为 N=5：T+3..T+5 仍加载（供观察日变量用），但**不参与**入池判定
+    expect(got.map((v) => v.loadedBars.length)).toEqual([5, 5, 5, 5, 5]);
+
+    // ③ 结论各自独立：d=1 未触及 ⇒ 不命中；d=2 触及带内 ⇒ 命中；d≥3 因跌破 ⇒ 失败
+    expect(got.map((v) => v.matched)).toEqual([false, true, false, false, false]);
+    expect(got[0]!.results[0]!.broken).toBe(false);
+    expect(got[2]!.results[0]!.broken).toBe(true);
+    expect(got[1]!.results[0]!.hitLow).toBe(11.58);
+  });
+
+  it("负向 look-ahead 回归：改动 T+4 / T+5 不得改变 d=2 的样本资格", () => {
+    const base = verdictFor(2);
+    const mutatedLows: Array<[string, number | null]> = [
+      LOWS[0]!,
+      LOWS[1]!,
+      LOWS[2]!,
+      ["2026-01-12", 9.0],
+      ["2026-01-13", 8.0],
+    ];
+    const mutated = verdictFor(2, mutatedLows);
+
+    // 资格逐字段不变 —— 本次修复的核心断言
+    expect(mutated.matched).toBe(base.matched);
+    expect(mutated.windowComplete).toBe(base.windowComplete);
+    expect(mutated.results).toEqual(base.results);
+    expect(mutated.decisionBars).toEqual(base.decisionBars);
+
+    // 反证：同一份（被改动的）数据在「整窗」口径下结论**不同**
+    // ⇒ 证明上一条断言确实在测缺陷，而不是因为两次调用本来就必然相同
+    const fullWindow = verdictFor(5, mutatedLows);
+    expect(fullWindow.matched).not.toBe(base.matched);
+  });
+
+  it("决策窗口缺 bar ⇒ 不完整保守排除；不因窗口外数据齐备而误判完整", () => {
+    const v = verdictFor(3, [
+      ["2026-01-07", 11.8],
+      ["2026-01-08", 11.58],
+      // T+3 = 2026-01-09 缺 bar
+      ["2026-01-12", 11.58],
+      ["2026-01-13", 11.58],
+    ]);
+    expect(v.windowComplete).toBe(false);
+    expect(v.matched).toBe(false);
+    expect(v.missingDates).toEqual(["2026-01-09"]);
+    expect(v.decisionBars).toHaveLength(3);
+    expect(v.loadedBars).toHaveLength(5);
+  });
+
+  it("d > N / 非整数 / 缺失 ⇒ 响亮抛错（绝不静默退回整窗）", () => {
+    for (const bad of [0, -1, 6, 2.5, Number.NaN, undefined]) {
+      expect(() =>
+        resolveDecisionOffsetDays({
+          targetTypes: ["limitPrice"],
+          tolerancePercent: 1,
+          observationWindowDays: 5,
+          decisionOffsetDays: bad as unknown as number,
+        }),
+      ).toThrow(/decisionOffsetDays/);
+    }
+    expect(
+      resolveDecisionOffsetDays({
+        targetTypes: ["limitPrice"],
+        tolerancePercent: 1,
+        observationWindowDays: 5,
+        decisionOffsetDays: 5,
+      }),
+    ).toBe(5);
   });
 });

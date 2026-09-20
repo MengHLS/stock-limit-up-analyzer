@@ -320,6 +320,19 @@ export const RESEARCH_ENGINE_ERROR_CODES = [
    * 因此报告只建立在**已完成的 Run** 上（PHASE-A-001 §9）。
    */
   "REPORT_RUN_NOT_COMPLETED",
+  // ---- 观察日 PIT（PHASE-R1-001）----
+  /**
+   * 条件组引用了观察日变量，但所属 Dataset Version 未声明决策日。
+   *
+   * 观察日变量必须有一个明确的「最早可在第几个交易日判定」才有 PIT 意义：
+   * 缺了它只能退回「整窗事后回看」，那正是 look-ahead。故**不放行**，
+   * 也不给默认值（默认 = 静默保留缺陷）。
+   */
+  "OBSERVATION_WITHOUT_DECISION_DAY",
+  /** `decisionOffsetDays` 存在但非法（非 ≥1 整数）。 */
+  "INVALID_DECISION_OFFSET",
+  /** 同一判定日出现互相冲突的多处声明（分析 / Run / Experiment / Dataset 之间）。 */
+  "DECISION_OFFSET_CONFLICT",
   "INTERNAL_ERROR",
 ] as const;
 export type ResearchEngineErrorCode = (typeof RESEARCH_ENGINE_ERROR_CODES)[number];
@@ -527,4 +540,12 @@ export interface ResearchDatasetVersionContext {
    * 缺失即「该数据集没有观察日数据」⇒ `obs_*` / `pullback_*` 全部不可用（不是默认 20）。
    */
   postRelativeDayRange: { min: number; max: number } | null;
+  /**
+   * 数据集**声明的决策日偏移 d**（交易日）—— 样本池的信息边界，也是观察日变量 PIT
+   * 护栏的判定日来源（`decisionOffsetDays` 冻结在 `dataset_version.universeDefinition`）。
+   *
+   * 🔴 `null` = 该数据集未声明（无首板回踩筛选）⇒ 引用观察日变量必须**被拒绝**，
+   * 不允许退回「整窗可判定」这种恒真的假护栏。
+   */
+  decisionOffsetDays: number | null;
 }

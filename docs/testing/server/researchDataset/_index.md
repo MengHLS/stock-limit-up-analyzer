@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/researchDataset
 
-- 测试文件 **9** 个 ｜ 用例声明 **85** 个
+- 测试文件 **9** 个 ｜ 用例声明 **89** 个
 - 涉及源码目录：`server/corporateActions/` · `server/data/` · `server/marketData/` · `server/researchDataset/` · `server/security/` · `server/securityStatus/`
 
 ## 怎么跑
@@ -116,7 +116,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - parse 非法输入 → 响亮抛错（不静默降级）
 
 ### `tests/server/researchDataset/pullback.test.ts`
-- 215 行 ｜ 用例声明 10 ｜ describe 5
+- 370 行 ｜ 用例声明 14 ｜ describe 6
 - 被测源码：`server/researchDataset/pullback.ts` · `server/data/types.ts`
 - 单跑：`pnpm exec vitest run tests/server/researchDataset/pullback.test.ts`
 - 用例树：
@@ -135,6 +135,11 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - **screenFirstBoardRow（通用回踩筛选）**
   - 首板后回踩到涨停价容差带内（触及且不破）→ matched
   - 窗口缺交易日 → 不完整，保守排除
+- **PHASE-R1-001 · 决策日截断（样本资格的信息边界）**
+  - 五个决策日各自独立时序：d=1 只看 T+1 … d=5 看 T+1..T+5
+  - 负向 look-ahead 回归：改动 T+4 / T+5 不得改变 d=2 的样本资格
+  - 决策窗口缺 bar ⇒ 不完整保守排除；不因窗口外数据齐备而误判完整
+  - d > N / 非整数 / 缺失 ⇒ 响亮抛错（绝不静默退回整窗）
 
 ### `tests/server/researchDataset/tDayFilter.test.ts`
 - 89 行 ｜ 用例声明 6 ｜ describe 3
