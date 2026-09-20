@@ -1,82 +1,48 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ContinuousRangeSlider } from "@/components/ContinuousRangeSlider";
-import { buildDistinctHighBoardLabels } from "@/lib/highBoardLabels";
+import { MaxConnectionBoardTrendChart } from "@/components/MaxConnectionBoardTrendChart";
+import { formatChineseDate as formatDate } from "@/lib/displayFormat";
 import { trpc } from "@/lib/trpc";
-import { DEFAULT_VISIBLE_TRADING_DAYS, getDefaultVisibleRange, normalizeVisibleRange } from "@/lib/visibleRange";
 import { Activity, CalendarDays, ChevronDown, ChevronUp, Crown, Flame, GitBranch, Loader2, TrendingUp } from "lucide-react";
-import { useEffect, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { useState } from "react";
 
 /** 龙头列表默认折叠，仅展示最近确认的 N 只，其余展开后可见。 */
 const LEADER_LIST_PREVIEW_COUNT = 6;
 
-function formatDate(date: string) {
-  return date.replace(/^(\d{4})-/, "$1年").replace(/-(\d{2})$/, "月$1日");
-}
-
-function ChartTooltip({ active, payload }: any) {
-  if (!active || !payload?.length) return null;
-  const point = payload[0]?.payload;
-  if (!point) return null;
-
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg">
-      <p className="text-sm font-semibold text-slate-800">{formatDate(point.date)}</p>
-      <p className="mt-1 text-sm text-orange-700">最高连板：{point.maxBoards}板</p>
-      <p className="mt-1 max-w-[240px] text-xs text-slate-600">
-        {point.stockNames.length > 0 ? `股票：${point.stockNames.join("、")}` : "当日暂无涨停记录"}
-      </p>
-      {point.phase && <p className="mt-1 text-xs font-medium text-sky-700">{point.marketCycle} · {point.phase} · {point.phaseReason}</p>}
-    </div>
-  );
-}
-
 export default function SentimentAnalysisPage() {
-  const [visibleRange, setVisibleRange] = useState({ startIndex: 0, endIndex: 0 });
   const [leaderListExpanded, setLeaderListExpanded] = useState(false);
-  const { data: trend = [], isLoading, isError, refetch } =
-    trpc.sentiment.getMaxConnectionBoardTrend.useQuery(undefined, {
+  /**
+   * 服务端结果缓存的键（见 `server/db.ts` 的 `sentimentTrendCache` / `sentimentCycleCache`）。
+   *
+   * 这两个端点要做「全表取数 + 全量重算」（实测取数 2.4~2.8s、计算 16.5s），因此服务端加了
+   * 10 分钟 TTL 结果缓存 + 单飞：**普通挂载固定用 0** ⇒ 复用缓存（秒开）；
+   * 「刷新数据」按钮把 nonce 自增 ⇒ 换键 ⇒ 强制真重算（而不是清空别人的缓存，也不是假刷新）。
+   */
+  const [cacheNonce, setCacheNonce] = useState(0);
+  const { data: trend = [], isLoading, isError, isFetching } =
+    trpc.sentiment.getMaxConnectionBoardTrend.useQuery({ nonce: cacheNonce }, {
       staleTime: 60_000,
     });
-  const { data: cycleAnalysis, refetch: refetchCycle } = trpc.sentiment.getSentimentCycleAnalysis.useQuery(undefined, {
+  const { data: cycleAnalysis, isFetching: isCycleFetching } = trpc.sentiment.getSentimentCycleAnalysis.useQuery({ nonce: cacheNonce }, {
     staleTime: 60_000,
   });
+  const isRefreshing = isFetching || isCycleFetching;
 
+  /**
+   * 趋势点叠加周期分析字段（`phase` / `marketCycle` / `phaseReason`）供图表 tooltip 使用。
+   *
+   * ⚠️ 展开顺序**不可调换**：周期分析在后（与抽取组件前逐字段一致）。两份数据同源，
+   * 但保持原顺序是「重构不改行为」这条判据的一部分。
+   */
   const cycleByDate = new Map((cycleAnalysis?.days ?? []).map((day) => [day.date, day]));
-  const rawChartData = trend.map((point) => ({
+  const chartData = trend.map((point) => ({
     ...point,
-    shortDate: point.date.slice(5),
     ...(cycleByDate.get(point.date) ?? {}),
   }));
-  const peakBoards = rawChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
-  const chartData = rawChartData;
+  const peakBoards = chartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
   const peakDates = chartData.filter((point) => point.maxBoards === peakBoards);
   const latest = chartData[chartData.length - 1];
-  const defaultRange = getDefaultVisibleRange(chartData.length, DEFAULT_VISIBLE_TRADING_DAYS);
-
-  useEffect(() => {
-    if (chartData.length === 0) return;
-    setVisibleRange(defaultRange);
-  }, [chartData.length, defaultRange.startIndex, defaultRange.endIndex]);
-
-  const { startIndex: visibleStartIndex, endIndex: visibleEndIndex } = normalizeVisibleRange(
-    visibleRange,
-    chartData.length,
-    defaultRange,
-  );
-  const visibleChartData = chartData.slice(visibleStartIndex, visibleEndIndex + 1);
-  const visiblePeakBoards = visibleChartData.reduce((max, point) => Math.max(max, point.maxBoards), 0);
-  const visibleHighBoardLabels = buildDistinctHighBoardLabels(visibleChartData);
   const latestCycleDay = cycleAnalysis?.days.at(-1);
   const leaderList = cycleAnalysis?.leaderList ?? [];
   const visibleLeaderList = leaderListExpanded ? leaderList : leaderList.slice(0, LEADER_LIST_PREVIEW_COUNT);
@@ -90,11 +56,11 @@ export default function SentimentAnalysisPage() {
           variant="outline"
           size="sm"
           className="ml-auto gap-2"
-          onClick={() => { void refetch(); void refetchCycle(); }}
-          disabled={isLoading}
+          onClick={() => setCacheNonce((previous) => previous + 1)}
+          disabled={isRefreshing}
         >
-          <TrendingUp className="h-4 w-4" />
-          刷新数据
+          {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+          {isRefreshing ? "刷新中…" : "刷新数据"}
         </Button>
       </div>
       <div className="mb-6">
@@ -118,7 +84,7 @@ export default function SentimentAnalysisPage() {
               <Activity className="mb-4 h-12 w-12 text-red-300" />
               <p className="font-medium text-slate-800">最高连板数据加载失败</p>
               <p className="mt-2 text-sm text-slate-500">请稍后重试，或检查数据库连接状态。</p>
-              <Button variant="outline" className="mt-5" onClick={() => { void refetch(); void refetchCycle(); }}>
+              <Button variant="outline" className="mt-5" onClick={() => setCacheNonce((previous) => previous + 1)}>
                 重新加载
               </Button>
             </CardContent>
@@ -167,78 +133,16 @@ export default function SentimentAnalysisPage() {
               </Card>
             </div>
 
-            <Card className="border-slate-200 bg-white/90 shadow-xl shadow-slate-200/50">
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <CardTitle>每日最高连板折线图</CardTitle>
-                    <CardDescription>仅统计主板股票；默认显示最近90个交易日，并对每段连续高连板仅标注一次股票名称。</CardDescription>
-                  </div>
-                  <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
-                    {formatDate(visibleChartData[0]?.date ?? chartData[0].date)} 至 {formatDate(visibleChartData.at(-1)?.date ?? chartData.at(-1)?.date ?? "")}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="relative h-[430px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={visibleChartData} margin={{ top: 50, right: 24, left: 0, bottom: 12 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="shortDate" tick={{ fontSize: 12, fill: "#64748b" }} minTickGap={18} />
-                      <YAxis width={60} allowDecimals={false} domain={[0, "dataMax + 1"]} tick={{ fontSize: 12, fill: "#64748b" }} label={{ value: "最高连板数", angle: -90, position: "insideLeft", fill: "#64748b" }} />
-                      <Tooltip content={<ChartTooltip />} />
-                      <Line
-                        type="monotone"
-                        dataKey="maxBoards"
-                        name="最高连板"
-                        stroke="#ea580c"
-                        strokeWidth={3}
-                        dot={{ r: 5, fill: "#ea580c", stroke: "#fff", strokeWidth: 2 }}
-                        activeDot={{ r: 7, fill: "#dc2626" }}
-                        isAnimationActive={false}
-                      />
-                      </LineChart>
-                    </ResponsiveContainer>
-                    <div className="pointer-events-none absolute inset-0 overflow-visible">
-                      {visibleHighBoardLabels.map((point, labelIndex) => {
-                        const pointIndex = visibleChartData.findIndex((item) => item.date === point.date);
-                        const pointProgress = visibleChartData.length === 1
-                          ? 0.5
-                          : pointIndex / (visibleChartData.length - 1);
-                        // 图表左侧为固定60px的Y轴，右侧为24px边距；以真实绘图区而非容器百分比定位。
-                        const centeredLeft = visibleChartData.length === 1
-                          ? "calc(50% + 18px)"
-                          : `calc(60px + ${pointProgress * 100}% - ${pointProgress * 84}px)`;
-                        const yPercent = 4 + (1 - point.maxBoards / (visiblePeakBoards + 1)) * 70;
-                        return (
-                          <div
-                            key={`high-board-label-${point.date}`}
-                            className="absolute inline-flex min-w-[72px] max-w-[180px] -translate-x-1/2 -translate-y-full items-center justify-center rounded-md border border-orange-200 bg-orange-50 px-2 py-1 text-center text-xs font-semibold leading-5 text-orange-700 shadow-sm"
-                            style={{
-                              left: centeredLeft,
-                              top: `${yPercent}%`,
-                              marginTop: `${-(labelIndex % 2) * 28}px`,
-                            }}
-                          >
-                            {point.labelNames.join("、") || `${point.maxBoards}板`}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <ContinuousRangeSlider
-                    data={chartData.map((point) => ({ value: point.maxBoards }))}
-                    range={{ startIndex: visibleStartIndex, endIndex: visibleEndIndex }}
-                    onRangeChange={setVisibleRange}
-                  />
-                  <p className="text-center text-xs text-slate-500">连续拖动选区或两端手柄，松手后会对齐交易日并更新主图；悬浮数据点可查看对应情绪阶段。</p>
-                </div>
-              </CardContent>
-            </Card>
+            {/*
+              折线图 + 日期范围滑块已抽到 `@/components/MaxConnectionBoardTrendChart`：
+              首页（`/`）复用**同一份实现**（用户 2026-09-20 要求把这张图放到首页最下面），
+              去重标注规则 `buildDistinctHighBoardLabels` 与窗口对齐 `normalizeVisibleRange`
+              因此仍然只有一处实现。`data-sentiment-chart` 保留（既有探针依赖该选择器）。
+            */}
+            <MaxConnectionBoardTrendChart points={chartData} cardProps={{ "data-sentiment-chart": true }} />
 
             {cycleAnalysis && (
-              <div className="grid gap-6 lg:grid-cols-[1fr_1.35fr]">
+              <div data-sentiment-cycle className="grid gap-6 lg:grid-cols-[1fr_1.35fr]">
                 <Card className="border-sky-100 bg-white/85 shadow-sm">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base"><Flame className="h-4 w-4 text-orange-600" />情绪周期与周期龙头</CardTitle>

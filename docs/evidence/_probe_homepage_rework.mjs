@@ -622,23 +622,39 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
     if (heat.size === 0) {
       skipCheck('G 梯队行内按当日题材热力排序', '所选日期 ' + ladderDate + ' 不在题材分布窗口内');
     } else {
+      const TAIL_SECTOR = '其他'; // = `shared/sectorHeatOrder.ts#TAIL_SECTORS` —— 「其他」恒压尾（用户 2026-09-19 裁定）
       const heatOf = (sector) => (heat.has(sector) ? heat.get(sector) : -1);
       const rows = ladder
         .filter((g) => g.items.length >= 2)
         .map((g) => {
-          const heats = g.items.map((i) => heatOf(String(i.text).split(' / ').slice(-1)[0]));
+          const sectors = g.items.map((i) => String(String(i.text).split(' / ').slice(-1)[0]).trim());
+          const heats = sectors.map(heatOf);
+          const isTail = sectors.map((s) => s === TAIL_SECTOR);
           const kinds = g.items.map((i) => (/line-through/.test(String(i.decoration)) ? 'broken' : 'up'));
-          let monotonic = true;
-          for (let i = 1; i < heats.length; i += 1) if (heats[i] > heats[i - 1]) monotonic = false;
+          // 🔴 单调性只在**非压尾段**上判（2026-09-20 第八轮修正）：`TAIL_SECTORS = ["其他"]` 是口径上的
+          //    压尾桶，它的热度**故意不参与名次**（用户 2026-09-19 裁定「把『其他』题材放到最后」）。
+          //    旧断言对**整行** heats 判非递增，只要「其他」当日热度高于它前面那一段就误报 ——
+          //    实测 2026-09-20 该日「其他」10 家（当日最多），2 板行尾 5 格 / 首板行尾 8 格全被判成违规。
+          const firstTail = isTail.indexOf(true);
+          const mainEnd = firstTail < 0 ? heats.length : firstTail;
+          let monotonicMain = true;
+          for (let i = 1; i < mainEnd; i += 1) if (heats[i] > heats[i - 1]) monotonicMain = false;
+          const tailContiguous = isTail.slice(mainEnd).every(Boolean);
           // 旧实现是「涨停格全部在前 + 断板格全部在后」⇒ firstBroken > lastUp；
           // 出现 firstBroken < lastUp 就直接反证「不再按断板分组」。
-          return { label: g.label, monotonic, interleaved: kinds.indexOf('broken') >= 0 && kinds.lastIndexOf('up') > kinds.indexOf('broken'), heats };
+          return { label: g.label, monotonicMain, tailContiguous, tailCount: isTail.filter(Boolean).length, interleaved: kinds.indexOf('broken') >= 0 && kinds.lastIndexOf('up') > kinds.indexOf('broken'), heats };
         });
-      const bad = rows.filter((r) => !r.monotonic);
+      const bad = rows.filter((r) => !r.monotonicMain);
       check(
-        '每个高度行内「题材当日涨停家数」非递增（' + ladderDate + ' 的热度）',
+        '每个高度行内「非压尾题材」当日涨停家数非递增（' + ladderDate + ' 的热度）',
         rows.length > 0 && bad.length === 0,
         bad.length ? JSON.stringify(bad.map((r) => r.label + ':' + r.heats.join('>'))) : rows.length + ' 行，样例 ' + rows[0].label + ' = ' + rows[0].heats.join(', '),
+      );
+      const badTail = rows.filter((r) => !r.tailContiguous);
+      check(
+        '压尾桶「其他」恒在行尾且连续（用户 2026-09-19 裁定）',
+        badTail.length === 0,
+        badTail.length ? JSON.stringify(badTail.map((r) => r.label)) : rows.map((r) => r.label + ':其他 ' + r.tailCount + ' 格').join(' | '),
       );
       check(
         '断板格与涨停格交错（不再统一排前/排尾）',
@@ -697,7 +713,8 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
   const misc = await jsonEval(`JSON.stringify({
     heatTable: !!document.querySelector('[data-homepage-heatmap] table'),
     heatHeader: !!Array.from(document.querySelectorAll('[data-homepage-heatmap] th')).find(function(t){return (t.textContent||'').trim() === '合计'}),
-    shortcuts: Array.from(document.querySelectorAll('a')).filter(function(a){return /\\/(limit-up|market|sentiment-analysis|upload)$/.test(a.getAttribute('href')||'')}).length,
+    shortcutLinks: Array.from(document.querySelectorAll('a')).filter(function(a){return /\\/(limit-up|market|sentiment-analysis|upload)$/.test(a.getAttribute('href')||'')}).filter(function(a){return !a.closest('[data-homepage-sentiment-chart]')}).length,
+    chartEntryLinks: Array.from(document.querySelectorAll('[data-homepage-sentiment-chart] a')).filter(function(a){return /\\/sentiment-analysis$/.test(a.getAttribute('href')||'')}).length,
     shortcutCards: Array.from(document.querySelectorAll('[data-slot="card"]')).filter(function(c){return /涨停复盘明细|录入当日涨停复盘图|情绪周期与龙头候选/.test(c.textContent||'')}).length,
     disclaimer: /免责声明/.test(document.body.innerText),
     h1: (document.querySelector('h1')||{}).textContent || '',
@@ -707,8 +724,18 @@ const EXPECTED_INDEX_CODES = ['000001.SH', '399001.SZ', '000300.SH', '000905.SH'
   check('题材热力日历表格保留（含「合计」列）', misc.heatTable && misc.heatHeader, JSON.stringify({ t: misc.heatTable, h: misc.heatHeader }));
   // 第五轮（2026-09-19，用户口述）：「首页最下面有四个大的跳转按钮没用，去掉」
   //   ⇒ 反证断言：底部 0 张快捷入口卡片、0 条指向这四个页面的跳转链（改回即红）。
-  check('首页底部四个快捷入口卡片已移除', misc.shortcuts === 0 && misc.shortcutCards === 0, JSON.stringify({ links: misc.shortcuts, cards: misc.shortcutCards }));
-  check('免责声明保留', misc.disclaimer === true, String(misc.disclaimer));
+  check('首页底部四个快捷入口卡片已移除', misc.shortcutLinks === 0 && misc.shortcutCards === 0, JSON.stringify({ links: misc.shortcutLinks, cards: misc.shortcutCards }));
+  // 🔴 计数口径修订（2026-09-20 第八轮）：上一行原来直接数「指向这四个路由的链接数 === 0」，
+  //   但第 17 轮（2026-09-20）用户要求把折线图**本体**放到首页最下面，该区块卡片头右侧带一条
+  //   **有意**的 `/sentiment-analysis` 文本链接 ⇒ 原口径把这条也数成「快捷入口回归」，
+  //   属**断言过期**（不是产品回归）。现改为 `closest('[data-homepage-sentiment-chart]')` 排除
+  //   该区块内的链接，并**正向**断言那条链接只有 1 条（防止「排除掉之后什么都算过」）。
+  check('折线图区块内仅有 1 条通往 /sentiment-analysis 的入口链接（第 17 轮有意保留）', misc.chartEntryLinks === 1, String(misc.chartEntryLinks));
+  // 第八轮（2026-09-20，用户口述）：「首页免责声明去掉」—— 用户在「整块删掉 / 只删合规语留
+  //   口径说明 / 内容不删压成一行小字」三选项中选定**整块删掉** ⇒ 反证断言：首页不再出现
+  //   「免责声明」字样（改回即红）。⚠️ 只针对首页这一块；研究侧 §13/§15 强制件（结论正文
+  //   `evidence.disclaimer`、溯源区 `PROVENANCE_DISCLAIMER`）**不在**本断言范围。
+  check('首页免责声明已移除', misc.disclaimer === false, String(misc.disclaimer));
   check('页面标题为「行情总览」', String(misc.h1).indexOf('行情总览') >= 0, String(misc.h1));
   check('数据补齐后无残留骨架屏', misc.skeletonLeft === 0, String(misc.skeletonLeft));
 
