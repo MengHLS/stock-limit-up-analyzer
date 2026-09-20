@@ -873,6 +873,35 @@ RUN-20260920-AECD8703
 | 5 | **生产链真机 E2E 未重跑** | 003 已如实登记过同一项 | 无新增风险（004 未改生产链） |
 | 6 | **`.env` 里的 MinIO 变量名是历史命名** | 代码同时支持 `MINIO_ACCESS_KEY/SECRET_KEY` 与 `MINIO_USERNAME/PASSWORD` | 建议统一为 `ACCESS_KEY/SECRET_KEY`（见 §17） |
 | 7 | **前端探针留下的 3 条真实 Run** | 见 §13.6 | 刻意保留；如需清理有明确路径 |
+| 8 | **接入文档与模板最初未同步 004**（**本报告定稿后补**） | `docs/research/EXPERIMENT-CODE-SPEC.md` 停在 001~003 口径；`research-experiments/{README.md,template/}` 亦然 | 照模板复制的新实验**不会声明任何产物** ⇒ 见 §15.1；这是「004 对**未来的实验**等于不存在」的风险 |
+
+---
+
+### 15.1 补记：接入面的同步（本报告定稿后追加）
+
+004 的验收清单（A~F）覆盖了「Database / MinIO / 链路 / 前端 / 失败不伪装 / 无回归」，
+但**没有覆盖「未来的实验作者怎么知道这件事」**。这一项是**用户追问后**发现的，如实登记。
+
+后果是具体的：`AGENT`/外部 AI 写新实验时只读 `EXPERIMENT-CODE-SPEC.md` + `template/`，
+而这两处在 004 后仍停在 001~003 口径 ⇒ 生成的实验**不会产出任何自定义产物**
+（虽然 `result.json` / `logs/run.log` / `manifest.json` 仍会自动持久化）。
+
+| 文件 | 补前 | 补后 |
+|---|---|---|
+| `docs/research/EXPERIMENT-CODE-SPEC.md`（**外部 AI 的接入规范**） | A~O 15 节，无一处提到持久化 | 头部标注 004；`ExperimentRunContext` 加 `artifact`；D.4 补「产物不进 payload」；**新增 §P 结果持久化与产物**（P.1 你不要做的事 / P.2 Run 生命周期 / P.3 两类产物 / P.4 何时不该用 / P.5 Object Key / P.6 Manifest 白名单即授权 / P.7 页面能看到什么 / P.8 你的责任） |
+| `research-experiments/template/experiment.ts` | `run()` 从未调用 `context.artifact()` | 加一次**演示调用**（`group-counts.csv` + `role: "table"`）⇒ 复制者自然带上产物声明 |
+| `research-experiments/template/README.md` | 无 | 新增「结果会自动持久化（004）」节 + 2 条自检项 |
+| `research-experiments/README.md` | 仍写「旧 Research 与独立实验**并存**、两个前端入口」——9cg 后 `/research` 已 **404** | 改为「旧链路已整体退役」；补 004 持久化说明 |
+
+判据：`npx tsc --noEmit` = 0 错（模板代码在 tsconfig 内，改模板必须过类型门）；改后 `checkEolDrift.mjs` 漂移 0。
+
+> **补记（2026-09-21，编号 `9ci` · EXP-001 真机发现）**：上表 `template/experiment.ts` 那一行原写作
+> `（tables/group-counts.csv）`，**这个写法是错的** —— `name` 是 Run 前缀下的相对名字，`tables/` 角色段
+> 由 `role` 拼，写成 `tables/group-counts.csv` 会落成 `tables/tables/group-counts.csv`。
+> 本报告 §15.1 之所以没发现，是因为当时**没有真机跑过模板的产物声明**。
+> 已修正 `template/experiment.ts` 的演示调用，并同步修正 `EXPERIMENT-CODE-SPEC.md` §P.3 示例 / §P.5 字段表 /
+> 检查清单与 `template/README.md`；EXP-001 的 E2E 新增「Object Key 角色段不重复」回归闸（第 9b 步）。
+> 细节见 `docs/research/EXP-001-final.md` §20 缺陷 ④。
 
 ---
 

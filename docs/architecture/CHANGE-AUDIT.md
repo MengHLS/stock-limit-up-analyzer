@@ -436,3 +436,26 @@
 - **GLOBAL AUDIT REQUIRED**：**NONE**（判定见 `BD-08`，留待人工裁定）。
 
 ---
+
+## 2026-09-21 · 9ci（EXP-001 · 首板后回踩第一性研究）
+
+- **Task**：用户投递 EXP-001 规格（34 节）+「按这个执行」。这是**独立研究实验基础设施（`9ch` / RESEARCH-EXPERIMENT-004）的第一次真实投产** —— 不改框架，用真实研究问题把「声明式实验定义 → 真库取数 → 结果落 TiDB + 产物落 MinIO → 关页面重开仍可回看」整条链走通。
+- **Changed Domains**：**无新增 / 无删除 Domain**。改动落在 `Independent Experiment`（既有体系）之内，新增 1 个 ExperimentDefinition；`Research Core`（已于 `9cg` 整体删除）/ `Strategy Core` / `tRPC 路由` / `DB schema` **零改动**。
+- **Changed Files**：生产 3 类 ——
+  ⑴ **新增实验**：`research-experiments/first-board-pullback/fundamental-study/`（`result.ts` 结果组装 / 表 / 图 / 观察 / 产物声明、`experiment.ts` 取数与逐事件评估、`page.tsx` 前端页、`README.md` 口径说明）；
+  ⑵ **注册点 2 处**：`research-experiments/manifest.ts`、`client/src/researchExperiments/pages.ts`（键 = `descriptor.pageKey`）；
+  ⑶ **作者面契约同步 4 处**（本轮缺陷 ④⑤ 的修法）：`docs/research/EXPERIMENT-CODE-SPEC.md`（§P.3 示例 / §P.5 字段表 / 检查清单）、`research-experiments/template/experiment.ts`（演示 `artifact()` 调用的 `name`）、`research-experiments/template/README.md`、`research-experiments/README.md`。
+  测试 1 个新增（`tests/server/researchExperiments/exp001FundamentalStudy.test.ts`，62 例）；证据 **3 个新探针**（`docs/evidence/_e2e_9ci_exp001.mts`、`docs/evidence/_probe_9ci_exp001_numbers.mts`、`docs/evidence/_probe_9ci_exp001_frontend.mjs`）+ 报告 `docs/research/EXP-001-final.md` + `docs/evidence/README.md` 新增 `9ci` 索引节。
+- **Changed Contracts**：**核心契约零改动**（`shared/**` 未动、无 `GLOBAL AUDIT REQUIRED` #7 对象被改）。新增的 `fundamentalStudyCustomPayloadSchema` 是**实验内局部** zod schema（随实验目录走，不进 `shared/**`、不被其它 Domain 消费）。**唯一「契约级」改动是作者面文档/模板的产物命名口径**（`docs/research/EXPERIMENT-CODE-SPEC.md` + `research-experiments/template/**`）：产物 `name` **不得自带角色段**（`tables/` / `charts/` 由 `role` 拼）。这是**修正既有规范的自相矛盾**（§P.3 示例与 §P.5 映射表当时互相打架），不是引入新语义。
+- **Changed DB**：**零**（0 DDL / 0 DML / 0 migration / 0 新表 / 0 新列）。真实 Run 由既有 `research_experiment_run` 表承载；`EXP001_KEEP=1` 保留了 `RUN-20260920-2A91D7C2` 一行 + 10 个 MinIO 对象供页面查看，属**本轮新增业务数据**（非结构变更），已在报告中登记。
+- **Changed Execution Path**：**无主链改动**。新增的是一条**独立的实验执行路径**（既有 Runner / datasetPort / artifactStorage 端口原样复用）。**不改** `Dataset → Research → Strategy → Backtest` 任何一段既有语义。附带两处行为增强（都在实验/探针内部）：`candidates.unscannedEventCount` 出数；E2E 新增「无在途 Run」前置闸。
+- **Potential Baseline Drift**：
+  - `BD-10`（**本任务新增，需裁定**）：`docs/architecture/CHANGE-AUDIT.md` **自 `9cc` 起未再登记**，`9cd`～`9ch` 全部缺失；其中 `9cg` 删除了 `server/researchCore/**` 与 `server/researchEngine/**`（**Domain 删除** ⇒ 命中 `GLOBAL AUDIT REQUIRED` #2）与 12 张表 RENAME，而 `SYSTEM-BASELINE.md` 仍是 `v2.0.0`。按 `AGENT-GUIDE.md` §6「发现 Drift ⇒ 停下、记录、修 Baseline 文档、写 CHANGE-AUDIT、恢复任务」，**本任务只完成「记录」这一步** —— 修基线（含 `9cd`～`9ch` 的补记与 `9cg` 的全量审计）属**独立任务**，在本任务规格 §33「禁止范围扩张」下**不擅自执行**。建议下一条指令显式指定。
+  - `BD-11`（**本任务新增**）：`EXPERIMENT-CODE-SPEC.md` §P.3 的代码示例与 §P.5 的映射表**曾自相矛盾**（`name` 是否含角色段），照抄示例会落成 `tables/tables/x.csv`。已修正并加**可证伪**的结构性闸门（全仓静态扫描，实测可红）。**登记理由**：这类「文档内部矛盾」不会被任何代码测试发现，只能靠真机 E2E。
+  - `BD-12`（**本任务新增**）：`docs/evidence/README.md`（根目录证据簇索引）**自 `9ce` 起未再登记** —— `9cg`、`9ch` 两轮的证据文件缺失。本任务只补登了**自己那一轮**（`9ci` 节），并在该节以「⚠️ 本索引的缺口」显式标注了两轮欠账，**未擅自代补**（同 `BD-10` 的处理原则：记录优先于代改）。
+- **Regression Result**：`tsc --noEmit` = **exit 0（0 error）**；`pnpm run build` = **exit 0**；`pnpm run test:changed` = **2 文件 / 71 例全绿 ⇒ 零新增失败文件**；定向 `npx vitest run tests/server/researchExperiments` = **11 文件 / 203 例全绿**；`legacyFreeProductionChain` Gate = **7 例 PASS**；`node scripts/checkEolDrift.mjs` = 漂移 **0 / 0**；EXP-001 单测 **62 例全绿**；真实 E2E（真库 + 真 Dataset + 真 MinIO）**20 步全 PASS**；**前端可达性探针（无头 Edge + CDP 量 DOM，走完整真实用户路径并真点一次「运行」）= 42 PASS / 0 FAIL**（新 Run `RUN-20260920-902A6515`）。
+- **Evidence-Hygiene Note（非产品缺陷，但必须登记）**：前端探针**第一版跑出 15 条 FAIL，全部是判据自身写错**，不是产品缺陷 —— ⑴ 误以为「保留的 Run 会自动渲染在实验详情页」（实际结果区条件是 `outcome !== null`，只来自本次会话的 `runMutation` ⇒ 验证自定义结果页**必须真点运行**）；⑵ 侧栏导航项实为 `SidebarMenuButton` + `onClick`，**不是 `<a href>`** ⇒ `a[href=…]` 永远查不到；⑶ 观察类别在 DOM 里渲染为**中文标签**，枚举码从不进 DOM；⑷ 「免责声明不得删」**适用范围已收窄为研究侧强制件**，独立实验页从未要求挂免责声明。四条已改写为真判据并登记在报告 §19.4 与 `docs/evidence/README.md` 的 `9ci` 节。**登记理由**：一条恒假的判据挂在「已验证」清单里等于在回归闸上挖洞（永远红被当噪声 / 被刷成永远绿而什么都没证明），与产品缺陷同等级别。
+- **Baseline Impact**：**保持 `v2.0.0`，未升版本**。依据：无新增 / 删除 Domain；DB 零变化；`shared/**` 核心契约零改动；无主链执行路径变化；新增的只是一个**注册在既有注册表里的 ExperimentDefinition**（Experiment 体系的 entry point —— `/research-experiments` 路由与 `manifest.ts` 注册表 —— 在 004 时已存在）⇒ 归入「只有实现细节变化」，按 §5 只更新 `CHANGE-AUDIT.md`。若判定口径认为「每新增一个 ExperimentDefinition 即算新增 entry point ⇒ 需 minor」，请在下一条指令中指定。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（本任务的改动面）。⚠️ 但 `BD-10` 指出 **`9cg` 的 Domain 删除从未触发过全量审计** —— 那是**历史欠账**，不因本任务而消失。
+
+---

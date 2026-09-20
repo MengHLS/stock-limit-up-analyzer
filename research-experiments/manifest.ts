@@ -19,6 +19,10 @@
 
 import type { ExperimentDefinition } from "../server/researchExperiments/types";
 import { entryDayExperiment } from "./first-board-pullback/entry-day/experiment";
+import { fundamentalStudyExperiment } from "./first-board-pullback/fundamental-study/experiment";
 
 /** 全部已注册实验（顺序不参与任何计算；registry 内部按 id 排序输出）。 */
-export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [entryDayExperiment];
+export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
+  entryDayExperiment,
+  fundamentalStudyExperiment,
+];

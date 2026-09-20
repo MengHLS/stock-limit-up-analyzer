@@ -25,6 +25,32 @@ cp -r research-experiments/template research-experiments/my-group/my-experiment
 | `result.ts` | 结果长什么样（自有 zod schema + 表格 / 统计 / 图表组装） |
 | `page.tsx` | 怎么展示（只消费 `descriptor` 与 `outcome` 两个 props） |
 
+## 结果会自动持久化（004）
+
+跑完之后平台自动把结果与产物写进对象存储（MinIO）+ 把 Run 元数据写进 TiDB，
+**关掉页面再打开仍能查看历史 Run，不需要重跑**。
+
+什么都不做也会得到：`result.json`（结果信封）+ `logs/run.log`（你的 `log(...)` 行）
++ `manifest.json`（产物索引）。
+
+**要留下自定义文件**（逐事件明细 CSV / 图片 / 大块数据）就显式声明一次：
+
+```ts
+artifact({
+  name: "cohort-detail.csv",          // Run 前缀下的相对名字；禁绝对路径 / 含 ..
+                                      // 🔴 **不要**自己写 `tables/` / `charts/` 前缀 ——
+                                      //    角色段由下面的 `role` 拼，写了会变成 `tables/tables/…`
+  role: "table",                      // "table" | "chart" | "log" | "artifact" ⇒ 决定角色段
+  body: toCsv(rows),                  // string 或 Uint8Array
+  contentType: "text/csv",            // 可省，按扩展名推断
+  label: "逐事件明细",                 // 显示在页面上的中文标签
+});
+```
+
+🔴 小表格 / 指标 / 图表数据**不要**落成文件 —— 直接放进返回值里的 `tables` /
+`statistics` / `charts`，页面直接渲染。把几十 MB 塞进结果体是规格 §17 明确要避免的。
+细节见 `docs/research/EXPERIMENT-CODE-SPEC.md` **§P**。
+
 ## 复制后请逐条确认
 
 - [ ] `descriptor.id` 与目录路径**完全一致**（不一致时页面能打开但 id 会误导）；
@@ -36,7 +62,11 @@ cp -r research-experiments/template research-experiments/my-group/my-experiment
 - [ ] 改了任何**计算**口径 ⇒ 升 `COMPUTATION_VERSION`（它同时进
       `descriptor.version` 与 `customPayload.computationVersion`，只改一处会校验失败）；
 - [ ] `pageKey` 已在 `client/src/researchExperiments/pages.ts` 登记
-      （忘了登记**不会白屏**，会降级为通用渲染器并明确提示）。
+      （忘了登记**不会白屏**，会降级为通用渲染器并明确提示）；
+- [ ] （004）要留档的大文件都调了 `context.artifact(...)`，`name` 是**相对名字且不含角色段**
+      （禁 `/` 开头、禁含 `..`、禁自己写 `tables/` / `charts/` 前缀；非法名字会**当场抛**
+      `EXPERIMENT_ARTIFACT_KEY_INVALID`）；
+- [ ] （004）**没有**把几十 MB 明细塞进 `customPayload` / `tables` —— 那是给页面直接渲染的小数据。
 
 ## 别忘了
 

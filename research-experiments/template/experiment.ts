@@ -17,7 +17,11 @@
  * - **只读 `events` 与 `prefix(rd=0)`** —— 演示「列投影 + 相对日白名单」怎么声明；
  * - **一个 ENUM 参数 + 一个 INT 参数** —— 演示参数定义怎么写（默认值 / 边界 / 枚举）；
  * - **样本账做平** —— `eligible + excluded === candidate` 且 `Σ excludedByReason === excluded`，
- *   这是 runner 会校验的硬约束，账不平整会直接 `EXPERIMENT_RESULT_INVALID`。
+ *   这是 runner 会校验的硬约束，账不平整会直接 `EXPERIMENT_RESULT_INVALID`；
+ * - **演示一次产物声明（RESEARCH-EXPERIMENT-004）** —— 调 `context.artifact(...)` 把分组统计
+ *   另存一份 CSV 到对象存储。这是**可选**能力：不调用也会自动持久化
+ *   `result.json` + `logs/run.log` + `manifest.json`，但只有显式声明的文件才会出现在
+ *   Run 详情的产物清单里。见规范 §P。
  *
  * 契约全文（含所有可用字段与禁止事项）见 `docs/research/EXPERIMENT-CODE-SPEC.md`。
  */
@@ -88,7 +92,7 @@ export const templateExperiment: ExperimentDefinition = {
   resultSchema: templateCustomPayloadSchema,
 
   run(context: ExperimentRunContext) {
-    const { dataset, parameters, log } = context;
+    const { dataset, parameters, log, artifact } = context;
     const groupBy = parameters.groupBy as GroupKey;
     const sampleLimit = parameters.sampleLimit as number;
 
@@ -127,6 +131,23 @@ export const templateExperiment: ExperimentDefinition = {
 
       const eligibleCount = used.length;
       log(`分组 ${groups.length} 个 · 有首板日收盘价 ${withPrice} 条`);
+
+      // ── RESEARCH-EXPERIMENT-004：把分组统计另存一份 CSV 到对象存储 ──
+      // 🔴 这里只是**演示写法**（这么小的数据其实放进返回值的 `tables` 就够了）。
+      //    真实场景用它落「大到不该塞进结果信封」的文件（逐事件明细 / 图片 / 大块数据）。
+      // 🔴 `name` 是 Run 前缀下的相对名字，**必须不含角色段** ——
+      //    Object Key = `…/runs/{runId}/{role}/{name}`，`tables/` / `charts/` 由 `role` 拼。
+      //    写成 `name: "tables/group-counts.csv"` 且 `role: "table"` 会落成
+      //    `tables/tables/group-counts.csv`（角色段重复，EXP-001 真机实测踩过）。
+      //    非法名字（绝对路径 / 含 `..`）会**当场抛**。
+      artifact({
+        name: "group-counts.csv",
+        role: "table",
+        body: ["key,count", ...groups.map((item) => `"${item.key}",${item.count}`)].join("\n"),
+        contentType: "text/csv",
+        label: "分组统计（CSV）",
+        description: "按 groupBy 维度统计的事件数，与结果信封里的表格同源。",
+      });
 
       return assembleTemplateResult({
         groupBy,

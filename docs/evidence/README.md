@@ -1213,3 +1213,37 @@ npx tsx docs/evidence/_r007_run_engine.mts
 > 且骨架屏计数为 0 才继续；`centerOn` 每轮重新核对元素是否真在视口内（不是算一次坐标就用到底）。
 > ⚠️ 这条与已知的「CDP 事件不可信」是**两码事**：不要因为 tooltip 没弹就去怀疑输入通道，
 > 先量「悬浮时元素还在不在那个位置」。
+
+## `9ci` · EXP-001（首板后回踩第一性研究 · 独立实验首次真实投产）· 2026-09-21
+
+| 文件 | 作用 | 结论 |
+| --- | --- | --- |
+| `_e2e_9ci_exp001.mts` | 真库全链 E2E：真实 `ExperimentDefinition` + 真实 Dataset 版本（`first_limit_pullback` v2 / id=390002）+ 真实 TiDB + 真实 MinIO，20 步逐条判据 | **20 步全 PASS**；`RUN-20260920-2A91D7C2`（`COMPLETED`，`durationMs=135389`）；产物 10 个对象逐个 `exists()` + **绕开服务层**列举 MinIO 前缀复核；账目缺口 3978 单列（步 5b）；Object Key 角色段不重复（步 9b） |
+| `_e2e_9ci_exp001.out.json` / `.out.txt` | 上述运行结果 | 同上 |
+| `_probe_9ci_exp001_numbers.mts` | 只读数字探针：从 `listRuns` 取最新 `COMPLETED` Run 复算样本口径 | 候选 20000 / 入池 19877 / 剔除 123 / 缺口 3978 |
+| `_probe_9ci_exp001_numbers.out.json` | 上述运行结果 | 同上 |
+| `_probe_9ci_exp001_frontend.mjs` | 前端可达性（无头 Edge + CDP **量 DOM**）：**完整真实用户路径** —— 列表页 → 点「打开」→ 详情页 → **真点一次「运行」** → 自定义结果页 → 点「打开这一条 Run」→ RunDetail | **42 PASS / 0 FAIL**；新 Run `RUN-20260920-902A6515`；🔴 首屏「样本账有缺口」告警条实测渲染且可见（取**最内层**命中盒，textLen=151，含 3978 / 23978） |
+| `_probe_9ci_exp001_frontend.out.json` / `.out.txt` | 上述运行结果 | 同上 |
+
+**留给后人的四条判据提醒（本会话真踩 —— 全是「判据自己写错」而不是产品缺陷）**：
+
+1. 🔴 **实验详情页不会自动渲染历史 Run**：结果区渲染条件是 `outcome !== null`，而 `outcome` 只来自
+   **本次会话的 `runMutation`**（`client/src/pages/researchExperiments/ExperimentDetail.tsx`）
+   ⇒ 「保留了一条 Run」与「页面能看到结果」是两件事。要验证**实验自定义结果页**，**必须真点一次「运行」**；
+   历史 Run 只能走 `/research-experiments/:group/:key/runs/:runId`，而 RunDetail **刻意不重建 execution**
+   ⇒ 走通用渲染器、**不挂**实验自定义页面（`RunDetail.tsx` 文件头有明文）。
+   （第一版探针假设「保留的 Run 会自动出现在详情页」，因此得到 15 条**假 FAIL**。）
+2. 🔴 **侧栏导航项不是 `<a href>`**：`client/src/components/AppShell.tsx` 用 `SidebarMenuButton` +
+   `onClick={() => handleNavigate(item.path)}` ⇒ `a[href="/research-experiments"]` **永远查不到**。
+   正确锚点 = `[data-sidebar="menu-button"]`（按文案匹配）+ `data-active`（当前高亮）。
+3. 🔴 **观察类别在 DOM 里是中文标签**：`page.tsx` 的 `OBSERVATION_META[kind].label` 渲染的是
+   「描述性事实 / 分组比较 / 值得进一步验证 / 局限」，枚举码 `DESCRIPTIVE / COMPARATIVE / …`
+   **从不进 DOM** ⇒ 拿枚举码当判据恒为 FAIL。
+4. 🔴 **「免责声明不得删」的适用范围已收窄**：只约束**研究侧强制件**（`Dashboard.tsx` 首板梯队区块 /
+   结论正文 `evidence.disclaimer`）；**独立实验页从未要求挂免责声明**，拿它当判据会得到恒假的 FAIL。
+
+> 🔴 **这一类错误的危害不比产品缺陷小**：一条恒假的判据挂在「已验证」列表里，等于在回归闸上挖了个洞 ——
+> 它要么永远红（被当噪声忽略），要么被修成永远绿（什么都没证明）。**发现时必须同时登记「判据为什么错」。**
+
+⚠️ **本索引的缺口**：`9cg`（旧 Research 整体退役）与 `9ch`（RESEARCH-EXPERIMENT-004 独立实验持久化）
+两轮的证据文件**尚未在本索引登记**（本次只补登 `9ci`），下次维护本文件时应一并补齐。

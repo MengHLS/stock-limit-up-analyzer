@@ -5,8 +5,12 @@
 > 就能写出一个符合本项目规范的实验，**不需要读整个仓库**。
 >
 > 项目：`stock-limit-up-analyzer`（A 股涨停/首板研究平台）
-> 体系编号：`RESEARCH-EXPERIMENT-001` · 契约版本 `1.0.0`
+> 体系编号：`RESEARCH-EXPERIMENT-001` ~ `004` · 契约版本 `1.0.0`
 > 唯一契约文件：`shared/researchExperimentsContracts.ts`
+>
+> 🔴 **004 起「结果会被持久化」**：Run 元数据进 TiDB，结果与产物进对象存储（MinIO）。
+>    ⇒ 新增 **§P 结果持久化与产物** 是**必读**节 —— 它决定你的实验「关掉页面后还能不能查看」。
+>    001~003 时执行是**请求内计算**、结果不落库、刷新需重跑；004 改变了这一点。
 
 ---
 
@@ -116,6 +120,7 @@ interface ExperimentRunContext {
   parameters: ExperimentParameterValues;  // 已归并默认值、已通过校验
   dataset: ExperimentDatasetAccess;   // 唯一数据面（见 §E）
   log: (message: string) => void;     // 进 execution.logs（最多 200 行），**不是** console
+  artifact: (spec: ExperimentArtifactFileSpec) => void;  // 声明落对象存储的产物（004 新增，见 §P）
 }
 ```
 
@@ -141,6 +146,11 @@ interface ExperimentResultPayload {
 
 🔴 `metadata`（实验 id / 版本 / Dataset 版本 / 时间）与 `parameters` **不要自己填** ——
 Runner 用**自己解析出的坐标**填，实验无法谎报「我跑的是哪个 Dataset 版本」。
+
+🔴 **产物内容不进这个 payload**（004）。`tables` / `charts` 这些是**给页面直接渲染的小数据**，
+留在信封里没问题；但**大型**产物（逐事件明细 CSV、Parquet、图片、图表数据文件）必须走
+`context.artifact(spec)` 落到对象存储，**不要**塞进 `customPayload` 或 `tables` ——
+那会把一次 Run 的结果体撑到几十 MB，正是规格 §17 要避免的。见 §P。
 
 ---
 
@@ -571,3 +581,142 @@ npx vite build
 - [ ] 改了计算口径 ⇒ `descriptor.version` 与 `customPayload.computationVersion` **同步**升
 - [ ] `README.md` 写清了口径、参数默认值、已知偏差、刻意不做的事
 - [ ] 补了 Contract / Runner / E2E / Frontend Smoke 四类验证
+- [ ] （004）声明的产物名字是 **Run 前缀下的相对名字、且不含角色段**（如 `cohort.csv`；
+      `tables/` / `charts/` 由 `role` 拼，写了会得到 `tables/tables/…`），**不是**绝对路径、不含 `..`
+- [ ] （004）大型产物走 `context.artifact(...)`，**没有**塞进 `customPayload` / `tables`（见 §P.3）
+
+---
+
+## P. 结果持久化与产物（RESEARCH-EXPERIMENT-004）
+
+> 001~003 时执行是**请求内计算**：结果不落库，关掉页面/刷新就没了，想看只能重跑。
+> **004 改变了这一点**：Run 元数据进 TiDB，结果与产物进对象存储（MinIO）。
+> 这一节是「你的实验跑完之后会发生什么」的完整说明。
+
+### P.1 你不需要做的事（重要）
+
+持久化**全部由平台完成**，实验作者**不需要**、也**不允许**：
+
+| 不要做 | 为什么 |
+| --- | --- |
+| 不要自己连 DB、写表 | 实验代码**拿不到 DB**（`run()` 里连 `server/**` 都 import 不到） |
+| 不要 import MinIO / S3 SDK | 唯一出口是 `context.artifact()`；直接依赖对象存储 SDK 是禁止的 |
+| 不要自己拼 Object Key | Key 由平台按坐标拼（见 §P.5） |
+| 不要改 tRPC 路由 / 前端路由 | 列表 / 详情 / Run 详情页由平台统一提供 |
+| 不要自己写 `manifest.json` | 平台按你声明的产物自动生成 |
+
+你**只需要**：算出结果（返回信封）+ 需要留档的大文件调 `context.artifact(...)` 声明一下。
+
+### P.2 Run 生命周期（你的实验处在哪一步）
+
+```text
+建立 Run ──▶ PENDING ──▶ RUNNING ──▶ 执行 run() ──▶ 生成结果信封
+                                                      │
+                                    ┌─────────────────┴──────────────────┐
+                                    ▼                                    ▼
+                          上传产物到对象存储                    执行中抛错 / 返回 FAILED
+                                    ▼                                    ▼
+                          生成 manifest.json 索引                  FAILED + errorMessage
+                                    ▼
+                     校验产物确实存在 ──▶ 写 resultManifestKey ──▶ COMPLETED
+```
+
+- 状态只有四个：`PENDING` / `RUNNING` / `COMPLETED` / `FAILED`。
+- 🔴 平台保证**不会**出现「DB 标记 `COMPLETED` 但对象存储里没有结果」——
+  顺序是「先上传、再校验、最后才写 `COMPLETED`」。
+- 🔴 **失败不会被伪装成成功**：执行失败 ⇒ Run 落 `FAILED` + 错误信息；
+  算完了但**产物没传上去** ⇒ 也**不**报成功（会明确显示「实验算完了但结果没能持久化」）。
+
+### P.3 产物分两类
+
+**① 平台自动产出的（你什么都不用做）**
+
+| 文件 | 内容 |
+| --- | --- |
+| `result.json` | 你返回的结果信封（含 `sampleSummary` / `tables` / `parameters` 等） |
+| `logs/run.log` | 你在 `run()` 里 `log(...)` 写下的行（上限 200 行） |
+| `manifest.json` | **索引**：登记本次 Run 全部产物的 Key / 类型 / 体积 |
+
+**② 你声明的（必须显式调用）**
+
+```ts
+run(context: ExperimentRunContext) {
+  const { dataset, artifact } = context;
+  return (async () => {
+    // …算完…
+
+    // 🔴 大型产物这样留档：name 是 Run 前缀下的相对名字，**不含角色段**
+    //    —— 角色段由下面那个 `role` 决定（写重复会得到 `tables/tables/…`）。
+    artifact({
+      name: "cohort-detail.csv",
+      role: "table",                       // "table" | "chart" | "log" | "artifact"
+      body: toCsv(rows),                   // string 或 Uint8Array
+      contentType: "text/csv",             // 可省，按扩展名推断
+      label: "逐事件明细",                  // 显示在页面上的中文标签
+      description: "每个事件的入场日 / 收益 / 剔除原因",
+    });
+
+    return assembleMyResult({ /* … */ });
+  })();
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `name` | ✅ | Run 前缀下的**相对名字**，可含子目录（`cohort.csv` / `detail/rows.csv`）；🔴 **不含角色段**（`tables/` / `charts/` 由 `role` 拼）；**禁止**绝对路径 / `..` / 空 |
+| `role` | ✅ | 落哪个固定段：`table` / `chart` / `log` / `artifact` |
+| `body` | ✅ | `string` 或 `Uint8Array` |
+| `contentType` | ❌ | MIME；缺省按扩展名推断 |
+| `label` / `description` | ❌ | 人读标签，进 Manifest 并显示在页面上 |
+
+⚠️ `name` 非法会在**收集时立刻抛领域错误**（`EXPERIMENT_ARTIFACT_KEY_INVALID`），
+不会等到上传阶段才炸 —— 那时结果已经算完了，白跑一次。
+
+### P.4 什么时候「不该」用 `artifact()`
+
+- **小表格 / 指标 / 图表数据** ⇒ 走返回值里的 `tables` / `statistics` / `charts`，
+  页面直接渲染，**不用**落对象存储；
+- **几十 MB 的逐事件明细** ⇒ 走 `artifact()`；
+- 🔴 页面初始化时**不会**自动下载全部产物（规格 §17）：大文件只在你**主动点开**时才发请求。
+  所以不要在 `run()` 里为了「让页面能显示」而产出超大文件。
+
+### P.5 Object Key 规范（平台自动拼，你只需知道长什么样）
+
+```text
+experiments/{group}/{key}/runs/{runId}/manifest.json
+experiments/{group}/{key}/runs/{runId}/result.json
+experiments/{group}/{key}/runs/{runId}/logs/run.log
+experiments/{group}/{key}/runs/{runId}/tables/cohort-detail.csv      ← role: "table"
+experiments/{group}/{key}/runs/{runId}/charts/equity-curve.svg        ← role: "chart"
+experiments/{group}/{key}/runs/{runId}/artifacts/raw.bin              ← role: "artifact"
+```
+
+`{group}/{key}` = 你的 `descriptor.id` 的两段（如 `first-board-pullback/entry-day`）；
+`{runId}` 形如 `RUN-20260920-1F0B5D96`（平台生成，一个 Experiment → **多个** Run，旧 Run 不被覆盖）。
+
+### P.6 `manifest.json` 是什么，以及「授权 = Manifest 白名单」
+
+Manifest 是本次 Run 的**产物索引**（不是新格式，只是 Key + 类型 + 体积的清单）。
+它同时是**访问控制的唯一依据**：
+
+- 前端只能读**已登记**在 Manifest 里的对象 ⇒ 未登记 ⇒ `404`；
+- 一个 Run 的凭据**不能**读另一个 Run 的对象 ⇒ 跨 Run ⇒ `400`；
+- MinIO 凭据**不进**浏览器 bundle；页面只能经后端 `GET /api/experiments/artifact` 取产物。
+
+⇒ 这也意味着：**没调 `artifact()` 的文件，页面上也不会有**（它压根不存在）。
+
+### P.7 跑完之后，在页面上能看到什么
+
+| 页面 | 路由 | 看到什么 |
+| --- | --- | --- |
+| 实验列表 | `/research-experiments` | 每个实验：版本 / 数据集 / 状态 / **Latest Run** / **最近运行时间** |
+| 实验详情 | `/research-experiments/<组>/<实验>` | 元数据 / Dataset 版本 / 参数 / **运行历史**（多次 Run 并存） |
+| **Run 详情** | `/research-experiments/<组>/<实验>/runs/<runId>` | 状态 / 数据集 / 参数 / 开始与完成时间 / **耗时** / 结果 / **产物清单** |
+
+★ 核心能力：**关掉页面再打开，历史 Run 仍在那里，不需要重跑。**
+
+### P.8 你需要为之负责的只有一件事
+
+**让产物可解释**：产物名字与 `label` 要让人（和以后的你）看懂这是什么。
+平台负责「存得住、找得到、不串号」，不负责「这份 CSV 是什么意思」。
+
