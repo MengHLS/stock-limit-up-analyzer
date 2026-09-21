@@ -14,6 +14,7 @@
 
 import { asc, eq } from "drizzle-orm";
 import { getDb } from "../../db";
+import { withReadRetry } from "../../readRetry";
 import { strategyResearchProvenance } from "../../../drizzle/schema";
 import { decodeJson, encodeJson, toIso } from "../jsonCodec";
 import {
@@ -122,21 +123,34 @@ export class DbStrategyResearchProvenanceRepository implements StrategyResearchP
     strategyVersionId: number,
   ): Promise<StrategyResearchProvenance | undefined> {
     const db = await this.requireDb();
-    const rows = await db
-      .select()
-      .from(strategyResearchProvenance)
-      .where(eq(strategyResearchProvenance.strategyVersionId, strategyVersionId))
-      .limit(1);
+    /**
+     * 🔴 读路径**必须**挂 `withReadRetry`（本仓横切约定；004 的同类缺陷）。
+     *
+     * 为什么这里特别要紧：本方法的唯一消费端是 Strategies 详情页的溯源面板，
+     * 前端那条 query 是 `retry: false`（溯源是**可缺、不阻断**的附加信息，不该自动重试拖慢页面）
+     * ⇒ 服务端**单次**冷启动 / 死连接失败会原样透到页面，用户看到「溯源读取失败」并
+     * **看不到研究证据**——STRATEGY-RESEARCH-BRIDGE-001 §16 的「证据必须可见」就落空了。
+     * 写入路径（`create` / `delete*`）**不重试**（重试写会造重复行）。
+     */
+    const rows = await withReadRetry("strategyResearchProvenance.getByStrategyVersionId", () =>
+      db
+        .select()
+        .from(strategyResearchProvenance)
+        .where(eq(strategyResearchProvenance.strategyVersionId, strategyVersionId))
+        .limit(1),
+    );
     return rows[0] ? mapRow(rows[0]) : undefined;
   }
 
   async listByStrategyId(strategyId: string): Promise<StrategyResearchProvenance[]> {
     const db = await this.requireDb();
-    const rows = await db
-      .select()
-      .from(strategyResearchProvenance)
-      .where(eq(strategyResearchProvenance.strategyId, strategyId))
-      .orderBy(asc(strategyResearchProvenance.strategyVersionId));
+    const rows = await withReadRetry("strategyResearchProvenance.listByStrategyId", () =>
+      db
+        .select()
+        .from(strategyResearchProvenance)
+        .where(eq(strategyResearchProvenance.strategyId, strategyId))
+        .orderBy(asc(strategyResearchProvenance.strategyVersionId)),
+    );
     return rows.map(mapRow);
   }
 
@@ -144,11 +158,13 @@ export class DbStrategyResearchProvenanceRepository implements StrategyResearchP
     sourceCandidateId: number,
   ): Promise<StrategyResearchProvenance | undefined> {
     const db = await this.requireDb();
-    const rows = await db
-      .select()
-      .from(strategyResearchProvenance)
-      .where(eq(strategyResearchProvenance.sourceCandidateId, sourceCandidateId))
-      .limit(1);
+    const rows = await withReadRetry("strategyResearchProvenance.getBySourceCandidateId", () =>
+      db
+        .select()
+        .from(strategyResearchProvenance)
+        .where(eq(strategyResearchProvenance.sourceCandidateId, sourceCandidateId))
+        .limit(1),
+    );
     return rows[0] ? mapRow(rows[0]) : undefined;
   }
 

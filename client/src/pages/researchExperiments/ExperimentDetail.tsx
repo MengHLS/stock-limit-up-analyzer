@@ -276,7 +276,8 @@ export default function ResearchExperimentDetail() {
                 {runMutation.isPending ? (
                   <>
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                    正在运行实验…（读真实 Dataset、全量计算、并写入对象存储；可能需要 10~60 秒）
+                    正在运行实验…（读真实 Dataset、做全量计算、并写入对象存储；可能需要数十秒到数分钟，
+                    取决于数据集规模与是否全量扫描）
                   </>
                 ) : (
                   <>

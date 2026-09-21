@@ -53,8 +53,14 @@ function sha256Hex(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-/** 剔除顶层 fingerprint 字段后的对象（用于指纹摘要）。 */
-function bodyWithoutFingerprint<T>(record: T): Omit<T, "fingerprint"> {
+/**
+ * 剔除顶层 fingerprint 字段后的对象（用于指纹摘要）。
+ *
+ * 🔴 **必须 export**：任何「除 fingerprint 外全部字段」的内容指纹都要用它。
+ *    否则指纹会把**自身**算进摘要 ⇒ 记录自相矛盾（反序列化必然 mismatch）。
+ *    泛化层（`multiDimension.ts`）与策略侧共用这一份，不许各写一份（审计 P1-3）。
+ */
+export function omitFingerprintField<T>(record: T): Omit<T, "fingerprint"> {
   const body: Record<string, unknown> = { ...(record as object) };
   delete body.fingerprint;
   return body as Omit<T, "fingerprint">;
@@ -64,13 +70,23 @@ function bodyWithoutFingerprint<T>(record: T): Omit<T, "fingerprint"> {
 // Fingerprint
 // ---------------------------------------------------------------------------
 
+/**
+ * **通用**内容指纹（除已剔除的字段外，全部字段的 canonical SHA-256 摘要）。
+ *
+ * 本泛化层（`multiDimension.ts`）与策略侧记录共用它 ⇒ 仓里只有**一份** canonical 指纹实现
+ * （审计 P1-3 的教训是「同一语义仓内两份实现」会静默漂移）。调用方负责先剔除
+ * `fingerprint` 字段本身；本函数只做「递归非有限值检查 → canonical 串 → sha256」。
+ */
+export function computeCanonicalFingerprint(record: unknown): string {
+  assertFiniteRecord(record, "record");
+  return sha256Hex(canonicalStringify(record));
+}
+
 /** RobustnessRun 内容指纹：除 fingerprint 外全部字段的 canonical SHA-256 摘要。 */
 export function computeRobustnessRunFingerprint(
   record: Omit<RobustnessRun, "fingerprint"> | RobustnessRun
 ): string {
-  assertFiniteRecord(record, "record");
-  const body = bodyWithoutFingerprint(record);
-  return sha256Hex(canonicalStringify(body));
+  return computeCanonicalFingerprint(omitFingerprintField(record));
 }
 
 /** 单条扰动「扰动后配置」内容指纹（axis/config 的 canonical SHA-256；用于逐样本回显）。 */

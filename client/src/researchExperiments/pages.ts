@@ -27,12 +27,14 @@
 
 import EntryDayExperimentPage from "@experiments/first-board-pullback/entry-day/page";
 import FundamentalStudyExperimentPage from "@experiments/first-board-pullback/fundamental-study/page";
+import StabilityValidationExperimentPage from "@experiments/first-board-pullback/stability-validation/page";
 import type { ExperimentPageComponent } from "./contract";
 
 /** pageKey → 实验页面组件。 */
 export const EXPERIMENT_PAGES: Readonly<Record<string, ExperimentPageComponent>> = {
   "first-board-pullback/entry-day": EntryDayExperimentPage,
   "first-board-pullback/fundamental-study": FundamentalStudyExperimentPage,
+  "first-board-pullback/stability-validation": StabilityValidationExperimentPage,
 };
 
 /** 取页面组件；未注册返回 null（由调用方降级并提示）。 */

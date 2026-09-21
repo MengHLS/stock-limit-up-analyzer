@@ -58,6 +58,11 @@ artifact({
 - [ ] `requiredColumns` 里每**一个列名都真实存在**（写错会在运行时被拒：
       `EXPERIMENT_METADATA_INVALID`，这是刻意的 —— 否则取值会静默变 null）；
 - [ ] 若读了 `postRelativeDays`（rd ≥ 1），必须同时 `usesForwardData: true` 并写 `forwardDataPurpose`；
+- [ ] **要不要全量扫描**？模板默认 `eventScanPolicy: "PLATFORM_LIMIT"`（最多 20000 个事件）。
+      只有当你需要「候选 = 数据集全量」时才改成 `"FULL_DATASET"`，并且**同时**做两件事：
+      ① 事件读取改成流式分页 `for await (const page of dataset.eventPages())`；
+      ② 结果里出 `unscannedEventCount` 并让它在页面**首屏可见**
+      （`eligible + excluded === candidate` 覆盖不到「压根没被扫到」的事件 —— 详见规范 §E.6）；
 - [ ] `sampleSummary` 的账是平的（`eligible + excluded === candidate`）；
 - [ ] 改了任何**计算**口径 ⇒ 升 `COMPUTATION_VERSION`（它同时进
       `descriptor.version` 与 `customPayload.computationVersion`，只改一处会校验失败）；
@@ -72,6 +77,10 @@ artifact({
 
 - 页面**不自己发请求**（执行入口在服务端只有一套：Registry + Runner）；
 - 页面**不得** import `experiment.ts` 或任何 `server/**`（它跑在浏览器里）；
+- 需要复用**既有跨阶段能力**（如 Robustness 稳定性方法）时，经由 `@experiments/robustnessBridge`
+  引 —— 那是实验作者面**唯一**允许 reach `server/**` 的文件。**不要**在实验目录里再写一套
+  同名引擎（`research-experiments/**` **零实现**地引桥，只有 re-export）。详见
+  `research-experiments/README.md` 的「可以消费既有的能力吗」一节；
 - 不引入新的 UI 框架，用 `@/components/ui/*` 与 `recharts`；
 - 不在实验里宣称「最优 / 最佳 / 排名」—— 同一份数据上的描述性统计
   挑出来的「最优」是样本内选择，不是结论。

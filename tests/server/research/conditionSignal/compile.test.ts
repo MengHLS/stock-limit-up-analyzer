@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from "vitest";
 import { DECLARATIVE_RECIPE_ID, compileConditionRecipe } from "../../../../server/research/conditionSignal";
-import { PULLBACK_FEATURE_IDS, registeredStrategyRecipeIds } from "../../../../server/research/recipeRegistry";
+import { PULLBACK_FEATURE_IDS, PULLBACK_PARAMETER_IDS, registeredStrategyRecipeIds } from "../../../../server/research/recipeRegistry";
 import { StrategyRecipeRuntimeError } from "../../../../server/research/recipeErrors";
 import type { ConditionDefinition } from "../../../../server/research/strategySchema/definition";
 import type { ResearchParameterSchema, ResearchParameterSet } from "../../../../server/research/types";
@@ -503,5 +503,94 @@ describe("确定性与 enabled 语义", () => {
     expect(evaluate(runtime, { ...ok, [PULLBACK_FEATURE_IDS.haircut]: 0.01 })).toBeNull();
     // 放量（量比 > 1）⇒ 剔除
     expect(evaluate(runtime, { ...ok, [PULLBACK_FEATURE_IDS.volumeRatio]: 1.2 })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. STRATEGY-RESEARCH-BRIDGE-001 §15 回归 —— 参数 code **不等于**已注册配方的三个 code
+//
+// 🔴 针对一个**结构性**缺陷（实测于 `first-board-pullback@1.0.0`）：
+//    注册期「门槛引用面」探测（`recipeRegistry#buildGatesProbe`）此前把探测参数集**写死**为
+//    `Object.values(PULLBACK_PARAMETER_IDS)`（= `max_volume_ratio` / `max_drawdown` /
+//    `require_bullish`）。合成配方的参数 code 来自**策略文档**，与这三个无关 ⇒ 探测调用
+//    `requireNumericParameter` 取不到值 ⇒ 抛 `RECIPE_PARAMETER_INVALID` ⇒
+//    「文档声明式条件」这条路径（`assemble.ts#requireRecipe` 路径 2）对任何参数 code 不等于
+//    注册配方三参数的策略**结构性不可用**（策略进不了 Backtest 输入链）。
+//
+// ⚠️ 为什么本文件此前 28 例全绿也没抓到：夹具里的参数 code 恰好用了 `max_drawdown`
+//    （**正是**那三个 code 之一）⇒ 缺陷被夹具**意外回避**。所以本节的夹具**故意**用
+//    不在 `PULLBACK_PARAMETER_IDS` 里的 code（与首板回踩草稿逐字一致）。
+//
+// 证据：`docs/evidence/_probe_srb001_doc_params.mts` / `_e2e_srb001_bridge_consumption.mts`。
+// ---------------------------------------------------------------------------
+
+describe("参数 code 不在已注册配方的参数面内（SRB001 §15 回归）", () => {
+  /** 与 `first-board-pullback@1.0.0` 文档逐字一致的两个参数 code（都不在 `PULLBACK_PARAMETER_IDS` 里）。 */
+  const FOREIGN_SCHEMA: ResearchParameterSchema = {
+    parameters: [
+      { name: "maxBreakDepthRatio", type: "number", required: false, defaultValue: 0 },
+      { name: "maxVolumeRatio", type: "number", required: false, defaultValue: 1 },
+    ],
+  };
+
+  it("夹具自检：这两个 code 确实不在已注册配方的参数面内（否则本节的回归是空的）", () => {
+    const registered = new Set(Object.values(PULLBACK_PARAMETER_IDS));
+    expect(registered.has("maxBreakDepthRatio")).toBe(false);
+    expect(registered.has("maxVolumeRatio")).toBe(false);
+  });
+
+  it("compileConditionRecipe 不抛错（修复前必抛 RECIPE_PARAMETER_INVALID）", () => {
+    const runtime = compile(
+      [
+        cond({
+          field: "bar.haircutFromEventLow",
+          operator: "LESS_THAN_OR_EQUAL",
+          value: "maxBreakDepthRatio",
+          valueType: "PARAMETER_REFERENCE",
+        }),
+        cond({
+          field: "bar.volumeRatio",
+          operator: "LESS_THAN_OR_EQUAL",
+          value: "maxVolumeRatio",
+          valueType: "PARAMETER_REFERENCE",
+        }),
+      ],
+      FOREIGN_SCHEMA,
+    );
+    expect(runtime.recipeId).toBe(DECLARATIVE_RECIPE_ID);
+  });
+
+  it("门槛右值仍真去参数集取值（边界两侧各一例）", () => {
+    const runtime = compile(
+      [
+        cond({
+          field: "bar.haircutFromEventLow",
+          operator: "LESS_THAN_OR_EQUAL",
+          value: "maxBreakDepthRatio",
+          valueType: "PARAMETER_REFERENCE",
+        }),
+      ],
+      FOREIGN_SCHEMA,
+    );
+    expect(evaluate(runtime, { [PULLBACK_FEATURE_IDS.haircut]: 0 }, { maxBreakDepthRatio: 0 })).not.toBeNull();
+    expect(evaluate(runtime, { [PULLBACK_FEATURE_IDS.haircut]: 0.01 }, { maxBreakDepthRatio: 0 })).toBeNull();
+    expect(evaluate(runtime, { [PULLBACK_FEATURE_IDS.haircut]: 0.01 }, { maxBreakDepthRatio: 0.02 })).not.toBeNull();
+  });
+
+  it("门槛右值缺值仍响亮抛错（修复没有把「拒绝静默取默认」放宽）", () => {
+    const runtime = compile(
+      [
+        cond({
+          field: "bar.haircutFromEventLow",
+          operator: "LESS_THAN_OR_EQUAL",
+          value: "maxBreakDepthRatio",
+          valueType: "PARAMETER_REFERENCE",
+        }),
+      ],
+      FOREIGN_SCHEMA,
+    );
+    expect(errorCodeOf(() => evaluate(runtime, { [PULLBACK_FEATURE_IDS.haircut]: 0.01 }, {}))).toBe(
+      "RECIPE_PARAMETER_INVALID",
+    );
   });
 });

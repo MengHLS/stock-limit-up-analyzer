@@ -97,6 +97,76 @@ export function StrategyResearchProvenancePanel({
             </>
           )}
 
+          {/*
+            Research Evidence（STRATEGY-RESEARCH-BRIDGE-001 §16）——
+            「这个 Strategy 是基于哪些研究运行产生的？」的正面回答。
+            每条指向一次**真实持久化 Run**；只读、保持后端行序（排序会被误读成推荐）。
+          */}
+          {vm.researchEvidences.length > 0 && (
+            <div className="space-y-2 rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-xs font-medium text-sky-900">
+                  研究证据（{vm.researchEvidences.length} 条 · 只读）
+                </span>
+                <span
+                  className="font-mono text-[10px] text-muted-foreground"
+                  title="证据列表的独立内容指纹（与执行语义指纹同名不同义）"
+                >
+                  证据指纹 {vm.researchEvidenceFingerprint ?? "—"}
+                </span>
+              </div>
+              <ul className="space-y-1.5">
+                {vm.researchEvidences.map((e, index) => (
+                  <li
+                    key={`${e.runId}·${e.reference}·${index}`}
+                    className="rounded border border-sky-200 bg-background/70 px-2 py-1.5 text-[11px]"
+                  >
+                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                      <span className="rounded border border-sky-300 bg-sky-100 px-1.5 py-0.5 text-[10px] text-sky-900">
+                        {e.evidenceKindLabel}
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {e.runStatus}
+                      </span>
+                    </div>
+                    <dl className="grid gap-x-3 gap-y-0.5 md:grid-cols-2">
+                      <div className="flex items-baseline gap-1.5">
+                        <dt className="shrink-0 text-muted-foreground">实验编号</dt>
+                        <dd className="break-all font-mono">{e.experimentCode}</dd>
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <dt className="shrink-0 text-muted-foreground">实验版本</dt>
+                        <dd className="font-mono">{e.experimentVersion}</dd>
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <dt className="shrink-0 text-muted-foreground">运行</dt>
+                        <dd className="break-all font-mono">{e.runId}</dd>
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <dt className="shrink-0 text-muted-foreground">数据集版本</dt>
+                        <dd className="break-all font-mono">
+                          {`#${e.datasetVersionId}`}
+                          {e.datasetVersionLabel === null ? "" : `（${e.datasetVersionLabel}）`}
+                        </dd>
+                      </div>
+                      <div className="flex items-baseline gap-1.5 md:col-span-2">
+                        <dt className="shrink-0 text-muted-foreground">引用</dt>
+                        <dd className="break-all font-mono">{e.reference}</dd>
+                      </div>
+                    </dl>
+                    {e.description !== null && (
+                      <p className="mt-1 text-[11px] text-muted-foreground">{e.description}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-muted-foreground">
+                这些运行只作为来源事实（样本量 / 统计量 / 稳定性判定等）被引用，
+                不构成本策略的买入 / 卖出规则 —— 交易规则属于 Strategy 侧定义。
+              </p>
+            </div>
+          )}
+
           {/* 执行绑定（Strategy 侧事实）与来源的对照 —— 两个坐标可以不同，且必须能看出差别。 */}
           <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">

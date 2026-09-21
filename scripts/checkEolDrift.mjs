@@ -2,12 +2,24 @@
 /**
  * EOL 漂移哨兵 —— 检测「工作区行尾 ≠ HEAD blob 行尾」的已跟踪文件。
  *
- * 背景（2026-09-17 实测代价）：
- *   本仓 `core.autocrlf=false` ⇒ 工作区行尾 = 磁盘真身；HEAD blob 内部一律 LF（仓库仅 3 个文件是有意 CRLF：
- *   `.workbuddy/memory/PROJECT_RULES.md`、`client/src/App.tsx`、`client/src/components/AppShell.tsx`）。
+ * 背景（2026-09-17 实测代价；2026-09-21 `9cm` 复核修正）：
+ *   本仓 `core.autocrlf=false` ⇒ 工作区行尾 = 磁盘真身；HEAD blob 内部一律 LF。
+ *   有意 CRLF 的**已跟踪**文件 = 5 个（`git ls-files --eol` 实测，均为 `i/crlf w/crlf`）：
+ *   `.gitignore`、`client/src/App.tsx`、`client/src/components/AppShell.tsx`、
+ *   `docs/evidence/_after_tsc_phaseA.out.txt`、`tests/server/marketSync.test.ts`。
+ *   ⚠️ 旧注释写「仅 3 个」，其中 `.workbuddy/memory/PROJECT_RULES.md` 已 untrack + gitignore ⇒ 该结论失效。
  *   一旦某个文件被外部工具/脚本翻成 CRLF，`git diff --numstat` 会显示「增删数 ≈ 文件行数」，
  *   真实改动被淹没、评审无法进行 —— 2026-09-17 的 STEP 0 就踩到过（`server/_core/index.ts` +228/-197、
  *   `tests/.../engine.test.ts` +420/-418，真实改动其实只有 +31 与 +5/-3）。
+ *
+ * ⚠️ 运维注记（2026-09-21 `9cm` 实测）——「内容判据」与「stat 判据」会分叉：
+ *   当索引条目携带**畸形 stat**（记录 size = 旧 CRLF 尺寸、blob 却为 LF 尺寸，且 mtime 陈旧）时，
+ *   `git status` / `git diff-files --raw` 会基于 stat 报**假阳性 M**，而此时
+ *   `git diff --numstat`（内容比对）与 `git hash-object` 都判「无差异」。
+ *   本哨兵只用 `git diff --numstat` ⇒ 判据本身不受此坑影响。
+ *   若确实踩到，修法是重建索引（**只动索引、不碰工作区**）：
+ *     `cp .git/index <备份> && rm .git/index && git read-tree HEAD`
+ *   注意 `git reset --mixed HEAD` **不解决问题** —— 它会按 oid 复用旧索引里那份畸形 stat。
  *
  * 原理（两次 git diff 即可定位，秒级，不依赖逐文件 cat-file）：
  *   `--ignore-cr-at-eol` 会忽略行尾 CR ⇒ 若某文件在普通 diff 里「整文件重写」，而在该开关下几乎无变化，

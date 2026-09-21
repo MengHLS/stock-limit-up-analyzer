@@ -28,7 +28,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { AlertTriangle, BarChart3, FlaskConical, Info, Microscope, Table2 } from "lucide-react";
+import { AlertTriangle, BarChart3, CheckCircle2, FlaskConical, Info, Microscope, Table2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -154,6 +154,9 @@ export default function FundamentalStudyExperimentPage({ descriptor, outcome }: 
   const pathChart = chartOf("path-mean-median");
   const bucketChart = chartOf("drawdown-bucket-distribution");
   const groupChart = chartOf("non-break-vs-break-by-horizon");
+  // 🔴 决策时点条件矩阵图（本轮新增）—— 与「不破 vs 破位」是**两张不同的图**：
+  //    前者按决策时点 T+k 横切，后者按视界横切，混在一起会读成同一件事。
+  const decisionChart = chartOf("decision-condition-by-day");
 
   return (
     <div className="space-y-4" data-experiment-page={descriptor.pageKey}>
@@ -177,6 +180,29 @@ export default function FundamentalStudyExperimentPage({ descriptor, outcome }: 
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/*
+            🔴 全量扫描成立时也要出数（正面事实）：缺口为 0 不代表不用说明
+            —— 读者需要看到「候选 = 数据集声明量」以及「这是分页读出来的」。
+          */}
+          {unscannedEventCount === 0 && custom.candidates && (
+            <div
+              className="flex items-start gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs"
+              data-experiment-badge="full-scan"
+            >
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <div className="space-y-1">
+                <p className="font-medium">
+                  全量扫描成立：数据集声明 {custom.candidates.datasetEventCount ?? "—"} 个事件，本轮候选{" "}
+                  {custom.candidates.candidateCount} 个，未被扫描 = 0。
+                </p>
+                <p className="text-muted-foreground">
+                  扫描策略 {custom.candidates.eventScanPolicy ?? "—"}；{custom.candidates.eventPageCount ?? "—"}{" "}
+                  轮分页（keyset 游标续读，无重复、无跳洞）；账目 {custom.candidates.candidateCount} ={" "}
+                  {summary.eligibleCount}（入池）+ {summary.excludedCount}（剔除）。
+                </p>
+              </div>
+            </div>
+          )}
           {unscannedEventCount !== null && unscannedEventCount !== 0 && (
             <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
@@ -245,23 +271,84 @@ export default function FundamentalStudyExperimentPage({ descriptor, outcome }: 
               这些计数说明「结果到底基于多少真实样本」；异常一律剔除并登记，不用 0 兜底、不静默丢弃。
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3 lg:grid-cols-4">
-            {[
-              ["候选事件（去重后）", quality.scannedRowCount],
-              ["入池样本", quality.includedCount],
-              ["被剔除", quality.excludedCount],
-              ["重复 eventId 行", quality.duplicateEventIdCount],
-              ["缺少 rd=0 行情", quality.missingEventDayBarCount],
-              ["观察窗口不完整", quality.missingObservationBarCount],
-              ["非法 OHLC 根数", quality.invalidOhlcBarCount],
-              ["长视界不齐备（已入池）", quality.insufficientForwardBarsEventCount],
-              ["首板日收盘 ≠ 涨停价", quality.eventDayCloseDiffersFromLimitUpPriceCount],
-            ].map(([label, value]) => (
-              <div key={String(label)} className="rounded-md border p-3">
-                <p className="text-muted-foreground">{label}</p>
-                <p className="mt-1 font-mono text-lg tabular-nums">{String(value ?? "—")}</p>
-              </div>
-            ))}
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3 lg:grid-cols-4">
+              {[
+                ["候选事件（去重后）", quality.scannedRowCount],
+                ["入池样本", quality.includedCount],
+                ["被剔除", quality.excludedCount],
+                ["重复 eventId 行", quality.duplicateEventIdCount],
+                ["缺少 rd=0 行情", quality.missingEventDayBarCount],
+                ["观察窗口不完整", quality.missingObservationBarCount],
+                ["非法 OHLC 根数（Bar 次）", quality.invalidOhlcBarCount],
+                ["非法 OHLC 涉及事件数", quality.invalidOhlcAffectedEventCount],
+                ["长视界不齐备（已入池）", quality.insufficientForwardBarsEventCount],
+                ["首板日收盘 ≠ 涨停价", quality.eventDayCloseDiffersFromLimitUpPriceCount],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-md border p-3">
+                  <p className="text-muted-foreground">{label}</p>
+                  <p className="mt-1 font-mono text-lg tabular-nums">{String(value ?? "—")}</p>
+                </div>
+              ))}
+            </div>
+            {/*
+              🔴 「1353 根坏 Bar vs 123 个被剔除事件」的差异必须有**唯一解释出口**：
+              分档 + 事件口径 + 「是否被用于计算未来收益」三者同屏，读者不必去翻文档。
+              全部用可选链：历史 Run（本口径升级前跑出来的）没有这些字段，缺字段显示「—」而不是白屏。
+            */}
+            <div className="space-y-2 rounded-md border p-3 text-xs">
+              <p className="font-medium">非法 OHLC 的两个口径（Bar 次 vs 事件数）</p>
+              <p className="text-muted-foreground">
+                按 <strong>Bar 次</strong> 共 {quality.invalidOhlcBarCount} 根 —— 首板日 rd=0 共{" "}
+                {quality.invalidOhlcByRelativeDay?.eventDay ?? "—"}、核心窗口 rd∈1-
+                {windowInfo?.maxObservationDay ?? "N"} 共{" "}
+                {quality.invalidOhlcByRelativeDay?.observationCore ?? "—"}、中段 rd∈
+                {(windowInfo?.maxObservationDay ?? 5) + 1}-10 共{" "}
+                {quality.invalidOhlcByRelativeDay?.observationMid ?? "—"}、长视界 rd∈11-20 共{" "}
+                {quality.invalidOhlcByRelativeDay?.observationLong ?? "—"}。按 <strong>事件数</strong> 涉及{" "}
+                {quality.invalidOhlcAffectedEventCount ?? "—"} 个事件 —— 二者不相等是刻意的：
+                只有核心窗口内的坏 Bar 才会剔除事件，长视界的坏 Bar 只让**那个视界**不可用。
+                被用于计算未来收益的坏 Bar 数 ={" "}
+                <strong>{quality.invalidOhlcUsedInFutureOutcomeCount ?? "—"}</strong>（必须为 0）。
+              </p>
+              {(quality.horizonDataQuality ?? []).length > 0 && (
+                <div className="space-y-1">
+                  <p className="font-medium">
+                    逐视界独立样本账（T+5 / T+10 / T+20 各算各的分母；长视界缺数据**不会**回流删核心样本）
+                  </p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>后续视界</TableHead>
+                        <TableHead className="text-right">核心样本</TableHead>
+                        <TableHead className="text-right">窗口可用</TableHead>
+                        <TableHead className="text-right">窗口内缺 Bar</TableHead>
+                        <TableHead className="text-right">窗口内含坏 Bar</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(quality.horizonDataQuality ?? []).map((row) => (
+                        <TableRow key={row.horizon}>
+                          <TableCell className="font-mono text-xs">T+{row.horizon}</TableCell>
+                          <TableCell className="text-right font-mono text-xs tabular-nums">
+                            {row.eligibleCount}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs tabular-nums">
+                            {row.validCount}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs tabular-nums">
+                            {row.missingCount}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs tabular-nums">
+                            {row.invalidCount}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -386,6 +473,43 @@ export default function FundamentalStudyExperimentPage({ descriptor, outcome }: 
                       dataKey={series.key}
                       name={series.label}
                       fill={[NEUTRAL_COLOR, "#2563eb", "#d97706"][index % 3]}
+                      opacity={0.85}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+        {decisionChart && (
+          <Card className="lg:col-span-2" data-experiment-section="decision-condition-by-day">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">{decisionChart.title}</CardTitle>
+              <CardDescription className="text-xs">
+                {decisionChart.description}（单位：比例）本图只呈现「不同决策时点的条件与后续结果」，
+                <strong>不标注最佳、不做排序</strong>。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData(decisionChart)} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.15} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="currentColor" />
+                  <YAxis
+                    tick={{ fontSize: 11 }}
+                    stroke="currentColor"
+                    tickFormatter={(value: number) => value.toFixed(3)}
+                  />
+                  <Tooltip formatter={(value: number | string) => (typeof value === "number" ? formatRatio(value) : String(value))} />
+                  <ReferenceLine y={0} stroke="currentColor" opacity={0.4} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {decisionChart.series.map((series, index) => (
+                    <Bar
+                      key={series.key}
+                      dataKey={series.key}
+                      name={series.label}
+                      // 红涨绿跌（A 股口径）：不破组红、破位组绿、全部灰。
+                      fill={[UP_COLOR, DOWN_COLOR, NEUTRAL_COLOR][index % 3]}
                       opacity={0.85}
                     />
                   ))}

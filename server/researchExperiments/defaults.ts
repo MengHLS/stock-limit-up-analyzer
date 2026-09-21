@@ -33,6 +33,8 @@ import { defaultExperimentRegistry } from "./registryDefaults";
 import { createStrategyPromotionPort } from "../research/strategyCandidate/strategyPromotionPort";
 import { DbStrategyResearchProvenanceRepository } from "../research/strategyCandidate/provenance";
 import { createExperimentStrategyBridge, type ExperimentStrategyBridge } from "./strategyBridge";
+// STRATEGY-RESEARCH-BRIDGE-001：按真实持久化 Run 建策略的只读读回端口。
+import { createPersistedEvidenceRunReader } from "./evidenceRunReader";
 
 export { createDefaultExperimentRegistry, defaultExperimentRegistry } from "./registryDefaults";
 
@@ -161,6 +163,10 @@ export function defaultExperimentRunService(): ExperimentRunService {
  *
  * 复用既有转正端口（幂等创建策略 + 首版本）与既有溯源仓储（唯一落点），
  * 本函数只做「把三件真实依赖装到一起」。
+ *
+ * 🔴 STRATEGY-RESEARCH-BRIDGE-001：追加注入 `evidenceRuns` —— 按**真实持久化 Run**
+ * 建策略的第二条路径需要一个只读读回端口。它与 Run 服务共用**同一份**仓储装配，
+ * 不新造第二套读 SQL（「列表里的 Run」与「建策略时读的 Run」必须同源）。
  */
 let strategyBridgeCache: ExperimentStrategyBridge | null = null;
 
@@ -169,6 +175,7 @@ export function defaultExperimentStrategyBridge(): ExperimentStrategyBridge {
     runner: defaultResearchExperimentsDeps().runner,
     strategies: createStrategyPromotionPort(),
     provenance: new DbStrategyResearchProvenanceRepository(),
+    evidenceRuns: createPersistedEvidenceRunReader({ runService: defaultExperimentRunService() }),
   });
   return strategyBridgeCache;
 }

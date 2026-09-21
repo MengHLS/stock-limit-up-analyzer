@@ -37,6 +37,7 @@ import {
   type RobustnessEntryInput,
 } from "./drift";
 import { computeRobustnessRunFingerprint } from "./serialize";
+import { findSerializableConfigProblem } from "./dimension";
 import type {
   PerturbationItem,
   RobustnessRequest,
@@ -60,37 +61,37 @@ function issue(code: string, path: string, message: string): ResearchValidationI
   return { code, path, message };
 }
 
-/** 参数集可序列化检查（number 有限 / boolean / string / null；拒绝 NaN/Infinity/对象嵌套）。 */
+/**
+ * 参数集可序列化检查（number 有限 / boolean / string / null；拒绝 NaN/Infinity/对象嵌套）。
+ *
+ * 🔴 遍历逻辑复用泛化层的**唯一实现** `findSerializableConfigProblem`（规格 §2 的适配点 2：
+ *    研究侧的不透明变体配置走同一条路径），本函数只做「问题 → 策略侧既有错误码词表」的投影
+ *    —— 错误码 / 路径 / 文案与历史**逐字一致**（既有测试即等价性判据）。
+ */
 function assertSerializableParameterSet(parameterSet: unknown, path: string): void {
-  if (parameterSet === null || typeof parameterSet !== "object" || Array.isArray(parameterSet)) {
+  const problem = findSerializableConfigProblem(parameterSet);
+  if (problem === null) return;
+  if (problem.kind === "NOT_OBJECT") {
     throw new ResearchValidationError([
       issue("RB18_PARAM_CONFIG_INVALID", path, "扰动参数集必须是对象"),
     ]);
   }
-  for (const [key, value] of Object.entries(parameterSet as Record<string, unknown>)) {
-    if (value === null) continue;
-    if (typeof value === "boolean") continue;
-    if (typeof value === "string") continue;
-    if (typeof value === "number") {
-      if (!Number.isFinite(value)) {
-        throw new ResearchValidationError([
-          issue(
-            "RB18_PARAM_CONFIG_NON_FINITE",
-            `${path}.${key}`,
-            `扰动参数 ${key} 含非有限数字 ${String(value)}（禁止 NaN / Infinity）`
-          ),
-        ]);
-      }
-      continue;
-    }
+  if (problem.kind === "NON_FINITE") {
     throw new ResearchValidationError([
       issue(
-        "RB18_PARAM_CONFIG_TYPE_INVALID",
-        `${path}.${key}`,
-        `扰动参数 ${key} 的类型不受支持（${typeof value}）；仅 number | string | boolean | null`
+        "RB18_PARAM_CONFIG_NON_FINITE",
+        `${path}.${problem.key ?? ""}`,
+        `扰动参数 ${problem.key} 含非有限数字 ${problem.literal}（禁止 NaN / Infinity）`
       ),
     ]);
   }
+  throw new ResearchValidationError([
+    issue(
+      "RB18_PARAM_CONFIG_TYPE_INVALID",
+      `${path}.${problem.key ?? ""}`,
+      `扰动参数 ${problem.key} 的类型不受支持（${problem.valueType}）；仅 number | string | boolean | null`
+    ),
+  ]);
 }
 
 /** 复核单条扰动配置（按轴走既有 validate / 参数可序列化检查；非法属编程错误）。 */
@@ -120,7 +121,10 @@ function assertValidPerturbationConfig(item: PerturbationItem): void {
   }
 }
 
-function deepFreeze<T>(value: T): T {
+/**
+ * 递归冻结（**策略侧与泛化层共用的唯一实现**；泛化层记录同样要求不可变）。
+ */
+export function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== "object") return value;
   if (Object.isFrozen(value)) return value;
   for (const key of Object.keys(value as object)) {

@@ -67,9 +67,26 @@ export function inferArtifactDescriptor(
 ): { kind: ExperimentArtifactKind; format: string; contentType: string } {
   const byExtension = EXTENSION_TABLE[extensionOf(name)];
   if (byExtension) {
-    // 角色优先于扩展名的两处：结果文件、纯文本日志。
+    /**
+     * 角色优先于扩展名的**三处**：结果文件、纯文本日志、以及「其它产物」。
+     *
+     * 🔴 第三处是 `9cl`（EXP-002 首次声明 `.json` 文件产物）实测暴露的缺陷：
+     *    原实现只让 `result` / `log` 覆盖扩展名，于是 `role: "artifact"` + `name:
+     *    "robustness-run.json"` 被 `.json` 扩展名改判成 `kind: "TABLE"`
+     *    ⇒ `artifactPublisher` 的**按 `kind` 分桶**（见该文件 `buildRunManifest` 调用处注释
+     *    「角色分层：table → tables 段、chart → charts 段、log/artifact → artifacts 段」）
+     *    把一份 **JSON 文档**放进 `manifest.tables`，页面上显示为「tables（表格）」+ TABLE 徽章。
+     *    也就是说：**代码与它自己声明的分桶契约矛盾**，而当时没有任何测试覆盖
+     *    `inferArtifactDescriptor` 的角色优先级（因此静默存活）。
+     *
+     * `.json → TABLE` 这条映射本身**保留**（对 `role: "table"` 是刻意的：允许表状 JSON）；
+     * 只有显式声明为「其它产物」时，扩展名不再把它拉回表格桶。
+     */
     if (role === "result") return { kind: "RESULT", format: "json", contentType: "application/json" };
     if (role === "log") return { kind: "LOG", format: byExtension.format, contentType: byExtension.contentType };
+    if (role === "artifact") {
+      return { kind: "OTHER", format: byExtension.format, contentType: byExtension.contentType };
+    }
     return byExtension;
   }
   switch (role) {

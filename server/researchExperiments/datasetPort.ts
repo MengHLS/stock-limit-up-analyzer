@@ -44,12 +44,27 @@ import type {
 } from "./types";
 
 /**
- * 事件扫描上限（**平台安全阀**，不是研究范围）。
+ * 事件扫描上限（**平台安全阀**）。
  *
- * 一个实验最多扫这么多事件；超出部分**不会静默丢弃** —— runner 会把它写进
- * `sampleSummary.notes` 与 `executedByReason`，让「本次只看了前 N 个事件」成为可见事实。
+ * 🔴 常量的权威来源已上移到**作者契约面**（`shared/researchExperimentsContracts.ts`）：
+ * 这些数字同时约束平台实现**与**实验作者（实验要把它们写进 `summary.notes` 并据此
+ * 计算「账目缺口」）。放在 `shared` 里，实验 `import` 到的是同一个值；
+ * 各抄一份就意味着将来改阀时**静默漂移**（`9ci` 时 EXP-001 自己抄了一个 20000）。
+ * 这里 re-export 保持既有 import 路径不破。
  */
-export const EXPERIMENT_EVENT_SCAN_LIMIT = 20000;
+import {
+  EXPERIMENT_BAR_BATCH_SIZE,
+  EXPERIMENT_EVENT_PAGE_SIZE,
+  EXPERIMENT_EVENT_SCAN_HARD_LIMIT,
+  EXPERIMENT_EVENT_SCAN_LIMIT,
+} from "@shared/researchExperimentsContracts";
+
+export {
+  EXPERIMENT_BAR_BATCH_SIZE,
+  EXPERIMENT_EVENT_PAGE_SIZE,
+  EXPERIMENT_EVENT_SCAN_HARD_LIMIT,
+  EXPERIMENT_EVENT_SCAN_LIMIT,
+};
 
 /** 列投影的可用表（列名白名单的权威来源 = drizzle 表对象）。 */
 const COLUMN_TABLES = {
@@ -148,14 +163,28 @@ function toBarRow(bar: FirstLimitPullbackRawBar, columns: readonly string[]): Ex
   };
 }
 
-/** 一次访问的计数（证明「读了什么」）。 */
+/**
+ * 一次访问的计数（证明「读了什么」）。
+ *
+ * 🔴 这是 access 级**累计**计数：同一 access 上重复发起事件读取（`events()` 已缓存，
+ *    但 `eventPages()` 每次调用都是一次真实分页扫描）会让 `eventCount` / `eventPageCount`
+ *    如实累加 —— 它反映的是「这次访问实际读了多少」，不是「去重后有多少」。去重是实验自己的事。
+ */
 export interface ExperimentAccessStats {
   eventCount: number;
+  /** 事件分页实际发生了几轮（证明「全量扫描是分页做的，不是一次性读」）。 */
+  eventPageCount: number;
+  /** 行情批量读实际发起了几次查询（每相对日 × 块数）。 */
+  barQueryCount: number;
   prefixRowCount: number;
   postRowCount: number;
   maxPostRelativeDayRead: number | null;
-  /** 事件扫描是否被平台安全阀截断。 */
+  /** 事件扫描是否被安全阀截断（缺省阀或硬阀，取先触达的那个）。 */
   eventScanTruncated: boolean;
+  /** 本次生效的事件扫描策略（来自实验声明）。 */
+  eventScanPolicy: "PLATFORM_LIMIT" | "FULL_DATASET";
+  /** 本次生效的扫描上限（＝策略对应的那个阀值）。 */
+  eventScanLimit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,18 +214,20 @@ export function createRegistryExperimentDatasetPort(deps: {
     ResearchDatasetReader,
     "getVersionContext" | "loadEventPage" | "loadPrefixBars" | "loadPostBars"
   >;
-  /** 事件扫描上限；缺省 `EXPERIMENT_EVENT_SCAN_LIMIT`。 */
+  /** 事件扫描上限；缺省「按实验声明的事件扫描策略」取阀值（见 `eventScanPolicy`）。 */
   eventScanLimit?: number;
   /** 版本目录实现（真实实现由 `defaults.ts` 注入 Dataset Registry；测试可给内存实现）。 */
   listVersionOptions?: (filter?: {
     datasetCode?: string;
   }) => Promise<ExperimentDatasetVersionOption[]>;
-  /** 事件分页大小（每次 `loadEventPage` 的行数）。 */
+  /** 事件分页大小（每次 `loadEventPage` 的行数）；缺省 `EXPERIMENT_EVENT_PAGE_SIZE`。 */
   eventPageSize?: number;
+  /** 行情批量读的分块大小；缺省 `EXPERIMENT_BAR_BATCH_SIZE`。 */
+  barBatchSize?: number;
 }): ExperimentDatasetPort {
   const reader = deps.reader;
-  const scanLimit = deps.eventScanLimit ?? EXPERIMENT_EVENT_SCAN_LIMIT;
-  const pageSize = deps.eventPageSize ?? 2000;
+  const pageSize = deps.eventPageSize ?? EXPERIMENT_EVENT_PAGE_SIZE;
+  const barBatchSize = deps.barBatchSize ?? EXPERIMENT_BAR_BATCH_SIZE;
 
   async function getVersionFacts(datasetVersionId: number): Promise<ExperimentDatasetFacts | null> {
     const context: ResearchDatasetVersionContext | null = await reader.getVersionContext(datasetVersionId);
@@ -241,20 +272,44 @@ export function createRegistryExperimentDatasetPort(deps: {
     const prefixDays = [...new Set(req.prefixRelativeDays ?? [])].sort((a, b) => a - b);
     const postDays = [...new Set(req.postRelativeDays ?? [])].sort((a, b) => a - b);
 
+    /**
+     * 本次生效的扫描上限 = 实验**显式声明**的策略对应的阀值。
+     *
+     * 🔴 这里不是「删掉了安全阀」，而是把「能不能突破单次扫描上限」变成一次
+     *    **可复核的声明**：默认（或不声明）仍是 `EXPERIMENT_EVENT_SCAN_LIMIT`；
+     *    只有写明 `FULL_DATASET` 才升到硬阀，且仍被硬阀兜住。
+     */
+    const eventScanPolicy: "PLATFORM_LIMIT" | "FULL_DATASET" =
+      req.eventScanPolicy ?? "PLATFORM_LIMIT";
+    const scanLimit =
+      deps.eventScanLimit ??
+      (eventScanPolicy === "FULL_DATASET"
+        ? EXPERIMENT_EVENT_SCAN_HARD_LIMIT
+        : EXPERIMENT_EVENT_SCAN_LIMIT);
+
     const stats: ExperimentAccessStats = {
       eventCount: 0,
+      eventPageCount: 0,
+      barQueryCount: 0,
       prefixRowCount: 0,
       postRowCount: 0,
       maxPostRelativeDayRead: null,
       eventScanTruncated: false,
+      eventScanPolicy,
+      eventScanLimit: scanLimit,
     };
 
-    let eventsPromise: Promise<readonly ExperimentEventRow[]> | null = null;
     const barCache = new Map<string, Promise<readonly ExperimentBarRow[]>>();
 
-    async function loadEvents(): Promise<readonly ExperimentEventRow[]> {
-      const collected: ExperimentEventRow[] = [];
+    /**
+     * 事件**流式分页**（chunked scan）：每轮 `loadEventPage` 拉一页，逐页交出。
+     *
+     * keyset 游标（`tradeDate` + `eventId`）续读 ⇒ 无重复、无跳洞；
+     * 触达 `scanLimit` 即停止并把 `eventScanTruncated` 置真（**不静默**）。
+     */
+    async function* iterateEventPages(): AsyncGenerator<readonly ExperimentEventRow[], void, void> {
       let cursor: string | null = null;
+      let collected = 0;
       for (;;) {
         const page = await reader.loadEventPage({
           datasetVersionId: facts.datasetVersionId,
@@ -262,18 +317,39 @@ export function createRegistryExperimentDatasetPort(deps: {
           limit: pageSize,
           columns: projections.events,
         });
-        for (const item of page.items) collected.push(toEventRow(item, columns.events));
+        // 防御：空页即终止（`nextCursor` 非空却给空页的实现会让循环空转）。
+        if (page.items.length === 0) break;
+        collected += page.items.length;
+        stats.eventCount = collected;
+        stats.eventPageCount += 1;
+        yield page.items.map((item) => toEventRow(item, columns.events));
         cursor = page.nextCursor;
         if (cursor === null) break;
-        if (collected.length >= scanLimit) {
+        if (collected >= scanLimit) {
           stats.eventScanTruncated = true;
           break;
         }
       }
-      stats.eventCount = collected.length;
+    }
+
+    let eventsPromise: Promise<readonly ExperimentEventRow[]> | null = null;
+
+    async function loadEvents(): Promise<readonly ExperimentEventRow[]> {
+      const collected: ExperimentEventRow[] = [];
+      for await (const page of iterateEventPages()) {
+        for (const row of page) collected.push(row);
+      }
       return collected;
     }
 
+    /**
+     * 批量读一天的行情，**按 `barBatchSize` 分块**。
+     *
+     * 🔴 为什么必须分块：读取层的批量接口实现是**单条** `IN (eventId…)` 查询。
+     *    全量扫描时 eventIds 上万，一次性下推会让 SQL 参数表无界膨胀
+     *    （参数包 / 解析开销 / 计划退化）。分块后查询次数 = 「每相对日 × 块数」，
+     *    量级仍是 O(相对日数 × N/块)，而不是 O(事件数 × 相对日数)。
+     */
     async function loadBars(
       role: "prefix" | "post",
       relativeDay: number,
@@ -282,26 +358,32 @@ export function createRegistryExperimentDatasetPort(deps: {
       // 物理角色（prefix/post）与声明角色（feature/observation）的映射**只在这里**发生。
       const columnRole: "feature" | "observation" = role === "prefix" ? "feature" : "observation";
       const projected = columns[columnRole];
-      const query = {
-        datasetVersionId: facts.datasetVersionId,
-        eventIds,
-        relativeDays: [relativeDay],
-        columns: projections[columnRole],
-      };
-      const rows =
-        role === "prefix"
-          ? await reader.loadPrefixBars(query)
-          : await reader.loadPostBars(query);
+      const out: ExperimentBarRow[] = [];
+      for (let start = 0; start < eventIds.length; start += barBatchSize) {
+        const chunk = eventIds.slice(start, start + barBatchSize);
+        const query = {
+          datasetVersionId: facts.datasetVersionId,
+          eventIds: chunk,
+          relativeDays: [relativeDay],
+          columns: projections[columnRole],
+        };
+        const rows =
+          role === "prefix"
+            ? await reader.loadPrefixBars(query)
+            : await reader.loadPostBars(query);
+        stats.barQueryCount += 1;
+        for (const bar of rows) out.push(toBarRow(bar, projected));
+      }
       if (role === "prefix") {
-        stats.prefixRowCount += rows.length;
+        stats.prefixRowCount += out.length;
       } else {
-        stats.postRowCount += rows.length;
+        stats.postRowCount += out.length;
         stats.maxPostRelativeDayRead =
           stats.maxPostRelativeDayRead === null
             ? relativeDay
             : Math.max(stats.maxPostRelativeDayRead, relativeDay);
       }
-      return rows.map((bar) => toBarRow(bar, projected));
+      return out;
     }
 
     const access: ExperimentDatasetAccess = {
@@ -309,6 +391,10 @@ export function createRegistryExperimentDatasetPort(deps: {
       async events() {
         eventsPromise ??= loadEvents();
         return eventsPromise;
+      },
+      eventPages() {
+        // 每次调用都是**一次独立的分页扫描**（从第一页重新开始）；计数如实累加。
+        return iterateEventPages();
       },
       async feature(relativeDay: number) {
         if (!prefixDays.includes(relativeDay)) {

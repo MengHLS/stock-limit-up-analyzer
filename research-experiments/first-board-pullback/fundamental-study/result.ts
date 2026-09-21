@@ -29,6 +29,10 @@
  */
 
 import { z } from "zod";
+import {
+  EXPERIMENT_EVENT_SCAN_HARD_LIMIT,
+  EXPERIMENT_EVENT_SCAN_LIMIT,
+} from "@shared/researchExperimentsContracts";
 import { mean, median, percentile } from "@shared/quant-stats";
 import type {
   ExperimentCell,
@@ -47,7 +51,7 @@ import type {
  * 🔴 它同时进 `descriptor.version` 与 `customPayload.computationVersion`（后者是 `z.literal`）：
  * 只改一处，`resultSchema` 会立刻校验失败 ⇒「版本与产物必须同步」是结构事实。
  */
-export const COMPUTATION_VERSION = "1.0.0";
+export const COMPUTATION_VERSION = "1.1.0";
 
 /**
  * 本实验声明的样本资格信息边界（= `descriptor.datasetRequirement.decisionOffsetDays`）。
@@ -69,8 +73,22 @@ export const DECLARED_POST_RELATIVE_DAYS: readonly number[] = Array.from({ lengt
 /** 最远的 post 相对日（= 声明面容量）。 */
 export const MAX_DECLARED_POST_RELATIVE_DAY = DECLARED_POST_RELATIVE_DAYS[DECLARED_POST_RELATIVE_DAYS.length - 1]!;
 
-/** 平台事件扫描安全阀（与 `server/researchExperiments/datasetPort.ts` 一致）。 */
-export const PLATFORM_EVENT_SCAN_LIMIT = 20000;
+/**
+ * 平台事件扫描**默认阀**（缺省策略 `PLATFORM_LIMIT` 下生效）。
+ *
+ * 🔴 唯一权威 = 作者契约面 `shared/researchExperimentsContracts.ts`。
+ *    这里**不再自己抄一份 `20000`** —— 曾经抄的那一份意味着改阀时两边会**静默漂移**，
+ *    而本实验还要把这个数写进 `summary.notes` 并据此算「账目缺口」，漂了就会算错。
+ */
+export const PLATFORM_EVENT_SCAN_LIMIT = EXPERIMENT_EVENT_SCAN_LIMIT;
+
+/**
+ * 平台事件扫描**硬阀**（本实验声明的 `FULL_DATASET` 策略下生效）。
+ *
+ * 本实验声明全量扫描（`candidateCount` 必须等于数据集声明的事件数），但仍被硬阀兜住：
+ * 「全量」的语义是「数据集声明多少就扫多少」，不是「无限制」。
+ */
+export const FULL_DATASET_EVENT_SCAN_LIMIT = EXPERIMENT_EVENT_SCAN_HARD_LIMIT;
 
 /** 表格显示小数位（比率类；6 位 ≈ 0.0001%）。 */
 const DISPLAY_DIGITS = 6;
@@ -189,16 +207,21 @@ export const fundamentalStudyCustomPayloadSchema = z.object({
     droppedByMaxEvents: z.number().int(),
     droppedByScanLimit: z.boolean(),
     scanLimit: z.number().int(),
+    /** 本 Run 生效的事件扫描策略（`FULL_DATASET` ⇒ 扫描量由数据集声明量决定）。 */
+    eventScanPolicy: z.string().min(1),
+    /** 事件分页实际轮数（证明「全量是分页读出来的」）；行情查询次数见 `execution.datasetFacts.barQueryCount`。 */
+    eventPageCount: z.number().int().nonnegative(),
     /**
      * 🔴 **账目缺口**：`datasetEventCount − candidateCount`。
      *
-     * 平台事件扫描有安全阀（`PLATFORM_EVENT_SCAN_LIMIT`），触顶后本轮只拿到前 N 个事件。
-     * 这些没被扫到的事件**既不在 `candidateCount` 里、也不在 `excludedByReason` 里** ——
+     * 平台事件扫描有安全阀，触顶后本轮只拿到前 N 个事件。这些没被扫到的事件
+     * **既不在 `candidateCount` 里、也不在 `excludedByReason` 里** ——
      * 平台强制的 `eligible + excluded === candidate` 守恒式**天然覆盖不到它们**，
      * 所以必须单独出一个数，否则「数据集 23978 个事件、只统计了 19877 个」会静默变成
      * 「数据就只有 20000 个」，是会被读成事实的假信息（EXP-001 真机 Run 实测踩过）。
      *
      * 只有数据集声明了总数时才有值；为 `null` 表示总数不可知（不是「缺口为 0」）。
+     * 本实验声明 `FULL_DATASET` 后，这个数必须为 **0**。
      */
     unscannedEventCount: z.number().int().nullable(),
   }),
@@ -213,8 +236,56 @@ export const fundamentalStudyCustomPayloadSchema = z.object({
     eventDayBarRowsRead: z.number().int(),
     observationBarRowsRead: z.number().int(),
     missingEventDayBarCount: z.number().int(),
+    /**
+     * 观察窗口内缺 Bar 的次数。
+     *
+     * ⚠️ 口径：这是**Bar 次**而非事件数；且只有**核心窗口**（rd ≤ maxObservationDay）
+     *    内的缺失才会导致事件被剔除 ⇒ 与 `excludedByReason.MISSING_OBSERVATION_BAR` 对应。
+     */
     missingObservationBarCount: z.number().int(),
+    /**
+     * 🔴 非法 OHLC 的 **Bar 次数**（不是事件数）。
+     *
+     * 这是最容易读错的一个数：它统计「读到的行情行里有多少行 OHLC 不自洽」，
+     * 而**事件口径**的剔除只发生在核心窗口内、且该事件因此被剔除时才发生 ——
+     * 所以它可以远大于 `excludedCount`：长视界（rd > maxObservationDay）的坏 Bar
+     * 只让**那个视界**不可用，**不**剔除事件（规格：禁止因 T+20 不可用而删掉 T+5 核心样本）。
+     * 真机 Run 实测 1353 vs 123 的差异全部来自这里，见 `invalidOhlcByRelativeDay` 分档。
+     */
     invalidOhlcBarCount: z.number().int(),
+    /** 非法 OHLC 按相对日分档的计数（rd=0 / rd∈1-5 / rd∈6-10 / rd∈11-20）—— 口径差异的来源。 */
+    invalidOhlcByRelativeDay: z.object({
+      eventDay: z.number().int(),
+      observationCore: z.number().int(),
+      observationMid: z.number().int(),
+      observationLong: z.number().int(),
+    }),
+    /** 至少有一根非法 OHLC Bar 的**事件数**（含长视界 ⇒ 可大于 `excludedCount`）。 */
+    invalidOhlcAffectedEventCount: z.number().int(),
+    /**
+     * 🔴 非法 OHLC Bar 被用于计算**未来收益**的次数。
+     *
+     * 必须恒为 **0**：收益窗口一律走 `contiguousWindow()`（要求 rd 连续齐备），
+     * 坏 Bar 会让窗口返回 `null` ⇒ 该视界标为**不可用**，而不是把坏值算进去。
+     * 这个字段是对这条纪律的**实测证据**，不是注释里的承诺。
+     */
+    invalidOhlcUsedInFutureOutcomeCount: z.number().int(),
+    /**
+     * 逐视界的样本账 —— T+5 / T+10 / T+20 **各自**的有效样本数（规格 §5）。
+     *
+     * `eligibleCount` = 核心样本数（分母，不因长视界缺失而变小）；
+     * `missingCount` / `invalidCount` = 该视界所需窗口内**缺 Bar** / **有坏 Bar** 的事件数；
+     * `validCount` = 该视界真正参与统计的事件数。
+     */
+    horizonDataQuality: z.array(
+      z.object({
+        horizon: z.number().int(),
+        eligibleCount: z.number().int().nonnegative(),
+        missingCount: z.number().int().nonnegative(),
+        invalidCount: z.number().int().nonnegative(),
+        validCount: z.number().int().nonnegative(),
+      }),
+    ),
     /** 已在核心研究中、但缺少某些长视界行情的事件数（对应单元格为 `null`，不是剔除）。 */
     insufficientForwardBarsEventCount: z.number().int(),
     duplicateEventIdCount: z.number().int(),
@@ -257,6 +328,48 @@ export const fundamentalStudyCustomPayloadSchema = z.object({
     medianCloseReturnOnFinalDay: z.number().nullable(),
     groupOutcomes: z.array(groupOutcomeSchema),
   }),
+
+  /**
+   * 🔴 决策时点条件矩阵（本轮新增的核心研究产出）。
+   *
+   * 对每个**决策时点** `classificationDay = T+k`（k ∈ 1..maxObservationDay），按
+   * 「截至 T+k 是否从未跌破首板日开盘价」分成 `NON_BREAK_OPEN` / `BREAK_OPEN`（外加 `ALL`），
+   * 再统计**其后**各视界的表现。
+   *
+   * ## 口径（两个锚点必须分清）
+   *
+   * - **决策时点**：T+k，判定只用 rd ∈ [1, k]（当时可见）；
+   * - **未来窗口**：rd ∈ [k+1, k+horizon] —— **严格在决策时点之后**，
+   *   不含 T+1..T+k 已经发生的数据（规格 §7 明令）；
+   * - **收益锚**：决策日 T+k 的**收盘价**（决策时点可观测的最后价格）。
+   *
+   * ## 为什么没有 best / optimal / rank 字段
+   *
+   * 这张矩阵回答「不同决策时点的**信息条件**与后续结果分别是什么」，
+   * **不**回答「哪一天最好」。择优属于 Strategy 阶段，本实验刻意不输出。
+   */
+  decisionConditionMatrix: z.array(
+    z.object({
+      classificationDay: z.number().int(),
+      group: z.enum(["ALL", "NON_BREAK_OPEN", "BREAK_OPEN"]),
+      horizon: z.number().int(),
+      sampleCount: z.number().int().nonnegative(),
+      /** 窗口完整可用（连续）的样本数；不完整的样本不进任何收益统计。 */
+      availableCount: z.number().int().nonnegative(),
+      meanCloseReturn: z.number().nullable(),
+      medianCloseReturn: z.number().nullable(),
+      p25CloseReturn: z.number().nullable(),
+      p75CloseReturn: z.number().nullable(),
+      meanHighReturn: z.number().nullable(),
+      medianHighReturn: z.number().nullable(),
+      meanLowReturn: z.number().nullable(),
+      medianLowReturn: z.number().nullable(),
+      /** 窗口内是否曾突破决策日收盘价（high > close_{T+k}）的样本占比。 */
+      breakoutVsCloseRate: z.number().nullable(),
+      /** 窗口内是否曾突破首板涨停价的样本占比。 */
+      breakoutVsLimitUpPriceRate: z.number().nullable(),
+    }),
+  ),
 
   /** 剔除原因码 → 人读说明（页面据此翻译）。 */
   exclusionReasonLabels: z.record(z.string(), z.string()),
@@ -304,6 +417,15 @@ export interface StudySample {
   /** rd ∈ [1, maxAvailableRelativeDay] 的行情，按 rd 升序，逐根已校验。 */
   bars: StudyBar[];
   maxAvailableRelativeDay: number;
+  /**
+   * 声明窗口（rd ∈ [1, MAX_DECLARED_POST_RELATIVE_DAY]）内**有行但非法**的相对日集合。
+   *
+   * 与 `missingRelativeDays` 刻意分开记：口径不同 ——「缺 Bar」与「Bar 在但 OHLC 不自洽」
+   * 是两种不同的数据质量问题，混成一个「缺失」会让逐视界样本账说不清缺的到底是什么。
+   */
+  invalidRelativeDays: Set<number>;
+  /** 声明窗口内**完全没有行**的相对日集合（缺 Bar）。 */
+  missingRelativeDays: Set<number>;
 }
 
 /** OHLC 自洽性判定（缺失 / 非有限 / 非正 / 高低倒挂都算非法）。 */
@@ -403,6 +525,38 @@ export interface SampleDerived {
       futureLowReturnFromEntry: number | null;
       mfeFromEntry: number | null;
       maeFromEntry: number | null;
+    }
+  >;
+  /**
+   * 逐决策时点（k ∈ 1..maxObservationDay）—— 决策时点条件矩阵的数据来源。
+   *
+   * 🔴 与 `byEntryDay` 的**本质差别**（不要混用）：
+   *    - `byEntryDay[k]`：「如果在 T+k **开盘**买入，之后怎样」（锚 = 入场日开盘价）；
+   *    - `byDecisionDay[k]`：「在 T+k **收盘后**（当时已知 rd∈[1,k] 的路径）分成
+   *      不破 / 破位两组，其后各视界表现如何」（锚 = 决策日收盘价，窗口从 T+k+1 起）。
+   *    前者是入场视角、后者是决策条件视角：锚不同、窗口起点不同，数值天然不同。
+   */
+  byDecisionDay: Map<
+    number,
+    {
+      classificationDay: number;
+      /** 决策时点可得的信息：`min(low_1..low_k) ≥ firstLimitUpOpen`（路径条件）。 */
+      nonBreakOpenThroughDay: boolean;
+      /** 决策日收盘价（未来收益的锚）。 */
+      decisionClose: number;
+      /** 逐视界（h ∈ futureHorizons）；窗口 = rd ∈ [k+1, k+h]，必须连续。 */
+      byHorizon: Map<
+        number,
+        {
+          available: boolean;
+          windowEndRelativeDay: number | null;
+          closeReturn: number | null;
+          highReturn: number | null;
+          lowReturn: number | null;
+          breakoutVsClose: boolean;
+          breakoutVsLimitUpPrice: boolean;
+        }
+      >;
     }
   >;
 }
@@ -556,7 +710,88 @@ export function deriveSample(
     });
   }
 
-  return { sample, byDay, byHorizon, byEntryDay };
+  // ---- 逐决策时点（**决策条件视角**，决策时点条件矩阵的数据来源）----
+  //
+  // 🔴 与 byEntryDay 的两处硬差别（混用会得到看似合理但口径错误的数）：
+  //    1. 窗口起点：决策发生在 T+k **收盘后**，未来窗口从 **T+k+1** 起 ——
+  //       决策时点当天已经发生的行情**绝不能**算作「未来收益」（规格 §7 明令）；
+  //    2. 收益锚：**决策日 T+k 的收盘价**（决策时点可观测的最后价格），
+  //       而 byEntryDay 的锚是入场日**开盘价**。
+  //
+  // 视界语义：`horizon = h` 指**绝对相对日 rd = h**（与数据集 post 视界对齐），
+  // 因此窗口 = rd ∈ [k+1, h]；`h ≤ k` 表示该视点在决策时点之前或当天 ⇒ 不是「后续表现」，
+  // 标为不可用（**不伪造窗口**，也不把它算进任何统计）。
+  const byDecisionDay: SampleDerived["byDecisionDay"] = new Map();
+  for (let k = 1; k <= params.maxObservationDay; k += 1) {
+    const dayRow = byDay.find((item) => item.relativeDay === k);
+    if (dayRow === undefined) break;
+    const decisionBar = index.get(k);
+    if (decisionBar === undefined) break;
+    const decisionClose = decisionBar.close;
+
+    const horizonMap: Map<
+      number,
+      {
+        available: boolean;
+        windowEndRelativeDay: number | null;
+        closeReturn: number | null;
+        highReturn: number | null;
+        lowReturn: number | null;
+        breakoutVsClose: boolean;
+        breakoutVsLimitUpPrice: boolean;
+      }
+    > = new Map();
+
+    for (const horizon of params.futureHorizons) {
+      const unavailable = {
+        available: false,
+        windowEndRelativeDay: null,
+        closeReturn: null,
+        highReturn: null,
+        lowReturn: null,
+        breakoutVsClose: false,
+        breakoutVsLimitUpPrice: false,
+      };
+      if (horizon <= k) {
+        horizonMap.set(horizon, unavailable);
+        continue;
+      }
+      const window = contiguousWindow(index, k + 1, horizon);
+      if (window === null || window.length === 0) {
+        horizonMap.set(horizon, unavailable);
+        continue;
+      }
+      let highest = Number.NEGATIVE_INFINITY;
+      let lowest = Number.POSITIVE_INFINITY;
+      let aboveDecisionClose = false;
+      let aboveLimitUpPrice = false;
+      for (const bar of window) {
+        highest = Math.max(highest, bar.high);
+        lowest = Math.min(lowest, bar.low);
+        if (bar.high > decisionClose) aboveDecisionClose = true;
+        if (bar.high > sample.firstLimitUpPrice) aboveLimitUpPrice = true;
+      }
+      const lastBar = window[window.length - 1]!;
+      horizonMap.set(horizon, {
+        available: true,
+        windowEndRelativeDay: lastBar.relativeDay,
+        closeReturn: (lastBar.close - decisionClose) / decisionClose,
+        highReturn: (highest - decisionClose) / decisionClose,
+        lowReturn: (lowest - decisionClose) / decisionClose,
+        breakoutVsClose: aboveDecisionClose,
+        breakoutVsLimitUpPrice: aboveLimitUpPrice,
+      });
+    }
+
+    byDecisionDay.set(k, {
+      classificationDay: k,
+      nonBreakOpenThroughDay: dayRow.nonBreakOpen,
+      decisionClose,
+      byHorizon: horizonMap,
+    });
+  }
+
+  return { sample, byDay, byHorizon, byEntryDay, byDecisionDay };
 }
 
 // ---------------------------------------------------------------------------
@@ -777,11 +1012,132 @@ export function summarizeDailyPath(
 
 export type StudyGroupCode = "ALL" | "NON_BREAK_OPEN" | "BREAK_OPEN";
 const GROUP_CODES: readonly StudyGroupCode[] = ["ALL", "NON_BREAK_OPEN", "BREAK_OPEN"];
+/** 分组的人读标签（图例 / 观察句共用一处，禁止各处各写一份）。 */
+export const GROUP_LABELS: Readonly<Record<StudyGroupCode, string>> = {
+  ALL: "全部样本（ALL）",
+  NON_BREAK_OPEN: "不破组（NON_BREAK_OPEN）",
+  BREAK_OPEN: "破位组（BREAK_OPEN）",
+};
 
 function matchesGroup(day: SampleDerived["byDay"][number] | undefined, group: StudyGroupCode): boolean {
   if (day === undefined) return false;
   if (group === "ALL") return true;
   return group === "NON_BREAK_OPEN" ? day.nonBreakOpen : !day.nonBreakOpen;
+}
+
+/**
+ * 表 6 · `decision_condition_by_day`（本轮新增，规格 §6/§7）。
+ *
+ * 一行 = 一个**决策时点** T+k（k ∈ 1..maxObservationDay）× 一个分组
+ * （`ALL` / `NON_BREAK_OPEN` / `BREAK_OPEN`）× 一个后续视界 h（∈ `futureHorizons`）。
+ *
+ * ## 三条口径（写在表描述里，不靠读者猜）
+ *
+ * 1. 决策时点的分组**只**用 rd ∈ [1, k]（当时可见的路径）——`nonBreakOpenThroughDay`；
+ * 2. 未来窗口 = rd ∈ **[k+1, h]** —— **严格在决策时点之后**，不含已发生的 T+1..T+k；
+ * 3. 收益锚 = **决策日 T+k 的收盘价**（决策时点可观测的最后价格）。
+ *
+ * ## 🔴 刻意不含择时字段
+ *
+ * 本表没有 `bestEntryDay` / `optimalDay` / `best` / `worst` / `rank` ——
+ * 它回答「不同决策时点的**信息条件**与后续结果分别是什么」，**不**回答「哪一天最好」。
+ * 择优属于 Strategy 阶段（本实验连 Strategy 都不创建）。
+ *
+ * ## `sampleCount` vs `availableCount`
+ *
+ * `sampleCount` = 落在该（时点 × 分组）的事件数；`availableCount` = 其中
+ * **该视界窗口连续可用**的事件数（`horizon ≤ k` 时恒为 0：那不是「后续」）。所有收益
+ * 统计都只用 `availableCount` 那一批，**分母不是 sampleCount**。
+ */
+export function summarizeDecisionConditionByDay(
+  derived: readonly SampleDerived[],
+  maxObservationDay: number,
+  futureHorizons: readonly number[],
+): StudyTable {
+  const rows: Array<Record<string, ExperimentCell>> = [];
+  for (let day = 1; day <= maxObservationDay; day += 1) {
+    for (const group of GROUP_CODES) {
+      const members = derived.filter((item) => {
+        const slice = item.byDecisionDay.get(day);
+        if (slice === undefined) return false;
+        if (group === "ALL") return true;
+        return group === "NON_BREAK_OPEN"
+          ? slice.nonBreakOpenThroughDay
+          : !slice.nonBreakOpenThroughDay;
+      });
+      for (const horizon of futureHorizons) {
+        const usable = members
+          .map((item) => item.byDecisionDay.get(day)?.byHorizon.get(horizon))
+          .filter(
+            (
+              value,
+            ): value is {
+              available: boolean;
+              windowEndRelativeDay: number | null;
+              closeReturn: number | null;
+              highReturn: number | null;
+              lowReturn: number | null;
+              breakoutVsClose: boolean;
+              breakoutVsLimitUpPrice: boolean;
+            } => value !== undefined && value.available,
+          );
+        const closeReturns = collect(usable.map((item) => item.closeReturn));
+        const highReturns = collect(usable.map((item) => item.highReturn));
+        const lowReturns = collect(usable.map((item) => item.lowReturn));
+        const breakoutVsCloseCount = usable.filter((item) => item.breakoutVsClose).length;
+        const breakoutVsLimitUpCount = usable.filter((item) => item.breakoutVsLimitUpPrice).length;
+        rows.push({
+          classificationDay: `T+${day}`,
+          group,
+          sampleCount: members.length,
+          availableCount: usable.length,
+          futureHorizon: `T+${horizon}`,
+          windowStartRelativeDay: day + 1,
+          windowEndRelativeDay: horizon,
+          meanCloseReturn: mean(closeReturns),
+          medianCloseReturn: median(closeReturns),
+          p25CloseReturn: percentile(closeReturns, 25),
+          p75CloseReturn: percentile(closeReturns, 75),
+          meanHighReturn: mean(highReturns),
+          medianHighReturn: median(highReturns),
+          meanLowReturn: mean(lowReturns),
+          medianLowReturn: median(lowReturns),
+          breakoutVsCloseRate: usable.length === 0 ? null : breakoutVsCloseCount / usable.length,
+          breakoutVsLimitUpPriceRate:
+            usable.length === 0 ? null : breakoutVsLimitUpCount / usable.length,
+        });
+      }
+    }
+  }
+  return {
+    key: "decision_condition_by_day",
+    title: "决策时点条件矩阵（不破 / 破位 × 后续视界）",
+    description:
+      "行 = 决策时点 T+k × 分组 × 后续视界 T+h。分组条件只用截至 T+k 的路径（min(low_1..low_k) 是否 ≥ 首板日开盘价）；" +
+      "未来窗口 = rd ∈ [k+1, h]（**严格在决策时点之后**，不含已发生的 T+1..T+k）；收益锚 = 决策日 T+k 收盘价。" +
+      "收益类全部为小数比例，负数 = 下跌。availableCount = 该视界窗口连续可用的事件数（分母），" +
+      "horizon ≤ k 时为 0（那不是「后续」）。**本表不含任何择优 / 排序字段。**",
+    columns: [
+      textColumn("classificationDay", "决策时点"),
+      textColumn("group", "分组"),
+      intColumn("sampleCount", "样本数"),
+      intColumn("availableCount", "窗口可用数"),
+      textColumn("futureHorizon", "后续视界"),
+      intColumn("windowStartRelativeDay", "窗口起(rd)"),
+      intColumn("windowEndRelativeDay", "窗口止(rd)"),
+      ratioColumn("meanCloseReturn", "平均收盘收益"),
+      ratioColumn("medianCloseReturn", "中位收盘收益"),
+      ratioColumn("p25CloseReturn", "P25 收盘收益"),
+      ratioColumn("p75CloseReturn", "P75 收盘收益"),
+      ratioColumn("meanHighReturn", "平均最高价收益"),
+      ratioColumn("medianHighReturn", "中位最高价收益"),
+      ratioColumn("meanLowReturn", "平均最低价收益"),
+      ratioColumn("medianLowReturn", "中位最低价收益"),
+      ratioColumn("breakoutVsCloseRate", "突破决策日收盘价率"),
+      ratioColumn("breakoutVsLimitUpPriceRate", "突破涨停价率"),
+    ],
+    rows,
+  };
 }
 
 /** 表 2 · `non_break_vs_break`（规格 §11：ALL / NON_BREAK_OPEN / BREAK_OPEN）。 */
@@ -1100,6 +1456,24 @@ export function buildObservations(args: {
   /** 见 `candidates.unscannedEventCount`：账目缺口的**具体条数**。 */
   unscannedEventCount: number | null;
   minFutureHorizon: number;
+  /** 决策时点条件矩阵**表**（观察句直接读它的行，不重算、不另建一份结构）。 */
+  decisionCondition: StudyTable;
+  /** 非法 OHLC 的分档与影响面（两个口径必须分开说，见 LIMITATION）。 */
+  invalidOhlc: {
+    barCount: number;
+    byRelativeDay: {
+      eventDay: number;
+      observationCore: number;
+      observationMid: number;
+      observationLong: number;
+    };
+    affectedEventCount: number;
+    usedInFutureOutcomeCount: number;
+  };
+  /** 逐视界样本账（T+5 / T+10 / T+20 各自的有效样本数）。 */
+  horizonDataQuality: FundamentalStudyCustomPayload["dataQuality"]["horizonDataQuality"];
+  /** 本 Run 生效的事件扫描策略。 */
+  eventScanPolicy: string;
 }): Array<{ kind: ObservationKind; text: string }> {
   const out: Array<{ kind: ObservationKind; text: string }> = [];
   const {
@@ -1239,6 +1613,60 @@ export function buildObservations(args: {
       `深度与后续表现之间是否存在非线性关系值得单独验证；本实验不输出任何「最佳回撤区间」。`,
   });
 
+  // ---- 决策时点条件矩阵（本轮新增；**只描述事实，不判优劣**）----
+  //
+  // 🔴 措辞纪律：只写「在 T+k 时点、某组、其后 T+h 的中位 / 平均收盘收益 = X」这类
+  //    **事实陈述**；绝不出现「T+k 最好 / 最优 / 应当在此入场」——
+  //    择优属于 Strategy 阶段，本实验连 Strategy 都不创建。
+  const decisionObsHorizon = futureHorizonList.includes(10)
+    ? 10
+    : futureHorizonList[futureHorizonList.length - 1]!;
+  for (let k = 1; k <= maxObservationDay; k += 1) {
+    const nonBreakRow = rowOf(
+      args.decisionCondition,
+      (r) =>
+        str(r, "classificationDay") === `T+${k}` &&
+        str(r, "group") === "NON_BREAK_OPEN" &&
+        str(r, "futureHorizon") === `T+${decisionObsHorizon}`,
+    );
+    const breakOpenRow = rowOf(
+      args.decisionCondition,
+      (r) =>
+        str(r, "classificationDay") === `T+${k}` &&
+        str(r, "group") === "BREAK_OPEN" &&
+        str(r, "futureHorizon") === `T+${decisionObsHorizon}`,
+    );
+    const nonBreakSample = int(nonBreakRow, "sampleCount");
+    const breakSample = int(breakOpenRow, "sampleCount");
+    if (nonBreakSample === 0 && breakSample === 0) continue;
+    out.push({
+      kind: "DESCRIPTIVE",
+      text:
+        `T+${k} 时点：截至该日尚未跌破首板日开盘价的事件 ${nonBreakSample} 个` +
+        `（其后 T+${decisionObsHorizon} 窗口连续可用 ${int(nonBreakRow, "availableCount")} 个），` +
+        `这些事件在 T+${decisionObsHorizon} 的**中位收盘收益**为 ${pct(num(nonBreakRow, "medianCloseReturn"))}；` +
+        `同期已破位事件 ${breakSample} 个（窗口可用 ${int(breakOpenRow, "availableCount")} 个），` +
+        `中位收盘收益为 ${pct(num(breakOpenRow, "medianCloseReturn"))}；两者差值为 ` +
+        `${pct(subtract(num(nonBreakRow, "medianCloseReturn"), num(breakOpenRow, "medianCloseReturn")))}。` +
+        `以上为样本内描述性统计，未进行显著性、稳健性或 OOS 检验。`,
+    });
+  }
+  /**
+   * 🔴 数据质量的两条口径必须分开说，否则「1353 个坏 Bar」会被读成「1353 个事件有问题」。
+   */
+  out.push({
+    kind: "LIMITATION",
+    text:
+      `非法 OHLC 有两个**不同**的口径：按**Bar 次**统计共 ${args.invalidOhlc.barCount} 根` +
+      `（分档：rd=0 共 ${args.invalidOhlc.byRelativeDay.eventDay}、rd∈1-${maxObservationDay} 共 ` +
+      `${args.invalidOhlc.byRelativeDay.observationCore}、rd∈${maxObservationDay + 1}-10 共 ` +
+      `${args.invalidOhlc.byRelativeDay.observationMid}、rd∈11-${MAX_DECLARED_POST_RELATIVE_DAY} 共 ` +
+      `${args.invalidOhlc.byRelativeDay.observationLong}），按**事件数**统计涉及 ` +
+      `${args.invalidOhlc.affectedEventCount} 个事件。二者不相等是**刻意的**：` +
+      `只有核心窗口（rd ≤ ${maxObservationDay}）内的坏 Bar 才会剔除事件，长视界的坏 Bar ` +
+      `只让该视界的窗口不可用。被用于计算未来收益的坏 Bar 数 = ${args.invalidOhlc.usedInFutureOutcomeCount}（必须恒为 0）。`,
+  });
+
   // ---- LIMITATION ----
   out.push({
     kind: "LIMITATION",
@@ -1306,7 +1734,7 @@ export function buildObservations(args: {
   const gap = args.unscannedEventCount;
   const declared = args.datasetDeclaredTotalEvents;
   const cause = args.droppedByScanLimit
-    ? `事件扫描触达平台安全阀上限 ${args.scanLimit}`
+    ? `事件扫描未覆盖数据集全量（本实验声明的扫描上限 ${args.scanLimit}）`
     : "本轮扫描返回的事件数少于数据集声明的事件数";
   if (args.droppedByScanLimit || (gap !== null && gap !== 0)) {
     if (gap === null) {
@@ -1334,6 +1762,52 @@ export function buildObservations(args: {
           `本结果的全部结论只适用于本轮扫描到的候选事件，不能外推到数据集全量。`,
       });
     }
+  }
+  /**
+   * 逐视界样本账（规格 §5）：长视界缺数据**不得**回头删核心样本。
+   *
+   * 这是「T+5 / T+10 / T+20 各自的有效样本数」的唯一人读出口 —— 没有它，
+   * 读者只能看到 T+5 的表，无从知道 T+20 那一列实际用了多少样本。
+   */
+  if (args.horizonDataQuality.length > 0) {
+    const parts = args.horizonDataQuality.map(
+      (item) =>
+        `T+${item.horizon} 可用 ${item.validCount} / 核心样本 ${item.eligibleCount}` +
+        `（窗口内缺 Bar ${item.missingCount} 个、含坏 Bar ${item.invalidCount} 个）`,
+    );
+    const allFull = args.horizonDataQuality.every((item) => item.validCount === item.eligibleCount);
+    out.push({
+      kind: allFull ? "DESCRIPTIVE" : "LIMITATION",
+      text:
+        `逐视界独立样本账 —— ${parts.join("；")}。` +
+        (allFull
+          ? " 各视界所需窗口均完整可用，长视界未损失样本。"
+          : " 长视界少掉的样本**不会**回流影响短视界统计：每个视界各算各的分母" +
+            "（规格：禁止因 T+20 不可用而把事件从 T+5 核心样本里删掉）。"),
+    });
+  }
+  /**
+   * 🔴 决策矩阵的「结构性空格」必须解释，否则会被读成「样本为 0 / 计算失败」。
+   */
+  const emptyCombos: string[] = [];
+  for (let k = 1; k <= maxObservationDay; k += 1) {
+    for (const h of futureHorizonList) {
+      if (h > k) continue;
+      const row = rowOf(
+        args.decisionCondition,
+        (r) => str(r, "classificationDay") === `T+${k}` && str(r, "futureHorizon") === `T+${h}`,
+      );
+      if (row !== null && int(row, "sampleCount") > 0) emptyCombos.push(`T+${k} → T+${h}`);
+    }
+  }
+  if (emptyCombos.length > 0) {
+    out.push({
+      kind: "LIMITATION",
+      text:
+        `决策时点条件矩阵有 ${emptyCombos.length} 个格子**结构上必然为空**（${emptyCombos.join("、")}）：` +
+        "「后续视界 h ≤ 决策时点 k」时窗口 rd ∈ [k+1, h] 是空集，那不是「后续表现」。" +
+        "这些格子的 sampleCount 仍有值（该时点该组的事件数），但收益字段一律为 null，**不代表计算失败**。",
+    });
   }
 
   return out;
@@ -1727,6 +2201,8 @@ export interface AssembleStudyArgs {
     droppedByMaxEvents: number;
     droppedByScanLimit: boolean;
     scanLimit: number;
+    eventScanPolicy: string;
+    eventPageCount: number;
     /** 见 `candidates` 模式里的说明：`datasetEventCount − candidateCount`，`null` = 总数不可知。 */
     unscannedEventCount: number | null;
   };
@@ -1736,11 +2212,27 @@ export interface AssembleStudyArgs {
     missingEventDayBarCount: number;
     missingObservationBarCount: number;
     invalidOhlcBarCount: number;
+    invalidOhlcByRelativeDay: {
+      eventDay: number;
+      observationCore: number;
+      observationMid: number;
+      observationLong: number;
+    };
+    invalidOhlcAffectedEventCount: number;
+    invalidOhlcUsedInFutureOutcomeCount: number;
+    horizonDataQuality: Array<{
+      horizon: number;
+      eligibleCount: number;
+      missingCount: number;
+      invalidCount: number;
+      validCount: number;
+    }>;
     insufficientForwardBarsEventCount: number;
     duplicateEventIdCount: number;
     eventDayCloseDiffersFromLimitUpPriceCount: number;
     closeMismatchToleranceRatio: number;
   };
+  /** 决策时点条件矩阵由 `tables.decision_condition_by_day` **投影**而来（见组装函数内部），无需在此传入。 */
   excludedByReason: Record<string, number>;
   availableMaxPostRelativeDay: number | null;
   forwardDataPurpose: string;
@@ -1776,6 +2268,7 @@ export function assembleFundamentalStudyResult(args: AssembleStudyArgs): Experim
   const drawdownBuckets = tableByKey.get("drawdown_buckets")!;
   const entryDay = tableByKey.get("entry_day_comparison")!;
   const futureHorizonComparison = tableByKey.get("future_horizon_comparison")!;
+  const decisionConditionTable = tableByKey.get("decision_condition_by_day")!;
 
   const finalDays = derived
     .map((item) => item.byDay.find((d) => d.relativeDay === classificationDay))
@@ -1810,6 +2303,15 @@ export function assembleFundamentalStudyResult(args: AssembleStudyArgs): Experim
     dailyPath.rows.map((row) => (typeof row[key] === "number" ? (row[key] as number) : null));
 
   const groupLabels = futureHorizons.map((h) => `T+${h}`);
+  /**
+   * 决策时点矩阵图使用的后续视界。
+   *
+   * 取 `futureHorizons` 中 ≥ 10 的最小值（默认即 T+10）：它必须**大于最大决策时点**
+   * 才能让 k ∈ 1..maxObservationDay 的每一行都还有「后续」可言 ——
+   * `T+k → T+h`（h ≤ k）按定义不是后续表现，那格恒为空。
+   */
+  const decisionChartHorizon =
+    futureHorizons.find((h) => h >= 10) ?? futureHorizons[futureHorizons.length - 1]!;
   const groupRowOf = (group: string) =>
     futureHorizons.flatMap((h) => {
       const row = futureHorizonComparison.rows.find(
@@ -1880,6 +2382,34 @@ export function assembleFundamentalStudyResult(args: AssembleStudyArgs): Experim
         },
       ],
     },
+    {
+      key: "decision-condition-by-day",
+      title: `决策时点条件矩阵（各决策时点的后续 T+${decisionChartHorizon} 平均收盘收益）`,
+      description:
+        `X = 决策时点 T+k（k ∈ 1..${maxObservationDay}）；Y = 该时点**之后**（rd ∈ [k+1, ${decisionChartHorizon}]）` +
+        "的平均收盘收益（锚 = 决策日 T+k 收盘价）。三条序列 = 截至 T+k 的不破组 / 破位组 / 全部样本。" +
+        "🔴 **不标注「最佳」、不做排序** —— 本图只呈现「不同时点的信息条件与后续结果」，择优属于 Strategy 阶段。",
+      kind: "BAR" as const,
+      xLabel: "决策时点",
+      yLabel: `后续 T+${decisionChartHorizon} 平均收盘收益`,
+      unit: RATIO_UNIT,
+      series: GROUP_CODES.map((group) => ({
+        key: group.toLowerCase().replace(/_/g, "-"),
+        label: GROUP_LABELS[group],
+        points: Array.from({ length: maxObservationDay }, (_, i) => {
+          const row = decisionConditionTable.rows.find(
+            (r) =>
+              r["classificationDay"] === `T+${i + 1}` &&
+              r["group"] === group &&
+              r["futureHorizon"] === `T+${decisionChartHorizon}`,
+          );
+          return {
+            x: `T+${i + 1}`,
+            y: typeof row?.["meanCloseReturn"] === "number" ? (row["meanCloseReturn"] as number) : null,
+          };
+        }),
+      })),
+    },
   ];
 
   // ---- 分布 ----
@@ -1941,6 +2471,42 @@ export function assembleFundamentalStudyResult(args: AssembleStudyArgs): Experim
       };
     }),
   );
+
+  /**
+   * 决策时点条件矩阵的结构化镜像 —— 与 `tables` 里的 `decision_condition_by_day`
+   * **同一份行数据投影**（不重算），页面/观察句都读它，杜绝第二套口径。
+   */
+  const decisionConditionMatrix: FundamentalStudyCustomPayload["decisionConditionMatrix"] =
+    futureHorizons.flatMap((horizon) =>
+      Array.from({ length: maxObservationDay }, (_, i) => i + 1).flatMap((day) =>
+        GROUP_CODES.map((group) => {
+          const row =
+            decisionConditionTable.rows.find(
+              (r) =>
+                r["classificationDay"] === `T+${day}` &&
+                r["group"] === group &&
+                r["futureHorizon"] === `T+${horizon}`,
+            ) ?? null;
+          return {
+            classificationDay: day,
+            group,
+            horizon,
+            sampleCount: int(row, "sampleCount"),
+            availableCount: int(row, "availableCount"),
+            meanCloseReturn: num(row, "meanCloseReturn"),
+            medianCloseReturn: num(row, "medianCloseReturn"),
+            p25CloseReturn: num(row, "p25CloseReturn"),
+            p75CloseReturn: num(row, "p75CloseReturn"),
+            meanHighReturn: num(row, "meanHighReturn"),
+            medianHighReturn: num(row, "medianHighReturn"),
+            meanLowReturn: num(row, "meanLowReturn"),
+            medianLowReturn: num(row, "medianLowReturn"),
+            breakoutVsCloseRate: num(row, "breakoutVsCloseRate"),
+            breakoutVsLimitUpPriceRate: num(row, "breakoutVsLimitUpPriceRate"),
+          };
+        }),
+      ),
+    );
 
   const customPayload: FundamentalStudyCustomPayload = {
     computationVersion: COMPUTATION_VERSION,
@@ -2006,6 +2572,7 @@ export function assembleFundamentalStudyResult(args: AssembleStudyArgs): Experim
       medianCloseReturnOnFinalDay: num(finalRow, "medianCloseReturn"),
       groupOutcomes,
     },
+    decisionConditionMatrix,
     exclusionReasonLabels: { ...EXCLUSION_REASON_LABELS },
     observations,
     potentialStrategyHypotheses: args.hypotheses,
@@ -2018,6 +2585,16 @@ export function assembleFundamentalStudyResult(args: AssembleStudyArgs): Experim
       `样本资格包含「rd 1…${maxObservationDay} 行情齐备」这一数据可得性条件（选择偏差，不是价格条件），特此登记。`,
       `futureHorizons 最长视界 T+${longHorizon} 的可用样本数可能少于核心样本数（数据集 post 视界上限 rd=${args.availableMaxPostRelativeDay ?? "未知"}）。`,
       "MFE / MAE 在「事件日收盘价锚定」的表里与同锚的最高 / 最低价收益**数学恒等**；只有入场日视角（锚 = 入场日开盘价）才给出独立信息。",
+      "决策时点矩阵口径：决策时点 = T+k，分组只用 rd ∈ [1, k]（当时可见的路径）；" +
+        "未来窗口 = rd ∈ [k+1, h]（**严格在决策时点之后**，不含已发生的 T+1..T+k）；收益锚 = 决策日 T+k 收盘价。" +
+        "`h ≤ k` 的格子按定义不是「后续表现」，一律标为不可用（不伪造窗口，也不计入任何统计）。",
+      `非法 OHLC 的两个口径必须分清：**Bar 次** ${dataQuality.invalidOhlcBarCount}（含长视界）` +
+        ` vs **事件数** ${dataQuality.invalidOhlcAffectedEventCount}（至少有一根坏 Bar 的事件）；` +
+        `其中只有核心窗口（rd ≤ ${maxObservationDay}）内的坏 Bar 才会**剔除事件** —— ` +
+        `长视界的坏 Bar 只让**那个视界**不可用（既不剔除事件，也绝不参与收益计算：` +
+        `被用于计算未来收益的坏 Bar 数 = ${dataQuality.invalidOhlcUsedInFutureOutcomeCount}，恒为 0）。`,
+      "后续视界的样本账**逐视界独立**（T+5 / T+10 / T+20 各有 eligible / missing / invalid / valid）：" +
+        "某事件缺 T+15 行情**不会**把它从 T+5 的统计里删掉，只会让 T+20 那一列少一个样本（规格：禁止因长视界不可用而删核心样本）。",
       "本实验只做描述性统计：不排序、不评级、不做显著性主张、不判定最优观察日 / 入场日 / 回撤区间，也不产出任何策略对象。",
     ],
   };
@@ -2042,8 +2619,18 @@ export function assembleFundamentalStudyResult(args: AssembleStudyArgs): Experim
          */
         candidates.unscannedEventCount === null
           ? "数据集未声明事件总数，因此**无法核对**本轮候选是否为数据集全量；平台守恒式（eligible + excluded = candidate）对「未被扫描的事件」不成立保护。"
-          : `账目缺口：数据集声明 ${candidates.datasetEventCount} 个事件 − 本轮候选 ${candidates.candidateCount} 个 = **${candidates.unscannedEventCount} 个未被扫描**（既不在候选、也不在剔除）。` +
-            `平台守恒式只覆盖 candidate，覆盖不到这个缺口，故由 customPayload.candidates.unscannedEventCount 单独登记。`,
+          : candidates.unscannedEventCount === 0
+            ? `全量扫描成立：数据集声明 ${candidates.datasetEventCount} 个事件，本轮候选 ${candidates.candidateCount} 个，` +
+              `**未被扫描 = 0**；扫描方式 = ${candidates.eventScanPolicy} 策略 + 共 ${candidates.eventPageCount} 轮分页。` +
+              `账目：${candidates.candidateCount}（候选）= ${eligibleCount}（入池） + ${excludedCount}（剔除）。`
+            : `账目缺口：数据集声明 ${candidates.datasetEventCount} 个事件 − 本轮候选 ${candidates.candidateCount} 个 = **${candidates.unscannedEventCount} 个未被扫描**（既不在候选、也不在剔除）。` +
+              `平台守恒式只覆盖 candidate，覆盖不到这个缺口，故由 customPayload.candidates.unscannedEventCount 单独登记。`,
+        `事件扫描策略 = ${candidates.eventScanPolicy}；本轮生效的扫描上限 = ${candidates.scanLimit} 个事件` +
+          `（` +
+          (candidates.droppedByScanLimit
+            ? "🔴 触顶截断：实际扫描被上限截断"
+            : "未触顶") +
+          `）；分页 = ${candidates.eventPageCount} 轮（每轮由 keyset 游标续读，无重复、无跳洞）。`,
       ],
     },
     // 🔴 信封里的表格由**同一份行数据**投影而成（`toEnvelopeTable` 只做显示位收敛），

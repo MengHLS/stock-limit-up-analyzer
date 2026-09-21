@@ -24,6 +24,7 @@
 
 import { ResearchValidationError } from "../experimentValidation";
 import type { PerformanceEvaluationRun } from "../performanceMetrics/types";
+import { evaluateTolerance, type MetricComparisonSpec } from "./comparison";
 import { computePerturbationConfigFingerprint } from "./serialize";
 import type {
   PerturbationDrift,
@@ -175,13 +176,46 @@ export function applyDriftThresholds(
   thresholds: ResolvedRobustnessThresholds
 ): readonly RobustnessSensitivityFlag[] {
   const flags: RobustnessSensitivityFlag[] = [];
-  if (Math.abs(drift.returnDriftPct) > thresholds.returnDriftThresholdPct) {
+  // 🔴 判定本身走**唯一实现** `evaluateTolerance`（泛化层的 `comparison.ts`）：
+  //    策略侧只是把两个阈值投影成两次调用（双向 / 仅增大），语义与历史逐字一致
+  //    （`|Δ| > tol` / `Δ > tol`，严格大于），但仓里从此只有一份容差语义。
+  if (evaluateTolerance(drift.returnDriftPct, thresholds.returnDriftThresholdPct, "both")) {
     flags.push("RETURN_DRIFT");
   }
-  if (drift.drawdownWorseningPct > thresholds.drawdownWorseningThresholdPct) {
+  if (evaluateTolerance(drift.drawdownWorseningPct, thresholds.drawdownWorseningThresholdPct, "increase")) {
     flags.push("DRAWDOWN_WORSENING");
   }
   return flags;
+}
+
+/**
+ * 策略侧阈值 → **声明式比较**（同样的语义，用泛化层的词表表达）。
+ *
+ * 用途有二：
+ *   1. 证明「泛化后的声明式比较能无语义损失地代替策略侧的固定两阈值」
+ *      （审计 P1-3 的判断标准就是这一条）；
+ *   2. 让跨阶段的两侧在**同一份词表**里对齐：策略侧的两个阈值不再是一对魔法字段，
+ *      而是「指标 + 容差 + 方向」三元组的两个实例。
+ */
+export function robustnessComparisonSpecsFromThresholds(
+  thresholds: ResolvedRobustnessThresholds
+): readonly MetricComparisonSpec[] {
+  return [
+    {
+      metric: "totalReturnPct",
+      label: "总收益率",
+      unit: "%",
+      tolerance: thresholds.returnDriftThresholdPct,
+      direction: "both",
+    },
+    {
+      metric: "maxDrawdownPct",
+      label: "最大回撤",
+      unit: "%",
+      tolerance: thresholds.drawdownWorseningThresholdPct,
+      direction: "increase",
+    },
+  ];
 }
 
 /**

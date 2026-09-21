@@ -264,9 +264,10 @@ export interface LoopRunAssemblySummary {
   readonly strategyVersion: string;
   readonly recipeId: string;
   /**
-   * 配方来源（三条诚实路径）：`strategy-document`（文档带 recipe）|
+   * 配方来源（**四条**诚实路径）：`strategy-document`（文档带 recipe）|
    * `strategy-declarative-conditions`（文档无 recipe，由 `definition.entry.conditions` 现场合成）|
-   * `explicit-request`（调用方指定 / 默认常量）。
+   * `explicit-request`（**调用方显式指定** recipeId）|
+   * `default-fallback`（文档既无 recipe 又无条件 ⇒ 落到默认常量；见 `BD-21`）。
    */
   readonly recipeSource: RecipeResolutionSource;
   readonly recipeFeatureIds: readonly string[];
@@ -326,11 +327,23 @@ function requireExecutionModel(document: StrategyDocument): ExecutionModelId {
 // 配方（特征 / 信号 / 排序 / 选择）
 // ---------------------------------------------------------------------------
 
-/** 配方来源（进审计摘要：让人一眼看出「这次按哪个配方跑的、这个配方是哪儿来的」）。 */
+/**
+ * 配方来源（进审计摘要：让人一眼看出「这次按哪个配方跑的、这个配方是哪儿来的」）。
+ *
+ * 🔴 `explicit-request` 与 `default-fallback` 必须**分开**（2026-09-21 · `BD-21`）：
+ * 两者此前**共用** `explicit-request` ⇒ 「调用方明确要求按 A 跑」与「文档什么都没声明、
+ * 系统自己拿默认配方顶上」在摘要里**长得一模一样**，且后者是**静默换规则** ——
+ * 产物看起来完全正常，跑的规则却与策略文档无关（参数搜索会把结果记在一个
+ * **根本没被执行**的策略定义名下）。拆开后「是否发生兜底」一眼可辨。
+ *
+ * ⚠️ 第三 / 第四值必须与 `shared/researchContracts.ts` 的 zod 闭集同步，
+ * 否则 tRPC `.output()` 会拒值。
+ */
 export type RecipeResolutionSource =
   | "strategy-document"
   | "strategy-declarative-conditions"
-  | "explicit-request";
+  | "explicit-request"
+  | "default-fallback";
 
 // ---------------------------------------------------------------------------
 // 数据来源（进审计摘要：让人一眼看出「这次跑的是哪份数据」）
@@ -543,7 +556,8 @@ function rebuildDataset(
  *   1. 文档带 `recipe` ⇒ 按注册表解析（既有链，不改）；
  *   2. 文档不带 `recipe`，但 `definition.entry.conditions` **声明了条件** ⇒
  *      现场编译成执行门槛（`compileConditionRecipe`）—— 这是「声明与执行同源」；
- *   3. 两者都没有 ⇒ 调用方显式指定 / 显式默认常量（诚实兜底，绝不伪装成「文档声明」）。
+ *   3. 两者都没有 ⇒ 调用方显式指定（`explicit-request`）/
+ *      显式默认常量（`default-fallback`）—— 两条**分别留痕**，绝不伪装成「文档声明」。
  *
  * 🔴 路径 2 的存在理由（修复「条件进不了回测」）：此前「无 recipe 但有条件」会静默落到
  * `DEFAULT_STRATEGY_RECIPE_ID`（涨跌幅加权取前 5 名），让「守线 + 缩量」的文档实际跑成
@@ -583,9 +597,25 @@ function requireRecipe(
   if (explicitRecipeId !== undefined && explicitRecipeId.trim().length > 0) {
     return { runtime: resolveStrategyRecipeById(explicitRecipeId), source: "explicit-request" };
   }
+  // 🔴 `BD-21`：走到这里时**没有任何人**要求按默认配方跑 —— 是系统自己顶上来的。
+  // 此前它被标成 `explicit-request`（语义 =「调用方明确要求」），于是「静默换规则」
+  // 在审计摘要里**根本看不见**。现在单列 `default-fallback` 并**响亮留痕**：
+  //   ⒜ 结构化字段 `assembly.recipeSource = "default-fallback"`（可检索、可断言）；
+  //   ⒝ 本行 stderr 日志（人看得见）。
+  // ⚠️ 这里刻意打日志而不新增 schema 字段：`recipeSource` + `recipeId`（=落到的配方）
+  //   两个既有字段已构成完整溯源；再加一个 note 字段属重复表达。
+  // ⚠️ 日志放在**唯一判定点**（本函数）而不是调用方 —— `assembleStrategySide` 被
+  //   主入口与 `strategyEvaluation` 两条路径共用，放在调用方必漏其中一条。
+  // 实测（2026-09-21）：库里 `limit-up-baseline` 2 份文档走的**正是**这条路径。
+  console.warn(
+    `[RunWorkbenchAssembly] 策略 ${document.strategyId}@${document.version} 的文档` +
+      `既没有 recipe、也没有 definition.entry.conditions ⇒ 装配层兜底到默认配方 ` +
+      `"${DEFAULT_STRATEGY_RECIPE_ID}"（assembly.recipeSource="default-fallback"）。` +
+      `这不是调用方指定的配方；若不符合预期，请在策略文档里声明 recipe 或声明式条件。`,
+  );
   return {
     runtime: resolveStrategyRecipeById(DEFAULT_STRATEGY_RECIPE_ID),
-    source: "explicit-request",
+    source: "default-fallback",
   };
 }
 

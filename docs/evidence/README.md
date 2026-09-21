@@ -1247,3 +1247,193 @@ npx tsx docs/evidence/_r007_run_engine.mts
 
 ⚠️ **本索引的缺口**：`9cg`（旧 Research 整体退役）与 `9ch`（RESEARCH-EXPERIMENT-004 独立实验持久化）
 两轮的证据文件**尚未在本索引登记**（本次只补登 `9ci`），下次维护本文件时应一并补齐。
+
+---
+
+## `9cj` · EXP-001 收口修正（全量样本 + 数据质量 + 决策时点条件矩阵）· 2026-09-21
+
+> 编号 `9cj`。前置 `9ci`（EXP-001 首次真实投产）同在本文件索引中。
+> 🔴 本轮的核心是**把「只有 20000 个事件」这件事真正解决**（缺口 3978 → **0**），
+> 因此证据里**每个数字都必须能被独立复算** —— 三个探针的分工就是「结论面 / 表格面 / 独立 SQL 基线」。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_probe_9cj_preflight.mts` → `.out.json` | **独立 SQL 基线**：不经过任何实验代码，直接查 TiDB（Run 状态 / Dataset 版本 / 事件表 / post 相对日分布 / 坏 Bar 分档） | `safeToRun = true`；后视坏 Bar 分档 **449 / 427 / 775**，与 Run 的 `invalidOhlcByRelativeDay` **逐档完全一致** ⇒ 数据质量数字是算出来的 |
+| `_probe_9cj_run_readback.mts` → `.out.json` | **结论面**：从 MinIO **读回 `result.json`**（不是内存值），导出账目 / 数据质量 / 45 格矩阵 / 24 条观察 / H1–H3 / 11 条口径说明 | `candidateCount = 23978`、`unscannedEventCount = 0`、`eligible 23712 / excluded 266`；矩阵 **45 格** |
+| `_probe_9cj_tables.mts` → `.out.json` | **表格面**：从 MinIO 读回 `result.json` 里 **6 张表的每一行**（readback 只 slice 了 8 行） | 行数 `5 / 15 / 6 / 5 / 9 / 45`；报告 §8/§9/§11/§12 逐行取自这里 |
+| `_e2e_9ci_exp001.mts`（**扩到 25 步**）→ `_e2e_9cj_exp001_full_scan.out.json` | 真库全链 E2E（真实 ExperimentDefinition + 真实 Dataset + 真实 TiDB + 真实 MinIO） | **25 步全 PASS**；Run `RUN-20260921-9D216C34`；产物 **12 个对象** |
+| `_e2e_9cj_exp001_full_scan_run1.out.json` | 上述 E2E 的**第一轮**输出 | 保留以对照「6c 判据写错 → 修好后复跑」的前后差异 |
+| `_probe_9ci_exp001_frontend.mjs`（**扩到 46 判据**）→ `.out.json` / `.out.txt` | 无头 Edge + CDP 量 DOM，走**完整真实用户路径**（列表 → 打开 → **真点运行** → 自定义结果页 → RunDetail） | **46 PASS / 0 FAIL**；新 Run `RUN-20260921-8557F38A`；`D4` 双侧互补判据 |
+| `_gate_9cj_done.out.txt` | **规格 §16 完成判据闸门输出**（13 条，逐条从落盘证据现读；脚本为一次性 `_scratch/check_9cj_done.py`） | **13 / 13 PASS** ⇒ EXP-001 可标记正式 `COMPLETE` |
+| `_gate_9cj_report_reconcile.out.txt` | **报告 ↔ 证据对账闸门输出**（脚本 `_scratch/reconcile_report_9cj.py`） | 报告 **359 项数字缺失 0 项**；闸门自身可证伪（篡改 1 处必被抓住） |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+pnpm exec tsx docs/evidence/_probe_9cj_preflight.mts   > docs/evidence/_probe_9cj_preflight.out.json
+pnpm exec tsx docs/evidence/_probe_9cj_run_readback.mts > docs/evidence/_probe_9cj_run_readback.out.json
+pnpm exec tsx docs/evidence/_probe_9cj_tables.mts      > docs/evidence/_probe_9cj_tables.out.json
+# 会写 1 行 Run + N 个对象（属被测能力本身）；不要在无必要时反复重跑
+EXP001_KEEP=1 pnpm exec tsx docs/evidence/_e2e_9ci_exp001.mts > docs/evidence/_e2e_9cj_exp001_full_scan.out.json
+node docs/evidence/_probe_9ci_exp001_frontend.mjs
+```
+
+🔴 **本次用到的一条「报告纪律」**：报告里的 **359 项数字全部由上述落盘证据现算**，
+并用一次性对账闸门逐字符串校验（**缺失 0 项**）；该闸门**自身可证伪**（故意篡改报告 1 处必被抓住）。
+⚠️ 对账时发现「进舍规则」是隐性口径：`.xx5` 这类中点值，Python `f"{x:.2f}"` 是 **half-even**、
+JS `toFixed` 是 **half-away-from-zero** ⇒ 2 个值曾出现假冲突，已显式指定规则。
+
+---
+
+## `9ck` · ROBUSTNESS-CROSS-STAGE-001（现有 Robustness 跨阶段通用性审计）· 2026-09-21
+
+> 编号 `9ck`。**纯只读审计**：`server/**` / `shared/**` / `client/**` / `tests/**` / `drizzle/**` **零改动**（机器证据：`git status --porcelain --` 这些路径的结果与审计开始前**逐行相同**）。⚠️ 按规格 §11 的台账登记要求，本轮修改了 4 个**文档**文件（`ROADMAP.md` / `ROADMAP-CHANGELOG.md` / `CHANGE-AUDIT.md` / 本文件）—— 不是「零改动」，但**全部落在文档面**。
+> 🔴 本轮证据的特点是**「否定性事实」占多数** —— 要证明的不是「有什么」，而是「**没有什么**」
+> （核心比较机制从未跨域复用 / C-18.1 与 C-18.2 零持久化 / 研究实验体系零 Robustness）。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_probe_robustness_cross_stage_state.mts` → `.out.json` | **只读真库状态**（**每条 SQL 均为 SELECT**）：全库扫 `%robust%` 表 / 三表精确行数 / C-18.1·C-18.2 落库表是否存在 / 父子完整性 / `parameter_search_run` 两列与 NULL 占比（含 `normalizeRows` 形状自检） | 全库 robustness 表**恰 3 张**（全是 `search_robustness_*`）；`robustness_run` / `robustness_sample` / `stochastic_robustness_run` **不存在** ⇒ **零持久化是实测事实**（不只是「代码看起来没写」）；`search_robustness_run` **0** 行 / `_result` **6** / `_parameter_analysis` **3**；🔴 **9 行孤儿**（父表 0 行、0 FK 无级联）；`referenceCheckApplied IS NULL` = **3** / 5 |
+| `_gate_robustness_cross_stage_audit.out.txt` | **报告对账闸门输出**（脚本 `_scratch/check_robustness_cross_stage_audit.py`）：75 条判据逐条**从真实文件 / 探针 JSON 现读**（不读「报告里怎么写的」） | **75 / 75 PASS**（退出码 0）；**闸门自身可证伪**（篡改探针 `search_robustness_run` 计数 ⇒ 必变红，已实测）；首跑 2 条 FAIL 全为**判据自身写错**并已登记「为什么错」 |
+| 报告（未在 evidence 目录） | `docs/research/ROBUSTNESS-CROSS-STAGE-001.md`（535 行 / 17 节，纯 LF） | 结论 **B（核心可复用，需要轻量适配）**；`ROBUSTNESS-CROSS-STAGE-001 = AUDIT_COMPLETE`；**EXP-002 未标记为开始** |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+pnpm exec tsx docs/evidence/_probe_robustness_cross_stage_state.mts > docs/evidence/_probe_robustness_cross_stage_state.out.json
+python C:/work/sourcecode/_scratch/check_robustness_cross_stage_audit.py
+```
+
+⚠️ **本索引的缺口（沿 `9ci` 的登记，仍未补）**：`9cg`（旧 Research 整体退役）与 `9ch`（RESEARCH-EXPERIMENT-004 独立实验持久化）两轮的证据文件**尚未在本索引登记**。
+
+---
+
+## `9cl` · EXP-002（Research Robustness / Stability Validation 完整闭环）· 2026-09-21
+
+> 编号 `9cl`。**跨阶段 Robustness 复用**轮：`server/research/robustness/{dimension,comparison,multiDimension}.ts` 为**新增泛化层**（3 文件 / 1540 行）；`{drift,evaluate,index,serialize}.ts` 为**既有文件泛化**（旧调用方形状不变）。
+> 🔴 本轮的证据特点：**每一类证据都配一条「反证」** —— 该是 0 的地方是 0（自检行）、**该动的地方真的动了**（非 0 delta 行 39/48）；
+> 且**中间态证据全部留档**（`.first` / `.prefix` / `.extendonly` / `.r4` 四份），所以「第一次为什么错、错在哪一步」可被第三方复核。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_e2e_9cl_exp002_stability_validation.mts` → `.out.json` | **真机 E2E 29 步**：真库 + 真 Dataset（`first_limit_pullback` / `390002`）+ 真 MinIO，经 tRPC 端点跑完整 Run（对象存储可用 → 前置闸无在途 Run → 定义已注册 → Run 生命周期 → 信封 → 矩阵结构 → 样本账两套守恒 → 全量扫描 → **真重算四条证据** → 不伪造 0 → 观察项 → 产物声明 / 逐个 `exists()` / 角色段不重复 / Manifest 索引 / **绕开服务层列 MinIO 前缀** → 读回 result.json / 3 CSV / SVG / 核心记录 → 页面读端点 → 核心记录坐标自洽 → 清理复核） | **29 / 29 PASS**；Run **`RUN-20260921-46934548`**（`COMPLETED` / `SUCCEEDED` / `durationMs = 128475` / 探针壁钟 133629 ms）；MinIO **8 对象**；`manifest` = `result 1 / tables 3 / charts 1 / artifacts 2 / logs 1`；CSV 数据行 **48 / 17 / 17**；SVG **14430 B 可闭合**；`robustness-run.json` **54679 B**、指纹 `ddd458d62578b483…`；**自清理 0 残留** |
+| `.first.out.json` | 同一条 E2E 的**首跑**结果（Run `RUN-20260921-A95F5B48`） | **22 PASS / 7 FAIL**，7 条**全部是判据自身写错**（字段名 `subjectKind`、`eventScanPolicy` 属平台 `datasetFacts`、`unavailable` 下发的是**标签**不是**码**、`HORIZON_T5` 按定义不可用、信封 `eligible` ≠ 核心 `eligible`、`RBM-…` 是派生值、清理后有**刻意保留**的 Run）—— **0 条是产品缺陷**；这是「判据自身写错也会静默给出假结论」的**可复核样本** |
+| `_probe_9cl_exp002_frontend.mjs` → `.out.json` / `.out.txt` | **前端可达性**（无头 Edge + Node `WebSocket` 直连 CDP **量 DOM**，零依赖）：列表页 → 点「打开」→ 详情页 → **真点一次「运行」** → 自定义结果页（10 张卡片）→ 点「打开这一条 Run」→ RunDetail | **56 PASS / 0 FAIL / `PROBE_EXIT = 0`**（新 Run **`RUN-20260921-C95B1D47`**，正文 23996 字符）；D15/D15b/D15c 钉死容差线（`refLineStroke #dc2626` / `refLineY1 8` / `yTicks [0,0.25,0.5,0.75,1]` / `barCount 48` / `chartSurfaceCount 1`）；越界措辞句子级扫描 552 句 / 4162 句 offenders **0**；控制台 error **0**；🔴 **`prefix` / `extendonly` / `r4` 三份中间态同目录留档，用于复核「产品缺陷 → 错修 → 正解」全过程** |
+| `_ops_cleanup_9cl_superseded_runs.mts` → `.out.json` | **白名单式运维清理**：只删被取代的中间态 Run，白名单外出现即 `exit 2` | `deletedRows = [1,1,1]`、`deletedObjects = 24`、`leftoverObjectsInDeletedPrefixes = 0`；清理后保留 `RUN-20260921-A95F5B48` 与 `RUN-20260921-C95B1D47`（均 `COMPLETED`） |
+| 报告（未在 evidence 目录） | `docs/research/EXP-002-REPORT.md`（774 行 / **19 项** / 52479 B / 纯 LF） | `EXP-002 = COMPLETE`；**§25 停止条件未触发**（泛化非大规模重构、未影响 Strategy / Parameter Search / Backtest 既有语义） |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+# 会写 Run + 写 MinIO 对象（属被测能力本身）；脚本自带前置闸与自清理，不要在无必要时反复重跑
+pnpm exec tsx docs/evidence/_e2e_9cl_exp002_stability_validation.mts > docs/evidence/_e2e_9cl_exp002_stability_validation.out.json
+node docs/evidence/_probe_9cl_exp002_frontend.mjs
+# 清理中间态 Run（默认 dry-run 语义受白名单约束；白名单外出现即 exit 2）
+pnpm exec tsx docs/evidence/_ops_cleanup_9cl_superseded_runs.mts > docs/evidence/_ops_cleanup_9cl_superseded_runs.out.json
+```
+
+🔴 **本轮的三条报告纪律（都可复核）**：
+⒜ **负向结论也要证据** —— `sensitive = 0` 必须配对「非 0 变化量行 39 / 48」，否则「0 敏感」无法与「机制空转」区分；
+⒝ **两个口径不得混用** —— 平台累计 `datasetFacts.eventPageCount = 24` vs 实验自己数的 `candidates.eventPageCount = 12`（`12 × 2`，同一件事被数了两次）；信封 `eligible` vs 核心 `eligible`（不同义，换算必须显式）；
+⒞ **闸门必须可证伪** —— `公共机制 · 12` 经**注入式验证**（注入 `"nonBreakOpen"` 立刻变红并点名；还原后逐字节一致）。
+
+⚠️ **本索引的缺口（沿 `9ci` / `9ck` 的登记，仍未补）**：`9cg`（旧 Research 整体退役）与 `9ch`（RESEARCH-EXPERIMENT-004 独立实验持久化）两轮的证据文件**尚未在本索引登记**（`CHANGE-AUDIT` `BD-12` / `BD-20`）。
+
+---
+
+## `9cm` · STRATEGY-RESEARCH-BRIDGE-001（Independent Experiment → Strategy 正式桥接 + 首板回踩 Strategy 首条真实闭环）· 2026-09-21
+
+> 编号 `9cm`。**首条真实 Strategy 闭环轮**：把 `Dataset 390002 → EXP-001 / EXP-002 真实 Run → first-board-pullback v1.0.0`
+> 这条链路做成**可追溯**，并让它在 **Parameter Search** 与 **Backtest** 两处被**真实消费**。
+> 🔴 本轮的证据特点：**每一条「链路成立」的结论都配一条「真实消费」的实测**，而不是只看类型 / 只看页面渲染；
+> 同时**修掉 2 条真实产品缺陷**，并各自用**注入式验证**证明其回归判据可证伪。
+> ⛔→✅ 本轮原有一道项目惯用闸跑不了（`.git/refs` 缺失 ⇒ 本机 git 拒识该仓库）；**同日已按用户裁定完成修复**（见本节末「`9cm` 收尾」），`checkEolDrift.mjs` 现可运行并报 **0 漂移 / 0 新 CRLF**。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_e2e_srb001_bridge_consumption.mts` → `.out.json` / `.out.txt` | **真机全链 E2E 8 段 / 43 判据**：真实 Dataset `390002` + **3 个真实 Run** → 真实建策略 → 幂等重放 → 证据改变时**响亮冲突** → 溯源读回 → 三张表**真实落盘行** → §14 Parameter Search（真实 `createSearch`）→ §15 Backtest 装配（真实 `assembleRunWorkbenchInputs`）→ 自清理 | **43 / 43 PASS**，`phase = done`；落盘交付物 `strategy_versions.id = 1110001` / `provenance.id = 630001`；证据指纹 `evi-sha256:f0959a03f21bd16a`；§14 `searchable` 恰 = 2 个 TUNABLE、组合 **44**、`referenceCheckApplied = true`；§15 装配 **13094 ms / 150873 行 / 2967 只证券**、`recipeSource = strategy-declarative-conditions`、**`strategyDecisionEngine = strategy-core`**；自清 `parameterSearchRun 1 / combination 44 / result 0` |
+| `_probe_srb001_doc_params.mts` → `.out.json` | **只读根因探针**（缺陷 #1 的证据）：读策略文档的 `hasRecipe` / 参数面 / 条件 / 观察窗口 / 数据集坐标，并**对同一次编译分别走合成配方与已注册配方** | 确证「缺陷只在**合成配方路径**」：`hasRecipe = false`；参数 `maxBreakDepthRatio`(0~0.1 step 0.01, 默认 0) / `maxVolumeRatio`(0.5~2 step 0.5, 默认 1)；两条条件**都是** `PARAMETER_REFERENCE`；`compileConditionRecipe = {ok:false, code:"RECIPE_PARAMETER_INVALID"}` 而 `registeredRecipe = {ok:true, resolved:{…}}` |
+| `_probe_srb001_strategy_detail_frontend.mjs` → `.out.json` / `.out.txt` | **前端可达性**（无头 Edge + Node `WebSocket` 直连 CDP **量 DOM**，零依赖）：`/strategies` → **点策略卡片**（卡片是**整块 `<button>`**，无「打开」文案）→ 等标签渲染 → **真实鼠标点「版本与状态」**（Radix 只认真实鼠标）→ 等**证据区块本体**渲染 → C 段逐项断言 | **36 PASS / 0 FAIL × 2 次确定性**；证据区块「研究证据（**5** 条 · 只读）」、指纹徽标与后端**逐字节一致**、3 个中文类别标签（**枚举码不进 DOM**）、3 个 runId、2 个实验编号、5 条 `reference` 路径、数据集坐标 `#390002（v2）`、尾注「不构成本策略的买入 / 卖出规则」全部可见；择优措辞句子级扫描 **174 句 / 97 句 offenders 0** |
+| `_probe_srb001_git_and_eol_state.py` → `.out.json` | **只读环境取证**（git 元数据完整性 + 行尾状态）：直读 `.git` 结构与 mtime（不经 git）→ 经**影子 GIT_DIR** 枚举对象库 → 统计 `index` 引用 blob 的缺失面 → 逐路径判别「文件丢了」还是「只有对象丢了」→ 两层行尾判据 | ⛔ `.git/refs` 与 `.git/packed-refs` **不存在** ⇒ `is_git_directory()` 失败 ⇒ 本机 git 拒识仓库；对象库剩 **5792** 对象 / **235** commit，存活最新 commit = `07fcbf494032`（**2026-09-19 22:56**），reflog 尖端 `a871b033…`（09-21 02:21）**不可解析**；`index` 1830 个唯一 blob 中 **241 个缺失**，而这 241 个路径**在工作区全部还在** ⇒ **元数据丢失、工作区零丢失**；行尾：本轮 **15/15 个改动文件全为纯 LF**（`taskFilesAllLf = true`），全仓 `i/lf w/crlf` **329** 个均为 **2026-08-30** 起的长期状态 |
+| `_probe_srb001_git_repair_and_eol.py` → `.out.json` | **「修后」只读取证**（git 元数据修复 + 329 文件 EOL 归一化的验收证据，全只读） | `git fsck` **rc=0 且零输出**；`git multi-pack-index verify` **rc=0**；`show-ref` 双 ref = `a871b033…`（`main` = `origin/main`）；`HEAD` = `a871b033…` / 2026-09-21 02:21:56 / 「第一次自动研究」；行尾矩阵 = `i/lf w/lf` **1807** / `i/crlf w/crlf` **5**（有意）/ `i/none` 15 / `i/-text` 10 / `i/mixed` 2，**`i/lf w/crlf` = 0**；`status` = 38 ` M` + 20 `??` / **0 删除**；`diff --numstat` **38** 文件；**`diff --stat HEAD` = 38 files / +3950 / −433（与归一化前逐字相同 ⇒ 归一化零内容漂移）**；索引 stat 抽样 `size: 310`（畸形 `345` 已修） |
+| `_probe_srb001_baseline.mts` / `_probe_srb001_result_paths.mts` | 第一阶段现状确认（**只读**）：既有桥 / 读路径 / 三张表列名 / 证据可解析路径 | 结论并入报告 §2（按规格 §2 **未单独交付审计报告**） |
+| 报告（未在 evidence 目录） | `docs/strategy/STRATEGY-RESEARCH-BRIDGE-001-REPORT.md`（**本任务唯一**最终报告） | `STRATEGY-RESEARCH-BRIDGE-001 = COMPLETE`（§23 判据 24/24）；**两条真实缺陷已修 + 可证伪回归**；`BD-21` / `BD-22` / `BD-23` 新增技术债登记 |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+# 会写 1 条策略 + 1 条溯源行（属被测能力本身，脚本默认保留）；会自清 parameter_search 3 类行
+pnpm exec tsx docs/evidence/_e2e_srb001_bridge_consumption.mts > docs/evidence/_e2e_srb001_bridge_consumption.out.json
+# 只读
+pnpm exec tsx docs/evidence/_probe_srb001_doc_params.mts      > docs/evidence/_probe_srb001_doc_params.out.json
+node docs/evidence/_probe_srb001_strategy_detail_frontend.mjs
+python docs/evidence/_probe_srb001_git_and_eol_state.py       > docs/evidence/_probe_srb001_git_and_eol_state.out.json
+# 只读（修后验收）
+python docs/evidence/_probe_srb001_git_repair_and_eol.py     > docs/evidence/_probe_srb001_git_repair_and_eol.out.json
+```
+
+🔴 **本轮的 3 条报告 / 证据纪律（都可复核）**：
+
+⒜ **「接线完成」≠「用户够得到」** —— 溯源面板住在**「版本与状态」标签页**内（详情页默认标签是「策略定义」），
+列表入口是**整块 `<button>`** 卡片；因此验收必须走**完整真实用户路径**并**真点标签**。
+⚠️ **Radix Tabs 对 JS `.click()` 会返回成功但内容不切换**（**假 PASS 来源**）⇒ 必须用 CDP `Input.dispatchMouseEvent` 发**真实鼠标事件**。
+
+⒝ **判据自身写错 = 与产品缺陷同级** —— 本轮登记 **6 条**（前端探针 5 条 + 行尾粗判据 1 条），
+其中行尾那条最危险：初次按「已跟踪文件应为 LF」判，报出 **333** 个「不应为 CRLF」，
+**差点把 2026-08-30 起的长期状态记成「本轮引入 329 处漂移」** ⇒ 修正为「**基线 blob ↔ 工作区**」比对后才成立。
+
+⒞ **修法本身也可以是错的** —— 「判据可证伪」必须**注入式实测**，不能靠声明：缺陷 #1 改成 `void name` ⇒ **3 条变红**；
+缺陷 #2 摘掉一个读方法的 `withReadRetry` ⇒ **恰好 2 条变红**（另两条仍绿，证明各自生效）。
+
+⛔→✅ **本节同时登记的环境缺陷（非本轮引入）—— 已于同日按用户裁定修复**：本仓 `.git/refs` + `.git/packed-refs` 缺失曾使
+项目惯用的两道 git 闸（`git status --porcelain` 前置、`node scripts/checkEolDrift.mjs` 行尾哨兵）**不可运行**（报 `fatal: not a git repository`）。
+修复**严格最小面**：① 整份备份 `.git`（36 文件 / 13 973 963 B → `_scratch/srb001_git_backup/dotgit`）；② **纯新增** `.git/refs`、`.git/refs/heads`、`.git/refs/tags` 空目录 ⇒ git **立即重新识别仓库**；③ `git fetch origin`（**只写对象库 + `refs/remotes/origin/*`**，不碰工作区/索引）⇒ 对象 5788 → **12088**，`origin/main` = `a871b033…` 拉回；④ 恢复 `refs/heads/main` = `a871b033…`，再重建索引。🚫 全程**未**用 `reset --hard` / `checkout -f` / `clean`。
+**结果**：`git fsck` **rc=0 零输出**、`git multi-pack-index verify` **rc=0**、`show-ref` 双 ref 齐备、`HEAD` = 「第一次自动研究」(2026-09-21 02:21:56)。
+🔴 **修复途中挖出第二层损坏（比 refs 更隐蔽）**：陈旧 `multi-pack-index`（09-19 22:56）与 09-20 20:50 被改写的 pack **不匹配** ⇒ `fsck` **rc=32** 报 `failed to load pack in position 0` + 26 条 `failed to load pack entry`，而 `verify-pack` 认为旧 pack **自身完整**。切分后定性：这 26 个 oid **既不在旧 idx 也不在新 idx**（真缺失、且**不被任何 ref 引用**）；`core.multiPackIndex=false` 下 `fsck --connectivity-only` **rc=0 零输出** ⇒ **唯一缺陷就是那份陈旧 midx**。修法 = 备份后删除并 `git multi-pack-index write` 重建。
+
+✅ **EOL 归一化（同一裁定）**：**329** 个 `i/lf w/crlf`（`.ts` 209 / `.tsx` 70 / `.json` 18 / `.md` 10 / `.sql` 10 / `.mts` 5 / `.mjs` 2 / `.py` 1 / `.patch` 1 / `.yaml` 1 / 无扩展名 2；mtime 集中在 **2026-08-30（144）** 与 **2026-09-13（164）** ⇒ **长期状态，非本轮引入**）**全部转回纯 LF**：先 zip 备份（877 167 B）→ 逐文件校验「纯 CRLF」（`crlf 计数 == lf 计数` 且无孤立 CR）→ 原子替换 + 回读 → 复查 **归零**（`i/lf w/lf` 1478 → **1807**），合计减少 **80 177** 字节。范围外**不动**的 5 个 `i/crlf w/crlf`（有意 CRLF）：`.gitignore`、`client/src/App.tsx`、`client/src/components/AppShell.tsx`、`docs/evidence/_after_tsc_phaseA.out.txt`、`tests/server/marketSync.test.ts`。
+🔴 **归一化零内容漂移的硬证据**：`git diff --stat HEAD` 在归一化**前后逐字相同** = `38 files changed, 3950 insertions(+), 433 deletions(-)（⚠️ 该 `38 / +3950 / −433` 是**归一化完成瞬间**的读数 —— 与归一化**之前**逐字相同，**这才是判据：EOL 归一化没有改变既有改动集**。此后本轮又追加了 `scripts/checkEolDrift.mjs` 注释修正与四处台账登记，而这些**都是被跟踪文件** ⇒ `diff --stat HEAD` 会自然变大；**当前快照一律以 `docs/evidence/_probe_srb001_git_repair_and_eol.out.json` 的 `D_diffStatHead_lastLine` 为准**。）`；`git status` 前后同为 **58**（38 ` M` + 20 `??`）；**0 个 `D` 条目** ⇒ **工作区文件零丢失**。
+
+⚠️ **归一化过程中踩到并修掉一个「判据分叉」陷阱（已升级为纪律）**：归一化后 `git status` 一度从 58 跳到 **387**（329 个目标全报 ` M`），而 `git diff --numstat` 仍是 **38** —— **同一棵树、两个口径给出矛盾结论**。逐步切分后定性：`git hash-object` = `git rev-parse :path` = `git rev-parse HEAD:path`（三方哈希**逐字节相同**）、`git diff --quiet` **rc=0**、`git diff-files -p` **空**，但 `git diff-files --raw` / `--name-only` / `git status` 报 `M`；`git ls-files --debug` 显示索引条目记录的是**畸形 stat**（`size: 345` = 旧 CRLF 尺寸，而 blob 只有 310 B；`mtime` 停在 2026-08-30）。⚠️ **`git reset --mixed HEAD` 解决不了** —— 它会按 oid **复用**旧索引里那份畸形 stat。✅ **正解**：`cp .git/index <备份> && rm .git/index && git read-tree HEAD`（**只动索引、不碰工作区**）⇒ 索引 stat 变为正确的 `size: 310`，`status` 回到 **58**。⇒ 教训：**「stat 判据」与「内容判据」会分叉，矛盾时拿 `git hash-object` 一锤定音**；已把该坑写入 `scripts/checkEolDrift.mjs` 的运维注记（该哨兵自身只用 `git diff --numstat`，**不受此坑影响**）。
+⚠️ 同时**修正该哨兵里已失效的背景注释**：旧注释称「仓库仅 3 个有意 CRLF 文件」并列出 `.workbuddy/memory/PROJECT_RULES.md`（该路径已 untrack + gitignore）⇒ 实测为 **5** 个，已按实测改写。
+
+**备份物**（均在 `C:\work\sourcecode\_scratch\`，**不进仓库**）：`srb001_git_backup\dotgit\`（整份 `.git`）/ `srb001_eol_backup_2026-09-21.zip`（329 文件 CRLF 原样，877 167 B）/ `srb001_index_before_rebuild.bak`（206 050 B）/ `srb001_midx_backup\multi-pack-index.stale.bak`（164 008 B）。
+`BD-22`（git 元数据受损）与 `BD-23`（329 个 CRLF 长期状态）**均已关闭**。👍 **工作区文件零丢失**：241 个「缺失 blob」对应的路径**全部**在工作区仍存在，且 329 个被归一化的文件在 `git diff --stat HEAD` 上**逐字未变**。
+⚠️ **「改 `server/**`」纪律的合规复核（本轮补做，如实登记，含流程瑕疵）**：EOL 归一化的 329 个文件里含 **20 个 `server/**`**（`server/_core/*` 16 个 + `server/recognition.ts` / `stockPriceSync.ts` / `storage.ts` / `tushare.ts`）、**5 个 `shared/**`**、**167 个 `tests/**`**、**85 个 `client/**`**、24 个 `drizzle/**` ⇒ 落在「三门」第一条的触发范围内。复核结论：
+① 🔴 **逐字节等同于 HEAD（零语义变化）**：`git diff --stat HEAD -- server/_core server/recognition.ts server/stockPriceSync.ts server/storage.ts server/tushare.ts` **输出为空**；5 个 `shared/**` 同为空；`tests/**` 只剩 **3 个** 9cm 自有改动文件（`compile.test.ts` / `exp001FundamentalStudy.test.ts` / `runPersistence.test.ts`）⇒ 其余 164 个归一化测试文件同样零 diff。且这 20 个 `server/**` 文件**均不出现在** `git status` 的 ` M` 列表里（列表里全是 9cm 自有改动）。
+② ✅ **在途 Run 检查**：`docs/evidence/_probe_inflight_runs.mts` 全表扫描 ⇒ `RUNNING = 0`；唯一命中 `archive_research_question:270001`，时间戳停在 **2026-09-17T06:50:58**（已登记的历史僵死行，且属**已退役**的 `archive_*` 表）⇒ **0 个真实在途 Run**，归一化未打断任何真实进度。
+③ ✅ **未主动杀 / 重启 dev server**：`pnpm run dev`（PID 10556）与 `tsx watch server/_core/index.ts`（PID 600）**存活**；因内容逐字节未变，watcher 的自动 reload（若被 mtime 触发）在语义上是 **no-op**，而纪律明确要求「常驻服务别杀」。
+⚠️ **流程瑕疵（诚实登记）**：`tsx watch` 是**按 mtime** 触发 reload 的 ⇒ **即使内容未变，批量重写已跟踪源文件也会让 dev server 重载**。正确顺序是**动手前**先跑在途 Run 检查（本轮做在**事后**，属流程瑕疵；结论仍是安全的，因为 `RUNNING` 真实值为 0）。⇒ 已升级为纪律：**任何批量重写已跟踪源文件（哪怕只改行尾）前，先跑 `_probe_inflight_runs.mts`**。
+## `9cm` 收尾② · `BD-21` 闭环 + Parameter Search 首次实际研究运行 · 2026-09-21
+
+> 编号 `9cm`（**同号收尾**，未新增编号）。本节 = 收尾项 `BD-21` 与 **Parameter Search 首次真实运行**的证据索引。
+> 🔴 **这不是审计**：本轮只修「真正阻塞 Parameter Search 实际运行」的问题，然后**直接运行**参数搜索。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_probe_bd21_recipe_fallback_real_db.mts` → `.out.json` / `.out.txt` | **真库只读体检**：遍历 `listStrategies()` + `listVersions` + `getVersionBundle`，对**每个**策略版本跑 `assembleStrategySide` 并捕获 `warn` | **5 / 5 PASS**；全库 **12** 策略 / **13** 版本 ⇒ `strategy-document` **9** / `strategy-declarative-conditions` **2** / `explicit-request` **0** / **`default-fallback` 2**（`limit-up-baseline@1.0.0` + `@1.1.0`，各 `warn` **恰 1**）；warn 文本含策略身份与配方 id |
+| `_probe_ps001_first_round.mts` → `.out.json` / `.out.txt` | **Parameter Search 第一轮真实运行**（真实 tRPC / 真实 TiDB / 真实回测）：`createSearch` → `getSearch` → `startSearch` → `getSearchResults`；11 步判据 | **11 / 11 PASS**；`PSRUN-20260921-45da2fb2`；4 组合；`evaluated = 4` / `reusedFromCache = 4`（**跨 Run** 复用）/ `failed = 0`；9560 ms；`parameter_search_result` 行数 == 4；**默认保留 Search Run**（真实研究产物） |
+| ↑ **同脚本** `PS001_SCALE=expand` → `_probe_ps001_expanded.out.json` / `.out.txt` | 同上的**扩大规模**轮（9 组合，窗口 2025-01-02 ~ 2025-06-30） | **11 / 11 PASS**；`PSRUN-20260921-b43a5716`；9 组合；`evaluated = 9` / `reusedFromCache = 0`（**全部真算**）/ `failed = 0`；105241 ms；**9 / 9 `SUCCEEDED`**；`parameter_search_result` 行数 == 9 |
+| 单测（不在 evidence 目录） | `tests/server/runWorkbenchAssembly/recipeFallback.test.ts`（用 `assembleStrategySide` —— 纯装配、零 DB） | **4 / 4 PASS**（A 兜底 ⇒ `default-fallback` + **恰一条** warn；B 显式 ⇒ `explicit-request` + **零** warn；C 判别力；D zod 闭集四值哨兵）；**注入式**改回 `explicit-request` ⇒ **恰好 2 条变红** |
+| 报告（不在 evidence 目录） | `docs/strategy/STRATEGY-RESEARCH-BRIDGE-001-REPORT.md` **§26**（75036 B / 纯 LF） | 6 节结构：`BD-21` / 闭环状态 / 连接状态 / 11 问 / Tests / 非阻塞项 + ROADMAP；数字**全部从本节落盘证据现算**，由 `_scratch/srb001_closeout_report.py` 生成并带 3 条自检 |
+
+**重跑方式**（均在项目根目录执行；长任务**不要接管道**，输出重定向到文件）：
+
+```bash
+# 只读：真库配方来源分布 + 兜底 warn 计数
+pnpm exec tsx docs/evidence/_probe_bd21_recipe_fallback_real_db.mts > docs/evidence/_probe_bd21_recipe_fallback_real_db.out.txt 2>&1
+
+# 会写真库（parameter_search_run / _combination / _result 三类行）+ 真跑回测；默认保留 Search Run（真实研究产物）
+PS001_SCALE=smoke  pnpm exec tsx docs/evidence/_probe_ps001_first_round.mts > docs/evidence/_probe_ps001_first_round.out.txt 2>&1
+PS001_SCALE=expand pnpm exec tsx docs/evidence/_probe_ps001_first_round.mts > docs/evidence/_probe_ps001_expanded.out.txt 2>&1
+
+# 清理本探针创建的 Search Run（3 张表按 searchRunId 精确删；默认关闭，必须显式 PS001_CLEAN=1）
+PS001_CLEAN=1 PS001_SCALE=smoke pnpm exec tsx docs/evidence/_probe_ps001_first_round.mts > /dev/null 2>&1
+```
+
+🔴 **本轮登记「判据自身写错」3 条（全部是探针自身，0 条产品缺陷）+ 1 条文档漂移**：
+
+⒜ **宽容断言把整条判据旁路** —— 步骤 0 写成「`datasetVersionId === 390002` **或** 该值为 `undefined` / `null`」，后半**恒真**；而下方 `createSearch` 又**显式传了** `datasetVersionId` ⇒ **「坐标能否从文档派生」这条从未被检验过**。已拆为 `0a`（版本身份）+ `0b`（`resolvePrimaryDatasetVersionId(document) === 390002`，**不依赖调用方传值**）。
+⒝ **桶内聚合会张冠李戴** —— 初版按参数分桶再比各桶指标集合，桶内混着**其他参数**的差异（如 `breakDepth = 0` 桶含 `[0/0.5]` 与 `[0/1]`，`tradeCount ∈ {12, 31}` 那 12↔31 的差**来自 volumeRatio**）⇒ 读者**必然误读**。已改为**边际效应（配对比较）**：固定其余参数比较目标参数，并加 `evidenceForInsensitive.notVacuous`（`distinctValues ≥ 2` 且 `comparisonGroupsWithMultipleValues ≥ 1`）。
+⒞ **把「子集」当「互斥」** —— `evaluatedCount + reusedFromCacheCount === 组合数` 假设两者互斥；真实语义是 **`reused ⊆ evaluated`**（**缓存复用也是一次评估**，只是未重算）⇒ expand 轮 `evaluated = 9 / reused = 2` 被**误判 FAIL**。已改为 `completed + failed === 组合数 && evaluated === 组合数 && reused <= evaluated`。⚠️ 注意 expand 轮的 `reused = 2` 出现在**中间态**，**最终落盘**轮次为 `reused = 0`。
+⒟ **文档与行为漂移（已就地修正）** —— `_probe_ps001_first_round.mts` 文件头 docstring 的 `expand` 网格写作 `{0, 0.02, 0.05} × {0.5, 1, 2}`，而实际常量是 `{0, 0.05, 0.1} × {0.5, 1, 1.5}` ⇒ **照文档复跑会得到与已落盘证据不同的网格**。已按实测改写 docstring；`.out.json` 证据**未改**（它记录的是真实跑过的东西）。

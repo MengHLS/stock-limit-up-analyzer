@@ -53,6 +53,10 @@ import {
   deriveUniverseIdForDataset,
   validateBuiltStrategyDefinition,
 } from "./definitionBuild";
+import {
+  readResearchEvidenceFingerprint,
+  readResearchEvidenceRecords,
+} from "./researchEvidence";
 import type { StrategyPromotionPort } from "./strategyPromotionPort";
 import type { StrategyResearchProvenanceRepository } from "./types";
 
@@ -256,6 +260,32 @@ export const PROMOTION_MISSING_UPSTREAMS = [
 export type PromotionMissingUpstream = (typeof PROMOTION_MISSING_UPSTREAMS)[number];
 
 /**
+ * 单条**研究证据**的只读视图（STRATEGY-RESEARCH-BRIDGE-001；display-only）。
+ *
+ * 它回答规格 §16 要求的一行五问：来自哪个 Experiment / 哪个 Experiment Version /
+ * 哪个 Run / 哪个 Dataset Version / 引用什么。
+ */
+export interface PromotionResearchEvidenceView {
+  /** 独立实验 id（`<group>/<key>`）。 */
+  experimentCode: string;
+  experimentVersion: string;
+  /** `RUN-YYYYMMDD-XXXXXXXX` —— **真实持久化 Run** 的 id。 */
+  runId: string;
+  datasetVersionId: number;
+  datasetVersionLabel: string | null;
+  /** `RESULT_SUMMARY` / `STABILITY_VERDICT` / `SAMPLE_ACCOUNTING`。 */
+  evidenceKind: string;
+  /** 引用了这次运行的哪一部分（点分定位路径）。 */
+  reference: string;
+  description: string | null;
+  /** 这次运行结果信封的 canonical 指纹。 */
+  resultDigest: string;
+  runStatus: string;
+  startedAt: string | null;
+  durationMs: number | null;
+}
+
+/**
  * Strategy Version 的 Research 溯源**视图**（display-only；006.4.1-B §21）。
  *
  * 四个概念的实际关系（§42 §7 要求说清）：
@@ -296,6 +326,23 @@ export interface PromotionProvenanceView {
     experimentParameters: unknown;
     /** 实验结果 canonical 指纹（服务端真实重跑后算出）。 */
     experimentResultDigest: string | null;
+    /**
+     * **研究证据列表**（STRATEGY-RESEARCH-BRIDGE-001 §16）—— 每条指向一次**真实持久化 Run**。
+     *
+     * 一条 Strategy Version 只允许一条溯源行（`UNIQUE(strategyVersionId)`），因此「同时引用
+     * EXP-001 + EXP-002」是把证据做成**列表**冻结进 `sourceSnapshotJson`，而不是多行。
+     * 旧链路 / 未声明证据的来源 ⇒ 空数组（**不是** `null`：读路径的「没有」与「读不到」都归一为
+     * 「这条溯源不带证据列表」，前端据此隐藏区块即可，无需区分两者）。
+     */
+    researchEvidences: readonly PromotionResearchEvidenceView[];
+    /**
+     * 证据列表的**独立内容指纹**（`evi-sha256:…`）。
+     *
+     * 🔴 **与 `strategy_versions.fingerprint` 同名不同义**：后者是**执行语义指纹**
+     * （只由交易规则 / 参数 / 执行假设决定），本指纹只由研究证据决定。两者刻意分离，
+     * 使「改研究来源」不会伪造出「改交易规则」的版本变化（§3 研究事实与交易规则严格分离）。
+     */
+    researchEvidenceFingerprint: string | null;
     createdAt: string | null;
   } | null;
   /** **执行**绑定坐标（Strategy 侧；与来源可不同）。 */
@@ -988,6 +1035,33 @@ export function createStrategyCandidateService(
         }
       }
 
+      // ⑤ 研究证据（STRATEGY-RESEARCH-BRIDGE-001 §16）：从**同一溯源行**的
+      //    `sourceSnapshotJson` 读回 —— 零额外查询、零 FK、零 migration。
+      //
+      //    🔴 **宽容读取**：形态旧（旧链路）/ 未声明证据段 ⇒ `[]` + `null`，
+      //       绝不因此让溯源读取失败（「这块溯源不带证据」不是数据异常）。
+      //    🔴 **只回显落盘值**，不即席重算指纹：读路径的职责是「如实报告存了什么」，
+      //       写入时的自洽性由 `assertProvenanceInput`（声明即受校验）保证。
+      const researchEvidences: PromotionResearchEvidenceView[] = (
+        row === undefined ? [] : readResearchEvidenceRecords(row.sourceSnapshotJson)
+      ).map((record) => ({
+        experimentCode: record.experimentCode,
+        experimentVersion: record.experimentVersion,
+        runId: record.runId,
+        datasetVersionId: record.datasetVersionId,
+        datasetVersionLabel: record.datasetVersionLabel,
+        evidenceKind: record.evidenceKind,
+        reference: record.reference,
+        description: record.description ?? null,
+        resultDigest: record.resultDigest,
+        runStatus: record.runStatus,
+        startedAt: record.startedAt,
+        durationMs: record.durationMs,
+      }));
+      const researchEvidenceFingerprint = row === undefined
+        ? null
+        : readResearchEvidenceFingerprint(row.sourceSnapshotJson);
+
       return {
         strategyId,
         version,
@@ -1008,6 +1082,8 @@ export function createStrategyCandidateService(
               experimentVersion: row.experimentVersion ?? null,
               experimentParameters: row.experimentParametersJson ?? null,
               experimentResultDigest: row.experimentResultDigest ?? null,
+              researchEvidences,
+              researchEvidenceFingerprint,
               createdAt: row.createdAt ?? null,
             },
         executionDatasetVersionId,

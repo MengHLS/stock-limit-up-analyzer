@@ -137,6 +137,22 @@ export type StrategyRecipeDefinition = StrategyRecipeDefinitionCommon &
         readonly buildGates: (parameters: ResearchParameterSet) => readonly FeatureGate[];
         /** 排序特征 id（信号值取自它，供横截面取 topN）。 */
         readonly rankFeatureId: string;
+        /**
+         * 探测用参数 code（**仅注册期「门槛引用面」校验用**；不给缺省 ⇒ `[]`）。
+         *
+         * 🔴 为什么必须有（STRATEGY-RESEARCH-BRIDGE-001 §15 实测缺陷）：
+         * 注册期会用「探测参数集」调一次 `buildGates` 以收集门槛引用的 featureId，而
+         * `buildGatesProbe` 原先把探测集**写死**为 `Object.values(PULLBACK_PARAMETER_IDS)`
+         * —— 那是**已注册配方**的参数面。合成配方（`conditionSignal/compile.ts`）的参数 code
+         * 来自**策略文档**，与这三个 code 无关 ⇒ 探测时 `requireNumericParameter` 取不到值，
+         * 抛 `RECIPE_PARAMETER_INVALID` ⇒ **「文档声明式条件」这条路径对任何参数 code 不等于
+         * 注册配方三参数的策略都不可用**（`assemble.ts#requireRecipe` 路径 2 结构性失败）。
+         *
+         * 语义：定义方**显式声明**自己 `buildGates` 会读的额外参数 code。探测集 = 既有
+         * `PULLBACK_PARAMETER_IDS` 值 ∪ 本字段（一律给 `0` —— 数值合法，只为让 `buildGates`
+         * 走完全程；**不参与任何计算与落库**）。
+         */
+        readonly gateProbeParameterCodes?: readonly string[];
       }
   );
 
@@ -309,11 +325,20 @@ function registeredRecipes(): ReadonlyMap<string, StrategyRecipeRuntime> {
 function buildGatesProbe(definition: StrategyRecipeDefinition): readonly FeatureGate[] {
   if (definition.signalKind !== "gated") return [];
   const probeValues = [0, 1];
+  /**
+   * 🔴 定义方声明的额外参数 code（`gateProbeParameterCodes`）。
+   *
+   * 合成配方（声明式条件）的门槛右值是**文档参数**，不在 `PULLBACK_PARAMETER_IDS` 里；
+   * 不补进探测集就会在注册期校验里抛 `RECIPE_PARAMETER_INVALID`
+   * （实测见 `docs/evidence/_probe_srb001_doc_params.mts`）。缺省 `[]` ⇒ 已注册配方零回归。
+   */
+  const extraCodes = definition.gateProbeParameterCodes ?? [];
   const out: FeatureGate[] = [];
   for (const requireBullish of probeValues) {
     const probe: ResearchParameterSet = {};
     // 只填能影响引用面的参数；其余给 0（数值合法，仅用于让 buildGates 走完全程）。
     for (const name of Object.values(PULLBACK_PARAMETER_IDS)) probe[name] = 0;
+    for (const name of extraCodes) probe[name] = 0;
     probe[PULLBACK_PARAMETER_IDS.requireBullish] = requireBullish;
     out.push(...definition.buildGates(probe));
   }
@@ -390,7 +415,10 @@ export function resolveStrategyRecipeById(recipeId: string): StrategyRecipeRunti
  * 当策略文档**没有** `recipe` 字段时的兜底配方（显式声明的常量，不是猜测）。
  *
  * ⚠️ 这是**兼容旧文档**的兜底：库里存量 3 份文档（#360001 / #360002 / #390001）都缺 `recipe`，
- * 装配层 `requireRecipe()` 会落到本常量，事实写进 `assembly.recipeSource = "explicit-request"`。
+ * 装配层 `requireRecipe()` 会落到本常量，事实写进
+ * `assembly.recipeSource = "default-fallback"`（🔴 与「调用方显式指定 recipeId」的
+ * `explicit-request` **分开** —— `BD-21`：兜底曾被标成 `explicit-request`，使
+ * 「系统自己顶上来的」与「有人要求的」在审计摘要里根本无法区分）。
  *
  * 🔴 兜底 ≠ 正确：若一份文档声明的是「守线 + 缩量」而缺 `recipe`，兜底会让它按
  * `leader-candidate-baseline`（涨跌幅取前 5 名）跑 —— **这就是「条件进不了回测」的机理**。

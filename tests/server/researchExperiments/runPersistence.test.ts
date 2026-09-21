@@ -42,6 +42,7 @@ import { ARTIFACT_STORAGE_ERROR, ArtifactStorageError } from "../../../server/ar
 import { createRegistryExperimentDatasetPort } from "../../../server/researchExperiments/datasetPort";
 import { ExperimentError } from "../../../server/researchExperiments/errors";
 import {
+  DEFAULT_RUN_LOG_NAME,
   EXPERIMENT_RUN_STALE_AFTER_MS,
   INLINE_VIEW_MAX_BYTES,
   InMemoryExperimentRunRepository,
@@ -50,8 +51,10 @@ import {
   buildRunManifest,
   computeStale,
   createExperimentRunService,
+  inferArtifactDescriptor,
   isInlineViewable,
   parseRunManifest,
+  publishRunArtifacts,
   summarizeOutcome,
   validateRunManifest,
 } from "../../../server/researchExperiments/persistence";
@@ -268,6 +271,74 @@ describe("Manifest 契约", () => {
     expect(manifest.experimentCode).toBe("demo/persist");
     expect(manifest.datasetVersionId).toBe(VERSION_ID);
     expect(manifest.result?.key).toBe(ref.key);
+  });
+
+  /**
+   * 🔴 `9cl` 新增（EXP-002 首次声明 `.json` 文件产物时**实测暴露**的真缺陷）。
+   *
+   * 见 `runManifest.ts#inferArtifactDescriptor` 的注释：原实现只让 `result` / `log`
+   * 覆盖扩展名，于是 `role: "artifact"` + `name: "robustness-run.json"` 被 `.json`
+   * 改判成 `kind: "TABLE"`；而 `artifactPublisher` 是**按 kind 分桶**的
+   * ⇒ 一份 JSON **文档**被放进 `manifest.tables`，页面上显示为「tables（表格）」+ TABLE 徽章，
+   * 与该文件调用处自述的「log/artifact → artifacts 段」**直接矛盾**。
+   *
+   * 当时没有任何测试覆盖角色优先级，所以它静默存活到第一次真机 Run。
+   *
+   * 判据分两层：① 角色优先级（unit）；② **分桶后果**（走真实发布器 + 内存存储）。
+   * 只测 ① 的话，将来有人改分桶规则（例如改成按 role 过滤）时它不会变红；
+   * ② 直接钉住「落进哪个数组」这个**用户可见**的结果。
+   */
+  it("inferArtifactDescriptor：角色优先于扩展名（artifact + .json 不得被改判成 TABLE）", () => {
+    expect(inferArtifactDescriptor("artifact", "robustness-run.json")).toEqual({
+      kind: "OTHER",
+      format: "json",
+      contentType: "application/json",
+    });
+    // `.json → TABLE` 这条映射对 `role: "table"` **保留**（表状 JSON 是合法用法，不是要禁掉它）。
+    expect(inferArtifactDescriptor("table", "table-like.json").kind).toBe("TABLE");
+    expect(inferArtifactDescriptor("table", "stability_matrix.csv").kind).toBe("CSV");
+    expect(inferArtifactDescriptor("chart", "stability_overview.svg").kind).toBe("CHART");
+    expect(inferArtifactDescriptor("result", "result.json").kind).toBe("RESULT");
+    expect(inferArtifactDescriptor("log", "run.log").kind).toBe("LOG");
+    expect(inferArtifactDescriptor("artifact", "no-extension").kind).toBe("OTHER");
+  });
+
+  it("🔴 分桶后果：role=artifact 的 .json 落 `artifacts` 段，不得混进 `tables` 段", async () => {
+    const storage = new InMemoryArtifactStorage();
+    const published = await publishRunArtifacts({
+      storage,
+      experimentId: "demo/persist",
+      experimentVersion: "1.0.0",
+      runId: "RUN-1",
+      datasetVersionId: VERSION_ID,
+      createdAt: "2026-09-20T00:00:00.000Z",
+      result: null,
+      logs: ["一行日志"],
+      artifactFiles: [
+        { name: "a.csv", role: "table", body: "x\n1\n" },
+        { name: "b.svg", role: "chart", body: "<svg/>" },
+        {
+          name: "record.json",
+          role: "artifact",
+          body: "{}",
+          contentType: "application/json; charset=utf-8",
+        },
+      ],
+    });
+    expect(published.manifest.tables.map((item) => item.key)).toEqual([
+      "experiments/demo/persist/runs/RUN-1/tables/a.csv",
+    ]);
+    expect(published.manifest.charts.map((item) => item.key)).toEqual([
+      "experiments/demo/persist/runs/RUN-1/charts/b.svg",
+    ]);
+    // 日志恒在 `artifacts` 段（这是既有行为）；本用例钉的是「JSON 文档也在这里」。
+    expect(published.manifest.artifacts.map((item) => item.key).sort()).toEqual(
+      [
+        "experiments/demo/persist/runs/RUN-1/artifacts/record.json",
+        logObjectKey("demo/persist", "RUN-1", DEFAULT_RUN_LOG_NAME),
+      ].sort(),
+    );
+    expect(published.verification.verified).toBe(true);
   });
 
   it("坐标自洽校验：把 A 的 Manifest 挪到 B ⇒ 当场拒（不是事后发现）", () => {

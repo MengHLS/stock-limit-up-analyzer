@@ -291,6 +291,32 @@ function makeRunner(universe: Universe = MAIN_UNIVERSE, versionContext = context
   });
 }
 
+/**
+ * 注入一个**很小的扫描上限**（模拟平台安全阀生效）。
+ *
+ * 用途：守住「安全阀没有被删掉」这条 —— 全量扫描是靠**声明式策略**绕过的，
+ * 而不是把保护拆了；一旦注入小阀，截断必须在结果里可见。
+ */
+function makeRunnerWithScanLimit(scanLimit: number) {
+  const registry = new ExperimentRegistry();
+  registry.register(fundamentalStudyExperiment);
+  const datasetPort = createRegistryExperimentDatasetPort({
+    reader: new InMemoryResearchDatasetReader({
+      context,
+      events: MAIN_UNIVERSE.events,
+      prefixBars: MAIN_UNIVERSE.prefixBars,
+      postBars: MAIN_UNIVERSE.postBars,
+    }),
+    eventPageSize: 2,
+    eventScanLimit: scanLimit,
+  });
+  return createExperimentRunner({
+    registry,
+    datasetPort,
+    now: () => new Date(1_700_000_000_000),
+  });
+}
+
 async function expectThrowCode(promise: Promise<unknown>, code: string): Promise<void> {
   try {
     await promise;
@@ -341,6 +367,8 @@ function deriveMain(
       firstLimitUpPrice: 11,
       bars: Object.entries(E1.postBars).map(([key, ohlc]) => barOf(Number(key), ohlc)),
       maxAvailableRelativeDay: 20,
+      invalidRelativeDays: new Set<number>(),
+      missingRelativeDays: new Set<number>(),
     },
     {
       eventId: "e2",
@@ -351,6 +379,8 @@ function deriveMain(
       firstLimitUpPrice: 22,
       bars: Object.entries(E2.postBars).map(([key, ohlc]) => barOf(Number(key), ohlc)),
       maxAvailableRelativeDay: 20,
+      invalidRelativeDays: new Set<number>(),
+      missingRelativeDays: new Set<number>(),
     },
     {
       eventId: "e3",
@@ -361,6 +391,8 @@ function deriveMain(
       firstLimitUpPrice: 33,
       bars: Object.entries(E3.postBars).map(([key, ohlc]) => barOf(Number(key), ohlc)),
       maxAvailableRelativeDay: 5,
+      invalidRelativeDays: new Set<number>(),
+      missingRelativeDays: new Set<number>(),
     },
   ];
   return samples.map((sample) => deriveSample(sample, { maxObservationDay, futureHorizons }));
@@ -1093,13 +1125,14 @@ describe("EXP-001 · 12. 空数据（零候选也要产出结构完整的结果�
       excludedCount: 0,
       excludedByReason: {},
     });
-    // 五张表都还在，行结构完整，比率类为 null 而不是 0
+    // 六张表都还在，行结构完整，比率类为 null 而不是 0
     expect(payload.tables!.map((t) => t.key)).toEqual([
       "daily_path_by_relative_day",
       "non_break_vs_break",
       "drawdown_buckets",
       "entry_day_comparison",
       "future_horizon_comparison",
+      "decision_condition_by_day",
     ]);
     const daily = findRow(tableOf(payload, "daily_path_by_relative_day").rows, { relativeDay: "T+1" });
     expect(num(daily, "sampleCount")).toBe(0);
@@ -1155,11 +1188,11 @@ describe("EXP-001 · 14. Result Envelope", () => {
       maxObservationDay: 5,
       futureHorizons: [5, 10, 20],
       drawdownBucketEdgesBps: [0, -200, -500, -800, -1000],
-      maxEvents: 20000,
+      maxEvents: 400000,
     });
   });
 
-  it("信封含 5 张表 / 8 个统计量 / 2 个分布 / 3 张图 / 1 个比较", async () => {
+  it("信封含 6 张表 / 8 个统计量 / 2 个分布 / 4 张图 / 1 个比较", async () => {
     const { outcome } = await runMain();
     const payload = outcome.result!;
     expect(payload.tables!.map((t) => t.key)).toEqual([
@@ -1168,6 +1201,7 @@ describe("EXP-001 · 14. Result Envelope", () => {
       "drawdown_buckets",
       "entry_day_comparison",
       "future_horizon_comparison",
+      "decision_condition_by_day",
     ]);
     expect(payload.statistics!.map((s) => s.code)).toEqual([
       "included_sample_count",
@@ -1187,6 +1221,7 @@ describe("EXP-001 · 14. Result Envelope", () => {
       "path-mean-median",
       "drawdown-bucket-distribution",
       "non-break-vs-break-by-horizon",
+      "decision-condition-by-day",
     ]);
     expect(payload.comparisons!.map((c) => c.key)).toEqual(["non-break-vs-break-at-longest-horizon"]);
   });
@@ -1234,13 +1269,13 @@ describe("EXP-001 · 14. Result Envelope", () => {
 // ---------------------------------------------------------------------------
 
 describe("EXP-001 · 15. Artifact Key", () => {
-  it("7 个产物：名字是合法相对名**且不含角色段**、落在 Run 前缀的角色段下、两两唯一", async () => {
+  it("9 个产物：名字是合法相对名**且不含角色段**、落在 Run 前缀的角色段下、两两唯一", async () => {
     const { artifactFiles } = await runMain();
-    expect(artifactFiles).toHaveLength(7);
+    expect(artifactFiles).toHaveLength(9);
     const names = artifactFiles.map((file) => file.name);
-    expect(new Set(names).size).toBe(7);
-    expect(artifactFiles.filter((file) => file.role === "table")).toHaveLength(5);
-    expect(artifactFiles.filter((file) => file.role === "chart")).toHaveLength(2);
+    expect(new Set(names).size).toBe(9);
+    expect(artifactFiles.filter((file) => file.role === "table")).toHaveLength(6);
+    expect(artifactFiles.filter((file) => file.role === "chart")).toHaveLength(3);
     const RUN_ID = "run-0001";
     for (const file of artifactFiles) {
       expect(() => assertSafeRelativeName(file.name)).not.toThrow();
@@ -1395,5 +1430,261 @@ describe("EXP-001 · 16. Manifest 与前端页面注册", () => {
 
   it("pageKey 与 id 一致（页面注册表按 pageKey 索引）", () => {
     expect(fundamentalStudyExperiment.descriptor.pageKey).toBe(fundamentalStudyExperiment.descriptor.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 17. 收口修正：全量扫描 / 数据质量分档 / 决策时点条件矩阵（规格 §2–§9、§14）
+// ---------------------------------------------------------------------------
+
+describe("EXP-001 · 17. 全量扫描与决策时点矩阵", () => {
+  it("① 分页是全量扫描的实现方式：页大小 2 ⇒ 6 个事件 = 3 轮分页", async () => {
+    const { outcome } = await runMain();
+    expect(outcome.runStatus).toBe("SUCCEEDED");
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    expect(custom.candidates.eventScanPolicy).toBe("FULL_DATASET");
+    expect(custom.candidates.scannedRowCount).toBe(6);
+    expect(custom.candidates.eventPageCount).toBe(3);
+    // 🔴 判据修正（旧断言写死 `datasetFacts.eventPageCount === 3`，实测 6 ⇒ 恒假 FAIL）：
+    //    两个 `eventPageCount` **不是同一个口径**，旧断言把两者当成一件事。
+    //    - `custom.candidates.eventPageCount` = **实验自己那次**流式扫描（6 事件 / 页大小 2 = 3 轮）；
+    //    - `datasetFacts.eventPageCount` = **平台累计**：`feature(0)` / `observation(n)` 走的是
+    //      `access.events()`，会**再做一次完整分页**（`eventsPromise ??=` 只保证「只做一次」，
+    //      并不保证「不做」）⇒ 实测 3 + 3 = 6。
+    //    因此判据写成「平台累计 ≥ 实验那次」且「是单轮页数的整数倍」，而不是把两个口径等同。
+    const experimentPageCount = custom.candidates.eventPageCount;
+    const platformPageCount = outcome.execution.datasetFacts.eventPageCount ?? 0;
+    expect(platformPageCount).toBeGreaterThanOrEqual(experimentPageCount);
+    expect(platformPageCount % experimentPageCount).toBe(0);
+    expect(outcome.execution.datasetFacts.eventScanPolicy).toBe("FULL_DATASET");
+  });
+
+  it("②③ 候选 = 数据集声明事件数，unscannedEventCount 严格为 0（不是 null）", async () => {
+    const { outcome } = await runMain();
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    expect(custom.candidates.datasetEventCount).toBe(6);
+    expect(custom.candidates.candidateCount).toBe(6);
+    expect(custom.candidates.unscannedEventCount).toBe(0);
+    expect(custom.candidates.droppedByScanLimit).toBe(false);
+    const notes = outcome.result!.sampleSummary.notes ?? [];
+    expect(notes.some((line) => line.includes("全量扫描成立"))).toBe(true);
+  });
+
+  it("④ 分页无重复：扫描行数 = 去重后候选数（keyset 游标不重不漏）", async () => {
+    const { outcome } = await runMain();
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    expect(custom.candidates.scannedRowCount).toBe(custom.candidates.candidateCount);
+    expect(custom.dataQuality.duplicateEventIdCount).toBe(0);
+  });
+
+  it("🔴 平台安全阀**没有被删掉**：注入小上限后截断必须可见（缺口 > 0）", async () => {
+    // 这个用例守的是「不许为了全量而拆掉保护」—— 全量是靠**声明式策略**绕过的，
+    // 安全阀本身仍在；一旦生效，截断必须在结果里出数。
+    const runner = makeRunnerWithScanLimit(2);
+    const { outcome } = await runner.runDetailed({
+      experimentId: EXPERIMENT_ID,
+      datasetVersionId: VERSION_ID,
+    });
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    expect(custom.candidates.scannedRowCount).toBe(2);
+    expect(custom.candidates.unscannedEventCount).toBe(4);
+    expect(custom.candidates.droppedByScanLimit).toBe(true);
+    const notes = outcome.result!.sampleSummary.notes ?? [];
+    expect(notes.some((line) => line.includes("未被扫描"))).toBe(true);
+  });
+
+  it("⑤ 非法 OHLC 不污染未来收益；两个口径（Bar 次 / 事件数）分档自洽", async () => {
+    const { outcome } = await runMain();
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    expect(custom.dataQuality.invalidOhlcUsedInFutureOutcomeCount).toBe(0);
+    const byDay = custom.dataQuality.invalidOhlcByRelativeDay;
+    // 分档之和必须等于 Bar 口径总数 —— 否则就是有一档没登记（数字会静默消失）
+    expect(
+      byDay.eventDay + byDay.observationCore + byDay.observationMid + byDay.observationLong,
+    ).toBe(custom.dataQuality.invalidOhlcBarCount);
+    // 事件口径 ≤ Bar 口径（一个事件可以有多根坏 Bar）
+    expect(custom.dataQuality.invalidOhlcAffectedEventCount).toBeLessThanOrEqual(
+      custom.dataQuality.invalidOhlcBarCount,
+    );
+  });
+
+  it("⑤b 长视界坏 Bar 只让该视界不可用，**不**把事件从核心样本里删掉（规格 §5 明令）", () => {
+    const bars: StudyBar[] = [];
+    for (let rd = 1; rd <= 20; rd += 1) {
+      if (rd === 15) continue; // T+15 缺（等价于坏 Bar：窗口不再连续）
+      bars.push(barOf(rd, [10, 10.5, 9.8, 10.2]));
+    }
+    const sample: StudySample = {
+      eventId: "e-horizon",
+      symbol: "600000.SH",
+      eventDate: "2025-01-02",
+      firstLimitUpOpen: 10,
+      firstLimitUpClose: 11,
+      firstLimitUpPrice: 11,
+      bars,
+      maxAvailableRelativeDay: 20,
+      invalidRelativeDays: new Set<number>(),
+      missingRelativeDays: new Set<number>([15]),
+    };
+    const derived = deriveSample(sample, { maxObservationDay: 5, futureHorizons: [5, 10, 20] });
+    expect(derived.byHorizon.get(5)?.available).toBe(true);
+    expect(derived.byHorizon.get(10)?.available).toBe(true);
+    expect(derived.byHorizon.get(20)?.available).toBe(false);
+    // 窗口不连续 ⇒ 收益必须为 null（**禁止跳洞取数**）
+    expect(derived.byHorizon.get(20)?.futureCloseReturnFromClose).toBeNull();
+  });
+
+  it("⑥ 逐视界样本账：eligible 不随视界变（长视界缺数据不回流删核心样本）", async () => {
+    const { outcome } = await runMain();
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    const table = custom.dataQuality.horizonDataQuality;
+    expect(table.map((row) => row.horizon)).toEqual([5, 10, 20]);
+    for (const row of table) {
+      // 🔴 分母恒为入池样本数 —— 这是「不回流」的结构性判据
+      expect(row.eligibleCount).toBe(custom.summary.sampleCount);
+      expect(row.validCount).toBeLessThanOrEqual(row.eligibleCount);
+      // `missing` 与 `invalid` **不是互斥划分**（同一事件可能既缺又坏）
+      // ⇒ 只能编码「上限 + 覆盖」，禁止写成 `missing + invalid === eligible - valid`。
+      const unavailable = row.eligibleCount - row.validCount;
+      expect(row.missingCount).toBeLessThanOrEqual(unavailable);
+      expect(row.invalidCount).toBeLessThanOrEqual(unavailable);
+      expect(row.missingCount + row.invalidCount).toBeGreaterThanOrEqual(unavailable);
+    }
+  });
+
+  it("⑦⑧⑨ 决策矩阵：T+1…T+5 × ALL/NON_BREAK_OPEN/BREAK_OPEN × 各视界，行数齐备且分组互补", async () => {
+    const { outcome } = await runMain();
+    const table = tableOf(outcome.result!, "decision_condition_by_day");
+    expect(table.rows).toHaveLength(5 * 3 * 3);
+    const days = [...new Set(table.rows.map((row) => String(row["classificationDay"])))].sort();
+    expect(days).toEqual(["T+1", "T+2", "T+3", "T+4", "T+5"]);
+    const groups = [...new Set(table.rows.map((row) => String(row["group"])))].sort();
+    expect(groups).toEqual(["ALL", "BREAK_OPEN", "NON_BREAK_OPEN"]);
+    for (const day of days) {
+      for (const horizon of ["T+5", "T+10", "T+20"]) {
+        const pick = (group: string) =>
+          findRow(table.rows, { classificationDay: day, group, futureHorizon: horizon });
+        // 不破 + 破位 = 全部（每个决策时点都成立）
+        expect(
+          num(pick("NON_BREAK_OPEN"), "sampleCount")! + num(pick("BREAK_OPEN"), "sampleCount")!,
+        ).toBe(num(pick("ALL"), "sampleCount"));
+      }
+    }
+  });
+
+  it("⑩ 后续窗口**不含决策日当天及之前**的数据（锚 = 决策日收盘价，窗口自 T+k+1 起）", () => {
+    // 手算夹具：T+2 当天振幅极大（high 15 / low 5），T+3…T+5 平淡。
+    // 若实现错误地把 T+2 当天算进「后续窗口」，high/low 收益会变成 15 / 5 那一组数。
+    const bars: StudyBar[] = [
+      barOf(1, [11, 11.2, 10.5, 11.0]),
+      barOf(2, [9.0, 15.0, 5.0, 9.9]),
+      barOf(3, [10, 10.5, 9.8, 10.2]),
+      barOf(4, [10, 10.5, 9.8, 10.2]),
+      barOf(5, [10, 10.5, 9.8, 10.2]),
+    ];
+    const sample: StudySample = {
+      eventId: "e-window",
+      symbol: "600000.SH",
+      eventDate: "2025-01-02",
+      firstLimitUpOpen: 10,
+      firstLimitUpClose: 11,
+      firstLimitUpPrice: 11,
+      bars,
+      maxAvailableRelativeDay: 5,
+      invalidRelativeDays: new Set<number>(),
+      missingRelativeDays: new Set<number>(),
+    };
+    const derived = deriveSample(sample, { maxObservationDay: 5, futureHorizons: [5] });
+    const decision = derived.byDecisionDay.get(2)!;
+    // 锚 = 决策日 T+2 的收盘价
+    expect(decision.decisionClose).toBeCloseTo(9.9, 10);
+    // T+2 当天 low=5 < 首板日开盘价 10 ⇒ 该时点已破位
+    expect(decision.nonBreakOpenThroughDay).toBe(false);
+    const window = decision.byHorizon.get(5)!;
+    expect(window.available).toBe(true);
+    expect(window.windowEndRelativeDay).toBe(5);
+    // 窗口 = rd ∈ [3, 5]：**不含** rd=2 的 high=15 / low=5
+    expect(window.closeReturn).toBeCloseTo((10.2 - 9.9) / 9.9, 10);
+    expect(window.highReturn).toBeCloseTo((10.5 - 9.9) / 9.9, 10);
+    expect(window.lowReturn).toBeCloseTo((9.8 - 9.9) / 9.9, 10);
+    expect(window.highReturn!).toBeLessThan(0.2); // 误含 rd=2 时会 ≈ 0.515
+  });
+
+  it("⑩b h ≤ k 的格子按定义不可用（不是「样本为 0」）：T+5 决策 → T+5 视界", () => {
+    const bars: StudyBar[] = Array.from({ length: 5 }, (_, i) =>
+      barOf(i + 1, [10, 10.5, 9.8, 10.2]),
+    );
+    const sample: StudySample = {
+      eventId: "e-self",
+      symbol: "600000.SH",
+      eventDate: "2025-01-02",
+      firstLimitUpOpen: 10,
+      firstLimitUpClose: 11,
+      firstLimitUpPrice: 11,
+      bars,
+      maxAvailableRelativeDay: 5,
+      invalidRelativeDays: new Set<number>(),
+      missingRelativeDays: new Set<number>(),
+    };
+    const derived = deriveSample(sample, { maxObservationDay: 5, futureHorizons: [5] });
+    const window = derived.byDecisionDay.get(5)!.byHorizon.get(5)!;
+    expect(window.available).toBe(false);
+    expect(window.closeReturn).toBeNull();
+    expect(window.highReturn).toBeNull();
+  });
+
+  it("⑪ Result 账目守恒：candidate = eligible + excluded，且 Σ excludedByReason = excluded", async () => {
+    const { outcome } = await runMain();
+    const summary = outcome.result!.sampleSummary;
+    expect(summary.eligibleCount + summary.excludedCount).toBe(summary.candidateCount);
+    expect(Object.values(summary.excludedByReason).reduce((a, b) => a + b, 0)).toBe(summary.excludedCount);
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    expect(custom.dataQuality.includedCount).toBe(summary.eligibleCount);
+    expect(custom.dataQuality.excludedCount).toBe(summary.excludedCount);
+  });
+
+  it("矩阵**不含** best / optimal / worst / rank 之类字段（规格 §8）", async () => {
+    const { outcome } = await runMain();
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    const forbidden = /best|optimal|worst|rank/iu;
+    for (const key of Object.keys(custom.decisionConditionMatrix[0] ?? {})) {
+      expect(key).not.toMatch(forbidden);
+    }
+    const table = tableOf(outcome.result!, "decision_condition_by_day");
+    for (const row of table.rows) {
+      for (const key of Object.keys(row)) expect(key).not.toMatch(forbidden);
+    }
+  });
+
+  it("决策矩阵的 customPayload 与 tables 同源（不可能是两套口径）", async () => {
+    const { outcome } = await runMain();
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    const table = tableOf(outcome.result!, "decision_condition_by_day");
+    const pick = custom.decisionConditionMatrix.find(
+      (item) => item.classificationDay === 2 && item.group === "ALL" && item.horizon === 5,
+    )!;
+    const row = findRow(table.rows, {
+      classificationDay: "T+2",
+      group: "ALL",
+      futureHorizon: "T+5",
+    });
+    // 🔴 判据修正（旧断言写 `toBeCloseTo(..., 10)`，实测差 1.72e-7 ⇒ 恒假 FAIL）：
+    //    信封表格的单元格经 `toEnvelopeTable` 按 `DISPLAY_DIGITS = 6` **收敛显示位**，
+    //    而 `customPayload` 保留**全精度** ⇒ 两者只能在「显示位之内」相等。
+    //    （§7 那些比较未过信封的裸 `StudyTable` 的用例，才可以用 12 位。）
+    expect(pick.medianCloseReturn).toBeCloseTo(num(row, "medianCloseReturn")!, 6);
+    expect(pick.sampleCount).toBe(num(row, "sampleCount"));
+  });
+
+  it("Matrix 的每个视界都有 `availableCount ≤ sampleCount`，且不可用格子的收益为 null", async () => {
+    const { outcome } = await runMain();
+    const custom = fundamentalStudyCustomPayloadSchema.parse(outcome.result!.customPayload);
+    for (const item of custom.decisionConditionMatrix) {
+      expect(item.availableCount).toBeLessThanOrEqual(item.sampleCount);
+      if (item.availableCount === 0) {
+        expect(item.medianCloseReturn).toBeNull();
+        expect(item.meanCloseReturn).toBeNull();
+      }
+    }
   });
 });

@@ -7,15 +7,22 @@
  *   - 溯源是**独立切面**：`Strategy Version ─┬─ 5 张投影`
  *     `                                       └─ strategy_research_provenance`
  *     **不是** `strategy_versions` 的列，**更不是** `StrategyDocument.definition` 的字段；
- *   - **display-only**：不参与 `StrategyDefinition` / `StrategyDocument` / 指纹 / 5 投影 /
- *     `validate` / `backtest` / 参数搜索 / 模拟 / 执行 —— 即 Research 模块整个不可用，
+ *   - **display-only**：不参与 `StrategyDefinition` / `StrategyDocument` / **执行语义指纹** /
+ *     5 投影 / `validate` / `backtest` / 参数搜索 / 模拟 / 执行 —— 即 Research 模块整个不可用，
  *     Strategy Version 仍必须能独立运行；
+ *     ⚠️ STRATEGY-RESEARCH-BRIDGE-001：研究证据另有**一个只属于自己的内容指纹**
+ *     （`researchEvidenceFingerprint`，见 `./researchEvidence.ts` 文件头）。它与
+ *     `strategy_versions.fingerprint`（执行语义指纹）**同名不同义**：前者是「这份溯源引用了
+ *     哪些研究运行」的身份，后者是「这份执行语义是什么」的身份 —— 前者仍严格不进后者，
+ *     也不被任何执行路径读取。
  *   - 所有 `sourceXxx` 是**快照值**（**不是 FK**）：上游行删除后仍能回答「这个策略从哪来」。
  *
  * 依赖方向（单向，禁环）：
  *   本模块（`server/research/strategyCandidate/`）是本项目**唯一**允许同时看见
  *   `researchCore` 与 `strategySchema|strategyPersistence` 的地方 —— 它就是桥本身。
  */
+
+import { assertDeclaredResearchEvidence } from "./researchEvidence";
 
 // ---------------------------------------------------------------------------
 // 枚举
@@ -221,6 +228,26 @@ export function assertProvenanceInput(input: StrategyResearchProvenanceCreateInp
     throw new StrategyProvenanceError(
       STRATEGY_PROVENANCE_ERROR.INVALID_INPUT,
       `origin 只能是 ${STRATEGY_RESEARCH_PROVENANCE_ORIGINS.join(" / ")}，实际：${String(input.origin)}`,
+    );
+  }
+
+  /**
+   * STRATEGY-RESEARCH-BRIDGE-001 —— 研究证据段的**声明即受校验**。
+   *
+   * 语义刻意是「声明了就受校验」而不是「必须声明」：
+   *   - 历史行 / 非证据型溯源（如旧 `RESEARCH_CONCLUSION`）不带 `researchEvidences` ⇒ **逐字不变**；
+   *   - 一旦带上（`buildResearchEvidenceSnapshot` 的产物）⇒ 列表非空、每条形态合法、
+   *     且 `researchEvidenceFingerprint` 必须与列表**自洽**（否则就是「声明与事实不符」）。
+   *
+   * `ResearchEvidenceError` 在这里翻译成**本层唯一**的领域错误码 ——
+   * 调用方只需要认识 `StrategyProvenanceError` 一套（与 006.3 在桥里翻译 Dataset Binding 错误同纪律）。
+   */
+  try {
+    assertDeclaredResearchEvidence(input.sourceSnapshotJson);
+  } catch (error) {
+    throw new StrategyProvenanceError(
+      STRATEGY_PROVENANCE_ERROR.INVALID_INPUT,
+      `sourceSnapshotJson 的研究证据段不合法：${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

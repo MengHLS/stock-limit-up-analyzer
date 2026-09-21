@@ -28,3 +28,7 @@ export * from "./executionPerturbation";
 export * from "./drift";
 export * from "./serialize";
 export * from "./evaluate";
+// ---- 跨阶段泛化层（ROBUSTNESS-CROSS-STAGE-001 结论 B 的最小适配；与上面同一模块，不是第二套引擎）----
+export * from "./dimension";
+export * from "./comparison";
+export * from "./multiDimension";

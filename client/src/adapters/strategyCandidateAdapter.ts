@@ -755,12 +755,34 @@ export interface PromotionProvenanceLike {
     experimentParameters: unknown;
     /** 实验结果 canonical 指纹（服务端真实重跑后算出）。 */
     experimentResultDigest: string | null;
+    /** STRATEGY-RESEARCH-BRIDGE-001 §16：引用的**真实持久化 Run** 列表（可能为空数组）。 */
+    researchEvidences: readonly PromotionResearchEvidenceLike[] | undefined;
+    /** 证据列表的独立内容指纹（`evi-sha256:…`）；与执行语义指纹同名不同义。 */
+    researchEvidenceFingerprint: string | null | undefined;
     createdAt: string | null;
   } | null;
   executionDatasetVersionId: number | null;
   executionDatasetLabel: string | null;
   sourceDatasetDivergenceReason: string | null;
   missingUpstreams: readonly ProvenanceMissingUpstream[];
+}
+
+/** 后端 `PromotionResearchEvidenceView` 的只读形状（STRATEGY-RESEARCH-BRIDGE-001）。 */
+export interface PromotionResearchEvidenceLike {
+  /** 独立实验 id（`<group>/<key>`，如 `first-board-pullback/fundamental-study`）。 */
+  experimentCode: string;
+  experimentVersion: string;
+  /** `RUN-YYYYMMDD-XXXXXXXX`。 */
+  runId: string;
+  datasetVersionId: number;
+  datasetVersionLabel: string | null;
+  evidenceKind: string;
+  reference: string;
+  description: string | null;
+  resultDigest: string;
+  runStatus: string;
+  startedAt: string | null;
+  durationMs: number | null;
 }
 
 export interface ProvenanceRowVm {
@@ -771,6 +793,30 @@ export interface ProvenanceRowVm {
   missing: boolean;
 }
 
+/**
+ * 单条研究证据的 ViewModel（STRATEGY-RESEARCH-BRIDGE-001 §16）。
+ *
+ * 🔴 `evidenceKindLabel` 是**中文标签**；枚举码只作稳定键，**不进 DOM**
+ * （项目既有纪律：观察 / 判定类别在页面上一律显示中文，不暴露内部编码）。
+ */
+export interface ProvenanceEvidenceVm {
+  /** `<group>/<key>` —— 规格 §16 的「EXP 编号」。 */
+  experimentCode: string;
+  experimentVersion: string;
+  runId: string;
+  datasetVersionId: number;
+  datasetVersionLabel: string | null;
+  evidenceKind: string;
+  evidenceKindLabel: string;
+  /** 引用了这次运行的哪一部分。 */
+  reference: string;
+  description: string | null;
+  resultDigest: string;
+  runStatus: string;
+  startedAt: string | null;
+  durationMs: number | null;
+}
+
 export interface ProvenanceVm {
   strategyId: string;
   version: string;
@@ -779,12 +825,35 @@ export interface ProvenanceVm {
   hasProvenance: boolean;
   originLabel: string;
   rows: ProvenanceRowVm[];
+  /**
+   * 研究证据列表（可能为空 = 这条溯源不带证据列表，例如旧链路）。
+   * 只读搬运，**不排序、不择优**（§17：严禁推荐 / 最佳 / 最优语义）。
+   */
+  researchEvidences: ProvenanceEvidenceVm[];
+  /** 证据列表的独立内容指纹；无证据段 → `null`。 */
+  researchEvidenceFingerprint: string | null;
   executionDatasetVersionId: number | null;
   executionDatasetLabel: string | null;
   sourceDatasetDivergenceReason: string | null;
   missingUpstreams: ProvenanceMissingUpstream[];
   /** 上游缺失的诚实说明；无缺失 → `null`。 */
   missingNote: string | null;
+}
+
+/**
+ * 证据类别 → 中文标签。
+ *
+ * 🔴 值域是**闭集**（后端 `RESEARCH_EVIDENCE_KINDS` 写入时强制），因此「表里没有」
+ * 只可能来自库被人工篡改 —— 此时如实显示「未识别类别」而不是把内部编码抛到页面。
+ */
+const EVIDENCE_KIND_LABELS: Record<string, string> = {
+  RESULT_SUMMARY: "结果摘要",
+  STABILITY_VERDICT: "稳定性结论",
+  SAMPLE_ACCOUNTING: "样本账",
+};
+
+export function evidenceKindLabel(kind: string): string {
+  return EVIDENCE_KIND_LABELS[kind] ?? "未识别类别";
 }
 
 const MISSING_UPSTREAM_LABELS: Record<ProvenanceMissingUpstream, string> = {
@@ -814,6 +883,33 @@ export function provenanceMissingNote(
 function textOf(value: number | string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
   return typeof value === "number" ? String(value) : value;
+}
+
+/**
+ * 研究证据 → ViewModel（**零重算 / 零排序**）。
+ *
+ * 🔴 保持后端给的行序：排序会被误读成「重要程度」⇒ 违反 §17「严禁自动择优」。
+ * 🔴 形状防御：`researchEvidences` 在旧后端 / 旧溯源下**不存在**（`undefined`）⇒ 归一为 `[]`。
+ */
+function researchEvidencesToVm(
+  raw: readonly PromotionResearchEvidenceLike[] | null | undefined,
+): ProvenanceEvidenceVm[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((e) => ({
+    experimentCode: e.experimentCode,
+    experimentVersion: e.experimentVersion,
+    runId: e.runId,
+    datasetVersionId: e.datasetVersionId,
+    datasetVersionLabel: e.datasetVersionLabel ?? null,
+    evidenceKind: e.evidenceKind,
+    evidenceKindLabel: evidenceKindLabel(e.evidenceKind),
+    reference: e.reference,
+    description: e.description ?? null,
+    resultDigest: e.resultDigest,
+    runStatus: e.runStatus,
+    startedAt: e.startedAt ?? null,
+    durationMs: e.durationMs ?? null,
+  }));
 }
 
 /** 🔴 溯源区的固定免责声明（§13 原话要求**必须显示**）。 */
@@ -872,6 +968,11 @@ export function promotionProvenanceToVm(view: PromotionProvenanceLike): Provenan
     hasProvenance: p !== null,
     originLabel: p === null ? "—" : p.origin,
     rows,
+    researchEvidences: researchEvidencesToVm(p?.researchEvidences),
+    researchEvidenceFingerprint:
+      typeof p?.researchEvidenceFingerprint === "string" && p.researchEvidenceFingerprint.length > 0
+        ? p.researchEvidenceFingerprint
+        : null,
     executionDatasetVersionId: view.executionDatasetVersionId,
     executionDatasetLabel: view.executionDatasetLabel,
     sourceDatasetDivergenceReason: view.sourceDatasetDivergenceReason,

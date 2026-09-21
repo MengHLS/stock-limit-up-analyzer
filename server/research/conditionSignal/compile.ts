@@ -369,9 +369,27 @@ export function compileConditionRecipe(input: CompileConditionRecipeInput): Stra
     .map(gate => `${gate.featureId} ${gate.gateKind} ${gate.bound.kind === "parameter" ? gate.bound.code : String(gate.bound.value)}`)
     .join(" 且 ");
 
+  /**
+   * 🔴 门槛里**被当作右值引用的参数 code**（去重、保序）。
+   *
+   * 必须显式下传给 `buildGatedRecipeRuntime`：注册期会用「探测参数集」调一次 `buildGates`
+   * 收集门槛引用的 featureId，而该探测集原先只含**已注册配方**的三个 pullback 参数 code。
+   * 合成配方的参数 code 来自**策略文档**（如 `maxBreakDepthRatio` / `maxVolumeRatio`），
+   * 不在探测集里 ⇒ 探测调用 `requireNumericParameter` 取不到值抛 `RECIPE_PARAMETER_INVALID`。
+   * 这是**结构性**失败：任何「参数 code ≠ 注册配方三参数」的策略都进不了 Backtest
+   * （实测见 `docs/evidence/_probe_srb001_doc_params.mts`）。
+   */
+  const gateParameterCodes: string[] = [];
+  for (const gate of compiled) {
+    if (gate.bound.kind !== "parameter") continue;
+    if (gateParameterCodes.includes(gate.bound.code)) continue;
+    gateParameterCodes.push(gate.bound.code);
+  }
+
   return buildGatedRecipeRuntime({
     recipeId: DECLARATIVE_RECIPE_ID,
     signalKind: "gated",
+    gateProbeParameterCodes: gateParameterCodes,
     point: DECLARATIVE_RECIPE_POINT,
     signalFrequency: "daily",
     signalDescription:

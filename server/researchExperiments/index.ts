@@ -40,6 +40,9 @@ export {
 export * from "./errors";
 export { ExperimentRegistry, validateExperimentDescriptor } from "./registry";
 export {
+  EXPERIMENT_BAR_BATCH_SIZE,
+  EXPERIMENT_EVENT_PAGE_SIZE,
+  EXPERIMENT_EVENT_SCAN_HARD_LIMIT,
   EXPERIMENT_EVENT_SCAN_LIMIT,
   assertDatasetCodeMatches,
   assertRelativeDaysWithinHorizon,

@@ -670,9 +670,18 @@ export function ClosedLoopRunResultPanel({
               配方：<span className="font-mono text-foreground">
                 {a.recipeId || "—"}
               </span>
-              <span className="ml-1 text-muted-foreground">
-                （来源 {a.recipeSource}）
-              </span>
+              {a.recipeSource === "default-fallback" ? (
+                // 🔴 BD-21：兜底 = 文档既没 recipe 也没声明式条件 ⇒ 装配层自己顶了一份
+                // 默认配方上来。这不是「有人要求这么跑」，必须让用户一眼看出，
+                // 不能只印一个英文枚举（否则等于把静默换规则留在界面上）。
+                <span className="ml-1 font-medium text-amber-700">
+                  （兜底默认 · 文档未声明配方与条件）
+                </span>
+              ) : (
+                <span className="ml-1 text-muted-foreground">
+                  （来源 {a.recipeSource}）
+                </span>
+              )}
             </span>
             <span className="text-muted-foreground">
               特征：<span className="font-mono text-foreground">

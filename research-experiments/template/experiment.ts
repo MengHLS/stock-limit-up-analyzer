@@ -82,6 +82,23 @@ export const templateExperiment: ExperimentDefinition = {
       postRelativeDays: [],
       decisionOffsetDays: null,
       usesForwardData: false,
+      /**
+       * 事件扫描策略（新增能力，**默认 PLATFORM_LIMIT**）。
+       *
+       * - `"PLATFORM_LIMIT"`：只扫平台默认上限（`EXPERIMENT_EVENT_SCAN_LIMIT` = 20000 个事件）。
+       *   模板实验声明 `sampleLimit ≤ 20000`，与它一致 ⇒ 保持默认。
+       * - `"FULL_DATASET"`：**声明式放行**到硬上限（`EXPERIMENT_EVENT_SCAN_HARD_LIMIT` = 400000）。
+       *   需要「候选 = 数据集全量」的研究（例如做总体分布 / 分位数）才声明它。
+       *
+       * 🔴 两条纪律，抄模板前务必读：
+       * 1. **不要为了拿全量去删安全阀、也不要只把 `maxEvents` 调大** —— 平台那层上限不删，
+       *    要全量就**显式声明**本字段；同时把事件读取改成**流式分页**（`dataset.eventPages()`），
+       *    而不是一次性 `dataset.events()`（全量时那是几十万行）。
+       * 2. 结果里**必须**出 `unscannedEventCount`（数据集声明总数 − 本轮候选数）并让它在**页面首屏**
+       *    可见：`eligible + excluded = candidate` 这两条守恒式**覆盖不到**「压根没被扫描到」的事件，
+       *    历史上就靠这个字段抓到过「声明 23978、只扫 20000、中间 3978 静默消失」。
+       */
+      eventScanPolicy: "PLATFORM_LIMIT",
     },
     // 🔴 改成你自己的 pageKey，并在 client/src/researchExperiments/pages.ts 里登记。
     pageKey: "template/demo",

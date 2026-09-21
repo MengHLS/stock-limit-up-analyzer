@@ -217,11 +217,46 @@ context.dataset.facts;  // datasetVersionId / datasetCode / datasetVersionLabel 
 
 ### E.5 平台行为（要知道的）
 
-- 事件读取有**平台安全阀**（最多 20000 个事件），触顶时 `execution.datasetFacts.eventCount`
-  会停在 20000；**不会静默**，你的结果应把「数据集共几个、扫到几个、用了几个」如实写进
-  `customPayload` 与 `sampleSummary.notes`；
-- 同一相对日**只读一次**（惰性缓存）；
-- 实际读取行数与最远相对日会进 `execution.datasetFacts`（可复核「读了什么」）。
+- 事件读取有**两层上限**：默认阀 `EXPERIMENT_EVENT_SCAN_LIMIT`（20000）与硬上限
+  `EXPERIMENT_EVENT_SCAN_HARD_LIMIT`（400000）。默认策略下触顶时
+  `execution.datasetFacts.eventCount` 会停在 20000；**不会静默**，但你必须在结果里如实登记
+  「数据集共几个、扫到几个、用了几个」（见 E.6 与 H.4）；
+- 同一相对日**只读一次**（惰性缓存）；但注意 `eventPages()` **每次调用都是一次独立的分页扫描**，
+  会重新从第一页读起并由平台如实累加计数（`datasetFacts.eventPageCount` 是**平台累计**，
+  不等于「你自己那次分页的轮数」）；
+- 实际读取行数、最远相对日、分页轮数、批量查询次数都会进 `execution.datasetFacts`（可复核「读了什么」）；
+- 💡 **批量读的物理实现是单条 `IN (eventId…)`** ⇒ 事件数上万时必须分块，
+  平台按 `EXPERIMENT_BAR_BATCH_SIZE`（2000）切，`datasetFacts.barQueryCount` = 相对日数 × 块数。
+
+### E.6 全量扫描（要「候选 = 数据集全量」时**唯一合法**的做法）
+
+```ts
+datasetRequirement: {
+  // ……
+  /** 缺省 PLATFORM_LIMIT（20000）；要全量必须**显式声明** —— 这是「声明式放行」，不是删阀。 */
+  eventScanPolicy: "FULL_DATASET",
+}
+```
+
+读取侧改成**流式分页**，不要一次性拉全量（全量时是几十万行）：
+
+```ts
+const events: ExperimentEventRow[] = [];
+for await (const page of dataset.eventPages()) {
+  for (const row of page) events.push(row);
+}
+```
+
+🔴 三条纪律（EXP-001 真机踩过，照抄可避免重演）：
+
+1. **不要删安全阀、也不要只把 `maxEvents` 调大**。全量是靠**声明**换来的硬上限，阀本身仍在；
+   平台仍可用 `deps.eventScanLimit` 注入更小的临时上限做测试。
+2. **结果必须出 `unscannedEventCount`** = 数据集声明总数 − 本轮候选数，并让它**在页面首屏可见**
+   （只放进 `notes` / `observations` 会被折叠，读者会把「候选数」当成「数据集全量」）。
+   `unscannedEventCount === null` 表示数据集未声明总数 ⇒ 缺口**不可知，不是 0**。
+3. `droppedByScanLimit` **不能**用「是否触达上限」判定 —— 实验**看不到**平台注入的临时上限，
+   真被截断时会误报 `false`。必须用**账目缺口**判定：
+   `unscannedEventCount !== null && unscannedEventCount > 0`。
 
 ---
 
@@ -356,6 +391,19 @@ eligibleCount + excludedCount === candidateCount
 
 不满足 ⇒ `EXPERIMENT_RESULT_INVALID`。理由：这是「样本为什么变少」的**唯一**诊断线索，
 账不平就意味着有样本被静默吞掉。
+
+🔴 **但这两条式子覆盖不到另一半 —— 必须单独出数**：它们只覆盖**进了候选**的事件。
+**被扫描上限截掉的事件压根不在 `candidate` 里** ⇒ 两条式子在它们身上**恒真、毫无保护**
+（实测事故：数据集声明 23978、候选 20000，中间 **3978** 个事件静默消失，而账是「平的」）。
+因此 `customPayload` 还必须出：
+
+```
+candidateCount === datasetDeclaredTotalEvents   // 仅在声明了 FULL_DATASET 时要求相等
+unscannedEventCount === datasetDeclaredTotalEvents − candidateCount
+```
+
+`null` = 数据集未声明总数（缺口**不可知**，不是 0）；`0` = 全量成立（这是**正面事实，也要渲染出来**）。
+平台不会替你校验这一条 —— 它只能靠你的结果自己交代。
 
 ### H.5 不要产出排序 / 评级字段
 
@@ -508,7 +556,8 @@ npx vite build                      → exit 0
 | 禁止 | 原因 |
 | --- | --- |
 | 删除 / 修改旧 Research（Analysis / Finding / Conclusion） | 两套体系并存（规格 §14） |
-| 改 Strategy Core / 重做 Parameter Search / Backtest / OOS / Walk-Forward / Robustness | 本体系不碰这些能力 |
+| 改 Strategy Core / 重做 Parameter Search / Backtest / OOS / Walk-Forward | 本体系不碰这些能力 |
+| **重做 / 复制** Robustness 模块本身（新引擎、第二套持久化、新表） | 🔴 与上一条**不是同一条**：Robustness 的方法（baseline-first / 变体执行 / evaluator 注入 / 容差判定 / 指纹 / 样本账守恒）是**跨阶段通用**的 ⇒ 实验**可以消费**它，唯一入口是 `@experiments/robustnessBridge`（零实现、只有 re-export）。但**不得**在 `research-experiments/**` 里另写一套同名引擎，也不得为它新增表 / migration / 第二套结果表 —— 结果继续走本体系的 `research_experiment_run` + 对象存储 |
 | 绕过 Dataset 契约直连数据库（`getDb()` / `ds_*` 直查） | 版本边界与 PIT 会失守 |
 | 在契约或代码里引入 `analysisId` / `findingIds` / `conclusion` / `candidateId` | 新实验不得耦合旧结构 |
 | `db:push` / `drizzle-kit generate` / 新增表 | 本体系**零新表、零写口** |
@@ -702,6 +751,35 @@ Manifest 是本次 Run 的**产物索引**（不是新格式，只是 Key + 类�
 - 前端只能读**已登记**在 Manifest 里的对象 ⇒ 未登记 ⇒ `404`；
 - 一个 Run 的凭据**不能**读另一个 Run 的对象 ⇒ 跨 Run ⇒ `400`；
 - MinIO 凭据**不进**浏览器 bundle；页面只能经后端 `GET /api/experiments/artifact` 取产物。
+
+#### P.6.1 🔴 Manifest 的**索引分组**只由 `role` 决定，**不看扩展名**
+
+Manifest 把产物分成 `tables` / `charts` / `artifacts` 三组，页面按这三组渲染卡片。
+分组依据是 `role`，**不是**文件后缀：
+
+```text
+role: "table"    → Tables（表格）组
+role: "chart"    → Charts（图表）组
+role: "artifact" → Artifacts（产物）组   ← 即使是 .json 也在这一组
+role: "log"      → 运行日志段
+```
+
+🔴 **本体系统真实事故（EXP-002 第一次真机 Run）**：`role: "artifact"` + `name: "robustness-run.json"`
+被**错误地**归进「Tables（表格）」组、页面挂 `TABLE` 徽章 —— 根因是产物描述符的推断器
+**先用扩展名判类型、只有 `result` / `log` 两个角色能覆盖扩展名**，于是 `.json` 把
+`role: "artifact"` 改判成了 `TABLE`；而分组按类型走 ⇒ 与它自己调用处的注释
+（「log / artifact → artifacts 段」）**直接矛盾**。当时**没有任何测试覆盖角色优先级**，
+所以这个缺陷一路静默活到第一次真机 Run。
+
+现已修复（角色优先于扩展名）并被两个单测钉死
+（`tests/server/researchExperiments/runPersistence.test.ts`：`inferArtifactDescriptor` 角色优先级
++ 走真实 `publishRunArtifacts` 的分桶后果）。
+
+**作者侧要记住的**：你在 `artifact()` 里写的 `role` 同时决定
+⑴ 对象 Key 的角色段（§P.5）与 ⑵ Manifest 的索引分组（本节）。
+写 `.json` / `.svg` 之类的**数据类**产物时，若它**不是**给人看的表格 / 图，就该用 `role: "artifact"`，
+它会稳定落在 Artifacts 组。
+
 
 ⇒ 这也意味着：**没调 `artifact()` 的文件，页面上也不会有**（它压根不存在）。
 

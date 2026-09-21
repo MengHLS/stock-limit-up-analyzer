@@ -109,6 +109,44 @@ export const experimentRequiredColumnsSchema = z.object({
 export type ExperimentRequiredColumns = z.infer<typeof experimentRequiredColumnsSchema>;
 
 /**
+ * 事件扫描上限（**平台安全阀**，不是研究范围）。
+ *
+ * 缺省策略（`eventScanPolicy` 未声明或为 `PLATFORM_LIMIT`）下，一个实验最多扫这么多事件。
+ * 超出部分**不会静默丢弃** —— 被截断这件事必须成为可见事实：Runner 侧的
+ * `ExperimentAccessStats.eventScanTruncated` 会进执行元数据，实验侧应当把它写进
+ * `sampleSummary.notes` 并输出「账目缺口」。EXP-001 真机 Run 就是在这里发现
+ * 「数据集声明 23978 / 本轮只扫到 20000 / 中间 3978 个静默消失」的。
+ */
+export const EXPERIMENT_EVENT_SCAN_LIMIT = 20000;
+
+/**
+ * 事件扫描**硬上限**（防跑飞的兜底，不是研究范围）。
+ *
+ * `eventScanPolicy: "FULL_DATASET"` 的实验可以突破 `EXPERIMENT_EVENT_SCAN_LIMIT`
+ * ——「全量」由数据集声明量决定 —— 但**不能**突破这里：一次实验的理论扫描量再大，
+ * 也不该把库拖垮。超过即截断，并同样通过 `eventScanTruncated` 如实暴露。
+ */
+export const EXPERIMENT_EVENT_SCAN_HARD_LIMIT = 400000;
+
+/**
+ * 事件分页页大小（每次 `loadEventPage` 拉多少行）。
+ *
+ * 分页是 keyset（`tradeDate` + `eventId`）游标续读 ⇒ 页大小只影响轮次数与内存峰值，
+ * 不影响正确性（无重复、无跳洞）。
+ */
+export const EXPERIMENT_EVENT_PAGE_SIZE = 2000;
+
+/**
+ * 行情批量读的分块大小（每次 `loadPostBars` / `loadPrefixBars` 带多少 eventId）。
+ *
+ * 🔴 为什么必须分块：读取层的批量接口实现是**单条** `IN (eventId…)` 查询。
+ * 全量扫描时 eventId 数量上万，一次性下推会让 SQL 参数表无界膨胀
+ * （参数包 / 解析开销 / 计划退化）。分块把「一次 N 万参数」换成
+ * 「多次 N 千参数」，查询次数仍是「每相对日 × 块数」而不是「每事件 × 每相对日」。
+ */
+export const EXPERIMENT_BAR_BATCH_SIZE = 2000;
+
+/**
  * 声明式 Dataset 需求。
  *
  * 🔴 这是**全部**取数能力的上限：Runner 只按这里声明的东西向 Dataset 读取层要数，
@@ -133,6 +171,22 @@ export const experimentDatasetRequirementSchema = z.object({
   usesForwardData: z.boolean(),
   /** `usesForwardData === true` 时必填：这些未来数据**用来做什么**（人读，进留档）。 */
   forwardDataPurpose: z.string().nullish(),
+  /**
+   * 事件扫描策略（**缺省 = 受平台安全阀约束**）。
+   *
+   * - `PLATFORM_LIMIT`（缺省）：最多扫 `EXPERIMENT_EVENT_SCAN_LIMIT` 个事件；
+   * - `FULL_DATASET`：按 Dataset 分页语义扫描**该版本声明的全部事件**。
+   *
+   * ## 为什么是「声明式放行」而不是「提高或删掉安全阀」
+   *
+   * 安全阀的存在理由（防一次实验扫爆内存 / 拖垮库）不会因为某个实验想做全量研究就消失。
+   * 因此这里**不删阀、也不全局调高**，而是让实验**显式承担**「我要扫全量」这件事：
+   * 声明 `FULL_DATASET` 之后，扫描量由「数据集声明量」决定（分页逐页读，不是一次性读），
+   * 且仍受 `EXPERIMENT_EVENT_SCAN_HARD_LIMIT` 兜底（防跑飞）。
+   * 代价是可见的：`candidateCount` 会等于数据集声明量，实验必须自己出
+   * `unscannedEventCount` 并让它为 0，否则账目缺口会被 `summary.notes` 如实点名。
+   */
+  eventScanPolicy: z.enum(["PLATFORM_LIMIT", "FULL_DATASET"]).optional(),
 });
 export type ExperimentDatasetRequirement = z.infer<typeof experimentDatasetRequirementSchema>;
 
@@ -352,6 +406,16 @@ export const experimentExecutionSchema = z.object({
     decisionOffsetDays: z.number().int().nullable(),
     /** 本次是否真的读了 rd ≥ 1 的数据。 */
     forwardDataRead: z.boolean(),
+    /** 本次生效的事件扫描策略（来自实验声明；缺省 `PLATFORM_LIMIT`）。 */
+    eventScanPolicy: z.enum(["PLATFORM_LIMIT", "FULL_DATASET"]).optional(),
+    /** 本次生效的事件扫描上限（＝策略对应的那个阀值）。 */
+    eventScanLimit: z.number().int().positive().optional(),
+    /** 事件分页实际轮数（证明「全量扫描是分页做的，不是一次性读」）。 */
+    eventPageCount: z.number().int().nonnegative().optional(),
+    /** 行情批量读实际查询次数（每相对日 × 块数）。 */
+    barQueryCount: z.number().int().nonnegative().optional(),
+    /** 事件扫描是否被安全阀截断（截断必须在结果里可见，不能静默）。 */
+    eventScanTruncated: z.boolean().optional(),
   }),
 });
 export type ExperimentExecution = z.infer<typeof experimentExecutionSchema>;
@@ -542,6 +606,17 @@ export interface ExperimentDatasetAccess {
   readonly facts: ExperimentDatasetFacts;
   /** 读事件行（列投影 = `requiredColumns.events`）。 */
   events(): Promise<readonly ExperimentEventRow[]>;
+  /**
+   * 事件**流式分页**（chunked scan）。
+   *
+   * 与 `events()` 的关系：`events()` 是「一次拿到全部」（内部就是把它读完），
+   * `eventPages()` 让实验**逐页消费**、不必把全部事件行同时握在手里 ——
+   * 扫描上万事件时这是内存峰值与「分页是否真的发生」可被观测的差别。
+   *
+   * 页与页之间用 keyset 游标（`tradeDate` + `eventId`）续读，**无重复、无跳洞**；
+   * 是否被平台安全阀截断取决于 `descriptor.datasetRequirement.eventScanPolicy`。
+   */
+  eventPages(): AsyncIterable<readonly ExperimentEventRow[]>;
   /** 读 prefix 行情（`relativeDay` 必须 ∈ `prefixRelativeDays`）。 */
   feature(relativeDay: number): Promise<readonly ExperimentBarRow[]>;
   /** 读 post 行情（`relativeDay` 必须 ∈ `postRelativeDays` 且已声明 `usesForwardData`）。 */

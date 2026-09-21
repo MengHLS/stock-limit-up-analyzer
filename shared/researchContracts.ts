@@ -1081,14 +1081,20 @@ export const closedLoopRunResultSchema = z.object({
       strategyVersion: z.string(),
       recipeId: z.string(),
       /**
-       * 配方来源（三条诚实路径）：`strategy-document`（文档带 recipe）|
+       * 配方来源（**四条**诚实路径）：`strategy-document`（文档带 recipe）|
        * `strategy-declarative-conditions`（文档无 recipe，由声明式条件现场合成）|
-       * `explicit-request`（调用方指定 / 默认常量）。
+       * `explicit-request`（**调用方显式指定** recipeId）|
+       * `default-fallback`（文档既无 recipe 又无条件 ⇒ 落到默认常量；`BD-21`）。
+       *
+       * 🔴 后两者必须分开：兜底曾被标成 `explicit-request` ⇒ 「系统自己顶上来」与
+       * 「有人要求」在摘要里无法区分（静默换规则）。本闭集与
+       * `server/runWorkbenchAssembly/assemble.ts#RecipeResolutionSource` 必须逐字一致。
        */
       recipeSource: z.enum([
         "strategy-document",
         "strategy-declarative-conditions",
         "explicit-request",
+        "default-fallback",
       ]),
       recipeFeatureIds: z.array(z.string()),
       selectionSummary: z.string(),

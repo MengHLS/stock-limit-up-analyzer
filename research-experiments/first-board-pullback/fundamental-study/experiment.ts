@@ -26,6 +26,7 @@
 import type {
   ExperimentBarRow,
   ExperimentDefinition,
+  ExperimentEventRow,
   ExperimentRunContext,
   ExperimentResultPayload,
 } from "@shared/researchExperimentsContracts";
@@ -34,6 +35,8 @@ import {
   DECLARED_DECISION_OFFSET_DAYS,
   DECLARED_POST_RELATIVE_DAYS,
   EXCLUSION_REASON_LABELS,
+  FULL_DATASET_EVENT_SCAN_LIMIT,
+  GROUP_LABELS,
   MAX_DECLARED_POST_RELATIVE_DAY,
   PLATFORM_EVENT_SCAN_LIMIT,
   assembleFundamentalStudyResult,
@@ -46,8 +49,10 @@ import {
   isExclusionReasonCode,
   isValidOhlc,
   renderBarChartSvg,
+  renderGroupedBarChartSvg,
   renderLineChartSvg,
   summarizeDailyPath,
+  summarizeDecisionConditionByDay,
   summarizeDrawdownBuckets,
   summarizeEntryDay,
   summarizeFutureHorizons,
@@ -119,17 +124,28 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
         code: "maxEvents",
         label: "最大事件数",
         description:
-          `本实验最多统计多少个首板事件（按事件日升序取前 N 个）。超出部分逐条登记原因，不静默丢弃。` +
-          `硬上界 = 平台事件扫描安全阀 ${PLATFORM_EVENT_SCAN_LIMIT}。`,
+          "本实验最多统计多少个首板事件（按事件日升序取前 N 个）。超出部分逐条登记为 " +
+          "MAX_EVENTS_LIMIT，不静默丢弃。缺省 = 平台事件扫描**硬阀** " +
+          `${FULL_DATASET_EVENT_SCAN_LIMIT}（即「不额外裁剪」）—— 本实验声明了 FULL_DATASET ` +
+          "全量扫描策略，所以这个参数只用来**主动缩小**研究范围，不是用来突破扫描上限的。",
         kind: "INT",
         required: false,
-        defaultValue: PLATFORM_EVENT_SCAN_LIMIT,
-        bounds: { min: 100, max: PLATFORM_EVENT_SCAN_LIMIT },
+        defaultValue: FULL_DATASET_EVENT_SCAN_LIMIT,
+        bounds: { min: 100, max: FULL_DATASET_EVENT_SCAN_LIMIT },
         unit: "个事件",
       },
     ],
     datasetRequirement: {
       datasetCode: "first_limit_pullback",
+      /**
+       * 🔴 本实验声明**全量扫描**：`candidateCount` 必须等于数据集声明的事件数
+       *    （正式 Run = 23978），且 `unscannedEventCount` 必须为 0。
+       *
+       * 平台的安全阀**没有被删掉**：缺省策略仍是 `EXPERIMENT_EVENT_SCAN_LIMIT`（20000），
+       * 只有显式声明 `FULL_DATASET` 的实验才升到硬阀，并因此**承担**「扫描量 = 声明量」
+       * 的可解释性责任（账目缺口必须自己出数）。
+       */
+      eventScanPolicy: "FULL_DATASET",
       requiredColumns: {
         events: ["isFirstLimit", "boardType", "limitUpPrice", "previousClose"],
         // rd = 0 = 首板日本身：基准价（开盘 / 收盘）的唯一来源，PIT 安全。
@@ -195,8 +211,23 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
     const { buckets, edgesRatio } = buildDrawdownBuckets(drawdownBucketEdgesBps);
 
     // ---- 4) 取数（全部经声明面；未声明的列 / 相对日读不到）----
-    const events = await dataset.events();
-    log(`读取事件行 ${events.length} 条（数据集声明事件总数 ${String(dataset.facts.totalEvents)}）`);
+    //
+    // 🔴 本实验声明了 `FULL_DATASET` ⇒ 事件扫描必须覆盖数据集声明的**全部**事件
+    //    （正式 Run = 23978）。这里**逐页消费** `dataset.eventPages()`（keyset 游标续读），
+    //    而不是调 `events()` 一次性拿回：差别在于「分页真的发生了」这件事**可见且可断言**
+    //    （页数进日志与结果），而不是藏在实现里当承诺。
+    const events: ExperimentEventRow[] = [];
+    let eventPageCount = 0;
+    for await (const page of dataset.eventPages()) {
+      eventPageCount += 1;
+      for (const row of page) events.push(row);
+    }
+    /** 本实验声明 `FULL_DATASET` ⇒ 生效上限 = 平台硬阀（不是默认阀 20000）。 */
+    const scanLimitApplied = FULL_DATASET_EVENT_SCAN_LIMIT;
+    log(
+      `读取事件行 ${events.length} 条（${eventPageCount} 轮分页；数据集声明事件总数 ` +
+        `${String(dataset.facts.totalEvents)}；扫描策略 FULL_DATASET，生效上限 ${scanLimitApplied}）`,
+    );
 
     const eventDayBars = await dataset.feature(0);
     log(`读取首板日（rd=0）行情 ${eventDayBars.length} 行`);
@@ -267,6 +298,29 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
     let missingObservationBarCount = 0;
     let invalidOhlcBarCount = 0;
     let closeDiffersCount = 0;
+    /**
+     * 非法 OHLC 按**相对日**分档（规格 §4）。
+     *
+     * 分档的意义：把「1353 个坏 Bar」拆成「首板日 / 核心窗口 / 中段 / 长视界」四块，
+     * 才能回答「这其中有多少真的影响了样本资格」—— 只有 `eventDay` 与 `observationCore`
+     * 会剔除事件，后两块只让对应视界不可用。
+     */
+    const invalidOhlcByRelativeDay = {
+      eventDay: 0,
+      observationCore: 0,
+      observationMid: 0,
+      observationLong: 0,
+    };
+    /** 至少有一根坏 Bar 的事件集合（**事件口径**，与 Bar 口径是两回事）。 */
+    const invalidOhlcEventIds = new Set<string>();
+    const noteInvalidOhlc = (eventId: string, relativeDay: number): void => {
+      invalidOhlcBarCount += 1;
+      invalidOhlcEventIds.add(eventId);
+      if (relativeDay === 0) invalidOhlcByRelativeDay.eventDay += 1;
+      else if (relativeDay <= maxObservationDay) invalidOhlcByRelativeDay.observationCore += 1;
+      else if (relativeDay <= 10) invalidOhlcByRelativeDay.observationMid += 1;
+      else invalidOhlcByRelativeDay.observationLong += 1;
+    };
 
     for (const event of usedEvents) {
       const base = eventDayBarByEvent.get(event.eventId);
@@ -281,17 +335,17 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       const low0 = toFiniteNumber(base.low);
       if (open0 === null || !(open0 > 0)) {
         addExclusion("INVALID_EVENT_DAY_OPEN", 1);
-        invalidOhlcBarCount += 1;
+        noteInvalidOhlc(event.eventId, 0);
         continue;
       }
       if (close0 === null || !(close0 > 0)) {
         addExclusion("INVALID_EVENT_DAY_CLOSE", 1);
-        invalidOhlcBarCount += 1;
+        noteInvalidOhlc(event.eventId, 0);
         continue;
       }
       if (!isValidOhlc({ open: open0, high: high0, low: low0, close: close0 })) {
         addExclusion("INVALID_EVENT_DAY_OHLC", 1);
-        invalidOhlcBarCount += 1;
+        noteInvalidOhlc(event.eventId, 0);
         continue;
       }
       const limitUpPrice = toFiniteNumber(event.values.limitUpPrice);
@@ -305,10 +359,14 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
 
       // 观察窗口（rd 1..maxObservationDay）必须完整：不完整就无法做「截至 T+N」的路径判定。
       const bars: StudyBar[] = [];
+      /** 本事件「有行但非法」与「整行缺失」的逐日记录（逐视界样本账的分母来源）。 */
+      const invalidRelativeDays = new Set<number>();
+      const missingRelativeDays = new Set<number>();
       let windowFailure: "MISSING_OBSERVATION_BAR" | "INVALID_OBSERVATION_OHLC" | null = null;
       for (let day = 1; day <= requiredMaxRelativeDay; day += 1) {
         const row = observationByDay.get(day)?.get(event.eventId);
         if (row === undefined) {
+          missingRelativeDays.add(day);
           if (day <= maxObservationDay) windowFailure = "MISSING_OBSERVATION_BAR";
           continue;
         }
@@ -325,11 +383,13 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
         if (bar.tradeDate === "") {
           // 行身份缺失 ⇒ 无法把该 K 线锚到某个交易日（`tradeDate` 属于骨架列，理论上必到）。
           if (day <= maxObservationDay) windowFailure = "INVALID_OBSERVATION_OHLC";
-          invalidOhlcBarCount += 1;
+          invalidRelativeDays.add(day);
+          noteInvalidOhlc(event.eventId, day);
           continue;
         }
         if (!isValidOhlc(bar)) {
-          invalidOhlcBarCount += 1;
+          invalidRelativeDays.add(day);
+          noteInvalidOhlc(event.eventId, day);
           if (day <= maxObservationDay) windowFailure = "INVALID_OBSERVATION_OHLC";
           continue;
         }
@@ -350,6 +410,8 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
         firstLimitUpPrice: limitUpPrice,
         bars,
         maxAvailableRelativeDay: bars.length === 0 ? 0 : bars[bars.length - 1]!.relativeDay,
+        invalidRelativeDays,
+        missingRelativeDays,
       });
     }
 
@@ -366,6 +428,68 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       (item) => item.byHorizon.get(longestHorizon)?.available !== true,
     ).length;
 
+    /**
+     * 🔴 用**独立于构造路径**的方式核验「坏 Bar 没被用于未来收益」。
+     *
+     * 只写「因为 `bars` 只 push 合法 bar 所以恒为 0」是同义反复、证明不了任何事。
+     * 这里反过来查：每个样本**实际用于**视界 / 决策时点窗口的每一天，是否都能在
+     * 「已校验合法」的 `sample.bars` 里按 rd 找到。找不到即计数 +1 —— 于是
+     * 「实现绕过 `contiguousWindow` 拿坏 Bar 凑数」这类回归会立刻把它顶成非 0。
+     */
+    let invalidOhlcUsedInFutureOutcomeCount = 0;
+    for (const item of derived) {
+      const validDays = new Set(item.sample.bars.map((bar) => bar.relativeDay));
+      const checkWindow = (from: number, to: number): void => {
+        for (let day = from; day <= to; day += 1) {
+          if (!validDays.has(day)) invalidOhlcUsedInFutureOutcomeCount += 1;
+        }
+      };
+      for (const horizon of futureHorizons) {
+        if (item.byHorizon.get(horizon)?.available === true) checkWindow(1, horizon);
+      }
+      for (let k = 1; k <= maxObservationDay; k += 1) {
+        const decision = item.byDecisionDay.get(k);
+        if (decision === undefined) continue;
+        for (const horizon of futureHorizons) {
+          if (decision.byHorizon.get(horizon)?.available === true) checkWindow(k + 1, horizon);
+        }
+      }
+    }
+
+    /**
+     * 逐视界样本账（规格 §5）：每个视界**各自**统计 eligible / missing / invalid / valid。
+     *
+     * 🔴 关键纪律：长视界不可用**不会**把一个事件从短视界的统计里删掉 ——
+     *    这里的 `eligibleCount` 恒为 `derived.length`（不随 horizon 变化），
+     *    `missingCount` / `invalidCount` 只描述「该视界所需窗口内」的问题。
+     *    （一个事件可能既有缺又有坏 ⇒ 两个计数可重叠，故三者之和未必等于 eligible。）
+     */
+    const horizonDataQuality = futureHorizons.map((horizon) => {
+      let missingCount = 0;
+      let invalidCount = 0;
+      let validCount = 0;
+      for (const item of derived) {
+        if (item.byHorizon.get(horizon)?.available === true) {
+          validCount += 1;
+          continue;
+        }
+        if ([...item.sample.missingRelativeDays].some((day) => day <= horizon)) missingCount += 1;
+        if ([...item.sample.invalidRelativeDays].some((day) => day <= horizon)) invalidCount += 1;
+      }
+      return {
+        horizon,
+        eligibleCount: derived.length,
+        missingCount,
+        invalidCount,
+        validCount,
+      };
+    });
+    log(
+      `逐视界可用样本：${horizonDataQuality
+        .map((item) => `T+${item.horizon} ${item.validCount}/${item.eligibleCount}`)
+        .join("、")}`,
+    );
+
     // ---- 8) 汇总（表 / 图 / CSV 同源）----
     const classificationDay = maxObservationDay;
     const dailyPath = summarizeDailyPath(derived, maxObservationDay);
@@ -378,12 +502,19 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
     );
     const entryDay = summarizeEntryDay(derived, maxObservationDay, futureHorizons);
     const futureHorizonComparison = summarizeFutureHorizons(derived, futureHorizons, classificationDay);
+    // 🔴 本轮新增的核心产出：决策时点 × 不破/破位 × 后续视界。
+    const decisionConditionByDay = summarizeDecisionConditionByDay(
+      derived,
+      maxObservationDay,
+      futureHorizons,
+    );
     const tables: StudyTable[] = [
       dailyPath,
       nonBreakVsBreak,
       drawdownBuckets,
       entryDay,
       futureHorizonComparison,
+      decisionConditionByDay,
     ];
 
     const availableMaxPostRelativeDay = dataset.facts.postRelativeDayRange?.max ?? null;
@@ -410,8 +541,18 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       candidateCount,
       usedEventCount: usedEvents.length,
       droppedByMaxEvents,
-      droppedByScanLimit: scannedRowCount >= PLATFORM_EVENT_SCAN_LIMIT,
-      scanLimit: PLATFORM_EVENT_SCAN_LIMIT,
+      /**
+       * 🔴 触顶判据 = **账目缺口**（`unscannedEventCount > 0`），而不是「扫描行数 ≥ 某上限」。
+       *
+       * 为什么不用上限比较：实验**看不到**平台实际生效的上限（`deps.eventScanLimit` 可被
+       * 注入覆盖），拿自己声明的上限去比会得出「没截断」的假结论（真被截断时缺口就在那儿）。
+       * 缺口为 `null`（数据集未声明总数）时无法判定 ⇒ 如实给 `false`，
+       * 并由 `sampleSummary.notes` 说明「无法核对」。
+       */
+      droppedByScanLimit: unscannedEventCount !== null && unscannedEventCount > 0,
+      scanLimit: scanLimitApplied,
+      eventScanPolicy: "FULL_DATASET",
+      eventPageCount,
       unscannedEventCount,
     };
 
@@ -435,10 +576,19 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       availableMaxPostRelativeDay,
       droppedByMaxEvents,
       droppedByScanLimit: candidatesInfo.droppedByScanLimit,
-      scanLimit: PLATFORM_EVENT_SCAN_LIMIT,
+      scanLimit: scanLimitApplied,
       datasetDeclaredTotalEvents: dataset.facts.totalEvents,
       unscannedEventCount,
       minFutureHorizon: futureHorizons[0]!,
+      decisionCondition: decisionConditionByDay,
+      invalidOhlc: {
+        barCount: invalidOhlcBarCount,
+        byRelativeDay: invalidOhlcByRelativeDay,
+        affectedEventCount: invalidOhlcEventIds.size,
+        usedInFutureOutcomeCount: invalidOhlcUsedInFutureOutcomeCount,
+      },
+      horizonDataQuality,
+      eventScanPolicy: "FULL_DATASET",
     });
 
     const hypotheses = buildPotentialHypotheses({
@@ -454,7 +604,7 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       drawdownBuckets,
     });
 
-    // ---- 9) 产物（5 张 CSV + 2 张 SVG；与信封里的表 / 图同源）----
+    // ---- 9) 产物（6 张 CSV + 3 张 SVG；与信封里的表 / 图同源）----
     const maxObsRow = dailyPath.rows.find((row) => row["relativeDay"] === `T+${classificationDay}`) ?? null;
     const dailyPathSvg = renderLineChartSvg({
       title: `首板后 T+1…T+${maxObservationDay} 路径（平均 / 中位，锚 = 首板日收盘价）`,
@@ -484,6 +634,33 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       values: drawdownBuckets.rows.map((row) => numeric(row["sampleCount"]) ?? 0),
     });
 
+    // 决策时点条件矩阵图（本轮新增）：X = 决策时点，Y = 决策之后的平均收盘收益。
+    const decisionChartHorizon = futureHorizons.includes(10) ? 10 : longestHorizon;
+    const decisionSeriesValues = (group: string): Array<number | null> =>
+      Array.from({ length: maxObservationDay }, (_, i) =>
+        numeric(
+          decisionConditionByDay.rows.find(
+            (row) =>
+              row["classificationDay"] === `T+${i + 1}` &&
+              row["group"] === group &&
+              row["futureHorizon"] === `T+${decisionChartHorizon}`,
+          )?.["meanCloseReturn"],
+        ),
+      );
+    const decisionConditionSvg = renderGroupedBarChartSvg({
+      title: `决策时点条件矩阵（各决策时点之后的 T+${decisionChartHorizon} 平均收盘收益）`,
+      subtitle:
+        `锚 = 决策日 T+k 收盘价；窗口 rd ∈ [k+1, ${decisionChartHorizon}]（严格在决策时点之后）。` +
+        `三条序列 = 不破 / 破位 / 全部；**不标注「最佳」**；样本 ${String(eligibleCount)} 个首板事件`,
+      categories: Array.from({ length: maxObservationDay }, (_, i) => `T+${i + 1}`),
+      series: [
+        // 红涨绿跌（A 股口径）：不破组用红、破位组用绿、全部用灰。
+        { label: GROUP_LABELS.NON_BREAK_OPEN, values: decisionSeriesValues("NON_BREAK_OPEN"), color: "#dc2626" },
+        { label: GROUP_LABELS.BREAK_OPEN, values: decisionSeriesValues("BREAK_OPEN"), color: "#16a34a" },
+        { label: GROUP_LABELS.ALL, values: decisionSeriesValues("ALL"), color: "#6b7280" },
+      ],
+    });
+
     // 🔴 `name` 不含角色段（角色段由 `role` 决定）：
     //    最终 Object Key = `…/runs/{runId}/charts/daily-path.svg`。
     const svgSpecs: ReadonlyArray<{ name: string; label: string; description: string; body: string }> = [
@@ -498,6 +675,14 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
           label: "回撤深度分布图（SVG）",
           description: "各回撤观察桶的样本数；自包含 SVG，无外部依赖。",
           body: bucketSvg,
+        },
+        {
+          name: "decision-condition-by-day.svg",
+          label: "决策时点条件矩阵图（SVG）",
+          description:
+            "X = 决策时点 T+k；Y = 决策之后（rd ∈ [k+1, h]）的平均收盘收益；三条序列 = 不破 / 破位 / 全部。" +
+            "自包含 SVG，无外部依赖；**不含任何择优标注**。",
+          body: decisionConditionSvg,
         },
     ];
     for (const file of buildArtifacts(tables, svgSpecs)) {
@@ -515,7 +700,7 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       `分桶边界（比率）：[${edgesRatio.map((value) => value.toFixed(4)).join(", ")}]；` +
         `截至 T+${classificationDay} 不破位率 ${percentText(numeric(maxObsRow?.["nonBreakOpenRate"]))}`,
     );
-    log(`产物：5 张表 CSV + 2 张 SVG（另由平台写入 result.json / logs/run.log / manifest.json）`);
+    log(`产物：6 张表 CSV + 3 张 SVG（另由平台写入 result.json / logs/run.log / manifest.json）`);
 
     // ---- 10) 结果组装（结构定义与组装都在 result.ts）----
     return assembleFundamentalStudyResult({
@@ -534,6 +719,10 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
         missingEventDayBarCount,
         missingObservationBarCount,
         invalidOhlcBarCount,
+        invalidOhlcByRelativeDay,
+        invalidOhlcAffectedEventCount: invalidOhlcEventIds.size,
+        invalidOhlcUsedInFutureOutcomeCount,
+        horizonDataQuality,
         insufficientForwardBarsEventCount,
         duplicateEventIdCount,
         eventDayCloseDiffersFromLimitUpPriceCount: closeDiffersCount,

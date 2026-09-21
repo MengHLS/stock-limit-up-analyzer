@@ -115,7 +115,8 @@
 ```
 1. 文档带 recipe                        ⇒ 按注册表解析            recipeSource = "strategy-document"
 2. 文档无 recipe 但声明了条件            ⇒ 现场编译成门槛           recipeSource = "strategy-declarative-conditions"  ← 新增
-3. 两者都没有（含调用方显式指定）        ⇒ 显式兜底                recipeSource = "explicit-request"
+3. 两者都没有（无调用方指定）          ⇒ 显式兜底（默认常量）     recipeSource = "default-fallback"   ← BD-21 新增
+3'. 两者都没有（有调用方指定 recipeId）  ⇒ 显式兜底（调用方指定）   recipeSource = "explicit-request"
 ```
 
 `RecipeResolutionSource` 加第三值 `"strategy-declarative-conditions"`，
