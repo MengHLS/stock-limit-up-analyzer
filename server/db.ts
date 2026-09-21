@@ -112,20 +112,50 @@ function resolvePoolSize(): number {
 /**
  * 空闲连接回收阈值（`DB_IDLE_TIMEOUT_MS` 可覆盖）。
  *
- * 🔴 为什么默认是 **10 分钟**而不是 mysql2 惯用的 60s：跨境 TiDB 建连成本高（实测首连 1.3~3.0s），
- * 而本应用是**交互式页面**（用户看盘/思考的间隔经常 > 60s）。若按 60s 回收，用户每次操作都要
- * 重新握手（1.3~3.0s 白等），把「抖动」换成了「稳定地慢」——这不是改善。
- * 10 分钟的依据：与对端（TiDB Cloud / 中间 LB）的常见 idle 断连窗口同量级且更短，既能回收
- * 真过期的死连接，又不惩罚交互式使用；`enableKeepAlive` 仍在链路上持续保活，双保险。
+ * 🔴 默认 **3 分钟**（2026-09-21 `BD-24` 由实测**派生**，原为 10 分钟）—— 判据只有一条：
+ *   **必须严格小于实测链路空闲窗口的下界**，否则回收器就赶不上对端掐连接。
  *
- * 注意（配合下方 `maxIdle`）：本值时**只有在 `maxIdle < connectionLimit` 时才会被读取**
- * —— mysql2 的回收定时器可选择性启动，见 `node_modules/mysql2/lib/base/pool.js:29-32`。
+ *   - 实测窗口（A/B 探针 `docs/evidence/_probe_db_keepalive_ab.mts`，同一条 socket 空闲后复用）：
+ *     空闲 **240s 存活**、**330s 起全部失败**（`read ECONNRESET`）⇒ 窗口 ∈ **(240, 330] s**；
+ *   - 因此阈值必须 **< 240s** ⇒ 取 **180_000**（留 25% 余量）。
+ *
+ *   反面教材（原值 600_000 的失效机理）：一次 `researchRun.loopRun` 真实运行 **588,881 ms**，
+ *   9.81 分钟 **小于** 10 分钟 ⇒ 期间一条空闲连接都没被回收 ⇒ 跑完后的留档 INSERT 撞上的全是被
+ *   掐死的 socket（`prefix-BD24` 证据：3 次 insert + 紧随的 SELECT 全 `ECONNRESET`）⇒「回测历史」
+ *   恒缺这条（用户报障）。旧注释写的「与对端窗口同量级**且更短**」在实测数字面前**不成立**（600s > 330s）。
+ *
+ *   🔴 **本项的能力边界（源码级核实，别当万能药）** —— mysql2 的回收循环
+ *   （`node_modules/mysql2/lib/base/pool.js:198-210`）**只处理自由队列里的连接**，且判据是
+ *   `Date.now() - _freeConnections.get(0).lastActiveTime > idleTimeout`；而 `lastActiveTime` 是
+ *   **在 `release()` 里**被刷新的（`.../base/pool_connection.js:23-30`）⇒
+ *   **任何在「掐断窗口」期间处于「被借出」状态的连接，回收器都看不见它**，等它被还回池时时间戳又是新的
+ *   ⇒ **本项对它永久无效**。所以本项只能**缩小**写库边界的陈旧连接数量，**不能清零**：
+ *     · 修前（600s）：`prefix-BD24` 证据里写库边界**至少 4 条**已死（3 次 INSERT + 紧随的 SELECT 全失败）；
+ *     · 修后（180s）：同一探针重跑，写库边界只剩 **1 条**已死 —— 第 1 次尝试仍撞死连接、白等 **19.28 s**
+ *       的 TCP 重传超时；第 2 次换到新连接 **3.86 s** 成功 ⇒ `fbpRows` **0 → 1**。
+ *   ⇒ **承重项是留档重试预算**，不是本项：连接级错误会把那条连接移出池，故 N 次尝试能清掉 N 条陈旧连接
+ *     （见 `researchRunRouter.ts#CLOSED_LOOP_PERSIST_ATTEMPTS`）；本项负责把 N 压进预算之内。
+ *
+ *   ⚠️ 代价（如实登记）：跨境建连 1.3~3.0s，交互式页面**空闲超过 3 分钟**后的下一次查询要重新握手一次。
+ *   这是**刻意选择**：宁可偶发多等 1 次握手，也不接受「长算后写库丢一条」这种**静默错**。
+ *
+ * ⚠️ 注意（配合下方 `maxIdle`）：本值**只有在 `maxIdle < connectionLimit` 时才会被读取**
+ * —— mysql2 的回收定时器可选择性启动，见 `node_modules/mysql2/lib/base/pool.js:29-32`；
+ * 回收动作按 `_freeConnections.get(0)`（**空闲最久的那条**）逐个销毁，见同文件 `_removeIdleTimeoutConnections`。
  */
-function resolveIdleTimeoutMs(): number {
+export function resolveIdleTimeoutMs(): number {
   const raw = Number(process.env.DB_IDLE_TIMEOUT_MS);
   if (Number.isFinite(raw) && raw >= 1_000) return Math.floor(raw);
-  return 600_000;
+  return 180_000;
 }
+
+/**
+ * 实测的链路空闲窗口下界（毫秒）—— 供**可证伪单测**比对（`tests/server/dbPoolConfig.test.ts`）：
+ * `resolveIdleTimeoutMs()` 的默认值必须**严格小于**本值，否则回收器赶不上对端掐连接（`BD-24`）。
+ *
+ * 来源：`docs/evidence/_probe_db_keepalive_ab.mts` 的 `aliveAtSec` 最大值 = **240s**（`0ms` 组）。
+ */
+export const MEASURED_DB_IDLE_WINDOW_LOWER_BOUND_MS = 240_000;
 
 /**
  * 是否开启 MySQL 压缩协议（`compress`，mysql2 官方连接选项）。
@@ -142,6 +172,37 @@ function resolveCompress(): boolean {
   const raw = process.env.DB_COMPRESS;
   if (raw === undefined || raw.trim() === "") return true;
   return !/^(0|false|off|no)$/i.test(raw.trim());
+}
+
+/**
+ * TCP 保活**首次探测**的初始延迟（毫秒；`DB_KEEPALIVE_INITIAL_DELAY_MS` 可覆盖）。
+ *
+ * 🔴 **默认 0 = 保持原行为，且这是刻意的**（2026-09-21 `BD-24` 实测裁定，**别改成有限值**）：
+ *   ⒜ `0` 的语义：Node 文档 *"Setting `initialDelay` to 0 will leave the value unchanged from the
+ *      default"* ⇒ 首次探测等**系统默认**（本机 `HKLM\…\Tcpip\Parameters` 未配 `KeepAliveTime`
+ *      ⇒ 2 小时）⇒ 分钟级尺度上**保活等于没开**（这才是长算后写库撞死连接的环境前提）。
+ *   ⒝ 但把 `0` 改成有限值（试过 **30_000**）**不是修复、而是引雷**：A/B 探针
+ *      （`docs/evidence/_probe_db_keepalive_ab.mts`）实测 ——
+ *        · 空闲窗口 ∈ **(240, 330] s**：`0` 组 240s 存活、330/360/480s 全部 `read ECONNRESET`（errno −4077）；
+ *          **`30_000` 组同样全部失败** ⇒ 「开保活就不会被掐」**证伪**，它挡不住链路掐断；
+ *        · 差别只在**失败形态**：`0` 组是半开 socket 等 **19.3~20.0s** 的 TCP 重传超时，
+ *          `30_000` 组是 **0 ms** 的已关闭 socket（`Can't add new command when connection is in closed state`）。
+ *      ⒞ 而**真正跑一次的真实运行**（`_probe_fbp_looprun_repro2.keepalive-trial.out.txt`）证明这个「快失败」
+ *        会把整条链路**打崩**：留档第 1 次尝试报 `EPIPE`（`writeAfterFIN`）→ mysql2
+ *        `_handleFatalError → _notifyError` **再次** `emit('error')`，而
+ *        `pool_connection.js` 注册的是 **`once('error')`**（第一次已被消费）⇒ **unhandled 'error' event
+ *        ⇒ 进程直接退出**（`code: 'EPIPE', fatal: true`）。保活关闭时同一路径只报 `ECONNRESET`、
+ *        进程不死（`_probe_fbp_looprun_repro2.prefix-BD24.out.json`）⇒ **故保活必须维持「等于没开」**。
+ *   ⇒ 结论：长算后写库不丢的落点**不在**这里，而在 `idleTimeout`（让空闲连接在**被掐之前**就被回收）
+ *     + 留档写路径的有界重试。本项保留仅为**可复现的实验开关**（`DB_KEEPALIVE_INITIAL_DELAY_MS=30000`
+ *     可复现上述崩溃）。
+ *
+ * 注意单位：本值**是毫秒**（`net.Socket#setKeepAlive` 收毫秒，内部 `/1000` 交给 libuv 的秒参数）。
+ */
+function resolveKeepAliveInitialDelayMs(): number {
+  const raw = Number(process.env.DB_KEEPALIVE_INITIAL_DELAY_MS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 0;
 }
 
 export async function getDb() {
@@ -178,7 +239,12 @@ export async function getDb() {
           // 默认值（mysql2：connectionLimit=10 / queueLimit=0）在「串行 await」的调用模式下等于只用 1 条连接，
           // 连接池形同虚设。这里显式声明，让有界并发（server/datasetRegistry/concurrency.ts）真正跑在池上：
           //   - connectionLimit 可用 DB_POOL_SIZE 调整（默认 16）；并发工具默认取 8，留给常规查询的余量充足；
-          //   - enableKeepAlive：跨境链路建连成本高（实测首连 1.3~3.0s），保活避免反复握手；
+          //   - enableKeepAlive + keepAliveInitialDelay：跨境链路建连成本高（实测首连 1.3~3.0s），
+          //     保活省握手。🔴 **不要**用「把初始延迟设成有限值」去修「长算后写库丢条」：`BD-24`
+          //     实测那会让 EPIPE 的二次 `emit('error')` 变成 unhandled 'error' ⇒ **进程退出**。
+          //     该问题由 `idleTimeout` **缩小**陈旧连接数量 + 留档重试预算**清掉剩余**两者合起来解决
+          //     （`idleTimeout` 单独不够 —— 它看不见「被借出跨越掐断窗口」的连接，见
+          //     `resolveIdleTimeoutMs` 注释里的能力边界）。本项默认仍是 `0`（= 保活在分钟级尺度上等于没开）。
           //   - connectTimeout：避免坏链路把整个请求无限挂住；
           //   - compress：MySQL 压缩协议。跨境链路是**吞吐受限**（RTT 208ms 只占总耗时 ~2%），
           //     压缩直接减少在途字节数，是本题最大的单点杠杆（实测 4.66×~6.00×，对小查询无副作用）。
@@ -192,15 +258,17 @@ export async function getDb() {
           //   `read ECONNRESET`，Drizzle 包成 `Failed query: …`。
           //   取 `poolSize - 1`（下限 1）恢复 idle 回收；被回收的连接即便残留，下一次取用由
           //   既有 `withReadRetry` 兜住（但先从源头减少「取出死连接」的概率才是正解）。
-          //   `idleTimeout` 默认放宽到 10 分钟：跨境建连贵，60s 会让交互式页面频繁重握手
-          //   （见 `resolveIdleTimeoutMs` 注释）。
+          //   `idleTimeout` 取 **小于实测链路空闲窗口下界**（3 分钟 < 240s）：
+          //   再宽（原 10 分钟）就会出现「长算 9.81 分钟 ⇒ 一条都没回收 ⇒ 写库撞死连接」（`BD-24`），
+          //   修后同一场景写库边界的陈旧连接由「至少 4 条」降到「1 条」。能力边界与代价见
+          //   `resolveIdleTimeoutMs` 注释。
           waitForConnections: true,
           connectionLimit: poolSize,
           maxIdle: Math.max(1, poolSize - 1),
           idleTimeout: resolveIdleTimeoutMs(),
           queueLimit: 0,
           enableKeepAlive: true,
-          keepAliveInitialDelay: 0,
+          keepAliveInitialDelay: resolveKeepAliveInitialDelayMs(),
           connectTimeout: 20_000,
           compress: resolveCompress(),
         },

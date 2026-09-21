@@ -1437,3 +1437,96 @@ PS001_CLEAN=1 PS001_SCALE=smoke pnpm exec tsx docs/evidence/_probe_ps001_first_r
 ⒝ **桶内聚合会张冠李戴** —— 初版按参数分桶再比各桶指标集合，桶内混着**其他参数**的差异（如 `breakDepth = 0` 桶含 `[0/0.5]` 与 `[0/1]`，`tradeCount ∈ {12, 31}` 那 12↔31 的差**来自 volumeRatio**）⇒ 读者**必然误读**。已改为**边际效应（配对比较）**：固定其余参数比较目标参数，并加 `evidenceForInsensitive.notVacuous`（`distinctValues ≥ 2` 且 `comparisonGroupsWithMultipleValues ≥ 1`）。
 ⒞ **把「子集」当「互斥」** —— `evaluatedCount + reusedFromCacheCount === 组合数` 假设两者互斥；真实语义是 **`reused ⊆ evaluated`**（**缓存复用也是一次评估**，只是未重算）⇒ expand 轮 `evaluated = 9 / reused = 2` 被**误判 FAIL**。已改为 `completed + failed === 组合数 && evaluated === 组合数 && reused <= evaluated`。⚠️ 注意 expand 轮的 `reused = 2` 出现在**中间态**，**最终落盘**轮次为 `reused = 0`。
 ⒟ **文档与行为漂移（已就地修正）** —— `_probe_ps001_first_round.mts` 文件头 docstring 的 `expand` 网格写作 `{0, 0.02, 0.05} × {0.5, 1, 2}`，而实际常量是 `{0, 0.05, 0.1} × {0.5, 1, 1.5}` ⇒ **照文档复跑会得到与已落盘证据不同的网格**。已按实测改写 docstring；`.out.json` 证据**未改**（它记录的是真实跑过的东西）。
+
+---
+
+## `BD-24` · 「跑完策略在『回测历史』里看不到」—— 长算后留档写库撞死连接 · 2026-09-21
+
+> **触发**：用户原话「刚才我跑了一下first-board-pullback，在回测历史中没有看到」。入口 = 策略页「运行策略」（`/strategies/first-board-pullback`），页面**出了结果**（`loopRun` 返回完整 14 阶段轨迹），但「回测历史」（`/backtest-runs`）没有这条。
+
+### 定位（先把「是没跑 / 还在算 / 跑完没存」三者分开）
+
+| 探针 | 结论 |
+| --- | --- |
+| `_probe_fbp_backtest_history.mts` + `_v2` + `.out.json` | 「回测历史」**唯一**数据源 = `closed_loop_backtest_run`；全库 **8** 行、最新 **2026-09-19**、`strategyId LIKE 'cand-%'` 占全部、`fbpRows = 0` |
+| `_probe_fbp_recent_writes.mts` + `.out.json` | 近 2h **全库**扫描：该表 **零新增**（同时排除「写到别的表了」）|
+| `_probe_fbp_ui_reach.mts` + `.out.json` | 真 tRPC 只读端点可达 ⇒ 页面链路正常，问题只在**写路径** |
+| `_probe_fbp_looprun_repro2.mts`（**进程内** `appRouter.createCaller`）| **抓到了原始错误**：idle 清单见下 |
+
+**唯一写入点** = `server/researchRunRouter.ts#loopRun` → `persistClosedLoopBacktestRun`，它是 **best-effort**（全失败只 `console.warn`、绝不抛）⇒ 页面照出结果、库里静默缺行 —— 这正是用户看到的现象。
+
+### 修前证据：`_probe_fbp_looprun_repro2.prefix-BD24.out.{json,txt}`（**已被另存保护，勿覆盖**）
+
+- 一次真实运行 **588881 ms**（9.81 分钟）后：`[loopRun] 留档第 1/3 次尝试失败` → `第 2/3` → `第 3/3` → **留档失败（历史列表将缺此条）**；3 次错误**全部** `Failed query: insert into closed_loop_backtest_run …`；
+- 3 条告警的间隔 = **19.585 s / 19.875 s**，减去退避 0.3 / 0.6 s ⇒ **每次失败恰 ≈19.28 s**（半开 socket 等 TCP 重传超时 —— 这是「重试代价」的实测标尺）；
+- ⚠️ 该次运行 `snapshotArchive('after')` 的列表 SELECT **也失败**（同一个 `ECONNRESET`）⇒ 探针走 catch 分支，所以 `prefix-BD24.out.json` 里 **`loopRunWarnings` 为空**、`fatalError = TRPCError: Failed query: select …`，而那 3 条 `[loopRun]` 告警在 **`capturedConsole`** 里（**易误读，特此记明**）⇒ 池里**至少 4 条**连接已死 ⇒ **3 次重试必然不够**；
+- 服务端 `wait_timeout = 28800` ⇒ **不是 TiDB 掐的**；DB host = `gateway03.us-east-1.prod.aws.tidbcloud.com:4000`。
+
+### 根因（两条，全部实测，无一条靠推断）
+
+⒜ **池的回收阈值大于对端窗口** —— `_probe_db_keepalive_ab.mts` 实测链路空闲窗口 **∈ (240, 330] s**（同一条 socket 空闲后复用：**240s 存活**、**330/360/480s 全部失败**；每组失败后立刻新建连接做对照**全部成功** ⇒ 死掉的只是那条空闲 socket，不是网关整体不可用）。而池 `idleTimeout` = **600s** ⇒ 9.81 分钟的长算（其间不再发 SQL）**恰好躲过回收**。
+⒝ **保活实际未生效** —— `enableKeepAlive: true` 但 `keepAliveInitialDelay: 0`；Node 文档：*"Setting `initialDelay` to 0 will leave the value unchanged from the default"* ⇒ 首次探测等**系统默认**（本机 `HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters` **未配置** `KeepAliveTime`/`KeepAliveInterval`（实测 `reg query` 报「找不到指定的注册表项或值」）⇒ **2 小时**）⇒ 死连接既不被检出、也留不到被提前移除。
+
+### 🔴 修复的能力边界（**这条是本轮最重要的更正**）
+
+回收循环（`node_modules/mysql2/lib/base/pool.js:198-210`）的实现是：
+
+```js
+while (this._freeConnections.length > this.config.maxIdle ||
+       (this._freeConnections.length > 0 &&
+        Date.now() - this._freeConnections.get(0).lastActiveTime > this.config.idleTimeout)) {
+  this._freeConnections.get(0).destroy();
+}
+```
+
+而 `lastActiveTime` 是在 **`release()`** 里被刷新的（`.../base/pool_connection.js:23-30`）⇒
+
+- 它**只处理自由队列** ⇒ 「借出跨越掐断窗口、之后才还回池」的连接**永远不在它的视野里**；
+- 那条连接还回池时时间戳又被刷新成「刚刚」⇒ **即使它站在自由队列里，也判不出过期**；
+⇒ 所以 `idleTimeout` 只能**缩小**写库边界的陈旧连接数量，**不能清零**。实测印证：
+
+| | 写库边界的陈旧连接 | 结果 |
+| --- | --- | --- |
+| 修前（600s） | **≥4 条**（3 次 INSERT + 紧随的 SELECT 全失败） | `fbpRows` = **0**，留档丢失 |
+| 修后（180s） | **1 条**（第 1 次尝试仍撞死连接，白等 **19.28 s**） | 第 2 次换新连接 **3.86 s** 成功 ⇒ `fbpRows` = **1** |
+
+⇒ **承重项是留档重试预算**（连接级错误会把那条连接移出池 ⇒ N 次尝试清掉 N 条陈旧连接），`idleTimeout` 只负责把陈旧连接**压进**这个预算。⚠️ 注释里原先写的「死连接在被掐之前就被回收」（以及「保活是防线」）都**过强/有误**，已按实测改写。
+
+### 🔴 一次被证伪的「修复」（本轮最有价值的负面证据）
+
+先试的办法是「把保活初始延迟改成 **30_000**，让死连接被快速检出」，结果**两连击**：
+
+⒜ **A/B 探针证伪其假设**：`30_000` 组在 330/360/480s **同样全部失败** ⇒ **保活挡不住链路掐断**；
+⒝ **真跑一次直接崩进程**：`_probe_fbp_looprun_repro2.keepalive-trial.out.txt` —— 失败形态从「半开挂 **19.3~20.0s** 后 `ECONNRESET`」变成「**0ms** 已关闭 socket」，于是 `EPIPE`（`writeAfterFIN`）触发 mysql2 `_handleFatalError → _notifyError` **再次** `emit('error')`，而 `node_modules/mysql2/lib/base/pool_connection.js` 注册的是 **`once('error')`**（第一次已被消费）⇒ **`Unhandled 'error' event` ⇒ 进程退出**（`code: 'EPIPE', fatal: true`）。
+
+⇒ **已按证据回退**（`keepAliveInitialDelay` 维持 `0`），并在 `server/db.ts` 就地写下红线；改动保留为**可复现的实验开关**（`DB_KEEPALIVE_INITIAL_DELAY_MS=30000`）。
+
+### 修复（零 DDL / 零迁移 / 零新依赖 / 零新端点）
+
+| 落点 | 改动 | 判据（派生自实测，不是拍脑袋） |
+| --- | --- | --- |
+| `server/db.ts#resolveIdleTimeoutMs` | 默认 **600_000 → 180_000** | 必须**严格小于**实测窗口下界 **240s**（留 25% 余量）⇒ 把「一直待在自由队列」的陈旧连接清掉，陈旧数量实测 **≥4 → 1** |
+| `server/db.ts` | 新增导出常量 `MEASURED_DB_IDLE_WINDOW_LOWER_BOUND_MS = 240_000` | 供单测**交叉核对落盘证据**（`A_current.aliveAtSec` 最大值）⇒ 数字不靠记忆 |
+| `server/db.ts#resolveKeepAliveInitialDelayMs` | 默认**维持 `0`**（**不是**修复项） | A/B + 真跑双证：有限值 ⇒ 保活无效且引 `EPIPE` 崩进程 |
+| `server/researchRunRouter.ts#persistClosedLoopBacktestRun` | 重试 **3 → 6**；**仅瞬时错误**重试；导出 + 依赖注入 | 实测池内**至少 4 条**已死 ⇒ 3 次必然不够（**承重项**）；非瞬时错误重试不可能成功（省下 N × 19.28s）|
+
+### 修复后真跑（`_probe_fbp_looprun_repro2.out.{json,txt}`，同一条探针、同一组入参）
+
+- `appearedInHistory` = **true**；`fbpRows` **0 → 1**；耗时 **571761 ms**（9.53 分钟）；`[loopRun]` 告警 **2** 条（第 1 次失败 + 第 2 次成功各一条）；
+- **时长可分解且自洽**（这就是「1 条陈旧连接」的直接读数）：计算 ≈ **548.3 s** + 第 1 次失败 **19.28 s** + 退避 **0.3 s** + 第 2 次成功 **3.86 s** ≈ **571.7 s** = 落盘 `durationMs`；
+- 写入的那一行：`runId = clrun-20260921121418150`、`strategyId = first-board-pullback`、`initialCapital = 1000000`、`finalEquity = 924331.41`、`tradeCount = 35`（**真实研究产物，默认不清理**）。
+
+### 用法（复跑）
+
+```bash
+# ① A/B：链路空闲窗口 + 保活 A/B（只读，约 9 分钟）
+node_modules/.bin/tsx docs/evidence/_probe_db_keepalive_ab.mts > docs/evidence/_probe_db_keepalive_ab.stdout.txt 2>&1
+
+# ② 端到端：真跑一次 first-board-pullback（约 10 分钟；会**覆盖**自身 out.*，复跑前先另存）
+node_modules/.bin/tsx docs/evidence/_probe_fbp_looprun_repro2.mts > docs/evidence/_probe_fbp_looprun_repro2.out.txt 2>&1
+
+# ③ 单测
+node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/closedLoopBacktestRun/
+```
+
+⚠️ `_probe_db_idle_window.mts`（上一轮的窗口探针）**已被 ① 取代**：它在上一轮被中断，磁盘上只留 `t=0` 建连 + `空闲 60.0s ⇒ 复用成功` 两行**部分证据**（只能证明「窗口 > 60s」）。

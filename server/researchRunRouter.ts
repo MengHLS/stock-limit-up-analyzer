@@ -31,6 +31,10 @@ import { publicProcedure, router } from "./_core/trpc";
 import { registerBuiltInResearchStrategies } from "./research/adapter";
 import { researchStrategyRegistry } from "./research/registry";
 import { readCertifiedGate } from "./dataHealth";
+// BD-24 — 留档重试的「瞬时 vs 语义」判定**复用只读路径的同一份特征表**，
+// 不另立第二套「什么算瞬时」（两份口径必然漂移）。此处只用判定函数，不用 `withReadRetry`
+// ——那个工具按其头注释**只给读路径**用。
+import { isTransientReadError } from "./readRetry";
 import { runClosedLoop } from "./research/closedLoop/orchestrator";
 import {
   CLOSED_LOOP_STAGE_IDS,
@@ -260,58 +264,128 @@ function describeWiringGap(wiring: ClosedLoopWiringSummary): string {
  * 代价是「留档失败 ⇒ 历史列表里少这一条」，这是**如实可见**的降级（不是假装存了）；
  * 另外 `runId` 唯一键保证重试幂等收敛，不会因重试堆出重复记录。
  *
- * 🔴 BACKTEST-002 收尾实测（本轮）：**只尝试一次是不够的**。
+ * 🔴 BACKTEST-002 收尾实测：**只尝试一次是不够的**。
  *    一次真实运行（`cand-360004@1.0.0`）计算阶段约 **593~616 s**，其间完全不碰 DB；
- *    计算结束时连接池里那条连接已被链路（TiDB Cloud / 本地代理）**静默重置**，于是
+ *    计算结束时连接池里那条连接已被链路（TiDB Cloud / 中间 LB）**静默重置**，于是
  *    **唯一的一次 insert 必然失败** ⇒ 长运行**每次都静默丢掉留档**（历史列表恒缺这条）。
- *    证据：同样条件下紧随其后的只读 SELECT 首发也失败、**重试即成功** ⇒ 池在失败后能拿到新连接。
- *    ⇒ 修法 = **有界重试**（首次失败后换连接再试），语义仍是 best-effort（不抛、不阻断回测）。
+ *    ⇒ 第一版修法 = **有界重试**（首次失败后换连接再试），语义仍是 best-effort（不抛、不阻断回测）。
  *    ⚠️ 不要把它改成「失败即抛」：那会把「历史列表少一条」升级成「回测结果丢失」。
+ *    ⚠️「不碰 DB」≠「连接没被借出」：池的回收器**只处理自由队列**，被借出的连接它看不见
+ *    ⇒「借出跨越掐断窗口、之后才还回池」的连接既不被回收、时间戳又被 `release()` 刷新成新的
+ *    ⇒ 这一类**只能靠有界重试清掉**（源码级边界见 `server/db.ts#resolveIdleTimeoutMs` 注释）。
+ *
+ * 🔴 BD-24（2026-09-21，用户报障「跑完 first-board-pullback 在『回测历史』里看不到」）：
+ *    第一版「重试 3 次」**不够**，且上面那句「重试即成功」**只在「池内死连接数 < 尝试次数」时成立**
+ *    —— 本轮进程内复现（`docs/evidence/_probe_fbp_looprun_repro2.out.json`）实测：9.81 分钟的长算后，
+ *    **3 次 INSERT + 紧随其后的列表 SELECT 全部 `read ECONNRESET`（errno −4077）** ⇒ 池里至少 **4 条**
+ *    连接已死，3 次尝试烧完就放弃（这正是「页面有结果、历史无此条」的直接原因）。
+ *    根因**不在本函数**：`server/db.ts` 的池阈值（`idleTimeout` = 10 分钟）**大于**实测链路空闲窗口
+ *    （**(240, 330] s**，见 `_probe_db_keepalive_ab.mts`）⇒ 长算期间**一条空闲连接都不会被回收**，
+ *    写库时取到的全是已被掐死、却因保活未生效而「看似可用」的半开 socket（要等 ~19.28 s TCP 重传超时）。
+ *    已按实测把回收阈值压到 **3 分钟 < 240s** ⇒ 写库边界的陈旧连接由**至少 4 条**降到 **1 条**。
+ *    ⚠️ 但压阈值**清不到 0**：回收器只处理自由队列，且只看 `release()` 时刷新的 `lastActiveTime`
+ *    ⇒ 「被借出跨越掐断窗口、之后才还回池」的连接对它**永久不可见**（源码级边界见
+ *    `db.ts#resolveIdleTimeoutMs` 注释）⇒ 修后真跑的第 1 次尝试**仍然**撞死连接、白等 **19.28 s**，
+ *    靠第 2 次换到新连接（**3.86 s**）才成功（`_probe_fbp_looprun_repro2.out.json`）。
+ *    ⇒ **所以本函数的重试预算是承重项，不是兜底。**
+ *    ⚠️ 试过的**错解**（别再试）：把保活初始延迟设成 30s（想让死连接被快速检出）—— 真跑一次证明它是
+ *    **引雷**：`EPIPE`（`writeAfterFIN`）触发 mysql2 `_notifyError` **二次** `emit('error')`，而
+ *    `pool_connection.js` 只用 `once('error')` ⇒ **unhandled 'error' ⇒ 进程退出**
+ *    （`_probe_fbp_looprun_repro2.keepalive-trial.out.txt`）。
+ *    本函数随之做两处**收紧**：⒜ 尝试次数按「实测死连接下界 4」派生（见下）；
+ *    ⒝ **非瞬时错误不再重试**（SQL / 表结构这类错误重试不可能成功，白等会拖住整个响应）。
  */
-const CLOSED_LOOP_PERSIST_ATTEMPTS = 3;
-/** 重试退避（线性）：给池一点时间销毁死连接并新开一条。 */
 const CLOSED_LOOP_PERSIST_RETRY_DELAY_MS = 300;
 
-async function persistClosedLoopBacktestRun(options: {
-  experimentId: string;
-  strategyId: string;
-  strategyVersion: string;
-  startDate: string;
-  endDate: string;
-  result: ClosedLoopRunResult;
-}): Promise<void> {
+/**
+ * 留档最大尝试次数（含首次）。**派生**而非拍脑袋：
+ *
+ *   - 连接级瞬时错误会让 mysql2 把**那条连接**移出池
+ *     （`node_modules/mysql2/lib/base/pool_connection.js` 的 `error` 处理器 `_removeConnection`）
+ *     ⇒ 每次失败**恰好**消耗一条死连接，需要的尝试次数 = 1 + 池内死连接数；
+ *   - 实测下界（`BD-24` 复现）：长算结束后池里**至少 4 条**已死 ⇒ 上轮的 **3 次**必然不够；
+ *   - 取 **6** = 实测下界 4 之上留 **2** 次余量。有界性：单次失败实测 **≈19.28 s**
+ *     （socket 半开时要等 TCP 重传超时；`prefix-BD24` 证据里连续两次间隔 19.585 / 19.875 s
+ *     减去 0.3 / 0.6 s 退避 ⇒ 19.28 s）⇒ 全 6 次都失败时最坏 ≈ **1.7 分钟**
+ *     （5 × 19.28 + 退避 4.5 s），且只在链路真出问题时才走到尾。
+ *
+ * ⚠️ **本项是承重项，不是兜底**（`BD-24` 修后真跑的实测结论）：`idleTimeout` 只能把写库边界的陈旧连接
+ *    从「至少 4 条」压到「1 条」，**压不到 0**（它看不见「被借出跨越掐断窗口」的连接）⇒ 余下那条必须靠
+ *    重试清掉。也**不是**保活：A/B 实测证明保活挡不住链路掐断，把它调成有限值还会引雷（见上两段）。
+ */
+const CLOSED_LOOP_PERSIST_ATTEMPTS = 6;
+
+/** 留档写入的依赖注入点：默认走真实实现；单测据此注入**可证伪**的失败序列。 */
+export interface ClosedLoopPersistDeps {
+  /** 覆盖真正的写入函数（默认 `saveClosedLoopBacktestRun`）。 */
+  save?: (input: Parameters<typeof saveClosedLoopBacktestRun>[0]) => Promise<number>;
+  /** 覆盖尝试次数（仅测试用；默认 `CLOSED_LOOP_PERSIST_ATTEMPTS`）。 */
+  attempts?: number;
+  /** 覆盖退避基数（仅测试用；`0` = 不等待）。 */
+  retryDelayMs?: number;
+}
+
+export async function persistClosedLoopBacktestRun(
+  options: {
+    experimentId: string;
+    strategyId: string;
+    strategyVersion: string;
+    startDate: string;
+    endDate: string;
+    result: ClosedLoopRunResult;
+  },
+  deps: ClosedLoopPersistDeps = {},
+): Promise<void> {
+  const save = deps.save ?? saveClosedLoopBacktestRun;
+  const maxAttempts = Math.max(1, Math.trunc(deps.attempts ?? CLOSED_LOOP_PERSIST_ATTEMPTS));
+  const retryDelayMs = Math.max(0, deps.retryDelayMs ?? CLOSED_LOOP_PERSIST_RETRY_DELAY_MS);
+  const saveInput: Parameters<typeof saveClosedLoopBacktestRun>[0] = {
+    experimentId: options.experimentId,
+    strategyId: options.strategyId,
+    strategyVersion: options.strategyVersion,
+    startDate: options.startDate,
+    endDate: options.endDate,
+    result: options.result,
+  };
+
   let lastDetail = "（未捕获到错误详情）";
-  for (let attempt = 1; attempt <= CLOSED_LOOP_PERSIST_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      await saveClosedLoopBacktestRun({
-        experimentId: options.experimentId,
-        strategyId: options.strategyId,
-        strategyVersion: options.strategyVersion,
-        startDate: options.startDate,
-        endDate: options.endDate,
-        result: options.result,
-      });
+      await save(saveInput);
       if (attempt > 1) {
         console.warn(
-          `[loopRun] 闭环回测结果留档在第 ${attempt} 次尝试成功（前面是长算后连接被重置，属已知现象）。`,
+          `[loopRun] 闭环回测结果留档在第 ${attempt} 次尝试成功（前 ${attempt - 1} 次是长算后连接被重置，` +
+            `属已知现象；BD-24）。`,
         );
       }
       return;
     } catch (error) {
-      lastDetail =
-        error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-      if (attempt < CLOSED_LOOP_PERSIST_ATTEMPTS) {
+      lastDetail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+
+      // 非瞬时错误（SQL 非法 / 表结构不符 / 数据越界…）重试**不可能**成功 ⇒ 立即放弃，
+      // 不白等 N × 19.6s。瞬时判定**复用** `readRetry.ts` 的同一份特征表，避免两套口径漂移。
+      if (!isTransientReadError(error)) {
         console.warn(
-          `[loopRun] 留档第 ${attempt}/${CLOSED_LOOP_PERSIST_ATTEMPTS} 次尝试失败，${CLOSED_LOOP_PERSIST_RETRY_DELAY_MS * attempt}ms 后重试：${lastDetail}`,
+          `[loopRun] 闭环回测结果留档失败（非瞬时错误，不重试；不影响本次运行结果，历史列表将缺此条）` +
+            `（runId=${options.result.runId}）：${lastDetail}`,
+        );
+        return;
+      }
+
+      if (attempt < maxAttempts) {
+        const nextDelayMs = retryDelayMs * attempt;
+        console.warn(
+          `[loopRun] 留档第 ${attempt}/${maxAttempts} 次尝试失败（连接级瞬时错误），${nextDelayMs}ms 后重试：${lastDetail}`,
         );
         await new Promise<void>((resolve) => {
-          setTimeout(resolve, CLOSED_LOOP_PERSIST_RETRY_DELAY_MS * attempt);
+          setTimeout(resolve, nextDelayMs);
         });
       }
     }
   }
   console.warn(
-    `[loopRun] 闭环回测结果留档失败（已尝试 ${CLOSED_LOOP_PERSIST_ATTEMPTS} 次；不影响本次运行结果，历史列表将缺此条）：${lastDetail}`,
+    `[loopRun] 闭环回测结果留档失败（已尝试 ${maxAttempts} 次；不影响本次运行结果，历史列表将缺此条）` +
+      `（runId=${options.result.runId}）：${lastDetail}`,
   );
 }
 
