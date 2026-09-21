@@ -1,25 +1,3 @@
-/**
- * FRONTEND-FINAL-001（P1-1）— 参数引用面检查卡（**只读**，不改策略、不发写请求）。
- *
- * ## 为什么需要这张卡
- *
- * 参数 Search 有一个**看不到的失败模式**：策略版本声明了 `TUNABLE` 参数，但规则图一个都没引用
- * ⇒ 搜索出的「不同取值」产出逐字节相同的权益曲线（假差异）。后端因此以
- * `PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER` 拒绝创建 Run。
- *
- * 规格 §六：这**不能只是后端返回一个错误码** —— 页面必须显式解释「当前 Strategy Version
- * 没有被执行链引用的 TUNABLE 参数，因此无法进行有效 Parameter Search」，并给出
- * 「当前版本 / 参数列表 / 参数角色 / 是否被引用 / 下一步入口」。
- *
- * ## 数据来源（前端纪律）
- *
- * - 引用面判定**一律读后端投影**（`research.strategy.loadBundle` 的
- *   `projections.parameters[].referenced` + `parameterReferenceCheck`）；
- *   🔴 前端**不重算**引用面、不解析策略 JSON、**不造 mock 数据**；
- * - `parameterReferenceCheck.applied === false` ⇒ 后端**不可判定**：此时必须显示「不可判定」，
- *   **不得**把 `referenced === false` 说成「未被引用」（那是伪造结论）；
- * - 本卡只渲染 + 跳转，🔴 不提供任何写库按钮（策略内容不可由本页修改）。
- */
 
 import { ExternalLink, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";

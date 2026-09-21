@@ -197,10 +197,6 @@ export default function RegimeReport() {
           <BarChart3 className="h-5 w-5" />
           市场 Regime + 研究结论报告
         </h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          FE-8 · Regime 标签可视化 + 研究结论报告导出。标签 / 归因 / 报告产物全部来自后端
-          marketRegime 端点，本页只读渲染、不计算、不伪造。
-        </p>
       </div>
 
       {/* R7 醒目提示条：技术预览·非 RESEARCH_READY 口径 */}

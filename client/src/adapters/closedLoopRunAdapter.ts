@@ -94,14 +94,6 @@ export interface ClosedLoopExecutionStatsView {
   byReason: ClosedLoopKeyedCount[];
 }
 
-/**
- * backtest 阶段产出的**真实明细**（2026-09-13 新增）。
- *
- * 存在理由：早前 backtest 交接只含 12 个标量，于是「0 成交 / 曲线全平」在界面上**无法解释**。
- * 后端现已把权益曲线、撮合统计、跳过原因、成交明细一并投影出来，本层负责**直搬**它们。
- * 🔴 严守「展示层不做估计」：本层只搬字段，**不**由成交明细反算胜率 / 盈亏比（那些由后端
- * 评估器给出），也**不**把截断后的条数当作总笔数（`tradesTruncated` 单独表达）。
- */
 export interface ClosedLoopBacktestArtifactsView {
   tradeCount: number;
   initialCapital: number | null;
@@ -158,16 +150,6 @@ export interface ClosedLoopRunAssemblyViewModel {
   };
 }
 
-/**
- * 本次**重建**有没有继承「绑定数据集声明的证券范围约束」（板块 / ST）。
- *
- * 为什么需要它（2026-09-14 实查，用户实报）：回落重建在修复前**不继承**
- * `dataset_version.universeDefinitionJson.boards` / `dataset_build_config.excludeSt`，
- * 实测把绑定的「主板数据集」（`boards:["main"]`）重建成了**全市场**面板
- * （`datasetSecurityCount=5146`），成交明细里出现 300/301/688 标的。
- * 修复后 `datasetSourceNote` 会带上继承声明；**修复前落库的历史结果没有这句** ⇒
- * 范围无法确认 ⇒ UI 必须如实提示，而不是让用户以为结果是按他的数据集跑的。
- */
 export type RebuildScopeVerdict = "inherited" | "declared-unscoped" | "unknown";
 
 /**

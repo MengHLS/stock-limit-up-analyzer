@@ -1,10 +1,3 @@
-/**
- * RESEARCH-EXPERIMENT-003 —— tRPC 错误的**诊断视图**（领域码 + 人读提示）。
- *
- * 从已删除的 `client/src/adapters/researchEngineAdapter.ts` 逐字迁出：旧引擎删除后，
- * 生产页面（参数搜索的引用面检查卡、独立实验体系的列表 / 详情）仍要按 `[CODE] …` 约定
- * 抠出领域码并给出可执行建议。**不新增第二套抠码规则**（沿用同一正则约定）。
- */
 
 import type { DiagnosticError } from "@/components/common";
 

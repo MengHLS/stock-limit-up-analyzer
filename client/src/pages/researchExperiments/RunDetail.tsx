@@ -1,34 +1,3 @@
-/**
- * 独立研究实验 · Run 详情（`/research-experiments/:group/:key/runs/:runId`，RESEARCH-EXPERIMENT-004）。
- *
- * ## 这一页存在的唯一理由
- *
- * 004 之前「结果」只活在内存里 —— 刷新就没了、必须重跑。落库之后，
- * 这一页必须能**只凭 `runId`** 把一条历史 Run 完整讲清楚：
- *
- * | 规格要求（§15 Run Detail / §16 Result 展示） | 本页落点 |
- * | --- | --- |
- * | Status | 顶部状态徽章（含 `stale`「可能已卡住」）+ 状态说明 |
- * | Dataset | 指标卡 + 坐标行（`datasetCode` / label / id） |
- * | Parameters | `JsonBlock`（键值表 + 可切原始 JSON） |
- * | Started At / Completed At / Duration | 指标卡 + 元数据行 |
- * | Result | 通用渲染器（Summary / Metrics / Tables / Observations）+ 原始 JSON |
- * | Artifacts | Manifest 索引卡 + 服务端**实测**存在性目录 + 按需预览/下载 |
- *
- * ## 三条硬纪律
- *
- * 1. **不自动下载任何产物**（§17）：页面初始化只发两个只读查询
- *    （`getRun` + 别的什么都不发）；字节只在用户点「打开 / 下载 / 加载预览」时才走
- *    `GET /api/experiments/artifact`。
- * 2. **失败 Run 绝不伪装成成功**（§21-E）：`FAILED` 一律给出 `errorCode` + `errorMessage`；
- *    「实验算完了但没落存储」这种情形在列表页与实验页都已被标红，这里同样显示失败原因。
- * 3. **拿不到就如实说**（§13 情况 C）：对象存储不可读 ⇒ `artifactsAvailable=false` 时
- *    明确写「不是产物丢了，是本次没读到」；Manifest 登记了但实测不存在 ⇒ 单独标红。
- *
- * 🔴 本页**不重建执行 outcome**：`getRun` 返回的是「持久化事实 + 产物」，
- *    不含内存态的 `execution`（那属于「刚跑完的那一次」）。所以结果区走通用渲染器，
- *    并在实验有自定义页面时给出**跳回实验页**的入口 —— 不伪造一份假的 execution。
- */
 
 import { useMemo, useState } from "react";
 import { Link, useParams } from "wouter";

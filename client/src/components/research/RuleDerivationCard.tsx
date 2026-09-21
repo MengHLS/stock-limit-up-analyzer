@@ -1,17 +1,3 @@
-/**
- * PHASE-D-001 — **规则派生链**卡片（编号 `9cb`；D.9 的 human review gate）。
- *
- * 回答三个问题，让人能**审查**而不是**猜**：
- *   ① 这条候选的规则是从哪几条 Finding 派生的（`sourceFindingId` / 研究侧原文）；
- *   ② 研究侧条件被翻译成了哪个策略侧条件（以及为什么是这个方向 —— Pattern 声明的 `comparison`）；
- *   ③ 哪些研究侧条件**没能**翻译（`skipped`：如实列出原因，而不是静默消失）。
- *
- * 纪律：
- *   - 只渲染 `sourceTraceJson.derivation` **真实存在**的内容；结构未知 / 缺失即**整卡不渲染**
- *     （不做「看起来像可用」的兜底展示）；
- *   - 方向不一致（`directionMismatch`）必须**醒目**提示「需人工确认后再转正」；
- *   - 纯只读：本卡不做任何写入、不放按钮（拒绝 / 接受走既有的状态迁移入口）。
- */
 
 import { AlertTriangle, Info, Workflow } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

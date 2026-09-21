@@ -58,22 +58,6 @@ import { trpc } from "@/lib/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { ParamSearchRouter } from "../../../server/paramSearchRouter";
 
-// ---------------------------------------------------------------------------
-// 🔴 FRONTEND-FINAL-001（冒烟实测发现的真缺陷）
-//
-// 原写法：`type ParamSearchClient = ReturnType<typeof createTRPCReact<ParamSearchRouter>>` +
-// `const paramSearch = trpc as unknown as ParamSearchClient;` —— 当时 `paramSearch` 尚未并入
-// `appRouter`，故用类型断言临时隔离。
-//
-// 但**端点早已合并**（`server/routers.ts:329` `paramSearch: paramSearchRouter`），断言就此变成
-// **错误映射**：`ParamSearchClient` 是「以 paramSearchRouter 为根」的客户端类型，因此
-// `paramSearch.describe` 发出的请求路径是**裸 `describe`**，服务端恒返回
-// `No procedure found on path "describe"`（无头浏览器实测，见
-// `docs/evidence/_probe_ff1_frontend_smoke.out.json`）⇒ 本页 `describe` 永远失败，
-// 组合数上限静默落到写死的 64。
-//
-// 修法：直接用真客户端 `trpc.paramSearch`（类型同源、路径正确）。
-// ---------------------------------------------------------------------------
 
 const paramSearch = trpc.paramSearch;
 
@@ -193,13 +177,6 @@ function heatCellStyle(returnPct: number | null, failed: boolean): React.CSSProp
 // 页面
 // ---------------------------------------------------------------------------
 
-/**
- * FRONTEND-FINAL-001（P1-6）：本页同时挂在 `/parameter-search` 与 `/parameter-search/:runId`。
- *
- * 🔴 **不用 props 传 runId**：本页是 `wouter` 的 `component` 形态，其 props 由路由注入
- *   （`RouteComponentProps`），自定义 props 会与之冲突（实测 `TS2322`）。
- *   ⇒ 与 `DatasetDetail` 等页一致，**组件内部** `useParams()` 读路由段。
- */
 export default function ParameterSearch() {
   // `/parameter-search/:runId` 时给出 runId；`/parameter-search` 时为 undefined。
   const routeParams = useParams<{ runId?: string }>();
@@ -242,13 +219,6 @@ export default function ParameterSearch() {
 
   const describe = describeQuery.data ?? null;
   const searchRun: SearchRun | null = runMutation.data ?? null;
-  /**
-   * 原始返回（tRPC 推断类型，含 `evaluationSource` / `evaluationNote` /
-   * `effectiveParameterSpace`）。
-   *
-   * 🔴 必须是**局部变量**：JSX 里直接写 `runMutation.data.xxx` 无法通过 TS 收窄
-   * （属性访问每次求值都可能不同）—— 实测报 TS18048。
-   */
   const searchRunRaw = runMutation.data ?? null;
   const rollingRun: RollingRun | null = rollMutation.data ?? null;
   const robustnessRun: RobustnessRun | null = robMutation.data ?? null;
@@ -327,10 +297,6 @@ export default function ParameterSearch() {
           <Radar className="h-5 w-5" />
           参数搜索 + 鲁棒性
         </h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          FE-6 · Grid / Random / Rolling 搜索、稳定参数区、候选参数，与 C-18.1 四轴扰动 /
-          C-18.2 随机化鲁棒性报告。数值一律来自后端 paramSearch.* 端点，本页不计算、不伪造。
-        </p>
       </div>
 
       {/* R7 技术预览提示条（醒目，必做） */}

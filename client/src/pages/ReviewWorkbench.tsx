@@ -64,15 +64,6 @@ import {
 import type { AppRouter } from "../../../server/routers";
 import type { ReviewRouter } from "../../../server/reviewRouter";
 
-// ---------------------------------------------------------------------------
-// 🔴 FRONTEND-FINAL-001（冒烟实测发现的同类真缺陷）
-//
-// 原写法：类型断言 `trpc as unknown as ReturnType<typeof createTRPCReact<ReviewRouter>>`
-// —— 当时认为 `review` 尚未并入 `appRouter`。
-// 但端点**早已合并**（`server/routers.ts:332` `review: reviewRouter`），断言因此变成错误映射：
-// `review.journal.reconcile` 的请求路径会退化成裸 `journal.reconcile` ⇒ 服务端 404。
-// 修法：直接用真客户端 `trpc.review`。
-// ---------------------------------------------------------------------------
 
 const review = trpc.review;
 
@@ -462,11 +453,6 @@ export default function ReviewWorkbench() {
           <ClipboardList className="h-5 w-5" />
           复盘工作台
         </h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          FE-9 · 复盘纪律 + 生产闭环——纸面交易单笔全生命周期（建仓→加仓→做T→清仓） /
-          纪律反馈看板（C-24.2）/ 生产闭环状态（C-25.1）；后端 review.* 端点已暴露
-          （tradeJournal / disciplineFeedback / paperAccount 引擎），C-23.2 数据注入未完成时诚实用空态。
-        </p>
       </div>
 
       {/* R7 隔离标注（必做、醒目）：技术预览 · 非 RESEARCH_READY 口径 */}
@@ -480,10 +466,6 @@ export default function ReviewWorkbench() {
               PaperPosition / equityCurve）与<b>手工注入的复盘数据流</b>，一律属「非研究可信度
               口径」，与 RESEARCH_READY 研究链路（tradeJournal / disciplineFeedback /
               paperAccount 经 review.* 暴露的同源记录）<b>严格隔离</b>，不得据此下研究结论。
-            </p>
-            <p className="font-mono text-[11px]">
-              研究链路数据联调前置：① C-23.2 编排产出 SignalToPnlRun / PaperAccountRunInput
-              真实数据注入；② C-24.1 / C-24.2 / C-25.1 认证（VALIDATED）。
             </p>
           </div>
         </div>

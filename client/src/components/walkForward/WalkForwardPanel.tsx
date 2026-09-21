@@ -1,29 +1,3 @@
-/**
- * WALK-FORWARD-001 §14 — Walk-Forward 验证（时间滚动编排）前端面板。
- *
- * ## 这个面板回答什么问题
- *
- * > 「把时间轴切成若干 Fold，**每个 Fold 各自**在它自己的样本内窗口里搜参数、
- * >   冻结候选，再拿到**紧邻的、它没见过的**样本外窗口上真实重跑 —— 这些 Fold 的结果
- * >   凑在一起是什么形状？」
- *
- * 它是**编排层**的可视化，不是新引擎：每一次搜索与每一次样本外都由服务端的既有
- * Parameter Search / OOS 应用服务完成（规格 §3 / §6 / §15），前端只展示后端读数。
- *
- * ## 前端纪律（本仓既有，逐条对齐 §14）
- *
- * - 🔴 **不产出任何排序 / 评级 / 择优结论**：面板里**没有**「最好 / 最差 Fold」、
- *   没有按表现排序、没有策略评级、没有「建议使用某组参数」。Fold 一律**按序号升序**展示。
- *   本文件不得出现结论性词汇 —— 由
- *   `tests/server/research/walkForward/walkForwardBoundary.test.ts` 的源码扫描钉住；
- * - 🔴 **长请求按钮必须换文案**：`执行` 会真实跑 `Fold 数 × (每 Fold 搜索 + 样本外)` 次回测
- *   （实测分钟级），pending 时文案必须变化；
- * - 🔴 **诚实空态**：`null`（算不出来）显示「—」，**不用 0 顶替**；`0`（真的零成交）显示 `0`；
- *   `INSUFFICIENT_TRADING_ACTIVITY` 是被如实标注的结果，**不是**失败；
- * - 🔴 **深链可达**：选中的 Run / Fold 写进 URL（`?walkForwardRunId=…&foldIndex=…`），
- *   刷新 / 分享后仍能回到同一份详情；
- * - 🔴 **创建 = 零执行**：创建按钮只冻结排程与身份，界面上必须说清「此时尚未跑任何回测」。
- */
 
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useSearch } from "wouter";
@@ -146,12 +120,6 @@ const SELECTION_KINDS = ["FIRST_ELIGIBLE_COMBINATION", "EXPLICIT_PARAMETER_HASH"
 // 主面板
 // ---------------------------------------------------------------------------
 
-/**
- * FRONTEND-FINAL-001（P0-1 / P1-6）：本面板既可作为 `/parameter-search` 的页内块，
- * 也可被独立路由（`/validation/walk-forward[/:runId[/folds/:foldIndex]]`）复用。
- *
- * 不传 props ⇒ 与改造前**逐字等价**（query 深链写回 `/parameter-search?walkForwardRunId=…&foldIndex=…`）。
- */
 export interface WalkForwardPanelProps extends Partial<PanelLinkOptions> {
   /** 由独立路由的路径段给出的选中 run（优先级高于 query）。 */
   readonly routeRunId?: string | null;

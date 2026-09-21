@@ -1,19 +1,3 @@
-/**
- * RunConfigPanel — 回测运行配置（任务 §4，Run Workbench）。
- *
- * 提供：时间范围 / 初始资金 / 手续费 / 滑点 / 最大持仓 / 运行模式。
- *
- * FE-0 扩展接入：顶部「运行就绪探测」条由后端 `researchRun.readiness` 只读端点驱动
- * （认证 gate + 策略注册 + 装配覆盖率），未就绪原因原样展示。
- *
- * FE-4 扩展接入：`onRun` 注入后「运行策略」按钮可用，点击真实调用
- * `researchRun.loopRun`（封闭循环编排器）。按钮**不因 executorBound=false 锁死**——
- * 运行请求会真跑入参齐备的阶段、如实 BLOCKED 其余阶段，这是有诊断价值的真实执行；
- * 未就绪原因只在 Tooltip 里提示，不阻断发起。
- *
- * 🔴 2026-09-13：原「加载真实数据」「声明数据链已就绪」两个用户开关已**移除**，
- * 恒为真（点运行 = 跑真数据）。理由见下方 `RealDataBlock` 注释。
- */
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,18 +43,6 @@ export interface RunConfigViewModel {
   recipeId: string;
 }
 
-/**
- * 时间范围默认值（🔴 2026-09-13 修复「点了运行没反应」的直接成因）。
- *
- * 背景：`loopRun` 的 `dateRange.startDate` / `endDate` 在契约里是 **`.min(1)` 必填**
- * （`shared/researchContracts.ts` 的 `closedLoopDateRangeSchema`），而后端还要求实验窗口
- * **⊆ 数据集窗口**（越界直接抛「超出数据集窗口」）。原先两格默认 `""` ⇒ 用户点「运行策略」
- * 会**立刻**收到 400 校验错误，看起来就像「按钮点了没反应」。
- *
- * 这里给一个**确定落在数据集窗口内的安全默认子窗**（数据集 390002 窗口 =
- * `2024-09-01 → 2026-09-01`）。用户仍可自由改；这只是把「必填」预置成合法值，
- * **不改变任何服务端判定**，也不冒充「已在全窗口验证过」。
- */
 const DEFAULT_RUN_WINDOW = {
   startDate: "2025-01-02",
   endDate: "2025-03-31",
@@ -377,19 +349,6 @@ export function RunConfigPanel({
   );
 }
 
-/**
- * 「本次运行会跑什么」态势区（🔴 2026-09-13：原「加载真实数据 / 声明数据链已就绪」
- * 两个用户开关已**移除**）。
- *
- * 移除理由（用户侧原话：「什么乱七八糟的选项」）：这两个开关的「关闭态」产出的
- * 是一份**没有任何诊断价值**的结果 ——
- *   ① 关掉「加载真实数据」⇒ 服务端拿不到数据集 ⇒ `data` 阶段 `CL_DATA_NOT_INJECTED`
- *      ⇒ 其后 13 阶段全部 `CL_UPSTREAM_BLOCKED`，用户看到「14 阶段无一执行」；
- *   ② 关掉「声明数据链已就绪」⇒ 数据集 gate 被**人为**压成 `INCONCLUSIVE`
- *      ⇒ 真实可用的数据集也跑不动。
- * 两者都不是用户能/应该做的决策，且第 ② 个的名字与实现不符（它实际只是「是否读取
- * 库内 `dataset_version.status`」，不是任何「声明」）。⇒ 改为恒真，并把事实**展示**出来。
- */
 function RealDataBlock({
   vm,
   config,

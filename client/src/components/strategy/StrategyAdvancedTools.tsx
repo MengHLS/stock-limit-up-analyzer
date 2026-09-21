@@ -1,19 +1,3 @@
-/**
- * StrategyAdvancedTools — 策略工作台的「工程 / 审计工具」区。
- *
- * 这里放的是**低频、面向工程与审计**的两件工具，它们此前与「编辑策略」「跑回测」
- * 平铺在同一层级，是页面「看起来很乱」的主要来源之一：
- *
- *   1. **semver 版本号推进**（`research.strategy.bump`，纯函数）；
- *      原实现只把结果打印出来 —— 用户还得手动抄进「基础信息」的版本框。
- *      现在多一个「写回草稿版本号」按钮，一步到位。
- *   2. **§23 生命周期账本**（`research.lifecycle.describe` / `transition`）。
- *      🔴 必须说清楚：**后端不持久化这份账本** —— `applyLifecycleTransition` 是纯函数，
- *      记录由本页持有并从上次结果继续。因此本区**不是**策略状态的写入口；
- *      真实状态写入口是「版本状态」卡（`strategy.setVersionStatus`，写库）。
- *
- * 默认折叠（`TechnicalDetails`），不占一级业务信息的视觉权重。
- */
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";

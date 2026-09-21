@@ -159,11 +159,6 @@ function KeyedCountList({
   );
 }
 
-/**
- * 渲染一行阶段（表格行；`compact` = 折叠区用的精简列）。
- *
- * 抽成函数是为了让「已执行表」与「未执行折叠表」共用同一套字段解析，避免两处口径漂移。
- */
 function renderStageRow(stage: ClosedLoopStageRowViewModel, compact = false) {
   return (
     <TableRow key={stage.stageId}>
@@ -466,12 +461,6 @@ function StrategyOutputSection({
           <p className="flex items-start gap-1.5 font-medium">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>本次运行的证券范围<strong>未确认</strong>，成交明细可能超出你绑定数据集的范围。</span>
-          </p>
-          <p className="mt-1.5 pl-5">
-            数据来源是「回落重建」，而这条结果里<strong>没有</strong>「已继承绑定数据集板块约束」的声明 ——
-            这类结果产生于 2026-09-14 修复之前（修复后重建会继承数据集的板块 / ST 约束）。
-            若成交明细里出现创业板 300·301、科创板 688 等标的，而你的数据集只声明了主板，
-            那正是这个原因。<strong>请重新运行一次</strong>得到范围正确的结果。
           </p>
         </div>
       )}

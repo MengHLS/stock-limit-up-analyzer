@@ -50,13 +50,6 @@ function getTPlus2PriceStatus(row: { secondDayDate: string | null; secondDayOpen
   return null;
 }
 
-/**
- * 全样本历史明细表（服务端分页）。
- *
- * 2026-09-11 性能修复：明细行数上万，过去整表回传 + 一次性渲染会把浏览器拖死。
- * 现在只渲染服务端返回的当前页（<= pageSize 行），过滤与计数都由服务端完成，
- * 因此「显示 x/y 条」始终反映筛选后的全量，而不是当前页。
- */
 export function CandidateHistoryTable({
   rows,
   observationDays,

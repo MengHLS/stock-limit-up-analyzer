@@ -1,10 +1,3 @@
-/**
- * 独立研究实验 · Run 展示公共件（RESEARCH-EXPERIMENT-004）。
- *
- * 抽出来的理由：`ExperimentDetail`（实验详情 + 历史 Run 列表）与 `RunDetail`（单条 Run）
- * 都要显示「状态徽章 / 时间 / 耗时 / 元数据行」。放在一处可以保证两页对同一条 Run
- * **不会显示成两种样子**（本项目明确禁止「同名不同义」的重复实现）。
- */
 
 import { AlertTriangle, Ban, CheckCircle2, Clock, Loader2, XCircle } from "lucide-react";
 import type {

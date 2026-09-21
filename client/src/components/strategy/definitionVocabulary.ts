@@ -1,35 +1,3 @@
-/**
- * definitionVocabulary — 策略 **Canonical 定义**（`StrategyDocument.definition`）的词表与标签。
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * 为什么需要它（2026-09-13）
- * ═══════════════════════════════════════════════════════════════════════════
- * 策略详情页此前的「规则编辑器」编辑的是**v1 兼容视图**（`entryRules` / `exitRules` /
- * `riskRules`），配的是 `strategyAdapter.ts` 里一张**自造字段表**
- * （`candidate.rank` / `price.pctChange` / `account.maxDrawdownPct` …）。
- * 两个问题叠在一起：
- *   1. 那些字段名**不是**合法的 Strategy 字段引用（`parseStrategyFieldReference` 只认
- *      `prefix.rd{n}.*` / `event.*` / `bar.*` / `post.rd{n}.*`），它们是审计用自由文本；
- *   2. v1 视图是 `definition` 的**有损派生结果**，且回测侧对 `entryRules` 的引用数为 **0**
- *      ⇒ 在那一层做的一切编辑，既不进回测，还会在保存时撞 `SCHEMA_DEFINITION_VIEW_CONFLICT`。
- *
- * 所以规则编辑必须落到 `definition`。而 `definition` 的每个枚举都有**服务端权威词表**
- * （`server/research/strategySchema/definition.ts`），让用户手打这些大写值是荒谬的。
- *
- * 🔴 客户端**不能** import 服务端的运行时值（跨端只允许 `import type`，否则服务端模块
- * 会被打进浏览器包）⇒ 本地表是唯一可落地的形式，**唯一的防漂移手段是对表测试**
- * （`tests/client/src/components/strategy/definitionVocabulary.test.ts` 逐字比服务端常量）。
- *
- * 本文件的纪律（与 `research/candidateSketchVocabulary.ts` 完全一致）：
- *   - 只放**词表与标签**，不放判定与拼装（那些在 `definitionDraft.ts`）；
- *   - 枚举值必须与服务端**逐字相同**（大小写、下划线），中文只进 `label` / `note`；
- *   - 不收录服务端不认的值 —— 宁可少一个选项，也不给一个保存时必被拒的选项。
- *
- * 🔑 **与研究草图共用同一批表**：草图的 `entryRule.event` / `timing` 等字段与这里的
- * `definition.entry.event.type` / `execution.*Timing` 说的是**同一组后端词表**，
- * 因此这里直接复用 `candidateSketchVocabulary` 的常量（客户端内**只有一份**），
- * 而不是再抄一遍 —— 抄第二遍就是第二个漂移面。
- */
 
 import {
   CANDIDATE_CONDITION_VALUE_TYPE_OPTIONS,

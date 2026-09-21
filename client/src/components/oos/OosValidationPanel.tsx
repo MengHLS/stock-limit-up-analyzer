@@ -1,27 +1,3 @@
-/**
- * OOS-001 §15 — 样本外验证（Out-of-Sample Validation）前端面板。
- *
- * ## 这个面板回答什么问题
- *
- * > 「在某次参数搜索里选出的那组参数，拿到**它没见过的数据**上，还成立吗？」
- *
- * 它**必须真正重跑回测**（与 `SearchRobustnessPanel` 的「零重跑」正好相反）：
- * 创建时只冻结配置（源 Run + 候选身份 + OOS 窗口），点击「执行」才会在 OOS 窗口上
- * 真实执行 Backtest 并重算 canonical metrics。
- *
- * ## 前端纪律（本仓既有，逐条对齐 §15）
- *
- * - 🔴 **不产出「最佳 / 最优 / 推荐」**：本文件不得出现这些结论性词汇
- *   （由 `tests/server/research/oosValidation/oosValidationBoundary.test.ts` 源码扫描钉住）；
- * - 🔴 **不可调参**：表单里**没有**参数值输入位 —— 唯一指定候选的方式是
- *   `源 Search Run + parameterHash`。参数值一律由服务端从源组合行读出并重算 hash 复核
- *   （规格 §5 在 UI 层的落地：让「顺手传一组更好的参数」**在界面上无处可写**）；
- * - 🔴 **长请求按钮必须换文案**：`执行` 会真实重跑回测（实测 30–40 s 量级），
- *   pending 时文案必须变化；
- * - 🔴 **诚实空态**：「加载中」不等于「数据到位」；指标不可用显示「—」而不是 0；
- *   `null`（算不出来）与 `0`（算出来是 0，例如零成交）必须区分显示；
- * - 🔴 **深链可达**：选中 Run 写进 URL（`?oosRunId=`），刷新 / 分享后仍能回到同一份详情。
- */
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
@@ -120,12 +96,6 @@ type MetricsView = Readonly<Record<(typeof METRIC_ROWS)[number]["key"], number |
 // 主面板
 // ---------------------------------------------------------------------------
 
-/**
- * FRONTEND-FINAL-001（P0-1 / P1-6）：本面板既可作为 `/parameter-search` 的页内块，
- * 也可被独立路由（`/validation/oos`、`/validation/oos/:runId`）复用。
- *
- * 不传 props ⇒ 与改造前**逐字等价**（query 深链写回 `/parameter-search?oosRunId=…`）。
- */
 export interface OosValidationPanelProps extends Partial<PanelLinkOptions> {
   /** 由独立路由的路径段给出的选中 run（优先级高于 query）。 */
   readonly routeRunId?: string | null;

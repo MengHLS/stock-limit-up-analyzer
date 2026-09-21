@@ -414,7 +414,7 @@ export default function DataHealth() {
             size="sm"
             onClick={() => recertify.mutate()}
             disabled={recertify.isPending}
-            title="让服务端执行 scripts/step12_certify_gate.mjs（只读查库，可能数十秒），生成新的认证快照后自动重读"
+            title="重跑数据域认证并重新读取快照（只读查库，可能数十秒）"
           >
             {recertify.isPending ? (
               <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

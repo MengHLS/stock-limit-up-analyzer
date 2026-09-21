@@ -1,44 +1,3 @@
-/**
- * StrategyDetail — 单个策略的详情页（`/strategies/:strategyId`，新建入口 `/strategies/new`）。
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * 设计要点（2026-09-13 · 纯 `client/**`，零服务端改动）
- * ═══════════════════════════════════════════════════════════════════════════
- * 1. **列表与详情分家**：本页只处理**一个**策略。挑策略是列表页的事
- *    （`StrategyList`），这里不再有「策略下拉框」——那会把「浏览全库」和
- *    「编辑这一条」混成同一个动作。
- * 2. **URL 是唯一坐标源**：`strategyId` 来自路由，`version` 来自 `?version=`。
- *    换版本 = 改 URL（可回退、可分享、可刷新），不存在「隐藏的当前版本」。
- *    `?version` 缺省 = 该策略最新版本（走 `load`，而非 `loadVersion`）。
- * 3. **两条页签动作链**：`校验 / 保存 / 另存为新版本` 全部走后端权威端点；
- *    页面只做结构化编辑与只读展示，**不重算**任何量化判定。
- * 4. 🔴 **`load` 与 `loadVersion` 形状不同**：前者返回裸 `StrategyDocument`，
- *    后者返回 §17 版本记录（文档嵌在 `.strategy` 下）⇒ 必须经 `toStrategyDocument()`
- *    归一，否则会把版本记录的**外壳**当成文档（所有字段读空）。
- * 5. **文案从简**：正文只留「是什么 / 缺什么」，后端契约与实现边界的说明收进
- *    组件内的 Tooltip / 折叠区，不再占据首屏。
- * 6. 🔴 **规则编辑只有一条路：Canonical `definition`**（2026-09-13，纯 `client/**`）。
- *    - 旧版此页签编辑的是 v1 兼容视图（`entryRules` / `exitRules` / `riskRules`），
- *      配一张自造字段表（`candidate.rank` / `price.pctChange` …）。实测真实库 9 个策略：
- *      **8 个带 Canonical 定义**，真正进回测的是它的 `entry.conditions`；v1 视图是有损派生，
- *      回测侧对 `entryRules` 的引用数为 **0**，且对它做**任何**编辑都会在保存时撞
- *      `SCHEMA_DEFINITION_VIEW_CONFLICT`（`alignDefinitionViews` 是深度比对）
- *      ⇒ 那一层既不是真相来源、也存不下去。
- *    - 现在的编辑走 `DefinitionFields`（与研究草图**同序同标题的七段**、同一套渲染外壳、
- *      同一批词表）；提交时删掉 v1 派生视图（与服务端 `patchToInput` 同口径）。
- *    - **「JSON 高级模式」已移除**：它让用户直接编辑 wire 文档，绕开一切约束，
- *      还制造出「JSON 里改了、页面上没改」的第二种真相。
- *    - **没有 Canonical 定义的文档**（legacy `limit-up-baseline`、新建模板）**保留**
- *      兼容视图编辑，并在页面上明说原因 —— 替用户凭空造一个定义会比现状更糟
- *      （见 `LegacyDefinitionNotice`）。这一条是已知缺口，须单独排期处理新建流程。
- * 7. 🔴 **运行结果不再只活在内存里**（2026-09-14，修「跑过的回测刷新后就没了」）。
- *    此前 `RunTab` 把结果只存进 `useState`，而 `dev` 是单进程 `tsx watch`（改 `server/**`
- *    即整站热重启）⇒ 整页重载后结果消失，且空态还写着「还没跑过」——看起来就像
- *    「跑过的回测又没了」。现在：**本次运行结果优先；无本次结果时，从「回测留档」
- *    （`researchRun.listBacktests` + `getBacktest`）恢复该策略最近一次运行**。
- *    恢复路径与运行工作台共用 `buildClosedLoopRunViewModel` + `ClosedLoopRunResultPanel`
- *    ⇒ 零口径漂移；且**绝不**在无留档时伪造「看起来跑过」的字段。
- */
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -356,17 +315,6 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
     refetchOnWindowFocus: false,
   });
 
-  /**
-   * 已留档的最近一次运行 —— 修「刷新 / 整页重载后结果就没了」（2026-09-14）。
-   *
-   * 结果此前**只**存在 `runResult` 这份组件内存里；而 `dev` 是单进程
-   * `tsx watch server/_core/index.ts`，任何 `server/**` 改动触发的热重启、或用户手动刷新，
-   * 都会整页重载 ⇒ 结果消失，空态还写着「还没跑过」。
-   *
-   * 现在：**本次运行结果优先；无本次结果时，从留档表恢复该策略最近一次运行**。
-   * 取数走 `listBacktests({strategyId, limit:1})` → `getBacktest({id})`，构建走运行工作台
-   * **同一个** `buildClosedLoopRunViewModel` ⇒ 零口径漂移。
-   */
   const historyQuery = trpc.researchRun.listBacktests.useQuery(
     { strategyId: vm.strategyId, limit: 1 },
     { retry: false, refetchOnWindowFocus: false }
@@ -431,10 +379,6 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
       strategyVersion: vm.version,
       dateRange: { startDate: config.startDate, endDate: config.endDate },
       executionModel: config.executionModel,
-      // 🔴 恒为真（2026-09-13）：点「运行策略」= 服务端真实读取该策略绑定的数据集 +
-      // 真实读策略文档 + 按配方装配入参。原先这是两个用户开关，但「关掉后跑空转」既非
-      // 用户所需也不可诊断（关「加载真实数据」⇒ 14 阶段全 BLOCKED；关「声明数据链已就绪」
-      // ⇒ 数据集 gate 被压成 INCONCLUSIVE），故已移出 UI。
       useRealData: true as const,
       // gate 取库内 `dataset_version.status` 的真实值（READY → PASS），不人为压成冒烟口径。
       datasetGuards: { dataReady: true as const },

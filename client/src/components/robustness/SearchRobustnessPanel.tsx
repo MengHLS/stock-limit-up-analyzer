@@ -107,12 +107,6 @@ function ReferenceWarning({ run }: { run: { summary: { parameterReferenceUnverif
 // 主面板
 // ---------------------------------------------------------------------------
 
-/**
- * FRONTEND-FINAL-001（P0-1 / P1-6）：本面板既可作为 `/parameter-search` 的页内块，
- * 也可被独立路由（`/validation/robustness`、`/validation/robustness/:runId`）复用。
- *
- * 不传 props ⇒ 与改造前**逐字等价**（query 深链写回 `/parameter-search?robRunId=…`）。
- */
 export interface SearchRobustnessPanelProps extends Partial<PanelLinkOptions> {
   /** 由独立路由的路径段给出的选中 run（优先级高于 query）。 */
   readonly routeRunId?: string | null;
@@ -400,13 +394,6 @@ export default function SearchRobustnessPanel({
               <div className="flex items-center gap-2">
                 <a
                   className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                  /*
-                   * 🔴 RESEARCH-EXPERIMENT-002 修复：原实现硬编码 `/research?searchRunId=…`
-                   *    —— 文案写「参数搜索页」，链接却指向**旧 Research 实验列表**，
-                   *    在 `/validation/robustness` 宿主下也绕过了 `basePath`。
-                   *    现在复用本面板既有的深链工具 `buildPanelLocation`（与本面板选中 run 的
-                   *    地址形式**同源**），锚点变成真正的参数搜索页。
-                   */
                   href={buildPanelLocation(
                     { basePath: DEFAULT_PANEL_BASE_PATH, queryKey: "searchRunId" },
                     selectedRun?.sourceSearchRunId ?? null,

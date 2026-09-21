@@ -462,14 +462,6 @@ export interface PromoteResultVm {
   path: string;
 }
 
-/**
- * 策略**详情页**的坐标式落点：`/strategies/:strategyId?version=…`。
- *
- * 2026-09-13 起策略页拆成「列表 + 详情」两页：`strategyId` 进路径（详情页的唯一身份），
- * `version` 留作查询参数（同一策略内可切换、可回退、可分享）。旧
- * `/strategy-editor?strategyId=…&version=…` 由 `App.tsx` 的兼容路由改写过来，
- * 因此**没有**第二套策略页面，只是同一个详情页换了更清晰的地址。
- */
 export function strategyVersionPath(strategyId: string, version: string): string {
   return `/strategies/${encodeURIComponent(strategyId)}?version=${encodeURIComponent(version)}`;
 }

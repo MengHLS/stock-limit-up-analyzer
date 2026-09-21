@@ -1,18 +1,3 @@
-/**
- * PageHeader — 页面级标题条（FRONTEND-FINAL-001 · P2-1 / §九-1、§九-2）。
- *
- * ## 为什么要它
- *
- * 审计确认：`components/ui/breadcrumb.tsx`（shadcn 原子）**全仓 0 使用**，
- * 项目里没有任何面包屑实现；同时各页标题条写法不一（有的裸 `<h1>`，有的塞在 `SectionCard.title`）。
- * 本组件是**唯一**的页面标题 + 面包屑出口：
- *
- * - 面包屑项由路由驱动（`{ label, href? }`），最后一项**不可点击**（当前页）；
- * - 不引入新的路由依赖 —— 用 wouter 的 `Link`，与全站一致；
- * - `right` 槽位放页面级动作（刷新 / 新建等），与 `SectionCard.right` 语义对齐。
- *
- * 🔴 侧栏高亮规则不受影响：本组件**不**参与导航高亮判定（那由 `AppShell#isPathActive` 独占）。
- */
 
 import { Link } from "wouter";
 import { ChevronRight } from "lucide-react";

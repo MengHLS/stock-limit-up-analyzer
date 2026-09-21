@@ -1,31 +1,3 @@
-/**
- * PromotionEligibilityCard — 候选**转正资格**（FRONTEND-FINAL-001 §八 / P1-3）。
- *
- * 为什么需要这张卡：转正失败的 gate 原因此前**只**写在「转正为策略」按钮的 `title`
- * 悬停提示里，而弹窗内的解释文案在按钮 `disabled` 时永远不可达（disabled 不触发 onClick
- * ⇒ 弹窗根本不打开）。结果就是「看不到为什么不能转正」。本卡片把它摊在页面上：
- * **不需要任何点击与悬停**就能看到每条 gate 的当前值 / 要求 / 失败原因。
- *
- * 🔴 判定纪律（与本仓「前端不重算」口径一致）：
- *   ① 只做**后端已经存在**的判定 —— 每条 gate 都在下方注释里给出后端权威位置；
- *   ② 只「读已有字段 + 与后端已声明的条件对比」，**不**新增业务规则、**不**补默认值、
- *      **不**复制一份 promote 逻辑（草稿缺口复用既有 `validateSketchDrafts`，
- *      状态门槛复用既有 `isPromotableStatus`）；
- *   ③ 前端确实判不了的（definition 由后端构建并校验），如实标注「需后端校验」，
- *      **不**猜成通过或不通过。
- *
- * 判定的后端依据一览（逐条对应下表一行）：
- *   - `CANDIDATE_NOT_ACCEPTED`       → `server/research/strategyCandidate/service.ts:1041-1047`
- *   - `PROMOTE_SOURCE_INCOMPLETE`    → `server/research/strategyCandidate/service.ts:1049-1056`
- *   - `PROMOTE_SKETCH_INCOMPLETE`    → `server/research/strategyCandidate/definitionBuild.ts:633-634 / 770 / 779-781`
- *                                      （以及 `requireEnum` / `requireNonEmptyString` / `requireFiniteNumber`）
- *   - `PROMOTE_SKETCH_INVALID`       → `server/research/strategyCandidate/definitionBuild.ts:153-159`
- *                                      （扩展键白名单见同文件 `:77-97`）
- *   - `PROMOTE_DEFINITION_INVALID`   → `server/research/strategyCandidate/definitionBuild.ts:1085-1090`
- *                                      / `strategyPromotionPort.ts:188,243`
- *   幂等闸门（`CONVERTED` 时先于状态门槛）→ `service.ts:923-1030`；前端读不到 provenance
- *   ⇒ 该行如实标为「信息不足」。
- */
 
 import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { SectionCard, StatusBadge } from "@/components/common";

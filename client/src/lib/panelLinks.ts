@@ -1,23 +1,3 @@
-/**
- * 验证域面板的深链工具（FRONTEND-FINAL-001 · P0-1 / P1-6）。
- *
- * ## 为什么需要它
- *
- * 四个验证面板（参数搜索 / 稳健性 / OOS / Walk-Forward）原本只被内嵌在
- * `/parameter-search` 一页里，因此 `selectRun` 里把跳转地址**硬编码**成了
- * `/parameter-search?xxxRunId=…`。审计（FRONTEND-FINAL-001 §P0-1）确认这导致
- * 持久化 OOS / Walk-Forward 没有属于自己的可达入口。
- *
- * 这里把「地址怎么拼」抽成**纯函数 + 一个 prop 契约**，让同一份面板既能保持
- * 页内嵌入的旧行为（query 形式），又能被独立路由复用（path 形式）：
- *
- * | 宿主 | `pathStyle` | 选中 run 的地址 |
- * |---|---|---|
- * | `/parameter-search`（页内嵌块，默认） | `false` | `` `${basePath}?${queryKey}=<runId>` `` |
- * | `/validation/oos` 等独立路由 | `true` | `` `${basePath}/<runId>` ``（fold 再拼 `/folds/<i>`） |
- *
- * 两种形式都能在刷新 / 分享后恢复 —— 选中坐标**只**来自 URL，不依赖 React state。
- */
 
 /** 面板可选的深链配置（不传即完全保持改造前的行为）。 */
 export interface PanelLinkOptions {

@@ -1,21 +1,3 @@
-/**
- * JsonBlock — 结构化展示任意 JSON（FRONTEND-FINAL-001 · P2-3 / §十四-7）。
- *
- * ## 为什么需要它（审计结论）
- *
- * 审计确认两件事：
- * 1. `common/TechnicalDetails.tsx` **不是** JSON 查看器，只是一个 `Collapsible` 折叠壳
- *    （自身不解析、不格式化传入的 children）；
- * 2. 全站唯一的「JSON 一锅端」点是参数搜索页的 `JSON.stringify(combination.parameters)`
- *    —— 用户拿到一坨字符串，看不清「哪个参数等于多少」。
- *
- * 本组件的规则（**默认形态不是 `<pre>`**）：
- * - `mode="auto"`（默认）：值是「平坦标量对象」（所有 value 都是 string/number/boolean/null）
- *   ⇒ 渲染成**键值表**（一行一个参数，可读、可复制单值）；
- *   否则回落 JSON 原文。
- * - 无论如何都提供「原文」开关 —— `<pre>` 不再是**唯一**形态，而是补充形态（符合规格 §十四-7）。
- * - 原文形态提供一键复制（走 `navigator.clipboard`，失败静默降级，不弹窗打断）。
- */
 
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";

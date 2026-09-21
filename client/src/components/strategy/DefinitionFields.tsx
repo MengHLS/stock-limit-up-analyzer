@@ -1,50 +1,3 @@
-/**
- * DefinitionFields — 策略 **Canonical 定义**（`StrategyDocument.definition`）的结构化编辑器。
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * 为什么要有它（2026-09-13）
- * ═══════════════════════════════════════════════════════════════════════════
- * 本页此前的「策略定义」页签编辑的是 **v1 兼容视图**（`entryRules` / `exitRules` /
- * `riskRules` / `positionSizing`），配一张 `strategyAdapter.ts` 里的**自造字段表**
- * （`candidate.rank` / `price.pctChange` / `account.maxDrawdownPct` …）。实测（真实库 9 个策略）：
- *   - **8 个**策略都带 Canonical `definition`，真正进回测的是它的 `entry.conditions`；
- *   - v1 视图是它的**有损派生结果**，且回测侧对 `entryRules` 的引用数为 **0**；
- *   - 因为 `map.ts#alignDefinitionViews` 是**深度比对**，在那层做的**任何**编辑都会让保存
- *     撞 `SCHEMA_DEFINITION_VIEW_CONFLICT` ⇒ 那个页签既不是真相来源、也存不下去。
- *
- * ⇒ 规则编辑必须落到 `definition`，且**与研究实验的「候选草图」保持同一套交互**
- *   （用户明确要求「这个地方的各种规则理应跟研究实验中的策略候选中的草图应该对齐」）。
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * 与草图「对齐」到什么程度
- * ═══════════════════════════════════════════════════════════════════════════
- * **一样的三件事**（这才是用户能感知的「对齐」）：
- *   1. **七段同序同标题**（`definitionDraft.ts#DEFINITION_SEGMENTS` 由测试锁死与
- *      `SKETCH_SEGMENTS` 逐项相同）：买什么 → 什么条件买 → 什么时候买 → 怎么卖 →
- *      买多少·最多持几只 → 成本与资金 → 参数搜索空间；
- *   2. **同一套渲染外壳**（`@/components/common/SegmentForm`：折叠 + 一行摘要 +
- *      「还差 N 项」徽标 + 顶部逐条缺口胶囊 + 中文优先的字段行 + 琥珀「必填未填」标记）；
- *   3. **同一批词表**（字段引用文法 / 条件运算符与右值类型 / 事件与触发与仓位与成本枚举，
- *      全部从 `research/candidateSketchVocabulary` 复用，**客户端只有一份**）。
- *
- * **刻意不同的一件事**：草图的五个块是「整块替换」（`entryRule` 全部字段一起提交），
- * 所以它只能「整块降级为只读」；这里的 `definition` 是**字段级**的，每一行草稿都带着
- * 服务端原对象（`original`），重建时是 `{ ...original, ...edited }` ⇒
- * 表单不编辑的键（`exit.rules[].condition` / `position.parameter` / `parameters[].derivedFrom`
- * / `conditions[].id` …）**原样穿过**，不需要整块降级。这是 `definition` 结构本身给的便利，
- * 不是纪律上的退让。
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * 三条纪律（与草图一致）
- * ═══════════════════════════════════════════════════════════════════════════
- *   1. **只提供后端认得的取值**。枚举来自 `definitionVocabulary`（本地表 + 对表测试），
- *      被后端 L6 拒绝的组合（`signalTiming=T_CLOSE` + `executionTiming=T_CLOSE`）在
- *      下拉里**带警告说明**，并在保存前被本地校验拦下（附后端规则名）。
- *   2. **不做语义默认值**。留空就是留空；只有 `operator` / `priority` / `valueType`
- *      这类**结构性**取值给合法初值（否则「刚点添加就报错」，而不是「还没填」）。
- *   3. **不可表达 ⇒ 说清楚**，绝不静默改写。右值里的算术表达式（`prefix.rd0.volume * 0.3`）
- *      在本编辑器里**看得见、改得动、原样保留**，但**无法新拼** —— 这一条如实写在条件段里。
- */
 
 import { useMemo, useState } from "react";
 import { AlertTriangle, Ban, Info, Plus, Trash2 } from "lucide-react";
@@ -322,7 +275,6 @@ function ConditionRowForm({
         <select
           className="h-8 rounded-md border bg-background px-1.5 text-xs"
           value={row.valueType}
-          title="后端按「能当字段引用解析 ⇒ 字段引用；命中参数名 ⇒ 参数引用；其余 ⇒ 常量」判定，这里让你显式声明它会变成哪种比较"
           onChange={(event) => onChange({ ...row, valueType: event.target.value })}
         >
           {DEFINITION_CONDITION_VALUE_TYPE_OPTIONS.map((option) => (

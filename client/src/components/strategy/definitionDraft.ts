@@ -901,17 +901,6 @@ export function definitionSegmentTitle(segment: DefinitionSegmentKey): string {
   return DEFINITION_SEGMENTS.find((s) => s.key === segment)?.title ?? segment;
 }
 
-/**
- * 界面锚点 —— 「这一段到底缺哪个输入框」。
- *
- * 🔴 为什么必须有它：段上的徽标只说「还差 N 项」。用户把段里看得见的东西都填完之后，
- * 如果徽标仍停在「还差 1 项」而没有任何一处被标出来，他就只能靠猜
- * （这正是草图侧踩过的坑：`when` 段缺 `entryRule.timing`，而它和「触发时点」看着像同一件事）。
- * 锚点的作用是让「清单说缺 A」与「琥珀标记落在 A」**永远指向同一处**。
- *
- * 取值刻意用**扁平字符串**而不是嵌套路径：一个输入框最多被两处引用
- * （如两个 `maxPositions`），扁平集合足以表达「这几格要亮」，也便于 UI 侧做 `includes`。
- */
 export type DefinitionFieldAnchor =
   | "event.type"
   | "window"

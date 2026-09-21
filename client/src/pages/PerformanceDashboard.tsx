@@ -358,10 +358,6 @@ export default function PerformanceDashboard() {
           <TrendingUp className="h-5 w-5" />
           绩效仪表盘
         </h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          FE-5 · 研究链路绩效查看器——Equity 曲线 / 回撤 / 指标卡 / 交易明细 /
-          月年一致性；指标由后端 C-16.1/16.2/16.3 同源评估记录给出，本页不计算、不伪造。
-        </p>
       </div>
 
       {/* 数据就绪门（后端 researchRun.readiness 只读探测） */}

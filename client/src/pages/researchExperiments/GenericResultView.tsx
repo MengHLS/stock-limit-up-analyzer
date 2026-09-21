@@ -57,16 +57,6 @@ export function GenericExperimentResult({
   result: ExperimentResultEnvelope;
   pageKey: string;
   reason: string;
-  /**
-   * 顶部提示的覆盖（RESEARCH-EXPERIMENT-004 新增，**可选**）。
-   *
-   * 为什么要加：本组件有两个调用场景 ——
-   *   1. 实验页降级路径（`pageKey` 未登记）⇒ 需要提醒「本该有页面」；
-   *   2. **历史 Run 详情页**（004）—— 那里只拿得到结果信封、拿不到执行 outcome，
-   *      所以也走通用渲染，但 `pageKey` 往往是**已登记**的 ⇒ 再报「未注册页面」
-   *      就是**假信息**。
-   * 传 `null` = 完全不显示顶部提示；不传 = 保留 001 的原始行为（向后兼容）。
-   */
   registrationNotice?: { title: string; description: string } | null;
 }) {
   const summary = result.sampleSummary;

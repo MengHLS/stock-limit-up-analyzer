@@ -1,20 +1,3 @@
-/**
- * OOS 验证域页面（FRONTEND-FINAL-001 · P0-1 / §3.3 / P1-6）。
- *
- * ## 审计背景（为什么需要这一页）
- *
- * 审计确认：OOS-001 的完整 UI **只**作为 `/parameter-search` 的第 3 块存在，
- * 全仓**没有** `/oos` 路由 ⇒ 持久化样本外验证没有属于自己的可达入口。
- * 本页把它提升为正式路由，并支持路径深链：
- *
- * | 路由 | 形态 |
- * |---|---|
- * | `/validation/oos` | 列表（含创建入口） |
- * | `/validation/oos/:runId` | 直接展开指定 Run 的详情（刷新 / 分享可恢复） |
- *
- * 🔴 正式口径 = **持久化** `paramSearch.*OosRun`（落 `oos_validation_run` / `oos_validation_result`）。
- *    本页**不调用** `walkForward.*` 那套内存态技术预览端点。
- */
 
 import { FlaskConical } from "lucide-react";
 import { useParams } from "wouter";

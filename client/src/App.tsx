@@ -31,9 +31,6 @@ import {
   VersionList,
   VersionDetail,
 } from "./pages/datasets";
-// FE-4 — 研究链路：策略**列表**与**详情**分家（2026-09-13）
-//   列表 `/strategies`            → 有哪些策略、各自什么状态
-//   详情 `/strategies/:strategyId` → 这一个策略长什么样、跑不跑得动
 import StrategyList from "./pages/StrategyList";
 import StrategyDetail from "./pages/StrategyDetail";
 // FE-5 — 研究链路：绩效仪表盘（骨架线）

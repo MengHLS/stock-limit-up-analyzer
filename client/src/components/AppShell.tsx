@@ -60,23 +60,6 @@ type NavGroup = {
   items: NavItem[];
 };
 
-/**
- * 侧栏分组（FRONTEND-FINAL-001 · P1-7 / §十二）。
- *
- * ## 为什么重组
- *
- * 审计结论：改造前「研究数据」一组塞了 **11 项**（数据域健康 / 历史状态查询 / 数据集构建 /
- * 提问研究 / 研究实验 / 策略 / 绩效仪表盘 / 参数搜索 / WFO-OOS 分析 / Regime-报告 / 复盘工作台），
- * 无法表达「研究 → 策略 → 验证 → 交易」这条主线。
- *
- * 现在按**业务域**分组（分组名即主线阶段），并让用户一眼看到四个阶段。
- *
- * 🔴 两条纪律：
- * 1. **不为了导航造功能** —— 每一项都指向仓库里**已经存在**的路由（已逐条核对 `App.tsx`）。
- * 2. 🔴 **旧 `/walk-forward` 不再出现在导航里** —— 它是内存态技术预览（不落库），
- *    保留代码仅为旧书签不 404；正式 Walk-Forward 入口 = `/validation/walk-forward`。
- *    同名的两个入口不得同时出现在正式导航上（规格 §3.2）。
- */
 const navGroups: NavGroup[] = [
   {
     label: "复盘分析",
@@ -91,10 +74,6 @@ const navGroups: NavGroup[] = [
   {
     label: "研究",
     items: [
-      // RESEARCH-EXPERIMENT-003 — 旧 Research 链路（提问研究 / 研究实验 / Findings /
-      //   Conclusions / Candidates 列表）的**正式导航入口已删除**：它们读的都是旧
-      //   `researchEngine` / `researchPlanner` API，而那两个 router 与整条旧 Research
-      //   体系已随本任务移除。侧栏现在只留**唯一**的正式研究入口。
       { label: "独立实验", path: "/research-experiments", icon: Beaker },
       { label: "数据集", path: "/datasets", icon: Boxes },
     ],
@@ -139,14 +118,6 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-/**
- * 侧栏高亮判定（2026-09-15 修）。
- *
- * 旧实现是 `location.startsWith(item.path)` —— 字符串前缀匹配，会把「前缀相同但完全
- * 不同的板块」一起点亮（`/backtest-runs` 回测历史命中 `/backtest` 组合回测）。
- * 现改为**按路径分段**匹配：路径相等、或当前路径以「item.path + `/`」开头才算命中，
- * 于是详情页（`/datasets/:id`、`/strategies/:id`、`/research/:id`）依然点亮父级菜单项。
- */
 function normalizePath(raw: string): string {
   // wouter 的 location 可能带 `?query` / `#hash`，也可能带尾部 `/`，先统一剥掉
   const stripped = raw.split("?")[0].split("#")[0];

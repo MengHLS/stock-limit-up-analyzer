@@ -17,7 +17,7 @@
  * 🔴 与 `/research`（旧 Research 工作台）的区别必须一眼可见：旧页是「一个实验绑定一份
  *    Dataset 版本、再挂 Run / 分析 / 结果 / 结论」；本页是「**独立实验**：自带参数与结果
  *    结构，可直接读 Dataset，**不需要**经过 Analysis / Finding / Conclusion 这条旧链路」。
- *    旧 Research 已随 RESEARCH-EXPERIMENT-003 整体删除，本页是**唯一**正式研究入口。
+ *    本页是**唯一**正式研究入口。
  */
 
 import { Link } from "wouter";
@@ -119,11 +119,7 @@ export default function ResearchExperimentList() {
             <span className="mx-1 font-mono text-xs">docs/research/EXPERIMENT-CODE-SPEC.md</span>。
           </CardDescription>
           <p className="text-xs text-muted-foreground">
-            本页是项目的<strong>唯一</strong>正式研究入口（旧 Research 工作台
-            <span className="mx-1 font-mono text-[11px]">
-              Experiment → Run → 分析 → 结果 → 结论
-            </span>
-            已随 RESEARCH-EXPERIMENT-003 整体删除）。
+            本页是项目的<strong>唯一</strong>正式研究入口。
           </p>
         </CardHeader>
       </Card>

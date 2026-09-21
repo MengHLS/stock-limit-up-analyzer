@@ -1,10 +1,3 @@
-/**
- * RESEARCH-EXPERIMENT-003 —— 时间 / 计数的**展示格式化**（从已删除的
- * `client/src/adapters/researchEngineAdapter.ts` 逐字迁出）。
- *
- * 为什么需要搬家：旧 Research 引擎（`researchEngine.*`）连同它的前端适配器一起删除，但这三个
- * 函数仍被**生产页面**使用（策略基本信息卡 / 策略版本面板 / 候选详情），因此迁到中立模块。
- */
 
 /** ISO 时间 → 本地 `YYYY-MM-DD HH:mm`；null / 非法 → "—"。 */
 export function formatDateTime(iso: string | null | undefined): string {
@@ -15,12 +8,6 @@ export function formatDateTime(iso: string | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/**
- * ISO 日期 `YYYY-MM-DD` → 中文 `YYYY年MM月DD日`；null / undefined → "—"。
- *
- * 抽出来是因为 `MaxConnectionBoardTrendChart`（情绪分析页与**首页**共用）与两个页面都要用同一口径，
- * 原先它是 `SentimentAnalysis.tsx` 里的局部函数，首页一旦复用就会复制出第二份。
- */
 export function formatChineseDate(date: string | null | undefined): string {
   if (!date) return "—";
   return date.replace(/^(\d{4})-/, "$1年").replace(/-(\d{2})$/, "月$1日");

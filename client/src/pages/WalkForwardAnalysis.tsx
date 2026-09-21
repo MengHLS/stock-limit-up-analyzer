@@ -44,19 +44,6 @@ import { trpc } from "@/lib/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { WalkForwardRouter } from "../../../server/walkForwardRouter";
 
-// ---------------------------------------------------------------------------
-// 🔴 FRONTEND-FINAL-001（冒烟实测发现的真缺陷）
-//
-// 原写法：类型断言 `trpc as unknown as ReturnType<typeof createTRPCReact<WalkForwardRouter>>`
-// —— 当时认为 `walkForward` 尚未并入 `appRouter`。
-//
-// 但**端点早已合并**（`server/routers.ts:330` `walkForward: walkForwardRouter`），断言因此变成
-// **错误映射**：`walkForward.describe` 发出的请求路径是**裸 `describe`**，服务端恒返回
-// `No procedure found on path "describe"`（无头浏览器实测）⇒ 本页「端点就绪门」永远显示
-// 「不可达」，且运行入参静默落到前端写死的兜底值（即 P1-8 要废止的那种行为）。
-//
-// 修法：直接用真客户端 `trpc.walkForward`（类型同源、路径正确）。
-// ---------------------------------------------------------------------------
 
 const walkForward = trpc.walkForward;
 
@@ -66,14 +53,6 @@ type OosRun = inferRouterOutputs<WalkForwardRouter>["oos"];
 type OverfitRun = inferRouterOutputs<WalkForwardRouter>["overfit"];
 type WalkForwardWindow = RunOutput["run"]["windows"][number];
 
-// ---------------------------------------------------------------------------
-// FRONTEND-FINAL-001（P1-8）— 前端写死兜底**已废止**
-//
-// 改造前：`describe` 不可达时，本页用两份写死常量（参数空间 / 窗口配置）作为入参，**直接**
-// 调用 `walkForward.run` 发起一次真实量化运行 —— 用户无从知晓实际跑的是谁定义的参数。
-// 规格 §十三 明确禁止：「正式产品禁止在用户不知道的情况下使用写死的真实运行参数」，
-// 且优先方案是「失败即阻止」。⇒ 常量删除，改为 `describe` 不可达时**禁止发起运行**。
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // 数值格式化与着色（中国 A 股约定：涨红跌绿）
@@ -309,11 +288,7 @@ export default function WalkForwardAnalysis() {
           />
         ) : (
           <p className="text-xs text-muted-foreground">
-            端点已就绪：<span className="font-mono">walkForward.describe</span> /
-            <span className="font-mono"> run</span> /{" "}
-            <span className="font-mono">oos</span> /{" "}
-            <span className="font-mono">overfit</span>。填写回测区间后点击「运行
-            Walk-Forward 全链路」即可端到端编排。
+            填写回测区间后点击「运行 Walk-Forward 全链路」即可端到端编排。
           </p>
         )}
       </SectionCard>
@@ -356,7 +331,6 @@ export default function WalkForwardAnalysis() {
               <span>
                 端点 <span className="font-mono">walkForward.describe</span> 不可达 ⇒
                 <span className="font-semibold">窗口配置与参数空间没有合法来源，已禁止发起运行</span>。
-                本页**不再**用前端写死的默认值冒充业务参数（FRONTEND-FINAL-001 P1-8）。
                 请在端点恢复后重试。
               </span>
             </div>

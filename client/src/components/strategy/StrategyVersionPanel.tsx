@@ -1,21 +1,3 @@
-/**
- * StrategyVersionPanel — 策略工作台「版本与状态」页签。
- *
- * 它回答三个**真实**问题（这三件事后端早已具备，此前页面却完全没露出来，
- * 反而要求用户手贴两份完整 StrategyDocument JSON 才能看到差异）：
- *
- *   1. 「这个策略有哪些版本、各自什么状态？」 → `research.strategy.listVersions`（只读）；
- *   2. 「我这次改了哪些地方？」               → `research.strategy.compare`（草稿 ↔ 已落库版本）；
- *   3. 「把这一版的状态改成 X。」             → `research.strategy.setVersionStatus`（真实写库）。
- *
- * 纪律（与项目铁律一致）：
- * - **不重算任何判定**：差异、状态合法性一律来自后端；本组件只发起请求与展示结果；
- * - **不伪造状态**：当前状态取自后端版本行（`listVersions[].status`），不是本地常量，
- *   也不是组件的 `useState` 默认值；
- * - 🔴 **`client/**` 不能 import 后端 / shared 的运行时值**（会把 `zod` 打进浏览器包）⇒
- *   状态词表用**客户端常量 + 对表测试**落地（`@/lib/status` ↔
- *   `tests/client/src/lib/statusVocabulary.test.ts`），后端改词表则该测试先红。
- */
 
 import { useState } from "react";
 import { toast } from "sonner";

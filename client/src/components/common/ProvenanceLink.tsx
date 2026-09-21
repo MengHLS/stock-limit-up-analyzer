@@ -1,20 +1,3 @@
-/**
- * ProvenanceLink — 跨资源溯源链接原语（FRONTEND-FINAL-001 · P1-4 / §九）。
- *
- * ## 为什么要它
- *
- * 审计确认溯源链**基本单向**：`Analysis → Finding`、`Conclusion → Finding`、`Finding → Analysis`
- * 都没有跳转；即便是已经有了 ID 的地方（OOS/WF run 的 `strategyVersionId`、`datasetVersionId`）
- * 也只是纯文本。规格要求形成
- * `Analysis → Finding → Conclusion → Candidate → Strategy Version → Parameter Search → Backtest → OOS → WF`
- * 的完整可点击链路，且明确「不要为了跳转重新查询一套数据，优先使用已有 ID」。
- *
- * 因此本文件只做两件事：
- * 1. **已有 ID 直接拼链接**（`strategyVersionId` = `"<strategyId>@<version>"` 是**已有** canonical 形态）；
- * 2. 数据集版本号 → 链接这一条确实需要 `datasetId`，而 run 视图上**只有** `datasetVersionId`
- *    ⇒ 用 `datasetRegistry.getVersion` 做**一次**解析（react-query 自带缓存与去重，
- *    同一 `datasetVersionId` 全页只请求一次），而不是复制一套数据集查询逻辑。
- */
 
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";

@@ -1,22 +1,3 @@
-/**
- * PARAMETER-001 §16 — Parameter Search 前端 MVP（**持久化搜索**面板）。
- *
- * ## 为什么是独立组件而不是改页面主体
- *
- * `client/src/pages/ParameterSearch.tsx` 是 FE-6 的**技术预览**页（内存态 search / rolling /
- * robustness / stochastic，结果跑完即弃）。PARAMETER-001 的持久化搜索是**同一域**的第二段能力，
- * 但交互形态完全不同（创建 → 执行 → 回看 → 重试）。⇒ 收进独立组件挂在同页顶部，
- * 避免把两套交互揉成一段难维护的 JSX。
- *
- * ## 前端纪律（本仓既有）
- *
- * - **只读渲染 + 只提交入参**：页面不计算任何指标、不拼曲线；数值一律来自 `paramSearch.*` 端点；
- * - 🔴 **默认值归后端**：能不提交的字段一律不提交（`datasetVersionId` 留空 ⇒ 由策略文档绑定派生）；
- * - 🔴 **长请求按钮必须换文案**：`startSearch` 每组合一次完整闭环回测（实测每个组合秒级~分钟级），
- *   pending 时按钮文案必须变化并给出量级，否则用户会以为「点了没反应」；
- * - 🔴 **诚实空态**：无数据 / 指标不可用 / 失败原因全部原样展示，不编造样例；
- * - 🔴 **不产出「最佳参数」结论**：默认排序 = 组合序号（不是收益降序），排序能力交给用户显式选择。
- */
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useSearch } from "wouter";
@@ -1014,9 +995,6 @@ export default function PersistedParameterSearchPanel({
                   </TableHeader>
                   <TableBody>
                     {page.results.map((result) => (
-                      /* React 要求列表项本身带 key：裸 `<>` 片段不算，会报
-                         "Each child in a list should have a unique key prop"（实测于无头浏览器冒烟）。
-                         改用带 key 的 `Fragment`。 */
                       <Fragment key={result.parameterHash}>
                         <TableRow key={result.parameterHash}>
                           <TableCell className="text-xs">

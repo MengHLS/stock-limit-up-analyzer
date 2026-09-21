@@ -12,13 +12,6 @@ const LEADER_LIST_PREVIEW_COUNT = 6;
 
 export default function SentimentAnalysisPage() {
   const [leaderListExpanded, setLeaderListExpanded] = useState(false);
-  /**
-   * 服务端结果缓存的键（见 `server/db.ts` 的 `sentimentTrendCache` / `sentimentCycleCache`）。
-   *
-   * 这两个端点要做「全表取数 + 全量重算」（实测取数 2.4~2.8s、计算 16.5s），因此服务端加了
-   * 10 分钟 TTL 结果缓存 + 单飞：**普通挂载固定用 0** ⇒ 复用缓存（秒开）；
-   * 「刷新数据」按钮把 nonce 自增 ⇒ 换键 ⇒ 强制真重算（而不是清空别人的缓存，也不是假刷新）。
-   */
   const [cacheNonce, setCacheNonce] = useState(0);
   const { data: trend = [], isLoading, isError, isFetching } =
     trpc.sentiment.getMaxConnectionBoardTrend.useQuery({ nonce: cacheNonce }, {

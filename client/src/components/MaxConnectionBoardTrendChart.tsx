@@ -17,26 +17,6 @@ import {
   YAxis,
 } from "recharts";
 
-/**
- * 「每日最高连板折线图 + 日期范围滑块」区块 —— `/sentiment-analysis` 与首页（`/`）**共用同一份实现**。
- *
- * 为什么抽成组件（2026-09-20，用户口述：「我是要把最高连板折线图展示在首页，包含折线图下面的
- * 日期选择滑块」）：这段图表原本只长在 `SentimentAnalysis.tsx` 里，若在首页**复制一份**，
- * 「高连板标签去重规则（`buildDistinctHighBoardLabels`）」「窗口对齐（`normalizeVisibleRange`）」
- * 「标签随轴宽的定位公式」会立刻出现两套，日后必然漂移。因此本组件是这段图表**唯一实现**，
- * 两个页面只传数据与少量展示参数。
- *
- * 与页面解耦的三处：
- *   · 数据来源不在这里（两个页面各自持有 tRPC query，各自渲染骨架屏/空态）；
- *   · 卡片底色/边框可被 `className` 覆盖（首页用主题令牌 `bg-card border-border`，
- *     情绪分析页保持原 `bg-white/90 border-slate-200 shadow-xl`）；
- *   · `headerExtra` 承载各页面自己的附加入口（首页是「查看完整周期分析」文本链接）。
- *
- * 🔴 夜间可读性：recharts 的 `stroke` / `fill` 是 **SVG 属性**，`darkCompatibility.css`
- * （只映射 Tailwind 类名）**够不到**它们 ⇒ 网格、刻度文字、折线必须按**实际生效主题**
- * （`useTheme()`）取色。日间档位与旧实现逐值相同，夜间档位只压暗网格、提亮折线/刻度，
- * 使折线对暗色卡面对比度 ≥ 3（图形对象阈值）。
- */
 const CHART_PALETTE = {
   light: { grid: "#e2e8f0", axis: "#64748b", line: "#ea580c", dotRing: "#ffffff", activeDot: "#dc2626" },
   dark: { grid: "#3f3f46", axis: "#a1a1aa", line: "#fb923c", dotRing: "#1c1c21", activeDot: "#f87171" },

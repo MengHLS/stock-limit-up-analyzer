@@ -1,20 +1,3 @@
-/**
- * 验证域首页（FRONTEND-FINAL-001 · P0-1 / §十）。
- *
- * ## 审计背景
- *
- * 审计确认：持久化的 **OOS / Walk-Forward / 稳健性** 三块此前**只在** `/parameter-search`
- * 一页里以内嵌块形式存在，侧栏「WFO/OOS 分析」指向的却是另一套**不落库**的内存态预览实现
- * ⇒ 用户点进去看到的不是正式口径，而正式口径没有入口。
- *
- * 本页是正式验证域的**唯一入口**，把三个口径讲清并给出各自的可达路由：
- *
- * | 能力 | 路由 | 是否重跑回测 | 落库表 |
- * |---|---|---|---|
- * | 稳健性 | `/validation/robustness` | 否（消费已冻结快照） | `search_robustness_*` |
- * | OOS | `/validation/oos` | 是 | `oos_validation_*` |
- * | Walk-Forward | `/validation/walk-forward` | 是（每个 Fold 各跑一次） | `walk_forward_run` / `walk_forward_fold` |
- */
 
 import { FlaskConical, Layers, ShieldCheck } from "lucide-react";
 import { Link } from "wouter";
