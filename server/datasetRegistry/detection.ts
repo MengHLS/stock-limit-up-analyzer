@@ -11,7 +11,11 @@
  * 反泄漏：首板判定只依赖 T 日 close/preClose + 截至 T 日的滚动状态，绝不触碰未来。
  */
 
-import { classifyBoard, exchangeLimitUpPrice } from "../data/boardRules";
+import {
+  classifyBoard,
+  exchangeLimitUpPrice,
+  resolveLimitRulesAt,
+} from "../data/boardRules";
 
 /** PIT ST 状态（来自 research_security_status_history，ST 维度解析）。 */
 export type StStatus = "NORMAL" | "ST" | "*ST" | "UNKNOWN";
@@ -29,8 +33,21 @@ export interface DailyBar {
   amount: number | null;
 }
 
-/** 按板块 + ST 解析涨停比例；unknown 板块 → null（不可判）。 */
-export function limitUpRatio(code: string, st: StStatus): number | null {
+/**
+ * 按板块 + ST 解析涨停比例；unknown 板块 → null（不可判）。
+ *
+ * `tradeDate` 缺省时保留旧口径（用于不跨制度变更的调用）；v3 起事件与执行事实
+ * 必须显式传入交易日，以覆盖创业板 2020-08-24 的 10% → 20% 变更。
+ */
+export function limitUpRatio(
+  code: string,
+  st: StStatus,
+  tradeDate?: string
+): number | null {
+  if (tradeDate !== undefined) {
+    const resolved = resolveLimitRulesAt(code, tradeDate, st);
+    return resolved.supported ? resolved.limitUpRatio : null;
+  }
   const board = classifyBoard(code);
   switch (board) {
     case "main":
@@ -45,14 +62,25 @@ export function limitUpRatio(code: string, st: StStatus): number | null {
   }
 }
 
-/** 收盘价是否触及涨停（close ≥ 交易所口径涨停价）；价格缺失 / 比例不可判 → false（保守）。 */
-export function isLimitUpClose(close: number | null, preClose: number | null, ratio: number | null): boolean {
+/**
+ * 收盘价是否为交易所口径涨停价。
+ *
+ * 必须使用「相等」而不是 `close >= 涨停价`：
+ *   - A 股收盘涨停的成交价恰等于按前收和比例四舍五入到分的涨停价；
+ *   - 使用 `>=` 会把新股上市首日等无涨跌幅限制日、除权失真数据误收为涨停；
+ *   - 实际涨幅可能低于 10%（如 0.23 → 0.25 = 8.6957%），但仍应视为合法涨停。
+ *
+ * 价格缺失 / 比例不可判 → false（保守）。
+ */
+export function isLimitUpClose(
+  close: number | null,
+  preClose: number | null,
+  ratio: number | null
+): boolean {
   if (ratio === null) return false;
   if (close === null || preClose === null || preClose <= 0) return false;
-  // 阈值必须取「四舍五入到分」的交易所口径涨停价：真实封板收盘价恰等于该值，
-  // 用未四舍五入的浮点乘积作阈值会系统性漏判（实测漏判率 38%，详见 boardRules.exchangeLimitUpPrice）。
   // 容差 1e-9 仅用于抵御「两位小数 double 表示」的比较误差，不放松任何业务口径。
-  return close >= exchangeLimitUpPrice(preClose, ratio) - 1e-9;
+  return Math.abs(close - exchangeLimitUpPrice(preClose, ratio)) <= 1e-9;
 }
 
 /** 由 (symbol, tradeDate) 派生确定性事件 id（唯一 ≤ 64 字符）。 */
@@ -68,8 +96,10 @@ export function computeEventId(symbol: string, tradeDate: string): string {
 // 而其中真正可能封板的只有约 8% —— 其余 92% 是纯浪费的跨境流量与解析开销。
 //
 // 语义约束（**必须**是 isLimitUpClose 的超集，否则静默漏判）：
-//   `isLimitUpClose(close, preClose, ratio)` 要求 `close ≥ exchangeLimitUpPrice(preClose, ratio)`
-//   即 `close ≥ Math.round(preClose × (1+ratio) × 100) / 100`，ratio ∈ {0.05, 0.10, 0.20, 0.30}。
+//   `isLimitUpClose(close, preClose, ratio)` 要求
+//   `close == exchangeLimitUpPrice(preClose, ratio)`
+//   即 `close == Math.round(preClose × (1+ratio) × 100) / 100`，
+//   ratio ∈ {0.05, 0.10, 0.20, 0.30}。
 //   最低比例是 0.05（ST/*ST 主板），因此只需保证
 //     `close ≥ Math.round(preClose × 1.05 × 100) / 100` 的行全部被保留 即可。
 //
@@ -91,7 +121,10 @@ export const LIMIT_UP_CANDIDATE_SQL_PREDICATE =
  * `LIMIT_UP_CANDIDATE_SQL_PREDICATE` 的 JS 等价实现（同一语义的单一来源，供内存实现与单测复用）。
  * 只保证「是 isLimitUpClose 的超集」，粗筛命中 ≠ 涨停，仍须 `isLimitUpClose` 精确判定。
  */
-export function isLimitUpCandidateBar(close: number | null, preClose: number | null): boolean {
+export function isLimitUpCandidateBar(
+  close: number | null,
+  preClose: number | null
+): boolean {
   if (close === null || preClose === null) return false;
   if (close >= preClose * 1.045) return true;
   return preClose < 1.0 && close >= preClose;
@@ -121,7 +154,7 @@ export const INITIAL_SYMBOL_LIMIT_STATE: SymbolLimitState = {
 export function advanceSymbolLimitState(
   state: SymbolLimitState,
   tradeDate: string,
-  isLimitUp: boolean,
+  isLimitUp: boolean
 ): SymbolLimitState {
   return {
     prevTradingDayLimitUp: isLimitUp,
@@ -150,7 +183,7 @@ export function classifyLimitDay(
   state: SymbolLimitState,
   tradeDate: string,
   isLimitUp: boolean,
-  tradingDayIndex: ReadonlyMap<string, number>,
+  tradingDayIndex: ReadonlyMap<string, number>
 ): DayLimitClassification {
   const isFirstLimit = isLimitUp && !state.prevTradingDayLimitUp;
   let daysSincePreviousLimit: number | null = null;

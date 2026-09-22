@@ -51,6 +51,7 @@ import {
   buildRunManifest,
   computeStale,
   createExperimentRunService,
+  formatExperimentBusinessDate,
   inferArtifactDescriptor,
   isInlineViewable,
   parseRunManifest,
@@ -60,11 +61,19 @@ import {
 } from "../../../server/researchExperiments/persistence";
 import { ExperimentRegistry } from "../../../server/researchExperiments/registry";
 import { createExperimentRunner } from "../../../server/researchExperiments/runner";
+import { createExperimentRunQueue } from "../../../server/researchExperiments/persistence/runQueue";
 import { InMemoryResearchDatasetReader } from "../../../server/researchRuntime/datasetReader";
 import type { ResearchDatasetVersionContext } from "../../../server/researchRuntime/versionContext";
 
 const VERSION_ID = 900_400;
 const RESULT_KEY_SAMPLE = "demo/persist";
+
+describe("Run DATE 读回", () => {
+  it("按业务日历输出 YYYY-MM-DD，不经 UTC 截断漂移", () => {
+    expect(formatExperimentBusinessDate(new Date(2024, 8, 1, 0, 0, 0))).toBe("2024-09-01");
+    expect(formatExperimentBusinessDate("2025-12-31")).toBe("2025-12-31");
+  });
+});
 
 const versionContext: ResearchDatasetVersionContext = {
   datasetVersionId: VERSION_ID,
@@ -144,6 +153,7 @@ interface Harness {
   runService: ReturnType<typeof createExperimentRunService>;
   repository: InMemoryExperimentRunRepository;
   storage: InMemoryArtifactStorage;
+  queue: ReturnType<typeof createExperimentRunQueue>;
 }
 
 function buildHarness(options?: {
@@ -183,16 +193,18 @@ function buildHarness(options?: {
   const runner = createExperimentRunner({ registry, datasetPort });
   const repository = options?.repository ?? new InMemoryExperimentRunRepository();
   const storage = options?.storage ?? new InMemoryArtifactStorage();
+  const queue = createExperimentRunQueue({ concurrency: 1 });
 
   const runService = createExperimentRunService({
     runner,
     repository,
+    queue,
     resolveStorage: () => storage,
     ...(options?.generateRunId !== undefined ? { generateRunId: options.generateRunId } : {}),
     ...(options?.now !== undefined ? { now: options.now } : {}),
   });
 
-  return { runService, repository, storage };
+  return { runService, repository, storage, queue };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +271,7 @@ describe("Manifest 契约", () => {
     const manifest = buildRunManifest({
       experimentId: "demo/persist",
       experimentVersion: "2.3.4",
+      experimentCodeDigest: "exp-code-sha256:test",
       runId: "RUN-1",
       datasetVersionId: VERSION_ID,
       createdAt: "2026-09-20T00:00:00.000Z",
@@ -309,6 +322,7 @@ describe("Manifest 契约", () => {
       storage,
       experimentId: "demo/persist",
       experimentVersion: "1.0.0",
+      experimentCodeDigest: "exp-code-sha256:test",
       runId: "RUN-1",
       datasetVersionId: VERSION_ID,
       createdAt: "2026-09-20T00:00:00.000Z",
@@ -345,6 +359,7 @@ describe("Manifest 契约", () => {
     const manifest = buildRunManifest({
       experimentId: "demo/persist",
       experimentVersion: "1.0.0",
+      experimentCodeDigest: "exp-code-sha256:test",
       runId: "RUN-1",
       datasetVersionId: VERSION_ID,
       createdAt: "2026-09-20T00:00:00.000Z",
@@ -926,6 +941,40 @@ describe("幂等：重复 finalize / Run id 冲突 / 人工收敛", () => {
       }),
     ).rejects.toThrowError(ExperimentError);
     expect((await repository.getRun("RUN-INTEGRITY-1"))?.status).toBe("RUNNING");
+  });
+});
+
+describe("异步启动：后台队列与持久化生命周期", () => {
+  it("start 立即返回 PENDING；队列 drain 后收敛为 COMPLETED", async () => {
+    const { runService, repository, queue } = buildHarness({
+      generateRunId: () => "RUN-ASYNC-1",
+    });
+    const started = await runService.start({
+      experimentId: RESULT_KEY_SAMPLE,
+      datasetVersionId: VERSION_ID,
+    });
+    expect(started.status).toBe("PENDING");
+    expect(queue.queuedCount() + queue.activeCount()).toBe(1);
+
+    await queue.drain();
+    const completed = await repository.getRun("RUN-ASYNC-1");
+    expect(completed?.status).toBe("COMPLETED");
+    expect(completed?.resultManifestKey).toBeTruthy();
+    expect(completed?.experimentCodeDigest).toMatch(/^exp-code-sha256:/);
+  });
+
+  it("Run 历史支持 offset 分页，避免长期只能看到固定首页", async () => {
+    let seq = 0;
+    const { runService } = buildHarness({
+      generateRunId: () => `RUN-PAGE-${++seq}`,
+    });
+    for (let index = 0; index < 3; index += 1) {
+      await runService.execute({ experimentId: RESULT_KEY_SAMPLE, datasetVersionId: VERSION_ID });
+    }
+    const first = await runService.listRuns({ experimentId: RESULT_KEY_SAMPLE, limit: 2, offset: 0 });
+    const second = await runService.listRuns({ experimentId: RESULT_KEY_SAMPLE, limit: 2, offset: 2 });
+    expect(first.map((run) => run.runId)).toEqual(["RUN-PAGE-3", "RUN-PAGE-2"]);
+    expect(second.map((run) => run.runId)).toEqual(["RUN-PAGE-1"]);
   });
 });
 

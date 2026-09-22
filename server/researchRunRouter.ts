@@ -325,6 +325,12 @@ export interface ClosedLoopPersistDeps {
   retryDelayMs?: number;
 }
 
+export interface ClosedLoopPersistResult {
+  readonly persisted: boolean;
+  readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+}
+
 export async function persistClosedLoopBacktestRun(
   options: {
     experimentId: string;
@@ -335,7 +341,7 @@ export async function persistClosedLoopBacktestRun(
     result: ClosedLoopRunResult;
   },
   deps: ClosedLoopPersistDeps = {},
-): Promise<void> {
+): Promise<ClosedLoopPersistResult> {
   const save = deps.save ?? saveClosedLoopBacktestRun;
   const maxAttempts = Math.max(1, Math.trunc(deps.attempts ?? CLOSED_LOOP_PERSIST_ATTEMPTS));
   const retryDelayMs = Math.max(0, deps.retryDelayMs ?? CLOSED_LOOP_PERSIST_RETRY_DELAY_MS);
@@ -358,7 +364,7 @@ export async function persistClosedLoopBacktestRun(
             `属已知现象；BD-24）。`,
         );
       }
-      return;
+      return { persisted: true, errorCode: null, errorMessage: null };
     } catch (error) {
       lastDetail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
@@ -369,7 +375,7 @@ export async function persistClosedLoopBacktestRun(
           `[loopRun] 闭环回测结果留档失败（非瞬时错误，不重试；不影响本次运行结果，历史列表将缺此条）` +
             `（runId=${options.result.runId}）：${lastDetail}`,
         );
-        return;
+        return { persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED", errorMessage: lastDetail };
       }
 
       if (attempt < maxAttempts) {
@@ -387,6 +393,7 @@ export async function persistClosedLoopBacktestRun(
     `[loopRun] 闭环回测结果留档失败（已尝试 ${maxAttempts} 次；不影响本次运行结果，历史列表将缺此条）` +
       `（runId=${options.result.runId}）：${lastDetail}`,
   );
+  return { persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED", errorMessage: lastDetail };
 }
 
 export const researchRunRouter = router({
@@ -851,7 +858,7 @@ export const researchRunRouter = router({
 
       // CLOSED-LOOP-BACKTEST-PERSIST-001 — 每次运行都留档，供「回测历史」页回看。
       // best-effort：留档失败不抛（详见 persistClosedLoopBacktestRun 的说明）。
-      await perfRunAsync("persistence.db_write", () =>
+      const persistence = await perfRunAsync("persistence.db_write", () =>
         persistClosedLoopBacktestRun({
           experimentId: input.experimentId,
           strategyId: input.strategyId,
@@ -861,6 +868,7 @@ export const researchRunRouter = router({
           result: resultOut,
         }),
       );
+      resultOut.persistence = persistence;
 
       perfCount("run.resultJson_bytes", JSON.stringify(resultOut).length);
       perfEnd(__runTotal);

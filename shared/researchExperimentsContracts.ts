@@ -147,6 +147,21 @@ export const EXPERIMENT_EVENT_PAGE_SIZE = 2000;
 export const EXPERIMENT_BAR_BATCH_SIZE = 2000;
 
 /**
+ * Result / Artifact 资源上限（RESEARCH-EXPERIMENT-004 hardening）。
+ *
+ * 这些上限不是研究范围，而是平台资源保护：
+ * - 超限必须在真正上传前失败，避免「算完才发现 result.json 太大」；
+ * - Artifact 超限不能留下半套对象，失败时必须清理本次已写入对象；
+ * - 数字刻意取宽松但仍有限，明确拒绝把 parquet / 明细表塞进 result.json。
+ */
+export const EXPERIMENT_RESULT_JSON_MAX_BYTES = 8 * 1024 * 1024;
+export const EXPERIMENT_RESULT_TABLE_MAX_ROWS = 100_000;
+export const EXPERIMENT_RESULT_TABLE_MAX_CELLS = 1_000_000;
+export const EXPERIMENT_ARTIFACT_MAX_COUNT = 100;
+export const EXPERIMENT_ARTIFACT_MAX_SINGLE_BYTES = 64 * 1024 * 1024;
+export const EXPERIMENT_ARTIFACT_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+
+/**
  * 声明式 Dataset 需求。
  *
  * 🔴 这是**全部**取数能力的上限：Runner 只按这里声明的东西向 Dataset 读取层要数，
@@ -190,6 +205,110 @@ export const experimentDatasetRequirementSchema = z.object({
 });
 export type ExperimentDatasetRequirement = z.infer<typeof experimentDatasetRequirementSchema>;
 
+export const experimentAuxiliaryDatasetRequirementSchema = z.object({
+  alias: z.string().regex(/^[a-z][a-z0-9_]*$/u, "alias 必须是 lowercase snake_case"),
+  requirement: experimentDatasetRequirementSchema,
+});
+export type ExperimentAuxiliaryDatasetRequirement = z.infer<
+  typeof experimentAuxiliaryDatasetRequirementSchema
+>;
+
+export const experimentDatasetBindingSchema = z.object({
+  alias: z.string().min(1),
+  datasetVersionId: z.number().int().positive(),
+  datasetCode: z.string().min(1),
+  datasetVersionLabel: z.string().min(1),
+});
+export type ExperimentDatasetBinding = z.infer<typeof experimentDatasetBindingSchema>;
+
+// ---------------------------------------------------------------------------
+// 三、Research Protocol / 确认性研究阶段
+// ---------------------------------------------------------------------------
+
+export const EXPERIMENT_RESEARCH_PHASES = ["EXPLORATORY", "OBSERVATION", "HOLDOUT"] as const;
+export type ExperimentResearchPhase = (typeof EXPERIMENT_RESEARCH_PHASES)[number];
+
+export const experimentEvaluationWindowSchema = z
+  .object({
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, "必须是 YYYY-MM-DD"),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u, "必须是 YYYY-MM-DD"),
+  })
+  .refine((window) => window.startDate <= window.endDate, {
+    message: "startDate 不得晚于 endDate",
+  });
+export type ExperimentEvaluationWindow = z.infer<typeof experimentEvaluationWindowSchema>;
+
+/** 用户提交的确认性研究协议；protocolFingerprint 由平台计算，不接受调用方自报。 */
+export const experimentResearchProtocolInputSchema = z
+  .object({
+    protocolId: z.string().min(1),
+    protocolVersion: z.string().min(1),
+    hypothesisCode: z.string().min(1),
+    observationWindow: experimentEvaluationWindowSchema,
+    holdoutWindow: experimentEvaluationWindowSchema,
+    phase: z.enum(["OBSERVATION", "HOLDOUT"]),
+    parentRunId: z.string().min(1).nullable().optional(),
+  })
+  .superRefine((protocol, ctx) => {
+    if (protocol.observationWindow.endDate >= protocol.holdoutWindow.startDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["holdoutWindow", "startDate"],
+        message: "Holdout 必须严格晚于 Observation 结束日",
+      });
+    }
+    if (protocol.phase === "HOLDOUT" && !protocol.parentRunId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["parentRunId"],
+        message: "HOLDOUT 必须引用一个已完成的 OBSERVATION Run",
+      });
+    }
+    if (protocol.phase === "OBSERVATION" && protocol.parentRunId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["parentRunId"],
+        message: "OBSERVATION 不得携带 parentRunId",
+      });
+    }
+  });
+export type ExperimentResearchProtocolInput = z.infer<typeof experimentResearchProtocolInputSchema>;
+
+/** 平台解析后的协议上下文；只读下发给实验。 */
+export interface ExperimentProtocolContext {
+  readonly phase: ExperimentResearchPhase;
+  readonly protocolId: string | null;
+  readonly protocolVersion: string | null;
+  readonly hypothesisCode: string | null;
+  readonly protocolFingerprint: string | null;
+  readonly evaluationWindow: ExperimentEvaluationWindow | null;
+  readonly parentRunId: string | null;
+}
+
+export const experimentConfirmatoryCheckSchema = z.object({
+  code: z.string().min(1),
+  label: z.string().min(1),
+  status: z.enum(["PASS", "FAIL", "INSUFFICIENT"]),
+  value: z.number().nullable().optional(),
+  threshold: z.number().nullable().optional(),
+  note: z.string().nullish(),
+});
+
+/**
+ * 确认性 Gate。
+ *
+ * - OBSERVATION Run 的 gate 只回答“协议和观察段是否准备好进入 Holdout”；
+ * - HOLDOUT Run 的 gate 才允许 PASS / FAIL / INSUFFICIENT，作为策略准入依据。
+ */
+export const experimentConfirmatoryGateSchema = z.object({
+  status: z.enum(["OBSERVATION_READY", "PASS", "FAIL", "INSUFFICIENT"]),
+  protocolFingerprint: z.string().min(1),
+  sampleCount: z.number().int().nonnegative().nullable(),
+  checks: z.array(experimentConfirmatoryCheckSchema),
+  summary: z.string().min(1),
+});
+export type ExperimentConfirmatoryGate = z.infer<typeof experimentConfirmatoryGateSchema>;
+
 // ---------------------------------------------------------------------------
 // 三、实验描述符（注册表可枚举的静态元数据）
 // ---------------------------------------------------------------------------
@@ -209,6 +328,8 @@ export const experimentDescriptorSchema = z.object({
   parameters: z.array(experimentParameterDefinitionSchema),
   /** Dataset 需求声明。 */
   datasetRequirement: experimentDatasetRequirementSchema,
+  /** 辅助 Dataset（可选）；alias 不得为 primary，且不得重复。 */
+  auxiliaryDatasetRequirements: z.array(experimentAuxiliaryDatasetRequirementSchema).optional(),
   /**
    * 前端页面键（= 客户端页面注册表 `client/src/researchExperiments/pages.ts` 的键）。
    * 平台按此键挂载实验自己的页面；键不存在时降级为通用结果渲染器。
@@ -338,8 +459,18 @@ export const experimentResultMetadataSchema = z.object({
   datasetVersionLabel: z.string().min(1),
   datasetStartDate: z.string().nullable(),
   datasetEndDate: z.string().nullable(),
+  /** 本次运行绑定的全部 Dataset（首个必须是 primary）。 */
+  datasetBindings: z.array(experimentDatasetBindingSchema).optional(),
   /** 本结果的计算引擎版本（实验侧声明，改动口径必须升）。 */
   computationVersion: z.string().min(1),
+  /** 实验定义代码指纹（平台计算，历史 Run 的精确执行身份）。 */
+  experimentCodeDigest: z.string().min(1).optional(),
+  /** 研究阶段；历史 Run / exploratory 缺省。 */
+  researchPhase: z.enum(EXPERIMENT_RESEARCH_PHASES).optional(),
+  /** 协议指纹；exploratory 为 null。 */
+  protocolFingerprint: z.string().min(1).nullish(),
+  /** 本次实际生效的数据观察窗口。 */
+  evaluationWindow: experimentEvaluationWindowSchema.nullish(),
 });
 export type ExperimentResultMetadata = z.infer<typeof experimentResultMetadataSchema>;
 
@@ -358,6 +489,8 @@ export const experimentResultEnvelopeSchema = z.object({
   distributions: z.array(experimentResultDistributionSchema).optional(),
   comparisons: z.array(experimentResultComparisonSchema).optional(),
   charts: z.array(experimentResultChartSchema).optional(),
+  /** 确认性研究的结构化 Gate；exploratory 不产出。 */
+  confirmatoryGate: experimentConfirmatoryGateSchema.optional(),
   /** 实验自有结果结构（由实验自己的 zod schema 校验；runner 负责跑那一层校验）。 */
   customPayload: z.unknown().optional(),
 });
@@ -406,6 +539,16 @@ export const experimentExecutionSchema = z.object({
     decisionOffsetDays: z.number().int().nullable(),
     /** 本次是否真的读了 rd ≥ 1 的数据。 */
     forwardDataRead: z.boolean(),
+    /** 平台级日期过滤窗口；null = 使用 Dataset 全窗。 */
+    evaluationWindow: experimentEvaluationWindowSchema.nullish(),
+    /** 研究阶段。 */
+    researchPhase: z.enum(EXPERIMENT_RESEARCH_PHASES).optional(),
+    /** 协议指纹。 */
+    protocolFingerprint: z.string().min(1).nullish(),
+    /** 样本选择是否已冻结；读取 observation 前必须为 true。 */
+    selectionFrozen: z.boolean().optional(),
+    /** 冻结后的样本事件数。 */
+    selectedEventCount: z.number().int().nonnegative().optional(),
     /** 本次生效的事件扫描策略（来自实验声明；缺省 `PLATFORM_LIMIT`）。 */
     eventScanPolicy: z.enum(["PLATFORM_LIMIT", "FULL_DATASET"]).optional(),
     /** 本次生效的事件扫描上限（＝策略对应的那个阀值）。 */
@@ -464,14 +607,22 @@ export const listExperimentsInputSchema = z
   })
   .optional();
 
-export const getExperimentInputSchema = z.object({ experimentId: experimentIdSchema });
+export const getExperimentInputSchema = z.object({
+  experimentId: experimentIdSchema,
+  /** Run 历史分页偏移；缺省 0。 */
+  runOffset: z.number().int().nonnegative().optional(),
+});
 
 export const runExperimentInputSchema = z.object({
   experimentId: experimentIdSchema,
   /** 唯一 Dataset 坐标（`dataset_version.id`）。 */
   datasetVersionId: z.number().int().positive(),
+  /** 辅助 Dataset alias → datasetVersionId。 */
+  auxiliaryDatasetVersionIds: z.record(z.string(), z.number().int().positive()).optional(),
   /** 实验参数（缺省键由 runner 用声明里的 `defaultValue` 归并）。 */
   parameters: experimentParameterValuesSchema.optional(),
+  /** 可选确认性协议；缺省 = EXPLORATORY。 */
+  protocol: experimentResearchProtocolInputSchema.optional(),
 });
 export type RunExperimentInput = z.infer<typeof runExperimentInputSchema>;
 
@@ -515,12 +666,27 @@ export const EXPERIMENT_ERROR_CODES = [
   "EXPERIMENT_ARTIFACT_KEY_INVALID",
   /** Artifact 在对象存储里不存在（`resultManifestKey` 指向了不存在的对象）。 */
   "EXPERIMENT_ARTIFACT_NOT_FOUND",
+  /** Result / Artifact 超出平台资源上限。 */
+  "EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED",
+  /** 未冻结样本资格就读取未来观察数据。 */
+  "EXPERIMENT_SELECTION_NOT_FROZEN",
   /** 对象存储未配置或不可用（MinIO 连接缺失 / 不可达）。 */
   "EXPERIMENT_ARTIFACT_STORAGE_UNAVAILABLE",
   /** 对象上传失败（**绝不允许**此时把 Run 标成 COMPLETED）。 */
   "EXPERIMENT_ARTIFACT_UPLOAD_FAILED",
   /** `manifest.json` 无法解析 / 不符合 Manifest 契约。 */
   "EXPERIMENT_MANIFEST_INVALID",
+  // ---- Research Protocol / Confirmatory Gate ----
+  /** 协议自身非法（窗口重叠 / 阶段缺 parent / 指纹不一致）。 */
+  "EXPERIMENT_PROTOCOL_INVALID",
+  /** 阶段冲突（Holdout 已使用 / Observation 晚于 Holdout / 父 Run 类型错误）。 */
+  "EXPERIMENT_PROTOCOL_PHASE_CONFLICT",
+  /** Holdout 窗口已被同实验 / 同 Dataset 的历史 Run 观察过。 */
+  "EXPERIMENT_PROTOCOL_HOLDOUT_CONTAMINATED",
+  /** Holdout 参数与父 Observation Run 冻结参数不一致。 */
+  "EXPERIMENT_PROTOCOL_PARAMETERS_FROZEN",
+  /** 确认性 Run 缺少合法 Gate / Exploratory Run 非法产出 Gate。 */
+  "EXPERIMENT_CONFIRMATORY_GATE_INVALID",
 ] as const;
 export type ExperimentErrorCode = (typeof EXPERIMENT_ERROR_CODES)[number];
 
@@ -661,10 +827,21 @@ export interface ExperimentArtifactFileSpec {
 export interface ExperimentRunContext {
   /** 实验自己的描述符（只读）。 */
   readonly descriptor: ExperimentDescriptor;
+  /** 平台解析后的研究协议；exploratory Run 为 null。 */
+  readonly protocol: ExperimentProtocolContext | null;
   /** 已归并默认值的参数（键 = `descriptor.parameters[].code`）。 */
   readonly parameters: ExperimentParameterValues;
   /** 数据面（按声明投影）。 */
   readonly dataset: ExperimentDatasetAccess;
+  /** 全部 Dataset 访问面；`primary` 恒为主 Dataset，其余键 = auxiliary alias。 */
+  readonly datasets: Readonly<Record<string, ExperimentDatasetAccess>>;
+  /**
+   * 冻结样本资格。
+   *
+   * 必须在第一次读取 `dataset.observation()` 前调用。冻结后未来数据只能服务于
+   * 已冻结样本的结果观察，不能反过来决定样本入池。
+   */
+  freezeSelection(eventIds: readonly string[]): void;
   /** 运行日志（进 `execution.logs` 返回给调用方；**不是** console 输出）。 */
   readonly log: (message: string) => void;
   /**
@@ -685,6 +862,8 @@ export interface ExperimentRunContext {
  */
 export interface ExperimentResultPayload {
   sampleSummary: ExperimentSampleSummary;
+  /** 确认性 Gate；OBSERVATION / HOLDOUT 协议 Run 必填，exploratory 必须省略。 */
+  confirmatoryGate?: ExperimentConfirmatoryGate;
   tables?: readonly ExperimentResultTable[];
   statistics?: readonly ExperimentResultStatistic[];
   distributions?: readonly ExperimentResultDistribution[];
@@ -844,6 +1023,8 @@ export const experimentRunManifestSchema = z.object({
   /** 实验 id（`<group>/<key>`）。 */
   experimentCode: z.string().min(1),
   experimentVersion: z.string().min(1),
+  /** 实验定义代码指纹；旧 Manifest 可为空。 */
+  experimentCodeDigest: z.string().min(1).nullish(),
   runId: z.string().min(1),
   /** 本次 Run 使用的唯一 Dataset 版本坐标（**软引用**，非 FK）。 */
   datasetVersionId: z.number().int().positive(),
@@ -877,6 +1058,12 @@ export const experimentRunSummarySchema = z.object({
   logLineCount: z.number().int().nonnegative(),
   /** 本次写出的 Artifact 个数（含 result / manifest）。 */
   artifactCount: z.number().int().nonnegative(),
+  /** 研究阶段快照。 */
+  researchPhase: z.enum(EXPERIMENT_RESEARCH_PHASES).optional(),
+  /** 确认 Gate 状态快照。 */
+  confirmatoryStatus: z
+    .enum(["OBSERVATION_READY", "PASS", "FAIL", "INSUFFICIENT"])
+    .nullish(),
 });
 export type ExperimentRunSummary = z.infer<typeof experimentRunSummarySchema>;
 
@@ -888,9 +1075,20 @@ export const experimentRunRecordSchema = z.object({
   /** 运行时的实验元数据**快照**（代码改了也仍能读懂这条历史 Run）。 */
   experimentName: z.string().min(1),
   experimentVersion: z.string().min(1),
+  /** 实验定义代码指纹（历史行可为 null；新 Run 必填）。 */
+  experimentCodeDigest: z.string().min(1).nullable(),
+  /** 研究阶段；历史行为 null。 */
+  researchPhase: z.enum(EXPERIMENT_RESEARCH_PHASES).nullable(),
+  protocolId: z.string().min(1).nullable(),
+  protocolVersion: z.string().min(1).nullable(),
+  protocolFingerprint: z.string().min(1).nullable(),
+  parentRunId: z.string().min(1).nullable(),
+  evaluationWindow: experimentEvaluationWindowSchema.nullable(),
   datasetVersionId: z.number().int().positive(),
   datasetCode: z.string().min(1),
   datasetVersionLabel: z.string().min(1),
+  /** 全部 Dataset 绑定快照。 */
+  datasetBindings: z.array(experimentDatasetBindingSchema),
   /** **已归并默认值**的参数快照（写入即冻结）。 */
   parameters: experimentParameterValuesSchema,
   status: z.enum(EXPERIMENT_RUN_LIFECYCLE_STATUSES),
@@ -902,6 +1100,7 @@ export const experimentRunRecordSchema = z.object({
   /** Manifest 对象 Key（`COMPLETED` 时必非空 —— 由 Repository 断言）。 */
   resultManifestKey: z.string().nullable(),
   resultSchemaVersion: z.string().nullable(),
+  confirmatoryGate: experimentConfirmatoryGateSchema.nullable(),
   summary: experimentRunSummarySchema.nullable(),
   /**
    * `true` = 该 Run 已长时间停留在 `RUNNING`（超过阈值仍未收敛）。
@@ -968,6 +1167,14 @@ export const experimentRunDetailSchema = z.object({
   manifest: experimentRunManifestSchema.nullable(),
   result: experimentResultEnvelopeSchema.nullable(),
   artifacts: z.array(experimentArtifactMetadataSchema),
+  /** 确认性 Holdout 的数据隔离审计；非 Holdout / 旧数据可为空。 */
+  dataIsolation: z
+    .object({
+      status: z.enum(["CLEAN", "CONTAMINATED", "NOT_APPLICABLE"]),
+      contaminatedRunIds: z.array(z.string().min(1)),
+      summary: z.string().min(1),
+    })
+    .optional(),
   /** 对象存储是否可读（false 时 manifest/result 必为 null）。 */
   artifactsAvailable: z.boolean(),
   /** 不可读时的原因（领域码 + 人读说明）；可读时为 null。 */
@@ -990,6 +1197,7 @@ export const listRunsInputSchema = z
   .object({
     experimentId: experimentIdSchema.optional(),
     limit: z.number().int().min(1).max(200).optional(),
+    offset: z.number().int().nonnegative().max(100_000).optional(),
   })
   .optional();
 
@@ -1007,4 +1215,3 @@ export const reconcileRunInputSchema = z.object({
   /** 收敛原因（必填：收敛一条 RUNNING 是**人为判定**，必须留痕）。 */
   reason: z.string().min(1).max(500),
 });
-

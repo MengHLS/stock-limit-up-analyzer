@@ -16,7 +16,11 @@
  * （下游流动性维因此 unassessed，绝不退化成 0 成交额）。
  */
 
-import { limitDownPrice, limitUpPrice, resolveLimitRules } from "../../data/boardRules";
+import {
+  exchangeLimitDownPrice,
+  exchangeLimitUpPrice,
+  resolveLimitRules,
+} from "../../data/boardRules";
 import { assertRowPitInvariant } from "../datasetAccess/invariants";
 import { mean } from "../../../shared/quant-stats";
 import { RegimeAnalysisError } from "./errors";
@@ -51,12 +55,15 @@ function stPseudoName(st: RegimeSecuritySnapshot["st"]): string | null {
 }
 
 /** 数值字段校验（有限即可；成交额允许为 0？A 股停牌日成交额为 0，属真实值，允许）。 */
-function assertOptionalFinite(value: number | null | undefined, label: string): void {
+function assertOptionalFinite(
+  value: number | null | undefined,
+  label: string
+): void {
   if (value === null || value === undefined) return;
   if (!Number.isFinite(value)) {
     throw new RegimeAnalysisError(
       "REGIME_INVALID_PARAMETER",
-      `marketRegime: ${label} 必须是有限数字或 null，实际 ${String(value)}`,
+      `marketRegime: ${label} 必须是有限数字或 null，实际 ${String(value)}`
     );
   }
 }
@@ -93,7 +100,9 @@ export interface BuildRegimeDayFactsInput {
  *   - totalAmount     = Σ amount（有限且 >= 0）；全缺为 null；
  *   - meanTurnoverRate= 有效换手率的算术平均（quant-stats mean）；全缺为 null。
  */
-export function buildRegimeDayFacts(input: BuildRegimeDayFactsInput): RegimeDayFacts {
+export function buildRegimeDayFacts(
+  input: BuildRegimeDayFactsInput
+): RegimeDayFacts {
   const tradeDate = input.tradeDate;
   assertRegimeIsoDate(tradeDate, "buildRegimeDayFacts.tradeDate");
   const asOf = input.asOf ?? tradeDate;
@@ -102,7 +111,7 @@ export function buildRegimeDayFacts(input: BuildRegimeDayFactsInput): RegimeDayF
     throw new RegimeAnalysisError(
       "REGIME_ASOF_INVARIANT_VIOLATION",
       `marketRegime: 日级事实 asOf=${asOf} != tradeDate=${tradeDate}；` +
-        `逐日 PIT 快照要求 asOf === tradeDate（asOf 落后=信息缺失，asOf 超前=未来信息）`,
+        `逐日 PIT 快照要求 asOf === tradeDate（asOf 落后=信息缺失，asOf 超前=未来信息）`
     );
   }
 
@@ -112,14 +121,14 @@ export function buildRegimeDayFacts(input: BuildRegimeDayFactsInput): RegimeDayF
     if (typeof bar.indexCode !== "string" || bar.indexCode.length === 0) {
       throw new RegimeAnalysisError(
         "REGIME_INVALID_PARAMETER",
-        "marketRegime: indexBars[].indexCode 必须是非空字符串",
+        "marketRegime: indexBars[].indexCode 必须是非空字符串"
       );
     }
     if (bar.close === null || bar.close === undefined) continue;
     if (!Number.isFinite(bar.close) || bar.close <= 0) {
       throw new RegimeAnalysisError(
         "REGIME_INVALID_PARAMETER",
-        `marketRegime: indexBars[${bar.indexCode}].close 必须是 > 0 的有限数，实际 ${String(bar.close)}`,
+        `marketRegime: indexBars[${bar.indexCode}].close 必须是 > 0 的有限数，实际 ${String(bar.close)}`
       );
     }
     indexCloses[bar.indexCode] = bar.close;
@@ -141,7 +150,8 @@ export function buildRegimeDayFacts(input: BuildRegimeDayFactsInput): RegimeDayF
     assertOptionalFinite(snapshot.amount, "snapshot.amount");
     assertOptionalFinite(snapshot.turnoverRate, "snapshot.turnoverRate");
 
-    const priceComparable = isPositiveFinite(snapshot.close) && isPositiveFinite(snapshot.preClose);
+    const priceComparable =
+      isPositiveFinite(snapshot.close) && isPositiveFinite(snapshot.preClose);
     if (priceComparable) {
       sampleSize += 1;
       if (snapshot.close! > snapshot.preClose!) advancingCount += 1;
@@ -153,26 +163,36 @@ export function buildRegimeDayFacts(input: BuildRegimeDayFactsInput): RegimeDayF
     if (snapshot.code !== null && priceComparable) {
       const rules = resolveLimitRules(snapshot.code, stPseudoName(snapshot.st));
       // supported=false（未知代码前缀/板块）→ 不可判定，不计入分母
-      if (rules.supported && rules.limitUpRatio !== null && rules.limitDownRatio !== null) {
+      if (
+        rules.supported &&
+        rules.limitUpRatio !== null &&
+        rules.limitDownRatio !== null
+      ) {
         limitClassifiableCount += 1;
         const close = snapshot.close!;
         const preClose = snapshot.preClose!;
-        // 容差说明（诚实披露与既有实现的差异）：
-        // 直接 `close >= preClose × (1+ratio)` 会因二进制浮点把真实涨停误判为未涨停
-        // ——如 preClose=100、ratio=0.1 时 100×1.1 = 110.00000000000001 > 110。
-        // A 股价格最小变动单位为 0.01 元，故用「相对 1e-9」容差吸收纯浮点噪声：
-        // 它比浮点噪声（~1e-16）大若干个量级、比 0.01 元 tick 小 5 个量级，
-        // 不会把「差一档」的价格误判成涨停。
-        const tolerance = preClose * 1e-9;
-        if (close >= limitUpPrice(preClose, rules.limitUpRatio) - tolerance) limitUpCount += 1;
-        if (close <= limitDownPrice(preClose, rules.limitDownRatio) + tolerance) limitDownCount += 1;
+        // 收盘涨停必须等于四舍五入到分的交易所涨停价；不得用 >= 把无涨跌幅限制日误收。
+        const limitUp = exchangeLimitUpPrice(preClose, rules.limitUpRatio);
+        const limitDown = exchangeLimitDownPrice(
+          preClose,
+          rules.limitDownRatio
+        );
+        if (Math.abs(close - limitUp) <= 1e-9) limitUpCount += 1;
+        if (Math.abs(close - limitDown) <= 1e-9) limitDownCount += 1;
       }
     }
 
-    if (typeof snapshot.amount === "number" && Number.isFinite(snapshot.amount) && snapshot.amount >= 0) {
+    if (
+      typeof snapshot.amount === "number" &&
+      Number.isFinite(snapshot.amount) &&
+      snapshot.amount >= 0
+    ) {
       amountSum = (amountSum ?? 0) + snapshot.amount;
     }
-    if (typeof snapshot.turnoverRate === "number" && Number.isFinite(snapshot.turnoverRate)) {
+    if (
+      typeof snapshot.turnoverRate === "number" &&
+      Number.isFinite(snapshot.turnoverRate)
+    ) {
       turnoverRates.push(snapshot.turnoverRate);
     }
   }
@@ -205,7 +225,7 @@ export function buildRegimeDayFacts(input: BuildRegimeDayFactsInput): RegimeDayF
  * （冻结快照面板不得喂给 regime 计算，否则等于用今天的知识给历史贴标签）。
  */
 export function regimeSecuritySnapshotFromDatasetRow(
-  row: ResearchDatasetRow,
+  row: ResearchDatasetRow
 ): RegimeSecuritySnapshot {
   assertRowPitInvariant(row);
   return {
@@ -236,17 +256,24 @@ export interface BuildRegimeDayFactsFromRowsInput {
  * 混入其它日期的行会被 assertRowPitInvariant 直接拒绝（FAIL FAST）。
  */
 export function buildRegimeDayFactsFromDatasetRows(
-  input: BuildRegimeDayFactsFromRowsInput,
+  input: BuildRegimeDayFactsFromRowsInput
 ): RegimeDayFacts {
-  assertRegimeIsoDate(input.tradeDate, "buildRegimeDayFactsFromDatasetRows.tradeDate");
-  const snapshots = input.rows.map((row) => regimeSecuritySnapshotFromDatasetRow(row));
+  assertRegimeIsoDate(
+    input.tradeDate,
+    "buildRegimeDayFactsFromDatasetRows.tradeDate"
+  );
+  const snapshots = input.rows.map(row =>
+    regimeSecuritySnapshotFromDatasetRow(row)
+  );
   let indexBars = input.indexBars;
   if (indexBars === undefined) {
-    const firstRowWithIndex = input.rows.find((row) => Object.keys(row.indexClose).length > 0);
+    const firstRowWithIndex = input.rows.find(
+      row => Object.keys(row.indexClose).length > 0
+    );
     indexBars = firstRowWithIndex
       ? Object.keys(firstRowWithIndex.indexClose)
           .sort()
-          .map((indexCode) => ({
+          .map(indexCode => ({
             indexCode,
             close: firstRowWithIndex.indexClose[indexCode] ?? null,
           }))
@@ -272,7 +299,7 @@ export function buildRegimeDayFactsFromDatasetRows(
  * 连板高度与炸板率）——如实留空，不编造。
  */
 export function deriveRegimeSentimentFromLimitUp(
-  facts: Pick<RegimeDayFacts, "limitUpCount" | "limitDownCount">,
+  facts: Pick<RegimeDayFacts, "limitUpCount" | "limitDownCount">
 ): RegimeSentimentFacts {
   return {
     limitUpCount: facts.limitUpCount,

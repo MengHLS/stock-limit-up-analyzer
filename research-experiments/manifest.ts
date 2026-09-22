@@ -18,13 +18,35 @@
  */
 
 import type { ExperimentDefinition } from "../server/researchExperiments/types";
+import { decisionForwardStudyExperiment } from "./first-board-pullback/decision-forward-study/experiment";
+import { conditionalPullbackStateExitStudyExperiment } from "./first-board-pullback/conditional-pullback-state-exit-study/experiment";
 import { entryDayExperiment } from "./first-board-pullback/entry-day/experiment";
+import { firstBoardBodyStudyExperiment } from "./first-board-pullback/first-board-body-study/experiment";
 import { fundamentalStudyExperiment } from "./first-board-pullback/fundamental-study/experiment";
+import { holdOpenPricePullbackExperiment } from "./first-board-pullback/hold-open-price-pullback/experiment";
+import { limitUpCloseHoldStudyExperiment } from "./first-board-pullback/limit-up-close-hold-study/experiment";
+import { oversoldGapReversalValidationExperiment } from "./first-board-pullback/oversold-gap-reversal-validation/experiment";
+import { preEventContextStudyExperiment } from "./first-board-pullback/pre-event-context-study/experiment";
+import { postEventAmplitudeStudyExperiment } from "./first-board-pullback/post-event-amplitude-study/experiment";
+import { turnoverStudyExperiment } from "./first-board-pullback/turnover-study/experiment";
+import { volumeRelationshipDynamicEntryStudyExperiment } from "./first-board-pullback/volume-relationship-dynamic-entry-study/experiment";
+import { volumeRecoveryFilteredValidationExperiment } from "./first-board-pullback/volume-recovery-filtered-validation/experiment";
 import { stabilityValidationExperiment } from "./first-board-pullback/stability-validation/experiment";
 
 /** 全部已注册实验（顺序不参与任何计算；registry 内部按 id 排序输出）。 */
 export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   entryDayExperiment,
   fundamentalStudyExperiment,
+  firstBoardBodyStudyExperiment,
   stabilityValidationExperiment,
+  decisionForwardStudyExperiment,
+  conditionalPullbackStateExitStudyExperiment,
+  holdOpenPricePullbackExperiment,
+  limitUpCloseHoldStudyExperiment,
+  oversoldGapReversalValidationExperiment,
+  preEventContextStudyExperiment,
+  postEventAmplitudeStudyExperiment,
+  turnoverStudyExperiment,
+  volumeRelationshipDynamicEntryStudyExperiment,
+  volumeRecoveryFilteredValidationExperiment,
 ];

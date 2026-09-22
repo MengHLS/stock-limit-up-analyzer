@@ -65,6 +65,23 @@ function persistedRun(overrides: Partial<PersistedEvidenceRun> = {}): PersistedE
     runId: EXP001_RUN,
     experimentCode: "first-board-pullback/fundamental-study",
     experimentVersion: "1.1.0",
+    researchPhase: "HOLDOUT",
+    protocolFingerprint: "protocol-sha256:test",
+    parentRunId: "RUN-OBSERVATION-TEST",
+    evaluationWindow: { startDate: "2026-01-01", endDate: "2026-06-30" },
+    confirmatoryGate: {
+      status: "PASS",
+      protocolFingerprint: "protocol-sha256:test",
+      sampleCount: 23_712,
+      checks: [
+        {
+          code: "holdout_net_return",
+          label: "Holdout 净收益",
+          status: "PASS",
+        },
+      ],
+      summary: "test fixture",
+    },
     datasetVersionId: DATASET_VERSION_ID,
     datasetCode: "first_limit_pullback",
     datasetVersionLabel: "v2",
@@ -128,6 +145,19 @@ function fakeReader(runs: readonly PersistedEvidenceRun[]): ExperimentEvidenceRu
   return {
     async read(runId) {
       return byId.get(runId) ?? null;
+    },
+    async listByExperiment(experimentCode) {
+      return runs
+        .filter((run) => run.experimentCode === experimentCode)
+        .map((run) => ({
+          runId: run.runId,
+          experimentCode: run.experimentCode,
+          researchPhase: run.researchPhase,
+          parentRunId: run.parentRunId,
+          evaluationWindow: run.evaluationWindow,
+          datasetVersionId: run.datasetVersionId,
+          status: run.status,
+        }));
     },
   };
 }
@@ -398,6 +428,76 @@ describe("§12 / §18.4 按 Run 建策略的失败面", () => {
           draft: draft(),
         }),
       EXPERIMENT_STRATEGY_ERROR.EVIDENCE_INVALID,
+    );
+  });
+
+  it("2-c2) Exploratory / Gate 未 PASS / 协议不一致的 Run 不得进入正式策略", async () => {
+    const exploratory = harness({
+      runs: [persistedRun({ researchPhase: "EXPLORATORY" })],
+    });
+    await expectBridgeError(
+      () =>
+        exploratory.bridge.createStrategyFromEvidenceRuns({
+          ...base,
+          evidences: [{ runId: EXP001_RUN, evidenceKind: "RESULT_SUMMARY", reference: "customPayload.metrics.pullbackRateOnFinalDay" }],
+          draft: draft(),
+        }),
+      EXPERIMENT_STRATEGY_ERROR.EVIDENCE_NOT_CONFIRMATORY,
+    );
+
+    const failedGate = harness({
+      runs: [
+        persistedRun({
+          confirmatoryGate: {
+            ...persistedRun().confirmatoryGate!,
+            status: "FAIL",
+          },
+        }),
+      ],
+    });
+    await expectBridgeError(
+      () =>
+        failedGate.bridge.createStrategyFromEvidenceRuns({
+          ...base,
+          evidences: [{ runId: EXP001_RUN, evidenceKind: "RESULT_SUMMARY", reference: "customPayload.metrics.pullbackRateOnFinalDay" }],
+          draft: draft(),
+        }),
+      EXPERIMENT_STRATEGY_ERROR.EVIDENCE_GATE_NOT_PASS,
+    );
+
+    const protocolMismatch = harness({
+      runs: [
+        persistedRun({
+          protocolFingerprint: "protocol-sha256:aaa",
+          confirmatoryGate: {
+            ...persistedRun().confirmatoryGate!,
+            protocolFingerprint: "protocol-sha256:aaa",
+          },
+        }),
+        persistedExp002Run(EXP002_RUN),
+        persistedExp002Run(EXP002_RUN_2),
+      ],
+    });
+    await expectBridgeError(
+      () => protocolMismatch.bridge.createStrategyFromEvidenceRuns({ ...base, draft: draft() }),
+      EXPERIMENT_STRATEGY_ERROR.EVIDENCE_PROTOCOL_MISMATCH,
+    );
+
+    const contaminated = harness({
+      runs: [
+        ...defaultRuns(),
+        persistedRun({
+          runId: "RUN-EXPLORATORY-CONTAMINATED",
+          researchPhase: "EXPLORATORY",
+          parentRunId: null,
+          evaluationWindow: null,
+          confirmatoryGate: null,
+        }),
+      ],
+    });
+    await expectBridgeError(
+      () => contaminated.bridge.createStrategyFromEvidenceRuns({ ...base, draft: draft() }),
+      EXPERIMENT_STRATEGY_ERROR.EVIDENCE_HOLDOUT_CONTAMINATED,
     );
   });
 

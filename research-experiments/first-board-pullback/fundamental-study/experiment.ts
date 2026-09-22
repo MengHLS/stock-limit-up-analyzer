@@ -228,6 +228,7 @@ export const fundamentalStudyExperiment: ExperimentDefinition = {
       `读取事件行 ${events.length} 条（${eventPageCount} 轮分页；数据集声明事件总数 ` +
         `${String(dataset.facts.totalEvents)}；扫描策略 FULL_DATASET，生效上限 ${scanLimitApplied}）`,
     );
+    context.freezeSelection(events.map((event) => event.eventId));
 
     const eventDayBars = await dataset.feature(0);
     log(`读取首板日（rd=0）行情 ${eventDayBars.length} 行`);

@@ -276,6 +276,24 @@ export function validateSimulationConfig(
       )
     );
   }
+  if (config.exitPolicy !== undefined) {
+    const policy = config.exitPolicy;
+    const ratio = (value: unknown): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value > 0;
+    if (policy.stopLossRatio !== null && policy.stopLossRatio !== undefined && !ratio(policy.stopLossRatio)) {
+      issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.stopLossRatio", "stopLossRatio 必须是正有限数字或 null"));
+    }
+    if (policy.takeProfitRatio !== null && policy.takeProfitRatio !== undefined && !ratio(policy.takeProfitRatio)) {
+      issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.takeProfitRatio", "takeProfitRatio 必须是正有限数字或 null"));
+    }
+    if (
+      policy.maxHoldingDays !== null &&
+      policy.maxHoldingDays !== undefined &&
+      (!Number.isInteger(policy.maxHoldingDays) || policy.maxHoldingDays <= 0)
+    ) {
+      issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.maxHoldingDays", "maxHoldingDays 必须是正整数或 null"));
+    }
+  }
   if (config.securityBoards !== undefined) {
     const boards = config.securityBoards;
     if (

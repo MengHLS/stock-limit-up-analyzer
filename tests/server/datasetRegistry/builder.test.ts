@@ -46,6 +46,9 @@ class MemIO implements DatasetBuildIO {
   resolveStSync(symbol: string): StStatus {
     return this.stBySymbol.get(symbol) ?? "NORMAL";
   }
+  resolveSuspensionSync(): { status: "SUSPENDED" | "NOT_SUSPENDED" | "UNKNOWN"; source: "PIT_STATUS" | "WINDOW" | "NO_BAR" | "UNKNOWN" } {
+    return { status: "NOT_SUSPENDED", source: "PIT_STATUS" };
+  }
   async resolveSt(symbol: string): Promise<StStatus> {
     return this.resolveStSync(symbol);
   }
@@ -164,6 +167,15 @@ describe("FirstLimitPullbackDatasetBuilder", () => {
     // 原始行情与衍生量分离：D0 行情在 prefix，path 只含 rd ≥ 1
     expect(io.prefixes.some((p) => p.relativeDay === 0 && p.close !== null)).toBe(true);
     expect(io.paths.every((p) => p.relativeDay >= 1)).toBe(true);
+    const post = io.posts.find((p) => p.datasetVersionId === 1 && p.relativeDay === 1)!;
+    expect(post.preClose).not.toBeNull();
+    expect(post.limitUpPrice).not.toBeNull();
+    expect(post.limitDownPrice).not.toBeNull();
+    expect(post.limitRuleVersion).toBe("cn-limit-rules-v1");
+    expect(post.barPresent).toBe(true);
+    expect(post.suspensionStatus).toBe("NOT_SUSPENDED");
+    expect(post.canBuyAtOpen).toBe(true);
+    expect(post.canSellAtClose).toBe(true);
     // 首板事件日期：01-02 与 01-04
     expect(new Set(io.events.map((e) => e.tradeDate))).toEqual(new Set(["2024-01-02", "2024-01-04"]));
   });
@@ -587,4 +599,3 @@ describe("筛选口径真实生效（DATASET-003B）", () => {
     expect(events.map((e) => e.symbol)).toEqual(["600001.SH"]);
   });
 });
-

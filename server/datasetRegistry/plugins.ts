@@ -113,6 +113,10 @@ function eventCreateSql(tableName: string): string {
   \`boardType\` varchar(32) DEFAULT NULL,
   \`previousClose\` double DEFAULT NULL,
   \`limitUpPrice\` double DEFAULT NULL,
+  \`limitDownPrice\` double DEFAULT NULL,
+  \`limitRuleUp\` double DEFAULT NULL,
+  \`limitRuleDown\` double DEFAULT NULL,
+  \`limitRuleVersion\` varchar(32) DEFAULT NULL,
   \`turnover\` double DEFAULT NULL,
   \`isFirstLimit\` tinyint(1) DEFAULT NULL,
   \`previousLimitDate\` date DEFAULT NULL,
@@ -157,11 +161,63 @@ function rawBarCreateSql(tableName: string, keyPrefix: string): string {
 }
 
 function prefixCreateSql(tableName: string): string {
-  return rawBarCreateSql(tableName, "prefix");
+  return `CREATE TABLE IF NOT EXISTS \`${tableName}\` (
+  \`id\` bigint NOT NULL AUTO_INCREMENT,
+  \`datasetVersionId\` bigint NOT NULL,
+  \`eventId\` varchar(64) NOT NULL,
+  \`symbol\` varchar(32) NOT NULL,
+  \`tradeDate\` date NOT NULL,
+  \`relativeDay\` int NOT NULL,
+  \`open\` double DEFAULT NULL,
+  \`high\` double DEFAULT NULL,
+  \`low\` double DEFAULT NULL,
+  \`close\` double DEFAULT NULL,
+  \`preClose\` double DEFAULT NULL,
+  \`volume\` double DEFAULT NULL,
+  \`amount\` double DEFAULT NULL,
+  \`createdAt\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`uq_prefix_version_event_day\` (\`datasetVersionId\`,\`eventId\`,\`relativeDay\`),
+  KEY \`idx_prefix_event_day\` (\`eventId\`,\`relativeDay\`),
+  KEY \`idx_prefix_symbol_date\` (\`symbol\`,\`tradeDate\`),
+  KEY \`idx_prefix_version_day\` (\`datasetVersionId\`,\`relativeDay\`)${TABLE_FOOTER}`;
 }
 
 function postCreateSql(tableName: string): string {
-  return rawBarCreateSql(tableName, "post");
+  return `CREATE TABLE IF NOT EXISTS \`${tableName}\` (
+  \`id\` bigint NOT NULL AUTO_INCREMENT,
+  \`datasetVersionId\` bigint NOT NULL,
+  \`eventId\` varchar(64) NOT NULL,
+  \`symbol\` varchar(32) NOT NULL,
+  \`tradeDate\` date NOT NULL,
+  \`relativeDay\` int NOT NULL,
+  \`open\` double DEFAULT NULL,
+  \`high\` double DEFAULT NULL,
+  \`low\` double DEFAULT NULL,
+  \`close\` double DEFAULT NULL,
+  \`preClose\` double DEFAULT NULL,
+  \`limitUpPrice\` double DEFAULT NULL,
+  \`limitDownPrice\` double DEFAULT NULL,
+  \`limitRuleUp\` double DEFAULT NULL,
+  \`limitRuleDown\` double DEFAULT NULL,
+  \`limitRuleVersion\` varchar(32) DEFAULT NULL,
+  \`barPresent\` tinyint(1) DEFAULT NULL,
+  \`suspensionStatus\` varchar(16) DEFAULT NULL,
+  \`suspensionSource\` varchar(24) DEFAULT NULL,
+  \`openAtLimitUp\` tinyint(1) DEFAULT NULL,
+  \`closeAtLimitDown\` tinyint(1) DEFAULT NULL,
+  \`oneWordLimitUp\` tinyint(1) DEFAULT NULL,
+  \`oneWordLimitDown\` tinyint(1) DEFAULT NULL,
+  \`canBuyAtOpen\` tinyint(1) DEFAULT NULL,
+  \`canSellAtClose\` tinyint(1) DEFAULT NULL,
+  \`volume\` double DEFAULT NULL,
+  \`amount\` double DEFAULT NULL,
+  \`createdAt\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`uq_post_version_event_day\` (\`datasetVersionId\`,\`eventId\`,\`relativeDay\`),
+  KEY \`idx_post_event_day\` (\`eventId\`,\`relativeDay\`),
+  KEY \`idx_post_symbol_date\` (\`symbol\`,\`tradeDate\`),
+  KEY \`idx_post_version_day\` (\`datasetVersionId\`,\`relativeDay\`)${TABLE_FOOTER}`;
 }
 
 /** 衍生指标表：只存相对事件价的衍生量，`relativeDay ≥ 1`（前视，仅打标签用）。 */

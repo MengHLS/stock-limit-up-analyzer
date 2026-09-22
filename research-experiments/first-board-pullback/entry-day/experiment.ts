@@ -144,6 +144,7 @@ export const entryDayExperiment: ExperimentDefinition = {
     // ---- 3) 取数（全部经声明面；未声明的列 / 相对日读不到）----
     const events = await dataset.events();
     log(`读取事件 ${events.length} 条（数据集声明总数 ${String(dataset.facts.totalEvents)}）`);
+    context.freezeSelection(events.map((event) => event.eventId));
 
     const eventDayBars = await dataset.feature(0);
     log(`读取首板日（rd=0）行情 ${eventDayBars.length} 行`);

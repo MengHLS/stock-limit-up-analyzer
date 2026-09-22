@@ -100,7 +100,7 @@ describe("BD-24 · 闭环留档重试（长算后连接被掐）", () => {
 
     await expect(
       persistClosedLoopBacktestRun(OPTIONS, { save, retryDelayMs: 0 }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ persisted: true, errorCode: null, errorMessage: null });
 
     expect(calls).toHaveLength(4);
     // 3 次失败各一条重试告警 + 最终成功一条 ⇒ 共 4 条（每一次都可见，不静默）
@@ -113,7 +113,7 @@ describe("BD-24 · 闭环留档重试（长算后连接被掐）", () => {
 
     await expect(
       persistClosedLoopBacktestRun(OPTIONS, { save, retryDelayMs: 0 }),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED" });
 
     expect(calls).toHaveLength(1);
     expect(String(warnSpy.mock.calls[0]?.[0])).toContain("非瞬时错误，不重试");
@@ -124,7 +124,7 @@ describe("BD-24 · 闭环留档重试（长算后连接被掐）", () => {
 
     await expect(
       persistClosedLoopBacktestRun(OPTIONS, { save, attempts: 3, retryDelayMs: 0 }),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED" });
 
     expect(calls).toHaveLength(3);
     const terminal = String(warnSpy.mock.calls.at(-1)?.[0]);

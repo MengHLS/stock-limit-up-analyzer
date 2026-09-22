@@ -3,8 +3,8 @@
  *
  * 语义（C-12.6.1 之上的可选窄化，不改 eligibility 判定）：
  *   - T 日条件 = 数据集只收录「T 日满足该信号」的 (tradeDate, securityId) 行。
- *   - 涨停判定复用 STEP 5 权威 `limitUpPrice`（close ≥ 前收 × (1+ratio)），
- *     口径与 `isLimitUpBar` 一致（未复权、未四舍五入阈值）；涨停比例按板块 + PIT ST 维度：
+ *   - 涨停判定复用 STEP 5 权威四舍五入到分的涨停价，并要求 close 与该价格相等，
+ *     口径与 `isLimitUpBar` 一致；涨停比例按板块 + PIT ST 维度：
  *       主板 10%（ST/*ST 5%）、创业板/科创板 20%、北交所 30%、unknown 板块不可判。
  *   - 首板 = T 日涨停 且 T-1 未涨停（T-1 无数据/窗口首日视作「非连板」，弱化为首板，
  *     与 ./pullback「无前日即首板」口径一致）；连板 = T 日涨停 且 T-1 也涨停。
@@ -12,12 +12,12 @@
  *   - 保守缺省：价格缺失 / 板块不可判 → 不算涨停（false），不伪造命中。
  */
 
-import { classifyBoard, limitUpPrice } from "../data/boardRules";
+import { classifyBoard, exchangeLimitUpPrice } from "../data/boardRules";
 import type { ResearchDatasetRow, TDayCondition } from "./types";
 
 /** 行 → 涨停比例（按板块 + PIT ST 维度）；板块 unknown 或 ST 不可判 → null。 */
 export function limitUpRatioForRow(
-  row: Pick<ResearchDatasetRow, "code" | "st">,
+  row: Pick<ResearchDatasetRow, "code" | "st">
 ): number | null {
   const board = classifyBoard(row.code ?? "");
   switch (board) {
@@ -33,14 +33,17 @@ export function limitUpRatioForRow(
   }
 }
 
-/** 行是否 T 日涨停（close ≥ 涨停价）；价格缺失 / 板块不可判 → false（保守）。 */
+/** 行是否 T 日收盘涨停（close == 交易所口径涨停价）；价格缺失 / 板块不可判 → false（保守）。 */
 export function isRowLimitUp(
-  row: Pick<ResearchDatasetRow, "code" | "st" | "close" | "preClose">,
+  row: Pick<ResearchDatasetRow, "code" | "st" | "close" | "preClose">
 ): boolean {
-  if (row.close === null || row.preClose === null || row.preClose <= 0) return false;
+  if (row.close === null || row.preClose === null || row.preClose <= 0)
+    return false;
   const ratio = limitUpRatioForRow(row);
   if (ratio === null) return false;
-  return row.close >= limitUpPrice(row.preClose, ratio);
+  return (
+    Math.abs(row.close - exchangeLimitUpPrice(row.preClose, ratio)) <= 1e-9
+  );
 }
 
 /**
@@ -52,7 +55,7 @@ export function isRowLimitUp(
 export function matchesTDayCondition(
   condition: TDayCondition,
   limitUp: boolean,
-  prevLimitUp: boolean | null,
+  prevLimitUp: boolean | null
 ): boolean {
   switch (condition) {
     case "limitUp":

@@ -41,6 +41,9 @@ import {
   EXPERIMENT_ARTIFACT_INLINE_PREVIEW_MAX_BYTES,
   EXPERIMENT_RESULT_SCHEMA_VERSION,
   experimentResultEnvelopeSchema,
+  type ExperimentEvaluationWindow,
+  type ExperimentProtocolContext,
+  type ExperimentResearchProtocolInput,
   type ExperimentResultEnvelope,
   type ExperimentRunDetail,
   type ExperimentRunExecutionResult,
@@ -55,6 +58,15 @@ import {
 import type { ArtifactStorageError } from "../../artifactStorage/types";
 import { ExperimentError, toExperimentError } from "../errors";
 import type { ExperimentRunRequest, ExperimentRunner } from "../runner";
+import {
+  EXPLORATORY_PROTOCOL,
+  assertProtocolWindowWithinDataset,
+  computeProtocolFingerprint,
+  findHoldoutWindowContamination,
+  protocolDatasetBindingIdentity,
+  protocolWindowOf,
+} from "../protocol";
+import { serializeCanonical } from "../../research/searchRobustness/canonical";
 import { publishRunArtifacts, translateArtifactStorageError } from "./artifactPublisher";
 import { generateExperimentRunId } from "./runId";
 import { assertSafeObjectKey } from "../../artifactStorage/objectKey";
@@ -64,12 +76,29 @@ import {
   parseRunManifest,
 } from "./runManifest";
 import type { ExperimentRunListFilter, ExperimentRunRepository } from "./runRepository";
+import {
+  createExperimentRunQueue,
+  type ExperimentRunQueue,
+} from "./runQueue";
 
 /** 收敛一条卡住的 Run 时写入的错误码。 */
 export const EXPERIMENT_RUN_RECONCILED_CODE = "EXPERIMENT_RUN_RECONCILED";
 
 /** Run id 冲突的最大重试次数（随机段碰撞的概率极低，但冲突必须被处理而不是抛到用户脸上）。 */
 const MAX_RUN_ID_ATTEMPTS = 3;
+
+async function listAllExperimentRuns(
+  repository: ExperimentRunRepository,
+  experimentId: string,
+): Promise<ExperimentRunRecord[]> {
+  const pageSize = 200;
+  const runs: ExperimentRunRecord[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const page = await repository.listRuns({ experimentId, limit: pageSize, offset });
+    runs.push(...page);
+    if (page.length < pageSize) return runs;
+  }
+}
 
 export interface ExperimentRunServiceDeps {
   runner: ExperimentRunner;
@@ -83,12 +112,17 @@ export interface ExperimentRunServiceDeps {
    */
   resolveStorage: () => ArtifactStorage;
   now?: () => Date;
+  /** 后台执行队列；缺省 = 单并发进程内队列。 */
+  queue?: ExperimentRunQueue;
   /** 可注入 Run id 生成器（测试用）。 */
   generateRunId?: (now: Date) => string;
 }
 
 export interface ExperimentRunService {
-  execute(request: ExperimentRunRequest): Promise<ExperimentRunExecutionResult>;
+  /** 创建 Run 并立即返回；实际执行进入后台队列。 */
+  start(request: ExperimentRunServiceRequest): Promise<ExperimentRunRecord>;
+  /** 同步执行完整生命周期（测试 / 内部工具；HTTP 页面不得使用）。 */
+  execute(request: ExperimentRunServiceRequest): Promise<ExperimentRunExecutionResult>;
   getRun(runId: string): Promise<ExperimentRunRecord | null>;
   listRuns(filter?: ExperimentRunListFilter): Promise<ExperimentRunRecord[]>;
   countRunsByExperiment(experimentId: string): Promise<number>;
@@ -103,10 +137,19 @@ export interface ExperimentRunService {
   reconcileRun(runId: string, reason: string): Promise<ExperimentRunRecord>;
 }
 
+export interface ExperimentRunServiceRequest {
+  experimentId: string;
+  datasetVersionId: number;
+  parameters?: ExperimentRunRequest["parameters"];
+  auxiliaryDatasetVersionIds?: ExperimentRunRequest["auxiliaryDatasetVersionIds"];
+  protocol?: ExperimentResearchProtocolInput;
+}
+
 /** 从 outcome 抽出**轻量摘要**（进 DB；让列表页不必去对象存储拉 result.json）。 */
 export function summarizeOutcome(
   outcome: ExperimentRunExecutionResult["outcome"],
   artifactCount: number,
+  protocol?: ExperimentProtocolContext | null,
 ): ExperimentRunSummary {
   const envelope = outcome.result;
   return {
@@ -120,17 +163,65 @@ export function summarizeOutcome(
     forwardDataRead: outcome.execution.datasetFacts.forwardDataRead,
     logLineCount: outcome.execution.logs.length,
     artifactCount,
+    researchPhase: protocol?.phase ?? "EXPLORATORY",
+    confirmatoryStatus: envelope?.confirmatoryGate?.status ?? null,
   };
 }
 
 export function createExperimentRunService(deps: ExperimentRunServiceDeps): ExperimentRunService {
   const { runner, repository } = deps;
   const now = deps.now ?? (() => new Date());
+  const queue = deps.queue ?? createExperimentRunQueue();
   const makeRunId = deps.generateRunId ?? ((at: Date) => generateExperimentRunId(at));
 
   function storageErrorDetail(error: unknown): { code: string; message: string } {
     const translated = translateArtifactStorageError(error);
     return { code: translated.code, message: translated.message };
+  }
+
+  async function computeRunDataIsolation(
+    record: ExperimentRunRecord,
+  ): Promise<NonNullable<ExperimentRunDetail["dataIsolation"]>> {
+    if (
+      record.researchPhase !== "HOLDOUT" ||
+      record.evaluationWindow === null
+    ) {
+      return {
+        status: "NOT_APPLICABLE",
+        contaminatedRunIds: [],
+        summary: "该 Run 不是带评估窗口的 Holdout，无需数据隔离审计。",
+      };
+    }
+    const runs = await listAllExperimentRuns(repository, record.experimentId);
+    const contaminated = findHoldoutWindowContamination({
+      targetWindow: record.evaluationWindow,
+      datasetVersionId: record.datasetVersionId,
+      excludeRunIds:
+        record.parentRunId === null
+          ? [record.runId]
+          : [record.parentRunId, record.runId],
+      runs: runs.map((run) => ({
+        runId: run.runId,
+        status: run.status,
+        researchPhase: run.researchPhase ?? "EXPLORATORY",
+        parentRunId: run.parentRunId,
+        datasetVersionId: run.datasetVersionId,
+        evaluationWindow: run.evaluationWindow,
+      })),
+    });
+    return contaminated.length === 0
+      ? {
+          status: "CLEAN",
+          contaminatedRunIds: [],
+          summary: "未发现同实验、同 Dataset 的历史探索 / Observation Run 覆盖该 Holdout 窗口。",
+        }
+      : {
+          status: "CONTAMINATED",
+          contaminatedRunIds: contaminated.map((run) => run.runId),
+          summary:
+            `该 Holdout 窗口已被历史 Run 观察过：${contaminated.map((run) => run.runId).join(", ")}` +
+            " —— 不构成独立 OOS，禁止创建正式策略。",
+        };
   }
 
   /** 读 Manifest（必要时抛领域错误）。 */
@@ -157,9 +248,180 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
     });
   }
 
-  async function execute(request: ExperimentRunRequest): Promise<ExperimentRunExecutionResult> {
+  async function createPendingRun(request: ExperimentRunServiceRequest): Promise<{
+    prepared: Awaited<ReturnType<ExperimentRunner["prepare"]>>;
+    executionRequest: ExperimentRunRequest;
+    record: ExperimentRunRecord;
+    createdAt: string;
+  }> {
+    let parameters = request.parameters;
+    let parent: ExperimentRunRecord | null = null;
+    let evaluationWindow: ExperimentEvaluationWindow | null = null;
+
+    if (request.protocol !== undefined) {
+      evaluationWindow = protocolWindowOf(request.protocol);
+      if (request.protocol.phase === "HOLDOUT") {
+        const parentRunId = request.protocol.parentRunId;
+        if (parentRunId === null || parentRunId === undefined) {
+          throw new ExperimentError(
+            "EXPERIMENT_PROTOCOL_INVALID",
+            "HOLDOUT 协议缺少 parentRunId",
+          );
+        }
+        parent = await repository.getRun(parentRunId);
+        if (parent === null) {
+          throw new ExperimentError(
+            "EXPERIMENT_PROTOCOL_PHASE_CONFLICT",
+            `HOLDOUT 父 Run 不存在：${parentRunId}`,
+            { parentRunId },
+          );
+        }
+        if (
+          parent.status !== "COMPLETED" ||
+          parent.researchPhase !== "OBSERVATION" ||
+          parent.experimentId !== request.experimentId
+        ) {
+          throw new ExperimentError(
+            "EXPERIMENT_PROTOCOL_PHASE_CONFLICT",
+            `HOLDOUT 父 Run 必须是同实验、已 COMPLETED 的 OBSERVATION Run：${parentRunId}`,
+            {
+              runId: parent.runId,
+              status: parent.status,
+              phase: parent.researchPhase,
+              experimentId: parent.experimentId,
+            },
+          );
+        }
+        if (parent.confirmatoryGate?.status !== "OBSERVATION_READY") {
+          throw new ExperimentError(
+            "EXPERIMENT_PROTOCOL_PHASE_CONFLICT",
+            `HOLDOUT 父 Run 的 Gate 不是 OBSERVATION_READY：${parentRunId}`,
+            { gate: parent.confirmatoryGate },
+          );
+        }
+        parameters ??= parent.parameters;
+      }
+    }
+
+    const provisionalRequest: ExperimentRunRequest = {
+      experimentId: request.experimentId,
+      datasetVersionId: request.datasetVersionId,
+      ...(parameters !== undefined ? { parameters } : {}),
+      ...(request.auxiliaryDatasetVersionIds !== undefined
+        ? { auxiliaryDatasetVersionIds: request.auxiliaryDatasetVersionIds }
+        : {}),
+      evaluationWindow,
+    };
+
     // ① 执行前校验：不合规 ⇒ 抛领域错误，**不留任何行**（规格 §12 前置）
-    const prepared = await runner.prepare(request);
+    const prepared = await runner.prepare(provisionalRequest);
+
+    let protocol: ExperimentProtocolContext = EXPLORATORY_PROTOCOL;
+    if (request.protocol !== undefined) {
+      assertProtocolWindowWithinDataset(request.protocol, prepared.facts);
+      const protocolFingerprint = computeProtocolFingerprint({
+        protocol: request.protocol,
+        experimentId: prepared.descriptor.id,
+        datasetVersionId: prepared.facts.datasetVersionId,
+        parameters: prepared.resolvedParameters,
+        datasetBindings: prepared.datasetBindings,
+      });
+
+      if (request.protocol.phase === "HOLDOUT") {
+        const experimentRuns = await listAllExperimentRuns(
+          repository,
+          prepared.descriptor.id,
+        );
+        const contaminated = findHoldoutWindowContamination({
+          targetWindow: request.protocol.holdoutWindow,
+          datasetVersionId: prepared.facts.datasetVersionId,
+          excludeRunIds:
+            request.protocol.parentRunId === null ||
+            request.protocol.parentRunId === undefined
+              ? []
+              : [request.protocol.parentRunId],
+          runs: experimentRuns.map((run) => ({
+            runId: run.runId,
+            status: run.status,
+            researchPhase: run.researchPhase ?? "EXPLORATORY",
+            parentRunId: run.parentRunId,
+            datasetVersionId: run.datasetVersionId,
+            evaluationWindow: run.evaluationWindow,
+          })),
+        });
+        if (contaminated.length > 0) {
+          throw new ExperimentError(
+            "EXPERIMENT_PROTOCOL_HOLDOUT_CONTAMINATED",
+            `HOLDOUT 窗口已被同实验 / 同 Dataset 的历史 Run 观察过：` +
+              contaminated.map((run) => run.runId).join(", ") +
+              " —— 该窗口不能作为独立 OOS",
+            {
+              holdoutWindow: request.protocol.holdoutWindow,
+              datasetVersionId: prepared.facts.datasetVersionId,
+              contaminatedRunIds: contaminated.map((run) => run.runId),
+            },
+          );
+        }
+      }
+
+      if (parent !== null) {
+        if (
+          parent.protocolFingerprint !== protocolFingerprint ||
+          parent.datasetVersionId !== prepared.facts.datasetVersionId ||
+          parent.experimentCodeDigest !== prepared.codeDigest ||
+          serializeCanonical(parent.parameters) !== serializeCanonical(prepared.resolvedParameters) ||
+          serializeCanonical(protocolDatasetBindingIdentity(parent.datasetBindings)) !==
+            serializeCanonical(protocolDatasetBindingIdentity(prepared.datasetBindings))
+        ) {
+          throw new ExperimentError(
+            "EXPERIMENT_PROTOCOL_PARAMETERS_FROZEN",
+            `HOLDOUT 与父 OBSERVATION Run 不一致：${parent.runId}`
+              + "（协议指纹 / Dataset / 代码指纹 / 参数必须全部一致）",
+            {
+              parentRunId: parent.runId,
+              parentProtocolFingerprint: parent.protocolFingerprint,
+              protocolFingerprint,
+              parentDatasetVersionId: parent.datasetVersionId,
+              datasetVersionId: prepared.facts.datasetVersionId,
+              parentCodeDigest: parent.experimentCodeDigest,
+              codeDigest: prepared.codeDigest,
+            },
+          );
+        }
+      }
+
+      const protocolRuns = await repository.listRunsByProtocolFingerprint(protocolFingerprint);
+      if (request.protocol.phase === "HOLDOUT" && protocolRuns.some((run) => run.researchPhase === "HOLDOUT")) {
+        throw new ExperimentError(
+          "EXPERIMENT_PROTOCOL_PHASE_CONFLICT",
+          `协议 ${request.protocol.protocolId}@${request.protocol.protocolVersion} 已经使用过 Holdout`,
+          { protocolFingerprint },
+        );
+      }
+      if (request.protocol.phase === "OBSERVATION" && protocolRuns.some((run) => run.researchPhase === "HOLDOUT")) {
+        throw new ExperimentError(
+          "EXPERIMENT_PROTOCOL_PHASE_CONFLICT",
+          `协议 ${request.protocol.protocolId}@${request.protocol.protocolVersion} 已进入 Holdout，禁止再补 Observation Run`,
+          { protocolFingerprint },
+        );
+      }
+
+      protocol = {
+        phase: request.protocol.phase,
+        protocolId: request.protocol.protocolId,
+        protocolVersion: request.protocol.protocolVersion,
+        hypothesisCode: request.protocol.hypothesisCode,
+        protocolFingerprint,
+        evaluationWindow,
+        parentRunId: request.protocol.parentRunId ?? null,
+      };
+    }
+
+    const executionRequest: ExperimentRunRequest = {
+      ...provisionalRequest,
+      protocol,
+      evaluationWindow,
+    };
 
     // ② 建 PENDING 行（runId 冲突则换一个再试）
     const at = now();
@@ -173,9 +435,17 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
           experimentId: prepared.descriptor.id,
           experimentName: prepared.descriptor.name,
           experimentVersion: prepared.descriptor.version,
+          experimentCodeDigest: prepared.codeDigest,
+          researchPhase: protocol.phase,
+          protocolId: protocol.protocolId,
+          protocolVersion: protocol.protocolVersion,
+          protocolFingerprint: protocol.protocolFingerprint,
+          parentRunId: protocol.parentRunId,
+          evaluationWindow,
           datasetVersionId: prepared.facts.datasetVersionId,
           datasetCode: prepared.facts.datasetCode,
           datasetVersionLabel: prepared.facts.datasetVersionLabel,
+          datasetBindings: prepared.datasetBindings,
           parameters: prepared.resolvedParameters,
           createdAt: at.toISOString(),
         });
@@ -194,10 +464,17 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
         { cause: lastConflict instanceof Error ? lastConflict.message : String(lastConflict) },
       );
     }
-    const runId = record.runId;
+    return { prepared, executionRequest, record, createdAt: at.toISOString() };
+  }
 
+  async function executeCreatedRun(
+    request: ExperimentRunRequest,
+    prepared: Awaited<ReturnType<ExperimentRunner["prepare"]>>,
+    runId: string,
+    startedAt: string,
+  ): Promise<ExperimentRunExecutionResult> {
     // ③ PENDING → RUNNING
-    await repository.markRunning(runId, at.toISOString());
+    await repository.markRunning(runId, startedAt);
 
     // ④ 执行
     let detailed: Awaited<ReturnType<ExperimentRunner["runDetailed"]>>;
@@ -243,6 +520,7 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
         storage: deps.resolveStorage(),
         experimentId: prepared.descriptor.id,
         experimentVersion: prepared.descriptor.version,
+        experimentCodeDigest: prepared.codeDigest,
         runId,
         datasetVersionId: prepared.facts.datasetVersionId,
         createdAt: completedAt,
@@ -268,11 +546,53 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
     const completed = await repository.markCompleted(runId, {
       manifestKey: published.manifestKey,
       resultSchemaVersion: EXPERIMENT_RESULT_SCHEMA_VERSION,
-      summary: summarizeOutcome(outcome, published.keys.length),
+      summary: summarizeOutcome(
+        outcome,
+        published.keys.length,
+        request.protocol ?? EXPLORATORY_PROTOCOL,
+      ),
+      confirmatoryGate: outcome.result?.confirmatoryGate ?? null,
       durationMs,
       completedAt,
     });
     return { persisted: true, run: completed, outcome };
+  }
+
+  async function start(request: ExperimentRunServiceRequest): Promise<ExperimentRunRecord> {
+    const { prepared, executionRequest, record, createdAt } = await createPendingRun(request);
+    queue.enqueue(async () => {
+      try {
+        await executeCreatedRun(executionRequest, prepared, record.runId, createdAt);
+      } catch (error) {
+        const failure = toExperimentError(error);
+        try {
+          const latest = await repository.getRun(record.runId);
+          if (latest !== null && (latest.status === "PENDING" || latest.status === "RUNNING")) {
+            await repository.markFailed(record.runId, {
+              errorCode: failure.code,
+              errorMessage: failure.message,
+              durationMs: null,
+              completedAt: now().toISOString(),
+            });
+          }
+        } catch (convergeError) {
+          console.error(
+            `[researchExperiments.start] Run ${record.runId} 后台失败后无法收敛：`,
+            convergeError instanceof Error ? convergeError.message : String(convergeError),
+          );
+        }
+        console.error(
+          `[researchExperiments.start] Run ${record.runId} 后台执行失败：`,
+          failure.message,
+        );
+      }
+    });
+    return record;
+  }
+
+  async function execute(request: ExperimentRunServiceRequest): Promise<ExperimentRunExecutionResult> {
+    const { prepared, executionRequest, record, createdAt } = await createPendingRun(request);
+    return executeCreatedRun(executionRequest, prepared, record.runId, createdAt);
   }
 
   async function readRunDetail(runId: string): Promise<ExperimentRunDetail> {
@@ -280,6 +600,7 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
     if (record === null) {
       throw new ExperimentError("EXPERIMENT_RUN_NOT_FOUND", `Run "${runId}" 不存在`, { runId });
     }
+    const dataIsolation = await computeRunDataIsolation(record);
 
     // 没有 Manifest 引用：正常的「未产出」状态（PENDING / RUNNING / FAILED），
     // 但 `COMPLETED` 却没有引用 = 数据完整性错误，必须响亮说出来。
@@ -290,6 +611,7 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
         manifest: null,
         result: null,
         artifacts: [],
+        dataIsolation,
         artifactsAvailable: !integrityBroken,
         artifactsError: integrityBroken
           ? {
@@ -312,6 +634,7 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
         manifest: null,
         result: null,
         artifacts: [],
+        dataIsolation,
         artifactsAvailable: false,
         artifactsError: { code: failure.code, message: failure.message },
       };
@@ -386,6 +709,7 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
       manifest,
       result: resultEnvelope,
       artifacts,
+      dataIsolation,
       // 存储可读但个别对象缺失 ⇒ 仍是「可读」，但把缺失如实报告出来。
       artifactsAvailable: true,
       artifactsError:
@@ -454,6 +778,7 @@ export function createExperimentRunService(deps: ExperimentRunServiceDeps): Expe
   }
 
   return {
+    start,
     execute,
     getRun: (runId) => repository.getRun(runId),
     listRuns: (filter) => repository.listRuns(filter),

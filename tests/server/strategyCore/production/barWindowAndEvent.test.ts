@@ -15,11 +15,19 @@ import {
   emptyCoreBarWindow,
   toCoreBarWindow,
 } from "../../../../server/strategyCore/production";
-import type { EventOccurrenceResolver, RuntimeContext } from "../../../../server/strategyCore";
+import type {
+  EventOccurrenceResolver,
+  RuntimeContext,
+} from "../../../../server/strategyCore";
 
 function barOf(
   date: string,
-  values: Partial<Pick<CanonicalMarketBar, "open" | "high" | "low" | "close" | "preClose" | "volume" | "amount">>,
+  values: Partial<
+    Pick<
+      CanonicalMarketBar,
+      "open" | "high" | "low" | "close" | "preClose" | "volume" | "amount"
+    >
+  >
 ): CanonicalMarketBar {
   return {
     symbol: "600001.SH",
@@ -38,16 +46,43 @@ function barOf(
 
 /** 事件窗：rd0 = 首板日（涨停），rd1..rd3 = 观察日。 */
 const EVENT_WINDOW: readonly CanonicalMarketBar[] = [
-  barOf("2026-09-10", { open: 10, close: 11, preClose: 10, volume: 200_000, low: 10 }),
-  barOf("2026-09-11", { open: 11, close: 10.8, preClose: 11, volume: 80_000, low: 10.6 }),
-  barOf("2026-09-12", { open: 10.9, close: 11.2, preClose: 10.8, volume: 60_000, low: 10.4 }),
-  barOf("2026-09-15", { open: 11.2, close: 11.5, preClose: 11.2, volume: 55_000, low: 10.9 }),
+  barOf("2026-09-10", {
+    open: 10,
+    close: 11,
+    preClose: 10,
+    volume: 200_000,
+    low: 10,
+  }),
+  barOf("2026-09-11", {
+    open: 11,
+    close: 10.8,
+    preClose: 11,
+    volume: 80_000,
+    low: 10.6,
+  }),
+  barOf("2026-09-12", {
+    open: 10.9,
+    close: 11.2,
+    preClose: 10.8,
+    volume: 60_000,
+    low: 10.4,
+  }),
+  barOf("2026-09-15", {
+    open: 11.2,
+    close: 11.5,
+    preClose: 11.2,
+    volume: 55_000,
+    low: 10.9,
+  }),
 ];
 
 function contextWith(bars: readonly CanonicalMarketBar[]): RuntimeContext {
   const window = toCoreBarWindow(bars);
   return {
-    timestamp: { date: bars[bars.length - 1]?.timestamp ?? "2026-09-15", point: "close" },
+    timestamp: {
+      date: bars[bars.length - 1]?.timestamp ?? "2026-09-15",
+      point: "close",
+    },
     instrument: { securityId: "600001.SH", code: "600001.SH" },
     visibleData: window.universe,
     currentRelativeDay: window.currentRelativeDay,
@@ -61,8 +96,10 @@ describe("barWindow — 锚定策略与相对日", () => {
     expect(window.anchorPolicy).toBe(DEFAULT_EVENT_ANCHOR_POLICY);
     expect(window.anchorPolicy).toBe("SERIES_START");
     expect(window.barCount).toBe(4);
-    expect(window.universe.bars.map((bar) => bar.relativeDay)).toEqual([0, 1, 2, 3]);
-    expect(window.universe.bars.map((bar) => bar.date)).toEqual([
+    expect(window.universe.bars.map(bar => bar.relativeDay)).toEqual([
+      0, 1, 2, 3,
+    ]);
+    expect(window.universe.bars.map(bar => bar.date)).toEqual([
       "2026-09-10",
       "2026-09-11",
       "2026-09-12",
@@ -82,9 +119,9 @@ describe("barWindow — 锚定策略与相对日", () => {
   });
 
   it("未登记的锚定策略 ⇒ 响亮抛错（不猜口径）", () => {
-    expect(() => toCoreBarWindow(EVENT_WINDOW, { anchorPolicy: "NOPE" as never })).toThrowError(
-      /未登记的事件锚定策略/,
-    );
+    expect(() =>
+      toCoreBarWindow(EVENT_WINDOW, { anchorPolicy: "NOPE" as never })
+    ).toThrowError(/未登记的事件锚定策略/);
   });
 
   it("说明文案里如实登记了「窗口左边界未预热会偏」这条边界", () => {
@@ -115,16 +152,32 @@ describe("eventSource — 事件判定器（生产注入）", () => {
     declaredBy: "test",
   } as const;
 
-  function resolve(resolver: EventOccurrenceResolver, bars: readonly CanonicalMarketBar[]): boolean {
+  function resolve(
+    resolver: EventOccurrenceResolver,
+    bars: readonly CanonicalMarketBar[]
+  ): boolean {
     return resolver("FIRST_LIMIT_UP", {}, contextWith(bars));
   }
 
-  it("锚定日是涨停（close ≥ preClose×1.1）⇒ 事件发生", () => {
+  it("锚定日是分价涨停（close 等于四舍五入后的 preClose×1.1）⇒ 事件发生", () => {
     const source = createDatasetEventResolver({ ...base });
     expect(resolve(source.resolve, EVENT_WINDOW)).toBe(true);
     expect(source.occurredCount()).toBe(1);
     expect(source.notOccurredCount()).toBe(0);
     expect(source.undecidableCount()).toBe(0);
+  });
+
+  it("不足 10% 的分价涨停保留，高于涨停价的异常值不算事件", () => {
+    const slightBelowTen = [
+      barOf("2026-09-10", { close: 2.56, preClose: 2.33 }),
+    ];
+    const aboveLimit = [barOf("2026-09-10", { close: 2.57, preClose: 2.33 })];
+    expect(
+      resolve(createDatasetEventResolver({ ...base }).resolve, slightBelowTen)
+    ).toBe(true);
+    expect(
+      resolve(createDatasetEventResolver({ ...base }).resolve, aboveLimit)
+    ).toBe(false);
   });
 
   it("锚定日未涨停 ⇒ 明确「未发生」（false，且与「无法判定」分开计数）", () => {
@@ -160,9 +213,9 @@ describe("eventSource — 事件判定器（生产注入）", () => {
 
   it("未声明的事件类型 ⇒ 响亮抛错（不静默 false）", () => {
     const source = createDatasetEventResolver({ ...base });
-    expect(() => source.resolve("SECOND_LIMIT_UP", {}, contextWith(EVENT_WINDOW))).toThrowError(
-      StrategyCoreError,
-    );
+    expect(() =>
+      source.resolve("SECOND_LIMIT_UP", {}, contextWith(EVENT_WINDOW))
+    ).toThrowError(StrategyCoreError);
   });
 
   it("窗口里没有 rd 0 ⇒ 响亮抛错（锚定不成立）", () => {
@@ -170,22 +223,30 @@ describe("eventSource — 事件判定器（生产注入）", () => {
     const window = toCoreBarWindow(EVENT_WINDOW);
     const noRdZero: RuntimeContext = {
       ...contextWith(EVENT_WINDOW),
-      visibleData: { bars: window.universe.bars.filter((bar) => bar.relativeDay !== 0) },
+      visibleData: {
+        bars: window.universe.bars.filter(bar => bar.relativeDay !== 0),
+      },
     };
-    expect(() => source.resolve("FIRST_LIMIT_UP", {}, noRdZero)).toThrowError(/没有相对日 0 的 bar/);
-  });
-
-  it("非事件窗数据集 ⇒ 构造即拒（不是静默不判定）", () => {
-    expect(() => createDatasetEventResolver({ ...base, eventAnchored: false })).toThrowError(
-      /eventAnchored=false/,
+    expect(() => source.resolve("FIRST_LIMIT_UP", {}, noRdZero)).toThrowError(
+      /没有相对日 0 的 bar/
     );
   });
 
+  it("非事件窗数据集 ⇒ 构造即拒（不是静默不判定）", () => {
+    expect(() =>
+      createDatasetEventResolver({ ...base, eventAnchored: false })
+    ).toThrowError(/eventAnchored=false/);
+  });
+
   it("事件类型闭集为空 ⇒ 构造即拒", () => {
-    expect(() => createDatasetEventResolver({ ...base, eventTypes: [] })).toThrowError(/事件类型闭集/);
+    expect(() =>
+      createDatasetEventResolver({ ...base, eventTypes: [] })
+    ).toThrowError(/事件类型闭集/);
   });
 
   it("limitUpRatio 非法 ⇒ 构造即拒", () => {
-    expect(() => createDatasetEventResolver({ ...base, limitUpRatio: -0.1 })).toThrowError(/limitUpRatio/);
+    expect(() =>
+      createDatasetEventResolver({ ...base, limitUpRatio: -0.1 })
+    ).toThrowError(/limitUpRatio/);
   });
 });

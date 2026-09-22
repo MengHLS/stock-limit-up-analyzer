@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import type {
   ExperimentParameterValues,
-  ExperimentRunExecutionResult,
+  ExperimentResearchProtocolInput,
 } from "@shared/researchExperimentsContracts";
 import { trpc } from "@/lib/trpc";
 import { Badge } from "@/components/ui/badge";
@@ -47,7 +47,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -66,8 +66,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ErrorState } from "@/components/common";
 import { rpcErrorToDiagnostic } from "@/lib/rpcDiagnostic";
-import { experimentPageOf } from "@/researchExperiments";
-import { GenericExperimentResult } from "./GenericResultView";
 import { MetadataRow, RunStatusBadge, formatDateTime, formatDuration } from "./runShared";
 
 /** 表单原始值（保持字符串形态，避免输入过程中被数字转换吃掉中间态）。 */
@@ -100,8 +98,9 @@ export default function ResearchExperimentDetail() {
   const basePath = `/research-experiments/${encodeURIComponent(group)}/${encodeURIComponent(key)}`;
 
   const utils = trpc.useUtils();
+  const [runOffset, setRunOffset] = useState(0);
   const experimentQuery = trpc.researchExperiments.get.useQuery(
-    { experimentId },
+    { experimentId, ...(runOffset > 0 ? { runOffset } : {}) },
     { enabled: experimentId !== "/", retry: false },
   );
   const detail = experimentQuery.data;
@@ -128,6 +127,7 @@ export default function ResearchExperimentDetail() {
   const [rawParams, setRawParams] = useState<Record<string, RawValue>>({});
   useEffect(() => {
     if (!descriptor) return;
+    setRunOffset(0);
     const next: Record<string, RawValue> = {};
     for (const param of descriptor.parameters) {
       next[param.code] = defaultRawValue(param.kind, param.defaultValue);
@@ -136,25 +136,29 @@ export default function ResearchExperimentDetail() {
   }, [descriptor?.id, descriptor?.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [paramError, setParamError] = useState<string | null>(null);
-  const [execution, setExecution] = useState<ExperimentRunExecutionResult | null>(null);
+  const [protocolEnabled, setProtocolEnabled] = useState(false);
+  const [protocolPhase, setProtocolPhase] = useState<"OBSERVATION" | "HOLDOUT">("OBSERVATION");
+  const [protocolId, setProtocolId] = useState("");
+  const [protocolVersion, setProtocolVersion] = useState("1.0.0");
+  const [hypothesisCode, setHypothesisCode] = useState("H1");
+  const [observationStart, setObservationStart] = useState("");
+  const [observationEnd, setObservationEnd] = useState("");
+  const [holdoutStart, setHoldoutStart] = useState("");
+  const [holdoutEnd, setHoldoutEnd] = useState("");
+  const [parentRunId, setParentRunId] = useState("");
   const [rpcError, setRpcError] = useState<{ message: string } | null>(null);
 
-  const runMutation = trpc.researchExperiments.run.useMutation({
-    onSuccess: (data) => {
-      setExecution(data);
+  const runMutation = trpc.researchExperiments.startRun.useMutation({
+    onSuccess: (run) => {
       setRpcError(null);
       // 新 Run 已落库 ⇒ 刷新历史列表（否则用户看不到刚跑的那一条）。
       void utils.researchExperiments.get.invalidate({ experimentId });
+      setLocation(`${basePath}/runs/${encodeURIComponent(run.runId)}`);
     },
     onError: (error) => {
-      // 🔴 响亮提示，不静默：tRPC 错误（请求不成立）与「执行失败」是两类事实，分开呈现。
       setRpcError({ message: error.message });
-      setExecution(null);
     },
   });
-
-  const outcome = execution?.outcome ?? null;
-  const persistedRun = execution?.run ?? null;
 
   /** 把表单原始值编译成入参；非法即**拒绝提交并提示**（服务端仍会独立校验）。 */
   function buildParameters(): ExperimentParameterValues | null {
@@ -199,14 +203,54 @@ export default function ResearchExperimentDetail() {
     return values;
   }
 
+  function buildProtocol(): ExperimentResearchProtocolInput | undefined | null {
+    if (!protocolEnabled) return undefined;
+    const id = protocolId.trim();
+    const version = protocolVersion.trim();
+    const hypothesis = hypothesisCode.trim();
+    if (
+      id === "" ||
+      version === "" ||
+      hypothesis === "" ||
+      observationStart === "" ||
+      observationEnd === "" ||
+      holdoutStart === "" ||
+      holdoutEnd === ""
+    ) {
+      setParamError("启用 Research Protocol 后，协议 ID / 版本 / 假设及观察、Holdout 窗口均为必填。");
+      return null;
+    }
+    if (observationEnd >= holdoutStart) {
+      setParamError("Holdout 起始日必须晚于 Observation 结束日。");
+      return null;
+    }
+    if (protocolPhase === "HOLDOUT" && parentRunId.trim() === "") {
+      setParamError("HOLDOUT 必须填写已完成且 Gate=OBSERVATION_READY 的父 Observation Run ID。");
+      return null;
+    }
+    setParamError(null);
+    return {
+      protocolId: id,
+      protocolVersion: version,
+      hypothesisCode: hypothesis,
+      observationWindow: { startDate: observationStart, endDate: observationEnd },
+      holdoutWindow: { startDate: holdoutStart, endDate: holdoutEnd },
+      phase: protocolPhase,
+      ...(protocolPhase === "HOLDOUT" ? { parentRunId: parentRunId.trim() } : {}),
+    };
+  }
+
   function handleRun() {
     if (descriptor === undefined || selectedVersionId === null) return;
     const parameters = buildParameters();
     if (parameters === null) return;
+    const protocol = buildProtocol();
+    if (protocol === null) return;
     runMutation.mutate({
       experimentId: descriptor.id,
       datasetVersionId: selectedVersionId,
       parameters,
+      ...(protocol !== undefined ? { protocol } : {}),
     });
   }
 
@@ -235,8 +279,6 @@ export default function ResearchExperimentDetail() {
   }
 
   const requirement = descriptor.datasetRequirement;
-  const PageComponent = experimentPageOf(descriptor.pageKey);
-
   return (
     <div className="space-y-4 p-4 md:p-6">
       {/* ① 元数据 */}
@@ -276,8 +318,7 @@ export default function ResearchExperimentDetail() {
                 {runMutation.isPending ? (
                   <>
                     <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                    正在运行实验…（读真实 Dataset、做全量计算、并写入对象存储；可能需要数十秒到数分钟，
-                    取决于数据集规模与是否全量扫描）
+                    正在创建 Run…
                   </>
                 ) : (
                   <>
@@ -309,95 +350,7 @@ export default function ResearchExperimentDetail() {
             />
           )}
 
-          {/* 🔴 004 新增：跑成功但没存下来 —— 必须与「执行失败」区分开 */}
-          {persistedRun !== null && outcome?.runStatus === "SUCCEEDED" && persistedRun.status !== "COMPLETED" && (
-            <Alert className="border-red-400 bg-red-50">
-              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
-              <AlertTitle className="text-sm">
-                实验算完了，但结果**没能持久化**
-                <Badge variant="outline" className="ml-2 font-mono text-[10px]">
-                  {persistedRun.errorCode ?? "UNKNOWN"}
-                </Badge>
-              </AlertTitle>
-              <AlertDescription className="space-y-1 text-xs">
-                <p>{persistedRun.errorMessage}</p>
-                <p className="text-muted-foreground">
-                  Run <span className="font-mono">{persistedRun.runId}</span> 已被记为 FAILED
-                  （规格要求：产物没落进对象存储，就**不允许**声称完成）。
-                  下方结果仍然显示，因为它确实是本次算出来的 —— 但刷新页面后不会再出现。
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {persistedRun !== null && persistedRun.status === "COMPLETED" && (
-            <Alert className="border-emerald-300 bg-emerald-50">
-              <AlertTitle className="text-sm">已持久化</AlertTitle>
-              <AlertDescription className="space-y-1 text-xs">
-                <p>
-                  Run <span className="font-mono">{persistedRun.runId}</span> · 耗时{" "}
-                  {formatDuration(persistedRun.durationMs)} ·{" "}
-                  <Link
-                    className="underline"
-                    href={`${basePath}/runs/${encodeURIComponent(persistedRun.runId)}`}
-                  >
-                    打开这一条 Run
-                  </Link>
-                </p>
-                <p className="break-all font-mono text-[10px] text-muted-foreground">
-                  manifest = {persistedRun.resultManifestKey}
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {outcome && outcome.runStatus === "FAILED" && (
-            <Alert className="border-red-300 bg-red-50">
-              <AlertTriangle className="h-4 w-4 shrink-0 text-red-600" />
-              <AlertTitle className="text-sm">
-                本次执行失败
-                <Badge variant="outline" className="ml-2 font-mono text-[10px]">
-                  {outcome.error?.code ?? "UNKNOWN"}
-                </Badge>
-                {persistedRun && (
-                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
-                    Run {persistedRun.runId}
-                  </span>
-                )}
-              </AlertTitle>
-              <AlertDescription className="space-y-1 text-xs">
-                <p>{outcome.error?.message}</p>
-                <p className="text-muted-foreground">
-                  执行耗时 {formatDuration(outcome.execution.durationMs)}；Dataset =
-                  {outcome.execution.datasetFacts.datasetCode}{" "}
-                  {outcome.execution.datasetFacts.datasetVersionLabel}。
-                  {outcome.error?.detail !== undefined && (
-                    <>
-                      {" "}
-                      技术详情：
-                      <span className="font-mono">
-                        {JSON.stringify(outcome.error.detail).slice(0, 400)}
-                      </span>
-                    </>
-                  )}
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {/* ③ 结果 */}
-          {outcome && outcome.runStatus === "SUCCEEDED" && outcome.result && (
-            PageComponent ? (
-              <PageComponent descriptor={descriptor} outcome={outcome} />
-            ) : (
-              <GenericExperimentResult
-                result={outcome.result}
-                pageKey={descriptor.pageKey}
-                reason="实验作者尚未在客户端页面注册表里登记该 pageKey。"
-              />
-            )
-          )}
-          {outcome === null && !rpcError && (
+          {!rpcError && (
             <Card>
               <CardContent className="p-6 text-sm text-muted-foreground">
                 <p className="flex items-center gap-2">
@@ -405,71 +358,8 @@ export default function ResearchExperimentDetail() {
                 </p>
                 <p className="mt-2 text-xs">
                   <RefreshCw className="mr-1 inline h-3 w-3" />
-                  每次运行都会**落库一条 Run**，产物（result.json / manifest.json / 日志）写入对象存储 ——
-                  刷新页面后可在下方「运行历史」里直接打开，不需要重跑。
+                  运行会创建后台 Run 并立即跳转到详情页；页面会持续刷新状态与结果。
                 </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* ④ 执行元数据 */}
-          {outcome && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">执行元数据</CardTitle>
-                <CardDescription className="text-xs">
-                  开始 {formatDateTime(outcome.execution.startedAt)} · 结束{" "}
-                  {formatDateTime(outcome.execution.finishedAt)} · 耗时{" "}
-                  {formatDuration(outcome.execution.durationMs)}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-xs">
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <MetadataRow label="实验" value={`${descriptor.name} v${descriptor.version}`} />
-                  <MetadataRow
-                    label="Dataset 版本"
-                    value={`${outcome.execution.datasetFacts.datasetCode} ${outcome.execution.datasetFacts.datasetVersionLabel}（id=${outcome.execution.datasetFacts.datasetVersionId}，${outcome.execution.datasetFacts.status}）`}
-                  />
-                  <MetadataRow
-                    label="数据集区间"
-                    value={`${outcome.execution.datasetFacts.startDate ?? "—"} ~ ${outcome.execution.datasetFacts.endDate ?? "—"}`}
-                  />
-                  <MetadataRow
-                    label="实际读取"
-                    value={`事件 ${outcome.execution.datasetFacts.eventCount} 行 · prefix ${outcome.execution.datasetFacts.prefixRowCount} 行 · post ${outcome.execution.datasetFacts.postRowCount} 行`}
-                  />
-                  <MetadataRow
-                    label="信息边界（decisionOffsetDays）"
-                    value={
-                      outcome.execution.datasetFacts.decisionOffsetDays === null
-                        ? "未声明（样本资格不使用事件日之后数据）"
-                        : `T+${outcome.execution.datasetFacts.decisionOffsetDays}`
-                    }
-                  />
-                  <MetadataRow
-                    label="是否读取事件日之后数据"
-                    value={
-                      outcome.execution.datasetFacts.forwardDataRead
-                        ? `是（最远 rd=${outcome.execution.datasetFacts.maxPostRelativeDayRead ?? "—"}）`
-                        : "否"
-                    }
-                  />
-                </div>
-                <Separator />
-                <div>
-                  <p className="mb-1 font-medium">实际使用的参数</p>
-                  <pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-[11px]">
-                    {JSON.stringify(outcome.execution.resolvedParameters, null, 2)}
-                  </pre>
-                </div>
-                {outcome.execution.logs.length > 0 && (
-                  <div>
-                    <p className="mb-1 font-medium">运行日志</p>
-                    <pre className="max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-[11px]">
-                      {outcome.execution.logs.join("\n")}
-                    </pre>
-                  </div>
-                )}
               </CardContent>
             </Card>
           )}
@@ -507,6 +397,7 @@ export default function ResearchExperimentDetail() {
                 </p>
               )}
               {runs.length > 0 && (
+                <>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -551,6 +442,28 @@ export default function ResearchExperimentDetail() {
                     ))}
                   </TableBody>
                 </Table>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={runOffset === 0}
+                    onClick={() => setRunOffset((value) => Math.max(0, value - 200))}
+                  >
+                    上一页
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {runOffset + 1} - {runOffset + runs.length}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={runs.length < 200}
+                    onClick={() => setRunOffset((value) => value + 200)}
+                  >
+                    下一页
+                  </Button>
+                </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -606,6 +519,123 @@ export default function ResearchExperimentDetail() {
                 </p>
               )}
             </CardContent>
+          </Card>
+
+          <Card data-experiment-protocol="true">
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <CardTitle className="text-sm">Research Protocol</CardTitle>
+                  <CardDescription className="text-xs">
+                    启用后进入 Observation / Holdout 确认性流程；Holdout 只能引用冻结的 Observation Run。
+                  </CardDescription>
+                </div>
+                <Switch
+                  checked={protocolEnabled}
+                  onCheckedChange={setProtocolEnabled}
+                  aria-label="启用 Research Protocol"
+                />
+              </div>
+            </CardHeader>
+            {protocolEnabled && (
+              <CardContent className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">阶段</Label>
+                  <Select
+                    value={protocolPhase}
+                    onValueChange={(value) =>
+                      setProtocolPhase(value as "OBSERVATION" | "HOLDOUT")
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="OBSERVATION">OBSERVATION</SelectItem>
+                      <SelectItem value="HOLDOUT">HOLDOUT</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Protocol ID</Label>
+                    <Input
+                      className="h-9"
+                      value={protocolId}
+                      onChange={(event) => setProtocolId(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">协议版本</Label>
+                    <Input
+                      className="h-9"
+                      value={protocolVersion}
+                      onChange={(event) => setProtocolVersion(event.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">假设编号</Label>
+                  <Input
+                    className="h-9"
+                    value={hypothesisCode}
+                    onChange={(event) => setHypothesisCode(event.target.value)}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Observation 开始</Label>
+                    <Input
+                      type="date"
+                      className="h-9"
+                      value={observationStart}
+                      onChange={(event) => setObservationStart(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Observation 结束</Label>
+                    <Input
+                      type="date"
+                      className="h-9"
+                      value={observationEnd}
+                      onChange={(event) => setObservationEnd(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Holdout 开始</Label>
+                    <Input
+                      type="date"
+                      className="h-9"
+                      value={holdoutStart}
+                      onChange={(event) => setHoldoutStart(event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Holdout 结束</Label>
+                    <Input
+                      type="date"
+                      className="h-9"
+                      value={holdoutEnd}
+                      onChange={(event) => setHoldoutEnd(event.target.value)}
+                    />
+                  </div>
+                </div>
+                {protocolPhase === "HOLDOUT" && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">父 Observation Run ID</Label>
+                    <Input
+                      className="h-9 font-mono text-xs"
+                      value={parentRunId}
+                      onChange={(event) => setParentRunId(event.target.value)}
+                      placeholder="RUN-..."
+                    />
+                  </div>
+                )}
+                <p className="text-[11px] text-muted-foreground">
+                  Holdout 一旦启动，同一协议指纹不得再次运行。
+                </p>
+              </CardContent>
+            )}
           </Card>
 
           <Card>

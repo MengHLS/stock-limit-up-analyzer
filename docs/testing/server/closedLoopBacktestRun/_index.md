@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/closedLoopBacktestRun
 
-- 测试文件 **2** 个 ｜ 用例声明 **15** 个
-- 涉及源码目录：`server/closedLoopBacktestRun/` · `shared/`
+- 测试文件 **3** 个 ｜ 用例声明 **20** 个
+- 涉及源码目录：`server/` · `server/closedLoopBacktestRun/` · `shared/`
 
 ## 怎么跑
 
@@ -14,6 +14,18 @@ pnpm run test:changed                                  # 只跑改动相关（�
 ```
 
 ## 逐文件
+
+### `tests/server/closedLoopBacktestRun/persistRetry.test.ts`
+- 154 行 ｜ 用例声明 5 ｜ describe 1
+- 被测源码：`server/researchRunRouter.ts` · `shared/researchContracts.ts`
+- 单跑：`pnpm exec vitest run tests/server/closedLoopBacktestRun/persistRetry.test.ts`
+- 用例树：
+- **BD-24 · 闭环留档重试（长算后连接被掐）**
+  - C1 · 前 3 次 ECONNRESET、第 4 次成功 ⇒ **生产默认参数下**必须留档成功
+  - C2 · 非瞬时错误 ⇒ 只尝试一次、立即放弃（不重试、不抛）
+  - C3 · 全瞬时失败 ⇒ 不抛（best-effort 不变式）+ 用尽尝试 + 响亮告警
+  - C4 · 首次即成功 ⇒ 零重试、零告警
+  - C5 · 瞬时判定穿透 Drizzle 的 cause 包装（最外层 message 无 ECONNRESET 字样也要认）
 
 ### `tests/server/closedLoopBacktestRun/securityLabels.test.ts`
 - 139 行 ｜ 用例声明 9 ｜ describe 1

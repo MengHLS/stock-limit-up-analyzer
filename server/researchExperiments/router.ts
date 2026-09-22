@@ -75,6 +75,10 @@ function toTrpcError(error: unknown): never {
       case "EXPERIMENT_ARTIFACT_KEY_INVALID":
       case "EXPERIMENT_RUN_STATE_INVALID":
       case "EXPERIMENT_MANIFEST_INVALID":
+      case "EXPERIMENT_PROTOCOL_INVALID":
+      case "EXPERIMENT_PROTOCOL_PHASE_CONFLICT":
+      case "EXPERIMENT_PROTOCOL_PARAMETERS_FROZEN":
+      case "EXPERIMENT_CONFIRMATORY_GATE_INVALID":
         throw new TRPCError({ code: "BAD_REQUEST", message });
       case "EXPERIMENT_DATASET_VERSION_NOT_READY":
         throw new TRPCError({ code: "PRECONDITION_FAILED", message });
@@ -164,6 +168,7 @@ export function buildResearchExperimentsRouter(deps: ResearchExperimentsRouterDe
           const runs = await deps.runService.listRuns({
             experimentId: descriptor.id,
             limit: 200,
+            offset: input.runOffset ?? 0,
           });
           return { descriptor, runs, runsAvailable: true, runsError: null };
         } catch (error) {
@@ -196,6 +201,7 @@ export function buildResearchExperimentsRouter(deps: ResearchExperimentsRouterDe
           return await deps.runService.listRuns({
             ...(input?.experimentId !== undefined ? { experimentId: input.experimentId } : {}),
             ...(input?.limit !== undefined ? { limit: input.limit } : {}),
+            ...(input?.offset !== undefined ? { offset: input.offset } : {}),
           });
         } catch (error) {
           toTrpcError(error);
@@ -270,7 +276,35 @@ export function buildResearchExperimentsRouter(deps: ResearchExperimentsRouterDe
           return await deps.runService.execute({
             experimentId: input.experimentId,
             datasetVersionId: input.datasetVersionId,
+            ...(input.auxiliaryDatasetVersionIds !== undefined
+              ? { auxiliaryDatasetVersionIds: input.auxiliaryDatasetVersionIds }
+              : {}),
             ...(input.parameters !== undefined ? { parameters: input.parameters } : {}),
+            ...(input.protocol !== undefined ? { protocol: input.protocol } : {}),
+          });
+        } catch (error) {
+          toTrpcError(error);
+        }
+      }),
+
+    /**
+     * 异步启动一次实验：只创建 Run 并入队，立即返回 Run 记录。
+     *
+     * 页面应使用本端点；`run` 仅保留给同步测试 / 维护工具，禁止长请求页面再依赖它。
+     */
+    startRun: adminProcedure
+      .input(runExperimentInputSchema)
+      .output(experimentRunRecordSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await deps.runService.start({
+            experimentId: input.experimentId,
+            datasetVersionId: input.datasetVersionId,
+            ...(input.auxiliaryDatasetVersionIds !== undefined
+              ? { auxiliaryDatasetVersionIds: input.auxiliaryDatasetVersionIds }
+              : {}),
+            ...(input.parameters !== undefined ? { parameters: input.parameters } : {}),
+            ...(input.protocol !== undefined ? { protocol: input.protocol } : {}),
           });
         } catch (error) {
           toTrpcError(error);

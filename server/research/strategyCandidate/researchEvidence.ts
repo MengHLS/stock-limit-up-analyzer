@@ -281,6 +281,10 @@ export interface ResearchEvidenceRecord {
   readonly runStatus: string;
   readonly startedAt: string | null;
   readonly durationMs: number | null;
+  /** RESEARCH-EXPERIMENT-005：正式策略证据必须来自 HOLDOUT + PASS。 */
+  readonly researchPhase?: "EXPLORATORY" | "OBSERVATION" | "HOLDOUT" | null;
+  readonly protocolFingerprint?: string | null;
+  readonly confirmatoryStatus?: "OBSERVATION_READY" | "PASS" | "FAIL" | "INSUFFICIENT" | null;
 }
 
 /**

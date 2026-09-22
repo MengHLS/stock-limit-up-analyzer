@@ -541,7 +541,7 @@ export class InMemoryDatasetDataReader implements DatasetDataReader {
 // 5. DbDatasetDataReader（真实 TiDB）
 // ===========================================================================
 
-function parseNumber(value: string | number | null | undefined): number | null {
+function parseNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -558,6 +558,10 @@ function eventRowToDomain(row: typeof firstLimitPullbackEvents.$inferSelect): Fi
     boardType: row.boardType,
     previousClose: parseNumber(row.previousClose),
     limitUpPrice: parseNumber(row.limitUpPrice),
+    limitDownPrice: parseNumber(row.limitDownPrice),
+    limitRuleUp: parseNumber(row.limitRuleUp),
+    limitRuleDown: parseNumber(row.limitRuleDown),
+    limitRuleVersion: row.limitRuleVersion,
     turnover: parseNumber(row.turnover),
     isFirstLimit: row.isFirstLimit === null ? null : Boolean(row.isFirstLimit),
     previousLimitDate: row.previousLimitDate,
@@ -600,6 +604,7 @@ function outcomeRowToDomain(row: typeof firstLimitPullbackOutcomes.$inferSelect)
 }
 
 function rawBarRowToDomain(row: typeof firstLimitPullbackPrefixes.$inferSelect): FirstLimitPullbackRawBar {
+  const records = row as unknown as Record<string, unknown>;
   return {
     datasetVersionId: row.datasetVersionId,
     eventId: row.eventId,
@@ -610,6 +615,47 @@ function rawBarRowToDomain(row: typeof firstLimitPullbackPrefixes.$inferSelect):
     high: parseNumber(row.high),
     low: parseNumber(row.low),
     close: parseNumber(row.close),
+    preClose: parseNumber(records.preClose),
+    limitUpPrice: parseNumber(records.limitUpPrice),
+    limitDownPrice: parseNumber(records.limitDownPrice),
+    limitRuleUp: parseNumber(records.limitRuleUp),
+    limitRuleDown: parseNumber(records.limitRuleDown),
+    limitRuleVersion:
+      typeof records.limitRuleVersion === "string" ? records.limitRuleVersion : null,
+    barPresent: records.barPresent === null || records.barPresent === undefined
+      ? null
+      : Boolean(records.barPresent),
+    suspensionStatus:
+      records.suspensionStatus === "SUSPENDED" ||
+      records.suspensionStatus === "NOT_SUSPENDED" ||
+      records.suspensionStatus === "UNKNOWN"
+        ? records.suspensionStatus
+        : null,
+    suspensionSource:
+      records.suspensionSource === "PIT_STATUS" ||
+      records.suspensionSource === "WINDOW" ||
+      records.suspensionSource === "NO_BAR" ||
+      records.suspensionSource === "UNKNOWN"
+        ? records.suspensionSource
+        : null,
+    openAtLimitUp: records.openAtLimitUp === null || records.openAtLimitUp === undefined
+      ? null
+      : Boolean(records.openAtLimitUp),
+    closeAtLimitDown: records.closeAtLimitDown === null || records.closeAtLimitDown === undefined
+      ? null
+      : Boolean(records.closeAtLimitDown),
+    oneWordLimitUp: records.oneWordLimitUp === null || records.oneWordLimitUp === undefined
+      ? null
+      : Boolean(records.oneWordLimitUp),
+    oneWordLimitDown: records.oneWordLimitDown === null || records.oneWordLimitDown === undefined
+      ? null
+      : Boolean(records.oneWordLimitDown),
+    canBuyAtOpen: records.canBuyAtOpen === null || records.canBuyAtOpen === undefined
+      ? null
+      : Boolean(records.canBuyAtOpen),
+    canSellAtClose: records.canSellAtClose === null || records.canSellAtClose === undefined
+      ? null
+      : Boolean(records.canSellAtClose),
     volume: parseNumber(row.volume),
     amount: parseNumber(row.amount),
   };

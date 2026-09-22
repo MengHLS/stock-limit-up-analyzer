@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/datasetRegistry
 
-- 测试文件 **12** 个 ｜ 用例声明 **201** 个
+- 测试文件 **13** 个 ｜ 用例声明 **206** 个
 - 涉及源码目录：`server/` · `server/datasetRegistry/` · `shared/`
 
 ## 怎么跑
@@ -16,7 +16,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
 ## 逐文件
 
 ### `tests/server/datasetRegistry/builder.test.ts`
-- 591 行 ｜ 用例声明 15 ｜ describe 2
+- 602 行 ｜ 用例声明 15 ｜ describe 2
 - 被测源码：`server/datasetRegistry/builder.ts` · `server/datasetRegistry/detection.ts` · `server/datasetRegistry/types.ts`
 - 单跑：`pnpm exec vitest run tests/server/datasetRegistry/builder.test.ts`
 - 用例树：
@@ -39,7 +39,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - Universe + Signal 两层叠加：板块过滤与事件维度同时生效
 
 ### `tests/server/datasetRegistry/detection.test.ts`
-- 119 行 ｜ 用例声明 12 ｜ describe 4
+- 156 行 ｜ 用例声明 13 ｜ describe 4
 - 被测源码：`server/datasetRegistry/detection.ts`
 - 单跑：`pnpm exec vitest run tests/server/datasetRegistry/detection.test.ts`
 - 用例树：
@@ -48,10 +48,11 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 创业板/科创板 20%、北交所 30%
   - unknown 板块不可判 → null
 - **detection: 涨停判定（交易所口径，四舍五入到分）**
-  - close ≥ 涨停价 = 涨停；1 分钱之差不算
+  - close 等于涨停价 = 收盘涨停；1 分钱之差不算
   - 回归：封板收盘价恰为「四舍五入到分」的涨停价时必须判为涨停（浮点误差不得漏判）
   - 回归：低于涨停价 1 分仍判否（修正不得放松判定口径）
-  - 回归：超出涨停价（异常/除权失真数据）仍判为涨停（用 ≥ 而非 =）
+  - 不足 10% 的分价涨停仍必须收录
+  - 收盘高于涨停价的异常数据不得判为收盘涨停
 - **detection: 首板判定（首板 = 今日涨停且昨日未涨停）**
   - 窗口首日涨停 → 首板（T-1 无数据视作非连板）
   - 连板：昨日涨停 + 今日涨停 → 非首板
@@ -59,6 +60,17 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - eventId 确定性且唯一于 (symbol, tradeDate)
 - **detection: Future Leakage（§38.9）**
   - 首板判定只依赖 close/preClose/截至 T 日的滚动状态，不读取未来
+
+### `tests/server/datasetRegistry/executionFacts.test.ts`
+- 93 行 ｜ 用例声明 4 ｜ describe 1
+- 被测源码：`server/datasetRegistry/executionFacts.ts`
+- 单跑：`pnpm exec vitest run tests/server/datasetRegistry/executionFacts.test.ts`
+- 用例树：
+- **Dataset execution facts**
+  - 按交易日解析创业板涨跌幅
+  - 主板 ST 使用 5% 且价格分价四舍五入
+  - 一字涨停不可买、一字跌停不可卖，缺 bar 不可交易
+  - 规则版本稳定写入
 
 ### `tests/server/datasetRegistry/filter.test.ts`
 - 169 行 ｜ 用例声明 20 ｜ describe 7
@@ -172,7 +184,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 表不存在时删除数据 → deleted=0 且 tableMissing=true（诚实 0，不报错）
 
 ### `tests/server/datasetRegistry/plugins.test.ts`
-- 144 行 ｜ 用例声明 8 ｜ describe 3
+- 155 行 ｜ 用例声明 8 ｜ describe 3
 - 被测源码：`server/datasetRegistry/plugins.ts` · `server/datasetRegistry/naming.ts` · `server/datasetRegistry/testHelpers.ts`
 - 单跑：`pnpm exec vitest run tests/server/datasetRegistry/plugins.test.ts`
 - 用例树：

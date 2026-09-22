@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/data
 
-- 测试文件 **1** 个 ｜ 用例声明 **20** 个
+- 测试文件 **1** 个 ｜ 用例声明 **21** 个
 - 涉及源码目录：`server/data/`
 
 ## 怎么跑
@@ -16,7 +16,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
 ## 逐文件
 
 ### `tests/server/data/data.test.ts`
-- 241 行 ｜ 用例声明 20 ｜ describe 3
+- 376 行 ｜ 用例声明 21 ｜ describe 3
 - 被测源码：`server/data/index.ts`
 - 单跑：`pnpm exec vitest run tests/server/data/data.test.ts`
 - 用例树：
@@ -29,6 +29,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - resolveLimitRules 使用严格 isStStock：STORE 类名称按主板 10% 处理
   - 无法识别 → UNSUPPORTED（null），不假装支持
   - isLimitUpBar / isLimitDownBar：close 达到涨跌停价即判定，无法判定返回 null
+  - isLimitUpBar：保留不足 10% 的分价涨停，拒绝高于涨停价的异常值
   - classifyBoard 基本归类
   - isPriceAtLimitUp/Down：按板块权威阈值而非 9.9% 近似判定
 - **Adapter — Raw → Canonical Bar**

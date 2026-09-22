@@ -798,3 +798,124 @@ role: "log"      → 运行日志段
 **让产物可解释**：产物名字与 `label` 要让人（和以后的你）看懂这是什么。
 平台负责「存得住、找得到、不串号」，不负责「这份 CSV 是什么意思」。
 
+---
+
+## Q. Research Protocol / Holdout / Confirmatory Gate（RESEARCH-EXPERIMENT-005）
+
+### Q.1 三种阶段
+
+```text
+EXPLORATORY  探索研究；允许形成假设，不能直接创建正式策略
+OBSERVATION  在冻结协议 + Observation 窗口上检查样本与执行前提
+HOLDOUT      对已冻结协议做一次性独立验证；正式策略只接受 PASS
+```
+
+平台持久化：
+
+- `protocolId` / `protocolVersion` / `hypothesisCode`
+- `protocolFingerprint`（协议 + 实验身份 + Dataset + 冻结参数）
+- `parentRunId`
+- `evaluationWindow`
+- `confirmatoryGate`
+
+### Q.2 Holdout 锁
+
+启动 `HOLDOUT` 时必须提供已完成的 `OBSERVATION` Run：
+
+```text
+parentRunId
+```
+
+平台强制：
+
+1. 父 Run 必须是同一实验的 `OBSERVATION`、状态 `COMPLETED`；
+2. 父 Run 的 Gate 必须是 `OBSERVATION_READY`；
+3. 代码指纹、主 / 辅助 Dataset 绑定、冻结参数、协议指纹必须完全一致；
+4. 同一协议指纹只允许启动一次 `HOLDOUT`；
+5. Observation 窗口与 Holdout 窗口不得重叠。
+6. Holdout 窗口不得与同实验、同 Dataset 的历史 `EXPLORATORY` / `OBSERVATION` Run 重叠；
+   历史 Run 未声明 `evaluationWindow` 时按 Dataset 全窗处理。违反即拒绝启动
+   `EXPERIMENT_PROTOCOL_HOLDOUT_CONTAMINATED`，Strategy Bridge 也会拒绝这类已污染证据。
+
+### Q.3 Gate
+
+OBSERVATION Run 的 Gate：
+
+```text
+OBSERVATION_READY  可以冻结并进入 Holdout
+INSUFFICIENT       样本 / 数据质量不足
+```
+
+HOLDOUT Run 的 Gate：
+
+```text
+PASS          通过预设标准，可作为正式策略证据
+FAIL          样本充足但结论不通过
+INSUFFICIENT  样本 / 数据质量不足，不能判定
+```
+
+`confirmatoryGate.protocolFingerprint` 必须与 Run 的协议指纹一致。
+
+### Q.4 Strategy Bridge 准入
+
+`createStrategyFromEvidenceRuns` 只接受：
+
+```text
+researchPhase = HOLDOUT
+confirmatoryGate.status = PASS
+所有证据 protocolFingerprint 一致
+```
+
+探索性 Run、Observation Run、Gate=FAIL/INSUFFICIENT 的 Run 都不能直接创建正式策略。
+
+### Q.5 多 Dataset
+
+实验主 Dataset 仍由 `datasetRequirement` 声明。辅助 Dataset：
+
+```ts
+auxiliaryDatasetRequirements: [
+  {
+    alias: "market",
+    requirement: { datasetCode: "market_regime", ... },
+  },
+]
+```
+
+运行时通过：
+
+```ts
+context.dataset;          // primary，兼容既有实验
+context.datasets.primary; // 与 context.dataset 同一个 access
+context.datasets.market;  // auxiliary
+```
+
+Run 入参需要给：
+
+```ts
+auxiliaryDatasetVersionIds: { market: 123456 }
+```
+
+每个 Dataset 都必须由 `DatasetProvider` 注册；Runner 不再硬编码 `datasetCode` 到物理表的映射。
+
+### Q.6 执行事实层（`first_limit_pullback` v3）
+
+新版本 Provider 的 `post` 窗口除原始 OHLCV 外，还暴露以下执行事实：
+
+```text
+preClose
+limitUpPrice / limitDownPrice
+limitRuleUp / limitRuleDown / limitRuleVersion
+barPresent
+suspensionStatus / suspensionSource
+openAtLimitUp / closeAtLimitDown
+oneWordLimitUp / oneWordLimitDown
+canBuyAtOpen / canSellAtClose
+```
+
+语义：
+
+- `preClose` 直接取源行情的交易所前收，不由上一根 `close` 推导；
+- 涨跌停价按交易日规则和分价四舍五入计算；
+- 缺 bar / 停牌 / 规则未知时，可交易性一律保守为 false；
+- 一字涨停视为不可买，一字跌停视为不可卖；
+- 旧 Dataset 版本这些列为 NULL，不能把 NULL 解释成 0 或“可交易”。

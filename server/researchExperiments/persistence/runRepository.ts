@@ -21,13 +21,17 @@
  * （本任务明确不引入调度器）；读时计算则永远与当下一致，且**完全不改写数据**。
  */
 
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "../../db";
 import { researchExperimentRun } from "../../../drizzle/schema";
 import { encodeJson, decodeJson, toDate, toIso } from "../../research/jsonCodec";
 import {
   EXPERIMENT_RUN_ALLOWED_TRANSITIONS,
+  type ExperimentConfirmatoryGate,
+  type ExperimentDatasetBinding,
+  type ExperimentEvaluationWindow,
   type ExperimentParameterValues,
+  type ExperimentResearchPhase,
   type ExperimentRunLifecycleStatus,
   type ExperimentRunRecord,
   type ExperimentRunSummary,
@@ -52,9 +56,17 @@ export interface ExperimentRunCreateInput {
   experimentId: string;
   experimentName: string;
   experimentVersion: string;
+  experimentCodeDigest: string;
+  researchPhase?: ExperimentResearchPhase;
+  protocolId?: string | null;
+  protocolVersion?: string | null;
+  protocolFingerprint?: string | null;
+  parentRunId?: string | null;
+  evaluationWindow?: ExperimentEvaluationWindow | null;
   datasetVersionId: number;
   datasetCode: string;
   datasetVersionLabel: string;
+  datasetBindings?: ExperimentDatasetBinding[];
   /** **已归并默认值**的参数快照。 */
   parameters: ExperimentParameterValues;
   /** 可注入创建时间（测试用：让 `createdAt` 确定）。 */
@@ -66,6 +78,7 @@ export interface ExperimentRunCompleteInput {
   manifestKey: string;
   resultSchemaVersion: string;
   summary: ExperimentRunSummary | null;
+  confirmatoryGate?: ExperimentConfirmatoryGate | null;
   durationMs: number;
   completedAt?: string;
 }
@@ -80,6 +93,9 @@ export interface ExperimentRunFailInput {
 export interface ExperimentRunListFilter {
   experimentId?: string;
   limit?: number;
+  offset?: number;
+  protocolFingerprint?: string;
+  researchPhase?: ExperimentResearchPhase;
 }
 
 /** Run 元数据仓储端口。 */
@@ -96,6 +112,7 @@ export interface ExperimentRunRepository {
   countRunsByExperiment(experimentId: string): Promise<number>;
   /** 每个实验的**最近**一条 Run（列表页 N+1 的替代：一次查询）。 */
   latestRunByExperiment(): Promise<Map<string, ExperimentRunRecord>>;
+  listRunsByProtocolFingerprint(protocolFingerprint: string): Promise<ExperimentRunRecord[]>;
 }
 
 /** 默认列表上限（页面一次只显示最近这么多条）。 */
@@ -165,6 +182,27 @@ function normalizeListLimit(limit: number | undefined): number {
   return Math.min(limit, 200);
 }
 
+function normalizeListOffset(offset: number | undefined): number {
+  if (offset === undefined) return 0;
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new ExperimentError(
+      "EXPERIMENT_RUN_STATE_INVALID",
+      `listRuns 的 offset 必须是非负整数，实际 ${String(offset)}`,
+      { offset },
+    );
+  }
+  return offset;
+}
+
+/** DB DATE / Date → `YYYY-MM-DD`；按本地日历字段格式化，避免 UTC 截断漂移一天。 */
+export function formatExperimentBusinessDate(value: Date | string): string {
+  if (!(value instanceof Date)) return value.slice(0, 10);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 // ---------------------------------------------------------------------------
 // InMemory 实现（测试替身；与 DB 实现同语义）
 // ---------------------------------------------------------------------------
@@ -222,9 +260,25 @@ export class InMemoryExperimentRunRepository implements ExperimentRunRepository 
       experimentId: input.experimentId,
       experimentName: input.experimentName,
       experimentVersion: input.experimentVersion,
+      experimentCodeDigest: input.experimentCodeDigest,
+      researchPhase: input.researchPhase ?? "EXPLORATORY",
+      protocolId: input.protocolId ?? null,
+      protocolVersion: input.protocolVersion ?? null,
+      protocolFingerprint: input.protocolFingerprint ?? null,
+      parentRunId: input.parentRunId ?? null,
+      evaluationWindow: input.evaluationWindow ?? null,
       datasetVersionId: input.datasetVersionId,
       datasetCode: input.datasetCode,
       datasetVersionLabel: input.datasetVersionLabel,
+      datasetBindings:
+        input.datasetBindings ?? [
+          {
+            alias: "primary",
+            datasetVersionId: input.datasetVersionId,
+            datasetCode: input.datasetCode,
+            datasetVersionLabel: input.datasetVersionLabel,
+          },
+        ],
       parameters: input.parameters,
       status: "PENDING",
       startedAt: null,
@@ -234,6 +288,7 @@ export class InMemoryExperimentRunRepository implements ExperimentRunRepository 
       errorMessage: null,
       resultManifestKey: null,
       resultSchemaVersion: null,
+      confirmatoryGate: null,
       summary: null,
       stale: false,
       createdAt,
@@ -288,6 +343,7 @@ export class InMemoryExperimentRunRepository implements ExperimentRunRepository 
       record.status = "COMPLETED";
       record.resultManifestKey = input.manifestKey;
       record.resultSchemaVersion = input.resultSchemaVersion;
+      record.confirmatoryGate = input.confirmatoryGate ?? null;
       record.summary = input.summary;
       record.durationMs = input.durationMs;
       record.completedAt = input.completedAt ?? this.nowIso();
@@ -319,11 +375,23 @@ export class InMemoryExperimentRunRepository implements ExperimentRunRepository 
 
   async listRuns(filter?: ExperimentRunListFilter): Promise<ExperimentRunRecord[]> {
     const limit = normalizeListLimit(filter?.limit);
+    const offset = normalizeListOffset(filter?.offset);
     const all = [...this.runs.values()].map((state) => this.decorate(state.record));
-    const filtered =
-      filter?.experimentId === undefined
-        ? all
-        : all.filter((record) => record.experimentId === filter.experimentId);
+    const filtered = all.filter((record) => {
+      if (filter?.experimentId !== undefined && record.experimentId !== filter.experimentId) {
+        return false;
+      }
+      if (
+        filter?.protocolFingerprint !== undefined &&
+        record.protocolFingerprint !== filter.protocolFingerprint
+      ) {
+        return false;
+      }
+      if (filter?.researchPhase !== undefined && record.researchPhase !== filter.researchPhase) {
+        return false;
+      }
+      return true;
+    });
     // 与 DB 实现同序：创建时间降序（同刻则 runId 降序，保证确定性）。
     return filtered
       .sort((a, b) =>
@@ -331,7 +399,7 @@ export class InMemoryExperimentRunRepository implements ExperimentRunRepository 
           ? b.runId.localeCompare(a.runId)
           : b.createdAt.localeCompare(a.createdAt),
       )
-      .slice(0, limit);
+      .slice(offset, offset + limit);
   }
 
   async countRunsByExperiment(experimentId: string): Promise<number> {
@@ -348,6 +416,10 @@ export class InMemoryExperimentRunRepository implements ExperimentRunRepository 
     }
     return map;
   }
+
+  async listRunsByProtocolFingerprint(protocolFingerprint: string): Promise<ExperimentRunRecord[]> {
+    return this.listRuns({ protocolFingerprint, limit: 200 });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -363,9 +435,34 @@ export function mapRunRow(row: RunRow, nowIso: string): ExperimentRunRecord {
     experimentId: row.experimentId,
     experimentName: row.experimentName,
     experimentVersion: row.experimentVersion,
+    experimentCodeDigest: row.experimentCodeDigest ?? null,
+    researchPhase: (row.researchPhase as ExperimentResearchPhase | null) ?? "EXPLORATORY",
+    protocolId: row.protocolId ?? null,
+    protocolVersion: row.protocolVersion ?? null,
+    protocolFingerprint: row.protocolFingerprint ?? null,
+    parentRunId: row.parentRunId ?? null,
+    evaluationWindow:
+      row.evaluationStartDate === null || row.evaluationEndDate === null
+        ? null
+        : {
+            startDate: formatExperimentBusinessDate(row.evaluationStartDate),
+            endDate: formatExperimentBusinessDate(row.evaluationEndDate),
+          },
     datasetVersionId: Number(row.datasetVersionId),
     datasetCode: row.datasetCode,
     datasetVersionLabel: row.datasetVersionLabel,
+    datasetBindings:
+      decodeJson<ExperimentDatasetBinding[]>(
+        row.datasetBindingsJson,
+        "research_experiment_run.datasetBindingsJson",
+      ) ?? [
+        {
+          alias: "primary",
+          datasetVersionId: Number(row.datasetVersionId),
+          datasetCode: row.datasetCode,
+          datasetVersionLabel: row.datasetVersionLabel,
+        },
+      ],
     parameters: decodeJson<ExperimentParameterValues>(
       row.parametersJson,
       "research_experiment_run.parametersJson",
@@ -378,6 +475,11 @@ export function mapRunRow(row: RunRow, nowIso: string): ExperimentRunRecord {
     errorMessage: row.errorMessage ?? null,
     resultManifestKey: row.resultManifestKey ?? null,
     resultSchemaVersion: row.resultSchemaVersion ?? null,
+    confirmatoryGate:
+      decodeJson<ExperimentConfirmatoryGate>(
+        row.confirmatoryGateJson,
+        "research_experiment_run.confirmatoryGateJson",
+      ) ?? null,
     summary: decodeJson<ExperimentRunSummary>(row.summaryJson, "research_experiment_run.summaryJson") ?? null,
     stale: computeStale(row.status as ExperimentRunLifecycleStatus, toIso(row.startedAt), nowIso),
     createdAt: toIso(row.createdAt) ?? nowIso,
@@ -389,6 +491,12 @@ export function mapRunRow(row: RunRow, nowIso: string): ExperimentRunRecord {
 function isDuplicateKeyError(err: unknown): boolean {
   const e = err as { code?: string; errno?: number } | null;
   return e?.code === "ER_DUP_ENTRY" || e?.errno === 1062;
+}
+
+function affectedRows(result: unknown): number {
+  const rows = result as Array<{ affectedRows?: number }> | { affectedRows?: number };
+  if (Array.isArray(rows)) return Number(rows[0]?.affectedRows ?? 0);
+  return Number(rows?.affectedRows ?? 0);
 }
 
 export class DbExperimentRunRepository implements ExperimentRunRepository {
@@ -412,19 +520,45 @@ export class DbExperimentRunRepository implements ExperimentRunRepository {
 
   async createRun(input: ExperimentRunCreateInput): Promise<ExperimentRunRecord> {
     const db = await this.requireDb();
+    const values: typeof researchExperimentRun.$inferInsert = {
+      runId: input.runId,
+      experimentId: input.experimentId,
+      experimentName: input.experimentName,
+      experimentVersion: input.experimentVersion,
+      experimentCodeDigest: input.experimentCodeDigest,
+      researchPhase: input.researchPhase ?? "EXPLORATORY",
+      protocolId: input.protocolId ?? null,
+      protocolVersion: input.protocolVersion ?? null,
+      protocolFingerprint: input.protocolFingerprint ?? null,
+      parentRunId: input.parentRunId ?? null,
+      evaluationStartDate:
+        input.evaluationWindow === undefined || input.evaluationWindow === null
+          ? null
+          : (toDate(input.evaluationWindow.startDate) ?? null),
+      evaluationEndDate:
+        input.evaluationWindow === undefined || input.evaluationWindow === null
+          ? null
+          : (toDate(input.evaluationWindow.endDate) ?? null),
+      datasetVersionId: input.datasetVersionId,
+      datasetCode: input.datasetCode,
+      datasetVersionLabel: input.datasetVersionLabel,
+      datasetBindingsJson: encodeJson(
+        input.datasetBindings ?? [
+          {
+            alias: "primary",
+            datasetVersionId: input.datasetVersionId,
+            datasetCode: input.datasetCode,
+            datasetVersionLabel: input.datasetVersionLabel,
+          },
+        ],
+        "datasetBindingsJson",
+      ),
+      parametersJson: encodeJson(input.parameters, "parametersJson") ?? "{}",
+      status: "PENDING",
+      ...(input.createdAt !== undefined ? { createdAt: toDate(input.createdAt) ?? undefined } : {}),
+    };
     try {
-      await db.insert(researchExperimentRun).values({
-        runId: input.runId,
-        experimentId: input.experimentId,
-        experimentName: input.experimentName,
-        experimentVersion: input.experimentVersion,
-        datasetVersionId: input.datasetVersionId,
-        datasetCode: input.datasetCode,
-        datasetVersionLabel: input.datasetVersionLabel,
-        parametersJson: encodeJson(input.parameters, "parametersJson") ?? "{}",
-        status: "PENDING",
-        ...(input.createdAt !== undefined ? { createdAt: toDate(input.createdAt) ?? undefined } : {}),
-      });
+      await db.insert(researchExperimentRun).values(values);
     } catch (err) {
       if (isDuplicateKeyError(err)) {
         throw new ExperimentError(
@@ -458,15 +592,34 @@ export class DbExperimentRunRepository implements ExperimentRunRepository {
 
   async markRunning(runId: string, startedAt?: string): Promise<ExperimentRunRecord> {
     const row = await this.requireRow(runId);
-    assertRunTransition(runId, row.status as ExperimentRunLifecycleStatus, "RUNNING");
+    const current = row.status as ExperimentRunLifecycleStatus;
+    if (current === "RUNNING") return (await this.getRun(runId))!;
+    assertRunTransition(runId, current, "RUNNING");
     const db = await this.requireDb();
-    await db
+    const result = await db
       .update(researchExperimentRun)
       .set({
         status: "RUNNING",
         startedAt: toDate(startedAt ?? toIso(row.startedAt) ?? this.nowIso()),
       })
-      .where(eq(researchExperimentRun.runId, runId));
+      .where(
+        and(
+          eq(researchExperimentRun.runId, runId),
+          eq(researchExperimentRun.status, "PENDING"),
+        ),
+      );
+    if (affectedRows(result) !== 1) {
+      const latest = await this.requireRow(runId);
+      if ((latest.status as ExperimentRunLifecycleStatus) === "RUNNING") {
+        return (await this.getRun(runId))!;
+      }
+      assertRunTransition(runId, latest.status as ExperimentRunLifecycleStatus, "RUNNING");
+      throw new ExperimentError(
+        "EXPERIMENT_RUN_STATE_INVALID",
+        `Run "${runId}" 竞争迁移 PENDING→RUNNING 失败，当前状态 ${latest.status}`,
+        { runId, status: latest.status },
+      );
+    }
     return (await this.getRun(runId))!;
   }
 
@@ -487,19 +640,43 @@ export class DbExperimentRunRepository implements ExperimentRunRepository {
     }
     assertRunTransition(runId, current, "COMPLETED");
     const db = await this.requireDb();
-    await db
+    const result = await db
       .update(researchExperimentRun)
       .set({
         status: "COMPLETED",
         resultManifestKey: input.manifestKey,
         resultSchemaVersion: input.resultSchemaVersion,
+        confirmatoryGateJson: encodeJson(input.confirmatoryGate, "confirmatoryGateJson"),
         summaryJson: encodeJson(input.summary, "summaryJson"),
         durationMs: input.durationMs,
         completedAt: toDate(input.completedAt ?? this.nowIso()),
         errorCode: null,
         errorMessage: null,
       })
-      .where(eq(researchExperimentRun.runId, runId));
+      .where(
+        and(
+          eq(researchExperimentRun.runId, runId),
+          eq(researchExperimentRun.status, "RUNNING"),
+        ),
+      );
+    if (affectedRows(result) !== 1) {
+      const latest = await this.requireRow(runId);
+      if ((latest.status as ExperimentRunLifecycleStatus) === "COMPLETED") {
+        if (latest.resultManifestKey === input.manifestKey) return (await this.getRun(runId))!;
+        throw new ExperimentError(
+          "EXPERIMENT_RUN_STATE_INVALID",
+          `Run "${runId}" 已 COMPLETED 且 Manifest Key 为 "${latest.resultManifestKey}"，` +
+            `本次却说 "${input.manifestKey}" —— 这是另一次终态写入，拒绝覆盖`,
+          { runId, existing: latest.resultManifestKey, incoming: input.manifestKey },
+        );
+      }
+      assertRunTransition(runId, latest.status as ExperimentRunLifecycleStatus, "COMPLETED");
+      throw new ExperimentError(
+        "EXPERIMENT_RUN_STATE_INVALID",
+        `Run "${runId}" 竞争迁移 RUNNING→COMPLETED 失败，当前状态 ${latest.status}`,
+        { runId, status: latest.status },
+      );
+    }
     return (await this.getRun(runId))!;
   }
 
@@ -509,7 +686,7 @@ export class DbExperimentRunRepository implements ExperimentRunRepository {
     if (current === "FAILED") return (await this.getRun(runId))!;
     assertRunTransition(runId, current, "FAILED");
     const db = await this.requireDb();
-    await db
+    const result = await db
       .update(researchExperimentRun)
       .set({
         status: "FAILED",
@@ -518,7 +695,24 @@ export class DbExperimentRunRepository implements ExperimentRunRepository {
         durationMs: input.durationMs,
         completedAt: toDate(input.completedAt ?? this.nowIso()),
       })
-      .where(eq(researchExperimentRun.runId, runId));
+      .where(
+        and(
+          eq(researchExperimentRun.runId, runId),
+          inArray(researchExperimentRun.status, ["PENDING", "RUNNING"]),
+        ),
+      );
+    if (affectedRows(result) !== 1) {
+      const latest = await this.requireRow(runId);
+      if ((latest.status as ExperimentRunLifecycleStatus) === "FAILED") {
+        return (await this.getRun(runId))!;
+      }
+      assertRunTransition(runId, latest.status as ExperimentRunLifecycleStatus, "FAILED");
+      throw new ExperimentError(
+        "EXPERIMENT_RUN_STATE_INVALID",
+        `Run "${runId}" 竞争迁移→FAILED 失败，当前状态 ${latest.status}`,
+        { runId, status: latest.status },
+      );
+    }
     return (await this.getRun(runId))!;
   }
 
@@ -537,16 +731,23 @@ export class DbExperimentRunRepository implements ExperimentRunRepository {
 
   async listRuns(filter?: ExperimentRunListFilter): Promise<ExperimentRunRecord[]> {
     const limit = normalizeListLimit(filter?.limit);
+    const offset = normalizeListOffset(filter?.offset);
     const db = await this.requireDb();
+    const conditions = [];
+    if (filter?.experimentId !== undefined) {
+      conditions.push(eq(researchExperimentRun.experimentId, filter.experimentId));
+    }
+    if (filter?.protocolFingerprint !== undefined) {
+      conditions.push(eq(researchExperimentRun.protocolFingerprint, filter.protocolFingerprint));
+    }
+    if (filter?.researchPhase !== undefined) {
+      conditions.push(eq(researchExperimentRun.researchPhase, filter.researchPhase));
+    }
     const base = db.select().from(researchExperimentRun);
-    const rows = await withReadRetry("experimentRuns.listRuns", () =>
-      filter?.experimentId === undefined
-        ? base.orderBy(desc(researchExperimentRun.id)).limit(limit)
-        : base
-            .where(eq(researchExperimentRun.experimentId, filter.experimentId))
-            .orderBy(desc(researchExperimentRun.id))
-            .limit(limit),
-    );
+    const filtered = conditions.length === 0 ? base : base.where(and(...conditions));
+    const ordered = filtered.orderBy(desc(researchExperimentRun.id));
+    const paginated = offset > 0 ? ordered.offset(offset) : ordered;
+    const rows = await withReadRetry("experimentRuns.listRuns", () => paginated.limit(limit));
     const nowIso = this.nowIso();
     return rows.map((row) => mapRunRow(row, nowIso));
   }
@@ -586,5 +787,9 @@ export class DbExperimentRunRepository implements ExperimentRunRepository {
       }
       return map;
     });
+  }
+
+  async listRunsByProtocolFingerprint(protocolFingerprint: string): Promise<ExperimentRunRecord[]> {
+    return this.listRuns({ protocolFingerprint, limit: 200 });
   }
 }

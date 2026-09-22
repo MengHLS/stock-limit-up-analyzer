@@ -1136,6 +1136,14 @@ export const closedLoopRunResultSchema = z.object({
    * 未跑 backtest 阶段（无 `artifacts.tradeSimulationRun`）时为 null / 缺省。
    */
   backtest: backtestRunPayloadSchema.nullable().optional(),
+  /** 本次运行写入「回测历史」的结果；失败时结果仍返回，但必须由页面响亮提示。 */
+  persistence: z
+    .object({
+      persisted: z.boolean(),
+      errorCode: z.string().nullable(),
+      errorMessage: z.string().nullable(),
+    })
+    .optional(),
 });
 export type ClosedLoopRunResult = z.infer<typeof closedLoopRunResultSchema>;
 

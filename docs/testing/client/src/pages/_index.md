@@ -28,7 +28,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 2) 旧 /strategy-editor 仍可达（兼容改写），且不再有第二个策略页面组件
   - 3) 侧边导航指向列表页，且不再指向旧路由
   - 4) 策略深链生成器指向详情路由（不再产出旧地址）
-  - 5) 详情页不承载「全库浏览」：不调 research.strategy.list
+  - 5) 详情页不承载「全库浏览」：不调 strategyDomain.strategy.list
   - 6) 列表页走真实只读端点，且该端点确实挂在真实 appRouter 上
   - 7) 两个页面用到的策略端点全部真实存在
   - 8) 新建草稿不复用模板身份（清空 strategyId，避免变成给既有策略加版本）

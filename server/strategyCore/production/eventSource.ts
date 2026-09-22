@@ -32,6 +32,7 @@
 
 import { StrategyCoreError, type CoreValue } from "../types";
 import type { EventOccurrenceResolver, RuntimeContext } from "../runtime";
+import { exchangeLimitUpPrice } from "../../data/boardRules";
 
 // ---------------------------------------------------------------------------
 // 数据集事件源声明（由装配层给出）
@@ -83,30 +84,37 @@ export interface ProductionEventResolver {
  * 抛错条件（全部响亮）：非事件窗数据集 / 事件类型闭集为空 / `limitUpRatio` 非法。
  */
 export function createDatasetEventResolver(
-  declaration: DatasetEventSourceDeclaration,
+  declaration: DatasetEventSourceDeclaration
 ): ProductionEventResolver {
   if (!declaration.eventAnchored) {
     throw new StrategyCoreError(
       "CORE_DEFINITION_INVALID",
       "数据集事件源声明 eventAnchored=false：该数据集不是事件窗数据集（rd 0 不是事件日），" +
         "拒绝在其上运行事件型策略 —— 静默跑出来的候选没有事件语义。",
-      { declaredBy: declaration.declaredBy },
+      { declaredBy: declaration.declaredBy }
     );
   }
-  const eventTypes = [...new Set(declaration.eventTypes.map((type) => String(type).trim()).filter((type) => type !== ""))];
+  const eventTypes = [
+    ...new Set(
+      declaration.eventTypes
+        .map(type => String(type).trim())
+        .filter(type => type !== "")
+    ),
+  ];
   if (eventTypes.length === 0) {
     throw new StrategyCoreError(
       "CORE_DEFINITION_INVALID",
       "数据集事件源声明缺少事件类型闭集（eventTypes 为空）：无法判定任何事件是否发生。",
-      { declaredBy: declaration.declaredBy },
+      { declaredBy: declaration.declaredBy }
     );
   }
   const ratio = declaration.limitUpRatio;
   if (ratio !== null && (!Number.isFinite(ratio) || ratio <= 0)) {
     throw new StrategyCoreError(
       "CORE_DEFINITION_INVALID",
-      "limitUpRatio 必须是 > 0 的有限数字或 null，实际 " + JSON.stringify(ratio),
-      { declaredBy: declaration.declaredBy },
+      "limitUpRatio 必须是 > 0 的有限数字或 null，实际 " +
+        JSON.stringify(ratio),
+      { declaredBy: declaration.declaredBy }
     );
   }
 
@@ -120,23 +128,31 @@ export function createDatasetEventResolver(
   let notOccurred = 0;
 
   /** 纯判定（**不计数**）—— 计数一律由 `counting` 包一层，避免探针求值放大计数。 */
-  const judge = (eventType: string, context: RuntimeContext): boolean | "UNDECIDABLE" => {
+  const judge = (
+    eventType: string,
+    context: RuntimeContext
+  ): boolean | "UNDECIDABLE" => {
     if (!eventTypes.includes(eventType)) {
       throw new StrategyCoreError(
         "CORE_DEFINITION_INVALID",
-        "事件判定器收到未声明的事件类型 `" + eventType + "`（本数据集声明：" + eventTypes.join("、") + "）" +
+        "事件判定器收到未声明的事件类型 `" +
+          eventType +
+          "`（本数据集声明：" +
+          eventTypes.join("、") +
+          "）" +
           "—— 拒绝静默返回 false（那会把「数据集不支持该事件」伪装成「当日无事件」）。",
-        { eventType },
+        { eventType }
       );
     }
 
-    const anchor = context.visibleData.bars.find((bar) => bar.relativeDay === 0) ?? null;
+    const anchor =
+      context.visibleData.bars.find(bar => bar.relativeDay === 0) ?? null;
     if (anchor === null) {
       // 窗口里没有 rd 0：锚定不成立。这是**结构性问题**（不是数据不足）⇒ 响亮抛错。
       throw new StrategyCoreError(
         "CORE_DEFINITION_INVALID",
         "事件判定：可见窗口内没有相对日 0 的 bar（窗口左边界未覆盖事件日）—— 锚定不成立，拒绝判定。",
-        { eventType },
+        { eventType }
       );
     }
 
@@ -145,15 +161,21 @@ export function createDatasetEventResolver(
 
     const { close, preClose } = anchor;
     if (
-      typeof close !== "number" || !Number.isFinite(close) ||
-      typeof preClose !== "number" || !Number.isFinite(preClose) || preClose <= 0
+      typeof close !== "number" ||
+      !Number.isFinite(close) ||
+      typeof preClose !== "number" ||
+      !Number.isFinite(preClose) ||
+      preClose <= 0
     ) {
       // 无法判定（与 legacy `eventBaselineOf` 返回 null 的行为一致：该证券被剔除）。
       return "UNDECIDABLE";
     }
 
-    const limitUpPrice = preClose * (1 + ratio);
-    return close + EPSILON * Math.abs(limitUpPrice) >= limitUpPrice;
+    const limitUpPrice = exchangeLimitUpPrice(preClose, ratio);
+    return (
+      Math.abs(close - limitUpPrice) <=
+      EPSILON * Math.max(1, Math.abs(limitUpPrice))
+    );
   };
 
   /** 计数包装（**只用于真实决策**；探针走 `resolveQuiet`）。 */
@@ -173,15 +195,20 @@ export function createDatasetEventResolver(
 
   return {
     resolve: counting,
-    resolveQuiet: (eventType, _params, context) => judge(eventType, context) === true,
+    resolveQuiet: (eventType, _params, context) =>
+      judge(eventType, context) === true,
     undecidableCount: () => undecidable,
     occurredCount: () => occurred,
     notOccurredCount: () => notOccurred,
     notes: [
-      "事件判定器口径（生产）：锚定日 = 相对日 0（" + declaration.declaredBy + " 声明该数据集为事件窗）",
+      "事件判定器口径（生产）：锚定日 = 相对日 0（" +
+        declaration.declaredBy +
+        " 声明该数据集为事件窗）",
       ratio === null
         ? "limitUpRatio 未在策略文档声明 ⇒ **运行期不做涨停校验**（锚定日的首板性由数据集定义承担），仅要求锚定 bar 的 close/preClose 可用"
-        : "涨停校验：close >= preClose × (1 + " + String(ratio) + ")（阈值来自策略文档 entry.event.params.limitUpRatio）",
+        : "涨停校验：close == 四舍五入到分的 preClose × (1 + " +
+          String(ratio) +
+          ")（阈值来自策略文档 entry.event.params.limitUpRatio）",
       "「首板性」（rd-1 非涨停）**不在本窗口可验证**，由数据集定义（dataset_definition）承担 —— 如实登记，不伪装成运行期已校验",
     ],
   };

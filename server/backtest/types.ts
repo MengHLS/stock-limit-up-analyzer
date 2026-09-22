@@ -235,6 +235,8 @@ export interface Fill {
   slippageAmount: number;
   /** 用于单笔买入容量约束的参考成交额（千元），必须取自成交时点之前已可知数据。 */
   referenceAmount?: number | null;
+  /** 退出原因（止损 / 止盈 / 时间退出 / 候选退出）。 */
+  reason?: string | null;
 }
 
 /** 持仓（Position）。区分总量 / 可卖 / 冻结（T+1）。 */

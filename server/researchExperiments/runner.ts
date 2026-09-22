@@ -23,16 +23,26 @@
 
 import {
   experimentResultEnvelopeSchema,
+  type ExperimentConfirmatoryGate,
+  type ExperimentAuxiliaryDatasetRequirement,
+  type ExperimentDatasetBinding,
+  type ExperimentDatasetAccess,
   type ExperimentDescriptor,
+  type ExperimentEvaluationWindow,
   type ExperimentArtifactFileSpec,
   type ExperimentResultEnvelope,
   type ExperimentParameterValues,
+  type ExperimentProtocolContext,
   type ExperimentRunOutcome,
 } from "@shared/researchExperimentsContracts";
 import { ExperimentError, toExperimentError } from "./errors";
+import { computeExperimentCodeDigest } from "./codeDigest";
+import { validateConfirmatoryGate } from "./protocol";
 import { assertSafeRelativeName } from "../artifactStorage/objectKey";
 import type { ExperimentDatasetPort } from "./datasetPort";
 import {
+  assertRequirementCodeMatches,
+  assertRequirementRelativeDaysWithinHorizon,
   assertDatasetCodeMatches,
   assertRelativeDaysWithinHorizon,
   assertVersionReady,
@@ -45,6 +55,12 @@ export interface ExperimentRunRequest {
   experimentId: string;
   datasetVersionId: number;
   parameters?: ExperimentParameterValues;
+  /** alias → auxiliary datasetVersionId。 */
+  auxiliaryDatasetVersionIds?: Readonly<Record<string, number>>;
+  /** 平台级事件日期过滤窗口。 */
+  evaluationWindow?: ExperimentEvaluationWindow | null;
+  /** 平台解析后的研究协议。 */
+  protocol?: ExperimentProtocolContext;
 }
 
 /** Runner 依赖（一律注入 ⇒ 单测可用内存替身，不必连真库）。 */
@@ -86,9 +102,17 @@ export interface ExperimentRunDetailedResult {
 export interface PreparedExperimentRun {
   definition: ExperimentDefinition;
   descriptor: ExperimentDescriptor;
+  /** 注册到当前进程的实验定义代码指纹。 */
+  codeDigest: string;
   resolvedParameters: ExperimentParameterValues;
+  evaluationWindow: ExperimentEvaluationWindow | null;
   /** 已解析的 Dataset 事实（避免 `run()` 里再解析一次，浪费一次跨境查询）。 */
   facts: import("./types").ExperimentDatasetFacts;
+  auxiliary: ReadonlyArray<{
+    requirement: ExperimentAuxiliaryDatasetRequirement;
+    facts: import("./types").ExperimentDatasetFacts;
+  }>;
+  datasetBindings: ExperimentDatasetBinding[];
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +356,60 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
     assertDatasetCodeMatches(descriptor, facts);
     assertRelativeDaysWithinHorizon(descriptor, facts);
 
-    return { definition, descriptor, resolvedParameters, facts };
+    const auxiliaryRequirements = descriptor.auxiliaryDatasetRequirements ?? [];
+    const auxiliary: Array<PreparedExperimentRun["auxiliary"][number]> = [];
+    for (const item of auxiliaryRequirements) {
+      const versionId = request.auxiliaryDatasetVersionIds?.[item.alias];
+      if (versionId === undefined) {
+        throw new ExperimentError(
+          "EXPERIMENT_DATASET_VERSION_NOT_FOUND",
+          `辅助 Dataset "${item.alias}" 缺少 datasetVersionId`,
+          { alias: item.alias, datasetCode: item.requirement.datasetCode },
+        );
+      }
+      const auxiliaryFacts = await datasetPort.getVersionFacts(versionId);
+      if (auxiliaryFacts === null) {
+        throw new ExperimentError(
+          "EXPERIMENT_DATASET_VERSION_NOT_FOUND",
+          `辅助 Dataset 版本 ${versionId} 不存在`,
+          { alias: item.alias, datasetVersionId: versionId },
+        );
+      }
+      assertVersionReady(auxiliaryFacts);
+      assertRequirementCodeMatches(descriptor.id, item.requirement, auxiliaryFacts);
+      assertRequirementRelativeDaysWithinHorizon(
+        descriptor.id,
+        item.requirement,
+        auxiliaryFacts,
+      );
+      auxiliary.push({ requirement: item, facts: auxiliaryFacts });
+    }
+
+    const datasetBindings: ExperimentDatasetBinding[] = [
+      {
+        alias: "primary",
+        datasetVersionId: facts.datasetVersionId,
+        datasetCode: facts.datasetCode,
+        datasetVersionLabel: facts.datasetVersionLabel,
+      },
+      ...auxiliary.map((item) => ({
+        alias: item.requirement.alias,
+        datasetVersionId: item.facts.datasetVersionId,
+        datasetCode: item.facts.datasetCode,
+        datasetVersionLabel: item.facts.datasetVersionLabel,
+      })),
+    ];
+
+    return {
+      definition,
+      descriptor,
+      codeDigest: computeExperimentCodeDigest(definition),
+      resolvedParameters,
+      evaluationWindow: request.evaluationWindow ?? null,
+      facts,
+      auxiliary,
+      datasetBindings,
+    };
   }
 
   return {
@@ -366,15 +443,40 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
   async function executeDetailed(request: ExperimentRunRequest): Promise<ExperimentRunDetailedResult> {
       // ---- 执行前：不合规即抛（调用方看到的是参数化领域错误）----
       const prepared = await prepare(request);
-      const { definition, descriptor, resolvedParameters, facts } = prepared;
+      const {
+        definition,
+        descriptor,
+        codeDigest,
+        resolvedParameters,
+        evaluationWindow,
+        facts,
+      } = prepared;
 
-      const { access, stats } = datasetPort.createAccess({ descriptor, facts });
+      const { access, stats, freezeSelection } = datasetPort.createAccess({
+        descriptor,
+        facts,
+        evaluationWindow,
+      });
+      const datasets: Record<string, ExperimentDatasetAccess> = {
+        primary: access,
+      };
+      for (const item of prepared.auxiliary) {
+        datasets[item.requirement.alias] = datasetPort.createAccess({
+          descriptor,
+          requirement: item.requirement.requirement,
+          facts: item.facts,
+          evaluationWindow,
+        }).access;
+      }
       const logs: string[] = [];
       const artifactFiles: ExperimentArtifactFileSpec[] = [];
       const context: ExperimentRunContext = {
         descriptor,
+        protocol: request.protocol ?? null,
         parameters: resolvedParameters,
         dataset: access,
+        datasets,
+        freezeSelection: (eventIds) => freezeSelection(eventIds),
         log: (message: string) => {
           if (logs.length < MAX_EXPERIMENT_LOG_LINES) logs.push(message);
         },
@@ -398,6 +500,7 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
       const startedAt = now();
       let payload: ExperimentResultPayload | null = null;
       let envelope: ExperimentResultEnvelope | null = null;
+      let confirmatoryGate: ExperimentConfirmatoryGate | undefined;
       let failure: ExperimentError | null = null;
 
       try {
@@ -415,6 +518,13 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
             datasetStartDate: facts.startDate,
             datasetEndDate: facts.endDate,
             computationVersion: descriptor.version,
+            experimentCodeDigest: codeDigest,
+            researchPhase: request.protocol?.phase ?? "EXPLORATORY",
+            protocolFingerprint: request.protocol?.protocolFingerprint ?? null,
+            evaluationWindow,
+            ...(prepared.datasetBindings.length > 1
+              ? { datasetBindings: prepared.datasetBindings }
+              : {}),
           },
           parameters: resolvedParameters,
           sampleSummary: payload.sampleSummary,
@@ -423,8 +533,17 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
           ...(payload.distributions !== undefined ? { distributions: [...payload.distributions] } : {}),
           ...(payload.comparisons !== undefined ? { comparisons: [...payload.comparisons] } : {}),
           ...(payload.charts !== undefined ? { charts: [...payload.charts] } : {}),
+          ...(payload.confirmatoryGate !== undefined
+            ? { confirmatoryGate: payload.confirmatoryGate }
+            : {}),
           ...(payload.customPayload !== undefined ? { customPayload: payload.customPayload } : {}),
         };
+        confirmatoryGate = payload.confirmatoryGate;
+        validateConfirmatoryGate({
+          phase: request.protocol?.phase ?? "EXPLORATORY",
+          protocolFingerprint: request.protocol?.protocolFingerprint ?? null,
+          gate: confirmatoryGate,
+        });
         validateExperimentResultEnvelope(envelope, descriptor.id);
         const custom = definition.resultSchema.safeParse(payload.customPayload);
         if (!custom.success) {
@@ -469,6 +588,11 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
             maxPostRelativeDayRead: stats.maxPostRelativeDayRead,
             decisionOffsetDays: descriptor.datasetRequirement.decisionOffsetDays,
             forwardDataRead: stats.postRowCount > 0,
+            evaluationWindow,
+            researchPhase: request.protocol?.phase ?? "EXPLORATORY",
+            protocolFingerprint: request.protocol?.protocolFingerprint ?? null,
+            selectionFrozen: stats.selectionFrozen,
+            selectedEventCount: stats.selectedEventCount,
             eventScanPolicy: stats.eventScanPolicy,
             eventScanLimit: stats.eventScanLimit,
             eventPageCount: stats.eventPageCount,

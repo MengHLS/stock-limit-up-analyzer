@@ -153,6 +153,18 @@ export interface SimulationConfig {
     readonly fixedAmount: number | null;
   };
   /**
+   * 策略声明的退出政策。
+   *
+   * 语义在 C-14.1 中固定为：
+   * - STOP_LOSS / TAKE_PROFIT：盘中触发，按触发价卖出全部可卖份额；
+   * - TIME_EXIT：持有满 N 个交易日后的收盘触发，下一交易日开盘卖出。
+   */
+  readonly exitPolicy?: {
+    readonly stopLossRatio: number | null;
+    readonly takeProfitRatio: number | null;
+    readonly maxHoldingDays: number | null;
+  };
+  /**
    * BACKTEST-002（B-05）— 成交量为 0 时的执行政策。
    *
    * `REJECT`（缺省，保守）= 执行日 `volume` 为 0 / 缺失 / 非有限 ⇒ **不可成交**（拒单）；
@@ -184,6 +196,12 @@ export interface SimulationConfigSnapshot {
     readonly blockLimitDownSell: boolean;
   };
   readonly allowPartialFill: boolean;
+  /** 策略退出政策快照（null = 未声明）。 */
+  readonly exitPolicy: {
+    readonly stopLossRatio: number | null;
+    readonly takeProfitRatio: number | null;
+    readonly maxHoldingDays: number | null;
+  };
   /** 是否启用 T+1（STEP 8 默认 true）。 */
   readonly tPlus1: boolean;
   /** 一手股数（= cost.lotSize，STEP 8 成交约束使用）。 */

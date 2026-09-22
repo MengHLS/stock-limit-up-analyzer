@@ -128,6 +128,7 @@ export function artifactRefFromMetadata(args: {
 export interface BuildRunManifestInput {
   experimentId: string;
   experimentVersion: string;
+  experimentCodeDigest: string;
   runId: string;
   datasetVersionId: number;
   createdAt: string;
@@ -143,6 +144,7 @@ export function buildRunManifest(input: BuildRunManifestInput): ExperimentRunMan
     schemaVersion: EXPERIMENT_MANIFEST_SCHEMA_VERSION,
     experimentCode: input.experimentId,
     experimentVersion: input.experimentVersion,
+    experimentCodeDigest: input.experimentCodeDigest,
     runId: input.runId,
     datasetVersionId: input.datasetVersionId,
     createdAt: input.createdAt,

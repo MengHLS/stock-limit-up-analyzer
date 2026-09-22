@@ -40,6 +40,7 @@ export interface RelativeBar {
   high: number | null;
   low: number | null;
   close: number | null;
+  preClose: number | null;
   volume: number | null;
   amount: number | null;
 }
@@ -119,6 +120,7 @@ export function buildRawBar(
     high: bar.high,
     low: bar.low,
     close: bar.close,
+    preClose: bar.preClose,
     volume: bar.volume,
     amount: bar.amount,
   };

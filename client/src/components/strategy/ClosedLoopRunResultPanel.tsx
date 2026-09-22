@@ -714,6 +714,19 @@ export function ClosedLoopRunResultPanel({
         </div>
       )}
 
+      {result.persistence !== null && !result.persistence.persisted && (
+        <div className="mt-3 rounded border border-red-300 bg-red-50 p-3 text-xs text-red-800">
+          <p className="flex items-center gap-1.5 font-medium">
+            <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+            回测结果未写入「回测历史」
+          </p>
+          <p className="mt-1 font-mono">
+            {result.persistence.errorCode ?? "CLOSED_LOOP_PERSIST_FAILED"}
+          </p>
+          <p className="mt-1">{result.persistence.errorMessage ?? "留档失败，但本次回测结果仍然有效。"}</p>
+        </div>
+      )}
+
       {/* 🔴 策略产出（真实回测产物）—— 放在装配摘要之后：0 成交时用户需要先看到「数据从哪来」 */}
       {result.backtest !== null && (
         <StrategyOutputSection

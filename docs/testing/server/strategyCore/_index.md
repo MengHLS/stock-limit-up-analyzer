@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/strategyCore
 
-- 测试文件 **11** 个 ｜ 用例声明 **163** 个
+- 测试文件 **11** 个 ｜ 用例声明 **164** 个
 - 涉及源码目录：`server/data/` · `server/research/` · `server/research/framework/` · `server/research/strategySchema/` · `server/strategyCore/` · `server/strategyCore/production/` · `shared/` · `tests/server/strategyCore/`
 
 ## 怎么跑
@@ -102,7 +102,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 空表达式 / 括号不匹配 / 末尾多余记号都被拒
 
 ### `tests/server/strategyCore/production/barWindowAndEvent.test.ts`
-- 192 行 ｜ 用例声明 14 ｜ describe 2
+- 253 行 ｜ 用例声明 15 ｜ describe 2
 - 被测源码：`server/data/index.ts` · `server/strategyCore/index.ts` · `server/strategyCore/production/index.ts`
 - 单跑：`pnpm exec vitest run tests/server/strategyCore/production/barWindowAndEvent.test.ts`
 - 用例树：
@@ -113,7 +113,8 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 说明文案里如实登记了「窗口左边界未预热会偏」这条边界
   - 能力声明如实：1D / OHLCV / 不编造 eventCount
 - **eventSource — 事件判定器（生产注入）**
-  - 锚定日是涨停（close ≥ preClose×1.1）⇒ 事件发生
+  - 锚定日是分价涨停（close 等于四舍五入后的 preClose×1.1）⇒ 事件发生
+  - 不足 10% 的分价涨停保留，高于涨停价的异常值不算事件
   - 锚定日未涨停 ⇒ 明确「未发生」（false，且与「无法判定」分开计数）
   - 锚定 bar 缺 preClose ⇒ 记「无法判定」并返回 false（与 legacy 基准缺失即剔除一致）
   - 文档未声明 limitUpRatio ⇒ 不做涨停校验（不替它猜 10%）

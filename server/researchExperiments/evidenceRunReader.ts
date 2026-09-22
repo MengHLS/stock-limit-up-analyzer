@@ -24,7 +24,12 @@
  *     **已经完成的** EXP-001 / EXP-002」所要求的形态。
  */
 
-import type { ExperimentResultEnvelope } from "@shared/researchExperimentsContracts";
+import type {
+  ExperimentConfirmatoryGate,
+  ExperimentEvaluationWindow,
+  ExperimentResearchPhase,
+  ExperimentResultEnvelope,
+} from "@shared/researchExperimentsContracts";
 import type { ExperimentRunService } from "./persistence/runService";
 
 /** 从持久化事实读回的一次运行（只保留「证据」需要的面）。 */
@@ -33,6 +38,11 @@ export interface PersistedEvidenceRun {
   /** = `research_experiment_run.experimentId`（`<group>/<key>`）。 */
   readonly experimentCode: string;
   readonly experimentVersion: string;
+  readonly researchPhase: ExperimentResearchPhase | null;
+  readonly protocolFingerprint: string | null;
+  readonly parentRunId: string | null;
+  readonly evaluationWindow: ExperimentEvaluationWindow | null;
+  readonly confirmatoryGate: ExperimentConfirmatoryGate | null;
   readonly datasetVersionId: number | null;
   readonly datasetCode: string | null;
   readonly datasetVersionLabel: string | null;
@@ -49,9 +59,22 @@ export interface PersistedEvidenceRun {
   readonly resultUnavailableReason: string | null;
 }
 
+/** 只读窗口元数据；用于确认性证据的数据隔离审计，不读取 Result。 */
+export interface PersistedEvidenceRunWindow {
+  readonly runId: string;
+  readonly experimentCode: string;
+  readonly researchPhase: ExperimentResearchPhase | null;
+  readonly parentRunId: string | null;
+  readonly evaluationWindow: ExperimentEvaluationWindow | null;
+  readonly datasetVersionId: number | null;
+  readonly status: string;
+}
+
 export interface ExperimentEvidenceRunReader {
   /** 读一条持久化 Run；**不存在** ⇒ `null`（不抛错 —— 「没找到」与「读失败」要分开）。 */
   read(runId: string): Promise<PersistedEvidenceRun | null>;
+  /** 读同一实验的全部窗口元数据；用于拒绝已被历史 Run 看过的 Holdout。 */
+  listByExperiment(experimentCode: string): Promise<PersistedEvidenceRunWindow[]>;
 }
 
 function asString(value: unknown): string | null {
@@ -99,6 +122,11 @@ export function createPersistedEvidenceRunReader(deps: {
         runId: record.runId,
         experimentCode: record.experimentId,
         experimentVersion: record.experimentVersion,
+        researchPhase: record.researchPhase,
+        protocolFingerprint: record.protocolFingerprint,
+        parentRunId: record.parentRunId,
+        evaluationWindow: record.evaluationWindow,
+        confirmatoryGate: record.confirmatoryGate,
         datasetVersionId: asNumber(record.datasetVersionId),
         datasetCode: asString(record.datasetCode),
         datasetVersionLabel: asString(record.datasetVersionLabel),
@@ -110,6 +138,29 @@ export function createPersistedEvidenceRunReader(deps: {
         resultAvailable,
         resultUnavailableReason,
       };
+    },
+    async listByExperiment(experimentCode) {
+      const pageSize = 200;
+      const runs: PersistedEvidenceRunWindow[] = [];
+      for (let offset = 0; ; offset += pageSize) {
+        const page = await deps.runService.listRuns({
+          experimentId: experimentCode,
+          limit: pageSize,
+          offset,
+        });
+        runs.push(
+          ...page.map((record) => ({
+            runId: record.runId,
+            experimentCode: record.experimentId,
+            researchPhase: record.researchPhase,
+            parentRunId: record.parentRunId,
+            evaluationWindow: record.evaluationWindow,
+            datasetVersionId: asNumber(record.datasetVersionId),
+            status: record.status,
+          })),
+        );
+        if (page.length < pageSize) return runs;
+      }
     },
   };
 }

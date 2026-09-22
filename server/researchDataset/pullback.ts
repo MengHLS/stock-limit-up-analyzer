@@ -17,7 +17,7 @@
  *     `d < N` 时 T+d+1..T+N 的数据仍然加载（供研究侧观察日变量用），但**不参与**入池判定。
  */
 
-import { limitUpPrice, resolveLimitRules } from "../data/boardRules";
+import { exchangeLimitUpPrice, resolveLimitRules } from "../data/boardRules";
 import type { CanonicalMarketBar } from "../data/types";
 import type { PullbackScreenCondition, PullbackTargetType } from "./types";
 
@@ -59,13 +59,15 @@ export interface WindowBar {
  * 🔴 这是样本资格的信息边界，**唯一实现源**：任何调用方（含绕过 validate 的脚本）都必须经此，
  * 不允许把非法值静默夹成整窗或空窗 —— 前者保留缺陷、后者是「没数据」伪装成「无命中」。
  */
-export function resolveDecisionOffsetDays(condition: PullbackScreenCondition): number {
+export function resolveDecisionOffsetDays(
+  condition: PullbackScreenCondition
+): number {
   const d = condition.decisionOffsetDays;
   const n = condition.observationWindowDays;
   if (!Number.isInteger(d) || d < 1 || d > n) {
     throw new Error(
-      `pullback.decisionOffsetDays 必须是 [1, observationWindowDays=${String(n)}] 的整数，实得 ${String(d)}。`
-        + "该字段是样本资格的唯一信息边界，不允许缺省（缺省即回到「整窗筛选」的 look-ahead 行为）。",
+      `pullback.decisionOffsetDays 必须是 [1, observationWindowDays=${String(n)}] 的整数，实得 ${String(d)}。` +
+        "该字段是样本资格的唯一信息边界，不允许缺省（缺省即回到「整窗筛选」的 look-ahead 行为）。"
     );
   }
   return d;
@@ -95,7 +97,7 @@ export interface PullbackTargetResult {
 /** 解析目标位价格（依赖首板事件 T0 数据）。 */
 export function resolveTargetPrice(
   event: FirstBoardEvent,
-  targetType: PullbackTargetType,
+  targetType: PullbackTargetType
 ): number | null {
   switch (targetType) {
     case "limitPrice":
@@ -116,7 +118,7 @@ export function screenSingleTarget(
   event: FirstBoardEvent,
   windowBars: readonly WindowBar[],
   targetType: PullbackTargetType,
-  tolerancePercent: number,
+  tolerancePercent: number
 ): PullbackTargetResult {
   const targetPrice = resolveTargetPrice(event, targetType);
   if (targetPrice === null || targetPrice <= 0) {
@@ -179,9 +181,11 @@ export function screenPullback(
   event: FirstBoardEvent,
   windowBars: readonly WindowBar[],
   targets: readonly PullbackTargetType[],
-  tolerancePercent: number,
+  tolerancePercent: number
 ): PullbackTargetResult[] {
-  return targets.map((target) => screenSingleTarget(event, windowBars, target, tolerancePercent));
+  return targets.map(target =>
+    screenSingleTarget(event, windowBars, target, tolerancePercent)
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +197,7 @@ export function computeMa5FromFacts(
   code: string,
   t0Date: string,
   priceByDate: ReadonlyMap<string, ReadonlyMap<string, CanonicalMarketBar>>,
-  calendarDates: readonly string[],
+  calendarDates: readonly string[]
 ): number | null {
   const idx = calendarDates.indexOf(t0Date);
   if (idx < 0) return null;
@@ -214,11 +218,15 @@ export function buildWindowBars(
   t0Date: string,
   priceByDate: ReadonlyMap<string, ReadonlyMap<string, CanonicalMarketBar>>,
   calendarDates: readonly string[],
-  observationWindowDays: number,
+  observationWindowDays: number
 ): WindowBar[] {
   const idx = calendarDates.indexOf(t0Date);
   const bars: WindowBar[] = [];
-  for (let j = idx + 1; j < calendarDates.length && j <= idx + observationWindowDays; j += 1) {
+  for (
+    let j = idx + 1;
+    j < calendarDates.length && j <= idx + observationWindowDays;
+    j += 1
+  ) {
     const date = calendarDates[j]!;
     const bar = priceByDate.get(date)?.get(code);
     bars.push({ tradeDate: date, low: bar?.low ?? null });
@@ -236,14 +244,17 @@ export function buildFirstBoardEvent(
     "code" | "tradeDate" | "open" | "high" | "low" | "close" | "preClose"
   >,
   priceByDate: ReadonlyMap<string, ReadonlyMap<string, CanonicalMarketBar>>,
-  calendarDates: readonly string[],
+  calendarDates: readonly string[]
 ): FirstBoardEvent | null {
   const code = row.code;
   if (!code) return null;
   const rules = resolveLimitRules(code);
   const limitPrice =
-    rules.supported && rules.limitUpRatio !== null && row.preClose !== null && row.preClose > 0
-      ? limitUpPrice(row.preClose, rules.limitUpRatio)
+    rules.supported &&
+    rules.limitUpRatio !== null &&
+    row.preClose !== null &&
+    row.preClose > 0
+      ? exchangeLimitUpPrice(row.preClose, rules.limitUpRatio)
       : null;
   return {
     securityCode: code,
@@ -287,7 +298,7 @@ export function screenFirstBoardRow(
   >,
   priceByDate: ReadonlyMap<string, ReadonlyMap<string, CanonicalMarketBar>>,
   calendarDates: readonly string[],
-  condition: PullbackScreenCondition,
+  condition: PullbackScreenCondition
 ): PullbackScreenVerdict {
   const decisionOffsetDays = resolveDecisionOffsetDays(condition);
   const event = buildFirstBoardEvent(row, priceByDate, calendarDates);
@@ -319,17 +330,25 @@ export function screenFirstBoardRow(
     event.eventDate,
     priceByDate,
     calendarDates,
-    condition.observationWindowDays,
+    condition.observationWindowDays
   );
   // 🔴 信息边界：只用 T+1..T+d 判样本资格。`loadedBars` 的其余部分（T+d+1..T+N）
   // 只供研究侧观察日变量使用，**绝不**进入入池判定。
   const decisionBars = loadedBars.slice(0, decisionOffsetDays);
-  const missingDates = decisionBars.filter((b) => b.low === null).map((b) => b.tradeDate);
-  const windowComplete = decisionBars.length === decisionOffsetDays && missingDates.length === 0;
+  const missingDates = decisionBars
+    .filter(b => b.low === null)
+    .map(b => b.tradeDate);
+  const windowComplete =
+    decisionBars.length === decisionOffsetDays && missingDates.length === 0;
 
   const results = windowComplete
-    ? screenPullback(event, decisionBars, condition.targetTypes, condition.tolerancePercent)
-    : condition.targetTypes.map((targetType) => ({
+    ? screenPullback(
+        event,
+        decisionBars,
+        condition.targetTypes,
+        condition.tolerancePercent
+      )
+    : condition.targetTypes.map(targetType => ({
         targetType,
         targetPrice: resolveTargetPrice(event, targetType),
         hit: false,
@@ -347,6 +366,6 @@ export function screenFirstBoardRow(
     windowComplete,
     missingDates,
     results,
-    matched: windowComplete && results.some((r) => r.hit),
+    matched: windowComplete && results.some(r => r.hit),
   };
 }

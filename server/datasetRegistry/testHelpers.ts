@@ -77,6 +77,7 @@ export function makeFakeIO(
     loadTradingDays: async () => tradingDays,
     loadSecurityIndexes: async () => {},
     resolveStSync: () => "UNKNOWN",
+    resolveSuspensionSync: () => ({ status: "UNKNOWN", source: "UNKNOWN" }),
     resolveSt: async () => "UNKNOWN",
     resolveIndustrySync: () => null,
     fetchLimitUpCandidateBars: notUsed as never,

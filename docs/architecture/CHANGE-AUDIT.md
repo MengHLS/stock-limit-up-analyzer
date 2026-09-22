@@ -635,3 +635,147 @@
 - **Baseline Impact**：**保持 `v2.0.0`，未升版本**。依据：零 Domain 增删、零 migration、零 `shared/**` 与 `client/**` 改动、零运行时语义变化（纯文档坐标整理）。
 - **GLOBAL AUDIT REQUIRED**：**NONE**。
 - **Evidence-Hygiene Note**：🔴 记录本轮**判据自身写错 2 条（0 条产品缺陷）**：⒜ 引用扫描第 1 版把「stem 命中」当引用，导致 `acceptance.md` 这类**通用 basename** 因为文中出现 `acceptance` 一词而让 11 个文件全部「被引用」⇒ 改为**标识符正则 + 路径/文件名/词干三级键**后重扫；⒝ 首版把 `git status --porcelain -M` 的输出当含相似度的 `R100` 文本（porcelain v1 **不含**分值）⇒ 断言恒假报 FAIL，改用 `git diff --cached --raw` 的 **blob sha 相等**判「零改写」，比看分值更强。
+
+## 2026-09-21 · Independent Experiment 硬化（异步执行 / 代码指纹 / PIT 冻结 / 资源配额）
+
+- **Task**：现有独立实验体系的可靠性补强。目标不是新增研究问题，而是把 Run 执行、身份、样本冻结与资源边界补到可持续运行。
+- **Changed Domains**：`Independent Experiment`（既有）内的 Runner / Dataset Port / Run Repository / Artifact Publisher / tRPC / 前端运行页；`DB migration`（新增 `0048`）；`tests`（新增 hardening 与 artifact limit 测试）。
+- **Changed Files**：`shared/researchExperimentsContracts.ts`（代码指纹、配额常量、`freezeSelection`、错误码与结果字段）；`server/researchExperiments/codeDigest.ts`（新增）；`server/researchExperiments/persistence/runQueue.ts`（新增）；`datasetPort.ts` / `runner.ts` / `runRepository.ts` / `runService.ts` / `artifactPublisher.ts` / `runManifest.ts` / `router.ts`；`client/src/pages/researchExperiments/ExperimentDetail.tsx` / `RunDetail.tsx`；`drizzle/schema.ts` + `drizzle/0048_experiment_run_code_digest.sql`；`tests/server/researchExperiments/**`。
+- **Changed Contracts**：新增 `experimentCodeDigest`；新增 `EXPERIMENT_RESULT_JSON_MAX_BYTES` / 表格与 Artifact 配额常量；新增 `EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED` / `EXPERIMENT_SELECTION_NOT_FROZEN`；`ExperimentRunContext.freezeSelection(eventIds)` 成为读取 `observation()` 前的 PIT 前置。旧 Run / 旧 Manifest 的代码指纹字段可空，保持历史可读。
+- **Changed DB**：新增 migration `0048`，为 `research_experiment_run` 增加可空列 `experimentCodeDigest varchar(96)`。只读 dry-run 实测 `pass=true / executed=0 / skippedExisting=1`，该列已由并行工作应用到真实库；本轮未重复执行 DDL。
+- **Changed Execution Path**：新增 `researchExperiments.startRun`：创建 PENDING Run 后立即返回，实际执行进入进程内有界并发队列；原同步 `run` 保留给测试与维护。后端生命周期异常时，后台包装器会尝试把 PENDING/RUNNING 收敛为 FAILED。`observation()` 现在要求先调用 `freezeSelection()`；冻结空集时允许“无观测数据”的空结果路径，但不会读取未来行情。
+- **Potential Baseline Drift**：
+  - 当前队列是**单进程队列**，进程退出会丢失待执行任务，多实例部署不成立；长期 Run 仍依赖 `reconcileRun` 或后续持久化任务系统。
+  - `experimentCodeDigest` 覆盖 descriptor、`run()` 源码与 `resultSchema.toString()`，但不覆盖被引用的外部 helper 或依赖包；后者仍需版本治理或构建产物指纹。
+  - `freezeSelection` 目前只冻结事件 ID 集合，实验仍可能在冻结后使用 observation 计算排除项；完整“样本选择阶段不得读取未来数据”的语义需要后续双阶段执行器。
+  - Run 历史仍是固定上限查询，尚无 cursor 分页；跨 Run 比较和证据目录仍未实现。
+- **Regression Result**：`pnpm run check` = **exit 0**；`pnpm run build` = **exit 0**；`pnpm exec vitest run tests/server/researchExperiments` = **16 文件 / 310 例全绿 / exit 0**；`pnpm run test:changed` = **4 个失败文件 / 11 例**，全部是文档登记的环境依赖基线（`marketData` / `limitUp` / `limitUp.watch` / `dataHealth`），**零新增失败文件**。
+- **Baseline Impact**：新增 tRPC 端点、shared 可选字段、DB 可空列和运行策略，均为**加法式**；既有实验结果读取兼容。DB 列已确认存在；正式验收仍需做一次真实异步 Run + MinIO 产物 E2E。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（无 Domain 删除、无既有计算口径改写；未执行 DB migration）。
+- **Evidence-Hygiene Note**：修正了一处测试判据错误：上传第二个对象失败时，实际只应清理第一个已成功写入的 `result.json`，不能把失败的 key 也计入清理数量；已按真实写入顺序收紧断言。
+
+## 2026-09-21 · 策略退出一致性 / 板块规则 / 回测留档可见性 / Run 分页
+
+- **Task**：`ST-01`、`ST-02`（K4 部分）、`ST-03`、`EX-09`。
+- **Changed Domains**：`Strategy execution`、`Backtest simulator`、`Research run persistence`、`Independent experiment history UI`。
+- **Changed Files**：`server/runWorkbenchAssembly/exitPolicy.ts`（新增）；`server/runWorkbenchAssembly/{assemble,errors}.ts`；`server/research/simulator/{types,validate,plan,engine}.ts`；`server/backtest/{types,portfolio}.ts`；`server/research/closedLoopWiring/executors.ts`；`server/researchRunRouter.ts`；`shared/researchContracts.ts`；`server/researchExperiments/{router,persistence/runRepository}.ts`；`client/src/adapters/closedLoopRunAdapter.ts`、`client/src/components/strategy/ClosedLoopRunResultPanel.tsx`、`client/src/pages/researchExperiments/ExperimentDetail.tsx`。
+- **Changed Contracts**：`ClosedLoopRunResult.persistence` 新增可选持久化事实；`getExperiment` 支持 `runOffset`，`listRuns` 支持 `offset`；`SimulationConfig.exitPolicy` 进入模拟配置与快照。
+- **Changed DB**：**零 DDL**；migration 仍至 `0048`。复用既有 `closed_loop_backtest_run` 的 JSON 载荷承载 `persistence`。
+- **Changed Execution Path**：`STOP_LOSS` / `TAKE_PROFIT` 由 `INTRADAY` 的 bar high/low 触发，卖出全部可卖份额；`TIME_EXIT` 在收盘触发、下一交易日开盘卖出；`Trade.reason` 记录四种退出原因。闭环回测按 Dataset 行把代码前缀 / 交易所映射为 board 后注入模拟器。留档函数返回 `{persisted,errorCode,errorMessage}`，失败不再静默。
+- **Potential Baseline Drift**：`K2` 公司行为复权仍未进入模拟器；单笔成本在盘中退出中按现有执行模型和成本口径计算；旧 Run 结果没有 `persistence` 字段，前端按“未知”处理。Run 历史目前是 offset 分页，不是强一致 keyset cursor。
+- **Regression Result**：`pnpm run check` exit 0；`pnpm run build` exit 0；定向测试 `426 passed`；真实 DB + MinIO 异步实验 `RUN-20260921-A0E433D0` 在 `34027ms` 后 `COMPLETED`，Result / Manifest / 2 个产物可读；`test:changed` 中与本次相关测试均通过，剩余失败为既有环境依赖基线。
+- **Baseline Impact**：新增可选字段与执行政策，旧结果可读；已产生新的真实交易语义，后续参数搜索必须重新运行，不能沿用旧回测结论。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（无表删除、无历史数据改写；复权缺口显式保留）。
+- **Evidence-Hygiene Note**：时间退出初版会在“只有强制退出、没有候选意图”的日期误把其它持仓当候选退出；已增加 `forcedOnly` 分支与纯函数测试钉死。
+
+## 2026-09-21 · `first-board-pullback/decision-forward-study` 独立实验建立
+
+- **Task**：新增决策时点后续收益实验，验证 EXP-001 的路径分组在 T+k 决策之后是否仍有可观察差异。
+- **Changed Domains**：`Independent Experiment`（新增实验定义、结果组装与页面）；`client` 页面注册；`tests`；`docs`。
+- **Changed Files**：新增 `research-experiments/first-board-pullback/decision-forward-study/{experiment,result,page}.ts(x)` 与 `README.md`；更新 `research-experiments/manifest.ts`、`research-experiments/README.md`、`client/src/researchExperiments/pages.ts`；新增 `tests/server/researchExperiments/decisionForwardStudy.test.ts`。
+- **Changed Contracts**：**无平台契约改动**。新实验复用既有 `ExperimentDefinition`、`freezeSelection`、Dataset Port、Result Envelope、Artifact 与页面接口。
+- **Changed DB**：**零 DDL / 零 DML**。仅新增代码定义，尚未产生真实 Run。
+- **Changed Execution Path**：新实验严格按 `T+k 收盘 -> T+h 收盘` 计算收益，窗口为 `rd ∈ [k+1, h]`；核心样本只要求决策路径 `rd=1..max(k)` 齐备，远期视界不足按格子独立计入 `availableCount`。默认输出不破 / 破位、回撤深度分桶、20bps 成本后净收益、均值近似 95% CI、分年度结果；不输出最优日、最优视界、策略或候选。
+- **Potential Baseline Drift**：收益仍是收盘到收盘；使用统一 20bps 成本敏感性参数，不是完整执行模型；未处理公司行为、涨跌停不可成交、停牌、整手和冲击成本；Dataset 仅覆盖沪深主板；均值 CI 未控制多重比较与重叠观测。
+- **Regression Result**：`pnpm run check` exit 0；`pnpm run build` exit 0；`tests/server/researchExperiments` **17 文件 / 315 例全绿**。
+- **Baseline Impact**：纯新增实验，未改既有实验和核心计算；正式使用前需运行一次真实 Dataset `390002` Run。
+- **GLOBAL AUDIT REQUIRED**：**NONE**。
+
+## 2026-09-21 · `RESEARCH-PROTOCOL-PROVIDER-GATE-001`（Research Protocol / Dataset Provider / Confirmatory Gate）
+
+- **Task**：补齐确认性研究的三项架构能力：探索 / 观察 / Holdout 阶段锁、脱离单一 `first_limit_pullback` 的 Dataset Provider、以及正式策略只接受 Holdout 通过证据的准入 Gate。
+- **Changed Domains**：`Independent Experiment`（Runner / Dataset Port / Run 持久化 / tRPC / 实验详情与 Run 详情）；`Strategy Bridge`（证据准入）；`Shared Contracts`；`DB migration`（新增 `0049`）；`tests` / `docs`。
+- **Changed Files**：新增 `server/researchExperiments/protocol.ts`、`server/researchExperiments/datasetProvider.ts`、`drizzle/0049_research_protocol_gate.sql`、`tests/server/researchExperiments/protocolGate.test.ts`、`tests/server/researchExperiments/datasetProvider.test.ts`；修改 `shared/researchExperimentsContracts.ts`、`server/researchExperiments/{datasetPort,defaults,registry,runner,evidenceRunReader,strategyBridge}.ts`、`server/researchExperiments/persistence/{runRepository,runService}.ts`、`server/research/strategyCandidate/researchEvidence.ts`、`client/src/pages/researchExperiments/{ExperimentDetail,RunDetail}.tsx`、`drizzle/schema.ts`、`research-experiments/first-board-pullback/decision-forward-study/**` 与对应测试 / 文档。
+- **Changed Contracts**：新增 `EXPLORATORY / OBSERVATION / HOLDOUT`、协议输入与平台计算的 `protocolFingerprint`、Observation / Holdout 窗口、`parentRunId`、Confirmatory Gate、`datasetBindings` 与 auxiliary Dataset 声明；`runExperiment` 新增 `auxiliaryDatasetVersionIds` 和 `protocol`，`getExperiment` / `listRuns` 增加 offset 分页。旧 Run / Manifest 的协议字段保持可空，历史数据按 Exploratory 读取。
+- **Changed DB**：新增 migration `0049`，为 `research_experiment_run` 增加 `researchPhase`、`protocolId`、`protocolVersion`、`protocolFingerprint`、`parentRunId`、`evaluationStartDate`、`evaluationEndDate`、`datasetBindingsJson`、`confirmatoryGateJson` 9 列，并新增协议 / 父 Run 2 个索引。真实库首次执行为 `11 executed / pass=true`，幂等复跑为 `11 skipped / pass=true`。
+- **Changed Execution Path**：`OBSERVATION` 只接受 `OBSERVATION_READY` 或 `INSUFFICIENT`（`PASS` / `FAIL` 均拒绝）；`HOLDOUT` 必须引用同实验、已 `COMPLETED`、Gate 为 `OBSERVATION_READY` 的 Observation Run，并冻结协议指纹、主 / 辅助 Dataset 绑定、代码指纹与参数。同一协议指纹只允许进入一次 Holdout，进入后不得补 Observation。Dataset 事件读取按评估窗口真实过滤；策略桥只接受 `HOLDOUT + PASS + 同协议指纹` 的证据，Exploratory、非 PASS、协议不一致均响亮拒绝。
+- **Potential Baseline Drift**：
+  - Dataset Provider 扩展点已经打开，但生产装配当前只注册 `first_limit_pullback`；指数、行业、Market Regime 等第二数据源仍需逐项实现 Provider 与不可变版本后才能进入同一协议。
+  - 多 Dataset 结果已记录 primary + auxiliary binding，但现有实验尚未声明第二数据源，因此还没有真实的跨 Dataset 研究 Run。
+  - 阶段锁依赖平台计算的协议指纹与 Run 表事实；它约束的是“同一 Dataset、同一代码、同一参数、同一窗口”的一次性 Holdout，不替代未来数据、按日期聚类 Bootstrap、真实执行模型等统计与交易口径验证。
+  - Holdout 的“一次”锁是应用层前置校验加数据库索引，不是数据库唯一约束；并发创建同一指纹的 Holdout 仍需依靠当前单进程写路径，多实例部署前应补事务级唯一性。
+- **Regression Result**：`pnpm run check` exit 0；`pnpm run build` exit 0；`pnpm exec vitest run tests/server/researchExperiments` **19 文件 / 325 例全绿**；migration 真实库幂等复跑通过；`test:changed` 仅命中登记的 4 个环境依赖基线失败文件，零新增失败文件；文档测试、`git diff --check` 与 EOL 漂移检查通过。
+- **Baseline Impact**：加法式契约、可空数据库列与新增准入规则；既有 Exploratory Run 和历史结果继续可读。正式策略的准入语义收紧为 `HOLDOUT + PASS + 同协议指纹`，不再允许探索或观察证据直接转策略。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（无 Domain 删除、无历史结果口径改写、无 destructive migration）。
+
+## 2026-09-22 · `RESEARCH-PROTOCOL-HOLDOUT-ISOLATION-001`（确认性 Holdout 数据隔离 + 真实独立实验运行）
+
+- **Task**：执行上一阶段约定的「首板后回踩决策时点后续收益」确认性实验，并验证新 Protocol / Gate 是否能安全支撑 Observation → Holdout。真实运行暴露出“窗口已被探索 Run 看过”这一关键缺口，本轮完成隔离门禁修复。
+- **Changed Domains**：`Independent Experiment`（协议启动与 Run 读回）；`Strategy Bridge`（Holdout 数据隔离准入）；`Persistence`（DATE 字段读回）；`Shared Contracts`；`tests` / `evidence` / `docs`。
+- **Changed Files**：`server/researchExperiments/protocol.ts`（Holdout 污染检测纯函数）；`server/researchExperiments/persistence/runService.ts`（启动前污染闸 + Run 详情隔离审计）；`server/researchExperiments/evidenceRunReader.ts`（同实验窗口元数据读口）；`server/researchExperiments/strategyBridge.ts`（建策略前二次隔离审计）；`server/researchExperiments/persistence/runRepository.ts`（DATE → `YYYY-MM-DD` 读回修复）；`client/src/pages/researchExperiments/RunDetail.tsx`（污染警告）；`shared/researchExperimentsContracts.ts`（新增错误码与详情审计字段）；`tests/server/researchExperiments/{protocolGate,strategyBridgeEvidence,runPersistence}.test.ts`；`docs/evidence/_run_protocol_confirmation.mts`、`docs/evidence/_probe_holdout_contamination.mts` 及输出；`EXPERIMENT-CODE-SPEC.md` / `ROADMAP.md` / `docs/evidence/README.md`。
+- **Changed Contracts**：新增 `EXPERIMENT_PROTOCOL_HOLDOUT_CONTAMINATED` 与 `EXPERIMENT_STRATEGY_EVIDENCE_HOLDOUT_CONTAMINATED`。明文规则 = 同实验、同 Dataset 的历史 `EXPLORATORY` / `OBSERVATION` Run 只要与目标 Holdout 窗口重叠，Holdout 不得启动；历史 Run 未声明窗口时按 Dataset 全窗处理。Strategy Bridge 对已存在的污染证据同样拒绝。
+- **Changed DB**：**零 DDL / 零 migration**。新增两条真实研究 Run：`RUN-20260921-8AF91CE9`（Observation，COMPLETED，`OBSERVATION_READY`，样本 15,297，H1 预检 0/10）与 `RUN-20260921-54D654BB`（Holdout，COMPLETED，机械化 Gate=`PASS`，样本 8,415，H1 8/10，父 Run 为上一条）。
+- **Changed Execution Path**：Holdout 启动时先读取该实验全部历史 Run，并按实际评估窗口做重叠审计；发现污染后在创建 Run 之前抛领域错误。Run 读回将 mysql2 的 `DATE` 对象按本地日历字段归一为 `YYYY-MM-DD`，避免 `Thu Jan…` 进入前端契约。Run 详情返回 `dataIsolation`，污染 Holdout 在页面显示红色阻断警告。Strategy Bridge 在建策略前再次读取同实验窗口并拒绝污染 Holdout。
+- **Potential Baseline Drift**：
+  - 本次既有 Holdout `RUN-20260921-54D654BB` 的机械化 Gate 虽为 `PASS`，但 `_probe_holdout_contamination.mts` 证明其 2026 窗口已被 `RUN-20260921-A87E7438`（Exploratory、全 Dataset 窗口）看过 ⇒ **不是干净 OOS，不得据此创建正式策略**。新门禁已能阻止当前代码继续使用它。
+  - 当前实验仍只有收盘到收盘收益与统一成本，未实现按日期聚类 Bootstrap、外部指数 / 行业中性化、涨跌停 / 停牌 / 滑点等完整执行模型；这些仍是下一步研究能力缺口。
+  - 2024-09~2025-12 Observation 为 0/10、2026 Holdout 为 8/10，方向跨期反转，本身就是“机制不稳定”的负面证据；不得通过换决策日 / 换视界再次寻找有利格子。
+  - 生产 Dataset Provider 仍只注册 `first_limit_pullback`；外部基准与 Regime 数据尚未接入。
+- **Regression Result**：`pnpm run check` exit 0；`pnpm run build` exit 0；`pnpm exec vitest run tests/server/researchExperiments` **19 文件 / 327 例全绿**；真实 DB 复跑 Holdout 被新门禁拒绝（返回污染 Run `RUN-20260921-A87E7438`）；真实 Run 读回窗口为 `2024-09-01..2025-12-31`；详情读回 `dataIsolation.status=CONTAMINATED`；污染探针确认 `contaminated=true`。
+- **Baseline Impact**：确认性研究准入进一步收紧；不删除任何历史 Run，也不改写历史 Gate。历史机械 PASS 会被 Strategy Bridge 重新审计，因此不能绕过新规则。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（无 Domain 删除、无表结构变更、无历史数据改写）。
+
+## 2026-09-22 · `LIMIT-EXECUTION-FACTS-001`（主板执行事实层 + 2019–2024H1 确认性 Dataset v3）
+
+- **Task**：按已冻结方案补齐 `prevClose / limitUpPrice / limitDownPrice / suspension / tradability`，只用沪深主板构建确认性 Dataset `v3-confirmatory`，为 `2019–2021 Observation + 2022–2024H1 Holdout` 提供执行事实层。
+- **Changed Domains**：`Dataset Registry`（physical schema / builder / DB IO / query mapping）；`Limit rules`（日期感知规则）；`DB migration`（新增 `0050`）；`tests` / `evidence` / `docs`。
+- **Changed Files**：`drizzle/schema.ts`、`drizzle/0050_limit_execution_facts.sql`、`server/data/boardRules.ts`、`server/datasetRegistry/{types,path,builder,detection,db,query,plugins,executionFacts,testHelpers}.ts`、`scripts/runDataset001Build.mts`、`tests/server/datasetRegistry/{builder,plugins,executionFacts}.test.ts`、`docs/evidence/_probe_v3_execution_facts.mts` 及输出、`ROADMAP.md` / `docs/evidence/README.md`。
+- **Changed Contracts**：`FirstLimitPullbackEvent` 增加跌停价与规则快照；原始窗口增加 `preClose`；`post` 窗口增加 `limitUpPrice / limitDownPrice / limitRuleUp / limitRuleDown / limitRuleVersion / barPresent / suspensionStatus / suspensionSource / openAtLimitUp / closeAtLimitDown / oneWordLimitUp / oneWordLimitDown / canBuyAtOpen / canSellAtClose`。旧版本字段为 NULL，保持可读。
+- **Changed DB**：migration `0050` 为 event 增 4 列、prefix 增 1 列、post 增 15 列；真实库首次 `20 executed / pass=true`，幂等 `--check` 为 `20 skipped / pass=true`。新版本 `dataset_version.id = 540002 / v3-confirmatory / READY`，窗口 `2019-01-01..2024-08-31`，筛选 `main + excludeSt`、T-20..T+20、horizons `[5,10,20]`。
+- **Changed Execution Path**：首板判定和 post 执行事实都使用日期感知涨跌停规则；创业板在 `2020-08-24` 前后分别为 10% / 20%。`preClose` 直接使用交易所前收；涨跌停价按分价四舍五入；PIT `SUSPENSION / TRADING / ST` 状态驱动停牌与 ST 比例；缺 bar / 停牌 / 规则未知时 `canBuyAtOpen` / `canSellAtClose` 一律保守为 false，一字板显式记录。
+- **Potential Baseline Drift**：
+  - 本批只完成沪深主板执行事实；指数 / 行业 / Regime 辅助 Dataset 仍未接入。
+  - `canBuyAtOpen` / `canSellAtClose` 是日线级保守可交易性模型，不能替代逐笔委托簿；一字板、停牌和缺 bar 的处理是明确保守口径。
+  - 3,585 个 post 行缺前收 / 执行字段，原因是源行情缺 bar；这些行 `barPresent=false`、不可交易，没有被静默填 0。
+  - v3 使用已看过数据区间之外的 2019–2024H1；它解决当前确认实验的数据窗口问题，不等于对未来 Prospective OOS 的替代。
+- **Regression Result**：`pnpm run check` exit 0；`pnpm exec vitest run tests/server/datasetRegistry` **13 文件 / 205 例全绿**；真实构建完成：49,154 events / 1,026,583 prefix / 983,080 post / 983,080 path / 147,462 outcome，job `COMPLETED`；真库验收 `mainEvents=49154`、`observationEvents=26383`、`holdoutEvents=22771`、`preCloseNotNull=979495`、`suspended=2717`、`oneWordUp=6807`、`oneWordDown=2259`、`canBuy=967332`、`canSell=959733`。
+- **Baseline Impact**：新增 schema 列与 Dataset Version，旧版本不受影响；执行事实层成为后续确认性实验的稳定输入。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（无 Domain 删除、无历史行改写；旧版本新列保持 NULL）。
+
+## 2026-09-22 · `HOLD-OPEN-PRICE-PULLBACK-001`（首板后回撤但不破开盘价交易研究）
+
+- **Task**：新增独立实验 `first-board-pullback/hold-open-price-pullback`，研究「首板后在 T+1..T+5 等待首次相对首板收盘 1% 回撤；只要等待路径未跌破首板开盘价，就在次日开盘入场，并在 T+10 / T+15 / T+20 固定退出」的交易周期。
+- **Changed Domains**：`Independent Experiment`（新实验定义 / 结果页）；`client` 页面注册；`tests` / `evidence` / `docs`。
+- **Changed Files**：新增 `research-experiments/first-board-pullback/hold-open-price-pullback/{experiment,result,page}.ts(x)` 与 README；更新 `research-experiments/manifest.ts`、`client/src/researchExperiments/pages.ts`；新增 `tests/server/researchExperiments/holdOpenPricePullback.test.ts`、`docs/evidence/_run_hold_open_price_pullback.mts` 与输出、`docs/evidence/_probe_v3_execution_facts.mts` 与输出。
+- **Changed Contracts**：**无平台契约改动**。实验复用既有 `ExperimentDefinition`、Dataset Port、Result Envelope、Artifact 与持久化；使用 v3 `post` 执行事实列。
+- **Changed DB**：**零 DDL / 零 migration**。真实研究 Run：`RUN-20260921-35357C36`，`Dataset 540002`，`EXPLORATORY`，`COMPLETED / SUCCEEDED`，耗时 `234032ms`。
+- **Changed Execution Path**：事件候选 49,154；eligible 48,897。入场前破位 5,221；等待窗口未触发回撤 9,039；触发 34,637；触发后次日不可买 143；交易样本 101,751（事件 × 退出日）。收益严格从次一交易日开盘到退出日收盘，毛收益扣 20bps 往返成本；同时登记入场后是否再次跌破首板开盘价，不把它伪造成已实现止损。
+- **Potential Baseline Drift**：
+  - 默认 100bps 回撤相对首板收盘价定义，同时要求路径不低于首板开盘价；这是研究参数，不是最优阈值。
+  - 未实现破位后的下一可卖点、滑点、冲击成本、整手与部分成交；入场后破位只作事实统计。
+  - 首次真实结果显示三种退出视界的中位净收益均为负，但交易模式的均值 / 中位数 / 胜率均优于「全部样本 T+1 开盘买入」基准；尚未做按日期聚类 Bootstrap 或真正的 Holdout 确认。
+  - v3 只覆盖沪深主板；指数 / 行业 / Regime 辅助 Provider 仍未接入。
+- **Regression Result**：`pnpm run check` exit 0；`tests/server/researchExperiments` **20 文件 / 330 例全绿**；与 Dataset Registry 合并定向测试为 **33 文件 / 535 例全绿**；真实 Run 产物含 `result.json`、`manifest.json`、`logs/run.log` 共 3 个对象；`test:changed` 仍只命中登记的 4 个环境依赖失败文件。
+- **Baseline Impact**：纯新增实验定义与页面，不影响既有实验 / Strategy / Backtest；真实 Run 已落库且可页面读取。
+- **GLOBAL AUDIT REQUIRED**：**NONE**。
+
+## 2026-09-22 · `HOLD-OPEN-PRICE-PULLBACK-002`（一字板首板排除复跑）
+
+- **Task**：在 `hold-open-price-pullback` 中新增 `excludeOneWordLimitUp`，首板日满足 `O=H=L=C=limitUpPrice` 即识别为一字板；默认开启并从 eligible 中剔除。实验版本升至 `1.1.0`，旧 `1.0.0` Run 保留。
+- **Changed Files**：`research-experiments/first-board-pullback/hold-open-price-pullback/{experiment,result,page}.tsx|ts`、README、`tests/server/researchExperiments/holdOpenPricePullback.test.ts`、`docs/evidence/_run_hold_open_price_pullback.mts` 与输出。
+- **Changed Contracts**：实验自有 payload 增加 `excludeOneWordLimitUp`、`eventOneWordLimitUpCount`、`excludedOneWordLimitUpCount` 与排除原因 `EXCLUDED_ONE_WORD_LIMIT_UP`；平台契约零改动。
+- **Changed DB**：零 DDL。真实复跑 `RUN-20260922-2090E5A6`，Dataset `540002`，`COMPLETED / SUCCEEDED`，耗时 `777706ms`。
+- **Changed Execution Path**：候选 49,154；识别一字板 **1,621** 并全部排除；eligible **47,276**；入场前破位 **4,214**；未触发 **8,425**；触发 **34,637**；触发后不可买 **143**；交易样本 **101,751**。
+- **Potential Baseline Drift**：一字板排除对该交易模式结果**无增量影响** —— 触发数、交易样本与 T+10/T+15/T+20 全部收益指标与 `1.0.0` 逐位相同；减少的 1,621 个 event 全部来自入场前破位 / 未触发，而非可交易样本。
+- **Regression Result**：新增第 3 个单测覆盖一字板排除账目；`pnpm run check` 0；定向实验测试全绿；真实 Run 结果 / Manifest / 日志可读。
+- **Baseline Impact**：纯实验级版本升级与参数增加；无平台契约、DB 或历史结果改写。
+- **GLOBAL AUDIT REQUIRED**：**NONE**。
+
+## 2026-09-22 · `FIRST-BOARD-CONTEXT-BOOTSTRAP-001`（首板前后上下文 + 换手率 + 日期聚类 Bootstrap）
+
+- **Task**：新增三项独立研究：① `pre-event-context-study`：首板前距上次涨停间隔与 T-5/T-10/T-20 前期涨幅；② `post-event-amplitude-study`：T+1..T+5 无涨跌停与平均振幅；③ `turnover-study`：首板日换手率、流通市值可用性与未来收益，并使用按交易日聚类的 Moving Block Bootstrap。
+- **Changed Files**：`research-experiments/shared/dateClusterBootstrap.ts`；三个新实验目录 `research-experiments/first-board-pullback/{pre-event-context-study,post-event-amplitude-study,turnover-study}/**`；`research-experiments/manifest.ts`；`client/src/researchExperiments/pages.ts`；三个新测试文件与对应 evidence runner / output。
+- **Changed Contracts**：平台契约零改动；实验自有 payload 增加上下文维度、Bootstrap 参数 / CI、`floatMarketCapStatus` 与 `INSUFFICIENT_DATA` 披露。
+- **Changed DB**：零 DDL。真实 Run：
+  - `RUN-20260922-71838486`：首板前上下文，eligible 47,120，Run 18.8 分钟；
+  - `RUN-20260922-3F4B3C39`：无涨跌停 / 振幅，eligible 48,897，Run 8.1 分钟；
+  - `RUN-20260922-4A0DAF7B`：换手率 / Bootstrap，eligible 45,726，Run 7.6 分钟。
+- **Changed Execution Path**：Bootstrap 使用 `1000` 次 Moving Block，block=`20` 个交易日，固定 seed；同交易日事件整体重采样，避免把横截面相关事件当独立样本。流通市值当前 `0/49,154`，返回 `INSUFFICIENT_DATA`；换手率 `49,150/49,154` 可用。
+- **Potential Baseline Drift**：
+  - 三项实验都使用完整 `2019–2024H1` Dataset，因此 2022–2024H1 对这些研究族已被探索，不能再作为干净独立 Holdout。
+  - 流通市值底层 `liquidity_daily.circulationMarketCap` 为 `0/9,015,158`，必须先补 `daily_basic.circ_mv` 数据并重建 Dataset，才能检验市值关系。
+  - Bootstrap CI 已解决日期聚类相关性，但不解决参数选择偏差；仍需未来 Prospective Holdout。
+  - 主要观察：高换手率（≥10%）和首板前大幅上涨组明显较差；无涨跌停 / 中等振幅相对更好；首板前超跌组相对更强。
+- **Regression Result**：`pnpm run check` exit 0；新增三个实验单测全绿；每个真实 Run 均产出 result / manifest / run.log；Bootstrap 结果含 clustering metadata。
+- **Baseline Impact**：三项纯新增实验与共享 Bootstrap 工具；无历史 Run / DB 结构改写。
+- **GLOBAL AUDIT REQUIRED**：**NONE**。

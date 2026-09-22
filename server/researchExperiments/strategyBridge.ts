@@ -56,6 +56,7 @@ import type {
   ExperimentExecution,
   ExperimentParameterValues,
   ExperimentResultEnvelope,
+  ExperimentRunLifecycleStatus,
   ExperimentRunOutcome,
 } from "@shared/researchExperimentsContracts";
 import type { StrategyDefinitionInput } from "../research/strategySchema/definition";
@@ -87,6 +88,7 @@ import {
 } from "../research/strategyCandidate/researchEvidence";
 import { serializeCanonical } from "../research/searchRobustness/canonical";
 import type { ExperimentEvidenceRunReader, PersistedEvidenceRun } from "./evidenceRunReader";
+import { findHoldoutWindowContamination } from "./protocol";
 import type { ExperimentRunner } from "./runner";
 
 // ---------------------------------------------------------------------------
@@ -121,6 +123,14 @@ export const EXPERIMENT_STRATEGY_ERROR = {
   EVIDENCE_REFERENCE_UNRESOLVED: "EXPERIMENT_STRATEGY_EVIDENCE_REFERENCE_UNRESOLVED",
   /** 多份证据指向不同 Dataset 版本 ⇒ 无法确定唯一执行绑定。 */
   EVIDENCE_DATASET_MISMATCH: "EXPERIMENT_STRATEGY_EVIDENCE_DATASET_MISMATCH",
+  /** 证据不是 HOLDOUT 阶段，禁止进入正式策略。 */
+  EVIDENCE_NOT_CONFIRMATORY: "EXPERIMENT_STRATEGY_EVIDENCE_NOT_CONFIRMATORY",
+  /** Holdout Confirmatory Gate 不为 PASS。 */
+  EVIDENCE_GATE_NOT_PASS: "EXPERIMENT_STRATEGY_EVIDENCE_GATE_NOT_PASS",
+  /** Holdout 窗口曾被同实验历史 Run 观察过，不能作为独立 OOS。 */
+  EVIDENCE_HOLDOUT_CONTAMINATED: "EXPERIMENT_STRATEGY_EVIDENCE_HOLDOUT_CONTAMINATED",
+  /** 多份证据来自不同协议指纹。 */
+  EVIDENCE_PROTOCOL_MISMATCH: "EXPERIMENT_STRATEGY_EVIDENCE_PROTOCOL_MISMATCH",
   /** 装配未注入 Run 读回端口（配置错误，响亮失败而不是静默降级）。 */
   EVIDENCE_READER_UNAVAILABLE: "EXPERIMENT_STRATEGY_EVIDENCE_READER_UNAVAILABLE",
   /**
@@ -630,6 +640,10 @@ export function createExperimentStrategyBridge(
 
       // ---- 2) 逐条从**真实 Run** 读回并冻结事实 ----
       const resolved: Array<{ ref: ResearchEvidenceRef; run: PersistedEvidenceRun }> = [];
+      const experimentWindowCache = new Map<
+        string,
+        Awaited<ReturnType<ExperimentEvidenceRunReader["listByExperiment"]>>
+      >();
       for (const ref of input.evidences) {
         const run = await reader.read(ref.runId);
         if (run === null) {
@@ -654,6 +668,73 @@ export function createExperimentStrategyBridge(
             `证据引用的 Run 结果信封读不回来：${ref.runId}`
               + `（${run.resultUnavailableReason ?? "原因未知"}）—— 不拿读不到的结果当证据`,
             { runId: ref.runId, reason: run.resultUnavailableReason },
+          );
+        }
+        if (run.researchPhase !== "HOLDOUT") {
+          throw new ExperimentStrategyError(
+            EXPERIMENT_STRATEGY_ERROR.EVIDENCE_NOT_CONFIRMATORY,
+            `证据 Run ${ref.runId} 的 researchPhase=${run.researchPhase}，不是 HOLDOUT`
+              + " —— 探索性 / Observation 证据不得直接创建正式策略",
+            { runId: ref.runId, researchPhase: run.researchPhase },
+          );
+        }
+        if (
+          run.protocolFingerprint === null ||
+          run.confirmatoryGate === null ||
+          run.confirmatoryGate.status !== "PASS"
+        ) {
+          throw new ExperimentStrategyError(
+            EXPERIMENT_STRATEGY_ERROR.EVIDENCE_GATE_NOT_PASS,
+            `证据 Run ${ref.runId} 未通过 Holdout Confirmatory Gate`
+              + `（protocolFingerprint=${String(run.protocolFingerprint)}，`
+              + `gate=${run.confirmatoryGate?.status ?? "（缺失）"}）`,
+            { runId: ref.runId, gate: run.confirmatoryGate },
+          );
+        }
+        if (run.evaluationWindow === null || run.datasetVersionId === null) {
+          throw new ExperimentStrategyError(
+            EXPERIMENT_STRATEGY_ERROR.EVIDENCE_INVALID,
+            `证据 Run ${ref.runId} 缺 Holdout 窗口或 Dataset 坐标，不能审计数据隔离`,
+            {
+              runId: ref.runId,
+              evaluationWindow: run.evaluationWindow,
+              datasetVersionId: run.datasetVersionId,
+            },
+          );
+        }
+        const evidenceDatasetVersionId = run.datasetVersionId;
+        let experimentWindows = experimentWindowCache.get(run.experimentCode);
+        if (experimentWindows === undefined) {
+          experimentWindows = await reader.listByExperiment(run.experimentCode);
+          experimentWindowCache.set(run.experimentCode, experimentWindows);
+        }
+        const contaminated = findHoldoutWindowContamination({
+          targetWindow: run.evaluationWindow,
+          datasetVersionId: evidenceDatasetVersionId,
+          excludeRunIds:
+            run.parentRunId === null
+              ? [run.runId]
+              : [run.parentRunId, run.runId],
+          runs: experimentWindows.map((window) => ({
+            runId: window.runId,
+            status: window.status as ExperimentRunLifecycleStatus,
+            researchPhase: window.researchPhase ?? "EXPLORATORY",
+            parentRunId: window.parentRunId,
+            datasetVersionId: window.datasetVersionId ?? evidenceDatasetVersionId,
+            evaluationWindow: window.evaluationWindow,
+          })),
+        });
+        if (contaminated.length > 0) {
+          throw new ExperimentStrategyError(
+            EXPERIMENT_STRATEGY_ERROR.EVIDENCE_HOLDOUT_CONTAMINATED,
+            `证据 Run ${ref.runId} 的 Holdout 窗口已被历史 Run 观察过：` +
+              contaminated.map((item) => item.runId).join(", ") +
+              " —— 该证据不构成独立 OOS，禁止创建正式策略",
+            {
+              runId: ref.runId,
+              holdoutWindow: run.evaluationWindow,
+              contaminatedRunIds: contaminated.map((item) => item.runId),
+            },
           );
         }
         if (run.datasetVersionId === null || run.datasetVersionLabel === null) {
@@ -690,6 +771,17 @@ export function createExperimentStrategyBridge(
         resolved.push({ ref, run });
       }
 
+      const protocolFingerprints = new Set(
+        resolved.map(({ run }) => run.protocolFingerprint as string),
+      );
+      if (protocolFingerprints.size !== 1) {
+        throw new ExperimentStrategyError(
+          EXPERIMENT_STRATEGY_ERROR.EVIDENCE_PROTOCOL_MISMATCH,
+          `证据引用的 Run 来自不同协议指纹：${[...protocolFingerprints].join(", ")}`,
+          { protocolFingerprints: [...protocolFingerprints] },
+        );
+      }
+
       const records: ResearchEvidenceRecord[] = resolved.map(({ ref, run }) => ({
         experimentCode: run.experimentCode,
         experimentVersion: run.experimentVersion,
@@ -703,6 +795,9 @@ export function createExperimentStrategyBridge(
         runStatus: run.status,
         startedAt: run.startedAt,
         durationMs: run.durationMs,
+        researchPhase: run.researchPhase,
+        protocolFingerprint: run.protocolFingerprint,
+        confirmatoryStatus: run.confirmatoryGate?.status ?? null,
       }));
 
       // ---- 3) 唯一 Dataset 坐标（多份证据必须同源）----

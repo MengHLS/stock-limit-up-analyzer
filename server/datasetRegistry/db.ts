@@ -49,6 +49,7 @@ import type {
   FirstLimitPullbackRawBar,
 } from "./types";
 import type { DatasetBuildIO, LiquidityEnrichment } from "./builder";
+import type { SuspensionResolution } from "./executionFacts";
 import { liquidityKey } from "./builder";
 import { LIMIT_UP_CANDIDATE_SQL_PREDICATE, type DailyBar, type StStatus } from "./detection";
 import {
@@ -615,7 +616,7 @@ interface IndustryInterval {
 /** 证券索引（PIT ST + 行业归属）—— 小表全量，一次性载入后逐 bar 解析 O(1)。 */
 interface SecurityIndex {
   identifiersByCode: Map<string, { securityId: string; effectiveFrom: string; effectiveTo: string | null }[]>;
-  stBySecurity: Map<string, SecurityStatusInterval[]>;
+  statusBySecurity: Map<string, SecurityStatusInterval[]>;
   industryByCode: Map<string, IndustryInterval[]>;
 }
 
@@ -649,9 +650,9 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
   private async buildSecurityIndex(): Promise<SecurityIndex> {
     const db = await getDb();
     const identifiersByCode = new Map<string, { securityId: string; effectiveFrom: string; effectiveTo: string | null }[]>();
-    const stBySecurity = new Map<string, SecurityStatusInterval[]>();
+    const statusBySecurity = new Map<string, SecurityStatusInterval[]>();
     const industryByCode = new Map<string, IndustryInterval[]>();
-    if (!db) return { identifiersByCode, stBySecurity, industryByCode };
+    if (!db) return { identifiersByCode, statusBySecurity, industryByCode };
 
     const idRows = await db.select().from(researchSecurityIdentifierHistory);
     for (const row of idRows) {
@@ -664,8 +665,8 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
       list.sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
     }
 
-    const stRows = await db.select().from(researchSecurityStatusHistory).where(eq(researchSecurityStatusHistory.statusType, "ST"));
-    for (const row of stRows) {
+    const statusRows = await db.select().from(researchSecurityStatusHistory);
+    for (const row of statusRows) {
       const interval: SecurityStatusInterval = {
         securityId: row.securityId,
         statusType: row.statusType,
@@ -677,9 +678,9 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
         confidence: row.confidence,
         availability: row.availability,
       };
-      const list = stBySecurity.get(row.securityId) ?? [];
+      const list = statusBySecurity.get(row.securityId) ?? [];
       list.push(interval);
-      stBySecurity.set(row.securityId, list);
+      statusBySecurity.set(row.securityId, list);
     }
 
     const industryRows = await db.select().from(industryAssignments);
@@ -692,7 +693,7 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
       list.sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
     }
 
-    return { identifiersByCode, stBySecurity, industryByCode };
+    return { identifiersByCode, statusBySecurity, industryByCode };
   }
 
   async loadTradingDays(): Promise<string[]> {
@@ -704,16 +705,49 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
 
   /** 同步 PIT ST 解析（须先 `loadSecurityIndexes`）。 */
   resolveStSync(symbol: string, tradeDate: string): StStatus {
-    const index = this.syncedIndex;
-    if (!index) return "UNKNOWN";
-    const candidates = index.identifiersByCode.get(symbol);
-    if (!candidates || candidates.length === 0) return "UNKNOWN";
-    const active = candidates.find((c) => c.effectiveFrom <= tradeDate && (c.effectiveTo === null || c.effectiveTo >= tradeDate));
-    if (!active) return "UNKNOWN";
-    const intervals = index.stBySecurity.get(active.securityId) ?? [];
+    const intervals = this.statusIntervalsFor(symbol, tradeDate);
     if (intervals.length === 0) return "UNKNOWN";
-    const snapshot = resolveSecurityStatus(intervals, active.securityId, tradeDate);
+    const securityId = this.activeSecurityId(symbol, tradeDate);
+    if (securityId === null) return "UNKNOWN";
+    const snapshot = resolveSecurityStatus(intervals, securityId, tradeDate);
     return stValueToStStatus(snapshot.resolved.ST?.statusValue);
+  }
+
+  resolveSuspensionSync(symbol: string, tradeDate: string): SuspensionResolution {
+    const intervals = this.statusIntervalsFor(symbol, tradeDate);
+    const securityId = this.activeSecurityId(symbol, tradeDate);
+    if (intervals.length === 0 || securityId === null) {
+      return { status: "UNKNOWN", source: "UNKNOWN" };
+    }
+    const snapshot = resolveSecurityStatus(intervals, securityId, tradeDate);
+    const trading = snapshot.resolved.TRADING?.statusValue;
+    const suspension = snapshot.resolved.SUSPENSION?.statusValue;
+    if (trading === "SUSPENDED" || suspension === "SUSPENDED") {
+      return { status: "SUSPENDED", source: "PIT_STATUS" };
+    }
+    if (trading === "TRADING" || suspension === "RESUMED") {
+      return { status: "NOT_SUSPENDED", source: "PIT_STATUS" };
+    }
+    return { status: "UNKNOWN", source: "UNKNOWN" };
+  }
+
+  private activeSecurityId(symbol: string, tradeDate: string): string | null {
+    const candidates = this.syncedIndex?.identifiersByCode.get(symbol);
+    if (!candidates || candidates.length === 0) return null;
+    return (
+      candidates.find(
+        (candidate) =>
+          candidate.effectiveFrom <= tradeDate &&
+          (candidate.effectiveTo === null || candidate.effectiveTo >= tradeDate),
+      )?.securityId ?? null
+    );
+  }
+
+  private statusIntervalsFor(symbol: string, tradeDate: string): SecurityStatusInterval[] {
+    const securityId = this.activeSecurityId(symbol, tradeDate);
+    return securityId === null
+      ? []
+      : this.syncedIndex?.statusBySecurity.get(securityId) ?? [];
   }
 
   /**
@@ -849,6 +883,10 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
       boardType: row.boardType,
       previousClose: parseNumber(row.previousClose),
       limitUpPrice: parseNumber(row.limitUpPrice),
+      limitDownPrice: parseNumber(row.limitDownPrice),
+      limitRuleUp: parseNumber(row.limitRuleUp),
+      limitRuleDown: parseNumber(row.limitRuleDown),
+      limitRuleVersion: row.limitRuleVersion,
       turnover: parseNumber(row.turnover),
       isFirstLimit: row.isFirstLimit === null ? null : Boolean(row.isFirstLimit),
       previousLimitDate: row.previousLimitDate,
@@ -874,6 +912,10 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
         boardType: r.boardType,
         previousClose: r.previousClose,
         limitUpPrice: r.limitUpPrice,
+        limitDownPrice: r.limitDownPrice ?? null,
+        limitRuleUp: r.limitRuleUp ?? null,
+        limitRuleDown: r.limitRuleDown ?? null,
+        limitRuleVersion: r.limitRuleVersion ?? null,
         turnover: r.turnover,
         isFirstLimit: r.isFirstLimit,
         previousLimitDate: r.previousLimitDate,
@@ -901,7 +943,7 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
     const db = await getDb();
     if (!db || rows.length === 0) return;
     for (const chunk of chunkArray(rows, MAX_ROWS_PER_STATEMENT)) {
-      await db.insert(table).values(chunk.map((r) => ({
+      const common = (r: FirstLimitPullbackRawBar) => ({
         datasetVersionId: r.datasetVersionId,
         eventId: r.eventId,
         symbol: r.symbol,
@@ -911,9 +953,30 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
         high: r.high,
         low: r.low,
         close: r.close,
+        preClose: r.preClose ?? null,
         volume: r.volume,
         amount: r.amount,
-      }))).onDuplicateKeyUpdate({ set: { id: sql`${table.id}` } });
+      });
+      const values = table === firstLimitPullbackPosts
+        ? chunk.map((r) => ({
+            ...common(r),
+            limitUpPrice: r.limitUpPrice ?? null,
+            limitDownPrice: r.limitDownPrice ?? null,
+            limitRuleUp: r.limitRuleUp ?? null,
+            limitRuleDown: r.limitRuleDown ?? null,
+            limitRuleVersion: r.limitRuleVersion ?? null,
+            barPresent: r.barPresent ?? null,
+            suspensionStatus: r.suspensionStatus ?? null,
+            suspensionSource: r.suspensionSource ?? null,
+            openAtLimitUp: r.openAtLimitUp ?? null,
+            closeAtLimitDown: r.closeAtLimitDown ?? null,
+            oneWordLimitUp: r.oneWordLimitUp ?? null,
+            oneWordLimitDown: r.oneWordLimitDown ?? null,
+            canBuyAtOpen: r.canBuyAtOpen ?? null,
+            canSellAtClose: r.canSellAtClose ?? null,
+          }))
+        : chunk.map(common);
+      await db.insert(table).values(values).onDuplicateKeyUpdate({ set: { id: sql`${table.id}` } });
     }
   }
 

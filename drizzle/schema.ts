@@ -1267,6 +1267,10 @@ export const firstLimitPullbackEvents = mysqlTable("ds_first_limit_pullback_even
   boardType: varchar("boardType", { length: 32 }),
   previousClose: double("previousClose"),
   limitUpPrice: double("limitUpPrice"),
+  limitDownPrice: double("limitDownPrice"),
+  limitRuleUp: double("limitRuleUp"),
+  limitRuleDown: double("limitRuleDown"),
+  limitRuleVersion: varchar("limitRuleVersion", { length: 32 }),
   turnover: double("turnover"),
   isFirstLimit: boolean("isFirstLimit"),
   previousLimitDate: date("previousLimitDate", { mode: "string" }),
@@ -1305,6 +1309,8 @@ export const firstLimitPullbackPrefixes = mysqlTable("ds_first_limit_pullback_pr
   high: double("high"),
   low: double("low"),
   close: double("close"),
+  /** 原始日线前收（含除权口径）；旧版本为 NULL。 */
+  preClose: double("preClose"),
   volume: double("volume"),
   amount: double("amount"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -1331,6 +1337,24 @@ export const firstLimitPullbackPosts = mysqlTable("ds_first_limit_pullback_post"
   high: double("high"),
   low: double("low"),
   close: double("close"),
+  /** 原始日线前收（含除权口径）；旧版本为 NULL。 */
+  preClose: double("preClose"),
+  /** 交易所口径涨停价（分价四舍五入）；旧版本为 NULL。 */
+  limitUpPrice: double("limitUpPrice"),
+  /** 交易所口径跌停价（分价四舍五入）；旧版本为 NULL。 */
+  limitDownPrice: double("limitDownPrice"),
+  limitRuleUp: double("limitRuleUp"),
+  limitRuleDown: double("limitRuleDown"),
+  limitRuleVersion: varchar("limitRuleVersion", { length: 32 }),
+  barPresent: boolean("barPresent"),
+  suspensionStatus: varchar("suspensionStatus", { length: 16 }),
+  suspensionSource: varchar("suspensionSource", { length: 24 }),
+  openAtLimitUp: boolean("openAtLimitUp"),
+  closeAtLimitDown: boolean("closeAtLimitDown"),
+  oneWordLimitUp: boolean("oneWordLimitUp"),
+  oneWordLimitDown: boolean("oneWordLimitDown"),
+  canBuyAtOpen: boolean("canBuyAtOpen"),
+  canSellAtClose: boolean("canSellAtClose"),
   volume: double("volume"),
   amount: double("amount"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -2210,12 +2234,24 @@ export const researchExperimentRun = mysqlTable("research_experiment_run", {
   experimentName: varchar("experimentName", { length: 200 }).notNull(),
   /** 运行时的实验**版本快照**（`descriptor.version`）。 */
   experimentVersion: varchar("experimentVersion", { length: 32 }).notNull(),
+  /** 实验定义代码指纹（平台计算；历史行为 NULL）。 */
+  experimentCodeDigest: varchar("experimentCodeDigest", { length: 96 }),
+  /** 研究阶段：EXPLORATORY / OBSERVATION / HOLDOUT；历史行为 NULL。 */
+  researchPhase: varchar("researchPhase", { length: 16 }),
+  protocolId: varchar("protocolId", { length: 96 }),
+  protocolVersion: varchar("protocolVersion", { length: 32 }),
+  protocolFingerprint: varchar("protocolFingerprint", { length: 96 }),
+  parentRunId: varchar("parentRunId", { length: 80 }),
+  evaluationStartDate: date("evaluationStartDate"),
+  evaluationEndDate: date("evaluationEndDate"),
   /** 唯一 Dataset 坐标（**软引用** → `dataset_version.id`；Dataset 不复制、不重建）。 */
   datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
   /** 数据集语义代码快照（避免 JOIN 才能显示「用的哪个数据集」）。 */
   datasetCode: varchar("datasetCode", { length: 64 }).notNull(),
   /** 数据集版本标签快照（`v1` / `v2` / …；仅显示用，坐标仍是 `datasetVersionId`）。 */
   datasetVersionLabel: varchar("datasetVersionLabel", { length: 96 }).notNull(),
+  /** 全部 Dataset 绑定快照（primary + auxiliary）。 */
+  datasetBindingsJson: longtext("datasetBindingsJson"),
   /** **已归并默认值**的参数快照（写入即冻结；JSON 文本，如 `{"n":3}`）。 */
   parametersJson: longtext("parametersJson").notNull(),
   /**
@@ -2239,6 +2275,8 @@ export const researchExperimentRun = mysqlTable("research_experiment_run", {
   resultManifestKey: varchar("resultManifestKey", { length: 512 }),
   /** 结果信封的结构版本（本任务起为 `1.0.0`）。 */
   resultSchemaVersion: varchar("resultSchemaVersion", { length: 32 }),
+  /** Confirmatory Gate JSON；历史 / exploratory 为 NULL。 */
+  confirmatoryGateJson: longtext("confirmatoryGateJson"),
   /** 轻量摘要（样本账 / 读取行数 / 产物计数）——列表页不必去对象存储拉 result.json。 */
   summaryJson: longtext("summaryJson"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -2252,6 +2290,8 @@ export const researchExperimentRun = mysqlTable("research_experiment_run", {
   statusIdx: index("idx_research_experiment_run_status").on(table.status),
   /** 按 Dataset 版本反查用过它的 Run。 */
   datasetIdx: index("idx_research_experiment_run_dataset").on(table.datasetVersionId),
+  protocolIdx: index("idx_research_experiment_protocol").on(table.protocolFingerprint, table.id),
+  parentIdx: index("idx_research_experiment_parent").on(table.parentRunId),
 }));
 
 export type ResearchExperimentRunRow = typeof researchExperimentRun.$inferSelect;

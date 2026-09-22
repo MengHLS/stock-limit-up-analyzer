@@ -32,6 +32,71 @@ function holdingWeightPercent(holding: PortfolioHoldingLike, equity: number | nu
 function formatHoldingAmount(value: number | null) { return value === null ? "待补" : `¥${formatMoney(value)}`; }
 function formatHoldingWeight(holding: PortfolioHoldingLike, equity: number | null) { const weight = holdingWeightPercent(holding, equity); return weight === null ? "—" : `${weight.toFixed(2)}%`; }
 function summarizeHoldings(holdings: readonly PortfolioHoldingLike[], equity: number | null) { let costTotal = 0; let marketTotal = 0; let costCount = 0; let marketCount = 0; for (const holding of holdings) { const cost = holdingCostAmount(holding); if (cost !== null) { costTotal += cost; costCount += 1; } const market = holdingMarketAmount(holding); if (market !== null) { marketTotal += market; marketCount += 1; } } const complete = holdings.length > 0 && costCount === holdings.length && marketCount === holdings.length; return { count: holdings.length, costTotal, marketTotal, costCount, marketCount, complete, floatingAmount: complete ? marketTotal - costTotal : null, weightPercent: complete && equity !== null && equity > 0 ? (marketTotal / equity) * 100 : null }; }
+type PortfolioBlockedBuy = {
+  rank: number;
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  boards: number;
+  signalDate: string;
+  score: number;
+  riskScore: number;
+  riskTier: "低风险" | "中风险" | "高风险";
+  strategyScore: number;
+  blockReasons: string[];
+};
+function BlockedCandidateTable({ candidates }: { candidates: PortfolioBlockedBuy[] }) {
+  return (
+    <div data-unbuyable-candidates className="border-t border-violet-200">
+      <div className="border-b border-violet-100 bg-violet-50/40 px-4 py-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h4 className="text-sm font-semibold text-violet-950">候选但不能买入</h4>
+          <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-violet-800">{candidates.length} 只</span>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-violet-800">仅展示已通过信号日入选条件、但被后续规则挡下的候选；未入选候选不在此列。原因按实际拦截顺序列示。</p>
+      </div>
+      {candidates.length > 0 ? (
+        <div className="max-h-[20rem] overflow-auto">
+          <table className="w-full min-w-[680px] text-xs">
+            <thead className="sticky top-0 z-10 bg-white text-left text-slate-500">
+              <tr>
+                <th className="px-3 py-2">候选 / 股票</th>
+                <th className="px-3 py-2">题材 / 板数</th>
+                <th className="px-3 py-2">原始 / 策略分</th>
+                <th className="px-3 py-2">风险</th>
+                <th className="px-3 py-2">不能买入的原因</th>
+              </tr>
+            </thead>
+            <tbody>
+              {candidates.map((candidate) => (
+                <tr key={`blocked-${candidate.signalDate}-${candidate.stockCode}`} className="border-t border-violet-100 align-top">
+                  <td className="px-3 py-2">
+                    <p className="font-semibold text-slate-800">#{candidate.rank} {candidate.stockName}</p>
+                    <p className="mt-1 font-mono text-slate-400">{candidate.stockCode}</p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <p>{candidate.sector}</p>
+                    <p className="mt-1 text-slate-500">{candidate.boards} 板 · {formatDate(candidate.signalDate)}</p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <p>原始 {candidate.score}</p>
+                    <p className="mt-1 font-semibold text-violet-800">策略 {candidate.strategyScore}</p>
+                  </td>
+                  <td className="px-3 py-2">
+                    <p className={candidate.riskTier === "高风险" ? "text-rose-600" : candidate.riskTier === "中风险" ? "text-amber-700" : "text-emerald-700"}>{candidate.riskTier} {candidate.riskScore}</p>
+                  </td>
+                  <td className="max-w-80 px-3 py-2 leading-5 text-slate-600">{candidate.blockReasons.join("；")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="p-6 text-center text-sm text-slate-500">当前候选池没有已知不可买入项。</p>
+      )}
+    </div>
+  );
+}
 function Metric({ label, value, tone = "text-slate-800" }: { label: string; value: string; tone?: string }) { return <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs text-slate-500">{label}</p><p className={`mt-1 text-lg font-bold ${tone}`}>{value}</p></div>; }
 function ReturnLineChart({ data, series }: { data: Array<Record<string, string | number>>; series: Array<{ key: string; label: string; color: string }> }) { return <div className="mt-5 h-[330px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={data} margin={{ top: 12, right: 20, bottom: 8, left: -8 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} /><XAxis dataKey="date" minTickGap={24} tick={{ fontSize: 11, fill: "#64748b" }} /><YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(value) => `${value}%`} /><Tooltip formatter={(value) => [`${value}%`, "累计收益率"]} /><Legend wrapperStyle={{ fontSize: 12 }} />{series.map((item) => <Line key={item.key} type="monotone" dataKey={item.key} name={item.label} stroke={item.color} strokeWidth={2.25} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} connectNulls />)}</LineChart></ResponsiveContainer></div>; }
 function formatTradingDays(value: number | null) { return value === null ? "样本不足" : `${value} 个交易日`; }
@@ -761,7 +826,202 @@ export default function BacktestPage() {  const [config, setConfig] = useState({
         {activeTab === "risk" && downsideRiskResearch && <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-wrap items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 text-fuchsia-700" /><div className="mr-auto"><h2 className="font-semibold">下行风险评分实验框架</h2><p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">{downsideRiskResearch.definition} 当前展示 {downsideRiskResearch.labeledSampleSize} 个完整观察期的样本外候选；原始、风险扣分和高风险过滤三版均使用唯一的动态止盈、开盘止损与强势续持退出策略。胜率为已平仓交易胜率，回测结束仍持有的仓位不计入。</p></div></div><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="日线覆盖" value={`${dailyPriceCoverage?.rowCount ?? 0} 行`} /><Metric label="日期范围" value={`${dailyPriceCoverage?.startDate ?? "-"} 至 ${dailyPriceCoverage?.endDate ?? "-"}`} /><Metric label="低价覆盖" value={`${dailyPriceCoverage?.lowPriceCount ?? 0} / ${dailyPriceCoverage?.rowCount ?? 0}`} /><Metric label="成交额覆盖" value={`${dailyPriceCoverage?.amountCount ?? 0} / ${dailyPriceCoverage?.rowCount ?? 0}`} /></div><p className="mt-3 text-xs leading-5 text-slate-500">低价标签完整样本 {downsideRiskResearch.lowPriceLabelSampleSize} 个；信号日成交额可用样本 {downsideRiskResearch.signalAmountSampleSize} 个。{downsideRiskResearch.autoTunePenaltyWeight && <span className="font-medium text-fuchsia-800"> 自动寻优网格：{downsideRiskResearch.penaltyWeightGrid.join("、")}；训练目标 = 收益率 − 0.5 × 最大回撤，依次以收益、回撤、已出清笔数和更小权重决胜。</span>}{downsideRiskResearch.labeledSampleSize < 50 && <span className="font-medium text-amber-700"> 当前完整观察期样本少于50个，仅适合观察特征方向。</span>}</p><div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{downsideRiskResearch.featureMatrix.map((feature) => <div key={feature.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3"><div className="flex items-center justify-between gap-2"><p className="text-xs font-semibold text-slate-800">{feature.label}</p><span className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{feature.timing}</span></div><p className="mt-1 text-xs leading-5 text-slate-500">{feature.definition}</p></div>)}</div><div className="mt-5 overflow-auto rounded-xl border border-slate-200"><table className="w-full min-w-[720px] text-xs"><thead className="bg-slate-100 text-left text-slate-500"><tr><th className="px-3 py-2">风险分层</th><th className="px-3 py-2">样本数</th><th className="px-3 py-2">平均最大不利波动</th><th className="px-3 py-2">≤ -{downsideRiskResearch.mediumDownsidePercent}%</th><th className="px-3 py-2">≤ -{downsideRiskResearch.highDownsidePercent}%</th></tr></thead><tbody>{downsideRiskResearch.riskTiers.map((tier) => <tr key={tier.tier} className="border-t border-slate-100"><td className="px-3 py-2 font-medium text-slate-800">{tier.tier}</td><td className="px-3 py-2">{tier.sampleSize}</td><td className="px-3 py-2 text-emerald-700">{tier.averageMaxAdverseReturn ?? "-"}{tier.averageMaxAdverseReturn === null ? "" : "%"}</td><td className="px-3 py-2">{tier.mediumDownsideCount} / {tier.mediumDownsideRate ?? "-"}%</td><td className="px-3 py-2">{tier.highDownsideCount} / {tier.highDownsideRate ?? "-"}%</td></tr>)}</tbody></table></div><div className="mt-5 grid gap-3 md:grid-cols-3">{downsideRiskResearch.experiments.map((experiment) => <div key={experiment.key} className="rounded-xl border border-slate-200 bg-slate-50/70 p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-semibold text-slate-800">{experiment.label}</p><p className="mt-1 min-h-10 text-xs leading-5 text-slate-500">{experiment.description}</p></div><span className={experiment.realisticSimulation.totalReturn >= 0 ? "text-sm font-bold text-rose-600" : "text-sm font-bold text-emerald-700"}>{experiment.realisticSimulation.totalReturn}%</span></div><div className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3 text-xs"><div><p className="text-slate-400">最大回撤</p><p className="mt-1 font-semibold text-emerald-700">{experiment.realisticSimulation.maxDrawdown}%</p></div><div><p className="text-slate-400">候选/剔除</p><p className="mt-1 font-semibold text-slate-700">{experiment.inputCandidateCount}/{experiment.excludedCandidateCount}</p></div><div><p className="text-slate-400">已平仓胜率</p><p className="mt-1 font-semibold text-slate-700">{experiment.realisticSimulation.winRate ?? "-"}{experiment.realisticSimulation.winRate === null ? "" : "%"}</p></div></div></div>)}</div><ReturnLineChart data={downsideRiskCurve} series={downsideRiskResearch.experiments.map((item) => ({ key: item.key, label: item.label, color: item.key === "baseline" ? "#64748b" : item.key === "riskPenalty" ? "#d946ef" : "#f59e0b" }))} /><div className="mt-5 rounded-xl border border-slate-200"><div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2"><DatabaseZap className="h-4 w-4 text-fuchsia-700" /><div><p className="text-sm font-semibold">滚动样本外窗口</p><p className="text-xs text-slate-500">每一行均以前置{downsideRiskResearch.rollingTrainTradingDays}个交易日校准、后续{downsideRiskResearch.rollingValidationTradingDays}个交易日验证；自动寻优只用校准期结果，不将验证期路径反向用于选权。</p></div></div><div className="overflow-auto"><table className="w-full min-w-[1360px] text-xs"><thead className="bg-white text-left text-slate-500"><tr><th className="px-3 py-2">窗口</th><th className="px-3 py-2">训练期</th><th className="px-3 py-2">验证期</th><th className="px-3 py-2">训练样本</th><th className="px-3 py-2">选出权重</th><th className="px-3 py-2">训练目标</th><th className="px-3 py-2">训练收益/回撤</th><th className="px-3 py-2">验证标签</th><th className="px-3 py-2">原始收益</th><th className="px-3 py-2">扣分收益</th><th className="px-3 py-2">过滤收益</th></tr></thead><tbody>{downsideRiskResearch.rollingWindows.map((window) => { const byKey = new Map(window.experiments.map((item) => [item.key, item])); return <tr key={window.index} className="border-t border-slate-100"><td className="px-3 py-2">{window.index}</td><td className="px-3 py-2">{window.calibrationStartDate} 至 {window.calibrationEndDate}</td><td className="px-3 py-2">{window.validationStartDate} 至 {window.validationEndDate}</td><td className="px-3 py-2">{window.trainingSampleSize}</td><td className="px-3 py-2 font-semibold text-fuchsia-800">{window.autoTunedPenaltyWeight}</td><td className="px-3 py-2">{window.trainingObjectiveValue}%</td><td className="px-3 py-2"><span className={window.trainingTotalReturn >= 0 ? "text-rose-600" : "text-emerald-700"}>{window.trainingTotalReturn}%</span> / <span className="text-emerald-700">{window.trainingMaxDrawdown}%</span></td><td className="px-3 py-2 text-emerald-700">{window.labeledSampleSize} / {window.highDownsideRate ?? "-"}%</td>{(["baseline", "riskPenalty", "hardFilter"] as const).map((key) => { const result = byKey.get(key)?.realisticSimulation.totalReturn; return <td key={key} className={`px-3 py-2 font-medium ${result !== undefined && result >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{result ?? "-"}{result === undefined ? "" : "%"}</td>; })}</tr>; })}</tbody></table></div></div></section>}
         {activeTab === "trades" && <p data-trades-relocated-note className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">「当前持仓与下一交易日准备买入」与「全部模拟订单」已迁至「回测总览」页签，便于与全周期五策略收益对比同屏阅读；本页保留资金与仓位审计。</p>}
         {activeTab === "trades" && <section data-capital-position-audit className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start gap-2"><ShieldCheck className="mt-0.5 h-5 w-5 text-emerald-700" /><div><h2 className="font-semibold">资金与仓位审计</h2><p className="mt-1 text-sm text-slate-600">峰值持仓 {simulation.peakOpenPositionCount}/{simulation.assumptions.maxPositions}，最低可用现金 ¥{formatMoney(simulation.minimumCash)}。开盘止损释放的资金仅在同一开盘时点后参与候选排序；收盘出清资金不提前复用。</p></div></div></section>}
-        {activeTab === "overview" && strategyPortfolioSnapshot && selectedStrategyPortfolio && <section data-strategy-portfolio-snapshot className="rounded-2xl border border-sky-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 border-b border-sky-100 pb-4"><div className="flex flex-wrap items-start gap-3"><div className="mr-auto"><p className="text-xs font-bold tracking-[0.16em] text-sky-700">SIMULATED PORTFOLIO SNAPSHOT</p><h2 className="mt-1 font-semibold">当前持仓与下一交易日准备买入</h2><p className="mt-1 max-w-4xl text-xs leading-5 text-slate-600">回测截止日 {formatDate(strategyPortfolioSnapshot.asOfDate)}；计划以最新信号日 {formatDate(strategyPortfolioSnapshot.latestSignalDate)} 的已知信息排序，拟于{strategyPortfolioSnapshot.nextEntryTiming}检查条件后执行。</p><span data-portfolio-provenance className="mt-2 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">口径来源：研究-legacy 模拟器（资金循环复用）· 与「资金与仓位审计」的生产引擎段非等价</span></div><div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="持仓计划策略切换">{orderStrategyOptions.map((option) => <Button key={option.key} type="button" size="sm" variant={portfolioStrategy === option.key ? "default" : "ghost"} role="tab" aria-selected={portfolioStrategy === option.key} onClick={() => setPortfolioStrategy(option.key)} className={portfolioStrategy === option.key ? "bg-sky-700 text-white hover:bg-sky-800" : "text-slate-600"}>{option.label}</Button>)}</div></div><p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{strategyPortfolioSnapshot.definition}</p><p className="text-xs font-medium text-amber-900">模拟计划仅用于历史规则验证，不构成交易建议。</p></div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Metric label="回测可用现金" value={`¥${formatMoney(selectedStrategyPortfolio.availableCash)}`} tone="text-sky-700" /><Metric label="当前持仓 / 最大持仓" value={`${selectedStrategyPortfolio.openPositionCount} / ${selectedStrategyPortfolio.maxPositions}`} /><Metric label="剩余可开仓位" value={`${selectedStrategyPortfolio.availableSlots} 个`} tone={selectedStrategyPortfolio.availableSlots > 0 ? "text-rose-600" : "text-amber-700"} /><Metric label="准备候选 / 高风险剔除" value={`${selectedStrategyPortfolio.candidateCount} / ${selectedStrategyPortfolio.excludedHighRiskCount}`} /></div><p className="mt-3 text-xs leading-5 text-slate-500">{selectedStrategyPortfolio.note}</p><div className="mt-5 grid gap-5 xl:grid-cols-2"><div className="overflow-hidden rounded-xl border border-slate-200"><div className="border-b border-slate-200 bg-slate-50 px-4 py-3"><h3 className="text-sm font-semibold text-slate-800">当前持仓</h3><p className="mt-1 text-xs text-slate-500">仅展示该策略在回测截止日仍未出清的模拟订单。</p></div><div className="max-h-[26rem] overflow-auto"><table className="w-full min-w-[680px] text-xs"><thead className="sticky top-0 z-10 bg-white text-left text-slate-500"><tr><th className="px-3 py-2">股票 / 题材</th><th className="px-3 py-2">信号 / 买入日</th><th className="px-3 py-2">数量 / 买入价 / 成本金额</th><th className="px-3 py-2">估值价 / 浮动</th><th className="px-3 py-2">持仓市值 / 占总权益<span className="mt-0.5 block text-[11px] font-normal text-slate-400">＝ 截止日收盘价 × 股数 ÷ 该策略截止日总权益</span></th><th className="px-3 py-2">续持说明</th></tr></thead><tbody>{selectedStrategyPortfolio.currentHoldings.map((holding) => <tr key={`${holding.signalDate}-${holding.stockCode}`} className="border-t border-slate-100 align-top"><td className="px-3 py-2"><p className="font-medium text-slate-800">{holding.stockName}</p><p className="mt-1 font-mono text-slate-400">{holding.stockCode}</p><p className="mt-1 text-slate-500">{holding.sector}</p></td><td className="whitespace-nowrap px-3 py-2">{formatDate(holding.signalDate)}<br />{formatDate(holding.entryDate)}</td><td className="whitespace-nowrap px-3 py-2">{holding.shares} 股<br />¥{holding.entryPrice ?? "-"}<br /><span className="text-slate-500">成本 {formatHoldingAmount(holdingCostAmount(holding))}</span></td><td className={`whitespace-nowrap px-3 py-2 font-medium ${holding.priceChangePercent !== null && holding.priceChangePercent >= 0 ? "text-rose-600" : "text-emerald-700"}`}>¥{holding.valuationPrice ?? "-"}<br />{holding.priceChangePercent === null ? "估值待补" : `${holding.priceChangePercent}%`}</td><td className="whitespace-nowrap px-3 py-2"><p className="font-semibold text-slate-700">{formatHoldingAmount(holdingMarketAmount(holding))}</p><p className="mt-1 font-mono font-semibold text-sky-700">{formatHoldingWeight(holding, selectedPortfolioEquity)}</p></td><td className="max-w-56 px-3 py-2 leading-5 text-slate-500">{holding.reason ?? "持仓中，等待下一实际交易日按退出规则判断。"}</td></tr>)}</tbody><tfoot><tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-slate-700"><td className="px-3 py-2" colSpan={2}>合计 {holdingsSummary.count} 只</td><td className="whitespace-nowrap px-3 py-2">成本 ¥{formatMoney(holdingsSummary.costTotal)}{holdingsSummary.costCount < holdingsSummary.count ? `（${holdingsSummary.count - holdingsSummary.costCount} 只待补）` : ""}</td><td className="whitespace-nowrap px-3 py-2">{holdingsSummary.floatingAmount === null ? "浮动待补" : `浮动 ${holdingsSummary.floatingAmount >= 0 ? "+" : "-"}¥${formatMoney(Math.abs(holdingsSummary.floatingAmount))}`}</td><td className="whitespace-nowrap px-3 py-2">市值 ¥{formatMoney(holdingsSummary.marketTotal)}<br /><span className="font-normal text-slate-500">占总权益 {holdingsSummary.weightPercent === null ? "待补" : `${holdingsSummary.weightPercent.toFixed(2)}%`}</span></td><td className="whitespace-nowrap px-3 py-2 font-normal text-slate-500">现金 ¥{formatMoney(selectedStrategyPortfolio.availableCash)}<br />总权益 ¥{selectedPortfolioEquity === null ? "待回显" : formatMoney(selectedPortfolioEquity)}</td></tr></tfoot></table>{selectedStrategyPortfolio.currentHoldings.length === 0 && <p className="p-6 text-center text-sm text-slate-500">该策略在回测截止日没有未出清的模拟持仓。</p>}</div></div><div className="overflow-hidden rounded-xl border border-violet-200"><div className="border-b border-violet-100 bg-violet-50/60 px-4 py-3"><h3 className="text-sm font-semibold text-violet-950">下一交易日准备买入</h3><div className="mt-1 space-y-2"><p className="text-xs text-violet-800">最多展示剩余可开仓位数量的优先候选；明日开盘价和成交条件未知，不预设成交。</p></div></div><div className="max-h-[26rem] overflow-auto"><table className="w-full min-w-[680px] text-xs"><thead className="sticky top-0 z-10 bg-white text-left text-slate-500"><tr><th className="px-3 py-2">优先级 / 股票</th><th className="px-3 py-2">题材 / 板数</th><th className="px-3 py-2">原始 / 策略分</th><th className="px-3 py-2">风险</th><th className="px-3 py-2" title={plannedSizing ? `${describePositionSizing(plannedSizing)}；${describeBoardHeightSizingRule(selectedStrategyPortfolio.key, plannedSizing.maxParticipatingBoards)}` : "口径待回显"}>计划仓位 / 预算上限<span className="mt-0.5 block text-[11px] font-normal text-slate-400">占可用现金 · {plannedSizing ? describePositionSizingShort(plannedSizing) : "待回显"}</span></th><th className="px-3 py-2">开盘前置条件</th></tr></thead><tbody>{selectedStrategyPortfolio.preparedBuys.map((plan) => <tr key={`${plan.signalDate}-${plan.stockCode}`} className="border-t border-slate-100 align-top"><td className="px-3 py-2"><p className="font-semibold text-violet-900">#{plan.rank} {plan.stockName}</p><p className="mt-1 font-mono text-slate-400">{plan.stockCode}</p></td><td className="px-3 py-2"><p>{plan.sector}</p><p className="mt-1 text-slate-500">{plan.boards} 板 · {formatDate(plan.signalDate)}</p></td><td className="px-3 py-2"><p>原始 {plan.score}</p><p className="mt-1 font-semibold text-violet-800">策略 {plan.strategyScore}</p></td><td className="px-3 py-2"><p className={plan.riskTier === "高风险" ? "text-rose-600" : plan.riskTier === "中风险" ? "text-amber-700" : "text-emerald-700"}>{plan.riskTier} {plan.riskScore}</p></td><td className="whitespace-nowrap px-3 py-2" data-planned-position><p className="font-mono font-semibold text-violet-700">{plan.plannedBudgetRatio.toFixed(2)}%</p><p className="mt-1 text-slate-500">¥{formatMoney(plan.plannedBudget)}</p>{plan.positionScale < 1 && <span title={describeBoardHeightSizingRule(selectedStrategyPortfolio.key, plannedSizing?.maxParticipatingBoards ?? 0)} className={`mt-1 inline-block rounded px-1 py-0.5 text-[10px] font-medium ${plan.positionScale === 0 ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-800"}`}>{plan.positionScale === 0 ? "超参与上限 · 不分配" : `降仓 ×${plan.positionScale}`}</span>}</td><td className="max-w-64 px-3 py-2 leading-5 text-slate-500">{plan.conditions.join("；")}</td></tr>)}</tbody><tfoot><tr className="border-t-2 border-violet-200 bg-violet-50/60 font-semibold text-violet-900"><td className="px-3 py-2" colSpan={4}>合计 {plannedSizing?.plannedCount ?? 0} 笔{plannedSizing && plannedSizing.positionScaledCount > 0 ? `（其中 ${plannedSizing.positionScaledCount} 笔降仓）` : ""} · {plannedSizing ? describePositionSizing(plannedSizing) : "口径待回显"}；股数待次日开盘价确定，开盘前不预估</td><td className="whitespace-nowrap px-3 py-2">{plannedSizing ? `${plannedSizing.totalPlannedBudgetRatio.toFixed(2)}%` : "-"}</td><td className="whitespace-nowrap px-3 py-2">¥{formatMoney(plannedSizing?.totalPlannedBudget ?? 0)}<br /><span className="font-normal text-slate-500">可用现金 ¥{formatMoney(plannedSizing?.cash ?? 0)}</span></td></tr></tfoot></table>{selectedStrategyPortfolio.preparedBuys.length === 0 && <p className="p-6 text-center text-sm text-slate-500">没有可准备的候选：可能已满仓，或当前策略没有符合条件的候选。</p>}</div></div></div></section>}
+        {activeTab === "overview" && strategyPortfolioSnapshot && selectedStrategyPortfolio && <section id="strategy-portfolio-snapshot" data-strategy-portfolio-snapshot className="scroll-mt-24 rounded-2xl border border-sky-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 border-b border-sky-100 pb-4">
+              <div className="flex flex-wrap items-start gap-3">
+                <div className="mr-auto">
+                  <p className="text-xs font-bold tracking-[0.16em] text-sky-700">SIMULATED PORTFOLIO SNAPSHOT</p>
+                  <h2 className="mt-1 font-semibold">当前持仓与下一交易日准备买入</h2>
+                  <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-600">
+                    回测截止日 {formatDate(strategyPortfolioSnapshot.asOfDate)}；计划以最新信号日 {formatDate(strategyPortfolioSnapshot.latestSignalDate)} 的已知信息排序，拟于{strategyPortfolioSnapshot.nextEntryTiming}检查条件后执行。
+                  </p>
+                  <span data-portfolio-provenance className="mt-2 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                    口径来源：研究-legacy 模拟器（资金循环复用）· 与「资金与仓位审计」的生产引擎段非等价
+                  </span>
+                </div>
+                <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1" role="tablist" aria-label="持仓计划策略切换">
+                  {orderStrategyOptions.map((option) => (
+                    <Button
+                      key={option.key}
+                      type="button"
+                      size="sm"
+                      variant={portfolioStrategy === option.key ? "default" : "ghost"}
+                      role="tab"
+                      aria-selected={portfolioStrategy === option.key}
+                      onClick={() => setPortfolioStrategy(option.key)}
+                      className={portfolioStrategy === option.key ? "bg-sky-700 text-white hover:bg-sky-800" : "text-slate-600"}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{strategyPortfolioSnapshot.definition}</p>
+              <p className="text-xs font-medium text-amber-900">模拟计划仅用于历史规则验证，不构成交易建议。</p>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Metric label="回测可用现金" value={`¥${formatMoney(selectedStrategyPortfolio.availableCash)}`} tone="text-sky-700" />
+              <Metric label="当前持仓 / 最大持仓" value={`${selectedStrategyPortfolio.openPositionCount} / ${selectedStrategyPortfolio.maxPositions}`} />
+              <Metric label="剩余可开仓位" value={`${selectedStrategyPortfolio.availableSlots} 个`} tone={selectedStrategyPortfolio.availableSlots > 0 ? "text-rose-600" : "text-amber-700"} />
+              <Metric label="策略候选 / 策略剔除" value={`${selectedStrategyPortfolio.candidateCount} / ${selectedStrategyPortfolio.excludedHighRiskCount}`} />
+            </div>
+            <p className="mt-3 text-xs leading-5 text-slate-500">{selectedStrategyPortfolio.note}</p>
+            <div className="mt-5 grid items-start gap-5 xl:grid-cols-2">
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-slate-800">当前持仓</h3>
+                  <p className="mt-1 text-xs text-slate-500">仅展示该策略在回测截止日仍未出清的模拟订单。</p>
+                </div>
+                <div className="max-h-[26rem] overflow-auto">
+                  <table className="w-full min-w-[680px] text-xs">
+                    <thead className="sticky top-0 z-10 bg-white text-left text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">股票 / 题材</th>
+                        <th className="px-3 py-2">信号 / 买入日</th>
+                        <th className="px-3 py-2">数量 / 买入价 / 成本金额</th>
+                        <th className="px-3 py-2">估值价 / 浮动</th>
+                        <th className="px-3 py-2">
+                          持仓市值 / 占总权益
+                          <span className="mt-0.5 block text-[11px] font-normal text-slate-400">＝ 截止日收盘价 × 股数 ÷ 该策略截止日总权益</span>
+                        </th>
+                        <th className="px-3 py-2">续持说明</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedStrategyPortfolio.currentHoldings.map((holding) => (
+                        <tr key={`${holding.signalDate}-${holding.stockCode}`} className="border-t border-slate-100 align-top">
+                          <td className="px-3 py-2">
+                            <p className="font-medium text-slate-800">{holding.stockName}</p>
+                            <p className="mt-1 font-mono text-slate-400">{holding.stockCode}</p>
+                            <p className="mt-1 text-slate-500">{holding.sector}</p>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2">
+                            {formatDate(holding.signalDate)}
+                            <br />
+                            {formatDate(holding.entryDate)}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2">
+                            {holding.shares} 股
+                            <br />
+                            ¥{holding.entryPrice ?? "-"}
+                            <br />
+                            <span className="text-slate-500">成本 {formatHoldingAmount(holdingCostAmount(holding))}</span>
+                          </td>
+                          <td className={`whitespace-nowrap px-3 py-2 font-medium ${holding.priceChangePercent !== null && holding.priceChangePercent >= 0 ? "text-rose-600" : "text-emerald-700"}`}>
+                            ¥{holding.valuationPrice ?? "-"}
+                            <br />
+                            {holding.priceChangePercent === null ? "估值待补" : `${holding.priceChangePercent}%`}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2">
+                            <p className="font-semibold text-slate-700">{formatHoldingAmount(holdingMarketAmount(holding))}</p>
+                            <p className="mt-1 font-mono font-semibold text-sky-700">{formatHoldingWeight(holding, selectedPortfolioEquity)}</p>
+                          </td>
+                          <td className="max-w-56 px-3 py-2 leading-5 text-slate-500">{holding.reason ?? "持仓中，等待下一实际交易日按退出规则判断。"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold text-slate-700">
+                        <td className="px-3 py-2" colSpan={2}>合计 {holdingsSummary.count} 只</td>
+                        <td className="whitespace-nowrap px-3 py-2">
+                          成本 ¥{formatMoney(holdingsSummary.costTotal)}
+                          {holdingsSummary.costCount < holdingsSummary.count ? `（${holdingsSummary.count - holdingsSummary.costCount} 只待补）` : ""}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2">
+                          {holdingsSummary.floatingAmount === null ? "浮动待补" : `浮动 ${holdingsSummary.floatingAmount >= 0 ? "+" : "-"}¥${formatMoney(Math.abs(holdingsSummary.floatingAmount))}`}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2">
+                          市值 ¥{formatMoney(holdingsSummary.marketTotal)}
+                          <br />
+                          <span className="font-normal text-slate-500">占总权益 {holdingsSummary.weightPercent === null ? "待补" : `${holdingsSummary.weightPercent.toFixed(2)}%`}</span>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 font-normal text-slate-500">
+                          现金 ¥{formatMoney(selectedStrategyPortfolio.availableCash)}
+                          <br />
+                          总权益 ¥{selectedPortfolioEquity === null ? "待回显" : formatMoney(selectedPortfolioEquity)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  {selectedStrategyPortfolio.currentHoldings.length === 0 && <p className="p-6 text-center text-sm text-slate-500">该策略在回测截止日没有未出清的模拟持仓。</p>}
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-xl border border-violet-200">
+                <div className="border-b border-violet-100 bg-violet-50/60 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-violet-950">下一交易日准备买入</h3>
+                  <p className="mt-1 text-xs text-violet-800">最多展示剩余可开仓位数量的优先候选；明日开盘价和成交条件未知，不预设成交。被已知约束挡下的同池候选列在下方。</p>
+                </div>
+                <div className="max-h-[26rem] overflow-auto">
+                  <table className="w-full min-w-[680px] text-xs">
+                    <thead className="sticky top-0 z-10 bg-white text-left text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">优先级 / 股票</th>
+                        <th className="px-3 py-2">题材 / 板数</th>
+                        <th className="px-3 py-2">原始 / 策略分</th>
+                        <th className="px-3 py-2">风险</th>
+                        <th className="px-3 py-2" title={plannedSizing ? `${describePositionSizing(plannedSizing)}；${describeBoardHeightSizingRule(selectedStrategyPortfolio.key, plannedSizing.maxParticipatingBoards)}` : "口径待回显"}>
+                          计划仓位 / 预算上限
+                          <span className="mt-0.5 block text-[11px] font-normal text-slate-400">占可用现金 · {plannedSizing ? describePositionSizingShort(plannedSizing) : "待回显"}</span>
+                        </th>
+                        <th className="px-3 py-2">开盘前置条件</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedStrategyPortfolio.preparedBuys.map((plan) => (
+                        <tr key={`${plan.signalDate}-${plan.stockCode}`} className="border-t border-slate-100 align-top">
+                          <td className="px-3 py-2">
+                            <p className="font-semibold text-violet-900">#{plan.rank} {plan.stockName}</p>
+                            <p className="mt-1 font-mono text-slate-400">{plan.stockCode}</p>
+                          </td>
+                          <td className="px-3 py-2">
+                            <p>{plan.sector}</p>
+                            <p className="mt-1 text-slate-500">{plan.boards} 板 · {formatDate(plan.signalDate)}</p>
+                          </td>
+                          <td className="px-3 py-2">
+                            <p>原始 {plan.score}</p>
+                            <p className="mt-1 font-semibold text-violet-800">策略 {plan.strategyScore}</p>
+                          </td>
+                          <td className="px-3 py-2">
+                            <p className={plan.riskTier === "高风险" ? "text-rose-600" : plan.riskTier === "中风险" ? "text-amber-700" : "text-emerald-700"}>{plan.riskTier} {plan.riskScore}</p>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2" data-planned-position>
+                            <p className="font-mono font-semibold text-violet-700">{plan.plannedBudgetRatio.toFixed(2)}%</p>
+                            <p className="mt-1 text-slate-500">¥{formatMoney(plan.plannedBudget)}</p>
+                            {plan.positionScale < 1 && (
+                              <span title={describeBoardHeightSizingRule(selectedStrategyPortfolio.key, plannedSizing?.maxParticipatingBoards ?? 0)} className="mt-1 inline-block rounded bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-800">
+                                {`降仓 ×${plan.positionScale}`}
+                              </span>
+                            )}
+                          </td>
+                          <td className="max-w-64 px-3 py-2 leading-5 text-slate-500">{plan.conditions.join("；")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-violet-200 bg-violet-50/60 font-semibold text-violet-900">
+                        <td className="px-3 py-2" colSpan={4}>
+                          合计 {selectedStrategyPortfolio.preparedBuys.length} 笔实际计划买入
+                          {plannedSizing && plannedSizing.plannedCount !== selectedStrategyPortfolio.preparedBuys.length ? ` · 分仓按 ${plannedSizing.plannedCount} 个入选名额` : ""}
+                          {plannedSizing && plannedSizing.positionScaledCount > 0 ? `（其中 ${plannedSizing.positionScaledCount} 笔降仓）` : ""}
+                          {" · "}
+                          {plannedSizing ? describePositionSizing(plannedSizing) : "口径待回显"}；股数待次日开盘价确定，开盘前不预估
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2">{plannedSizing ? `${plannedSizing.totalPlannedBudgetRatio.toFixed(2)}%` : "-"}</td>
+                        <td className="whitespace-nowrap px-3 py-2">
+                          ¥{formatMoney(plannedSizing?.totalPlannedBudget ?? 0)}
+                          <br />
+                          <span className="font-normal text-slate-500">可用现金 ¥{formatMoney(plannedSizing?.cash ?? 0)}</span>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  {selectedStrategyPortfolio.preparedBuys.length === 0 && <p className="p-6 text-center text-sm text-slate-500">没有可安排的计划买入；完整原因见下方候选但不能买入池。</p>}
+                </div>
+                <BlockedCandidateTable candidates={selectedStrategyPortfolio.blockedBuys} />
+              </div>
+            </div>
+          </section>
+        }
         {activeTab === "overview" && <FullOrdersSection
           strategy={orderStrategy}
           onStrategyChange={(strategy) => { setOrderStrategy(strategy); setReason("all"); }}

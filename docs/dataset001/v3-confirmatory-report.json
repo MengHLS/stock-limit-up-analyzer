@@ -1,0 +1,47 @@
+{
+  "datasetCode": "first_limit_pullback",
+  "version": "v3-confirmatory",
+  "versionId": 540002,
+  "jobId": "ds001-v3-confirmatory-1790012911170-f902a9d4",
+  "status": "COMPLETED",
+  "window": {
+    "from": "2019-01-01",
+    "to": "2024-08-31"
+  },
+  "filter": {
+    "boards": [
+      "main"
+    ],
+    "excludeSt": true,
+    "events": [
+      {
+        "relativeDay": 0,
+        "kind": "firstBoard"
+      }
+    ],
+    "preWindowDays": 20,
+    "postWindowDays": 20,
+    "outcomeHorizons": [
+      5,
+      10,
+      20
+    ],
+    "batchSize": 1000
+  },
+  "counts": {
+    "events": 49154,
+    "prefixes": 1026583,
+    "posts": 983080,
+    "paths": 983080,
+    "outcomes": 147462,
+    "totalRows": 3189359
+  },
+  "processedRows": 3140205,
+  "failedRows": 0,
+  "chunks": 49154,
+  "elapsedSec": 606.9,
+  "throughput": {
+    "rowsPerSec": 5255.2,
+    "eventsPerSec": 81
+  }
+}

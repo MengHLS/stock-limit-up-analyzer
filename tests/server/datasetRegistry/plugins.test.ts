@@ -118,12 +118,23 @@ describe("内置插件：first_limit_pullback", () => {
       expect(eventSql).not.toContain(col);
     }
 
-    // prefix / post 严格同构：除表名与索引前缀外逐字相同。
-    expect(prefixSql.replace(/prefix/g, "X")).toBe(postSql.replace(/post/g, "X"));
+    // prefix 保持 PIT 原始窗口；post 在原始 OHLC 上追加执行 / 可交易性事实。
+    expect(prefixSql).toContain("`relativeDay`");
+    expect(prefixSql).toContain("`preClose`");
+    expect(prefixSql).not.toContain("`limitUpPrice`");
+    expect(postSql).toContain("`relativeDay`");
+    expect(postSql).toContain("`preClose`");
+    for (const col of [
+      "limitUpPrice",
+      "limitDownPrice",
+      "barPresent",
+      "suspensionStatus",
+      "canBuyAtOpen",
+      "canSellAtClose",
+    ]) {
+      expect(postSql).toContain(`\`${col}\``);
+    }
     for (const sql of [prefixSql, postSql]) {
-      expect(sql).toContain("`relativeDay`");
-      expect(sql).toContain("`close`");
-      // 原始行情表禁止出现衍生列（结构级 PIT 防线）。
       expect(sql).not.toContain("FromEventClose");
       expect(sql).not.toContain("isBreakout");
     }

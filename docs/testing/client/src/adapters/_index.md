@@ -2,7 +2,7 @@
 
 # 测试模块：tests/client/src/adapters
 
-- 测试文件 **5** 个 ｜ 用例声明 **147** 个
+- 测试文件 **4** 个 ｜ 用例声明 **98** 个
 - 涉及源码目录：`client/src/adapters/` · `server/research/strategyCandidate/` · `shared/`
 
 ## 怎么跑
@@ -76,72 +76,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - formatCount：number 千分位 / null → —
   - formatDateTime：ISO → 本地 YYYY-MM-DD HH:mm / null → —
 
-### `tests/client/src/adapters/researchEngineAdapter.test.ts`
-- 719 行 ｜ 用例声明 50 ｜ describe 10
-- 被测源码：`client/src/adapters/researchEngineAdapter.ts`
-- 单跑：`pnpm exec vitest run tests/client/src/adapters/researchEngineAdapter.test.ts`
-- 用例树：
-- **researchEngineAdapter — 指标单位与格式化**
-  - 自带单位的指标码不依赖变量名
-  - 无单位指标码必须看变量名（同一 MEAN 在不同变量上单位不同）
-  - 收益型变量识别覆盖后端全部收益变量族
-  - 百分比 / 计数 / 统计量各自格式化；null 一律显示 —（不显示 0）
-  - 极小非零百分比不被显示成假零
-  - 标签：指标中文名 / 变量中文名；未收录原样返回不臆造
-  - 时长格式化
-- **researchEngineAdapter — 分组维度**
-  - 五种真实维度写法都能渲染成可读标签
-  - 维度排序键稳定且与键顺序无关
-  - Q2 必须排在 Q10 之前（数值排序，不是字符串排序）
-- **researchEngineAdapter — 结果行 / 分组块**
-  - 逐指标保留各自的样本数，分母不一致时不给统一的「组样本数」
-  - 全部指标样本数一致时才给出统一的组样本数
-  - 标量行与分组行分离（顶底差 / p 值差值走 SCALAR）
-  - 结果行读取 details.variable 以决定单位；缺失变量时不猜
-  - 指标值为 null 的合法结果行显示 —，不显示 0
-- **researchEngineAdapter — 分档区间与结论速览**
-  - 分档端点反解：首档 ≤、末档 >、中间为左开右闭（与 band(v) 规则同源）
-  - 区间把「第 5 档」翻成「跌幅最小」—— 档号本身不含方向，靠它才读得懂符号
-  - 非分档分组（条件组 / 变量 / 板块）不产出区间，不臆造
-  - QUANTILE 的区间单位由特征变量决定（比例型特征 → 百分数）
-  - buildHeadline 对分档分析给出顶底档与引擎写入的差值口径
-  - buildHeadline 对条件分析把「满足条件」当主语、「全样本」当参照（差值口径原样带出）
-  - 名义分类维度（变量 / 板块 / 行业）不做顶底差 —— 无序维度之间没有「差值」可言
-  - 分组不足 2 组时不硬凑结论
-- **researchEngineAdapter — 对照组反推**
-  - 按恒等式反推「不满足条件」那组的均值
-  - 条件组均值与全样本相同时，反推值也相同（不会凭空造出差异）
-  - 反推值可无损还原全样本均值（round-trip）
-  - 没有剩余样本（条件组 ≥ 全样本）时返回 null，而不返回 0 或自身
-  - 计数缺失或非正时返回 null（宁可缺数，也不给可疑数）
-  - 均值缺失或非有限数时返回 null
-- **researchEngineAdapter — 有序变量序列（趋势图）**
-  - volume_ratio 的中文名已登记（防回归成「volume_ratio T+1」这种半工程名）
-  - 量比族：识别为有序序列，基准线 = 1，点按滞后阶数升序
-  - 收益族的基准线是 0（不是 1）
-  - 指标码去重且保持首次出现顺序
-  - 族不一致 / 变量名不是滞后族 / 混入分组维度 → 不认（宁可不出图，也不乱出）
-  - 滞后重复 / 少于 2 个点 → null
-- **researchEngineAdapter — 实验 / Run**
-  - runToVm 由起止时间算时长；失败原因必须冒泡
-  - 预检拒绝（从未 startedAt）时长为 null，而不是 0
-  - experimentToVm 归一 null 字段
-- **researchEngineAdapter — 结论 evidence**
-  - 解析真实 evidence：阈值口径 / 主效应 / 规则轨迹 / 免责声明全部落位
-  - 主分析为 null（证据不足分支）不崩，且仍保留阈值与轨迹
-  - 兼容统一之前落库的旧键名（trace / analyses）
-  - evidence 缺失 / 非对象时返回空壳而不是抛错（老数据兼容）
-- **researchEngineAdapter — Finding → VM（RESEARCH-FINDING-001）**
-  - findingTypeLabelOf 覆盖六维类型；未收录回退原值
-  - 数值原样映射；缺失即 null，不在前端重算
-  - 基准不可得时显式标记 benchmarkUnavailable，而不是假装有基准
-  - 档位明细优先级：effect.buckets > monotonicity.buckets > horizon.points
-- **researchEngineAdapter — 错误诊断**
-  - 引擎错误码被翻译成「下一步做什么」，而非裸抛错误码
-  - 支持 [CODE] 包裹形式
-  - 未知错误退化为通用 RPC_ERROR，不臆造建议
-  - 空消息也有可读解释
-
 ### `tests/client/src/adapters/strategyAdapter.test.ts`
 - 128 行 ｜ 用例声明 9 ｜ describe 2
 - 被测源码：`client/src/adapters/strategyAdapter.ts`
@@ -160,7 +94,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - emptyRule 生成合法默认规则
 
 ### `tests/client/src/adapters/strategyCandidateAdapter.test.ts`
-- 648 行 ｜ 用例声明 50 ｜ describe 12
+- 697 行 ｜ 用例声明 51 ｜ describe 12
 - 被测源码：`client/src/adapters/strategyCandidateAdapter.ts` · `server/research/strategyCandidate/candidateTypes.ts`
 - 单跑：`pnpm exec vitest run tests/client/src/adapters/strategyCandidateAdapter.test.ts`
 - 用例树：
@@ -214,7 +148,8 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 9-i) 草图类失败的建议是「回去改草稿」，不是「在转正时另给定义」
   - 9-j) 状态不对时建议「先流转到 ACCEPTED」（可执行，而不是泛泛重试）
 - **promotionProvenanceToVm**
-  - 10-a) 完整溯源：来源类型 + 五个上游坐标 + 创建时间，一项不少
+  - 10-a2) 独立实验来源：**不显示**三个旧锚行，改为显示实验坐标（RESEARCH-EXPERIMENT-002）
+  - 10-a) 完整溯源：来源类型 + 来源体系 + 五个上游坐标 + 创建时间，一项不少
   - 10-b) 没有溯源行（未转正 / 非本系统产出）→ hasProvenance=false 且**不生成**空行
   - 10-c) 上游已删除：如实标注该行缺失 + 明说「不影响策略读取与执行」（§23）
   - 10-d) 无缺失时不显示无用提示

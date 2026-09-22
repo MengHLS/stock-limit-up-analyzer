@@ -36,6 +36,7 @@ import { evaluateTradeQualityMetrics } from "../tradeQualityMetrics/evaluate";
 import { runCandidateEngine } from "../signalEngine/engine";
 import { computeCandidateEvaluationRunFingerprint } from "../signalEngine/serialize";
 import { runTradeSimulation } from "../simulator/engine";
+import type { SecurityBoard } from "../simulator/types";
 import { buildRegimeDayFactsFromDatasetRows } from "../marketRegime/facts";
 import { runMarketRegimeAnalysis } from "../marketRegime/run";
 import type { RegimeDayFacts } from "../marketRegime/types";
@@ -513,7 +514,23 @@ function buildExecutor(
             "装配层：backtest 阶段需要 inputs.simulationConfig（真实交易模拟配置）。",
           );
         }
-        const run = runTradeSimulation({ dataset, sourceRun, simConfig });
+        const securityBoards: Record<string, SecurityBoard> = {};
+        for (const row of dataset.rows) {
+          if (securityBoards[row.securityId] !== undefined) continue;
+          const code = row.code ?? "";
+          securityBoards[row.securityId] = row.exchange === "BJ"
+            ? "bse"
+            : code.startsWith("688")
+              ? "star"
+              : code.startsWith("300") || code.startsWith("301")
+                ? "gem"
+                : "main";
+        }
+        const run = runTradeSimulation({
+          dataset,
+          sourceRun,
+          simConfig: { ...simConfig, securityBoards },
+        });
         artifacts.tradeSimulationRun = run;
         // 复用既有适配器做投影（不重写摘要口径）
         return summarizeTradeSimulationRun(run) as ClosedLoopHandoff;

@@ -70,20 +70,10 @@ import type { LifecycleConfigInput } from "./lifecycleConfig";
 import { buildLifecycleConfig } from "./lifecycleConfig";
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
 import { perfCount, perfRun, perfRunAsync } from "../observability";
+import { LoopRunAssemblyError } from "./errors";
+import { mapDeclaredExitPolicy } from "./exitPolicy";
 
-// ---------------------------------------------------------------------------
-// 错误
-// ---------------------------------------------------------------------------
-
-/** 装配错误（消息必须能直接指向「缺哪个字段 / 去改哪里」）。 */
-export class LoopRunAssemblyError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "LoopRunAssemblyError";
-    this.code = code;
-  }
-}
+export { LoopRunAssemblyError } from "./errors";
 
 /**
  * BACKTEST-002（R-02）— 文档 `positionSizing` 声明 → 执行层仓位口径（**唯一映射实现**）。
@@ -883,6 +873,7 @@ export function assembleStrategySide(
   }
   // BACKTEST-002（B-02/R-02）— 文档声明的仓位口径 → 执行层口径（**唯一实现**，见 `mapDeclaredPositionSizing`）。
   const declaredPositionSizing = mapDeclaredPositionSizing(document.positionSizing);
+  const declaredExitPolicy = mapDeclaredExitPolicy(document.definition?.exit?.rules, parameterSet);
   const positionSizingMapping = mapPositionSizing({
     sizingMethod: declaredPositionSizing.sizingMethod,
     maxPositions: backtestConfig.maxPositions ?? null,
@@ -908,6 +899,9 @@ export function assembleStrategySide(
       fraction: declaredPositionSizing.fraction,
       fixedAmount: declaredPositionSizing.fixedAmount,
     },
+    ...(declaredExitPolicy !== undefined
+      ? { exitPolicy: declaredExitPolicy }
+      : {}),
     // BACKTEST-002（B-05）— 零成交量政策（保守：不可成交）。
     zeroVolumePolicy: backtestPolicy.zeroVolumePolicy,
   };

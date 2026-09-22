@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/researchDataset
 
-- 测试文件 **9** 个 ｜ 用例声明 **89** 个
+- 测试文件 **9** 个 ｜ 用例声明 **90** 个
 - 涉及源码目录：`server/corporateActions/` · `server/data/` · `server/marketData/` · `server/researchDataset/` · `server/security/` · `server/securityStatus/`
 
 ## 怎么跑
@@ -142,7 +142,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - d > N / 非整数 / 缺失 ⇒ 响亮抛错（绝不静默退回整窗）
 
 ### `tests/server/researchDataset/tDayFilter.test.ts`
-- 89 行 ｜ 用例声明 6 ｜ describe 3
+- 156 行 ｜ 用例声明 7 ｜ describe 3
 - 被测源码：`server/researchDataset/tDayFilter.ts` · `server/researchDataset/types.ts`
 - 单跑：`pnpm exec vitest run tests/server/researchDataset/tDayFilter.test.ts`
 - 用例树：
@@ -150,7 +150,8 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 主板 10%、创业板/科创板 20%、北交所 30%、ST 主板 5%
   - unknown 板块 / 无代码 → null（不可判，不伪造）
 - **isRowLimitUp**
-  - close ≥ 涨停价 → 涨停（主板 10%）
+  - close 等于交易所口径涨停价 → 涨停（主板 10%）
+  - 不足 10% 的分价涨停保留，高于涨停价的异常值排除
   - ST 主板按 5% 判定
   - 价格缺失 / 板块不可判 → false（保守不入选）
 - **matchesTDayCondition**

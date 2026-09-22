@@ -99,6 +99,11 @@ export interface FirstLimitPullbackEvent {
   previousClose: number | null;
   /** 涨停价（由 previousClose 派生，四舍五入到分）。 */
   limitUpPrice: number | null;
+  /** 跌停价（由 previousClose 派生，四舍五入到分）；v3 起填充。 */
+  limitDownPrice?: number | null;
+  limitRuleUp?: number | null;
+  limitRuleDown?: number | null;
+  limitRuleVersion?: string | null;
   /** t 日换手率（来自流动性富集 liquidity_daily.turnoverRate，非日线列）。 */
   turnover: number | null;
   isFirstLimit: boolean | null;
@@ -124,6 +129,23 @@ export interface FirstLimitPullbackRawBar {
   high: number | null;
   low: number | null;
   close: number | null;
+  /** 原始日线前收（含除权口径）；旧版本为 null。 */
+  preClose?: number | null;
+  /** v3 post 专用：执行 / 可交易性事实；prefix 与旧版本为 null。 */
+  limitUpPrice?: number | null;
+  limitDownPrice?: number | null;
+  limitRuleUp?: number | null;
+  limitRuleDown?: number | null;
+  limitRuleVersion?: string | null;
+  barPresent?: boolean | null;
+  suspensionStatus?: "SUSPENDED" | "NOT_SUSPENDED" | "UNKNOWN" | null;
+  suspensionSource?: "PIT_STATUS" | "WINDOW" | "NO_BAR" | "UNKNOWN" | null;
+  openAtLimitUp?: boolean | null;
+  closeAtLimitDown?: boolean | null;
+  oneWordLimitUp?: boolean | null;
+  oneWordLimitDown?: boolean | null;
+  canBuyAtOpen?: boolean | null;
+  canSellAtClose?: boolean | null;
   volume: number | null;
   amount: number | null;
 }

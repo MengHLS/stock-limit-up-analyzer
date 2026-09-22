@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server
 
-- 测试文件 **57** 个 ｜ 用例声明 **522** 个
-- 涉及源码目录：`client/src/lib/` · `drizzle/` · `server/` · `server/_core/` · `server/corporateActions/` · `server/data/` · `server/marketData/` · `server/research/` · `server/research/closedLoop/` · `server/research/framework/` · `server/research/performanceMetrics/` · `server/researchCore/` · `server/researchEngine/` · `server/security/` · `server/securityStatus/` · `shared/`
+- 测试文件 **55** 个 ｜ 用例声明 **473** 个
+- 涉及源码目录：`client/src/lib/` · `drizzle/` · `server/` · `server/_core/` · `server/corporateActions/` · `server/data/` · `server/marketData/` · `server/research/closedLoop/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/performanceMetrics/` · `server/security/` · `server/securityStatus/` · `shared/`
 
 ## 怎么跑
 
@@ -47,7 +47,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 脚本源码不得再使用 String(price.x) 静默降级，必须复用生产校验入口
 
 ### `tests/server/backtestPage.test.ts`
-- 253 行 ｜ 用例声明 3 ｜ describe 1 ｜ 📄 源码文本断言
+- 256 行 ｜ 用例声明 3 ｜ describe 1 ｜ 📄 源码文本断言
 - 被测源码：**无相对/别名 import**（自足纯函数或读文件断言）
 - 单跑：`pnpm exec vitest run tests/server/backtestPage.test.ts`
 - 用例树：
@@ -139,6 +139,16 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 证据清单来自真实文件（含 gate 与 audit 状态）
 - **FE-1 router 注册守卫**
   - appRouter 暴露 dataHealth 路由
+
+### `tests/server/dbPoolConfig.test.ts`
+- 68 行 ｜ 用例声明 3 ｜ describe 1
+- 被测源码：`server/db.ts`
+- 单跑：`pnpm exec vitest run tests/server/dbPoolConfig.test.ts`
+- 用例树：
+- **BD-24 · 池的空闲回收阈值 vs 实测链路空闲窗口**
+  - 默认阈值严格小于实测窗口下界 —— 改回 600_000（旧值）即红
+  - 源码里的窗口下界常量 == 落盘证据里 aliveAtSec 的最大值（数字不靠记忆）
+  - env 覆盖仍然生效（运维可临时回退，不必改代码）
 
 ### `tests/server/downsideRisk.test.ts`
 - 354 行 ｜ 用例声明 13 ｜ describe 1
@@ -701,111 +711,26 @@ pnpm run test:changed                                  # 只跑改动相关（�
 
 ### `tests/server/researchContracts.test.ts`
 - 152 行 ｜ 用例声明 13 ｜ describe 4
-- 被测源码：`server/routers.ts` · `shared/researchContracts.ts` · `server/research/index.ts`
+- 被测源码：`server/routers.ts` · `shared/researchContracts.ts` · `server/research/lifecycle/index.ts`
 - 单跑：`pnpm exec vitest run tests/server/researchContracts.test.ts`
 - 用例树：
 - **FE-0 · 契约一致性守卫**
   - shared 生命周期状态枚举与后端 STRATEGY_LIFECYCLE_STATUSES 完全一致
 - **FE-0 · appRouter 注册（R6 回归锁）**
   - historicalState / researchDataset / research 三个 router 均已暴露
-  - research 下含 strategy 与 lifecycle 子路由
-  - research.strategy 下含 STEP STRATEGY-002 CRUD 端点（注册守卫）
+  - strategyDomain 下含 strategy 与 lifecycle 子路由
+  - strategyDomain.strategy 下含 STEP STRATEGY-002 CRUD 端点（注册守卫）
 - **FE-0 · 入参 schema 校验**
   - isoDateSchema 拒绝非 YYYY-MM-DD
   - historicalState.asOf 入参：缺 securityId 或非法日期被拒
   - researchDataset.build 入参：名称/日期校验 + 限流字段为正整数
   - lifecycle.transition 入参：reason 非空（§23 四要素）
 - **FE-0 · 纯函数端点（经 tRPC caller）**
-  - research.strategy.validate：非法本体返回 valid=false 且不抛异常
-  - research.strategy.bump：semver 推进语义正确
-  - research.lifecycle.describe：返回后端权威 8 态与迁移表
-  - research.lifecycle.transition：合法相邻迁移返回新记录（append-only，不改原记录）
-  - research.lifecycle.transition：跳级迁移被拒绝（不静默成功）
-
-### `tests/server/researchEngineRouter.test.ts`
-- 927 行 ｜ 用例声明 43 ｜ describe 9
-- 被测源码：`server/routers.ts` · `server/researchEngineRouter.ts` · `server/researchCore/index.ts` · `server/researchEngine/errors.ts` · `server/researchEngine/testFixtures.ts`
-- 单跑：`pnpm exec vitest run tests/server/researchEngineRouter.test.ts`
-- 用例树：
-- **researchEngineRouter — 注册与权限**
-  - appRouter 暴露全部 researchEngine 端点
-  - 注册 researchEngine 未破坏既有 router
-  - 写端点与执行端点必须管理员：未登录 / 非管理员一律拒绝
-  - 维护端点（update / delete）同样必须管理员：未登录一律拒绝
-- **researchEngineRouter — 变量目录**
-  - listVariables 只暴露 Dataset 真实存在的视界
-  - listVariables 对不存在的 Dataset Version → NOT_FOUND
-- **researchEngineRouter — 端到端链路**
-  - QUANTILE：Experiment → Run → Analysis → Result → Conclusion 全链路可查回
-  - 已 COMPLETED 的 Run 不允许重复执行（CONFLICT）
-  - 重跑同一 Run 时结果被整批重写而非追加
-  - 分析条件替换后旧产物失效：清结果 + 删失效结论 + 回退 PENDING（于是可重跑）
-- **researchEngineRouter — 维护端点（更新 / 级联删除）**
-  - updateExperiment 改名生效；datasetVersionId 不可改（schema 里没有该键）
-  - updateExperiment 空 patch → BAD_REQUEST（拒绝无意义写）
-  - deleteExperiment 级联删干净：实验 / Run / 分析 / 结果 / 假设 / 结论全为 0 残留
-  - deleteExperiment 未命中 → NOT_FOUND
-  - deleteRun 只删归属该 Run 的结论：另一个 Run 的结论必须保留
-  - deleteRun 未命中 → NOT_FOUND
-  - deleteRun 对 RUNNING 的 Run → CONFLICT（拒绝删除飞行中的写入）
-  - deleteAnalysis 删分析 + 子行 + 证据指向它的结论（Run 保留）
-  - updateHypothesis / deleteHypothesis 生效（删假设连带删其结论）
-  - updateAnalysis 改名称生效，且不影响已落库结果
-- **researchEngineRouter — 错误码映射**
-  - 未找到 Experiment → NOT_FOUND
-  - 未找到 Run → NOT_FOUND
-  - Run 不属于该 Experiment → CONFLICT
-  - 未知变量 → BAD_REQUEST（引擎在计算前就拒绝）
-  - 没有任何分析 → BAD_REQUEST
-  - runEngine 失败后 Run 必须落 FAILED + errorCode（可查回）
-  - getExperiment / getRun / getAnalysis 未命中 → NOT_FOUND
-- **researchEngineRouter — 增量补跑（runIncremental）**
-  - 整轮执行后新增分析：走路由补跑 → 有新结果、有批次日志、不生成结论、旧结果不变
-  - 从未整轮执行过（无基准快照）→ PRECONDITION_FAILED
-  - 已 COMPLETED 的分析不可补跑 → CONFLICT；无待补跑分析 → CONFLICT
-- **researchEngineRouter — 批量建分析（createAnalyses）**
-  - 一次提交建出一组分析，且 created 的 index 能映射回入参
-  - CONDITIONAL 带条件时条件真实落库（组号连续）
-  - 预检未通过 → 整批拒绝，**一个都不建**（BAD_REQUEST）
-  - CONDITIONAL 缺条件 → 预检拦住（不写出一个跑不了的分析）
-  - Run 不存在 → NOT_FOUND
-- **researchEngineRouter — 分析模板（跨实验复用）**
-  - 创建 → 清单 → 按模板铺到另一个 Run（跨实验复用）
-  - 模板里带条件时，展开后条件是**真关系行**（不是 JSON 直通）
-  - 模板名重名 → CONFLICT（名字是「一键铺开」的不歧义引用基础）
-  - 空模板明细 → BAD_REQUEST（zod min(1)），不写出一个铺不出东西的模板
-  - 模板不存在 → NOT_FOUND（apply 与 delete 都如此）
-  - 删除模板：明细一并消失，且不影响已铺出的分析
-- **researchEngineRouter — 默认实例契约**
-  - getConclusionPolicy 返回引擎默认阈值（前端展示用）
-  - ResearchEngineError 是 Engine 边界上唯一的领域错误类型
-
-### `tests/server/researchEngineRouterFinding.test.ts`
-- 278 行 ｜ 用例声明 9 ｜ describe 3
-- 被测源码：`server/researchEngineRouter.ts` · `server/researchCore/index.ts` · `server/researchEngine/testFixtures.ts`
-- 单跑：`pnpm exec vitest run tests/server/researchEngineRouterFinding.test.ts`
-- 用例树：
-- **researchEngineRouter — Finding 端点**
-  - runEngine 收口自动检测 Finding；listFindings / getFinding 可查回
-  - detectFindings 端点幂等：重跑不翻倍（fingerprint 去重）
-  - reviewFinding 状态机：DISCOVERED → REVIEWED → SUPPORTED 合法；跳级被拒
-  - getFinding / reviewFinding 对不存在的 id 报 NOT_FOUND
-- **researchEngineRouter — Hypothesis 补充端点**
-  - getHypothesis 查回；testHypothesis 置 TESTABLE 需三件套
-  - testHypothesis 状态机：形式化后可逐级推进；跳级被拒
-- **researchEngineRouter — Candidate 从假设转出**
-  - 非 SUPPORTED 假设不能转候选（§26 不要自动生成 Strategy）
-  - SUPPORTED 假设可转出 DRAFT 候选，并落谱系锚（sourceHypothesisId / sourceFindingIds）
-  - 不存在的假设报 NOT_FOUND
-
-### `tests/server/researchFindingIntegration.test.ts`
-- 153 行 ｜ 用例声明 2 ｜ describe 1
-- 被测源码：`server/researchEngineRouter.ts` · `server/researchCore/index.ts` · `server/researchEngine/testFixtures.ts`
-- 单跑：`pnpm exec vitest run tests/server/researchFindingIntegration.test.ts`
-- 用例树：
-- **RESEARCH-FINDING-001 闭环集成（Analysis → Result → Finding → Hypothesis → Candidate）**
-  - 五段闭环逐跳谱系可回溯
-  - 非 SUPPORTED 假设在闭环中卡在 Hypothesis 段（§26 不得跳转）
+  - strategyDomain.strategy.validate：非法本体返回 valid=false 且不抛异常
+  - strategyDomain.strategy.bump：semver 推进语义正确
+  - strategyDomain.lifecycle.describe：返回后端权威 8 态与迁移表
+  - strategyDomain.lifecycle.transition：合法相邻迁移返回新记录（append-only，不改原记录）
+  - strategyDomain.lifecycle.transition：跳级迁移被拒绝（不静默成功）
 
 ### `tests/server/researchRunRouter.test.ts`
 - 334 行 ｜ 用例声明 17 ｜ describe 5
@@ -954,7 +879,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 指数同步端点在路由层注册，且写入路径要求管理员
 
 ### `tests/server/strategyPortfolio.test.ts`
-- 191 行 ｜ 用例声明 8 ｜ describe 2
+- 242 行 ｜ 用例声明 10 ｜ describe 2
 - 被测源码：`server/leaderCandidates.ts` · `server/positionBudget.ts` · `shared/boardHeightRisk.ts`
 - 单跑：`pnpm exec vitest run tests/server/strategyPortfolio.test.ts`
 - 用例树：
@@ -962,8 +887,10 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 只以最新信号日生成下一实际交易日准备买入优先级，不预设未知开盘成交
   - 当前持仓取模拟截止日未出清订单，并且准备买入不重复已有持仓
   - 高风险硬过滤与质量门控的准备清单均不包含被阈值排除的候选
+  - 未达到生效最低分的当日候选不进入准备买入或不可买池
   - 准备买入清单回显计划仓位：等权分仓、比例自洽、原始策略不降仓
   - 非基准策略按高位连板系数降低仓位（5 板 ×0.6），原始基准不降仓
+  - 超过高位连板参与上限的候选移出准备买入，并在不可买池说明仓位系数为 0
 - **单笔计划预算分配（分仓口径唯一权威）**
   - 等权 / 评分加权 / 固定比例三种口径与交易模拟器一致
   - 评分加权合计为 0 时退化为等权；positionScale 只缩放该笔预算

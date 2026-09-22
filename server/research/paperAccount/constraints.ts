@@ -19,8 +19,7 @@
  *   逐单委托价，账户层只收「成交结果」，仍为 RECORDED_ONLY（不强制执行）。
  *
  * 涨跌停口径（显式引用，不重写）：
- *   复用 STEP 8 backtest/execution#limitState 的判定（engine/execution 的
- *   limitUpPrice/limitDownPrice，prevClose × (1 ± ratio)，不四舍五入到分），
+ *   复用 STEP 5 的四舍五入到分口径计算涨跌停价；开盘价达到该价格即触及，
  *   幅度解析复用 DEFAULT_MARKET_RULES.resolvePriceLimit（main ±10% / gem·star ±20% /
  *   bse ±30%），板块来自 C-14.3 声明 marketClaims.boards（缺省 main）。
  *
@@ -29,7 +28,10 @@
 
 import type { Security } from "../../backtest/types";
 import { DEFAULT_MARKET_RULES } from "../../backtest/marketRules";
-import { limitDownPrice, limitUpPrice } from "../../engine/execution";
+import {
+  exchangeLimitDownPrice,
+  exchangeLimitUpPrice,
+} from "../../data/boardRules";
 import { computeTradeCost } from "../../backtest/cost";
 import { toEngineCostModel } from "../costModel/mappers";
 import type { CostModelDeclaration } from "../costModel/types";
@@ -46,10 +48,19 @@ import { PAPER_ACCOUNT_ERROR_CODES, PaperAccountError } from "./errors";
 // ---------------------------------------------------------------------------
 
 /** 六维（贴近实盘六维，对齐 ROADMAP §25 STEP 23）。 */
-export type PaperSixDimension = "Signal" | "Position" | "Execution" | "Risk" | "Capital" | "Cost";
+export type PaperSixDimension =
+  | "Signal"
+  | "Position"
+  | "Execution"
+  | "Risk"
+  | "Capital"
+  | "Cost";
 
 /** 账户层约束落地状态。 */
-export type PaperEnforcementState = "ENFORCED" | "RECORDED_ONLY" | "NOT_DECLARED";
+export type PaperEnforcementState =
+  | "ENFORCED"
+  | "RECORDED_ONLY"
+  | "NOT_DECLARED";
 
 /** 账户层能力矩阵条目。 */
 export interface PaperAccountConstraintEnforcementItem {
@@ -86,60 +97,149 @@ export function describePaperAccountConstraintEnforcement(
   const t = declaration.timing;
   return [
     // -- Signal 维（注入式记录，不做生成） --
-    item("signal.source", "信号来源", "Signal", "RECORDED_ONLY",
-      "信号由调用方注入（PaperSignalSource），账户层只记录不做生成（C-23.2 编排）"),
+    item(
+      "signal.source",
+      "信号来源",
+      "Signal",
+      "RECORDED_ONLY",
+      "信号由调用方注入（PaperSignalSource），账户层只记录不做生成（C-23.2 编排）"
+    ),
 
     // -- Position 维（持仓状态机 + T+1） --
-    item("position.stateMachine", "持仓状态机", "Position", "ENFORCED",
-      "开仓/加仓/减仓/清仓纯函数原语（applyPaperBuyFill/applyPaperSellFill）"),
-    item("position.tPlus1", "T+1 冻结股", "Position", "ENFORCED",
-      "当日买入进入 frozenQuantity，settlePaperAccountT1 次日解冻"),
+    item(
+      "position.stateMachine",
+      "持仓状态机",
+      "Position",
+      "ENFORCED",
+      "开仓/加仓/减仓/清仓纯函数原语（applyPaperBuyFill/applyPaperSellFill）"
+    ),
+    item(
+      "position.tPlus1",
+      "T+1 冻结股",
+      "Position",
+      "ENFORCED",
+      "当日买入进入 frozenQuantity，settlePaperAccountT1 次日解冻"
+    ),
 
     // -- Execution 维（订单 → 成交约束） --
-    item("execution.lotSize", "一手股数（100 整数倍）", "Execution", "ENFORCED",
-      "checkPaperOrder 校验 quantity % lotSize === 0（复用 C-14.3 DEFAULT_LOT_SIZE=100）"),
-    item("execution.blockLimitUpBuy", "开盘涨停禁买", "Execution", "ENFORCED",
-      "checkPaperOrder 按 STEP 8 limitState 口径拒单（LIMIT_UP）"),
-    item("execution.blockLimitDownSell", "开盘跌停禁卖", "Execution", "ENFORCED",
-      "checkPaperOrder 按 STEP 8 limitState 口径拒单（LIMIT_DOWN）"),
-    item("execution.suspension", "停牌拒单", "Execution", "ENFORCED",
-      "执行日无有效开盘/前收 → SUSPENDED（对齐 marketClaims.suspensionMode=REJECT_NO_BAR）"),
-    item("execution.executionModel", "成交时机", "Execution", "RECORDED_ONLY",
-      "成交时机（NEXT_OPEN/NEXT_CLOSE/VWAP_PROXY）由执行模型决定，账户层只收成交价"),
-    item("execution.allowPartialFill", "允许部分成交", "Execution", "RECORDED_ONLY",
-      "部分成交裁决属执行层，账户层按整单应用成交"),
-    item("execution.limitPrice", "限价撮合", "Execution",
+    item(
+      "execution.lotSize",
+      "一手股数（100 整数倍）",
+      "Execution",
+      "ENFORCED",
+      "checkPaperOrder 校验 quantity % lotSize === 0（复用 C-14.3 DEFAULT_LOT_SIZE=100）"
+    ),
+    item(
+      "execution.blockLimitUpBuy",
+      "开盘涨停禁买",
+      "Execution",
+      "ENFORCED",
+      "checkPaperOrder 按 STEP 8 limitState 口径拒单（LIMIT_UP）"
+    ),
+    item(
+      "execution.blockLimitDownSell",
+      "开盘跌停禁卖",
+      "Execution",
+      "ENFORCED",
+      "checkPaperOrder 按 STEP 8 limitState 口径拒单（LIMIT_DOWN）"
+    ),
+    item(
+      "execution.suspension",
+      "停牌拒单",
+      "Execution",
+      "ENFORCED",
+      "执行日无有效开盘/前收 → SUSPENDED（对齐 marketClaims.suspensionMode=REJECT_NO_BAR）"
+    ),
+    item(
+      "execution.executionModel",
+      "成交时机",
+      "Execution",
+      "RECORDED_ONLY",
+      "成交时机（NEXT_OPEN/NEXT_CLOSE/VWAP_PROXY）由执行模型决定，账户层只收成交价"
+    ),
+    item(
+      "execution.allowPartialFill",
+      "允许部分成交",
+      "Execution",
+      "RECORDED_ONLY",
+      "部分成交裁决属执行层，账户层按整单应用成交"
+    ),
+    item(
+      "execution.limitPrice",
+      "限价撮合",
+      "Execution",
       t.executionModel === "LIMIT_PRICE" ? "RECORDED_ONLY" : "NOT_DECLARED",
-      "LIMIT_PRICE 需逐单委托价撮合，账户层不提供撮合（requestedPrice 仅记录）"),
+      "LIMIT_PRICE 需逐单委托价撮合，账户层不提供撮合（requestedPrice 仅记录）"
+    ),
 
     // -- Risk 维（仓位上限 / 单票上限 / 总敞口 / 禁买禁卖） --
-    item("risk.maxPositionCount", "并发持仓数上限", "Risk",
+    item(
+      "risk.maxPositionCount",
+      "并发持仓数上限",
+      "Risk",
       p.maxPositionCount === null ? "NOT_DECLARED" : "ENFORCED",
-      "checkPaperOrder 新开仓时校验持仓数（MAX_POSITIONS_REACHED）"),
-    item("risk.perSecurityEquityCap", "单票权益占比上限", "Risk",
+      "checkPaperOrder 新开仓时校验持仓数（MAX_POSITIONS_REACHED）"
+    ),
+    item(
+      "risk.perSecurityEquityCap",
+      "单票权益占比上限",
+      "Risk",
       p.perSecurityEquityCap === null ? "NOT_DECLARED" : "ENFORCED",
-      "账户层有逐仓市值，买后单票市值/权益占比校验（C-14.1 plan 层无此能力）"),
-    item("risk.totalEquityCap", "总仓位权益占比上限", "Risk",
+      "账户层有逐仓市值，买后单票市值/权益占比校验（C-14.1 plan 层无此能力）"
+    ),
+    item(
+      "risk.totalEquityCap",
+      "总仓位权益占比上限",
+      "Risk",
       p.totalEquityCap === null ? "NOT_DECLARED" : "ENFORCED",
-      "账户层有总权益，买后总仓位市值/权益占比校验（C-14.1 plan 层无此能力）"),
-    item("risk.buyBanned", "禁买标的集", "Risk",
+      "账户层有总权益，买后总仓位市值/权益占比校验（C-14.1 plan 层无此能力）"
+    ),
+    item(
+      "risk.buyBanned",
+      "禁买标的集",
+      "Risk",
       r.buyBanned.length === 0 ? "NOT_DECLARED" : "ENFORCED",
-      "账户层订单级检查点按标的过滤买入"),
-    item("risk.sellBanned", "禁卖标的集", "Risk",
+      "账户层订单级检查点按标的过滤买入"
+    ),
+    item(
+      "risk.sellBanned",
+      "禁卖标的集",
+      "Risk",
       r.sellBanned.length === 0 ? "NOT_DECLARED" : "ENFORCED",
-      "账户层订单级检查点按标的过滤卖出"),
+      "账户层订单级检查点按标的过滤卖出"
+    ),
 
     // -- Capital 维（现金账本 + 冻结资金） --
-    item("capital.initialCapital", "初始资金", "Capital", "ENFORCED",
-      "createPaperAccount 起始现金 = initialCapital"),
-    item("capital.cashLedger", "现金账本", "Capital", "ENFORCED",
-      "每笔资金变动产出 PaperCashLedgerEntry（可追溯）"),
-    item("capital.frozen", "冻结资金", "Capital", "ENFORCED",
-      "freezePaperCash/unfreezePaperCash 挂单预留原语"),
+    item(
+      "capital.initialCapital",
+      "初始资金",
+      "Capital",
+      "ENFORCED",
+      "createPaperAccount 起始现金 = initialCapital"
+    ),
+    item(
+      "capital.cashLedger",
+      "现金账本",
+      "Capital",
+      "ENFORCED",
+      "每笔资金变动产出 PaperCashLedgerEntry（可追溯）"
+    ),
+    item(
+      "capital.frozen",
+      "冻结资金",
+      "Capital",
+      "ENFORCED",
+      "freezePaperCash/unfreezePaperCash 挂单预留原语"
+    ),
 
     // -- Cost 维（五维成本分解复用 C-14.2） --
-    item("cost.breakdown", "五维成本分解", "Cost", "ENFORCED",
-      "复用 C-14.2 computeFillCostBreakdown（佣金/印花/过户/滑点/冲击）"),
+    item(
+      "cost.breakdown",
+      "五维成本分解",
+      "Cost",
+      "ENFORCED",
+      "复用 C-14.2 computeFillCostBreakdown（佣金/印花/过户/滑点/冲击）"
+    ),
   ];
 }
 
@@ -148,20 +248,28 @@ export function describePaperAccountConstraintEnforcement(
 // ---------------------------------------------------------------------------
 
 /** securityId → 板块（缺省 main）。 */
-function boardOf(declaration: ExecutionConstraintDeclaration, securityId: string): Security["board"] {
+function boardOf(
+  declaration: ExecutionConstraintDeclaration,
+  securityId: string
+): Security["board"] {
   return declaration.marketClaims.boards[securityId] ?? "main";
 }
 
 /** 涨跌停幅度解析（复用 STEP 8 DEFAULT_MARKET_RULES）。 */
-function priceLimitOf(declaration: ExecutionConstraintDeclaration, securityId: string): {
+function priceLimitOf(
+  declaration: ExecutionConstraintDeclaration,
+  securityId: string
+): {
   readonly limitUpRatio: number;
   readonly limitDownRatio: number;
 } {
   const board = boardOf(declaration, securityId);
-  return DEFAULT_MARKET_RULES.resolvePriceLimit({ securityId, board }) ?? {
-    limitUpRatio: 0,
-    limitDownRatio: 0,
-  };
+  return (
+    DEFAULT_MARKET_RULES.resolvePriceLimit({ securityId, board }) ?? {
+      limitUpRatio: 0,
+      limitDownRatio: 0,
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +313,13 @@ function rejected(
   enforcedAxes: readonly string[],
   recordedOnlyAxes: readonly string[]
 ): PaperOrderCheckResult {
-  return { ok: false, rejectionCode: code, reason, enforcedAxes, recordedOnlyAxes };
+  return {
+    ok: false,
+    rejectionCode: code,
+    reason,
+    enforcedAxes,
+    recordedOnlyAxes,
+  };
 }
 
 function passed(
@@ -213,7 +327,13 @@ function passed(
   enforcedAxes: readonly string[],
   recordedOnlyAxes: readonly string[]
 ): PaperOrderCheckResult {
-  return { ok: true, rejectionCode: null, reason, enforcedAxes, recordedOnlyAxes };
+  return {
+    ok: true,
+    rejectionCode: null,
+    reason,
+    enforcedAxes,
+    recordedOnlyAxes,
+  };
 }
 
 /** 账户层仅记录（不强制执行）的约束轴 key（诚实 blocker，用于成交审计）。 */
@@ -238,13 +358,19 @@ const RECORDED_ONLY_AXES: readonly string[] = [
  *   8. 资金充足（买入，含费用估算）；
  *   9. T+1 可卖份额（卖出）。
  */
-export function checkPaperOrder(input: PaperOrderCheckInput): PaperOrderCheckResult {
+export function checkPaperOrder(
+  input: PaperOrderCheckInput
+): PaperOrderCheckResult {
   const { order, account, declaration, costDeclaration } = input;
   const lotSize = declaration.lot.lotSize;
   const recordedOnly = RECORDED_ONLY_AXES;
 
   // 1. 股数整手。
-  if (!Number.isInteger(order.quantity) || order.quantity <= 0 || order.quantity % lotSize !== 0) {
+  if (
+    !Number.isInteger(order.quantity) ||
+    order.quantity <= 0 ||
+    order.quantity % lotSize !== 0
+  ) {
     return rejected(
       PAPER_ACCOUNT_ERROR_CODES.ORDER_QUANTITY_NOT_LOT,
       `目标股数 ${order.quantity} 必须是 ${lotSize} 的整数倍`,
@@ -254,7 +380,9 @@ export function checkPaperOrder(input: PaperOrderCheckInput): PaperOrderCheckRes
   }
 
   // 2. 方向 longOnly：卖出必须有持仓。
-  const position = account.positions.find((p) => p.securityId === order.securityId);
+  const position = account.positions.find(
+    p => p.securityId === order.securityId
+  );
   if (order.side === "sell" && !position) {
     return rejected(
       PAPER_ACCOUNT_ERROR_CODES.CHECK_NO_POSITION,
@@ -304,11 +432,15 @@ export function checkPaperOrder(input: PaperOrderCheckInput): PaperOrderCheckRes
 
   // 5. 涨跌停拦截（复用 STEP 8 limitState 口径）。
   const limit = priceLimitOf(declaration, order.securityId);
-  const up = limitUpPrice(prevClose, limit.limitUpRatio);
-  const down = limitDownPrice(prevClose, limit.limitDownRatio);
+  const up = exchangeLimitUpPrice(prevClose, limit.limitUpRatio);
+  const down = exchangeLimitDownPrice(prevClose, limit.limitDownRatio);
   const isLimitUp = open >= up;
   const isLimitDown = open <= down;
-  if (order.side === "buy" && declaration.restrictions.blockLimitUpBuy && isLimitUp) {
+  if (
+    order.side === "buy" &&
+    declaration.restrictions.blockLimitUpBuy &&
+    isLimitUp
+  ) {
     return rejected(
       PAPER_ACCOUNT_ERROR_CODES.CHECK_LIMIT_UP,
       `${order.securityId} 开盘触及涨停，禁止追买`,
@@ -316,7 +448,11 @@ export function checkPaperOrder(input: PaperOrderCheckInput): PaperOrderCheckRes
       recordedOnly
     );
   }
-  if (order.side === "sell" && declaration.restrictions.blockLimitDownSell && isLimitDown) {
+  if (
+    order.side === "sell" &&
+    declaration.restrictions.blockLimitDownSell &&
+    isLimitDown
+  ) {
     return rejected(
       PAPER_ACCOUNT_ERROR_CODES.CHECK_LIMIT_DOWN,
       `${order.securityId} 开盘触及跌停，禁止卖出`,
@@ -327,7 +463,8 @@ export function checkPaperOrder(input: PaperOrderCheckInput): PaperOrderCheckRes
 
   if (order.side === "buy") {
     const enforced: string[] = ["execution.lotSize", "execution.suspension"];
-    if (declaration.restrictions.blockLimitUpBuy) enforced.push("execution.blockLimitUpBuy");
+    if (declaration.restrictions.blockLimitUpBuy)
+      enforced.push("execution.blockLimitUpBuy");
 
     // 6. 并发持仓数上限（仅新开仓受限）。
     const isNewPosition = !position;
@@ -349,7 +486,10 @@ export function checkPaperOrder(input: PaperOrderCheckInput): PaperOrderCheckRes
     const totalCap = declaration.positions.totalEquityCap;
     const price = input.prices.get(order.securityId) ?? open;
     const buyNotional = price * order.quantity;
-    const currentMarketValue = account.positions.reduce((s, p) => s + p.marketValue, 0);
+    const currentMarketValue = account.positions.reduce(
+      (s, p) => s + p.marketValue,
+      0
+    );
     const equity = account.equity;
     if (perCap !== null) {
       enforced.push("risk.perSecurityEquityCap");
@@ -395,7 +535,8 @@ export function checkPaperOrder(input: PaperOrderCheckInput): PaperOrderCheckRes
 
   // sell 分支。
   const enforced: string[] = ["execution.lotSize", "execution.suspension"];
-  if (declaration.restrictions.blockLimitDownSell) enforced.push("execution.blockLimitDownSell");
+  if (declaration.restrictions.blockLimitDownSell)
+    enforced.push("execution.blockLimitDownSell");
 
   // 9. T+1 可卖份额（卖出只能卖可卖）。
   enforced.push("position.tPlus1");

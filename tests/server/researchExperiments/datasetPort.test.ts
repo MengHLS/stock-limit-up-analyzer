@@ -257,7 +257,7 @@ describe("Dataset 桥 · 相对日白名单与 PIT 闸门", () => {
   it("未声明的相对日读不到（feature / observation 都拒绝）", async () => {
     const port = makePort();
     const facts = (await port.getVersionFacts(VERSION_ID))!;
-    const { access } = port.createAccess({
+    const { access, freezeSelection } = port.createAccess({
       descriptor: descriptorWith({
         prefixRelativeDays: [0],
         postRelativeDays: [1],
@@ -270,7 +270,42 @@ describe("Dataset 桥 · 相对日白名单与 PIT 闸门", () => {
     await expectReject(access.feature(-1), "EXPERIMENT_DATASET_REQUIREMENT_INVALID");
     await expectReject(access.observation(2), "EXPERIMENT_DATASET_REQUIREMENT_INVALID");
     // 声明过的可以读
+    freezeSelection(EVENTS.map((event) => event.eventId));
     expect((await access.observation(1)).length).toBeGreaterThan(0);
+  });
+
+  it("observation() 必须在 freezeSelection() 之后调用（未冻结即拒）", async () => {
+    const port = makePort();
+    const facts = (await port.getVersionFacts(VERSION_ID))!;
+    const { access } = port.createAccess({
+      descriptor: descriptorWith({
+        postRelativeDays: [1],
+        usesForwardData: true,
+        forwardDataPurpose: "研究事件后收益",
+      }),
+      facts,
+    });
+    await expectReject(access.observation(1), "EXPERIMENT_SELECTION_NOT_FROZEN");
+  });
+
+  it("冻结空样本后 observation() 返回空集，不读取未来数据", async () => {
+    const port = makePort();
+    const facts = (await port.getVersionFacts(VERSION_ID))!;
+    const { access, stats, freezeSelection } = port.createAccess({
+      descriptor: descriptorWith({
+        postRelativeDays: [1],
+        usesForwardData: true,
+        forwardDataPurpose: "研究事件后收益",
+      }),
+      facts,
+    });
+    freezeSelection([]);
+    await expect(access.observation(1)).resolves.toEqual([]);
+    expect(stats).toMatchObject({
+      selectionFrozen: true,
+      selectedEventCount: 0,
+      postRowCount: 0,
+    });
   });
 
   it("未声明 usesForwardData 时 observation() 调用即抛（PIT 结构闸门，不是靠注释提醒）", async () => {
@@ -313,7 +348,7 @@ describe("Dataset 桥 · 相对日白名单与 PIT 闸门", () => {
 
     const port = createRegistryExperimentDatasetPort({ reader: recorder, eventPageSize: 2 });
     const facts = (await port.getVersionFacts(VERSION_ID))!;
-    const { access } = port.createAccess({
+    const { access, freezeSelection } = port.createAccess({
       descriptor: descriptorWith({
         requiredColumns: { events: ["isFirstLimit"], feature: ["close"], observation: ["open"] },
         postRelativeDays: [1],
@@ -324,6 +359,7 @@ describe("Dataset 桥 · 相对日白名单与 PIT 闸门", () => {
     });
     await access.events();
     await access.feature(0);
+    freezeSelection(EVENTS.map((event) => event.eventId));
     await access.observation(1);
 
     const byMethod = new Map(queries.map((query) => [query.method, query.columns ?? []]));
@@ -350,7 +386,7 @@ describe("Dataset 桥 · 相对日白名单与 PIT 闸门", () => {
     });
     const port = createRegistryExperimentDatasetPort({ reader, eventPageSize: 1 });
     const facts = (await port.getVersionFacts(VERSION_ID))!;
-    const { access, stats } = port.createAccess({
+    const { access, stats, freezeSelection } = port.createAccess({
       descriptor: descriptorWith({
         prefixRelativeDays: [0],
         postRelativeDays: [1, 2],
@@ -361,6 +397,7 @@ describe("Dataset 桥 · 相对日白名单与 PIT 闸门", () => {
     });
 
     await access.events();
+    freezeSelection(EVENTS.map((event) => event.eventId));
     await access.observation(1);
     await access.observation(1);
     await access.observation(2);

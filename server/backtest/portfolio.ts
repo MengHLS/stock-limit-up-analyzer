@@ -48,6 +48,13 @@ interface OpenTrade {
   grossPnL: number;
 }
 
+export interface OpenTradeDetail {
+  readonly securityId: string;
+  readonly entryTime: string;
+  readonly entryPrice: number;
+  readonly quantity: number;
+}
+
 const reject = (reason: string, rejectionReason: RejectionReason | null = null): FillResult => ({
   success: false,
   filledQuantity: 0,
@@ -87,6 +94,20 @@ export class Portfolio {
 
   openPositionSymbols(): string[] {
     return this.book.openPositionSymbols();
+  }
+
+  /** 只读持仓明细（供退出政策判断，不暴露可变交易对象）。 */
+  openTradeDetails(): OpenTradeDetail[] {
+    return Array.from(this.openTrades.values()).map((open) => ({
+      securityId: open.securityId,
+      entryTime: open.entryTime,
+      entryPrice: open.entryPrice,
+      quantity: open.quantity,
+    }));
+  }
+
+  holdingDaysBetween(entry: string, exit: string): number | null {
+    return this.holdingDays(entry, exit);
   }
 
   available(securityId: string): number {
@@ -257,7 +278,7 @@ export class Portfolio {
       returnPct: open.totalEntryCost > 0 ? (netPnl / open.totalEntryCost) * 100 : null,
       holdingPeriod: this.holdingDays(open.entryTime, fill.timestamp),
       openAtEnd: false,
-      reason: null,
+      reason: fill.reason ?? null,
     });
     this.openTrades.delete(open.securityId);
   }

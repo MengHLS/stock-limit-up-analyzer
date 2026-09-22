@@ -206,6 +206,12 @@ export interface ClosedLoopRunViewModel {
    * `unknown` = 历史结果（修复前落库，note 里没有继承声明）⇒ UI 须提示重跑。
    */
   rebuildScope: RebuildScopeVerdict | null;
+  /** 是否成功写入「回测历史」；旧结果未知时为 null。 */
+  persistence: {
+    persisted: boolean;
+    errorCode: string | null;
+    errorMessage: string | null;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +276,7 @@ export function emptyClosedLoopRun(): ClosedLoopRunViewModel {
     backtest: null,
     assembly: null,
     rebuildScope: null,
+    persistence: null,
   };
 }
 
@@ -493,6 +500,13 @@ export function buildClosedLoopRunViewModel(
   const wiringRaw = isRecord(raw.wiring) ? raw.wiring : {};
   const overall = isRecord(raw.overall) ? raw.overall : {};
   const assemblyVm = extractAssembly(raw.assembly);
+  const persistence = isRecord(raw.persistence)
+    ? {
+        persisted: raw.persistence.persisted === true,
+        errorCode: asStr(raw.persistence.errorCode),
+        errorMessage: asStr(raw.persistence.errorMessage),
+      }
+    : null;
 
   return {
     hasResult: true,
@@ -523,6 +537,7 @@ export function buildClosedLoopRunViewModel(
       assemblyVm !== null && assemblyVm.datasetSource === "rebuild"
         ? classifyRebuildScope(assemblyVm.datasetSourceNote)
         : null,
+    persistence,
   };
 }
 

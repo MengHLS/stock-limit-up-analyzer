@@ -20,7 +20,12 @@ import { defaultArtifactStorage } from "../artifactStorage/factory";
 import { DbDatasetRegistry } from "../datasetRegistry/db";
 import { DbDatasetDataReader } from "../datasetRegistry/query";
 import { RegistryResearchDatasetReader } from "../researchRuntime/datasetReader";
-import { createRegistryExperimentDatasetPort, type ExperimentDatasetPort } from "./datasetPort";
+import type { ExperimentDatasetPort } from "./datasetPort";
+import {
+  ExperimentDatasetProviderRegistry,
+  createProviderExperimentDatasetPort,
+  createRegistryProtocolDatasetProvider,
+} from "./datasetProvider";
 import {
   DbExperimentRunRepository,
   type ExperimentRunRepository,
@@ -78,10 +83,15 @@ async function listRealVersionOptions(filter?: {
 
 /** 真实 Dataset 桥（复用 Research 侧唯一读取层，不另写 SQL）。 */
 export function createDefaultExperimentDatasetPort(): ExperimentDatasetPort {
-  return createRegistryExperimentDatasetPort({
-    reader: new RegistryResearchDatasetReader({ registryRepo: new DbDatasetRegistry() }),
-    listVersionOptions: listRealVersionOptions,
-  });
+  const registry = new ExperimentDatasetProviderRegistry();
+  registry.register(
+    createRegistryProtocolDatasetProvider({
+      datasetCode: "first_limit_pullback",
+      reader: new RegistryResearchDatasetReader({ registryRepo: new DbDatasetRegistry() }),
+      listVersionOptions: listRealVersionOptions,
+    }),
+  );
+  return createProviderExperimentDatasetPort({ registry });
 }
 
 /** 默认 Runner（真实装配；惰性单例）。 */

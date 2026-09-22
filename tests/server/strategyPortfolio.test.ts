@@ -60,6 +60,8 @@ describe("五策略持仓与准备买入快照", () => {
     expect(baseline.currentHoldings).toHaveLength(2);
     expect(baseline.availableSlots).toBe(0);
     expect(baseline.preparedBuys).toHaveLength(0);
+    expect(baseline.blockedBuys).toHaveLength(2);
+    expect(baseline.blockedBuys.every((item) => item.blockReasons.some((reason) => reason.includes("已有当前持仓")))).toBe(true);
   });
 
   it("高风险硬过滤与质量门控的准备清单均不包含被阈值排除的候选", () => {
@@ -79,8 +81,29 @@ describe("五策略持仓与准备买入快照", () => {
     const qualityGate = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "qualityGate")!;
     expect(hardFilter.preparedBuys).toHaveLength(0);
     expect(hardFilter.excludedHighRiskCount).toBeGreaterThan(0);
+    expect(hardFilter.blockedBuys.some((item) => item.blockReasons.some((reason) => reason.includes("策略风控剔除")))).toBe(true);
     expect(qualityGate.preparedBuys).toHaveLength(0);
     expect(qualityGate.excludedHighRiskCount).toBeGreaterThan(0);
+    expect(qualityGate.blockedBuys.some((item) => item.blockReasons.some((reason) => reason.includes("剔除")))).toBe(true);
+  });
+
+  it("未达到生效最低分的当日候选不进入准备买入或不可买池", () => {
+    const records = ["2026-08-18", "2026-08-19", "2026-08-20"].flatMap((date) => [
+      makeRecord(date, "600001.SH", "主板甲"), makeRecord(date, "600002.SH", "主板乙", "10:00:00"),
+    ]);
+    const result = buildLeaderCandidateBacktest(records, { minScore: 999 }, {
+      tradingDates: ["2026-08-18", "2026-08-19", "2026-08-20"],
+      priceByStockDate: new Map([
+        ["600001.SH::2026-08-18", { openPrice: 10, closePrice: 10 }], ["600002.SH::2026-08-18", { openPrice: 10, closePrice: 10 }],
+        ["600001.SH::2026-08-19", { openPrice: 10.1, closePrice: 10.3 }], ["600002.SH::2026-08-19", { openPrice: 10.1, closePrice: 10.3 }],
+        ["600001.SH::2026-08-20", { openPrice: 10.2, closePrice: 10.4 }], ["600002.SH::2026-08-20", { openPrice: 10.2, closePrice: 10.4 }],
+      ]),
+    });
+
+    const baseline = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "baseline")!;
+    expect(baseline.preparedBuys).toHaveLength(0);
+    expect(baseline.blockedBuys).toHaveLength(0);
+    expect(baseline.candidateCount).toBe(0);
   });
 
   it("准备买入清单回显计划仓位：等权分仓、比例自洽、原始策略不降仓", () => {
@@ -162,6 +185,34 @@ describe("五策略持仓与准备买入快照", () => {
     expect(sizing.positionScaledCount).toBeGreaterThan(0);
     // 降仓后预算上限 = 等权预算 × 0.6（与模拟器同一口径）。
     expect(scaled!.plannedBudget).toBe(Number((((sizing.cash / sizing.plannedCount) * 0.6)).toFixed(2)));
+  });
+
+  it("超过高位连板参与上限的候选移出准备买入，并在不可买池说明仓位系数为 0", () => {
+    const dates = ["2026-08-12", "2026-08-13", "2026-08-14", "2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20"];
+    const records = dates.flatMap((date) => [
+      makeRecord(date, "600001.SH", "主板甲"),
+      makeRecord(date, "600002.SH", "主板乙", "10:00:00"),
+    ]);
+    const priceByStockDate = new Map<string, { openPrice: number; closePrice: number }>(
+      dates.flatMap((date) => [
+        [`600001.SH::${date}`, { openPrice: Number((10 * 1.1).toFixed(2)), closePrice: 10 }],
+        [`600002.SH::${date}`, { openPrice: 10, closePrice: 10.5 }],
+      ]),
+    );
+    const result = buildLeaderCandidateBacktest(
+      records,
+      { minScore: 0, realistic: { blockLimitUpBuys: true, maxPositions: 5 } },
+      { tradingDates: dates, priceByStockDate },
+    );
+
+    const baseline = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "baseline")!;
+    const riskPenalty = result.strategyPortfolioSnapshot.strategies.find((item) => item.key === "riskPenalty")!;
+    expect(baseline.preparedBuys.some((item) => item.boards === 7)).toBe(true);
+    expect(riskPenalty.preparedBuys.some((item) => item.boards === 7)).toBe(false);
+    expect(riskPenalty.plannedPositionSizing.plannedCount).toBeGreaterThan(riskPenalty.preparedBuys.length);
+    const sevenBoardBlock = riskPenalty.blockedBuys.find((item) => item.boards === 7);
+    expect(sevenBoardBlock).toBeDefined();
+    expect(sevenBoardBlock!.blockReasons.join(" ")).toContain("仓位系数为 0");
   });
 });
 

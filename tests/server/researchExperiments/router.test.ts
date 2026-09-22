@@ -135,6 +135,7 @@ describe("appRouter 注册守卫", () => {
     expect(keys).toContain("researchExperiments.getRunResultManifest");
     expect(keys).toContain("researchExperiments.getArtifactMetadata");
     expect(keys).toContain("researchExperiments.reconcileRun");
+    expect(keys).toContain("researchExperiments.startRun");
     // 反面：不许出现第二套同义端点（历史上「两套并存」是本仓库的重灾区）。
     for (const forbidden of [
       "researchExperiments.listExperiments",
@@ -201,6 +202,9 @@ describe("run 端点（admin）", () => {
     // 文案来源 = `@shared/const#NOT_ADMIN_ERR_MSG`（`adminProcedure` 用的就是它）。
     await expect(
       anonCaller.run({ experimentId: "demo/router", datasetVersionId: VERSION_ID }),
+    ).rejects.toThrowError(NOT_ADMIN_ERR_MSG);
+    await expect(
+      anonCaller.startRun({ experimentId: "demo/router", datasetVersionId: VERSION_ID }),
     ).rejects.toThrowError(NOT_ADMIN_ERR_MSG);
     await expect(anonCaller.reconcileRun({ runId: "RUN-X", reason: "r" })).rejects.toThrowError(
       NOT_ADMIN_ERR_MSG,

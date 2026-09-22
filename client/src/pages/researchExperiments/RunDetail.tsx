@@ -47,7 +47,15 @@ export default function ResearchExperimentRunDetail() {
 
   const runQuery = trpc.researchExperiments.getRun.useQuery(
     { runId },
-    { enabled: runId.length > 0, retry: false, staleTime: 15_000 },
+    {
+      enabled: runId.length > 0,
+      retry: false,
+      staleTime: 15_000,
+      refetchInterval: (query) => {
+        const status = query.state.data?.run.status;
+        return status === "PENDING" || status === "RUNNING" ? 2_000 : false;
+      },
+    },
   );
   const detail = runQuery.data;
 
@@ -106,7 +114,8 @@ export default function ResearchExperimentRunDetail() {
     );
   }
 
-  const { run, manifest, result, artifacts, artifactsAvailable, artifactsError } = detail;
+  const { run, manifest, result, artifacts, artifactsAvailable, artifactsError, dataIsolation } =
+    detail;
   const PageComponent = descriptor ? experimentPageOf(descriptor.pageKey) : null;
   const summary = run.summary;
   const isFailed = run.status === "FAILED";
@@ -130,6 +139,9 @@ export default function ResearchExperimentRunDetail() {
                 <span className="block font-mono text-[11px]">Run {run.runId}</span>
                 <span className="block font-mono text-[11px]">
                   experiment = {run.experimentId}
+                </span>
+                <span className="block break-all font-mono text-[11px]">
+                  code = {run.experimentCodeDigest ?? "（历史 Run 未记录）"}
                 </span>
               </CardDescription>
             </div>
@@ -160,8 +172,8 @@ export default function ResearchExperimentRunDetail() {
               <Info className="h-4 w-4 shrink-0 text-blue-600" />
               <AlertDescription className="text-xs">
                 这条 Run 仍处于 <span className="font-mono">RUNNING</span>。
-                正常执行会在请求内收敛为 <span className="font-mono">COMPLETED</span> 或{" "}
-                <span className="font-mono">FAILED</span>；若长时间停在这里（服务重启 / 请求被中断），
+                正常执行会在后台队列中收敛为 <span className="font-mono">COMPLETED</span> 或{" "}
+                <span className="font-mono">FAILED</span>；若长时间停在这里（服务重启 / 进程退出），
                 Run 元数据里会标记「可能已卡住」，管理员可在此**人为判定为失败**（不会删除任何产物）。
               </AlertDescription>
             </Alert>
@@ -224,7 +236,91 @@ export default function ResearchExperimentRunDetail() {
           value={summary?.artifactCount ?? artifacts.length}
           hint="含 result / manifest"
         />
+        <MetricCard
+          label="研究阶段"
+          value={run.researchPhase ?? "EXPLORATORY"}
+          mono={false}
+        />
+        <MetricCard
+          label="确认 Gate"
+          value={run.confirmatoryGate?.status ?? "—"}
+          tone={
+            run.confirmatoryGate?.status === "PASS"
+              ? "success"
+              : run.confirmatoryGate?.status === "FAIL"
+                ? "danger"
+                : undefined
+          }
+        />
       </div>
+
+      {dataIsolation?.status === "CONTAMINATED" && (
+        <Alert variant="destructive" data-run-data-isolation="contaminated">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>该 Holdout 已被历史 Run 污染，不能作为正式策略证据</AlertTitle>
+          <AlertDescription>
+            {dataIsolation.summary}
+            <span className="mt-1 block font-mono text-xs">
+              污染 Run：{dataIsolation.contaminatedRunIds.join(", ")}
+            </span>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {(run.researchPhase === "OBSERVATION" || run.researchPhase === "HOLDOUT") && (
+        <Card data-run-protocol="true">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Research Protocol</CardTitle>
+            <CardDescription className="text-xs">
+              确认性研究的阶段、冻结窗口与 Gate；Holdout 只允许引用匹配的 Observation Run。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 text-xs">
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              <MetadataRow label="阶段" value={run.researchPhase ?? "—"} />
+              <MetadataRow
+                label="协议"
+                value={
+                  run.protocolId
+                    ? `${run.protocolId}@${run.protocolVersion ?? "—"}`
+                    : "—"
+                }
+              />
+              <MetadataRow
+                label="评估窗口"
+                value={
+                  run.evaluationWindow
+                    ? `${run.evaluationWindow.startDate} ~ ${run.evaluationWindow.endDate}`
+                    : "—"
+                }
+              />
+              <MetadataRow label="父 Run" value={run.parentRunId ?? "—"} />
+              <MetadataRow
+                label="协议指纹"
+                value={run.protocolFingerprint ?? "—"}
+              />
+            </div>
+            {run.confirmatoryGate && (
+              <>
+                <Separator />
+                <div className="space-y-1.5">
+                  <p className="font-medium">
+                    Gate：{run.confirmatoryGate.status}
+                  </p>
+                  <p className="text-muted-foreground">{run.confirmatoryGate.summary}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {run.confirmatoryGate.checks.map((check) => (
+                      <Badge key={check.code} variant="outline" className="font-mono text-[10px]">
+                        {check.code}: {check.status}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">

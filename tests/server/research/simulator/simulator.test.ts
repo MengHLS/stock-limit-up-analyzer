@@ -714,3 +714,68 @@ describe("FAIL FAST", () => {
     ).toThrow(/executionModel/);
   });
 });
+
+describe("策略退出政策：盘中止损/止盈 + 收盘时间退出", () => {
+  const D1 = "2026-05-06";
+  const D2 = "2026-05-07";
+  const D3 = "2026-05-08";
+  const D4 = "2026-05-11";
+  const VERSION = "sim-exit-policy-v1";
+
+  function runWithPolicy(
+    exitPolicy: NonNullable<SimulationConfig["exitPolicy"]>,
+    d3: Partial<SeedSpec>,
+    d4: Partial<SeedSpec> = {},
+  ): TradeSimulationRun {
+    const seeds: readonly SeedSpec[] = [
+      { date: D1, sec: "A", open: 9.9, close: 10.0, preClose: 9.5 },
+      { date: D2, sec: "A", open: 10.0, close: 10.1, preClose: 10.0 },
+      { date: D3, sec: "A", open: 10.0, close: 10.0, preClose: 10.1, ...d3 },
+      { date: D4, sec: "A", open: 10.0, close: 10.0, preClose: 10.0, ...d4 },
+    ];
+    const built = buildDataset(seeds, VERSION);
+    const candidate = runCandidates(built, VERSION, D1, D1, 1);
+    return runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: makeSimConfig({
+        dateRange: { startDate: D1, endDate: D4 },
+        exitPolicy,
+      }),
+    });
+  }
+
+  it("盘中跌破止损价 → 当日卖出并把原因贯通到 Trade", () => {
+    const run = runWithPolicy(
+      { stopLossRatio: 0.08, takeProfitRatio: null, maxHoldingDays: null },
+      { open: 10.0, close: 9.0, preClose: 10.1 },
+    );
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D3);
+    expect(trade.reason).toContain("止损");
+    expect(trade.exitPrice).not.toBeNull();
+  });
+
+  it("盘中触及止盈价 → 当日卖出并保留止盈原因", () => {
+    const run = runWithPolicy(
+      { stopLossRatio: null, takeProfitRatio: 0.15, maxHoldingDays: null },
+      { open: 10.5, close: 12.0, preClose: 10.1 },
+    );
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D3);
+    expect(trade.reason).toContain("止盈");
+    expect(trade.exitPrice).toBeCloseTo(11.5, 6);
+  });
+
+  it("持有满 2 个交易日 → 收盘触发，下一交易日开盘卖出", () => {
+    const run = runWithPolicy(
+      { stopLossRatio: null, takeProfitRatio: null, maxHoldingDays: 2 },
+      { open: 10.0, close: 10.0, preClose: 10.1 },
+      { open: 10.2, close: 10.2, preClose: 10.0 },
+    );
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D4);
+    expect(trade.exitPrice).toBeCloseTo(10.2, 6);
+    expect(trade.reason).toContain("持有满2个交易日");
+  });
+});

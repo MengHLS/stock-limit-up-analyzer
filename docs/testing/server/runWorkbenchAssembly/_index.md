@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/runWorkbenchAssembly
 
-- 测试文件 **2** 个 ｜ 用例声明 **26** 个
-- 涉及源码目录：`server/datasetRegistry/` · `server/runWorkbenchAssembly/` · `server/security/`
+- 测试文件 **4** 个 ｜ 用例声明 **33** 个
+- 涉及源码目录：`server/datasetRegistry/` · `server/engine/` · `server/research/strategySchema/` · `server/runWorkbenchAssembly/` · `server/security/` · `shared/`
 
 ## 怎么跑
 
@@ -14,6 +14,27 @@ pnpm run test:changed                                  # 只跑改动相关（�
 ```
 
 ## 逐文件
+
+### `tests/server/runWorkbenchAssembly/exitPolicy.test.ts`
+- 71 行 ｜ 用例声明 3 ｜ describe 1
+- 被测源码：`server/research/strategySchema/definition.ts` · `server/runWorkbenchAssembly/exitPolicy.ts`
+- 单跑：`pnpm exec vitest run tests/server/runWorkbenchAssembly/exitPolicy.test.ts`
+- 用例树：
+- **mapDeclaredExitPolicy**
+  - 把首板回踩的止损/止盈/持有期映射为可执行政策
+  - 参数引用退出阈值时从已解析参数集取值
+  - 带 condition 的阈值退出不能静默降级
+
+### `tests/server/runWorkbenchAssembly/recipeFallback.test.ts`
+- 226 行 ｜ 用例声明 4 ｜ describe 1
+- 被测源码：`shared/researchContracts.ts` · `server/engine/domain.ts` · `server/research/strategySchema/map.ts` · `server/research/strategySchema/types.ts` · `server/runWorkbenchAssembly/assemble.ts`
+- 单跑：`pnpm exec vitest run tests/server/runWorkbenchAssembly/recipeFallback.test.ts`
+- 用例树：
+- **BD-21 — requireRecipe 路径 3 兜底留痕**
+  - A. 无 recipe 且无条件 ⇒ recipeSource = default-fallback，并打一条留痕日志
+  - B. 调用方显式指定 recipeId ⇒ explicit-request，且**不打**留痕日志（两者必须可区分）
+  - C. 判别力（可证伪）：兜底 与 显式指定 必须给出**不同**的来源值
+  - D. 契约同步哨兵：tRPC zod 闭集必须逐字含四值（否则生产上 .output() 拒值）
 
 ### `tests/server/runWorkbenchAssembly/universeConstraint.test.ts`
 - 109 行 ｜ 用例声明 8 ｜ describe 1

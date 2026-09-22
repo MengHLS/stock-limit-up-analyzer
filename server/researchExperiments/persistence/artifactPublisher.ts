@@ -31,6 +31,14 @@ import type {
   ExperimentResultEnvelope,
   ExperimentRunManifest,
 } from "@shared/researchExperimentsContracts";
+import {
+  EXPERIMENT_ARTIFACT_MAX_COUNT,
+  EXPERIMENT_ARTIFACT_MAX_SINGLE_BYTES,
+  EXPERIMENT_ARTIFACT_MAX_TOTAL_BYTES,
+  EXPERIMENT_RESULT_JSON_MAX_BYTES,
+  EXPERIMENT_RESULT_TABLE_MAX_CELLS,
+  EXPERIMENT_RESULT_TABLE_MAX_ROWS,
+} from "@shared/researchExperimentsContracts";
 import { ARTIFACT_STORAGE_ERROR, ArtifactStorageError, type ArtifactStorage } from "../../artifactStorage/types";
 import {
   logObjectKey,
@@ -78,6 +86,7 @@ export interface PublishRunArtifactsInput {
   storage: ArtifactStorage;
   experimentId: string;
   experimentVersion: string;
+  experimentCodeDigest: string;
   runId: string;
   datasetVersionId: number;
   /** Manifest 的 `createdAt`（ISO）。 */
@@ -88,7 +97,27 @@ export interface PublishRunArtifactsInput {
   logs: readonly string[];
   /** 实验声明的文件产物。 */
   artifactFiles: readonly ExperimentArtifactFileSpec[];
+  /** 测试 / 维护可注入较严的上限；生产缺省使用 shared 契约常量。 */
+  limits?: Partial<ExperimentPublishLimits>;
 }
+
+export interface ExperimentPublishLimits {
+  resultJsonMaxBytes: number;
+  resultTableMaxRows: number;
+  resultTableMaxCells: number;
+  artifactMaxCount: number;
+  artifactMaxSingleBytes: number;
+  artifactMaxTotalBytes: number;
+}
+
+export const DEFAULT_EXPERIMENT_PUBLISH_LIMITS: ExperimentPublishLimits = Object.freeze({
+  resultJsonMaxBytes: EXPERIMENT_RESULT_JSON_MAX_BYTES,
+  resultTableMaxRows: EXPERIMENT_RESULT_TABLE_MAX_ROWS,
+  resultTableMaxCells: EXPERIMENT_RESULT_TABLE_MAX_CELLS,
+  artifactMaxCount: EXPERIMENT_ARTIFACT_MAX_COUNT,
+  artifactMaxSingleBytes: EXPERIMENT_ARTIFACT_MAX_SINGLE_BYTES,
+  artifactMaxTotalBytes: EXPERIMENT_ARTIFACT_MAX_TOTAL_BYTES,
+});
 
 export interface PublishRunArtifactsResult {
   manifest: ExperimentRunManifest;
@@ -110,6 +139,12 @@ export async function publishRunArtifacts(
   input: PublishRunArtifactsInput,
 ): Promise<PublishRunArtifactsResult> {
   const { storage } = input;
+  const resultBody = input.result === null ? null : `${JSON.stringify(input.result, null, 2)}\n`;
+  const limits: ExperimentPublishLimits = {
+    ...DEFAULT_EXPERIMENT_PUBLISH_LIMITS,
+    ...input.limits,
+  };
+  validatePublishLimits(input, resultBody, limits);
   const keys: string[] = [];
   let totalBytes = 0;
   // Key → 已写入的索引项：重复 Key 是**作者写错**，直接拒绝（不静默覆盖）。
@@ -155,7 +190,7 @@ export async function publishRunArtifacts(
     if (input.result !== null) {
       resultRef = await write({
         key: resultObjectKey(input.experimentId, input.runId),
-        body: `${JSON.stringify(input.result, null, 2)}\n`,
+        body: resultBody!,
         kind: "RESULT",
         format: "json",
         label: "结果信封（result.json）",
@@ -196,6 +231,7 @@ export async function publishRunArtifacts(
     const manifest = buildRunManifest({
       experimentId: input.experimentId,
       experimentVersion: input.experimentVersion,
+      experimentCodeDigest: input.experimentCodeDigest,
       runId: input.runId,
       datasetVersionId: input.datasetVersionId,
       createdAt: input.createdAt,
@@ -232,7 +268,87 @@ export async function publishRunArtifacts(
 
     return { manifest, manifestKey, resultKey: resultRef?.key ?? null, keys, verification, totalBytes };
   } catch (error) {
+    const cleanupFailures: string[] = [];
+    for (const key of [...keys].reverse()) {
+      try {
+        await storage.delete(key);
+      } catch (cleanupError) {
+        cleanupFailures.push(
+          `${key}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+        );
+      }
+    }
+    if (cleanupFailures.length > 0 && error instanceof ExperimentError) {
+      const detail =
+        typeof error.detail === "object" && error.detail !== null
+          ? { ...(error.detail as Record<string, unknown>), cleanupFailures }
+          : { cause: error.detail, cleanupFailures };
+      throw new ExperimentError(error.code, error.message, detail);
+    }
     throw translateArtifactStorageError(error);
+  }
+}
+
+function bodyByteLength(body: string | Uint8Array): number {
+  return typeof body === "string" ? Buffer.byteLength(body, "utf8") : body.byteLength;
+}
+
+export function validatePublishLimits(
+  input: PublishRunArtifactsInput,
+  resultBody: string | null,
+  limits: ExperimentPublishLimits,
+): void {
+  const resultBytes = resultBody === null ? 0 : bodyByteLength(resultBody);
+  if (resultBytes > limits.resultJsonMaxBytes) {
+    throw new ExperimentError(
+      "EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED",
+      `result.json 体积 ${resultBytes} B 超过上限 ${limits.resultJsonMaxBytes} B；` +
+        `明细数据必须通过 context.artifact 输出，禁止塞进结果信封`,
+      { resultBytes, max: limits.resultJsonMaxBytes },
+    );
+  }
+
+  for (const table of input.result?.tables ?? []) {
+    const rows = table.rows.length;
+    const columns = table.columns.length;
+    const cells = rows * columns;
+    if (rows > limits.resultTableMaxRows || cells > limits.resultTableMaxCells) {
+      throw new ExperimentError(
+        "EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED",
+        `结果表 "${table.key}" 资源超限：${rows} 行 × ${columns} 列 = ${cells} 单元格` +
+          `（上限 ${limits.resultTableMaxRows} 行 / ${limits.resultTableMaxCells} 单元格）`,
+        { tableKey: table.key, rows, columns, cells },
+      );
+    }
+  }
+
+  const declaredCount = input.artifactFiles.length + (input.result === null ? 0 : 1) + 2;
+  if (declaredCount > limits.artifactMaxCount) {
+    throw new ExperimentError(
+      "EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED",
+      `本次 Run 预计写出 ${declaredCount} 个对象，超过上限 ${limits.artifactMaxCount}`,
+      { count: declaredCount, max: limits.artifactMaxCount },
+    );
+  }
+
+  let totalBytes = resultBytes + bodyByteLength(input.logs.join("\n") + (input.logs.length > 0 ? "\n" : ""));
+  for (const spec of input.artifactFiles) {
+    const bytes = bodyByteLength(spec.body);
+    if (bytes > limits.artifactMaxSingleBytes) {
+      throw new ExperimentError(
+        "EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED",
+        `产物 "${spec.name}" 体积 ${bytes} B 超过单文件上限 ${limits.artifactMaxSingleBytes} B`,
+        { name: spec.name, bytes, max: limits.artifactMaxSingleBytes },
+      );
+    }
+    totalBytes += bytes;
+  }
+  if (totalBytes > limits.artifactMaxTotalBytes) {
+    throw new ExperimentError(
+      "EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED",
+      `本次 Run 产物总量 ${totalBytes} B 超过上限 ${limits.artifactMaxTotalBytes} B`,
+      { totalBytes, max: limits.artifactMaxTotalBytes },
+    );
   }
 }
 

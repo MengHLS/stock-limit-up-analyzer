@@ -291,6 +291,7 @@ export const stabilityValidationExperiment: ExperimentDefinition = {
       `读取事件行 ${scannedRowCount} 条（${eventPageCount} 轮分页；数据集声明事件总数 ` +
         `${String(dataset.facts.totalEvents)}；扫描策略 ${EVENT_SCAN_POLICY}）`
     );
+    context.freezeSelection(events.map((event) => event.eventId));
 
     const eventDayBars = await dataset.feature(0);
     log(`读取首板日（rd=0）行情 ${eventDayBars.length} 行`);

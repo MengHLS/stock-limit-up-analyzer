@@ -106,6 +106,11 @@ describe("BoardRules — 板块与涨跌停规则权威", () => {
     expect(isLimitUpBar(bar({ symbol: "ABC", close: 11 }))).toBeNull();
   });
 
+  it("isLimitUpBar：保留不足 10% 的分价涨停，拒绝高于涨停价的异常值", () => {
+    expect(isLimitUpBar(bar({ preClose: 2.33, close: 2.56 }))).toBe(true);
+    expect(isLimitUpBar(bar({ preClose: 2.33, close: 2.57 }))).toBe(false);
+  });
+
   it("classifyBoard 基本归类", () => {
     expect(classifyBoard("600001.SH")).toBe("main");
     expect(classifyBoard("300750.SZ")).toBe("chinext");
@@ -116,27 +121,134 @@ describe("BoardRules — 板块与涨跌停规则权威", () => {
 
   it("isPriceAtLimitUp/Down：按板块权威阈值而非 9.9% 近似判定", () => {
     // 主板非 ST：10% 涨停价 = 11.00；10.99（+9.9%）不是涨停
-    expect(isPriceAtLimitUp({ stockCode: "600001.SH", price: 10.99, referencePrice: 10 })).toBe(false);
-    expect(isPriceAtLimitUp({ stockCode: "600001.SH", price: 11, referencePrice: 10 })).toBe(true);
-    expect(isPriceAtLimitDown({ stockCode: "600001.SH", price: 9.01, referencePrice: 10 })).toBe(false);
-    expect(isPriceAtLimitDown({ stockCode: "600001.SH", price: 9, referencePrice: 10 })).toBe(true);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "600001.SH",
+        price: 10.99,
+        referencePrice: 10,
+      })
+    ).toBe(false);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "600001.SH",
+        price: 11,
+        referencePrice: 10,
+      })
+    ).toBe(true);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "600001.SH",
+        price: 2.56,
+        referencePrice: 2.33,
+      })
+    ).toBe(true);
+    expect(
+      isPriceAtLimitDown({
+        stockCode: "600001.SH",
+        price: 9.01,
+        referencePrice: 10,
+      })
+    ).toBe(false);
+    expect(
+      isPriceAtLimitDown({
+        stockCode: "600001.SH",
+        price: 9,
+        referencePrice: 10,
+      })
+    ).toBe(true);
     // 主板 ST：5%（涨停价 10.50）
-    expect(isPriceAtLimitUp({ stockCode: "600001.SH", stockName: "*ST示例", price: 10.5, referencePrice: 10 })).toBe(true);
-    expect(isPriceAtLimitUp({ stockCode: "600001.SH", stockName: "*ST示例", price: 10.49, referencePrice: 10 })).toBe(false);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "600001.SH",
+        stockName: "*ST示例",
+        price: 10.5,
+        referencePrice: 10,
+      })
+    ).toBe(true);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "600001.SH",
+        stockName: "*ST示例",
+        price: 10.49,
+        referencePrice: 10,
+      })
+    ).toBe(false);
     // 创业板 / 科创板：20%
-    expect(isPriceAtLimitUp({ stockCode: "300001.SZ", price: 11.5, referencePrice: 10 })).toBe(false);
-    expect(isPriceAtLimitUp({ stockCode: "300001.SZ", price: 12, referencePrice: 10 })).toBe(true);
-    expect(isPriceAtLimitUp({ stockCode: "688001.SH", price: 11.99, referencePrice: 10 })).toBe(false);
-    expect(isPriceAtLimitUp({ stockCode: "688001.SH", price: 12, referencePrice: 10 })).toBe(true);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "300001.SZ",
+        price: 11.5,
+        referencePrice: 10,
+      })
+    ).toBe(false);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "300001.SZ",
+        price: 12,
+        referencePrice: 10,
+      })
+    ).toBe(true);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "688001.SH",
+        price: 11.99,
+        referencePrice: 10,
+      })
+    ).toBe(false);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "688001.SH",
+        price: 12,
+        referencePrice: 10,
+      })
+    ).toBe(true);
     // 北交所：30%
-    expect(isPriceAtLimitUp({ stockCode: "920001.BJ", price: 12.99, referencePrice: 10 })).toBe(false);
-    expect(isPriceAtLimitUp({ stockCode: "920001.BJ", price: 13, referencePrice: 10 })).toBe(true);
-    expect(isPriceAtLimitDown({ stockCode: "920001.BJ", price: 7.01, referencePrice: 10 })).toBe(false);
-    expect(isPriceAtLimitDown({ stockCode: "920001.BJ", price: 7, referencePrice: 10 })).toBe(true);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "920001.BJ",
+        price: 12.99,
+        referencePrice: 10,
+      })
+    ).toBe(false);
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "920001.BJ",
+        price: 13,
+        referencePrice: 10,
+      })
+    ).toBe(true);
+    expect(
+      isPriceAtLimitDown({
+        stockCode: "920001.BJ",
+        price: 7.01,
+        referencePrice: 10,
+      })
+    ).toBe(false);
+    expect(
+      isPriceAtLimitDown({
+        stockCode: "920001.BJ",
+        price: 7,
+        referencePrice: 10,
+      })
+    ).toBe(true);
     // 规则/价格不可判定 → null（不得当命中或当 10%）
-    expect(isPriceAtLimitUp({ stockCode: "ABC", price: 11, referencePrice: 10 })).toBeNull();
-    expect(isPriceAtLimitUp({ stockCode: "600001.SH", price: null, referencePrice: 10 })).toBeNull();
-    expect(isPriceAtLimitUp({ stockCode: "600001.SH", price: 11, referencePrice: null })).toBeNull();
+    expect(
+      isPriceAtLimitUp({ stockCode: "ABC", price: 11, referencePrice: 10 })
+    ).toBeNull();
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "600001.SH",
+        price: null,
+        referencePrice: 10,
+      })
+    ).toBeNull();
+    expect(
+      isPriceAtLimitUp({
+        stockCode: "600001.SH",
+        price: 11,
+        referencePrice: null,
+      })
+    ).toBeNull();
   });
 });
 
@@ -164,7 +276,13 @@ describe("Adapter — Raw → Canonical Bar", () => {
   });
 
   it("非法数值 → null（不静默填 0）", () => {
-    const canonical = toCanonicalBar({ stockCode: "600001.SH", tradeDate: "2026-01-05", openPrice: "abc", closePrice: "   ", preClosePrice: null });
+    const canonical = toCanonicalBar({
+      stockCode: "600001.SH",
+      tradeDate: "2026-01-05",
+      openPrice: "abc",
+      closePrice: "   ",
+      preClosePrice: null,
+    });
     expect(canonical.open).toBeNull();
     expect(canonical.close).toBeNull();
     expect(canonical.preClose).toBeNull();
@@ -189,8 +307,12 @@ describe("Validation — 数据质量三态", () => {
 
   it("symbol 为空 / timestamp 非法 → INVALID", () => {
     expect(validateMarketBar(bar({ symbol: "" })).status).toBe("INVALID");
-    expect(validateMarketBar(bar({ timestamp: "2026/01/05" })).status).toBe("INVALID");
-    expect(validateMarketBar(bar({ timestamp: "2026-13-01" })).status).toBe("INVALID");
+    expect(validateMarketBar(bar({ timestamp: "2026/01/05" })).status).toBe(
+      "INVALID"
+    );
+    expect(validateMarketBar(bar({ timestamp: "2026-13-01" })).status).toBe(
+      "INVALID"
+    );
   });
 
   it("OHLC 非正 → INVALID；字段缺失 → WARNING", () => {
@@ -200,9 +322,21 @@ describe("Validation — 数据质量三态", () => {
   });
 
   it("OHLC 矛盾（high < max / low > min / high < low）→ INVALID", () => {
-    expect(validateMarketBar(bar({ high: 10, low: 9, open: 10.2, close: 10.1 })).issues.some((i) => i.code === "HIGH_LT_MAX")).toBe(true);
-    expect(validateMarketBar(bar({ low: 10.2, open: 10, close: 10.1, high: 10.5 })).issues.some((i) => i.code === "LOW_GT_MIN")).toBe(true);
-    expect(validateMarketBar(bar({ high: 9, low: 10.5, open: 10, close: 10 })).issues.some((i) => i.code === "HIGH_LT_LOW")).toBe(true);
+    expect(
+      validateMarketBar(
+        bar({ high: 10, low: 9, open: 10.2, close: 10.1 })
+      ).issues.some(i => i.code === "HIGH_LT_MAX")
+    ).toBe(true);
+    expect(
+      validateMarketBar(
+        bar({ low: 10.2, open: 10, close: 10.1, high: 10.5 })
+      ).issues.some(i => i.code === "LOW_GT_MIN")
+    ).toBe(true);
+    expect(
+      validateMarketBar(
+        bar({ high: 9, low: 10.5, open: 10, close: 10 })
+      ).issues.some(i => i.code === "HIGH_LT_LOW")
+    ).toBe(true);
   });
 
   it("volume / amount 为负 → INVALID", () => {
@@ -219,7 +353,8 @@ describe("Validation — 数据质量三态", () => {
   });
 
   it("统一数值解析语义：parsePositivePrice / parseNonNegativeNumber 是唯一权威", async () => {
-    const { parsePositivePrice, parseNonNegativeNumber, parseNumericPrice } = await import("../../../server/data/index");
+    const { parsePositivePrice, parseNonNegativeNumber, parseNumericPrice } =
+      await import("../../../server/data/index");
     // 正价格：合法正数保留；0/负/非法/空 → null
     expect(parsePositivePrice("10.5")).toBe(10.5);
     expect(parsePositivePrice(11)).toBe(11);

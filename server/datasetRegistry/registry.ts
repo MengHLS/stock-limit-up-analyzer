@@ -29,7 +29,11 @@ import {
   type ResolvedBuildConfig,
 } from "./lifecycle";
 import { BUILD_FILTER_DEFAULTS } from "./filter";
-import type { DatasetPhysicalStore, PhysicalDropResult, PhysicalTablePurgeResult } from "./physicalTables";
+import type {
+  DatasetPhysicalStore,
+  PhysicalDropResult,
+  PhysicalTablePurgeResult,
+} from "./physicalTables";
 import type { DatasetPlugin, DatasetPluginRegistry } from "./plugins";
 import type {
   DatasetBuildConfigRecord,
@@ -58,11 +62,27 @@ export interface DatasetRegistryRepository {
 
   // ---- Dataset Version ----
   /** 幂等写入版本：(datasetId, version) 唯一；同 version 同内容跳过，不同内容拒绝。 */
-  saveVersion(input: DatasetVersion): Promise<{ outcome: "inserted" | "idempotent-skip" | "conflict"; version: DatasetVersion }>;
-  getVersion(datasetId: number, version: string): Promise<DatasetVersion | undefined>;
+  saveVersion(
+    input: DatasetVersion
+  ): Promise<{
+    outcome: "inserted" | "idempotent-skip" | "conflict";
+    version: DatasetVersion;
+  }>;
+  getVersion(
+    datasetId: number,
+    version: string
+  ): Promise<DatasetVersion | undefined>;
   getVersionById(id: number): Promise<DatasetVersion | undefined>;
   listVersions(datasetId: number): Promise<DatasetVersion[]>;
-  updateVersion(id: number, patch: Partial<Pick<DatasetVersion, "status" | "totalEvents" | "totalRows" | "completedAt">>): Promise<void>;
+  updateVersion(
+    id: number,
+    patch: Partial<
+      Pick<
+        DatasetVersion,
+        "status" | "totalEvents" | "totalRows" | "completedAt"
+      >
+    >
+  ): Promise<void>;
 
   // ---- Dataset Build Job ----
   saveJob(input: DatasetBuildJob): Promise<DatasetBuildJob>;
@@ -70,9 +90,14 @@ export interface DatasetRegistryRepository {
   getJobById(id: number): Promise<DatasetBuildJob | undefined>;
   listJobs(datasetVersionId: number): Promise<DatasetBuildJob[]>;
   /** 仅允许更新作业的进度 / 状态字段（不触碰 datasetVersionId / jobId）。 */
-  updateJob(id: number, patch: Partial<Omit<DatasetBuildJob, "id" | "datasetVersionId" | "jobId">>): Promise<void>;
+  updateJob(
+    id: number,
+    patch: Partial<Omit<DatasetBuildJob, "id" | "datasetVersionId" | "jobId">>
+  ): Promise<void>;
   /** 返回该版本当前 RUNNING 的作业（用于并发构建保护，最多一个）。 */
-  getRunningJobForVersion(datasetVersionId: number): Promise<DatasetBuildJob | undefined>;
+  getRunningJobForVersion(
+    datasetVersionId: number
+  ): Promise<DatasetBuildJob | undefined>;
   /**
    * 列出**全库** RUNNING 的构建作业（跨数据集 / 跨版本）。
    * 用途：孤儿作业回收（`reclaimStaleJobs`）——运行态是进程内内存 map，
@@ -83,7 +108,12 @@ export interface DatasetRegistryRepository {
    * 原子状态转换：仅当作业当前 status === from 时置为 to，并附加 patch 字段。
    * 返回是否真正发生转换（false = 已被并发请求抢先转换）。
    */
-  transitionJob(id: number, from: JobStatus, to: JobStatus, patch?: JobTransitionPatch): Promise<boolean>;
+  transitionJob(
+    id: number,
+    from: JobStatus,
+    to: JobStatus,
+    patch?: JobTransitionPatch
+  ): Promise<boolean>;
 
   // ---- Deletion（DATASET-003A：删除版本 / 删除数据集）----
   /** 删除 Dataset 定义记录（硬删；物理表与版本的清理由 service 编排）。 */
@@ -93,16 +123,22 @@ export interface DatasetRegistryRepository {
   /** 删除某版本的全部构建作业，返回删除条数（审计记录随版本一并移除）。 */
   deleteJobsByVersion(datasetVersionId: number): Promise<number>;
   /** 该 Dataset 名下是否存在 RUNNING 作业（跨版本；删除守卫）。 */
-  getRunningJobForDefinition(datasetId: number): Promise<DatasetBuildJob | undefined>;
+  getRunningJobForDefinition(
+    datasetId: number
+  ): Promise<DatasetBuildJob | undefined>;
 
   // ---- Build / Filter Config（DATASET-003B：筛选口径持久化，与版本 1:1）----
   /**
    * 幂等写入构建 / 筛选配置（同 datasetVersionId 重复写入 → 覆盖主表并整体替换子表）。
    * 返回落库后的完整记录（含 id）。
    */
-  saveBuildConfig(input: DatasetBuildConfigRecord): Promise<DatasetBuildConfigRecord>;
+  saveBuildConfig(
+    input: DatasetBuildConfigRecord
+  ): Promise<DatasetBuildConfigRecord>;
   /** 读取某版本的构建 / 筛选配置；历史版本（无配置行）→ undefined（不臆造）。 */
-  getBuildConfig(datasetVersionId: number): Promise<DatasetBuildConfigRecord | undefined>;
+  getBuildConfig(
+    datasetVersionId: number
+  ): Promise<DatasetBuildConfigRecord | undefined>;
   /** 删除某版本的配置（主表 + 子表），返回删除的主表行数。 */
   deleteBuildConfigsByVersion(datasetVersionId: number): Promise<number>;
 }
@@ -131,7 +167,11 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
     const existing = this.definitionsByCode.get(input.datasetCode);
     if (existing !== undefined) {
       const current = this.definitions.get(existing)!;
-      const updated: DatasetDefinition = { ...current, ...input, id: current.id };
+      const updated: DatasetDefinition = {
+        ...current,
+        ...input,
+        id: current.id,
+      };
       this.definitions.set(current.id!, updated);
       return updated;
     }
@@ -142,7 +182,9 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
     return record;
   }
 
-  async getDefinitionByCode(code: string): Promise<DatasetDefinition | undefined> {
+  async getDefinitionByCode(
+    code: string
+  ): Promise<DatasetDefinition | undefined> {
     const id = this.definitionsByCode.get(code);
     return id === undefined ? undefined : this.definitions.get(id);
   }
@@ -152,10 +194,17 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
   }
 
   async listDefinitions(): Promise<DatasetDefinition[]> {
-    return Array.from(this.definitions.values()).sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+    return Array.from(this.definitions.values()).sort(
+      (a, b) => (a.id ?? 0) - (b.id ?? 0)
+    );
   }
 
-  async saveVersion(input: DatasetVersion): Promise<{ outcome: "inserted" | "idempotent-skip" | "conflict"; version: DatasetVersion }> {
+  async saveVersion(
+    input: DatasetVersion
+  ): Promise<{
+    outcome: "inserted" | "idempotent-skip" | "conflict";
+    version: DatasetVersion;
+  }> {
     const key = `${input.datasetId}:${input.version}`;
     const existing = this.versions.get(key);
     if (existing) {
@@ -169,7 +218,10 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
     return { outcome: "inserted", version: record };
   }
 
-  async getVersion(datasetId: number, version: string): Promise<DatasetVersion | undefined> {
+  async getVersion(
+    datasetId: number,
+    version: string
+  ): Promise<DatasetVersion | undefined> {
     return this.versions.get(`${datasetId}:${version}`);
   }
 
@@ -179,11 +231,19 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
 
   async listVersions(datasetId: number): Promise<DatasetVersion[]> {
     return Array.from(this.versions.values())
-      .filter((v) => v.datasetId === datasetId)
+      .filter(v => v.datasetId === datasetId)
       .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
   }
 
-  async updateVersion(id: number, patch: Partial<Pick<DatasetVersion, "status" | "totalEvents" | "totalRows" | "completedAt">>): Promise<void> {
+  async updateVersion(
+    id: number,
+    patch: Partial<
+      Pick<
+        DatasetVersion,
+        "status" | "totalEvents" | "totalRows" | "completedAt"
+      >
+    >
+  ): Promise<void> {
     const current = this.versionsById.get(id);
     if (!current) throw new Error(`未找到版本：${id}`);
     this.versionsById.set(id, { ...current, ...patch });
@@ -211,37 +271,57 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
 
   async listJobs(datasetVersionId: number): Promise<DatasetBuildJob[]> {
     return Array.from(this.jobs.values())
-      .filter((j) => j.datasetVersionId === datasetVersionId)
+      .filter(j => j.datasetVersionId === datasetVersionId)
       .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
   }
 
-  async updateJob(id: number, patch: Partial<Omit<DatasetBuildJob, "id" | "datasetVersionId" | "jobId">>): Promise<void> {
+  async updateJob(
+    id: number,
+    patch: Partial<Omit<DatasetBuildJob, "id" | "datasetVersionId" | "jobId">>
+  ): Promise<void> {
     const current = this.jobsById.get(id);
     if (!current) throw new Error(`未找到作业：${id}`);
     // updatedAt 由存储层自动刷新（与真实 DB 的 ON UPDATE CURRENT_TIMESTAMP 同语义）——
     // 孤儿作业回收以它为「是否仍在推进」的判据，故内存实现必须同样维护。
-    const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
+    const updated = {
+      ...current,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
     this.jobsById.set(id, updated);
     this.jobs.set(current.jobId, updated);
   }
 
-  async getRunningJobForVersion(datasetVersionId: number): Promise<DatasetBuildJob | undefined> {
+  async getRunningJobForVersion(
+    datasetVersionId: number
+  ): Promise<DatasetBuildJob | undefined> {
     for (const job of this.jobs.values()) {
-      if (job.datasetVersionId === datasetVersionId && job.status === "RUNNING") return job;
+      if (job.datasetVersionId === datasetVersionId && job.status === "RUNNING")
+        return job;
     }
     return undefined;
   }
 
   async listRunningJobs(): Promise<DatasetBuildJob[]> {
     return Array.from(this.jobs.values())
-      .filter((j) => j.status === "RUNNING")
+      .filter(j => j.status === "RUNNING")
       .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
   }
 
-  async transitionJob(id: number, from: JobStatus, to: JobStatus, patch: JobTransitionPatch = {}): Promise<boolean> {
+  async transitionJob(
+    id: number,
+    from: JobStatus,
+    to: JobStatus,
+    patch: JobTransitionPatch = {}
+  ): Promise<boolean> {
     const current = this.jobsById.get(id);
     if (!current || current.status !== from) return false;
-    const updated: DatasetBuildJob = { ...current, ...patch, status: to, updatedAt: new Date().toISOString() };
+    const updated: DatasetBuildJob = {
+      ...current,
+      ...patch,
+      status: to,
+      updatedAt: new Date().toISOString(),
+    };
     this.jobsById.set(id, updated);
     this.jobs.set(current.jobId, updated);
     return true;
@@ -272,19 +352,24 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
     return deleted;
   }
 
-  async getRunningJobForDefinition(datasetId: number): Promise<DatasetBuildJob | undefined> {
+  async getRunningJobForDefinition(
+    datasetId: number
+  ): Promise<DatasetBuildJob | undefined> {
     const versionIds = new Set(
       Array.from(this.versionsById.values())
-        .filter((v) => v.datasetId === datasetId)
-        .map((v) => v.id!),
+        .filter(v => v.datasetId === datasetId)
+        .map(v => v.id!)
     );
     for (const job of this.jobs.values()) {
-      if (job.status === "RUNNING" && versionIds.has(job.datasetVersionId)) return job;
+      if (job.status === "RUNNING" && versionIds.has(job.datasetVersionId))
+        return job;
     }
     return undefined;
   }
 
-  async saveBuildConfig(input: DatasetBuildConfigRecord): Promise<DatasetBuildConfigRecord> {
+  async saveBuildConfig(
+    input: DatasetBuildConfigRecord
+  ): Promise<DatasetBuildConfigRecord> {
     const existing = this.buildConfigs.get(input.datasetVersionId);
     const record: DatasetBuildConfigRecord = {
       ...input,
@@ -296,7 +381,9 @@ export class InMemoryDatasetRegistry implements DatasetRegistryRepository {
     return record;
   }
 
-  async getBuildConfig(datasetVersionId: number): Promise<DatasetBuildConfigRecord | undefined> {
+  async getBuildConfig(
+    datasetVersionId: number
+  ): Promise<DatasetBuildConfigRecord | undefined> {
     return this.buildConfigs.get(datasetVersionId);
   }
 
@@ -316,7 +403,14 @@ export interface CreateDefinitionInput {
   datasetType: "EVENT" | "FACTOR" | "ML" | "RESEARCH";
   storageType?: "DATABASE";
   /** 显式覆盖物理表名；缺省按 ds_{dataset_code}_{role} 派生。 */
-  tableNames?: { event?: string; prefix?: string; post?: string; path?: string; outcome?: string; feature?: string | null };
+  tableNames?: {
+    event?: string;
+    prefix?: string;
+    post?: string;
+    path?: string;
+    outcome?: string;
+    feature?: string | null;
+  };
 }
 
 /** 生成稳定格式的构建作业 id（与既有 ds001-<version>-<ts> 约定一致，附加随机后缀防碰撞）。 */
@@ -414,7 +508,10 @@ export class DatasetRegistryService {
   private readonly plugins: DatasetPluginRegistry | null;
   private readonly physicalStore: DatasetPhysicalStore | null;
 
-  constructor(repo: DatasetRegistryRepository, options: DatasetRegistryServiceOptions = {}) {
+  constructor(
+    repo: DatasetRegistryRepository,
+    options: DatasetRegistryServiceOptions = {}
+  ) {
     this.repo = repo;
     this.plugins = options.plugins ?? null;
     this.physicalStore = options.physicalStore ?? null;
@@ -431,7 +528,7 @@ export class DatasetRegistryService {
     if (!plugin) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.BUILDER_NOT_REGISTERED,
-        `数据集 "${datasetCode}" 没有已注册的构建插件（无物理表结构与构建器），无法构建`,
+        `数据集 "${datasetCode}" 没有已注册的构建插件（无物理表结构与构建器），无法构建`
       );
     }
     return plugin;
@@ -439,7 +536,9 @@ export class DatasetRegistryService {
 
   private requirePhysicalStore(): DatasetPhysicalStore {
     if (!this.physicalStore) {
-      throw new Error("未注入 DatasetPhysicalStore，无法执行物理数据清理（生产必须注入 DbDatasetPhysicalStore）");
+      throw new Error(
+        "未注入 DatasetPhysicalStore，无法执行物理数据清理（生产必须注入 DbDatasetPhysicalStore）"
+      );
     }
     return this.physicalStore;
   }
@@ -452,19 +551,21 @@ export class DatasetRegistryService {
    * 则在落库前**幂等建立该数据集的物理表**（先建表后落库，建表失败不留下「有定义无表」的脏定义）。
    * 未注册插件时仅登记定义（状态 ACTIVE、buildable=false），构建入口会被明确拒绝。
    */
-  async createDefinition(input: CreateDefinitionInput): Promise<DatasetDefinition> {
+  async createDefinition(
+    input: CreateDefinitionInput
+  ): Promise<DatasetDefinition> {
     const issues = validateDatasetCode(input.datasetCode);
     if (issues.length > 0) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.INVALID_DATASET_CODE,
-        `非法 datasetCode："${input.datasetCode}"；${issues.join("；")}`,
+        `非法 datasetCode："${input.datasetCode}"；${issues.join("；")}`
       );
     }
     const existing = await this.repo.getDefinitionByCode(input.datasetCode);
     if (existing) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.DEFINITION_ALREADY_EXISTS,
-        `Dataset 定义已存在（datasetCode 唯一）：${input.datasetCode}`,
+        `Dataset 定义已存在（datasetCode 唯一）：${input.datasetCode}`
       );
     }
     const derived = buildDatasetTableNames(input.datasetCode);
@@ -486,7 +587,7 @@ export class DatasetRegistryService {
       if (explicit !== undefined && explicit !== expected) {
         throw new DatasetLifecycleError(
           DATASET_LIFECYCLE_ERROR.INVALID_DATASET_CODE,
-          `显式表名非法（必须为 ${expected}）：role=${role} 实际=${explicit}`,
+          `显式表名非法（必须为 ${expected}）：role=${role} 实际=${explicit}`
         );
       }
     }
@@ -519,7 +620,11 @@ export class DatasetRegistryService {
    * 更新 Definition 的可变字段（name / description）。
    * datasetCode 与物理表名不可变（命名规范铁律），故不接受入参覆盖。
    */
-  async updateDefinition(input: { definitionId: number; name?: string; description?: string | null }): Promise<DatasetDefinition> {
+  async updateDefinition(input: {
+    definitionId: number;
+    name?: string;
+    description?: string | null;
+  }): Promise<DatasetDefinition> {
     const def = await this.repo.getDefinitionById(input.definitionId);
     if (!def) throw new Error(`未找到 Dataset 定义：${input.definitionId}`);
     const patch: Partial<DatasetDefinition> = {};
@@ -536,23 +641,28 @@ export class DatasetRegistryService {
   }
 
   /** 创建逻辑版本（§9/§10）：(datasetId, version) 唯一，版本不是物理表。 */
-  async createVersion(input: Omit<DatasetVersion, "id" | "status">): Promise<DatasetVersion> {
+  async createVersion(
+    input: Omit<DatasetVersion, "id" | "status">
+  ): Promise<DatasetVersion> {
     const def = await this.repo.getDefinitionById(input.datasetId);
     if (!def) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND,
-        `未找到 Dataset 定义：${input.datasetId}`,
+        `未找到 Dataset 定义：${input.datasetId}`
       );
     }
     const labelIssues = validateVersionLabel(input.version);
     if (labelIssues.length > 0) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.INVALID_VERSION_LABEL, labelIssues.join("；"));
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.INVALID_VERSION_LABEL,
+        labelIssues.join("；")
+      );
     }
     const existing = await this.repo.getVersion(input.datasetId, input.version);
     if (existing) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.VERSION_ALREADY_EXISTS,
-        `版本已存在（(datasetId, version) 唯一）：${input.datasetId}@${input.version}`,
+        `版本已存在（(datasetId, version) 唯一）：${input.datasetId}@${input.version}`
       );
     }
     return (await this.repo.saveVersion({ ...input, status: "DRAFT" })).version;
@@ -579,13 +689,13 @@ export class DatasetRegistryService {
     if (!def) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND,
-        `未找到 Dataset 定义：${input.datasetId}`,
+        `未找到 Dataset 定义：${input.datasetId}`
       );
     }
     if (def.status === "ARCHIVED") {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.DEFINITION_ARCHIVED,
-        `Dataset 定义已归档（${def.datasetCode}），不可新建版本`,
+        `Dataset 定义已归档（${def.datasetCode}），不可新建版本`
       );
     }
 
@@ -626,25 +736,32 @@ export class DatasetRegistryService {
     if (version.id === undefined) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
-        `版本已创建但未返回 id（${input.datasetId}/${input.version}），无法固化筛选配置`,
+        `版本已创建但未返回 id（${input.datasetId}/${input.version}），无法固化筛选配置`
       );
     }
-    await this.repo.saveBuildConfig({ ...normalized, datasetVersionId: version.id });
+    await this.repo.saveBuildConfig({
+      ...normalized,
+      datasetVersionId: version.id,
+    });
     return version;
   }
 
   /** 读取某版本已固化的筛选配置（无配置行 → undefined，不臆造）。 */
-  async getBuildConfig(datasetVersionId: number): Promise<DatasetBuildConfigRecord | undefined> {
+  async getBuildConfig(
+    datasetVersionId: number
+  ): Promise<DatasetBuildConfigRecord | undefined> {
     return this.repo.getBuildConfig(datasetVersionId);
   }
 
   /** 解析某版本的构建配置（配置行 → legacy 镜像 → 权威默认；构建执行前调用）。 */
-  async resolveBuildConfigForVersion(datasetVersionId: number): Promise<ResolvedBuildConfig> {
+  async resolveBuildConfigForVersion(
+    datasetVersionId: number
+  ): Promise<ResolvedBuildConfig> {
     const version = await this.repo.getVersionById(datasetVersionId);
     if (!version) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
-        `未找到 Dataset 版本：${datasetVersionId}`,
+        `未找到 Dataset 版本：${datasetVersionId}`
       );
     }
     const configRow = await this.repo.getBuildConfig(datasetVersionId);
@@ -654,15 +771,26 @@ export class DatasetRegistryService {
   /** 标记版本进入构建态（DRAFT / FAILED / READY → BUILDING，非法转换拒绝）。 */
   async markBuilding(versionId: number): Promise<void> {
     const v = await this.repo.getVersionById(versionId);
-    if (!v) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${versionId}`);
+    if (!v)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${versionId}`
+      );
     assertVersionTransition(v.status!, "BUILDING");
     await this.repo.updateVersion(versionId, { status: "BUILDING" });
   }
 
   /** 标记版本完成（BUILDING → READY），并写入统计。 */
-  async markReady(versionId: number, totals: { totalEvents: number; totalRows: number }): Promise<void> {
+  async markReady(
+    versionId: number,
+    totals: { totalEvents: number; totalRows: number }
+  ): Promise<void> {
     const v = await this.repo.getVersionById(versionId);
-    if (!v) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${versionId}`);
+    if (!v)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${versionId}`
+      );
     assertVersionTransition(v.status!, "READY");
     await this.repo.updateVersion(versionId, {
       status: "READY",
@@ -675,7 +803,11 @@ export class DatasetRegistryService {
   /** 标记版本失败（BUILDING → FAILED）。 */
   async markFailed(versionId: number): Promise<void> {
     const v = await this.repo.getVersionById(versionId);
-    if (!v) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${versionId}`);
+    if (!v)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${versionId}`
+      );
     assertVersionTransition(v.status!, "FAILED");
     await this.repo.updateVersion(versionId, { status: "FAILED" });
   }
@@ -686,14 +818,24 @@ export class DatasetRegistryService {
    */
   async createJob(versionId: number): Promise<DatasetBuildJob> {
     const v = await this.repo.getVersionById(versionId);
-    if (!v) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${versionId}`);
+    if (!v)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${versionId}`
+      );
     if (!isVersionBuildable(v.status!)) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_BUILDABLE, `版本 ${v.version} 当前状态 ${v.status} 不可创建构建作业`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_BUILDABLE,
+        `版本 ${v.version} 当前状态 ${v.status} 不可创建构建作业`
+      );
     }
     // 前置「构建能力」校验：未注册插件的数据集不允许建作业（避免建了永远跑不起来的作业）。
     const definition = await this.repo.getDefinitionById(v.datasetId);
     if (!definition) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND, `未找到 Dataset 定义：${v.datasetId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND,
+        `未找到 Dataset 定义：${v.datasetId}`
+      );
     }
     this.requirePlugin(definition.datasetCode);
     return this.repo.saveJob({
@@ -715,26 +857,53 @@ export class DatasetRegistryService {
    */
   async startJob(jobId: string): Promise<DatasetBuildJob> {
     const job = await this.repo.getJob(jobId);
-    if (!job) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND, `未找到构建作业：${jobId}`);
+    if (!job)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND,
+        `未找到构建作业：${jobId}`
+      );
     const version = await this.repo.getVersionById(job.datasetVersionId);
-    if (!version) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${job.datasetVersionId}`);
+    if (!version)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${job.datasetVersionId}`
+      );
     assertJobTransition(job.status!, "RUNNING");
     if (!isVersionBuildable(version.status!)) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_BUILDABLE, `版本 ${version.version} 当前状态 ${version.status} 不可开始构建`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_BUILDABLE,
+        `版本 ${version.version} 当前状态 ${version.status} 不可开始构建`
+      );
     }
     // 构建能力前置校验（未注册插件 → BUILDER_NOT_REGISTERED，不置 RUNNING 假象）。
     const definition = await this.repo.getDefinitionById(version.datasetId);
     if (!definition) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND, `未找到 Dataset 定义：${version.datasetId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND,
+        `未找到 Dataset 定义：${version.datasetId}`
+      );
     }
     this.requirePlugin(definition.datasetCode);
-    const running = await this.repo.getRunningJobForVersion(job.datasetVersionId);
+    const running = await this.repo.getRunningJobForVersion(
+      job.datasetVersionId
+    );
     if (running && running.id !== job.id) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_ALREADY_RUNNING, `版本已存在运行中的作业：${running.jobId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_ALREADY_RUNNING,
+        `版本已存在运行中的作业：${running.jobId}`
+      );
     }
-    const transitioned = await this.repo.transitionJob(job.id!, "PENDING", "RUNNING", { startedAt: new Date().toISOString() });
+    const transitioned = await this.repo.transitionJob(
+      job.id!,
+      "PENDING",
+      "RUNNING",
+      { startedAt: new Date().toISOString() }
+    );
     if (!transitioned) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION, `作业 ${jobId} 已被并发启动或状态已变更，无法启动`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION,
+        `作业 ${jobId} 已被并发启动或状态已变更，无法启动`
+      );
     }
     return (await this.repo.getJob(jobId))!;
   }
@@ -746,15 +915,27 @@ export class DatasetRegistryService {
    */
   async cancelJob(jobId: string): Promise<DatasetBuildJob> {
     const job = await this.repo.getJob(jobId);
-    if (!job) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND, `未找到构建作业：${jobId}`);
+    if (!job)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND,
+        `未找到构建作业：${jobId}`
+      );
     assertJobTransition(job.status!, "CANCELLED");
     const wasRunning = job.status === "RUNNING";
-    const transitioned = await this.repo.transitionJob(job.id!, job.status!, "CANCELLED", {
-      completedAt: new Date().toISOString(),
-      errorMessage: "cancelled by user",
-    });
+    const transitioned = await this.repo.transitionJob(
+      job.id!,
+      job.status!,
+      "CANCELLED",
+      {
+        completedAt: new Date().toISOString(),
+        errorMessage: "cancelled by user",
+      }
+    );
     if (!transitioned) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION, `作业 ${jobId} 状态已变更，无法取消`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION,
+        `作业 ${jobId} 状态已变更，无法取消`
+      );
     }
     if (wasRunning) {
       const version = await this.repo.getVersionById(job.datasetVersionId);
@@ -775,14 +956,22 @@ export class DatasetRegistryService {
    * 未注入 `physicalStore` → 抛错（**不静默跳过**，防止「以为删了其实没删」）。
    * 幂等：可重复调用，已空则返回 0。
    */
-  async purgeVersionRows(datasetVersionId: number): Promise<VersionRollbackResult> {
+  async purgeVersionRows(
+    datasetVersionId: number
+  ): Promise<VersionRollbackResult> {
     const version = await this.repo.getVersionById(datasetVersionId);
     if (!version) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${datasetVersionId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${datasetVersionId}`
+      );
     }
     const definition = await this.repo.getDefinitionById(version.datasetId);
     if (!definition) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND, `未找到 Dataset 定义：${version.datasetId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND,
+        `未找到 Dataset 定义：${version.datasetId}`
+      );
     }
     const store = this.requirePhysicalStore();
     const tables = await store.purgeVersionRows(definition, datasetVersionId);
@@ -815,7 +1004,10 @@ export class DatasetRegistryService {
   async cancelJobAndRollback(jobId: string): Promise<CancelJobRollbackResult> {
     const existing = await this.repo.getJob(jobId);
     if (!existing) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND, `未找到构建作业：${jobId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND,
+        `未找到构建作业：${jobId}`
+      );
     }
     const alreadyCancelled = existing.status === "CANCELLED";
     const job = alreadyCancelled ? existing : await this.cancelJob(jobId);
@@ -847,7 +1039,12 @@ export class DatasetRegistryService {
     }
 
     const rollback = await this.purgeVersionRows(existing.datasetVersionId);
-    return { job: (await this.repo.getJob(jobId))!, rollback, rollbackSkippedReason: null, alreadyCancelled };
+    return {
+      job: (await this.repo.getJob(jobId))!,
+      rollback,
+      rollbackSkippedReason: null,
+      alreadyCancelled,
+    };
   }
 
   /**
@@ -869,7 +1066,9 @@ export class DatasetRegistryService {
    * @param options.staleMinutes 停更阈值（分钟）；`<= 0` → 整体跳过（返回空数组）。
    * @param options.now 注入时钟（测试用，缺省取当前时间）。
    */
-  async reclaimStaleJobs(options: { staleMinutes?: number; now?: Date } = {}): Promise<ReclaimStaleJobResult[]> {
+  async reclaimStaleJobs(
+    options: { staleMinutes?: number; now?: Date } = {}
+  ): Promise<ReclaimStaleJobResult[]> {
     const staleMinutes = options.staleMinutes ?? DEFAULT_STALE_BUILD_MINUTES;
     if (staleMinutes <= 0) return [];
     const now = options.now ?? new Date();
@@ -881,10 +1080,15 @@ export class DatasetRegistryService {
       const at = reference ? Date.parse(reference) : Number.NaN;
       if (!Number.isFinite(at)) continue; // 无时间基准 → 不回收（诚实）
       if (at > cutoff) continue; // 仍在刷新进度 → 视为存活
-      const transitioned = await this.repo.transitionJob(job.id!, "RUNNING", "CANCELLED", {
-        completedAt: now.toISOString(),
-        errorMessage: `orphan reclaimed：停更 ${Math.round((now.getTime() - at) / 60_000)} 分钟无进度更新`,
-      });
+      const transitioned = await this.repo.transitionJob(
+        job.id!,
+        "RUNNING",
+        "CANCELLED",
+        {
+          completedAt: now.toISOString(),
+          errorMessage: `orphan reclaimed：停更 ${Math.round((now.getTime() - at) / 60_000)} 分钟无进度更新`,
+        }
+      );
       if (!transitioned) continue; // 已被真实执行者 / 并发请求改变状态 → 不重复处理
       const version = await this.repo.getVersionById(job.datasetVersionId);
       const takeover = version?.status === "BUILDING";
@@ -915,34 +1119,66 @@ export class DatasetRegistryService {
   }
 
   /** 推进作业进度（checkpoint 落库；不改变状态机，仅进度字段）。 */
-  async updateJobProgress(jobId: string, patch: Partial<Omit<DatasetBuildJob, "id" | "datasetVersionId" | "jobId">>): Promise<void> {
+  async updateJobProgress(
+    jobId: string,
+    patch: Partial<Omit<DatasetBuildJob, "id" | "datasetVersionId" | "jobId">>
+  ): Promise<void> {
     const job = await this.repo.getJob(jobId);
-    if (!job) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND, `未找到构建作业：${jobId}`);
+    if (!job)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND,
+        `未找到构建作业：${jobId}`
+      );
     await this.repo.updateJob(job.id!, patch);
   }
 
   /** 完成作业（RUNNING → COMPLETED；非 RUNNING 拒绝）。 */
   async completeJob(jobId: string): Promise<void> {
     const job = await this.repo.getJob(jobId);
-    if (!job) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND, `未找到构建作业：${jobId}`);
+    if (!job)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND,
+        `未找到构建作业：${jobId}`
+      );
     assertJobTransition(job.status!, "COMPLETED");
-    const transitioned = await this.repo.transitionJob(job.id!, "RUNNING", "COMPLETED", { completedAt: new Date().toISOString() });
+    const transitioned = await this.repo.transitionJob(
+      job.id!,
+      "RUNNING",
+      "COMPLETED",
+      { completedAt: new Date().toISOString() }
+    );
     if (!transitioned) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION, `作业 ${jobId} 状态已变更，无法完成`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION,
+        `作业 ${jobId} 状态已变更，无法完成`
+      );
     }
   }
 
   /** 失败作业（RUNNING → FAILED；非 RUNNING 拒绝）。 */
   async failJob(jobId: string, errorMessage: string): Promise<void> {
     const job = await this.repo.getJob(jobId);
-    if (!job) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND, `未找到构建作业：${jobId}`);
+    if (!job)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND,
+        `未找到构建作业：${jobId}`
+      );
     assertJobTransition(job.status!, "FAILED");
-    const transitioned = await this.repo.transitionJob(job.id!, "RUNNING", "FAILED", {
-      errorMessage,
-      completedAt: new Date().toISOString(),
-    });
+    const transitioned = await this.repo.transitionJob(
+      job.id!,
+      "RUNNING",
+      "FAILED",
+      {
+        // 构建错误可能携带完整 SQL，必须截断后再落库；否则 errorMessage 本身会溢出。
+        errorMessage: errorMessage.slice(0, 16_000),
+        completedAt: new Date().toISOString(),
+      }
+    );
     if (!transitioned) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION, `作业 ${jobId} 状态已变更，无法置为失败`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION,
+        `作业 ${jobId} 状态已变更，无法置为失败`
+      );
     }
   }
 
@@ -952,14 +1188,28 @@ export class DatasetRegistryService {
    */
   async retryJob(jobId: string): Promise<DatasetBuildJob> {
     const job = await this.repo.getJob(jobId);
-    if (!job) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND, `未找到构建作业：${jobId}`);
+    if (!job)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.JOB_NOT_FOUND,
+        `未找到构建作业：${jobId}`
+      );
     if (job.status !== "FAILED" && job.status !== "CANCELLED") {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION, `仅 FAILED / CANCELLED 作业可重试（当前 ${job.status}）`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.INVALID_JOB_TRANSITION,
+        `仅 FAILED / CANCELLED 作业可重试（当前 ${job.status}）`
+      );
     }
     const version = await this.repo.getVersionById(job.datasetVersionId);
-    if (!version) throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${job.datasetVersionId}`);
+    if (!version)
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${job.datasetVersionId}`
+      );
     if (!isVersionBuildable(version.status!)) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_BUILDABLE, `版本 ${version.version} 当前状态 ${version.status} 不可重试构建`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_BUILDABLE,
+        `版本 ${version.version} 当前状态 ${version.status} 不可重试构建`
+      );
     }
     return this.repo.saveJob({
       datasetVersionId: job.datasetVersionId,
@@ -987,23 +1237,30 @@ export class DatasetRegistryService {
   async deleteVersion(datasetVersionId: number): Promise<DeleteVersionResult> {
     const version = await this.repo.getVersionById(datasetVersionId);
     if (!version) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND, `未找到 Dataset 版本：${datasetVersionId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.VERSION_NOT_FOUND,
+        `未找到 Dataset 版本：${datasetVersionId}`
+      );
     }
     const running = await this.repo.getRunningJobForVersion(datasetVersionId);
     if (running) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.VERSION_HAS_RUNNING_JOB,
-        `版本存在运行中的构建作业（${running.jobId}），请先取消或等待结束后再删除`,
+        `版本存在运行中的构建作业（${running.jobId}），请先取消或等待结束后再删除`
       );
     }
     const definition = await this.repo.getDefinitionById(version.datasetId);
     if (!definition) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND, `未找到 Dataset 定义：${version.datasetId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND,
+        `未找到 Dataset 定义：${version.datasetId}`
+      );
     }
     const store = this.requirePhysicalStore();
     const tables = await store.purgeVersionRows(definition, datasetVersionId);
     const jobsDeleted = await this.repo.deleteJobsByVersion(datasetVersionId);
-    const configsDeleted = await this.repo.deleteBuildConfigsByVersion(datasetVersionId);
+    const configsDeleted =
+      await this.repo.deleteBuildConfigsByVersion(datasetVersionId);
     await this.repo.deleteVersion(datasetVersionId);
     return {
       datasetVersionId,
@@ -1026,16 +1283,21 @@ export class DatasetRegistryService {
    *   4. DROP 该数据集的全部物理表（表结构一并删除，符合「删数据集连表结构一起删」语义）；
    *   5. 删除定义记录（datasetCode 释放，可用同 code 重建，重建时由插件重新建表）。
    */
-  async deleteDefinition(definitionId: number): Promise<DeleteDefinitionResult> {
+  async deleteDefinition(
+    definitionId: number
+  ): Promise<DeleteDefinitionResult> {
     const definition = await this.repo.getDefinitionById(definitionId);
     if (!definition) {
-      throw new DatasetLifecycleError(DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND, `未找到 Dataset 定义：${definitionId}`);
+      throw new DatasetLifecycleError(
+        DATASET_LIFECYCLE_ERROR.DEFINITION_NOT_FOUND,
+        `未找到 Dataset 定义：${definitionId}`
+      );
     }
     const running = await this.repo.getRunningJobForDefinition(definitionId);
     if (running) {
       throw new DatasetLifecycleError(
         DATASET_LIFECYCLE_ERROR.DEFINITION_HAS_RUNNING_JOB,
-        `数据集存在运行中的构建作业（${running.jobId}），请先取消或等待结束后再删除`,
+        `数据集存在运行中的构建作业（${running.jobId}），请先取消或等待结束后再删除`
       );
     }
     const store = this.requirePhysicalStore();

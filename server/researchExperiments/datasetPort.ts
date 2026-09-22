@@ -25,7 +25,13 @@
  *      拿不到 `db` / 表对象 / 任意 SQL 的能力。
  */
 
-import type { ExperimentDescriptor, ExperimentDatasetVersionOption, ExperimentRequiredColumns } from "@shared/researchExperimentsContracts";
+import type {
+  ExperimentDescriptor,
+  ExperimentDatasetRequirement,
+  ExperimentDatasetVersionOption,
+  ExperimentEvaluationWindow,
+  ExperimentRequiredColumns,
+} from "@shared/researchExperimentsContracts";
 import {
   firstLimitPullbackEvents,
   firstLimitPullbackPrefixes,
@@ -185,6 +191,10 @@ export interface ExperimentAccessStats {
   eventScanPolicy: "PLATFORM_LIMIT" | "FULL_DATASET";
   /** 本次生效的扫描上限（＝策略对应的那个阀值）。 */
   eventScanLimit: number;
+  /** 样本资格是否已冻结。 */
+  selectionFrozen: boolean;
+  /** 冻结样本数。 */
+  selectedEventCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,8 +214,14 @@ export interface ExperimentDatasetPort {
   /** 按声明构造一次性的取数句柄（惰性读取 + 同相对日缓存）。 */
   createAccess(args: {
     descriptor: ExperimentDescriptor;
+    requirement?: ExperimentDatasetRequirement;
     facts: ExperimentDatasetFacts;
-  }): { access: ExperimentDatasetAccess; stats: ExperimentAccessStats };
+    evaluationWindow?: ExperimentEvaluationWindow | null;
+  }): {
+    access: ExperimentDatasetAccess;
+    stats: ExperimentAccessStats;
+    freezeSelection: (eventIds: readonly string[]) => void;
+  };
 }
 
 /** 真实实现：适配 `ResearchDatasetReader`（Research 侧唯一读取层）。 */
@@ -247,10 +263,16 @@ export function createRegistryExperimentDatasetPort(deps: {
 
   function createAccess(args: {
     descriptor: ExperimentDescriptor;
+    requirement?: ExperimentDatasetRequirement;
     facts: ExperimentDatasetFacts;
-  }): { access: ExperimentDatasetAccess; stats: ExperimentAccessStats } {
-    const { descriptor, facts } = args;
-    const req = descriptor.datasetRequirement;
+    evaluationWindow?: ExperimentEvaluationWindow | null;
+  }): {
+    access: ExperimentDatasetAccess;
+    stats: ExperimentAccessStats;
+    freezeSelection: (eventIds: readonly string[]) => void;
+  } {
+    const { descriptor, facts, evaluationWindow = null } = args;
+    const req = args.requirement ?? descriptor.datasetRequirement;
 
     const columns: Record<keyof typeof COLUMN_TABLES, readonly string[]> = {
       events: req.requiredColumns.events ?? [],
@@ -297,9 +319,26 @@ export function createRegistryExperimentDatasetPort(deps: {
       eventScanTruncated: false,
       eventScanPolicy,
       eventScanLimit: scanLimit,
+      selectionFrozen: false,
+      selectedEventCount: 0,
     };
 
     const barCache = new Map<string, Promise<readonly ExperimentBarRow[]>>();
+    let selectedEventIds: Set<string> | null = null;
+
+    function freezeSelection(eventIds: readonly string[]): void {
+      if (selectedEventIds !== null) {
+        throw new ExperimentError(
+          "EXPERIMENT_RUN_STATE_INVALID",
+          `实验 "${descriptor.id}" 已经冻结过样本资格，禁止重复冻结`,
+          { selectedEventCount: selectedEventIds.size },
+        );
+      }
+      const unique = new Set(eventIds);
+      selectedEventIds = unique;
+      stats.selectionFrozen = true;
+      stats.selectedEventCount = unique.size;
+    }
 
     /**
      * 事件**流式分页**（chunked scan）：每轮 `loadEventPage` 拉一页，逐页交出。
@@ -313,6 +352,12 @@ export function createRegistryExperimentDatasetPort(deps: {
       for (;;) {
         const page = await reader.loadEventPage({
           datasetVersionId: facts.datasetVersionId,
+          ...(evaluationWindow !== null
+            ? {
+                fromDate: evaluationWindow.startDate,
+                toDate: evaluationWindow.endDate,
+              }
+            : {}),
           cursor,
           limit: pageSize,
           columns: projections.events,
@@ -436,15 +481,28 @@ export function createRegistryExperimentDatasetPort(deps: {
             { relativeDay, declared: postDays },
           );
         }
+        experimentAssert(
+          selectedEventIds !== null,
+          "EXPERIMENT_SELECTION_NOT_FROZEN",
+          `实验 "${descriptor.id}" 在读取未来观察数据 rd=${relativeDay} 前未调用 freezeSelection()` +
+            `（必须先冻结样本资格，随后未来数据只能用于已冻结样本的结果观察）`,
+          { relativeDay },
+        );
+        // 空样本集可以继续走“无观测数据”的结果组装；没有样本时严禁再去触碰未来数据。
+        if (selectedEventIds.size === 0) return [];
         const key = `post:${relativeDay}`;
         let pending = barCache.get(key);
         if (pending === undefined) {
           pending = (async () => {
             const events = await access.events();
+            const selected = selectedEventIds;
+            const eligibleEvents = selected === null
+              ? events
+              : events.filter((event) => selected.has(event.eventId));
             return loadBars(
               "post",
               relativeDay,
-              events.map((e) => e.eventId),
+              eligibleEvents.map((e) => e.eventId),
             );
           })();
           barCache.set(key, pending);
@@ -453,7 +511,7 @@ export function createRegistryExperimentDatasetPort(deps: {
       },
     };
 
-    return { access, stats };
+    return { access, stats, freezeSelection };
   }
 
   return {
@@ -477,7 +535,14 @@ export function assertRelativeDaysWithinHorizon(
   descriptor: ExperimentDescriptor,
   facts: ExperimentDatasetFacts,
 ): void {
-  const req = descriptor.datasetRequirement;
+  assertRequirementRelativeDaysWithinHorizon(descriptor.id, descriptor.datasetRequirement, facts);
+}
+
+export function assertRequirementRelativeDaysWithinHorizon(
+  experimentId: string,
+  req: ExperimentDatasetRequirement,
+  facts: ExperimentDatasetFacts,
+): void {
   const postDays = req.postRelativeDays ?? [];
   if (postDays.length === 0) return;
   const range = facts.postRelativeDayRange;
@@ -485,7 +550,7 @@ export function assertRelativeDaysWithinHorizon(
     throw new ExperimentError(
       "EXPERIMENT_RELATIVE_DAY_OUT_OF_RANGE",
       `数据集版本 ${facts.datasetVersionId} 没有 post（观察日）数据，` +
-        `但实验 "${descriptor.id}" 声明了 postRelativeDays=[${postDays.join(", ")}]`,
+        `但实验 "${experimentId}" 声明了 postRelativeDays=[${postDays.join(", ")}]`,
       { datasetVersionId: facts.datasetVersionId, postDays },
     );
   }
@@ -493,7 +558,7 @@ export function assertRelativeDaysWithinHorizon(
   if (beyond.length > 0) {
     throw new ExperimentError(
       "EXPERIMENT_RELATIVE_DAY_OUT_OF_RANGE",
-      `实验 "${descriptor.id}" 声明的 post 相对日超出该版本真实视界 ` +
+      `实验 "${experimentId}" 声明的 post 相对日超出该版本真实视界 ` +
         `[${range.min}, ${range.max}]：${beyond.join(", ")}（**夹取等于悄悄改窄研究范围**，故拒绝）`,
       { beyond, range },
     );
@@ -505,12 +570,24 @@ export function assertDatasetCodeMatches(
   descriptor: ExperimentDescriptor,
   facts: ExperimentDatasetFacts,
 ): void {
-  if (facts.datasetCode !== descriptor.datasetRequirement.datasetCode) {
+  assertRequirementCodeMatches(
+    descriptor.id,
+    descriptor.datasetRequirement,
+    facts,
+  );
+}
+
+export function assertRequirementCodeMatches(
+  experimentId: string,
+  requirement: ExperimentDatasetRequirement,
+  facts: ExperimentDatasetFacts,
+): void {
+  if (facts.datasetCode !== requirement.datasetCode) {
     throw new ExperimentError(
       "EXPERIMENT_DATASET_CODE_MISMATCH",
-      `实验 "${descriptor.id}" 声明需要数据集 "${descriptor.datasetRequirement.datasetCode}"，` +
+      `实验 "${experimentId}" 声明需要数据集 "${requirement.datasetCode}"，` +
         `但版本 ${facts.datasetVersionId} 属于 "${facts.datasetCode}"`,
-      { expected: descriptor.datasetRequirement.datasetCode, actual: facts.datasetCode },
+      { expected: requirement.datasetCode, actual: facts.datasetCode },
     );
   }
 }

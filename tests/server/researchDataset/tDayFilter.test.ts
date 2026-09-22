@@ -8,9 +8,16 @@ import {
   limitUpRatioForRow,
   matchesTDayCondition,
 } from "../../../server/researchDataset/tDayFilter";
-import type { ResearchDatasetRow, TDayCondition } from "../../../server/researchDataset/types";
+import type {
+  ResearchDatasetRow,
+  TDayCondition,
+} from "../../../server/researchDataset/types";
 
-function rowLike(overrides: Partial<Pick<ResearchDatasetRow, "code" | "st" | "close" | "preClose">> = {}): {
+function rowLike(
+  overrides: Partial<
+    Pick<ResearchDatasetRow, "code" | "st" | "close" | "preClose">
+  > = {}
+): {
   code: string | null;
   st: "NORMAL" | "ST" | "*ST" | "UNKNOWN";
   close: number | null;
@@ -27,13 +34,27 @@ function rowLike(overrides: Partial<Pick<ResearchDatasetRow, "code" | "st" | "cl
 
 describe("limitUpRatioForRow", () => {
   it("主板 10%、创业板/科创板 20%、北交所 30%、ST 主板 5%", () => {
-    expect(limitUpRatioForRow(rowLike({ code: "600000.SH", st: "NORMAL" }))).toBe(0.1);
-    expect(limitUpRatioForRow(rowLike({ code: "000001.SZ", st: "NORMAL" }))).toBe(0.1);
-    expect(limitUpRatioForRow(rowLike({ code: "300001.SZ", st: "NORMAL" }))).toBe(0.2);
-    expect(limitUpRatioForRow(rowLike({ code: "688001.SH", st: "NORMAL" }))).toBe(0.2);
-    expect(limitUpRatioForRow(rowLike({ code: "920001.BJ", st: "NORMAL" }))).toBe(0.3);
-    expect(limitUpRatioForRow(rowLike({ code: "600000.SH", st: "ST" }))).toBe(0.05);
-    expect(limitUpRatioForRow(rowLike({ code: "600000.SH", st: "*ST" }))).toBe(0.05);
+    expect(
+      limitUpRatioForRow(rowLike({ code: "600000.SH", st: "NORMAL" }))
+    ).toBe(0.1);
+    expect(
+      limitUpRatioForRow(rowLike({ code: "000001.SZ", st: "NORMAL" }))
+    ).toBe(0.1);
+    expect(
+      limitUpRatioForRow(rowLike({ code: "300001.SZ", st: "NORMAL" }))
+    ).toBe(0.2);
+    expect(
+      limitUpRatioForRow(rowLike({ code: "688001.SH", st: "NORMAL" }))
+    ).toBe(0.2);
+    expect(
+      limitUpRatioForRow(rowLike({ code: "920001.BJ", st: "NORMAL" }))
+    ).toBe(0.3);
+    expect(limitUpRatioForRow(rowLike({ code: "600000.SH", st: "ST" }))).toBe(
+      0.05
+    );
+    expect(limitUpRatioForRow(rowLike({ code: "600000.SH", st: "*ST" }))).toBe(
+      0.05
+    );
   });
 
   it("unknown 板块 / 无代码 → null（不可判，不伪造）", () => {
@@ -43,26 +64,72 @@ describe("limitUpRatioForRow", () => {
 });
 
 describe("isRowLimitUp", () => {
-  it("close ≥ 涨停价 → 涨停（主板 10%）", () => {
-    expect(isRowLimitUp(rowLike({ code: "600000.SH", st: "NORMAL", close: 11, preClose: 10 }))).toBe(true);
-    expect(isRowLimitUp(rowLike({ code: "600000.SH", st: "NORMAL", close: 10.99, preClose: 10 }))).toBe(false);
+  it("close 等于交易所口径涨停价 → 涨停（主板 10%）", () => {
+    expect(
+      isRowLimitUp(
+        rowLike({ code: "600000.SH", st: "NORMAL", close: 11, preClose: 10 })
+      )
+    ).toBe(true);
+    expect(
+      isRowLimitUp(
+        rowLike({ code: "600000.SH", st: "NORMAL", close: 10.99, preClose: 10 })
+      )
+    ).toBe(false);
+  });
+
+  it("不足 10% 的分价涨停保留，高于涨停价的异常值排除", () => {
+    expect(
+      isRowLimitUp(
+        rowLike({
+          code: "600000.SH",
+          st: "NORMAL",
+          close: 2.56,
+          preClose: 2.33,
+        })
+      )
+    ).toBe(true);
+    expect(
+      isRowLimitUp(
+        rowLike({
+          code: "600000.SH",
+          st: "NORMAL",
+          close: 2.57,
+          preClose: 2.33,
+        })
+      )
+    ).toBe(false);
   });
 
   it("ST 主板按 5% 判定", () => {
-    expect(isRowLimitUp(rowLike({ code: "600000.SH", st: "ST", close: 10.5, preClose: 10 }))).toBe(true);
-    expect(isRowLimitUp(rowLike({ code: "600000.SH", st: "ST", close: 10.4, preClose: 10 }))).toBe(false);
+    expect(
+      isRowLimitUp(
+        rowLike({ code: "600000.SH", st: "ST", close: 10.5, preClose: 10 })
+      )
+    ).toBe(true);
+    expect(
+      isRowLimitUp(
+        rowLike({ code: "600000.SH", st: "ST", close: 10.4, preClose: 10 })
+      )
+    ).toBe(false);
   });
 
   it("价格缺失 / 板块不可判 → false（保守不入选）", () => {
     expect(isRowLimitUp(rowLike({ close: null }))).toBe(false);
     expect(isRowLimitUp(rowLike({ preClose: null }))).toBe(false);
     expect(isRowLimitUp(rowLike({ preClose: 0 }))).toBe(false);
-    expect(isRowLimitUp(rowLike({ code: "999999.SH", close: 11, preClose: 10 }))).toBe(false);
+    expect(
+      isRowLimitUp(rowLike({ code: "999999.SH", close: 11, preClose: 10 }))
+    ).toBe(false);
   });
 });
 
 describe("matchesTDayCondition", () => {
-  const cases: { condition: TDayCondition; limitUp: boolean; prev: boolean | null; want: boolean }[] = [
+  const cases: {
+    condition: TDayCondition;
+    limitUp: boolean;
+    prev: boolean | null;
+    want: boolean;
+  }[] = [
     // none：无条件，恒真
     { condition: "none", limitUp: false, prev: null, want: true },
     { condition: "none", limitUp: true, prev: true, want: true },

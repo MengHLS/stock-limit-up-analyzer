@@ -42,6 +42,8 @@ export interface PlannedSell {
   readonly securityId: string;
   /** 目标股数 = 决策日收盘时点可卖份额。 */
   readonly quantity: number;
+  /** 退出原因（止损 / 止盈 / 时间退出 / 候选退出）。 */
+  readonly reason: string;
 }
 
 export type PlannedOrder = PlannedBuy | PlannedSell;
@@ -59,6 +61,8 @@ export interface PlanDecisionInput {
   readonly decisionDate: string;
   /** 当日候选意图（C-13.2 产出，顺序即候选 rank 升序）。 */
   readonly intents: readonly PositionIntent[];
+  /** 引擎计算出的强制退出原因（止损 / 止盈 / 时间退出）。 */
+  readonly forcedExitReasons?: ReadonlyMap<string, string>;
   /** 当前持仓 securityId（引擎负责确定性排序）。 */
   readonly holdings: readonly string[];
   /** securityId → 决策日收盘可卖股数。 */
@@ -213,6 +217,7 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
   const {
     decisionDate,
     intents,
+    forcedExitReasons,
     holdings,
     availableBySecurity,
     cash,
@@ -226,8 +231,10 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     initialCapital,
   } = input;
 
-  // 决策日无候选意图 → 信息不足，持仓不变（不强制清仓），无任何计划。
-  if (intents.length === 0) {
+  const forced = forcedExitReasons ?? new Map<string, string>();
+  const forcedOnly = intents.length === 0;
+  // 决策日无候选意图且没有强制退出 → 信息不足，持仓不变（不强制清仓）。
+  if (forcedOnly && forced.size === 0) {
     return { orders: [], skipped: [] };
   }
 
@@ -247,7 +254,9 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
   // ---- 退出：当前持仓不在 desired → 卖出全部可卖份额 ----
   const nextDayMessage = "模拟窗口最后交易日，无下一交易日可执行";
   for (const securityId of holdings) {
-    if (desired.has(securityId)) continue;
+    const forcedReason = forced.get(securityId);
+    if (forcedOnly && forcedReason === undefined) continue;
+    if (desired.has(securityId) && forcedReason === undefined) continue;
     if (!hasNextTradingDay) {
       skipped.push(
         skip(
@@ -255,7 +264,7 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
           securityId,
           "sell",
           "NO_NEXT_TRADING_DAY",
-          nextDayMessage
+          forcedReason === undefined ? nextDayMessage : `${nextDayMessage}（${forcedReason}）`
         )
       );
       continue;
@@ -268,12 +277,19 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
           securityId,
           "sell",
           "FROZEN_EXIT_DEFERRED",
-          "可卖份额为 0（T+1 冻结中），卖出顺延至后续决策日再评估"
+          forcedReason === undefined
+            ? "可卖份额为 0（T+1 冻结中），卖出顺延至后续决策日再评估"
+            : `${forcedReason}；可卖份额为 0（T+1 冻结中），卖出顺延`
         )
       );
       continue;
     }
-    orders.push({ kind: "sell", securityId, quantity: available });
+    orders.push({
+      kind: "sell",
+      securityId,
+      quantity: available,
+      reason: forcedReason ?? "候选退出",
+    });
   }
 
   // ---- 进入：desired 中未持仓的新候选，按预算进入 ----

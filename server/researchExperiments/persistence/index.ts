@@ -19,6 +19,7 @@ export {
   assertManifestKeyPresent,
   assertRunTransition,
   computeStale,
+  formatExperimentBusinessDate,
   mapRunRow,
   type ExperimentRunCompleteInput,
   type ExperimentRunCreateInput,
@@ -45,9 +46,12 @@ export {
 } from "./runManifest";
 
 export {
+  DEFAULT_EXPERIMENT_PUBLISH_LIMITS,
   DEFAULT_RUN_LOG_NAME,
   publishRunArtifacts,
   translateArtifactStorageError,
+  validatePublishLimits,
+  type ExperimentPublishLimits,
   type PublishRunArtifactsInput,
   type PublishRunArtifactsResult,
 } from "./artifactPublisher";

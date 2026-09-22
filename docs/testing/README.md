@@ -2,8 +2,8 @@
 
 # 测试资产总览（tests/ 与 docs/testing/ 的唯一索引）
 
-全仓测试文件 **290** 个 ｜ 用例声明 **4839** 个 ｜ 模块 **28** 个
-其中：环境依赖（离线必失败）**7** 个 ｜ 已知失效 **1** 个 ｜ 源码文本断言 **22** 个
+全仓测试文件 **261** 个 ｜ 用例声明 **4028** 个 ｜ 模块 **27** 个
+其中：环境依赖（离线必失败）**7** 个 ｜ 已知失效 **1** 个 ｜ 源码文本断言 **19** 个
 
 > 本目录由 `pnpm run docs:tests` 生成，**禁手改**；改测试后重跑即同步。
 
@@ -64,8 +64,6 @@
 
 | 测试文件 |
 |---|
-| `tests/client/src/components/research/candidateSketchForm.test.ts` |
-| `tests/client/src/components/research/strategyCandidateUiContract.test.ts` |
 | `tests/client/src/components/strategy/definitionDraft.test.ts` |
 | `tests/client/src/pages/strategyListDetailSplit.test.ts` |
 | `tests/client/src/pages/strategyRunResultPersist.test.ts` |
@@ -76,12 +74,11 @@
 | `tests/server/image.uploadAndRecognize.test.ts` |
 | `tests/server/leaderCandidatesPage.test.ts` |
 | `tests/server/operationLog.test.ts` |
-| `tests/server/research/evaluationService.test.ts` |
 | `tests/server/research/parameterSearch/parameterSearchEffectiveness.test.ts` |
-| `tests/server/research/researchRun.test.ts` |
-| `tests/server/research/strategyCandidate/importBoundary.test.ts` |
-| `tests/server/research/sweep.test.ts` |
+| `tests/server/research/robustness/multiDimension.test.ts` |
 | `tests/server/research/walkForward/walkForwardBoundary.test.ts` |
+| `tests/server/researchExperiments/exp001FundamentalStudy.test.ts` |
+| `tests/server/researchExperiments/exp002StabilityValidation.test.ts` |
 | `tests/server/stockDailyPriceUnique.test.ts` |
 | `tests/server/stockPriceSyncPage.test.ts` |
 | `tests/server/strategy/contract.test.ts` |
@@ -91,33 +88,32 @@
 
 | 模块 | 文档 | 测试文件 | 用例声明 | 环境依赖 | 文本断言 |
 |---|---|---|---|---|---|
-| `client/src/adapters` | [`client/src/adapters/_index.md`](client/src/adapters/_index.md) | 5 | 147 | - | - |
-| `client/src/components` | [`client/src/components/_index.md`](client/src/components/_index.md) | 17 | 427 | - | 3 |
+| `client/src/adapters` | [`client/src/adapters/_index.md`](client/src/adapters/_index.md) | 4 | 98 | - | - |
+| `client/src/components` | [`client/src/components/_index.md`](client/src/components/_index.md) | 5 | 84 | - | 1 |
 | `client/src/lib` | [`client/src/lib/_index.md`](client/src/lib/_index.md) | 3 | 20 | - | - |
 | `client/src/pages` | [`client/src/pages/_index.md`](client/src/pages/_index.md) | 2 | 16 | - | 2 |
-| `server` | [`server/_index.md`](server/_index.md) | 57 | 522 | 7 | 9 |
+| `server` | [`server/_index.md`](server/_index.md) | 55 | 473 | 7 | 9 |
 | `server/backfill` | [`server/backfill/_index.md`](server/backfill/_index.md) | 14 | 110 | - | - |
 | `server/backtest` | [`server/backtest/_index.md`](server/backtest/_index.md) | 8 | 102 | - | - |
-| `server/closedLoopBacktestRun` | [`server/closedLoopBacktestRun/_index.md`](server/closedLoopBacktestRun/_index.md) | 2 | 15 | - | - |
+| `server/closedLoopBacktestRun` | [`server/closedLoopBacktestRun/_index.md`](server/closedLoopBacktestRun/_index.md) | 3 | 20 | - | - |
 | `server/corporateActions` | [`server/corporateActions/_index.md`](server/corporateActions/_index.md) | 4 | 62 | - | - |
-| `server/data` | [`server/data/_index.md`](server/data/_index.md) | 1 | 20 | - | - |
-| `server/datasetRegistry` | [`server/datasetRegistry/_index.md`](server/datasetRegistry/_index.md) | 12 | 201 | - | - |
+| `server/data` | [`server/data/_index.md`](server/data/_index.md) | 1 | 21 | - | - |
+| `server/datasetRegistry` | [`server/datasetRegistry/_index.md`](server/datasetRegistry/_index.md) | 13 | 206 | - | - |
 | `server/engine` | [`server/engine/_index.md`](server/engine/_index.md) | 3 | 63 | - | - |
 | `server/features` | [`server/features/_index.md`](server/features/_index.md) | 2 | 14 | - | - |
 | `server/historicalState` | [`server/historicalState/_index.md`](server/historicalState/_index.md) | 5 | 64 | - | 1 |
 | `server/marketData` | [`server/marketData/_index.md`](server/marketData/_index.md) | 9 | 95 | - | - |
 | `server/portfolio` | [`server/portfolio/_index.md`](server/portfolio/_index.md) | 1 | 17 | - | - |
-| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 70 | 1817 | - | 6 |
-| `server/researchCore` | [`server/researchCore/_index.md`](server/researchCore/_index.md) | 8 | 125 | - | - |
-| `server/researchDataset` | [`server/researchDataset/_index.md`](server/researchDataset/_index.md) | 9 | 89 | - | - |
-| `server/researchEngine` | [`server/researchEngine/_index.md`](server/researchEngine/_index.md) | 20 | 301 | - | - |
+| `server/research` | [`server/research/_index.md`](server/research/_index.md) | 51 | 1520 | - | 3 |
+| `server/researchDataset` | [`server/researchDataset/_index.md`](server/researchDataset/_index.md) | 9 | 90 | - | - |
+| `server/researchExperiments` | [`server/researchExperiments/_index.md`](server/researchExperiments/_index.md) | 29 | 333 | - | 2 |
 | `server/risk` | [`server/risk/_index.md`](server/risk/_index.md) | 2 | 50 | - | - |
 | `server/riskEngine` | [`server/riskEngine/_index.md`](server/riskEngine/_index.md) | 1 | 18 | - | - |
-| `server/runWorkbenchAssembly` | [`server/runWorkbenchAssembly/_index.md`](server/runWorkbenchAssembly/_index.md) | 2 | 26 | - | - |
+| `server/runWorkbenchAssembly` | [`server/runWorkbenchAssembly/_index.md`](server/runWorkbenchAssembly/_index.md) | 4 | 33 | - | - |
 | `server/security` | [`server/security/_index.md`](server/security/_index.md) | 8 | 123 | - | - |
 | `server/securityStatus` | [`server/securityStatus/_index.md`](server/securityStatus/_index.md) | 3 | 40 | - | - |
 | `server/strategy` | [`server/strategy/_index.md`](server/strategy/_index.md) | 5 | 54 | - | 1 |
-| `server/strategyCore` | [`server/strategyCore/_index.md`](server/strategyCore/_index.md) | 11 | 163 | - | - |
+| `server/strategyCore` | [`server/strategyCore/_index.md`](server/strategyCore/_index.md) | 11 | 164 | - | - |
 | `shared` | [`shared/_index.md`](shared/_index.md) | 6 | 138 | - | - |
 
 ## 布局铁律（改测试前必读）

@@ -129,6 +129,7 @@ function testDefinition(
     run: async (ctx) => {
       const events = await ctx.dataset.events();
       await ctx.dataset.feature(0);
+      ctx.freezeSelection(events.map((event) => event.eventId));
       await ctx.dataset.observation(1);
       ctx.log(`读取事件 ${events.length} 条`);
       return {
@@ -246,6 +247,7 @@ describe("Runner · execute（成功路径）", () => {
         lastContext = ctx;
         const events = await ctx.dataset.events();
         await ctx.dataset.feature(0);
+        ctx.freezeSelection(events.map((event) => event.eventId));
         const post = await ctx.dataset.observation(1);
         ctx.log(`事件 ${events.length} · post ${post.length}`);
         return {
@@ -383,5 +385,42 @@ describe("Runner · capture error（执行期失败一律回报，不吞错）",
     const outcome = await runner.run({ experimentId: "demo/runner", datasetVersionId: VERSION_ID });
     expect(outcome.runStatus).toBe("FAILED");
     expect(outcome.error?.code).toBe("EXPERIMENT_RESULT_INVALID");
+  });
+});
+
+describe("Runner · 执行身份与 PIT 样本冻结", () => {
+  it("未冻结样本就读取 observation ⇒ FAILED + EXPERIMENT_SELECTION_NOT_FROZEN", async () => {
+    const runner = makeRunner(
+      testDefinition({}, async (ctx) => {
+        await ctx.dataset.observation(1);
+        return {
+          sampleSummary: { candidateCount: 0, eligibleCount: 0, excludedCount: 0, excludedByReason: {} },
+          customPayload: { echo: 1 },
+        };
+      }),
+    );
+    const outcome = await runner.run({ experimentId: "demo/runner", datasetVersionId: VERSION_ID });
+    expect(outcome.runStatus).toBe("FAILED");
+    expect(outcome.error?.code).toBe("EXPERIMENT_SELECTION_NOT_FROZEN");
+  });
+
+  it("冻结样本后 metadata 记录 selectedEventCount，代码变化 ⇒ codeDigest 变化", async () => {
+    const first = await makeRunner(testDefinition()).run({
+      experimentId: "demo/runner",
+      datasetVersionId: VERSION_ID,
+    });
+    const second = await makeRunner(
+      testDefinition({}, (ctx) => ({
+        sampleSummary: { candidateCount: 2, eligibleCount: 2, excludedCount: 0, excludedByReason: {} },
+        customPayload: { echo: ctx.parameters.n + 1 },
+      })),
+    ).run({ experimentId: "demo/runner", datasetVersionId: VERSION_ID });
+
+    expect(first.result?.metadata.experimentCodeDigest).toBeTruthy();
+    expect(first.result?.metadata.experimentCodeDigest).not.toBe(
+      second.result?.metadata.experimentCodeDigest,
+    );
+    expect(first.execution.datasetFacts.selectionFrozen).toBe(true);
+    expect(first.execution.datasetFacts.selectedEventCount).toBe(2);
   });
 });

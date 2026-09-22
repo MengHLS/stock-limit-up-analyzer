@@ -202,6 +202,11 @@ function buildConfigSnapshot(
     directionPolicy: config.directionPolicy ?? "longOnly",
     executionRules,
     allowPartialFill: config.allowPartialFill ?? false,
+    exitPolicy: {
+      stopLossRatio: config.exitPolicy?.stopLossRatio ?? null,
+      takeProfitRatio: config.exitPolicy?.takeProfitRatio ?? null,
+      maxHoldingDays: config.exitPolicy?.maxHoldingDays ?? null,
+    },
     tPlus1: DEFAULT_MARKET_RULES.tPlus1,
     lotSize: config.cost.lotSize > 0 ? Math.floor(config.cost.lotSize) : 1,
     decisionPoint: "close",
@@ -226,6 +231,8 @@ interface PendingOrder {
   readonly executionTime: string;
   /** 决策日成交额（千元），成交时点前已知（滑点分层）。 */
   readonly referenceAmount: number | null;
+  /** 退出原因；buy 为 null。 */
+  readonly exitReason: string | null;
 }
 
 const REJECTION_NOTES: Partial<Record<RejectionReason, string>> = {
@@ -569,6 +576,7 @@ export function runTradeSimulation(
         },
         slippageAmount: 0,
         referenceAmount: entry.referenceAmount,
+        reason: entry.exitReason,
       };
       const result =
         entry.side === "buy"
@@ -651,11 +659,182 @@ export function runTradeSimulation(
       });
     }
 
+    // (c2) 盘中阈值退出：止损 / 止盈按当日 OHLC 触发并成交。
+    const exitPolicy = simConfig.exitPolicy;
+    if (exitPolicy && (exitPolicy.stopLossRatio !== null || exitPolicy.takeProfitRatio !== null)) {
+      const details = portfolio.openTradeDetails().sort((a, b) => a.securityId.localeCompare(b.securityId));
+      for (const detail of details) {
+        const bar = dayBars.get(detail.securityId);
+        if (!bar || bar.high === null || bar.low === null) continue;
+        const available = portfolio.available(detail.securityId);
+        if (available <= 0) continue;
+
+        const stopPrice = exitPolicy.stopLossRatio === null
+          ? null
+          : detail.entryPrice * (1 - exitPolicy.stopLossRatio);
+        const takeProfitPrice = exitPolicy.takeProfitRatio === null
+          ? null
+          : detail.entryPrice * (1 + exitPolicy.takeProfitRatio);
+        let exitReason: string | null = null;
+        let triggerPrice: number | null = null;
+        if (stopPrice !== null && bar.low <= stopPrice) {
+          exitReason = `止损（${(exitPolicy.stopLossRatio! * 100).toFixed(2)}%）`;
+          triggerPrice = bar.open !== null && bar.open <= stopPrice ? bar.open : stopPrice;
+        } else if (takeProfitPrice !== null && bar.high >= takeProfitPrice) {
+          exitReason = `止盈（${(exitPolicy.takeProfitRatio! * 100).toFixed(2)}%）`;
+          triggerPrice = bar.open !== null && bar.open >= takeProfitPrice ? bar.open : takeProfitPrice;
+        }
+        if (exitReason === null || triggerPrice === null) continue;
+
+        orderSeq += 1;
+        const orderId = `ORD-${orderSeq}`;
+        stats.totalOrders += 1;
+        const ruleContext = resolveExecutionRuleContext(
+          securityOf(detail.securityId),
+          marketRules,
+          executionRules,
+        );
+        const syntheticBar: CanonicalMarketBar = {
+          ...bar,
+          open: triggerPrice,
+          high: triggerPrice,
+          low: triggerPrice,
+          close: triggerPrice,
+        };
+        const quote = executionModel.quote(
+          {
+            orderId,
+            securityId: detail.securityId,
+            tradeDate: date,
+            side: "sell",
+            quantity: available,
+            orderType: "market",
+            requestedPrice: null,
+            status: "SUBMITTED",
+            executionTime: date,
+            filledQuantity: 0,
+            averageFillPrice: null,
+            rejectionReason: null,
+            createdAt: "deterministic",
+          },
+          syntheticBar,
+          ruleContext,
+          cost,
+          null,
+        );
+        if (quote.kind === "rejected") {
+          stats.rejectedOrders += 1;
+          const reason = quote.rejectionReason ?? "OTHER";
+          stats.byReason[reason] = (stats.byReason[reason] ?? 0) + 1;
+          audit.recordOrder({
+            orderId,
+            securityId: detail.securityId,
+            tradeDate: date,
+            side: "sell",
+            requestedQuantity: available,
+            filledQuantity: 0,
+            status: "REJECTED",
+            rejectionReason: reason,
+            explanation: `${exitReason} 触发，但执行模型拒绝：${REJECTION_NOTES[reason] ?? reason}`,
+          });
+          continue;
+        }
+
+        const fill = {
+          fillId: `FILL-${fillSeq}`,
+          orderId,
+          securityId: detail.securityId,
+          side: "sell" as const,
+          quantity: available,
+          price: quote.price!,
+          basePrice: quote.basePrice!,
+          timestamp: date,
+          cost: { commission: 0, stampDuty: 0, transferFee: 0, otherFees: 0, total: 0 },
+          slippageAmount: 0,
+          referenceAmount: null,
+          reason: exitReason,
+        };
+        const result = portfolio.sell(fill, cost, allowPartialFill);
+        if (!result.success) {
+          stats.rejectedOrders += 1;
+          const reason = result.rejectionReason ?? "OTHER";
+          stats.byReason[reason] = (stats.byReason[reason] ?? 0) + 1;
+          audit.recordOrder({
+            orderId,
+            securityId: detail.securityId,
+            tradeDate: date,
+            side: "sell",
+            requestedQuantity: available,
+            filledQuantity: 0,
+            status: "REJECTED",
+            rejectionReason: reason,
+            explanation: `${exitReason} 触发，但组合约束拒绝：${result.reason}`,
+          });
+          continue;
+        }
+
+        const filledQuantity = result.filledQuantity;
+        const gross = fill.price * filledQuantity;
+        const tradeCost = computeTradeCost("sell", gross, cost);
+        const slippage = slippageAmount(fill.price, fill.basePrice, filledQuantity);
+        if (result.status === "PARTIALLY_FILLED") stats.partialFills += 1;
+        stats.totalFills += 1;
+        accumulateCost("sell", tradeCost, slippage);
+        audit.recordFill(
+          fillAuditEntry(
+            `FILL-${fillSeq}`,
+            orderId,
+            detail.securityId,
+            "sell",
+            filledQuantity,
+            fill.price,
+            fill.basePrice,
+            date,
+            slippage,
+            tradeCost,
+          ),
+        );
+        fillSeq += 1;
+        audit.recordOrder({
+          orderId,
+          securityId: detail.securityId,
+          tradeDate: date,
+          side: "sell",
+          requestedQuantity: available,
+          filledQuantity,
+          status: result.status,
+          rejectionReason: result.status === "PARTIALLY_FILLED" ? "OTHER" : null,
+          explanation: `${exitReason}：卖出成交 ${filledQuantity} 股 @ ${fill.price}`,
+        });
+        const afterQuantity = portfolio.quantity(detail.securityId);
+        audit.recordPosition({
+          securityId: detail.securityId,
+          timestamp: date,
+          event: afterQuantity === 0 ? "close" : "decrease",
+          beforeQuantity: afterQuantity + filledQuantity,
+          afterQuantity,
+          availableQuantity: portfolio.available(detail.securityId),
+          frozenQuantity: afterQuantity - portfolio.available(detail.securityId),
+          explanation: exitReason,
+        });
+      }
+    }
+
     // (d) 收盘后决策（仅候选日）：hold-while-selected 进出场。
     const nextDate =
       dateIndex + 1 < tradingDates.length ? tradingDates[dateIndex + 1]! : null;
-    const intents = decisionIndex.get(date);
-    if (intents) {
+    const intents = decisionIndex.get(date) ?? [];
+    const forcedExitReasons = new Map<string, string>();
+    const maxHoldingDays = exitPolicy?.maxHoldingDays ?? null;
+    if (maxHoldingDays !== null) {
+      for (const detail of portfolio.openTradeDetails().sort((a, b) => a.securityId.localeCompare(b.securityId))) {
+        const holdingDays = portfolio.holdingDaysBetween(detail.entryTime, date);
+        if (holdingDays !== null && holdingDays >= maxHoldingDays) {
+          forcedExitReasons.set(detail.securityId, `持有满${maxHoldingDays}个交易日`);
+        }
+      }
+    }
+    if (intents.length > 0 || forcedExitReasons.size > 0) {
       const holdings = Array.from(portfolio.openPositionSymbols()).sort();
       const availableBySecurity = new Map<string, number>();
       for (const securityId of holdings)
@@ -671,6 +850,7 @@ export function runTradeSimulation(
         planDecisionDay({
         decisionDate: date,
         intents,
+        forcedExitReasons,
         holdings,
         availableBySecurity,
         cash: portfolio.cash,
@@ -695,6 +875,7 @@ export function runTradeSimulation(
         }
         orderSeq += 1;
         const orderId = `ORD-${orderSeq}`;
+        const exitReason = item.kind === "sell" ? item.reason : null;
         const order: Order = {
           orderId,
           securityId: item.securityId,
@@ -719,6 +900,7 @@ export function runTradeSimulation(
           quantity: item.quantity,
           executionTime: nextDate,
           referenceAmount: item.kind === "buy" ? item.referenceAmount : null,
+          exitReason,
         });
         audit.recordOrder({
           orderId,
@@ -732,7 +914,7 @@ export function runTradeSimulation(
           explanation:
             item.kind === "buy"
               ? `信号买入 ${item.quantity} 股（候选进入）`
-              : `信号卖出 ${item.quantity} 股（候选退出）`,
+              : `${exitReason ?? "候选退出"}：卖出 ${item.quantity} 股`,
         });
       }
       skippedEntries.push(...plan.skipped);

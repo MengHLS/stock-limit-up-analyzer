@@ -26,10 +26,20 @@ research-experiments/
     │   ├── experiment.ts
     │   ├── result.ts
     │   └── page.tsx
-    └── stability-validation/       ← EXP-002：条件稳定性验证（复用 Robustness 核心方法）
+    ├── stability-validation/       ← EXP-002：条件稳定性验证（复用 Robustness 核心方法）
+    │   ├── experiment.ts
+    │   ├── result.ts
+    │   └── page.tsx
+    ├── decision-forward-study/     ← 决策时点之后收益验证（严格 rd ∈ [k+1, h]）
         ├── experiment.ts
         ├── result.ts
-        └── page.tsx
+        ├── page.tsx
+        └── README.md
+    └── hold-open-price-pullback/   ← 首板后回撤但守开盘价的交易周期研究
+        ├── experiment.ts
+        ├── result.ts
+        ├── page.tsx
+        └── README.md
 ```
 
 ## 为什么要有这套东西

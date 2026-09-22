@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/research
 
-- 测试文件 **70** 个 ｜ 用例声明 **1817** 个
-- 涉及源码目录：`server/` · `server/backtest/` · `server/data/` · `server/engine/` · `server/research/` · `server/research/closedLoop/` · `server/research/closedLoopWiring/` · `server/research/conditionSignal/` · `server/research/costModel/` · `server/research/datasetAccess/` · `server/research/disciplineFeedback/` · `server/research/executionConstraints/` · `server/research/experimentLineage/` · `server/research/factorAblation/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/marketRegime/` · `server/research/oosIsolation/` · `server/research/oosValidation/` · `server/research/overfittingDetection/` · `server/research/paperAccount/` · `server/research/parameterSearch/` · `server/research/patternLibrary/` · `server/research/patternLibrary/patterns/` · `server/research/performanceMetrics/` · `server/research/persistence/` · `server/research/riskAdjustedMetrics/` · `server/research/robustness/` · `server/research/rollingOptimization/` · `server/research/searchRobustness/` · `server/research/signalEngine/` · `server/research/signalToPnl/` · `server/research/simulator/` · `server/research/stochasticRobustness/` · `server/research/strategyCandidate/` · `server/research/strategyEvaluation/` · `server/research/strategyPersistence/` · `server/research/strategySchema/` · `server/research/tradeJournal/` · `server/research/tradeQualityMetrics/` · `server/research/walkForward/` · `server/research/walkForwardRun/` · `server/researchCore/` · `server/researchCore/repository/` · `server/researchDataset/` · `server/researchEngine/` · `server/researchEngine/planner/` · `server/strategyCore/` · `shared/`
+- 测试文件 **51** 个 ｜ 用例声明 **1520** 个
+- 涉及源码目录：`server/backtest/` · `server/data/` · `server/engine/` · `server/research/` · `server/research/closedLoop/` · `server/research/closedLoopWiring/` · `server/research/conditionSignal/` · `server/research/costModel/` · `server/research/datasetAccess/` · `server/research/disciplineFeedback/` · `server/research/executionConstraints/` · `server/research/experimentLineage/` · `server/research/factorAblation/` · `server/research/framework/` · `server/research/lifecycle/` · `server/research/marketRegime/` · `server/research/oosIsolation/` · `server/research/oosValidation/` · `server/research/overfittingDetection/` · `server/research/paperAccount/` · `server/research/parameterSearch/` · `server/research/patternLibrary/` · `server/research/performanceMetrics/` · `server/research/riskAdjustedMetrics/` · `server/research/robustness/` · `server/research/rollingOptimization/` · `server/research/searchRobustness/` · `server/research/signalEngine/` · `server/research/signalToPnl/` · `server/research/simulator/` · `server/research/stochasticRobustness/` · `server/research/strategyCandidate/` · `server/research/strategyEvaluation/` · `server/research/strategyPersistence/` · `server/research/strategySchema/` · `server/research/tradeJournal/` · `server/research/tradeQualityMetrics/` · `server/research/walkForward/` · `server/research/walkForwardRun/` · `server/researchDataset/` · `server/strategyCore/` · `shared/` · `tests/server/research/`
 
 ## 怎么跑
 
@@ -13,7 +13,7 @@ pnpm exec vitest run tests/server/xxx.test.ts          # 单个文件（路径�
 pnpm run test:changed                                  # 只跑改动相关（日常推荐）
 ```
 
-> ℹ️ 本模块有 **6** 个「源码文本断言」测试（`readFileSync` 源码 + 字符串匹配），
+> ℹ️ 本模块有 **3** 个「源码文本断言」测试（`readFileSync` 源码 + 字符串匹配），
 > 改个变量名就可能变红，且不验证行为；详见 `docs/testing/README.md` 的「测试分类」一节。
 
 ## 逐文件
@@ -106,7 +106,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 同输入两次运行 → 链指纹逐位一致（装配层未引入不确定性）
 
 ### `tests/server/research/conditionSignal/compile.test.ts`
-- 508 行 ｜ 用例声明 28 ｜ describe 6
+- 597 行 ｜ 用例声明 32 ｜ describe 7
 - 被测源码：`server/research/conditionSignal/index.ts` · `server/research/recipeRegistry.ts` · `server/research/recipeErrors.ts` · `server/research/strategySchema/definition.ts` · `server/research/types.ts`
 - 单跑：`pnpm exec vitest run tests/server/research/conditionSignal/compile.test.ts`
 - 用例树：
@@ -144,6 +144,11 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 同输入两次编译 ⇒ 行为一致（无随机 / 无时间依赖）
   - enabled=false 的条件按声明跳过，且跳过条数进摘要
   - 真实文档形态回归：cand-270001 的两条条件可编译且语义为「守线 + 缩量」
+- **参数 code 不在已注册配方的参数面内（SRB001 §15 回归）**
+  - 夹具自检：这两个 code 确实不在已注册配方的参数面内（否则本节的回归是空的）
+  - compileConditionRecipe 不抛错（修复前必抛 RECIPE_PARAMETER_INVALID）
+  - 门槛右值仍真去参数集取值（边界两侧各一例）
+  - 门槛右值缺值仍响亮抛错（修复没有把「拒绝静默取默认」放宽）
 
 ### `tests/server/research/costModel/costModel.test.ts`
 - 580 行 ｜ 用例声明 34 ｜ describe 6
@@ -231,32 +236,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - close 决策：特征用当日及以前行，D3 的未来 close 不泄漏
   - open 决策：当日 full bar 不可见，特征只用昨日收盘（D2 的 11 不泄漏）
 
-### `tests/server/research/datasetSplit.test.ts`
-- 135 行 ｜ 用例声明 16 ｜ describe 4
-- 被测源码：`server/research/datasetSplit.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/datasetSplit.test.ts`
-- 用例树：
-- **Dataset Split 时间边界**
-  - 正常三段 Train < Validation < OOS 通过
-  - 相邻边界：trainEnd=2023-12-31 → validationStart=2024-01-01 通过（闭区间紧挨）
-  - 单日区间（start === end）合法（闭区间语义，非空）
-  - 单日单段 split（train 单日）通过
-- **Dataset Split 重叠 / 倒序**
-  - Train 与 Validation 重叠（trainEnd === validationStart）失败
-  - Validation 与 OOS 重叠（validationEnd >= oosStart）失败
-  - Train 与 OOS 重叠失败
-  - Validation 倒序（validationStart > validationEnd）失败
-  - 范围倒序（start > end）失败
-  - 非法日期格式失败
-  - assertValidDatasetRange 在非法时抛 ResearchValidationError
-- **Dataset Split 派生范围**
-  - toTrainValidationOosRanges 返回三段闭区间范围
-- **Dataset Split Fingerprint**
-  - 相同切分产生相同指纹（确定性）
-  - 字段插入顺序不影响指纹（canonical 固定字段序）
-  - 只改 validationEnd → 不同指纹
-  - 只改 oosStart → 不同指纹
-
 ### `tests/server/research/disciplineFeedback/disciplineFeedback.test.ts`
 - 928 行 ｜ 用例声明 38 ｜ describe 7
 - 被测源码：`server/research/tradeJournal/index.ts` · `server/research/disciplineFeedback/index.ts`
@@ -307,32 +286,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - G1 全部报告 reasonCode 落在 C-24.1 JOURNAL_REASON_CODES 受控词表
   - G2 喂真实 TradeJournalLedger 结构（append v1 + 人工标注修订）通过且结论自洽
   - G3 类型级复用：DeviationDimension/severity/entry 形态直接消费（编译期保证）
-
-### `tests/server/research/engineNonEquivalence.test.ts`
-- 122 行 ｜ 用例声明 2 ｜ describe 1
-- 被测源码：`server/leaderCandidates.ts` · `server/research/legacyTransactionSimulator.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/engineNonEquivalence.test.ts`
-- 用例树：
-- **P2-2 research-legacy 与 Engine 非等价契约**
-  - research-legacy 唯一出口标识：productionRuntime=false，语义明确为逐笔退出+资金循环
-  - legacy 在同一回测输入下产出已平仓交易与资金循环（引擎语义下 completedCount=0，故二者不等价）
-
-### `tests/server/research/evaluationService.test.ts`
-- 308 行 ｜ 用例声明 8 ｜ describe 3 ｜ 📄 源码文本断言
-- 被测源码：`server/research/adapter.ts` · `server/research/evaluationService.ts` · `server/research/runService.ts` · `server/research/registry.ts` · `server/research/trainValidationOos.ts` · `server/research/datasetSplit.ts` · `server/research/types.ts` · `server/engine/domain.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/evaluationService.test.ts`
-- 用例树：
-- **Research Evaluation Service — 端到端链 + OOS 隔离**
-  - Validation 选 B；OOS 即使 C=20 仍运行冻结的 B（§44）
-  - 反向污染：Validation 选 C（1.0/2.0/3.0 → C），OOS A=100/B=200/C=1 也不重选 A/B（§45）
-- **Research Evaluation Service — 版本 / 成本模型 / 确定性**
-  - 策略版本冻结：registry 出现 v2 后 OOS 仍用 v1（§47）
-  - 成本模型冻结：OOS 用候选冻结 costModel（minCommission=1），不重读默认（§48）
-  - 确定性：相同输入两次执行 selectedExperimentId / parameters / OOS metrics 一致（§49）
-- **STEP 6.4 Boundary — 不复制引擎 / 不反向依赖**
-  - STEP 6.4 模块不直接 import 生产引擎实现（仅类型 + 研究层适配器）
-  - STEP 6.4 模块不重新实现引擎 / 交易（无 ResearchBacktestEngine / simulateRealisticTPlus1ToTPlus2）
-  - 生产核心仍不反向依赖 research（STEP 6.4 新增后边界保持）
 
 ### `tests/server/research/executionConstraints/executionConstraints.test.ts`
 - 1065 行 ｜ 用例声明 27 ｜ describe 5
@@ -416,35 +369,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - bridge 不修改既有 registry：注册后 registry.get 内容与原实验一致（mutation isolation 不破坏）
 - **兼容性：既有测试风格 fixture**
   - experimentPersistence.test.ts 同构输入可被校验器给出结构化结论
-
-### `tests/server/research/experimentPersistence.test.ts`
-- 279 行 ｜ 用例声明 17 ｜ describe 6
-- 被测源码：`server/research/adapter.ts` · `server/research/experiment.ts` · `server/research/experimentRegistry.ts` · `server/research/experimentService.ts` · `server/research/persistence/inMemory.ts` · `server/research/registry.ts` · `server/research/serialization.ts` · `server/research/status.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/experimentPersistence.test.ts`
-- 用例树：
-- **Experiment Persistence**
-  - create → get → list 往返一致（Repository 为持久化真相源）
-  - 重复 experimentId create 抛错（拒绝重复）
-- **Experiment Snapshot**
-  - 保存实验 → 重新读取 → Snapshot 不变（不依赖运行时默认值）
-- **Experiment Immutability**
-  - getExperiment 返回独立副本，外部篡改不影响已持久化实验
-  - ExperimentRegistry.get 返回独立副本
-  - 状态迁移后核心输入字段保持冻结（仅 status 变化）
-  - 不存在修改核心输入字段的公开入口（repository 仅有 updateStatus）
-- **Experiment Registry**
-  - register / get / list / has
-  - duplicate experimentId 拒绝
-  - 未知 experimentId get 拒绝
-- **CostModel Freeze & Isolation**
-  - 创建实验时冻结完整 CostModel（缺省 costModel 用当前 DEFAULT_COST_MODEL 补齐）
-  - 显式 costModel 原样冻结（不被默认值覆盖，也不与默认共享引用）
-  - CostModel 序列化往返保持完整（number 类型不 string 化 / 不 null 污染 / 不 undefined 丢失）
-  - getExperiment 返回的 costModel 为独立副本（外部篡改不影响已持久化实验）
-  - ExperimentRegistry.get 返回的 costModel 为独立副本
-- **状态机**
-  - 合法迁移：created→running→completed→running→failed
-  - 非法迁移抛错（created→completed / completed→failed / failed→completed）
 
 ### `tests/server/research/factorAblation/factorAblation.test.ts`
 - 885 行 ｜ 用例声明 45 ｜ describe 10
@@ -578,6 +502,21 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - **端到端链路（STEP 10 → STEP 8）**
   - 研究意图经引擎执行后真实成交并进入组合
 
+### `tests/server/research/legacyFreeProductionChain.test.ts`
+- 213 行 ｜ 用例声明 7 ｜ describe 2
+- 被测源码：`tests/server/research/_importGraph.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/legacyFreeProductionChain.test.ts`
+- 用例树：
+- **依赖 Gate · 生产链不传递依赖旧 Research**
+  - 可达集里没有 server/researchCore/** 或 server/researchEngine/**（走 import 图，非逐文件 grep）
+  - 可达集里没有任何文件从 drizzle/schema import 旧 Research 表对象
+  - 入口自身存在于仓库（清单写错会让上两条**假通过**）
+  - 旧 Research 的**入口文件已不存在**（RESEARCH-EXPERIMENT-003 起：目录已整体删除）
+- **依赖 Gate · 新体系够到旧 Research 目录的通道是具名白名单**
+  - 除白名单外，新体系文件不得够到 server/researchCore/** 或 server/researchEngine/**
+  - 新体系**自己的文件**没有从 drizzle/schema import 旧 Research 表对象（结构事实）
+  - 桥的旧字段只允许取 null / 0（补偿断言：不得传真实旧 id）
+
 ### `tests/server/research/lifecycle/lifecycle.test.ts`
 - 583 行 ｜ 用例声明 30 ｜ describe 9
 - 被测源码：`server/research/experimentLineage/codeVersion.ts` · `server/research/strategySchema/index.ts` · `server/research/experimentValidation.ts` · `server/research/lifecycle/index.ts`
@@ -688,22 +627,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 流动性口径可切 turnoverRate：当日 2.0 / 窗口均值 1.2 → high
   - 日期纯函数：儒略日序号与跨闰年天数差（无 Date 对象依赖）
   - Run → §28 regime 映射（toExperimentLineageRegimeFromRun）与 tags 入口一致
-
-### `tests/server/research/oosEvaluation.test.ts`
-- 136 行 ｜ 用例声明 7 ｜ describe 3
-- 被测源码：`server/research/oosEvaluation.ts` · `server/research/validationSelection.ts` · `server/research/evaluationService.ts` · `server/research/types.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/oosEvaluation.test.ts`
-- 用例树：
-- **OOS Evaluation — 组装与可追溯性**
-  - succeeded 结果携带完整冻结候选 + 版本 + 成本模型
-  - failed 结果必须携带 error
-- **OOS Evaluation — 隔离校验**
-  - split fingerprint 与候选 validationFingerprint 不一致 → 抛错
-  - succeeded 缺 metrics → 抛错
-  - NaN metrics → 抛错（禁止 NaN 进入 OOS 结果）
-  - failed 缺 error → 抛错
-- **OOS Evaluation — 不可变性**
-  - 修改 result.frozenCandidate 不影响输入候选（mutation isolation）
 
 ### `tests/server/research/oosIsolation/oosIsolation.test.ts`
 - 404 行 ｜ 用例声明 23 ｜ describe 7
@@ -831,29 +754,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - **命名不遮蔽守卫：本域顶层导出名不得与仓内既有声明重名**
   - 负例自测：确实能发现重名
   - 本域导出名与 server/** + shared/** 其余文件的顶层导出名**零交集**
-
-### `tests/server/research/overfittingAssessment.test.ts`
-- 167 行 ｜ 用例声明 14 ｜ describe 3
-- 被测源码：`server/research/overfittingAssessment.ts` · `server/research/parameterStability.ts` · `server/research/pbo.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/overfittingAssessment.test.ts`
-- 用例树：
-- **Validation → OOS Degradation（方向一致公式）**
-  - maximize：degradation = validation - oos（OOS 更差 → 正）
-  - minimize：degradation = oos - validation（OOS 更差 → 正）
-  - OOS 更好 → degradation 为负
-  - OOS 无指标（null）→ degradation 不可用，不参与均值
-- **Overfitting Assessment — 风险等级**
-  - 无任何证据 → insufficient_data
-  - PBO = 1.0 → high
-  - PBO = 0.4 → medium
-  - PBO = 0.1 → low
-  - 明显 Validation → OOS 崩溃（relativeDegradation >= degradationHigh）→ high
-  - 中等退化 → medium
-  - 自定义阈值生效
-  - Parameter Stability 仅作为 evidence，不单独触发 high
-- **Overfitting Assessment — 确定性 / 不修改输入**
-  - 相同输入 → 相同输出（deterministic）
-  - 不修改输入对象
 
 ### `tests/server/research/overfittingDetection/overfittingDetection.test.ts`
 - 954 行 ｜ 用例声明 55 ｜ describe 10
@@ -1091,80 +991,9 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - status 判据 = 评估引用是否存在（不看指标是否为 null）
   - 评估引用为 null ⇒ 六项全 null（不编造）
 
-### `tests/server/research/parameterSpace.test.ts`
-- 325 行 ｜ 用例声明 25 ｜ describe 18
-- 被测源码：`server/research/index.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/parameterSpace.test.ts`
-- 用例树：
-- **单参数组合**
-  - integer [5, 10, 15] → 3 组合
-- **多参数笛卡尔积**
-  - A=[1,2] × B=[10,20,30] → 6 组合，顺序稳定
-- **稳定顺序**
-  - 同一 ParameterSpace 连续生成两次结果 deepEqual（数量/顺序/值）
-- **Mutation Isolation**
-  - 修改生成后的 combination 不影响兄弟组合与原始 ParameterSpace
-- **Invalid step**
-  - step=0 / 负数 / NaN / Infinity 全部拒绝
-- **Invalid range**
-  - min > max 拒绝
-  - NaN / Infinity min/max 拒绝
-- **Duplicate parameter name**
-  - 同一参数名出现多个 definition 拒绝
-- **Duplicate enum value**
-  - 枚举值重复拒绝
-  - 空枚举值拒绝
-- **maxCombinations**
-  - 100 × 100 超过 1000 上限 → 生成前失败（不截断）
-  - 默认上限 DEFAULT_MAX_COMBINATIONS = 10_000
-- **Floating-point stability**
-  - 0.1 → 0.5 step 0.1 精确产出 0.1/0.2/0.3/0.4/0.5（无 0.30000000000000004）
-- **空参数空间**
-  - parameters.length === 0 → 1 个空 parameterSet
-- **单参数 Sweep**
-  - lookback 取 3 个值（min=5,max=15,step=5 → [5,10,15]）→ 3 组合
-- **多参数 Sweep**
-  - lookback 3 值 × threshold 2 值 → 6 组合且顺序稳定
-- **边界测试**
-  - min=max → 单值
-  - step > range（min=10 max=12 step=5）→ 仅 [10]（不自动补 12）
-- **整数参数**
-  - lookback 5..20 step 5 → 5/10/15/20（无 20.000000001）
-- **布尔参数**
-  - useTrendFilter=[true,false] → true/false 顺序稳定
-  - 缺省 values → [true, false]
-- **Enum 参数**
-  - mode=[strict,normal,loose] 保持定义顺序（不 sort）
-- **Fingerprint / Serialization**
-  - fingerprint 确定性：同一空间两次结果一致
-  - 不同空间 fingerprint 不同
-  - 参数空间 serialize → deserialize 语义一致
-
-### `tests/server/research/parameterStability.test.ts`
-- 121 行 ｜ 用例声明 11 ｜ describe 5
-- 被测源码：`server/research/parameterStability.ts` · `server/research/types.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/parameterStability.test.ts`
-- 用例树：
-- **Parameter Stability — number / integer**
-  - integer 类型：min/max/mean/median/std/range/dispersion
-  - number（浮点）类型识别
-- **Parameter Stability — enum**
-  - enum：每个值出现次数 / 最常见值 / dispersion
-- **Parameter Stability — boolean**
-  - boolean：true/false count / trueRatio / dispersion
-- **Parameter Stability — 多参数 / null / 边界**
-  - 多参数：参数名按字典序输出
-  - null 值：全 null 视为 enum、唯一取值 null
-  - 单一参数 / 单窗口
-  - 参数变化（跨窗口变化）被正确统计
-- **Parameter Stability — 非法输入 / 确定性**
-  - 类型跨窗口不一致 → 抛错
-  - 相同输入产生相同输出（deterministic）
-  - 不修改输入（返回独立副本）
-
 ### `tests/server/research/patternLibrary/patternLibrary.test.ts`
 - 450 行 ｜ 用例声明 41 ｜ describe 7
-- 被测源码：`server/research/patternLibrary/index.ts` · `server/researchEngine/planner/moduleRegistry.ts` · `server/research/recipeRegistry.ts` · `server/research/strategyCandidate/definitionBuild.ts` · `server/research/strategySchema/definition.ts`
+- 被测源码：`server/research/patternLibrary/index.ts` · `server/research/patternLibrary/moduleRegistry.ts` · `server/research/recipeRegistry.ts` · `server/research/strategyCandidate/definitionBuild.ts` · `server/research/strategySchema/definition.ts`
 - 单跑：`pnpm exec vitest run tests/server/research/patternLibrary/patternLibrary.test.ts`
 - 用例树：
 - **PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）**
@@ -1216,36 +1045,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 基准配方是纯执行模式：无研究模块，但有可用配方
   - 纯研究模式：有研究模块，但无配方引用
 
-### `tests/server/research/patternLibrary/patternSemantics.test.ts`
-- 332 行 ｜ 用例声明 18 ｜ describe 6
-- 被测源码：`shared/patternSemantics.ts` · `server/research/patternLibrary/semanticRegistry.ts` · `server/research/patternLibrary/patterns/index.ts` · `server/researchEngine/semanticProjection.ts` · `server/research/patternLibrary/strategyProjection.ts` · `server/research/recipeRegistryAtoms.ts` · `server/research/framework/leakage.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/patternLibrary/patternSemantics.test.ts`
-- 用例树：
-- **PHASE-B-001 · 正向：真实 Pattern 清单 → 正确展开**
-  - 首板回踩模式声明了 2 条语义，展开名规范、可用性 = 窗口末端
-  - 算子白名单外的一律不是聚合算子（白名单是有限的）
-- **PHASE-B-001 · 负向：非法声明逐条拒绝**
-  - 同一批里 semanticId 重复 ⇒ DUPLICATE_SEMANTIC_ID
-- **PHASE-B-001 · 唯一性与不可变性（B.9）**
-  - 同一 patternId + version 重复注册 ⇒ SEMANTIC_REDEFINITION
-  - 两个 Pattern 抢同一 semanticId ⇒ SEMANTIC_ID_COLLISION
-  - 非法声明 ⇒ INVALID_SEMANTIC_DECLARATION（注册期就拒绝，不留到执行期）
-  - 产物被深冻结：运行期 mutate 不能改变语义（同 Pattern 恒同语义）
-- **PHASE-B-001 · 研究投影（B.6）**
-  - 数据集视界覆盖 ⇒ 产出观察日变量定义，且带自己的 resolve
-  - 数据集 post 视界不足 ⇒ OUT_OF_DATASET_RANGE（不静默 null）
-  - 声明窗口晚于决策日 ⇒ AFTER_DECISION_DAY（复用 R1 的判定日契约）
-  - 核心目录之外的名字仍然被拒绝（白名单没有被放开）
-- **PHASE-B-001 · 策略投影与两侧一致性（B.7 / B.10）**
-  - 同一份声明 → 策略特征，可用性日期取**真实决策日**（不再是 1990-01-01）
-  - 声明窗口晚于决策日 ⇒ AFTER_DECISION_DAY（这是**可失败**的护栏）
-  - 一致性：研究侧与策略侧来自同一份 expanded ⇒ semanticId / 名字一一对应（无双写 SoT）
-  - 只声明研究意图、没有执行侧投影 ⇒ MISSING_STRATEGY_PROJECTION（不臆造执行口径）
-- **PHASE-B-001 · PIT 与「可失败对照」（B.8）**
-  - 🔴 对照：旧 samePointAvailability 的日期恒为 1990-01-01 ⇒ 对任何决策日都不触发泄漏守卫
-  - 新可用性用真实决策日 ⇒ 声称「晚于决策日才可知」时**会**被比较器抓到
-  - T / T+1 / T+2 的可用性行为：EVENT_BAR 可声明；POST_BAR 在 d=1 被拒、d=2 通过
-
 ### `tests/server/research/patternLibrary/strategyConsumption.test.ts`
 - 123 行 ｜ 用例声明 7 ｜ describe 2
 - 被测源码：`server/research/patternLibrary/strategyConsumption.ts` · `server/research/patternLibrary/semanticRegistry.ts` · `server/strategyCore/featureRegistry.ts`
@@ -1260,33 +1059,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 声明的执行侧特征不存在 ⇒ FEATURE_NOT_REGISTERED（点名到 semanticId）
   - 阈值参数不在策略文档里 ⇒ THRESHOLD_PARAM_NOT_DECLARED（该语义无法调参）
   - 未匹配到 Pattern ⇒ applied=false（不臆造语义，也不报假失败）
-
-### `tests/server/research/pbo.test.ts`
-- 190 行 ｜ 用例声明 15 ｜ describe 6
-- 被测源码：`server/research/pbo.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/pbo.test.ts`
-- 用例树：
-- **CSCV 划分生成**
-  - N=4 产生 3 个去对称划分（与 §十九 一致）
-  - N=6 产生 C(6,3)/2 = 10 个划分
-  - 奇数分区 → 抛错
-  - N < 4 → 抛错
-- **PBO — 明显过拟合合成数据**
-  - 极端集中在单一分区 → PBO = 1.0
-- **PBO — 相对稳定合成数据**
-  - 稳定单调占优 → PBO = 0.0
-- **PBO — 数据不足 / 非法 metric**
-  - 候选 < 2 → insufficient_data（pbo null）
-  - 全 NaN/Infinity → insufficient_data
-  - 非法 metric 不得参与排名
-  - 奇数 numPartitions → 抛错（不返回 PBO=0）
-- **PBO — tie-break 与确定性**
-  - 同 metric 按 experimentId 字典序 tie-break（deterministic）
-  - 候选顺序打乱不影响 PBO（deterministic ordering）
-  - 相同输入 → 相同 fingerprint 与相同 PBO
-- **PBO — 序列化**
-  - serialize → deserialize round-trip 语义一致
-  - deserialize 返回独立副本
 
 ### `tests/server/research/performanceMetrics/performanceMetrics.test.ts`
 - 611 行 ｜ 用例声明 40 ｜ describe 7
@@ -1363,88 +1135,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 空 schema 下任何覆写都算未知 ⇒ 拒绝
   - 错误消息点出未知键名与已声明清单（调用方可直接照着改）
 
-### `tests/server/research/research.test.ts`
-- 447 行 ｜ 用例声明 46 ｜ describe 8
-- 被测源码：`server/research/index.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/research.test.ts`
-- 用例树：
-- **Strategy Research Contract**
-  - strategyId / version / requiredFeatures / requiredData / decisionPoint 正常
-  - strategyId 必填（空则 REJECT）
-  - version 必填（空则 REJECT）
-  - requiredFeatures / requiredData 必须是字符串数组
-  - decisionPoint 必须是 open 或 close
-- **Parameter Contract**
-  - number / string / boolean 合法值全部通过
-  - required 缺失 REJECT
-  - optional 缺失 + default 应用
-  - number 有限数字（NaN / Infinity REJECT）
-  - min / max 越界 REJECT
-  - schema min>max / step<=0 REJECT
-  - defaultValue 必须满足自身 schema
-  - 禁止隐式类型转换（number 传字符串 REJECT）
-  - 未知参数 REJECT
-  - null 仅 nullable 参数允许
-  - 参数名唯一（重复 REJECT）
-  - string allowedValues 生效
-- **Experiment Contract**
-  - 合法 Experiment PASS
-  - 非法 Experiment REJECT（空 strategyId）
-  - 空 version REJECT
-  - 日期反转 REJECT
-  - 空 experimentId REJECT
-  - 非法 initialCapital REJECT
-  - createExperiment 校验策略身份与定义一致
-  - createExperiment 拒绝缺失 required 参数
-- **Serialization**
-  - Experiment serialize → deserialize 语义一致
-  - Snapshot serialize → deserialize 语义一致
-  - Strategy Definition serialize → deserialize 语义一致
-  - 拒绝序列化 NaN / Infinity（不静默转 null）
-  - deserialize 拒绝非对象 JSON
-- **Strategy Registry**
-  - register / get / list
-  - 同 strategyId+version 重复注册 REJECT
-  - 同 strategyId 不同 version 可并存
-  - 未知身份 get REJECT
-  - 非法定义 register REJECT
-  - get() 返回独立副本（外部修改不污染内部状态）
-  - list() 返回独立副本（外部修改不污染内部状态）
-- **Determinism**
-  - 相同输入构造 Snapshot 语义一致
-  - toExperimentSnapshot 确定性 + 独立副本
-  - resolveParameterSet 确定性
-- **Identity**
-  - normalizeStrategyKey / parseStrategyKey
-  - formatExperimentId 确定性
-  - generateExperimentId 注入 now/suffix 时确定性
-  - isExperimentIdFormat
-- **Research Adapter**
-  - 研究定义身份与生产策略 metadata 一致
-  - 研究定义参数 schema 覆盖生产配置（minScore/maxSignals/featureMode）
-
-### `tests/server/research/researchRun.test.ts`
-- 320 行 ｜ 用例声明 10 ｜ describe 6 ｜ 📄 源码文本断言
-- 被测源码：`server/research/adapter.ts` · `server/research/experiment.ts` · `server/research/experimentRegistry.ts` · `server/research/experimentService.ts` · `server/research/engineAdapter.ts` · `server/research/persistence/inMemory.ts` · `server/research/registry.ts` · `server/research/runService.ts` · `server/data/index.ts` · `server/leaderCandidates.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/researchRun.test.ts`
-- 用例树：
-- **Research Run**
-  - 创建实验 → 执行 → SUCCEEDED，结果摘要与实验状态正确（复用生产 Backtest Core）
-- **Failed Run**
-  - 执行失败 → FAILED：error + finishedAt 保存，实验状态 failed，不吞异常返回空结果
-  - 未知策略版本 / 未知实验在创建 Run 前抛错（不产生 FAILED Run）
-- **Multiple Runs**
-  - experiment A → run 1/2/3 均正常保存
-- **Determinism**
-  - 同一实验连续执行两次核心结果一致
-- **CostModel Freeze (Run)**
-  - Default CostModel 漂移：快照冻结 A ≠ 当前默认，Run 仍使用 A（不重读 DEFAULT_COST_MODEL）
-  - Result Traceability：run.result.config.cost === 实验 snapshot 冻结的 costModel
-  - Determinism：同一快照（含 costModel A）连续运行两次核心结果一致，均使用 A
-- **Production / Legacy Boundary**
-  - 生产核心不反向依赖 research（无 research import）
-  - 生产服务不引用 legacy 模拟器 simulateRealisticTPlus1ToTPlus2，也不 import research
-
 ### `tests/server/research/riskAdjustedMetrics/riskAdjustedMetrics.test.ts`
 - 359 行 ｜ 用例声明 19 ｜ describe 5
 - 被测源码：`shared/quant-stats.ts` · `server/backtest/metrics.ts` · `server/backtest/types.ts` · `server/research/performanceMetrics/index.ts` · `server/research/riskAdjustedMetrics/index.ts`
@@ -1474,6 +1164,72 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 空 / 单点曲线 → INSUFFICIENT_EQUITY_CURVE（复用 C-16.1 校验）
   - 非法口径参数 → INVALID_PARAMETER：rf/ann/downsideTarget 非有限、ann<=0、Calmar 负回撤
   - computeCalmarRatio / computeSharpeRatio 对合法输入不抛错且确定性可复现
+
+### `tests/server/research/robustness/multiDimension.test.ts`
+- 1072 行 ｜ 用例声明 48 ｜ describe 12 ｜ 📄 源码文本断言
+- 被测源码：`server/research/experimentValidation.ts` · `server/research/robustness/comparison.ts` · `server/research/robustness/dimension.ts` · `server/research/robustness/drift.ts` · `server/research/robustness/multiDimension.ts` · `server/research/robustness/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/robustness/multiDimension.test.ts`
+- 用例树：
+- **公共机制 · 1. baseline 校验（baseline-first）**
+  - 索引 0 必须是基准条目，否则拒
+  - 基准条目多于 / 少于一条都拒
+  - 基准条目的 dimensionId 必须为 null（基准是共享锚点，不属于任何维度）
+  - 基准成功时结果里 baseline 单列，且 verdict = baseline、comparisons 为空
+- **公共机制 · 2. variant 校验**
+  - 变体的 dimensionId 必须 ∈ 维度声明表
+  - 变体 code 重复 ⇒ 拒
+  - code / label 为空串 ⇒ 拒
+  - config 不可 JSON 序列化（函数 / NaN / undefined 叶子）⇒ 拒（不静默丢配置）
+  - 维度声明表为空 / 维度 id 重复 ⇒ 拒
+- **公共机制 · 3. evaluator 注入（核心不重算）**
+  - 每个变体（含基准）恰好被评估一次，且按声明顺序
+  - 核心只透传 evaluator 给的指标，不做任何换算 / 再计算
+  - 同配置的自检变体 delta 恰为 0（核心不引入任何额外状态）
+  - evaluator 不是函数 ⇒ 拒
+- **公共机制 · 4. 指标可扩展（词表任意声明）**
+  - 词表里可以有任意命名的指标（研究侧自造统计量）
+  - 快照里出现词表外的指标 ⇒ 该变体 failed（结构化，不静默接受）
+  - 指标值为 NaN / Infinity ⇒ failed（不得用非有限值充当结论）
+  - 词表里声明的指标既没值也没原因 ⇒ failed（不允许静默少一个指标）
+  - 「指标不可用」走 unavailable + 非空原因（**不是** 0）
+  - 不可用原因缺省（空串）⇒ failed
+- **公共机制 · 5. 比较（声明式）**
+  - 比较声明的 metric 必须 ∈ 词表；重复 / 空 / 非法方向一律拒
+  - delta = 变体 − 基准；逐行带样本集合上下文；sampleSetChanged 在有效样本数不同时为 true
+  - 单元判定优先级：sensitive > insufficient > stable；anyFailed ⇒ failed
+- **公共机制 · 6. 容差判定（**唯一实现**）**
+  - 严格大于：等于容差算「在容差内」
+  - 三个方向语义：both / increase / decrease（不猜、不倒推）
+  - 非法容差 / 非法 delta / 未知方向 ⇒ 结构化抛错
+  - 三个方向常量齐备（界面与声明共用同一份）
+  - 🔴 §18 P1-3 判据：C-18.1 的两个固定阈值能被「声明式比较」**无语义损失**替代
+- **公共机制 · 7. 失败样本结构化（不静默吞）**
+  - 评估器抛错 ⇒ 该变体 failed，且错误文案带原因；其余变体不受影响
+  - 评估器返回 failed 但错误为空 ⇒ 仍给结构化文案（不产生空错误）
+  - 评估器返回非法产物（非对象 / status 非法）⇒ failed
+- **公共机制 · 8. 基准失败 ⇒ 拒绝产出无锚点结论**
+  - 基准评估失败 ⇒ RB18X_BASELINE_FAILED（不返回任何记录）
+  - 基准抛错同理 ⇒ RB18X_BASELINE_FAILED
+- **公共机制 · 9. 样本账守恒（§13）**
+  - 直接校验：两式都平才通过；不平则结构化抛错
+  - 评估产物样本账不平 ⇒ 该变体 failed（结构化原因，不静默接受）
+  - 剔除原因合计 ≠ excludedCount ⇒ 也 failed（「为什么样本变少」不许丢）
+  - 缺样本账（null）⇒ failed（每个变体必须给出账目）
+- **公共机制 · 10. 多维矩阵（一个 Run 一个基准）**
+  - 维度结论归因正确，计数自洽（stable+sensitive+insufficient+failed = variantCount）
+  - 总判定优先级：sensitive > insufficient > failed > stable
+  - 维度没有变体 ⇒ verdict = no-variants（不是 stable）
+  - subject 身份：实验语境允许 subjectRunId=null；策略语境必须为 null
+- **公共机制 · 11. 确定性指纹与序列化**
+  - 同输入 ⇒ 同指纹、逐字节同串（wall-clock 刻意不注入）
+  - 改一个指标值 ⇒ 指纹变
+  - 记录不可变（deepFreeze）：改 baseline 会抛（严格模式）
+  - 结构校验 + 反序列化：合法记录通过；篡改内容被指纹拒
+  - 记录种类标签与策略侧**不同**（两套记录形态并存，不互相冒充）
+- **公共机制 · 12. 核心不含研究侧业务语义（§17 结构级闸门）**
+  - 🔴 泛化层三个文件的**代码**里不出现任何研究侧标识符
+  - 🔴 「去注释」这一步真的有作用（否则闸门会空转通过）
+  - 三个文件都真的被读到了（防止路径写错导致闸门对空气生效）
 
 ### `tests/server/research/robustness/robustness.test.ts`
 - 807 行 ｜ 用例声明 34 ｜ describe 9
@@ -1702,8 +1458,16 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 测试 13: frozenTimeline + peakFrozenAmount 正确
   - 测试 14: rejectionSummary 按 code 聚合正确
 
+### `tests/server/research/simulator/plan.test.ts`
+- 36 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`server/engine/domain.ts` · `server/research/simulator/plan.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/simulator/plan.test.ts`
+- 用例树：
+- **planDecisionDay · 强制退出与候选退出隔离**
+  - 无候选意图时只卖被强制退出的持仓，不受影响持仓继续持有
+
 ### `tests/server/research/simulator/simulator.test.ts`
-- 717 行 ｜ 用例声明 17 ｜ describe 5
+- 782 行 ｜ 用例声明 20 ｜ describe 6
 - 被测源码：`server/data/index.ts` · `server/engine/domain.ts` · `server/researchDataset/types.ts` · `server/research/signalEngine/index.ts` · `server/research/datasetAccess/handle.ts` · `server/research/framework/index.ts` · `server/research/simulator/index.ts`
 - 单跑：`pnpm exec vitest run tests/server/research/simulator/simulator.test.ts`
 - 用例树：
@@ -1729,6 +1493,10 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 来源候选记录指纹不匹配 → 拒绝
   - 模拟窗口与候选决策日无交集 → EmptySimulationWindowError
   - 非法输入配置 → assertValidSimulationConfig 抛错
+- **策略退出政策：盘中止损/止盈 + 收盘时间退出**
+  - 盘中跌破止损价 → 当日卖出并把原因贯通到 Trade
+  - 盘中触及止盈价 → 当日卖出并保留止盈原因
+  - 持有满 2 个交易日 → 收盘触发，下一交易日开盘卖出
 
 ### `tests/server/research/stochasticRobustness/stochasticRobustness.test.ts`
 - 832 行 ｜ 用例声明 50 ｜ describe 10
@@ -1798,7 +1566,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
 
 ### `tests/server/research/strategyCandidate/definitionBuild.test.ts`
 - 767 行 ｜ 用例声明 41 ｜ describe 7
-- 被测源码：`server/researchCore/index.ts` · `server/research/strategyCandidate/candidateTypes.ts` · `server/research/strategyCandidate/definitionBuild.ts`
+- 被测源码：`server/research/vocabulary.ts` · `server/research/strategyCandidate/candidateTypes.ts` · `server/research/strategyCandidate/definitionBuild.ts`
 - 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/definitionBuild.test.ts`
 - 用例树：
 - **RESEARCH-006.3 · definitionBuild 正常映射（§9）**
@@ -1850,182 +1618,52 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - P0-1c) 首条 logicalOperator=OR **允许**（引擎口径：首条无前序，连接符本就被忽略）
   - P0-2) 研究侧变量名 ⇒ 拒绝且消息点名「研究侧变量名」（不做机械翻译）
 
-### `tests/server/research/strategyCandidate/evidenceDerivation.test.ts`
-- 538 行 ｜ 用例声明 19 ｜ describe 5
-- 被测源码：`server/research/strategyCandidate/evidenceDerivation.ts` · `server/research/patternLibrary/semanticRegistry.ts` · `server/research/strategySchema/definition.ts` · `server/researchCore/index.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/evidenceDerivation.test.ts`
+### `tests/server/research/strategyCandidate/provenanceReadRetry.test.ts`
+- 157 行 ｜ 用例声明 6 ｜ describe 1
+- 被测源码：`server/research/strategyCandidate/provenance.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/provenanceReadRetry.test.ts`
 - 用例树：
-- **正向派生**
-  - Pattern 语义变量 ⇒ 策略侧条件（fieldName 含 '.'，阈值=参数引用）
-  - 多条条件 ⇒ 去重后按 fieldName 升序（确定性），同键保留 findingId 最小者
-  - filterRule 的条件顺序与 derivedRules 一致，且 sortOrder 连续（0,1,…）
-- **确定性**
-  - 同输入 ⇒ 同指纹；finding 顺序颠倒亦同（遍历顺序固定）
-  - 指纹不读时钟：同内容重新构造 ⇒ 指纹逐字节相同
-  - 指纹对「内容变化」敏感：改 value ⇒ 指纹变（可失败对照）
-  - computeDerivationFingerprint 是纯函数（同参同值）
-- **不可翻译一律如实登记（绝不猜）**
-  - 非 Pattern 语义变量（内建观察日变量）⇒ NOT_PATTERN_SEMANTIC_VARIABLE
-  - 分析没有结构化条件 ⇒ NO_STRUCTURED_CONDITIONS（附对照：加一条条件即派生）
-  - Finding 没有 primaryAnalysisId ⇒ NO_STRUCTURED_CONDITIONS
-  - OR 语义 ⇒ LOGICAL_OPERATOR_NOT_EXPRESSIBLE（组内 OR 与多组各一例）
-  - 声明要求的阈值参数不在候选参数空间 ⇒ THRESHOLD_PARAM_NOT_DECLARED
-  - skip 原因全部落在闭集内（无第二套字符串）
-- **方向差异必须「派生 + 登记」，不得静默也不得误杀**
-  - 研究侧 GTE 与声明 LTE 相反 ⇒ 仍然派生，但 directionMismatch=true 并有可读说明
-  - 非比较运算（==）⇒ researchDirection=null 且带说明（不拒绝）
-  - 方向一致 ⇒ 无说明（三者可辨，证明判据有牙齿）
-- **快照**
-  - 快照含 derivationVersion / fingerprint / patternIds / 规则与跳过明细
-  - 没有 Finding ⇒ emptyDerivation（真实反映「没有证据」，不假装派生过）
-  - 读取辅助对非快照输入保持沉默（返回 0 / null，不抛）
+- **SRB001 §16 · 溯源仓储的只读重试（冷连接瞬时失败不得让证据区块消失）**
+  - getByStrategyVersionId：首次瞬时失败 → 重试一次后成功（调用 2 次，返回 undefined 而不是抛错）
+  - listByStrategyId：首次瞬时失败 → 重试后返回（调用 2 次，返回空数组）
+  - getBySourceCandidateId：首次瞬时失败 → 重试后返回（调用 2 次）
+  - 语义错误（ER_NO_SUCH_TABLE）**不重试**：只调用 1 次并原样抛出
+  - 写路径（deleteByStrategyVersionId）瞬时错误**不重试**：只调用 1 次
+  - 夹具自检：`withReadRetry` 真的挂在读路径上（否则前四条会被别的原因弄绿）
 
-### `tests/server/research/strategyCandidate/importBoundary.test.ts`
-- 218 行 ｜ 用例声明 7 ｜ describe 2 ｜ 📄 源码文本断言
-- 被测源码：**无相对/别名 import**（自足纯函数或读文件断言）
-- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/importBoundary.test.ts`
+### `tests/server/research/strategyCandidate/researchEvidence.test.ts`
+- 399 行 ｜ 用例声明 23 ｜ describe 5
+- 被测源码：`server/research/strategyCandidate/researchEvidence.ts`
+- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/researchEvidence.test.ts`
 - 用例树：
-- **跨模块依赖方向守护（RESEARCH-006.1 §21 / §22）**
-  - 只有桥（server/research/strategyCandidate/**）可以同时 import researchCore 与 strategyPersistence
-  - 桥不得被 Research Core / Strategy Persistence 反向 import
-  - 桥内部不得出现「Research 领域 ↔ Strategy 领域」的环（不得 import research 主 barrel）
-- **RESEARCH-006.3 桥边界守护（§47）**
-  - ① 桥内只有允许清单文件可以 import Strategy 领域（跨界必须收敛到端口）
-  - ①-b 允许清单里的文件**确实存在**（防止清单随重构静默失效）
-  - ② 桥不得出现**直接**写 `strategy_versions` 的痕迹（§28 / §29：必须复用 StrategyService）
-  - ③ Strategy 侧不得反向认识 Research 侧的任何东西（含 006.3 新增端口）
-
-### `tests/server/research/strategyCandidate/provenance.test.ts`
-- 85 行 ｜ 用例声明 4 ｜ describe 2
-- 被测源码：`server/researchCore/repository/inMemory.ts` · `server/researchCore/repository/contract.ts` · `server/research/strategyCandidate/provenance.ts` · `server/research/strategyCandidate/provenanceContract.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/provenance.test.ts`
-- 用例树：
-- **Research → Strategy 溯源仓储（InMemory 契约）**
-  - 全部契约用例通过
-  - DIRECT / INHERITED 两种 origin 都被覆盖到
-- **Candidate 来源快照字段（InMemory 契约）**
-  - 全部契约用例通过（含自建自清）
-  - 自建自清：契约结束后该实验下无残留候选
-
-### `tests/server/research/strategyCandidate/router.test.ts`
-- 454 行 ｜ 用例声明 16 ｜ describe 5
-- 被测源码：`server/routers.ts` · `server/researchCore/index.ts` · `server/research/strategyPersistence/inMemory.ts` · `server/research/strategyCandidate/router.ts` · `server/research/strategyCandidate/service.ts` · `server/research/strategyCandidate/provenance.ts` · `server/research/strategyCandidate/strategyPromotionPort.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/router.test.ts`
-- 用例树：
-- **RESEARCH-006.2 / 006.3 · Router 端点与偷跑检查**
-  - 恰好暴露 5 个端点；006.3 起 promote 是**唯一**新增入口（§33）
-  - 已注册进 appRouter（research.strategyCandidate.*）—— 只读路由表，不触库
-- **RESEARCH-006.3 · Router `promote`（§33 / §34 / §35）**
-  - 权限：写端点，未登录 → FORBIDDEN（**不开放 public**）
-  - 入参：未知顶层键 / overrides 里的完整 definition → 传输层 BAD_REQUEST
-  - 领域错误 → 稳定 code：不存在 NOT_FOUND / 非 ACCEPTED PRECONDITION_FAILED
-  - 端到端：ACCEPTED → promote → CONVERTED，DTO 五键齐备；再次 promote 幂等
-- **RESEARCH-006.2 · Router 权限**
-  - createFromConclusion / update / transition 需 admin（未登录 → FORBIDDEN）
-  - get 是只读端点（未登录可读）
-- **RESEARCH-006.2 · Router 入参校验（zod strictObject）**
-  - 未知顶层字段 → BAD_REQUEST
-  - conclusionId 非正整数 → BAD_REQUEST
-  - update 的 patch 带 status / 未知字段 → BAD_REQUEST（传输层即挡）
-  - transition 的 to 非法枚举 → BAD_REQUEST；CONVERTED 留给 Service 的架构拒绝
-- **RESEARCH-006.2 · Router 领域错误映射 + 端到端效果**
-  - createFromConclusion：Conclusion 不存在 → NOT_FOUND；被取代 → PRECONDITION_FAILED
-  - 重复登记 → CONFLICT
-  - createFromConclusion → update → transition → get 全链效果可见
-  - get 不存在 → NOT_FOUND
-
-### `tests/server/research/strategyCandidate/service.promote.test.ts`
-- 784 行 ｜ 用例声明 30 ｜ describe 6
-- 被测源码：`server/researchCore/index.ts` · `server/research/strategyPersistence/inMemory.ts` · `server/research/strategyPersistence/contract.ts` · `server/research/strategyCandidate/strategyPromotionPort.ts` · `server/research/strategyCandidate/provenance.ts` · `server/research/strategyCandidate/candidateTypes.ts` · `server/research/strategyCandidate/service.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/service.promote.test.ts`
-- 用例树：
-- **RESEARCH-006.3 · promote 前置条件（§5）**
-  - 1) candidateId 不存在 → CANDIDATE_NOT_FOUND
-  - 2) candidateId 非正整数 → INVALID_INPUT（不查库）
-  - 2b) overrides 出现未知键（含完整 definition）→ 响亮拒绝，不静默丢弃
-  - 3) DRAFT 直接转正 → CANDIDATE_NOT_ACCEPTED（且零 Strategy 数据）
-  - 4) REVIEW → CANDIDATE_NOT_ACCEPTED
-  - 5) REJECTED → CANDIDATE_NOT_ACCEPTED
-  - 6) ARCHIVED → CANDIDATE_NOT_ACCEPTED
-  - 7) ACCEPTED + 草稿完整 → 成功（Strategy / Version / Provenance / CONVERTED 四件套）
-  - 8) 构建出的 definition 未过既有校验 → PROMOTE_DEFINITION_INVALID，零 Strategy 数据，候选保持 ACCEPTED
-  - 9) 草稿缺必填（无 observationWindow）→ PROMOTE_SKETCH_INCOMPLETE，零副作用
-- **RESEARCH-006.3 · promote 的 Dataset 绑定（§11 ~ §16）**
-  - 10) 缺省继承：执行绑定 = 研究来源坐标，且 divergence 原因必须为 NULL
-  - 11) 显式指定不同 Dataset + 提供原因 → divergence=true，原因落列
-  - 12) 指定不同却不给原因 → DATASET_DIVERGENCE_REASON_REQUIRED（零 Strategy 数据）
-  - 13) 一致却硬填原因（含 same dataset / N/A 之类占位）→ INVALID_INPUT
-  - 14) 指定的 Dataset Version 不存在 → DATASET_VERSION_NOT_FOUND
-  - 15) 指定的 Dataset Version 非 READY → DATASET_VERSION_NOT_READY
-- **RESEARCH-006.3 · promote 的 provenance（§20 ~ §22）**
-  - 16) provenance 是历史事实快照：上游锚 / origin / 快照逐项正确
-  - 17) 候选终态：CONVERTED + strategyDefinitionId 指向策略（两处一致）
-  - 18) 上游（Experiment / Conclusion / Candidate）被删后，provenance 仍可读（§40）
-- **RESEARCH-006.3 · promote 幂等（§18 / §19）**
-  - 19) 第二次 promote：同结果 + 不产生第二个版本 + 候选不再被改写
-  - 20) 幂等返回仍带 fingerprint（来自真实版本行，不编值）
-  - 21) 第二次带上「一致却填了 reason」→ 拒绝（不因幂等而放宽 divergence 规则）
-  - 21b) 第二次要求改绑到别的 Dataset → 拒绝（已转正 = 不可逆；不静默忽略）
-  - 21c) 已转正且带 divergence：重复传同一个原因 → 幂等通过；传新原因 → 拒绝
-- **RESEARCH-006.3 · 跨存储失败与恢复（§25 / §26 / §39）**
-  - 22) provenance 写入失败：抛 PROMOTE_WRITEBACK_FAILED（带 strategyId / versionId），不删 Strategy，候选仍 ACCEPTED
-  - 23) 候选回写失败：抛 PROMOTE_WRITEBACK_FAILED，Strategy + provenance 都在，重试只补回写
-  - 24) 候选已 CONVERTED 但溯源行消失（被绕过 promote 改过状态）→ PROMOTE_STATE_INCONSISTENT
-  - 25) 溯源在、候选状态却不是 ACCEPTED/CONVERTED（状态与溯源不一致）→ PROMOTE_STATE_INCONSISTENT
-- **RESEARCH-006.3 · Strategy 独立性（§41）**
-  - 26) Research 侧登记录被删后，Strategy 版本仍可读 / 定义仍在（研究侧不是 Strategy 的依赖）
-  - 27) 同一候选（两次独立运行）的 Strategy 身份是确定性的：cand-<id> + 1.0.0
-
-### `tests/server/research/strategyCandidate/service.test.ts`
-- 759 行 ｜ 用例声明 40 ｜ describe 5
-- 被测源码：`server/researchCore/index.ts` · `server/research/strategyCandidate/candidateTypes.ts` · `server/research/strategyCandidate/evidenceTrace.ts` · `server/research/strategyCandidate/service.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/strategyCandidate/service.test.ts`
-- 用例树：
-- **RESEARCH-006.2 · createFromConclusion（§23）**
-  - 1) Conclusion 不存在 → CONCLUSION_NOT_FOUND
-  - 2) Conclusion 不允许登记（SUPERSEDED）→ CONCLUSION_NOT_CANDIDATE_ELIGIBLE
-  - 2b) Conclusion 状态为 FINAL 时允许登记（资格白名单含 FINAL）
-  - 3) Experiment 不存在 → EXPERIMENT_NOT_FOUND
-  - 3b) Experiment.datasetVersionId 非法（0）→ DATASET_VERSION_INVALID
-  - 4) Dataset Version 不存在 → DATASET_VERSION_NOT_FOUND
-  - 4b) Dataset Version 未 READY → DATASET_VERSION_NOT_READY
-  - 5) 正常创建 → status = DRAFT，且 name / description 缺省取自结论
-  - 5b) 显式 name / description 覆盖缺省
-  - 6+7) sourceDatasetVersionId 正确复制自 Experiment（唯一 Dataset 坐标）
-  - 8) sourceResearchRunId 由 evidence.primaryAnalysis.analysisId 两跳解析得到
-  - 9) 无法解析 Run → sourceResearchRunId = NULL（不伪造）
-  - 9c) 证据跨多个 Run（runId 不唯一）→ NULL
-  - 10) sourceTraceJson 是**最小充分**快照：证据形状 + 主分析 + 免责声明（截断有上限）
-  - 11a) intent 映射：不传 overrides ⇒ 5 个规则列**保持为空**（Research 没研究出来的，Service 不猜）
-  - 11b) intent 映射：人显式传入的 overrides 原样落库（不补默认值）
-  - 11c) overrides 不接受 datasetVersionId（研究来源坐标不可被调用方改写）
-  - 11d) overrides 不接受 status / experimentId 等非草图字段
-  - 12) 同一 Conclusion + 同名 ⇒ CANDIDATE_ALREADY_EXISTS；不同名允许（1:N）
-  - 12b) 名称非法（空白 / 超长）→ INVALID_INPUT
-- **RESEARCH-006.2 · get**
-  - 返回候选本体 + 上游摘要；上游被删时如实标注 sourceMissing（不报错、不伪造）
-  - 不存在 → CANDIDATE_NOT_FOUND
-- **RESEARCH-006.2 · update 白名单（§24）**
-  - 允许修改草图字段（name / description / entryRule）
-  - 空 patch → INVALID_INPUT（不返回假成功）
-  - name 为空串 → INVALID_INPUT
-  - 候选不存在 → CANDIDATE_NOT_FOUND（且先于任何写入）
-  - 白名单不能绕过 Repository boundary：一次越界 patch 不会顺带改掉合法字段
-- **RESEARCH-006.2 · transition 状态机（§17 / §24）**
-  - DRAFT → REVIEW 通过
-  - REVIEW → ACCEPTED 通过
-  - REVIEW → REJECTED 通过
-  - 各级 → ARCHIVED 通过
-  - 🔴 DRAFT → CONVERTED 拒绝（CONVERSION_REQUIRES_PROMOTE，且提示走 promote）
-  - 🔴 REVIEW → CONVERTED 拒绝
-  - 🔴 ACCEPTED → CONVERTED 拒绝（即便已 ACCEPTED，006.2 也不放行）
-  - 非法迁移：DRAFT → ACCEPTED 拒绝（不能跳过 REVIEW）
-  - 非法迁移：终态 ARCHIVED 之后不可再迁移
-  - 未开放目标（含 DRAFT 退回 / 未知枚举）→ TRANSITION_INVALID
-  - 状态未变化 → TRANSITION_INVALID（不返回假成功）
-  - 候选不存在 → CANDIDATE_NOT_FOUND
-- **RESEARCH-006.2 · 全局不变量（§28 / §29 / §34）**
-  - 无论怎样操作，Service 都不产出 CONVERTED、不写 strategyDefinitionId
+- **§18.1 证据引用校验**
+  - 1-a) 合法列表通过（闭集 kind 的每一种取值都能通过）
+  - 1-b) 空列表 / runId 形态错 ⇒ EMPTY / RUN_ID_INVALID
+  - 1-c) 缺 experimentCode / experimentVersion 的形态**不是字段缺失** —— 契约上它们不由调用方提供
+  - 1-d) 缺 datasetVersionId（= 记录由 Run 读回，不由调用方给）—— 记录缺 Dataset 坐标一律非法
+  - 1-e) 非法 reference / 超长 description ⇒ REFERENCE_INVALID
+  - 1-f) 同一 (runId, kind, reference) 重复 ⇒ DUPLICATE；仅 reference 不同不算重复
+- **§12 reference 解析（不得虚构 artifact）**
+  - 1-g-1) 存在路径 ⇒ 返回真实值（含 null 值也算**已解析**）
+  - 1-g-2) 段不存在 / 中间不是对象 ⇒ REFERENCE_UNRESOLVED
+  - 1-g-2b) 声明层比解析层**更严**：数字下标永远进不了 reference
+  - 1-g-3) 原型链上的键不算命中（constructor / toString / __proto__）
+  - 1-g-4) 错误消息里**列出该层的可用键**（便于定位写错的坐标）
+- **§18.2 证据指纹**
+  - 2-a) 相同证据 ⇒ 相同指纹（且是纯函数：连算两次相同）
+  - 2-b) 证据顺序变化 ⇒ 指纹**不变**（先按稳定键排序）
+  - 2-c) 任一**参与身份**的字段变化 ⇒ 指纹变化（逐字段遍历，一个都不漏）
+  - 2-d) 「多一条证据」也算变化（列表长度进身份）
+  - 2-e) 指纹前缀与执行语义指纹**刻意不同**（同名不同义在肉眼与 grep 层面都不可混）
+  - 2-f) 不参与身份的字段（runStatus / startedAt / durationMs / description）变化**不改**指纹
+- **§18.2 快照编解码与声明校验**
+  - 3-a) build → read 往返一致（列表 + 指纹）
+  - 3-b) 宽容读取：JSON 字符串输入 / 形态不符 / 缺键 ⇒ [] 与 null（读路径不失败）
+  - 3-c) 「声明即受校验」：不带证据段的快照**逐字不变**（历史行零回归）
+  - 3-d) 声明了证据段 ⇒ 必须自洽（缺指纹 / 指纹不符 / 列表不合法 都失败）
+- **§18.2 唯一 Dataset 坐标**
+  - 4-a) 同 Dataset ⇒ 返回该坐标；乱序无关
+  - 4-b) 异 Dataset ⇒ DATASET_MISMATCH；空列表 ⇒ 不得静默返回（抛错）
 
 ### `tests/server/research/strategyEvaluation/optimizationStage.test.ts`
 - 249 行 ｜ 用例声明 15 ｜ describe 2
@@ -2278,43 +1916,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 映射提取可序列化面：point / 排序后的 featureVersions / ranking / selection / 频率
   - 映射配方嵌入本体后 validate 通过；recipeId 空串映射抛错
 
-### `tests/server/research/sweep.test.ts`
-- 547 行 ｜ 用例声明 20 ｜ describe 11 ｜ 📄 源码文本断言
-- 被测源码：`server/research/adapter.ts` · `server/research/experimentRegistry.ts` · `server/research/experimentService.ts` · `server/research/engineAdapter.ts` · `server/research/persistence/inMemory.ts` · `server/research/persistence/contract.ts` · `server/research/registry.ts` · `server/research/runService.ts` · `server/research/sweep.ts` · `server/research/sweepService.ts` · `server/data/index.ts` · `server/leaderCandidates.ts` · `server/research/parameterSpace.ts` · `server/research/types.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/sweep.test.ts`
-- 用例树：
-- **Batch persistence**
-  - createSweep → persist → reload：parameterSpace / strategyId / strategyVersion / status 一致
-- **Experiment creation**
-  - 每个 combination 都创建独立 Experiment（参数集正确）
-- **Snapshot isolation**
-  - 修改 Batch ParameterSpace 不影响 Experiment Snapshot
-- **Run success**
-  - Batch → Experiment → ResearchRun → Backtest Core：成功结果正确保存
-- **Run failure**
-  - 可控失败 → ResearchRun FAILED：error + finishedAt 保存，batch failed
-- **Partial failure**
-  - 5 experiments 中 1 失败 → total=5 / succeeded=4 / failed=1
-- **Result parameter traceability**
-  - 每个结果都能找到 experimentId / runId / parameterSet
-- **createSweep 防护**
-  - 非法参数空间在创建任何 Experiment 之前抛错（无孤儿实验）
-  - 超过 maxCombinations 上限在创建前失败
-  - 未知策略版本在创建前抛错
-  - 参数空间含 schema 未定义参数 → 预校验 FAIL FAST（无孤儿实验）
-- **createSweep 回滚**
-  - 实验中途持久化失败 → 已创建实验全部回滚，Batch 不存在
-  - Batch 持久化失败 → 已创建实验全部回滚，Batch 不存在
-  - 失败回滚不影响历史 Experiment
-  - 回滚删除自身失败 → 原始异常仍抛出，且回滚失败被记录
-  - 正常成功路径不受影响：Experiments + Batch 全部存在
-- **sortSweepResults**
-  - 按 sharpeRatio 降序排序，null 排末尾，稳定
-  - 返回新数组，不修改入参
-- **Production / Legacy boundary**
-  - 生产核心不反向依赖 research sweep/experiment
-  - Sweep 层不引用 legacy 模拟器（research-only 边界保持）
-
 ### `tests/server/research/tradeJournal/tradeJournal.test.ts`
 - 907 行 ｜ 用例声明 29 ｜ describe 5
 - 被测源码：`server/research/executionConstraints/factory.ts` · `server/research/signalEngine/index.ts` · `server/research/paperAccount/account.ts` · `server/research/paperAccount/errors.ts` · `server/research/paperAccount/types.ts` · `server/research/signalEngine/types.ts` · `server/research/framework/contract.ts` · `server/data/index.ts` · `server/research/costModel/types.ts` · `server/research/executionConstraints/types.ts` · `server/research/types.ts` · `server/research/signalToPnl/engine.ts` · `server/research/signalToPnl/types.ts` · `server/research/tradeJournal/index.ts`
@@ -2405,107 +2006,6 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 篡改记录（改交易质量字段）→ fingerprint 复核抛错
   - 返回记录深冻结（不可变）
   - 记录输入边界回显正确（点数/起止日期/tradeCount）
-
-### `tests/server/research/trainEvaluation.test.ts`
-- 295 行 ｜ 用例声明 12 ｜ describe 6
-- 被测源码：`server/engine/domain.ts` · `server/research/evaluationService.ts` · `server/research/registry.ts` · `server/research/strategyContract.ts` · `server/research/trainEvaluation.ts` · `server/research/types.ts` · `server/research/runService.ts` · `server/research/walkForwardService.ts` · `server/research/walkForward.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/trainEvaluation.test.ts`
-- 用例树：
-- **filterEligibleTrainCandidates — 纯函数语义**
-  - succeeded 且 metric 有限 → eligible；失败 → ineligible；null/NaN → ineligible
-  - 保持输入顺序（确定性，不依赖 Map/DB 顺序）
-  - 非法 selectionMetric 抛错
-- **STEP 6.5-FIX-1 — Test A/B/C：Train 真正执行且只看到 Train 区间**
-  - A：train / validation / oos 三种调用均 > 0
-  - B：Train 阶段收到的是 TRAIN 区间，而非 validation/oos 区间
-  - C：Train 评估只能看到 Train dataset（不读 validation/oos 数据）
-- **STEP 6.5-FIX-1 — Test D/E：Train 不越权、OOS 不参与选择**
-  - D：Train 优但 Validation 差 → 不被选；Validation 才是唯一 Selection Authority
-  - E：Validation 最优但 OOS 差 → 仍被选；OOS 结果不参与 Selection
-- **STEP 6.5-FIX-1 — Train 阶段 Strategy Version / CostModel Freeze**
-  - Strategy Version Freeze：register v2 后 Train/Validation/OOS 全部用 v1
-  - CostModel Freeze：Train/Validation/OOS 使用同一 Frozen CostModel
-- **STEP 6.5-FIX-1 — Test J：Determinism**
-  - 同一 Plan 连续执行两次 → selected id / parameters / train·validation·oos 指标 / fingerprint 一致
-- **STEP 6.5-FIX-1 — Train 无 eligible 候选时窗口显式失败（不产生空结果）**
-  - 所有候选 Train 失败 → 窗口 failed，error 明确（非静默 empty / 非 pbo=0）
-
-### `tests/server/research/trainValidationOos.test.ts`
-- 137 行 ｜ 用例声明 10 ｜ describe 3
-- 被测源码：`server/research/datasetSplit.ts` · `server/research/trainValidationOos.ts` · `server/research/types.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/trainValidationOos.test.ts`
-- 用例树：
-- **Research Evaluation Plan — 创建与校验**
-  - createResearchEvaluationPlan 派生三段范围 + fingerprint
-  - 语义锁：validationOnly / oosLocked 设为 false 被拒绝
-  - 非法 selectionMetric 被拒绝
-- **Research Evaluation Plan — Fingerprint**
-  - 相同 Plan 产生相同指纹（确定性）
-  - 只改 validationEnd → 不同指纹
-  - 只改 selectionMetric → 不同指纹
-  - 只改 costModel → 不同指纹
-- **Research Evaluation Plan — 序列化 / mutation isolation**
-  - serialize → deserialize round-trip 语义一致
-  - deserialize 返回独立副本：修改 restored 不影响再次 deserialize
-  - createResearchEvaluationPlan 深拷贝 backtestConfig：修改输入不影响 Plan
-
-### `tests/server/research/validationSelection.test.ts`
-- 219 行 ｜ 用例声明 13 ｜ describe 5
-- 被测源码：`server/research/evaluationService.ts` · `server/research/types.ts` · `server/research/validationSelection.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/validationSelection.test.ts`
-- 用例树：
-- **Validation Selection — 基本选择**
-  - 最高 Sharpe 被选（maximize）
-  - 最低 MaxDrawdown 被选（minimize）
-- **Validation Selection — 非法 metric 不中选**
-  - null / NaN / Infinity 候选不会被选择
-  - failed 候选不中选
-  - 所有候选 invalid → selection 失败（不偷偷选第一个）
-  - 非法 selectionMetric → 抛错
-- **Validation Selection — tie-break 确定性**
-  - 相同 metric 按 experimentId 字典序稳定决定（重复 100 次一致）
-- **Validation Selection — mutation isolation**
-  - selectedParameters 是独立副本，修改不影响候选
-- **Frozen OOS Candidate — 参数 / 版本 / 成本模型冻结**
-  - 修改 candidate.parameters 不影响原 snapshot（参数冻结）
-  - 策略版本由 snapshot 派生并冻结（v1），不随 registry 漂移
-  - 冻结候选保留冻结 costModel（不重读默认成本模型）
-  - snapshot.experimentId 与 experimentId 不一致 → 抛错
-  - validationValue 非有限 → 抛错
-
-### `tests/server/research/walkForward.test.ts`
-- 205 行 ｜ 用例声明 22 ｜ describe 6
-- 被测源码：`server/research/walkForward.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/walkForward.test.ts`
-- 用例树：
-- **WFO Window — Rolling 生成**
-  - 正确生成滚动窗口（长度固定、按 stepSize 前进）
-  - 窗口按时间顺序严格递增（windowIndex 单调）
-  - 每窗口三段严格无重叠
-  - 相邻窗口 OOS 不重叠
-- **WFO Window — Expanding 生成**
-  - Train 起点固定、终点向前扩展
-  - Expanding Validation/OOS 向前移动
-- **WFO Window — 边界与步长**
-  - stepSize > oosSize 时相邻 OOS 之间留有空档（仍不重叠）
-  - 单日区间（trainSize=1 等）合法
-- **WFO Window — 非法配置 fail fast**
-  - trainSize <= 0 → invalid
-  - validationSize <= 0 → invalid
-  - oosSize <= 0 → invalid
-  - stepSize <= 0 → invalid
-  - stepSize < oosSize → invalid（相邻 OOS 会重叠）
-  - 非法 mode → invalid
-  - datasetRange 倒序 → invalid
-  - 非法 selectionMetric → invalid
-- **WFO Window — 数据不足 fail fast**
-  - 数据集不足以形成第 0 个完整窗口 → 抛错（非空数组）
-- **WFO Window — Fingerprint 确定性**
-  - 相同窗口产生相同 fingerprint
-  - 不同窗口产生不同 fingerprint
-  - 只改 oosRange 结束日期 → 不同 fingerprint
-  - config fingerprint 确定性 + 敏感性
-  - 重复生成窗口序列完全一致（deterministic）
 
 ### `tests/server/research/walkForward/walkForward.test.ts`
 - 927 行 ｜ 用例声明 48 ｜ describe 8
@@ -2655,20 +2155,3 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - round-trip：serialize → deserialize 深比较一致，指纹相同
   - 篡改拒绝：改动字段后反序列化抛指纹不匹配
   - 结构校验：非法 recordKind / recordVersion → issues
-
-### `tests/server/research/walkForwardService.test.ts`
-- 224 行 ｜ 用例声明 7 ｜ describe 4
-- 被测源码：`server/engine/domain.ts` · `server/research/evaluationService.ts` · `server/research/registry.ts` · `server/research/strategyContract.ts` · `server/research/types.ts` · `server/research/walkForwardService.ts` · `server/research/runService.ts` · `server/research/walkForward.ts`
-- 单跑：`pnpm exec vitest run tests/server/research/walkForwardService.test.ts`
-- 用例树：
-- **WalkForwardService — 窗口独立性（OOS 不影响 Selection）**
-  - Window 1 OOS 极好 / Window 2 OOS 极差 → Window 2 选择仍只依赖其 Validation
-  - 反向构造（Window 1 OOS 极差 / Window 2 OOS 极好）→ Selection 不变
-- **WalkForwardService — Strategy Version Freeze**
-  - v1 → v2 后重跑，历史候选仍用 v1
-- **WalkForwardService — CostModel Freeze**
-  - frozen minCommission=1 不被默认 5 覆盖（WFO/OOS 均用 1）
-- **WalkForwardService — 结果组装 + 序列化**
-  - 结果字段完整（planFingerprint / aggregate / stability / degradation / assessment）
-  - 提供 pboInput 时 PBO 被计算并纳入 assessment
-  - serialize → deserialize round-trip 语义一致

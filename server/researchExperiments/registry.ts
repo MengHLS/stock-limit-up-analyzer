@@ -133,6 +133,17 @@ export function validateExperimentDescriptor(
   if (declaredColumns === 0) {
     fail("requiredColumns 至少要声明一个要读的列（events / feature / observation）");
   }
+
+  const aliases = new Set<string>();
+  for (const auxiliary of descriptor.auxiliaryDatasetRequirements ?? []) {
+    if (auxiliary.alias === "primary") {
+      fail(`辅助 Dataset alias 不得使用保留名 "primary"`, { alias: auxiliary.alias });
+    }
+    if (aliases.has(auxiliary.alias)) {
+      fail(`辅助 Dataset alias 重复："${auxiliary.alias}"`, { alias: auxiliary.alias });
+    }
+    aliases.add(auxiliary.alias);
+  }
 }
 
 /** 实验注册表（注册即校验；重复注册具名拒绝，不静默覆盖）。 */

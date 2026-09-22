@@ -43,7 +43,11 @@ import {
   type DayLimitClassification,
   type StStatus,
 } from "./detection";
-import { exchangeLimitUpPrice } from "../data/boardRules";
+import {
+  exchangeLimitDownPrice,
+  exchangeLimitUpPrice,
+} from "../data/boardRules";
+import { deriveExecutionFacts } from "./executionFacts";
 import { DATASET_LIFECYCLE_ERROR, DatasetLifecycleError } from "./lifecycle";
 import {
   isBoardAllowed,
@@ -77,6 +81,7 @@ import type {
   FirstLimitPullbackPath,
   FirstLimitPullbackRawBar,
 } from "./types";
+import type { SuspensionResolution } from "./executionFacts";
 
 // ---------------------------------------------------------------------------
 // IO 抽象（注入式，测试用内存实现，生产用 db.ts）
@@ -108,6 +113,8 @@ export interface DatasetBuildIO {
   loadSecurityIndexes(): Promise<void>;
   /** 同步 PIT ST 解析（须先 `loadSecurityIndexes`；不再有网络往返）。 */
   resolveStSync(symbol: string, tradeDate: string): StStatus;
+  /** 同步 PIT 停牌解析（须先 `loadSecurityIndexes`）。 */
+  resolveSuspensionSync(symbol: string, tradeDate: string): SuspensionResolution;
   /** 异步 PIT ST 解析（等价于先 `loadSecurityIndexes` 再 `resolveStSync`；供验证脚本复用）。 */
   resolveSt(symbol: string, tradeDate: string): Promise<StStatus>;
   /** 同步 PIT 行业归属解析（须先 `loadSecurityIndexes`）。 */
@@ -223,6 +230,13 @@ export function assembleEventRow(
       ratio !== null && bar.preClose !== null && bar.preClose > 0
         ? exchangeLimitUpPrice(bar.preClose, ratio)
         : null,
+    limitDownPrice:
+      ratio !== null && bar.preClose !== null && bar.preClose > 0
+        ? exchangeLimitDownPrice(bar.preClose, ratio)
+        : null,
+    limitRuleUp: ratio,
+    limitRuleDown: ratio,
+    limitRuleVersion: ratio === null ? null : "cn-limit-rules-v1",
     turnover: liquidity?.turnover ?? null,
     isFirstLimit,
     previousLimitDate,
@@ -296,6 +310,7 @@ export function buildRelativeBarsFull(
       high: bar?.high ?? null,
       low: bar?.low ?? null,
       close: bar?.close ?? null,
+      preClose: bar?.preClose ?? null,
       volume: bar?.volume ?? null,
       amount: bar?.amount ?? null,
     });
@@ -355,15 +370,22 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
     };
 
     // ---------- Phase 1：events ----------
-    const eventCount = await this.buildEvents(
-      config,
-      tradingDays,
-      tradingDayIndex,
-      windowStartIdx,
-      windowEndIdx,
-      checkpoint,
-      reportProgress,
-    );
+    //
+    // 从 windows 阶段续跑时，事件行已经全部落库；重建 buildEvents 会要求 checkpoint
+    // 继续携带 limitUpDays，而 windows checkpoint 只记录窗口游标。这里直接读已落库事件数，
+    // 避免把合法的 windows 续跑误判为旧 checkpoint 不兼容。
+    const eventCount =
+      checkpoint.phase === "windows"
+        ? (await this.io.listEvents(config.datasetVersionId)).length
+        : await this.buildEvents(
+            config,
+            tradingDays,
+            tradingDayIndex,
+            windowStartIdx,
+            windowEndIdx,
+            checkpoint,
+            reportProgress,
+          );
 
     // ---------- Phase 2：prefix + post + path + outcome ----------
     const { prefixCount, postCount, pathCount, outcomeCount, processedRows, failedRows, completedChunks } =
@@ -467,7 +489,7 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
       if (idx === undefined) continue;
       // 精确判定（粗筛只是超集，命中仍需 exchangeLimitUpPrice 口径确认）。
       const st = io.resolveStSync(bar.symbol, bar.tradeDate);
-      if (isLimitUpClose(bar.close, bar.preClose, limitUpRatio(bar.symbol, st))) {
+      if (isLimitUpClose(bar.close, bar.preClose, limitUpRatio(bar.symbol, st, bar.tradeDate))) {
         const set = limitUpDaySets.get(bar.symbol);
         if (set) set.add(idx);
         else limitUpDaySets.set(bar.symbol, new Set([idx]));
@@ -623,7 +645,7 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
           candidates.push({
             dayIdx,
             bar,
-            ratio: limitUpRatio(bar.symbol, st),
+            ratio: limitUpRatio(bar.symbol, st, bar.tradeDate),
             classification: {
               isFirstLimit: anchorIsLimitUp && !anchorPrevIsLimitUp,
               previousLimitDate: prevLimitIdx === null ? null : tradingDays[prevLimitIdx]!,
@@ -803,15 +825,31 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
             relativeBars,
             config.outcomeHorizons,
           );
+          const posts = windows.post.map((row) => ({
+            ...row,
+            ...deriveExecutionFacts({
+              symbol: event.symbol,
+              tradeDate: row.tradeDate,
+              stStatus: this.io.resolveStSync(event.symbol, row.tradeDate),
+              preClose: row.preClose ?? null,
+              bars: {
+                open: row.open,
+                high: row.high,
+                low: row.low,
+                close: row.close,
+              },
+              suspension: this.io.resolveSuspensionSync(event.symbol, row.tradeDate),
+            }),
+          }));
           for (const row of windows.prefix) pendingPrefixes.push(row);
-          for (const row of windows.post) pendingPosts.push(row);
+          for (const row of posts) pendingPosts.push(row);
           for (const row of windows.paths) pendingPaths.push(row);
           for (const row of windows.outcomes) pendingOutcomes.push(row);
           prefixCount += windows.prefix.length;
-          postCount += windows.post.length;
+          postCount += posts.length;
           pathCount += windows.paths.length;
           outcomeCount += windows.outcomes.length;
-          processedRows += windows.prefix.length + windows.post.length + windows.paths.length + windows.outcomes.length;
+          processedRows += windows.prefix.length + posts.length + windows.paths.length + windows.outcomes.length;
           lastEventId = event.eventId;
         }
       }

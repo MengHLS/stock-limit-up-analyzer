@@ -34,9 +34,23 @@ export { limitUpPrice, limitDownPrice }; // eslint-disable-line no-re-export
  * 因此凡「判定是否涨停」「记录涨停价事实列」都必须走本函数，不得直接使用 `limitUpPrice`
  * 的原始乘积作为比较阈值。
  */
-export function exchangeLimitUpPrice(prevClose: number, limitUpRatio: number): number {
+export function exchangeLimitUpPrice(
+  prevClose: number,
+  limitUpRatio: number
+): number {
   return Math.round(prevClose * (1 + limitUpRatio) * 100) / 100;
 }
+
+/** 交易所口径的跌停价：同涨跌停规则，分价四舍五入。 */
+export function exchangeLimitDownPrice(
+  prevClose: number,
+  limitDownRatio: number
+): number {
+  return Math.round(prevClose * (1 - limitDownRatio) * 100) / 100;
+}
+
+/** 创业板涨跌幅由 10% 调整为 20% 的生效日。 */
+export const CHINEXT_20PCT_EFFECTIVE_DATE = "2020-08-24";
 
 /** 板块类别。 */
 export type BoardCategory = "main" | "chinext" | "star" | "bse" | "unknown";
@@ -100,12 +114,20 @@ export function isStStock(stockName: string | null | undefined): boolean {
  * - 北交所：30%
  * - 无法识别代码或名称不足：supported=false（UNKNOWN），返回 null，不得假装支持。
  */
-export function resolveLimitRules(stockCode: string, stockName?: string | null): LimitRulesResolution {
+export function resolveLimitRules(
+  stockCode: string,
+  stockName?: string | null
+): LimitRulesResolution {
   const board = classifyBoard(stockCode);
   switch (board) {
     case "main": {
       const ratio = isStStock(stockName) ? 0.05 : 0.1;
-      return { board, supported: true, limitUpRatio: ratio, limitDownRatio: ratio };
+      return {
+        board,
+        supported: true,
+        limitUpRatio: ratio,
+        limitDownRatio: ratio,
+      };
     }
     case "chinext":
     case "star":
@@ -113,28 +135,91 @@ export function resolveLimitRules(stockCode: string, stockName?: string | null):
     case "bse":
       return { board, supported: true, limitUpRatio: 0.3, limitDownRatio: 0.3 };
     default:
-      return { board, supported: false, limitUpRatio: null, limitDownRatio: null };
+      return {
+        board,
+        supported: false,
+        limitUpRatio: null,
+        limitDownRatio: null,
+      };
   }
 }
 
 /**
- * 判断一个 canonical bar 的 close 是否触及涨停价 / 跌停价。
- * 规则：涨停价 = 前收 × (1+ratio)，跌停价 = 前收 × (1−ratio)；close 达到即视为触及。
- * 若板块/规则不可判定，或缺少 preClose / close，返回 null（UNKNOWN），不得假装支持。
+ * 按交易日的涨跌停规则解析。
+ *
+ * 与 `resolveLimitRules` 的差别：创业板在 `2020-08-24` 之前为 10%，之后为 20%。
+ * 只有主板的当前研究可以忽略这个差异；任何跨 2020-08-24 的 Dataset 构建都必须使用本函数。
  */
-export function isLimitUpBar(bar: CanonicalMarketBar, stockName?: string | null): boolean | null {
-  const rules = resolveLimitRules(bar.symbol, stockName);
-  if (!rules.supported || rules.limitUpRatio === null) return null;
-  if (bar.close === null || bar.preClose === null || bar.preClose <= 0) return null;
-  return bar.close >= limitUpPrice(bar.preClose, rules.limitUpRatio);
+export function resolveLimitRulesAt(
+  stockCode: string,
+  tradeDate: string,
+  stStatus: "NORMAL" | "ST" | "*ST" | "UNKNOWN"
+): LimitRulesResolution {
+  const board = classifyBoard(stockCode);
+  if (board === "main") {
+    const ratio = stStatus === "ST" || stStatus === "*ST" ? 0.05 : 0.1;
+    return {
+      board,
+      supported: true,
+      limitUpRatio: ratio,
+      limitDownRatio: ratio,
+    };
+  }
+  if (board === "chinext") {
+    const ratio = tradeDate >= CHINEXT_20PCT_EFFECTIVE_DATE ? 0.2 : 0.1;
+    return {
+      board,
+      supported: true,
+      limitUpRatio: ratio,
+      limitDownRatio: ratio,
+    };
+  }
+  if (board === "star") {
+    return { board, supported: true, limitUpRatio: 0.2, limitDownRatio: 0.2 };
+  }
+  if (board === "bse") {
+    return { board, supported: true, limitUpRatio: 0.3, limitDownRatio: 0.3 };
+  }
+  return { board, supported: false, limitUpRatio: null, limitDownRatio: null };
 }
 
-/** 判断 bar 的 close 是否触及跌停价。语义同 isLimitUpBar。 */
-export function isLimitDownBar(bar: CanonicalMarketBar, stockName?: string | null): boolean | null {
+/**
+ * 判断一个 canonical bar 的 close 是否恰为交易所口径涨停价 / 跌停价。
+ *
+ * 收盘封板价必须等于四舍五入到分的涨停价；使用 `close >= rawLimitPrice`
+ * 会把无涨跌幅限制日或失真行情误判为涨停。
+ *
+ * 若板块/规则不可判定，或缺少 preClose / close，返回 null（UNKNOWN），不得假装支持。
+ */
+export function isLimitUpBar(
+  bar: CanonicalMarketBar,
+  stockName?: string | null
+): boolean | null {
+  const rules = resolveLimitRules(bar.symbol, stockName);
+  if (!rules.supported || rules.limitUpRatio === null) return null;
+  if (bar.close === null || bar.preClose === null || bar.preClose <= 0)
+    return null;
+  return (
+    Math.abs(
+      bar.close - exchangeLimitUpPrice(bar.preClose, rules.limitUpRatio)
+    ) <= 1e-9
+  );
+}
+
+/** 判断 bar 的 close 是否恰为交易所口径跌停价。语义同 isLimitUpBar。 */
+export function isLimitDownBar(
+  bar: CanonicalMarketBar,
+  stockName?: string | null
+): boolean | null {
   const rules = resolveLimitRules(bar.symbol, stockName);
   if (!rules.supported || rules.limitDownRatio === null) return null;
-  if (bar.close === null || bar.preClose === null || bar.preClose <= 0) return null;
-  return bar.close <= limitDownPrice(bar.preClose, rules.limitDownRatio);
+  if (bar.close === null || bar.preClose === null || bar.preClose <= 0)
+    return null;
+  return (
+    Math.abs(
+      bar.close - exchangeLimitDownPrice(bar.preClose, rules.limitDownRatio)
+    ) <= 1e-9
+  );
 }
 
 /** 触及判定入参（供回测/模拟盘等按“价格 vs 前收参考价”直接判断）。 */
@@ -155,9 +240,23 @@ export function isPriceAtLimitUp(check: PriceLimitCheck): boolean | null {
   const rules = resolveLimitRules(check.stockCode, check.stockName);
   if (!rules.supported || rules.limitUpRatio === null) return null;
   const { price, referencePrice } = check;
-  if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return null;
-  if (referencePrice === null || referencePrice === undefined || !Number.isFinite(referencePrice) || referencePrice <= 0) return null;
-  return price >= limitUpPrice(referencePrice, rules.limitUpRatio);
+  if (
+    price === null ||
+    price === undefined ||
+    !Number.isFinite(price) ||
+    price <= 0
+  )
+    return null;
+  if (
+    referencePrice === null ||
+    referencePrice === undefined ||
+    !Number.isFinite(referencePrice) ||
+    referencePrice <= 0
+  )
+    return null;
+  return (
+    price >= exchangeLimitUpPrice(referencePrice, rules.limitUpRatio) - 1e-9
+  );
 }
 
 /** 判断给定价格是否触及跌停价（price <= 跌停价）。规则不可判定 → null。 */
@@ -165,7 +264,21 @@ export function isPriceAtLimitDown(check: PriceLimitCheck): boolean | null {
   const rules = resolveLimitRules(check.stockCode, check.stockName);
   if (!rules.supported || rules.limitDownRatio === null) return null;
   const { price, referencePrice } = check;
-  if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return null;
-  if (referencePrice === null || referencePrice === undefined || !Number.isFinite(referencePrice) || referencePrice <= 0) return null;
-  return price <= limitDownPrice(referencePrice, rules.limitDownRatio);
+  if (
+    price === null ||
+    price === undefined ||
+    !Number.isFinite(price) ||
+    price <= 0
+  )
+    return null;
+  if (
+    referencePrice === null ||
+    referencePrice === undefined ||
+    !Number.isFinite(referencePrice) ||
+    referencePrice <= 0
+  )
+    return null;
+  return (
+    price <= exchangeLimitDownPrice(referencePrice, rules.limitDownRatio) + 1e-9
+  );
 }

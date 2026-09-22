@@ -263,15 +263,21 @@ export type LeaderCandidatePreparedBuy = {
   conditions: string[];
 };
 
-/**
- * 准备买入的「计划骨架」：仓位字段（positionScale / plannedBudget / plannedBudgetRatio）
- * 由 `buildLeaderCandidateStrategyPortfolioSnapshot` 在选定清单后按分仓口径统一补算，
- * 故此处先以本类型约束候选来源字段，避免骨架阶段就伪造仓位数值。
- */
-export type LeaderCandidatePreparedBuyPlan = Omit<
-  LeaderCandidatePreparedBuy,
-  "positionScale" | "plannedBudget" | "plannedBudgetRatio"
->;
+/** 最新候选池中已被模型识别，但在下一交易日前已知约束下不能进入计划买入的标的。 */
+export type LeaderCandidateBlockedBuy = {
+  rank: number;
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  boards: number;
+  signalDate: string;
+  score: number;
+  riskScore: number;
+  riskTier: "低风险" | "中风险" | "高风险";
+  strategyScore: number;
+  /** 候选不能买入的原因；按实际拦截顺序记录，可能同时命中多项。 */
+  blockReasons: string[];
+};
 
 /** 「下一交易日准备买入」清单的仓位口径回显：只描述**已知**信息，不含对次日行情的任何假设。 */
 export type LeaderCandidatePositionSizing = {
@@ -287,7 +293,7 @@ export type LeaderCandidatePositionSizing = {
   plannedCount: number;
   /** 高位连板参与上限；原始策略不施加该约束（其逐笔系数恒为 1）。 */
   maxParticipatingBoards: number;
-  /** 本批被降低仓位的笔数（`positionScale < 1`，含被风控置 0 的笔）。 */
+  /** 本批实际计划买入中被降低仓位的笔数（`0 < positionScale < 1`）。 */
   positionScaledCount: number;
   /** 计划预算合计（元）与占可用现金比例（%）。固定比例口径可能超过 100%，如实呈现、不夹取。 */
   totalPlannedBudget: number;
@@ -305,6 +311,7 @@ export type LeaderCandidateStrategyPortfolio = {
   availableSlots: number;
   currentHoldings: LeaderCandidatePortfolioHolding[];
   preparedBuys: LeaderCandidatePreparedBuy[];
+  blockedBuys: LeaderCandidateBlockedBuy[];
   candidateCount: number;
   excludedHighRiskCount: number;
   /** 上述准备买入清单的仓位口径回显（前端据此说明「比例是怎么算出来的」）。 */
@@ -859,9 +866,6 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
 ): LeaderCandidateStrategyPortfolioSnapshot {
   const latestSignalDate = latestCandidates.date;
   const maxParticipatingBoards = options.maxParticipatingBoards ?? DEFAULT_MAX_PARTICIPATING_BOARDS;
-  const candidatePool = latestCandidates.candidates.filter((candidate) => (
-    options.appliedMinScore === null || candidate.score >= options.appliedMinScore
-  ));
   const experimentByKey = new Map(fullCycleExperiments.map((experiment) => [experiment.key, experiment]));
   const appliedPenaltyWeight = latestSignalDate && options.autoTunePenaltyWeight
     ? options.rollingWindows.find((window) => latestSignalDate >= window.validationStartDate && latestSignalDate <= window.validationEndDate)?.autoTunedPenaltyWeight ?? options.penaltyWeight
@@ -871,14 +875,16 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     .filter((row) => row.date === latestSignalDate)
     .map((row) => [row.stockCode, row]));
   const qualityScoringContext = { priceByStockDate: options.priceByStockDate };
-  const scoredCandidatePool = candidatePool.map((candidate) => {
-    const historicalRow = latestRowByStockCode.get(candidate.stockCode);
-    const signalRow = historicalRow ? { ...historicalRow, score: candidate.score } : null;
-    const qualityScore = signalRow
-      ? calculateQualityBlendScoreForRisk(signalRow, candidate.riskScore, qualityScoringContext)
-      : candidate.score;
-    return { candidate, qualityScore };
-  });
+  const scoredCandidatePool = latestCandidates.candidates
+    .filter((candidate) => options.appliedMinScore === null || candidate.score >= options.appliedMinScore)
+    .map((candidate) => {
+      const historicalRow = latestRowByStockCode.get(candidate.stockCode);
+      const signalRow = historicalRow ? { ...historicalRow, score: candidate.score } : null;
+      const qualityScore = signalRow
+        ? calculateQualityBlendScoreForRisk(signalRow, candidate.riskScore, qualityScoringContext)
+        : candidate.score;
+      return { candidate, qualityScore };
+    });
   const sortedQualityScores = scoredCandidatePool.map(({ qualityScore }) => qualityScore).sort((left, right) => left - right);
   const qualityMedianIndex = Math.floor(sortedQualityScores.length / 2);
   const qualityGateThreshold = sortedQualityScores.length === 0
@@ -919,38 +925,99 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     const heldCodes = new Set(holdings.map((holding) => holding.stockCode));
     const maxPositions = simulation?.assumptions.maxPositions ?? 0;
     const availableSlots = Math.max(0, maxPositions - holdings.length);
-    const candidateWithScore = scoredCandidatePool.map(({ candidate, qualityScore }) => ({
-      candidate,
-      strategyScore: key === "riskPenalty"
+    const strategyScoreOf = ({ candidate, qualityScore }: (typeof scoredCandidatePool)[number]) => (
+      key === "riskPenalty"
         ? Math.max(0, snapshotRound(candidate.score - candidate.riskScore * appliedPenaltyWeight))
         : key === "qualityBlend" || key === "qualityGate"
           ? qualityScore
-        : candidate.score,
+        : candidate.score
+    );
+    const withStrategyScore = (items: typeof scoredCandidatePool) => items.map((item) => ({
+      candidate: item.candidate,
+      strategyScore: strategyScoreOf(item),
     }));
-    const excludedHighRiskCount = key === "hardFilter"
-      ? candidateWithScore.filter(({ candidate }) => candidate.riskScore >= options.hardRiskThreshold).length
-      : key === "qualityGate"
-        ? candidateWithScore.filter(({ candidate, strategyScore }) => candidate.riskScore >= options.hardRiskThreshold || strategyScore < (qualityGateThreshold ?? Number.NEGATIVE_INFINITY)).length
-      : 0;
-    const strategyCandidates = candidateWithScore
-      .filter(({ candidate, strategyScore }) => (
-        key === "hardFilter"
-          ? candidate.riskScore < options.hardRiskThreshold
-          : key === "qualityGate"
-            ? candidate.riskScore < options.hardRiskThreshold && strategyScore >= (qualityGateThreshold ?? Number.POSITIVE_INFINITY)
-            : true
-      ))
-      .sort((left, right) => (
+    const compareCandidates = (
+      left: { candidate: LeaderCandidate; strategyScore: number },
+      right: { candidate: LeaderCandidate; strategyScore: number },
+    ) => (
         right.strategyScore - left.strategyScore
         || right.candidate.boards - left.candidate.boards
         || right.candidate.sectorCount - left.candidate.sectorCount
         || (left.candidate.limitUpTime ?? "99:99:99").localeCompare(right.candidate.limitUpTime ?? "99:99:99")
         || left.candidate.stockCode.localeCompare(right.candidate.stockCode)
-      ));
-    const preparedBuys = strategyCandidates
-      .filter(({ candidate }) => !heldCodes.has(candidate.stockCode))
-      .slice(0, availableSlots)
-      .map(({ candidate, strategyScore }, index) => ({
+    );
+    const toBlockedBuy = (
+      { candidate, strategyScore }: { candidate: LeaderCandidate; strategyScore: number },
+      blockReasons: string[],
+    ) => ({
+      rank: candidate.rank,
+      stockCode: candidate.stockCode,
+      stockName: candidate.stockName,
+      sector: candidate.sector,
+      boards: candidate.boards,
+      signalDate: latestSignalDate ?? "",
+      score: candidate.score,
+      riskScore: candidate.riskScore,
+      riskTier: candidate.riskTier,
+      strategyScore,
+      blockReasons,
+    } satisfies LeaderCandidateBlockedBuy);
+    const strategyFilterReasons = (item: { candidate: LeaderCandidate; strategyScore: number }) => {
+      const reasons: string[] = [];
+      if (key === "hardFilter" || key === "qualityGate") {
+        if (item.candidate.riskScore >= options.hardRiskThreshold) {
+          reasons.push(`策略风控剔除：风险分 ${item.candidate.riskScore} ≥ 阈值 ${options.hardRiskThreshold}`);
+        }
+        if (isBoardParticipationRestricted(item.candidate.boards, maxParticipatingBoards)) {
+          reasons.push(`策略风控剔除：${item.candidate.boards} 板超过参与上限 ${maxParticipatingBoards} 板`);
+        }
+      }
+      if (key === "qualityGate" && item.strategyScore < (qualityGateThreshold ?? Number.NEGATIVE_INFINITY)) {
+        reasons.push(`质量门控剔除：质量复合分 ${item.strategyScore} < 当日中位数 ${qualityGateThreshold ?? "-"}`);
+      }
+      return reasons;
+    };
+    const candidateWithScore = withStrategyScore(scoredCandidatePool);
+    const strategyCandidates = candidateWithScore
+      .filter((item) => strategyFilterReasons(item).length === 0)
+      .sort(compareCandidates);
+    const strategyExcludedCandidates = candidateWithScore
+      .filter((item) => strategyFilterReasons(item).length > 0)
+      .sort(compareCandidates)
+      .map((item) => toBlockedBuy(item, strategyFilterReasons(item)));
+    const heldCandidateBlocks = strategyCandidates
+      .filter(({ candidate }) => heldCodes.has(candidate.stockCode))
+      .map((item) => toBlockedBuy(item, ["已有当前持仓，不支持加仓"]));
+    const availableStrategyCandidates = strategyCandidates
+      .filter(({ candidate }) => !heldCodes.has(candidate.stockCode));
+    const slotExcludedCandidates = availableStrategyCandidates
+      .slice(availableSlots)
+      .map((item) => toBlockedBuy(item, [
+        availableSlots === 0
+          ? `没有剩余持仓名额（当前 ${holdings.length} / 上限 ${maxPositions}）`
+          : `按优先级排在剩余 ${availableSlots} 个持仓名额之外`,
+      ]));
+    const selectedCandidates = availableStrategyCandidates.slice(0, availableSlots);
+    // 计划仓位：口径唯一权威 = server/positionBudget（与交易模拟器同一实现，禁在此重写公式）。
+    // 决策时点可用现金 = 该策略期末现金，与模拟器「下一决策日」所见一致。
+    const planCash = simulation?.equityCurve.at(-1)?.cash ?? simulation?.initialCapital ?? 0;
+    const planStrategy = simulation?.assumptions.positionSizingStrategy ?? "equal";
+    const planFixedPercent = simulation?.assumptions.fixedPositionPercent ?? 0;
+    const planInitialCapital = simulation?.assumptions.initialCapital ?? 0;
+    // 高位连板降仓：原始策略作为对照基准不施加（恒 1）；其余策略与模拟器同一规则、同一系数。
+    const planScales = selectedCandidates.map(({ candidate }) => (
+      key === "baseline" ? 1 : boardHeightPositionScale(candidate.boards, maxParticipatingBoards)
+    ));
+    // 权重用「策略生效分」（strategyScore）：与模拟器实际用于加权的 row.score 同源。
+    // 保留 positionScale=0 的候选参与分仓分母，严格复现模拟器的预算口径。
+    const planBudgets = allocatePlannedBudgets({
+      strategy: planStrategy,
+      cash: planCash,
+      initialCapital: planInitialCapital,
+      fixedPositionPercent: planFixedPercent,
+      targets: selectedCandidates.map(({ strategyScore }, index) => ({ score: strategyScore, positionScale: planScales[index]! })),
+    });
+    const selectedPlans = selectedCandidates.map(({ candidate, strategyScore }, index) => ({
         rank: index + 1,
         stockCode: candidate.stockCode,
         stockName: candidate.stockName,
@@ -961,41 +1028,42 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
         riskScore: candidate.riskScore,
         riskTier: candidate.riskTier,
         strategyScore,
+        positionScale: planScales[index]!,
+        plannedBudget: snapshotRound(planBudgets[index] ?? 0),
+        plannedBudgetRatio: planCash > 0 ? snapshotRound(((planBudgets[index] ?? 0) / planCash) * 100) : 0,
         reasons: candidate.reasons,
         conditions: [
           `下一实际交易日开盘涨幅不低于${simulation?.assumptions.minimumExpectedOpenChangePercent ?? -2}%`,
           simulation?.assumptions.blockLimitUpBuys ? "开盘接近涨停时按保守规则不追买" : "需按实际开盘价与整手资金约束核算",
           "以开盘时可用资金、最大持仓与策略排序为准，未承诺成交",
         ],
-      } satisfies LeaderCandidatePreparedBuyPlan));
-    // 计划仓位：口径唯一权威 = server/positionBudget（与交易模拟器同一实现，禁在此重写公式）。
-    // 决策时点可用现金 = 该策略期末现金，与模拟器「下一决策日」所见一致。
-    const planCash = simulation?.equityCurve.at(-1)?.cash ?? simulation?.initialCapital ?? 0;
-    const planStrategy = simulation?.assumptions.positionSizingStrategy ?? "equal";
-    const planFixedPercent = simulation?.assumptions.fixedPositionPercent ?? 0;
-    const planInitialCapital = simulation?.assumptions.initialCapital ?? 0;
-    // 高位连板降仓：原始策略作为对照基准不施加（恒 1）；其余策略与模拟器同一规则、同一系数。
-    const planScales = preparedBuys.map((plan) => (
-      key === "baseline" ? 1 : boardHeightPositionScale(plan.boards, maxParticipatingBoards)
-    ));
-    // 权重用「策略生效分」（strategyScore）：与模拟器实际用于加权的 row.score 同源。
-    const planBudgets = allocatePlannedBudgets({
-      strategy: planStrategy,
-      cash: planCash,
-      initialCapital: planInitialCapital,
-      fixedPositionPercent: planFixedPercent,
-      targets: preparedBuys.map((plan, index) => ({ score: plan.strategyScore, positionScale: planScales[index]! })),
-    });
-    const plannedBuys = preparedBuys.map((plan, index) => {
-      const plannedBudget = snapshotRound(planBudgets[index] ?? 0);
-      return {
-        ...plan,
-        positionScale: planScales[index]!,
-        plannedBudget,
-        plannedBudgetRatio: planCash > 0 ? snapshotRound((plannedBudget / planCash) * 100) : 0,
-      };
-    });
-    const totalPlannedBudget = snapshotRound(plannedBuys.reduce((sum, plan) => sum + plan.plannedBudget, 0));
+      } satisfies LeaderCandidatePreparedBuy));
+    const preparedBuys = selectedPlans.filter((plan) => plan.positionScale > 0 && plan.plannedBudget > 0);
+    const zeroBudgetBlocks = selectedPlans
+      .filter((plan) => plan.positionScale === 0 || plan.plannedBudget <= 0)
+      .map((plan) => ({
+        rank: plan.rank,
+        stockCode: plan.stockCode,
+        stockName: plan.stockName,
+        sector: plan.sector,
+        boards: plan.boards,
+        signalDate: plan.signalDate,
+        score: plan.score,
+        riskScore: plan.riskScore,
+        riskTier: plan.riskTier,
+        strategyScore: plan.strategyScore,
+        blockReasons: plan.positionScale === 0
+          ? [`连板高度 ${plan.boards} 板超过参与上限 ${maxParticipatingBoards} 板，仓位系数为 0`]
+          : [planCash <= 0 ? "可用现金为 0，无法分配计划预算" : "计算后的计划预算为 0，无法形成可执行买入计划"],
+      } satisfies LeaderCandidateBlockedBuy));
+    const blockedBuys = [
+      ...strategyExcludedCandidates,
+      ...heldCandidateBlocks,
+      ...slotExcludedCandidates,
+      ...zeroBudgetBlocks,
+    ];
+    const totalPlannedBudget = snapshotRound(preparedBuys.reduce((sum, plan) => sum + plan.plannedBudget, 0));
+    const positionScaledCount = preparedBuys.filter((plan) => plan.positionScale < 1).length;
 
     return {
       key,
@@ -1007,28 +1075,29 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
       openPositionCount: holdings.length,
       availableSlots,
       currentHoldings: holdings,
-      preparedBuys: plannedBuys,
+      preparedBuys,
+      blockedBuys,
       candidateCount: strategyCandidates.length,
-      excludedHighRiskCount,
+      excludedHighRiskCount: strategyExcludedCandidates.length,
       plannedPositionSizing: {
         strategy: planStrategy,
         fixedPositionPercent: planFixedPercent,
         initialCapital: planInitialCapital,
         cash: snapshotRound(planCash),
-        plannedCount: plannedBuys.length,
+        plannedCount: selectedPlans.length,
         maxParticipatingBoards,
-        positionScaledCount: planScales.filter((scale) => scale < 1).length,
+        positionScaledCount,
         totalPlannedBudget,
         totalPlannedBudgetRatio: planCash > 0 ? snapshotRound((totalPlannedBudget / planCash) * 100) : 0,
       },
       note: key === "riskPenalty"
         ? `最新信号日使用风险扣分权重 ${appliedPenaltyWeight}；若该日不在已完成验证窗口内，则使用手动回退权重。`
         : key === "hardFilter"
-          ? `风险分不低于 ${options.hardRiskThreshold} 的候选不纳入该策略准备清单。`
+          ? `风险分不低于 ${options.hardRiskThreshold} 或连板高度超过 ${maxParticipatingBoards} 板的候选不纳入该策略准备清单。`
           : key === "qualityBlend"
             ? "固定质量复合分：68%原始候选强度、32%信号日安全度，加早封、题材共振与充足成交额奖励。"
             : key === "qualityGate"
-              ? `仅保留质量复合分不低于当日中位数 ${qualityGateThreshold ?? "-"} 且风险分低于 ${options.hardRiskThreshold} 的候选。`
+              ? `仅保留质量复合分不低于当日中位数 ${qualityGateThreshold ?? "-"}、风险分低于 ${options.hardRiskThreshold} 且连板高度不超过 ${maxParticipatingBoards} 板的候选。`
               : "按原始候选评分排序。",
     } satisfies LeaderCandidateStrategyPortfolio;
   });

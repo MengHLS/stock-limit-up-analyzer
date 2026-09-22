@@ -29,7 +29,7 @@ describe("detection: 涨停比例（复用 boardRules 口径，不硬编码 +10%
 });
 
 describe("detection: 涨停判定（交易所口径，四舍五入到分）", () => {
-  it("close ≥ 涨停价 = 涨停；1 分钱之差不算", () => {
+  it("close 等于涨停价 = 收盘涨停；1 分钱之差不算", () => {
     expect(isLimitUpClose(11.0, 10.0, 0.1)).toBe(true); // 10 → 11.00 恰好
     expect(isLimitUpClose(10.99, 10.0, 0.1)).toBe(false); // 差 1 分
     expect(isLimitUpClose(null, 10.0, 0.1)).toBe(false);
@@ -64,8 +64,15 @@ describe("detection: 涨停判定（交易所口径，四舍五入到分）", ()
     expect(isLimitUpClose(1.05, 1.01, 0.05)).toBe(false);
   });
 
-  it("回归：超出涨停价（异常/除权失真数据）仍判为涨停（用 ≥ 而非 =）", () => {
-    expect(isLimitUpClose(13.5, 11.61, 0.1)).toBe(true);
+  it("不足 10% 的分价涨停仍必须收录", () => {
+    expect(isLimitUpClose(0.25, 0.23, 0.1)).toBe(true); // +8.6957%
+    expect(isLimitUpClose(2.56, 2.33, 0.1)).toBe(true); // +9.8712%
+    expect(isLimitUpClose(13.57, 12.34, 0.1)).toBe(true); // +9.9676%
+  });
+
+  it("收盘高于涨停价的异常数据不得判为收盘涨停", () => {
+    expect(isLimitUpClose(13.5, 11.61, 0.1)).toBe(false);
+    expect(isLimitUpClose(160.99, 7.98, 0.1)).toBe(false);
   });
 });
 
@@ -78,23 +85,46 @@ describe("detection: 首板判定（首板 = 今日涨停且昨日未涨停）",
   ]);
 
   it("窗口首日涨停 → 首板（T-1 无数据视作非连板）", () => {
-    const c = classifyLimitDay(INITIAL_SYMBOL_LIMIT_STATE, "2024-01-02", true, idx);
+    const c = classifyLimitDay(
+      INITIAL_SYMBOL_LIMIT_STATE,
+      "2024-01-02",
+      true,
+      idx
+    );
     expect(c.isFirstLimit).toBe(true);
     expect(c.previousLimitDate).toBeNull();
     expect(c.historicalLimitCount).toBe(0);
   });
 
   it("连板：昨日涨停 + 今日涨停 → 非首板", () => {
-    const prev = advanceSymbolLimitState(INITIAL_SYMBOL_LIMIT_STATE, "2024-01-02", true);
-    const c = classifyLimitDay({ ...prev, prevTradingDayLimitUp: true }, "2024-01-03", true, idx);
+    const prev = advanceSymbolLimitState(
+      INITIAL_SYMBOL_LIMIT_STATE,
+      "2024-01-02",
+      true
+    );
+    const c = classifyLimitDay(
+      { ...prev, prevTradingDayLimitUp: true },
+      "2024-01-03",
+      true,
+      idx
+    );
     expect(c.isFirstLimit).toBe(false);
   });
 
   it("隔日再涨停 → 首板，且 daysSincePreviousLimit 正确", () => {
     // 1/2 涨停，1/3 未涨停，1/4 再涨停 → 1/4 是首板，距上次涨停 2 个交易日
-    const s1 = advanceSymbolLimitState(INITIAL_SYMBOL_LIMIT_STATE, "2024-01-02", true);
+    const s1 = advanceSymbolLimitState(
+      INITIAL_SYMBOL_LIMIT_STATE,
+      "2024-01-02",
+      true
+    );
     const s2 = advanceSymbolLimitState(s1, "2024-01-03", false);
-    const c = classifyLimitDay({ ...s2, prevTradingDayLimitUp: false }, "2024-01-04", true, idx);
+    const c = classifyLimitDay(
+      { ...s2, prevTradingDayLimitUp: false },
+      "2024-01-04",
+      true,
+      idx
+    );
     expect(c.isFirstLimit).toBe(true);
     expect(c.previousLimitDate).toBe("2024-01-02");
     expect(c.daysSincePreviousLimit).toBe(2);
@@ -102,15 +132,22 @@ describe("detection: 首板判定（首板 = 今日涨停且昨日未涨停）",
   });
 
   it("eventId 确定性且唯一于 (symbol, tradeDate)", () => {
-    expect(computeEventId("600001.SH", "2024-01-02")).toBe("600001.SH@2024-01-02");
-    expect(computeEventId("600001.SH", "2024-01-02")).toBe(computeEventId("600001.SH", "2024-01-02"));
+    expect(computeEventId("600001.SH", "2024-01-02")).toBe(
+      "600001.SH@2024-01-02"
+    );
+    expect(computeEventId("600001.SH", "2024-01-02")).toBe(
+      computeEventId("600001.SH", "2024-01-02")
+    );
   });
 });
 
 describe("detection: Future Leakage（§38.9）", () => {
   it("首板判定只依赖 close/preClose/截至 T 日的滚动状态，不读取未来", () => {
     // 构造：T 日涨停、T+1 也涨停。T 日的首板判定结果与 T+1 完全无关。
-    const idx = new Map<string, number>([["D0", 0], ["D1", 1]]);
+    const idx = new Map<string, number>([
+      ["D0", 0],
+      ["D1", 1],
+    ]);
     const t0 = classifyLimitDay(INITIAL_SYMBOL_LIMIT_STATE, "D0", true, idx);
     // 即便 T+1 也涨停，T 日仍是首板（判定在 T 日完成，不向后看）
     expect(t0.isFirstLimit).toBe(true);

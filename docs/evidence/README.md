@@ -1530,3 +1530,53 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
 ```
 
 ⚠️ `_probe_db_idle_window.mts`（上一轮的窗口探针）**已被 ① 取代**：它在上一轮被中断，磁盘上只留 `t=0` 建连 + `空闲 60.0s ⇒ 复用成功` 两行**部分证据**（只能证明「窗口 > 60s」）。
+
+## 2026-09-21 · 异步独立实验真实链路
+
+- 探针：`_probe_async_experiment_real.mts`。
+- 运行：`first-board-pullback/entry-day`，`Dataset 390002`，`maxEvents=10`。
+- 目的：验证 `startRun -> 单进程后台队列 -> Run 元数据/代码指纹 -> 结果与 Manifest 落对象存储 -> 终态可读`。
+- 结果：`RUN-20260921-A0E433D0`，`COMPLETED`，`durationMs=34027`，`resultAvailable=true`，`manifestAvailable=true`，`artifactCount=2`，`experimentCodeDigest=exp-code-sha256:0e28dc3d32d2857756de9c031ee1f52f28ce56b186f25a2fa6de6d1eef58e0d1`。
+
+## 2026-09-22 · 首板后回踩确认性 Observation / Holdout 与污染审计
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_run_protocol_confirmation.mts` → `_run_protocol_confirmation.out.{json,txt}` | 生产 Run Service 真实执行 `first-board-pullback/decision-forward-study`；协议 `first-board-pullback-forward-confirmation@1.0.0`，Observation `2024-09-01..2025-12-31`、Holdout `2026-01-01..2026-09-01` | Observation `RUN-20260921-8AF91CE9`：`COMPLETED / OBSERVATION_READY`，15,297 样本，H1 预检 **0/10**；Holdout `RUN-20260921-54D654BB`：`COMPLETED / PASS`（机械 Gate），8,415 样本，H1 **8/10** |
+| `_probe_holdout_contamination.mts` → `.out.json` | 只读审计 Holdout 是否与历史 Run 重叠 | `contaminated=true`；污染来源 `RUN-20260921-A87E7438`（`EXPLORATORY`，`evaluationWindow=null` ⇒ Dataset 全窗）⇒ 2026 不是干净 OOS，禁止创建正式策略 |
+
+⚠️ 本次实验的机械化 `PASS` **不能升级为策略证据**：方向在两个时段完全反转（Observation 0/10，Holdout 8/10），且 2026 已被早期探索运行读过。新门禁会在 Holdout 启动前拒绝此类窗口，并在 Strategy Bridge 再次拒绝已污染证据。
+
+## 2026-09-22 · 主板执行事实层与确认性 Dataset v3
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `drizzle/0050_limit_execution_facts.sql` | event / prefix / post 新增前收、涨跌停价、停牌、可交易性字段 | 真库 `20 executed / pass=true`；幂等 `20 skipped / pass=true` |
+| `docs/dataset001/v3-confirmatory-report.json` | 真实构建 `first_limit_pullback@v3-confirmatory`，`2019-01-01..2024-08-31`，`main + excludeSt`，T-20..T+20 | `READY`；`49154 events / 3189359 rows`；job `COMPLETED`；耗时 `606.9s` |
+| `_probe_v3_execution_facts.mts` → `.out.json` | 真库验收新增执行事实层 | Observation `26383` events；Holdout `22771` events；post `983080`；前收非空 `979495`；停牌 `2717`；一字涨停 `6807`；一字跌停 `2259`；可买 `967332`；可卖 `959733` |
+
+本批只覆盖沪深主板；日期感知规则已覆盖创业板 2020-08-24 前后 10% / 20% 的制度切换，但 v3 数据本身没有创业板事件。
+
+## 2026-09-22 · 首板后回撤但不破开盘价交易研究
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_run_hold_open_price_pullback.mts` → `.out.json` | 真实 Run：`first-board-pullback/hold-open-price-pullback` × `Dataset 540002`；T+1..T+5 等待首次相对首板收盘 100bps 回撤；不破首板开盘价；次日开盘入场；T+10/15/20 退出 | `RUN-20260921-35357C36`，`COMPLETED / SUCCEEDED`，234,032ms；候选 **49,154**、eligible **48,897**、触发 **34,637**、入场前破位 **5,221**、未触发 **9,039**、触发后不可买 **143**、交易样本 **101,751** |
+
+真实结果：交易模式 T+10 / T+15 / T+20 中位净收益分别为 **-1.80% / -2.83% / -3.57%**；全部样本 T+1 开盘入场基准分别为 **-3.23% / -4.15% / -4.92%**。模式相对基准更好，但绝对收益仍为负，且尚未做日期聚类 Bootstrap、Holdout 或破位后实际退出撮合。
+
+### 一字板首板排除复跑（experiment `1.1.0`）
+
+- 新 Run：`RUN-20260922-2090E5A6`，参数 `excludeOneWordLimitUp=true`。
+- 识别一字涨停首板 **1,621** 个并全部剔除；eligible 由 **48,897 → 47,276**。
+- 入场前破位由 **5,221 → 4,214**，未触发由 **9,039 → 8,425**；两者合计正好减少 **1,621**。
+- 触发数 **34,637**、触发后不可买 **143**、交易样本 **101,751** 均不变。
+- T+10/T+15/T+20 的所有收益指标与上一版逐位相同 ⇒ 一字板事件原先就没有进入可交易触发集，本次排除对该交易模式结果没有增量影响。
+
+## 2026-09-22 · 首板前上下文 / 首板后振幅 / 换手率 + 日期聚类 Bootstrap
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_run_pre_event_context_study.mts` → `.out.json` | 首板前 `daysSincePreviousLimit` + T-5/T-10/T-20 前期涨幅 → T+1 开盘到 T+5/T+10/T+20 收益 | `RUN-20260922-71838486`；eligible **47,120**，间隔已知 **44,850**、未知 **2,270**；间隔越短越差、首板前越跌后续相对越好 |
+| `_run_post_event_amplitude_study.mts` → `.out.json` | T+1..T+5 是否触及涨跌停 + 平均振幅 → T+6 开盘到 T+10/T+15/T+20 收益 | `RUN-20260922-3F4B3C39`；无涨跌停 **25,409**、有涨跌停 **23,488**；无涨跌停及各视界均更好，振幅 ≥8% 明显更差 |
+| `_run_turnover_study.mts` → `.out.json` | 首板日换手率 + 流通市值 → 未来收益；1000 次 Moving Block Bootstrap，block=20 交易日 | `RUN-20260922-4A0DAF7B`；换手率非空 **49,150**、流通市值非空 **0**；≥10% 换手率的聚类 Bootstrap 95% CI 在 T+5/T+10/T+20 均显著为负区间，流通市值返回 `INSUFFICIENT_DATA` |
