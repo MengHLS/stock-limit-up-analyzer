@@ -26,16 +26,22 @@
  */
 
 import DecisionForwardStudyPage from "@experiments/first-board-pullback/decision-forward-study/page";
+import BodyFilteredExitCurveStudyPage from "@experiments/first-board-pullback/body-filtered-exit-curve-study/page";
+import DynamicEntryPathDistributionStudyPage from "@experiments/first-board-pullback/dynamic-entry-path-distribution-study/page";
+import DynamicStateFactorExpansionStudyPage from "@experiments/first-board-pullback/dynamic-state-factor-expansion-study/page";
 import ConditionalPullbackStateExitStudyPage from "@experiments/first-board-pullback/conditional-pullback-state-exit-study/page";
 import EntryDayExperimentPage from "@experiments/first-board-pullback/entry-day/page";
 import FirstBoardBodyStudyPage from "@experiments/first-board-pullback/first-board-body-study/page";
+import HoldStreakAmplitudeT10StudyPage from "@experiments/first-board-pullback/hold-streak-amplitude-t10-study/page";
 import FundamentalStudyExperimentPage from "@experiments/first-board-pullback/fundamental-study/page";
 import HoldOpenPricePullbackPage from "@experiments/first-board-pullback/hold-open-price-pullback/page";
 import LimitUpCloseHoldStudyPage from "@experiments/first-board-pullback/limit-up-close-hold-study/page";
+import LimitUpPriceHoldStreakStudyPage from "@experiments/first-board-pullback/limit-up-price-hold-streak-study/page";
 import OversoldGapReversalValidationPage from "@experiments/first-board-pullback/oversold-gap-reversal-validation/page";
 import PreEventContextStudyPage from "@experiments/first-board-pullback/pre-event-context-study/page";
 import PostEventAmplitudeStudyPage from "@experiments/first-board-pullback/post-event-amplitude-study/page";
 import TurnoverStudyPage from "@experiments/first-board-pullback/turnover-study/page";
+import ThresholdRacePolicyStudyPage from "@experiments/first-board-pullback/threshold-race-policy-study/page";
 import VolumeRelationshipDynamicEntryStudyPage from "@experiments/first-board-pullback/volume-relationship-dynamic-entry-study/page";
 import VolumeRecoveryFilteredValidationPage from "@experiments/first-board-pullback/volume-recovery-filtered-validation/page";
 import StabilityValidationExperimentPage from "@experiments/first-board-pullback/stability-validation/page";
@@ -45,20 +51,32 @@ import type { ExperimentPageComponent } from "./contract";
 export const EXPERIMENT_PAGES: Readonly<
   Record<string, ExperimentPageComponent>
 > = {
+  "first-board-pullback/body-filtered-exit-curve-study":
+    BodyFilteredExitCurveStudyPage,
   "first-board-pullback/decision-forward-study": DecisionForwardStudyPage,
+  "first-board-pullback/dynamic-entry-path-distribution-study":
+    DynamicEntryPathDistributionStudyPage,
+  "first-board-pullback/dynamic-state-factor-expansion-study":
+    DynamicStateFactorExpansionStudyPage,
   "first-board-pullback/conditional-pullback-state-exit-study":
     ConditionalPullbackStateExitStudyPage,
   "first-board-pullback/entry-day": EntryDayExperimentPage,
   "first-board-pullback/first-board-body-study": FirstBoardBodyStudyPage,
+  "first-board-pullback/hold-streak-amplitude-t10-study":
+    HoldStreakAmplitudeT10StudyPage,
   "first-board-pullback/fundamental-study": FundamentalStudyExperimentPage,
   "first-board-pullback/hold-open-price-pullback": HoldOpenPricePullbackPage,
   "first-board-pullback/limit-up-close-hold-study": LimitUpCloseHoldStudyPage,
+  "first-board-pullback/limit-up-price-hold-streak-study":
+    LimitUpPriceHoldStreakStudyPage,
   "first-board-pullback/oversold-gap-reversal-validation":
     OversoldGapReversalValidationPage,
   "first-board-pullback/pre-event-context-study": PreEventContextStudyPage,
   "first-board-pullback/post-event-amplitude-study":
     PostEventAmplitudeStudyPage,
   "first-board-pullback/turnover-study": TurnoverStudyPage,
+  "first-board-pullback/threshold-race-policy-study":
+    ThresholdRacePolicyStudyPage,
   "first-board-pullback/volume-relationship-dynamic-entry-study":
     VolumeRelationshipDynamicEntryStudyPage,
   "first-board-pullback/volume-recovery-filtered-validation":

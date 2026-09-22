@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/researchExperiments
 
-- 测试文件 **29** 个 ｜ 用例声明 **333** 个
-- 涉及源码目录：`client/src/researchExperiments/` · `research-experiments/` · `research-experiments/first-board-pullback/conditional-pullback-state-exit-study/` · `research-experiments/first-board-pullback/decision-forward-study/` · `research-experiments/first-board-pullback/first-board-body-study/` · `research-experiments/first-board-pullback/fundamental-study/` · `research-experiments/first-board-pullback/hold-open-price-pullback/` · `research-experiments/first-board-pullback/limit-up-close-hold-study/` · `research-experiments/first-board-pullback/oversold-gap-reversal-validation/` · `research-experiments/first-board-pullback/post-event-amplitude-study/` · `research-experiments/first-board-pullback/pre-event-context-study/` · `research-experiments/first-board-pullback/stability-validation/` · `research-experiments/first-board-pullback/turnover-study/` · `research-experiments/first-board-pullback/volume-recovery-filtered-validation/` · `research-experiments/first-board-pullback/volume-relationship-dynamic-entry-study/` · `server/` · `server/artifactStorage/` · `server/datasetRegistry/` · `server/research/` · `server/research/robustness/` · `server/research/strategyCandidate/` · `server/research/strategySchema/` · `server/researchExperiments/` · `server/researchExperiments/persistence/` · `server/researchRuntime/` · `server/strategyCore/` · `server/strategyCore/production/` · `shared/`
+- 测试文件 **34** 个 ｜ 用例声明 **338** 个
+- 涉及源码目录：`client/src/researchExperiments/` · `research-experiments/` · `research-experiments/first-board-pullback/conditional-pullback-state-exit-study/` · `research-experiments/first-board-pullback/decision-forward-study/` · `research-experiments/first-board-pullback/dynamic-entry-path-distribution-study/` · `research-experiments/first-board-pullback/dynamic-state-factor-expansion-study/` · `research-experiments/first-board-pullback/first-board-body-study/` · `research-experiments/first-board-pullback/fundamental-study/` · `research-experiments/first-board-pullback/hold-open-price-pullback/` · `research-experiments/first-board-pullback/hold-streak-amplitude-t10-study/` · `research-experiments/first-board-pullback/limit-up-close-hold-study/` · `research-experiments/first-board-pullback/limit-up-price-hold-streak-study/` · `research-experiments/first-board-pullback/oversold-gap-reversal-validation/` · `research-experiments/first-board-pullback/post-event-amplitude-study/` · `research-experiments/first-board-pullback/pre-event-context-study/` · `research-experiments/first-board-pullback/stability-validation/` · `research-experiments/first-board-pullback/threshold-race-policy-study/` · `research-experiments/first-board-pullback/turnover-study/` · `research-experiments/first-board-pullback/volume-recovery-filtered-validation/` · `research-experiments/first-board-pullback/volume-relationship-dynamic-entry-study/` · `server/` · `server/artifactStorage/` · `server/datasetRegistry/` · `server/research/` · `server/research/robustness/` · `server/research/strategyCandidate/` · `server/research/strategySchema/` · `server/researchExperiments/` · `server/researchExperiments/persistence/` · `server/researchRuntime/` · `server/strategyCore/` · `server/strategyCore/production/` · `shared/`
 
 ## 怎么跑
 
@@ -119,6 +119,22 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 收益严格从决策日收盘起算，并扣除成本
   - 决策路径齐备但远期窗口缺数据时，sampleCount 保留而 availableCount 下降
   - 跨年度输出按事件年份分组
+
+### `tests/server/researchExperiments/dynamicEntryPathDistributionStudy.test.ts`
+- 146 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`research-experiments/first-board-pullback/dynamic-entry-path-distribution-study/experiment.ts` · `research-experiments/first-board-pullback/dynamic-entry-path-distribution-study/result.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/dynamicEntryPathDistributionStudy.test.ts`
+- 用例树：
+- **dynamic-entry-path-distribution-study**
+  - 输出每日路径、MFE/MAE 和阈值到达时间
+
+### `tests/server/researchExperiments/dynamicStateFactorExpansionStudy.test.ts`
+- 148 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`research-experiments/first-board-pullback/dynamic-state-factor-expansion-study/experiment.ts` · `research-experiments/first-board-pullback/dynamic-state-factor-expansion-study/result.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/dynamicStateFactorExpansionStudy.test.ts`
+- 用例树：
+- **dynamic-state-factor-expansion-study**
+  - 生成同日横截面分位、历史次数与 T+1 执行因子
 
 ### `tests/server/researchExperiments/exp001FundamentalStudy.test.ts`
 - 1691 行 ｜ 用例声明 76 ｜ describe 12 ｜ 📄 源码文本断言
@@ -341,6 +357,14 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 缺少等待窗口行情时归入样本账外，不伪造触发或收益
   - 排除一字涨停首板时，事件仍保留候选账但不进入 eligible
 
+### `tests/server/researchExperiments/holdStreakAmplitudeT10Study.test.ts`
+- 145 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`research-experiments/first-board-pullback/hold-streak-amplitude-t10-study/experiment.ts` · `research-experiments/first-board-pullback/hold-streak-amplitude-t10-study/result.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/holdStreakAmplitudeT10Study.test.ts`
+- 用例树：
+- **hold-streak-amplitude-t10-study**
+  - 交叉守线 streak 与平均振幅
+
 ### `tests/server/researchExperiments/limitUpCloseHoldStudy.test.ts`
 - 184 行 ｜ 用例声明 1 ｜ describe 1
 - 被测源码：`research-experiments/first-board-pullback/limit-up-close-hold-study/experiment.ts` · `research-experiments/first-board-pullback/limit-up-close-hold-study/result.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
@@ -348,6 +372,14 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - 用例树：
 - **limit-up-close-hold-study**
   - 按 T+1..T+5 最低收盘相对 T 日涨停价分组并排除一字板
+
+### `tests/server/researchExperiments/limitUpPriceHoldStreakStudy.test.ts`
+- 139 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`research-experiments/first-board-pullback/limit-up-price-hold-streak-study/experiment.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/limitUpPriceHoldStreakStudy.test.ts`
+- 用例树：
+- **limit-up-price-hold-streak-study**
+  - 分别计算收盘守线和盘中守线 streak
 
 ### `tests/server/researchExperiments/manifest.test.ts`
 - 181 行 ｜ 用例声明 9 ｜ describe 3
@@ -589,6 +621,14 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - **§16 溯源读路径能看到研究证据**
   - 4-a) 读到 5 条证据（EXP 编号 / 版本 / Run / Dataset 版本 / 引用）+ 证据指纹
   - 4-b) 非证据型溯源（历史行）⇒ `[]` + `null`（读路径不因形态旧而失败）
+
+### `tests/server/researchExperiments/thresholdRacePolicyStudy.test.ts`
+- 138 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`research-experiments/first-board-pullback/threshold-race-policy-study/experiment.ts` · `research-experiments/first-board-pullback/threshold-race-policy-study/result.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/thresholdRacePolicyStudy.test.ts`
+- 用例树：
+- **threshold-race-policy-study**
+  - 比较正负阈值先到时的止盈止损规则
 
 ### `tests/server/researchExperiments/turnoverStudy.test.ts`
 - 141 行 ｜ 用例声明 1 ｜ describe 1
