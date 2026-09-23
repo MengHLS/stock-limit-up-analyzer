@@ -6,23 +6,24 @@
  * 接口定义在 types.ts（领域契约），本文件提供 A 股默认实现与解析辅助。
  */
 
+import { isStStock, resolveLimitRulesAt } from "../data/boardRules";
 import type { ExecutionRuleContext, ExecutionRuleSet, MarketRuleSet, PriceLimit, Security } from "./types";
 
 /** 默认 A 股市场规则：T+1，一手 100 股，主板 ±10% / 创业板·科创板 ±20% / 北交所 ±30%。 */
 export const DEFAULT_MARKET_RULES: MarketRuleSet = {
   tPlus1: true,
   lotSize: 100,
-  resolvePriceLimit(security: Security): PriceLimit | null {
-    switch (security.board) {
-      case "gem":
-      case "star":
-        return { limitUpRatio: 0.2, limitDownRatio: 0.2 };
-      case "bse":
-        return { limitUpRatio: 0.3, limitDownRatio: 0.3 };
-      case "main":
-      default:
-        return { limitUpRatio: 0.1, limitDownRatio: 0.1 };
-    }
+  resolvePriceLimit(security: Security, tradeDate = "9999-12-31"): PriceLimit | null {
+    const stStatus =
+      security.stStatus ??
+      (isStStock(security.name) ? "ST" : "NORMAL");
+    const rules = resolveLimitRulesAt(security.securityId, tradeDate, stStatus);
+    return rules.supported
+      ? {
+          limitUpRatio: rules.limitUpRatio!,
+          limitDownRatio: rules.limitDownRatio!,
+        }
+      : null;
   },
 };
 
@@ -37,8 +38,12 @@ export function resolveExecutionRuleContext(
   security: Security,
   marketRules: MarketRuleSet,
   executionRules: ExecutionRuleSet,
+  tradeDate?: string,
 ): ExecutionRuleContext {
-  const limit = marketRules.resolvePriceLimit(security) ?? { limitUpRatio: 0, limitDownRatio: 0 };
+  const limit = marketRules.resolvePriceLimit(security, tradeDate) ?? {
+    limitUpRatio: 0,
+    limitDownRatio: 0,
+  };
   return {
     limitUpRatio: limit.limitUpRatio,
     limitDownRatio: limit.limitDownRatio,

@@ -514,7 +514,8 @@ export function runTradeSimulation(
       const ruleContext = resolveExecutionRuleContext(
         securityOf(entry.securityId),
         marketRules,
-        executionRules
+        executionRules,
+        entry.tradeDate
       );
       const quote = executionModel.quote(
         {
@@ -693,6 +694,7 @@ export function runTradeSimulation(
           securityOf(detail.securityId),
           marketRules,
           executionRules,
+          date,
         );
         const syntheticBar: CanonicalMarketBar = {
           ...bar,

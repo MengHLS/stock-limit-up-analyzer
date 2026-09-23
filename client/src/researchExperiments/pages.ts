@@ -47,6 +47,7 @@ import ThresholdRacePolicyStudyPage from "@experiments/first-board-pullback/thre
 import VolumeRelationshipDynamicEntryStudyPage from "@experiments/first-board-pullback/volume-relationship-dynamic-entry-study/page";
 import VolumeRecoveryFilteredValidationPage from "@experiments/first-board-pullback/volume-recovery-filtered-validation/page";
 import StabilityValidationExperimentPage from "@experiments/first-board-pullback/stability-validation/page";
+import LeaderCandidateBaselinePage from "@experiments/combo-backtest/leader-candidate-baseline/page";
 import type { ExperimentPageComponent } from "./contract";
 
 /** pageKey → 实验页面组件。 */
@@ -89,6 +90,7 @@ export const EXPERIMENT_PAGES: Readonly<
     VolumeRecoveryFilteredValidationPage,
   "first-board-pullback/stability-validation":
     StabilityValidationExperimentPage,
+  "combo-backtest/leader-candidate-baseline": LeaderCandidateBaselinePage,
 };
 
 /** 取页面组件；未注册返回 null（由调用方降级并提示）。 */

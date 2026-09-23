@@ -6,7 +6,12 @@
 
 import { describe, expect, it } from "vitest";
 import { FirstLimitPullbackDatasetBuilder } from "../../../server/datasetRegistry/builder";
-import type { DatasetBuildIO, FirstLimitPullbackBuildConfig, LiquidityEnrichment } from "../../../server/datasetRegistry/builder";
+import type {
+  DatasetBuildIO,
+  FirstLimitPullbackBuildConfig,
+  LimitUpSourceFacts,
+  LiquidityEnrichment,
+} from "../../../server/datasetRegistry/builder";
 import type { DailyBar, StStatus } from "../../../server/datasetRegistry/detection";
 import { isLimitUpCandidateBar } from "../../../server/datasetRegistry/detection";
 import type {
@@ -71,6 +76,9 @@ class MemIO implements DatasetBuildIO {
       .sort((a, b) => a.tradeDate.localeCompare(b.tradeDate) || a.symbol.localeCompare(b.symbol));
   }
   async fetchLiquidityForSymbolsInRange(): Promise<Map<string, LiquidityEnrichment>> {
+    return new Map();
+  }
+  async fetchLimitUpSourceFacts(): Promise<Map<string, LimitUpSourceFacts>> {
     return new Map();
   }
   async listEvents(datasetVersionId: number): Promise<FirstLimitPullbackEvent[]> {

@@ -104,6 +104,8 @@ export interface Security {
   securityId: string;
   /** 股票名称（可选）。 */
   name?: string;
+  /** PIT ST 状态；缺失时按名称兜底判定。 */
+  stStatus?: "NORMAL" | "ST" | "*ST" | "UNKNOWN";
   /** 板块（用于涨跌停幅度），可空。 */
   board?: "main" | "gem" | "star" | "bse";
 }
@@ -145,7 +147,7 @@ export interface MarketRuleSet {
   /** 一手股数（最小交易单位）。 */
   lotSize: number;
   /** 按标的板块解析涨跌停幅度；返回 null 表示不设涨跌停。 */
-  resolvePriceLimit(security: Security): PriceLimit | null;
+  resolvePriceLimit(security: Security, tradeDate?: string): PriceLimit | null;
 }
 
 /** 执行规则（注入式）：涨跌停拦截开关。 */

@@ -12,30 +12,27 @@
  *   - 保守缺省：价格缺失 / 板块不可判 → 不算涨停（false），不伪造命中。
  */
 
-import { classifyBoard, exchangeLimitUpPrice } from "../data/boardRules";
+import { exchangeLimitUpPrice, resolveLimitRulesAt } from "../data/boardRules";
 import type { ResearchDatasetRow, TDayCondition } from "./types";
 
 /** 行 → 涨停比例（按板块 + PIT ST 维度）；板块 unknown 或 ST 不可判 → null。 */
 export function limitUpRatioForRow(
-  row: Pick<ResearchDatasetRow, "code" | "st">
+  row: Pick<ResearchDatasetRow, "code" | "st" | "tradeDate">
 ): number | null {
-  const board = classifyBoard(row.code ?? "");
-  switch (board) {
-    case "main":
-      return row.st === "ST" || row.st === "*ST" ? 0.05 : 0.1;
-    case "chinext":
-    case "star":
-      return 0.2;
-    case "bse":
-      return 0.3;
-    default:
-      return null;
-  }
+  const resolved = resolveLimitRulesAt(
+    row.code ?? "",
+    row.tradeDate,
+    row.st
+  );
+  return resolved.supported ? resolved.limitUpRatio : null;
 }
 
 /** 行是否 T 日收盘涨停（close == 交易所口径涨停价）；价格缺失 / 板块不可判 → false（保守）。 */
 export function isRowLimitUp(
-  row: Pick<ResearchDatasetRow, "code" | "st" | "close" | "preClose">
+  row: Pick<
+    ResearchDatasetRow,
+    "code" | "st" | "tradeDate" | "close" | "preClose"
+  >
 ): boolean {
   if (row.close === null || row.preClose === null || row.preClose <= 0)
     return false;

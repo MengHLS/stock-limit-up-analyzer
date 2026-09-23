@@ -17,7 +17,10 @@
  *     `d < N` 时 T+d+1..T+N 的数据仍然加载（供研究侧观察日变量用），但**不参与**入池判定。
  */
 
-import { exchangeLimitUpPrice, resolveLimitRules } from "../data/boardRules";
+import {
+  exchangeLimitUpPrice,
+  resolveLimitRulesAt,
+} from "../data/boardRules";
 import type { CanonicalMarketBar } from "../data/types";
 import type { PullbackScreenCondition, PullbackTargetType } from "./types";
 
@@ -241,14 +244,21 @@ export function buildWindowBars(
 export function buildFirstBoardEvent(
   row: Pick<
     import("./types").ResearchDatasetRow,
-    "code" | "tradeDate" | "open" | "high" | "low" | "close" | "preClose"
+    | "code"
+    | "tradeDate"
+    | "st"
+    | "open"
+    | "high"
+    | "low"
+    | "close"
+    | "preClose"
   >,
   priceByDate: ReadonlyMap<string, ReadonlyMap<string, CanonicalMarketBar>>,
   calendarDates: readonly string[]
 ): FirstBoardEvent | null {
   const code = row.code;
   if (!code) return null;
-  const rules = resolveLimitRules(code);
+  const rules = resolveLimitRulesAt(code, row.tradeDate, row.st);
   const limitPrice =
     rules.supported &&
     rules.limitUpRatio !== null &&
@@ -294,7 +304,14 @@ export interface PullbackScreenVerdict {
 export function screenFirstBoardRow(
   row: Pick<
     import("./types").ResearchDatasetRow,
-    "code" | "tradeDate" | "open" | "high" | "low" | "close" | "preClose"
+    | "code"
+    | "tradeDate"
+    | "st"
+    | "open"
+    | "high"
+    | "low"
+    | "close"
+    | "preClose"
   >,
   priceByDate: ReadonlyMap<string, ReadonlyMap<string, CanonicalMarketBar>>,
   calendarDates: readonly string[],

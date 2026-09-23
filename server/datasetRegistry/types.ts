@@ -106,6 +106,16 @@ export interface FirstLimitPullbackEvent {
   limitRuleVersion?: string | null;
   /** t 日换手率（来自流动性富集 liquidity_daily.turnoverRate，非日线列）。 */
   turnover: number | null;
+  /** 封板时间（来自 limit_up_records；未采集时为 null）。 */
+  limitUpTime: string | null;
+  /** 原始题材分类（来自 limit_up_records；未采集时为 null）。 */
+  sector: string | null;
+  /** 原始涨停关键词（来自 limit_up_records；未采集时为 null）。 */
+  keywords: string | null;
+  /** 原始成交额（亿元，来自 limit_up_records；未采集时为 null）。 */
+  sourceTurnoverAmount: number | null;
+  /** 原始流通市值（亿元，来自 limit_up_records；未采集时为 null）。 */
+  sourceCirculationValue: number | null;
   isFirstLimit: boolean | null;
   previousLimitDate: string | null;
   daysSincePreviousLimit: number | null;

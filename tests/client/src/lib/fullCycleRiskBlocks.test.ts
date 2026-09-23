@@ -2,12 +2,13 @@
  * `client/src/lib/fullCycleRiskBlocks.ts` 行为锁。
  *
  * 本模块是「回测总览 → 全周期五策略收益对比」折线图下方收益/回撤区块的唯一派生入口，
- * 因此这里锁三类**静默失效**：
+ * 因此这里锁四类**静默失效**：
  *   ① **不新造回撤口径** —— 最大回撤 / 回撤持续时间 / 收复回撤所用时间必须原样搬运服务端值，
  *      一旦有人在这里"顺手重算"，就会与「策略对比」六层评价出现两套数。
- *   ② **收益两项的恒等变形** —— 以初始资金为基准，最大收益取曲线最高点、当前收益取期末权益；
+ *   ② **交易质量原样回显** —— 已平仓胜率 / 盈亏比必须搬运服务端值，不走前端二次统计。
+ *   ③ **收益两项的恒等变形** —— 以初始资金为基准，最大收益取曲线最高点、当前收益取期末权益；
  *      并列最高点必须取**最早**（否则同一份数据两次渲染可能给出不同日期）。
- *   ③ **降级纪律** —— 初始资金非正 / 无有效权益点时一律返回空，由展示层回显「样本不足」，
+ *   ④ **降级纪律** —— 初始资金非正 / 无有效权益点时一律返回空，由展示层回显「样本不足」，
  *      不得用 0 或上一笔权益兜底（这正是纸面交易里"静默永不出清"那类事故的同型风险）。
  */
 
@@ -103,6 +104,8 @@ describe("buildFullCycleRiskBlocks", () => {
       maxDrawdownPercent: 12.34,
       maxDrawdownDurationTradingDays: 21,
       longestRecoveryTradingDays: 34,
+      winRate: 57.5,
+      profitFactor: 1.82,
       initialCapital: 100000,
       equityCurve: curve(["2024-01-02", 100000], ["2024-01-03", 95000], ["2024-01-04", 120000]),
     },
@@ -113,19 +116,25 @@ describe("buildFullCycleRiskBlocks", () => {
       maxDrawdownPercent: 9.87,
       maxDrawdownDurationTradingDays: null,
       longestRecoveryTradingDays: null,
+      winRate: null,
+      profitFactor: null,
       initialCapital: 100000,
       equityCurve: curve(["2024-01-02", 100000], ["2024-01-03", 88000]),
     },
   ];
 
-  it("6) 回撤三项原样搬运服务端值，不在此重算", () => {
+  it("6) 回撤与交易质量指标原样搬运服务端值，不在此重算", () => {
     const blocks = buildFullCycleRiskBlocks(inputs);
 
     expect(blocks[0]!.maxDrawdownPercent).toBe(12.34);
     expect(blocks[0]!.maxDrawdownDurationTradingDays).toBe(21);
     expect(blocks[0]!.longestRecoveryTradingDays).toBe(34);
+    expect(blocks[0]!.winRate).toBe(57.5);
+    expect(blocks[0]!.profitFactor).toBe(1.82);
     expect(blocks[1]!.maxDrawdownDurationTradingDays).toBeNull();
     expect(blocks[1]!.longestRecoveryTradingDays).toBeNull();
+    expect(blocks[1]!.winRate).toBeNull();
+    expect(blocks[1]!.profitFactor).toBeNull();
   });
 
   it("7) 保持传入顺序、回填收益派生值，且不把整条权益曲线带进渲染数据", () => {

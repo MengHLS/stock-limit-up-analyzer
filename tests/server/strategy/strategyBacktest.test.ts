@@ -84,7 +84,7 @@ interface PriceScenario {
 function priceRows(scenario: PriceScenario = {}): RawDailyPriceRow[] {
   const aD1Close = scenario.aD1Close ?? 11.0; // 涨停：limitUpPrice(10,0.1)=11
   const bD1Close = scenario.bD1Close ?? 10.2; // 非涨停
-  const xD2Close = scenario.xD2Close ?? 10.6; // 非涨停（默认）；11.5 为涨停
+  const xD2Close = scenario.xD2Close ?? 10.6; // 非涨停（默认）；11.22 为涨停
   const rows: RawDailyPriceRow[] = [
     // A：D0 平收 10.00；D1 以 11.00 收盘（触及涨停）；D2 高开回落但仍为正。
     row(A, D0, 10.0, 10.0, 10.0, 10.0, 10.0),
@@ -183,9 +183,9 @@ describe("P1-F1/F2 生产组装点集成：Feature 不再孤儿、真实流入 S
   });
 
   it("无未来数据渗漏：X 的 D2（未来）涨停不会改变 D1 的 Strategy Decision", () => {
-    // X 的 D2 收盘分别取「非涨停 10.60」与「涨停 11.50」；两条数据只在 D2（未来）不同。
+    // X 的 D2 收盘分别取「非涨停 10.60」与「涨停 11.22」；两条数据只在 D2（未来）不同。
     const noFutureLimitUp = runProbe({ xD2Close: 10.6 }, { featureMode: "limit-up-confirm" });
-    const withFutureLimitUp = runProbe({ xD2Close: 11.5 }, { featureMode: "limit-up-confirm" });
+    const withFutureLimitUp = runProbe({ xD2Close: 11.22 }, { featureMode: "limit-up-confirm" });
 
     // 两条运行中 X 的 D1 特征一致：X 始终未被 D1 确认（若 D2 渗漏进 D1，会变成已确认）。
     expect(withFutureLimitUp.confirmedSymbols).toEqual(noFutureLimitUp.confirmedSymbols);
@@ -202,7 +202,7 @@ describe("P1-F1/F2 生产组装点集成：Feature 不再孤儿、真实流入 S
   it("渗漏探针有效性：X 的 D2 bar 在 D2 视角确为涨停（证明上述断言能捕获未来渗漏）", () => {
     // 若特征管道把 D2 的 bar 误带入 D1 快照，limitUpHit(D1) 会从 0 变 1、X 被错误确认；
     // 本用例直接证明 D2 bar 确实是「会被误判为涨停」的数据。
-    const barsX = priceRows({ xD2Close: 11.5 }).filter((r) => r.stockCode === X);
+    const barsX = priceRows({ xD2Close: 11.22 }).filter((r) => r.stockCode === X);
     const atD1 = runFeaturePipeline({
       symbol: X,
       stockName: "天启智能",

@@ -258,14 +258,15 @@ function boardOf(
 /** 涨跌停幅度解析（复用 STEP 8 DEFAULT_MARKET_RULES）。 */
 function priceLimitOf(
   declaration: ExecutionConstraintDeclaration,
-  securityId: string
+  securityId: string,
+  tradeDate: string
 ): {
   readonly limitUpRatio: number;
   readonly limitDownRatio: number;
 } {
   const board = boardOf(declaration, securityId);
   return (
-    DEFAULT_MARKET_RULES.resolvePriceLimit({ securityId, board }) ?? {
+    DEFAULT_MARKET_RULES.resolvePriceLimit({ securityId, board }, tradeDate) ?? {
       limitUpRatio: 0,
       limitDownRatio: 0,
     }
@@ -431,7 +432,11 @@ export function checkPaperOrder(
   }
 
   // 5. 涨跌停拦截（复用 STEP 8 limitState 口径）。
-  const limit = priceLimitOf(declaration, order.securityId);
+  const limit = priceLimitOf(
+    declaration,
+    order.securityId,
+    order.executionTime
+  );
   const up = exchangeLimitUpPrice(prevClose, limit.limitUpRatio);
   const down = exchangeLimitDownPrice(prevClose, limit.limitDownRatio);
   const isLimitUp = open >= up;

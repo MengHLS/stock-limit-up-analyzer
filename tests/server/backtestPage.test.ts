@@ -128,8 +128,12 @@ describe("独立组合资金回测页面", () => {
       "buildFullCycleRiskBlocks",
       "maxDrawdownDurationTradingDays",
       "longestRecoveryTradingDays",
+      "winRate: item.realisticSimulation.winRate",
+      "profitFactor: item.realisticSimulation.profitFactor",
       "回撤持续时间",
       "收复回撤所用时间",
+      "已平仓胜率",
+      "盈亏比",
       "最大收益",
       "当前收益",
     ]) {

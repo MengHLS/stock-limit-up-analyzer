@@ -41,6 +41,7 @@ import { thresholdRacePolicyStudyExperiment } from "./first-board-pullback/thres
 import { volumeRelationshipDynamicEntryStudyExperiment } from "./first-board-pullback/volume-relationship-dynamic-entry-study/experiment";
 import { volumeRecoveryFilteredValidationExperiment } from "./first-board-pullback/volume-recovery-filtered-validation/experiment";
 import { stabilityValidationExperiment } from "./first-board-pullback/stability-validation/experiment";
+import { leaderCandidateBaselineExperiment } from "./combo-backtest/leader-candidate-baseline/experiment";
 
 /** 全部已注册实验（顺序不参与任何计算；registry 内部按 id 排序输出）。 */
 const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
@@ -66,6 +67,7 @@ const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   thresholdRacePolicyStudyExperiment,
   volumeRelationshipDynamicEntryStudyExperiment,
   volumeRecoveryFilteredValidationExperiment,
+  leaderCandidateBaselineExperiment,
 ];
 
 /**
@@ -76,5 +78,7 @@ const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
  */
 export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] =
   RAW_EXPERIMENT_DEFINITIONS.map(definition =>
-    withFirstBoardPullbackFoundation(definition)
+    definition.descriptor.id.startsWith("first-board-pullback/")
+      ? withFirstBoardPullbackFoundation(definition)
+      : definition
   );

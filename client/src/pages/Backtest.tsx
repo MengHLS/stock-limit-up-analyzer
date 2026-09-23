@@ -103,17 +103,18 @@ function formatTradingDays(value: number | null) { return value === null ? "样�
 function formatReturnPercent(value: number | null) { return value === null ? "样本不足" : `${value >= 0 ? "+" : ""}${value}%`; }
 function returnTone(value: number | null) { return value === null ? "text-slate-500" : value >= 0 ? "text-rose-600" : "text-emerald-700"; }
 /**
- * 折线图下方的「各策略回撤与收益特征」区块：最大回撤 / 回撤持续时间 / 收复回撤所用时间 / 最大收益 / 当前收益。
+ * 折线图下方的「各策略回撤与收益特征」区块：最大回撤 / 回撤持续时间 / 收复回撤所用时间 / 已平仓胜率 / 盈亏比 / 最大收益 / 当前收益。
  * 前三项的权威来源是服务端 `realisticSimulation.maxDrawdown` 与 `strategyEvaluation.stability`（此处只做搬运与回显）；
  * 其中「回撤持续时间 / 收复回撤所用时间」锚定**最大回撤那一次**区间（峰→谷 / 谷→收复），口径由
  * `server/downsideRisk.ts#calculateDrawdownDurations` 唯一定义，与六层评价同名指标同源。
+ * 「已平仓胜率 / 盈亏比」直接取自服务端 `realisticSimulation`，期末仍持仓不计入。
  * 收益两项由 `client/src/lib/fullCycleRiskBlocks.ts` 从该策略自身权益曲线恒等派生（口径见该模块注释）。
  */
 function FullCycleRiskBlocks({ blocks }: { blocks: FullCycleRiskBlock[] }) {
   if (blocks.length === 0) return null;
   return <div className="mt-6 border-t border-violet-100 pt-4">
     <h3 className="text-sm font-semibold text-slate-800">各策略回撤与收益特征</h3>
-    <p className="mt-1 text-xs leading-5 text-slate-600">最大回撤取自该策略整条权益曲线（以初始资金为起点）；回撤持续时间与收复回撤所用时间锚定最大回撤那一次区间（持续＝峰值日→谷底日，收复＝谷底日回到前高，未收复则计至期末），与「策略对比」六层评价同一口径；最大收益与当前收益均以初始资金为基准，当前收益即期末累计收益。</p>
+    <p className="mt-1 text-xs leading-5 text-slate-600">最大回撤取自该策略整条权益曲线（以初始资金为起点）；回撤持续时间与收复回撤所用时间锚定最大回撤那一次区间（持续＝峰值日→谷底日，收复＝谷底日回到前高，未收复则计至期末），与「策略对比」六层评价同一口径；已平仓胜率与盈亏比只统计已平仓交易，期末仍持仓不计入；最大收益与当前收益均以初始资金为基准，当前收益即期末累计收益。</p>
     <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       {blocks.map((block) => <div key={block.key} data-full-cycle-risk-card={block.key} className="rounded-xl border border-violet-100 bg-violet-50/40 p-3">
         <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: block.color }} /><p className="text-xs font-semibold" style={{ color: block.color }}>{block.label}</p></div>
@@ -121,6 +122,8 @@ function FullCycleRiskBlocks({ blocks }: { blocks: FullCycleRiskBlock[] }) {
           <div className="flex items-baseline justify-between gap-2"><dt className="text-slate-500">最大回撤</dt><dd className="font-bold text-emerald-700">{block.maxDrawdownPercent}%</dd></div>
           <div className="flex items-baseline justify-between gap-2"><dt className="text-slate-500">回撤持续时间</dt><dd className="font-semibold text-slate-800">{formatTradingDays(block.maxDrawdownDurationTradingDays)}</dd></div>
           <div className="flex items-baseline justify-between gap-2"><dt className="text-slate-500">收复回撤所用时间</dt><dd className="font-semibold text-slate-800">{formatTradingDays(block.longestRecoveryTradingDays)}</dd></div>
+          <div className="flex items-baseline justify-between gap-2"><dt className="text-slate-500">已平仓胜率</dt><dd className="font-semibold text-slate-800">{formatRiskMetric(block.winRate, "%")}</dd></div>
+          <div className="flex items-baseline justify-between gap-2"><dt className="text-slate-500">盈亏比</dt><dd className="font-semibold text-slate-800">{formatRiskMetric(block.profitFactor)}</dd></div>
           <div className="flex items-baseline justify-between gap-2"><dt className="text-slate-500">最大收益</dt><dd className={`font-bold ${returnTone(block.maxReturnPercent)}`}>{formatReturnPercent(block.maxReturnPercent)}</dd></div>
           <div className="flex items-baseline justify-between gap-2"><dt className="text-slate-500">当前收益</dt><dd className={`font-bold ${returnTone(block.currentReturnPercent)}`}>{formatReturnPercent(block.currentReturnPercent)}</dd></div>
         </dl>
@@ -725,6 +728,8 @@ export default function BacktestPage() {  const [config, setConfig] = useState({
     maxDrawdownPercent: item.realisticSimulation.maxDrawdown,
     maxDrawdownDurationTradingDays: item.strategyEvaluation.stability.maxDrawdownDurationTradingDays,
     longestRecoveryTradingDays: item.strategyEvaluation.stability.longestRecoveryTradingDays,
+    winRate: item.realisticSimulation.winRate,
+    profitFactor: item.realisticSimulation.profitFactor,
     initialCapital: item.realisticSimulation.initialCapital,
     equityCurve: item.realisticSimulation.equityCurve,
   }))), [fullCycleExperiments]);

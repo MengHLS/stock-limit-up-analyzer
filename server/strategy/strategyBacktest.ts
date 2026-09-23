@@ -30,6 +30,7 @@ import { strategyRegistry } from "./registry";
 import { registerBuiltInStrategies } from "./strategies";
 import type { LeaderCandidateSourceRecord } from "../leaderCandidates";
 import { buildLatestStockNameMap } from "../../shared/stockDataNormalization";
+import { isStStock, resolveLimitRulesAt } from "../data/boardRules";
 import type { LeaderCandidateDataView } from "./strategies/leaderCandidateBaseline";
 import type { StrategyConfig } from "./contract";
 
@@ -258,6 +259,21 @@ export function runStrategyEngineBacktest(input: StrategyEngineBacktestInput): S
     maxPositionAmountRatio: options.maxPositionAmountRatio ?? 0,
     maxHoldingDays: options.maxHoldingDays,
   };
+  const limitRulesResolver = (symbol: string, tradeDate: string) => {
+    const stockName = stockNameByCode.get(symbol) ?? null;
+    const rules = resolveLimitRulesAt(
+      symbol,
+      tradeDate,
+      isStStock(stockName) ? "ST" : "NORMAL"
+    );
+    if (!rules.supported) {
+      throw new Error(`无法解析 ${symbol} 在 ${tradeDate} 的涨跌停规则`);
+    }
+    return {
+      limitUpRatio: rules.limitUpRatio!,
+      limitDownRatio: rules.limitDownRatio!,
+    };
+  };
 
   // 8. Golden Pipeline：Strategy → PositionSizer → RiskManager → Approved Order → Backtest Core。
   const result = runBacktestWithRisk({
@@ -265,6 +281,7 @@ export function runStrategyEngineBacktest(input: StrategyEngineBacktestInput): S
     tradingDates,
     barsByDate,
     signalProvider,
+    limitRulesResolver,
   });
 
   return {

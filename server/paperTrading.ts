@@ -698,6 +698,7 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
         stockName: position.stockName,
         price: openPrice,
         referencePrice: position.previousClosePrice,
+        tradeDate: today,
       }) === true;
       if (blockLimitDownSells && opensAtLimitDown) {
         const order = findOrder(position.stockCode, position.entryDate);
@@ -766,6 +767,7 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
       stockName: pending.stockName,
       price: openPrice,
       referencePrice: pending.signalClosePrice,
+      tradeDate: today,
     }) === true;
     if (blockLimitUpBuys && limitUp) {
       skippedOrders.push(createSkippedOrder(pending, today, "开盘接近涨停，按保守规则不可追买"));
@@ -877,12 +879,14 @@ export function advancePaperTradingDay(input: PaperTradingAdvanceInput): { state
       stockName: position.stockName,
       price: closePrice,
       referencePrice: position.previousClosePrice,
+      tradeDate: today,
     }) === true;
     const opensAtLimitDown = isPriceAtLimitDown({
       stockCode: position.stockCode,
       stockName: position.stockName,
       price: marketOpenPrice,
       referencePrice: position.previousClosePrice,
+      tradeDate: today,
     }) === true;
     const oneWordLimitDown = limitDown
       && opensAtLimitDown

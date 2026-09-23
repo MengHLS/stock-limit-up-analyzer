@@ -94,8 +94,30 @@ export interface LiquidityEnrichment {
   floatMarketCap: number | null;
 }
 
+/** `limit_up_records` 中与候选评分有关的客观来源字段。 */
+export interface LimitUpSourceFacts {
+  limitUpTime: string | null;
+  sector: string | null;
+  keywords: string | null;
+  turnoverAmount: number | null;
+  circulationValue: number | null;
+}
+
+const EMPTY_LIMIT_UP_SOURCE_FACTS: LimitUpSourceFacts = {
+  limitUpTime: null,
+  sector: null,
+  keywords: null,
+  turnoverAmount: null,
+  circulationValue: null,
+};
+
 /** 流动性富集查找键（`fetchLiquidityForSymbolsInRange` 的 Map 键）。 */
 export function liquidityKey(symbol: string, tradeDate: string): string {
+  return `${symbol}|${tradeDate}`;
+}
+
+/** 原始涨停记录来源字段查找键。 */
+export function limitUpSourceKey(symbol: string, tradeDate: string): string {
   return `${symbol}|${tradeDate}`;
 }
 
@@ -143,6 +165,14 @@ export interface DatasetBuildIO {
     startDate: string,
     endDate: string,
   ): Promise<Map<string, LiquidityEnrichment>>;
+  /**
+   * `limit_up_records` 的来源字段（封板时间 / 题材 / 关键词 / 成交额 / 流通市值）。
+   * 键 = `limitUpSourceKey(symbol, tradeDate)`；未采集的字段保持 null。
+   */
+  fetchLimitUpSourceFacts(
+    startDate: string,
+    endDate: string,
+  ): Promise<Map<string, LimitUpSourceFacts>>;
   /** 读取某版本已落库的全部事件（供窗口构建阶段，支持 resume 重跑）。 */
   listEvents(datasetVersionId: number): Promise<FirstLimitPullbackEvent[]>;
   /** 读取某版本五张物理表当前真实行数（用于 resume 后写准确版本账本）。 */
@@ -223,6 +253,7 @@ export function assembleEventRow(
   historicalLimitCount: number,
   liquidity: LiquidityEnrichment | null,
   industryCode: string | null,
+  sourceFacts: LimitUpSourceFacts | null = null,
 ): FirstLimitPullbackEvent {
   const market = bar.symbol.includes(".") ? bar.symbol.split(".")[1]! : null;
   return {
@@ -246,6 +277,11 @@ export function assembleEventRow(
     limitRuleDown: ratio,
     limitRuleVersion: ratio === null ? null : "cn-limit-rules-v1",
     turnover: liquidity?.turnover ?? null,
+    limitUpTime: sourceFacts?.limitUpTime ?? null,
+    sector: sourceFacts?.sector ?? null,
+    keywords: sourceFacts?.keywords ?? null,
+    sourceTurnoverAmount: sourceFacts?.turnoverAmount ?? null,
+    sourceCirculationValue: sourceFacts?.circulationValue ?? null,
     isFirstLimit,
     previousLimitDate,
     daysSincePreviousLimit,
@@ -335,6 +371,7 @@ const EMPTY_ENRICHMENT: LiquidityEnrichment = { turnover: null, marketCap: null,
 /** Phase 1 片内候选（尚未富集/装配）。 */
 interface CandidateRow {
   dayIdx: number;
+  sourceTradeDate: string;
   bar: DailyBar;
   ratio: number | null;
   classification: DayLimitClassification;
@@ -487,6 +524,10 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
 
     // ---- A. 一次范围下推：涨停候选 bar（SQL 粗筛超集，按月分片并发）----
     const candidateBars = await io.fetchLimitUpCandidateBars(
+      tradingDays[factStartIdx]!,
+      tradingDays[windowEndIdx]!,
+    );
+    const sourceFacts = await io.fetchLimitUpSourceFacts(
       tradingDays[factStartIdx]!,
       tradingDays[windowEndIdx]!,
     );
@@ -652,6 +693,7 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
           const anchorPrevIsLimitUp = wasLimitUpOn(bar.symbol, anchorIdx - 1);
           candidates.push({
             dayIdx,
+            sourceTradeDate: tradingDays[anchorIdx]!,
             bar,
             ratio: limitUpRatio(bar.symbol, st, bar.tradeDate),
             classification: {
@@ -690,6 +732,8 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
             row.classification.historicalLimitCount,
             liquidityMap.get(liquidityKey(row.bar.symbol, row.bar.tradeDate)) ?? EMPTY_ENRICHMENT,
             io.resolveIndustrySync(row.bar.symbol, row.bar.tradeDate),
+            sourceFacts.get(limitUpSourceKey(row.bar.symbol, row.sourceTradeDate))
+              ?? EMPTY_LIMIT_UP_SOURCE_FACTS,
           ),
         );
       }

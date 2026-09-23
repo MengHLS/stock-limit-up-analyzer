@@ -671,6 +671,11 @@ export interface DatasetEventItem {
   previousClose: number | null;
   limitUpPrice: number | null;
   turnover: number | null;
+  limitUpTime: string | null;
+  sector: string | null;
+  keywords: string | null;
+  sourceTurnoverAmount: number | null;
+  sourceCirculationValue: number | null;
   isFirstLimit: boolean | null;
   previousLimitDate: string | null;
   daysSincePreviousLimit: number | null;

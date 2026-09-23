@@ -361,6 +361,7 @@ export function simulateRealisticTPlus1ToTPlus2(
         stockName: position.row.stockName,
         price: marketOpenPrice,
         referencePrice: position.previousClosePrice,
+        tradeDate: date,
       }) === true;
       if (openReturnPercent <= -stopLossPercent) {
         if (blockLimitDownSells && opensAtLimitDown) {
@@ -454,6 +455,7 @@ export function simulateRealisticTPlus1ToTPlus2(
         stockName: row.stockName,
         price: entryOpenPrice,
         referencePrice: row.signalClosePrice,
+        tradeDate: date,
       }) === true;
       if (blockLimitUpBuys && limitUp) {
         blockedBuyCount += 1;
@@ -574,12 +576,14 @@ export function simulateRealisticTPlus1ToTPlus2(
         stockName: position.row.stockName,
         price: exitPrice,
         referencePrice: previousClose,
+        tradeDate: date,
       }) === true;
       const opensAtLimitDown = isPriceAtLimitDown({
         stockCode: position.row.stockCode,
         stockName: position.row.stockName,
         price: marketOpenPrice,
         referencePrice: previousClose,
+        tradeDate: date,
       }) === true;
       const oneWordLimitDown = limitDown
         && opensAtLimitDown

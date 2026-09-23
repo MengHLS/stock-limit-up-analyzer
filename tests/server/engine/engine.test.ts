@@ -193,7 +193,10 @@ describe("ExecutionModel", () => {
   });
 
   it("可配置禁止追涨停买入", () => {
-    const m = new NextOpenExecutionModel({ blockLimitUpBuy: true });
+    const m = new NextOpenExecutionModel({
+      blockLimitUpBuy: true,
+      limitRules: { limitUpRatio: 0.1, limitDownRatio: 0.1 },
+    });
     const b = bar({ date: "T2", open: 11, prevClose: 10 }); // 11 = 10 * 1.1 涨停
     const fill = m.execute({ symbol: "A", side: "buy", quantity: 100, executionTime: "T2", orderType: "market" }, b, COST);
     expect(fill.rejectionReason).toContain("涨停");

@@ -5,7 +5,7 @@
  * ——regime 七维计算的唯一输入单元。**只使用当日数据**，不含任何未来信息。
  *
  * 复用而非重写（真实复用，非声明）：
- *   - `server/data/boardRules`（STEP 5 涨停规则唯一权威来源）：resolveLimitRules /
+ *   - `server/data/boardRules`（STEP 5 涨停规则唯一权威来源）：resolveLimitRulesAt /
  *     isPriceAtLimitUp / isPriceAtLimitDown。禁止自造「9.9% / 10% 近似」；
  *     ST/退市整理 5%、创业板/科创板 20%、北交所 30% 全部由该层给出。
  *   - `server/research/datasetAccess/invariants`：assertRowPitInvariant（行级
@@ -19,7 +19,7 @@
 import {
   exchangeLimitDownPrice,
   exchangeLimitUpPrice,
-  resolveLimitRules,
+  resolveLimitRulesAt,
 } from "../../data/boardRules";
 import { assertRowPitInvariant } from "../datasetAccess/invariants";
 import { mean } from "../../../shared/quant-stats";
@@ -40,18 +40,6 @@ import type {
 /** 是否为可用于价格比较的正有限数。 */
 function isPositiveFinite(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-/**
- * 把 dataset 的 st 状态映射为 boardRules 可识别的「股票名称」。
- * 依据：server/data/boardRules.isStStock 通过名称判定风险警示（ST/*ST/退市），
- * 而 Research Dataset 行只给 st 枚举（NORMAL/ST/*ST/UNKNOWN），故做确定性映射；
- * UNKNOWN/NORMAL 传 null（按非 ST 处理，主板 10%）。
- */
-function stPseudoName(st: RegimeSecuritySnapshot["st"]): string | null {
-  if (st === "ST") return "ST";
-  if (st === "*ST") return "*ST";
-  return null;
 }
 
 /** 数值字段校验（有限即可；成交额允许为 0？A 股停牌日成交额为 0，属真实值，允许）。 */
@@ -161,7 +149,11 @@ export function buildRegimeDayFacts(
 
     // 涨跌停判定：板块比例与涨跌停价来自 boardRules（唯一权威），此处不重算比例
     if (snapshot.code !== null && priceComparable) {
-      const rules = resolveLimitRules(snapshot.code, stPseudoName(snapshot.st));
+      const rules = resolveLimitRulesAt(
+        snapshot.code,
+        input.tradeDate,
+        snapshot.st
+      );
       // supported=false（未知代码前缀/板块）→ 不可判定，不计入分母
       if (
         rules.supported &&

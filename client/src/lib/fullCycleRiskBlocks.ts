@@ -9,6 +9,9 @@
  *       回撤持续 = 峰值日 → 谷底日的交易日数，
  *       收复用时 = 谷底日 → 收复前高的交易日数，未收复则计至期末）。
  *     这两个数不在此重算，只做搬运 —— 与「策略对比」六层评价里的同名指标天然同源。
+ *   · 已平仓胜率 / 盈亏比 ← `realisticSimulation.winRate / profitFactor`
+ *     （server/realisticBacktest.ts：仅统计已完成平仓的交易；期末仍持仓不计入，
+ *       无已平仓交易时保持 null，由展示层回显「样本不足」）。
  *   · 最大收益 / 当前收益 ← 本模块从该策略自身权益曲线做**恒等变形**（不含任何估计或外推）：
  *       最大收益 = max(权益 ÷ 初始资金 − 1) × 100，峰值日取曲线最高点（并列时取最早，保证渲染稳定）；
  *       当前收益 = 期末权益 ÷ 初始资金 × 100 − 100，数值上等于 `realisticSimulation.totalReturn`。
@@ -77,6 +80,10 @@ export type FullCycleRiskBlockInput = {
   maxDrawdownDurationTradingDays: number | null;
   /** 服务端权威收复回撤所用时间（交易日）。 */
   longestRecoveryTradingDays: number | null;
+  /** 服务端权威已平仓胜率（%）；无已平仓交易时为 null。 */
+  winRate: number | null;
+  /** 服务端权威盈亏比（总盈利 / 总亏损）；无可比样本时为 null。 */
+  profitFactor: number | null;
   initialCapital: number;
   equityCurve: readonly EquityCurvePointLike[];
 };

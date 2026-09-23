@@ -15,7 +15,11 @@
  */
 
 import type { BacktestConfig, BacktestResult, MarketBar, ReadonlyPortfolioSnapshot, Signal } from "./domain";
-import { nextOpenExecutionModel, type ExecutionModel } from "./execution";
+import {
+  nextOpenExecutionModel,
+  type ExecutionModel,
+  type LimitRules,
+} from "./execution";
 import { computePerformance } from "./performance";
 import { Portfolio } from "./portfolio";
 import { buildRiskContext, buildDefaultRiskManager, type OrderIntent, type PositionSizer, type RiskDecisionTrace, type RiskManager } from "../risk";
@@ -28,6 +32,11 @@ export interface RunBacktestInput {
   barsByDate: Map<string, Map<string, MarketBar>>;
   /** 成交模型；缺省使用 next-open。 */
   execution?: ExecutionModel;
+  /**
+   * 缺省 next-open 成交模型使用的涨跌停规则解析器。
+   * 必须按证券代码与执行日解析，禁止在成交层使用全局固定比例。
+   */
+  limitRulesResolver?: (symbol: string, tradeDate: string) => LimitRules;
   /** 策略：给定信号日（收盘后），返回该日产生的信号。只允许使用 <= date 的信息。
    *  第二个参数为该信号日收盘后的只读组合快照（供 Strategy 层读取，不暴露可变 API）。 */
   signalProvider: (date: string, portfolio: ReadonlyPortfolioSnapshot) => Signal[];
@@ -58,7 +67,19 @@ function extractClosePrices(bars: Map<string, MarketBar>): Map<string, number> {
 /** 确定性回测引擎。 */
 export function runBacktest(input: RunBacktestInput): BacktestResult {
   const { config, barsByDate } = input;
-  const execution = input.execution ?? nextOpenExecutionModel();
+  const execution =
+    input.execution ??
+    nextOpenExecutionModel(
+      input.limitRulesResolver
+        ? {
+            limitRules: order =>
+              input.limitRulesResolver!(
+                order.symbol,
+                order.executionTime
+              ),
+          }
+        : {}
+    );
   const dates = input.tradingDates.filter((date) => date >= config.startDate && date <= config.endDate);
 
   const portfolio = new Portfolio(config.initialCapital, dates, {

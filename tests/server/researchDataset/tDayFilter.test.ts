@@ -20,12 +20,14 @@ function rowLike(
 ): {
   code: string | null;
   st: "NORMAL" | "ST" | "*ST" | "UNKNOWN";
+  tradeDate: string;
   close: number | null;
   preClose: number | null;
 } {
   return {
     code: "600000.SH",
     st: "NORMAL",
+    tradeDate: "2026-01-05",
     close: 11,
     preClose: 10,
     ...overrides,
@@ -55,6 +57,16 @@ describe("limitUpRatioForRow", () => {
     expect(limitUpRatioForRow(rowLike({ code: "600000.SH", st: "*ST" }))).toBe(
       0.05
     );
+    expect(
+      limitUpRatioForRow(
+        rowLike({ code: "300001.SZ", tradeDate: "2020-08-21" })
+      )
+    ).toBe(0.1);
+    expect(
+      limitUpRatioForRow(
+        rowLike({ code: "300001.SZ", tradeDate: "2020-08-24" })
+      )
+    ).toBe(0.2);
   });
 
   it("unknown 板块 / 无代码 → null（不可判，不伪造）", () => {

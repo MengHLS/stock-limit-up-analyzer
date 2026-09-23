@@ -91,12 +91,15 @@ export interface LimitRules {
   limitDownRatio: number;
 }
 
-/** 计算涨停价 / 跌停价（基于前收盘价）。 */
+export type LimitRulesResolver = (order: Order, bar: MarketBar) => LimitRules;
+
+/** 交易所口径涨停价：前收盘价按比例计算后，四舍五入到分。 */
 export function limitUpPrice(prevClose: number, limitUpRatio: number): number {
-  return prevClose * (1 + limitUpRatio);
+  return Math.round(prevClose * (1 + limitUpRatio) * 100) / 100;
 }
+/** 交易所口径跌停价：前收盘价按比例计算后，四舍五入到分。 */
 export function limitDownPrice(prevClose: number, limitDownRatio: number): number {
-  return prevClose * (1 - limitDownRatio);
+  return Math.round(prevClose * (1 - limitDownRatio) * 100) / 100;
 }
 
 /**
@@ -112,16 +115,16 @@ export function limitDownPrice(prevClose: number, limitDownRatio: number): numbe
 export class NextOpenExecutionModel implements ExecutionModel {
   private readonly blockLimitUpBuy: boolean;
   private readonly blockLimitDownSell: boolean;
-  private readonly limitRules: LimitRules;
+  private readonly limitRules: LimitRules | LimitRulesResolver | null;
 
   constructor(options: {
     blockLimitUpBuy?: boolean;
     blockLimitDownSell?: boolean;
-    limitRules?: LimitRules;
+    limitRules?: LimitRules | LimitRulesResolver;
   } = {}) {
     this.blockLimitUpBuy = options.blockLimitUpBuy ?? false;
     this.blockLimitDownSell = options.blockLimitDownSell ?? false;
-    this.limitRules = options.limitRules ?? { limitUpRatio: 0.1, limitDownRatio: 0.1 };
+    this.limitRules = options.limitRules ?? null;
   }
 
   execute(order: Order, bar: MarketBar, cost: CostModel, referenceAmount?: number | null): Fill {
@@ -143,8 +146,22 @@ export class NextOpenExecutionModel implements ExecutionModel {
 
     const basePrice = bar.open!;
     const prevClose = bar.prevClose!;
-    const limitUp = basePrice >= limitUpPrice(prevClose, this.limitRules.limitUpRatio);
-    const limitDown = basePrice <= limitDownPrice(prevClose, this.limitRules.limitDownRatio);
+    const rules =
+      typeof this.limitRules === "function"
+        ? this.limitRules(order, bar)
+        : this.limitRules;
+    if (
+      rules === null &&
+      (this.blockLimitUpBuy || this.blockLimitDownSell)
+    ) {
+      return rejection("缺少按证券与交易日解析的涨跌停规则，拒绝成交");
+    }
+    const limitUp =
+      rules !== null &&
+      basePrice >= limitUpPrice(prevClose, rules.limitUpRatio);
+    const limitDown =
+      rules !== null &&
+      basePrice <= limitDownPrice(prevClose, rules.limitDownRatio);
     // 未来函数防护：滑点分层只使用「成交时点之前已可知」的参考成交额，绝不用 bar.date 当日全天成交额。
     const refAmount = referenceAmount ?? null;
 
@@ -165,8 +182,10 @@ export class NextOpenExecutionModel implements ExecutionModel {
 }
 
 /** 便捷构造：默认 next-open 执行模型（不拦截涨跌停）。 */
-export function nextOpenExecutionModel(): ExecutionModel {
-  return new NextOpenExecutionModel();
+export function nextOpenExecutionModel(
+  options: ConstructorParameters<typeof NextOpenExecutionModel>[0] = {}
+): ExecutionModel {
+  return new NextOpenExecutionModel(options);
 }
 
 export type { Side };

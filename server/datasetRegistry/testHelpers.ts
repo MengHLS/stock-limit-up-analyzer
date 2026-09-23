@@ -90,6 +90,7 @@ export function makeFakeIO(
     fetchLimitUpCandidateBars: notUsed as never,
     fetchBarsForSymbolsInRange: notUsed as never,
     fetchLiquidityForSymbolsInRange: notUsed as never,
+    fetchLimitUpSourceFacts: notUsed as never,
     listEvents: (async () => events) as never,
     getVersionCounts: async () => counts,
     insertEvents: async () => {},

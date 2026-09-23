@@ -154,6 +154,7 @@ export async function runBacktestEngine2(store: HistoricalBarStore, spec: Backte
         security ?? { securityId: order.securityId },
         marketRules,
         executionRules,
+        date,
       );
 
       // 参考成交额：信号日（tradeDate）成交额——成交时点前已可知，避免未来函数。

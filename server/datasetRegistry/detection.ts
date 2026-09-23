@@ -44,22 +44,12 @@ export function limitUpRatio(
   st: StStatus,
   tradeDate?: string
 ): number | null {
-  if (tradeDate !== undefined) {
-    const resolved = resolveLimitRulesAt(code, tradeDate, st);
-    return resolved.supported ? resolved.limitUpRatio : null;
-  }
-  const board = classifyBoard(code);
-  switch (board) {
-    case "main":
-      return st === "ST" || st === "*ST" ? 0.05 : 0.1;
-    case "chinext":
-    case "star":
-      return 0.2;
-    case "bse":
-      return 0.3;
-    default:
-      return null;
-  }
+  const resolved = resolveLimitRulesAt(
+    code,
+    tradeDate ?? "9999-12-31",
+    st
+  );
+  return resolved.supported ? resolved.limitUpRatio : null;
 }
 
 /**

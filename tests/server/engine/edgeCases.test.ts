@@ -24,9 +24,8 @@
  *                    除权日会算出假盈亏。adjustment_factors 已 FULL 回填，但生产引擎未接入复权。
  *   K3 一字板封死概率 legacy 有 enableOneWordLimitDownProbability（跌停封死无法卖出概率模型），
  *                    生产引擎无此能力。
- *   K4 板块 limitRules 未注入生产引擎  boardRules.resolveLimitRules 已实现板块差异，但
- *                    strategyBacktest.runStrategyEngineBacktest 用默认 nextOpenExecutionModel()
- *                    （固定 10%），未按 symbol 注入 limitRules，也未启用 blockLimitUpBuy/DownSell。
+ *   K4 已关闭       生产 strategyBacktest 现在按 symbol + tradeDate 注入 boardRules 解析结果；
+ *                    执行模型不再使用固定 10% 兜底。
  *
  * 这些 KNOWN_GAP 是「能力现状」的诚实记录，不冒充已实现；已在 PRODUCT_GAP_MATRIX.md 登记。
  */
@@ -37,6 +36,7 @@ import {
   NextOpenExecutionModel,
   nextOpenExecutionModel,
   buyFees,
+  limitUpPrice,
   sellFees,
   type CostModel,
   type MarketBar,
@@ -71,8 +71,53 @@ function config(overrides: Partial<BacktestConfig> = {}): BacktestConfig {
 // ---------------------------------------------------------------------------
 
 describe("G3 P3-T4 · 涨跌停可成交性", () => {
-  it("blockLimitUpBuy=true 时，开盘触及涨停的买入被拒绝", () => {
+  it("涨停价按前收分价四舍五入，允许实际涨幅不足 10%", () => {
+    expect(limitUpPrice(0.23, 0.1)).toBe(0.25);
+    expect(limitUpPrice(6.81, 0.1)).toBe(7.49);
+  });
+
+  it("低于 10% 但等于分价涨停价的开盘仍被识别为涨停", () => {
+    const m = new NextOpenExecutionModel({
+      blockLimitUpBuy: true,
+      limitRules: { limitUpRatio: 0.1, limitDownRatio: 0.1 },
+    });
+    const b = bar({ date: "T2", open: 0.25, prevClose: 0.23 });
+    const fill = m.execute(
+      {
+        symbol: "A",
+        side: "buy",
+        quantity: 100,
+        executionTime: "T2",
+        orderType: "market",
+      },
+      b,
+      COST
+    );
+    expect(fill.rejectionReason).toContain("涨停");
+  });
+
+  it("开启涨跌停拦截但未注入规则 → 拒绝成交，不退回固定 10%", () => {
     const m = new NextOpenExecutionModel({ blockLimitUpBuy: true });
+    const b = bar({ date: "T2", open: 11, prevClose: 10 });
+    const fill = m.execute(
+      {
+        symbol: "A",
+        side: "buy",
+        quantity: 100,
+        executionTime: "T2",
+        orderType: "market",
+      },
+      b,
+      COST
+    );
+    expect(fill.rejectionReason).toContain("缺少");
+  });
+
+  it("blockLimitUpBuy=true 时，开盘触及涨停的买入被拒绝", () => {
+    const m = new NextOpenExecutionModel({
+      blockLimitUpBuy: true,
+      limitRules: { limitUpRatio: 0.1, limitDownRatio: 0.1 },
+    });
     const b = bar({ date: "T2", open: 11, prevClose: 10 }); // 11 = 10 * 1.1 涨停
     const fill = m.execute({ symbol: "A", side: "buy", quantity: 100, executionTime: "T2", orderType: "market" }, b, COST);
     expect(fill.rejectionReason).toContain("涨停");
@@ -88,7 +133,10 @@ describe("G3 P3-T4 · 涨跌停可成交性", () => {
   });
 
   it("blockLimitDownSell=true 时，开盘触及跌停的卖出被拒绝", () => {
-    const m = new NextOpenExecutionModel({ blockLimitDownSell: true });
+    const m = new NextOpenExecutionModel({
+      blockLimitDownSell: true,
+      limitRules: { limitUpRatio: 0.1, limitDownRatio: 0.1 },
+    });
     const b = bar({ date: "T2", open: 9, prevClose: 10 }); // 9 = 10 * 0.9 跌停
     const fill = m.execute({ symbol: "A", side: "sell", quantity: 100, executionTime: "T2", orderType: "market" }, b, COST);
     expect(fill.rejectionReason).toContain("跌停");
@@ -104,7 +152,10 @@ describe("G3 P3-T4 · 涨跌停可成交性", () => {
   });
 
   it("缺少前收盘价时无法判定涨跌停 → 拒绝成交（不静默放行）", () => {
-    const m = new NextOpenExecutionModel({ blockLimitUpBuy: true });
+    const m = new NextOpenExecutionModel({
+      blockLimitUpBuy: true,
+      limitRules: { limitUpRatio: 0.1, limitDownRatio: 0.1 },
+    });
     const b = bar({ date: "T2", open: 11, prevClose: null });
     const fill = m.execute({ symbol: "A", side: "buy", quantity: 100, executionTime: "T2", orderType: "market" }, b, COST);
     expect(fill.rejectionReason).toContain("前收盘价");

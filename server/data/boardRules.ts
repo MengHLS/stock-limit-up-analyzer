@@ -7,11 +7,10 @@
  * 价格计算复用 Backtest Core 已验收的纯函数 limitUpPrice / limitDownPrice
  * （server/engine/execution.ts），不在本层重复实现「prevClose × (1+ratio)」。
  *
- * 既有实现说明（不回改，仅记录）：
- *   - engine/execution.NextOpenExecutionModel 允许调用方注入 LimitRules（默认 10%）；
- *     真实板块比例应调用 resolveLimitRules 后注入。
- *   - legacy realisticBacktest 使用近似 1.099 / 0.901（±9.9%）且仅回测主板候选，
- *     其行为已被既有测试锁定；本模块是「新代码」的权威口径。
+ * 全系统统一口径：
+ *   - 板块 / ST / 历史日期比例只允许由本模块解析；
+ *   - 价格计算复用 engine/execution 的交易所分价四舍五入纯函数；
+ *   - 执行模型必须注入本模块解析出的比例，不得使用固定 10% 兜底。
  */
 
 import { limitDownPrice, limitUpPrice } from "../engine/execution";
@@ -38,7 +37,7 @@ export function exchangeLimitUpPrice(
   prevClose: number,
   limitUpRatio: number
 ): number {
-  return Math.round(prevClose * (1 + limitUpRatio) * 100) / 100;
+  return limitUpPrice(prevClose, limitUpRatio);
 }
 
 /** 交易所口径的跌停价：同涨跌停规则，分价四舍五入。 */
@@ -46,7 +45,7 @@ export function exchangeLimitDownPrice(
   prevClose: number,
   limitDownRatio: number
 ): number {
-  return Math.round(prevClose * (1 - limitDownRatio) * 100) / 100;
+  return limitDownPrice(prevClose, limitDownRatio);
 }
 
 /** 创业板涨跌幅由 10% 调整为 20% 的生效日。 */
@@ -195,7 +194,11 @@ export function isLimitUpBar(
   bar: CanonicalMarketBar,
   stockName?: string | null
 ): boolean | null {
-  const rules = resolveLimitRules(bar.symbol, stockName);
+  const rules = resolveLimitRulesAt(
+    bar.symbol,
+    bar.timestamp,
+    isStStock(stockName) ? "ST" : "NORMAL"
+  );
   if (!rules.supported || rules.limitUpRatio === null) return null;
   if (bar.close === null || bar.preClose === null || bar.preClose <= 0)
     return null;
@@ -211,7 +214,11 @@ export function isLimitDownBar(
   bar: CanonicalMarketBar,
   stockName?: string | null
 ): boolean | null {
-  const rules = resolveLimitRules(bar.symbol, stockName);
+  const rules = resolveLimitRulesAt(
+    bar.symbol,
+    bar.timestamp,
+    isStStock(stockName) ? "ST" : "NORMAL"
+  );
   if (!rules.supported || rules.limitDownRatio === null) return null;
   if (bar.close === null || bar.preClose === null || bar.preClose <= 0)
     return null;
@@ -226,6 +233,10 @@ export function isLimitDownBar(
 export interface PriceLimitCheck {
   stockCode: string;
   stockName?: string | null;
+  /** 交易日；提供时按历史规则解析（创业板 2020-08-24 的 10% → 20%）。 */
+  tradeDate?: string;
+  /** PIT ST 状态；提供时优先于股票名称推断。 */
+  stStatus?: "NORMAL" | "ST" | "*ST" | "UNKNOWN";
   /** 待判定价格（开盘价/收盘价等）。 */
   price: number | null | undefined;
   /** 前收参考价（涨停/跌停的基准价）。 */
@@ -237,7 +248,15 @@ export interface PriceLimitCheck {
  * 板块规则不可判定 / 任一价格缺失或非正 → null（UNKNOWN），调用方不得把它当成 10% 或当成命中。
  */
 export function isPriceAtLimitUp(check: PriceLimitCheck): boolean | null {
-  const rules = resolveLimitRules(check.stockCode, check.stockName);
+  const rules =
+    check.tradeDate === undefined
+      ? resolveLimitRules(check.stockCode, check.stockName)
+      : resolveLimitRulesAt(
+          check.stockCode,
+          check.tradeDate,
+          check.stStatus ??
+            (isStStock(check.stockName) ? "ST" : "NORMAL")
+        );
   if (!rules.supported || rules.limitUpRatio === null) return null;
   const { price, referencePrice } = check;
   if (
@@ -261,7 +280,15 @@ export function isPriceAtLimitUp(check: PriceLimitCheck): boolean | null {
 
 /** 判断给定价格是否触及跌停价（price <= 跌停价）。规则不可判定 → null。 */
 export function isPriceAtLimitDown(check: PriceLimitCheck): boolean | null {
-  const rules = resolveLimitRules(check.stockCode, check.stockName);
+  const rules =
+    check.tradeDate === undefined
+      ? resolveLimitRules(check.stockCode, check.stockName)
+      : resolveLimitRulesAt(
+          check.stockCode,
+          check.tradeDate,
+          check.stStatus ??
+            (isStStock(check.stockName) ? "ST" : "NORMAL")
+        );
   if (!rules.supported || rules.limitDownRatio === null) return null;
   const { price, referencePrice } = check;
   if (

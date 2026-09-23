@@ -26,6 +26,7 @@ import {
   firstLimitPullbackPrefixes,
   indexDaily,
   industryAssignments,
+  limitUpRecords,
   liquidityDaily,
   researchSecurityIdentifierHistory,
   researchSecurityStatusHistory,
@@ -48,9 +49,13 @@ import type {
   FirstLimitPullbackPath,
   FirstLimitPullbackRawBar,
 } from "./types";
-import type { DatasetBuildIO, LiquidityEnrichment } from "./builder";
+import type {
+  DatasetBuildIO,
+  LimitUpSourceFacts,
+  LiquidityEnrichment,
+} from "./builder";
 import type { SuspensionResolution } from "./executionFacts";
-import { liquidityKey } from "./builder";
+import { limitUpSourceKey, liquidityKey } from "./builder";
 import { LIMIT_UP_CANDIDATE_SQL_PREDICATE, type DailyBar, type StStatus } from "./detection";
 import {
   CANDIDATE_RANGE_MAX_MONTHS,
@@ -867,6 +872,47 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
     return result;
   }
 
+  async fetchLimitUpSourceFacts(
+    startDate: string,
+    endDate: string,
+  ): Promise<Map<string, LimitUpSourceFacts>> {
+    const result = new Map<string, LimitUpSourceFacts>();
+    const db = await getDb();
+    if (!db) return result;
+    const rows = await db
+      .select({
+        symbol: limitUpRecords.stockCode,
+        tradeDate: limitUpRecords.limitUpDate,
+        limitUpTime: limitUpRecords.limitUpTime,
+        sector: limitUpRecords.sector,
+        keywords: limitUpRecords.keywords,
+        turnover: limitUpRecords.turnover,
+        circulationValue: limitUpRecords.circulationValue,
+      })
+      .from(limitUpRecords)
+      .where(and(
+        gte(limitUpRecords.limitUpDate, startDate),
+        lte(limitUpRecords.limitUpDate, endDate),
+      ))
+      .orderBy(asc(limitUpRecords.limitUpDate), asc(limitUpRecords.limitUpTime));
+
+    for (const row of rows) {
+      const key = limitUpSourceKey(row.symbol, row.tradeDate);
+      const existing = result.get(key);
+      const existingTime = existing?.limitUpTime ?? "99:99:99";
+      const candidateTime = row.limitUpTime ?? "99:99:99";
+      if (existing && existingTime <= candidateTime) continue;
+      result.set(key, {
+        limitUpTime: row.limitUpTime ?? null,
+        sector: row.sector ?? null,
+        keywords: row.keywords ?? null,
+        turnoverAmount: parseNumber(row.turnover),
+        circulationValue: parseNumber(row.circulationValue),
+      });
+    }
+    return result;
+  }
+
   async listEvents(datasetVersionId: number): Promise<FirstLimitPullbackEvent[]> {
     const db = await getDb();
     if (!db) return [];
@@ -888,6 +934,11 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
       limitRuleDown: parseNumber(row.limitRuleDown),
       limitRuleVersion: row.limitRuleVersion,
       turnover: parseNumber(row.turnover),
+      limitUpTime: row.limitUpTime,
+      sector: row.sector,
+      keywords: row.keywords,
+      sourceTurnoverAmount: parseNumber(row.sourceTurnoverAmount),
+      sourceCirculationValue: parseNumber(row.sourceCirculationValue),
       isFirstLimit: row.isFirstLimit === null ? null : Boolean(row.isFirstLimit),
       previousLimitDate: row.previousLimitDate,
       daysSincePreviousLimit: row.daysSincePreviousLimit,
@@ -949,6 +1000,11 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
         limitRuleDown: r.limitRuleDown ?? null,
         limitRuleVersion: r.limitRuleVersion ?? null,
         turnover: r.turnover,
+        limitUpTime: r.limitUpTime,
+        sector: r.sector,
+        keywords: r.keywords,
+        sourceTurnoverAmount: r.sourceTurnoverAmount,
+        sourceCirculationValue: r.sourceCirculationValue,
         isFirstLimit: r.isFirstLimit,
         previousLimitDate: r.previousLimitDate,
         daysSincePreviousLimit: r.daysSincePreviousLimit,
