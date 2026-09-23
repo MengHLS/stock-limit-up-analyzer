@@ -27,10 +27,12 @@
 
 import DecisionForwardStudyPage from "@experiments/first-board-pullback/decision-forward-study/page";
 import BodyFilteredExitCurveStudyPage from "@experiments/first-board-pullback/body-filtered-exit-curve-study/page";
+import BodyMaSupportScreenStudyPage from "@experiments/first-board-pullback/body-ma-support-screen-study/page";
 import DynamicEntryPathDistributionStudyPage from "@experiments/first-board-pullback/dynamic-entry-path-distribution-study/page";
 import DynamicStateFactorExpansionStudyPage from "@experiments/first-board-pullback/dynamic-state-factor-expansion-study/page";
 import ConditionalPullbackStateExitStudyPage from "@experiments/first-board-pullback/conditional-pullback-state-exit-study/page";
 import EntryDayExperimentPage from "@experiments/first-board-pullback/entry-day/page";
+import EntryAlignedExitHorizonStudyPage from "@experiments/first-board-pullback/entry-aligned-exit-horizon-study/page";
 import FirstBoardBodyStudyPage from "@experiments/first-board-pullback/first-board-body-study/page";
 import HoldStreakAmplitudeT10StudyPage from "@experiments/first-board-pullback/hold-streak-amplitude-t10-study/page";
 import FundamentalStudyExperimentPage from "@experiments/first-board-pullback/fundamental-study/page";
@@ -53,6 +55,8 @@ export const EXPERIMENT_PAGES: Readonly<
 > = {
   "first-board-pullback/body-filtered-exit-curve-study":
     BodyFilteredExitCurveStudyPage,
+  "first-board-pullback/body-ma-support-screen-study":
+    BodyMaSupportScreenStudyPage,
   "first-board-pullback/decision-forward-study": DecisionForwardStudyPage,
   "first-board-pullback/dynamic-entry-path-distribution-study":
     DynamicEntryPathDistributionStudyPage,
@@ -61,6 +65,8 @@ export const EXPERIMENT_PAGES: Readonly<
   "first-board-pullback/conditional-pullback-state-exit-study":
     ConditionalPullbackStateExitStudyPage,
   "first-board-pullback/entry-day": EntryDayExperimentPage,
+  "first-board-pullback/entry-aligned-exit-horizon-study":
+    EntryAlignedExitHorizonStudyPage,
   "first-board-pullback/first-board-body-study": FirstBoardBodyStudyPage,
   "first-board-pullback/hold-streak-amplitude-t10-study":
     HoldStreakAmplitudeT10StudyPage,

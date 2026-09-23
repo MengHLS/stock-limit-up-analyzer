@@ -2,7 +2,7 @@
 
 # 测试资产总览（tests/ 与 docs/testing/ 的唯一索引）
 
-全仓测试文件 **266** 个 ｜ 用例声明 **4033** 个 ｜ 模块 **27** 个
+全仓测试文件 **269** 个 ｜ 用例声明 **4041** 个 ｜ 模块 **27** 个
 其中：环境依赖（离线必失败）**7** 个 ｜ 已知失效 **1** 个 ｜ 源码文本断言 **19** 个
 
 > 本目录由 `pnpm run docs:tests` 生成，**禁手改**；改测试后重跑即同步。
@@ -98,7 +98,7 @@
 | `server/closedLoopBacktestRun` | [`server/closedLoopBacktestRun/_index.md`](server/closedLoopBacktestRun/_index.md) | 3 | 20 | - | - |
 | `server/corporateActions` | [`server/corporateActions/_index.md`](server/corporateActions/_index.md) | 4 | 62 | - | - |
 | `server/data` | [`server/data/_index.md`](server/data/_index.md) | 1 | 21 | - | - |
-| `server/datasetRegistry` | [`server/datasetRegistry/_index.md`](server/datasetRegistry/_index.md) | 13 | 206 | - | - |
+| `server/datasetRegistry` | [`server/datasetRegistry/_index.md`](server/datasetRegistry/_index.md) | 13 | 207 | - | - |
 | `server/engine` | [`server/engine/_index.md`](server/engine/_index.md) | 3 | 63 | - | - |
 | `server/features` | [`server/features/_index.md`](server/features/_index.md) | 2 | 14 | - | - |
 | `server/historicalState` | [`server/historicalState/_index.md`](server/historicalState/_index.md) | 5 | 64 | - | 1 |
@@ -106,7 +106,7 @@
 | `server/portfolio` | [`server/portfolio/_index.md`](server/portfolio/_index.md) | 1 | 17 | - | - |
 | `server/research` | [`server/research/_index.md`](server/research/_index.md) | 51 | 1520 | - | 3 |
 | `server/researchDataset` | [`server/researchDataset/_index.md`](server/researchDataset/_index.md) | 9 | 90 | - | - |
-| `server/researchExperiments` | [`server/researchExperiments/_index.md`](server/researchExperiments/_index.md) | 34 | 338 | - | 2 |
+| `server/researchExperiments` | [`server/researchExperiments/_index.md`](server/researchExperiments/_index.md) | 37 | 345 | - | 2 |
 | `server/risk` | [`server/risk/_index.md`](server/risk/_index.md) | 2 | 50 | - | - |
 | `server/riskEngine` | [`server/riskEngine/_index.md`](server/riskEngine/_index.md) | 1 | 18 | - | - |
 | `server/runWorkbenchAssembly` | [`server/runWorkbenchAssembly/_index.md`](server/runWorkbenchAssembly/_index.md) | 4 | 33 | - | - |

@@ -590,6 +590,20 @@ export function assertRequirementCodeMatches(
       { expected: requirement.datasetCode, actual: facts.datasetCode },
     );
   }
+  if (
+    requirement.requiredDatasetVersionLabel !== undefined &&
+    facts.datasetVersionLabel !== requirement.requiredDatasetVersionLabel
+  ) {
+    throw new ExperimentError(
+      "EXPERIMENT_DATASET_CODE_MISMATCH",
+      `实验 "${experimentId}" 要求数据集版本 "${requirement.requiredDatasetVersionLabel}"，` +
+        `但版本 ${facts.datasetVersionId} 是 "${facts.datasetVersionLabel}"`,
+      {
+        expected: requirement.requiredDatasetVersionLabel,
+        actual: facts.datasetVersionLabel,
+      },
+    );
+  }
 }
 
 /** 声明式校验：版本必须 READY。 */

@@ -170,6 +170,13 @@ export const EXPERIMENT_ARTIFACT_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 export const experimentDatasetRequirementSchema = z.object({
   /** 期望的数据集语义代码（= `dataset_definition.datasetCode`）。 */
   datasetCode: z.string().min(1),
+  /**
+   * 可选：要求 Dataset 版本标签必须精确匹配。
+   *
+   * 该字段用于冻结核心研究实验的数据口径，避免同一个实验在不同章节
+   * 悄然接受 v3/v4/v5 等不同数据源后产生不可比较结论。
+   */
+  requiredDatasetVersionLabel: z.string().min(1).optional(),
   requiredColumns: experimentRequiredColumnsSchema,
   /** 需要读的 prefix 相对日（**必须 ≤ 0**）。 */
   prefixRelativeDays: z.array(z.number().int().max(0)).optional(),
@@ -827,6 +834,8 @@ export interface ExperimentArtifactFileSpec {
 export interface ExperimentRunContext {
   /** 实验自己的描述符（只读）。 */
   readonly descriptor: ExperimentDescriptor;
+  /** 本次 Run 的完整实验代码摘要；由平台计算，不接受实验自报。 */
+  readonly codeDigest: string;
   /** 平台解析后的研究协议；exploratory Run 为 null。 */
   readonly protocol: ExperimentProtocolContext | null;
   /** 已归并默认值的参数（键 = `descriptor.parameters[].code`）。 */

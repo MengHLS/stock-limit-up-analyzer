@@ -1215,8 +1215,12 @@ export class DatasetRegistryService {
       datasetVersionId: job.datasetVersionId,
       jobId: generateJobId(version),
       status: "PENDING",
-      processedRows: 0,
+      completedChunks: job.completedChunks ?? null,
+      processedRows: job.processedRows ?? 0,
       failedRows: 0,
+      lastSymbol: job.lastSymbol ?? null,
+      lastTradeDate: job.lastTradeDate ?? null,
+      lastCursor: job.lastCursor ?? null,
     });
   }
 

@@ -82,6 +82,61 @@ describe("DefaultDatasetBuildRunner", () => {
     expect(v!.totalRows).toBe(126); // events 3 + prefixes 3 + posts 30 + paths 30 + outcomes 60（= rowCount 同口径）
   });
 
+  it("重试作业携带 checkpoint → runner 把 resumeCheckpoint 交给 builder", async () => {
+    let seenCheckpoint: unknown = null;
+    const plugin = makeTestPlugin({
+      createBuilder: () => ({
+        datasetCode: "first_limit_pullback",
+        async build(config: { resumeCheckpoint?: unknown }, report) {
+          seenCheckpoint = config.resumeCheckpoint ?? null;
+          await report({
+            phase: "events",
+            lastTradeDate: "2024-01-10",
+            lastSymbol: "600001.SH",
+            lastEventId: null,
+            processedRows: 70,
+            completedChunks: 7,
+          });
+          return {
+            status: "COMPLETED",
+            events: 3,
+            prefixes: 3,
+            posts: 30,
+            paths: 30,
+            outcomes: 60,
+            chunks: 7,
+            processedRows: 70,
+            failedRows: 0,
+          };
+        },
+      }),
+    });
+    const { repo, service, runner, version, job } = await makeFixture(
+      {},
+      { runnerPlugins: (() => {
+        const registry = new DatasetPluginRegistry();
+        registry.register(plugin);
+        return registry;
+      })() },
+    );
+    const checkpoint = {
+      phase: "events",
+      lastTradeDate: "2024-01-07",
+      lastSymbol: "600001.SH",
+      lastEventId: null,
+      processedRows: 70,
+      completedChunks: 7,
+    } as const;
+    await service.updateJobProgress(job.jobId, {
+      ...checkpoint,
+      lastCursor: JSON.stringify(checkpoint),
+    });
+    await service.startJob(job.jobId);
+    await runner.start(job.jobId);
+    await waitFor(async () => (await repo.getJob(job.jobId))?.status === "COMPLETED");
+    expect(seenCheckpoint).toEqual(checkpoint);
+  });
+
   it("幂等 start：同作业同进程只执行一个实例", async () => {
     const { repo, service, runner, job } = await makeFixture({ delayPerChunkMs: 20 });
     await service.startJob(job.jobId);

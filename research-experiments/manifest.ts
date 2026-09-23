@@ -18,12 +18,15 @@
  */
 
 import type { ExperimentDefinition } from "../server/researchExperiments/types";
+import { withFirstBoardPullbackFoundation } from "./shared/firstBoardPullback/wrapExperiment";
 import { bodyFilteredExitCurveStudyExperiment } from "./first-board-pullback/body-filtered-exit-curve-study/experiment";
+import { bodyMaSupportScreenStudyExperiment } from "./first-board-pullback/body-ma-support-screen-study/experiment";
 import { decisionForwardStudyExperiment } from "./first-board-pullback/decision-forward-study/experiment";
 import { dynamicEntryPathDistributionStudyExperiment } from "./first-board-pullback/dynamic-entry-path-distribution-study/experiment";
 import { dynamicStateFactorExpansionStudyExperiment } from "./first-board-pullback/dynamic-state-factor-expansion-study/experiment";
 import { conditionalPullbackStateExitStudyExperiment } from "./first-board-pullback/conditional-pullback-state-exit-study/experiment";
 import { entryDayExperiment } from "./first-board-pullback/entry-day/experiment";
+import { entryAlignedExitHorizonStudyExperiment } from "./first-board-pullback/entry-aligned-exit-horizon-study/experiment";
 import { firstBoardBodyStudyExperiment } from "./first-board-pullback/first-board-body-study/experiment";
 import { holdStreakAmplitudeT10StudyExperiment } from "./first-board-pullback/hold-streak-amplitude-t10-study/experiment";
 import { fundamentalStudyExperiment } from "./first-board-pullback/fundamental-study/experiment";
@@ -40,10 +43,11 @@ import { volumeRecoveryFilteredValidationExperiment } from "./first-board-pullba
 import { stabilityValidationExperiment } from "./first-board-pullback/stability-validation/experiment";
 
 /** 全部已注册实验（顺序不参与任何计算；registry 内部按 id 排序输出）。 */
-export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
+const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   entryDayExperiment,
   fundamentalStudyExperiment,
   bodyFilteredExitCurveStudyExperiment,
+  bodyMaSupportScreenStudyExperiment,
   firstBoardBodyStudyExperiment,
   holdStreakAmplitudeT10StudyExperiment,
   stabilityValidationExperiment,
@@ -54,6 +58,7 @@ export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   holdOpenPricePullbackExperiment,
   limitUpCloseHoldStudyExperiment,
   limitUpPriceHoldStreakStudyExperiment,
+  entryAlignedExitHorizonStudyExperiment,
   oversoldGapReversalValidationExperiment,
   preEventContextStudyExperiment,
   postEventAmplitudeStudyExperiment,
@@ -62,3 +67,14 @@ export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   volumeRelationshipDynamicEntryStudyExperiment,
   volumeRecoveryFilteredValidationExperiment,
 ];
+
+/**
+ * 所有首板回撤核心实验统一接入公共研究底座。
+ *
+ * 原始定义不直接注册：生产清单中的每个核心实验都必须声明 Dataset `v5`，
+ * 并输出 commonSample、entryDay × exitDay 面板、逐日净收益曲线和 Run 坐标。
+ */
+export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] =
+  RAW_EXPERIMENT_DEFINITIONS.map(definition =>
+    withFirstBoardPullbackFoundation(definition)
+  );

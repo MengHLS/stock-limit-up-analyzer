@@ -637,7 +637,10 @@ export function assembleDecisionForwardResult(args: {
   };
 
   let confirmatoryGate: ExperimentConfirmatoryGate | undefined;
-  if (args.protocol !== null) {
+  if (
+    args.protocol?.phase === "OBSERVATION" ||
+    args.protocol?.phase === "HOLDOUT"
+  ) {
     const status =
       args.protocol.phase === "OBSERVATION"
         ? dataSufficient

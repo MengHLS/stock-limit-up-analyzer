@@ -2,7 +2,7 @@
 
 # 测试模块：tests/server/datasetRegistry
 
-- 测试文件 **13** 个 ｜ 用例声明 **206** 个
+- 测试文件 **13** 个 ｜ 用例声明 **207** 个
 - 涉及源码目录：`server/` · `server/datasetRegistry/` · `shared/`
 
 ## 怎么跑
@@ -223,7 +223,7 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - getVersionCounts：统计与 horizon 聚合正确
 
 ### `tests/server/datasetRegistry/registry.test.ts`
-- 749 行 ｜ 用例声明 47 ｜ describe 6
+- 767 行 ｜ 用例声明 47 ｜ describe 6
 - 被测源码：`server/datasetRegistry/registry.ts` · `server/datasetRegistry/plugins.ts` · `server/datasetRegistry/physicalTables.ts` · `server/datasetRegistry/lifecycle.ts` · `server/datasetRegistry/testHelpers.ts`
 - 单跑：`pnpm exec vitest run tests/server/datasetRegistry/registry.test.ts`
 - 用例树：
@@ -327,12 +327,13 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - deleteDatasetDefinition：RUNNING 作业 → CONFLICT；不存在 → NOT_FOUND
 
 ### `tests/server/datasetRegistry/runner.test.ts`
-- 227 行 ｜ 用例声明 12 ｜ describe 1
+- 282 行 ｜ 用例声明 13 ｜ describe 1
 - 被测源码：`server/datasetRegistry/plugins.ts` · `server/datasetRegistry/runner.ts` · `server/datasetRegistry/lifecycle.ts` · `server/datasetRegistry/testHelpers.ts`
 - 单跑：`pnpm exec vitest run tests/server/datasetRegistry/runner.test.ts`
 - 用例树：
 - **DefaultDatasetBuildRunner**
   - 成功：RUNNING 作业被真实执行 → COMPLETED + 版本 READY + 进度 100
+  - 重试作业携带 checkpoint → runner 把 resumeCheckpoint 交给 builder
   - 幂等 start：同作业同进程只执行一个实例
   - 非法 start：PENDING 作业 → INVALID_JOB_TRANSITION，且不置 RUNNING
   - 非法 start：不存在的作业 → JOB_NOT_FOUND

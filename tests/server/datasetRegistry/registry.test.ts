@@ -179,12 +179,30 @@ describe("DATASET-002.4A · Build Job Lifecycle（service 层）", () => {
     const v = await makeVersion(svc);
     const original = await svc.createJob(v.id!);
     await svc.startJob(original.jobId);
+    await svc.updateJobProgress(original.jobId, {
+      completedChunks: 7,
+      processedRows: 70,
+      lastTradeDate: "2024-01-07",
+      lastSymbol: "600001.SH",
+      lastCursor: JSON.stringify({
+        phase: "events",
+        lastTradeDate: "2024-01-07",
+        lastSymbol: "600001.SH",
+        lastEventId: null,
+        processedRows: 70,
+        completedChunks: 7,
+      }),
+    });
     await svc.failJob(original.jobId, "boom");
 
     const retried = await svc.retryJob(original.jobId);
     expect(retried.status).toBe("PENDING");
     expect(retried.jobId).not.toBe(original.jobId);
     expect(retried.datasetVersionId).toBe(original.datasetVersionId);
+    expect(retried.completedChunks).toBe(7);
+    expect(retried.processedRows).toBe(70);
+    expect(retried.lastTradeDate).toBe("2024-01-07");
+    expect(retried.lastCursor).toContain('"phase":"events"');
 
     // 历史 Job 保留且仍 FAILED
     const history = (await svc["repo"].listJobs(v.id!)).map((j) => ({ id: j.jobId, status: j.status }));

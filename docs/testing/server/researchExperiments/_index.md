@@ -2,8 +2,8 @@
 
 # 测试模块：tests/server/researchExperiments
 
-- 测试文件 **34** 个 ｜ 用例声明 **338** 个
-- 涉及源码目录：`client/src/researchExperiments/` · `research-experiments/` · `research-experiments/first-board-pullback/conditional-pullback-state-exit-study/` · `research-experiments/first-board-pullback/decision-forward-study/` · `research-experiments/first-board-pullback/dynamic-entry-path-distribution-study/` · `research-experiments/first-board-pullback/dynamic-state-factor-expansion-study/` · `research-experiments/first-board-pullback/first-board-body-study/` · `research-experiments/first-board-pullback/fundamental-study/` · `research-experiments/first-board-pullback/hold-open-price-pullback/` · `research-experiments/first-board-pullback/hold-streak-amplitude-t10-study/` · `research-experiments/first-board-pullback/limit-up-close-hold-study/` · `research-experiments/first-board-pullback/limit-up-price-hold-streak-study/` · `research-experiments/first-board-pullback/oversold-gap-reversal-validation/` · `research-experiments/first-board-pullback/post-event-amplitude-study/` · `research-experiments/first-board-pullback/pre-event-context-study/` · `research-experiments/first-board-pullback/stability-validation/` · `research-experiments/first-board-pullback/threshold-race-policy-study/` · `research-experiments/first-board-pullback/turnover-study/` · `research-experiments/first-board-pullback/volume-recovery-filtered-validation/` · `research-experiments/first-board-pullback/volume-relationship-dynamic-entry-study/` · `server/` · `server/artifactStorage/` · `server/datasetRegistry/` · `server/research/` · `server/research/robustness/` · `server/research/strategyCandidate/` · `server/research/strategySchema/` · `server/researchExperiments/` · `server/researchExperiments/persistence/` · `server/researchRuntime/` · `server/strategyCore/` · `server/strategyCore/production/` · `shared/`
+- 测试文件 **37** 个 ｜ 用例声明 **345** 个
+- 涉及源码目录：`client/src/researchExperiments/` · `research-experiments/` · `research-experiments/first-board-pullback/body-filtered-exit-curve-study/` · `research-experiments/first-board-pullback/conditional-pullback-state-exit-study/` · `research-experiments/first-board-pullback/decision-forward-study/` · `research-experiments/first-board-pullback/dynamic-entry-path-distribution-study/` · `research-experiments/first-board-pullback/dynamic-state-factor-expansion-study/` · `research-experiments/first-board-pullback/entry-aligned-exit-horizon-study/` · `research-experiments/first-board-pullback/first-board-body-study/` · `research-experiments/first-board-pullback/fundamental-study/` · `research-experiments/first-board-pullback/hold-open-price-pullback/` · `research-experiments/first-board-pullback/hold-streak-amplitude-t10-study/` · `research-experiments/first-board-pullback/limit-up-close-hold-study/` · `research-experiments/first-board-pullback/limit-up-price-hold-streak-study/` · `research-experiments/first-board-pullback/oversold-gap-reversal-validation/` · `research-experiments/first-board-pullback/post-event-amplitude-study/` · `research-experiments/first-board-pullback/pre-event-context-study/` · `research-experiments/first-board-pullback/stability-validation/` · `research-experiments/first-board-pullback/threshold-race-policy-study/` · `research-experiments/first-board-pullback/turnover-study/` · `research-experiments/first-board-pullback/volume-recovery-filtered-validation/` · `research-experiments/first-board-pullback/volume-relationship-dynamic-entry-study/` · `research-experiments/shared/firstBoardPullback/` · `server/` · `server/artifactStorage/` · `server/datasetRegistry/` · `server/research/` · `server/research/robustness/` · `server/research/strategyCandidate/` · `server/research/strategySchema/` · `server/researchExperiments/` · `server/researchExperiments/persistence/` · `server/researchRuntime/` · `server/strategyCore/` · `server/strategyCore/production/` · `shared/`
 
 ## 怎么跑
 
@@ -37,6 +37,14 @@ pnpm run test:changed                                  # 只跑改动相关（�
   - 取 Key 的最后一段作为文件名
   - 引号 / 换行 / 反斜杠 / 分号一律替换 —— 不允许在响应头上加字段
   - 空 / 以斜杠结尾 ⇒ 回落到稳定的占位名（不是空字符串）
+
+### `tests/server/researchExperiments/bodyFilteredExitCurveStudy.test.ts`
+- 180 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`research-experiments/first-board-pullback/body-filtered-exit-curve-study/experiment.ts` · `research-experiments/first-board-pullback/body-filtered-exit-curve-study/result.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/bodyFilteredExitCurveStudy.test.ts`
+- 用例树：
+- **body-filtered-exit-curve-study**
+  - 排除一字板和小实体，并按共同路径输出持有曲线
 
 ### `tests/server/researchExperiments/conditionalPullbackStateExitStudy.test.ts`
 - 160 行 ｜ 用例声明 1 ｜ describe 1
@@ -135,6 +143,14 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - 用例树：
 - **dynamic-state-factor-expansion-study**
   - 生成同日横截面分位、历史次数与 T+1 执行因子
+
+### `tests/server/researchExperiments/entryAlignedExitHorizonStudy.test.ts`
+- 176 行 ｜ 用例声明 1 ｜ describe 1
+- 被测源码：`research-experiments/first-board-pullback/entry-aligned-exit-horizon-study/experiment.ts` · `research-experiments/first-board-pullback/entry-aligned-exit-horizon-study/result.ts` · `server/researchExperiments/datasetPort.ts` · `server/researchExperiments/registry.ts` · `server/researchExperiments/runner.ts` · `server/researchRuntime/datasetReader.ts` · `server/researchRuntime/versionContext.ts` · `server/datasetRegistry/types.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/entryAlignedExitHorizonStudy.test.ts`
+- 用例树：
+- **entry-aligned-exit-horizon-study**
+  - 排除一字板与T+1..T+5涨跌停触达，并按持有日展开共同样本
 
 ### `tests/server/researchExperiments/exp001FundamentalStudy.test.ts`
 - 1691 行 ｜ 用例声明 76 ｜ describe 12 ｜ 📄 源码文本断言
@@ -304,6 +320,18 @@ pnpm run test:changed                                  # 只跑改动相关（�
 - 用例树：
 - **first-board-body-study**
   - 按严格涨停首板实体高度分桶，并排除收盘高于涨停价的异常事件
+
+### `tests/server/researchExperiments/firstBoardPullbackFoundation.test.ts`
+- 331 行 ｜ 用例声明 5 ｜ describe 1
+- 被测源码：`shared/researchExperimentsContracts.ts` · `research-experiments/shared/firstBoardPullback/cost.ts` · `research-experiments/shared/firstBoardPullback/foundation.ts` · `research-experiments/shared/firstBoardPullback/types.ts` · `research-experiments/shared/firstBoardPullback/wrapExperiment.ts` · `server/researchExperiments/datasetPort.ts` · `research-experiments/shared/firstBoardPullback/panel.ts` · `research-experiments/shared/firstBoardPullback/dataset.ts`
+- 单跑：`pnpm exec vitest run tests/server/researchExperiments/firstBoardPullbackFoundation.test.ts`
+- 用例树：
+- **first-board-pullback public foundation**
+  - declares and enforces the v5 Dataset binding
+  - rejects non-v5 Dataset versions
+  - aligns holdingDay from actual entry and uses next sellable open
+  - uses the same commonSample event set for every holding day
+  - deducts commission, stamp duty, slippage and impact
 
 ### `tests/server/researchExperiments/firstBoardPullbackStrategy.test.ts`
 - 280 行 ｜ 用例声明 14 ｜ describe 4

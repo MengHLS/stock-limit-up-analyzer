@@ -58,6 +58,25 @@ export class DatasetBuildCancelledError extends Error {
  */
 export const BUILD_STOP_TIMEOUT_MS = 60_000;
 
+function parseResumeCheckpoint(raw: string | null): DatasetBuildCheckpoint | null {
+  if (raw === null || raw.trim() === "") return null;
+  try {
+    const value = JSON.parse(raw) as Partial<DatasetBuildCheckpoint>;
+    if (value.phase !== "events" && value.phase !== "windows") {
+      return null;
+    }
+    if (
+      typeof value.processedRows !== "number" ||
+      typeof value.completedChunks !== "number"
+    ) {
+      return null;
+    }
+    return value as DatasetBuildCheckpoint;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 执行器接口 / 实现
 // ---------------------------------------------------------------------------
@@ -251,7 +270,16 @@ export class DefaultDatasetBuildRunner implements DatasetBuildRunner {
       //   前置步骤可能因配置非法而抛错，此时**不应破坏**版本已有数据；
       //   放到 build 之前则保证「一旦开始写，表内必为空」，结果只属于本轮。
       if (control.cancelled) throw new DatasetBuildCancelledError();
-      await service.purgeVersionRows(versionId);
+      const resumeCheckpoint = parseResumeCheckpoint(job.lastCursor ?? null);
+      if (resumeCheckpoint === null) {
+        await service.purgeVersionRows(versionId);
+      } else {
+        console.log(
+          `[DatasetBuild] 从 checkpoint 续跑 version=${versionId} job=${job.jobId} ` +
+            `phase=${resumeCheckpoint.phase} lastTradeDate=${resumeCheckpoint.lastTradeDate ?? "null"} ` +
+            `completedChunks=${resumeCheckpoint.completedChunks}`,
+        );
+      }
 
       const result = await builder.build(
         {
@@ -265,7 +293,7 @@ export class DefaultDatasetBuildRunner implements DatasetBuildRunner {
           postWindowDays: config.postWindowDays,
           outcomeHorizons: config.outcomeHorizons,
           batchSize: config.batchSize,
-          resumeCheckpoint: null,
+          resumeCheckpoint,
         },
         report,
       );
@@ -273,12 +301,16 @@ export class DefaultDatasetBuildRunner implements DatasetBuildRunner {
       if (control.cancelled) throw new DatasetBuildCancelledError();
 
       await service.completeJob(job.jobId);
-      // totalRows = 该版本五张物理表行数之和，与 `DatasetVersionCounts.rowCount` 完全同口径
-      // （否则前端「声明行数 vs 实际行数」会因口径不同而永久对不上）。
+      // Resume 后 builder 只统计本轮新增行；版本账本必须回读五张物理表的真实行数。
+      const actualCounts = await io.getVersionCounts(versionId);
       await service.markReady(versionId, {
-        totalEvents: result.events,
+        totalEvents: actualCounts.events,
         totalRows:
-          result.events + result.prefixes + result.posts + result.paths + result.outcomes,
+          actualCounts.events +
+          actualCounts.prefixes +
+          actualCounts.posts +
+          actualCounts.paths +
+          actualCounts.outcomes,
       });
     } catch (err) {
       // 取消是正常终止：job → CANCELLED、version → FAILED 已由 service.cancelJob 落库，此处不再写终态。

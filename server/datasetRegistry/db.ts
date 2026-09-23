@@ -9,7 +9,7 @@
  * 不引入新 ORM / 新库 / 队列。所有 ds_* 插入走 ON DUPLICATE KEY（幂等，§28）。
  */
 
-import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, lte } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { getDb } from "../db";
 import {
@@ -895,6 +895,38 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
       marketCap: parseNumber(row.marketCap),
       floatMarketCap: parseNumber(row.floatMarketCap),
     }));
+  }
+
+  async getVersionCounts(datasetVersionId: number): Promise<{
+    events: number;
+    prefixes: number;
+    posts: number;
+    paths: number;
+    outcomes: number;
+  }> {
+    const db = await getDb();
+    if (!db) {
+      return { events: 0, prefixes: 0, posts: 0, paths: 0, outcomes: 0 };
+    }
+    const [events, prefixes, posts, paths, outcomes] = await Promise.all([
+      db.select({ n: count() }).from(firstLimitPullbackEvents)
+        .where(eq(firstLimitPullbackEvents.datasetVersionId, datasetVersionId)),
+      db.select({ n: count() }).from(firstLimitPullbackPrefixes)
+        .where(eq(firstLimitPullbackPrefixes.datasetVersionId, datasetVersionId)),
+      db.select({ n: count() }).from(firstLimitPullbackPosts)
+        .where(eq(firstLimitPullbackPosts.datasetVersionId, datasetVersionId)),
+      db.select({ n: count() }).from(firstLimitPullbackPaths)
+        .where(eq(firstLimitPullbackPaths.datasetVersionId, datasetVersionId)),
+      db.select({ n: count() }).from(firstLimitPullbackOutcomes)
+        .where(eq(firstLimitPullbackOutcomes.datasetVersionId, datasetVersionId)),
+    ]);
+    return {
+      events: Number(events[0]?.n ?? 0),
+      prefixes: Number(prefixes[0]?.n ?? 0),
+      posts: Number(posts[0]?.n ?? 0),
+      paths: Number(paths[0]?.n ?? 0),
+      outcomes: Number(outcomes[0]?.n ?? 0),
+    };
   }
 
   async insertEvents(rows: FirstLimitPullbackEvent[]): Promise<void> {

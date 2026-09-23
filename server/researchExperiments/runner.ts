@@ -472,6 +472,7 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
       const artifactFiles: ExperimentArtifactFileSpec[] = [];
       const context: ExperimentRunContext = {
         descriptor,
+        codeDigest,
         protocol: request.protocol ?? null,
         parameters: resolvedParameters,
         dataset: access,

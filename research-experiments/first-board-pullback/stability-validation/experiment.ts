@@ -699,7 +699,9 @@ export const stabilityValidationExperiment: ExperimentDefinition = {
     };
 
     const unscannedEventCount =
-      dataset.facts.totalEvents === null ? null : dataset.facts.totalEvents - candidateCount;
+      dataset.facts.totalEvents === null
+        ? null
+        : Math.max(0, dataset.facts.totalEvents - candidateCount);
     const candidatesInfo: RunCandidatesInfo = {
       datasetEventCount: dataset.facts.totalEvents,
       scannedRowCount,

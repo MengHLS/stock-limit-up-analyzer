@@ -72,6 +72,13 @@ function notUsed(): never {
 export function makeFakeIO(
   tradingDays: string[] = ["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"],
   events: unknown[] = [],
+  counts: {
+    events: number;
+    prefixes: number;
+    posts: number;
+    paths: number;
+    outcomes: number;
+  } = { events: 3, prefixes: 3, posts: 30, paths: 30, outcomes: 60 },
 ): DatasetBuildIO {
   return {
     loadTradingDays: async () => tradingDays,
@@ -84,6 +91,7 @@ export function makeFakeIO(
     fetchBarsForSymbolsInRange: notUsed as never,
     fetchLiquidityForSymbolsInRange: notUsed as never,
     listEvents: (async () => events) as never,
+    getVersionCounts: async () => counts,
     insertEvents: async () => {},
     insertPrefixes: async () => {},
     insertPosts: async () => {},

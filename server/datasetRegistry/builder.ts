@@ -145,6 +145,14 @@ export interface DatasetBuildIO {
   ): Promise<Map<string, LiquidityEnrichment>>;
   /** 读取某版本已落库的全部事件（供窗口构建阶段，支持 resume 重跑）。 */
   listEvents(datasetVersionId: number): Promise<FirstLimitPullbackEvent[]>;
+  /** 读取某版本五张物理表当前真实行数（用于 resume 后写准确版本账本）。 */
+  getVersionCounts(datasetVersionId: number): Promise<{
+    events: number;
+    prefixes: number;
+    posts: number;
+    paths: number;
+    outcomes: number;
+  }>;
   /** 幂等批量 upsert。 */
   insertEvents(rows: FirstLimitPullbackEvent[]): Promise<void>;
   /** 幂等批量 upsert 原始行情窗口（prefix：rd ≤ 0）。 */
