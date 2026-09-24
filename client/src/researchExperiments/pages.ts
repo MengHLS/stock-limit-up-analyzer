@@ -47,6 +47,8 @@ import ThresholdRacePolicyStudyPage from "@experiments/first-board-pullback/thre
 import VolumeRelationshipDynamicEntryStudyPage from "@experiments/first-board-pullback/volume-relationship-dynamic-entry-study/page";
 import VolumeRecoveryFilteredValidationPage from "@experiments/first-board-pullback/volume-recovery-filtered-validation/page";
 import StabilityValidationExperimentPage from "@experiments/first-board-pullback/stability-validation/page";
+import TwelveFactorCompositeStudyPage from "@experiments/first-board-pullback/twelve-factor-composite-study/page";
+import TwelveFactorTopNRankingStudyPage from "@experiments/first-board-pullback/twelve-factor-topn-ranking-study/page";
 import LeaderCandidateBaselinePage from "@experiments/combo-backtest/leader-candidate-baseline/page";
 import type { ExperimentPageComponent } from "./contract";
 
@@ -90,6 +92,10 @@ export const EXPERIMENT_PAGES: Readonly<
     VolumeRecoveryFilteredValidationPage,
   "first-board-pullback/stability-validation":
     StabilityValidationExperimentPage,
+  "first-board-pullback/twelve-factor-composite-study":
+    TwelveFactorCompositeStudyPage,
+  "first-board-pullback/twelve-factor-topn-ranking-study":
+    TwelveFactorTopNRankingStudyPage,
   "combo-backtest/leader-candidate-baseline": LeaderCandidateBaselinePage,
 };
 

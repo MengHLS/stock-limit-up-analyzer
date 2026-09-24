@@ -93,3 +93,95 @@ export function movingBlockBootstrapMean(args: {
     seed,
   };
 }
+
+interface DateClusters {
+  dates: readonly string[];
+  byDate: ReadonlyMap<string, { sum: number; count: number }>;
+}
+
+/**
+ * 把事件聚到交易日上（同一天的事件不拆开）。
+ *
+ * 刻意与 `movingBlockBootstrapMean` 内部保持同样的聚合动作、不从那边抽公共函数，
+ * 避免改动既有实现后 22 个已注册实验的 Bootstrap 数字发生静默漂移。
+ */
+function clusterize(samples: readonly DateClusterValue[]): DateClusters | null {
+  const byDate = new Map<string, { sum: number; count: number }>();
+  for (const sample of samples) {
+    const current = byDate.get(sample.eventDate) ?? { sum: 0, count: 0 };
+    current.sum += sample.value;
+    current.count += 1;
+    byDate.set(sample.eventDate, current);
+  }
+  const dates = [...byDate.keys()].sort();
+  if (dates.length < 2) return null;
+  return { dates, byDate };
+}
+
+function resampleMean(
+  clusters: DateClusters,
+  random: () => number,
+  blockLength: number
+): number {
+  const total = clusters.dates.length;
+  let sum = 0;
+  let count = 0;
+  let sampledClusters = 0;
+  while (sampledClusters < total) {
+    const start = Math.floor(random() * total);
+    for (
+      let offset = 0;
+      offset < blockLength && sampledClusters < total;
+      offset += 1
+    ) {
+      const aggregate = clusters.byDate.get(
+        clusters.dates[(start + offset) % total]!
+      )!;
+      sum += aggregate.sum;
+      count += aggregate.count;
+      sampledClusters += 1;
+    }
+  }
+  return sum / count;
+}
+
+/**
+ * Moving-block date cluster bootstrap for a **difference of two means**.
+ *
+ * 两个臂各自独立重采样交易日块，逐次迭代计算 `mean(positive) − mean(negative)`。
+ * 用于「头部档 − 尾部档」「最优桶 − 最差桶」这类对比的区间估计 ——
+ * 这类差值**不能**由两个边际 CI 相减得到，必须单独重采样。
+ */
+export function movingBlockBootstrapDifference(args: {
+  positive: readonly DateClusterValue[];
+  negative: readonly DateClusterValue[];
+  iterations?: number;
+  blockLength?: number;
+  seed?: number;
+}): MovingBlockBootstrapResult | null {
+  const positive = clusterize(args.positive);
+  const negative = clusterize(args.negative);
+  if (!positive || !negative) return null;
+
+  const iterations = Math.max(100, Math.trunc(args.iterations ?? 1_000));
+  const blockLength = Math.max(1, Math.trunc(args.blockLength ?? 20));
+  const seed = args.seed ?? 20_260_922;
+  const random = mulberry32(seed);
+  const differences: number[] = [];
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    differences.push(
+      resampleMean(positive, random, blockLength) -
+        resampleMean(negative, random, blockLength)
+    );
+  }
+  differences.sort((a, b) => a - b);
+  return {
+    low: quantile(differences, 0.025),
+    high: quantile(differences, 0.975),
+    iterations,
+    blockLength,
+    clusterCount: Math.min(positive.dates.length, negative.dates.length),
+    seed,
+  };
+}
