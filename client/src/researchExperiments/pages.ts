@@ -28,6 +28,10 @@
 import DecisionForwardStudyPage from "@experiments/first-board-pullback/decision-forward-study/page";
 import BodyFilteredExitCurveStudyPage from "@experiments/first-board-pullback/body-filtered-exit-curve-study/page";
 import BodyMaSupportScreenStudyPage from "@experiments/first-board-pullback/body-ma-support-screen-study/page";
+import CompositeFactorEqualWeightStudyPage from "@experiments/first-board-pullback/composite-factor-equal-weight-study/page";
+import CompositeFactorFourStrongStudyPage from "@experiments/first-board-pullback/composite-factor-four-strong-study/page";
+import CompositeFactorConstrainedWeightStudyPage from "@experiments/first-board-pullback/composite-factor-constrained-weight-study/page";
+import CompositeFactorOosValidationStudyPage from "@experiments/first-board-pullback/composite-factor-oos-validation-study/page";
 import DynamicEntryPathDistributionStudyPage from "@experiments/first-board-pullback/dynamic-entry-path-distribution-study/page";
 import DynamicStateFactorExpansionStudyPage from "@experiments/first-board-pullback/dynamic-state-factor-expansion-study/page";
 import ConditionalPullbackStateExitStudyPage from "@experiments/first-board-pullback/conditional-pullback-state-exit-study/page";
@@ -42,6 +46,7 @@ import LimitUpPriceHoldStreakStudyPage from "@experiments/first-board-pullback/l
 import OversoldGapReversalValidationPage from "@experiments/first-board-pullback/oversold-gap-reversal-validation/page";
 import PreEventContextStudyPage from "@experiments/first-board-pullback/pre-event-context-study/page";
 import PostEventAmplitudeStudyPage from "@experiments/first-board-pullback/post-event-amplitude-study/page";
+import SingleFactorV1Page from "@experiments/first-board-pullback/single-factor-v1/page";
 import TurnoverStudyPage from "@experiments/first-board-pullback/turnover-study/page";
 import ThresholdRacePolicyStudyPage from "@experiments/first-board-pullback/threshold-race-policy-study/page";
 import VolumeRelationshipDynamicEntryStudyPage from "@experiments/first-board-pullback/volume-relationship-dynamic-entry-study/page";
@@ -60,6 +65,24 @@ export const EXPERIMENT_PAGES: Readonly<
     BodyFilteredExitCurveStudyPage,
   "first-board-pullback/body-ma-support-screen-study":
     BodyMaSupportScreenStudyPage,
+  "first-board-pullback/composite-factor-equal-weight-study":
+    CompositeFactorEqualWeightStudyPage,
+  "first-board-pullback/composite-factor-four-strong-study":
+    CompositeFactorFourStrongStudyPage,
+  // 受约束权重三方案共用一份页面（结果结构同构，靠 descriptor + payload 区分）
+  "first-board-pullback/composite-factor-2f-amplitude-study":
+    CompositeFactorConstrainedWeightStudyPage,
+  "first-board-pullback/composite-factor-3f-amplitude-volume-study":
+    CompositeFactorConstrainedWeightStudyPage,
+  "first-board-pullback/composite-factor-4f-weighted-study":
+    CompositeFactorConstrainedWeightStudyPage,
+  // OOS 后置窗口验证三方案共用一份页面（与上面同构，另加「研究协议与评估窗口」一栏）
+  "first-board-pullback/composite-factor-3f-amplitude-volume-oos-study":
+    CompositeFactorOosValidationStudyPage,
+  "first-board-pullback/composite-factor-4f-equal-weight-oos-study":
+    CompositeFactorOosValidationStudyPage,
+  "first-board-pullback/composite-factor-12f-equal-weight-oos-study":
+    CompositeFactorOosValidationStudyPage,
   "first-board-pullback/decision-forward-study": DecisionForwardStudyPage,
   "first-board-pullback/dynamic-entry-path-distribution-study":
     DynamicEntryPathDistributionStudyPage,
@@ -83,6 +106,7 @@ export const EXPERIMENT_PAGES: Readonly<
   "first-board-pullback/pre-event-context-study": PreEventContextStudyPage,
   "first-board-pullback/post-event-amplitude-study":
     PostEventAmplitudeStudyPage,
+  "first-board-pullback/single-factor-v1": SingleFactorV1Page,
   "first-board-pullback/turnover-study": TurnoverStudyPage,
   "first-board-pullback/threshold-race-policy-study":
     ThresholdRacePolicyStudyPage,

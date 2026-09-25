@@ -21,6 +21,10 @@ import type { ExperimentDefinition } from "../server/researchExperiments/types";
 import { withFirstBoardPullbackFoundation } from "./shared/firstBoardPullback/wrapExperiment";
 import { bodyFilteredExitCurveStudyExperiment } from "./first-board-pullback/body-filtered-exit-curve-study/experiment";
 import { bodyMaSupportScreenStudyExperiment } from "./first-board-pullback/body-ma-support-screen-study/experiment";
+import { compositeFactorEqualWeightStudyExperiment } from "./first-board-pullback/composite-factor-equal-weight-study/experiment";
+import { constrainedWeightExperiments } from "./first-board-pullback/composite-factor-constrained-weight-study/experiment";
+import { compositeFactorOosValidationExperiments } from "./first-board-pullback/composite-factor-oos-validation-study/experiment";
+import { compositeFactorFourStrongStudyExperiment } from "./first-board-pullback/composite-factor-four-strong-study/experiment";
 import { decisionForwardStudyExperiment } from "./first-board-pullback/decision-forward-study/experiment";
 import { dynamicEntryPathDistributionStudyExperiment } from "./first-board-pullback/dynamic-entry-path-distribution-study/experiment";
 import { dynamicStateFactorExpansionStudyExperiment } from "./first-board-pullback/dynamic-state-factor-expansion-study/experiment";
@@ -36,6 +40,7 @@ import { limitUpPriceHoldStreakStudyExperiment } from "./first-board-pullback/li
 import { oversoldGapReversalValidationExperiment } from "./first-board-pullback/oversold-gap-reversal-validation/experiment";
 import { preEventContextStudyExperiment } from "./first-board-pullback/pre-event-context-study/experiment";
 import { postEventAmplitudeStudyExperiment } from "./first-board-pullback/post-event-amplitude-study/experiment";
+import { singleFactorV1Experiment } from "./first-board-pullback/single-factor-v1/experiment";
 import { turnoverStudyExperiment } from "./first-board-pullback/turnover-study/experiment";
 import { thresholdRacePolicyStudyExperiment } from "./first-board-pullback/threshold-race-policy-study/experiment";
 import { volumeRelationshipDynamicEntryStudyExperiment } from "./first-board-pullback/volume-relationship-dynamic-entry-study/experiment";
@@ -65,11 +70,19 @@ const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   oversoldGapReversalValidationExperiment,
   preEventContextStudyExperiment,
   postEventAmplitudeStudyExperiment,
+  singleFactorV1Experiment,
   turnoverStudyExperiment,
   thresholdRacePolicyStudyExperiment,
   volumeRelationshipDynamicEntryStudyExperiment,
   volumeRecoveryFilteredValidationExperiment,
   twelveFactorCompositeStudyExperiment,
+  compositeFactorEqualWeightStudyExperiment,
+  compositeFactorFourStrongStudyExperiment,
+  // 受约束权重三方案（2F 等权 / 3F 等权 / 4F 预设 35-35-15-15）；顺序 = 方案顺序
+  ...constrainedWeightExperiments,
+  // 组合因子 OOS 后置窗口验证（3F 主判定 / 4F-EQ 描述性参照 / 12F-EQ 负对照）；
+  // members 与 weighting 逐字复制自既有实例，**只换 id**（原因见该模块 README）；顺序 = 方案顺序
+  ...compositeFactorOosValidationExperiments,
   twelveFactorTopNRankingStudyExperiment,
   leaderCandidateBaselineExperiment,
 ];

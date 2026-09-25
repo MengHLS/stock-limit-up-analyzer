@@ -30,6 +30,7 @@
  */
 
 import type {
+  ExperimentEvaluationWindow,
   ExperimentEventRow,
   ExperimentRunContext,
 } from "@shared/researchExperimentsContracts";
@@ -175,9 +176,39 @@ function sortEventRows(left: ExperimentEventRow, right: ExperimentEventRow): num
     : left.tradeDate.localeCompare(right.tradeDate);
 }
 
+/**
+ * 入池样本的**事件元数据**（真实交易日 + 代码）。
+ *
+ * ## 为什么加这个（RESEARCH-EXPERIMENT 单因子模板，2026-09-25）
+ *
+ * 单因子模板的逐笔留档要求 `stockCode / signalDate / entryDate / exitDate / holdingDays`，
+ * 而这些字段都是「平台数据里已有的、但原 `TwelveFactorSample` 没带」的事实。
+ *
+ * 🔴 它们**只增不改**：不参与任何计算，也不是判定条件 ——
+ *    `TwelveFactorSample` 的字段与语义一个字都没动，
+ *    因此 12F / Top-N 两个已注册实验的数字与代码指纹都不受影响。
+ *    之所以放在这里而不是让新模板自己再读一遍行情：
+ *    `exitRelativeDay` 是「主退出不可卖就顺延」的结果，**规则只有这一处实现**，
+ *    让别处再解一次就等于长出第二套退出语义（迟早漂移，而且漂移是静默的）。
+ */
+export interface TwelveFactorUniverseFact {
+  /** 代码域标识（`symbol`，如 `600000.SH`）。 */
+  stockCode: string;
+  /** 信息截止日（`T+5` 的真实交易日）。 */
+  signalDate: string;
+  /** 入场日（`T+6` 的真实交易日）。 */
+  entryDate: string;
+  /** 实际退出日（`T+10`，或其后第一个可卖日）。 */
+  exitDate: string;
+  entryRelativeDay: number;
+  exitRelativeDay: number;
+}
+
 export interface TwelveFactorDerivation {
   /** 12 因子齐全、且入场/退出都可执行的样本（字段名与 `assemble*` 入参一致）。 */
   samples: TwelveFactorSample[];
+  /** 每个入池样本的事件元数据（key = `eventId`，与 `samples` 一一对应）。 */
+  universeFacts: ReadonlyMap<string, TwelveFactorUniverseFact>;
   candidateCount: number;
   exactLimitUpCloseCount: number;
   excludedByReason: Record<string, number>;
@@ -187,11 +218,22 @@ export interface TwelveFactorDerivation {
   duplicateEventIdCount: number;
   crossSectionPeerCount: number;
   prefixWindowMissingCount: number;
+  /**
+   * 本次 Run 的**平台评估窗口**（`OBSERVATION` / `HOLDOUT` 才有；`EXPLORATORY` 恒 `null`）。
+   *
+   * 🔴 本派生层**不自己过滤**事件：窗口是在取数层施加的
+   *    （`server/researchExperiments/datasetPort.ts` 把 `evaluationWindow` 转成
+   *    `fromDate` / `toDate` 传给读取层），因此这里读到的 `events()` 已经是窗口内的。
+   *    登记它只为两件事：① 样本账不再谎报「全库候选数」；② 信封可追溯跑了哪一段。
+   */
+  evaluationWindow: ExperimentEvaluationWindow | null;
 }
 
 export async function deriveTwelveFactorSamples(
   context: ExperimentRunContext
 ): Promise<TwelveFactorDerivation> {
+  // 平台评估窗口（`EXPLORATORY` ⇒ null）。窗口过滤发生在**取数层**，这里只登记。
+  const evaluationWindow = context.protocol?.evaluationWindow ?? null;
   const events = await context.dataset.events();
   const deduped = new Map<string, ExperimentEventRow>();
   let duplicateEventIdCount = 0;
@@ -351,6 +393,7 @@ export async function deriveTwelveFactorSamples(
 
   // ---- Pass D：入池第 9 条（12 因子完备用例）----
   const samples: TwelveFactorSample[] = [];
+  const universeFacts = new Map<string, TwelveFactorUniverseFact>();
   for (const item of stageB) {
     const bars = item.bars;
     const eventClose = item.eventBar.close;
@@ -445,6 +488,26 @@ export async function deriveTwelveFactorSamples(
       mae: Number.isFinite(trough) ? trough / item.entryOpen - 1 : 0,
       factors: factors as TwelveFactorSample["factors"],
     });
+
+    // 事件元数据（只增不改口径）。上述 contextPathOk / forwardPathOk 已保证
+    // rd=ENTRY_DAY−1、rd=ENTRY_DAY 与 rd=exitIndex 的行情行确实存在 ⇒ 这里取不到即为内部不一致。
+    const signalRow = postByDay.get(ENTRY_DAY - 1)?.get(item.event.eventId);
+    const entryRow = postByDay.get(ENTRY_DAY)?.get(item.event.eventId);
+    const exitRow = postByDay.get(item.exitIndex)?.get(item.event.eventId);
+    if (signalRow === undefined || entryRow === undefined || exitRow === undefined) {
+      throw new Error(
+        `公共底座内部不一致：事件 ${item.event.eventId} 缺少 rd=${ENTRY_DAY - 1}/` +
+          `${ENTRY_DAY}/${item.exitIndex} 的行情行（入池判定本应已排除此情形）`
+      );
+    }
+    universeFacts.set(item.event.eventId, {
+      stockCode: item.event.symbol,
+      signalDate: signalRow.tradeDate,
+      entryDate: entryRow.tradeDate,
+      exitDate: exitRow.tradeDate,
+      entryRelativeDay: ENTRY_DAY,
+      exitRelativeDay: item.exitIndex,
+    });
   }
 
   const excludedByReason: Record<string, number> = {};
@@ -454,7 +517,12 @@ export async function deriveTwelveFactorSamples(
     excludedByReason[reason] = (excludedByReason[reason] ?? 0) + 1;
   }
 
-  const datasetEventCount = context.dataset.facts.totalEvents;
+  // 🔴 有评估窗口时**不得**报「全库事件数 − 窗口内唯一事件数」这种差值：
+  //    那会把「窗口外的事件」统统算成 `unscanned`（未扫描），是谎报。
+  //    与先例一致（`first-board-pullback/oversold-gap-reversal-validation/experiment.ts`）：
+  //    窗口化 Run 的这两个量一律为 `null`（= 不可得），不编造。
+  const datasetEventCount =
+    evaluationWindow === null ? context.dataset.facts.totalEvents : null;
   const unscannedEventCount =
     datasetEventCount === null
       ? null
@@ -462,6 +530,7 @@ export async function deriveTwelveFactorSamples(
 
   return {
     samples,
+    universeFacts,
     candidateCount: uniqueEvents.length,
     exactLimitUpCloseCount,
     excludedByReason,
@@ -471,5 +540,6 @@ export async function deriveTwelveFactorSamples(
     duplicateEventIdCount,
     crossSectionPeerCount,
     prefixWindowMissingCount,
+    evaluationWindow,
   };
 }
