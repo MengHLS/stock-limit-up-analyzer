@@ -185,6 +185,41 @@ describe("closedLoopRunAdapter — 映射", () => {
     expect(evalRow.handoffFingerprint).toBe("b".repeat(64));
     expect(evalRow.blockedReasonCode).toBeNull();
   });
+
+  it("留档成交中的名称 / 代码原样透传（页面无需再次查询）", () => {
+    const vm = buildClosedLoopRunViewModel(
+      rawRun({
+        stages: [
+          {
+            stageId: "backtest",
+            state: "EXECUTED",
+            outputKind: "backtestSummary",
+            output: {
+              kind: "backtestSummary",
+              trades: [
+                {
+                  securityId: "sec_aaa",
+                  code: "603269.SH",
+                  name: "海鸥股份",
+                  entryTime: "2026-01-05",
+                  entryPrice: 10,
+                  quantity: 100,
+                  openAtEnd: false,
+                  reason: "止损（5.00%）",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    )!;
+    expect(vm.backtest?.trades[0]).toMatchObject({
+      securityId: "sec_aaa",
+      code: "603269.SH",
+      name: "海鸥股份",
+      exitReason: "止损（5.00%）",
+    });
+  });
 });
 
 describe("closedLoopRunAdapter — 评估标量（零计算）", () => {

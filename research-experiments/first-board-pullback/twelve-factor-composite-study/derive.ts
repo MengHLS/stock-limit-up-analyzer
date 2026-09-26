@@ -397,6 +397,13 @@ export async function deriveTwelveFactorSamples(
   for (const item of stageB) {
     const bars = item.bars;
     const eventClose = item.eventBar.close;
+    const hasObservationPullback = bars
+      .slice(0, CONTEXT_DAYS)
+      .some(bar => bar !== null && bar.close < eventClose - EPSILON);
+    if (!hasObservationPullback) {
+      reasonByEvent.set(item.event.eventId, "NO_PULLBACK_IN_OBSERVATION");
+      continue;
+    }
     const previousClose = numberValue(item.event.values, "previousClose");
     const turnover = numberValue(item.event.values, "turnover");
     const historyLimitCount = numberValue(

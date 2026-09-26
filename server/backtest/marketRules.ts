@@ -33,6 +33,22 @@ export const DEFAULT_EXECUTION_RULES: ExecutionRuleSet = {
   blockLimitDownSell: false,
 };
 
+/**
+ * 从事件级执行身份取回涨跌停规则需要的证券代码。
+ *
+ * 事件面板使用 `sec_<uuid>::event:<code>@<eventDate>`；若把整串交给
+ * `resolveLimitRulesAt`，代码前缀为空 ⇒ supported=false ⇒ 后续可能被误解释成
+ * 0% 涨跌幅。这里只抽取事件 id 中 `@` 前的交易代码。
+ */
+export function priceLimitSymbolOf(securityId: string): string {
+  const eventMarker = "::event:";
+  const markerIndex = securityId.indexOf(eventMarker);
+  if (markerIndex < 0) return securityId;
+  const eventId = securityId.slice(markerIndex + eventMarker.length);
+  const atIndex = eventId.indexOf("@");
+  return atIndex > 0 ? eventId.slice(0, atIndex) : securityId;
+}
+
 /** 按标的板块把市场/执行规则解析为执行模型可消费的上下文。 */
 export function resolveExecutionRuleContext(
   security: Security,
@@ -40,7 +56,13 @@ export function resolveExecutionRuleContext(
   executionRules: ExecutionRuleSet,
   tradeDate?: string,
 ): ExecutionRuleContext {
-  const limit = marketRules.resolvePriceLimit(security, tradeDate) ?? {
+  const limit = marketRules.resolvePriceLimit(
+    {
+      ...security,
+      securityId: priceLimitSymbolOf(security.securityId),
+    },
+    tradeDate,
+  ) ?? {
     limitUpRatio: 0,
     limitDownRatio: 0,
   };

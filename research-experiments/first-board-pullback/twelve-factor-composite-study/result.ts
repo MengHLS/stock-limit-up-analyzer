@@ -836,6 +836,7 @@ export const EXCLUSION_REASON_LABELS: Readonly<Record<string, string>> =
     INVALID_EVENT_DAY_OHLC: "首板日 OHLC 结构非法",
     EVENT_NOT_EXACT_LIMIT_UP: "首板收盘价不等于涨停价",
     MISSING_FACTOR_PATH: "T+1..T+5 行情路径不完整或停牌",
+    NO_PULLBACK_IN_OBSERVATION: "T+1..T+5 从未回踩到首板收盘价下方",
     MISSING_FORWARD_PATH: "T+6..T+10 行情路径不完整或停牌",
     MISSING_PREFIX_PATH: "T-1 / T-10 收盘不可得",
     ENTRY_UNFILLABLE: "T+6 开盘不可买",

@@ -65,6 +65,20 @@ export interface CoreDecisionSourceConfig {
   readonly parameterSet: ParameterSet;
   /** 排序特征 id（**取自装配层声明的 recipe**，不是 Core 的概念）。`null` ⇒ 无排序值。 */
   readonly rankFeatureId: string | null;
+  /**
+   * **排序值取值函数**（可选；给了它就不再用 `rankFeatureId`）。
+   *
+   * 🔴 为什么需要它（2026-09-26 实测缺陷）：`weighted` 配方（= 「按综合分择优」，
+   * 如 `leader-candidate-baseline`）的排序值是 `Σ wᵢ·fᵢ`，**它不对应任何一个特征 id**
+   * ⇒ 此前只能把 `rankFeatureId` 填 `null` ⇒ 下面的判据 `rankValue !== null` 恒不成立
+   * ⇒ 该配方在生产链路上**一笔交易都发不出**（全部落 `droppedMissingRank`），
+   * 而且不报错、不留痕。装配层现在把配方的排序值语义**原样传进来**，Core 不再猜特征名。
+   *
+   * `undefined` / `null` ⇒ 回落到 `rankFeatureId`（**既有行为逐字不变**）。
+   */
+  readonly rankValueOf?:
+    | ((features: Readonly<Record<string, number | null>>) => number | null)
+    | null;
   /** 决策时点（来自 recipe 的 `point`）。 */
   readonly point: DecisionPoint;
   /** 事件判定器（生产注入；未提供则 Core 会响亮抛错）。 */
@@ -228,7 +242,11 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
     maxRelativeDayObserved = Math.max(maxRelativeDayObserved, window.currentRelativeDay) as RelativeDay;
 
     const rankValue =
-      config.rankFeatureId === null ? null : readFeature(input.features, config.rankFeatureId);
+      config.rankValueOf !== undefined && config.rankValueOf !== null
+        ? config.rankValueOf(input.features)
+        : config.rankFeatureId === null
+          ? null
+          : readFeature(input.features, config.rankFeatureId);
 
     // 🔴 「**今天**出不出信号」需要独立求一次「昨天是否已经成立」。
     //

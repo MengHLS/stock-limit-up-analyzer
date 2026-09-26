@@ -20,6 +20,7 @@
  */
 
 import { buildResearchDataset, type ResearchDataset } from "../researchDataset";
+import { baseSecurityIdOf } from "../eventIdentity";
 import {
   buildResearchDatasetFromRegistry,
   readDatasetUniverseConstraint,
@@ -35,6 +36,11 @@ import { deriveDatasetUniverseId } from "../research/datasetAccess/handle";
 import type { ExperimentConfig, StrategyContract } from "../research/framework/contract";
 import type { Strategy13 } from "../research/signalEngine/types";
 import type { SimulationConfig } from "../research/simulator/types";
+import { listCorporateActionsForCodesInRange } from "../corporateActions/storage";
+import {
+  createCorporateActionResolver,
+  type CorporateActionResolverLike,
+} from "../corporateActions/resolver";
 import type { ClosedLoopWiringInputs } from "../research/closedLoopWiring/types";
 import { resolveStrategyRecipe, resolveStrategyRecipeById, DEFAULT_STRATEGY_RECIPE_ID, type StrategyRecipeRuntime } from "../research/recipeRegistry";
 import { compileConditionRecipe } from "../research/conditionSignal";
@@ -274,6 +280,7 @@ export interface LoopRunAssemblySummary {
   readonly simulation: {
     readonly initialCapital: number;
     readonly maxPositions: number | null;
+    readonly maxDailyBuys: number | null;
     readonly executionModel: string;
     readonly costModel: CostModel;
   };
@@ -762,6 +769,7 @@ export function assembleStrategySide(
         version: coreVersionResult.version,
         parameterSet,
         rankFeatureId: recipeRuntime.rankFeatureId,
+        rankValueOf: recipeRuntime.rankValueOf,
         point: recipeRuntime.point,
         ...(eventResolver !== undefined ? { eventResolver } : {}),
         ...(eventTypes.length > 0 ? { eventTypes } : {}),
@@ -888,6 +896,7 @@ export function assembleStrategySide(
     cost: costModel,
     executionModel,
     maxPositions: backtestConfig.maxPositions ?? null,
+    maxDailyBuys: backtestConfig.maxDailyBuys ?? null,
     directionPolicy: "longOnly",
     // 🔴 BACKTEST-001（G1）：此前不传 ⇒ 走默认 false ⇒ 涨停买得进、跌停卖得出。
     //    改为显式传保守口径，并把政策写进 Run Record（可解释「为什么这笔没成交」）。
@@ -965,6 +974,7 @@ export function assembleStrategySide(
 export function buildClosedLoopWiringInputs(
   dataset: ResearchDataset,
   side: AssembledStrategySide,
+  corporateActionResolver?: CorporateActionResolverLike,
 ): ClosedLoopWiringInputs {
   return {
     researchDataset: dataset,
@@ -973,7 +983,10 @@ export function buildClosedLoopWiringInputs(
     strategy13: side.strategy13,
     strategyDocumentInput: side.strategyDocumentInput,
     strategyVersionRecordInput: side.strategyVersionRecordInput,
-    simulationConfig: side.simulationConfig,
+    simulationConfig:
+      corporateActionResolver === undefined
+        ? side.simulationConfig
+        : { ...side.simulationConfig, corporateActionResolver },
     ...(side.lifecycle !== undefined ? { lifecycle: side.lifecycle } : {}),
   };
 }
@@ -1000,9 +1013,30 @@ export async function assembleRunWorkbenchInputs(
   // -- 2~5. 策略侧装配（**同步**；抽成 `assembleStrategySide` 供闭环内的参数评估器复用）--
   const side = perfRun("research.context_build", () => assembleStrategySide(request, dataset.datasetVersion));
 
-  const inputs = buildClosedLoopWiringInputs(dataset, side);
+  const securityIdByCode = new Map<string, string[]>();
+  for (const row of dataset.rows) {
+    if (row.code !== null && row.code !== undefined) {
+      const ids = securityIdByCode.get(row.code) ?? [];
+      if (!ids.includes(row.securityId)) ids.push(row.securityId);
+      securityIdByCode.set(row.code, ids);
+    }
+  }
+  const corporateActions = await perfRunAsync("corporate_actions.load", () =>
+    listCorporateActionsForCodesInRange([...securityIdByCode.keys()], {
+      startDate: request.startDate,
+      endDate: request.endDate,
+    }),
+  );
+  const corporateActionResolver = createCorporateActionResolver(corporateActions, securityIdByCode);
 
-  const distinctSecurities = perfRun("research.candidate_preparation", () => new Set(dataset.rows.map(row => row.securityId)));
+  const inputs = buildClosedLoopWiringInputs(dataset, side, corporateActionResolver);
+
+  // Registry runs use event-scoped ids so one security can contribute multiple independent
+  // first-limit events. The summary still reports underlying securities, not event series.
+  const distinctSecurities = perfRun(
+    "research.candidate_preparation",
+    () => new Set(dataset.rows.map(row => baseSecurityIdOf(row.securityId))),
+  );
   perfCount("research.dataset_rows", dataset.rows.length);
 
   return {
@@ -1036,6 +1070,7 @@ export async function assembleRunWorkbenchInputs(
       simulation: {
         initialCapital: side.simulationConfig.initialCapital,
         maxPositions: side.simulationConfig.maxPositions ?? null,
+        maxDailyBuys: side.simulationConfig.maxDailyBuys ?? null,
         executionModel: side.executionModel,
         costModel: side.costModel,
       },

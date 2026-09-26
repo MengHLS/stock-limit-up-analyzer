@@ -29,6 +29,7 @@ import {
   applyCorporateActionsToPosition,
   type PositionState,
 } from "../../../server/corporateActions/portfolioTransform";
+import { Portfolio } from "../../../server/backtest/portfolio";
 
 function rawBar(overrides: Partial<CanonicalMarketBar> = {}): CanonicalMarketBar {
   return {
@@ -363,5 +364,70 @@ describe("Portfolio Corporate Action Transformation — 同日多事件合并", 
     expect(r1.position.quantity).toBe(2000);
     expect(r1.cashDelta).toBeCloseTo(2000, 10);
     expect(r1.position.costBasis).toBe(10000);
+  });
+});
+
+describe("Portfolio 实际记账 — 分红 / 送转不再被误算为亏损", () => {
+  const zeroCost = {
+    commissionRate: 0,
+    stampDutyRate: 0,
+    transferFeeRate: 0,
+    slippageBps: 0,
+    lotSize: 100,
+    minCommission: 0,
+  };
+
+  it("除息日价格从 10 跌到 9：1 元/股分红后交易净收益为 0，而不是 -10%", () => {
+    const portfolio = new Portfolio(100_000, ["2026-01-05", "2026-01-06"]);
+    const bought = portfolio.buy(
+      {
+        fillId: "buy-1",
+        orderId: "order-1",
+        securityId: "sec_dividend",
+        side: "buy",
+        quantity: 100,
+        price: 10,
+        basePrice: 10,
+        timestamp: "2026-01-05",
+        cost: { commission: 0, stampDuty: 0, transferFee: 0, otherFees: 0, total: 0 },
+        slippageAmount: 0,
+      },
+      zeroCost,
+      false,
+    );
+    expect(bought.success).toBe(true);
+
+    portfolio.applyCorporateAction("sec_dividend", [
+      action({
+        securityId: "sec_dividend",
+        actionType: "dividend",
+        cashAmount: 1,
+        effectiveDate: "2026-01-06",
+      }),
+    ]);
+    portfolio.settle();
+    const sold = portfolio.sell(
+      {
+        fillId: "sell-1",
+        orderId: "order-1",
+        securityId: "sec_dividend",
+        side: "sell",
+        quantity: 100,
+        price: 9,
+        basePrice: 9,
+        timestamp: "2026-01-06",
+        cost: { commission: 0, stampDuty: 0, transferFee: 0, otherFees: 0, total: 0 },
+        slippageAmount: 0,
+      },
+      zeroCost,
+      false,
+    );
+    expect(sold.success).toBe(true);
+    expect(portfolio.allTrades()[0]).toMatchObject({
+      grossPnL: 0,
+      netPnl: 0,
+      returnPct: 0,
+    });
+    expect(portfolio.cash).toBe(100_000);
   });
 });

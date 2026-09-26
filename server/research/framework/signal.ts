@@ -39,21 +39,53 @@ export function directionFromValue(value: number): Direction {
 }
 
 /**
+ * 取特征值的**有限值**（不存在 / `null` / 非有限 ⇒ `null`）。
+ *
+ * **唯一实现**：本条取值规则有三个消费者——`makeWeightedSignalBuilder`（信号值）、
+ * `makeGatedSignalBuilder`（排序特征值）、以及 `recipeRegistry` 下发给 Core 的
+ * `rankValueOf`（排序值）。若各写一份「三连判断」，任一处漏掉
+ * `Number.isFinite` 都会让 `NaN` 通过；而 `NaN` 混进横截面排序会静默污染 `rank`
+ * 次序（`NaN` 的比较恒为 false，排到哪里取决于实现），而这种漂移在结果里
+ * 完全不可见。
+ */
+export function featureValueOf(
+  features: Readonly<Record<string, number | null>>,
+  featureId: string,
+): number | null {
+  const value = features[featureId];
+  if (value === undefined || value === null || !Number.isFinite(value)) return null;
+  return value;
+}
+
+/**
+ * 线性加权值 `Σ wᵢ·fᵢ`；任一权重特征不可用 ⇒ `null`（禁止静默填零）。
+ *
+ * 🔴 这是加权语义的**唯一实现**：`makeWeightedSignalBuilder`（信号值）与
+ * `recipeRegistry` 下发的 `rankValueOf`（Core 的排序值）**共用它**。若两处各写一遍，
+ * 信号值与排序值就有漂移的可能 —— 而 Core 的判据是「`rankValue` 非空才发信号」
+ * ⇒ 漂移会表现为「出了信号但排序取不到值」，症状是**静默少选**，不是报错。
+ */
+export function weightedValueOf(
+  weights: Readonly<Record<string, number>>,
+  features: Readonly<Record<string, number | null>>,
+): number | null {
+  let value = 0;
+  for (const [featureId, weight] of Object.entries(weights)) {
+    const featureValue = featureValueOf(features, featureId);
+    if (featureValue === null) return null;
+    value += weight * featureValue;
+  }
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
  * 加权线性信号构造器：value = Σ w_i · f_i。
  * 任一权重特征缺失/非有限 → 返回 null（该证券不参与，禁止静默填零）。
  */
 export function makeWeightedSignalBuilder(weights: Readonly<Record<string, number>>): SignalBuilder {
-  const entries = Object.entries(weights);
   return ({ securityId, date, features }) => {
-    let value = 0;
-    for (const [featureId, weight] of entries) {
-      const featureValue = features[featureId];
-      if (featureValue === undefined || featureValue === null || !Number.isFinite(featureValue)) {
-        return null;
-      }
-      value += weight * featureValue;
-    }
-    if (!Number.isFinite(value)) return null;
+    const value = weightedValueOf(weights, features);
+    if (value === null) return null;
     return { securityId, date, value, direction: directionFromValue(value) };
   };
 }

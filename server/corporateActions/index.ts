@@ -12,5 +12,6 @@
 export * from "./types";
 export * from "./engine";
 export * from "./provider";
+export * from "./resolver";
 export * from "./validation";
 export * from "./storage";

@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  attachSecurityLabelsToClosedLoopResult,
   buildSecurityLabels,
   type SecurityIdentifierRow,
   type StockNameRecordRow,
@@ -134,5 +135,40 @@ describe("buildSecurityLabels", () => {
       [],
     );
     expect(labels[0]?.code).toBe("600000.SH");
+  });
+
+  it("J) 名称 / 代码写入留档成交对象（详情表与有界样本同时覆盖）", () => {
+    const result = {
+      stages: [
+        {
+          stageId: "backtest",
+          output: {
+            kind: "backtestSummary",
+            trades: [{ securityId: "sec_aaa", entryTime: "2026-01-05" }],
+          },
+        },
+      ],
+      backtest: {
+        tradeSamples: [{ securityId: "sec_aaa", entryTime: "2026-01-05" }],
+      },
+    } as never;
+    const enriched = attachSecurityLabelsToClosedLoopResult(result, [
+      { securityId: "sec_aaa", code: "603269.SH", name: "海鸥股份", exchange: "SH" },
+    ]) as unknown as {
+      stages: Array<{ output: { trades: Array<Record<string, unknown>> } }>;
+      backtest: { tradeSamples: Array<Record<string, unknown>> };
+    };
+    expect(enriched.stages[0]?.output.trades[0]).toMatchObject({
+      securityId: "sec_aaa",
+      code: "603269.SH",
+      name: "海鸥股份",
+      exchange: "SH",
+    });
+    expect(enriched.backtest.tradeSamples[0]).toMatchObject({
+      securityId: "sec_aaa",
+      code: "603269.SH",
+      name: "海鸥股份",
+      exchange: "SH",
+    });
   });
 });

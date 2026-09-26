@@ -22,7 +22,7 @@
 
 import type { ResearchSignal } from "./contract";
 import type { SignalBuilder } from "./signal";
-import { directionFromValue } from "./signal";
+import { directionFromValue, featureValueOf } from "./signal";
 
 /** 单个门槛条件：作用于**特征值**的谓词（非数值型约束）。 */
 export type FeatureGate =
@@ -45,13 +45,6 @@ export interface GatedSignalBuilderSpec {
   readonly rankFeatureId: string;
 }
 
-/** 取特征值（不存在 / null / 非有限 ⇒ null）。 */
-function readFeature(features: Readonly<Record<string, number | null>>, featureId: string): number | null {
-  const value = features[featureId];
-  if (value === undefined || value === null || !Number.isFinite(value)) return null;
-  return value;
-}
-
 /**
  * 单条件判定。返回 `null` 表示**无法判定**（特征缺失/非有限）。
  *
@@ -59,7 +52,7 @@ function readFeature(features: Readonly<Record<string, number | null>>, featureI
  * 「数据不足」与「明确不满足」在审计上必须可辨（否则会把数据缺口误读成策略过滤强度）。
  */
 function evaluateGate(gate: FeatureGate, features: Readonly<Record<string, number | null>>): boolean | null {
-  const value = readFeature(features, gate.featureId);
+  const value = featureValueOf(features, gate.featureId);
   if (value === null) return null;
   switch (gate.kind) {
     case "lte":
@@ -89,7 +82,7 @@ export function makeGatedSignalBuilder(spec: GatedSignalBuilderSpec): SignalBuil
       if (evaluateGate(gate, features) !== true) return null;
     }
 
-    const value = readFeature(features, rankFeatureId);
+    const value = featureValueOf(features, rankFeatureId);
     if (value === null) return null;
 
     return {

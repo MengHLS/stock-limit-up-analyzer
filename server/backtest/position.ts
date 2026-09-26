@@ -146,7 +146,7 @@ export class PositionBook {
       actions,
     );
     const ratio = beforeQ > 0 ? result.position.quantity / beforeQ : 1;
-    position.quantity = result.position.quantity;
+    position.quantity = Math.round(result.position.quantity);
     position.totalCostBasis = result.position.costBasis;
     position.averageEntryPrice = result.position.averageCost;
     position.availableQuantity = Math.round(position.availableQuantity * ratio);

@@ -38,6 +38,7 @@ import type {
 import type { ResearchDataset } from "../../researchDataset/types";
 import type { ResearchParameterSet } from "../types";
 import type { CandidateEvaluationRun } from "../signalEngine/types";
+import type { CorporateActionResolverLike } from "../../corporateActions/resolver";
 
 // ---------------------------------------------------------------------------
 // 记录身份常量
@@ -72,6 +73,8 @@ export type PlanSkipCode =
   | "NO_NEXT_TRADING_DAY"
   /** 并发持仓已达上限（maxPositions），新候选无空位。 */
   | "MAX_POSITIONS_REACHED"
+  /** 单日新建仓已达上限（maxDailyBuys），后续候选顺延/放弃。 */
+  | "MAX_DAILY_BUYS_REACHED"
   /** T+1：可卖份额为 0（当日/此前买入仍冻结），卖出顺延至后续决策日再评估。 */
   | "FROZEN_EXIT_DEFERRED"
   /** 现金预算不足一手（含费用估算后不足 lotSize）。 */
@@ -124,6 +127,8 @@ export interface SimulationConfig {
   readonly executionModel?: ExecutionModelId;
   /** 并发持仓上限；null/缺省 = 不限。 */
   readonly maxPositions?: number | null;
+  /** 单日最多新建仓数；null/缺省 = 不限。 */
+  readonly maxDailyBuys?: number | null;
   /** 方向策略（缺省 longOnly）。 */
   readonly directionPolicy?: DirectionPolicy;
   /** 涨跌停拦截开关（缺省 false，对齐 STEP 8 DEFAULT_EXECUTION_RULES）。 */
@@ -176,6 +181,11 @@ export interface SimulationConfig {
    * 缺省按 main ±10% 处理（与 dataset 行不含 board 的口径一致）。
    */
   readonly securityBoards?: Readonly<Record<string, SecurityBoard>>;
+  /**
+   * 公司行为解析器（装配期从 corporate_actions 读取并按 securityId 建索引）。
+   * 提供后在每日撮合前对持仓应用分红、送转、配股、拆合股。
+   */
+  readonly corporateActionResolver?: CorporateActionResolverLike;
 }
 
 /** 执行配置快照（冻结，进入结果记录；剔除函数，全部可序列化）。 */
@@ -190,6 +200,8 @@ export interface SimulationConfigSnapshot {
   readonly executionModel: ExecutionModelId;
   /** null = 不限并发持仓。 */
   readonly maxPositions: number | null;
+  /** null = 不限单日新建仓数。 */
+  readonly maxDailyBuys: number | null;
   readonly directionPolicy: DirectionPolicy;
   readonly executionRules: {
     readonly blockLimitUpBuy: boolean;
@@ -210,8 +222,8 @@ export interface SimulationConfigSnapshot {
   readonly decisionPoint: "close";
   /** 进出场模型摘要（本版本实现语义，声明性常量）。 */
   readonly entryExitModel: "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET";
-  /** 公司行为口径：研究链暂不应用（价格收益含除权跳空）。 */
-  readonly corporateActions: "NOT_APPLIED";
+  /** 公司行为口径：本次运行是否已接入真实分红送转事件。 */
+  readonly corporateActions: "APPLIED" | "NOT_APPLIED";
 }
 
 // ---------------------------------------------------------------------------

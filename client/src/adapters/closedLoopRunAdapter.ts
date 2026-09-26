@@ -72,6 +72,10 @@ export interface ClosedLoopEquityPointView {
 /** 单笔成交（直搬 `backtest/types.Trade` 子集）。 */
 export interface ClosedLoopTradeView {
   securityId: string;
+  /** 留档时已解析的展示代码；旧结果或无法解析时为 null。 */
+  code: string | null;
+  /** 留档时已解析的证券名称；名称源未收录时为 null。 */
+  name: string | null;
   entryTime: string;
   entryPrice: number | null;
   exitTime: string | null;
@@ -82,6 +86,8 @@ export interface ClosedLoopTradeView {
   holdingPeriod: number | null;
   openAtEnd: boolean;
   fees: number | null;
+  /** 退出原因（止盈 / 止损 / 时间退出 / 候选退出等）；旧留档缺失时为 null。 */
+  exitReason: string | null;
 }
 
 /** 撮合执行统计（含**拒单原因分布** —— 「为什么没成交」的唯一答案来源）。 */
@@ -138,6 +144,7 @@ export interface ClosedLoopRunAssemblyViewModel {
   simulation: {
     initialCapital: number | null;
     maxPositions: number | null;
+    maxDailyBuys: number | null;
     executionModel: string;
     costModel: {
       commissionRate?: number | null;
@@ -390,6 +397,8 @@ function extractBacktestArtifacts(
       if (securityId === null || entryTime === null) continue;
       trades.push({
         securityId,
+        code: asStr(trade.code),
+        name: asStr(trade.name),
         entryTime,
         entryPrice: asNum(trade.entryPrice),
         exitTime: asStr(trade.exitTime),
@@ -400,6 +409,7 @@ function extractBacktestArtifacts(
         holdingPeriod: asNum(trade.holdingPeriod),
         openAtEnd: trade.openAtEnd === true,
         fees: asNum(trade.fees),
+        exitReason: asStr(trade.reason),
       });
     }
   }
@@ -454,6 +464,7 @@ function extractAssembly(
     simulation: {
       initialCapital: sim ? asNum(sim.initialCapital) : null,
       maxPositions: sim ? asNum(sim.maxPositions) : null,
+      maxDailyBuys: sim ? asNum(sim.maxDailyBuys) : null,
       executionModel: sim ? asStr(sim.executionModel) ?? "—" : "—",
       costModel: costRaw
         ? {

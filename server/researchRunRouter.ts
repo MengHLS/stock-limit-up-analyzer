@@ -87,7 +87,7 @@ import {
   listClosedLoopBacktestRuns,
   saveClosedLoopBacktestRun,
 } from "./closedLoopBacktestRun/repository";
-import { loadSecurityLabels } from "./closedLoopBacktestRun/securityLabels";
+import { loadSecurityLabels, withPersistedSecurityLabels } from "./closedLoopBacktestRun/securityLabels";
 // STRATEGY-ARCH-002 — 策略运行留档（零 schema 变更：进既有 resultJson）。
 import {
   buildStrategyRunRecord,
@@ -696,7 +696,7 @@ export const researchRunRouter = router({
         }),
       );
 
-      const resultOut: ClosedLoopRunResult = {
+      let resultOut: ClosedLoopRunResult = {
         runId: run.runId,
         createdAt: run.createdAt,
         chainFingerprint: run.chainFingerprint,
@@ -752,6 +752,7 @@ export const researchRunRouter = router({
                 simulation: {
                   initialCapital: assemblySummary.simulation.initialCapital,
                   maxPositions: assemblySummary.simulation.maxPositions,
+                  maxDailyBuys: assemblySummary.simulation.maxDailyBuys,
                   executionModel: assemblySummary.simulation.executionModel,
                   costModel: { ...assemblySummary.simulation.costModel },
                 },
@@ -858,6 +859,7 @@ export const researchRunRouter = router({
 
       // CLOSED-LOOP-BACKTEST-PERSIST-001 — 每次运行都留档，供「回测历史」页回看。
       // best-effort：留档失败不抛（详见 persistClosedLoopBacktestRun 的说明）。
+      resultOut = await withPersistedSecurityLabels(resultOut);
       const persistence = await perfRunAsync("persistence.db_write", () =>
         persistClosedLoopBacktestRun({
           experimentId: input.experimentId,

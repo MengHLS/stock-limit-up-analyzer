@@ -13,7 +13,7 @@
  *   B. 声明非法 ⇒ **响亮抛错**（不夹取，夹取 = 悄悄改窄策略）；
  *   C. 面板 = rd=0（首板日，特征基准）+ rd ∈ [1, end+1]（观察日 + 次日执行日）；
  *   D. **决策日资格 = rd ∈ [start, end]**；rd=0 与 rd=end+1 **不具资格**；
- *   E. 重叠窗口按「取有值者、冲突即抛错」合并成 (证券, 交易日) 唯一行；
+ *   E. 同一证券的多个事件窗口保留为独立事件级序列，底层同 K 线数值冲突即抛错；
  *   F. 观察日的 turnover / 市值如实为 null（不拿首板日数值冒充观察日）。
  */
 
@@ -25,6 +25,7 @@ import {
   resolveObservationWindow,
   resolveSecurityIdsByEvent,
 } from "../../../server/runWorkbenchAssembly/datasetFromRegistry";
+import { eventScopedSecurityId } from "../../../server/eventIdentity";
 import type {
   FirstLimitPullbackEvent,
   FirstLimitPullbackRawBar,
@@ -215,7 +216,8 @@ describe("buildWindowRows — 事件窗口 → 逐日面板", () => {
     const { zero, post } = window(event, 10);
     const projection = buildWindowRows([event], [zero], post, WINDOW_1_3, idsOf(event));
 
-    const key = (d: string) => `${d}\u0000${sid(event.symbol)}`;
+    const key = (d: string) =>
+      `${d}\u0000${eventScopedSecurityId(sid(event.symbol), event.eventId)}`;
     expect(projection.memberKeys.has(key("2025-03-03"))).toBe(false); // rd=0 首板日
     expect(projection.memberKeys.has(key("2025-03-04"))).toBe(true); // rd=1
     expect(projection.memberKeys.has(key("2025-03-05"))).toBe(true); // rd=2
@@ -250,7 +252,7 @@ describe("buildWindowRows — 事件窗口 → 逐日面板", () => {
     }
   });
 
-  it("E. 重叠窗口合并为 (证券, 交易日) 唯一行，且行序按 (tradeDate, securityId) 升序", () => {
+  it("E. 重叠窗口保留为事件级序列，且行序按 (tradeDate, eventScopedSecurityId) 升序", () => {
     // 同一证券两个事件：E1 首板 2025-03-03、E2 首板 2025-03-05 ⇒ 03-05..03-07 被两者共同覆盖。
     // 价表按**交易日**给定 ⇒ 重叠日数值天然一致（同一根 K 线）。
     const price: Record<string, number> = {
@@ -295,26 +297,33 @@ describe("buildWindowRows — 事件窗口 → 逐日面板", () => {
       "2025-03-03",
       "2025-03-04",
       "2025-03-05",
+      "2025-03-05",
       "2025-03-06",
+      "2025-03-06",
+      "2025-03-07",
       "2025-03-07",
       "2025-03-10",
       "2025-03-11",
-    ]); // 唯一 + 升序（03-05..03-07 由两个事件共同覆盖，只出现一次）
-    expect(projection.mergedKeys).toBe(3); // 03-05 / 03-06 / 03-07 各合并一次
-    expect(projection.rows.map((r) => r.close)).toEqual([10, 11, 12, 13, 14, 15, 16]);
+    ]); // 事件级序列保留重叠日，两个事件各自拥有独立 bars[0]
+    expect(projection.mergedKeys).toBe(3); // 底层证券/交易日重叠键数，仅用于一致性审计
+    expect(projection.rows.map((r) => r.close)).toEqual([10, 11, 12, 12, 13, 13, 14, 14, 15, 16]);
 
     // 决策日资格取自**原始相对日**（任一个事件给出 rd ∈ [1,3] 即具备资格）：
     //   E1：03-03=rd0（否）/ 03-04=rd1 / 03-05=rd2 / 03-06=rd3 / 03-07=rd4（否）
     //   E2：03-05=rd0（否）/ 03-06=rd1 / 03-07=rd2 / 03-10=rd3 / 03-11=rd4（否）
     // ⇒ 03-07 由 E1 看「不具资格」、由 E2 看「具资格」，**任一命中即具资格**（事件池语义）。
-    const member = (d: string) => projection.memberKeys.has(`${d}\u0000${sid("000001.SZ")}`);
-    expect(member("2025-03-03")).toBe(false); // 仅 E1 rd=0
-    expect(member("2025-03-04")).toBe(true); //  E1 rd=1
-    expect(member("2025-03-05")).toBe(true); //  E1 rd=2（E2 那天是 rd=0，不构成资格，但 E1 构成）
-    expect(member("2025-03-06")).toBe(true); //  E1 rd=3 / E2 rd=1
-    expect(member("2025-03-07")).toBe(true); //  E2 rd=2（E1 那天是 rd=4）
-    expect(member("2025-03-10")).toBe(true); //  E2 rd=3
-    expect(member("2025-03-11")).toBe(false); // 仅 E2 rd=4（仅供执行）
+    const member = (d: string, eventId: "E1" | "E2") =>
+      projection.memberKeys.has(`${d}\u0000${eventScopedSecurityId(sid("000001.SZ"), eventId)}`);
+    expect(member("2025-03-03", "E1")).toBe(false); // E1 rd=0
+    expect(member("2025-03-04", "E1")).toBe(true); //  E1 rd=1
+    expect(member("2025-03-05", "E1")).toBe(true); //  E1 rd=2
+    expect(member("2025-03-06", "E1")).toBe(true); //  E1 rd=3
+    expect(member("2025-03-07", "E1")).toBe(false); // E1 rd=4（仅供执行）
+    expect(member("2025-03-05", "E2")).toBe(false); // E2 rd=0
+    expect(member("2025-03-06", "E2")).toBe(true); //  E2 rd=1
+    expect(member("2025-03-07", "E2")).toBe(true); //  E2 rd=2
+    expect(member("2025-03-10", "E2")).toBe(true); //  E2 rd=3
+    expect(member("2025-03-11", "E2")).toBe(false); // E2 rd=4（仅供执行）
   });
 
   it("F. 同一根 K 线数值冲突 ⇒ 响亮抛错（不编造取舍）", () => {
@@ -353,7 +362,7 @@ describe("buildWindowRows — 事件窗口 → 逐日面板", () => {
     const projection = buildWindowRows([event], [zero], post, WINDOW_1_3, idsOf(event));
 
     for (const row of projection.rows) {
-      expect(row.securityId).toBe(sid("000001.SZ")); // canonical 身份
+      expect(row.securityId).toBe(eventScopedSecurityId(sid("000001.SZ"), event.eventId));
       expect(row.code).toBe("000001.SZ"); // 该日生效完整代码
       expect(row.securityId).not.toBe(row.code);
     }

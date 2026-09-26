@@ -23,8 +23,13 @@ export interface SecurityLabelView {
   exchange: string | null;
 }
 
-/** 单次查询的 identity 上限（与服务端契约一致）。 */
-const MAX_IDS = 500;
+/**
+ * 单次 GET 的 identity 上限。
+ *
+ * 服务端契约允许 500 个，但完整 ID 列表放进 query string 会触发反向代理/服务器的
+ * 431（Request Header Fields Too Large）。成交表只展示前 80 条，80 个 UUID 留足 URL 余量。
+ */
+const MAX_IDS = 80;
 
 export function useSecurityLabels(securityIds: readonly string[]): {
   /** `securityId → 标签`；未加载完成或查询失败时为 null（调用方回退显示原始 id）。 */
@@ -37,7 +42,6 @@ export function useSecurityLabels(securityIds: readonly string[]): {
     [securityIds],
   );
   const ids = useMemo(() => (key.length === 0 ? [] : key.split("|")), [key]);
-
   const query = trpc.researchRun.securityLabels.useQuery(
     { securityIds: ids },
     {

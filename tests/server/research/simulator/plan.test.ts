@@ -33,3 +33,51 @@ describe("planDecisionDay · 强制退出与候选退出隔离", () => {
     ]);
   });
 });
+
+describe("planDecisionDay · 单日新建仓上限", () => {
+  it("按排名只保留前 maxDailyBuys 个买入，其余显式记录跳过原因", () => {
+    const intent = (securityId: string, rank: number) => ({
+      securityId,
+      direction: "long" as const,
+      rank,
+      percentile: 1,
+      weight: 1 / 3,
+      signalValue: 1,
+      confidence: null,
+    });
+    const plan = planDecisionDay({
+      decisionDate: "2026-01-05",
+      intents: [intent("A", 1), intent("B", 2), intent("C", 3)],
+      holdings: [],
+      availableBySecurity: new Map(),
+      cash: 100_000,
+      maxPositions: 5,
+      maxDailyBuys: 2,
+      hasNextTradingDay: true,
+      closePriceBySecurity: new Map([
+        ["A", 10],
+        ["B", 10],
+        ["C", 10],
+      ]),
+      amountBySecurity: new Map([
+        ["A", null],
+        ["B", null],
+        ["C", null],
+      ]),
+      cost: COST,
+      directionPolicy: "longOnly",
+    });
+
+    expect(plan.orders).toEqual([
+      expect.objectContaining({ kind: "buy", securityId: "A" }),
+      expect.objectContaining({ kind: "buy", securityId: "B" }),
+    ]);
+    expect(plan.skipped).toEqual([
+      expect.objectContaining({
+        securityId: "C",
+        side: "buy",
+        code: "MAX_DAILY_BUYS_REACHED",
+      }),
+    ]);
+  });
+});

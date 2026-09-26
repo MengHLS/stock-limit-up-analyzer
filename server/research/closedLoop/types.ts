@@ -298,6 +298,10 @@ export interface ClosedLoopBacktestExecutionStats {
 /** 单笔成交投影（`backtest/types.Trade` 的子集；字段同名直搬）。 */
 export interface ClosedLoopBacktestTrade {
   readonly securityId: string;
+  /** 持久化后的展示代码；旧留档 / 未解析时为 null。 */
+  readonly code?: string | null;
+  /** 持久化后的证券名称；名称源未收录时为 null。 */
+  readonly name?: string | null;
   readonly entryTime: string;
   readonly entryPrice: number;
   readonly exitTime: string | null;

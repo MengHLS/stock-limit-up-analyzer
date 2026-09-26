@@ -2,6 +2,7 @@
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/common";
+import { ThreeFactorTopNPanel } from "@/components/strategy/ThreeFactorTopNPanel";
 import { trpc } from "@/lib/trpc";
 import { ChevronRight, Plus } from "lucide-react";
 import { useLocation } from "wouter";
@@ -46,6 +47,8 @@ export default function StrategyList() {
           新建策略
         </Button>
       </div>
+
+      <ThreeFactorTopNPanel />
 
       {list.isLoading && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

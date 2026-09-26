@@ -114,6 +114,7 @@ const REJECTION_REASON_LABEL: Readonly<Record<string, string>> = {
 /** 计划层跳过原因人话表（`SkippedIntentEntry.code`）。 */
 const SKIP_CODE_LABEL: Readonly<Record<string, string>> = {
   MAX_POSITIONS_REACHED: "并发持仓已满位",
+  MAX_DAILY_BUYS_REACHED: "单日买入已达上限",
   BUDGET_BELOW_MIN_LOT: "预算不足一手",
   FROZEN_EXIT_DEFERRED: "T+1 冻结，卖出顺延",
   NO_NEXT_TRADING_DAY: "窗口最后一日无可执行日",
@@ -294,7 +295,10 @@ function StrategyOutputSection({
 
   // 成交明细的「名称 + 代码」字典：只对本次真正出现的标的查一次（只读、展示增强）。
   const tradeSecurityIds = useMemo(
-    () => backtest.trades.map(trade => trade.securityId),
+    () =>
+      backtest.trades
+        .filter(trade => trade.code === null && trade.name === null)
+        .map(trade => trade.securityId),
     [backtest.trades],
   );
   const { labels: securityLabels } = useSecurityLabels(tradeSecurityIds);
@@ -487,6 +491,7 @@ function StrategyOutputSection({
                   <TableHead className="px-3 py-2">净盈亏</TableHead>
                   <TableHead className="px-3 py-2">收益率</TableHead>
                   <TableHead className="px-3 py-2">持有(交易日)</TableHead>
+                  <TableHead className="px-3 py-2">退出原因</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -495,7 +500,16 @@ function StrategyOutputSection({
                     <TableCell className="px-3 py-1.5">
                       <SecurityCell
                         securityId={trade.securityId}
-                        label={securityLabels?.[trade.securityId] ?? null}
+                        label={
+                          trade.code !== null || trade.name !== null
+                            ? {
+                                securityId: trade.securityId,
+                                code: trade.code,
+                                name: trade.name,
+                                exchange: null,
+                              }
+                            : securityLabels?.[trade.securityId] ?? null
+                        }
                       />
                     </TableCell>
                     <TableCell className="px-3 py-1.5 font-mono">{trade.entryTime}</TableCell>
@@ -519,6 +533,9 @@ function StrategyOutputSection({
                     </TableCell>
                     <TableCell className="px-3 py-1.5 font-mono tabular-nums">
                       {fmtInt(trade.holdingPeriod)}
+                    </TableCell>
+                    <TableCell className="px-3 py-1.5 text-muted-foreground">
+                      {trade.exitReason ?? (trade.openAtEnd ? "期末持仓" : "—")}
                     </TableCell>
                   </TableRow>
                 ))}

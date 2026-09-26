@@ -40,8 +40,13 @@ function sourceRef(module: string, moduleRunKind: string, runId: string | null, 
 // ① C-14.1 TradeSimulationRun → backtestSummary（复用其 run 摘要字段）
 // ---------------------------------------------------------------------------
 
-/** 成交明细投影上限（防长窗口把响应体撑爆；截断事实由 `tradesTruncated` 显式表达）。 */
-const BACKTEST_TRADE_DETAIL_LIMIT = 500;
+/**
+ * 成交明细投影上限。
+ *
+ * 事件级 3F TopN（N5）当前产生 1,069 笔；旧的 1,000 会静默丢掉尾部成交。
+ * 5,000 覆盖当前策略全量，同时保留有界上限，避免把任意大规模运行写成无界长文本。
+ */
+const BACKTEST_TRADE_DETAIL_LIMIT = 5_000;
 
 /**
  * 把 C-14.1 simulator 产出的 TradeSimulationRun 摘要化为 backtest 阶段交接。
@@ -104,6 +109,7 @@ export function summarizeTradeSimulationRun(run: TradeSimulationRun): ClosedLoop
       holdingPeriod: trade.holdingPeriod,
       openAtEnd: trade.openAtEnd,
       fees: trade.fees,
+      reason: trade.reason ?? null,
     })),
     tradesTruncated: run.trades.length > BACKTEST_TRADE_DETAIL_LIMIT,
     costs: { ...run.costs },

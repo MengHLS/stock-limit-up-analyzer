@@ -225,6 +225,21 @@ export function validateSimulationConfig(
       );
     }
   }
+  if (config.maxDailyBuys !== undefined && config.maxDailyBuys !== null) {
+    if (
+      typeof config.maxDailyBuys !== "number" ||
+      !Number.isInteger(config.maxDailyBuys) ||
+      config.maxDailyBuys <= 0
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_MAX_DAILY_BUYS_INVALID",
+          "simConfig.maxDailyBuys",
+          "maxDailyBuys 必须是正整数或 null"
+        )
+      );
+    }
+  }
   if (
     config.directionPolicy !== undefined &&
     config.directionPolicy !== "longOnly"
@@ -330,6 +345,22 @@ export function validateSimulationConfig(
         }
       }
     }
+  }
+  if (
+    config.corporateActionResolver !== undefined &&
+    (
+      config.corporateActionResolver === null ||
+      typeof config.corporateActionResolver !== "object" ||
+      typeof config.corporateActionResolver.actionsFor !== "function"
+    )
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_CORPORATE_ACTION_RESOLVER_INVALID",
+        "simConfig.corporateActionResolver",
+        "corporateActionResolver 必须提供 actionsFor(securityId, date)"
+      )
+    );
   }
   return result(issues);
 }
@@ -569,6 +600,21 @@ export function validateTradeSimulationRun(
         )
       );
     }
+    if (
+      config.maxDailyBuys !== undefined &&
+      config.maxDailyBuys !== null &&
+      (typeof config.maxDailyBuys !== "number" ||
+        !Number.isInteger(config.maxDailyBuys) ||
+        config.maxDailyBuys <= 0)
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_MAX_DAILY_BUYS_INVALID",
+          "record.config.maxDailyBuys",
+          "maxDailyBuys 必须是正整数或 null"
+        )
+      );
+    }
     if (config.directionPolicy !== "longOnly") {
       issues.push(
         issue(
@@ -618,7 +664,7 @@ export function validateTradeSimulationRun(
     if (
       config.decisionPoint !== "close" ||
       config.entryExitModel !== "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET" ||
-      config.corporateActions !== "NOT_APPLIED"
+      (config.corporateActions !== "NOT_APPLIED" && config.corporateActions !== "APPLIED")
     ) {
       issues.push(
         issue(

@@ -159,6 +159,27 @@ describe("Portfolio.applyCorporateAction — 现金与生命周期", () => {
     expect(splitNet).toBeGreaterThan(180); // ≈ 200 − 少量费用
     expect(splitNet).toBeLessThan(200);
   });
+
+  it("送股形成零股后可整仓卖出，不被 partial-fill 开关拒绝", () => {
+    const portfolio = new Portfolio(10_000, ["2026-01-01", "2026-01-02"]);
+    portfolio.buy(buyFill("600001.SH", 100, 10, "2026-01-01"), COST, false);
+    portfolio.applyCorporateAction("600001.SH", [
+      action({ actionType: "bonus_issue", bonusRatio: 0.12, effectiveDate: "2026-01-02" }),
+    ]);
+    portfolio.settle();
+
+    expect(portfolio.quantity("600001.SH")).toBe(112);
+    const result = portfolio.sell(
+      sellFill("600001.SH", 112, 10, "2026-01-02"),
+      COST,
+      false,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.status).toBe("FILLED");
+    expect(result.filledQuantity).toBe(112);
+    expect(portfolio.quantity("600001.SH")).toBe(0);
+  });
 });
 
 describe("引擎主循环 — ex-date 应用公司行为", () => {

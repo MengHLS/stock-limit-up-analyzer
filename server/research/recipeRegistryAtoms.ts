@@ -28,6 +28,10 @@ import {
   computeVolumeRatio,
   eventBaselineOf,
 } from "./recipeFeatures/pullbackFeatures";
+import {
+  computeThreeFactorRaw,
+  threeFactorCompositeScoreOf,
+} from "./recipeFeatures/threeFactorScoreFeatures";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
 
 // ---------------------------------------------------------------------------
@@ -156,6 +160,47 @@ export function buildPullbackFeatureProviders(point: DecisionPoint): readonly Fe
     }),
     withBaseline(PULLBACK_FEATURE_IDS.momentum, computeCloseReturnFromEventClose),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// 「首板回踩 · 3F 综合评分」配方的特征原子（2026-09-26 新增）
+// ---------------------------------------------------------------------------
+
+/**
+ * 3F 配方的特征 id（口径逐字对齐 `FROZEN-BUCKET-CONTRACT-001` 的落地处，
+ * 见 `recipeFeatures/threeFactorScoreFeatures.ts` 的偏移表与来源说明）。
+ *
+ * 🔴 **只登记真正被消费的那一个**：本配方是 `gated`（空门槛）+ 排序特征 = 合成分，
+ * 合成分既是「是否产生信号」的判据（可用性），也是横截面取 TopN 的键。
+ * 三个成员的方向分**不登记** —— 闭环不落库逐证券特征值，声明了也没人读
+ * （本项目明确反对「声明了却无效」的静默面）；它们由 `threeFactorScoreFeatures.ts`
+ * 导出，供证据链脚本与研究侧复用。
+ */
+export const THREE_FACTOR_FEATURE_IDS = {
+  /** 排序特征 = 等权合成分 `Σ(oriented) / 3`（与研究侧 EQUAL 分支同浮点路径）。 */
+  composite: "threeFactorCompositeScore",
+} as const;
+
+export const THREE_FACTOR_FEATURE_VERSION = "1.0.0";
+
+/**
+ * 构造 3F 配方的特征提供器。
+ *
+ * 🔴 与回踩配方同一条纪律：无法计算时**返回 null**（该证券当日不进候选），绝不填默认值。
+ * 基准（`bars[0]` = 首板日）缺失、或观察窗口 T+1..T+5 未走完时返回 null
+ * ⇒ 该证券当日不产生信号（这正是「rd < 5 不进决策日」的 PIT 来源）。
+ */
+export function buildThreeFactorFeatureProvider(point: DecisionPoint): FeatureProvider {
+  return makeBarFeatureProvider({
+    featureId: THREE_FACTOR_FEATURE_IDS.composite,
+    version: THREE_FACTOR_FEATURE_VERSION,
+    availability: samePointAvailability(point),
+    compute: (bars) => {
+      const raw = computeThreeFactorRaw(bars);
+      if (raw === null) return null;
+      return threeFactorCompositeScoreOf(raw);
+    },
+  });
 }
 
 /**

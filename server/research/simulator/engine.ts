@@ -38,6 +38,7 @@ import {
   resolveExecutionRuleContext,
 } from "../../backtest/marketRules";
 import { createExecutionModel } from "../../backtest/execution";
+import { limitDownPrice, validPrice } from "../../engine/execution";
 import { Portfolio } from "../../backtest/portfolio";
 import { AuditLog, fillAuditEntry } from "../../backtest/audit";
 import { bindResearchDataset } from "../datasetAccess/handle";
@@ -199,6 +200,7 @@ function buildConfigSnapshot(
     cost: config.cost,
     executionModel: config.executionModel ?? "NEXT_OPEN",
     maxPositions: config.maxPositions ?? null,
+    maxDailyBuys: config.maxDailyBuys ?? null,
     directionPolicy: config.directionPolicy ?? "longOnly",
     executionRules,
     allowPartialFill: config.allowPartialFill ?? false,
@@ -211,7 +213,7 @@ function buildConfigSnapshot(
     lotSize: config.cost.lotSize > 0 ? Math.floor(config.cost.lotSize) : 1,
     decisionPoint: "close",
     entryExitModel: "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET",
-    corporateActions: "NOT_APPLIED",
+    corporateActions: config.corporateActionResolver === undefined ? "NOT_APPLIED" : "APPLIED",
   };
 }
 
@@ -381,6 +383,7 @@ export function runTradeSimulation(
   // BACKTEST-002（B-05）— 成交量为 0 的政策：缺省 REJECT（保守）；只有显式声明才 IGNORE。
   const zeroVolumePolicy = simConfig.zeroVolumePolicy ?? "REJECT";
   const maxPositions = simConfig.maxPositions ?? null;
+  const maxDailyBuys = simConfig.maxDailyBuys ?? null;
   const directionPolicy = simConfig.directionPolicy ?? "longOnly";
   const securityBoards = simConfig.securityBoards;
   const configSnapshot = buildConfigSnapshot(simConfig, {
@@ -438,6 +441,14 @@ export function runTradeSimulation(
   const equityCurve: EquityPoint[] = [];
   const skippedEntries: SkippedIntentEntry[] = [];
   let pending: PendingOrder[] = [];
+  /**
+   * 已触发止损的持仓。
+   *
+   * 止损卖单可能因开盘跌停/停牌被拒；该状态必须跨日保留，直到真正清仓。
+   * 否则后续候选退出/时间退出成交时会把最终 Trade.reason 覆盖掉，页面看起来
+   * 像“止损从未触发”，实际是风控卖单被拒后没有继承原始退出原因。
+   */
+  const stopLossTriggered = new Map<string, string>();
   let orderSeq = 0;
   let fillSeq = 0;
   let lastClosePrices = new Map<string, number>();
@@ -449,6 +460,14 @@ export function runTradeSimulation(
 
     // (a) T+1 结算：前一日冻结份额转可卖。
     portfolio.settle();
+
+    // (a2) 公司行为：先于当日订单与估值应用分红/送转/配股/拆合股。
+    if (simConfig.corporateActionResolver !== undefined) {
+      for (const securityId of portfolio.openPositionSymbols()) {
+        const actions = simConfig.corporateActionResolver.actionsFor(securityId, date);
+        if (actions.length > 0) portfolio.applyCorporateAction(securityId, actions);
+      }
+    }
 
     // (b) 当日行切片 + bar 索引（一个 chunk，处理完即弃，内存克制）。
     const { start, end } = dateRowRange(handle.rows, date);
@@ -462,6 +481,10 @@ export function runTradeSimulation(
     const due = pending.filter(entry => entry.executionTime === date);
     pending = pending.filter(entry => entry.executionTime !== date);
     for (const entry of due) {
+      const effectiveExitReason =
+        entry.side === "sell"
+          ? stopLossTriggered.get(entry.securityId) ?? entry.exitReason
+          : null;
       const bar = dayBars.get(entry.securityId);
       if (!bar) {
         // 停牌：当日非 universe 成员 → 无行 → 无成交（显式拒绝，不静默顺延）。
@@ -577,7 +600,7 @@ export function runTradeSimulation(
         },
         slippageAmount: 0,
         referenceAmount: entry.referenceAmount,
-        reason: entry.exitReason,
+        reason: effectiveExitReason,
       };
       const result =
         entry.side === "buy"
@@ -658,6 +681,9 @@ export function runTradeSimulation(
         frozenQuantity: afterQuantity - portfolio.available(entry.securityId),
         explanation: entry.side === "buy" ? "买入增加持仓" : "卖出减少持仓",
       });
+      if (entry.side === "sell" && afterQuantity === 0) {
+        stopLossTriggered.delete(entry.securityId);
+      }
     }
 
     // (c2) 盘中阈值退出：止损 / 止盈按当日 OHLC 触发并成交。
@@ -676,11 +702,36 @@ export function runTradeSimulation(
         const takeProfitPrice = exitPolicy.takeProfitRatio === null
           ? null
           : detail.entryPrice * (1 + exitPolicy.takeProfitRatio);
+        const ruleContext = resolveExecutionRuleContext(
+          securityOf(detail.securityId),
+          marketRules,
+          executionRules,
+          date,
+        );
         let exitReason: string | null = null;
         let triggerPrice: number | null = null;
         if (stopPrice !== null && bar.low <= stopPrice) {
           exitReason = `止损（${(exitPolicy.stopLossRatio! * 100).toFixed(2)}%）`;
-          triggerPrice = bar.open !== null && bar.open <= stopPrice ? bar.open : stopPrice;
+          stopLossTriggered.set(detail.securityId, exitReason);
+          if (bar.open !== null && bar.open <= stopPrice) {
+            const openAtLimitDown =
+              ruleContext.limitDownRatio > 0
+              &&
+              validPrice(bar.preClose)
+              && validPrice(bar.open)
+              && bar.open <= limitDownPrice(bar.preClose as number, ruleContext.limitDownRatio);
+            // 开盘跌停但盘中重新拉回止损价上方时，不能把开盘价当成全天唯一
+            // 可成交价；按拉回后的止损价成交。只有全天封死跌停（high 未回到
+            // 止损价）才继续由执行模型拒绝并顺延。
+            triggerPrice =
+              openAtLimitDown
+              && bar.high !== null
+              && bar.high >= stopPrice
+                ? stopPrice
+                : bar.open;
+          } else {
+            triggerPrice = stopPrice;
+          }
         } else if (takeProfitPrice !== null && bar.high >= takeProfitPrice) {
           exitReason = `止盈（${(exitPolicy.takeProfitRatio! * 100).toFixed(2)}%）`;
           triggerPrice = bar.open !== null && bar.open >= takeProfitPrice ? bar.open : takeProfitPrice;
@@ -690,12 +741,6 @@ export function runTradeSimulation(
         orderSeq += 1;
         const orderId = `ORD-${orderSeq}`;
         stats.totalOrders += 1;
-        const ruleContext = resolveExecutionRuleContext(
-          securityOf(detail.securityId),
-          marketRules,
-          executionRules,
-          date,
-        );
         const syntheticBar: CanonicalMarketBar = {
           ...bar,
           open: triggerPrice,
@@ -819,6 +864,7 @@ export function runTradeSimulation(
           frozenQuantity: afterQuantity - portfolio.available(detail.securityId),
           explanation: exitReason,
         });
+        if (afterQuantity === 0) stopLossTriggered.delete(detail.securityId);
       }
     }
 
@@ -857,6 +903,7 @@ export function runTradeSimulation(
         availableBySecurity,
         cash: portfolio.cash,
         maxPositions,
+        maxDailyBuys,
         hasNextTradingDay: nextDate !== null,
         closePriceBySecurity,
         amountBySecurity,
@@ -902,7 +949,10 @@ export function runTradeSimulation(
           quantity: item.quantity,
           executionTime: nextDate,
           referenceAmount: item.kind === "buy" ? item.referenceAmount : null,
-          exitReason,
+          exitReason:
+            item.kind === "sell"
+              ? stopLossTriggered.get(item.securityId) ?? exitReason
+              : exitReason,
         });
         audit.recordOrder({
           orderId,
@@ -920,6 +970,126 @@ export function runTradeSimulation(
         });
       }
       skippedEntries.push(...plan.skipped);
+    }
+
+    // (d-2) 面板末日清算（防悬挂）。
+    //
+    // 🔴 问题：卖出订单的 `executionTime` 固定是 **nextDate**（NEXT_OPEN 语义）。若某证券在
+    // nextDate **没有行情行**，这笔卖出注定被拒，而引擎会**逐日重试直到期末** ⇒ 持仓永久
+    // 悬挂。实测（690001 / 2025-11..2026-09）：`holdingPeriod` 出现 67/76/108/134 的长尾，
+    // `SUSPENDED / 执行日无行` 累计 697 次、`SUBMITTED / 执行日无行` 705 次。
+    //
+    // 🔴 判据：**明日无行**即清算（不是「最后一个有行情日」—— 同一证券的多个事件会让
+    // 面板行跨度达 34~210 行，按末日判定永远不触发，第一版兜底因此完全无效）。
+    //
+    // 修正动作：当日还有行情 ⇒ **按当日收盘价**强制清算，仍走
+    // 「syntheticBar → executionModel.quote → portfolio.sell」以保留滑点与费用；
+    // 但把 syntheticBar.preClose 设为收盘价，显式绕过「最后一行跌停无法再次重试」
+    // 的僵局。该绕过仅在事件面板没有下一行时发生，并写入退出原因。
+    if (nextDate !== null) {
+      for (const detail of portfolio.openTradeDetails().sort((a, b) => a.securityId.localeCompare(b.securityId))) {
+        // 明日仍有行 ⇒ 正常退出路径可行，不干预。
+        if (rowKeys.has(`${nextDate}\u0000${detail.securityId}`)) continue;
+        const bar = dayBars.get(detail.securityId);
+        const closePrice =
+          bar !== undefined
+          && bar.close !== null
+          && Number.isFinite(bar.close)
+          && bar.close > 0
+            ? bar.close
+            : lastClosePrices.get(detail.securityId) ?? null;
+        if (closePrice === null || !Number.isFinite(closePrice) || closePrice <= 0) continue;
+        const available = portfolio.available(detail.securityId);
+        if (available <= 0) continue; // T+1 冻结，留到下一交易日再判
+
+        const exitReason =
+          `面板末日清算（下一交易日 ${nextDate} 无行情，按当日收盘价平仓，避免悬挂到期末）`;
+        orderSeq += 1;
+        const orderId = `ORD-${orderSeq}`;
+        stats.totalOrders += 1;
+        // The event panel has no later executable bar. A normal NEXT_OPEN
+        // retry is impossible, so close directly at the last known close with
+        // the configured sell slippage; fees are still applied below.
+        const forcedPrice = Number(
+          (closePrice * (1 - Math.max(0, cost.slippageBps) / 10_000)).toFixed(4),
+        );
+        const fill = {
+          fillId: `FILL-${fillSeq}`,
+          orderId,
+          securityId: detail.securityId,
+          side: "sell" as const,
+          quantity: available,
+          price: forcedPrice,
+          basePrice: closePrice,
+          timestamp: date,
+          cost: { commission: 0, stampDuty: 0, transferFee: 0, otherFees: 0, total: 0 },
+          slippageAmount: 0,
+          referenceAmount: null,
+          reason: exitReason,
+        };
+        const result = portfolio.sell(fill, cost, allowPartialFill);
+        if (!result.success) {
+          stats.rejectedOrders += 1;
+          const reason = result.rejectionReason ?? "OTHER";
+          stats.byReason[reason] = (stats.byReason[reason] ?? 0) + 1;
+          audit.recordOrder({
+            orderId,
+            securityId: detail.securityId,
+            tradeDate: date,
+            side: "sell",
+            requestedQuantity: available,
+            filledQuantity: 0,
+            status: "REJECTED",
+            rejectionReason: reason,
+            explanation: `${exitReason}：组合约束拒绝（${result.reason}）`,
+          });
+          continue;
+        }
+        const filledQuantity = result.filledQuantity;
+        const gross = fill.price * filledQuantity;
+        const tradeCost = computeTradeCost("sell", gross, cost);
+        const slippage = slippageAmount(fill.price, fill.basePrice, filledQuantity);
+        if (result.status === "PARTIALLY_FILLED") stats.partialFills += 1;
+        stats.totalFills += 1;
+        accumulateCost("sell", tradeCost, slippage);
+        audit.recordFill(
+          fillAuditEntry(
+            `FILL-${fillSeq}`,
+            orderId,
+            detail.securityId,
+            "sell",
+            filledQuantity,
+            fill.price,
+            fill.basePrice,
+            date,
+            slippage,
+            tradeCost,
+          ),
+        );
+        fillSeq += 1;
+        audit.recordOrder({
+          orderId,
+          securityId: detail.securityId,
+          tradeDate: date,
+          side: "sell",
+          requestedQuantity: available,
+          filledQuantity,
+          status: result.status,
+          rejectionReason: result.status === "PARTIALLY_FILLED" ? "OTHER" : null,
+          explanation: `${exitReason}：卖出成交 ${filledQuantity} 股 @ ${fill.price}`,
+        });
+        const afterQuantity = portfolio.quantity(detail.securityId);
+        audit.recordPosition({
+          securityId: detail.securityId,
+          timestamp: date,
+          event: afterQuantity === 0 ? "close" : "decrease",
+          beforeQuantity: afterQuantity + filledQuantity,
+          afterQuantity,
+          availableQuantity: portfolio.available(detail.securityId),
+          frozenQuantity: afterQuantity - portfolio.available(detail.securityId),
+          explanation: exitReason,
+        });
+      }
     }
 
     // (e) 收盘后记录权益点。

@@ -341,6 +341,38 @@ describe("端到端：候选 → 交易模拟（T+1 与执行模型）", () => {
     expect(trade.openAtEnd).toBe(true);
   });
 
+  it("买入日触发止损但 T+1 冻结，下一交易日开盘应立刻卖出", () => {
+    const buyDecision = "2026-05-05";
+    const buyDay = "2026-05-06";
+    const stopDay = "2026-05-07";
+    const nextDay = "2026-05-08";
+    const stopSeeds: readonly SeedSpec[] = [
+      { date: buyDecision, sec: "A", open: 9.9, close: 10, preClose: 9.5 },
+      { date: buyDay, sec: "A", open: 11.32, close: 10.56, preClose: 11.44 },
+      { date: stopDay, sec: "A", open: 10.38, close: 9.91, preClose: 10.56 },
+      { date: nextDay, sec: "A", open: 9.92, close: 9.92, preClose: 9.91 },
+    ];
+    const built = buildDataset(stopSeeds, "sim-stop-t1-v1");
+    const candidate = runCandidates(built, "sim-stop-t1-v1", buyDecision, buyDecision, 1);
+    const run = runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: makeSimConfig({
+        executionModel: "NEXT_OPEN",
+        dateRange: { startDate: buyDecision, endDate: nextDay },
+        exitPolicy: { stopLossRatio: 0.05, takeProfitRatio: null, maxHoldingDays: null },
+        allowPartialFill: true,
+      }),
+    });
+
+    const trade = run.trades.find(item => item.securityId === "A")!;
+    expect(trade.entryTime).toBe(buyDay);
+    expect(trade.entryPrice).toBeCloseTo(11.32, 10);
+    expect(trade.exitTime).toBe(stopDay);
+    expect(trade.exitPrice).toBeCloseTo(10.38, 10);
+    expect(trade.reason).toBe("止损（5.00%）");
+  });
+
   it("换 NEXT_CLOSE 后成交价 = T+1 收盘价（同样非决策日收盘，e）", () => {
     const run = makeRun("NEXT_CLOSE");
     expect(run.executionStats.totalFills).toBe(1);
@@ -456,14 +488,14 @@ describe("涨跌停与停牌限制", () => {
     // L1 决策选 B（pct +3% > A +1%）；L2 B 开盘 = 涨停价 11.0（preClose=10.0）。
     const seeds: readonly SeedSpec[] = [
       { date: L1, sec: "A", open: 10.0, close: 10.1, preClose: 10.0 },
-      { date: L1, sec: "B", open: 9.9, close: 10.0, preClose: 9.7 },
+      { date: L1, sec: "600001.SH", open: 9.9, close: 10.0, preClose: 9.7 },
       { date: L2, sec: "A", open: 10.0, close: 10.0, preClose: 10.1 },
-      { date: L2, sec: "B", open: 11.0, close: 11.0, preClose: 10.0 },
+      { date: L2, sec: "600001.SH", open: 11.0, close: 11.0, preClose: 10.0 },
     ];
     const VERSION = "sim-limit-v1";
     const built = buildDataset(seeds, VERSION);
     const candidate = runCandidates(built, VERSION, L1, L1, 1);
-    expect(candidate.days[0]!.selected[0]!.securityId).toBe("B");
+    expect(candidate.days[0]!.selected[0]!.securityId).toBe("600001.SH");
 
     const simConfig = makeSimConfig({
       initialCapital: 150_000,
@@ -479,16 +511,16 @@ describe("涨跌停与停牌限制", () => {
     expect(run.executionStats.rejectedOrders).toBe(1);
     expect(run.executionStats.byReason.LIMIT_UP).toBe(1);
     const rejected = run.audit.orders.find(o => o.status === "REJECTED")!;
-    expect(rejected.securityId).toBe("B");
+    expect(rejected.securityId).toBe("600001.SH");
     expect(rejected.rejectionReason).toBe("LIMIT_UP");
   });
 
   it("不拦截涨停 + 部分成交开启时，涨停开盘价可成交（价格=11.0，规则可配置）", () => {
     const seeds: readonly SeedSpec[] = [
       { date: L1, sec: "A", open: 10.0, close: 10.1, preClose: 10.0 },
-      { date: L1, sec: "B", open: 9.9, close: 10.0, preClose: 9.7 },
+      { date: L1, sec: "600001.SH", open: 9.9, close: 10.0, preClose: 9.7 },
       { date: L2, sec: "A", open: 10.0, close: 10.0, preClose: 10.1 },
-      { date: L2, sec: "B", open: 11.0, close: 11.0, preClose: 10.0 },
+      { date: L2, sec: "600001.SH", open: 11.0, close: 11.0, preClose: 10.0 },
     ];
     const VERSION = "sim-limit-v2";
     const built = buildDataset(seeds, VERSION);
@@ -534,6 +566,39 @@ describe("涨跌停与停牌限制", () => {
     const rejected = run.audit.orders.find(o => o.status === "REJECTED")!;
     expect(rejected.securityId).toBe("B");
     expect(rejected.rejectionReason).toBe("SUSPENDED");
+  });
+
+  it("事件窗口最后一行跌停且次日无行情 → 面板末日强制清算，不以 openAtEnd 悬挂", () => {
+    const D1 = "2026-04-13";
+    const D2 = "2026-04-14";
+    const D3 = "2026-04-15";
+    const D4 = "2026-04-16";
+    const seeds: readonly SeedSpec[] = [
+      { date: D1, sec: "A", open: 10.0, close: 10.5, preClose: 10.0 },
+      { date: D2, sec: "A", open: 10.5, close: 10.6, preClose: 10.5 },
+      // D3 为事件窗口最后一行，开盘即跌停。
+      { date: D3, sec: "A", open: 9.54, close: 9.54, preClose: 10.6 },
+      // D4 只有另一证券有行；A 没有下一行，无法重试卖出。
+      { date: D4, sec: "B", open: 10.0, close: 10.0, preClose: 10.0 },
+    ];
+    const VERSION = "sim-window-tail-limit-down-v1";
+    const built = buildDataset(seeds, VERSION);
+    const candidate = runCandidates(built, VERSION, D1, D1, 1);
+    const run = runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: makeSimConfig({
+        initialCapital: 200_000,
+        dateRange: { startDate: D1, endDate: D4 },
+        executionRules: { blockLimitDownSell: true },
+      }),
+    });
+
+    const trade = run.trades.find(item => item.securityId === "A")!;
+    expect(trade.openAtEnd).toBe(false);
+    expect(trade.exitTime).toBe(D3);
+    expect(trade.reason).toContain("面板末日清算");
+    expect(run.positions.find(position => position.securityId === "A")).toBeUndefined();
   });
 });
 

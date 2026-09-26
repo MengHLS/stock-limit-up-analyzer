@@ -15,6 +15,10 @@ import { BREAKOUT_SUCCESS_RESEARCH } from "./breakoutSuccessResearch";
 import { STOP_LOSS_RESEARCH } from "./stopLossResearch";
 import { MARKET_REGIME_STABILITY } from "./marketRegimeStability";
 import { LEADER_CANDIDATE_BASELINE } from "./leaderCandidateBaseline";
+import {
+  FIRST_LIMIT_PULLBACK_3F_TOPN3,
+  FIRST_LIMIT_PULLBACK_3F_TOPN5,
+} from "./firstLimitPullback3FTopN";
 
 export {
   FIRST_LIMIT_PULLBACK_HOLD_SHRINK,
@@ -27,6 +31,13 @@ export { BREAKOUT_SUCCESS_RESEARCH } from "./breakoutSuccessResearch";
 export { STOP_LOSS_RESEARCH } from "./stopLossResearch";
 export { MARKET_REGIME_STABILITY } from "./marketRegimeStability";
 export { LEADER_CANDIDATE_BASELINE } from "./leaderCandidateBaseline";
+export {
+  FIRST_LIMIT_PULLBACK_3F_TOPN3,
+  FIRST_LIMIT_PULLBACK_3F_TOPN5,
+  THREE_FACTOR_TOPN_OBSERVATION_WINDOW,
+  THREE_FACTOR_TOPN_MAX_HOLDING_DAYS,
+  THREE_FACTOR_TOPN_STOP_LOSS_RATIO,
+} from "./firstLimitPullback3FTopN";
 
 /**
  * 全部已声明的交易模式。
@@ -44,4 +55,7 @@ export const ALL_TRADING_PATTERNS: readonly TradingPatternSpec[] = [
   STOP_LOSS_RESEARCH,
   MARKET_REGIME_STABILITY,
   LEADER_CANDIDATE_BASELINE,
+  // 2026-09-26 新增：把 3F 综合评分（RESULT-OOS-COMPOSITE-3F-001）落成可回测策略。
+  FIRST_LIMIT_PULLBACK_3F_TOPN3,
+  FIRST_LIMIT_PULLBACK_3F_TOPN5,
 ];

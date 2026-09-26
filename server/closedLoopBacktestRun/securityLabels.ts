@@ -27,6 +27,9 @@ import { getDb } from "../db";
 import { limitUpRecords, researchSecurityIdentifierHistory } from "../../drizzle/schema";
 import { isValidDigits, normalizeSecurityCode } from "../security/code";
 import { buildLatestStockNameMap } from "../../shared/stockDataNormalization";
+import { withReadRetry } from "../readRetry";
+import { baseSecurityIdOf } from "../eventIdentity";
+import type { ClosedLoopRunResult } from "../../shared/researchContracts";
 
 /** 单个证券的展示标签（名称可为空 —— 那是如实的数据缺口）。 */
 export type SecurityLabel = {
@@ -131,23 +134,29 @@ function dedupe(ids: readonly string[]): string[] {
 export async function loadSecurityLabels(
   securityIds: readonly string[],
 ): Promise<SecurityLabel[]> {
-  const ids = dedupe(securityIds).slice(0, SECURITY_LABEL_MAX_IDS);
-  if (ids.length === 0) return [];
+  const aliases = dedupe(securityIds)
+    .slice(0, SECURITY_LABEL_MAX_IDS)
+    .map((securityId) => ({ securityId, baseSecurityId: baseSecurityIdOf(securityId) }));
+  if (aliases.length === 0) return [];
+  const ids = [...new Set(aliases.map((item) => item.baseSecurityId))];
 
   const db = await getDb();
   if (!db) {
     throw new Error("数据库不可用，无法解析证券名称");
   }
 
-  const identifierRows = (await db
-    .select({
-      securityId: researchSecurityIdentifierHistory.securityId,
-      exchange: researchSecurityIdentifierHistory.exchange,
-      code: researchSecurityIdentifierHistory.securityCode,
-      identifierType: researchSecurityIdentifierHistory.identifierType,
-    })
-    .from(researchSecurityIdentifierHistory)
-    .where(inArray(researchSecurityIdentifierHistory.securityId, ids))) as SecurityIdentifierRow[];
+  const identifierRows = await withReadRetry(
+    "securityLabels.identifiers",
+    async () => (await db
+      .select({
+        securityId: researchSecurityIdentifierHistory.securityId,
+        exchange: researchSecurityIdentifierHistory.exchange,
+        code: researchSecurityIdentifierHistory.securityCode,
+        identifierType: researchSecurityIdentifierHistory.identifierType,
+      })
+      .from(researchSecurityIdentifierHistory)
+      .where(inArray(researchSecurityIdentifierHistory.securityId, ids))) as SecurityIdentifierRow[],
+  );
 
   // 先算出代码，再**只**按这些代码去名称源取数 —— 不整表扫 9.9 万行。
   const identityToCode = new Map<string, string>();
@@ -165,18 +174,113 @@ export async function loadSecurityLabels(
   }
   const codes = Array.from(new Set(identityToCode.values()));
   if (codes.length === 0) {
-    return buildSecurityLabels(ids, identifierRows, []);
+    return aliasResolvedLabels(aliases, buildSecurityLabels(ids, identifierRows, []));
   }
 
-  const nameRows = (await db
-    .select({
-      stockCode: limitUpRecords.stockCode,
-      stockName: limitUpRecords.stockName,
-      limitUpDate: limitUpRecords.limitUpDate,
-      limitUpTime: limitUpRecords.limitUpTime,
-    })
-    .from(limitUpRecords)
-    .where(inArray(limitUpRecords.stockCode, codes))) as StockNameRecordRow[];
+  const nameRows = await withReadRetry(
+    "securityLabels.names",
+    async () => (await db
+      .select({
+        stockCode: limitUpRecords.stockCode,
+        stockName: limitUpRecords.stockName,
+        limitUpDate: limitUpRecords.limitUpDate,
+        limitUpTime: limitUpRecords.limitUpTime,
+      })
+      .from(limitUpRecords)
+      .where(inArray(limitUpRecords.stockCode, codes))) as StockNameRecordRow[],
+  );
 
-  return buildSecurityLabels(ids, identifierRows, nameRows);
+  return aliasResolvedLabels(aliases, buildSecurityLabels(ids, identifierRows, nameRows));
+}
+
+function aliasResolvedLabels(
+  aliases: readonly { securityId: string; baseSecurityId: string }[],
+  labels: readonly SecurityLabel[],
+): SecurityLabel[] {
+  const byBase = new Map(labels.map((label) => [label.securityId, label]));
+  return aliases.map((alias) => {
+    const label = byBase.get(alias.baseSecurityId);
+    return {
+      securityId: alias.securityId,
+      code: label?.code ?? null,
+      name: label?.name ?? null,
+      exchange: label?.exchange ?? null,
+    };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function collectResultTradeIds(result: ClosedLoopRunResult): string[] {
+  const ids: string[] = [];
+  for (const stage of result.stages) {
+    const output = stage.output;
+    if (!isRecord(output) || output.kind !== "backtestSummary" || !Array.isArray(output.trades)) continue;
+    for (const trade of output.trades) {
+      if (isRecord(trade) && typeof trade.securityId === "string") ids.push(trade.securityId);
+    }
+  }
+  if (result.backtest !== null && result.backtest !== undefined && Array.isArray(result.backtest.tradeSamples)) {
+    for (const trade of result.backtest.tradeSamples) {
+      if (isRecord(trade) && typeof trade.securityId === "string") ids.push(trade.securityId);
+    }
+  }
+  return ids;
+}
+
+/**
+ * 把名称 / 代码写进留档中的成交对象。
+ *
+ * 落点同时覆盖：
+ *   - `stages[backtest].output.trades`（详情页交易表真实读取面）；
+ *   - `backtest.tradeSamples`（有界回测载荷中的成交样本）。
+ * 这是展示身份的一次性持久化，不参与任何指标计算。
+ */
+export function attachSecurityLabelsToClosedLoopResult(
+  result: ClosedLoopRunResult,
+  labels: readonly SecurityLabel[],
+): ClosedLoopRunResult {
+  const byId = new Map(labels.map(label => [label.securityId, label]));
+  const enrichTrades = (trades: readonly unknown[]): unknown[] =>
+    trades.map((trade) => {
+      if (!isRecord(trade) || typeof trade.securityId !== "string") return trade;
+      const label = byId.get(trade.securityId);
+      return {
+        ...trade,
+        code: label?.code ?? null,
+        name: label?.name ?? null,
+        exchange: label?.exchange ?? null,
+      };
+    });
+
+  const cloned = structuredClone(result) as unknown as {
+    stages: Array<{ output?: unknown }>;
+    backtest?: { tradeSamples?: unknown[] } | null;
+  };
+  for (const stage of cloned.stages) {
+    const output = stage.output;
+    if (!isRecord(output) || output.kind !== "backtestSummary" || !Array.isArray(output.trades)) continue;
+    output.trades = enrichTrades(output.trades);
+  }
+  if (cloned.backtest !== null && cloned.backtest !== undefined && Array.isArray(cloned.backtest.tradeSamples)) {
+    cloned.backtest.tradeSamples = enrichTrades(cloned.backtest.tradeSamples);
+  }
+  return cloned as unknown as ClosedLoopRunResult;
+}
+
+/** 读取一次标识表，把名称 / 代码永久贴到本次留档结果。 */
+export async function withPersistedSecurityLabels(
+  result: ClosedLoopRunResult,
+): Promise<ClosedLoopRunResult> {
+  const ids = [...new Set(collectResultTradeIds(result))];
+  if (ids.length === 0) return result;
+  const labels: SecurityLabel[] = [];
+  for (let index = 0; index < ids.length; index += SECURITY_LABEL_MAX_IDS) {
+    labels.push(
+      ...(await loadSecurityLabels(ids.slice(index, index + SECURITY_LABEL_MAX_IDS))),
+    );
+  }
+  return attachSecurityLabelsToClosedLoopResult(result, labels);
 }

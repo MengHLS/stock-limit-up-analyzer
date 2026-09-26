@@ -7,7 +7,8 @@
  *     可卖为 0（当日买入仍冻结，T+1）→ 顺延（FROZEN_EXIT_DEFERRED），不静默；
  *   - 进入：desired 中当前未持仓的候选 → 按意图权重在「决策日收盘可用现金」上
  *     分配预算 → 买入股数（整手、含佣金估算，保证不超预算）；
- *     并发持仓达上限 → MAX_POSITIONS_REACHED；预算不足一手 → BUDGET_BELOW_MIN_LOT；
+ *     并发持仓达上限 → MAX_POSITIONS_REACHED；单日新建仓达上限 → MAX_DAILY_BUYS_REACHED；
+ *     预算不足一手 → BUDGET_BELOW_MIN_LOT；
  *   - 决策日无候选意图 → 视为信息不足，持仓不变（不强制清仓）；
  *   - 窗口最后交易日无下一交易日 → 全部意图 NO_NEXT_TRADING_DAY。
  *
@@ -71,6 +72,8 @@ export interface PlanDecisionInput {
   readonly cash: number;
   /** 并发持仓上限；null = 不限。 */
   readonly maxPositions: number | null;
+  /** 单日最多新建仓数；null/缺省 = 不限。 */
+  readonly maxDailyBuys?: number | null;
   /** 决策日是否仍有下一交易日（可执行日）。 */
   readonly hasNextTradingDay: boolean;
   /** 决策日收盘价（securityId → 元）；缺失=数据缺失。 */
@@ -222,6 +225,7 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     availableBySecurity,
     cash,
     maxPositions,
+    maxDailyBuys,
     hasNextTradingDay,
     closePriceBySecurity,
     amountBySecurity,
@@ -329,11 +333,11 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     maxPositions === null
       ? Number.POSITIVE_INFINITY
       : Math.max(0, maxPositions - openPositionCount);
-  const entries: PositionIntent[] = [];
+  const positionEligible: PositionIntent[] = [];
   const blockedByCap: PositionIntent[] = [];
   for (const intent of longs) {
     if (holdingSet.has(intent.securityId)) continue; // 已持有：hold，不加仓（STEP 8 Portfolio 不支持加仓）
-    if (entries.length < slotCap) entries.push(intent);
+    if (positionEligible.length < slotCap) positionEligible.push(intent);
     else blockedByCap.push(intent);
   }
   for (const intent of blockedByCap) {
@@ -344,6 +348,23 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
         "buy",
         "MAX_POSITIONS_REACHED",
         `并发持仓已达上限 ${maxPositions}，新候选无空位`
+      )
+    );
+  }
+
+  const dailyBuyCap = maxDailyBuys ?? null;
+  const entries =
+    dailyBuyCap === null ? positionEligible : positionEligible.slice(0, dailyBuyCap);
+  const blockedByDailyCap =
+    dailyBuyCap === null ? [] : positionEligible.slice(dailyBuyCap);
+  for (const intent of blockedByDailyCap) {
+    skipped.push(
+      skip(
+        decisionDate,
+        intent.securityId,
+        "buy",
+        "MAX_DAILY_BUYS_REACHED",
+        `单日买入已达上限 ${dailyBuyCap} 只，后续候选未在下单计划中`
       )
     );
   }

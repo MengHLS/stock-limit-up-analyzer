@@ -142,6 +142,7 @@
 | [`first-board-pullback/fundamental-study/README.md`](../research-experiments/first-board-pullback/fundamental-study/README.md) | EXP-001（`9cj`） |
 | [`first-board-pullback/stability-validation/README.md`](../research-experiments/first-board-pullback/stability-validation/README.md) | EXP-002（`9cl`） |
 | [`template/README.md`](../research-experiments/template/README.md) | 新实验模板 |
+| [`PLAN-MARKET-LEADER-REVERSAL-001.md`](research/PLAN-MARKET-LEADER-REVERSAL-001.md) | 市场总龙生命周期与断板反抽研究计划（Phase 0 已通过） |
 
 ## 11. 归档区
 

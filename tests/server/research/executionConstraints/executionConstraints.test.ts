@@ -823,15 +823,17 @@ describe("约束生效端到端（runTradeSimulation）", () => {
   });
 
   it("开盘涨停禁买 → 买入订单 LIMIT_UP 拒绝；关闭拦截则正常成交", () => {
+    const securityA = "600000.SH";
+    const securityB = "600001.SH";
     const seeds: readonly SeedSpec[] = [
-      { date: U1, sec: "A", open: 10.0, close: 10.1, preClose: 10.0 },
-      { date: U1, sec: "B", open: 9.9, close: 10.0, preClose: 9.7 },
-      { date: U2, sec: "A", open: 10.0, close: 10.0, preClose: 10.1 },
-      { date: U2, sec: "B", open: 11.0, close: 11.0, preClose: 10.0 },
+      { date: U1, sec: securityA, open: 10.0, close: 10.1, preClose: 10.0 },
+      { date: U1, sec: securityB, open: 9.9, close: 10.0, preClose: 9.7 },
+      { date: U2, sec: securityA, open: 10.0, close: 10.0, preClose: 10.1 },
+      { date: U2, sec: securityB, open: 11.0, close: 11.0, preClose: 10.0 },
     ];
     const built = buildDataset(seeds, "excon-limitup-v1");
     const candidate = runCandidates(built, "excon-limitup-v1", U1, U1, 1);
-    expect(candidate.days[0]!.selected[0]!.securityId).toBe("B");
+    expect(candidate.days[0]!.selected[0]!.securityId).toBe(securityB);
 
     // 开涨停禁买 → 拒绝。
     const blocked = createExecutionConstraintDeclaration({
@@ -850,7 +852,7 @@ describe("约束生效端到端（runTradeSimulation）", () => {
     expect(runBlocked.executionStats.rejectedOrders).toBe(1);
     expect(runBlocked.executionStats.byReason.LIMIT_UP).toBe(1);
     const rejected = runBlocked.audit.orders.find(o => o.status === "REJECTED")!;
-    expect(rejected.securityId).toBe("B");
+    expect(rejected.securityId).toBe(securityB);
     expect(rejected.rejectionReason).toBe("LIMIT_UP");
 
     // 同场景关闭拦截 + 部分成交 → 涨停开盘价成交（对照：限制是唯一拒绝原因）。
@@ -873,25 +875,27 @@ describe("约束生效端到端（runTradeSimulation）", () => {
   });
 
   it("开盘跌停禁卖 → 卖出订单 LIMIT_DOWN 拒绝", () => {
+    const securityA = "600000.SH";
+    const securityB = "600001.SH";
     // A 入选（R1 决策）→ R2 开盘买入；R2/R3 B 接力入选 → A 掉出候选。
     // R2 收盘 A 冻结（T+1）卖出顺延；R3 收盘 A 可卖 → R4 开盘卖出，但 R4 开盘触及跌停。
     const seeds: readonly SeedSpec[] = [
-      { date: R1, sec: "A", open: 10.4, close: 10.5, preClose: 10.0 },
-      { date: R1, sec: "B", open: 10.1, close: 10.2, preClose: 10.0 },
-      { date: R2, sec: "A", open: 10.5, close: 10.6, preClose: 10.5 },
-      { date: R2, sec: "B", open: 10.4, close: 10.9, preClose: 10.2 },
-      { date: R3, sec: "A", open: 10.5, close: 10.1, preClose: 10.6 },
-      { date: R3, sec: "B", open: 10.85, close: 11.0, preClose: 10.9 },
-      { date: R4, sec: "A", open: 9.0, close: 9.0, preClose: 10.1 }, // 跌停开盘
-      { date: R4, sec: "B", open: 11.0, close: 11.2, preClose: 11.0 },
+      { date: R1, sec: securityA, open: 10.4, close: 10.5, preClose: 10.0 },
+      { date: R1, sec: securityB, open: 10.1, close: 10.2, preClose: 10.0 },
+      { date: R2, sec: securityA, open: 10.5, close: 10.6, preClose: 10.5 },
+      { date: R2, sec: securityB, open: 10.4, close: 10.9, preClose: 10.2 },
+      { date: R3, sec: securityA, open: 10.5, close: 10.1, preClose: 10.6 },
+      { date: R3, sec: securityB, open: 10.85, close: 11.0, preClose: 10.9 },
+      { date: R4, sec: securityA, open: 9.0, close: 9.0, preClose: 10.1 }, // 跌停开盘
+      { date: R4, sec: securityB, open: 11.0, close: 11.2, preClose: 11.0 },
     ];
     const built = buildDataset(seeds, "excon-limitdown-v1");
     const candidate = runCandidates(built, "excon-limitdown-v1", R1, R4, 1);
     expect(candidate.days.map(d => d.selected[0]!.securityId)).toEqual([
-      "A",
-      "B",
-      "B",
-      "B",
+      securityA,
+      securityB,
+      securityB,
+      securityB,
     ]);
 
     const decl = createExecutionConstraintDeclaration({
@@ -909,15 +913,189 @@ describe("约束生效端到端（runTradeSimulation）", () => {
     expect(run.executionStats.rejectedOrders).toBe(1);
     expect(run.executionStats.byReason.LIMIT_DOWN).toBe(1);
     const rejected = run.audit.orders.find(o => o.status === "REJECTED")!;
-    expect(rejected.securityId).toBe("A");
+    expect(rejected.securityId).toBe(securityA);
     expect(rejected.side).toBe("sell");
     expect(rejected.rejectionReason).toBe("LIMIT_DOWN");
     // A 期末仍持仓（卖出失败未被静默成清仓）。
-    expect(run.positions.find(p => p.securityId === "A")).toBeDefined();
+    expect(run.positions.find(p => p.securityId === securityA)).toBeDefined();
     // lot 舍入：全部成交为 100 整数倍。
     for (const fill of run.audit.fills) {
       expect(fill.quantity % 100).toBe(0);
     }
+  });
+
+  it("止损触发后被跌停拒单，后续普通卖单成交仍保留止损退出原因", () => {
+    const decisionDay = "2026-06-01";
+    const buyDay = "2026-06-02";
+    const limitDownDay = "2026-06-03";
+    const retryDay = "2026-06-04";
+    const securityA = "sec_test::event:600001.SH@2026-06-01";
+    const securityB = "sec_test::event:600002.SH@2026-06-01";
+    const seeds: readonly SeedSpec[] = [
+      { date: decisionDay, sec: securityA, open: 9.9, close: 10.5, preClose: 10.0 },
+      { date: decisionDay, sec: securityB, open: 10.0, close: 10.1, preClose: 10.0 },
+      { date: buyDay, sec: securityA, open: 10.6, close: 10.4, preClose: 10.5 },
+      { date: buyDay, sec: securityB, open: 10.2, close: 10.9, preClose: 10.1 },
+      { date: limitDownDay, sec: securityA, open: 9.0, close: 9.0, preClose: 10.4 },
+      { date: limitDownDay, sec: securityB, open: 10.9, close: 11.1, preClose: 10.9 },
+      { date: retryDay, sec: securityA, open: 9.2, close: 9.3, preClose: 9.1 },
+      { date: retryDay, sec: securityB, open: 11.0, close: 11.0, preClose: 11.1 },
+    ];
+    const built = buildDataset(seeds, "excon-stoploss-retry-v1");
+    const candidate = runCandidates(
+      built,
+      "excon-stoploss-retry-v1",
+      decisionDay,
+      limitDownDay,
+      1,
+    );
+    expect(candidate.days.map(day => day.selected[0]?.securityId)).toEqual([
+      securityA,
+      securityB,
+      securityB,
+    ]);
+
+    const decl = createExecutionConstraintDeclaration({
+      label: "stopLossRetry",
+      initialCapital: 2_000_000,
+      restrictions: { blockLimitDownSell: true },
+      timing: { allowPartialFill: true },
+    });
+    const base = assertMapExecutionConstraintDeclaration(decl, COST, {
+      dateRange: { startDate: decisionDay, endDate: retryDay },
+    });
+    const run = runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: {
+        ...base,
+        exitPolicy: {
+          stopLossRatio: 0.05,
+          takeProfitRatio: null,
+          maxHoldingDays: null,
+        },
+      },
+    });
+
+    expect(run.audit.orders).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          securityId: securityA,
+          side: "sell",
+          tradeDate: limitDownDay,
+          status: "REJECTED",
+          rejectionReason: "LIMIT_DOWN",
+        }),
+      ]),
+    );
+    expect(run.trades.find(trade => trade.securityId === securityA)).toMatchObject({
+      exitTime: retryDay,
+      reason: "止损（5.00%）",
+    });
+  });
+
+  it("开盘跌停后盘中拉回止损价上方时，按止损价当日成交", () => {
+    const decisionDay = "2026-07-01";
+    const buyDay = "2026-07-02";
+    const reboundDay = "2026-07-03";
+    const securityId = "sec_test::event:600001.SH@2026-07-01";
+    const seeds: readonly SeedSpec[] = [
+      { date: decisionDay, sec: securityId, open: 10.1, close: 10.5, preClose: 10.0 },
+      { date: buyDay, sec: securityId, open: 10.0, close: 10.1, preClose: 10.5 },
+      { date: reboundDay, sec: securityId, open: 9.0, close: 9.6, preClose: 10.1 },
+    ];
+    const built = buildDataset(seeds, "excon-stoploss-rebound-v1");
+    const candidate = runCandidates(built, "excon-stoploss-rebound-v1", decisionDay, decisionDay, 1);
+    const decl = createExecutionConstraintDeclaration({
+      label: "stopLossRebound",
+      initialCapital: 2_000_000,
+      restrictions: { blockLimitDownSell: true },
+      timing: { allowPartialFill: true },
+    });
+    const base = assertMapExecutionConstraintDeclaration(decl, COST, {
+      dateRange: { startDate: decisionDay, endDate: reboundDay },
+    });
+
+    const run = runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: {
+        ...base,
+        exitPolicy: {
+          stopLossRatio: 0.05,
+          takeProfitRatio: null,
+          maxHoldingDays: null,
+        },
+      },
+    });
+
+    expect(run.trades.find(trade => trade.securityId === securityId)).toMatchObject({
+      exitTime: reboundDay,
+      exitPrice: 9.5,
+      reason: "止损（5.00%）",
+    });
+    expect(
+      run.executionStats.byReason.LIMIT_DOWN ?? 0,
+    ).toBe(0);
+  });
+
+  it("开盘候选卖单先成交时，不拿当天最低价倒推止损原因", () => {
+    const decisionDay = "2026-08-03";
+    const buyDay = "2026-08-04";
+    const repeatDecisionDay = "2026-08-05";
+    const openExitDay = "2026-08-06";
+    const securityA = "sec_test::event:600001.SH@2026-08-03";
+    const securityB = "sec_test::event:600002.SH@2026-08-03";
+    const seeds: readonly SeedSpec[] = [
+      { date: decisionDay, sec: securityA, open: 29.8, close: 30.5, preClose: 29.5 },
+      { date: decisionDay, sec: securityB, open: 30.0, close: 30.1, preClose: 30.0 },
+      { date: buyDay, sec: securityA, open: 30.0, close: 30.2, preClose: 30.5 },
+      { date: buyDay, sec: securityB, open: 30.0, close: 31.0, preClose: 30.1 },
+      { date: repeatDecisionDay, sec: securityA, open: 30.4, close: 30.2, preClose: 30.2 },
+      { date: repeatDecisionDay, sec: securityB, open: 31.0, close: 31.5, preClose: 31.0 },
+      { date: openExitDay, sec: securityA, open: 31.0, close: 31.0, preClose: 30.2 },
+      { date: openExitDay, sec: securityB, open: 31.0, close: 31.2, preClose: 31.0 },
+    ];
+    const built = buildDataset(seeds, "excon-stoploss-open-first-v1");
+    const candidate = runCandidates(
+      built,
+      "excon-stoploss-open-first-v1",
+      decisionDay,
+      repeatDecisionDay,
+      1,
+    );
+    expect(candidate.days.map(day => day.selected[0]?.securityId)).toEqual([
+      securityA,
+      securityB,
+      securityB,
+    ]);
+    const decl = createExecutionConstraintDeclaration({
+      label: "openBeforeStop",
+      initialCapital: 2_000_000,
+      timing: { allowPartialFill: true },
+    });
+    const base = assertMapExecutionConstraintDeclaration(decl, COST, {
+      dateRange: { startDate: decisionDay, endDate: openExitDay },
+    });
+
+    const run = runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: {
+        ...base,
+        exitPolicy: {
+          stopLossRatio: 0.05,
+          takeProfitRatio: null,
+          maxHoldingDays: null,
+        },
+      },
+    });
+
+    expect(run.trades.find(trade => trade.securityId === securityA)).toMatchObject({
+      exitTime: openExitDay,
+      exitPrice: 31,
+      reason: "候选退出",
+    });
   });
 });
 

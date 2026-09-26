@@ -19,10 +19,12 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  attachPoolConnectionErrorLogger,
   MEASURED_DB_IDLE_WINDOW_LOWER_BOUND_MS,
   resolveIdleTimeoutMs,
 } from "../../server/db";
@@ -62,6 +64,22 @@ describe("BD-24 · 池的空闲回收阈值 vs 实测链路空闲窗口", () => 
     } finally {
       if (previous === undefined) delete process.env.DB_IDLE_TIMEOUT_MS;
       else process.env.DB_IDLE_TIMEOUT_MS = previous;
+    }
+  });
+});
+
+describe("BD-24 · 池连接致命错误兜底", () => {
+  it("连接二次 error 不再成为 unhandled 'error'", () => {
+    const pool = new EventEmitter();
+    const connection = new EventEmitter();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      attachPoolConnectionErrorLogger(pool);
+      pool.emit("connection", connection);
+      expect(() => connection.emit("error", new Error("socket closed"))).not.toThrow();
+      expect(warn).toHaveBeenCalledWith("[Database] pooled connection error: Error: socket closed");
+    } finally {
+      warn.mockRestore();
     }
   });
 });

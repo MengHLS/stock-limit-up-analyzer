@@ -1110,6 +1110,7 @@ export const closedLoopRunResultSchema = z.object({
       simulation: z.object({
         initialCapital: z.number(),
         maxPositions: z.number().nullable(),
+        maxDailyBuys: z.number().nullable().default(null),
         executionModel: z.string(),
         /** 成本模型六字段（口径自描述，避免界面只能显示「已配置」）。 */
         costModel: z.object({

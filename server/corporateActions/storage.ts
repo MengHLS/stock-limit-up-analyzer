@@ -6,7 +6,7 @@
  * 注意：本层需要真实 DB，测试在无库环境下跳过（属 ENVIRONMENTAL）。
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import {
   adjustmentFactors,
   corporateActions,
@@ -14,6 +14,7 @@ import {
   type InsertCorporateAction,
 } from "../../drizzle/schema";
 import { getDb } from "../db";
+import { withReadRetry } from "../readRetry";
 import type { AdjustmentFactor, CorporateAction } from "./types";
 
 function numToStr(value: number | null): string | null {
@@ -193,4 +194,38 @@ export async function getCorporateAction(
     )
     .limit(1);
   return rows.length > 0 ? rowToAction(rows[0]!) : null;
+}
+
+/**
+ * 批量读取回测数据集涉及证券在窗口内的公司行为。
+ *
+ * 查询按 500 个证券代码分批，避免单条 SQL 参数过多；读操作使用既有有界重试。
+ */
+export async function listCorporateActionsForCodesInRange(
+  securityCodes: readonly string[],
+  dateRange: { readonly startDate: string; readonly endDate: string },
+): Promise<CorporateAction[]> {
+  const codes = [...new Set(securityCodes.filter(code => code.trim() !== ""))];
+  if (codes.length === 0) return [];
+  const db = await getDb();
+  if (!db) return [];
+  const out: CorporateAction[] = [];
+  const batchSize = 500;
+  for (let index = 0; index < codes.length; index += batchSize) {
+    const batch = codes.slice(index, index + batchSize);
+    const rows = await withReadRetry(
+      `corporateActions.load(${index}-${index + batch.length})`,
+      async () => db
+        .select()
+        .from(corporateActions)
+        .where(and(
+          inArray(corporateActions.securityCode, batch),
+          gte(corporateActions.effectiveDate, dateRange.startDate),
+          lte(corporateActions.effectiveDate, dateRange.endDate),
+        ))
+        .orderBy(corporateActions.securityCode, corporateActions.effectiveDate),
+    );
+    out.push(...rows.map(rowToAction));
+  }
+  return out;
 }

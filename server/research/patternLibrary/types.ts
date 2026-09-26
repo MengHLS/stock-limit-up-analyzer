@@ -107,7 +107,18 @@ export type PatternConditionRecipeRef =
  * `project.ts#PATTERN_FEATURE_ID_BY_KEY`（用 `PULLBACK_FEATURE_IDS` 的值，禁写第二套字面量）。
  * 这样一来「改名」只需改 `recipeRegistry.ts` 的常量，本库自动跟随；映射表缺键则**抛错**。
  */
-export type PatternFeatureKey = "haircut" | "volumeRatio" | "isBullish" | "momentum" | "pctChange";
+export type PatternFeatureKey =
+  | "haircut"
+  | "volumeRatio"
+  | "isBullish"
+  | "momentum"
+  | "pctChange"
+  /**
+   * 首板回踩 3F 综合评分（`maxAmplitude`(LOW) + `meanAmplitude`(LOW) +
+   * `t1VolumeRatio`(HIGH) 等权合成分）。桶边界 / 方向 / 浮点路径全部来自研究侧
+   * `twelve-factor-composite-study/result.ts`，本层零口径复制。
+   */
+  | "threeFactorComposite";
 
 /** 参数键（语义键）。到文档参数名 `max_volume_ratio` 的映射同样只有一份。 */
 export type PatternParameterKey =

@@ -20,7 +20,7 @@
   parameter_search_combination       RUNNING = 0
   parameter_search_result            RUNNING = 0
   parameter_search_run               RUNNING = 0
-  research_experiment_run            RUNNING = 0
+  research_experiment_run            RUNNING = 16
   research_securities                RUNNING = 0
   research_strategy_candidate        RUNNING = 0
   search_robustness_result           RUNNING = 0
@@ -34,8 +34,26 @@
 === archive_research_question 命中行明细 ===
   {"id":270001,"createdAt":"2026-09-17T06:48:02.000Z","updatedAt":"2026-09-17T06:50:58.000Z"}
 
+=== research_experiment_run 命中行明细 ===
+  {"id":1830002,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:56:57.000Z","completedAt":null,"createdAt":"2026-09-25T01:56:57.000Z","updatedAt":"2026-09-25T01:56:57.000Z"}
+  {"id":1830001,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:56:06.000Z","completedAt":null,"createdAt":"2026-09-25T01:56:06.000Z","updatedAt":"2026-09-25T01:56:07.000Z"}
+  {"id":1740012,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:45.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:45.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740011,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740010,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740009,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740008,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740007,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740006,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740005,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740004,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740003,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:44.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:44.000Z","updatedAt":"2026-09-25T01:08:45.000Z"}
+  {"id":1740002,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:43.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:43.000Z","updatedAt":"2026-09-25T01:08:44.000Z"}
+  {"id":1740001,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T01:08:42.000Z","completedAt":null,"createdAt":"2026-09-25T01:08:42.000Z","updatedAt":"2026-09-25T01:08:43.000Z"}
+  {"id":1710005,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T00:35:49.000Z","completedAt":null,"createdAt":"2026-09-25T00:35:49.000Z","updatedAt":"2026-09-25T00:35:49.000Z"}
+  {"id":1710003,"evaluationStartDate":null,"evaluationEndDate":null,"startedAt":"2026-09-25T00:35:48.000Z","completedAt":null,"createdAt":"2026-09-25T00:35:48.000Z","updatedAt":"2026-09-25T00:35:49.000Z"}
+
 === 结论 ===
-⚠️ 存在 RUNNING 行（archive_research_question:270001）
+⚠️ 存在 RUNNING 行（archive_research_question:270001；research_experiment_run:1830002/1830001/1740012/1740011/1740010/1740009/1740008/1740007/1740006/1740005/1740004/1740003/1740002/1740001/1710005/1710003）
    请按上方时间戳判断是「真在途」还是「历史僵死」：
    - 时间戳在近几分钟内 ⇒ 真在途 ⇒ 禁止改 server/**、禁止跑重库脚本；
    - 时间戳停在数小时/数天前 ⇒ 僵死状态，热重启不会打断任何真实进度。

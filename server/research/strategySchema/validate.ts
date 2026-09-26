@@ -357,6 +357,12 @@ function checkBacktestConfig(backtest: unknown, path: string, issues: ResearchVa
       issues.push(issue("SCHEMA_BACKTEST_MAX_POSITIONS_INVALID", `${path}.maxPositions`, "maxPositions 必须是 >= 1 的整数"));
     }
   }
+  const maxDailyBuys = bt.maxDailyBuys;
+  if (maxDailyBuys !== undefined && maxDailyBuys !== null) {
+    if (typeof maxDailyBuys !== "number" || !Number.isInteger(maxDailyBuys) || maxDailyBuys < 1) {
+      issues.push(issue("SCHEMA_BACKTEST_MAX_DAILY_BUYS_INVALID", `${path}.maxDailyBuys`, "maxDailyBuys 必须是 >= 1 的整数"));
+    }
+  }
 }
 
 /** Execution assumptions（backtest config + costModel + executionModel 白名单）。 */

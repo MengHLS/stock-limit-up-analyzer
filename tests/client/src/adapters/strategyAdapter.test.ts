@@ -39,7 +39,7 @@ const DOC = {
   },
   datasetVersion: "rd-1.0.0-1-cffc2a0e66efbf0b",
   executionAssumptions: {
-    backtestConfig: { initialCapital: 100000, maxPositions: 5 },
+    backtestConfig: { initialCapital: 100000, maxPositions: 5, maxDailyBuys: 2 },
     costModel: { commissionRate: 0.0003, stampDutyRate: 0.001, transferFeeRate: 0.00001, slippageBps: 10, lotSize: 100, minCommission: 5 },
     executionModel: "NEXT_OPEN",
   },
@@ -103,6 +103,7 @@ describe("strategyAdapter 无损往返", () => {
     expect((out.executionAssumptions as { costModel: unknown }).costModel).toEqual(DOC.executionAssumptions.costModel);
     expect((out.executionAssumptions as { executionModel: string }).executionModel).toBe("NEXT_OPEN");
     expect((out.executionAssumptions as { backtestConfig: { initialCapital: number } }).backtestConfig.initialCapital).toBe(100000);
+    expect((out.executionAssumptions as { backtestConfig: { maxDailyBuys: number } }).backtestConfig.maxDailyBuys).toBe(2);
   });
 });
 

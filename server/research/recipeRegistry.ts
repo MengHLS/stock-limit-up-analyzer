@@ -26,7 +26,12 @@ import type {
   SelectionConfig,
   SignalFrequency,
 } from "./framework/contract";
-import { makeWeightedSignalBuilder, type SignalBuilder } from "./framework/signal";
+import {
+  featureValueOf,
+  makeWeightedSignalBuilder,
+  weightedValueOf,
+  type SignalBuilder,
+} from "./framework/signal";
 import { makeGatedSignalBuilder, type FeatureGate } from "./framework/gatedSignal";
 import type { StrategyRecipe } from "./strategySchema/types";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
@@ -87,6 +92,20 @@ export interface StrategyRecipeRuntime {
    * 而不是在接线层按配方名硬编码（那会形成第二套口径）。
    */
   readonly rankFeatureId: string | null;
+  /**
+   * **排序值取值函数**（唯一权威；供 Core 决策源取横截面排序值）。
+   *
+   * 🔴 与 `rankFeatureId` 的分工：
+   *   - `gated` 支：排序值 = 排序特征的（有限）值 ⇒ 与 `rankFeatureId` 同源；
+   *   - `weighted` 支：排序值 = `Σ wᵢ·fᵢ`，**不对应任何单一特征 id**
+   *     ⇒ `rankFeatureId` 只能是 `null`（它的语义是「特征 id」，不是「值的算法」）。
+   *
+   * 此前只有 `rankFeatureId`，`weighted` 支因此恒为 `null`，而 `coreDecision` 的
+   * 判据是「`rankValue` 非空才发信号」 ⇒ `weighted` 配方在生产链路**零信号且不报错**
+   * （2026-09-26 实测）。本字段把「排序值怎么算」从「特征名的猜测」升级为
+   * **配方声明的算法**，两支统一。
+   */
+  readonly rankValueOf: (features: Readonly<Record<string, number | null>>) => number | null;
   readonly rankingConfig: RankingConfig;
   readonly selectionConfig: SelectionConfig;
   /** 该配方运行所需数据域（进 `StrategyContract.requiredData`）。 */
@@ -261,6 +280,19 @@ function makeStrategyRecipeRuntime(definition: StrategyRecipeDefinition): Strate
     },
     rankingConfig: definition.rankingConfig,
     rankFeatureId: definition.signalKind === "gated" ? definition.rankFeatureId : null,
+    /**
+     * 排序值语义与信号值**同源**：`weighted` 支复用 `Σ wᵢ·fᵢ`（与
+     * `makeWeightedSignalBuilder` 走同一实现），`gated` 支取排序特征的有限值
+     * （与 `makeGatedSignalBuilder` 走同一实现）。
+     *
+     * 🔴 两者若各写一遍，Core 会出现「信号值非空但排序值为空」的非对称 ⇒ 静默少选。
+     */
+    rankValueOf:
+      definition.signalKind === "weighted"
+        ? (features: Readonly<Record<string, number | null>>) =>
+            weightedValueOf(definition.defaultWeights, features)
+        : (features: Readonly<Record<string, number | null>>) =>
+            featureValueOf(features, definition.rankFeatureId),
     selectionConfig: definition.selectionConfig,
     requiredData: definition.requiredData,
     selectionSummary: definition.selectionSummary,

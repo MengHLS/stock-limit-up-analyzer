@@ -205,6 +205,26 @@ function resolveKeepAliveInitialDelayMs(): number {
   return 0;
 }
 
+interface PoolConnectionErrorEmitter {
+  on(event: "connection", listener: (connection: { on(event: "error", listener: (error: unknown) => void): void }) => void): unknown;
+}
+
+/**
+ * mysql2 的 PoolConnection 在致命网络错误上会二次 `emit('error')`，而连接自身通常只注册
+ * 一次性错误监听。长算结束后的陈旧连接因此可能以 unhandled 'error' 直接终止进程。
+ *
+ * 这里只挂一个日志兜底，不改变连接状态机，也不吞掉查询路径已经拿到的错误；
+ * 它保证 `persistClosedLoopBacktestRun` 的既有重试预算有机会继续执行。
+ */
+export function attachPoolConnectionErrorLogger(pool: PoolConnectionErrorEmitter): void {
+  pool.on("connection", (connection) => {
+    connection.on("error", (error) => {
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.warn(`[Database] pooled connection error: ${detail}`);
+    });
+  });
+}
+
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
@@ -277,6 +297,8 @@ export async function getDb() {
       // 只做「往返计数 + 墙钟记账」，不改 SQL / 参数 / 返回。关闭时该层完全不存在。
       // 见 `server/observability/dbHook.ts` 头注释。
       if (PERF_DB_HOOK_ENABLED) installDbPerfHook((_db as unknown as { $client?: unknown }).$client);
+      const client = (_db as unknown as { $client?: PoolConnectionErrorEmitter }).$client;
+      if (client !== undefined) attachPoolConnectionErrorLogger(client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;

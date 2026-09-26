@@ -62,7 +62,9 @@ import {
   type DatasetRawBarRole,
 } from "../datasetRegistry/query";
 import { DbDatasetRegistry } from "../datasetRegistry/db";
-import { defaultConcurrency, mapWithConcurrency } from "../datasetRegistry/concurrency";import type {
+import { defaultConcurrency, mapWithConcurrency } from "../datasetRegistry/concurrency";
+import { eventScopedSecurityId } from "../eventIdentity";
+import type {
   DatasetDefinition,
   DatasetVersion,
   FirstLimitPullbackEvent,
@@ -75,7 +77,7 @@ import { withReadRetry } from "../readRetry";
 import { canonicalCode, parseSecurityCode } from "../security/code";
 import { resolveSecurityIdByEngineKey } from "../security/engineKeyBridge";
 import type { SecurityIdentifier } from "../security/types";
-import { computeDatasetVersion } from "../researchDataset/version";
+import { computeDatasetVersionStreaming } from "../researchDataset/version";
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
 import { perfCount, perfRun, perfRunAsync } from "../observability";
 import { normalizeResearchDatasetRequest } from "../researchDataset/validate";
@@ -150,8 +152,22 @@ function resolvePoolSizeForBridge(): number {
  * （post 表本身上限 rd=20），而**行数**才是内存成本的真正计量单位（原先误按事件数计量）。
  *
  * 计量对象 = 投影出的 `rows.length`（不是事件数）。
+ *
+ * 🔴 2026-09-26 由 400,000 提高到 1,400,000：护栏的**隐含前提是「版本事件数 ≤ 2 万」**
+ * （400,000 ÷ 20 行/事件），而 Dataset v5（`dataset_version.id = 660001`）有 **73,003 事件**，
+ * 即便取最小合法窗口（`end = start = 5` ⇒ 7 行/事件）也需 511,021 行 ⇒ **任何合法窗口都超护栏**
+ * ⇒ v5 必回落 rebuild；而 rebuild 的 bars 按**证券序列**组织、配合 `anchorPolicy = SERIES_START`
+ * 会把事件钉死在序列首日（实测 1,875 次事件命中仅 75 次出信号）⇒ 与 v5 的「首板回踩事件样本」
+ * 口径不对齐，结果不可用（见 `docs/evidence/_probe_dataset_version_alignment.mts`）。
+ *
+ * 新容量依据（实测，`docs/evidence/_probe_registry_row_budget.mts`）：
+ *   - v5 全区间 + `end = 15`（17 行/事件）⇒ 1,241,051 行；
+ *   - 吞吐实测：152,442 行取数 55s（`_probe_3f_topn_combo_top5.out.txt`）⇒ 124 万行约 8~15 分钟；
+ *   - 1,400,000 覆盖 v5 在 `end ≤ 17` 的全部合法窗口，并留 ~13% 余量。
+ *
+ * ⚠️ 内存：本量级需配合 `--max-old-space-size` 使用（默认堆可能不足）。
  */
-export const REGISTRY_BRIDGE_MAX_ROWS = 400_000;
+export const REGISTRY_BRIDGE_MAX_ROWS = 1_400_000;
 
 /**
  * `ds_*_post.relativeDay` 的结构上限（== 表内可用的最远观察日）。
@@ -482,7 +498,9 @@ function hasPreCloseMismatch(group: readonly WindowRow[]): boolean {
 interface WindowRow {
   readonly eventId: string;
   readonly relativeDay: number;
-  /** canonical 身份（`sec_<uuid>`）—— 去重键与成员键都用它，**不用**代码（code reuse 下同码不同身份）。 */
+  /** 底层 canonical 身份（`sec_<uuid>`）；用于跨事件数据一致性检查。 */
+  readonly canonicalSecurityId: string;
+  /** 本次面板使用的**事件级身份**（`securityId::event:<eventId>`）。 */
   readonly securityId: string;
   readonly tradeDate: string;
   readonly row: ResearchDatasetRow;
@@ -490,23 +508,23 @@ interface WindowRow {
 
 /** 事件窗口 → 逐日面板的投影结果。 */
 export interface WindowProjection {
-  /** 已按 `(tradeDate, securityId)` 升序去重的宽行（`bindResearchDataset` 强校验此序与唯一性）。 */
+  /** 已按 `(tradeDate, eventScopedSecurityId)` 升序的事件级宽行。 */
   readonly rows: ResearchDatasetRow[];
   /**
-   * 「决策日资格」键集 = `<tradeDate>\u0000<symbol>`，取自 rd ∈ `[window.start, window.end]`
+   * 「决策日资格」键集 = `<tradeDate>\u0000<eventScopedSecurityId>`，取自 rd ∈ `[window.start, window.end]`
    * 的**原始**相对日 —— 注意**不是**去重后行的相对日：同一 `(symbol, tradeDate)` 可能由一个
    * 事件以 rd=2 覆盖、由另一事件以 rd=9 覆盖，只要**任一**事件给出 rd ∈ 观察窗口，该日
    * 就具备决策日资格（`ds_*` 是事件级窗口，同一根 K 线被多窗口覆盖是结构性事实）。
    */
   readonly memberKeys: ReadonlySet<string>;
-  /** 去重前的候选行数（= 事件数 + post 行数，含重复覆盖）。 */
+  /** 候选行数（= 每个事件窗口内实际投影的 rd=0..end+1 行之和）。 */
   readonly candidateCount: number;
   /**
    * 多个来源给出**不一致前收**的键数（如实登记的数据质量信号）。
    * 🔴 前收是派生列、不参与严格冲突判定（见 `pickMergedPreClose`）。
    */
   readonly preCloseMismatchKeys: number;
-  /** 发生「同 (symbol, tradeDate) 多行合并」的键数。 */
+  /** 同一底层证券/交易日被多个事件窗口覆盖的键数（行不再合并）。 */
   readonly mergedKeys: number;
 }
 
@@ -555,14 +573,15 @@ export function buildWindowRows(
   const memberKeys = new Set<string>();
 
   for (const event of events) {
-    const securityId = securityIds.get(event.eventId);
-    if (securityId === undefined) {
+    const canonicalSecurityId = securityIds.get(event.eventId);
+    if (canonicalSecurityId === undefined) {
       throw new RegistryDatasetBridgeError(
         "REGISTRY_SECURITY_IDENTITY_UNRESOLVED",
         `直读桥：事件 ${event.eventId} 未提供 canonical securityId（调用方必须先跑 ` +
           `resolveSecurityIdsByEvent）。🔴 不用代码冒充身份。`,
       );
     }
+    const securityId = eventScopedSecurityId(canonicalSecurityId, event.eventId);
     // 该事件的相对日序列（rd 升序）：rd=0 来自 prefix，rd≥1 来自 post。
     const seq: FirstLimitPullbackRawBar[] = [];
     const zero = zeroByEvent.get(event.eventId);
@@ -589,24 +608,30 @@ export function buildWindowRows(
           })();
       const row = projectEventRow(event, securityId, bar, tradeDate, previousClose, isEventDay);
 
-      candidates.push({ eventId: event.eventId, relativeDay: bar.relativeDay, securityId, tradeDate, row });
+      candidates.push({
+        eventId: event.eventId,
+        relativeDay: bar.relativeDay,
+        canonicalSecurityId,
+        securityId,
+        tradeDate,
+        row,
+      });
       if (bar.relativeDay >= window.start && bar.relativeDay <= window.end) {
         memberKeys.add(keyOf(tradeDate, securityId));
       }
     }
   }
 
-  // --- 去重：同一 (securityId, tradeDate) 的多行必须数值一致，否则响亮抛错 ---
+  // --- 同事件同相对日的重复行必须数值一致；不同事件不再跨窗口合并。 ---
   const byKey = new Map<string, WindowRow[]>();
   for (const candidate of candidates) {
-    const key = keyOf(candidate.tradeDate, candidate.securityId);
+    const key = `${candidate.eventId}\u0000${candidate.relativeDay}`;
     const list = byKey.get(key);
     if (list === undefined) byKey.set(key, [candidate]);
     else list.push(candidate);
   }
 
   const rows: ResearchDatasetRow[] = [];
-  let mergedKeys = 0;
   let preCloseMismatchKeys = 0;
   for (const key of [...byKey.keys()].sort()) {
     const group = byKey.get(key)!;
@@ -614,7 +639,6 @@ export function buildWindowRows(
       rows.push(group[0]!.row);
       continue;
     }
-    mergedKeys += 1;
     // 基准行 = 排序后第一条（确定性）：优先 rd 小者，再按 eventId。
     group.sort((a, b) =>
       a.relativeDay !== b.relativeDay
@@ -637,6 +661,24 @@ export function buildWindowRows(
       amount: pickMergedPrice(group, "amount"),
       preClose: pickMergedPreClose(group),
     });
+  }
+
+  // 事件级序列不合并，但同一底层证券/交易日的原始行情必须一致。
+  const byCanonicalKey = new Map<string, WindowRow[]>();
+  for (const candidate of candidates) {
+    const key = keyOf(candidate.tradeDate, candidate.canonicalSecurityId);
+    const list = byCanonicalKey.get(key);
+    if (list === undefined) byCanonicalKey.set(key, [candidate]);
+    else list.push(candidate);
+  }
+  let mergedKeys = 0;
+  for (const group of byCanonicalKey.values()) {
+    if (group.length <= 1) continue;
+    mergedKeys += 1;
+    for (const field of ["open", "high", "low", "close", "volume", "amount"] as const) {
+      pickMergedPrice(group, field);
+    }
+    if (hasPreCloseMismatch(group)) preCloseMismatchKeys += 1;
   }
 
   rows.sort((a, b) =>
@@ -1097,8 +1139,13 @@ export async function buildResearchDatasetFromRegistry(
     ),
   );
   perfCount("dataset.universe_days", universeDefinition.days.length);
+  // 🔴 用**流式**版本而不是一次性 `computeDatasetVersion`：后者要先把整个
+  // {request, universeDefinition, rows} 拼成一个 canonical 字符串，行数达百万级时会越过
+  // V8 字符串上限抛 `RangeError: Invalid string length`（2026-09-26 v5 全区间实测）。
+  // 流式版逐行 `hash.update`，内存 O(1)，且**对同内容产出完全相同的版本字符串**
+  // （等价契约由 `tests/server/researchDataset/partitioned.test.ts:121` 钉死）⇒ 零语义变更。
   const datasetVersion = perfRun("dataset.version_fingerprint", () =>
-    computeDatasetVersion(normalizedRequest, universeDefinition, rows),
+    computeDatasetVersionStreaming(normalizedRequest, universeDefinition, rows),
   );
   const policySet = perfRun("dataset.policy_set", () => derivePolicySet(normalizedRequest, dataSnapshot));
 

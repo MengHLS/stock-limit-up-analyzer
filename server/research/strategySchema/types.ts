@@ -156,6 +156,8 @@ export interface StrategyBacktestConfig {
   readonly initialCapital: number;
   /** 最大持仓数（>= 1 整数）；缺省则由 positionSizing.maxPositions 表达。 */
   readonly maxPositions?: number;
+  /** 单日最多新建仓数（>= 1 整数）；缺省 = 不限制。 */
+  readonly maxDailyBuys?: number;
 }
 
 /**

@@ -55,11 +55,23 @@ function filled(basePrice: number, price: number, referenceAmount: number | null
 function limitState(bar: CanonicalMarketBar, rules: ExecutionRuleContext): { limitUp: boolean; limitDown: boolean } {
   const prevClose = bar.preClose;
   if (!validPrice(prevClose)) return { limitUp: false, limitDown: false };
-  const up = limitUpPrice(prevClose, rules.limitUpRatio);
-  const down = limitDownPrice(prevClose, rules.limitDownRatio);
+  const up =
+    rules.limitUpRatio > 0
+      ? limitUpPrice(prevClose, rules.limitUpRatio)
+      : null;
+  const down =
+    rules.limitDownRatio > 0
+      ? limitDownPrice(prevClose, rules.limitDownRatio)
+      : null;
   return {
-    limitUp: validPrice(bar.open) ? (bar.open as number) >= up : false,
-    limitDown: validPrice(bar.open) ? (bar.open as number) <= down : false,
+    limitUp:
+      up !== null && validPrice(bar.open)
+        ? (bar.open as number) >= up
+        : false,
+    limitDown:
+      down !== null && validPrice(bar.open)
+        ? (bar.open as number) <= down
+        : false,
   };
 }
 

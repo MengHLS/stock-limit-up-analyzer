@@ -113,6 +113,7 @@ export interface StrategyViewModel {
   // execution assumptions
   initialCapital: number;
   maxPositions: number | null;
+  maxDailyBuys: number | null;
   costModel: CostModelViewModel;
   executionModel: string;
   // fingerprint（前端占位）
@@ -366,6 +367,7 @@ export function strategyToViewModel(raw: unknown): StrategyViewModel {
     datasetVersionId: asNullableNum(src.datasetVersionId),
     initialCapital: asNum(backtest.initialCapital, 100000),
     maxPositions: asNullableNum(backtest.maxPositions),
+    maxDailyBuys: asNullableNum(backtest.maxDailyBuys),
     costModel: parseCostModel(exec.costModel),
     executionModel: asStr(exec.executionModel, "NEXT_OPEN"),
     fingerprint: asStr(src.fingerprint, ""),
@@ -418,6 +420,7 @@ export function viewModelToStrategy(
     initialCapital: vm.initialCapital,
   };
   if (vm.maxPositions !== null) backtestConfig.maxPositions = vm.maxPositions;
+  if (vm.maxDailyBuys !== null) backtestConfig.maxDailyBuys = vm.maxDailyBuys;
 
   const executionAssumptions: Record<string, unknown> = overrides?.executionAssumptions ?? {
     backtestConfig,

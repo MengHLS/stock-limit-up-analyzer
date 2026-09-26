@@ -134,15 +134,30 @@ export class Portfolio {
    */
   applyCorporateAction(securityId: string, actions: readonly CorporateAction[]): void {
     if (actions.length === 0) return;
+    const quantityBefore = this.book.quantity(securityId);
+    if (quantityBefore <= 0) return;
+    const dividendCash = actions
+      .filter(action => action.actionType === "dividend")
+      .reduce((sum, action) => sum + (action.cashAmount ?? 0) * quantityBefore, 0);
+    const rightsCash = actions
+      .filter(action => action.actionType === "rights_issue")
+      .reduce(
+        (sum, action) =>
+          sum + (action.rightsRatio ?? 0) * (action.rightsPrice ?? 0) * quantityBefore,
+        0,
+      );
     const { cashDelta, ratio } = this.book.applyCorporateAction(securityId, actions);
     this.cashAmount += cashDelta;
     const open = this.openTrades.get(securityId);
-    if (open && ratio !== 1) {
-      open.quantity = Math.round(open.quantity * ratio);
-      open.totalQuantity = Math.round(open.totalQuantity * ratio);
-      open.entryPrice = open.entryPrice / ratio;
-      open.entryBasePrice = open.entryBasePrice / ratio;
-      open.totalEntryCost -= cashDelta; // 配股 cashDelta<0 → 认购支出计入总成本基
+    if (open) {
+      if (ratio !== 1) {
+        open.quantity = Math.round(open.quantity * ratio);
+        open.totalQuantity = Math.round(open.totalQuantity * ratio);
+        open.entryPrice = open.entryPrice / ratio;
+        open.entryBasePrice = open.entryBasePrice / ratio;
+      }
+      open.grossPnL += dividendCash;
+      open.totalEntryCost += rightsCash;
     }
   }
 
@@ -230,8 +245,17 @@ export class Portfolio {
       }
       quantity = available; // 部分成交：只卖可卖份额。
     }
-    if (quantity % lotSize !== 0) quantity = Math.floor(quantity / lotSize) * lotSize;
-    if (quantity < lotSize) return reject("可卖份额不足一手", "T_PLUS_1");
+    // A 股允许把因送转/拆股形成的零股一次性整仓卖出。零股不能拆单，但
+    // `requested === available === totalHeld` 是完整清仓，不应被部分成交开关误拒。
+    const fullPositionSell =
+      requested === available
+      && Math.abs(quantity - this.book.quantity(fill.securityId)) < 1e-9;
+    if (!fullPositionSell && quantity % lotSize !== 0) {
+      quantity = Math.floor(quantity / lotSize) * lotSize;
+    }
+    if (quantity <= 0 || (!fullPositionSell && quantity < lotSize)) {
+      return reject("可卖份额不足一手", "T_PLUS_1");
+    }
 
     const partial = quantity < requested;
     const gross = fill.price * quantity;

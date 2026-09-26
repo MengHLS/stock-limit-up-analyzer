@@ -1580,3 +1580,114 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
 | `_run_pre_event_context_study.mts` → `.out.json` | 首板前 `daysSincePreviousLimit` + T-5/T-10/T-20 前期涨幅 → T+1 开盘到 T+5/T+10/T+20 收益 | `RUN-20260922-71838486`；eligible **47,120**，间隔已知 **44,850**、未知 **2,270**；间隔越短越差、首板前越跌后续相对越好 |
 | `_run_post_event_amplitude_study.mts` → `.out.json` | T+1..T+5 是否触及涨跌停 + 平均振幅 → T+6 开盘到 T+10/T+15/T+20 收益 | `RUN-20260922-3F4B3C39`；无涨跌停 **25,409**、有涨跌停 **23,488**；无涨跌停及各视界均更好，振幅 ≥8% 明显更差 |
 | `_run_turnover_study.mts` → `.out.json` | 首板日换手率 + 流通市值 → 未来收益；1000 次 Moving Block Bootstrap，block=20 交易日 | `RUN-20260922-4A0DAF7B`；换手率非空 **49,150**、流通市值非空 **0**；≥10% 换手率的聚类 Bootstrap 95% CI 在 T+5/T+10/T+20 均显著为负区间，流通市值返回 `INSUFFICIENT_DATA` |
+
+## 2026-09-26 · 独立实验列表页「模式分级 + 组内分页」
+
+**需求（用户原话）**：「独立实验页面需要优化一下，需要分级展示，第一层需要展示模式，对于不同的模式下的实验进行分组，然后实验也要分页展示」。
+
+**为什么需要真浏览器**：分级 / 分页是**渲染层**性质 —— tRPC 返回 200、单测全绿都不能证明「模式卡片真的在 DOM 里」「组内翻页真的换了行集」「折叠真的收起了内容」「既有『打开』入口没被改版打断」。
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_probe_list001_experiment_modes.mjs` → `.out.{txt,json}` | 无头 Chrome + CDP 按**正常导航路径**走到 `/research-experiments`：A **两级分级不漏**（一级 = 命名空间，键序 = 映射声明；模式内「各档之和 == 一级计数」；两级计数之和各自 == list API 34；最大档 17 < 34 ⇒ 分级真的发生）；B **档内分页**（比例 = ceil(N/5) / 真实点「下一页」/ 第 2 页行数 = min(5,N−5) / 两页行集零交集 / 区间文案随页更新 / 状态按 `modeKey::kindKey` 隔离）；C 折叠（档级 + 模式级 + 作用域隔离 + 全部收起/展开 + 按钮文案翻转）；D 既有「打开」→ 详情路由仍可达；E 零回归（list 200 / console error 0 / 请求失败 0 / 未被登录门拦住）；F 夜间可读性（canvas 反解真实色算对比度，三级标题 + 分页控件） | **PASS 44 / FAIL 0 / SKIP 0 ⇒ ALL PASS**。实测 2 模式 × 4 档：`first-board-pullback` 33 = 单因子 6 + 多因子 10 + 其他口径 17，`combo-backtest` 1 = 其他口径 1；计数和 **34 == API 34**；`other-scope`（17 个）真实翻页：第 2 页 5 行、与第 1 页交集 0；夜间对比度 一级标题 **12.8** / 说明 **6.4** / 分页页码 **6.81** / 每页控件 **8.19**（全部 ≥ 4.5:1） |
+| （同上，口径变更记录） | 本探针**首版**量的是「7 个研究范式」分组（PASS 31），用户改口径为「命名空间 → 单/多因子」后**整份重写**（PASS 44）。留档：暗色段曾 8 条全 SKIP —— `Page.reload` 后 `waitFor` 命中**上一节的旧文档**，在「新文档已换主题、列表还没挂上」的空窗期量到节点全灭，**看起来像产品没渲染**；解法 = **带文档哨兵的硬导航** + 就绪诊断落盘 ⇒ **产品零改动**，是探针自己的竞态 |
+
+**本轮登记的「判据自身写错」2 条**（按项目纪律登记原因，而不是只把颜色刷绿）：
+
+1. 🔴 **探针里漏了一个开引号**：`querySelectorAll(<选择器> [data-experiment-row]').length` —— 第二段选择器没有起始引号 ⇒ 整段是语法错误 ⇒ `Runtime.evaluate` 返 `undefined` ⇒ `|| 0` 把它变成「其他组可见行 0」，**看起来像产品的作用域泄漏**（首跑 FAIL 1）。真因是断言自身拼错，不是页面错。
+2. 🔴 **「文本含『页』」不是页码判据**：分页条里「**每**页」（标签）也含「页」，首跑因此把标签当成了页码 span（量到 `text="每页"`）。已改成绑形状的正则（`第 \d+ / \d+ 页`）—— 与 `PROJECT_RULES.md` 的「绑到真正承载目标值的节点」同一类坑。
+
+**本轮附带发现（非本次需求引入）**：`client/src/theme/darkCompatibility.css` 在 **HEAD 上已滞后** —— `client/src/pages/researchExperiments/artifactViews.tsx` 里的 `border-violet-300` / `border-pink-300` / `text-pink-700` **从未进过兼容层**（该文件自 RESEARCH-EXPERIMENT-004 起就在用这三个类）。按「生成物禁手改、必须重跑生成器」重跑 `scripts/generateDarkCompatibility.mjs` 后一并补齐（另含纯排序 churn：新增 `client/**` 文件会改变生成器的扫描顺序，属已知现象）。
+
+
+
+## 2026-09-26 · 3F TopN 策略化：Core 真实回测链路打通（含两处 server 修复）
+
+**需求（任务书原文要点）**：冻结 3F（`maxAmplitude` LOW + `meanAmplitude` LOW + `t1VolumeRatio` HIGH，等权各 1/3），
+在首板回踩候选池上**每日按 3F 合成分降序排名、只选 TopN**（先测 N=3 / N=5），明确并固定买入时点/价格、
+持有周期、退出规则、仓位分配并严格 PIT；**用现有 Strategy Core 执行真实回测**，输出收益、胜率、最大回撤、
+交易数、年度表现与完整「评分→排名→入选→交易」证据链。
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_probe_3f_topn_backtest.mts` → `.json` / `.out.txt` | 主探针：装配 3F TopN 策略文档 → `evaluateStrategyParameters`（官方标量）→ **同一份数据集注入复跑**取交易明细与候选证据链（零额外取数）；带 `coreDecisionDiag`（Core 决策源 digest）与 `executionPanelAudit`（面板覆盖直方图 + 卖单按「原因 × 执行日是否有行」交叉统计） | 链路打通。630001 冒烟（`--window-end 15`）：决策日/信号/入选 **25 / 761 / 100**、交易 49（完成 44）、胜率 50%、`MAX_POSITIONS_REACHED` 由 76 降到 3；690001：`220 / 2395 / 914`、交易 404 |
+| `_probe_registry_row_budget.mts` → `.out.txt` | 直读桥**行预算**：事件数 × (end+2) 行/事件 vs `REGISTRY_BRIDGE_MAX_ROWS` | 660001（v5）= 73,003 事件 ⇒ 即便 `end=5` 也需 **511,021 行**，**任何合法窗口都超原护栏 400,000** |
+| `_probe_v5_events_per_year.mts` → `.out.txt` | v5 **按年**事件数与行预算（判断能否分片绕开护栏） | 各年 5,993~10,924 事件（101k~186k 行，单看都在护栏内）；但直读桥**没有日期区间参数**（`assemble.ts:428-433` 只传 versionId/name/observationWindow）⇒ 行数由**版本总事件数**决定 ⇒ **按年切分无效** |
+| `_probe_dataset_version_catalog.mts` → `.out.txt` | 所有 `dataset_version` 的规模与可直读性（单版本事件上限 ≈ 23,529） | 唯一「v5 口径且可直读」的只有 **630001**（1,285 事件 / 1 个月）；660001、570001、390002 均超护栏 |
+| `_probe_dataset_version_alignment.mts` → `.out.txt` | 660001 vs 690001 **口径比对**（能否用后者替代前者） | **不同口径**：v5 = `excludeSt:true` + `kind:"firstBoard"`；combo-v1 = `excludeSt:false` + `kind:"limitUp"`（含非首板涨停）。重叠区 2025-11-03..2026-09-04 事件数 **10,418 vs 15,473** ⇒ 690001 **不能替代 v5** |
+| `_probe_limitdown_sanity.mts` → `.out.txt` | `LIMIT_DOWN`（开盘跌停）拒单率是否为**数据问题** | 真实开盘跌停率仅 **0.255%**（660001）/ 0.295%（690001）⇒ 判据无错；探针里 854 次是「**卖不掉的仓位每天重试**」的堆积（重试偏差），不是判据错误 |
+
+### 本轮定位并修复的两个根因（均改 `server/**`）
+
+1. 🔴 **零信号且不报错**（Task 之前的最大阻塞）：
+   - `strategyCore/adapters/legacyDefinition.ts:356` 在 **enabled 条件为空时直接丢弃 WINDOW 节点** ⇒ 规则图退化为 `SEQUENCE[EVENT, TRIGGER]`；
+   - `strategyCore/ruleGraph.ts:437` 在 TRIGGER 无 WINDOW journal 时候选日 = `[currentDay]`，而 `NEXT_TRADING_DAY` 要求 `currentDay === last + 1` ⇒ **恒不成立**。
+   - 修法（在策略文档侧）：放一条**恒真条件哨兵**（`bar.close > 0`）让窗口进入规则图；trigger 改用 `FIRST_VALID_DAY`。修复后 630001 由 `0 信号` 变为 **761 信号 / 100 入选**。
+
+2. 🔴 **持仓永久悬挂**（执行层缺陷）：卖出订单的 `executionTime` 固定是**下一交易日**，若该证券在执行日**无行情行**，卖出必然被拒，而引擎**逐日重试直到期末**。实测 690001：`holdingPeriod` 出现 **67 / 76 / 108 / 134** 的长尾，`SUSPENDED / 执行日无行` 697 次、`SUBMITTED / 执行日无行` 705 次。
+
+### 两处 server 改动（用户 2026-09-26 裁定：提高护栏 + 加兜底）
+
+| 文件 | 改动 | 依据 |
+|---|---|---|
+| `server/runWorkbenchAssembly/datasetFromRegistry.ts` | `REGISTRY_BRIDGE_MAX_ROWS` 400,000 → **1,400,000** | 护栏的隐含前提是「版本事件数 ≤ 2 万」（400,000 ÷ 20 行/事件），而 v5 有 73,003 事件 ⇒ 护栏容量已落后于数据规模。1,400,000 覆盖 v5 在 `end ≤ 17` 的全部合法窗口：v5 + `end=15` = 1,241,051 行；吞吐实测 152,442 行取数 **55s** ⇒ 124 万行约 8~15 分钟 |
+| `server/research/simulator/engine.ts` | 新增 **(d-2) 面板末日清算**：若持仓证券在**下一交易日无行情行**，则以**当日收盘价**强制清算 | 复用 (c2) 止损/止盈的「syntheticBar → `executionModel.quote` → `portfolio.sell`」路径 ⇒ 滑点/费用/涨跌停拦截与正常路径完全一致 |
+
+**⚠️ 第一版兜底已实测无效并撤销**（留档，避免重犯）：初版判据是 `nextDate >= lastBarDateBySecurity.get(sec)`（「最后一个有行情日」）。
+失败原因 = 面板里**同一证券的多个事件会合并**，行跨度实测达 **34~210 行**（见 `面板覆盖（证券数 / 行数直方图）`），
+`lastDate` 被推得很远 ⇒ `nextDate >= lastDate` **从不成立** ⇒ 兜底零触发（重跑结果与改动前**逐位相同**，只有因代码变更而变的指纹不同）。
+第二版改为判「**明日是否有行**」才真正触发。教训：**别用「面板末日」这种会被数据合并推远的量做判据，要判真正的失败条件（执行日无行）**。
+
+### 观察窗口的两条实测事实（写进模式文件头）
+
+- **窗口 `end` 只调「执行面板深度」，不改入选集合**：`[5,5]` / `[5,9]` / `[5,15]` 的信号数与入选数**完全相同**（761 / 100），
+  因为 Core 的 `firesToday = satisfiedToday && !satisfiedBefore` 与 trigger 类型无关（语义 = 首个成立日）⇒ 事件只在 T+5 出一次信号。
+- **但 `end` 决定退出能不能成交**：`[5,5]` 面板到 rd 6、`[5,9]` 到 rd 10、`[5,15]` 到 rd 16；
+  630001 实测完成的卖出 **5 → 25 → 44**，期末仍持仓 **19 → 16 → 5**，执行日无行的卖单 **229 → 176 → 0**。
+
+
+
+### v5 全区间正式结果（`dataset_version.id = 660001`，2019-01-01 ~ 2026-09-04）
+
+护栏提高 + 流式指纹修复后，registry 直读终于跑通全区间：**969,060 行 / 取数 412.7s**（`NODE_OPTIONS=--max-old-space-size=8192`）。
+
+| 指标 | N3 | N5 |
+|---|---|---|
+| 总收益 | **-64.91%** | **-63.51%** |
+| 年化（CAGR） | -13.21% | -12.75% |
+| 最大回撤 | 66.02% | 64.21% |
+| 胜率 | 39.62% | 39.47% |
+| 盈亏比 | 0.7254 | 0.7339 |
+| 完成交易数 | 578 | 750 |
+| 决策日 / 信号 / 入选 | 1,863 / 3,314 / 1,575 | 1,863 / 3,314 / 1,940 |
+| 双跑指纹一致 | true | true |
+
+年度（年内首末权益比）：2019 -19.22%/-14.91%，2020 -34.57%/-35.51%，2021 -22.55%/-23.43%，
+2022 -12.18%/-10.04%，2023 -5.39%/-5.22%，2024 +1.72%/+2.01%，2025 +1.40%/+0.07%，2026 -1.46%/-1.61%（N3/N5）。
+
+结论文档：`docs/research/RESULT-3F-TOPN-STRATEGY-001.md`（脚本机械生成 + 独立回校 38 项数字一致）。
+
+### 第三个容量瓶颈：`computeDatasetVersion` 的 `RangeError`
+
+护栏放宽到 124 万行后立刻撞上第二个瓶颈：
+`RangeError: Invalid string length` @ `canonicalStringify`（`version.ts:27`）← `computeDatasetVersion`（`:56`）
+← `buildResearchDatasetFromRegistry`（`datasetFromRegistry.ts:1115`）。原因 = 它要把整个
+`{request, universeDefinition, rows}` **先拼成一个 canonical 字符串**再 SHA-256，行数过百万时越过 V8 字符串上限。
+
+修法：改用**已存在**的 `computeDatasetVersionStreaming`（逐行 `hash.update`，内存 O(1)），
+它与一次性版**对同内容产出完全相同的版本字符串**，该等价性已由
+`tests/server/researchDataset/partitioned.test.ts:121` 钉死 ⇒ 零语义变更（测试 10/10 通过）。
+教训：**放宽行数护栏时，要同步检查「有没有别的地方把全量行拼成单个字符串」**。
+
+### 🔴 决定性发现：执行侧语义是「每证券一次信号」，不是「每事件一次」
+
+跑通后核对发现的**架构级口径退化**（不是配置问题，registry 与 rebuild 两条路径都逃不掉）：
+
+- v5 全区间：**754 笔交易 / 754 个不同证券 ⇒ 每证券恰好 1 笔**；N3 同样 **581 笔 / 581 个证券 = 每证券 1.000 笔**。
+- 信号总数 **3,314**，与面板证券数（3,334）同量级；而 Dataset v5 有 **73,003 个首板事件**（覆盖率仅 4.5%）。
+- 成因链：面板按 `(securityId, tradeDate)` 合并 ⇒ 同证券多事件合成一条**超长 bars 序列**
+  （实测 `maxBarCount = 837`、`maxRelativeDayObserved = 836`）；`anchorPolicy = SERIES_START`
+  把事件锚定在 `bars[0]`（序列首日）⇒ 该证券后续首板不再被识别为事件；再叠加
+  `firesToday = satisfiedToday && !satisfiedBefore`（语义 = 首个成立日）⇒ **每证券终身只出一次信号**。
+- ⇒ 本轮出的执行侧结论**不能**与研究侧事件级结论（`RESULT-OOS-COMPOSITE-3F-001`）横向比较，
+  已在报告开头醒目登记；「Dataset schema 引入事件维度（面板键 `(eventId, relativeDay)`）」登记为后续事项。
