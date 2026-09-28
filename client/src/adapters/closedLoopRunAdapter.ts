@@ -88,6 +88,8 @@ export interface ClosedLoopTradeView {
   fees: number | null;
   /** 退出原因（止盈 / 止损 / 时间退出 / 候选退出等）；旧留档缺失时为 null。 */
   exitReason: string | null;
+  /** 建仓候选评分；旧留档缺失时为 null。 */
+  score: number | null;
 }
 
 /** 撮合执行统计（含**拒单原因分布** —— 「为什么没成交」的唯一答案来源）。 */
@@ -410,6 +412,7 @@ function extractBacktestArtifacts(
         openAtEnd: trade.openAtEnd === true,
         fees: asNum(trade.fees),
         exitReason: asStr(trade.reason),
+        score: asNum(trade.score),
       });
     }
   }

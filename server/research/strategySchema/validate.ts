@@ -261,10 +261,10 @@ function checkPositionSizing(positionSizing: unknown, issues: ResearchValidation
   if (typeof maxPositions !== "number" || !Number.isInteger(maxPositions) || maxPositions < 1) {
     issues.push(issue("SCHEMA_POSITION_SIZING_MAX_INVALID", "positionSizing.maxPositions", "maxPositions 必须是 >= 1 的整数"));
   }
-  if (kind === "fixed-fraction") {
+  if (kind === "fixed-fraction" || kind === "equity-fraction") {
     const fraction = ps.fraction;
     if (typeof fraction !== "number" || !Number.isFinite(fraction) || fraction <= 0 || fraction > 1) {
-      issues.push(issue("SCHEMA_POSITION_SIZING_FRACTION_INVALID", "positionSizing.fraction", "fixed-fraction.fraction 必须是 (0, 1] 的有限数字"));
+      issues.push(issue("SCHEMA_POSITION_SIZING_FRACTION_INVALID", "positionSizing.fraction", `${kind}.fraction 必须是 (0, 1] 的有限数字`));
     }
   }
   if (kind === "fixed-amount") {

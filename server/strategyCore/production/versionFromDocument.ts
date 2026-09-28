@@ -57,6 +57,7 @@ const KEBAB_SIZING_TO_LEGACY: Readonly<Record<string, string>> = Object.freeze({
   "equal-weight": "EQUAL_WEIGHT",
   "fixed-amount": "FIXED_AMOUNT",
   "fixed-ratio": "FIXED_RATIO",
+  "equity-fraction": "EQUITY_RATIO",
   "risk-based": "RISK_BASED",
 });
 

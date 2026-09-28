@@ -116,6 +116,7 @@ describe("strategyAdapter 展示 helpers", () => {
   it("positionSizingLabel 映射中文标签", () => {
     expect(positionSizingLabel("equal-weight")).toBe("等权分仓");
     expect(positionSizingLabel("fixed-fraction")).toBe("固定比例");
+    expect(positionSizingLabel("equity-fraction")).toBe("按现有权益比例");
     expect(positionSizingLabel("rank-weighted")).toBe("按排名加权");
   });
 

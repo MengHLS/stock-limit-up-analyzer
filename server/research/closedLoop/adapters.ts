@@ -110,6 +110,7 @@ export function summarizeTradeSimulationRun(run: TradeSimulationRun): ClosedLoop
       openAtEnd: trade.openAtEnd,
       fees: trade.fees,
       reason: trade.reason ?? null,
+      score: trade.score ?? null,
     })),
     tradesTruncated: run.trades.length > BACKTEST_TRADE_DETAIL_LIMIT,
     costs: { ...run.costs },

@@ -237,6 +237,8 @@ export interface Fill {
   slippageAmount: number;
   /** 用于单笔买入容量约束的参考成交额（千元），必须取自成交时点之前已可知数据。 */
   referenceAmount?: number | null;
+  /** 建仓候选评分（仅买入成交有值）；用于成交追溯，不参与撮合。 */
+  score?: number | null;
   /** 退出原因（止损 / 止盈 / 时间退出 / 候选退出）。 */
   reason?: string | null;
 }
@@ -300,6 +302,8 @@ export interface Trade {
   openAtEnd: boolean;
   /** 解释性标签（止盈/止损/到期/期末估值等）。 */
   reason?: string | null;
+  /** 建仓候选评分（仅新结果且来源信号带评分时有值）。 */
+  score?: number | null;
 }
 
 /** 权益曲线上的一个点。 */

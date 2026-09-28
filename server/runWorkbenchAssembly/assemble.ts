@@ -90,13 +90,14 @@ export { LoopRunAssemblyError } from "./errors";
  *
  * 映射表（**机械映射，不猜、不补默认**）：
  *   equal-weight    → EQUAL_WEIGHT
- *   fixed-fraction  → FIXED_FRACTION（带 fraction）
+ *   fixed-fraction  → FIXED_FRACTION（带 fraction，按初始资金）
+ *   equity-fraction → EQUITY_FRACTION（带 fraction，按决策日现有总权益）
  *   rank-weighted   → RANK_WEIGHTED
  *   fixed-amount    → FIXED_AMOUNT（带 fixedAmount；**缺失 / ≤ 0 ⇒ 响亮抛错**）
  *   其它            → 响亮抛错（拒绝猜）
  */
 export function mapDeclaredPositionSizing(declared: unknown): {
-  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
+  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
   readonly fraction: number | null;
   readonly fixedAmount: number | null;
 } {
@@ -111,6 +112,12 @@ export function mapDeclaredPositionSizing(declared: unknown): {
     case "fixed-fraction":
       return {
         sizingMethod: "FIXED_FRACTION",
+        fraction: typeof sizing.fraction === "number" ? sizing.fraction : null,
+        fixedAmount: null,
+      };
+    case "equity-fraction":
+      return {
+        sizingMethod: "EQUITY_FRACTION",
         fraction: typeof sizing.fraction === "number" ? sizing.fraction : null,
         fixedAmount: null,
       };
@@ -134,7 +141,7 @@ export function mapDeclaredPositionSizing(declared: unknown): {
       throw new LoopRunAssemblyError(
         "LOOP_RUN_ASSEMBLY_UNKNOWN_POSITION_SIZING",
         "装配层：未知的仓位声明 kind=" + JSON.stringify(sizing.kind ?? null) +
-          "（已登记：equal-weight / fixed-fraction / rank-weighted / fixed-amount）—— 拒绝猜。",
+          "（已登记：equal-weight / fixed-fraction / equity-fraction / rank-weighted / fixed-amount）—— 拒绝猜。",
       );
   }
 }
@@ -215,6 +222,11 @@ export interface AssembleRunWorkbenchInputsRequest {
   readonly parameterOverrides?: ResearchParameterSet;
   /** 生命周期推进配置（finalize 阶段；缺省不注入 ⇒ 编排器以 CL_LIFECYCLE_CONFIG_MISSING 阻塞）。 */
   readonly lifecycle?: AssembleLifecycleRequest | null;
+  /**
+   * 已解析的公司行为解析器。参数扫描在同一数据集上跑多组参数时可复用，
+   * 避免每组参数都重复查询同一张公司行为表。
+   */
+  readonly corporateActionResolver?: CorporateActionResolverLike;
 }
 
 /** finalize 阶段的调用方输入（真实回测产物指纹由装配层回填）。 */
@@ -881,7 +893,11 @@ export function assembleStrategySide(
   }
   // BACKTEST-002（B-02/R-02）— 文档声明的仓位口径 → 执行层口径（**唯一实现**，见 `mapDeclaredPositionSizing`）。
   const declaredPositionSizing = mapDeclaredPositionSizing(document.positionSizing);
-  const declaredExitPolicy = mapDeclaredExitPolicy(document.definition?.exit?.rules, parameterSet);
+  const declaredExitPolicy = mapDeclaredExitPolicy(
+    document.definition?.exit?.rules,
+    parameterSet,
+    document.definition?.exit?.strongHold,
+  );
   const positionSizingMapping = mapPositionSizing({
     sizingMethod: declaredPositionSizing.sizingMethod,
     maxPositions: backtestConfig.maxPositions ?? null,
@@ -898,6 +914,7 @@ export function assembleStrategySide(
     maxPositions: backtestConfig.maxPositions ?? null,
     maxDailyBuys: backtestConfig.maxDailyBuys ?? null,
     directionPolicy: "longOnly",
+    candidateExitPolicy: document.definition?.exit?.candidateExitPolicy ?? "HOLD_WHILE_SELECTED",
     // 🔴 BACKTEST-001（G1）：此前不传 ⇒ 走默认 false ⇒ 涨停买得进、跌停卖得出。
     //    改为显式传保守口径，并把政策写进 Run Record（可解释「为什么这笔没成交」）。
     executionRules: toExecutionRuleSet(backtestPolicy),
@@ -1021,13 +1038,18 @@ export async function assembleRunWorkbenchInputs(
       securityIdByCode.set(row.code, ids);
     }
   }
-  const corporateActions = await perfRunAsync("corporate_actions.load", () =>
-    listCorporateActionsForCodesInRange([...securityIdByCode.keys()], {
-      startDate: request.startDate,
-      endDate: request.endDate,
-    }),
-  );
-  const corporateActionResolver = createCorporateActionResolver(corporateActions, securityIdByCode);
+  const corporateActionResolver =
+    request.corporateActionResolver ??
+    (await perfRunAsync("corporate_actions.load", async () => {
+      const corporateActions = await listCorporateActionsForCodesInRange(
+        [...securityIdByCode.keys()],
+        {
+          startDate: request.startDate,
+          endDate: request.endDate,
+        },
+      );
+      return createCorporateActionResolver(corporateActions, securityIdByCode);
+    }));
 
   const inputs = buildClosedLoopWiringInputs(dataset, side, corporateActionResolver);
 
@@ -1066,7 +1088,8 @@ export async function assembleRunWorkbenchInputs(
         " / 仓位口径（B-02 起真正参与成交预算）：" +
         "sizingMethod=" + String(side.simulationConfig.positionSizing?.sizingMethod ?? "（未声明=等权）") +
         "；fraction=" + String(side.simulationConfig.positionSizing?.fraction ?? "—") +
-        "（预算 = min(等权现金预算, 初始资金 × fraction)）",
+        "（预算 = min(等权现金预算, 对应计量基数 × fraction)；" +
+        "EQUITY_FRACTION 用决策日收盘总权益，其他固定比例用初始资金）",
       simulation: {
         initialCapital: side.simulationConfig.initialCapital,
         maxPositions: side.simulationConfig.maxPositions ?? null,

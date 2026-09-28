@@ -167,7 +167,7 @@ export function deriveExecutionModel(executionTiming: StrategyExecutionTiming): 
  *
  * 映射表：
  *   entry.conditions          → entryRules（`IN` / `NOT_IN` 无 v1 操作符 → 省略 operator，表达式落 description）
- *   exit.rules                → exitRules（TAKE_PROFIT / STOP_LOSS → threshold；TIME_EXIT → time-based）
+ *   exit.rules                → exitRules（止盈 / 止损 / 回撤止盈 → threshold；TIME_EXIT → time-based）
  *   risk.*                    → riskRules（portfolio.* / position.* 维度的状态与阈值声明）
  *   position                  → positionSizing（⚠ 有损：FIXED_AMOUNT / RISK_BASED 无 v1 等价，
  *                                               归入 fixed-fraction / rank-weighted，比例取 parameter
@@ -189,7 +189,10 @@ export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegac
     if (isTimeExit) operator = ">=";
     else if (rule.type === "STOP_LOSS") operator = "<=";
     else if (rule.type === "TAKE_PROFIT") operator = ">=";
-    const operand: number | string | null = rule.type === "STOP_LOSS" && typeof threshold === "number"
+    else if (rule.type === "TRAILING_TAKE_PROFIT") operator = "<=";
+    const operand: number | string | null =
+      (rule.type === "STOP_LOSS" || rule.type === "TRAILING_TAKE_PROFIT")
+      && typeof threshold === "number"
       ? -Math.abs(threshold)
       : (threshold ?? (rule.parameter === undefined ? null : `param:${rule.parameter}`));
     return {
@@ -245,7 +248,9 @@ export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegac
       ? { kind: "rank-weighted", maxPositions: position.maxPositions }
       : position.sizingMethod === "FIXED_AMOUNT"
         ? { kind: "fixed-amount", fixedAmount: requireFixedAmount(position), maxPositions: position.maxPositions }
-        : { kind: "fixed-fraction", fraction, maxPositions: position.maxPositions };
+        : position.sizingMethod === "EQUITY_RATIO"
+          ? { kind: "equity-fraction", fraction, maxPositions: position.maxPositions }
+          : { kind: "fixed-fraction", fraction, maxPositions: position.maxPositions };
 
   const parameters: ResearchParameterSchema = {
     parameters: definition.parameters.map((parameter: ParameterDefinition) => ({

@@ -141,9 +141,20 @@ export function orientedScoreOfMember(code: ThreeFactorCode, raw: ThreeFactorRaw
  * 有大量精确同值 ⇒ 1 ULP 就足以改变 `rankSignals` 的同值破平次序（`selection.ts` 的
  * `rank` 升序 + `securityId` 破平）⇒ 改变 TopN 边界上「选中哪几只」。
  */
-export function threeFactorCompositeScoreOf(raw: ThreeFactorRaw): number | null {
-  // 「首板回踩」模式要求观察窗内真实发生过回踩；纯连板上升路径不计入候选。
-  if (!raw.hasPullbackInObservationWindow) return null;
+export interface ThreeFactorCompositeScoreOptions {
+  /**
+   * true（缺省）= 沿用「首板回踩」资格门槛：观察窗内必须出现收盘价低于首板日收盘价；
+   * false = 新版本显式移除该门槛，允许纯上升路径进入 3F 横截面排序。
+   */
+  readonly requirePullback?: boolean;
+}
+
+export function threeFactorCompositeScoreOf(
+  raw: ThreeFactorRaw,
+  options: ThreeFactorCompositeScoreOptions = {},
+): number | null {
+  const requirePullback = options.requirePullback ?? true;
+  if (requirePullback && !raw.hasPullbackInObservationWindow) return null;
   const values: Record<TwelveFactorCode, number | null> = {
     bodyHeight: null,
     turnover: null,

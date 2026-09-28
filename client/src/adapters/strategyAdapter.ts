@@ -33,6 +33,7 @@ export type RuleOperator = (typeof RULE_OPERATORS)[number];
 export const POSITION_SIZING_KINDS = [
   "equal-weight",
   "fixed-fraction",
+  "equity-fraction",
   "rank-weighted",
   // BACKTEST-002（R-02）：执行层已支持固定金额（每仓 fixedAmount 元）。
   "fixed-amount",
@@ -58,7 +59,7 @@ export interface RuleViewModel {
 export interface PositionSizingViewModel {
   kind: PositionSizingKind | string;
   maxPositions: number;
-  /** 仅 fixed-fraction 使用。 */
+  /** 仅 fixed-fraction / equity-fraction 使用。 */
   fraction: number | null;
   /** 仅 fixed-amount 使用（元，> 0）。 */
   fixedAmount: number | null;
@@ -227,9 +228,9 @@ function parsePositionSizing(raw: unknown): PositionSizingViewModel {
 function serializePositionSizing(
   p: PositionSizingViewModel
 ): Record<string, unknown> {
-  if (p.kind === "fixed-fraction") {
+  if (p.kind === "fixed-fraction" || p.kind === "equity-fraction") {
     return {
-      kind: "fixed-fraction",
+      kind: p.kind,
       fraction: p.fraction ?? 0,
       maxPositions: p.maxPositions,
     };
@@ -480,6 +481,8 @@ export function positionSizingLabel(kind: string): string {
       return "等权分仓";
     case "fixed-fraction":
       return "固定比例";
+    case "equity-fraction":
+      return "按现有权益比例";
     case "rank-weighted":
       return "按排名加权";
     case "fixed-amount":
@@ -496,6 +499,8 @@ export function positionSizingDescription(kind: string): string {
       return "入选的候选等额分配资金，每只仓位相同，简单稳健。";
     case "fixed-fraction":
       return "每只固定占用初始资金的一定比例，超出部分留作现金。";
+    case "equity-fraction":
+      return "每只按决策日收盘总权益的一定比例建仓，现金不足时只收窄不放大。";
     case "rank-weighted":
       return "按候选排名高低分配权重，排名越靠前仓位越重。";
     case "fixed-amount":

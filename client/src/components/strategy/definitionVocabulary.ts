@@ -163,6 +163,7 @@ export const DEFINITION_PRICE_TYPE_OPTIONS: readonly SketchOption[] = [
 export const DEFINITION_EXIT_RULE_TYPE_OPTIONS: readonly SketchOption[] = [
   { value: "STOP_LOSS", label: "止损", note: "亏损达到阈值即离场（阈值通常是 RATIO，如 0.05 = -5%）" },
   { value: "TAKE_PROFIT", label: "止盈", note: "盈利达到阈值即离场" },
+  { value: "TRAILING_TAKE_PROFIT", label: "回撤止盈", note: "峰值进入盈利后，从最高收盘价回撤达到阈值即离场" },
   { value: "TIME_EXIT", label: "到期离场", note: "持有满 N 个交易日离场（阈值单位用 TRADING_DAY）" },
   { value: "SIGNAL_EXIT", label: "信号离场", note: "出现反向信号时离场" },
   { value: "FORCED_EXIT", label: "强制离场", note: "外部条件强制平仓（如触及风控闸门）" },

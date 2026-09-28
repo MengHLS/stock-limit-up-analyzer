@@ -65,6 +65,7 @@ export interface StrategyExitRuleProjectionRow {
   readonly triggerType: string;
   readonly thresholdValue: number | null;
   readonly thresholdUnit: string | null;
+  readonly policyJson: string | null;
   readonly parameterCode: string | null;
   readonly conditionJson: string | null;
   readonly priority: number;
@@ -190,6 +191,7 @@ export function buildStrategyProjections(definition: StrategyDefinition): Strate
     triggerType: rule.trigger,
     thresholdValue: rule.threshold ?? null,
     thresholdUnit: rule.thresholdUnit ?? null,
+    policyJson: optionalJson(rule.policy ?? rule.trailingPolicy),
     parameterCode: rule.parameter ?? null,
     conditionJson: optionalJson(rule.condition),
     priority: rule.priority,
@@ -295,7 +297,7 @@ export function verifyStrategyProjections(
     expected.exitRules as unknown as Record<string, unknown>[],
     actual.exitRules as unknown as Record<string, unknown>[],
     ["ruleId"],
-    ["ruleType", "triggerType", "thresholdValue", "thresholdUnit", "parameterCode", "conditionJson", "priority", "enabled", "ordinal"],
+    ["ruleType", "triggerType", "thresholdValue", "thresholdUnit", "policyJson", "parameterCode", "conditionJson", "priority", "enabled", "ordinal"],
   ));
 
   drifts.push(...diffRowSets(

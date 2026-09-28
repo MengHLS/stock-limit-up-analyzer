@@ -41,6 +41,7 @@ import { createExecutionModel } from "../../backtest/execution";
 import { limitDownPrice, validPrice } from "../../engine/execution";
 import { Portfolio } from "../../backtest/portfolio";
 import { AuditLog, fillAuditEntry } from "../../backtest/audit";
+import { computeGroupForwardFactor } from "../../corporateActions/engine";
 import { bindResearchDataset } from "../datasetAccess/handle";
 import { rowToCanonicalBar } from "../datasetAccess/bars";
 import type { PositionIntent } from "../framework/contract";
@@ -59,6 +60,18 @@ import {
 import { planDecisionDay, type PlannedOrder } from "./plan";
 import { computeTradeSimulationRunFingerprint } from "./serialize";
 import { assertValidSimulationConfig } from "./validate";
+import {
+  adjustTrailingPriceHistory,
+  buildTrailingPriceHistory,
+  evaluateAdvancedTrailingPolicy,
+  movingAverageAt,
+  type ParabolicSarState,
+  type TrailingPriceHistory,
+} from "./advancedTrailing";
+import {
+  evaluateAdvancedStopPolicy,
+  type AdvancedStopState,
+} from "./advancedStop";
 import type {
   PlanSkipCode,
   SecurityBoard,
@@ -202,17 +215,48 @@ function buildConfigSnapshot(
     maxPositions: config.maxPositions ?? null,
     maxDailyBuys: config.maxDailyBuys ?? null,
     directionPolicy: config.directionPolicy ?? "longOnly",
+    candidateExitPolicy: config.candidateExitPolicy ?? "HOLD_WHILE_SELECTED",
     executionRules,
     allowPartialFill: config.allowPartialFill ?? false,
     exitPolicy: {
       stopLossRatio: config.exitPolicy?.stopLossRatio ?? null,
       takeProfitRatio: config.exitPolicy?.takeProfitRatio ?? null,
       maxHoldingDays: config.exitPolicy?.maxHoldingDays ?? null,
+      trailingTakeProfitActivationRatio:
+        config.exitPolicy?.trailingTakeProfitActivationRatio ?? null,
+      trailingTakeProfitDrawdownRatio:
+        config.exitPolicy?.trailingTakeProfitDrawdownRatio ?? null,
+      trailingTakeProfitTrigger:
+        config.exitPolicy?.trailingTakeProfitTrigger ?? null,
+      advancedTrailingPolicy:
+        config.exitPolicy?.advancedTrailingPolicy ?? null,
+      advancedStopPolicy:
+        config.exitPolicy?.advancedStopPolicy ?? null,
+      strongHold:
+        config.exitPolicy?.strongHold === undefined
+        || config.exitPolicy.strongHold === null
+          ? null
+          : {
+              ...config.exitPolicy.strongHold,
+              afterExtendedHold:
+                config.exitPolicy.strongHold.afterExtendedHold ?? "TIME_EXIT",
+              scaleOutRatio:
+                config.exitPolicy.strongHold.scaleOutRatio ?? null,
+              runnerExitAtHoldingDays:
+                config.exitPolicy.strongHold.runnerExitAtHoldingDays ?? null,
+              maxConcurrentRunners:
+                config.exitPolicy.strongHold.maxConcurrentRunners ?? null,
+              replacementScoreMargin:
+                config.exitPolicy.strongHold.replacementScoreMargin ?? null,
+            },
     },
     tPlus1: DEFAULT_MARKET_RULES.tPlus1,
     lotSize: config.cost.lotSize > 0 ? Math.floor(config.cost.lotSize) : 1,
     decisionPoint: "close",
-    entryExitModel: "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET",
+    entryExitModel:
+      (config.candidateExitPolicy ?? "HOLD_WHILE_SELECTED") === "HOLD_WHILE_SELECTED"
+        ? "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET"
+        : "EXIT_RULES_LONG_ONLY_CASH_BUDGET",
     corporateActions: config.corporateActionResolver === undefined ? "NOT_APPLIED" : "APPLIED",
   };
 }
@@ -233,8 +277,13 @@ interface PendingOrder {
   readonly executionTime: string;
   /** 决策日成交额（千元），成交时点前已知（滑点分层）。 */
   readonly referenceAmount: number | null;
+  /** 买入候选评分；卖出订单为 null。 */
+  readonly score: number | null;
   /** 退出原因；buy 为 null。 */
   readonly exitReason: string | null;
+  /** 分批减仓后 runner 仍占用的组合槽比例；仅分批卖出单存在。 */
+  readonly runnerSlotUsage?: number;
+  readonly stopReduction?: boolean;
 }
 
 const REJECTION_NOTES: Partial<Record<RejectionReason, string>> = {
@@ -385,6 +434,8 @@ export function runTradeSimulation(
   const maxPositions = simConfig.maxPositions ?? null;
   const maxDailyBuys = simConfig.maxDailyBuys ?? null;
   const directionPolicy = simConfig.directionPolicy ?? "longOnly";
+  const candidateExitEnabled =
+    (simConfig.candidateExitPolicy ?? "HOLD_WHILE_SELECTED") === "HOLD_WHILE_SELECTED";
   const securityBoards = simConfig.securityBoards;
   const configSnapshot = buildConfigSnapshot(simConfig, {
     startDate: tradingDates[0]!,
@@ -449,6 +500,56 @@ export function runTradeSimulation(
    * 像“止损从未触发”，实际是风控卖单被拒后没有继承原始退出原因。
    */
   const stopLossTriggered = new Map<string, string>();
+  /**
+   * 盈利回撤止盈触发后，卖单可能同样因跌停/停牌被拒；触发状态跨日保留，
+   * 直到真正清仓，避免价格反弹后取消已经触发的保护性退出。
+   */
+  const trailingTakeProfitTriggered = new Map<string, string>();
+  /** 持仓期最高收盘价；建仓成交价作为初始峰值。 */
+  const trailingPeakClosePrices = new Map<string, number>();
+  /** 风控规则使用的复权后建仓参考价（公司行为发生前等同于成交价）。 */
+  const riskEntryPrices = new Map<string, number>();
+  const strongHold = simConfig.exitPolicy?.strongHold ?? null;
+  const advancedTrailingPolicy =
+    simConfig.exitPolicy?.advancedTrailingPolicy ?? null;
+  const advancedStopPolicy =
+    simConfig.exitPolicy?.advancedStopPolicy ?? null;
+  const stronglyHeldPositions = new Set<string>();
+  /** 已完成或已挂单减仓的强势持仓，避免重复减持。 */
+  const scaleOutScheduled = new Set<string>();
+  const partialStopScheduled = new Set<string>();
+  /** 未拆分仓位的 full-size trend runner。 */
+  const activeFullRunnerSecurityIds = new Set<string>();
+  /** 减仓成交后，runner 剩余仓位占用的组合槽比例。 */
+  const runnerSlotUsageBySecurity = new Map<string, number>();
+  const sarStateBySecurity = new Map<string, ParabolicSarState>();
+  const advancedStopStateBySecurity = new Map<string, AdvancedStopState>();
+  const closeHistoryBySecurity: Map<string, TrailingPriceHistory> =
+    strongHold !== null || advancedTrailingPolicy !== null
+      ? buildTrailingPriceHistory(handle.rows)
+      : new Map();
+  const triggeredExitReasonFor = (securityId: string): string | undefined =>
+    stopLossTriggered.get(securityId) ?? trailingTakeProfitTriggered.get(securityId);
+  const clearTriggeredExit = (securityId: string): void => {
+    stopLossTriggered.delete(securityId);
+    trailingTakeProfitTriggered.delete(securityId);
+    trailingPeakClosePrices.delete(securityId);
+    riskEntryPrices.delete(securityId);
+    sarStateBySecurity.delete(securityId);
+    scaleOutScheduled.delete(securityId);
+    partialStopScheduled.delete(securityId);
+    activeFullRunnerSecurityIds.delete(securityId);
+    runnerSlotUsageBySecurity.delete(securityId);
+    advancedStopStateBySecurity.delete(securityId);
+  };
+  const resetScaleOutScheduleOnReject = (securityId: string): void => {
+    if (!runnerSlotUsageBySecurity.has(securityId)) {
+      scaleOutScheduled.delete(securityId);
+    }
+  };
+  const resetPartialStopScheduleOnReject = (securityId: string): void => {
+    partialStopScheduled.delete(securityId);
+  };
   let orderSeq = 0;
   let fillSeq = 0;
   let lastClosePrices = new Map<string, number>();
@@ -465,7 +566,34 @@ export function runTradeSimulation(
     if (simConfig.corporateActionResolver !== undefined) {
       for (const securityId of portfolio.openPositionSymbols()) {
         const actions = simConfig.corporateActionResolver.actionsFor(securityId, date);
-        if (actions.length > 0) portfolio.applyCorporateAction(securityId, actions);
+        if (actions.length > 0) {
+          const preActionClose = lastClosePrices.get(securityId) ?? null;
+          const priceFactor =
+            preActionClose !== null && Number.isFinite(preActionClose) && preActionClose > 0
+              ? computeGroupForwardFactor(actions, preActionClose)
+              : 1;
+          portfolio.applyCorporateAction(securityId, actions);
+          if (priceFactor !== 1) {
+            portfolio.scaleMarketPrice(securityId, priceFactor);
+            const peak = trailingPeakClosePrices.get(securityId);
+            if (peak !== undefined) {
+              trailingPeakClosePrices.set(securityId, peak * priceFactor);
+            }
+            const riskEntry = riskEntryPrices.get(securityId);
+            if (riskEntry !== undefined) {
+              riskEntryPrices.set(securityId, riskEntry * priceFactor);
+            }
+            const previousClose = lastClosePrices.get(securityId);
+            if (previousClose !== undefined) {
+              lastClosePrices.set(securityId, previousClose * priceFactor);
+            }
+            adjustTrailingPriceHistory(
+              closeHistoryBySecurity.get(securityId),
+              date,
+              priceFactor,
+            );
+          }
+        }
       }
     }
 
@@ -483,7 +611,7 @@ export function runTradeSimulation(
     for (const entry of due) {
       const effectiveExitReason =
         entry.side === "sell"
-          ? stopLossTriggered.get(entry.securityId) ?? entry.exitReason
+          ? triggeredExitReasonFor(entry.securityId) ?? entry.exitReason
           : null;
       const bar = dayBars.get(entry.securityId);
       if (!bar) {
@@ -501,6 +629,12 @@ export function runTradeSimulation(
           rejectionReason: "SUSPENDED",
           explanation: "停牌/当日非 universe 成员无行情，无法成交",
         });
+        if (entry.runnerSlotUsage !== undefined) {
+          resetScaleOutScheduleOnReject(entry.securityId);
+        }
+        if (entry.stopReduction === true) {
+          resetPartialStopScheduleOnReject(entry.securityId);
+        }
         continue;
       }
 
@@ -530,6 +664,12 @@ export function runTradeSimulation(
               "执行日成交量为 0 / 缺失（zeroVolumePolicy=REJECT）⇒ 不可成交；" +
               "成交量=" + JSON.stringify(volume ?? null),
           });
+          if (entry.runnerSlotUsage !== undefined) {
+            resetScaleOutScheduleOnReject(entry.securityId);
+          }
+          if (entry.stopReduction === true) {
+            resetPartialStopScheduleOnReject(entry.securityId);
+          }
           continue;
         }
       }
@@ -577,6 +717,12 @@ export function runTradeSimulation(
           rejectionReason: reason,
           explanation: REJECTION_NOTES[reason] ?? `执行模型拒绝：${reason}`,
         });
+        if (entry.runnerSlotUsage !== undefined) {
+          resetScaleOutScheduleOnReject(entry.securityId);
+        }
+        if (entry.stopReduction === true) {
+          resetPartialStopScheduleOnReject(entry.securityId);
+        }
         continue;
       }
 
@@ -600,6 +746,7 @@ export function runTradeSimulation(
         },
         slippageAmount: 0,
         referenceAmount: entry.referenceAmount,
+        score: entry.score,
         reason: effectiveExitReason,
       };
       const result =
@@ -622,10 +769,35 @@ export function runTradeSimulation(
           rejectionReason: reason,
           explanation: result.reason,
         });
+        if (entry.runnerSlotUsage !== undefined) {
+          resetScaleOutScheduleOnReject(entry.securityId);
+        }
+        if (entry.stopReduction === true) {
+          resetPartialStopScheduleOnReject(entry.securityId);
+        }
         continue;
       }
 
       const filledQuantity = result.filledQuantity;
+      if (entry.side === "buy") {
+        riskEntryPrices.set(entry.securityId, price);
+        trailingPeakClosePrices.set(
+          entry.securityId,
+          Math.max(trailingPeakClosePrices.get(entry.securityId) ?? 0, price),
+        );
+        if (advancedTrailingPolicy?.kind === "PARABOLIC_SAR") {
+          sarStateBySecurity.set(entry.securityId, {
+            sar: bar.low ?? price,
+            extreme: bar.high ?? price,
+            acceleration: advancedTrailingPolicy.step,
+          });
+        }
+        if (advancedStopPolicy !== null) {
+          advancedStopStateBySecurity.set(entry.securityId, {
+            confirmationCount: 0,
+          });
+        }
+      }
       const gross = price * filledQuantity;
       const tradeCost = computeTradeCost(entry.side, gross, cost);
       const slippage = slippageAmount(price, basePrice, filledQuantity);
@@ -681,27 +853,69 @@ export function runTradeSimulation(
         frozenQuantity: afterQuantity - portfolio.available(entry.securityId),
         explanation: entry.side === "buy" ? "买入增加持仓" : "卖出减少持仓",
       });
+      if (
+        entry.side === "sell"
+        && entry.runnerSlotUsage !== undefined
+        && afterQuantity > 0
+      ) {
+        runnerSlotUsageBySecurity.set(entry.securityId, entry.runnerSlotUsage);
+      }
       if (entry.side === "sell" && afterQuantity === 0) {
-        stopLossTriggered.delete(entry.securityId);
+        clearTriggeredExit(entry.securityId);
       }
     }
 
-    // (c2) 盘中阈值退出：止损 / 止盈按当日 OHLC 触发并成交。
+    // (c2) 盘中阈值退出：止损 / 固定止盈 / 盘中盈利回撤止盈按当日 OHLC 触发并成交。
     const exitPolicy = simConfig.exitPolicy;
-    if (exitPolicy && (exitPolicy.stopLossRatio !== null || exitPolicy.takeProfitRatio !== null)) {
+    const intradayTrailingDrawdownRatio =
+      exitPolicy?.trailingTakeProfitTrigger === "INTRADAY"
+        ? exitPolicy.trailingTakeProfitDrawdownRatio ?? null
+        : null;
+    if (
+      exitPolicy
+      && (
+        exitPolicy.stopLossRatio !== null
+        || exitPolicy.takeProfitRatio !== null
+        || intradayTrailingDrawdownRatio !== null
+        || advancedStopPolicy !== null
+      )
+    ) {
       const details = portfolio.openTradeDetails().sort((a, b) => a.securityId.localeCompare(b.securityId));
       for (const detail of details) {
         const bar = dayBars.get(detail.securityId);
         if (!bar || bar.high === null || bar.low === null) continue;
         const available = portfolio.available(detail.securityId);
         if (available <= 0) continue;
+        const riskEntryPrice =
+          riskEntryPrices.get(detail.securityId) ?? detail.entryPrice;
 
         const stopPrice = exitPolicy.stopLossRatio === null
           ? null
-          : detail.entryPrice * (1 - exitPolicy.stopLossRatio);
+          : riskEntryPrice * (1 - exitPolicy.stopLossRatio);
         const takeProfitPrice = exitPolicy.takeProfitRatio === null
           ? null
-          : detail.entryPrice * (1 + exitPolicy.takeProfitRatio);
+          : riskEntryPrice * (1 + exitPolicy.takeProfitRatio);
+        const trailingPeakClosePrice = intradayTrailingDrawdownRatio === null
+          ? null
+          : trailingPeakClosePrices.get(detail.securityId) ?? detail.entryPrice;
+        const trailingPrice =
+          trailingPeakClosePrice === null
+          || intradayTrailingDrawdownRatio === null
+            ? null
+            : trailingPeakClosePrice * (1 - intradayTrailingDrawdownRatio);
+        const trailingPeakReturnRatio =
+          trailingPeakClosePrice === null || riskEntryPrice <= 0
+            ? null
+            : trailingPeakClosePrice / riskEntryPrice - 1;
+        const trailingActivationRatio =
+          exitPolicy.trailingTakeProfitActivationRatio ?? 0;
+        const trailingArmed =
+          trailingPeakReturnRatio !== null
+          && (
+            trailingActivationRatio === 0
+              ? trailingPeakReturnRatio > 0
+              : trailingPeakReturnRatio >= trailingActivationRatio
+          );
         const ruleContext = resolveExecutionRuleContext(
           securityOf(detail.securityId),
           marketRules,
@@ -710,7 +924,60 @@ export function runTradeSimulation(
         );
         let exitReason: string | null = null;
         let triggerPrice: number | null = null;
-        if (stopPrice !== null && bar.low <= stopPrice) {
+        const advancedStopEvaluation =
+          advancedStopPolicy === null
+            ? null
+            : evaluateAdvancedStopPolicy({
+                policy: advancedStopPolicy,
+                date,
+                phase: "INTRADAY",
+                close: bar.close ?? riskEntryPrice,
+                high: bar.high,
+                low: bar.low,
+                entryPrice: riskEntryPrice,
+                holdingDays:
+                  portfolio.holdingDaysBetween(detail.entryTime, date) ?? 1,
+                peakClosePrice:
+                  trailingPeakClosePrices.get(detail.securityId)
+                  ?? detail.entryPrice,
+                history: closeHistoryBySecurity.get(detail.securityId),
+                state: advancedStopStateBySecurity.get(detail.securityId),
+              });
+        if (advancedStopEvaluation !== null) {
+          advancedStopStateBySecurity.set(
+            detail.securityId,
+            advancedStopEvaluation.state,
+          );
+        }
+        if (
+          advancedStopEvaluation?.triggered === true
+          && advancedStopEvaluation.sellRatio >= 1
+          && advancedStopEvaluation.line !== null
+        ) {
+          exitReason = advancedStopEvaluation.reason ?? "止损";
+          if (
+            bar.open !== null
+            && bar.open <= advancedStopEvaluation.line
+          ) {
+            const openAtLimitDown =
+              ruleContext.limitDownRatio > 0
+              && validPrice(bar.preClose)
+              && validPrice(bar.open)
+              && bar.open <= limitDownPrice(
+                bar.preClose as number,
+                ruleContext.limitDownRatio,
+              );
+            triggerPrice =
+              openAtLimitDown
+              && bar.high !== null
+              && bar.high >= advancedStopEvaluation.line
+                ? advancedStopEvaluation.line
+                : bar.open;
+          } else {
+            triggerPrice = advancedStopEvaluation.line;
+          }
+          stopLossTriggered.set(detail.securityId, exitReason);
+        } else if (stopPrice !== null && bar.low <= stopPrice) {
           exitReason = `止损（${(exitPolicy.stopLossRatio! * 100).toFixed(2)}%）`;
           stopLossTriggered.set(detail.securityId, exitReason);
           if (bar.open !== null && bar.open <= stopPrice) {
@@ -735,6 +1002,23 @@ export function runTradeSimulation(
         } else if (takeProfitPrice !== null && bar.high >= takeProfitPrice) {
           exitReason = `止盈（${(exitPolicy.takeProfitRatio! * 100).toFixed(2)}%）`;
           triggerPrice = bar.open !== null && bar.open >= takeProfitPrice ? bar.open : takeProfitPrice;
+        } else if (
+          trailingArmed
+          && trailingPrice !== null
+          && bar.low <= trailingPrice
+        ) {
+          triggerPrice =
+            bar.open !== null && bar.open <= trailingPrice
+              ? bar.open
+              : trailingPrice;
+          const triggeredDrawdownRatio =
+            trailingPeakClosePrice === null
+              ? null
+              : (triggerPrice - trailingPeakClosePrice) / trailingPeakClosePrice;
+          exitReason =
+            `盈利回撤止盈（峰值收益${((trailingPeakReturnRatio ?? 0) * 100).toFixed(2)}%，`
+            + `盘中回撤${((triggeredDrawdownRatio ?? 0) * 100).toFixed(2)}%）`;
+          trailingTakeProfitTriggered.set(detail.securityId, exitReason);
         }
         if (exitReason === null || triggerPrice === null) continue;
 
@@ -864,24 +1148,381 @@ export function runTradeSimulation(
           frozenQuantity: afterQuantity - portfolio.available(detail.securityId),
           explanation: exitReason,
         });
-        if (afterQuantity === 0) stopLossTriggered.delete(detail.securityId);
+        if (afterQuantity === 0) clearTriggeredExit(detail.securityId);
       }
     }
 
-    // (d) 收盘后决策（仅候选日）：hold-while-selected 进出场。
+    // (d) 收盘后决策：显式退出规则优先，候选退出只在策略启用时参与。
     const nextDate =
       dateIndex + 1 < tradingDates.length ? tradingDates[dateIndex + 1]! : null;
     const intents = decisionIndex.get(date) ?? [];
     const forcedExitReasons = new Map<string, string>();
-    const maxHoldingDays = exitPolicy?.maxHoldingDays ?? null;
-    if (maxHoldingDays !== null) {
-      for (const detail of portfolio.openTradeDetails().sort((a, b) => a.securityId.localeCompare(b.securityId))) {
-        const holdingDays = portfolio.holdingDaysBetween(detail.entryTime, date);
-        if (holdingDays !== null && holdingDays >= maxHoldingDays) {
-          forcedExitReasons.set(detail.securityId, `持有满${maxHoldingDays}个交易日`);
+    const partialExitOrders = new Map<string, {
+      quantity: number;
+      reason: string;
+      runnerSlotUsage: number;
+      stopReduction?: boolean;
+    }>();
+    const openTradeDetails = portfolio
+      .openTradeDetails()
+      .sort((a, b) => a.securityId.localeCompare(b.securityId));
+    for (const detail of openTradeDetails) {
+      const triggeredReason = triggeredExitReasonFor(detail.securityId);
+      if (triggeredReason !== undefined) {
+        forcedExitReasons.set(detail.securityId, triggeredReason);
+      }
+    }
+
+    const trailingActivationRatio =
+      exitPolicy?.trailingTakeProfitActivationRatio ?? 0;
+    const trailingDrawdownRatio =
+      exitPolicy?.trailingTakeProfitDrawdownRatio ?? null;
+    if (advancedStopPolicy !== null) {
+      for (const detail of openTradeDetails) {
+        if (triggeredExitReasonFor(detail.securityId) !== undefined) continue;
+        const bar = dayBars.get(detail.securityId);
+        const closePrice = bar?.close ?? null;
+        if (
+          closePrice === null
+          || !Number.isFinite(closePrice)
+          || closePrice <= 0
+        ) {
+          continue;
+        }
+        const riskEntryPrice =
+          riskEntryPrices.get(detail.securityId) ?? detail.entryPrice;
+        const peakClosePrice = Math.max(
+          trailingPeakClosePrices.get(detail.securityId) ?? detail.entryPrice,
+          closePrice,
+        );
+        trailingPeakClosePrices.set(detail.securityId, peakClosePrice);
+        const evaluation = evaluateAdvancedStopPolicy({
+          policy: advancedStopPolicy,
+          date,
+          phase: "CLOSE",
+          close: closePrice,
+          high: bar?.high ?? null,
+          low: bar?.low ?? null,
+          entryPrice: riskEntryPrice,
+          holdingDays:
+            portfolio.holdingDaysBetween(detail.entryTime, date) ?? 1,
+          peakClosePrice,
+          history: closeHistoryBySecurity.get(detail.securityId),
+          state: advancedStopStateBySecurity.get(detail.securityId),
+        });
+        advancedStopStateBySecurity.set(detail.securityId, evaluation.state);
+        if (!evaluation.triggered) continue;
+        if (evaluation.sellRatio >= 1) {
+          const reason = evaluation.reason ?? "止损";
+          stopLossTriggered.set(detail.securityId, reason);
+          forcedExitReasons.set(detail.securityId, reason);
+          continue;
+        }
+        const available = portfolio.available(detail.securityId);
+        const lotSize = cost.lotSize > 0 ? Math.floor(cost.lotSize) : 1;
+        const quantity = Math.floor((available * evaluation.sellRatio) / lotSize) * lotSize;
+        if (
+          quantity >= lotSize
+          && quantity < available
+          && !partialStopScheduled.has(detail.securityId)
+        ) {
+          partialExitOrders.set(detail.securityId, {
+            quantity,
+            reason: evaluation.reason ?? "分批止损",
+            runnerSlotUsage: 1,
+            stopReduction: true,
+          });
+          partialStopScheduled.add(detail.securityId);
         }
       }
     }
+    if (advancedTrailingPolicy !== null) {
+      for (const detail of openTradeDetails) {
+        if (triggeredExitReasonFor(detail.securityId) !== undefined) continue;
+        const bar = dayBars.get(detail.securityId);
+        const closePrice = bar?.close ?? null;
+        if (
+          closePrice === null
+          || !Number.isFinite(closePrice)
+          || closePrice <= 0
+          || detail.entryPrice <= 0
+        ) {
+          continue;
+        }
+        const riskEntryPrice =
+          riskEntryPrices.get(detail.securityId) ?? detail.entryPrice;
+        if (riskEntryPrice <= 0) continue;
+        const priorPeakClosePrice =
+          trailingPeakClosePrices.get(detail.securityId) ?? detail.entryPrice;
+        const peakClosePrice = Math.max(priorPeakClosePrice, closePrice);
+        trailingPeakClosePrices.set(detail.securityId, peakClosePrice);
+        const evaluation = evaluateAdvancedTrailingPolicy({
+          policy: advancedTrailingPolicy,
+          date,
+          close: closePrice,
+          high: bar?.high ?? null,
+          low: bar?.low ?? null,
+          riskEntryPrice,
+          peakClosePrice,
+          stopLossRatio: exitPolicy?.stopLossRatio ?? 0,
+          history: closeHistoryBySecurity.get(detail.securityId),
+          ...(sarStateBySecurity.get(detail.securityId) === undefined
+            ? {}
+            : { sarState: sarStateBySecurity.get(detail.securityId)! }),
+        });
+        if (evaluation.sarState !== undefined) {
+          sarStateBySecurity.set(detail.securityId, evaluation.sarState);
+        }
+        if (evaluation.reason !== null) {
+          trailingTakeProfitTriggered.set(detail.securityId, evaluation.reason);
+          forcedExitReasons.set(detail.securityId, evaluation.reason);
+        }
+      }
+    }
+    if (trailingDrawdownRatio !== null) {
+      const trailingTrigger = exitPolicy?.trailingTakeProfitTrigger ?? "ON_CLOSE";
+      for (const detail of openTradeDetails) {
+        if (triggeredExitReasonFor(detail.securityId) !== undefined) continue;
+        const closePrice = dayBars.get(detail.securityId)?.close ?? null;
+        if (
+          closePrice === null
+          || !Number.isFinite(closePrice)
+          || closePrice <= 0
+          || detail.entryPrice <= 0
+        ) {
+          continue;
+        }
+        const priorPeakClosePrice =
+          trailingPeakClosePrices.get(detail.securityId) ?? detail.entryPrice;
+        const peakClosePrice = Math.max(priorPeakClosePrice, closePrice);
+        trailingPeakClosePrices.set(detail.securityId, peakClosePrice);
+        if (trailingTrigger === "INTRADAY") continue;
+        const riskEntryPrice =
+          riskEntryPrices.get(detail.securityId) ?? detail.entryPrice;
+        const peakReturnRatio = peakClosePrice / riskEntryPrice - 1;
+        const drawdownFromPeakRatio =
+          (closePrice - peakClosePrice) / peakClosePrice;
+        const trailingArmed =
+          trailingActivationRatio === 0
+            ? peakReturnRatio > 0
+            : peakReturnRatio >= trailingActivationRatio;
+        if (
+          trailingArmed
+          && drawdownFromPeakRatio < 0
+          && drawdownFromPeakRatio <= -trailingDrawdownRatio
+        ) {
+          const reason =
+            `盈利回撤止盈（峰值收益${(peakReturnRatio * 100).toFixed(2)}%，`
+            + `收盘回撤${(drawdownFromPeakRatio * 100).toFixed(2)}%）`;
+          trailingTakeProfitTriggered.set(detail.securityId, reason);
+          forcedExitReasons.set(detail.securityId, reason);
+        }
+      }
+    }
+
+    const maxHoldingDays = exitPolicy?.maxHoldingDays ?? null;
+    if (maxHoldingDays !== null) {
+      for (const detail of openTradeDetails) {
+        if (forcedExitReasons.has(detail.securityId)) continue;
+        const holdingDays = portfolio.holdingDaysBetween(detail.entryTime, date);
+        if (holdingDays === null) continue;
+        const positionKey = `${detail.securityId}\u0000${detail.entryTime}`;
+        if (
+          strongHold !== null &&
+          holdingDays === strongHold.atHoldingDays
+        ) {
+          const close = dayBars.get(detail.securityId)?.close ?? null;
+          const ma5 = movingAverageAt(
+            closeHistoryBySecurity.get(detail.securityId),
+            date,
+            5,
+          );
+          const ma10 = movingAverageAt(
+            closeHistoryBySecurity.get(detail.securityId),
+            date,
+            10,
+          );
+          const returnRatio =
+            close === null
+              ? null
+              : close / (riskEntryPrices.get(detail.securityId) ?? detail.entryPrice) - 1;
+          const strong =
+            close !== null &&
+            returnRatio !== null &&
+            returnRatio >= strongHold.minReturnRatio &&
+            (!strongHold.requireAboveMa5 || (ma5 !== null && close > ma5)) &&
+            (!strongHold.requireAboveMa10 || (ma10 !== null && close > ma10));
+          if (strong) {
+            stronglyHeldPositions.add(positionKey);
+            continue;
+          }
+        }
+        if (
+          strongHold !== null &&
+          stronglyHeldPositions.has(positionKey) &&
+          holdingDays < strongHold.extendToHoldingDays
+        ) {
+          continue;
+        }
+        if (
+          strongHold !== null
+          && stronglyHeldPositions.has(positionKey)
+          && (strongHold.afterExtendedHold ?? "TIME_EXIT") === "TREND"
+        ) {
+          const scaleOutRatio = strongHold.scaleOutRatio ?? null;
+          const runnerExitAtHoldingDays =
+            strongHold.runnerExitAtHoldingDays ?? null;
+          if (
+            runnerExitAtHoldingDays !== null
+            && holdingDays >= runnerExitAtHoldingDays
+          ) {
+            forcedExitReasons.set(
+              detail.securityId,
+              `趋势runner达到第${String(runnerExitAtHoldingDays)}个持有日，下一交易日开盘退出`,
+            );
+            continue;
+          }
+          const maxConcurrentRunners =
+            strongHold.maxConcurrentRunners ?? null;
+          if (
+            maxConcurrentRunners !== null
+            && !activeFullRunnerSecurityIds.has(detail.securityId)
+            && !scaleOutScheduled.has(detail.securityId)
+          ) {
+            const activeRunnerCount =
+              activeFullRunnerSecurityIds.size + scaleOutScheduled.size;
+            if (activeRunnerCount >= maxConcurrentRunners) {
+              forcedExitReasons.set(
+                detail.securityId,
+                `强势续持趋势runner名额已满（上限${String(maxConcurrentRunners)}个），`
+                + `持有满${String(strongHold.extendToHoldingDays)}个交易日退出`,
+              );
+              continue;
+            }
+            activeFullRunnerSecurityIds.add(detail.securityId);
+          }
+          if (
+            scaleOutRatio !== null
+            && !scaleOutScheduled.has(detail.securityId)
+            && !runnerSlotUsageBySecurity.has(detail.securityId)
+          ) {
+            const available = portfolio.available(detail.securityId);
+            const lotSize = cost.lotSize > 0 ? Math.floor(cost.lotSize) : 1;
+            const targetSell = Math.floor(
+              (available * scaleOutRatio) / lotSize,
+            ) * lotSize;
+            const remaining = available - targetSell;
+            if (
+              targetSell >= lotSize
+              && remaining >= lotSize
+            ) {
+              partialExitOrders.set(detail.securityId, {
+                quantity: targetSell,
+                reason:
+                  `强势续持第${String(strongHold.extendToHoldingDays)}日减仓`
+                  + `${(scaleOutRatio * 100).toFixed(0)}%（剩余仓位转趋势止盈）`,
+                runnerSlotUsage: 1 - scaleOutRatio,
+              });
+              scaleOutScheduled.add(detail.securityId);
+            } else {
+              forcedExitReasons.set(
+                detail.securityId,
+                `强势续持后持仓不足两手，无法按${(scaleOutRatio * 100).toFixed(0)}%拆分，`
+                + `持有满${String(strongHold.extendToHoldingDays)}个交易日`,
+              );
+            }
+          }
+          continue;
+        }
+        if (holdingDays >= maxHoldingDays) {
+          forcedExitReasons.set(
+            detail.securityId,
+            stronglyHeldPositions.has(positionKey)
+              ? `强势续持后持有满${strongHold?.extendToHoldingDays ?? maxHoldingDays}个交易日`
+              : `持有满${maxHoldingDays}个交易日`,
+          );
+        }
+      }
+    }
+
+    let additionalEntryCash = 0;
+    let allowForcedExitSlotReuse = false;
+    const replacementScoreMargin =
+      strongHold?.replacementScoreMargin ?? null;
+    if (replacementScoreMargin !== null && intents.length > 0) {
+      const activeRunnerIds = new Set([
+        ...activeFullRunnerSecurityIds,
+        ...scaleOutScheduled,
+      ]);
+      const candidates = intents
+        .filter(intent => intent.direction === "long")
+        .slice()
+        .sort((left, right) =>
+          left.rank !== right.rank
+            ? left.rank - right.rank
+            : left.securityId.localeCompare(right.securityId),
+        );
+      const holdingIds = new Set(
+        openTradeDetails.map(detail => detail.securityId),
+      );
+      const replacedRunnerIds = new Set<string>();
+      let occupiedSlots = openTradeDetails.reduce(
+        (sum, detail) =>
+          sum + (runnerSlotUsageBySecurity.get(detail.securityId) ?? 1),
+        0,
+      );
+      occupiedSlots -= openTradeDetails.reduce(
+        (sum, detail) =>
+          sum + (
+            forcedExitReasons.has(detail.securityId)
+            && !replacedRunnerIds.has(detail.securityId)
+              ? runnerSlotUsageBySecurity.get(detail.securityId) ?? 1
+              : 0
+          ),
+        0,
+      );
+      for (const candidate of candidates) {
+        if (holdingIds.has(candidate.securityId)) continue;
+        if (maxPositions !== null && occupiedSlots < maxPositions) break;
+        const weakest = openTradeDetails
+          .filter(detail =>
+            activeRunnerIds.has(detail.securityId)
+            && !replacedRunnerIds.has(detail.securityId)
+            && forcedExitReasons.has(detail.securityId) === false
+            && typeof detail.score === "number"
+          )
+          .sort((left, right) =>
+            left.score! !== right.score!
+              ? left.score! - right.score!
+              : left.securityId.localeCompare(right.securityId),
+          )[0];
+        if (weakest === undefined || typeof weakest.score !== "number") break;
+        if (
+          candidate.signalValue
+          < weakest.score + replacementScoreMargin
+        ) {
+          continue;
+        }
+        const available = portfolio.available(weakest.securityId);
+        const close = dayBars.get(weakest.securityId)?.close ?? null;
+        if (available <= 0 || close === null || !Number.isFinite(close)) continue;
+        forcedExitReasons.set(
+          weakest.securityId,
+          `候选替换：新候选评分${candidate.signalValue.toFixed(4)}高于最弱runner `
+          + `${weakest.score.toFixed(4)} + 阈值${replacementScoreMargin.toFixed(4)}`,
+        );
+        replacedRunnerIds.add(weakest.securityId);
+        const gross = available * close;
+        const sellCost = computeTradeCost("sell", gross, cost).total;
+        additionalEntryCash += Math.max(0, gross - sellCost);
+        occupiedSlots = Math.max(
+          0,
+          occupiedSlots - (runnerSlotUsageBySecurity.get(weakest.securityId) ?? 1),
+        );
+      }
+      allowForcedExitSlotReuse = replacedRunnerIds.size > 0;
+    }
+
     if (intents.length > 0 || forcedExitReasons.size > 0) {
       const holdings = Array.from(portfolio.openPositionSymbols()).sort();
       const availableBySecurity = new Map<string, number>();
@@ -894,17 +1535,26 @@ export function runTradeSimulation(
           closePriceBySecurity.set(securityId, bar.close);
         amountBySecurity.set(securityId, bar.amount ?? null);
       }
+      // 决策日收盘总权益 = 现金 + 持仓市值；供 equity-fraction 仓位口径使用。
+      const currentEquity = portfolio.markToMarket(closePriceBySecurity);
       const plan = perfRun("backtest.plan", () =>
         planDecisionDay({
         decisionDate: date,
         intents,
         forcedExitReasons,
+        partialExitOrders,
         holdings,
+        candidateExitEnabled,
         availableBySecurity,
+        ...(runnerSlotUsageBySecurity.size === 0
+          ? {}
+          : { positionSlotUsageBySecurity: runnerSlotUsageBySecurity }),
         cash: portfolio.cash,
+        ...(additionalEntryCash > 0 ? { additionalEntryCash } : {}),
         maxPositions,
         maxDailyBuys,
         hasNextTradingDay: nextDate !== null,
+        ...(allowForcedExitSlotReuse ? { allowForcedExitSlotReuse: true } : {}),
         closePriceBySecurity,
         amountBySecurity,
         cost,
@@ -912,6 +1562,7 @@ export function runTradeSimulation(
         // BACKTEST-002（B-02）— 仓位口径与计量基数透传（min 收窄，不放大）。
         ...(simConfig.positionSizing !== undefined ? { positionSizing: simConfig.positionSizing } : {}),
         initialCapital: simConfig.initialCapital,
+        currentEquity,
         }),
       );
 
@@ -949,10 +1600,17 @@ export function runTradeSimulation(
           quantity: item.quantity,
           executionTime: nextDate,
           referenceAmount: item.kind === "buy" ? item.referenceAmount : null,
+          score: item.kind === "buy" ? item.score : null,
           exitReason:
             item.kind === "sell"
-              ? stopLossTriggered.get(item.securityId) ?? exitReason
+              ? triggeredExitReasonFor(item.securityId) ?? exitReason
               : exitReason,
+          ...(item.kind === "sell" && item.runnerSlotUsage !== undefined
+            ? { runnerSlotUsage: item.runnerSlotUsage }
+            : {}),
+          ...(item.kind === "sell" && item.stopReduction === true
+            ? { stopReduction: true }
+            : {}),
         });
         audit.recordOrder({
           orderId,
@@ -972,125 +1630,9 @@ export function runTradeSimulation(
       skippedEntries.push(...plan.skipped);
     }
 
-    // (d-2) 面板末日清算（防悬挂）。
-    //
-    // 🔴 问题：卖出订单的 `executionTime` 固定是 **nextDate**（NEXT_OPEN 语义）。若某证券在
-    // nextDate **没有行情行**，这笔卖出注定被拒，而引擎会**逐日重试直到期末** ⇒ 持仓永久
-    // 悬挂。实测（690001 / 2025-11..2026-09）：`holdingPeriod` 出现 67/76/108/134 的长尾，
-    // `SUSPENDED / 执行日无行` 累计 697 次、`SUBMITTED / 执行日无行` 705 次。
-    //
-    // 🔴 判据：**明日无行**即清算（不是「最后一个有行情日」—— 同一证券的多个事件会让
-    // 面板行跨度达 34~210 行，按末日判定永远不触发，第一版兜底因此完全无效）。
-    //
-    // 修正动作：当日还有行情 ⇒ **按当日收盘价**强制清算，仍走
-    // 「syntheticBar → executionModel.quote → portfolio.sell」以保留滑点与费用；
-    // 但把 syntheticBar.preClose 设为收盘价，显式绕过「最后一行跌停无法再次重试」
-    // 的僵局。该绕过仅在事件面板没有下一行时发生，并写入退出原因。
-    if (nextDate !== null) {
-      for (const detail of portfolio.openTradeDetails().sort((a, b) => a.securityId.localeCompare(b.securityId))) {
-        // 明日仍有行 ⇒ 正常退出路径可行，不干预。
-        if (rowKeys.has(`${nextDate}\u0000${detail.securityId}`)) continue;
-        const bar = dayBars.get(detail.securityId);
-        const closePrice =
-          bar !== undefined
-          && bar.close !== null
-          && Number.isFinite(bar.close)
-          && bar.close > 0
-            ? bar.close
-            : lastClosePrices.get(detail.securityId) ?? null;
-        if (closePrice === null || !Number.isFinite(closePrice) || closePrice <= 0) continue;
-        const available = portfolio.available(detail.securityId);
-        if (available <= 0) continue; // T+1 冻结，留到下一交易日再判
-
-        const exitReason =
-          `面板末日清算（下一交易日 ${nextDate} 无行情，按当日收盘价平仓，避免悬挂到期末）`;
-        orderSeq += 1;
-        const orderId = `ORD-${orderSeq}`;
-        stats.totalOrders += 1;
-        // The event panel has no later executable bar. A normal NEXT_OPEN
-        // retry is impossible, so close directly at the last known close with
-        // the configured sell slippage; fees are still applied below.
-        const forcedPrice = Number(
-          (closePrice * (1 - Math.max(0, cost.slippageBps) / 10_000)).toFixed(4),
-        );
-        const fill = {
-          fillId: `FILL-${fillSeq}`,
-          orderId,
-          securityId: detail.securityId,
-          side: "sell" as const,
-          quantity: available,
-          price: forcedPrice,
-          basePrice: closePrice,
-          timestamp: date,
-          cost: { commission: 0, stampDuty: 0, transferFee: 0, otherFees: 0, total: 0 },
-          slippageAmount: 0,
-          referenceAmount: null,
-          reason: exitReason,
-        };
-        const result = portfolio.sell(fill, cost, allowPartialFill);
-        if (!result.success) {
-          stats.rejectedOrders += 1;
-          const reason = result.rejectionReason ?? "OTHER";
-          stats.byReason[reason] = (stats.byReason[reason] ?? 0) + 1;
-          audit.recordOrder({
-            orderId,
-            securityId: detail.securityId,
-            tradeDate: date,
-            side: "sell",
-            requestedQuantity: available,
-            filledQuantity: 0,
-            status: "REJECTED",
-            rejectionReason: reason,
-            explanation: `${exitReason}：组合约束拒绝（${result.reason}）`,
-          });
-          continue;
-        }
-        const filledQuantity = result.filledQuantity;
-        const gross = fill.price * filledQuantity;
-        const tradeCost = computeTradeCost("sell", gross, cost);
-        const slippage = slippageAmount(fill.price, fill.basePrice, filledQuantity);
-        if (result.status === "PARTIALLY_FILLED") stats.partialFills += 1;
-        stats.totalFills += 1;
-        accumulateCost("sell", tradeCost, slippage);
-        audit.recordFill(
-          fillAuditEntry(
-            `FILL-${fillSeq}`,
-            orderId,
-            detail.securityId,
-            "sell",
-            filledQuantity,
-            fill.price,
-            fill.basePrice,
-            date,
-            slippage,
-            tradeCost,
-          ),
-        );
-        fillSeq += 1;
-        audit.recordOrder({
-          orderId,
-          securityId: detail.securityId,
-          tradeDate: date,
-          side: "sell",
-          requestedQuantity: available,
-          filledQuantity,
-          status: result.status,
-          rejectionReason: result.status === "PARTIALLY_FILLED" ? "OTHER" : null,
-          explanation: `${exitReason}：卖出成交 ${filledQuantity} 股 @ ${fill.price}`,
-        });
-        const afterQuantity = portfolio.quantity(detail.securityId);
-        audit.recordPosition({
-          securityId: detail.securityId,
-          timestamp: date,
-          event: afterQuantity === 0 ? "close" : "decrease",
-          beforeQuantity: afterQuantity + filledQuantity,
-          afterQuantity,
-          availableQuantity: portfolio.available(detail.securityId),
-          frozenQuantity: afterQuantity - portfolio.available(detail.securityId),
-          explanation: exitReason,
-        });
-      }
-    }
+    // 执行日无该证券行情不等于“永远没有行情”，更不等于可在前一日收盘价成交。
+    // 强制退出会在后续决策日重新挂单，只能在真实出现该证券 bar 时按 NEXT_OPEN 撮合；否则期末 openAtEnd。
+    // 禁止恢复“下一交易日无行就按当日收盘价强制清算”的伪成交兜底。
 
     // (e) 收盘后记录权益点。
     const closePrices = new Map<string, number>();
@@ -1098,7 +1640,11 @@ export function runTradeSimulation(
       if (bar.close !== null && Number.isFinite(bar.close) && bar.close > 0)
         closePrices.set(securityId, bar.close);
     }
-    lastClosePrices = closePrices;
+    // 保留每个证券最近一次有效收盘价：执行日停牌/缺行时不能把上一日估值价
+    // 从期末快照中抹掉，否则 openAtEnd 会错误地写成 exitPrice=null。
+    for (const [securityId, close] of Array.from(closePrices.entries())) {
+      lastClosePrices.set(securityId, close);
+    }
     equityCurve.push(portfolio.equityPoint(date, closePrices));
   }
   perfEnd(__btDayLoop);

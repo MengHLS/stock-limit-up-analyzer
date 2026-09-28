@@ -3,6 +3,7 @@
  *
  * 只接受当前实现能精确兑现的语义：
  * - STOP_LOSS / TAKE_PROFIT: INTRADAY
+ * - TRAILING_TAKE_PROFIT: INTRADAY / ON_CLOSE
  * - TIME_EXIT: ON_CLOSE
  *
  * 带附加 condition 的规则不能压缩成单一阈值，必须走 exitRuleGraph；本层拒绝静默降级。
@@ -11,6 +12,7 @@
 import type { ExitRuleDefinition } from "../research/strategySchema/definition";
 import type { ResearchParameterSet } from "../research/types";
 import type { SimulationConfig } from "../research/simulator/types";
+import type { StrongHoldAfterExtendedExitPolicy } from "../research/trailingPolicy";
 import { LoopRunAssemblyError } from "./errors";
 
 type ExitPolicy = NonNullable<SimulationConfig["exitPolicy"]>;
@@ -65,19 +67,85 @@ function tradingDaysOf(rule: ExitRuleDefinition, parameters: ResearchParameterSe
 export function mapDeclaredExitPolicy(
   rules: readonly ExitRuleDefinition[] | undefined,
   parameters: ResearchParameterSet,
+  strongHold?:
+    | {
+        readonly atHoldingDays: number;
+        readonly minReturnRatio: number;
+        readonly requireAboveMa5: boolean;
+        readonly requireAboveMa10: boolean;
+        readonly extendToHoldingDays: number;
+        readonly afterExtendedHold?: StrongHoldAfterExtendedExitPolicy;
+        readonly scaleOutRatio?: number | null;
+        readonly runnerExitAtHoldingDays?: number | null;
+        readonly maxConcurrentRunners?: number | null;
+        readonly replacementScoreMargin?: number | null;
+      }
+    | null,
 ): ExitPolicy | undefined {
   const enabled = (rules ?? []).filter((rule) => rule.enabled).sort((a, b) => a.priority - b.priority);
   const policy: {
     stopLossRatio: number | null;
     takeProfitRatio: number | null;
     maxHoldingDays: number | null;
+    trailingTakeProfitActivationRatio: number | null;
+    trailingTakeProfitDrawdownRatio: number | null;
+    trailingTakeProfitTrigger: ExitPolicy["trailingTakeProfitTrigger"];
+    advancedTrailingPolicy: ExitPolicy["advancedTrailingPolicy"];
+    advancedStopPolicy: ExitPolicy["advancedStopPolicy"];
+    strongHold: ExitPolicy["strongHold"];
   } = {
     stopLossRatio: null,
     takeProfitRatio: null,
     maxHoldingDays: null,
+    trailingTakeProfitActivationRatio: null,
+    trailingTakeProfitDrawdownRatio: null,
+    trailingTakeProfitTrigger: null,
+    advancedTrailingPolicy: null,
+    advancedStopPolicy: null,
+    strongHold: null,
   };
+  let unifiedPolicyApplied = false;
 
   for (const rule of enabled) {
+    if (rule.policy !== undefined && rule.policy !== null) {
+      if (unifiedPolicyApplied) {
+        throw new LoopRunAssemblyError(
+          "LOOP_RUN_ASSEMBLY_EXIT_POLICY_UNSUPPORTED",
+          "同一策略存在多条统一 policy 规则，无法无损映射。",
+        );
+      }
+      unifiedPolicyApplied = true;
+      const unifiedStop = rule.policy.stop;
+      const legacyFixedIntraday =
+        unifiedStop.anchor.kind === "FIXED_PERCENT"
+        && unifiedStop.confirmation === "INTRADAY"
+        && (
+          unifiedStop.disasterStopRatio === undefined
+          || unifiedStop.disasterStopRatio === null
+        )
+        && (unifiedStop.escalation === undefined || unifiedStop.escalation === null)
+        && (unifiedStop.schedule === undefined || unifiedStop.schedule === null)
+        && (unifiedStop.reduction === undefined || unifiedStop.reduction === null)
+        && (unifiedStop.contexts === undefined || unifiedStop.contexts === null);
+      if (legacyFixedIntraday) {
+        policy.stopLossRatio = unifiedStop.anchor.stopRatio;
+        policy.advancedStopPolicy = null;
+      } else {
+        policy.advancedStopPolicy = { ...unifiedStop };
+      }
+      policy.advancedTrailingPolicy = rule.policy.takeProfit === null
+        ? null
+        : { ...rule.policy.takeProfit };
+      policy.maxHoldingDays = rule.policy.timeExit?.holdingDays ?? null;
+      policy.strongHold = rule.policy.strongHold === null
+        ? null
+        : {
+            ...rule.policy.strongHold,
+            afterExtendedHold:
+              rule.policy.strongHold.afterExtendedHold ?? "TIME_EXIT",
+          };
+      continue;
+    }
     switch (rule.type) {
       case "STOP_LOSS":
         if (rule.trigger !== "INTRADAY") {
@@ -109,6 +177,43 @@ export function mapDeclaredExitPolicy(
         }
         policy.takeProfitRatio = ratioOf(rule, parameters);
         break;
+      case "TRAILING_TAKE_PROFIT":
+        if (
+          rule.trailingPolicy !== undefined
+          && rule.trailingPolicy !== null
+          && rule.trigger !== "ON_CLOSE"
+        ) {
+          throw new LoopRunAssemblyError(
+            "LOOP_RUN_ASSEMBLY_EXIT_POLICY_UNSUPPORTED",
+            `高级 TRAILING_TAKE_PROFIT 当前只支持 ON_CLOSE，实际 ${rule.trigger}。`,
+          );
+        }
+        if (
+          rule.trailingPolicy === undefined
+          && rule.trigger !== "ON_CLOSE"
+          && rule.trigger !== "INTRADAY"
+        ) {
+          throw new LoopRunAssemblyError(
+            "LOOP_RUN_ASSEMBLY_EXIT_POLICY_UNSUPPORTED",
+            `TRAILING_TAKE_PROFIT 当前只支持 INTRADAY / ON_CLOSE，实际 ${rule.trigger}。`,
+          );
+        }
+        if (policy.trailingTakeProfitDrawdownRatio !== null) {
+          throw new LoopRunAssemblyError(
+            "LOOP_RUN_ASSEMBLY_EXIT_POLICY_UNSUPPORTED",
+            "同一策略存在多条启用的 TRAILING_TAKE_PROFIT 规则，无法无损映射为单一阈值。",
+          );
+        }
+        if (rule.trailingPolicy !== undefined && rule.trailingPolicy !== null) {
+          policy.advancedTrailingPolicy = { ...rule.trailingPolicy };
+          policy.trailingTakeProfitTrigger = "ON_CLOSE";
+        } else {
+          policy.trailingTakeProfitActivationRatio = 0;
+          policy.trailingTakeProfitDrawdownRatio = ratioOf(rule, parameters);
+          policy.trailingTakeProfitTrigger =
+            rule.trigger as ExitPolicy["trailingTakeProfitTrigger"];
+        }
+        break;
       case "TIME_EXIT":
         if (rule.trigger !== "ON_CLOSE") {
           throw new LoopRunAssemblyError(
@@ -132,9 +237,17 @@ export function mapDeclaredExitPolicy(
     }
   }
 
+  if (strongHold !== undefined && strongHold !== null) {
+    policy.strongHold = { ...strongHold };
+  }
+
   return policy.stopLossRatio === null &&
     policy.takeProfitRatio === null &&
-    policy.maxHoldingDays === null
+    policy.maxHoldingDays === null &&
+    policy.trailingTakeProfitDrawdownRatio === null &&
+    policy.advancedTrailingPolicy === null &&
+    policy.advancedStopPolicy === null &&
+    policy.strongHold === null
     ? undefined
     : policy;
 }

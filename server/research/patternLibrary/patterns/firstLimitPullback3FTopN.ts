@@ -4,8 +4,9 @@
  * ## 这个模式在赌什么
  *
  * 首板之后第 5 个交易日（T+5）收盘，用 **3F 合成分**给当日候选打分并降序排名，只买排名前 N 名，
- * **次一交易日开盘**（T+6）成交；退出由引擎的 hold-while-selected 语义决定
- * （「不再入选」即卖），盘中 `STOP_LOSS = 5%` 与 `TIME_EXIT = 5 个交易日` 封顶。
+ * **次一交易日开盘**（T+6）成交；候选评分只负责买入，不触发卖出。退出由
+ * `STOP_LOSS = 5%`、`TRAILING_TAKE_PROFIT = 峰值盈利后回撤 5%` 与
+ * `TIME_EXIT = 持有满 5 个交易日` 共同决定。
  *
  * 3F = `maxAmplitude`(LOW) + `meanAmplitude`(LOW) + `t1VolumeRatio`(HIGH)，等权各 1/3，
  * 口径**零复制**沿用冻结契约 `FROZEN-BUCKET-CONTRACT-001` 的唯一落地处
@@ -25,22 +26,17 @@
  * （`datasetFromRegistry.ts` 的 `neededMaxRelativeDay = window.end + 1`），
  * 而卖出订单的 `executionTime` 固定是**下一交易日**（NEXT_OPEN），成交前置条件是
  * 「**执行日在数据集里有该证券的行**」（`simulator/engine.ts` 第 9(c) 步）。
- * ⚠️ 无行 ⇒ 拒单 `SUSPENDED`，且引擎**逐日重试**（不是「不重试」）⇒ 一旦执行日被推出面板，
- * 该仓位会一直重试到期末，形成 `holdingPeriod` 的**超长尾**（实测见下表与「面板末日清算」）。
+ * ⚠️ 无行 ⇒ 该日卖单拒单 `SUSPENDED`；强制退出会在后续决策日重新生成卖单。若面板内一直没有
+ * 该证券的真实行情，仓位会保持到期末，以 `openAtEnd` 计入权益，而不是伪造一笔收盘价成交。
  *
- * ⇒ **`end` 不只是「看几天」，它是「允许退出发生在多久之内」**。实测（2026-09-26，630001 冒烟，
- * 面板机制其后的当日收盘价清算见下）：
+ * ⇒ **`end` 不只是「看几天」，它是「允许退出发生在多久之内」**：退出订单在次一交易日执行，
+ * 还可能因 T+1 冻结（`FROZEN_EXIT_DEFERRED`）与跌停（`LIMIT_DOWN`）顺延；若执行日没有该证券
+ * 行情，当日订单只会被拒 `SUSPENDED`，不会用前一日收盘价伪造成交。若面板内始终没有后续行情，
+ * 持仓必须如实以 `openAtEnd` 收尾（期末估值），不能改写成完成的已实现交易。
  *
- * | 窗口 | 面板 rd 深度 | 完成的卖出 | 期末仍持仓 | **执行日无行的卖单** |
- * | --- | --- | --- | --- | --- |
- * | `[5, 5]` | 0..6 | 5 | 19 | 229 |
- * | `[5, 9]` | 0..10 | 25 | 16 | 176 |
- * | `[5, 15]` | 0..16 | **44** | **5** | **0** |
- *
- * 机理：`hold-while-selected` 的退出决策日 ≥ T+6，订单在**次一交易日**执行，且会被
- * T+1 冻结（`FROZEN_EXIT_DEFERRED`）与跌停（`LIMIT_DOWN`）反复顺延 ⇒ 正常路径之外还存在
- * 多日顺延路径，实测最远触及 T+16 附近。取 **`end = 15`**（面板到 `rd = 16`）是让
- * 「正常退出 + 冻结/跌停顺延」**全部落在面板内**的最小实测取值；此时上表右列归零。
+ * `end = 15`（面板到 `rd = 16`）是此前实测覆盖「正常退出 + 冻结/跌停顺延」最远路径的最小取值；
+ * 2026-09-27 删除「面板末日清算」伪成交后，旧窗口对比表中的完成卖出/期末持仓数字已失效，
+ * 必须随下一次全量回测重新产出，不能继续作为当前口径结论引用。
  *
  * ⚠️ 代价：面板行数 ∝ `end + 2` 行/事件 ⇒ v5（73,003 事件）在 `end = 15` 下需约 124 万行，
  * 已超过直读桥护栏的原值 400,000（护栏已于 2026-09-26 提高到 1,400,000，理由见
@@ -61,24 +57,22 @@
  * 因此策略文档必须放一条**恒真**条件（本策略用 `bar.close > 0`）让窗口真正进入规则图；
  * 它不改变入选集合（字段缺失/非有限时如实判不成立，不臆造）。
  *
- * ## 退出与持有期（如实登记）
+ * ## 退出与持有期
  *
- * 引擎（`simulator/plan.ts`）是 **hold-while-selected**：决策日「持仓 ∉ 当日 desired」即卖出。
- * 由于 Core 每个事件**只出一次信号**（见上），事件在 T+6 起不再入选 ⇒ 实际持有
- * **≈ 2 个交易日敞口（T+6 开盘买入 → T+8 开盘卖出）**，`TIME_EXIT = 5` 是上限而非常态。
+ * 本模式显式声明 `candidateExitPolicy = DISABLED`：Core 每个事件仍只出一次买入信号，
+ * 但该信号不再被解释为「次日不入选即卖」。持仓只在以下三种情况下退出：
  *
- * 🔴 **该实现期与研究侧主口径（T+6 开盘 → T+10 收盘）不等长**：本模式是同一排序信号在
- * 真实撮合下的**短持有期变体**，不能直接当作研究侧结论的验证。成因与它一样是架构性的 ——
- * 「持有满 5 个交易日」需要 Core 支持「逐日重复触发」（当前 `firesToday` 把 `EVERY_VALID_DAY`
- * 降级为首日），属平台改动，不在本模式范围。执行侧结论文档强制登记该差异。
+ * 1. 盘中相对建仓成本亏损达到 5%；
+ * 2. 持仓期峰值收益转正后，从最高收盘价回撤达到 5%；
+ * 3. 持有满 5 个交易日的收盘时间上限。
  *
- * ⚠️ **「执行日无行情」已由兜底覆盖（2026-09-26）**：跌停连板/停牌一度会把执行日推出面板，
- * 使该仓位持有到期末（按市价计入期末权益）—— 实测 690001 样本出现 `holdingPeriod`
- * 67/76/108/134 的长尾，`SUSPENDED / 执行日无行` 累计 697 次。现已由
- * `simulator/engine.ts` 的 **(d-2) 面板末日清算**覆盖：持仓证券若在**下一交易日无行情行**，
- * 即以**当日收盘价**强制清算（复用 (c2) 止损/止盈的 syntheticBar → quote → sell 路径，
- * 滑点/费用/涨跌停规则与正常路径一致）⇒ 上述长尾不复存在。
- * ⇒ **加宽窗口与加兜底是两件互补的事**：前者让正常路径不出面板，后者兜住仍然出面板的残差。
+ * 因此执行持有期与研究侧 `T+6 开盘 → T+10 收盘` 的 5 个交易日窗口一致；执行日仍按
+ * `NEXT_OPEN`，时间退出会在第 5 个持有交易日后的下一交易日开盘成交。
+ *
+ * ⚠️ **「执行日无行情」必须按真实成交处理（2026-09-27 修正）**：跌停连板/停牌会把执行日推出
+ * 面板时，旧实现以当日收盘价强制清算，制造了一笔实际不可成交的卖出。该伪成交已删除：无行情
+ * 只登记 `SUSPENDED`，后续有真实行情才可成交；面板内始终无行情则 `openAtEnd`，不把停牌/缺数据
+ * 变成已实现收益。加宽窗口只能降低这种边界发生的频率，不能替代真实可成交性。
  *
  * ## 为什么是 `gated` + 空 `gates`，而不是 `weighted`
  *
@@ -102,17 +96,16 @@
  * 没有留给 Parameter Search 的维度 ⇒ 不声明任何参数。声明一个不被读取的参数 = 假的可搜索性。
  */
 
-import type { TradingPatternSpec } from "../types";
+import type { PatternFeatureKey, TradingPatternSpec } from "../types";
 
 /**
  * 观察窗口（相对首板日的**交易日**偏移）：`[5, 15]`。
  *
  * - `start = 5`：3F 首次可算日（PIT 闸门，**唯一有语义的那一端**）；
  * - `end = 15`：纯**机械**取值 —— 决定直读桥执行面板的深度（面板 `rd ∈ [0, end+1]`）。
- *   依据：三档窗口 `[5,5]`/`[5,9]`/`[5,15]` 的入选集合完全相同（Core 只在首个成立日出信号），
- *   但「完成的卖出 / 期末仍持仓 / 执行日无行的卖单」分别为 5/19/229、25/16/176、**44/5/0**
- *   ⇒ `end = 15` 是让退出**（含 T+1 冻结与跌停顺延）全部落在面板内**的最小实测取值。
- *   详见文件头实测表与 `docs/evidence/README.md` 的 2026-09-26 节。
+ *   三档窗口的入选集合完全相同（Core 只在首个成立日出信号），但窗口越深，退出（含 T+1
+ *   冻结与跌停顺延）越有机会落在面板内；面板内始终无真实行情时仍按 `openAtEnd` 如实收尾。
+ *   详见文件头“执行面板深度”说明；2026-09-27 删除伪清算后，窗口对比结果需重新回测。
  */
 export const THREE_FACTOR_TOPN_OBSERVATION_WINDOW = {
   start: 5,
@@ -120,24 +113,49 @@ export const THREE_FACTOR_TOPN_OBSERVATION_WINDOW = {
   unit: "TRADING_DAY",
 } as const;
 
-/** 时间退出阈值（交易日）：持有期**上限**（常态由 hold-while-selected 的候选退出更早触发）。 */
+/** 时间退出阈值（交易日）：持有期上限。 */
 export const THREE_FACTOR_TOPN_MAX_HOLDING_DAYS = 5;
 
 /** 盘中固定比例止损：相对建仓成本亏 5% 时卖出全部可卖份额。 */
 export const THREE_FACTOR_TOPN_STOP_LOSS_RATIO = 0.05;
 
+/** 盈利回撤止盈：峰值一进入盈利即启动；从最高收盘价回撤达到该比例时退出。 */
+export const THREE_FACTOR_TOPN_TRAILING_TAKE_PROFIT_DRAWDOWN_RATIO = 0.05;
+
+interface ThreeFactorTopNPatternOptions {
+  /**
+   * true = 保留「首板回踩」资格门槛（观察窗内必须出现收盘低于首板日收盘价）；
+   * false = 1.13.0 变体，移除该门槛，让纯上升路径也进入 3F 横截面排序。
+   */
+  readonly requirePullback: boolean;
+  /** 配方 id 后缀；用于在同一策略族下区分不同执行口径。 */
+  readonly recipeIdSuffix?: string;
+}
+
 /** 3F TopN 模式的声明（N 参数化；`topN` 必须 > 0）。 */
-function makeThreeFactorTopNPattern(topN: number): TradingPatternSpec {
+function makeThreeFactorTopNPattern(
+  topN: number,
+  options: ThreeFactorTopNPatternOptions,
+): TradingPatternSpec {
   if (!Number.isInteger(topN) || topN <= 0) {
     throw new Error(`3F TopN 模式：topN 必须是正整数，实际 ${String(topN)}。`);
   }
-  const recipeId = `first-limit-pullback-3f-top${topN}`;
+  const recipeId =
+    `first-limit-pullback-3f-top${topN}${options.recipeIdSuffix ?? ""}`;
+  const rankFeature: PatternFeatureKey = options.requirePullback
+    ? "threeFactorComposite"
+    : "threeFactorCompositeNoPullbackGate";
   return {
     patternId: recipeId,
-    label: `首板回踩 · 3F 综合评分 Top${topN}`,
+    label:
+      `首板${options.requirePullback ? "回踩" : ""} · 3F 综合评分 Top${topN}`
+      + (options.requirePullback ? "" : "（无回踩门槛）"),
     purpose:
       `首板后第 5 个交易日收盘，按 3F 等权合成分（双振幅 LOW + T+1 量比 HIGH）降序排名，`
-      + `只买前 ${topN} 名并于次日开盘成交，赌「3F 高分候选的后续收益优于同池平均」。`,
+      + `只买前 ${topN} 名并于次日开盘成交，赌「3F 高分候选的后续收益优于同池平均」。`
+      + (options.requirePullback
+        ? ""
+        : "该变体移除「观察窗内必须出现收盘回踩」的候选资格门槛。"),
     whenToUse: [
       "要把「3F 综合评分降序取 TopN」落成可回测的完整策略（评分→排名→入选→交易）",
       "检验 3F 排名信号在**真实撮合**（含 T+1 冻结、整手、佣金/印花税/滑点、涨跌停）下是否仍成立",
@@ -152,10 +170,16 @@ function makeThreeFactorTopNPattern(topN: number): TradingPatternSpec {
       notes: [
         "决策日 = 首板后第 5 个交易日（T+5）；T+5 是 3F 首次可算日（PIT，禁未来数据）。",
         "买入时点 = 决策日的次一交易日开盘（T+6）；决策点固定为收盘（point=close）。",
-        `退出 = 「不再入选（候选退出）」、「盘中亏损达 ${(THREE_FACTOR_TOPN_STOP_LOSS_RATIO * 100).toFixed(0)}%（止损）」与「持有满 ${THREE_FACTOR_TOPN_MAX_HOLDING_DAYS} 个交易日（时间退出）」先到者；实测常态是候选退出（≈2 个交易日敞口）。`,
-        "窗口末端 end=15 是**执行面板深度**的声明（面板 rd ≤ end+1），不是「观察多久」：三档 [5,5]/[5,9]/[5,15] 入选集合完全相同，但完成的卖出 5/25/44、期末持仓 19/16/5 ⇒ 它决定退出能不能成交（见文件头实测表）。",
+        `退出 = 「盘中亏损达 ${(THREE_FACTOR_TOPN_STOP_LOSS_RATIO * 100).toFixed(0)}%（止损）」、「盈利峰值回撤 ${(THREE_FACTOR_TOPN_TRAILING_TAKE_PROFIT_DRAWDOWN_RATIO * 100).toFixed(0)}%（回撤止盈）」与「持有满 ${THREE_FACTOR_TOPN_MAX_HOLDING_DAYS} 个交易日（时间退出）」先到者；候选评分只控制买入。`,
+        "窗口末端 end=15 是**执行面板深度**的声明（面板 rd ≤ end+1），不是「观察多久」：它决定冻结/跌停后的退出能否遇到真实行情。执行日无行只记 SUSPENDED；面板内始终无行情则按 openAtEnd 估值，禁止用前一日收盘价伪造成交。",
         "面板按 eventId 保留同一证券的多个事件序列；Core 对每个事件只出一次信号 ⇒ 加宽窗口不改变该事件入选集合，只增评估量与面板深度。",
         "策略文档必须带一条恒真条件哨兵（bar.close > 0）才能让窗口进入规则图，否则零信号且不报错（见文件头）。",
+        ...(options.requirePullback
+          ? []
+          : [
+              "本变体移除「观察窗 T+1..T+5 内必须出现收盘价低于首板日收盘价」的候选资格门槛；"
+              + "没有回踩、但 3F 三因子可算的事件也会进入横截面排序。",
+            ]),
       ],
     },
 
@@ -175,10 +199,10 @@ function makeThreeFactorTopNPattern(topN: number): TradingPatternSpec {
       selectionSummary:
         `按 3F 合成分由高到低取前 ${topN} 名（同值按 securityId 破平，破平只影响边界名次）`,
       randomSeed: 23,
-      features: ["threeFactorComposite"],
+      features: [rankFeature],
       // 空门槛 = 官方支持语义「只要排序特征可用即入选」。本模式无硬门槛。
       gates: [],
-      rankFeature: "threeFactorComposite",
+      rankFeature,
       rankHigherIsBetter: true,
       topN,
       parameters: [],
@@ -187,7 +211,27 @@ function makeThreeFactorTopNPattern(topN: number): TradingPatternSpec {
 }
 
 /** 3F 综合评分 TopN 策略（N = 3）。 */
-export const FIRST_LIMIT_PULLBACK_3F_TOPN3: TradingPatternSpec = makeThreeFactorTopNPattern(3);
+export const FIRST_LIMIT_PULLBACK_3F_TOPN3: TradingPatternSpec = makeThreeFactorTopNPattern(
+  3,
+  { requirePullback: true },
+);
 
 /** 3F 综合评分 TopN 策略（N = 5）。 */
-export const FIRST_LIMIT_PULLBACK_3F_TOPN5: TradingPatternSpec = makeThreeFactorTopNPattern(5);
+export const FIRST_LIMIT_PULLBACK_3F_TOPN5: TradingPatternSpec = makeThreeFactorTopNPattern(
+  5,
+  { requirePullback: true },
+);
+
+/** 1.13.0 变体：Top3，移除观察窗收盘回踩资格门槛。 */
+export const FIRST_LIMIT_3F_TOPN3_NO_PULLBACK_GATE: TradingPatternSpec =
+  makeThreeFactorTopNPattern(3, {
+    requirePullback: false,
+    recipeIdSuffix: "-no-pullback-gate",
+  });
+
+/** 1.13.0 变体：Top5，移除观察窗收盘回踩资格门槛。 */
+export const FIRST_LIMIT_3F_TOPN5_NO_PULLBACK_GATE: TradingPatternSpec =
+  makeThreeFactorTopNPattern(5, {
+    requirePullback: false,
+    recipeIdSuffix: "-no-pullback-gate",
+  });

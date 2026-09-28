@@ -48,6 +48,8 @@ const TRANSIENT_ERROR_PATTERNS: readonly RegExp[] = [
   /connection lost/i,
   /this socket has been ended/i,
   /server has gone away/i,
+  /decryption failed or bad record mac/i,
+  /ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC/i,
 ];
 
 /** 默认最大尝试次数（含首次）。 */

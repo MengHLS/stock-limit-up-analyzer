@@ -118,7 +118,12 @@ export type PatternFeatureKey =
    * `t1VolumeRatio`(HIGH) 等权合成分）。桶边界 / 方向 / 浮点路径全部来自研究侧
    * `twelve-factor-composite-study/result.ts`，本层零口径复制。
    */
-  | "threeFactorComposite";
+  | "threeFactorComposite"
+  /**
+   * 3F 合成分的 1.13.0 变体：同一桶位分与浮点路径，但**不要求观察窗内出现过回踩**。
+   * 用于把「首板后纯上升、没有收盘回踩」的事件也纳入横截面排序。
+   */
+  | "threeFactorCompositeNoPullbackGate";
 
 /** 参数键（语义键）。到文档参数名 `max_volume_ratio` 的映射同样只有一份。 */
 export type PatternParameterKey =

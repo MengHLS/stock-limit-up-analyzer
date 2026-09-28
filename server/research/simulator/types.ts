@@ -39,6 +39,11 @@ import type { ResearchDataset } from "../../researchDataset/types";
 import type { ResearchParameterSet } from "../types";
 import type { CandidateEvaluationRun } from "../signalEngine/types";
 import type { CorporateActionResolverLike } from "../../corporateActions/resolver";
+import type {
+  ResearchTrailingPolicyDefinition,
+  StrongHoldAfterExtendedExitPolicy,
+} from "../trailingPolicy";
+import type { StopPolicyDefinition } from "../stopPolicy";
 
 // ---------------------------------------------------------------------------
 // 记录身份常量
@@ -63,6 +68,17 @@ export type SecurityBoard = "main" | "gem" | "star" | "bse";
 
 /** 方向策略：当前仅支持 longOnly（A 股无做空；short/neutral 候选不可交易）。 */
 export type DirectionPolicy = "longOnly";
+
+/**
+ * 候选退出政策。
+ *
+ * - `HOLD_WHILE_SELECTED`（缺省）：持仓不在当日候选集合时卖出，保留历史行为；
+ * - `DISABLED`：候选评分不参与卖出，持仓只由止损/止盈/时间退出等显式规则结束。
+ */
+export type CandidateExitPolicy = "HOLD_WHILE_SELECTED" | "DISABLED";
+
+/** 盈利回撤止盈的检查时点。 */
+export type TrailingTakeProfitTrigger = "INTRADAY" | "ON_CLOSE";
 
 /**
  * 意图未转成订单的稳定原因码（供程序化处理，非自由文本）。
@@ -131,6 +147,8 @@ export interface SimulationConfig {
   readonly maxDailyBuys?: number | null;
   /** 方向策略（缺省 longOnly）。 */
   readonly directionPolicy?: DirectionPolicy;
+  /** 候选退出政策；缺省 = HOLD_WHILE_SELECTED（保持既有策略行为）。 */
+  readonly candidateExitPolicy?: CandidateExitPolicy;
   /** 涨跌停拦截开关（缺省 false，对齐 STEP 8 DEFAULT_EXECUTION_RULES）。 */
   readonly executionRules?: {
     /** 开盘触及涨停时拒绝买入。 */
@@ -143,13 +161,14 @@ export interface SimulationConfig {
   /**
    * BACKTEST-002（B-02）— 策略声明的**仓位口径**（透传给 `planDecisionDay`）。
    *
-   * 缺省 = 等权现金预算（= 改造前行为）。声明 `fixed-fraction` / `fixed-amount` 时
+   * 缺省 = 等权现金预算（= 改造前行为）。声明 `fixed-fraction` / `equity-fraction` / `fixed-amount` 时
    * **真正收窄**每笔订单的成交预算 —— 这是「参数搜索改仓位参数、结果才会变」的前提。
    */
   readonly positionSizing?: {
     readonly sizingMethod:
       | "EQUAL_WEIGHT"
       | "FIXED_FRACTION"
+      | "EQUITY_FRACTION"
       | "RANK_WEIGHTED"
       | "FIXED_AMOUNT"
       | "FIXED_RATIO"
@@ -162,12 +181,47 @@ export interface SimulationConfig {
    *
    * 语义在 C-14.1 中固定为：
    * - STOP_LOSS / TAKE_PROFIT：盘中触发，按触发价卖出全部可卖份额；
+   * - TRAILING_TAKE_PROFIT：按持仓期最高收盘价计算回撤。`INTRADAY` 当日触发卖出；
+   *   `ON_CLOSE` 收盘触发后下一交易日开盘卖出；
    * - TIME_EXIT：持有满 N 个交易日后的收盘触发，下一交易日开盘卖出。
    */
   readonly exitPolicy?: {
     readonly stopLossRatio: number | null;
     readonly takeProfitRatio: number | null;
     readonly maxHoldingDays: number | null;
+    /** 盈利回撤止盈启动阈值（相对建仓价）；0 = 峰值一进入盈利即启动。 */
+    readonly trailingTakeProfitActivationRatio?: number | null;
+    /** 自持仓期最高收盘价回撤达到该比例时止盈；null = 未声明。 */
+    readonly trailingTakeProfitDrawdownRatio?: number | null;
+    /** 盈利回撤止盈检查时点；缺省 = ON_CLOSE（兼容既有策略）。 */
+    readonly trailingTakeProfitTrigger?: TrailingTakeProfitTrigger | null;
+    /**
+     * Advanced research-only trailing policy. Mutually exclusive with the
+     * fixed trailingTakeProfitDrawdownRatio path.
+     */
+    readonly advancedTrailingPolicy?: ResearchTrailingPolicyDefinition | null;
+    /** 统一止损策略；缺省 = 旧 stopLossRatio 路径。 */
+    readonly advancedStopPolicy?: StopPolicyDefinition | null;
+    /**
+     * 实验性时间退出延长：到 `atHoldingDays` 收盘时，若仍满足强势条件，
+     * 则延长到 `extendToHoldingDays`；否则按原 maxHoldingDays 退出。
+     */
+    readonly strongHold?: {
+      readonly atHoldingDays: number;
+      readonly minReturnRatio: number;
+      readonly requireAboveMa5: boolean;
+      readonly requireAboveMa10: boolean;
+      readonly extendToHoldingDays: number;
+      readonly afterExtendedHold?: StrongHoldAfterExtendedExitPolicy;
+      /** 到 extendToHoldingDays 时卖出的仓位比例；缺省 = 不减仓。 */
+      readonly scaleOutRatio?: number | null;
+      /** runner 最迟产生退出信号的持有日。 */
+      readonly runnerExitAtHoldingDays?: number | null;
+      /** 组合中允许同时存在的趋势 runner 数量上限。 */
+      readonly maxConcurrentRunners?: number | null;
+      /** 新候选评分超过最弱 runner 入仓评分的最小差值。 */
+      readonly replacementScoreMargin?: number | null;
+    } | null;
   };
   /**
    * BACKTEST-002（B-05）— 成交量为 0 时的执行政策。
@@ -203,6 +257,7 @@ export interface SimulationConfigSnapshot {
   /** null = 不限单日新建仓数。 */
   readonly maxDailyBuys: number | null;
   readonly directionPolicy: DirectionPolicy;
+  readonly candidateExitPolicy: CandidateExitPolicy;
   readonly executionRules: {
     readonly blockLimitUpBuy: boolean;
     readonly blockLimitDownSell: boolean;
@@ -213,6 +268,23 @@ export interface SimulationConfigSnapshot {
     readonly stopLossRatio: number | null;
     readonly takeProfitRatio: number | null;
     readonly maxHoldingDays: number | null;
+    readonly trailingTakeProfitActivationRatio: number | null;
+    readonly trailingTakeProfitDrawdownRatio: number | null;
+    readonly trailingTakeProfitTrigger: TrailingTakeProfitTrigger | null;
+    readonly advancedTrailingPolicy: ResearchTrailingPolicyDefinition | null;
+    readonly advancedStopPolicy: StopPolicyDefinition | null;
+    readonly strongHold: {
+      readonly atHoldingDays: number;
+      readonly minReturnRatio: number;
+      readonly requireAboveMa5: boolean;
+      readonly requireAboveMa10: boolean;
+      readonly extendToHoldingDays: number;
+      readonly afterExtendedHold: StrongHoldAfterExtendedExitPolicy;
+      readonly scaleOutRatio: number | null;
+      readonly runnerExitAtHoldingDays: number | null;
+      readonly maxConcurrentRunners: number | null;
+      readonly replacementScoreMargin: number | null;
+    } | null;
   };
   /** 是否启用 T+1（STEP 8 默认 true）。 */
   readonly tPlus1: boolean;
@@ -221,7 +293,9 @@ export interface SimulationConfigSnapshot {
   /** 决策时点（模拟固定为 close：决策日收盘后可见当日整根 bar）。 */
   readonly decisionPoint: "close";
   /** 进出场模型摘要（本版本实现语义，声明性常量）。 */
-  readonly entryExitModel: "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET";
+  readonly entryExitModel:
+    | "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET"
+    | "EXIT_RULES_LONG_ONLY_CASH_BUDGET";
   /** 公司行为口径：本次运行是否已接入真实分红送转事件。 */
   readonly corporateActions: "APPLIED" | "NOT_APPLIED";
 }

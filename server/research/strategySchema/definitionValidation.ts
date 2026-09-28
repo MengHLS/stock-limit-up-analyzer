@@ -39,6 +39,8 @@
 
 import { isValidDatasetVersionFormat } from "../experimentLineage/validate";
 import { validateParameterSchema } from "../experimentValidation";
+import { trailingPolicyDefinitionErrors } from "../trailingPolicy";
+import { exitPolicyDefinitionErrors } from "../exitPolicyCommon";
 import type { ResearchParameterSchema, ResearchParameterValue } from "../types";
 import {
   ResearchValidationError,
@@ -47,6 +49,7 @@ import {
 } from "../experimentValidation";
 import {
   STRATEGY_BAR_FIELDS,
+  STRATEGY_CANDIDATE_EXIT_POLICIES,
   STRATEGY_CONDITION_OPERATORS,
   STRATEGY_CONDITION_VALUE_TYPES,
   STRATEGY_COST_MODELS,
@@ -490,6 +493,17 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
   if (!isPlainObject(exit)) {
     issues.push(issue("SCHEMA_DEFINITION_EXIT_INVALID", "exit", "exit 必须是对象"));
   } else {
+    if (
+      exit.candidateExitPolicy !== undefined
+      && exit.candidateExitPolicy !== null
+      && !inWhitelist(exit.candidateExitPolicy, STRATEGY_CANDIDATE_EXIT_POLICIES)
+    ) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_EXIT_CANDIDATE_POLICY_INVALID",
+        "exit.candidateExitPolicy",
+        `exit.candidateExitPolicy 必须是 ${STRATEGY_CANDIDATE_EXIT_POLICIES.join(" | ")} 之一`,
+      ));
+    }
     const rules = exit.rules as unknown;
     if (!Array.isArray(rules)) {
       issues.push(issue("SCHEMA_DEFINITION_EXIT_RULES_INVALID", "exit.rules", "exit.rules 必须是数组"));
@@ -538,8 +552,17 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
 
         const hasThreshold = rule.threshold !== undefined && rule.threshold !== null;
         const hasParameter = typeof rule.parameter === "string" && rule.parameter.trim() !== "";
-        if (!hasThreshold && !hasParameter) {
-          issues.push(issue("SCHEMA_DEFINITION_EXIT_THRESHOLD_REQUIRED", base, "出场规则必须提供 threshold 或 parameter 之一"));
+        const hasTrailingPolicy =
+          rule.type === "TRAILING_TAKE_PROFIT"
+          && rule.trailingPolicy !== undefined
+          && rule.trailingPolicy !== null;
+        const hasUnifiedPolicy = rule.policy !== undefined && rule.policy !== null;
+        if (!hasThreshold && !hasParameter && !hasTrailingPolicy && !hasUnifiedPolicy) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_THRESHOLD_REQUIRED",
+            base,
+            "出场规则必须提供 threshold、parameter、trailingPolicy 或 policy 之一",
+          ));
         } else if (hasThreshold && hasParameter) {
           issues.push(issue(
             "SCHEMA_DEFINITION_EXIT_THRESHOLD_AMBIGUOUS",
@@ -547,11 +570,59 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
             "threshold（字面值）与 parameter（引用参数，取 defaultValue）只能二选一；同时声明将产生两个真值来源",
           ));
         }
+        if (rule.trailingPolicy !== undefined && rule.trailingPolicy !== null) {
+          if (rule.type !== "TRAILING_TAKE_PROFIT") {
+            issues.push(issue(
+              "SCHEMA_DEFINITION_EXIT_TRAILING_POLICY_TYPE_INVALID",
+              `${base}.trailingPolicy`,
+              "trailingPolicy 只能声明在 TRAILING_TAKE_PROFIT 规则上",
+            ));
+          }
+          if (hasThreshold || hasParameter || rule.thresholdUnit !== undefined) {
+            issues.push(issue(
+              "SCHEMA_DEFINITION_EXIT_TRAILING_POLICY_CONFLICT",
+              base,
+              "声明 trailingPolicy 时不得同时声明 threshold / parameter / thresholdUnit",
+            ));
+          }
+          for (const detail of trailingPolicyDefinitionErrors(rule.trailingPolicy)) {
+            issues.push(issue(
+              "SCHEMA_DEFINITION_EXIT_TRAILING_POLICY_INVALID",
+              `${base}.trailingPolicy`,
+              detail,
+            ));
+          }
+        }
+        if (rule.policy !== undefined && rule.policy !== null) {
+          if (hasThreshold || hasParameter || rule.thresholdUnit !== undefined) {
+            issues.push(issue(
+              "SCHEMA_DEFINITION_EXIT_POLICY_CONFLICT",
+              base,
+              "声明 policy 时不得同时声明 threshold / parameter / thresholdUnit",
+            ));
+          }
+          if (hasTrailingPolicy) {
+            issues.push(issue(
+              "SCHEMA_DEFINITION_EXIT_POLICY_CONFLICT",
+              base,
+              "policy 与 trailingPolicy 不能同时声明，统一策略已包含止盈定义",
+            ));
+          }
+          for (const detail of exitPolicyDefinitionErrors(rule.policy)) {
+            issues.push(issue(
+              "SCHEMA_DEFINITION_EXIT_POLICY_INVALID",
+              `${base}.policy`,
+              detail,
+            ));
+          }
+        }
         if (hasThreshold) {
           if (typeof rule.threshold !== "number" || !Number.isFinite(rule.threshold)) {
             issues.push(issue("SCHEMA_DEFINITION_EXIT_THRESHOLD_INVALID", `${base}.threshold`, "threshold 必须是有限数字"));
           } else if (rule.type === "TIME_EXIT" && rule.threshold <= 0) {
             issues.push(issue("SCHEMA_DEFINITION_EXIT_HOLDING_DAYS_INVALID", `${base}.threshold`, "TIME_EXIT 的持有天数必须 > 0"));
+          } else if (rule.type === "TRAILING_TAKE_PROFIT" && rule.threshold <= 0) {
+            issues.push(issue("SCHEMA_DEFINITION_EXIT_TRAILING_DRAWDOWN_INVALID", `${base}.threshold`, "TRAILING_TAKE_PROFIT 的回撤阈值必须 > 0"));
           }
         }
 
@@ -592,6 +663,145 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
     }
   }
 
+  if (isPlainObject(exit)) {
+    const strongHold = exit.strongHold;
+    if (strongHold !== undefined && strongHold !== null) {
+      if (!isPlainObject(strongHold)) {
+        issues.push(issue(
+          "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+          "exit.strongHold",
+          "exit.strongHold 必须是对象",
+        ));
+      } else {
+        if (
+          typeof strongHold.atHoldingDays !== "number"
+          || !Number.isInteger(strongHold.atHoldingDays)
+          || strongHold.atHoldingDays <= 0
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.atHoldingDays",
+            "atHoldingDays 必须是正整数",
+          ));
+        }
+        if (
+          typeof strongHold.extendToHoldingDays !== "number"
+          || !Number.isInteger(strongHold.extendToHoldingDays)
+          || strongHold.extendToHoldingDays <= 0
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.extendToHoldingDays",
+            "extendToHoldingDays 必须是正整数",
+          ));
+        } else if (
+          typeof strongHold.atHoldingDays === "number"
+          && strongHold.extendToHoldingDays <= strongHold.atHoldingDays
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.extendToHoldingDays",
+            "extendToHoldingDays 必须大于 atHoldingDays",
+          ));
+        }
+        if (
+          typeof strongHold.minReturnRatio !== "number"
+          || !Number.isFinite(strongHold.minReturnRatio)
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.minReturnRatio",
+            "minReturnRatio 必须是有限数字",
+          ));
+        }
+        for (const field of ["requireAboveMa5", "requireAboveMa10"] as const) {
+          if (typeof strongHold[field] !== "boolean") {
+            issues.push(issue(
+              "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+              `exit.strongHold.${field}`,
+              `${field} 必须是布尔值`,
+            ));
+          }
+        }
+        if (
+          strongHold.afterExtendedHold !== undefined
+          && strongHold.afterExtendedHold !== "TIME_EXIT"
+          && strongHold.afterExtendedHold !== "TREND"
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.afterExtendedHold",
+            "afterExtendedHold 必须是 TIME_EXIT | TREND",
+          ));
+        }
+        if (
+          strongHold.scaleOutRatio !== undefined
+          && strongHold.scaleOutRatio !== null
+          && (
+            typeof strongHold.scaleOutRatio !== "number"
+            || !Number.isFinite(strongHold.scaleOutRatio)
+            || strongHold.scaleOutRatio <= 0
+            || strongHold.scaleOutRatio >= 1
+          )
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.scaleOutRatio",
+            "scaleOutRatio 必须位于 (0,1) 或 null",
+          ));
+        }
+        if (
+          strongHold.runnerExitAtHoldingDays !== undefined
+          && strongHold.runnerExitAtHoldingDays !== null
+          && (
+            typeof strongHold.runnerExitAtHoldingDays !== "number"
+            || !Number.isInteger(strongHold.runnerExitAtHoldingDays)
+            || (
+              typeof strongHold.extendToHoldingDays === "number"
+              && strongHold.runnerExitAtHoldingDays <= strongHold.extendToHoldingDays
+            )
+          )
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.runnerExitAtHoldingDays",
+            "runnerExitAtHoldingDays 必须是大于 extendToHoldingDays 的整数或 null",
+          ));
+        }
+        if (
+          strongHold.maxConcurrentRunners !== undefined
+          && strongHold.maxConcurrentRunners !== null
+          && (
+            typeof strongHold.maxConcurrentRunners !== "number"
+            || !Number.isInteger(strongHold.maxConcurrentRunners)
+            || strongHold.maxConcurrentRunners <= 0
+          )
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.maxConcurrentRunners",
+            "maxConcurrentRunners 必须是正整数或 null",
+          ));
+        }
+        if (
+          strongHold.replacementScoreMargin !== undefined
+          && strongHold.replacementScoreMargin !== null
+          && (
+            typeof strongHold.replacementScoreMargin !== "number"
+            || !Number.isFinite(strongHold.replacementScoreMargin)
+            || strongHold.replacementScoreMargin < 0
+          )
+        ) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_EXIT_STRONG_HOLD_INVALID",
+            "exit.strongHold.replacementScoreMargin",
+            "replacementScoreMargin 必须是非负有限数字或 null",
+          ));
+        }
+      }
+    }
+  }
+
   // -- Position --
   const position = d.position as unknown;
   if (!isPlainObject(position)) {
@@ -619,10 +829,14 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
     if (position.sizingMethod === "FIXED_AMOUNT" && (position.fixedAmount === undefined || position.fixedAmount === null)) {
       issues.push(issue("SCHEMA_DEFINITION_POSITION_FIXED_AMOUNT_INVALID", "position.fixedAmount", "sizingMethod=FIXED_AMOUNT 必须声明 fixedAmount"));
     }
-    if (position.sizingMethod === "FIXED_RATIO"
+    if ((position.sizingMethod === "FIXED_RATIO" || position.sizingMethod === "EQUITY_RATIO")
       && (position.positionRatio === undefined || position.positionRatio === null)
       && (typeof position.parameter !== "string" || position.parameter.trim() === "")) {
-      issues.push(issue("SCHEMA_DEFINITION_POSITION_RATIO_INVALID", "position.positionRatio", "sizingMethod=FIXED_RATIO 必须声明 positionRatio 或 parameter"));
+      issues.push(issue(
+        "SCHEMA_DEFINITION_POSITION_RATIO_INVALID",
+        "position.positionRatio",
+        `sizingMethod=${position.sizingMethod} 必须声明 positionRatio 或 parameter`,
+      ));
     }
     if (typeof position.parameter === "string" && position.parameter.trim() !== "" && !parameterCodes.has(position.parameter)) {
       issues.push(issue("SCHEMA_DEFINITION_POSITION_PARAMETER_UNKNOWN", "position.parameter", `position 引用了不存在的参数 code：${position.parameter}`));

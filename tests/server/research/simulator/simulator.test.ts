@@ -17,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import type { CanonicalMarketBar } from "../../../../server/data";
 import type { CostModel } from "../../../../server/engine/domain";
+import type { CorporateAction } from "../../../../server/corporateActions/types";
 import {
   RESEARCH_DATASET_BUILDER_VERSION,
   RESEARCH_DATASET_ROW_SCHEMA_VERSION,
@@ -65,11 +66,14 @@ interface SeedSpec {
   open: number;
   close: number;
   preClose: number;
+  /** 可选覆盖：用于构造盘中触发类用例；缺省按 open/close 生成。 */
+  high?: number;
+  low?: number;
 }
 
 function makeRow(seed: SeedSpec): ResearchDatasetRow {
-  const high = Math.max(seed.open, seed.close) + 0.05;
-  const low = Math.min(seed.open, seed.close) - 0.05;
+  const high = seed.high ?? Math.max(seed.open, seed.close) + 0.05;
+  const low = seed.low ?? Math.min(seed.open, seed.close) - 0.05;
   const close = seed.close;
   return {
     tradeDate: seed.date,
@@ -315,6 +319,8 @@ describe("端到端：候选 → 交易模拟（T+1 与执行模型）", () => {
   }
 
   it("T 日信号 T+1 才成交；成交价 = T+1 开盘价而非信号日收盘（a/e, NEXT_OPEN）", () => {
+    const candidate = runCandidates(buildDataset(seeds, VERSION), VERSION, E1, E1, 1);
+    const expectedScore = candidate.days[0]!.positionIntents[0]!.signalValue;
     const run = makeRun("NEXT_OPEN");
     // 权益曲线只含两个交易日；D1（决策日）无成交。
     expect(run.equityCurve.map(p => p.date)).toEqual([E1, E2]);
@@ -339,6 +345,7 @@ describe("端到端：候选 → 交易模拟（T+1 与执行模型）", () => {
     const trade = run.trades.find(t => t.securityId === "A")!;
     expect(trade.entryTime).toBe(E2);
     expect(trade.openAtEnd).toBe(true);
+    expect(trade.score).toBe(expectedScore);
   });
 
   it("买入日触发止损但 T+1 冻结，下一交易日开盘应立刻卖出", () => {
@@ -568,7 +575,7 @@ describe("涨跌停与停牌限制", () => {
     expect(rejected.rejectionReason).toBe("SUSPENDED");
   });
 
-  it("事件窗口最后一行跌停且次日无行情 → 面板末日强制清算，不以 openAtEnd 悬挂", () => {
+  it("事件窗口末端次日无行情 → 不伪造前收价清算，按最后可得收盘价 openAtEnd", () => {
     const D1 = "2026-04-13";
     const D2 = "2026-04-14";
     const D3 = "2026-04-15";
@@ -595,9 +602,51 @@ describe("涨跌停与停牌限制", () => {
     });
 
     const trade = run.trades.find(item => item.securityId === "A")!;
+    expect(trade.openAtEnd).toBe(true);
+    expect(trade.exitTime).toBe(D4);
+    expect(trade.exitPrice).toBeCloseTo(9.54, 10);
+    expect(trade.reason).not.toContain("面板末日清算");
+    expect(run.executionStats.totalFills).toBe(1);
+    expect(run.positions.find(position => position.securityId === "A")?.quantity).toBe(19_000);
+  });
+
+  it("执行日停牌但后续恢复行情 → 不提前清算，恢复后有真实行情再退出", () => {
+    const D1 = "2026-04-20";
+    const D2 = "2026-04-21";
+    const D3 = "2026-04-22";
+    const D4 = "2026-04-23";
+    const D5 = "2026-04-24";
+    const seeds: readonly SeedSpec[] = [
+      { date: D1, sec: "A", open: 9.9, close: 10.0, preClose: 9.5 },
+      { date: D2, sec: "A", open: 10.0, close: 10.2, preClose: 10.0 },
+      { date: D3, sec: "A", open: 10.2, close: 10.3, preClose: 10.2 },
+      // D4：A 停牌，仅保留交易日行；D5 A 恢复交易。
+      { date: D4, sec: "B", open: 10.0, close: 10.0, preClose: 10.0 },
+      { date: D5, sec: "A", open: 10.4, close: 10.5, preClose: 10.3 },
+    ];
+    const VERSION = "sim-suspended-then-resume-v1";
+    const built = buildDataset(seeds, VERSION);
+    const candidate = runCandidates(built, VERSION, D1, D1, 1);
+    const run = runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: makeSimConfig({
+        initialCapital: 200_000,
+        dateRange: { startDate: D1, endDate: D5 },
+        exitPolicy: {
+          stopLossRatio: null,
+          takeProfitRatio: null,
+          maxHoldingDays: 1,
+        },
+      }),
+    });
+
+    const trade = run.trades.find(item => item.securityId === "A")!;
     expect(trade.openAtEnd).toBe(false);
-    expect(trade.exitTime).toBe(D3);
-    expect(trade.reason).toContain("面板末日清算");
+    expect(trade.exitTime).toBe(D5);
+    expect(trade.exitPrice).toBeCloseTo(10.4, 10);
+    expect(trade.exitTime).not.toBe(D3);
+    expect(run.executionStats.byReason.SUSPENDED).toBe(1);
     expect(run.positions.find(position => position.securityId === "A")).toBeUndefined();
   });
 });
@@ -821,6 +870,32 @@ describe("策略退出政策：盘中止损/止盈 + 收盘时间退出", () => 
     expect(trade.exitPrice).not.toBeNull();
   });
 
+  it("SL-00 统一固定止损与旧 stopLossRatio 在同一输入上逐笔一致", () => {
+    const legacy = runWithPolicy(
+      { stopLossRatio: 0.08, takeProfitRatio: null, maxHoldingDays: null },
+      { open: 10.0, close: 9.0, preClose: 10.1 },
+    );
+    const advanced = runWithPolicy(
+      {
+        stopLossRatio: null,
+        takeProfitRatio: null,
+        maxHoldingDays: null,
+        advancedStopPolicy: {
+          anchor: { kind: "FIXED_PERCENT", stopRatio: 0.08 },
+          confirmation: "INTRADAY",
+        },
+      },
+      { open: 10.0, close: 9.0, preClose: 10.1 },
+    );
+    const legacyTrade = legacy.trades.find(item => item.securityId === "A")!;
+    const advancedTrade = advanced.trades.find(item => item.securityId === "A")!;
+    expect(advancedTrade.entryTime).toBe(legacyTrade.entryTime);
+    expect(advancedTrade.exitTime).toBe(legacyTrade.exitTime);
+    expect(advancedTrade.exitPrice).toBe(legacyTrade.exitPrice);
+    expect(advancedTrade.returnPct).toBe(legacyTrade.returnPct);
+    expect(advancedTrade.quantity).toBe(legacyTrade.quantity);
+  });
+
   it("盘中触及止盈价 → 当日卖出并保留止盈原因", () => {
     const run = runWithPolicy(
       { stopLossRatio: null, takeProfitRatio: 0.15, maxHoldingDays: null },
@@ -842,5 +917,131 @@ describe("策略退出政策：盘中止损/止盈 + 收盘时间退出", () => 
     expect(trade.exitTime).toBe(D4);
     expect(trade.exitPrice).toBeCloseTo(10.2, 6);
     expect(trade.reason).toContain("持有满2个交易日");
+  });
+
+  it("收盘检查的盈利回撤止盈 → 下一交易日开盘卖出", () => {
+    const run = runWithPolicy(
+      {
+        stopLossRatio: null,
+        takeProfitRatio: null,
+        maxHoldingDays: null,
+        trailingTakeProfitActivationRatio: 0,
+        trailingTakeProfitDrawdownRatio: 0.05,
+      },
+      { open: 9.9, close: 9.55, preClose: 10.1 },
+      { open: 9.5, close: 9.6, preClose: 9.55 },
+    );
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D4);
+    expect(trade.exitPrice).toBeCloseTo(9.5, 6);
+    expect(trade.reason).toContain("盈利回撤止盈");
+  });
+
+  it("盘中检查的盈利回撤止盈 → 开盘跳过触发线时当日卖出", () => {
+    const run = runWithPolicy(
+      {
+        stopLossRatio: null,
+        takeProfitRatio: null,
+        maxHoldingDays: null,
+        trailingTakeProfitActivationRatio: 0,
+        trailingTakeProfitDrawdownRatio: 0.05,
+        trailingTakeProfitTrigger: "INTRADAY",
+      },
+      { open: 9.5, high: 9.8, low: 9.4, close: 9.55, preClose: 10.1 },
+    );
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D3);
+    expect(trade.exitPrice).toBeCloseTo(9.5, 6);
+    expect(trade.reason).toContain("盘中回撤");
+  });
+
+  it("盘中检查的盈利回撤止盈 → 盘中跌破触发线时当日按触发价卖出", () => {
+    const run = runWithPolicy(
+      {
+        stopLossRatio: null,
+        takeProfitRatio: null,
+        maxHoldingDays: null,
+        trailingTakeProfitActivationRatio: 0,
+        trailingTakeProfitDrawdownRatio: 0.05,
+        trailingTakeProfitTrigger: "INTRADAY",
+      },
+      { open: 10.0, high: 10.2, low: 9.4, close: 10.0, preClose: 10.1 },
+    );
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D3);
+    expect(trade.exitPrice).toBeCloseTo(10.1 * 0.95, 6);
+    expect(trade.reason).toContain("盘中回撤");
+  });
+
+  it("峰值收益未达到启动阈值时，回撤不触发止盈", () => {
+    const run = runWithPolicy(
+      {
+        stopLossRatio: null,
+        takeProfitRatio: null,
+        maxHoldingDays: null,
+        trailingTakeProfitActivationRatio: 0.02,
+        trailingTakeProfitDrawdownRatio: 0.05,
+      },
+      { open: 9.9, close: 9.3, preClose: 10.1 },
+      { open: 9.2, close: 9.1, preClose: 9.3 },
+    );
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.reason).not.toContain("盈利回撤止盈");
+  });
+
+  it("送转除权日同步复权历史峰值，不把除权跳空误判为止盈", () => {
+    const D5 = "2026-05-12";
+    const action: CorporateAction = {
+      securityId: "A",
+      securityCode: "A",
+      actionType: "transfer",
+      effectiveDate: D4,
+      recordDate: D3,
+      announcementDate: D1,
+      cashAmount: null,
+      bonusRatio: null,
+      transferRatio: 1,
+      rightsRatio: null,
+      rightsPrice: null,
+      splitRatio: null,
+      source: "test",
+      retrievedAt: "2026-05-01T00:00:00.000Z",
+      description: "10转10",
+    };
+    const seeds: readonly SeedSpec[] = [
+      { date: D1, sec: "A", open: 9.9, close: 10.0, preClose: 9.5 },
+      { date: D2, sec: "A", open: 10.0, close: 12.0, preClose: 10.0 },
+      { date: D3, sec: "A", open: 12.0, close: 12.0, preClose: 12.0 },
+      { date: D4, sec: "A", open: 6.0, close: 6.1, preClose: 12.0 },
+      { date: D5, sec: "A", open: 6.1, close: 6.2, preClose: 6.1 },
+    ];
+    const built = buildDataset(seeds, VERSION);
+    const candidate = runCandidates(built, VERSION, D1, D1, 1);
+    const run = runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: makeSimConfig({
+        initialCapital: 2_000,
+        allowPartialFill: true,
+        dateRange: { startDate: D1, endDate: D5 },
+        exitPolicy: {
+          stopLossRatio: null,
+          takeProfitRatio: null,
+          maxHoldingDays: null,
+          trailingTakeProfitActivationRatio: 0,
+          trailingTakeProfitDrawdownRatio: 0.05,
+          trailingTakeProfitTrigger: "INTRADAY",
+        },
+        corporateActionResolver: {
+          actionsFor: (securityId, date) =>
+            securityId === "A" && date === D4 ? [action] : [],
+        },
+      }),
+    });
+    const trade = run.trades.find((item) => item.securityId === "A")!;
+    expect(trade.openAtEnd).toBe(true);
+    expect(trade.quantity).toBe(200);
+    expect(trade.entryPrice).toBeCloseTo(5, 10);
+    expect(trade.reason).not.toContain("盈利回撤止盈");
   });
 });

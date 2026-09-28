@@ -1,10 +1,12 @@
 /**
  * STEP 14 / C-14.1 — 交易模拟核心：候选意图 → 买/卖计划（纯函数）。
  *
- * 语义（hold-while-selected 长仓进出场，A 股 longOnly）：
+ * 语义（长仓进出场，A 股 longOnly）：
  *   - desired = 当日意图中 direction == "long" 的候选（rank 升序 + securityId 破平）；
- *   - 退出：当前持仓中不在 desired 的证券 → 卖出**全部可卖份额**（整手），
- *     可卖为 0（当日买入仍冻结，T+1）→ 顺延（FROZEN_EXIT_DEFERRED），不静默；
+ *   - 候选退出（缺省启用）：当前持仓中不在 desired 的证券 → 卖出**全部可卖份额**（整手）；
+ *     策略显式 `candidateExitPolicy=DISABLED` 时，候选集合不参与卖出；
+ *   - 强制退出：止损/止盈/时间退出始终优先，不依赖当日是否有候选；
+ *   - 可卖为 0（当日买入仍冻结，T+1）→ 顺延（FROZEN_EXIT_DEFERRED），不静默；
  *   - 进入：desired 中当前未持仓的候选 → 按意图权重在「决策日收盘可用现金」上
  *     分配预算 → 买入股数（整手、含佣金估算，保证不超预算）；
  *     并发持仓达上限 → MAX_POSITIONS_REACHED；单日新建仓达上限 → MAX_DAILY_BUYS_REACHED；
@@ -33,6 +35,8 @@ export interface PlannedBuy {
   readonly quantity: number;
   /** 该候选在当日候选中的权重（预算分配依据，>0）。 */
   readonly weight: number;
+  /** 候选评分（3F 合成分等排序值），仅用于成交追溯与展示。 */
+  readonly score: number;
   /** 决策日成交额（千元），成交时点前已知，供滑点分层；可为 null。 */
   readonly referenceAmount: number | null;
 }
@@ -45,6 +49,10 @@ export interface PlannedSell {
   readonly quantity: number;
   /** 退出原因（止损 / 止盈 / 时间退出 / 候选退出）。 */
   readonly reason: string;
+  /** 分批减仓后剩余持仓占用的仓位槽比例。 */
+  readonly runnerSlotUsage?: number;
+  /** 该卖单是止损协商减仓，不是 runner 减仓。 */
+  readonly stopReduction?: boolean;
 }
 
 export type PlannedOrder = PlannedBuy | PlannedSell;
@@ -64,18 +72,33 @@ export interface PlanDecisionInput {
   readonly intents: readonly PositionIntent[];
   /** 引擎计算出的强制退出原因（止损 / 止盈 / 时间退出）。 */
   readonly forcedExitReasons?: ReadonlyMap<string, string>;
+  /** 引擎计算出的部分退出订单（securityId → 卖出数量与固定原因）。 */
+  readonly partialExitOrders?: ReadonlyMap<string, {
+    readonly quantity: number;
+    readonly reason: string;
+    readonly runnerSlotUsage: number;
+    readonly stopReduction?: boolean;
+  }>;
   /** 当前持仓 securityId（引擎负责确定性排序）。 */
   readonly holdings: readonly string[];
+  /** 候选退出开关；缺省 true（保持 hold-while-selected 历史行为）。 */
+  readonly candidateExitEnabled?: boolean;
   /** securityId → 决策日收盘可卖股数。 */
   readonly availableBySecurity: ReadonlyMap<string, number>;
+  /** securityId → 当前持仓占用的组合槽数量；缺省 = 1。 */
+  readonly positionSlotUsageBySecurity?: ReadonlyMap<string, number>;
   /** 决策日收盘现金。 */
   readonly cash: number;
+  /** 同日预计卖回款；只供显式替换策略复用现金。 */
+  readonly additionalEntryCash?: number;
   /** 并发持仓上限；null = 不限。 */
   readonly maxPositions: number | null;
   /** 单日最多新建仓数；null/缺省 = 不限。 */
   readonly maxDailyBuys?: number | null;
   /** 决策日是否仍有下一交易日（可执行日）。 */
   readonly hasNextTradingDay: boolean;
+  /** 是否允许同日强制卖出释放的槽位用于新买入。 */
+  readonly allowForcedExitSlotReuse?: boolean;
   /** 决策日收盘价（securityId → 元）；缺失=数据缺失。 */
   readonly closePriceBySecurity: ReadonlyMap<string, number>;
   /** 决策日成交额（securityId → 千元），滑点分层用。 */
@@ -92,19 +115,25 @@ export interface PlanDecisionInput {
    */
   readonly positionSizing?: PositionSizingInput;
   /**
-   * 初始资金（元）—— `fixed-fraction.fraction` 的**计量基数**。
+   * 初始资金（元）—— `FIXED_FRACTION.fraction` 的**计量基数**。
    *
    * 基数口径取自项目既有定义：`strategySchema/definition.ts` 的 `PositionDefinition.positionRatio`
-   * 注释为「每仓占**初始资金**比例 (0, 1]」（不是当前权益）⇒ 这里沿用同一口径，
-   * 不另立「按权益」的第二套语义。
+   * 中 `FIXED_RATIO` 表示「每仓占初始资金比例」⇒ 这里沿用同一口径。
    */
   readonly initialCapital?: number;
+  /**
+   * 决策日收盘总权益（现金 + 持仓市值，元）—— `EQUITY_FRACTION.fraction` 的计量基数。
+   *
+   * `EQUITY_RATIO` / `equity-fraction` 按该值计算每仓目标资金；固定比例则继续使用
+   * `initialCapital`，两套语义显式分开。
+   */
+  readonly currentEquity?: number;
 }
 
 /** 仓位口径（策略声明的最小面；与 `PositionSizingDeclaration` 同义，避免反向依赖）。 */
 export interface PositionSizingInput {
-  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
-  /** `FIXED_FRACTION` / `FIXED_RATIO` 的比例基数（占初始资金，(0,1]）。 */
+  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
+  /** `FIXED_FRACTION` 占初始资金；`EQUITY_FRACTION` 占决策日现有总权益。 */
   readonly fraction: number | null;
   /** `FIXED_AMOUNT` 的固定金额（元，> 0）。 */
   readonly fixedAmount: number | null;
@@ -119,6 +148,8 @@ export interface PositionSizingInput {
  *        属**如实降级**而非实现（见 BACKTEST-002 报告 Remaining Issues）。
  *   - `FIXED_FRACTION` / `FIXED_RATIO` ⇒ `min(allocatable, initialCapital × fraction)`
  *     （基数 = **初始资金**，与 `PositionDefinition.positionRatio` 既有定义一致）；
+ *   - `EQUITY_FRACTION` ⇒ `min(allocatable, currentEquity × fraction)`
+ *     （基数 = **决策日收盘总权益**，现金不足仍由 `min` 与 Portfolio 约束兜底）；
  *   - `FIXED_AMOUNT` ⇒ `min(allocatable, fixedAmount)`。
  *
  * 🔴 **永远只收窄不放大**：`min(...)` 保证「现金不足」仍由既有 `portfolio` 现金约束兜底，
@@ -128,6 +159,7 @@ function applyPositionSizing(
   allocatable: number,
   sizing: PositionSizingInput | undefined,
   initialCapital: number | undefined,
+  currentEquity: number | undefined,
 ): { readonly budget: number; readonly cappedBy: string | null } {
   if (sizing === undefined) return { budget: allocatable, cappedBy: null };
   const finite = (value: number | null | undefined): value is number =>
@@ -148,6 +180,21 @@ function applyPositionSizing(
         );
       }
       const target = initialCapital * sizing.fraction;
+      return { budget: Math.min(allocatable, target), cappedBy: sizing.sizingMethod };
+    }
+    case "EQUITY_FRACTION": {
+      if (!finite(sizing.fraction)) {
+        throw new Error(
+          `TradeSimulator: 仓位口径 EQUITY_FRACTION 缺有效 fraction（实际 ${JSON.stringify(sizing.fraction)}）` +
+            ` —— 拒绝静默回落到等权预算`
+        );
+      }
+      if (!finite(currentEquity)) {
+        throw new Error(
+          `TradeSimulator: 仓位口径 EQUITY_FRACTION 需要 currentEquity 作为计量基数，实际 ${JSON.stringify(currentEquity)}`
+        );
+      }
+      const target = currentEquity * sizing.fraction;
       return { budget: Math.min(allocatable, target), cappedBy: sizing.sizingMethod };
     }
     case "FIXED_AMOUNT": {
@@ -221,24 +268,32 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     decisionDate,
     intents,
     forcedExitReasons,
+    partialExitOrders,
     holdings,
+    candidateExitEnabled,
     availableBySecurity,
+    positionSlotUsageBySecurity,
     cash,
+    additionalEntryCash,
     maxPositions,
     maxDailyBuys,
     hasNextTradingDay,
+    allowForcedExitSlotReuse,
     closePriceBySecurity,
     amountBySecurity,
     cost,
     directionPolicy,
     positionSizing,
     initialCapital,
+    currentEquity,
   } = input;
 
   const forced = forcedExitReasons ?? new Map<string, string>();
+  const partial = partialExitOrders ?? new Map();
+  const candidateExit = candidateExitEnabled ?? true;
   const forcedOnly = intents.length === 0;
   // 决策日无候选意图且没有强制退出 → 信息不足，持仓不变（不强制清仓）。
-  if (forcedOnly && forced.size === 0) {
+  if (forcedOnly && forced.size === 0 && partial.size === 0) {
     return { orders: [], skipped: [] };
   }
 
@@ -259,8 +314,10 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
   const nextDayMessage = "模拟窗口最后交易日，无下一交易日可执行";
   for (const securityId of holdings) {
     const forcedReason = forced.get(securityId);
-    if (forcedOnly && forcedReason === undefined) continue;
-    if (desired.has(securityId) && forcedReason === undefined) continue;
+    const partialExit = partial.get(securityId);
+    if (forcedReason === undefined && partialExit === undefined) {
+      if (!candidateExit || forcedOnly || desired.has(securityId)) continue;
+    }
     if (!hasNextTradingDay) {
       skipped.push(
         skip(
@@ -288,11 +345,20 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
       );
       continue;
     }
+    const requestedQuantity = forcedReason === undefined && partialExit !== undefined
+      ? Math.min(available, partialExit.quantity)
+      : available;
     orders.push({
       kind: "sell",
       securityId,
-      quantity: available,
-      reason: forcedReason ?? "候选退出",
+      quantity: requestedQuantity,
+      reason: forcedReason ?? partialExit?.reason ?? "候选退出",
+      ...(partialExit === undefined
+        ? {}
+        : {
+            runnerSlotUsage: partialExit.runnerSlotUsage,
+            ...(partialExit.stopReduction === true ? { stopReduction: true } : {}),
+          }),
     });
   }
 
@@ -328,7 +394,19 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
   }
 
   // 并发持仓上限（跳过超限候选）。
-  const openPositionCount = holdingSet.size;
+  const occupiedSlotCount = holdings.reduce(
+    (sum, securityId) =>
+      sum + (positionSlotUsageBySecurity?.get(securityId) ?? 1),
+    0,
+  );
+  const forcedSlotsReleased = allowForcedExitSlotReuse === true
+    ? holdings.reduce(
+        (sum, securityId) =>
+          sum + (forced.has(securityId) ? positionSlotUsageBySecurity?.get(securityId) ?? 1 : 0),
+        0,
+      )
+    : 0;
+  const openPositionCount = Math.max(0, occupiedSlotCount - forcedSlotsReleased);
   const slotCap =
     maxPositions === null
       ? Number.POSITIVE_INFINITY
@@ -391,9 +469,16 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
   }
   for (const intent of entries) {
     // BACKTEST-002（B-02）— 等权现金预算（既有口径，保持不变）
-    const allocatable = totalWeight > 0 ? (cash * intent.weight) / totalWeight : 0;
+    const availableEntryCash = cash + (additionalEntryCash ?? 0);
+    const allocatable =
+      totalWeight > 0 ? (availableEntryCash * intent.weight) / totalWeight : 0;
     // 再按**策略声明的仓位口径**收窄（只收窄、不放大：绝不超过可分配现金）
-    const sizing = applyPositionSizing(allocatable, positionSizing, initialCapital);
+    const sizing = applyPositionSizing(
+      allocatable,
+      positionSizing,
+      initialCapital,
+      currentEquity,
+    );
     const budget = sizing.budget;
     if (sizing.cappedBy !== null && budget <= 0) {
       skipped.push(
@@ -431,6 +516,7 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
       securityId: intent.securityId,
       quantity,
       weight: intent.weight,
+      score: intent.signalValue,
       referenceAmount: amountBySecurity.get(intent.securityId) ?? null,
     });
   }

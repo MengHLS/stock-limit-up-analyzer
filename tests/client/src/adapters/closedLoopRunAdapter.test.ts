@@ -206,6 +206,7 @@ describe("closedLoopRunAdapter — 映射", () => {
                   quantity: 100,
                   openAtEnd: false,
                   reason: "止损（5.00%）",
+                  score: 88.1234,
                 },
               ],
             },
@@ -218,6 +219,7 @@ describe("closedLoopRunAdapter — 映射", () => {
       code: "603269.SH",
       name: "海鸥股份",
       exitReason: "止损（5.00%）",
+      score: 88.1234,
     });
   });
 });

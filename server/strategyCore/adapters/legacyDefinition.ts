@@ -100,6 +100,7 @@ export const LEGACY_TRIGGER_TO_QUANTIFIER: Readonly<Record<string, "ANY_DAY">> =
 export const LEGACY_POSITION_SIZING_TO_CORE: Readonly<Record<string, PositionSizingMethod>> = Object.freeze({
   FIXED_AMOUNT: "FIXED_AMOUNT",
   FIXED_RATIO: "FIXED_RATIO",
+  EQUITY_RATIO: "EQUITY_RATIO",
   EQUAL_WEIGHT: "EQUAL_WEIGHT",
   RISK_BASED: "RISK_BASED",
 });

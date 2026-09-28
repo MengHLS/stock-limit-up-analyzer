@@ -111,6 +111,7 @@ export interface DeclaredRule {
 export const POSITION_SIZING_KINDS = [
   "equal-weight",
   "fixed-fraction",
+  "equity-fraction",
   "rank-weighted",
   "fixed-amount",
 ] as const;
@@ -118,7 +119,8 @@ export type PositionSizingKind = (typeof POSITION_SIZING_KINDS)[number];
 
 /**
  * 仓位规则声明（§16 position sizing）。
- * equal-weight：入选等权分仓；fixed-fraction：每仓占初始资金 fraction；rank-weighted：按排名加权；
+ * equal-weight：入选等权分仓；fixed-fraction：每仓占初始资金 fraction；
+ * equity-fraction：每仓占决策时现有总权益 fraction；rank-weighted：按排名加权；
  * fixed-amount：**每仓固定金额**（元，> 0）—— BACKTEST-002（R-02）开放，执行层已支持
  * （`research/simulator/plan.ts#applyPositionSizing` 的 `FIXED_AMOUNT` 分支，
  * 预算 = min(可分配现金, fixedAmount)，只收窄不放大）。
@@ -126,6 +128,7 @@ export type PositionSizingKind = (typeof POSITION_SIZING_KINDS)[number];
 export type PositionSizingDeclaration =
   | { readonly kind: "equal-weight"; readonly maxPositions: number }
   | { readonly kind: "fixed-fraction"; readonly fraction: number; readonly maxPositions: number }
+  | { readonly kind: "equity-fraction"; readonly fraction: number; readonly maxPositions: number }
   | { readonly kind: "rank-weighted"; readonly maxPositions: number }
   | { readonly kind: "fixed-amount"; readonly fixedAmount: number; readonly maxPositions: number };
 

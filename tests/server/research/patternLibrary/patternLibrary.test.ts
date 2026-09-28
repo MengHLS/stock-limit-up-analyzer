@@ -7,8 +7,9 @@
  *      且「守线 + 缩量」配方的门槛行为逐支可辨。全量行为等价另由
  *      `docs/evidence/_probe_pattern_migration_snapshot.mts` 的**逐字节比对**覆盖
  *      （迁移前后均为 50973 B），本文件只钉关键面。
- *      ⚠️ 2026-09-26 追加 2 个纯执行配方（`first-limit-pullback-3f-top3/top5`）⇒ 配方 id
- *      集合由 2 个变为 4 个（迁移前的两个仍在集合内，未改动其行为）。
+ *      ⚠️ 2026-09-26 追加 2 个纯执行配方（`first-limit-pullback-3f-top3/top5`）；
+ *      2026-09-27 再追加 2 个无回踩门槛变体 ⇒ 配方 id 集合由 2 个变为 6 个
+ *      （迁移前的两个仍在集合内，未改动其行为）。
  *   2. **声明库自洽**：id 唯一、门槛引用的特征必须在产出面内、门槛引用的参数必须已声明 ——
  *      这类错误若能溜到运行时，症状是「信号莫名变少」而不是报错。
  *   3. **词表一致性**（本文件是它唯一的落点）：`project.ts` 刻意**不** import
@@ -66,10 +67,12 @@ describe("PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）",
     ]);
   });
 
-  it("配方 id 集合与迁移前一致（原 2 个）+ 2026-09-26 新增 2 个 3F TopN（合计 4 个）", () => {
+  it("配方 id 集合（原 2 个 + 3F TopN 4 个，合计 6 个）", () => {
     expect(registeredStrategyRecipeIds()).toEqual([
       "first-limit-pullback-3f-top3",
+      "first-limit-pullback-3f-top3-no-pullback-gate",
       "first-limit-pullback-3f-top5",
+      "first-limit-pullback-3f-top5-no-pullback-gate",
       PULLBACK_RECIPE_ID,
       "leader-candidate-baseline",
     ]);
@@ -84,7 +87,7 @@ describe("PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）",
   it("配方定义数量 = 声明库里带 execution 侧的模式数", () => {
     const expected = ALL_TRADING_PATTERNS.filter(pattern => pattern.execution !== null).length;
     expect(buildPatternRecipeDefinitions()).toHaveLength(expected);
-    expect(expected).toBe(4);
+    expect(expected).toBe(6);
   });
 
   it("回踩模块的三类条件配方数量与 id 序列不变", () => {

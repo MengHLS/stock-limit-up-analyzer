@@ -35,6 +35,8 @@ interface OpenTrade {
   entryTime: string;
   entryPrice: number;
   entryBasePrice: number;
+  /** 建仓候选评分；旧调用方未提供时为 null。 */
+  entryScore: number | null;
   /** 剩余持仓数量。 */
   quantity: number;
   /** 建仓总数量（用于结算交易生命周期，不随减仓变化）。 */
@@ -53,6 +55,7 @@ export interface OpenTradeDetail {
   readonly entryTime: string;
   readonly entryPrice: number;
   readonly quantity: number;
+  readonly score?: number;
 }
 
 const reject = (reason: string, rejectionReason: RejectionReason | null = null): FillResult => ({
@@ -103,6 +106,7 @@ export class Portfolio {
       entryTime: open.entryTime,
       entryPrice: open.entryPrice,
       quantity: open.quantity,
+      ...(open.entryScore === null ? {} : { score: open.entryScore }),
     }));
   }
 
@@ -132,10 +136,13 @@ export class Portfolio {
    *   - 配股：股数增加 + 现金减少（认购支出计入成本基）。
    * 同时把 open trade 的生命周期数量/成本同步缩放，保证后续清仓的已实现盈亏与未拆基准经济等价。
    */
-  applyCorporateAction(securityId: string, actions: readonly CorporateAction[]): void {
-    if (actions.length === 0) return;
+  applyCorporateAction(
+    securityId: string,
+    actions: readonly CorporateAction[],
+  ): { cashDelta: number; ratio: number } {
+    if (actions.length === 0) return { cashDelta: 0, ratio: 1 };
     const quantityBefore = this.book.quantity(securityId);
-    if (quantityBefore <= 0) return;
+    if (quantityBefore <= 0) return { cashDelta: 0, ratio: 1 };
     const dividendCash = actions
       .filter(action => action.actionType === "dividend")
       .reduce((sum, action) => sum + (action.cashAmount ?? 0) * quantityBefore, 0);
@@ -159,6 +166,12 @@ export class Portfolio {
       open.grossPnL += dividendCash;
       open.totalEntryCost += rightsCash;
     }
+    return { cashDelta, ratio };
+  }
+
+  /** 同步缩放最近一次估值价，保证除权日缺 bar 时不会回退到未复权旧价。 */
+  scaleMarketPrice(securityId: string, factor: number): void {
+    this.book.scaleMarketPrice(securityId, factor);
   }
 
   /** 应用买入成交（含约束与部分成交裁决）。 */
@@ -212,6 +225,7 @@ export class Portfolio {
       entryTime: fill.timestamp,
       entryPrice: fill.price,
       entryBasePrice: fill.basePrice,
+      entryScore: fill.score ?? null,
       quantity,
       totalQuantity: quantity,
       totalEntryCost: totalCost,
@@ -302,6 +316,7 @@ export class Portfolio {
       returnPct: open.totalEntryCost > 0 ? (netPnl / open.totalEntryCost) * 100 : null,
       holdingPeriod: this.holdingDays(open.entryTime, fill.timestamp),
       openAtEnd: false,
+      ...(open.entryScore !== null ? { score: open.entryScore } : {}),
       reason: fill.reason ?? null,
     });
     this.openTrades.delete(open.securityId);
@@ -364,6 +379,7 @@ export class Portfolio {
         returnPct: null,
         holdingPeriod: null,
         openAtEnd: true,
+        ...(open.entryScore !== null ? { score: open.entryScore } : {}),
         reason,
       });
     }
@@ -387,6 +403,7 @@ export class Portfolio {
       returnPct: null,
       holdingPeriod: null,
       openAtEnd: false,
+      ...(open.entryScore !== null ? { score: open.entryScore } : {}),
       reason: null,
     }));
   }

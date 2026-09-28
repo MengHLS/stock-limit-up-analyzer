@@ -275,8 +275,11 @@ export function checkExecutionSemantics(input: {
  * 哪些声明被忽略（进 Run Record，界面可见）。
  */
 export interface PositionSizingMapping {
-  /** 引擎实际生效的口径（BACKTEST-002 起 `FIXED_FRACTION` 真正生效）。 */
-  readonly effective: "EQUAL_WEIGHT_CASH_BUDGET" | "FIXED_FRACTION_OF_INITIAL_CAPITAL";
+  /** 引擎实际生效的口径（BACKTEST-002 起固定比例真正生效）。 */
+  readonly effective:
+    | "EQUAL_WEIGHT_CASH_BUDGET"
+    | "FIXED_FRACTION_OF_INITIAL_CAPITAL"
+    | "EQUITY_FRACTION_OF_CURRENT_EQUITY";
   /** 声明了但**未被引擎消费**的项（如实登记，绝不静默）。 */
   readonly ignoredDeclarations: readonly string[];
   readonly note: string;
@@ -295,6 +298,19 @@ export function mapPositionSizing(positionSizing: BacktestContext["positionSizin
       ignoredDeclarations: ignored,
       note:
         "声明 " + method + "（fraction=" + String(fraction ?? "缺失") + "）⇒ 引擎按「初始资金 × fraction，且不超过可分配现金」收窄每笔成交预算" +
+        (valid ? "" : "；⚠️ fraction 缺失/非法 ⇒ 引擎会**响亮抛错**（不静默回落等权）"),
+    };
+  }
+  if (method === "EQUITY_FRACTION") {
+    const fraction = positionSizing.positionRatio;
+    const valid = typeof fraction === "number" && Number.isFinite(fraction) && fraction > 0;
+    if (!valid) ignored.push("fraction=" + JSON.stringify(fraction ?? null));
+    return {
+      effective: "EQUITY_FRACTION_OF_CURRENT_EQUITY",
+      ignoredDeclarations: ignored,
+      note:
+        "声明 EQUITY_FRACTION（fraction=" + String(fraction ?? "缺失") +
+        "）⇒ 引擎按「决策日收盘总权益 × fraction，且不超过可分配现金」收窄每笔成交预算" +
         (valid ? "" : "；⚠️ fraction 缺失/非法 ⇒ 引擎会**响亮抛错**（不静默回落等权）"),
     };
   }

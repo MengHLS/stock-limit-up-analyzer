@@ -577,6 +577,8 @@ export const strategyExitRules = mysqlTable("strategy_exit_rules", {
   thresholdValue: double("thresholdValue"),
   /** RATIO | PERCENT | TRADING_DAY | PRICE。 */
   thresholdUnit: varchar("thresholdUnit", { length: 32 }),
+  /** 统一 stop/take-profit/time/strong-hold/policy JSON；旧规则为 null。 */
+  policyJson: longtext("policyJson"),
   /** 阈值由参数表达时的参数 code。 */
   parameterCode: varchar("parameterCode", { length: 64 }),
   conditionJson: longtext("conditionJson"),

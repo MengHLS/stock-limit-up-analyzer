@@ -199,7 +199,9 @@ export async function getCorporateAction(
 /**
  * 批量读取回测数据集涉及证券在窗口内的公司行为。
  *
- * 查询按 500 个证券代码分批，避免单条 SQL 参数过多；读操作使用既有有界重试。
+ * 查询按 100 个证券代码分批。500 个代码的长 `IN (...)` 在跨境 TiDB 上实测会触发
+ * `ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC`；缩小批次可避免大包在链路上解密失败。
+ * 读操作仍使用既有有界重试。
  */
 export async function listCorporateActionsForCodesInRange(
   securityCodes: readonly string[],
@@ -210,7 +212,7 @@ export async function listCorporateActionsForCodesInRange(
   const db = await getDb();
   if (!db) return [];
   const out: CorporateAction[] = [];
-  const batchSize = 500;
+  const batchSize = 100;
   for (let index = 0; index < codes.length; index += batchSize) {
     const batch = codes.slice(index, index + batchSize);
     const rows = await withReadRetry(

@@ -718,6 +718,7 @@ export const tradeSchema = z.object({
   holdingPeriod: z.number().nullable(),
   openAtEnd: z.boolean(),
   reason: z.string().nullable().optional(),
+  score: z.number().nullable().optional(),
 });
 
 export type EquityPointInput = z.infer<typeof equityPointSchema>;

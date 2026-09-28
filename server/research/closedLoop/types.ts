@@ -312,6 +312,8 @@ export interface ClosedLoopBacktestTrade {
   readonly holdingPeriod: number | null;
   readonly openAtEnd: boolean;
   readonly fees: number;
+  /** 建仓候选评分；旧留档或来源信号无评分时为 null。 */
+  readonly score?: number | null;
 }
 
 /**

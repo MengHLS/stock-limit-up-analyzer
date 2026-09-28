@@ -45,11 +45,12 @@ function intent(securityId: string, weight: number): PositionIntent {
 /** 单候选（weight=1）⇒ 等权现金预算 = 全部可用现金 —— 便于观测仓位口径的上限。 */
 function plan(input: {
   readonly positionSizing?: {
-    readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO";
+    readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO";
     readonly fraction: number | null;
     readonly fixedAmount: number | null;
   };
   readonly cash?: number;
+  readonly currentEquity?: number;
   readonly candidates?: readonly PositionIntent[];
 }) {
   return planDecisionDay({
@@ -66,6 +67,7 @@ function plan(input: {
     directionPolicy: "longOnly",
     ...(input.positionSizing !== undefined ? { positionSizing: input.positionSizing } : {}),
     initialCapital: INITIAL_CAPITAL,
+    currentEquity: input.currentEquity ?? INITIAL_CAPITAL,
   });
 }
 
@@ -105,6 +107,47 @@ describe("B-02 — Test B：FIXED_FRACTION 50% ⇒ 成交金额约为基准的�
     const baseline = buyQuantity(plan({}));
     const full = buyQuantity(plan({ positionSizing: { sizingMethod: "FIXED_FRACTION", fraction: 1, fixedAmount: null } }));
     expect(full).toBe(baseline);
+  });
+});
+
+describe("equity-fraction — 按决策日现有总权益，而不是初始资金", () => {
+  it("现有权益 16 万、初始资金 10 万、fraction=50% ⇒ 目标 8 万，而非 5 万", () => {
+    const fixed = buyQuantity(
+      plan({
+        positionSizing: {
+          sizingMethod: "FIXED_FRACTION",
+          fraction: 0.5,
+          fixedAmount: null,
+        },
+      }),
+    );
+    const equityBased = buyQuantity(
+      plan({
+        positionSizing: {
+          sizingMethod: "EQUITY_FRACTION",
+          fraction: 0.5,
+          fixedAmount: null,
+        },
+        currentEquity: 160_000,
+      }),
+    );
+    expect(fixed).toBeGreaterThan(0);
+    expect(equityBased).toBeGreaterThan(fixed);
+    expect(equityBased).toBeGreaterThanOrEqual(7_900);
+    expect(equityBased).toBeLessThanOrEqual(8_000);
+  });
+
+  it("EQUITY_FRACTION 缺 currentEquity ⇒ 响亮抛错（不静默按初始资金）", () => {
+    expect(() =>
+      plan({
+        positionSizing: {
+          sizingMethod: "EQUITY_FRACTION",
+          fraction: 0.2,
+          fixedAmount: null,
+        },
+        currentEquity: Number.NaN,
+      }),
+    ).toThrowError(/currentEquity/);
   });
 });
 

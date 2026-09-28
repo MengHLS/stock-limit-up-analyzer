@@ -430,6 +430,7 @@ export class DbStrategyRepository implements StrategyRepository {
         triggerType: row.triggerType,
         thresholdValue: row.thresholdValue ?? null,
         thresholdUnit: row.thresholdUnit ?? null,
+        policyJson: row.policyJson ?? null,
         parameterCode: row.parameterCode ?? null,
         conditionJson: row.conditionJson ?? null,
         priority: row.priority,

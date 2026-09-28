@@ -202,7 +202,7 @@ describe("A. Projection 派生（Definition → 投影，单向）", () => {
       "ruleType", "triggerType", "windowEnd", "windowStart", "windowUnit",
     ]);
     expect(Object.keys(projections.exitRules[0] ?? {}).sort()).toEqual([
-      "conditionJson", "enabled", "ordinal", "parameterCode", "priority", "ruleId",
+      "conditionJson", "enabled", "ordinal", "parameterCode", "policyJson", "priority", "ruleId",
       "ruleType", "thresholdUnit", "thresholdValue", "triggerType",
     ]);
     expect(Object.keys(projections.executionRule).sort()).toEqual([

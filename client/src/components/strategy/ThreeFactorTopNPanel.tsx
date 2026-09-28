@@ -2,9 +2,11 @@ import { trpc } from "@/lib/trpc";
 import {
   buildClosedLoopRunViewModel,
   type ClosedLoopRunViewModel,
+  type ClosedLoopTradeView,
 } from "@/adapters/closedLoopRunAdapter";
-import { BarChart3, DatabaseZap, Loader2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { StockKlineDialog } from "@/components/strategy/StockKlineDialog";
+import { BarChart3, CandlestickChart, DatabaseZap, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -16,15 +18,63 @@ import {
   YAxis,
 } from "recharts";
 
-const FACTOR_STRATEGIES = [
-  { topN: 3, strategyId: "first-limit-pullback-3f-top3", label: "3F Top3", color: "#0f766e" },
-  { topN: 5, strategyId: "first-limit-pullback-3f-top5", label: "3F Top5", color: "#ea580c" },
+const DEFAULT_COMPARISON_STRATEGY_IDS = [
+  "first-limit-pullback-3f-top3",
+  "first-limit-pullback-3f-top5",
 ] as const;
 
-/** 只展示带盘中止损和固定仓位口径的留档；旧结果不得套用新口径文案。 */
-const THREE_FACTOR_TOPN_VERSION = "1.6.0";
+const STRATEGY_LABELS: Record<string, string> = {
+  "first-limit-pullback-3f-top3": "3F Top3",
+  "first-limit-pullback-3f-top5": "3F Top5",
+};
 
-type FactorStrategy = (typeof FACTOR_STRATEGIES)[number];
+type BacktestRunOption = {
+  readonly id: number;
+  readonly strategyId: string;
+  readonly strategyVersion: string;
+  readonly runId: string;
+  readonly createdAt: string;
+};
+
+type CurveRunView = {
+  readonly slot: 0 | 1;
+  readonly key: string;
+  readonly label: string;
+  readonly color: string;
+  readonly run: BacktestRunOption;
+  readonly view: ClosedLoopRunViewModel;
+};
+
+function compareStrategyVersionDesc(left: string, right: string): number {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const delta = (rightParts[index] ?? 0) - (leftParts[index] ?? 0);
+    if (delta !== 0) return delta;
+  }
+  return 0;
+}
+
+const CURVE_COLORS = ["#0f766e", "#ea580c"] as const;
+
+function latestVersionRun<T extends { strategyVersion: string }>(
+  runs: readonly T[],
+): T | null {
+  return [...runs].sort((left, right) =>
+    compareStrategyVersionDesc(left.strategyVersion, right.strategyVersion),
+  )[0] ?? null;
+}
+
+function strategyLabel(strategyId: string): string {
+  return STRATEGY_LABELS[strategyId] ?? strategyId;
+}
+
+function latestRunForStrategy(
+  runs: readonly BacktestRunOption[],
+  strategyId: string,
+): BacktestRunOption | null {
+  return latestVersionRun(runs.filter(run => run.strategyId === strategyId));
+}
 
 function formatMoney(value: number | null): string {
   if (value === null) return "—";
@@ -60,48 +110,91 @@ function buildCurveData(
   });
 }
 
-export function ThreeFactorTopNPanel() {
-  const [detailTopN, setDetailTopN] = useState<3 | 5>(3);
+export function ClosedLoopBacktestComparisonPanel() {
+  const [detailSlot, setDetailSlot] = useState<0 | 1>(0);
   const [tradeYear, setTradeYear] = useState<string>("ALL");
   const [tradePage, setTradePage] = useState(1);
-  const top3History = trpc.researchRun.listBacktests.useQuery(
-    { strategyId: FACTOR_STRATEGIES[0].strategyId, limit: 10 },
+  const [selectedTrade, setSelectedTrade] = useState<ClosedLoopTradeView | null>(null);
+  const [tradeDetailOpen, setTradeDetailOpen] = useState(false);
+  const [curveRunIds, setCurveRunIds] = useState<[number | null, number | null]>([null, null]);
+  const curveInitialized = useRef(false);
+  const history = trpc.researchRun.listBacktests.useQuery(
+    { limit: 200 },
     { staleTime: 60_000, refetchOnWindowFocus: false },
   );
-  const top5History = trpc.researchRun.listBacktests.useQuery(
-    { strategyId: FACTOR_STRATEGIES[1].strategyId, limit: 10 },
-    { staleTime: 60_000, refetchOnWindowFocus: false },
+  const curveOptions = useMemo(() => {
+    return [...(history.data ?? [])].sort((left, right) => {
+      const byStrategy = strategyLabel(left.strategyId).localeCompare(
+        strategyLabel(right.strategyId),
+      );
+      if (byStrategy !== 0) return byStrategy;
+      const byVersion = compareStrategyVersionDesc(
+        left.strategyVersion,
+        right.strategyVersion,
+      );
+      if (byVersion !== 0) return byVersion;
+      return right.createdAt.localeCompare(left.createdAt);
+    });
+  }, [history.data]);
+  const curveRunById = useMemo(
+    () => new Map(curveOptions.map(run => [run.id, run])),
+    [curveOptions],
   );
-  const top3Run =
-    top3History.data?.find(item => item.strategyVersion === THREE_FACTOR_TOPN_VERSION) ?? null;
-  const top5Run =
-    top5History.data?.find(item => item.strategyVersion === THREE_FACTOR_TOPN_VERSION) ?? null;
-  const top3Detail = trpc.researchRun.getBacktest.useQuery(
-    { id: top3Run?.id ?? 0 },
-    { enabled: top3Run !== null, staleTime: 60_000, refetchOnWindowFocus: false },
+  const curveADetail = trpc.researchRun.getBacktest.useQuery(
+    { id: curveRunIds[0] ?? 0 },
+    {
+      enabled: curveRunIds[0] !== null,
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+    },
   );
-  const top5Detail = trpc.researchRun.getBacktest.useQuery(
-    { id: top5Run?.id ?? 0 },
-    { enabled: top5Run !== null, staleTime: 60_000, refetchOnWindowFocus: false },
+  const curveBDetail = trpc.researchRun.getBacktest.useQuery(
+    { id: curveRunIds[1] ?? 0 },
+    {
+      enabled: curveRunIds[1] !== null,
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+    },
   );
-
-  const views = useMemo(() => {
-    const rows: Array<{ strategy: FactorStrategy; view: ClosedLoopRunViewModel }> = [];
-    for (const [strategy, detail] of [
-      [FACTOR_STRATEGIES[0], top3Detail.data],
-      [FACTOR_STRATEGIES[1], top5Detail.data],
-    ] as const) {
-      const view = buildClosedLoopRunViewModel(detail?.result ?? null);
-      if (view !== null) rows.push({ strategy, view });
+  useEffect(() => {
+    if (curveInitialized.current) return;
+    const first =
+      latestRunForStrategy(curveOptions, DEFAULT_COMPARISON_STRATEGY_IDS[0])?.id ??
+      curveOptions[0]?.id ??
+      null;
+    const second =
+      latestRunForStrategy(curveOptions, DEFAULT_COMPARISON_STRATEGY_IDS[1])?.id ??
+      curveOptions.find(run => run.id !== first)?.id ??
+      null;
+    if (first !== null || second !== null) {
+      setCurveRunIds([first, second]);
+      curveInitialized.current = true;
     }
-    return rows;
-  }, [top3Detail.data, top5Detail.data]);
+  }, [curveOptions]);
+
+  const curveViews = useMemo(() => {
+    const details = [curveADetail.data, curveBDetail.data] as const;
+    return curveRunIds.flatMap((runId, index) => {
+      if (runId === null) return [];
+      const run = curveRunById.get(runId);
+      const view = buildClosedLoopRunViewModel(details[index]?.result ?? null);
+      if (run === undefined || view === null) return [];
+      return [{
+        slot: index as 0 | 1,
+        key: `curve-${index}-${runId}`,
+        label: `${strategyLabel(run.strategyId)} · v${run.strategyVersion} · #${run.id}`,
+        color: CURVE_COLORS[index]!,
+        run,
+        view,
+      }];
+    });
+  }, [curveADetail.data, curveBDetail.data, curveRunById, curveRunIds]);
 
   const curveData = useMemo(
-    () => buildCurveData(views.map(item => ({ key: item.strategy.label, view: item.view }))),
-    [views],
+    () => buildCurveData(curveViews.map(item => ({ key: item.key, view: item.view }))),
+    [curveViews],
   );
-  const selected = views.find(item => item.strategy.topN === detailTopN) ?? views[0] ?? null;
+  const selected = curveViews.find(item => item.slot === detailSlot) ?? curveViews[0] ?? null;
   const selectedBacktest = selected?.view.backtest ?? null;
   const selectedEvaluation = selected?.view.evaluation ?? null;
   const tradeYears = useMemo(() => {
@@ -129,30 +222,27 @@ export function ThreeFactorTopNPanel() {
   useEffect(() => {
     setTradeYear("ALL");
     setTradePage(1);
-  }, [detailTopN]);
-  const loading =
-    top3History.isLoading
-    || top5History.isLoading
-    || (top3Run !== null && top3Detail.isLoading)
-    || (top5Run !== null && top5Detail.isLoading);
+  }, [detailSlot]);
+  const loading = history.isLoading;
+  const curveLoading =
+    (curveRunIds[0] !== null && curveADetail.isLoading)
+    || (curveRunIds[1] !== null && curveBDetail.isLoading);
 
   return (
     <section
-      data-three-factor-topn-panel
+      data-closed-loop-backtest-comparison
       className="overflow-hidden rounded-2xl border border-teal-200 bg-card"
     >
       <div className="p-5">
         <div className="flex flex-wrap items-start gap-3">
           <BarChart3 className="mt-0.5 h-5 w-5 text-teal-700" />
           <div className="mr-auto">
-            <p className="text-xs font-bold tracking-[0.16em] text-teal-700">3F TOPN · STRATEGY CORE</p>
-            <h2 className="mt-1 font-semibold">3F 综合评分 TopN 闭环回测</h2>
+            <p className="text-xs font-bold tracking-[0.16em] text-teal-700">CLOSED LOOP · BACKTEST</p>
+            <h2 className="mt-1 font-semibold">闭环回测版本对比</h2>
             <p className="mt-1 max-w-5xl text-xs leading-5 text-slate-600">
-              Dataset v5（2019-01-01 至 2026-09-04）；T+5 收盘按 3F 等权合成分排序，
-              T+6 开盘买入；两个方案初始资金均为 ¥100,000；佣金 3 bps、印花税 10 bps、
-              过户费 0.1 bps、滑点 10 bps。退出为盘中 -5% 止损、持有满 5 个交易日与
-              候选退出的先到者。两个方案每仓固定按初始资金的 20% 建仓，最多同时持有
-              5 只；单日最多新建仓 Top3 2 只、Top5 3 只。
+              从闭环回测留档中选择最多两个版本进行比较，默认优先展示最新的 3F Top3
+              与 3F Top5。曲线、指标表和成交明细均跟随所选版本，具体策略条件以对应
+              策略版本的留档声明为准。
             </p>
           </div>
         </div>
@@ -161,12 +251,12 @@ export function ThreeFactorTopNPanel() {
           <div className="flex min-h-56 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-teal-700" />
           </div>
-        ) : views.length === 0 ? (
+        ) : curveOptions.length === 0 ? (
           <div className="mt-5 rounded-xl border border-dashed border-teal-200 bg-teal-50/40 px-5 py-8 text-center">
             <DatabaseZap className="mx-auto h-5 w-5 text-teal-700" />
-            <p className="mt-2 text-sm font-medium text-slate-700">尚无 3F TopN 留档结果</p>
+            <p className="mt-2 text-sm font-medium text-slate-700">尚无闭环回测留档结果</p>
             <p className="mt-1 text-xs text-slate-500">
-              运行 v{THREE_FACTOR_TOPN_VERSION} 的 3F TopN 闭环回测后，固定仓位结果会自动出现在这里。
+              运行闭环回测后，留档会自动出现在这里。
             </p>
           </div>
         ) : (
@@ -190,13 +280,18 @@ export function ThreeFactorTopNPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {views.map(({ strategy, view }) => {
+                  {curveViews.map(({ key, run, view, color }) => {
                     const evaluation = view.evaluation;
                     const backtest = view.backtest;
                     return (
-                      <tr key={strategy.strategyId} className="border-t border-teal-100 align-top">
+                      <tr key={key} className="border-t border-teal-100 align-top">
                         <td className="px-3 py-3">
-                          <p className="font-semibold" style={{ color: strategy.color }}>{strategy.label}</p>
+                          <p className="font-semibold" style={{ color }}>
+                            {strategyLabel(run.strategyId)}
+                          </p>
+                          <p className="mt-1 font-mono text-[10px] text-slate-400">
+                            v{run.strategyVersion} · 留档 {run.id}
+                          </p>
                           <p className="mt-1 font-mono text-[10px] text-slate-400">{view.runId}</p>
                         </td>
                         <td className="px-3 py-3">
@@ -231,7 +326,76 @@ export function ThreeFactorTopNPanel() {
               </table>
             </div>
 
+            <div className="mt-5 rounded-xl border border-teal-100 bg-teal-50/30 p-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="mr-auto">
+                  <h3 className="text-sm font-semibold text-slate-800">曲线对比</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    每条曲线可独立选择策略与版本，最多同时显示两条。
+                  </p>
+                </div>
+                {[0, 1].map(index => (
+                  <label key={index} className="min-w-[310px] text-xs text-slate-600">
+                    <span className="mb-1 block font-medium">
+                      曲线 {index === 0 ? "A" : "B"}
+                    </span>
+                    <select
+                      className="h-9 w-full rounded-md border border-teal-200 bg-white px-2 text-xs text-slate-700"
+                      value={curveRunIds[index] ?? ""}
+                      onChange={event => {
+                        const value = event.target.value === "" ? null : Number(event.target.value);
+                        setCurveRunIds(current => {
+                          const next: [number | null, number | null] = [...current];
+                          next[index] = value;
+                          return next;
+                        });
+                      }}
+                    >
+                      <option value="">{index === 0 ? "请选择留档" : "不显示第二条"}</option>
+                      {curveOptions.map(run => (
+                        <option
+                          key={`${index}-${run.id}`}
+                          value={run.id}
+                          disabled={run.id === curveRunIds[index === 0 ? 1 : 0]}
+                        >
+                          {strategyLabel(run.strategyId)} · v{run.strategyVersion} · #{run.id} · {run.runId}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                {curveViews.map(item => (
+                  <span
+                    key={item.key}
+                    className="inline-flex items-center gap-2 rounded-md border border-teal-100 bg-white px-2.5 py-1.5"
+                  >
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <span className="font-medium text-slate-700">{item.label}</span>
+                  </span>
+                ))}
+                {!curveLoading && curveViews.length === 0 ? (
+                  <span className="rounded-md border border-dashed border-teal-200 px-2.5 py-1.5 text-slate-500">
+                    请选择至少一条留档
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
             <div className="mt-5 h-[340px] w-full">
+              {curveLoading ? (
+                <div className="flex h-full items-center justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin text-teal-700" />
+                </div>
+              ) : curveViews.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                  暂无可绘制曲线
+                </div>
+              ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={curveData} margin={{ top: 12, right: 20, bottom: 8, left: -8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#dbe5e4" vertical={false} />
@@ -246,13 +410,13 @@ export function ThreeFactorTopNPanel() {
                   />
                   <Tooltip formatter={value => [`${value}%`, "累计收益率"]} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  {views.map(item => (
+                  {curveViews.map(item => (
                     <Line
-                      key={item.strategy.label}
+                      key={item.key}
                       type="monotone"
-                      dataKey={item.strategy.label}
-                      name={item.strategy.label}
-                      stroke={item.strategy.color}
+                      dataKey={item.key}
+                      name={item.label}
+                      stroke={item.color}
                       strokeWidth={2.25}
                       dot={false}
                       activeDot={{ r: 4 }}
@@ -262,6 +426,7 @@ export function ThreeFactorTopNPanel() {
                   ))}
                 </LineChart>
               </ResponsiveContainer>
+              )}
             </div>
 
             <div className="mt-5 rounded-xl border border-teal-100">
@@ -273,18 +438,18 @@ export function ThreeFactorTopNPanel() {
                   </p>
                 </div>
                 <div className="flex rounded-lg border border-teal-200 bg-white p-1">
-                  {views.map(item => (
+                  {curveViews.map(item => (
                     <button
-                      key={item.strategy.topN}
+                      key={item.key}
                       type="button"
                       className={`rounded-md px-3 py-1 text-xs font-medium ${
-                        selected?.strategy.topN === item.strategy.topN
+                        selected?.slot === item.slot
                           ? "bg-teal-700 text-white"
                           : "text-slate-600 hover:bg-teal-50"
                       }`}
-                      onClick={() => setDetailTopN(item.strategy.topN)}
+                      onClick={() => setDetailSlot(item.slot)}
                     >
-                      {item.strategy.label}
+                      {item.label}
                     </button>
                   ))}
                 </div>
@@ -326,10 +491,11 @@ export function ThreeFactorTopNPanel() {
               {selectedBacktest !== null && selectedBacktest.trades.length > 0 ? (
                 <>
                   <div className="max-h-[24rem] overflow-auto">
-                    <table className="w-full min-w-[900px] text-xs">
+                    <table className="w-full min-w-[960px] text-xs">
                       <thead className="sticky top-0 z-10 bg-white text-left text-slate-500">
                         <tr>
                           <th className="px-3 py-2">证券名称 / 代码</th>
+                          <th className="px-3 py-2 text-right">评分</th>
                           <th className="px-3 py-2">买入</th>
                           <th className="px-3 py-2">卖出</th>
                           <th className="px-3 py-2">股数</th>
@@ -337,6 +503,7 @@ export function ThreeFactorTopNPanel() {
                           <th className="px-3 py-2">收益率</th>
                           <th className="px-3 py-2">持有</th>
                           <th className="px-3 py-2">退出原因</th>
+                          <th className="px-3 py-2 text-right">操作</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -350,6 +517,9 @@ export function ThreeFactorTopNPanel() {
                                 <p className="mt-1 font-mono text-slate-500">
                                   {trade.code ?? trade.securityId}
                                 </p>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono font-semibold text-slate-800">
+                                {formatNumber(trade.score, 4)}
                               </td>
                               <td className="px-3 py-2">
                                 <p>{trade.entryTime}</p>
@@ -371,6 +541,19 @@ export function ThreeFactorTopNPanel() {
                               </td>
                               <td className="px-3 py-2 text-slate-600">
                                 {trade.exitReason ?? "—"}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-teal-200 bg-white px-2.5 py-1 font-medium text-teal-700 transition-colors hover:border-teal-300 hover:bg-teal-50"
+                                  onClick={() => {
+                                    setSelectedTrade(trade);
+                                    setTradeDetailOpen(true);
+                                  }}
+                                >
+                                  <CandlestickChart className="h-3.5 w-3.5" />
+                                  成交详情
+                                </button>
                               </td>
                             </tr>
                         ))}
@@ -415,6 +598,11 @@ export function ThreeFactorTopNPanel() {
           </>
         )}
       </div>
+      <StockKlineDialog
+        trade={selectedTrade}
+        open={tradeDetailOpen}
+        onOpenChange={setTradeDetailOpen}
+      />
     </section>
   );
 }

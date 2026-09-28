@@ -155,6 +155,17 @@ export class PositionBook {
     return { cashDelta: result.cashDelta, ratio };
   }
 
+  /** 把最近一次估值价按公司行为价格因子缩放到事件后的价格口径。 */
+  scaleMarketPrice(securityId: string, factor: number): void {
+    if (!Number.isFinite(factor) || factor <= 0) {
+      throw new Error(`PositionBook：公司行为价格因子必须为正，实际 ${String(factor)}`);
+    }
+    const position = this.positions.get(securityId);
+    if (position?.marketPrice !== null && position?.marketPrice !== undefined) {
+      position.marketPrice *= factor;
+    }
+  }
+
   /** 按给定价格生成对外只读持仓快照。价格缺失时回退最近市场价/成本价。 */
   snapshot(prices: ReadonlyMap<string, number>): Position[] {
     return Array.from(this.positions.values()).map((position) => {

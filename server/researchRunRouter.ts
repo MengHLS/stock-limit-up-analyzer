@@ -88,6 +88,7 @@ import {
   saveClosedLoopBacktestRun,
 } from "./closedLoopBacktestRun/repository";
 import { loadSecurityLabels, withPersistedSecurityLabels } from "./closedLoopBacktestRun/securityLabels";
+import { getStockDailySeriesForTradeWindow } from "./stockPriceSeries";
 // STRATEGY-ARCH-002 — 策略运行留档（零 schema 变更：进既有 resultJson）。
 import {
   buildStrategyRunRecord,
@@ -110,6 +111,33 @@ import { perfBegin, perfCount, perfEnd, perfRun, perfRunAsync } from "./observab
 
 // 幂等启动装配：把内置研究策略注册进单例注册中心（已注册则跳过）。
 registerBuiltInResearchStrategies(researchStrategyRegistry);
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_TRADE_KLINE_TRADING_DAYS = 250;
+
+const stockDailySeriesInputSchema = z
+  .object({
+    securityId: z.string().trim().min(1).max(200),
+    stockCode: z.string().trim().min(1).max(24).optional(),
+    entryDate: z.string().regex(DATE_ONLY_PATTERN),
+    exitDate: z.string().regex(DATE_ONLY_PATTERN),
+    beforeTradingDays: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_TRADE_KLINE_TRADING_DAYS)
+      .default(30),
+    afterTradingDays: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_TRADE_KLINE_TRADING_DAYS)
+      .default(30),
+  })
+  .refine((input) => input.entryDate <= input.exitDate, {
+    message: "entryDate 不能晚于 exitDate",
+    path: ["exitDate"],
+  });
 
 /**
  * 策略持久化读取服务（**只读**用途：`useRealData=true` 时按 `strategyId@version` 取
@@ -436,6 +464,44 @@ export const researchRunRouter = router({
     .output(closedLoopBacktestRunDetailSchema.nullable())
     .query(async ({ input }) => {
       return await getClosedLoopBacktestRun(input.id);
+    }),
+
+  /**
+   * 成交详情弹窗的日 K 数据（只读）。
+   *
+   * 返回区间内完整 OHLC、成交量和 MA5/MA10。均线在服务端基于区间前 9 个交易日
+   * 计算，避免左侧前几根因缺少历史数据而变成 null 或错误值。
+   */
+  stockDailySeries: publicProcedure
+    .input(stockDailySeriesInputSchema)
+    .query(async ({ input }) => {
+      let label: Awaited<ReturnType<typeof loadSecurityLabels>>[number] | null = null;
+      try {
+        label = (await loadSecurityLabels([input.securityId]))[0] ?? null;
+      } catch {
+        // 名称/映射属展示增强；调用方已给出 stockCode 时仍应能看 K 线。
+      }
+
+      const stockCode = input.stockCode ?? label?.code ?? null;
+      const bars =
+        stockCode === null
+          ? []
+          : await getStockDailySeriesForTradeWindow(
+              stockCode,
+              input.entryDate,
+              input.exitDate,
+              input.beforeTradingDays,
+              input.afterTradingDays,
+            );
+
+      return {
+        securityId: input.securityId,
+        stockCode,
+        name: label?.name ?? null,
+        startDate: bars[0]?.tradeDate ?? input.entryDate,
+        endDate: bars.at(-1)?.tradeDate ?? input.exitDate,
+        bars,
+      };
     }),
 
   /**

@@ -2,13 +2,14 @@ import { Button } from "@/components/ui/button";
 import { PaginationBar } from "@/components/PaginationBar";
 import { Input } from "@/components/ui/input";
 import { StrategyEvaluationPanel } from "@/components/StrategyEvaluationPanel";
+import { StockKlineDialog, type StockKlineTradeTarget } from "@/components/strategy/StockKlineDialog";
 import { buildFullCycleRiskBlocks, type FullCycleRiskBlock } from "@/lib/fullCycleRiskBlocks";
 import { sortOrdersByKey, type OrderReturnSortDirection, type OrderSortKey } from "@/lib/orderReturnSort";
 import { trpc } from "@/lib/trpc";
 import { BOARD_HEIGHT_RISK_MAX_TIER_FROM, boardHeightPositionScale, boardHeightRiskLadder, isBoardParticipationRestricted } from "@shared/boardHeightRisk";
 import { FIELD_COVERAGE_LABELS, type FieldCoverageReport } from "@shared/fieldAvailability";
 import { toast } from "sonner";
-import { BarChart3, DatabaseZap, History, Loader2, RefreshCw, Save, ShieldAlert, ShieldCheck, WalletCards } from "lucide-react";
+import { BarChart3, CandlestickChart, DatabaseZap, History, Loader2, RefreshCw, Save, ShieldAlert, ShieldCheck, WalletCards } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -245,6 +246,8 @@ function FullOrdersSection({
   // 不新增端点、不改变任何统计口径（笔数汇总仍按筛选后的全集计算）。
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [selectedTrade, setSelectedTrade] = useState<StockKlineTradeTarget | null>(null);
+  const [tradeDetailOpen, setTradeDetailOpen] = useState(false);
   const filledCount = orders.filter((order) => order.status === "filled").length;
   const skippedCount = orders.length - filledCount;
   const highRiskExcludedCount = orders.filter((order) => order.highRiskExcluded).length;
@@ -323,7 +326,7 @@ function FullOrdersSection({
         </div>
       )}
       <div className="orders-scroll-container overflow-auto rounded-lg border border-slate-200">
-        <table className="w-full min-w-[1360px] text-xs">
+        <table className="w-full min-w-[1460px] text-xs">
           <thead className="bg-slate-100 text-left text-slate-500">
             <tr>
               <th className="px-3 py-2"><button type="button" className="inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold text-slate-600 transition-colors hover:bg-slate-200 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500" onClick={() => onSortChange("signalDate")} aria-label="按信号日排序" aria-sort={sortIndicator("signalDate").ariaSort}>信号日 <span aria-hidden="true" className={sortIndicator("signalDate").active ? "text-sky-700" : "text-slate-400"}>{sortIndicator("signalDate").arrow}</span></button></th>
@@ -338,13 +341,22 @@ function FullOrdersSection({
               {hasExpectationTier && <th className="px-3 py-2">预期档位</th>}
               <th className="px-3 py-2">买点涨幅</th>
               <th className="px-3 py-2">原因</th>
+              <th className="px-3 py-2 text-right">操作</th>
             </tr>
           </thead>
           <tbody>
             {pagedOrders.map((order, index) => {
               const entryPointPremium = order.entryPointPremium ?? null;
               const pnlToEquityRatio = order.pnlToEquityRatio ?? null;
-              return <tr key={`${strategy}-${order.signalDate}-${order.stockCode}-${index}`} className="border-t border-slate-100 align-top"><td className="whitespace-nowrap px-3 py-2">{formatDate(order.signalDate)}</td><td className="px-3 py-2"><p className="font-medium">{order.stockName}</p><p className="font-mono text-slate-400">{order.stockCode}</p></td><td className="px-3 py-2 font-medium text-slate-700">{order.score}</td><td className="px-3 py-2">{order.highRiskExcluded ? <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800">高风险剔除</span> : order.exclusionLabel ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800">{order.exclusionLabel}</span> : order.status === "filled" ? "已成交" : "未成交"}</td><td className="px-3 py-2">{order.shares || "-"}</td><td className="whitespace-nowrap px-3 py-2">{formatDate(order.entryDate)} / {formatDate(order.exitDate)}</td><td className="whitespace-nowrap px-3 py-2">{order.entryPrice ?? "-"} / {order.exitPrice ?? "-"}</td><td className={`px-3 py-2 font-medium ${order.netReturn !== null && order.netReturn >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{order.netReturn === null ? "-" : `${order.netReturn}%`}</td><td className={`px-3 py-2 font-medium ${pnlToEquityRatio === null ? "text-slate-400" : pnlToEquityRatio >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{pnlToEquityRatio === null ? "-" : `${pnlToEquityRatio.toFixed(2)}%`}</td>{hasExpectationTier && <td className="px-3 py-2">{order.openExpectationTier ? <span className={`rounded px-1.5 py-0.5 font-medium ${OPEN_EXPECTATION_TIER_STYLE[order.openExpectationTier].chip}`}>{OPEN_EXPECTATION_TIER_STYLE[order.openExpectationTier].label}</span> : "-"}</td>}<td className={`px-3 py-2 font-medium ${entryPointPremium !== null && entryPointPremium >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{entryPointPremium === null ? "-" : `${entryPointPremium}%`}</td><td className="max-w-80 px-3 py-2 leading-5 text-slate-500">{order.reason ?? "-"}</td></tr>;
+              const tradeTarget: StockKlineTradeTarget | null = order.status === "filled" && order.entryDate
+                ? {
+                    code: order.stockCode,
+                    name: order.stockName,
+                    entryTime: order.entryDate,
+                    exitTime: order.exitDate,
+                  }
+                : null;
+              return <tr key={`${strategy}-${order.signalDate}-${order.stockCode}-${index}`} className="border-t border-slate-100 align-top"><td className="whitespace-nowrap px-3 py-2">{formatDate(order.signalDate)}</td><td className="px-3 py-2"><p className="font-medium">{order.stockName}</p><p className="font-mono text-slate-400">{order.stockCode}</p></td><td className="px-3 py-2 font-medium text-slate-700">{order.score}</td><td className="px-3 py-2">{order.highRiskExcluded ? <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800">高风险剔除</span> : order.exclusionLabel ? <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800">{order.exclusionLabel}</span> : order.status === "filled" ? "已成交" : "未成交"}</td><td className="px-3 py-2">{order.shares || "-"}</td><td className="whitespace-nowrap px-3 py-2">{formatDate(order.entryDate)} / {formatDate(order.exitDate)}</td><td className="whitespace-nowrap px-3 py-2">{order.entryPrice ?? "-"} / {order.exitPrice ?? "-"}</td><td className={`px-3 py-2 font-medium ${order.netReturn !== null && order.netReturn >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{order.netReturn === null ? "-" : `${order.netReturn}%`}</td><td className={`px-3 py-2 font-medium ${pnlToEquityRatio === null ? "text-slate-400" : pnlToEquityRatio >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{pnlToEquityRatio === null ? "-" : `${pnlToEquityRatio.toFixed(2)}%`}</td>{hasExpectationTier && <td className="px-3 py-2">{order.openExpectationTier ? <span className={`rounded px-1.5 py-0.5 font-medium ${OPEN_EXPECTATION_TIER_STYLE[order.openExpectationTier].chip}`}>{OPEN_EXPECTATION_TIER_STYLE[order.openExpectationTier].label}</span> : "-"}</td>}<td className={`px-3 py-2 font-medium ${entryPointPremium !== null && entryPointPremium >= 0 ? "text-rose-600" : "text-emerald-700"}`}>{entryPointPremium === null ? "-" : `${entryPointPremium}%`}</td><td className="max-w-80 px-3 py-2 leading-5 text-slate-500">{order.reason ?? "-"}</td><td className="px-3 py-2 text-right">{tradeTarget ? <button type="button" className="inline-flex items-center gap-1.5 rounded-md border border-teal-200 bg-white px-2.5 py-1 font-medium text-teal-700 transition-colors hover:border-teal-300 hover:bg-teal-50" onClick={() => { setSelectedTrade(tradeTarget); setTradeDetailOpen(true); }}><CandlestickChart className="h-3.5 w-3.5" />成交详情</button> : <span className="text-slate-300">-</span>}</td></tr>;
             })}
           </tbody>
         </table>
@@ -354,6 +366,7 @@ function FullOrdersSection({
         <span data-orders-range className="text-xs text-slate-500">本页第 {displayedOrders.length === 0 ? 0 : pageStart + 1}–{Math.min(pageStart + pageSize, displayedOrders.length)} 笔（当前筛选共 {displayedOrders.length} 笔 / 全部 {orders.length} 笔）</span>
         <PaginationBar page={currentPage} totalPages={totalPages} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizeOptions={[10, 20, 50, 100]} className="ml-auto" />
       </div>
+      <StockKlineDialog trade={selectedTrade} open={tradeDetailOpen} onOpenChange={setTradeDetailOpen} />
     </section>
   );
 }

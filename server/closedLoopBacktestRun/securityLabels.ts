@@ -63,6 +63,15 @@ export type StockNameRecordRow = {
 export const SECURITY_LABEL_MAX_IDS = 500;
 
 /**
+ * 单次 `IN (...)` 查询的有界批次。
+ *
+ * 500 个 id 的预编译查询已多次触发远端连接
+ * `ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC`；批次缩小只是降低单包体积，
+ * 不改变解析顺序或语义。
+ */
+export const SECURITY_LABEL_QUERY_BATCH_SIZE = 100;
+
+/**
  * 纯函数：把「标识行 + 名称行」拼成按 `securityIds` 顺序排列的标签数组。
  *
  * 无 DB 依赖、不抛错；任一环节缺失一律降级为 `null` 字段（**不做任何猜测**）。
@@ -145,18 +154,24 @@ export async function loadSecurityLabels(
     throw new Error("数据库不可用，无法解析证券名称");
   }
 
-  const identifierRows = await withReadRetry(
-    "securityLabels.identifiers",
-    async () => (await db
-      .select({
-        securityId: researchSecurityIdentifierHistory.securityId,
-        exchange: researchSecurityIdentifierHistory.exchange,
-        code: researchSecurityIdentifierHistory.securityCode,
-        identifierType: researchSecurityIdentifierHistory.identifierType,
-      })
-      .from(researchSecurityIdentifierHistory)
-      .where(inArray(researchSecurityIdentifierHistory.securityId, ids))) as SecurityIdentifierRow[],
-  );
+  const identifierRows: SecurityIdentifierRow[] = [];
+  for (let index = 0; index < ids.length; index += SECURITY_LABEL_QUERY_BATCH_SIZE) {
+    const batch = ids.slice(index, index + SECURITY_LABEL_QUERY_BATCH_SIZE);
+    identifierRows.push(
+      ...await withReadRetry(
+        "securityLabels.identifiers",
+        async () => (await db
+          .select({
+            securityId: researchSecurityIdentifierHistory.securityId,
+            exchange: researchSecurityIdentifierHistory.exchange,
+            code: researchSecurityIdentifierHistory.securityCode,
+            identifierType: researchSecurityIdentifierHistory.identifierType,
+          })
+          .from(researchSecurityIdentifierHistory)
+          .where(inArray(researchSecurityIdentifierHistory.securityId, batch))) as SecurityIdentifierRow[],
+      ),
+    );
+  }
 
   // 先算出代码，再**只**按这些代码去名称源取数 —— 不整表扫 9.9 万行。
   const identityToCode = new Map<string, string>();
@@ -177,18 +192,24 @@ export async function loadSecurityLabels(
     return aliasResolvedLabels(aliases, buildSecurityLabels(ids, identifierRows, []));
   }
 
-  const nameRows = await withReadRetry(
-    "securityLabels.names",
-    async () => (await db
-      .select({
-        stockCode: limitUpRecords.stockCode,
-        stockName: limitUpRecords.stockName,
-        limitUpDate: limitUpRecords.limitUpDate,
-        limitUpTime: limitUpRecords.limitUpTime,
-      })
-      .from(limitUpRecords)
-      .where(inArray(limitUpRecords.stockCode, codes))) as StockNameRecordRow[],
-  );
+  const nameRows: StockNameRecordRow[] = [];
+  for (let index = 0; index < codes.length; index += SECURITY_LABEL_QUERY_BATCH_SIZE) {
+    const batch = codes.slice(index, index + SECURITY_LABEL_QUERY_BATCH_SIZE);
+    nameRows.push(
+      ...await withReadRetry(
+        "securityLabels.names",
+        async () => (await db
+          .select({
+            stockCode: limitUpRecords.stockCode,
+            stockName: limitUpRecords.stockName,
+            limitUpDate: limitUpRecords.limitUpDate,
+            limitUpTime: limitUpRecords.limitUpTime,
+          })
+          .from(limitUpRecords)
+          .where(inArray(limitUpRecords.stockCode, batch))) as StockNameRecordRow[],
+      ),
+    );
+  }
 
   return aliasResolvedLabels(aliases, buildSecurityLabels(ids, identifierRows, nameRows));
 }
@@ -276,11 +297,23 @@ export async function withPersistedSecurityLabels(
 ): Promise<ClosedLoopRunResult> {
   const ids = [...new Set(collectResultTradeIds(result))];
   if (ids.length === 0) return result;
-  const labels: SecurityLabel[] = [];
-  for (let index = 0; index < ids.length; index += SECURITY_LABEL_MAX_IDS) {
-    labels.push(
-      ...(await loadSecurityLabels(ids.slice(index, index + SECURITY_LABEL_MAX_IDS))),
+  try {
+    const labels: SecurityLabel[] = [];
+    for (let index = 0; index < ids.length; index += SECURITY_LABEL_QUERY_BATCH_SIZE) {
+      labels.push(
+        ...(await loadSecurityLabels(ids.slice(index, index + SECURITY_LABEL_QUERY_BATCH_SIZE))),
+      );
+    }
+    return attachSecurityLabelsToClosedLoopResult(result, labels);
+  } catch (error) {
+    // 名称是展示增强，不是指标输入。长回测后远端连接可能已被 LB 断开；若在这里
+    // 向上抛，会让整次已完成回测无法留档。前端详情页仍有 `securityLabels`
+    // 按需补名路径，因此这里降级为「先落完整结果、名称待补」，并保留告警。
+    console.warn(
+      `[SecurityLabels] 留档前名称解析失败，保留未贴名结果并继续留档：${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
+    return result;
   }
-  return attachSecurityLabelsToClosedLoopResult(result, labels);
 }

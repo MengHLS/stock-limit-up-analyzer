@@ -37,6 +37,24 @@ describe("3F 首板回踩资格", () => {
     expect(raw === null ? null : threeFactorCompositeScoreOf(raw)).toBeNull();
   });
 
+  it("显式关闭回踩门槛后，纯上升路径也进入 3F 排序", () => {
+    const bars = [
+      bar(10),
+      bar(11),
+      bar(12),
+      bar(13),
+      bar(14),
+      bar(15),
+    ];
+    const raw = computeThreeFactorRaw(bars);
+    expect(raw?.hasPullbackInObservationWindow).toBe(false);
+    expect(
+      raw === null
+        ? null
+        : threeFactorCompositeScoreOf(raw, { requirePullback: false }),
+    ).not.toBeNull();
+  });
+
   it("T+1..T+5 任一天回踩到首板收盘价下方 ⇒ 保留为候选", () => {
     const bars = [
       bar(10),

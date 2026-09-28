@@ -179,9 +179,12 @@ export function buildPullbackFeatureProviders(point: DecisionPoint): readonly Fe
 export const THREE_FACTOR_FEATURE_IDS = {
   /** 排序特征 = 等权合成分 `Σ(oriented) / 3`（与研究侧 EQUAL 分支同浮点路径）。 */
   composite: "threeFactorCompositeScore",
+  /** 1.13.0 变体：同一合成分公式，但显式移除「观察窗内必须回踩」资格门槛。 */
+  compositeWithoutPullbackGate: "threeFactorCompositeScoreNoPullbackGate",
 } as const;
 
 export const THREE_FACTOR_FEATURE_VERSION = "1.0.0";
+export const THREE_FACTOR_FEATURE_NO_PULLBACK_GATE_VERSION = "1.1.0";
 
 /**
  * 构造 3F 配方的特征提供器。
@@ -190,15 +193,23 @@ export const THREE_FACTOR_FEATURE_VERSION = "1.0.0";
  * 基准（`bars[0]` = 首板日）缺失、或观察窗口 T+1..T+5 未走完时返回 null
  * ⇒ 该证券当日不产生信号（这正是「rd < 5 不进决策日」的 PIT 来源）。
  */
-export function buildThreeFactorFeatureProvider(point: DecisionPoint): FeatureProvider {
+export function buildThreeFactorFeatureProvider(
+  point: DecisionPoint,
+  options: { readonly requirePullback?: boolean } = {},
+): FeatureProvider {
+  const requirePullback = options.requirePullback ?? true;
   return makeBarFeatureProvider({
-    featureId: THREE_FACTOR_FEATURE_IDS.composite,
-    version: THREE_FACTOR_FEATURE_VERSION,
+    featureId: requirePullback
+      ? THREE_FACTOR_FEATURE_IDS.composite
+      : THREE_FACTOR_FEATURE_IDS.compositeWithoutPullbackGate,
+    version: requirePullback
+      ? THREE_FACTOR_FEATURE_VERSION
+      : THREE_FACTOR_FEATURE_NO_PULLBACK_GATE_VERSION,
     availability: samePointAvailability(point),
     compute: (bars) => {
       const raw = computeThreeFactorRaw(bars);
       if (raw === null) return null;
-      return threeFactorCompositeScoreOf(raw);
+      return threeFactorCompositeScoreOf(raw, { requirePullback });
     },
   });
 }

@@ -62,6 +62,8 @@ const PATTERN_FEATURE_ID_BY_KEY: Readonly<Record<PatternFeatureKey, string>> = {
   momentum: PULLBACK_FEATURE_IDS.momentum,
   pctChange: PCT_CHANGE_FEATURE_ID,
   threeFactorComposite: THREE_FACTOR_FEATURE_IDS.composite,
+  threeFactorCompositeNoPullbackGate:
+    THREE_FACTOR_FEATURE_IDS.compositeWithoutPullbackGate,
 };
 
 function featureIdOf(feature: PatternFeatureKey): string {
@@ -78,7 +80,12 @@ function featureIdOf(feature: PatternFeatureKey): string {
 /** 取某个特征的真实提供器（回踩四特征 / 当日涨跌幅 / 3F 合成分各用同一批 `compute*` 实现）。 */
 function featureProviderOf(feature: PatternFeatureKey, point: DecisionPoint): FeatureProvider {
   if (feature === "pctChange") return buildPctChangeFeatureProvider(point);
-  if (feature === "threeFactorComposite") return buildThreeFactorFeatureProvider(point);
+  if (feature === "threeFactorComposite") {
+    return buildThreeFactorFeatureProvider(point, { requirePullback: true });
+  }
+  if (feature === "threeFactorCompositeNoPullbackGate") {
+    return buildThreeFactorFeatureProvider(point, { requirePullback: false });
+  }
   const featureId = featureIdOf(feature);
   const found = buildPullbackFeatureProviders(point).find(provider => provider.featureId === featureId);
   if (found === undefined) {

@@ -18,6 +18,8 @@ import {
   type ResearchValidationResult,
 } from "../experimentValidation";
 import type { ExecutionModelId, Side } from "../../backtest/types";
+import { trailingPolicyDefinitionErrors } from "../trailingPolicy";
+import { stopPolicyDefinitionErrors } from "../stopPolicy";
 import type { SecurityBoard } from "./types";
 import type {
   SimulationConfig,
@@ -252,6 +254,19 @@ export function validateSimulationConfig(
       )
     );
   }
+  if (
+    config.candidateExitPolicy !== undefined
+    && config.candidateExitPolicy !== "HOLD_WHILE_SELECTED"
+    && config.candidateExitPolicy !== "DISABLED"
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_CANDIDATE_EXIT_POLICY_INVALID",
+        "simConfig.candidateExitPolicy",
+        "candidateExitPolicy 必须是 HOLD_WHILE_SELECTED 或 DISABLED"
+      )
+    );
+  }
   if (config.executionRules !== undefined) {
     const rules = config.executionRules;
     if (
@@ -295,6 +310,8 @@ export function validateSimulationConfig(
     const policy = config.exitPolicy;
     const ratio = (value: unknown): value is number =>
       typeof value === "number" && Number.isFinite(value) && value > 0;
+    const nonNegativeRatio = (value: unknown): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0;
     if (policy.stopLossRatio !== null && policy.stopLossRatio !== undefined && !ratio(policy.stopLossRatio)) {
       issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.stopLossRatio", "stopLossRatio 必须是正有限数字或 null"));
     }
@@ -307,6 +324,130 @@ export function validateSimulationConfig(
       (!Number.isInteger(policy.maxHoldingDays) || policy.maxHoldingDays <= 0)
     ) {
       issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.maxHoldingDays", "maxHoldingDays 必须是正整数或 null"));
+    }
+    if (
+      policy.trailingTakeProfitActivationRatio !== null &&
+      policy.trailingTakeProfitActivationRatio !== undefined &&
+      !nonNegativeRatio(policy.trailingTakeProfitActivationRatio)
+    ) {
+      issues.push(issue(
+        "SIM_CONFIG_EXIT_POLICY_INVALID",
+        "simConfig.exitPolicy.trailingTakeProfitActivationRatio",
+        "trailingTakeProfitActivationRatio 必须是非负有限数字或 null",
+      ));
+    }
+    if (
+      policy.trailingTakeProfitDrawdownRatio !== null &&
+      policy.trailingTakeProfitDrawdownRatio !== undefined &&
+      !ratio(policy.trailingTakeProfitDrawdownRatio)
+    ) {
+      issues.push(issue(
+        "SIM_CONFIG_EXIT_POLICY_INVALID",
+        "simConfig.exitPolicy.trailingTakeProfitDrawdownRatio",
+        "trailingTakeProfitDrawdownRatio 必须是正有限数字或 null",
+      ));
+    }
+    if (
+      policy.trailingTakeProfitTrigger !== null &&
+      policy.trailingTakeProfitTrigger !== undefined &&
+      policy.trailingTakeProfitTrigger !== "INTRADAY" &&
+      policy.trailingTakeProfitTrigger !== "ON_CLOSE"
+    ) {
+      issues.push(issue(
+        "SIM_CONFIG_EXIT_POLICY_INVALID",
+        "simConfig.exitPolicy.trailingTakeProfitTrigger",
+        "trailingTakeProfitTrigger 必须是 INTRADAY / ON_CLOSE 或 null",
+      ));
+    }
+    if (
+      policy.advancedTrailingPolicy !== null
+      && policy.advancedTrailingPolicy !== undefined
+    ) {
+      if (
+        policy.trailingTakeProfitDrawdownRatio !== null
+        && policy.trailingTakeProfitDrawdownRatio !== undefined
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy",
+          "advancedTrailingPolicy 与 trailingTakeProfitDrawdownRatio 不能同时声明",
+        ));
+      }
+      for (const detail of trailingPolicyDefinitionErrors(policy.advancedTrailingPolicy)) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.advancedTrailingPolicy",
+          detail,
+        ));
+      }
+    }
+    if (policy.advancedStopPolicy !== null && policy.advancedStopPolicy !== undefined) {
+      for (const detail of stopPolicyDefinitionErrors(policy.advancedStopPolicy)) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.advancedStopPolicy",
+          detail,
+        ));
+      }
+    }
+    const strongHold = policy.strongHold;
+    if (strongHold !== null && strongHold !== undefined) {
+      if (
+        !Number.isInteger(strongHold.atHoldingDays) ||
+        strongHold.atHoldingDays <= 0 ||
+        !Number.isInteger(strongHold.extendToHoldingDays) ||
+        strongHold.extendToHoldingDays <= strongHold.atHoldingDays ||
+        !Number.isFinite(strongHold.minReturnRatio) ||
+        typeof strongHold.requireAboveMa5 !== "boolean" ||
+        typeof strongHold.requireAboveMa10 !== "boolean" ||
+        policy.maxHoldingDays === null ||
+        policy.maxHoldingDays === undefined ||
+        strongHold.atHoldingDays !== policy.maxHoldingDays ||
+        (
+          strongHold.afterExtendedHold !== undefined
+          && strongHold.afterExtendedHold !== "TIME_EXIT"
+          && strongHold.afterExtendedHold !== "TREND"
+        ) ||
+        (
+          strongHold.scaleOutRatio !== undefined
+          && strongHold.scaleOutRatio !== null
+          && (
+            !Number.isFinite(strongHold.scaleOutRatio)
+            || strongHold.scaleOutRatio <= 0
+            || strongHold.scaleOutRatio >= 1
+          )
+        ) ||
+        (
+          strongHold.runnerExitAtHoldingDays !== undefined
+          && strongHold.runnerExitAtHoldingDays !== null
+          && (
+            !Number.isInteger(strongHold.runnerExitAtHoldingDays)
+            || strongHold.runnerExitAtHoldingDays <= strongHold.extendToHoldingDays
+          )
+        ) ||
+        (
+          strongHold.maxConcurrentRunners !== undefined
+          && strongHold.maxConcurrentRunners !== null
+          && (
+            !Number.isInteger(strongHold.maxConcurrentRunners)
+            || strongHold.maxConcurrentRunners <= 0
+          )
+        ) ||
+        (
+          strongHold.replacementScoreMargin !== undefined
+          && strongHold.replacementScoreMargin !== null
+          && (
+            !Number.isFinite(strongHold.replacementScoreMargin)
+            || strongHold.replacementScoreMargin < 0
+          )
+        )
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.strongHold",
+          "strongHold 参数非法（atHoldingDays 必须等于 maxHoldingDays，extendToHoldingDays 必须更大）",
+        ));
+      }
     }
   }
   if (config.securityBoards !== undefined) {
@@ -624,6 +765,19 @@ export function validateTradeSimulationRun(
         )
       );
     }
+    const candidateExitPolicy = config.candidateExitPolicy ?? "HOLD_WHILE_SELECTED";
+    if (
+      candidateExitPolicy !== "HOLD_WHILE_SELECTED"
+      && candidateExitPolicy !== "DISABLED"
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_CANDIDATE_EXIT_POLICY_INVALID",
+          "record.config.candidateExitPolicy",
+          "candidateExitPolicy 非法"
+        )
+      );
+    }
     const rules = config.executionRules;
     if (
       !rules ||
@@ -661,9 +815,13 @@ export function validateTradeSimulationRun(
         )
       );
     }
+    const expectedEntryExitModel =
+      candidateExitPolicy === "DISABLED"
+        ? "EXIT_RULES_LONG_ONLY_CASH_BUDGET"
+        : "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET";
     if (
       config.decisionPoint !== "close" ||
-      config.entryExitModel !== "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET" ||
+      config.entryExitModel !== expectedEntryExitModel ||
       (config.corporateActions !== "NOT_APPLIED" && config.corporateActions !== "APPLIED")
     ) {
       issues.push(
@@ -673,6 +831,167 @@ export function validateTradeSimulationRun(
           "执行假设语义常量与版本不匹配"
         )
       );
+    }
+    const exitPolicy = config.exitPolicy;
+    if (exitPolicy === undefined || exitPolicy === null || typeof exitPolicy !== "object") {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_EXIT_POLICY_INVALID",
+          "record.config.exitPolicy",
+          "exitPolicy 缺失"
+        )
+      );
+    } else {
+      const activation = exitPolicy.trailingTakeProfitActivationRatio;
+      const drawdown = exitPolicy.trailingTakeProfitDrawdownRatio;
+      if (
+        activation !== undefined
+        && activation !== null
+        && (!isFiniteNumber(activation) || activation < 0)
+      ) {
+        issues.push(
+          issue(
+            "RECORD_CONFIG_EXIT_POLICY_INVALID",
+            "record.config.exitPolicy.trailingTakeProfitActivationRatio",
+            "trailingTakeProfitActivationRatio 必须是非负有限数字或 null"
+          )
+        );
+      }
+      if (
+        drawdown !== undefined
+        && drawdown !== null
+        && (!isFiniteNumber(drawdown) || drawdown <= 0)
+      ) {
+        issues.push(
+          issue(
+            "RECORD_CONFIG_EXIT_POLICY_INVALID",
+            "record.config.exitPolicy.trailingTakeProfitDrawdownRatio",
+            "trailingTakeProfitDrawdownRatio 必须是正有限数字或 null"
+          )
+        );
+      }
+      const trigger = exitPolicy.trailingTakeProfitTrigger;
+      if (
+        trigger !== undefined
+        && trigger !== null
+        && trigger !== "INTRADAY"
+        && trigger !== "ON_CLOSE"
+      ) {
+        issues.push(
+          issue(
+            "RECORD_CONFIG_EXIT_POLICY_INVALID",
+            "record.config.exitPolicy.trailingTakeProfitTrigger",
+            "trailingTakeProfitTrigger 必须是 INTRADAY / ON_CLOSE 或 null"
+          )
+        );
+      }
+      const advanced = exitPolicy.advancedTrailingPolicy;
+      if (advanced !== undefined && advanced !== null) {
+        for (const detail of trailingPolicyDefinitionErrors(advanced)) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.advancedTrailingPolicy",
+              detail,
+            )
+          );
+        }
+      }
+      const advancedStop = exitPolicy.advancedStopPolicy;
+      if (advancedStop !== undefined && advancedStop !== null) {
+        for (const detail of stopPolicyDefinitionErrors(advancedStop)) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.advancedStopPolicy",
+              detail,
+            )
+          );
+        }
+      }
+      const strongHold = exitPolicy.strongHold;
+      if (strongHold !== undefined && strongHold !== null) {
+        if (
+          typeof strongHold.afterExtendedHold !== "string"
+          || (
+            strongHold.afterExtendedHold !== "TIME_EXIT"
+            && strongHold.afterExtendedHold !== "TREND"
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.afterExtendedHold",
+              "afterExtendedHold 必须是 TIME_EXIT / TREND"
+            )
+          );
+        }
+        if (
+          strongHold.scaleOutRatio !== null
+          && (
+            typeof strongHold.scaleOutRatio !== "number"
+            || !Number.isFinite(strongHold.scaleOutRatio)
+            || strongHold.scaleOutRatio <= 0
+            || strongHold.scaleOutRatio >= 1
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.scaleOutRatio",
+              "scaleOutRatio 必须是 (0,1) 或 null"
+            )
+          );
+        }
+        if (
+          strongHold.runnerExitAtHoldingDays !== null
+          && (
+            typeof strongHold.runnerExitAtHoldingDays !== "number"
+            || !Number.isInteger(strongHold.runnerExitAtHoldingDays)
+            || strongHold.runnerExitAtHoldingDays <= strongHold.extendToHoldingDays
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.runnerExitAtHoldingDays",
+              "runnerExitAtHoldingDays 必须是大于 extendToHoldingDays 的整数或 null"
+            )
+          );
+        }
+        if (
+          strongHold.maxConcurrentRunners !== null
+          && (
+            typeof strongHold.maxConcurrentRunners !== "number"
+            || !Number.isInteger(strongHold.maxConcurrentRunners)
+            || strongHold.maxConcurrentRunners <= 0
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.maxConcurrentRunners",
+              "maxConcurrentRunners 必须是正整数或 null"
+            )
+          );
+        }
+        if (
+          strongHold.replacementScoreMargin !== null
+          && (
+            typeof strongHold.replacementScoreMargin !== "number"
+            || !Number.isFinite(strongHold.replacementScoreMargin)
+            || strongHold.replacementScoreMargin < 0
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.replacementScoreMargin",
+              "replacementScoreMargin 必须是非负有限数字或 null"
+            )
+          );
+        }
+      }
     }
   }
 

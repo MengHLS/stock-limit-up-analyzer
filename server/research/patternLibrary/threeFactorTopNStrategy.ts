@@ -13,19 +13,42 @@ import {
   THREE_FACTOR_TOPN_MAX_HOLDING_DAYS,
   THREE_FACTOR_TOPN_OBSERVATION_WINDOW,
   THREE_FACTOR_TOPN_STOP_LOSS_RATIO,
+  THREE_FACTOR_TOPN_TRAILING_TAKE_PROFIT_DRAWDOWN_RATIO,
 } from "./patterns/firstLimitPullback3FTopN";
+import {
+  assertValidTrailingPolicyDefinition,
+  describeTrailingPolicy,
+  type ResearchTrailingPolicyDefinition,
+  type StrongHoldAfterExtendedExitPolicy,
+} from "../trailingPolicy";
+import type { ExitPolicyDefinition } from "../exitPolicyCommon";
 
-export const THREE_FACTOR_TOPN_STRATEGY_VERSION = "1.6.0";
+export const THREE_FACTOR_TOPN_STRATEGY_VERSION = "1.9.0";
+
+/** 实验版本：排除 T 日一字板与 T 字板，其余口径沿用 1.10.0 强势续持实验。 */
+export const THREE_FACTOR_TOPN_EXCLUDE_OPEN_LIMIT_STRATEGY_VERSION = "1.11.0";
+
+/** 实验版本：将盈利回撤止盈从收盘检查改为盘中检查。 */
+export const THREE_FACTOR_TOPN_INTRADAY_TRAILING_STRATEGY_VERSION = "1.12.0";
+
+/** 实验版本：移除「观察窗内必须出现收盘回踩」资格门槛；沿用 1.12.0 的盘中回撤止盈。 */
+export const THREE_FACTOR_TOPN_NO_PULLBACK_GATE_STRATEGY_VERSION = "1.13.0";
 
 /** 固定创建时间，保证由本装配生成的策略指纹可复现。 */
-export const THREE_FACTOR_TOPN_CREATED_AT = "2026-09-26T00:00:00.000Z";
+export const THREE_FACTOR_TOPN_CREATED_AT = "2026-09-27T00:00:00.000Z";
 
-/** 与研究侧 RESULT-OOS-COMPOSITE-3F-001 保持同一套成本假设。 */
+/**
+ * 与研究侧 RESULT-OOS-COMPOSITE-3F-001 冻结的 20 bps 往返成本对齐。
+ *
+ * 研究侧分解：佣金 2.5 + 滑点 2.5 + 冲击 2.5 bps/边，另收卖出印花税 5 bps。
+ * 执行成本模型没有独立 impact 字段，因此把「滑点 + 冲击」合并为 5 bps/边：
+ * 佣金 5 + 滑点/冲击 10 + 印花税 5 + 过户费 0.2 = 20.2 bps/往返。
+ */
 export const THREE_FACTOR_TOPN_COST_MODEL: CostModel = {
-  commissionRate: 0.0003,
-  stampDutyRate: 0.001,
+  commissionRate: 0.00025,
+  stampDutyRate: 0.0005,
   transferFeeRate: 0.00001,
-  slippageBps: 10,
+  slippageBps: 5,
   lotSize: 100,
   minCommission: 5,
 };
@@ -33,7 +56,7 @@ export const THREE_FACTOR_TOPN_COST_MODEL: CostModel = {
 /** 两个 3F TopN 策略共用同一组合容量：最多同时持有 5 只。 */
 export const THREE_FACTOR_TOPN_MAX_POSITIONS = 5;
 
-/** 固定仓位比例：每只按初始资金的 20% 建仓，不随当日候选数动态均分。 */
+/** 固定仓位比例：每只按决策日收盘总权益的 20% 建仓，不随当日候选数动态均分。 */
 export const THREE_FACTOR_TOPN_POSITION_RATIO = 0.2;
 
 /** 单日最多新建仓数：Top3 只买前 2 只，Top5 只买前 3 只。 */
@@ -52,6 +75,8 @@ export function threeFactorTopNStrategyId(topN: number): string {
 
 export interface BuildThreeFactorTopNStrategyDocumentInput {
   readonly topN: number;
+  /** 实验版本覆盖；未提供 = 正式版本。 */
+  readonly strategyVersion?: string;
   readonly datasetVersionId: number;
   readonly datasetLabel: string;
   /** 缺省 = 模式声明窗口。探针 A/B 可显式覆盖，但正式策略必须使用缺省值。 */
@@ -64,6 +89,45 @@ export interface BuildThreeFactorTopNStrategyDocumentInput {
   readonly maxPositions?: number;
   /** 缺省 = Top3 2 只 / Top5 3 只；正式策略必须使用缺省值。 */
   readonly maxDailyBuys?: number;
+  /** 实验开关：排除 T 日一字板与 T 字板，只保留普通涨停事件。 */
+  readonly excludeEventDayOpenAtLimit?: boolean;
+  /**
+   * true（缺省）= 沿用「首板回踩」资格门槛；false = 1.13.0 变体，
+   * 移除「观察窗 T+1..T+5 内必须出现收盘价低于首板日收盘价」的要求。
+   */
+  readonly requirePullback?: boolean;
+  /**
+   * 盈利回撤止盈检查时点。缺省 = ON_CLOSE（兼容正式版本）；
+   * INTRADAY = 当日开盘/最低价跌破触发线时立即卖出。
+   */
+  readonly trailingTakeProfitTrigger?: "INTRADAY" | "ON_CLOSE";
+  /**
+   * 实验覆盖：`null` = 删除 TIME_EXIT；未提供 = 使用模式声明的 5 个交易日。
+   * 正式策略不得覆盖，正式交付使用缺省值。
+   */
+  readonly maxHoldingDays?: number | null;
+  /**
+   * 实验覆盖：止损比例。未提供 = 模式声明的 5%。
+   * 正式策略不得覆盖，正式交付使用缺省值。
+   */
+  readonly stopLossRatio?: number;
+  /** 实验性：第5个持有日强势时延长持有到指定持有日。 */
+  readonly strongHold?: {
+    readonly atHoldingDays: number;
+    readonly minReturnRatio: number;
+    readonly requireAboveMa5: boolean;
+    readonly requireAboveMa10: boolean;
+    readonly extendToHoldingDays: number;
+    readonly afterExtendedHold?: StrongHoldAfterExtendedExitPolicy;
+    readonly scaleOutRatio?: number | null;
+    readonly runnerExitAtHoldingDays?: number | null;
+    readonly maxConcurrentRunners?: number | null;
+    readonly replacementScoreMargin?: number | null;
+  } | null;
+  /** 实验性高级收盘移动止盈；与固定回撤止盈二选一。 */
+  readonly trailingPolicy?: ResearchTrailingPolicyDefinition | null;
+  /** 统一 stop/take-profit/time/strong-hold/capital-recycle 配置。 */
+  readonly exitPolicy?: ExitPolicyDefinition | null;
 }
 
 /**
@@ -76,13 +140,108 @@ export function buildThreeFactorTopNStrategyDocument(
 ): StrategyDocument {
   const { topN, datasetVersionId, datasetLabel } = input;
   const strategyId = threeFactorTopNStrategyId(topN);
+  const requirePullback = input.requirePullback ?? true;
+  const recipeId = requirePullback
+    ? strategyId
+    : `${strategyId}-no-pullback-gate`;
   const maxPositions = input.maxPositions ?? THREE_FACTOR_TOPN_MAX_POSITIONS;
   const maxDailyBuys = input.maxDailyBuys ?? threeFactorTopNMaxDailyBuys(topN);
   const observationWindow = input.observationWindow ?? THREE_FACTOR_TOPN_OBSERVATION_WINDOW;
-  const runtime = resolveStrategyRecipeById(strategyId);
+  const maxHoldingDays =
+    input.maxHoldingDays === undefined
+      ? THREE_FACTOR_TOPN_MAX_HOLDING_DAYS
+      : input.maxHoldingDays;
+  if (
+    maxHoldingDays !== null &&
+    (!Number.isInteger(maxHoldingDays) || maxHoldingDays <= 0)
+  ) {
+    throw new Error(
+      `3F TopN 策略：maxHoldingDays 必须是正整数或 null，实际 ${String(maxHoldingDays)}。`,
+    );
+  }
+  const stopLossRatio = input.stopLossRatio ?? THREE_FACTOR_TOPN_STOP_LOSS_RATIO;
+  const trailingTakeProfitTrigger = input.trailingTakeProfitTrigger ?? "ON_CLOSE";
+  const trailingPolicy = input.trailingPolicy ?? null;
+  const unifiedExitPolicy = input.exitPolicy ?? null;
+  if (unifiedExitPolicy !== null && trailingPolicy !== null) {
+    throw new Error("3F TopN 策略：exitPolicy 与 trailingPolicy 不能同时声明。");
+  }
+  if (trailingPolicy !== null) {
+    assertValidTrailingPolicyDefinition(trailingPolicy);
+    if (trailingTakeProfitTrigger !== "ON_CLOSE") {
+      throw new Error("3F TopN 策略：高级 trailingPolicy 只支持 ON_CLOSE。");
+    }
+  }
+  if (
+    !Number.isFinite(stopLossRatio) ||
+    stopLossRatio <= 0 ||
+    stopLossRatio >= 1
+  ) {
+    throw new Error(
+      `3F TopN 策略：stopLossRatio 必须位于 (0,1)，实际 ${String(stopLossRatio)}。`,
+    );
+  }
+  if (input.strongHold !== undefined && input.strongHold !== null) {
+    const strongHold = input.strongHold;
+    if (
+      !Number.isInteger(strongHold.atHoldingDays) ||
+      strongHold.atHoldingDays <= 0 ||
+      !Number.isInteger(strongHold.extendToHoldingDays) ||
+      strongHold.extendToHoldingDays <= strongHold.atHoldingDays ||
+      !Number.isFinite(strongHold.minReturnRatio) ||
+      (
+        strongHold.afterExtendedHold !== undefined
+        && strongHold.afterExtendedHold !== "TIME_EXIT"
+        && strongHold.afterExtendedHold !== "TREND"
+      ) ||
+      (
+        strongHold.scaleOutRatio !== undefined
+        && strongHold.scaleOutRatio !== null
+        && (
+          !Number.isFinite(strongHold.scaleOutRatio)
+          || strongHold.scaleOutRatio <= 0
+          || strongHold.scaleOutRatio >= 1
+        )
+      ) ||
+      (
+        strongHold.runnerExitAtHoldingDays !== undefined
+        && strongHold.runnerExitAtHoldingDays !== null
+        && (
+          !Number.isInteger(strongHold.runnerExitAtHoldingDays)
+          || strongHold.runnerExitAtHoldingDays <= strongHold.extendToHoldingDays
+        )
+      ) ||
+      (
+        strongHold.maxConcurrentRunners !== undefined
+        && strongHold.maxConcurrentRunners !== null
+        && (
+          !Number.isInteger(strongHold.maxConcurrentRunners)
+          || strongHold.maxConcurrentRunners <= 0
+        )
+      ) ||
+      (
+        strongHold.replacementScoreMargin !== undefined
+        && strongHold.replacementScoreMargin !== null
+        && (
+          !Number.isFinite(strongHold.replacementScoreMargin)
+          || strongHold.replacementScoreMargin < 0
+        )
+      )
+    ) {
+      throw new Error("3F TopN 策略：strongHold 参数非法。");
+    }
+    if (
+      strongHold.atHoldingDays !== maxHoldingDays
+    ) {
+      throw new Error(
+        "3F TopN 策略：strongHold.atHoldingDays 必须等于 maxHoldingDays。",
+      );
+    }
+  }
+  const runtime = resolveStrategyRecipeById(recipeId);
   const recipe = {
     kind: "signalEngine" as const,
-    recipeId: strategyId,
+    recipeId,
     point: runtime.point,
     signalFrequency: runtime.signalFrequency,
     signalDescription: runtime.signalDescription,
@@ -96,16 +255,59 @@ export function buildThreeFactorTopNStrategyDocument(
 
   return createStrategyDocument({
     strategyId,
-    version: THREE_FACTOR_TOPN_STRATEGY_VERSION,
-    name: `首板回踩 · 3F 综合评分 Top${topN}`,
+    version: input.strategyVersion ?? THREE_FACTOR_TOPN_STRATEGY_VERSION,
+    name:
+      `首板${requirePullback ? "回踩" : ""} · 3F 综合评分 Top${topN}`
+      + (requirePullback ? "" : "（无回踩门槛）"),
     description:
       "首板后第 5 个交易日收盘，按 3F 等权合成分（maxAmplitude LOW + meanAmplitude LOW + "
-      + `t1VolumeRatio HIGH）降序排名，取前 ${topN} 名，次日开盘买入；退出 = 候选退出 / 满 `
-      + `${THREE_FACTOR_TOPN_MAX_HOLDING_DAYS} 个交易日 / 盘中亏损达 `
-      + `${(THREE_FACTOR_TOPN_STOP_LOSS_RATIO * 100).toFixed(0)}% 止损。口径见 `
+      + `t1VolumeRatio HIGH）降序排名，取前 ${topN} 名，次日开盘买入；候选评分不触发卖出。`
+      + (requirePullback
+        ? "候选要求观察窗内出现过收盘回踩，沿用首板回踩资格门槛。"
+        : "1.13.0 变体移除「观察窗内必须出现收盘回踩」的候选资格门槛。")
+      + (unifiedExitPolicy === null
+        ? `退出 = 盘中亏损达 ${(stopLossRatio * 100).toFixed(0)}% 止损 / `
+          + (trailingPolicy === null
+            ? `盈利后从峰值回撤 ${(THREE_FACTOR_TOPN_TRAILING_TAKE_PROFIT_DRAWDOWN_RATIO * 100).toFixed(0)}% 止盈 / `
+            : `收盘移动止盈：${describeTrailingPolicy(trailingPolicy)} / `)
+          + (maxHoldingDays === null
+            ? "不设时间退出上限。"
+            : `持有满 ${maxHoldingDays} 个交易日。`)
+        : "退出 = 统一 exitPolicy 配置。")
+      + "口径见 "
       + "FROZEN-BUCKET-CONTRACT-001（研究侧唯一落地处）。"
       + `执行容量：最多同时持有 ${maxPositions} 只，单日最多新建仓 ${maxDailyBuys} 只；`
-      + `每仓固定按初始资金 ${(THREE_FACTOR_TOPN_POSITION_RATIO * 100).toFixed(0)}% 建仓。`,
+      + `每仓按决策日收盘总权益 ${(THREE_FACTOR_TOPN_POSITION_RATIO * 100).toFixed(0)}% 建仓。`
+      + (input.strongHold?.afterExtendedHold === "TREND"
+        ? `第 ${input.strongHold.atHoldingDays} 日强势续持后不再按第 ${input.strongHold.extendToHoldingDays} 日固定退出，`
+          + (
+            input.strongHold.scaleOutRatio === undefined
+            || input.strongHold.scaleOutRatio === null
+              ? "继续持有到趋势止盈或止损。"
+              : `到第 ${input.strongHold.extendToHoldingDays} 日先卖出 ${(input.strongHold.scaleOutRatio * 100).toFixed(0)}%，剩余仓位继续持有到趋势止盈或止损。`
+          )
+          + (
+            input.strongHold.runnerExitAtHoldingDays === undefined
+            || input.strongHold.runnerExitAtHoldingDays === null
+              ? ""
+              : `Runner 最迟在第 ${input.strongHold.runnerExitAtHoldingDays} 日收盘产生退出信号。`
+          )
+          + (
+            input.strongHold.maxConcurrentRunners === undefined
+            || input.strongHold.maxConcurrentRunners === null
+              ? ""
+              : ` 组合同最多保留 ${input.strongHold.maxConcurrentRunners} 个趋势 runner。`
+          )
+          + (
+            input.strongHold.replacementScoreMargin === undefined
+            || input.strongHold.replacementScoreMargin === null
+              ? ""
+              : ` 新候选评分至少高出最弱 runner ${input.strongHold.replacementScoreMargin} 时替换。`
+          )
+        : "")
+      + (input.excludeEventDayOpenAtLimit === true
+        ? "T 日一字板与 T 字板在候选事件层排除。"
+        : ""),
     universe: { universeId: `research-dataset:${datasetLabel}` },
     definition: {
       schemaVersion: "1.0",
@@ -126,6 +328,18 @@ export function buildThreeFactorTopNStrategyDocument(
         },
         observationWindow,
         conditions: [
+          ...(input.excludeEventDayOpenAtLimit === true
+            ? [{
+                id: "entry-exclude-one-word-and-t-word",
+                field: "prefix.rd0.open",
+                operator: "LESS_THAN" as const,
+                value: "prefix.rd0.high",
+                valueType: "FIELD_REFERENCE" as const,
+                enabled: true,
+                description:
+                  "排除 T 日一字板与 T 字板：两者均满足 open=high；仅保留 open<high 的普通涨停板事件。",
+              }]
+            : []),
           {
             id: "entry-sentinel-window",
             field: "bar.close",
@@ -152,33 +366,72 @@ export function buildThreeFactorTopNStrategyDocument(
         commissionModel: "BPS",
         slippageModel: "BPS",
       },
-      exit: {
-        rules: [
-          {
-            id: "exit-stop-loss",
-            type: "STOP_LOSS",
-            trigger: "INTRADAY",
-            threshold: THREE_FACTOR_TOPN_STOP_LOSS_RATIO,
-            thresholdUnit: "RATIO",
-            priority: 1,
-            enabled: true,
-            description:
-              `盘中止损：相对建仓成本亏损达 ${(THREE_FACTOR_TOPN_STOP_LOSS_RATIO * 100).toFixed(0)}% 时退出`,
+      exit: unifiedExitPolicy === null
+        ? {
+            candidateExitPolicy: "DISABLED",
+            ...(input.strongHold !== undefined && input.strongHold !== null
+              ? { strongHold: { ...input.strongHold } }
+              : {}),
+            rules: [
+              {
+                id: "exit-stop-loss",
+                type: "STOP_LOSS",
+                trigger: "INTRADAY",
+                threshold: stopLossRatio,
+                thresholdUnit: "RATIO",
+                priority: 1,
+                enabled: true,
+                description:
+                  `盘中止损：相对建仓成本亏损达 ${(stopLossRatio * 100).toFixed(0)}% 时退出`,
+              },
+              {
+                id: "exit-trailing-take-profit",
+                type: "TRAILING_TAKE_PROFIT",
+                trigger: trailingPolicy === null ? trailingTakeProfitTrigger : "ON_CLOSE",
+                ...(trailingPolicy === null
+                  ? {
+                      threshold: THREE_FACTOR_TOPN_TRAILING_TAKE_PROFIT_DRAWDOWN_RATIO,
+                      thresholdUnit: "RATIO" as const,
+                    }
+                  : { trailingPolicy }),
+                priority: 2,
+                enabled: true,
+                description:
+                  trailingPolicy === null
+                    ? `盈利回撤止盈：峰值收益转正后，从最高收盘价回撤达 ${(THREE_FACTOR_TOPN_TRAILING_TAKE_PROFIT_DRAWDOWN_RATIO * 100).toFixed(0)}% `
+                      + (trailingTakeProfitTrigger === "INTRADAY"
+                        ? "时盘中触发退出"
+                        : "时收盘触发，下一交易日开盘退出")
+                    : `高级收盘移动止盈：${describeTrailingPolicy(trailingPolicy)}`,
+              },
+              ...(maxHoldingDays === null
+                ? []
+                : [{
+                    id: "exit-time-exit",
+                    type: "TIME_EXIT" as const,
+                    trigger: "ON_CLOSE" as const,
+                    threshold: maxHoldingDays,
+                    thresholdUnit: "TRADING_DAY" as const,
+                    priority: 3,
+                    enabled: true,
+                    description: `时间出场：持有满 ${maxHoldingDays} 个交易日后退出`,
+                  }]),
+            ],
+          }
+        : {
+            candidateExitPolicy: "DISABLED",
+            rules: [{
+              id: "exit-unified-policy",
+              type: "STOP_LOSS",
+              trigger: "ON_CLOSE",
+              policy: unifiedExitPolicy,
+              priority: 0,
+              enabled: true,
+              description: "统一退出策略：止损、止盈、时间退出和资本周转由 policy 配置表达。",
+            }],
           },
-          {
-            id: "exit-time-exit",
-            type: "TIME_EXIT",
-            trigger: "ON_CLOSE",
-            threshold: THREE_FACTOR_TOPN_MAX_HOLDING_DAYS,
-            thresholdUnit: "TRADING_DAY",
-            priority: 2,
-            enabled: true,
-            description: `时间出场：持有满 ${THREE_FACTOR_TOPN_MAX_HOLDING_DAYS} 个交易日后退出`,
-          },
-        ],
-      },
       position: {
-        sizingMethod: "FIXED_RATIO",
+        sizingMethod: "EQUITY_RATIO",
         positionRatio: THREE_FACTOR_TOPN_POSITION_RATIO,
         maxPositions,
         maxSinglePosition: THREE_FACTOR_TOPN_POSITION_RATIO,

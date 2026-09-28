@@ -2,8 +2,9 @@
  * PositionSizingEditor — 仓位与资金规则（任务 §3.5）。
  *
  * 可视化仓位模式 + 初始资金 + 最大持仓数 + 每仓资金比例。
- * 模式严格映射后端 PositionSizingDeclaration 四值
- * （equal-weight / fixed-fraction / rank-weighted / fixed-amount），不引入契约外的「Custom」。
+ * 模式严格映射后端 PositionSizingDeclaration 五值
+ * （equal-weight / fixed-fraction / equity-fraction / rank-weighted / fixed-amount），
+ * 不引入契约外的「Custom」。
  * 「最大持仓数」同时同步 executionAssumptions.backtestConfig.maxPositions（§17 追溯一致）。
  */
 
@@ -41,7 +42,10 @@ export function PositionSizingEditor({
       positionSizing: {
         ...p,
         kind,
-        fraction: kind === "fixed-fraction" ? (p.fraction ?? 0.05) : p.fraction,
+        fraction:
+          kind === "fixed-fraction" || kind === "equity-fraction"
+            ? (p.fraction ?? 0.05)
+            : p.fraction,
         fixedAmount: kind === "fixed-amount" ? (p.fixedAmount ?? 10_000) : p.fixedAmount,
       },
     });
@@ -134,7 +138,7 @@ export function PositionSizingEditor({
           </div>
         )}
 
-        {p.kind === "fixed-fraction" && (
+        {(p.kind === "fixed-fraction" || p.kind === "equity-fraction") && (
           <div className="space-y-1.5">
             <Label htmlFor="ps-frac">每仓资金比例（0 ~ 1）</Label>
             <Input

@@ -65,6 +65,7 @@ import {
 export const POSITION_SIZING_METHODS = [
   "FIXED_AMOUNT",
   "FIXED_RATIO",
+  "EQUITY_RATIO",
   "EQUAL_WEIGHT",
   "RISK_BASED",
 ] as const;
@@ -111,6 +112,7 @@ export const DEFAULT_RISK_SPEC: RiskSpec = {};
 /** 出场规则类型。 */
 export const EXIT_RULE_TYPES = [
   "TAKE_PROFIT",
+  "TRAILING_TAKE_PROFIT",
   "STOP_LOSS",
   "TIME_EXIT",
   "SIGNAL_EXIT",

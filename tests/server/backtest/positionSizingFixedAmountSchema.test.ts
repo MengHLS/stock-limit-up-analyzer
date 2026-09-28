@@ -181,7 +181,7 @@ describe("R-02 — ⑥ legacy FIXED_AMOUNT 投影为 fixed-amount（不再被静
 // ---------------------------------------------------------------------------
 
 describe("R-02 — ③ 文档声明 → 执行层口径（mapDeclaredPositionSizing 是唯一实现）", () => {
-  it("四种已登记 kind 逐一机械映射", () => {
+  it("五种已登记 kind 逐一机械映射", () => {
     expect(mapDeclaredPositionSizing({ kind: "equal-weight", maxPositions: 5 })).toEqual({
       sizingMethod: "EQUAL_WEIGHT",
       fraction: null,
@@ -189,6 +189,11 @@ describe("R-02 — ③ 文档声明 → 执行层口径（mapDeclaredPositionSiz
     });
     expect(mapDeclaredPositionSizing({ kind: "fixed-fraction", fraction: 0.2, maxPositions: 5 })).toEqual({
       sizingMethod: "FIXED_FRACTION",
+      fraction: 0.2,
+      fixedAmount: null,
+    });
+    expect(mapDeclaredPositionSizing({ kind: "equity-fraction", fraction: 0.2, maxPositions: 5 })).toEqual({
+      sizingMethod: "EQUITY_FRACTION",
       fraction: 0.2,
       fixedAmount: null,
     });

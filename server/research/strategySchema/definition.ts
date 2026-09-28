@@ -42,6 +42,11 @@
  */
 
 import type { ResearchParameterValue } from "../types";
+import type {
+  ResearchTrailingPolicyDefinition,
+  StrongHoldAfterExtendedExitPolicy,
+} from "../trailingPolicy";
+import type { ExitPolicyDefinition } from "../exitPolicyCommon";
 
 // ---------------------------------------------------------------------------
 // Definition 自身结构版本（≠ strategy version，SPEC §30）
@@ -110,12 +115,20 @@ export type StrategyConditionValueType = (typeof STRATEGY_CONDITION_VALUE_TYPES)
 /** 出场规则类型（SPEC §12）。 */
 export const STRATEGY_EXIT_RULE_TYPES = [
   "TAKE_PROFIT",
+  "TRAILING_TAKE_PROFIT",
   "STOP_LOSS",
   "TIME_EXIT",
   "SIGNAL_EXIT",
   "FORCED_EXIT",
 ] as const;
 export type StrategyExitRuleType = (typeof STRATEGY_EXIT_RULE_TYPES)[number];
+
+/** 候选退出政策（退出定义优先级高于候选集合变化）。 */
+export const STRATEGY_CANDIDATE_EXIT_POLICIES = [
+  "HOLD_WHILE_SELECTED",
+  "DISABLED",
+] as const;
+export type StrategyCandidateExitPolicy = (typeof STRATEGY_CANDIDATE_EXIT_POLICIES)[number];
 
 /** 出场规则触发时点。 */
 export const STRATEGY_EXIT_TRIGGERS = ["ON_ENTRY", "ON_OPEN", "ON_CLOSE", "INTRADAY"] as const;
@@ -125,10 +138,11 @@ export type StrategyExitTrigger = (typeof STRATEGY_EXIT_TRIGGERS)[number];
 export const STRATEGY_EXIT_THRESHOLD_UNITS = ["RATIO", "PERCENT", "TRADING_DAY", "PRICE"] as const;
 export type StrategyExitThresholdUnit = (typeof STRATEGY_EXIT_THRESHOLD_UNITS)[number];
 
-/** 仓位规模方法（SPEC §13，四种全量保留）。 */
+/** 仓位规模方法（SPEC §13 + 项目扩展 EQUITY_RATIO）。 */
 export const STRATEGY_POSITION_SIZING_METHODS = [
   "FIXED_AMOUNT",
   "FIXED_RATIO",
+  "EQUITY_RATIO",
   "EQUAL_WEIGHT",
   "RISK_BASED",
 ] as const;
@@ -496,6 +510,14 @@ export interface ExitRuleDefinition {
   readonly thresholdUnit?: StrategyExitThresholdUnit;
   /** 阈值由参数表达时的参数 code（须存在于 `parameters`）。 */
   readonly parameter?: string;
+  /**
+   * Advanced research-only trailing policy. When present, threshold /
+   * parameter / thresholdUnit must be omitted and the simulator evaluates the
+   * policy at close.
+   */
+  readonly trailingPolicy?: ResearchTrailingPolicyDefinition;
+  /** 统一退出策略；与 trailingPolicy 二选一。 */
+  readonly policy?: ExitPolicyDefinition;
   /** 附加条件（可选；同样受 Look-Ahead 约束）。 */
   readonly condition?: ConditionDefinition;
   /** 优先级（数值越小越优先；同一出场定义内必须唯一）。 */
@@ -507,12 +529,43 @@ export interface ExitRuleDefinition {
 /** 出场定义。 */
 export interface ExitDefinition {
   readonly rules: readonly ExitRuleDefinition[];
+  /**
+   * 候选退出政策；缺省 = HOLD_WHILE_SELECTED（兼容既有策略）。
+   * `DISABLED` 表示候选评分只控制买入，不触发持仓卖出。
+   */
+  readonly candidateExitPolicy?: StrategyCandidateExitPolicy;
+  /**
+   * 实验性时间退出延长。到指定持有日收盘，若仍满足强势条件，则继续持有到延长日。
+   */
+  readonly strongHold?: {
+    readonly atHoldingDays: number;
+    readonly minReturnRatio: number;
+    readonly requireAboveMa5: boolean;
+    readonly requireAboveMa10: boolean;
+    readonly extendToHoldingDays: number;
+    /**
+     * 到 extendToHoldingDays 后的行为。
+     * 缺省 TIME_EXIT 保持旧语义；TREND 表示继续持有，直到趋势止盈或止损。
+     */
+    readonly afterExtendedHold?: StrongHoldAfterExtendedExitPolicy;
+    /** 到 extendToHoldingDays 时卖出的仓位比例；缺省 = 不减仓。 */
+    readonly scaleOutRatio?: number | null;
+    /** runner 最迟在该持有日收盘产生退出信号；下一交易日开盘成交。 */
+    readonly runnerExitAtHoldingDays?: number | null;
+    /** 组合中允许同时存在的趋势 runner 数量上限。 */
+    readonly maxConcurrentRunners?: number | null;
+    /** 新候选评分超过最弱 runner 入仓评分的最小差值，才允许替换。 */
+    readonly replacementScoreMargin?: number | null;
+  };
 }
 
 /** 仓位定义（SPEC §13）。 */
 export interface PositionDefinition {
   readonly sizingMethod: StrategyPositionSizingMethod;
-  /** 每仓占初始资金比例 (0, 1]，`FIXED_RATIO` 必填或由 `parameter` 表达。 */
+  /**
+   * 每仓比例 (0, 1]。
+   * `FIXED_RATIO` = 初始资金基数；`EQUITY_RATIO` = 每次决策时现有总权益基数。
+   */
   readonly positionRatio?: number;
   /** `FIXED_AMOUNT` 的固定金额（> 0）。 */
   readonly fixedAmount?: number;

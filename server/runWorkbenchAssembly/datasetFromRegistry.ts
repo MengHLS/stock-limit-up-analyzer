@@ -36,11 +36,13 @@
  *     ＋ **rd ∈ [1, end+1]（观察日 + 次日执行日）** 投影为逐日面板：
  *       · **决策日资格 = rd ∈ [start, end]**（候选只在这些日产生；rd=0 不进决策日，
  *         否则首板日当天 bars 只有一根、特征必然退化）；
- *       · **面板最多到 rd=end+1** —— 那是撮合的最小充分条件（订单在决策日下一交易日执行）。
+ *       · **面板最多到 rd=end+1** —— 覆盖正常 NEXT_OPEN 路径（订单在决策日下一交易日执行）；
+ *         它不保证停牌/跌停后的多日顺延一定遇到真实行情。
  *     `prefix` 的 rd<0（特征窗口）**仍不进 rows**：它们既不构成决策日、也不是执行日，
  *     并入只会让同一证券/日期出现 rd=-20..-1 的重复候选（违反 `(tradeDate, securityId)` 唯一键）。
- *   - 🔴 **窗口末持仓**：观察窗口末决策建仓的持仓，在数据集内没有「下一决策日」⇒ 以
- *     `openAtEnd` 收尾（期末按最后可得收盘价估值）。这是「数据集只覆盖事件窗口」的固有边界。
+ *   - 🔴 **窗口末/执行日无行**：面板内始终等不到该证券真实可执行行情时，以 `openAtEnd`
+ *     收尾（期末按最后可得收盘价估值），不得用前一日收盘价伪造成交。这是「数据集只覆盖
+ *     事件窗口 + 真实可成交性」的固有边界。
  *   - 🔴 **观察日的换手/市值为 null**：`ds_*_post` 的 DDL 只承载原始日线
  *     （结构性 PIT 防线，`plugins.ts#rawBarCreateSql`），event 级富集列不可外推到观察日
  *     （外推 = 编数据）。本桥据此如实记 `knowledge.liquidity = UNKNOWN`。
@@ -162,12 +164,13 @@ function resolvePoolSizeForBridge(): number {
  *
  * 新容量依据（实测，`docs/evidence/_probe_registry_row_budget.mts`）：
  *   - v5 全区间 + `end = 15`（17 行/事件）⇒ 1,241,051 行；
+ *   - v5 全区间 + `end = 19`（21 行/事件，覆盖 post rd 上限 20）⇒ 约 1,533,063 行；
  *   - 吞吐实测：152,442 行取数 55s（`_probe_3f_topn_combo_top5.out.txt`）⇒ 124 万行约 8~15 分钟；
- *   - 1,400,000 覆盖 v5 在 `end ≤ 17` 的全部合法窗口，并留 ~13% 余量。
+ *   - 1,600,000 覆盖 v5 在数据可用上限 `end = 19` 的窗口，并留少量余量。
  *
  * ⚠️ 内存：本量级需配合 `--max-old-space-size` 使用（默认堆可能不足）。
  */
-export const REGISTRY_BRIDGE_MAX_ROWS = 1_400_000;
+export const REGISTRY_BRIDGE_MAX_ROWS = 1_600_000;
 
 /**
  * `ds_*_post.relativeDay` 的结构上限（== 表内可用的最远观察日）。
@@ -538,8 +541,9 @@ function keyOf(tradeDate: string, securityId: string): string {
  * 口径（🔴 改这里前必读）：
  *   1. **哪些行进面板**：rd = 0（首板日，来自 `prefix`，充当「特征基准 bars[0]」）
  *      ＋ rd ∈ [1, `window.end + 1`]（来自 `post`，观察日 + **次日执行日**）。
- *      `window.end + 1` 是撮合的最小充分条件：交易模拟在**决策日的下一交易日**执行订单
- *      （`simulator/engine.ts` 第 9(c) 步），决策日最大为 `window.end`。
+ *      `window.end + 1` 覆盖正常 NEXT_OPEN 路径：交易模拟在**决策日的下一交易日**执行订单
+ *      （`simulator/engine.ts` 第 9(c) 步），决策日最大为 `window.end`。它不保证停牌/跌停后的
+ *      多日顺延一定遇到真实行情；没有真实行时按 openAtEnd 如实收尾。
  *   2. **哪些日具备决策日资格**：rd ∈ [window.start, window.end]（= 策略声明的
  *      `definition.entry.observationWindow`，实库为 `{start:1, end:3}`）。
  *      🔴 **rd=0 不进决策日**：首板日当天只有 bars=[rd0]，特征必然退化为
@@ -1159,9 +1163,9 @@ export async function buildResearchDatasetFromRegistry(
     `OBSERVATION_DAY_LIQUIDITY_UNKNOWN：post（rd≥1）行的 turnover / marketCap / floatMarketCap 为 NULL —— ` +
       `ds_*_post 的 DDL 只承载原始日线（结构性 PIT 防线，见 plugins.ts#rawBarCreateSql），` +
       `把首板日数值盖到观察日上就是编数据。本投影如实记 knowledge.liquidity = UNKNOWN。`,
-    `WINDOW_TAIL_OPEN_POSITION：观察窗口末（rd=${window.end}）决策建仓的持仓在数据集内没有` +
-      `「下一决策日」，会以 openAtEnd 收尾（期末按最后可得收盘价估值）—— 这是「数据集只覆盖事件窗口」` +
-      `的固有边界，不是撮合失败。`,
+    `WINDOW_TAIL_OPEN_POSITION：若持仓在面板内始终等不到该证券的真实可执行行情（窗口末端退出、` +
+      `停牌或缺行），会以 openAtEnd 收尾（期末按最后可得收盘价估值）—— 这是「数据集只覆盖事件窗口 +` +
+      `真实可成交性」的固有边界，不得用前一日收盘价伪造清算。`,
   ];
   if (projection.mergedKeys > 0) {
     gateNotes.push(
