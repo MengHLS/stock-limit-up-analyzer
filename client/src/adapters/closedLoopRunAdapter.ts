@@ -143,6 +143,8 @@ export interface ClosedLoopRunAssemblyViewModel {
   recipeSource: string;
   recipeFeatureIds: string[];
   selectionSummary: string | null;
+  /** 本次运行真实生效的 runtimeConfig 覆写字段（后端如实回显）。 */
+  runtimeOverrides: string[];
   simulation: {
     initialCapital: number | null;
     maxPositions: number | null;
@@ -220,6 +222,8 @@ export interface ClosedLoopRunViewModel {
     persisted: boolean;
     errorCode: string | null;
     errorMessage: string | null;
+    /** 写入成功的「回测历史」行 id；失败或旧结果未知时为 null。 */
+    archiveId: number | null;
   } | null;
 }
 
@@ -456,14 +460,17 @@ function extractAssembly(
     datasetSource: asStr(raw.datasetSource) ?? "UNKNOWN",
     datasetSourceNote: asStr(raw.datasetSourceNote),
     datasetVersionId: asNum(raw.datasetVersionId),
-    startDate: asStr(raw.startDate) ?? "",
-    endDate: asStr(raw.endDate) ?? "",
+    startDate: isRecord(raw.dateRange)
+      ? asStr(raw.dateRange.startDate) ?? ""
+      : "",
+    endDate: isRecord(raw.dateRange) ? asStr(raw.dateRange.endDate) ?? "" : "",
     strategyId: asStr(raw.strategyId) ?? "",
     strategyVersion: asStr(raw.strategyVersion) ?? "",
     recipeId: asStr(raw.recipeId) ?? "",
     recipeSource: asStr(raw.recipeSource) ?? "UNKNOWN",
     recipeFeatureIds: asStrArray(raw.recipeFeatureIds),
     selectionSummary: asStr(raw.selectionSummary),
+    runtimeOverrides: asStrArray(raw.runtimeOverrides),
     simulation: {
       initialCapital: sim ? asNum(sim.initialCapital) : null,
       maxPositions: sim ? asNum(sim.maxPositions) : null,
@@ -519,6 +526,7 @@ export function buildClosedLoopRunViewModel(
         persisted: raw.persistence.persisted === true,
         errorCode: asStr(raw.persistence.errorCode),
         errorMessage: asStr(raw.persistence.errorMessage),
+        archiveId: asNum(raw.persistence.archiveId),
       }
     : null;
 

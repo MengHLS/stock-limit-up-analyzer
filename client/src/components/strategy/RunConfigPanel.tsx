@@ -2,7 +2,8 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { SectionCard, StatusBadge } from "@/components/common";import {
+import { SectionCard, StatusBadge } from "@/components/common";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -14,9 +15,19 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Database, Loader2, Play, ShieldCheck, TriangleAlert } from "lucide-react";
-import { useState } from "react";
-import type { StrategyViewModel } from "@/adapters/strategyAdapter";
+import {
+  Database,
+  Loader2,
+  Play,
+  RotateCcw,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
+import { useRef, useState } from "react";
+import type {
+  ParameterViewModel,
+  StrategyViewModel,
+} from "@/adapters/strategyAdapter";
 import { EXECUTION_MODEL_LABELS } from "@/adapters/strategyAdapter";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
@@ -35,12 +46,231 @@ export interface RunConfigViewModel {
   startDate: string;
   endDate: string;
   initialCapital: number;
+  /** 覆盖策略文档的费率；null = 沿用策略文档。 */
   commissionRate: number;
+  stampDutyRate: number;
+  transferFeeRate: number;
   slippageBps: number;
   maxPositions: number;
+  /** 单日最多新建仓数量；null = 沿用策略文档。 */
+  maxDailyBuys: number | null;
   executionModel: string;
+  /** 仅包含用户显式修改过的参数名 → 覆盖值。 */
+  parameterOverrides: Record<string, unknown>;
   /** 显式执行配方 id（策略文档无 recipe 时生效；空串 = 用服务端默认常量）。 */
   recipeId: string;
+}
+
+export function createRunConfig(vm: StrategyViewModel): RunConfigViewModel {
+  return initRunConfig(vm);
+}
+
+/**
+ * 运行配置 → `runtimeConfig` 覆写（**只包含真正改动过的字段**）。
+ *
+ * 用途：单策略运行与多版本对比必须共用同一套「什么算覆写」的判断，否则同一份
+ * 界面配置在两条入口会产出不同口径。策略文档本身永不被本函数修改。
+ */
+export function toRuntimeConfig(
+  config: RunConfigViewModel,
+  vm: StrategyViewModel
+): Record<string, unknown> {
+  return {
+    ...(config.initialCapital !== vm.initialCapital
+      ? { initialCapital: config.initialCapital }
+      : {}),
+    ...(config.maxPositions !== vm.positionSizing.maxPositions
+      ? { maxPositions: config.maxPositions }
+      : {}),
+    ...(config.maxDailyBuys !== vm.maxDailyBuys
+      ? { maxDailyBuys: config.maxDailyBuys }
+      : {}),
+    ...(config.commissionRate !== vm.costModel.commissionRate
+      ? { commissionRate: config.commissionRate }
+      : {}),
+    ...(config.stampDutyRate !== vm.costModel.stampDutyRate
+      ? { stampDutyRate: config.stampDutyRate }
+      : {}),
+    ...(config.transferFeeRate !== vm.costModel.transferFeeRate
+      ? { transferFeeRate: config.transferFeeRate }
+      : {}),
+    ...(config.slippageBps !== vm.costModel.slippageBps
+      ? { slippageBps: config.slippageBps }
+      : {}),
+    ...(config.executionModel !== vm.executionModel
+      ? { executionModel: config.executionModel }
+      : {}),
+    ...(Object.keys(config.parameterOverrides).length > 0
+      ? { parameterOverrides: config.parameterOverrides }
+      : {}),
+  };
+}
+
+/** 预先算好的可复用输入块（单策略 / 版本对比共用）。 */
+export function RunConfigFields({
+  vm,
+  config,
+  set,
+}: {
+  vm: StrategyViewModel;
+  config: RunConfigViewModel;
+  set: (patch: Partial<RunConfigViewModel>) => void;
+}) {
+  return (
+    <>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="run-start">时间范围（起始）</Label>
+          <Input
+            id="run-start"
+            type="date"
+            value={config.startDate}
+            onChange={e => set({ startDate: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-end">时间范围（结束）</Label>
+          <Input
+            id="run-end"
+            type="date"
+            value={config.endDate}
+            onChange={e => set({ endDate: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2 lg:col-span-1 flex flex-col justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              set({
+                startDate: DEFAULT_RUN_WINDOW.startDate,
+                endDate: DEFAULT_RUN_WINDOW.endDate,
+              })
+            }
+          >
+            重置为默认窗口
+          </Button>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            两格必填，且须落在 <code className="font-mono">2024-09-01 ~ 2026-09-01</code> 内。
+          </p>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-capital">初始资金</Label>
+          <Input
+            id="run-capital"
+            type="number"
+            min={0}
+            value={config.initialCapital}
+            onChange={e =>
+              set({ initialCapital: Number(e.target.value) || 0 })
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-comm">手续费（费率）</Label>
+          <Input
+            id="run-comm"
+            type="number"
+            step={0.0001}
+            min={0}
+            value={config.commissionRate}
+            onChange={e =>
+              set({ commissionRate: Number(e.target.value) || 0 })
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-stamp">印花税（费率）</Label>
+          <Input
+            id="run-stamp"
+            type="number"
+            step={0.0001}
+            min={0}
+            value={config.stampDutyRate}
+            onChange={e =>
+              set({ stampDutyRate: Number(e.target.value) || 0 })
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-transfer">过户费（费率）</Label>
+          <Input
+            id="run-transfer"
+            type="number"
+            step={0.00001}
+            min={0}
+            value={config.transferFeeRate}
+            onChange={e =>
+              set({ transferFeeRate: Number(e.target.value) || 0 })
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-slip">滑点（bps）</Label>
+          <Input
+            id="run-slip"
+            type="number"
+            min={0}
+            value={config.slippageBps}
+            onChange={e => set({ slippageBps: Number(e.target.value) || 0 })}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-maxpos">最大持仓</Label>
+          <Input
+            id="run-maxpos"
+            type="number"
+            min={1}
+            value={config.maxPositions}
+            onChange={e =>
+              set({ maxPositions: Math.max(1, Number(e.target.value) || 1) })
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="run-maxdaily">单日最多建仓</Label>
+          <Input
+            id="run-maxdaily"
+            type="number"
+            min={1}
+            placeholder="留空 = 沿用策略文档"
+            value={config.maxDailyBuys ?? ""}
+            onChange={e =>
+              set({
+                maxDailyBuys:
+                  e.target.value === ""
+                    ? null
+                    : Math.max(1, Number(e.target.value) || 1),
+              })
+            }
+          />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
+          <Label>运行模式</Label>
+          <Select
+            value={config.executionModel}
+            onValueChange={v => set({ executionModel: v })}
+          >
+            <SelectTrigger className="text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {EXECUTION_MODELS.map(m => (
+                <SelectItem key={m} value={m}>
+                  {EXECUTION_MODEL_LABELS[m] ?? m}（{m}）
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <RealDataBlock vm={vm} config={config} set={set} />
+
+      <ParameterOverrideBlock vm={vm} config={config} set={set} />
+    </>
+  );
 }
 
 const DEFAULT_RUN_WINDOW = {
@@ -54,9 +284,13 @@ function initRunConfig(vm: StrategyViewModel): RunConfigViewModel {
     endDate: DEFAULT_RUN_WINDOW.endDate,
     initialCapital: vm.initialCapital,
     commissionRate: vm.costModel.commissionRate,
+    stampDutyRate: vm.costModel.stampDutyRate,
+    transferFeeRate: vm.costModel.transferFeeRate,
     slippageBps: vm.costModel.slippageBps,
     maxPositions: vm.positionSizing.maxPositions,
+    maxDailyBuys: vm.maxDailyBuys,
     executionModel: vm.executionModel,
+    parameterOverrides: {},
     recipeId: "",
   };
 }
@@ -164,6 +398,14 @@ export function RunConfigPanel({
   const [config, setConfig] = useState<RunConfigViewModel>(() =>
     initRunConfig(vm)
   );
+  const configKey = `${vm.strategyId}@${vm.version}`;
+  const previousKeyRef = useRef(configKey);
+  if (previousKeyRef.current !== configKey) {
+    previousKeyRef.current = configKey;
+    // 切策略 / 切版本时必须重挂配置，避免上一版的覆盖值串台。
+    // 这里用同步重置而不是 effect：下次渲染前 `config` 已与 `vm` 对齐。
+    setConfig(initRunConfig(vm));
+  }
   const set = (patch: Partial<RunConfigViewModel>) =>
     setConfig(c => ({ ...c, ...patch }));
 
@@ -239,113 +481,175 @@ export function RunConfigPanel({
           </p>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="run-start">时间范围（起始）</Label>
-            <Input
-              id="run-start"
-              type="date"
-              value={config.startDate}
-              onChange={e => set({ startDate: e.target.value })}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="run-end">时间范围（结束）</Label>
-            <Input
-              id="run-end"
-              type="date"
-              value={config.endDate}
-              onChange={e => set({ endDate: e.target.value })}
-            />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2 lg:col-span-1 flex flex-col justify-end">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                set({
-                  startDate: DEFAULT_RUN_WINDOW.startDate,
-                  endDate: DEFAULT_RUN_WINDOW.endDate,
-                })
-              }
-            >
-              重置为默认窗口
-            </Button>
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
-              两格必填，且须落在 <code className="font-mono">2024-09-01 ~ 2026-09-01</code> 内。
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="run-capital">初始资金</Label>
-            <Input
-              id="run-capital"
-              type="number"
-              min={0}
-              value={config.initialCapital}
-              onChange={e =>
-                set({ initialCapital: Number(e.target.value) || 0 })
-              }
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="run-comm">手续费（费率）</Label>
-            <Input
-              id="run-comm"
-              type="number"
-              step={0.0001}
-              min={0}
-              value={config.commissionRate}
-              onChange={e =>
-                set({ commissionRate: Number(e.target.value) || 0 })
-              }
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="run-slip">滑点（bps）</Label>
-            <Input
-              id="run-slip"
-              type="number"
-              min={0}
-              value={config.slippageBps}
-              onChange={e => set({ slippageBps: Number(e.target.value) || 0 })}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="run-maxpos">最大持仓</Label>
-            <Input
-              id="run-maxpos"
-              type="number"
-              min={1}
-              value={config.maxPositions}
-              onChange={e =>
-                set({ maxPositions: Math.max(1, Number(e.target.value) || 1) })
-              }
-            />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
-            <Label>运行模式</Label>
-            <Select
-              value={config.executionModel}
-              onValueChange={v => set({ executionModel: v })}
-            >
-              <SelectTrigger className="text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {EXECUTION_MODELS.map(m => (
-                  <SelectItem key={m} value={m}>
-                    {EXECUTION_MODEL_LABELS[m] ?? m}（{m}）
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        <RealDataBlock vm={vm} config={config} set={set} />
+        <RunConfigFields vm={vm} config={config} set={set} />
       </div>
     </SectionCard>
+  );
+}
+
+/**
+ * 参数覆盖编辑器。
+ *
+ * 交互纪律：
+ *   - 初始值 = 策略文档参数 `defaultValue`（无默认值 → 空）；
+ *   - 「已覆盖」由**当前值与文档默认值是否不同**唯一决定，不额外维护一份易失真的勾选状态；
+ *   - 清空输入 = 还原为文档默认值（即取消覆盖），不是提交空串；
+ *   - `defaultValue: null` 与「没有 defaultValue」在展示上可区分，但两者都视为「未覆盖」起点。
+ */
+function ParameterOverrideBlock({
+  vm,
+  config,
+  set,
+}: {
+  vm: StrategyViewModel;
+  config: RunConfigViewModel;
+  set: (patch: Partial<RunConfigViewModel>) => void;
+}) {
+  if (vm.parameters.length === 0) return null;
+
+  const effectiveValue = (param: ParameterViewModel): unknown =>
+    Object.prototype.hasOwnProperty.call(config.parameterOverrides, param.name)
+      ? config.parameterOverrides[param.name]
+      : param.defaultValue;
+
+  const isOverridden = (param: ParameterViewModel): boolean =>
+    Object.prototype.hasOwnProperty.call(config.parameterOverrides, param.name);
+
+  const setOverride = (param: ParameterViewModel, raw: string) => {
+    const next = { ...config.parameterOverrides };
+    const docDefault = param.defaultValue;
+    const isDocDefault = (candidate: unknown): boolean => {
+      if (!param.hasDefaultValue && docDefault === null) {
+        return candidate === null;
+      }
+      return candidate === docDefault;
+    };
+
+    let nextValue: unknown;
+    if (raw === "") {
+      nextValue = null;
+    } else if (param.type === "number") {
+      const n = Number(raw);
+      nextValue = Number.isFinite(n) ? n : raw;
+    } else if (param.type === "boolean") {
+      nextValue = raw === "true";
+    } else {
+      nextValue = raw;
+    }
+
+    if (raw === "" || isDocDefault(nextValue)) {
+      delete next[param.name];
+    } else {
+      next[param.name] = nextValue;
+    }
+    set({ parameterOverrides: next });
+  };
+
+  const resetAll = () => set({ parameterOverrides: {} });
+  const overriddenCount = Object.keys(config.parameterOverrides).length;
+
+  return (
+    <details className="rounded-md border bg-muted/20 px-3 py-3">
+      <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-xs font-medium">
+        <span>参数覆盖</span>
+        <span className="text-[11px] font-normal text-muted-foreground">
+          策略文档参数 {vm.parameters.length} 项
+          {overriddenCount > 0
+            ? ` · 已覆盖 ${overriddenCount} 项`
+            : " · 全部沿用文档默认值"}
+        </span>
+        {overriddenCount > 0 && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-6 px-2 text-[11px]"
+            onClick={e => {
+              e.preventDefault();
+              resetAll();
+            }}
+          >
+            <RotateCcw className="mr-1 h-3 w-3" />
+            全部还原
+          </Button>
+        )}
+      </summary>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {vm.parameters.map(param => {
+          const value = effectiveValue(param);
+          const shown =
+            value === null || value === undefined ? "" : String(value);
+          const overridden = isOverridden(param);
+          return (
+            <div key={param.name} className="space-y-1.5">
+              <Label
+                htmlFor={`run-param-${param.name}`}
+                className="flex items-center gap-1.5"
+              >
+                <span className="font-mono">{param.name}</span>
+                <span className="text-[10px] font-normal text-muted-foreground">
+                  {param.type}
+                </span>
+                {overridden && (
+                  <span className="rounded bg-orange-100 px-1 py-0.5 text-[10px] text-orange-700">
+                    已覆盖
+                  </span>
+                )}
+              </Label>
+              {param.type === "boolean" ? (
+                <Select
+                  value={shown === "" ? "__none__" : shown}
+                  onValueChange={v =>
+                    setOverride(param, v === "__none__" ? "" : v)
+                  }
+                >
+                  <SelectTrigger
+                    id={`run-param-${param.name}`}
+                    className="text-sm"
+                  >
+                    <SelectValue placeholder="沿用文档默认" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">
+                      沿用文档默认
+                      {param.hasDefaultValue
+                        ? `（${String(param.defaultValue ?? "null")}）`
+                        : ""}
+                    </SelectItem>
+                    <SelectItem value="true">true</SelectItem>
+                    <SelectItem value="false">false</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id={`run-param-${param.name}`}
+                  type={param.type === "number" ? "number" : "text"}
+                  step={param.step ?? "any"}
+                  min={param.min ?? undefined}
+                  max={param.max ?? undefined}
+                  placeholder={
+                    param.hasDefaultValue
+                      ? `文档默认：${String(param.defaultValue ?? "null")}`
+                      : "留空 = 沿用文档默认"
+                  }
+                  value={shown}
+                  onChange={e => setOverride(param, e.target.value)}
+                />
+              )}
+              {param.description !== "" && (
+                <p className="text-[10px] leading-snug text-muted-foreground">
+                  {param.description}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+        只提交你改过的参数；未改动的参数由后端按策略文档默认值解析。
+      </p>
+    </details>
   );
 }
 

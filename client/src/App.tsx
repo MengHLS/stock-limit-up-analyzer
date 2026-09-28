@@ -33,6 +33,7 @@ import {
 } from "./pages/datasets";
 import StrategyList from "./pages/StrategyList";
 import StrategyDetail from "./pages/StrategyDetail";
+import StrategyVersionCompare from "./pages/StrategyVersionCompare";
 // FE-5 — 研究链路：绩效仪表盘（骨架线）
 import PerformanceDashboard from "./pages/PerformanceDashboard";
 // FE-6 — 研究链路：参数搜索 + 鲁棒性（骨架线）
@@ -119,6 +120,11 @@ function Router() {
       <Route path="/datasets/:datasetId/versions/:versionId" component={VersionDetail} />
       {/* 策略：列表 / 详情分家；旧 /strategy-editor 仅做兼容改写 */}
       <Route path="/strategies" component={StrategyList} />
+      {/* 更具体的对比路由必须放在 `/strategies/:strategyId` 之前 */}
+      <Route
+        path="/strategies/:strategyId/compare"
+        component={StrategyVersionCompare}
+      />
       <Route path="/strategies/:strategyId" component={StrategyDetail} />
       <Route path="/strategy-editor" component={LegacyStrategyRedirect} />
       <Route path="/performance" component={PerformanceDashboard} />

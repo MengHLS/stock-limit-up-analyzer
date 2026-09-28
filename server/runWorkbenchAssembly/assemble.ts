@@ -78,6 +78,7 @@ import { buildLifecycleConfig } from "./lifecycleConfig";
 import { perfCount, perfRun, perfRunAsync } from "../observability";
 import { LoopRunAssemblyError } from "./errors";
 import { mapDeclaredExitPolicy } from "./exitPolicy";
+import type { ClosedLoopRuntimeConfig } from "../../shared/researchContracts";
 
 export { LoopRunAssemblyError } from "./errors";
 
@@ -97,32 +98,40 @@ export { LoopRunAssemblyError } from "./errors";
  *   其它            → 响亮抛错（拒绝猜）
  */
 export function mapDeclaredPositionSizing(declared: unknown): {
-  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
+  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED" | "SCORE_TIERED_EQUITY_FRACTION";
   readonly fraction: number | null;
   readonly fixedAmount: number | null;
+  readonly tiers: readonly { readonly minScore: number; readonly fraction: number }[] | null;
+  readonly rankTiers: readonly { readonly maxRank: number; readonly fraction: number }[] | null;
 } {
   const sizing = (declared ?? {}) as {
     readonly kind?: string;
     readonly fraction?: number;
     readonly fixedAmount?: number;
+    readonly tiers?: readonly { readonly minScore?: unknown; readonly fraction?: unknown }[];
+    readonly rankTiers?: readonly { readonly maxRank?: unknown; readonly fraction?: unknown }[];
   };
   switch (sizing.kind) {
     case "equal-weight":
-      return { sizingMethod: "EQUAL_WEIGHT", fraction: null, fixedAmount: null };
+      return { sizingMethod: "EQUAL_WEIGHT", fraction: null, fixedAmount: null, tiers: null, rankTiers: null };
     case "fixed-fraction":
       return {
         sizingMethod: "FIXED_FRACTION",
         fraction: typeof sizing.fraction === "number" ? sizing.fraction : null,
         fixedAmount: null,
+        tiers: null,
+        rankTiers: null,
       };
     case "equity-fraction":
       return {
         sizingMethod: "EQUITY_FRACTION",
         fraction: typeof sizing.fraction === "number" ? sizing.fraction : null,
         fixedAmount: null,
+        tiers: null,
+        rankTiers: null,
       };
     case "rank-weighted":
-      return { sizingMethod: "RANK_WEIGHTED", fraction: null, fixedAmount: null };
+      return { sizingMethod: "RANK_WEIGHTED", fraction: null, fixedAmount: null, tiers: null, rankTiers: null };
     case "fixed-amount": {
       // 金额必须为正数（文档校验也会拒，这里再兜一层：避免绕过校验的文档把
       // 「无金额的固定金额」带进执行层 ⇒ 静默退化成等权预算）。
@@ -135,7 +144,37 @@ export function mapDeclaredPositionSizing(declared: unknown): {
             " —— 拒绝静默退化为等权预算。",
         );
       }
-      return { sizingMethod: "FIXED_AMOUNT", fraction: null, fixedAmount: amount };
+      return { sizingMethod: "FIXED_AMOUNT", fraction: null, fixedAmount: amount, tiers: null, rankTiers: null };
+    }
+    case "score-tiered-equity-fraction": {
+      const tiers = sizing.tiers;
+      const rankTiers = sizing.rankTiers;
+      if (
+        !(Array.isArray(tiers) && tiers.length > 0)
+        && !(Array.isArray(rankTiers) && rankTiers.length > 0)
+      ) {
+        throw new LoopRunAssemblyError(
+          "LOOP_RUN_ASSEMBLY_POSITION_SIZING_TIERS_INVALID",
+          "score-tiered-equity-fraction 需要非空 tiers 或 rankTiers 数组。",
+        );
+      }
+      return {
+        sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+        fraction: null,
+        fixedAmount: null,
+        tiers: Array.isArray(tiers)
+          ? tiers.map(tier => ({
+          minScore: Number(tier.minScore),
+          fraction: Number(tier.fraction),
+        }))
+          : null,
+        rankTiers: Array.isArray(rankTiers)
+          ? rankTiers.map(tier => ({
+              maxRank: Number(tier.maxRank),
+              fraction: Number(tier.fraction),
+            }))
+          : null,
+      };
     }
     default:
       throw new LoopRunAssemblyError(
@@ -220,6 +259,13 @@ export interface AssembleRunWorkbenchInputsRequest {
    * `RECIPE_PARAMETER_UNKNOWN` —— 拒绝「以为某维度参与了寻优、实际被丢掉」。
    */
   readonly parameterOverrides?: ResearchParameterSet;
+  /**
+   * 运行期覆写（初始资金 / 成本 / 持仓上限 / 执行模型 / 参数）。
+   *
+   * 与兼容字段 `parameterOverrides` 同时存在时，本对象内的
+   * `parameterOverrides` 优先；其余字段均只在本对象显式提供时生效。
+   */
+  readonly runtimeConfig?: ClosedLoopRuntimeConfig;
   /** 生命周期推进配置（finalize 阶段；缺省不注入 ⇒ 编排器以 CL_LIFECYCLE_CONFIG_MISSING 阻塞）。 */
   readonly lifecycle?: AssembleLifecycleRequest | null;
   /**
@@ -289,6 +335,8 @@ export interface LoopRunAssemblySummary {
    */
   readonly strategyDecisionEngine: "strategy-core" | "legacy-recipe";
   readonly strategyDecisionEngineNote: string;
+  /** 本次真实生效的显式覆写字段（空数组 = 全部取策略文档声明）。 */
+  readonly runtimeOverrides: readonly string[];
   readonly simulation: {
     readonly initialCapital: number;
     readonly maxPositions: number | null;
@@ -669,6 +717,8 @@ export interface AssembledStrategySide {
   readonly lifecycle: ClosedLoopWiringInputs["lifecycle"] | undefined;
   /** STRATEGY-ARCH-002 — 判定引擎与运行留档所需的非序列化上下文。 */
   readonly strategyRunContext: StrategyRunContext;
+  /** 本次真实生效的显式覆写字段。 */
+  readonly runtimeOverrides: readonly string[];
 }
 
 /**
@@ -706,15 +756,42 @@ export function assembleStrategySide(
     );
   }
 
-  const costModel = requireCostModel(document);
-  const executionModel = requireExecutionModel(document);
+  const runtimeConfig = request.runtimeConfig ?? {};
+  const documentCostModel = requireCostModel(document);
+  const providedCostFields: Partial<CostModel> = {
+    ...(runtimeConfig.commissionRate !== undefined
+      ? { commissionRate: runtimeConfig.commissionRate }
+      : {}),
+    ...(runtimeConfig.stampDutyRate !== undefined
+      ? { stampDutyRate: runtimeConfig.stampDutyRate }
+      : {}),
+    ...(runtimeConfig.transferFeeRate !== undefined
+      ? { transferFeeRate: runtimeConfig.transferFeeRate }
+      : {}),
+    ...(runtimeConfig.slippageBps !== undefined
+      ? { slippageBps: runtimeConfig.slippageBps }
+      : {}),
+  };
+  const costModel: CostModel = { ...documentCostModel, ...providedCostFields };
+  const documentExecutionModel = requireExecutionModel(document);
+  const executionModel =
+    runtimeConfig.executionModel === undefined
+      ? documentExecutionModel
+      : normalizeStrategyExecutionModel(runtimeConfig.executionModel);
   const { runtime: recipeRuntime, source: recipeSource } = requireRecipe(document, request.recipeId);
 
   // 🔴 参数集必须**先**解析，再据此构造信号构造器。
   // 顺序理由（2026-09-13）：门槛型配方（「守线 + 缩量 ≤ X%」）的门槛值来自策略文档参数，
   // 若先建构造器再解析参数，就会「文档声明 0.3、实际按登记时常量跑」= 口径漂移。
   // 参数集同时喂 experimentConfig 与 §17 版本记录 —— 两处必须是同一份，只解析一次。
-  const parameterSet = recipeRuntime.resolveParameters(document.parameters, request.parameterOverrides);
+  // 覆写键仍是 `unknown`（传输契约如此），但这里收敛成 `ResearchParameterSet` 的值域；
+  // 非法类型由 `resolveParameters` 的类型约束 + 值的可序列化面共同兜底，
+  // 键不存在则由 `resolveParameters` 响亮抛 `RECIPE_PARAMETER_UNKNOWN`。
+  const parameterOverrides: ResearchParameterSet = {
+    ...(request.parameterOverrides ?? {}),
+    ...(runtimeConfig.parameterOverrides ?? {}),
+  } as ResearchParameterSet;
+  const parameterSet = recipeRuntime.resolveParameters(document.parameters, parameterOverrides);
 
   // -- 3. 装配四入参 --
   const strategyContract: StrategyContract = {
@@ -869,6 +946,32 @@ export function assembleStrategySide(
       `装配层：策略文档缺少 executionAssumptions.backtestConfig（初始资金 / 持仓上限），无法装配 backtest 阶段。`,
     );
   }
+  const initialCapital =
+    runtimeConfig.initialCapital !== undefined
+      ? runtimeConfig.initialCapital
+      : backtestConfig.initialCapital;
+  const maxPositions =
+    runtimeConfig.maxPositions !== undefined
+      ? runtimeConfig.maxPositions
+      : backtestConfig.maxPositions ?? null;
+  const maxDailyBuys =
+    runtimeConfig.maxDailyBuys !== undefined
+      ? runtimeConfig.maxDailyBuys
+      : backtestConfig.maxDailyBuys ?? null;
+  const runtimeOverrides: string[] = [
+    ...(runtimeConfig.initialCapital !== undefined ? ["initialCapital"] : []),
+    ...(runtimeConfig.maxPositions !== undefined ? ["maxPositions"] : []),
+    ...(runtimeConfig.maxDailyBuys !== undefined ? ["maxDailyBuys"] : []),
+    ...(runtimeConfig.commissionRate !== undefined ? ["costModel.commissionRate"] : []),
+    ...(runtimeConfig.stampDutyRate !== undefined ? ["costModel.stampDutyRate"] : []),
+    ...(runtimeConfig.transferFeeRate !== undefined ? ["costModel.transferFeeRate"] : []),
+    ...(runtimeConfig.slippageBps !== undefined ? ["costModel.slippageBps"] : []),
+    ...(runtimeConfig.executionModel !== undefined ? ["executionModel"] : []),
+    ...(runtimeConfig.parameterOverrides !== undefined &&
+    Object.keys(runtimeConfig.parameterOverrides).length > 0
+      ? ["parameterOverrides"]
+      : []),
+  ];
 
   // ------------------------------------------------------------------
   // BACKTEST-001 — 执行政策 / 执行语义校验 / 仓位口径如实登记
@@ -900,7 +1003,7 @@ export function assembleStrategySide(
   );
   const positionSizingMapping = mapPositionSizing({
     sizingMethod: declaredPositionSizing.sizingMethod,
-    maxPositions: backtestConfig.maxPositions ?? null,
+    maxPositions,
     positionRatio: declaredPositionSizing.fraction,
     fixedAmount: declaredPositionSizing.fixedAmount,
   });
@@ -908,11 +1011,11 @@ export function assembleStrategySide(
   const simulationConfig: SimulationConfig = {
     name: `run-workbench-${document.strategyId}@${document.version}`,
     dateRange: { startDate: request.startDate, endDate: request.endDate },
-    initialCapital: backtestConfig.initialCapital,
+    initialCapital,
     cost: costModel,
     executionModel,
-    maxPositions: backtestConfig.maxPositions ?? null,
-    maxDailyBuys: backtestConfig.maxDailyBuys ?? null,
+    maxPositions,
+    maxDailyBuys,
     directionPolicy: "longOnly",
     candidateExitPolicy: document.definition?.exit?.candidateExitPolicy ?? "HOLD_WHILE_SELECTED",
     // 🔴 BACKTEST-001（G1）：此前不传 ⇒ 走默认 false ⇒ 涨停买得进、跌停卖得出。
@@ -924,6 +1027,12 @@ export function assembleStrategySide(
       sizingMethod: declaredPositionSizing.sizingMethod,
       fraction: declaredPositionSizing.fraction,
       fixedAmount: declaredPositionSizing.fixedAmount,
+      ...(declaredPositionSizing.tiers === null || declaredPositionSizing.tiers === undefined
+        ? {}
+        : { tiers: declaredPositionSizing.tiers }),
+      ...(declaredPositionSizing.rankTiers === null || declaredPositionSizing.rankTiers === undefined
+        ? {}
+        : { rankTiers: declaredPositionSizing.rankTiers }),
     },
     ...(declaredExitPolicy !== undefined
       ? { exitPolicy: declaredExitPolicy }
@@ -979,6 +1088,7 @@ export function assembleStrategySide(
     strategyVersionRecordInput,
     lifecycle,
     strategyRunContext,
+    runtimeOverrides,
   };
 }
 
@@ -1090,6 +1200,7 @@ export async function assembleRunWorkbenchInputs(
         "；fraction=" + String(side.simulationConfig.positionSizing?.fraction ?? "—") +
         "（预算 = min(等权现金预算, 对应计量基数 × fraction)；" +
         "EQUITY_FRACTION 用决策日收盘总权益，其他固定比例用初始资金）",
+      runtimeOverrides: [...side.runtimeOverrides],
       simulation: {
         initialCapital: side.simulationConfig.initialCapital,
         maxPositions: side.simulationConfig.maxPositions ?? null,

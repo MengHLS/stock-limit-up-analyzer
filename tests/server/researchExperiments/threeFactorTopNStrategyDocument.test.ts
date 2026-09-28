@@ -18,6 +18,7 @@ import {
 import { mapDeclaredExitPolicy } from "../../../server/runWorkbenchAssembly/exitPolicy";
 import { mapDeclaredPositionSizing } from "../../../server/runWorkbenchAssembly/assemble";
 import { coreVersionFromDocument } from "../../../server/strategyCore/production/versionFromDocument";
+import { deriveParameterSpaceFromDocument } from "../../../server/research/strategyEvaluation/parameterSpaceFromDocument";
 
 describe("3F TopN StrategyDocument 装配", () => {
   it.each([3, 5])("Top%i：文档合法、坐标绑定 v5、执行面来自已注册配方", (topN) => {
@@ -62,6 +63,8 @@ describe("3F TopN StrategyDocument 装配", () => {
       sizingMethod: "EQUITY_FRACTION",
       fraction: THREE_FACTOR_TOPN_POSITION_RATIO,
       fixedAmount: null,
+      tiers: null,
+      rankTiers: null,
     });
     expect(document.executionAssumptions?.backtestConfig).toEqual({
       initialCapital: 100_000,
@@ -291,6 +294,107 @@ describe("3F TopN StrategyDocument 装配", () => {
       }),
     ]);
     expect(document.definition?.exit.strongHold).toEqual(strongHold);
+    const core = coreVersionFromDocument({
+      document,
+      createdAt: "2026-09-27T00:00:00.000Z",
+    });
+    expect(core.ok, core.ok ? "" : `${core.reason}: ${core.detail}`).toBe(true);
+  });
+
+  it("entryRiskFilter 写入观察窗风险 entry conditions 且 Core 可构造", () => {
+    const document = buildThreeFactorTopNStrategyDocument({
+      topN: 3,
+      datasetVersionId: 660001,
+      datasetLabel: "v5",
+      strategyVersion: "1.58.7",
+      entryRiskFilter: {
+        maxMeanAmplitude: 0.08,
+        maxMaxAmplitude: 0.12,
+        minDrawdownFromEventClose: -0.1,
+      },
+    });
+    const validation = validateStrategyDocument(document);
+    expect(
+      validation.valid,
+      validation.issues.map(issue => `${issue.code}:${issue.path}`).join(" | "),
+    ).toBe(true);
+    const conditions = document.definition?.entry.conditions ?? [];
+    expect(conditions).toEqual([
+      expect.objectContaining({ id: "entry-sentinel-window" }),
+      expect.objectContaining({
+        id: "entry-risk-mean-amplitude",
+        field: "bar.observationMeanAmplitude",
+        operator: "LESS_THAN",
+        value: 0.08,
+        valueType: "CONSTANT",
+        enabled: true,
+      }),
+      expect.objectContaining({
+        id: "entry-risk-max-amplitude",
+        field: "bar.observationMaxAmplitude",
+        operator: "LESS_THAN",
+        value: 0.12,
+        valueType: "CONSTANT",
+        enabled: true,
+      }),
+      expect.objectContaining({
+        id: "entry-risk-drawdown-depth",
+        field: "bar.drawdownFromEventClose",
+        operator: "GREATER_THAN",
+        value: -0.1,
+        valueType: "CONSTANT",
+        enabled: true,
+      }),
+    ]);
+    const core = coreVersionFromDocument({
+      document,
+      createdAt: "2026-09-27T00:00:00.000Z",
+    });
+    expect(core.ok, core.ok ? "" : `${core.reason}: ${core.detail}`).toBe(true);
+  });
+
+  it("parameterizedMaxMaxAmplitude 声明 TUNABLE 参数并走参数引用", () => {
+    const document = buildThreeFactorTopNStrategyDocument({
+      topN: 3,
+      datasetVersionId: 660001,
+      datasetLabel: "v5",
+      strategyVersion: "1.62.0",
+      parameterizedMaxMaxAmplitude: {
+        defaultValue: 0.12,
+        min: 0.08,
+        max: 0.15,
+        step: 0.01,
+      },
+    });
+    const validation = validateStrategyDocument(document);
+    expect(
+      validation.valid,
+      validation.issues.map(issue => `${issue.code}:${issue.path}`).join(" | "),
+    ).toBe(true);
+    const condition = document.definition?.entry.conditions.find(
+      item => item.id === "entry-risk-max-amplitude-param",
+    );
+    expect(condition).toEqual(
+      expect.objectContaining({
+        field: "bar.observationMaxAmplitude",
+        operator: "LESS_THAN",
+        value: "max_max_amplitude",
+        valueType: "PARAMETER_REFERENCE",
+        enabled: true,
+      }),
+    );
+    expect(document.definition?.parameters[0]).toEqual(
+      expect.objectContaining({
+        code: "max_max_amplitude",
+        parameterRole: "TUNABLE",
+        defaultValue: 0.12,
+        min: 0.08,
+        max: 0.15,
+        step: 0.01,
+      }),
+    );
+    const space = deriveParameterSpaceFromDocument(document).space;
+    expect(space.parameters.map(item => item.name)).toContain("max_max_amplitude");
     const core = coreVersionFromDocument({
       document,
       createdAt: "2026-09-27T00:00:00.000Z",

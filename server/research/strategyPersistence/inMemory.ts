@@ -38,6 +38,7 @@ interface StoredVersion {
   readonly input: StrategyVersionInput;
   readonly rowId: number;
   readonly status: string;
+  readonly isStarred: boolean;
   readonly parentVersionId: number | null;
   readonly description: string | null;
   readonly projections: StrategyProjections;
@@ -183,6 +184,7 @@ export class InMemoryStrategyRepository implements StrategyRepository {
       input: structuredClone(input),
       rowId,
       status: input.status ?? "Draft",
+      isStarred: false,
       parentVersionId: input.parentVersionId ?? null,
       description: input.description ?? null,
       projections: structuredClone(projections),
@@ -219,6 +221,7 @@ export class InMemoryStrategyRepository implements StrategyRepository {
         status: stored.status,
         parentVersionId: stored.parentVersionId,
         description: stored.description,
+        isStarred: stored.isStarred,
         createdAt: stored.input.versionRecord.createdAt,
       }))
       .sort((a, b) => compareStrategyVersions(b.version, a.version));
@@ -240,6 +243,16 @@ export class InMemoryStrategyRepository implements StrategyRepository {
 
   async getVersionRowId(strategyId: string, version: string): Promise<number | undefined> {
     return this.versions.get(strategyId)?.get(version)?.rowId;
+  }
+
+  async getVersionStatus(strategyId: string, version: string): Promise<string | undefined> {
+    return this.versions.get(strategyId)?.get(version)?.status;
+  }
+
+  async isCurrentStrategyVersion(strategyId: string, version: string): Promise<boolean> {
+    const strategy = await this.getStrategy(strategyId);
+    if (strategy === undefined || strategy.currentVersionId === null) return false;
+    return (await this.getVersionRowId(strategyId, version)) === strategy.currentVersionId;
   }
 
   async getVersionBundle(strategyId: string, version: string): Promise<StrategyVersionBundle | undefined> {
@@ -269,5 +282,14 @@ export class InMemoryStrategyRepository implements StrategyRepository {
       throw new Error(`未找到策略版本，无法迁移状态：${strategyId}@${version}`);
     }
     bucket.set(version, { ...stored, status, updatedAt: this.now() });
+  }
+
+  async updateVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void> {
+    const bucket = this.versions.get(strategyId);
+    const stored = bucket?.get(version);
+    if (bucket === undefined || stored === undefined) {
+      throw new Error(`未找到策略版本，无法更新星标：${strategyId}@${version}`);
+    }
+    bucket.set(version, { ...stored, isStarred, updatedAt: this.now() });
   }
 }

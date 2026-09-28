@@ -412,12 +412,89 @@ export function makePullbackFeatures(): readonly FeatureDefinition[] {
   return [haircut, volumeRatio, isBullish, momentum];
 }
 
+/**
+ * 3F 建仓风险过滤用的观察窗特征（T+1..T+5）。
+ *
+ * 口径与 `research/recipeFeatures/threeFactorScoreFeatures.ts` 的振幅链式前收算法一致：
+ * runningPreClose 从事件日收盘起逐根更新，禁止另立公式。
+ */
+export interface ObservationWindowFeatures {
+  /** T+1..T+5 平均振幅：(high-low)/runningPreClose 的均值。 */
+  readonly meanAmplitude: number;
+  /** T+1..T+5 最大振幅。 */
+  readonly maxAmplitude: number;
+  /** (观察窗最低 low − 事件日收盘) / 事件日收盘；负数 = 跌破事件收盘。 */
+  readonly drawdownFromEventClose: number;
+}
+
+function observationWindowFeatureValues(
+  context: FeatureComputeContext,
+): ObservationWindowFeatures | null {
+  const event = context.eventDayBar;
+  if (event === null || event.close === null || event.close <= 0) return null;
+  let post = context.bars.filter(
+    bar => bar.relativeDay >= 1 && bar.relativeDay <= 5,
+  );
+  if (post.length < 5) return null;
+  if (post.length !== 5) {
+    post = context.bars.slice(-5);
+    if (post.length < 5) return null;
+  }
+
+  let runningPreClose = event.close;
+  let sum = 0;
+  let max = Number.NEGATIVE_INFINITY;
+  let minLow = Number.POSITIVE_INFINITY;
+  for (const bar of post) {
+    if (bar.high === null || bar.low === null || bar.close === null) return null;
+    const amplitude = (bar.high - bar.low) / runningPreClose;
+    if (!Number.isFinite(amplitude)) return null;
+    sum += amplitude;
+    max = Math.max(max, amplitude);
+    minLow = Math.min(minLow, bar.low);
+    runningPreClose = bar.close;
+  }
+  if (!Number.isFinite(minLow)) return null;
+  return {
+    meanAmplitude: sum / 5,
+    maxAmplitude: max,
+    drawdownFromEventClose: (minLow - event.close) / event.close,
+  };
+}
+
+export function makeObservationWindowFeatures(): readonly FeatureDefinition[] {
+  const leakage = sameBarLeakage("close", -4);
+  const fromValues = (
+    featureId: string,
+    pick: (raw: ObservationWindowFeatures) => number,
+  ): FeatureDefinition => ({
+    featureId,
+    version: BUILTIN_FEATURE_VERSION,
+    inputs: ["high", "low", "close"],
+    lookback: 5,
+    leakage,
+    description: `${featureId}：T+1..T+5 观察窗风险特征（与 3F 振幅口径一致）`,
+    compute: (context) => {
+      const raw = observationWindowFeatureValues(context);
+      return raw === null ? null : pick(raw);
+    },
+  });
+  return [
+    fromValues("observationMeanAmplitude", raw => raw.meanAmplitude),
+    fromValues("observationMaxAmplitude", raw => raw.maxAmplitude),
+    fromValues("drawdownFromEventClose", raw => raw.drawdownFromEventClose),
+  ];
+}
+
 /** 特征 id → legacy `bar.<field>` 派生字段名的映射（**唯一权威**；未登记即拒绝）。 */
 export const DERIVED_BAR_FIELD_TO_FEATURE_ID: Readonly<Record<string, string>> = Object.freeze({
   volumeRatio: "volumeRatio",
   haircutFromEventLow: "haircutFromEventLow",
   isBullish: "isBullish",
   momentumFromEventClose: "momentumFromEventClose",
+  observationMeanAmplitude: "observationMeanAmplitude",
+  observationMaxAmplitude: "observationMaxAmplitude",
+  drawdownFromEventClose: "drawdownFromEventClose",
 });
 
 /** 默认注册表（内置指标 + 事件相对特征 + 涨跌幅）。 */
@@ -433,6 +510,7 @@ export function createDefaultFeatureRegistry(): FeatureRegistry {
   for (const window of DEFAULT_RSI_WINDOWS) definitions.push(makeRsiFeature(window));
   for (const window of DEFAULT_ATR_WINDOWS) definitions.push(makeAtrFeature(window));
   definitions.push(...makePullbackFeatures());
+  definitions.push(...makeObservationWindowFeatures());
   definitions.push(makePctChangeFeature());
   return createFeatureRegistry(definitions);
 }

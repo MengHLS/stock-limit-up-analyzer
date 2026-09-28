@@ -42,6 +42,7 @@ import {
   type StrategyExecutionAssumptions,
   type StrategyMetadata,
   type StrategyRecipe,
+  type StrategyType,
   type StrategyUniverse,
   type StrategyVersionRecord,
   type StrategyVersionRecordContext,
@@ -217,6 +218,7 @@ export function cloneStrategyDocumentToVersion(
     version: targetVersion,
     name: base.name,
     description: description ?? base.description,
+    ...(base.strategyType === undefined ? {} : { strategyType: base.strategyType }),
     universe: base.universe,
     ...(base.definition === undefined
       ? {
@@ -294,6 +296,8 @@ export interface StrategyDocumentFromDefinitionInput {
   readonly version: string;
   readonly name: string;
   readonly description?: string;
+  /** 策略类型标签（封闭词汇表 `STRATEGY_TYPES`；缺省 = 未分类）。 */
+  readonly strategyType?: StrategyType;
   readonly universe: StrategyUniverse;
   /** Canonical 富定义（`schemaVersion` 缺省补 `1.0`）。 */
   readonly definition: StrategyDefinitionInput;
@@ -341,6 +345,7 @@ export function createStrategyDocumentFromDefinition(
     version: input.version,
     name: input.name,
     ...(input.description === undefined ? {} : { description: input.description }),
+    ...(input.strategyType === undefined ? {} : { strategyType: input.strategyType }),
     universe: input.universe,
     definition: {
       schemaVersion: "1.0",
@@ -370,6 +375,8 @@ export interface StrategyDocumentPatch {
   readonly name?: string;
   /** null = 删除可选字段（description 移除）。 */
   readonly description?: string | null;
+  /** 策略类型标签（实体级分类；未提供 = 继承 base）。 */
+  readonly strategyType?: StrategyType;
   readonly universe?: StrategyUniverse;
   readonly entryRules?: readonly DeclaredRule[];
   readonly exitRules?: readonly DeclaredRule[];
@@ -417,6 +424,9 @@ export function cloneStrategyDocument(
     version: nextVersion,
     name: patch.name ?? base.name,
     description: patch.description === undefined ? base.description : (patch.description ?? undefined),
+    ...((patch.strategyType ?? base.strategyType) === undefined
+      ? {}
+      : { strategyType: patch.strategyType ?? base.strategyType }),
     universe: patch.universe ?? base.universe,
     entryRules: inheritViews ? (patch.entryRules ?? base.entryRules) : undefined,
     exitRules: inheritViews ? (patch.exitRules ?? base.exitRules) : undefined,

@@ -1691,3 +1691,24 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
   `firesToday = satisfiedToday && !satisfiedBefore`（语义 = 首个成立日）⇒ **每证券终身只出一次信号**。
 - ⇒ 本轮出的执行侧结论**不能**与研究侧事件级结论（`RESULT-OOS-COMPOSITE-3F-001`）横向比较，
   已在报告开头醒目登记；「Dataset schema 引入事件维度（面板键 `(eventId, relativeDay)`）」登记为后续事项。
+
+### 数据库上云清点（2026-09-28）—— 2 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_db_migration_inventory.mts` | 只读清点探针；产出本节另两个文件 |
+| `_db_migration_inventory.md` / `.json` | 迁移方案讨论（TiDB Cloud → 阿里云 ECS 自建 MySQL） |
+
+### ECS 自建 MySQL 公网连通性与安全姿态（2026-09-28）—— 3 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_ecs_mysql_connectivity_probe.mjs` | 只读探针（3 条判据，含 1 条负向）；产出本节另两个文件 |
+| `_ecs_mysql_connectivity.md` / `.json` | 迁移方案「本机 → ECS 新库」写入通路验收证据；P3 负向判据曾抓出 `root@'%'` 公网暴露并据以收敛 |
+
+
+### T2「数据地基」迁移验收（2026-09-28）—— 1 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_t2_market_verify_raw.txt` | ECS 侧 `verify.sh s2_market` 原始输出（源库 TiDB vs 目标库 MySQL 逐表精确 `COUNT(*)`）：**9/9 表一致 / 17,994,199 行**，独立复跑结果相同 ⇒ 结果可复现 |

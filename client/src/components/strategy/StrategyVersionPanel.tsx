@@ -1,19 +1,20 @@
-
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
+  ArrowUpRight,
+  BarChart3,
   CheckCircle2,
   GitCompareArrows,
   History,
   Loader2,
   RefreshCw,
-  ShieldAlert,
   Tag,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PaginationBar } from "@/components/PaginationBar";
 import {
   Select,
   SelectContent,
@@ -30,18 +31,30 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SectionCard, StatusBadge } from "@/components/common";
+import { buildClosedLoopRunViewModel } from "@/adapters/closedLoopRunAdapter";
 import { STRATEGY_VERSION_STATUS_OPTIONS } from "@/lib/status";
 import { formatDateTime } from "@/lib/displayFormat";
 import { trpc } from "@/lib/trpc";
+import { Link } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
 import type { StrategyLifecycleStatusValue } from "@shared/researchContracts";
 
-// 类型取自真实 tRPC 路由（与 `RunConfigPanel` 同一种写法），不手写 DTO、不复制口径。
+// 类型取自真实 tRPC 路由，不手写 DTO、不复制口径。
 type RouterOutputs = inferRouterOutputs<AppRouter>;
-// RESEARCH-EXPERIMENT-003 —— 策略域命名空间由 `research.*` 改名 `strategyDomain.*`。
 type VersionRows = RouterOutputs["strategyDomain"]["strategy"]["listVersions"];
 type LabeledDiff = RouterOutputs["strategyDomain"]["strategy"]["compare"];
+type BacktestRows = RouterOutputs["researchRun"]["listBacktests"];
+
+interface VersionBacktestMetric {
+  archiveId: number;
+  createdAt: string;
+  totalReturnPct: number | null;
+  maxDrawdownPct: number | null;
+  loading: boolean;
+  missingDetail: boolean;
+  error: string | null;
+}
 
 function shortHash(h: string): string {
   return h.length <= 16 ? h : `${h.slice(0, 12)}…${h.slice(-4)}`;
@@ -58,6 +71,97 @@ const STATUS_HINT: Record<string, string> = {
   Production: "生产中：实盘运行。",
   Retired: "已退役：终态。",
 };
+
+function MetricValue({
+  value,
+  tone,
+}: {
+  value: number | null;
+  tone: "return" | "drawdown";
+}) {
+  const className =
+    value === null || !Number.isFinite(value)
+      ? "text-muted-foreground"
+      : tone === "return"
+        ? value >= 0
+          ? "text-rose-600"
+          : "text-emerald-700"
+        : "text-emerald-700";
+  return (
+    <span className={`font-semibold tabular-nums ${className}`}>
+      {value === null || !Number.isFinite(value)
+        ? "—"
+        : `${value.toFixed(2)}%`}
+    </span>
+  );
+}
+
+function BacktestMetricCard({
+  metric,
+}: {
+  metric: VersionBacktestMetric | null;
+}) {
+  if (metric === null) {
+    return (
+      <div className="mt-3 rounded-md border border-dashed bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+        暂无该版本的回测留档。到「运行回测」跑一次后，这里会显示结果指标。
+      </div>
+    );
+  }
+
+  if (metric.loading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 rounded-md border border-dashed bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        正在读取这次留档的收益与回撤…
+      </div>
+    );
+  }
+
+  if (metric.error !== null) {
+    return (
+      <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+        指标读取失败：{metric.error}
+      </div>
+    );
+  }
+
+  if (metric.missingDetail) {
+    return (
+      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+        最新留档没有完整结果明细，无法读取收益与回撤。
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+          <p className="text-[10px] text-muted-foreground">最大收益率</p>
+          <MetricValue value={metric.totalReturnPct} tone="return" />
+        </div>
+        <div className="rounded-md border bg-muted/20 px-2.5 py-2">
+          <p className="text-[10px] text-muted-foreground">最大回撤</p>
+          <MetricValue value={metric.maxDrawdownPct} tone="drawdown" />
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[10px] text-muted-foreground">
+          留档 {formatDateTime(metric.createdAt)}
+        </span>
+        <Link
+          to={`/backtest-runs?id=${metric.archiveId}`}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-700 underline-offset-2 hover:underline"
+        >
+          <BarChart3 className="h-3 w-3" />
+          查看完整结果
+          <ArrowUpRight className="h-3 w-3" />
+        </Link>
+      </div>
+    </>
+  );
+}
 
 export function StrategyVersionPanel({
   strategyId,
@@ -85,9 +189,119 @@ export function StrategyVersionPanel({
   const [nextStatus, setNextStatus] = useState<StrategyLifecycleStatusValue | "">("");
   const [diff, setDiff] = useState<LabeledDiff | null>(null);
   const [cmpError, setCmpError] = useState<string | null>(null);
+  const [versionPage, setVersionPage] = useState(1);
+  const [versionPageSize, setVersionPageSize] = useState(6);
 
   const current = versions?.find(v => v.version === version) ?? null;
   const currentStatus = current?.status ?? null;
+
+  const archiveQuery = trpc.researchRun.listBacktests.useQuery(
+    { strategyId, limit: 200 },
+    { retry: false, refetchOnWindowFocus: false }
+  );
+
+  const latestArchiveByVersion = useMemo(() => {
+    const rows = (archiveQuery.data ?? []) as BacktestRows;
+    const byVersion = new Map<string, BacktestRows[number]>();
+    for (const row of rows) {
+      if (!byVersion.has(row.strategyVersion)) byVersion.set(row.strategyVersion, row);
+    }
+    return byVersion;
+  }, [archiveQuery.data]);
+
+  const orderedVersions = useMemo(
+    () =>
+      [...(versions ?? [])].sort((a, b) =>
+        a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+      ),
+    [versions]
+  );
+  const versionTotalPages = Math.max(
+    1,
+    Math.ceil(orderedVersions.length / versionPageSize)
+  );
+  const safeVersionPage = Math.min(Math.max(1, versionPage), versionTotalPages);
+  const pagedVersions = orderedVersions.slice(
+    (safeVersionPage - 1) * versionPageSize,
+    safeVersionPage * versionPageSize
+  );
+
+  useEffect(() => {
+    setVersionPage(1);
+  }, [strategyId, versionPageSize]);
+
+  const archiveIds = useMemo(
+    () =>
+      pagedVersions
+        .map(v => latestArchiveByVersion.get(v.version)?.id ?? null)
+        .filter((id): id is number => id !== null),
+    [latestArchiveByVersion, pagedVersions]
+  );
+  const archiveDetails = trpc.useQueries(t =>
+    archiveIds.map(id =>
+      t.researchRun.getBacktest(
+        { id },
+        { retry: false, refetchOnWindowFocus: false }
+      )
+    )
+  );
+  const detailById = useMemo(() => {
+    const map = new Map<number, (typeof archiveDetails)[number]>();
+    archiveIds.forEach((id, index) => {
+      const query = archiveDetails[index];
+      if (query !== undefined) map.set(id, query);
+    });
+    return map;
+  }, [archiveDetails, archiveIds]);
+
+  function metricForVersion(version: string): VersionBacktestMetric | null {
+    const archive = latestArchiveByVersion.get(version);
+    if (archive === undefined) return null;
+    const query = detailById.get(archive.id);
+    if (query === undefined || query.isLoading) {
+      return {
+        archiveId: archive.id,
+        createdAt: archive.createdAt,
+        totalReturnPct: null,
+        maxDrawdownPct: null,
+        loading: true,
+        missingDetail: false,
+        error: null,
+      };
+    }
+    if (query.error !== null) {
+      return {
+        archiveId: archive.id,
+        createdAt: archive.createdAt,
+        totalReturnPct: null,
+        maxDrawdownPct: null,
+        loading: false,
+        missingDetail: false,
+        error: query.error.message,
+      };
+    }
+    if (query.data === null || query.data === undefined || query.data.result === null) {
+      return {
+        archiveId: archive.id,
+        createdAt: archive.createdAt,
+        totalReturnPct: null,
+        maxDrawdownPct: null,
+        loading: false,
+        missingDetail: true,
+        error: null,
+      };
+    }
+    const view = buildClosedLoopRunViewModel(query.data.result);
+    return {
+      archiveId: archive.id,
+      createdAt: archive.createdAt,
+      totalReturnPct: view?.evaluation?.totalReturnPct ?? null,
+      maxDrawdownPct: view?.evaluation?.maxDrawdownPct ?? null,
+      loading: false,
+      missingDetail: view === null,
+      error: null,
+    };
+  }
 
   function runCompare() {
     if (savedDocument === null) return;
@@ -117,12 +331,19 @@ export function StrategyVersionPanel({
 
   return (
     <div className="space-y-4">
-      {/* ---- 1. 版本历史（后端真实数据） ---- */}
-      <SectionCard
-        title="版本历史"
-        icon={History}
-        description="来自后端 `listVersions` 的真实记录；「父版本」是版本演进链，不是外键。"
-        right={
+      {/* ---- 1. 版本历史（后端真实数据 + 最近留档指标） ---- */}
+    <SectionCard
+      title="版本历史"
+      icon={History}
+      description="按版本创建时间倒序；每张卡展示该版本最近一次回测留档的收益与回撤，并可直接查看完整结果。"
+      right={
+        <div className="flex items-center gap-2">
+          <Link to={`/strategies/${encodeURIComponent(strategyId)}/compare`}>
+            <Button size="sm" variant="outline">
+              <GitCompareArrows className="mr-1.5 h-3.5 w-3.5" />
+              回测对比
+            </Button>
+          </Link>
           <Button
             size="sm"
             variant="ghost"
@@ -136,69 +357,108 @@ export function StrategyVersionPanel({
             )}
             刷新
           </Button>
-        }
-      >
+        </div>
+      }
+    >
+        {archiveQuery.error && (
+          <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+            回测留档读取失败：{archiveQuery.error.message}
+          </p>
+        )}
         {versionsLoading && versions === null ? (
           <Skeleton className="h-16 w-full" />
-        ) : versions === null || versions.length === 0 ? (
+        ) : orderedVersions.length === 0 ? (
           <p className="text-xs text-muted-foreground">暂无版本。</p>
         ) : (
-          <div className="overflow-x-auto rounded-md border">
-            <Table className="text-xs">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="px-3 py-2">版本</TableHead>
-                  <TableHead className="px-3 py-2">状态</TableHead>
-                  <TableHead className="px-3 py-2">父版本</TableHead>
-                  <TableHead className="px-3 py-2">数据集</TableHead>
-                  <TableHead className="px-3 py-2">指纹</TableHead>
-                  <TableHead className="px-3 py-2">创建时间</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {versions.map(v => {
-                  const isCurrent = v.version === version;
-                  return (
-                    <TableRow
-                      key={v.version}
-                      className={isCurrent ? "bg-orange-50/60" : undefined}
-                    >
-                      <TableCell className="px-3 py-2 font-mono">
-                        {v.version}
-                        {isCurrent && (
-                          <span className="ml-2 text-[10px] text-orange-700">
-                            当前载入
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {pagedVersions.map(v => {
+                const isCurrent = v.version === version;
+                const metric = metricForVersion(v.version);
+                return (
+                  <div
+                    key={v.version}
+                    className={`rounded-lg border bg-card p-3 ${
+                      isCurrent ? "border-orange-300 bg-orange-50/40" : ""
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-sm font-semibold">
+                            v{v.version}
                           </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="px-3 py-2">
-                        <StatusBadge status={v.status} />
-                      </TableCell>
-                      <TableCell className="px-3 py-2 font-mono text-muted-foreground">
-                        {v.parentVersionId === null ? "—" : `#${v.parentVersionId}`}
-                      </TableCell>
-                      <TableCell className="px-3 py-2">
-                        <span className="font-mono">{v.datasetVersion || "—"}</span>
-                        {v.datasetVersionId !== null && (
-                          <span className="ml-1 text-muted-foreground">
-                            （id={v.datasetVersionId}）
+                          <StatusBadge status={v.status} />
+                          {isCurrent && (
+                            <span className="text-[10px] font-medium text-orange-700">
+                              当前载入
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {formatDateTime(v.createdAt)} · 父版本{" "}
+                          <span className="font-mono">
+                            {v.parentVersionId === null
+                              ? "—"
+                              : `#${v.parentVersionId}`}
                           </span>
-                        )}
-                      </TableCell>
-                      <TableCell
-                        className="px-3 py-2 font-mono text-muted-foreground"
-                        title={v.fingerprint}
+                        </p>
+                      </div>
+                      <Link
+                        to={`/strategies/${encodeURIComponent(strategyId)}?version=${encodeURIComponent(v.version)}`}
                       >
-                        {shortHash(v.fingerprint)}
-                      </TableCell>
-                      <TableCell className="px-3 py-2 text-muted-foreground">
-                        {formatDateTime(v.createdAt)}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        <Button
+                          size="sm"
+                          variant={isCurrent ? "secondary" : "outline"}
+                        >
+                          {isCurrent ? "当前" : "载入"}
+                        </Button>
+                      </Link>
+                    </div>
+
+                    <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
+                      <p className="truncate">
+                        数据集{" "}
+                        <span className="font-mono">
+                          {v.datasetVersion || "—"}
+                        </span>
+                        {v.datasetVersionId !== null && (
+                          <span> (id={v.datasetVersionId})</span>
+                        )}
+                      </p>
+                      <p className="truncate" title={v.fingerprint}>
+                        指纹{" "}
+                        <span className="font-mono">
+                          {shortHash(v.fingerprint)}
+                        </span>
+                      </p>
+                    </div>
+
+                    <BacktestMetricCard metric={metric} />
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+              <span className="text-[11px] text-muted-foreground">
+                共 {orderedVersions.length} 个版本，本页第{" "}
+                {(safeVersionPage - 1) * versionPageSize + 1}–
+                {Math.min(
+                  safeVersionPage * versionPageSize,
+                  orderedVersions.length
+                )}{" "}
+                个
+              </span>
+              <PaginationBar
+                page={safeVersionPage}
+                totalPages={versionTotalPages}
+                pageSize={versionPageSize}
+                onPageChange={setVersionPage}
+                onPageSizeChange={setVersionPageSize}
+                pageSizeOptions={[6, 12, 24]}
+              />
+            </div>
           </div>
         )}
       </SectionCard>
@@ -227,7 +487,11 @@ export function StrategyVersionPanel({
           </p>
         ) : (
           <p className="text-[11px] text-muted-foreground">
-            左：已落库 <code className="font-mono">{strategyId}@{version}</code>；右：当前草稿（忽略 version / fingerprint）。
+            左：已落库{" "}
+            <code className="font-mono">
+              {strategyId}@{version}
+            </code>
+            ；右：当前草稿（忽略 version / fingerprint）。
           </p>
         )}
 
@@ -259,7 +523,9 @@ export function StrategyVersionPanel({
                       <TableRow>
                         <TableHead className="w-56 px-3 py-2">路径</TableHead>
                         <TableHead className="w-24 px-3 py-2">类型</TableHead>
-                        <TableHead className="px-3 py-2">已保存 → 草稿</TableHead>
+                        <TableHead className="px-3 py-2">
+                          已保存 → 草稿
+                        </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -271,7 +537,9 @@ export function StrategyVersionPanel({
                           <TableCell className="px-3 py-2">{d.kind}</TableCell>
                           <TableCell className="px-3 py-2 font-mono text-[11px]">
                             <span className="text-muted-foreground">
-                              {d.left === undefined ? "∅" : JSON.stringify(d.left)}
+                              {d.left === undefined
+                                ? "∅"
+                                : JSON.stringify(d.left)}
                             </span>
                             <span className="mx-1 text-muted-foreground">→</span>
                             <span className="text-foreground">
@@ -297,7 +565,9 @@ export function StrategyVersionPanel({
         icon={Tag}
         description="只改 status 一列；策略内容不可变。"
         right={
-          currentStatus !== null ? <StatusBadge status={currentStatus} /> : undefined
+          currentStatus !== null ? (
+            <StatusBadge status={currentStatus} />
+          ) : undefined
         }
       >
         {currentStatus === null ? (

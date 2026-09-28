@@ -123,6 +123,9 @@ function toPatch(wire: Record<string, unknown>): StrategyDocumentPatch {
   return {
     name: wire.name as string,
     description: hasOwn(wire, "description") ? (wire.description as string | null) : null,
+    ...(hasOwn(wire, "strategyType")
+      ? { strategyType: wire.strategyType as StrategyDocumentPatch["strategyType"] }
+      : {}),
     universe: wire.universe as StrategyDocumentPatch["universe"],
     entryRules: wire.entryRules as StrategyDocumentPatch["entryRules"],
     exitRules: wire.exitRules as StrategyDocumentPatch["exitRules"],
@@ -165,6 +168,7 @@ function patchToInput(base: StrategyDocument, patch: StrategyDocumentPatch): Str
     version: base.version,
     name: patch.name ?? base.name,
     description: patch.description === undefined ? base.description : (patch.description ?? undefined),
+    strategyType: patch.strategyType ?? base.strategyType,
     universe: patch.universe ?? base.universe,
     ...views,
     datasetVersion: patch.datasetVersion ?? base.datasetVersion,
@@ -374,6 +378,25 @@ export class StrategyService {
       );
     }
     await this.repo.updateVersionStatus(strategyId, version, status);
+    // 实体 status 是列表展示的冗余投影，权威值始终来自 currentVersionId 指向的版本。
+    // 只在迁移当前版本时同步，旧版本状态迁移不得覆盖首页状态。
+    const existing = await this.repo.getStrategy(strategyId);
+    if (existing !== undefined && await this.repo.isCurrentStrategyVersion(strategyId, version)) {
+      await this.repo.saveStrategy({
+        strategyId: existing.strategyId,
+        name: existing.name,
+        latestVersion: existing.latestVersion,
+        status,
+        description: existing.description,
+        strategyType: existing.strategyType,
+        currentVersionId: existing.currentVersionId,
+      });
+    }
+  }
+
+  /** 用户星标：仅更新展示元数据，不触碰版本内容、指纹或投影。 */
+  async setVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void> {
+    await this.repo.updateVersionStarred(strategyId, version, isStarred);
   }
 
   /** 由 base + patch 判定内容差异所需的 bump 级别（复用 classifyRequiredBumpKind + bumpCoversChange）。 */
@@ -412,7 +435,9 @@ export class StrategyService {
 
   /**
    * 刷新策略实体：维持 `latestVersion`（兼容冗余列）与 `currentVersionId`（权威指针）的一致性。
-   * 不变式：`currentVersionId` 指向版本号最大的那一行；`latestVersion` = 该行的 version。
+   * 不变式：
+   *   - `currentVersionId` 指向版本号最大的那一行；`latestVersion` = 该行的 version；
+   *   - `status` = `currentVersionId` 指向版本的 `strategy_versions.status`（列表展示的冗余投影）。
    */
   private async refreshEntityPointer(
     doc: StrategyDocument,
@@ -429,12 +454,22 @@ export class StrategyService {
         ?? currentVersionId;
       currentVersionId = resolved ?? null;
     }
+    const currentVersion = isNewLatest
+      ? doc.version
+      : existing?.latestVersion ?? doc.version;
+    const currentStatus = currentVersionId === null
+      ? fallbackStatus
+      : await this.repo.getVersionStatus(doc.strategyId, currentVersion)
+        ?? (isNewLatest ? fallbackStatus : existing?.status ?? fallbackStatus);
     await this.repo.saveStrategy({
       strategyId: doc.strategyId,
       name: doc.name,
       latestVersion: isNewLatest ? doc.version : (existing?.latestVersion ?? doc.version),
-      status: existing?.status ?? fallbackStatus,
+      status: currentStatus,
       description: doc.description ?? existing?.description ?? null,
+      // 策略类型是实体级展示元数据：文档显式声明则以其为准，否则保留既有值
+      // （绝不因文档缺省而把已落库的分类清成 NULL——这是当前策略类型恒为空的根因）。
+      strategyType: doc.strategyType ?? existing?.strategyType ?? null,
       currentVersionId,
     });
   }

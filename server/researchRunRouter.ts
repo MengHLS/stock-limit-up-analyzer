@@ -57,15 +57,19 @@ import type {
 import type { ResearchParameterSet } from "./research/types";
 import {
   closedLoopBacktestRunDetailSchema,
+  closedLoopBacktestRunBatchInputSchema,
   closedLoopBacktestRunListInputSchema,
   closedLoopBacktestRunRecordSchema,
   closedLoopRunInputSchema,
   closedLoopRunResultSchema,
+  compareStrategyVersionsInputSchema,
+  compareStrategyVersionsOutputSchema,
   researchCatalogItemSchema,
   researchChainHealthSchema,
   researchRunReadinessSchema,
   securityLabelsInputSchema,
   securityLabelsOutputSchema,
+  type ClosedLoopRunInput,
   type ClosedLoopRunResult,
   type ClosedLoopWiringSummary,
   type ResearchCatalogItem,
@@ -84,6 +88,7 @@ import type { StrategyDocument } from "./research/strategySchema/types";
 import { StrategyRecipeRuntimeError } from "./research/recipeErrors";
 import {
   getClosedLoopBacktestRun,
+  getClosedLoopBacktestRunsByIds,
   listClosedLoopBacktestRuns,
   saveClosedLoopBacktestRun,
 } from "./closedLoopBacktestRun/repository";
@@ -357,6 +362,8 @@ export interface ClosedLoopPersistResult {
   readonly persisted: boolean;
   readonly errorCode: string | null;
   readonly errorMessage: string | null;
+  /** 写入成功时的留档行 id；失败 / 未写入时为 null。 */
+  readonly archiveId: number | null;
 }
 
 export async function persistClosedLoopBacktestRun(
@@ -385,14 +392,14 @@ export async function persistClosedLoopBacktestRun(
   let lastDetail = "（未捕获到错误详情）";
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      await save(saveInput);
+      const archiveId = await save(saveInput);
       if (attempt > 1) {
         console.warn(
           `[loopRun] 闭环回测结果留档在第 ${attempt} 次尝试成功（前 ${attempt - 1} 次是长算后连接被重置，` +
             `属已知现象；BD-24）。`,
         );
       }
-      return { persisted: true, errorCode: null, errorMessage: null };
+      return { persisted: true, errorCode: null, errorMessage: null, archiveId };
     } catch (error) {
       lastDetail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
@@ -403,7 +410,7 @@ export async function persistClosedLoopBacktestRun(
           `[loopRun] 闭环回测结果留档失败（非瞬时错误，不重试；不影响本次运行结果，历史列表将缺此条）` +
             `（runId=${options.result.runId}）：${lastDetail}`,
         );
-        return { persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED", errorMessage: lastDetail };
+        return { persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED", errorMessage: lastDetail, archiveId: null };
       }
 
       if (attempt < maxAttempts) {
@@ -421,7 +428,7 @@ export async function persistClosedLoopBacktestRun(
     `[loopRun] 闭环回测结果留档失败（已尝试 ${maxAttempts} 次；不影响本次运行结果，历史列表将缺此条）` +
       `（runId=${options.result.runId}）：${lastDetail}`,
   );
-  return { persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED", errorMessage: lastDetail };
+  return { persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED", errorMessage: lastDetail, archiveId: null };
 }
 
 export const researchRunRouter = router({
@@ -464,6 +471,19 @@ export const researchRunRouter = router({
     .output(closedLoopBacktestRunDetailSchema.nullable())
     .query(async ({ input }) => {
       return await getClosedLoopBacktestRun(input.id);
+    }),
+
+  /**
+   * 批量读取留档详情（含完整结果）。
+   *
+   * 单策略多版本对比页需要同时加载多条已跑出的结果：曲线、指标与成交明细都从这里来，
+   * 不重算、不伪造；顺序跟随入参 id。
+   */
+  getBacktests: publicProcedure
+    .input(closedLoopBacktestRunBatchInputSchema)
+    .output(closedLoopBacktestRunDetailSchema.array())
+    .query(async ({ input }) => {
+      return await getClosedLoopBacktestRunsByIds(input.ids);
     }),
 
   /**
@@ -596,352 +616,437 @@ export const researchRunRouter = router({
   loopRun: publicProcedure
     .input(closedLoopRunInputSchema)
     .output(closedLoopRunResultSchema)
+    .mutation(async ({ input }) => executeClosedLoopRun(input)),
+
+  /**
+   * 同一策略的多个版本对比（各自独立账户，同一日期与运行口径）。
+   *
+   * 每个版本都走同一条 `executeClosedLoopRun`；顺序执行以避免并发构建数据集，
+   * 单版本失败不阻断其他版本。
+   */
+  compareStrategyVersions: publicProcedure
+    .input(compareStrategyVersionsInputSchema)
+    .output(compareStrategyVersionsOutputSchema)
     .mutation(async ({ input }) => {
-      const __runTotal = perfBegin("run.loopRun_total");
-      const createdAt = input.createdAt ?? new Date().toISOString();
-      const runId =
-        input.runId ?? `clrun-${createdAt.replace(/[^0-9]/g, "").slice(0, 17)}`;
+      const createdAt = new Date().toISOString();
+      const comparisonId = `cmp-${createdAt.replace(/[^0-9]/g, "").slice(0, 17)}`;
+      const runtimeConfig = input.runtimeConfig ?? {};
+      const baseExperimentId =
+        input.experimentId ??
+        `EXP-${input.strategyId}-${input.dateRange.startDate}-${input.dateRange.endDate}-${input.strategyVersions[0]}`;
+      const entries = [];
 
-      // 归一为 canonical 保序子集（乱序/重复输入不报错；非法值已被 zod enum 挡下）
-      const requested: readonly ClosedLoopStageId[] = CLOSED_LOOP_STAGE_IDS.filter(
-        stageId => input.stageIds === undefined || input.stageIds.includes(stageId)
-      );
-
-      // backtestSummarySeed 的产生阶段（backtest）不得在链内，否则语义冲突
-      if (input.backtestSummarySeed !== undefined && requested.includes("backtest")) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "backtestSummarySeed 只适用于不含 backtest 阶段的链（交接种子要求其产生阶段不在 stageIds 内）。" +
-            "请显式传入不含 backtest 的 stageIds，或去掉该种子让 backtest 阶段自行产生摘要。",
-        });
-      }
-
-      // evaluation 的两项前置必须成对出现：
-      //   ① 编排器要求消费 backtestSummary 交接 → 需 backtestSummarySeed（或链内有 backtest，但那条路要 dataset）；
-      //   ② 评估结果必须绑定「曲线来自哪次真实回测」→ 指纹只能取 seed.fingerprint（不接受调用方另填，防伪绑定）。
-      if (input.evaluationInput !== undefined && input.backtestSummarySeed === undefined) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message:
-            "evaluationInput 必须与 backtestSummarySeed 一并提供：权益曲线必须声明来自哪次真实回测" +
-            "（backtestFingerprint 取 seed.fingerprint），且 evaluation 阶段的执行还要求 backtestSummary 交接存在。",
-        });
-      }
-
-      const lifecycleConfig: ClosedLoopLifecycleConfig | undefined =
-        input.lifecycle === undefined
-          ? undefined
-          : {
-              lifecycleRecord: input.lifecycle
-                .lifecycleRecord as unknown as StrategyLifecycleRecord,
-              transition: input.lifecycle
-                .transition as unknown as LifecycleTransitionInput,
-              ...(input.lifecycle.allowSyntheticEvidence !== undefined
-                ? { allowSyntheticEvidence: input.lifecycle.allowSyntheticEvidence }
-                : {}),
-            };
-
-      // 只注入调用方显式声明的真实入参（缺项 → 相应阶段不注册 → 编排器如实 BLOCKED）
-      const wiringInputs: ClosedLoopWiringInputs = {
-        ...(input.evaluationInput !== undefined && input.backtestSummarySeed !== undefined
-          ? {
-              evaluationInput: {
-                ...input.evaluationInput,
-                // 指纹来自调用方声明的真实回测种子，不由本层推算
-                backtestFingerprint: input.backtestSummarySeed.fingerprint,
-              },
-            }
-          : {}),
-        ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
-      };
-
-      // ------------------------------------------------------------------
-      // 运行工作台「真实跑通」（useRealData=true）
-      //
-      // 与上方「只透传」是**互斥的两条路**：本分支由服务端真实构建数据集 + 真实读策略
-      // 文档 + 真实装配配方，因此 data / research / backtest / evaluation / regime 五阶段
-      // 可以真的执行。任何一环失败 → 抛 PRECONDITION_FAILED（附稳定错误码），
-      // **绝不**降级成「用占位数据跑一遍」。
-      // ------------------------------------------------------------------
-      let assemblySummary: LoopRunAssemblySummary | null = null;
-      // STRATEGY-ARCH-002 — 策略侧产物（Core 决策源 / 版本 / 事件判定器）留到跑完后组 Run Record。
-      let assembledSide: AssembledStrategySide | null = null;
-      if (input.useRealData === true) {
-        let assembled;
+      for (const [index, strategyVersion] of input.strategyVersions.entries()) {
+        const runCreatedAt = new Date().toISOString();
+        // 序号兜底：同一毫秒内、或同一版本被重复选择时，runId 仍必须逐条唯一。
+        const runId =
+          `clcmp-${runCreatedAt.replace(/[^0-9]/g, "").slice(0, 17)}-` +
+          strategyVersion.replace(/[^a-zA-Z0-9]/g, "") +
+          `-${String(index).padStart(2, "0")}`;
         try {
-          const versionRecord = await runWorkbenchStrategyService.loadVersion(
-            input.strategyId,
-            input.strategyVersion,
+          const result = await executeClosedLoopRun(
+            {
+              experimentId: `${baseExperimentId}:${strategyVersion}`,
+              runId,
+              createdAt: runCreatedAt,
+              strategyId: input.strategyId,
+              strategyVersion,
+              dateRange: { ...input.dateRange },
+              codeVersion: input.codeVersion ?? "unknown",
+              runtimeConfig,
+              useRealData: true,
+              datasetGuards: { dataReady: true, ...(input.datasetGuards ?? {}) },
+              ...(input.recipeId !== undefined ? { recipeId: input.recipeId } : {}),
+            },
+            { experimentId: `${baseExperimentId}:${strategyVersion}` },
           );
-          assembled = await assembleRunWorkbenchInputs({
-            strategyId: input.strategyId,
-            strategyVersion: input.strategyVersion,
-            startDate: input.dateRange.startDate,
-            endDate: input.dateRange.endDate,
-            createdAt,
-            codeVersion: input.codeVersion ?? "unknown",
-            strategyDocument: versionRecord.strategy,
-            // 已绑定的 Dataset Registry 坐标（PRIMARY）——有就用它直读已落库 ds_* 数据集，
-            // 而不是从零重算。事实（含回落原因）由装配层写进 assembly.datasetSource*。
-            ...(primaryDatasetVersionIdOf(versionRecord.strategy) !== undefined
-              ? { datasetVersionId: primaryDatasetVersionIdOf(versionRecord.strategy)! }
-              : {}),
-            ...(input.recipeId !== undefined ? { recipeId: input.recipeId } : {}),
-            ...(input.datasetGuards?.dataReady !== undefined
-              ? { dataReady: input.datasetGuards.dataReady }
-              : {}),
-            ...(input.datasetGuards?.maxTradingDays !== undefined
-              ? { maxTradingDays: input.datasetGuards.maxTradingDays }
-              : {}),
-            ...(input.datasetGuards?.maxSecuritiesPerDay !== undefined
-              ? { maxSecuritiesPerDay: input.datasetGuards.maxSecuritiesPerDay }
-              : {}),
+          entries.push({
+            strategyVersion,
+            runId: result.runId,
+            archiveId: result.persistence?.archiveId ?? null,
+            status: result.overall.status,
+            failure: null,
+            result,
           });
         } catch (error) {
-          throw toAssemblyTrpcError(error);
+          const message = error instanceof Error ? error.message : String(error);
+          const code =
+            error instanceof TRPCError
+              ? error.code
+              : error instanceof LoopRunAssemblyError || error instanceof StrategyRecipeRuntimeError
+                ? error.code
+                : "COMPARE_VERSION_RUN_FAILED";
+          entries.push({
+            strategyVersion,
+            runId,
+            archiveId: null,
+            status: "FAILED",
+            failure: { code, message },
+            result: null,
+          });
         }
-        // 装配成功：把真实入参合并进 wiringInputs（覆盖同名的空位）
-        Object.assign(wiringInputs, assembled.inputs);
-        assemblySummary = assembled.assembly;
-        assembledSide = assembled.side;
       }
 
-      const seedHandoffs: ClosedLoopSeedHandoff[] = [];
-      if (input.backtestSummarySeed !== undefined) {
-        const seed = input.backtestSummarySeed;
-        const handoff: ClosedLoopBacktestSummary = {
-          kind: "backtestSummary",
-          handoffVersion: 1,
-          synthetic: seed.synthetic,
-          source: {
-            module: seed.module,
-            moduleRunKind: "TRADE_SIMULATION_RUN",
-            runId: null,
-            fingerprint: seed.fingerprint,
-          },
-          datasetVersion: seed.datasetVersion,
-          datasetGate: seed.datasetGate,
-          dateRange: { ...seed.dateRange },
-          initialCapital: seed.initialCapital,
-          finalEquity: seed.finalEquity,
-          decisionDayCount: seed.decisionDayCount,
-          equityCurvePointCount: seed.equityCurvePointCount,
-          tradeCount: seed.tradeCount,
-        };
-        seedHandoffs.push({ kind: "backtestSummary", handoff });
-      }
-
-      const metadata: ClosedLoopRunMetadata = {
-        experimentId: input.experimentId,
+      return {
+        comparisonId,
+        createdAt,
         strategyId: input.strategyId,
-        strategyVersion: input.strategyVersion,
         dateRange: { ...input.dateRange },
-        datasetVersion: input.datasetVersion ?? null,
-        universeVersion: input.universeVersion ?? null,
-        codeVersion: input.codeVersion ?? null,
-        costModel: null,
-        executionModel: input.executionModel ?? null,
-        parameterSet: (input.parameterSet ?? {}) as unknown as Readonly<ResearchParameterSet>,
+        runtimeConfig,
+        entries,
       };
-
-      // BACKTEST-002（B-03）— 🔴 此前这里把 `artifacts` 丢掉了 ⇒ 完整的
-      // `TradeSimulationRun`（含 equityCurve / trades）跑完即弃，无法落库。
-      // 捕获它即打通 artifact propagation：**不重算、不复制引擎**，只用同一个产物。
-      const { stageRunners, artifacts } = createClosedLoopWiring(wiringInputs, { requested });
-
-      const run = perfRun("run.stage_orchestration", () =>
-        runClosedLoop({
-          runId,
-          createdAt,
-          metadata,
-          stageIds: requested,
-          stageRunners,
-          ...(seedHandoffs.length > 0 ? { seedHandoffs } : {}),
-          ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
-        }),
-      );
-
-      let resultOut: ClosedLoopRunResult = {
-        runId: run.runId,
-        createdAt: run.createdAt,
-        chainFingerprint: run.chainFingerprint,
-        fingerprint: run.fingerprint,
-        overall: { ...run.overall },
-        runnerInjected: [...run.request.runnerInjected],
-        stages: run.stages.map(stage => ({
-          stageId: stage.stageId,
-          state: stage.state,
-          outputKind: stage.producedHandoffKind,
-          outputHandoffFingerprint: stage.outputHandoffFingerprint,
-          output: stage.output ?? null,
-          blocked:
-            stage.blocked === null
-              ? null
-              : {
-                  reasonCode: stage.blocked.reasonCode,
-                  detail: stage.blocked.detail,
-                  upstreamStageId: stage.blocked.upstreamStageId,
-                  errorCode: stage.blocked.errorCode,
-                  errorMessage: stage.blocked.errorMessage,
-                },
-        })),
-        blockedSummary: run.blockedSummary.map(item => ({
-          stageId: item.stageId,
-          reasonCode: item.reasonCode,
-          detail: item.detail,
-          upstreamStageId: item.upstreamStageId,
-          errorCode: item.errorCode,
-          errorMessage: item.errorMessage,
-        })),
-        wiring: toWiringSummary(wiringInputs, requested),
-        assembly:
-          assemblySummary === null
-            ? null
-            : {
-                datasetVersion: assemblySummary.datasetVersion,
-                datasetGate: assemblySummary.datasetGate,
-                datasetRowCount: assemblySummary.datasetRowCount,
-                datasetSecurityCount: assemblySummary.datasetSecretCount,
-                datasetSource: assemblySummary.datasetSource,
-                datasetSourceNote: assemblySummary.datasetSourceNote,
-                datasetVersionId: assemblySummary.datasetVersionId,
-                dateRange: { ...assemblySummary.dateRange },
-                strategyId: assemblySummary.strategyId,
-                strategyVersion: assemblySummary.strategyVersion,
-                recipeId: assemblySummary.recipeId,
-                recipeSource: assemblySummary.recipeSource,
-                recipeFeatureIds: [...assemblySummary.recipeFeatureIds],
-                selectionSummary: assemblySummary.selectionSummary,
-                strategyDecisionEngine: assemblySummary.strategyDecisionEngine,
-                strategyDecisionEngineNote: assemblySummary.strategyDecisionEngineNote,
-                simulation: {
-                  initialCapital: assemblySummary.simulation.initialCapital,
-                  maxPositions: assemblySummary.simulation.maxPositions,
-                  maxDailyBuys: assemblySummary.simulation.maxDailyBuys,
-                  executionModel: assemblySummary.simulation.executionModel,
-                  costModel: { ...assemblySummary.simulation.costModel },
-                },
-              },
-      };
-
-      // ------------------------------------------------------------------
-      // STRATEGY-ARCH-002 — Strategy Run Record（**每次运行必留**，零 schema 变更）
-      //
-      // 落点 = 上面这个 `result` 对象 ⇒ 由既有 `persistClosedLoopBacktestRun` 写进
-      // `closed_loop_backtest_run.resultJson`。只有真的走了 Core 判定（`strategy-core`）
-      // 才留档 —— 回落 legacy 配方时留一份「其实是 legacy 跑的」记录只会误导。
-      // ------------------------------------------------------------------
-      if (assembledSide !== null && assembledSide.strategyRunContext.engine === "strategy-core") {
-        const context = assembledSide.strategyRunContext;
-        const source = context.coreDecisionSource;
-        const coreVersion = context.coreVersion;
-        if (source !== null && coreVersion !== null && coreVersion.ok) {
-          const codeVersion = input.codeVersion ?? "unknown";
-          const digest = source.digest();
-          const record = buildStrategyRunRecord({
-            runId: run.runId,
-            version: coreVersion.version,
-            parameterSet: assembledSide.parameterSet as unknown as Record<string, never>,
-            resolvedParameterSet: source.resolvedParameterSet().values,
-            codeVersion,
-            universe: { universeId: context.universeId, members: null },
-            datasetReference: {
-              datasetVersionId: assemblySummary?.datasetVersionId ?? null,
-              datasetLabel: assemblySummary?.datasetVersion ?? null,
-              datasetSource: (assemblySummary?.datasetSource ?? "rebuild") as
-                | "registry"
-                | "rebuild"
-                | "injected",
-              datasetContentFingerprint: assemblySummary?.datasetVersion ?? null,
-            },
-            seed: null,
-            runtimeConfig: runtimeConfigSnapshot({
-              startDate: input.dateRange.startDate,
-              point: context.point,
-              maxRelativeDayObserved: digest.maxRelativeDayObserved,
-              horizonRelativeDay: digest.maxRelativeDayObserved,
-            }),
-            createdAt,
-            digest,
-            anchorPolicy: context.anchorPolicy,
-            notes: [
-              context.note,
-              ...source.notes,
-              ...coreVersion.notes,
-              "codeVersion=" + codeVersion + " 由调用方注入（本服务端不读 git / package.json）",
-            ],
-            unmappedExitRuleIds: coreVersion.adaptation.unmappedExitRuleIds,
-          });
-          resultOut.strategyRun = record;
-        }
-      }
-
-      // ------------------------------------------------------------------
-      // BACKTEST-002（B-03）— BacktestRunResult → resultJson.backtest（有界载荷）
-      // ------------------------------------------------------------------
-      const backtestRun = artifacts.tradeSimulationRun;
-      if (backtestRun !== undefined) {
-        const initialCapital = assemblySummary?.simulation.initialCapital ?? null;
-        if (initialCapital !== null) {
-          const __metrics = perfBegin("metrics.build_backtest_result");
-          const result = buildBacktestResult({
-            runId: run.runId,
-            strategyVersionId: input.strategyId + "@" + input.strategyVersion,
-            datasetVersionId: assemblySummary?.datasetVersionId ?? null,
-            parameterSet: (input.parameterSet ?? {}) as Readonly<Record<string, unknown>>,
-            initialCapital,
-            equityCurve: backtestRun.equityCurve,
-            tradeLedger: backtestRun.trades,
-            notes: [
-              "权益曲线 / 成交台账来自同链 backtest 阶段的真实产物（artifacts.tradeSimulationRun）",
-              "明细**不全量入库**：见 equitySamples / tradeSamples（有界）与 equityDigest / tradeDigest（全量指纹）",
-            ],
-          });
-          perfEnd(__metrics);
-          const __serialize = perfBegin("persistence.payload_serialization");
-          const payload = buildBacktestRunPayload({ result });
-          resultOut.backtest = {
-            canonicalMetrics: payload.canonicalMetrics,
-            summary: payload.summary,
-            equitySamples: [...payload.equitySamples],
-            tradeSamples: [...payload.tradeSamples],
-            truncated: payload.truncated,
-            equityDigest: payload.equityDigest,
-            tradeDigest: payload.tradeDigest,
-            notes: [...payload.notes],
-            executionMetadata: {
-              executionPolicyVersion: BACKTEST_EXECUTION_POLICY_VERSION,
-              engineVersion: "strategy-core/1.0.0",
-              codeVersion: input.codeVersion ?? "unknown",
-              initialCapital,
-              sampleLimit: DEFAULT_BACKTEST_SAMPLE_LIMIT,
-              notes: [...describeExecutionPolicy(DEFAULT_BACKTEST_EXECUTION_POLICY)],
-            },
-          };
-          perfEnd(__serialize);
-        }
-      }
-
-      // CLOSED-LOOP-BACKTEST-PERSIST-001 — 每次运行都留档，供「回测历史」页回看。
-      // best-effort：留档失败不抛（详见 persistClosedLoopBacktestRun 的说明）。
-      resultOut = await withPersistedSecurityLabels(resultOut);
-      const persistence = await perfRunAsync("persistence.db_write", () =>
-        persistClosedLoopBacktestRun({
-          experimentId: input.experimentId,
-          strategyId: input.strategyId,
-          strategyVersion: input.strategyVersion,
-          startDate: input.dateRange.startDate,
-          endDate: input.dateRange.endDate,
-          result: resultOut,
-        }),
-      );
-      resultOut.persistence = persistence;
-
-      perfCount("run.resultJson_bytes", JSON.stringify(resultOut).length);
-      perfEnd(__runTotal);
-      return resultOut;
     }),
 });
+
+async function executeClosedLoopRun(
+  input: ClosedLoopRunInput,
+  options?: { experimentId?: string },
+): Promise<ClosedLoopRunResult> {
+  const experimentId = options?.experimentId ?? input.experimentId;
+  const __runTotal = perfBegin("run.loopRun_total");
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const runId =
+    input.runId ?? `clrun-${createdAt.replace(/[^0-9]/g, "").slice(0, 17)}`;
+
+  // 归一为 canonical 保序子集（乱序/重复输入不报错；非法值已被 zod enum 挡下）
+  const requested: readonly ClosedLoopStageId[] = CLOSED_LOOP_STAGE_IDS.filter(
+    stageId => input.stageIds === undefined || input.stageIds.includes(stageId)
+  );
+
+  // backtestSummarySeed 的产生阶段（backtest）不得在链内，否则语义冲突
+  if (input.backtestSummarySeed !== undefined && requested.includes("backtest")) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "backtestSummarySeed 只适用于不含 backtest 阶段的链（交接种子要求其产生阶段不在 stageIds 内）。" +
+        "请显式传入不含 backtest 的 stageIds，或去掉该种子让 backtest 阶段自行产生摘要。",
+    });
+  }
+
+  // evaluation 的两项前置必须成对出现：
+  //   ① 编排器要求消费 backtestSummary 交接 → 需 backtestSummarySeed（或链内有 backtest，但那条路要 dataset）；
+  //   ② 评估结果必须绑定「曲线来自哪次真实回测」→ 指纹只能取 seed.fingerprint（不接受调用方另填，防伪绑定）。
+  if (input.evaluationInput !== undefined && input.backtestSummarySeed === undefined) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "evaluationInput 必须与 backtestSummarySeed 一并提供：权益曲线必须声明来自哪次真实回测" +
+        "（backtestFingerprint 取 seed.fingerprint），且 evaluation 阶段的执行还要求 backtestSummary 交接存在。",
+    });
+  }
+
+  const lifecycleConfig: ClosedLoopLifecycleConfig | undefined =
+    input.lifecycle === undefined
+      ? undefined
+      : {
+          lifecycleRecord: input.lifecycle
+            .lifecycleRecord as unknown as StrategyLifecycleRecord,
+          transition: input.lifecycle
+            .transition as unknown as LifecycleTransitionInput,
+          ...(input.lifecycle.allowSyntheticEvidence !== undefined
+            ? { allowSyntheticEvidence: input.lifecycle.allowSyntheticEvidence }
+            : {}),
+        };
+
+  // 只注入调用方显式声明的真实入参（缺项 → 相应阶段不注册 → 编排器如实 BLOCKED）
+  const wiringInputs: ClosedLoopWiringInputs = {
+    ...(input.evaluationInput !== undefined && input.backtestSummarySeed !== undefined
+      ? {
+          evaluationInput: {
+            ...input.evaluationInput,
+            // 指纹来自调用方声明的真实回测种子，不由本层推算
+            backtestFingerprint: input.backtestSummarySeed.fingerprint,
+          },
+        }
+      : {}),
+    ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
+  };
+
+  // ------------------------------------------------------------------
+  // 运行工作台「真实跑通」（useRealData=true）
+  //
+  // 与上方「只透传」是**互斥的两条路**：本分支由服务端真实构建数据集 + 真实读策略
+  // 文档 + 真实装配配方，因此 data / research / backtest / evaluation / regime 五阶段
+  // 可以真的执行。任何一环失败 → 抛 PRECONDITION_FAILED（附稳定错误码），
+  // **绝不**降级成「用占位数据跑一遍」。
+  // ------------------------------------------------------------------
+  let assemblySummary: LoopRunAssemblySummary | null = null;
+  // STRATEGY-ARCH-002 — 策略侧产物（Core 决策源 / 版本 / 事件判定器）留到跑完后组 Run Record。
+  let assembledSide: AssembledStrategySide | null = null;
+  if (input.useRealData === true) {
+    let assembled;
+    try {
+      const versionRecord = await runWorkbenchStrategyService.loadVersion(
+        input.strategyId,
+        input.strategyVersion,
+      );
+      assembled = await assembleRunWorkbenchInputs({
+        strategyId: input.strategyId,
+        strategyVersion: input.strategyVersion,
+        startDate: input.dateRange.startDate,
+        endDate: input.dateRange.endDate,
+        createdAt,
+        codeVersion: input.codeVersion ?? "unknown",
+        strategyDocument: versionRecord.strategy,
+        // 已绑定的 Dataset Registry 坐标（PRIMARY）——有就用它直读已落库 ds_* 数据集，
+        // 而不是从零重算。事实（含回落原因）由装配层写进 assembly.datasetSource*。
+        ...(primaryDatasetVersionIdOf(versionRecord.strategy) !== undefined
+          ? { datasetVersionId: primaryDatasetVersionIdOf(versionRecord.strategy)! }
+          : {}),
+        ...(input.recipeId !== undefined ? { recipeId: input.recipeId } : {}),
+        ...(input.datasetGuards?.dataReady !== undefined
+          ? { dataReady: input.datasetGuards.dataReady }
+          : {}),
+        ...(input.datasetGuards?.maxTradingDays !== undefined
+          ? { maxTradingDays: input.datasetGuards.maxTradingDays }
+          : {}),
+        ...(input.datasetGuards?.maxSecuritiesPerDay !== undefined
+          ? { maxSecuritiesPerDay: input.datasetGuards.maxSecuritiesPerDay }
+          : {}),
+      });
+    } catch (error) {
+      throw toAssemblyTrpcError(error);
+    }
+    // 装配成功：把真实入参合并进 wiringInputs（覆盖同名的空位）
+    Object.assign(wiringInputs, assembled.inputs);
+    assemblySummary = assembled.assembly;
+    assembledSide = assembled.side;
+  }
+
+  const seedHandoffs: ClosedLoopSeedHandoff[] = [];
+  if (input.backtestSummarySeed !== undefined) {
+    const seed = input.backtestSummarySeed;
+    const handoff: ClosedLoopBacktestSummary = {
+      kind: "backtestSummary",
+      handoffVersion: 1,
+      synthetic: seed.synthetic,
+      source: {
+        module: seed.module,
+        moduleRunKind: "TRADE_SIMULATION_RUN",
+        runId: null,
+        fingerprint: seed.fingerprint,
+      },
+      datasetVersion: seed.datasetVersion,
+      datasetGate: seed.datasetGate,
+      dateRange: { ...seed.dateRange },
+      initialCapital: seed.initialCapital,
+      finalEquity: seed.finalEquity,
+      decisionDayCount: seed.decisionDayCount,
+      equityCurvePointCount: seed.equityCurvePointCount,
+      tradeCount: seed.tradeCount,
+    };
+    seedHandoffs.push({ kind: "backtestSummary", handoff });
+  }
+
+  const metadata: ClosedLoopRunMetadata = {
+    experimentId,
+    strategyId: input.strategyId,
+    strategyVersion: input.strategyVersion,
+    dateRange: { ...input.dateRange },
+    datasetVersion: input.datasetVersion ?? null,
+    universeVersion: input.universeVersion ?? null,
+    codeVersion: input.codeVersion ?? null,
+    costModel: null,
+    executionModel: input.executionModel ?? null,
+    parameterSet: (input.parameterSet ?? {}) as unknown as Readonly<ResearchParameterSet>,
+  };
+
+  // BACKTEST-002（B-03）— 🔴 此前这里把 `artifacts` 丢掉了 ⇒ 完整的
+  // `TradeSimulationRun`（含 equityCurve / trades）跑完即弃，无法落库。
+  // 捕获它即打通 artifact propagation：**不重算、不复制引擎**，只用同一个产物。
+  const { stageRunners, artifacts } = createClosedLoopWiring(wiringInputs, { requested });
+
+  const run = perfRun("run.stage_orchestration", () =>
+    runClosedLoop({
+      runId,
+      createdAt,
+      metadata,
+      stageIds: requested,
+      stageRunners,
+      ...(seedHandoffs.length > 0 ? { seedHandoffs } : {}),
+      ...(lifecycleConfig !== undefined ? { lifecycle: lifecycleConfig } : {}),
+    }),
+  );
+
+  let resultOut: ClosedLoopRunResult = {
+    runId: run.runId,
+    createdAt: run.createdAt,
+    chainFingerprint: run.chainFingerprint,
+    fingerprint: run.fingerprint,
+    overall: { ...run.overall },
+    runnerInjected: [...run.request.runnerInjected],
+    stages: run.stages.map(stage => ({
+      stageId: stage.stageId,
+      state: stage.state,
+      outputKind: stage.producedHandoffKind,
+      outputHandoffFingerprint: stage.outputHandoffFingerprint,
+      output: stage.output ?? null,
+      blocked:
+        stage.blocked === null
+          ? null
+          : {
+              reasonCode: stage.blocked.reasonCode,
+              detail: stage.blocked.detail,
+              upstreamStageId: stage.blocked.upstreamStageId,
+              errorCode: stage.blocked.errorCode,
+              errorMessage: stage.blocked.errorMessage,
+            },
+    })),
+    blockedSummary: run.blockedSummary.map(item => ({
+      stageId: item.stageId,
+      reasonCode: item.reasonCode,
+      detail: item.detail,
+      upstreamStageId: item.upstreamStageId,
+      errorCode: item.errorCode,
+      errorMessage: item.errorMessage,
+    })),
+    wiring: toWiringSummary(wiringInputs, requested),
+    assembly:
+      assemblySummary === null
+        ? null
+        : {
+            datasetVersion: assemblySummary.datasetVersion,
+            datasetGate: assemblySummary.datasetGate,
+            datasetRowCount: assemblySummary.datasetRowCount,
+            datasetSecurityCount: assemblySummary.datasetSecretCount,
+            datasetSource: assemblySummary.datasetSource,
+            datasetSourceNote: assemblySummary.datasetSourceNote,
+            datasetVersionId: assemblySummary.datasetVersionId,
+            dateRange: { ...assemblySummary.dateRange },
+            strategyId: assemblySummary.strategyId,
+            strategyVersion: assemblySummary.strategyVersion,
+            recipeId: assemblySummary.recipeId,
+            recipeSource: assemblySummary.recipeSource,
+            recipeFeatureIds: [...assemblySummary.recipeFeatureIds],
+            selectionSummary: assemblySummary.selectionSummary,
+            strategyDecisionEngine: assemblySummary.strategyDecisionEngine,
+            strategyDecisionEngineNote: assemblySummary.strategyDecisionEngineNote,
+            simulation: {
+              initialCapital: assemblySummary.simulation.initialCapital,
+              maxPositions: assemblySummary.simulation.maxPositions,
+              maxDailyBuys: assemblySummary.simulation.maxDailyBuys,
+              executionModel: assemblySummary.simulation.executionModel,
+              costModel: { ...assemblySummary.simulation.costModel },
+            },
+          },
+  };
+
+  // ------------------------------------------------------------------
+  // STRATEGY-ARCH-002 — Strategy Run Record（**每次运行必留**，零 schema 变更）
+  //
+  // 落点 = 上面这个 `result` 对象 ⇒ 由既有 `persistClosedLoopBacktestRun` 写进
+  // `closed_loop_backtest_run.resultJson`。只有真的走了 Core 判定（`strategy-core`）
+  // 才留档 —— 回落 legacy 配方时留一份「其实是 legacy 跑的」记录只会误导。
+  // ------------------------------------------------------------------
+  if (assembledSide !== null && assembledSide.strategyRunContext.engine === "strategy-core") {
+    const context = assembledSide.strategyRunContext;
+    const source = context.coreDecisionSource;
+    const coreVersion = context.coreVersion;
+    if (source !== null && coreVersion !== null && coreVersion.ok) {
+      const codeVersion = input.codeVersion ?? "unknown";
+      const digest = source.digest();
+      const record = buildStrategyRunRecord({
+        runId: run.runId,
+        version: coreVersion.version,
+        parameterSet: assembledSide.parameterSet as unknown as Record<string, never>,
+        resolvedParameterSet: source.resolvedParameterSet().values,
+        codeVersion,
+        universe: { universeId: context.universeId, members: null },
+        datasetReference: {
+          datasetVersionId: assemblySummary?.datasetVersionId ?? null,
+          datasetLabel: assemblySummary?.datasetVersion ?? null,
+          datasetSource: (assemblySummary?.datasetSource ?? "rebuild") as
+            | "registry"
+            | "rebuild"
+            | "injected",
+          datasetContentFingerprint: assemblySummary?.datasetVersion ?? null,
+        },
+        seed: null,
+        runtimeConfig: runtimeConfigSnapshot({
+          startDate: input.dateRange.startDate,
+          point: context.point,
+          maxRelativeDayObserved: digest.maxRelativeDayObserved,
+          horizonRelativeDay: digest.maxRelativeDayObserved,
+        }),
+        createdAt,
+        digest,
+        anchorPolicy: context.anchorPolicy,
+        notes: [
+          context.note,
+          ...source.notes,
+          ...coreVersion.notes,
+          "codeVersion=" + codeVersion + " 由调用方注入（本服务端不读 git / package.json）",
+        ],
+        unmappedExitRuleIds: coreVersion.adaptation.unmappedExitRuleIds,
+      });
+      resultOut.strategyRun = record;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // BACKTEST-002（B-03）— BacktestRunResult → resultJson.backtest（有界载荷）
+  // ------------------------------------------------------------------
+  const backtestRun = artifacts.tradeSimulationRun;
+  if (backtestRun !== undefined) {
+    const initialCapital = assemblySummary?.simulation.initialCapital ?? null;
+    if (initialCapital !== null) {
+      const __metrics = perfBegin("metrics.build_backtest_result");
+      const result = buildBacktestResult({
+        runId: run.runId,
+        strategyVersionId: input.strategyId + "@" + input.strategyVersion,
+        datasetVersionId: assemblySummary?.datasetVersionId ?? null,
+        parameterSet: (input.parameterSet ?? {}) as Readonly<Record<string, unknown>>,
+        initialCapital,
+        equityCurve: backtestRun.equityCurve,
+        tradeLedger: backtestRun.trades,
+        notes: [
+          "权益曲线 / 成交台账来自同链 backtest 阶段的真实产物（artifacts.tradeSimulationRun）",
+          "明细**不全量入库**：见 equitySamples / tradeSamples（有界）与 equityDigest / tradeDigest（全量指纹）",
+        ],
+      });
+      perfEnd(__metrics);
+      const __serialize = perfBegin("persistence.payload_serialization");
+      const payload = buildBacktestRunPayload({ result });
+      resultOut.backtest = {
+        canonicalMetrics: payload.canonicalMetrics,
+        summary: payload.summary,
+        equitySamples: [...payload.equitySamples],
+        tradeSamples: [...payload.tradeSamples],
+        truncated: payload.truncated,
+        equityDigest: payload.equityDigest,
+        tradeDigest: payload.tradeDigest,
+        notes: [...payload.notes],
+        executionMetadata: {
+          executionPolicyVersion: BACKTEST_EXECUTION_POLICY_VERSION,
+          engineVersion: "strategy-core/1.0.0",
+          codeVersion: input.codeVersion ?? "unknown",
+          initialCapital,
+          sampleLimit: DEFAULT_BACKTEST_SAMPLE_LIMIT,
+          notes: [...describeExecutionPolicy(DEFAULT_BACKTEST_EXECUTION_POLICY)],
+        },
+      };
+      perfEnd(__serialize);
+    }
+  }
+
+  // CLOSED-LOOP-BACKTEST-PERSIST-001 — 每次运行都留档，供「回测历史」页回看。
+  // best-effort：留档失败不抛（详见 persistClosedLoopBacktestRun 的说明）。
+  resultOut = await withPersistedSecurityLabels(resultOut);
+  const persistence = await perfRunAsync("persistence.db_write", () =>
+    persistClosedLoopBacktestRun({
+      experimentId,
+      strategyId: input.strategyId,
+      strategyVersion: input.strategyVersion,
+      startDate: input.dateRange.startDate,
+      endDate: input.dateRange.endDate,
+      result: resultOut,
+    }),
+  );
+  resultOut.persistence = persistence;
+
+  perfCount("run.resultJson_bytes", JSON.stringify(resultOut).length);
+  perfEnd(__runTotal);
+  return resultOut;
+}
 
 export type ResearchRunRouter = typeof researchRunRouter;

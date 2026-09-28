@@ -240,17 +240,30 @@ export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegac
   const position = definition.position;
   const resolvedRatio = resolvePositionRatio(position, definition);
   const fraction = resolvedRatio ?? (1 / position.maxPositions);
-  // BACKTEST-002（R-02）：`FIXED_AMOUNT` 现在有对应的 `fixed-amount` 声明（此前被静默投影为
-  // `fixed-fraction`，等于改写了策略语义）。缺金额 ⇒ **响亮抛错**，不退化成等权/固定比例。
-  const positionSizing: PositionSizingDeclaration = position.sizingMethod === "EQUAL_WEIGHT"
-    ? { kind: "equal-weight", maxPositions: position.maxPositions }
-    : position.sizingMethod === "RISK_BASED"
-      ? { kind: "rank-weighted", maxPositions: position.maxPositions }
-      : position.sizingMethod === "FIXED_AMOUNT"
-        ? { kind: "fixed-amount", fixedAmount: requireFixedAmount(position), maxPositions: position.maxPositions }
-        : position.sizingMethod === "EQUITY_RATIO"
-          ? { kind: "equity-fraction", fraction, maxPositions: position.maxPositions }
-          : { kind: "fixed-fraction", fraction, maxPositions: position.maxPositions };
+  let positionSizing: PositionSizingDeclaration;
+  if (
+    (position.positionTiers !== undefined && position.positionTiers.length > 0)
+    || (position.positionRankTiers !== undefined && position.positionRankTiers.length > 0)
+  ) {
+    positionSizing = {
+      kind: "score-tiered-equity-fraction",
+      tiers: position.positionTiers ?? [],
+      ...(position.positionRankTiers === undefined ? {} : { rankTiers: position.positionRankTiers }),
+      maxPositions: position.maxPositions,
+    };
+  } else {
+    // BACKTEST-002（R-02）：`FIXED_AMOUNT` 现在有对应的 `fixed-amount` 声明（此前被静默投影为
+    // `fixed-fraction`，等于改写了策略语义）。缺金额 ⇒ **响亮抛错**，不退化成等权/固定比例。
+    positionSizing = position.sizingMethod === "EQUAL_WEIGHT"
+      ? { kind: "equal-weight", maxPositions: position.maxPositions }
+      : position.sizingMethod === "RISK_BASED"
+        ? { kind: "rank-weighted", maxPositions: position.maxPositions }
+        : position.sizingMethod === "FIXED_AMOUNT"
+          ? { kind: "fixed-amount", fixedAmount: requireFixedAmount(position), maxPositions: position.maxPositions }
+          : position.sizingMethod === "EQUITY_RATIO"
+            ? { kind: "equity-fraction", fraction, maxPositions: position.maxPositions }
+            : { kind: "fixed-fraction", fraction, maxPositions: position.maxPositions };
+  }
 
   const parameters: ResearchParameterSchema = {
     parameters: definition.parameters.map((parameter: ParameterDefinition) => ({

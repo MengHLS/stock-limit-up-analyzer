@@ -17,12 +17,13 @@
  * 不同表、不同口径（那张存龙头候选回测结果），**禁互灌**。
  */
 
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { closedLoopBacktestRun } from "../../drizzle/schema";
 import type { ClosedLoopRunResult } from "../../shared/researchContracts";
 import {
   buildClosedLoopBacktestRunSummary,
+  readEvaluationStageOutput,
   type ClosedLoopBacktestRunSummary,
 } from "./summary";
 
@@ -179,8 +180,13 @@ type SummaryRow = {
   summaryJson: string | null;
 };
 
+type ParsedSummary = {
+  summary: ClosedLoopBacktestRunSummary;
+  missingMetrics: boolean;
+};
+
 /** 概要 JSON 解析：坏文本 ⇒ 抛错（不伪装成空摘要）。 */
-function parseSummaryJson(text: string | null): ClosedLoopBacktestRunSummary {
+function parseSummaryJson(text: string | null): ParsedSummary {
   if (text === null || text === undefined || text === "") {
     throw new Error("留档摘要缺失：summaryJson 为 NULL（记录损坏，不静默降级）");
   }
@@ -188,11 +194,25 @@ function parseSummaryJson(text: string | null): ClosedLoopBacktestRunSummary {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("留档摘要结构非法：summaryJson 不是对象");
   }
-  return parsed as ClosedLoopBacktestRunSummary;
+  const raw = parsed as Record<string, unknown>;
+  const missingMetrics =
+    !Object.prototype.hasOwnProperty.call(raw, "totalReturnPct") ||
+    !Object.prototype.hasOwnProperty.call(raw, "maxDrawdownPct") ||
+    !Object.prototype.hasOwnProperty.call(raw, "cagrPct");
+  return {
+    summary: {
+      ...(parsed as ClosedLoopBacktestRunSummary),
+      // 旧行没有这三项；读取时归一成 null，由列表路径惰性回填。
+      totalReturnPct: readFiniteNumber(raw.totalReturnPct),
+      maxDrawdownPct: readFiniteNumber(raw.maxDrawdownPct),
+      cagrPct: readFiniteNumber(raw.cagrPct),
+    },
+    missingMetrics,
+  };
 }
 
 function rowToRecord(row: SummaryRow): ClosedLoopBacktestRunRecord {
-  const summary = parseSummaryJson(row.summaryJson);
+  const { summary } = parseSummaryJson(row.summaryJson);
   return {
     // 先铺摘要（自带 status / 阶段计数 / 金额等），再用**表列**覆盖坐标类字段：
     // 表列是本次运行入参的直接来源，比摘要 JSON 更权威；同值时不产生语义差异。
@@ -212,6 +232,72 @@ function rowToRecord(row: SummaryRow): ClosedLoopBacktestRunRecord {
     skippedStageCount: row.skippedStageCount,
     firstBlockedReasonCode: row.firstBlockedReasonCode,
   };
+}
+
+/**
+ * 旧留档惰性补齐卡片指标。
+ *
+ * 背景：三项评估标量是后加到 summaryJson 的；此前落库的行没有。若每次列表都回读
+ * resultJson 会把首屏重新拖慢，因此只在内存里按 id 去重：读一次完整结果，回填
+ * summaryJson，之后该进程内的列表请求就走摘要快路径。
+ */
+const summaryMetricsBackfillInFlight = new Map<number, Promise<void>>();
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+async function backfillSummaryMetrics(id: number): Promise<void> {
+  const existing = summaryMetricsBackfillInFlight.get(id);
+  if (existing !== undefined) return existing;
+
+  const task = (async () => {
+    const db = await getDb();
+    if (!db) return;
+    const rows = await db
+      .select({
+        summaryJson: closedLoopBacktestRun.summaryJson,
+        resultJson: closedLoopBacktestRun.resultJson,
+      })
+      .from(closedLoopBacktestRun)
+      .where(eq(closedLoopBacktestRun.id, id));
+    const row = rows[0];
+    if (row === undefined || row.resultJson === null || row.resultJson === "") return;
+
+    const parsedResult = JSON.parse(row.resultJson) as unknown;
+    if (parsedResult === null || typeof parsedResult !== "object" || Array.isArray(parsedResult)) {
+      return;
+    }
+    const summary = row.summaryJson === null || row.summaryJson === ""
+      ? buildClosedLoopBacktestRunSummary(parsedResult as ClosedLoopRunResult)
+      : parseSummaryJson(row.summaryJson).summary;
+    const evaluation = readEvaluationStageOutput(parsedResult as ClosedLoopRunResult);
+    const performance =
+      evaluation !== null &&
+      typeof evaluation.performance === "object" &&
+      evaluation.performance !== null &&
+      !Array.isArray(evaluation.performance)
+        ? evaluation.performance as Record<string, unknown>
+        : null;
+    const nextSummary: ClosedLoopBacktestRunSummary = {
+      ...summary,
+      totalReturnPct:
+        performance === null ? summary.totalReturnPct ?? null : readFiniteNumber(performance.totalReturnPct),
+      maxDrawdownPct:
+        performance === null ? summary.maxDrawdownPct ?? null : readFiniteNumber(performance.maxDrawdownPct),
+      cagrPct:
+        performance === null ? summary.cagrPct ?? null : readFiniteNumber(performance.cagrPct),
+    };
+    await db
+      .update(closedLoopBacktestRun)
+      .set({ summaryJson: JSON.stringify(nextSummary) })
+      .where(eq(closedLoopBacktestRun.id, id));
+  })().finally(() => {
+    summaryMetricsBackfillInFlight.delete(id);
+  });
+
+  summaryMetricsBackfillInFlight.set(id, task);
+  return task;
 }
 
 /** 列出留档记录（摘要级，按留档时间倒序）。**不读** `resultJson`。 */
@@ -234,7 +320,44 @@ export async function listClosedLoopBacktestRuns(
   const rows = (await ordered
     .orderBy(desc(closedLoopBacktestRun.createdAt))
     .limit(limit)) as unknown as SummaryRow[];
-  return rows.map(rowToRecord);
+  const parsedRows = rows.map(row => {
+    const { summary, missingMetrics } = parseSummaryJson(row.summaryJson);
+    return {
+      record: {
+        ...summary,
+        id: row.id,
+        runId: row.runId,
+        createdAt: toIso(row.createdAt) ?? "",
+        experimentId: row.experimentId,
+        strategyId: row.strategyId,
+        strategyVersion: row.strategyVersion,
+        startDate: row.startDate,
+        endDate: row.endDate,
+        status: row.status,
+        executedStageCount: row.executedStageCount,
+        blockedStageCount: row.blockedStageCount,
+        skippedStageCount: row.skippedStageCount,
+        firstBlockedReasonCode: row.firstBlockedReasonCode,
+      },
+      missingMetrics,
+    };
+  });
+  const staleIds = parsedRows.filter(row => row.missingMetrics).map(row => row.record.id);
+  if (staleIds.length > 0) {
+    // 不阻塞首屏：先返回现有摘要（旧记录指标暂为 null），后台小并发回填，
+    // 之后的列表请求自然命中已更新的 summaryJson。
+    const concurrency = 4;
+    void (async () => {
+      for (let index = 0; index < staleIds.length; index += concurrency) {
+        await Promise.all(
+          staleIds.slice(index, index + concurrency).map(id => backfillSummaryMetrics(id)),
+        );
+      }
+    })().catch(() => {
+      // 回填失败不改变列表可用性；下次请求会再尝试。
+    });
+  }
+  return parsedRows.map(row => row.record);
 }
 
 /** 读取单条留档的完整内容（含 `resultJson`）。不存在 ⇒ null。 */
@@ -260,4 +383,47 @@ export async function getClosedLoopBacktestRun(
     result = parsed as ClosedLoopRunResult;
   }
   return { ...record, result };
+}
+
+/**
+ * 批量读取多条留档的完整内容（含 `resultJson`）。
+ *
+ * 用途：单策略多版本对比页需要一次性把若干版本的历史结果拼到一张曲线图上。
+ * 与 `getClosedLoopBacktestRun` 同口径：不存在 ⇒ 不返回；`resultJson` 损坏 ⇒ 抛错。
+ */
+export async function getClosedLoopBacktestRunsByIds(
+  ids: readonly number[],
+): Promise<ClosedLoopBacktestRunDetail[]> {
+  const unique = [...new Set(ids)].filter(id => Number.isInteger(id) && id > 0);
+  if (unique.length === 0) return [];
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({ ...SUMMARY_COLUMNS, resultJson: closedLoopBacktestRun.resultJson })
+    .from(closedLoopBacktestRun)
+    .where(inArray(closedLoopBacktestRun.id, unique));
+
+  const byId = new Map<number, ClosedLoopBacktestRunDetail>();
+  for (const raw of rows) {
+    const row = raw as unknown as SummaryRow & { resultJson: string | null };
+    const record = rowToRecord(row);
+    let result: ClosedLoopRunResult | null = null;
+    if (row.resultJson !== null && row.resultJson !== "") {
+      const parsed = JSON.parse(row.resultJson) as unknown;
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error(
+          `留档结果结构非法：closed_loop_backtest_run#${row.id}.resultJson 不是对象`,
+        );
+      }
+      result = parsed as ClosedLoopRunResult;
+    }
+    byId.set(row.id, { ...record, result });
+  }
+
+  // 出参顺序跟随入参，保证「最近一次在前」的语义由调用方掌控。
+  return unique.flatMap(id => {
+    const detail = byId.get(id);
+    return detail === undefined ? [] : [detail];
+  });
 }

@@ -36,6 +36,7 @@ import type { ParameterSearchEvaluator, ParameterSearchSampleOutcome } from "../
 import type { StrategyDocument } from "../strategySchema/types";
 import type { ResearchParameterSet } from "../types";
 import { STRATEGY_EVALUATION_STAGE_IDS, deriveExperimentId } from "./evaluate";
+import type { CorporateActionResolverLike } from "../../corporateActions/resolver";
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
 import { perfCount, perfRun } from "../../observability";
 
@@ -60,6 +61,8 @@ export interface StrategyParameterEvaluatorInput {
   readonly codeVersion: string;
   /** runId 前缀（便于在日志 / 审计里区分「哪个阶段的评估」）。 */
   readonly runIdPrefix: string;
+  /** 公司行为解析器（与正式装配一致；缺省 = 无外部解析器）。 */
+  readonly corporateActionResolver?: CorporateActionResolverLike;
 }
 
 /**
@@ -115,7 +118,11 @@ function evaluateOneParameterSet(
   // -- 2. 复用闭环既有执行器走 research → backtest → evaluation（**不手写子链**）--
   const artifacts = createClosedLoopWiringArtifacts();
   artifacts.dataset = input.dataset; // 预置 ⇒ 无需 data 阶段
-  const wiringInputs = buildClosedLoopWiringInputs(input.dataset, side);
+  const wiringInputs = buildClosedLoopWiringInputs(
+    input.dataset,
+    side,
+    input.corporateActionResolver,
+  );
   const stageRunners = createClosedLoopStageRunners(wiringInputs, artifacts, {
     requested: STRATEGY_EVALUATION_STAGE_IDS,
   });

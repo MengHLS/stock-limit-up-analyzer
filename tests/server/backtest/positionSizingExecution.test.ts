@@ -45,9 +45,11 @@ function intent(securityId: string, weight: number): PositionIntent {
 /** 单候选（weight=1）⇒ 等权现金预算 = 全部可用现金 —— 便于观测仓位口径的上限。 */
 function plan(input: {
   readonly positionSizing?: {
-    readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO";
+    readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "SCORE_TIERED_EQUITY_FRACTION";
     readonly fraction: number | null;
     readonly fixedAmount: number | null;
+    readonly tiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+    readonly rankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
   };
   readonly cash?: number;
   readonly currentEquity?: number;
@@ -148,6 +150,94 @@ describe("equity-fraction — 按决策日现有总权益，而不是初始资�
         currentEquity: Number.NaN,
       }),
     ).toThrowError(/currentEquity/);
+  });
+});
+
+describe("score-tiered-equity-fraction — 按候选 signalValue / rank 分档", () => {
+  function sizedIntent(signalValue: number, rank: number): PositionIntent {
+    return { ...intent("600001.SH", 1), signalValue, rank };
+  }
+
+  it("signalValue 0.6 命中低档 10%；0.75 命中高档 20%", () => {
+    const low = buyQuantity(
+      plan({
+        positionSizing: {
+          sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+          fraction: null,
+          fixedAmount: null,
+          tiers: [
+            { minScore: 0, fraction: 0.1 },
+            { minScore: 0.65, fraction: 0.2 },
+          ],
+        },
+        candidates: [sizedIntent(0.6, 1)],
+      }),
+    );
+    const high = buyQuantity(
+      plan({
+        positionSizing: {
+          sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+          fraction: null,
+          fixedAmount: null,
+          tiers: [
+            { minScore: 0, fraction: 0.1 },
+            { minScore: 0.65, fraction: 0.2 },
+          ],
+        },
+        candidates: [sizedIntent(0.75, 1)],
+      }),
+    );
+    expect(low).toBeGreaterThan(0);
+    expect(high).toBeGreaterThan(low);
+    expect(high).toBeLessThanOrEqual(2000);
+    expect(high).toBeGreaterThanOrEqual(1900);
+  });
+
+  it("rank 1 命中 20%；rank 3 命中 10%", () => {
+    const top = buyQuantity(
+      plan({
+        positionSizing: {
+          sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+          fraction: null,
+          fixedAmount: null,
+          rankTiers: [
+            { maxRank: 1, fraction: 0.2 },
+            { maxRank: 2, fraction: 0.15 },
+            { maxRank: 999, fraction: 0.1 },
+          ],
+        },
+        candidates: [sizedIntent(0.6, 1)],
+      }),
+    );
+    const third = buyQuantity(
+      plan({
+        positionSizing: {
+          sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+          fraction: null,
+          fixedAmount: null,
+          rankTiers: [
+            { maxRank: 1, fraction: 0.2 },
+            { maxRank: 2, fraction: 0.15 },
+            { maxRank: 999, fraction: 0.1 },
+          ],
+        },
+        candidates: [sizedIntent(0.6, 3)],
+      }),
+    );
+    expect(top).toBeGreaterThan(third);
+    expect(third).toBeGreaterThan(0);
+  });
+
+  it("缺 tiers / 缺 intent 均响亮抛错", () => {
+    expect(() =>
+      plan({
+        positionSizing: {
+          sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+          fraction: null,
+          fixedAmount: null,
+        },
+      }),
+    ).toThrowError(/缺有效 tiers/);
   });
 });
 

@@ -128,6 +128,26 @@ export interface BuildThreeFactorTopNStrategyDocumentInput {
   readonly trailingPolicy?: ResearchTrailingPolicyDefinition | null;
   /** 统一 stop/take-profit/time/strong-hold/capital-recycle 配置。 */
   readonly exitPolicy?: ExitPolicyDefinition | null;
+  /** 建仓侧绝对风险过滤（T+1..T+5 观察窗；全部为 PIT 可算的派生 bar 特征）。 */
+  readonly entryRiskFilter?: {
+    /** 观察窗平均振幅上限（ratio，如 0.08 = 8%）。 */
+    readonly maxMeanAmplitude?: number;
+    /** 观察窗最大振幅上限（ratio）。 */
+    readonly maxMaxAmplitude?: number;
+    /** 观察窗最低价相对首板收盘的破位下限（ratio，如 -0.10 = 允许破位 10%）。 */
+    readonly minDrawdownFromEventClose?: number;
+  };
+  /** 实验：按信号评分分档的权益仓位比例（minScore 升序，取命中最高档）。 */
+  readonly positionTiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+  /** 实验：按当日 rank 分档的权益仓位比例（maxRank 升序，取首个命中档）。 */
+  readonly positionRankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
+  /** 实验参数搜索：把 b4 最大振幅门槛暴露为 TUNABLE 参数（entry condition 走参数引用）。 */
+  readonly parameterizedMaxMaxAmplitude?: {
+    readonly defaultValue: number;
+    readonly min: number;
+    readonly max: number;
+    readonly step: number;
+  };
 }
 
 /**
@@ -163,6 +183,50 @@ export function buildThreeFactorTopNStrategyDocument(
   const trailingTakeProfitTrigger = input.trailingTakeProfitTrigger ?? "ON_CLOSE";
   const trailingPolicy = input.trailingPolicy ?? null;
   const unifiedExitPolicy = input.exitPolicy ?? null;
+  const riskFilter = input.entryRiskFilter ?? {};
+  for (const [label, value] of [
+    ["maxMeanAmplitude", riskFilter.maxMeanAmplitude],
+    ["maxMaxAmplitude", riskFilter.maxMaxAmplitude],
+  ] as const) {
+    if (
+      value !== undefined
+      && (!Number.isFinite(value) || value <= 0 || value >= 1)
+    ) {
+      throw new Error(
+        `3F TopN 策略：entryRiskFilter.${label} 必须位于 (0,1)，实际 ${String(value)}。`,
+      );
+    }
+  }
+  if (
+    riskFilter.minDrawdownFromEventClose !== undefined
+    && (
+      !Number.isFinite(riskFilter.minDrawdownFromEventClose)
+      || riskFilter.minDrawdownFromEventClose <= -1
+      || riskFilter.minDrawdownFromEventClose >= 0
+    )
+  ) {
+    throw new Error(
+      "3F TopN 策略：entryRiskFilter.minDrawdownFromEventClose 必须位于 (-1,0)。",
+    );
+  }
+  const amplitudeParam = input.parameterizedMaxMaxAmplitude;
+  if (amplitudeParam !== undefined) {
+    for (const value of [
+      amplitudeParam.defaultValue,
+      amplitudeParam.min,
+      amplitudeParam.max,
+      amplitudeParam.step,
+    ]) {
+      if (!Number.isFinite(value) || value <= 0 || value >= 1) {
+        throw new Error(
+          "3F TopN 策略：parameterizedMaxMaxAmplitude 的数值必须位于 (0,1)，且 step 为正。",
+        );
+      }
+    }
+    if (amplitudeParam.min > amplitudeParam.max || amplitudeParam.defaultValue > amplitudeParam.max) {
+      throw new Error("3F TopN 策略：parameterizedMaxMaxAmplitude 范围倒挂（min/max/default）。");
+    }
+  }
   if (unifiedExitPolicy !== null && trailingPolicy !== null) {
     throw new Error("3F TopN 策略：exitPolicy 与 trailingPolicy 不能同时声明。");
   }
@@ -351,6 +415,46 @@ export function buildThreeFactorTopNStrategyDocument(
               "恒真价格哨兵：仅用于让观察窗口进入 Core 规则图"
               + "（legacy 词汇无法表达「3F 合成分可算」这类特征门槛）",
           },
+          ...(riskFilter.maxMeanAmplitude === undefined ? [] : [{
+            id: "entry-risk-mean-amplitude",
+            field: "bar.observationMeanAmplitude",
+            operator: "LESS_THAN" as const,
+            value: riskFilter.maxMeanAmplitude,
+            valueType: "CONSTANT" as const,
+            enabled: true,
+            description:
+              `建仓风险过滤：T+1..T+5 平均振幅 < ${(riskFilter.maxMeanAmplitude * 100).toFixed(0)}%`,
+          }]),
+          ...(riskFilter.maxMaxAmplitude === undefined ? [] : [{
+            id: "entry-risk-max-amplitude",
+            field: "bar.observationMaxAmplitude",
+            operator: "LESS_THAN" as const,
+            value: riskFilter.maxMaxAmplitude,
+            valueType: "CONSTANT" as const,
+            enabled: true,
+            description:
+              `建仓风险过滤：T+1..T+5 最大振幅 < ${(riskFilter.maxMaxAmplitude * 100).toFixed(0)}%`,
+          }]),
+          ...(amplitudeParam === undefined ? [] : [{
+            id: "entry-risk-max-amplitude-param",
+            field: "bar.observationMaxAmplitude",
+            operator: "LESS_THAN" as const,
+            value: "max_max_amplitude",
+            valueType: "PARAMETER_REFERENCE" as const,
+            enabled: true,
+            description:
+              "建仓风险过滤：T+1..T+5 最大振幅 < max_max_amplitude（参数搜索维度）",
+          }]),
+          ...(riskFilter.minDrawdownFromEventClose === undefined ? [] : [{
+            id: "entry-risk-drawdown-depth",
+            field: "bar.drawdownFromEventClose",
+            operator: "GREATER_THAN" as const,
+            value: riskFilter.minDrawdownFromEventClose,
+            valueType: "CONSTANT" as const,
+            enabled: true,
+            description:
+              `建仓风险过滤：观察窗最低价相对首板收盘破位 > ${(riskFilter.minDrawdownFromEventClose * 100).toFixed(0)}%`,
+          }]),
         ],
         trigger: {
           type: "FIRST_VALID_DAY",
@@ -435,8 +539,24 @@ export function buildThreeFactorTopNStrategyDocument(
         positionRatio: THREE_FACTOR_TOPN_POSITION_RATIO,
         maxPositions,
         maxSinglePosition: THREE_FACTOR_TOPN_POSITION_RATIO,
+        ...(input.positionTiers === undefined ? {} : { positionTiers: input.positionTiers }),
+        ...(input.positionRankTiers === undefined ? {} : { positionRankTiers: input.positionRankTiers }),
       },
-      parameters: [],
+      parameters: amplitudeParam === undefined
+        ? []
+        : [{
+            code: "max_max_amplitude",
+            name: "最大振幅阈值",
+            dataType: "number" as const,
+            parameterRole: "TUNABLE" as const,
+            defaultValue: amplitudeParam.defaultValue,
+            min: amplitudeParam.min,
+            max: amplitudeParam.max,
+            step: amplitudeParam.step,
+            required: true,
+            unit: "ratio",
+            description: "观察窗 T+1..T+5 最大振幅上限（b4 参数搜索维度）",
+          }],
       risk: {},
     },
     executionAssumptions: {

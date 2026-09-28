@@ -239,6 +239,52 @@ describe("StrategyService", () => {
     expect(record.createdAt).toBe("2026-09-09T00:00:00.000Z");
     expect(record.strategy.fingerprint).toBe(doc.fingerprint);
   });
+
+  it("strategyType：创建时落库，后续文档缺省不得清空既有分类", async () => {
+    const { service, repo } = makeService();
+    const typed = makeDocument({ strategyType: "BASELINE" });
+
+    await service.create({ document: typed as unknown as Record<string, unknown> });
+    expect((await repo.getStrategy(typed.strategyId))?.strategyType).toBe("BASELINE");
+
+    // 回归：refreshEntityPointer 曾因未透传、且 DB 侧用 `?? null` 覆盖，导致每次 save 清空分类。
+    // 版本内容不可变，改名必须走 createVersion；补丁未声明 strategyType 时应继承既有分类。
+    const withoutType = makeDocInput({ name: "改名但不重复声明分类" });
+    delete (withoutType as { strategyType?: unknown }).strategyType;
+    await service.createVersion({
+      strategyId: typed.strategyId,
+      document: withoutType as unknown as Record<string, unknown>,
+    });
+
+    const summary = await repo.getStrategy(typed.strategyId);
+    expect(summary?.strategyType).toBe("BASELINE");
+    expect(summary?.name).toBe("改名但不重复声明分类");
+  });
+
+  it("strategyType：显式改分类时落库覆盖既有值", async () => {
+    const { service, repo } = makeService();
+    const typed = makeDocument({ strategyType: "BASELINE" });
+    await service.create({ document: typed as unknown as Record<string, unknown> });
+
+    const reclassified = makeDocument({ strategyType: "MANUAL", name: "改分类" });
+    await service.createVersion({
+      strategyId: typed.strategyId,
+      document: reclassified as unknown as Record<string, unknown>,
+      bump: "minor",
+    });
+
+    expect((await repo.getStrategy(typed.strategyId))?.strategyType).toBe("MANUAL");
+  });
+
+  it("strategyType：非法值被校验器拒绝，不静默落库", async () => {
+    const { service } = makeService();
+    const invalid = makeDocInput({
+      strategyType: "NOT_A_REAL_TYPE" as unknown as StrategyDocumentInput["strategyType"],
+    });
+
+    await expect(service.create({ document: invalid as unknown as Record<string, unknown> }))
+      .rejects.toThrow(/strategyType/);
+  });
 });
 
 /** 构造一个最小 §17 版本追溯记录（复用 createStrategyVersionRecord）。 */

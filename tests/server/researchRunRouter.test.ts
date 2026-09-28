@@ -75,6 +75,7 @@ describe("FE-0 · researchRun appRouter 注册守卫", () => {
     expect(keys).toContain("researchRun.catalog.list");
     expect(keys).toContain("researchRun.readiness");
     expect(keys).toContain("researchRun.loopRun");
+    expect(keys).toContain("researchRun.compareStrategyVersions");
   });
 });
 
@@ -329,5 +330,68 @@ describe("FE-4 · researchRun.loopRun — 真实执行", () => {
     await expect(
       caller.researchRun.loopRun(baseRunInput({ stageIds: ["not-a-stage"] }))
     ).rejects.toThrow();
+  });
+});
+
+describe("FE-4 · researchRun.compareStrategyVersions — 多版本对比", () => {
+  /**
+   * 边界声明（诚实）：`compareStrategyVersions` 的策略文档读取走模块内 DB-backed
+   * `StrategyService`，本单测环境无 DB ⇒ **没有可成功装配的版本**，因此这里**不**断言
+   * 「有版本跑成功」，只断言编排层可验证的不变式：请求顺序如实保留、逐版本独立 runId、
+   * 失败逐条如实返回（FAILED + 稳定错误码 + 无 result / archiveId）、一个版本失败继续跑下一个。
+   */
+  it("逐版本独立 runId / experimentId，失败逐条返回且不阻断后续版本", async () => {
+    const r = await caller.researchRun.compareStrategyVersions({
+      strategyId: "limit-up-baseline",
+      strategyVersions: ["1.0.0", "9.9.9", "1.0.0"],
+      dateRange: { ...DATE_RANGE },
+      codeVersion: "test",
+    });
+
+    // 请求顺序被如实保留（不去重、不重排）
+    expect(r.entries.map(e => e.strategyVersion)).toEqual([
+      "1.0.0",
+      "9.9.9",
+      "1.0.0",
+    ]);
+    expect(r.strategyId).toBe("limit-up-baseline");
+    expect(r.comparisonId).toMatch(/^cmp-/);
+
+    // 每个版本各自独立 runId（互不相同）
+    const runIds = r.entries.map(e => e.runId);
+    expect(new Set(runIds).size).toBe(runIds.length);
+    for (const runId of runIds) expect(runId).toMatch(/^clcmp-/);
+
+    // 每个版本逐条如实返回；本环境无 DB ⇒ 全部 FAILED，但**都到达了运行层**（不是整批早退）
+    for (const entry of r.entries) {
+      expect(entry.status).toBe("FAILED");
+      expect(entry.failure?.code).toBeTruthy();
+      expect(entry.failure?.message.length).toBeGreaterThan(0);
+      expect(entry.result).toBeNull();
+      expect(entry.archiveId).toBeNull();
+    }
+    // 重复同一版本仍各自独立成条（不去重、不共享 runId）
+    expect(r.entries[0]!.strategyVersion).toBe(r.entries[2]!.strategyVersion);
+    expect(r.entries[0]!.runId).not.toBe(r.entries[2]!.runId);
+  });
+
+  it("版本数 < 2 被 input schema 拒绝（对比至少两个版本）", async () => {
+    await expect(
+      caller.researchRun.compareStrategyVersions({
+        strategyId: "limit-up-baseline",
+        strategyVersions: ["1.0.0"],
+        dateRange: { ...DATE_RANGE },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("runtimeConfig 如实回显，未覆写时为空对象", async () => {
+    const r = await caller.researchRun.compareStrategyVersions({
+      strategyId: "limit-up-baseline",
+      strategyVersions: ["1.0.0", "9.9.9"],
+      dateRange: { ...DATE_RANGE },
+      codeVersion: "test",
+    });
+    expect(r.runtimeConfig).toEqual({});
   });
 });

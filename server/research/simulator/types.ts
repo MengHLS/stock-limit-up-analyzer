@@ -172,9 +172,12 @@ export interface SimulationConfig {
       | "RANK_WEIGHTED"
       | "FIXED_AMOUNT"
       | "FIXED_RATIO"
-      | "RISK_BASED";
+      | "RISK_BASED"
+      | "SCORE_TIERED_EQUITY_FRACTION";
     readonly fraction: number | null;
     readonly fixedAmount: number | null;
+    readonly tiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+    readonly rankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
   };
   /**
    * 策略声明的退出政策。

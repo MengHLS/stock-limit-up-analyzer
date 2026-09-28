@@ -462,6 +462,8 @@ export const strategyVersions = mysqlTable("strategy_versions", {
   status: varchar("status", { length: 32 }).notNull().default("Draft"),
   /** STEP STRATEGY-003：该版本变更说明（人类可读）。 */
   description: varchar("description", { length: 512 }),
+  /** 用户标记的有价值版本（仅展示元数据，不参与版本指纹 / 不可变内容）。 */
+  isStarred: boolean("isStarred").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   /**
    * STEP STRATEGY-003：**唯一合法用途 = 状态迁移时间**。内容（strategyDocumentJson /
@@ -474,6 +476,7 @@ export const strategyVersions = mysqlTable("strategy_versions", {
   createdAtIdx: index("idx_strategy_versions_created").on(table.createdAt),
   parentVersionIdx: index("idx_strategy_versions_parent").on(table.parentVersionId),
   statusIdx: index("idx_strategy_versions_status").on(table.status),
+  starredIdx: index("idx_strategy_versions_starred").on(table.isStarred),
 }));
 
 export type StrategyVersionRow = typeof strategyVersions.$inferSelect;

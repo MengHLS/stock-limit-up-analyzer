@@ -51,7 +51,7 @@ import {
   validateRuleGraph,
   type RuleNode,
 } from "./ruleGraph";
-import { isKnownCoreFieldReference } from "./fieldReference";
+import { fieldReferenceFeatureId, isKnownCoreFieldReference } from "./fieldReference";
 import {
   validateParameterSchema,
   type ParameterDefinition,
@@ -398,8 +398,9 @@ export function validateCoreDefinition(
   }
   for (const column of [...usedColumns].sort()) {
     if (declaredFields.has(column)) continue;
-    // 派生字段（volumeRatio / haircutFromEventLow / …）不属于原始列，跳过。
-    if (["volumeRatio", "haircutFromEventLow", "isBullish", "momentumFromEventClose"].includes(column)) continue;
+    // 派生字段（volumeRatio / observationMeanAmplitude / …）不属于原始列，跳过；
+    // 以特征桥接表为唯一权威，避免硬编码名单漂移。
+    if (fieldReferenceFeatureId(`bar.${column}`) !== null) continue;
     issues.push(
       validationIssue(
         "DATA_REQUIREMENTS_UNSATISFIED",

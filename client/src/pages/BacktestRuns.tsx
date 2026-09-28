@@ -118,7 +118,15 @@ export default function BacktestRuns() {
     return Number.isInteger(n) && n > 0 ? n : null;
   }, [search]);
 
-  const listQuery = trpc.researchRun.listBacktests.useQuery({ limit: 100 });
+  const strategyFilter = useMemo(() => {
+    const raw = new URLSearchParams(search).get("strategyId");
+    return raw !== null && raw !== "" ? raw : null;
+  }, [search]);
+
+  const listQuery = trpc.researchRun.listBacktests.useQuery({
+    limit: 100,
+    ...(strategyFilter !== null ? { strategyId: strategyFilter } : {}),
+  });
   const detailQuery = trpc.researchRun.getBacktest.useQuery(
     { id: selectedId ?? 0 },
     { enabled: selectedId !== null },
@@ -138,7 +146,7 @@ export default function BacktestRuns() {
     return buildClosedLoopRunViewModel(detail.result);
   }, [detailQuery.data]);
 
-  const hasFilter = false;
+  const hasFilter = strategyFilter !== null;
 
   const handleSelect = (id: number) => {
     const next = selectedId === id ? "/backtest-runs" : `/backtest-runs?id=${id}`;
@@ -153,8 +161,14 @@ export default function BacktestRuns() {
           <div>
             <h1 className="text-lg font-semibold text-slate-800">回测历史</h1>
             <p className="text-xs text-slate-500">
-              每次在「策略」页运行回测都会自动留档一行；点「查看」载入那次运行的完整产出
-              （权益曲线 / 成交明细 / 拒单原因 / 阶段执行表）。
+              {strategyFilter !== null ? (
+                <>
+                  当前只显示策略 <span className="font-mono">{strategyFilter}</span> 的回测留档；
+                </>
+              ) : (
+                "每次在「策略」页运行回测都会自动留档一行；"
+              )}
+              点「查看」载入那次运行的完整产出（权益曲线 / 成交明细 / 拒单原因 / 阶段执行表）。
             </p>
           </div>
         </div>

@@ -15,6 +15,7 @@ import {
   type LoadedTarget,
   type RunConfigViewModel,
 } from "@/components/strategy";
+import { toRuntimeConfig } from "@/components/strategy/RunConfigPanel";
 import {
   draftsToDefinition,
   backtestConfigFromDrafts,
@@ -368,6 +369,7 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
 
   const handleRun = (config: RunConfigViewModel) => {
     setRunError(null);
+    const runtimeConfig = toRuntimeConfig(config, vm);
     loopRun.mutate({
       // experimentId 仅作谱系锚点标识（确定性派生，非业务数值）
       experimentId: deriveExperimentId(
@@ -378,7 +380,7 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
       strategyId: vm.strategyId,
       strategyVersion: vm.version,
       dateRange: { startDate: config.startDate, endDate: config.endDate },
-      executionModel: config.executionModel,
+      ...(Object.keys(runtimeConfig).length > 0 ? { runtimeConfig } : {}),
       useRealData: true as const,
       // gate 取库内 `dataset_version.status` 的真实值（READY → PASS），不人为压成冒烟口径。
       datasetGuards: { dataReady: true as const },

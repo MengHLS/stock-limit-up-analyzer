@@ -132,11 +132,15 @@ export interface PlanDecisionInput {
 
 /** 仓位口径（策略声明的最小面；与 `PositionSizingDeclaration` 同义，避免反向依赖）。 */
 export interface PositionSizingInput {
-  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED";
+  readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED" | "SCORE_TIERED_EQUITY_FRACTION";
   /** `FIXED_FRACTION` 占初始资金；`EQUITY_FRACTION` 占决策日现有总权益。 */
   readonly fraction: number | null;
   /** `FIXED_AMOUNT` 的固定金额（元，> 0）。 */
   readonly fixedAmount: number | null;
+  /** `SCORE_TIERED_EQUITY_FRACTION`：按候选信号 score 分档占现有总权益。 */
+  readonly tiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+  /** `SCORE_TIERED_EQUITY_FRACTION`：按候选当日 rank 分档（1 = 最优）。 */
+  readonly rankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
 }
 
 /**
@@ -160,6 +164,7 @@ function applyPositionSizing(
   sizing: PositionSizingInput | undefined,
   initialCapital: number | undefined,
   currentEquity: number | undefined,
+  intent: PositionIntent | undefined,
 ): { readonly budget: number; readonly cappedBy: string | null } {
   if (sizing === undefined) return { budget: allocatable, cappedBy: null };
   const finite = (value: number | null | undefined): value is number =>
@@ -196,6 +201,55 @@ function applyPositionSizing(
       }
       const target = currentEquity * sizing.fraction;
       return { budget: Math.min(allocatable, target), cappedBy: sizing.sizingMethod };
+    }
+    case "SCORE_TIERED_EQUITY_FRACTION": {
+      if (
+        !(Array.isArray(sizing.tiers) && sizing.tiers.length > 0)
+        && !(Array.isArray(sizing.rankTiers) && sizing.rankTiers.length > 0)
+      ) {
+        throw new Error(
+          "TradeSimulator: 仓位口径 SCORE_TIERED_EQUITY_FRACTION 缺有效 tiers/rankTiers（拒绝静默降级）。"
+        );
+      }
+      if (!finite(currentEquity)) {
+        throw new Error(
+          "TradeSimulator: 仓位口径 SCORE_TIERED_EQUITY_FRACTION 需要 currentEquity 作为计量基数"
+        );
+      }
+      if (intent === undefined) {
+        throw new Error(
+          "TradeSimulator: SCORE_TIERED_EQUITY_FRACTION 需要候选意图（score）选档"
+        );
+      }
+      const signalValue = intent.signalValue;
+      if (!Number.isFinite(signalValue)) {
+        throw new Error(
+          `TradeSimulator: 候选 ${intent.securityId} 缺有效 signalValue（实际 ${String(signalValue)}）`
+        );
+      }
+      if (Array.isArray(sizing.rankTiers) && sizing.rankTiers.length > 0) {
+        let fraction = sizing.rankTiers[0]!.fraction;
+        for (const tier of [...sizing.rankTiers].sort((left, right) => left.maxRank - right.maxRank)) {
+          if (intent.rank <= tier.maxRank) {
+            fraction = tier.fraction;
+            break;
+          }
+        }
+        const target = currentEquity * fraction;
+        return { budget: Math.min(allocatable, target), cappedBy: sizing.sizingMethod };
+      } else {
+        if (!Array.isArray(sizing.tiers) || sizing.tiers.length === 0) {
+          throw new Error(
+            "TradeSimulator: 仓位口径 SCORE_TIERED_EQUITY_FRACTION 需要 tiers 或 rankTiers。"
+          );
+        }
+        let fraction = sizing.tiers[0]!.fraction;
+        for (const tier of [...sizing.tiers].sort((left, right) => left.minScore - right.minScore)) {
+          if (signalValue >= tier.minScore) fraction = tier.fraction;
+        }
+        const target = currentEquity * fraction;
+        return { budget: Math.min(allocatable, target), cappedBy: sizing.sizingMethod };
+      }
     }
     case "FIXED_AMOUNT": {
       if (!finite(sizing.fixedAmount)) {
@@ -478,6 +532,7 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
       positionSizing,
       initialCapital,
       currentEquity,
+      intent,
     );
     const budget = sizing.budget;
     if (sizing.cappedBy !== null && budget <= 0) {

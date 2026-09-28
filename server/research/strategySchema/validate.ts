@@ -39,8 +39,10 @@ import {
   STRATEGY_DOCUMENT_RECORD_KIND,
   STRATEGY_DOCUMENT_RECORD_VERSION,
   STRATEGY_EXECUTION_MODEL_IDS,
+  STRATEGY_TYPES,
   STRATEGY_VERSION_RECORD_KIND,
   STRATEGY_VERSION_RECORD_VERSION,
+  isStrategyType,
   isValidStrategyVersionFormat,
   type StrategyDocument,
   type StrategyVersionRecord,
@@ -277,6 +279,53 @@ function checkPositionSizing(positionSizing: unknown, issues: ResearchValidation
         "positionSizing.fixedAmount",
         `fixed-amount.fixedAmount 必须是 > 0 的有限数字（元），实际：${String(fixedAmount)}`,
       ));
+    }
+  }
+  if (kind === "score-tiered-equity-fraction") {
+    const tiers = ps.tiers;
+    const rankTiers = ps.rankTiers;
+    if (
+      !(Array.isArray(tiers) && tiers.length > 0)
+      && !(Array.isArray(rankTiers) && rankTiers.length > 0)
+    ) {
+      issues.push(issue(
+        "SCHEMA_POSITION_SIZING_TIERS_INVALID",
+        "positionSizing.tiers",
+        "score-tiered-equity-fraction 必须声明至少一档 tiers 或 rankTiers",
+      ));
+      return;
+    }
+    if (Array.isArray(tiers)) {
+      let previousMinScore = -Infinity;
+      tiers.forEach((tier, index) => {
+        const raw = tier as Record<string, unknown>;
+        const minScore = raw.minScore;
+        const fraction = raw.fraction;
+        const at = `positionSizing.tiers[${index}]`;
+        if (typeof minScore !== "number" || !Number.isFinite(minScore) || minScore < 0 || minScore > 1) {
+          issues.push(issue("SCHEMA_POSITION_SIZING_TIERS_INVALID", `${at}.minScore`, "minScore 必须是 [0,1] 的有限数字"));
+        } else if (minScore < previousMinScore) {
+          issues.push(issue("SCHEMA_POSITION_SIZING_TIERS_INVALID", `${at}.minScore`, "tiers 必须按 minScore 升序"));
+        }
+        previousMinScore = Math.max(previousMinScore, typeof minScore === "number" ? minScore : -Infinity);
+        if (typeof fraction !== "number" || !Number.isFinite(fraction) || fraction < 0 || fraction > 1) {
+          issues.push(issue("SCHEMA_POSITION_SIZING_TIERS_INVALID", `${at}.fraction`, "fraction 必须是 [0,1] 的有限数字"));
+        }
+      });
+    }
+    if (Array.isArray(rankTiers)) {
+      rankTiers.forEach((tier, index) => {
+        const raw = tier as Record<string, unknown>;
+        const maxRank = raw.maxRank;
+        const fraction = raw.fraction;
+        const at = `positionSizing.rankTiers[${index}]`;
+        if (typeof maxRank !== "number" || !Number.isInteger(maxRank) || maxRank < 1) {
+          issues.push(issue("SCHEMA_POSITION_SIZING_TIERS_INVALID", `${at}.maxRank`, "maxRank 必须是 >= 1 的整数"));
+        }
+        if (typeof fraction !== "number" || !Number.isFinite(fraction) || fraction < 0 || fraction > 1) {
+          issues.push(issue("SCHEMA_POSITION_SIZING_TIERS_INVALID", `${at}.fraction`, "fraction 必须是 [0,1] 的有限数字"));
+        }
+      });
     }
   }
 }
@@ -545,6 +594,14 @@ export function validateStrategyDocument(document: StrategyDocument | undefined 
   }
   checkNonEmptyString(d.name, "name", "SCHEMA_NAME_EMPTY", "策略 name", issues);
   checkOptionalNonEmptyString(d.description, "description", "SCHEMA_DESCRIPTION_EMPTY", "description", issues);
+  // -- 策略类型标签（封闭词汇表；缺省 = 未分类） --
+  if (d.strategyType !== undefined && !isStrategyType(d.strategyType)) {
+    issues.push(issue(
+      "SCHEMA_STRATEGY_TYPE_INVALID",
+      "strategyType",
+      `strategyType 必须属于 ${STRATEGY_TYPES.join(" / ")}，实际：${String(d.strategyType)}`,
+    ));
+  }
 
   // -- §16 rules --
   checkUniverse(d.universe as unknown, d.datasetVersion as string | undefined, issues);

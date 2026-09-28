@@ -106,6 +106,7 @@ function rowToVersionSummary(row: StrategyVersionRow): StrategyVersionSummary {
     status: row.status,
     parentVersionId: row.parentVersionId ?? null,
     description: row.description ?? null,
+    isStarred: row.isStarred,
     createdAt: toIso(row.createdAt),
   };
 }
@@ -156,13 +157,15 @@ export class DbStrategyRepository implements StrategyRepository {
       .limit(1);
     if (existing.length > 0) {
       // currentVersionId 为权威指针，但调用方未显式提供时不得被 null 覆盖既有值。
+      // 同理 strategyType：undefined = 本次调用不表态，保留既有分类；
+      // null = 显式清空。service 层已保证「文档缺省 → 传既有值」，这里再守一道。
       await db.update(strategies)
         .set({
           name: input.name,
           latestVersion: input.latestVersion,
           status: input.status,
           description: input.description ?? null,
-          strategyType: input.strategyType ?? null,
+          ...(input.strategyType === undefined ? {} : { strategyType: input.strategyType }),
           ...(input.currentVersionId === undefined ? {} : { currentVersionId: input.currentVersionId }),
         })
         .where(eq(strategies.strategyId, input.strategyId));
@@ -488,6 +491,18 @@ export class DbStrategyRepository implements StrategyRepository {
     return row?.id;
   }
 
+  async getVersionStatus(strategyId: string, version: string): Promise<string | undefined> {
+    const row = await this.selectVersionRow(strategyId, version);
+    return row?.status;
+  }
+
+  async isCurrentStrategyVersion(strategyId: string, version: string): Promise<boolean> {
+    const strategy = await this.getStrategy(strategyId);
+    if (strategy === undefined || strategy.currentVersionId === null) return false;
+    const rowId = await this.getVersionRowId(strategyId, version);
+    return rowId === strategy.currentVersionId;
+  }
+
   async updateVersionStatus(strategyId: string, version: string, status: string): Promise<void> {
     const db = await getDb();
     if (!db) throw new Error("数据库不可用，无法迁移版本状态");
@@ -496,6 +511,17 @@ export class DbStrategyRepository implements StrategyRepository {
       .where(and(eq(strategyVersions.strategyId, strategyId), eq(strategyVersions.version, version)));
     if (result[0].affectedRows === 0) {
       throw new Error(`未找到策略版本，无法迁移状态：${strategyId}@${version}`);
+    }
+  }
+
+  async updateVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void> {
+    const db = await getDb();
+    if (!db) throw new Error("数据库不可用，无法更新版本星标");
+    const result = await db.update(strategyVersions)
+      .set({ isStarred })
+      .where(and(eq(strategyVersions.strategyId, strategyId), eq(strategyVersions.version, version)));
+    if (result[0].affectedRows === 0) {
+      throw new Error(`未找到策略版本，无法更新星标：${strategyId}@${version}`);
     }
   }
 

@@ -290,6 +290,9 @@ export const STRATEGY_DERIVED_BAR_FIELDS = [
   "haircutFromEventLow",
   "isBullish",
   "momentumFromEventClose",
+  "observationMeanAmplitude",
+  "observationMaxAmplitude",
+  "drawdownFromEventClose",
 ] as const;
 
 /**
@@ -577,6 +580,10 @@ export interface PositionDefinition {
   readonly maxSinglePosition?: number;
   /** 比例由参数表达时的参数 code。 */
   readonly parameter?: string;
+  /** 实验：按候选 signalValue 分档的权益仓位比例（与 sizingMethod=EQUITY_RATIO 配合）。 */
+  readonly positionTiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+  /** 实验：按候选当日 rank 分档的权益仓位比例（rank 1 = 最优）。 */
+  readonly positionRankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
 }
 
 /**

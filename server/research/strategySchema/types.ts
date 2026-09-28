@@ -54,6 +54,41 @@ export const STRATEGY_VERSION_RECORD_KIND = "STRATEGY_VERSION_RECORD" as const;
 export const STRATEGY_VERSION_RECORD_VERSION = 1 as const;
 
 // ---------------------------------------------------------------------------
+// 策略类型标签（策略族分类词汇表）
+// ---------------------------------------------------------------------------
+
+/**
+ * 策略类型标签（策略族级分类，非版本级）。
+ *
+ * 用途：列表页 / 总览页按类别归类策略资产。落库到 `strategies.strategyType`
+ * （varchar(32)），随策略实体 upsert 持久化，**不进版本指纹**（同 §16 name/description 口径：
+ * 分类是实体的展示元数据，不改变策略语义）。
+ *
+ * 词汇表纪律：封闭枚举，新增类别必须同时加到这里与前端 `strategyTypeVocabulary.ts`，
+ * 并由契约单测守护两侧一致（避免前端自由文本漂移成事实上的第二套口径）。
+ */
+export const STRATEGY_TYPES = [
+  /** 基线策略：如 limit-up-baseline。 */
+  "BASELINE",
+  /** 首板回踩等主力人工策略。 */
+  "MANUAL",
+  /** 三因子 Top-N 策略族。 */
+  "THREE_FACTOR_TOPN",
+  /** 研究候选策略（cand-* 自动生成）。 */
+  "RESEARCH_CANDIDATE",
+  /** 测试 / 验证用策略。 */
+  "TEST",
+  /** 其他 / 未归类。 */
+  "OTHER",
+] as const;
+export type StrategyType = (typeof STRATEGY_TYPES)[number];
+
+/** 值是否为合法策略类型标签（供 validator / 测试复用）。 */
+export function isStrategyType(value: unknown): value is StrategyType {
+  return typeof value === "string" && (STRATEGY_TYPES as readonly string[]).includes(value);
+}
+
+// ---------------------------------------------------------------------------
 // 结构化版本（major.minor.patch）
 // ---------------------------------------------------------------------------
 
@@ -114,6 +149,7 @@ export const POSITION_SIZING_KINDS = [
   "equity-fraction",
   "rank-weighted",
   "fixed-amount",
+  "score-tiered-equity-fraction",
 ] as const;
 export type PositionSizingKind = (typeof POSITION_SIZING_KINDS)[number];
 
@@ -130,7 +166,13 @@ export type PositionSizingDeclaration =
   | { readonly kind: "fixed-fraction"; readonly fraction: number; readonly maxPositions: number }
   | { readonly kind: "equity-fraction"; readonly fraction: number; readonly maxPositions: number }
   | { readonly kind: "rank-weighted"; readonly maxPositions: number }
-  | { readonly kind: "fixed-amount"; readonly fixedAmount: number; readonly maxPositions: number };
+  | { readonly kind: "fixed-amount"; readonly fixedAmount: number; readonly maxPositions: number }
+  | {
+      readonly kind: "score-tiered-equity-fraction";
+      readonly tiers: readonly { readonly minScore: number; readonly fraction: number }[];
+      readonly rankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
+      readonly maxPositions: number;
+    };
 
 // ---------------------------------------------------------------------------
 // Universe / Dataset / Execution assumptions
@@ -251,6 +293,13 @@ export interface StrategyDocument {
   readonly version: string;
   readonly name: string;
   readonly description?: string;
+  /**
+   * 策略类型标签（策略族级分类；封闭词汇表 `STRATEGY_TYPES`）。
+   *
+   * 与 name/description 同为实体展示元数据：不进版本指纹，落库到 `strategies.strategyType`。
+   * 缺省 = 未分类（不猜测、不自动推导）。
+   */
+  readonly strategyType?: StrategyType;
 
   // -- §16 rules --
   readonly universe: StrategyUniverse;

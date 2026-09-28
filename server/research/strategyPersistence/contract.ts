@@ -63,6 +63,8 @@ export interface StrategyVersionSummary {
   /** STEP STRATEGY-003：父版本（版本演进链；null = 无父）。 */
   readonly parentVersionId: number | null;
   readonly description: string | null;
+  /** 用户标记的有价值版本（展示元数据，不参与内容指纹）。 */
+  readonly isStarred: boolean;
   readonly createdAt: string;
 }
 
@@ -216,8 +218,14 @@ export interface StrategyRepository {
   // ---- STRATEGY-003 新增 ----
   /** 读取版本行主键（软引用锚点；供 clone 写 parentVersionId 用）。 */
   getVersionRowId(strategyId: string, version: string): Promise<number | undefined>;
+  /** 读取版本的轻量状态（不反序列化文档；供实体状态同步用）。 */
+  getVersionStatus(strategyId: string, version: string): Promise<string | undefined>;
+  /** 判断指定版本是否为策略实体的权威当前版本（不反序列化文档）。 */
+  isCurrentStrategyVersion(strategyId: string, version: string): Promise<boolean>;
   /** 读取完整版本包（canonical + 追溯记录 + 5 类投影）。 */
   getVersionBundle(strategyId: string, version: string): Promise<StrategyVersionBundle | undefined>;
   /** 迁移版本生命周期状态（唯一允许的 UPDATE；内容仍不可变）。 */
   updateVersionStatus(strategyId: string, version: string, status: string): Promise<void>;
+  /** 用户星标（展示元数据的 UPDATE；内容仍不可变）。 */
+  updateVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void>;
 }

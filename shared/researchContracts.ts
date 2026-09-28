@@ -462,6 +462,14 @@ export const strategySetVersionStatusInputSchema = z.object({
 });
 export type StrategySetVersionStatusInput = z.infer<typeof strategySetVersionStatusInputSchema>;
 
+/** 版本星标：用户标记有价值的版本（仅展示元数据；不改变版本内容）。 */
+export const strategySetVersionStarredInputSchema = z.object({
+  strategyId: z.string().min(1, "strategyId 必填"),
+  version: z.string().min(1, "version 必填（semver x.y.z）"),
+  isStarred: z.boolean(),
+});
+export type StrategySetVersionStarredInput = z.infer<typeof strategySetVersionStarredInputSchema>;
+
 /** StrategyLifecycleRecord 传输层透传（校验由后端 assertValidStrategyLifecycleRecord 负责）。 */
 export const strategyLifecycleRecordSchema = z.custom<Record<string, unknown>>(
   value => typeof value === "object" && value !== null && !Array.isArray(value),
@@ -799,6 +807,41 @@ export type ClosedLoopLifecycleInput = z.infer<
 >;
 
 /**
+ * 运行工作台 — 本次运行的**运行期覆写**（`useRealData=true` 时生效）。
+ *
+ * 存在的理由：单策略回测要能在前端改「初始资金 / 成本口径 / 持仓上限 / 执行模型 / 参数」，
+ * 而这些在策略文档里都有默认声明。覆写必须**显式声明**并进入运行记录，
+ * 否则「界面上改了、实际按文档默认跑」会变成静默口径漂移。
+ *
+ * 优先级（装配层实现）：系统默认 < 策略文档声明 < **本对象**。
+ * 未提供的字段一律取策略文档声明，不做任何猜测补齐。
+ */
+export const closedLoopRuntimeConfigSchema = z.object({
+  /** 初始资金（> 0）；缺省 = 策略文档 `executionAssumptions.backtestConfig.initialCapital`。 */
+  initialCapital: z.number().positive().optional(),
+  /** 最大持仓数（>= 1 整数）；缺省 = 策略文档声明。 */
+  maxPositions: z.number().int().positive().optional(),
+  /** 单日最多新建仓数（>= 1 整数）；缺省 = 策略文档声明。 */
+  maxDailyBuys: z.number().int().positive().optional(),
+  /** 佣金费率（双边）；缺省 = 策略文档 `costModel.commissionRate`。 */
+  commissionRate: z.number().min(0).optional(),
+  /** 印花税（仅卖出）；缺省 = 策略文档声明。 */
+  stampDutyRate: z.number().min(0).optional(),
+  /** 过户费（双边）；缺省 = 策略文档声明。 */
+  transferFeeRate: z.number().min(0).optional(),
+  /** 滑点（bps）；缺省 = 策略文档声明。 */
+  slippageBps: z.number().min(0).optional(),
+  /** 执行模型（NEXT_OPEN / NEXT_CLOSE / VWAP_PROXY / LIMIT_PRICE）；缺省 = 策略文档声明。 */
+  executionModel: z.string().min(1).optional(),
+  /**
+   * 参数覆写（键必须存在于策略文档 `parameters`，否则装配层响亮拒绝）。
+   * 缺省 = 全部取各参数 `defaultValue`。
+   */
+  parameterOverrides: z.record(z.string(), z.unknown()).optional(),
+});
+export type ClosedLoopRuntimeConfig = z.infer<typeof closedLoopRuntimeConfigSchema>;
+
+/**
  * 闭环运行请求（FE-4）。
  *
  * 未提供的入参 = 该阶段入参不可得 → 对应阶段不会被注册执行器，编排器如实 BLOCKED。
@@ -851,6 +894,11 @@ export const closedLoopRunInputSchema = z.object({
   recipeId: z.string().min(1).optional(),
   /** 阶段选择（缺省 = canonical 全 14 阶段；必须为保序子集）。 */
   stageIds: z.array(closedLoopStageIdSchema).optional(),
+  /**
+   * 运行期覆写（初始资金 / 成本 / 持仓上限 / 执行模型 / 参数）。
+   * 仅 `useRealData=true` 时由装配层消费；缺省 = 全部取策略文档声明。
+   */
+  runtimeConfig: closedLoopRuntimeConfigSchema.optional(),
   /** evaluation 阶段的直供入参（权益曲线 + 可选交易明细 + 口径参数）。 */
   evaluationInput: metricsEvaluateInputSchema.optional(),
   /** evaluation 阶段的上游交接种子（提供后 evaluation 可在无 backtest 阶段时执行）。 */
@@ -1108,6 +1156,12 @@ export const closedLoopRunResultSchema = z.object({
       strategyDecisionEngine: z.enum(["strategy-core", "legacy-recipe"]),
       /** 回落原因 / 接线事实（**必填**，防「回落了但界面看不出来」）。 */
       strategyDecisionEngineNote: z.string(),
+      /**
+       * 本次运行**显式覆写**的字段名（形如 `initialCapital` / `costModel.slippageBps` /
+       * `parameterOverrides`）。空数组 = 全部取策略文档声明。
+       * 用途：让「界面上改了哪些、这次到底按什么跑的」一眼可辨，杜绝静默口径漂移。
+       */
+      runtimeOverrides: z.array(z.string()).optional(),
       simulation: z.object({
         initialCapital: z.number(),
         maxPositions: z.number().nullable(),
@@ -1144,10 +1198,85 @@ export const closedLoopRunResultSchema = z.object({
       persisted: z.boolean(),
       errorCode: z.string().nullable(),
       errorMessage: z.string().nullable(),
+      /** 本次运行写入的留档行 id（`persisted=false` 时为 null）。 */
+      archiveId: z.number().int().positive().nullable().optional(),
     })
     .optional(),
 });
 export type ClosedLoopRunResult = z.infer<typeof closedLoopRunResultSchema>;
+
+// ---------------------------------------------------------------------------
+// 多版本回测对比（单策略 · 多版本 · 各自独立账户）
+//
+// 定位：让前端**不依赖 AI** 就能对同一策略的多个版本跑同一份运行配置，
+// 得到可复现的指标对比。语义纪律：
+//   - **各自独立**：每个版本跑一次独立的闭环运行（独立 experimentId / runId），
+//     不做共享账户 / 组合持仓 —— 组合属于另一个功能域；
+//   - **同一份口径**：所有版本共享同一 dateRange / runtimeConfig；
+//   - **单版本失败不连坐**：某个版本装配/执行失败时，其余版本照常返回，
+//     失败版本以 `failure` 如实标注（绝不静默丢弃）。
+// ---------------------------------------------------------------------------
+
+/** 多版本对比入参（版本 ≥ 2 才有对比意义；上限 10 防止误触发长任务风暴）。 */
+export const compareStrategyVersionsInputSchema = z.object({
+  /** 谱系锚点（缺省由服务端按 strategyId + 窗口 + 首个版本确定性派生）。 */
+  experimentId: z.string().min(1).optional(),
+  strategyId: z.string().min(1, "strategyId 必填"),
+  strategyVersions: z
+    .array(z.string().min(1))
+    .min(2, "至少选择 2 个版本进行对比")
+    .max(10, "一次最多对比 10 个版本"),
+  dateRange: closedLoopDateRangeSchema,
+  /** 所有版本共享的运行期覆写。 */
+  runtimeConfig: closedLoopRuntimeConfigSchema.optional(),
+  /** 显式指定的执行配方 id（仅策略文档没有 `recipe` 时生效）。 */
+  recipeId: z.string().min(1).optional(),
+  /** 数据集构建护栏（对齐 `loopRun.datasetGuards`）。 */
+  datasetGuards: z
+    .object({
+      dataReady: z.boolean().optional(),
+      maxTradingDays: z.number().int().positive().optional(),
+      maxSecuritiesPerDay: z.number().int().positive().optional(),
+    })
+    .optional(),
+  codeVersion: z.string().nullish(),
+});
+export type CompareStrategyVersionsInput = z.infer<
+  typeof compareStrategyVersionsInputSchema
+>;
+
+/** 单个版本的运行结果（成功 / 失败都如实返回）。 */
+export const strategyVersionRunOutcomeSchema = z.object({
+  strategyVersion: z.string(),
+  /** 本次运行的 runId（失败时仍返回，便于在日志 / 留档里定位）。 */
+  runId: z.string(),
+  /** 该版本的留档行 id；落库失败或运行失败时为 null（错误见 `persistence` / `failure`）。 */
+  archiveId: z.number().int().positive().nullable(),
+  /** `ALL_EXECUTED` / `PARTIAL_BLOCKED` / `NO_STAGE_EXECUTED`；运行失败为 `FAILED`。 */
+  status: z.string(),
+  /** 运行失败时的稳定错误码 + 人话（成功为 null）。 */
+  failure: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /** 完整运行结果（失败时为 null）。 */
+  result: closedLoopRunResultSchema.nullable(),
+});
+export type StrategyVersionRunOutcome = z.infer<
+  typeof strategyVersionRunOutcomeSchema
+>;
+
+/** 多版本对比结果。 */
+export const compareStrategyVersionsOutputSchema = z.object({
+  comparisonId: z.string().min(1),
+  createdAt: z.string(),
+  strategyId: z.string(),
+  dateRange: closedLoopDateRangeSchema,
+  /** 本次对比统一的运行期覆写（如实回显；未覆写为空对象）。 */
+  runtimeConfig: closedLoopRuntimeConfigSchema,
+  /** 按请求顺序返回每个版本的结果。 */
+  entries: z.array(strategyVersionRunOutcomeSchema),
+});
+export type CompareStrategyVersionsOutput = z.infer<
+  typeof compareStrategyVersionsOutputSchema
+>;
 
 // ---------------------------------------------------------------------------
 // CLOSED-LOOP-BACKTEST-PERSIST-001 — 闭环回测留档（历史列表 / 详情）
@@ -1193,6 +1322,12 @@ export const closedLoopBacktestRunRecordSchema = z.object({
   finalEquity: z.number().nullable(),
   tradeCount: z.number().int().nullable(),
   equityCurvePointCount: z.number().int().nullable(),
+  /** 最近一次回测的评估标量（卡片展示；历史摘要缺失时由服务端惰性回填）。 */
+  totalReturnPct: z.number().nullable(),
+  /** 最大回撤幅度（正数，%）。 */
+  maxDrawdownPct: z.number().nullable(),
+  /** 年化收益率（%）。 */
+  cagrPct: z.number().nullable(),
 });
 export type ClosedLoopBacktestRunRecordDto = z.infer<typeof closedLoopBacktestRunRecordSchema>;
 
@@ -1209,6 +1344,16 @@ export const closedLoopBacktestRunListInputSchema = z
     strategyId: z.string().min(1).optional(),
   })
   .optional();
+
+/**
+ * 批量读取留档详情入参。
+ *
+ * 与单条 `getBacktest` 的差异：这是「多版本对比」的只读批处理入口，一次最多 20 条，
+ * 顺序由调用方给定的 id 顺序决定。
+ */
+export const closedLoopBacktestRunBatchInputSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(20),
+});
 
 /**
  * 成交明细的「证券名称 + 代码」标签。

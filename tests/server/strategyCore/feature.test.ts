@@ -12,6 +12,7 @@ import {
   getDefaultFeatureRegistry,
   makeAtrFeature,
   makeEmaFeature,
+  makeObservationWindowFeatures,
   makePullbackFeatures,
   makePctChangeFeature,
   makeRsiFeature,
@@ -171,10 +172,36 @@ describe("§23.4 Feature — lookback 与计算", () => {
   it("默认注册表：内置指标 + 事件相对特征 + pctChange 全部就位，且是惰性单例", () => {
     const registry = createDefaultFeatureRegistry();
     const ids = registry.list().map((item) => item.featureId);
-    for (const expected of ["ma5", "ma10", "ma20", "ma60", "ema12", "ema26", "rsi14", "atr14", "haircutFromEventLow", "volumeRatio", "isBullish", "momentumFromEventClose", "pctChange"]) {
+    for (const expected of ["ma5", "ma10", "ma20", "ma60", "ema12", "ema26", "rsi14", "atr14", "haircutFromEventLow", "volumeRatio", "isBullish", "momentumFromEventClose", "observationMeanAmplitude", "observationMaxAmplitude", "drawdownFromEventClose", "pctChange"]) {
       expect(ids).toContain(expected);
     }
     expect(getDefaultFeatureRegistry()).toBe(getDefaultFeatureRegistry());
+  });
+
+  it("观察窗风险特征：T+1..T+5 振幅口径与事件日收盘基准", () => {
+    const [meanAmp, maxAmp, drawdown] = makeObservationWindowFeatures();
+    const eventBar = { ...BAR_FIXTURE(0), relativeDay: 0, open: 10, high: 11, low: 9, close: 10, volume: 1_000_000 };
+    const posts = [1, 2, 3, 4, 5].map((relativeDay) => ({
+      ...BAR_FIXTURE(relativeDay),
+      relativeDay,
+      open: 9.5,
+      high: 11,
+      low: 9,
+      close: 10,
+    }));
+    const ctx = context([...posts], eventBar);
+    expect(meanAmp.compute(ctx)).toBeCloseTo(0.2, 10);
+    expect(maxAmp.compute(ctx)).toBeCloseTo(0.2, 10);
+    expect(drawdown.compute(ctx)).toBeCloseTo(-0.1, 10);
+  });
+
+  it("观察窗风险特征：T+1..T+5 不足或事件日缺失 ⇒ null", () => {
+    const [meanAmp, , drawdown] = makeObservationWindowFeatures();
+    const eventBar = { ...BAR_FIXTURE(0), relativeDay: 0, close: 10 };
+    const short = [1, 2, 3].map((relativeDay) => ({ ...BAR_FIXTURE(relativeDay), relativeDay }));
+    expect(meanAmp.compute(context(short, eventBar))).toBeNull();
+    expect(drawdown.compute(context(short, eventBar))).toBeNull();
+    expect(meanAmp.compute(context([], null))).toBeNull();
   });
 
   it("新增特征不需要改 Core 代码（数据驱动可扩展）—— 注册一个全新特征即可被 resolve", () => {

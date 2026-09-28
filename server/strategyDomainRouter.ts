@@ -39,6 +39,7 @@ import {
   strategyCreateVersionInputSchema,
   strategyCloneVersionInputSchema,
   strategySetVersionStatusInputSchema,
+  strategySetVersionStarredInputSchema,
 } from "../shared/researchContracts";
 import type { StrategyDocument } from "./research/strategySchema/types";
 import type { StrategyLifecycleRecord, LifecycleEvidenceRef } from "./research/lifecycle/types";
@@ -241,6 +242,13 @@ export const strategyDomainRouter = router({
       .input(strategySetVersionStatusInputSchema)
       .mutation(({ input }) =>
         strategyService.setVersionStatus(input.strategyId, input.version, input.status),
+      ),
+
+    /** 版本星标：仅展示元数据，不影响版本内容与指纹。 */
+    setVersionStarred: adminProcedure
+      .input(strategySetVersionStarredInputSchema)
+      .mutation(({ input }) =>
+        strategyService.setVersionStarred(input.strategyId, input.version, input.isStarred),
       ),
   }),
 

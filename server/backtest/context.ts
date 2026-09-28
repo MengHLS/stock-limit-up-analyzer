@@ -279,7 +279,8 @@ export interface PositionSizingMapping {
   readonly effective:
     | "EQUAL_WEIGHT_CASH_BUDGET"
     | "FIXED_FRACTION_OF_INITIAL_CAPITAL"
-    | "EQUITY_FRACTION_OF_CURRENT_EQUITY";
+    | "EQUITY_FRACTION_OF_CURRENT_EQUITY"
+    | "SCORE_TIERED_EQUITY_FRACTION_OF_CURRENT_EQUITY";
   /** 声明了但**未被引擎消费**的项（如实登记，绝不静默）。 */
   readonly ignoredDeclarations: readonly string[];
   readonly note: string;
@@ -312,6 +313,15 @@ export function mapPositionSizing(positionSizing: BacktestContext["positionSizin
         "声明 EQUITY_FRACTION（fraction=" + String(fraction ?? "缺失") +
         "）⇒ 引擎按「决策日收盘总权益 × fraction，且不超过可分配现金」收窄每笔成交预算" +
         (valid ? "" : "；⚠️ fraction 缺失/非法 ⇒ 引擎会**响亮抛错**（不静默回落等权）"),
+    };
+  }
+  if (method === "SCORE_TIERED_EQUITY_FRACTION") {
+    return {
+      effective: "SCORE_TIERED_EQUITY_FRACTION_OF_CURRENT_EQUITY",
+      ignoredDeclarations: [],
+      note:
+        "声明 SCORE_TIERED_EQUITY_FRACTION ⇒ 引擎按候选 signalValue 选择分档比例，"
+        + "以「决策日收盘总权益 × 档位 fraction，且不超过可分配现金」收窄每笔成交预算",
     };
   }
   if (positionSizing.fixedAmount !== null && positionSizing.fixedAmount !== undefined) {

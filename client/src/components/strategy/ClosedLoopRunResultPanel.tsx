@@ -271,6 +271,109 @@ function SecurityCell({
 }
 
 /**
+ * 成交明细表 —— 单次回测 trades 的可复用展示。
+ *
+ * 版本对比页与完整运行面板共用同一组件，避免两处列口径漂移。
+ */
+export function BacktestTradeDetailsTable({
+  backtest,
+}: {
+  backtest: ClosedLoopBacktestArtifactsView;
+}) {
+  const tradeSecurityIds = useMemo(
+    () =>
+      backtest.trades
+        .filter(trade => trade.code === null && trade.name === null)
+        .map(trade => trade.securityId),
+    [backtest.trades],
+  );
+  const { labels: securityLabels } = useSecurityLabels(tradeSecurityIds);
+
+  return (
+    <div>
+      <p className="mb-1 text-[11px] text-muted-foreground">
+        成交明细{backtest.tradesTruncated ? "（后端按上限投影，仅含前若干笔）" : ""}
+        {backtest.tradeCount > 0 && `　共 ${backtest.tradeCount} 笔`}
+      </p>
+      {backtest.trades.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">无成交明细。</p>
+      ) : (
+        <div className="max-h-[360px] overflow-auto rounded-md border">
+          <Table className="text-xs">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="px-3 py-2">证券（名称 / 代码）</TableHead>
+                <TableHead className="px-3 py-2">买入日</TableHead>
+                <TableHead className="px-3 py-2">买入价</TableHead>
+                <TableHead className="px-3 py-2">卖出日</TableHead>
+                <TableHead className="px-3 py-2">卖出价</TableHead>
+                <TableHead className="px-3 py-2">股数</TableHead>
+                <TableHead className="px-3 py-2">净盈亏</TableHead>
+                <TableHead className="px-3 py-2">收益率</TableHead>
+                <TableHead className="px-3 py-2">持有(交易日)</TableHead>
+                <TableHead className="px-3 py-2">退出原因</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {backtest.trades.map((trade, index) => (
+                <TableRow key={`${trade.securityId}-${trade.entryTime}-${index}`}>
+                  <TableCell className="px-3 py-1.5">
+                    <SecurityCell
+                      securityId={trade.securityId}
+                      label={
+                        trade.code !== null || trade.name !== null
+                          ? {
+                              securityId: trade.securityId,
+                              code: trade.code,
+                              name: trade.name,
+                              exchange: null,
+                            }
+                          : securityLabels?.[trade.securityId] ?? null
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono">{trade.entryTime}</TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                    {fmtNum(trade.entryPrice)}
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono">
+                    {trade.exitTime ?? (trade.openAtEnd ? "期末持仓" : "—")}
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                    {fmtNum(trade.exitPrice)}
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                    {fmtInt(trade.quantity)}
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                    {fmtNum(trade.netPnl)}
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                    {fmtPct(trade.returnPct)}
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                    {fmtInt(trade.holdingPeriod)}
+                  </TableCell>
+                  <TableCell className="px-3 py-1.5 text-muted-foreground">
+                    {trade.exitReason ?? (trade.openAtEnd ? "期末持仓" : "—")}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      {backtest.trades.length > 0 && (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          证券名称取自涨停复盘记录（`limit_up_records`，只收录有过涨停的股票），未收录的代码名称显示「—」；
+          代码为证券标识历史的 canonical 形式（`6位数字.交易所`）。
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * 「策略产出」区块 —— 运行一次回测后**真正产生的东西**。
  *
  * 全部数值都是后端产出（评估器 / 撮合引擎）的直搬；本组件不做任何反算。
@@ -292,16 +395,6 @@ function StrategyOutputSection({
   const stats = backtest.executionStats;
   const zeroTrades = backtest.tradeCount === 0;
   const curve = backtest.equityCurve;
-
-  // 成交明细的「名称 + 代码」字典：只对本次真正出现的标的查一次（只读、展示增强）。
-  const tradeSecurityIds = useMemo(
-    () =>
-      backtest.trades
-        .filter(trade => trade.code === null && trade.name === null)
-        .map(trade => trade.securityId),
-    [backtest.trades],
-  );
-  const { labels: securityLabels } = useSecurityLabels(tradeSecurityIds);
   const equityValues = curve.map(p => p.equity);
   const yDomain: [number, number] | undefined =
     equityValues.length === 0
@@ -471,86 +564,8 @@ function StrategyOutputSection({
 
       {/* 成交明细 */}
       <div className="mt-3">
-        <p className="mb-1 text-[11px] text-muted-foreground">
-          成交明细{backtest.tradesTruncated ? "（后端按上限投影，仅含前若干笔）" : ""}
-          {backtest.tradeCount > 0 && `　共 ${backtest.tradeCount} 笔`}
-        </p>
-        {backtest.trades.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">无成交明细。</p>
-        ) : (
-          <div className="max-h-[360px] overflow-auto rounded-md border">
-            <Table className="text-xs">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="px-3 py-2">证券（名称 / 代码）</TableHead>
-                  <TableHead className="px-3 py-2">买入日</TableHead>
-                  <TableHead className="px-3 py-2">买入价</TableHead>
-                  <TableHead className="px-3 py-2">卖出日</TableHead>
-                  <TableHead className="px-3 py-2">卖出价</TableHead>
-                  <TableHead className="px-3 py-2">股数</TableHead>
-                  <TableHead className="px-3 py-2">净盈亏</TableHead>
-                  <TableHead className="px-3 py-2">收益率</TableHead>
-                  <TableHead className="px-3 py-2">持有(交易日)</TableHead>
-                  <TableHead className="px-3 py-2">退出原因</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {backtest.trades.map((trade, index) => (
-                  <TableRow key={`${trade.securityId}-${trade.entryTime}-${index}`}>
-                    <TableCell className="px-3 py-1.5">
-                      <SecurityCell
-                        securityId={trade.securityId}
-                        label={
-                          trade.code !== null || trade.name !== null
-                            ? {
-                                securityId: trade.securityId,
-                                code: trade.code,
-                                name: trade.name,
-                                exchange: null,
-                              }
-                            : securityLabels?.[trade.securityId] ?? null
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono">{trade.entryTime}</TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                      {fmtNum(trade.entryPrice)}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono">
-                      {trade.exitTime ?? (trade.openAtEnd ? "期末持仓" : "—")}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                      {fmtNum(trade.exitPrice)}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                      {fmtInt(trade.quantity)}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                      {fmtNum(trade.netPnl)}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                      {fmtPct(trade.returnPct)}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                      {fmtInt(trade.holdingPeriod)}
-                    </TableCell>
-                    <TableCell className="px-3 py-1.5 text-muted-foreground">
-                      {trade.exitReason ?? (trade.openAtEnd ? "期末持仓" : "—")}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+        <BacktestTradeDetailsTable backtest={backtest} />
       </div>
-
-      {backtest.trades.length > 0 && (
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          证券名称取自涨停复盘记录（`limit_up_records`，只收录有过涨停的股票），未收录的代码名称显示「—」；
-          代码为证券标识历史的 canonical 形式（`6位数字.交易所`）。
-        </p>
-      )}
 
       <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
         <Info className="mt-0.5 h-3 w-3 shrink-0" />

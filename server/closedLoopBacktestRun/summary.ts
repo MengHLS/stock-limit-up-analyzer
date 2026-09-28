@@ -33,6 +33,15 @@ export type ClosedLoopBacktestRunSummary = {
   finalEquity: number | null;
   tradeCount: number | null;
   equityCurvePointCount: number | null;
+  /**
+   * 最近一次回测的评估标量（卡片展示）。
+   *
+   * 这三项直接取自 evaluation 阶段的 `evaluationRef.performance`，只搬运不重算。
+   * 历史行可能缺失这几个可选字段，读取时按 null 处理并惰性回填。
+   */
+  totalReturnPct: number | null;
+  maxDrawdownPct: number | null;
+  cagrPct: number | null;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -82,6 +91,8 @@ export function buildClosedLoopBacktestRunSummary(
   const assembly = asRecord(result.assembly);
   const simulation = assembly === null ? null : asRecord(assembly.simulation);
   const backtestOutput = readBacktestStageOutput(result);
+  const evaluation = readEvaluationStageOutput(result);
+  const performance = evaluation === null ? null : asRecord(evaluation.performance);
 
   return {
     runId: result.runId,
@@ -100,5 +111,26 @@ export function buildClosedLoopBacktestRunSummary(
     tradeCount: backtestOutput === null ? null : asFiniteNumber(backtestOutput.tradeCount),
     equityCurvePointCount:
       backtestOutput === null ? null : asFiniteNumber(backtestOutput.equityCurvePointCount),
+    totalReturnPct: performance === null ? null : asFiniteNumber(performance.totalReturnPct),
+    maxDrawdownPct: performance === null ? null : asFiniteNumber(performance.maxDrawdownPct),
+    cagrPct: performance === null ? null : asFiniteNumber(performance.cagrPct),
   };
+}
+
+/**
+ * 从 `evaluation` 阶段产出里读交接摘要。
+ *
+ * 与前端 ViewModel 同判据：仅接受 `state=EXECUTED` 且 `kind="evaluationRef"`。
+ * 这样卡片指标与结果详情、对比表永远来自同一处，不出现第二套口径。
+ */
+export function readEvaluationStageOutput(
+  result: ClosedLoopRunResult,
+): Record<string, unknown> | null {
+  for (const stage of result.stages) {
+    if (stage.stageId !== "evaluation" || stage.state !== "EXECUTED") continue;
+    const output = asRecord(stage.output);
+    if (output === null) return null;
+    return asString(output.kind) === "evaluationRef" ? output : null;
+  }
+  return null;
 }
