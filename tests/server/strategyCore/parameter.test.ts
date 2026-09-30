@@ -266,6 +266,96 @@ describe("§23.3 Parameter — FIXED / TUNABLE / DERIVED", () => {
     expect(searchable).not.toContain("max_drawdown_tolerance");
   });
 
+  it("json 参数支持标量数组与标量对象数组，并校验 minItems / maxItems", () => {
+    const schema: readonly ParameterDefinition[] = [
+      {
+        code: "position_tiers",
+        name: "评分分档仓位",
+        dataType: "json",
+        role: "FIXED",
+        defaultValue: [{ minScore: 0.8, fraction: 0.3 }],
+        minItems: 1,
+        maxItems: 2,
+        required: true,
+      },
+      {
+        code: "labels",
+        name: "标签",
+        dataType: "json",
+        role: "FIXED",
+        defaultValue: ["a", 1, true, null],
+        required: false,
+      },
+    ];
+
+    expect(resolveParameters(schema, {}).values.position_tiers).toEqual([
+      { minScore: 0.8, fraction: 0.3 },
+    ]);
+    expect(
+      resolveParameters(schema, {
+        position_tiers: [{ minScore: 0.5, fraction: 0.2 }],
+      }).values.position_tiers,
+    ).toEqual([{ minScore: 0.5, fraction: 0.2 }]);
+    expect(errorCode(() => resolveParameters(schema, { position_tiers: [] }))).toBe(
+      "PARAMETER_OUT_OF_RANGE",
+    );
+    expect(
+      errorCode(() =>
+        resolveParameters(schema, {
+          position_tiers: [
+            { minScore: 0.5, fraction: 0.2 },
+            { minScore: 0.6, fraction: 0.3 },
+            { minScore: 0.7, fraction: 0.4 },
+          ],
+        }),
+      ),
+    ).toBe("PARAMETER_OUT_OF_RANGE");
+    expect(
+      errorCode(() =>
+        resolveParameters(schema, {
+          position_tiers: [{ minScore: { nested: 1 }, fraction: 0.2 }] as never,
+        }),
+      ),
+    ).toBe("PARAMETER_TYPE_MISMATCH");
+    expect(errorCode(() => resolveParameters(schema, { labels: [[1]] } as never))).toBe(
+      "PARAMETER_TYPE_MISMATCH",
+    );
+  });
+
+  it("TUNABLE json 没有 allowedValues 时被拒；派生表达式不能引用 json", () => {
+    const tunableJson: readonly ParameterDefinition[] = [
+      {
+        code: "tiers",
+        name: "分档",
+        dataType: "json",
+        role: "TUNABLE",
+        defaultValue: [{ minScore: 0.5, fraction: 0.2 }],
+        required: true,
+      },
+    ];
+    expect(errorCode(() => resolveParameters(tunableJson, {}))).toBe("CORE_DEFINITION_INVALID");
+
+    const derivedFromJson: readonly ParameterDefinition[] = [
+      {
+        code: "tiers",
+        name: "分档",
+        dataType: "json",
+        role: "FIXED",
+        defaultValue: [{ minScore: 0.5, fraction: 0.2 }],
+        required: true,
+      },
+      {
+        code: "tier_count",
+        name: "档数",
+        dataType: "number",
+        role: "DERIVED",
+        derivedFrom: Expr.param("tiers"),
+        required: false,
+      },
+    ];
+    expect(errorCode(() => resolveParameters(derivedFromJson, {}))).toBe("EXPRESSION_INVALID");
+  });
+
   it("解析结果键序稳定（指纹/复现依赖这一点）", () => {
     const resolved: ResolvedParameterSet = resolveParameters(SCHEMA, {});
     expect(Object.keys(resolved.values)).toEqual([...Object.keys(resolved.values)].sort());

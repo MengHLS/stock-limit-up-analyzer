@@ -82,6 +82,7 @@ describe("InMemoryStrategyRepository", () => {
 
     const versions = await repo.listVersions(doc.strategyId);
     expect(versions.length).toBe(1);
+    expect(versions[0]?.versionRowId).toBeGreaterThan(0);
   });
 
   it("saveVersion 冲突：同 version 不同 fingerprint 拒绝", async () => {
@@ -132,6 +133,116 @@ describe("InMemoryStrategyRepository", () => {
     await repo.deleteStrategy(doc.strategyId);
     expect(await repo.getStrategy(doc.strategyId)).toBeUndefined();
     expect(await repo.listVersions(doc.strategyId)).toEqual([]);
+  });
+
+  it("updateVersionStarred 写入后可被 listVersions 读回，并支持取消", async () => {
+    const repo = new InMemoryStrategyRepository(() => "2026-09-09T00:00:00.000Z");
+    const doc = makeDocument();
+    await repo.saveVersion({
+      strategyId: doc.strategyId,
+      document: doc,
+      versionRecord: makeVersionRecord(doc),
+    });
+
+    await repo.updateVersionStarred(doc.strategyId, doc.version, true);
+    expect(await repo.listVersions(doc.strategyId)).toEqual([
+      expect.objectContaining({ version: doc.version, isStarred: true }),
+    ]);
+
+    await repo.updateVersionStarred(doc.strategyId, doc.version, false);
+    expect((await repo.listVersions(doc.strategyId))[0]?.isStarred).toBe(false);
+  });
+
+  it("没有正式版本行的坐标不能加星（留档必须先物化正式版本）", async () => {
+    const repo = new InMemoryStrategyRepository();
+    // 刻意不 saveVersion：模拟研究脚本只写 closed_loop_backtest_run 留档的版本
+    // （例如 first-limit-pullback-3f-top3@1.62.1）。
+    const strategyId = "first-limit-pullback-3f-top3";
+    const version = "1.62.1";
+
+    expect(await repo.listVersions(strategyId)).toEqual([]);
+    await expect(repo.updateVersionStarred(strategyId, version, true))
+      .rejects.toThrow(/未找到策略版本，无法更新星标/);
+    expect(await repo.listVersionStars(strategyId)).toEqual([]);
+  });
+
+  it("updateVersionParent 写入父链后可被 listVersions / getVersionBundle 读回", async () => {
+    const repo = new InMemoryStrategyRepository(() => "2026-09-09T00:00:00.000Z");
+    const rootDoc = makeDocument();
+    const childDoc = makeDocument({ version: "1.1.0", name: "子版本" });
+    for (const document of [rootDoc, childDoc]) {
+      await repo.saveVersion({
+        strategyId: document.strategyId,
+        document,
+        versionRecord: makeVersionRecord(document),
+      });
+    }
+
+    const rootRowId = await repo.getVersionRowId(rootDoc.strategyId, rootDoc.version);
+    expect(rootRowId).toBeGreaterThan(0);
+    await repo.updateVersionParent(childDoc.strategyId, childDoc.version, rootRowId!);
+
+    const versions = await repo.listVersions(childDoc.strategyId);
+    const child = versions.find(row => row.version === childDoc.version);
+    expect(child?.parentVersionId).toBe(rootRowId);
+    expect((await repo.getVersionBundle(childDoc.strategyId, childDoc.version))?.parentVersionId)
+      .toBe(rootRowId);
+
+    await repo.updateVersionParent(childDoc.strategyId, childDoc.version, null);
+    expect((await repo.getVersionBundle(childDoc.strategyId, childDoc.version))?.parentVersionId)
+      .toBeNull();
+  });
+
+  it("updateVersionParent 拒绝缺失父版本、跨策略父版本与自引用", async () => {
+    const repo = new InMemoryStrategyRepository(() => "2026-09-09T00:00:00.000Z");
+    const doc = makeDocument();
+    const otherDoc = makeDocument({ strategyId: "other-strategy", name: "其他策略" });
+    for (const document of [doc, otherDoc]) {
+      await repo.saveVersion({
+        strategyId: document.strategyId,
+        document,
+        versionRecord: makeVersionRecord(document),
+      });
+    }
+
+    await expect(repo.updateVersionParent(doc.strategyId, doc.version, 999_999))
+      .rejects.toThrow(/父版本不存在或不属于同一策略/);
+    await expect(repo.updateVersionParent(
+      doc.strategyId,
+      doc.version,
+      (await repo.getVersionRowId(otherDoc.strategyId, otherDoc.version))!,
+    )).rejects.toThrow(/父版本不存在或不属于同一策略/);
+
+    const selfRowId = await repo.getVersionRowId(doc.strategyId, doc.version);
+    await expect(repo.updateVersionParent(doc.strategyId, doc.version, selfRowId!))
+      .rejects.toThrow(/不能指向自身/);
+  });
+
+  it("updateVersionParent 是幂等纯元数据操作：摘要、内容、指纹与时间戳不变", async () => {
+    const repo = new InMemoryStrategyRepository(() => "2026-09-09T00:00:00.000Z");
+    const rootDoc = makeDocument();
+    const childDoc = makeDocument({ version: "1.1.0", name: "子版本" });
+    for (const document of [rootDoc, childDoc]) {
+      await repo.saveVersion({
+        strategyId: document.strategyId,
+        document,
+        versionRecord: makeVersionRecord(document),
+      });
+    }
+    const rootRowId = await repo.getVersionRowId(rootDoc.strategyId, rootDoc.version);
+    const before = await repo.getVersionBundle(childDoc.strategyId, childDoc.version);
+    const beforeSummary = (await repo.listVersions(childDoc.strategyId))
+      .find(row => row.version === childDoc.version);
+
+    await repo.updateVersionParent(childDoc.strategyId, childDoc.version, rootRowId!);
+    await repo.updateVersionParent(childDoc.strategyId, childDoc.version, rootRowId!);
+
+    const after = await repo.getVersionBundle(childDoc.strategyId, childDoc.version);
+    const afterSummary = (await repo.listVersions(childDoc.strategyId))
+      .find(row => row.version === childDoc.version);
+    expect(after).toEqual({ ...before, parentVersionId: rootRowId });
+    expect(afterSummary).toEqual({ ...beforeSummary, parentVersionId: rootRowId });
+    expect(after?.updatedAt).toBe(before?.updatedAt);
   });
 });
 

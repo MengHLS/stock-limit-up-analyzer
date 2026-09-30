@@ -129,7 +129,7 @@ function StrategyCard({
             onClick={onCompare}
           >
             <GitCompareArrows className="mr-1 h-3 w-3" />
-            回测对比
+            版本演化
           </Button>
           <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={onOpen}>
             打开

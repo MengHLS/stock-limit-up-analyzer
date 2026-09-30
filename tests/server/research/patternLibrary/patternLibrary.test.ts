@@ -69,6 +69,9 @@ describe("PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）",
 
   it("配方 id 集合（原 2 个 + 3F TopN 4 个，合计 6 个）", () => {
     expect(registeredStrategyRecipeIds()).toEqual([
+      "first-limit-pool-fixed-3f",
+      "first-limit-pool-rolling-3f",
+      "first-limit-pullback-3f-calibrated-n5",
       "first-limit-pullback-3f-top3",
       "first-limit-pullback-3f-top3-no-pullback-gate",
       "first-limit-pullback-3f-top5",

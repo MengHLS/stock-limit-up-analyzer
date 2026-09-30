@@ -48,6 +48,7 @@ import { z } from "zod";
 import {
   PARAMETER_SEARCH_RUN_STATUSES,
   parameterSearchMethodSchema,
+  parameterSearchParameterSetSchema,
   parameterSearchValueSchema,
 } from "./parameterSearchContracts";
 import {
@@ -241,7 +242,7 @@ export const walkForwardFoldViewSchema = z.object({
   sourceCombinationIndex: z.number().int().nullable(),
   parameterHash: z.string().nullable(),
   /** 冻结的参数快照（原样来自源组合行，禁止由当前 Schema 重新推导）。 */
-  resolvedParameterSet: z.record(z.string(), parameterSearchValueSchema).nullable(),
+  resolvedParameterSet: parameterSearchParameterSetSchema.nullable(),
   /** 策略身份与定义指纹（继承创建时冻结值）。 */
   strategyVersionId: z.string().min(1),
   strategyFingerprint: z.string().nullable(),

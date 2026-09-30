@@ -31,6 +31,7 @@
 
 import {
   StrategyCoreError,
+  type CoreScalar,
   type CoreValue,
   type EvaluationTime,
   type PositionState,
@@ -104,9 +105,9 @@ export interface RuntimeContext {
   /** 🔴 本次评估的**当前相对日**（决定「哪些未来 bar 已变成现在」）。缺省 = bar 集里的最大相对日。 */
   readonly currentRelativeDay?: RelativeDay;
   /** 事件日字段（`event.limitUpPrice` 等；事件日不可见时应留空）。 */
-  readonly eventFields?: Readonly<Record<string, CoreValue>>;
+  readonly eventFields?: Readonly<Record<string, CoreScalar>>;
   /** 已算好的特征值（可注入；缺省由注册表现场计算）。 */
-  readonly featureOverrides?: Readonly<Record<string, CoreValue>>;
+  readonly featureOverrides?: Readonly<Record<string, CoreScalar>>;
   readonly state: RuntimeState;
   /** 本数据集的能力声明（运行方**如实**填写；缺省 = 只声明频率，其余未知）。 */
   readonly datasetCapability?: DatasetCapabilityDescriptor;
@@ -179,7 +180,7 @@ function computeDefinitionFingerprintCached(definition: StrategyCoreDefinition):
 }
 
 /** 读取 bar 的某一列（不支持的列 ⇒ null，不抛错：列缺失属数据问题，由「不足」上报）。 */
-export function readBarColumnValue(bar: VisibleBar, column: string): CoreValue {
+export function readBarColumnValue(bar: VisibleBar, column: string): CoreScalar {
   switch (column) {
     case "open":
       return bar.open;
@@ -243,22 +244,22 @@ function evaluateWithDetail(
   };
   const eventFields = context.eventFields ?? {};
   const featureOverrides = context.featureOverrides ?? {};
-  const featureCache = new Map<string, CoreValue>();
+  const featureCache = new Map<string, CoreScalar>();
   const requirementByFeatureId = new Map(definition.featureRequirements.map((item) => [item.featureId, item]));
 
-  const readEventField = (field: string): CoreValue => {
+  const readEventField = (field: string): CoreScalar => {
     if (!Object.prototype.hasOwnProperty.call(eventFields, field)) {
       insufficiencies.push("事件字段 " + field + " 未提供（数据集未给出该列）");
       return null;
     }
-    return eventFields[field] as CoreValue;
+    return eventFields[field] as CoreScalar;
   };
 
-  const featureValueAt = (day: RelativeDay, featureId: string): CoreValue => {
+  const featureValueAt = (day: RelativeDay, featureId: string): CoreScalar => {
     const key = featureId + "@" + String(day);
-    if (featureCache.has(key)) return featureCache.get(key) as CoreValue;
+    if (featureCache.has(key)) return featureCache.get(key) as CoreScalar;
     if (Object.prototype.hasOwnProperty.call(featureOverrides, featureId)) {
-      const injected = featureOverrides[featureId] as CoreValue;
+      const injected = featureOverrides[featureId] as CoreScalar;
       featureCache.set(key, injected);
       return injected;
     }
@@ -288,11 +289,11 @@ function evaluateWithDetail(
       eventField: readEventField,
       parameters: resolved.values,
     });
-    featureCache.set(key, value);
-    return value;
+    featureCache.set(key, value as CoreScalar);
+    return value as CoreScalar;
   };
 
-  const fieldValueAt = (day: RelativeDay, field: string): CoreValue => {
+  const fieldValueAt = (day: RelativeDay, field: string): CoreScalar => {
     const parsed = parseCoreFieldReference(field);
     switch (parsed.kind) {
       case "PRE_EVENT":
@@ -303,7 +304,7 @@ function evaluateWithDetail(
           insufficiencies.push("字段 " + field + " 对应的 bar 在 " + String(day) + " 日不可见 / 不存在");
           return null;
         }
-        return readBarColumnValue(bar, parsed.field);
+        return readBarColumnValue(bar, parsed.field) as CoreScalar;
       }
       case "CURRENT_BAR": {
         const bar = accessFor(day).currentBar();
@@ -311,7 +312,7 @@ function evaluateWithDetail(
           insufficiencies.push("当前 bar 在 " + String(day) + " 日不存在");
           return null;
         }
-        return readBarColumnValue(bar, parsed.field);
+        return readBarColumnValue(bar, parsed.field) as CoreScalar;
       }
       case "EVENT_DAY":
         return readEventField(parsed.field);
@@ -343,14 +344,22 @@ function evaluateWithDetail(
         if (!Object.prototype.hasOwnProperty.call(resolved.values, code)) {
           throw new StrategyCoreError("PARAMETER_UNKNOWN", "表达式引用了未解析的参数 " + code, { code });
         }
-        return resolved.values[code] as CoreValue;
+        const value = resolved.values[code] as CoreValue;
+        if (Array.isArray(value)) {
+          throw new StrategyCoreError(
+            "EXPRESSION_INVALID",
+            "结构化参数 " + code + " 不能作为规则图标量求值；json 参数只服务于声明面（如仓位分档）",
+            { code },
+          );
+        }
+        return value as CoreScalar;
       },
     };
     return {
       asOf: context.timestamp,
       currentDay: day,
       maxRelativeDay: context.visibleData.maxRelativeDay ?? currentDayCap,
-      eventOccurred: (eventType: string, params: Readonly<Record<string, CoreValue>>) =>
+      eventOccurred: (eventType: string, params: Readonly<Record<string, CoreScalar>>) =>
         evaluateEventOccurrence(eventType, params, context),
       fieldValue: (field: string) => scope.fieldValue(field),
       featureValue: (featureId: string) => scope.featureValue(featureId),
@@ -525,7 +534,7 @@ function evaluateWithDetail(
 /** 事件发生的判据（**由上下文显式提供** —— Core 不猜事件语义，也不查库）。 */
 export type EventOccurrenceResolver = (
   eventType: string,
-  params: Readonly<Record<string, CoreValue>>,
+  params: Readonly<Record<string, CoreScalar>>,
   context: RuntimeContext,
 ) => boolean;
 
@@ -544,7 +553,7 @@ export function setEventOccurrenceResolver(resolver: EventOccurrenceResolver | n
 
 function evaluateEventOccurrence(
   eventType: string,
-  params: Readonly<Record<string, CoreValue>>,
+  params: Readonly<Record<string, CoreScalar>>,
   context: RuntimeContext,
 ): boolean {
   const resolver = context.resolveEvent ?? eventOccurrenceResolver;

@@ -13,6 +13,7 @@ import {
   ruleConditionText,
   positionSizingLabel,
   emptyRule,
+  parseJsonScalarArray,
 } from "../../../../client/src/adapters/strategyAdapter";
 
 const DOC = {
@@ -125,5 +126,52 @@ describe("strategyAdapter 展示 helpers", () => {
     expect(r.kind).toBe("threshold");
     expect(r.operator).toBe("<=");
     expect(r.operand).toBeNull();
+  });
+});
+
+describe("strategyAdapter JSON 参数", () => {
+  it("解析标量数组与标量对象数组", () => {
+    expect(parseJsonScalarArray('["a", 1, true, null]')).toEqual(["a", 1, true, null]);
+    expect(
+      parseJsonScalarArray('[{"minScore": 0.8, "fraction": 0.3}]'),
+    ).toEqual([{ minScore: 0.8, fraction: 0.3 }]);
+  });
+
+  it("拒绝非法语法、嵌套数组与嵌套对象", () => {
+    expect(() => parseJsonScalarArray("{")).toThrow("JSON 语法无效");
+    expect(() => parseJsonScalarArray("[[1]]")).toThrow("JSON 必须是数组");
+    expect(() => parseJsonScalarArray('[{"x": {"y": 1}}]')).toThrow("JSON 必须是数组");
+  });
+
+  it("JSON 参数往返保留数组默认值与 minItems / maxItems", () => {
+    const doc = {
+      ...DOC,
+      parameters: {
+        parameters: [
+          {
+            name: "position_tiers",
+            type: "json",
+            required: true,
+            defaultValue: [{ minScore: 0.8, fraction: 0.3 }],
+            minItems: 1,
+            maxItems: 20,
+            description: "评分分档仓位",
+          },
+        ],
+      },
+    };
+    const out = viewModelToStrategy(strategyToViewModel(doc));
+    const parameter = (
+      out.parameters as { parameters: Array<Record<string, unknown>> }
+    ).parameters[0];
+    expect(parameter).toEqual({
+      name: "position_tiers",
+      type: "json",
+      required: true,
+      defaultValue: [{ minScore: 0.8, fraction: 0.3 }],
+      minItems: 1,
+      maxItems: 20,
+      description: "评分分档仓位",
+    });
   });
 });

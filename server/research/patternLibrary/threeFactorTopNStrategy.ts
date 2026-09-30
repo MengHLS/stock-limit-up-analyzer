@@ -141,6 +141,16 @@ export interface BuildThreeFactorTopNStrategyDocumentInput {
   readonly positionTiers?: readonly { readonly minScore: number; readonly fraction: number }[];
   /** 实验：按当日 rank 分档的权益仓位比例（maxRank 升序，取首个命中档）。 */
   readonly positionRankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
+  /**
+   * 把仓位分档提升为文档声明的 `json` 参数（FIXED；前端可覆写，装配时解析为
+   * `positionSizing.tiers`）。与 `positionTiers` 二选一。
+   *
+   * 结构化档位不适合网格搜索：Core 要求 TUNABLE json 穷举 allowedValues，
+   * 而这里的档位是声明面的结构值。保持 FIXED 仍允许 `parameterOverrides` 覆写。
+   */
+  readonly tunablePositionTiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+  /** 把 rank 分档提升为文档声明的 `json` 参数（FIXED）。与 `positionRankTiers` 二选一。 */
+  readonly tunablePositionRankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
   /** 实验参数搜索：把 b4 最大振幅门槛暴露为 TUNABLE 参数（entry condition 走参数引用）。 */
   readonly parameterizedMaxMaxAmplitude?: {
     readonly defaultValue: number;
@@ -148,6 +158,23 @@ export interface BuildThreeFactorTopNStrategyDocumentInput {
     readonly max: number;
     readonly step: number;
   };
+  /**
+   * 把族维度提升为文档声明的 TUNABLE 参数。声明后前端可通过
+   * `parameterOverrides` 覆写，重跑时由 resolveParameters 校验并传进引擎。
+   */
+  readonly tunables?: {
+    readonly maxMaxAmplitude?: NumberTunable;
+    readonly maxMeanAmplitude?: NumberTunable;
+    readonly minDrawdownFromEventClose?: NumberTunable;
+    readonly stopLossRatio?: NumberTunable;
+  };
+}
+
+interface NumberTunable {
+  readonly defaultValue: number;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
 }
 
 /**
@@ -184,6 +211,67 @@ export function buildThreeFactorTopNStrategyDocument(
   const trailingPolicy = input.trailingPolicy ?? null;
   const unifiedExitPolicy = input.exitPolicy ?? null;
   const riskFilter = input.entryRiskFilter ?? {};
+  if (input.positionTiers !== undefined && input.tunablePositionTiers !== undefined) {
+    throw new Error("3F TopN 策略：positionTiers 与 tunablePositionTiers 不能同时声明。");
+  }
+  if (input.positionRankTiers !== undefined && input.tunablePositionRankTiers !== undefined) {
+    throw new Error("3F TopN 策略：positionRankTiers 与 tunablePositionRankTiers 不能同时声明。");
+  }
+  const positionTiersValue = input.tunablePositionTiers ?? input.positionTiers;
+  const positionRankTiersValue = input.tunablePositionRankTiers ?? input.positionRankTiers;
+  const validateScoreTiers = (
+    tiers: readonly { readonly minScore: number; readonly fraction: number }[] | undefined,
+    label: string,
+  ): void => {
+    if (tiers === undefined) return;
+    if (tiers.length === 0) {
+      throw new Error(`3F TopN 策略：${label} 不能为空数组。`);
+    }
+    let previousMinScore = -1;
+    for (const tier of tiers) {
+      if (
+        !Number.isFinite(tier.minScore)
+        || tier.minScore < 0
+        || tier.minScore > 1
+        || !Number.isFinite(tier.fraction)
+        || tier.fraction < 0
+        || tier.fraction > 1
+      ) {
+        throw new Error(`3F TopN 策略：${label} 的 minScore / fraction 必须位于 [0,1]。`);
+      }
+      if (tier.minScore <= previousMinScore) {
+        throw new Error(`3F TopN 策略：${label} 必须按 minScore 严格升序。`);
+      }
+      previousMinScore = tier.minScore;
+    }
+  };
+  const validateRankTiers = (
+    tiers: readonly { readonly maxRank: number; readonly fraction: number }[] | undefined,
+    label: string,
+  ): void => {
+    if (tiers === undefined) return;
+    if (tiers.length === 0) {
+      throw new Error(`3F TopN 策略：${label} 不能为空数组。`);
+    }
+    let previousMaxRank = 0;
+    for (const tier of tiers) {
+      if (
+        !Number.isInteger(tier.maxRank)
+        || tier.maxRank < 1
+        || !Number.isFinite(tier.fraction)
+        || tier.fraction < 0
+        || tier.fraction > 1
+      ) {
+        throw new Error(`3F TopN 策略：${label} 的 maxRank 必须 >= 1 且为整数，fraction 必须位于 [0,1]。`);
+      }
+      if (tier.maxRank <= previousMaxRank) {
+        throw new Error(`3F TopN 策略：${label} 必须按 maxRank 严格升序。`);
+      }
+      previousMaxRank = tier.maxRank;
+    }
+  };
+  validateScoreTiers(positionTiersValue, "positionTiers");
+  validateRankTiers(positionRankTiersValue, "positionRankTiers");
   for (const [label, value] of [
     ["maxMeanAmplitude", riskFilter.maxMeanAmplitude],
     ["maxMaxAmplitude", riskFilter.maxMaxAmplitude],
@@ -226,6 +314,89 @@ export function buildThreeFactorTopNStrategyDocument(
     if (amplitudeParam.min > amplitudeParam.max || amplitudeParam.defaultValue > amplitudeParam.max) {
       throw new Error("3F TopN 策略：parameterizedMaxMaxAmplitude 范围倒挂（min/max/default）。");
     }
+  }
+
+  const tunables = input.tunables ?? {};
+  const tunableDefinitions: {
+    readonly code:
+      | "max_max_amplitude"
+      | "max_mean_amplitude"
+      | "min_drawdown_from_event_close"
+      | "stop_loss_ratio";
+    readonly name: string;
+    readonly unit: string;
+    readonly description: string;
+    readonly spec: NumberTunable;
+  }[] = [];
+  const addTunable = (
+    code: (typeof tunableDefinitions)[number]["code"],
+    name: string,
+    unit: string,
+    description: string,
+    spec: NumberTunable | undefined,
+  ): void => {
+    if (spec === undefined) return;
+    if (!Number.isFinite(spec.step) || spec.step <= 0) {
+      throw new Error(
+        `3F TopN 策略：tunables.${code}.step 必须为正有限数，实际 ${String(spec.step)}。`,
+      );
+    }
+    for (const value of [spec.defaultValue, spec.min, spec.max]) {
+      if (!Number.isFinite(value)) {
+        throw new Error(
+          `3F TopN 策略：tunables.${code} 的数值必须为有限数，实际 ${String(value)}。`,
+        );
+      }
+    }
+    if (spec.min > spec.max || spec.defaultValue < spec.min || spec.defaultValue > spec.max) {
+      throw new Error(`3F TopN 策略：tunables.${code} 范围倒挂（min/max/default）。`);
+    }
+    tunableDefinitions.push({ code, name, unit, description, spec });
+  };
+  addTunable(
+    "max_max_amplitude",
+    "最大振幅阈值",
+    "ratio",
+    "观察窗 T+1..T+5 最大振幅上限",
+    tunables.maxMaxAmplitude,
+  );
+  addTunable(
+    "max_mean_amplitude",
+    "平均振幅阈值",
+    "ratio",
+    "观察窗 T+1..T+5 平均振幅上限",
+    tunables.maxMeanAmplitude,
+  );
+  addTunable(
+    "min_drawdown_from_event_close",
+    "首板收盘破位下限",
+    "ratio",
+    "观察窗最低价相对首板收盘的破位下限（负数）",
+    tunables.minDrawdownFromEventClose,
+  );
+  addTunable(
+    "stop_loss_ratio",
+    "固定止损比例",
+    "ratio",
+    "相对建仓成本的盘中止损比例",
+    tunables.stopLossRatio,
+  );
+
+  const tunableByCode = new Map(
+    tunableDefinitions.map(definition => [definition.code, definition] as const),
+  );
+  if (
+    amplitudeParam !== undefined
+    && tunableByCode.has("max_max_amplitude")
+  ) {
+    throw new Error(
+      "3F TopN 策略：parameterizedMaxMaxAmplitude 与 tunables.maxMaxAmplitude 不能同时声明。",
+    );
+  }
+  if (tunableByCode.has("stop_loss_ratio") && unifiedExitPolicy !== null) {
+    throw new Error(
+      "3F TopN 策略：统一 exitPolicy 自带止损政策，不能同时声明 tunables.stopLossRatio。",
+    );
   }
   if (unifiedExitPolicy !== null && trailingPolicy !== null) {
     throw new Error("3F TopN 策略：exitPolicy 与 trailingPolicy 不能同时声明。");
@@ -415,25 +586,37 @@ export function buildThreeFactorTopNStrategyDocument(
               "恒真价格哨兵：仅用于让观察窗口进入 Core 规则图"
               + "（legacy 词汇无法表达「3F 合成分可算」这类特征门槛）",
           },
-          ...(riskFilter.maxMeanAmplitude === undefined ? [] : [{
+          ...(riskFilter.maxMeanAmplitude === undefined && !tunableByCode.has("max_mean_amplitude") ? [] : [{
             id: "entry-risk-mean-amplitude",
             field: "bar.observationMeanAmplitude",
             operator: "LESS_THAN" as const,
-            value: riskFilter.maxMeanAmplitude,
-            valueType: "CONSTANT" as const,
+            value: tunableByCode.has("max_mean_amplitude")
+              ? "max_mean_amplitude"
+              : riskFilter.maxMeanAmplitude,
+            valueType: tunableByCode.has("max_mean_amplitude")
+              ? "PARAMETER_REFERENCE" as const
+              : "CONSTANT" as const,
             enabled: true,
             description:
-              `建仓风险过滤：T+1..T+5 平均振幅 < ${(riskFilter.maxMeanAmplitude * 100).toFixed(0)}%`,
+              tunableByCode.has("max_mean_amplitude")
+                ? "建仓风险过滤：T+1..T+5 平均振幅 < max_mean_amplitude（可由前端覆写）"
+                : `建仓风险过滤：T+1..T+5 平均振幅 < ${((riskFilter.maxMeanAmplitude ?? 0) * 100).toFixed(0)}%`,
           }]),
-          ...(riskFilter.maxMaxAmplitude === undefined ? [] : [{
+          ...(riskFilter.maxMaxAmplitude === undefined && !tunableByCode.has("max_max_amplitude") ? [] : [{
             id: "entry-risk-max-amplitude",
             field: "bar.observationMaxAmplitude",
             operator: "LESS_THAN" as const,
-            value: riskFilter.maxMaxAmplitude,
-            valueType: "CONSTANT" as const,
+            value: tunableByCode.has("max_max_amplitude")
+              ? "max_max_amplitude"
+              : riskFilter.maxMaxAmplitude,
+            valueType: tunableByCode.has("max_max_amplitude")
+              ? "PARAMETER_REFERENCE" as const
+              : "CONSTANT" as const,
             enabled: true,
             description:
-              `建仓风险过滤：T+1..T+5 最大振幅 < ${(riskFilter.maxMaxAmplitude * 100).toFixed(0)}%`,
+              tunableByCode.has("max_max_amplitude")
+                ? "建仓风险过滤：T+1..T+5 最大振幅 < max_max_amplitude（可由前端覆写）"
+                : `建仓风险过滤：T+1..T+5 最大振幅 < ${((riskFilter.maxMaxAmplitude ?? 0) * 100).toFixed(0)}%`,
           }]),
           ...(amplitudeParam === undefined ? [] : [{
             id: "entry-risk-max-amplitude-param",
@@ -445,15 +628,21 @@ export function buildThreeFactorTopNStrategyDocument(
             description:
               "建仓风险过滤：T+1..T+5 最大振幅 < max_max_amplitude（参数搜索维度）",
           }]),
-          ...(riskFilter.minDrawdownFromEventClose === undefined ? [] : [{
+          ...(riskFilter.minDrawdownFromEventClose === undefined && !tunableByCode.has("min_drawdown_from_event_close") ? [] : [{
             id: "entry-risk-drawdown-depth",
             field: "bar.drawdownFromEventClose",
             operator: "GREATER_THAN" as const,
-            value: riskFilter.minDrawdownFromEventClose,
-            valueType: "CONSTANT" as const,
+            value: tunableByCode.has("min_drawdown_from_event_close")
+              ? "min_drawdown_from_event_close"
+              : riskFilter.minDrawdownFromEventClose,
+            valueType: tunableByCode.has("min_drawdown_from_event_close")
+              ? "PARAMETER_REFERENCE" as const
+              : "CONSTANT" as const,
             enabled: true,
             description:
-              `建仓风险过滤：观察窗最低价相对首板收盘破位 > ${(riskFilter.minDrawdownFromEventClose * 100).toFixed(0)}%`,
+              tunableByCode.has("min_drawdown_from_event_close")
+                ? "建仓风险过滤：观察窗破位 > min_drawdown_from_event_close（可由前端覆写）"
+                : `建仓风险过滤：观察窗最低价相对首板收盘破位 > ${((riskFilter.minDrawdownFromEventClose ?? 0) * 100).toFixed(0)}%`,
           }]),
         ],
         trigger: {
@@ -481,12 +670,16 @@ export function buildThreeFactorTopNStrategyDocument(
                 id: "exit-stop-loss",
                 type: "STOP_LOSS",
                 trigger: "INTRADAY",
-                threshold: stopLossRatio,
+                ...(tunableByCode.has("stop_loss_ratio")
+                  ? { parameter: "stop_loss_ratio" }
+                  : { threshold: stopLossRatio }),
                 thresholdUnit: "RATIO",
                 priority: 1,
                 enabled: true,
                 description:
-                  `盘中止损：相对建仓成本亏损达 ${(stopLossRatio * 100).toFixed(0)}% 时退出`,
+                  tunableByCode.has("stop_loss_ratio")
+                    ? "盘中止损：相对建仓成本亏损达到 stop_loss_ratio 时退出（可由前端覆写）"
+                    : `盘中止损：相对建仓成本亏损达 ${(stopLossRatio * 100).toFixed(0)}% 时退出`,
               },
               {
                 id: "exit-trailing-take-profit",
@@ -539,24 +732,71 @@ export function buildThreeFactorTopNStrategyDocument(
         positionRatio: THREE_FACTOR_TOPN_POSITION_RATIO,
         maxPositions,
         maxSinglePosition: THREE_FACTOR_TOPN_POSITION_RATIO,
-        ...(input.positionTiers === undefined ? {} : { positionTiers: input.positionTiers }),
-        ...(input.positionRankTiers === undefined ? {} : { positionRankTiers: input.positionRankTiers }),
+        ...(input.tunablePositionTiers === undefined
+          ? (input.positionTiers === undefined ? {} : { positionTiers: input.positionTiers })
+          : { positionTiersParameter: "position_tiers" }),
+        ...(input.tunablePositionRankTiers === undefined
+          ? (input.positionRankTiers === undefined ? {} : { positionRankTiers: input.positionRankTiers })
+          : { positionRankTiersParameter: "position_rank_tiers" }),
       },
-      parameters: amplitudeParam === undefined
-        ? []
-        : [{
-            code: "max_max_amplitude",
-            name: "最大振幅阈值",
+      parameters: [
+        ...(amplitudeParam === undefined
+          ? []
+          : [{
+              code: "max_max_amplitude",
+              name: "最大振幅阈值",
+              dataType: "number" as const,
+              parameterRole: "TUNABLE" as const,
+              defaultValue: amplitudeParam.defaultValue,
+              min: amplitudeParam.min,
+              max: amplitudeParam.max,
+              step: amplitudeParam.step,
+              required: true,
+              unit: "ratio",
+              description: "观察窗 T+1..T+5 最大振幅上限（b4 参数搜索维度）",
+            }]),
+        ...tunableDefinitions
+          .filter(definition => definition.code !== "max_max_amplitude" || amplitudeParam === undefined)
+          .map(definition => ({
+            code: definition.code,
+            name: definition.name,
             dataType: "number" as const,
             parameterRole: "TUNABLE" as const,
-            defaultValue: amplitudeParam.defaultValue,
-            min: amplitudeParam.min,
-            max: amplitudeParam.max,
-            step: amplitudeParam.step,
+            defaultValue: definition.spec.defaultValue,
+            min: definition.spec.min,
+            max: definition.spec.max,
+            step: definition.spec.step,
             required: true,
-            unit: "ratio",
-            description: "观察窗 T+1..T+5 最大振幅上限（b4 参数搜索维度）",
-          }],
+            unit: definition.unit,
+            description: definition.description,
+          })),
+        ...(input.tunablePositionTiers === undefined
+          ? []
+          : [{
+              code: "position_tiers",
+              name: "评分分档仓位",
+              dataType: "json" as const,
+              parameterRole: "FIXED" as const,
+              defaultValue: input.tunablePositionTiers,
+              minItems: 1,
+              maxItems: 20,
+              required: true,
+              description: "按 3F 综合评分分档的权益仓位比例；每项形如 {\"minScore\":0.8,\"fraction\":0.3}。",
+            }]),
+        ...(input.tunablePositionRankTiers === undefined
+          ? []
+          : [{
+              code: "position_rank_tiers",
+              name: "排名分档仓位",
+              dataType: "json" as const,
+              parameterRole: "FIXED" as const,
+              defaultValue: input.tunablePositionRankTiers,
+              minItems: 1,
+              maxItems: 20,
+              required: true,
+              description: "按当日候选排名分档的权益仓位比例；每项形如 {\"maxRank\":2,\"fraction\":0.3}。",
+            }]),
+      ],
       risk: {},
     },
     executionAssumptions: {

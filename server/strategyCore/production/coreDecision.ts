@@ -39,6 +39,7 @@ import type { ResearchSignal } from "../../research/framework/contract";
 import type { SignalBuilder } from "../../research/framework/signal";
 import { directionFromValue } from "../../research/framework/signal";
 import type { RelativeDay } from "../types";
+import type { FirstLimitPoolPolicy } from "../types";
 import { StrategyRuntime, type RuntimeState } from "../runtime";
 import type { StrategyVersion } from "../version";
 import type { ParameterSet } from "../parameterResolver";
@@ -93,6 +94,13 @@ export interface CoreDecisionSourceConfig {
    * 编一个「= 当前相对日」会误杀所有早期决策日；运行级校验请在装配层用整份数据集做一次。
    */
   readonly datasetHorizonRelativeDay?: RelativeDay;
+  /**
+   * 池化策略（仅 trigger.type = FIRST_LIMIT_POOL 时提供）。
+   *
+   * 提供时本决策源关闭「首个成立日」抑制：池成员在有效期内每个交易日都可产生候选。
+   * 未提供时行为逐字不变（旧事件窗策略继续只在首个成立日触发）。
+   */
+  readonly firstLimitPool?: FirstLimitPoolPolicy;
   /** 决策样本留存上限（诊断用，**不参与判定**；缺省 24）。 */
   readonly maxSamples?: number;
 }
@@ -138,6 +146,8 @@ export interface StrategyDecisionDigest {
   readonly minBarCount: number;
   readonly maxBarCount: number;
   readonly maxRelativeDayObserved: RelativeDay;
+  /** 池化滚动评分中因低于最低分/连续缺分而移除的成员次数。 */
+  readonly poolScoreRemovalCount: number;
   /**
    * 行为面滚动指纹（逐决策 `digest = H(digest ‖ 决策摘要)`）。
    *
@@ -166,6 +176,7 @@ const DEFAULT_MAX_SAMPLES = 24;
 export function createCoreDecisionSource(config: CoreDecisionSourceConfig): CoreDecisionSource {
   const maxSamples = config.maxSamples ?? DEFAULT_MAX_SAMPLES;
   const anchorPolicy = config.anchorPolicy ?? "SERIES_START";
+  const isDailyPoolDecision = config.firstLimitPool !== undefined;
 
   let decisionCount = 0;
   let emittedSignalCount = 0;
@@ -182,6 +193,9 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
   const samples: StrategyDecisionSample[] = [];
   let rolling = "";
   let resolvedParameterSet: ResolvedParameterSet | null = null;
+  const poolRemovedMembers = new Set<string>();
+  const poolMissingScoreStreak = new Map<string, number>();
+  let poolScoreRemovalCount = 0;
 
   const signalBuilder: SignalBuilder = (input) => {
     const bars: readonly CanonicalMarketBar[] = input.bars ?? [];
@@ -248,6 +262,31 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
           ? null
           : readFeature(input.features, config.rankFeatureId);
 
+    const rollingPool = config.firstLimitPool?.scorePolicy === "ROLLING_THREE_FACTOR";
+    const poolMemberRemoved = rollingPool && poolRemovedMembers.has(input.securityId);
+    if (rollingPool && !poolMemberRemoved) {
+      const startDay = config.firstLimitPool?.scoreStartRelativeDay ?? 1;
+      if (window.currentRelativeDay >= startDay && rankValue === null) {
+        const next = (poolMissingScoreStreak.get(input.securityId) ?? 0) + 1;
+        poolMissingScoreStreak.set(input.securityId, next);
+        if (next >= (config.firstLimitPool?.scoreInvalidationDays ?? 3)) {
+          poolRemovedMembers.add(input.securityId);
+          poolScoreRemovalCount += 1;
+        }
+      } else if (rankValue !== null) {
+        poolMissingScoreStreak.set(input.securityId, 0);
+        const minimumScore = config.firstLimitPool?.minimumScore;
+        if (
+          config.firstLimitPool?.removeBelowMinimumScore === true
+          && typeof minimumScore === "number"
+          && rankValue < minimumScore
+        ) {
+          poolRemovedMembers.add(input.securityId);
+          poolScoreRemovalCount += 1;
+        }
+      }
+    }
+
     // 🔴 「**今天**出不出信号」需要独立求一次「昨天是否已经成立」。
     //
     // 实测结论（本轮）：`StrategyDecision.signals[].signalDay` 取的是**本次求值的当前日**，
@@ -296,7 +335,10 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
      * 触发点 = 首个成立日。`FIRST_VALID_DAY` / `NEXT_TRADING_DAY` 这类「单点触发」语义下，
      * 只有 transition（昨天不成立 → 今天成立）才是「今天要买」。
      */
-    const firesToday = satisfiedToday && !satisfiedBefore;
+    // FIRST_LIMIT_POOL：池成员有效期内逐日决策；旧事件窗触发继续只消费首个成立日。
+    const firesToday = isDailyPoolDecision
+      ? satisfiedToday && !poolMemberRemoved
+      : satisfiedToday && !satisfiedBefore;
 
     let emitted = false;
     let signal: ResearchSignal | null = null;
@@ -382,11 +424,30 @@ export function createCoreDecisionSource(config: CoreDecisionSourceConfig): Core
       maxBarCount,
       maxRelativeDayObserved,
       decisionDigestFingerprint: rolling,
+      poolScoreRemovalCount,
       samples: [...samples],
     }),
     notes: [
       describeAnchorPolicy(anchorPolicy),
       "决策由 StrategyRuntime.evaluate 产出（唯一执行入口）；排序 / 选择由 pipeline 的既有权衡负责",
+      ...(config.firstLimitPool === undefined
+        ? []
+        : [
+            "FIRST_LIMIT_POOL 每日触发：池成员在有效期内每个交易日都可产出候选，" +
+              "不再使用 FIRST_VALID_DAY 的「首个成立日」抑制。",
+            "池策略 " + config.firstLimitPool.poolPolicyId +
+              "：池龄上限=" + String(config.firstLimitPool.poolAgeCapTradingDays) +
+              " 交易日 / " +
+              (config.firstLimitPool.scorePolicy === "ROLLING_THREE_FACTOR"
+                ? "滚动 3F T+1..T+" + String(config.firstLimitPool.scoreWindowDays) +
+                  " / 最低分 " + String(config.firstLimitPool.minimumScore) +
+                  " / 低于最低分立即移池 / 校准 " +
+                  String(config.firstLimitPool.calibrationVersion)
+                : "早期 OHLC 至 T+" + String(config.firstLimitPool.earlyScoreStageEnd) +
+                  " / 完整 3F 自 T+" + String(config.firstLimitPool.fullScoreStart)) +
+              " / 连续不可评分 " + String(config.firstLimitPool.scoreInvalidationDays) +
+              " 日失效 / scoreAffectsExit=" + String(config.firstLimitPool.scoreAffectsExit),
+          ]),
       config.datasetHorizonRelativeDay === undefined
         ? "数据集视界未声明 ⇒ 兼容性报告**不做视界校验**（逐决策日该量不可知，编一个会误杀早期决策日）；「读不读得到未来」由 PIT 关卡在访问点拒绝"
         : "数据集视界 = T+" + String(config.datasetHorizonRelativeDay) + "（进兼容性校验）",
@@ -438,6 +499,7 @@ export function emptyDecisionDigest(): StrategyDecisionDigest {
     minBarCount: 0,
     maxBarCount: 0,
     maxRelativeDayObserved: 0,
+    poolScoreRemovalCount: 0,
     decisionDigestFingerprint: "",
     samples: [],
   };

@@ -14,6 +14,9 @@
     "test:changed": "tsx scripts/testChanged.mts",
     "docs:tests": "tsx scripts/genTestDocs.mts",
     "backfill:daily": "tsx scripts/backfillDaily.ts",
+    "dataset:snapshot": "tsx scripts/datasetSnapshot.ts",
+    "dataset:build-pool-v6": "tsx scripts/buildFirstLimitPoolV6Dataset.mts --version v6",
+    "study:run-pool-rolling": "tsx scripts/runFirstLimitPoolRollingStudy.mts",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {

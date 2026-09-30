@@ -32,7 +32,11 @@ import { createHash } from "node:crypto";
 import { assembleRunWorkbenchInputs } from "../../runWorkbenchAssembly/assemble";
 import type { ResearchDataset } from "../../researchDataset";
 import type { EquityPoint } from "../../backtest/types";
-import { createClosedLoopWiring, ClosedLoopWiringError } from "../closedLoopWiring/executors";
+import {
+  createClosedLoopWiring,
+  createStreamingClosedLoopWiring,
+  ClosedLoopWiringError,
+} from "../closedLoopWiring/executors";
 import { runClosedLoop } from "../closedLoop/orchestrator";
 import type {
   ClosedLoopEvaluationRef,
@@ -198,9 +202,14 @@ export async function evaluateStrategyParameters(
     parameterSet,
   };
 
-  const { artifacts, stageRunners } = createClosedLoopWiring(assembled.inputs, {
-    requested: STRATEGY_EVALUATION_STAGE_IDS,
-  });
+  const wiring = assembled.inputs.researchDatasetCursor !== undefined
+    ? await createStreamingClosedLoopWiring(assembled.inputs, {
+        requested: STRATEGY_EVALUATION_STAGE_IDS,
+      })
+    : createClosedLoopWiring(assembled.inputs, {
+        requested: STRATEGY_EVALUATION_STAGE_IDS,
+      });
+  const { artifacts, stageRunners } = wiring;
 
   const run = runClosedLoop({
     runId,

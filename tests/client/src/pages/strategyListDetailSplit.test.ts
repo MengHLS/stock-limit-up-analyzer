@@ -109,4 +109,12 @@ describe("策略：列表页 / 详情页分家", () => {
     expect(result).not.toContain("未开启「使用真实数据」");
     expect(result).not.toContain("「数据完整性已确认」未勾选");
   });
+
+  it("10) 版本回测对比页的「返回策略」指向策略首页", () => {
+    const compare = read("pages/StrategyVersionCompare.tsx");
+    expect(compare).toContain('<Link to="/strategies">');
+    expect(compare).not.toContain(
+      '<Link to={`/strategies/${encodeURIComponent(strategyId)}`}>',
+    );
+  });
 });

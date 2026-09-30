@@ -72,13 +72,50 @@ export const PARAMETER_SEARCH_PARAMETER_KINDS = ["FIXED", "TUNABLE", "DERIVED"] 
 export const parameterSearchParameterKindSchema = z.enum(PARAMETER_SEARCH_PARAMETER_KINDS);
 export type ParameterSearchParameterKind = (typeof PARAMETER_SEARCH_PARAMETER_KINDS)[number];
 
-/** 参数值（与 `research/types.ts#ResearchParameterValue` 同域）。 */
+/** 标量参数值（与 `research/types.ts#ResearchParameterScalar` 同域）。 */
 export const parameterSearchValueSchema = z.union([
   z.number(),
   z.string(),
   z.boolean(),
   z.null(),
 ]);
+
+/** 结构化参数元素：标量，或键值均为标量的普通对象。 */
+export const parameterSearchJsonElementSchema = z.union([
+  parameterSearchValueSchema,
+  z.record(z.string(), parameterSearchValueSchema),
+]);
+
+/**
+ * 结构化参数值：有限、可序列化的 JSON 数组。
+ *
+ * 与 `research/types.ts#ResearchParameterJsonValue` 同域；元素可为标量或标量对象，
+ * 刻意不开放嵌套数组与更深对象，避免参数面偷偷承载策略结构。
+ */
+export const parameterSearchJsonValueSchema = z.array(
+  parameterSearchJsonElementSchema
+);
+
+/** 参数值（与 `research/types.ts#ResearchParameterValue` 同域）。 */
+export const parameterSearchParameterValueSchema = z.union([
+  parameterSearchValueSchema,
+  parameterSearchJsonValueSchema,
+]);
+export type ParameterSearchParameterValue = z.infer<typeof parameterSearchValueSchema>
+  | readonly z.infer<typeof parameterSearchJsonElementSchema>[];
+
+/**
+ * 参数集合的传输形态。
+ *
+ * 结构化参数（json）随参数集一起传输与持久化；但**搜索域**仍沿用标量 schema，
+ * 因为 `json` 参数不是可枚举的网格维度。
+ */
+export type ParameterSearchParameterSet = Readonly<Record<string, ParameterSearchParameterValue>>;
+
+export const parameterSearchParameterSetSchema: z.ZodType<ParameterSearchParameterSet> = z.record(
+  z.string(),
+  parameterSearchParameterValueSchema,
+);
 
 /** 搜索域形态（规格 §3：enum / integer range / decimal range / fixed value）。 */
 export const PARAMETER_SEARCH_DOMAIN_MODES = [
@@ -114,7 +151,7 @@ export const parameterSearchParameterDefinitionSchema = z.object({
   name: z.string().min(1),
   type: z.enum(["number", "string", "boolean"]),
   kind: parameterSearchParameterKindSchema,
-  defaultValue: parameterSearchValueSchema.optional(),
+  defaultValue: parameterSearchParameterValueSchema.optional(),
   required: z.boolean(),
   description: z.string().optional(),
   unit: z.string().optional(),
@@ -151,7 +188,7 @@ export const parameterSearchCombinationViewSchema = z.object({
   combinationIndex: z.number().int().nonnegative(),
   /** 稳定参数哈希（身份；见 `parameterHash.ts`）。 */
   parameterHash: z.string().min(1),
-  parameters: z.record(z.string(), parameterSearchValueSchema),
+  parameters: parameterSearchParameterSetSchema,
   status: parameterSearchCombinationStatusSchema,
   attemptCount: z.number().int().nonnegative(),
   lastError: z.string().nullable().optional(),
@@ -225,7 +262,7 @@ export const parameterSearchResultViewSchema = z.object({
   searchRunId: z.string().min(1),
   combinationIndex: z.number().int().nonnegative(),
   parameterHash: z.string().min(1),
-  parameters: z.record(z.string(), parameterSearchValueSchema),
+  parameters: parameterSearchParameterSetSchema,
   status: z.enum(["SUCCEEDED", "FAILED"]),
   /** 失败原因（结构化字符串）；成功时为 null。 */
   error: z.string().nullable(),
@@ -254,7 +291,7 @@ export const parameterSearchResultViewSchema = z.object({
    * FRONTEND-FINAL-001（P0-2）追加，**只读投影**：不重算、不二次解析、不为反推而重跑策略。
    * 留档中没有该记录时为 `null`（历史行 / 失败路径）—— 此时 UI 必须显示 `UNAVAILABLE`，不得猜。
    */
-  resolvedParameterSet: z.record(z.string(), parameterSearchValueSchema).nullable(),
+  resolvedParameterSet: parameterSearchParameterSetSchema.nullable(),
   /** 请求参数 ↔ 实际被消费参数的对照结论（服务端算好，前端直接渲染）。 */
   parameterResolution: parameterResolutionViewSchema.nullable(),
   createdAt: z.string().min(1),
@@ -281,7 +318,7 @@ export const parameterSearchRunViewSchema = z.object({
   parameterSpace: parameterSearchSpaceDefinitionSchema,
   parameterSpaceFingerprint: z.string().min(1),
   /** FIXED 坐标快照（用于回答「这次搜索固定了什么」）。 */
-  fixedCoordinates: z.record(z.string(), parameterSearchValueSchema),
+  fixedCoordinates: parameterSearchParameterSetSchema,
   executionPolicyVersion: z.number().int(),
   evaluationConfigFingerprint: z.string().min(1),
   combinationCount: z.number().int().nonnegative(),

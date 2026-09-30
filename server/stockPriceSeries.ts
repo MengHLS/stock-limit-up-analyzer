@@ -14,6 +14,7 @@ export interface StockDailySeriesPoint {
   amount: number | null;
   ma5: number | null;
   ma10: number | null;
+  ma20: number | null;
 }
 
 type StockDailyRow = {
@@ -29,7 +30,8 @@ type StockDailyRow = {
 
 const MA5_WINDOW = 5;
 const MA10_WINDOW = 10;
-const MAX_LOOKBACK_ROWS = MA10_WINDOW - 1;
+const MA20_WINDOW = 20;
+const MAX_LOOKBACK_ROWS = MA20_WINDOW - 1;
 
 function parsePositiveNumber(value: string | null): number | null {
   if (value === null || value.trim() === "") return null;
@@ -109,6 +111,7 @@ export function buildStockDailySeries(
             : Number(((row.close / previousClose - 1) * 100).toFixed(4)),
         ma5: movingAverageAt(closes, index, MA5_WINDOW),
         ma10: movingAverageAt(closes, index, MA10_WINDOW),
+        ma20: movingAverageAt(closes, index, MA20_WINDOW),
       };
     })
     .filter(
@@ -117,8 +120,8 @@ export function buildStockDailySeries(
 }
 
 /**
- * Load one stock's daily bars for a bounded display range. Nine preceding rows are
- * fetched so MA5/MA10 remain correct at the left edge of the returned range.
+ * Load one stock's daily bars for a bounded display range. Nineteen preceding rows
+ * are fetched so MA5/MA10/MA20 remain correct at the left edge of the returned range.
  */
 export async function getStockDailySeries(
   stockCode: string,

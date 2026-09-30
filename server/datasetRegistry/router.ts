@@ -57,12 +57,14 @@ import {
   createBuildJobInputSchema,
   createDatasetDefinitionInputSchema,
   createDatasetVersionInputSchema,
+  createSnapshotInputSchema,
   deleteDatasetDefinitionInputSchema,
   deleteDatasetVersionInputSchema,
   eventPageInputSchema,
   getBuildConfigInputSchema,
   getDefinitionInputSchema,
   getJobInputSchema,
+  getSnapshotStatusInputSchema,
   getStatisticsInputSchema,
   getVersionInputSchema,
   listJobsInputSchema,
@@ -74,6 +76,19 @@ import {
   startBuildJobInputSchema,
   updateDefinitionInputSchema,
 } from "../../shared/datasetRegistryContracts";
+import {
+  defaultDatasetContentDependencies,
+  defaultDatasetSnapshotStore,
+  defaultDatasetSnapshotTaskManager,
+  type DatasetContentDependencies,
+  type DatasetSnapshotStore,
+  type DatasetSnapshotTaskManager,
+} from "./snapshot";
+import type { DatasetDefinition, DatasetVersion } from "./types";
+
+type SnapshotSupport =
+  | { supported: true; reason: null; version: DatasetVersion; definition: DatasetDefinition }
+  | { supported: false; reason: string };
 
 function assertDateRange(fromDate?: string, toDate?: string): void {
   if (fromDate && toDate && fromDate > toDate) {
@@ -147,6 +162,12 @@ export interface DatasetRegistryRouterDeps {
   physicalStore?: DatasetPhysicalStore;
   /** 构建执行器；缺省按 pluginRegistry + physicalStore 自动构造。 */
   buildRunner?: DatasetBuildRunner;
+  /** 本地快照存储（开发态加速）；缺省单例。 */
+  snapshotStore?: DatasetSnapshotStore;
+  /** 本地快照任务管理器（CLI 子进程）；缺省单例。 */
+  snapshotTaskManager?: DatasetSnapshotTaskManager;
+  /** 统一内容依赖（快照感知 reader + 窄 metadata reader）；缺省单例。 */
+  contentDependencies?: DatasetContentDependencies;
 }
 
 export function buildDatasetRegistryRouter(deps: DatasetRegistryRouterDeps) {
@@ -157,6 +178,45 @@ export function buildDatasetRegistryRouter(deps: DatasetRegistryRouterDeps) {
   const query = new DatasetQueryService(deps.repo, deps.reader, (code) => plugins.has(code));
   const runner: DatasetBuildRunner =
     deps.buildRunner ?? new DefaultDatasetBuildRunner({ repo: deps.repo, service, plugins });
+  const snapshotStore = deps.snapshotStore ?? defaultDatasetSnapshotStore();
+  const snapshotTaskManager = deps.snapshotTaskManager ?? defaultDatasetSnapshotTaskManager();
+  const contentDependencies = deps.contentDependencies ?? defaultDatasetContentDependencies();
+
+  /**
+   * 快照支持的**唯一判据**（getSnapshotStatus / createSnapshot 共用，避免两处漂移）：
+   * 版本存在 + READY + datasetCode=first_limit_pullback + 开发态。
+   */
+  async function resolveSnapshotSupport(datasetVersionId: number): Promise<SnapshotSupport> {
+    if (process.env.NODE_ENV !== "development") {
+      return { supported: false, reason: "本地 Dataset 快照仅在开发环境（NODE_ENV=development）生效。" };
+    }
+    const version = await deps.repo.getVersionById(datasetVersionId);
+    if (!version) {
+      return { supported: false, reason: `未找到 dataset_version.id=${datasetVersionId}。` };
+    }
+    if (version.status !== "READY") {
+      return {
+        supported: false,
+        reason: `版本状态为 ${version.status}，只有 READY 版本才能导出快照。`,
+      };
+    }
+    const definition = await deps.repo.getDefinitionById(version.datasetId);
+    if (!definition) {
+      return {
+        supported: false,
+        reason: `dataset_version.id=${datasetVersionId} 所属 dataset_definition.id=${version.datasetId} 不存在。`,
+      };
+    }
+    if (definition.datasetCode !== "first_limit_pullback") {
+      return {
+        supported: false,
+        reason: `本快照能力目前只支持 first_limit_pullback，收到 datasetCode=${JSON.stringify(
+          definition.datasetCode,
+        )}。`,
+      };
+    }
+    return { supported: true, reason: null, version, definition };
+  }
 
   /** 统一把「定义」映射为 wire（附带 buildable）。 */
   const definitionToWire = (def: Parameters<typeof toDefinitionListItem>[0]) =>
@@ -258,6 +318,64 @@ export function buildDatasetRegistryRouter(deps: DatasetRegistryRouterDeps) {
         const version = await query.getVersion(input.datasetVersionId);
         if (!version) throw new TRPCError({ code: "NOT_FOUND", message: `未找到 Dataset 版本：${input.datasetVersionId}` });
         return version;
+      }),
+
+    // ---- 本地快照（开发态加速；LOCAL-DATASET-SNAPSHOT）----
+    /**
+     * 快照状态：支持性 + 可用性 + manifest + 任务 + 下载 URL。
+     *
+     * 🔴 快照存在但校验失败必须**抛错**（`DatasetSnapshotError`），不能伪装成
+     *    「无快照」——否则 UI 会显示「可生成」，而实际读路径会突然停摆。
+     */
+    getSnapshotStatus: publicProcedure
+      .input(getSnapshotStatusInputSchema)
+      .query(async ({ input }) => {
+        const support = await resolveSnapshotSupport(input.datasetVersionId);
+        const task = snapshotTaskManager.get(input.datasetVersionId);
+        if (!support.supported) {
+          return {
+            supported: false as const,
+            reason: support.reason,
+            available: false as const,
+            manifest: null,
+            task,
+            downloadUrl: null,
+          };
+        }
+        const snapshot = await snapshotStore.inspect(input.datasetVersionId, {
+          version: support.version,
+          definition: support.definition,
+        });
+        return {
+          supported: true as const,
+          reason: null,
+          available: snapshot !== null,
+          manifest: snapshot?.manifest ?? null,
+          task,
+          downloadUrl: snapshot
+            ? `/api/datasets/${input.datasetVersionId}/snapshot`
+            : null,
+        };
+      }),
+
+    /**
+     * 创建（或复用）快照导出任务。
+     *
+     * 并发纪律：同一版本已有 running 任务时复用（返回既有 taskId），不重复起子进程。
+     */
+    createSnapshot: adminProcedure
+      .input(createSnapshotInputSchema)
+      .mutation(async ({ input }) => {
+        const support = await resolveSnapshotSupport(input.datasetVersionId);
+        if (!support.supported) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: support.reason ?? "该版本不支持本地快照。",
+          });
+        }
+        return snapshotTaskManager.create(input.datasetVersionId, {
+          ...(input.force !== undefined ? { force: input.force } : {}),
+        });
       }),
 
     // ---- Create Version（admin 写端点：建版本 + 固化筛选配置，新版本以 DRAFT 落地）----
@@ -521,9 +639,11 @@ export function buildDatasetRegistryRouter(deps: DatasetRegistryRouterDeps) {
 /** 默认实例（真实 TiDB，惰性连接；多数据集插件注册表 + 真实构建执行器 + 物理表存储）。 */
 export const datasetRegistryRouter = buildDatasetRegistryRouter({
   repo: new DbDatasetRegistry(),
-  reader: new DbDatasetDataReader(),
+  // 内容读取统一走快照感知 reader：有效快照存在时读 SQLite，否则回退 DB。
+  reader: defaultDatasetContentDependencies().reader,
   pluginRegistry: defaultDatasetPluginRegistry,
   physicalStore: new DbDatasetPhysicalStore(),
+  contentDependencies: defaultDatasetContentDependencies(),
 });
 
 export type DatasetRegistryRouter = ReturnType<typeof buildDatasetRegistryRouter>;

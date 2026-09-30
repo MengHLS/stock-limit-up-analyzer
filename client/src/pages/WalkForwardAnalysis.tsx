@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { WalkForwardRouter } from "../../../server/walkForwardRouter";
+import type { ParameterSearchParameterValue } from "@shared/parameterSearchContracts";
 
 
 const walkForward = trpc.walkForward;
@@ -66,11 +67,13 @@ const pnlTone = (v: number | null | undefined) =>
   v === null || v === undefined ? "" : v >= 0 ? "text-rose-600" : "text-emerald-700";
 
 /** 参数集 → 人类可读（键排序 + `k=v`）。 */
-function formatParamSet(set: Record<string, number | string | boolean | null> | null | undefined): string {
+function formatParamSet(
+  set: Record<string, ParameterSearchParameterValue> | null | undefined,
+): string {
   if (!set) return "—";
   const parts = Object.keys(set)
     .sort()
-    .map((k) => `${k}=${String(set[k])}`);
+    .map((k) => `${k}=${JSON.stringify(set[k])}`);
   return parts.length === 0 ? "∅" : parts.join("，");
 }
 
@@ -105,7 +108,7 @@ function pboStatus(conclusion: string | null | undefined): string {
 }
 
 /** 从冻结参数集派生参数敏感性扰动规则（仅数值参数，±2 档）。 */
-function sensitivityRules(set: Record<string, number | string | boolean | null>): Array<{
+function sensitivityRules(set: Record<string, ParameterSearchParameterValue>): Array<{
   parameterName: string;
   additiveSteps: number[];
 }> {

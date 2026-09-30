@@ -16,6 +16,7 @@
 
 import type { StrategyDocument } from "../../research/strategySchema/types";
 import type { StrategyDefinition as LegacyStrategyDefinition } from "../../research/strategySchema/definition";
+import type { FirstLimitPoolPolicy } from "../types";
 import { fromLegacyStrategyDefinition, type LegacyAdaptationResult } from "../adapters/legacyDefinition";
 import { createStrategyVersion, type StrategyVersion } from "../version";
 
@@ -36,6 +37,8 @@ export type CoreVersionFromDocumentResult =
       readonly eventType: string | null;
       /** 文档声明的涨停阈值（**仅读**；`null` = 未声明 ⇒ 运行期不做涨停校验）。 */
       readonly limitUpRatio: number | null;
+      /** 文档声明的池策略（仅 FIRST_LIMIT_POOL；旧事件窗策略为 null）。 */
+      readonly firstLimitPool: FirstLimitPoolPolicy | null;
       readonly notes: readonly string[];
     }
   | {
@@ -179,6 +182,7 @@ export function coreVersionFromDocument(
   const eventType = legacy.entry?.event?.type === undefined ? null : String(legacy.entry.event.type);
   const rawRatio = (legacy.entry?.event?.params ?? {})["limitUpRatio"];
   const limitUpRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) ? rawRatio : null;
+  const firstLimitPool = readFirstLimitPoolPolicy(legacy);
 
   return {
     ok: true,
@@ -186,12 +190,113 @@ export function coreVersionFromDocument(
     adaptation,
     eventType,
     limitUpRatio,
+    firstLimitPool,
     notes: [
       ...normalizeNotes,
       ...adaptation.notes,
       eventType === null
         ? "文档未声明事件类型 ⇒ Core 定义里没有 EVENT 节点（纯条件策略）"
         : "文档声明事件类型 " + eventType + "；事件判定器由生产层按数据集事件源注入",
+      ...(firstLimitPool === null
+        ? []
+        : [
+            "文档声明 FIRST_LIMIT_POOL 池化语义：" +
+              firstLimitPool.poolPolicyId +
+              "（池龄 " + String(firstLimitPool.poolAgeCapTradingDays) +
+              " 交易日 / " +
+              (firstLimitPool.scorePolicy === "ROLLING_THREE_FACTOR"
+                ? "滚动 3F T+1..T+" + String(firstLimitPool.scoreWindowDays) +
+                  " / 最低分 " + String(firstLimitPool.minimumScore) +
+                  " / 校准 " + String(firstLimitPool.calibrationVersion)
+                : "早期 OHLC T+0..T+" + String(firstLimitPool.earlyScoreStageEnd) +
+                  " / 完整 3F T+" + String(firstLimitPool.fullScoreStart) + " 起") +
+              " / scoreAffectsExit=" + String(firstLimitPool.scoreAffectsExit) + "）",
+          ]),
     ],
+  };
+}
+
+/**
+ * 只读文档里的池策略声明；结构非法时返回 null（严格校验由
+ * `validateCanonicalStrategyDefinition` 在更上游完成，这里不重复发明规则）。
+ */
+function readFirstLimitPoolPolicy(legacy: LegacyStrategyDefinition): FirstLimitPoolPolicy | null {
+  const raw = (legacy as unknown as { firstLimitPool?: unknown }).firstLimitPool;
+  if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const poolPolicyId = typeof record.poolPolicyId === "string" ? record.poolPolicyId.trim() : "";
+  const poolAgeCapTradingDays = record.poolAgeCapTradingDays;
+  const earlyScoreStageEnd = record.earlyScoreStageEnd;
+  const fullScoreStart = record.fullScoreStart;
+  const scoreInvalidationDays = record.scoreInvalidationDays;
+  const maxDailyCandidates = record.maxDailyCandidates;
+  const isRolling = record.scorePolicy === "ROLLING_THREE_FACTOR";
+  const boardScope = Array.isArray(record.boardScope)
+    ? record.boardScope.filter((value): value is "main" | "chinext" | "star" | "bse" =>
+        value === "main" || value === "chinext" || value === "star" || value === "bse")
+    : (["main"] as const);
+  if (
+    poolPolicyId === "" ||
+    record.admissionEventType !== "FIRST_LIMIT_UP" ||
+    record.admittedRelativeDay !== 0 ||
+    !Number.isInteger(poolAgeCapTradingDays) ||
+    (poolAgeCapTradingDays as number) < 1 ||
+    (isRolling
+      ? record.scoreStartRelativeDay !== 1
+        || record.scoreWindowDays !== 5
+        || typeof record.minimumScore !== "number"
+        || !Number.isFinite(record.minimumScore)
+        || record.minimumScore < 0
+        || record.minimumScore > 1
+        || typeof record.maxObservationAmplitude !== "number"
+        || !Number.isFinite(record.maxObservationAmplitude)
+        || record.maxObservationAmplitude <= 0
+        || record.maxObservationAmplitude >= 1
+        || typeof record.calibrationVersion !== "string"
+        || record.calibrationVersion.trim() === ""
+        || record.removeBelowMinimumScore !== true
+        || boardScope.length === 0
+      : !Number.isInteger(earlyScoreStageEnd)
+        || (earlyScoreStageEnd as number) < 0
+        || !Number.isInteger(fullScoreStart)
+        || (fullScoreStart as number) !== (earlyScoreStageEnd as number) + 1) ||
+    !Number.isInteger(scoreInvalidationDays) ||
+    (scoreInvalidationDays as number) < 1 ||
+    !Number.isInteger(maxDailyCandidates) ||
+    (maxDailyCandidates as number) < 0 ||
+    record.scoreAffectsExit !== false
+  ) {
+    return null;
+  }
+  return {
+    poolPolicyId,
+    admissionEventType: "FIRST_LIMIT_UP",
+    admittedRelativeDay: 0,
+    boardScope,
+    poolAgeCapTradingDays: poolAgeCapTradingDays as number,
+    ...(isRolling
+      ? {
+          scorePolicy: "ROLLING_THREE_FACTOR" as const,
+          scoreStartRelativeDay: 1,
+          scoreWindowDays: 5,
+          minimumScore: record.minimumScore as number,
+          maxObservationAmplitude: record.maxObservationAmplitude as number,
+          calibrationVersion: record.calibrationVersion as string,
+          removeBelowMinimumScore: true,
+          allowMultipleMembersPerSecurity:
+            record.allowMultipleMembersPerSecurity === true,
+          ...(typeof record.exitTailTradingDays === "number"
+            ? { exitTailTradingDays: record.exitTailTradingDays }
+            : {}),
+        }
+      : {
+          earlyScoreStageEnd: earlyScoreStageEnd as number,
+          fullScoreStart: fullScoreStart as number,
+        }),
+    scoreInvalidationDays: scoreInvalidationDays as number,
+    scoreAffectsExit: false,
+    maxDailyCandidates: maxDailyCandidates as number,
   };
 }

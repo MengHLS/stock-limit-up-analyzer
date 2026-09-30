@@ -24,7 +24,13 @@
  * 纯模块：无 IO / 无 Date.now / 无 Math.random。
  */
 
-import { StrategyCoreError, type ComparisonOperator, type CoreValue, type StrategyCapability } from "../types";
+import {
+  StrategyCoreError,
+  type ComparisonOperator,
+  type CoreScalar,
+  type CoreValue,
+  type StrategyCapability,
+} from "../types";
 import { Expr, parseExpression, type ValueExpression } from "../expression";
 import { Rule, type RuleNode } from "../ruleGraph";
 import {
@@ -94,6 +100,9 @@ export const LEGACY_TRIGGER_TO_QUANTIFIER: Readonly<Record<string, "ANY_DAY">> =
   LAST_VALID_DAY: "ANY_DAY",
   EVERY_VALID_DAY: "ANY_DAY",
   NEXT_TRADING_DAY: "ANY_DAY",
+  // 池化触发沿用「窗口内任一天可成立」，但生产决策源会对
+  // FIRST_LIMIT_POOL 关掉「首个成立日」抑制，改为有效期内逐日触发。
+  FIRST_LIMIT_POOL: "ANY_DAY",
 });
 
 /** legacy 仓位方法 → Core 仓位方法（同名同义，仍显式登记）。 */
@@ -175,7 +184,7 @@ function mapValueExpression(
   switch (condition.valueType) {
     case "CONSTANT": {
       if (Array.isArray(value)) {
-        return Expr.array(value as readonly CoreValue[]);
+        return Expr.array(value as readonly CoreScalar[]);
       }
       if (typeof value === "string" && looksLikeExpressionText(value)) {
         // legacy 把算术表达式写进了 CONSTANT ⇒ 用 Core 既有解析器还原。
@@ -187,7 +196,7 @@ function mapValueExpression(
         );
         return expression;
       }
-      return Expr.constant((value ?? null) as CoreValue);
+      return Expr.constant((value ?? null) as CoreScalar);
     }
     case "FIELD_REFERENCE": {
       if (typeof value !== "string") {
@@ -276,7 +285,17 @@ function mapParameter(parameter: LegacyParameterDefinition): CoreParameterDefini
     return {
       ...shared,
       dataType: "string",
-      ...(parameter.allowedValues === undefined ? {} : { allowedValues: [...parameter.allowedValues] }),
+      ...(parameter.allowedValues === undefined
+        ? {}
+        : { allowedValues: parameter.allowedValues.filter((value): value is string => typeof value === "string") }),
+    };
+  }
+  if (parameter.dataType === "json") {
+    return {
+      ...shared,
+      dataType: "json",
+      ...(parameter.minItems === undefined ? {} : { minItems: parameter.minItems }),
+      ...(parameter.maxItems === undefined ? {} : { maxItems: parameter.maxItems }),
     };
   }
   return { ...shared, dataType: "boolean" };
@@ -350,7 +369,11 @@ export function fromLegacyStrategyDefinition(
   );
 
   const steps: RuleNode[] = [
-    Rule.event(entry.event.type, "entry.event", entry.event.params as Readonly<Record<string, CoreValue>> | undefined),
+    Rule.event(
+      entry.event.type,
+      "entry.event",
+      entry.event.params as Readonly<Record<string, CoreScalar>> | undefined,
+    ),
   ];
   if (conditionNodes.length > 0) {
     steps.push(Rule.window(window, quantifier, Rule.all(conditionNodes, "entry.conditions"), "entry.window"));
@@ -563,7 +586,7 @@ export function toLegacyStrategyDefinition(
       ...("min" in parameter && parameter.min !== undefined ? { min: parameter.min } : {}),
       ...("max" in parameter && parameter.max !== undefined ? { max: parameter.max } : {}),
       ...("step" in parameter && parameter.step !== undefined ? { step: parameter.step } : {}),
-      ...("allowedValues" in parameter && parameter.allowedValues !== undefined
+      ...(parameter.dataType === "string" && parameter.allowedValues !== undefined
         ? { allowedValues: [...parameter.allowedValues] }
         : {}),
       ...(parameter.unit === undefined ? {} : { unit: parameter.unit }),

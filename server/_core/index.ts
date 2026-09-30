@@ -16,6 +16,8 @@ import { reclaimOrphanBuildJobs } from "../datasetRegistry";
 import { resolveRuntimeNodeEnv } from "./env";
 // RESEARCH-EXPERIMENT-004 — 实验 Artifact 只读代理（凭据只留在服务端；规格 §18）。
 import { registerExperimentArtifactRoutes } from "../experimentArtifactRoutes";
+// LOCAL-DATASET-SNAPSHOT — 本地 Dataset SQLite 快照下载（开发态；必须早于 Vite/静态 fallback）。
+import { registerDatasetSnapshotRoutes } from "../datasetSnapshotRoutes";
 
 // 统一运行模式（判定口径见 env.ts#resolveRuntimeNodeEnv）。
 // 必须早于任何读取 process.env.NODE_ENV 的逻辑：下方的 Vite/静态分支、vite.ts#serveStatic、
@@ -73,12 +75,21 @@ async function startServer() {
   // RESEARCH-EXPERIMENT-004 — 实验 Artifact 代理（必须早于 Vite/静态中间件注册，
   // 否则开发模式下会被 Vite 的 HTML fallback 吃掉）。
   registerExperimentArtifactRoutes(app);
+  // LOCAL-DATASET-SNAPSHOT — 本地快照下载（同前：必须早于 Vite/静态 fallback）。
+  registerDatasetSnapshotRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",
     createExpressMiddleware({
       router: appRouter,
       createContext,
+      // 允许 POST 调用 query —— 与前端 main.tsx 的 `splitLink` 配套。
+      // 留档回测的「证券名称 / 代码」查询要带几百个 canonical identity
+      // （单个 ~68 字符），走 GET 会把 query string 撑到几十 KB，先撞上 Node 的
+      // 请求行上限并返回 431 / `Input is too big for a single dispatch`。
+      // 该查询是纯读取、无副作用，改用 POST 把入参放进请求体即可；
+      // 其余查询仍走 GET，行为不变。
+      allowMethodOverride: true,
     })
   );
 

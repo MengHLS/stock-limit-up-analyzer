@@ -38,6 +38,7 @@ type StockDailySeriesPoint = {
   amount: number | null;
   ma5: number | null;
   ma10: number | null;
+  ma20: number | null;
 };
 
 type KlineChartPoint = StockDailySeriesPoint & {
@@ -188,6 +189,7 @@ function KlineTooltip({
         <span>收 {formatPrice(point.close)}</span>
         <span>MA5 {formatPrice(point.ma5)}</span>
         <span>MA10 {formatPrice(point.ma10)}</span>
+        <span>MA20 {formatPrice(point.ma20)}</span>
         <span>
           涨跌{" "}
           {point.changePct === null ? "—" : `${point.changePct.toFixed(2)}%`}
@@ -245,7 +247,13 @@ export function StockKlineDialog({
   const priceDomain = useMemo<[number, number]>(() => {
     if (chartData.length === 0) return [0, 1];
     const prices = chartData
-      .flatMap(point => [point.low, point.high, point.ma5, point.ma10])
+      .flatMap(point => [
+        point.low,
+        point.high,
+        point.ma5,
+        point.ma10,
+        point.ma20,
+      ])
       .filter((value): value is number => value !== null);
     const min = Math.min(...prices);
     const max = Math.max(...prices);
@@ -376,6 +384,16 @@ export function StockKlineDialog({
                           dataKey="ma10"
                           name="MA10"
                           stroke="#2563eb"
+                          strokeWidth={1.8}
+                          dot={false}
+                          connectNulls={false}
+                          isAnimationActive={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="ma20"
+                          name="MA20"
+                          stroke="#7c3aed"
                           strokeWidth={1.8}
                           dot={false}
                           connectNulls={false}

@@ -35,6 +35,9 @@ import {
   StrategyCoreError,
   validationIssue,
   type CoreValidationIssue,
+  type CoreJsonElement,
+  type CoreJsonValue,
+  type CoreScalar,
   type CoreValue,
   type ParameterDataType,
   type ParameterRole,
@@ -82,10 +85,26 @@ export interface BooleanParameterDefinition extends ParameterDefinitionBase {
   readonly derivedFrom?: ValueExpression;
 }
 
+/**
+ * 结构化参数定义。
+ *
+ * 🔴 只开放“JSON 数组”，不开放任意 JSON 对象 / 嵌套数组：Core 的表达式求值仍只接受
+ * `CoreScalar`，结构参数的消费点是声明面（如仓位分档），不能混进规则图。
+ * 数组元素可以是标量或键值均为标量的普通对象。
+ */
+export interface JsonParameterDefinition extends ParameterDefinitionBase {
+  readonly dataType: "json";
+  readonly minItems?: number;
+  readonly maxItems?: number;
+  readonly allowedValues?: readonly CoreJsonValue[];
+  readonly derivedFrom?: ValueExpression;
+}
+
 export type ParameterDefinition =
   | NumberParameterDefinition
   | StringParameterDefinition
-  | BooleanParameterDefinition;
+  | BooleanParameterDefinition
+  | JsonParameterDefinition;
 
 /** 调用方提供的参数值集合（**未解析**原始配置；键必须都在 schema 内）。 */
 export type ParameterSet = Readonly<Record<string, CoreValue>>;
@@ -162,6 +181,17 @@ function validateSingleDefinition(definition: ParameterDefinition, path: string)
           validationIssue("PARAMETER_NOT_ALLOWED_VALUE", path, "TUNABLE 字符串参数必须声明非空 allowedValues"),
         );
       }
+    } else if (definition.dataType === "json") {
+      const jsonDef = definition as JsonParameterDefinition;
+      if (jsonDef.allowedValues === undefined || jsonDef.allowedValues.length === 0) {
+        issues.push(
+          validationIssue(
+            "PARAMETER_NOT_ALLOWED_VALUE",
+            path,
+            "TUNABLE json 参数必须声明非空 allowedValues（结构化参数无法网格化，候选集合必须显式声明）",
+          ),
+        );
+      }
     } else {
       issues.push(
         validationIssue("PARAMETER_TYPE_MISMATCH", path, "TUNABLE 不支持 boolean（布尔维度无法网格化，请用 string 枚举表达）"),
@@ -218,10 +248,48 @@ function validateSingleValue(
     }
     return issues;
   }
+  if (definition.dataType === "json") {
+    if (!isCoreJsonValue(value)) {
+      issues.push(validationIssue("PARAMETER_TYPE_MISMATCH", path, "期望 JSON 数组（元素为标量或标量对象），实际 " + JSON.stringify(value)));
+      return issues;
+    }
+    const jsonDef = definition as JsonParameterDefinition;
+    if (jsonDef.minItems !== undefined && value.length < jsonDef.minItems) {
+      issues.push(validationIssue("PARAMETER_OUT_OF_RANGE", path, "数组长度 " + String(value.length) + " 小于 minItems " + String(jsonDef.minItems)));
+    }
+    if (jsonDef.maxItems !== undefined && value.length > jsonDef.maxItems) {
+      issues.push(validationIssue("PARAMETER_OUT_OF_RANGE", path, "数组长度 " + String(value.length) + " 大于 maxItems " + String(jsonDef.maxItems)));
+    }
+    if (jsonDef.allowedValues !== undefined && jsonDef.allowedValues.length > 0) {
+      const key = JSON.stringify(value);
+      const allowed = jsonDef.allowedValues.some((candidate) => JSON.stringify(candidate) === key);
+      if (!allowed) {
+        issues.push(validationIssue("PARAMETER_NOT_ALLOWED_VALUE", path, "结构化参数值不在 allowedValues 内"));
+      }
+    }
+    return issues;
+  }
   if (typeof value !== "boolean") {
     issues.push(validationIssue("PARAMETER_TYPE_MISMATCH", path, "期望布尔，实际 " + JSON.stringify(value)));
   }
   return issues;
+}
+
+function isCoreScalar(value: unknown): value is CoreScalar {
+  return value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isCoreJsonElement(value: unknown): value is CoreJsonElement {
+  if (isCoreScalar(value)) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(isCoreScalar);
+}
+
+function isCoreJsonValue(value: unknown): value is CoreJsonValue {
+  return Array.isArray(value) && value.every(isCoreJsonElement);
 }
 
 /** 校验参数 schema（结构 + 唯一性 + role 相关规则 + 依赖引用完整性 + 循环依赖）。 */
@@ -402,13 +470,23 @@ export function resolveParameters(
   }
 
   const resolved: Record<string, CoreValue> = {};
-  const readResolved = (code: string): CoreValue => {
-    if (Object.prototype.hasOwnProperty.call(resolved, code)) return resolved[code] as CoreValue;
-    throw new StrategyCoreError(
-      "PARAMETER_UNKNOWN",
-      "派生表达式引用了尚未解析的参数 " + code + "（拓扑序保证不应发生；请检查循环依赖）",
-      { code },
-    );
+  const readResolved = (code: string): CoreScalar => {
+    if (!Object.prototype.hasOwnProperty.call(resolved, code)) {
+      throw new StrategyCoreError(
+        "PARAMETER_UNKNOWN",
+        "派生表达式引用了尚未解析的参数 " + code + "（拓扑序保证不应发生；请检查循环依赖）",
+        { code },
+      );
+    }
+    const value = resolved[code] as CoreValue;
+    if (Array.isArray(value)) {
+      throw new StrategyCoreError(
+        "EXPRESSION_INVALID",
+        "派生表达式不能引用结构化参数 " + code + "（json 参数不属于标量表达式域）",
+        { code },
+      );
+    }
+    return value as CoreScalar;
   };
 
   const order = parameterResolutionOrder(schema);
@@ -426,7 +504,7 @@ export function resolveParameters(
         );
       }
       const expression = definition.derivedFrom as ValueExpression;
-      value = evaluateExpression(expression, {
+      const derived = evaluateExpression(expression, {
         fieldValue: (field) => {
           throw new StrategyCoreError(
             "EXPRESSION_INVALID",
@@ -443,6 +521,7 @@ export function resolveParameters(
         },
         parameterValue: readResolved,
       });
+      value = derived;
       if (value !== null && typeof value === "number" && !Number.isFinite(value)) {
         throw new StrategyCoreError(
           "PARAMETER_DERIVED_INVALID_RESULT",

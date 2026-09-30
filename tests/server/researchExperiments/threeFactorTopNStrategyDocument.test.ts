@@ -16,7 +16,10 @@ import {
   THREE_FACTOR_TOPN_TRAILING_TAKE_PROFIT_DRAWDOWN_RATIO,
 } from "../../../server/research/patternLibrary/patterns/firstLimitPullback3FTopN";
 import { mapDeclaredExitPolicy } from "../../../server/runWorkbenchAssembly/exitPolicy";
-import { mapDeclaredPositionSizing } from "../../../server/runWorkbenchAssembly/assemble";
+import {
+  assembleStrategySide,
+  mapDeclaredPositionSizing,
+} from "../../../server/runWorkbenchAssembly/assemble";
 import { coreVersionFromDocument } from "../../../server/strategyCore/production/versionFromDocument";
 import { deriveParameterSpaceFromDocument } from "../../../server/research/strategyEvaluation/parameterSpaceFromDocument";
 
@@ -63,8 +66,6 @@ describe("3F TopN StrategyDocument 装配", () => {
       sizingMethod: "EQUITY_FRACTION",
       fraction: THREE_FACTOR_TOPN_POSITION_RATIO,
       fixedAmount: null,
-      tiers: null,
-      rankTiers: null,
     });
     expect(document.executionAssumptions?.backtestConfig).toEqual({
       initialCapital: 100_000,
@@ -400,6 +401,208 @@ describe("3F TopN StrategyDocument 装配", () => {
       createdAt: "2026-09-27T00:00:00.000Z",
     });
     expect(core.ok, core.ok ? "" : `${core.reason}: ${core.detail}`).toBe(true);
+  });
+
+  it("tunables 把族维度提升为可覆写参数并贯通到入场与退出规则", () => {
+    const document = buildThreeFactorTopNStrategyDocument({
+      topN: 3,
+      datasetVersionId: 660001,
+      datasetLabel: "v5",
+      strategyVersion: "1.62.2",
+      tunables: {
+        maxMaxAmplitude: {
+          defaultValue: 0.14,
+          min: 0.08,
+          max: 0.2,
+          step: 0.01,
+        },
+        maxMeanAmplitude: {
+          defaultValue: 0.08,
+          min: 0.04,
+          max: 0.12,
+          step: 0.01,
+        },
+        minDrawdownFromEventClose: {
+          defaultValue: -0.1,
+          min: -0.2,
+          max: -0.02,
+          step: 0.01,
+        },
+        stopLossRatio: {
+          defaultValue: 0.06,
+          min: 0.02,
+          max: 0.12,
+          step: 0.01,
+        },
+      },
+    });
+
+    const validation = validateStrategyDocument(document);
+    expect(
+      validation.valid,
+      validation.issues.map(issue => `${issue.code}:${issue.path}`).join(" | "),
+    ).toBe(true);
+
+    const parameterCodes = document.definition?.parameters.map(param => param.code);
+    expect(parameterCodes).toEqual(
+      expect.arrayContaining([
+        "max_max_amplitude",
+        "max_mean_amplitude",
+        "min_drawdown_from_event_close",
+        "stop_loss_ratio",
+      ]),
+    );
+
+    for (const [id, code] of [
+      ["entry-risk-max-amplitude", "max_max_amplitude"],
+      ["entry-risk-mean-amplitude", "max_mean_amplitude"],
+      ["entry-risk-drawdown-depth", "min_drawdown_from_event_close"],
+    ] as const) {
+      expect(
+        document.definition?.entry.conditions.find(condition => condition.id === id),
+      ).toEqual(
+        expect.objectContaining({
+          value: code,
+          valueType: "PARAMETER_REFERENCE",
+          enabled: true,
+        }),
+      );
+    }
+    expect(
+      document.definition?.exit.rules.find(rule => rule.id === "exit-stop-loss"),
+    ).toEqual(
+      expect.objectContaining({
+        type: "STOP_LOSS",
+        parameter: "stop_loss_ratio",
+        thresholdUnit: "RATIO",
+      }),
+    );
+
+    const space = deriveParameterSpaceFromDocument(document).space;
+    expect(space.parameters.map(item => item.name)).toEqual(
+      expect.arrayContaining([
+        "max_max_amplitude",
+        "max_mean_amplitude",
+        "min_drawdown_from_event_close",
+        "stop_loss_ratio",
+      ]),
+    );
+    const core = coreVersionFromDocument({
+      document,
+      createdAt: "2026-09-27T00:00:00.000Z",
+    });
+    expect(core.ok, core.ok ? "" : `${core.reason}: ${core.detail}`).toBe(true);
+
+    const assembled = assembleStrategySide(
+      {
+        strategyId: document.strategyId,
+        strategyVersion: document.version,
+        strategyDocument: document,
+        startDate: "2025-01-01",
+        endDate: "2025-12-31",
+        runtimeConfig: {
+          parameterOverrides: {
+            max_max_amplitude: 0.17,
+            max_mean_amplitude: 0.05,
+            min_drawdown_from_event_close: -0.06,
+            stop_loss_ratio: 0.03,
+          },
+        },
+      },
+      "v5",
+    );
+
+    expect(assembled.simulationConfig.exitPolicy).toMatchObject({
+      stopLossRatio: 0.03,
+    });
+    expect(assembled.parameterSet).toMatchObject({
+      max_max_amplitude: 0.17,
+      max_mean_amplitude: 0.05,
+      min_drawdown_from_event_close: -0.06,
+      stop_loss_ratio: 0.03,
+    });
+  });
+
+  it("tunable 分档仓位参数可覆写，并贯通到 simulationConfig.positionSizing", () => {
+    const defaultScoreTiers = [
+      { minScore: 0.6, fraction: 0.1 },
+      { minScore: 0.8, fraction: 0.3 },
+    ] as const;
+    const overrideScoreTiers = [
+      { minScore: 0.5, fraction: 0.05 },
+      { minScore: 0.7, fraction: 0.25 },
+    ] as const;
+    const document = buildThreeFactorTopNStrategyDocument({
+      topN: 3,
+      datasetVersionId: 660001,
+      datasetLabel: "v5",
+      strategyVersion: "1.70.0",
+      tunablePositionTiers: defaultScoreTiers,
+    });
+
+    const validation = validateStrategyDocument(document);
+    expect(
+      validation.valid,
+      validation.issues.map((issue) => `${issue.code}:${issue.path}`).join(" | "),
+    ).toBe(true);
+
+    expect(
+      document.definition?.parameters.find(
+        (parameter) => parameter.code === "position_tiers",
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        dataType: "json",
+        parameterRole: "FIXED",
+        defaultValue: defaultScoreTiers,
+        minItems: 1,
+        maxItems: 20,
+      }),
+    );
+    expect(document.definition?.position.positionTiersParameter).toBe("position_tiers");
+
+    const space = deriveParameterSpaceFromDocument(document).space;
+    expect(space.parameters.map((item) => item.name)).not.toContain("position_tiers");
+
+    const defaultAssembled = assembleStrategySide(
+      {
+        strategyId: document.strategyId,
+        strategyVersion: document.version,
+        strategyDocument: document,
+        startDate: "2025-01-01",
+        endDate: "2025-12-31",
+        runtimeConfig: {},
+      },
+      "v5",
+    );
+    expect(defaultAssembled.simulationConfig.positionSizing).toMatchObject({
+      sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+      tiers: defaultScoreTiers,
+    });
+
+    const overrideAssembled = assembleStrategySide(
+      {
+        strategyId: document.strategyId,
+        strategyVersion: document.version,
+        strategyDocument: document,
+        startDate: "2025-01-01",
+        endDate: "2025-12-31",
+        runtimeConfig: {
+          parameterOverrides: {
+            position_tiers: overrideScoreTiers,
+          },
+        },
+      },
+      "v5",
+    );
+    expect(overrideAssembled.parameterSet.position_tiers).toEqual(overrideScoreTiers);
+    expect(overrideAssembled.simulationConfig.positionSizing).toMatchObject({
+      sizingMethod: "SCORE_TIERED_EQUITY_FRACTION",
+      tiers: overrideScoreTiers,
+    });
+    expect(overrideAssembled.simulationConfig.positionSizing.tiers).not.toEqual(
+      defaultScoreTiers,
+    );
   });
 
   it("1.12.0 将盈利回撤止盈改为盘中检查", () => {

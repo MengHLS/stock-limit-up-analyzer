@@ -34,9 +34,13 @@ import { evaluatePerformance } from "../performanceMetrics/evaluate";
 import { evaluateRiskAdjustedMetrics } from "../riskAdjustedMetrics/evaluate";
 import { evaluateTradeQualityMetrics } from "../tradeQualityMetrics/evaluate";
 import { runCandidateEngine } from "../signalEngine/engine";
+import type { CandidateEvaluationRun } from "../signalEngine/types";
+import { runCandidateEngineFromCursor } from "../signalEngine/cursorEngine";
 import { computeCandidateEvaluationRunFingerprint } from "../signalEngine/serialize";
 import { runTradeSimulation } from "../simulator/engine";
+import { runTradeSimulationFromCursor } from "../simulator/cursorEngine";
 import type { SecurityBoard } from "../simulator/types";
+import type { ResearchDatasetCursor } from "../framework/datasetCursor";
 import { buildRegimeDayFactsFromDatasetRows } from "../marketRegime/facts";
 import { runMarketRegimeAnalysis } from "../marketRegime/run";
 import type { RegimeDayFacts } from "../marketRegime/types";
@@ -52,6 +56,7 @@ import {
   type ParameterSpaceDerivation,
 } from "../strategyEvaluation/parameterSpaceFromDocument";
 import { createStrategyDocument, createStrategyVersionRecord } from "../strategySchema/map";
+import type { StrategyDocument } from "../strategySchema/types";
 import { computeStrategyVersionRecordFingerprint } from "../strategySchema/serialize";
 import { closedLoopStageWiringRequirement } from "./requirements";
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
@@ -134,7 +139,111 @@ export function projectDatasetSummary(dataset: {
   };
 }
 
-/** 装配层内部：把 data 阶段真正用到的字段类型收窄（保持 projectDatasetSummary 可单测）。 */
+/** research 阶段：CandidateEvaluationRun → researchSummary（唯一投影，供同步/流式路径共用）。 */
+export function projectResearchSummary(
+  run: CandidateEvaluationRun,
+  extraNotes: readonly string[] = [],
+): ClosedLoopResearchSummary {
+  return {
+    kind: "researchSummary",
+    handoffVersion: 1,
+    synthetic: false,
+    source: {
+      module: "signalEngine",
+      moduleRunKind: "CANDIDATE_EVALUATION_RUN",
+      runId: null,
+      fingerprint: run.fingerprint,
+    },
+    datasetVersion: run.datasetVersion,
+    candidateRunFingerprint: run.fingerprint,
+    evaluated: {
+      candidateCount: run.evaluation.totalSelectedSlots,
+      decisionDateRange: {
+        startDate: run.dateRange.startDate,
+        endDate: run.dateRange.endDate,
+      },
+    },
+    notes: [
+      `决策日数 = ${run.evaluation.decisionDayCount}；跨日去重入选证券 = ${run.evaluation.distinctSelectedSecurities.length}`,
+      `数据集 gate = ${run.datasetGate}（来自 datasetAccess 句柄，非本层判定）`,
+      ...extraNotes,
+    ],
+  };
+}
+
+/** strategy 阶段：StrategyDocument → strategyDocRef（唯一投影，供同步/流式路径共用）。 */
+export function projectStrategyDocRef(
+  document: StrategyDocument,
+  versionRecordFingerprint: string | null,
+): ClosedLoopStrategyDocRef {
+  return {
+    kind: "strategyDocRef",
+    handoffVersion: 1,
+    synthetic: false,
+    source: {
+      module: "strategySchema",
+      moduleRunKind: "STRATEGY_DOCUMENT",
+      runId: null,
+      fingerprint: document.fingerprint,
+    },
+    strategyId: document.strategyId,
+    strategyVersion: document.version,
+    docFingerprint: document.fingerprint,
+    versionRecordFingerprint,
+    rules: {
+      entryRuleCount: document.entryRules.length,
+      exitRuleCount: document.exitRules.length,
+      sizingRuleCount: 1,
+      riskRuleCount: document.riskRules.length,
+    },
+  };
+}
+
+/** 池化 cursor → datasetSummary（rowCount 未知时如实为 null，不拿事件数冒充面板行数）。 */
+export function projectCursorDatasetSummary(
+  cursor: ResearchDatasetCursor,
+): ClosedLoopDatasetSummary {
+  return {
+    kind: "datasetSummary",
+    handoffVersion: 1,
+    synthetic: false,
+    source: {
+      module: "researchDatasetCursor",
+      moduleRunKind: "RESEARCH_DATASET_CURSOR",
+      runId: null,
+      fingerprint: cursor.metadata.datasetVersion,
+    },
+    datasetVersion: cursor.metadata.datasetVersion,
+    gate: cursor.metadata.gate as ClosedLoopDatasetSummary["gate"],
+    dateRange: {
+      startDate: cursor.metadata.startDate,
+      endDate: cursor.metadata.endDate,
+    },
+    builderVersion: cursor.metadata.builderVersion,
+    rowSchemaVersion: cursor.metadata.rowSchemaVersion,
+    rowCount: cursor.metadata.rowCount,
+    universeCount: null,
+    coverageGaps: [
+      "流式池化路径：rowCount / universeCount 按需读取，运行前不物化完整面板，故此处为 null；",
+      "实际读取量、活跃成员数、移池原因与候选数写入运行审计。",
+    ],
+  };
+}
+
+/** 装配层内部：data 阶段优先 cursor；无 cursor 时保持原 ResearchDataset 路径不变。 */
+function requireDatasetOrCursor(artifacts: ClosedLoopWiringArtifacts, inputs: ClosedLoopWiringInputs) {
+  const cursor = artifacts.datasetCursor ?? inputs.researchDatasetCursor;
+  if (cursor !== undefined) return { kind: "cursor" as const, cursor };
+  const dataset = artifacts.dataset ?? inputs.researchDataset;
+  if (dataset === undefined) {
+    throw new ClosedLoopWiringError(
+      "CL_WIRING_ARTIFACT_MISSING",
+      "装配层：data 阶段需要真实 ResearchDataset 或 ResearchDatasetCursor，但未提供。",
+    );
+  }
+  return { kind: "dataset" as const, dataset };
+}
+
 function requireDataset(artifacts: ClosedLoopWiringArtifacts, inputs: ClosedLoopWiringInputs) {
   const dataset = artifacts.dataset ?? inputs.researchDataset;
   if (dataset === undefined) {
@@ -407,9 +516,13 @@ function buildExecutor(
   switch (stageId) {
     case "data": {
       return (() => {
-        const dataset = requireDataset(artifacts, inputs);
-        artifacts.dataset = dataset;
-        return projectDatasetSummary(dataset) as ClosedLoopHandoff;
+        const resolved = requireDatasetOrCursor(artifacts, inputs);
+        if (resolved.kind === "cursor") {
+          artifacts.datasetCursor = resolved.cursor;
+          return projectCursorDatasetSummary(resolved.cursor) as ClosedLoopHandoff;
+        }
+        artifacts.dataset = resolved.dataset;
+        return projectDatasetSummary(resolved.dataset) as ClosedLoopHandoff;
       }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
     }
     case "research": {
@@ -430,32 +543,7 @@ function buildExecutor(
           strategy13,
         });
         artifacts.candidateRun = run;
-        const summary: ClosedLoopResearchSummary = {
-          kind: "researchSummary",
-          handoffVersion: 1,
-          synthetic: false,
-          source: {
-            module: "signalEngine",
-            moduleRunKind: "CANDIDATE_EVALUATION_RUN",
-            runId: null,
-            fingerprint: run.fingerprint,
-          },
-          datasetVersion: run.datasetVersion,
-          candidateRunFingerprint: run.fingerprint,
-          evaluated: {
-            // 累计候选名额 = Σ 每日 selected 数（引擎自身的统计口径，不另行求和猜测）
-            candidateCount: run.evaluation.totalSelectedSlots,
-            decisionDateRange: {
-              startDate: run.dateRange.startDate,
-              endDate: run.dateRange.endDate,
-            },
-          },
-          notes: [
-            `决策日数 = ${run.evaluation.decisionDayCount}；跨日去重入选证券 = ${run.evaluation.distinctSelectedSecurities.length}`,
-            `数据集 gate = ${run.datasetGate}（来自 datasetAccess 句柄，非本层判定）`,
-          ],
-        };
-        return summary as ClosedLoopHandoff;
+        return projectResearchSummary(run) as ClosedLoopHandoff;
       }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
     }
     case "strategy": {
@@ -479,28 +567,7 @@ function buildExecutor(
           artifacts.strategyVersionRecord = record;
           versionRecordFingerprint = computeStrategyVersionRecordFingerprint(record);
         }
-        const ref: ClosedLoopStrategyDocRef = {
-          kind: "strategyDocRef",
-          handoffVersion: 1,
-          synthetic: false,
-          source: {
-            module: "strategySchema",
-            moduleRunKind: "STRATEGY_DOCUMENT",
-            runId: null,
-            fingerprint: document.fingerprint,
-          },
-          strategyId: document.strategyId,
-          strategyVersion: document.version,
-          docFingerprint: document.fingerprint,
-          versionRecordFingerprint,
-          rules: {
-            entryRuleCount: document.entryRules.length,
-            exitRuleCount: document.exitRules.length,
-            sizingRuleCount: 1, // positionSizing 是单一声明（非规则集），恒 1
-            riskRuleCount: document.riskRules.length,
-          },
-        };
-        return ref as ClosedLoopHandoff;
+        return projectStrategyDocRef(document, versionRecordFingerprint) as ClosedLoopHandoff;
       }) as ClosedLoopStageExecutor<ClosedLoopStageId>;
     }
     case "backtest": {
@@ -727,6 +794,141 @@ function buildExecutor(
  * ⚠️ 三件套必须成对使用：`artifacts` 是阶段间传重对象的通道，跨运行复用会导致
  * 「读到上一次运行的产物」这种最危险的静默错误，因此这里强制一次创建、一次使用。
  */
+/**
+ * 池化流式路径的装配器：在进入同步编排器前，先在外部 await 真正的 cursor research/backtest，
+ * 再把结果作为同步 runner 注入。这样完整保留现有 14 阶段状态机、审计与指纹逻辑，
+ * 同时不把异步 cursor 逻辑复制进 orchestrator。
+ */
+export async function createStreamingClosedLoopWiring(
+  inputs: ClosedLoopWiringInputs,
+  options: CreateClosedLoopStageRunnersOptions = {},
+): Promise<{
+  readonly inputs: ClosedLoopWiringInputs;
+  readonly artifacts: ClosedLoopWiringArtifacts;
+  readonly stageRunners: ClosedLoopStageRunnerMap;
+}> {
+  const cursor = inputs.researchDatasetCursor;
+  if (cursor === undefined) {
+    throw new ClosedLoopWiringError(
+      "CL_WIRING_INPUT_MISSING",
+      "流式装配：inputs.researchDatasetCursor 缺失。",
+    );
+  }
+  const requested = options.requested;
+  const wants = (stageId: ClosedLoopStageId): boolean =>
+    requested === undefined || requested.includes(stageId);
+  const artifacts = createClosedLoopWiringArtifacts();
+  artifacts.datasetCursor = cursor;
+  if (inputs.researchDataset !== undefined) artifacts.dataset = inputs.researchDataset;
+  const stageRunners: ClosedLoopStageRunnerMap = {};
+
+  if (wants("data")) {
+    stageRunners.data = (() => {
+      artifacts.datasetCursor = cursor;
+      if (inputs.researchDataset !== undefined) artifacts.dataset = inputs.researchDataset;
+      return projectCursorDatasetSummary(cursor);
+    }) as ClosedLoopStageExecutor<"data">;
+  }
+
+  let candidateRun: CandidateEvaluationRun | undefined;
+  if (wants("research") || wants("backtest")) {
+    const { experimentConfig, strategyContract, strategy13 } = inputs;
+    if (
+      experimentConfig === undefined
+      || strategyContract === undefined
+      || strategy13 === undefined
+    ) {
+      throw new ClosedLoopWiringError(
+        "CL_WIRING_INPUT_MISSING",
+        "流式装配：research/backtest 需要 inputs.experimentConfig / strategyContract / strategy13。",
+      );
+    }
+    if (cursor.restart !== undefined) await cursor.restart();
+    const poolPolicy = inputs.strategyDocumentInput?.definition?.firstLimitPool;
+    const poolMinimumScore = poolPolicy?.minimumScore;
+    candidateRun = await runCandidateEngineFromCursor({
+      cursor,
+      config: experimentConfig,
+      strategy: strategyContract,
+      strategy13,
+      ...(typeof poolMinimumScore === "number" ? { minimumScore: poolMinimumScore } : {}),
+      ...(typeof poolPolicy?.scoreStartRelativeDay === "number"
+        ? { scoreStartRelativeDay: poolPolicy.scoreStartRelativeDay }
+        : {}),
+    });
+    artifacts.candidateRun = candidateRun;
+    if (wants("research")) {
+      const stats = cursor.stats?.();
+      const statsNotes = stats === undefined
+        ? []
+        : [
+            `流式 cursor 审计：bars 读取 ${stats.barsRead}；入池成员 ${stats.admittedMemberCount}；`
+            + `已退休 ${stats.retiredMemberCount}；低分移池 ${stats.removedByMinimumScoreCount}；`
+            + `峰值活跃成员 ${stats.peakActiveMemberCount}`,
+          ];
+      stageRunners.research = (() => {
+        artifacts.candidateRun = candidateRun;
+        return projectResearchSummary(candidateRun!, statsNotes) as ClosedLoopHandoff;
+      }) as ClosedLoopStageExecutor<"research">;
+    }
+  }
+
+  if (wants("strategy")) {
+    const documentInput = inputs.strategyDocumentInput;
+    if (documentInput === undefined) {
+      throw new ClosedLoopWiringError(
+        "CL_WIRING_INPUT_MISSING",
+        "流式装配：strategy 阶段需要 inputs.strategyDocumentInput。",
+      );
+    }
+    const document = createStrategyDocument(documentInput);
+    artifacts.strategyDocument = document;
+    let versionRecordFingerprint: string | null = null;
+    if (inputs.strategyVersionRecordInput !== undefined) {
+      const record = createStrategyVersionRecord({
+        ...inputs.strategyVersionRecordInput,
+        document,
+      });
+      artifacts.strategyVersionRecord = record;
+      versionRecordFingerprint = computeStrategyVersionRecordFingerprint(record);
+    }
+    stageRunners.strategy = (() => {
+      artifacts.strategyDocument = document;
+      return projectStrategyDocRef(document, versionRecordFingerprint) as ClosedLoopHandoff;
+    }) as ClosedLoopStageExecutor<"strategy">;
+  }
+
+  if (wants("backtest")) {
+    const simConfig = inputs.simulationConfig;
+    if (simConfig === undefined || candidateRun === undefined) {
+      throw new ClosedLoopWiringError(
+        "CL_WIRING_INPUT_MISSING",
+        "流式装配：backtest 需要 inputs.simulationConfig 与真实 candidateRun。",
+      );
+    }
+    const tradeSimulationRun = await runTradeSimulationFromCursor({
+      cursor,
+      sourceRun: candidateRun,
+      simConfig,
+    });
+    artifacts.tradeSimulationRun = tradeSimulationRun;
+    stageRunners.backtest = (() => {
+      artifacts.tradeSimulationRun = tradeSimulationRun;
+      return summarizeTradeSimulationRun(tradeSimulationRun) as ClosedLoopHandoff;
+    }) as ClosedLoopStageExecutor<"backtest">;
+  }
+
+  if (wants("evaluation")) {
+    stageRunners.evaluation = buildExecutor(
+      "evaluation",
+      artifacts,
+      inputs,
+    ) as ClosedLoopStageExecutor<"evaluation"> | undefined;
+  }
+
+  return { inputs, artifacts, stageRunners };
+}
+
 export function createClosedLoopWiring(
   inputs: ClosedLoopWiringInputs,
   options: CreateClosedLoopStageRunnersOptions = {},

@@ -32,6 +32,7 @@
 
 import { z } from "zod";
 import {
+  parameterSearchParameterSetSchema,
   parameterSearchValueSchema,
   PARAMETER_SEARCH_RUN_STATUSES,
 } from "./parameterSearchContracts";
@@ -181,12 +182,12 @@ export const oosValidationRunViewSchema = z.object({
   /** 冻结的 Search 快照指纹（继承自源 Run；不从当前策略重新解释）。 */
   searchSnapshotFingerprint: z.string().min(1),
   /** 冻结的 FIXED 坐标（原样继承）。 */
-  fixedCoordinates: z.record(z.string(), parameterSearchValueSchema),
+  fixedCoordinates: parameterSearchParameterSetSchema,
   /** ⑥ 使用什么 execution policy。 */
   executionPolicyVersion: z.number().int(),
   evaluationConfigFingerprint: z.string().min(1),
   /** ⑦ 使用什么参数（**冻结快照**，创建时写死）。 */
-  resolvedParameterSet: z.record(z.string(), parameterSearchValueSchema),
+  resolvedParameterSet: parameterSearchParameterSetSchema,
   /** ⑧ 使用什么 metrics version（口径自述；本域唯一口径 = canonical）。 */
   metricsVersion: z.string().min(1),
   /** 决策引擎版本自述（来自实际执行的那份文档 / 引擎）。 */
@@ -218,7 +219,7 @@ export const oosValidationResultViewSchema = z.object({
   sourceParameterHash: z.string().min(1),
   strategyVersionId: z.string().min(1),
   datasetVersionId: z.number().int().nullable(),
-  resolvedParameterSet: z.record(z.string(), parameterSearchValueSchema),
+  resolvedParameterSet: parameterSearchParameterSetSchema,
   oosWindow: oosWindowSchema,
   searchWindow: oosWindowSchema,
   /** ⑩ IS 指标（**源 Search 结果的冻结副本**，零重算）。 */

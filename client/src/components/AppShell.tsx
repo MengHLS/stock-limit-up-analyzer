@@ -44,6 +44,7 @@ import {
   FileText,
   FileClock,
   BookOpenCheck,
+  GitCompareArrows,
   Target,
 } from "lucide-react";
 import { useLocation } from "wouter";
@@ -85,6 +86,7 @@ const navGroups: NavGroup[] = [
       { label: "绩效仪表盘", path: "/performance", icon: Activity },
       { label: "参数搜索", path: "/parameter-search", icon: SlidersHorizontal },
       { label: "组合回测", path: "/backtest", icon: WalletCards },
+      { label: "回测对比", path: "/backtest-compare", icon: GitCompareArrows },
       { label: "回测历史", path: "/backtest-runs", icon: FileClock },
     ],
   },
@@ -244,8 +246,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </SidebarFooter>
       </Sidebar>
 
-      <SidebarInset>
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+      <SidebarInset className="min-w-0">
+        <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   );

@@ -47,6 +47,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
+import type { ParameterSearchParameterValue } from "@shared/parameterSearchContracts";
 import {
   buildPanelLocation,
   DEFAULT_PANEL_BASE_PATH,
@@ -65,13 +66,14 @@ function num(value: number | null | undefined, digits = 2): string {
 }
 
 /** 参数值 → 文本（`null` 显示为 `null` 而不是空串）。 */
-function valueText(value: number | string | boolean | null): string {
+function valueText(value: ParameterSearchParameterValue): string {
   if (value === null) return "null";
+  if (Array.isArray(value)) return JSON.stringify(value);
   return String(value);
 }
 
 /** 参数组合 → 紧凑文本。 */
-function parametersText(parameters: Readonly<Record<string, number | string | boolean | null>>): string {
+function parametersText(parameters: Readonly<Record<string, ParameterSearchParameterValue>>): string {
   return Object.keys(parameters)
     .sort()
     .map((key) => `${key}=${valueText(parameters[key] ?? null)}`)
@@ -668,8 +670,8 @@ function MatrixGrid({
 }: {
   matrix:
     | {
-        rowAxis: { parameter: string; values: readonly (number | string | boolean | null)[] };
-        columnAxis: { parameter: string; values: readonly (number | string | boolean | null)[] };
+        rowAxis: { parameter: string; values: readonly ParameterSearchParameterValue[] };
+        columnAxis: { parameter: string; values: readonly ParameterSearchParameterValue[] };
         cells: readonly {
           rowIndex: number;
           columnIndex: number;

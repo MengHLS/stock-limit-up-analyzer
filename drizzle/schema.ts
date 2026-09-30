@@ -466,7 +466,8 @@ export const strategyVersions = mysqlTable("strategy_versions", {
   isStarred: boolean("isStarred").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   /**
-   * STEP STRATEGY-003：**唯一合法用途 = 状态迁移时间**。内容（strategyDocumentJson /
+   * STEP STRATEGY-003：**合法用途 = 状态迁移时间**。谱系元数据修复必须显式保留本列，
+   * 避免把 parentVersionId 回填误记为版本内容变更。内容（strategyDocumentJson /
    * versionRecordJson / fingerprint）一经写入仍然禁止 UPDATE —— 改内容必须新建版本（§8）。
    */
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -481,6 +482,30 @@ export const strategyVersions = mysqlTable("strategy_versions", {
 
 export type StrategyVersionRow = typeof strategyVersions.$inferSelect;
 export type InsertStrategyVersion = typeof strategyVersions.$inferInsert;
+
+/**
+ * 策略版本星标元数据。
+ *
+ * 与 `strategy_versions` 解耦：研究脚本可以只写 `closed_loop_backtest_run` 留档，
+ * 不创建正式版本行；这类版本同样需要可持久化的星标。唯一键固定为
+ * `(strategyId, version)`，正式版本与仅留档版本共用同一套标记。
+ *
+ * `strategy_versions.isStarred` 是 0052 的旧存储口径；0053 起星标以本表为准。
+ */
+export const strategyVersionStars = mysqlTable("strategy_version_star", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  version: varchar("version", { length: 32 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  strategyVersionUnique: uniqueIndex("uq_strategy_version_star_strategy_version")
+    .on(table.strategyId, table.version),
+  strategyIdIdx: index("idx_strategy_version_star_strategy").on(table.strategyId),
+}));
+
+export type StrategyVersionStarRow = typeof strategyVersionStars.$inferSelect;
+export type InsertStrategyVersionStar = typeof strategyVersionStars.$inferInsert;
 
 // ===========================================================================
 // STEP STRATEGY-003 — Strategy Domain Model 查询投影（5 张，全部由 canonical Definition 派生）
@@ -1373,6 +1398,11 @@ export const firstLimitPullbackPosts = mysqlTable("ds_first_limit_pullback_post"
   eventDayIdx: index("idx_ds_flp_post_event_day").on(table.eventId, table.relativeDay),
   symbolDateIdx: index("idx_ds_flp_post_symbol_date").on(table.symbol, table.tradeDate),
   versionDayIdx: index("idx_ds_flp_post_version_day").on(table.datasetVersionId, table.relativeDay),
+  versionDayEventIdx: index("idx_ds_flp_post_version_day_event").on(
+    table.datasetVersionId,
+    table.relativeDay,
+    table.eventId,
+  ),
 }));
 
 export type FirstLimitPullbackPostRow = typeof firstLimitPullbackPosts.$inferSelect;

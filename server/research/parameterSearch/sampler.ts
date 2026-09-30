@@ -105,7 +105,7 @@ function parameterSetAt(
   index: number,
 ): ResearchParameterSet {
   let remaining = index;
-  const set: ResearchParameterSet = {};
+  const set: Record<string, ResearchParameterValue> = {};
   for (let p = parameters.length - 1; p >= 0; p--) {
     const values = valuesByParam[p]!;
     const digit = remaining % values.length;

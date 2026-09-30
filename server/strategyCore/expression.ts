@@ -27,8 +27,8 @@
 import {
   StrategyCoreError,
   validationIssue,
+  type CoreScalar,
   type CoreValidationIssue,
-  type CoreValue,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ export const BINARY_OPERATORS = ["+", "-", "*", "/"] as const;
 export type BinaryOperator = (typeof BINARY_OPERATORS)[number];
 
 export type ValueExpression =
-  | { readonly kind: "CONSTANT"; readonly value: CoreValue }
+  | { readonly kind: "CONSTANT"; readonly value: CoreScalar }
   | { readonly kind: "FIELD_REFERENCE"; readonly field: string }
   | { readonly kind: "FEATURE_REFERENCE"; readonly featureId: string }
   | { readonly kind: "PARAMETER_REFERENCE"; readonly code: string }
@@ -50,11 +50,11 @@ export type ValueExpression =
       readonly right: ValueExpression;
     }
   | { readonly kind: "NEGATE"; readonly operand: ValueExpression }
-  | { readonly kind: "ARRAY"; readonly items: readonly CoreValue[] };
+  | { readonly kind: "ARRAY"; readonly items: readonly CoreScalar[] };
 
 /** 构造助手（保持调用点可读）。 */
 export const Expr = {
-  constant: (value: CoreValue): ValueExpression => ({ kind: "CONSTANT", value }),
+  constant: (value: CoreScalar): ValueExpression => ({ kind: "CONSTANT", value }),
   field: (field: string): ValueExpression => ({ kind: "FIELD_REFERENCE", field }),
   feature: (featureId: string): ValueExpression => ({ kind: "FEATURE_REFERENCE", featureId }),
   param: (code: string): ValueExpression => ({ kind: "PARAMETER_REFERENCE", code }),
@@ -65,7 +65,7 @@ export const Expr = {
     right,
   }),
   negate: (operand: ValueExpression): ValueExpression => ({ kind: "NEGATE", operand }),
-  array: (items: readonly CoreValue[]): ValueExpression => ({ kind: "ARRAY", items }),
+  array: (items: readonly CoreScalar[]): ValueExpression => ({ kind: "ARRAY", items }),
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -75,18 +75,18 @@ export const Expr = {
 /** 求值作用域（三类符号各自的读取函数；由 Runtime 装配）。 */
 export interface ExpressionScope {
   /** 字段引用求值（`prefix.rd0.open` / `bar.low` / `event.limitUpPrice`）。 */
-  readonly fieldValue: (field: string) => CoreValue;
+  readonly fieldValue: (field: string) => CoreScalar;
   /** 特征引用求值（注册表特征 id）。 */
-  readonly featureValue: (featureId: string) => CoreValue;
+  readonly featureValue: (featureId: string) => CoreScalar;
   /** 参数引用求值（**已解析**的 ResolvedParameterSet）。 */
-  readonly parameterValue: (code: string) => CoreValue;
+  readonly parameterValue: (code: string) => CoreScalar;
 }
 
-function isNumeric(value: CoreValue): value is number {
+function isNumeric(value: CoreScalar): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function requireNumeric(value: CoreValue, operator: BinaryOperator, side: "left" | "right"): number {
+function requireNumeric(value: CoreScalar, operator: BinaryOperator, side: "left" | "right"): number {
   if (!isNumeric(value)) {
     throw new StrategyCoreError(
       "EXPRESSION_INVALID",
@@ -102,7 +102,7 @@ function requireNumeric(value: CoreValue, operator: BinaryOperator, side: "left"
  *   - `- * /`：两侧必须 number；
  *   - `/` 除零 ⇒ 抛 `EXPRESSION_DIVISION_BY_ZERO`（**不返回 Infinity**）。
  */
-export function evaluateExpression(expr: ValueExpression, scope: ExpressionScope): CoreValue {
+export function evaluateExpression(expr: ValueExpression, scope: ExpressionScope): CoreScalar {
   switch (expr.kind) {
     case "CONSTANT":
       return expr.value;
@@ -145,7 +145,7 @@ export function evaluateExpression(expr: ValueExpression, scope: ExpressionScope
 }
 
 /** 求值为数组（供 `IN` / `NOT_IN`；非数组 ⇒ 抛错）。 */
-export function evaluateExpressionArray(expr: ValueExpression, scope: ExpressionScope): readonly CoreValue[] {
+export function evaluateExpressionArray(expr: ValueExpression, scope: ExpressionScope): readonly CoreScalar[] {
   if (expr.kind === "ARRAY") return expr.items;
   const value = evaluateExpression(expr, scope);
   throw new StrategyCoreError(

@@ -135,7 +135,8 @@ export const PULLBACK_TARGET_TYPE_VALUES = [
   "ma5",
 ] as const;
 export const pullbackTargetTypeSchema = z.enum(PULLBACK_TARGET_TYPE_VALUES);
-export type PullbackTargetTypeValue = (typeof PULLBACK_TARGET_TYPE_VALUES)[number];
+export type PullbackTargetTypeValue =
+  (typeof PULLBACK_TARGET_TYPE_VALUES)[number];
 
 /** 回踩筛选条件（首板后 T+1~T+d「触及且不破」）。 */
 export const pullbackScreenConditionSchema = z.object({
@@ -225,10 +226,16 @@ export interface ResearchDatasetSummary {
 // ---------------------------------------------------------------------------
 
 /** 能力可用性三态（与后端 capability.ts 一致）。 */
-export type DatasetCapabilityStatus = "AVAILABLE" | "CONDITIONAL" | "UNAVAILABLE";
+export type DatasetCapabilityStatus =
+  | "AVAILABLE"
+  | "CONDITIONAL"
+  | "UNAVAILABLE";
 
 /** 认证资格三态（与后端 certify.ts 一致）。 */
-export type DatasetCertificationStatus = "CERTIFIED" | "CONDITIONAL" | "REJECTED";
+export type DatasetCertificationStatus =
+  | "CERTIFIED"
+  | "CONDITIONAL"
+  | "REJECTED";
 
 /** 认证依赖声明（研究是否实际消费这些可选域）。 */
 export const datasetCertificationRequirementsSchema = z.object({
@@ -391,12 +398,231 @@ export const strategyIdInputSchema = z.object({
 });
 export type StrategyIdInput = z.infer<typeof strategyIdInputSchema>;
 
+/**
+ * 统一版本目录行：正式 `strategy_versions` 与 `closed_loop_backtest_run` 留档的只读投影。
+ *
+ * 设计约束：
+ *   - 一行表示正式存在的 `(strategyId, version)`；留档不再单独增行；
+ *   - `isStarred` 统一来自 `strategy_version_star`；
+ *   - 留档只补运行事实（runId / 窗口 / 指标），**不伪造** canonical strategy document。
+ */
+export const strategyVersionStudyMinuteStageSchema = z.object({
+  label: z.string().min(1),
+  effect: z.string().min(1),
+});
+
+export const strategyVersionStudyMinuteFieldSchema = z.object({
+  field: z.string().min(1),
+  role: z.string().min(1),
+  stages: strategyVersionStudyMinuteStageSchema.array(),
+  limitations: z.string().array(),
+});
+
+export const strategyVersionStudySignalSchema = z.object({
+  label: z.string().min(1),
+  value: z.string().min(1),
+  stage: z.string().min(1),
+  effect: z.string().min(1),
+  source: z.enum(["TUNABLE", "FIXED", "ASSEMBLY"]),
+});
+export type StrategyVersionStudySignalDto = z.infer<
+  typeof strategyVersionStudySignalSchema
+>;
+
+export const strategyVersionStudyFamilyArmSchema = z.object({
+  armId: z.string().min(1),
+  strategyVersion: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().min(1),
+  signals: strategyVersionStudySignalSchema.array(),
+});
+export type StrategyVersionStudyFamilyArmDto = z.infer<
+  typeof strategyVersionStudyFamilyArmSchema
+>;
+
+export const strategyVersionStudyFamilySchema = z.object({
+  familyId: z.string().min(1),
+  familyLabel: z.string().min(1),
+  minVersion: z.string().min(1),
+  maxVersion: z.string().min(1),
+  studyStage: z.string().min(1),
+  uniqueDimension: z.string().min(1),
+  minuteStage: z.string().min(1),
+  minuteEffect: z.string().min(1),
+  /** 该族是否已恢复为可执行参数；HISTORICAL_ONLY 表示留档不足以还原、拒绝按默认值重跑。 */
+  executability: z.enum(["EXECUTABLE", "HISTORICAL_ONLY"]),
+  /** 不可执行时的具体原因；可执行时为 null。 */
+  historicalOnlyReason: z.string().min(1).nullable(),
+  /**
+   * 该族可执行时可覆写的维度参数（来自权威注册表），与版本文档的 TUNABLE 声明同源。
+   */
+  tunableParameters: z
+    .object({
+      name: z.string().min(1),
+      defaultValue: z.number(),
+      min: z.number(),
+      max: z.number(),
+      step: z.number(),
+      note: z.string().min(1),
+    })
+    .array(),
+  /**
+   * 该族留档过的具体 arm：每个 arm 显式携带 strategyVersion 与关键执行取值。
+   * 版本落在族区间内但没有登记为 arm 时，不冒领 arm 参数。
+   */
+  arms: strategyVersionStudyFamilyArmSchema.array(),
+  /** 该族按权威注册表解析出的关键执行取值，供版本详情直接展示。 */
+  resolvedSignals: strategyVersionStudySignalSchema.array(),
+  /** 该族留档参数的证据出处，便于追溯。 */
+  evidenceSources: z.string().array(),
+});
+export type StrategyVersionStudyFamilyDto = z.infer<
+  typeof strategyVersionStudyFamilySchema
+>;
+
+export const strategyVersionFirstLimitPoolDetailSchema = z.object({
+  familyId: z.string().min(1),
+  armId: z.string().min(1),
+  strategyId: z.string().min(1),
+  strategyVersion: z.string().min(1),
+  admissionRule: z.string().min(1),
+  earlyScoreStage: z.string().min(1),
+  fullScoreStage: z.string().min(1),
+  invalidationRule: z.string().min(1),
+  ageCapTradingDays: z.number().int().positive(),
+  scoreInvalidationDays: z.number().int().positive(),
+  scoreAffectsExit: z.literal(false),
+  maxDailyCandidates: z.number().int().nonnegative(),
+  minimumScore: z.number().min(0).max(1).optional(),
+  maxObservationAmplitude: z.number().gt(0).lt(1).optional(),
+  calibrationVersion: z.string().min(1).optional(),
+  allowMultipleMembersPerSecurity: z.boolean().optional(),
+  panelBudgets: z.object({
+    maxMembersPerDay: z.number().int().positive(),
+    maxPanelRows: z.number().int().positive(),
+  }),
+  errorCodes: z.string().array(),
+});
+export type StrategyVersionFirstLimitPoolDetailDto = z.infer<
+  typeof strategyVersionFirstLimitPoolDetailSchema
+>;
+
+export const strategyVersionStudyAnnotationSchema = z.object({
+  familyId: z.string().min(1),
+  familyLabel: z.string().min(1),
+  studyStage: z.string().min(1),
+  keyDifference: z.string().min(1),
+  observedResult: z.string().min(1),
+  signals: strategyVersionStudySignalSchema.array(),
+  minuteFields: strategyVersionStudyMinuteFieldSchema.array(),
+  familyDirectory: strategyVersionStudyFamilySchema.array(),
+  /** 首板股票池族专用声明面；旧事件窗 3F 族与历史对照族为 null。 */
+  firstLimitPool: strategyVersionFirstLimitPoolDetailSchema.nullable().default(null),
+  caution: z.string().nullable(),
+});
+export type StrategyVersionStudyAnnotationDto = z.infer<
+  typeof strategyVersionStudyAnnotationSchema
+>;
+
+export const strategyVersionCatalogRowSchema = z.object({
+  strategyId: z.string().min(1),
+  version: z.string().min(1),
+  isStarred: z.boolean(),
+  versionStatus: z.string().nullable(),
+  versionCreatedAt: z.string().nullable(),
+  fingerprint: z.string().nullable(),
+  parentVersionId: z.number().int().positive().nullable(),
+  /**
+   * 父版本号（由 `parentVersionId` 解析得到）。父版本行缺失 / 不可解析时为 null，
+   * 调用方必须按「无父」处理，不得据此伪造父子关系。
+   */
+  parentVersion: z.string().min(1).nullable(),
+  description: z.string().nullable(),
+  datasetVersion: z.string().nullable(),
+  datasetVersionId: z.number().int().positive().nullable(),
+  archiveId: z.number().int().positive().nullable(),
+  runId: z.string().nullable(),
+  archiveCreatedAt: z.string().nullable(),
+  startDate: z.string().nullable(),
+  endDate: z.string().nullable(),
+  backtestStatus: z.string().nullable(),
+  totalReturnPct: z.number().nullable(),
+  maxDrawdownPct: z.number().nullable(),
+  cagrPct: z.number().nullable(),
+  study: strategyVersionStudyAnnotationSchema.nullable(),
+});
+export type StrategyVersionCatalogRowDto = z.infer<
+  typeof strategyVersionCatalogRowSchema
+>;
+
+export const strategyVersionCatalogSchema =
+  strategyVersionCatalogRowSchema.array();
+export type StrategyVersionCatalogDto = z.infer<
+  typeof strategyVersionCatalogSchema
+>;
+
+// ---------------------------------------------------------------------------
+// 注册模式族配置（服务端 materialize，前端只提交参数值）
+// ---------------------------------------------------------------------------
+
+export const strategyFamilyParameterValueSchema = z.union([
+  z.number(),
+  z.boolean(),
+  z.string(),
+]);
+
+export const strategyFamilyParameterDefinitionSchema = z.object({
+  name: z.string().min(1),
+  label: z.string().min(1),
+  type: z.enum(["number", "boolean", "string"]),
+  defaultValue: strategyFamilyParameterValueSchema,
+  min: z.number().optional(),
+  max: z.number().optional(),
+  step: z.number().optional(),
+  description: z.string(),
+});
+
+export const strategyFamilyDefinitionSchema = z.object({
+  familyId: z.string().min(1),
+  label: z.string().min(1),
+  strategyType: z.string().min(1),
+  baseStrategyId: z.string().min(1),
+  baseVersion: z.string().min(1),
+  baseArmId: z.string().min(1),
+  parameters: strategyFamilyParameterDefinitionSchema.array(),
+});
+export type StrategyFamilyDefinitionDto = z.infer<
+  typeof strategyFamilyDefinitionSchema
+>;
+
+export const materializeStrategyFamilyInputSchema = z.object({
+  familyId: z.string().min(1),
+  strategyId: z.string().min(1),
+  version: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  datasetVersionId: z.number().int().positive(),
+  datasetLabel: z.string().min(1),
+  parameters: z.record(z.string(), strategyFamilyParameterValueSchema),
+});
+export type MaterializeStrategyFamilyInputDto = z.infer<
+  typeof materializeStrategyFamilyInputSchema
+>;
+
+export const createStrategyFromFamilyInputSchema =
+  materializeStrategyFamilyInputSchema;
+export type CreateStrategyFromFamilyInputDto = z.infer<
+  typeof createStrategyFromFamilyInputSchema
+>;
+
 /** 按 (strategyId, version) 加载指定版本。 */
 export const strategyLoadVersionInputSchema = z.object({
   strategyId: z.string().min(1, "strategyId 必填"),
   version: z.string().min(1, "version 必填（semver x.y.z）"),
 });
-export type StrategyLoadVersionInput = z.infer<typeof strategyLoadVersionInputSchema>;
+export type StrategyLoadVersionInput = z.infer<
+  typeof strategyLoadVersionInputSchema
+>;
 
 /** 基于最新版本创建新版本（bump 可选，缺省由内容差异自动判定）。 */
 export const strategyCreateVersionInputSchema = z.object({
@@ -404,7 +630,9 @@ export const strategyCreateVersionInputSchema = z.object({
   document: strategyDocumentSchema,
   bump: z.enum(["major", "minor", "patch"]).optional(),
 });
-export type StrategyCreateVersionInput = z.infer<typeof strategyCreateVersionInputSchema>;
+export type StrategyCreateVersionInput = z.infer<
+  typeof strategyCreateVersionInputSchema
+>;
 
 // ---------------------------------------------------------------------------
 // research · lifecycle（STEP 21 · 策略生命周期）
@@ -444,12 +672,17 @@ export type StrategyLifecycleStatusValue =
 export const strategyCloneVersionInputSchema = z.object({
   strategyId: z.string().min(1, "strategyId 必填"),
   fromVersion: z.string().min(1, "fromVersion 必填（semver x.y.z）"),
-  targetVersion: z.string().min(1, "targetVersion 需为 semver x.y.z").optional(),
+  targetVersion: z
+    .string()
+    .min(1, "targetVersion 需为 semver x.y.z")
+    .optional(),
   bump: z.enum(["major", "minor", "patch"]).optional(),
   description: z.string().max(512).optional(),
   status: strategyLifecycleStatusSchema.optional(),
 });
-export type StrategyCloneVersionInput = z.infer<typeof strategyCloneVersionInputSchema>;
+export type StrategyCloneVersionInput = z.infer<
+  typeof strategyCloneVersionInputSchema
+>;
 
 /**
  * 版本生命周期状态迁移（STRATEGY-003 唯一允许的 UPDATE；内容仍不可变）。
@@ -460,7 +693,9 @@ export const strategySetVersionStatusInputSchema = z.object({
   version: z.string().min(1, "version 必填（semver x.y.z）"),
   status: strategyLifecycleStatusSchema,
 });
-export type StrategySetVersionStatusInput = z.infer<typeof strategySetVersionStatusInputSchema>;
+export type StrategySetVersionStatusInput = z.infer<
+  typeof strategySetVersionStatusInputSchema
+>;
 
 /** 版本星标：用户标记有价值的版本（仅展示元数据；不改变版本内容）。 */
 export const strategySetVersionStarredInputSchema = z.object({
@@ -468,7 +703,9 @@ export const strategySetVersionStarredInputSchema = z.object({
   version: z.string().min(1, "version 必填（semver x.y.z）"),
   isStarred: z.boolean(),
 });
-export type StrategySetVersionStarredInput = z.infer<typeof strategySetVersionStarredInputSchema>;
+export type StrategySetVersionStarredInput = z.infer<
+  typeof strategySetVersionStarredInputSchema
+>;
 
 /** StrategyLifecycleRecord 传输层透传（校验由后端 assertValidStrategyLifecycleRecord 负责）。 */
 export const strategyLifecycleRecordSchema = z.custom<Record<string, unknown>>(
@@ -592,7 +829,8 @@ export const CLOSED_LOOP_STAGE_ID_VALUES = [
 ] as const;
 
 export const closedLoopStageIdSchema = z.enum(CLOSED_LOOP_STAGE_ID_VALUES);
-export type ClosedLoopStageIdValue = (typeof CLOSED_LOOP_STAGE_ID_VALUES)[number];
+export type ClosedLoopStageIdValue =
+  (typeof CLOSED_LOOP_STAGE_ID_VALUES)[number];
 
 /**
  * 闭环装配覆盖率摘要（`assessClosedLoopWiringCoverage` 的传输层投影）。
@@ -607,7 +845,9 @@ export const closedLoopWiringSummarySchema = z.object({
   uncoveredStages: z.array(closedLoopStageIdSchema),
   executorBound: z.boolean(),
 });
-export type ClosedLoopWiringSummary = z.infer<typeof closedLoopWiringSummarySchema>;
+export type ClosedLoopWiringSummary = z.infer<
+  typeof closedLoopWiringSummarySchema
+>;
 
 export const researchRunReadinessSchema = z.object({
   canRun: z.boolean(),
@@ -839,7 +1079,9 @@ export const closedLoopRuntimeConfigSchema = z.object({
    */
   parameterOverrides: z.record(z.string(), z.unknown()).optional(),
 });
-export type ClosedLoopRuntimeConfig = z.infer<typeof closedLoopRuntimeConfigSchema>;
+export type ClosedLoopRuntimeConfig = z.infer<
+  typeof closedLoopRuntimeConfigSchema
+>;
 
 /**
  * 闭环运行请求（FE-4）。
@@ -997,6 +1239,7 @@ export const strategyRunRecordSchema = z.object({
     minBarCount: z.number().int().nonnegative(),
     maxBarCount: z.number().int().nonnegative(),
     maxRelativeDayObserved: z.number().int(),
+    poolScoreRemovalCount: z.number().int().nonnegative().default(0),
     decisionDigestFingerprint: z.string(),
     samples: z.array(
       z.object({
@@ -1013,7 +1256,7 @@ export const strategyRunRecordSchema = z.object({
         emitted: z.boolean(),
         rankValue: z.number().nullable(),
         explanation: z.array(z.string()),
-      }),
+      })
     ),
   }),
   /** 执行元数据（谁跑的 / 怎么接的）。 */
@@ -1056,13 +1299,15 @@ export const backtestRunPayloadSchema = z.object({
       daysPerYear: z.number().int().positive(),
     }),
   }),
-  summary: z.object({
-    initialCapital: z.number(),
-    finalEquity: z.number(),
-    totalReturnPct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
-    equityPointCount: z.number().int().nonnegative(),
-    tradingDayCount: z.number().int().nonnegative(),
-  }).passthrough(),
+  summary: z
+    .object({
+      initialCapital: z.number(),
+      finalEquity: z.number(),
+      totalReturnPct: z.union([z.number(), z.literal("NOT_AVAILABLE")]),
+      equityPointCount: z.number().int().nonnegative(),
+      tradingDayCount: z.number().int().nonnegative(),
+    })
+    .passthrough(),
   /** 有界样本（≤ 上限；**全量明细不进这里**）。 */
   equitySamples: z.array(z.unknown()),
   tradeSamples: z.array(z.unknown()),
@@ -1071,14 +1316,17 @@ export const backtestRunPayloadSchema = z.object({
   tradeDigest: z.string(),
   notes: z.array(z.string()),
   /** 回测执行元数据（政策版本 / 成本模型 / 初始资金等）。 */
-  executionMetadata: z.object({
-    executionPolicyVersion: z.number().int().positive(),
-    engineVersion: z.string(),
-    codeVersion: z.string(),
-    initialCapital: z.number(),
-    sampleLimit: z.number().int().positive(),
-    notes: z.array(z.string()),
-  }).passthrough().optional(),
+  executionMetadata: z
+    .object({
+      executionPolicyVersion: z.number().int().positive(),
+      engineVersion: z.string(),
+      codeVersion: z.string(),
+      initialCapital: z.number(),
+      sampleLimit: z.number().int().positive(),
+      notes: z.array(z.string()),
+    })
+    .passthrough()
+    .optional(),
 });
 export type BacktestRunPayloadDto = z.infer<typeof backtestRunPayloadSchema>;
 
@@ -1300,6 +1548,13 @@ export const closedLoopBacktestRunRecordSchema = z.object({
   experimentId: z.string(),
   strategyId: z.string(),
   strategyVersion: z.string(),
+  /**
+   * 该版本是否已加星。
+   *
+   * 来源是独立的 `strategy_version_star`（`(strategyId, version)` 唯一键）；版本行是
+   * 版本存在的唯一来源，星标只允许绑定正式 `strategy_versions` 坐标。
+   */
+  isStarred: z.boolean(),
   /** 回测窗口（含两端，YYYY-MM-DD）。 */
   startDate: z.string(),
   endDate: z.string(),
@@ -1329,13 +1584,18 @@ export const closedLoopBacktestRunRecordSchema = z.object({
   /** 年化收益率（%）。 */
   cagrPct: z.number().nullable(),
 });
-export type ClosedLoopBacktestRunRecordDto = z.infer<typeof closedLoopBacktestRunRecordSchema>;
+export type ClosedLoopBacktestRunRecordDto = z.infer<
+  typeof closedLoopBacktestRunRecordSchema
+>;
 
 /** 留档详情：在条目之上带完整运行结果（`result` 为 null = 本次未留完整结果）。 */
-export const closedLoopBacktestRunDetailSchema = closedLoopBacktestRunRecordSchema.extend({
-  result: closedLoopRunResultSchema.nullable(),
-});
-export type ClosedLoopBacktestRunDetailDto = z.infer<typeof closedLoopBacktestRunDetailSchema>;
+export const closedLoopBacktestRunDetailSchema =
+  closedLoopBacktestRunRecordSchema.extend({
+    result: closedLoopRunResultSchema.nullable(),
+  });
+export type ClosedLoopBacktestRunDetailDto = z.infer<
+  typeof closedLoopBacktestRunDetailSchema
+>;
 
 /** 留档列表查询入参（按留档时间倒序；可按策略过滤）。 */
 export const closedLoopBacktestRunListInputSchema = z
@@ -1381,7 +1641,10 @@ export const securityLabelsInputSchema = z.object({
 });
 
 /** 查询出参：按 `securityId` 索引的标签表。 */
-export const securityLabelsOutputSchema = z.record(z.string(), securityLabelSchema);
+export const securityLabelsOutputSchema = z.record(
+  z.string(),
+  securityLabelSchema
+);
 
 export type SecurityLabelDto = z.infer<typeof securityLabelSchema>;
 export type SecurityLabelsInput = z.infer<typeof securityLabelsInputSchema>;
@@ -1425,8 +1688,14 @@ export const RESEARCH_PLAN_DEFAULT_ANALYSIS = 30;
 export const researchQuestionTextSchema = z
   .string()
   .trim()
-  .min(RESEARCH_QUESTION_MIN_LENGTH, `研究问题至少要 ${RESEARCH_QUESTION_MIN_LENGTH} 个字`)
-  .max(RESEARCH_QUESTION_MAX_LENGTH, `研究问题不能超过 ${RESEARCH_QUESTION_MAX_LENGTH} 个字符`);
+  .min(
+    RESEARCH_QUESTION_MIN_LENGTH,
+    `研究问题至少要 ${RESEARCH_QUESTION_MIN_LENGTH} 个字`
+  )
+  .max(
+    RESEARCH_QUESTION_MAX_LENGTH,
+    `研究问题不能超过 ${RESEARCH_QUESTION_MAX_LENGTH} 个字符`
+  );
 
 /** `maxAnalysisPerPlan` 校验（§9：只允许在建议区间内显式指定）。 */
 export const researchPlanCapSchema = z

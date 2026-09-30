@@ -25,6 +25,10 @@ import {
   THREE_FACTOR_TOPN_CREATED_AT,
   threeFactorTopNStrategyId,
 } from "../server/research/patternLibrary/threeFactorTopNStrategy";
+import {
+  buildThreeFactorTopNFamilyArmDocument,
+  resolveThreeFactorTopNStudyMembers,
+} from "../server/research/patternLibrary/threeFactorTopNFamilies";
 import type { ResearchTrailingPolicyDefinition } from "../server/research/trailingPolicy";
 import type { ExitPolicyDefinition } from "../server/research/exitPolicyCommon";
 import { getExitPolicyExperiment } from "../server/research/exitPolicyExperiments";
@@ -38,25 +42,11 @@ import type {
 } from "../server/research/simulator/types";
 import type { ClosedLoopRunResult } from "../shared/researchContracts";
 
-type ArmId =
-  | "control"
-  | "ma"
-  | "atr"
-  | "rlock"
-  | "giveback"
-  | "swing"
-  | "sar"
-  | "hybrid"
-  | "ma_trend"
-  | "scale50"
-  | "scale75"
-  | "runner2"
-  | "replace";
-
 interface ArmDefinition {
   readonly id: string;
   readonly strategyVersion: string;
   readonly label: string;
+  readonly familyId: string | null;
   readonly policy: ResearchTrailingPolicyDefinition | null;
   readonly exitPolicy?: ExitPolicyDefinition;
   readonly observationWindowEnd?: number;
@@ -67,177 +57,54 @@ interface ArmDefinition {
   readonly strongHoldReplacementScoreMargin?: number;
 }
 
-const ARMS: Readonly<Record<string, ArmDefinition>> = {
-  control: {
-    id: "control",
-    strategyVersion: "1.21.0",
-    label: "control-v111-fixed-close-5pct",
-    policy: null,
-  },
-  ma: {
-    id: "ma",
-    strategyVersion: "1.14.0",
-    label: "ma5-ma10-close",
-    policy: {
-      kind: "MA_CROSS",
-      fastWindow: 5,
-      slowWindow: 10,
-      activationRatio: 0,
-    },
-  },
-  legacy_ma_control: {
-    id: "legacy_ma_control",
-    strategyVersion: "1.14.1",
-    label: "legacy-ma-fixed-6-control",
-    policy: {
-      kind: "MA_CROSS",
-      fastWindow: 5,
-      slowWindow: 10,
-      activationRatio: 0,
-    },
-  },
-  atr: {
-    id: "atr",
-    strategyVersion: "1.15.0",
-    label: "atr10-chandelier-2p5",
-    policy: {
-      kind: "ATR_CHANDELIER",
-      atrWindow: 10,
-      atrMultiplier: 2.5,
-      activationRatio: 0,
-    },
-  },
-  rlock: {
-    id: "rlock",
-    strategyVersion: "1.16.0",
-    label: "risk-multiple-lock-2r-3r",
-    policy: {
-      kind: "R_MULTIPLE",
-      lockLadder: [
-        { triggerR: 2, lockR: 1 },
-        { triggerR: 3, lockR: 2 },
-      ],
-    },
-  },
-  giveback: {
-    id: "giveback",
-    strategyVersion: "1.17.0",
-    label: "profit-giveback-one-third",
-    policy: {
-      kind: "PROFIT_GIVEBACK",
-      activationRatio: 0.05,
-      givebackFraction: 1 / 3,
-    },
-  },
-  swing: {
-    id: "swing",
-    strategyVersion: "1.18.0",
-    label: "three-day-swing-low",
-    policy: {
-      kind: "SWING_LOW",
-      lookbackDays: 3,
-      activationRatio: 0,
-    },
-  },
-  sar: {
-    id: "sar",
-    strategyVersion: "1.19.0",
-    label: "parabolic-sar-close",
-    policy: {
-      kind: "PARABOLIC_SAR",
-      step: 0.02,
-      maxStep: 0.2,
-      activationRatio: 0,
-    },
-  },
-  hybrid: {
-    id: "hybrid",
-    strategyVersion: "1.20.0",
-    label: "ma5-atr10-floor-hybrid",
-    policy: {
-      kind: "HYBRID",
-      fastWindow: 5,
-      atrWindow: 10,
-      atrMultiplier: 2.5,
-      floorRatio: 0.01,
-      activationRatio: 0.03,
-    },
-  },
-  ma_trend: {
-    id: "ma_trend",
-    strategyVersion: "1.22.0",
-    label: "ma-trend-after-strong-hold",
-    policy: {
-      kind: "MA_CROSS",
-      fastWindow: 5,
-      slowWindow: 10,
-      activationRatio: 0,
-    },
-    observationWindowEnd: 19,
-    strongHoldAfterExtendedHold: "TREND",
-  },
-  scale50: {
-    id: "scale50",
-    strategyVersion: "1.23.1",
-    label: "ma-trend-scale-out-50",
-    policy: {
-      kind: "MA_CROSS",
-      fastWindow: 5,
-      slowWindow: 10,
-      activationRatio: 0,
-    },
-    observationWindowEnd: 19,
-    strongHoldAfterExtendedHold: "TREND",
-    strongHoldScaleOutRatio: 0.5,
-    strongHoldRunnerExitAtHoldingDays: 14,
-  },
-  scale75: {
-    id: "scale75",
-    strategyVersion: "1.24.1",
-    label: "ma-trend-scale-out-75",
-    policy: {
-      kind: "MA_CROSS",
-      fastWindow: 5,
-      slowWindow: 10,
-      activationRatio: 0,
-    },
-    observationWindowEnd: 19,
-    strongHoldAfterExtendedHold: "TREND",
-    strongHoldScaleOutRatio: 0.75,
-    strongHoldRunnerExitAtHoldingDays: 14,
-  },
-  runner2: {
-    id: "runner2",
-    strategyVersion: "1.25.0",
-    label: "ma-trend-runner-limit-2",
-    policy: {
-      kind: "MA_CROSS",
-      fastWindow: 5,
-      slowWindow: 10,
-      activationRatio: 0,
-    },
-    observationWindowEnd: 19,
-    strongHoldAfterExtendedHold: "TREND",
-    strongHoldRunnerExitAtHoldingDays: 14,
-    strongHoldMaxConcurrentRunners: 2,
-  },
-  replace: {
-    id: "replace",
-    strategyVersion: "1.26.0",
-    label: "ma-trend-runner-replacement",
-    policy: {
-      kind: "MA_CROSS",
-      fastWindow: 5,
-      slowWindow: 10,
-      activationRatio: 0,
-    },
-    observationWindowEnd: 19,
-    strongHoldAfterExtendedHold: "TREND",
-    strongHoldRunnerExitAtHoldingDays: 14,
-    strongHoldMaxConcurrentRunners: 2,
-    strongHoldReplacementScoreMargin: 0.03,
-  },
+/**
+ * 移动止盈/趋势 runner 族的臂定义已迁移到模式族注册表；脚本改从注册表读取
+ * strategyVersion 与执行补丁。别名与顺序来自 `trailing-policy-study` 集合。
+ * control（1.21.0）是无移动止盈的历史控制臂，仍显式声明在脚本里，
+ * 因为它不属于任何「移动止盈维度」族。
+ */
+const NAMED_ARMS: ReadonlyMap<
+  string,
+  { readonly familyId: string; readonly armId: string }
+> = new Map(
+  resolveThreeFactorTopNStudyMembers("trailing-policy-study").map(member => [
+    member.alias,
+    { familyId: member.familyId, armId: member.arm.armId },
+  ]),
+);
+
+const CONTROL_ARM: ArmDefinition = {
+  id: "control",
+  strategyVersion: "1.21.0",
+  label: "control-v111-fixed-close-5pct",
+  familyId: null,
+  policy: null,
 };
+
+/** 从注册表 arm 补丁里读回脚本展示/落档需要的强续持字段。 */
+function armFromRegistry(familyId: string, armId: string): ArmDefinition {
+  const arm = resolveThreeFactorTopNFamilyArm(familyId, armId);
+  if (arm === null) {
+    throw new Error(`模式族注册表缺少 ${familyId}/${armId}。`);
+  }
+  const patch = arm.inputPatch;
+  return {
+    id: arm.armId,
+    strategyVersion: arm.strategyVersion,
+    label: arm.label,
+    familyId,
+    policy: patch.trailingPolicy ?? null,
+    observationWindowEnd: patch.observationWindow?.end,
+    strongHoldAfterExtendedHold: patch.strongHold?.afterExtendedHold,
+    strongHoldScaleOutRatio: patch.strongHold?.scaleOutRatio ?? undefined,
+    strongHoldRunnerExitAtHoldingDays:
+      patch.strongHold?.runnerExitAtHoldingDays ?? undefined,
+    strongHoldMaxConcurrentRunners:
+      patch.strongHold?.maxConcurrentRunners ?? undefined,
+    strongHoldReplacementScoreMargin:
+      patch.strongHold?.replacementScoreMargin ?? undefined,
+  };
+}
 
 function argOf(name: string, fallback: string): string {
   const index = process.argv.indexOf(`--${name}`);
@@ -392,17 +259,21 @@ function toClosedLoopRunResultDto(input: {
 const armArg = argOf("arm", "");
 const slId = argOf("sl", "");
 const slExperiment = slId === "" ? null : getExitPolicyExperiment(slId);
-if (slExperiment === null && !(armArg in ARMS)) {
+if (slExperiment === null && armArg !== "control" && !NAMED_ARMS.has(armArg)) {
   throw new Error(
-    `--arm 必须是 ${Object.keys(ARMS).join(" | ")}，或使用 --sl SL-xx；实际 --arm=${armArg} --sl=${slId}`,
+    `--arm 必须是 control | ${[...NAMED_ARMS.keys()].join(" | ")}，或使用 --sl SL-xx；实际 --arm=${armArg} --sl=${slId}`,
   );
 }
+const namedArm = NAMED_ARMS.get(armArg);
 const arm: ArmDefinition = slExperiment === null
-  ? ARMS[armArg]!
+  ? armArg === "control"
+    ? CONTROL_ARM
+    : armFromRegistry(namedArm!.familyId, namedArm!.armId)
   : {
       id: slExperiment.id,
       strategyVersion: slExperiment.version,
       label: slExperiment.name,
+      familyId: null,
       policy: null,
       exitPolicy: slExperiment.policy,
     };
@@ -437,39 +308,24 @@ const codeVersion = "3f-topn-exit-policy-study-20260927";
 const experimentId = `EXP-${AS_OF}-${fnv1a8(
   `${strategyId}|${arm.strategyVersion}|${START}|${END}|${arm.label}|STOP=6|STRONG=3-10`,
 )}`;
-const strategyDocument = buildThreeFactorTopNStrategyDocument({
-  topN: TOP_N,
-  datasetVersionId: DATASET_VERSION_ID,
-  datasetLabel: DATASET_LABEL,
-  strategyVersion: arm.strategyVersion,
-  stopLossRatio: STOP_LOSS_RATIO,
-  strongHold: {
-    ...STRONG_HOLD,
-    ...(arm.strongHoldAfterExtendedHold === undefined
-      ? {}
-      : { afterExtendedHold: arm.strongHoldAfterExtendedHold }),
-    ...(arm.strongHoldScaleOutRatio === undefined
-      ? {}
-      : { scaleOutRatio: arm.strongHoldScaleOutRatio }),
-    ...(arm.strongHoldRunnerExitAtHoldingDays === undefined
-      ? {}
-      : { runnerExitAtHoldingDays: arm.strongHoldRunnerExitAtHoldingDays }),
-    ...(arm.strongHoldMaxConcurrentRunners === undefined
-      ? {}
-      : { maxConcurrentRunners: arm.strongHoldMaxConcurrentRunners }),
-    ...(arm.strongHoldReplacementScoreMargin === undefined
-      ? {}
-      : { replacementScoreMargin: arm.strongHoldReplacementScoreMargin }),
-  },
-  excludeEventDayOpenAtLimit: true,
-  observationWindow: {
-    start: 5,
-    end: arm.observationWindowEnd ?? 15,
-    unit: "TRADING_DAY",
-  },
-  ...(arm.policy === null ? {} : { trailingPolicy: arm.policy }),
-  ...(arm.exitPolicy === undefined ? {} : { exitPolicy: arm.exitPolicy }),
-});
+const strategyDocument = arm.familyId === null
+  ? buildThreeFactorTopNStrategyDocument({
+      topN: TOP_N,
+      datasetVersionId: DATASET_VERSION_ID,
+      datasetLabel: DATASET_LABEL,
+      strategyVersion: arm.strategyVersion,
+      stopLossRatio: STOP_LOSS_RATIO,
+      strongHold: { ...STRONG_HOLD },
+      excludeEventDayOpenAtLimit: true,
+      observationWindow: { start: 5, end: 15, unit: "TRADING_DAY" },
+      ...(arm.policy === null ? {} : { trailingPolicy: arm.policy }),
+      ...(arm.exitPolicy === undefined ? {} : { exitPolicy: arm.exitPolicy }),
+    })
+  : buildThreeFactorTopNFamilyArmDocument(arm.familyId, arm.id, {
+      topN: TOP_N,
+      datasetVersionId: DATASET_VERSION_ID,
+      datasetLabel: DATASET_LABEL,
+    });
 
 if (PERSIST) {
   const strategyService = new StrategyService(new DbStrategyRepository(), {

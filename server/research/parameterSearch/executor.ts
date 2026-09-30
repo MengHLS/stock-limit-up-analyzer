@@ -48,7 +48,7 @@ import { BACKTEST_EXECUTION_POLICY_VERSION } from "../../backtest/context";
 import { ResearchValidationError } from "../experimentValidation";
 import type { StrategyParameterProjectionRow } from "../strategySchema/projection";
 import type { StrategyDocument } from "../strategySchema/types";
-import type { ResearchParameterSet } from "../types";
+import type { ResearchParameterSet, ResearchParameterValue } from "../types";
 import { buildParameterCombinations, computeCombinationSetFingerprint } from "./combination";
 import {
   computeEvaluationConfigFingerprint,
@@ -449,7 +449,26 @@ function parseJsonObject(text: string | null): ResearchParameterSet {
   if (text === null || text === "") return {};
   const parsed: unknown = JSON.parse(text);
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-  return parsed as ResearchParameterSet;
+  const out: Record<string, ResearchParameterValue> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+      continue;
+    }
+    if (
+      Array.isArray(value)
+      && value.every(
+        (item) =>
+          item === null
+          || typeof item === "string"
+          || typeof item === "number"
+          || typeof item === "boolean",
+      )
+    ) {
+      out[key] = value as readonly (string | number | boolean | null)[];
+    }
+  }
+  return out;
 }
 
 /** Run 行 → wire 视图。 */

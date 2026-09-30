@@ -24,6 +24,7 @@ import {
 import { ConfirmDialog, EmptyState, SectionCard, StatusBadge } from "@/components/common";
 import { DatasetVersionLink, StrategyVersionIdLink } from "@/components/common/ProvenanceLink";
 import { trpc } from "@/lib/trpc";
+import type { ParameterSearchParameterValue } from "@shared/parameterSearchContracts";
 import {
   buildPanelLocation,
   DEFAULT_PANEL_BASE_PATH,
@@ -53,13 +54,14 @@ function ratio(value: number | null | undefined): string {
   return `×${value.toFixed(2)}`;
 }
 
-function valueText(value: number | string | boolean | null | undefined): string {
+function valueText(value: ParameterSearchParameterValue | undefined): string {
   if (value === null || value === undefined) return "null";
+  if (Array.isArray(value)) return JSON.stringify(value);
   return String(value);
 }
 
 /** 冻结参数集 → 紧凑文本（键排序，稳定展示）。 */
-function parametersText(parameters: Readonly<Record<string, number | string | boolean | null>>): string {
+function parametersText(parameters: Readonly<Record<string, ParameterSearchParameterValue>>): string {
   const keys = Object.keys(parameters).sort();
   if (keys.length === 0) return "（无）";
   return keys.map((key) => `${key}=${valueText(parameters[key] ?? null)}`).join(" · ");

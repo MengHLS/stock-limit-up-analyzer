@@ -68,7 +68,7 @@ export function PaginationBar({
         </div>
       )}
 
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-slate-500 hover:text-slate-900 disabled:opacity-40" disabled={atStart} onClick={() => onPageChange(1)} title="第一页">
           <ChevronsLeft className="h-4 w-4" />
         </Button>

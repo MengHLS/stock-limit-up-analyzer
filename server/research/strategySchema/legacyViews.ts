@@ -103,6 +103,77 @@ function resolveParameterDefault(definition: StrategyDefinition, code: string): 
   return definition.parameters.find((parameter) => parameter.code === code)?.defaultValue;
 }
 
+type PositionTier = { readonly minScore: number; readonly fraction: number };
+type PositionRankTier = { readonly maxRank: number; readonly fraction: number };
+
+function isPositionTier(value: unknown): value is PositionTier {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as { minScore?: unknown; fraction?: unknown };
+  return typeof candidate.minScore === "number"
+    && Number.isFinite(candidate.minScore)
+    && candidate.minScore >= 0
+    && candidate.minScore <= 1
+    && typeof candidate.fraction === "number"
+    && Number.isFinite(candidate.fraction)
+    && candidate.fraction >= 0
+    && candidate.fraction <= 1;
+}
+
+function isPositionRankTier(value: unknown): value is PositionRankTier {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as { maxRank?: unknown; fraction?: unknown };
+  return typeof candidate.maxRank === "number"
+    && Number.isInteger(candidate.maxRank)
+    && candidate.maxRank >= 1
+    && typeof candidate.fraction === "number"
+    && Number.isFinite(candidate.fraction)
+    && candidate.fraction >= 0
+    && candidate.fraction <= 1;
+}
+
+/**
+ * 解析仓位分档参数。
+ *
+ * `json` 参数在 v1 视图里必须展开成 `tiers` / `rankTiers`：参数数组是值域声明，
+ * 不是让下游再解释一次的对象。引用缺默认值或结构不合法时响亮抛错，不静默回退。
+ */
+function requirePositionTierParameter(
+  definition: StrategyDefinition,
+  code: string,
+  kind: "score" | "rank",
+  resolvedParameterSet?: Readonly<Record<string, ResearchParameterValue>>,
+): readonly PositionTier[] | readonly PositionRankTier[] {
+  const parameter = definition.parameters.find((item) => item.code === code);
+  const value = resolvedParameterSet !== undefined && Object.prototype.hasOwnProperty.call(resolvedParameterSet, code)
+    ? resolvedParameterSet[code]
+    : parameter?.defaultValue;
+  if (parameter === undefined) {
+    throw new Error(`仓位分档参数引用 \`${code}\` 未在 definition.parameters 中声明。`);
+  }
+  if (parameter.dataType !== "json") {
+    throw new Error(
+      `仓位分档参数 \`${code}\` 的 dataType 必须是 json（标量数组），实际 ${parameter.dataType}。`,
+    );
+  }
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`仓位分档参数 \`${code}\` 必须声明非空默认值数组。`);
+  }
+  if (kind === "score") {
+    if (!value.every(isPositionTier)) {
+      throw new Error(
+        `仓位分档参数 \`${code}\` 必须是 { minScore, fraction } 数组，且 minScore / fraction 位于 [0,1]。`,
+      );
+    }
+    return value as readonly PositionTier[];
+  }
+  if (!value.every(isPositionRankTier)) {
+    throw new Error(
+      `仓位分档参数 \`${code}\` 必须是 { maxRank, fraction } 数组，且 maxRank >= 1、fraction 位于 [0,1]。`,
+    );
+  }
+  return value as readonly PositionRankTier[];
+}
+
 /** 出场规则阈值解析：显式 threshold 优先，其次由 `parameter` 的 defaultValue 解析。 */
 function resolveExitThreshold(rule: ExitRuleDefinition, definition: StrategyDefinition): number | undefined {
   if (typeof rule.threshold === "number") return rule.threshold;
@@ -176,7 +247,10 @@ export function deriveExecutionModel(executionTiming: StrategyExecutionTiming): 
  *   execution.executionTiming → executionModel（见 deriveExecutionModel，含两处有损）
  *   datasets(PRIMARY)         → datasetVersion（label / 快照）+ datasetVersionId（权威坐标）
  */
-export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegacyViews {
+export function deriveLegacyViewsWithParameters(
+  definition: StrategyDefinition,
+  parameterSet?: Readonly<Record<string, ResearchParameterValue>>,
+): StrategyLegacyViews {
   const entryRules = definition.entry.conditions.map((condition, index) => conditionToDeclaredRule(condition, index));
 
   const exitRules: DeclaredRule[] = definition.exit.rules.map((rule, index) => {
@@ -240,15 +314,21 @@ export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegac
   const position = definition.position;
   const resolvedRatio = resolvePositionRatio(position, definition);
   const fraction = resolvedRatio ?? (1 / position.maxPositions);
+  const positionTiers = position.positionTiersParameter === undefined
+    ? position.positionTiers
+    : requirePositionTierParameter(definition, position.positionTiersParameter, "score", parameterSet) as readonly PositionTier[];
+  const positionRankTiers = position.positionRankTiersParameter === undefined
+    ? position.positionRankTiers
+    : requirePositionTierParameter(definition, position.positionRankTiersParameter, "rank", parameterSet) as readonly PositionRankTier[];
   let positionSizing: PositionSizingDeclaration;
   if (
-    (position.positionTiers !== undefined && position.positionTiers.length > 0)
-    || (position.positionRankTiers !== undefined && position.positionRankTiers.length > 0)
+    (positionTiers !== undefined && positionTiers.length > 0)
+    || (positionRankTiers !== undefined && positionRankTiers.length > 0)
   ) {
     positionSizing = {
       kind: "score-tiered-equity-fraction",
-      tiers: position.positionTiers ?? [],
-      ...(position.positionRankTiers === undefined ? {} : { rankTiers: position.positionRankTiers }),
+      tiers: positionTiers ?? [],
+      ...(positionRankTiers === undefined ? {} : { rankTiers: positionRankTiers }),
       maxPositions: position.maxPositions,
     };
   } else {
@@ -276,6 +356,8 @@ export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegac
       ...(parameter.max === undefined ? {} : { max: parameter.max }),
       ...(parameter.step === undefined ? {} : { step: parameter.step }),
       ...(parameter.allowedValues === undefined ? {} : { allowedValues: parameter.allowedValues }),
+      ...(parameter.minItems === undefined ? {} : { minItems: parameter.minItems }),
+      ...(parameter.maxItems === undefined ? {} : { maxItems: parameter.maxItems }),
       ...(parameter.description === undefined ? {} : { description: parameter.description }),
     })),
   };
@@ -292,6 +374,11 @@ export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegac
     ...(primary === undefined ? {} : { datasetVersion: primary.datasetVersion }),
     ...(primary?.datasetVersionId === undefined ? {} : { datasetVersionId: primary.datasetVersionId }),
   };
+}
+
+/** 文档默认值版视图（保持既有导出与语义）。 */
+export function deriveLegacyViews(definition: StrategyDefinition): StrategyLegacyViews {
+  return deriveLegacyViewsWithParameters(definition);
 }
 
 /** 深比较（canonical JSON 串比较；`undefined` 与「不存在」等价）。 */

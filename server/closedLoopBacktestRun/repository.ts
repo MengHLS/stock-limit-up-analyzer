@@ -17,10 +17,11 @@
  * 不同表、不同口径（那张存龙头候选回测结果），**禁互灌**。
  */
 
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
-import { closedLoopBacktestRun } from "../../drizzle/schema";
+import { closedLoopBacktestRun, strategyVersionStars } from "../../drizzle/schema";
 import type { ClosedLoopRunResult } from "../../shared/researchContracts";
+import type { StrategyDocument } from "../research/strategySchema/types";
 import {
   buildClosedLoopBacktestRunSummary,
   readEvaluationStageOutput,
@@ -42,6 +43,13 @@ export type ClosedLoopBacktestRunRecord = {
   strategyVersion: string;
   startDate: string;
   endDate: string;
+  /**
+   * 该版本是否已加星。
+   *
+   * 来源是独立的 `strategy_version_star`（`(strategyId, version)` 唯一键）；版本行是
+   * 版本存在的唯一来源，星标只允许绑定正式 `strategy_versions` 坐标。
+   */
+  isStarred: boolean;
 } & ClosedLoopBacktestRunSummary;
 
 /** 留档详情（含完整运行结果）。 */
@@ -57,6 +65,14 @@ export type SaveClosedLoopBacktestRunInput = {
   strategyVersion: string;
   startDate: string;
   endDate: string;
+  /**
+   * 本次运行使用的 canonical strategy document。
+   *
+   * 有值时由调用方保证它已通过策略域校验；保存留档前会先在同一持久化流程中把
+   * `(strategyId, version)` 补成正式 `strategy_versions` 行。这样「回测留档」与
+   * 「正式版本」不再产生两套版本来源，星标、详情、对比页都只认正式版本。
+   */
+  strategyDocument?: StrategyDocument;
   /** 完整运行结果（原样投影；不做二次加工）。 */
   result: ClosedLoopRunResult;
 };
@@ -82,6 +98,20 @@ export async function saveClosedLoopBacktestRun(
 ): Promise<number> {
   const db = await getDb();
   if (!db) throw new Error("数据库不可用，无法留档闭环回测结果");
+
+  if (input.strategyDocument !== undefined) {
+    const document = input.strategyDocument;
+    if (document.strategyId !== input.strategyId || document.version !== input.strategyVersion) {
+      throw new Error(
+        `留档策略文档坐标不一致：input=${input.strategyId}@${input.strategyVersion}，`
+        + `document=${document.strategyId}@${document.version}`,
+      );
+    }
+    const { StrategyService } = await import("../research/strategyPersistence/service");
+    const { DbStrategyRepository } = await import("../research/strategyPersistence/db");
+    const strategyService = new StrategyService(new DbStrategyRepository());
+    await strategyService.save({ document: document as unknown as Record<string, unknown> });
+  }
 
   const summary = buildClosedLoopBacktestRunSummary(input.result);
   const summaryJson = JSON.stringify(summary);
@@ -211,7 +241,50 @@ function parseSummaryJson(text: string | null): ParsedSummary {
   };
 }
 
-function rowToRecord(row: SummaryRow): ClosedLoopBacktestRunRecord {
+/** 星标坐标键：`${strategyId}@${version}`（与 DB 表键一一对应）。 */
+function starCoordKey(strategyId: string, version: string): string {
+  return `${strategyId}@${version}`;
+}
+
+/**
+ * 批量读取给定策略的已加星坐标。
+ *
+ * 星标在 `strategy_version_star`，按 strategyId 一次取回后在内存里按 `strategyId@version`
+ * 命中，避免逐行查询（列表最多 200 行）。
+ */
+async function loadStarredCoordKeys(strategyIds: readonly string[]): Promise<Set<string>> {
+  const unique = [...new Set(strategyIds.filter(id => id !== ""))];
+  if (unique.length === 0) return new Set();
+  const db = await getDb();
+  if (!db) return new Set();
+  const rows = await db
+    .select({
+      strategyId: strategyVersionStars.strategyId,
+      version: strategyVersionStars.version,
+    })
+    .from(strategyVersionStars)
+    .where(inArray(strategyVersionStars.strategyId, unique));
+  return new Set(rows.map(row => starCoordKey(row.strategyId, row.version)));
+}
+
+/** 单条坐标的星标查询（详情接口用）。 */
+async function isVersionStarred(strategyId: string, version: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const rows = await db
+    .select({ id: strategyVersionStars.id })
+    .from(strategyVersionStars)
+    .where(
+      and(
+        eq(strategyVersionStars.strategyId, strategyId),
+        eq(strategyVersionStars.version, version),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+function rowToRecord(row: SummaryRow, isStarred: boolean): ClosedLoopBacktestRunRecord {
   const { summary } = parseSummaryJson(row.summaryJson);
   return {
     // 先铺摘要（自带 status / 阶段计数 / 金额等），再用**表列**覆盖坐标类字段：
@@ -231,6 +304,7 @@ function rowToRecord(row: SummaryRow): ClosedLoopBacktestRunRecord {
     blockedStageCount: row.blockedStageCount,
     skippedStageCount: row.skippedStageCount,
     firstBlockedReasonCode: row.firstBlockedReasonCode,
+    isStarred,
   };
 }
 
@@ -320,6 +394,7 @@ export async function listClosedLoopBacktestRuns(
   const rows = (await ordered
     .orderBy(desc(closedLoopBacktestRun.createdAt))
     .limit(limit)) as unknown as SummaryRow[];
+  const starredKeys = await loadStarredCoordKeys(rows.map(row => row.strategyId));
   const parsedRows = rows.map(row => {
     const { summary, missingMetrics } = parseSummaryJson(row.summaryJson);
     return {
@@ -338,6 +413,7 @@ export async function listClosedLoopBacktestRuns(
         blockedStageCount: row.blockedStageCount,
         skippedStageCount: row.skippedStageCount,
         firstBlockedReasonCode: row.firstBlockedReasonCode,
+        isStarred: starredKeys.has(starCoordKey(row.strategyId, row.strategyVersion)),
       },
       missingMetrics,
     };
@@ -373,7 +449,7 @@ export async function getClosedLoopBacktestRun(
   const row = rows[0] as unknown as (SummaryRow & { resultJson: string | null }) | undefined;
   if (row === undefined) return null;
 
-  const record = rowToRecord(row);
+  const record = rowToRecord(row, await isVersionStarred(row.strategyId, row.strategyVersion));
   let result: ClosedLoopRunResult | null = null;
   if (row.resultJson !== null && row.resultJson !== "") {
     const parsed = JSON.parse(row.resultJson) as unknown;
@@ -405,9 +481,15 @@ export async function getClosedLoopBacktestRunsByIds(
     .where(inArray(closedLoopBacktestRun.id, unique));
 
   const byId = new Map<number, ClosedLoopBacktestRunDetail>();
+  const starredKeys = await loadStarredCoordKeys(
+    (rows as unknown as SummaryRow[]).map(row => row.strategyId),
+  );
   for (const raw of rows) {
     const row = raw as unknown as SummaryRow & { resultJson: string | null };
-    const record = rowToRecord(row);
+    const record = rowToRecord(
+      row,
+      starredKeys.has(starCoordKey(row.strategyId, row.strategyVersion)),
+    );
     let result: ClosedLoopRunResult | null = null;
     if (row.resultJson !== null && row.resultJson !== "") {
       const parsed = JSON.parse(row.resultJson) as unknown;

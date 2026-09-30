@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import {
   BuildJobTable,
+  DatasetSnapshotPanel,
   DeleteDatasetVersionDialog,
   StatisticsGrid,
   VersionBuildControls,
@@ -393,6 +394,9 @@ export default function VersionDetail() {
           {statistics.data && (
             <StatisticsGrid stats={statisticsToVm(statistics.data)} />
           )}
+
+          {/* 本地快照（开发态加速；仅 supported 时后端返回面板数据） */}
+          <DatasetSnapshotPanel datasetVersionId={version.id} />
 
           {/* 构建作业 */}
           <BuildJobTable

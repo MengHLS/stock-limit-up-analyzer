@@ -18,6 +18,9 @@
 import { z } from "zod";
 import {
   parameterSearchRunStatusSchema,
+  parameterSearchParameterSetSchema,
+  type ParameterSearchParameterValue,
+  parameterSearchParameterValueSchema,
   parameterSearchSpaceDefinitionSchema,
   parameterSearchValueSchema,
 } from "./parameterSearchContracts";
@@ -59,7 +62,7 @@ export const robustnessNeighborAvailabilitySchema = z.enum(ROBUSTNESS_NEIGHBOR_A
 export const robustnessNeighborSchema = z.object({
   axis: z.string().min(1),
   stepOffset: z.number().int(),
-  parameters: z.record(z.string(), parameterSearchValueSchema),
+  parameters: parameterSearchParameterSetSchema,
   parameterHash: z.string().nullable(),
   availability: robustnessNeighborAvailabilitySchema,
   metrics: robustnessMetricsSnapshotSchema.nullable(),
@@ -132,7 +135,7 @@ export const searchRobustnessResultViewSchema = z.object({
   sourceSearchRunId: z.string().min(1),
   parameterHash: z.string().min(1),
   combinationIndex: z.number().int().nonnegative(),
-  parameters: z.record(z.string(), parameterSearchValueSchema),
+  parameters: parameterSearchParameterSetSchema,
   metrics: robustnessMetricsSnapshotSchema,
   metricsSource: z.string().min(1),
   status: robustnessCombinationStatusSchema,
@@ -156,17 +159,38 @@ export const searchRobustnessResultViewSchema = z.object({
 // 多参数矩阵
 // ---------------------------------------------------------------------------
 
-export const robustnessMatrixAxisSchema = z.object({
+export type RobustnessMatrixAxisView = {
+  readonly parameter: string;
+  readonly domainMode: string;
+  readonly values: readonly ParameterSearchParameterValue[];
+};
+
+export type RobustnessMatrixCellView = {
+  readonly rowIndex: number;
+  readonly columnIndex: number;
+  readonly rowValue: ParameterSearchParameterValue;
+  readonly columnValue: ParameterSearchParameterValue;
+  readonly parameterHash: string | null;
+  readonly present: boolean;
+  readonly status: RobustnessCombinationStatusView | "MISSING" | "AMBIGUOUS";
+  readonly stable: boolean | null;
+  readonly stabilityRatio: number | null;
+  readonly totalReturnPct: number | null;
+  readonly tradeCount: number | null;
+  readonly matchedCount: number;
+};
+
+export const robustnessMatrixAxisSchema: z.ZodType<RobustnessMatrixAxisView> = z.object({
   parameter: z.string(),
   domainMode: z.string(),
-  values: z.array(parameterSearchValueSchema),
+  values: z.array(parameterSearchParameterValueSchema),
 });
 
-export const robustnessMatrixCellSchema = z.object({
+export const robustnessMatrixCellSchema: z.ZodType<RobustnessMatrixCellView> = z.object({
   rowIndex: z.number().int().nonnegative(),
   columnIndex: z.number().int().nonnegative(),
-  rowValue: parameterSearchValueSchema,
-  columnValue: parameterSearchValueSchema,
+  rowValue: parameterSearchParameterValueSchema,
+  columnValue: parameterSearchParameterValueSchema,
   parameterHash: z.string().nullable(),
   present: z.boolean(),
   status: z.union([robustnessCombinationStatusSchema, z.enum(["MISSING", "AMBIGUOUS"])]),
@@ -177,7 +201,15 @@ export const robustnessMatrixCellSchema = z.object({
   matchedCount: z.number().int().nonnegative(),
 });
 
-export const robustnessMatrixSchema = z.object({
+export type RobustnessMatrixView = {
+  readonly rowAxis: RobustnessMatrixAxisView;
+  readonly columnAxis: RobustnessMatrixAxisView;
+  readonly cells: readonly RobustnessMatrixCellView[];
+  readonly parameterCount: number;
+  readonly omittedParameters: readonly string[];
+};
+
+export const robustnessMatrixSchema: z.ZodType<RobustnessMatrixView> = z.object({
   rowAxis: robustnessMatrixAxisSchema,
   columnAxis: robustnessMatrixAxisSchema,
   cells: z.array(robustnessMatrixCellSchema),
@@ -256,7 +288,7 @@ export const searchRobustnessRunViewSchema = z.object({
   /** 源 Run 的冻结参数空间快照（列表页可能为空串占位，详情页才有）。 */
   searchSnapshot: parameterSearchSpaceDefinitionSchema,
   searchSnapshotFingerprint: z.string().min(1),
-  fixedCoordinates: z.record(z.string(), parameterSearchValueSchema),
+  fixedCoordinates: parameterSearchParameterSetSchema,
   executionPolicyVersion: z.number().int(),
   evaluationConfigFingerprint: z.string().min(1),
   sourceReferenceCheckApplied: z.boolean().nullable(),
@@ -387,9 +419,6 @@ export type RobustnessParameterSensitivityView = z.infer<
 >;
 export type RobustnessCombinationStatusView = z.infer<typeof robustnessCombinationStatusSchema>;
 export type SearchRobustnessResultView = z.infer<typeof searchRobustnessResultViewSchema>;
-export type RobustnessMatrixAxisView = z.infer<typeof robustnessMatrixAxisSchema>;
-export type RobustnessMatrixCellView = z.infer<typeof robustnessMatrixCellSchema>;
-export type RobustnessMatrixView = z.infer<typeof robustnessMatrixSchema>;
 export type RobustnessParameterSensitivityVerdictView = z.infer<
   typeof robustnessParameterSensitivityVerdictSchema
 >;

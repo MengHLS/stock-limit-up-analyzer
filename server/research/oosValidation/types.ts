@@ -43,6 +43,7 @@ import type {
   OosValidationRunStatus,
 } from "../../../shared/oosValidationContracts";
 import { BACKTEST_ANNUALIZATION_DAYS } from "../../backtest/backtestResult";
+import type { ResearchParameterValue } from "../types";
 
 // ---------------------------------------------------------------------------
 // 身份 / 版本自述
@@ -112,7 +113,7 @@ export interface FrozenCandidateSnapshot {
   readonly sourceSearchRunId: string;
   readonly combinationIndex: number;
   readonly parameterHash: string;
-  readonly parameters: Readonly<Record<string, number | string | boolean | null>>;
+  readonly parameters: Readonly<Record<string, ResearchParameterValue>>;
   /** 该组合在源 Run 里是否已有成功结果（IS 侧的来源判据）。 */
   readonly hasSucceededResult: boolean;
 }

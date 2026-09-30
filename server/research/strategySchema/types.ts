@@ -74,6 +74,10 @@ export const STRATEGY_TYPES = [
   "MANUAL",
   /** 三因子 Top-N 策略族。 */
   "THREE_FACTOR_TOPN",
+  /** 首板股票池每日评分策略族。 */
+  "FIRST_LIMIT_POOL_DAILY_SCORE",
+  /** 首板股票池滚动 3F 策略族。 */
+  "FIRST_LIMIT_POOL_ROLLING_3F",
   /** 研究候选策略（cand-* 自动生成）。 */
   "RESEARCH_CANDIDATE",
   /** 测试 / 验证用策略。 */

@@ -22,6 +22,7 @@
 import { buildResearchDataset, type ResearchDataset } from "../researchDataset";
 import { baseSecurityIdOf } from "../eventIdentity";
 import {
+  buildPooledDatasetCursorFromRegistry,
   buildResearchDatasetFromRegistry,
   readDatasetUniverseConstraint,
   resolveObservationWindow,
@@ -30,6 +31,7 @@ import {
   type DatasetUniverseConstraint,
   type ObservationWindowSpec,
 } from "./datasetFromRegistry";
+import type { PooledDatasetCursor } from "./pooledDatasetCursor";
 import type { CostModel } from "../engine/domain";
 import type { ExecutionModelId } from "../backtest/types";
 import { deriveDatasetUniverseId } from "../research/datasetAccess/handle";
@@ -50,6 +52,7 @@ import {
   verifyStrategyConsumption,
 } from "../research/patternLibrary/strategyConsumption";
 import { getDefaultFeatureRegistry } from "../strategyCore/featureRegistry";
+import type { FirstLimitPoolPolicy } from "../strategyCore/types";
 // STRATEGY-ARCH-002 — Strategy Core 生产接线（决策引擎 + 运行留档）。
 import {
   createCoreDecisionSource,
@@ -70,6 +73,7 @@ import {
 } from "../backtest/context";
 import { normalizeStrategyExecutionModel } from "./executionModel";
 import type { StrategyDocument, StrategyDocumentInput } from "../research/strategySchema/types";
+import { deriveLegacyViewsWithParameters } from "../research/strategySchema/legacyViews";
 import type { ResearchParameterSet } from "../research/types";
 import type { StrategyVersionRecordInput } from "../research/strategySchema/map";
 import type { LifecycleConfigInput } from "./lifecycleConfig";
@@ -101,8 +105,8 @@ export function mapDeclaredPositionSizing(declared: unknown): {
   readonly sizingMethod: "EQUAL_WEIGHT" | "FIXED_FRACTION" | "EQUITY_FRACTION" | "RANK_WEIGHTED" | "FIXED_AMOUNT" | "FIXED_RATIO" | "RISK_BASED" | "SCORE_TIERED_EQUITY_FRACTION";
   readonly fraction: number | null;
   readonly fixedAmount: number | null;
-  readonly tiers: readonly { readonly minScore: number; readonly fraction: number }[] | null;
-  readonly rankTiers: readonly { readonly maxRank: number; readonly fraction: number }[] | null;
+  readonly tiers?: readonly { readonly minScore: number; readonly fraction: number }[] | null;
+  readonly rankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[] | null;
 } {
   const sizing = (declared ?? {}) as {
     readonly kind?: string;
@@ -113,25 +117,21 @@ export function mapDeclaredPositionSizing(declared: unknown): {
   };
   switch (sizing.kind) {
     case "equal-weight":
-      return { sizingMethod: "EQUAL_WEIGHT", fraction: null, fixedAmount: null, tiers: null, rankTiers: null };
+      return { sizingMethod: "EQUAL_WEIGHT", fraction: null, fixedAmount: null };
     case "fixed-fraction":
       return {
         sizingMethod: "FIXED_FRACTION",
         fraction: typeof sizing.fraction === "number" ? sizing.fraction : null,
         fixedAmount: null,
-        tiers: null,
-        rankTiers: null,
       };
     case "equity-fraction":
       return {
         sizingMethod: "EQUITY_FRACTION",
         fraction: typeof sizing.fraction === "number" ? sizing.fraction : null,
         fixedAmount: null,
-        tiers: null,
-        rankTiers: null,
       };
     case "rank-weighted":
-      return { sizingMethod: "RANK_WEIGHTED", fraction: null, fixedAmount: null, tiers: null, rankTiers: null };
+      return { sizingMethod: "RANK_WEIGHTED", fraction: null, fixedAmount: null };
     case "fixed-amount": {
       // 金额必须为正数（文档校验也会拒，这里再兜一层：避免绕过校验的文档把
       // 「无金额的固定金额」带进执行层 ⇒ 静默退化成等权预算）。
@@ -144,7 +144,7 @@ export function mapDeclaredPositionSizing(declared: unknown): {
             " —— 拒绝静默退化为等权预算。",
         );
       }
-      return { sizingMethod: "FIXED_AMOUNT", fraction: null, fixedAmount: amount, tiers: null, rankTiers: null };
+      return { sizingMethod: "FIXED_AMOUNT", fraction: null, fixedAmount: amount };
     }
     case "score-tiered-equity-fraction": {
       const tiers = sizing.tiers;
@@ -459,6 +459,12 @@ async function resolveDataset(
   source: DatasetSourceKind;
   sourceNote: string | null;
   registry: BuildDatasetFromRegistryResult | null;
+  /** 池化流式路径专用；事件窗/内存路径为 undefined。 */
+  datasetCursor?: PooledDatasetCursor;
+  /** 已按面板身份桥接的 code → securityId 列表；池化流式路径用它装配公司行为。 */
+  securityIdByCode?: ReadonlyMap<string, readonly string[]>;
+  datasetVersionId?: number;
+  datasetRowCount?: number;
 }> {
   // 🔴 注入路径优先：调用方已构建好数据集（参数搜索 / 走查等需要在同一份数据上跑 N 组参数）
   //    ⇒ 直接复用，并**如实**标记来源。放在最前面：注入时不重新解析，也不需要观察窗口。
@@ -474,6 +480,15 @@ async function resolveDataset(
 
   const policy: DatasetSourcePolicy = request.datasetSourcePolicy ?? "prefer-registry";
   const boundId = request.datasetVersionId;
+  /**
+   * 🔴 池化语义来自策略文档的显式声明（`definition.firstLimitPool`）。
+   *
+   * 旧事件窗策略不携带该字段，继续按 `observationWindow` 投影；池化策略必须把
+   * 该声明原样交给直读桥，并禁止在池预算/池龄失败时回落重建 —— 重建路径按事件日
+   * 组织数据，无法兑现「按日历日逐日存在」的池成员语义，会静默换成另一套数据面。
+   */
+  const firstLimitPool = request.strategyDocument.definition?.firstLimitPool ?? null;
+  const isPooled = firstLimitPool !== null;
 
   /**
    * 🔴 策略声明的观察窗口 ⇒ 直读桥投影多少 T+N 行情。
@@ -486,9 +501,62 @@ async function resolveDataset(
    * 桥会以 `REGISTRY_OBSERVATION_WINDOW_UNDECLARED` 拒绝直读 ⇒ 均回落重建并如实记录原因。
    * 本层**不给缺省窗口**（代猜窗口 = 让数据面与策略声明不一致）。
    */
-  const observationWindow: ObservationWindowSpec | null = resolveObservationWindow(
-    request.strategyDocument.definition?.entry?.observationWindow,
-  );
+  const observationWindow: ObservationWindowSpec | null = isPooled
+    ? null
+    : resolveObservationWindow(
+        request.strategyDocument.definition?.entry?.observationWindow,
+      );
+
+  if (isPooled) {
+    if (policy !== "prefer-registry" || boundId === undefined) {
+      throw new LoopRunAssemblyError(
+        "LOOP_RUN_ASSEMBLY_POOL_DATASET_REQUIRED",
+        `装配层：策略 ${request.strategyId}@${request.strategyVersion} 声明 FIRST_LIMIT_POOL，` +
+          `但当前${boundId === undefined ? "未绑定 datasetVersionId" : "强制 datasetSourcePolicy=rebuild"}` +
+          `⇒ 池化语义必须直读已落库数据集，禁止回落事件窗重建（否则会静默改变数据面）。`,
+      );
+    }
+    // 池化策略只构造 cursor，不物化整张逐日面板；真实 bars 在 research/backtest 阶段按需读取。
+    const cursorBuild = await buildPooledDatasetCursorFromRegistry({
+      datasetVersionId: boundId,
+      name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
+      dateRange: { startDate: request.startDate, endDate: request.endDate },
+      poolPolicy: {
+        poolPolicyId: firstLimitPool.poolPolicyId,
+        admissionEventType: firstLimitPool.admissionEventType,
+        admittedRelativeDay: firstLimitPool.admittedRelativeDay,
+        ...(firstLimitPool.boardScope !== undefined
+          ? { boardScope: firstLimitPool.boardScope }
+          : {}),
+        poolAgeCapTradingDays: firstLimitPool.poolAgeCapTradingDays,
+        scorePolicy: firstLimitPool.scorePolicy,
+        scoreStartRelativeDay: firstLimitPool.scoreStartRelativeDay,
+        scoreWindowDays: firstLimitPool.scoreWindowDays,
+        minimumScore: firstLimitPool.minimumScore,
+        maxObservationAmplitude: firstLimitPool.maxObservationAmplitude,
+        calibrationVersion: firstLimitPool.calibrationVersion,
+        removeBelowMinimumScore: firstLimitPool.removeBelowMinimumScore,
+        allowMultipleMembersPerSecurity: firstLimitPool.allowMultipleMembersPerSecurity,
+        exitTailTradingDays: firstLimitPool.exitTailTradingDays,
+        scoreInvalidationDays: firstLimitPool.scoreInvalidationDays,
+        scoreAffectsExit: firstLimitPool.scoreAffectsExit,
+        maxDailyCandidates: firstLimitPool.maxDailyCandidates,
+      },
+      ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
+    });
+    return {
+      dataset: cursorBuild.dataset,
+      datasetCursor: cursorBuild.cursor,
+      securityIdByCode: cursorBuild.securityIdByCode,
+      source: "registry",
+      sourceNote:
+        "池化流式路径：不物化完整逐日面板；datasetRowCount 显示的是窗口内事件数，"
+        + "真实 bars 读取量 / 活跃成员数 / 低分移池写入 researchSummary.notes。",
+      registry: null,
+      datasetVersionId: cursorBuild.version.id ?? boundId,
+      datasetRowCount: cursorBuild.stats.eventCount,
+    };
+  }
 
   if (policy === "prefer-registry" && boundId !== undefined) {
     try {
@@ -697,6 +765,15 @@ export interface StrategyRunContext {
   readonly eventTypes: readonly string[];
   readonly limitUpRatio: number | null;
   readonly universeId: string;
+  /**
+   * 本次数据集语义：旧事件窗投影 or 池化逐日面板。
+   * 由装配层按策略文档声明裁定，供运行留档与版本详情共用。
+   */
+  readonly datasetSemantics: "event-window" | "pooled";
+  /** 池化策略声明；旧事件窗策略为 null。 */
+  readonly firstLimitPool: FirstLimitPoolPolicy | null;
+  /** 池策略明确声明：评分只影响买入，不触发卖出。旧策略为 null。 */
+  readonly scoreAffectsExit: boolean | null;
 }
 
 /**
@@ -792,6 +869,17 @@ export function assembleStrategySide(
     ...(runtimeConfig.parameterOverrides ?? {}),
   } as ResearchParameterSet;
   const parameterSet = recipeRuntime.resolveParameters(document.parameters, parameterOverrides);
+  // 仓位分档参数（`json`）不是执行配方参数，但属于同一份“默认值 + 覆写”口径。
+  // 必须在这里按覆写后的参数集重派生旧视图，否则前端改了分档却仍按文档默认档位回测。
+  const runtimeLegacyViews = document.definition === undefined
+    ? {
+        entryRules: document.entryRules,
+        exitRules: document.exitRules,
+        riskRules: document.riskRules,
+        positionSizing: document.positionSizing,
+        parameters: document.parameters,
+      }
+    : deriveLegacyViewsWithParameters(document.definition, parameterSet);
 
   // -- 3. 装配四入参 --
   const strategyContract: StrategyContract = {
@@ -862,6 +950,9 @@ export function assembleStrategySide(
         point: recipeRuntime.point,
         ...(eventResolver !== undefined ? { eventResolver } : {}),
         ...(eventTypes.length > 0 ? { eventTypes } : {}),
+        ...(coreVersionResult.firstLimitPool !== null
+          ? { firstLimitPool: coreVersionResult.firstLimitPool }
+          : {}),
       });
       strategyDecisionEngine = "strategy-core";
     } catch (error) {
@@ -926,6 +1017,13 @@ export function assembleStrategySide(
       coreVersionResult.ok && coreVersionResult.eventType !== null ? [coreVersionResult.eventType] : [],
     limitUpRatio: coreVersionResult.ok ? coreVersionResult.limitUpRatio : null,
     universeId: document.universe.universeId,
+    datasetSemantics:
+      coreVersionResult.ok && coreVersionResult.firstLimitPool !== null ? "pooled" : "event-window",
+    firstLimitPool: coreVersionResult.ok ? coreVersionResult.firstLimitPool : null,
+    scoreAffectsExit:
+      coreVersionResult.ok && coreVersionResult.firstLimitPool !== null
+        ? coreVersionResult.firstLimitPool.scoreAffectsExit
+        : null,
   };
 
   const experimentConfig: ExperimentConfig = {
@@ -995,7 +1093,7 @@ export function assembleStrategySide(
     );
   }
   // BACKTEST-002（B-02/R-02）— 文档声明的仓位口径 → 执行层口径（**唯一实现**，见 `mapDeclaredPositionSizing`）。
-  const declaredPositionSizing = mapDeclaredPositionSizing(document.positionSizing);
+  const declaredPositionSizing = mapDeclaredPositionSizing(runtimeLegacyViews.positionSizing);
   const declaredExitPolicy = mapDeclaredExitPolicy(
     document.definition?.exit?.rules,
     parameterSet,
@@ -1102,9 +1200,11 @@ export function buildClosedLoopWiringInputs(
   dataset: ResearchDataset,
   side: AssembledStrategySide,
   corporateActionResolver?: CorporateActionResolverLike,
+  researchDatasetCursor?: PooledDatasetCursor,
 ): ClosedLoopWiringInputs {
   return {
     researchDataset: dataset,
+    ...(researchDatasetCursor !== undefined ? { researchDatasetCursor } : {}),
     experimentConfig: side.experimentConfig,
     strategyContract: side.strategyContract,
     strategy13: side.strategy13,
@@ -1141,11 +1241,17 @@ export async function assembleRunWorkbenchInputs(
   const side = perfRun("research.context_build", () => assembleStrategySide(request, dataset.datasetVersion));
 
   const securityIdByCode = new Map<string, string[]>();
-  for (const row of dataset.rows) {
-    if (row.code !== null && row.code !== undefined) {
-      const ids = securityIdByCode.get(row.code) ?? [];
-      if (!ids.includes(row.securityId)) ids.push(row.securityId);
-      securityIdByCode.set(row.code, ids);
+  if (datasetResolution.securityIdByCode !== undefined) {
+    for (const [code, ids] of datasetResolution.securityIdByCode) {
+      securityIdByCode.set(code, [...ids]);
+    }
+  } else {
+    for (const row of dataset.rows) {
+      if (row.code !== null && row.code !== undefined) {
+        const ids = securityIdByCode.get(row.code) ?? [];
+        if (!ids.includes(row.securityId)) ids.push(row.securityId);
+        securityIdByCode.set(row.code, ids);
+      }
     }
   }
   const corporateActionResolver =
@@ -1161,15 +1267,23 @@ export async function assembleRunWorkbenchInputs(
       return createCorporateActionResolver(corporateActions, securityIdByCode);
     }));
 
-  const inputs = buildClosedLoopWiringInputs(dataset, side, corporateActionResolver);
+  const inputs = buildClosedLoopWiringInputs(
+    dataset,
+    side,
+    corporateActionResolver,
+    datasetResolution.datasetCursor,
+  );
 
   // Registry runs use event-scoped ids so one security can contribute multiple independent
   // first-limit events. The summary still reports underlying securities, not event series.
-  const distinctSecurities = perfRun(
-    "research.candidate_preparation",
-    () => new Set(dataset.rows.map(row => baseSecurityIdOf(row.securityId))),
-  );
-  perfCount("research.dataset_rows", dataset.rows.length);
+  const distinctSecurities = datasetResolution.datasetCursor !== undefined
+    ? new Set([...securityIdByCode.values()].flat().map(baseSecurityIdOf))
+    : perfRun(
+        "research.candidate_preparation",
+        () => new Set(dataset.rows.map(row => baseSecurityIdOf(row.securityId))),
+      );
+  const effectiveDatasetRowCount = datasetResolution.datasetRowCount ?? dataset.rows.length;
+  perfCount("research.dataset_rows", effectiveDatasetRowCount);
 
   return {
     inputs,
@@ -1178,11 +1292,14 @@ export async function assembleRunWorkbenchInputs(
     assembly: {
       datasetVersion: dataset.datasetVersion,
       datasetGate: dataset.gate,
-      datasetRowCount: dataset.rows.length,
+      datasetRowCount: effectiveDatasetRowCount,
       datasetSecretCount: distinctSecurities.size,
       datasetSource: datasetResolution.source,
       datasetSourceNote: datasetResolution.sourceNote,
-      datasetVersionId: datasetResolution.registry?.version.id ?? null,
+      datasetVersionId:
+        datasetResolution.datasetVersionId
+        ?? datasetResolution.registry?.version.id
+        ?? null,
       dateRange: { startDate: request.startDate, endDate: request.endDate },
       strategyId: request.strategyDocument.strategyId,
       strategyVersion: request.strategyDocument.version,

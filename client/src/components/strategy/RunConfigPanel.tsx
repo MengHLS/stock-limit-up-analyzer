@@ -1,5 +1,6 @@
 
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { SectionCard, StatusBadge } from "@/components/common";
@@ -28,7 +29,10 @@ import type {
   ParameterViewModel,
   StrategyViewModel,
 } from "@/adapters/strategyAdapter";
-import { EXECUTION_MODEL_LABELS } from "@/adapters/strategyAdapter";
+import {
+  EXECUTION_MODEL_LABELS,
+  parseJsonScalarArray,
+} from "@/adapters/strategyAdapter";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../../server/routers";
 
@@ -505,6 +509,9 @@ function ParameterOverrideBlock({
   config: RunConfigViewModel;
   set: (patch: Partial<RunConfigViewModel>) => void;
 }) {
+  const [jsonDrafts, setJsonDrafts] = useState<Record<string, string>>({});
+  const [jsonErrors, setJsonErrors] = useState<Record<string, string>>({});
+
   if (vm.parameters.length === 0) return null;
 
   const effectiveValue = (param: ParameterViewModel): unknown =>
@@ -516,6 +523,29 @@ function ParameterOverrideBlock({
     Object.prototype.hasOwnProperty.call(config.parameterOverrides, param.name);
 
   const setOverride = (param: ParameterViewModel, raw: string) => {
+    if (param.type === "json") {
+      const next = { ...config.parameterOverrides };
+      if (raw.trim() === "") {
+        delete next[param.name];
+        set({ parameterOverrides: next });
+        return;
+      }
+      const parsed = parseJsonScalarArray(raw);
+      if (param.minItems !== null && parsed.length < param.minItems) {
+        throw new Error(
+          `${param.name} 至少需要 ${param.minItems} 项，当前 ${parsed.length} 项。`
+        );
+      }
+      if (param.maxItems !== null && parsed.length > param.maxItems) {
+        throw new Error(
+          `${param.name} 最多允许 ${param.maxItems} 项，当前 ${parsed.length} 项。`
+        );
+      }
+      next[param.name] = parsed;
+      set({ parameterOverrides: next });
+      return;
+    }
+
     const next = { ...config.parameterOverrides };
     const docDefault = param.defaultValue;
     const isDocDefault = (candidate: unknown): boolean => {
@@ -548,6 +578,40 @@ function ParameterOverrideBlock({
   const resetAll = () => set({ parameterOverrides: {} });
   const overriddenCount = Object.keys(config.parameterOverrides).length;
 
+  const jsonText = (param: ParameterViewModel, value: unknown): string => {
+    const draft = jsonDrafts[param.name];
+    if (draft !== undefined) return draft;
+    if (value === null || value === undefined) return "";
+    return JSON.stringify(value, null, 2);
+  };
+
+  const handleJsonChange = (param: ParameterViewModel, raw: string) => {
+    setJsonDrafts(current => ({ ...current, [param.name]: raw }));
+    if (raw.trim() === "") {
+      setJsonErrors(current => {
+        const next = { ...current };
+        delete next[param.name];
+        return next;
+      });
+      setOverride(param, "");
+      return;
+    }
+    try {
+      setOverride(param, raw);
+      setJsonErrors(current => {
+        const next = { ...current };
+        delete next[param.name];
+        return next;
+      });
+    } catch (error) {
+      setJsonErrors(current => ({
+        ...current,
+        [param.name]:
+          error instanceof Error ? error.message : "JSON 参数无效。",
+      }));
+    }
+  };
+
   return (
     <details className="rounded-md border bg-muted/20 px-3 py-3">
       <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-xs font-medium">
@@ -579,7 +643,11 @@ function ParameterOverrideBlock({
         {vm.parameters.map(param => {
           const value = effectiveValue(param);
           const shown =
-            value === null || value === undefined ? "" : String(value);
+            value === null || value === undefined
+              ? ""
+              : param.type === "json"
+                ? jsonText(param, value)
+                : String(value);
           const overridden = isOverridden(param);
           return (
             <div key={param.name} className="space-y-1.5">
@@ -614,13 +682,37 @@ function ParameterOverrideBlock({
                     <SelectItem value="__none__">
                       沿用文档默认
                       {param.hasDefaultValue
-                        ? `（${String(param.defaultValue ?? "null")}）`
+                        ? `（${
+                            param.defaultValue === null
+                              ? "null"
+                              : JSON.stringify(param.defaultValue)
+                          }）`
                         : ""}
                     </SelectItem>
                     <SelectItem value="true">true</SelectItem>
                     <SelectItem value="false">false</SelectItem>
                   </SelectContent>
                 </Select>
+              ) : param.type === "json" ? (
+                <>
+                  <Textarea
+                    id={`run-param-${param.name}`}
+                    rows={4}
+                    className="font-mono text-xs"
+                    placeholder={
+                      param.hasDefaultValue
+                        ? `文档默认：${JSON.stringify(param.defaultValue)}`
+                        : "留空 = 沿用文档默认"
+                    }
+                    value={shown}
+                    onChange={e => handleJsonChange(param, e.target.value)}
+                  />
+                  {jsonErrors[param.name] !== undefined && (
+                    <p className="text-[10px] text-red-600">
+                      {jsonErrors[param.name]}
+                    </p>
+                  )}
+                </>
               ) : (
                 <Input
                   id={`run-param-${param.name}`}
@@ -630,7 +722,11 @@ function ParameterOverrideBlock({
                   max={param.max ?? undefined}
                   placeholder={
                     param.hasDefaultValue
-                      ? `文档默认：${String(param.defaultValue ?? "null")}`
+                      ? `文档默认：${
+                          param.defaultValue === null
+                            ? "null"
+                            : JSON.stringify(param.defaultValue)
+                        }`
                       : "留空 = 沿用文档默认"
                   }
                   value={shown}

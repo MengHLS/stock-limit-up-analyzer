@@ -341,7 +341,7 @@ export function StrategyVersionPanel({
           <Link to={`/strategies/${encodeURIComponent(strategyId)}/compare`}>
             <Button size="sm" variant="outline">
               <GitCompareArrows className="mr-1.5 h-3.5 w-3.5" />
-              回测对比
+              版本演化
             </Button>
           </Link>
           <Button

@@ -74,6 +74,7 @@ import {
   DEFAULT_DRAWDOWN_WORSENING_THRESHOLD_PCT,
 } from "./research/robustness";
 import type { EquityPoint } from "./backtest/types";
+import { parameterSearchParameterSetSchema } from "../shared/parameterSearchContracts";
 
 // ---------------------------------------------------------------------------
 // 技术预览常量
@@ -297,7 +298,7 @@ const sweepParameterSchema = z.discriminatedUnion("type", [
 
 const parameterSpaceSchema = z.object({ parameters: z.array(sweepParameterSchema) });
 
-const parameterSetSchema = z.record(z.string(), z.union([z.number(), z.string(), z.boolean(), z.null()]));
+const parameterSetSchema = parameterSearchParameterSetSchema;
 
 const regionAnalysisSchema = z
   .object({

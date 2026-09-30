@@ -541,13 +541,15 @@ export class InMemoryDatasetDataReader implements DatasetDataReader {
 // 5. DbDatasetDataReader（真实 TiDB）
 // ===========================================================================
 
-function parseNumber(value: unknown): number | null {
+export function parseDatasetNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function eventRowToDomain(row: typeof firstLimitPullbackEvents.$inferSelect): FirstLimitPullbackEvent {
+const parseNumber = parseDatasetNumber;
+
+export function eventRowToDomain(row: typeof firstLimitPullbackEvents.$inferSelect): FirstLimitPullbackEvent {
   return {
     datasetVersionId: row.datasetVersionId,
     eventId: row.eventId,
@@ -577,7 +579,7 @@ function eventRowToDomain(row: typeof firstLimitPullbackEvents.$inferSelect): Fi
   };
 }
 
-function pathRowToDomain(row: typeof firstLimitPullbackPaths.$inferSelect): FirstLimitPullbackPath {
+export function pathRowToDomain(row: typeof firstLimitPullbackPaths.$inferSelect): FirstLimitPullbackPath {
   return {
     datasetVersionId: row.datasetVersionId,
     eventId: row.eventId,
@@ -595,7 +597,7 @@ function pathRowToDomain(row: typeof firstLimitPullbackPaths.$inferSelect): Firs
   };
 }
 
-function outcomeRowToDomain(row: typeof firstLimitPullbackOutcomes.$inferSelect): FirstLimitPullbackOutcome {
+export function outcomeRowToDomain(row: typeof firstLimitPullbackOutcomes.$inferSelect): FirstLimitPullbackOutcome {
   return {
     datasetVersionId: row.datasetVersionId,
     eventId: row.eventId,
@@ -608,7 +610,7 @@ function outcomeRowToDomain(row: typeof firstLimitPullbackOutcomes.$inferSelect)
   };
 }
 
-function rawBarRowToDomain(row: typeof firstLimitPullbackPrefixes.$inferSelect): FirstLimitPullbackRawBar {
+export function rawBarRowToDomain(row: typeof firstLimitPullbackPrefixes.$inferSelect): FirstLimitPullbackRawBar {
   const records = row as unknown as Record<string, unknown>;
   return {
     datasetVersionId: row.datasetVersionId,

@@ -41,7 +41,18 @@ export type StrategyCoreSchemaVersion = (typeof STRATEGY_CORE_SCHEMA_VERSIONS)[n
 // ---------------------------------------------------------------------------
 
 /** 参数 / 表达式可携带的标量值（可 JSON 序列化）。 */
-export type CoreValue = number | string | boolean | null;
+export type CoreScalar = number | string | boolean | null;
+/**
+ * 结构化参数值：只允许有限、可序列化的 JSON 数组。
+ *
+ * 当前用途是仓位分档（`{ minScore, fraction }[]` / `{ maxRank, fraction }[]`）
+ * 这类“声明面参数”。元素只能是标量或由标量构成的普通对象；数组不允许嵌套数组。
+ * RuleGraph 表达式仍只消费 `CoreScalar`，结构值不会被静默当成标量。
+ */
+export type CoreJsonScalarObject = { readonly [key: string]: CoreScalar };
+export type CoreJsonElement = CoreScalar | CoreJsonScalarObject;
+export type CoreJsonValue = readonly CoreJsonElement[];
+export type CoreValue = CoreScalar | CoreJsonValue;
 
 /** 决策时点（交易日 + 时点）。与 Backtest / Dataset 无关，只是「信息可见性」的坐标。 */
 export interface EvaluationTime {
@@ -107,8 +118,63 @@ export const CORE_TRIGGER_TYPES = [
   "LAST_VALID_DAY",
   "EVERY_VALID_DAY",
   "NEXT_TRADING_DAY",
+  "FIRST_LIMIT_POOL",
 ] as const;
 export type CoreTriggerType = (typeof CORE_TRIGGER_TYPES)[number];
+
+/** 首板股票池的评分阶段。 */
+export const FIRST_LIMIT_POOL_SCORE_STAGES = [
+  "EARLY_OHLC",
+  "FULL_3F",
+  "ROLLING_3F",
+] as const;
+export type FirstLimitPoolScoreStage = (typeof FIRST_LIMIT_POOL_SCORE_STAGES)[number];
+
+/**
+ * 首板股票池策略声明。
+ *
+ * 它只定义「何时入池 / 每日何时可决策 / 何时失效」；退出政策不在本对象里，
+ * 由既有 `exitPolicy` 独立承担，避免把评分与卖出耦合成第二套退出语义。
+ */
+export interface FirstLimitPoolPolicy {
+  readonly poolPolicyId: string;
+  readonly admissionEventType: "FIRST_LIMIT_UP";
+  /** 入池当天相对日（固定 0；保留字段便于审计）。 */
+  readonly admittedRelativeDay: 0;
+  readonly boardScope?: readonly ("main" | "chinext" | "star" | "bse")[];
+  /** 池龄上限（交易日）。 */
+  readonly poolAgeCapTradingDays: number;
+  /** 新滚动评分策略标识；旧两段策略缺省。 */
+  readonly scorePolicy?: "ROLLING_THREE_FACTOR";
+  readonly scoreStartRelativeDay?: number;
+  readonly scoreWindowDays?: number;
+  readonly minimumScore?: number;
+  readonly maxObservationAmplitude?: number;
+  readonly calibrationVersion?: string;
+  readonly removeBelowMinimumScore?: boolean;
+  readonly allowMultipleMembersPerSecurity?: boolean;
+  readonly exitTailTradingDays?: number;
+  /** 旧版早期 OHLC 评分最后一日（相对日；含）。 */
+  readonly earlyScoreStageEnd?: number;
+  /** 旧版完整 3F 评分起始日（相对日；含）。 */
+  readonly fullScoreStart?: number;
+  /** 连续不可评分达到该交易日数后移除。 */
+  readonly scoreInvalidationDays: number;
+  /** 恒为 false：评分只影响买入，不直接影响退出。 */
+  readonly scoreAffectsExit: false;
+  /** 每日候选上限（0 = 不额外限制，沿用执行层 topN/maxDailyBuys）。 */
+  readonly maxDailyCandidates: number;
+}
+
+/** 池成员身份（同一证券的多个首板事件必须显式隔离）。 */
+export interface FirstLimitPoolMemberIdentity {
+  readonly poolMemberId: string;
+  readonly eventId: string;
+  readonly securityId: string;
+  readonly admittedAt: string;
+  readonly expiresAt: string | null;
+  readonly stage: FirstLimitPoolScoreStage;
+}
 
 /** 时间单位（规格 §6）。 */
 export const TEMPORAL_UNITS = ["TRADING_DAY", "CALENDAR_DAY"] as const;
@@ -135,7 +201,7 @@ export const PARAMETER_ROLES = ["FIXED", "TUNABLE", "DERIVED"] as const;
 export type ParameterRole = (typeof PARAMETER_ROLES)[number];
 
 /** 参数数据类型（规格 §9「类型校验」）。 */
-export const PARAMETER_DATA_TYPES = ["number", "string", "boolean"] as const;
+export const PARAMETER_DATA_TYPES = ["number", "string", "boolean", "json"] as const;
 export type ParameterDataType = (typeof PARAMETER_DATA_TYPES)[number];
 
 /** 参数 code 形态（与既有策略域一致，保证可复用既有参数校验器口径）。 */
@@ -241,6 +307,11 @@ export const STRATEGY_CORE_ERROR_CODES = [
   "LEAKAGE_UNKNOWN_TIME_DOMAIN",
   "LEGACY_MAPPING_UNSUPPORTED",
   "LEGACY_DEFINITION_INVALID",
+  "POOL_AGE_CAP_EXCEEDED",
+  "POOL_MEMBER_BUDGET_EXCEEDED",
+  "POOL_PANEL_ROW_BUDGET_EXCEEDED",
+  "POOL_MEMBER_IDENTITY_NOT_UNIQUE",
+  "POOL_SCORE_STAGE_CONFIG_INVALID",
 ] as const;
 export type StrategyCoreErrorCode = (typeof STRATEGY_CORE_ERROR_CODES)[number];
 

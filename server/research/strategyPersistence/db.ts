@@ -6,7 +6,7 @@
  * 幂等 / 指纹冲突 / 不可变（§7/§18/§19）：
  *   - saveVersion 先查后插（幂等 + 冲突判定），并发由 DB 唯一约束 (strategyId, version) 兜底；
  *   - 版本内容一经写入，绝不提供「修改内容」的 UPDATE 入口（改内容必须新建版本）；
- *     唯一允许的 UPDATE 是 `status`（+ 自动刷新的 `updatedAt`）。
+ *     允许的 UPDATE 仅限于生命周期 `status`、星标元数据与谱系元数据 `parentVersionId`。
  *
  * 🔴 STRATEGY-003 事务纪律（SPEC §七）：
  *   canonical 本体 + §17 追溯记录 + **由 definition 单向派生的 5 类投影** 在同一事务内写入；
@@ -33,6 +33,7 @@ import {
   strategyExitRules,
   strategyParameters,
   strategyVersionDatasets,
+  strategyVersionStars,
   strategyVersions,
 } from "../../../drizzle/schema";
 import { buildStrategyProjections, type StrategyProjections } from "../strategySchema/projection";
@@ -94,10 +95,11 @@ function rowToSummary(row: StrategyRow): StrategySummary {
   };
 }
 
-function rowToVersionSummary(row: StrategyVersionRow): StrategyVersionSummary {
+function rowToVersionSummary(row: StrategyVersionRow, isStarred: boolean): StrategyVersionSummary {
   return {
     strategyId: row.strategyId,
     version: row.version,
+    versionRowId: row.id,
     fingerprint: row.fingerprint,
     datasetVersion: row.datasetVersion,
     datasetVersionId: row.datasetVersionId ?? null,
@@ -106,7 +108,8 @@ function rowToVersionSummary(row: StrategyVersionRow): StrategyVersionSummary {
     status: row.status,
     parentVersionId: row.parentVersionId ?? null,
     description: row.description ?? null,
-    isStarred: row.isStarred,
+    // 星标以 strategy_version_star 为准（0053 起），不再读 0052 的历史列。
+    isStarred,
     createdAt: toIso(row.createdAt),
   };
 }
@@ -215,6 +218,8 @@ export class DbStrategyRepository implements StrategyRepository {
         await tx.delete(strategyExecutionRules).where(inArray(strategyExecutionRules.strategyVersionId, versionIds));
         await tx.delete(strategyVersionDatasets).where(inArray(strategyVersionDatasets.strategyVersionId, versionIds));
       }
+      // 星标按 strategyId 独立存储，删除策略时必须显式清理。
+      await tx.delete(strategyVersionStars).where(eq(strategyVersionStars.strategyId, strategyId));
       await tx.delete(strategyVersions).where(eq(strategyVersions.strategyId, strategyId));
       const result = await tx.delete(strategies).where(eq(strategies.strategyId, strategyId));
       if (result[0].affectedRows === 0) {
@@ -469,9 +474,19 @@ export class DbStrategyRepository implements StrategyRepository {
     const rows = await db.select().from(strategyVersions)
       .where(eq(strategyVersions.strategyId, strategyId))
       .orderBy(desc(strategyVersions.createdAt));
+    const starred = new Set(await this.listVersionStars(strategyId));
     return rows
-      .map(rowToVersionSummary)
+      .map(row => rowToVersionSummary(row, starred.has(row.version)))
       .sort((a, b) => compareStrategyVersions(b.version, a.version));
+  }
+
+  async listVersionStars(strategyId: string): Promise<string[]> {
+    const db = await getDb();
+    if (!db) return [];
+    const rows = await db.select({ version: strategyVersionStars.version })
+      .from(strategyVersionStars)
+      .where(eq(strategyVersionStars.strategyId, strategyId));
+    return rows.map(row => row.version);
   }
 
   async getLatestVersion(strategyId: string): Promise<StrategyVersionRecord | undefined> {
@@ -514,15 +529,66 @@ export class DbStrategyRepository implements StrategyRepository {
     }
   }
 
+  async updateVersionParent(
+    strategyId: string,
+    version: string,
+    parentVersionId: number | null,
+  ): Promise<void> {
+    const db = await getDb();
+    if (!db) throw new Error("数据库不可用，无法更新版本父链");
+    const child = await this.selectVersionRow(strategyId, version);
+    if (child === undefined) {
+      throw new Error(`未找到策略版本，无法更新父链：${strategyId}@${version}`);
+    }
+    if (parentVersionId === child.id) {
+      throw new Error(`版本父链不能指向自身：${strategyId}@${version}`);
+    }
+    if (child.parentVersionId === parentVersionId) return;
+
+    if (parentVersionId !== null) {
+      const parentRows = await db.select({
+        id: strategyVersions.id,
+        strategyId: strategyVersions.strategyId,
+      }).from(strategyVersions)
+        .where(eq(strategyVersions.id, parentVersionId))
+        .limit(1);
+      const parent = parentRows[0];
+      if (parent === undefined) {
+        throw new Error(`父版本行不存在：${parentVersionId}`);
+      }
+      if (parent.strategyId !== strategyId) {
+        throw new Error(
+          `父版本必须属于同一策略：${strategyId}@${version} -> ${parent.strategyId}#${parentVersionId}`,
+        );
+      }
+    }
+
+    // 显式写回原 updatedAt，避免 onUpdateNow() 把谱系元数据修复误记为版本内容变更。
+    const result = await db.update(strategyVersions)
+      .set({ parentVersionId, updatedAt: child.updatedAt })
+      .where(and(eq(strategyVersions.strategyId, strategyId), eq(strategyVersions.version, version)));
+    if (result[0].affectedRows === 0) {
+      throw new Error(`未找到策略版本，无法更新父链：${strategyId}@${version}`);
+    }
+  }
+
   async updateVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void> {
     const db = await getDb();
     if (!db) throw new Error("数据库不可用，无法更新版本星标");
-    const result = await db.update(strategyVersions)
-      .set({ isStarred })
-      .where(and(eq(strategyVersions.strategyId, strategyId), eq(strategyVersions.version, version)));
-    if (result[0].affectedRows === 0) {
+    // 正式版本是版本存在的唯一来源：先确认 strategy_versions 行存在，避免留下
+    // 「正式目录查不到、星标却存在」的孤儿元数据。
+    const versionRow = await this.selectVersionRow(strategyId, version);
+    if (versionRow === undefined) {
       throw new Error(`未找到策略版本，无法更新星标：${strategyId}@${version}`);
     }
+    if (isStarred) {
+      await db.insert(strategyVersionStars)
+        .values({ strategyId, version })
+        .onDuplicateKeyUpdate({ set: { version } });
+      return;
+    }
+    await db.delete(strategyVersionStars)
+      .where(and(eq(strategyVersionStars.strategyId, strategyId), eq(strategyVersionStars.version, version)));
   }
 
   // ---- 内部：行读取与列裁剪 ----

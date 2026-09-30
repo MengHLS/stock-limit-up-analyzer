@@ -21,6 +21,7 @@
 
 import type { EquityPoint, Trade } from "../../backtest/types";
 import type { ResearchDataset } from "../../researchDataset/types";
+import type { ResearchDatasetCursor } from "../framework/datasetCursor";
 import type { ExperimentConfig, StrategyContract } from "../framework/contract";
 import type { CandidateEvaluationRun, Strategy13 } from "../signalEngine/types";
 import type { SimulationConfig, TradeSimulationRun } from "../simulator/types";
@@ -71,6 +72,8 @@ export interface ClosedLoopEvaluationWiringInput {
 export interface ClosedLoopWiringInputs {
   /** **data**：真实 ResearchDataset（调用方注入；本层不读 DB/不构建）。 */
   readonly researchDataset?: ResearchDataset;
+  /** **data**：池化流式数据集游标；提供时优先于 ResearchDataset，research/backtest 自动走流式执行器。 */
+  readonly researchDatasetCursor?: ResearchDatasetCursor;
 
   /** **research**：完整实验配置。 */
   readonly experimentConfig?: ExperimentConfig;
@@ -108,6 +111,7 @@ export interface ClosedLoopWiringInputs {
 /** 旁路中可存放的重对象（每项至多一个来源阶段）。 */
 export interface ClosedLoopWiringArtifactByKey {
   readonly dataset: ResearchDataset;
+  readonly datasetCursor: ResearchDatasetCursor;
   readonly candidateRun: CandidateEvaluationRun;
   readonly strategyDocument: StrategyDocument;
   readonly strategyVersionRecord: StrategyVersionRecord;
@@ -122,6 +126,7 @@ export const CLOSED_LOOP_ARTIFACT_PRODUCER: Readonly<
   Record<ClosedLoopWiringArtifactKey, ClosedLoopStageId>
 > = {
   dataset: "data",
+  datasetCursor: "data",
   candidateRun: "research",
   strategyDocument: "strategy",
   strategyVersionRecord: "strategy",
@@ -137,6 +142,7 @@ export const CLOSED_LOOP_ARTIFACT_PRODUCER: Readonly<
  */
 export interface ClosedLoopWiringArtifacts {
   dataset?: ResearchDataset;
+  datasetCursor?: ResearchDatasetCursor;
   candidateRun?: CandidateEvaluationRun;
   strategyDocument?: StrategyDocument;
   strategyVersionRecord?: StrategyVersionRecord;

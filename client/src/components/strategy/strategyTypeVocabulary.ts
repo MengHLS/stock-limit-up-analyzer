@@ -14,6 +14,8 @@ export const STRATEGY_TYPE_VALUES = [
   "BASELINE",
   "MANUAL",
   "THREE_FACTOR_TOPN",
+  "FIRST_LIMIT_POOL_DAILY_SCORE",
+  "FIRST_LIMIT_POOL_ROLLING_3F",
   "RESEARCH_CANDIDATE",
   "TEST",
   "OTHER",
@@ -26,6 +28,8 @@ const STRATEGY_TYPE_LABELS: Record<StrategyTypeValue, string> = {
   BASELINE: "基线策略",
   MANUAL: "人工策略",
   THREE_FACTOR_TOPN: "三因子 Top-N",
+  FIRST_LIMIT_POOL_DAILY_SCORE: "首板股票池每日评分",
+  FIRST_LIMIT_POOL_ROLLING_3F: "首板股票池滚动 3F",
   RESEARCH_CANDIDATE: "研究候选",
   TEST: "测试",
   OTHER: "其他",
@@ -36,6 +40,10 @@ const STRATEGY_TYPE_DESCRIPTIONS: Record<StrategyTypeValue, string> = {
   BASELINE: "系统基线参考策略，用作其它版本的对照。",
   MANUAL: "人工设计与维护的主力策略。",
   THREE_FACTOR_TOPN: "基于三因子评分排序取 Top-N 的策略族。",
+  FIRST_LIMIT_POOL_DAILY_SCORE:
+    "首板事件入池后逐日评分、动态买入；评分只影响买入，不触发卖出。",
+  FIRST_LIMIT_POOL_ROLLING_3F:
+    "首板事件入池后按逐 N 校准的滚动 3F 分每日排序，低分移池。",
   RESEARCH_CANDIDATE: "研究流程自动生成的候选策略。",
   TEST: "测试 / 验证用途，不代表生产口径。",
   OTHER: "尚未归入既定类别的策略。",
@@ -69,6 +77,9 @@ export function strategyTypeBadgeClass(value: string | null | undefined): string
       return "border-sky-300 bg-sky-50 text-sky-700";
     case "THREE_FACTOR_TOPN":
       return "border-teal-300 bg-teal-50 text-teal-700";
+    case "FIRST_LIMIT_POOL_DAILY_SCORE":
+    case "FIRST_LIMIT_POOL_ROLLING_3F":
+      return "border-cyan-300 bg-cyan-50 text-cyan-700";
     case "RESEARCH_CANDIDATE":
       return "border-amber-300 bg-amber-50 text-amber-700";
     case "TEST":

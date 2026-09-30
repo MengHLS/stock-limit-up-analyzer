@@ -4,6 +4,11 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/common";
 import { ArrowLeft, Loader2, Save, Tag } from "lucide-react";
 import {
+  strategyTypeBadgeClass,
+  strategyTypeDescription,
+  strategyTypeLabel,
+} from "@/components/strategy/strategyTypeVocabulary";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -64,6 +69,14 @@ export function StrategyHeader({
   dirty: boolean;
 }) {
   const busy = validating || saving || creatingVersion;
+  /**
+   * 策略族类型标签：`strategyType` 是实体级展示元数据，不在 `StrategyViewModel` 的
+   * 结构化字段里，落在 `extra` 透传。拿不到就不显示，绝不猜测归类。
+   */
+  const strategyType =
+    typeof vm.extra.strategyType === "string" && vm.extra.strategyType !== ""
+      ? vm.extra.strategyType
+      : null;
 
   return (
     <div className="space-y-2.5 rounded-lg border bg-card px-4 py-3">
@@ -115,6 +128,15 @@ export function StrategyHeader({
             <h1 className="truncate text-xl font-semibold">
               {vm.name || "未命名策略"}
             </h1>
+            {strategyType !== null && (
+              <Badge
+                variant="outline"
+                className={`font-medium ${strategyTypeBadgeClass(strategyType)}`}
+                title={strategyTypeDescription(strategyType) || undefined}
+              >
+                {strategyTypeLabel(strategyType)}
+              </Badge>
+            )}
             {versionStatus !== null && <StatusBadge status={versionStatus} />}
             {loadedTarget === null && (
               <Badge

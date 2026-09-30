@@ -38,7 +38,6 @@ interface StoredVersion {
   readonly input: StrategyVersionInput;
   readonly rowId: number;
   readonly status: string;
-  readonly isStarred: boolean;
   readonly parentVersionId: number | null;
   readonly description: string | null;
   readonly projections: StrategyProjections;
@@ -79,6 +78,8 @@ export const EMPTY_DATASET_VERSION_REFERENCE_PORT: DatasetVersionReferencePort =
 export class InMemoryStrategyRepository implements StrategyRepository {
   private readonly entities = new Map<string, StoredEntity>();
   private readonly versions = new Map<string, Map<string, StoredVersion>>();
+  /** 星标元数据（`(strategyId, version)` 维度）；仅正式版本可加星。 */
+  private readonly versionStars = new Map<string, Set<string>>();
   private readonly now: () => string;
   private readonly datasetRegistry: DatasetVersionReferencePort;
   private nextRowId = 1;
@@ -152,6 +153,7 @@ export class InMemoryStrategyRepository implements StrategyRepository {
     }
     this.entities.delete(strategyId);
     this.versions.delete(strategyId);
+    this.versionStars.delete(strategyId);
   }
 
   async saveVersion(input: StrategyVersionInput): Promise<SaveVersionResult> {
@@ -184,7 +186,6 @@ export class InMemoryStrategyRepository implements StrategyRepository {
       input: structuredClone(input),
       rowId,
       status: input.status ?? "Draft",
-      isStarred: false,
       parentVersionId: input.parentVersionId ?? null,
       description: input.description ?? null,
       projections: structuredClone(projections),
@@ -213,6 +214,7 @@ export class InMemoryStrategyRepository implements StrategyRepository {
       .map(([version, stored]) => ({
         strategyId,
         version,
+        versionRowId: stored.rowId,
         fingerprint: stored.input.document.fingerprint,
         datasetVersion: stored.input.document.datasetVersion,
         datasetVersionId: stored.input.document.datasetVersionId ?? null,
@@ -221,10 +223,14 @@ export class InMemoryStrategyRepository implements StrategyRepository {
         status: stored.status,
         parentVersionId: stored.parentVersionId,
         description: stored.description,
-        isStarred: stored.isStarred,
+        isStarred: this.versionStars.get(strategyId)?.has(version) ?? false,
         createdAt: stored.input.versionRecord.createdAt,
       }))
       .sort((a, b) => compareStrategyVersions(b.version, a.version));
+  }
+
+  async listVersionStars(strategyId: string): Promise<string[]> {
+    return Array.from(this.versionStars.get(strategyId) ?? []);
   }
 
   async getLatestVersion(strategyId: string): Promise<StrategyVersionRecord | undefined> {
@@ -284,12 +290,53 @@ export class InMemoryStrategyRepository implements StrategyRepository {
     bucket.set(version, { ...stored, status, updatedAt: this.now() });
   }
 
-  async updateVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void> {
+  async updateVersionParent(
+    strategyId: string,
+    version: string,
+    parentVersionId: number | null,
+  ): Promise<void> {
     const bucket = this.versions.get(strategyId);
     const stored = bucket?.get(version);
     if (bucket === undefined || stored === undefined) {
+      throw new Error(`未找到策略版本，无法更新父链：${strategyId}@${version}`);
+    }
+    if (parentVersionId === stored.rowId) {
+      throw new Error(`版本父链不能指向自身：${strategyId}@${version}`);
+    }
+    if (stored.parentVersionId === parentVersionId) return;
+
+    if (parentVersionId !== null) {
+      const parentExists = Array.from(bucket.values()).some(
+        candidate => candidate.rowId === parentVersionId,
+      );
+      if (!parentExists) {
+        throw new Error(`父版本不存在或不属于同一策略：${strategyId}@${version} -> ${parentVersionId}`);
+      }
+    }
+
+    bucket.set(version, {
+      ...stored,
+      parentVersionId,
+      // 谱系修复只改元数据，不刷新版本的时间戳。
+      updatedAt: stored.updatedAt,
+    });
+  }
+
+  async updateVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void> {
+    // 与 DB 实现同语义：正式版本是版本存在的唯一来源，不存在版本行时不得产生孤儿星标。
+    if (this.versions.get(strategyId)?.has(version) !== true) {
       throw new Error(`未找到策略版本，无法更新星标：${strategyId}@${version}`);
     }
-    bucket.set(version, { ...stored, isStarred, updatedAt: this.now() });
+    const starred = this.versionStars.get(strategyId) ?? new Set<string>();
+    if (isStarred) {
+      starred.add(version);
+    } else {
+      starred.delete(version);
+    }
+    if (starred.size === 0) {
+      this.versionStars.delete(strategyId);
+      return;
+    }
+    this.versionStars.set(strategyId, starred);
   }
 }

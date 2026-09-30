@@ -105,27 +105,48 @@ function makeSource(input: {
 }
 
 /** 跑一遍全部决策日，返回「出信号的日子」与信号值。 */
-function runAllDays(source: ReturnType<typeof makeSource>["source"]): {
+function runAllDays(
+  source: ReturnType<typeof makeSource>["source"],
+  options: { readonly breakRd2?: boolean; readonly breakRd3?: boolean } = {},
+): {
   readonly emittedDays: number[];
   readonly values: (number | null)[];
 } {
   const emittedDays: number[] = [];
   const values: (number | null)[] = [];
   for (const { k, bars } of rollingBars()) {
+    // 可选：把某一个决策日的 low 压到首板日开盘价之下，破坏「守线」条件。
+    const brokenDay =
+      options.breakRd2 === true ? 2 : options.breakRd3 === true ? 3 : null;
+    const effectiveBars =
+      brokenDay !== null && k === brokenDay
+        ? bars.map((bar, index) =>
+            index === bars.length - 1
+              ? marketBar(bar.timestamp, {
+                  open: bar.open,
+                  high: bar.high,
+                  low: 9.5,
+                  close: bar.close,
+                  preClose: bar.preClose,
+                  volume: bar.volume,
+                })
+              : bar,
+          )
+        : bars;
     // 逐日可见窗口：pipeline 的语义就是「决策日当天 as-of 过滤后的 bars」
     const features: Record<string, number | null> = {};
     for (const provider of buildPullbackFeatureProviders("close")) {
       features[provider.featureId] = provider.compute({
         securityId: "600001.SH",
-        decisionTime: { date: bars[bars.length - 1]!.timestamp, point: "close" },
-        data: { symbol: "600001.SH", bars },
+        decisionTime: { date: effectiveBars[effectiveBars.length - 1]!.timestamp, point: "close" },
+        data: { symbol: "600001.SH", bars: effectiveBars },
       });
     }
     const signal = source.signalBuilder({
       securityId: "600001.SH",
-      date: bars[bars.length - 1]!.timestamp,
+      date: effectiveBars[effectiveBars.length - 1]!.timestamp,
       features,
-      bars,
+      bars: effectiveBars,
       point: "close",
     });
     if (signal !== null) {
@@ -360,6 +381,88 @@ describe("§15 — Legacy vs Core 同日对比（**差异必须被定位**，不
     expect(legacyDays.length).toBeGreaterThan(coreDays.length);
   });
 });
+
+describe("StrategyRuntime 仍为唯一执行入口（接线不改 Core 契约）", () => {
+  it("池化触发：FIRST_LIMIT_POOL 在有效期内逐日出信号；旧事件窗仍只在首个成立日出 [2]", () => {
+    const poolSource = makePoolSource();
+    const poolDays = runAllDays(poolSource.source).emittedDays;
+    // 池成员在 rd=2,3 均满足门槛 ⇒ 两日都出（区别于 FIRST_VALID_DAY 的 [2]）。
+    expect(poolDays).toEqual([2, 3]);
+
+    const eventWindowDays = runAllDays(makeSource({}).source).emittedDays;
+    expect(eventWindowDays).toEqual([2]);
+  });
+
+  it("池化触发只在「当天成立」时出信号，不把历史成立重复消费", () => {
+    // 让 rd=2 不成立、rd=3 成立：事件窗在首个成立日 [3] 出一次；
+    // 池语义同样只在「窗口已成立」的当天起逐日出 ⇒ [3]（不会把历史成立提前消费到 rd=2）。
+    const poolSource = makePoolSource({ breakRd2: true });
+    const days = runAllDays(poolSource.source, { breakRd2: poolSource.breakRd2 }).emittedDays;
+    expect(days).toEqual([3]);
+  });
+
+  it("滚动池低于最低分后立即移池，后续高分也不再出信号", () => {
+    const scores = [0.4, 0.4, 0.4, 0.9];
+    let index = 0;
+    const poolSource = makePoolSource({
+      rolling: true,
+      rankValueOf: () => scores[index++] ?? 0.9,
+    });
+    const days = runAllDays(poolSource.source).emittedDays;
+    expect(days).toEqual([]);
+    expect(poolSource.source.digest().poolScoreRemovalCount).toBeGreaterThan(0);
+  });
+});
+
+/** 池化决策源：与事件窗同定义，但注入 firstLimitPool ⇒ 逐日触发。 */
+function makePoolSource(options: {
+  readonly breakRd2?: boolean;
+  readonly rolling?: boolean;
+  readonly rankValueOf?: () => number | null;
+} = {}) {
+  const definition = makePullbackDefinition();
+  const version = makeVersion(definition, { name: "首板股票池（测试）" });
+  const parameterSet = { max_volume_ratio: 0.5 };
+  const eventResolver = createDatasetEventResolver({
+    eventAnchored: true,
+    eventTypes: ["FIRST_LIMIT_UP"],
+    limitUpRatio: 0.1,
+    declaredBy: "test",
+  });
+  const source = createCoreDecisionSource({
+    version,
+    parameterSet,
+    rankFeatureId: "isBullish",
+    ...(options.rankValueOf !== undefined ? { rankValueOf: options.rankValueOf } : {}),
+    point: "close",
+    eventResolver,
+    eventTypes: ["FIRST_LIMIT_UP"],
+    firstLimitPool: {
+      poolPolicyId: "first-limit-pool-daily-score",
+      admissionEventType: "FIRST_LIMIT_UP",
+      admittedRelativeDay: 0,
+      poolAgeCapTradingDays: 60,
+      ...(options.rolling === true
+        ? {
+            scorePolicy: "ROLLING_THREE_FACTOR" as const,
+            scoreStartRelativeDay: 1,
+            scoreWindowDays: 5,
+            minimumScore: 0.55,
+            maxObservationAmplitude: 0.14,
+            calibrationVersion: "test",
+            removeBelowMinimumScore: true,
+          }
+        : {
+            earlyScoreStageEnd: 4,
+            fullScoreStart: 5,
+          }),
+      scoreInvalidationDays: 3,
+      scoreAffectsExit: false,
+      maxDailyCandidates: 3,
+    },
+  });
+  return { version, parameterSet, eventResolver, source, breakRd2: options.breakRd2 === true };
+}
 
 describe("StrategyRuntime 仍为唯一执行入口（接线不改 Core 契约）", () => {
   it("决策源内部走 StrategyRuntime.evaluate（用 evaluateWithDetail 的产物字段佐证）", () => {

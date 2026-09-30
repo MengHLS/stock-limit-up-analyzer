@@ -55,6 +55,7 @@ import SearchRobustnessPanel from "@/components/robustness/SearchRobustnessPanel
 import OosValidationPanel from "@/components/oos/OosValidationPanel";
 import WalkForwardPanel from "@/components/walkForward/WalkForwardPanel";
 import { trpc } from "@/lib/trpc";
+import type { ParameterSearchParameterValue } from "@shared/parameterSearchContracts";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { ParamSearchRouter } from "../../../server/paramSearchRouter";
 
@@ -105,11 +106,11 @@ const pnlTone = (v: number | null | undefined) =>
   v === null || v === undefined ? "" : v >= 0 ? "text-rose-600" : "text-emerald-700";
 
 /** 参数集 → 人类可读（键排序 + `k=v`）。 */
-function formatParamSet(set: Record<string, number | string | boolean | null> | undefined): string {
+function formatParamSet(set: Record<string, ParameterSearchParameterValue> | undefined): string {
   if (!set) return "—";
   const parts = Object.keys(set)
     .sort()
-    .map((k) => `${k}=${String(set[k])}`);
+    .map((k) => `${k}=${JSON.stringify(set[k])}`);
   return parts.length === 0 ? "∅" : parts.join("，");
 }
 

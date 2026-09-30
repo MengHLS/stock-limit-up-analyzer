@@ -33,9 +33,9 @@ import {
   WINDOW_QUANTIFIERS,
   validationIssue,
   type ComparisonOperator,
+  type CoreScalar,
   type CoreTriggerType,
   type CoreValidationIssue,
-  type CoreValue,
   type RelativeDay,
   type RuleNodeKind,
   type WindowQuantifier,
@@ -97,7 +97,7 @@ export interface EventNode {
   readonly kind: "EVENT";
   readonly id?: string;
   readonly eventType: string;
-  readonly params?: Readonly<Record<string, CoreValue>>;
+  readonly params?: Readonly<Record<string, CoreScalar>>;
   readonly description?: string;
 }
 
@@ -149,7 +149,7 @@ export const Rule = {
     id?: string,
     description?: string,
   ): ConditionNode => ({ kind: "CONDITION", left, operator, right, ...(id === undefined ? {} : { id }), ...(description === undefined ? {} : { description }) }),
-  event: (eventType: string, id?: string, params?: Readonly<Record<string, CoreValue>>): EventNode => ({
+  event: (eventType: string, id?: string, params?: Readonly<Record<string, CoreScalar>>): EventNode => ({
     kind: "EVENT",
     eventType,
     ...(id === undefined ? {} : { id }),
@@ -184,7 +184,7 @@ export interface RuleNodeTrace {
   /** EVENT 节点：事件类型（供 StrategyDecision.events 直接取用，**不再二次求值**）。 */
   readonly eventType?: string;
   /** EVENT 节点：事件参数。 */
-  readonly eventParams?: Readonly<Record<string, CoreValue>>;
+  readonly eventParams?: Readonly<Record<string, CoreScalar>>;
   /** TRIGGER 节点：触发类型（供 StrategyDecision.signals 直接取用）。 */
   readonly triggerType?: string;
 }
@@ -198,13 +198,13 @@ export interface RuleEvaluationEnv {
   /** 本次评估允许的最远相对日。 */
   readonly maxRelativeDay: RelativeDay;
   /** 事件是否发生（事件类型 + 参数）。 */
-  readonly eventOccurred: (eventType: string, params: Readonly<Record<string, CoreValue>>) => boolean;
+  readonly eventOccurred: (eventType: string, params: Readonly<Record<string, CoreScalar>>) => boolean;
   /** 字段引用求值（`bar.low` / `prefix.rd0.open` / `post.rd1.close` / `event.limitUpPrice`）。 */
-  readonly fieldValue: (field: string) => CoreValue;
+  readonly fieldValue: (field: string) => CoreScalar;
   /** 特征求值（注册表 id）。 */
-  readonly featureValue: (featureId: string) => CoreValue;
+  readonly featureValue: (featureId: string) => CoreScalar;
   /** 已解析参数求值。 */
-  readonly parameterValue: (code: string) => CoreValue;
+  readonly parameterValue: (code: string) => CoreScalar;
   /** 共享的 PIT 违规收集器（越界读取追加到这里，Runtime 在产出决策前检查）。 */
   readonly violations: VisibilityViolation[];
   /**
@@ -226,7 +226,7 @@ export function resolveNodeId(node: RuleNode, path: string): string {
   return typeof explicit === "string" && explicit.trim() !== "" ? explicit.trim() : path;
 }
 
-function requireNumber(value: CoreValue, operator: ComparisonOperator, side: "left" | "right", nodeId: string): number {
+function requireNumber(value: CoreScalar, operator: ComparisonOperator, side: "left" | "right", nodeId: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new StrategyCoreError(
       "EXPRESSION_INVALID",
@@ -237,9 +237,9 @@ function requireNumber(value: CoreValue, operator: ComparisonOperator, side: "le
 }
 
 function compareValues(
-  left: CoreValue,
+  left: CoreScalar,
   operator: ComparisonOperator,
-  right: CoreValue,
+  right: CoreScalar,
   nodeId: string,
 ): boolean {
   switch (operator) {
@@ -480,6 +480,10 @@ export function resolveTriggerSatisfaction(
       return validDays.includes(currentDay);
     case "NEXT_TRADING_DAY":
       return currentDay === last + 1;
+    // 首板池：有效期内每个交易日都成立；「每事件只出一次」的抑制只在
+    // 池化决策路径（coreDecision）处理，不能在规则图层伪装成 FIRST_VALID_DAY。
+    case "FIRST_LIMIT_POOL":
+      return validDays.includes(currentDay);
   }
 }
 
@@ -582,6 +586,8 @@ export function triggerCandidateDays(
       return validDays;
     case "NEXT_TRADING_DAY":
       return [last + 1];
+    case "FIRST_LIMIT_POOL":
+      return validDays;
   }
 }
 

@@ -4,7 +4,8 @@
  * 职责边界：
  *   - StrategyRepository 只负责策略实体（strategies）与不可变版本（strategy_versions）
  *     及其**查询投影**（5 张表）的存取，绝不提供「修改已存在版本内容」的入口 ——
- *     版本一旦落库即 immutable（§18）；唯一允许的 UPDATE 是 `status`（+ `updatedAt`）；
+ *     版本一旦落库即 immutable（§18）；允许的 UPDATE 仅限于生命周期 `status`、星标元数据
+ *     与谱系元数据 `parentVersionId`，版本内容 / 指纹 / 追溯记录始终不可变；
  *   - 幂等 / 指纹冲突判定在 Repository 层实现（依赖 DB 唯一约束兜底，§19）；
  *   - Service 通过接口依赖，与具体存储（内存 / DB）解耦，本契约不含任何 ViewModel 概念（§8）。
  *
@@ -48,6 +49,11 @@ export interface StrategySummary {
 export interface StrategyVersionSummary {
   readonly strategyId: string;
   readonly version: string;
+  /**
+   * 版本行主键（`strategy_versions.id`）；与 `parentVersionId` 同一坐标空间，
+   * 供目录投影把父版本 id 解析成可读版本号，不参与内容指纹。
+   */
+  readonly versionRowId: number;
   readonly fingerprint: string;
   /**
    * Dataset Version 的 label / 快照（`v2`；legacy 绑定为 `rd-…`）。
@@ -63,7 +69,12 @@ export interface StrategyVersionSummary {
   /** STEP STRATEGY-003：父版本（版本演进链；null = 无父）。 */
   readonly parentVersionId: number | null;
   readonly description: string | null;
-  /** 用户标记的有价值版本（展示元数据，不参与内容指纹）。 */
+  /**
+   * 用户标记的有价值版本（展示元数据，不参与内容指纹）。
+   *
+   * 权威存储是 `strategy_version_star`（`(strategyId, version)` 唯一键）；版本行是版本
+   * 存在的唯一来源，星标只允许绑定正式 `strategy_versions` 坐标。
+   */
   readonly isStarred: boolean;
   readonly createdAt: string;
 }
@@ -226,6 +237,29 @@ export interface StrategyRepository {
   getVersionBundle(strategyId: string, version: string): Promise<StrategyVersionBundle | undefined>;
   /** 迁移版本生命周期状态（唯一允许的 UPDATE；内容仍不可变）。 */
   updateVersionStatus(strategyId: string, version: string, status: string): Promise<void>;
-  /** 用户星标（展示元数据的 UPDATE；内容仍不可变）。 */
+  /**
+   * 写入版本演进父链（仅更新谱系元数据 `parentVersionId`，不改版本内容与 `updatedAt`）。
+   *
+   * 父版本必须已存在、属于同一策略且不能是子版本自身；`null` 表示显式清空父链。
+   */
+  updateVersionParent(
+    strategyId: string,
+    version: string,
+    parentVersionId: number | null,
+  ): Promise<void>;
+  /**
+   * 读取某策略的全部已加星版本号（顺序无契约，调用方自行排序）。
+   *
+   * 🔴 星标是 `(strategyId, version)` 维度的**独立元数据**（`strategy_version_star`），
+   * 不从 `strategy_versions.isStarred` 读取 —— 后者是 0052 的历史口径，0053 起以本方法为准。
+   */
+  listVersionStars(strategyId: string): Promise<string[]>;
+  /**
+   * 用户星标（展示元数据；内容仍不可变）。
+   *
+   * 🔴 只允许正式 `strategy_versions` 已存在的 `(strategyId, version)`：
+   * 回测留档不是版本来源，保存留档时必须先物化正式版本。实现层在版本不存在时
+   * 抛错，避免产生「正式版本目录查不到、星标却存在」的孤儿元数据。
+   */
   updateVersionStarred(strategyId: string, version: string, isStarred: boolean): Promise<void>;
 }

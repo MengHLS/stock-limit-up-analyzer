@@ -66,7 +66,7 @@ export const CLOSED_LOOP_STAGE_WIRING_REQUIREMENTS: readonly ClosedLoopStageWiri
   wired(
     "data",
     "researchDataset",
-    [via(["researchDataset"])],
+    [via(["researchDataset"]), via(["researchDatasetCursor"])],
     [
       "本层不调用任何构建器：直接采用调用方注入的真实 ResearchDataset（避免与 Dataset 侧隐式耦合）。",
       "投影字段：datasetVersion / gate / dataSnapshot.request.{startDate,endDate} / rows.length / universeDefinition.members.length / gateNotes。",
@@ -76,7 +76,10 @@ export const CLOSED_LOOP_STAGE_WIRING_REQUIREMENTS: readonly ClosedLoopStageWiri
   wired(
     "research",
     "signalEngine",
-    [via(["experimentConfig", "strategyContract", "strategy13"], ["dataset"])],
+    [
+      via(["experimentConfig", "strategyContract", "strategy13"], ["datasetCursor"]),
+      via(["experimentConfig", "strategyContract", "strategy13"], ["dataset"]),
+    ],
     [
       "server/research/signalEngine/engine.ts:124  runCandidateEngine(input: CandidateEngineInput): CandidateEvaluationRun",
       "server/research/signalEngine/serialize.ts:41  computeCandidateEvaluationRunFingerprint(record)",
@@ -94,7 +97,10 @@ export const CLOSED_LOOP_STAGE_WIRING_REQUIREMENTS: readonly ClosedLoopStageWiri
   wired(
     "backtest",
     "simulator",
-    [via(["simulationConfig"], ["dataset", "candidateRun"])],
+    [
+      via(["simulationConfig"], ["datasetCursor", "candidateRun"]),
+      via(["simulationConfig"], ["dataset", "candidateRun"]),
+    ],
     [
       "server/research/simulator/engine.ts:248     runTradeSimulation(input: TradeSimulationInput): TradeSimulationRun",
       "server/research/closedLoop/adapters.ts:45   summarizeTradeSimulationRun(run) → ClosedLoopBacktestSummary（复用既有适配器，不另写投影）",

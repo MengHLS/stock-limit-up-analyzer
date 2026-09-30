@@ -41,7 +41,11 @@ import { isValidDatasetVersionFormat } from "../experimentLineage/validate";
 import { validateParameterSchema } from "../experimentValidation";
 import { trailingPolicyDefinitionErrors } from "../trailingPolicy";
 import { exitPolicyDefinitionErrors } from "../exitPolicyCommon";
-import type { ResearchParameterSchema, ResearchParameterValue } from "../types";
+import type {
+  ResearchParameterScalar,
+  ResearchParameterSchema,
+  ResearchParameterValue,
+} from "../types";
 import {
   ResearchValidationError,
   type ResearchValidationIssue,
@@ -78,6 +82,7 @@ import {
   parseStrategyFieldReference,
   resolveSignalTimeline,
   type ConditionDefinition,
+  type FirstLimitPoolDefinition,
   type StrategyDefinition,
 } from "./definition";
 
@@ -95,7 +100,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isScalar(value: unknown): value is ResearchParameterValue {
+function isScalar(value: unknown): value is ResearchParameterScalar {
   return value === null
     || typeof value === "string"
     || typeof value === "boolean"
@@ -110,6 +115,209 @@ function checkOptionalRatio(value: unknown, path: string, label: string, issues:
   if (value === undefined || value === null) return;
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 1) {
     issues.push(issue("SCHEMA_DEFINITION_RATIO_INVALID", path, `${label} 必须是 (0, 1] 的有限数字，实际：${String(value)}`));
+  }
+}
+
+function checkFirstLimitPool(
+  raw: unknown,
+  entryTriggerType: unknown,
+  issues: ResearchValidationIssue[],
+): void {
+  if (raw === undefined || raw === null) {
+    if (entryTriggerType === "FIRST_LIMIT_POOL") {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_REQUIRED",
+        "firstLimitPool",
+        "entry.trigger.type = FIRST_LIMIT_POOL 时必须声明 firstLimitPool（拒绝执行侧猜测池化语义）",
+      ));
+    }
+    return;
+  }
+  if (!isPlainObject(raw)) {
+    issues.push(issue("SCHEMA_DEFINITION_FIRST_LIMIT_POOL_INVALID", "firstLimitPool", "firstLimitPool 必须是对象"));
+    return;
+  }
+  if (entryTriggerType !== "FIRST_LIMIT_POOL") {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_TRIGGER_MISMATCH",
+      "firstLimitPool",
+      "firstLimitPool 仅在 entry.trigger.type = FIRST_LIMIT_POOL 时允许声明",
+    ));
+  }
+  const spec = raw as unknown as FirstLimitPoolDefinition;
+  if (typeof spec.poolPolicyId !== "string" || spec.poolPolicyId.trim() === "") {
+    issues.push(issue("SCHEMA_DEFINITION_FIRST_LIMIT_POOL_ID_INVALID", "firstLimitPool.poolPolicyId", "poolPolicyId 必须是非空字符串"));
+  }
+  if (spec.admissionEventType !== "FIRST_LIMIT_UP") {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_ADMISSION_INVALID",
+      "firstLimitPool.admissionEventType",
+      "admissionEventType 必须是 FIRST_LIMIT_UP",
+    ));
+  }
+  if (spec.admittedRelativeDay !== 0) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_ADMISSION_INVALID",
+      "firstLimitPool.admittedRelativeDay",
+      "admittedRelativeDay 固定为 0（首板日入池）",
+    ));
+  }
+  if (
+    spec.boardScope !== undefined
+    && (
+      !Array.isArray(spec.boardScope)
+      || spec.boardScope.length === 0
+      || spec.boardScope.some(value =>
+        !["main", "chinext", "star", "bse"].includes(String(value)),
+      )
+    )
+  ) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_ADMISSION_INVALID",
+      "firstLimitPool.boardScope",
+      "boardScope 必须是非空的 main/chinext/star/bse 数组",
+    ));
+  }
+  if (!Number.isInteger(spec.poolAgeCapTradingDays) || spec.poolAgeCapTradingDays < 1) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_AGE_CAP_INVALID",
+      "firstLimitPool.poolAgeCapTradingDays",
+      "poolAgeCapTradingDays 必须是 >= 1 的整数",
+    ));
+  }
+  if (spec.scorePolicy === "ROLLING_THREE_FACTOR") {
+    if (spec.scoreStartRelativeDay !== 1) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_STAGE_INVALID",
+        "firstLimitPool.scoreStartRelativeDay",
+        "滚动 3F 必须从 T+1 开始评分",
+      ));
+    }
+    if (spec.scoreWindowDays !== 5) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_STAGE_INVALID",
+        "firstLimitPool.scoreWindowDays",
+        "滚动 3F 的评分窗口固定为 5 个交易日",
+      ));
+    }
+    if (
+      typeof spec.minimumScore !== "number"
+      || !Number.isFinite(spec.minimumScore)
+      || spec.minimumScore < 0
+      || spec.minimumScore > 1
+    ) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_SCORE_INVALID",
+        "firstLimitPool.minimumScore",
+        "minimumScore 必须是 [0,1] 内的有限数字",
+      ));
+    }
+    if (
+      typeof spec.maxObservationAmplitude !== "number"
+      || !Number.isFinite(spec.maxObservationAmplitude)
+      || spec.maxObservationAmplitude <= 0
+      || spec.maxObservationAmplitude >= 1
+    ) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_SCORE_INVALID",
+        "firstLimitPool.maxObservationAmplitude",
+        "maxObservationAmplitude 必须位于 (0,1)",
+      ));
+    }
+    if (typeof spec.calibrationVersion !== "string" || spec.calibrationVersion.trim() === "") {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_SCORE_INVALID",
+        "firstLimitPool.calibrationVersion",
+        "calibrationVersion 必须是非空字符串",
+      ));
+    }
+    if (spec.removeBelowMinimumScore !== true) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_SCORE_INVALID",
+        "firstLimitPool.removeBelowMinimumScore",
+        "滚动 3F 池必须显式声明低于最低分立即移池",
+      ));
+    }
+    if (spec.allowMultipleMembersPerSecurity !== true) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_SCORE_INVALID",
+        "firstLimitPool.allowMultipleMembersPerSecurity",
+        "滚动 3F 池必须显式允许同一证券的多个首板成员独立存在",
+      ));
+    }
+    if (!Number.isInteger(spec.exitTailTradingDays) || spec.exitTailTradingDays! < 1) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_SCORE_INVALID",
+        "firstLimitPool.exitTailTradingDays",
+        "exitTailTradingDays 必须是 >= 1 的整数",
+      ));
+    }
+  } else {
+    if (!Number.isInteger(spec.earlyScoreStageEnd) || spec.earlyScoreStageEnd! < 0) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_STAGE_INVALID",
+        "firstLimitPool.earlyScoreStageEnd",
+        "earlyScoreStageEnd 必须是 >= 0 的整数（T+0 起）",
+      ));
+    }
+    if (!Number.isInteger(spec.fullScoreStart) || spec.fullScoreStart! < 1) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_STAGE_INVALID",
+        "firstLimitPool.fullScoreStart",
+        "fullScoreStart 必须是 >= 1 的整数",
+      ));
+    }
+    if (
+      Number.isInteger(spec.earlyScoreStageEnd)
+      && Number.isInteger(spec.fullScoreStart)
+      && spec.fullScoreStart !== spec.earlyScoreStageEnd! + 1
+    ) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_STAGE_INVALID",
+        "firstLimitPool.fullScoreStart",
+        "评分阶段必须无缝切换：fullScoreStart 必须等于 earlyScoreStageEnd + 1",
+      ));
+    }
+  }
+  if (!Number.isInteger(spec.scoreInvalidationDays) || spec.scoreInvalidationDays < 1) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_INVALIDATION_INVALID",
+      "firstLimitPool.scoreInvalidationDays",
+      "scoreInvalidationDays 必须是 >= 1 的整数",
+    ));
+  }
+  if (spec.scoreAffectsExit !== false) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_EXIT_COUPLING",
+      "firstLimitPool.scoreAffectsExit",
+      "scoreAffectsExit 必须恒为 false：评分只控制买入，退出由既有 exitPolicy 决定",
+    ));
+  }
+  if (!Number.isInteger(spec.maxDailyCandidates) || spec.maxDailyCandidates < 0) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_CANDIDATE_CAP_INVALID",
+      "firstLimitPool.maxDailyCandidates",
+      "maxDailyCandidates 必须是 >= 0 的整数（0 = 不额外限制）",
+    ));
+  }
+  const budgets = spec.panelBudgets;
+  if (budgets !== undefined) {
+    if (!isPlainObject(budgets)) {
+      issues.push(issue("SCHEMA_DEFINITION_FIRST_LIMIT_POOL_BUDGET_INVALID", "firstLimitPool.panelBudgets", "panelBudgets 必须是对象"));
+    } else {
+      for (const [key, value] of [
+        ["maxMembersPerDay", budgets.maxMembersPerDay],
+        ["maxPanelRows", budgets.maxPanelRows],
+      ] as const) {
+        if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+          issues.push(issue(
+            "SCHEMA_DEFINITION_FIRST_LIMIT_POOL_BUDGET_INVALID",
+            `firstLimitPool.panelBudgets.${key}`,
+            `${key} 必须是 >= 1 的整数`,
+          ));
+        }
+      }
+    }
   }
 }
 
@@ -398,6 +606,8 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
         ...(typeof item.max === "number" ? { max: item.max } : {}),
         ...(typeof item.step === "number" ? { step: item.step } : {}),
         ...(Array.isArray(item.allowedValues) ? { allowedValues: item.allowedValues as string[] } : {}),
+        ...(typeof item.minItems === "number" ? { minItems: item.minItems } : {}),
+        ...(typeof item.maxItems === "number" ? { maxItems: item.maxItems } : {}),
       })),
     };
     issues.push(...validateParameterSchema(derivedSchema).issues.map((item) => ({
@@ -408,6 +618,14 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
       message: item.message,
     })));
   }
+
+  // -- 首板股票池（可选；旧事件窗文档不携带该字段） --
+  checkFirstLimitPool(
+    (d as unknown as Record<string, unknown>).firstLimitPool,
+    (d.entry as unknown as Record<string, unknown> | undefined)?.trigger
+      && ((d.entry as unknown as Record<string, unknown>).trigger as Record<string, unknown>).type,
+    issues,
+  );
 
   // -- Entry --
   // 时间线在 Entry 段解出，但 Exit 段的附加条件也要用同一套边界，因此在段外声明。

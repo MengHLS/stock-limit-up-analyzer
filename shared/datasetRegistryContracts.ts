@@ -778,3 +778,151 @@ export type EventPage = DatasetPage<DatasetEventItem>;
 export type RawBarPage = DatasetPage<DatasetRawBarItem>;
 export type PathPage = DatasetPage<DatasetPathItem>;
 export type OutcomePage = DatasetPage<DatasetOutcomeItem>;
+
+// ---------------------------------------------------------------------------
+// H. 本地快照（开发态加速；LOCAL-DATASET-SNAPSHOT）
+// ---------------------------------------------------------------------------
+//
+// 只读契约：把某个 READY 的 Dataset Version 一次导出为完整 SQLite 文件，
+// 后续研究 / 参数搜索 / Registry 预览优先读本地文件，避免反复查询 TiDB。
+// 仅开发态生效；生产环境下载路由返回 404，快照缺失时自动回退 DB。
+//
+// 🔴 快照存在但校验失败 = 独立错误并停止（不静默回退 DB）—— 见
+//    `server/datasetRegistry/snapshot/errors.ts#DatasetSnapshotError`。
+
+/** 快照导出的行号语义（每 5,000 行提交一次事务；用于进度展示）。 */
+export const DATASET_SNAPSHOT_COMMIT_ROWS = 5_000;
+
+/** 快照仅支持 `first_limit_pullback`（v1 明确拒绝其他 datasetCode）。 */
+export const DATASET_SNAPSHOT_SUPPORTED_DATASET_CODE = "first_limit_pullback";
+
+/** 快照导出 phase（固定八个；前端按 phase 展示进度）。 */
+export const DATASET_SNAPSHOT_PHASES = [
+  "event",
+  "prefix",
+  "post",
+  "path",
+  "outcome",
+  "identity",
+  "index",
+  "verify",
+] as const;
+export const datasetSnapshotPhaseSchema = z.enum(DATASET_SNAPSHOT_PHASES);
+export type DatasetSnapshotPhase = (typeof DATASET_SNAPSHOT_PHASES)[number];
+
+/** 快照任务事件类型（progress / completed / failed）。 */
+export const DATASET_SNAPSHOT_EVENT_KINDS = ["progress", "completed", "failed"] as const;
+export const datasetSnapshotEventKindSchema = z.enum(DATASET_SNAPSHOT_EVENT_KINDS);
+export type DatasetSnapshotEventKind = (typeof DATASET_SNAPSHOT_EVENT_KINDS)[number];
+
+/** 快照任务状态（进程内任务；不做持久化）。 */
+export const DATASET_SNAPSHOT_TASK_STATUS_VALUES = [
+  "running",
+  "completed",
+  "failed",
+] as const;
+export const datasetSnapshotTaskStatusSchema = z.enum(DATASET_SNAPSHOT_TASK_STATUS_VALUES);
+export type DatasetSnapshotTaskStatus = (typeof DATASET_SNAPSHOT_TASK_STATUS_VALUES)[number];
+
+/** 单条 JSONL 进度事件（CLI `--json-events` 输出同构）。 */
+export interface DatasetSnapshotTaskEventItem {
+  phase: DatasetSnapshotPhase;
+  event: DatasetSnapshotEventKind;
+  message: string;
+  datasetVersionId: number;
+  rowsWritten?: number;
+  totalRows?: number;
+  table?: string;
+  error?: string;
+}
+
+/** 任务视图（HTTP 轮询用；与 `server/datasetRegistry/snapshot/taskManager.ts` 同构）。 */
+export interface DatasetSnapshotTaskView {
+  taskId: string;
+  datasetVersionId: number;
+  status: DatasetSnapshotTaskStatus;
+  force: boolean;
+  events: DatasetSnapshotTaskEventItem[];
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+}
+
+/** manifest 的五表行数 + 日期范围（与 `server/datasetRegistry/query.ts#DatasetVersionCounts` 同构）。 */
+export interface DatasetSnapshotManifestCounts {
+  eventCount: number;
+  prefixCount: number;
+  postCount: number;
+  pathCount: number;
+  outcomeCount: number;
+  rowCount: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  horizons: number[];
+}
+
+/** 快照清单（`manifest.json`；固定字段 + 版本 / 定义元数据）。 */
+export interface DatasetSnapshotManifest {
+  formatVersion: 1;
+  exporterVersion: string;
+  datasetVersionId: number;
+  datasetId: number;
+  definition: {
+    id: number;
+    datasetCode: string;
+    name: string;
+  };
+  version: {
+    id: number;
+    datasetId: number;
+    label: string;
+    status: "READY";
+    startDate: string | null;
+    endDate: string | null;
+  };
+  counts: DatasetSnapshotManifestCounts;
+  firstDate: string | null;
+  lastDate: string | null;
+  horizons: number[];
+  pathRelativeDayRange: { min: number; max: number } | null;
+  postRelativeDayRange: { min: number; max: number } | null;
+  identityCount: number;
+  sqlite: {
+    fileName: "dataset.sqlite";
+    size: number;
+    sha256: string;
+  };
+  exportedAt: string;
+}
+
+export const getSnapshotStatusInputSchema = z.object({
+  datasetVersionId: safeIntId,
+});
+export type GetSnapshotStatusInput = z.infer<typeof getSnapshotStatusInputSchema>;
+
+export const createSnapshotInputSchema = z.object({
+  datasetVersionId: safeIntId,
+  force: z.boolean().optional(),
+});
+export type CreateSnapshotInput = z.infer<typeof createSnapshotInputSchema>;
+
+export interface DatasetSnapshotStatusResult {
+  /** 该版本是否具备快照能力（存在 + READY + datasetCode=first_limit_pullback + 开发态）。 */
+  supported: boolean;
+  /** 不支持时的人类可读原因（支持时 null）。 */
+  reason: string | null;
+  /** 是否存在一份校验通过的可用快照。 */
+  available: boolean;
+  /** 可用快照的 manifest（不存在 / 不可用时 null）。 */
+  manifest: DatasetSnapshotManifest | null;
+  /** 该版本当前（或最近一次）导出任务；从未创建过为 null。 */
+  task: DatasetSnapshotTaskView | null;
+  /** 快照下载 URL（仅 supported && available 时非 null）。 */
+  downloadUrl: string | null;
+}
+
+export interface CreateDatasetSnapshotResult {
+  taskId: string;
+  status: DatasetSnapshotTaskStatus;
+}

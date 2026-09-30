@@ -21,8 +21,11 @@ import type {
   ResearchExperimentSnapshot,
   ResearchFeatureConfig,
   ResearchParameterDefinition,
+  ResearchParameterJsonElement,
+  ResearchParameterJsonValue,
   ResearchParameterSchema,
   ResearchParameterSet,
+  ResearchParameterScalar,
   ResearchParameterValue,
 } from "./types";
 
@@ -61,6 +64,47 @@ function issue(code: string, path: string, message: string): ResearchValidationI
 // 单值校验（value ↔ 单个参数定义）
 // ---------------------------------------------------------------------------
 
+function isJsonScalar(value: unknown): value is ResearchParameterScalar {
+  return value === null
+    || typeof value === "string"
+    || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isJsonElement(value: unknown): value is ResearchParameterJsonElement {
+  if (isJsonScalar(value)) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(isJsonScalar);
+}
+
+/** `json` 参数只接受有限、可序列化的 JSON 数组；元素为标量或键值均为标量的对象。 */
+function validateJsonValue(
+  value: unknown,
+  def: ResearchParameterDefinition,
+  path: string,
+): ResearchValidationIssue[] {
+  if (!Array.isArray(value)) {
+    return [issue("VALUE_TYPE_MISMATCH", path, `参数 ${def.name} 期望 json（数组），实际 ${typeof value}`)];
+  }
+  if (def.minItems !== undefined && value.length < def.minItems) {
+    return [issue("VALUE_BELOW_MIN_ITEMS", path, `参数 ${def.name} 至少需要 ${def.minItems} 项，实际 ${value.length}`)];
+  }
+  if (def.maxItems !== undefined && value.length > def.maxItems) {
+    return [issue("VALUE_ABOVE_MAX_ITEMS", path, `参数 ${def.name} 最多允许 ${def.maxItems} 项，实际 ${value.length}`)];
+  }
+  const issues: ResearchValidationIssue[] = [];
+  value.forEach((item, index) => {
+    if (!isJsonElement(item)) {
+      issues.push(issue(
+        "VALUE_JSON_ITEM_INVALID",
+        `${path}[${index}]`,
+        `参数 ${def.name} 的 json 数组每项必须是标量或键值均为标量的对象，实际 ${item === null ? "null" : typeof item}`,
+      ));
+    }
+  });
+  return issues;
+}
+
 function validateValue(value: ResearchParameterValue, def: ResearchParameterDefinition, path: string): ResearchValidationIssue[] {
   const issues: ResearchValidationIssue[] = [];
   const nullable = def.nullable === true;
@@ -70,6 +114,10 @@ function validateValue(value: ResearchParameterValue, def: ResearchParameterDefi
       issues.push(issue("VALUE_NULL_NOT_ALLOWED", path, `参数 ${def.name} 不允许 null（未声明 nullable）`));
     }
     return issues;
+  }
+
+  if (def.type === "json") {
+    return validateJsonValue(value, def, path);
   }
 
   const actualType = typeof value;
@@ -126,7 +174,7 @@ export function validateParameterSchema(schema: ResearchParameterSchema): Resear
     }
     seen.add(param.name);
 
-    if (param.type !== "number" && param.type !== "string" && param.type !== "boolean") {
+    if (param.type !== "number" && param.type !== "string" && param.type !== "boolean" && param.type !== "json") {
       issues.push(issue("PARAM_TYPE_INVALID", `${path}.type`, `非法参数类型：${String(param.type)}`));
       continue;
     }
@@ -137,6 +185,15 @@ export function validateParameterSchema(schema: ResearchParameterSchema): Resear
     }
     if (param.allowedValues !== undefined && param.type !== "string") {
       issues.push(issue("PARAM_ALLOWED_VALUES_TYPE_MISMATCH", path, "allowedValues 仅对 string 类型生效"));
+    }
+    if (param.minItems !== undefined && param.type !== "json") {
+      issues.push(issue("PARAM_JSON_SHAPE_TYPE_MISMATCH", path, "minItems/maxItems 仅对 json 类型生效"));
+    }
+    if (param.type === "json") {
+      const jsonValue = param.defaultValue as ResearchParameterJsonValue | undefined;
+      if (jsonValue !== undefined && !Array.isArray(jsonValue)) {
+        issues.push(issue("PARAM_JSON_DEFAULT_INVALID", `${path}.defaultValue`, "json 参数的 defaultValue 必须是数组"));
+      }
     }
 
     if (param.type === "number") {

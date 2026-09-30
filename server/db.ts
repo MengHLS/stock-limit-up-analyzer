@@ -95,6 +95,11 @@ import {
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
+interface ClosableDbPool {
+  end(): Promise<void> | void;
+  promise?(): ClosableDbPool;
+}
+
 /**
  * 连接池上限（DB_POOL_SIZE 可覆盖）。
  *
@@ -305,6 +310,23 @@ export async function getDb() {
     }
   }
   return _db;
+}
+
+/**
+ * 关闭进程内共享连接池，供一次性 CLI 在任务结束后释放 socket。
+ *
+ * Web 进程不应调用；导出 CLI 调用后进程不会继续接受数据库查询。
+ */
+export async function closeDb(): Promise<void> {
+  const db = _db;
+  _db = null;
+  if (!db) return;
+
+  const client = (db as unknown as { $client?: ClosableDbPool }).$client;
+  if (!client) return;
+  const pool =
+    typeof client.promise === "function" ? client.promise() : client;
+  await pool.end();
 }
 
 // ==================== User Functions ====================

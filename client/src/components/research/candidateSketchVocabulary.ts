@@ -135,6 +135,11 @@ export const CANDIDATE_TRIGGER_OPTIONS: readonly SketchOption[] = [
       "第一个满足条件的交易日**再顺延一个交易日**才出信号（信号被推迟一天）；"
       + "配合它时「入场时点」不能选同 bar 成交，后端 L7 会拒绝（TRIGGER_EXECUTION_INCONSISTENT）",
   },
+  {
+    value: "FIRST_LIMIT_POOL",
+    label: "首板股票池逐日",
+    note: "首板事件入池后，在池成员有效期内每个交易日都可产生候选；只供池化模式族使用。",
+  },
 ];
 
 /** `entryRule.extra.execution.quantityMethod`（服务端 `STRATEGY_QUANTITY_METHODS`）。**必填**。 */
@@ -155,6 +160,7 @@ export const CANDIDATE_COST_MODEL_OPTIONS: readonly SketchOption[] = [
 export const CANDIDATE_SIZING_METHOD_OPTIONS: readonly SketchOption[] = [
   { value: "FIXED_AMOUNT", label: "固定金额" },
   { value: "FIXED_RATIO", label: "固定比例" },
+  { value: "EQUITY_RATIO", label: "总权益比例" },
   { value: "EQUAL_WEIGHT", label: "等权" },
   { value: "RISK_BASED", label: "按风险" },
 ];
@@ -217,6 +223,7 @@ export const CANDIDATE_PARAMETER_TYPE_OPTIONS: readonly SketchOption[] = [
   { value: "number", label: "数值", note: "必须同时给出 min 与 max" },
   { value: "string", label: "字符串", note: "必须给出非空候选集合" },
   { value: "boolean", label: "布尔", note: "必须给出非空候选集合" },
+  { value: "json", label: "JSON 数组", note: "用于仓位分档等结构化参数" },
 ];
 
 /**

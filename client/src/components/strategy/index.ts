@@ -3,6 +3,7 @@
  */
 
 export { StrategyHeader, type LoadedTarget, type VersionOption } from "./StrategyHeader";
+export { StrategyFamilyPanel } from "./StrategyFamilyPanel";
 export { StrategyBasicInfo } from "./StrategyBasicInfo";
 export { RuleEditor } from "./RuleEditor";
 export { PositionSizingEditor } from "./PositionSizingEditor";

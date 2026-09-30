@@ -12,14 +12,25 @@
 
 import type { CostModel } from "../engine/domain";
 
-/** 研究参数值（可序列化原子值；null 仅对 nullable 参数合法，表示「显式不设值」）。 */
-export type ResearchParameterValue = number | string | boolean | null;
+/**
+ * 研究参数值。
+ *
+ * 标量（number / string / boolean / null）是绝大多数参数的形态；`ResearchParameterValue[]`
+ * 只服务于 `type = "json"` 的结构化参数（当前用于仓位分档数组）。数组是**有限、可序列化**
+ * 的 JSON 集合，元素可为标量或键值均为标量的对象，不允许嵌套数组 —— 结构约束由参数定义
+ * 与参数校验器负责。
+ */
+export type ResearchParameterScalar = number | string | boolean | null;
+export type ResearchParameterJsonObject = { readonly [key: string]: ResearchParameterScalar };
+export type ResearchParameterJsonElement = ResearchParameterScalar | ResearchParameterJsonObject;
+export type ResearchParameterJsonValue = readonly ResearchParameterJsonElement[];
+export type ResearchParameterValue = ResearchParameterScalar | ResearchParameterJsonValue;
 
 /** 参数集合：参数名 → 值（键唯一）。 */
-export type ResearchParameterSet = Record<string, ResearchParameterValue>;
+export type ResearchParameterSet = Readonly<Record<string, ResearchParameterValue>>;
 
-/** 参数类型。 */
-export type ResearchParameterType = "number" | "string" | "boolean";
+/** 参数类型。`json` 表示可序列化的结构化参数（当前为 JSON 数组）。 */
+export type ResearchParameterType = "number" | "string" | "boolean" | "json";
 
 /** 单个参数定义。 */
 export interface ResearchParameterDefinition {
@@ -37,6 +48,10 @@ export interface ResearchParameterDefinition {
   step?: number;
   /** 可选值白名单，仅对 string 类型生效。 */
   allowedValues?: readonly string[];
+  /** json 数组的最小长度（仅对 json 类型生效）。 */
+  minItems?: number;
+  /** json 数组的最大长度（仅对 json 类型生效）。 */
+  maxItems?: number;
   description?: string;
 }
 

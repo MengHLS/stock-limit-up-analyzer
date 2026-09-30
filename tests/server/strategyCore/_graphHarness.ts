@@ -11,7 +11,7 @@ import {
   parseCoreFieldReference,
   readBarColumnValue,
   type BarUniverse,
-  type CoreValue,
+  type CoreScalar,
   type DayScopedBarAccess,
   type RelativeDay,
   type RuleEvaluationEnv,
@@ -20,6 +20,10 @@ import {
   type VisibilityViolation,
   type VisibleBar,
 } from "../../../server/strategyCore";
+
+function coreScalarOrNull(value: CoreScalar | undefined): CoreScalar {
+  return value === undefined ? null : value;
+}
 
 /** 单根 bar 工厂（相对日 → 确定性日期/价格）。 */
 export function BAR_FIXTURE(relativeDay: number, overrides: Partial<VisibleBar> = {}): VisibleBar {
@@ -51,9 +55,9 @@ export interface HarnessOptions {
   readonly bars?: BarUniverse;
   readonly maxRelativeDay?: RelativeDay;
   readonly eventOccurred?: boolean | ((eventType: string) => boolean);
-  readonly eventFields?: Readonly<Record<string, CoreValue>>;
-  readonly featureValues?: Readonly<Record<string, CoreValue>>;
-  readonly parameterValues?: Readonly<Record<string, CoreValue>>;
+  readonly eventFields?: Readonly<Record<string, CoreScalar>>;
+  readonly featureValues?: Readonly<Record<string, CoreScalar>>;
+  readonly parameterValues?: Readonly<Record<string, CoreScalar>>;
 }
 
 export interface HarnessResult {
@@ -83,7 +87,7 @@ export function envFor(root: RuleNode, options: HarnessOptions = {}): HarnessRes
     return access;
   };
 
-  const fieldValueAt = (day: RelativeDay, field: string): CoreValue => {
+  const fieldValueAt = (day: RelativeDay, field: string): CoreScalar => {
     const parsed = parseCoreFieldReference(field);
     switch (parsed.kind) {
       case "PRE_EVENT":
@@ -96,10 +100,12 @@ export function envFor(root: RuleNode, options: HarnessOptions = {}): HarnessRes
         return bar === null ? null : readBarColumnValue(bar, parsed.field);
       }
       case "EVENT_DAY":
-        return Object.prototype.hasOwnProperty.call(eventFields, parsed.field) ? (eventFields[parsed.field] as CoreValue) : null;
+        return Object.prototype.hasOwnProperty.call(eventFields, parsed.field)
+          ? coreScalarOrNull(eventFields[parsed.field])
+          : null;
       case "DERIVED_BAR_FEATURE":
         return Object.prototype.hasOwnProperty.call(featureValues, parsed.featureId as string)
-          ? (featureValues[parsed.featureId as string] as CoreValue)
+          ? coreScalarOrNull(featureValues[parsed.featureId as string])
           : null;
       default:
         return null;
@@ -116,9 +122,13 @@ export function envFor(root: RuleNode, options: HarnessOptions = {}): HarnessRes
     },
     fieldValue: (field: string) => fieldValueAt(day, field),
     featureValue: (featureId: string) =>
-      Object.prototype.hasOwnProperty.call(featureValues, featureId) ? (featureValues[featureId] as CoreValue) : null,
+      Object.prototype.hasOwnProperty.call(featureValues, featureId)
+        ? (featureValues[featureId] as CoreScalar)
+        : null,
     parameterValue: (code: string) =>
-      Object.prototype.hasOwnProperty.call(parameterValues, code) ? (parameterValues[code] as CoreValue) : null,
+      Object.prototype.hasOwnProperty.call(parameterValues, code)
+        ? (parameterValues[code] as CoreScalar)
+        : null,
     violations,
     insufficiencies,
     withDay: (next: RelativeDay) => build(next),

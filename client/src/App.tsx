@@ -34,6 +34,8 @@ import {
 import StrategyList from "./pages/StrategyList";
 import StrategyDetail from "./pages/StrategyDetail";
 import StrategyVersionCompare from "./pages/StrategyVersionCompare";
+// 回测对比：读取同一策略的多版本留档，折线图 + 交易明细
+import BacktestCompare from "./pages/BacktestCompare";
 // FE-5 — 研究链路：绩效仪表盘（骨架线）
 import PerformanceDashboard from "./pages/PerformanceDashboard";
 // FE-6 — 研究链路：参数搜索 + 鲁棒性（骨架线）
@@ -127,6 +129,8 @@ function Router() {
       />
       <Route path="/strategies/:strategyId" component={StrategyDetail} />
       <Route path="/strategy-editor" component={LegacyStrategyRedirect} />
+      {/* 回测对比：多版本累计收益率折线图 + 各版本交易明细（`?strategyId=` 为唯一坐标源） */}
+      <Route path="/backtest-compare" component={BacktestCompare} />
       <Route path="/performance" component={PerformanceDashboard} />
       <Route path="/parameter-search" component={ParameterSearch} />
       {/* FRONTEND-FINAL-001（P1-6）— 参数搜索深链：`/parameter-search/:runId` 直达某次搜索 Run。

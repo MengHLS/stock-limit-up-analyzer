@@ -10,6 +10,7 @@ import {
   RunConfigPanel,
   StrategyAdvancedTools,
   StrategyBasicInfo,
+  StrategyFamilyPanel,
   StrategyHeader,
   StrategyVersionPanel,
   type LoadedTarget,
@@ -27,6 +28,7 @@ import {
   type DefinitionDrafts,
 } from "@/components/strategy/definitionDraft";
 import { StrategyResearchProvenancePanel } from "@/components/research/StrategyResearchProvenancePanel";
+import { FirstLimitPoolSummary } from "@/components/strategy/FirstLimitPoolSummary";
 import { trpc } from "@/lib/trpc";
 import {
   strategyToViewModel,
@@ -536,6 +538,10 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     { strategyId },
     { enabled: loadEnabled, refetchOnWindowFocus: false }
   );
+  const versionCatalog = trpc.strategyDomain.strategy.listVersionCatalog.useQuery(
+    { strategyId },
+    { enabled: loadEnabled, refetchOnWindowFocus: false }
+  );
 
   /**
    * 把一次「加载结果」灌进编辑器。
@@ -576,6 +582,25 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     if (rows === undefined) return null;
     return rows.find(v => v.version === loadedTarget.version)?.status ?? null;
   }, [loadedTarget, versionList.data]);
+
+  const loadedPoolSemantics = useMemo(() => {
+    if (loadedTarget === null) return null;
+    return (
+      versionCatalog.data?.find(row => row.version === loadedTarget.version)?.study
+        ?.firstLimitPool ?? null
+    );
+  }, [loadedTarget, versionCatalog.data]);
+
+  /**
+   * 当前版本是否属于「首板股票池每日评分」模式族。
+   *
+   * 判据取已落库文档的实体级 `strategyType`（落在 `vm.extra` 透传），而不是「有没有
+   * 拿到池化语义详情」——否则目录接口慢一步时，池化区块会整块消失，看起来像「前端没改」。
+   */
+  const loadedStrategyType =
+    typeof vm.extra.strategyType === "string" && vm.extra.strategyType !== ""
+      ? vm.extra.strategyType
+      : null;
 
   /**
    * 提交给后端的文档 = 身份 / 视图（`vm`）+ Canonical 定义（草稿）。
@@ -723,6 +748,38 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         validateStatus={validateStatus}
         dirty={dirty}
       />
+
+      <StrategyFamilyPanel
+        currentStrategyId={strategyId}
+        datasetVersionId={vm.datasetVersionId}
+        datasetLabel={vm.datasetVersion}
+      />
+
+      {loadedPoolSemantics !== null && (
+        <FirstLimitPoolSummary
+          pool={loadedPoolSemantics}
+          title="当前版本使用首板股票池 · 滚动 3F"
+          description="首板事件把证券加入持久池；T+1 起逐日滚动评分，T+5 后固定窗口，低于最低分移池但持仓继续按原退出政策执行。"
+        />
+      )}
+
+      {loadedPoolSemantics === null &&
+        (loadedStrategyType === "FIRST_LIMIT_POOL_DAILY_SCORE" ||
+          loadedStrategyType === "FIRST_LIMIT_POOL_ROLLING_3F") && (
+          <div className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50/50 px-4 py-3 text-[11px] text-cyan-900">
+            {versionCatalog.isLoading ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                正在读取池化语义…
+              </>
+            ) : (
+              <>
+                <Info className="h-3.5 w-3.5" />
+                该策略属于「首板股票池每日评分」模式族，但当前版本未登记池化语义详情。
+              </>
+            )}
+          </div>
+        )}
 
       {loadError !== null && (
         <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3">

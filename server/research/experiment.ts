@@ -29,6 +29,7 @@ import type {
   ResearchFeatureConfig,
   ResearchParameterSchema,
   ResearchParameterSet,
+  ResearchParameterValue,
 } from "./types";
 
 /** 构造实验的输入（除 createdAt 外必填；参数集为「已解析前」的原始输入）。 */
@@ -94,7 +95,7 @@ function freezeBacktestConfig(config: ResearchBacktestConfig): ResearchBacktestC
  * 任一参数问题（必填缺失 / 未知参数 / 类型或取值非法）直接抛 ResearchValidationError。
  */
 export function resolveParameterSet(input: ResearchParameterSet, schema: ResearchParameterSchema): ResearchParameterSet {
-  const resolved: ResearchParameterSet = {};
+  const resolved: Record<string, ResearchParameterValue> = {};
 
   for (const def of schema.parameters) {
     if (def.name in input) {

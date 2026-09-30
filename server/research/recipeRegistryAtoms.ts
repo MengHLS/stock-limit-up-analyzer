@@ -32,6 +32,21 @@ import {
   computeThreeFactorRaw,
   threeFactorCompositeScoreOf,
 } from "./recipeFeatures/threeFactorScoreFeatures";
+import {
+  ROLLING_THREE_FACTOR_FEATURE_ID,
+  ROLLING_THREE_FACTOR_FEATURE_VERSION,
+  FIXED_POOL_THREE_FACTOR_FEATURE_ID,
+  CALIBRATED_N5_EVENT_FEATURE_ID,
+  FROZEN_THREE_FACTOR_SCORE_EDGES,
+  calibratedN5ThreeFactorCompositeScoreOf,
+  computeRollingThreeFactorRaw,
+  rollingThreeFactorCompositeScoreOf,
+  rollingThreeFactorCompositeScoreWithEdgesOf,
+} from "./recipeFeatures/rollingThreeFactorScoreFeatures";
+export {
+  FIXED_POOL_THREE_FACTOR_FEATURE_ID,
+  CALIBRATED_N5_EVENT_FEATURE_ID,
+} from "./recipeFeatures/rollingThreeFactorScoreFeatures";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
 
 // ---------------------------------------------------------------------------
@@ -186,6 +201,11 @@ export const THREE_FACTOR_FEATURE_IDS = {
 export const THREE_FACTOR_FEATURE_VERSION = "1.0.0";
 export const THREE_FACTOR_FEATURE_NO_PULLBACK_GATE_VERSION = "1.1.0";
 
+export const ROLLING_THREE_FACTOR_FEATURE = {
+  featureId: ROLLING_THREE_FACTOR_FEATURE_ID,
+  version: ROLLING_THREE_FACTOR_FEATURE_VERSION,
+} as const;
+
 /**
  * 构造 3F 配方的特征提供器。
  *
@@ -210,6 +230,46 @@ export function buildThreeFactorFeatureProvider(
       const raw = computeThreeFactorRaw(bars);
       if (raw === null) return null;
       return threeFactorCompositeScoreOf(raw, { requirePullback });
+    },
+  });
+}
+
+/** 构造滚动 3F 特征提供器；T+1 起逐日可算，T+5 后窗口固定。 */
+export function buildRollingThreeFactorFeatureProvider(point: DecisionPoint): FeatureProvider {
+  return makeBarFeatureProvider({
+    featureId: ROLLING_THREE_FACTOR_FEATURE_ID,
+    version: ROLLING_THREE_FACTOR_FEATURE_VERSION,
+    availability: samePointAvailability(point),
+    compute: (bars) => {
+      const raw = computeRollingThreeFactorRaw(bars);
+      return raw === null ? null : rollingThreeFactorCompositeScoreOf(raw);
+    },
+  });
+}
+
+export function buildFixedPoolThreeFactorFeatureProvider(point: DecisionPoint): FeatureProvider {
+  return makeBarFeatureProvider({
+    featureId: FIXED_POOL_THREE_FACTOR_FEATURE_ID,
+    version: ROLLING_THREE_FACTOR_FEATURE_VERSION,
+    availability: samePointAvailability(point),
+    compute: (bars) => {
+      const raw = computeRollingThreeFactorRaw(bars);
+      return raw === null
+        ? null
+        : rollingThreeFactorCompositeScoreWithEdgesOf(raw, FROZEN_THREE_FACTOR_SCORE_EDGES);
+    },
+  });
+}
+
+export function buildCalibratedN5EventFeatureProvider(point: DecisionPoint): FeatureProvider {
+  return makeBarFeatureProvider({
+    featureId: CALIBRATED_N5_EVENT_FEATURE_ID,
+    version: ROLLING_THREE_FACTOR_FEATURE_VERSION,
+    availability: samePointAvailability(point),
+    compute: (bars) => {
+      if (bars.length < 6) return null;
+      const raw = computeRollingThreeFactorRaw(bars.slice(0, 6));
+      return raw === null ? null : calibratedN5ThreeFactorCompositeScoreOf(raw);
     },
   });
 }

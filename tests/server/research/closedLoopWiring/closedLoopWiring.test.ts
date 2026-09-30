@@ -28,11 +28,13 @@ import {
   closedLoopStageWiringRequirement,
   createClosedLoopStageRunners,
   createClosedLoopWiring,
+  createStreamingClosedLoopWiring,
   describeClosedLoopWiringCoverage,
   projectDatasetSummary,
   wiredClosedLoopStages,
 } from "../../../../server/research/closedLoopWiring/index";
 import type { ClosedLoopWiringInputs } from "../../../../server/research/closedLoopWiring/types";
+import type { ResearchDatasetCursor } from "../../../../server/research/framework/datasetCursor";
 
 // ---------------------------------------------------------------------------
 // 常量与夹具
@@ -118,6 +120,35 @@ const REAL_CHAIN_INPUTS: ClosedLoopWiringInputs = {
   evaluationInput: { backtestFingerprint: HEX64, equityCurve: equityCurveFixture() },
 };
 
+function cursorFixture(): ResearchDatasetCursor {
+  return {
+    metadata: {
+      datasetVersion: "rd-1.0.0-1-cccccccccccccccc",
+      builderVersion: "1.0.0",
+      rowSchemaVersion: "1.0.0",
+      universeId: "research-dataset:rd-1.0.0-1-" + "c".repeat(64),
+      startDate: DATE_RANGE.startDate,
+      endDate: DATE_RANGE.endDate,
+      rowCount: null,
+      universeDayCount: 1,
+      gate: "PASS",
+    },
+    tradingDates: [DATE_RANGE.startDate],
+    async getDaySlice(tradeDate: string) {
+      return {
+        tradeDate,
+        isTradingDay: true,
+        rows: [],
+        members: [],
+        executionBars: new Map(),
+        visibleBars: new Map(),
+      };
+    },
+    async restart() {},
+    async close() {},
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 1. 装配声明表
 // ---------------------------------------------------------------------------
@@ -191,6 +222,48 @@ describe("closedLoopWiring — 覆盖率探测（取代硬编码 executorBound�
     expect(coverage.executorBound).toBe(true); // 只请求 data 时，链是完整可执行的
   });
 
+  it("给 researchDatasetCursor → data 覆盖，research/backtest 明确走 datasetCursor 产物路径", () => {
+    const cursor = cursorFixture();
+    const inputs = {
+      researchDatasetCursor: cursor,
+      experimentConfig: {},
+      strategyContract: {},
+      strategy13: {},
+      simulationConfig: {},
+    } as unknown as ClosedLoopWiringInputs;
+    const coverage = assessClosedLoopWiringCoverage(inputs, [
+      "data",
+      "research",
+      "backtest",
+    ]);
+    expect(coverage.stages.find(item => item.stageId === "data")!.satisfiedBy)
+      .toBe("input:researchDatasetCursor");
+    expect(coverage.stages.find(item => item.stageId === "research")!.satisfiedBy)
+      .toBe("input:experimentConfig+strategyContract+strategy13 & artifact:datasetCursor");
+    // research 在同一链内产生 candidateRun 后，backtest 也走 cursor 路径并覆盖。
+    expect(coverage.stages.find(item => item.stageId === "backtest")!.covered).toBe(true);
+    expect(coverage.stages.find(item => item.stageId === "backtest")!.satisfiedBy)
+      .toBe("input:simulationConfig & artifact:datasetCursor+candidateRun");
+  });
+
+  it("createStreamingClosedLoopWiring 的 data 阶段保存 cursor 而不物化 ResearchDataset", async () => {
+    const cursor = cursorFixture();
+    const wiring = await createStreamingClosedLoopWiring(
+      { researchDatasetCursor: cursor } as ClosedLoopWiringInputs,
+      { requested: ["data"] },
+    );
+    expect(wiring.artifacts.datasetCursor).toBe(cursor);
+    expect(wiring.artifacts.dataset).toBeUndefined();
+    const run = runClosedLoop({
+      runId: "clrun-cursor-data-test",
+      createdAt: T0,
+      metadata: { ...META, datasetVersion: cursor.metadata.datasetVersion },
+      stageIds: ["data"],
+      stageRunners: wiring.stageRunners,
+    });
+    expect(run.overall.status).toBe("ALL_EXECUTED");
+  });
+
   it("给 lifecycle → finalize 覆盖（finalize 无需本层注册执行器）", () => {
     const coverage = assessClosedLoopWiringCoverage({ lifecycle: {} as never }, ["finalize"]);
     expect(coverage.coveredStages).toEqual(["finalize"]);
@@ -228,7 +301,7 @@ describe("closedLoopWiring — 覆盖率探测（取代硬编码 executorBound�
     const coverage = assessClosedLoopWiringCoverage(ALL_INPUTS_PRESENT, ["data", "backtest"]);
     const row = coverage.stages.find((s) => s.stageId === "backtest")!;
     expect(row.covered).toBe(false);
-    expect(row.missingArtifacts).toEqual(["candidateRun"]);
+    expect(row.missingArtifacts).toEqual(["datasetCursor", "candidateRun"]);
   });
 
   // 回归守卫：来源内必须 AND。曾经把来源内写成 OR，导致「只给 data 产物、缺 research 入参」时
@@ -240,7 +313,7 @@ describe("closedLoopWiring — 覆盖率探测（取代硬编码 executorBound�
     expect(coverage.stages.find((s) => s.stageId === "data")!.covered).toBe(true);
     expect(row.covered).toBe(false);
     // 上游产物其实可得（data 已覆盖且在链内）——缺的纯粹是调用方入参
-    expect(row.missingArtifacts).toEqual([]);
+    expect(row.missingArtifacts).toEqual(["datasetCursor"]);
     expect([...row.missingInputs].sort()).toEqual(["experimentConfig", "strategy13", "strategyContract"]);
     expect(row.note).toMatch(/缺调用方入参/);
 
@@ -261,8 +334,8 @@ describe("closedLoopWiring — 覆盖率探测（取代硬编码 executorBound�
     const row = coverage.stages.find((s) => s.stageId === "research")!;
     expect(row.covered).toBe(false);
     expect(row.missingInputs).toEqual([]);
-    expect(row.missingArtifacts).toEqual(["dataset"]);
-    expect(row.note).toMatch(/缺同链上游产物：dataset/);
+    expect(row.missingArtifacts).toEqual(["datasetCursor", "dataset"]);
+    expect(row.note).toMatch(/缺同链上游产物：datasetCursor、dataset/);
   });
 
   it("evaluation 的多来源为 OR：artifact 路径不成立时，input 路径仍可单独成立", () => {

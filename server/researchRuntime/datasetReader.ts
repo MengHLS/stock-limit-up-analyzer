@@ -15,11 +15,11 @@
 
 import type { DatasetRegistryRepository } from "../datasetRegistry/registry";
 import {
-  DbDatasetDataReader,
   decodeEventCursor,
   encodeEventCursor,
   type DatasetDataReader,
 } from "../datasetRegistry/query";
+import { defaultDatasetContentReader } from "../datasetRegistry/snapshot/contentDependencies";
 import { withReadRetry } from "../readRetry";
 import type {
   FirstLimitPullbackEvent,
@@ -112,10 +112,16 @@ export interface ResearchDatasetReader {
 // ---------------------------------------------------------------------------
 
 export interface RegistryResearchDatasetReaderDeps {
-  /** Dataset 数据读取器；缺省构造真实 DB 实现。 */
+  /**
+   * Dataset 内容读取器；缺省取**统一内容依赖工厂**的 snapshot-aware reader
+   * （有效本地快照 → SQLite，无/失效快照 → 既有 DB reader）。
+   */
   dataReader?: DatasetDataReader;
-  /** Dataset Registry 仓储（读 dataset_version / dataset_definition）。 */
-  registryRepo: DatasetRegistryRepository;
+  /**
+   * Dataset Registry 元数据读取器（读 dataset_version / dataset_definition）。
+   * 只依赖这两个方法 ⇒ 允许注入窄接口替身。
+   */
+  registryRepo: Pick<DatasetRegistryRepository, "getVersionById" | "getDefinitionById">;
 }
 
 /**
@@ -136,10 +142,13 @@ function extractDecisionOffsetDays(...definitions: unknown[]): number | null {
 
 export class RegistryResearchDatasetReader implements ResearchDatasetReader {
   private readonly dataReader: DatasetDataReader;
-  private readonly registryRepo: DatasetRegistryRepository;
+  private readonly registryRepo: Pick<
+    DatasetRegistryRepository,
+    "getVersionById" | "getDefinitionById"
+  >;
 
   constructor(deps: RegistryResearchDatasetReaderDeps) {
-    this.dataReader = deps.dataReader ?? new DbDatasetDataReader();
+    this.dataReader = deps.dataReader ?? defaultDatasetContentReader();
     this.registryRepo = deps.registryRepo;
   }
 

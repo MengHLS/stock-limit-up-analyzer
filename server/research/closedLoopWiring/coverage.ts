@@ -64,9 +64,20 @@ function hasInput(inputs: ClosedLoopWiringInputs, key: keyof ClosedLoopWiringInp
  */
 function artifactAvailable(
   key: ClosedLoopWiringArtifactKey,
+  inputs: ClosedLoopWiringInputs,
   consumerIndex: number,
   coveredInOrder: ReadonlySet<ClosedLoopStageId>,
 ): boolean {
+  // data 阶段有两个互斥产物：提供 cursor 时只产出 cursor，否则只产出内存 dataset。
+  // 覆盖率探测必须与 data 执行器的真实选择一致，不能把 producer 相同当成两个产物都存在。
+  if (key === "dataset" || key === "datasetCursor") {
+    const selected = inputs.researchDatasetCursor !== undefined
+      ? "datasetCursor"
+      : inputs.researchDataset !== undefined
+        ? "dataset"
+        : null;
+    if (selected !== key) return false;
+  }
   const producer = CLOSED_LOOP_ARTIFACT_PRODUCER[key];
   if (!coveredInOrder.has(producer)) return false;
   return closedLoopStageIndex(producer) < consumerIndex;
@@ -90,7 +101,7 @@ function evaluateSource(
   const requiredArtifacts = source.artifacts ?? [];
   const missingInputs = requiredInputs.filter((key) => !hasInput(inputs, key));
   const missingArtifacts = requiredArtifacts.filter(
-    (key) => !artifactAvailable(key, consumerIndex, coveredInOrder),
+    (key) => !artifactAvailable(key, inputs, consumerIndex, coveredInOrder),
   );
   const descriptorParts: string[] = [];
   if (requiredInputs.length > 0) descriptorParts.push(`input:${requiredInputs.join("+")}`);

@@ -47,6 +47,7 @@ import {
 import {
   assessClosedLoopWiringCoverage,
   createClosedLoopWiring,
+  createStreamingClosedLoopWiring,
   wiredClosedLoopStages,
   type ClosedLoopWiringInputs,
 } from "./research/closedLoopWiring";
@@ -373,6 +374,7 @@ export async function persistClosedLoopBacktestRun(
     strategyVersion: string;
     startDate: string;
     endDate: string;
+    strategyDocument?: StrategyDocument;
     result: ClosedLoopRunResult;
   },
   deps: ClosedLoopPersistDeps = {},
@@ -386,6 +388,7 @@ export async function persistClosedLoopBacktestRun(
     strategyVersion: options.strategyVersion,
     startDate: options.startDate,
     endDate: options.endDate,
+    ...(options.strategyDocument === undefined ? {} : { strategyDocument: options.strategyDocument }),
     result: options.result,
   };
 
@@ -489,7 +492,7 @@ export const researchRunRouter = router({
   /**
    * 成交详情弹窗的日 K 数据（只读）。
    *
-   * 返回区间内完整 OHLC、成交量和 MA5/MA10。均线在服务端基于区间前 9 个交易日
+   * 返回区间内完整 OHLC、成交量和 MA5/MA10/MA20。均线在服务端基于区间前 19 个交易日
    * 计算，避免左侧前几根因缺少历史数据而变成 null 或错误值。
    */
   stockDailySeries: publicProcedure
@@ -773,6 +776,7 @@ async function executeClosedLoopRun(
   let assemblySummary: LoopRunAssemblySummary | null = null;
   // STRATEGY-ARCH-002 — 策略侧产物（Core 决策源 / 版本 / 事件判定器）留到跑完后组 Run Record。
   let assembledSide: AssembledStrategySide | null = null;
+  let persistedStrategyDocument: StrategyDocument | null = null;
   if (input.useRealData === true) {
     let assembled;
     try {
@@ -780,6 +784,7 @@ async function executeClosedLoopRun(
         input.strategyId,
         input.strategyVersion,
       );
+      persistedStrategyDocument = versionRecord.strategy;
       assembled = await assembleRunWorkbenchInputs({
         strategyId: input.strategyId,
         strategyVersion: input.strategyVersion,
@@ -854,7 +859,10 @@ async function executeClosedLoopRun(
   // BACKTEST-002（B-03）— 🔴 此前这里把 `artifacts` 丢掉了 ⇒ 完整的
   // `TradeSimulationRun`（含 equityCurve / trades）跑完即弃，无法落库。
   // 捕获它即打通 artifact propagation：**不重算、不复制引擎**，只用同一个产物。
-  const { stageRunners, artifacts } = createClosedLoopWiring(wiringInputs, { requested });
+  const wiring = wiringInputs.researchDatasetCursor !== undefined
+    ? await createStreamingClosedLoopWiring(wiringInputs, { requested })
+    : createClosedLoopWiring(wiringInputs, { requested });
+  const { stageRunners, artifacts } = wiring;
 
   const run = perfRun("run.stage_orchestration", () =>
     runClosedLoop({
@@ -921,6 +929,7 @@ async function executeClosedLoopRun(
             selectionSummary: assemblySummary.selectionSummary,
             strategyDecisionEngine: assemblySummary.strategyDecisionEngine,
             strategyDecisionEngineNote: assemblySummary.strategyDecisionEngineNote,
+            runtimeOverrides: [...assemblySummary.runtimeOverrides],
             simulation: {
               initialCapital: assemblySummary.simulation.initialCapital,
               maxPositions: assemblySummary.simulation.maxPositions,
@@ -1039,6 +1048,9 @@ async function executeClosedLoopRun(
       strategyVersion: input.strategyVersion,
       startDate: input.dateRange.startDate,
       endDate: input.dateRange.endDate,
+      ...(persistedStrategyDocument === null
+        ? {}
+        : { strategyDocument: persistedStrategyDocument }),
       result: resultOut,
     }),
   );

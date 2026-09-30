@@ -40,6 +40,9 @@ import {
   strategyCloneVersionInputSchema,
   strategySetVersionStatusInputSchema,
   strategySetVersionStarredInputSchema,
+  strategyVersionCatalogSchema,
+  strategyFamilyDefinitionSchema,
+  materializeStrategyFamilyInputSchema,
 } from "../shared/researchContracts";
 import type { StrategyDocument } from "./research/strategySchema/types";
 import type { StrategyLifecycleRecord, LifecycleEvidenceRef } from "./research/lifecycle/types";
@@ -63,6 +66,15 @@ import { composeCodeVersion } from "./research/experimentLineage/codeVersion";
 import { evaluatePerformance } from "./research/performanceMetrics";
 import { evaluateRiskAdjustedMetrics } from "./research/riskAdjustedMetrics";
 import { evaluateTradeQualityMetrics } from "./research/tradeQualityMetrics";
+import {
+  CLOSED_LOOP_BACKTEST_LIST_MAX_LIMIT,
+  listClosedLoopBacktestRuns,
+} from "./closedLoopBacktestRun/repository";
+import { buildStrategyVersionCatalog } from "./research/strategyVersionCatalog";
+import {
+  STRATEGY_FAMILIES,
+  materializeStrategyFamily,
+} from "./research/strategyFamilyRegistry";
 import type { EquityPoint, Trade } from "./backtest/types";
 
 /**
@@ -87,6 +99,7 @@ const CODE_VERSION = resolveCodeVersion();
 
 /** 策略持久化编排服务（真实 DB 落库；fingerprint/幂等/不可变语义见 strategyPersistence）。 */
 const strategyService = new StrategyService(new DbStrategyRepository(), { codeVersion: CODE_VERSION });
+const strategyFamilyDefinitionsSchema = z.array(strategyFamilyDefinitionSchema);
 
 /**
  * 传输层 → 领域层边界投递。
@@ -147,6 +160,38 @@ export const strategyDomainRouter = router({
       .input(strategySaveInputSchema)
       .mutation(({ input }) => strategyService.create({ document: input.document })),
 
+    /** 列出可由前端配置的已注册模式族。 */
+    listFamilies: publicProcedure
+      .output(strategyFamilyDefinitionsSchema)
+      .query(() => STRATEGY_FAMILIES.map(family => ({
+        ...family,
+        parameters: family.parameters.map(parameter => ({ ...parameter })),
+      }))),
+
+    /** 仅物化、不写库；用于前端预览和保存前指纹复核。 */
+    materializeFamily: publicProcedure
+      .input(materializeStrategyFamilyInputSchema)
+      .mutation(({ input }) => materializeStrategyFamily(input)),
+
+    /** 从注册族创建全新策略。 */
+    createFromFamily: adminProcedure
+      .input(materializeStrategyFamilyInputSchema)
+      .mutation(({ input }) =>
+        strategyService.create({
+          document: materializeStrategyFamily(input) as unknown as Record<string, unknown>,
+        }),
+      ),
+
+    /** 从注册族创建已有策略的新版本。 */
+    createVersionFromFamily: adminProcedure
+      .input(materializeStrategyFamilyInputSchema)
+      .mutation(({ input }) =>
+        strategyService.createVersion({
+          strategyId: input.strategyId,
+          document: materializeStrategyFamily(input) as unknown as Record<string, unknown>,
+        }),
+      ),
+
     /** 保存策略版本（幂等；strategyId 不存在时等价 create）。 */
     save: adminProcedure
       .input(strategySaveInputSchema)
@@ -185,6 +230,26 @@ export const strategyDomainRouter = router({
     listVersions: publicProcedure
       .input(strategyIdInputSchema)
       .query(({ input }) => strategyService.listVersions(input.strategyId)),
+
+    /**
+     * 统一版本目录：正式 `strategy_versions` + `closed_loop_backtest_run` 留档。
+     *
+     * 版本对比页 / 版本历史只需要消费本接口，避免前端各自合并两个数据源后产生
+     * 去重、星标与排序口径漂移。留档只补运行事实，不会伪装成正式版本。
+     */
+    listVersionCatalog: publicProcedure
+      .input(strategyIdInputSchema)
+      .output(strategyVersionCatalogSchema)
+      .query(async ({ input }) => {
+        const [versions, archives] = await Promise.all([
+          strategyService.listVersions(input.strategyId),
+          listClosedLoopBacktestRuns({
+            strategyId: input.strategyId,
+            limit: CLOSED_LOOP_BACKTEST_LIST_MAX_LIMIT,
+          }),
+        ]);
+        return buildStrategyVersionCatalog({ versions, archives });
+      }),
 
     // ---- STEP STRATEGY-004 · 暴露 STRATEGY-003 已完成但未暴露的 Domain Service 能力 ----
     // 以下 4 个能力在 STRATEGY-003 已实现于 StrategyService / Repository，本 STEP 只做「传输 → 领域」

@@ -102,11 +102,11 @@ const MAX_OOS_NOTES = 200;
 // ---------------------------------------------------------------------------
 
 /**
- * JSON 文本 → 标量记录（`fixedCoordinatesJson` / `resolvedParameterSetJson` 共用）。
+ * JSON 文本 → 参数记录（`fixedCoordinatesJson` / `resolvedParameterSetJson` 共用）。
  *
  * 🔴 **为什么这里不 `try/catch` 也不丢弃非标量值**：
  *   冻结快照是本模块自己用 `canonicalStringify` 写进去的，出现「解析不了」或
- *   「值不是标量」都意味着**不变式已破**。此刻若静默退化成 `{}` 或丢掉那个键，
+ *   「值不是合法参数值」都意味着**不变式已破**。此刻若静默退化成 `{}` 或丢掉那个键，
  *   后续回测就会拿**少了参数**的参数集去跑 —— 那正是规格 §5 明禁的
  *   「参数冻结被悄悄破坏」，而且会伪装成一次「成功的 OOS Run」。
  *   ⇒ 一律抛领域码，让调用方看到响亮失败。
@@ -131,12 +131,25 @@ function parseRecord(text: string | null): Record<string, ResearchParameterValue
       out[key] = value;
       continue;
     }
+    if (
+      Array.isArray(value)
+      && value.every(
+        (item) =>
+          item === null
+          || typeof item === "string"
+          || typeof item === "number"
+          || typeof item === "boolean",
+      )
+    ) {
+      out[key] = value as readonly (string | number | boolean | null)[];
+      continue;
+    }
     throw new ResearchValidationError([
       {
         code: "OOS_FROZEN_SNAPSHOT_MALFORMED",
         path: `frozenSnapshotJson.${key}`,
         message:
-          `冻结快照的参数 ${key} 不是标量值`
+          `冻结快照的参数 ${key} 不是标量或标量数组`
           + "（参数冻结要求逐键精确还原，拒绝静默丢弃该键）。",
       },
     ]);

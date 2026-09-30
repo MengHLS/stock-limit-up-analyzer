@@ -23,6 +23,7 @@ function point(overrides: {
     amount: 10000,
     ma5: null,
     ma10: null,
+    ma20: null,
   };
 }
 

@@ -88,8 +88,17 @@ export const STRATEGY_TRIGGER_TYPES = [
   "LAST_VALID_DAY",
   "EVERY_VALID_DAY",
   "NEXT_TRADING_DAY",
+  "FIRST_LIMIT_POOL",
 ] as const;
 export type StrategyTriggerType = (typeof STRATEGY_TRIGGER_TYPES)[number];
+
+/** 首板股票池的评分阶段。 */
+export const STRATEGY_FIRST_LIMIT_POOL_SCORE_STAGES = [
+  "EARLY_OHLC",
+  "FULL_3F",
+] as const;
+export type StrategyFirstLimitPoolScoreStage =
+  (typeof STRATEGY_FIRST_LIMIT_POOL_SCORE_STAGES)[number];
 
 /** 条件比较操作符。 */
 export const STRATEGY_CONDITION_OPERATORS = [
@@ -178,7 +187,7 @@ export const STRATEGY_PARAMETER_ROLES = ["FIXED", "TUNABLE", "DERIVED"] as const
 export type StrategyParameterRole = (typeof STRATEGY_PARAMETER_ROLES)[number];
 
 /** 参数数据类型（与 `ResearchParameterType` 对齐，保证可复用既有参数校验器）。 */
-export const STRATEGY_PARAMETER_DATA_TYPES = ["number", "string", "boolean"] as const;
+export const STRATEGY_PARAMETER_DATA_TYPES = ["number", "string", "boolean", "json"] as const;
 export type StrategyParameterDataType = (typeof STRATEGY_PARAMETER_DATA_TYPES)[number];
 
 /** Dataset 绑定角色（SPEC §21）。 */
@@ -292,6 +301,7 @@ export const STRATEGY_DERIVED_BAR_FIELDS = [
   "momentumFromEventClose",
   "observationMeanAmplitude",
   "observationMaxAmplitude",
+  "rollingMaxAmplitude",
   "drawdownFromEventClose",
 ] as const;
 
@@ -435,6 +445,10 @@ export function resolveSignalTimeline(
     case "EVERY_VALID_DAY":
       earliestSignalOffset = windowStart;
       break;
+    case "FIRST_LIMIT_POOL":
+      // 池化策略从入池首板日（T+0）起每日评估；窗口仍用于声明后续面板深度。
+      earliestSignalOffset = 0;
+      break;
     case "LAST_VALID_DAY":
       earliestSignalOffset = windowEnd;
       break;
@@ -493,6 +507,57 @@ export interface TriggerDefinition {
   readonly type: StrategyTriggerType;
   readonly params?: Readonly<Record<string, string | number | boolean>>;
   readonly description?: string;
+}
+
+/**
+ * 首板股票池策略声明（可选；仅 `trigger.type = FIRST_LIMIT_POOL` 时生效）。
+ *
+ * 该对象把「首板事件入池 → 每日评分 → 次一交易日开盘执行 → 评分只影响买入」的
+ * 池化语义写进版本快照。旧的事件窗策略不携带本字段，执行侧继续走既有路径。
+ */
+export interface FirstLimitPoolDefinition {
+  readonly poolPolicyId: string;
+  readonly admissionEventType: "FIRST_LIMIT_UP";
+  readonly admittedRelativeDay: 0;
+  /** 事件板块范围；默认仅主板，与 v5 正式研究 universe 对齐。 */
+  readonly boardScope?: readonly ("main" | "chinext" | "star" | "bse")[];
+  /** 池龄上限（交易日）；超过即移除。 */
+  readonly poolAgeCapTradingDays: number;
+  /** 滚动 3F 评分声明；新池化版本使用该字段替代早期/完整两段声明。 */
+  readonly scorePolicy?: "ROLLING_THREE_FACTOR";
+  /** 首次评分日（含）；默认 T+1。 */
+  readonly scoreStartRelativeDay?: number;
+  /** 滚动评分最大窗口（默认 5；满窗后固定）。 */
+  readonly scoreWindowDays?: number;
+  /** 最低评分；低于该值当日移池。 */
+  readonly minimumScore?: number;
+  /** 滚动振幅风控上限（如 0.14 = 14%）。 */
+  readonly maxObservationAmplitude?: number;
+  /** 冻结校准版本 id。 */
+  readonly calibrationVersion?: string;
+  /** true = 低于最低分立即移池；仅影响未来买入。 */
+  readonly removeBelowMinimumScore?: boolean;
+  /** 同一证券的多个首板事件是否保留为独立成员。 */
+  readonly allowMultipleMembersPerSecurity?: boolean;
+  /** 数据集为池成员退出额外保留的交易日尾部。 */
+  readonly exitTailTradingDays?: number;
+  /** 旧版两段评分声明；仅历史文档兼容使用。 */
+  readonly earlyScoreStageEnd?: number;
+  /** 旧版两段评分声明；仅历史文档兼容使用。 */
+  readonly fullScoreStart?: number;
+  /** 连续不可评分达到该交易日数后移除。 */
+  readonly scoreInvalidationDays: number;
+  /** 恒为 false：评分只影响买入，不触发卖出。 */
+  readonly scoreAffectsExit: false;
+  /** 每日候选上限；0 = 不额外限制。 */
+  readonly maxDailyCandidates: number;
+  /**
+   * 面板物化预算（可选；由装配/数据桥强制执行，超限稳定失败）。
+   */
+  readonly panelBudgets?: {
+    readonly maxMembersPerDay?: number;
+    readonly maxPanelRows?: number;
+  };
 }
 
 /** 入场定义。 */
@@ -582,8 +647,12 @@ export interface PositionDefinition {
   readonly parameter?: string;
   /** 实验：按候选 signalValue 分档的权益仓位比例（与 sizingMethod=EQUITY_RATIO 配合）。 */
   readonly positionTiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+  /** 实验：按候选 signalValue 分档的权益仓位比例，值由参数 code 提供（前端可覆写）。 */
+  readonly positionTiersParameter?: string;
   /** 实验：按候选当日 rank 分档的权益仓位比例（rank 1 = 最优）。 */
   readonly positionRankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
+  /** 实验：按候选当日 rank 分档的权益仓位比例，值由参数 code 提供（前端可覆写）。 */
+  readonly positionRankTiersParameter?: string;
 }
 
 /**
@@ -638,6 +707,10 @@ export interface ParameterDefinition {
   readonly step?: number;
   /** 字符串白名单（仅 `dataType = string`）。 */
   readonly allowedValues?: readonly string[];
+  /** json 数组最小长度（仅 `dataType = json`）。 */
+  readonly minItems?: number;
+  /** json 数组最大长度（仅 `dataType = json`）。 */
+  readonly maxItems?: number;
   readonly unit?: string;
   readonly description?: string;
   readonly required: boolean;
@@ -678,6 +751,10 @@ export interface StrategyDatasetBinding {
 export interface StrategyDefinition {
   readonly schemaVersion: string;
   readonly entry: EntryDefinition;
+  /**
+   * 首板股票池策略（可选）。仅在 `entry.trigger.type = FIRST_LIMIT_POOL` 时允许声明。
+   */
+  readonly firstLimitPool?: FirstLimitPoolDefinition;
   readonly exit: ExitDefinition;
   readonly position: PositionDefinition;
   readonly risk: RiskDefinition;

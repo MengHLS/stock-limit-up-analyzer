@@ -17,12 +17,14 @@
  *   1. **不新增第二套读取实现**：`ds_*` 五表的读取全部走 `server/datasetRegistry` 既有只读接口
  *      （`DatasetRegistryRepository` + `DatasetDataReader`），本文件**不写 `ds_*` SQL、不直连
  *      `ds_*` 物理表**。
- *      **唯一例外（2026-09-14 显式登记，非静默）**：身份桥接需要读研究域小表
- *      `research_security_identifier_history`（5,552 行），因为 `ds_*` 只有代码域 `symbol`、
- *      没有 canonical 身份列，而 registry 的读取接口没有「代码 → 身份」方法。
- *      该读取（`loadPrimaryIdentifiers`）**复用**既有映射 `identifierRowToSecurityIdentifier`、
- *      **复用**既有解析 `engineKeyBridge#resolveSecurityIdByEngineKey`（判定逻辑零新增），
- *      与 `closedLoopBacktestRun/securityLabels.ts` 同口径（同一张表、同一映射器）。
+ *      **唯一例外（2026-09-14 显式登记，非静默）**：身份桥接需要代码域 `symbol` → canonical
+ *      `sec_<uuid>`，因为 `ds_*` 只有代码域 `symbol`、没有 canonical 身份列，而 registry 的
+ *      读取接口没有「代码 → 身份」方法。**该例外只在无快照时成立**：
+ *        · 无本地快照 → `defaultDatasetIdentityProvider` 读研究域小表
+ *          `research_security_identifier_history`（`loadPrimaryIdentifiers`，**复用**既有映射
+ *          `identifierRowToSecurityIdentifier` 与 `engineKeyBridge#resolveSecurityIdByEngineKey`，
+ *          与 `closedLoopBacktestRun/securityLabels.ts` 同口径）；
+ *        · 有效本地快照 → 身份直接取自快照的 `event_identity` 表，**零 Identifier History 查询**。
  *   2. **不猜不造**：`gate` 取自 `dataset_version.status`（READY → PASS，其余 → FAIL/
  *      INCONCLUSIVE 并如实记录原因）；缺行、缺窗口、缺身份一律**抛错**，绝不填零冒充。
  *   3. **内容即版本**：`datasetVersion` 由 `computeDatasetVersion(request, universeDefinition,
@@ -55,15 +57,16 @@
  *     详见 `resolveSecurityIdsByEvent` 上方注释。
  */
 
-import { eq } from "drizzle-orm";
-import { researchSecurityIdentifierHistory } from "../../drizzle/schema";
 import { getDb } from "../db";
 import {
-  DbDatasetDataReader,
   type DatasetDataReader,
   type DatasetRawBarRole,
 } from "../datasetRegistry/query";
 import { DbDatasetRegistry } from "../datasetRegistry/db";
+import {
+  defaultDatasetContentDependencies,
+  type DatasetContentDependencies,
+} from "../datasetRegistry/snapshot/contentDependencies";
 import { defaultConcurrency, mapWithConcurrency } from "../datasetRegistry/concurrency";
 import { eventScopedSecurityId } from "../eventIdentity";
 import type {
@@ -72,13 +75,11 @@ import type {
   FirstLimitPullbackEvent,
   FirstLimitPullbackRawBar,
 } from "../datasetRegistry/types";
-import { identifierRowToSecurityIdentifier } from "../historicalState/mappers";
 // 🔴 RESEARCH-EXPERIMENT-002：原先走 `../researchEngine/readRetry`（会把本装配链在模块加载期
 //    与旧 Research 目录挂在一起）；实现与领域无关，已搬到 `server/readRetry.ts`。
 import { withReadRetry } from "../readRetry";
-import { canonicalCode, parseSecurityCode } from "../security/code";
-import { resolveSecurityIdByEngineKey } from "../security/engineKeyBridge";
-import type { SecurityIdentifier } from "../security/types";
+import { RegistryDatasetBridgeError } from "./bridgeError";
+import type { DatasetIdentityProvider } from "./datasetIdentityProvider";
 import { computeDatasetVersionStreaming } from "../researchDataset/version";
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
 import { perfCount, perfRun, perfRunAsync } from "../observability";
@@ -96,20 +97,25 @@ import type {
   UniverseDayResult,
   UniverseDefinition,
 } from "../researchDataset/types";
+import type { FirstLimitPoolPolicy } from "../strategyCore/types";
+import { buildPoolProjection, type PoolMemberRecord } from "./poolProjection";
+import { loadTradingCalendar } from "../security/tradingCalendar";
+import { addDays } from "../security/dates";
+import {
+  createPooledDatasetCursor,
+  type PooledDatasetCursor,
+  type PooledDatasetCursorReader,
+} from "./pooledDatasetCursor";
 
 // ---------------------------------------------------------------------------
 // 错误
 // ---------------------------------------------------------------------------
 
-/** 直读桥错误（消息必须能直接指向「缺哪个版本 / 去改哪里」）。 */
-export class RegistryDatasetBridgeError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "RegistryDatasetBridgeError";
-    this.code = code;
-  }
-}
+export { RegistryDatasetBridgeError } from "./bridgeError";
+export {
+  loadPrimaryIdentifiers,
+  resolveSecurityIdsByEvent,
+} from "./datasetIdentityProvider";
 
 // ---------------------------------------------------------------------------
 // 配置
@@ -171,6 +177,21 @@ function resolvePoolSizeForBridge(): number {
  * ⚠️ 内存：本量级需配合 `--max-old-space-size` 使用（默认堆可能不足）。
  */
 export const REGISTRY_BRIDGE_MAX_ROWS = 1_600_000;
+
+/** 池化策略的事件板块范围过滤；未声明时保持旧行为（不过滤）。 */
+export function filterPoolEventsByBoardScope<T extends {
+  readonly boardType: string | null | undefined;
+}>(
+  events: readonly T[],
+  boardScope: readonly ("main" | "chinext" | "star" | "bse")[] | undefined,
+): readonly T[] {
+  if (boardScope === undefined) return events;
+  return events.filter(event =>
+    event.boardType !== null
+    && event.boardType !== undefined
+    && boardScope.includes(event.boardType as "main" | "chinext" | "star" | "bse"),
+  );
+}
 
 /**
  * `ds_*_post.relativeDay` 的结构上限（== 表内可用的最远观察日）。
@@ -262,81 +283,6 @@ function gateFromVersionStatus(status: DatasetVersion["status"]): ResearchDatase
 function exchangeFromSymbol(symbol: string): string {
   const dot = symbol.lastIndexOf(".");
   return dot >= 0 ? symbol.slice(dot + 1).toUpperCase() : "UNKNOWN";
-}
-
-/**
- * 载入 primary 标识全量（5,552 行）用于 symbol → canonical identity 桥接。
- *
- * 为什么一次载全而不是 `WHERE (exchange, code) IN (...)`：表**极小**（实测 5,552 行 / 1.1s），
- * 而 2,967 个 symbol 分批 IN 反而引入批大小/顺序等可变口径。映射复用既有
- * `identifierRowToSecurityIdentifier`（`historicalState/mappers.ts`），不另写一套。
- */
-async function loadPrimaryIdentifiers(): Promise<readonly SecurityIdentifier[]> {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db
-    .select()
-    .from(researchSecurityIdentifierHistory)
-    .where(eq(researchSecurityIdentifierHistory.identifierType, "primary"));
-  return rows.map(identifierRowToSecurityIdentifier);
-}
-
-/**
- * 事件 → canonical `securityId`（`sec_<uuid>`），asOf = **该事件自己的 tradeDate**。
- *
- * 🔴 必须逐事件按自己的日期解析，不能「一 symbol 解一次」：code reuse（同一代码在不同
- * 历史区间归属不同证券）下，同一 symbol 的早/晚事件本就属于不同 identity。
- * 解析失败（无生效区间 / 多行歧义）**响亮抛错**——绝不退回用代码冒充身份。
- */
-export function resolveSecurityIdsByEvent(
-  events: readonly FirstLimitPullbackEvent[],
-  identifiers: readonly SecurityIdentifier[],
-): Map<string, string> {
-  // 按 engineKey（`6位.交易所`）预索引，把 `resolveSecurityIdByEngineKey` 的线性过滤
-  // 从 O(全量) 降到 O(该代码的分段数)；判定语义完全复用该函数本身（不另写判定）。
-  const byEngineKey = new Map<string, SecurityIdentifier[]>();
-  for (const identifier of identifiers) {
-    let engineKey: string;
-    try {
-      engineKey = canonicalCode({ digits: identifier.code, exchange: identifier.exchange });
-    } catch {
-      continue; // 代码非法行不参与桥接（与 securityLabels 同口径：宁可 null，不产错代码）
-    }
-    const list = byEngineKey.get(engineKey);
-    if (list === undefined) byEngineKey.set(engineKey, [identifier]);
-    else list.push(identifier);
-  }
-
-  const resolved = new Map<string, string>();
-  for (const event of events) {
-    let engineKey: string;
-    try {
-      engineKey = canonicalCode(parseSecurityCode(event.symbol));
-    } catch {
-      throw new RegistryDatasetBridgeError(
-        "REGISTRY_SECURITY_IDENTITY_UNRESOLVED",
-        `直读桥：事件 ${event.eventId} 的 symbol=${JSON.stringify(event.symbol)} 不是合法完整代码，` +
-          `无法桥接到 canonical securityId（回落重建并如实记录）。`,
-      );
-    }
-    const segments = byEngineKey.get(engineKey);
-    const lookup =
-      segments === undefined
-        ? ({ ok: false, reason: "NO_IDENTIFIER" } as const)
-        : resolveSecurityIdByEngineKey(segments, engineKey, event.tradeDate);
-    if (!lookup.ok) {
-      throw new RegistryDatasetBridgeError(
-        "REGISTRY_SECURITY_IDENTITY_UNRESOLVED",
-        `直读桥：事件 ${event.eventId}（symbol=${event.symbol}）在 ${event.tradeDate} ` +
-          `无法解析到唯一 canonical securityId（${lookup.reason}${
-            lookup.reason === "AMBIGUOUS" ? ` / matches=${lookup.matches}` : ""
-          }）。` +
-          `🔴 不退回用代码冒充身份（那会让留档/成交明细键域与重建路径不一致）⇒ 回落重建并如实记录。`,
-      );
-    }
-    resolved.set(event.eventId, lookup.securityId);
-  }
-  return resolved;
 }
 
 /**
@@ -708,12 +654,15 @@ export function buildWindowRows(
 async function readAllEvents(
   reader: DatasetDataReader,
   datasetVersionId: number,
+  range?: { readonly fromDate?: string; readonly toDate?: string },
 ): Promise<FirstLimitPullbackEvent[]> {
   const all: FirstLimitPullbackEvent[] = [];
   let cursor: { tradeDate: string; eventId: string } | null = null;
   for (;;) {
     const page: { items: FirstLimitPullbackEvent[]; nextCursor: string | null } = await reader.listEventsPage({
       datasetVersionId,
+      ...(range?.fromDate !== undefined ? { fromDate: range.fromDate } : {}),
+      ...(range?.toDate !== undefined ? { toDate: range.toDate } : {}),
       ...(cursor !== null ? { cursor } : {}),
       limit: EVENT_PAGE_LIMIT,
     });
@@ -911,6 +860,18 @@ export interface BuildDatasetFromRegistryRequest {
    * 窗口是策略语义，桥无权代猜。
    */
   readonly observationWindow?: ObservationWindowSpec | null;
+  /**
+   * 池化策略声明（仅 FIRST_LIMIT_POOL 策略）。提供时本桥走池化逐日投影，
+   * 不读取 observationWindow，也不回落事件窗语义。
+   */
+  readonly poolPolicy?: FirstLimitPoolPolicy | null;
+  /** 池化运行窗口；仅用于把事件下推到生命周期可能覆盖该窗口的集合。 */
+  readonly dateRange?: { readonly startDate: string; readonly endDate: string } | null;
+  /** 池化面板显式预算；超限稳定失败。 */
+  readonly poolBudgets?: {
+    readonly maxMembersPerDay?: number;
+    readonly maxPanelRows?: number;
+  };
   /** dataReady 声明（与 `buildResearchDataset` 同口径：缺省 false = 冒烟）。 */
   readonly dataReady?: boolean;
 }
@@ -938,6 +899,8 @@ export interface BuildDatasetFromRegistryResult {
   readonly executionBarsAvailable: boolean;
   /** 直读实况（供装配摘要如实展示「从已落库数据集读了什么」）。 */
   readonly stats: {
+    /** 池化路径为 "pooled"；旧事件窗路径为 "event-window"。 */
+    readonly datasetSemantics: "event-window" | "pooled";
     readonly eventCount: number;
     readonly rowCount: number;
     readonly prefixBarsRead: number;
@@ -955,17 +918,21 @@ export interface BuildDatasetFromRegistryResult {
     readonly observationWindow: { readonly start: number; readonly end: number };
     /** 投影到的最远相对日（= 观察窗口末 + 1，即执行日）。 */
     readonly projectedRelativeDayMax: number;
+    /** 池化：池成员数 / 单日最大成员数；事件窗路径为 0。 */
+    readonly poolMemberCount: number;
+    readonly poolMaxMembersPerDay: number;
     readonly versionStatus: string;
     readonly datasetCode: string;
     readonly versionLabel: string;
   };
+  /** 池化路径的成员元数据；事件窗路径为空数组。 */
+  readonly poolMembers: readonly PoolMemberRecord[];
 }
 
 /**
  * 从 Dataset Registry 直读已落库 `ds_*` 数据集，投影为 `ResearchDataset`。
  *
  * 失败响亮（全部抛 `RegistryDatasetBridgeError`，附稳定错误码）：
- *   - `REGISTRY_DB_UNAVAILABLE` —— `getDb()` 为 null；
  *   - `REGISTRY_VERSION_NOT_FOUND` —— `dataset_version.id` 不存在；
  *   - `REGISTRY_VERSION_NOT_READY` —— 行存在但 status ≠ READY；
  *   - `REGISTRY_DEFINITION_MISSING` —— 版本所属 dataset_definition 缺失；
@@ -983,19 +950,280 @@ export interface BuildDatasetFromRegistryResult {
  *     不一致的**严格列**（OHLCV/量额）；
  *   - `REGISTRY_ROW_BUDGET_EXCEEDED` —— 行数超 `REGISTRY_BRIDGE_MAX_ROWS`（调用方应回落重建）。
  */
-export async function buildResearchDatasetFromRegistry(
+/**
+ * 直读桥依赖包（全部可选；缺省取统一内容依赖工厂的 snapshot-aware 装配）。
+ *
+ * 🔴 「同一个 reader」是本桥的核心纪律：内容读取（`contentReader`）与身份解析
+ * （`identityProvider`）必须同源，否则「有效快照下零内容表查询」就会出现一条暗路径。
+ */
+export interface BuildDatasetFromRegistryDeps {
+  /** 版本/定义等轻量元数据（仍读 TiDB）。 */
+  readonly metadataReader?: DatasetContentDependencies["metadataReader"];
+  /** 五张内容表读取器；缺省 = snapshot-aware（有效快照 → SQLite，否则 DB）。 */
+  readonly contentReader?: DatasetDataReader;
+  /** 事件 → canonical `sec_<uuid>`；缺省与 `contentReader` 同源。 */
+  readonly identityProvider?: DatasetIdentityProvider;
+}
+
+
+/**
+ * 池化流式直读：不物化整张逐日面板，只返回按交易日推进的 cursor。
+ *
+ * 事件只读取「最早仍可能在请求起点存活的成员」到请求终点；每个成员的 0..cap+tail
+ * bars 在其入池日批量读取，移池后保留 exitTailTradingDays 供已有持仓退出，随后释放。
+ */
+export interface BuildPooledCursorFromRegistryResult {
+  readonly cursor: PooledDatasetCursor;
+  readonly version: DatasetVersion;
+  readonly definition: DatasetDefinition;
+  /** 兼容装配摘要 / 策略定义的轻量数据集；真实行情只在 cursor 中按需读取。 */
+  readonly dataset: ResearchDataset;
+  /** code → 面板身份（canonical::pool:eventId），供公司行为装配使用。 */
+  readonly securityIdByCode: ReadonlyMap<string, readonly string[]>;
+  readonly stats: {
+    readonly eventCount: number;
+    readonly tradingDayCount: number;
+    readonly datasetVersion: string;
+    readonly poolAgeCapTradingDays: number;
+    readonly exitTailTradingDays: number;
+    readonly datasetGate: ResearchDatasetGate;
+  };
+}
+
+export async function buildPooledDatasetCursorFromRegistry(
   request: BuildDatasetFromRegistryRequest,
-): Promise<BuildDatasetFromRegistryResult> {
-  const db = await getDb();
-  if (!db) {
+  deps: BuildDatasetFromRegistryDeps = {},
+): Promise<BuildPooledCursorFromRegistryResult> {
+  const poolPolicy = request.poolPolicy ?? null;
+  if (poolPolicy === null) {
     throw new RegistryDatasetBridgeError(
-      "REGISTRY_DB_UNAVAILABLE",
-      "直读桥：数据库不可用（getDb()=null），无法读取已落库数据集。",
+      "REGISTRY_POOL_POLICY_MISSING",
+      "池化流式直读：请求未提供 poolPolicy，拒绝按事件窗语义猜测池化行为。",
+    );
+  }
+  const content = defaultDatasetContentDependencies();
+  const registry = deps.metadataReader ?? content.metadataReader;
+  const baseReader = deps.contentReader ?? content.reader;
+  const reader = "pinReader" in baseReader && typeof (baseReader as { pinReader?: unknown }).pinReader === "function"
+    ? await (baseReader as { pinReader(datasetVersionId: number): Promise<DatasetDataReader> }).pinReader(request.datasetVersionId)
+    : baseReader;
+  const identityProvider = deps.identityProvider ?? content.identityProvider;
+
+  const version = await perfRunAsync("dataset.version_and_definition", () =>
+    withReadRetry("registry.getVersionById", () => registry.getVersionById(request.datasetVersionId)),
+  );
+  if (version === undefined) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_VERSION_NOT_FOUND",
+      `池化流式直读：dataset_version.id=${request.datasetVersionId} 不存在。`,
+    );
+  }
+  if (version.status !== "READY") {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_VERSION_NOT_READY",
+      `池化流式直读：dataset_version.id=${request.datasetVersionId} status=${version.status}，只有 READY 可用。`,
+    );
+  }
+  const definition = await perfRunAsync("dataset.definition_read", () =>
+    withReadRetry("registry.getDefinitionById", () => registry.getDefinitionById(version.datasetId)),
+  );
+  if (definition === undefined) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_DEFINITION_MISSING",
+      `池化流式直读：dataset_version.id=${request.datasetVersionId} 所属 definition 不存在。`,
+    );
+  }
+  if (definition.datasetCode !== "first_limit_pullback") {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_DATASET_CODE_UNSUPPORTED",
+      `池化流式直读：datasetCode=${JSON.stringify(definition.datasetCode)} 尚不支持。`,
     );
   }
 
-  const registry = new DbDatasetRegistry();
-  const reader = new DbDatasetDataReader();
+  const postRange = await perfRunAsync("dataset.post_range", () =>
+    withReadRetry("registry.getPostRelativeDayRange", () =>
+      reader.getPostRelativeDayRange(request.datasetVersionId),
+    ),
+  );
+  if (postRange === null) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_POST_WINDOW_MISSING",
+      `池化流式直读：dataset_version.id=${request.datasetVersionId} 无 post 行情。`,
+    );
+  }
+  const exitTailTradingDays = poolPolicy.exitTailTradingDays ?? 20;
+  const requiredMaxRelativeDay = poolPolicy.poolAgeCapTradingDays + exitTailTradingDays;
+  if (requiredMaxRelativeDay > postRange.max) {
+    throw new RegistryDatasetBridgeError(
+      "POOL_AGE_CAP_EXCEEDED",
+      `池化流式直读：池龄 ${poolPolicy.poolAgeCapTradingDays} + 退出尾部 ${exitTailTradingDays} ` +
+        `需要 post rd≤${requiredMaxRelativeDay}，但版本最大 rd=${postRange.max}。`,
+    );
+  }
+
+  const rangeStart = request.dateRange?.startDate ?? version.startDate ?? version.endDate ?? postRange.max.toString();
+  const rangeEnd = request.dateRange?.endDate ?? version.endDate ?? rangeStart;
+  if (rangeStart > rangeEnd) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_OBSERVATION_WINDOW_INVALID",
+      `池化流式直读：请求日期范围倒序 [${rangeStart}, ${rangeEnd}]。`,
+    );
+  }
+  const calendarStart = addDays(rangeStart, -Math.max(180, (requiredMaxRelativeDay + 5) * 3));
+  const calendarSearchEnd = addDays(rangeEnd, Math.max(60, exitTailTradingDays * 3 + 10));
+  const calendar = await perfRunAsync("dataset.trading_calendar", () =>
+    loadTradingCalendar(calendarStart, calendarSearchEnd, {
+      name: `pooled-cursor:${request.datasetVersionId}`,
+      exchange: ["SSE", "SZSE"],
+    }),
+  );
+  const calendarDates = calendar.tradingDaysBetween(calendarStart, calendarSearchEnd);
+  const rangeStartIndex = calendarDates.findIndex(date => date >= rangeStart);
+  const rangeEndIndex = calendarDates.findIndex(date => date > rangeEnd);
+  const warmupCount = requiredMaxRelativeDay + 1;
+  const warmupIndex = rangeStartIndex < 0 ? 0 : Math.max(0, rangeStartIndex - warmupCount);
+  const cursorStart = calendarDates[warmupIndex] ?? rangeStart;
+  const exitTailEndIndex = rangeEndIndex < 0 ? calendarDates.length : rangeEndIndex + exitTailTradingDays;
+  const cursorEnd = calendarDates[Math.min(calendarDates.length - 1, Math.max(0, exitTailEndIndex - 1))] ?? rangeEnd;
+  const tradingDates = calendarDates.filter(date => date >= cursorStart && date <= cursorEnd);
+  if (tradingDates.length === 0) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_WINDOW_EMPTY",
+      `池化流式直读：窗口 [${cursorStart}, ${rangeEnd}] 内无交易日。`,
+    );
+  }
+
+  const events = await perfRunAsync("dataset.events_page", () =>
+    withReadRetry("registry.listEvents", () =>
+      readAllEvents(reader, request.datasetVersionId, {
+        fromDate: cursorStart,
+        toDate: rangeEnd,
+      }),
+    ),
+  );
+  const scopedEvents = filterPoolEventsByBoardScope(events, poolPolicy.boardScope);
+  if (scopedEvents.length === 0) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_EMPTY_VERSION",
+      `池化流式直读：窗口 [${cursorStart}, ${rangeEnd}] 内无可用首板事件。`,
+    );
+  }
+  const identityByEventId = await perfRunAsync("dataset.identity_bridge.resolve", () =>
+    identityProvider.resolveSecurityIdsByEvent(request.datasetVersionId, scopedEvents),
+  );
+
+  const datasetGate = request.dataReady === true ? gateFromVersionStatus(version.status) : "INCONCLUSIVE";
+  const normalizedRequest = normalizeResearchDatasetRequest({
+    name: request.name,
+    startDate: cursorStart,
+    endDate: cursorEnd,
+    asOfPerTradeDate: true,
+  });
+  const universeDefinition: UniverseDefinition = {
+    rule: "池化流式直读：真实成员由 cursor 逐日推进；本轻量数据集只承载身份/日期元信息。",
+    asOfDescription: "逐日 PIT（asOf = tradeDate）",
+    days: tradingDates.map(tradeDate => ({
+      tradeDate,
+      isTradingDay: true,
+      members: [],
+      excludedByReason: {},
+    })),
+  };
+  // 用真实 metadata + 交易日 universe 派生合法 rd- 版本；不伪造完整面板行内容。
+  const datasetVersion = computeDatasetVersionStreaming(normalizedRequest, universeDefinition, []);
+  const cursorReader: PooledDatasetCursorReader = {
+    listTradingDates: async (startDate, endDate) =>
+      tradingDates.filter(date => date >= startDate && date <= endDate),
+    listEvents: async (startDate, endDate) =>
+      scopedEvents.filter(event => event.tradeDate >= startDate && event.tradeDate <= endDate),
+    loadPrefixBars: async (eventIds) =>
+      readEventBars(reader, request.datasetVersionId, eventIds, "prefix", [0]),
+    loadPostBars: async (eventIds, relativeDays) =>
+      readEventBars(reader, request.datasetVersionId, eventIds, "post", relativeDays),
+  };
+  const cursor = await createPooledDatasetCursor({
+    reader: cursorReader,
+    identityByEventId,
+    datasetVersion,
+    datasetGate,
+    startDate: cursorStart,
+    endDate: cursorEnd,
+    poolAgeCapTradingDays: poolPolicy.poolAgeCapTradingDays,
+    scoreStartRelativeDay: poolPolicy.scoreStartRelativeDay ?? 1,
+    scoreInvalidationDays: poolPolicy.scoreInvalidationDays,
+    exitTailTradingDays,
+    ...(request.poolBudgets?.maxMembersPerDay !== undefined
+      ? { maxActiveMembersPerDay: request.poolBudgets.maxMembersPerDay }
+      : {}),
+  });
+
+  const securityIdByCode = new Map<string, string[]>();
+  for (const event of scopedEvents) {
+    const canonical = identityByEventId.get(event.eventId);
+    if (canonical === undefined) continue;
+    const panelId = `${canonical}::pool:${event.eventId}`;
+    const values = securityIdByCode.get(event.symbol) ?? [];
+    if (!values.includes(panelId)) values.push(panelId);
+    securityIdByCode.set(event.symbol, values);
+  }
+
+  const dataSnapshot = buildDataSnapshotFromRegistry(
+    normalizedRequest,
+    version,
+    definition,
+    [],
+    { start: 0, end: poolPolicy.poolAgeCapTradingDays - 1 },
+    requiredMaxRelativeDay,
+  );
+  const dataset: ResearchDataset = {
+    datasetVersion,
+    universeDefinition,
+    policySet: derivePolicySet(
+      normalizeResearchDatasetRequest({
+        name: request.name,
+        startDate: cursorStart,
+        endDate: rangeEnd,
+        asOfPerTradeDate: true,
+      }),
+      dataSnapshot,
+    ),
+    dataSnapshot,
+    rows: [],
+    gate: datasetGate,
+    gateNotes: [
+      `数据来源=Dataset Registry 池化流式直读（dataset_version.id=${request.datasetVersionId} / status=${version.status}）`,
+      `事件 ${scopedEvents.length} 个；cursor 从 ${cursorStart} 起按交易日推进，不一次性物化完整面板。`,
+      `池龄=${poolPolicy.poolAgeCapTradingDays}，退出尾部=${exitTailTradingDays}，T+${poolPolicy.scoreStartRelativeDay ?? 1} 起评分。`,
+    ],
+  };
+
+  return {
+    cursor,
+    version,
+    definition,
+    dataset,
+    securityIdByCode,
+    stats: {
+      eventCount: scopedEvents.length,
+      tradingDayCount: tradingDates.length,
+      datasetVersion,
+      poolAgeCapTradingDays: poolPolicy.poolAgeCapTradingDays,
+      exitTailTradingDays,
+      datasetGate,
+    },
+  };
+}
+
+export async function buildResearchDatasetFromRegistry(
+  request: BuildDatasetFromRegistryRequest,
+  deps: BuildDatasetFromRegistryDeps = {},
+): Promise<BuildDatasetFromRegistryResult> {
+  // 元数据/内容/身份三件依赖来自**同一份**内容依赖工厂（惰性单例）。
+  // 不再 eager 检查 `getDb()`：有效快照下内容与身份都走 SQLite，只有元数据仍读 TiDB。
+  const content = defaultDatasetContentDependencies();
+  const registry = deps.metadataReader ?? content.metadataReader;
+  const reader = deps.contentReader ?? content.reader;
+  const identityProvider = deps.identityProvider ?? content.identityProvider;
 
   // -- 1. 版本事实（存在 + READY）--
   const version = await perfRunAsync("dataset.version_and_definition", () =>
@@ -1030,20 +1258,31 @@ export async function buildResearchDatasetFromRegistry(
     );
   }
 
-  // -- 2. 观察窗口：🔴 必须由**策略声明**给出，本桥不猜 --
+  // -- 2. 语义分流：池化策略走池化逐日投影；旧事件窗继续走 observationWindow 投影 --
+  const poolPolicy = request.poolPolicy ?? null;
   const window = request.observationWindow;
-  if (window === null || window === undefined) {
+  if (poolPolicy === null && (window === null || window === undefined)) {
     throw new RegistryDatasetBridgeError(
       "REGISTRY_OBSERVATION_WINDOW_UNDECLARED",
-      `直读桥：策略未声明 definition.entry.observationWindow ⇒ 无法确定需要投影多少 T+N 观察/执行行情。` +
-        `本桥不猜窗口（猜错会让「数据面」与策略声明不一致），由调用方回落重建并如实记录原因。`,
+      `直读桥：策略既未声明 firstLimitPool，也未声明 definition.entry.observationWindow ` +
+        `⇒ 无法确定要投影多少 T+N 观察/执行行情。本桥不猜窗口（猜错会让「数据面」与策略声明不一致），` +
+        `由调用方回落重建并如实记录原因。`,
     );
   }
 
   // -- 3. 事件（分页读全）--
-  const events = await perfRunAsync("dataset.events_page", () =>
+  const allEvents = await perfRunAsync("dataset.events_page", () =>
     withReadRetry("registry.listEvents", () => readAllEvents(reader, request.datasetVersionId)),
   );
+  const scopedEvents = filterPoolEventsByBoardScope(allEvents, poolPolicy?.boardScope);
+  const events = request.dateRange === undefined || request.dateRange === null
+    ? scopedEvents
+    : scopedEvents.filter(event => {
+        const warmupStart = new Date(`${request.dateRange!.startDate}T00:00:00.000Z`);
+        warmupStart.setUTCDate(warmupStart.getUTCDate() - 180);
+        return event.tradeDate >= warmupStart.toISOString().slice(0, 10)
+          && event.tradeDate <= request.dateRange!.endDate;
+      });
   if (events.length === 0) {
     throw new RegistryDatasetBridgeError(
       "REGISTRY_EMPTY_VERSION",
@@ -1064,12 +1303,21 @@ export async function buildResearchDatasetFromRegistry(
         `无法支撑撮合（回落重建并如实记录）。`,
     );
   }
-  /** 需要投影的最远相对日 = 观察窗口末 + 1（决策日下一交易日执行）。 */
-  const neededMaxRelativeDay = window.end + 1;
-  if (neededMaxRelativeDay > postRange.max) {
+  /** 事件窗：最远相对日 = 窗口末 + 1（决策日下一交易日执行）；池化：池龄上限。 */
+  const neededMaxRelativeDay =
+    poolPolicy === null ? window!.end + 1 : poolPolicy.poolAgeCapTradingDays;
+  if (poolPolicy !== null && poolPolicy.poolAgeCapTradingDays > postRange.max) {
+    throw new RegistryDatasetBridgeError(
+      "POOL_AGE_CAP_EXCEEDED",
+      `池化直读：策略声明池龄上限 ${poolPolicy.poolAgeCapTradingDays} 个交易日，` +
+        `但 dataset_version.id=${request.datasetVersionId} 的 post 最大 rd=${postRange.max}。` +
+        `不静默夹取池龄、不改走事件窗投影。`,
+    );
+  }
+  if (poolPolicy === null && neededMaxRelativeDay > postRange.max) {
     throw new RegistryDatasetBridgeError(
       "REGISTRY_POST_WINDOW_TOO_SHORT",
-      `直读桥：策略声明的观察窗口 end=${window.end} 需要 post rd ≤ ${neededMaxRelativeDay}，` +
+      `直读桥：策略声明的观察窗口 end=${window!.end} 需要 post rd ≤ ${neededMaxRelativeDay}，` +
         `但 dataset_version.id=${request.datasetVersionId} 的 post 最大 rd=${postRange.max}。` +
         `🔴 不静默夹取窗口（夹取 = 把策略声明悄悄改窄）⇒ 回落重建，由调用方如实记录原因。`,
     );
@@ -1078,16 +1326,28 @@ export async function buildResearchDatasetFromRegistry(
   // -- 5. 身份桥接：symbol（代码域）→ canonical securityId（`sec_<uuid>`）--
   //     🔴 必须先解析身份，再投影行 —— 行里的 securityId 是**身份**、code 才是代码；
   //     解析失败（无生效区间 / 多行歧义）响亮抛错，不退回代码冒充身份。
-  const identifiers = await perfRunAsync("dataset.identity_bridge.read_identifiers", () =>
-    withReadRetry("registry.loadPrimaryIdentifiers", () => loadPrimaryIdentifiers()),
-  );
-  const securityIds = perfRun("dataset.identity_bridge.resolve", () =>
-    resolveSecurityIdsByEvent(events, identifiers),
+  //     🔴 身份提供器与 `reader` 同源：有效快照 → `event_identity`（零 Identifier History 查询），
+  //     无快照 → 既有 `resolveDatasetEventIdentities`（Identifier History）。
+  const securityIds = await perfRunAsync("dataset.identity_bridge.resolve", () =>
+    identityProvider.resolveSecurityIdsByEvent(request.datasetVersionId, events),
   );
 
-  // -- 6. 行情行：prefix rd=0（首板日，充当特征基准 bars[0]）+ post rd ∈ [1, end+1]（观察日 + 次日执行日）--
+  // -- 6. 行情行：prefix rd=0（首板日）；post 读取事件窗或池龄所需相对日 --
   const eventIds = events.map((e) => e.eventId);
-  const postRelativeDays = Array.from({ length: neededMaxRelativeDay }, (_, i) => i + 1);
+  /**
+   * 事件窗：决策日 rd=end，执行日 rd=end+1；池化：决策日 rd ∈ [0, cap-1]，
+   * 另读 rd=cap 作为最后一日决策的次日执行行情。
+   * 这里单独区分“图内最远相对日”和“需要从 post 表读取的最大相对日”，避免池化多读一日
+   * 或在统计中把需求值冒充实际投影值。
+   */
+  const projectedMaxRelativeDay =
+    poolPolicy === null ? neededMaxRelativeDay : poolPolicy.poolAgeCapTradingDays;
+  const postReadMaxRelativeDay =
+    poolPolicy === null ? neededMaxRelativeDay : projectedMaxRelativeDay;
+  const postRelativeDays = Array.from(
+    { length: Math.max(0, postReadMaxRelativeDay) },
+    (_, i) => i + 1,
+  );
   const [dayZeroBars, postBars] = await perfRunAsync("dataset.bar_read", () =>
     withReadRetry("registry.loadRawBarsBatch", () =>
       Promise.all([
@@ -1101,16 +1361,38 @@ export async function buildResearchDatasetFromRegistry(
     ),
   );
 
-  // -- 7. 投影为逐日面板（去重 + 决策日资格）--
-  const projection = perfRun("dataset.projection", () =>
-    buildWindowRows(events, dayZeroBars, postBars, window, securityIds),
-  );
+  // -- 7. 投影为逐日面板 --
+  const eventWindowProjection = poolPolicy === null
+    ? perfRun("dataset.projection", () =>
+        buildWindowRows(events, dayZeroBars, postBars, window!, securityIds),
+      )
+    : null;
+  const poolProjectionResult = poolPolicy === null
+    ? null
+    : perfRun("dataset.pool_projection", () =>
+        buildPoolProjection({
+          events,
+          prefixBars: dayZeroBars,
+          postBars,
+          securityIds,
+          policy: poolPolicy,
+          postMaxRelativeDay: postReadMaxRelativeDay,
+          ...(request.poolBudgets !== undefined ? { budgets: request.poolBudgets } : {}),
+        }),
+      );
+  const candidateCount =
+    eventWindowProjection !== null
+      ? eventWindowProjection.candidateCount
+      : poolProjectionResult!.stats.candidateCount;
   perfCount("dataset.events", events.length);
-  perfCount("dataset.rows_raw", projection.candidateCount);
-  perfCount("dataset.rows_deduped", projection.rows.length);
+  perfCount("dataset.rows_raw", candidateCount);
+  perfCount(
+    "dataset.rows_deduped",
+    eventWindowProjection !== null ? eventWindowProjection.rows.length : poolProjectionResult!.rows.length,
+  );
   perfCount("dataset.bars_prefix", dayZeroBars.length);
   perfCount("dataset.bars_post", postBars.length);
-  const rows = projection.rows;
+  const rows = eventWindowProjection !== null ? eventWindowProjection.rows : poolProjectionResult!.rows;
   if (rows.length > REGISTRY_BRIDGE_MAX_ROWS) {
     throw new RegistryDatasetBridgeError(
       "REGISTRY_ROW_BUDGET_EXCEEDED",
@@ -1129,16 +1411,18 @@ export async function buildResearchDatasetFromRegistry(
     asOfPerTradeDate: true,
   });
 
-  const universeDefinition = perfRun("dataset.universe_build", () =>
-    buildUniverseDefinitionFromRows(rows, projection.memberKeys),
-  );
+  const universeDefinition = poolProjectionResult !== null
+    ? poolProjectionResult.universeDefinition
+    : perfRun("dataset.universe_build", () =>
+        buildUniverseDefinitionFromRows(rows, eventWindowProjection!.memberKeys),
+      );
   const dataSnapshot = perfRun("dataset.data_snapshot", () =>
     buildDataSnapshotFromRegistry(
       normalizedRequest,
       version,
       definition,
       rows,
-      window,
+      window ?? { start: 1, end: Math.max(1, neededMaxRelativeDay - 1) },
       neededMaxRelativeDay,
     ),
   );
@@ -1155,28 +1439,34 @@ export async function buildResearchDatasetFromRegistry(
 
   const dataReady = request.dataReady ?? false;
   const gate = dataReady ? gateFromVersionStatus(version.status) : "INCONCLUSIVE";
-  const gateNotes: string[] = [
+  const gateNotes: string[] = poolPolicy === null ? [
     `数据来源=Dataset Registry 直读（dataset_version.id=${request.datasetVersionId} / ` +
       `${definition.datasetCode}@${version.version} / status=${version.status}）`,
-    `观察窗口投影：策略声明 rd ∈ [${window.start}, ${window.end}] ⇒ 面板含 rd=0（首板日，特征基准）` +
-      `+ rd ∈ [1, ${neededMaxRelativeDay}]（观察日 + 次日执行日）；**决策日资格 = rd ∈ [${window.start}, ${window.end}]**。`,
+    `观察窗口投影：策略声明 rd ∈ [${window!.start}, ${window!.end}] ⇒ 面板含 rd=0（首板日，特征基准）` +
+      `+ rd ∈ [1, ${neededMaxRelativeDay}]（观察日 + 次日执行日）；**决策日资格 = rd ∈ [${window!.start}, ${window!.end}]**。`,
     `OBSERVATION_DAY_LIQUIDITY_UNKNOWN：post（rd≥1）行的 turnover / marketCap / floatMarketCap 为 NULL —— ` +
       `ds_*_post 的 DDL 只承载原始日线（结构性 PIT 防线，见 plugins.ts#rawBarCreateSql），` +
       `把首板日数值盖到观察日上就是编数据。本投影如实记 knowledge.liquidity = UNKNOWN。`,
     `WINDOW_TAIL_OPEN_POSITION：若持仓在面板内始终等不到该证券的真实可执行行情（窗口末端退出、` +
       `停牌或缺行），会以 openAtEnd 收尾（期末按最后可得收盘价估值）—— 这是「数据集只覆盖事件窗口 +` +
       `真实可成交性」的固有边界，不得用前一日收盘价伪造清算。`,
+  ] : [
+    `数据来源=Dataset Registry 池化直读（dataset_version.id=${request.datasetVersionId} / ` +
+      `${definition.datasetCode}@${version.version} / status=${version.status}）`,
+    `池化投影：首板事件入池，按日历日读取成员从入池日到池龄上限的逐日面板；` +
+      `池龄上限=${poolPolicy!.poolAgeCapTradingDays} 交易日，实际投影到 rd=${poolProjectionResult!.stats.projectedRelativeDayMax}。`,
+    `成员身份由 poolMemberId 隔离，同一证券的多个首板事件不会合并。`,
   ];
-  if (projection.mergedKeys > 0) {
+  if (eventWindowProjection !== null && eventWindowProjection.mergedKeys > 0) {
     gateNotes.push(
-      `事件窗口重叠：${projection.mergedKeys} 个 (证券, 交易日) 键被多个事件窗口共同覆盖，` +
+      `事件窗口重叠：${eventWindowProjection.mergedKeys} 个 (证券, 交易日) 键被多个事件窗口共同覆盖，` +
         `按「严格列（open/high/low/close/volume/amount）必须完全一致、不一致即抛 REGISTRY_WINDOW_ROW_CONFLICT」` +
         `+「基准行（rd 最小者）优先」合并；实库 390002 实测 OHLCV 数值完全一致、无损。`,
     );
   }
-  if (projection.preCloseMismatchKeys > 0) {
+  if (eventWindowProjection !== null && eventWindowProjection.preCloseMismatchKeys > 0) {
     gateNotes.push(
-      `PRECLOSE_SOURCE_MISMATCH：${projection.preCloseMismatchKeys} 个 (证券, 交易日) 键的多个来源给出` +
+      `PRECLOSE_SOURCE_MISMATCH：${eventWindowProjection.preCloseMismatchKeys} 个 (证券, 交易日) 键的多个来源给出` +
         `**不一致的 previousClose**（同一交易日既是某事件的 rd=0、又是另一事件的 rd≥1，两处前收基准不同）。` +
         `前收不是行的身份（行的身份 = 该交易日 OHLCV），故不因它中止直读；但**也不编造** —— ` +
         `确定性取基准行（rd 最小）的值并在此如实登记。实库 390002 实测 15 / 112,920 键 = 0.0133%。`,
@@ -1207,15 +1497,23 @@ export async function buildResearchDatasetFromRegistry(
       postBarsRead: postBars.length,
       /** 经 Identifier History 桥接出的 canonical identity 数（= 事件数；解析失败会先抛错）。 */
       resolvedIdentityCount: securityIds.size,
-      mergedKeys: projection.mergedKeys,
-      preCloseMismatchKeys: projection.preCloseMismatchKeys,
-      candidateCount: projection.candidateCount,
-      observationWindow: { start: window.start, end: window.end },
-      projectedRelativeDayMax: neededMaxRelativeDay,
+      datasetSemantics: poolPolicy === null ? "event-window" : "pooled",
+      mergedKeys: eventWindowProjection?.mergedKeys ?? 0,
+      preCloseMismatchKeys: eventWindowProjection?.preCloseMismatchKeys ?? 0,
+      candidateCount,
+      observationWindow:
+        poolPolicy === null
+          ? { start: window!.start, end: window!.end }
+          : { start: 0, end: Math.max(0, poolPolicy.poolAgeCapTradingDays - 1) },
+      projectedRelativeDayMax:
+        poolProjectionResult?.stats.projectedRelativeDayMax ?? neededMaxRelativeDay,
+      poolMemberCount: poolProjectionResult?.stats.memberCount ?? 0,
+      poolMaxMembersPerDay: poolProjectionResult?.stats.maxMembersPerDay ?? 0,
       versionStatus: version.status,
       datasetCode: definition.datasetCode,
       versionLabel: version.version,
     },
+    poolMembers: poolProjectionResult?.members ?? [],
   };
 }
 

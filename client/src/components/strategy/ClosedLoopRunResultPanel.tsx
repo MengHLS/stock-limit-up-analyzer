@@ -14,11 +14,7 @@
  *      执行器、恒为 BLOCKED，把它们与「真跑过的阶段」平铺在一起只会淹没真实产出。
  */
 
-import {
-  MetricCard,
-  SectionCard,
-  StatusBadge,
-} from "@/components/common";
+import { MetricCard, SectionCard, StatusBadge } from "@/components/common";
 import {
   Table,
   TableBody,
@@ -27,7 +23,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { CheckCircle2, Info, TriangleAlert } from "lucide-react";
+import { PaginationBar } from "@/components/PaginationBar";
+import {
+  StockKlineDialog,
+  type StockKlineTradeTarget,
+} from "@/components/strategy/StockKlineDialog";
+import {
+  CandlestickChart,
+  CheckCircle2,
+  Info,
+  TriangleAlert,
+} from "lucide-react";
 import {
   CartesianGrid,
   Line,
@@ -38,7 +44,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type {
   ClosedLoopBacktestArtifactsView,
   ClosedLoopKeyedCount,
@@ -46,7 +52,11 @@ import type {
   ClosedLoopStageRowViewModel,
   RebuildScopeVerdict,
 } from "@/adapters/closedLoopRunAdapter";
-import { useSecurityLabels, type SecurityLabelView } from "@/hooks/useSecurityLabels";
+import {
+  SecurityLabelChunks,
+  useSecurityLabels,
+  type SecurityLabelView,
+} from "@/hooks/useSecurityLabels";
 
 function fmtPct(v: number | null): string {
   return v === null ? "—" : `${v.toFixed(2)}%`;
@@ -68,6 +78,16 @@ function fmtMoney(v: number | null): string {
   return v === null ? "—" : `¥${v.toLocaleString()}`;
 }
 
+/** 金额千分位，保留两位小数（无货币符号；null 显示「—」）。 */
+function fmtAmount(v: number | null): string {
+  return v === null
+    ? "—"
+    : v.toLocaleString("zh-CN", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+}
+
 function fmtRate(v: number | null): string {
   return v === null ? "—" : `${(v * 100).toFixed(4)}%`;
 }
@@ -76,22 +96,66 @@ function fmtBps(v: number | null): string {
   return v === null ? "—" : `${v} bp`;
 }
 
+/**
+ * 净盈亏 / 收益率的涨跌配色 —— **A 股惯例：红赚绿亏**（与 Dashboard 的 `pctClass`、
+ * 权益曲线同口径）。null / 非有限值 / 0 一律中性，不给颜色，避免把「没数据」渲染成
+ * 「赚了」或「亏了」。
+ */
+export function pnlToneClass(v: number | null): string {
+  if (v === null || !Number.isFinite(v) || v === 0) {
+    return "text-muted-foreground";
+  }
+  return v > 0 ? "text-red-600" : "text-emerald-600";
+}
+
+/**
+ * 买入金额 = 买入价 × 股数（**展示口径**）。
+ *
+ * 🔴 与适配层「零计算」纪律的关系：`Trade` 契约里没有 `buyAmount` 字段，这里只做
+ * **乘法恒等换算**（成交价 × 成交股数），不引入任何业务假设；缺任一分量即 null，
+ * 表格显示「—」，绝不补 0 或用卖出价顶替。
+ */
+export function tradeEntryAmount(
+  trade: Pick<BacktestTradeRow, "entryPrice" | "quantity">
+): number | null {
+  if (trade.entryPrice === null || trade.quantity === null) return null;
+  return trade.entryPrice * trade.quantity;
+}
+
+/**
+ * 仓位百分比 = 买入金额 ÷ 买入当日权益 × 100（**展示口径**）。
+ *
+ * 分母取该留档 `equityCurve` 中 `entryTime` 对应的当日权益点（引擎按日终记录）；
+ * 当日权益缺失、非有限值或非正时返回 null（显示「—」），不回退初始资金。
+ */
+export function tradePositionPct(
+  trade: Pick<BacktestTradeRow, "entryPrice" | "quantity" | "entryTime">,
+  equityByDate: ReadonlyMap<string, number> | null
+): number | null {
+  const amount = tradeEntryAmount(trade);
+  const equity = equityByDate?.get(trade.entryTime) ?? null;
+  if (
+    amount === null ||
+    equity === null ||
+    !Number.isFinite(equity) ||
+    equity <= 0
+  ) {
+    return null;
+  }
+  return (amount / equity) * 100;
+}
+
 /** 人话解释：把首阻塞码翻译成「为什么没跑 / 怎么才能跑」。 */
 const BLOCKED_REASON_HUMAN: Readonly<Record<string, string>> = {
-  CL_DATA_NOT_INJECTED:
-    "服务端未拿到数据集 → 后续阶段无数据可用。",
+  CL_DATA_NOT_INJECTED: "服务端未拿到数据集 → 后续阶段无数据可用。",
   CL_DATASET_GATE_NOT_PASS:
     "数据集预检未通过（库内 dataset_version.status 非 READY）→ 数据阶段阻塞。",
   CL_RUNNER_NOT_INJECTED:
     "该阶段尚无真实执行器 → 下游一并阻塞。属功能未覆盖，非运行错误。",
-  CL_UPSTREAM_BLOCKED:
-    "上游阶段阻塞 → 先解决上游（禁止伪造中间产物）。",
-  CL_WIRING_ARTIFACT_MISSING:
-    "装配层缺少该阶段所需的重对象。",
-  CL_STAGE_INPUT_MISSING:
-    "该阶段所需的上游交接物未产出。",
-  CL_LIFECYCLE_CONFIG_MISSING:
-    "生命周期配置缺失，无法确定评估口径。",
+  CL_UPSTREAM_BLOCKED: "上游阶段阻塞 → 先解决上游（禁止伪造中间产物）。",
+  CL_WIRING_ARTIFACT_MISSING: "装配层缺少该阶段所需的重对象。",
+  CL_STAGE_INPUT_MISSING: "该阶段所需的上游交接物未产出。",
+  CL_LIFECYCLE_CONFIG_MISSING: "生命周期配置缺失，无法确定评估口径。",
 };
 
 /**
@@ -186,7 +250,9 @@ function renderStageRow(stage: ClosedLoopStageRowViewModel, compact = false) {
       <TableCell className="px-3 py-2">
         {stage.blockedReasonCode ? (
           <div>
-            <span className="font-mono text-red-600">{stage.blockedReasonCode}</span>
+            <span className="font-mono text-red-600">
+              {stage.blockedReasonCode}
+            </span>
             {stage.blockedDetail && (
               <p className="mt-0.5 max-w-xl text-[11px] leading-snug text-muted-foreground">
                 {stage.blockedDetail}
@@ -221,7 +287,9 @@ function renderEquityTooltip(props: unknown, initialCapital: number | null) {
       <p className="font-mono font-medium">{point.date}</p>
       <p className="flex items-center justify-between gap-3">
         <span className="text-muted-foreground">权益</span>
-        <span className="font-mono tabular-nums">¥{point.equity.toLocaleString()}</span>
+        <span className="font-mono tabular-nums">
+          ¥{point.equity.toLocaleString()}
+        </span>
       </p>
       {diff !== null && (
         <p className="flex items-center justify-between gap-3 text-muted-foreground">
@@ -259,12 +327,17 @@ function SecurityCell({
     return (
       <div className="flex flex-col leading-tight">
         <span>{label.name ?? "—"}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">{label.code}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {label.code}
+        </span>
       </div>
     );
   }
   return (
-    <span className="font-mono text-[10px] text-muted-foreground" title={securityId}>
+    <span
+      className="font-mono text-[10px] text-muted-foreground"
+      title={securityId}
+    >
       {securityId.length <= 14 ? securityId : `${securityId.slice(0, 14)}…`}
     </span>
   );
@@ -275,100 +348,304 @@ function SecurityCell({
  *
  * 版本对比页与完整运行面板共用同一组件，避免两处列口径漂移。
  */
+export type BacktestTradeRow =
+  ClosedLoopBacktestArtifactsView["trades"][number];
+
+/** 按买入年份倒序分组；同一年内保持后端返回的交易顺序。 */
+export function groupBacktestTradesByYear(
+  trades: readonly BacktestTradeRow[]
+): Array<[string, BacktestTradeRow[]]> {
+  const grouped = new Map<string, BacktestTradeRow[]>();
+  trades.forEach(trade => {
+    const year = trade.entryTime.slice(0, 4) || "未知年份";
+    grouped.set(year, [...(grouped.get(year) ?? []), trade]);
+  });
+  return [...grouped.entries()].sort(([left], [right]) =>
+    right.localeCompare(left)
+  );
+}
+
 export function BacktestTradeDetailsTable({
   backtest,
 }: {
   backtest: ClosedLoopBacktestArtifactsView;
 }) {
+  const [detailTrade, setDetailTrade] = useState<StockKlineTradeTarget | null>(
+    null
+  );
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [activeYear, setActiveYear] = useState<string>(ALL_YEARS);
+  const years = useMemo(
+    () => groupBacktestTradesByYear(backtest.trades),
+    [backtest.trades]
+  );
+  // 年度筛选：所选年份若不在当前数据里（切换留档 / 数据变化），回落到「全部」。
+  const effectiveYear =
+    activeYear !== ALL_YEARS && years.some(([year]) => year === activeYear)
+      ? activeYear
+      : ALL_YEARS;
+  const visibleTrades =
+    effectiveYear === ALL_YEARS
+      ? backtest.trades
+      : (years.find(([year]) => year === effectiveYear)?.[1] ??
+        backtest.trades);
   const tradeSecurityIds = useMemo(
     () =>
       backtest.trades
         .filter(trade => trade.code === null && trade.name === null)
         .map(trade => trade.securityId),
-    [backtest.trades],
+    [backtest.trades]
   );
   const { labels: securityLabels } = useSecurityLabels(tradeSecurityIds);
+  const equityByDate = useMemo(() => {
+    const byDate = new Map<string, number>();
+    for (const point of backtest.equityCurve) {
+      if (Number.isFinite(point.equity) && point.equity > 0) {
+        byDate.set(point.date, point.equity);
+      }
+    }
+    return byDate;
+  }, [backtest.equityCurve]);
 
   return (
     <div>
       <p className="mb-1 text-[11px] text-muted-foreground">
-        成交明细{backtest.tradesTruncated ? "（后端按上限投影，仅含前若干笔）" : ""}
+        成交明细
+        {backtest.tradesTruncated ? "（后端按上限投影，仅含前若干笔）" : ""}
         {backtest.tradeCount > 0 && `　共 ${backtest.tradeCount} 笔`}
       </p>
       {backtest.trades.length === 0 ? (
         <p className="text-[11px] text-muted-foreground">无成交明细。</p>
       ) : (
-        <div className="max-h-[360px] overflow-auto rounded-md border">
-          <Table className="text-xs">
-            <TableHeader>
-              <TableRow>
-                <TableHead className="px-3 py-2">证券（名称 / 代码）</TableHead>
-                <TableHead className="px-3 py-2">买入日</TableHead>
-                <TableHead className="px-3 py-2">买入价</TableHead>
-                <TableHead className="px-3 py-2">卖出日</TableHead>
-                <TableHead className="px-3 py-2">卖出价</TableHead>
-                <TableHead className="px-3 py-2">股数</TableHead>
-                <TableHead className="px-3 py-2">净盈亏</TableHead>
-                <TableHead className="px-3 py-2">收益率</TableHead>
-                <TableHead className="px-3 py-2">持有(交易日)</TableHead>
-                <TableHead className="px-3 py-2">退出原因</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {backtest.trades.map((trade, index) => (
-                <TableRow key={`${trade.securityId}-${trade.entryTime}-${index}`}>
-                  <TableCell className="px-3 py-1.5">
-                    <SecurityCell
-                      securityId={trade.securityId}
-                      label={
-                        trade.code !== null || trade.name !== null
-                          ? {
-                              securityId: trade.securityId,
-                              code: trade.code,
-                              name: trade.name,
-                              exchange: null,
-                            }
-                          : securityLabels?.[trade.securityId] ?? null
-                      }
-                    />
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono">{trade.entryTime}</TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                    {fmtNum(trade.entryPrice)}
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono">
-                    {trade.exitTime ?? (trade.openAtEnd ? "期末持仓" : "—")}
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                    {fmtNum(trade.exitPrice)}
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                    {fmtInt(trade.quantity)}
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                    {fmtNum(trade.netPnl)}
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                    {fmtPct(trade.returnPct)}
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 font-mono tabular-nums">
-                    {fmtInt(trade.holdingPeriod)}
-                  </TableCell>
-                  <TableCell className="px-3 py-1.5 text-muted-foreground">
-                    {trade.exitReason ?? (trade.openAtEnd ? "期末持仓" : "—")}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <>
+          {/* 按年分组只作横向筛选条件：年份从新到旧横排，每格带上该年成交笔数。 */}
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <YearFilterChip
+              label="全部"
+              count={backtest.trades.length}
+              active={effectiveYear === ALL_YEARS}
+              onSelect={() => setActiveYear(ALL_YEARS)}
+            />
+            {years.map(([year, trades]) => (
+              <YearFilterChip
+                key={year}
+                label={`${year} 年`}
+                count={trades.length}
+                active={effectiveYear === year}
+                onSelect={() => setActiveYear(year)}
+              />
+            ))}
+          </div>
+          <TradeTableSection
+            key={effectiveYear}
+            trades={visibleTrades}
+            equityByDate={equityByDate}
+            labels={securityLabels ?? null}
+            onOpenDetail={trade => {
+              setDetailTrade({
+                securityId: trade.securityId,
+                code: trade.code,
+                name: trade.name,
+                entryTime: trade.entryTime,
+                exitTime: trade.exitTime,
+              });
+              setDetailOpen(true);
+            }}
+          />
+        </>
       )}
       {backtest.trades.length > 0 && (
         <p className="mt-1 text-[11px] text-muted-foreground">
           证券名称取自涨停复盘记录（`limit_up_records`，只收录有过涨停的股票），未收录的代码名称显示「—」；
-          代码为证券标识历史的 canonical 形式（`6位数字.交易所`）。
+          代码为证券标识历史的 canonical 形式（`6位数字.交易所`）。买入金额 =
+          买入价 × 股数； 仓位百分比 = 买入金额 ÷
+          买入当日权益（日终权益口径；展示口径，未含费用与滑点）。
         </p>
       )}
+      <StockKlineDialog
+        trade={detailTrade}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+      />
+      <SecurityLabelChunks securityIds={tradeSecurityIds} />
+    </div>
+  );
+}
+
+/** 「全部年份」筛选值 —— 与真实年份（`YYYY`）区分开。 */
+const ALL_YEARS = "__ALL__";
+
+/**
+ * 年份筛选格 —— 横向排列的一个筛选条件，展示该年成交笔数。
+ */
+function YearFilterChip({
+  label,
+  count,
+  active,
+  onSelect,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onSelect}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors ${
+        active
+          ? "border-teal-600 bg-teal-600 text-white"
+          : "border-slate-200 bg-white text-slate-600 hover:border-teal-300 hover:text-teal-700"
+      }`}
+    >
+      <span className="font-medium">{label}</span>
+      <span
+        className={`rounded-full px-1.5 text-[10px] font-semibold tabular-nums ${
+          active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+        }`}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * 成交明细表 + 分页。
+ *
+ * 分页状态放在子组件内，并由 `key`（当前筛选年份）触发重挂载：切换年份时自然回到第 1 页。
+ */
+function TradeTableSection({
+  trades,
+  equityByDate,
+  labels,
+  onOpenDetail,
+}: {
+  trades: readonly BacktestTradeRow[];
+  /** 买入日 → 当日权益；仓位百分比按买入日取值。 */
+  equityByDate: ReadonlyMap<string, number>;
+  labels: Readonly<Record<string, SecurityLabelView>> | null;
+  onOpenDetail: (trade: BacktestTradeRow) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const totalPages = Math.max(1, Math.ceil(trades.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pagedTrades = trades.slice(pageStart, pageStart + pageSize);
+
+  return (
+    <div className="rounded-md border">
+      <div className="overflow-x-auto">
+        <Table className="text-xs">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="px-3 py-2">证券（名称 / 代码）</TableHead>
+              <TableHead className="px-3 py-2">买入日</TableHead>
+              <TableHead className="px-3 py-2">买入价</TableHead>
+              <TableHead className="px-3 py-2">卖出日</TableHead>
+              <TableHead className="px-3 py-2">卖出价</TableHead>
+              <TableHead className="px-3 py-2">股数</TableHead>
+              <TableHead className="px-3 py-2">买入金额</TableHead>
+              <TableHead className="px-3 py-2">仓位百分比</TableHead>
+              <TableHead className="px-3 py-2">净盈亏</TableHead>
+              <TableHead className="px-3 py-2">收益率</TableHead>
+              <TableHead className="px-3 py-2">持有(交易日)</TableHead>
+              <TableHead className="px-3 py-2">退出原因</TableHead>
+              <TableHead className="px-3 py-2 text-right">交易详情</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pagedTrades.map(trade => (
+              <TableRow key={`${trade.securityId}-${trade.entryTime}`}>
+                <TableCell className="px-3 py-1.5">
+                  <SecurityCell
+                    securityId={trade.securityId}
+                    label={
+                      trade.code !== null || trade.name !== null
+                        ? {
+                            securityId: trade.securityId,
+                            code: trade.code,
+                            name: trade.name,
+                            exchange: null,
+                          }
+                        : (labels?.[trade.securityId] ?? null)
+                    }
+                  />
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono">
+                  {trade.entryTime}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                  {fmtNum(trade.entryPrice)}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono">
+                  {trade.exitTime ?? (trade.openAtEnd ? "期末持仓" : "—")}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                  {fmtNum(trade.exitPrice)}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                  {fmtInt(trade.quantity)}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                  {fmtAmount(tradeEntryAmount(trade))}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                  {fmtPct(tradePositionPct(trade, equityByDate))}
+                </TableCell>
+                <TableCell
+                  className={`px-3 py-1.5 font-mono tabular-nums ${pnlToneClass(trade.netPnl)}`}
+                >
+                  {fmtNum(trade.netPnl)}
+                </TableCell>
+                <TableCell
+                  className={`px-3 py-1.5 font-mono tabular-nums ${pnlToneClass(trade.returnPct)}`}
+                >
+                  {fmtPct(trade.returnPct)}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 font-mono tabular-nums">
+                  {fmtInt(trade.holdingPeriod)}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 text-muted-foreground">
+                  {trade.exitReason ?? (trade.openAtEnd ? "期末持仓" : "—")}
+                </TableCell>
+                <TableCell className="px-3 py-1.5 text-right">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-white px-2 py-1 font-medium text-teal-700 transition-colors hover:border-teal-300 hover:bg-teal-50"
+                    onClick={() => onOpenDetail(trade)}
+                  >
+                    <CandlestickChart className="h-3.5 w-3.5" />
+                    交易详情
+                  </button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 px-3 py-2">
+        <span className="text-[11px] text-muted-foreground">
+          本页第 {trades.length === 0 ? 0 : pageStart + 1}–
+          {Math.min(pageStart + pageSize, trades.length)} 笔（共 {trades.length}{" "}
+          笔）
+        </span>
+        <PaginationBar
+          page={currentPage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={size => {
+            setPageSize(size);
+            setPage(1);
+          }}
+          pageSizeOptions={[10, 20, 50, 100]}
+          className="ml-auto"
+        />
+      </div>
     </div>
   );
 }
@@ -400,7 +677,10 @@ function StrategyOutputSection({
     equityValues.length === 0
       ? undefined
       : (() => {
-          const values = initialCapital === null ? equityValues : [...equityValues, initialCapital];
+          const values =
+            initialCapital === null
+              ? equityValues
+              : [...equityValues, initialCapital];
           const lo = Math.min(...values);
           const hi = Math.max(...values);
           const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.02 || 1;
@@ -410,7 +690,9 @@ function StrategyOutputSection({
   return (
     <div className="mt-4 rounded-md border px-3 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-foreground">策略产出（回测阶段真实产物）</span>
+        <span className="text-xs font-medium text-foreground">
+          策略产出（回测阶段真实产物）
+        </span>
         <StatusBadge
           status={zeroTrades ? "WARNING" : "SUCCESS"}
           label={zeroTrades ? "ZERO_TRADES" : "TRADES_FILLED"}
@@ -422,7 +704,10 @@ function StrategyOutputSection({
 
       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard label="成交笔数" value={fmtInt(backtest.tradeCount)} />
-        <MetricCard label="初始资金" value={fmtMoney(backtest.initialCapital)} />
+        <MetricCard
+          label="初始资金"
+          value={fmtMoney(backtest.initialCapital)}
+        />
         <MetricCard label="期末权益" value={fmtMoney(backtest.finalEquity)} />
         <MetricCard
           label="总收益率（评估阶段口径）"
@@ -437,7 +722,8 @@ function StrategyOutputSection({
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               本次一笔都没成交（订单 {fmtInt(stats?.totalOrders ?? null)} 单，
-              全部被拒 {fmtInt(stats?.rejectedOrders ?? null)} 单）⇒ 权益曲线恒定不变、指标全 0。
+              全部被拒 {fmtInt(stats?.rejectedOrders ?? null)} 单）⇒
+              权益曲线恒定不变、指标全 0。
             </span>
           </p>
           <p className="mt-1 pl-5">
@@ -450,7 +736,8 @@ function StrategyOutputSection({
           </p>
           <p className="mt-1 pl-5">
             最常见原因若为「执行日无行情」，说明数据集在该证券的**执行日**没有行情行
-            （例如数据集只覆盖事件日）—— 请核对上方「真实数据装配」里的数据来源与回落原因。
+            （例如数据集只覆盖事件日）——
+            请核对上方「真实数据装配」里的数据来源与回落原因。
           </p>
         </div>
       )}
@@ -463,19 +750,36 @@ function StrategyOutputSection({
           </p>
           <div className="w-full" style={{ height: 220 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={curve} margin={{ top: 8, right: 24, bottom: 4, left: 4 }}>
-                <CartesianGrid vertical={false} stroke="currentColor" strokeOpacity={0.12} />
+              <LineChart
+                data={curve}
+                margin={{ top: 8, right: 24, bottom: 4, left: 4 }}
+              >
+                <CartesianGrid
+                  vertical={false}
+                  stroke="currentColor"
+                  strokeOpacity={0.12}
+                />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.7 }}
+                  tick={{
+                    fontSize: 10,
+                    fill: "currentColor",
+                    fillOpacity: 0.7,
+                  }}
                   tickLine={false}
                   axisLine={{ stroke: "currentColor", strokeOpacity: 0.2 }}
                   minTickGap={36}
                 />
                 <YAxis
                   {...(yDomain !== undefined ? { domain: yDomain } : {})}
-                  tickFormatter={(value: number) => `${Math.round(value / 1000)}k`}
-                  tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.7 }}
+                  tickFormatter={(value: number) =>
+                    `${Math.round(value / 1000)}k`
+                  }
+                  tick={{
+                    fontSize: 10,
+                    fill: "currentColor",
+                    fillOpacity: 0.7,
+                  }}
                   tickLine={false}
                   axisLine={false}
                   width={48}
@@ -518,9 +822,11 @@ function StrategyOutputSection({
       {/* 撮合统计（含拒单 / 跳过原因分布） */}
       <div className="mt-3 grid gap-1 rounded-md border bg-muted/20 px-3 py-2 font-mono text-[11px] leading-relaxed">
         <p className="text-muted-foreground">
-          撮合：信号 {fmtInt(stats?.totalSignals ?? null)} · 下单 {fmtInt(stats?.totalOrders ?? null)} ·
-          成交 {fmtInt(stats?.totalFills ?? null)} · 拒单 {fmtInt(stats?.rejectedOrders ?? null)} ·
-          部分成交 {fmtInt(stats?.partialFills ?? null)}
+          撮合：信号 {fmtInt(stats?.totalSignals ?? null)} · 下单{" "}
+          {fmtInt(stats?.totalOrders ?? null)} · 成交{" "}
+          {fmtInt(stats?.totalFills ?? null)} · 拒单{" "}
+          {fmtInt(stats?.rejectedOrders ?? null)} · 部分成交{" "}
+          {fmtInt(stats?.partialFills ?? null)}
         </p>
         <p className="text-muted-foreground">
           拒单原因分布：
@@ -542,13 +848,18 @@ function StrategyOutputSection({
           <p className="text-muted-foreground">
             成本：
             <KeyedCountList
-              items={backtest.costs.map(c => ({ key: c.key, count: Math.round(c.count) }))}
+              items={backtest.costs.map(c => ({
+                key: c.key,
+                count: Math.round(c.count),
+              }))}
               labels={COST_KEY_LABEL}
               emptyText="—"
             />
           </p>
         )}
-        {costModelNote && <p className="text-muted-foreground">假设：{costModelNote}</p>}
+        {costModelNote && (
+          <p className="text-muted-foreground">假设：{costModelNote}</p>
+        )}
       </div>
 
       {/* 🔴 证券范围未确认（修复前落库的历史结果）—— 必须如实提示：
@@ -557,7 +868,10 @@ function StrategyOutputSection({
         <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
           <p className="flex items-start gap-1.5 font-medium">
             <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>本次运行的证券范围<strong>未确认</strong>，成交明细可能超出你绑定数据集的范围。</span>
+            <span>
+              本次运行的证券范围<strong>未确认</strong>
+              ，成交明细可能超出你绑定数据集的范围。
+            </span>
           </p>
         </div>
       )}
@@ -589,12 +903,16 @@ export function ClosedLoopRunResultPanel({
   const a = result.assembly;
   const zeroExecuted = result.counts.executed === 0 && total > 0;
   // 「本次真正做了什么」为主视图：只有 EXECUTED 阶段有产物，其余（BLOCKED / SKIPPED）折叠。
-  const executedStages = result.stages.filter(stage => stage.state === "EXECUTED");
-  const unexecutedStages = result.stages.filter(stage => stage.state !== "EXECUTED");
+  const executedStages = result.stages.filter(
+    stage => stage.state === "EXECUTED"
+  );
+  const unexecutedStages = result.stages.filter(
+    stage => stage.state !== "EXECUTED"
+  );
   const blockedHuman =
     result.firstBlockedReasonCode === null
       ? null
-      : BLOCKED_REASON_HUMAN[result.firstBlockedReasonCode] ?? null;
+      : (BLOCKED_REASON_HUMAN[result.firstBlockedReasonCode] ?? null);
 
   return (
     <SectionCard
@@ -611,9 +929,7 @@ export function ClosedLoopRunResultPanel({
             Chain: {shortHash(result.chainFingerprint)}
           </span>
         )}
-        {result.synthetic && (
-          <StatusBadge status="WARNING" label="SYNTHETIC" />
-        )}
+        {result.synthetic && <StatusBadge status="WARNING" label="SYNTHETIC" />}
       </div>
 
       {/* 「0 执行」人话横幅：不是卡住、也不是没做完，而是入参没给够 */}
@@ -656,7 +972,9 @@ export function ClosedLoopRunResultPanel({
             <span className="font-mono text-muted-foreground">
               数据集 {a.datasetVersion}
               {a.datasetVersionId !== null && (
-                <span className="ml-1">（dataset_version.id={a.datasetVersionId}）</span>
+                <span className="ml-1">
+                  （dataset_version.id={a.datasetVersionId}）
+                </span>
               )}
             </span>
           </div>
@@ -668,27 +986,32 @@ export function ClosedLoopRunResultPanel({
           )}
           <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-0.5 sm:grid-cols-3 lg:grid-cols-4">
             <span className="text-muted-foreground">
-              区间：<span className="font-mono text-foreground">
+              区间：
+              <span className="font-mono text-foreground">
                 {a.startDate || "—"} ~ {a.endDate || "—"}
               </span>
             </span>
             <span className="text-muted-foreground">
-              行数：<span className="font-mono text-foreground">
+              行数：
+              <span className="font-mono text-foreground">
                 {fmtInt(a.datasetRowCount)}
               </span>
             </span>
             <span className="text-muted-foreground">
-              证券数：<span className="font-mono text-foreground">
+              证券数：
+              <span className="font-mono text-foreground">
                 {fmtInt(a.datasetSecurityCount)}
               </span>
             </span>
             <span className="text-muted-foreground">
-              策略：<span className="font-mono text-foreground">
+              策略：
+              <span className="font-mono text-foreground">
                 {a.strategyId || "—"}@{a.strategyVersion || "—"}
               </span>
             </span>
             <span className="text-muted-foreground">
-              配方：<span className="font-mono text-foreground">
+              配方：
+              <span className="font-mono text-foreground">
                 {a.recipeId || "—"}
               </span>
               {a.recipeSource === "default-fallback" ? (
@@ -705,36 +1028,41 @@ export function ClosedLoopRunResultPanel({
               )}
             </span>
             <span className="text-muted-foreground">
-              特征：<span className="font-mono text-foreground">
+              特征：
+              <span className="font-mono text-foreground">
                 {a.recipeFeatureIds.length > 0
                   ? a.recipeFeatureIds.join("、")
                   : "—"}
               </span>
             </span>
             <span className="text-muted-foreground">
-              初始资金：<span className="font-mono text-foreground">
+              初始资金：
+              <span className="font-mono text-foreground">
                 {fmtMoney(a.simulation.initialCapital)}
               </span>
             </span>
             <span className="text-muted-foreground">
-              最大持仓：<span className="font-mono text-foreground">
+              最大持仓：
+              <span className="font-mono text-foreground">
                 {fmtInt(a.simulation.maxPositions)}
               </span>
             </span>
             <span className="text-muted-foreground">
-              执行模型：<span className="font-mono text-foreground">
+              执行模型：
+              <span className="font-mono text-foreground">
                 {a.simulation.executionModel}
               </span>
             </span>
           </div>
           {a.simulation.costModel !== null && (
             <p className="mt-1.5 font-mono text-muted-foreground">
-              成本模型：佣金 {fmtRate(a.simulation.costModel.commissionRate ?? null)}
+              成本模型：佣金{" "}
+              {fmtRate(a.simulation.costModel.commissionRate ?? null)}
               （最低 {fmtMoney(a.simulation.costModel.minCommission ?? null)}）·
               印花税 {fmtRate(a.simulation.costModel.stampDutyRate ?? null)} ·
               过户费 {fmtRate(a.simulation.costModel.transferFeeRate ?? null)} ·
-              滑点 {fmtBps(a.simulation.costModel.slippageBps ?? null)} ·
-              冲击 {fmtBps(a.simulation.costModel.impactBps ?? null)}
+              滑点 {fmtBps(a.simulation.costModel.slippageBps ?? null)} · 冲击{" "}
+              {fmtBps(a.simulation.costModel.impactBps ?? null)}
             </p>
           )}
           {a.selectionSummary && (
@@ -755,7 +1083,10 @@ export function ClosedLoopRunResultPanel({
           <p className="mt-1 font-mono">
             {result.persistence.errorCode ?? "CLOSED_LOOP_PERSIST_FAILED"}
           </p>
-          <p className="mt-1">{result.persistence.errorMessage ?? "留档失败，但本次回测结果仍然有效。"}</p>
+          <p className="mt-1">
+            {result.persistence.errorMessage ??
+              "留档失败，但本次回测结果仍然有效。"}
+          </p>
         </div>
       )}
 
@@ -765,16 +1096,18 @@ export function ClosedLoopRunResultPanel({
           backtest={result.backtest}
           totalReturnPct={e?.totalReturnPct ?? null}
           initialCapital={
-            result.backtest.initialCapital ?? a?.simulation.initialCapital ?? null
+            result.backtest.initialCapital ??
+            a?.simulation.initialCapital ??
+            null
           }
           rebuildScope={result.rebuildScope}
           costModelNote={
             a === null
               ? null
               : `${a.simulation.executionModel} 执行 · 佣金 ${fmtRate(
-                  a.simulation.costModel?.commissionRate ?? null,
+                  a.simulation.costModel?.commissionRate ?? null
                 )} / 印花税 ${fmtRate(a.simulation.costModel?.stampDutyRate ?? null)} / 滑点 ${fmtBps(
-                  a.simulation.costModel?.slippageBps ?? null,
+                  a.simulation.costModel?.slippageBps ?? null
                 )}`
           }
         />
@@ -801,7 +1134,9 @@ export function ClosedLoopRunResultPanel({
       {result.firstBlockedReasonCode && (
         <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-700">
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="font-mono">首阻塞：{result.firstBlockedReasonCode}</span>
+          <span className="font-mono">
+            首阻塞：{result.firstBlockedReasonCode}
+          </span>
         </p>
       )}
 
@@ -816,9 +1151,18 @@ export function ClosedLoopRunResultPanel({
           )}
         </p>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          <MetricCard label="总收益率" value={fmtPct(e?.totalReturnPct ?? null)} />
-          <MetricCard label="年化收益率（CAGR）" value={fmtPct(e?.cagrPct ?? null)} />
-          <MetricCard label="最大回撤" value={fmtPct(e?.maxDrawdownPct ?? null)} />
+          <MetricCard
+            label="总收益率"
+            value={fmtPct(e?.totalReturnPct ?? null)}
+          />
+          <MetricCard
+            label="年化收益率（CAGR）"
+            value={fmtPct(e?.cagrPct ?? null)}
+          />
+          <MetricCard
+            label="最大回撤"
+            value={fmtPct(e?.maxDrawdownPct ?? null)}
+          />
           <MetricCard label="Sharpe" value={fmtNum(e?.sharpeRatio ?? null)} />
           <MetricCard label="Sortino" value={fmtNum(e?.sortinoRatio ?? null)} />
           <MetricCard label="Calmar" value={fmtNum(e?.calmarRatio ?? null)} />
@@ -879,7 +1223,8 @@ export function ClosedLoopRunResultPanel({
 
         {executedStages.length === 0 ? (
           <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-            本次没有任何阶段被真实执行 —— 请求入参未齐备。请先看上方的「首阻塞」与下方
+            本次没有任何阶段被真实执行 ——
+            请求入参未齐备。请先看上方的「首阻塞」与下方
             「未执行阶段」明细；**没有执行就没有产出**，本页不会用占位数据补齐。
           </p>
         ) : (
@@ -904,18 +1249,22 @@ export function ClosedLoopRunResultPanel({
         {unexecutedStages.length > 0 && (
           <details className="mt-3 rounded-md border bg-muted/20 px-3 py-2">
             <summary className="cursor-pointer text-xs text-muted-foreground">
-              未执行的 {unexecutedStages.length} 个阶段（无产物；列出仅为可追溯）
+              未执行的 {unexecutedStages.length}{" "}
+              个阶段（无产物；列出仅为可追溯）
             </summary>
-            {unexecutedStages.some(s => s.blockedReasonCode === "CL_RUNNER_NOT_INJECTED") && (
+            {unexecutedStages.some(
+              s => s.blockedReasonCode === "CL_RUNNER_NOT_INJECTED"
+            ) && (
               <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
                 其中{" "}
                 {
                   unexecutedStages.filter(
-                    s => s.blockedReasonCode === "CL_RUNNER_NOT_INJECTED",
+                    s => s.blockedReasonCode === "CL_RUNNER_NOT_INJECTED"
                   ).length
                 }{" "}
-                个是「尚无真实执行器」（优化 / 稳健性 / 样本外 / 过拟合 / 纸面交易 / 复盘 /
-                纪律反馈）—— 属功能未覆盖，不是本次运行出错；它们也不会产出任何数据。
+                个是「尚无真实执行器」（优化 / 稳健性 / 样本外 / 过拟合 /
+                纸面交易 / 复盘 / 纪律反馈）——
+                属功能未覆盖，不是本次运行出错；它们也不会产出任何数据。
               </p>
             )}
             <div className="mt-2 overflow-x-auto rounded-md border">

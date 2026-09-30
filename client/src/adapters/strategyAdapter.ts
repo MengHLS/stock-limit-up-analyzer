@@ -67,17 +67,61 @@ export interface PositionSizingViewModel {
 
 export interface ParameterViewModel {
   name: string;
-  type: "number" | "string" | "boolean";
+  type: "number" | "string" | "boolean" | "json";
   required: boolean;
   nullable: boolean;
-  defaultValue: number | string | boolean | null;
+  defaultValue: number | string | boolean | JsonValueArray | null;
   /** 原始契约是否显式携带 defaultValue 键（区分「无默认值」与「defaultValue: null」）。 */
   hasDefaultValue: boolean;
   min: number | null;
   max: number | null;
   step: number | null;
+  minItems: number | null;
+  maxItems: number | null;
   allowedValues: string[];
   description: string;
+}
+
+export type JsonScalar = number | string | boolean | null;
+export type JsonScalarObject = { [key: string]: JsonScalar };
+export type JsonElement = JsonScalar | JsonScalarObject;
+export type JsonValueArray = JsonElement[];
+
+function isJsonScalar(value: unknown): value is JsonScalar {
+  return (
+    value === null ||
+    typeof value === "number" ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  );
+}
+
+function isJsonElement(value: unknown): value is JsonElement {
+  if (isJsonScalar(value)) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every(isJsonScalar);
+}
+
+function isJsonValueArray(value: unknown): value is JsonValueArray {
+  return Array.isArray(value) && value.every(isJsonElement);
+}
+
+/**
+ * 把前端 JSON 文本解析成参数契约允许的有限 JSON 数组。
+ *
+ * 这里只负责 UI 输入边界；服务端 schema 仍会再次拒绝非法值。
+ */
+export function parseJsonScalarArray(text: string): JsonValueArray {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("JSON 语法无效。");
+  }
+  if (!isJsonValueArray(parsed)) {
+    throw new Error("JSON 必须是数组，元素为有限标量或键值均为标量的对象。");
+  }
+  return parsed;
 }
 
 export interface CostModelViewModel {
@@ -251,7 +295,7 @@ function parseParameter(raw: unknown): ParameterViewModel {
   const dv = r.defaultValue;
   return {
     name: asStr(r.name),
-    type: (["number", "string", "boolean"] as const).includes(r.type as never)
+    type: (["number", "string", "boolean", "json"] as const).includes(r.type as never)
       ? (r.type as ParameterViewModel["type"])
       : "number",
     required: asBool(r.required),
@@ -263,11 +307,15 @@ function parseParameter(raw: unknown): ParameterViewModel {
             typeof dv === "string" ||
             typeof dv === "boolean"
           ? dv
+          : isJsonValueArray(dv)
+            ? dv
           : null,
     hasDefaultValue: Object.prototype.hasOwnProperty.call(r, "defaultValue"),
     min: asNullableNum(r.min),
     max: asNullableNum(r.max),
     step: asNullableNum(r.step),
+    minItems: asNullableNum(r.minItems),
+    maxItems: asNullableNum(r.maxItems),
     allowedValues: asStrArray(r.allowedValues),
     description: asStr(r.description),
   };
@@ -287,6 +335,8 @@ function serializeParameter(p: ParameterViewModel): Record<string, unknown> {
   if (p.min !== null) out.min = p.min;
   if (p.max !== null) out.max = p.max;
   if (p.step !== null) out.step = p.step;
+  if (p.minItems !== null) out.minItems = p.minItems;
+  if (p.maxItems !== null) out.maxItems = p.maxItems;
   if (p.allowedValues.length > 0) out.allowedValues = p.allowedValues;
   if (p.description) out.description = p.description;
   return out;

@@ -100,6 +100,14 @@ function evaluateOneParameterSet(
   input: StrategyParameterEvaluatorInput,
   parameterSet: ResearchParameterSet,
 ): ParameterSearchSampleOutcome {
+  if (input.document.definition?.firstLimitPool !== undefined) {
+    return {
+      status: "failed",
+      error:
+        "池化策略需要异步 ResearchDatasetCursor evaluator；当前参数搜索 evaluator 为同步内存路径，"
+        + "拒绝用空/物化面板静默产出错误标量。",
+    };
+  }
   // -- 1. 同步装配策略侧（唯一实现；此处**不碰数据集**，直接复用调用方那份）--
   const side = assembleStrategySide(
     {

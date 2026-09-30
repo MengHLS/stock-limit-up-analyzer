@@ -32,7 +32,7 @@
 import type { ParameterSearchCombinationRow, ParameterSearchResultRow } from "../parameterSearch/persistence";
 import { computeParameterHash } from "../parameterSearch/parameterHash";
 import { ResearchValidationError } from "../experimentValidation";
-import type { ResearchParameterSet } from "../types";
+import type { ResearchParameterSet, ResearchParameterValue } from "../types";
 import type { FrozenCandidateSnapshot } from "./types";
 
 /** 读取冻结候选所需的最小行集（本层零 IO，行由调用方读入）。 */
@@ -57,7 +57,36 @@ function parseParametersJson(text: string): ResearchParameterSet {
       },
     ]);
   }
-  return parsed as ResearchParameterSet;
+  const out: Record<string, ResearchParameterValue> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+      continue;
+    }
+    if (
+      Array.isArray(value)
+      && value.every(
+        (item) =>
+          item === null
+          || typeof item === "string"
+          || typeof item === "number"
+          || typeof item === "boolean",
+      )
+    ) {
+      out[key] = value as readonly (string | number | boolean | null)[];
+      continue;
+    }
+    throw new ResearchValidationError([
+      {
+        code: "OOS_FROZEN_PARAMETER_SET_MISSING",
+        path: `parametersJson.${key}`,
+        message:
+          `源组合行的参数 ${key} 不是标量或标量数组`
+          + "（冻结参数集不允许嵌套对象 / 混合数组）。",
+      },
+    ]);
+  }
+  return out;
 }
 
 /**

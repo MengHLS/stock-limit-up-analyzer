@@ -58,6 +58,15 @@ export interface ClosedLoopBacktestRunListItemViewModel {
   finalEquity: number | null;
   tradeCount: number | null;
   equityCurvePointCount: number | null;
+  /**
+   * 服务端留档摘要里的评估标量（与 `closed_loop_backtest_run` 列一一对应）。
+   *
+   * **直接搬运服务端值**，展示层不重算（真跑口径含成本 / 参数，自算必然漂移）；
+   * 缺失为 `null`（如实为「无」，不臆造 0）。
+   */
+  totalReturnPct: number | null;
+  maxDrawdownPct: number | null;
+  cagrPct: number | null;
   /** 是否有成交明细可看（`null` 视为「未知」→ 不当作「有」）。 */
   hasTrades: boolean;
 }
@@ -158,6 +167,9 @@ export function toClosedLoopBacktestRunListItem(
     finalEquity: asNum(raw.finalEquity),
     tradeCount,
     equityCurvePointCount: asNum(raw.equityCurvePointCount),
+    totalReturnPct: asNum(raw.totalReturnPct),
+    maxDrawdownPct: asNum(raw.maxDrawdownPct),
+    cagrPct: asNum(raw.cagrPct),
     hasTrades: tradeCount !== null && tradeCount > 0,
   };
 }

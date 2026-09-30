@@ -19,22 +19,24 @@ function row(
 }
 
 describe("buildStockDailySeries", () => {
-  it("uses lookback rows to calculate MA5 and MA10 at the requested range edge", () => {
-    const rows = Array.from({ length: 12 }, (_, index) =>
+  it("uses lookback rows to calculate MA5, MA10 and MA20 at the requested range edge", () => {
+    const rows = Array.from({ length: 22 }, (_, index) =>
       row(`2026-01-${String(index + 1).padStart(2, "0")}`, 10 + index)
     );
 
-    const points = buildStockDailySeries(rows, "2026-01-10", "2026-01-12");
+    const points = buildStockDailySeries(rows, "2026-01-20", "2026-01-22");
 
     expect(points.map(point => point.tradeDate)).toEqual([
-      "2026-01-10",
-      "2026-01-11",
-      "2026-01-12",
+      "2026-01-20",
+      "2026-01-21",
+      "2026-01-22",
     ]);
-    expect(points[0]?.ma5).toBe(17);
-    expect(points[0]?.ma10).toBe(14.5);
-    expect(points[2]?.ma5).toBe(19);
-    expect(points[2]?.ma10).toBe(16.5);
+    expect(points[0]?.ma5).toBe(27);
+    expect(points[0]?.ma10).toBe(24.5);
+    expect(points[0]?.ma20).toBe(19.5);
+    expect(points[2]?.ma5).toBe(29);
+    expect(points[2]?.ma10).toBe(26.5);
+    expect(points[2]?.ma20).toBe(21.5);
   });
 
   it("drops incomplete OHLC rows without fabricating values", () => {
@@ -56,6 +58,7 @@ describe("buildStockDailySeries", () => {
       "2026-01-06",
     ]);
     expect(points[0]?.ma5).toBeNull();
+    expect(points[0]?.ma20).toBeNull();
     expect(points[3]?.ma5).toBe(12.8);
   });
 });

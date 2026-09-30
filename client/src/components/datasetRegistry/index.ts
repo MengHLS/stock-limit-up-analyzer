@@ -14,3 +14,5 @@ export { VersionBuildControls } from "./VersionBuildControls";
 export { CreateDatasetDialog } from "./CreateDatasetDialog";
 export { DeleteDatasetDialog } from "./DeleteDatasetDialog";
 export { DeleteDatasetVersionDialog } from "./DeleteDatasetVersionDialog";
+// LOCAL-DATASET-SNAPSHOT — 本地开发态 SQLite 快照
+export { DatasetSnapshotPanel } from "./DatasetSnapshotPanel";

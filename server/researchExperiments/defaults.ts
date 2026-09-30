@@ -18,7 +18,7 @@
 import type { ExperimentDatasetVersionOption } from "@shared/researchExperimentsContracts";
 import { defaultArtifactStorage } from "../artifactStorage/factory";
 import { DbDatasetRegistry } from "../datasetRegistry/db";
-import { DbDatasetDataReader } from "../datasetRegistry/query";
+import { defaultDatasetContentDependencies } from "../datasetRegistry/snapshot/contentDependencies";
 import { RegistryResearchDatasetReader } from "../researchRuntime/datasetReader";
 import type { ExperimentDatasetPort } from "./datasetPort";
 import {
@@ -84,10 +84,16 @@ async function listRealVersionOptions(filter?: {
 /** 真实 Dataset 桥（复用 Research 侧唯一读取层，不另写 SQL）。 */
 export function createDefaultExperimentDatasetPort(): ExperimentDatasetPort {
   const registry = new ExperimentDatasetProviderRegistry();
+  // 内容读取与元数据读取来自**同一份**快照装配：有效本地快照时内容走 SQLite，
+  // 版本/定义等轻量元数据仍读 TiDB（口径与 Registry Router 完全一致）。
+  const content = defaultDatasetContentDependencies();
   registry.register(
     createRegistryProtocolDatasetProvider({
       datasetCode: "first_limit_pullback",
-      reader: new RegistryResearchDatasetReader({ registryRepo: new DbDatasetRegistry() }),
+      reader: new RegistryResearchDatasetReader({
+        registryRepo: content.metadataReader,
+        dataReader: content.reader,
+      }),
       listVersionOptions: listRealVersionOptions,
     }),
   );

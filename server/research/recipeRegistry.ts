@@ -19,7 +19,7 @@
  */
 
 import type { DecisionPoint } from "../data";
-import type { ResearchParameterSchema, ResearchParameterSet } from "./types";
+import type { ResearchParameterSchema, ResearchParameterSet, ResearchParameterValue } from "./types";
 import type {
   FeatureProvider,
   RankingConfig,
@@ -35,7 +35,16 @@ import {
 import { makeGatedSignalBuilder, type FeatureGate } from "./framework/gatedSignal";
 import type { StrategyRecipe } from "./strategySchema/types";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
-import { PULLBACK_PARAMETER_IDS, requireNumericParameter } from "./recipeRegistryAtoms";
+import {
+  PULLBACK_PARAMETER_IDS,
+  FIXED_POOL_THREE_FACTOR_FEATURE_ID,
+  CALIBRATED_N5_EVENT_FEATURE_ID,
+  ROLLING_THREE_FACTOR_FEATURE,
+  buildCalibratedN5EventFeatureProvider,
+  buildFixedPoolThreeFactorFeatureProvider,
+  buildRollingThreeFactorFeatureProvider,
+  requireNumericParameter,
+} from "./recipeRegistryAtoms";
 import { buildPatternRecipeDefinitions } from "./patternLibrary/projectRecipe";
 
 // ---------------------------------------------------------------------------
@@ -202,8 +211,70 @@ interface StrategyRecipeDefinitionCommon {
  */
 let definitionsCache: readonly StrategyRecipeDefinition[] | null = null;
 function strategyRecipeDefinitions(): readonly StrategyRecipeDefinition[] {
-  if (definitionsCache === null) definitionsCache = buildPatternRecipeDefinitions();
+  if (definitionsCache === null) {
+    definitionsCache = [
+      ...buildPatternRecipeDefinitions(),
+      makeRollingThreeFactorRecipeDefinition(),
+      makeFixedPoolThreeFactorRecipeDefinition(),
+      makeCalibratedN5EventRecipeDefinition(),
+    ];
+  }
   return definitionsCache;
+}
+
+function makeRollingThreeFactorRecipeDefinition(): StrategyRecipeDefinition {
+  return {
+    recipeId: "first-limit-pool-rolling-3f",
+    point: "close",
+    signalFrequency: "daily",
+    signalDescription:
+      "首板池滚动 3F：T+1..T+N 逐日等权合成（N≤5），maxAmplitude/meanAmplitude 取 LOW，t1VolumeRatio 取 HIGH",
+    requiredData: ["OHLCV"],
+    selectionSummary: "每个有效池交易日按滚动 3F 分降序 TopN",
+    randomSeed: 20_260_930,
+    features: [buildRollingThreeFactorFeatureProvider("close")],
+    signalKind: "gated",
+    buildGates: () => [],
+    rankFeatureId: ROLLING_THREE_FACTOR_FEATURE.featureId,
+    rankingConfig: { higherIsBetter: true },
+    selectionConfig: { method: { kind: "topN", n: 3 } },
+  };
+}
+
+function makeFixedPoolThreeFactorRecipeDefinition(): StrategyRecipeDefinition {
+  return {
+    recipeId: "first-limit-pool-fixed-3f",
+    point: "close",
+    signalFrequency: "daily",
+    signalDescription: "首板池固定冻结桶 3F 对照：滚动窗口但所有 N 共用原冻结边界",
+    requiredData: ["OHLCV"],
+    selectionSummary: "每个有效池交易日按固定桶 3F 分降序 TopN",
+    randomSeed: 20_260_930,
+    features: [buildFixedPoolThreeFactorFeatureProvider("close")],
+    signalKind: "gated",
+    buildGates: () => [],
+    rankFeatureId: FIXED_POOL_THREE_FACTOR_FEATURE_ID,
+    rankingConfig: { higherIsBetter: true },
+    selectionConfig: { method: { kind: "topN", n: 3 } },
+  };
+}
+
+function makeCalibratedN5EventRecipeDefinition(): StrategyRecipeDefinition {
+  return {
+    recipeId: "first-limit-pullback-3f-calibrated-n5",
+    point: "close",
+    signalFrequency: "daily",
+    signalDescription: "事件窗 T+5 决策，使用 N=5 重估桶边界；用于逐 N 校准归因对照",
+    requiredData: ["OHLCV"],
+    selectionSummary: "T+5 按 N=5 校准 3F 分降序 TopN",
+    randomSeed: 20_260_930,
+    features: [buildCalibratedN5EventFeatureProvider("close")],
+    signalKind: "gated",
+    buildGates: () => [],
+    rankFeatureId: CALIBRATED_N5_EVENT_FEATURE_ID,
+    rankingConfig: { higherIsBetter: true },
+    selectionConfig: { method: { kind: "topN", n: 3 } },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -367,7 +438,7 @@ function buildGatesProbe(definition: StrategyRecipeDefinition): readonly Feature
   const extraCodes = definition.gateProbeParameterCodes ?? [];
   const out: FeatureGate[] = [];
   for (const requireBullish of probeValues) {
-    const probe: ResearchParameterSet = {};
+    const probe: Record<string, ResearchParameterValue> = {};
     // 只填能影响引用面的参数；其余给 0（数值合法，仅用于让 buildGates 走完全程）。
     for (const name of Object.values(PULLBACK_PARAMETER_IDS)) probe[name] = 0;
     for (const name of extraCodes) probe[name] = 0;

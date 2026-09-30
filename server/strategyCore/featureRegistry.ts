@@ -486,6 +486,41 @@ export function makeObservationWindowFeatures(): readonly FeatureDefinition[] {
   ];
 }
 
+/**
+ * 池化滚动风控：T+1..min(当前日,T+5) 的最大振幅。
+ *
+ * 与事件窗 `observationMaxAmplitude` 使用同一链式前收公式，但允许在 T+1..T+5 之间逐日计算。
+ */
+export function makeRollingObservationWindowFeatures(): readonly FeatureDefinition[] {
+  const rollingMaxAmplitude: FeatureDefinition = {
+    featureId: "rollingMaxAmplitude",
+    version: BUILTIN_FEATURE_VERSION,
+    inputs: ["high", "low", "close"],
+    lookback: 1,
+    leakage: sameBarLeakage("close", 0),
+    description: "T+1..min(当前日,T+5) 最大振幅（链式前收）",
+    compute: (context) => {
+      const event = context.eventDayBar;
+      if (event === null || event.close === null || event.close <= 0) return null;
+      const post = context.bars
+        .filter(bar => bar.relativeDay >= 1 && bar.relativeDay <= 5)
+        .sort((left, right) => left.relativeDay - right.relativeDay);
+      if (post.length === 0) return null;
+      let runningPreClose = event.close;
+      let max = Number.NEGATIVE_INFINITY;
+      for (const bar of post) {
+        if (bar.high === null || bar.low === null || bar.close === null) return null;
+        const amplitude = (bar.high - bar.low) / runningPreClose;
+        if (!Number.isFinite(amplitude)) return null;
+        max = Math.max(max, amplitude);
+        runningPreClose = bar.close;
+      }
+      return Number.isFinite(max) ? max : null;
+    },
+  };
+  return [rollingMaxAmplitude];
+}
+
 /** 特征 id → legacy `bar.<field>` 派生字段名的映射（**唯一权威**；未登记即拒绝）。 */
 export const DERIVED_BAR_FIELD_TO_FEATURE_ID: Readonly<Record<string, string>> = Object.freeze({
   volumeRatio: "volumeRatio",
@@ -494,6 +529,7 @@ export const DERIVED_BAR_FIELD_TO_FEATURE_ID: Readonly<Record<string, string>> =
   momentumFromEventClose: "momentumFromEventClose",
   observationMeanAmplitude: "observationMeanAmplitude",
   observationMaxAmplitude: "observationMaxAmplitude",
+  rollingMaxAmplitude: "rollingMaxAmplitude",
   drawdownFromEventClose: "drawdownFromEventClose",
 });
 
@@ -511,6 +547,7 @@ export function createDefaultFeatureRegistry(): FeatureRegistry {
   for (const window of DEFAULT_ATR_WINDOWS) definitions.push(makeAtrFeature(window));
   definitions.push(...makePullbackFeatures());
   definitions.push(...makeObservationWindowFeatures());
+  definitions.push(...makeRollingObservationWindowFeatures());
   definitions.push(makePctChangeFeature());
   return createFeatureRegistry(definitions);
 }
