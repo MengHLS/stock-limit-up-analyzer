@@ -521,6 +521,25 @@ export interface FirstLimitPoolDefinition {
   readonly admittedRelativeDay: 0;
   /** 事件板块范围；默认仅主板，与 v5 正式研究 universe 对齐。 */
   readonly boardScope?: readonly ("main" | "chinext" | "star" | "bse")[];
+  /**
+   * 是否排除 ST/*ST（PIT 口径：事件日 + 池期内逐日）。
+   *
+   * 缺省 = 由策略构造器决定的默认值（池化族默认 true：ST 永久不做）。
+   * 显式声明 `false` 只用于历史对照，不是推荐配置。
+   */
+  readonly excludeSt?: boolean;
+  /**
+   * 再入场策略（可选）。只约束**新建仓**，不影响退出与已持仓。
+   * 缺省 = 不限制（既有池化版本行为逐字节不变）。
+   */
+  readonly reentryPolicy?: {
+    /** 同一底层代码出场后 K 个交易日内不得再买（含出场当日）。 */
+    readonly securityCooldownTradingDays?: number;
+    /** 同一池成员身份累计买入次数上限；1 = 一次性成员。 */
+    readonly maxEntriesPerMember?: number;
+    /** 同一底层代码同时最多允许在仓的池成员数。 */
+    readonly maxConcurrentOpenPerCode?: number;
+  };
   /** 池龄上限（交易日）；超过即移除。 */
   readonly poolAgeCapTradingDays: number;
   /** 滚动 3F 评分声明；新池化版本使用该字段替代早期/完整两段声明。 */

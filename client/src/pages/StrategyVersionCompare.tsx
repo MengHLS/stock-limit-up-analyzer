@@ -372,6 +372,24 @@ function EvolutionBranch({
                   {fmtNum(node.row.row.cagrPct, 2, "%")}
                 </span>
               </span>
+              <span>
+                覆盖个股{" "}
+                <span className="font-mono tabular-nums">
+                  {fmtNum(node.row.row.tradedInstrumentCount, 0)}
+                </span>
+              </span>
+              <span>
+                重复占比{" "}
+                <span className="font-mono tabular-nums">
+                  {fmtNum(node.row.row.repeatTradeRatioPct, 1, "%")}
+                </span>
+              </span>
+              <span>
+                最长链{" "}
+                <span className="font-mono tabular-nums">
+                  {fmtNum(node.row.row.longestReentryChainLength, 0)}
+                </span>
+              </span>
               {node.row.row.datasetVersion !== null && (
                 <span>数据集 {node.row.row.datasetVersion}</span>
               )}

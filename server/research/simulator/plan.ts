@@ -24,6 +24,7 @@ import type { Side } from "../../backtest/types";
 import type {
   DirectionPolicy,
   PlanSkipCode,
+  ReentryBlockCode,
   SkippedIntentEntry,
 } from "./types";
 
@@ -79,6 +80,13 @@ export interface PlanDecisionInput {
     readonly runnerSlotUsage: number;
     readonly stopReduction?: boolean;
   }>;
+  /**
+   * 再入场策略阻断集合（securityId → 阻断码），由引擎按**已成交事实**计算。
+   *
+   * 命中者只影响「新建仓」，不参与退出判定；命中即写进 skipped，绝不静默丢弃。
+   * 缺省 = 不限制（既有行为逐字节不变）。
+   */
+  readonly reentryBlocked?: ReadonlyMap<string, ReentryBlockCode>;
   /** 当前持仓 securityId（引擎负责确定性排序）。 */
   readonly holdings: readonly string[];
   /** 候选退出开关；缺省 true（保持 hold-while-selected 历史行为）。 */
@@ -301,6 +309,16 @@ function desiredLongIntents(
     );
 }
 
+/** 再入场阻断码 → 审计解释（写入 skipped.reason，绝不静默）。 */
+const REENTRY_SKIP_REASONS: Readonly<Record<ReentryBlockCode, string>> = {
+  CONCURRENT_CODE_POSITION_LIMIT:
+    "再入场策略：同一底层代码已有在仓成员且达到并发上限，本次不建仓",
+  REENTRY_COOLDOWN_ACTIVE:
+    "再入场策略：同一底层代码仍在冷却窗口内（出场后 K 个交易日内），本次不建仓",
+  MEMBER_ENTRY_LIMIT_REACHED:
+    "再入场策略：该池成员身份累计买入次数已达上限，本次不建仓",
+};
+
 function skip(
   date: string,
   securityId: string,
@@ -340,6 +358,7 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     positionSizing,
     initialCapital,
     currentEquity,
+    reentryBlocked,
   } = input;
 
   const forced = forcedExitReasons ?? new Map<string, string>();
@@ -360,9 +379,22 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     );
   }
 
-  const longs = desiredLongIntents(intents);
-  const desired = new Set(longs.map(intent => intent.securityId));
+  const longsAll = desiredLongIntents(intents);
+  const desired = new Set(longsAll.map(intent => intent.securityId));
   const holdingSet = new Set(holdings);
+  // 再入场策略：命中阻断的候选不进入建仓流程，但仍是当日 desired（不影响退出判定）；
+  // 已持仓身份保持既有「已持有即 hold」语义，不受阻断集合影响。
+  const longs: PositionIntent[] = [];
+  for (const intent of longsAll) {
+    const blockCode = reentryBlocked?.get(intent.securityId);
+    if (blockCode === undefined || holdingSet.has(intent.securityId)) {
+      longs.push(intent);
+      continue;
+    }
+    skipped.push(
+      skip(decisionDate, intent.securityId, "buy", blockCode, REENTRY_SKIP_REASONS[blockCode])
+    );
+  }
 
   // ---- 退出：当前持仓不在 desired → 卖出全部可卖份额 ----
   const nextDayMessage = "模拟窗口最后交易日，无下一交易日可执行";

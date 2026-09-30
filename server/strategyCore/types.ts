@@ -142,6 +142,8 @@ export interface FirstLimitPoolPolicy {
   /** 入池当天相对日（固定 0；保留字段便于审计）。 */
   readonly admittedRelativeDay: 0;
   readonly boardScope?: readonly ("main" | "chinext" | "star" | "bse")[];
+  /** 池化读取侧 ST 排除（PIT：事件日 + 池期逐日）；true = 永不交易 ST。 */
+  readonly excludeSt?: boolean;
   /** 池龄上限（交易日）。 */
   readonly poolAgeCapTradingDays: number;
   /** 新滚动评分策略标识；旧两段策略缺省。 */

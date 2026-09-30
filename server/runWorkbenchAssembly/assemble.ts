@@ -82,6 +82,7 @@ import { buildLifecycleConfig } from "./lifecycleConfig";
 import { perfCount, perfRun, perfRunAsync } from "../observability";
 import { LoopRunAssemblyError } from "./errors";
 import { mapDeclaredExitPolicy } from "./exitPolicy";
+import { mapDeclaredReentryPolicy } from "./reentryPolicy";
 import type { ClosedLoopRuntimeConfig } from "../../shared/researchContracts";
 
 export { LoopRunAssemblyError } from "./errors";
@@ -527,6 +528,10 @@ async function resolveDataset(
         admittedRelativeDay: firstLimitPool.admittedRelativeDay,
         ...(firstLimitPool.boardScope !== undefined
           ? { boardScope: firstLimitPool.boardScope }
+          : {}),
+        // ST 永久排除（PIT：事件日 + 池期逐日）；未声明 = 由读取侧保持既有行为。
+        ...(firstLimitPool.excludeSt !== undefined
+          ? { excludeSt: firstLimitPool.excludeSt }
           : {}),
         poolAgeCapTradingDays: firstLimitPool.poolAgeCapTradingDays,
         scorePolicy: firstLimitPool.scorePolicy,
@@ -1099,6 +1104,10 @@ export function assembleStrategySide(
     parameterSet,
     document.definition?.exit?.strongHold,
   );
+  // REENTRY-001 — 池化再入场策略（冷却 / 成员限次 / 同代码并发上限）。
+  const declaredReentryPolicy = mapDeclaredReentryPolicy(
+    document.definition?.firstLimitPool?.reentryPolicy,
+  );
   const positionSizingMapping = mapPositionSizing({
     sizingMethod: declaredPositionSizing.sizingMethod,
     maxPositions,
@@ -1116,6 +1125,7 @@ export function assembleStrategySide(
     maxDailyBuys,
     directionPolicy: "longOnly",
     candidateExitPolicy: document.definition?.exit?.candidateExitPolicy ?? "HOLD_WHILE_SELECTED",
+    ...(declaredReentryPolicy === undefined ? {} : { reentryPolicy: declaredReentryPolicy }),
     // 🔴 BACKTEST-001（G1）：此前不传 ⇒ 走默认 false ⇒ 涨停买得进、跌停卖得出。
     //    改为显式传保守口径，并把政策写进 Run Record（可解释「为什么这笔没成交」）。
     executionRules: toExecutionRuleSet(backtestPolicy),

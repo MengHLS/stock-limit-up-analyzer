@@ -228,7 +228,8 @@ function parseSummaryJson(text: string | null): ParsedSummary {
   const missingMetrics =
     !Object.prototype.hasOwnProperty.call(raw, "totalReturnPct") ||
     !Object.prototype.hasOwnProperty.call(raw, "maxDrawdownPct") ||
-    !Object.prototype.hasOwnProperty.call(raw, "cagrPct");
+    !Object.prototype.hasOwnProperty.call(raw, "cagrPct") ||
+    !Object.prototype.hasOwnProperty.call(raw, "breadth");
   return {
     summary: {
       ...(parsed as ClosedLoopBacktestRunSummary),
@@ -236,6 +237,16 @@ function parseSummaryJson(text: string | null): ParsedSummary {
       totalReturnPct: readFiniteNumber(raw.totalReturnPct),
       maxDrawdownPct: readFiniteNumber(raw.maxDrawdownPct),
       cagrPct: readFiniteNumber(raw.cagrPct),
+      // 旧行没有 breadth / 漏斗字段：读取时归一成 null，由列表路径惰性回填。
+      breadth: readBreadthMetrics(raw.breadth),
+      poolMemberCount: readFiniteNumber(raw.poolMemberCount),
+      poolPeakActiveMembers: readFiniteNumber(raw.poolPeakActiveMembers),
+      poolLowScoreRemoved: readFiniteNumber(raw.poolLowScoreRemoved),
+      poolRetired: readFiniteNumber(raw.poolRetired),
+      candidateCount: readFiniteNumber(raw.candidateCount),
+      selectedIdentityCount: readFiniteNumber(raw.selectedIdentityCount),
+      stExcludedEventCount: readFiniteNumber(raw.stExcludedEventCount),
+      stRemovedMemberCount: readFiniteNumber(raw.stRemovedMemberCount),
     },
     missingMetrics,
   };
@@ -321,6 +332,27 @@ function readFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+/** 广度指标归一化：缺字段 / 结构非法一律当 null（旧行惰性回填前保持可读）。 */
+function readBreadthMetrics(value: unknown): ClosedLoopBacktestRunSummary["breadth"] {
+  const source =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    tradedInstrumentCount: readFiniteNumber(source.tradedInstrumentCount),
+    tradedIdentityCount: readFiniteNumber(source.tradedIdentityCount),
+    repeatTradeCount: readFiniteNumber(source.repeatTradeCount),
+    repeatTradeRatioPct: readFiniteNumber(source.repeatTradeRatioPct),
+    maxTradesPerInstrument: readFiniteNumber(source.maxTradesPerInstrument),
+    sameCodeOverlapPairCount: readFiniteNumber(source.sameCodeOverlapPairCount),
+    longestReentryChainLength: readFiniteNumber(source.longestReentryChainLength),
+    chainTradeRatioPct: readFiniteNumber(source.chainTradeRatioPct),
+    immediateReentryCount: readFiniteNumber(source.immediateReentryCount),
+    medianReentryGapTradingDays: readFiniteNumber(source.medianReentryGapTradingDays),
+    maxReentryGapTradingDays: readFiniteNumber(source.maxReentryGapTradingDays),
+  };
+}
+
 async function backfillSummaryMetrics(id: number): Promise<void> {
   const existing = summaryMetricsBackfillInFlight.get(id);
   if (existing !== undefined) return existing;
@@ -342,8 +374,9 @@ async function backfillSummaryMetrics(id: number): Promise<void> {
     if (parsedResult === null || typeof parsedResult !== "object" || Array.isArray(parsedResult)) {
       return;
     }
+    const fresh = buildClosedLoopBacktestRunSummary(parsedResult as ClosedLoopRunResult);
     const summary = row.summaryJson === null || row.summaryJson === ""
-      ? buildClosedLoopBacktestRunSummary(parsedResult as ClosedLoopRunResult)
+      ? fresh
       : parseSummaryJson(row.summaryJson).summary;
     const evaluation = readEvaluationStageOutput(parsedResult as ClosedLoopRunResult);
     const performance =
@@ -361,6 +394,16 @@ async function backfillSummaryMetrics(id: number): Promise<void> {
         performance === null ? summary.maxDrawdownPct ?? null : readFiniteNumber(performance.maxDrawdownPct),
       cagrPct:
         performance === null ? summary.cagrPct ?? null : readFiniteNumber(performance.cagrPct),
+      // BREADTH-001：从真实结果重算并补齐广度 / 漏斗 / ST 口径审计（不读不写 resultJson）。
+      breadth: fresh.breadth,
+      poolMemberCount: fresh.poolMemberCount,
+      poolPeakActiveMembers: fresh.poolPeakActiveMembers,
+      poolLowScoreRemoved: fresh.poolLowScoreRemoved,
+      poolRetired: fresh.poolRetired,
+      candidateCount: fresh.candidateCount,
+      selectedIdentityCount: fresh.selectedIdentityCount,
+      stExcludedEventCount: fresh.stExcludedEventCount,
+      stRemovedMemberCount: fresh.stRemovedMemberCount,
     };
     await db
       .update(closedLoopBacktestRun)

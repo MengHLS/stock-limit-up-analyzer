@@ -92,6 +92,11 @@ export function buildStrategyVersionCatalog(
       totalReturnPct: archive?.totalReturnPct ?? null,
       maxDrawdownPct: archive?.maxDrawdownPct ?? null,
       cagrPct: archive?.cagrPct ?? null,
+      // BREADTH-001 — 最新留档的覆盖广度 / 重复度（缺 breadth 的历史行按 null 处理）。
+      tradedInstrumentCount: archive?.breadth?.tradedInstrumentCount ?? null,
+      repeatTradeRatioPct: archive?.breadth?.repeatTradeRatioPct ?? null,
+      maxTradesPerInstrument: archive?.breadth?.maxTradesPerInstrument ?? null,
+      longestReentryChainLength: archive?.breadth?.longestReentryChainLength ?? null,
       study: getStrategyVersionStudyAnnotation(
         version.strategyId,
         version.version

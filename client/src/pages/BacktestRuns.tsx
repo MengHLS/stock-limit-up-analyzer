@@ -262,7 +262,7 @@ export default function BacktestRuns() {
               这条留档没有完整结果（`resultJson` 为空）—— 只保留了摘要。可对照上表的关键指标查看。
             </div>
           ) : (
-            <ClosedLoopRunResultPanel result={detailViewModel} />
+            <ClosedLoopRunResultPanel result={detailViewModel} breadth={detailQuery.data?.breadth ?? null} />
           )}
         </div>
       )}

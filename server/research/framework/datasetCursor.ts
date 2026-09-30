@@ -57,6 +57,10 @@ export interface ResearchDatasetCursorStats {
   readonly retiredMemberCount: number;
   readonly removedByMinimumScoreCount: number;
   readonly peakActiveMemberCount: number;
+  /** POOL-ST-001：事件日被 ST 排除的事件数（未启用 ST 口径时为 0）。 */
+  readonly stExcludedEventCount?: number;
+  /** POOL-ST-001：池期内转 ST 当日移池的成员数。 */
+  readonly stRemovedMemberCount?: number;
 }
 
 export interface ResearchDatasetCursor {

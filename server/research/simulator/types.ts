@@ -100,7 +100,39 @@ export type PlanSkipCode =
   /** BACKTEST-002（B-02）：策略声明的仓位口径给出的目标资金为 0 ⇒ 不建仓。 */
   | "POSITION_SIZING_ZERO_BUDGET"
   /** BACKTEST-002（B-05）：执行日成交量为 0（或缺失）⇒ 不可成交。 */
-  | "ZERO_VOLUME";
+  | "ZERO_VOLUME"
+  /** 再入场策略：同一底层代码已有在仓成员且达到并发上限 ⇒ 不建仓。 */
+  | "CONCURRENT_CODE_POSITION_LIMIT"
+  /** 再入场策略：同一底层代码仍在冷却窗口内 ⇒ 不建仓。 */
+  | "REENTRY_COOLDOWN_ACTIVE"
+  /** 再入场策略：该池成员身份累计买入次数已达上限 ⇒ 不建仓。 */
+  | "MEMBER_ENTRY_LIMIT_REACHED";
+
+/**
+ * 再入场策略阻断原因码（`planDecisionDay` 的 `reentryBlocked` 值域）。
+ *
+ * 与 `PlanSkipCode` 新增的三个码同值：阻断在引擎里按"已成交事实"计算，
+ * 由计划层原样写进 `skipped`，保证「不静默丢弃意图」。
+ */
+export type ReentryBlockCode =
+  | "CONCURRENT_CODE_POSITION_LIMIT"
+  | "REENTRY_COOLDOWN_ACTIVE"
+  | "MEMBER_ENTRY_LIMIT_REACHED";
+
+/**
+ * 再入场策略声明（可选；缺省 = 既有行为，逐字节不变）。
+ *
+ * 只约束**新建仓**，不影响退出与已持仓；判定顺序固定为
+ * 并发上限 → 代码冷却 → 成员限次，命中即不建仓并记录 skip。
+ */
+export interface ReentryPolicy {
+  /** 同一底层代码出场后 K 个交易日内不得再买（含出场当日）。null/缺省 = 不限制。 */
+  readonly securityCooldownTradingDays?: number | null;
+  /** 同一 panelSecurityId（池成员身份）累计买入次数上限；1 = 一次性成员。null/缺省 = 不限制。 */
+  readonly maxEntriesPerMember?: number | null;
+  /** 同一底层代码同时最多允许的在仓成员数。null/缺省 = 不限制。 */
+  readonly maxConcurrentOpenPerCode?: number | null;
+}
 
 /** 被计划层跳过（未下单）的意图条目。 */
 export interface SkippedIntentEntry {
@@ -149,6 +181,13 @@ export interface SimulationConfig {
   readonly directionPolicy?: DirectionPolicy;
   /** 候选退出政策；缺省 = HOLD_WHILE_SELECTED（保持既有策略行为）。 */
   readonly candidateExitPolicy?: CandidateExitPolicy;
+  /**
+   * 再入场策略（可选）。缺省 = 不限制，既有策略执行路径逐字节不变。
+   *
+   * 只在**新建仓**时生效；由 `simulator/engine` 按已成交事实计算 blocked 集合，
+   * 再交给 `planDecisionDay` 写成 skipped（绝不静默丢弃）。
+   */
+  readonly reentryPolicy?: ReentryPolicy;
   /** 涨跌停拦截开关（缺省 false，对齐 STEP 8 DEFAULT_EXECUTION_RULES）。 */
   readonly executionRules?: {
     /** 开盘触及涨停时拒绝买入。 */
@@ -261,6 +300,8 @@ export interface SimulationConfigSnapshot {
   readonly maxDailyBuys: number | null;
   readonly directionPolicy: DirectionPolicy;
   readonly candidateExitPolicy: CandidateExitPolicy;
+  /** 再入场策略快照（null = 未声明；声明时进入结果记录与指纹）。 */
+  readonly reentryPolicy: ReentryPolicy | null;
   readonly executionRules: {
     readonly blockLimitUpBuy: boolean;
     readonly blockLimitDownSell: boolean;

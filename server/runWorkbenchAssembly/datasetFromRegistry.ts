@@ -67,6 +67,7 @@ import {
   defaultDatasetContentDependencies,
   type DatasetContentDependencies,
 } from "../datasetRegistry/snapshot/contentDependencies";
+import { loadPoolStIndex } from "./poolStIndex";
 import { defaultConcurrency, mapWithConcurrency } from "../datasetRegistry/concurrency";
 import { eventScopedSecurityId } from "../eventIdentity";
 import type {
@@ -1131,11 +1132,27 @@ export async function buildPooledDatasetCursorFromRegistry(
   };
   // 用真实 metadata + 交易日 universe 派生合法 rd- 版本；不伪造完整面板行内容。
   const datasetVersion = computeDatasetVersionStreaming(normalizedRequest, universeDefinition, []);
+  // ---- POOL-ST-001：ST 永久排除（事件日 + 池期逐日 PIT）----
+  //  未声明 excludeSt（或 false）⇒ 不查 ST 表，读取路径与既有行为逐字节一致。
+  const stIndex = poolPolicy.excludeSt === true ? await loadPoolStIndex() : null;
+  let stExcludedEventCount = 0;
+  const stEligibleEvents = stIndex === null
+    ? scopedEvents
+    : scopedEvents.filter(event => {
+        const canonical = identityByEventId.get(event.eventId);
+        if (canonical === undefined) return true;
+        const st = stIndex.resolve(canonical, event.tradeDate);
+        if (st === "ST" || st === "*ST") {
+          stExcludedEventCount += 1;
+          return false;
+        }
+        return true;
+      });
   const cursorReader: PooledDatasetCursorReader = {
     listTradingDates: async (startDate, endDate) =>
       tradingDates.filter(date => date >= startDate && date <= endDate),
     listEvents: async (startDate, endDate) =>
-      scopedEvents.filter(event => event.tradeDate >= startDate && event.tradeDate <= endDate),
+      stEligibleEvents.filter(event => event.tradeDate >= startDate && event.tradeDate <= endDate),
     loadPrefixBars: async (eventIds) =>
       readEventBars(reader, request.datasetVersionId, eventIds, "prefix", [0]),
     loadPostBars: async (eventIds, relativeDays) =>
@@ -1155,6 +1172,10 @@ export async function buildPooledDatasetCursorFromRegistry(
     ...(request.poolBudgets?.maxMembersPerDay !== undefined
       ? { maxActiveMembersPerDay: request.poolBudgets.maxMembersPerDay }
       : {}),
+    ...(stIndex === null
+      ? {}
+      : { stResolver: (securityId: string, tradeDate: string) => stIndex.resolve(securityId, tradeDate) }),
+    ...(stIndex === null ? {} : { stExcludedEventCount }),
   });
 
   const securityIdByCode = new Map<string, string[]>();

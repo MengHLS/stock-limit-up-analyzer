@@ -275,6 +275,7 @@ function readFirstLimitPoolPolicy(legacy: LegacyStrategyDefinition): FirstLimitP
     admissionEventType: "FIRST_LIMIT_UP",
     admittedRelativeDay: 0,
     boardScope,
+    ...(record.excludeSt === true ? { excludeSt: true } : {}),
     poolAgeCapTradingDays: poolAgeCapTradingDays as number,
     ...(isRolling
       ? {

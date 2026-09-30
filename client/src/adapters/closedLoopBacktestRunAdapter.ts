@@ -67,8 +67,28 @@ export interface ClosedLoopBacktestRunListItemViewModel {
   totalReturnPct: number | null;
   maxDrawdownPct: number | null;
   cagrPct: number | null;
+  /**
+   * BREADTH-001 — 覆盖广度 / 重复买入 / 连续链诊断指标（服务端投影计数，前端不重算）。
+   *
+   * `null` = 该留档没留下可计算的事实（成交明细截断 / 无成交 / 旧行尚未回填），
+   * **不显示 0**，避免与「真的没有重复」混淆。
+   */
+  tradedInstrumentCount: number | null;
+  tradedIdentityCount: number | null;
+  repeatTradeRatioPct: number | null;
+  maxTradesPerInstrument: number | null;
+  longestReentryChainLength: number | null;
+  immediateReentryCount: number | null;
+  medianReentryGapTradingDays: number | null;
+  sameCodeOverlapPairCount: number | null;
   /** 是否有成交明细可看（`null` 视为「未知」→ 不当作「有」）。 */
   hasTrades: boolean;
+}
+
+/** 服务端 `breadth` 子对象的安全读取（缺字段 / 非法结构 → 空对象，逐字段取 null）。 */
+function readBreadth(raw: Record<string, unknown>): Record<string, unknown> {
+  const value = raw.breadth;
+  return isRecord(value) ? value : {};
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -170,6 +190,14 @@ export function toClosedLoopBacktestRunListItem(
     totalReturnPct: asNum(raw.totalReturnPct),
     maxDrawdownPct: asNum(raw.maxDrawdownPct),
     cagrPct: asNum(raw.cagrPct),
+    tradedInstrumentCount: asNum(readBreadth(raw).tradedInstrumentCount),
+    tradedIdentityCount: asNum(readBreadth(raw).tradedIdentityCount),
+    repeatTradeRatioPct: asNum(readBreadth(raw).repeatTradeRatioPct),
+    maxTradesPerInstrument: asNum(readBreadth(raw).maxTradesPerInstrument),
+    longestReentryChainLength: asNum(readBreadth(raw).longestReentryChainLength),
+    immediateReentryCount: asNum(readBreadth(raw).immediateReentryCount),
+    medianReentryGapTradingDays: asNum(readBreadth(raw).medianReentryGapTradingDays),
+    sameCodeOverlapPairCount: asNum(readBreadth(raw).sameCodeOverlapPairCount),
     hasTrades: tradeCount !== null && tradeCount > 0,
   };
 }

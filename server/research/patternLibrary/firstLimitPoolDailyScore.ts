@@ -67,6 +67,14 @@ export interface BuildFirstLimitPoolDailyScoreDocumentInput {
   readonly allowMultipleMembersPerSecurity?: boolean;
   readonly exitTailTradingDays?: number;
   readonly boardScope?: readonly ("main" | "chinext" | "star" | "bse")[];
+  /** ST 永久排除（PIT：事件日 + 池期逐日）；缺省 true。 */
+  readonly excludeSt?: boolean;
+  /** 再入场策略（冷却 / 成员限次 / 同代码并发上限）；缺省 = 不限制。 */
+  readonly reentryPolicy?: {
+    readonly securityCooldownTradingDays?: number;
+    readonly maxEntriesPerMember?: number;
+    readonly maxConcurrentOpenPerCode?: number;
+  };
   readonly maxDailyCandidates?: number;
   readonly panelBudgets?: {
     readonly maxMembersPerDay?: number;
@@ -112,6 +120,8 @@ export function buildFirstLimitPoolDailyScoreDocument(
     input.exitTailTradingDays ?? FIRST_LIMIT_POOL_DEFAULT_EXIT_TAIL_TRADING_DAYS;
   const maxDailyCandidates = input.maxDailyCandidates ?? topN;
   const boardScope = input.boardScope ?? (["main"] as const);
+  // 池化族默认永不交易 ST（PIT：事件日 + 池期逐日）；显式 false 只用于历史对照。
+  const excludeSt = input.excludeSt ?? true;
 
   for (const [value, label] of [
     [topN, "topN"],
@@ -176,7 +186,23 @@ export function buildFirstLimitPoolDailyScoreDocument(
     admissionEventType: "FIRST_LIMIT_UP",
     admittedRelativeDay: 0,
     boardScope: [...boardScope],
+    excludeSt,
     poolAgeCapTradingDays,
+    ...(input.reentryPolicy === undefined
+      ? {}
+      : {
+          reentryPolicy: {
+            ...(input.reentryPolicy.securityCooldownTradingDays !== undefined
+              ? { securityCooldownTradingDays: input.reentryPolicy.securityCooldownTradingDays }
+              : {}),
+            ...(input.reentryPolicy.maxEntriesPerMember !== undefined
+              ? { maxEntriesPerMember: input.reentryPolicy.maxEntriesPerMember }
+              : {}),
+            ...(input.reentryPolicy.maxConcurrentOpenPerCode !== undefined
+              ? { maxConcurrentOpenPerCode: input.reentryPolicy.maxConcurrentOpenPerCode }
+              : {}),
+          },
+        }),
     scorePolicy: "ROLLING_THREE_FACTOR",
     scoreStartRelativeDay,
     scoreWindowDays,

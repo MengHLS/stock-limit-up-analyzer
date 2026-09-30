@@ -267,6 +267,26 @@ export function validateSimulationConfig(
       )
     );
   }
+  if (config.reentryPolicy !== undefined && config.reentryPolicy !== null) {
+    const policy = config.reentryPolicy;
+    if (typeof policy !== "object" || Array.isArray(policy)) {
+      issues.push(issue("SIM_CONFIG_REENTRY_POLICY_INVALID", "simConfig.reentryPolicy", "reentryPolicy 必须是对象"));
+    } else {
+      for (const key of ["securityCooldownTradingDays", "maxEntriesPerMember", "maxConcurrentOpenPerCode"] as const) {
+        const value = policy[key];
+        if (value === undefined || value === null) continue;
+        if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+          issues.push(
+            issue(
+              "SIM_CONFIG_REENTRY_POLICY_INVALID",
+              `simConfig.reentryPolicy.${key}`,
+              `${key} 必须是正整数或 null`
+            )
+          );
+        }
+      }
+    }
+  }
   if (config.executionRules !== undefined) {
     const rules = config.executionRules;
     if (

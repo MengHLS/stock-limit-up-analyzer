@@ -549,6 +549,11 @@ export const strategyVersionCatalogRowSchema = z.object({
   totalReturnPct: z.number().nullable(),
   maxDrawdownPct: z.number().nullable(),
   cagrPct: z.number().nullable(),
+  /** 最新留档的覆盖广度 / 重复度（历史行缺失为 null）。 */
+  tradedInstrumentCount: z.number().int().nonnegative().nullable(),
+  repeatTradeRatioPct: z.number().nullable(),
+  maxTradesPerInstrument: z.number().int().nonnegative().nullable(),
+  longestReentryChainLength: z.number().int().nonnegative().nullable(),
   study: strategyVersionStudyAnnotationSchema.nullable(),
 });
 export type StrategyVersionCatalogRowDto = z.infer<
@@ -1540,6 +1545,27 @@ export type CompareStrategyVersionsOutput = z.infer<
  * 字段与 `closed_loop_backtest_run` 的结构化列一一对应；`null` 表示「本次确实没有这个量」
  * （例如 backtest 阶段被阻塞 ⇒ 没有期末权益），**不是 0**。
  */
+/**
+ * BREADTH-001 — 回测覆盖广度 / 重复买入 / 连续链诊断指标。
+ *
+ * 全部为**投影计数**（直接由真实成交明细与权益曲线算出）；成交明细被截断或无成交时整体为
+ * null —— 绝不按截断样本低报「重复很少」。
+ */
+export const breadthMetricsSchema = z.object({
+  tradedInstrumentCount: z.number().int().nonnegative().nullable(),
+  tradedIdentityCount: z.number().int().nonnegative().nullable(),
+  repeatTradeCount: z.number().int().nonnegative().nullable(),
+  repeatTradeRatioPct: z.number().nullable(),
+  maxTradesPerInstrument: z.number().int().nonnegative().nullable(),
+  sameCodeOverlapPairCount: z.number().int().nonnegative().nullable(),
+  longestReentryChainLength: z.number().int().nonnegative().nullable(),
+  chainTradeRatioPct: z.number().nullable(),
+  immediateReentryCount: z.number().int().nonnegative().nullable(),
+  medianReentryGapTradingDays: z.number().nullable(),
+  maxReentryGapTradingDays: z.number().nullable(),
+});
+export type BreadthMetricsDto = z.infer<typeof breadthMetricsSchema>;
+
 export const closedLoopBacktestRunRecordSchema = z.object({
   id: z.number().int().positive(),
   runId: z.string().min(1),
@@ -1583,6 +1609,18 @@ export const closedLoopBacktestRunRecordSchema = z.object({
   maxDrawdownPct: z.number().nullable(),
   /** 年化收益率（%）。 */
   cagrPct: z.number().nullable(),
+  /** 覆盖广度 / 重复买入 / 连续链诊断指标（历史行缺失时由服务端惰性回填）。 */
+  breadth: breadthMetricsSchema,
+  /** 池化漏斗（取不到为 null）。 */
+  poolMemberCount: z.number().int().nonnegative().nullable(),
+  poolPeakActiveMembers: z.number().int().nonnegative().nullable(),
+  poolLowScoreRemoved: z.number().int().nonnegative().nullable(),
+  poolRetired: z.number().int().nonnegative().nullable(),
+  candidateCount: z.number().int().nonnegative().nullable(),
+  selectedIdentityCount: z.number().int().nonnegative().nullable(),
+  /** ST 口径审计（事件日被排除 / 池期内转 ST 移池）。 */
+  stExcludedEventCount: z.number().int().nonnegative().nullable(),
+  stRemovedMemberCount: z.number().int().nonnegative().nullable(),
 });
 export type ClosedLoopBacktestRunRecordDto = z.infer<
   typeof closedLoopBacktestRunRecordSchema

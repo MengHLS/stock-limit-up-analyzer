@@ -58,6 +58,7 @@ import {
   computeCandidateEvaluationRunFingerprint,
 } from "../signalEngine";
 import { planDecisionDay, type PlannedOrder } from "./plan";
+import { createReentryBlocker } from "./reentry";
 import { computeTradeSimulationRunFingerprint } from "./serialize";
 import { assertValidSimulationConfig } from "./validate";
 import {
@@ -74,6 +75,7 @@ import {
 } from "./advancedStop";
 import type {
   PlanSkipCode,
+  ReentryBlockCode,
   SecurityBoard,
   SimulationConfig,
   SimulationConfigSnapshot,
@@ -215,6 +217,7 @@ function buildConfigSnapshot(
     maxPositions: config.maxPositions ?? null,
     maxDailyBuys: config.maxDailyBuys ?? null,
     directionPolicy: config.directionPolicy ?? "longOnly",
+    reentryPolicy: config.reentryPolicy ?? null,
     candidateExitPolicy: config.candidateExitPolicy ?? "HOLD_WHILE_SELECTED",
     executionRules,
     allowPartialFill: config.allowPartialFill ?? false,
@@ -383,6 +386,11 @@ export function runTradeSimulation(
     throw new EmptySimulationWindowError(
       `模拟窗口 [${requestedRange.startDate}, ${requestedRange.endDate}] 内无交易日`
     );
+  }
+  // REENTRY-001：交易日 → 升序序号（冷却按交易日计数，跨周末/节假日正确）。
+  const reentryTradingDayIndex = new Map<string, number>();
+  for (let index = 0; index < tradingDates.length; index += 1) {
+    reentryTradingDayIndex.set(tradingDates[index]!, index);
   }
   const decisionIndex = buildDecisionDayIndex(sourceRun);
   const decisionDates = tradingDates.filter(date => decisionIndex.has(date));
@@ -1537,8 +1545,25 @@ export function runTradeSimulation(
       }
       // 决策日收盘总权益 = 现金 + 持仓市值；供 equity-fraction 仓位口径使用。
       const currentEquity = portfolio.markToMarket(closePriceBySecurity);
+      // REENTRY-001：按已成交事实计算当日阻断集合（缺省策略 → 空集合，行为不变）。
+      const reentryBlocked = new Map<string, ReentryBlockCode>();
+      if (simConfig.reentryPolicy !== undefined && intents.length > 0) {
+        const blocker = createReentryBlocker({
+          policy: simConfig.reentryPolicy,
+          decisionDate: date,
+          tradingDayIndex: reentryTradingDayIndex,
+          openSecurityIds: holdings,
+          trades: portfolio.allTrades(),
+        });
+        for (const intent of intents) {
+          if (intent.direction !== "long") continue;
+          const blockCode = blocker(intent.securityId);
+          if (blockCode !== undefined) reentryBlocked.set(intent.securityId, blockCode);
+        }
+      }
       const plan = perfRun("backtest.plan", () =>
         planDecisionDay({
+        ...(reentryBlocked.size === 0 ? {} : { reentryBlocked }),
         decisionDate: date,
         intents,
         forcedExitReasons,

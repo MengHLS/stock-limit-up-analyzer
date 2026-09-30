@@ -58,7 +58,19 @@ export interface PooledDatasetCursorOptions {
   readonly exitTailTradingDays: number;
   /** 单日活跃成员硬预算；超限响亮失败，绝不静默裁剪。 */
   readonly maxActiveMembersPerDay?: number;
+  /** 事件日被 ST 排除的事件数（由装配层统计后传入，仅用于口径审计展示）。 */
+  readonly stExcludedEventCount?: number;
+  /**
+   * ST 永久排除（PIT）—— 可选。
+   *
+   * 提供后：每个池成员的逐日行写入真实 PIT `st` 值，`isHardEligibilityBroken` 即在
+   * 该成员转 ST 的当日把它移出池（当天起不再产生买入意图）。缺省 = 不查询（既有行为不变）。
+   */
+  readonly stResolver?: (canonicalSecurityId: string, tradeDate: string) => PooledStStatus;
 }
+
+/** PIT ST 取值（与 `ResearchDatasetRow.st` 同域）。 */
+export type PooledStStatus = "NORMAL" | "ST" | "*ST" | "UNKNOWN";
 
 export interface PooledDatasetCursor extends ResearchDatasetCursor {
   next(): Promise<IteratorResult<PooledDaySlice>>;
@@ -68,6 +80,8 @@ interface ActivePoolMember {
   readonly event: FirstLimitPullbackEvent;
   readonly poolMemberId: string;
   readonly panelSecurityId: string;
+  /** canonical 身份（ST PIT 解析以此为准）。 */
+  readonly canonicalSecurityId: string;
   readonly barsByDate: Map<string, FirstLimitPullbackRawBar>;
   readonly barsByRelativeDay: Map<number, FirstLimitPullbackRawBar>;
   decisionRemoved: boolean;
@@ -111,6 +125,7 @@ function toResearchDatasetRow(
   member: ActivePoolMember,
   bar: FirstLimitPullbackRawBar,
   previousClose: number | null,
+  stResolver: ((canonicalSecurityId: string, tradeDate: string) => PooledStStatus) | undefined,
 ): ResearchDatasetRow {
   const event = member.event;
   const isAdmissionDay = bar.relativeDay === 0;
@@ -124,7 +139,10 @@ function toResearchDatasetRow(
     lifecycleVerdict: "UNKNOWN",
     eligible: true,
     exclusionReason: null,
-    st: "UNKNOWN",
+    st:
+      stResolver === undefined
+        ? "UNKNOWN"
+        : stResolver(member.canonicalSecurityId, bar.tradeDate),
     industryCode: event.industryCode ?? null,
     industryName: null,
     turnoverRate: isAdmissionDay ? event.turnover ?? null : null,
@@ -209,6 +227,8 @@ export async function createPooledDatasetCursor(
   let admittedMemberCount = 0;
   let removedByMinimumScoreCount = 0;
   let peakActiveMemberCount = 0;
+  // POOL-ST-001：池期内转 ST 当日移池的成员数（口径审计）。
+  let stRemovedMemberCount = 0;
   const retainedMemberIds = new Set<string>();
   const retainedRows: ResearchDatasetRow[] = [];
   const retainedRowKeys = new Set<string>();
@@ -235,6 +255,7 @@ export async function createPooledDatasetCursor(
           member,
           bar,
           previousCloseOf(member, bar.relativeDay, member.event),
+          options.stResolver,
         ),
       );
     }
@@ -280,6 +301,7 @@ export async function createPooledDatasetCursor(
           event,
           poolMemberId: memberId,
           panelSecurityId: panelSecurityId(canonical, event.eventId),
+          canonicalSecurityId: canonical,
           barsByDate,
           barsByRelativeDay,
           decisionRemoved: false,
@@ -315,9 +337,20 @@ export async function createPooledDatasetCursor(
       const relativeDay = bar.relativeDay;
       const preClose = previousCloseOf(member, relativeDay, member.event);
       executionBars.set(member.panelSecurityId, toCanonicalBar(bar, preClose));
-      const researchRow = toResearchDatasetRow(member, bar, preClose);
+      const researchRow = toResearchDatasetRow(member, bar, preClose, options.stResolver);
       rows.push(researchRow);
       recordRetainedRow(researchRow);
+
+      // POOL-ST-001：池期内转 ST ⇒ 当日移池（当天起不再产生买入意图）。
+      if (options.stResolver !== undefined) {
+        const st = options.stResolver(member.canonicalSecurityId, tradeDate);
+        if (st === "ST" || st === "*ST") {
+          member.retired = true;
+          retiredAtByMember.set(member.poolMemberId, index - 1);
+          stRemovedMemberCount += 1;
+          continue;
+        }
+      }
 
       if (member.retired) continue;
 
@@ -419,6 +452,7 @@ export async function createPooledDatasetCursor(
     retiredAtByMember.clear();
     barsRead = 0;
     admittedMemberCount = 0;
+    stRemovedMemberCount = 0;
     removedByMinimumScoreCount = 0;
     peakActiveMemberCount = 0;
   }
@@ -479,6 +513,8 @@ export async function createPooledDatasetCursor(
       retiredMemberCount: retiredAtByMember.size,
       removedByMinimumScoreCount,
       peakActiveMemberCount,
+      stRemovedMemberCount,
+      stExcludedEventCount: options.stExcludedEventCount ?? 0,
     }),
     async close(): Promise<void> {},
   };

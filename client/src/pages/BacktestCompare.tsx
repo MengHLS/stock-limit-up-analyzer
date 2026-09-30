@@ -137,6 +137,10 @@ function CompareSummaryTable({ rows }: { rows: readonly CompareRow[] }) {
             <th className="px-3 py-2 text-right">最大回撤</th>
             <th className="px-3 py-2 text-right">年化</th>
             <th className="px-3 py-2 text-right">成交笔数</th>
+            <th className="px-3 py-2 text-right" title="成交覆盖的底层个股数（按代码去重）">覆盖个股</th>
+            <th className="px-3 py-2 text-right" title="同一只股票第 2 笔及以后的成交占比">重复占比</th>
+            <th className="px-3 py-2 text-right" title="同代码连续买回链的最长笔数（相邻间隔 ≤1 交易日）">最长链</th>
+            <th className="px-3 py-2 text-right" title="同代码相邻两笔间隔 ≤1 交易日的次数">立即买回</th>
             <th className="px-3 py-2 text-right">初始资金 / 期末权益</th>
           </tr>
         </thead>
@@ -195,6 +199,18 @@ function CompareSummaryTable({ rows }: { rows: readonly CompareRow[] }) {
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
                   {formatCount(row.detail.tradeCount)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                  {formatCount(row.detail.breadth?.tradedInstrumentCount ?? null)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                  {formatPct(row.detail.breadth?.repeatTradeRatioPct ?? null, 1)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                  {formatCount(row.detail.breadth?.longestReentryChainLength ?? null)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                  {formatCount(row.detail.breadth?.immediateReentryCount ?? null)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
                   ¥{formatMoney(row.detail.initialCapital)} / ¥{formatMoney(row.detail.finalEquity)}
@@ -412,6 +428,10 @@ export default function BacktestCompare() {
                     <th className="px-3 py-2 text-right">累计收益率</th>
                     <th className="px-3 py-2 text-right">最大回撤</th>
                     <th className="px-3 py-2 text-right">成交笔数</th>
+                    <th className="px-3 py-2 text-right" title="成交覆盖的底层个股数（按代码去重）">覆盖个股</th>
+                    <th className="px-3 py-2 text-right" title="同一只股票第 2 笔及以后的成交占比">重复占比</th>
+                    <th className="px-3 py-2 text-right" title="同代码连续买回链的最长笔数">最长链</th>
+                    <th className="px-3 py-2 text-right" title="同代码相邻两笔间隔 ≤1 交易日的次数">立即买回</th>
                     <th className="px-3 py-2 text-right">期末权益</th>
                     <th className="px-3 py-2">数据集</th>
                   </tr>
@@ -459,6 +479,18 @@ export default function BacktestCompare() {
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
                           {formatCount(item.tradeCount)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                          {formatCount(item.tradedInstrumentCount)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                          {formatPct(item.repeatTradeRatioPct, 1)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                          {formatCount(item.longestReentryChainLength)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                          {formatCount(item.immediateReentryCount)}
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
                           ¥{formatMoney(item.finalEquity)}

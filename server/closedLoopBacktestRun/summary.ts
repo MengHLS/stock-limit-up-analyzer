@@ -14,6 +14,7 @@
  */
 
 import type { ClosedLoopRunResult } from "../../shared/researchContracts";
+import { computeBreadthMetrics, type BreadthMetrics } from "./breadthMetrics";
 
 /** 列表页展示所需的扁平摘要（与留档表的结构化列一一对应）。 */
 export type ClosedLoopBacktestRunSummary = {
@@ -42,6 +43,23 @@ export type ClosedLoopBacktestRunSummary = {
   totalReturnPct: number | null;
   maxDrawdownPct: number | null;
   cagrPct: number | null;
+  /**
+   * BREADTH-001 — 覆盖广度 / 重复买入 / 连续链诊断指标（投影计数，非估算）。
+   *
+   * 成交明细被截断（`tradesTruncated=true`）或无成交时整体为 null：
+   * 绝不按截断样本低报「重复很少」。
+   */
+  readonly breadth: BreadthMetrics;
+  /** 池化漏斗（取自 research 阶段审计，取不到为 null）。 */
+  readonly poolMemberCount: number | null;
+  readonly poolPeakActiveMembers: number | null;
+  readonly poolLowScoreRemoved: number | null;
+  readonly poolRetired: number | null;
+  readonly candidateCount: number | null;
+  readonly selectedIdentityCount: number | null;
+  /** ST 口径审计：事件日被排除的 ST 事件数 / 池期内转 ST 被移池的成员数。 */
+  readonly stExcludedEventCount: number | null;
+  readonly stRemovedMemberCount: number | null;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -94,6 +112,7 @@ export function buildClosedLoopBacktestRunSummary(
   const evaluation = readEvaluationStageOutput(result);
   const performance = evaluation === null ? null : asRecord(evaluation.performance);
 
+  const funnel = readPoolFunnel(result);
   return {
     runId: result.runId,
     status: result.overall.status,
@@ -114,6 +133,8 @@ export function buildClosedLoopBacktestRunSummary(
     totalReturnPct: performance === null ? null : asFiniteNumber(performance.totalReturnPct),
     maxDrawdownPct: performance === null ? null : asFiniteNumber(performance.maxDrawdownPct),
     cagrPct: performance === null ? null : asFiniteNumber(performance.cagrPct),
+    breadth: readBreadthMetrics(result, backtestOutput),
+    ...funnel,
   };
 }
 
@@ -133,4 +154,95 @@ export function readEvaluationStageOutput(
     return asString(output.kind) === "evaluationRef" ? output : null;
   }
   return null;
+}
+
+/** research 阶段产出（`kind="researchSummary"`，state=EXECUTED）；缺失返回 null。 */
+export function readResearchStageOutput(
+  result: ClosedLoopRunResult,
+): Record<string, unknown> | null {
+  for (const stage of result.stages) {
+    if (stage.stageId !== "research" || stage.state !== "EXECUTED") continue;
+    const output = asRecord(stage.output);
+    if (output === null) return null;
+    return asString(output.kind) === "researchSummary" ? output : null;
+  }
+  return null;
+}
+
+/** 从自由文本审计里抽一个 `标签 <数字>`；抽不到返回 null（绝不猜）。 */
+function numberAfterLabel(text: string, label: string): number | null {
+  const matched = new RegExp(`${label}\\s*=?\\s*([0-9][0-9,]*)`).exec(text);
+  if (matched === null) return null;
+  const value = Number(matched[1]!.replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+/** 从 research 阶段抽出池化漏斗 + ST 口径审计（取不到一律 null）。 */
+function readPoolFunnel(result: ClosedLoopRunResult): {
+  readonly poolMemberCount: number | null;
+  readonly poolPeakActiveMembers: number | null;
+  readonly poolLowScoreRemoved: number | null;
+  readonly poolRetired: number | null;
+  readonly candidateCount: number | null;
+  readonly selectedIdentityCount: number | null;
+  readonly stExcludedEventCount: number | null;
+  readonly stRemovedMemberCount: number | null;
+} {
+  const output = readResearchStageOutput(result);
+  if (output === null) {
+    return {
+      poolMemberCount: null,
+      poolPeakActiveMembers: null,
+      poolLowScoreRemoved: null,
+      poolRetired: null,
+      candidateCount: null,
+      selectedIdentityCount: null,
+      stExcludedEventCount: null,
+      stRemovedMemberCount: null,
+    };
+  }
+  const notes = Array.isArray(output.notes) ? output.notes.filter((n): n is string => typeof n === "string") : [];
+  const text = notes.join("\n");
+  const evaluated = asRecord(output.evaluated);
+  return {
+    poolMemberCount: numberAfterLabel(text, "入池成员"),
+    poolPeakActiveMembers: numberAfterLabel(text, "峰值活跃成员"),
+    poolLowScoreRemoved: numberAfterLabel(text, "低分移池"),
+    poolRetired: numberAfterLabel(text, "已退休"),
+    candidateCount:
+      evaluated === null ? null : asFiniteNumber(evaluated.candidateCount),
+    selectedIdentityCount: numberAfterLabel(text, "跨日去重入选证券"),
+    stExcludedEventCount: numberAfterLabel(text, "ST事件排除"),
+    stRemovedMemberCount: numberAfterLabel(text, "ST移池"),
+  };
+}
+
+/** 广度/链指标：成交明细 + 权益曲线日期（交易日历）+ 截断标志。 */
+function readBreadthMetrics(
+  result: ClosedLoopRunResult,
+  backtestOutput: Record<string, unknown> | null,
+): BreadthMetrics {
+  if (backtestOutput === null) {
+    return computeBreadthMetrics({ trades: [], tradingDates: [], tradesTruncated: false });
+  }
+  const rawTrades = Array.isArray(backtestOutput.trades) ? backtestOutput.trades : [];
+  const trades = rawTrades
+    .map(item => asRecord(item))
+    .filter((item): item is Record<string, unknown> => item !== null)
+    .map(item => ({
+      securityId: asString(item.securityId) ?? "",
+      entryTime: asString(item.entryTime) ?? "",
+      exitTime: asString(item.exitTime),
+    }))
+    .filter(item => item.securityId !== "" && item.entryTime !== "");
+  const rawCurve = Array.isArray(backtestOutput.equityCurve) ? backtestOutput.equityCurve : [];
+  const tradingDates = rawCurve
+    .map(point => asRecord(point))
+    .map(point => (point === null ? null : asString(point.date)))
+    .filter((date): date is string => date !== null);
+  return computeBreadthMetrics({
+    trades,
+    tradingDates,
+    tradesTruncated: backtestOutput.tradesTruncated === true,
+  });
 }

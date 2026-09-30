@@ -655,17 +655,43 @@ function TradeTableSection({
  *
  * 全部数值都是后端产出（评估器 / 撮合引擎）的直搬；本组件不做任何反算。
  */
+/** 留档层广度指标在客户端的**只读**视图（字段与服务端 summaryJson.breadth 同名同义）。 */
+export interface BreadthDiagnosticsView {
+  tradedInstrumentCount: number | null;
+  tradedIdentityCount: number | null;
+  repeatTradeRatioPct: number | null;
+  maxTradesPerInstrument: number | null;
+  longestReentryChainLength: number | null;
+  chainTradeRatioPct: number | null;
+  immediateReentryCount: number | null;
+  medianReentryGapTradingDays: number | null;
+}
+
+/** 广度百分比展示：缺失显示「—」（不显示 0）。 */
+function fmtBreadthPct(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(1)}%`;
+}
+
 function StrategyOutputSection({
   backtest,
   totalReturnPct,
   initialCapital,
   costModelNote,
   rebuildScope,
+  breadth,
 }: {
   backtest: ClosedLoopBacktestArtifactsView;
   totalReturnPct: number | null;
   initialCapital: number | null;
   costModelNote: string | null;
+  /**
+   * BREADTH-001 — 留档层的覆盖广度 / 重复买入诊断指标（服务端算，前端只展示）。
+   *
+   * 只有「回测历史详情」这类能读到留档摘要的调用方会传；运行工作台的即时结果没有它 ⇒
+   * 缺省 undefined 时整块不渲染（不伪造、不前端重算）。
+   */
+  breadth?: BreadthDiagnosticsView | null;
   /** 重建路径的证券范围是否已确认继承自绑定数据集（`unknown` = 修复前的历史结果）。 */
   rebuildScope: RebuildScopeVerdict | null;
 }) {
@@ -701,6 +727,27 @@ function StrategyOutputSection({
           决策日 {fmtInt(backtest.decisionDayCount)} · 权益点 {curve.length}
         </span>
       </div>
+
+      {breadth !== undefined && breadth !== null && (
+        <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2">
+          <p className="text-[11px] font-medium text-amber-900">
+            覆盖广度 / 重复买入（留档摘要口径，非前端重算）
+          </p>
+          <div className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <MetricCard label="覆盖个股" value={fmtInt(breadth.tradedInstrumentCount)} />
+            <MetricCard label="覆盖池身份" value={fmtInt(breadth.tradedIdentityCount)} />
+            <MetricCard label="重复占比" value={fmtBreadthPct(breadth.repeatTradeRatioPct)} />
+            <MetricCard label="单票最多成交" value={fmtInt(breadth.maxTradesPerInstrument)} />
+            <MetricCard label="最长买回链" value={fmtInt(breadth.longestReentryChainLength)} />
+            <MetricCard label="链内成交占比" value={fmtBreadthPct(breadth.chainTradeRatioPct)} />
+            <MetricCard label="立即买回次数" value={fmtInt(breadth.immediateReentryCount)} />
+            <MetricCard
+              label="再入场间隔中位（交易日）"
+              value={fmtInt(breadth.medianReentryGapTradingDays)}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MetricCard label="成交笔数" value={fmtInt(backtest.tradeCount)} />
@@ -894,8 +941,11 @@ function StrategyOutputSection({
 
 export function ClosedLoopRunResultPanel({
   result,
+  breadth,
 }: {
   result: ClosedLoopRunViewModel;
+  /** 留档摘要里的广度/重复诊断指标（可选；只有能读到留档的调用方会传）。 */
+  breadth?: BreadthDiagnosticsView | null;
 }) {
   const e = result.evaluation;
   const covered = result.wiring.coveredStages.length;
@@ -1093,6 +1143,7 @@ export function ClosedLoopRunResultPanel({
       {/* 🔴 策略产出（真实回测产物）—— 放在装配摘要之后：0 成交时用户需要先看到「数据从哪来」 */}
       {result.backtest !== null && (
         <StrategyOutputSection
+          {...(breadth === undefined ? {} : { breadth })}
           backtest={result.backtest}
           totalReturnPct={e?.totalReturnPct ?? null}
           initialCapital={
