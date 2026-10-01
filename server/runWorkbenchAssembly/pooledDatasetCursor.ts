@@ -344,7 +344,9 @@ export async function createPooledDatasetCursor(
       recordRetainedRow(researchRow);
 
       // POOL-ST-001：池期内转 ST ⇒ 当日移池（当天起不再产生买入意图）。
-      if (options.stResolver !== undefined) {
+      // 只在**尚未退休**时判定一次：已退休成员仍会在退出尾窗里保留行，
+      // 若不加此守卫，同一成员的 ST 移池会在尾窗内逐日重复计数（审计数字虚高）。
+      if (options.stResolver !== undefined && !member.retired) {
         const st = options.stResolver(member.canonicalSecurityId, tradeDate);
         if (st === "ST" || st === "*ST") {
           member.retired = true;
