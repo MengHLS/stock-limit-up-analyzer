@@ -866,7 +866,8 @@ export async function createStreamingClosedLoopWiring(
             + `已退休 ${stats.retiredMemberCount}；低分移池 ${stats.removedByMinimumScoreCount}；`
             + `峰值活跃成员 ${stats.peakActiveMemberCount}；`
             // POOL-ST-001：ST 口径审计（事件日排除 + 池期转 ST 移池）。
-            + `ST事件排除 ${stats.stExcludedEventCount ?? 0}；ST移池 ${stats.stRemovedMemberCount ?? 0}`,
+            + `ST事件排除 ${stats.stExcludedEventCount ?? 0}；ST移池 ${stats.stRemovedMemberCount ?? 0}；`
+            + `数据内容源 ${stats.contentSource ?? "UNKNOWN"}`,
           ];
       stageRunners.research = (() => {
         artifacts.candidateRun = candidateRun;

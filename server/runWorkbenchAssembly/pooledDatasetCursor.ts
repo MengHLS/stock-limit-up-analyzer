@@ -60,6 +60,8 @@ export interface PooledDatasetCursorOptions {
   readonly maxActiveMembersPerDay?: number;
   /** 事件日被 ST 排除的事件数（由装配层统计后传入，仅用于口径审计展示）。 */
   readonly stExcludedEventCount?: number;
+  /** 本次读取的实际内容源（本地快照 / TiDB 直读），用于审计"没白导快照"。 */
+  readonly contentSource?: string;
   /**
    * ST 永久排除（PIT）—— 可选。
    *
@@ -515,6 +517,7 @@ export async function createPooledDatasetCursor(
       peakActiveMemberCount,
       stRemovedMemberCount,
       stExcludedEventCount: options.stExcludedEventCount ?? 0,
+      contentSource: options.contentSource ?? "UNKNOWN",
     }),
     async close(): Promise<void> {},
   };

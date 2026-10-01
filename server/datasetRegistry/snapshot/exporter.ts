@@ -37,7 +37,17 @@ import {
 import type { DatasetMetadataReader } from "./contentDependencies";
 import { withReadRetry } from "../../readRetry";
 
-export const SNAPSHOT_EXPORT_PAGE_SIZE = 5_000;
+/**
+ * 导出分页大小。
+ *
+ * 默认 5,000；可用 `SNAPSHOT_EXPORT_PAGE_SIZE` 覆盖（WAN 往返是导出吞吐的主要瓶颈，
+ * 大版本导出时提高该值能显著缩短时间；只影响导出，不影响任何读取语义）。
+ */
+const SNAPSHOT_EXPORT_PAGE_SIZE_OVERRIDE = Number(process.env.SNAPSHOT_EXPORT_PAGE_SIZE ?? "");
+export const SNAPSHOT_EXPORT_PAGE_SIZE =
+  Number.isSafeInteger(SNAPSHOT_EXPORT_PAGE_SIZE_OVERRIDE) && SNAPSHOT_EXPORT_PAGE_SIZE_OVERRIDE > 0
+    ? SNAPSHOT_EXPORT_PAGE_SIZE_OVERRIDE
+    : 5_000;
 
 export type SnapshotExportPhase =
   | "event"

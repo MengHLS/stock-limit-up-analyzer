@@ -61,6 +61,8 @@ export interface ResearchDatasetCursorStats {
   readonly stExcludedEventCount?: number;
   /** POOL-ST-001：池期内转 ST 当日移池的成员数。 */
   readonly stRemovedMemberCount?: number;
+  /** 本次读取的实际内容源（本地快照 / TiDB 直读）。 */
+  readonly contentSource?: string;
 }
 
 export interface ResearchDatasetCursor {

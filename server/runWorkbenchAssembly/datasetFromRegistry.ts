@@ -68,6 +68,7 @@ import {
   type DatasetContentDependencies,
 } from "../datasetRegistry/snapshot/contentDependencies";
 import { loadPoolStIndex } from "./poolStIndex";
+import { SnapshotSqliteReader } from "../datasetRegistry/snapshot/sqliteReader";
 import { defaultConcurrency, mapWithConcurrency } from "../datasetRegistry/concurrency";
 import { eventScopedSecurityId } from "../eventIdentity";
 import type {
@@ -1009,6 +1010,11 @@ export async function buildPooledDatasetCursorFromRegistry(
     ? await (baseReader as { pinReader(datasetVersionId: number): Promise<DatasetDataReader> }).pinReader(request.datasetVersionId)
     : baseReader;
   const identityProvider = deps.identityProvider ?? content.identityProvider;
+  // 内容源可查：有效本地快照 → SQLite；否则 TiDB 直读（据此确认"没白导快照"）。
+  const datasetContentSource =
+    reader instanceof SnapshotSqliteReader
+      ? "本地快照(SQLite dataset.sqlite)"
+      : "TiDB 直读";
 
   const version = await perfRunAsync("dataset.version_and_definition", () =>
     withReadRetry("registry.getVersionById", () => registry.getVersionById(request.datasetVersionId)),
@@ -1176,6 +1182,7 @@ export async function buildPooledDatasetCursorFromRegistry(
       ? {}
       : { stResolver: (securityId: string, tradeDate: string) => stIndex.resolve(securityId, tradeDate) }),
     ...(stIndex === null ? {} : { stExcludedEventCount }),
+    contentSource: datasetContentSource,
   });
 
   const securityIdByCode = new Map<string, string[]>();
