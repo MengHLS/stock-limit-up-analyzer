@@ -767,6 +767,19 @@ export interface StrategyDatasetBinding {
  * 本对象随 `StrategyDocument.definition` 一起进入 `strategy_versions.strategyDocumentJson`，
  * 是该版本「可复现的核心规则快照」。5 张投影表全部由本对象单向派生。
  */
+/**
+ * 市场状态闸门声明（MARKET-REGIME-001）。
+ *
+ * 只约束**新建仓**：命中日期当日不建仓；已有持仓/退出路径完全不受影响。
+ * 决策日集合由研究侧按 PIT 规则（指数趋势 / 涨停家数 / 炸板率等）预先算出并冻结进版本。
+ */
+export interface MarketRegimeFilterDefinition {
+  /** 被排除的决策日（YYYY-MM-DD，升序、无重复）。 */
+  readonly blockedDecisionDates: readonly string[];
+  /** 人类可读标签（仅审计用途）。 */
+  readonly label?: string;
+}
+
 export interface StrategyDefinition {
   readonly schemaVersion: string;
   readonly entry: EntryDefinition;
@@ -774,6 +787,14 @@ export interface StrategyDefinition {
    * 首板股票池策略（可选）。仅在 `entry.trigger.type = FIRST_LIMIT_POOL` 时允许声明。
    */
   readonly firstLimitPool?: FirstLimitPoolDefinition;
+  /**
+   * MARKET-REGIME-001 市场状态闸门（可选，研究截面）。
+   *
+   * 语义：`blockedDecisionDates` 命中的决策日**不新建仓**（退出与已持仓完全不受影响）。
+   * 该字段承载「研究侧按 PIT 规则算出的被排除决策日集合」——把市场状态过滤表达成
+   * 版本可复现的声明的数据面；缺省 = 不限制（既有行为逐字节不变）。
+   */
+  readonly marketRegimeFilter?: MarketRegimeFilterDefinition;
   readonly exit: ExitDefinition;
   readonly position: PositionDefinition;
   readonly risk: RiskDefinition;
@@ -852,6 +873,26 @@ export function normalizeStrategyDefinition(input: StrategyDefinitionInput): Str
         ...condition,
         id: resolveConditionId(condition, index),
       })),
+    };
+  }
+
+  // MARKET-REGIME-001：决策日集合规范化（升序、去重后保序），保证同一声明必得同一指纹。
+  const marketRegimeFilter = clone.marketRegimeFilter as
+    | { readonly blockedDecisionDates?: unknown; readonly label?: unknown }
+    | undefined;
+  if (
+    marketRegimeFilter !== undefined
+    && marketRegimeFilter !== null
+    && Array.isArray(marketRegimeFilter.blockedDecisionDates)
+  ) {
+    const dates = marketRegimeFilter.blockedDecisionDates.filter(
+      (value): value is string => typeof value === "string",
+    );
+    clone.marketRegimeFilter = {
+      ...marketRegimeFilter,
+      blockedDecisionDates: [...dates].sort((left, right) =>
+        left < right ? -1 : left > right ? 1 : 0,
+      ),
     };
   }
 

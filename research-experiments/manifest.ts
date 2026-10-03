@@ -49,9 +49,11 @@ import { stabilityValidationExperiment } from "./first-board-pullback/stability-
 import { twelveFactorCompositeStudyExperiment } from "./first-board-pullback/twelve-factor-composite-study/experiment";
 import { twelveFactorTopNRankingStudyExperiment } from "./first-board-pullback/twelve-factor-topn-ranking-study/experiment";
 import { leaderCandidateBaselineExperiment } from "./combo-backtest/leader-candidate-baseline/experiment";
+import { compositeRunnerNewHigh3Hold20Experiment } from "./first-board-pullback/composite-runner-newhigh3-hold20/experiment";
 
 /** 全部已注册实验（顺序不参与任何计算；registry 内部按 id 排序输出）。 */
 const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
+  compositeRunnerNewHigh3Hold20Experiment,
   entryDayExperiment,
   fundamentalStudyExperiment,
   bodyFilteredExitCurveStudyExperiment,
@@ -99,3 +101,4 @@ export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] =
       ? withFirstBoardPullbackFoundation(definition)
       : definition
   );
+

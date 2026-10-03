@@ -410,6 +410,65 @@ export function validateSimulationConfig(
         ));
       }
     }
+    const recoveryPath = policy.recoveryPath;
+    if (recoveryPath !== null && recoveryPath !== undefined) {
+      if (
+        typeof recoveryPath !== "object"
+        || Array.isArray(recoveryPath)
+        || recoveryPath.kind !== "HIGHER_HIGH_STREAK_RECOVERY"
+        || !Number.isFinite(recoveryPath.activationRatio)
+        || recoveryPath.activationRatio <= 0
+        || recoveryPath.activationRatio >= 1
+        || !Number.isInteger(recoveryPath.confirmationDays)
+        || recoveryPath.confirmationDays < 0
+        || recoveryPath.confirmationDays > 3
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.recoveryPath",
+          "recoveryPath 必须是 HIGHER_HIGH_STREAK_RECOVERY，activationRatio∈(0,1)，confirmationDays∈{0,1,2,3}",
+        ));
+      }
+    }
+    const runnerBridge = policy.runnerBridge;
+    if (runnerBridge !== null && runnerBridge !== undefined) {
+      if (
+        typeof runnerBridge !== "object"
+        || Array.isArray(runnerBridge)
+        || runnerBridge.kind !== "PIT_RUNNER_HOLDING_BRIDGE"
+        || typeof runnerBridge.state !== "string"
+        || runnerBridge.decisionHoldingDays !== 5
+        || !Number.isInteger(runnerBridge.extendToHoldingDays)
+        || runnerBridge.extendToHoldingDays <= 5
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.runnerBridge",
+          "runnerBridge 必须是 PIT_RUNNER_HOLDING_BRIDGE，decisionHoldingDays=5，extendToHoldingDays>5",
+        ));
+      }
+    }
+    const clc2ReversalPath = policy.clc2ReversalPath;
+    if (clc2ReversalPath !== null && clc2ReversalPath !== undefined) {
+      if (
+        typeof clc2ReversalPath !== "object"
+        || Array.isArray(clc2ReversalPath)
+        || clc2ReversalPath.kind !== "SUSTAINED_CLOSE_DECLINE_REVERSAL"
+        || (
+          clc2ReversalPath.sustainMinRun !== undefined
+          && (
+            !Number.isInteger(clc2ReversalPath.sustainMinRun)
+            || clc2ReversalPath.sustainMinRun < 1
+          )
+        )
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.clc2ReversalPath",
+          "clc2ReversalPath 必须是 SUSTAINED_CLOSE_DECLINE_REVERSAL，sustainMinRun 缺省或为正整数",
+        ));
+      }
+    }
     const strongHold = policy.strongHold;
     if (strongHold !== null && strongHold !== undefined) {
       if (
@@ -1008,6 +1067,48 @@ export function validateTradeSimulationRun(
               "RECORD_CONFIG_EXIT_POLICY_INVALID",
               "record.config.exitPolicy.strongHold.replacementScoreMargin",
               "replacementScoreMargin 必须是非负有限数字或 null"
+            )
+          );
+        }
+      }
+      const recoveryPath = exitPolicy.recoveryPath;
+      if (recoveryPath !== undefined && recoveryPath !== null) {
+        if (
+          typeof recoveryPath !== "object"
+          || Array.isArray(recoveryPath)
+          || recoveryPath.kind !== "HIGHER_HIGH_STREAK_RECOVERY"
+          || !Number.isFinite(recoveryPath.activationRatio)
+          || recoveryPath.activationRatio <= 0
+          || recoveryPath.activationRatio >= 1
+          || !Number.isInteger(recoveryPath.confirmationDays)
+          || recoveryPath.confirmationDays < 0
+          || recoveryPath.confirmationDays > 3
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.recoveryPath",
+              "recoveryPath 必须是 HIGHER_HIGH_STREAK_RECOVERY，activationRatio∈(0,1)，confirmationDays∈{0,1,2,3}"
+            )
+          );
+        }
+      }
+      const runnerBridge = exitPolicy.runnerBridge;
+      if (runnerBridge !== undefined && runnerBridge !== null) {
+        if (
+          typeof runnerBridge !== "object"
+          || Array.isArray(runnerBridge)
+          || runnerBridge.kind !== "PIT_RUNNER_HOLDING_BRIDGE"
+          || typeof runnerBridge.state !== "string"
+          || runnerBridge.decisionHoldingDays !== 5
+          || !Number.isInteger(runnerBridge.extendToHoldingDays)
+          || runnerBridge.extendToHoldingDays <= 5
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.runnerBridge",
+              "runnerBridge 必须是 PIT_RUNNER_HOLDING_BRIDGE，decisionHoldingDays=5，extendToHoldingDays>5"
             )
           );
         }

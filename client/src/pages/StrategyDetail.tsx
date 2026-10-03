@@ -346,9 +346,11 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
       ? null
       : detailQuery.error
         ? `回测留档详情读取失败：${detailQuery.error.message}`
-        : latestDetail !== null && latestDetail.result === null
-          ? "这条留档没有完整结果明细（本次运行的 resultJson 为空）。"
-          : null;
+        : latestDetail !== null && latestDetail.resultIssue !== null
+          ? `这条留档的结果读不出来（不符合当前契约）：${latestDetail.resultIssue}`
+          : latestDetail !== null && latestDetail.result === null
+            ? "这条留档没有完整结果明细（本次运行的 resultJson 为空）。"
+            : null;
 
   const loopRun = trpc.researchRun.loopRun.useMutation({
     onSuccess: raw => {

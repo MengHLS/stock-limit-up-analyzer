@@ -83,6 +83,7 @@ import { perfCount, perfRun, perfRunAsync } from "../observability";
 import { LoopRunAssemblyError } from "./errors";
 import { mapDeclaredExitPolicy } from "./exitPolicy";
 import { mapDeclaredReentryPolicy } from "./reentryPolicy";
+import { mapDeclaredMarketRegimeGate } from "./marketRegimeGate";
 import type { ClosedLoopRuntimeConfig } from "../../shared/researchContracts";
 
 export { LoopRunAssemblyError } from "./errors";
@@ -1108,6 +1109,10 @@ export function assembleStrategySide(
   const declaredReentryPolicy = mapDeclaredReentryPolicy(
     document.definition?.firstLimitPool?.reentryPolicy,
   );
+  // MARKET-REGIME-001 — 市场状态闸门（研究侧按 PIT 规则算出的被排除决策日集合）。
+  const declaredMarketRegimeGate = mapDeclaredMarketRegimeGate(
+    document.definition?.marketRegimeFilter,
+  );
   const positionSizingMapping = mapPositionSizing({
     sizingMethod: declaredPositionSizing.sizingMethod,
     maxPositions,
@@ -1126,6 +1131,9 @@ export function assembleStrategySide(
     directionPolicy: "longOnly",
     candidateExitPolicy: document.definition?.exit?.candidateExitPolicy ?? "HOLD_WHILE_SELECTED",
     ...(declaredReentryPolicy === undefined ? {} : { reentryPolicy: declaredReentryPolicy }),
+    ...(declaredMarketRegimeGate === undefined
+      ? {}
+      : { marketRegimeGate: declaredMarketRegimeGate }),
     // 🔴 BACKTEST-001（G1）：此前不传 ⇒ 走默认 false ⇒ 涨停买得进、跌停卖得出。
     //    改为显式传保守口径，并把政策写进 Run Record（可解释「为什么这笔没成交」）。
     executionRules: toExecutionRuleSet(backtestPolicy),

@@ -344,6 +344,27 @@ export const experimentDescriptorSchema = z.object({
   pageKey: z.string().min(1),
   /** 页面标题（通用外壳用它做容器标题）。 */
   pageTitle: z.string().min(1),
+  /**
+   * COMPOSITE-RUNNER-BRIDGE-001 —— 组合执行面声明（可选）。
+   *
+   * 缺省 = `SINGLE_EVENT`（既有行为，逐字节不变）。声明 `COMPOSITE_PORTFOLIO` 表示本实验
+   * 需要「完整 simulator / 资金循环」的组合回测能力；平台据此允许实验通过
+   * `@experiments/compositeRunnerBridge`（零实现 re-export）调用唯一组合执行模块。
+   *
+   * 🔴 该声明**不是权限后门**：它只解锁「调用既有单一引擎」；实验仍不得直连 DB、
+   *    不得 import `server/**` 运行时、不得在 `research-experiments/**` 内复制引擎。
+   */
+  executionSurface: z.enum(["SINGLE_EVENT", "COMPOSITE_PORTFOLIO"]).optional(),
+  /**
+   * COMPOSITE-RUNNER-DATASET-PROVIDER-001 —— 组合执行的数据坐标（仅当
+   * `executionSurface = "COMPOSITE_PORTFOLIO"` 时必填）。
+   *
+   * `datasetRequirement`（primary）给的是**扩展**版本坐标；本字段给**基线**版本坐标。
+   * 平台 provider 据此装配「基线官方投影 + 扩展 rd17..80」两个 ResearchDataset。
+   */
+  compositeExecution: z
+    .object({ baselineDatasetVersionId: z.number().int().positive() })
+    .optional(),
 });
 export type ExperimentDescriptor = z.infer<typeof experimentDescriptorSchema>;
 
@@ -694,6 +715,8 @@ export const EXPERIMENT_ERROR_CODES = [
   "EXPERIMENT_PROTOCOL_PARAMETERS_FROZEN",
   /** 确认性 Run 缺少合法 Gate / Exploratory Run 非法产出 Gate。 */
   "EXPERIMENT_CONFIRMATORY_GATE_INVALID",
+  "EXPERIMENT_COMPOSITE_PROVIDER_UNAVAILABLE",
+  "EXPERIMENT_COMPOSITE_BASELINE_MISSING",
 ] as const;
 export type ExperimentErrorCode = (typeof EXPERIMENT_ERROR_CODES)[number];
 
@@ -861,6 +884,16 @@ export interface ExperimentRunContext {
    * 不会等到上传阶段才炸。
    */
   readonly artifact: (spec: ExperimentArtifactFileSpec) => void;
+  /**
+   * COMPOSITE-RUNNER-DATASET-PROVIDER-001 —— 组合执行面（仅当 descriptor 声明
+   * `executionSurface: "COMPOSITE_PORTFOLIO"` 时由平台注入；其余实验为 `undefined`）。
+   *
+   * 形状（`baselineDataset` / `executionDataset` / `dateRange` …）由
+   * `server/researchExperiments/compositeDatasetProvider.ts` 定义；实验侧经
+   * `@experiments/compositeRunnerBridge` 收窄类型。shared 层刻意用 `unknown`：
+   * `ResearchDataset` 是 server 类型，契约面不得依赖它。
+   */
+  readonly composite?: unknown;
 }
 
 /**
@@ -1224,3 +1257,7 @@ export const reconcileRunInputSchema = z.object({
   /** 收敛原因（必填：收敛一条 RUNNING 是**人为判定**，必须留痕）。 */
   reason: z.string().min(1).max(500),
 });
+
+
+
+

@@ -51,8 +51,8 @@ const REGISTERED_IDS = EXPERIMENT_DEFINITIONS.map(definition => definition.descr
 /** 当前一审定的分档规模（改了映射就要同步改这里 —— 这是**故意**的一次显式确认）。 */
 const EXPECTED_MODE_COUNTS: Record<string, { total: number; kinds: Record<string, number> }> = {
   "first-board-pullback": {
-    total: 33,
-    kinds: { "single-factor": 6, "multi-factor": 10, "other-scope": 17 },
+    total: 34,
+    kinds: { "single-factor": 6, "multi-factor": 10, "other-scope": 18 },
   },
   "combo-backtest": { total: 1, kinds: { "other-scope": 1 } },
 };

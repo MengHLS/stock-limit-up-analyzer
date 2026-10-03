@@ -175,6 +175,7 @@ export const EXPERIMENT_MODES: readonly ExperimentMode[] = [
           "first-board-pullback/limit-up-price-hold-streak-study",
           "first-board-pullback/stability-validation",
           "first-board-pullback/oversold-gap-reversal-validation",
+          "first-board-pullback/composite-runner-newhigh3-hold20",
         ],
       },
     ],

@@ -83,6 +83,8 @@ const navGroups: NavGroup[] = [
     label: "策略",
     items: [
       { label: "策略", path: "/strategies", icon: ClipboardList },
+              { label: "最终评估 3570001", path: "/strategy-final-evaluation", icon: ClipboardList },
+              { label: "模拟盘 3570001", path: "/paper-trading-3570001", icon: ClipboardList },
       { label: "绩效仪表盘", path: "/performance", icon: Activity },
       { label: "参数搜索", path: "/parameter-search", icon: SlidersHorizontal },
       { label: "组合回测", path: "/backtest", icon: WalletCards },

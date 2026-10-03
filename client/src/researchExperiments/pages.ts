@@ -26,6 +26,7 @@
  */
 
 import DecisionForwardStudyPage from "@experiments/first-board-pullback/decision-forward-study/page";
+import CompositeRunnerNewHigh3Hold20Page from "@experiments/first-board-pullback/composite-runner-newhigh3-hold20/page";
 import BodyFilteredExitCurveStudyPage from "@experiments/first-board-pullback/body-filtered-exit-curve-study/page";
 import BodyMaSupportScreenStudyPage from "@experiments/first-board-pullback/body-ma-support-screen-study/page";
 import CompositeFactorEqualWeightStudyPage from "@experiments/first-board-pullback/composite-factor-equal-weight-study/page";
@@ -91,6 +92,7 @@ export const EXPERIMENT_PAGES: Readonly<
   "first-board-pullback/conditional-pullback-state-exit-study":
     ConditionalPullbackStateExitStudyPage,
   "first-board-pullback/entry-day": EntryDayExperimentPage,
+  "first-board-pullback/composite-runner-newhigh3-hold20": CompositeRunnerNewHigh3Hold20Page,
   "first-board-pullback/entry-aligned-exit-horizon-study":
     EntryAlignedExitHorizonStudyPage,
   "first-board-pullback/first-board-body-study": FirstBoardBodyStudyPage,
@@ -129,3 +131,5 @@ export function experimentPageOf(
 ): ExperimentPageComponent | null {
   return EXPERIMENT_PAGES[pageKey] ?? null;
 }
+
+

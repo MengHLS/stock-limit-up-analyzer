@@ -1,7 +1,7 @@
 /**
  * 3F Top3 正式版本谱系校验测试。
  *
- * 该映射是回填脚本的写入依据：98 个正式版本必须一一登记，父行必须同策略，
+ * 该映射是回填脚本的写入依据：正式版本必须一一登记，父行必须同策略，
  * 且只允许 1.0.0 / 1.21.0 两个根。测试同时覆盖缺失版本、意外版本、
  * 自引用、跨策略父行与环等拒绝路径。
  */
@@ -38,9 +38,9 @@ function rowOf(rows: VersionLineageRow[], version: string): VersionLineageRow {
 }
 
 describe("THREE_FACTOR_TOPN_3_VERSION_LINEAGE", () => {
-  it("恰好登记 98 个正式版本，且只有 1.0.0 / 1.21.0 两个根", () => {
+  it("恰好登记全部正式版本（2026-10-01 起 99 个，含新增 1.63.0），且只有 1.0.0 / 1.21.0 两个根", () => {
     const entries = Object.entries(LINEAGE);
-    expect(entries).toHaveLength(98);
+    // 2026-10-01：新增 1.63.0（涨停生态闸门）⇒ 98 → 99。\n    expect(entries).toHaveLength(99);
     expect(entries.filter(([, parent]) => parent === null).map(([version]) => version))
       .toEqual(["1.0.0", "1.21.0"]);
   });

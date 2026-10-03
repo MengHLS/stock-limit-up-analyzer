@@ -87,6 +87,12 @@ export interface PlanDecisionInput {
    * 缺省 = 不限制（既有行为逐字节不变）。
    */
   readonly reentryBlocked?: ReadonlyMap<string, ReentryBlockCode>;
+  /**
+   * 市场状态闸门（MARKET-REGIME-001）：true = 该决策日处于被排除的市场状态 ⇒
+   * 当日所有**新建仓**跳过（退出与已持仓不受影响）。由 engine 依 SimulationConfig 计算。
+   * 缺省 / false = 行为逐字节不变。
+   */
+  readonly marketRegimeBlocked?: boolean;
   /** 当前持仓 securityId（引擎负责确定性排序）。 */
   readonly holdings: readonly string[];
   /** 候选退出开关；缺省 true（保持 hold-while-selected 历史行为）。 */
@@ -319,6 +325,10 @@ const REENTRY_SKIP_REASONS: Readonly<Record<ReentryBlockCode, string>> = {
     "再入场策略：该池成员身份累计买入次数已达上限，本次不建仓",
 };
 
+/** MARKET-REGIME-001 闸门跳过原因（写入 skipped.reason，绝不静默）。 */
+const MARKET_REGIME_SKIP_REASON =
+  "市场状态闸门：决策日处于被排除的市场状态，当日不新建仓（退出与已持仓不受影响）";
+
 function skip(
   date: string,
   securityId: string,
@@ -359,6 +369,7 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     initialCapital,
     currentEquity,
     reentryBlocked,
+    marketRegimeBlocked,
   } = input;
 
   const forced = forcedExitReasons ?? new Map<string, string>();
@@ -394,6 +405,24 @@ export function planDecisionDay(input: PlanDecisionInput): DecisionPlan {
     skipped.push(
       skip(decisionDate, intent.securityId, "buy", blockCode, REENTRY_SKIP_REASONS[blockCode])
     );
+  }
+
+  // MARKET-REGIME-001：市场状态闸门。命中当日 ⇒ 当日**全部新建仓**跳过；
+  // 已持仓保持既有「已持有即 hold」语义、退出路径完全不受影响。
+  if (marketRegimeBlocked === true) {
+    const blockedEntries: PositionIntent[] = [];
+    const kept: PositionIntent[] = [];
+    for (const intent of longs) {
+      if (holdingSet.has(intent.securityId)) kept.push(intent);
+      else blockedEntries.push(intent);
+    }
+    longs.length = 0;
+    longs.push(...kept);
+    for (const intent of blockedEntries) {
+      skipped.push(
+        skip(decisionDate, intent.securityId, "buy", "MARKET_REGIME_BLOCKED", MARKET_REGIME_SKIP_REASON)
+      );
+    }
   }
 
   // ---- 退出：当前持仓不在 desired → 卖出全部可卖份额 ----

@@ -416,6 +416,129 @@ describe("端到端：候选 → 交易模拟（T+1 与执行模型）", () => {
   });
 });
 
+describe("STRATEGY-EXIT-VALIDATION-010：Runner Strong→Weak 恢复路径", () => {
+  const D0 = "2026-06-01";
+  const D1 = "2026-06-02";
+  const D2 = "2026-06-03";
+  const D3 = "2026-06-04";
+  const D4 = "2026-06-05";
+  const D5 = "2026-06-08";
+  const D6 = "2026-06-09";
+  const D7 = "2026-06-10";
+  const VERSION = "sim-recovery-path-v1";
+  const seeds: readonly SeedSpec[] = [
+    { date: D0, sec: "A", open: 9.9, close: 10, preClose: 9.5 },
+    { date: D1, sec: "A", open: 10, high: 11, low: 9.9, close: 10.8, preClose: 10 },
+    { date: D2, sec: "A", open: 10.8, high: 12, low: 10.7, close: 11.8, preClose: 10.8 },
+    { date: D3, sec: "A", open: 11.8, high: 13, low: 11.7, close: 12.8, preClose: 11.8 },
+    { date: D4, sec: "A", open: 12.8, high: 14, low: 12.7, close: 13.8, preClose: 12.8 },
+    { date: D5, sec: "A", open: 13.8, high: 13.5, low: 12.5, close: 13, preClose: 13.8 },
+    { date: D6, sec: "A", open: 13, high: 14.5, low: 12.9, close: 14, preClose: 13 },
+    { date: D7, sec: "A", open: 14, high: 15.5, low: 13.9, close: 15, preClose: 14 },
+  ];
+
+  function run(confirmationDays: 0 | 1 | 2): TradeSimulationRun {
+    const built = buildDataset(seeds, VERSION);
+    const candidate = runCandidates(built, VERSION, D0, D0, 1);
+    return runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: makeSimConfig({
+        candidateExitPolicy: "DISABLED",
+        dateRange: { startDate: D0, endDate: D7 },
+        exitPolicy: {
+          stopLossRatio: null,
+          takeProfitRatio: null,
+          maxHoldingDays: null,
+          recoveryPath: {
+            kind: "HIGHER_HIGH_STREAK_RECOVERY",
+            activationRatio: 0.10,
+            confirmationDays,
+          },
+        },
+      }),
+    });
+  }
+
+  it("D+0：首次 strong→weak 收盘产生退出，次日开盘成交", () => {
+    const trade = run(0).trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D6);
+    expect(trade.reason).toContain("Runner路径退出");
+  });
+
+  it("D+1：首次转弱后下一日仍弱则退出", () => {
+    const trade = run(1).trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D7);
+    expect(trade.reason).toContain("Runner路径退出");
+  });
+
+  it("D+2：确认窗口内恢复 strong 则取消退出并继续持有", () => {
+    const trade = run(2).trades.find((item) => item.securityId === "A")!;
+    expect(trade.openAtEnd).toBe(true);
+    expect(trade.reason).not.toContain("Runner路径退出");
+  });
+});
+
+describe("RUNNER-HOLDING-BRIDGE-001：第五持有日 PIT 持有桥", () => {
+  const D0 = "2026-07-01";
+  const D1 = "2026-07-02";
+  const D2 = "2026-07-03";
+  const D3 = "2026-07-06";
+  const D4 = "2026-07-07";
+  const D5 = "2026-07-08";
+  const D6 = "2026-07-09";
+  const D7 = "2026-07-10";
+  const VERSION = "sim-holding-bridge-v1";
+  const seeds: readonly SeedSpec[] = [
+    { date: D0, sec: "A", open: 9.9, close: 10, preClose: 9.5 },
+    { date: D1, sec: "A", open: 10, high: 10.4, low: 9.9, close: 10.2, preClose: 10 },
+    { date: D2, sec: "A", open: 10.2, high: 10.5, low: 10.1, close: 10.3, preClose: 10.2 },
+    { date: D3, sec: "A", open: 10.3, high: 10.6, low: 10.2, close: 10.4, preClose: 10.3 },
+    { date: D4, sec: "A", open: 10.4, high: 10.7, low: 10.3, close: 10.5, preClose: 10.4 },
+    { date: D5, sec: "A", open: 10.5, high: 10.9, low: 10.4, close: 10.7, preClose: 10.5 },
+    { date: D6, sec: "A", open: 10.7, high: 10.8, low: 10.5, close: 10.6, preClose: 10.7 },
+    { date: D7, sec: "A", open: 10.6, close: 10.6, preClose: 10.6 },
+  ];
+
+  function run(bridge: boolean): TradeSimulationRun {
+    const built = buildDataset(seeds, VERSION);
+    const candidate = runCandidates(built, VERSION, D0, D0, 1);
+    return runTradeSimulation({
+      dataset: built.dataset,
+      sourceRun: candidate,
+      simConfig: makeSimConfig({
+        candidateExitPolicy: "DISABLED",
+        dateRange: { startDate: D0, endDate: D7 },
+        exitPolicy: {
+          stopLossRatio: null,
+          takeProfitRatio: null,
+          maxHoldingDays: 5,
+          ...(bridge
+            ? {
+                runnerBridge: {
+                  kind: "PIT_RUNNER_HOLDING_BRIDGE" as const,
+                  state: "NEW_HIGH_2" as const,
+                  decisionHoldingDays: 5 as const,
+                  extendToHoldingDays: 6,
+                },
+              }
+            : {}),
+        },
+      }),
+    });
+  }
+
+  it("状态命中时在第五持有日延长原时间退出", () => {
+    const trade = run(true).trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D7);
+  });
+
+  it("状态未声明时完全保持原第五日时间退出", () => {
+    const trade = run(false).trades.find((item) => item.securityId === "A")!;
+    expect(trade.exitTime).toBe(D6);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // (a2) 持仓切换与 T+1 卖出冻结顺延
 // ---------------------------------------------------------------------------

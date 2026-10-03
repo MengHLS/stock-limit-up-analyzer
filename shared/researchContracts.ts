@@ -1630,6 +1630,15 @@ export type ClosedLoopBacktestRunRecordDto = z.infer<
 export const closedLoopBacktestRunDetailSchema =
   closedLoopBacktestRunRecordSchema.extend({
     result: closedLoopRunResultSchema.nullable(),
+    /**
+     * `resultJson` 存在、却**读不出来**时的如实原因（`null` = 无此问题）。
+     *
+     * 🔴 与 `result === null` 是**两件不同的事**：
+     *   - `result === null` 且本字段为 `null` ⇒ 本次**没留**完整结果（`resultJson` 为 NULL）
+     *   - 本字段非 `null` ⇒ **留了，但按当前契约读不出来**（例：留档写于某次契约收紧之前，
+     *     且无事实依据可升级）—— 「记录不可读」绝不能被伪装成「没跑过」。
+     */
+    resultIssue: z.string().nullable(),
   });
 export type ClosedLoopBacktestRunDetailDto = z.infer<
   typeof closedLoopBacktestRunDetailSchema

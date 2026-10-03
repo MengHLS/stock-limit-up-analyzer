@@ -83,6 +83,10 @@ import type {
   TradeSimulationInput,
   TradeSimulationRun,
 } from "./types";
+import type {
+  RunnerHoldingBridgeState,
+  SustainedCloseDeclineReversalExitPolicyDefinition,
+} from "../exitPolicyCommon";
 import {
   TRADE_SIMULATION_RUN_RECORD_KIND,
   TRADE_SIMULATION_RUN_RECORD_VERSION,
@@ -202,6 +206,147 @@ function resolveExecutionRules(config: SimulationConfig): {
   };
 }
 
+function numericMean(values: readonly number[]): number | null {
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function movingAverageBefore(
+  bars: readonly CanonicalMarketBar[],
+  index: number,
+  window: number,
+): number | null {
+  if (index - window + 1 < 0) return null;
+  const closes: number[] = [];
+  for (let cursor = index - window + 1; cursor <= index; cursor += 1) {
+    const close = bars[cursor]?.close;
+    if (close === null || close === undefined || !Number.isFinite(close)) return null;
+    closes.push(close);
+  }
+  return numericMean(closes);
+}
+
+export function evaluateRunnerHoldingBridgeState(
+  bars: readonly CanonicalMarketBar[],
+  entryTime: string,
+  currentDate: string,
+  state: RunnerHoldingBridgeState,
+): boolean {
+  const currentIndex = bars.findIndex((bar) => bar.timestamp === currentDate);
+  const entryIndex = bars.findIndex((bar) => bar.timestamp === entryTime);
+  if (currentIndex < 0 || entryIndex < 0 || currentIndex <= entryIndex) return false;
+  const current = bars[currentIndex]!;
+  const high = current.high;
+  const low = current.low;
+  const close = current.close;
+  const volume = current.volume;
+  if (
+    high === null || low === null || close === null || volume === null
+    || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)
+    || !Number.isFinite(volume)
+  ) return false;
+
+  const highAt = (index: number): number | null => {
+    const value = bars[index]?.high;
+    return value !== null && value !== undefined && Number.isFinite(value) ? value : null;
+  };
+  const closeAt = (index: number): number | null => {
+    const value = bars[index]?.close;
+    return value !== null && value !== undefined && Number.isFinite(value) ? value : null;
+  };
+  const maxHigh = (from: number, to: number): number | null => {
+    const values: number[] = [];
+    for (let index = Math.max(0, from); index <= Math.min(bars.length - 1, to); index += 1) {
+      const value = highAt(index);
+      if (value !== null) values.push(value);
+    }
+    return values.length === 0 ? null : Math.max(...values);
+  };
+
+  switch (state) {
+    case "NEW_HIGH_2": {
+      const prior = maxHigh(currentIndex - 2, currentIndex - 1);
+      return prior !== null && high > prior;
+    }
+    case "NEW_HIGH_3": {
+      const prior = maxHigh(currentIndex - 3, currentIndex - 1);
+      return prior !== null && high > prior;
+    }
+    case "CONSECUTIVE_HIGHER_HIGHS_GE_2": {
+      let count = 0;
+      for (let index = currentIndex; index > entryIndex; index -= 1) {
+        const currentHigh = highAt(index);
+        const previousHigh = highAt(index - 1);
+        if (currentHigh === null || previousHigh === null || currentHigh <= previousHigh) break;
+        count += 1;
+      }
+      return count >= 2;
+    }
+    case "RETURN_2_POSITIVE": {
+      const prior = closeAt(currentIndex - 2);
+      return prior !== null && prior > 0 && close > prior;
+    }
+    case "RETURN_3_POSITIVE": {
+      const prior = closeAt(currentIndex - 3);
+      return prior !== null && prior > 0 && close > prior;
+    }
+    case "CLOSE_ABOVE_MA5": {
+      const ma = movingAverageBefore(bars, currentIndex, 5);
+      return ma !== null && close > ma;
+    }
+    case "CLOSE_ABOVE_MA10": {
+      const ma = movingAverageBefore(bars, currentIndex, 10);
+      return ma !== null && close > ma;
+    }
+    case "MA5_SLOPE_POSITIVE": {
+      const currentMa = movingAverageBefore(bars, currentIndex, 5);
+      const priorMa = movingAverageBefore(bars, currentIndex - 1, 5);
+      return currentMa !== null && priorMa !== null && priorMa > 0 && currentMa > priorMa;
+    }
+    case "MA10_SLOPE_POSITIVE": {
+      const currentMa = movingAverageBefore(bars, currentIndex, 10);
+      const priorMa = movingAverageBefore(bars, currentIndex - 1, 10);
+      return currentMa !== null && priorMa !== null && priorMa > 0 && currentMa > priorMa;
+    }
+    case "NEAR_5D_HIGH": {
+      const recent = maxHigh(currentIndex - 4, currentIndex);
+      return recent !== null && close >= recent;
+    }
+    case "CONSECUTIVE_LOWER_CLOSES_GE_2": {
+      let count = 0;
+      for (let index = currentIndex; index > entryIndex; index -= 1) {
+        const currentClose = closeAt(index);
+        const previousClose = closeAt(index - 1);
+        if (currentClose === null || previousClose === null || currentClose >= previousClose) break;
+        count += 1;
+      }
+      return count >= 2;
+    }
+    case "CLOSE_LOCATION_UPPER_THIRD": {
+      const range = high - low;
+      return range > 0 && (close - low) / range >= 2 / 3;
+    }
+    default:
+      return false;
+  }
+}
+
+/** CLC2-PORTFOLIO-001：收盘是否低于前一交易日收盘（连续收低计数 ≥1）。 */
+function evaluateCloseBelowPrior(
+  bars: readonly CanonicalMarketBar[],
+  currentDate: string,
+): boolean {
+  const currentIndex = bars.findIndex((bar) => bar.timestamp === currentDate);
+  if (currentIndex <= 0) return false;
+  const currentClose = bars[currentIndex]?.close;
+  const previousClose = bars[currentIndex - 1]?.close;
+  if (
+    currentClose === null || currentClose === undefined || !Number.isFinite(currentClose)
+    || previousClose === null || previousClose === undefined || !Number.isFinite(previousClose)
+  ) return false;
+  return currentClose < previousClose;
+}
+
 /** 装配可序列化执行假设快照。 */
 function buildConfigSnapshot(
   config: SimulationConfig,
@@ -218,6 +363,13 @@ function buildConfigSnapshot(
     maxDailyBuys: config.maxDailyBuys ?? null,
     directionPolicy: config.directionPolicy ?? "longOnly",
     reentryPolicy: config.reentryPolicy ?? null,
+    marketRegimeGate:
+      config.marketRegimeGate === undefined || config.marketRegimeGate === null
+        ? null
+        : {
+            blockedDecisionDates: [...config.marketRegimeGate.blockedDecisionDates],
+            label: config.marketRegimeGate.label ?? null,
+          },
     candidateExitPolicy: config.candidateExitPolicy ?? "HOLD_WHILE_SELECTED",
     executionRules,
     allowPartialFill: config.allowPartialFill ?? false,
@@ -252,6 +404,9 @@ function buildConfigSnapshot(
               replacementScoreMargin:
                 config.exitPolicy.strongHold.replacementScoreMargin ?? null,
             },
+      recoveryPath: config.exitPolicy?.recoveryPath ?? null,
+      runnerBridge: config.exitPolicy?.runnerBridge ?? null,
+      clc2ReversalPath: config.exitPolicy?.clc2ReversalPath ?? null,
     },
     tPlus1: DEFAULT_MARKET_RULES.tPlus1,
     lotSize: config.cost.lotSize > 0 ? Math.floor(config.cost.lotSize) : 1,
@@ -315,6 +470,10 @@ export function runTradeSimulation(
 
   // 1. 输入形态校验（FAIL FAST）。
   assertValidSimulationConfig(simConfig);
+  // MARKET-REGIME-001：市场状态闸门 → 决策日集合（缺省空集合 ⇒ 行为逐字节不变）。
+  const marketRegimeBlockedDates = new Set<string>(
+    simConfig.marketRegimeGate?.blockedDecisionDates ?? [],
+  );
   assertValidCandidateEvaluationRun(sourceRun);
   if (sourceRun.recordKind !== "CANDIDATE_EVALUATION_RUN") {
     throw new TradeSimulationError(
@@ -513,6 +672,9 @@ export function runTradeSimulation(
    * 直到真正清仓，避免价格反弹后取消已经触发的保护性退出。
    */
   const trailingTakeProfitTriggered = new Map<string, string>();
+  /** Runner 恢复路径已发出退出信号；卖单被拒时跨日保留，直到真正清仓。 */
+  const recoveryPathTriggered = new Map<string, string>();
+  const clc2ReversalTriggered = new Map<string, string>();
   /** 持仓期最高收盘价；建仓成交价作为初始峰值。 */
   const trailingPeakClosePrices = new Map<string, number>();
   /** 风控规则使用的复权后建仓参考价（公司行为发生前等同于成交价）。 */
@@ -522,6 +684,7 @@ export function runTradeSimulation(
     simConfig.exitPolicy?.advancedTrailingPolicy ?? null;
   const advancedStopPolicy =
     simConfig.exitPolicy?.advancedStopPolicy ?? null;
+  const recoveryPathPolicy = simConfig.exitPolicy?.recoveryPath ?? null;
   const stronglyHeldPositions = new Set<string>();
   /** 已完成或已挂单减仓的强势持仓，避免重复减持。 */
   const scaleOutScheduled = new Set<string>();
@@ -532,15 +695,71 @@ export function runTradeSimulation(
   const runnerSlotUsageBySecurity = new Map<string, number>();
   const sarStateBySecurity = new Map<string, ParabolicSarState>();
   const advancedStopStateBySecurity = new Map<string, AdvancedStopState>();
+  const runnerBridgePolicy = simConfig.exitPolicy?.runnerBridge ?? null;
+  const runnerBridgeBarsBySecurity = new Map<string, CanonicalMarketBar[]>();
+  if (runnerBridgePolicy !== null) {
+    for (const row of handle.rows) {
+      const bars = runnerBridgeBarsBySecurity.get(row.securityId) ?? [];
+      bars.push(rowToCanonicalBar(row));
+      runnerBridgeBarsBySecurity.set(row.securityId, bars);
+    }
+    for (const bars of runnerBridgeBarsBySecurity.values()) {
+      bars.sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+    }
+  }
+  const runnerBridgeExtendedToBySecurity = new Map<string, number>();
+  /**
+   * STRATEGY-EXIT-VALIDATION-010：每个持仓的固定 Strong→Weak 路径状态。
+   *
+   * 语义与 009 冻结口径一致：激活日只记录首个高点的基准，不产生 strong/weak 判断；
+   * 从次日起连续创新高计数 >=2 为 strong，首次 strong→weak 后等待 confirmationDays，
+   * 期间恢复 strong 则永久持有到时间退出，否则发出退出信号。
+   */
+  const recoveryPathStateBySecurity = new Map<string, {
+    activated: boolean;
+    activationDayIndex: number | null;
+    previousHigh: number | null;
+    consecutiveHigherHighs: number;
+    wasStrong: boolean;
+    firstWeakSeen: boolean;
+    firstWeakDayIndex: number | null;
+    confirmationRemaining: number | null;
+    recovered: boolean;
+    triggered: boolean;
+  }>();
+  /** CLC2-PORTFOLIO-001：每个持仓的「持续连续收低 → 反转确认」路径状态。 */
+  const clc2ReversalPolicy =
+    simConfig.exitPolicy?.clc2ReversalPath ?? null;
+  const clc2ReversalStateBySecurity = new Map<string, {
+    consecutiveTrue: number;
+    sustained: boolean;
+    triggered: boolean;
+  }>();
+  const clc2ReversalBarsBySecurity = new Map<string, CanonicalMarketBar[]>();
+  if (clc2ReversalPolicy !== null) {
+    for (const row of handle.rows) {
+      const bars = clc2ReversalBarsBySecurity.get(row.securityId) ?? [];
+      bars.push(rowToCanonicalBar(row));
+      clc2ReversalBarsBySecurity.set(row.securityId, bars);
+    }
+    for (const bars of clc2ReversalBarsBySecurity.values()) {
+      bars.sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+    }
+  }
   const closeHistoryBySecurity: Map<string, TrailingPriceHistory> =
     strongHold !== null || advancedTrailingPolicy !== null
       ? buildTrailingPriceHistory(handle.rows)
       : new Map();
   const triggeredExitReasonFor = (securityId: string): string | undefined =>
-    stopLossTriggered.get(securityId) ?? trailingTakeProfitTriggered.get(securityId);
+    stopLossTriggered.get(securityId)
+    ?? trailingTakeProfitTriggered.get(securityId)
+    ?? recoveryPathTriggered.get(securityId)
+    ?? clc2ReversalTriggered.get(securityId);
   const clearTriggeredExit = (securityId: string): void => {
     stopLossTriggered.delete(securityId);
     trailingTakeProfitTriggered.delete(securityId);
+    recoveryPathTriggered.delete(securityId);
+    clc2ReversalTriggered.delete(securityId);
     trailingPeakClosePrices.delete(securityId);
     riskEntryPrices.delete(securityId);
     sarStateBySecurity.delete(securityId);
@@ -549,6 +768,9 @@ export function runTradeSimulation(
     activeFullRunnerSecurityIds.delete(securityId);
     runnerSlotUsageBySecurity.delete(securityId);
     advancedStopStateBySecurity.delete(securityId);
+    recoveryPathStateBySecurity.delete(securityId);
+    clc2ReversalStateBySecurity.delete(securityId);
+    runnerBridgeExtendedToBySecurity.delete(securityId);
   };
   const resetScaleOutScheduleOnReject = (securityId: string): void => {
     if (!runnerSlotUsageBySecurity.has(securityId)) {
@@ -1181,6 +1403,131 @@ export function runTradeSimulation(
       }
     }
 
+    // STRATEGY-EXIT-VALIDATION-010：仅消费 009 已验证的固定 Runner 路径定义。
+    // 信号在 close 产生；若未恢复强状态，则经当前执行模型在下一可交易日退出。
+    if (recoveryPathPolicy !== null) {
+      for (const detail of openTradeDetails) {
+        if (triggeredExitReasonFor(detail.securityId) !== undefined) continue;
+        const bar = dayBars.get(detail.securityId);
+        const high = bar?.high ?? null;
+        if (
+          high === null
+          || !Number.isFinite(high)
+          || high <= 0
+        ) {
+          continue;
+        }
+        const riskEntryPrice =
+          riskEntryPrices.get(detail.securityId) ?? detail.entryPrice;
+        if (!Number.isFinite(riskEntryPrice) || riskEntryPrice <= 0) continue;
+
+        let state = recoveryPathStateBySecurity.get(detail.securityId);
+        if (state === undefined) {
+          state = {
+            activated: false,
+            activationDayIndex: null,
+            previousHigh: null,
+            consecutiveHigherHighs: 0,
+            wasStrong: false,
+            firstWeakSeen: false,
+            firstWeakDayIndex: null,
+            confirmationRemaining: null,
+            recovered: false,
+            triggered: false,
+          };
+        }
+
+        if (!state.activated) {
+          const activationPrice =
+            riskEntryPrice * (1 + recoveryPathPolicy.activationRatio);
+          if (high >= activationPrice) {
+            state.activated = true;
+            state.activationDayIndex = dateIndex;
+            state.previousHigh = high;
+            state.consecutiveHigherHighs = 0;
+          }
+          recoveryPathStateBySecurity.set(detail.securityId, state);
+          continue;
+        }
+
+        if (state.triggered || state.recovered) {
+          recoveryPathStateBySecurity.set(detail.securityId, state);
+          continue;
+        }
+
+        if (state.previousHigh !== null && high > state.previousHigh) {
+          state.consecutiveHigherHighs += 1;
+        } else {
+          state.consecutiveHigherHighs = 0;
+        }
+        const isStrong = state.consecutiveHigherHighs >= 2;
+
+        if (!state.firstWeakSeen) {
+          if (isStrong) {
+            state.wasStrong = true;
+          } else if (state.wasStrong) {
+            state.firstWeakSeen = true;
+            state.firstWeakDayIndex = dateIndex;
+            state.confirmationRemaining = recoveryPathPolicy.confirmationDays;
+            if (recoveryPathPolicy.confirmationDays === 0) {
+              state.triggered = true;
+            }
+          }
+        } else if (isStrong) {
+          // 009 固定路径：确认窗口内任一收盘恢复 strong ⇒ 取消退出并继续持有。
+          state.recovered = true;
+          state.confirmationRemaining = null;
+        } else if (state.confirmationRemaining !== null) {
+          state.confirmationRemaining -= 1;
+          if (state.confirmationRemaining <= 0) {
+            state.triggered = true;
+          }
+        }
+
+        state.previousHigh = high;
+        recoveryPathStateBySecurity.set(detail.securityId, state);
+
+        if (state.triggered) {
+          const reason =
+            `Runner路径退出（激活${(recoveryPathPolicy.activationRatio * 100).toFixed(0)}%，`
+            + `首次转弱D0，确认D+${String(recoveryPathPolicy.confirmationDays)}，持续弱）`;
+          recoveryPathTriggered.set(detail.securityId, reason);
+          forcedExitReasons.set(detail.securityId, reason);
+        }
+      }
+    }
+
+    // CLC2-PORTFOLIO-001：仅消费冻结的「持续连续收低 → 反转确认」定义。
+    // 状态在 close 观测；持续 ≥sustainMinRun 后的首个 FALSE 触发，下一可交易日开盘退出。
+    if (clc2ReversalPolicy !== null) {
+      const sustainMinRun = clc2ReversalPolicy.sustainMinRun ?? 5;
+      for (const detail of openTradeDetails) {
+        if (clc2ReversalTriggered.has(detail.securityId)) continue;
+        const bars = clc2ReversalBarsBySecurity.get(detail.securityId);
+        if (bars === undefined) continue;
+        let state = clc2ReversalStateBySecurity.get(detail.securityId);
+        if (state === undefined) {
+          state = { consecutiveTrue: 0, sustained: false, triggered: false };
+        }
+        const isTrue = evaluateCloseBelowPrior(bars, date);
+        if (isTrue) {
+          state.consecutiveTrue += 1;
+          if (state.consecutiveTrue >= sustainMinRun) state.sustained = true;
+        } else {
+          if (state.sustained && !state.triggered) {
+            state.triggered = true;
+            const reason =
+              `CLC2反转确认（连续收低≥${String(sustainMinRun)}日后首次结束，`
+              + `下一交易日开盘退出）`;
+            clc2ReversalTriggered.set(detail.securityId, reason);
+            forcedExitReasons.set(detail.securityId, reason);
+          }
+          state.consecutiveTrue = 0;
+        }
+        clc2ReversalStateBySecurity.set(detail.securityId, state);
+      }
+    }
+
     const trailingActivationRatio =
       exitPolicy?.trailingTakeProfitActivationRatio ?? 0;
     const trailingDrawdownRatio =
@@ -1328,12 +1675,45 @@ export function runTradeSimulation(
       }
     }
 
+    if (runnerBridgePolicy !== null) {
+      for (const detail of openTradeDetails) {
+        if (forcedExitReasons.has(detail.securityId)) continue;
+        if (runnerBridgeExtendedToBySecurity.has(detail.securityId)) continue;
+        const holdingDays = portfolio.holdingDaysBetween(detail.entryTime, date);
+        if (holdingDays !== runnerBridgePolicy.decisionHoldingDays) continue;
+        const bars = runnerBridgeBarsBySecurity.get(detail.securityId);
+        if (bars === undefined) continue;
+        const matched = evaluateRunnerHoldingBridgeState(
+          bars,
+          detail.entryTime,
+          date,
+          runnerBridgePolicy.state,
+        );
+        if (matched) {
+          runnerBridgeExtendedToBySecurity.set(
+            detail.securityId,
+            runnerBridgePolicy.extendToHoldingDays,
+          );
+        }
+      }
+    }
+
     const maxHoldingDays = exitPolicy?.maxHoldingDays ?? null;
     if (maxHoldingDays !== null) {
       for (const detail of openTradeDetails) {
         if (forcedExitReasons.has(detail.securityId)) continue;
         const holdingDays = portfolio.holdingDaysBetween(detail.entryTime, date);
         if (holdingDays === null) continue;
+        const bridgeExtendedTo = runnerBridgeExtendedToBySecurity.get(detail.securityId);
+        if (bridgeExtendedTo !== undefined) {
+          if (holdingDays >= bridgeExtendedTo) {
+            forcedExitReasons.set(
+              detail.securityId,
+              `Runner Bridge持有满${String(bridgeExtendedTo)}个交易日`,
+            );
+          }
+          continue;
+        }
         const positionKey = `${detail.securityId}\u0000${detail.entryTime}`;
         if (
           strongHold !== null &&
@@ -1564,6 +1944,7 @@ export function runTradeSimulation(
       const plan = perfRun("backtest.plan", () =>
         planDecisionDay({
         ...(reentryBlocked.size === 0 ? {} : { reentryBlocked }),
+        ...(marketRegimeBlockedDates.has(date) ? { marketRegimeBlocked: true } : {}),
         decisionDate: date,
         intents,
         forcedExitReasons,
@@ -1719,3 +2100,4 @@ export function runTradeSimulation(
   perfCount("backtest.equity_points", equityCurve.length);
   return deepFreeze<TradeSimulationRun>({ ...body, fingerprint });
 }
+

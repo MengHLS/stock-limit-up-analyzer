@@ -28,8 +28,11 @@ function augmentFirstBoardRequirement(
   return {
     ...requirement,
     datasetCode: FIRST_BOARD_PULLBACK_DATASET_CODE,
+    // 缺省沿用核心版本标签；若实验**显式**声明了自己的标签则尊重之
+    // （COMPOSITE-RUNNER-DATASET-PROVIDER-001：组合实验绑定 v7/750001 作为平台数据集坐标）。
     requiredDatasetVersionLabel:
-      FIRST_BOARD_PULLBACK_CORE_DATASET_VERSION_LABEL,
+      requirement.requiredDatasetVersionLabel
+      ?? FIRST_BOARD_PULLBACK_CORE_DATASET_VERSION_LABEL,
     requiredColumns: {
       events: unique([
         ...(requirement.requiredColumns.events ?? []),
@@ -91,6 +94,12 @@ export function withFirstBoardPullbackFoundation(
   definition: ExperimentDefinition,
   options: FoundationBuildOptions = {}
 ): ExperimentDefinition {
+  // COMPOSITE-RUNNER-DATASET-PROVIDER-001：声明了组合执行面的实验**不使用**事件级
+  // 首板回撤底座（其数据由平台 provider 经 `context.composite` 供给），因此不注入底座。
+  // 既有 SINGLE_EVENT 实验逐字节不变。
+  if (definition.descriptor.executionSurface === "COMPOSITE_PORTFOLIO") {
+    return definition;
+  }
   return {
     ...definition,
     descriptor: {
@@ -137,3 +146,5 @@ export function withFirstBoardPullbackFoundation(
     },
   };
 }
+
+

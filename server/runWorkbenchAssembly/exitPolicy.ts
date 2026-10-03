@@ -93,6 +93,7 @@ export function mapDeclaredExitPolicy(
     advancedTrailingPolicy: ExitPolicy["advancedTrailingPolicy"];
     advancedStopPolicy: ExitPolicy["advancedStopPolicy"];
     strongHold: ExitPolicy["strongHold"];
+    recoveryPath: ExitPolicy["recoveryPath"];
   } = {
     stopLossRatio: null,
     takeProfitRatio: null,
@@ -103,8 +104,14 @@ export function mapDeclaredExitPolicy(
     advancedTrailingPolicy: null,
     advancedStopPolicy: null,
     strongHold: null,
+    recoveryPath: null,
   };
   let unifiedPolicyApplied = false;
+  /**
+   * STRATEGY-HOLDING-BRIDGE-001：统一 policy 里的 runnerBridge 必须原样透传，否则语义丢失。
+   * 仅在草稿**显式声明**时写出该键 —— 未声明时返回对象形状与既有行为逐字段一致（零回归）。
+   */
+  let unifiedRunnerBridge: ExitPolicy["runnerBridge"] | undefined;
 
   for (const rule of enabled) {
     if (rule.policy !== undefined && rule.policy !== null) {
@@ -144,6 +151,11 @@ export function mapDeclaredExitPolicy(
             afterExtendedHold:
               rule.policy.strongHold.afterExtendedHold ?? "TIME_EXIT",
           };
+      policy.recoveryPath = rule.policy.recoveryPath ?? null;
+      // 只有草稿**显式声明**该键时才透传，避免把「缺省」变成裸 null 而改变既有输出形状。
+      if (Object.prototype.hasOwnProperty.call(rule.policy, "runnerBridge")) {
+        unifiedRunnerBridge = rule.policy.runnerBridge ?? null;
+      }
       continue;
     }
     switch (rule.type) {
@@ -241,13 +253,21 @@ export function mapDeclaredExitPolicy(
     policy.strongHold = { ...strongHold };
   }
 
+  if (unifiedRunnerBridge !== undefined) {
+    (policy as { runnerBridge?: ExitPolicy["runnerBridge"] }).runnerBridge = unifiedRunnerBridge;
+  }
+
   return policy.stopLossRatio === null &&
     policy.takeProfitRatio === null &&
     policy.maxHoldingDays === null &&
     policy.trailingTakeProfitDrawdownRatio === null &&
     policy.advancedTrailingPolicy === null &&
     policy.advancedStopPolicy === null &&
-    policy.strongHold === null
+    policy.strongHold === null &&
+    policy.recoveryPath === null
     ? undefined
     : policy;
 }
+
+
+

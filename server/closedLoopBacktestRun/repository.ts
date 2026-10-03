@@ -21,6 +21,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../db";
 import { closedLoopBacktestRun, strategyVersionStars } from "../../drizzle/schema";
 import type { ClosedLoopRunResult } from "../../shared/researchContracts";
+import { reconcileArchivedClosedLoopResult } from "./resultCompat";
 import type { StrategyDocument } from "../research/strategySchema/types";
 import {
   buildClosedLoopBacktestRunSummary,
@@ -56,6 +57,13 @@ export type ClosedLoopBacktestRunRecord = {
 export type ClosedLoopBacktestRunDetail = ClosedLoopBacktestRunRecord & {
   /** `resultJson` 为 NULL 时为 null（表示本次未留完整结果，非「记录损坏」）。 */
   result: ClosedLoopRunResult | null;
+  /**
+   * `resultJson` 存在、却**读不出来**时的如实原因；`null` = 无此问题。
+   *
+   * 🔴 与 `result === null` 是两件事：前者=「留了但不可读」，后者=「本次没留」。
+   * 细节与已登记升级路径见 `resultCompat.ts`。
+   */
+  resultIssue: string | null;
 };
 
 export type SaveClosedLoopBacktestRunInput = {
@@ -479,6 +487,33 @@ export async function listClosedLoopBacktestRuns(
   return parsedRows.map(row => row.record);
 }
 
+/**
+ * 从 `resultJson` 读出一条留档的结果（读路径的**唯一**入口）。
+ *
+ * 三种结局，刻意分开、不许互相冒充：
+ *   1. `resultJson` 为 NULL / 空 ⇒ `{ result: null, resultIssue: null }`（本次没留完整结果）；
+ *   2. 文本解析失败 / 不是对象 ⇒ **抛错**（「记录坏了」必须响，不降级成「没跑过」）；
+ *   3. 解析成功但过不了当前契约 ⇒ `{ result: null, resultIssue: <原因> }` —— 如实上报
+ *      「留了但读不出来」，且**不抛错**：一条旧契约留档不该把整批对比请求打死
+ *      （升级路径与纪律见 `resultCompat.ts`）。
+ */
+function readArchivedResult(
+  id: number,
+  resultJson: string | null,
+): { result: ClosedLoopRunResult | null; resultIssue: string | null } {
+  if (resultJson === null || resultJson === "") {
+    return { result: null, resultIssue: null };
+  }
+  const parsed = JSON.parse(resultJson) as unknown;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`留档结果结构非法：closed_loop_backtest_run#${id}.resultJson 不是对象`);
+  }
+  const reconciled = reconcileArchivedClosedLoopResult(parsed);
+  return reconciled.status === "ok"
+    ? { result: reconciled.result, resultIssue: null }
+    : { result: null, resultIssue: reconciled.reason };
+}
+
 /** 读取单条留档的完整内容（含 `resultJson`）。不存在 ⇒ null。 */
 export async function getClosedLoopBacktestRun(
   id: number,
@@ -493,22 +528,15 @@ export async function getClosedLoopBacktestRun(
   if (row === undefined) return null;
 
   const record = rowToRecord(row, await isVersionStarred(row.strategyId, row.strategyVersion));
-  let result: ClosedLoopRunResult | null = null;
-  if (row.resultJson !== null && row.resultJson !== "") {
-    const parsed = JSON.parse(row.resultJson) as unknown;
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error(`留档结果结构非法：closed_loop_backtest_run#${id}.resultJson 不是对象`);
-    }
-    result = parsed as ClosedLoopRunResult;
-  }
-  return { ...record, result };
+  return { ...record, ...readArchivedResult(id, row.resultJson) };
 }
 
 /**
  * 批量读取多条留档的完整内容（含 `resultJson`）。
  *
  * 用途：单策略多版本对比页需要一次性把若干版本的历史结果拼到一张曲线图上。
- * 与 `getClosedLoopBacktestRun` 同口径：不存在 ⇒ 不返回；`resultJson` 损坏 ⇒ 抛错。
+ * 与 `getClosedLoopBacktestRun` 同口径：不存在 ⇒ 不返回；`resultJson` 损坏 ⇒ 抛错；
+ * 过不了当前契约 ⇒ `result: null` + `resultIssue`（**整批不因此失败**，见 `readArchivedResult`）。
  */
 export async function getClosedLoopBacktestRunsByIds(
   ids: readonly number[],
@@ -533,17 +561,7 @@ export async function getClosedLoopBacktestRunsByIds(
       row,
       starredKeys.has(starCoordKey(row.strategyId, row.strategyVersion)),
     );
-    let result: ClosedLoopRunResult | null = null;
-    if (row.resultJson !== null && row.resultJson !== "") {
-      const parsed = JSON.parse(row.resultJson) as unknown;
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error(
-          `留档结果结构非法：closed_loop_backtest_run#${row.id}.resultJson 不是对象`,
-        );
-      }
-      result = parsed as ClosedLoopRunResult;
-    }
-    byId.set(row.id, { ...record, result });
+    byId.set(row.id, { ...record, ...readArchivedResult(row.id, row.resultJson) });
   }
 
   // 出参顺序跟随入参，保证「最近一次在前」的语义由调用方掌控。

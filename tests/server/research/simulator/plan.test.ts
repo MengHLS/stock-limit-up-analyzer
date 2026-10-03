@@ -113,6 +113,84 @@ describe("planDecisionDay · 单日新建仓上限", () => {
   });
 });
 
+describe("planDecisionDay · 市场状态闸门（MARKET-REGIME-001）", () => {
+  const intent = (securityId: string, rank: number) => ({
+    securityId,
+    direction: "long" as const,
+    rank,
+    percentile: 1,
+    weight: 1,
+    signalValue: 1,
+    confidence: null,
+  });
+
+  it("闸门命中当日：全部新建仓跳过（code=MARKET_REGIME_BLOCKED），不产生买单", () => {
+    const plan = planDecisionDay({
+      decisionDate: "2026-01-05",
+      intents: [intent("A", 1), intent("B", 2)],
+      holdings: [],
+      availableBySecurity: new Map(),
+      cash: 100_000,
+      maxPositions: 5,
+      maxDailyBuys: 2,
+      hasNextTradingDay: true,
+      closePriceBySecurity: new Map([["A", 10], ["B", 10]]),
+      amountBySecurity: new Map([["A", null], ["B", null]]),
+      cost: COST,
+      directionPolicy: "longOnly",
+      marketRegimeBlocked: true,
+    });
+
+    expect(plan.orders.filter(order => order.kind === "buy")).toEqual([]);
+    expect(plan.skipped).toEqual([
+      expect.objectContaining({ securityId: "A", side: "buy", code: "MARKET_REGIME_BLOCKED" }),
+      expect.objectContaining({ securityId: "B", side: "buy", code: "MARKET_REGIME_BLOCKED" }),
+    ]);
+  });
+
+  it("闸门命中只挡新建仓：已持仓的强制退出照常执行", () => {
+    const plan = planDecisionDay({
+      decisionDate: "2026-01-05",
+      intents: [intent("A", 1)],
+      holdings: ["A"],
+      availableBySecurity: new Map([["A", 100]]),
+      cash: 0,
+      maxPositions: 5,
+      hasNextTradingDay: true,
+      closePriceBySecurity: new Map([["A", 10]]),
+      amountBySecurity: new Map([["A", null]]),
+      cost: COST,
+      directionPolicy: "longOnly",
+      forcedExitReasons: new Map([["A", "持有满5个交易日"]]),
+      marketRegimeBlocked: true,
+    });
+
+    expect(plan.orders).toEqual([
+      { kind: "sell", securityId: "A", quantity: 100, reason: "持有满5个交易日" },
+    ]);
+  });
+
+  it("闸门缺省（false/undefined）时行为与既有路径一致", () => {
+    const plan = planDecisionDay({
+      decisionDate: "2026-01-05",
+      intents: [intent("A", 1)],
+      holdings: [],
+      availableBySecurity: new Map(),
+      cash: 100_000,
+      maxPositions: 5,
+      maxDailyBuys: 2,
+      hasNextTradingDay: true,
+      closePriceBySecurity: new Map([["A", 10]]),
+      amountBySecurity: new Map([["A", null]]),
+      cost: COST,
+      directionPolicy: "longOnly",
+    });
+
+    expect(plan.orders).toEqual([expect.objectContaining({ kind: "buy", securityId: "A" })]);
+    expect(plan.skipped).toEqual([]);
+  });
+});
+
 describe("planDecisionDay · runner 分批退出", () => {
   it("部分卖出只释放对应仓位槽，并允许新候选补入剩余槽", () => {
     const intent = {

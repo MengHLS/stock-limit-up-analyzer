@@ -111,6 +111,8 @@ export const THREE_FACTOR_TOPN_3_VERSION_LINEAGE: Readonly<Record<string, string
     "1.61.1": "1.59.6",
     "1.61.2": "1.59.6",
     "1.62.1": "1.59.6",
+    // 2026-10-01：唯一的增量 = definition.marketRegimeFilter（决策日封板家数 < 训练段 p33 时不新建仓）。
+    "1.63.0": "1.62.1",
   });
 
 export interface VersionLineageRow {

@@ -118,6 +118,50 @@ function checkOptionalRatio(value: unknown, path: string, label: string, issues:
   }
 }
 
+function checkMarketRegimeFilter(
+  raw: unknown,
+  issues: ResearchValidationIssue[],
+): void {
+  if (raw === undefined || raw === null) return;
+  if (!isPlainObject(raw)) {
+    issues.push(issue("SCHEMA_DEFINITION_MARKET_REGIME_INVALID", "marketRegimeFilter", "marketRegimeFilter 必须是对象"));
+    return;
+  }
+  const spec = raw as { blockedDecisionDates?: unknown; label?: unknown };
+  const dates = spec.blockedDecisionDates;
+  if (!Array.isArray(dates) || dates.length === 0) {
+    issues.push(issue(
+      "SCHEMA_DEFINITION_MARKET_REGIME_INVALID",
+      "marketRegimeFilter.blockedDecisionDates",
+      "blockedDecisionDates 必须是非空数组（YYYY-MM-DD）",
+    ));
+    return;
+  }
+  const seen = new Set<string>();
+  for (let index = 0; index < dates.length; index += 1) {
+    const value = dates[index];
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_MARKET_REGIME_INVALID",
+        `marketRegimeFilter.blockedDecisionDates[${index}]`,
+        `必须是 YYYY-MM-DD 字符串，实际：${String(value)}`,
+      ));
+      continue;
+    }
+    if (seen.has(value)) {
+      issues.push(issue(
+        "SCHEMA_DEFINITION_MARKET_REGIME_INVALID",
+        `marketRegimeFilter.blockedDecisionDates[${index}]`,
+        `决策日重复：${value}`,
+      ));
+    }
+    seen.add(value);
+  }
+  if (spec.label !== undefined && (typeof spec.label !== "string" || spec.label.trim() === "")) {
+    issues.push(issue("SCHEMA_DEFINITION_MARKET_REGIME_INVALID", "marketRegimeFilter.label", "label 必须是非空字符串"));
+  }
+}
+
 function checkFirstLimitPool(
   raw: unknown,
   entryTriggerType: unknown,
@@ -620,6 +664,7 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
   }
 
   // -- 首板股票池（可选；旧事件窗文档不携带该字段） --
+  checkMarketRegimeFilter(definition.marketRegimeFilter, issues);
   checkFirstLimitPool(
     (d as unknown as Record<string, unknown>).firstLimitPool,
     (d.entry as unknown as Record<string, unknown> | undefined)?.trigger

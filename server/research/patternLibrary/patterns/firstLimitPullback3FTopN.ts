@@ -210,6 +210,18 @@ function makeThreeFactorTopNPattern(
   };
 }
 
+/** 交易压缩实验（TRADE-COMPRESSION-001）：3F 综合评分 TopN（N = 1）。其余口径与 N3 逐项一致。 */
+export const FIRST_LIMIT_PULLBACK_3F_TOPN1: TradingPatternSpec = makeThreeFactorTopNPattern(
+  1,
+  { requirePullback: true },
+);
+
+/** 交易压缩实验（TRADE-COMPRESSION-001）：3F 综合评分 TopN（N = 2）。其余口径与 N3 逐项一致。 */
+export const FIRST_LIMIT_PULLBACK_3F_TOPN2: TradingPatternSpec = makeThreeFactorTopNPattern(
+  2,
+  { requirePullback: true },
+);
+
 /** 3F 综合评分 TopN 策略（N = 3）。 */
 export const FIRST_LIMIT_PULLBACK_3F_TOPN3: TradingPatternSpec = makeThreeFactorTopNPattern(
   3,

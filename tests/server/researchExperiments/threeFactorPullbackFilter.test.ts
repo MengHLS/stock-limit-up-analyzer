@@ -68,4 +68,24 @@ describe("3F 首板回踩资格", () => {
     expect(raw?.hasPullbackInObservationWindow).toBe(true);
     expect(raw === null ? null : threeFactorCompositeScoreOf(raw)).not.toBeNull();
   });
+  it("Te 截点只使用 T+1..Te，且 t1VolumeRatio 固定使用 T+1", () => {
+    const bars = [
+      bar(10, { volume: 1000, high: 10.2, low: 9.8 }),
+      bar(11, { volume: 800, high: 11.5, low: 10.5 }),
+      bar(9.5, { volume: 700, high: 10.0, low: 9.0 }),
+      bar(12, { volume: 600, high: 12.5, low: 11.0 }),
+    ];
+    const raw1 = computeThreeFactorRaw(bars, 1)!;
+    expect(raw1.maxAmplitude).toBeCloseTo((11.5 - 10.5) / 10, 12);
+    expect(raw1.meanAmplitude).toBeCloseTo((11.5 - 10.5) / 10, 12);
+    expect(raw1.hasPullbackInObservationWindow).toBe(false);
+    expect(raw1.t1VolumeRatio).toBeCloseTo(0.8, 12);
+
+    const raw3 = computeThreeFactorRaw(bars, 3)!;
+    expect(raw3.maxAmplitude).toBeCloseTo(Math.max((11.5 - 10.5) / 10, (10 - 9) / 11, (12.5 - 11) / 9.5), 12);
+    expect(raw3.meanAmplitude).toBeCloseTo(((11.5 - 10.5) / 10 + (10 - 9) / 11 + (12.5 - 11) / 9.5) / 3, 12);
+    expect(raw3.hasPullbackInObservationWindow).toBe(true);
+    expect(raw3.t1VolumeRatio).toBeCloseTo(0.8, 12);
+  });
+
 });

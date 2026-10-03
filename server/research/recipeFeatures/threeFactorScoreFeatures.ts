@@ -44,7 +44,7 @@ import {
   type TwelveFactorCode,
 } from "../../../research-experiments/first-board-pullback/twelve-factor-composite-study/result";
 
-/** 振幅窗口长度（T+1..T+5），与研究侧 `CONTEXT_DAYS` 同值。 */
+/** 1.62.1 的振幅窗口上限（T+1..T+5），与研究侧 `CONTEXT_DAYS` 同值。 */
 export const AMPLITUDE_WINDOW_DAYS = 5;
 
 /**
@@ -65,11 +65,11 @@ export type ThreeFactorCode = (typeof THREE_FACTOR_CODES)[number];
 
 /** 3F 三个原始因子值（未标准化）。 */
 export interface ThreeFactorRaw {
-  /** T+1..T+5 是否至少有一天回踩到首板收盘价下方。 */
+  /** 当前评估窗口 T+1..Te 内是否至少有一天回踩到首板收盘价下方。 */
   readonly hasPullbackInObservationWindow: boolean;
-  /** T+1..T+5 最大振幅（分母为链式前收）。 */
+  /** 当前评估窗口 T+1..Te 最大振幅（分母为链式前收）。 */
   readonly maxAmplitude: number;
-  /** T+1..T+5 平均振幅。 */
+  /** 当前评估窗口 T+1..Te 平均振幅。 */
   readonly meanAmplitude: number;
   /** T+1 成交量 ÷ 首板日成交量。 */
   readonly t1VolumeRatio: number;
@@ -82,28 +82,37 @@ function finite(value: number | null | undefined): value is number {
 /**
  * 由「已 as-of 过滤」的 bars 算 3F 三个原始值。
  *
- * 🔴 入参约定：`bars[0]` = **首板日 T**（装配层 prefix `rd=0`），`bars[1..5]` = T+1..T+5。
+ * 🔴 入参约定：`bars[0]` = **首板日 T**（装配层 prefix `rd=0`），`bars[1..N]` = T+1..T+N。
+ * `amplitudeWindowDays` 是**本次信息截点** Te：
+ *   - 1.62.1 调用缺省值 5 ⇒ T+1..T+5；
+ *   - DYNAMIC-3F-BUCKET-ENTRY-001 传入 1..5，且只读 bars[1..Te]。
  * 任一根缺失 / 非有限 / 首板日收盘或成交量非正 ⇒ 返回 `null`（**不插补、不填 0**、
  * 与契约 §3.3「完备用例」一致）。
  *
- * 决策日 = 序列末根（T+5）；本函数只读 `bars[0..5]`，因此对 T+5 之后的任何决策日
- * 取到的都是**同一组值**（这正是「同一事件的 3F 评分不随时间变化」的来源）。
+ * `t1VolumeRatio` 始终固定为 T+1 成交量 / 首板日成交量，不随 Te 改变。
+ * 决策日 = 序列末根；同一事件一旦在声明的首个有效日触发，后续日不再重复入场。
  */
-export function computeThreeFactorRaw(bars: readonly CanonicalMarketBar[]): ThreeFactorRaw | null {
+export function computeThreeFactorRaw(
+  bars: readonly CanonicalMarketBar[],
+  amplitudeWindowDays: number = AMPLITUDE_WINDOW_DAYS,
+): ThreeFactorRaw | null {
+  if (!Number.isInteger(amplitudeWindowDays) || amplitudeWindowDays < 1 || amplitudeWindowDays > AMPLITUDE_WINDOW_DAYS) {
+    throw new Error(`3F amplitudeWindowDays 必须是 [1, ${AMPLITUDE_WINDOW_DAYS}] 的整数，实际 ${String(amplitudeWindowDays)}。`);
+  }
   const eventBar = bars[0];
   if (eventBar === undefined) return null;
   const eventClose = eventBar.close;
   const eventVolume = eventBar.volume;
   if (!finite(eventClose) || eventClose <= 0) return null;
   if (!finite(eventVolume) || eventVolume <= 0) return null;
-  // 需要 bars[0..AMPLITUDE_WINDOW_DAYS] 共 6 根；不足 ⇒ 该事件尚未走完观察窗口。
-  if (bars.length < AMPLITUDE_WINDOW_DAYS + 1) return null;
+  // 需要 bars[0..Te] 共 Te+1 根；不足 ⇒ 该事件尚未走完当前观察窗口。
+  if (bars.length < amplitudeWindowDays + 1) return null;
 
   let runningPreClose = eventClose;
   let sum = 0;
   let max = Number.NEGATIVE_INFINITY;
   let hasPullbackInObservationWindow = false;
-  for (let index = 0; index < AMPLITUDE_WINDOW_DAYS; index += 1) {
+  for (let index = 0; index < amplitudeWindowDays; index += 1) {
     const bar = bars[index + 1]!;
     const { high, low, close } = bar;
     if (!finite(high) || !finite(low) || !finite(close)) return null;
@@ -120,7 +129,7 @@ export function computeThreeFactorRaw(bars: readonly CanonicalMarketBar[]): Thre
   return {
     hasPullbackInObservationWindow,
     maxAmplitude: max,
-    meanAmplitude: sum / AMPLITUDE_WINDOW_DAYS,
+    meanAmplitude: sum / amplitudeWindowDays,
     t1VolumeRatio: t1Bar.volume / eventVolume,
   };
 }

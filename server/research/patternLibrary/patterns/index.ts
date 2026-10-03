@@ -16,6 +16,8 @@ import { STOP_LOSS_RESEARCH } from "./stopLossResearch";
 import { MARKET_REGIME_STABILITY } from "./marketRegimeStability";
 import { LEADER_CANDIDATE_BASELINE } from "./leaderCandidateBaseline";
 import {
+  FIRST_LIMIT_PULLBACK_3F_TOPN1,
+  FIRST_LIMIT_PULLBACK_3F_TOPN2,
   FIRST_LIMIT_PULLBACK_3F_TOPN3,
   FIRST_LIMIT_PULLBACK_3F_TOPN5,
   FIRST_LIMIT_3F_TOPN3_NO_PULLBACK_GATE,
@@ -34,6 +36,8 @@ export { STOP_LOSS_RESEARCH } from "./stopLossResearch";
 export { MARKET_REGIME_STABILITY } from "./marketRegimeStability";
 export { LEADER_CANDIDATE_BASELINE } from "./leaderCandidateBaseline";
 export {
+  FIRST_LIMIT_PULLBACK_3F_TOPN1,
+  FIRST_LIMIT_PULLBACK_3F_TOPN2,
   FIRST_LIMIT_PULLBACK_3F_TOPN3,
   FIRST_LIMIT_PULLBACK_3F_TOPN5,
   FIRST_LIMIT_3F_TOPN3_NO_PULLBACK_GATE,
@@ -61,6 +65,9 @@ export const ALL_TRADING_PATTERNS: readonly TradingPatternSpec[] = [
   LEADER_CANDIDATE_BASELINE,
   // 2026-09-26 新增：把 3F 综合评分（RESULT-OOS-COMPOSITE-3F-001）落成可回测策略。
   FIRST_LIMIT_PULLBACK_3F_TOPN3,
+  // 2026-10-01 新增：交易压缩实验 Top1 / Top2（与 Top3 同配方，仅 selectionConfig.topN 不同）。
+  FIRST_LIMIT_PULLBACK_3F_TOPN1,
+  FIRST_LIMIT_PULLBACK_3F_TOPN2,
   FIRST_LIMIT_PULLBACK_3F_TOPN5,
   // 2026-09-27 新增：移除「观察窗内必须出现收盘回踩」资格门槛的 1.13.0 变体。
   FIRST_LIMIT_3F_TOPN3_NO_PULLBACK_GATE,

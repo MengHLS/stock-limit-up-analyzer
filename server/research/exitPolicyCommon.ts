@@ -38,12 +38,67 @@ export interface CapitalRecyclePolicyDefinition {
   readonly replacementScoreMargin: number | null;
 }
 
+export interface RunnerRecoveryPathExitPolicyDefinition {
+  /** 固定基准信号：连续创新高 >=2 中断（Strong→Weak）。 */
+  readonly kind: "HIGHER_HIGH_STREAK_RECOVERY";
+  /** 首次达到该浮盈后，才开始跟踪 Strong→Weak。 */
+  readonly activationRatio: number;
+  /** 首次转弱后等待多少个收盘日；期间恢复 Strong 则继续持有，否则退出。 */
+  readonly confirmationDays: 0 | 1 | 2 | 3;
+}
+
+export const RUNNER_HOLDING_BRIDGE_STATES = [
+  "NEW_HIGH_2",
+  "NEW_HIGH_3",
+  "CONSECUTIVE_HIGHER_HIGHS_GE_2",
+  "RETURN_2_POSITIVE",
+  "RETURN_3_POSITIVE",
+  "CLOSE_ABOVE_MA5",
+  "CLOSE_ABOVE_MA10",
+  "MA5_SLOPE_POSITIVE",
+  "MA10_SLOPE_POSITIVE",
+  "NEAR_5D_HIGH",
+  "CONSECUTIVE_LOWER_CLOSES_GE_2",
+  "CLOSE_LOCATION_UPPER_THIRD",
+] as const;
+export type RunnerHoldingBridgeState = (typeof RUNNER_HOLDING_BRIDGE_STATES)[number];
+
+/** STRATEGY-HOLDING-BRIDGE-001：在第 5 个持有日收盘用 PIT 状态决定是否延长原时间退出。 */
+export interface RunnerHoldingBridgePolicyDefinition {
+  readonly kind: "PIT_RUNNER_HOLDING_BRIDGE";
+  readonly state: RunnerHoldingBridgeState;
+  readonly decisionHoldingDays: 5;
+  readonly extendToHoldingDays: number;
+}
+
+/**
+ * CLC2-PORTFOLIO-001：研究专用的「持续状态 → 反转确认退出」路径。
+ *
+ * 语义（逐收盘评估，信号次日开盘执行）：
+ * - 状态 = 前一日收盘后、当日收盘低于前一日收盘（连续收低计数 ≥1）；
+ * - 连续 TRUE 达到 `sustainMinRun`（默认 5）个交易日后视为「持续成立」；
+ * - 成立后的首个 FALSE（反转确认）发出退出信号，下一个可交易日开盘卖出。
+ *
+ * 缺省 / null 时既有执行路径完全不变。仅在显式研究策略中声明。
+ */
+export interface SustainedCloseDeclineReversalExitPolicyDefinition {
+  readonly kind: "SUSTAINED_CLOSE_DECLINE_REVERSAL";
+  /** 触发反转确认前，状态需要连续 TRUE 的最小交易日数；默认 5。 */
+  readonly sustainMinRun?: number;
+}
+
 export interface ExitPolicyDefinition {
   readonly stop: StopPolicyDefinition;
   readonly takeProfit: ResearchTrailingPolicyDefinition | null;
   readonly timeExit: TimeExitPolicyDefinition | null;
   readonly strongHold: StrongHoldPolicyDefinition | null;
   readonly capitalRecycle: CapitalRecyclePolicyDefinition | null;
+  /** STRATEGY-EXIT-VALIDATION-010：固定 Runner 恢复/持续弱路径退出。 */
+  readonly recoveryPath?: RunnerRecoveryPathExitPolicyDefinition | null;
+  /** STRATEGY-HOLDING-BRIDGE-001：研究专用单变量 Runner 持有桥。 */
+  readonly runnerBridge?: RunnerHoldingBridgePolicyDefinition | null;
+  /** CLC2-PORTFOLIO-001：研究专用「持续连续收低 → 反转确认退出」路径。 */
+  readonly clc2ReversalPath?: SustainedCloseDeclineReversalExitPolicyDefinition | null;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -245,9 +300,65 @@ export function exitPolicyDefinitionErrors(
       errors.push(error);
     }
   }
+  if (value.recoveryPath !== undefined && value.recoveryPath !== null) {
+    if (!isRecord(value.recoveryPath)) {
+      errors.push(`${path}.recoveryPath 必须是对象或 null`);
+    } else {
+      const recoveryPath = value.recoveryPath;
+      if (recoveryPath.kind !== "HIGHER_HIGH_STREAK_RECOVERY") {
+        errors.push(`${path}.recoveryPath.kind 必须是 HIGHER_HIGH_STREAK_RECOVERY`);
+      }
+      if (!ratio(recoveryPath.activationRatio)) {
+        errors.push(`${path}.recoveryPath.activationRatio 必须位于 (0,1)`);
+      }
+      if (
+        !Number.isInteger(recoveryPath.confirmationDays)
+        || (recoveryPath.confirmationDays as number) < 0
+        || (recoveryPath.confirmationDays as number) > 3
+      ) {
+        errors.push(`${path}.recoveryPath.confirmationDays 必须是 0/1/2/3`);
+      }
+    }
+  }
+  if (value.runnerBridge !== undefined && value.runnerBridge !== null) {
+    if (!isRecord(value.runnerBridge)) {
+      errors.push(`${path}.runnerBridge 必须是对象或 null`);
+    } else {
+      const bridge = value.runnerBridge;
+      if (bridge.kind !== "PIT_RUNNER_HOLDING_BRIDGE") {
+        errors.push(`${path}.runnerBridge.kind 必须是 PIT_RUNNER_HOLDING_BRIDGE`);
+      }
+      if (!(RUNNER_HOLDING_BRIDGE_STATES as readonly unknown[]).includes(bridge.state)) {
+        errors.push(`${path}.runnerBridge.state 非法`);
+      }
+      if (bridge.decisionHoldingDays !== 5) {
+        errors.push(`${path}.runnerBridge.decisionHoldingDays 必须是 5`);
+      }
+      if (!Number.isInteger(bridge.extendToHoldingDays) || (bridge.extendToHoldingDays as number) <= 5) {
+        errors.push(`${path}.runnerBridge.extendToHoldingDays 必须是大于 5 的整数`);
+      }
+    }
+  }
+  if (value.clc2ReversalPath !== undefined && value.clc2ReversalPath !== null) {
+    if (!isRecord(value.clc2ReversalPath)) {
+      errors.push(`${path}.clc2ReversalPath 必须是对象或 null`);
+    } else {
+      const clc2 = value.clc2ReversalPath;
+      if (clc2.kind !== "SUSTAINED_CLOSE_DECLINE_REVERSAL") {
+        errors.push(`${path}.clc2ReversalPath.kind 必须是 SUSTAINED_CLOSE_DECLINE_REVERSAL`);
+      }
+      if (
+        clc2.sustainMinRun !== undefined
+        && (!Number.isInteger(clc2.sustainMinRun) || (clc2.sustainMinRun as number) < 1)
+      ) {
+        errors.push(`${path}.clc2ReversalPath.sustainMinRun 必须是正整数`);
+      }
+    }
+  }
   if (value.takeProfit !== null && !isRecord(value.takeProfit)) {
     errors.push(`${path}.takeProfit 必须是对象或 null`);
   }
   return errors;
 }
+
 

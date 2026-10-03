@@ -58,6 +58,7 @@ import {
   type StrategyWindowUnit,
 } from "../strategySchema/definition";
 import type { StrategyRecipe } from "../strategySchema/types";
+import { exitPolicyDefinitionErrors, type ExitPolicyDefinition } from "../exitPolicyCommon";
 import type { ResearchParameterValue } from "../types";
 import { validateCanonicalStrategyDefinition } from "../strategySchema/definitionValidation";
 import {
@@ -720,7 +721,31 @@ export function buildStrategyDefinition(input: DefinitionBuildInput): StrategyDe
   if (candidate.exitRule !== undefined && candidate.exitRule !== null) {
     const exitRule = asRecord(candidate.exitRule, "exitRule");
     assertUnusedExtra(exitRule.extra, "exitRule.extra");
-    if (exitRule.stopLoss !== undefined && exitRule.stopLoss !== null) {
+    // ---- 统一退出政策（STRATEGY-HOLDING-BRIDGE-001）----
+    // `exitRule.policy` 承载完整 ExitPolicyDefinition（stop / takeProfit / timeExit /
+    // strongHold / recoveryPath / runnerBridge）；校验复用 exitPolicyCommon 的唯一实现。
+    // 声明 policy 后不再展开 stopLoss/takeProfit/holdingDays（避免同一 STOP_LOSS 重复表达）。
+    let unifiedPolicyApplied = false;
+    if (exitRule.policy !== undefined && exitRule.policy !== null) {
+      const policyRecord = asRecord(exitRule.policy, "exitRule.policy");
+      const policyErrors = exitPolicyDefinitionErrors(policyRecord, "exitRule.policy");
+      if (policyErrors.length > 0) {
+        invalid("exitRule.policy", policyErrors.join("；"));
+      }
+      exitRules.push({
+        id: "exit-unified-policy",
+        type: "STOP_LOSS",
+        trigger: "ON_CLOSE",
+        policy: policyRecord as unknown as ExitPolicyDefinition,
+        priority: 0,
+        enabled: true,
+        description:
+          "统一退出策略：止损、止盈、时间退出、strongHold 与 runnerBridge 由 policy 配置表达"
+          + "（来源：候选草稿 exitRule.policy）",
+      });
+      unifiedPolicyApplied = true;
+    }
+    if (!unifiedPolicyApplied && exitRule.stopLoss !== undefined && exitRule.stopLoss !== null) {
       const stopLoss = requireFiniteNumber(exitRule.stopLoss, "exitRule.stopLoss");
       if (stopLoss <= 0 || stopLoss >= 1) invalid("exitRule.stopLoss", `必须是 (0,1) 的比例，实际：${stopLoss}`);
       exitRules.push({
@@ -734,7 +759,7 @@ export function buildStrategyDefinition(input: DefinitionBuildInput): StrategyDe
         description: `止损：亏损达 ${stopLoss} 时触发（来源：候选草稿 exitRule.stopLoss）`,
       });
     }
-    if (exitRule.takeProfit !== undefined && exitRule.takeProfit !== null) {
+    if (!unifiedPolicyApplied && exitRule.takeProfit !== undefined && exitRule.takeProfit !== null) {
       const takeProfit = requireFiniteNumber(exitRule.takeProfit, "exitRule.takeProfit");
       if (takeProfit <= 0) invalid("exitRule.takeProfit", `必须是正比例，实际：${takeProfit}`);
       exitRules.push({
@@ -748,7 +773,7 @@ export function buildStrategyDefinition(input: DefinitionBuildInput): StrategyDe
         description: `止盈：收益达 ${takeProfit} 时触发（来源：候选草稿 exitRule.takeProfit）`,
       });
     }
-    if (exitRule.holdingDays !== undefined && exitRule.holdingDays !== null) {
+    if (!unifiedPolicyApplied && exitRule.holdingDays !== undefined && exitRule.holdingDays !== null) {
       const holdingDays = requireFiniteNumber(exitRule.holdingDays, "exitRule.holdingDays");
       if (!Number.isInteger(holdingDays) || holdingDays <= 0) {
         invalid("exitRule.holdingDays", `必须是正整数交易日，实际：${holdingDays}`);
@@ -1098,3 +1123,5 @@ export function validateBuiltStrategyDefinition(
   }
   return normalized;
 }
+
+

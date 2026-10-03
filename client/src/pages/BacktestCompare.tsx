@@ -152,8 +152,22 @@ function CompareSummaryTable({ rows }: { rows: readonly CompareRow[] }) {
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground">
                     #{row.id}
                   </td>
-                  <td className="px-3 py-2 text-rose-700" colSpan={8}>
+                  <td className="px-3 py-2 text-rose-700" colSpan={12}>
                     该留档不存在（可能已被清理）。
+                  </td>
+                </tr>
+              );
+            }
+
+            // 「留了、但读不出来」必须与「本次没留结果」区分显示，不能伪装成一条空曲线。
+            if (row.detail.resultIssue !== null) {
+              return (
+                <tr key={row.id} className="border-t bg-amber-50/60 align-top">
+                  <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-foreground">
+                    #{row.id}
+                  </td>
+                  <td className="px-3 py-2 text-amber-800" colSpan={12}>
+                    该留档已落库，但结果读不出来（不符合当前契约）：{row.detail.resultIssue}
                   </td>
                 </tr>
               );

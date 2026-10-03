@@ -67,11 +67,13 @@ describe("PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）",
     ]);
   });
 
-  it("配方 id 集合（原 2 个 + 3F TopN 4 个，合计 6 个）", () => {
+  it("配方 id 集合（原 2 个 + 3F TopN 6 个，合计 8 个）", () => {
     expect(registeredStrategyRecipeIds()).toEqual([
       "first-limit-pool-fixed-3f",
       "first-limit-pool-rolling-3f",
       "first-limit-pullback-3f-calibrated-n5",
+      "first-limit-pullback-3f-top1",
+      "first-limit-pullback-3f-top2",
       "first-limit-pullback-3f-top3",
       "first-limit-pullback-3f-top3-no-pullback-gate",
       "first-limit-pullback-3f-top5",
@@ -90,7 +92,8 @@ describe("PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）",
   it("配方定义数量 = 声明库里带 execution 侧的模式数", () => {
     const expected = ALL_TRADING_PATTERNS.filter(pattern => pattern.execution !== null).length;
     expect(buildPatternRecipeDefinitions()).toHaveLength(expected);
-    expect(expected).toBe(6);
+    // 2026-10-01：TRADE-COMPRESSION-001 新增 3F Top1 / Top2 两个执行模式 ⇒ 6 → 8。
+    expect(expected).toBe(8);
   });
 
   it("回踩模块的三类条件配方数量与 id 序列不变", () => {

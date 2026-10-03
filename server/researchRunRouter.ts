@@ -25,7 +25,7 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, publicProcedure, router } from "./_core/trpc";
 // RESEARCH-EXPERIMENT-003 — 研究层 barrel 已删除；本 router 只用到两件东西，
 // 改为显式按文件导入（barrel 会让整个旧 Research 目录进入可达集）。
 import { registerBuiltInResearchStrategies } from "./research/adapter";
@@ -94,6 +94,18 @@ import {
   saveClosedLoopBacktestRun,
 } from "./closedLoopBacktestRun/repository";
 import { loadSecurityLabels, withPersistedSecurityLabels } from "./closedLoopBacktestRun/securityLabels";
+import {
+  PAPER_TRADING_3570001_EXPERIMENT,
+  selectPaperTradingRunIds,
+  selectPaperTradingState,
+} from "./paperTrading3fTop3Runner/selection";
+import { loadForwardState, runNextAvailableDay } from "./paperTrading3fTop3Runner/service";
+import { getClosedLoopBacktestRunRawResult } from "./closedLoopBacktestRun/rawPayload";
+import {
+  FINAL_EVALUATION_EXPERIMENT_ID,
+  selectFinalEvaluationPair,
+  selectFinalEvaluationRunIds,
+} from "./closedLoopBacktestRun/finalEvaluationSelection";
 import { getStockDailySeriesForTradeWindow } from "./stockPriceSeries";
 // STRATEGY-ARCH-002 — 策略运行留档（零 schema 变更：进既有 resultJson）。
 import {
@@ -434,6 +446,8 @@ export async function persistClosedLoopBacktestRun(
   return { persisted: false, errorCode: "CLOSED_LOOP_PERSIST_FAILED", errorMessage: lastDetail, archiveId: null };
 }
 
+
+
 export const researchRunRouter = router({
   /** 已注册研究策略目录（v1：leader-candidate-baseline 等内置策略）。 */
   catalog: router({
@@ -489,6 +503,55 @@ export const researchRunRouter = router({
       return await getClosedLoopBacktestRunsByIds(input.ids);
     }),
 
+  /**
+   * STRATEGY-3570001-FINAL-EVALUATION-001 — 正式策略评估（3570001 vs 1.62.1）。
+   *
+   * 只读：从闭环留档（`closed_loop_backtest_run`）中取该任务的两条运行，**原样**返回
+   * `result`（含本任务写入的 `evaluationDetail` 完整指标）。前端据此渲染，不重算、不硬编码。
+   *
+   * 刻意**不声明 output schema**：`closedLoopBacktestRunDetailSchema` 会剥离扩展字段
+   * （zod 默认 strip），而本端点必须把 `evaluationDetail` 原样交给前端。
+   */
+  getFinalEvaluation: publicProcedure
+    .query(async () => {
+      // 🔴 按 runId 直读原样载荷（旧读取会对结果做旧闭环 reconcile，不匹配即置 null）。
+      const rawBaseline = await getClosedLoopBacktestRunRawResult("eval-3570001-baseline-1621");
+      const rawPromoted = await getClosedLoopBacktestRunRawResult("eval-3570001-promoted-hold20");
+      if (rawBaseline === null && rawPromoted === null) return null;
+      const toDetail = (raw: Awaited<ReturnType<typeof getClosedLoopBacktestRunRawResult>>): Record<string, unknown> | null =>
+        raw === null
+          ? null
+          : {
+              id: raw.id, runId: raw.runId, strategyId: raw.strategyId, strategyVersion: raw.strategyVersion,
+              startDate: raw.startDate, endDate: raw.endDate,
+              status: String((raw.payload.overall as { status?: unknown } | undefined)?.status ?? ""),
+              result: raw.payload,
+            };
+      const evaluationDetail =
+        (rawPromoted?.payload.evaluationDetail ?? rawBaseline?.payload.evaluationDetail ?? null);
+      return { baseline: toDetail(rawBaseline), promoted: toDetail(rawPromoted), evaluationDetail };
+    }),
+  /**
+   * STRATEGY-3570001-PAPER-TRADING-001 — 3570001 每日模拟盘（只读）。
+   *
+   * 从留档中取本任务最近一条运行的 `result.paperTradingState`（每日 signals / fills /
+   * positions / exits / account 明细）。刻意不声明 output schema，避免 zod strip 掉扩展载荷。
+   */
+  getPaperTrading3570001: publicProcedure
+    .query(async () => {
+      const raw = await getClosedLoopBacktestRunRawResult("paper-3570001-2025-01-01-2026-09-04");
+      return { state: raw?.payload.paperTradingState ?? null, forward: await loadForwardState() };
+    }),
+
+  /**
+   * STRATEGY-3570001-LIVE-PAPER-TRADING-001 — 持续推进一个可用交易日（幂等）。
+   *
+   * 无新数据 ⇒ 返回 `status=WAITING_FOR_NEW_DATA` 且不写入任何新记录（不伪造行情）。
+   */
+  runPaperTrading3570001NextDay: adminProcedure
+    .mutation(async () => {
+      return await runNextAvailableDay();
+    }),
   /**
    * 成交详情弹窗的日 K 数据（只读）。
    *
@@ -1062,3 +1125,7 @@ async function executeClosedLoopRun(
 }
 
 export type ResearchRunRouter = typeof researchRunRouter;
+
+
+
+

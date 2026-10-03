@@ -67,6 +67,13 @@ export interface ExperimentRunRequest {
 export interface ExperimentRunnerDeps {
   registry: ExperimentRegistry;
   datasetPort: ExperimentDatasetPort;
+  /**
+   * COMPOSITE-RUNNER-DATASET-PROVIDER-001 —— 组合执行面的数据装配端口。
+   *
+   * 仅在实验 descriptor 声明 `executionSurface: "COMPOSITE_PORTFOLIO"` 时被调用；
+   * 未注入而实验声明了该 surface ⇒ 响亮失败（不静默降级成「没有数据」）。
+   */
+  compositeDatasetProvider?: import("./compositeDatasetProvider").ExperimentCompositeDatasetProvider;
   /** 可注入的时钟（默认 `() => new Date()`）；测试用它固定耗时。 */
   now?: () => Date;
 }
@@ -498,6 +505,33 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
         },
       };
 
+      // COMPOSITE-RUNNER-DATASET-PROVIDER-001：仅对声明了 COMPOSITE_PORTFOLIO 的实验
+      // 注入组合执行面（数据装配在 server 侧完成；实验不碰 DB）。
+      if (descriptor.executionSurface === "COMPOSITE_PORTFOLIO") {
+        const provider = deps.compositeDatasetProvider;
+        if (provider === undefined) {
+          throw new ExperimentError(
+            "EXPERIMENT_COMPOSITE_PROVIDER_UNAVAILABLE",
+            `实验 "${descriptor.id}" 声明 executionSurface=COMPOSITE_PORTFOLIO，`
+              + "但装配未注入 compositeDatasetProvider（拒绝静默降级）",
+            { experimentId: descriptor.id },
+          );
+        }
+        const baselineDatasetVersionId = descriptor.compositeExecution?.baselineDatasetVersionId;
+        if (baselineDatasetVersionId === undefined) {
+          throw new ExperimentError(
+            "EXPERIMENT_COMPOSITE_BASELINE_MISSING",
+            `实验 "${descriptor.id}" 声明 COMPOSITE_PORTFOLIO，但未声明 compositeExecution.baselineDatasetVersionId`,
+            { experimentId: descriptor.id },
+          );
+        }
+        (context as { composite?: unknown }).composite = await provider.build({
+          baselineDatasetVersionId,
+          extensionDatasetVersionId: facts.datasetVersionId,
+          evaluationWindow,
+        });
+      }
+
       const startedAt = now();
       let payload: ExperimentResultPayload | null = null;
       let envelope: ExperimentResultEnvelope | null = null;
@@ -617,3 +651,4 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
       return { outcome, artifactFiles: failure === null ? artifactFiles : [] };
   }
 }
+

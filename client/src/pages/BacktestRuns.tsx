@@ -257,6 +257,11 @@ export default function BacktestRuns() {
             <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
               这条留档不存在（可能已被清理）。
             </div>
+          ) : detailQuery.data.resultIssue !== null ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              这条留档已落库，但结果读不出来（不符合当前契约）：{detailQuery.data.resultIssue}
+              —— 只保留了摘要，可对照上表的关键指标查看。
+            </div>
           ) : detailViewModel === null ? (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               这条留档没有完整结果（`resultJson` 为空）—— 只保留了摘要。可对照上表的关键指标查看。

@@ -44,6 +44,11 @@ import type {
   StrongHoldAfterExtendedExitPolicy,
 } from "../trailingPolicy";
 import type { StopPolicyDefinition } from "../stopPolicy";
+import type {
+  RunnerHoldingBridgePolicyDefinition,
+  RunnerRecoveryPathExitPolicyDefinition,
+  SustainedCloseDeclineReversalExitPolicyDefinition,
+} from "../exitPolicyCommon";
 
 // ---------------------------------------------------------------------------
 // 记录身份常量
@@ -106,7 +111,12 @@ export type PlanSkipCode =
   /** 再入场策略：同一底层代码仍在冷却窗口内 ⇒ 不建仓。 */
   | "REENTRY_COOLDOWN_ACTIVE"
   /** 再入场策略：该池成员身份累计买入次数已达上限 ⇒ 不建仓。 */
-  | "MEMBER_ENTRY_LIMIT_REACHED";
+  | "MEMBER_ENTRY_LIMIT_REACHED"
+  /**
+   * MARKET-REGIME-001 市场状态闸门：决策日处于被排除的市场状态 ⇒ 当日**不新建仓**。
+   * 只约束新建仓；退出与已持仓不受影响。命中者写进 skipped，绝不静默丢弃。
+   */
+  | "MARKET_REGIME_BLOCKED";
 
 /**
  * 再入场策略阻断原因码（`planDecisionDay` 的 `reentryBlocked` 值域）。
@@ -188,6 +198,18 @@ export interface SimulationConfig {
    * 再交给 `planDecisionDay` 写成 skipped（绝不静默丢弃）。
    */
   readonly reentryPolicy?: ReentryPolicy;
+  /**
+   * MARKET-REGIME-001 市场状态闸门（可选）。缺省 / null = 不限制，既有执行路径逐字节不变。
+   *
+   * 语义：`blockedDecisionDates` 命中的决策日**不新建仓**（已有持仓与退出路径完全不受影响）；
+   * 命中者写进 skipped（code=MARKET_REGIME_BLOCKED），绝不静默丢弃。
+   */
+  readonly marketRegimeGate?: {
+    /** 被排除的决策日（YYYY-MM-DD）。 */
+    readonly blockedDecisionDates: readonly string[];
+    /** 人类可读标签（仅审计用途）。 */
+    readonly label?: string;
+  } | null;
   /** 涨跌停拦截开关（缺省 false，对齐 STEP 8 DEFAULT_EXECUTION_RULES）。 */
   readonly executionRules?: {
     /** 开盘触及涨停时拒绝买入。 */
@@ -264,6 +286,15 @@ export interface SimulationConfig {
       /** 新候选评分超过最弱 runner 入仓评分的最小差值。 */
       readonly replacementScoreMargin?: number | null;
     } | null;
+    /**
+     * STRATEGY-EXIT-VALIDATION-010：固定 Runner 恢复/持续弱路径退出。
+     * 该策略只由显式研究策略声明，缺省 / null 时既有执行路径不变。
+     */
+    readonly recoveryPath?: RunnerRecoveryPathExitPolicyDefinition | null;
+    /** STRATEGY-HOLDING-BRIDGE-001：研究专用单变量持有桥。 */
+    readonly runnerBridge?: RunnerHoldingBridgePolicyDefinition | null;
+    /** CLC2-PORTFOLIO-001：研究专用「持续连续收低 → 反转确认退出」路径。 */
+    readonly clc2ReversalPath?: SustainedCloseDeclineReversalExitPolicyDefinition | null;
   };
   /**
    * BACKTEST-002（B-05）— 成交量为 0 时的执行政策。
@@ -302,6 +333,11 @@ export interface SimulationConfigSnapshot {
   readonly candidateExitPolicy: CandidateExitPolicy;
   /** 再入场策略快照（null = 未声明；声明时进入结果记录与指纹）。 */
   readonly reentryPolicy: ReentryPolicy | null;
+  /** 市场状态闸门快照（null = 未声明；声明时进入结果记录与指纹）。 */
+  readonly marketRegimeGate: {
+    readonly blockedDecisionDates: readonly string[];
+    readonly label: string | null;
+  } | null;
   readonly executionRules: {
     readonly blockLimitUpBuy: boolean;
     readonly blockLimitDownSell: boolean;
@@ -329,6 +365,12 @@ export interface SimulationConfigSnapshot {
       readonly maxConcurrentRunners: number | null;
       readonly replacementScoreMargin: number | null;
     } | null;
+    /** Runner 恢复/持续弱路径退出快照（null = 未声明）。 */
+    readonly recoveryPath: RunnerRecoveryPathExitPolicyDefinition | null;
+    /** Runner 持有桥快照（null = 未声明）。 */
+    readonly runnerBridge: RunnerHoldingBridgePolicyDefinition | null;
+    /** CLC2 反转路径快照（null = 未声明）。 */
+    readonly clc2ReversalPath: SustainedCloseDeclineReversalExitPolicyDefinition | null;
   };
   /** 是否启用 T+1（STEP 8 默认 true）。 */
   readonly tPlus1: boolean;

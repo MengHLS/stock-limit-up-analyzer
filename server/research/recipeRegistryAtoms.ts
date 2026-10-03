@@ -29,6 +29,7 @@ import {
   eventBaselineOf,
 } from "./recipeFeatures/pullbackFeatures";
 import {
+  AMPLITUDE_WINDOW_DAYS,
   computeThreeFactorRaw,
   threeFactorCompositeScoreOf,
 } from "./recipeFeatures/threeFactorScoreFeatures";
@@ -227,7 +228,11 @@ export function buildThreeFactorFeatureProvider(
       : THREE_FACTOR_FEATURE_NO_PULLBACK_GATE_VERSION,
     availability: samePointAvailability(point),
     compute: (bars) => {
-      const raw = computeThreeFactorRaw(bars);
+      // 当前决策日可见的 T+1..Te；正式 1.62.1 的 observationWindow.start=5
+      // 使该值在首个有效决策日恒为 5，并完整保留原浮点累加路径。
+      const visibleAmplitudeDays = Math.min(AMPLITUDE_WINDOW_DAYS, bars.length - 1);
+      if (visibleAmplitudeDays < 1) return null;
+      const raw = computeThreeFactorRaw(bars, visibleAmplitudeDays);
       if (raw === null) return null;
       return threeFactorCompositeScoreOf(raw, { requirePullback });
     },

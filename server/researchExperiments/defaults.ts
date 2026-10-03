@@ -32,6 +32,7 @@ import {
 } from "./persistence/runRepository";
 import { createExperimentRunService, type ExperimentRunService } from "./persistence/runService";
 import { createExperimentRunner, type ExperimentRunner } from "./runner";
+import { createDefaultCompositeDatasetProvider } from "./compositeDatasetProvider";
 // 注册表工厂拆到轻量模块（不 import DB / researchEngine）—— 见该文件头注释。
 import { defaultExperimentRegistry } from "./registryDefaults";
 // RESEARCH-EXPERIMENT-002：Experiment → Strategy 桥的真实依赖。
@@ -107,6 +108,7 @@ export function defaultExperimentRunner(): ExperimentRunner {
   runnerCache ??= createExperimentRunner({
     registry: defaultExperimentRegistry(),
     datasetPort: createDefaultExperimentDatasetPort(),
+    compositeDatasetProvider: createDefaultCompositeDatasetProvider(),
   });
   return runnerCache;
 }
@@ -131,7 +133,7 @@ export function defaultResearchExperimentsDeps(): ResearchExperimentsDeps {
   depsCache ??= (() => {
     const registry = defaultExperimentRegistry();
     const datasetPort = createDefaultExperimentDatasetPort();
-    const runner = createExperimentRunner({ registry, datasetPort });
+    const runner = createExperimentRunner({ registry, datasetPort, compositeDatasetProvider: createDefaultCompositeDatasetProvider() });
     return { runner, datasetPort, runService: createDefaultExperimentRunService(runner) };
   })();
   runnerCache = depsCache.runner;
@@ -195,3 +197,4 @@ export function defaultExperimentStrategyBridge(): ExperimentStrategyBridge {
   });
   return strategyBridgeCache;
 }
+

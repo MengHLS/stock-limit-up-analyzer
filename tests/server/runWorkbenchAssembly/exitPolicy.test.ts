@@ -52,6 +52,7 @@ describe("mapDeclaredExitPolicy", () => {
       advancedTrailingPolicy: null,
       advancedStopPolicy: null,
       strongHold: null,
+      recoveryPath: null,
     });
   });
 
@@ -66,6 +67,7 @@ describe("mapDeclaredExitPolicy", () => {
       advancedTrailingPolicy: null,
       advancedStopPolicy: null,
       strongHold: null,
+      recoveryPath: null,
     });
   });
 
@@ -82,6 +84,7 @@ describe("mapDeclaredExitPolicy", () => {
       advancedTrailingPolicy: null,
       advancedStopPolicy: null,
       strongHold: null,
+      recoveryPath: null,
     });
   });
 
@@ -101,6 +104,7 @@ describe("mapDeclaredExitPolicy", () => {
       advancedTrailingPolicy: null,
       advancedStopPolicy: null,
       strongHold: null,
+      recoveryPath: null,
     });
   });
 
@@ -177,5 +181,38 @@ describe("mapDeclaredExitPolicy", () => {
     );
     expect(mapped?.stopLossRatio).toBe(0.06);
     expect(mapped?.advancedStopPolicy).toBeNull();
+  });
+
+  it("统一策略透传 Runner 恢复路径退出定义", () => {
+    const mapped = mapDeclaredExitPolicy(
+      [{
+        id: "exit-unified-policy",
+        type: "STOP_LOSS",
+        trigger: "ON_CLOSE",
+        policy: {
+          stop: {
+            anchor: { kind: "FIXED_PERCENT", stopRatio: 0.05 },
+            confirmation: "INTRADAY",
+          },
+          takeProfit: null,
+          timeExit: { kind: "FIXED_HOLDING_DAYS", holdingDays: 14 },
+          strongHold: null,
+          capitalRecycle: null,
+          recoveryPath: {
+            kind: "HIGHER_HIGH_STREAK_RECOVERY",
+            activationRatio: 0.10,
+            confirmationDays: 2,
+          },
+        },
+        priority: 0,
+        enabled: true,
+      }],
+      {},
+    );
+    expect(mapped?.recoveryPath).toEqual({
+      kind: "HIGHER_HIGH_STREAK_RECOVERY",
+      activationRatio: 0.10,
+      confirmationDays: 2,
+    });
   });
 });
