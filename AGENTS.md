@@ -105,7 +105,7 @@ Dataset
 ### 依赖方向
 
 领域依赖**只允许单向向下**：`Dataset → Research → Strategy → Parameter Search → Backtest → Evaluation → Robustness/OOS/WFA → Simulation/Paper → Production`。
-**反向依赖 = 架构违规**。已有静态守卫测试（`*Boundary.test.ts` / `importBoundary.test.ts`）钉住多条边 —— 不要为了「方便」把它们改松。
+**反向依赖 = 架构违规**。已有静态守卫测试（`*Boundary.test.ts` / `legacyFreeProductionChain.test.ts`）钉住多条边 —— 不要为了「方便」把它们改松。
 
 ---
 

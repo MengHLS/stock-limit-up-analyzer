@@ -97,7 +97,7 @@ pnpm run check                       # tsc --noEmit（必须 0 错）
 - **目标模块测试**（`tests/**` 镜像目录）
 - **必要的集成测试**（跨域边界 / tRPC 端到端，如适用）
 
-新增/改变行为时**必须新增测试**；边界守卫测试（`*Boundary.test.ts` / `importBoundary.test.ts`）**只允许加强，不允许放松**。
+新增/改变行为时**必须新增测试**；边界守卫测试（`*Boundary.test.ts` / `legacyFreeProductionChain.test.ts`）**只允许加强，不允许放松**。
 
 ## 7. Fix
 

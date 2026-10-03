@@ -264,8 +264,8 @@
 | L-5 | legacy 模拟器唯一合法出口 | `server/research/legacyTransactionSimulator.ts:74`（`productionRuntime:false`） | research-only | **LEGACY** |
 | L-6 | `server/strategy/**` legacy 引擎策略 | 8 文件 | 经 `runBacktestWithRisk` **生产可达** | **LEGACY（但在产）** |
 | L-7 | `server/engine/**` 生产 Step2 Core | 7 文件 | **在生产请求路径** | **FACT（legacy 语义）** |
-| L-8 | `server/engine/adapter.ts` | 整文件 | **零引用** | **死代码** |
-| L-9 | STEP 6.x service | `evaluationService` / `experimentService` / `runService` / `sweepService` / `status` | **仅测试**，但被主 barrel 加载 | **死代码（隐性加载）** |
+| L-8 | ~~`server/engine/adapter.ts`~~ | ~~整文件~~ | ✅ **已删除**（REFACTOR-001 · `55f7838`） | ~~死代码~~ **已退役** |
+| L-9 | ~~STEP 6.x service~~ + `research/experiment.ts` / `status.ts` / `engineAdapter.ts` | ~~`evaluationService` / `experimentService` / `runService` / `sweepService` / `status`~~ | ✅ **已全部退役**（主 barrel 与 service 层随旧 Research 链删除；最后 3 个残件于 REFACTOR-001 `55f7838` 删除） | ~~死代码（隐性加载）~~ **已消除** |
 | L-10 | `factorAblation` | `server/research/factorAblation/**` | **仅测试** | **CODE_READY 未接线** |
 | L-11 | `signalToPnl` 编排引擎 | `engine.ts:280 runSignalToPnlLoop` | **仅测试**（闭环 `paper` `notWired`） | **CODE_READY 未接线** |
 | L-12 | legacy `LeakageGuard` | `server/research/framework/leakage.ts:68` | 在产但**恒通过** | **DEPRECATED（语义失效）** |
@@ -794,7 +794,7 @@ WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
 |---|---|---|
 | **AR-12** | `pat_*` 语义变量**无区分度**（声明写「归一化回撤比例」，投影按 `field:"low"+MIN` 取**绝对值** ⇒ 恒 > 0）⇒ 以它作条件的 Finding 必然产不出来 | `PHASE-D-001-implementation.md:128-142` |
 | **AR-13** | **结论不写 `findingIds`**（`engine.ts:370` 正常分支写空数组）⇒ 证据链在列上断裂 | 实查：13 个候选中仅 4 个有 `sourceFindingIdsJson` |
-| **AR-9** | 新依赖边 `researchEngine → research/patternLibrary` **无测试守护** | `importBoundary.test.ts` 无该规则 |
+| **AR-9** | ~~新依赖边 `researchEngine → research/patternLibrary` **无测试守护**~~ | ✅ **已消解**：`server/researchEngine/**` 已删除，该边不复存在；生产链改由 `tests/server/research/legacyFreeProductionChain.test.ts` 图 Gate 守护 |
 
 **中**：`AR-10`（`INVALID_PULLBACK_DECISION_OFFSET` 未映射 tRPC code）· `AR-11`（`research_artifact` 无唯一约束）· `AR-14`（`strategyProjection` 未接线）· `AR-15`（内存态预览与持久化端点双轨并存）· `AR-16`（planner `patternId` 路径仍写空 `filterRule`）。
 

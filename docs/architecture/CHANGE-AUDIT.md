@@ -809,3 +809,38 @@
   - 工作区存在**其它会话的未提交业务改动**（`server/paperTrading3fTop3Runner/**` 等）⇒ 本任务**未触碰**；判定「业务代码变化 = 0」以「本任务写入的文件集合」为准
 - **Baseline Impact**：新增当前读数地图 3 份 + 总规则 1 份 + Skill 6 份。**未改写** `SYSTEM-BASELINE.md` / `DOMAIN-MAP.md` 等旧基线（drift 只登记，不就地修改，按 `AGENT-GUIDE.md` §6 处置）。建议后续以独立任务 `CODE-AGENT-INFRA-002` 统一修正旧地图。
 - **GLOBAL AUDIT REQUIRED**：**NONE**（本任务不改 Domain 边界 / 主链 / 核心契约 / DB schema；仅新增规则与当前读数）
+---
+
+## 2026-10-03 · `REFACTOR-001`（退役 STEP 6.x 零引用死代码）
+
+- **Task**：删除已确认**零运行时引用**的 STEP 6.x legacy 死代码（Architecture → Refactoring → Verification 三 Skill 流水线的首次真实验证）。
+- **Changed Domains**：**无**（不变量零变化；未改 Domain 边界 / 主链 / 契约 / 指标）
+- **Changed Files**：
+  - 删除 `server/research/experiment.ts`（169 行）· `server/research/status.ts`（53）· `server/research/engineAdapter.ts`（95）· `server/engine/adapter.ts`（58）—— 合计 **375 行**
+  - 清理 6 处 stale comment：`server/runWorkbenchAssembly/executionModel.ts` · `server/research/strategySchema/types.ts` · `server/research/strategySchema/map.ts` · `server/research/types.ts` · `server/research/lifecycle/transition.ts` · `shared/researchContracts.ts`
+- **Changed Contracts**：**无**（`shared/researchContracts.ts` 仅改一行注释文字）
+- **Changed DB**：**无**（0 DDL / 0 DML / 0 migration；未连库）
+- **Changed Execution Path**：**无**（改动行 14 处**全部为注释**，可执行代码零变化；删除对象 0 importer）
+- **Potential Baseline Drift**：删除使 5 份架构地图中的 L-08/L-09/L-10 条目变为「已退役」—— 已由同日的 `CODE-AGENT-INFRA-002` 同步修正
+- **Regression Result**：
+  - Architecture 前置：自建 import 图扫描 **1666 文件** → 4 目标 **0 importer**；22 个导出符号逐一核对无外部引用
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/server/research/legacyFreeProductionChain.test.ts` ⇒ **7/7**
+  - 定向回归（`runWorkbenchAssembly` + `strategySchema` + `strategyPersistence` + `lifecycle` + `researchContracts` + `statusVocabulary`）⇒ **19 文件 / 335 用例全绿**
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+  - 提交：`55f7838`
+- **Baseline Impact**：**L-08 / L-09 / L-10 退役**（`SYSTEM-BASELINE.md` §11 · `LEGACY-MAP.md` L-09/L-10 · `EXECUTION-FLOW.md` §6 · `DEPENDENCY-MAP.md` §5/§6 · `system-manifest.yaml`）
+- **GLOBAL AUDIT REQUIRED**：**NONE**（纯死代码删除 + 注释清理，未触碰 Domain 边界 / 主链 / 核心契约 / DB schema）
+
+## 2026-10-03 · `CODE-AGENT-INFRA-002`（架构地图 drift 同步）
+
+- **Task**：把因旧 Research 链退役与 `REFACTOR-001` 而失效的架构地图条目同步为当前事实（含 `BD-16` / `BD-17` 的失效测试引用修正）。
+- **Changed Domains**：**无**（纯文档）
+- **Changed Files**：`docs/architecture/{LEGACY-MAP,EXECUTION-FLOW,DEPENDENCY-MAP,SYSTEM-BASELINE,system-manifest.yaml,DOMAIN-MAP,CONTRACT-MAP,ARCHITECTURE,CHANGE-AUDIT}.md|yaml` + `AGENTS.md` / `.agents/refactoring/SKILL.md`（边界守卫命名由已删除的 `importBoundary.test.ts` 改指 `legacyFreeProductionChain.test.ts`）
+- **Changed Contracts**：**无**
+- **Changed DB**：**无**
+- **Changed Execution Path**：**无**
+- **Potential Baseline Drift**：修正 `BD-16` / `BD-17` —— `tests/server/research/strategyCandidate/importBoundary.test.ts` **已不存在**（全仓 `*importBoundary*` 零命中），其守护对象 `researchCore` / `researchEngine` / `server/research` 主 barrel 亦已删除。已把 `DOMAIN-MAP.md`（§2/§风险）· `CONTRACT-MAP.md`（§边界守护/§检查清单）· `DEPENDENCY-MAP.md`（§2 禁止项 4/6 · §5 AR-6 · §6 死代码计数 · D-92）· `system-manifest.yaml`（`research.boundaryGuard` / `legacyPaths` / `roundTwo.newCrossDomainEdgesUnGuarded`）· `SYSTEM-BASELINE.md`（L-8/L-9 · AR-9）的引用**改指当前活守卫**：`tests/server/research/legacyFreeProductionChain.test.ts`（AST import 图可达性 Gate，7 用例）+ `oosValidationBoundary` / `robustnessBoundary` / `walkForwardBoundary`（55 用例）。
+- **Regression Result**：纯文档；`node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+- **Baseline Impact**：架构地图与 `system-manifest.yaml` 的 legacy / 死代码 / 边界守卫条目与当前代码重新对齐；**未改写历史报告**（`SYSTEM-BASELINE-001-REPORT.md` / `SYSTEM-BASELINE-002-REPORT.md` / `docs/legacy/**` 按「时点快照」保留）
+- **GLOBAL AUDIT REQUIRED**：**NONE**

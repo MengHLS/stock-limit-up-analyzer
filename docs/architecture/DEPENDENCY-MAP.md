@@ -68,9 +68,9 @@
 | 1 | Dataset → Strategy | 不存在 | ✅ 合规 | `server/datasetRegistry/**` 零 import strategy |
 | 2 | Research → Parameter Search | 不存在（researchCore 只到 candidate） | ✅ 合规 | grep |
 | 3 | Backtest → 反向修改 Strategy Definition | 不存在 | ✅ 合规 | 唯一允许 UPDATE 的列 = `status`（`strategyPersistence/contract.ts:6-7`） |
-| 4 | researchCore → strategyPersistence / strategySchema | **只允许经桥** | ✅ 合规（**有测试固化**） | `tests/server/research/strategyCandidate/importBoundary.test.ts:69-131` |
+| 4 | ~~researchCore → strategyPersistence / strategySchema~~ | **守卫对象已消失**（`researchCore/**` 已删除） | ✅ 已消解 | 活的等价守卫 = `tests/server/research/legacyFreeProductionChain.test.ts`（AST import 图可达性 Gate，7 用例） |
 | 5 | 反向：strategyPersistence / strategySchema → researchCore | 同上禁止 | ✅ 合规 | 同上 |
-| 6 | 桥不得 import `server/research` 主 barrel（因它是 legacy） | 已固化 | ✅ 合规 | `importBoundary.test.ts:127-131` |
+| 6 | ~~桥不得 import `server/research` 主 barrel（因它是 legacy）~~ | **主 barrel 已不存在**（`server/research/index.ts` 已删除） | ✅ 已消解 | 约束对象消失；跨域方向改由 `legacyFreeProductionChain.test.ts` 的具名白名单 Gate 守护 |
 | 7 | `client/**` → `server/**` **运行时值** | 不存在（全部 `import type`，编译期擦除） | ✅ 合规 | grep 全仓；`client/src/lib/trpc.ts:2` 等 |
 | 8 | Strategy Definition → Dataset / 引擎坐标 | 由机器拒绝 | ✅ 合规 | `DATASET_BINDING_IN_DEFINITION_FORBIDDEN`（`dataRequirements.ts:350`） |
 | 9 | `@shared/*` 被 client 使用 | 允许 | ✅ 合规 | 别名在 `vite.config.ts:14-18` / `tsconfig.json:18-21` / `vitest.config.ts:9-13` |
@@ -150,7 +150,7 @@
 | AR-3 | 4 个同名 `adapter.ts`（`engine` / `research` / `strategy` / `data`）语义无关 | 全仓 | 低（认知） | 重命名 |
 | AR-4 | `server/strategy/**`（legacy 引擎策略）与 `server/research/strategySchema/**`（版本 SoT）命名撞车 | 全仓 | 低（认知） | 重命名 legacy |
 | AR-5 | 三段不可互换执行契约并存（`runBacktestWithRisk` / `runTradeSimulation` / `simulateRealisticTPlus1ToTPlus2`） | 见 `EXECUTION-FLOW.md` §7 E-1 | **高** | 需专门决策 |
-| AR-6 | `server/engine/adapter.ts` 为孤儿死代码（零引用） | grep 实证 | 低 | 可删除或注明用途 |
+| AR-6 | ~~`server/engine/adapter.ts` 为孤儿死代码（零引用）~~ | ✅ **已解决**（REFACTOR-001 · `55f7838`） | — | 已删除 |
 | AR-7 | 遗留复数表与单数表**仅差一个 `s`**（`research_experiments` vs `research_experiment`） | `drizzle/schema.ts:338` / `:1512` | 中 | 清理遗留时**优先重命名遗留表** |
 | AR-8 | 策略层无独立未来函数防护（legacy `LeakageGuard` 因 `EPOCH_FLOOR_DATE` 恒通过） | `recipeRegistryAtoms.ts:47-58`；Core 侧守卫**真实生效** | 中 | 把生产执行面切到 Core 守卫（已部分完成） |
 
@@ -165,7 +165,7 @@
 | 强连通分量 | ✅ 无（唯一历史环已消除） |
 | 前后端边界 | ✅ 零运行时值 import（全 `import type`） |
 | Definition 纯净性 | ✅ 机器可查（禁 Dataset/引擎坐标） |
-| 死代码 | ⚠️ 存在 5 处（`runBacktestEngine2` / `engine/adapter.ts` / 3 个 Db 仓储 / 5 个 STEP 6.x service / `factorAblation`） |
+| 死代码 | ⚠️ 剩 2 类：`runBacktestEngine2`（BACKTEST-001 §4 要求保留）· `factorAblation`（CODE_READY 未接线）。✅ `engine/adapter.ts` + STEP 6.x 残件（`experiment.ts`/`status.ts`/`engineAdapter.ts`）+ `persistence/**` + 3 个 Db 仓储 均已于 e79b510 / REFACTOR-001 退役 |
 | 命名混淆 | ⚠️ 4 处（`adapter.ts` ×4、`research` 单复数、`strategy` ×2、`select` 类） |
 | 隐性加载 | ⚠️ 1 处（主 barrel 混居 legacy） |
 
@@ -185,7 +185,7 @@
 
 ### 🔴 本批次最重要的依赖事实：**新边没有被任何测试守护**
 
-`tests/server/research/strategyCandidate/importBoundary.test.ts` 当前约束的方向（`:69-85`、`:102-216`）：
+~~`tests/server/research/strategyCandidate/importBoundary.test.ts` 当前约束的方向（`:69-85`、`:102-216`）~~ —— 🔴 **该测试文件与其全部守护对象（`researchCore` / `researchEngine` / `server/research` 主 barrel）均已不存在**（2026-10-03 `CODE-AGENT-INFRA-002` 修正）。以下为**历史记录**；当前活的守卫 = `tests/server/research/legacyFreeProductionChain.test.ts`（import 图 Gate）+ 三个 `*Boundary.test.ts`：
 
 - `researchCore` ↛ `strategyPersistence` / `strategySchema`
 - `research/strategyPersistence` ↛ `researchCore`

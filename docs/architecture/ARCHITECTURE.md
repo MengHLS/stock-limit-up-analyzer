@@ -191,8 +191,8 @@ client/src/researchExperiments/** + pages/researchExperiments/**
 | **BD-13** | `drizzle/schema.ts` 2947 行 / 70 张表；migration 45 | 2224 行 / **≈55** 张；migration **56** | 数字漂移 |
 | **BD-14** | 闭环「实装 8/14 阶段」 | `requirements.ts` 声明 8 阶段 `wired: true`，但 `executors.ts` 只初始化 data/research/strategy/backtest/evaluation；optimization/regime/finalize **无对应 runner**（可能由其它入口补，**未证实**） | 待核漂移 |
 | **BD-15** | `docs/architecture/**` 各图均为 round-2 读数 | 本文件（`ARCHITECTURE.md`）与 `MODULE-MAP.md` / `LEGACY-MAP.md` 为 2026-10-03 新读数 | 新增读数 |
-| **BD-16** | `tests/server/research/strategyCandidate/importBoundary.test.ts` 是「本项目唯一被测试固化的跨域边界」（`DOMAIN-MAP.md` §2 原文） | **该测试文件已不存在**（全仓 `*importBoundary*` 零命中）；`researchCore` 也已删除 ⇒ 该守卫的守护对象消失 | 文档引用失效 |
-| **BD-17** | `DOMAIN-MAP.md` §2 / `DEPENDENCY-MAP.md` D-92 引用 `importBoundary.test.ts` | 现有**活着的**边界守卫是 `tests/server/research/legacyFreeProductionChain.test.ts`（import 图可达性 Gate，7 用例）+ `oosValidationBoundary` / `robustnessBoundary` / `walkForwardBoundary`（已实跑通过） | 文档引用失效 |
+| **BD-16** | `tests/server/research/strategyCandidate/importBoundary.test.ts` 是「本项目唯一被测试固化的跨域边界」（`DOMAIN-MAP.md` §2 原文） | **该测试文件已不存在**；`researchCore` 也已删除 ⇒ 该守卫的守护对象消失 | ✅ **已修正**（CODE-AGENT-INFRA-002：`DOMAIN-MAP` / `CONTRACT-MAP` / `DEPENDENCY-MAP` / `system-manifest.yaml` 的引用已改指活守卫） |
+| **BD-17** | `DOMAIN-MAP.md` §2 / `DEPENDENCY-MAP.md` D-92 引用 `importBoundary.test.ts` | 现有**活着的**边界守卫 = `legacyFreeProductionChain.test.ts`（7）+ `oosValidationBoundary` / `robustnessBoundary` / `walkForwardBoundary`（55） | ✅ **已修正**（同上） |
 
 > 🔴 处置原则（对齐 `AGENT-GUIDE.md` §6）：**发现 drift ⇒ 登记 + 修正基线**；本任务只做「登记 + 新增当前读数」，**未**改写旧报告、**未**触碰代码。
 > 下一阶段若要对旧地图做一次统一 drift 修正，应作为**独立任务**执行（建议编号 `CODE-AGENT-INFRA-002`）。

@@ -169,10 +169,10 @@ TradeSimulationRun
 | 对象 | 位置 | 引用方 | 处置 |
 |---|---|---|---|
 | `runBacktestEngine2` | `server/backtest/engine.ts:56` | 仅 3 个测试 + barrel 再导出；注释提及 `simulator/engine.ts:19`、`positionIntentAdapter.ts:141` | 保留（BACKTEST-001 规格 §4 要求**不删**） |
-| `server/engine/adapter.ts` | 整个文件 | **零引用** | 保留（文件头自述「迁移期兼容层」） |
-| `DbExperimentRepository` / `DbResearchRunRepository` / `DbSweepBatchRepository` | `server/research/persistence/db.ts:61/112/191` | 仅测试 | 保留（legacy 链路的一部分） |
-| `server/research/index.ts` legacy barrel | `index.ts:1-42` | 被 `researchRouter.ts:46` / `researchRunRouter.ts:32` 间接加载 | 保留；**加载即求值**（隐性成本） |
-| `server/engine/adapter.ts` 之外另 3 个同名 `adapter.ts` | `server/research/adapter.ts`（在产）/ `server/strategy/adapter.ts`（在产）/ `server/data/adapter.ts`（barrel） | — | 保留；命名易混淆（文档级风险） |
+| ~~`server/engine/adapter.ts`~~ | ~~整个文件~~ | **零引用** | ✅ **已于 REFACTOR-001（`55f7838`）删除** |
+| ~~`DbExperimentRepository` / `DbResearchRunRepository` / `DbSweepBatchRepository`~~ | ~~`server/research/persistence/db.ts:61/112/191`~~ | **已不存在**（`server/research/persistence/**` 整目录已随旧 Research 链退役） | ✅ 已退役 |
+| ~~`server/research/index.ts` legacy barrel~~ | ~~`index.ts:1-42`~~ | **已不存在**（barrel 已删除；旧 Research 残余 `experiment.ts` / `status.ts` / `engineAdapter.ts` 亦于 REFACTOR-001 删除） | ✅ 已退役 |
+| 现存同名 `adapter.ts` ×3 | `server/research/adapter.ts`（在产）/ `server/strategy/adapter.ts`（在产）/ `server/data/adapter.ts`（barrel） | — | 保留；命名易混淆（文档级风险）。注：同名数 **4 → 3**（`server/engine/adapter.ts` 已于 REFACTOR-001 删除） |
 
 ---
 

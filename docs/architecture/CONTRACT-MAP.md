@@ -55,7 +55,7 @@
 | **nullable** | `research_strategy_candidate.strategyDefinitionId` 允许 NULL（未转正）；`research_run.inputSnapshotJson` 允许 NULL（草稿态） |
 | **兼容性规则** | ① `researchCore/types.ts:12-15` 显式声明与 `server/research/types.ts` **同名不同物**；② 不复用 barrel；③ `research_analysis_metric` 目前 **0 行**（结构化落列，非 JSON 一把梭）；④ **转正仅经 `strategyPromotionPort.ts`** |
 | **状态** | READY（FACT） |
-| **🔴 边界守护** | `tests/server/research/strategyCandidate/importBoundary.test.ts:69-131` 固化「researchCore ↔ strategyPersistence/strategySchema 只允许经桥」 |
+| **🔴 边界守护** | 原 `tests/server/research/strategyCandidate/importBoundary.test.ts:69-131`（固化「researchCore ↔ strategyPersistence/strategySchema 只允许经桥」）**已失效**（`researchCore` 已删除）。现行守卫 = `tests/server/research/legacyFreeProductionChain.test.ts`（import 图可达性 Gate） |
 
 ---
 
@@ -162,7 +162,7 @@
 3. 改 Strategy Schema ⇒ 必须同步 5 投影派生 + `assertStoredVersionConsistency` 三方指纹。
 4. 改 Core Definition 结构 ⇒ 必须过 `adapters/legacyDefinition.ts` 双向翻译测试（`legacy→Core→legacy→Core` 指纹逐字节相等）。
 5. 新增 `resultJson` 段 ⇒ 必须**可选**（zod optional），否则历史留档读取会炸。
-6. 改 Research 表 ⇒ 必须过 `importBoundary.test.ts`（跨域 import 方向）。
+6. 改 Research 表 ⇒ 必须过 `tests/server/research/legacyFreeProductionChain.test.ts`（生产链 import 图可达性；原 `importBoundary.test.ts` 已删除）。
 7. 改 Dataset 物理表 ⇒ 必须同步插件声明式 DDL + `apply*` 脚本 + `totalRows` 口径（五表之和）。
 
 ---

@@ -65,7 +65,7 @@
 
 **不负责**：遗留复数表**不代表**任何当前职责；`server/research/index.ts` 仍 barrel 化它们（加载即求值），属**隐性死代码**。
 
-**边界守护（FACT）**：`tests/server/research/strategyCandidate/importBoundary.test.ts:69-131` 用测试固化「researchCore 不得 import strategyPersistence/strategySchema；反向亦然；只有桥可两侧同时 import」——**这是本项目唯一被测试固化的跨域边界**。
+**边界守护（FACT）**：原 `tests/server/research/strategyCandidate/importBoundary.test.ts`（固化「researchCore ↔ strategyPersistence/strategySchema 只允许经桥」）**已随 `researchCore` / `researchEngine` 的删除而失效**（2026-10-03 `CODE-AGENT-INFRA-002` 修正）。当前**活着的**跨域守卫 = `tests/server/research/legacyFreeProductionChain.test.ts`（AST import 图可达性 Gate，14 入口 / 7 用例）+ `oosValidationBoundary` / `robustnessBoundary` / `walkForwardBoundary`（55 用例）。
 
 ---
 
@@ -286,7 +286,7 @@
 **🔴 round-2 新增的域间硬约束**
 
 1. **判定日四方同值**：`analysis.config` / `run.config` / `experiment.config` / `dataset_version.universeDefinition` 四处若都声明，**必须同值**；异值 ⇒ `DECISION_OFFSET_CONFLICT`（不是「按优先级取一个」）。
-2. **Research 域新增对 Pattern 声明库的依赖**：`server/researchEngine/**` → `server/research/patternLibrary/**`（`semanticRegistry`）。**这条边当前未被 `importBoundary.test.ts` 守护**（见 `DEPENDENCY-MAP.md` D-92）。
+2. ~~**Research 域新增对 Pattern 声明库的依赖**：`server/researchEngine/**` → `server/research/patternLibrary/**`（`semanticRegistry`）~~ ⇒ ✅ **已消解**：`researchEngine/**` 已删除，该边不复存在（见 `DEPENDENCY-MAP.md` D-92）。
 3. **`research_artifact` 幂等只在应用层**（无 DB 唯一约束）⇒ 并发/多进程下无 DB 兜底。
 
 ---

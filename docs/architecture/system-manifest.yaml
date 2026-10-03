@@ -143,15 +143,13 @@ domains:
       - tests/server/research/strategyCandidate/**
       - tests/server/researchRunRouter.test.ts
     knownRisks:
-      - "两套 Research 数据模型并存（单数 vs 复数，仅差一个 s）"
-      - "主 barrel 隐式加载 legacy 死代码"
-      - "research_analysis_metric / research_artifact 0 行"
-    legacyPaths:
-      - server/research/{experiment,run,sweep}*.ts
-      - server/research/persistence/**
-      - server/research/{evaluationService,experimentService,runService,sweepService,status}.ts
+      - "两套 Research 数据模型并存（单数 vs 复数）⇒ ✅ 已解决：旧表已 DROP/RENAME 为 archive_research_*（migration 0046）"
+      - "主 barrel 隐式加载 legacy 死代码 ⇒ ✅ 已解决：server/research/index.ts 已删除"
+      - "research_analysis_metric / research_artifact ⇒ 已随 migration 0046 退役/归档"
+    legacyPaths: []
+    legacyPathsRetired: "server/research/{experiment,status,engineAdapter}.ts、persistence/**、*Service.ts 均已退役（e79b510 / REFACTOR-001 55f7838）；注：run.ts / sweep.ts 仍在产（sweep#computeParameterSpaceFingerprint 被 parameterSearch · rollingOptimization · walkForwardRun 引用），非 legacy"
     boundaryGuard:
-      - "tests/server/research/strategyCandidate/importBoundary.test.ts:69-131"
+      - "tests/server/research/legacyFreeProductionChain.test.ts（AST import 图可达性 Gate，7 用例）—— 取代已删除的 importBoundary.test.ts"
 
   strategy:
     status: READY
@@ -305,7 +303,6 @@ domains:
       - server/backtest/engine.ts#runBacktestEngine2（仅测试）
       - server/realisticBacktest.ts#simulateRealisticTPlus1ToTPlus2
       - server/research/legacyTransactionSimulator.ts
-      - server/engine/adapter.ts（零引用）
     confirmedFacts:
       executionPolicyVersion: 1
       annualizationDays: 252
@@ -715,7 +712,7 @@ roundTwo:
     - "REPORT_RUN_NOT_COMPLETED → PRECONDITION_FAILED"
     - "INVALID_PULLBACK_DECISION_OFFSET → (未映射, 落 INTERNAL_SERVER_ERROR)"
   newCrossDomainEdgesUnGuarded:
-    - "server/researchEngine/** → server/research/patternLibrary/** (semanticRegistry / 声明文件) — importBoundary.test.ts 未守护"
+    - "~~server/researchEngine/** → server/research/patternLibrary/**~~ ⇒ ✅ 已消解：researchEngine 已删除，该边不存在"
   resolvedRisks:
     R-01: "搜索结果不落库 ⇒ 已解决：parameter_search_{run,combination,result} 三层落库（persistence.ts:144/312/451）"
     R-02: "运行级复现快照缺失 ⇒ 部分解决：已有 parameterSpaceJson / datasetVersionId / startDate/endDate / executionPolicyVersion / evaluationConfigFingerprint / metricsVersion / engineVersion / runFingerprint；仍缺 seed / universe / codeVersion"
