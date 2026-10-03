@@ -752,7 +752,7 @@ export type LifecycleTransitionCall = z.infer<
 //   - **只读探测**：catalog = 已注册研究策略元数据（无执行、无状态变更）；
 //     readiness = dataset gate 认证快照 + 注册策略 + 执行器绑定状态的合成判定，
 //     绝不发起回测、绝不产生 run 记录；
-//   - **不冒充 READY**：真实执行链（runResearchBacktest + 数据 loader 装配）未绑定前
+//   - **不冒充 READY**：真实执行链（研究回测执行 + 数据 loader 装配）未绑定前
 //     executorBound=false 恒定，readiness 老实给 BLOCKED（对应 closedLoop 的
 //     CL_DATA_NOT_INJECTED / CL_DATASET_GATE_NOT_PASS 语义），数据认证完成后
 //     由后端翻转为 true，前端无需改动；

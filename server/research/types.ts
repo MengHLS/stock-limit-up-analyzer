@@ -106,8 +106,8 @@ export interface ResearchBacktestConfig {
    *
    * 默认值只在 Experiment 创建阶段解析并深拷贝进入 Snapshot；Research Run 运行时
    * 必须消费这里的冻结值，禁止重新读取当前 DEFAULT_COST_MODEL（防止未来默认成本
-   * 模型漂移导致历史实验重跑结果不一致）。缺省时由 createExperiment / createExperimentSnapshot
-   * 在创建阶段用当前 DEFAULT_COST_MODEL 补齐并冻结。
+   * 模型漂移导致历史实验重跑结果不一致）。缺省时用当前 DEFAULT_COST_MODEL
+   * 在实验创建阶段补齐并冻结。
    */
   costModel?: CostModel;
 }

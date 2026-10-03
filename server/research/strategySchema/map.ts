@@ -457,7 +457,7 @@ export function cloneStrategyDocument(
 /**
  * 解析 schema 的「默认参数集」：取每个参数的 defaultValue（含 null）；required 且无
  * defaultValue 时无法自洽解析 → 响亮抛错（该版本没有可追溯的参数快照，调用方应显式传
- * parameterSet）。与既有 resolveParameterSet（要求调用方显式提供 required 参数）不同：
+ * parameterSet）。与「要求调用方显式提供 required 参数」的显式参数集路径不同：
  * 本函数消费的是 schema 自身已声明的默认值，用于 §17 版本追溯快照。
  */
 function resolveSchemaDefaultParameterSet(schema: ResearchParameterSchema): ResearchParameterSet {

@@ -213,7 +213,7 @@ export interface StrategyBacktestConfig {
  * Execution Assumptions（§16 execution assumptions / §17 backtest config + cost model + execution model）。
  *
  * 与 backtest 层的命名对齐：ExecutionModelId（NEXT_OPEN/…）与 CostModel（engine/domain 六字段
- * 单一事实来源）。研究链路 legacy 的 "next-open" 小写写法亦在白名单内（engineAdapter 校验口径），
+ * 单一事实来源）。研究链路 legacy 的 "next-open" 小写写法亦在白名单内（历史兼容口径），
  * 未来 C-14.x 交易模拟消费本字段形态。
  */
 export interface StrategyExecutionAssumptions {

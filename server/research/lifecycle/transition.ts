@@ -18,7 +18,7 @@
  *   5. 禁止跳级与同态：Draft→Production 之类跳级、to === from 同态一律拒绝
  *      （响亮报错，带中文信息）。
  *
- * 与既有实验/Run/Batch 状态机（status.ts EXPERIMENT_STATUS_TRANSITIONS 等）命名隔离：
+ * 与既有实验/Run/Batch 状态机命名隔离：
  * 全部符号加 LIFECYCLE / STRATEGY_LIFECYCLE 域前缀，避免 future research/index.ts 聚合撞名。
  */
 

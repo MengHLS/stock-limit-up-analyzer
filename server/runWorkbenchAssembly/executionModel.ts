@@ -21,7 +21,7 @@ const EXECUTION_MODEL_ALIASES: Readonly<Record<string, ExecutionModelId>> = {
   NEXT_CLOSE: "NEXT_CLOSE",
   VWAP_PROXY: "VWAP_PROXY",
   LIMIT_PRICE: "LIMIT_PRICE",
-  // 研究链路 legacy 小写写法（engineAdapter.ts 亦只认这一种）
+  // 研究链路 legacy 小写写法（历史兼容：策略文档里确有 next-open 形态）
   "next-open": "NEXT_OPEN",
 };
 
