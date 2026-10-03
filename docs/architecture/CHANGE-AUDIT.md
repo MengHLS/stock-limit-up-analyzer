@@ -779,3 +779,33 @@
 - **Regression Result**：`pnpm run check` exit 0；新增三个实验单测全绿；每个真实 Run 均产出 result / manifest / run.log；Bootstrap 结果含 clustering metadata。
 - **Baseline Impact**：三项纯新增实验与共享 Bootstrap 工具；无历史 Run / DB 结构改写。
 - **GLOBAL AUDIT REQUIRED**：**NONE**。
+---
+
+## 2026-10-03 · `CODE-AGENT-INFRA-001`（建立项目级 Coding Agent 工作体系）
+
+- **Task**：建立项目级 Agent/Skill 基础设施 + 当前架构地图。**不做任何业务代码重构。**
+- **Changed Domains**：**无**（纯规则 / 文档；未改任何 Domain 逻辑）
+- **Changed Files**：
+  - 新增 `AGENTS.md`（项目级总规则：不变量 / 修改原则 / 数据库规则 / 权限 / 工程铁律 / DoD）
+  - 新增 `.agents/{architecture,refactoring,verification,database,strategy,research}/SKILL.md`（6 个专业 Skill）
+  - 新增 `docs/architecture/ARCHITECTURE.md`（当前实际架构，2026-10-03 实查）
+  - 新增 `docs/architecture/MODULE-MAP.md`（模块地图：Module/Purpose/Main Entry/Dependencies/Consumers/Tests/Status）
+  - 新增 `docs/architecture/LEGACY-MAP.md`（legacy 路径地图：L-01~L-16 + 重点检查项核实）
+  - 更新 `docs/INDEX.md`（登记上述文件；**保留原有 CRLF 行尾**）
+- **Changed Contracts**：**无**（未改任何 `shared/**` 契约）
+- **Changed DB**：**无**（0 schema / 0 migration / 0 DML；未连库）
+- **Changed Execution Path**：**无**
+- **Potential Baseline Drift**：**发现并登记 7 条**（`ARCHITECTURE.md` §11）——
+  - `BD-11`：`server/researchCore/**` / `researchEngine/**` / `researchPlanner/**` **已删除**（baseline 仍指其为权威入口）
+  - `BD-12`：旧 Research 表已 DROP / RENAME 为 `archive_research_*`（migration `0046`）⇒ 「两套 Research 数据模型并存」**已解决**
+  - `BD-13`：`drizzle/schema.ts` 2947 行 / 70 表 → 2224 行 / ≈55 表；migration 45 → 56
+  - `BD-14`：闭环 `requirements.ts` 声明 8 阶段 `wired:true`，但 `executors.ts` 仅实装 5 阶段（optimization/regime/finalize 无 runner，**待核**）
+  - `BD-16` / `BD-17`：`tests/server/research/strategyCandidate/importBoundary.test.ts` **已不存在**（`DOMAIN-MAP.md` §2 / `DEPENDENCY-MAP.md` D-92 引用失效）；活着的边界守卫是 `legacyFreeProductionChain.test.ts` + 三个 `*Boundary.test.ts`
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0（0 错）**
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**（已跟踪漂移 0 / 未跟踪 CRLF 0）
+  - `pnpm exec vitest run tests/server/research/{legacyFreeProductionChain,closedLoopWiring/closedLoopWiring}.test.ts` ⇒ **40/40 通过**
+  - `pnpm exec vitest run tests/server/research/{oosValidation/oosValidationBoundary,searchRobustness/robustnessBoundary,walkForward/walkForwardBoundary}.test.ts` ⇒ **55/55 通过**
+  - 工作区存在**其它会话的未提交业务改动**（`server/paperTrading3fTop3Runner/**` 等）⇒ 本任务**未触碰**；判定「业务代码变化 = 0」以「本任务写入的文件集合」为准
+- **Baseline Impact**：新增当前读数地图 3 份 + 总规则 1 份 + Skill 6 份。**未改写** `SYSTEM-BASELINE.md` / `DOMAIN-MAP.md` 等旧基线（drift 只登记，不就地修改，按 `AGENT-GUIDE.md` §6 处置）。建议后续以独立任务 `CODE-AGENT-INFRA-002` 统一修正旧地图。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（本任务不改 Domain 边界 / 主链 / 核心契约 / DB schema；仅新增规则与当前读数）

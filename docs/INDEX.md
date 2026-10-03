@@ -14,6 +14,8 @@
 | 2 | [`ROADMAP.md`](../ROADMAP.md) | **唯一 Master Control**（§44 覆盖式状态区 / §44.5 队列 / §47 append-only 记录） |
 | 3 | [`docs/architecture/AGENT-GUIDE.md`](architecture/AGENT-GUIDE.md) | Agent 工作规范（§3 禁止行为、§5 CHANGE-AUDIT 要求） |
 
+> 🔴 **2026-10-03 起**：新增 [`AGENTS.md`](../AGENTS.md) 作为**项目级 Agent 总规则**（规则与边界；优先级高于本表顺序）；新增 `docs/architecture/ARCHITECTURE.md` / `MODULE-MAP.md` / `LEGACY-MAP.md` 作为**当前实际架构**读数（见下 §2）。
+
 ---
 
 ## 1. 项目级权威（仓库根）
@@ -25,6 +27,7 @@
 | [`TASK_TRACKING.md`](../TASK_TRACKING.md) | 任务状态模型与任务清单（ROADMAP 引用的 §0.1 / §5） |
 | [`DEVELOPMENT_PLAN.md`](../DEVELOPMENT_PLAN.md) | 工作量口径与计划（ROADMAP 引用的 §2） |
 | [`AUDIT-DRS-001-EVIDENCE.md`](../AUDIT-DRS-001-EVIDENCE.md) | Strategy ⇄ Dataset Registry 联合审计证据（被 `SYSTEM-BASELINE.md` 引用） |
+| [`AGENTS.md`](../AGENTS.md) | **项目级 Agent 总规则**（规则与边界；CODE-AGENT-INFRA-001，2026-10-03）。动手前先读本文件，再读架构基线 |
 | [`README.MD`](../README.MD) | 快速上手 |
 
 ## 2. 架构基线 —— `docs/architecture/`
@@ -34,6 +37,9 @@
 | 文档 | 说明 |
 |---|---|
 | [`SYSTEM-BASELINE.md`](architecture/SYSTEM-BASELINE.md) | **总基线**（其余地图的根） |
+| [`ARCHITECTURE.md`](architecture/ARCHITECTURE.md) | **当前实际架构**（CODE-AGENT-INFRA-001，2026-10-03 实查；含与 v2.0.0 基线的 drift 登记） |
+| [`MODULE-MAP.md`](architecture/MODULE-MAP.md) | **模块地图**（Module / Purpose / Main Entry / Dependencies / Consumers / Tests / Status） |
+| [`LEGACY-MAP.md`](architecture/LEGACY-MAP.md) | **legacy 路径地图**（Legacy Path / Current Consumer / Replacement / Migration Status / Risk） |
 | [`SYSTEM-BASELINE-001-REPORT.md`](architecture/SYSTEM-BASELINE-001-REPORT.md) | 首版基线报告 |
 | [`SYSTEM-BASELINE-002-REPORT.md`](architecture/SYSTEM-BASELINE-002-REPORT.md) | round-2 基线报告 |
 | [`DOMAIN-MAP.md`](architecture/DOMAIN-MAP.md) | 领域地图 |

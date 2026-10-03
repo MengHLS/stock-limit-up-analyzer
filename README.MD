@@ -46,12 +46,16 @@ pnpm exec tsx watch server/_core/index.ts
 | `pnpm exec vitest run <路径>` | 跑单个文件或某个模块目录 |
 | `pnpm run docs:tests` | 重新生成模块测试文档（`tsx scripts/genTestDocs.mts` → `docs/testing/**`） |
 | `pnpm run backfill:daily` | 每日行情回填（`tsx scripts/backfillDaily.ts`） |
-| `pnpm run db:push` | `drizzle-kit generate && drizzle-kit migrate` |
+| `pnpm run db:push` | 🔴 **当前禁止使用**（= `drizzle-kit generate && drizzle-kit migrate`；`_journal.json` 止于 `0023`、snapshot 止于 `0015` ⇒ 已不可用）。迁移一律走「手写 SQL + `scripts/apply*.mjs` 旁路执行」，详见 `docs/architecture/DATABASE-MAP.md` |
 
 ### 🔴 不要再「每个任务完成就跑全量」
 
 全量里有 **8 个恒红文件**（7 个环境依赖：真 MySQL / 真 Tushare / 真实证据文件；＋ 1 个已知失效 `tests/server/research/parameterSearch/parameterSearchEffectiveness.test.ts`）离线**必然失败**，跑它只会让「基线零新增」退化成人工比对文件集合。
 日常请用 `pnpm run test:changed`（按 git 改动 → 反向依赖图 → 只跑受影响的测试）。详见 `docs/testing/README.md`。
+
+### 🔴 不要跑 `pnpm run db:push`
+
+`pnpm run db:push` = `drizzle-kit generate && drizzle-kit migrate`，**当前不可用，且本项目禁止使用**：`drizzle/meta/_journal.json` 的 `entries` 止于 `idx=23`、snapshot 只到 `0015` ⇒ `0024` 起既无 journal 也无 snapshot。数据库迁移**一律**走**手写 SQL（`-- @guard:` 幂等守卫）+ 专用 `scripts/apply*.mjs|mts` 旁路执行**（通用器 `scripts/applySqlMigration.mjs`）；**不存在「一键 up 全部」脚本**。详见 `docs/architecture/DATABASE-MAP.md` §2 与 `.agents/database/SKILL.md`。
 
 ### 🔴 不要跑 `pnpm run format`
 
