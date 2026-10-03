@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RerunBadge } from "@/components/validation/RerunBadge";
+import { ValidationSourcePicker } from "@/components/validation/ValidationSourcePicker";
 import {
   Table,
   TableBody,
@@ -137,6 +139,16 @@ export default function OosValidationPanel({
   const [confirmCancel, setConfirmCancel] = useState(false);
 
   const runs = trpc.paramSearch.listOosRuns.useQuery({ limit: 50 });
+
+  // PD-04：候选组合身份从源 Search Run 的结果里选（不再手抄 64 位哈希）
+  const candidateResults = trpc.paramSearch.getSearchResults.useQuery(
+    { searchRunId: form.sourceSearchRunId, limit: 200 },
+    { enabled: form.sourceSearchRunId.trim() !== "" },
+  );
+  const parameterOptions = useMemo(
+    () => (candidateResults.data?.results ?? []).map((r) => ({ hash: r.parameterHash, index: r.combinationIndex })),
+    [candidateResults.data],
+  );
   const detail = trpc.paramSearch.getOosRun.useQuery(
     { oosRunId: selectedRunId ?? "" },
     { enabled: selectedRunId !== null },
@@ -261,7 +273,9 @@ export default function OosValidationPanel({
           <div className="mb-2 flex items-start gap-2">
             <Target className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             <div>
-              <p className="text-sm font-medium">新建样本外验证（只冻结配置，不执行）</p>
+              <p className="flex items-center gap-2 text-sm font-medium">
+                新建样本外验证（只冻结配置，不执行）<RerunBadge kind="RERUN" />
+              </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 候选参数**只能**用「源 Search Run + 该 Run 内的组合身份（parameterHash）」指定 ——
                 参数值由服务端从源组合行读出并**重算哈希复核**；界面上没有任何可以填参数值的位置。
@@ -270,25 +284,42 @@ export default function OosValidationPanel({
             </div>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="sm:col-span-2">
+              <ValidationSourcePicker
+                id="oos-source-search-run-id"
+                value={form.sourceSearchRunId}
+                onChange={(next) => setForm({ ...form, sourceSearchRunId: next, parameterHash: "" })}
+                hint="源须为 COMPLETED；选定后可从其结果里挑候选组合。"
+              />
+            </div>
+            <label className="text-xs">
+              <span className="mb-1 block text-muted-foreground">候选组合（parameterHash）</span>
+              <select
+                id="oos-parameter-hash"
+                className="h-8 w-full rounded-md border bg-background px-2 text-xs"
+                value={form.parameterHash}
+                onChange={(e) => setForm({ ...form, parameterHash: e.target.value })}
+                disabled={form.sourceSearchRunId.trim() === ""}
+              >
+                <option value="">
+                  {form.sourceSearchRunId.trim() === "" ? "— 请先选择源 Run —" : "— 请选择候选组合 —"}
+                </option>
+                {parameterOptions.map((option) => (
+                  <option key={option.hash} value={option.hash}>
+                    #{option.index} · {option.hash.slice(0, 12)}…
+                  </option>
+                ))}
+              </select>
+            </label>
             <Input
-              id="oos-source-search-run-id"
-              placeholder="源 Parameter Search Run ID"
-              value={form.sourceSearchRunId}
-              onChange={(e) => setForm({ ...form, sourceSearchRunId: e.target.value })}
-            />
-            <Input
-              id="oos-parameter-hash"
-              placeholder="候选组合身份 parameterHash（64 位 hex）"
-              value={form.parameterHash}
-              onChange={(e) => setForm({ ...form, parameterHash: e.target.value })}
-            />
-            <Input
+              aria-label="OOS 窗口起始日（YYYY-MM-DD）"
               id="oos-window-start"
               placeholder="OOS 起（YYYY-MM-DD）"
               value={form.oosStartDate}
               onChange={(e) => setForm({ ...form, oosStartDate: e.target.value })}
             />
             <Input
+              aria-label="OOS 窗口结束日（YYYY-MM-DD）"
               id="oos-window-end"
               placeholder="OOS 止（YYYY-MM-DD）"
               value={form.oosEndDate}

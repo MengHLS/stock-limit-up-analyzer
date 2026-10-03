@@ -152,15 +152,19 @@ describe("candidateToDetailVm", () => {
     expect(vm.source.runId).toBeNull();
   });
 
-  it("3-e) 来源缺失必须转成人话，并说明是快照", () => {
+  it("3-e) 来源缺失必须转成人话，说明是快照，且**退役 ≠ 丢失**", () => {
     const vm = candidateToDetailVm(
       view({ experiment: null, conclusion: null, dataset: null, sourceMissing: ["EXPERIMENT", "CONCLUSION", "DATASET_VERSION"] }),
     );
     expect(vm.source.experiment).toBeNull();
     expect(vm.source.missing).toEqual(["EXPERIMENT", "CONCLUSION", "DATASET_VERSION"]);
-    expect(vm.source.missingNote).toContain("来源实验在当前库中已不存在");
     expect(vm.source.missingNote).toContain("来源 Dataset 版本在 Dataset Registry 中查不到");
     expect(vm.source.missingNote).toContain("快照");
+    // 🔴 2026-10-03 措辞契约变更（本断言**加强**而非放松）：
+    //    旧 Research 的 Experiment / Conclusion 是**结构上整体退役**（RESEARCH-EXPERIMENT-003），
+    //    不是「这条上游丢了」。旧断言把两者混为一谈（「在当前库中已不存在」），会误导用户去抢救不存在的数据。
+    expect(vm.source.missingNote).toContain("已退役的旧 Research 链");
+    expect(vm.source.missingNote).toContain("不是数据丢失");
   });
 
   it("3-f) CANDIDATE_SKETCH_FIELDS 与 VM 输出顺序一致（防止两处顺序漂移）", () => {

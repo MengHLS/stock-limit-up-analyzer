@@ -533,6 +533,103 @@ function checkCondition(
   }
 }
 
+/** 校验 `State / Factor` 的 PIT 上下文声明。 */
+function checkStateFactorEvaluationContext(
+  value: unknown,
+  path: string,
+  issues: ResearchValidationIssue[],
+): void {
+  if (value === undefined || value === null) return;
+  if (!isPlainObject(value)) {
+    issues.push(issue("SCHEMA_DEFINITION_STATE_FACTOR_CONTEXT_INVALID", path, `${path} 必须是对象`));
+    return;
+  }
+  if (value.decisionPoint !== "CLOSE") issues.push(issue("SCHEMA_DEFINITION_STATE_FACTOR_CONTEXT_INVALID", `${path}.decisionPoint`, `${path}.decisionPoint 必须是 CLOSE`));
+  if (value.historyFrom !== "ENTRY" || value.historyTo !== "DECISION") {
+    issues.push(issue("SCHEMA_DEFINITION_STATE_FACTOR_CONTEXT_INVALID", path, `${path} 必须声明 historyFrom=ENTRY / historyTo=DECISION`));
+  }
+  if (!Array.isArray(value.requiredData) || value.requiredData.length === 0 || value.requiredData.some((item) => typeof item !== "string" || item.trim() === "")) {
+    issues.push(issue("SCHEMA_DEFINITION_STATE_FACTOR_CONTEXT_INVALID", `${path}.requiredData`, `${path}.requiredData 必须是非空字符串数组`));
+  }
+  if (value.usesForwardData !== false) issues.push(issue("SCHEMA_DEFINITION_STATE_FACTOR_CONTEXT_INVALID", `${path}.usesForwardData`, `${path}.usesForwardData 必须为 false`));
+}
+
+/** 校验声明的 states / factors；只验声明面，不求值，执行实现由注册表与 Feature Registry 负责。 */
+function checkStateFactorDeclarations(
+  value: unknown,
+  parameterCodes: ReadonlySet<string>,
+  issues: ResearchValidationIssue[],
+): void {
+  if (value === undefined || value === null) return;
+  if (!isPlainObject(value)) {
+    issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", "stateFactors", "stateFactors 必须是对象"));
+    return;
+  }
+  const seenIds = new Set<string>();
+  const states = value.states;
+  if (states !== undefined && states !== null) {
+    if (!Array.isArray(states)) {
+      issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", "stateFactors.states", "stateFactors.states 必须是数组"));
+    } else {
+      states.forEach((raw, index) => {
+        const base = `stateFactors.states[${index}]`;
+        if (!isPlainObject(raw)) {
+          issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", base, `${base} 必须是对象`));
+          return;
+        }
+        for (const [key, label] of [["id", "id"], ["stateId", "stateId"], ["version", "version"]] as const) {
+          if (typeof raw[key] !== "string" || (raw[key] as string).trim() === "") issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.${key}`, `${base}.${label} 必须是非空字符串`));
+        }
+        if (typeof raw.enabled !== "boolean") issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.enabled`, `${base}.enabled 必须是布尔值`));
+        if (raw.parameters !== undefined && raw.parameters !== null) {
+          if (!isPlainObject(raw.parameters) || Object.values(raw.parameters).some((item) => !isScalar(item))) {
+            issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.parameters`, `${base}.parameters 必须是标量对象`));
+          }
+        }
+        checkStateFactorEvaluationContext(raw.evaluationContext, `${base}.evaluationContext`, issues);
+        if (typeof raw.id === "string" && raw.id.trim() !== "") {
+          if (seenIds.has(raw.id)) issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.id`, `${base}.id 重复：${raw.id}`));
+          seenIds.add(raw.id);
+        }
+      });
+    }
+  }
+  const factors = value.factors;
+  if (factors !== undefined && factors !== null) {
+    if (!Array.isArray(factors)) {
+      issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", "stateFactors.factors", "stateFactors.factors 必须是数组"));
+    } else {
+      factors.forEach((raw, index) => {
+        const base = `stateFactors.factors[${index}]`;
+        if (!isPlainObject(raw)) {
+          issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", base, `${base} 必须是对象`));
+          return;
+        }
+        for (const key of ["id", "featureId", "featureVersion"] as const) {
+          if (typeof raw[key] !== "string" || (raw[key] as string).trim() === "") issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.${key}`, `${base}.${key} 必须是非空字符串`));
+        }
+        if (typeof raw.enabled !== "boolean") issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.enabled`, `${base}.enabled 必须是布尔值`));
+        if (!inWhitelist(raw.operator, STRATEGY_CONDITION_OPERATORS)) issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.operator`, `${base}.operator 非法`));
+        if (!inWhitelist(raw.valueType, STRATEGY_CONDITION_VALUE_TYPES)) issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.valueType`, `${base}.valueType 非法`));
+        const isSetOperator = raw.operator === "IN" || raw.operator === "NOT_IN";
+        if (raw.valueType === "FIELD_REFERENCE" && (typeof raw.value !== "string" || raw.value.trim() === "")) issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.value`, `${base}.value 必须是字段引用字符串`));
+        if (raw.valueType === "PARAMETER_REFERENCE") {
+          if (typeof raw.value !== "string" || !parameterCodes.has(raw.value)) issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.value`, `${base}.value 必须是已声明参数 code`));
+        }
+        if (raw.valueType === "CONSTANT") {
+          if (isSetOperator ? (!Array.isArray(raw.value) || raw.value.length === 0 || !raw.value.every(isScalar)) : Array.isArray(raw.value) || !isScalar(raw.value)) {
+            issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.value`, `${base}.value 与 operator/valueType 不匹配`));
+          }
+        }
+        checkStateFactorEvaluationContext(raw.evaluationContext, `${base}.evaluationContext`, issues);
+        if (typeof raw.id === "string" && raw.id.trim() !== "") {
+          if (seenIds.has(raw.id)) issues.push(issue("SCHEMA_DEFINITION_STATE_FACTORS_INVALID", `${base}.id`, `${base}.id 重复：${raw.id}`));
+          seenIds.add(raw.id);
+        }
+      });
+    }
+  }
+}
 // ---------------------------------------------------------------------------
 // 主体校验
 // ---------------------------------------------------------------------------
@@ -671,6 +768,8 @@ export function validateCanonicalStrategyDefinition(definition: StrategyDefiniti
       && ((d.entry as unknown as Record<string, unknown>).trigger as Record<string, unknown>).type,
     issues,
   );
+
+  checkStateFactorDeclarations((d as unknown as Record<string, unknown>).stateFactors, parameterCodes, issues);
 
   // -- Entry --
   // 时间线在 Entry 段解出，但 Exit 段的附加条件也要用同一套边界，因此在段外声明。

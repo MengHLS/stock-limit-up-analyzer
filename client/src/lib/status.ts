@@ -205,6 +205,24 @@ export const STRATEGY_VERSION_STATUS_OPTIONS = [
 export type StrategyVersionStatus =
   (typeof STRATEGY_VERSION_STATUS_OPTIONS)[number];
 
+/**
+ * 策略候选状态（镜像自 `server/research/vocabulary.ts#RESEARCH_CANDIDATE_STATUSES`）。
+ *
+ * 🔴 与上表同一约定：**客户端不能 import 后端运行时值** ⇒ 本地镜像 + 对表测试
+ *    （`tests/client/src/lib/statusVocabulary.test.ts` 的「候选状态词表」段）——
+ *    后端增删状态时该测试先红，避免下拉静默漂移后被 tRPC 输入校验拒值。
+ */
+export const CANDIDATE_STATUS_OPTIONS = [
+  "DRAFT",
+  "REVIEW",
+  "ACCEPTED",
+  "REJECTED",
+  "CONVERTED",
+  "ARCHIVED",
+] as const;
+
+export type CandidateStatusOption = (typeof CANDIDATE_STATUS_OPTIONS)[number];
+
 /** 状态字符串 → 语义色。空值 / 未收录 → neutral。 */
 export function toneForStatus(status: string | null | undefined): StatusTone {
   if (!status) return "neutral";

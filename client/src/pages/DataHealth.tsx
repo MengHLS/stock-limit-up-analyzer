@@ -639,12 +639,12 @@ export default function DataHealth() {
 
           <Tabs defaultValue="gates">
             <TabsList>
-              <TabsTrigger value="gates">
+              <TabsTrigger value="gates" data-tab="gates">
                 Gate 明细（{data.checks.length}）
               </TabsTrigger>
-              <TabsTrigger value="snapshot">数据快照</TabsTrigger>
-              <TabsTrigger value="live">实况查库（未认证）</TabsTrigger>
-              <TabsTrigger value="evidence">
+              <TabsTrigger value="snapshot" data-tab="snapshot">数据快照</TabsTrigger>
+              <TabsTrigger value="live" data-tab="live">实况查库（未认证）</TabsTrigger>
+              <TabsTrigger value="evidence" data-tab="evidence">
                 证据产物（{data.evidence.length}）
               </TabsTrigger>
             </TabsList>

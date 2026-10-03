@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ResearchEntryLink } from "@/components/research";
 import { trpc } from "@/lib/trpc";
 import { normalizeLimitUpTime } from "@shared/limitUpTime";
 import { TrendingUp, Calendar, BarChart3, PieChart, Loader2, RefreshCw, CheckCircle2 } from "lucide-react";
@@ -101,6 +102,7 @@ export default function MarketPage() {
           <h1 className="text-lg font-semibold">大盘分析</h1>
         </div>
         <div className="flex items-center gap-3">
+          <ResearchEntryLink />
           {!syncStatus ? null : syncStatus.pendingDates.length > 1 ? (
             <span
               className="text-xs text-amber-600"
@@ -193,9 +195,9 @@ export default function MarketPage() {
             {/* 图表区域 */}
             <Tabs defaultValue="market" className="space-y-4">
               <TabsList>
-                <TabsTrigger value="market">大盘数据</TabsTrigger>
-                <TabsTrigger value="heatmap">题材热力</TabsTrigger>
-                <TabsTrigger value="boards">连板梯队</TabsTrigger>
+                <TabsTrigger value="market" data-tab="market">大盘数据</TabsTrigger>
+                <TabsTrigger value="heatmap" data-tab="heatmap">题材热力</TabsTrigger>
+                <TabsTrigger value="boards" data-tab="boards">连板梯队</TabsTrigger>
               </TabsList>
 
               {/* 大盘数据 - 三轴融合图表 */}

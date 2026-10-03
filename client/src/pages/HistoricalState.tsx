@@ -235,7 +235,7 @@ function QueryForm({
             <Label className="mb-1 block text-xs">① 代码解析（可选）</Label>
             <div className="flex gap-2">
               <Input
-                value={codeQuery}
+                aria-label="① 代码解析（可选）" value={codeQuery}
                 onChange={e => setCodeQuery(e.target.value)}
                 placeholder="600000 或 600000.SH"
                 className="font-mono"
@@ -262,7 +262,7 @@ function QueryForm({
           <div className="flex-1">
             <Label className="mb-1 block text-xs">② securityId（sec_…）</Label>
             <Input
-              value={securityId}
+              aria-label="② securityId（sec_…）" value={securityId}
               onChange={e => setSecurityId(e.target.value)}
               placeholder="sec_…"
               className="font-mono"
@@ -366,8 +366,9 @@ function QueryForm({
         {/* 日期与查询 */}
         <div className="flex flex-wrap items-end gap-3">
           <div>
-            <Label className="mb-1 block text-xs">交易日（tradeDate）</Label>
+            <Label htmlFor="hs-trade-date" className="mb-1 block text-xs">交易日（tradeDate）</Label>
             <Input
+              id="hs-trade-date"
               type="date"
               value={tradeDate}
               onChange={e => setTradeDate(e.target.value)}
@@ -375,10 +376,11 @@ function QueryForm({
             />
           </div>
           <div>
-            <Label className="mb-1 block text-xs">
+            <Label htmlFor="hs-asof" className="mb-1 block text-xs">
               asOf（PIT 截止；留空=全知）{asOfEnabled ? "" : " ⚠"}
             </Label>
             <Input
+              id="hs-asof"
               type="date"
               value={asOf}
               onChange={e => setAsOf(e.target.value)}

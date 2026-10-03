@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  CANDIDATE_STATUS_OPTIONS,
   STRATEGY_VERSION_STATUS_OPTIONS,
   toneForStatus,
 } from "../../../../client/src/lib/status";
@@ -19,6 +20,8 @@ import {
   STRATEGY_LIFECYCLE_STATUS_VALUES,
   strategyLifecycleStatusSchema,
 } from "../../../../shared/researchContracts";
+// 候选状态权威在后端（非 shared）—— 测试文件可以 import 服务端常量，这正是镜像表成立的前提。
+import { RESEARCH_CANDIDATE_STATUSES } from "../../../../server/research/vocabulary";
 
 describe("策略版本状态词表：客户端镜像 ↔ 后端权威", () => {
   it("1) 客户端顺序常量与 shared 权威值逐字、同序一致", () => {
@@ -44,6 +47,25 @@ describe("策略版本状态词表：客户端镜像 ↔ 后端权威", () => {
     // 不要求非 neutral —— 该判据在下方用正向枚举表达。
     const allowed = ["success", "info", "warning", "danger", "neutral"];
     for (const status of STRATEGY_VERSION_STATUS_OPTIONS) {
+      expect(allowed).toContain(toneForStatus(status));
+    }
+  });
+});
+
+describe("候选状态词表：客户端镜像 ↔ 后端权威", () => {
+  it("5) 客户端镜像与后端 `RESEARCH_CANDIDATE_STATUSES` 逐字、同序一致", () => {
+    expect([...CANDIDATE_STATUS_OPTIONS]).toEqual([...RESEARCH_CANDIDATE_STATUSES]);
+  });
+
+  it("6) 词表无重复、无空值（重复会让下拉出现两个同值项）", () => {
+    const list = [...CANDIDATE_STATUS_OPTIONS];
+    expect(new Set(list).size).toBe(list.length);
+    expect(list.every((s) => typeof s === "string" && s.length > 0)).toBe(true);
+  });
+
+  it("7) 每个候选状态都能取到合法语义色（未收录会静默回退 neutral，这里钉住）", () => {
+    const allowed = ["success", "info", "warning", "danger", "neutral"];
+    for (const status of CANDIDATE_STATUS_OPTIONS) {
       expect(allowed).toContain(toneForStatus(status));
     }
   });

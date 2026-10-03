@@ -60,8 +60,25 @@ export function CandidatePhaseFunnel({ stages, observationDays, activePhase, onP
           <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
             <div className="flex items-center gap-2"><Filter className="h-4 w-4 text-indigo-600" /><p className="text-sm font-semibold text-slate-800">漏斗阅读方式</p></div>
             <p className="mt-2 text-xs leading-5 text-slate-600">宽度表示该阶段的独立样本数量；右侧百分比为当前评分阈值下的 T+{observationDays} 延续率。阶段之间样本量并非资金流入或交易路径。</p>
-            <div className="mt-3 flex flex-wrap gap-1.5">{stages.map((stage) => <Badge key={stage.phase} variant="outline" className={`cursor-pointer border-transparent ${phaseStyle[stage.phase].soft} ${phaseStyle[stage.phase].text}`} onClick={() => onPhaseChange(activePhase === stage.phase ? null : stage.phase)}>{stage.phase} {stage.sampleSize}样本</Badge>)}</div>
-            <p className="mt-3 text-xs font-medium text-indigo-700">点击任一阶段可筛选下方完整历史明细，再次点击取消。</p>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {/* 🔴 同上：筛选开关必须是真 <button>，否则键盘用户无法筛选明细。 */}
+              {stages.map((stage) => {
+                const selected = activePhase === stage.phase;
+                return (
+                  <Badge key={stage.phase} variant="outline" asChild className={`border-transparent ${phaseStyle[stage.phase].soft} ${phaseStyle[stage.phase].text}`}>
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      className="cursor-pointer"
+                      onClick={() => onPhaseChange(selected ? null : stage.phase)}
+                    >
+                      {stage.phase} {stage.sampleSize}样本
+                    </button>
+                  </Badge>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-xs font-medium text-indigo-700">点击（或键盘聚焦后按回车 / 空格）任一阶段可筛选下方完整历史明细，再次触发取消。</p>
           </div>
         </div>
       </CardContent>

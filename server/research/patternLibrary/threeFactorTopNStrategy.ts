@@ -6,7 +6,7 @@
  */
 
 import type { CostModel } from "../../engine/domain";
-import { resolveStrategyRecipeById } from "../recipeRegistry";
+import { projectStrategyRecipe } from "../recipeRegistry";
 import { createStrategyDocument } from "../strategySchema/map";
 import type { StrategyDocument } from "../strategySchema/types";
 import {
@@ -473,20 +473,9 @@ export function buildThreeFactorTopNStrategyDocument(
       );
     }
   }
-  const runtime = resolveStrategyRecipeById(recipeId);
-  const recipe = {
-    kind: "signalEngine" as const,
-    recipeId,
-    point: runtime.point,
-    signalFrequency: runtime.signalFrequency,
-    signalDescription: runtime.signalDescription,
-    featureVersions: runtime.features
-      .map(feature => ({ featureId: feature.featureId, version: feature.version }))
-      .sort((a, b) => a.featureId.localeCompare(b.featureId)),
-    rankingConfig: { ...runtime.rankingConfig },
-    selectionConfig: { method: { ...runtime.selectionConfig.method } },
-    requiredData: [...runtime.requiredData],
-  };
+  // SCOPE-002 §1.3.3：投影收敛到 `recipeRegistry#projectStrategyRecipe`（唯一实现）。
+  // 此处**不得**再内联一份 —— 两处投影会让「文档声明的配方」与「实际跑的配方」漂移。
+  const recipe = projectStrategyRecipe(recipeId);
 
   return createStrategyDocument({
     strategyId,

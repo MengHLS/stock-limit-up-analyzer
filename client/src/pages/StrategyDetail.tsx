@@ -1,4 +1,5 @@
 
+import { ConfirmDialog } from "@/components/common";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,8 +13,14 @@ import {
   StrategyBasicInfo,
   StrategyFamilyPanel,
   StrategyHeader,
+  StrategyValidationStatus,
   StrategyVersionPanel,
+  PresetEditor,
   type LoadedTarget,
+  type PresetMaterializeResult,
+  type PresetParameterValue,
+  type PresetSelection,
+  type PresetSummary,
   type RunConfigViewModel,
 } from "@/components/strategy";
 import { toRuntimeConfig } from "@/components/strategy/RunConfigPanel";
@@ -27,8 +34,33 @@ import {
   type DefinitionDraftState,
   type DefinitionDrafts,
 } from "@/components/strategy/definitionDraft";
+import {
+  applyDefinitionFieldPatch,
+  type DefinitionFieldPatch,
+} from "@/components/strategy/definitionFieldPatch";
+import type { SelectedPresetParameters } from "@/components/strategy/searchParameterCandidates";
+import { recordPresetUsage } from "@/components/strategy/authoringUsageLog";
+import {
+  ExitPolicySlotEditor,
+  type ExitPolicySlotDto,
+  type ExitPolicySlotRecognition,
+  type ExitSlotParameterValue,
+} from "@/components/strategy/ExitPolicySlotEditor";
 import { StrategyResearchProvenancePanel } from "@/components/research/StrategyResearchProvenancePanel";
 import { FirstLimitPoolSummary } from "@/components/strategy/FirstLimitPoolSummary";
+import {
+  StrategyFinalEvaluationTab,
+  StrategyPaperTradingTab,
+} from "@/components/strategy/StrategyVersionArtifactsTabs";
+import {
+  DefinitionProgressOverview,
+  type DefinitionProgressPresetSegment,
+} from "@/components/strategy/DefinitionProgressOverview";
+import {
+  DefinitionTrustStatus,
+  type DefinitionTrustChangedParam,
+  type DefinitionTrustKind,
+} from "@/components/strategy/DefinitionTrustStatus";
 import { trpc } from "@/lib/trpc";
 import {
   strategyToViewModel,
@@ -51,8 +83,9 @@ import {
   LogIn,
   Play,
   ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Link, useLocation, useParams, useSearch } from "wouter";
 
@@ -156,8 +189,51 @@ const TEMPLATE_DOCUMENT = {
     "c8f0996d95e372e3eba56081ef0df5a607f48313e7e370916d0009af3bcbdb02",
 } as const;
 
+/** 「起点」选择按钮的样式（选中态高亮）。 */
+function originButtonClass(active: boolean): string {
+  return [
+    "rounded-md border px-3 py-1.5 text-xs transition",
+    active ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted",
+  ].join(" ");
+}
+
 function asRecord(v: unknown): Record<string, unknown> {
   return (typeof v === "object" && v !== null ? v : {}) as Record<string, unknown>;
+}
+
+/**
+ * SCOPE-002 —— 创作词表 / 空白草稿的**线上形状**（结构性描述，不 import 服务端值）。
+ */
+interface AuthoringVocabularyDto {
+  readonly presetSlots: readonly { readonly slot: string; readonly label: string; readonly required: boolean; readonly description: string }[];
+  readonly presets: readonly PresetSummary[];
+  readonly exitPolicyRuleEnvelope: Record<string, unknown>;
+  /** FE-PLAN-004：退出政策的 9 个规则槽（服务端下发；前端不自行拼 policy）。 */
+  readonly exitPolicySlots?: readonly ExitPolicySlotDto[];
+  /** 还没有退出政策时的**起步基准**（= 已登记实验 SL-00 的 policy）。 */
+  readonly exitPolicyBasePolicy?: Record<string, unknown> | null;
+  readonly exitPolicyBaseLabel?: string;
+  readonly strategyTypes: readonly string[];
+}
+
+type AuthoringExitSlotId =
+  | "ANCHOR" | "TAKE_PROFIT" | "TIME_EXIT" | "CONFIRMATION" | "ESCALATION"
+  | "SCHEDULE" | "REDUCTION" | "STRONG_HOLD" | "RESEARCH";
+
+/** 与共享契约 `strategyAuthoringSlotSchema` 的取值一一对应（客户端只描述形状，不 import 服务端值）。 */
+type AuthoringSlotValue =
+  | "RECIPE" | "EXIT_POLICY" | "POSITION" | "COST" | "EXIT_BASE" | "STOP" | "TAKE_PROFIT"
+  | "TIME_EXIT" | "STRONG_HOLD" | "CAPITAL_RECYCLE" | "RUNNER_BRIDGE";
+
+interface AuthoringBlankDto {
+  readonly parts: {
+    readonly identity: { readonly version: string };
+    readonly definition: Record<string, unknown>;
+    readonly executionAssumptions: Record<string, unknown>;
+    readonly universe: Record<string, unknown>;
+  };
+  readonly requiredSections: readonly { readonly key: string; readonly label: string; readonly description: string }[];
+  readonly notes: readonly string[];
 }
 
 /**
@@ -230,6 +306,10 @@ function DefinitionTab({
   legacyReason,
   syncedDrafts,
   onDefinitionChange,
+  presetSegments,
+  trustPanel,
+  searchParameterSources,
+  presetBlocks,
 }: {
   vm: StrategyViewModel;
   onVmChange: (next: StrategyViewModel) => void;
@@ -238,6 +318,14 @@ function DefinitionTab({
   /** **已同步数据集坐标**的定义草稿；`null` ⇒ 走兼容视图编辑。 */
   syncedDrafts: DefinitionDrafts | null;
   onDefinitionChange: (next: DefinitionDrafts) => void;
+  /** 预设槽的完成度状态（并入概览；不传 = 概览只反映 7 段）。 */
+  presetSegments?: readonly DefinitionProgressPresetSegment[];
+  /** 信任层状态条（P1）。 */
+  trustPanel?: ReactNode;
+  /** ⑤ 派生来源（P3）：①–④ 已选方案暴露的参数。 */
+  searchParameterSources?: readonly SelectedPresetParameters[];
+  /** 各任务块**自己的方案行**（由各段渲染在段首）。 */
+  presetBlocks?: { readonly recipe?: ReactNode; readonly exit?: ReactNode; readonly position?: ReactNode; readonly cost?: ReactNode };
 }) {
   return (
     <div className="space-y-4">
@@ -276,7 +364,17 @@ function DefinitionTab({
           />
         </>
       ) : (
-        <DefinitionFields drafts={syncedDrafts} onChange={onDefinitionChange} />
+        <>
+          {/* 7 段是折叠的 ⇒ 先把"还差什么"平铺出来（点击可跳到该段） */}
+          {trustPanel}
+          <DefinitionProgressOverview drafts={syncedDrafts} presetSegments={presetSegments} />
+          <DefinitionFields
+            drafts={syncedDrafts}
+            onChange={onDefinitionChange}
+            searchParameterSources={searchParameterSources}
+            presetBlocks={presetBlocks}
+          />
+        </>
       )}
     </div>
   );
@@ -483,6 +581,35 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
   const save = trpc.strategyDomain.strategy.save.useMutation();
   const createVersion = trpc.strategyDomain.strategy.createVersion.useMutation();
 
+  // ---- SCOPE-002：创作词表 / 空白 canonical 草稿 / 预设物化 ----
+  const authoringVocabularyQuery = trpc.strategyDomain.authoring.getVocabulary.useQuery(undefined, {
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60_000,
+  });
+  const vocabulary = (authoringVocabularyQuery.data ?? null) as AuthoringVocabularyDto | null;
+  /**
+   * 新建策略的起点 = **服务端下发的空白 canonical 草稿**（SCOPE-002 §2.3 A2）。
+   *
+   * 只有 `isNew` 才查（既有策略一律从库里加载真实文档，绝不用模板覆盖）。
+   */
+  const blankDraftQuery = trpc.strategyDomain.authoring.getBlankDraft.useQuery({}, {
+    enabled: isNew,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
+  const blankAppliedRef = useRef(false);
+  const materializePreset = trpc.strategyDomain.authoring.materializePreset.useMutation();
+  const saveDraft = trpc.strategyDomain.authoring.saveDraft.useMutation();
+  const [recipeSelection, setRecipeSelection] = useState<PresetSelection | null>(null);
+  const [exitPolicySelection, setExitPolicySelection] = useState<PresetSelection | null>(null);
+  const [recipeMaterialized, setRecipeMaterialized] = useState<PresetMaterializeResult | null>(null);
+  const [exitPolicyMaterialized, setExitPolicyMaterialized] = useState<PresetMaterializeResult | null>(null);
+  // ③ 仓位 / ④ 成本与成交：FIELD_PATCH 预设（选中后把值**填进**草稿字段）
+  const [positionSelection, setPositionSelection] = useState<PresetSelection | null>(null);
+  const [costSelection, setCostSelection] = useState<PresetSelection | null>(null);
+  const [positionMaterialized, setPositionMaterialized] = useState<PresetMaterializeResult | null>(null);
+  const [costMaterialized, setCostMaterialized] = useState<PresetMaterializeResult | null>(null);
+
   // ---- 编辑器状态 ----
   const initialDocument = () => (isNew ? emptyDraftDocument() : TEMPLATE_DOCUMENT);
   const [vm, setVm] = useState<StrategyViewModel>(() =>
@@ -513,6 +640,12 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
   const [loadedTarget, setLoadedTarget] = useState<LoadedTarget | null>(null);
   /** 草稿是否有未保存的改动（只用于显示「未保存」标记与换版本前确认）。 */
   const [dirty, setDirty] = useState(false);
+  /**
+   * 新建策略的**起点**：空白 canonical（默认）或从模式族生成。
+   *
+   * 🔴 只在 `isNew` 时有意义 —— 既有版本永远从库里加载真实文档，不用起点覆盖它。
+   */
+  const [originKind, setOriginKind] = useState<"BLANK" | "FAMILY">("BLANK");
 
   // ---- 后端真实数据源 ----
   const loadEnabled = !isNew;
@@ -576,6 +709,37 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     setValidateStatus(null);
     setDirty(false);
   }, [loadEnabled, loadFetching, loadData, pinnedVersion, strategyId]);
+
+  /**
+   * 新建策略：空白 canonical 草稿一到，就把编辑器切到**结构化定义**模式。
+   *
+   * 为什么必须这样做：此前的 `emptyDraftDocument()` 是无 `definition` 的 legacy 模板，
+   * `definitionToDrafts` 会返回 `raw` ⇒ 定义编辑器退化成"兼容视图"，
+   * 用户**根本编不出 canonical 策略**（SCOPE-002 §0.1 DoD 不可能达成）。
+   */
+  useEffect(() => {
+    if (!isNew) return;
+    if (blankAppliedRef.current) return;
+    const blank = (blankDraftQuery.data ?? null) as AuthoringBlankDto | null;
+    if (blank === null) return;
+    blankAppliedRef.current = true;
+    const document: Record<string, unknown> = {
+      recordKind: "STRATEGY_DOCUMENT",
+      recordVersion: 1,
+      strategyId: "",
+      version: blank.parts.identity.version,
+      name: "",
+      universe: blank.parts.universe,
+      definition: blank.parts.definition,
+      executionAssumptions: blank.parts.executionAssumptions,
+    };
+    setVm(strategyToViewModel(document));
+    setDefinitionState(withDocumentLevelDrafts(definitionToDrafts(document.definition), document.executionAssumptions));
+    setSavedDocument(null);
+    setLoadedTarget(null);
+    setValidateStatus(null);
+    setDirty(false);
+  }, [blankDraftQuery.data, isNew]);
 
   /** 当前版本的真实状态（后端版本行；拿不到就是 `null`，不猜）。 */
   const versionStatus = useMemo(() => {
@@ -641,6 +805,311 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     });
   }, [vm.datasetVersionId, vm.datasetVersion, definitionState]);
 
+  /**
+   * 预设槽的完成度（并入「定义完成度」概览）。
+   *
+   * 为什么必须并进来：**信号配方是必填** —— 缺它装配层会落到 DEFAULT 配方，
+   * 回测跑的不是你以为的那套；而它不在 7 段里，只看 7 段会误报"没有必填缺口"。
+   */
+  const definitionPresetSegments = useMemo<readonly DefinitionProgressPresetSegment[]>(() => {
+    const build = (
+      selection: PresetSelection | null,
+      materialized: PresetMaterializeResult | null,
+      key: string,
+      label: string,
+      domId: string,
+      required: boolean,
+    ): DefinitionProgressPresetSegment => {
+      if (selection === null) {
+        return {
+          key, label, domId,
+          state: required ? "MISSING" : "OPTIONAL",
+          hint: required ? "未选择（必填：缺它会退回默认配方的选股逻辑）" : "未选择（可选：留空 = 持有到回测期末）",
+        };
+      }
+      if (materialized !== null && materialized.issues.length > 0) {
+        return { key, label, domId, state: "INVALID", hint: materialized.issues[0]?.message ?? "物化失败" };
+      }
+      return { key, label, domId, state: "SET", hint: `已选 ${selection.presetId}` };
+    };
+    return [
+      build(recipeSelection, recipeMaterialized, "RECIPE", "信号配方", "preset-recipe", true),
+      build(exitPolicySelection, exitPolicyMaterialized, "EXIT_POLICY", "退出政策", "preset-exit-policy", false),
+      build(positionSelection, positionMaterialized, "POSITION", "仓位与持仓数", "preset-position", false),
+      build(costSelection, costMaterialized, "COST", "成本与成交", "preset-cost", false),
+    ];
+  }, [
+    recipeSelection, recipeMaterialized,
+    exitPolicySelection, exitPolicyMaterialized,
+    positionSelection, positionMaterialized,
+    costSelection, costMaterialized,
+  ]);
+
+  /** 本稿用过的预设 + **预设版本** + 参数（SCOPE-002 §1.5 · 裁定 Q5：只进审计，不进定义指纹）。 */
+  /**
+   * 信任层（P1）：相对"你打开的那个版本"，**预设参数**改了哪几项。
+   *
+   * 只比对「预设暴露的参数」与它自己的默认值 —— 这正是"选方案 + 调参数"模型下最常改的面；
+   * 定义里其它字段的改动由 `dirty` 兜底（状态条显示为"定义已修改"）。
+   */
+  const changedPresetParams = useMemo<readonly DefinitionTrustChangedParam[]>(() => {
+    const out: DefinitionTrustChangedParam[] = [];
+    const scan = (selection: PresetSelection | null, slotKey: string, slotLabel: string) => {
+      if (selection === null) return;
+      const preset = (vocabulary?.presets ?? []).find(item => item.presetId === selection.presetId);
+      if (preset === undefined) return;
+      for (const parameter of preset.parameters) {
+        const current = selection.parameters[parameter.code];
+        if (current === undefined || current === parameter.defaultValue) continue;
+        out.push({
+          slotKey, slotLabel, code: parameter.code,
+          from: String(parameter.defaultValue), to: String(current),
+        });
+      }
+    };
+    scan(recipeSelection, "RECIPE", "信号配方");
+    scan(exitPolicySelection, "EXIT_POLICY", "退出政策");
+    scan(positionSelection, "POSITION", "仓位与持仓数");
+    scan(costSelection, "COST", "成本与成交");
+    return out;
+  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+
+  const presetRefs = useMemo(() => {
+    const refs: { slot: AuthoringSlotValue; presetId: string; presetVersion: string; parameters: Record<string, PresetParameterValue> }[] = [];
+    const add = (selection: PresetSelection | null, slot: AuthoringSlotValue) => {
+      if (selection === null) return;
+      const preset = (vocabulary?.presets ?? []).find(item => item.presetId === selection.presetId);
+      refs.push({
+        slot: (selection.slot as AuthoringSlotValue) ?? slot,
+        presetId: selection.presetId,
+        presetVersion: preset?.version ?? "unknown",
+        parameters: { ...selection.parameters },
+      });
+    };
+    add(recipeSelection, "RECIPE");
+    add(exitPolicySelection, "EXIT_POLICY");
+    add(positionSelection, "POSITION");
+    add(costSelection, "COST");
+    return refs;
+  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+
+  /**
+   * ⑤「可调参数」的派生来源（P3 / C-1）：①–④ **已选方案**各自暴露的参数。
+   *
+   * 🔴 这里只做"投影"，不自造参数清单 —— ⑤ 的唯一写路径仍是 `definition.parameters[]`
+   *    （草稿）。加一个预设参数，候选自动多一条。
+   */
+  const searchParameterSources = useMemo<readonly SelectedPresetParameters[]>(() => {
+    const pick = (selection: PresetSelection | null, blockLabel: string): SelectedPresetParameters | null => {
+      if (selection === null) return null;
+      const preset = (vocabulary?.presets ?? []).find(item => item.presetId === selection.presetId);
+      if (preset === undefined || preset.parameters.length === 0) return null;
+      return { blockLabel, presetDisplayName: preset.displayName, parameters: preset.parameters };
+    };
+    return [
+      pick(recipeSelection, "① 选股"),
+      pick(exitPolicySelection, "② 出场"),
+      pick(positionSelection, "③ 仓位"),
+      pick(costSelection, "④ 成本与成交"),
+    ].filter((item): item is SelectedPresetParameters => item !== null);
+  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+
+  /**
+   * P5：**本地**用量计数（每块方案被换 / 参数被改的频率）。
+   *
+   * - 只写 `localStorage`，**不发任何网络请求**（本仓也没有遥测基建）；
+   * - 只记 slot / presetId / "改了几项"，不记策略名与数值；
+   * - 用途仅限：攒够 ≥2 周后决定要不要重排每块的默认项（FE-PLAN-003 §8 P5）。
+   */
+  useEffect(() => {
+    const scan = (slotKey: string, selection: PresetSelection | null) => {
+      if (selection === null) return;
+      const preset = (vocabulary?.presets ?? []).find(item => item.presetId === selection.presetId);
+      const changed = preset === undefined
+        ? 0
+        : preset.parameters.filter(parameter => {
+            const current = selection.parameters[parameter.code];
+            return current !== undefined && current !== parameter.defaultValue;
+          }).length;
+      recordPresetUsage(slotKey, selection.presetId, changed);
+    };
+    scan("RECIPE", recipeSelection);
+    scan("EXIT_POLICY", exitPolicySelection);
+    scan("POSITION", positionSelection);
+    scan("COST", costSelection);
+  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+
+  /**
+   * 当前文档里的**退出政策**（即 `exit.rules[*].policy` 里那一条）。
+   *
+   * 🔴 它同时也是 9 个槽的**当前取值来源** —— 槽编辑器显示的就是这份 policy 拆出来的东西，
+   *    所以"看到的"与"保存的"永远是同一份（不会出现显示与提交不一致）。
+   */
+  const currentExitPolicy = useMemo<Record<string, unknown> | null>(() => {
+    if (visibleDefinitionDrafts === null) return null;
+    for (const row of visibleDefinitionDrafts.exitRules) {
+      const policy = row.original?.policy;
+      if (typeof policy === "object" && policy !== null && !Array.isArray(policy)) {
+        return policy as Record<string, unknown>;
+      }
+    }
+    return null;
+  }, [visibleDefinitionDrafts]);
+
+  /**
+   * 槽编辑器实际使用的 policy：
+   *   - 文档里已有退出政策 ⇒ 用它（既有行为，零改动）；
+   *   - **还没有** ⇒ 用词表下发的**起步基准**（已登记实验 SL-00 的 policy）。
+   *
+   * 🔴 为什么不是「什么都不给」：那样用户必须先在「推荐组合」里挑一个整包才能碰任何槽
+   *    （实测反馈：不选推荐组合 ⇒ 9 槽根本不出现）。改用起步基准后，任一槽改一下就
+   *    写出一份完整的、**基于已登记实验**的政策；它是不是被验证过由信任层照实说。
+   */
+  const effectiveExitPolicy = currentExitPolicy ?? ((vocabulary?.exitPolicyBasePolicy ?? null) as Record<string, unknown> | null);
+  const usingExitBasePolicy = currentExitPolicy === null && effectiveExitPolicy !== null;
+
+  /** 服务端识别：每个槽现在是哪个方案 + 参数（认不出 ⇒ `optionId: null`）。 */
+  /**
+   * 打开的那个版本的退出政策 —— 信任层判「改了哪一槽」的**基准**。
+   *
+   * 只从已落库文档（`savedDocument`）取：本地草稿的变化**不能**当基准，
+   * 否则改完再改回去就永远判"变体"。
+   */
+  const baselineExitPolicy = useMemo<Record<string, unknown> | null>(() => {
+    if (savedDocument === null) return null;
+    const doc = savedDocument as Record<string, unknown>;
+    const definition = (doc.definition ?? doc.definitionJson ?? doc) as Record<string, unknown>;
+    const rules = (definition.exit as { rules?: unknown } | undefined)?.rules;
+    if (!Array.isArray(rules)) return null;
+    for (const rule of rules) {
+      const policy = (rule as { policy?: unknown } | null)?.policy;
+      if (typeof policy === "object" && policy !== null && !Array.isArray(policy)) {
+        return policy as Record<string, unknown>;
+      }
+    }
+    return null;
+  }, [savedDocument]);
+
+  const baselineExitSlotRecognition = trpc.strategyDomain.authoring.recognizeExitPolicySlots.useQuery(
+    { policy: baselineExitPolicy ?? {} },
+    { enabled: baselineExitPolicy !== null },
+  );
+
+
+
+
+  const exitSlotRecognition = trpc.strategyDomain.authoring.recognizeExitPolicySlots.useQuery(
+    { policy: effectiveExitPolicy ?? {} },
+    { enabled: effectiveExitPolicy !== null },
+  );
+
+  /** P4：起点行选了某个推荐组合 ⇒ 走既有整包物化路径（与原来那张卡完全相同）。 */
+  const onExitStartPresetChange = (presetId: string) => {
+    const preset = (vocabulary?.presets ?? []).find(item => item.presetId === presetId);
+    if (preset === undefined) return;
+    onExitPolicySelectionChange({
+      slot: preset.slot as AuthoringSlotValue,
+      presetId,
+      parameters: Object.fromEntries(preset.parameters.map(parameter => [parameter.code, parameter.defaultValue])),
+    });
+  };
+
+  /** P4：「改为实验基准」= 把整份政策换回词表下发的起步基准（SL-00）。 */
+  const onExitResetToBase = () => {
+    const envelope = vocabulary?.exitPolicyRuleEnvelope;
+    const base = vocabulary?.exitPolicyBasePolicy;
+    if (envelope === undefined || base === undefined) return;
+    setExitPolicySelection(null);
+    setExitPolicyMaterialized(null);
+    setDirty(true);
+    applyExitPolicyRule(envelope, base);
+  };
+
+  /**
+   * P4：**退出槽**的逐槽差异（相对打开的那个版本）。
+   *
+   * 与上面的预设参数比对同源：都以"打开时的那一份"为基准，都只报**改了哪一项**。
+   * 换方案报一条「换方案：A → B」；只调参数则逐参数报一条。
+   */
+  const changedExitSlots = useMemo<readonly DefinitionTrustChangedParam[]>(() => {
+    const base = baselineExitSlotRecognition.data?.slots as readonly ExitPolicySlotRecognition[] | undefined;
+    const current = exitSlotRecognition.data?.slots as readonly ExitPolicySlotRecognition[] | undefined;
+    if (base === undefined || current === undefined) return [];
+    const out: DefinitionTrustChangedParam[] = [];
+    for (const slot of vocabulary?.exitPolicySlots ?? []) {
+      const before = base.find(item => item.slotId === slot.slotId);
+      const after = current.find(item => item.slotId === slot.slotId);
+      if (before === undefined || after === undefined) continue;
+      const nameOf = (optionId: string | null) =>
+        optionId === null
+          ? "本表单不识别"
+          : (slot.options.find(option => option.optionId === optionId)?.displayName ?? optionId);
+      if (before.optionId !== after.optionId) {
+        out.push({
+          slotKey: `EXIT_${slot.slotId}`, slotLabel: `出场·${slot.label}`, code: "换方案",
+          from: nameOf(before.optionId), to: nameOf(after.optionId),
+        });
+        continue;
+      }
+      const option = slot.options.find(item => item.optionId === after.optionId);
+      if (option === undefined) continue;
+      for (const parameter of option.parameters) {
+        const from = before.parameters[parameter.code] ?? parameter.defaultValue;
+        const to = after.parameters[parameter.code] ?? parameter.defaultValue;
+        if (from === to) continue;
+        out.push({
+          slotKey: `EXIT_${slot.slotId}`, slotLabel: `出场·${slot.label}`, code: parameter.label,
+          from: String(from), to: String(to),
+        });
+      }
+    }
+    return out;
+  }, [baselineExitSlotRecognition.data, exitSlotRecognition.data, vocabulary]);
+
+  /** 预设参数 + 退出槽差异的**合并**（信任层只认这一份）。 */
+  const changedDefinitionParams = useMemo<readonly DefinitionTrustChangedParam[]>(
+    () => [...changedPresetParams, ...changedExitSlots],
+    [changedPresetParams, changedExitSlots],
+  );
+
+  /** 三态：未落库 ⇒ 全新；有参数改动或任何编辑 ⇒ 变体；否则一致。 */
+  const definitionTrustKind: DefinitionTrustKind =
+    loadedTarget === null ? "UNVERIFIED" : (changedDefinitionParams.length > 0 || dirty ? "VARIANT" : "MATCH");
+
+  const applyExitSlot = trpc.strategyDomain.authoring.applyExitPolicySlot.useMutation();
+
+  /**
+   * 改一个退出槽：把**当前 policy** 与「选哪个方案 + 填哪些参数」交给服务端，
+   * 由它认领 + 物化 + 只覆盖该槽的键，再把结果写回 `exit.rules`。
+   * 前端**不拼 policy**（SCOPE-002 §0.2 P4）。
+   */
+  const onExitSlotApply = (input: {
+    slotId: string;
+    optionId: string;
+    parameters: Readonly<Record<string, ExitSlotParameterValue>>;
+  }) => {
+    const envelope = vocabulary?.exitPolicyRuleEnvelope;
+    if (envelope === undefined || effectiveExitPolicy === null) return;
+    setDirty(true);
+    applyExitSlot.mutate(
+      {
+        policy: effectiveExitPolicy,
+        slotId: input.slotId as AuthoringExitSlotId,
+        optionId: input.optionId,
+        parameters: { ...input.parameters },
+      },
+      {
+        onSuccess: result => {
+          if (result.issues.length > 0) {
+            toast.error("这一槽没改成", { description: result.issues.join("；") });
+            return;
+          }
+          applyExitPolicyRule(envelope, result.policy);
+        },
+      },
+    );
+  };
+
   const goToVersion = (version: string) =>
     setLocation(
       `/strategies/${encodeURIComponent(strategyId)}?version=${encodeURIComponent(version)}`
@@ -648,10 +1117,16 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
 
   const goToList = () => setLocation("/strategies");
 
-  /** 换版本 = 改 URL；草稿有改动时先确认，避免静默丢编辑。 */
+  /**
+   * 换版本 = 改 URL；草稿有改动时先确认，避免静默丢编辑。
+   * 🔴 用统一 `ConfirmDialog`（`@/components/common`）而非原生 `window.confirm`：
+   *    原生 confirm 会阻塞页面且无法被无头 DOM 断言；本仓已把「重操作统一走 ConfirmDialog」写成约定。
+   */
+  const [pendingVersionSwitch, setPendingVersionSwitch] = useState<string | null>(null);
   const onSelectVersion = (version: string) => {
     if (version === (loadedTarget?.version ?? pinnedVersion)) return;
-    if (dirty && !window.confirm("当前草稿有未保存的修改，切换版本会丢弃它们。继续？")) {
+    if (dirty) {
+      setPendingVersionSwitch(version);
       return;
     }
     goToVersion(version);
@@ -665,6 +1140,155 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
   const updateDefinitionDrafts = (next: DefinitionDrafts) => {
     setDirty(true);
     setDefinitionState({ kind: "structured", drafts: next });
+  };
+
+  /** RECIPE 槽：物化结果写进**文档级** `recipe`（经 `vm.extra` 无损透传）。 */
+  const onRecipeSelectionChange = (next: PresetSelection | null) => {
+    setRecipeSelection(next);
+    setDirty(true);
+    if (next === null) {
+      setRecipeMaterialized(null);
+      setVm(previous => {
+        const extra = { ...previous.extra };
+        delete extra.recipe;
+        return { ...previous, extra };
+      });
+      return;
+    }
+    materializePreset.mutate(
+      { slot: next.slot as AuthoringSlotValue, presetId: next.presetId, parameters: { ...next.parameters } },
+      {
+        onSuccess: result => {
+          const materialized = result as PresetMaterializeResult;
+          setRecipeMaterialized(materialized);
+          setVm(previous => {
+            const extra = { ...previous.extra };
+            if (materialized.issues.length === 0) extra.recipe = materialized.payload;
+            else delete extra.recipe;
+            return { ...previous, extra };
+          });
+        },
+      }
+    );
+  };
+
+  /**
+   * EXIT_POLICY 槽：把服务端物化出的 policy 塞进 `definition.exit.rules` 的**统一规则外壳**。
+   *
+   * 🔴 外壳（id / type / trigger / priority / enabled / description）来自词表的
+   * `exitPolicyRuleEnvelope` —— 前端只做"外壳 + payload"的合并，不自行发明语义。
+   */
+  const onExitPolicySelectionChange = (next: PresetSelection | null) => {
+    setExitPolicySelection(next);
+    setDirty(true);
+    const envelope = vocabulary?.exitPolicyRuleEnvelope;
+    if (next === null) {
+      setExitPolicyMaterialized(null);
+      if (envelope !== undefined) removeExitPolicyRule(String(envelope.id));
+      return;
+    }
+    materializePreset.mutate(
+      { slot: next.slot as AuthoringSlotValue, presetId: next.presetId, parameters: { ...next.parameters } },
+      {
+        onSuccess: result => {
+          const materialized = result as PresetMaterializeResult;
+          setExitPolicyMaterialized(materialized);
+          if (materialized.issues.length > 0 || envelope === undefined) return;
+          applyExitPolicyRule(envelope, materialized.payload);
+        },
+      }
+    );
+  };
+
+  /**
+   * ③ 仓位 / ④ 成本与成交：**FIELD_PATCH** 预设。
+   *
+   * 选中 ⇒ 服务端物化出一张「草稿字段补丁」⇒ 这里用 `applyDefinitionFieldPatch` 把值填进草稿。
+   * 与 ①② 的唯一区别：payload **不进文档**，只填本来就由表单编辑的那些字段
+   * （草稿仍是唯一真相，C-2 不破）。
+   */
+  const onFieldPatchSelectionChange = (
+    slot: "POSITION" | "COST",
+    next: PresetSelection | null,
+    setSelection: (value: PresetSelection | null) => void,
+    setMaterialized: (value: PresetMaterializeResult | null) => void,
+  ) => {
+    setSelection(next);
+    setDirty(true);
+    if (next === null) {
+      setMaterialized(null);
+      return;
+    }
+    materializePreset.mutate(
+      { slot, presetId: next.presetId, parameters: { ...next.parameters } },
+      {
+        onSuccess: result => {
+          const materialized = result as PresetMaterializeResult;
+          setMaterialized(materialized);
+          if (materialized.issues.length > 0) return;
+          const patch = materialized.payload as DefinitionFieldPatch;
+          setDefinitionState(previous => previous.kind !== "structured"
+            ? previous
+            : { kind: "structured", drafts: applyDefinitionFieldPatch(previous.drafts, patch) });
+        },
+      }
+    );
+  };
+
+  const onPositionSelectionChange = (next: PresetSelection | null) =>
+    onFieldPatchSelectionChange("POSITION", next, setPositionSelection, setPositionMaterialized);
+
+  const onCostSelectionChange = (next: PresetSelection | null) =>
+    onFieldPatchSelectionChange("COST", next, setCostSelection, setCostMaterialized);
+
+  /** 变体态的一键还原：把预设参数恢复为各自默认值（不动其它编辑）。 */
+  const restorePresetDefaults = () => {
+    const reset = (selection: PresetSelection | null, apply: (next: PresetSelection) => void) => {
+      if (selection === null) return;
+      const preset = (vocabulary?.presets ?? []).find(item => item.presetId === selection.presetId);
+      if (preset === undefined) return;
+      apply({
+        slot: selection.slot,
+        presetId: selection.presetId,
+        parameters: Object.fromEntries(preset.parameters.map(item => [item.code, item.defaultValue])),
+      });
+    };
+    reset(recipeSelection, onRecipeSelectionChange);
+    reset(exitPolicySelection, onExitPolicySelectionChange);
+    reset(positionSelection, onPositionSelectionChange);
+    reset(costSelection, onCostSelectionChange);
+    /**
+     * P4：退出槽的"还原" = 把整份 policy 换回**打开的那个版本**的那一份。
+     * 槽是逐字段拼出来的，逐槽回默认值拼回去未必等于原政策（例如原政策有本表单不表达的形状）
+     * ⇒ 只有整份替换才能保证"还原到已验证的那一套"。
+     */
+    const envelope = vocabulary?.exitPolicyRuleEnvelope;
+    if (baselineExitPolicy !== null && envelope !== undefined) applyExitPolicyRule(envelope, baselineExitPolicy);
+  };
+
+  const applyExitPolicyRule = (envelope: Record<string, unknown>, policy: unknown) => {
+    setDefinitionState(previous => {
+      if (previous.kind !== "structured") return previous;
+      const ruleId = String(envelope.id ?? "exit-unified-policy");
+      const row = {
+        original: { ...envelope, policy },
+        type: String(envelope.type ?? "STOP_LOSS"),
+        trigger: String(envelope.trigger ?? "ON_CLOSE"),
+        threshold: "",
+        thresholdUnit: "",
+        priority: String(envelope.priority ?? 0),
+        enabled: envelope.enabled !== false,
+      };
+      const others = previous.drafts.exitRules.filter(item => item.original?.id !== ruleId);
+      return { kind: "structured", drafts: { ...previous.drafts, exitRules: [row, ...others] } };
+    });
+  };
+
+  const removeExitPolicyRule = (ruleId: string) => {
+    setDefinitionState(previous => {
+      if (previous.kind !== "structured") return previous;
+      return { kind: "structured", drafts: { ...previous.drafts, exitRules: previous.drafts.exitRules.filter(item => item.original?.id !== ruleId) } };
+    });
   };
 
   function onValidate() {
@@ -707,14 +1331,25 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     setLocation(`/strategies/${encodeURIComponent(id)}?version=${encodeURIComponent(version)}`);
   }
 
+  /**
+   * SCOPE-002 §2.3 A5 —— 新建走 `authoring.saveDraft`（带"必须有 canonical definition" +
+   * "strategyType 必填"两条门槛，并把用过的预设连同**预设版本**冻结进审计字段）；
+   * 既有策略仍走 `strategy.save`（不改其写语义与门槛）。
+   */
   function onSave() {
-    save.mutate(
-      { document: draftDocument },
-      {
-        onSuccess: saved => settleSaved(saved, "策略已保存"),
-        onError: e => toast.error("保存失败", { description: e.message }),
-      }
-    );
+    const handlers = {
+      onSuccess: (saved: unknown) => settleSaved(saved, isNew ? "草稿已保存" : "策略已保存"),
+      onError: (error: { message: string; data?: unknown }) =>
+        toast.error("保存失败", { description: error.message }),
+    };
+    if (isNew) {
+      saveDraft.mutate(
+        { document: draftDocument, origin: { kind: "BLANK_CANONICAL", presetRefs } },
+        handlers
+      );
+      return;
+    }
+    save.mutate({ document: draftDocument }, handlers);
   }
 
   function onCreateVersion() {
@@ -743,7 +1378,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         loadingTarget={loadFetching}
         validating={validate.isPending}
         onValidate={onValidate}
-        saving={save.isPending}
+        saving={save.isPending || saveDraft.isPending}
         onSave={onSave}
         creatingVersion={createVersion.isPending}
         onCreateVersion={onCreateVersion}
@@ -751,11 +1386,64 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         dirty={dirty}
       />
 
-      <StrategyFamilyPanel
-        currentStrategyId={strategyId}
-        datasetVersionId={vm.datasetVersionId}
-        datasetLabel={vm.datasetVersion}
-      />
+      {/*
+        SCOPE-002 UI 重排 —— **起点**只在新建时选，模式族面板不再无条件置顶。
+        旧行为：/strategies/new 一进来就预填「首板股票池 · 滚动 3F」并给出"创建独立策略"按钮，
+        与"空白 canonical 起点"直接冲突（用户从没选过那个族）。
+      */}
+      {isNew ? (
+        <div className="rounded-lg border bg-card p-4" data-strategy-origin>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold">起点</h3>
+            <p className="text-[11px] text-muted-foreground">
+              空白 canonical = 从零填写；模式族 = 用已登记族物化一份完整文档后继续编辑。
+            </p>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setOriginKind("BLANK")}
+              className={originButtonClass(originKind === "BLANK")}
+              data-origin-option="BLANK"
+            >
+              空白 canonical 定义
+            </button>
+            <button
+              type="button"
+              onClick={() => setOriginKind("FAMILY")}
+              className={originButtonClass(originKind === "FAMILY")}
+              data-origin-option="FAMILY"
+            >
+              从模式族生成
+            </button>
+          </div>
+          {originKind === "FAMILY" && (
+            <div className="mt-4">
+              <StrategyFamilyPanel
+                currentStrategyId={strategyId}
+                datasetVersionId={vm.datasetVersionId}
+                datasetLabel={vm.datasetVersion}
+              />
+            </div>
+          )}
+        </div>
+      ) : (
+        <details className="rounded-lg border bg-card px-4 py-3" data-strategy-family-collapsed>
+          <summary className="cursor-pointer text-sm font-medium">
+            从模式族另存新版本
+            <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+              不修改当前版本；物化后需另存为新版本
+            </span>
+          </summary>
+          <div className="mt-3">
+            <StrategyFamilyPanel
+              currentStrategyId={strategyId}
+              datasetVersionId={vm.datasetVersionId}
+              datasetLabel={vm.datasetVersion}
+            />
+          </div>
+        </details>
+      )}
 
       {loadedPoolSemantics !== null && (
         <FirstLimitPoolSummary
@@ -801,14 +1489,24 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         loadError === null && (
           <Tabs defaultValue="definition">
             <TabsList>
-              <TabsTrigger value="definition" className="flex items-center gap-1.5">
+              <TabsTrigger value="definition" data-tab="definition" className="flex items-center gap-1.5">
                 <ClipboardList className="h-3.5 w-3.5" /> 策略定义
               </TabsTrigger>
-              <TabsTrigger value="run" className="flex items-center gap-1.5">
+              <TabsTrigger value="run" data-tab="run" className="flex items-center gap-1.5">
                 <Play className="h-3.5 w-3.5" /> 运行回测
               </TabsTrigger>
-              <TabsTrigger value="versions" className="flex items-center gap-1.5">
+              {/* SCOPE-002 S7：按当前版本坐标查看留档（专项页能力的通用化） */}
+              <TabsTrigger value="evaluation" data-tab="evaluation" className="flex items-center gap-1.5">
+                <ClipboardList className="h-3.5 w-3.5" /> 最终评估
+              </TabsTrigger>
+              <TabsTrigger value="paper" data-tab="paper" className="flex items-center gap-1.5">
+                <ClipboardList className="h-3.5 w-3.5" /> 模拟盘
+              </TabsTrigger>
+              <TabsTrigger value="versions" data-tab="versions" className="flex items-center gap-1.5">
                 <History className="h-3.5 w-3.5" /> 版本与状态
+              </TabsTrigger>
+              <TabsTrigger value="validation" className="flex items-center gap-1.5" data-tab="validation">
+                <ShieldCheck className="h-3.5 w-3.5" /> 验证状态
               </TabsTrigger>
             </TabsList>
 
@@ -819,11 +1517,122 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
                 legacyReason={definitionState.kind === "raw" ? definitionState.reason : null}
                 syncedDrafts={visibleDefinitionDrafts}
                 onDefinitionChange={updateDefinitionDrafts}
+                presetSegments={definitionPresetSegments}
+                searchParameterSources={searchParameterSources}
+                presetBlocks={
+                  vocabulary === null ? undefined : {
+                    recipe: (
+                      <PresetEditor
+                        domId="preset-recipe"
+                        title="信号配方（RECIPE）"
+                        hint="决定买什么样的股（选股规则）"
+                        presets={(vocabulary.presets ?? []).filter(item => item.slot === "RECIPE")}
+                        value={recipeSelection}
+                        onChange={onRecipeSelectionChange}
+                        materialized={recipeMaterialized}
+                        materializing={materializePreset.isPending}
+                      />
+                    ),
+                    exit: (
+                      <div className="space-y-3">
+                        {/* 逐槽：9 个规则槽（常显 3 / 折叠 5 / 研究 1）+ 起点行 + 总述。 */}
+                        {effectiveExitPolicy === null ? (
+                          <p className="rounded-lg border border-dashed px-3 py-2 text-[11px] text-muted-foreground" data-exit-slots-empty>
+                            正在读取退出政策的起步基准…
+                          </p>
+                        ) : (
+                          <>
+                            {usingExitBasePolicy && (
+                              <p className="text-[10px] text-muted-foreground" data-exit-slots-base-note>
+                                还没有退出政策 ⇒ 下面 9 槽以「{vocabulary.exitPolicyBaseLabel ?? "实验基准"}」为起点；改任一槽即写成这份定义的政策。
+                              </p>
+                            )}
+                            <ExitPolicySlotEditor
+                              slots={vocabulary.exitPolicySlots ?? []}
+                              recognitions={(exitSlotRecognition.data?.slots ?? []) as readonly ExitPolicySlotRecognition[]}
+                              policy={effectiveExitPolicy}
+                              domId="preset-exit-policy"
+                              startOptions={(vocabulary.presets ?? [])
+                                .filter(item => item.slot === "EXIT_POLICY")
+                                .map(item => ({ presetId: item.presetId, displayName: item.displayName }))}
+                              startPresetId={exitPolicySelection?.presetId ?? null}
+                              onStartChange={onExitStartPresetChange}
+                              onResetToBase={onExitResetToBase}
+                              baseLabel={vocabulary.exitPolicyBaseLabel}
+                              disabled={applyExitSlot.isPending}
+                              busy={exitSlotRecognition.isFetching || applyExitSlot.isPending}
+                              onApply={onExitSlotApply}
+                            />
+                          </>
+                        )}
+                      </div>
+                    ),
+                    position: (
+                      <PresetEditor
+                        domId="preset-position"
+                        title="仓位与持仓数（POSITION）"
+                        hint="每笔买多少 / 最多同时持有几只 —— 选中后填进第 ⑤ 段的字段"
+                        presets={(vocabulary.presets ?? []).filter(item => item.slot === "POSITION")}
+                        value={positionSelection}
+                        onChange={onPositionSelectionChange}
+                        materialized={positionMaterialized}
+                        materializing={materializePreset.isPending}
+                      />
+                    ),
+                    cost: (
+                      <PresetEditor
+                        domId="preset-cost"
+                        title="成本与成交（COST）"
+                        hint="初始资金 / 六项费率 / 成交时点与价格 —— 选中后填进第 ⑥ 段的字段"
+                        presets={(vocabulary.presets ?? []).filter(item => item.slot === "COST")}
+                        value={costSelection}
+                        onChange={onCostSelectionChange}
+                        materialized={costMaterialized}
+                        materializing={materializePreset.isPending}
+                      />
+                    ),
+                  }
+                }
+                trustPanel={
+                  <DefinitionTrustStatus
+                    kind={definitionTrustKind}
+                    basisLabel={loadedTarget === null ? null : `${loadedTarget.strategyId}@${loadedTarget.version}`}
+                    changedParams={changedDefinitionParams}
+                    dirty={dirty}
+                    onRestoreDefaults={restorePresetDefaults}
+                  />
+                }
               />
             </TabsContent>
 
             <TabsContent value="run" className="pt-4">
               <RunTab vm={vm} />
+            </TabsContent>
+
+            <TabsContent value="evaluation" className="pt-4" data-tab-content="evaluation">
+              {loadedTarget === null ? (
+                <p className="rounded-lg border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
+                  尚未保存 —— 留档以 (strategyId, version) 为坐标，保存后才可查询。
+                </p>
+              ) : (
+                <StrategyFinalEvaluationTab
+                  strategyId={loadedTarget.strategyId}
+                  strategyVersion={loadedTarget.version}
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="paper" className="pt-4" data-tab-content="paper">
+              {loadedTarget === null ? (
+                <p className="rounded-lg border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
+                  尚未保存 —— 留档以 (strategyId, version) 为坐标，保存后才可查询。
+                </p>
+              ) : (
+                <StrategyPaperTradingTab
+                  strategyId={loadedTarget.strategyId}
+                  strategyVersion={loadedTarget.version}
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="versions" className="pt-4">
@@ -854,9 +1663,28 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
                 </div>
               )}
             </TabsContent>
+
+            {/* FLOW-001 §3 ⑤→⑥ 交接缺口：统一状态标识（只读台账，不给结论、不排名） */}
+            <TabsContent value="validation" className="pt-4" data-tab-content="validation">
+              <StrategyValidationStatus strategyId={vm.strategyId} strategyVersion={vm.version} />
+            </TabsContent>
           </Tabs>
         )
       )}
+
+      <ConfirmDialog
+        open={pendingVersionSwitch !== null}
+        onOpenChange={(open) => { if (!open) setPendingVersionSwitch(null); }}
+        title="切换版本会丢弃未保存的修改"
+        description="当前草稿有未保存的修改。切换版本后这些修改会丢失，且无法撤销。"
+        confirmLabel="丢弃并切换"
+        tone="danger"
+        onConfirm={() => {
+          const next = pendingVersionSwitch;
+          setPendingVersionSwitch(null);
+          if (next !== null) goToVersion(next);
+        }}
+      />
     </div>
   );
 }

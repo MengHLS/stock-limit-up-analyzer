@@ -1,4 +1,5 @@
 import { MaxConnectionBoardTrendChart } from "@/components/MaxConnectionBoardTrendChart";
+import { ResearchEntryLink, ResearchFlowNav } from "@/components/research";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -657,8 +658,9 @@ function BoardLadderSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm font-medium">选择日期：</label>
+          <label htmlFor="dashboard-date-select" className="text-sm font-medium">选择日期：</label>
           <select
+            id="dashboard-date-select"
             value={selectedDate}
             onChange={(event) => setSelectedDate(event.target.value)}
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background [&>option]:bg-popover [&>option]:text-popover-foreground"
@@ -920,7 +922,11 @@ export default function DashboardPage() {
       <div className="mb-4 flex items-center gap-2">
         <TrendingUp className="h-5 w-5" />
         <h1 className="text-lg font-semibold">行情总览</h1>
+        <ResearchEntryLink className="ml-auto" />
       </div>
+
+      {/* 研究闭环六阶段入口（HOME_ENTRY）：纯导航，不取数；首页本身属于「② 观察」 */}
+      <ResearchFlowNav current="OBSERVE" className="mb-4" />
 
       {/*
         各区块**各自持有 query、各自渲染骨架屏**：没有任何一个数据源可以堵住整页。

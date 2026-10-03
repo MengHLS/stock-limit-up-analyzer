@@ -27,3 +27,4 @@ export * from "./validate";
 export * from "./serialize";
 export * from "./compare";
 export * from "./map";
+export * from "./template";

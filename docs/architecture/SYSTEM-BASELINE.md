@@ -1,8 +1,9 @@
 # SYSTEM-BASELINE — 全局架构基线
 
-> **Baseline Version：`v2.0.0`**（**major** —— round-2 全量审计，触发 `GLOBAL AUDIT REQUIRED` 第 4 条（核心数据流变化：判定日 `decisionOffsetDays` 贯穿 Dataset→Run→Experiment→Analysis）+ 第 7 条（核心 Contract 变化：4 份新 shared 契约 + 新增 `shared/patternSemantics.ts`）+ 第 1 条（Domain 新增：`searchRobustness` / `oosValidation` / `walkForward`）。历史：`v1.4.0` = WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
+> **Baseline Version：`v2.1.0`**（**minor** —— `SCOPE-002` 策略创作工作台：新增 `server/research/strategyAuthoring/**`（8 模块）· `strategyDomain.authoring.*`（5 端点，**不新增顶层 key**）· 8 份 shared 契约 · 1 个前端通用预设编辑器 · **S7** 策略留档（评估 / 模拟盘）按版本坐标通用化（`researchRun.getStrategyVersion*` 2 端点，原专项端点收敛为薄封装）；**0 表 / 0 列 / 0 migration**；不改 simulator / backtest / evaluation / paper trading ⇒ 不触发 `GLOBAL AUDIT REQUIRED`。详见 `CHANGE-AUDIT.md` 2026-10-03 `SCOPE-002` 与 `CONTRACT-MAP.md` C-98）
+> **上一版 Baseline：`v2.0.0`**（**major** —— round-2 全量审计，触发 `GLOBAL AUDIT REQUIRED` 第 4 条（核心数据流变化：判定日 `decisionOffsetDays` 贯穿 Dataset→Run→Experiment→Analysis）+ 第 7 条（核心 Contract 变化：4 份新 shared 契约 + 新增 `shared/patternSemantics.ts`）+ 第 1 条（Domain 新增：`searchRobustness` / `oosValidation` / `walkForward`）。历史：`v1.4.0` = WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
 > **Last Audit Time：`2026-09-19`**（SYSTEM-BASELINE-001，一次性全局审计）
-> **Last Change Time：`2026-09-19`**（见 `CHANGE-AUDIT.md`）
+> **Last Change Time：`2026-10-03`**（`SCOPE-002` 策略创作工作台 · 见 `CHANGE-AUDIT.md`）
 > **审计方式**：真实代码 + 真实库（只读探针）+ 既有测试基线；**代码变更 = 0 / DB 变更 = 0 / migration = 0**。
 >
 > ⚠️ **两个必须知道的前提（本轮实测）**

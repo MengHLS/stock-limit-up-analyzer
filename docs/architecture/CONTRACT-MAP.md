@@ -301,3 +301,63 @@
    并**断言豁免面恰为 `["../oosValidation/types"]`**（豁免面扩大即测试变红）。
 6. 🔴 **冻结坐标六项**：创建时冻结 `strategyFingerprint` / `datasetVersionId` / `windowSchedule` /
    `selectionPolicy` / `engineVersion` / `metricsVersion`；运行期任一不一致 ⇒ **FAIL LOUDLY**，**不自动修复**。
+
+---
+
+## C-97 PD-03 增量：候选列表只读契约 `strategyDomain.strategyCandidate.list`（2026-10-03）
+
+| 项 | 内容 |
+|---|---|
+| **定义位置** | `server/research/strategyCandidate/router.ts`（`candidateListInput` / `candidateListRowSchema`，zod + TS 同源由 `.output()` 收口） |
+| **producer** | `StrategyCandidateService.list(filter)` → `ResearchStrategyCandidateRepository.list(filter)` |
+| **consumer** | 前端候选列表页 `client/src/pages/candidates/CandidateList.tsx`（路由 `/candidates`） |
+| **versioned** | ❌ |
+| **持久化** | 读 `research_strategy_candidate`（**零 DDL / 零 migration**） |
+| **nullable** | `sourceDatasetVersionId` / `strategyDefinitionId` / `createdAt` / `updatedAt` 允许 `null` |
+| **Breaking** | **否**：新增只读端点；既有 `get` / `update` / `transition` / `promote` / `getVersionProvenance` 签名与行为零改动 |
+| **状态** | READY（FACT） |
+
+### 契约纪律（本契约特有）
+
+1. 🔴 **只读**：本端点不写库、不改状态；写操作仍只经 `update` / `transition` / `promote`。
+2. 🔴 **不得出现旧链遗留列**：`experimentId` / `conclusionId`（旧 Research 链，已随 `RESEARCH-EXPERIMENT-003` 退役）
+   **禁止**进入 input 契约；仓储层虽保留这两个 key，但新 API 不得把退役结构固化下来。
+3. 🔴 **轻量行**：输出恰好为 `id` / `name` / `status` / `sourceDatasetVersionId` / `strategyDefinitionId` /
+   `createdAt` / `updatedAt` / `hasSourceDatasetDivergence` —— **不含** entry/filter/exit/risk/parameterSpace 五套 JSON。
+4. 🔴 **无 N+1**：列表**不解析** Dataset 版本（那是 `get` 的职责）；`hasSourceDatasetDivergence` 仅由快照列
+   `sourceDatasetDivergenceReason` 派生。
+5. 🔴 **来源 ≠ 执行绑定**：`sourceDatasetVersionId` 是「基于哪份数据研究出来的」，不是 Strategy 的执行绑定坐标；
+   两者不同的候选必须在 UI 上可见（分歧标记）。
+6. **状态闭集单一来源** = `server/research/vocabulary.ts#RESEARCH_CANDIDATE_STATUSES`（router 不另抄一份）。
+
+---
+
+## C-98 SCOPE-002 增量：策略创作工作台契约 `strategyDomain.authoring.*`（2026-10-03）
+
+| 项 | 内容 |
+|---|---|
+| **契约** | `strategyDomain.authoring.{getVocabulary, getBlankDraft, materializePreset, previewDocument, saveDraft}` |
+| **定义位置** | `server/research/strategyAuthoring/router.ts`（挂载于 `server/strategyDomainRouter.ts`） |
+| **共享 schema** | `shared/researchContracts.ts`：`strategyAuthoringSlotSchema` · `strategyPresetParameterValueSchema` · `strategyAuthoringBlankInputSchema` · `materializeStrategyPresetInputSchema` · `strategyAuthoringDraftOriginSchema` · `saveStrategyAuthoringDraftInputSchema` · `previewStrategyAuthoringDocumentInputSchema` |
+| **语义** | 只做「把用户选择变成 canonical 文档」的**辅助**：词表（预设 / recipe / runner 状态 / strategyType / lifecycle）· 空白草稿骨架 · 预设物化（RFC 6901 JSON Pointer + 既有校验器）· 保存前预检 · 保存 Draft（复用 `StrategyService.save`） |
+| **权限** | 只读 / 物化 / 预检 = `publicProcedure`；`saveDraft` = `adminProcedure`（与 `strategy.save` 同口径） |
+| **唯一权威复用** | `exitPolicyExperiments#STOP_POLICY_EXPERIMENTS`（EXIT_POLICY 基座）· `recipeRegistry#projectStrategyRecipe`（RECIPE 投影**唯一实现**）· `stateFactorRegistry#RUNNER_STATE_DEFINITIONS` · `strategySchema`（校验）· `lifecycle/types`（八态） |
+| **不变量** | I-5 StrategyVersion 不可变（`saveDraft` 不覆盖既有版本）· I-6 Strategy Core 唯一权威（零新引擎）· **DB 变更 = 0** |
+| **consumer** | `client/src/pages/StrategyDetail.tsx`（新建/编辑工作台）· `client/src/components/strategy/PresetEditor.tsx` · `tests/server/research/strategyAuthoring/equivalence3570001.test.ts`（验收） |
+| **状态** | **IMPLEMENTED**（`check` 0 错；`strategyAuthoring` 66/66；3570001 等价 diff `equal:true`） |
+
+---
+
+## C-99 SCOPE-002 S7 增量：按策略版本坐标读回留档（通用评估 / 模拟盘端点）
+
+| 项 | 内容 |
+|---|---|
+| **契约** | `researchRun.getStrategyVersionEvaluation` · `researchRun.getStrategyVersionPaperTrading` |
+| **定义位置** | `server/researchRunRouter.ts`；选择逻辑在 `server/closedLoopBacktestRun/strategyVersionArtifacts.ts`（纯选择器 + 只读加载） |
+| **共享 schema** | `strategyVersionCoordinatesInputSchema`（`{ strategyId, strategyVersion }`） |
+| **语义** | 按 `(strategyId, strategyVersion)` **原样直读** `closed_loop_backtest_run.resultJson` 的扩展载荷：评估取 `result.evaluationDetail`（并补读同 `experimentId` 的对照组作 baseline）；模拟盘取 `result.paperTradingState` / `paperTradingForwardState`。查不到 ⇒ `null`（**不伪造**） |
+| **收敛** | 原专项端点 `getFinalEvaluation` / `getPaperTrading3570001` **变成薄封装**（固定 3570001 坐标），返回形状逐字段不变 ⇒ 专项页无需改动 |
+| **读取路径** | 新增 `listClosedLoopBacktestRunRawResults({ strategyId?, strategyVersion?, experimentId?, runIdPrefix?, limit? })`（**不经旧 reconcile**，与 `getClosedLoopBacktestRunRawResult` 同一纪律） |
+| **consumer** | `client/src/components/strategy/StrategyVersionArtifactsTabs.tsx`（策略详情 Tab）· `client/src/pages/{StrategyFinalEvaluation,PaperTrading3570001}.tsx`（改走通用端点） |
+| **DB 变更** | **0 表 / 0 列 / 0 migration** |
+| **状态** | **IMPLEMENTED**（`check` 0 错；通用端点 vs 专项端点真实库比对一致；浏览器 Tab 实测通过） |

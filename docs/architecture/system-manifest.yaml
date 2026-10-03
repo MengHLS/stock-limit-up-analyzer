@@ -735,3 +735,53 @@ roundTwo:
     - "server/observability/** 新增（PARAM_PROFILE=1 性能剖析，生产已用、无专属测试）"
     - ".workbuddy/ 已 untrack + gitignore（禁止 git add -f）⇒ 项目记忆不再随仓库走"
     - "shared/sectorHeatOrder.ts 升级为四键全序（修「梯队 vs 热力图排序对不上」，10 个测试锁定）"
+
+# ---------------------------------------------------------------------------
+# SCOPE-002（2026-10-03）—— 策略创作工作台（纯前端构建 Strategy）
+# ---------------------------------------------------------------------------
+strategyAuthoring:
+  baselineImpact: minor
+  module: server/research/strategyAuthoring/**
+  files:
+    - server/research/strategyAuthoring/diff.ts
+    - server/research/strategyAuthoring/jsonPointer.ts
+    - server/research/strategyAuthoring/presetRegistry.ts
+    - server/research/strategyAuthoring/vocabulary.ts
+    - server/research/strategyAuthoring/materialize.ts
+    - server/research/strategyAuthoring/blankDraft.ts
+    - server/research/strategyAuthoring/datasetBinding.ts
+    - server/research/strategyAuthoring/router.ts
+    - client/src/components/strategy/PresetEditor.tsx
+    - client/src/components/strategy/StrategyVersionArtifactsTabs.tsx
+    - server/closedLoopBacktestRun/strategyVersionArtifacts.ts
+  endpoints:
+    - strategyDomain.authoring.getVocabulary
+    - strategyDomain.authoring.getBlankDraft
+    - strategyDomain.authoring.materializePreset
+    - strategyDomain.authoring.previewDocument
+    - strategyDomain.authoring.saveDraft
+    - researchRun.getStrategyVersionEvaluation
+    - researchRun.getStrategyVersionPaperTrading
+  sharedContracts:
+    - strategyAuthoringSlotSchema
+    - strategyPresetParameterValueSchema
+    - strategyAuthoringBlankInputSchema
+    - materializeStrategyPresetInputSchema
+    - strategyAuthoringDraftOriginSchema
+    - saveStrategyAuthoringDraftInputSchema
+    - previewStrategyAuthoringDocumentInputSchema
+    - strategyVersionCoordinatesInputSchema
+  dbChange: none
+  executionPathChange: none
+  acceptance:
+    - "3570001 等价锚点：预设物化 policy == golden policy（逐字段）"
+    - "diffAgainstVersion(空白草稿 + 预设 + 用户填自由段) == equal:true"
+    - "strategyAuthoring 测试 66/66；client strategy 测试 115/115；定向回归 326/326"
+  s7Convergence:
+    endpoints:
+      - researchRun.getStrategyVersionEvaluation
+      - researchRun.getStrategyVersionPaperTrading
+    thinWrappers:
+      - researchRun.getFinalEvaluation
+      - researchRun.getPaperTrading3570001
+    evidence: "通用端点 vs 专项端点真实库比对逐字段一致（evaluationDetail 129.6860% / 407 日 / equity 199036.53 / WAITING_FOR_NEW_DATA）；缺坐标 ⇒ null；浏览器两个 Tab 渲染通过"

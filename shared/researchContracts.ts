@@ -620,6 +620,116 @@ export type CreateStrategyFromFamilyInputDto = z.infer<
   typeof createStrategyFromFamilyInputSchema
 >;
 
+// ---------------------------------------------------------------------------
+// SCOPE-002 — 策略创作工作台（strategyDomain.authoring.*）
+// ---------------------------------------------------------------------------
+
+/** 作者面槽位（与 `server/research/strategyAuthoring/presetRegistry.ts` 的枚举逐字一致）。 */
+export const strategyAuthoringSlotSchema = z.enum([
+  "RECIPE",
+  "EXIT_POLICY",
+  // ③ 仓位 / ④ 成本与成交：**字段补丁**预设（写草稿字段，不是 canonical payload）
+  "POSITION",
+  "COST",
+  "EXIT_BASE",
+  "STOP",
+  "TAKE_PROFIT",
+  "TIME_EXIT",
+  "STRONG_HOLD",
+  "CAPITAL_RECYCLE",
+  "RUNNER_BRIDGE",
+]);
+export type StrategyAuthoringSlotDto = z.infer<typeof strategyAuthoringSlotSchema>;
+
+export const strategyPresetParameterValueSchema = z.union([z.number(), z.boolean(), z.string()]);
+export type StrategyPresetParameterValueDto = z.infer<typeof strategyPresetParameterValueSchema>;
+
+/**
+ * FE-PLAN-004 —— 退出政策的 **9 个规则槽**（传输层字面量）。
+ *
+ * 🔴 与 `server/research/strategyAuthoring/exitPolicySlots.ts#EXIT_POLICY_SLOT_IDS`
+ *    **逐字同序**，由 `tests/server/research/strategyAuthoring/exitPolicySlotsContract.test.ts`
+ *    断言相等 —— 与生命周期状态同款的"防静默漂移"手法。
+ */
+export const exitPolicySlotIdSchema = z.enum([
+  "ANCHOR",
+  "TAKE_PROFIT",
+  "TIME_EXIT",
+  "CONFIRMATION",
+  "ESCALATION",
+  "SCHEDULE",
+  "REDUCTION",
+  "STRONG_HOLD",
+  "RESEARCH",
+]);
+export type ExitPolicySlotIdDto = z.infer<typeof exitPolicySlotIdSchema>;
+
+/**
+ * 应用一个退出政策槽的入参。
+ *
+ * 🔴 `policy` 用 `z.unknown()` **透传**：它的语义权威是服务端的
+ *    `ExitPolicyDefinition` 校验器，shared 层复制一份 schema 只会造成双份口径漂移
+ *    （与 StrategyDocument 的处理一致）。服务端在 `applyExitPolicySlot` 里复核。
+ */
+export const applyExitPolicySlotInputSchema = z.object({
+  policy: z.unknown(),
+  slotId: exitPolicySlotIdSchema,
+  optionId: z.string().min(1, "optionId 必填"),
+  parameters: z.record(z.string(), strategyPresetParameterValueSchema),
+});
+export type ApplyExitPolicySlotInputDto = z.infer<typeof applyExitPolicySlotInputSchema>;
+
+/** A2 `getBlankDraft` 输入：可选绑定 Dataset Version（不传 = 未绑定骨架）。 */
+export const strategyAuthoringBlankInputSchema = z.object({
+  datasetVersionId: z.number().int().positive().optional(),
+});
+export type StrategyAuthoringBlankInputDto = z.infer<typeof strategyAuthoringBlankInputSchema>;
+
+/** A3 `materializePreset` 输入。 */
+export const materializeStrategyPresetInputSchema = z.object({
+  slot: strategyAuthoringSlotSchema,
+  presetId: z.string().min(1, "presetId 必填"),
+  parameters: z.record(z.string(), strategyPresetParameterValueSchema),
+});
+export type MaterializeStrategyPresetInputDto = z.infer<
+  typeof materializeStrategyPresetInputSchema
+>;
+
+/**
+ * A5 `saveDraft` 输入。
+ *
+ * `origin` 只做**审计**：记录本稿由哪条路径产生、用过哪些预设（含预设版本，裁定 Q5）。
+ * 🔴 它**不进 `definition`**，因此不影响策略指纹。
+ */
+export const strategyAuthoringDraftOriginSchema = z.object({
+  kind: z.literal("BLANK_CANONICAL"),
+  presetRefs: z.array(z.object({
+    slot: strategyAuthoringSlotSchema,
+    presetId: z.string().min(1),
+    presetVersion: z.string().min(1),
+    parameters: z.record(z.string(), strategyPresetParameterValueSchema),
+  })),
+});
+export type StrategyAuthoringDraftOriginDto = z.infer<
+  typeof strategyAuthoringDraftOriginSchema
+>;
+
+export const saveStrategyAuthoringDraftInputSchema = z.object({
+  document: strategyDocumentSchema,
+  origin: strategyAuthoringDraftOriginSchema,
+});
+export type SaveStrategyAuthoringDraftInputDto = z.infer<
+  typeof saveStrategyAuthoringDraftInputSchema
+>;
+
+/** A4 `previewDocument` 输入（只做校验与缺口展示，不落库）。 */
+export const previewStrategyAuthoringDocumentInputSchema = z.object({
+  document: strategyDocumentSchema,
+});
+export type PreviewStrategyAuthoringDocumentInputDto = z.infer<
+  typeof previewStrategyAuthoringDocumentInputSchema
+>;
+
 /** 按 (strategyId, version) 加载指定版本。 */
 export const strategyLoadVersionInputSchema = z.object({
   strategyId: z.string().min(1, "strategyId 必填"),
@@ -1627,6 +1737,19 @@ export type ClosedLoopBacktestRunRecordDto = z.infer<
 >;
 
 /** 留档详情：在条目之上带完整运行结果（`result` 为 null = 本次未留完整结果）。 */
+/**
+ * SCOPE-002 S7 —— 「按策略版本坐标读回评估 / 模拟盘留档」的通用入参。
+ *
+ * 与写死的 runId 专项端点相对：任何策略版本都可查自己那一条留档（查不到即 null）。
+ */
+export const strategyVersionCoordinatesInputSchema = z.object({
+  strategyId: z.string().min(1, "strategyId 必填"),
+  strategyVersion: z.string().min(1, "strategyVersion 必填"),
+});
+export type StrategyVersionCoordinatesInputDto = z.infer<
+  typeof strategyVersionCoordinatesInputSchema
+>;
+
 export const closedLoopBacktestRunDetailSchema =
   closedLoopBacktestRunRecordSchema.extend({
     result: closedLoopRunResultSchema.nullable(),

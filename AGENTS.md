@@ -184,14 +184,28 @@ node scripts/checkEolDrift.mjs --strict
 
 | Skill | 何时使用 |
 |---|---|
+| [`.agents/orchestrator/SKILL.md`](.agents/orchestrator/SKILL.md) | Goal 驱动跨阶段编排：读取 `.agent/task-state.yaml` → 建立 Pipeline → 判断 READY → 按专业 Skill 规则执行 → 验证 → 更新状态 → 连续推进（默认 SAFE_PIPELINE） |
 | [`.agents/architecture/SKILL.md`](.agents/architecture/SKILL.md) | 分析模块 / 调用关系 / 依赖 / legacy / 最小重构边界（**默认只分析不改码**） |
 | [`.agents/refactoring/SKILL.md`](.agents/refactoring/SKILL.md) | 在已确定 Scope 内执行重构（Baseline → Refactor → Test → Verify） |
 | [`.agents/verification/SKILL.md`](.agents/verification/SKILL.md) | 判断重构是否保持原有行为（Before vs After） |
 | [`.agents/database/SKILL.md`](.agents/database/SKILL.md) | schema / migration / SQL 检查与变更影响评估（**默认只读**） |
 | [`.agents/strategy/SKILL.md`](.agents/strategy/SKILL.md) | Strategy Core / RuleGraph / 参数角色 / 版本化演进 |
-| [`.agents/research/SKILL.md`](.agents/research/SKILL.md) | Dataset → Experiment → Run → Finding → Conclusion → Candidate → Strategy 演进 |
+| [`.agents/research/SKILL.md`](.agents/research/SKILL.md) | Dataset → Experiment → Run → 实验结论（自定义 payload）→ Candidate → Strategy 演进（Finding / Conclusion **不属本平台概念**，见 PD-02） |
+| [`.agents/product/SKILL.md`](.agents/product/SKILL.md) | 产品需求 / 用户目标 / 用户流程 / 功能边界 / 验收标准（**不直接改代码、不决定架构**） |
+| [`.agents/frontend/SKILL.md`](.agents/frontend/SKILL.md) | 页面信息架构 / 交互流程 / 组件结构 / 状态管理 / 数据展示与前端实现 |
+
+职责边界：
+
+- **Product Skill** 负责产品需求与用户流程。
+- **Frontend Skill** 负责前端信息架构、交互和实现。
+- **Product Agent 不直接决定代码架构。**
+- **Frontend Agent 不直接改变业务语义。**
+- **Orchestrator Skill 只负责识别阶段、选择规则、检查前置条件、判断继续 / 停止**；Skill 是工作规则、Codex 是执行主体，Orchestrator 不把 Skill 当工具函数调用，也不代替专业 Skill 做业务、架构、策略、研究或数据库决定。
 
 推荐流水线：**Architecture Agent → Refactoring Agent → Verification Agent**。
+产品向（新增功能）：**Product Agent → Frontend Agent →（必要时）Architecture Agent → Verification Agent**。
+完整目标默认由 **Orchestrator SAFE_PIPELINE** 串联上述流水线；命中高风险变化时停在 NEEDS_HUMAN。
+Goal 驱动：完整目标建议用 /goal <objective> 激活；Orchestrator 按 .agent/task-state.yaml 维护当前 Goal 阶段状态，按 PRODUCT / RESEARCH / STRATEGY / ARCHITECTURE / FRONTEND / BACKEND / INTEGRATION / REFACTORING / VERIFICATION / FINAL 标准阶段推进（DATABASE 为横切只读 Gate），阶段状态 PENDING / READY / IN_PROGRESS / COMPLETE / BLOCKED / NEEDS_HUMAN；详细协议见 [.agents/orchestrator/SKILL.md](.agents/orchestrator/SKILL.md)。
 
 ---
 

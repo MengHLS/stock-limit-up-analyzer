@@ -1,4 +1,5 @@
 
+import * as React from "react";
 import { Loader2 } from "lucide-react";
 import {
   AlertDialog,
@@ -37,8 +38,14 @@ export function ConfirmDialog({
   pending = false,
   onConfirm,
 }: ConfirmDialogProps) {
+  /**
+   * 🔴 焦点还原（键盘可达性）：受控且无 `AlertDialogTrigger` 时 Radix 不还原焦点。
+   *    共享实现与根因见 `lib/dialogFocusRestore.ts`，由 `components/ui/alert-dialog.tsx` 统一兜底。
+   */
+
   return (
     <AlertDialog open={open} onOpenChange={(next) => (pending ? undefined : onOpenChange(next))}>
+      {/* 焦点还原由 `components/ui/alert-dialog.tsx` 统一兜底（见 lib/dialogFocusRestore），此处不重复实现 */}
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>

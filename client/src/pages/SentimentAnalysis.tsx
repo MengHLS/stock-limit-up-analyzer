@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MaxConnectionBoardTrendChart } from "@/components/MaxConnectionBoardTrendChart";
+import { ResearchEntryLink } from "@/components/research";
 import { formatChineseDate as formatDate } from "@/lib/displayFormat";
 import { trpc } from "@/lib/trpc";
 import { Activity, CalendarDays, ChevronDown, ChevronUp, Crown, Flame, GitBranch, Loader2, TrendingUp } from "lucide-react";
@@ -45,6 +46,7 @@ export default function SentimentAnalysisPage() {
       <div className="mb-6 flex items-center gap-2">
         <Activity className="h-5 w-5 text-orange-600" />
         <h1 className="text-lg font-semibold text-slate-800">情绪分析</h1>
+        <ResearchEntryLink className="ml-auto" />
         <Button
           variant="outline"
           size="sm"

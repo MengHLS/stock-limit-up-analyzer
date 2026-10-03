@@ -202,8 +202,47 @@ export interface PromoteCandidateResult {
   idempotent: boolean;
 }
 
+/**
+ * 候选列表过滤（PD-03）。
+ *
+ * 🔴 **只允许非遗留维度**：`experimentId` / `conclusionId`（旧 Research 链遗留列，该链已随
+ *    `RESEARCH-EXPERIMENT-003` 整体退役）**不得**出现在此过滤器里 —— 仓储层虽保留这两个键，
+ *    但新端点不得把它们固化成新 API 的一部分。
+ */
+export interface StrategyCandidateListFilter {
+  readonly status?: ResearchCandidateStatus;
+  /**
+   * 研究**来源** Dataset Version 坐标（`dataset_version.id`）。
+   * ⚠️ 这是「基于哪份数据研究出来的」，**不是**未来 Strategy 的执行绑定坐标
+   *    （后者见 `strategy_versions.datasetVersionId`，两者允许不同）。
+   */
+  readonly sourceDatasetVersionId?: number;
+  readonly limit?: number;
+  readonly order?: "asc" | "desc";
+}
+
+/** 候选列表行（**轻量**）：不含三套规则 JSON，也不含旧链遗留列。 */
+export interface StrategyCandidateListRow {
+  readonly id: number;
+  readonly name: string;
+  readonly status: ResearchCandidateStatus;
+  readonly sourceDatasetVersionId: number | null;
+  readonly strategyDefinitionId: string | null;
+  readonly createdAt: string | null;
+  readonly updatedAt: string | null;
+  /** 来源 Dataset ≠ 执行 Dataset 时有值 ⇒ 列表必须显示分歧标记（PD-03 规则 4）。 */
+  readonly hasSourceDatasetDivergence: boolean;
+}
+
 export interface StrategyCandidateService {
   get(candidateId: number): Promise<StrategyCandidateView>;
+  /**
+   * 只读列表（PD-03 / `docs/architecture/SCOPE-001-candidate-list-endpoint.md`）。
+   *
+   * 🔴 **只读**：不写库、不改状态；写操作仍只经 `update` / `transition` / `promote`。
+   * 🔴 **无 N+1**：不解析 Dataset 版本（`buildView` 才做）；分歧标记仅由快照列派生。
+   */
+  list(filter?: StrategyCandidateListFilter): Promise<StrategyCandidateListRow[]>;
   /** 普通编辑：**只**改研究草图字段（闭集白名单）。 */
   update(candidateId: number, input: StrategyCandidateUpdateInput): Promise<ResearchStrategyCandidate>;
   /**
@@ -385,6 +424,33 @@ export interface StrategyCandidateServiceDeps {
 // 实现
 // ---------------------------------------------------------------------------
 
+/**
+ * 候选行 → 列表行（PD-03）。
+ *
+ * 刻意**不解析** Dataset 版本（`buildView` 才做，逐行解析会退化成 N+1）；
+ * 分歧标记直接由快照列 `sourceDatasetDivergenceReason` 派生（有值即分歧）。
+ */
+function toListRow(candidate: ResearchStrategyCandidate): StrategyCandidateListRow {
+  if (candidate.id === undefined) {
+    // 仓储返回的行必带主键；缺失说明上游契约被破坏 ⇒ 响亮失败，不静默跳过。
+    throw new StrategyCandidateError(
+      STRATEGY_CANDIDATE_ERROR.INVALID_INPUT,
+      "候选行缺少主键（id），无法进入列表。",
+    );
+  }
+  const divergence = candidate.sourceDatasetDivergenceReason;
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    status: candidate.status,
+    sourceDatasetVersionId: candidate.sourceDatasetVersionId ?? null,
+    strategyDefinitionId: candidate.strategyDefinitionId ?? null,
+    createdAt: candidate.createdAt ?? null,
+    updatedAt: candidate.updatedAt ?? null,
+    hasSourceDatasetDivergence: typeof divergence === "string" && divergence.trim() !== "",
+  };
+}
+
 function isPositiveInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
@@ -556,6 +622,22 @@ export function createStrategyCandidateService(
   return {
     async get(candidateId) {
       return buildView(await requireCandidate(candidateId));
+    },
+
+    /**
+     * PD-03 只读列表：直接复用仓储 `list(filter)`（能力早已存在），只做行投影。
+     * 未提供的过滤键**不传**（与仓储的「缺省不截断 / 缺省 asc」语义一致，不在此处再发明默认值）。
+     */
+    async list(filter) {
+      const rows = await candidatesRepo.list({
+        ...(filter?.status === undefined ? {} : { status: filter.status }),
+        ...(filter?.sourceDatasetVersionId === undefined
+          ? {}
+          : { sourceDatasetVersionId: filter.sourceDatasetVersionId }),
+        ...(filter?.limit === undefined ? {} : { limit: filter.limit }),
+        ...(filter?.order === undefined ? {} : { order: filter.order }),
+      });
+      return rows.map(toListRow);
     },
 
     async update(candidateId, input) {

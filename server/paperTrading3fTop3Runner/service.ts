@@ -8,6 +8,7 @@ import {
 } from "./forward";
 import { selectPaperTradingState } from "./selection";
 import type { PaperTrading3570001State } from "./run";
+import { createPaperForwardRunner } from "../paperTradingFramework";
 
 export const PAPER_FORWARD_3570001_BASELINE_RUN_ID = "paper-3570001-2025-01-01-2026-09-04";
 export const PAPER_FORWARD_3570001_BASELINE_LAST_DATE = "2026-09-04";
@@ -59,44 +60,48 @@ async function saveForwardState(state: PaperForwardState): Promise<void> {
  * 正式入口：推进「下一个可用交易日」。幂等（已处理的日期不会重复追加）；
  * 无新数据 ⇒ `WAITING_FOR_NEW_DATA` 且不产生任何新记录；失败 ⇒ 持久化 ERROR，不破坏既有账户。
  */
-/** 运维/开发入口：以历史回放为基线**重建**前向状态（账户从基线继续，不重置）。 */
-export async function resetForwardState(): Promise<PaperForwardState> {
-  // 历史回放留档行的**已知 id**（`paper-3570001-2025-01-01-2026-09-04`）。列表端点有 200 行上限，
-  // 不能用来可靠定位它；直接按 id 读取，避免「找不到就静默空账户起步」。
+/** 读取历史回放基线；缺失即响亮失败，拒绝从空账户起步。 */
+async function loadHistoricalBaseline(): Promise<PaperTrading3570001State> {
   const raw = await getClosedLoopBacktestRunRawResult(PAPER_FORWARD_3570001_HISTORICAL_RUN_ID);
   const historical = ((raw?.payload.paperTradingState ?? null) as PaperTrading3570001State | null);
-  if (historical === null) throw new Error("找不到历史回放基线（6000001）");
-  const state = await initForwardState({
+  if (historical === null) throw new Error("找不到历史回放基线（6000001），拒绝以空账户起步");
+  return historical;
+}
+
+/** 把历史回放账户/持仓/峰值转成前向 checkpoint。 */
+async function initializeFromHistoricalBaseline(): Promise<PaperForwardState> {
+  const historical = await loadHistoricalBaseline();
+  return initForwardState({
     baselineRunId: PAPER_FORWARD_3570001_BASELINE_RUN_ID,
+    // R6：整段重放的起点 —— 直接取历史回放的真实窗口起点（不是硬编码常量）。
+    baselineStartDate: historical.window.startDate,
     baselineLastProcessedDate: PAPER_FORWARD_3570001_BASELINE_LAST_DATE,
     latestDataDate: PAPER_FORWARD_3570001_BASELINE_LAST_DATE,
     strategyVersionId: 3570001, provenanceId: 660001, holdoutRunId: "RUN-20261002-BD1D7332",
-    baseline: { initialCapital: historical.initialCapital, maxPositions: historical.maxPositions, singlePositionRatio: historical.singlePositionRatio, account: historical.account, openPositions: historical.openPositions },
+    baseline: {
+      initialCapital: historical.initialCapital,
+      maxPositions: historical.maxPositions,
+      singlePositionRatio: historical.singlePositionRatio,
+      account: historical.account,
+      openPositions: historical.openPositions,
+    },
   });
-  await saveForwardState(state);
-  return state;
 }
+
+/** 通用 Forward 服务：加载/初始化/推进/保存与断点重建均复用同一框架。 */
+const forwardRunner = createPaperForwardRunner<PaperForwardState>({
+  load: loadForwardState,
+  initialize: initializeFromHistoricalBaseline,
+  advance: advanceForwardOnce,
+  save: saveForwardState,
+  reset: initializeFromHistoricalBaseline,
+});
+
+/** 运维/开发入口：以历史回放为基线重建前向状态（账户从基线继续，不重置）。 */
+export async function resetForwardState(): Promise<PaperForwardState> {
+  return forwardRunner.reset();
+}
+
 export async function runNextAvailableDay(): Promise<PaperForwardState> {
-  const existing = await loadForwardState();
-  let base = existing;
-  if (base === null) {
-    // 以历史回放（6000001）为基线：账户 / 持仓 / 峰值**从这里继续**。
-    const raw = await getClosedLoopBacktestRunRawResult(PAPER_FORWARD_3570001_HISTORICAL_RUN_ID);
-    const historical = ((raw?.payload.paperTradingState ?? null) as PaperTrading3570001State | null);
-    if (historical === null) throw new Error("找不到历史回放基线（6000001），拒绝以空账户起步");
-    base = await initForwardState({
-      baselineRunId: PAPER_FORWARD_3570001_BASELINE_RUN_ID,
-      baselineLastProcessedDate: PAPER_FORWARD_3570001_BASELINE_LAST_DATE,
-      latestDataDate: PAPER_FORWARD_3570001_BASELINE_LAST_DATE,
-      strategyVersionId: 3570001, provenanceId: 660001, holdoutRunId: "RUN-20261002-BD1D7332",
-      baseline: { initialCapital: historical.initialCapital, maxPositions: historical.maxPositions, singlePositionRatio: historical.singlePositionRatio, account: historical.account, openPositions: historical.openPositions },
-    });
-  }
-  const next = await advanceForwardOnce(base);
-  await saveForwardState(next);
-  return next;
+  return forwardRunner.runNextAvailableDay();
 }
-
-
-
-

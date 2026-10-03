@@ -63,12 +63,40 @@ export const RUNNER_HOLDING_BRIDGE_STATES = [
 ] as const;
 export type RunnerHoldingBridgeState = (typeof RUNNER_HOLDING_BRIDGE_STATES)[number];
 
-/** STRATEGY-HOLDING-BRIDGE-001：在第 5 个持有日收盘用 PIT 状态决定是否延长原时间退出。 */
+/** 已注册状态条件的显式引用；实现由状态注册表持有，不在 Schema 内复制执行代码。 */
+export interface RunnerStateConditionReference {
+  readonly stateId: string;
+  readonly version: string;
+  readonly parameters?: Readonly<Record<string, string | number | boolean>>;
+}
+
+/** Runner 状态判定上下文；固定为 PIT、只用入场日到决策日的可见信息。 */
+export interface RunnerEvaluationContextDefinition {
+  readonly decisionPoint: "CLOSE";
+  readonly historyFrom: "ENTRY";
+  readonly historyTo: "DECISION";
+  readonly requiredData: readonly string[];
+  readonly usesForwardData: false;
+}
+
+export const DEFAULT_RUNNER_EVALUATION_CONTEXT: RunnerEvaluationContextDefinition = Object.freeze({
+  decisionPoint: "CLOSE",
+  historyFrom: "ENTRY",
+  historyTo: "DECISION",
+  requiredData: Object.freeze(["OHLCV"]),
+  usesForwardData: false,
+});
+
+/** STRATEGY-HOLDING-BRIDGE-001：在指定持有日收盘用 PIT 状态决定是否延长原时间退出。 */
 export interface RunnerHoldingBridgePolicyDefinition {
   readonly kind: "PIT_RUNNER_HOLDING_BRIDGE";
-  readonly state: RunnerHoldingBridgeState;
-  readonly decisionHoldingDays: 5;
+  /** @deprecated 新策略使用 stateCondition；3570001 与历史版本继续使用。 */
+  readonly state?: RunnerHoldingBridgeState;
+  readonly stateCondition?: RunnerStateConditionReference;
+  /** 决策发生在入场后的第 N 个持有日收盘；3570001 = 5。 */
+  readonly decisionHoldingDays: number;
   readonly extendToHoldingDays: number;
+  readonly evaluationContext?: RunnerEvaluationContextDefinition;
 }
 
 /**
@@ -271,6 +299,74 @@ export function strongHoldPolicyErrors(
   return errors;
 }
 
+/** RunnerBridge 的单一校验入口 —— Strategy Schema / Simulator / Record 复核必须共用。 */
+export function runnerBridgePolicyErrors(
+  value: unknown,
+  path = "runnerBridge",
+): string[] {
+  if (!isRecord(value)) return [`${path} 必须是对象`];
+  const errors: string[] = [];
+  if (value.kind !== "PIT_RUNNER_HOLDING_BRIDGE") {
+    errors.push(`${path}.kind 必须是 PIT_RUNNER_HOLDING_BRIDGE`);
+  }
+  const hasState = value.state !== undefined && value.state !== null;
+  const hasStateCondition = value.stateCondition !== undefined && value.stateCondition !== null;
+  if (hasState === hasStateCondition) {
+    errors.push(`${path} 必须且只能声明 state 或 stateCondition 之一`);
+  }
+  if (hasState && !(RUNNER_HOLDING_BRIDGE_STATES as readonly unknown[]).includes(value.state)) {
+    errors.push(`${path}.state 非法`);
+  }
+  if (hasStateCondition) {
+    if (!isRecord(value.stateCondition)) {
+      errors.push(`${path}.stateCondition 必须是对象`);
+    } else {
+      const ref = value.stateCondition;
+      if (typeof ref.stateId !== "string" || ref.stateId.trim() === "") {
+        errors.push(`${path}.stateCondition.stateId 必须是非空字符串`);
+      }
+      if (typeof ref.version !== "string" || ref.version.trim() === "") {
+        errors.push(`${path}.stateCondition.version 必须是非空字符串`);
+      }
+      if (ref.parameters !== undefined && ref.parameters !== null) {
+        if (!isRecord(ref.parameters)) {
+          errors.push(`${path}.stateCondition.parameters 必须是标量对象`);
+        } else {
+          for (const [key, parameter] of Object.entries(ref.parameters)) {
+            if (typeof parameter !== "string" && typeof parameter !== "boolean" && !finite(parameter)) {
+              errors.push(`${path}.stateCondition.parameters.${key} 必须是字符串 / 布尔 / 有限数字`);
+            }
+          }
+        }
+      }
+    }
+  }
+  const decisionHoldingDays = value.decisionHoldingDays;
+  if (!Number.isInteger(decisionHoldingDays) || (decisionHoldingDays as number) <= 0) {
+    errors.push(`${path}.decisionHoldingDays 必须是正整数`);
+  }
+  const extendToHoldingDays = value.extendToHoldingDays;
+  if (!Number.isInteger(extendToHoldingDays) || !Number.isInteger(decisionHoldingDays) || (extendToHoldingDays as number) <= (decisionHoldingDays as number)) {
+    errors.push(`${path}.extendToHoldingDays 必须是大于 decisionHoldingDays 的整数`);
+  }
+  if (value.evaluationContext !== undefined && value.evaluationContext !== null) {
+    if (!isRecord(value.evaluationContext)) {
+      errors.push(`${path}.evaluationContext 必须是对象`);
+    } else {
+      const context = value.evaluationContext;
+      if (context.decisionPoint !== "CLOSE") errors.push(`${path}.evaluationContext.decisionPoint 目前必须是 CLOSE`);
+      if (context.historyFrom !== "ENTRY" || context.historyTo !== "DECISION") {
+        errors.push(`${path}.evaluationContext.historyFrom/historyTo 必须是 ENTRY/DECISION`);
+      }
+      if (!Array.isArray(context.requiredData) || context.requiredData.length === 0 || context.requiredData.some((item) => typeof item !== "string" || item.trim() === "")) {
+        errors.push(`${path}.evaluationContext.requiredData 必须是非空字符串数组`);
+      }
+      if (context.usesForwardData !== false) errors.push(`${path}.evaluationContext.usesForwardData 必须为 false`);
+    }
+  }
+  return errors;
+}
+
 export function exitPolicyDefinitionErrors(
   value: unknown,
   path = "exitPolicy",
@@ -321,23 +417,7 @@ export function exitPolicyDefinitionErrors(
     }
   }
   if (value.runnerBridge !== undefined && value.runnerBridge !== null) {
-    if (!isRecord(value.runnerBridge)) {
-      errors.push(`${path}.runnerBridge 必须是对象或 null`);
-    } else {
-      const bridge = value.runnerBridge;
-      if (bridge.kind !== "PIT_RUNNER_HOLDING_BRIDGE") {
-        errors.push(`${path}.runnerBridge.kind 必须是 PIT_RUNNER_HOLDING_BRIDGE`);
-      }
-      if (!(RUNNER_HOLDING_BRIDGE_STATES as readonly unknown[]).includes(bridge.state)) {
-        errors.push(`${path}.runnerBridge.state 非法`);
-      }
-      if (bridge.decisionHoldingDays !== 5) {
-        errors.push(`${path}.runnerBridge.decisionHoldingDays 必须是 5`);
-      }
-      if (!Number.isInteger(bridge.extendToHoldingDays) || (bridge.extendToHoldingDays as number) <= 5) {
-        errors.push(`${path}.runnerBridge.extendToHoldingDays 必须是大于 5 的整数`);
-      }
-    }
+    errors.push(...runnerBridgePolicyErrors(value.runnerBridge, `${path}.runnerBridge`));
   }
   if (value.clc2ReversalPath !== undefined && value.clc2ReversalPath !== null) {
     if (!isRecord(value.clc2ReversalPath)) {

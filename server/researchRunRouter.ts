@@ -70,6 +70,7 @@ import {
   researchRunReadinessSchema,
   securityLabelsInputSchema,
   securityLabelsOutputSchema,
+  strategyVersionCoordinatesInputSchema,
   type ClosedLoopRunInput,
   type ClosedLoopRunResult,
   type ClosedLoopWiringSummary,
@@ -100,7 +101,11 @@ import {
   selectPaperTradingState,
 } from "./paperTrading3fTop3Runner/selection";
 import { loadForwardState, runNextAvailableDay } from "./paperTrading3fTop3Runner/service";
-import { getClosedLoopBacktestRunRawResult } from "./closedLoopBacktestRun/rawPayload";
+import { getClosedLoopBacktestRunRawResult, type RawArchivedPayload } from "./closedLoopBacktestRun/rawPayload";
+import {
+  loadStrategyVersionEvaluation,
+  loadStrategyVersionPaperTrading,
+} from "./closedLoopBacktestRun/strategyVersionArtifacts";
 import {
   FINAL_EVALUATION_EXPERIMENT_ID,
   selectFinalEvaluationPair,
@@ -448,6 +453,23 @@ export async function persistClosedLoopBacktestRun(
 
 
 
+/** 3570001 的坐标（两个专项端点收敛后仍用它定位留档）。 */
+const THREE_FACTOR_RUNNER_HOLD20_COORDS = {
+  strategyId: "first-limit-pullback-3f-top3-runner-hold20",
+  strategyVersion: "1.0.0",
+} as const;
+
+/** 把原样留档投影成前端用的 detail 形状（与 S7 前 `getFinalEvaluation` 的返回逐字段一致）。 */
+function toArchivedRunDetail(raw: RawArchivedPayload | null): Record<string, unknown> | null {
+  if (raw === null) return null;
+  return {
+    id: raw.id, runId: raw.runId, strategyId: raw.strategyId, strategyVersion: raw.strategyVersion,
+    startDate: raw.startDate, endDate: raw.endDate,
+    status: String((raw.payload.overall as { status?: unknown } | undefined)?.status ?? ""),
+    result: raw.payload,
+  };
+}
+
 export const researchRunRouter = router({
   /** 已注册研究策略目录（v1：leader-candidate-baseline 等内置策略）。 */
   catalog: router({
@@ -504,43 +526,69 @@ export const researchRunRouter = router({
     }),
 
   /**
+   * SCOPE-002 S7 —— 按**任意策略版本坐标**读回最终评估留档（通用端点）。
+   *
+   * 与写死 runId 的专项端点不同：只给 `strategyId + strategyVersion`，
+   * 服务端按**原样载荷**直读该版本那条留档，并补读**同 experimentId 的对照组**作为 baseline。
+   *
+   * 刻意不声明 output schema：扩展字段（`evaluationDetail`）会被 zod strip 掉。
+   */
+  getStrategyVersionEvaluation: publicProcedure
+    .input(strategyVersionCoordinatesInputSchema)
+    .query(async ({ input }) => {
+      const artifacts = await loadStrategyVersionEvaluation({
+        strategyId: input.strategyId,
+        strategyVersion: input.strategyVersion,
+      });
+      if (artifacts.baseline === null && artifacts.promoted === null) return null;
+      return {
+        baseline: toArchivedRunDetail(artifacts.baseline),
+        promoted: toArchivedRunDetail(artifacts.promoted),
+        evaluationDetail: artifacts.evaluationDetail,
+      };
+    }),
+
+  /**
+   * SCOPE-002 S7 —— 按**任意策略版本坐标**读回模拟盘留档（通用端点）。
+   *
+   * `state` = 历史回放（每日 signals / fills / positions / exits / account）；
+   * `forward` = 前向状态（该版本若跑过前向）。两者各自可缺失（如实返回 null）。
+   */
+  getStrategyVersionPaperTrading: publicProcedure
+    .input(strategyVersionCoordinatesInputSchema)
+    .query(async ({ input }) => {
+      const artifacts = await loadStrategyVersionPaperTrading({
+        strategyId: input.strategyId,
+        strategyVersion: input.strategyVersion,
+      });
+      return { state: artifacts.state, forward: artifacts.forward };
+    }),
+
+  /**
    * STRATEGY-3570001-FINAL-EVALUATION-001 — 正式策略评估（3570001 vs 1.62.1）。
    *
-   * 只读：从闭环留档（`closed_loop_backtest_run`）中取该任务的两条运行，**原样**返回
-   * `result`（含本任务写入的 `evaluationDetail` 完整指标）。前端据此渲染，不重算、不硬编码。
-   *
-   * 刻意**不声明 output schema**：`closedLoopBacktestRunDetailSchema` 会剥离扩展字段
-   * （zod 默认 strip），而本端点必须把 `evaluationDetail` 原样交给前端。
+   * ✅ SCOPE-002 S7：**收敛为通用端点的薄封装**（3570001 坐标），不再写死 runId。
+   * 返回形状与收敛前逐字段一致（前端 `/strategy-final-evaluation` 无需改动）。
    */
   getFinalEvaluation: publicProcedure
     .query(async () => {
-      // 🔴 按 runId 直读原样载荷（旧读取会对结果做旧闭环 reconcile，不匹配即置 null）。
-      const rawBaseline = await getClosedLoopBacktestRunRawResult("eval-3570001-baseline-1621");
-      const rawPromoted = await getClosedLoopBacktestRunRawResult("eval-3570001-promoted-hold20");
-      if (rawBaseline === null && rawPromoted === null) return null;
-      const toDetail = (raw: Awaited<ReturnType<typeof getClosedLoopBacktestRunRawResult>>): Record<string, unknown> | null =>
-        raw === null
-          ? null
-          : {
-              id: raw.id, runId: raw.runId, strategyId: raw.strategyId, strategyVersion: raw.strategyVersion,
-              startDate: raw.startDate, endDate: raw.endDate,
-              status: String((raw.payload.overall as { status?: unknown } | undefined)?.status ?? ""),
-              result: raw.payload,
-            };
-      const evaluationDetail =
-        (rawPromoted?.payload.evaluationDetail ?? rawBaseline?.payload.evaluationDetail ?? null);
-      return { baseline: toDetail(rawBaseline), promoted: toDetail(rawPromoted), evaluationDetail };
+      const artifacts = await loadStrategyVersionEvaluation(THREE_FACTOR_RUNNER_HOLD20_COORDS);
+      if (artifacts.baseline === null && artifacts.promoted === null) return null;
+      return {
+        baseline: toArchivedRunDetail(artifacts.baseline),
+        promoted: toArchivedRunDetail(artifacts.promoted),
+        evaluationDetail: artifacts.evaluationDetail,
+      };
     }),
   /**
    * STRATEGY-3570001-PAPER-TRADING-001 — 3570001 每日模拟盘（只读）。
    *
-   * 从留档中取本任务最近一条运行的 `result.paperTradingState`（每日 signals / fills /
-   * positions / exits / account 明细）。刻意不声明 output schema，避免 zod strip 掉扩展载荷。
+   * ✅ SCOPE-002 S7：**收敛为通用端点的薄封装**（3570001 坐标）。
    */
   getPaperTrading3570001: publicProcedure
     .query(async () => {
-      const raw = await getClosedLoopBacktestRunRawResult("paper-3570001-2025-01-01-2026-09-04");
-      return { state: raw?.payload.paperTradingState ?? null, forward: await loadForwardState() };
+      const artifacts = await loadStrategyVersionPaperTrading(THREE_FACTOR_RUNNER_HOLD20_COORDS);
+      return { state: artifacts.state, forward: artifacts.forward };
     }),
 
   /**

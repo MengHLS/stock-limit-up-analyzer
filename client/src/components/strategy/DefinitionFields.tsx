@@ -1,11 +1,17 @@
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, Ban, Info, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  FieldTechnicalProvider,
+  FieldTechnicalToggle,
+  TechnicalHint,
+} from "@/components/common/FieldTechnicalDetails";
 import { Input } from "@/components/ui/input";
 import {
   Advanced,
+  EnumRadio,
   EnumSelect,
   Field,
   KeyValueRows,
@@ -61,6 +67,9 @@ import {
   symbolToDefinitionOperator,
 } from "./definitionVocabulary";
 import {
+  DEFINITION_FOCUS_SEGMENT_EVENT,
+  DEFINITION_SEGMENT_DOM_PREFIX,
+  DEFINITION_SEGMENT_KEYS,
   DEFINITION_SEGMENTS,
   describeConditionRow,
   emptyConditionRow,
@@ -79,12 +88,17 @@ import {
   type ExitRuleRowDraft,
   type ParameterRowDraft,
 } from "./definitionDraft";
+import {
+  candidateStatusLabel,
+  deriveSearchParameterCandidates,
+  toggleSearchParameter,
+  type SelectedPresetParameters,
+} from "./searchParameterCandidates";
 
 // ---------------------------------------------------------------------------
 // 段 DOM id 前缀（与草图的 `candidate-sketch-segment` 刻意不同，避免同页 id 冲突）
 // ---------------------------------------------------------------------------
 
-const SEGMENT_DOM_PREFIX = "definition-segment";
 
 // ---------------------------------------------------------------------------
 // 局部控件
@@ -109,6 +123,30 @@ function Toggle({
         onChange={(event) => onChange(event.target.checked)}
       />
       {label}
+    </label>
+  );
+}
+
+/**
+ * 行内控件的**可见小标签**（NN/g I-9：禁止把 placeholder 当标签用）。
+ *
+ * 重复行（买入条件 / 出场规则 / 参数）里控件多而窄，所以标签走"迷你"形态：
+ * 一行 10px 灰字压在控件上方，控件本身仍是原来的尺寸。
+ * 这样"这是阈值 / 这是优先级"由**可见文字**说清楚，placeholder 只留示例。
+ */
+function MiniField({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className={`flex flex-col gap-0.5 ${className ?? ""}`}>
+      <span className="text-[10px] leading-tight text-muted-foreground">{label}</span>
+      {children}
     </label>
   );
 }
@@ -176,7 +214,7 @@ function ConditionRowForm({
 
   return (
     <div className="space-y-1.5 rounded-md border bg-background p-2">
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-end gap-1.5">
         {parts === null ? (
           <>
             <Input
@@ -261,16 +299,18 @@ function ConditionRowForm({
           ))}
         </select>
 
-        <Input
-          className="h-8 w-52 font-mono text-xs"
-          value={row.value}
-          placeholder={
-            operatorOption?.arity === "LIST"
-              ? "逗号分隔，如 main,chinext"
-              : "比较值（可以是另一处行情值）"
-          }
-          onChange={(event) => onChange({ ...row, value: event.target.value })}
-        />
+        <MiniField label="比较值">
+          <Input
+            className="h-8 w-52 font-mono text-xs"
+            value={row.value}
+            placeholder={
+              operatorOption?.arity === "LIST"
+                ? "逗号分隔，如 main,chinext"
+                : "如 0.05，或另一处行情值"
+            }
+            onChange={(event) => onChange({ ...row, value: event.target.value })}
+          />
+        </MiniField>
 
         <select
           className="h-8 rounded-md border bg-background px-1.5 text-xs"
@@ -316,12 +356,44 @@ function ConditionRowForm({
 // 主组件
 // ---------------------------------------------------------------------------
 
+/**
+ * 这条出场规则是不是**统一退出政策**（`original.policy` 存在）。
+ *
+ * 🔴 它的语义全在 `policy` 里（由「出场」块的 9 个规则槽编辑），**不是**阈值型规则行。
+ *    第 ④ 段不再把它当普通规则渲染 —— 否则同一条政策有两个编辑点，用户取消启用/删除
+ *    会直接把整套政策弄没（FE-PLAN-004 §6 的彻底方案 B）。
+ */
+function isUnifiedExitPolicyRow(row: ExitRuleRowDraft): boolean {
+  const policy = row.original.policy;
+  return typeof policy === "object" && policy !== null && !Array.isArray(policy);
+}
+
 export function DefinitionFields({
   drafts,
   onChange,
+  searchParameterSources = [],
+  presetBlocks,
 }: {
   drafts: DefinitionDrafts;
   onChange: (next: DefinitionDrafts) => void;
+  /**
+   * 每个任务块**自己的方案行**（FE-PLAN-003 §1 的目标形态：每块 = 方案 + 参数）。
+   *
+   * 🔴 由各段**渲染在段首**，不再集中到页面顶部一个"方案区" —— 此前方案在上、字段在下，
+   *    中间隔着好几个段，用户看不出"这个方案管的是哪一段"（FE-PLAN-004 §6 彻底方案 B）。
+   * 不传某个键 ⇒ 该段维持旧行为（段内只有字段）。
+   */
+  presetBlocks?: {
+    readonly recipe?: ReactNode;
+    readonly exit?: ReactNode;
+    readonly position?: ReactNode;
+    readonly cost?: ReactNode;
+  };
+  /**
+   * ⑤「可调参数」的**派生来源**：①–④ 已选方案各自暴露的参数（P3 / C-1）。
+   * 不传 ⇒ 该面板不渲染（⑤ 仍可手写行）。
+   */
+  searchParameterSources?: readonly SelectedPresetParameters[];
 }) {
   const statuses = useMemo(() => definitionSegmentStatuses(drafts), [drafts]);
   const validation = useMemo(() => validateDefinitionDrafts(drafts), [drafts]);
@@ -344,15 +416,66 @@ export function DefinitionFields({
   const focusSegment = (segment: DefinitionSegmentKey) => {
     toggle(segment, true);
     requestAnimationFrame(() => {
-      document.getElementById(segmentDomId(SEGMENT_DOM_PREFIX, segment))?.scrollIntoView({
+      document.getElementById(segmentDomId(DEFINITION_SEGMENT_DOM_PREFIX, segment))?.scrollIntoView({
         block: "start",
         behavior: "smooth",
       });
     });
   };
 
+  /**
+   * 监听「跳到某一段」广播（来自 `DefinitionProgressOverview`）。
+   *
+   * 🔴 只接受**本模块认得的段 key**：外部（或旧版本代码）传来未知值时忽略，不崩、不猜。
+   */
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const segment = (event as CustomEvent<{ segment?: unknown }>).detail?.segment;
+      if (typeof segment !== "string") return;
+      if (!DEFINITION_SEGMENT_KEYS.includes(segment as DefinitionSegmentKey)) return;
+      focusSegment(segment as DefinitionSegmentKey);
+    };
+    window.addEventListener(DEFINITION_FOCUS_SEGMENT_EVENT, handler);
+    return () => window.removeEventListener(DEFINITION_FOCUS_SEGMENT_EVENT, handler);
+  }, []);
+
   const set = <K extends keyof DefinitionDrafts>(key: K, value: DefinitionDrafts[K]) =>
     onChange({ ...drafts, [key]: value });
+
+  /**
+   * 「最多同时持有」的**唯一编辑点** —— 一次写入两处。
+   *
+   * 为什么双写：这个数在两个地方被读，
+   *   - `definition.position.maxPositions`：Strategy Core 用它推导 `positionIntent`；
+   *   - `executionAssumptions.backtestConfig.maxPositions`：**执行引擎真正用的那一份**。
+   * 实测 176 个版本里两处**零冲突**（165 个同值），所以统一为一个旋钮、两处同时写，
+   * 既消掉「同名两个输入框」，又不改变任何既有版本的取值。
+   */
+  const setMaxPositions = (value: string) =>
+    onChange({
+      ...drafts,
+      position: { ...drafts.position, maxPositions: value },
+      cost: { ...drafts.cost, maxPositions: value },
+    });
+
+  /** 未填 `position.maxPositions` 时，回测实际生效的回退值（仅用于提示，不参与写库）。 */
+  const costMaxPositionsHint =
+    drafts.position.maxPositions.trim() === "" && drafts.cost.maxPositions.trim() !== ""
+      ? drafts.cost.maxPositions.trim()
+      : null;
+
+  /** 执行层无实现、因而**不可编辑**的声明字段（只在技术细节里只读展示）。 */
+  const declaredOnlyFields: readonly (readonly [string, string])[] = [
+    ["position.maxSinglePosition", drafts.position.maxSinglePosition],
+    ["position.maxExposure", drafts.position.maxExposure],
+    ["risk.stopLoss", drafts.risk.stopLoss],
+    ["risk.maxDrawdown", drafts.risk.maxDrawdown],
+    ["risk.maxExposure", drafts.risk.maxExposure],
+    ["risk.maxSinglePosition", drafts.risk.maxSinglePosition],
+    ["risk.maxPositions", drafts.risk.maxPositions],
+    ["risk.dailyLossLimit", drafts.risk.dailyLossLimit],
+    ["risk.concentrationLimit", drafts.risk.concentrationLimit],
+  ];
 
   const totalGaps = statuses.reduce((sum, status) => sum + status.gapCount, 0);
 
@@ -406,7 +529,12 @@ export function DefinitionFields({
   };
 
   return (
+    <FieldTechnicalProvider>
     <div className="space-y-2">
+      {/* 技术细节（字段路径 / 枚举原始值）默认隐藏，需要对照时一键打开 */}
+      <div className="flex justify-end">
+        <FieldTechnicalToggle />
+      </div>
       {/* ---- 校验：错误拦住保存，警告只提醒 ---- */}
       {validation.errors.length > 0 && (
         <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2">
@@ -448,12 +576,15 @@ export function DefinitionFields({
       {/* ① 买什么 ---------------------------------------------------------- */}
       <SegmentShell
         index={1}
-        domIdPrefix={SEGMENT_DOM_PREFIX}
+        domIdPrefix={DEFINITION_SEGMENT_DOM_PREFIX}
         status={statuses[0]}
         open={isOpen(statuses[0])}
         onToggle={() => toggle("what", !isOpen(statuses[0]))}
         hint={DEFINITION_SEGMENTS[0].hint}
       >
+        {/* ① 选股自己的方案行（信号配方）。 */}
+        {presetBlocks?.recipe}
+
         <Field
           label="事件类型"
           name="definition.entry.event.type"
@@ -546,7 +677,7 @@ export function DefinitionFields({
       {/* ② 什么条件买（可空） ------------------------------------------------ */}
       <SegmentShell
         index={2}
-        domIdPrefix={SEGMENT_DOM_PREFIX}
+        domIdPrefix={DEFINITION_SEGMENT_DOM_PREFIX}
         status={statuses[1]}
         open={isOpen(statuses[1])}
         onToggle={() => toggle("condition", !isOpen(statuses[1]))}
@@ -618,7 +749,7 @@ export function DefinitionFields({
       {/* ③ 什么时候买 -------------------------------------------------------- */}
       <SegmentShell
         index={3}
-        domIdPrefix={SEGMENT_DOM_PREFIX}
+        domIdPrefix={DEFINITION_SEGMENT_DOM_PREFIX}
         status={statuses[2]}
         open={isOpen(statuses[2])}
         onToggle={() => toggle("when", !isOpen(statuses[2]))}
@@ -644,11 +775,10 @@ export function DefinitionFields({
               />
             </Field>
             <Field label="单位" name="…observationWindow.unit">
-              <EnumSelect
+              <EnumRadio
                 value={drafts.window.unit}
                 options={DEFINITION_WINDOW_UNIT_OPTIONS}
                 onChange={(value) => set("window", { ...drafts.window, unit: value })}
-                emptyLabel="选单位"
               />
             </Field>
           </div>
@@ -717,12 +847,15 @@ export function DefinitionFields({
       {/* ④ 怎么卖 ---------------------------------------------------------- */}
       <SegmentShell
         index={4}
-        domIdPrefix={SEGMENT_DOM_PREFIX}
+        domIdPrefix={DEFINITION_SEGMENT_DOM_PREFIX}
         status={statuses[3]}
         open={isOpen(statuses[3])}
         onToggle={() => toggle("exit", !isOpen(statuses[3]))}
         hint={DEFINITION_SEGMENTS[3].hint}
       >
+        {/* 出场只有这一处场地：推荐组合（可选起点）+ 9 个规则槽。 */}
+        {presetBlocks?.exit}
+
         <div className="space-y-2">
           {drafts.exitRules.length === 0 && (
             <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] text-sky-900">
@@ -730,9 +863,9 @@ export function DefinitionFields({
             </p>
           )}
 
-          {drafts.exitRules.map((row, index) => (
+          {drafts.exitRules.map((row, index) => (isUnifiedExitPolicyRow(row) ? null : (
             <div key={index} className="space-y-1.5 rounded-md border bg-background p-2">
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-end gap-1.5">
                 <select
                   className="h-8 rounded-md border bg-background px-1.5 text-xs"
                   value={row.type}
@@ -773,19 +906,21 @@ export function DefinitionFields({
                   ))}
                 </select>
 
-                <Input
-                  className="h-8 w-24 font-mono text-xs"
-                  value={row.threshold}
-                  placeholder="阈值"
-                  onChange={(event) =>
-                    set(
-                      "exitRules",
-                      drafts.exitRules.map((r, i) =>
-                        i === index ? { ...r, threshold: event.target.value } : r,
-                      ),
-                    )
-                  }
-                />
+                <MiniField label="阈值">
+                  <Input
+                    className="h-8 w-24 font-mono text-xs"
+                    value={row.threshold}
+                    placeholder={row.thresholdUnit === "TRADING_DAY" ? "如 5" : "如 0.08"}
+                    onChange={(event) =>
+                      set(
+                        "exitRules",
+                        drafts.exitRules.map((r, i) =>
+                          i === index ? { ...r, threshold: event.target.value } : r,
+                        ),
+                      )
+                    }
+                  />
+                </MiniField>
 
                 <select
                   className="h-8 rounded-md border bg-background px-1.5 text-xs"
@@ -807,20 +942,22 @@ export function DefinitionFields({
                   ))}
                 </select>
 
-                <Input
-                  className="h-8 w-16 font-mono text-xs"
-                  value={row.priority}
-                  title="优先级：数值越小越先判定；同一出场定义内不得重复"
-                  placeholder="优先级"
-                  onChange={(event) =>
-                    set(
-                      "exitRules",
-                      drafts.exitRules.map((r, i) =>
-                        i === index ? { ...r, priority: event.target.value } : r,
-                      ),
-                    )
-                  }
-                />
+                <MiniField label="优先级">
+                  <Input
+                    className="h-8 w-16 font-mono text-xs"
+                    value={row.priority}
+                    title="数值越小越先判定；同一出场定义内不得重复"
+                    placeholder="如 1"
+                    onChange={(event) =>
+                      set(
+                        "exitRules",
+                        drafts.exitRules.map((r, i) =>
+                          i === index ? { ...r, priority: event.target.value } : r,
+                        ),
+                      )
+                    }
+                  />
+                </MiniField>
 
                 <Toggle
                   checked={row.enabled}
@@ -857,7 +994,7 @@ export function DefinitionFields({
                 </p>
               )}
             </div>
-          ))}
+          )))}
 
           <div className="flex flex-wrap items-center gap-1.5">
             <Button
@@ -898,12 +1035,15 @@ export function DefinitionFields({
       {/* ⑤ 买多少 · 最多持几只 ---------------------------------------------- */}
       <SegmentShell
         index={5}
-        domIdPrefix={SEGMENT_DOM_PREFIX}
+        domIdPrefix={DEFINITION_SEGMENT_DOM_PREFIX}
         status={statuses[4]}
         open={isOpen(statuses[4])}
         onToggle={() => toggle("sizing", !isOpen(statuses[4]))}
         hint={DEFINITION_SEGMENTS[4].hint}
       >
+        {/* ③ 仓位自己的方案行。 */}
+        {presetBlocks?.position}
+
         <div className="grid gap-3 sm:grid-cols-3">
           <Field
             label="仓位方式"
@@ -922,25 +1062,16 @@ export function DefinitionFields({
             label="最多同时持有"
             name="definition.position.maxPositions"
             missing={missingAt("sizing", "position.maxPositions")}
-            hint="≥ 1 的整数"
+            hint={
+              drafts.position.maxPositions.trim() === "" && costMaxPositionsHint !== null
+                ? `≥ 1 的整数；未填时回测按 executionAssumptions.backtestConfig.maxPositions = ${costMaxPositionsHint} 生效`
+                : "≥ 1 的整数；保存时同步写入 position 与 backtestConfig 两处"
+            }
           >
             <NumInput
               value={drafts.position.maxPositions}
               placeholder="如 5"
-              onChange={(value) => set("position", { ...drafts.position, maxPositions: value })}
-            />
-          </Field>
-          <Field
-            label="单标的仓位上限"
-            name="definition.position.maxSinglePosition"
-            hint="占总资金比例 (0,1]，如 0.2"
-          >
-            <NumInput
-              value={drafts.position.maxSinglePosition}
-              placeholder="如 0.2"
-              onChange={(value) =>
-                set("position", { ...drafts.position, maxSinglePosition: value })
-              }
+              onChange={setMaxPositions}
             />
           </Field>
           <Field
@@ -950,11 +1081,10 @@ export function DefinitionFields({
             missing={missingAt("sizing", "execution.quantityMethod")}
             hint="数量按什么算"
           >
-            <EnumSelect
+            <EnumRadio
               value={drafts.execution.quantityMethod}
               options={DEFINITION_QUANTITY_METHOD_OPTIONS}
               onChange={(value) => set("execution", { ...drafts.execution, quantityMethod: value })}
-              emptyLabel="选下单口径"
             />
           </Field>
           <Field
@@ -969,94 +1099,71 @@ export function DefinitionFields({
               onChange={(value) => set("execution", { ...drafts.execution, lotSize: value })}
             />
           </Field>
-          <Field
-            label="风控里的最多持仓数"
-            name="definition.risk.maxPositions"
-            missing={missingAt("sizing", "risk.maxPositions")}
-            hint="与上面的 position.maxPositions 含义重叠；两者都给且不一致会提醒"
-          >
-            <NumInput
-              value={drafts.risk.maxPositions}
-              placeholder="通常与上面同值"
-              onChange={(value) => set("risk", { ...drafts.risk, maxPositions: value })}
-            />
-          </Field>
+
         </div>
 
-        <Advanced title="进阶：其余仓位与风控落点" hint="表单不常编辑，但会原样保存">
-          <div className="grid gap-3 sm:grid-cols-4">
-            <Field label="单笔比例" name="position.positionRatio" hint="(0,1]">
+        <Advanced
+          title="单笔比例 / 固定金额"
+          hint="仓位方式选「固定比例」或「固定金额」时生效；别的仓位方式下这两项不参与计算"
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="单笔比例"
+              name="position.positionRatio"
+              optional
+              hint="(0,1]，如 0.2 = 每笔用两成资金；仓位方式选「固定比例」时生效"
+            >
               <NumInput
                 value={drafts.position.positionRatio}
                 onChange={(value) => set("position", { ...drafts.position, positionRatio: value })}
               />
             </Field>
-            <Field label="固定金额" name="position.fixedAmount">
+            <Field
+              label="固定金额"
+              name="position.fixedAmount"
+              optional
+              hint="单位：元；仓位方式选「固定金额」时生效"
+            >
               <NumInput
                 value={drafts.position.fixedAmount}
                 onChange={(value) => set("position", { ...drafts.position, fixedAmount: value })}
               />
             </Field>
-            <Field label="最大暴露（仓位）" name="position.maxExposure" hint="[0,1]">
-              <NumInput
-                value={drafts.position.maxExposure}
-                onChange={(value) => set("position", { ...drafts.position, maxExposure: value })}
-              />
-            </Field>
-            <Field label="风控单标的上限" name="risk.maxSinglePosition" hint="[0,1]">
-              <NumInput
-                value={drafts.risk.maxSinglePosition}
-                onChange={(value) => set("risk", { ...drafts.risk, maxSinglePosition: value })}
-              />
-            </Field>
           </div>
-          <Section title="扩展风控（落到 definition.risk 的具名阈值）">
-            <div className="grid gap-3 sm:grid-cols-4">
-              {(
-                [
-                  ["stopLoss", "止损比例"],
-                  ["maxDrawdown", "最大回撤"],
-                  ["maxExposure", "最大暴露"],
-                  ["dailyLossLimit", "单日亏损上限"],
-                  ["concentrationLimit", "集中度上限"],
-                ] as const
-              ).map(([key, label]) => (
-                <Field key={key} label={label} name={`risk.${key}`}>
-                  <NumInput
-                    value={drafts.risk[key]}
-                    onChange={(value) => set("risk", { ...drafts.risk, [key]: value })}
-                  />
-                </Field>
-              ))}
-            </div>
-            {drafts.risk.extensionsExpressible ? (
-              <KeyValueRows
-                rows={drafts.risk.extensions}
-                onChange={(rows) => set("risk", { ...drafts.risk, extensions: rows })}
-                newRow={emptyKeyValueRowDraft}
-                keyPlaceholder="如 maxBoardHeight"
-                addLabel="加一条具名阈值"
-              />
-            ) : (
-              <ReadOnlyNotice
-                title="扩展风控含表单表达不了的值"
-                reason="`risk.extensions` 里出现了非标量值"
-                raw={JSON.stringify(drafts.risk.original.extensions ?? null, null, 2)}
-              />
-            )}
-          </Section>
         </Advanced>
+
+        {/*
+          🔴 裁定（2026-10-03）：以下字段**执行层零实现** ⇒ **不提供编辑**，
+             只在「技术细节」里只读展示。原样保留在文档里（不删数据、不改指纹）。
+        */}
+        <TechnicalHint>
+          <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2" data-declared-only-fields>
+            <p className="text-[10px] font-medium text-muted-foreground">
+              以下字段**仅声明，不参与回测**（执行层无实现，故不提供编辑）
+            </p>
+            <ul className="mt-1 grid gap-x-4 gap-y-0.5 text-[10px] text-muted-foreground sm:grid-cols-2">
+              {declaredOnlyFields.map(([label, value]) => (
+                <li key={label}>
+                  <span className="font-mono">{label}</span>：{value === "" ? "（未声明）" : value}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </TechnicalHint>
       </SegmentShell>
 
       {/* ⑥ 成本与资金 ------------------------------------------------------- */}
       <SegmentShell
         index={6}
-        domIdPrefix={SEGMENT_DOM_PREFIX}
+        domIdPrefix={DEFINITION_SEGMENT_DOM_PREFIX}
         status={statuses[5]}
         open={isOpen(statuses[5])}
         onToggle={() => toggle("cost", !isOpen(statuses[5]))}
         hint={DEFINITION_SEGMENTS[5].hint}
       >
+        {/* ④ 成本与成交自己的方案行。 */}
+        {presetBlocks?.cost}
+
         <div className="grid gap-3 sm:grid-cols-3">
           <Field
             label="信号时点"
@@ -1064,11 +1171,10 @@ export function DefinitionFields({
             valueKey={drafts.execution.signalTiming}
             missing={missingAt("cost", "execution.signalTiming")}
           >
-            <EnumSelect
+            <EnumRadio
               value={drafts.execution.signalTiming}
               options={DEFINITION_SIGNAL_TIMING_OPTIONS}
               onChange={(value) => set("execution", { ...drafts.execution, signalTiming: value })}
-              emptyLabel="信号在哪根 bar 判定"
             />
           </Field>
           <Field
@@ -1102,25 +1208,25 @@ export function DefinitionFields({
           </Field>
         </div>
 
-        <p className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+        <TechnicalHint className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-[10px] text-muted-foreground">
           后端的硬约束：<strong>L6</strong> 成交不得早于或等于信号时点
           （`signalTiming=T_CLOSE` + `executionTiming=T_CLOSE` 必被拒，规则名
           `SIGNAL_EXECUTION_TIMING_CONFLICT`）；<strong>L7</strong> 触发时点为「次一交易日」时不能
           同 bar 成交（`TRIGGER_EXECUTION_INCONSISTENT`）。填错了上面的红色清单会直接点出来。
-        </p>
+        </TechnicalHint>
 
         <Section title="成本与资金（文档级 executionAssumptions，不属于 definition）">
           <CostFields drafts={drafts} onChange={onChange} missingCapital={missingAt("cost", "cost.initialCapital")} missingRates={missingAt("cost", "cost.rates")} />
         </Section>
 
-        <Advanced title="进阶：费用模型与执行约束（落到 definition.execution）">
+        <Advanced title="费用模型与执行约束">
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
               label="滑点模型"
               name="execution.slippageModel"
               valueKey={drafts.execution.slippageModel}
             >
-              <EnumSelect
+              <EnumRadio
                 value={drafts.execution.slippageModel}
                 options={DEFINITION_COST_MODEL_OPTIONS}
                 onChange={(value) => set("execution", { ...drafts.execution, slippageModel: value })}
@@ -1131,7 +1237,7 @@ export function DefinitionFields({
               name="execution.commissionModel"
               valueKey={drafts.execution.commissionModel}
             >
-              <EnumSelect
+              <EnumRadio
                 value={drafts.execution.commissionModel}
                 options={DEFINITION_COST_MODEL_OPTIONS}
                 onChange={(value) => set("execution", { ...drafts.execution, commissionModel: value })}
@@ -1157,12 +1263,21 @@ export function DefinitionFields({
       {/* ⑦ 参数搜索空间 ----------------------------------------------------- */}
       <SegmentShell
         index={7}
-        domIdPrefix={SEGMENT_DOM_PREFIX}
+        domIdPrefix={DEFINITION_SEGMENT_DOM_PREFIX}
         status={statuses[6]}
         open={isOpen(statuses[6])}
         onToggle={() => toggle("parameters", !isOpen(statuses[6]))}
         hint={DEFINITION_SEGMENTS[6].hint}
       >
+        {/* ---- 派生候选：来自 ①–④ 已选方案（不是自造方案，C-1） ---- */}
+        {searchParameterSources.length > 0 && (
+          <SearchParameterCandidatePanel
+            drafts={drafts}
+            sources={searchParameterSources}
+            onChange={onChange}
+          />
+        )}
+
         {drafts.parameters.length === 0 ? (
           <Button
             type="button"
@@ -1194,14 +1309,14 @@ export function DefinitionFields({
             </Button>
           </div>
         )}
-        <p className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
+        <TechnicalHint className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
             数值参数若角色是「待搜索（TUNABLE）」就**必须给 min 与 max**（搜索不会替你定界）；
             字符串 / 布尔参数必须给非空候选集合。「推导值（DERIVED）」必须另外带 derivedFrom 表达式
             —— 那个键不在本表单里，缺了会由上面的红色清单点出来。
           </span>
-        </p>
+        </TechnicalHint>
       </SegmentShell>
 
       {/* ---- 表单不编辑的键：明说，而不是让它悄悄消失 ---- */}
@@ -1216,6 +1331,7 @@ export function DefinitionFields({
         </p>
       )}
     </div>
+    </FieldTechnicalProvider>
   );
 }
 
@@ -1288,7 +1404,7 @@ function CostFields({
           )}
         </div>
         <p className="mt-1.5 text-[10px] text-muted-foreground">
-          套用只写入下面七项，不会动「回测最大持仓数」。
+          套用只写入下面七项（持仓上限在第 5 段的「最多同时持有」处编辑）。
         </p>
       </div>
 
@@ -1306,17 +1422,7 @@ function CostFields({
             onChange={(value) => setCost({ initialCapital: value })}
           />
         </Field>
-        <Field
-          label="回测最大持仓数"
-          name="executionAssumptions.backtestConfig.maxPositions"
-          hint="可留空；与第 5 段的「最多同时持有」不是同一个字段"
-        >
-          <NumInput
-            value={drafts.cost.maxPositions}
-            placeholder="可留空"
-            onChange={(value) => setCost({ maxPositions: value })}
-          />
-        </Field>
+
       </div>
 
       <Section title="六项成本费率（服务端要求六项都要有）" missing={missingRates}>
@@ -1359,6 +1465,84 @@ function CostFields({
 // ⑦ 参数搜索空间：一行
 // ---------------------------------------------------------------------------
 
+/**
+ * ⑤ 的**派生候选清单**（P3）。
+ *
+ * 只做三件事：把 ①–④ 已选方案暴露的参数列出来、标出"能不能搜"、勾选/取消时写
+ * `definition.parameters[]` 一行。**不自造方案、不新增第二处定义**（C-1）。
+ *
+ * 🔴 未被规则图引用的候选**禁用勾选**：勾了也只会得到 N 组逐字节相同的重复结果
+ * （参数搜索会以 `PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER` 拒绝）。
+ */
+function SearchParameterCandidatePanel({
+  drafts,
+  sources,
+  onChange,
+}: {
+  drafts: DefinitionDrafts;
+  sources: readonly SelectedPresetParameters[];
+  onChange: (next: DefinitionDrafts) => void;
+}) {
+  const candidates = deriveSearchParameterCandidates(drafts, sources);
+  if (candidates.length === 0) return null;
+  const blocked = candidates.filter(c => !c.referenced).length;
+  return (
+    <div className="space-y-1.5 rounded-md border bg-muted/20 p-2" data-search-candidates>
+      <p className="text-[11px] font-medium">
+        上面四块里，这些值可以放进搜索空间
+        <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+          （{candidates.length} 项；来自当前选中的方案）
+        </span>
+      </p>
+      <ul className="space-y-1">
+        {candidates.map(candidate => {
+          const checked = candidate.alreadyDeclared;
+          const disabled = !checked && !candidate.referenced;
+          return (
+            <li key={candidate.code} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]">
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  className="h-3.5 w-3.5"
+                  checked={checked}
+                  disabled={disabled}
+                  title={disabled ? "该参数没有被规则引用：搜索它不会改变任何结果" : undefined}
+                  onChange={(event) => {
+                    const result = toggleSearchParameter(drafts, candidate, event.target.checked);
+                    if (result.kind === "APPLIED") onChange(result.drafts);
+                  }}
+                />
+                <span className="font-medium">{candidate.label}</span>
+              </label>
+              <code className="font-mono text-[10px] text-muted-foreground">{candidate.code}</code>
+              <span className="text-[10px] text-muted-foreground">
+                {candidate.blockLabel} · {candidate.presetDisplayName}
+              </span>
+              <span
+                className={
+                  checked
+                    ? "rounded-full bg-emerald-100 px-1.5 py-px text-[10px] text-emerald-800"
+                    : candidate.referenced
+                      ? "rounded-full bg-muted px-1.5 py-px text-[10px] text-muted-foreground"
+                      : "rounded-full border border-amber-300 bg-amber-50 px-1.5 py-px text-[10px] text-amber-800"
+                }
+              >
+                {candidateStatusLabel(candidate)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {blocked > 0 && (
+        <p className="text-[10px] text-amber-800">
+          有 {blocked} 项没被规则引用 —— 勾了也不会改变结果（参数搜索会拒），所以先禁用。
+          要让某个阈值真的可搜，得先在条件/出场规则里用「参数引用」指向它。
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ParameterRowForm({
   row,
   onChange,
@@ -1368,40 +1552,43 @@ function ParameterRowForm({
   onChange: (next: ParameterRowDraft) => void;
   onRemove: () => void;
 }) {
-  const roleOption = DEFINITION_PARAMETER_ROLE_OPTIONS.find((o) => o.value === row.parameterRole);
+  /** 「待搜索」的数值参数**必须**给最小/最大值 —— 提示走可见文案，不藏在 placeholder 里。 */
+  const numericSearchRange = row.dataType === "number" && row.parameterRole === "TUNABLE";
 
   return (
     <div className="space-y-1.5 rounded-md border bg-muted/20 p-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Input
-          className="h-8 w-44 font-mono text-xs"
-          value={row.code}
-          placeholder="参数名，如 max_volume_ratio"
-          onChange={(event) => onChange({ ...row, code: event.target.value })}
-        />
-        <Input
-          className="h-8 w-40 text-xs"
-          value={row.name}
-          placeholder="中文名（可留空）"
-          onChange={(event) => onChange({ ...row, name: event.target.value })}
-        />
-        <EnumSelect
-          value={row.dataType}
-          options={DEFINITION_PARAMETER_TYPE_OPTIONS}
-          onChange={(value) => onChange({ ...row, dataType: value })}
-        />
-        <select
-          className="h-8 rounded-md border bg-background px-1.5 text-xs"
-          value={row.parameterRole}
-          title={roleOption?.note}
-          onChange={(event) => onChange({ ...row, parameterRole: event.target.value })}
-        >
-          {DEFINITION_PARAMETER_ROLE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+      <div className="flex flex-wrap items-end gap-1.5">
+        <MiniField label="参数名" className="w-44">
+          <Input
+            className="h-8 w-full font-mono text-xs"
+            value={row.code}
+            placeholder="如 max_volume_ratio"
+            onChange={(event) => onChange({ ...row, code: event.target.value })}
+          />
+        </MiniField>
+        <MiniField label="中文名" className="w-40">
+          <Input
+            className="h-8 w-full text-xs"
+            value={row.name}
+            placeholder="可留空"
+            onChange={(event) => onChange({ ...row, name: event.target.value })}
+          />
+        </MiniField>
+        <MiniField label="取值类型">
+          <EnumSelect
+            value={row.dataType}
+            options={DEFINITION_PARAMETER_TYPE_OPTIONS}
+            onChange={(value) => onChange({ ...row, dataType: value })}
+          />
+        </MiniField>
+        <MiniField label="用途">
+          <EnumRadio
+            value={row.parameterRole}
+            options={DEFINITION_PARAMETER_ROLE_OPTIONS}
+            emptyLabel={null}
+            onChange={(value) => onChange({ ...row, parameterRole: value })}
+          />
+        </MiniField>
         <Toggle
           checked={row.required}
           onChange={(required) => onChange({ ...row, required })}
@@ -1422,40 +1609,56 @@ function ParameterRowForm({
       <div className="grid gap-1.5 sm:grid-cols-4">
         {row.dataType === "number" ? (
           <>
-            <Input
-              className="h-8 font-mono text-xs"
-              value={row.min}
-              placeholder="min（TUNABLE 必填）"
-              onChange={(event) => onChange({ ...row, min: event.target.value })}
-            />
-            <Input
-              className="h-8 font-mono text-xs"
-              value={row.max}
-              placeholder="max（TUNABLE 必填）"
-              onChange={(event) => onChange({ ...row, max: event.target.value })}
-            />
-            <Input
-              className="h-8 font-mono text-xs"
-              value={row.step}
-              placeholder="step（可选）"
-              onChange={(event) => onChange({ ...row, step: event.target.value })}
-            />
+            <MiniField label="最小值">
+              <Input
+                className="h-8 w-full font-mono text-xs"
+                value={row.min}
+                placeholder="如 0"
+                onChange={(event) => onChange({ ...row, min: event.target.value })}
+              />
+            </MiniField>
+            <MiniField label="最大值">
+              <Input
+                className="h-8 w-full font-mono text-xs"
+                value={row.max}
+                placeholder="如 1"
+                onChange={(event) => onChange({ ...row, max: event.target.value })}
+              />
+            </MiniField>
+            <MiniField label="步长">
+              <Input
+                className="h-8 w-full font-mono text-xs"
+                value={row.step}
+                placeholder="可留空"
+                onChange={(event) => onChange({ ...row, step: event.target.value })}
+              />
+            </MiniField>
           </>
         ) : (
-          <Input
-            className="h-8 font-mono text-xs sm:col-span-3"
-            value={row.allowedValuesText}
-            placeholder="候选集合（逗号分隔，必填）"
-            onChange={(event) => onChange({ ...row, allowedValuesText: event.target.value })}
-          />
+          <MiniField label="候选集合" className="sm:col-span-3">
+            <Input
+              className="h-8 w-full font-mono text-xs"
+              value={row.allowedValuesText}
+              placeholder="逗号分隔，如 5,10,20"
+              onChange={(event) => onChange({ ...row, allowedValuesText: event.target.value })}
+            />
+          </MiniField>
         )}
-        <Input
-          className="h-8 font-mono text-xs"
-          value={row.defaultValue}
-          placeholder="默认值（可选）"
-          onChange={(event) => onChange({ ...row, defaultValue: event.target.value })}
-        />
+        <MiniField label="默认值">
+          <Input
+            className="h-8 w-full font-mono text-xs"
+            value={row.defaultValue}
+            placeholder="可留空"
+            onChange={(event) => onChange({ ...row, defaultValue: event.target.value })}
+          />
+        </MiniField>
       </div>
+
+      {numericSearchRange && (
+        <p className="text-[10px] text-muted-foreground">
+          用途是「待搜索」的数值参数必须同时给出最小值与最大值 —— 缺了参数搜索会拒。
+        </p>
+      )}
 
       {row.parameterRole === "DERIVED" && (
         <p className="text-[10px] text-amber-800">

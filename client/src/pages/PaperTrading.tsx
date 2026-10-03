@@ -562,7 +562,14 @@ export default function PaperTrading() {
                           </Button>
                         )}
                         {isAdmin && (run.status === "active" || run.status === "paused") && (
-                          <Button size="sm" variant="ghost" onClick={() => statusMutation.mutate({ id: run.id, status: run.status === "active" ? "paused" : "active" })} disabled={statusMutation.isPending}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => statusMutation.mutate({ id: run.id, status: run.status === "active" ? "paused" : "active" })}
+                            disabled={statusMutation.isPending}
+                            aria-label={run.status === "active" ? "暂停该模拟盘运行" : "恢复该模拟盘运行"}
+                            title={run.status === "active" ? "暂停" : "恢复"}
+                          >
                             {run.status === "active" ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                           </Button>
                         )}

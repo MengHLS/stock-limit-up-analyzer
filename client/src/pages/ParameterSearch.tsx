@@ -391,7 +391,7 @@ export default function ParameterSearch() {
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">策略 ID</p>
                 <Input
-                  value={evalStrategyId}
+                  aria-label="策略 ID" value={evalStrategyId}
                   onChange={(e) => setEvalStrategyId(e.target.value)}
                   placeholder="cand-360001"
                   className="h-8 w-40 font-mono text-xs"
@@ -400,7 +400,7 @@ export default function ParameterSearch() {
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">版本</p>
                 <Input
-                  value={evalStrategyVersion}
+                  aria-label="版本" value={evalStrategyVersion}
                   onChange={(e) => setEvalStrategyVersion(e.target.value)}
                   placeholder="1.0.0"
                   className="h-8 w-24 font-mono text-xs"
@@ -409,7 +409,7 @@ export default function ParameterSearch() {
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">决策起（YYYY-MM-DD）</p>
                 <Input
-                  value={evalStartDate}
+                  aria-label="决策起（YYYY-MM-DD）" value={evalStartDate}
                   onChange={(e) => setEvalStartDate(e.target.value)}
                   placeholder="2026-08-22"
                   className="h-8 w-28 font-mono text-xs"
@@ -418,7 +418,7 @@ export default function ParameterSearch() {
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">决策止</p>
                 <Input
-                  value={evalEndDate}
+                  aria-label="决策止" value={evalEndDate}
                   onChange={(e) => setEvalEndDate(e.target.value)}
                   placeholder="2026-09-01"
                   className="h-8 w-28 font-mono text-xs"
@@ -594,11 +594,11 @@ export default function ParameterSearch() {
             </div>
             <div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">种子（seed）</p>
-              <Input value={stochSeed} onChange={(e) => setStochSeed(e.target.value)} className="h-8 w-24 font-mono text-xs" />
+              <Input id="ps-stoch-seed" aria-label="种子（seed）" value={stochSeed} onChange={(e) => setStochSeed(e.target.value)} className="h-8 w-24 font-mono text-xs" />
             </div>
             <div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">迭代次数（iterations，默认 500）</p>
-              <Input value={stochIterations} onChange={(e) => setStochIterations(e.target.value)} className="h-8 w-24 font-mono text-xs" />
+              <Input id="ps-stoch-iterations" aria-label="迭代次数（iterations，默认 500）" value={stochIterations} onChange={(e) => setStochIterations(e.target.value)} className="h-8 w-24 font-mono text-xs" />
             </div>
           </div>
 

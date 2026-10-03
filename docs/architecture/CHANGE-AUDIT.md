@@ -844,3 +844,733 @@
 - **Regression Result**：纯文档；`node scripts/checkEolDrift.mjs --strict` ⇒ **0**
 - **Baseline Impact**：架构地图与 `system-manifest.yaml` 的 legacy / 死代码 / 边界守卫条目与当前代码重新对齐；**未改写历史报告**（`SYSTEM-BASELINE-001-REPORT.md` / `SYSTEM-BASELINE-002-REPORT.md` / `docs/legacy/**` 按「时点快照」保留）
 - **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `A11Y-DIALOG-FOCUS-002`（对话框焦点还原从单组件上移到共享包装层）
+
+- **Task**：`A11Y-DIALOG-FOCUS-001` 只修了 `ConfirmDialog`。随后静态扫描发现**同类受控且无 Trigger 的对话框共 9 个**，若继续逐调用点修补会重复实现且必然遗漏 ⇒ 把修复上移到 Radix 包装层，一次覆盖全部对话框。
+- **Changed Domains**：**无**（纯前端无障碍修复）
+- **Changed Files**：`client/src/lib/dialogFocusRestore.ts`（新共享 hook）· `client/src/components/ui/{dialog,alert-dialog}.tsx`（Content 统一接入）· `client/src/components/common/ConfirmDialog.tsx`（移除本地重复实现）· `tests/client/src/pages/pageFlowContracts.test.ts`（§36–§38）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **根因与实现**：Radix 默认焦点还原依赖 `DialogTrigger` 写入的 `triggerRef`；本仓大量对话框是受控用法且无 Trigger。共享 hook 在 `onOpenAutoFocus` 捕获触发元素，在 `onCloseAutoFocus` 中 `preventDefault()` + `focus()`，并用 `document.contains()` 守卫；包装层同时透传调用方自己的 handler，避免覆盖扩展点。
+- **验证**：
+  - `ConfirmDialog` 焦点探针 **4/4 PASS**（打开 / Escape 关闭 / 焦点回触发按钮 / 未误删）
+  - 曾同类缺陷的 `EditCandidateDialog` 探针 **4/4 PASS**（焦点回到「编辑草图」按钮）
+  - 确认框回归探针 **5/5 PASS**
+  - `pageFlowContracts.test.ts` ⇒ **37/37**；`pnpm run check` ⇒ **0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 仓外对话框扫描：**15/15** 命中包装层兜底标记
+- **断言调整（如实记录）**：原 §35 只断言 `ConfirmDialog` 内存在局部修复；实现上移后该断言会反向阻止去重，已由 §36/§37/§38 取代。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `A11Y-FOCUS-VISIBLE-003`（键盘焦点必须有可见指示）
+
+- **Task**：在对话框焦点还原收口后，继续审计 `:focus-visible` 可见性，查找「可聚焦但聚焦后画面无变化」的控件。
+- **Changed Domains**：**无**（纯前端无障碍样式）
+- **Changed Files**：`client/src/components/ui/tabs.tsx` · `client/src/pages/StrategyVersionCompare.tsx` · `client/src/components/AppShell.tsx` · `tests/client/src/pages/pageFlowContracts.test.ts`（§39–§41）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **发现**：
+  1. `StrategyVersionCompare` 的版本搜索 `<input>`：真实 Tab 到它时 `:focus-visible=true`，但 `outline/box-shadow/border` 与未聚焦基线完全一致 ⇒ 键盘用户看不到焦点位置。
+  2. `/data-health` 与 `/market` 的 Radix `TabsList` 自身可聚焦，但共同组件没有焦点环 ⇒ 同属焦点不可见。
+  3. 侧栏账户菜单触发器只剩 `focus:outline-none`、没有替代 ring；因登录态下才渲染，用静态结构守卫 + 强制伪类 DOM 验证钉住。
+- **修复**：① `TabsList` 共用样式增加 `focus-visible:ring-2 + ring-ring`；② 版本搜索的边框容器增加 `focus-within:border-ring + focus-within:ring-2`，同时保持输入框自身简洁；③ 账户触发器改为 `focus-visible:ring-2 + ring-sidebar-ring`。
+- **验证**：
+  - 真实 DOM 探针 **3/3 PASS**：版本搜索用真实 Tab（`focusVisible=true`，父容器 `box-shadow`/`border-color` 变化）✅；`TabsList` 强制 `:focus-visible` 后出现 2px ring ✅；账户触发器强制 `:focus-visible` 后出现 2px ring ✅
+  - `pageFlowContracts.test.ts` ⇒ **40/40**（新增 §39/§40/§41）
+  - `pnpm run check` ⇒ **0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 探针：仓外 `_scratch/probe_focus_visible_fix.mjs`；全站强制伪类扫描 `_scratch/probe_focus_visible_scan.mjs`
+- **边界**：`TabsList` 与账户按钮的 DOM 验证使用 CDP `CSS.forcePseudoState`，搜索框使用真实 Tab；强制伪类结果不等于真实键盘遍历，但用于判定 CSS 是否有可见指示足够，且已用真实 Tab 对其中一条路径交叉验证。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+## 2026-10-03 · `CODE-AGENT-ORCHESTRATOR-001`（Orchestrator / Project Manager Agent）
+
+- **Task**：新增跨阶段 Orchestrator Skill，读取 ROADMAP 与当前任务状态，判断 READY 阶段，按需路由 Product / Frontend / Architecture / Strategy / Research / Database / Refactoring / Verification，并统一状态机、停止条件、SAFE_PIPELINE 与 ROADMAP 同步规则。
+- **Changed Domains**：**无**（仅 Agent 工作流与规则文档；未改变 Dataset / Research / Strategy / Backtest / Paper Trading / Production 语义）
+- **Changed Files**：新增 `.agents/orchestrator/SKILL.md`；更新 `AGENTS.md`（Skill 注册、职责边界、完整目标默认流水线）、`docs/architecture/AGENT-GUIDE.md`（9 个 Skill 的职责与编排链）、`ROADMAP-CHANGELOG.md`（§47 append-only 记录）。
+- **Changed Contracts**：**无**
+- **Changed DB**：**无**（0 DDL / 0 DML / 0 migration；未连库）
+- **Changed Execution Path**：**无**（未修改 `server/**` / `client/**` 运行代码）
+- **Potential Baseline Drift**：**无领域漂移**。本次只把 Agent 规则层的 Skill 数量从 8 更新为 9，并明确 Orchestrator 默认 `SAFE_PIPELINE`；未修改 §44 状态区或 §44.5 未完成队列。
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 error**
+  - `pnpm run test:changed`：因既有未提交 `package.json` 命中全局触发，回退全量 **327 文件** ⇒ **319 passed / 8 failed files；4569 passed / 19 failed tests**。失败由既有工作区状态造成：7 个已知环境 / 离线文件（16 例）+ 既有未提交 `recoveryPath` 变更导致 `tests/server/researchExperiments/threeFactorTopNStrategyDocument.test.ts` 3 例不匹配；本次仅新增/修改 Markdown，未触及任何测试或运行代码。
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0 漂移 / 0 未跟踪 CRLF**
+- **Baseline Impact**：Agent 规则层新增跨阶段编排能力；专业 Skill 的业务权威边界不变。`ROADMAP.md` §44 / §44.5 保持不变（本任务不改变当前业务状态与未完成队列），历史更新按 §47 写入 `ROADMAP-CHANGELOG.md`。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+## 2026-10-03 · `CODE-AGENT-GOAL-ORCHESTRATOR-002`（Orchestrator → Goal 驱动编排协议）
+
+- **Task**：把已有 Orchestrator Skill 从「阶段路由」升级为 **Codex Goal 驱动**的持续推进工作流：Codex Goal → Orchestration Protocol → 当前任务状态 → 选择下一阶段 → 按对应 Skill 规则执行 → 测试 / 验证 → 更新状态 → 继续，直到 `COMPLETE` / `BLOCKED` / `NEEDS_HUMAN`。
+- **Changed Domains**：**无**（仅 Agent 工作流与规则文档；未改变 Dataset / Research / Strategy / Backtest / Paper Trading / Production 语义）
+- **Changed Files**：
+  - 重写 `.agents/orchestrator/SKILL.md`：10 阶段标准 Pipeline（`PRODUCT` / `RESEARCH` / `STRATEGY` / `ARCHITECTURE` / `FRONTEND` / `BACKEND` / `INTEGRATION` / `REFACTORING` / `VERIFICATION` / `FINAL`，`DATABASE` 为横切只读 Gate）；阶段状态词汇 `BACKLOG` → `PENDING`；明确「Orchestrator 不把 Skill 当工具函数调用（无 `call_skill()` / `invoke_skill()` / `run_skill()`），Skill 是规则、Codex 是执行主体」；新增 Goal 启动协议（`/goal`）、自动继续与停止条件、检查点、Verification / Database / Strategy / Research Gate、Git 安全、`GOAL FINAL` 报告模板。
+  - 新增 `.agent/task-state.yaml`：当前 Goal 的过程状态（只描述当前 Goal；不保存长期业务知识 / 模型内部推理；不替代 `AGENTS.md` / `ROADMAP.md`；不参与业务逻辑）。
+  - 更新 `AGENTS.md`（§7 Orchestrator 条目改为 Goal 驱动，新增 `/goal` + `.agent/task-state.yaml` + 10 阶段说明）、`docs/architecture/AGENT-GUIDE.md`（§1-A 新增「Goal 驱动编排」与「不把 Skill 当工具函数调用」约束）、`ROADMAP-CHANGELOG.md`（§47 append-only）。
+- **Changed Contracts**：**无**
+- **Changed DB**：**无**（0 DDL / 0 DML / 0 migration；未连库）
+- **Changed Execution Path**：**无**（未修改 `server/**` / `client/**` 运行代码）
+- **Potential Baseline Drift**：**无领域漂移**。仅 Agent 规则层：Orchestrator 由「阶段路由」升级为「Goal 驱动协议」；阶段状态词汇 `BACKLOG` 规范化为 `PENDING`（纯 Agent 规则，未影响任何业务状态机 / 契约 / DB）。
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 error**
+  - `pnpm run test:changed`：因既有未提交 `package.json` 命中全局触发，回退全量 **327 文件** ⇒ **319 passed / 8 failed files；4569 passed / 19 failed tests**。失败集与 `CODE-AGENT-ORCHESTRATOR-001` 基线**完全一致**：7 个已知环境 / 离线文件（`dataHealth` / `image.uploadAndRecognize` / `limitUp` / `limitUp.watch` / `marketData` / `tushare.secret` / `tushareTradingCalendar`）+ 既有未提交 `recoveryPath` 变更导致 `threeFactorTopNStrategyDocument.test.ts` 3 例不匹配。**零新增失败文件**。
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0 漂移 / 0 未跟踪 CRLF**
+  - 虚拟任务编排模拟（低风险工具模块重构）⇒ 正确生成 `ARCHITECTURE → REFACTORING → VERIFICATION → FINAL`，未修改任何模块
+- **Baseline Impact**：Agent 规则层升级为 Goal 驱动编排；专业 Skill 业务权威边界不变。`ROADMAP.md` §44 / §44.5 保持不变（本任务不改变当前业务状态与未完成队列），历史更新按 §47 写入 `ROADMAP-CHANGELOG.md`。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `PAGE-FLOW-001`（页面流程三缺口落地：PD-01 / PD-04 / PD-03）
+
+- **Task**：把 `docs/product/PRODUCT-DECISIONS-001.md` 的 3 个产品决策落成代码：观察→研究入口（PD-01）、验证域输入来源显式化（PD-04）、候选列表只读端点 + 列表页（PD-03）。
+- **Changed Domains**：**Research（候选只读）** + **Frontend**；Dataset / Strategy / Backtest 语义**零改动**
+- **Changed Files**：
+  - 新增 `client/src/components/research/ResearchEntryLink.tsx` · `client/src/components/validation/{RerunBadge,ValidationSourcePicker}.tsx` · `client/src/pages/candidates/CandidateList.tsx`
+  - 新增 `tests/server/research/strategyCandidate/candidateList.test.ts`
+  - 修改 `server/research/strategyCandidate/{service.ts,router.ts}`（新增只读 `list`）
+  - 修改 `client/src/components/{robustness/SearchRobustnessPanel,oos/OosValidationPanel,walkForward/WalkForwardPanel}.tsx`、`client/src/components/research/index.ts`、`client/src/pages/candidates/index.ts`
+  - 修改 `client/src/pages/{Dashboard,Market,SentimentAnalysis,LeaderCandidates,LimitUpReview}.tsx`（观察页入口）
+  - 修改 `client/src/App.tsx` / `client/src/components/AppShell.tsx`（候选路由 + 侧栏，**mixed EOL 精确插入**）
+  - 文档：`docs/product/**`（8 份）· `docs/architecture/SCOPE-001-candidate-list-endpoint.md` · 本文件 · `CONTRACT-MAP.md`（+C-97）
+- **Changed Contracts**：➕ `C-97` 候选列表只读契约（`strategyCandidate.list`，input/output schema）—— **新增只读端点，无 breaking**
+- **Changed DB**：**无**（0 DDL / 0 DML / 0 migration；未连库）
+- **Changed Execution Path**：**无**（PD-01/PD-04 为展示与输入方式；PD-03 为只读查询）
+- **Potential Baseline Drift**：无。PD-01 的原始前提（从观察页携带 `datasetVersionId`）被实查推翻 —— 5 个观察页**全部 dataset-unaware**（读 legacy 表），已按 `SPEC-002` 修正为「跳转入口、不携带坐标」并在 `PRODUCT-DECISIONS-001.md` 登记前提修正。
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/server/research/legacyFreeProductionChain.test.ts` ⇒ **7/7**（边界 Gate 不回归）
+  - `pnpm exec vitest run tests/server/research/strategyCandidate tests/client/src/adapters/strategyCandidateAdapter.test.ts` ⇒ **5 文件 / 126 用例全绿**（含新增 5 用例）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**（`App.tsx` / `AppShell.tsx` 的 mixed 行尾保持）
+- **Baseline Impact**：新增 contract `C-97`；`AGENTS.md` / `AGENT-GUIDE.md` 由并发会话的 `CODE-AGENT-ORCHESTRATOR-001/002` 同步，本任务未改写其内容。
+- **GLOBAL AUDIT REQUIRED**：**NONE**（无 Domain 边界变化、无主链变化、无 DB schema 变化）
+
+---
+
+## 2026-10-03 · `FRONTEND-IA-001`（侧栏信息架构按研究闭环阶段重组）
+
+- **Task**：把侧栏从「按功能来源分组」（复盘分析 / 研究 / 策略 / 验证 / 交易 / 系统）改为**按用户所处的研究闭环阶段分组**（① 数据 → ② 观察 → ③ 研究 → ④ 策略 → ⑤ 验证 → ⑥ 前向与复盘）。依据 `docs/product/FLOW-001-page-workflow.md` §4/§5。
+- **Changed Domains**：**无**（纯前端导航归位；路由、页面、端点、契约全部未动）
+- **Changed Files**：`client/src/components/AppShell.tsx`（navGroups 重排）· `client/src/pages/validation/ValidationIndexPage.tsx`（补旧预览入口）· `tests/client/src/pages/pageFlowContracts.test.ts`（+5 结构锁）· `docs/product/FLOW-001-page-workflow.md`（状态与两处自相矛盾修正）
+- **Changed Contracts**：**无**（未新增/修改任何 tRPC 契约）
+- **Changed DB**：**无**
+- **Changed Execution Path**：**无**
+- **Potential Baseline Drift**：修正 FLOW-001 自身两处矛盾 —— ① 草案把「组合回测」放进 ⚙ 工具箱，与 §5「🔒 不挪位置」冲突 ⇒ 以 §5 为准，实际**留在 ④ 策略**；② §5 的「观察类页面补显 `datasetVersionId`」与 `SPEC-002`/PD-01 的实测结论（观察页 dataset-unaware）冲突 ⇒ **撤销该行**。
+- **Regression Result**：
+  - 导航项数 **27 → 28**（原 27 项**一项不丢** + PD-03 新增 `/candidates`），与 HEAD 版本逐项集合比对无缺失
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts` ⇒ **18/18**（含新增 §14–§18：分组顺序 / 28 项集合 / 归位 / 组合回测不动 / 旧预览入口）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+- **Baseline Impact**：导航 IA 与 FLOW-001 重新对齐；`ROADMAP.md` §44/§44.5 未改（未改变业务状态与未完成队列）。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `FRONTEND-LINK-001`（清除旧 Research 死链与误导文案 + 断链守卫）
+
+- **Task**：以「站内可达性审计」为判据清扫前端遗留缺陷：① 候选详情页 3 处指向**已移除**的 `/research[/:id]` 路由（死链）；② 「来源实验 / 来源结论」把**结构性退役**显示成「已不存在」（误导）；③ adapter 中指向**不存在的「结论页」**等过时提示。
+- **Changed Domains**：**无**（纯前端展示与文案；路由 / 端点 / 契约 / DB 全部未动）
+- **Changed Files**：`client/src/pages/candidates/StrategyCandidateDetail.tsx` · `client/src/adapters/strategyCandidateAdapter.ts` · `tests/client/src/pages/pageFlowContracts.test.ts`（+断链守卫）· `tests/client/src/adapters/strategyCandidateAdapter.test.ts`（3-e 断言加强）
+- **Changed Contracts**：**无**（tRPC 契约零改动）
+- **Changed DB**：**无**
+- **Changed Execution Path**：**无**
+- **Potential Baseline Drift**：`StrategyCandidateDetail` 的文件头注释仍写旧路径 `/research/candidates/:candidateId`，实际为 `/candidates/:candidateId` ⇒ 已修正。
+- **Regression Result**：
+  - 断链守卫**已验证覆盖面**：对修复前的 4 种写法（模板串 `/research/${id}`、`"/research"`、`/findings/1` 等）均命中；修复后 0 命中
+  - 站内可达性审计：**无孤儿路由**（44 条路由全部有入口；仅 `/dataset-builder` `/strategy-editor` 为纯重定向，无站内入口属设计意图）
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts tests/client/src/adapters/strategyCandidateAdapter.test.ts` ⇒ **2 文件 / 70 用例全绿**
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+- **Baseline Impact**：仅 `CHANGE-AUDIT` + 本 Goal 的 `task-state.yaml`。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `HOME-ENTRY-001`（首页研究闭环六阶段入口带）
+
+- **Task**：把首页 `/` 从「只有行情总览」补成「研究流程入口 + 今日观察」双区 —— **加法式**：新增六阶段入口带，下方行情总览**一个区块未删**。决策见 `PRODUCT-DECISIONS-001.md` PD-05。
+- **Changed Domains**：**无**（纯前端导航组件）
+- **Changed Files**：`client/src/components/research/ResearchFlowNav.tsx`（新增）· `client/src/components/research/index.ts`（barrel）· `client/src/pages/Dashboard.tsx`（+1 行渲染）· `tests/client/src/pages/pageFlowContracts.test.ts`（+§20/§21）· `docs/product/{FLOW-001,PRODUCT-DECISIONS-001}.md`
+- **Changed Contracts**：**无**
+- **Changed DB**：**无**
+- **Changed Execution Path**：**无**（入口带为纯导航：不取数、不计算，§21 断言组件内无 `trpc` / `useQuery`）
+- **Potential Baseline Drift**：无
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts tests/client/src/adapters/strategyCandidateAdapter.test.ts` ⇒ **2 文件 / 72 用例全绿**（含 §20 与侧栏逐条一致、§21 纯导航）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+- **Baseline Impact**：`CHANGE-AUDIT` + `.agent/task-state.yaml`；`ROADMAP.md` 未改。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `FRONTEND-DOM-VERIFY-001`（真实 DOM 渲染验证：本目标全部前端改动的端到端确认）
+
+- **Task**：按本仓铁律「**接线完成 ≠ 用户够得到** ⇒ 交付前必须无头量 DOM」，对 `FRONTEND-IA-001` / `HOME-ENTRY-001` / `FRONTEND-LINK-001` / PD-01·PD-03·PD-04 的全部前端改动做**真实浏览器渲染验证**（此前只有 `tsc` + 静态结构测试，**没有渲染级证据**）。
+- **方法**：无头 Edge + CDP（Node 内置 WebSocket 直连，零依赖）—— 与仓库既有 `docs/evidence/_probe_*.mjs` 同范式；探针与产物按 `AGENTS.md` §6-8 落在**仓外** `C:\work\sourcecode\_scratch\probe_frontend_ia_001.mjs`（`docs/evidence/` 已被 gitignore）。
+- **前置（实测）**：dev server 已在 `http://localhost:4000` 运行（node PID 10532 监听 4000）；先用 `/src/**.tsx` 直取确认 **Vite 服务的是工作区最新代码**。
+- **Changed Files**：**无仓库文件**（本轮为只读验证；仅落 CHANGE-AUDIT 与本 Goal 的 task-state）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **验证结果（18/18 PASS）**：
+  | 段 | 判据 | 结果 |
+  |---|---|---|
+  | A1–A4 首页 | 六阶段入口带渲染 · 6 阶段顺序 · 当前高亮 `OBSERVE` · **行情总览 4 个区块仍在**（大盘日线/连板梯队/题材热力/最高连板） | ✅ |
+  | B1–B3 侧栏 | 6 个分组按阶段顺序（真实 DOM 文本） · 含「候选」 · **组合回测仍在**（未挪位置） | ✅ |
+  | C1–C2 候选列表 | `/candidates` 真实渲染（**读到 13 条候选**）· 两个筛选控件在 · **无写操作入口**（只读） | ✅ |
+  | D1–D2 验证总览 | `/walk-forward` 旧预览入口在 · 三块验证卡片齐全 | ✅ |
+  | F1–F6 验证域 | 稳健性=`NO_RERUN`+源为 `<select>` · OOS=`RERUN`+源与 `parameterHash` 均为 `<select>` · WFA=`PER_FOLD_RERUN`+策略/版本为 `<select>` 且 Dataset 版本为**派生展示** | ✅ |
+  | E1 控制台 | 无 `No procedure found on path`（端点漏挂症状）· `consoleErrors=0` | ✅ |
+- **视觉确认**：首页截图（`_scratch/shot_home.png`）确认入口带单行 6 卡、③ 观察高亮「当前」、下方行情总览未被挤压或删除。
+- **探针自身的两个缺陷（已修正，如实登记）**：① 视口 800×600 时侧栏折叠为图标模式 ⇒ `[data-sidebar="menu-button"]` 取不到、误判 FAIL —— 改为 `--window-size=1600,1000`；② C2 用整页文本正则判「有写按钮」⇒ 命中**描述文案里的「转正」**而误报 —— 改为只查 `button, a[href]` 的**自身文本**。
+- **探针的异步等待缺陷（已修正）**：`ValidationSourcePicker` 在 `listSearches` 未返回时渲染 loading（既无 select 也无空态）⇒ 等待条件由「有徽章」改为「有徽章 **且**（下拉 或 空态）」。
+- **Regression Result**：`pnpm run check` ⇒ exit 0（本仓无文件改动）；DOM 探针 ⇒ **18/18 PASS**，exit 0。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `FRONTEND-SWEEP-001`（全站页面健康基线：33 条路由逐条实测）
+
+- **Task**：对**全部可达路由**做一次端到端健康扫描（渲染 + 控制台 + 未捕获异常 + 最终落地路径），建立可复核的「零缺陷」基线。
+- **方法**：无头 Edge + CDP 逐条 `Page.navigate`；捕获 `Runtime.consoleAPICalled(error)` 与 `Runtime.exceptionThrown`；自动 dismiss `alert/confirm`；REST 端点漏挂特征串 `No procedure found on path` 单独计数。探针在仓外 `_scratch/probe_frontend_sweep.mjs`，产物 `_scratch/probe_frontend_sweep.out.json`。
+- **结果：33/33 OK，异常 0**
+
+  | 段 | 覆盖 | 结果 |
+  |---|---|---|
+  | ① 数据 | `/data-health` `/datasets` `/historical-state` `/stock-sync` `/upload` `/operation-logs` | ✅ 全部渲染 |
+  | ② 观察 | `/limit-up` `/market` `/sentiment-analysis` `/leader-candidates` `/sentiment-alerts` | ✅ |
+  | ③ 研究 | `/research-experiments` `/candidates` `/candidates/270001` | ✅ |
+  | ④ 策略 | `/strategies` `/parameter-search` `/performance` `/backtest-runs` `/backtest-compare` `/strategy-final-evaluation` `/backtest` | ✅ |
+  | ⑤ 验证 | `/validation` `/{robustness,oos,walk-forward}` `/regime-report` `/walk-forward`(旧预览) | ✅ |
+  | ⑥ 前向与复盘 | `/paper-trading` `/paper-trading-3570001` `/review-workbench` | ✅ |
+  | 首页与兼容 | `/` · `/dataset-builder`→`/datasets` · `/strategy-editor`→`/strategies`（重定向均正确） | ✅ |
+
+  判据：`textLen > 60`（无白屏）· `uncaught = 0` · `No procedure found = 0` · 无 React 崩溃特征（`is not a function` / `Cannot read` / `Maximum update depth`）。
+- **内容抽查（渲染 ≠ 有数据，故逐页看正文）**：`/datasets` 真实读到 `first_limit_pullback` **12 个版本（最新 v8 READY）**；`/stock-sync` 真实计数（股票 100,164 / 已同步行情行 8,893,077）；`/sentiment-alerts` 3 条预警；`/market` 交易日 1,880；`/regime-report` 如实标注「技术预览 · 报告导出无后端服务（C-22/23 尚未 VALIDATED）」—— **诚实状态，非缺陷**。
+- **PD-01 的真实 DOM 确认**：4 个观察页均渲染出「做实验（**需在实验中选择 Dataset 版本** —— 观察页与数据集版本不是同一坐标系）」，与 `SPEC-002` 的强制文案一致。
+- **Changed Files**：**无仓库代码改动**（本轮为只读扫描；仅本审计条目与本 Goal 的 task-state）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **发现的已知缺口（登记，不在本轮 Scope）**：`/regime-report` 的「研究报告导出」**无后端服务**（页面已如实标注）；属后端/编排范围，需另立任务。
+- **Regression Result**：DOM 扫描 **33/33 OK / 异常 0**，exit 0；`pnpm run check` exit 0；`checkEolDrift --strict` = 0。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `STRATEGY-VALIDATION-STATUS-001`（补齐 FLOW-001 §3 的 ⑤→⑥ 交接缺口）
+
+- **Task**：在策略详情页新增「**验证状态**」Tab —— 回答「这个策略版本跑过哪些验证、各自什么状态」。此前用户必须离开策略页、去 `/validation` 逐块翻找才能知道某版本是否验证过（`FLOW-001` §3 原文标注「⚠️ 缺统一状态标识」）。
+- **Changed Domains**：**无**（纯前端只读汇总；未改任何业务语义）
+- **Changed Files**：新增 `client/src/components/strategy/StrategyValidationStatus.tsx`；修改 `client/src/components/strategy/index.ts`（barrel）· `client/src/pages/StrategyDetail.tsx`（第 4 个 Tab）· `tests/client/src/pages/pageFlowContracts.test.ts`（+§22/§23）· `docs/product/FLOW-001-page-workflow.md`
+- **Changed Contracts**：**无** —— 只消费既有只读端点 `paramSearch.list{Robustness,Oos,WalkForward}Runs`（三者的 Run 视图本就带 `strategyId`/`strategyVersion`/`status`）
+- **Changed DB**：**无**
+- **Changed Execution Path**：**无**（只读汇总；组件内无 `useMutation`、无任何写调用 —— 由 §22 钉死）
+- **设计纪律（关键）**：① 只表示「跑没跑过 / 状态是什么」，**不表示结论好坏** —— 面板内显式声明，且源码不得出现结论性词汇（§22 断言 `最优|最佳|推荐|评级|winner|best|optimal` 全零命中）；② 三块验证的「是否重跑」口径（零重跑 / 真重跑 / 每 Fold 真重跑）逐条展示，不可互相替代；③ 稳健性/OOS 的 list 端点**不支持** `strategyId` 过滤（仅 WFA 支持）⇒ 前端拉取上限 200 后本地过滤，UI 如实标注为台账而非全量统计。
+- **Regression Result**：
+  - **真实 DOM 验证 11/11 PASS**（无头 Edge + CDP；Radix Tab 用 `Input.dispatchMouseEvent` **真实鼠标**，符合 PROJECT_RULES）：
+    - 空态分支（`first-limit-pullback-3f-top3@1.63.0`，0 个 Run）：显示「本版本尚未跑过验证」+「前往参数搜索」CTA，**不虚构**三块行
+    - 已跑过分支（`wf1-e2e-mu9dbqw6@1.0.0`，真实数据）：`稳健性 零重跑 未跑过` / `样本外 OOS 真重跑 共 2 次 COMPLETED ×2` / `Walk-Forward 每 Fold 真重跑 共 2 次 COMPLETED ×1 CREATED ×1`，三块均有「查看 →」深链
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts` ⇒ **23/23**（含新增 §22 只读+无结论词 / §23 页面挂载）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+  - 探针：仓外 `_scratch/probe_strategy_validation_status.mjs`（11/11 PASS）
+- **Baseline Impact**：`CHANGE-AUDIT` + `.agent/task-state.yaml`；`FLOW-001` §3 的 ⑤→⑥ 行由「⚠️ 缺统一状态标识」改为「✅ 已补齐」。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `RESEARCH-LOOP-001`（补齐 FLOW-001 §3 的 ⑥→② 闭环表达 —— 最后一条交接）
+
+- **Task**：把「复盘发现 → 回到 ② 观察」这条**最后一棒**在 UI 上表达出来。此前：首页流程带名叫「研究闭环六阶段」却渲染成**直线**；`/review-workbench` **没有任何**回到 ②/③ 的链接（实查零命中）。
+- **Changed Domains**：**无**（纯前端导航与文案）
+- **Changed Files**：`client/src/components/research/ResearchFlowNav.tsx`（+循环说明）· `client/src/pages/ReviewWorkbench.tsx`（+闭环出口区）· `tests/client/src/pages/pageFlowContracts.test.ts`（+§24/§25）· `docs/product/FLOW-001-page-workflow.md`
+- **Changed Contracts / DB / Execution Path**：**无**
+- **实现要点**：① 首页流程带下方加 `data-research-flow-loop="true"` 的说明「↻ 闭环：⑥ 前向与复盘的发现 → 回到 ② 观察，形成新的研究问题」；② 复盘工作台页头之后加「闭环出口」`SectionCard`（`data-review-loop-exits="true"`），三个出口：回到 ② 观察·涨停复盘 / 回到 ② 观察·情绪分析 / 去 ③ 研究·独立实验；③ 出口描述显式声明「**本页只提供回跳，不替你下研究结论**」——避免导航被读成研究结论。
+- **Regression Result**：
+  - **真实 DOM 验证 4/4 PASS**（无头 Edge + CDP）：首页闭环说明文本命中；复盘工作台出口区渲染；三个 href 精确等于 `[/limit-up, /sentiment-analysis, /research-experiments]`；诚实口径文案命中
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts` ⇒ **25/25**（含新增 §24/§25）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+  - 探针：仓外 `_scratch/probe_close_loop.mjs`（4/4 PASS）
+- **Baseline Impact**：`FLOW-001` §3 的 ⑥→② 行由「⚠️ 闭环未在 UI 表达」改为「✅ 已表达」⇒ **§3 六条交接全部闭合或明确撤销**。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `FRONTEND-TAB-VERIFY-001`（Tab 交互级验证 + DOM 锚点约定）
+
+- **Task**：把前端验证从「路由能打开」推进到「**交互能切换**」。此前只证明了页面渲染与非空，未证明 Tabs 真的可切换（Radix 只认真实鼠标，JS `.click()` 会给出**假 PASS**）。
+- **Changed Domains**：**无**（纯前端锚点属性 + 验证）
+- **Changed Files**：`client/src/pages/{DataHealth,Market,StrategyDetail}.tsx` · `client/src/pages/datasets/{DatasetDetail,VersionDetail}.tsx`（各 Tab 触发加 `data-tab`）· `tests/client/src/pages/pageFlowContracts.test.ts`（+§26/§27）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **做法**：① 沿本仓既有自动化锚点约定（`data-sidebar` / `data-experiment-row`），给 **19 个 `TabsTrigger`** 补 `data-tab="<value>"` —— 否则 Radix 不把 `value` 写到 DOM，只能靠中文文案定位，脆弱；② 用 `Input.dispatchMouseEvent` **真实鼠标**逐 Tab 点击，断言 `aria-selected=true` 且对应 `[role=tabpanel]` 非空。
+- **结果：15/15 PASS**（5 页 / 15 个 Tab）
+
+  | 页面 | Tab | 结果 |
+  |---|---|---|
+  | `/data-health` | gates · snapshot · live · evidence | ✅ 4/4 |
+  | `/market` | market · heatmap · boards | ✅ 3/3 |
+  | `/datasets/120001` | overview · versions · jobs · statistics | ✅ 4/4 |
+  | `/strategies/first-limit-pullback-3f-top3` | definition · run · versions · validation | ✅ 4/4 |
+
+- **探针缺陷（已修正，如实登记）**：初版每 Tab 固定等 900ms ⇒ `/market` 的 `boards` 面板为空被判 FAIL。复查发现该 Tab 是**两跳查询**（`limitUp.getDates` → 连板统计），实测需 **~4s** 才出内容（等 4s 后 len=22778）⇒ 改**自适应等待**（面板出现可见内容即继续，上限 ~9.6s）。**是探针等待不足，不是产品缺陷。**
+- **⚠️ 证据更新（修正上一轮结论）**：上一轮把「`/strategy-final-evaluation` · `/paper-trading-3570001` 收敛进策略详情标签」列为「产品取舍」——**实查为后端门槛**：两页分别调用**策略专属端点** `researchRun.getPaperTrading3570001`（专用端点）与 `researchRun.getFinalEvaluation`（**无入参**），前端**无法**自行参数化。⇒ 该项属后端范围，已从「前端可自主项」移出。
+- **Regression Result**：Tab 交互扫描 **15/15 PASS**；`pnpm run check` ⇒ exit 0；`pageFlowContracts.test.ts` ⇒ **27/27**（含 §26 锚点约定、§27 验证 Tab 双锚点）；`checkEolDrift --strict` ⇒ 0；探针 `_scratch/probe_tab_interactions.mjs`。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `CONFIRM-DIALOG-001`（破坏性操作统一走 ConfirmDialog · 清除最后 2 处原生 confirm）
+
+- **Task**：把仓库**已明文约定**但未贯彻的一致性规则补完 —— 「重操作 / 破坏性操作走统一确认对话框（`common/ConfirmDialog`），不再一点就发请求」（约定原文见 `OosValidationPanel.tsx:136-137`）。实查客户端还剩 **2 处原生 `window.confirm`**。
+- **Changed Domains**：**无**（纯前端交互一致性；无业务语义变化）
+- **Changed Files**：`client/src/pages/LimitUpReview.tsx`（删除涨停记录）· `client/src/pages/StrategyDetail.tsx`（换版本丢弃草稿）· `tests/client/src/pages/pageFlowContracts.test.ts`（+§28/§29）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **为什么是「完善」而非「美化」**：原生 `window.confirm` **阻塞页面**且**无法被无头 DOM 断言**（本仓铁律要求「交付前必须无头量 DOM」）⇒ 破坏性操作此前**不可自动化验证**。改为 AlertDialog 后既可断言，也能带 `pending` 态与 `tone=danger` 的危险语义。
+- **实现**：① `LimitUpReview` 记录行：`window.confirm(...)` → `setConfirmDeleteOpen(true)`，行内渲染 `ConfirmDialog`（`tone="danger"`、`pending={deleteRecord.isPending}`，标题含被删股票名与代码、说明写明「无法撤销」）；② `StrategyDetail`：`window.confirm(...)` → `pendingVersionSwitch` 状态 + `ConfirmDialog`（确认键「丢弃并切换」、`tone="danger"`）。两处均**只改确认方式，不改写操作本身**。
+- **Regression Result**：
+  - **真实 DOM 验证 5/5 PASS**（无头 Edge + CDP，真实鼠标；**只打开 → 取消，绝不确认**，避免删真实数据）：删除按钮存在（52 个）→ 点击弹出 `[role=alertdialog]`，文案含「删除涨停记录：贝瑞基因（000710.SZ）」与「无法撤销」→ **未触发任何原生 dialog**（`nativeDialogs=[]`）→ 点「取消」后对话框关闭
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts` ⇒ **29/29**（+§28 全客户端 `window.confirm` 零命中 · §29 两处已接 ConfirmDialog）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+  - 探针：仓外 `_scratch/probe_confirm_dialog.mjs`（5/5 PASS）
+- **验证范围如实说明**：`LimitUpReview` 的对话框路径已**真机点击验证**；`StrategyDetail` 的对话框需先制造「脏草稿」状态才可触发，本轮**未做**该交互复现 ⇒ 其正确性由 `tsc` + §29 源码断言 + **同一共享组件**的真机证据支持（非直接证据，已如实标注）。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `STATUS-MIRROR-001`（候选状态镜像表收口：补齐唯一未受守护的客户端词表）
+
+- **Task**：自审 + 全客户端词表扫描。发现 `CandidateList.tsx`（本 Goal 早先新增）**页内硬编码**了一份候选状态闭集，注释自称「与后端 `RESEARCH_CANDIDATE_STATUSES` 同源」，但**没有任何东西守护**这条同源关系 —— 正是 `PROJECT_RULES` 警告的「闭集不同步 ⇒ 生产 tRPC 拒值」风险。
+- **Changed Domains**：**无**（纯前端常量归位 + 测试）
+- **Changed Files**：`client/src/lib/status.ts`（新增 `CANDIDATE_STATUS_OPTIONS` 镜像表）· `client/src/pages/candidates/CandidateList.tsx`（删除页内重复，改 import）· `tests/client/src/lib/statusVocabulary.test.ts`（+「候选状态词表」对表段）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **做法（沿本仓既有范式，不新造）**：`statusVocabulary.test.ts` 头部已写明该范式 ——「`client/**` 不能 import 后端 / shared 运行时值（`zod` 会被打进浏览器包）⇒ 客户端只能维护**镜像表**，且**必须配一条对表测试**，否则后端词表一变、前端下拉当天静默漂移」。本任务把候选状态并入同一位置（`lib/status.ts`）并补同款「漂移哨兵」。
+- **扫描结论**：客户端 `*_OPTIONS / *_VALUES / *_STATUSES` 常量共 8 处；`STRATEGY_VERSION_STATUS_OPTIONS`（statusVocabulary）· `STRATEGY_TYPE_VALUES`（strategyTypeVocabulary）· `definitionVocabulary` 等**均已有对表测试** ⇒ **候选状态是唯一未受守护的一份**，本轮补齐。
+- **Regression Result**：
+  - `tests/client/src/lib/statusVocabulary.test.ts` ⇒ **7/7**（原 4 + 新 3：① 与后端 `RESEARCH_CANDIDATE_STATUSES` 逐字同序一致 ② 无重复无空值 ③ 每个状态都能取到合法语义色）
+  - **真实 DOM 3/3 PASS**：`/candidates` 筛选下拉存在且恰含 6 个状态、与镜像表逐字一致、真实选择 `ACCEPTED` 后筛选生效且页面无报错
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+  - 探针：仓外 `_scratch/probe_candidate_filter.mjs`（3/3 PASS）
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `A11Y-NAMES-001`（全站可访问名称扫描：清除无名的纯图标交互）
+
+- **Task**：用真实 DOM 扫描**所有可交互元素的可访问名称**（`button` / `a[href]`：既无可见文本，也无 `aria-label` / `title` / `img[alt]`）—— 这类元素在屏幕阅读器里只读出「按钮」，也无法按语义被自动化定位。
+- **Changed Domains**：**无**（纯前端无障碍属性）
+- **Changed Files**：`client/src/components/SentimentAlertBell.tsx` · `client/src/pages/PaperTrading.tsx` · `tests/client/src/pages/pageFlowContracts.test.ts`（+§30/§31）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **发现（扫描 30 条路由）**：
+  | # | 位置 | 影响面 |
+  |---|---|---|
+  | 1 | `components/SentimentAlertBell.tsx:128`（顶栏预警铃，纯图标 + 可选未读徽章） | 🔴 **渲染在每一页的顶栏**（12 条路由同时命中），未读数为 0 时按钮**完全无名** |
+  | 2 | `pages/PaperTrading.tsx:565`（模拟盘「暂停 / 恢复」纯图标按钮） | 该页 3 处命中（每行一个） |
+- **修复**：① 预警铃加**状态相关** `aria-label`（`情绪预警（N 条未读）` / `情绪预警（无未读）`）+ 对应 `title`；② 暂停/恢复按钮加状态相关 `aria-label`（`暂停该模拟盘运行` / `恢复该模拟盘运行`）+ `title`。**只加属性，不改行为。**
+- **Regression Result**：
+  - **扫描复跑：30 条路由 → 有问题的页面 0 个**（修复前为 12 个页面 / 2 个根因）
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts` ⇒ **31/31**（+§30 预警铃状态相关名称 · §31 暂停/恢复名称）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+  - 探针：仓外 `_scratch/probe_a11y_names.mjs`（产物 `.out.json`）
+- **方法说明（可复用）**：本轮沿用「先量 DOM 找根因 → 修 → 复跑同一探针证明归零」的闭环；探针按 `data-loc`（dev 模式由 Vite 插件注入源码位置）直接定位到**文件:行**，根因 2 处而非表面 12 处。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `A11Y-FORMS-001`（表单可访问名称：30 条路由扫描 → 清零）
+
+- **Task**：扫描 `input` / `select` / `textarea` 的**可访问名称**（排除 hidden/submit/checkbox 等）。分类：`完全无名`（无 label 关联、无 `aria-label`/`labelledby`/`title`；**只有 placeholder 不算名称**）与 `仅靠 placeholder`（弱合规）。
+- **Changed Domains**：**无**（纯前端无障碍属性）
+- **Changed Files**：`pages/{HistoricalState,StockSync,LimitUpReview,LeaderCandidates,ParameterSearch,RegimeReport,WalkForwardAnalysis,Dashboard}.tsx` · `components/oos/OosValidationPanel.tsx` · `tests/client/src/pages/pageFlowContracts.test.ts`（+§32）
+- **Changed Contracts / DB / Execution Path**：**无**（只加 `id`/`htmlFor`/`aria-label`，不改任何取值与提交逻辑）
+- **发现（扫描 30 条路由）**：`完全无名 5` + `仅靠 placeholder 17`。
+  - 🔴 **最典型的一类**：`HistoricalState` / `Dashboard` / `ParameterSearch` 里**视觉上明明有标签**（`<Label>` 或 `<p>`），但**没有程序关联** ⇒ 读屏只报「编辑框」，点标签也不会聚焦该控件。属于「看起来有、实际没有」。
+  - ⚠️ **不能直接用 placeholder 当名称**：其中多处 placeholder 是**示例值**（`cand-360001` / `1.0.0` / `2026-08-22` / `000300.SH` / `sec_…`）⇒ 若照抄，读屏会把「示例」当字段名。故逐个回到上下文取**真实可见标签**。
+- **修复**：① `HistoricalState`（交易日 / asOf）与 `Dashboard`（选择日期）建立 `id` + `htmlFor` 关联；② 其余 12 处补 `aria-label`，文案与页面上的可见标签**逐字一致**（如「策略 ID」/「版本」/「决策起（YYYY-MM-DD）」/「基准指数代码」/「起始日期（含）」/「日期区间 · 起始」）。
+- **Regression Result**：
+  - **扫描复跑：完全无名 5 → 0；仅靠 placeholder 17 → 0**（30 条路由）
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `pnpm exec vitest run tests/client/src/pages/pageFlowContracts.test.ts` ⇒ **32/32**（+§32 逐文件钉住上述关联/名称）
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+  - 探针：仓外 `_scratch/probe_form_a11y.mjs`（产物 `.out.json`，含 `data-loc` 源码定位）
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `A11Y-KEYBOARD-001`（键盘可达性：可点击 chips 必须是真按钮）
+
+- **Task**：静态扫描「挂了 `onClick` 但本身不是交互元素」的 JSX 标签（排除 button/a/input/… 与转发到原生控件的封装组件）。这类元素**键盘 Tab 不到**，键盘用户无法触发。
+- **Changed Domains**：**无**（纯前端无障碍）
+- **Changed Files**：`components/CandidateInsightCharts.tsx` · `components/CandidatePhaseFunnel.tsx` · `tests/client/src/pages/pageFlowContracts.test.ts`（+§33/§34）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **发现（扫描前 4 处）**：
+  | # | 位置 | 判定 |
+  |---|---|---|
+  | 1 | `CandidateInsightCharts` 板块筛选 chips（`<Badge onClick>` → 渲染 `<span>`） | 🔴 **真缺陷**：筛选开关键盘不可达 |
+  | 2 | `CandidatePhaseFunnel` 阶段筛选 chips（同上） | 🔴 **真缺陷** |
+  | 3 | `CandidateInsightCharts` 评分区间 `<Bar onClick>`（recharts SVG） | ⚠️ 有**键盘替代路径**：同页 4 个真 `<button>` 已能设置同一筛选 ⇒ 图表点击属冗余便利 |
+  | 4 | `CandidateInsightCharts` 个股气泡 `<Scatter onClick>`（recharts SVG） | ⚠️ **无替代路径** ⇒ 键盘用户无法按个股筛选（见下「剩余」） |
+- **修复**：两处 chips 改为 `Badge asChild` 渲染**真 `<button>`**，并加 `aria-pressed` 表达「已选」切换语义（保留原有视觉）；`onClick` 从 Badge 移到 button。阶段筛选的指引文案同步补「键盘聚焦后按回车 / 空格」。
+- **Regression Result**：
+  - 静态扫描：可点击非交互元素 **4 → 2**（仅剩 recharts 的 SVG 图形元素）
+  - **真实键盘验证 3/3**（无头 Edge + CDP）：chips 已是 `button[aria-pressed]` ✅ · 可聚焦（`document.activeElement === chip`）✅ · **空格键触发筛选切换** ✅
+  - ⚠️ **Enter 键在本 harness 无效 —— 已用对照实验判定为 harness 限制，非产品缺陷**：对**已知正常的原生 `<button>`**（主题切换）派发 Enter（`rawKeyDown` / `keyDown`+`char` 两种形态）同样不触发，而空格可触发 ⇒ 原生 `<button>` 的 Enter 语义由浏览器保证，无法在本 CDP harness 中复现。
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`pageFlowContracts.test.ts` ⇒ **34/34**（+§33 chips 必须真按钮 · §34 指引含键盘说明）；`checkEolDrift --strict` ⇒ 0
+  - 探针：仓外 `_scratch/scan_clickable_tags.mjs` · `probe_chip_keyboard2.mjs` · `probe_key_control.mjs`（对照）
+- **剩余（如实登记，待产品决策）**：`<Scatter onClick>`（个股筛选）**没有键盘替代路径**。补齐需要新增一个平行控件（如个股列表 / 下拉），属**产品交互决策**，不在纯前端整理范围内 ⇒ 登记为候选任务，不擅自新增入口。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `A11Y-DIALOG-FOCUS-001`（对话框键盘路径：Escape 关闭 + 焦点还原）
+
+- **Task**：验证对话框的键盘路径 —— ① Escape 能否关闭；② 关闭后**焦点能否回到触发元素**（否则键盘用户丢失位置，只能从头 Tab）。
+- **Changed Domains**：**无**（纯前端无障碍）
+- **Changed Files**：`client/src/components/common/ConfirmDialog.tsx` · `tests/client/src/pages/pageFlowContracts.test.ts`（+§35）
+- **Changed Contracts / DB / Execution Path**：**无**
+- **发现（真实 DOM 实测）**：Escape **可以**关闭（Radix 默认行为正常）；但关闭后 `document.activeElement` 落到 **`<body>`** ⇒ 焦点丢失。
+- **根因（经对照实验定位）**：`ConfirmDialog` 是**受控** AlertDialog、**没有 `AlertDialogTrigger`** ⇒ Radix 的 `triggerRef` 为空，其默认 `onCloseAutoFocus` 没有可还原的目标，直接跳过。
+  - 对照组：使用 `DialogTrigger` 的 `CreateDatasetDialog`（`/datasets` 新建数据集）关闭后焦点**正常回到触发按钮** ⇒ 证明不是 Radix 或全局配置问题，而是本组件用法问题。
+- **修复过程（两次失败，如实记录）**：
+  1. ❌ 用 `useEffect(() => { if (!open) ref = document.activeElement }, [open])`：**点击触发按钮时 `open` 仍为 false、effect 不重跑** ⇒ 记到的永远是 `BODY`。
+  2. ❌ 改为关闭态持续监听 `focusin`：仍失败（未进一步定位）。
+  3. ✅ 改为在 **`onOpenAutoFocus`** 捕获 —— 此刻焦点**尚未移入内容**，`document.activeElement` 正是触发元素；再在 `onCloseAutoFocus` 中 `preventDefault()` + `target.focus()`（带 `document.contains(target)` 守卫，避免对已卸载节点调用）。
+- **影响面**：`ConfirmDialog` 是共享组件 ⇒ **4 个调用点全部受益**（复盘删除 / 换版本丢草稿 / OOS 执行与取消）。
+- **Regression Result**：
+  - **对话框键盘探针 4/4 PASS**：真实点击打开 ✅ · **Escape 关闭** ✅ · **焦点回到触发元素**（`isTrigger=true, title="删除记录"`）✅ · 取消后记录仍在（未执行删除）✅
+  - **回归探针 5/5 PASS**：点「取消」路径仍正常关闭、且仍未触发原生 dialog
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`pageFlowContracts.test.ts` ⇒ **35/35**（+§35）；`checkEolDrift --strict` ⇒ 0
+  - 探针：仓外 `_scratch/probe_dialog_keyboard.mjs` · `probe_dialog_focus_control.mjs`（对照）· `probe_confirm_dialog.mjs`（回归）
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `SCOPE-002`（策略创作工作台：纯前端构建 Strategy 的契约与实现）
+
+- **Task**：执行 `docs/architecture/SCOPE-002-strategy-authoring-workbench.md`（用户裁定六项后）。目标 = **用前端即可完整构建出 `3570001`**。
+- **Changed Domains**：Strategy（新增**创作辅助**子域 `authoring`；不改既有 `strategy` / `strategyCandidate` 语义）
+- **Changed Files（新增）**：`scripts/verifyStrategyAuthoringE2E.mts`（`pnpm strategy:verify-authoring`，自清理写库验收） · `server/research/strategyAuthoring/{diff,jsonPointer,presetRegistry,vocabulary,materialize,blankDraft,datasetBinding,router}.ts` · `client/src/components/strategy/PresetEditor.tsx` · `tests/server/research/strategyAuthoring/{golden3570001.ts,golden3570001,diff,materialize,jsonPointer,vocabulary,blankDraft,router,equivalence3570001}.test.ts`
+- **Changed Files（改动）**：`server/research/recipeRegistry.ts`（新增 `projectStrategyRecipe` / `listStrategyRecipeProjections`，**投影收敛为唯一实现**）· `server/research/patternLibrary/threeFactorTopNStrategy.ts`（改用该唯一实现，删除内联副本）· `server/strategyDomainRouter.ts`（挂载 `authoring` 子 router）· `shared/researchContracts.ts`（+7 份 schema）· `client/src/components/strategy/{index.ts,StrategyBasicInfo.tsx}`（barrel + `strategyType` 选择器）· `client/src/pages/StrategyDetail.tsx`（新建走 canonical 空白草稿 + RECIPE/EXIT_POLICY 预设接入 + `saveDraft` 承接新建保存）
+- **Changed Contracts**：**新增** `strategyDomain.authoring.{getVocabulary,getBlankDraft,materializePreset,previewDocument,saveDraft}`（5 个 procedure，**不新增 tRPC 顶层 key**，仍为 21）；**新增** shared schema：`strategyAuthoringSlotSchema` · `strategyPresetParameterValueSchema` · `strategyAuthoringBlankInputSchema` · `materializeStrategyPresetInputSchema` · `strategyAuthoringDraftOriginSchema` · `saveStrategyAuthoringDraftInputSchema` · `previewStrategyAuthoringDocumentInputSchema`
+- **DB Impact**：**0 表 / 0 列 / 0 migration**（写库复用既有 `StrategyService.save`，无第二条写路径）
+- **Execution Impact**：**无**（不改 simulator / backtest / evaluation / paper trading；`runTradeSimulation` 仍是唯一内核）
+- **关键复用（防第二套 SoT）**：EXIT_POLICY 基座直接引用 `exitPolicyExperiments.ts#STOP_POLICY_EXPERIMENTS`；RECIPE 预设来自 `recipeRegistry`；runner 状态来自 `stateFactorRegistry`；预设 payload 一律由**既有校验器**复核（`exitPolicyDefinitionErrors` / `resolveStrategyRecipe` / `runnerBridgePolicyErrors` …）
+- **设计偏差（已登记在 SCOPE-002 §9.2）**：D-1 新增 `EXIT_BASE` 槽（既有注册表存的是**完整** `ExitPolicyDefinition`）· D-3 空白草稿返回"零件"而非"已校验文档" · D-4 `saveDraft` 对既有策略**不降级状态** · D-7 单一通用 `PresetEditor` · D-8 语义 diff 默认忽略 `description`/`note`
+- **Regression Result**：
+  - **3570001 等价锚点（DoD 的机器判定）**：`materializePreset(exit:SL-18.1-nh3-5-20)` 与 golden `policy` **逐字段相等**；`diffAgainstVersion` 对"空白草稿 + 预设 + 用户填自由段"的产物 ⇒ **`equal: true`**；`previewDocument` ⇒ `valid: true` + 真实 fingerprint
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - `tests/server/research/strategyAuthoring` ⇒ **66/66**（8 文件）
+  - `tests/client/src/components/strategy` + `pageFlowContracts` ⇒ **115/115**（7 文件）
+  - 定向回归（recipeRegistry · patternLibrary · strategySchema · runWorkbenchAssembly · strategyCandidate）⇒ **326/326**（20 文件）
+  - `pnpm run test:changed` ⇒ 8 失败文件 / 19 用例，**全部为既有失败集**（7 个环境依赖 + `threeFactorTopNStrategyDocument` 的 `recoveryPath` 差异，均早于本次改动并有文档登记）⇒ **零新增失败文件**
+  - `node scripts/checkEolDrift.mjs --strict` ⇒ **0**
+- **端到端验收（真实写库，自清理）**：`scripts/verifyStrategyAuthoringE2E.mts`（`pnpm strategy:verify-authoring`） —— `authoring.saveDraft` 新建 Draft → `strategyDomain.strategy.loadVersion` **读回真实落库文档** → `diffAgainstVersion` vs 3570001 golden ⇒ **`equal=true / differences=0 / comparedPaths=67`** → `strategyDomain.strategy.delete` 清理（实查 `strategies` / `strategy_versions` 各 0 行，`3570001` 完好）
+- **浏览器实测（headless Edge + CDP，只读）**：`/strategies/new` 已**不再是 legacy 模式**（`legacyNoticeShown=false`），canonical 定义编辑器 + RECIPE(12 项) + EXIT_POLICY(7 项，含 `SL-18.1 + NEW_HIGH_3 5 → 20`) + `strategyType`(9 项) 全部渲染；选预设触发真实 `materializePreset`（响应 `issues:[]`、`runnerBridge=NEW_HIGH_3/5/20`）；点「保存」发出的 `saveDraft` 请求体含 `recipe.recipeId=first-limit-pullback-3f-top3`、`definition.exit.rules[0].policy.runnerBridge.state=NEW_HIGH_3`、`origin.kind=BLANK_CANONICAL`、`presetRefs=[RECIPE,EXIT_POLICY]`（含 presetVersion）
+- **附带修复：R6 前向账户续跑缺陷**（`server/paperTrading3fTop3Runner/forward.ts` + `service.ts`）：`buildIncrement` 原先只跑 `[from, to]` 新窗口，而 `runTradeSimulation` **只有 `initialCapital`、无期初在仓/期初权益入参** ⇒ 组合从 100k 平仓起步，`mergeForwardDays` 又把账户覆盖成该次独立回测末日值 ⇒ 一旦有新交易日，6000001 的 199,036 账户会被打回约 10 万。修法 = **从基线起点重放整段再切增量**（新增纯函数 `resolveForwardRunWindow` / `partitionForwardIncrement`；`PaperForwardState` 增 `baselineStartDate`，老载荷回落 `PAPER_FORWARD_3570001_DEFAULT_BASELINE_START="2025-01-01"`）。证据：`forward.test.ts` **10/10**（+4 条 R6 回归）；既有 6090001 只读复核 `WAITING_FOR_NEW_DATA` / equity **199,036.53** 不变。
+- **S7 专项页收敛（本轮完成）**：① 后端 —— `server/closedLoopBacktestRun/rawPayload.ts` 增 `listClosedLoopBacktestRunRawResults`（按 `strategyId/strategyVersion/experimentId/runIdPrefix` **原样**列取，不经旧 reconcile）；新增 `strategyVersionArtifacts.ts`（纯选择器 `selectStrategyVersionEvaluation` / `selectStrategyVersionPaperTrading` + 只读加载器）；`researchRun` 新增 **通用端点** `getStrategyVersionEvaluation` / `getStrategyVersionPaperTrading`（+ `strategyVersionCoordinatesInputSchema`），并把 `getFinalEvaluation` / `getPaperTrading3570001` **收敛为薄封装**（固定 3570001 坐标，返回形状不变）。② 前端 —— 新增 `client/src/components/strategy/StrategyVersionArtifactsTabs.tsx`，策略详情新增「最终评估 / 模拟盘」两个 Tab（按当前版本坐标查询）；两个专项页也改用通用端点。**证据**：真实库只读比对通用端点与专项端点 `promoted/baseline runId` / `evaluationDetail`（Full **129.6860%**）/ 407 日 / equity **199,036.53** / forward **WAITING_FOR_NEW_DATA** **逐字段一致**；缺坐标 ⇒ `null`（不伪造）；`strategyVersionArtifacts.test.ts` **7/7**；headless Edge 实测两个 Tab 均渲染（网络 200、无 console 错误）；`pnpm run check` 0 错；`pageFlowContracts` + client strategy **115/115**。
+- **未做（如实登记）**：未在浏览器里跑通"填齐自由段 → 点保存 → 成功落库"（自由段分散在折叠面板，逐字段 DOM 输入成本高；落库等价性已由上面的 E2E 脚本用同一写入口证明）· 未动 **S7**（专项页收敛，SCOPE-002 §4.1 标注为可选；硬前置 = **R6** 前向账户续跑缺陷，仍是未修的真实缺陷）
+- **GLOBAL AUDIT REQUIRED**：**NONE**（无新增表 / 无核心数据流变化 / 无既有执行路径语义变化；按 AGENTS §8 = minor）
+
+---
+
+## 2026-10-03 · `STRATEGY-DEFINITION-PAGE-IA-001`（策略定义页重排 + 完成度总览）
+
+- **Task**：重新整理「策略定义」页，并补上缺失的功能（起点选择 / 完成度总览 / 预设状态可见）。
+- **Changed Domains**：**Frontend**（无契约 / 无 DB / 无执行链变化）
+- **Changed Files**：`client/src/pages/StrategyDetail.tsx` · `client/src/components/strategy/DefinitionProgressOverview.tsx`（新增） · `client/src/components/strategy/DefinitionFields.tsx` · `client/src/components/strategy/definitionDraft.ts` · `client/src/components/strategy/PresetEditor.tsx` · `tests/client/src/pages/strategyDefinitionPageIa.test.ts`（新增）
+- **实测发现（`/strategies/new`）**：① 模式族配置**无条件置顶**，默认预填「首板股票池 · 滚动 3F」并给出"创建独立策略"按钮 —— 与"空白 canonical 起点"直接冲突（用户从没选过那个族）；② 页面同时存在**两组 strategyId / version / name 输入**（模式族面板 + 基础信息）；③ 定义 7 段默认折叠，首屏只有「未命名策略 / 信号配方 / 退出政策」三个标题，**看不出还差什么**；④ 预设槽状态（尤其**必填的信号配方**）没有任何总览 —— 缺它会退回 DEFAULT 配方。
+- **重排**：① 新建时用「起点」二选一（**空白 canonical 默认** / 从模式族生成），模式族面板**只在选后者时**渲染；既有版本把模式族收进 `<details>` 折叠区（"从模式族另存新版本"，不修改当前版本）。② 策略定义 Tab 顺序改为：**基础信息 → 定义完成度 → 信号配方 → 退出政策 → 定义明细**。
+- **新增功能**：`DefinitionProgressOverview` —— 7 段状态（齐 / 还差 N / 待填 / 可选）+ 预设槽状态（已选 / 待选 / 可选 / 有问题）+ 汇总（已齐 X · 还差 N 项 · 预设 X/Y）；点击芯片**展开并滚动**到对应段或预设区块。状态**只来自** `definitionSegmentStatuses`（与折叠段、保存前校验**同源**），**不另立必填表**。
+- **单一来源收敛**：段 DOM 前缀 `DEFINITION_SEGMENT_DOM_PREFIX` 与跳段事件 `DEFINITION_FOCUS_SEGMENT_EVENT` / `dispatchDefinitionFocusSegment` 移入 `definitionDraft.ts`（原先前缀写死在 `DefinitionFields.tsx` 内部，概览要跳段就得再抄一份字符串 ⇒ "点概览跳不到那一段"）。
+- **Changed Contracts / DB / Execution Path**：**无**
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 客户端定向（`tests/client/src/pages` + `components/strategy`）⇒ **193/193**（15 文件）
+  - 新增**结构锁** `strategyDefinitionPageIa.test.ts` ⇒ **7/7**（起点二选一 · 模式族不再无条件渲染 · 概览位置 · 状态单一来源 · 空段不得显示"齐" · 预设状态并入 · 跳段单一来源）
+  - **浏览器实测**（headless Edge + CDP）：新建页默认**不渲染**模式族面板、有起点二选一；概览「7 段 · 已齐 2 · 还差 2 项 · 预设 1/2 · 1 项待选」，芯片 `RECIPE=MISSING / EXIT_POLICY=OPTIONAL`；选中配方后 ⇒ `RECIPE=SET`、汇总「预设 2/2」；点「信号配方」芯片滚到 `#preset-recipe`（top=89，在视口内）；既有版本页无起点选择器、模式族在折叠区、概览「已齐 5 · 没有必填缺口」
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `STRATEGY-PRESET-DISPLAY-002`（配方改说人话：规则式中文名 + 参数可读 + 技术细节折叠）
+
+- **Task**：用户反馈「信号配方 / 退出政策都是代码，意义不明；下面的 7 条也比较混乱」，要「像模式族那样给出很多配置选项、显式配置、参数可调」。本次**只改呈现层**（不改任何契约 / DB / 执行语义）。
+- **Changed Domains**：**Frontend** + 预设**展示元数据**（后端 `presetRegistry` 增加 `displayName` / `summary` / `optionLabels`，纯展示、不参与计算）
+- **Changed Files**：`server/research/strategyAuthoring/presetRegistry.ts` · `server/research/strategyAuthoring/vocabulary.ts` · `client/src/components/strategy/PresetEditor.tsx` · `client/src/pages/StrategyDetail.tsx` · `tests/server/research/strategyAuthoring/vocabulary.test.ts` · `tests/client/src/pages/strategyDefinitionPageIa.test.ts`
+- **问题（用户实测反馈）**：① 配方下拉显示 **recipeId**（`first-limit-pullback-3f-top3`）与**实验编号**（`SL-18.1 + NEW_HIGH_3 5 → 20`）；② 参数下面挂着 **JSON Pointer**（`stop.anchor.stopRatio`）；③ 底部暴露**源码路径 + sha 指纹 + 原始 JSON**；④ 默认只有 6 个退出方案，"没有很多选项"。
+- **改法（四条硬规则，已写进 `PresetEditor.tsx` 文件头）**：
+  1. **下拉只显示「规则式中文名」** —— 名字本身把规则说清楚（`6%止损｜8%回撤保护｜破均线走｜最长20日`、`首板回踩 · 3F 评分取前 3`）；**不显示** presetId / recipeId / 实验编号；
+  2. **不堆解释段落** —— `summary` 只作 `title` 悬浮提示，**不作正文渲染**；
+  3. **参数只显示中文名 + 取值含义** —— `初始止损比例 = 6%`、`判定持有日 = 5 个交易日`；枚举显示中文（`NEW_HIGH_3` → **创 3 日新高**，提交仍是 canonical 值）；**不显示** JSON Pointer；
+  4. **技术细节默认折叠** —— presetId / 技术名 / 预设版本 / 来源 / 内容指纹 / 生成的 JSON 全收进「技术细节」，排障时才展开。
+- **新增「更多方案」**：退出政策编辑器同时提供 **`EXIT_POLICY` 组合预设（6）** 与 **`EXIT_BASE` 完整基座（46）** ⇒ 默认视图干净、需要更多选择时展开「更多方案（46）」；`PresetSelection` 因此携带**自己的 slot**，两者走同一物化入口（`origin.presetRefs[].slot` 如实记录）。
+- **展示元数据的唯一来源**：中文名 / 说明 / 枚举标签由后端 `presetRegistry` 提供（复用既有 `describeStopPolicy` / `describeTrailingPolicy` 生成短规则名），经 `getVocabulary` 下发；**前端不写任何 presetId 或中文名映射**。
+- **守门测试**：`vocabulary.test.ts` 新增 —— 每个预设必须有**非空中文名**、**≠ presetId**、**含汉字**；`strategyDefinitionPageIa.test.ts` 新增 4 条（8–11）—— 下拉用 `displayName`、summary 不作正文、技术细节在 `showTechnical` 之后、参数不渲染 `code`、退出编辑器含 `EXIT_BASE`。
+- **Changed Contracts / DB / Execution Path**：**无**（`getVocabulary` 响应新增字段，属向后兼容的只读扩展）
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - `tests/server/research/strategyAuthoring` ⇒ **70/70**（8 文件）
+  - 客户端定向（`tests/client/src/pages` + `components/strategy`）⇒ **197/197**（15 文件，含新增结构锁 11 例）
+  - `pnpm run test:changed` ⇒ 8 失败文件与改动前**逐一相同** ⇒ **零新增失败文件**
+  - **浏览器实测**（headless Edge）：配方下拉全中文；退出政策下拉为短规则名；`更多方案（46）` 出现；参数显示 `初始止损比例 = 6%` / `快线窗口 = 5 个交易日`；`codeLabelVisible=false` / `sourcePathVisible=false` / 指纹不可见；展开「技术细节」后才出现 presetId / 来源 / 指纹；Runner 状态下拉为 12 项中文（值仍是 `NEW_HIGH_3`）
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+### 续（同日）：7 段定义表单的字段噪音同样收口
+
+- **问题**：`SegmentForm#Field` 会把 **canonical 路径**（`definition.entry.event.type`）与**枚举原始值**（`FIXED_RATIO` / `T_CLOSE` / `T_PLUS_1_OPEN` / `TARGET_WEIGHT`）当标签回显；另外 7 段里还有 3 处长段技术说明（后端硬约束 **L6/L7** 规则名、`TUNABLE`/`DERIVED` 语义、`bar.volumeRatio` 等字段引用语法）。用户实测反馈「下面的也比较混乱」。
+- **改法**：新增 \`client/src/components/common/FieldTechnicalDetails.tsx\`（\`FieldTechnicalProvider\` / \`useFieldTechnicalDetails\` / \`FieldTechnicalToggle\` / \`TechnicalHint\`）：
+  - \`SegmentForm#Field\` 的 \`name\` / \`valueKey\` **默认不渲染**，由开关统一控制；
+  - 3 处长段技术说明改用 \`TechnicalHint\`（只技术模式显示）；
+  - 「策略定义」页顶部一处开关，**默认关闭**。
+- **命名冲突（如实记录）**：首次实现误用了 \`common/TechnicalDetails.tsx\` 这一**已存在**的组件文件名（那是既有的「工程信息折叠区」组件）⇒ 已 \`git checkout --\` 恢复原文件（现仍是 clean），本功能改名 \`FieldTechnicalDetails\`。
+- **证据（headless Edge 实测）**：默认关闭时 \`pathPresent=false\` / \`ruleCodePresent=false\` / \`tunablePresent=false\` / \`rawEnumPresent=false\`；点开关后四项**全部为 true**（信息没丢，只是默认不占视野）。
+- **验证**：\`pnpm run check\` 0 错；\`checkEolDrift --strict\` 0；客户端定向（\`tests/client/src/components\` + \`pages\`）⇒ **234/234**（18 文件）；\`test:changed\` ⇒ 8 失败文件与改动前逐一相同（零新增）。
+---
+
+## 2026-10-03 · `STRATEGY-DEFINITION-P1-DECLARED-ONLY-001`（③ 块删除"无执行实现"的假旋钮 + `maxPositions` 单点双写）
+
+- **Task**：按裁定（**无执行实现就先删除**；账户风控默认不启用）实现 `FE-PLAN-003` 的 **P-1**。
+- **Changed Domains**：**Frontend only**（契约 / schema / Strategy Core / 执行引擎**均未改**）
+- **Changed Files**：`client/src/components/strategy/DefinitionFields.tsx`（编辑面）· `client/src/components/strategy/definitionDraft.ts`（锚点闭集）· `tests/client/src/components/strategy/definitionDraft.test.ts` · `tests/client/src/pages/strategyDefinitionPageIa.test.ts`
+- **背景（四层普查）**：`position.maxSinglePosition` / `position.maxExposure` / `risk.{stopLoss,maxDrawdown,maxExposure,maxSinglePosition,maxPositions,dailyLossLimit,concentrationLimit}` **在 Strategy Core 有声明（`server/strategyCore/definition.ts:76-106`），但在执行层零实现**（`server/research/simulator` · `server/backtest` · `server/runWorkbenchAssembly` 搜这些词 0 命中；`riskSpec` 只出现在 `definition.ts` 与 `adapters/`，运行时与 capabilities 都不读）。页面上它们是**改了不生效**的假旋钮。
+- **改动**：
+  1. **删除编辑面**：第 5 段不再渲染「单标的仓位上限」「风控里的最多持仓数」「最大暴露（仓位）」「风控单标的上限」以及整个「扩展风控（落到 definition.risk 的具名阈值）」区块；`CostFields` 不再单独渲染「回测最大持仓数」。
+  2. **改为技术细节只读清单**：新增 `data-declared-only-fields`，把这 9 个字段（含值）在**技术细节开启时**只读列出，并标注「仅声明，不参与回测」。
+  3. **`maxPositions` 单一编辑点 + 双写**：第 5 段「最多同时持有」一次 `onChange` 同时写 `definition.position.maxPositions` 与 `executionAssumptions.backtestConfig.maxPositions`（后者是引擎真正读的那一份）；未填时提示"回测按 backtestConfig 生效"。依据：176 个版本里两处**零冲突**（165 个同值），故统一为单旋钮对既有版本是 no-op。
+  4. **锚点闭集同步**：`DEFINITION_GAP_ANCHORS["最大同时持仓数（必填）"]` 去掉 `risk.maxPositions`；`DefinitionFieldAnchor` 类型闭集与测试闭集同步移除该成员。
+- **🔴 数据面一律不动（兼容性硬约束）**：
+  - **schema / validator / Strategy Core `RiskSpec` 全部保留** —— 既有文档里就有这些键（`position.maxSinglePosition` 出现在 **174/176** 个版本），删 schema 会改变派生 v1 视图 ⇒ 指纹变化 ⇒ 版本不可变闸门拒绝保存；
+  - `normalizeRiskSpec()` 是**白名单归一化**，从 core 删字段 = 主动丢弃既有值。
+- **Changed Contracts / DB / Execution Path**：**无**（本次不触碰执行链路 ⇒ 既有策略结果**构造性不变**）
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 客户端（`tests/client/src/components` + `pages`）⇒ **238/238**（18 文件）；其中 `definitionDraft.test.ts` **47** 例、`strategyDefinitionPageIa.test.ts` **14** 例
+  - **新增 G-2/G-4 守卫**：① 单测「声明字段往返不丢」（`position.maxSinglePosition=0.3` / `position.maxExposure=0.8` / `risk={stopLoss:0.08,maxDrawdown:0.25,maxExposure:0.8}` 往返后逐字保留）；② 只读探针 `scripts/_scratch/_verify_p1_roundtrip2.mts` 对**真实 3570001 golden** 跑「定义→草稿→定义」⇒ **结构化深等于 = true**（零新增键、零丢失；此前 JSON 字符串不等只是**键顺序**差异）
+  - **新增结构锁 3 条（IA 测试 12/13/14）**：编辑面不得出现这 4 个 `Field`；被删字段必须出现在 `data-declared-only-fields` 只读清单；`setMaxPositions` 必须同时写 `position` 与 `cost`
+  - `pnpm run test:changed` ⇒ 8 失败文件与改动前**逐一相同** ⇒ **零新增失败文件**
+- **未做（如实登记）**：**本轮浏览器实测不可用** —— 本会话后段 headless Edge 反复启动失败（dev server 正常 200、Edge 二进制在、无残留进程；三次换端口均 `ECONNREFUSED`）⇒ P-1 的验收改由**源码级结构锁 + 往返单测 + tsc** 承载，未做真实 DOM 观察。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+---
+
+## 2026-10-03 · `STRATEGY-DEFINITION-P1-BLOCKS-TRUST-001`（五块骨架 + 信任层状态条）
+
+- **Task**：实现 `FE-PLAN-003` 的 **P1** —— 「五块骨架 + 信任层」；接入 ① 选股 / ② 出场（预设已就绪）。
+- **Changed Domains**：**Frontend only**（无契约 / 无 DB / 无执行链改动）
+- **Changed Files**：`client/src/components/strategy/DefinitionProgressOverview.tsx`（改为五块）· `client/src/components/strategy/DefinitionTrustStatus.tsx`（新增）· `client/src/pages/StrategyDetail.tsx`（接线）· `client/src/components/strategy/index.ts`（barrel）· `tests/client/src/pages/strategyDefinitionPageIa.test.ts`
+- **改动**：
+  1. **七段归位到五块**：`DefinitionProgressOverview` 从「7 段平铺」改为「**5 个任务块**」（① 选股 ② 出场 ③ 仓位 ④ 成本与成交 ⑤ 可调参数），每块平铺出**该块的方案（预设）** + **该块下各字段段的状态**。映射常量 `DEFINITION_BLOCKS` 导出，供 UI 与测试共用。
+     - ① 选股 ← `what` / `condition` / `when` + 预设 `RECIPE`
+     - ② 出场 ← `exit` + 预设 `EXIT_POLICY`
+     - ③ 仓位 ← `sizing`；④ 成本与成交 ← `cost`；⑤ 可调参数 ← `parameters`
+  2. **信任层状态条（新增 `DefinitionTrustStatus`）**：三态 🟢 一致 / 🟡 变体 / ⚪ 全新。
+     - **判定输入由 `StrategyDetail` 算好传入**（组件不做语义推断）：`changedPresetParams` = 逐个比对「预设暴露参数」与它自己的 `defaultValue`；`kind` = 未落库 ⇒ `UNVERIFIED`，有参数改动**或** `dirty` ⇒ `VARIANT`，否则 ⇒ `MATCH`。
+     - 变体态**列出改了哪几项**（槽位 · 参数 code：默认值 → 当前值），并提供「**还原为已验证版本的参数**」（只恢复预设参数默认值，不动其它编辑）。
+     - 文案明确三件事：一致 ⇒ 可直接引用该版本的评估/模拟盘；变体 ⇒ 原版本数字**不直接适用**；全新 ⇒ **尚未验证**（不拿别的版本冒名顶替）。
+     - 渲染位置：策略定义 Tab 内、**定义完成度概览之前**（`{trustPanel}`）。
+- **Changed Contracts / DB / Execution Path**：**无**
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 客户端（`tests/client/src/components` + `pages`）⇒ **241/241**（18 文件）
+  - **新增结构锁 3 条（IA 测试 15/16/17）**：① **五块覆盖全部 7 段且每段恰好归位一次**（`DEFINITION_BLOCKS.flatMap(segments)` 与 `DEFINITION_SEGMENT_KEYS` 集合相等 + 无重复）+ 块序号 `[1..5]` 与标题逐字；② 状态条三态齐备、`data-trust-status` 存在、`{trustPanel}` 渲染在概览**之前**、含还原动作文案；③ 判定输入来自「预设默认值比对」（`changedPresetParams` / `parameter.defaultValue`）且三态表达式含 `loadedTarget === null ? "UNVERIFIED"`
+  - `pnpm run test:changed` ⇒ 8 失败文件与改动前**逐一相同** ⇒ **零新增失败文件**
+- **未做（如实登记）**：
+  1. **浏览器实测仍不可用** —— headless Edge 继续启动失败（脚本已改为「CDP 未就绪即明确返回原因」，本轮返回 `{"ok":false,"reason":"CDP 未就绪（headless Edge 未启动）"}`）。⇒ P1 的「**首屏控件 ≤ 12**」这一条**未实测**（结构锁只能证明五块与状态条存在，不能证明控件计数），需在有可用浏览器的环境下补测。
+  2. 信任层**未接后端"已验证指纹清单"** —— 按 `FE-PLAN-003` §9 R5 的降级约定，P1 用「你打开的那个版本」作基准（`loadedTarget`）；跨版本指纹比对待 P5 或后端能力就绪后再做。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `STRATEGY-DEFINITION-P4-INTERACTION-001`（交互规格收敛 I-3 / I-7 / I-8 / I-9 / I-10）
+
+- **Task**：实现 `FE-PLAN-003` 的 **P4** —— 把 15 条交互规格里还没落地的 I-3 / I-7 / I-8 / I-9 / I-10 收敛掉（I-2 / I-4 / I-5 / I-6 / I-13 / I-14 在 P-1 / P1 已落地）。
+- **Changed Domains**：**Frontend only**（无契约 / 无 DB / 无执行链 / 无 schema 改动）
+- **Changed Files**：`client/src/components/strategy/DefinitionFields.tsx` · `client/src/components/common/SegmentForm.tsx` · `client/src/components/strategy/PresetEditor.tsx` · `tests/client/src/pages/strategyDefinitionPageIa.test.ts`
+- **改动**：
+  1. **I-3 去空词**：`PresetEditor` 的「更多方案（N）」⇒ optgroup「其余 N 个方案」+ 按钮「再显示 N 个方案」；`DefinitionFields` 的两处 `Advanced title="进阶：…"` 分别改为「单笔比例 / 固定金额」（hint 换成“哪种仓位方式下生效”）与「费用模型与执行约束」。编辑面上不再出现「更多 / 进阶 / 高级」。
+  2. **I-8 ≤3 项枚举摊开点选**：新增 `SegmentForm#EnumRadio`（`role=radiogroup` + `aria-checked`，`emptyLabel={null}` 表示无空值语义，`title` 带每项的 `note`）。替换 5 处：`observationWindow.unit`(2) · `execution.quantityMethod`(3) · `execution.signalTiming`(2) · `execution.slippageModel`/`commissionModel`(3×2) · `parameters[].parameterRole`(3，原来是一个原生 `<select>`)。**≥4 项一律保持下拉**（`event.type` / `trigger.type` / `priceType` / `sizingMethod` / `executionTiming`）—— 摊开会把表单撑长。
+  3. **I-9 禁止 placeholder 当标签**：`DefinitionFields` 新增局部 `MiniField`（10px 灰字标签压在控件上方）；把 10 处「只有 placeholder 说明这是什么」的控件补上可见标签 —— 出场规则的「阈值」「优先级」、买入条件的「比较值」、参数行的「参数名」「中文名」「最小值」「最大值」「步长」「候选集合」「默认值」。placeholder 只留**示例值**（`如 0.08` / `逗号分隔，如 5,10,20`）。参数行「待搜索的数值参数必须给最小/最大值」由可见提示句承担，不再塞进 placeholder。
+  4. **I-10 只标可选（不逐项盖必填章）**：`SegmentForm#Field` 新增 `optional?: boolean` ⇒ 渲染灰色「可选」芯片。**口径**：本页 7 段里**多数**字段必填（NN/g：多数字段必填时应标**可选**的那几个，而不是给每个必填项盖章）⇒ 只给条件生效的两项（「单笔比例」「固定金额」）打「可选」，其余靠既有的红色「必填未填」+ 段缺口胶囊表达。
+  5. **I-7 单列/有界**：`PresetEditor` 的参数格从 `md:grid-cols-2 xl:grid-cols-3`（铺满、最多三列）改为 `grid max-w-2xl gap-3 sm:grid-cols-2`（**有宽度上限**，最多两列）。
+- **Changed Contracts / DB / Execution Path**：**无**（纯呈现层；草稿↔定义语义一行未动，值仍是 canonical 值，只换控件形态与显示文案）
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**（改动文件均为 LF，保持 LF）
+  - 客户端定向（`tests/client/src/components` + `pages`）⇒ **246/246**（18 文件，比 P1 的 241 多 5 例，全部是新增结构锁）
+  - **新增结构锁 5 条（IA 测试 18/19/20/21/22）**：① 编辑面不得含「更多方案 / 进阶： / 高级选项」且展开入口必须带数量；② **每一项 ≤3 取值的枚举，取它前面最近的容器标签必须是 `<EnumRadio`**（同时反向锁 5 个 ≥4 项枚举仍为 `<EnumSelect`）；③ `MiniField` 存在 + 9 个可见标签存在 + 4 个旧 placeholder 标签消失；④ `Field.optional` 存在且单笔比例/固定金额带 `optional`，同时「事件类型（必填）」缺口文案仍在（可选标注不许抹掉必填）；⑤ 参数格含 `max-w-2xl` 且不再有 `xl:grid-cols-3`
+  - **修订既有结构锁 #10**：原断言 `PresetEditor` 含字面量「更多方案」——那正是 I-3 要删的空词 ⇒ 改为断言「其余 N 个方案」+「再显示 N 个方案」（测试跟着设计走，不是设计迁就测试）
+  - `pnpm run test:changed` ⇒ 8 失败文件与改动前**逐一相同**（`dataHealth` / `image.uploadAndRecognize` / `limitUp` / `limitUp.watch` / `marketData` / `tushare.secret` / `tushareTradingCalendar` 七个环境依赖 + `threeFactorTopNStrategyDocument`）⇒ **零新增失败文件**
+- **未做（如实登记）**：
+  1. **浏览器实测仍不可用**（headless Edge 在本会话后段无法启动）⇒ I-7/I-8/I-9/I-10 的**真实 DOM 观感未实测**，本轮由源码级结构锁 + tsc 承载。仍需在有可用浏览器时补跑。
+  2. **I-11（参数按使用频率排序）未做** —— 现有方案注册表没有“使用频率”信息，排在 **P5**（埋点后再重排），此为 `FE-PLAN-003` §8 的原定顺序，不是漏项。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `STRATEGY-DEFINITION-P2-PRESET-FAMILIES-001`（③ 仓位 / ④ 成本与成交 方案族）
+
+- **Task**：实现 `FE-PLAN-003` 的 **P2** —— 给 ③ 仓位与 ④ 成本与成交建方案族（各 ≥3 个、参数可调、与 ①② 同构），并把零散的成本预设收编进服务端注册表。
+- **Changed Domains**：**Frontend + Strategy Authoring 注册表**（**无 DB / 无执行链 / 无 Strategy Core 语义改动**）
+- **Changed Files**：`server/research/strategyAuthoring/presetRegistry.ts` · `materialize.ts` · `vocabulary.ts` · `shared/researchContracts.ts`（slot 枚举）· `client/src/components/strategy/definitionFieldPatch.ts`（新增）· `client/src/pages/StrategyDetail.tsx` · `client/src/components/strategy/DefinitionProgressOverview.tsx`
+- **设计要点（本轮真正的取舍）**：③④ 在定义里**没有独立载体** —— 它们就是 `definition.position.*` / `definition.execution.*` + 文档级 `executionAssumptions.*` 的若干字段。所以预设产出的**不是** canonical payload，而是一张**字段补丁**：
+  1. 新增预设类型 `FieldPatchStrategyPreset`（`kind: "FIELD_PATCH"`），与 `ATOMIC` / `COMPOSITE` 并列 —— **类型上**就挡住「把它整体写进文档」；
+  2. `materializePreset` 照旧按 RFC 6901 写参数 + 用**新校验器**复核（`positionPatchErrors` / `costPatchErrors`），新增错误码 `AUTHORING_FIELD_PATCH_INVALID`；
+  3. 客户端 `applyDefinitionFieldPatch` 把补丁**填进草稿**（与用户手填逐字同效）⇒ C-2「一个概念只有一个编辑点」不破：草稿仍是唯一真相。
+- **③ 仓位方案（4 个）**：`固定比例 20% × 最多 5 只`（REGISTERED）· `等权（各 1/N）× 最多 5 只`（REGISTERED）· `固定金额 10 万 × 最多 3 只`（REGISTERED）· `总权益比例 10% × 最多 10 只`（EXPERIMENTAL）。
+- **④ 成本与成交方案（4 个）**：`A 股标准 · 100 万 · T+1 开盘`（REGISTERED）· `A 股标准 · 100 万 · T+1 收盘` · `零成本（理想化对照）` · `A 股标准 + 高滑点压力（30bp）`（后三者 EXPERIMENTAL）。费率口径与 `candidateSketchCostPreset.ts#A_SHARE_COST_PRESET` **同一组数字**（由单测逐字钉住）。
+- **★ `maxPositions` 没有被拆成两个旋钮**：预设只在 `/position/maxPositions` 声明一次，落到草稿时由客户端**镜像**进 `cost.maxPositions`（= 回测配置的最大持仓数）。测试同时钉住「payload 里 `maxPositions` 字面量只出现 1 次」与「应用后两处相等」。
+- **Changed Contracts**：`strategyAuthoringSlotSchema` 新增 `"POSITION"` / `"COST"`（向后兼容的枚举扩展）
+- **DB / Execution Path Impact**：**无**
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 服务端 `tests/server/research/strategyAuthoring` ⇒ **新增 15 例**（`fieldPatchPresets.test.ts`）；该目录 **8 文件全过**
+  - 客户端 `definitionFieldPatch.test.ts` ⇒ **9 例**（纯函数 / 只覆盖声明键 / `original` 不重建 / 双写 / 往返不丢键 / 未知键忽略）
+  - IA 结构锁新增 **23 / 24**：四块各有方案编辑器且块↔方案对应；③④ 必须经 `applyDefinitionFieldPatch` 落草稿，且**不得**出现 `extra.position = payload` 这类直写
+  - 定向合跑（`strategyAuthoring` + `components/strategy` + IA）⇒ **194/194（17 文件）**
+- **未做（如实登记）**：浏览器实测仍不可用（headless Edge 起不来）⇒ 四个预设编辑器的**真实 DOM 观感未实测**；本轮由纯函数测试 + 源码级结构锁 + tsc 承载。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `STRATEGY-DEFINITION-P3P5-DERIVED-AND-METRICS-001`（⑤ 派生视图 + 本地用量计数）
+
+- **Task**：实现 `FE-PLAN-003` 的 **P3**（⑤ 改派生视图）与 **P5**（度量与重排的前半）。**至此 P0 / P-1 / P1 / P4 / P2 / P3 / P5 全部落地。**
+- **Changed Domains**：**Frontend only**（无 DB / 无契约破坏 / 无执行链改动）
+- **Changed Files**：`client/src/components/strategy/searchParameterCandidates.ts`（新增）· `authoringUsageLog.ts`（新增）· `DefinitionFields.tsx` · `client/src/pages/StrategyDetail.tsx`
+
+### P3 · ⑤ 改派生视图
+
+- **做法**：⑤ 不再让人凭空写参数行，而是**投影**已选方案暴露的参数：候选 = ①–④ 各选中所选方案的参数并集（`vocabulary.presets[].parameters`）。勾选 ⇒ 往 `definition.parameters[]` 写**一行**（`parameterRole = TUNABLE`，min/max/step/中文名一律照抄预设声明的范围）。
+- **C-1 不破**：本模块**没有任何参数 code 字面量清单**（结构锁钉住：不得出现 `const X_CODES = [` 形态）。
+- **「同一参数不得两处定义」的实测修法**：单测一开始就抓到 **替换已声明行会丢掉 `original` 里的键**（`unit` / `description` / `derivedFrom`…）⇒ `toggleSearchParameter` 改为**已有同 code 的行就幂等返回、绝不重写**。
+- **★ 死参数防火墙（本轮最重要的判断）**：查证 `server/research/parameterSearch/executor.ts` 后确认 —— **`TUNABLE` 只有被规则图引用才真正参与搜索**，否则参数搜索以 `PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER` 拒绝；真实库已踩过（`cand-360001@1.0.0`：声明 3 个、引用 0 个）。而**预设参数**（`anchor.stopRatio` / `positionRatio` / `slippageBps` …）住在 policy / 文档级配置里，**不在规则图里** ⇒ 直接批量声明就是生产死参数（正是用户反复说的「假旋钮」）。
+  - 因此候选一律带 `referenced` 标记（口径 = `valueType === PARAMETER_REFERENCE` 的条件 + 出场规则的 `parameter`），**未被引用的候选不可勾选**（UI 禁用 + 说明原因，函数层再兜一道 `REJECTED_UNREFERENCED`）。
+  - 结论（如实登记）：要让退出政策/仓位的阈值**真的可搜**，还需补「参数引用 → policy 字段」的能力；那属**新的执行语义**，按 `AGENTS.md` §5 必须停下并报告 —— 本轮**不做**。
+
+### P5 · 本地用量计数
+
+- **做法**：新增 `authoringUsageLog.ts` —— 只写 `localStorage`，记 `slot / presetId → 次数` 与「参数被改了几项」+ 首末时间；接到四块选择的 `useEffect` 上。
+- **为什么不接上报**：本仓**没有任何遥测基建**，这是个个人研究平台；为「两周后重排默认项」引一条上报通道，收益远小于隐私/合规代价 ⇒ 只做本机计数，并留了 `clearAuthoringUsage()`。
+- **用途边界写进代码**：模块头注释明说「仅限 ≥2 周后决定默认项排序；在做出决定前不得接到任何上报通道」。
+- **⚠️ 未做（如实登记）**：「>2 周数据后**重排默认项**」本身**没有做** —— 需要真实数据积累 + 产品决策，不是本轮能凭代码完成的。
+
+- **DB / Execution Path Impact**：**无**
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 客户端定向（`tests/client/src/components` + `pages`）⇒ **271/271（20 文件）**
+  - P3：`searchParameterCandidates.test.ts` **12 例** + IA 结构锁 **25 / 26**
+  - P5：`authoringUsageLog.test.ts` **9 例**（含「源码里不得出现任何网络调用」的反向锁）+ IA 结构锁 **27**
+  - P2：`fieldPatchPresets.test.ts` **15 例** + `definitionFieldPatch.test.ts` **9 例** + IA **23 / 24**
+  - P4：IA **18–22**；P1：IA **15–17**；P-1：IA **12–14**
+- **未做（如实登记）**：headless Edge 在本会话始终无法启动 ⇒ 全部 UI 观感**未做真实 DOM 实测**，由「纯函数测试 + 源码级结构锁 + tsc」承载。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `EXIT-POLICY-SLOTS-P1-001`（退出政策拆成 9 个规则槽 · 服务端槽表）
+
+- **Task**：实现 `FE-PLAN-004` 的 **P1**。裁定（用户 2026-10-03）：① 认可「常显 3 + 折叠 5 + 研究 1」分层；② **46 个实验直接从前端删掉**（服务端保留）；③ 删 `stop.contexts` / `capitalRecycle` 编辑面；④ **不做**真实库普查。
+- **背景（实测，`FE-PLAN-004` §1）**：`STOP_POLICY_EXPERIMENTS` 的 **46 个实验里 40 个只改 1 个维度**、4 个改 2 个、**2 个与基准逐字相同（SL-00 ≡ SL-08.0）**；止盈 / 到期 / 续持 / 资金循环在 46 个里**完全不变** ⇒ 那 46 个不是 46 套政策，而是 **6 个止损维度的单变量扫描**。另查出两个**假旋钮**：`stop.contexts`（5 个实验声明它，**全仓零求值器**）与 `capitalRecycle`（46/46 未用、零消费、字段与 `strongHold` 重复）。
+- **Changed Domains**：**Strategy Authoring（服务端注册表/物化层）**。**无 DB / 无执行链 / 无 schema / 无前端改动**。
+- **Changed Files**：`server/research/strategyAuthoring/exitPolicySlots.ts`（新增）· `tests/server/research/strategyAuthoring/exitPolicySlots.test.ts`（新增）
+- **交付**：9 个槽（止损位置 · 止盈 · 到期 · 止损确认 · 止损收紧 · 止损时间表 · 分批止损 · 续持 · 研究路径），每槽「方案 + 参数」；槽与 `ExitPolicyDefinition` 字段**逐字段对应**（`stop.anchor` / `stop.confirmation` / `stop.escalation` / `stop.schedule` / `stop.reduction` / `takeProfit` / `timeExit` / `strongHold` / `recoveryPath·runnerBridge·clc2ReversalPath`）。四个原语：`mergeExitPolicyPatch` · `materializeExitPolicySlotOption` · `recognizeExitPolicySlot` · `applyExitPolicySlot`。
+- **Changed Contracts**：**无**（本模块只被测试引用；P2 才会经词汇表下发到前端）
+- **DB / Execution Path Impact**：**无**
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - **主证据**：46 个实验逐个「识别 → 重新物化 → 合并」**结构化深等于**（键序无关比较）⇒ 既有版本零改写（X-2）在服务端层成立
+  - 越界锁：只改「止损位置」时 `stop` 其它字段 / 其它 8 个槽 / 表单不编辑的 `stop.contexts` 与 `strongHold.scaleOutRatio` **逐字保留**
+  - 反向锁：槽表里**不得**出现 `contexts` 与 `capitalRecycle`（两个假旋钮）
+  - 该测试文件 ⇒ **14/14**
+- **🔴 测试抓到的两个真实缺陷（均已修）**：
+  1. **`null` ≠ 键缺失**：patch 里的 `takeProfit: null` 会给原本没这个键的政策**新增键** ⇒ 文档 JSON 变样 ⇒ 「打开老版本→不改→保存」会派生新版本。修法：patch 要置 `null` 而原对象本来没有该键 ⇒ **跳过**。
+  2. **「不启用」不能是空 patch**：空 patch 与**任何**策略都匹配 ⇒ 有规则的版本会被误判成「不启用」。修法：每个「不启用」显式置 `null`。
+- **设计约束（被测试逼出来的）**：匹配判据 = patch 去掉「被参数覆盖的叶子」后逐叶相同 ⇒ 「固定阶梯 / 时间表 / 分批表」这类数组内容必须**逐元素相等**才算那个选项；**自定义阶梯会被如实判成「认不出」**，而不是静默改写成默认阶梯。
+- **未做（如实登记）**：P2（前端拆 9 槽 + 删 46 个实验渲染 + 推荐组合入口）**未做**；真实 DOM 观感仍未实测（headless Edge 不可用）。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `EXIT-POLICY-SLOTS-P2-001`（退出政策拆成 9 个规则槽 · 前端接线）
+
+- **Task**：实现 `FE-PLAN-004` 的 **P2**（前端把「出场」拆成 9 个规则槽 + 按裁定删掉 46 个实验的前端渲染）。
+- **Changed Domains**：**Frontend + Strategy Authoring 传输层**（无 DB / 无执行链 / 无 Strategy Core 语义改动）
+- **Changed Files**：`shared/researchContracts.ts` · `server/research/strategyAuthoring/vocabulary.ts` · `router.ts` · `client/src/components/strategy/ExitPolicySlotEditor.tsx`（新增） · `client/src/pages/StrategyDetail.tsx`
+- **改动**：
+  1. **词表下发槽表但不下发 patch**：前端只拿「有哪些槽 / 每槽有哪些方案 / 每个方案能调哪些参数」；结构锁反向断言词表 JSON 里不出现 `patch` 键。
+  2. **两个新路由**：`recognizeExitPolicySlots`（当前 policy → 每槽 `optionId/parameters/atDefaults`；认不出 ⇒ `optionId: null`）与 `applyExitPolicySlot`（→ 新 policy；`issues` 非空则原样返回，响亮拒绝）。
+  3. **前端 `ExitPolicySlotEditor`**：常显 3 槽（止损位置 / 止盈 / 到期）+ 折叠 5 槽（止损确认 / 止损收紧 / 止损时间表 / 分批止损 / 续持）+ 研究 1 槽；每槽「方案下拉 + 参数」；只提供逐槽「恢复该方案默认参数」。认不出的槽显示「本表单不识别（保持原样）」并停在空值。
+  4. **删掉 `EXIT_BASE` 46 个实验的前端渲染**（裁定 2）：`EXIT_POLICY` 6 个改为「推荐组合（整套退出政策）」整包入口；46 个实验的取值已溶解进各槽（服务端注册表与 payload 一字未动）。
+  5. 无退出政策时显示「先从推荐组合选一个起点」，**不合成**默认政策（不发明语义）。
+- **Changed Contracts**：`exitPolicySlotIdSchema` + `applyExitPolicySlotInputSchema`（新增，向后兼容）
+- **DB / Execution Path Impact**：**无**
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 定向（`strategyAuthoring` + `client/components` + `client/pages`）⇒ **385/385（31 文件）**
+  - 服务端 `exitPolicySlots.test.ts` ⇒ **17 例**；IA 结构锁 ⇒ **29 例**（新增 28/29）
+  - **旧结构锁 #10 按裁定改写**：原断言「`EXIT_POLICY` 与 `EXIT_BASE` 挤在同一个下拉」正是本次要拆的杂糅 ⇒ 改为断言 `EXIT_BASE` 不在筛选条件里
+  - `pnpm run test:changed` ⇒ 8 失败文件与改动前**逐一相同** ⇒ **零新增失败文件**（通过数 4790 → 4809）
+- **未做（如实登记）**：
+  1. **信任层逐槽明细未接**：改任一槽目前只让 `dirty` 生效；「还原为已验证版本的参数」对槽不生效（需要 baseline policy 比对）⇒ 留作 P4。
+  2. **真实 DOM 观感未实测**（headless Edge 起不来）。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `EXIT-POLICY-SLOTS-P3P4-001`（假旋钮只读收口 + 信任层按槽比对）
+
+- **Task**：实现 `FE-PLAN-004` 的 **P3**（删假旋钮的只读收口）与 **P4**（信任层接线）。
+- **Changed Domains**：**Frontend only**（无 DB / 无契约 / 无执行链改动）
+- **Changed Files**：`client/src/components/strategy/ExitPolicySlotEditor.tsx` · `client/src/pages/StrategyDetail.tsx` · `tests/client/src/components/strategy/exitPolicyUneditedFields.test.ts`（新增） · `tests/client/src/pages/strategyDefinitionPageIa.test.ts`
+- **P3 改动**：`ExitPolicySlotEditor` 增只读技术细节块（`data-exit-declared-only-fields`，走既有 `TechnicalHint` ⇒ **默认不显示**）：列出 `stop.contexts` / `capitalRecycle` 的当前值并标「仅声明，不参与回测」（全仓零求值器，`FE-PLAN-004` §1.3）。
+  - 🔴 **两类必须分开**：`strongHold.scaleOutRatio` / `runnerExitAtHoldingDays` / `maxConcurrentRunners` / `replacementScoreMargin` 同样是本表单不编辑的键，但它们**会参与回测** ⇒ 标「原样保留（会参与回测）」。把它们跟着 `contexts` 一起说成「不参与回测」＝ 把真旋钮说成假旋钮（单测专门钉住这条）。
+- **P4 改动**：信任层接上退出槽。
+  1. **基准只取已落库文档**（`savedDocument` 里的 policy）：用本地草稿当基准的话，改完再改回去就永远不会判「变体」。
+  2. **逐槽差异**：基线识别 vs 当前识别 —— 方案不同 ⇒ 一条「换方案：A → B」；方案相同但参数不同 ⇒ 逐参数一条（形如 `出场·止损位置 · 换方案：固定百分比 → ATR 倍数`）。
+  3. **三态**改用合并差异 `changedDefinitionParams = 预设参数差异 + 退出槽差异`。
+  4. **还原**：退出槽的「还原」＝ **整份 policy 换回打开的那个版本** —— 槽是逐字段拼出来的，逐槽回默认值拼回去**未必等于**原政策（原政策可能有本表单不表达的形状），只有整份替换才真的回到已验证的那一套。
+- **Changed Contracts / DB / Execution Path**：**无**
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**；`checkEolDrift --strict` ⇒ **0**
+  - 定向（`strategyAuthoring` + `client/components` + `client/pages`）⇒ **391/391（32 文件）**
+  - 新增单测 `exitPolicyUneditedFields.test.ts` ⇒ **4 例**（两类标注不得混、值原样回显、无 policy 不编造）
+  - IA 结构锁 ⇒ **31 例**（新增 30：两个假旋钮无编辑控件 + 如实标注；31：基准来自已落库文档 + 逐槽 diff + 整份还原）
+- **未做（如实登记）**：
+  1. 「还原」目前**一键同时**还原预设参数与整份退出政策，不区分用户只想还原哪一边。
+  2. **真实 DOM 观感未实测**（headless Edge 起不来）—— 9 槽折叠、只读块、变体明细只由结构锁 + 纯函数测试 + tsc 承载。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `EXIT-POLICY-SLOTS-COMPACT-001`（出场块紧凑化）
+
+- **Task**：按用户反馈把「出场规则」这块前端**紧凑化**（`FE-PLAN-004` P5）。
+- **Changed Domains**：**Frontend only**（纯呈现层，无契约 / 无 DB / 无执行链改动）
+- **Changed Files**：`client/src/components/strategy/ExitPolicySlotEditor.tsx` · `client/src/components/strategy/PresetEditor.tsx` · `tests/client/src/pages/strategyDefinitionPageIa.test.ts`
+- **改动**：
+  1. **槽编辑器一行一槽**：`标签 | 方案下拉 | 状态 | ▸ 参数（N）`。参数折叠（NN/g 第 2 层）；槽的人话问题改走 `title` 悬浮提示、不占正文；每槽不再各套卡片（分区改 `divide-y`）；状态徽标只在 `已改` / `本表单不识别` 时出现；「恢复该方案默认参数」只在参数被改过时出现。
+  2. **`PresetEditor` 参数收进「调整参数（N 项）」**（I-1 的真正落地）：默认只留方案下拉；改过参数时入口显示「调整参数（8 项 · 已改 3）」；「恢复默认参数」移进折叠区。此改动**同时惠及其它块**（信号配方 / 推荐组合 / 仓位 / 成本）。
+- **Changed Contracts / DB / Execution Path**：**无**（`data-*` 属性全部保留，跳转与结构锁不受影响）
+- **Regression Result**：
+  - `pnpm run check` ⇒ **exit 0 / 0 错**
+  - 客户端定向（`components/strategy` + `pages/strategyDefinitionPageIa`）⇒ **142/142（11 文件）**
+  - IA 结构锁 ⇒ **32 例**（新增 32：一行一槽 + 参数折叠 + 反例「不得再出现每槽卡片」）
+- **教训（如实记）**：紧凑化时误用「从 `function SlotRow` 到 `export function ExitPolicySlotEditor`」的区间替换，把夹在两者之间的 P3 helper（`uneditedExitPolicyFields`）**一并删掉**了 —— 由 `tsc` 当场抓住并补回。同区间替换要确认区间里没有别的声明。
+- **未做**：真实 DOM 观感仍未实测（headless Edge 起不来）—— 「一行一槽」的实际密度只有结构锁 + 类名断言承载。
+- **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-03 · `EXIT-POLICY-SLOTS-BASE-001`（修：不选推荐组合 ⇒ 9 槽不出现）
+
+- **Task**：修用户实测反馈 —— 「推荐组合不选的话，9 槽好像不出来」。
+- **根因**：P2 里我把槽编辑器的渲染条件写成 `currentExitPolicy === null ? 提示文字 : 编辑器`，而 `currentExitPolicy` 只从文档里已有的 `exit.rules[*].policy` 取。于是**新建/空白定义（本来就没有 policy）永远看不到 9 槽**，必须先挑一个「推荐组合」整包。这是我为了「不发明语义」而过度保守的取舍 —— 代价是把入口堵死了。
+- **修法（不发明语义）**：词表下发**起步基准** `exitPolicyBasePolicy` + `exitPolicyBaseLabel`，其值**直接引用已登记实验 `SL-00` 的 policy**（46 个实验全部建在这条脊上：固定 6% 止损 / 盘中 / 破 MA5-10 / 最长 5 日 / 够强延至 10 日）。前端把渲染条件改成 `effectiveExitPolicy = 文档里的 policy ?? 词表下发的起步基准`：
+  1. 有政策 ⇒ 行为与之前**逐字相同**；
+  2. 没有 ⇒ 9 槽照常显示（各槽显示起步基准的取值），并给一行说明「还没有退出政策 ⇒ 下面 9 槽以「实验基准 SL-00：…」为起点；改任一槽即写成这份定义的政策」；
+  3. 识别（`recognizeExitPolicySlots`）与改槽（`applyExitPolicySlot`）都用 `effectiveExitPolicy` —— 否则会「用基准显示、却拿不到基准去改」。
+- **为什么引用而不是复刻**：复刻一份常量就多了一处真相；测试 18 断言 `vocabulary.exitPolicyBasePolicy` **toEqual** `STOP_POLICY_EXPERIMENTS["SL-00"].policy`，漂移即红。测试 19 断言起步基准能被**全部 9 槽**认出来（否则用户一进来就面对「不识别」）。
+- **Changed Files**：`server/research/strategyAuthoring/vocabulary.ts` · `client/src/pages/StrategyDetail.tsx` · `tests/server/research/strategyAuthoring/exitPolicySlots.test.ts` · `tests/client/src/pages/strategyDefinitionPageIa.test.ts`
+- **Changed Contracts / DB / Execution Path**：**无**（词表新增两个只读字段）
+- **Regression Result**：`pnpm run check` ⇒ **0 错**；`exitPolicySlots.test.ts` ⇒ **19 例**；IA ⇒ **33 例**（新增 33：槽渲染条件基于 `effectiveExitPolicy`、改槽也用它、推荐组合标明「可选」、前端**不得**硬编码 policy）；两文件合跑 ⇒ **52/52**
+- **未做**：本轮**未跑** `test:changed`（预算用尽）；真实 DOM 仍未实测。
+- **GLOBAL AUDIT REQUIRED**：**NONE**

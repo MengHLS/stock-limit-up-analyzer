@@ -241,16 +241,16 @@ export default function DatasetDetail() {
       {!invalidId && definition.data && (
         <Tabs defaultValue="overview">
           <TabsList>
-            <TabsTrigger value="overview" className="flex items-center gap-1.5">
+            <TabsTrigger value="overview" data-tab="overview" className="flex items-center gap-1.5">
               <Database className="h-3.5 w-3.5" /> Overview
             </TabsTrigger>
-            <TabsTrigger value="versions" className="flex items-center gap-1.5">
+            <TabsTrigger value="versions" data-tab="versions" className="flex items-center gap-1.5">
               <Layers className="h-3.5 w-3.5" /> Versions
             </TabsTrigger>
-            <TabsTrigger value="jobs" className="flex items-center gap-1.5">
+            <TabsTrigger value="jobs" data-tab="jobs" className="flex items-center gap-1.5">
               <Hammer className="h-3.5 w-3.5" /> Jobs
             </TabsTrigger>
-            <TabsTrigger value="statistics" className="flex items-center gap-1.5">
+            <TabsTrigger value="statistics" data-tab="statistics" className="flex items-center gap-1.5">
               <BarChart3 className="h-3.5 w-3.5" /> Statistics
             </TabsTrigger>
           </TabsList>

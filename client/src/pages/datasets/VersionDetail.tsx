@@ -411,19 +411,19 @@ export default function VersionDetail() {
           <SectionCard title="Event / Prefix / Post / Path / Outcome 预览" icon={TableProperties}>
             <Tabs defaultValue="event">
               <TabsList>
-                <TabsTrigger value="event" className="flex items-center gap-1.5">
+                <TabsTrigger value="event" data-tab="event" className="flex items-center gap-1.5">
                   <FileText className="h-3.5 w-3.5" /> Event
                 </TabsTrigger>
-                <TabsTrigger value="prefix" className="flex items-center gap-1.5">
+                <TabsTrigger value="prefix" data-tab="prefix" className="flex items-center gap-1.5">
                   <ArrowDown className="h-3.5 w-3.5" /> Prefix
                 </TabsTrigger>
-                <TabsTrigger value="post" className="flex items-center gap-1.5">
+                <TabsTrigger value="post" data-tab="post" className="flex items-center gap-1.5">
                   <ArrowUp className="h-3.5 w-3.5" /> Post
                 </TabsTrigger>
-                <TabsTrigger value="path" className="flex items-center gap-1.5">
+                <TabsTrigger value="path" data-tab="path" className="flex items-center gap-1.5">
                   <GitBranch className="h-3.5 w-3.5" /> Path
                 </TabsTrigger>
-                <TabsTrigger value="outcome" className="flex items-center gap-1.5">
+                <TabsTrigger value="outcome" data-tab="outcome" className="flex items-center gap-1.5">
                   <CalendarRange className="h-3.5 w-3.5" /> Outcome
                 </TabsTrigger>
               </TabsList>

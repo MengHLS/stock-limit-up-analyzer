@@ -177,6 +177,24 @@ describe("② definition → 草稿 → definition：真实 golden sample 必须
     expect(costModelFromDrafts(drafts)).toEqual(assumptions.costModel);
     expect(backtestConfigFromDrafts(drafts)).toEqual(assumptions.backtestConfig);
   });
+  it("9b) 🔴 P-1 裁定：**执行层零实现**的声明字段往返不丢（删编辑面 ≠ 删数据）", () => {
+    // 这些字段按 2026-10-03 裁定已从编辑面移除（`risk.*` / `position.maxSinglePosition` /
+    // `position.maxExposure`），但**既有版本里就有它们的值**（3570001 即如此）。
+    // 因此「打开 → 不改 → 保存」必须把它们原样带过去，否则就是悄悄改写既有版本。
+    const source = structuredClone(FIRST_BOARD_PULLBACK_DEFINITION) as Record<string, unknown>;
+    source.position = {
+      ...(source.position as Record<string, unknown>),
+      maxSinglePosition: 0.3,
+      maxExposure: 0.8,
+    };
+    source.risk = { stopLoss: 0.08, maxDrawdown: 0.25, maxExposure: 0.8 };
+
+    const rebuilt = draftsToDefinition(structuredDrafts(source as never)) as Record<string, unknown>;
+    const position = rebuilt.position as Record<string, unknown>;
+    expect(position.maxSinglePosition).toBe(0.3);
+    expect(position.maxExposure).toBe(0.8);
+    expect(rebuilt.risk).toEqual({ stopLoss: 0.08, maxDrawdown: 0.25, maxExposure: 0.8 });
+  });
 
   it("10) 表单不编辑的键会被**列出**（而不是悄悄保留）", () => {
     // golden 里的条件行带 `id` / `description`，出场规则带 `id` / `description` / `parameter`
@@ -251,7 +269,6 @@ describe("④ 缺口锚点：清单说缺哪一项，界面上那一格就必须
     "trigger",
     "position.sizingMethod",
     "position.maxPositions",
-    "risk.maxPositions",
     "execution.quantityMethod",
     "execution.lotSize",
     "execution.signalTiming",
@@ -305,7 +322,10 @@ describe("④ 缺口锚点：清单说缺哪一项，界面上那一格就必须
         for (const anchor of gap.anchors) pairs.add(`${status.segment}|${anchor}`);
       }
     }
-    expect(pairs.size).toBeGreaterThanOrEqual(13);
+    // 绊线：锚点数量骤降说明「界面上接住缺口的输入框」被删掉了。
+    // 2026-10-03 裁定：`risk.maxPositions` 执行层零实现 ⇒ 已删其编辑面与锚点，
+    // 故下界由 13 降为 12（不是放松标准，是这条锚点被**有意**删除，见 FE-PLAN-003 §5）。
+    expect(pairs.size).toBeGreaterThanOrEqual(12);
     for (const pair of [...pairs].sort()) {
       const [segment, anchor] = pair.split("|") as [string, string];
       expect(

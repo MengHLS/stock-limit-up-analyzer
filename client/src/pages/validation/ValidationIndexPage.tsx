@@ -59,6 +59,13 @@ export default function ValidationIndexPage() {
             正式口径一律是 `paramSearch.*` 的持久化 Run。
           </li>
           <li>
+            旧技术预览页（
+            <Link href="/walk-forward" className="underline underline-offset-2 hover:text-foreground">
+              /walk-forward
+            </Link>
+            ，**不落库**）已不在侧栏 —— 需要核对历史行为时从本页进入，该页顶部有醒目降级提示。
+          </li>
+          <li>
             样本内（IS）数据参与参数选择，样本外（OOS）数据**不参与** —— 页面上会用独立标签与配色区分，
             避免把 OOS 误读成「又一次样本内回测」。
           </li>

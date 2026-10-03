@@ -161,7 +161,26 @@ export function CandidateInsightCharts({
                 </ResponsiveContainer>
               </div>
             )}
-            <div className="mt-3 flex flex-wrap gap-1.5">{sectorOrder.map((sector) => <Badge key={sector} variant="outline" className="cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50" onClick={() => updateFilter({ sector: filters.sector === sector ? null : sector })}><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: sectorColorMap.get(sector) }} />{sector}</Badge>)}</div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {/* 🔴 chips 是**筛选开关**，必须是真 <button>：span 键盘 Tab 不到。
+                  用 Badge asChild 保留视觉，aria-pressed 表达「已选」语义。 */}
+              {sectorOrder.map((sector) => {
+                const selected = filters.sector === sector;
+                return (
+                  <Badge key={sector} variant="outline" asChild className="border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      className="cursor-pointer"
+                      onClick={() => updateFilter({ sector: selected ? null : sector })}
+                    >
+                      <span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ backgroundColor: sectorColorMap.get(sector) }} />
+                      {sector}
+                    </button>
+                  </Badge>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
 

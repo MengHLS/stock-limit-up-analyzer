@@ -46,6 +46,7 @@ import {
   BookOpenCheck,
   GitCompareArrows,
   Target,
+  Trophy,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { type LucideIcon } from "lucide-react";
@@ -62,65 +63,71 @@ type NavGroup = {
 };
 
 const navGroups: NavGroup[] = [
+  // 分组口径 = 研究闭环的**阶段顺序**（FLOW-001 §4）：数据 → 观察 → 研究 → 策略 → 验证 → 前向与复盘。
+  // 与原「按功能来源分组」的差别只在**归位**，不改任何路由、不改任何页面。
   {
-    label: "复盘分析",
+    label: "① 数据",
+    items: [
+      { label: "数据域健康", path: "/data-health", icon: ShieldCheck },
+      { label: "数据集", path: "/datasets", icon: Boxes },
+      { label: "历史状态查询", path: "/historical-state", icon: History },
+      { label: "行情同步", path: "/stock-sync", icon: CloudDownload },
+      { label: "上传图片", path: "/upload", icon: Upload },
+      { label: "操作日志", path: "/operation-logs", icon: ClipboardList },
+    ],
+  },
+  {
+    label: "② 观察",
     items: [
       // HOMEPAGE-005：首页（`/`）入口 = 左上角网站标题（详见 SidebarHeader），侧栏不再单列「首页」项
       { label: "涨停复盘", path: "/limit-up", icon: Flame },
       { label: "大盘分析", path: "/market", icon: BarChart3 },
       { label: "情绪分析", path: "/sentiment-analysis", icon: Activity },
       { label: "龙头候选", path: "/leader-candidates", icon: Crown },
+      { label: "情绪预警", path: "/sentiment-alerts", icon: Bell },
     ],
   },
   {
-    label: "研究",
+    label: "③ 研究",
     items: [
       { label: "独立实验", path: "/research-experiments", icon: Beaker },
-      { label: "数据集", path: "/datasets", icon: Boxes },
+      { label: "候选", path: "/candidates", icon: Trophy },
     ],
   },
   {
-    label: "策略",
+    label: "④ 策略",
     items: [
       { label: "策略", path: "/strategies", icon: ClipboardList },
-              { label: "最终评估 3570001", path: "/strategy-final-evaluation", icon: ClipboardList },
-              { label: "模拟盘 3570001", path: "/paper-trading-3570001", icon: ClipboardList },
-      { label: "绩效仪表盘", path: "/performance", icon: Activity },
       { label: "参数搜索", path: "/parameter-search", icon: SlidersHorizontal },
-      { label: "组合回测", path: "/backtest", icon: WalletCards },
-      { label: "回测对比", path: "/backtest-compare", icon: GitCompareArrows },
+      { label: "绩效仪表盘", path: "/performance", icon: Activity },
       { label: "回测历史", path: "/backtest-runs", icon: FileClock },
+      { label: "回测对比", path: "/backtest-compare", icon: GitCompareArrows },
+      // P3 专项页（FLOW-001 §5）：绑定单一策略 3570001，不是通用能力；长期收敛进策略详情标签
+      { label: "最终评估 3570001（专项）", path: "/strategy-final-evaluation", icon: ClipboardList },
+      // 🔒 组合回测**不挪位置、不改名**（FLOW-001 §5：用户要求暂时保持原样）
+      { label: "组合回测", path: "/backtest", icon: WalletCards },
     ],
   },
   {
-    label: "验证",
+    label: "⑤ 验证",
     items: [
       { label: "验证总览", path: "/validation", icon: ShieldCheck },
       { label: "稳健性", path: "/validation/robustness", icon: ShieldCheck },
       { label: "样本外 OOS", path: "/validation/oos", icon: Target },
       { label: "Walk-Forward", path: "/validation/walk-forward", icon: Workflow },
+      { label: "Regime / 报告", path: "/regime-report", icon: FileText },
     ],
   },
   {
-    label: "交易",
+    label: "⑥ 前向与复盘",
     items: [
       { label: "前向纸面交易", path: "/paper-trading", icon: TrendingUp },
-    ],
-  },
-  {
-    label: "系统",
-    items: [
-      { label: "数据域健康", path: "/data-health", icon: ShieldCheck },
-      { label: "历史状态查询", path: "/historical-state", icon: History },
-      { label: "行情同步", path: "/stock-sync", icon: CloudDownload },
-      { label: "情绪预警", path: "/sentiment-alerts", icon: Bell },
-      { label: "操作日志", path: "/operation-logs", icon: ClipboardList },
-      { label: "Regime / 报告", path: "/regime-report", icon: FileText },
+      { label: "模拟盘 3570001（专项）", path: "/paper-trading-3570001", icon: ClipboardList },
       { label: "复盘工作台", path: "/review-workbench", icon: BookOpenCheck },
-      { label: "上传图片", path: "/upload", icon: Upload },
     ],
   },
 ];
+
 
 function normalizePath(raw: string): string {
   // wouter 的 location 可能带 `?query` / `#hash`，也可能带尾部 `/`，先统一剥掉
@@ -210,7 +217,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {isAuthenticated && user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sidebar-accent transition-colors min-w-0 flex-1 text-left group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:flex-none focus:outline-none">
+                  <button className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sidebar-accent transition-colors min-w-0 flex-1 text-left group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:flex-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
                     <Avatar className="h-8 w-8 border shrink-0">
                       <AvatarFallback className="text-xs font-medium">
                         {user.name?.charAt(0).toUpperCase() ?? "U"}

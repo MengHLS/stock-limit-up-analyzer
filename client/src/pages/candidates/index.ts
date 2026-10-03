@@ -6,4 +6,5 @@
  * 编辑 / 状态流转 / 转正）是 Strategy Candidate 桥的唯一前端入口，故保留并迁到本目录。
  */
 
+export { default as CandidateList } from "./CandidateList";
 export { default as StrategyCandidateDetail } from "./StrategyCandidateDetail";

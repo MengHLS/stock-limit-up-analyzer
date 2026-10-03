@@ -515,7 +515,7 @@ export default function StockSync() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索股票代码或名称..."
-              value={search}
+              aria-label="搜索股票代码或名称" value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 h-9 w-64 text-sm border-slate-200"
             />

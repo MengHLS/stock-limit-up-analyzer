@@ -24,6 +24,8 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { adminProcedure, publicProcedure, router } from "../../_core/trpc";
 import { ResearchCandidateError } from "../candidateRules";
+// PD-03：候选状态闭集**单一来源**（`server/research/vocabulary.ts`），不在 router 里再抄一份。
+import { RESEARCH_CANDIDATE_STATUSES } from "../vocabulary";
 import {
   ResearchConflictError,
   ResearchReferenceError,
@@ -75,6 +77,34 @@ function withDomainCode(code: string, message: string): string {
 // ---------------------------------------------------------------------------
 
 const candidateIdInput = z.strictObject({ candidateId: z.number().int().positive() });
+
+/** 列表返回行数上限（有界，避免一次拉全表）。 */
+const CANDIDATE_LIST_MAX_LIMIT = 200;
+
+/**
+ * PD-03 列表入参。
+ *
+ * 🔴 **不得**加入 `experimentId` / `conclusionId`：它们是旧 Research 链遗留列，
+ *    该链已随 `RESEARCH-EXPERIMENT-003` 整体退役，不得固化成新 API 的一部分。
+ */
+const candidateListInput = z.strictObject({
+  status: z.enum(RESEARCH_CANDIDATE_STATUSES).optional(),
+  sourceDatasetVersionId: z.number().int().positive().optional(),
+  limit: z.number().int().positive().max(CANDIDATE_LIST_MAX_LIMIT).optional(),
+  order: z.enum(["asc", "desc"]).optional(),
+});
+
+/** 列表行（轻量）：与 `StrategyCandidateListRow` 同源，`.output()` 收口防止形状漂移。 */
+const candidateListRowSchema = z.object({
+  id: z.number().int().positive(),
+  name: z.string(),
+  status: z.enum(RESEARCH_CANDIDATE_STATUSES),
+  sourceDatasetVersionId: z.number().int().positive().nullable(),
+  strategyDefinitionId: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  hasSourceDatasetDivergence: z.boolean(),
+});
 
 /** 溯源读取入参：**只按 Strategy 侧坐标**（`strategyId` + semver），不问 Research（§24）。 */
 const provenanceLookupInput = z.strictObject({
@@ -238,6 +268,23 @@ export function buildStrategyCandidateRouter(deps: StrategyCandidateRouterDeps) 
       .query(async ({ input }) => {
         try {
           return await service.get(input.candidateId);
+        } catch (e) {
+          toTrpcError(e);
+        }
+      }),
+
+    /**
+     * 只读列表（PD-03）：浏览「我产出了哪些候选」，供③研究 → ④策略交接使用。
+     *
+     * 权限与 `get` 同口径（读 → public）；**只读**，本页不做任何写操作 ——
+     * 写仍只经 `update` / `transition` / `promote`。
+     */
+    list: publicProcedure
+      .input(candidateListInput)
+      .output(candidateListRowSchema.array())
+      .query(async ({ input }) => {
+        try {
+          return await service.list(input);
         } catch (e) {
           toTrpcError(e);
         }

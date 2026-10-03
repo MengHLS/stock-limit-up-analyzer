@@ -84,3 +84,13 @@ artifact({
 - 不引入新的 UI 框架，用 `@/components/ui/*` 与 `recharts`；
 - 不在实验里宣称「最优 / 最佳 / 排名」—— 同一份数据上的描述性统计
   挑出来的「最优」是样本内选择，不是结论。
+
+## 继续把实验提升为策略
+
+实验模板只负责 Research。完成实验后，Strategy Definition / Runner / Evaluation / Paper Trading / Forward / 前端复用模板见：
+
+- `docs/strategy/STRATEGY-DEVELOPMENT-TEMPLATE.md`
+- `server/research/strategySchema/template.ts`
+- `server/researchExperiments/strategyBridge.ts`
+
+后续策略目录仍然保持 `experiment.ts` / `result.ts` / `page.tsx` / `README.md` 四件；不要复制 simulator、backtest、evaluation、paper trading 或第二套 Runner。策略专属内容只包括：Experiment、Draft / Definition 输入、Dataset 坐标、Evidence、必要的状态注册项和策略专属展示列。

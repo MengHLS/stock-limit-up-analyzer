@@ -53,7 +53,7 @@ import ReviewWorkbench from "./pages/ReviewWorkbench";
 //   正式研究入口只剩 `/research-experiments`（见下方 RESEARCH-EXPERIMENT-001 注释）。
 // RESEARCH-006.4.1 — Strategy Candidate（研究 → 策略桥）详情页保留：
 //   它是「候选草稿 → 策略」的唯一前端入口，与旧 Analysis/Finding/Conclusion 无关。
-import { StrategyCandidateDetail } from "./pages/candidates";
+import { CandidateList, StrategyCandidateDetail } from "./pages/candidates";
 // FRONTEND-FINAL-001（P0-1）— 正式验证域：OOS / Walk-Forward / 稳健性的**持久化**口径唯一入口。
 //   审计确认旧 `/walk-forward` 走的是内存态技术预览（不落库），与持久化实现是两套且互不引用
 //   ⇒ 正式口径改由 `/validation/*` 承载，旧页保留代码但从导航移除（见 WalkForwardAnalysis.tsx）。
@@ -156,6 +156,7 @@ function Router() {
       {/* RESEARCH-EXPERIMENT-003 — 旧 Research 路由段（`/research*`、`/findings*`、
           `/conclusions*`、`/candidates` 列表）已整体移除。候选详情保留一条可达路径
           （跨实验候选列表页不存在了，但候选详情仍可从策略溯源面板打开）。 */}
+      <Route path="/candidates" component={CandidateList} />
       <Route path="/candidates/:candidateId" component={StrategyCandidateDetail} />
 
       {/* RESEARCH-EXPERIMENT-001 — **唯一**的正式研究入口：独立实验体系。

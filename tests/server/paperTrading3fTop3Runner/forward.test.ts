@@ -3,7 +3,13 @@
  * 覆盖：增量、幂等、断点恢复、账户一致性、Runner 边界（PENDING）。
  */
 import { describe, expect, it } from "vitest";
-import { mergeForwardDays, type PaperForwardState } from "../../../server/paperTrading3fTop3Runner/forward";
+import {
+  mergeForwardDays,
+  partitionForwardIncrement,
+  resolveForwardRunWindow,
+  PAPER_FORWARD_3570001_DEFAULT_BASELINE_START,
+  type PaperForwardState,
+} from "../../../server/paperTrading3fTop3Runner/forward";
 import type { PaperDailyRecord, PaperExitRecord, PaperPositionRecord } from "../../../server/paperTrading3fTop3Runner/run";
 
 function day(date: string, equity: number, cash: number, mv: number, opts: { signals?: number; buys?: number; exits?: PaperExitRecord[]; positions?: PaperPositionRecord[] } = {}): PaperDailyRecord {
@@ -21,7 +27,7 @@ function base(lastProcessed: string): PaperForwardState {
     strategyVersionId: 3570001, strategyId: "s", strategyVersion: "1.0.0", datasetVersionId: 750001,
     runner: { kind: "PIT_RUNNER_HOLDING_BRIDGE", state: "NEW_HIGH_3", decisionHoldingDays: 5, extendToHoldingDays: 20 },
     provenanceId: 660001, holdoutRunId: "RUN-20261002-BD1D7332",
-    baselineRunId: "paper-3570001-2025-01-01-2026-09-04", baselineLastProcessedDate: "2026-09-04",
+    baselineRunId: "paper-3570001-2025-01-01-2026-09-04", baselineStartDate: "2025-01-01", baselineLastProcessedDate: "2026-09-04",
     latestDataDate: lastProcessed, lastProcessedTradingDate: lastProcessed, nextTradingDate: null,
     status: "WAITING_FOR_NEW_DATA", lastRunAt: "t0", lastError: null,
     initialCapital: 100000, maxPositions: 5, singlePositionRatio: 0.2,
@@ -77,5 +83,47 @@ describe("mergeForwardDays", () => {
     expect(s.forwardDaily).toHaveLength(0);
     expect(s.forwardHistory).toHaveLength(0);
     expect(s.lastProcessedTradingDate).toBe("2026-09-04");
+  });
+});
+
+describe("R6 · 前向增量必须从基线起点重放（不能只跑新窗口）", () => {
+  it("resolveForwardRunWindow：起点取 baselineStartDate，而不是增量起始日", () => {
+    const window = resolveForwardRunWindow({ baselineStartDate: "2025-01-01", toTradingDate: "2026-09-07" });
+    expect(window).toEqual({ startDate: "2025-01-01", endDate: "2026-09-07" });
+    // 回归哨兵：绝不能把起点收缩成"新增的那一天"（那会让组合从 100k 平仓起步）
+    expect(window.startDate).not.toBe("2026-09-07");
+  });
+
+  it("resolveForwardRunWindow：状态缺 baselineStartDate（老载荷）⇒ 回落到历史窗口起点常量", () => {
+    const window = resolveForwardRunWindow({ baselineStartDate: undefined, toTradingDate: "2026-09-07" });
+    expect(window.startDate).toBe(PAPER_FORWARD_3570001_DEFAULT_BASELINE_START);
+  });
+
+  it("partitionForwardIncrement：只保留 > lastProcessedTradingDate 的日与退出（不重复并入整段）", () => {
+    const daily = [
+      { tradeDate: "2026-09-04" }, { tradeDate: "2026-09-07" }, { tradeDate: "2026-09-08" },
+    ] as never;
+    const history = [
+      { tradeDate: "2026-09-04", stock: "A" }, { tradeDate: "2026-09-07", stock: "B" },
+    ] as never;
+    const out = partitionForwardIncrement({ daily, history }, "2026-09-04");
+    expect(out.newDaily.map((d) => d.tradeDate)).toEqual(["2026-09-07", "2026-09-08"]);
+    expect(out.newHistory.map((h) => h.tradeDate)).toEqual(["2026-09-07"]);
+  });
+
+  it("账户连续性：整段重放切出的增量并入后，账户取自**连续权益**而非独立小回测", () => {
+    // 模拟"整段重放到 2026-09-07"的结果：equity 是 199,036 继续演化的值（不是 100k 起步）
+    const s = mergeForwardDays({
+      previous: base("2026-09-04"),
+      newDaily: [day("2026-09-07", 201500, 9000, 192500, { signals: 3, buys: 1 })],
+      newHistory: [],
+      carriedPositions: [],
+      latestDataDate: "2026-09-07",
+      nextTradingDate: null,
+      lastRunAt: "t1",
+    });
+    expect(s.account.equity).toBe(201500);
+    // 相对**初始本金**的累计收益仍然连续（不是被打回 0 附近）
+    expect(s.account.cumulativeReturnPct).toBeCloseTo(101.5, 6);
   });
 });

@@ -1,6 +1,6 @@
 ---
 name: research-agent
-description: 研究链路（Dataset → Experiment → Run → Finding → Conclusion → Candidate → Strategy）的统一理解与执行规范，强调 Dataset Version、实验口径、provenance 与可追溯性。
+description: 研究链路（Dataset → Experiment → Run → 实验结论(自定义 payload) → Candidate → Strategy）的统一理解与执行规范，强调 Dataset Version、实验口径、provenance 与可追溯性。Finding / Conclusion 不属于本平台概念。
 ---
 
 # Research Agent Skill
@@ -17,9 +17,7 @@ Experiment
  ↓
 Run
  ↓
-Finding
- ↓
-Conclusion
+实验结论（自定义 payload）
  ↓
 Candidate
  ↓
@@ -56,7 +54,7 @@ Strategy
 - **证据指纹独立**：`strategy_versions.fingerprint` 只表示**策略文档**指纹；证据指纹形如 `evi-sha256:…`。两者**不得混用**。
   - 换可解析但不同的 `reference` ⇒ `…_PROVENANCE_CONFLICT`；指向不存在字段 ⇒ `…_REFERENCE_UNRESOLVED` —— **两者都不落行**。
 - `sourceCandidateId` / `sourceConclusionId` 是旧链遗留列 ⇒ 新链**一律 NULL**。
-- **Candidate 必须能够追溯到 Research Finding / Conclusion（或独立实验证据 Run）**；`sourceFindingIdsJson` 为空属**证据链断裂**（历史遗留），新写入不得复现。
+- **Candidate 必须能够追溯到「证据来源」**：独立实验证据 Run，或**历史 Finding · Conclusion 遗留链**（该链已退役，见 §2 —— 🔴 Finding / Conclusion **不属于本平台概念**，见 `docs/product/PRODUCT-DECISIONS-001.md` PD-02）；`sourceFindingIdsJson` 为空属**证据链断裂**（历史遗留），新写入不得复现。
 
 ## 5. 数据口径要求
 
@@ -85,7 +83,7 @@ Experiment Definition      口径 / 参数 / 窗口 / 信息边界（usesForward
 Inputs                     参数 / seed / universe / codeVersion
 Outputs                    结果结构 + 样本账（eligible / excluded / unscannedEventCount）
 Provenance                 Run ID / 产物路径 / 证据指纹
-Finding → Conclusion       结论与证据链
+实验结论(自定义 payload)   结论与证据链（Finding/Conclusion 已退役）
 Candidate → Strategy       转正路径 + 溯源行
 Tests
 Remaining Risks

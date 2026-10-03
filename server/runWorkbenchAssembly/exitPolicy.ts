@@ -264,7 +264,8 @@ export function mapDeclaredExitPolicy(
     policy.advancedTrailingPolicy === null &&
     policy.advancedStopPolicy === null &&
     policy.strongHold === null &&
-    policy.recoveryPath === null
+    policy.recoveryPath === null &&
+    unifiedRunnerBridge === undefined
     ? undefined
     : policy;
 }

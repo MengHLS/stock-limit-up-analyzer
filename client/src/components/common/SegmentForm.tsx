@@ -4,6 +4,7 @@ import { Check, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useFieldTechnicalDetails } from "@/components/common/FieldTechnicalDetails";
 
 // ---------------------------------------------------------------------------
 // 结构契约
@@ -64,6 +65,9 @@ export function segmentDomId(prefix: string, segment: string): string {
  * `valueKey` 用来回显枚举当前选中的**原始值**（同样是给对照用的）。
  * `missing` = 「必填但还没填」：由该段缺口的驱动方传入（**不是**另立一张必填表），
  * 因此清单说缺哪一项，琥珀标记就一定落在哪一项上。
+ *
+ * `optional` = 「这一项可以不管」（NN/g I-10：本页**多数**字段必填 ⇒ 只标**可选**的那几项，
+ * 不逐项盖「必填」章 —— 那是噪音）。可选字段少（≤2）时才加这个标记。
  */
 export function Field({
   label,
@@ -71,6 +75,7 @@ export function Field({
   valueKey,
   hint,
   missing = false,
+  optional = false,
   children,
 }: {
   label: string;
@@ -78,8 +83,14 @@ export function Field({
   valueKey?: string;
   hint?: string;
   missing?: boolean;
+  optional?: boolean;
   children: ReactNode;
 }) {
+  /**
+   * 🔴 默认**不显示**字段路径与原始枚举值 —— 用户看的是策略，不是代码。
+   *    需要对照/排障时，由「策略定义」页顶部的「技术细节」开关统一打开。
+   */
+  const { show: showTechnical } = useFieldTechnicalDetails();
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-baseline gap-x-1.5">
@@ -89,10 +100,15 @@ export function Field({
             必填未填
           </span>
         )}
-        {name !== undefined && (
+        {optional && !missing && (
+          <span className="rounded-full bg-muted px-1.5 py-px text-[10px] leading-tight text-muted-foreground">
+            可选
+          </span>
+        )}
+        {showTechnical && name !== undefined && (
           <code className="font-mono text-[10px] text-muted-foreground/70">{name}</code>
         )}
-        {valueKey !== undefined && valueKey.trim() !== "" && (
+        {showTechnical && valueKey !== undefined && valueKey.trim() !== "" && (
           <code className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">
             {valueKey}
           </code>
@@ -174,7 +190,8 @@ export function EnumSelect({
   value: string;
   options: readonly OptionLike[];
   onChange: (next: string) => void;
-  emptyLabel?: string;
+  /** 传 `null` = 不提供「未选择」（该字段必填、没有空值语义）。 */
+  emptyLabel?: string | null;
   disabled?: boolean;
 }) {
   return (
@@ -192,6 +209,58 @@ export function EnumSelect({
         </option>
       ))}
     </select>
+  );
+}
+
+/**
+ * 枚举「选项很少（≤3）」时的形态：**全部摊开一次点选**。
+ *
+ * 依据 NN/g 表单 10 条：「2–3 个选项用 radio 而不是下拉」——下拉要多一次点击，
+ * 而且把选项藏起来了，用户不知道有几条路可走。
+ * 选项 ≥4 时仍用 `EnumSelect`（摊开会把表单撑得很长）。
+ */
+export function EnumRadio({
+  value,
+  options,
+  onChange,
+  emptyLabel = "未选择",
+  disabled = false,
+}: {
+  value: string;
+  options: readonly OptionLike[];
+  onChange: (next: string) => void;
+  /** 传 `null` = 不提供「未选择」（该字段必填、没有空值语义）。 */
+  emptyLabel?: string | null;
+  disabled?: boolean;
+}) {
+  const items = emptyLabel === null ? [...options] : [{ value: "", label: emptyLabel }, ...options];
+  return (
+    <div className="flex flex-wrap gap-1.5" role="radiogroup">
+      {items.map((option) => {
+        const active = option.value === value;
+        const itemDisabled = disabled || option.disabled === true;
+        return (
+          <button
+            key={option.value === "" ? "__empty" : option.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            disabled={itemDisabled}
+            title={option.note}
+            onClick={() => onChange(option.value)}
+            className={
+              "rounded-md border px-2.5 py-1 text-xs transition disabled:opacity-50 "
+              + (active
+                ? "border-primary bg-primary/10 font-semibold"
+                : "hover:bg-muted")
+            }
+          >
+            {option.label}
+            {option.disabled === true ? "（当前不可选）" : ""}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

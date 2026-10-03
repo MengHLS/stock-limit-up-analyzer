@@ -1,244 +1,36 @@
-/**
- * STRATEGY-3570001-PAPER-TRADING-001 —— 3570001 每日模拟盘页。
- *
- * 数据来源：`trpc.researchRun.getPaperTrading3570001`（读留档 `result.paperTradingState`）。
- * 页面不硬编码任何账户 / 成交数字，刷新后从持久化记录重建。
- */
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { SectionCard, StatusBadge } from "@/components/common";
+/** STRATEGY-3570001 模拟盘只读适配页：查询持久化 API，展示复用通用 Paper Trading 模板。 */
+import {
+  PaperTradingTemplate,
+  type PaperSignalRecord,
+  type PaperTradingSignalColumn,
+  type PaperTradingState,
+  type PaperForwardState,
+} from "@/components/strategy/PaperTradingTemplate";
 import { trpc } from "@/lib/trpc";
 
-type Signal = { tradeDate: string; stock: string; inTop3: boolean; newHigh3: boolean; signalTime: string; plannedEntryPrice: number | null };
-type Fill = { tradeDate: string; stock: string; side: string; plannedPrice: number | null; simulatedFillPrice: number | null; quantity: number; cost: number; slippage: number; status: string };
-type Position = { tradeDate: string; stock: string; entryDate: string; entryPrice: number; currentPrice: number | null; holdingDays: number; runnerState: string; peakPrice: number | null; unrealizedPnL: number | null; exitCondition: string | null };
-type Exit = { tradeDate: string; stock: string; exitPrice: number | null; exitReason: string; realizedPnL: number | null; holdingDays: number | null; usedRunner: boolean };
-type Daily = { tradeDate: string; equity: number; cash: number; marketValue: number; dailyReturnPct: number | null; cumulativeReturnPct: number | null; drawdownPct: number; signals: Signal[]; fills: Fill[]; positions: Position[]; exits: Exit[] };
-type ForwardDaily = { tradeDate: string; equity: number; drawdownPct: number; cash: number; marketValue: number };
-type ForwardState = {
-  runId: string; status: string; latestDataDate: string; lastProcessedTradingDate: string;
-  nextTradingDate: string | null; lastRunAt: string; lastError: string | null;
-  baselineRunId: string; baselineLastProcessedDate: string;
-  account: { cash: number; marketValue: number; equity: number; peakEquity: number; dailyReturnPct: number | null; cumulativeReturnPct: number; drawdownPct: number };
-  carriedPositions: Position[]; forwardDaily: ForwardDaily[];
-  forwardStats: { newTradeCount: number; newSignalCount: number; newRunnerCount: number; forwardReturnPct: number | null; forwardMaxDrawdownPct: number | null; forwardProfitFactor: number | null; forwardWinRatePct: number | null; forwardAverageHoldingDays: number | null; runnerDirectContribution: number };
-  forwardHistory: Exit[];
-};
-type State = {
-  strategyVersionId: number; strategyId: string; strategyVersion: string; datasetVersionId: number;
-  runner: { state: string; decisionHoldingDays: number; extendToHoldingDays: number };
-  window: { startDate: string; endDate: string };
-  provenanceId: number; holdoutRunId: string;
-  initialCapital: number; maxPositions: number; singlePositionRatio: number;
-  daily: Daily[];
-  account: { equity: number; cash: number; marketValue: number; cumulativeReturnPct: number; maxDrawdownPct: number; currentDrawdownPct: number; todayReturnPct: number | null };
-  openPositions: Position[]; history: Exit[];
-  lastRunAt: string; runStatus: string; dataIssue: string | null;
-};
-
-const money = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v).toLocaleString("en-US") : "—");
-const pct = (v: unknown, d = 2) => (typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(d)}%` : "—");
-const num = (v: unknown, d = 2) => (typeof v === "number" && Number.isFinite(v) ? v.toFixed(d) : "—");
+const SIGNAL_COLUMNS: readonly PaperTradingSignalColumn[] = [
+  {
+    key: "rank",
+    header: "3F Top3 排名",
+    value: (_signal: PaperSignalRecord, index: number) => `#${index + 1}`,
+  },
+  {
+    key: "newHigh3",
+    header: "NEW_HIGH_3",
+    value: (signal: PaperSignalRecord) => (signal.newHigh3 ? "是" : "—"),
+  },
+];
 
 export default function PaperTrading3570001() {
-  const q = trpc.researchRun.getPaperTrading3570001.useQuery();
-  const payload = q.data as { state: State; forward: ForwardState | null } | null;
+  // ✅ SCOPE-002 S7：改用**通用**端点（按版本坐标），专项端点只是它的薄封装。
+  const q = trpc.researchRun.getStrategyVersionPaperTrading.useQuery({
+    strategyId: "first-limit-pullback-3f-top3-runner-hold20",
+    strategyVersion: "1.0.0",
+  });
+  const payload = q.data as { state: PaperTradingState | null; forward: PaperForwardState | null } | null;
   const state = payload?.state ?? null;
-  const forward = payload?.forward ?? null;
 
   if (q.isLoading) return <div className="p-6 text-sm text-muted-foreground">加载模拟盘数据…</div>;
-  if (!state) return <div className="p-6 text-sm text-muted-foreground">尚无持久化的模拟盘运行数据。</div>;
-
-  const today = state.daily.at(-1);
-  const recentSignals = state.daily.flatMap((d) => d.signals).slice(-20).reverse();
-  const fillsByStock = new Map((today?.fills ?? []).map((f) => [f.stock, f]));
-  const curve = state.daily.map((d) => ({ date: d.tradeDate, equity: d.equity, drawdownPct: d.drawdownPct }));
-  const recentHistory = [...state.history].reverse().slice(0, 40);
-
-  return (
-    <div className="space-y-4 p-4">
-      <SectionCard title="策略运行状态">
-        <div className="grid gap-3 md:grid-cols-4 text-sm">
-          <div><div className="text-xs text-muted-foreground">Strategy Version</div><div className="font-semibold">3570001</div></div>
-          <div><div className="text-xs text-muted-foreground">Runner</div><div className="font-semibold">{state.runner.state} / {state.runner.decisionHoldingDays} → {state.runner.extendToHoldingDays}</div></div>
-          <div><div className="text-xs text-muted-foreground">Dataset</div><div className="font-semibold">v7 (#{state.datasetVersionId})</div></div>
-          <div><div className="text-xs text-muted-foreground">Data Date</div><div className="font-semibold">{today?.tradeDate ?? "—"}</div></div>
-          <div><div className="text-xs text-muted-foreground">最近一次运行</div><div className="font-semibold">{state.lastRunAt}</div></div>
-          <div><div className="text-xs text-muted-foreground">Run Status</div><StatusBadge status={state.runStatus} /></div>
-          <div><div className="text-xs text-muted-foreground">数据缺失 / 异常</div><div className="font-semibold">{state.dataIssue ?? "无"}</div></div>
-          <div><div className="text-xs text-muted-foreground">溯源</div><div className="font-semibold">provenance {state.provenanceId} · {state.holdoutRunId}</div></div>
-        </div>
-      </SectionCard>
-
-      <SectionCard title="账户">
-        <div className="grid gap-3 md:grid-cols-4 text-sm">
-          <div><div className="text-xs text-muted-foreground">总权益</div><div className="text-lg font-semibold tabular-nums">{money(state.account.equity)}</div></div>
-          <div><div className="text-xs text-muted-foreground">现金</div><div className="text-lg font-semibold tabular-nums">{money(state.account.cash)}</div></div>
-          <div><div className="text-xs text-muted-foreground">持仓市值</div><div className="text-lg font-semibold tabular-nums">{money(state.account.marketValue)}</div></div>
-          <div><div className="text-xs text-muted-foreground">累计收益</div><div className="text-lg font-semibold tabular-nums">{pct(state.account.cumulativeReturnPct)}</div></div>
-          <div><div className="text-xs text-muted-foreground">今日收益</div><div className="font-semibold tabular-nums">{pct(state.account.todayReturnPct)}</div></div>
-          <div><div className="text-xs text-muted-foreground">MaxDD</div><div className="font-semibold tabular-nums">{pct(state.account.maxDrawdownPct)}</div></div>
-          <div><div className="text-xs text-muted-foreground">当前回撤</div><div className="font-semibold tabular-nums">{pct(state.account.currentDrawdownPct)}</div></div>
-          <div><div className="text-xs text-muted-foreground">初始资金 / 单仓</div><div className="font-semibold">{money(state.initialCapital)} · {pct(state.singlePositionRatio * 100, 0)}</div></div>
-        </div>
-      </SectionCard>
-
-      <SectionCard title={`今日策略池（${today?.tradeDate ?? "—"}）`}>
-        <table className="w-full text-sm">
-          <thead><tr className="text-left text-xs text-muted-foreground">
-            <th className="py-1">股票</th><th className="py-1">3F Top3 排名</th><th className="py-1">NEW_HIGH_3</th>
-            <th className="py-1 text-right">计划入场</th><th className="py-1 text-right">实际模拟成交</th><th className="py-1">状态</th>
-          </tr></thead>
-          <tbody>
-            {(today?.signals ?? []).map((s, i) => {
-              const fill = fillsByStock.get(s.stock);
-              return (
-                <tr key={s.stock + i} className="border-t border-border">
-                  <td className="py-1 font-mono text-xs">{s.stock}</td>
-                  <td className="py-1">#{i + 1}</td>
-                  <td className="py-1">{s.newHigh3 ? "是" : "—"}</td>
-                  <td className="py-1 text-right tabular-nums">{num(s.plannedEntryPrice)}</td>
-                  <td className="py-1 text-right tabular-nums">{fill ? num(fill.simulatedFillPrice) : "—"}</td>
-                  <td className="py-1">{fill ? fill.status : "WAITING_FILL"}</td>
-                </tr>
-              );
-            })}
-            {(today?.signals ?? []).length === 0 && <tr><td className="py-2 text-muted-foreground" colSpan={6}>当日无 Top3 信号</td></tr>}
-          </tbody>
-        </table>
-        <div className="mt-2 text-xs text-muted-foreground">近期信号（最近 20 条，倒序）</div>
-        <table className="mt-1 w-full text-sm">
-          <tbody>
-            {recentSignals.map((s, i) => (
-              <tr key={"r" + s.tradeDate + s.stock + i} className="border-t border-border">
-                <td className="py-1">{s.tradeDate}</td><td className="py-1 font-mono text-xs">{s.stock}</td>
-                <td className="py-1 text-right tabular-nums">{num(s.plannedEntryPrice)}</td>
-                <td className="py-1 text-xs text-muted-foreground">{s.signalTime}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </SectionCard>
-
-      <SectionCard title="当前持仓">
-        <table className="w-full text-sm">
-          <thead><tr className="text-left text-xs text-muted-foreground">
-            <th className="py-1">股票</th><th className="py-1 text-right">入场价</th><th className="py-1 text-right">现价</th>
-            <th className="py-1 text-right">持仓天数</th><th className="py-1">Runner 状态</th>
-            <th className="py-1 text-right">浮盈亏</th><th className="py-1">退出条件</th>
-          </tr></thead>
-          <tbody>
-            {state.openPositions.map((p, i) => (
-              <tr key={p.stock + i} className="border-t border-border">
-                <td className="py-1 font-mono text-xs">{p.stock}</td>
-                <td className="py-1 text-right tabular-nums">{num(p.entryPrice)}</td>
-                <td className="py-1 text-right tabular-nums">{num(p.currentPrice)}</td>
-                <td className="py-1 text-right tabular-nums">{p.holdingDays}</td>
-                <td className="py-1">{p.runnerState}</td>
-                <td className="py-1 text-right tabular-nums">{money(p.unrealizedPnL)}</td>
-                <td className="py-1 text-xs text-muted-foreground">{p.exitCondition ?? "按原止损 / 趋势 / strongHold 逐日判定"}</td>
-              </tr>
-            ))}
-            {state.openPositions.length === 0 && <tr><td className="py-2 text-muted-foreground" colSpan={7}>当前无持仓（期末已清仓）</td></tr>}
-          </tbody>
-        </table>
-      </SectionCard>
-
-      <SectionCard title="权益 / 回撤">
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={curve}>
-              <XAxis dataKey="date" minTickGap={60} /><YAxis /><Tooltip />
-              <Line type="monotone" dataKey="equity" name="Equity" dot={false} stroke="#dc2626" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </SectionCard>
-
-      <SectionCard title={`历史交易（共 ${state.history.length} 笔，显示最近 ${recentHistory.length} 笔）`}>
-        <table className="w-full text-sm">
-          <thead><tr className="text-left text-xs text-muted-foreground">
-            <th className="py-1">日期</th><th className="py-1">股票</th><th className="py-1 text-right">退出价</th>
-            <th className="py-1">退出原因</th><th className="py-1 text-right">持仓天数</th>
-            <th className="py-1 text-right">PnL</th><th className="py-1">Runner</th>
-          </tr></thead>
-          <tbody>
-            {recentHistory.map((h, i) => (
-              <tr key={h.tradeDate + h.stock + i} className="border-t border-border">
-                <td className="py-1">{h.tradeDate}</td><td className="py-1 font-mono text-xs">{h.stock}</td>
-                <td className="py-1 text-right tabular-nums">{num(h.exitPrice)}</td>
-                <td className="py-1">{h.exitReason}</td>
-                <td className="py-1 text-right tabular-nums">{h.holdingDays ?? "—"}</td>
-                <td className="py-1 text-right tabular-nums">{money(h.realizedPnL)}</td>
-                <td className="py-1">{h.usedRunner ? "是" : "否"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </SectionCard>
-
-      <SectionCard title="实时状态（Forward Paper Trading）">
-        {forward === null ? (
-          <div className="text-sm text-muted-foreground">尚未创建前向运行（调用 runPaperTrading3570001NextDay 初始化）。</div>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-3 text-sm">
-            <div><div className="text-xs text-muted-foreground">Latest Data Date</div><div className="font-semibold">{forward.latestDataDate}</div></div>
-            <div><div className="text-xs text-muted-foreground">Last Processed Date</div><div className="font-semibold">{forward.lastProcessedTradingDate}</div></div>
-            <div><div className="text-xs text-muted-foreground">Next Trading Date</div><div className="font-semibold">{forward.nextTradingDate ?? "—"}</div></div>
-            <div><div className="text-xs text-muted-foreground">Last Run</div><div className="font-semibold">{forward.lastRunAt}</div></div>
-            <div><div className="text-xs text-muted-foreground">Run Status</div><StatusBadge status={forward.status} /></div>
-            <div><div className="text-xs text-muted-foreground">数据缺失 / 执行错误</div><div className="font-semibold">{forward.lastError ?? "无"}</div></div>
-            <div><div className="text-xs text-muted-foreground">基线</div><div className="font-semibold">{forward.baselineRunId}（{forward.baselineLastProcessedDate}）</div></div>
-            <div><div className="text-xs text-muted-foreground">新增交易日</div><div className="font-semibold">{forward.forwardDaily.length}</div></div>
-            <div><div className="text-xs text-muted-foreground">前向账户权益</div><div className="font-semibold tabular-nums">{money(forward.account.equity)}</div></div>
-          </div>
-        )}
-      </SectionCard>
-
-      <SectionCard title="Forward 统计（仅真实新增交易日）">
-        {forward === null || forward.forwardDaily.length === 0 ? (
-          <div className="text-sm text-muted-foreground">尚无新增交易日 —— Forward 表现不可用（等待新数据，不用历史数据冒充前向）。</div>
-        ) : (
-          <>
-            <div className="grid gap-3 md:grid-cols-4 text-sm">
-              <div><div className="text-xs text-muted-foreground">新增交易数</div><div className="font-semibold tabular-nums">{forward.forwardStats.newTradeCount}</div></div>
-              <div><div className="text-xs text-muted-foreground">新增信号数</div><div className="font-semibold tabular-nums">{forward.forwardStats.newSignalCount}</div></div>
-              <div><div className="text-xs text-muted-foreground">新增 Runner 数</div><div className="font-semibold tabular-nums">{forward.forwardStats.newRunnerCount}</div></div>
-              <div><div className="text-xs text-muted-foreground">Forward Return</div><div className="font-semibold tabular-nums">{pct(forward.forwardStats.forwardReturnPct)}</div></div>
-              <div><div className="text-xs text-muted-foreground">Forward MaxDD</div><div className="font-semibold tabular-nums">{pct(forward.forwardStats.forwardMaxDrawdownPct)}</div></div>
-              <div><div className="text-xs text-muted-foreground">Forward PF</div><div className="font-semibold tabular-nums">{num(forward.forwardStats.forwardProfitFactor, 4)}</div></div>
-              <div><div className="text-xs text-muted-foreground">Forward 胜率</div><div className="font-semibold tabular-nums">{pct(forward.forwardStats.forwardWinRatePct)}</div></div>
-              <div><div className="text-xs text-muted-foreground">Forward 平均持仓</div><div className="font-semibold tabular-nums">{num(forward.forwardStats.forwardAverageHoldingDays, 2)}</div></div>
-              <div><div className="text-xs text-muted-foreground">Runner 直接贡献</div><div className="font-semibold tabular-nums">{money(forward.forwardStats.runnerDirectContribution)}</div></div>
-            </div>
-            <div className="mt-3 h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={forward.forwardDaily.map((d) => ({ date: d.tradeDate, equity: d.equity }))}>
-                  <XAxis dataKey="date" minTickGap={60} /><YAxis /><Tooltip />
-                  <Line type="monotone" dataKey="equity" name="Forward Equity" dot={false} stroke="#2563eb" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </>
-        )}
-      </SectionCard>
-
-      <SectionCard title="Historical Backtest vs Live Paper Forward">
-        <table className="w-full text-sm">
-          <thead><tr className="text-left text-xs text-muted-foreground">
-            <th className="py-1">指标</th><th className="py-1 text-right">历史回测（6000001）</th><th className="py-1 text-right">Forward Paper</th><th className="py-1 text-right">Delta</th>
-          </tr></thead>
-          <tbody>
-            <tr className="border-t border-border"><td className="py-1">Return</td><td className="py-1 text-right tabular-nums">{pct(state.account.cumulativeReturnPct)}</td><td className="py-1 text-right tabular-nums">{pct(forward?.forwardStats.forwardReturnPct)}</td><td className="py-1 text-right tabular-nums">{forward?.forwardStats.forwardReturnPct == null ? "—" : pct(forward.forwardStats.forwardReturnPct - state.account.cumulativeReturnPct)}</td></tr>
-            <tr className="border-t border-border"><td className="py-1">MaxDD</td><td className="py-1 text-right tabular-nums">{pct(state.account.maxDrawdownPct)}</td><td className="py-1 text-right tabular-nums">{pct(forward?.forwardStats.forwardMaxDrawdownPct)}</td><td className="py-1 text-right tabular-nums">—</td></tr>
-            <tr className="border-t border-border"><td className="py-1">PF</td><td className="py-1 text-right tabular-nums">—</td><td className="py-1 text-right tabular-nums">{num(forward?.forwardStats.forwardProfitFactor, 4)}</td><td className="py-1 text-right tabular-nums">—</td></tr>
-            <tr className="border-t border-border"><td className="py-1">Win Rate</td><td className="py-1 text-right tabular-nums">—</td><td className="py-1 text-right tabular-nums">{pct(forward?.forwardStats.forwardWinRatePct)}</td><td className="py-1 text-right tabular-nums">—</td></tr>
-            <tr className="border-t border-border"><td className="py-1">Trade Count</td><td className="py-1 text-right tabular-nums">{state.history.length}</td><td className="py-1 text-right tabular-nums">{forward?.forwardStats.newTradeCount ?? "—"}</td><td className="py-1 text-right tabular-nums">{forward === null ? "—" : String(forward.forwardStats.newTradeCount - state.history.length)}</td></tr>
-            <tr className="border-t border-border"><td className="py-1">Avg Holding</td><td className="py-1 text-right tabular-nums">—</td><td className="py-1 text-right tabular-nums">{num(forward?.forwardStats.forwardAverageHoldingDays, 2)}</td><td className="py-1 text-right tabular-nums">—</td></tr>
-            <tr className="border-t border-border"><td className="py-1">Runner Contribution</td><td className="py-1 text-right tabular-nums">—</td><td className="py-1 text-right tabular-nums">{money(forward?.forwardStats.runnerDirectContribution)}</td><td className="py-1 text-right tabular-nums">—</td></tr>
-          </tbody>
-        </table>
-        <div className="mt-2 text-xs text-muted-foreground">Forward 数据只来自真实新增交易日；无新数据时该列为空，不用历史数据冒充。</div>
-      </SectionCard>
-    </div>
-  );
+  if (state === null) return <div className="p-6 text-sm text-muted-foreground">尚无持久化的模拟盘运行数据。</div>;
+  return <PaperTradingTemplate state={state} forward={payload?.forward ?? null} signalColumns={SIGNAL_COLUMNS} />;
 }

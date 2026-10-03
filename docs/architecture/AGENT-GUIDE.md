@@ -33,6 +33,46 @@
 
 ---
 
+## 1-A. Agent / Skill 职责边界与调用关系（2026-10-03 新增）
+
+`.agents/**` 共 **9 个**项目级 Skill。**各 Skill 只定义自己那一层，不越界**：
+
+```text
+Product Agent      → 定义「做什么」（产品需求 / 用户流程 / 功能边界 / 验收标准）
+Frontend Agent     → 定义「用户怎么用、页面怎么呈现」（信息架构 / 交互 / 组件 / 展示）
+Orchestrator Agent → 定义「怎么按阶段推进」（Codex Goal → 读取 .agent/task-state.yaml → 建立 Pipeline → READY 判定 → 按对应 Skill 规则执行 → Verification 门禁 → 状态同步）
+Architecture Agent → 定义「系统应该怎么组织」（模块边界 / 依赖 / legacy / 最小重构边界）
+Strategy Agent     → 定义「策略语义」（Strategy Core / RuleGraph / 参数角色 / 版本指纹）
+Research Agent     → 定义「研究语义」（Dataset 坐标 / 实验口径 / provenance）
+Database Agent     → 定义「数据库变更是否安全」（默认只读；危险操作须先授权）
+Refactoring Agent  → 既有代码结构重构（Baseline → Refactor → Test → Verify）
+Verification Agent → 行为与结果验证（Before vs After；Expected / Unexpected / Unknown）
+```
+
+**边界硬约束**：
+
+- **Product Agent 不直接决定代码架构**，也**不直接修改业务代码**（只产出规格）。
+- **Frontend Agent 不直接改变业务语义**；业务口径归 Strategy / Research Agent，指标口径归 Backtest（`canonicalMetrics()`）。
+- **Orchestrator Agent 不代替 Product / Architecture / Strategy / Research / Database 的业务判断**；默认 `SAFE_PIPELINE`，命中高风险变化即 `NEEDS_HUMAN`。
+- **Orchestrator Agent 不把 Skill 当工具函数调用**：Skill 是工作规则，Codex 是唯一执行主体；禁止 `call_skill()` / `invoke_skill()` / `run_skill()` 之类的虚假机制。
+- 前端不得自行重算指标口径；`client/**` 不得 import `server/**` 运行时值（只允许 `import type`）。
+- 发现需求与 `AGENTS.md` §2 不变量冲突 ⇒ **标记冲突并交回对应 Agent**，不得默默按需求改写语义。
+
+**Goal 驱动编排（2026-10-03 增强）**：
+
+- 完整目标默认走 **Orchestrator `SAFE_PIPELINE`**：Codex Goal → 读取 `.agent/task-state.yaml` → 建立 Pipeline → 判断 READY → 按对应 Skill 规则执行 → 验证 → 更新状态 → 继续，直到 `COMPLETE` / `BLOCKED` / `NEEDS_HUMAN`。
+- 标准阶段：`PRODUCT` / `RESEARCH` / `STRATEGY` / `ARCHITECTURE` / `FRONTEND` / `BACKEND` / `INTEGRATION` / `REFACTORING` / `VERIFICATION` / `FINAL`；`DATABASE` 是横切 Gate（默认只读）。**不是每个任务都执行全部阶段**，由 Goal 裁剪。
+- 过程状态落在 `.agent/task-state.yaml`（唯一运行时状态文件，只描述当前 Goal）；长期状态载体仍是 `ROADMAP.md` / `ROADMAP-CHANGELOG.md`。
+- 阶段状态：`PENDING` / `READY` / `IN_PROGRESS` / `COMPLETE` / `BLOCKED` / `NEEDS_HUMAN`；合法转换见 `.agents/orchestrator/SKILL.md` §6.3。
+
+**推荐流水线**：
+
+- 新增功能：**Product Agent → Frontend Agent →（必要时）Architecture Agent → Verification Agent**
+- 重构：**Architecture Agent → Refactoring Agent → Verification Agent**
+- 完整目标默认：**Orchestrator SAFE_PIPELINE** 编排上述流水线，自动推进到 `COMPLETE` / `BLOCKED` / `NEEDS_HUMAN`。
+
+---
+
 ## 2. 什么时候必须做全局审计（`GLOBAL AUDIT REQUIRED`）
 
 **只有**满足下列任一条时才重新全局审计（触发条目编号必须写进 `CHANGE-AUDIT.md`）：

@@ -231,8 +231,11 @@ export interface CandidateRowVm {
 }
 
 const MISSING_NOTES: Record<CandidateSourceMissingReason, string> = {
-  EXPERIMENT: "来源实验在当前库中已不存在",
-  CONCLUSION: "来源结论在当前库中已不存在",
+  // 🔴 旧 Research 链（Experiment / Conclusion）已随 RESEARCH-EXPERIMENT-003 **整体退役**：
+  //    表已归档、领域实现已删除 ⇒ 这是「结构上不再存在」，**不是**「这条上游丢了」。
+  //    措辞必须区分这两件事，否则会把结构性事实伪装成数据异常（与 service.ts#buildView 同口径）。
+  EXPERIMENT: "来源实验属于已退役的旧 Research 链（结构上不再存在，不是数据丢失）",
+  CONCLUSION: "来源结论属于已退役的旧 Research 链（结构上不再存在，不是数据丢失）",
   DATASET_VERSION: "来源 Dataset 版本在 Dataset Registry 中查不到",
 };
 
@@ -367,12 +370,12 @@ const OPERATION_HINTS: Partial<Record<string, string>> = {
   "CREATE_FROM_CONCLUSION:PRECONDITION_FAILED":
     "登记候选要求：结论状态为 DRAFT / FINAL（已被取代的结论不得进入策略链路），且结论所属实验绑定的 Dataset 版本存在并且是 READY。",
   "CREATE_FROM_CONCLUSION:NOT_FOUND":
-    "结论 / 实验 / Dataset 版本有一项查不到了。请回到结论页确认该结论仍在，并到「数据集构建」确认绑定的版本还存在。",
+    "来源锚 / Dataset 版本有一项查不到了。🔴 旧 Research 的「结论 / 实验」两级已随 RESEARCH-EXPERIMENT-003 退役（对应的结论页已不存在）；请到「数据集」确认绑定版本仍在，并在候选列表确认该候选当前的来源锚。",
   "CREATE_FROM_CONCLUSION:BAD_REQUEST":
     "入参不合法（例如候选名为空、携带了后端不允许的字段）。建议只提交结论 + 候选名 / 描述。",
   "UPDATE_SKETCH:BAD_REQUEST":
     "只能修改后端允许的 7 个草图字段（name / description / entryRule / filterRule / exitRule / riskRule / parameterSpace），且不能提交空补丁或未知字段。",
-  "UPDATE_SKETCH:NOT_FOUND": "候选不存在（可能已被删除）。请返回实验页重新打开。",
+  "UPDATE_SKETCH:NOT_FOUND": "候选不存在（可能已被删除）。请返回候选列表（/candidates）重新打开。",
   "TRANSITION:CONFLICT":
     "该迁移不在候选状态机允许的路径上，或候选已经是目标状态。注意：CONVERTED（已转正）**不由状态流转产生** —— 它只能由转正入口写入，普通流转一律被拒绝（后端专属码 STRATEGY_CANDIDATE_CONVERSION_REQUIRES_PROMOTE）。",
   "TRANSITION:BAD_REQUEST":
@@ -547,7 +550,8 @@ export const PROMOTE_DOMAIN_HINTS: Readonly<Record<string, PromoteDomainHint>> =
   STRATEGY_CANDIDATE_PROMOTE_SOURCE_INCOMPLETE: {
     title: "候选缺少来源锚",
     explanation:
-      "转正要求把来源结论与来源实验写进溯源。该候选的 conclusionId / experimentId 不完整 ⇒ 需要人工核对上游数据，本页无法自行修复。",
+      "转正必须能写出一条可追溯的溯源：独立实验来源 = 证据 Run（`experimentRef`）；旧 Research 来源 = conclusionId / experimentId。"
+      + "该候选这两类锚都不完整 ⇒ 需要人工核对上游数据，本页无法自行修复（🔴 不会伪造一条溯源）。",
   },
   STRATEGY_CANDIDATE_PROMOTE_SKETCH_INCOMPLETE: {
     title: "策略草图缺少必填内容",

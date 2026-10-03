@@ -46,6 +46,8 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RerunBadge } from "@/components/validation/RerunBadge";
+import { ValidationSourcePicker } from "@/components/validation/ValidationSourcePicker";
 import { trpc } from "@/lib/trpc";
 import type { ParameterSearchParameterValue } from "@shared/parameterSearchContracts";
 import {
@@ -256,17 +258,18 @@ export default function SearchRobustnessPanel({
 
         {/* ---------------- 创建 ---------------- */}
         <div className="rounded-md border border-border p-3">
-          <p className="mb-2 text-sm font-medium">① 选一个已完成的 Parameter Search Run</p>
+          <p className="mb-2 flex items-center gap-2 text-sm font-medium">
+            ① 选一个已完成的 Parameter Search Run <RerunBadge kind="NO_RERUN" />
+          </p>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <label className="text-xs md:col-span-2">
-              <span className="mb-1 block text-muted-foreground">源 Search Run ID（须为 COMPLETED 且结果全为 canonical）</span>
-              <Input
+            <div className="md:col-span-2">
+              <ValidationSourcePicker
                 id="rob-source-search-run-id"
                 value={sourceSearchRunId}
-                onChange={(event) => setSourceSearchRunId(event.target.value)}
-                placeholder="如 PSRUN-20260919-XXXXXXXX"
+                onChange={setSourceSearchRunId}
+                hint="源须为 COMPLETED 且结果全为 canonical；选定后显示该 Run 的数据集版本与冻结时间。"
               />
-            </label>
+            </div>
             <label className="text-xs">
               <span className="mb-1 block text-muted-foreground">收益容差（百分点，留空 = 平台缺省 5）</span>
               <Input

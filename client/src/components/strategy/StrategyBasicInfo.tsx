@@ -31,6 +31,7 @@ import { FileText, Loader2, RefreshCw } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { formatCount } from "@/lib/displayFormat";
 import { isUsableVersionStatus } from "@/lib/datasetVersionStatus";
+import { STRATEGY_TYPE_VALUES, strategyTypeLabel } from "@/components/strategy/strategyTypeVocabulary";
 import type { StrategyViewModel } from "@/adapters/strategyAdapter";
 
 /** 派生 universe 标识（= deriveDatasetUniverseId(datasetVersion)）。 */
@@ -137,6 +138,23 @@ export function StrategyBasicInfo({
             onChange={e => set({ strategyId: e.target.value })}
             className="font-mono"
           />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="s-type">策略类型</Label>
+          <select
+            id="s-type"
+            className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+            value={typeof vm.extra.strategyType === "string" ? vm.extra.strategyType : ""}
+            onChange={e => set({ extra: { ...vm.extra, strategyType: e.target.value } })}
+          >
+            <option value="">— 未选择 —</option>
+            {STRATEGY_TYPE_VALUES.map(value => (
+              <option key={value} value={value}>{strategyTypeLabel(value)}</option>
+            ))}
+          </select>
+          <p className="text-[10px] text-muted-foreground">
+            SCOPE-002 裁定 Q4：经「策略创作工作台」保存草稿时必填。
+          </p>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="s-ver">版本（语义化版本号）</Label>

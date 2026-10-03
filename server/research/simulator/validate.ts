@@ -20,6 +20,7 @@ import {
 import type { ExecutionModelId, Side } from "../../backtest/types";
 import { trailingPolicyDefinitionErrors } from "../trailingPolicy";
 import { stopPolicyDefinitionErrors } from "../stopPolicy";
+import { runnerBridgePolicyErrors } from "../exitPolicyCommon";
 import type { SecurityBoard } from "./types";
 import type {
   SimulationConfig,
@@ -432,20 +433,8 @@ export function validateSimulationConfig(
     }
     const runnerBridge = policy.runnerBridge;
     if (runnerBridge !== null && runnerBridge !== undefined) {
-      if (
-        typeof runnerBridge !== "object"
-        || Array.isArray(runnerBridge)
-        || runnerBridge.kind !== "PIT_RUNNER_HOLDING_BRIDGE"
-        || typeof runnerBridge.state !== "string"
-        || runnerBridge.decisionHoldingDays !== 5
-        || !Number.isInteger(runnerBridge.extendToHoldingDays)
-        || runnerBridge.extendToHoldingDays <= 5
-      ) {
-        issues.push(issue(
-          "SIM_CONFIG_EXIT_POLICY_INVALID",
-          "simConfig.exitPolicy.runnerBridge",
-          "runnerBridge 必须是 PIT_RUNNER_HOLDING_BRIDGE，decisionHoldingDays=5，extendToHoldingDays>5",
-        ));
+      for (const message of runnerBridgePolicyErrors(runnerBridge, "simConfig.exitPolicy.runnerBridge")) {
+        issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.runnerBridge", message));
       }
     }
     const clc2ReversalPath = policy.clc2ReversalPath;
@@ -1095,22 +1084,8 @@ export function validateTradeSimulationRun(
       }
       const runnerBridge = exitPolicy.runnerBridge;
       if (runnerBridge !== undefined && runnerBridge !== null) {
-        if (
-          typeof runnerBridge !== "object"
-          || Array.isArray(runnerBridge)
-          || runnerBridge.kind !== "PIT_RUNNER_HOLDING_BRIDGE"
-          || typeof runnerBridge.state !== "string"
-          || runnerBridge.decisionHoldingDays !== 5
-          || !Number.isInteger(runnerBridge.extendToHoldingDays)
-          || runnerBridge.extendToHoldingDays <= 5
-        ) {
-          issues.push(
-            issue(
-              "RECORD_CONFIG_EXIT_POLICY_INVALID",
-              "record.config.exitPolicy.runnerBridge",
-              "runnerBridge 必须是 PIT_RUNNER_HOLDING_BRIDGE，decisionHoldingDays=5，extendToHoldingDays>5"
-            )
-          );
+        for (const message of runnerBridgePolicyErrors(runnerBridge, "record.config.exitPolicy.runnerBridge")) {
+          issues.push(issue("RECORD_CONFIG_EXIT_POLICY_INVALID", "record.config.exitPolicy.runnerBridge", message));
         }
       }
     }

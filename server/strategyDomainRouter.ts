@@ -62,6 +62,7 @@ import {
 import { DbStrategyRepository } from "./research/strategyPersistence/db";
 import { StrategyService } from "./research/strategyPersistence/service";
 import { createDefaultStrategyCandidateRouter } from "./research/strategyCandidate/router";
+import { createStrategyAuthoringRouter } from "./research/strategyAuthoring/router";
 import { composeCodeVersion } from "./research/experimentLineage/codeVersion";
 import { evaluatePerformance } from "./research/performanceMetrics";
 import { evaluateRiskAdjustedMetrics } from "./research/riskAdjustedMetrics";
@@ -124,6 +125,14 @@ export const strategyDomainRouter = router({
    * `codeVersion` 与既有 `strategyService` 同口径注入（同一进程只解析一次版本号）。
    */
   strategyCandidate: createDefaultStrategyCandidateRouter({ codeVersion: CODE_VERSION }),
+
+  /**
+   * SCOPE-002 —— 策略创作工作台（词表 / 空白草稿 / 预设物化 / 预检 / 保存 Draft）。
+   *
+   * 与 `strategy`（策略本体 CRUD / 版本 / 生命周期）**并列**：`authoring` 只做
+   * 「把用户的选择变成 canonical 文档」这一段的辅助，不改变既有写语义。
+   */
+  authoring: createStrategyAuthoringRouter({ codeVersion: CODE_VERSION }),
 
   strategy: router({
     /** 校验 StrategyDocument（§16 全字段 + §17 追溯）。返回结构化 issue 列表。 */

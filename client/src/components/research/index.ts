@@ -16,6 +16,10 @@ export { EditCandidateDialog } from "./EditCandidateDialog";
 export { PromoteCandidateDialog } from "./PromoteCandidateDialog";
 export { StrategyResearchProvenancePanel } from "./StrategyResearchProvenancePanel";
 
+// —— 观察 → 研究入口（PD-01）——
+export { ResearchEntryLink } from "./ResearchEntryLink";
+export { ResearchFlowNav, RESEARCH_STAGES, type ResearchStageKey } from "./ResearchFlowNav";
+
 // —— 维护能力 ——
 export { ConfirmDeleteButton } from "./ConfirmDeleteButton";
 

@@ -1,5 +1,5 @@
 /**
- * StrategyCandidateDetail — 策略候选详情（`/research/candidates/:candidateId`）。
+ * StrategyCandidateDetail — 策略候选详情（`/candidates/:candidateId`；父级 = 候选列表 `/candidates`）。
  *
  * RESEARCH-006.4.1（Phase A 展示 + Phase B 转正）：把「研究结论 → 候选」的产物**完整可见**，
  * 并提供限于后端口径的编辑、状态流转与转正入口。
@@ -52,10 +52,9 @@ function CandidateDetailBody({
   onSaved: () => void;
 }) {
   const source = vm.source;
-  const backHref =
-    source.experiment?.id !== undefined && source.experiment !== null
-      ? `/research/${source.experiment.id}`
-      : "/research";
+  // 🔴 父级 = 候选列表（PD-03 新增）。旧 `/research[/:id]` 路由已随 RESEARCH-EXPERIMENT-003 移除，
+  //    且本视图的 `source.experiment` 由服务端**恒为 null**（旧 Research 层已退役）⇒ 不再据此拼跳转。
+  const backHref = "/candidates";
 
   return (
     <div className="space-y-4">
@@ -67,7 +66,7 @@ function CandidateDetailBody({
                 href={backHref}
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:underline"
               >
-                <ArrowLeft className="h-3 w-3" /> 返回研究实验
+                <ArrowLeft className="h-3 w-3" /> 返回候选列表
               </Link>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Trophy className="h-4 w-4 shrink-0" /> {vm.name}
@@ -118,16 +117,19 @@ function CandidateDetailBody({
                 )}
               </span>
             ) : (
-              <span className="text-amber-700">已不存在</span>
+              <span className="text-muted-foreground">旧 Research 链路已退役（本层不存在，非「丢失」）</span>
             )}
           </SourceRow>
           <SourceRow label="来源实验">
             {source.experiment ? (
-              <Link href={`/research/${source.experiment.id}`} className="hover:underline">
+              <span>
                 <span className="font-mono">#{source.experiment.id}</span> {source.experiment.name}
-              </Link>
+                <span className="ml-2 text-muted-foreground">
+                  （旧 Research 实验页已随 RESEARCH-EXPERIMENT-003 退役，无跳转）
+                </span>
+              </span>
             ) : (
-              <span className="text-amber-700">已不存在</span>
+              <span className="text-muted-foreground">旧 Research 链路已退役（本层不存在，非「丢失」）</span>
             )}
           </SourceRow>
 
@@ -293,7 +295,7 @@ export default function StrategyCandidateDetail() {
           description="后端没有返回该候选。它可能已被删除，或 ID 不属于本工作区。"
           action={
             <Button size="sm" variant="outline" asChild>
-              <Link href="/research">返回研究实验列表</Link>
+              <Link href="/candidates">返回候选列表</Link>
             </Button>
           }
         />

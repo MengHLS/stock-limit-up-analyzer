@@ -282,7 +282,7 @@ services:
 | `max_allowed_packet` | 256 MB | `268435456` | ✅ |
 | `innodb_buffer_pool_size` | 256 MB | `268435456` | ✅ |
 | `innodb_redo_log_capacity` | 128 MB | `134217728` | ✅ |
-| `time_zone` | `+08:00` | `+08:00` | ✅ |
+| `time_zone` | `+08:00` | `+08:00` | ⚠️ **见 §9** —— 该取值是**切流后时间语义回归的根因**：源库实为 UTC，而应用用的 drizzle 双向硬编码按 UTC 处理 |
 | `sql_mode` | 不含 `NO_AUTO_CREATE_USER` | 8.0 默认集 | ✅ |
 | 目标库 | `utf8mb4` / `utf8mb4_bin` | `vwwjfde663dhej4tohvzpq` / `utf8mb4` / `utf8mb4_bin` | ✅ |
 | 容器内存占用 | — | **184 MiB**（占实例 11%） | ✅ 实测远低于预估 |
@@ -490,3 +490,208 @@ ECS 上 MySQL 只绑回环（`127.0.0.1:3306`）⇒ 本机需经 SSH 隧道访�
 | 切流窗口 | 仍需「无在途 Run + 用户不在用页面」的时间点 |
 | 收尾闭环 | 切流前仍需一次「重导 → 重导入 → 复比对」，且落在确认无写入的窗口内 |
 | `backfillLimitUpRecords` | 仅覆盖主板，跳过创业板 300/301 与科创板 688/689 ⇒ 若用它回填须知此限制 |
+
+---
+
+## 8. 切流执行（2026-10-03）· 应用已切至阿里云新库
+
+> 第 7 节完成的是「数据地基（T2）」。本节完成的是**应用切流**：补齐 09-28 之后的全部增量、同步 schema 漂移、把 `.env` 指向新库。
+
+### 8.1 切流前的重新勘察（09-28 → 10-03 的 5 天里发生了什么）
+
+| 项 | 09-28 | 10-03 | 说明 |
+|---|---|---|---|
+| 源库规模 | 69 表 / 3240 万行 / 5.7 GB | **70 表 / 6102 万行 / 12.7 GB** | 体积翻倍 |
+| 新库 | 3.93 GB | 3.93 GB（未动） | — |
+| `stock_daily_prices` 最新 | 2026-09-24 | **2026-09-30** | 需要增量 |
+| `strategy_versions` | 50 行 | **177 行** | +127 |
+| `closed_loop_backtest_run` | 121 行 | **459 行** | +338 |
+| 公网 IP | `111.14.148.127` | **未变** ✅ | 安全组与 `app` 账号仍有效 |
+
+### 8.2 🔴 T3 规模更正：不是 3.4 GB，是 10.37 GB
+
+| 表 | 行数 | 体积 |
+|---|---:|---:|
+| `ds_first_limit_pullback_post` | 18,305,162 | 5693.4 MB |
+| `ds_first_limit_pullback_path` | 18,423,642 | 3750.0 MB |
+| `ds_first_limit_pullback_prefix` | 4,386,038 | 885.0 MB |
+| `ds_first_limit_pullback_outcome` | 1,274,722 | 172.6 MB |
+| `ds_first_limit_pullback_event` | 504,947 | 117.9 MB |
+| **合计** | **42,904,511** | **10.37 GB（占源库 81%）** |
+
+第 7 节报的「3.4 GB」**低估 3 倍**，登记为口径错误。同时更正了「ds_* 可有可无」的说法 —— 它被 **7 处生产路径**读取：
+
+```
+server/datasetRegistry/{naming,query,types}.ts
+server/researchExperiments/datasetPort.ts
+server/runWorkbenchAssembly/datasetFromRegistry.ts
+server/research/strategyPersistence/datasetBindingValidation.ts
+server/research/strategySchema/goldenSample.ts
+```
+
+**决策：T3 本次不迁，改为切流后在新库重建**（依据用户决策）。
+
+### 8.3 schema 漂移（实测只有 3 处，全部已修）
+
+用 `information_schema` 列级 + 索引级双向 `comm` 比对，源库比新库多：
+
+| 差异 | 内容 |
+|---|---|
+| 新表 1 张 | `strategy_version_star`（5 列 + PRIMARY + 唯一键 + 1 索引） |
+| 新列 1 个 | `strategy_versions.isStarred tinyint(1) NOT NULL DEFAULT 0` |
+| 新索引 1 个 | `idx_strategy_versions_starred` |
+
+其余 69 张表**列级完全一致**（1051 列逐列比对，零差异）。对应官方迁移文件 `drizzle/0052_strategy_version_starred.sql` 与 `0053_strategy_version_star.sql`。
+
+**修复方式（不是单独执行 DDL）**：把 `strategy_version_star` 追加进 `/opt/dbdump/tables.s1_core.txt`（55 → 56 张）后**整层重导 + 重导入**。因为整表 `mysqldump` 会带 `CREATE TABLE`，重建表时自动带上最新 schema —— 比「先重导再用旧 schema 建表、再补 ALTER」少一次状态分叉。
+
+附：`strategy_versions.isStarred` 源库实测**全为 0**（无需数据回填）；`strategy_version_star` 有 **5 行真实数据**，随重导带入。
+
+### 8.4 增量补齐（收尾闭环）
+
+| 阶段 | 操作 | 结果 |
+|---|---|---|
+| s1_core | 归档旧 55 分片 → 清单加到 56 → **重导** | 56/56 分片，零坏片（三重校验） |
+| s1_core | 重导入（DROP + CREATE + INSERT） | **56/56 成功 / 0 失败** |
+| s2_market | 新建 `export_t2_delta.sh`：`stock_daily_prices` 取 `tradeDate >= '2026-09-25'`（`--insert-ignore`，不 DROP）+ 7 张小表整表重导 | 8 个产物 / 1.9 MB |
+| t2_delta | 导入 | **8/8 成功 / 0 失败** |
+| 新库表数 | — | **69 → 70**（与源库一致） |
+
+**首轮复比对抓到 1 张不一致**：
+
+| 表 | 源库 | 目标库 | 差 |
+|---|---:|---:|---:|
+| `stock_daily_prices` | 8,898,902 | 8,898,898 | **4** |
+
+按年下钻定位到 **2026 年**；再按交易日 diff，精确定位到：
+
+| 交易日 | 源库 | 目标库 |
+|---|---:|---:|
+| 2026-09-21 | 485 | 484 |
+| 2026-09-22 | 466 | 465 |
+| 2026-09-23 | 456 | 455 |
+| 2026-09-24 | 451 | 450 |
+
+⇒ **这 4 行是 `tradeDate` 落在 09-25 之前的「补录/修正」数据**，而我的增量窗口起点恰好是 09-25 ⇒ **窗口边界一刀切掉了它们**。把窗口放宽到 `>= 2026-09-01` 重导后补齐 ⇒ 复比对 **9/9 一致**。
+
+🔴 **这条必须记住**：**增量窗口的起点不能用「上次迁移的日期」拍脑袋，必须能覆盖「旧日期被后补写入」的情况**。稳妥做法是留一段重叠窗口（本次留了 24 天），或干脆按「来源库最后写入时间」倒推。
+
+### 8.5 最终复比对（两次独立执行，结果相同）
+
+| 层 | 判据 | 结果 |
+|---|---|---|
+| `s1_core` | 逐表精确 `COUNT(*)` | **56/56 一致** |
+| `s2_market` | 逐表精确 `COUNT(*)` | **9/9 一致**（含 `stock_daily_prices` 8,898,902、`liquidity_daily` 9,015,158） |
+| 表数 | 源 70 / 目标 70 | 一致 |
+
+落盘：`/opt/dbdump/logs/verify_s1_core_20261003.txt`、`/opt/dbdump/logs/verify_s2_market_20261003.txt`
+
+### 8.6 切流动作与验证
+
+| 步骤 | 动作 | 证据 |
+|---|---|---|
+| 1 | `.env` 备份为 `.env.bak-tidb-20260928`（767 B） | 已加 `.gitignore` 规则 `.env.bak-*` |
+| 2 | `.env` 的 `DATABASE_URL` 改为新库 | 767 → **730 B**，**CR=12 / CRLF=12 保持不变**（该文件是 CRLF，不能按仓库惯例写成 LF） |
+| 3 | 触发 dev server 重载 | `server/_core/index.ts` 第 1 行即 `import "dotenv/config"` ⇒ `touch` 入口文件即令 `tsx watch` 重启子进程并重读 `.env` |
+| 4 | 进程与连接验证 | dev server 新 PID、**4 条连接全部指向 `47.94.112.21:13306`**、**已无任何连向 TiDB 4000 的连接** |
+| 5 | 新库侧反查 | `information_schema.processlist` 出现 4 条 **`app@111.14.148.127`** 会话 |
+| 6 | 功能级验证（走项目 `getDb()`） | `8.0.43` · `app@111.14.148.127` · `stock_daily_prices`=8,898,902 · `strategy_version_star`=5 · `ds_first_limit_pullback_event`=0（T3 未迁，符合预期） |
+
+### 8.7 🔴 顺带堵掉的安全隐患：`.env.bak` 未被 gitignore
+
+`.gitignore` 只忽略了 `.env` 本身，**`.env.bak-tidb-20260928` 会以未跟踪文件形式暴露在 `git status` 里**，而它含 TiDB 明文连接串。已追加规则：
+
+```
+# 数据库迁移备份（含明文凭据，禁止入库）
+.env.bak-*
+```
+
+### 8.8 更正登记（本轮新增）
+
+| # | 原判断 | 更正 | 错在哪 |
+|---|---|---|---|
+| 5 | T3 `ds_*` ≈ 3.4 GB | **10.37 GB** | 低估 3 倍。**引用规模前必须先实查**，不能沿用 5 天前的旧口径 |
+| 6 | `ds_*` 是「可有可无的物化中间结果」 | 被 **7 处生产路径**读取（datasetRegistry / datasetPort / datasetFromRegistry 等） | 只看「是否可重建」不够，还要看「谁在读」 |
+| 7 | 增量窗口起点 = 上次迁移日期 | **窗口边界会切掉「旧日期被后补写入」的行**（实测 4 行） | 增量窗口需留重叠期 |
+| 8 | 管道后 `echo $?` 能反映上游命令成败 | 反映的是 **`grep` 的退出码**，须用 `${PIPESTATUS[0]}` | 与第 7 节「瞬时采样」同类：判据本身取错了对象 |
+
+### 8.9 切流后待办
+
+| 项 | 说明 |
+|---|---|
+| **T3 重建** | 🔴 `dataset_version` 里 **v6 已标记 `READY`**（源库 2026-09-30 构建，totalRows=16,712,486），但新库 `ds_*` 五张表为**空** ⇒ 元数据与物理数据不一致。重建脚本会因读到 `READY` 而**直接返回、什么都不做**。绕开办法：用 `--version v8` 建全新版本触发构建 |
+| T3 重建耗时参考 | v6 在源库上耗时 **1h29m**（12:52:43→14:22:08）、v7 **37m**、v5 **50m**；改为本机→公网→ECS 后速率待实测 |
+| 源库去向 | 切流后源库（TiDB Cloud）应视为**只读归档**；若额度耗尽被回收，`ds_*`（10.37 GB）将只剩新库重建这一条路 |
+| 旧的 `s3_ds` 分片 | 从未导出过，`/opt/dbdump/s3_ds` 不存在 |
+
+
+## 9. 切流后发现的回归：容器 `time_zone='+08:00'` 与 drizzle 的 UTC 假设错位（2026-10-03）
+
+> 结论先行：**这是切流引入的回归**（源库为 UTC），影响**审计时间戳**的语义与一处**回收逻辑**。
+> 不影响 DATE 列（`tradeDate` / `limitUpDate` 等研究主键均为 DATE）⇒ **研究结论与数据行数不受影响**。
+> 证据全文：`docs/evidence/_mysql_session_tz_regression_20261003.txt`。
+
+### 9.1 现象
+
+T3 重建（v8）启动后，`dataset_build_job` 的**同一行**出现自相矛盾的时间：
+
+| 列 | 写入方 | 库内真实 instant | 应用（ORM）读到的值 | 真实时刻 |
+|---|---|---|---|---:|
+| `startedAt` | **应用**（drizzle 写 UTC 字面量） | 2026-10-02T19:05:47Z | 2026-10-03T03:05:47Z | 03:05:47Z ✅ |
+| `updatedAt` | **库**（`ON UPDATE CURRENT_TIMESTAMP`） | 2026-10-03T03:17:33Z | **2026-10-03T11:17:33Z** | 03:17:33Z ❌ +8h |
+
+裸 SQL 的 `timestampdiff(second, startedAt, updatedAt)` 得到 **29354 s ≈ 8.2 小时**，
+而该作业实际只跑了 **9.1 分钟** —— 差值恰为 **8h00m00s**。
+
+### 9.2 根因（三条证据，缺一不可）
+
+1. **客户端假设 UTC**：`node_modules/drizzle-orm/mysql-core/columns/timestamp.cjs:52-57`
+   ```js
+   mapFromDriverValue(value) { return new Date(value + "+0000"); }                              // 读：字面量按 UTC 解析
+   mapToDriverValue(value)   { return value.toISOString().slice(0, -1).replace("T", " "); }      // 写：Date → UTC 字面量
+   ```
+   双向都硬编码 UTC。`server/db.ts` 构造 drizzle 连接时**未传 `timezone`**，全仓**无任何 `SET time_zone`**。
+2. **服务端不是 UTC**：容器 MySQL 被显式配成 `@@global/@@session.time_zone = '+08:00'`（第 2 节参数表）。
+3. **源库是 UTC**：TiDB Cloud 实测 `now() == utc_timestamp()`（`unix_timestamp` 均 `1790997487`）。
+
+### 9.3 为什么切流前不暴露
+
+`mysqldump` 默认带 `--tz-utc`，会在转储头部写 `SET TIME_ZONE='+00:00'`，
+**导入会话因此也跑在 UTC** ⇒ 分片的**库内 instant 被逐位保留**（实测：v7 作业在源库与新库的
+`unix_timestamp(startedAt)` **完全相同**）。
+
+关键在**读**：应用读到的不是 instant，而是「服务端按会话时区渲染出的字面量」，再由 drizzle 按 UTC 解析。
+会话时区一变（UTC → +08:00），**同一行渲染出的字面量就 +8h**，于是：
+
+| 数据来源 | 应用可见值 |
+|---|---|
+| **迁移来的行**（instant 保留，字面量 +8h 渲染） | **+8h** |
+| **切流后应用写入的行**（写读都在 +08:00，往返相消） | 正确 |
+| **切流后库默认列写入的行**（instant 正确，字面量 +8h 渲染） | **+8h** |
+
+⇒ 同一张表里出现「三套语义」，这才是最危险的部分。
+
+### 9.4 影响面
+
+| 级别 | 位置 | 说明 |
+|---|---|---|
+| **S1** | `server/datasetRegistry/registry.ts:1079` | 孤儿构建作业回收取 `job.updatedAt ?? job.startedAt` 与 `now - staleMinutes` 比较。`updatedAt` 恒读作「未来 8h」⇒ `at > cutoff` **恒真** ⇒ **回收永不触发**，注释里写的「版本永久卡 BUILDING」死锁**无法自愈** |
+| S2 | 各表 `updatedAt` 等库默认列 | 读值 +8h；与同一行的应用写入列（`startedAt`/`completedAt`）混用会得出 +8h 的「耗时」 |
+| S3 | 以 timestamp 列做时间范围的 SQL 过滤 | 应用侧传 UTC 参数会被按 +08:00 解释 ⇒ 整体偏移 8h。**DATE 列不受影响** |
+| S4 | 裸 SQL / BI / 后续 `mysqldump` | 对同一列的解释与 ORM 不一致 |
+
+### 9.5 建议修法（未执行，待确认）
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| **A（推荐）** | 把容器 MySQL 的 `default-time-zone` 改为 `'+00:00'`，使服务端语义与 drizzle 假设对齐；随后修正「在 +08:00 窗口内写入的行」，并重跑 T1/T2 复比对 | 需停整体应用 + 重跑复比对；**若只改 tz 不修正历史行，已迁移行的应用可见值会反向变成 −8h** |
+| **B（最小侵入）** | 保留 `+08:00`，改为「所有时间列都由应用显式写入」（去掉 `defaultNow()` / `onUpdateNow()`），使全表统一为一套「应用写 UTC 字面量」语义 | 需改 `drizzle/schema.ts` 多处 + 生成迁移；`+08:00` 窗口内写入的历史行仍需修正 |
+
+两方案都必须**先停掉在途 T3 构建**，否则改动会被并发写覆盖。
+
+### 9.6 更正登记（本轮新增）
+
+| # | 原判断 | 更正 | 错在哪 |
+|---|---|---|---|
+| 9 | 容器参数表把 `time_zone` 钉成 `+08:00` 标 ✅ | 源库实为 **UTC**；该取值使应用侧时间语义 +8h 错位 | 只对了「服务端自己内部一致」，**没核对客户端的隐含假设**（drizzle 双向硬编码 UTC）。与第 8 节同类：**判据选错了对象** |
+| 10 | 复比对「逐表精确 `COUNT(*)` 一致」即验收通过 | 行数一致**不能**覆盖**时间语义**；本次两类缺陷（行数 4 行缺口、tz 8h 错位）都由「另一条判据」单独抓出 | 判据只覆盖了「行数与集合」，未覆盖「值的语义」 |

@@ -46,7 +46,11 @@ import type {
   ResearchTrailingPolicyDefinition,
   StrongHoldAfterExtendedExitPolicy,
 } from "../trailingPolicy";
-import type { ExitPolicyDefinition } from "../exitPolicyCommon";
+import type {
+  ExitPolicyDefinition,
+  RunnerEvaluationContextDefinition,
+  RunnerStateConditionReference,
+} from "../exitPolicyCommon";
 
 // ---------------------------------------------------------------------------
 // Definition 自身结构版本（≠ strategy version，SPEC §30）
@@ -501,6 +505,40 @@ export interface ConditionDefinition {
   readonly description?: string;
   readonly enabled: boolean;
 }
+/**
+ * StateCondition：引用已注册的布尔状态实现。
+ *
+ * `NEW_HIGH_3` / `MA10_SLOPE_POSITIVE` 等名字属于策略配置，不属于 Schema 分支；
+ * 执行实现由 `server/research/stateFactorRegistry.ts` 注册，并保留 PIT 评估上下文。
+ */
+export interface StateConditionDefinition extends RunnerStateConditionReference {
+  readonly id: string;
+  readonly enabled: boolean;
+  readonly description?: string;
+  readonly evaluationContext?: RunnerEvaluationContextDefinition;
+}
+
+/**
+ * FactorCondition：引用 feature registry 的因子，再以现有比较算子形成声明条件。
+ * 因子计算与版本仍由既有 feature registry / semantics contract 负责。
+ */
+export interface FactorConditionDefinition {
+  readonly id: string;
+  readonly featureId: string;
+  readonly featureVersion: string;
+  readonly operator: StrategyConditionOperator;
+  readonly value: ResearchParameterValue | readonly ResearchParameterValue[];
+  readonly valueType: StrategyConditionValueType;
+  readonly evaluationContext?: RunnerEvaluationContextDefinition;
+  readonly enabled: boolean;
+  readonly description?: string;
+}
+
+/** Strategy 可复用的状态 / 因子声明面；执行实现不在这里。 */
+export interface StateFactorDefinitionSet {
+  readonly states?: readonly StateConditionDefinition[];
+  readonly factors?: readonly FactorConditionDefinition[];
+}
 
 /** 触发定义（条件满足后何时产生 Signal，SPEC §11）。 */
 export interface TriggerDefinition {
@@ -783,6 +821,8 @@ export interface MarketRegimeFilterDefinition {
 export interface StrategyDefinition {
   readonly schemaVersion: string;
   readonly entry: EntryDefinition;
+  /** 通用状态 / 因子声明；缺省 = 本版本不额外声明（既有策略逐字节不变）。 */
+  readonly stateFactors?: StateFactorDefinitionSet;
   /**
    * 首板股票池策略（可选）。仅在 `entry.trigger.type = FIRST_LIMIT_POOL` 时允许声明。
    */
@@ -896,6 +936,17 @@ export function normalizeStrategyDefinition(input: StrategyDefinitionInput): Str
     };
   }
 
+  const stateFactors = clone.stateFactors as StateFactorDefinitionSet | undefined;
+  if (stateFactors !== undefined && stateFactors !== null) {
+    clone.stateFactors = {
+      ...(Array.isArray(stateFactors.states)
+        ? { states: [...stateFactors.states].sort((a, b) => compareText(a.id, b.id)) }
+        : {}),
+      ...(Array.isArray(stateFactors.factors)
+        ? { factors: [...stateFactors.factors].sort((a, b) => compareText(a.id, b.id)) }
+        : {}),
+    };
+  }
   const exit = clone.exit as ExitDefinition | undefined;
   if (exit !== undefined && exit !== null && Array.isArray(exit.rules)) {
     const rules: ExitRuleDefinition[] = exit.rules.map((rule, index) => {

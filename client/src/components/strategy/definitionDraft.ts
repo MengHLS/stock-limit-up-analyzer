@@ -895,6 +895,29 @@ export const DEFINITION_SEGMENTS = [
 
 export type DefinitionSegmentKey = (typeof DEFINITION_SEGMENTS)[number]["key"];
 
+/**
+ * 「策略定义」7 段在 DOM 上的 **id 前缀**（由 `@/components/common/SegmentForm#segmentDomId` 生成锚点）。
+ *
+ * 🔴 放在这里而不是 `DefinitionFields.tsx` 内部：完成度概览、未来的面包屑、深链都要用它，
+ * 各写一份字符串迟早会漂移（"点概览跳不到那一段"就是这么来的）。
+ */
+export const DEFINITION_SEGMENT_DOM_PREFIX = "definition-segment";
+
+/**
+ * 「跳到某一段」的**跨组件事件名**。
+ *
+ * 为什么用事件而不是 prop 透传：概览与定义明细是**兄弟**关系（都在策略定义 Tab 里），
+ * 而展开状态是明细组件内部的事（用户手动开合过哪些段）。用事件可以让概览保持"只读 + 广播"，
+ * 明细保持"自己决定怎么展开/滚动"，不引入双向受控状态。
+ */
+export const DEFINITION_FOCUS_SEGMENT_EVENT = "strategy-definition:focus-segment";
+
+/** 广播「跳到某段」；明细组件监听后展开并滚动过去。 */
+export function dispatchDefinitionFocusSegment(segment: DefinitionSegmentKey): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(DEFINITION_FOCUS_SEGMENT_EVENT, { detail: { segment } }));
+}
+
 export const DEFINITION_SEGMENT_KEYS: readonly DefinitionSegmentKey[] = DEFINITION_SEGMENTS.map((s) => s.key);
 
 export function definitionSegmentTitle(segment: DefinitionSegmentKey): string {
@@ -907,7 +930,6 @@ export type DefinitionFieldAnchor =
   | "trigger"
   | "position.sizingMethod"
   | "position.maxPositions"
-  | "risk.maxPositions"
   | "execution.quantityMethod"
   | "execution.lotSize"
   | "execution.signalTiming"
@@ -930,7 +952,8 @@ export const DEFINITION_GAP_ANCHORS: Readonly<Record<string, readonly Definition
   "观察窗口：起始 / 结束 / 单位": ["window"],
   "触发时点（必填）": ["trigger"],
   "仓位方式（必填）": ["position.sizingMethod"],
-  "最大同时持仓数（必填）": ["position.maxPositions", "risk.maxPositions"],
+  // 裁定（2026-10-03）：risk.maxPositions 执行层零实现 ⇒ 已删编辑面；缺口只落在 position.maxPositions。
+  "最大同时持仓数（必填）": ["position.maxPositions"],
   "下单口径（必填）": ["execution.quantityMethod"],
   "每手股数（必填）": ["execution.lotSize"],
   "信号时点（必填）": ["execution.signalTiming"],
@@ -1160,7 +1183,15 @@ export function validateDefinitionDrafts(drafts: DefinitionDrafts): DefinitionVa
      */
     const hasParameter = typeof row.original.parameter === "string" && row.original.parameter.trim() !== "";
     const hasCondition = isRecord(row.original.condition) && row.original.condition !== null;
-    if (row.threshold.trim() === "" && !hasParameter && !hasCondition) {
+    /**
+     * 🔴 **统一退出政策行**（`original.policy` 存在）的语义全在 `policy` 里，
+     *    它既没有 `threshold` 也没有 `parameter` / `condition` —— 这是**合法**形态。
+     *    此前这里把它一并判成「三者至少给一个」，于是任何用了统一政策的策略
+     *    在第 ④ 段永远挂着一条红字（实测反馈的"膈应"之一）。
+     *    它的编辑入口是「出场」块的 9 个规则槽，不是这里。
+     */
+    const isUnifiedPolicy = isRecord(row.original.policy) && row.original.policy !== null;
+    if (!isUnifiedPolicy && row.threshold.trim() === "" && !hasParameter && !hasCondition) {
       errors.push(`${at}：既没有阈值也没有参数/条件 —— 后端要求三者至少给一个`);
     }
     if (row.threshold.trim() !== "") {

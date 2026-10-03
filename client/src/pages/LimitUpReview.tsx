@@ -4,7 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ConfirmDialog } from "@/components/common";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { ResearchEntryLink } from "@/components/research";
 import { trpc } from "@/lib/trpc";
 import { filterFirstBoardRecords, getPreviousRecordedDate } from "@/lib/firstBoard";
 import { buildLimitUpCsv } from "@/lib/exportCsv";
@@ -308,13 +310,15 @@ export default function Home() {
   return (
     <div className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
       <div className="container py-2 max-w-[1600px]">
+        {/* 观察 → 研究入口（PD-01）：LimitUpReview 无统一头部，用 block 变体 */}
+        <ResearchEntryLink variant="block" />
         {/* 搜索栏 */}
         <div className="mb-3">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="搜索股票代码或名称..."
-              value={searchQuery}
+              aria-label="搜索股票代码或名称" value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-12 h-10 text-base shadow-sm border-slate-200 focus-visible:ring-orange-500"
             />
@@ -843,6 +847,8 @@ function StockRecordActions({ record, onCorrectStock }: { record: any; onCorrect
   const [keywords, setKeywords] = useState(record.keywords ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  /** 删除走统一确认对话框（不再用会阻塞页面的原生 confirm）。 */
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const updateRecord = trpc.limitUp.update.useMutation({
     onSuccess: () => {
@@ -897,6 +903,7 @@ function StockRecordActions({ record, onCorrectStock }: { record: any; onCorrect
   }
 
   return (
+    <>
         <div className="flex items-center gap-1">
       {successMessage && <span className="text-xs text-green-600">{successMessage}</span>}
       {onCorrectStock && (
@@ -925,14 +932,24 @@ function StockRecordActions({ record, onCorrectStock }: { record: any; onCorrect
         className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
         title="删除记录"
         disabled={deleteRecord.isPending}
-        onClick={() => {
-          if (window.confirm(`确定删除 ${record.stockName}（${record.stockCode}）吗？`)) {
-            deleteRecord.mutate({ id: record.id });
-          }
-        }}
+        onClick={() => setConfirmDeleteOpen(true)}
       >
         <Trash2 className="h-4 w-4" />
       </button>
     </div>
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title={`删除涨停记录：${record.stockName}（${record.stockCode}）`}
+        description="删除后该记录不再出现在复盘列表与统计中，且无法撤销。"
+        confirmLabel="删除"
+        tone="danger"
+        pending={deleteRecord.isPending}
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          deleteRecord.mutate({ id: record.id });
+        }}
+      />
+    </>
   );
 }

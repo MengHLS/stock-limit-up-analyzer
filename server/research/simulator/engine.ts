@@ -73,6 +73,7 @@ import {
   evaluateAdvancedStopPolicy,
   type AdvancedStopState,
 } from "./advancedStop";
+import { evaluateRunnerBridgePolicyState, evaluateRunnerHoldingBridgeStateByRegistry } from "../stateFactorRegistry";
 import type {
   PlanSkipCode,
   ReentryBlockCode,
@@ -206,129 +207,14 @@ function resolveExecutionRules(config: SimulationConfig): {
   };
 }
 
-function numericMean(values: readonly number[]): number | null {
-  if (values.length === 0) return null;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function movingAverageBefore(
-  bars: readonly CanonicalMarketBar[],
-  index: number,
-  window: number,
-): number | null {
-  if (index - window + 1 < 0) return null;
-  const closes: number[] = [];
-  for (let cursor = index - window + 1; cursor <= index; cursor += 1) {
-    const close = bars[cursor]?.close;
-    if (close === null || close === undefined || !Number.isFinite(close)) return null;
-    closes.push(close);
-  }
-  return numericMean(closes);
-}
-
+/** Legacy 出口：保留导出供 3570001 投影层复用，实现已收敛到状态注册表。 */
 export function evaluateRunnerHoldingBridgeState(
   bars: readonly CanonicalMarketBar[],
   entryTime: string,
   currentDate: string,
   state: RunnerHoldingBridgeState,
 ): boolean {
-  const currentIndex = bars.findIndex((bar) => bar.timestamp === currentDate);
-  const entryIndex = bars.findIndex((bar) => bar.timestamp === entryTime);
-  if (currentIndex < 0 || entryIndex < 0 || currentIndex <= entryIndex) return false;
-  const current = bars[currentIndex]!;
-  const high = current.high;
-  const low = current.low;
-  const close = current.close;
-  const volume = current.volume;
-  if (
-    high === null || low === null || close === null || volume === null
-    || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)
-    || !Number.isFinite(volume)
-  ) return false;
-
-  const highAt = (index: number): number | null => {
-    const value = bars[index]?.high;
-    return value !== null && value !== undefined && Number.isFinite(value) ? value : null;
-  };
-  const closeAt = (index: number): number | null => {
-    const value = bars[index]?.close;
-    return value !== null && value !== undefined && Number.isFinite(value) ? value : null;
-  };
-  const maxHigh = (from: number, to: number): number | null => {
-    const values: number[] = [];
-    for (let index = Math.max(0, from); index <= Math.min(bars.length - 1, to); index += 1) {
-      const value = highAt(index);
-      if (value !== null) values.push(value);
-    }
-    return values.length === 0 ? null : Math.max(...values);
-  };
-
-  switch (state) {
-    case "NEW_HIGH_2": {
-      const prior = maxHigh(currentIndex - 2, currentIndex - 1);
-      return prior !== null && high > prior;
-    }
-    case "NEW_HIGH_3": {
-      const prior = maxHigh(currentIndex - 3, currentIndex - 1);
-      return prior !== null && high > prior;
-    }
-    case "CONSECUTIVE_HIGHER_HIGHS_GE_2": {
-      let count = 0;
-      for (let index = currentIndex; index > entryIndex; index -= 1) {
-        const currentHigh = highAt(index);
-        const previousHigh = highAt(index - 1);
-        if (currentHigh === null || previousHigh === null || currentHigh <= previousHigh) break;
-        count += 1;
-      }
-      return count >= 2;
-    }
-    case "RETURN_2_POSITIVE": {
-      const prior = closeAt(currentIndex - 2);
-      return prior !== null && prior > 0 && close > prior;
-    }
-    case "RETURN_3_POSITIVE": {
-      const prior = closeAt(currentIndex - 3);
-      return prior !== null && prior > 0 && close > prior;
-    }
-    case "CLOSE_ABOVE_MA5": {
-      const ma = movingAverageBefore(bars, currentIndex, 5);
-      return ma !== null && close > ma;
-    }
-    case "CLOSE_ABOVE_MA10": {
-      const ma = movingAverageBefore(bars, currentIndex, 10);
-      return ma !== null && close > ma;
-    }
-    case "MA5_SLOPE_POSITIVE": {
-      const currentMa = movingAverageBefore(bars, currentIndex, 5);
-      const priorMa = movingAverageBefore(bars, currentIndex - 1, 5);
-      return currentMa !== null && priorMa !== null && priorMa > 0 && currentMa > priorMa;
-    }
-    case "MA10_SLOPE_POSITIVE": {
-      const currentMa = movingAverageBefore(bars, currentIndex, 10);
-      const priorMa = movingAverageBefore(bars, currentIndex - 1, 10);
-      return currentMa !== null && priorMa !== null && priorMa > 0 && currentMa > priorMa;
-    }
-    case "NEAR_5D_HIGH": {
-      const recent = maxHigh(currentIndex - 4, currentIndex);
-      return recent !== null && close >= recent;
-    }
-    case "CONSECUTIVE_LOWER_CLOSES_GE_2": {
-      let count = 0;
-      for (let index = currentIndex; index > entryIndex; index -= 1) {
-        const currentClose = closeAt(index);
-        const previousClose = closeAt(index - 1);
-        if (currentClose === null || previousClose === null || currentClose >= previousClose) break;
-        count += 1;
-      }
-      return count >= 2;
-    }
-    case "CLOSE_LOCATION_UPPER_THIRD": {
-      const range = high - low;
-      return range > 0 && (close - low) / range >= 2 / 3;
-    }
-    default:
-      return false;
-  }
+  return evaluateRunnerHoldingBridgeStateByRegistry(state, bars, entryTime, currentDate);
 }
 
 /** CLC2-PORTFOLIO-001：收盘是否低于前一交易日收盘（连续收低计数 ≥1）。 */
@@ -1683,11 +1569,11 @@ export function runTradeSimulation(
         if (holdingDays !== runnerBridgePolicy.decisionHoldingDays) continue;
         const bars = runnerBridgeBarsBySecurity.get(detail.securityId);
         if (bars === undefined) continue;
-        const matched = evaluateRunnerHoldingBridgeState(
+        const matched = evaluateRunnerBridgePolicyState(
+          runnerBridgePolicy,
           bars,
           detail.entryTime,
           date,
-          runnerBridgePolicy.state,
         );
         if (matched) {
           runnerBridgeExtendedToBySecurity.set(

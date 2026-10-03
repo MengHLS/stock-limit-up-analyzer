@@ -50,6 +50,9 @@
 | [`CONTRACT-MAP.md`](architecture/CONTRACT-MAP.md) | 契约地图 |
 | [`CHANGE-AUDIT.md`](architecture/CHANGE-AUDIT.md) | 逐次变更审计（每个任务必记） |
 | [`AGENT-GUIDE.md`](architecture/AGENT-GUIDE.md) | Agent 工作规范 |
+| [`SCOPE-002-strategy-authoring-workbench.md`](architecture/SCOPE-002-strategy-authoring-workbench.md) | **策略创作工作台设计**（**DECIDED · 六项已裁定**：数据结构 + API 契约 + 前端交互 + 代码计划；目标 = 纯前端构建 Strategy `3570001`；空白 canonical 起点 · 预设+参数 · 允许无证据 Draft；未实现、不改契约/DB） |
+| [`FE-PLAN-003-strategy-definition-restructure.md`](product/FE-PLAN-003-strategy-definition-restructure.md) | **「策略定义」页设计方案 v2**（PROPOSED）：**每块 = 方案 + 参数 + 信任状态**；**二次裁定已定**——「执行层零实现的字段（`risk.*` / `maxExposure` / `maxSinglePosition`）**删除编辑面**（schema 保留，技术细节只读）、账户风控默认不启用、`maxPositions` **来源收敛**（实测零冲突）；附四层普查表、真实库分布（`risk` 仅 3/176 且为模板值）、15 条交互规格 |
+| [`FE-PLAN-004-exit-policy-restructure.md`](product/FE-PLAN-004-exit-policy-restructure.md) | **「退出政策」拆解为规则槽**（PROPOSED，只出方案不改代码）：实测 **46 个实验 = 6 个正交规则槽的单变量扫描**（40 个只改 1 维、4 个改 2 维、**2 个与基准逐字相同**）；结论 **出场 = 6 槽（止损位置 / 止损确认 / 止损收紧 / 止损节奏 / 止盈 / 到期与续持）+ 研究槽**，46 个实验降级为只读实验档案；并查出 **`stop.contexts` 与 `capitalRecycle` 两个假旋钮**（声明+校验齐全、**全仓零执行**） |
 
 ## 3. 契约与 Gate 规范（`docs/` 根）
 
@@ -134,7 +137,7 @@
 | 目录 | 文档 |
 |---|---|
 | `docs/researchDataset/` | [`DATASET_SPECIFICATION.md`](researchDataset/DATASET_SPECIFICATION.md)｜[`DATASET_CERTIFICATION_SPEC.md`](researchDataset/DATASET_CERTIFICATION_SPEC.md)｜[`DATASET_VERSIONING.md`](researchDataset/DATASET_VERSIONING.md)｜[`DATASET_CAPABILITY_MATRIX.md`](researchDataset/DATASET_CAPABILITY_MATRIX.md)｜[`DATASET_CURRENT_STATE_AUDIT.md`](researchDataset/DATASET_CURRENT_STATE_AUDIT.md)｜[`RESEARCH_DATASET_V2_IMPLEMENTATION_REPORT.md`](researchDataset/RESEARCH_DATASET_V2_IMPLEMENTATION_REPORT.md) |
-| `docs/strategy/` | [`STRATEGY-003-report.md`](strategy/STRATEGY-003-report.md)｜[`STRATEGY-003-difference-report.md`](strategy/STRATEGY-003-difference-report.md)｜[`STRATEGY-004-report.md`](strategy/STRATEGY-004-report.md)｜[`STRATEGY-RESEARCH-BRIDGE-001-REPORT.md`](strategy/STRATEGY-RESEARCH-BRIDGE-001-REPORT.md) |
+| `docs/strategy/` | [`STRATEGY-003-report.md`](strategy/STRATEGY-003-report.md)｜[`STRATEGY-003-difference-report.md`](strategy/STRATEGY-003-difference-report.md)｜[`STRATEGY-004-report.md`](strategy/STRATEGY-004-report.md)｜[`STRATEGY-RESEARCH-BRIDGE-001-REPORT.md`](strategy/STRATEGY-RESEARCH-BRIDGE-001-REPORT.md)｜[`STRATEGY-DEVELOPMENT-TEMPLATE.md`](strategy/STRATEGY-DEVELOPMENT-TEMPLATE.md) |
 | `docs/parameter-search/` | [`PARAMETER-001-REPORT.md`](parameter-search/PARAMETER-001-REPORT.md)｜[`PARAMETER-002-REPORT.md`](parameter-search/PARAMETER-002-REPORT.md) |
 | `docs/parameter/` | [`PARAMETER-001-PRE-PROFILE.md`](parameter/PARAMETER-001-PRE-PROFILE.md) |
 | `docs/robustness/` | [`ROBUSTNESS-001-REPORT.md`](robustness/ROBUSTNESS-001-REPORT.md) |

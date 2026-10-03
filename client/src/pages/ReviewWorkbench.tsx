@@ -26,6 +26,7 @@ import {
   ClipboardList,
   Loader2,
   Play,
+  RotateCcw,
   ShieldAlert,
   ShieldCheck,
   TrendingUp,
@@ -51,6 +52,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
+import { Link } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import {
   CartesianGrid,
@@ -454,6 +456,25 @@ export default function ReviewWorkbench() {
           复盘工作台
         </h1>
       </div>
+
+      {/* FLOW-001 §3 ⑥→② 闭环出口：复盘发现必须能回到观察/研究，否则「闭环」只停留在口号 */}
+      <SectionCard
+        title="闭环出口"
+        icon={RotateCcw}
+        description="本页只提供回跳，不替你下研究结论：把复盘发现带回 ② 观察，或直接去 ③ 研究立一个实验。"
+      >
+        <div className="flex flex-wrap gap-2" data-review-loop-exits="true">
+          <Button asChild size="sm" variant="outline">
+            <Link href="/limit-up">回到 ② 观察 · 涨停复盘</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/sentiment-analysis">回到 ② 观察 · 情绪分析</Link>
+          </Button>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/research-experiments">去 ③ 研究 · 独立实验</Link>
+          </Button>
+        </div>
+      </SectionCard>
 
       {/* R7 隔离标注（必做、醒目）：技术预览 · 非 RESEARCH_READY 口径 */}
       <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">

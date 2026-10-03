@@ -1713,6 +1713,29 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
 |---|---|
 | `_t2_market_verify_raw.txt` | ECS 侧 `verify.sh s2_market` 原始输出（源库 TiDB vs 目标库 MySQL 逐表精确 `COUNT(*)`）：**9/9 表一致 / 17,994,199 行**，独立复跑结果相同 ⇒ 结果可复现 |
 
+### 应用切流验收（2026-10-03）—— 1 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_db_migration_verify_20261003.txt` | 切流前「重导 → 重导入 → 复比对」闭环的原始输出：`s1_core` **56/56 一致**、`s2_market` **9/9 一致**（`stock_daily_prices` 8,898,902 / `liquidity_daily` 9,015,158）；首轮曾抓出 09-21~09-24 补录的 4 行缺口并据以放宽增量窗口 |
+
+### 切换数据源核实（2026-10-03）—— 2 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_datasource_identity.mts` | 只读探针：走应用自己的入口（`.env` → `getDb()`）取**实连库身份**（`@@hostname` / `@@version` / `DATABASE()` / `CURRENT_USER()` / `@@session.time_zone`）与服务端 `information_schema.processlist` 的客户端 IP 分布；内含「**不能用 `@@port` 判断新库**」的判据说明（`@@port` 是服务端监听端口，非客户端连接端口） |
+| `_datasource_switch_verify_20261003.txt` | 上述探针原始输出 + 本机全量非本机 ESTABLISHED 连接统计 + 进程身份识别 + 代码层「零硬编码」检索结论；结论：**14 条连接全指向 `47.94.112.21:13306`，0 条连向旧 TiDB**；`MinIO` 端点切流前即同机（非本轮变更） |
+
+### 切流后时间语义回归（2026-10-03）—— 4 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_mysql_session_tz.mts` | 只读探针：新库 `@@global/@@session.time_zone` / `now()` / `unix_timestamp(now())`，并直接对比 `dataset_build_job.startedAt` 与 `updatedAt` 的库内 instant |
+| `_probe_mysql_tz_orm_vs_raw.mts` | 只读探针：**同一行走 drizzle 读 vs 裸 SQL 读**的对照（决定性证据，抓出库默认列读值 +8h） |
+| `_probe_srcdb_timezone.mts` | 只读探针：源库 TiDB Cloud 会话时区（`now() == utc_timestamp()` ⇒ 源库为 UTC，用 `.env.bak-tidb-20260928` 的 DSN，不打印凭据） |
+| `_mysql_session_tz_regression_20261003.txt` | 上述三探针的原始输出 + drizzle 源码摘录 + 影响面与修法建议；结论：容器 `time_zone='+08:00'` 与 drizzle 硬编码的 UTC 假设错位 ⇒ **切流引入**的 +8h 时间语义回归 |
+
+
 ## 2026-10-02 · 首板回撤池右尾与退出路径研究 — 2 个
 
 | 文件 | 被引用于 |

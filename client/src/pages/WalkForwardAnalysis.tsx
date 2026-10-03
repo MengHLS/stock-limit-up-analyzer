@@ -310,14 +310,14 @@ export default function WalkForwardAnalysis() {
             <p className="font-mono text-[11px] font-medium text-foreground">日期区间</p>
             <div className="mt-1 flex items-center gap-1.5">
               <Input
-                value={startDate}
+                aria-label="日期区间 · 起始" value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 className="h-7 font-mono text-[11px]"
                 placeholder="YYYY-MM-DD"
               />
               <span className="text-muted-foreground">~</span>
               <Input
-                value={endDate}
+                aria-label="日期区间 · 结束" value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 className="h-7 font-mono text-[11px]"
                 placeholder="YYYY-MM-DD"

@@ -125,7 +125,15 @@ export function SentimentAlertBell() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
+        {/* 🔴 纯图标按钮必须自带可访问名称：否则屏幕阅读器只读出「按钮」，
+            且本组件渲染在**每一页**的顶栏 ⇒ 影响面最大。名称随未读数变化。 */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative"
+          aria-label={unreadCount > 0 ? `情绪预警（${unreadCount} 条未读）` : "情绪预警（无未读）"}
+          title={unreadCount > 0 ? `情绪预警：${unreadCount} 条未读` : "情绪预警：无未读"}
+        >
           {unreadCount > 0 ? (
             <>
               <BellRing className="h-5 w-5 text-orange-500 animate-pulse" />

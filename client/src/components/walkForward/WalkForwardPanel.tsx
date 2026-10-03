@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RerunBadge } from "@/components/validation/RerunBadge";
 import {
   Table,
   TableBody,
@@ -181,6 +182,24 @@ export default function WalkForwardPanel({
   );
 
   const createMutation = trpc.paramSearch.createWalkForwardRun.useMutation();
+
+  // PD-04：策略 / 版本改为选择式（不再手抄 ID）；Dataset 版本坐标由所选版本**自动带出**
+  const strategyList = trpc.strategyDomain.strategy.list.useQuery();
+  const versionCatalog = trpc.strategyDomain.strategy.listVersionCatalog.useQuery(
+    { strategyId: form.strategyId },
+    { enabled: form.strategyId.trim() !== "" },
+  );
+  const selectedVersionRow = useMemo(
+    () => (versionCatalog.data ?? []).find((row) => row.version === form.strategyVersion) ?? null,
+    [versionCatalog.data, form.strategyVersion],
+  );
+  useEffect(() => {
+    const derived = selectedVersionRow?.datasetVersionId;
+    setForm((previous) => {
+      const next = derived === undefined || derived === null ? "" : String(derived);
+      return previous.datasetVersionId === next ? previous : { ...previous, datasetVersionId: next };
+    });
+  }, [selectedVersionRow]);
   const startMutation = trpc.paramSearch.startWalkForwardRun.useMutation();
   const cancelMutation = trpc.paramSearch.cancelWalkForwardRun.useMutation();
 
@@ -327,37 +346,52 @@ export default function WalkForwardPanel({
           <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
             <CalendarRange className="h-3.5 w-3.5" />
             新建验证（只冻结排程与身份，**不执行**）
+            <RerunBadge kind="PER_FOLD_RERUN" />
           </p>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <label className="text-xs">
-              <span className="mb-1 block text-muted-foreground">策略 ID</span>
-              <Input
+              <span className="mb-1 block text-muted-foreground">策略</span>
+              <select
                 id="wf-strategy-id"
-                className="h-8 text-xs"
+                className="h-8 w-full rounded-md border bg-background px-2 text-xs"
                 value={form.strategyId}
-                onChange={(event) => setForm({ ...form, strategyId: event.target.value })}
-                placeholder="limit-up-baseline"
-              />
+                onChange={(event) => setForm({ ...form, strategyId: event.target.value, strategyVersion: "" })}
+              >
+                <option value="">— 请选择策略 —</option>
+                {(strategyList.data ?? []).map((item) => (
+                  <option key={item.strategyId} value={item.strategyId}>
+                    {item.strategyId}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-xs">
               <span className="mb-1 block text-muted-foreground">策略版本</span>
-              <Input
+              <select
                 id="wf-strategy-version"
-                className="h-8 text-xs"
+                className="h-8 w-full rounded-md border bg-background px-2 text-xs"
                 value={form.strategyVersion}
                 onChange={(event) => setForm({ ...form, strategyVersion: event.target.value })}
-                placeholder="1.0.0"
-              />
+                disabled={form.strategyId.trim() === ""}
+              >
+                <option value="">{form.strategyId.trim() === "" ? "— 请先选择策略 —" : "— 请选择版本 —"}</option>
+                {(versionCatalog.data ?? []).map((row) => (
+                  <option key={`${row.strategyId}@${row.version}`} value={row.version}>
+                    {row.version}
+                    {row.versionStatus === null ? "" : `（${row.versionStatus}）`}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-xs">
-              <span className="mb-1 block text-muted-foreground">数据集版本 ID（可空）</span>
-              <Input
+              <span className="mb-1 block text-muted-foreground">数据集版本（由所选版本带出）</span>
+              <div
                 id="wf-dataset-version-id"
-                className="h-8 text-xs"
-                value={form.datasetVersionId}
-                onChange={(event) => setForm({ ...form, datasetVersionId: event.target.value })}
-                placeholder="留空 = 回落策略文档绑定"
-              />
+                data-derived-dataset-version-id={form.datasetVersionId === "" ? "none" : form.datasetVersionId}
+                className="flex h-8 w-full items-center rounded-md border bg-muted/40 px-2 font-mono text-xs text-muted-foreground"
+              >
+                {form.datasetVersionId === "" ? "留空 = 回落策略文档绑定" : `id=${form.datasetVersionId}`}
+              </div>
             </label>
             <label className="text-xs">
               <span className="mb-1 block text-muted-foreground">窗口模式</span>

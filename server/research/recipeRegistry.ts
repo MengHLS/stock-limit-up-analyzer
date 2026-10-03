@@ -515,6 +515,39 @@ export function resolveStrategyRecipeById(recipeId: string): StrategyRecipeRunti
 }
 
 /**
+ * SCOPE-002 §1.3.3 —— 把**已注册配方**投影成可序列化的 `StrategyRecipe`（**唯一实现**）。
+ *
+ * 为什么必须是唯一实现：这份投影此前内联在
+ * `server/research/patternLibrary/threeFactorTopNStrategy.ts` 里；若「策略创作」的
+ * RECIPE 预设再抄一份，就会出现两处投影 → 「文档说 A、实际跑 B」的口径漂移。
+ * 提取到这里后，两边**共用同一份**代码（三个字段的规则：point / signalFrequency /
+ * featureVersions 必须与真实注册实例一致，否则下游 `resolveStrategyRecipe` 会拒绝运行）。
+ *
+ * 纪律：只做**投影**，不新增语义。未注册的 recipeId ⇒ 由 `resolveStrategyRecipeById` 响亮抛错。
+ */
+export function projectStrategyRecipe(recipeId: string): StrategyRecipe {
+  const runtime = resolveStrategyRecipeById(recipeId);
+  return {
+    kind: "signalEngine",
+    recipeId,
+    point: runtime.point,
+    signalFrequency: runtime.signalFrequency,
+    signalDescription: runtime.signalDescription,
+    featureVersions: runtime.features
+      .map(feature => ({ featureId: feature.featureId, version: feature.version }))
+      .sort((a, b) => a.featureId.localeCompare(b.featureId)),
+    rankingConfig: { ...runtime.rankingConfig },
+    selectionConfig: { method: { ...runtime.selectionConfig.method } },
+    requiredData: [...runtime.requiredData],
+  };
+}
+
+/** SCOPE-002 §1.4 —— 已注册配方的**规范投影清单**（按 recipeId 升序，确定性）。 */
+export function listStrategyRecipeProjections(): readonly StrategyRecipe[] {
+  return [...registeredStrategyRecipeIds()].sort().map(projectStrategyRecipe);
+}
+
+/**
  * 当策略文档**没有** `recipe` 字段时的兜底配方（显式声明的常量，不是猜测）。
  *
  * ⚠️ 这是**兼容旧文档**的兜底：库里存量 3 份文档（#360001 / #360002 / #390001）都缺 `recipe`，

@@ -6,6 +6,7 @@ import { CandidateInsightCharts, type CandidateChartFilters } from "@/components
 import { CandidatePhaseFunnel } from "@/components/CandidatePhaseFunnel";
 import { CandidatePremiumChart } from "@/components/CandidatePremiumChart";
 import { Input } from "@/components/ui/input";
+import { ResearchEntryLink } from "@/components/research";
 import { trpc } from "@/lib/trpc";
 import { keepPreviousData } from "@tanstack/react-query";
 import { Activity, AlertTriangle, Crown, Loader2, RefreshCw, ShieldAlert, Sparkles, TrendingUp } from "lucide-react";
@@ -170,6 +171,7 @@ export default function LeaderCandidatesPage() {
         <Crown className="h-5 w-5 text-amber-600" />
         <h1 className="text-lg font-semibold text-slate-800">龙头候选池</h1>
         <div className="ml-auto flex items-center gap-2">
+          <ResearchEntryLink />
           <Button variant="outline" size="sm" className="gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={syncHistoricalPrices} disabled={priceSyncMutation.isPending}>
             {priceSyncMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
             回填历史行情
@@ -235,7 +237,7 @@ export default function LeaderCandidatesPage() {
                     </div>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                       <div><p className="mb-1.5 text-xs font-medium text-slate-600">成功观察窗口</p><div className="flex rounded-lg border border-sky-200 bg-white p-1"><Button size="sm" variant={observationDays === 1 ? "default" : "ghost"} className={observationDays === 1 ? "bg-sky-600 hover:bg-sky-700" : ""} onClick={() => setObservationDays(1)}>T+1 延续</Button><Button size="sm" variant={observationDays === 2 ? "default" : "ghost"} className={observationDays === 2 ? "bg-sky-600 hover:bg-sky-700" : ""} onClick={() => setObservationDays(2)}>T+2 延续</Button></div></div>
-                      <div className="min-w-[230px]"><p className="mb-1.5 text-xs font-medium text-slate-600">手动最低评分阈值</p><div className="flex gap-2"><Input type="number" min="0" max="100" inputMode="numeric" value={scoreDraft} onChange={(event) => setScoreDraft(event.target.value)} placeholder={backtest?.recommendedMinScore ? `历史校准 ${backtest.recommendedMinScore} 分` : "留空使用历史校准"} className="h-9 bg-white" /><Button size="sm" variant="outline" onClick={applyManualScore}>应用</Button></div>{scoreInputError && <p className="mt-1 text-xs text-rose-600">{scoreInputError}</p>}</div>
+                      <div className="min-w-[230px]"><p className="mb-1.5 text-xs font-medium text-slate-600">手动最低评分阈值</p><div className="flex gap-2"><Input type="number" min="0" max="100" inputMode="numeric" aria-label="手动最低评分阈值" value={scoreDraft} onChange={(event) => setScoreDraft(event.target.value)} placeholder={backtest?.recommendedMinScore ? `历史校准 ${backtest.recommendedMinScore} 分` : "留空使用历史校准"} className="h-9 bg-white" /><Button size="sm" variant="outline" onClick={applyManualScore}>应用</Button></div>{scoreInputError && <p className="mt-1 text-xs text-rose-600">{scoreInputError}</p>}</div>
                       <Button size="sm" variant="ghost" className="text-sky-700 hover:bg-sky-100" onClick={restoreCalibratedScore} disabled={manualMinScore === undefined}>恢复历史校准</Button>
                     </div>
                   </div>

@@ -234,7 +234,7 @@ export default function RegimeReport() {
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">基准指数代码</p>
             <Input
-              value={benchmark}
+              aria-label="基准指数代码" value={benchmark}
               onChange={(event) => setBenchmark(event.target.value)}
               placeholder={describe?.benchmarkIndexCode ?? "000300.SH"}
             />
@@ -242,7 +242,7 @@ export default function RegimeReport() {
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">起始日期（含）</p>
             <Input
-              value={startDate}
+              aria-label="起始日期（含）" value={startDate}
               onChange={(event) => setStartDate(event.target.value)}
               placeholder="YYYY-MM-DD（空 = 最近窗口）"
             />
@@ -250,7 +250,7 @@ export default function RegimeReport() {
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">结束日期（含）</p>
             <Input
-              value={endDate}
+              aria-label="结束日期（含）" value={endDate}
               onChange={(event) => setEndDate(event.target.value)}
               placeholder="YYYY-MM-DD（空 = 最新）"
             />

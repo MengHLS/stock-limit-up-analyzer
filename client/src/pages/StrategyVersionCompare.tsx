@@ -604,7 +604,7 @@ export default function StrategyVersionCompare() {
         contentClassName="min-w-0"
       >
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="flex w-full items-center gap-2 rounded-md border bg-background px-3 py-1.5 sm:min-w-[200px] sm:flex-1">
+          <div className="flex w-full items-center gap-2 rounded-md border bg-background px-3 py-1.5 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50 sm:min-w-[200px] sm:flex-1">
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <input
               value={search}
