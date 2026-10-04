@@ -25,6 +25,9 @@ import {
   computeCloseReturnFromEventClose,
   computeHaircutFromEventLow,
   computeIsBullish,
+  computePeakCloseSinceEvent,
+  computePullbackFromEventPeakClose,
+  computeTrendHoldsMa5Ma10,
   computeVolumeRatio,
   eventBaselineOf,
 } from "./recipeFeatures/pullbackFeatures";
@@ -175,6 +178,65 @@ export function buildPullbackFeatureProviders(point: DecisionPoint): readonly Fe
       compute: computeIsBullish,
     }),
     withBaseline(PULLBACK_FEATURE_IDS.momentum, computeCloseReturnFromEventClose),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// ENTRY_CONDITION 入场轴特征原子
+// ---------------------------------------------------------------------------
+
+/** 入场轴特征 id（固定、稳定；与 Core `EVENT_PEAK_PULLBACK_FEATURE_IDS` 同名同义）。 */
+export const ENTRY_CONDITION_FEATURE_IDS = {
+  peakCloseSinceEvent: "peakCloseSinceEvent",
+  pullbackFromEventPeakClose: "pullbackFromEventPeakClose",
+  trendHoldsMa5Ma10: "trendHoldsMa5Ma10",
+} as const;
+
+/** 入场轴特征版本；修改公式必须 bump。 */
+export const ENTRY_CONDITION_FEATURE_VERSION = "1.0.0";
+
+export interface EntryConditionFeatureProviderOptions {
+  /**
+   * `bars[eventDayIndex]` = 事件日 T0。缺省 0，保持既有「bars[0] = 首板日」口径。
+   * 当调用方把首板日前 prefix 历史放在 bars 前面时，必须传入真实事件日下标，
+   * 否则 peakCloseSinceEvent / pullbackFromEventPeakClose 会把 prefix 误当事件起点。
+   */
+  readonly eventDayIndex?: number;
+}
+
+/**
+ * 构造 ENTRY_CONDITION 入场轴特征提供器。
+ *
+ * 返回值刻意包含既有四个 pullback 特征 + 新增三个入场特征：声明式条件编译需要完整的
+ * 特征面；既有已注册配方仍只调用 `buildPullbackFeatureProviders`，不受本函数影响。
+ * MA5 / MA10 使用 `bars` 当前日及之前的最后 10 根，prefix 历史可通过 `eventDayIndex` 正确定位。
+ */
+export function buildEntryConditionFeatureProviders(
+  point: DecisionPoint,
+  options: EntryConditionFeatureProviderOptions = {},
+): readonly FeatureProvider[] {
+  const eventDayIndex = options.eventDayIndex ?? 0;
+  const availability = samePointAvailability(point);
+  return [
+    ...buildPullbackFeatureProviders(point),
+    makeBarFeatureProvider({
+      featureId: ENTRY_CONDITION_FEATURE_IDS.peakCloseSinceEvent,
+      version: ENTRY_CONDITION_FEATURE_VERSION,
+      availability,
+      compute: (bars) => computePeakCloseSinceEvent(bars, eventDayIndex),
+    }),
+    makeBarFeatureProvider({
+      featureId: ENTRY_CONDITION_FEATURE_IDS.pullbackFromEventPeakClose,
+      version: ENTRY_CONDITION_FEATURE_VERSION,
+      availability,
+      compute: (bars) => computePullbackFromEventPeakClose(bars, eventDayIndex),
+    }),
+    makeBarFeatureProvider({
+      featureId: ENTRY_CONDITION_FEATURE_IDS.trendHoldsMa5Ma10,
+      version: ENTRY_CONDITION_FEATURE_VERSION,
+      availability,
+      compute: (bars) => computeTrendHoldsMa5Ma10(bars, eventDayIndex),
+    }),
   ];
 }
 

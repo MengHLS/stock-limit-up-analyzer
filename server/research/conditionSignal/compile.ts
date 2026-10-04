@@ -32,6 +32,10 @@ import {
   requireNumericParameter,
   type StrategyRecipeRuntime,
 } from "../recipeRegistry";
+import {
+  ENTRY_CONDITION_FEATURE_IDS,
+  buildEntryConditionFeatureProviders,
+} from "../recipeRegistryAtoms";
 import { StrategyRecipeRuntimeError } from "../recipeErrors";
 import type { ResearchParameterSchema, ResearchParameterSet } from "../types";
 
@@ -57,14 +61,19 @@ const DECLARATIVE_RECIPE_POINT: DecisionPoint = "close";
 const DECLARATIVE_RECIPE_TOP_N = 5;
 
 // ---------------------------------------------------------------------------
-// 表 1：派生字段 → 执行侧特征 id（**恒等映射**，命名唯一真源 = PULLBACK_FEATURE_IDS）
+// 表 1：派生字段 → 执行侧特征 id（**恒等映射**：既有 pullback + ENTRY_CONDITION 特征 id）
 // ---------------------------------------------------------------------------
+
+const ENTRY_CONDITION_FEATURE_ID_SET: ReadonlySet<string> = new Set(Object.values(ENTRY_CONDITION_FEATURE_IDS));
 
 const DERIVED_FEATURE_BY_FIELD: ReadonlyMap<string, string> = new Map([
   ["bar.haircutFromEventLow", PULLBACK_FEATURE_IDS.haircut],
   ["bar.volumeRatio", PULLBACK_FEATURE_IDS.volumeRatio],
   ["bar.isBullish", PULLBACK_FEATURE_IDS.isBullish],
   ["bar.momentumFromEventClose", PULLBACK_FEATURE_IDS.momentum],
+  ["bar.peakCloseSinceEvent", ENTRY_CONDITION_FEATURE_IDS.peakCloseSinceEvent],
+  ["bar.pullbackFromEventPeakClose", ENTRY_CONDITION_FEATURE_IDS.pullbackFromEventPeakClose],
+  ["bar.trendHoldsMa5Ma10", ENTRY_CONDITION_FEATURE_IDS.trendHoldsMa5Ma10],
 ]);
 
 // ---------------------------------------------------------------------------
@@ -318,6 +327,11 @@ export interface CompileConditionRecipeInput {
   readonly conditions: readonly ConditionDefinition[];
   /** 只用于「右值是参数引用」时判定 code 是否合法（门槛在 `buildGates` 时才取值）。 */
   readonly parameters: ResearchParameterSchema;
+  /**
+   * `bars[eventDayIndex]` = 事件日 T0；缺省 0（既有 bars[0]=首板日口径）。
+   * 当运行方把首板日前 prefix 历史放在 bars 前面时，必须显式传入真实事件日下标。
+   */
+  readonly eventDayIndex?: number;
 }
 
 /**
@@ -386,6 +400,15 @@ export function compileConditionRecipe(input: CompileConditionRecipeInput): Stra
     gateParameterCodes.push(gate.bound.code);
   }
 
+  const featureProviderOptions =
+    input.eventDayIndex === undefined ? {} : { eventDayIndex: input.eventDayIndex };
+  const usesEntryConditionFeature = compiled.some((gate) =>
+    ENTRY_CONDITION_FEATURE_ID_SET.has(gate.featureId),
+  );
+  const features = usesEntryConditionFeature
+    ? buildEntryConditionFeatureProviders(DECLARATIVE_RECIPE_POINT, featureProviderOptions)
+    : buildPullbackFeatureProviders(DECLARATIVE_RECIPE_POINT);
+
   return buildGatedRecipeRuntime({
     recipeId: DECLARATIVE_RECIPE_ID,
     signalKind: "gated",
@@ -400,7 +423,7 @@ export function compileConditionRecipe(input: CompileConditionRecipeInput): Stra
     selectionSummary:
       `在满足文档声明的 ${compiled.length} 条门槛的候选中，按相对首板日收盘的涨幅由高到低取前 ${DECLARATIVE_RECIPE_TOP_N} 名`,
     randomSeed: DECLARATIVE_RECIPE_RANDOM_SEED,
-    features: buildPullbackFeatureProviders(DECLARATIVE_RECIPE_POINT),
+    features,
     rankFeatureId: PULLBACK_FEATURE_IDS.momentum,
     rankingConfig: { higherIsBetter: true },
     selectionConfig: { method: { kind: "topN", n: DECLARATIVE_RECIPE_TOP_N } },

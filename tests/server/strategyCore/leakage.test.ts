@@ -13,12 +13,14 @@ import {
   StrategyRuntime,
   auditDefinitionLeakage,
   auditFeatureLeakage,
+  fromLegacyStrategyDefinition,
   futureOutcomeLeakage,
+  makeEventPeakPullbackFeatures,
   sameBarLeakage,
   setEventOccurrenceResolver,
   type RuntimeContext,
 } from "../../../server/strategyCore";
-import { TEST_REGISTRY, barsThrough, eventFields, makePullbackDefinition, makeVersion } from "./_fixtures";
+import { TEST_REGISTRY, bar, barsThrough, eventFields, makePullbackDefinition, makeVersion } from "./_fixtures";
 
 function errorCode(fn: () => unknown): string {
   try {
@@ -123,6 +125,13 @@ describe("§23.5 Leakage — 静态审计（图结构层）", () => {
     expect(findings.some((finding) => finding.code === "LEAKAGE_UNKNOWN_TIME_DOMAIN")).toBe(true);
   });
 
+  it("入场轴新特征声明为 close 同点可见、无未来依赖", () => {
+    for (const feature of makeEventPeakPullbackFeatures()) {
+      expect(auditFeatureLeakage(feature.featureId, feature.leakage, `feature.${feature.featureId}`, "close")).toEqual([]);
+      expect(feature.historyMode).toBe("EVENT_TO_CURRENT");
+    }
+  });
+
   it("特征声明：future outcome / 需要未来数据 / 时点矛盾 全部被抓", () => {
     expect(auditFeatureLeakage("x", futureOutcomeLeakage(), "p", "close").length).toBe(2);
     expect(auditFeatureLeakage("x", sameBarLeakage("close", 0), "p", "close").length).toBe(0);
@@ -203,6 +212,89 @@ describe("§23.5 Leakage — 运行时关卡（evaluate(T) 不得读 T+1 / T+2 /
     expect(() =>
       LeakageGuard.assertFeatureUsable("f", sameBarLeakage("close", 0), { date: "2026-09-11", point: "close" }),
     ).not.toThrow();
+  });
+
+  it("入场轴特征在 T+1 决策时只读 T+1 及之前；prefix 参与 MA，未来 bar 不参与峰值", () => {
+    const definition = {
+      schemaVersion: "1.0",
+      entry: {
+        event: { type: "FIRST_LIMIT_UP" },
+        observationWindow: { start: 1, end: 5, unit: "TRADING_DAY" },
+        conditions: [
+          {
+            id: "peak-min",
+            field: "bar.pullbackFromEventPeakClose",
+            operator: "GREATER_THAN_OR_EQUAL",
+            value: 0.03,
+            valueType: "CONSTANT",
+            enabled: true,
+          },
+          {
+            id: "peak-max",
+            field: "bar.pullbackFromEventPeakClose",
+            operator: "LESS_THAN_OR_EQUAL",
+            value: 0.08,
+            valueType: "CONSTANT",
+            enabled: true,
+          },
+          {
+            id: "trend-holds",
+            field: "bar.trendHoldsMa5Ma10",
+            operator: "GREATER_THAN_OR_EQUAL",
+            value: 1,
+            valueType: "CONSTANT",
+            enabled: true,
+          },
+        ],
+        trigger: { type: "FIRST_VALID_DAY" },
+      },
+      exit: { rules: [] },
+      position: { sizingMethod: "EQUAL_WEIGHT", maxPositions: 1 },
+      risk: {},
+      execution: {
+        signalTiming: "T_CLOSE",
+        executionTiming: "T_PLUS_1_OPEN",
+        priceType: "OPEN",
+        quantityMethod: "FIXED_SHARES",
+        lotSize: 100,
+      },
+      parameters: [],
+      datasets: [],
+    } as never;
+    const adapted = fromLegacyStrategyDefinition(definition, { featureRegistry: TEST_REGISTRY });
+    const version = makeVersion(adapted.definition, { strategyId: "entry-trend-pullback" });
+    const prefixCloses = [1, 1, 1, 1, 1, 20, 20, 20, 20];
+    const visibleData = {
+      bars: [
+        ...prefixCloses.map((close, index) => bar(index - 9, close, close, close, close, 1_000_000)),
+        bar(0, 11.5, 12, 11, 12, 1_000_000),
+        bar(1, 11, 12, 11, 11.5, 800_000),
+        bar(2, 100, 100, 100, 100, 1_000_000),
+        bar(3, 100, 100, 100, 100, 1_000_000),
+        bar(4, 100, 100, 100, 100, 1_000_000),
+        bar(5, 100, 100, 100, 100, 1_000_000),
+      ],
+      maxRelativeDay: 5,
+    };
+    const decision = StrategyRuntime.evaluate(
+      version,
+      {},
+      {
+        ...runtimeContext(1),
+        visibleData,
+        datasetCapability: {
+          frequency: "1D",
+          availableFields: ["open", "high", "low", "close", "volume"],
+          availableDomains: ["OHLCV"],
+          eventTypes: ["FIRST_LIMIT_UP"],
+          maxRelativeDay: 5,
+          availableHistory: 10,
+        },
+      },
+      { featureRegistry: TEST_REGISTRY, skipDataCompatibilityCheck: true },
+    );
+    expect(decision.signals.length).toBe(1);
+    expect(decision.conditions.every((condition) => condition.satisfied === true)).toBe(true);
   });
 
   it("「未注入事件判定器」与「当日无事件」被区分开（不静默返回 false）", () => {

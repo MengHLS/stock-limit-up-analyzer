@@ -32,15 +32,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { closedLoopRunResultSchema } from "@shared/researchContracts";
 import type { CostModel } from "../../../server/engine/domain";
+import type { CanonicalMarketBar } from "../../../server/data";
+import { materializeEntryConditionSlotOption } from "../../../server/research/strategyAuthoring/entryConditionSlots";
+
 import { createStrategyDocument } from "../../../server/research/strategySchema/map";
 import type {
   StrategyDocument,
   StrategyDocumentInput,
 } from "../../../server/research/strategySchema/types";
 import {
+  LoopRunAssemblyError,
   assembleStrategySide,
   type AssembleRunWorkbenchInputsRequest,
 } from "../../../server/runWorkbenchAssembly/assemble";
+import { GOLDEN_3570001 } from "../research/strategyAuthoring/golden3570001";
 
 const DATASET_VERSION_LABEL = "rd-1.0.0-1-cffc2a0e66efbf0b";
 
@@ -108,6 +113,7 @@ function makeDocument(overrides: Partial<StrategyDocumentInput> = {}): StrategyD
 function makeRequest(
   document: StrategyDocument,
   recipeId?: string,
+  eventDayIndex?: number,
 ): AssembleRunWorkbenchInputsRequest {
   return {
     strategyId: document.strategyId,
@@ -118,6 +124,23 @@ function makeRequest(
     codeVersion: "bd21-test",
     strategyDocument: document,
     ...(recipeId !== undefined ? { recipeId } : {}),
+    ...(eventDayIndex !== undefined ? { eventDayIndex } : {}),
+  };
+}
+
+function canonicalBar(timestamp: string, close: number): CanonicalMarketBar {
+  return {
+    symbol: "600001.SH",
+    timestamp,
+    open: close,
+    high: close,
+    low: close,
+    close,
+    preClose: close,
+    volume: 1_000_000,
+    amount: close * 1_000_000,
+    turnoverRate: null,
+    adjustment: "raw",
   };
 }
 
@@ -186,6 +209,108 @@ describe("BD-21 — requireRecipe 路径 3 兜底留痕", () => {
     expect(fallback.recipeRuntime.recipeId).toBe(explicit.recipeRuntime.recipeId);
   });
 
+  it("E. ENTRY_CONDITION 存在但 Core 构造失败 ⇒ 稳定报错，禁止回落 legacy recipe", () => {
+    const document = makeDocInput({
+      recipe: GOLDEN_3570001.recipe,
+      definition: {
+        ...(GOLDEN_3570001.definition as any),
+        entry: {
+          ...(GOLDEN_3570001.definition as any).entry,
+          conditions: [
+            {
+              id: "entry.trend_pullback.probe",
+              field: "bar.featureThatIsNotRegistered",
+              operator: "GREATER_THAN_OR_EQUAL",
+              value: 1,
+              valueType: "CONSTANT",
+              enabled: true,
+            },
+          ],
+        },
+      },
+    }) as unknown as StrategyDocument;
+
+    expect(() => assembleStrategySide(makeRequest(document), "ds-entry-condition-fail-closed"))
+      .toThrowError(LoopRunAssemblyError);
+    try {
+      assembleStrategySide(makeRequest(document), "ds-entry-condition-fail-closed");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "LOOP_RUN_ENTRY_CONDITION_CORE_REQUIRED",
+        message: expect.stringContaining("ENTRY_CONDITION"),
+      });
+    }
+  });
+  it("F. 声明式条件分支把显式 eventDayIndex 透传给入场特征 provider（prefix 历史）", () => {
+    const materialized = materializeEntryConditionSlotOption(
+      "TREND_PULLBACK_AFTER_FIRST_LIMIT_UP",
+      "trend-pullback-after-first-limit-up",
+    );
+    expect(materialized.issues).toEqual([]);
+
+    const baseDefinition = GOLDEN_3570001.definition as any;
+    const document = createStrategyDocument({
+      strategyId: "entry-prefix-probe",
+      version: "1.0.0",
+      name: "entry prefix probe",
+      strategyType: "TEST",
+      universe: { universeId: "research-dataset:v7" },
+      datasetVersion: "v7",
+      datasetVersionId: 750001,
+      definition: {
+        ...baseDefinition,
+        entry: { ...baseDefinition.entry, conditions: materialized.conditions },
+        parameters: materialized.parameters,
+      },
+      executionAssumptions: {
+        backtestConfig: { initialCapital: 100_000, maxPositions: 5 },
+        costModel: COST_MODEL,
+        executionModel: "NEXT_OPEN",
+      },
+    } as never);
+
+    const prefixCloses = [1, 1, 1, 1, 1, 20, 20, 20, 20];
+    const bars = [...prefixCloses, 12, 11.5].map((close, index) =>
+      canonicalBar(`2026-01-${String(index + 1).padStart(2, "0")}`, close));
+    const side = assembleStrategySide(
+      makeRequest(document, undefined, prefixCloses.length),
+      "ds-entry-condition-prefix",
+    );
+    const provider = side.recipeRuntime.features.find((feature) =>
+      feature.featureId === "pullbackFromEventPeakClose");
+    expect(provider).toBeDefined();
+    const value = provider!.compute({
+      securityId: "sec_test",
+      decisionTime: { date: bars[bars.length - 1]!.timestamp, point: "close" },
+      data: { symbol: "600001.SH", bars },
+    });
+    expect(value).toBeCloseTo((12 - 11.5) / 12, 10);
+  });
+
+  it("G. fail-closed 只认 entry.trend_pullback.*，不把旧 entry.* 条件当作入场槽", () => {
+    const document = makeDocInput({
+      recipe: GOLDEN_3570001.recipe,
+      definition: {
+        ...(GOLDEN_3570001.definition as any),
+        entry: {
+          ...(GOLDEN_3570001.definition as any).entry,
+          conditions: [
+            {
+              id: "entry.legacy-condition",
+              field: "bar.featureThatIsNotRegistered",
+              operator: "GREATER_THAN_OR_EQUAL",
+              value: 1,
+              valueType: "CONSTANT",
+              enabled: true,
+            },
+          ],
+        },
+      },
+    }) as unknown as StrategyDocument;
+
+    const side = assembleStrategySide(makeRequest(document), "ds-entry-legacy-condition");
+    expect(side.strategyRunContext.engine).toBe("legacy-recipe");
+  });
   it("D. 契约同步哨兵：tRPC zod 闭集必须逐字含四值（否则生产上 .output() 拒值）", () => {
     const options = recipeSourceEnumOptions();
     expect(options).toEqual([

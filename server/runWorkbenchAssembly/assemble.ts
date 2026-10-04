@@ -46,6 +46,7 @@ import {
 import type { ClosedLoopWiringInputs } from "../research/closedLoopWiring/types";
 import { resolveStrategyRecipe, resolveStrategyRecipeById, DEFAULT_STRATEGY_RECIPE_ID, type StrategyRecipeRuntime } from "../research/recipeRegistry";
 import { compileConditionRecipe } from "../research/conditionSignal";
+import { hasEntryConditionSlotConditions } from "../research/strategyAuthoring/entryConditionSlots";
 // 9cc · PHASE-D（AR-14）—— Pattern 语义 → 策略侧的**消费点**（唯一 Expander 的执行侧出口）。
 import {
   resolvePatternIdByRecipeId,
@@ -232,6 +233,14 @@ export interface AssembleRunWorkbenchInputsRequest {
    * 🔴 复用时 `assembly.datasetSource` 会**如实**标成 `injected`，不会伪装成 `registry` / `rebuild`。
    */
   readonly researchDataset?: ResearchDataset;
+  /**
+   * 声明式条件编译使用的真实事件日下标（`bars[eventDayIndex]` = T0）。
+   *
+   * - 当前 registry / rebuild 装配出的 bars 以 rd=0 为首根 ⇒ 缺省 `0`，不猜测；
+   * - 只有调用方明确提供了「bars 已前置 prefix 历史」的数据形态时，才传入真实下标；
+   * - 该值会被 `requireRecipe` 透传给 `compileConditionRecipe` 的入场特征 provider。
+   */
+  readonly eventDayIndex?: number;
   /**
    * 数据集护栏（对齐 `buildResearchDataset` 选项；用于「先小步验证再放大」）。
    * 缺省不限，与既有 `researchDataset.build` 端点口径一致。
@@ -700,9 +709,29 @@ function rebuildDataset(
  * 存有转正期遗留的**字符串常量**（`"prefix.rd0.volume * 0.3"`，现行 schema 下已是死写法）。
  * 若把条件编译提到 recipe 之前，这 8 份会从「能跑」变成「一跑就报错」。
  */
+/**
+ * ENTRY_CONDITION fail-closed 守卫。
+ *
+ * 入场槽物化后仍写 canonical conditions；只要这些条件存在，Core 就是唯一能保证
+ * `entry.trend_pullback.*` 真正参与判定的一般路径。Core 构造失败时回落 legacy recipe
+ * 会让用户以为规则生效、实际回测却没执行它，因此这里必须响亮中止。
+ */
+function assertEntryConditionCoreReady(
+  document: StrategyDocument,
+  reason: string,
+): void {
+  if (!hasEntryConditionSlotConditions(document.definition)) return;
+  throw new LoopRunAssemblyError(
+    "LOOP_RUN_ENTRY_CONDITION_CORE_REQUIRED",
+    `装配层：策略 ${document.strategyId}@${document.version} 声明了 ENTRY_CONDITION ` +
+      `（entry.trend_pullback.*），但 ${reason}。` +
+      `为避免入场条件静默失效，拒绝回落 legacy recipe；请修复 Core 定义 / 特征注册后重试。`,
+  );
+}
 function requireRecipe(
   document: StrategyDocument,
   explicitRecipeId: string | undefined,
+  eventDayIndex: number,
 ): { runtime: StrategyRecipeRuntime; source: RecipeResolutionSource } {
   const recipe = document.recipe;
   if (recipe !== undefined && recipe !== null) {
@@ -719,6 +748,7 @@ function requireRecipe(
         strategyVersion: document.version,
         conditions: declaredConditions,
         parameters: document.parameters,
+        ...(eventDayIndex !== 0 ? { eventDayIndex } : {}),
       }),
       source: "strategy-declarative-conditions",
     };
@@ -861,7 +891,14 @@ export function assembleStrategySide(
     runtimeConfig.executionModel === undefined
       ? documentExecutionModel
       : normalizeStrategyExecutionModel(runtimeConfig.executionModel);
-  const { runtime: recipeRuntime, source: recipeSource } = requireRecipe(document, request.recipeId);
+  const eventDayIndex = request.eventDayIndex ?? 0;
+  if (!Number.isInteger(eventDayIndex) || eventDayIndex < 0) {
+    throw new LoopRunAssemblyError(
+      "LOOP_RUN_EVENT_DAY_INDEX_INVALID",
+      `装配层：eventDayIndex 必须是 >= 0 的整数，实际：${String(request.eventDayIndex)}。`,
+    );
+  }
+  const { runtime: recipeRuntime, source: recipeSource } = requireRecipe(document, request.recipeId, eventDayIndex);
 
   // 🔴 参数集必须**先**解析，再据此构造信号构造器。
   // 顺序理由（2026-09-13）：门槛型配方（「守线 + 缩量 ≤ X%」）的门槛值来自策略文档参数，
@@ -910,16 +947,27 @@ export function assembleStrategySide(
   //    此时继续用既有配方判定器，并把原因写进 `assembly.strategyDecisionEngineNote`。
   // ------------------------------------------------------------------
   const legacySignalBuilder = recipeRuntime.buildSignalBuilder(parameterSet);
-  const coreVersionResult = coreVersionFromDocument({
-    document,
-    createdAt: request.createdAt,
-  });
+  let coreVersionResult: CoreVersionFromDocumentResult;
+  try {
+    coreVersionResult = coreVersionFromDocument({
+      document,
+      createdAt: request.createdAt,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.name + ": " + error.message : String(error);
+    assertEntryConditionCoreReady(document, `Core 定义构造抛错（${detail}）`);
+    throw error;
+  }
 
   let coreDecisionSource: CoreDecisionSource | null = null;
   let strategyDecisionEngine: "strategy-core" | "legacy-recipe" = "legacy-recipe";
   let strategyDecisionEngineNote: string;
 
   if (!coreVersionResult.ok) {
+    assertEntryConditionCoreReady(
+      document,
+      `Core 定义不可构造（${coreVersionResult.reason}）：${coreVersionResult.detail}`,
+    );
     strategyDecisionEngineNote =
       "Core 定义不可构造（" + coreVersionResult.reason + "）：" + coreVersionResult.detail +
       " ⇒ 本次回落既有配方判定器（" + recipeRuntime.recipeId + "）。";
@@ -963,12 +1011,16 @@ export function assembleStrategySide(
       strategyDecisionEngine = "strategy-core";
     } catch (error) {
       const detail = error instanceof Error ? error.name + ": " + error.message : String(error);
+      assertEntryConditionCoreReady(document, `Core 决策源构造失败（${detail}）`);
       coreDecisionSource = null;
       strategyDecisionEngineNote =
         "Core 决策源构造失败（" + detail + "）⇒ 本次回落既有配方判定器（" + recipeRuntime.recipeId + "）。";
     }
   }
 
+  if (coreDecisionSource === null) {
+    assertEntryConditionCoreReady(document, "Core 决策源为 null");
+  }
   const strategy13: Strategy13 = {
     point: recipeRuntime.point,
     features: recipeRuntime.features,

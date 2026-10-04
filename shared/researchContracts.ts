@@ -679,6 +679,33 @@ export const applyExitPolicySlotInputSchema = z.object({
 });
 export type ApplyExitPolicySlotInputDto = z.infer<typeof applyExitPolicySlotInputSchema>;
 
+/**
+ * ENTRY_CONDITION —— 服务端权威入场规则槽的传输契约。
+ *
+ * 🔴 `slotId` 保持开放字符串而不是本地枚举：槽注册表与版本演进由服务端
+ *    `server/research/strategyAuthoring/entryConditionSlots.ts` 唯一裁定，
+ *    前端只按 vocabulary 下发的清单选择。
+ * 🔴 `definition` 透传，canonical 语义由服务端策略 Schema / 槽模块校验。
+ */
+export const entryConditionSlotIdSchema = z.string().min(1, "entryConditionSlotId 必填");
+export type EntryConditionSlotIdDto = z.infer<typeof entryConditionSlotIdSchema>;
+
+export const recognizeEntryConditionSlotsInputSchema = z.object({
+  definition: z.unknown(),
+});
+export type RecognizeEntryConditionSlotsInputDto = z.infer<
+  typeof recognizeEntryConditionSlotsInputSchema
+>;
+
+export const applyEntryConditionSlotInputSchema = z.object({
+  definition: z.unknown(),
+  slotId: entryConditionSlotIdSchema,
+  optionId: z.string().min(1, "optionId 必填"),
+  parameters: z.record(z.string(), strategyPresetParameterValueSchema).default({}),
+});
+export type ApplyEntryConditionSlotInputDto = z.infer<
+  typeof applyEntryConditionSlotInputSchema
+>;
 /** A2 `getBlankDraft` 输入：可选绑定 Dataset Version（不传 = 未绑定骨架）。 */
 export const strategyAuthoringBlankInputSchema = z.object({
   datasetVersionId: z.number().int().positive().optional(),

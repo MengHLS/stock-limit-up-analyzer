@@ -9,9 +9,12 @@ import {
   StrategyCoreError,
   createFeatureRegistry,
   createDefaultFeatureRegistry,
+  DEFAULT_FEATURE_HISTORY_MODE,
+  EVENT_PEAK_PULLBACK_FEATURE_IDS,
   getDefaultFeatureRegistry,
   makeAtrFeature,
   makeEmaFeature,
+  makeEventPeakPullbackFeatures,
   makeObservationWindowFeatures,
   makePullbackFeatures,
   makePctChangeFeature,
@@ -153,6 +156,57 @@ describe("§23.4 Feature — lookback 与计算", () => {
     expect(momentum.compute(ctx)).toBeCloseTo(11.5 / 11 - 1, 10);
   });
 
+  it("入场轴特征：峰值不含 prefix、回撤正确、MA 使用 prefix 历史", () => {
+    const [peak, pullback, trend] = makeEventPeakPullbackFeatures();
+    const prefix = [1, 1, 1, 1, 1, 20, 20, 20, 20].map((close, index) => ({
+      ...BAR_FIXTURE(index - 9),
+      open: close,
+      high: close,
+      low: close,
+      close,
+      volume: 1_000_000,
+    }));
+    const event = { ...BAR_FIXTURE(0), open: 11.5, high: 12, low: 11, close: 12, volume: 1_000_000 };
+    const current = { ...BAR_FIXTURE(1), open: 11, high: 12, low: 11, close: 11.5, volume: 800_000 };
+    const ctx = context([...prefix, event, current], event);
+
+    expect(EVENT_PEAK_PULLBACK_FEATURE_IDS.peakCloseSinceEvent).toBe("peakCloseSinceEvent");
+    expect(EVENT_PEAK_PULLBACK_FEATURE_IDS.pullbackFromEventPeakClose).toBe("pullbackFromEventPeakClose");
+    expect(EVENT_PEAK_PULLBACK_FEATURE_IDS.trendHoldsMa5Ma10).toBe("trendHoldsMa5Ma10");
+    expect(peak.compute(ctx)).toBeCloseTo(12, 10);
+    expect(pullback.compute(ctx)).toBeCloseTo((12 - 11.5) / 12, 10);
+    expect(trend.compute(ctx)).toBe(1);
+  });
+
+  it("入场轴特征：当前新高 pullback=0；缺失 / 零峰值 / MA 历史不足返回 null", () => {
+    const [peak, pullback, trend] = makeEventPeakPullbackFeatures();
+    const event = { ...BAR_FIXTURE(0), close: 10, volume: 1_000_000 };
+    const newHigh = { ...BAR_FIXTURE(1), close: 11, volume: 500_000 };
+    const ctx = context([event, newHigh], event);
+    expect(peak.compute(ctx)).toBeCloseTo(11, 10);
+    expect(pullback.compute(ctx)).toBe(0);
+    expect(trend.compute(ctx)).toBeNull();
+
+    expect(peak.compute(context([{ ...event, close: null }], { ...event, close: null }))).toBeNull();
+    expect(pullback.compute(context([{ ...event, close: 0 }], { ...event, close: 0 }))).toBeNull();
+    const missingCurrent = { ...newHigh, close: null };
+    expect(pullback.compute(context([event, missingCurrent], event))).toBeNull();
+  });
+
+  it("historyMode：旧特征缺省为 TRAILING_BARS；入场轴三个特征显式 EVENT_TO_CURRENT", () => {
+    expect(DEFAULT_FEATURE_HISTORY_MODE).toBe("TRAILING_BARS");
+    expect(makePullbackFeatures().every((feature) => feature.historyMode === undefined)).toBe(true);
+    const features = makeEventPeakPullbackFeatures();
+    expect(features.map((feature) => feature.historyMode)).toEqual([
+      "EVENT_TO_CURRENT",
+      "EVENT_TO_CURRENT",
+      "EVENT_TO_CURRENT",
+    ]);
+    expect(features.every((feature) => feature.leakage.usesForwardData === false)).toBe(true);
+    expect(features.every((feature) => feature.leakage.dataThroughRelativeDay === 0)).toBe(true);
+    expect(features.every((feature) => feature.leakage.availableAtPoint === "close")).toBe(true);
+  });
+
   it("事件日 bar 缺失 ⇒ 全部事件相对特征返回 null（不臆造基准）", () => {
     const [haircut, volumeRatio, , momentum] = makePullbackFeatures();
     const ctx = context([BAR_FIXTURE(2)], null);
@@ -172,7 +226,7 @@ describe("§23.4 Feature — lookback 与计算", () => {
   it("默认注册表：内置指标 + 事件相对特征 + pctChange 全部就位，且是惰性单例", () => {
     const registry = createDefaultFeatureRegistry();
     const ids = registry.list().map((item) => item.featureId);
-    for (const expected of ["ma5", "ma10", "ma20", "ma60", "ema12", "ema26", "rsi14", "atr14", "haircutFromEventLow", "volumeRatio", "isBullish", "momentumFromEventClose", "observationMeanAmplitude", "observationMaxAmplitude", "drawdownFromEventClose", "pctChange"]) {
+    for (const expected of ["ma5", "ma10", "ma20", "ma60", "ema12", "ema26", "rsi14", "atr14", "haircutFromEventLow", "volumeRatio", "isBullish", "momentumFromEventClose", "observationMeanAmplitude", "observationMaxAmplitude", "drawdownFromEventClose", "peakCloseSinceEvent", "pullbackFromEventPeakClose", "trendHoldsMa5Ma10", "pctChange"]) {
       expect(ids).toContain(expected);
     }
     expect(getDefaultFeatureRegistry()).toBe(getDefaultFeatureRegistry());

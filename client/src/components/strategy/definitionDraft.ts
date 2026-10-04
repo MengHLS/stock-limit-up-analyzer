@@ -419,14 +419,7 @@ export function definitionToDrafts(definition: unknown): DefinitionDraftState {
       params: triggerParams.ok ? triggerParams.rows : [],
       paramsExpressible: triggerParams.ok,
     },
-    conditions: asRecords(entry.conditions).map((row) => ({
-      original: row,
-      field: typeof row.field === "string" ? row.field : "",
-      operator: typeof row.operator === "string" ? row.operator : "",
-      value: conditionValueText(row.value),
-      valueType: typeof row.valueType === "string" ? row.valueType : "CONSTANT",
-      enabled: row.enabled !== false,
-    })),
+    conditions: conditionRowsFromCanonical(entry.conditions),
     exitRules: asRecords(isRecord(exit) ? exit.rules : []).map((row) => ({
       original: row,
       type: typeof row.type === "string" ? row.type : "",
@@ -470,22 +463,7 @@ export function definitionToDrafts(definition: unknown): DefinitionDraftState {
         ? execution.executionConstraints.filter((c): c is string => typeof c === "string").join(",")
         : "",
     },
-    parameters: asRecords(parameters).map((row) => ({
-      original: row,
-      code: typeof row.code === "string" ? row.code : "",
-      name: typeof row.name === "string" ? row.name : "",
-      dataType: typeof row.dataType === "string" ? row.dataType : "number",
-      parameterRole: typeof row.parameterRole === "string" ? row.parameterRole : "TUNABLE",
-      required: row.required === true,
-      hasDefaultValue: Object.prototype.hasOwnProperty.call(row, "defaultValue"),
-      defaultValue: scalarText(row.defaultValue) ?? "",
-      min: scalarText(row.min) ?? "",
-      max: scalarText(row.max) ?? "",
-      step: scalarText(row.step) ?? "",
-      allowedValuesText: Array.isArray(row.allowedValues)
-        ? row.allowedValues.filter((v): v is string => typeof v === "string").join(",")
-        : "",
-    })),
+    parameters: parameterRowsFromCanonical(parameters),
     datasets: asRecords(definition.datasets).map((row) => ({
       original: row,
       role: typeof row.role === "string" ? row.role : "",
@@ -597,6 +575,66 @@ function conditionValueText(value: unknown): string {
       .join(",");
   }
   return scalarText(value) ?? "";
+}
+
+/**
+ * Canonical `entry.conditions[]` → 条件行草稿。
+ *
+ * 这里与 `definitionToDrafts()` 共用同一份映射；入场槽 apply 返回完整 canonical
+ * `conditions` / `parameters` 时，前端原子替换这两个数组即可，不能另写一套解析器。
+ */
+export function conditionRowsFromCanonical(value: unknown): ConditionRowDraft[] {
+  return asRecords(value).map((row) => ({
+    original: row,
+    field: typeof row.field === "string" ? row.field : "",
+    operator: typeof row.operator === "string" ? row.operator : "",
+    value: conditionValueText(row.value),
+    valueType: typeof row.valueType === "string" ? row.valueType : "CONSTANT",
+    enabled: row.enabled !== false,
+  }));
+}
+
+/**
+ * Canonical `definition.parameters[]` → 参数行草稿。
+ *
+ * `original` 原样携带服务端对象，未知键 / 顺序 / 类型不变；参数槽只改
+ * `defaultValue` 与声明字段。
+ */
+export function parameterRowsFromCanonical(value: unknown): ParameterRowDraft[] {
+  return asRecords(value).map((row) => ({
+    original: row,
+    code: typeof row.code === "string" ? row.code : "",
+    name: typeof row.name === "string" ? row.name : "",
+    dataType: typeof row.dataType === "string" ? row.dataType : "number",
+    parameterRole: typeof row.parameterRole === "string" ? row.parameterRole : "TUNABLE",
+    required: row.required === true,
+    hasDefaultValue: Object.prototype.hasOwnProperty.call(row, "defaultValue"),
+    defaultValue: scalarText(row.defaultValue) ?? "",
+    min: scalarText(row.min) ?? "",
+    max: scalarText(row.max) ?? "",
+    step: scalarText(row.step) ?? "",
+    allowedValuesText: Array.isArray(row.allowedValues)
+      ? row.allowedValues.filter((v): v is string => typeof v === "string").join(",")
+      : "",
+  }));
+}
+
+/**
+ * 把 `applyEntryConditionSlot` 的服务端返回原子写回草稿。
+ *
+ * `issues` 非空或数组形状不符时**原样返回输入**，调用方据此保证“apply 失败不改草稿”。
+ */
+export function applyEntryConditionSlotResult(
+  drafts: DefinitionDrafts,
+  result: { readonly conditions?: unknown; readonly parameters?: unknown; readonly issues?: readonly string[] },
+): DefinitionDrafts {
+  if (result.issues !== undefined && result.issues.length > 0) return drafts;
+  if (!Array.isArray(result.conditions) || !Array.isArray(result.parameters)) return drafts;
+  return {
+    ...drafts,
+    conditions: conditionRowsFromCanonical(result.conditions),
+    parameters: parameterRowsFromCanonical(result.parameters),
+  };
 }
 
 /** 文档级成本模型 + 回测配置 → 草稿（与 definition 无关，单独喂给同一份 drafts）。 */

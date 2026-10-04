@@ -284,6 +284,9 @@ export const STRATEGY_BAR_FIELDS = [
  * | `haircutFromEventLow` | `haircutFromEventLow` | (事件日开盘价 − 当日最低价) / 事件日开盘价（**正数 = 跌破**） |
  * | `isBullish` | `isBullish` | 当日收盘 > 当日开盘 ? 1 : 0（用 0/1 数值，便于与常量比较） |
  * | `momentumFromEventClose` | `momentumFromEventClose` | 当日收盘 / 事件日收盘 − 1 |
+ * | `peakCloseSinceEvent` | `peakCloseSinceEvent` | max(close[T0..T])，包含事件日 |
+ * | `pullbackFromEventPeakClose` | `pullbackFromEventPeakClose` | (峰值收盘 − 当前收盘) / 峰值收盘 |
+ * | `trendHoldsMa5Ma10` | `trendHoldsMa5Ma10` | close > MA10 且 MA5 > MA10（MA 可含 prefix 历史） |
  *
  * ## 时间域与 PIT 安全
  *
@@ -307,6 +310,9 @@ export const STRATEGY_DERIVED_BAR_FIELDS = [
   "observationMaxAmplitude",
   "rollingMaxAmplitude",
   "drawdownFromEventClose",
+  "peakCloseSinceEvent",
+  "pullbackFromEventPeakClose",
+  "trendHoldsMa5Ma10",
 ] as const;
 
 /**

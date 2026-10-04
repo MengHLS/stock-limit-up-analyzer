@@ -14,8 +14,10 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { adminProcedure, publicProcedure, router } from "../../_core/trpc";
 import {
+  applyEntryConditionSlotInputSchema,
   materializeStrategyPresetInputSchema,
   previewStrategyAuthoringDocumentInputSchema,
+  recognizeEntryConditionSlotsInputSchema,
   saveStrategyAuthoringDraftInputSchema,
   strategyAuthoringBlankInputSchema,
 } from "../../../shared/researchContracts";
@@ -36,6 +38,13 @@ import {
 } from "./exitPolicySlots";
 import type { ExitPolicyDefinition } from "../exitPolicyCommon";
 import { applyExitPolicySlotInputSchema } from "../../../shared/researchContracts";
+import {
+  ENTRY_CONDITION_SLOT_IDS,
+  applyEntryConditionSlot,
+  entryConditionSlotIsAtDefaults,
+  recognizeEntryConditionSlot,
+  type EntryConditionSlotDefinitionCarrier,
+} from "./entryConditionSlots";
 
 export interface StrategyAuthoringRouterOptions {
   readonly codeVersion: string;
@@ -45,6 +54,16 @@ function badRequest(message: string): never {
   throw new TRPCError({ code: "BAD_REQUEST", message });
 }
 
+function isEntryConditionDefinitionCarrier(value: unknown): value is EntryConditionSlotDefinitionCarrier {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const entry = record.entry;
+  return typeof entry === "object"
+    && entry !== null
+    && !Array.isArray(entry)
+    && Array.isArray((entry as Record<string, unknown>).conditions)
+    && Array.isArray(record.parameters);
+}
 function summarizeValidationIssues(issues: readonly { readonly code: string; readonly path: string; readonly message: string }[]): string {
   const head = issues.slice(0, 5).map(item => `[${item.code}] ${item.path}: ${item.message}`).join("；");
   return issues.length > 5 ? `${head} …（共 ${issues.length} 处）` : head;
@@ -55,6 +74,62 @@ export function createStrategyAuthoringRouter(options: StrategyAuthoringRouterOp
     /** A1 —— 元数据词表（只读、确定性）。 */
     getVocabulary: publicProcedure.query(() => buildStrategyAuthoringVocabulary()),
 
+    /**
+     * ENTRY_CONDITION —— 把当前 definition **认出**每个入场槽的方案与参数。
+     *
+     * 🔴 识别只在服务端做；认不出返回 `optionId: null`，绝不就近匹配。
+     */
+    recognizeEntryConditionSlots: publicProcedure
+      .input(recognizeEntryConditionSlotsInputSchema)
+      .query(({ input }) => {
+        if (!isEntryConditionDefinitionCarrier(input.definition)) {
+          return {
+            slots: ENTRY_CONDITION_SLOT_IDS.map(slotId => ({ slotId, optionId: null, parameters: {}, atDefaults: false })),
+          };
+        }
+        const definition = input.definition;
+        return {
+          slots: ENTRY_CONDITION_SLOT_IDS.map(slotId => {
+            const recognized = recognizeEntryConditionSlot(definition, slotId);
+            if (recognized === null) return { slotId, optionId: null, parameters: {}, atDefaults: false };
+            return {
+              slotId,
+              optionId: recognized.optionId,
+              parameters: recognized.parameters,
+              managedConditionIds: recognized.managedConditionIds,
+              atDefaults: entryConditionSlotIsAtDefaults(recognized, slotId),
+            };
+          }),
+        };
+      }),
+
+    /**
+     * ENTRY_CONDITION —— 应用一个入场槽。
+     *
+     * 服务端负责认领条件 / 参数并只覆盖本槽拥有的内容；前端只提交
+     * `slotId + optionId + parameters`。`issues` 非空时原样返回当前数组。
+     */
+    applyEntryConditionSlot: publicProcedure
+      .input(applyEntryConditionSlotInputSchema)
+      .mutation(({ input }) => {
+        if (!isEntryConditionDefinitionCarrier(input.definition)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "AUTHORING_ENTRY_CONDITION_DEFINITION_INVALID：definition 必须含 entry.conditions 与 parameters",
+          });
+        }
+        const result = applyEntryConditionSlot(
+          input.definition,
+          input.slotId,
+          input.optionId,
+          input.parameters,
+        );
+        return {
+          conditions: result.conditions,
+          parameters: result.parameters,
+          issues: result.issues,
+        };
+      }),
     /**
      * FE-PLAN-004 —— 把当前 policy **认出**每个槽现在是哪个方案 + 参数。
      *

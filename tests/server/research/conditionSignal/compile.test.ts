@@ -18,6 +18,7 @@
 import { describe, expect, it } from "vitest";
 import { DECLARATIVE_RECIPE_ID, compileConditionRecipe } from "../../../../server/research/conditionSignal";
 import { PULLBACK_FEATURE_IDS, PULLBACK_PARAMETER_IDS, registeredStrategyRecipeIds } from "../../../../server/research/recipeRegistry";
+import { ENTRY_CONDITION_FEATURE_IDS } from "../../../../server/research/recipeRegistryAtoms";
 import { StrategyRecipeRuntimeError } from "../../../../server/research/recipeErrors";
 import type { ConditionDefinition } from "../../../../server/research/strategySchema/definition";
 import type { ResearchParameterSchema, ResearchParameterSet } from "../../../../server/research/types";
@@ -123,6 +124,50 @@ describe("恒等映射（派生字段直接落在同名特征上）", () => {
     ]);
     expect(evaluate(runtime, { [PULLBACK_FEATURE_IDS.volumeRatio]: 0.5 })).not.toBeNull();
     expect(evaluate(runtime, { [PULLBACK_FEATURE_IDS.volumeRatio]: 0.6 })).toBeNull();
+  });
+
+  it("入场轴派生字段映射到同名特征，并保持门槛方向", () => {
+    const runtime = compile([
+      cond({
+        field: "bar.peakCloseSinceEvent",
+        operator: "GREATER_THAN_OR_EQUAL",
+        value: 12,
+        valueType: "CONSTANT",
+      }),
+      cond({
+        field: "bar.pullbackFromEventPeakClose",
+        operator: "GREATER_THAN_OR_EQUAL",
+        value: 0.03,
+        valueType: "CONSTANT",
+      }),
+      cond({
+        field: "bar.pullbackFromEventPeakClose",
+        operator: "LESS_THAN_OR_EQUAL",
+        value: 0.08,
+        valueType: "CONSTANT",
+      }),
+      cond({
+        field: "bar.trendHoldsMa5Ma10",
+        operator: "GREATER_THAN_OR_EQUAL",
+        value: 1,
+        valueType: "CONSTANT",
+      }),
+    ]);
+    expect(runtime.features.map((feature) => feature.featureId)).toEqual(
+      expect.arrayContaining([
+        ENTRY_CONDITION_FEATURE_IDS.peakCloseSinceEvent,
+        ENTRY_CONDITION_FEATURE_IDS.pullbackFromEventPeakClose,
+        ENTRY_CONDITION_FEATURE_IDS.trendHoldsMa5Ma10,
+      ]),
+    );
+    const allPass = {
+      [ENTRY_CONDITION_FEATURE_IDS.peakCloseSinceEvent]: 12,
+      [ENTRY_CONDITION_FEATURE_IDS.pullbackFromEventPeakClose]: 0.05,
+      [ENTRY_CONDITION_FEATURE_IDS.trendHoldsMa5Ma10]: 1,
+    };
+    expect(evaluate(runtime, allPass)).not.toBeNull();
+    expect(evaluate(runtime, { ...allPass, [ENTRY_CONDITION_FEATURE_IDS.pullbackFromEventPeakClose]: 0.09 })).toBeNull();
+    expect(evaluate(runtime, { ...allPass, [ENTRY_CONDITION_FEATURE_IDS.trendHoldsMa5Ma10]: 0 })).toBeNull();
   });
 
   it("bar.isBullish >= 1 ⇒ 「红盘」门槛", () => {
@@ -387,7 +432,7 @@ describe("合成配方的身份", () => {
     expect(registeredStrategyRecipeIds()).not.toContain(DECLARATIVE_RECIPE_ID);
   });
 
-  it("特征提供器与已注册配方同源（四个派生特征）", () => {
+  it("未引用入场轴字段时，声明式配方的特征面仍保持既有四个 pullback 特征", () => {
     const runtime = compile([
       cond({ field: "bar.isBullish", operator: "GREATER_THAN_OR_EQUAL", value: 1, valueType: "CONSTANT" }),
     ]);

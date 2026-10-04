@@ -39,6 +39,7 @@ import {
   definitionSegmentStatuses,
   definitionToDrafts,
   draftsToDefinition,
+  applyEntryConditionSlotResult,
   emptyConditionRow,
   emptyExitRuleRow,
   emptyParameterRow,
@@ -540,6 +541,80 @@ describe("⑥ 基础信息改数据集 ⇒ 必须同步进 definition.datasets �
     const next = syncPrimaryDatasetBinding(noRole, coordinate);
     expect(next.datasets[0]?.datasetVersionId).toBe("390002");
     expect(syncPrimaryDatasetBinding(next, coordinate)).toBe(next);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑧ ENTRY_CONDITION 服务端结果写回
+// ---------------------------------------------------------------------------
+
+describe("⑧ ENTRY_CONDITION canonical 结果写回", () => {
+  it("40) conditions / parameters 原子替换，未知键、id、顺序与其它草稿字段原样保留", () => {
+    const base = structuredDrafts(FIRST_BOARD_PULLBACK_DEFINITION);
+    const snapshot = JSON.stringify(base);
+    const result = {
+      conditions: [
+        {
+          id: "entry.trend_pullback.max",
+          field: "bar.pullbackFromEventPeakClose",
+          operator: "LESS_THAN_OR_EQUAL",
+          value: "entry_peak_pullback_max",
+          valueType: "PARAMETER_REFERENCE",
+          enabled: true,
+          description: "原样保留的条件描述",
+          extensionKey: "keep-condition",
+        },
+        {
+          id: "manual-keep",
+          field: "bar.close",
+          operator: "GREATER_THAN",
+          value: 0,
+          valueType: "CONSTANT",
+          enabled: true,
+        },
+      ],
+      parameters: [
+        {
+          code: "entry_peak_pullback_max",
+          name: "首板后峰值回撤上限",
+          dataType: "number",
+          parameterRole: "TUNABLE",
+          defaultValue: 0.08,
+          min: 0.05,
+          max: 0.15,
+          step: 0.01,
+          unit: "RATIO",
+          extensionKey: "keep-parameter",
+        },
+      ],
+      issues: [],
+    } as const;
+
+    const next = applyEntryConditionSlotResult(base, result);
+
+    expect(next.conditions.map((row) => row.original.id)).toEqual([
+      "entry.trend_pullback.max",
+      "manual-keep",
+    ]);
+    expect(next.conditions[0]?.original.extensionKey).toBe("keep-condition");
+    expect(next.conditions[1]?.value).toBe("0");
+    expect(next.parameters).toHaveLength(1);
+    expect(next.parameters[0]?.original.extensionKey).toBe("keep-parameter");
+    expect(next.parameters[0]?.defaultValue).toBe("0.08");
+    expect(next.parameters[0]?.parameterRole).toBe("TUNABLE");
+    expect(next.exitRules).toBe(base.exitRules);
+    expect(next.cost).toBe(base.cost);
+    expect(JSON.stringify(base)).toBe(snapshot);
+  });
+
+  it("41) issues 非空或数组形状不符 ⇒ 原样返回，不产生半份写入", () => {
+    const base = structuredDrafts(FIRST_BOARD_PULLBACK_DEFINITION);
+    expect(applyEntryConditionSlotResult(base, {
+      conditions: [{ id: "would-change" }],
+      parameters: [],
+      issues: ["ENTRY_CONDITION_PARAMETER_CONFLICT"],
+    })).toBe(base);
+    expect(applyEntryConditionSlotResult(base, { conditions: {}, parameters: [] })).toBe(base);
   });
 });
 

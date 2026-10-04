@@ -29,6 +29,7 @@ const OVERVIEW = "components/strategy/DefinitionProgressOverview.tsx";
 const FIELDS = "components/strategy/DefinitionFields.tsx";
 const PRESET_EDITOR = "components/strategy/PresetEditor.tsx";
 const DRAFT = "components/strategy/definitionDraft.ts";
+const ENTRY_EDITOR = "components/strategy/EntryConditionSlotEditor.tsx";
 
 describe("策略定义页 IA 结构锁", () => {
   it("1) 新建时提供「起点」二选一（空白 canonical / 从模式族生成）", () => {
@@ -550,5 +551,64 @@ describe("策略定义页 IA 结构锁", () => {
 
     const overview = read(OVERVIEW);
     expect(overview).toContain("dispatchDefinitionFocusSegment");
+  });
+});
+
+describe("ENTRY_CONDITION 定义页结构锁", () => {
+  it("37) 服务端入场槽渲染在第②段，未识别保持原样", () => {
+    const editor = read(ENTRY_EDITOR);
+    for (const hook of [
+      "data-entry-condition-slots",
+      "data-entry-condition-slot=",
+      "data-entry-condition-select=",
+      "data-entry-condition-value=",
+      "data-entry-condition-params-toggle=",
+      "data-entry-condition-empty",
+      "data-entry-condition-unrecognized=",
+      "data-entry-condition-summary",
+    ]) {
+      expect(editor.includes(hook), hook).toBe(true);
+    }
+    expect(editor).toContain("本表单不识别（保持原样）");
+    expect(editor).toContain("humanEntryParameterValue");
+    expect(editor).toContain("RATIO");
+    expect(editor).not.toContain("from \"server/");
+    expect(editor).not.toContain("materializeEntryConditionSlotOption");
+    expect(editor).not.toContain("recognizeEntryConditionSlot(");
+    expect(read(FIELDS)).toContain("{presetBlocks?.entryCondition}");
+  });
+
+  it("38) 识别和应用都走服务端，apply 成功后才写草稿并置 dirty", () => {
+    const detail = read(DETAIL);
+    expect(detail).toContain("recognizeEntryConditionSlots");
+    expect(detail).toContain("applyEntryConditionSlot");
+    expect(detail).toContain("<EntryConditionSlotEditor");
+    expect(detail).toContain("onEntryConditionSlotApply");
+    expect(detail).toContain("applyEntryConditionSlotResult(previous.drafts, result)");
+    expect(detail).toContain('toast.error("入场规则槽没改成"');
+    const successStart = detail.indexOf("const changedCount = option === undefined");
+    const dirtyIndex = detail.indexOf("setDirty(true);", successStart);
+    expect(successStart).toBeGreaterThan(-1);
+    expect(dirtyIndex).toBeGreaterThan(successStart);
+    expect(detail).toContain("recordPresetUsage(`ENTRY_CONDITION:${input.slotId}`, input.optionId, changedCount)");
+  });
+
+  it("39) managedConditionIds 过滤手动条件，未知条件仍展示", () => {
+    const fields = read(FIELDS);
+    expect(fields).toContain("managedConditionIds");
+    expect(fields).toContain("const managedConditionIdSet = useMemo(() => new Set(managedConditionIds)");
+    expect(fields).toContain("visibleConditionRows");
+    expect(fields).toContain("data-entry-condition-manual-empty");
+    expect(fields).toContain("入场槽已管理");
+    expect(fields).toContain("未知 / 未识别条件仍按原样展示");
+    expect(read(DETAIL)).toContain("managedConditionIds={entryConditionManagedConditionIds}");
+  });
+
+  it("40) TUNABLE 参数进入⑤候选来源，FIXED 不进入；概览纳入入场条件", () => {
+    const detail = read(DETAIL);
+    expect(detail).toContain('blockLabel: "② 买入条件"');
+    expect(detail).toContain('declaredRoleByCode.get(parameter.code.trim()) === "TUNABLE"');
+    expect(detail).toContain("entryConditionRecognition.data");
+    expect(read(OVERVIEW)).toContain('presetKeys: ["RECIPE", "ENTRY_CONDITION"]');
   });
 });

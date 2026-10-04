@@ -49,11 +49,27 @@ export interface FeatureLeakageDeclaration {
   readonly availableAtPoint: "open" | "close";
 }
 
-/** 特征计算输入（由 Runtime 按 `lookback` 准备）。 */
+/**
+ * 特征可见历史模式。
+ *
+ * - `TRAILING_BARS`：既有语义，Runtime 按 `lookback` 截取最后 N 根可见 bar。
+ * - `EVENT_TO_CURRENT`：Runtime 传入 `barsUpTo(当前日)` 的**完整可见序列**；
+ *   特征自行决定从事件日（relativeDay=0）还是更早的 prefix 历史开始读取。
+ *
+ * `historyMode` 缺省等价于 `TRAILING_BARS`，因此旧特征无需增加字段即可保持行为不变。
+ */
+export const FEATURE_HISTORY_MODES = ["TRAILING_BARS", "EVENT_TO_CURRENT"] as const;
+export type FeatureHistoryMode = (typeof FEATURE_HISTORY_MODES)[number];
+export const DEFAULT_FEATURE_HISTORY_MODE: FeatureHistoryMode = "TRAILING_BARS";
+
+/** 特征计算输入（由 Runtime 按 `historyMode` 准备）。 */
 export interface FeatureComputeContext {
   /** 决策时点。 */
   readonly asOf: EvaluationTime;
-  /** 升序可见 bar，**最后一根 = 当前 bar**；长度 >= `lookback`（不足由 Runtime 拒绝）。 */
+  /**
+   * 升序可见 bar，**最后一根 = 当前 bar**。
+   * `TRAILING_BARS` 长度 >= `lookback`；`EVENT_TO_CURRENT` 为当前日及之前的完整可见序列。
+   */
   readonly bars: readonly VisibleBar[];
   /** 事件日 bar（相对日 0）；不在可见范围时为 null。 */
   readonly eventDayBar: VisibleBar | null;
@@ -71,6 +87,11 @@ export interface FeatureDefinition {
   readonly inputs: readonly string[];
   /** 需要的历史 bar 根数（**含当前 bar**；>= 1）。 */
   readonly lookback: number;
+  /**
+   * 可见历史如何交给 `compute`。缺省 = `TRAILING_BARS`（旧特征行为不变）。
+   * `EVENT_TO_CURRENT` 由 Runtime 传入完整 `barsUpTo(当前日)`，不按 `lookback` 截断。
+   */
+  readonly historyMode?: FeatureHistoryMode;
   readonly leakage: FeatureLeakageDeclaration;
   readonly description?: string;
   /** 纯函数：给定可见数据求特征值；数据不足 ⇒ 返回 null（**不臆造**）。 */
@@ -107,6 +128,18 @@ function validateFeatureDefinition(definition: FeatureDefinition): readonly Core
   }
   if (!Number.isInteger(definition.lookback) || definition.lookback < 1) {
     issues.push(validationIssue("FEATURE_LOOKBACK_INSUFFICIENT", at, "lookback 必须是 >= 1 的整数"));
+  }
+  if (
+    definition.historyMode !== undefined
+    && !(FEATURE_HISTORY_MODES as readonly string[]).includes(definition.historyMode)
+  ) {
+    issues.push(
+      validationIssue(
+        "CORE_DEFINITION_INVALID",
+        at + ".historyMode",
+        "historyMode 必须是 TRAILING_BARS / EVENT_TO_CURRENT 之一，实际 " + String(definition.historyMode),
+      ),
+    );
   }
   if (definition.leakage.usesForwardData) {
     issues.push(
@@ -412,6 +445,121 @@ export function makePullbackFeatures(): readonly FeatureDefinition[] {
   return [haircut, volumeRatio, isBullish, momentum];
 }
 
+/** 入场轴：首板后趋势峰值回撤所需的特征 id（稳定 id / version）。 */
+export const EVENT_PEAK_PULLBACK_FEATURE_IDS = {
+  peakCloseSinceEvent: "peakCloseSinceEvent",
+  pullbackFromEventPeakClose: "pullbackFromEventPeakClose",
+  trendHoldsMa5Ma10: "trendHoldsMa5Ma10",
+} as const;
+
+function finiteClose(value: number | null): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * 为 `EVENT_TO_CURRENT` 取事件日到当前日的完整可见序列。
+ *
+ * 这里刻意不回退到 prefix bar：峰值回撤的基准是 T0 收盘，prefix 只服务于 MA10 的历史预热。
+ */
+function eventToCurrentBars(context: FeatureComputeContext): readonly VisibleBar[] | null {
+  const current = lastBar(context.bars);
+  if (current === null || current.relativeDay < 0) return null;
+  const event = context.eventDayBar;
+  if (event === null || event.relativeDay !== 0) return null;
+  const bars = context.bars.filter(
+    (bar) => bar.relativeDay >= 0 && bar.relativeDay <= current.relativeDay,
+  );
+  if (bars.length === 0 || bars[0]?.relativeDay !== 0) return null;
+  return bars;
+}
+
+function peakCloseOf(bars: readonly VisibleBar[]): number | null {
+  let peak = Number.NEGATIVE_INFINITY;
+  for (const bar of bars) {
+    if (!finiteClose(bar.close)) return null;
+    peak = Math.max(peak, bar.close);
+  }
+  return Number.isFinite(peak) && peak > 0 ? peak : null;
+}
+
+/**
+ * 入场轴：首板后趋势峰值回撤特征。
+ *
+ * - `peakCloseSinceEvent` = max(close[T0..T])，包含事件日，不含 prefix；
+ * - `pullbackFromEventPeakClose` = (peak − currentClose) / peak，新高时为 0；
+ * - `trendHoldsMa5Ma10` = close > MA10 且 MA5 > MA10；MA 使用当前日及之前的完整可见序列，
+ *   因此首板日前 prefix bar 会参与 MA5 / MA10 预热。
+ *
+ * 三个特征都声明 `EVENT_TO_CURRENT`，Runtime 不按固定 lookback 截断；数据不足 / 缺失返回 null。
+ */
+export function makeEventPeakPullbackFeatures(): readonly FeatureDefinition[] {
+  const leakage = sameBarLeakage("close", 0);
+
+  const peakCloseSinceEvent: FeatureDefinition = {
+    featureId: EVENT_PEAK_PULLBACK_FEATURE_IDS.peakCloseSinceEvent,
+    version: BUILTIN_FEATURE_VERSION,
+    inputs: ["close", "relativeDay"],
+    lookback: 1,
+    historyMode: "EVENT_TO_CURRENT",
+    leakage,
+    description: "事件日到当前日的滚动最高收盘价（含事件日 T0）",
+    compute: (context) => {
+      const bars = eventToCurrentBars(context);
+      return bars === null ? null : peakCloseOf(bars);
+    },
+  };
+
+  const pullbackFromEventPeakClose: FeatureDefinition = {
+    featureId: EVENT_PEAK_PULLBACK_FEATURE_IDS.pullbackFromEventPeakClose,
+    version: BUILTIN_FEATURE_VERSION,
+    inputs: ["close", "relativeDay"],
+    lookback: 1,
+    historyMode: "EVENT_TO_CURRENT",
+    leakage,
+    description: "当前收盘相对事件日以来最高收盘的回撤幅度；当前新高为 0",
+    compute: (context) => {
+      const bars = eventToCurrentBars(context);
+      if (bars === null) return null;
+      const peak = peakCloseOf(bars);
+      const current = lastBar(bars);
+      if (peak === null || current === null || !finiteClose(current.close)) return null;
+      const value = (peak - current.close) / peak;
+      return Number.isFinite(value) ? value : null;
+    },
+  };
+
+  const trendHoldsMa5Ma10: FeatureDefinition = {
+    featureId: EVENT_PEAK_PULLBACK_FEATURE_IDS.trendHoldsMa5Ma10,
+    version: BUILTIN_FEATURE_VERSION,
+    inputs: ["close", "relativeDay"],
+    lookback: 10,
+    historyMode: "EVENT_TO_CURRENT",
+    leakage,
+    description: "收盘 > MA10 且 MA5 > MA10（MA 可使用事件日前 prefix 历史）",
+    compute: (context) => {
+      const current = lastBar(context.bars);
+      const event = context.eventDayBar;
+      if (current === null || current.relativeDay < 0 || event === null || event.relativeDay !== 0) return null;
+      const bars = context.bars
+        .filter((bar) => bar.relativeDay <= current.relativeDay)
+        .slice(-10);
+      if (bars.length < 10) return null;
+      for (const bar of bars) {
+        if (!finiteClose(bar.close)) return null;
+      }
+      const currentClose = current.close;
+      if (!finiteClose(currentClose)) return null;
+      const last5 = bars.slice(-5);
+      const ma5 = last5.reduce((sum, bar) => sum + (bar.close as number), 0) / 5;
+      const ma10 = bars.reduce((sum, bar) => sum + (bar.close as number), 0) / 10;
+      if (!Number.isFinite(ma5) || !Number.isFinite(ma10)) return null;
+      return currentClose > ma10 && ma5 > ma10 ? 1 : 0;
+    },
+  };
+
+  return [peakCloseSinceEvent, pullbackFromEventPeakClose, trendHoldsMa5Ma10];
+}
+
 /**
  * 3F 建仓风险过滤用的观察窗特征（T+1..T+5）。
  *
@@ -531,6 +679,9 @@ export const DERIVED_BAR_FIELD_TO_FEATURE_ID: Readonly<Record<string, string>> =
   observationMaxAmplitude: "observationMaxAmplitude",
   rollingMaxAmplitude: "rollingMaxAmplitude",
   drawdownFromEventClose: "drawdownFromEventClose",
+  peakCloseSinceEvent: EVENT_PEAK_PULLBACK_FEATURE_IDS.peakCloseSinceEvent,
+  pullbackFromEventPeakClose: EVENT_PEAK_PULLBACK_FEATURE_IDS.pullbackFromEventPeakClose,
+  trendHoldsMa5Ma10: EVENT_PEAK_PULLBACK_FEATURE_IDS.trendHoldsMa5Ma10,
 });
 
 /** 默认注册表（内置指标 + 事件相对特征 + 涨跌幅）。 */
@@ -546,6 +697,7 @@ export function createDefaultFeatureRegistry(): FeatureRegistry {
   for (const window of DEFAULT_RSI_WINDOWS) definitions.push(makeRsiFeature(window));
   for (const window of DEFAULT_ATR_WINDOWS) definitions.push(makeAtrFeature(window));
   definitions.push(...makePullbackFeatures());
+  definitions.push(...makeEventPeakPullbackFeatures());
   definitions.push(...makeObservationWindowFeatures());
   definitions.push(...makeRollingObservationWindowFeatures());
   definitions.push(makePctChangeFeature());

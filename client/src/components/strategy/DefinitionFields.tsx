@@ -372,6 +372,7 @@ export function DefinitionFields({
   drafts,
   onChange,
   searchParameterSources = [],
+  managedConditionIds = [],
   presetBlocks,
 }: {
   drafts: DefinitionDrafts;
@@ -385,10 +386,18 @@ export function DefinitionFields({
    */
   presetBlocks?: {
     readonly recipe?: ReactNode;
+    /** ②“什么条件买”段顶部的服务端入场规则槽。 */
+    readonly entryCondition?: ReactNode;
     readonly exit?: ReactNode;
     readonly position?: ReactNode;
     readonly cost?: ReactNode;
   };
+  /**
+   * 服务端已识别的入场槽所管理的 canonical condition.id。
+   *
+   * 这些行不会在“其它买入条件”里重复出现；未知 / 未识别条件仍按原样展示。
+   */
+  readonly managedConditionIds?: readonly string[];
   /**
    * ⑤「可调参数」的**派生来源**：①–④ 已选方案各自暴露的参数（P3 / C-1）。
    * 不传 ⇒ 该面板不渲染（⑤ 仍可手写行）。
@@ -478,6 +487,18 @@ export function DefinitionFields({
   ];
 
   const totalGaps = statuses.reduce((sum, status) => sum + status.gapCount, 0);
+
+  const managedConditionIdSet = useMemo(() => new Set(managedConditionIds), [managedConditionIds]);
+  const visibleConditionRows = useMemo(
+    () => drafts.conditions
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => {
+        const id = row.original.id;
+        return typeof id !== "string" || !managedConditionIdSet.has(id);
+      }),
+    [drafts.conditions, managedConditionIdSet],
+  );
+  const managedConditionCount = drafts.conditions.length - visibleConditionRows.length;
 
   /**
    * 某个输入框是否「必填未填」。
@@ -683,9 +704,11 @@ export function DefinitionFields({
         onToggle={() => toggle("condition", !isOpen(statuses[1]))}
         hint={DEFINITION_SEGMENTS[1].hint}
       >
+        {presetBlocks?.entryCondition}
+
         <div className="space-y-1.5">
           <p className="flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-            <span>常用（点一下加一条）：</span>
+            <span>其它买入条件 · 常用（点一下加一条）：</span>
             {CANDIDATE_CONDITION_PRESETS.map((preset) => (
               <Button
                 key={preset.id}
@@ -710,13 +733,18 @@ export function DefinitionFields({
           ))}
         </datalist>
 
-        {drafts.conditions.length === 0 ? (
-          <p className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] text-sky-900">
-            没有买入条件 ⇒ 观察窗口内**一出现该事件就产生买入信号**。要「回踩到位才买」，就在这里加条件。
+        {visibleConditionRows.length === 0 ? (
+          <p
+            className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] text-sky-900"
+            data-entry-condition-manual-empty={managedConditionCount > 0 ? "slot-managed" : "empty"}
+          >
+            {managedConditionCount > 0
+              ? `入场槽已管理 ${String(managedConditionCount)} 条条件；其它买入条件为空。`
+              : "没有买入条件 ⇒ 观察窗口内**一出现该事件就产生买入信号**。要「回踩到位才买」，就在这里加条件。"}
           </p>
         ) : (
           <div className="space-y-1.5">
-            {drafts.conditions.map((row, index) => (
+            {visibleConditionRows.map(({ row, index }) => (
               <ConditionRowForm
                 key={index}
                 row={row}

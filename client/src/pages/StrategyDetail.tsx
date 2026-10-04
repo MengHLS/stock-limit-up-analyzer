@@ -27,6 +27,7 @@ import { toRuntimeConfig } from "@/components/strategy/RunConfigPanel";
 import {
   draftsToDefinition,
   backtestConfigFromDrafts,
+  applyEntryConditionSlotResult,
   costModelFromDrafts,
   definitionToDrafts,
   syncPrimaryDatasetBinding,
@@ -46,6 +47,12 @@ import {
   type ExitPolicySlotRecognition,
   type ExitSlotParameterValue,
 } from "@/components/strategy/ExitPolicySlotEditor";
+import {
+  EntryConditionSlotEditor,
+  type EntryConditionSlotDto,
+  type EntryConditionSlotParameterValue,
+  type EntryConditionSlotRecognition,
+} from "@/components/strategy/EntryConditionSlotEditor";
 import { StrategyResearchProvenancePanel } from "@/components/research/StrategyResearchProvenancePanel";
 import { FirstLimitPoolSummary } from "@/components/strategy/FirstLimitPoolSummary";
 import {
@@ -213,6 +220,8 @@ interface AuthoringVocabularyDto {
   /** 还没有退出政策时的**起步基准**（= 已登记实验 SL-00 的 policy）。 */
   readonly exitPolicyBasePolicy?: Record<string, unknown> | null;
   readonly exitPolicyBaseLabel?: string;
+  /** ENTRY_CONDITION：服务端下发的入场规则槽（不含 conditions / parameter code 模板）。 */
+  readonly entryConditionSlots?: readonly EntryConditionSlotDto[];
   readonly strategyTypes: readonly string[];
 }
 
@@ -309,6 +318,7 @@ function DefinitionTab({
   presetSegments,
   trustPanel,
   searchParameterSources,
+  managedConditionIds,
   presetBlocks,
 }: {
   vm: StrategyViewModel;
@@ -324,8 +334,10 @@ function DefinitionTab({
   trustPanel?: ReactNode;
   /** ⑤ 派生来源（P3）：①–④ 已选方案暴露的参数。 */
   searchParameterSources?: readonly SelectedPresetParameters[];
+  /** 服务端入场槽管理的 condition.id，用于从手动条件列表中隐藏重复行。 */
+  managedConditionIds?: readonly string[];
   /** 各任务块**自己的方案行**（由各段渲染在段首）。 */
-  presetBlocks?: { readonly recipe?: ReactNode; readonly exit?: ReactNode; readonly position?: ReactNode; readonly cost?: ReactNode };
+  presetBlocks?: { readonly recipe?: ReactNode; readonly entryCondition?: ReactNode; readonly exit?: ReactNode; readonly position?: ReactNode; readonly cost?: ReactNode };
 }) {
   return (
     <div className="space-y-4">
@@ -372,6 +384,7 @@ function DefinitionTab({
             drafts={syncedDrafts}
             onChange={onDefinitionChange}
             searchParameterSources={searchParameterSources}
+            managedConditionIds={managedConditionIds}
             presetBlocks={presetBlocks}
           />
         </>
@@ -805,6 +818,40 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     });
   }, [vm.datasetVersionId, vm.datasetVersion, definitionState]);
 
+  /** 当前草稿的 canonical definition —— 入场槽 recognition / apply 的唯一输入。 */
+  const currentCanonicalDefinition = useMemo<Record<string, unknown> | null>(() => {
+    if (visibleDefinitionDrafts === null) return null;
+    return draftsToDefinition(visibleDefinitionDrafts);
+  }, [visibleDefinitionDrafts]);
+
+  /** 已落库版本的 definition —— 信任层判入场槽差异的基准。 */
+  const baselineCanonicalDefinition = useMemo<Record<string, unknown> | null>(() => {
+    if (savedDocument === null) return null;
+    const definition = savedDocument.definition;
+    if (typeof definition !== "object" || definition === null || Array.isArray(definition)) return null;
+    return definition as Record<string, unknown>;
+  }, [savedDocument]);
+
+  const entryConditionRecognition = trpc.strategyDomain.authoring.recognizeEntryConditionSlots.useQuery(
+    { definition: currentCanonicalDefinition ?? {} },
+    { enabled: currentCanonicalDefinition !== null, refetchOnWindowFocus: false },
+  );
+
+  const baselineEntryConditionRecognition = trpc.strategyDomain.authoring.recognizeEntryConditionSlots.useQuery(
+    { definition: baselineCanonicalDefinition ?? {} },
+    { enabled: baselineCanonicalDefinition !== null, refetchOnWindowFocus: false },
+  );
+
+  const entryConditionManagedConditionIds = useMemo<readonly string[]>(() => {
+    const ids = new Set<string>();
+    const slots = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
+    for (const slot of slots) {
+      if (slot.optionId === null || slot.optionId === "off") continue;
+      for (const id of slot.managedConditionIds ?? []) ids.add(id);
+    }
+    return [...ids];
+  }, [entryConditionRecognition.data]);
+
   /**
    * 预设槽的完成度（并入「定义完成度」概览）。
    *
@@ -832,8 +879,34 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
       }
       return { key, label, domId, state: "SET", hint: `已选 ${selection.presetId}` };
     };
+    const entrySlots = vocabulary?.entryConditionSlots ?? [];
+    const entryRecognitions = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
+    const activeEntry = entryRecognitions.find((item) => item.optionId !== null && item.optionId !== "off");
+    const activeEntryOption = activeEntry === undefined
+      ? null
+      : entrySlots.find((slot) => slot.slotId === activeEntry.slotId)?.options.find(
+          (option) => option.optionId === activeEntry.optionId,
+        ) ?? null;
+    const entryConditionSegment: DefinitionProgressPresetSegment = activeEntry === undefined
+      ? {
+          key: "ENTRY_CONDITION",
+          label: "入场条件",
+          domId: "preset-entry-condition",
+          state: "OPTIONAL",
+          hint: entryRecognitions.some((item) => item.optionId === null)
+            ? "现有条件不由本表单识别，保持原样"
+            : "未设置（可选：留空 = 事件出现后按其它买入条件判断）",
+        }
+      : {
+          key: "ENTRY_CONDITION",
+          label: "入场条件",
+          domId: "preset-entry-condition",
+          state: "SET",
+          hint: `已选 ${activeEntryOption?.displayName ?? activeEntry.optionId ?? "入场方案"}`,
+        };
     return [
       build(recipeSelection, recipeMaterialized, "RECIPE", "信号配方", "preset-recipe", true),
+      entryConditionSegment,
       build(exitPolicySelection, exitPolicyMaterialized, "EXIT_POLICY", "退出政策", "preset-exit-policy", false),
       build(positionSelection, positionMaterialized, "POSITION", "仓位与持仓数", "preset-position", false),
       build(costSelection, costMaterialized, "COST", "成本与成交", "preset-cost", false),
@@ -843,6 +916,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     exitPolicySelection, exitPolicyMaterialized,
     positionSelection, positionMaterialized,
     costSelection, costMaterialized,
+    vocabulary, entryConditionRecognition.data,
   ]);
 
   /** 本稿用过的预设 + **预设版本** + 参数（SCOPE-002 §1.5 · 裁定 Q5：只进审计，不进定义指纹）。 */
@@ -906,13 +980,41 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
       if (preset === undefined || preset.parameters.length === 0) return null;
       return { blockLabel, presetDisplayName: preset.displayName, parameters: preset.parameters };
     };
-    return [
+    const sources = [
       pick(recipeSelection, "① 选股"),
       pick(exitPolicySelection, "② 出场"),
       pick(positionSelection, "③ 仓位"),
       pick(costSelection, "④ 成本与成交"),
     ].filter((item): item is SelectedPresetParameters => item !== null);
-  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+
+    /**
+     * 入场槽的服务端参数也进入 ⑤ 候选来源，但只暴露草稿里
+     * `parameterRole === "TUNABLE"` 的行；FIXED 参数不会出现在搜索空间。
+     */
+    const declaredRoleByCode = new Map(
+      (visibleDefinitionDrafts?.parameters ?? []).map((row) => [row.code.trim(), row.parameterRole] as const),
+    );
+    const entryRecognitions = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
+    for (const recognition of entryRecognitions) {
+      if (recognition.optionId === null || recognition.optionId === "off") continue;
+      const slot = (vocabulary?.entryConditionSlots ?? []).find((item) => item.slotId === recognition.slotId);
+      const option = slot?.options.find((item) => item.optionId === recognition.optionId);
+      if (option === undefined) continue;
+      const tunableParameters = option.parameters.filter(
+        (parameter) => declaredRoleByCode.get(parameter.code.trim()) === "TUNABLE",
+      );
+      if (tunableParameters.length === 0) continue;
+      sources.push({
+        blockLabel: "② 买入条件",
+        presetDisplayName: option.displayName,
+        parameters: tunableParameters,
+      });
+    }
+    return sources;
+  }, [
+    recipeSelection, exitPolicySelection, positionSelection, costSelection,
+    vocabulary, visibleDefinitionDrafts, entryConditionRecognition.data,
+  ]);
 
   /**
    * P5：**本地**用量计数（每块方案被换 / 参数被改的频率）。
@@ -1066,10 +1168,56 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     return out;
   }, [baselineExitSlotRecognition.data, exitSlotRecognition.data, vocabulary]);
 
-  /** 预设参数 + 退出槽差异的**合并**（信任层只认这一份）。 */
+  /**
+   * ENTRY_CONDITION —— 入场槽相对已落库版本的逐槽差异。
+   *
+   * 与服务端 recognition 同源；认不出时只显示“本表单不识别”，不猜相近方案。
+   */
+  const changedEntryConditionSlots = useMemo<readonly DefinitionTrustChangedParam[]>(() => {
+    const base = (baselineEntryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
+    const current = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
+    if (base.length === 0 || current.length === 0) return [];
+    const out: DefinitionTrustChangedParam[] = [];
+    for (const slot of vocabulary?.entryConditionSlots ?? []) {
+      const before = base.find((item) => item.slotId === slot.slotId);
+      const after = current.find((item) => item.slotId === slot.slotId);
+      if (before === undefined || after === undefined) continue;
+      const nameOf = (optionId: string | null) =>
+        optionId === null
+          ? "本表单不识别"
+          : (slot.options.find((option) => option.optionId === optionId)?.displayName ?? optionId);
+      if (before.optionId !== after.optionId) {
+        out.push({
+          slotKey: `ENTRY_${slot.slotId}`,
+          slotLabel: `入场·${slot.label}`,
+          code: "换方案",
+          from: nameOf(before.optionId),
+          to: nameOf(after.optionId),
+        });
+        continue;
+      }
+      const option = slot.options.find((item) => item.optionId === after.optionId);
+      if (option === undefined) continue;
+      for (const parameter of option.parameters) {
+        const from = before.parameters[parameter.code] ?? parameter.defaultValue;
+        const to = after.parameters[parameter.code] ?? parameter.defaultValue;
+        if (from === to) continue;
+        out.push({
+          slotKey: `ENTRY_${slot.slotId}`,
+          slotLabel: `入场·${slot.label}`,
+          code: parameter.label,
+          from: String(from),
+          to: String(to),
+        });
+      }
+    }
+    return out;
+  }, [baselineEntryConditionRecognition.data, entryConditionRecognition.data, vocabulary]);
+
+  /** 预设参数 + 退出槽 + 入场槽差异的**合并**（信任层只认这一份）。 */
   const changedDefinitionParams = useMemo<readonly DefinitionTrustChangedParam[]>(
-    () => [...changedPresetParams, ...changedExitSlots],
-    [changedPresetParams, changedExitSlots],
+    () => [...changedPresetParams, ...changedExitSlots, ...changedEntryConditionSlots],
+    [changedPresetParams, changedExitSlots, changedEntryConditionSlots],
   );
 
   /** 三态：未落库 ⇒ 全新；有参数改动或任何编辑 ⇒ 变体；否则一致。 */
@@ -1077,6 +1225,8 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     loadedTarget === null ? "UNVERIFIED" : (changedDefinitionParams.length > 0 || dirty ? "VARIANT" : "MATCH");
 
   const applyExitSlot = trpc.strategyDomain.authoring.applyExitPolicySlot.useMutation();
+  const applyEntryConditionSlot = trpc.strategyDomain.authoring.applyEntryConditionSlot.useMutation();
+  const authoringUtils = trpc.useUtils();
 
   /**
    * 改一个退出槽：把**当前 policy** 与「选哪个方案 + 填哪些参数」交给服务端，
@@ -1105,6 +1255,53 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
             return;
           }
           applyExitPolicyRule(envelope, result.policy);
+        },
+      },
+    );
+  };
+
+  /**
+   * ENTRY_CONDITION —— 前端只提交槽选择与参数，由服务端返回完整 canonical
+   * conditions / parameters；成功后原子替换草稿的两个数组。
+   *
+   * 失败 / issues 非空时不写草稿，也不提前 setDirty。
+   */
+  const onEntryConditionSlotApply = (input: {
+    slotId: string;
+    optionId: string;
+    parameters: Readonly<Record<string, EntryConditionSlotParameterValue>>;
+  }) => {
+    if (currentCanonicalDefinition === null) return;
+    applyEntryConditionSlot.mutate(
+      {
+        definition: currentCanonicalDefinition,
+        slotId: input.slotId,
+        optionId: input.optionId,
+        parameters: { ...input.parameters },
+      },
+      {
+        onSuccess: (result) => {
+          if (result.issues.length > 0) {
+            toast.error("入场规则槽没改成", { description: result.issues.join("；") });
+            return;
+          }
+          const option = (vocabulary?.entryConditionSlots ?? [])
+            .find((slot) => slot.slotId === input.slotId)
+            ?.options.find((item) => item.optionId === input.optionId);
+          const changedCount = option === undefined
+            ? 0
+            : option.parameters.filter((parameter) =>
+                (input.parameters[parameter.code] ?? parameter.defaultValue) !== parameter.defaultValue,
+              ).length;
+          setDefinitionState((previous) => previous.kind !== "structured"
+            ? previous
+            : { kind: "structured", drafts: applyEntryConditionSlotResult(previous.drafts, result) });
+          recordPresetUsage(`ENTRY_CONDITION:${input.slotId}`, input.optionId, changedCount);
+          setDirty(true);
+          void authoringUtils.strategyDomain.authoring.recognizeEntryConditionSlots.invalidate();
+        },
+        onError: (error) => {
+          toast.error("入场规则槽没改成", { description: error.message });
         },
       },
     );
@@ -1264,6 +1461,21 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
      */
     const envelope = vocabulary?.exitPolicyRuleEnvelope;
     if (baselineExitPolicy !== null && envelope !== undefined) applyExitPolicyRule(envelope, baselineExitPolicy);
+
+    /**
+     * ENTRY_CONDITION：仅当基准版本能被服务端识别时，才逐槽还原；
+     * 认不出（`optionId: null`）就保持原样，不做危险猜测。
+     */
+    const baselineEntrySlots = (baselineEntryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
+    for (const slot of vocabulary?.entryConditionSlots ?? []) {
+      const before = baselineEntrySlots.find((item) => item.slotId === slot.slotId);
+      if (before?.optionId === null || before?.optionId === undefined) continue;
+      onEntryConditionSlotApply({
+        slotId: slot.slotId,
+        optionId: before.optionId,
+        parameters: before.parameters,
+      });
+    }
   };
 
   const applyExitPolicyRule = (envelope: Record<string, unknown>, policy: unknown) => {
@@ -1519,8 +1731,19 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
                 onDefinitionChange={updateDefinitionDrafts}
                 presetSegments={definitionPresetSegments}
                 searchParameterSources={searchParameterSources}
+                managedConditionIds={entryConditionManagedConditionIds}
                 presetBlocks={
                   vocabulary === null ? undefined : {
+                    entryCondition: (
+                      <EntryConditionSlotEditor
+                        domId="preset-entry-condition"
+                        slots={vocabulary.entryConditionSlots ?? []}
+                        recognitions={(entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[]}
+                        disabled={applyEntryConditionSlot.isPending}
+                        busy={entryConditionRecognition.isFetching || applyEntryConditionSlot.isPending}
+                        onApply={onEntryConditionSlotApply}
+                      />
+                    ),
                     recipe: (
                       <PresetEditor
                         domId="preset-recipe"

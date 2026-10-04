@@ -44,6 +44,29 @@ describe("strategyDomain.authoring · 只读面", () => {
     expect(vocab.strategyTypes).toContain("THREE_FACTOR_TOPN");
   });
 
+  it("ENTRY_CONDITION 路由：apply 返回 canonical conditions/parameters，再 recognize 精确往返", async () => {
+    const emptyDefinition = { entry: { conditions: [] }, parameters: [] };
+    const applied = await publicCaller.strategyDomain.authoring.applyEntryConditionSlot({
+      definition: emptyDefinition,
+      slotId: "TREND_PULLBACK_AFTER_FIRST_LIMIT_UP",
+      optionId: "trend-pullback-after-first-limit-up",
+      parameters: {},
+    });
+    expect(applied.issues).toEqual([]);
+    expect(applied.conditions.map((condition: any) => condition.id)).toContain("entry.trend_pullback.min");
+    expect(applied.parameters.map((parameter: any) => parameter.code)).toContain("entry_peak_pullback_max");
+
+    const recognized = await publicCaller.strategyDomain.authoring.recognizeEntryConditionSlots({
+      definition: { entry: { conditions: applied.conditions }, parameters: applied.parameters },
+    });
+    expect(recognized.slots).toEqual([
+      expect.objectContaining({
+        slotId: "TREND_PULLBACK_AFTER_FIRST_LIMIT_UP",
+        optionId: "trend-pullback-after-first-limit-up",
+        atDefaults: true,
+      }),
+    ]);
+  });
   it("getBlankDraft（未绑定）返回骨架零件 + 必填段清单", async () => {
     const blank = await publicCaller.strategyDomain.authoring.getBlankDraft({});
     expect(blank.parts.identity.strategyId).toBe("");

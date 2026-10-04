@@ -57,7 +57,7 @@ import {
 } from "./decision";
 import { nextPositionState } from "./executionSemantics";
 import { parseCoreFieldReference } from "./fieldReference";
-import { getDefaultFeatureRegistry, type FeatureRegistry } from "./featureRegistry";
+import { DEFAULT_FEATURE_HISTORY_MODE, getDefaultFeatureRegistry, type FeatureRegistry } from "./featureRegistry";
 import { assertNoDefinitionLeakage, auditDefinitionLeakage, LeakageGuard } from "./leakageGuard";
 import type { ExpressionScope } from "./expression";
 import {
@@ -274,10 +274,21 @@ function evaluateWithDetail(
     const featureDefinition = registry.resolve(requirement);
     LeakageGuard.assertFeatureUsable(featureDefinition.featureId, featureDefinition.leakage, context.timestamp);
     const access = accessFor(day);
-    const bars = access.barsUpTo(day).slice(-featureDefinition.lookback);
-    if (bars.length < featureDefinition.lookback) {
+    const historyMode = featureDefinition.historyMode ?? DEFAULT_FEATURE_HISTORY_MODE;
+    const visibleBars = access.barsUpTo(day);
+    const bars = historyMode === "EVENT_TO_CURRENT"
+      ? visibleBars
+      : visibleBars.slice(-featureDefinition.lookback);
+    if (historyMode === "TRAILING_BARS" && bars.length < featureDefinition.lookback) {
       insufficiencies.push(
         "特征 " + featureId + " 需要 " + String(featureDefinition.lookback) + " 根 bar，在 " + String(day) + " 日只有 " + String(bars.length) + " 根",
+      );
+      featureCache.set(key, null);
+      return null;
+    }
+    if (historyMode === "EVENT_TO_CURRENT" && bars.length === 0) {
+      insufficiencies.push(
+        "特征 " + featureId + " 在 " + String(day) + " 日没有任何可见 bar",
       );
       featureCache.set(key, null);
       return null;

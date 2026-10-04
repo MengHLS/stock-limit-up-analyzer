@@ -134,5 +134,73 @@ export function computeMomentum(bars: readonly CanonicalMarketBar[], baseline: E
   return computeCloseReturnFromEventClose(bars, baseline);
 }
 
+/**
+ * 入场轴特征：事件日到当前日的滚动最高收盘价。
+ *
+ * `eventDayIndex` 允许调用方在 `bars` 前置了事件日前 prefix 历史时指向真正的 T0；
+ * 缺省 0 保持既有「bars[0] = 首板日」口径。事件日之后任一 close 缺失 / 非有限，
+ * 或峰值非正 ⇒ 返回 null（不跳过缺失 bar 伪造峰值）。
+ */
+export function computePeakCloseSinceEvent(
+  bars: readonly CanonicalMarketBar[],
+  eventDayIndex = 0,
+): number | null {
+  if (!Number.isInteger(eventDayIndex) || eventDayIndex < 0 || eventDayIndex >= bars.length) return null;
+  const eventToCurrent = bars.slice(eventDayIndex);
+  if (eventToCurrent.length === 0) return null;
+  let peak = Number.NEGATIVE_INFINITY;
+  for (const bar of eventToCurrent) {
+    if (!isFiniteNumber(bar.close)) return null;
+    peak = Math.max(peak, bar.close);
+  }
+  return Number.isFinite(peak) && peak > 0 ? peak : null;
+}
+
+/**
+ * 入场轴特征：当前收盘相对事件日以来最高收盘的回撤。
+ *
+ * `= (peakCloseSinceEvent − currentClose) / peakCloseSinceEvent`；当前新高为 0。
+ */
+export function computePullbackFromEventPeakClose(
+  bars: readonly CanonicalMarketBar[],
+  eventDayIndex = 0,
+): number | null {
+  const peak = computePeakCloseSinceEvent(bars, eventDayIndex);
+  const current = decisionBarOf(bars);
+  if (peak === null || current === null || !isFiniteNumber(current.close)) return null;
+  const value = (peak - current.close) / peak;
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 入场轴特征：收盘 > MA10 且 MA5 > MA10（严格大于）。
+ *
+ * MA 使用 `bars` 当前日及之前的完整可见序列中的最后 10 根，因此调用方把 prefix 历史放在
+ * 事件日之前时，MA5 / MA10 会自然预热；`eventDayIndex` 仅用于要求事件日在可见序列中。
+ * 历史不足或任一 close 缺失 ⇒ null（不把「数据不足」伪装成趋势不成立）。
+ */
+export function computeTrendHoldsMa5Ma10(
+  bars: readonly CanonicalMarketBar[],
+  eventDayIndex = 0,
+): number | null {
+  if (!Number.isInteger(eventDayIndex) || eventDayIndex < 0 || eventDayIndex >= bars.length) return null;
+  const current = decisionBarOf(bars);
+  if (current === null || !isFiniteNumber(current.close)) return null;
+  const history = bars.slice(-10);
+  if (history.length < 10) return null;
+  for (const bar of history) {
+    if (!isFiniteNumber(bar.close)) return null;
+  }
+  const last5 = history.slice(-5);
+  const ma5 = last5.reduce((sum, bar) => sum + (bar.close as number), 0) / 5;
+  const ma10 = history.reduce((sum, bar) => sum + (bar.close as number), 0) / 10;
+  if (!Number.isFinite(ma5) || !Number.isFinite(ma10)) return null;
+  return current.close > ma10 && ma5 > ma10 ? 1 : 0;
+}
+
+function isFiniteNumber(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 /** 价格比较容差（与研究侧 `variables.ts` 的 `PRICE_EPS` 一致，防浮点抖动把平盘判成阳线）。 */
 export const PRICE_EPS = 1e-6;
