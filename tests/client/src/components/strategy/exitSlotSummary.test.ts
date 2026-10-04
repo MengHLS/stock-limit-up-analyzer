@@ -1,7 +1,7 @@
 /** P2/P3 —— 槽取值摘要与政策总述的纯函数锁。 */
 import { describe, expect, it } from "vitest";
 import { compactParameterValue, summarizeExitPolicySlots, summarizeSlotValues } from "@/components/strategy/ExitPolicySlotEditor";
-import type { PresetParameter } from "@/components/strategy/PresetEditor";
+import type { PresetParameter } from "@/components/strategy/authoringSlotParameter";
 
 const num = (code: string, unit: string, value: number): PresetParameter => ({
   code, label: code, description: "", path: "/" + code, valueType: "number", unit, required: true, defaultValue: value,

@@ -53,7 +53,7 @@ export const DEFINITION_BLOCKS: readonly {
   readonly segments: readonly DefinitionSegmentKey[];
   readonly presetKeys: readonly string[];
 }[] = [
-  { key: "selection", index: 1, title: "选股", hint: "买什么样的股（事件 / 条件 / 时点 + 信号配方）", segments: ["what", "condition", "when"], presetKeys: ["RECIPE", "ENTRY_CONDITION"] },
+  { key: "selection", index: 1, title: "选股", hint: "买什么样的股（事件 / 条件 / 时点 + 信号配方）", segments: ["what", "condition", "when"], presetKeys: ["SELECTION", "ENTRY_CONDITION"] },
   { key: "exit", index: 2, title: "出场", hint: "什么时候卖（退出政策 + 出场规则）", segments: ["exit"], presetKeys: ["EXIT_POLICY"] },
   { key: "position", index: 3, title: "仓位", hint: "每笔买多少 / 最多同时持有几只", segments: ["sizing"], presetKeys: ["POSITION"] },
   { key: "cost", index: 4, title: "成本与成交", hint: "怎么成交 / 花多少钱", segments: ["cost"], presetKeys: ["COST"] },

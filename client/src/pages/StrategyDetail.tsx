@@ -15,19 +15,14 @@ import {
   StrategyHeader,
   StrategyValidationStatus,
   StrategyVersionPanel,
-  PresetEditor,
   type LoadedTarget,
-  type PresetMaterializeResult,
-  type PresetParameterValue,
-  type PresetSelection,
-  type PresetSummary,
   type RunConfigViewModel,
 } from "@/components/strategy";
 import { toRuntimeConfig } from "@/components/strategy/RunConfigPanel";
 import {
   draftsToDefinition,
   backtestConfigFromDrafts,
-  applyEntryConditionSlotResult,
+  applyAuthoringSlotResult,
   costModelFromDrafts,
   definitionToDrafts,
   syncPrimaryDatasetBinding,
@@ -35,10 +30,7 @@ import {
   type DefinitionDraftState,
   type DefinitionDrafts,
 } from "@/components/strategy/definitionDraft";
-import {
-  applyDefinitionFieldPatch,
-  type DefinitionFieldPatch,
-} from "@/components/strategy/definitionFieldPatch";
+import { AuthoringSlotGroupEditor } from "@/components/strategy/AuthoringSlotGroupEditor";
 import type { SelectedPresetParameters } from "@/components/strategy/searchParameterCandidates";
 import { recordPresetUsage } from "@/components/strategy/authoringUsageLog";
 import {
@@ -53,6 +45,13 @@ import {
   type EntryConditionSlotParameterValue,
   type EntryConditionSlotRecognition,
 } from "@/components/strategy/EntryConditionSlotEditor";
+import type {
+  PresetMaterializeResult,
+  PresetParameter,
+  PresetParameterValue,
+  PresetSelection,
+  PresetSummary,
+} from "@/components/strategy/authoringSlotParameter";
 import { StrategyResearchProvenancePanel } from "@/components/research/StrategyResearchProvenancePanel";
 import { FirstLimitPoolSummary } from "@/components/strategy/FirstLimitPoolSummary";
 import {
@@ -208,6 +207,70 @@ function asRecord(v: unknown): Record<string, unknown> {
   return (typeof v === "object" && v !== null ? v : {}) as Record<string, unknown>;
 }
 
+
+/** 通用槽 managedPaths → DefinitionFields 的隐藏路径命名空间。 */
+function normalizeManagedDefinitionPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed === "") return trimmed;
+  const withoutDefinition = trimmed.startsWith("definition.")
+    ? trimmed.slice("definition.".length)
+    : trimmed;
+  const backtestPrefix = "executionAssumptions.backtestConfig.";
+  if (withoutDefinition.startsWith(backtestPrefix)) {
+    return `cost.${withoutDefinition.slice(backtestPrefix.length)}`;
+  }
+  const costModelPrefix = "executionAssumptions.costModel.";
+  if (withoutDefinition.startsWith(costModelPrefix)) {
+    return `cost.${withoutDefinition.slice(costModelPrefix.length)}`;
+  }
+  return withoutDefinition;
+}
+
+/**
+ * 通用 AuthoringSlot 协议（SCOPE-003）的**客户端结构视图**。
+ *
+ * 前端只描述形状，不 import `server/**`；有哪些槽 / 方案 / 参数，全部由服务端
+ * `getVocabulary().authoringSlotGroups` 与通用识别 / 应用端点下发。
+ */
+interface AuthoringSlotOptionDto {
+  readonly optionId: string;
+  readonly displayName: string;
+  readonly summary: string;
+  readonly parameters: readonly PresetParameter[];
+}
+interface AuthoringSlotDto {
+  readonly slotId: string;
+  readonly label: string;
+  readonly question: string;
+  readonly visibility: "PRIMARY" | "MORE" | "RESEARCH";
+  readonly options: readonly AuthoringSlotOptionDto[];
+}
+interface AuthoringSlotGroupDto {
+  readonly group: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly slots: readonly AuthoringSlotDto[];
+}
+/** `recognizeAuthoringSlots` 返回的单槽结果；认不出 ⇒ `optionId: null`（保持原样）。 */
+interface AuthoringSlotRecognitionBaseDto {
+  readonly slotId: string;
+  readonly optionId: string | null;
+  readonly parameters: Readonly<Record<string, number | boolean | string>>;
+  readonly atDefaults: boolean;
+  readonly managedConditionIds?: readonly string[];
+  readonly managedPaths?: readonly string[];
+}
+interface AuthoringSlotRecognitionDto extends AuthoringSlotRecognitionBaseDto {
+  readonly group: string;
+}
+/** 通用 AuthoringSlot target：与 `recognizeAuthoringSlots` / `applyAuthoringSlot` 的输入同形。 */
+interface AuthoringTargetDto {
+  readonly recipe: unknown | null;
+  readonly definition: Record<string, unknown>;
+  readonly executionAssumptions: Record<string, unknown>;
+}
+type AuthoringGroupKey = "SELECTION" | "EXIT_POLICY" | "ENTRY_CONDITION" | "POSITION" | "COST";
+
 /**
  * SCOPE-002 —— 创作词表 / 空白草稿的**线上形状**（结构性描述，不 import 服务端值）。
  */
@@ -220,14 +283,15 @@ interface AuthoringVocabularyDto {
   /** 还没有退出政策时的**起步基准**（= 已登记实验 SL-00 的 policy）。 */
   readonly exitPolicyBasePolicy?: Record<string, unknown> | null;
   readonly exitPolicyBaseLabel?: string;
-  /** ENTRY_CONDITION：服务端下发的入场规则槽（不含 conditions / parameter code 模板）。 */
+  /** @deprecated 逐块专用槽字段：主来源已切换为 `authoringSlotGroups`（通用 AuthoringSlot 协议）。 */
   readonly entryConditionSlots?: readonly EntryConditionSlotDto[];
+  /**
+   * 通用 AuthoringSlot 协议：按 group 下发槽（当前 EXIT_POLICY / ENTRY_CONDITION，
+   * 未来 POSITION / COST / SELECTION / PARAMETER_SPACE）。识别与应用都走通用端点。
+   */
+  readonly authoringSlotGroups?: readonly AuthoringSlotGroupDto[];
   readonly strategyTypes: readonly string[];
 }
-
-type AuthoringExitSlotId =
-  | "ANCHOR" | "TAKE_PROFIT" | "TIME_EXIT" | "CONFIRMATION" | "ESCALATION"
-  | "SCHEDULE" | "REDUCTION" | "STRONG_HOLD" | "RESEARCH";
 
 /** 与共享契约 `strategyAuthoringSlotSchema` 的取值一一对应（客户端只描述形状，不 import 服务端值）。 */
 type AuthoringSlotValue =
@@ -320,6 +384,10 @@ function DefinitionTab({
   searchParameterSources,
   managedConditionIds,
   presetBlocks,
+  hiddenFieldPaths,
+  hideLegacySelectionFields,
+  hideLegacyPositionFields,
+  hideLegacyCostFields,
 }: {
   vm: StrategyViewModel;
   onVmChange: (next: StrategyViewModel) => void;
@@ -337,7 +405,14 @@ function DefinitionTab({
   /** 服务端入场槽管理的 condition.id，用于从手动条件列表中隐藏重复行。 */
   managedConditionIds?: readonly string[];
   /** 各任务块**自己的方案行**（由各段渲染在段首）。 */
-  presetBlocks?: { readonly recipe?: ReactNode; readonly entryCondition?: ReactNode; readonly exit?: ReactNode; readonly position?: ReactNode; readonly cost?: ReactNode };
+  presetBlocks?: { readonly selection?: ReactNode; readonly entryCondition?: ReactNode; readonly exit?: ReactNode; readonly position?: ReactNode; readonly cost?: ReactNode };
+  /** 通用 AuthoringSlot 已认领的 canonical path；DefinitionFields 据此隐藏旧编辑点。 */
+  hiddenFieldPaths?: readonly string[];
+  /** 服务端已下发 SELECTION 槽时，隐藏旧的事件 / 窗口 / 触发编辑点。 */
+  hideLegacySelectionFields?: boolean;
+  /** 服务端已下发 POSITION / COST 槽时，分别隐藏旧的手动字段组。 */
+  hideLegacyPositionFields?: boolean;
+  hideLegacyCostFields?: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -386,6 +461,10 @@ function DefinitionTab({
             searchParameterSources={searchParameterSources}
             managedConditionIds={managedConditionIds}
             presetBlocks={presetBlocks}
+            hiddenFieldPaths={hiddenFieldPaths}
+            hideLegacySelectionFields={hideLegacySelectionFields}
+            hideLegacyPositionFields={hideLegacyPositionFields}
+            hideLegacyCostFields={hideLegacyCostFields}
           />
         </>
       )}
@@ -613,15 +692,9 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
   const blankAppliedRef = useRef(false);
   const materializePreset = trpc.strategyDomain.authoring.materializePreset.useMutation();
   const saveDraft = trpc.strategyDomain.authoring.saveDraft.useMutation();
-  const [recipeSelection, setRecipeSelection] = useState<PresetSelection | null>(null);
   const [exitPolicySelection, setExitPolicySelection] = useState<PresetSelection | null>(null);
-  const [recipeMaterialized, setRecipeMaterialized] = useState<PresetMaterializeResult | null>(null);
   const [exitPolicyMaterialized, setExitPolicyMaterialized] = useState<PresetMaterializeResult | null>(null);
   // ③ 仓位 / ④ 成本与成交：FIELD_PATCH 预设（选中后把值**填进**草稿字段）
-  const [positionSelection, setPositionSelection] = useState<PresetSelection | null>(null);
-  const [costSelection, setCostSelection] = useState<PresetSelection | null>(null);
-  const [positionMaterialized, setPositionMaterialized] = useState<PresetMaterializeResult | null>(null);
-  const [costMaterialized, setCostMaterialized] = useState<PresetMaterializeResult | null>(null);
 
   // ---- 编辑器状态 ----
   const initialDocument = () => (isNew ? emptyDraftDocument() : TEMPLATE_DOCUMENT);
@@ -832,25 +905,160 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     return definition as Record<string, unknown>;
   }, [savedDocument]);
 
-  const entryConditionRecognition = trpc.strategyDomain.authoring.recognizeEntryConditionSlots.useQuery(
-    { definition: currentCanonicalDefinition ?? {} },
-    { enabled: currentCanonicalDefinition !== null, refetchOnWindowFocus: false },
+  /**
+   * 通用 AuthoringSlot target —— 当前草稿。
+   *
+   * 只放服务端需要看到的完整片段：文档级 recipe、canonical definition、执行假设。
+   * 识别与应用都拿它当唯一输入，前端不自行拆 / 拼任何一块语义。
+   */
+  const currentAuthoringTarget = useMemo<AuthoringTargetDto | null>(() => {
+    if (currentCanonicalDefinition === null || visibleDefinitionDrafts === null) return null;
+    const recipe = vm.extra.recipe;
+    return {
+      recipe: recipe === undefined ? null : recipe,
+      definition: currentCanonicalDefinition,
+      executionAssumptions: {
+        costModel: costModelFromDrafts(visibleDefinitionDrafts),
+        backtestConfig: backtestConfigFromDrafts(visibleDefinitionDrafts),
+      },
+    };
+  }, [currentCanonicalDefinition, visibleDefinitionDrafts, vm.extra]);
+
+  /** 通用 AuthoringSlot target —— 已落库版本（信任层判「改了哪一槽」的基准）。 */
+  const baselineAuthoringTarget = useMemo<AuthoringTargetDto | null>(() => {
+    if (baselineCanonicalDefinition === null || savedDocument === null) return null;
+    const recipe = savedDocument.recipe;
+    return {
+      recipe: recipe === undefined ? null : recipe,
+      definition: baselineCanonicalDefinition,
+      executionAssumptions: asRecord(savedDocument.executionAssumptions),
+    };
+  }, [baselineCanonicalDefinition, savedDocument]);
+
+  /** 通用识别：当前草稿 target（一条 query 同时供 EXIT_POLICY / ENTRY_CONDITION）。 */
+  const authoringRecognition = trpc.strategyDomain.authoring.recognizeAuthoringSlots.useQuery(
+    { target: currentAuthoringTarget ?? { recipe: null, definition: {}, executionAssumptions: {} } },
+    { enabled: currentAuthoringTarget !== null, refetchOnWindowFocus: false },
   );
 
-  const baselineEntryConditionRecognition = trpc.strategyDomain.authoring.recognizeEntryConditionSlots.useQuery(
-    { definition: baselineCanonicalDefinition ?? {} },
-    { enabled: baselineCanonicalDefinition !== null, refetchOnWindowFocus: false },
+  /** 通用识别：已落库 target —— baseline 只取 `savedDocument`。 */
+  const baselineAuthoringRecognition = trpc.strategyDomain.authoring.recognizeAuthoringSlots.useQuery(
+    { target: baselineAuthoringTarget ?? { recipe: null, definition: {}, executionAssumptions: {} } },
+    { enabled: baselineAuthoringTarget !== null, refetchOnWindowFocus: false },
   );
+
+  /** 词表：通用 AuthoringSlot group（旧 exitPolicySlots / entryConditionSlots 不再是主来源）。 */
+  const authoringSlotGroups = useMemo<readonly AuthoringSlotGroupDto[]>(
+    () => (vocabulary?.authoringSlotGroups ?? []) as readonly AuthoringSlotGroupDto[],
+    [vocabulary],
+  );
+  const selectionAuthoringSlots = useMemo<readonly AuthoringSlotDto[]>(
+    () => authoringSlotGroups
+      .filter(group => group.group === "SELECTION")
+      .flatMap(group => group.slots) as readonly AuthoringSlotDto[],
+    [authoringSlotGroups],
+  );
+  const exitAuthoringSlots = useMemo<readonly ExitPolicySlotDto[]>(
+    () => authoringSlotGroups
+      .filter(group => group.group === "EXIT_POLICY")
+      .flatMap(group => group.slots) as readonly ExitPolicySlotDto[],
+    [authoringSlotGroups],
+  );
+  const entryAuthoringSlots = useMemo<readonly EntryConditionSlotDto[]>(
+    () => authoringSlotGroups
+      .filter(group => group.group === "ENTRY_CONDITION")
+      .flatMap(group => group.slots) as readonly EntryConditionSlotDto[],
+    [authoringSlotGroups],
+  );
+  const positionAuthoringSlots = useMemo<readonly AuthoringSlotDto[]>(
+    () => authoringSlotGroups
+      .filter(group => group.group === "POSITION")
+      .flatMap(group => group.slots) as readonly AuthoringSlotDto[],
+    [authoringSlotGroups],
+  );
+  const costAuthoringSlots = useMemo<readonly AuthoringSlotDto[]>(
+    () => authoringSlotGroups
+      .filter(group => group.group === "COST")
+      .flatMap(group => group.slots) as readonly AuthoringSlotDto[],
+    [authoringSlotGroups],
+  );
+
+  const authoringRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => (authoringRecognition.data?.slots ?? []) as readonly AuthoringSlotRecognitionDto[],
+    [authoringRecognition.data],
+  );
+  const baselineAuthoringRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => (baselineAuthoringRecognition.data?.slots ?? []) as readonly AuthoringSlotRecognitionDto[],
+    [baselineAuthoringRecognition.data],
+  );
+
+  /** 通用 recognition 按 group 过滤 → 现有两个编辑器各自的 recognition。 */
+  const selectionRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => authoringRecognitions.filter(item => item.group === "SELECTION"),
+    [authoringRecognitions],
+  );
+  const exitRecognitions = useMemo<readonly ExitPolicySlotRecognition[]>(
+    () => authoringRecognitions.filter(item => item.group === "EXIT_POLICY") as readonly ExitPolicySlotRecognition[],
+    [authoringRecognitions],
+  );
+  const entryRecognitions = useMemo<readonly EntryConditionSlotRecognition[]>(
+    () => authoringRecognitions.filter(item => item.group === "ENTRY_CONDITION") as readonly EntryConditionSlotRecognition[],
+    [authoringRecognitions],
+  );
+  const positionRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => authoringRecognitions.filter(item => item.group === "POSITION"),
+    [authoringRecognitions],
+  );
+  const costRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => authoringRecognitions.filter(item => item.group === "COST"),
+    [authoringRecognitions],
+  );
+  const baselineSelectionRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => baselineAuthoringRecognitions.filter(item => item.group === "SELECTION"),
+    [baselineAuthoringRecognitions],
+  );
+  const baselineExitRecognitions = useMemo<readonly ExitPolicySlotRecognition[]>(
+    () => baselineAuthoringRecognitions.filter(item => item.group === "EXIT_POLICY") as readonly ExitPolicySlotRecognition[],
+    [baselineAuthoringRecognitions],
+  );
+  const baselineEntryRecognitions = useMemo<readonly EntryConditionSlotRecognition[]>(
+    () => baselineAuthoringRecognitions.filter(item => item.group === "ENTRY_CONDITION") as readonly EntryConditionSlotRecognition[],
+    [baselineAuthoringRecognitions],
+  );
+  const baselinePositionRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => baselineAuthoringRecognitions.filter(item => item.group === "POSITION"),
+    [baselineAuthoringRecognitions],
+  );
+  const baselineCostRecognitions = useMemo<readonly AuthoringSlotRecognitionDto[]>(
+    () => baselineAuthoringRecognitions.filter(item => item.group === "COST"),
+    [baselineAuthoringRecognitions],
+  );
+
+  /** POSITION / COST 的服务端 owned paths，用于隐藏 DefinitionFields 的重复编辑点。 */
+  const managedDefinitionPaths = useMemo<readonly string[]>(() => {
+    const out = new Set<string>();
+    const addAll = (recognitions: readonly AuthoringSlotRecognitionBaseDto[]) => {
+      for (const recognition of recognitions) {
+        for (const path of recognition.managedPaths ?? []) {
+          const normalized = normalizeManagedDefinitionPath(path);
+          if (normalized !== "") out.add(normalized);
+        }
+      }
+    };
+    addAll(selectionRecognitions);
+    addAll(positionRecognitions);
+    addAll(costRecognitions);
+    return [...out];
+  }, [selectionRecognitions, positionRecognitions, costRecognitions]);
 
   const entryConditionManagedConditionIds = useMemo<readonly string[]>(() => {
     const ids = new Set<string>();
-    const slots = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
-    for (const slot of slots) {
+    for (const slot of entryRecognitions) {
       if (slot.optionId === null || slot.optionId === "off") continue;
       for (const id of slot.managedConditionIds ?? []) ids.add(id);
     }
     return [...ids];
-  }, [entryConditionRecognition.data]);
+  }, [entryRecognitions]);
 
   /**
    * 预设槽的完成度（并入「定义完成度」概览）。
@@ -879,14 +1087,77 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
       }
       return { key, label, domId, state: "SET", hint: `已选 ${selection.presetId}` };
     };
-    const entrySlots = vocabulary?.entryConditionSlots ?? [];
-    const entryRecognitions = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
+    const entrySlots = entryAuthoringSlots;
     const activeEntry = entryRecognitions.find((item) => item.optionId !== null && item.optionId !== "off");
     const activeEntryOption = activeEntry === undefined
       ? null
       : entrySlots.find((slot) => slot.slotId === activeEntry.slotId)?.options.find(
           (option) => option.optionId === activeEntry.optionId,
         ) ?? null;
+
+    const signalRecipeSlot = selectionAuthoringSlots.find((slot) => slot.slotId === "SIGNAL_RECIPE") ?? null;
+    const signalRecipeRecognition = selectionRecognitions.find((item) => item.slotId === "SIGNAL_RECIPE") ?? null;
+    const signalRecipeOption = signalRecipeRecognition === null
+      ? null
+      : signalRecipeSlot?.options.find((option) => option.optionId === signalRecipeRecognition.optionId) ?? null;
+    const recipeSegment: DefinitionProgressPresetSegment = signalRecipeSlot === null
+      ? {
+          key: "SELECTION",
+          label: "信号配方",
+          domId: "preset-selection",
+          state: "MISSING",
+          hint: "服务端未下发 SIGNAL_RECIPE 槽；当前没有可选的信号配方。",
+        }
+      : signalRecipeRecognition === null || signalRecipeRecognition.optionId === "off"
+        ? {
+            key: "SELECTION",
+            label: "信号配方",
+            domId: "preset-selection",
+            state: "MISSING",
+            hint: "未选择信号配方（必填：缺它会退回默认配方的选股逻辑）",
+          }
+        : signalRecipeRecognition.optionId === null
+          ? {
+              key: "SELECTION",
+              label: "信号配方",
+              domId: "preset-selection",
+              state: "INVALID",
+              hint: "本表单不识别（保持原样）；不会用默认配方伪装成已选。",
+            }
+          : {
+              key: "SELECTION",
+              label: "信号配方",
+              domId: "preset-selection",
+              state: "SET",
+              hint: `已选 ${signalRecipeOption?.displayName ?? signalRecipeRecognition.optionId}`,
+            };
+
+    const buildAuthoringGroupSegment = (
+      key: string,
+      label: string,
+      domId: string,
+      slots: readonly AuthoringSlotDto[],
+      recognitions: readonly AuthoringSlotRecognitionBaseDto[],
+      emptyHint: string,
+    ): DefinitionProgressPresetSegment => {
+      const active = recognitions.find((item) => item.optionId !== null && item.optionId !== "off");
+      if (active !== undefined) {
+        const option = slots.find((slot) => slot.slotId === active.slotId)
+          ?.options.find((candidate) => candidate.optionId === active.optionId);
+        return {
+          key,
+          label,
+          domId,
+          state: "SET",
+          hint: `已选 ${option?.displayName ?? active.optionId ?? label}`,
+        };
+      }
+      if (recognitions.some((item) => item.optionId === null)) {
+        return { key, label, domId, state: "INVALID", hint: "现有配置不由本表单识别，保持原样" };
+      }
+      return { key, label, domId, state: "OPTIONAL", hint: emptyHint };
+    };
+
     const entryConditionSegment: DefinitionProgressPresetSegment = activeEntry === undefined
       ? {
           key: "ENTRY_CONDITION",
@@ -904,19 +1175,28 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
           state: "SET",
           hint: `已选 ${activeEntryOption?.displayName ?? activeEntry.optionId ?? "入场方案"}`,
         };
+
     return [
-      build(recipeSelection, recipeMaterialized, "RECIPE", "信号配方", "preset-recipe", true),
+      recipeSegment,
       entryConditionSegment,
       build(exitPolicySelection, exitPolicyMaterialized, "EXIT_POLICY", "退出政策", "preset-exit-policy", false),
-      build(positionSelection, positionMaterialized, "POSITION", "仓位与持仓数", "preset-position", false),
-      build(costSelection, costMaterialized, "COST", "成本与成交", "preset-cost", false),
+      buildAuthoringGroupSegment(
+        "POSITION", "仓位与持仓数", "preset-position",
+        positionAuthoringSlots, positionRecognitions,
+        "未设置（可选：留空 = 使用定义里的仓位字段）",
+      ),
+      buildAuthoringGroupSegment(
+        "COST", "成本与成交", "preset-cost",
+        costAuthoringSlots, costRecognitions,
+        "未设置（可选：留空 = 使用定义里的成本与成交字段）",
+      ),
     ];
   }, [
-    recipeSelection, recipeMaterialized,
     exitPolicySelection, exitPolicyMaterialized,
-    positionSelection, positionMaterialized,
-    costSelection, costMaterialized,
-    vocabulary, entryConditionRecognition.data,
+    selectionAuthoringSlots, selectionRecognitions,
+    entryAuthoringSlots, entryRecognitions,
+    positionAuthoringSlots, positionRecognitions,
+    costAuthoringSlots, costRecognitions,
   ]);
 
   /** 本稿用过的预设 + **预设版本** + 参数（SCOPE-002 §1.5 · 裁定 Q5：只进审计，不进定义指纹）。 */
@@ -941,12 +1221,47 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         });
       }
     };
-    scan(recipeSelection, "RECIPE", "信号配方");
     scan(exitPolicySelection, "EXIT_POLICY", "退出政策");
-    scan(positionSelection, "POSITION", "仓位与持仓数");
-    scan(costSelection, "COST", "成本与成交");
+
+    // 新版 SELECTION：方案与参数都从通用 recognition + vocabulary 派生，不再依赖旧 RECIPE 组件。
+    for (const slot of selectionAuthoringSlots) {
+      const before = baselineSelectionRecognitions.find((item) => item.slotId === slot.slotId);
+      const after = selectionRecognitions.find((item) => item.slotId === slot.slotId);
+      if (before === undefined || after === undefined) continue;
+      const nameOf = (optionId: string | null) =>
+        optionId === null || optionId === "off"
+          ? (optionId === "off" ? "未选择" : "本表单不识别")
+          : (slot.options.find((option) => option.optionId === optionId)?.displayName ?? optionId);
+      if (before.optionId !== after.optionId) {
+        out.push({
+          slotKey: `SELECTION_${slot.slotId}`,
+          slotLabel: `选股·${slot.label}`,
+          code: "换方案",
+          from: nameOf(before.optionId),
+          to: nameOf(after.optionId),
+        });
+        continue;
+      }
+      const option = slot.options.find((item) => item.optionId === after.optionId);
+      if (option === undefined) continue;
+      for (const parameter of option.parameters) {
+        const from = before.parameters[parameter.code] ?? parameter.defaultValue;
+        const to = after.parameters[parameter.code] ?? parameter.defaultValue;
+        if (from === to) continue;
+        out.push({
+          slotKey: `SELECTION_${slot.slotId}`,
+          slotLabel: `选股·${slot.label}`,
+          code: parameter.label,
+          from: String(from),
+          to: String(to),
+        });
+      }
+    }
     return out;
-  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+  }, [
+    exitPolicySelection, vocabulary,
+    selectionAuthoringSlots, selectionRecognitions, baselineSelectionRecognitions,
+  ]);
 
   const presetRefs = useMemo(() => {
     const refs: { slot: AuthoringSlotValue; presetId: string; presetVersion: string; parameters: Record<string, PresetParameterValue> }[] = [];
@@ -960,12 +1275,20 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         parameters: { ...selection.parameters },
       });
     };
-    add(recipeSelection, "RECIPE");
     add(exitPolicySelection, "EXIT_POLICY");
-    add(positionSelection, "POSITION");
-    add(costSelection, "COST");
+
+    // SELECTION 的旧审计字段仍以 RECIPE 为兼容槽位；只在 SIGNAL_RECIPE 已识别时记录。
+    const signalRecipeRecognition = selectionRecognitions.find((item) => item.slotId === "SIGNAL_RECIPE");
+    if (signalRecipeRecognition !== undefined && signalRecipeRecognition.optionId !== null && signalRecipeRecognition.optionId !== "off") {
+      refs.push({
+        slot: "RECIPE",
+        presetId: signalRecipeRecognition.optionId,
+        presetVersion: "slot",
+        parameters: { ...signalRecipeRecognition.parameters },
+      });
+    }
     return refs;
-  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+  }, [exitPolicySelection, vocabulary, selectionRecognitions]);
 
   /**
    * ⑤「可调参数」的派生来源（P3 / C-1）：①–④ **已选方案**各自暴露的参数。
@@ -974,46 +1297,62 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
    *    （草稿）。加一个预设参数，候选自动多一条。
    */
   const searchParameterSources = useMemo<readonly SelectedPresetParameters[]>(() => {
-    const pick = (selection: PresetSelection | null, blockLabel: string): SelectedPresetParameters | null => {
-      if (selection === null) return null;
-      const preset = (vocabulary?.presets ?? []).find(item => item.presetId === selection.presetId);
-      if (preset === undefined || preset.parameters.length === 0) return null;
-      return { blockLabel, presetDisplayName: preset.displayName, parameters: preset.parameters };
-    };
-    const sources = [
-      pick(recipeSelection, "① 选股"),
-      pick(exitPolicySelection, "② 出场"),
-      pick(positionSelection, "③ 仓位"),
-      pick(costSelection, "④ 成本与成交"),
-    ].filter((item): item is SelectedPresetParameters => item !== null);
-
     /**
-     * 入场槽的服务端参数也进入 ⑤ 候选来源，但只暴露草稿里
-     * `parameterRole === "TUNABLE"` 的行；FIXED 参数不会出现在搜索空间。
+     * 参数声明唯一真相仍是 `definition.parameters[]`。
+     *
+     * 只有已经由上方 AuthoringSlot 声明为 TUNABLE 的 slot 参数才进入 ⑤ 候选；
+     * FIXED / DERIVED / 未声明参数不会出现，也不会被前端偷偷提升为 TUNABLE。
      */
     const declaredRoleByCode = new Map(
       (visibleDefinitionDrafts?.parameters ?? []).map((row) => [row.code.trim(), row.parameterRole] as const),
     );
-    const entryRecognitions = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
-    for (const recognition of entryRecognitions) {
-      if (recognition.optionId === null || recognition.optionId === "off") continue;
-      const slot = (vocabulary?.entryConditionSlots ?? []).find((item) => item.slotId === recognition.slotId);
-      const option = slot?.options.find((item) => item.optionId === recognition.optionId);
-      if (option === undefined) continue;
-      const tunableParameters = option.parameters.filter(
-        (parameter) => declaredRoleByCode.get(parameter.code.trim()) === "TUNABLE",
-      );
-      if (tunableParameters.length === 0) continue;
-      sources.push({
-        blockLabel: "② 买入条件",
-        presetDisplayName: option.displayName,
-        parameters: tunableParameters,
-      });
-    }
+    const sources: SelectedPresetParameters[] = [];
+
+    const addAuthoringSource = (
+      blockLabel: string,
+      slots: readonly {
+        readonly slotId: string;
+        readonly options: readonly {
+          readonly optionId: string;
+          readonly displayName: string;
+          readonly parameters: readonly PresetParameter[];
+        }[];
+      }[],
+      recognitions: readonly {
+        readonly slotId: string;
+        readonly optionId: string | null;
+      }[],
+    ) => {
+      for (const recognition of recognitions) {
+        if (recognition.optionId === null || recognition.optionId === "off") continue;
+        const slot = slots.find((item) => item.slotId === recognition.slotId);
+        const option = slot?.options.find((item) => item.optionId === recognition.optionId);
+        if (option === undefined) continue;
+        const tunableParameters = option.parameters.filter(
+          (parameter) => declaredRoleByCode.get(parameter.code.trim()) === "TUNABLE",
+        );
+        if (tunableParameters.length === 0) continue;
+        sources.push({
+          blockLabel,
+          presetDisplayName: option.displayName,
+          parameters: tunableParameters,
+        });
+      }
+    };
+
+    addAuthoringSource("① 选股", selectionAuthoringSlots, selectionRecognitions);
+    addAuthoringSource("② 买入条件", entryAuthoringSlots, entryRecognitions);
+    addAuthoringSource("③ 仓位", positionAuthoringSlots, positionRecognitions);
+    addAuthoringSource("④ 成本与成交", costAuthoringSlots, costRecognitions);
+    addAuthoringSource("退出政策", exitAuthoringSlots, exitRecognitions);
     return sources;
   }, [
-    recipeSelection, exitPolicySelection, positionSelection, costSelection,
-    vocabulary, visibleDefinitionDrafts, entryConditionRecognition.data,
+    visibleDefinitionDrafts,
+    selectionAuthoringSlots, selectionRecognitions,
+    entryAuthoringSlots, entryRecognitions,
+    positionAuthoringSlots, positionRecognitions,
+    costAuthoringSlots, costRecognitions,
+    exitAuthoringSlots, exitRecognitions,
   ]);
 
   /**
@@ -1035,11 +1374,8 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
           }).length;
       recordPresetUsage(slotKey, selection.presetId, changed);
     };
-    scan("RECIPE", recipeSelection);
     scan("EXIT_POLICY", exitPolicySelection);
-    scan("POSITION", positionSelection);
-    scan("COST", costSelection);
-  }, [recipeSelection, exitPolicySelection, positionSelection, costSelection, vocabulary]);
+  }, [exitPolicySelection, vocabulary]);
 
   /**
    * 当前文档里的**退出政策**（即 `exit.rules[*].policy` 里那一条）。
@@ -1092,18 +1428,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     return null;
   }, [savedDocument]);
 
-  const baselineExitSlotRecognition = trpc.strategyDomain.authoring.recognizeExitPolicySlots.useQuery(
-    { policy: baselineExitPolicy ?? {} },
-    { enabled: baselineExitPolicy !== null },
-  );
-
-
-
-
-  const exitSlotRecognition = trpc.strategyDomain.authoring.recognizeExitPolicySlots.useQuery(
-    { policy: effectiveExitPolicy ?? {} },
-    { enabled: effectiveExitPolicy !== null },
-  );
+  // 退出 / 入场识别统一走上面的通用 recognizeAuthoringSlots（按 group 过滤）。
 
   /** P4：起点行选了某个推荐组合 ⇒ 走既有整包物化路径（与原来那张卡完全相同）。 */
   const onExitStartPresetChange = (presetId: string) => {
@@ -1127,59 +1452,18 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     applyExitPolicyRule(envelope, base);
   };
 
-  /**
-   * P4：**退出槽**的逐槽差异（相对打开的那个版本）。
-   *
-   * 与上面的预设参数比对同源：都以"打开时的那一份"为基准，都只报**改了哪一项**。
-   * 换方案报一条「换方案：A → B」；只调参数则逐参数报一条。
-   */
-  const changedExitSlots = useMemo<readonly DefinitionTrustChangedParam[]>(() => {
-    const base = baselineExitSlotRecognition.data?.slots as readonly ExitPolicySlotRecognition[] | undefined;
-    const current = exitSlotRecognition.data?.slots as readonly ExitPolicySlotRecognition[] | undefined;
-    if (base === undefined || current === undefined) return [];
+  const changedSlotsForGroup = (
+    prefix: string,
+    labelPrefix: string,
+    slots: readonly AuthoringSlotDto[],
+    baseline: readonly AuthoringSlotRecognitionBaseDto[],
+    current: readonly AuthoringSlotRecognitionBaseDto[],
+    requireBoth: boolean,
+  ): readonly DefinitionTrustChangedParam[] => {
+    if (requireBoth && (baseline.length === 0 || current.length === 0)) return [];
     const out: DefinitionTrustChangedParam[] = [];
-    for (const slot of vocabulary?.exitPolicySlots ?? []) {
-      const before = base.find(item => item.slotId === slot.slotId);
-      const after = current.find(item => item.slotId === slot.slotId);
-      if (before === undefined || after === undefined) continue;
-      const nameOf = (optionId: string | null) =>
-        optionId === null
-          ? "本表单不识别"
-          : (slot.options.find(option => option.optionId === optionId)?.displayName ?? optionId);
-      if (before.optionId !== after.optionId) {
-        out.push({
-          slotKey: `EXIT_${slot.slotId}`, slotLabel: `出场·${slot.label}`, code: "换方案",
-          from: nameOf(before.optionId), to: nameOf(after.optionId),
-        });
-        continue;
-      }
-      const option = slot.options.find(item => item.optionId === after.optionId);
-      if (option === undefined) continue;
-      for (const parameter of option.parameters) {
-        const from = before.parameters[parameter.code] ?? parameter.defaultValue;
-        const to = after.parameters[parameter.code] ?? parameter.defaultValue;
-        if (from === to) continue;
-        out.push({
-          slotKey: `EXIT_${slot.slotId}`, slotLabel: `出场·${slot.label}`, code: parameter.label,
-          from: String(from), to: String(to),
-        });
-      }
-    }
-    return out;
-  }, [baselineExitSlotRecognition.data, exitSlotRecognition.data, vocabulary]);
-
-  /**
-   * ENTRY_CONDITION —— 入场槽相对已落库版本的逐槽差异。
-   *
-   * 与服务端 recognition 同源；认不出时只显示“本表单不识别”，不猜相近方案。
-   */
-  const changedEntryConditionSlots = useMemo<readonly DefinitionTrustChangedParam[]>(() => {
-    const base = (baselineEntryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
-    const current = (entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
-    if (base.length === 0 || current.length === 0) return [];
-    const out: DefinitionTrustChangedParam[] = [];
-    for (const slot of vocabulary?.entryConditionSlots ?? []) {
-      const before = base.find((item) => item.slotId === slot.slotId);
+    for (const slot of slots) {
+      const before = baseline.find((item) => item.slotId === slot.slotId);
       const after = current.find((item) => item.slotId === slot.slotId);
       if (before === undefined || after === undefined) continue;
       const nameOf = (optionId: string | null) =>
@@ -1188,8 +1472,8 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
           : (slot.options.find((option) => option.optionId === optionId)?.displayName ?? optionId);
       if (before.optionId !== after.optionId) {
         out.push({
-          slotKey: `ENTRY_${slot.slotId}`,
-          slotLabel: `入场·${slot.label}`,
+          slotKey: `${prefix}_${slot.slotId}`,
+          slotLabel: `${labelPrefix}·${slot.label}`,
           code: "换方案",
           from: nameOf(before.optionId),
           to: nameOf(after.optionId),
@@ -1203,8 +1487,8 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         const to = after.parameters[parameter.code] ?? parameter.defaultValue;
         if (from === to) continue;
         out.push({
-          slotKey: `ENTRY_${slot.slotId}`,
-          slotLabel: `入场·${slot.label}`,
+          slotKey: `${prefix}_${slot.slotId}`,
+          slotLabel: `${labelPrefix}·${slot.label}`,
           code: parameter.label,
           from: String(from),
           to: String(to),
@@ -1212,69 +1496,91 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
       }
     }
     return out;
-  }, [baselineEntryConditionRecognition.data, entryConditionRecognition.data, vocabulary]);
+  };
 
-  /** 预设参数 + 退出槽 + 入场槽差异的**合并**（信任层只认这一份）。 */
+  /**
+   * EXIT_POLICY / ENTRY_CONDITION / POSITION / COST 的逐槽差异。
+   *
+   * 与服务端 recognition 同源；认不出时只显示“本表单不识别”，不猜相近方案。
+   */
+  const changedExitSlots = useMemo<readonly DefinitionTrustChangedParam[]>(
+    () => changedSlotsForGroup("EXIT", "出场", exitAuthoringSlots, baselineExitRecognitions, exitRecognitions, false),
+    [baselineExitRecognitions, exitRecognitions, exitAuthoringSlots],
+  );
+
+  const changedEntryConditionSlots = useMemo<readonly DefinitionTrustChangedParam[]>(
+    () => changedSlotsForGroup("ENTRY", "入场", entryAuthoringSlots, baselineEntryRecognitions, entryRecognitions, true),
+    [baselineEntryRecognitions, entryRecognitions, entryAuthoringSlots],
+  );
+
+  const changedPositionSlots = useMemo<readonly DefinitionTrustChangedParam[]>(
+    () => changedSlotsForGroup("POSITION", "仓位", positionAuthoringSlots, baselinePositionRecognitions, positionRecognitions, true),
+    [baselinePositionRecognitions, positionRecognitions, positionAuthoringSlots],
+  );
+
+  const changedCostSlots = useMemo<readonly DefinitionTrustChangedParam[]>(
+    () => changedSlotsForGroup("COST", "成本与成交", costAuthoringSlots, baselineCostRecognitions, costRecognitions, true),
+    [baselineCostRecognitions, costRecognitions, costAuthoringSlots],
+  );
+
+  /** 预设参数 + 各 AuthoringSlot group 差异的**合并**（信任层只认这一份）。 */
   const changedDefinitionParams = useMemo<readonly DefinitionTrustChangedParam[]>(
-    () => [...changedPresetParams, ...changedExitSlots, ...changedEntryConditionSlots],
-    [changedPresetParams, changedExitSlots, changedEntryConditionSlots],
+    () => [
+      ...changedPresetParams,
+      ...changedExitSlots,
+      ...changedEntryConditionSlots,
+      ...changedPositionSlots,
+      ...changedCostSlots,
+    ],
+    [
+      changedPresetParams,
+      changedExitSlots,
+      changedEntryConditionSlots,
+      changedPositionSlots,
+      changedCostSlots,
+    ],
   );
 
   /** 三态：未落库 ⇒ 全新；有参数改动或任何编辑 ⇒ 变体；否则一致。 */
   const definitionTrustKind: DefinitionTrustKind =
     loadedTarget === null ? "UNVERIFIED" : (changedDefinitionParams.length > 0 || dirty ? "VARIANT" : "MATCH");
 
-  const applyExitSlot = trpc.strategyDomain.authoring.applyExitPolicySlot.useMutation();
-  const applyEntryConditionSlot = trpc.strategyDomain.authoring.applyEntryConditionSlot.useMutation();
+  const applyAuthoringSlot = trpc.strategyDomain.authoring.applyAuthoringSlot.useMutation();
   const authoringUtils = trpc.useUtils();
 
-  /**
-   * 改一个退出槽：把**当前 policy** 与「选哪个方案 + 填哪些参数」交给服务端，
-   * 由它认领 + 物化 + 只覆盖该槽的键，再把结果写回 `exit.rules`。
-   * 前端**不拼 policy**（SCOPE-002 §0.2 P4）。
-   */
-  const onExitSlotApply = (input: {
-    slotId: string;
-    optionId: string;
-    parameters: Readonly<Record<string, ExitSlotParameterValue>>;
-  }) => {
-    const envelope = vocabulary?.exitPolicyRuleEnvelope;
-    if (envelope === undefined || effectiveExitPolicy === null) return;
-    setDirty(true);
-    applyExitSlot.mutate(
-      {
-        policy: effectiveExitPolicy,
-        slotId: input.slotId as AuthoringExitSlotId,
-        optionId: input.optionId,
-        parameters: { ...input.parameters },
-      },
-      {
-        onSuccess: result => {
-          if (result.issues.length > 0) {
-            toast.error("这一槽没改成", { description: result.issues.join("；") });
-            return;
-          }
-          applyExitPolicyRule(envelope, result.policy);
-        },
-      },
-    );
-  };
+  /** 在通用词表里按 (group, slotId, optionId) 找 option（仅用于用量计数）。 */
+  const authoringOptionOf = (
+    group: AuthoringGroupKey,
+    slotId: string,
+    optionId: string,
+  ) => authoringSlotGroups
+    .filter(item => item.group === group)
+    .flatMap(item => item.slots)
+    .find(slot => slot.slotId === slotId)
+    ?.options.find(option => option.optionId === optionId) ?? null;
 
   /**
-   * ENTRY_CONDITION —— 前端只提交槽选择与参数，由服务端返回完整 canonical
-   * conditions / parameters；成功后原子替换草稿的两个数组。
+   * EXIT_POLICY / ENTRY_CONDITION 的统一逐槽应用。
    *
-   * 失败 / issues 非空时不写草稿，也不提前 setDirty。
+   * 前端只提交「通用 target + slotId + optionId + 参数」；由服务端
+   * `applyAuthoringSlot` 认领、物化、只覆盖该槽拥有的片段。成功后用返回的**完整片段**
+   * 原子替换草稿（definition + executionAssumptions），并把 recipe 写回 `vm.extra`
+   * —— 前端不自行合并任何一块语义（SCOPE-002 §0.2 P4）。
+   *
+   * 失败 / `issues` 非空时不写草稿、不 setDirty。
    */
-  const onEntryConditionSlotApply = (input: {
-    slotId: string;
-    optionId: string;
-    parameters: Readonly<Record<string, EntryConditionSlotParameterValue>>;
-  }) => {
-    if (currentCanonicalDefinition === null) return;
-    applyEntryConditionSlot.mutate(
+  const applyAuthoringSelection = (
+    group: AuthoringGroupKey,
+    input: {
+      slotId: string;
+      optionId: string;
+      parameters: Readonly<Record<string, number | boolean | string>>;
+    },
+  ) => {
+    if (currentAuthoringTarget === null || applyAuthoringSlot.isPending) return;
+    applyAuthoringSlot.mutate(
       {
-        definition: currentCanonicalDefinition,
+        target: currentAuthoringTarget,
         slotId: input.slotId,
         optionId: input.optionId,
         parameters: { ...input.parameters },
@@ -1282,30 +1588,88 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
       {
         onSuccess: (result) => {
           if (result.issues.length > 0) {
-            toast.error("入场规则槽没改成", { description: result.issues.join("；") });
+            const title = group === "SELECTION"
+              ? "选股规则槽没改成"
+              : group === "EXIT_POLICY"
+                ? "这一槽没改成"
+              : group === "ENTRY_CONDITION"
+                ? "入场规则槽没改成"
+                : group === "POSITION"
+                  ? "仓位规则槽没改成"
+                  : "成本与成交规则槽没改成";
+            toast.error(title, {
+              description: result.issues.join("；"),
+            });
             return;
           }
-          const option = (vocabulary?.entryConditionSlots ?? [])
-            .find((slot) => slot.slotId === input.slotId)
-            ?.options.find((item) => item.optionId === input.optionId);
-          const changedCount = option === undefined
+          setDefinitionState(previous => previous.kind !== "structured"
+            ? previous
+            : applyAuthoringSlotResult(previous.drafts, result));
+          // 通用协议对 recipe 也保持兼容：apply 返回的完整 recipe 写回 vm.extra。
+          const nextRecipe = result.recipe ?? null;
+          setVm(previous => {
+            const extra = { ...previous.extra };
+            if (nextRecipe === null) delete extra.recipe;
+            else extra.recipe = nextRecipe;
+            return { ...previous, extra };
+          });
+          const option = authoringOptionOf(group, input.slotId, input.optionId);
+          const changedCount = option === null
             ? 0
-            : option.parameters.filter((parameter) =>
+            : option.parameters.filter(parameter =>
                 (input.parameters[parameter.code] ?? parameter.defaultValue) !== parameter.defaultValue,
               ).length;
-          setDefinitionState((previous) => previous.kind !== "structured"
-            ? previous
-            : { kind: "structured", drafts: applyEntryConditionSlotResult(previous.drafts, result) });
-          recordPresetUsage(`ENTRY_CONDITION:${input.slotId}`, input.optionId, changedCount);
+          recordPresetUsage(`${group}:${input.slotId}`, input.optionId, changedCount);
           setDirty(true);
-          void authoringUtils.strategyDomain.authoring.recognizeEntryConditionSlots.invalidate();
+          void authoringUtils.strategyDomain.authoring.recognizeAuthoringSlots.invalidate();
         },
         onError: (error) => {
-          toast.error("入场规则槽没改成", { description: error.message });
+          const title = group === "SELECTION"
+            ? "选股规则槽没改成"
+            : group === "EXIT_POLICY"
+              ? "这一槽没改成"
+            : group === "ENTRY_CONDITION"
+              ? "入场规则槽没改成"
+              : group === "POSITION"
+                ? "仓位规则槽没改成"
+                : "成本与成交规则槽没改成";
+          toast.error(title, {
+            description: error.message,
+          });
         },
       },
     );
   };
+
+  const onSelectionSlotApply = (input: {
+    slotId: string;
+    optionId: string;
+    parameters: Readonly<Record<string, number | boolean | string>>;
+  }) => applyAuthoringSelection("SELECTION", input);
+
+  const onExitSlotApply = (input: {
+    slotId: string;
+    optionId: string;
+    parameters: Readonly<Record<string, ExitSlotParameterValue>>;
+  }) => applyAuthoringSelection("EXIT_POLICY", input);
+
+  const onEntryConditionSlotApply = (input: {
+    slotId: string;
+    optionId: string;
+    parameters: Readonly<Record<string, EntryConditionSlotParameterValue>>;
+  }) => applyAuthoringSelection("ENTRY_CONDITION", input);
+
+  const onPositionSlotApply = (input: {
+    slotId: string;
+    optionId: string;
+    parameters: Readonly<Record<string, number | boolean | string>>;
+  }) => applyAuthoringSelection("POSITION", input);
+
+  const onCostSlotApply = (input: {
+    slotId: string;
+    optionId: string;
+    parameters: Readonly<Record<string, number | boolean | string>>;
+  }) => applyAuthoringSelection("COST", input);
 
   const goToVersion = (version: string) =>
     setLocation(
@@ -1339,36 +1703,6 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     setDefinitionState({ kind: "structured", drafts: next });
   };
 
-  /** RECIPE 槽：物化结果写进**文档级** `recipe`（经 `vm.extra` 无损透传）。 */
-  const onRecipeSelectionChange = (next: PresetSelection | null) => {
-    setRecipeSelection(next);
-    setDirty(true);
-    if (next === null) {
-      setRecipeMaterialized(null);
-      setVm(previous => {
-        const extra = { ...previous.extra };
-        delete extra.recipe;
-        return { ...previous, extra };
-      });
-      return;
-    }
-    materializePreset.mutate(
-      { slot: next.slot as AuthoringSlotValue, presetId: next.presetId, parameters: { ...next.parameters } },
-      {
-        onSuccess: result => {
-          const materialized = result as PresetMaterializeResult;
-          setRecipeMaterialized(materialized);
-          setVm(previous => {
-            const extra = { ...previous.extra };
-            if (materialized.issues.length === 0) extra.recipe = materialized.payload;
-            else delete extra.recipe;
-            return { ...previous, extra };
-          });
-        },
-      }
-    );
-  };
-
   /**
    * EXIT_POLICY 槽：把服务端物化出的 policy 塞进 `definition.exit.rules` 的**统一规则外壳**。
    *
@@ -1397,47 +1731,6 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
     );
   };
 
-  /**
-   * ③ 仓位 / ④ 成本与成交：**FIELD_PATCH** 预设。
-   *
-   * 选中 ⇒ 服务端物化出一张「草稿字段补丁」⇒ 这里用 `applyDefinitionFieldPatch` 把值填进草稿。
-   * 与 ①② 的唯一区别：payload **不进文档**，只填本来就由表单编辑的那些字段
-   * （草稿仍是唯一真相，C-2 不破）。
-   */
-  const onFieldPatchSelectionChange = (
-    slot: "POSITION" | "COST",
-    next: PresetSelection | null,
-    setSelection: (value: PresetSelection | null) => void,
-    setMaterialized: (value: PresetMaterializeResult | null) => void,
-  ) => {
-    setSelection(next);
-    setDirty(true);
-    if (next === null) {
-      setMaterialized(null);
-      return;
-    }
-    materializePreset.mutate(
-      { slot, presetId: next.presetId, parameters: { ...next.parameters } },
-      {
-        onSuccess: result => {
-          const materialized = result as PresetMaterializeResult;
-          setMaterialized(materialized);
-          if (materialized.issues.length > 0) return;
-          const patch = materialized.payload as DefinitionFieldPatch;
-          setDefinitionState(previous => previous.kind !== "structured"
-            ? previous
-            : { kind: "structured", drafts: applyDefinitionFieldPatch(previous.drafts, patch) });
-        },
-      }
-    );
-  };
-
-  const onPositionSelectionChange = (next: PresetSelection | null) =>
-    onFieldPatchSelectionChange("POSITION", next, setPositionSelection, setPositionMaterialized);
-
-  const onCostSelectionChange = (next: PresetSelection | null) =>
-    onFieldPatchSelectionChange("COST", next, setCostSelection, setCostMaterialized);
-
   /** 变体态的一键还原：把预设参数恢复为各自默认值（不动其它编辑）。 */
   const restorePresetDefaults = () => {
     const reset = (selection: PresetSelection | null, apply: (next: PresetSelection) => void) => {
@@ -1450,10 +1743,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         parameters: Object.fromEntries(preset.parameters.map(item => [item.code, item.defaultValue])),
       });
     };
-    reset(recipeSelection, onRecipeSelectionChange);
     reset(exitPolicySelection, onExitPolicySelectionChange);
-    reset(positionSelection, onPositionSelectionChange);
-    reset(costSelection, onCostSelectionChange);
     /**
      * P4：退出槽的"还原" = 把整份 policy 换回**打开的那个版本**的那一份。
      * 槽是逐字段拼出来的，逐槽回默认值拼回去未必等于原政策（例如原政策有本表单不表达的形状）
@@ -1466,16 +1756,26 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
      * ENTRY_CONDITION：仅当基准版本能被服务端识别时，才逐槽还原；
      * 认不出（`optionId: null`）就保持原样，不做危险猜测。
      */
-    const baselineEntrySlots = (baselineEntryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[];
-    for (const slot of vocabulary?.entryConditionSlots ?? []) {
-      const before = baselineEntrySlots.find((item) => item.slotId === slot.slotId);
-      if (before?.optionId === null || before?.optionId === undefined) continue;
-      onEntryConditionSlotApply({
-        slotId: slot.slotId,
-        optionId: before.optionId,
-        parameters: before.parameters,
-      });
-    }
+    const restoreAuthoringGroup = (
+      slots: readonly AuthoringSlotDto[],
+      baseline: readonly AuthoringSlotRecognitionBaseDto[],
+      apply: (input: {
+        slotId: string;
+        optionId: string;
+        parameters: Readonly<Record<string, number | boolean | string>>;
+      }) => void,
+    ) => {
+      for (const slot of slots) {
+        const before = baseline.find((item) => item.slotId === slot.slotId);
+        if (before?.optionId === null || before?.optionId === undefined) continue;
+        apply({ slotId: slot.slotId, optionId: before.optionId, parameters: before.parameters });
+      }
+    };
+
+    restoreAuthoringGroup(selectionAuthoringSlots, baselineSelectionRecognitions, onSelectionSlotApply);
+    restoreAuthoringGroup(entryAuthoringSlots, baselineEntryRecognitions, onEntryConditionSlotApply);
+    restoreAuthoringGroup(positionAuthoringSlots, baselinePositionRecognitions, onPositionSlotApply);
+    restoreAuthoringGroup(costAuthoringSlots, baselineCostRecognitions, onCostSlotApply);
   };
 
   const applyExitPolicyRule = (envelope: Record<string, unknown>, policy: unknown) => {
@@ -1732,28 +2032,34 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
                 presetSegments={definitionPresetSegments}
                 searchParameterSources={searchParameterSources}
                 managedConditionIds={entryConditionManagedConditionIds}
+                hiddenFieldPaths={managedDefinitionPaths}
+                hideLegacySelectionFields={selectionAuthoringSlots.length > 0}
+                hideLegacyPositionFields={positionAuthoringSlots.length > 0}
+                hideLegacyCostFields={costAuthoringSlots.length > 0}
                 presetBlocks={
                   vocabulary === null ? undefined : {
                     entryCondition: (
                       <EntryConditionSlotEditor
                         domId="preset-entry-condition"
-                        slots={vocabulary.entryConditionSlots ?? []}
-                        recognitions={(entryConditionRecognition.data?.slots ?? []) as readonly EntryConditionSlotRecognition[]}
-                        disabled={applyEntryConditionSlot.isPending}
-                        busy={entryConditionRecognition.isFetching || applyEntryConditionSlot.isPending}
+                        slots={entryAuthoringSlots}
+                        recognitions={entryRecognitions}
+                        disabled={applyAuthoringSlot.isPending}
+                        busy={authoringRecognition.isFetching || applyAuthoringSlot.isPending}
                         onApply={onEntryConditionSlotApply}
                       />
                     ),
-                    recipe: (
-                      <PresetEditor
-                        domId="preset-recipe"
-                        title="信号配方（RECIPE）"
-                        hint="决定买什么样的股（选股规则）"
-                        presets={(vocabulary.presets ?? []).filter(item => item.slot === "RECIPE")}
-                        value={recipeSelection}
-                        onChange={onRecipeSelectionChange}
-                        materialized={recipeMaterialized}
-                        materializing={materializePreset.isPending}
+                    selection: (
+                      <AuthoringSlotGroupEditor
+                        domId="preset-selection"
+                        title="选股规则（SELECTION）"
+                        group="SELECTION"
+                        groupLabel="选股"
+                        hint="信号配方 / 事件 / 观察窗口 / 触发时点；方案与参数由服务端物化"
+                        slots={selectionAuthoringSlots}
+                        recognitions={selectionRecognitions}
+                        disabled={applyAuthoringSlot.isPending}
+                        busy={authoringRecognition.isFetching || applyAuthoringSlot.isPending}
+                        onApply={onSelectionSlotApply}
                       />
                     ),
                     exit: (
@@ -1771,8 +2077,8 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
                               </p>
                             )}
                             <ExitPolicySlotEditor
-                              slots={vocabulary.exitPolicySlots ?? []}
-                              recognitions={(exitSlotRecognition.data?.slots ?? []) as readonly ExitPolicySlotRecognition[]}
+                              slots={exitAuthoringSlots}
+                              recognitions={exitRecognitions}
                               policy={effectiveExitPolicy}
                               domId="preset-exit-policy"
                               startOptions={(vocabulary.presets ?? [])
@@ -1782,8 +2088,8 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
                               onStartChange={onExitStartPresetChange}
                               onResetToBase={onExitResetToBase}
                               baseLabel={vocabulary.exitPolicyBaseLabel}
-                              disabled={applyExitSlot.isPending}
-                              busy={exitSlotRecognition.isFetching || applyExitSlot.isPending}
+                              disabled={applyAuthoringSlot.isPending}
+                              busy={authoringRecognition.isFetching || applyAuthoringSlot.isPending}
                               onApply={onExitSlotApply}
                             />
                           </>
@@ -1791,27 +2097,31 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
                       </div>
                     ),
                     position: (
-                      <PresetEditor
+                      <AuthoringSlotGroupEditor
                         domId="preset-position"
                         title="仓位与持仓数（POSITION）"
-                        hint="每笔买多少 / 最多同时持有几只 —— 选中后填进第 ⑤ 段的字段"
-                        presets={(vocabulary.presets ?? []).filter(item => item.slot === "POSITION")}
-                        value={positionSelection}
-                        onChange={onPositionSelectionChange}
-                        materialized={positionMaterialized}
-                        materializing={materializePreset.isPending}
+                        group="POSITION"
+                        groupLabel="仓位"
+                        hint="每笔买多少 / 最多同时持有几只；方案与参数由服务端物化"
+                        slots={positionAuthoringSlots}
+                        recognitions={positionRecognitions}
+                        disabled={applyAuthoringSlot.isPending}
+                        busy={authoringRecognition.isFetching || applyAuthoringSlot.isPending}
+                        onApply={onPositionSlotApply}
                       />
                     ),
                     cost: (
-                      <PresetEditor
+                      <AuthoringSlotGroupEditor
                         domId="preset-cost"
                         title="成本与成交（COST）"
-                        hint="初始资金 / 六项费率 / 成交时点与价格 —— 选中后填进第 ⑥ 段的字段"
-                        presets={(vocabulary.presets ?? []).filter(item => item.slot === "COST")}
-                        value={costSelection}
-                        onChange={onCostSelectionChange}
-                        materialized={costMaterialized}
-                        materializing={materializePreset.isPending}
+                        group="COST"
+                        groupLabel="成本与成交"
+                        hint="只显示服务端下发的真实数值参数；成交时点与价格由槽方案决定"
+                        slots={costAuthoringSlots}
+                        recognitions={costRecognitions}
+                        disabled={applyAuthoringSlot.isPending}
+                        busy={authoringRecognition.isFetching || applyAuthoringSlot.isPending}
+                        onApply={onCostSlotApply}
                       />
                     ),
                   }

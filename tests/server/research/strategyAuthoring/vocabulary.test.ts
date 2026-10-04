@@ -10,6 +10,7 @@ import { listStrategyAuthoringPresets } from "../../../../server/research/strate
 import { RUNNER_HOLDING_BRIDGE_STATES } from "../../../../server/research/exitPolicyCommon";
 import { STRATEGY_TYPES } from "../../../../server/research/strategySchema/types";
 import { STRATEGY_LIFECYCLE_STATUSES } from "../../../../server/research/lifecycle/types";
+import { listAuthoringSlotGroups } from "../../../../server/research/strategyAuthoring/authoringSlotRegistry";
 
 const vocabulary = buildStrategyAuthoringVocabulary();
 
@@ -28,6 +29,17 @@ describe("buildStrategyAuthoringVocabulary", () => {
     const ids = vocabulary.presets.map(p => p.presetId);
     expect(ids).toContain("exit:SL-18.1-nh3-5-20");
     expect(ids).toContain("recipe:first-limit-pullback-3f-top3");
+  });
+
+  it("authoringSlotGroups 是唯一槽词表来源", () => {
+    expect(vocabulary.authoringSlotGroups).toEqual(listAuthoringSlotGroups());
+    expect(vocabulary.authoringSlotGroups.map(group => group.group)).toEqual(expect.arrayContaining([
+      "SELECTION",
+      "EXIT_POLICY",
+      "ENTRY_CONDITION",
+      "POSITION",
+      "COST",
+    ]));
   });
 
   it("runnerStates 与 RUNNER_HOLDING_BRIDGE_STATES 逐项同源（12 项）", () => {

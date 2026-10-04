@@ -245,25 +245,15 @@ describe("ENTRY_CONDITION apply ownership", () => {
 });
 
 describe("ENTRY_CONDITION vocabulary and shared contract", () => {
-  it("publishes summaries without leaking condition templates", () => {
+  it("publishes generic summaries without leaking condition templates", () => {
     const vocabulary = buildStrategyAuthoringVocabulary();
-    expect(vocabulary.entryConditionSlots.map((slot) => slot.slotId)).toEqual([...ENTRY_CONDITION_SLOT_IDS]);
-    const slot = vocabulary.entryConditionSlots[0]!;
+    const group = vocabulary.authoringSlotGroups.find((item) => item.group === "ENTRY_CONDITION")!;
+    expect(group.slots.map((slot) => slot.slotId)).toEqual([...ENTRY_CONDITION_SLOT_IDS]);
+    const slot = group.slots[0]!;
     expect(slot.options.map((option) => option.optionId)).toEqual([OPTION_ID, OFF_OPTION_ID]);
     expect(JSON.stringify(slot)).not.toContain('"conditions"');
     expect(JSON.stringify(slot)).not.toContain('"patch"');
     expect(buildStrategyAuthoringVocabulary().vocabularyVersion).toBe(vocabulary.vocabularyVersion);
-  });
-
-  it("keeps the shared entry-condition schemas independent from the preset slot enum", async () => {
-    const shared = await import("../../../../shared/researchContracts");
-    expect(shared.entryConditionSlotIdSchema.safeParse(SLOT_ID).success).toBe(true);
-    expect(shared.entryConditionSlotIdSchema.safeParse("").success).toBe(false);
-    expect(shared.applyEntryConditionSlotInputSchema.safeParse({
-      definition: {},
-      slotId: SLOT_ID,
-      optionId: OPTION_ID,
-    }).success).toBe(true);
   });
 
   it("exposes the fail-closed predicate only for entry namespaces", () => {

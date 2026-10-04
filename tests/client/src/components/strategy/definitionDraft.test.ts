@@ -40,6 +40,7 @@ import {
   definitionToDrafts,
   draftsToDefinition,
   applyEntryConditionSlotResult,
+  applyAuthoringSlotResult,
   emptyConditionRow,
   emptyExitRuleRow,
   emptyParameterRow,
@@ -605,6 +606,34 @@ describe("⑧ ENTRY_CONDITION canonical 结果写回", () => {
     expect(next.exitRules).toBe(base.exitRules);
     expect(next.cost).toBe(base.cost);
     expect(JSON.stringify(base)).toBe(snapshot);
+  });
+
+  it("42) applyAuthoringSlotResult 用完整 definition + executionAssumptions 重建草稿（issues 非空不改）", () => {
+    const base = structuredDrafts(FIRST_BOARD_PULLBACK_DEFINITION);
+    const definition = draftsToDefinition(base);
+    const executionAssumptions = {
+      costModel: { commissionRate: 0.0003, extensionKey: "keep-cost" },
+      backtestConfig: { initialCapital: 250000, maxPositions: 4, extensionKey: "keep-backtest" },
+    };
+
+    const result = applyAuthoringSlotResult(base, { definition, executionAssumptions, issues: [] });
+    expect(result.kind).toBe("structured");
+    if (result.kind !== "structured") throw new Error("期望 structured");
+    expect(result.drafts.conditions.map((row) => row.original.id)).toEqual(base.conditions.map((row) => row.original.id));
+    expect(result.drafts.cost.original.extensionKey).toBe("keep-cost");
+    expect(result.drafts.cost.backtestOriginal.extensionKey).toBe("keep-backtest");
+    expect(result.drafts.cost.initialCapital).toBe("250000");
+    expect(result.drafts.cost.maxPositions).toBe("4");
+
+    // issues 非空 ⇒ 原样返回输入草稿（不产生半份写入）
+    const kept = applyAuthoringSlotResult(base, { definition, executionAssumptions, issues: ["X"] });
+    expect(kept.kind).toBe("structured");
+    if (kept.kind !== "structured") throw new Error("期望 structured");
+    expect(kept.drafts).toBe(base);
+
+    // 形状不可表达 ⇒ 如实降级为 raw，不猜着解析半份
+    const raw = applyAuthoringSlotResult(base, { definition: { entry: { conditions: "not-an-array" } }, issues: [] });
+    expect(raw.kind).toBe("raw");
   });
 
   it("41) issues 非空或数组形状不符 ⇒ 原样返回，不产生半份写入", () => {

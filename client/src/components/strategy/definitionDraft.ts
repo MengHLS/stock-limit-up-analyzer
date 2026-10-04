@@ -637,6 +637,34 @@ export function applyEntryConditionSlotResult(
   };
 }
 
+/**
+ * 通用 AuthoringSlot 协议 `applyAuthoringSlot` 返回的**完整片段** → 定义草稿状态。
+ *
+ * 与「加载 / 保存」走同一套映射（`definitionToDrafts` + `withDocumentLevelDrafts`），
+ * 前端不另写一份 canonical definition 解析器，也不自行合并服务端语义。
+ *
+ * - `issues` 非空 ⇒ 原样返回输入草稿（调用方据此保证「apply 失败不改草稿」）；
+ * - `definition` 形状不可表达 ⇒ 返回 `raw` 降级状态，如实暴露而不是猜着解析半份。
+ */
+export function applyAuthoringSlotResult(
+  drafts: DefinitionDrafts,
+  result: {
+    readonly definition?: unknown;
+    readonly executionAssumptions?: unknown;
+    readonly issues?: readonly string[];
+  },
+): DefinitionDraftState {
+  if (result.issues !== undefined && result.issues.length > 0) {
+    return { kind: "structured", drafts };
+  }
+  if (result.definition === undefined || result.definition === null) {
+    return { kind: "structured", drafts };
+  }
+  const next = definitionToDrafts(result.definition);
+  if (next.kind !== "structured") return next;
+  return withDocumentLevelDrafts(next, result.executionAssumptions);
+}
+
 /** 文档级成本模型 + 回测配置 → 草稿（与 definition 无关，单独喂给同一份 drafts）。 */
 export function withDocumentLevelDrafts(
   state: DefinitionDraftState,

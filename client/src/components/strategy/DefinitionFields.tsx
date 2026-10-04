@@ -47,15 +47,12 @@ import {
 import {
   DEFINITION_CONDITION_OPERATOR_OPTIONS,
   DEFINITION_CONDITION_VALUE_TYPE_OPTIONS,
-  DEFINITION_COST_MODEL_OPTIONS,
   DEFINITION_DATASET_ROLE_OPTIONS,
   DEFINITION_EVENT_OPTIONS,
   DEFINITION_EXECUTION_TIMING_OPTIONS,
   DEFINITION_EXIT_RULE_TYPE_OPTIONS,
   DEFINITION_EXIT_THRESHOLD_UNIT_OPTIONS,
   DEFINITION_EXIT_TRIGGER_OPTIONS,
-  DEFINITION_PARAMETER_ROLE_OPTIONS,
-  DEFINITION_PARAMETER_TYPE_OPTIONS,
   DEFINITION_PRICE_TYPE_OPTIONS,
   DEFINITION_QUANTITY_METHOD_OPTIONS,
   DEFINITION_SIGNAL_TIMING_OPTIONS,
@@ -75,7 +72,6 @@ import {
   emptyConditionRow,
   emptyExitRuleRow,
   emptyKeyValueRowDraft,
-  emptyParameterRow,
   definitionSegmentStatuses,
   resolveEarliestSignalOffset,
   uneditedKeysOf,
@@ -374,6 +370,10 @@ export function DefinitionFields({
   searchParameterSources = [],
   managedConditionIds = [],
   presetBlocks,
+  hiddenFieldPaths = [],
+  hideLegacySelectionFields = false,
+  hideLegacyPositionFields = false,
+  hideLegacyCostFields = false,
 }: {
   drafts: DefinitionDrafts;
   onChange: (next: DefinitionDrafts) => void;
@@ -385,7 +385,8 @@ export function DefinitionFields({
    * 不传某个键 ⇒ 该段维持旧行为（段内只有字段）。
    */
   presetBlocks?: {
-    readonly recipe?: ReactNode;
+    /** ①“选股”段顶部的服务端选股规则槽。 */
+    readonly selection?: ReactNode;
     /** ②“什么条件买”段顶部的服务端入场规则槽。 */
     readonly entryCondition?: ReactNode;
     readonly exit?: ReactNode;
@@ -398,6 +399,19 @@ export function DefinitionFields({
    * 这些行不会在“其它买入条件”里重复出现；未知 / 未识别条件仍按原样展示。
    */
   readonly managedConditionIds?: readonly string[];
+  /**
+   * 通用 AuthoringSlot 已认领的 canonical path。
+   *
+   * 例如 `position.sizingMethod` / `execution.signalTiming` / `cost.commissionRate`。
+   * 这些路径的旧手输控件不再渲染；由调用方从 generic recognition.managedPaths 派生。
+   */
+  readonly hiddenFieldPaths?: readonly string[];
+  /** 服务端已下发 SELECTION 槽时，隐藏旧事件 / 观察窗口 / 触发编辑点。 */
+  readonly hideLegacySelectionFields?: boolean;
+  /** 服务端已下发 POSITION 槽时，隐藏旧仓位字段组。 */
+  readonly hideLegacyPositionFields?: boolean;
+  /** 服务端已下发 COST 槽时，隐藏旧成本/成交字段组。 */
+  readonly hideLegacyCostFields?: boolean;
   /**
    * ⑤「可调参数」的**派生来源**：①–④ 已选方案各自暴露的参数（P3 / C-1）。
    * 不传 ⇒ 该面板不渲染（⑤ 仍可手写行）。
@@ -499,6 +513,12 @@ export function DefinitionFields({
     [drafts.conditions, managedConditionIdSet],
   );
   const managedConditionCount = drafts.conditions.length - visibleConditionRows.length;
+
+  const hiddenFieldPathSet = useMemo(() => new Set(hiddenFieldPaths), [hiddenFieldPaths]);
+  const hiddenField = (path: string) => hiddenFieldPathSet.has(path);
+  const hideSelectionField = (path: string) => hideLegacySelectionFields || hiddenField(path);
+  const hidePositionField = (path: string) => hideLegacyPositionFields || hiddenField(path);
+  const hideCostField = (path: string) => hideLegacyCostFields || hiddenField(path);
 
   /**
    * 某个输入框是否「必填未填」。
@@ -603,31 +623,34 @@ export function DefinitionFields({
         onToggle={() => toggle("what", !isOpen(statuses[0]))}
         hint={DEFINITION_SEGMENTS[0].hint}
       >
-        {/* ① 选股自己的方案行（信号配方）。 */}
-        {presetBlocks?.recipe}
+        {/* ① 选股自己的方案行（通用 SELECTION 槽）。 */}
+        {presetBlocks?.selection}
 
-        <Field
-          label="事件类型"
-          name="definition.entry.event.type"
-          valueKey={drafts.event.type}
-          missing={missingAt("what", "event.type")}
-          hint="决定「哪些交易日算候选」，也是后面所有相对日（rd0 / rd-1 …）的原点"
-        >
-          <EnumSelect
-            value={drafts.event.type}
-            options={DEFINITION_EVENT_OPTIONS}
-            onChange={(value) => set("event", { ...drafts.event, type: value })}
-            emptyLabel="选一个事件"
-          />
-        </Field>
+        {!hideSelectionField("entry.event.type") && (
+          <Field
+            label="事件类型"
+            name="definition.entry.event.type"
+            valueKey={drafts.event.type}
+            missing={missingAt("what", "event.type")}
+            hint="决定「哪些交易日算候选」，也是后面所有相对日（rd0 / rd-1 …）的原点"
+          >
+            <EnumSelect
+              value={drafts.event.type}
+              options={DEFINITION_EVENT_OPTIONS}
+              onChange={(value) => set("event", { ...drafts.event, type: value })}
+              emptyLabel="选一个事件"
+            />
+          </Field>
+        )}
 
-        {drafts.event.type === "CUSTOM_EVENT" && (
+        {!hideSelectionField("entry.event.type") && drafts.event.type === "CUSTOM_EVENT" && (
           <p className="text-[11px] text-amber-800">
             自定义事件要靠参数里的 <code className="font-mono">eventCode</code> 说明语义，
             否则这是一个没有任何含义的空事件。
           </p>
         )}
 
+        {!hideSelectionField("entry.event.params") && (
         <Advanced
           title="事件参数（可选）"
           hint={
@@ -658,6 +681,7 @@ export function DefinitionFields({
             />
           )}
         </Advanced>
+        )}
 
         <Section title="数据集绑定（由转正 / 持久化层写入，本页不编辑）">
           {drafts.datasets.length === 0 ? (
@@ -783,6 +807,7 @@ export function DefinitionFields({
         onToggle={() => toggle("when", !isOpen(statuses[2]))}
         hint={DEFINITION_SEGMENTS[2].hint}
       >
+        {!hideSelectionField("entry.observationWindow") && (
         <Section
           title="观察窗口（相对事件日的第几根开始看）"
           missing={missingAt("when", "window")}
@@ -811,21 +836,24 @@ export function DefinitionFields({
             </Field>
           </div>
         </Section>
+        )}
 
-        <Field
-          label="触发时点"
-          name="definition.entry.trigger.type"
-          valueKey={drafts.trigger.type}
-          missing={missingAt("when", "trigger")}
-          hint={DEFINITION_TRIGGER_OPTIONS.find((o) => o.value === drafts.trigger.type)?.note}
-        >
-          <EnumSelect
-            value={drafts.trigger.type}
-            options={DEFINITION_TRIGGER_OPTIONS}
-            onChange={(value) => set("trigger", { ...drafts.trigger, type: value })}
-            emptyLabel="条件满足后哪天出信号"
-          />
-        </Field>
+        {!hideSelectionField("entry.trigger.type") && (
+          <Field
+            label="触发时点"
+            name="definition.entry.trigger.type"
+            valueKey={drafts.trigger.type}
+            missing={missingAt("when", "trigger")}
+            hint={DEFINITION_TRIGGER_OPTIONS.find((o) => o.value === drafts.trigger.type)?.note}
+          >
+            <EnumSelect
+              value={drafts.trigger.type}
+              options={DEFINITION_TRIGGER_OPTIONS}
+              onChange={(value) => set("trigger", { ...drafts.trigger, type: value })}
+              emptyLabel="条件满足后哪天出信号"
+            />
+          </Field>
+        )}
 
         {/*
           信号时间线是「前视红线」的所在：它决定买入条件里最多能引用到事件后第几根。
@@ -846,6 +874,7 @@ export function DefinitionFields({
           )}
         </p>
 
+        {!hideSelectionField("entry.trigger.params") && (
         <Advanced
           title="触发参数（可选）"
           hint={
@@ -870,6 +899,7 @@ export function DefinitionFields({
             />
           )}
         </Advanced>
+        )}
       </SegmentShell>
 
       {/* ④ 怎么卖 ---------------------------------------------------------- */}
@@ -1073,35 +1103,39 @@ export function DefinitionFields({
         {presetBlocks?.position}
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field
-            label="仓位方式"
-            name="definition.position.sizingMethod"
-            valueKey={drafts.position.sizingMethod}
-            missing={missingAt("sizing", "position.sizingMethod")}
-          >
-            <EnumSelect
-              value={drafts.position.sizingMethod}
-              options={DEFINITION_SIZING_METHOD_OPTIONS}
-              onChange={(value) => set("position", { ...drafts.position, sizingMethod: value })}
-              emptyLabel="选仓位方式"
-            />
-          </Field>
-          <Field
-            label="最多同时持有"
-            name="definition.position.maxPositions"
-            missing={missingAt("sizing", "position.maxPositions")}
-            hint={
-              drafts.position.maxPositions.trim() === "" && costMaxPositionsHint !== null
-                ? `≥ 1 的整数；未填时回测按 executionAssumptions.backtestConfig.maxPositions = ${costMaxPositionsHint} 生效`
-                : "≥ 1 的整数；保存时同步写入 position 与 backtestConfig 两处"
-            }
-          >
-            <NumInput
-              value={drafts.position.maxPositions}
-              placeholder="如 5"
-              onChange={setMaxPositions}
-            />
-          </Field>
+          {!hidePositionField("position.sizingMethod") && (
+            <Field
+              label="仓位方式"
+              name="definition.position.sizingMethod"
+              valueKey={drafts.position.sizingMethod}
+              missing={missingAt("sizing", "position.sizingMethod")}
+            >
+              <EnumSelect
+                value={drafts.position.sizingMethod}
+                options={DEFINITION_SIZING_METHOD_OPTIONS}
+                onChange={(value) => set("position", { ...drafts.position, sizingMethod: value })}
+                emptyLabel="选仓位方式"
+              />
+            </Field>
+          )}
+          {!hidePositionField("position.maxPositions") && (
+            <Field
+              label="最多同时持有"
+              name="definition.position.maxPositions"
+              missing={missingAt("sizing", "position.maxPositions")}
+              hint={
+                drafts.position.maxPositions.trim() === "" && costMaxPositionsHint !== null
+                  ? `≥ 1 的整数；未填时回测按 executionAssumptions.backtestConfig.maxPositions = ${costMaxPositionsHint} 生效`
+                  : "≥ 1 的整数；保存时同步写入 position 与 backtestConfig 两处"
+              }
+            >
+              <NumInput
+                value={drafts.position.maxPositions}
+                placeholder="如 5"
+                onChange={setMaxPositions}
+              />
+            </Field>
+          )}
           <Field
             label="下单口径"
             name="definition.execution.quantityMethod"
@@ -1130,35 +1164,41 @@ export function DefinitionFields({
 
         </div>
 
-        <Advanced
-          title="单笔比例 / 固定金额"
-          hint="仓位方式选「固定比例」或「固定金额」时生效；别的仓位方式下这两项不参与计算"
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
-              label="单笔比例"
-              name="position.positionRatio"
-              optional
-              hint="(0,1]，如 0.2 = 每笔用两成资金；仓位方式选「固定比例」时生效"
-            >
-              <NumInput
-                value={drafts.position.positionRatio}
-                onChange={(value) => set("position", { ...drafts.position, positionRatio: value })}
-              />
-            </Field>
-            <Field
-              label="固定金额"
-              name="position.fixedAmount"
-              optional
-              hint="单位：元；仓位方式选「固定金额」时生效"
-            >
-              <NumInput
-                value={drafts.position.fixedAmount}
-                onChange={(value) => set("position", { ...drafts.position, fixedAmount: value })}
-              />
-            </Field>
-          </div>
-        </Advanced>
+        {(!hidePositionField("position.positionRatio") || !hidePositionField("position.fixedAmount")) && (
+          <Advanced
+            title="单笔比例 / 固定金额"
+            hint="仓位方式选「固定比例」或「固定金额」时生效；别的仓位方式下这两项不参与计算"
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              {!hidePositionField("position.positionRatio") && (
+                <Field
+                  label="单笔比例"
+                  name="position.positionRatio"
+                  optional
+                  hint="(0,1]，如 0.2 = 每笔用两成资金；仓位方式选「固定比例」时生效"
+                >
+                  <NumInput
+                    value={drafts.position.positionRatio}
+                    onChange={(value) => set("position", { ...drafts.position, positionRatio: value })}
+                  />
+                </Field>
+              )}
+              {!hidePositionField("position.fixedAmount") && (
+                <Field
+                  label="固定金额"
+                  name="position.fixedAmount"
+                  optional
+                  hint="单位：元；仓位方式选「固定金额」时生效"
+                >
+                  <NumInput
+                    value={drafts.position.fixedAmount}
+                    onChange={(value) => set("position", { ...drafts.position, fixedAmount: value })}
+                  />
+                </Field>
+              )}
+            </div>
+          </Advanced>
+        )}
 
         {/*
           🔴 裁定（2026-10-03）：以下字段**执行层零实现** ⇒ **不提供编辑**，
@@ -1193,47 +1233,53 @@ export function DefinitionFields({
         {presetBlocks?.cost}
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field
-            label="信号时点"
-            name="definition.execution.signalTiming"
-            valueKey={drafts.execution.signalTiming}
-            missing={missingAt("cost", "execution.signalTiming")}
-          >
-            <EnumRadio
-              value={drafts.execution.signalTiming}
-              options={DEFINITION_SIGNAL_TIMING_OPTIONS}
-              onChange={(value) => set("execution", { ...drafts.execution, signalTiming: value })}
-            />
-          </Field>
-          <Field
-            label="成交时点"
-            name="definition.execution.executionTiming"
-            valueKey={drafts.execution.executionTiming}
-            missing={missingAt("cost", "execution.executionTiming")}
-            hint={DEFINITION_EXECUTION_TIMING_OPTIONS.find(
-              (o) => o.value === drafts.execution.executionTiming,
-            )?.note}
-          >
-            <EnumSelect
-              value={drafts.execution.executionTiming}
-              options={DEFINITION_EXECUTION_TIMING_OPTIONS}
-              onChange={(value) => set("execution", { ...drafts.execution, executionTiming: value })}
-              emptyLabel="哪根 bar 成交"
-            />
-          </Field>
-          <Field
-            label="成交价格类型"
-            name="definition.execution.priceType"
-            valueKey={drafts.execution.priceType}
-            missing={missingAt("cost", "execution.priceType")}
-          >
-            <EnumSelect
-              value={drafts.execution.priceType}
-              options={DEFINITION_PRICE_TYPE_OPTIONS}
-              onChange={(value) => set("execution", { ...drafts.execution, priceType: value })}
-              emptyLabel="选价格类型"
-            />
-          </Field>
+          {!hideCostField("execution.signalTiming") && (
+            <Field
+              label="信号时点"
+              name="definition.execution.signalTiming"
+              valueKey={drafts.execution.signalTiming}
+              missing={missingAt("cost", "execution.signalTiming")}
+            >
+              <EnumRadio
+                value={drafts.execution.signalTiming}
+                options={DEFINITION_SIGNAL_TIMING_OPTIONS}
+                onChange={(value) => set("execution", { ...drafts.execution, signalTiming: value })}
+              />
+            </Field>
+          )}
+          {!hideCostField("execution.executionTiming") && (
+            <Field
+              label="成交时点"
+              name="definition.execution.executionTiming"
+              valueKey={drafts.execution.executionTiming}
+              missing={missingAt("cost", "execution.executionTiming")}
+              hint={DEFINITION_EXECUTION_TIMING_OPTIONS.find(
+                (o) => o.value === drafts.execution.executionTiming,
+              )?.note}
+            >
+              <EnumSelect
+                value={drafts.execution.executionTiming}
+                options={DEFINITION_EXECUTION_TIMING_OPTIONS}
+                onChange={(value) => set("execution", { ...drafts.execution, executionTiming: value })}
+                emptyLabel="哪根 bar 成交"
+              />
+            </Field>
+          )}
+          {!hideCostField("execution.priceType") && (
+            <Field
+              label="成交价格类型"
+              name="definition.execution.priceType"
+              valueKey={drafts.execution.priceType}
+              missing={missingAt("cost", "execution.priceType")}
+            >
+              <EnumSelect
+                value={drafts.execution.priceType}
+                options={DEFINITION_PRICE_TYPE_OPTIONS}
+                onChange={(value) => set("execution", { ...drafts.execution, priceType: value })}
+                emptyLabel="选价格类型"
+              />
+            </Field>
+          )}
         </div>
 
         <TechnicalHint className="rounded-md border bg-muted/30 px-2.5 py-1.5 text-[10px] text-muted-foreground">
@@ -1243,34 +1289,28 @@ export function DefinitionFields({
           同 bar 成交（`TRIGGER_EXECUTION_INCONSISTENT`）。填错了上面的红色清单会直接点出来。
         </TechnicalHint>
 
-        <Section title="成本与资金（文档级 executionAssumptions，不属于 definition）">
-          <CostFields drafts={drafts} onChange={onChange} missingCapital={missingAt("cost", "cost.initialCapital")} missingRates={missingAt("cost", "cost.rates")} />
-        </Section>
+        {!hideLegacyCostFields && (
+          <Section title="成本与资金（文档级 executionAssumptions，不属于 definition）">
+            <CostFields
+              drafts={drafts}
+              onChange={onChange}
+              missingCapital={missingAt("cost", "cost.initialCapital")}
+              missingRates={missingAt("cost", "cost.rates")}
+              hiddenFieldPaths={hiddenFieldPathSet}
+            />
+          </Section>
+        )}
 
         <Advanced title="费用模型与执行约束">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field
-              label="滑点模型"
-              name="execution.slippageModel"
-              valueKey={drafts.execution.slippageModel}
-            >
-              <EnumRadio
-                value={drafts.execution.slippageModel}
-                options={DEFINITION_COST_MODEL_OPTIONS}
-                onChange={(value) => set("execution", { ...drafts.execution, slippageModel: value })}
-              />
-            </Field>
-            <Field
-              label="佣金模型"
-              name="execution.commissionModel"
-              valueKey={drafts.execution.commissionModel}
-            >
-              <EnumRadio
-                value={drafts.execution.commissionModel}
-                options={DEFINITION_COST_MODEL_OPTIONS}
-                onChange={(value) => set("execution", { ...drafts.execution, commissionModel: value })}
-              />
-            </Field>
+          <div className="grid gap-3 sm:grid-cols-2" data-legacy-cost-model-readonly>
+            <div className="rounded-md border border-dashed bg-muted/20 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              <p className="font-medium">滑点模型（只读）</p>
+              <p className="font-mono">{drafts.execution.slippageModel || "（未声明）"}</p>
+            </div>
+            <div className="rounded-md border border-dashed bg-muted/20 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              <p className="font-medium">佣金模型（只读）</p>
+              <p className="font-mono">{drafts.execution.commissionModel || "（未声明）"}</p>
+            </div>
           </div>
           <Field
             label="执行约束"
@@ -1298,51 +1338,30 @@ export function DefinitionFields({
         hint={DEFINITION_SEGMENTS[6].hint}
       >
         {/* ---- 派生候选：来自 ①–④ 已选方案（不是自造方案，C-1） ---- */}
-        {searchParameterSources.length > 0 && (
+        {searchParameterSources.length > 0 ? (
           <SearchParameterCandidatePanel
             drafts={drafts}
             sources={searchParameterSources}
             onChange={onChange}
           />
-        )}
-
-        {drafts.parameters.length === 0 ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => set("parameters", [emptyParameterRow()])}
-          >
-            <Plus className="mr-1 h-3.5 w-3.5" /> 添加待搜索参数
-          </Button>
         ) : (
-          <div className="space-y-2">
-            {drafts.parameters.map((row, index) => (
-              <ParameterRowForm
-                key={index}
-                row={row}
-                onChange={(next) =>
-                  set("parameters", drafts.parameters.map((r, i) => (i === index ? next : r)))
-                }
-                onRemove={() => set("parameters", drafts.parameters.filter((_, i) => i !== index))}
-              />
-            ))}
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => set("parameters", [...drafts.parameters, emptyParameterRow()])}
-            >
-              <Plus className="mr-1 h-3.5 w-3.5" /> 添加待搜索参数
-            </Button>
+          <div
+            className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground"
+            data-search-parameter-empty
+          >
+            先在 ①–④ 选择带参数的方案。⑤ 的参数候选由服务端方案声明，本面板不再提供手工参数 code 输入。
           </div>
         )}
+
+        {drafts.parameters.length > 0 && (
+          <ParameterDeclarationList rows={drafts.parameters} />
+        )}
+
         <TechnicalHint className="flex items-start gap-1.5 text-[10px] text-muted-foreground">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
-            数值参数若角色是「待搜索（TUNABLE）」就**必须给 min 与 max**（搜索不会替你定界）；
-            字符串 / 布尔参数必须给非空候选集合。「推导值（DERIVED）」必须另外带 derivedFrom 表达式
-            —— 那个键不在本表单里，缺了会由上面的红色清单点出来。
+            参数声明由上方方案写入，本面板只控制是否加入搜索空间；未被规则图 / 条件真实引用的参数不可勾选。
+            FIXED 参数不会进入可搜索候选。
           </span>
         </TechnicalHint>
       </SegmentShell>
@@ -1381,17 +1400,20 @@ function CostFields({
   onChange,
   missingCapital,
   missingRates,
+  hiddenFieldPaths,
 }: {
   drafts: DefinitionDrafts;
   onChange: (next: DefinitionDrafts) => void;
   missingCapital: boolean;
   missingRates: boolean;
+  hiddenFieldPaths?: ReadonlySet<string>;
 }) {
   const [preset, setPreset] = useState<CostPreset>(() => preferredCostPreset());
   const matched = matchCostPreset(drafts.cost);
   const complete = isCostAssumptionComplete(drafts.cost);
   const capital = formatCapital(drafts.cost.initialCapital);
 
+  const hiddenField = (path: string) => hiddenFieldPaths?.has(path) ?? false;
   const setCost = (patch: Partial<DefinitionDrafts["cost"]>) =>
     onChange({ ...drafts, cost: { ...drafts.cost, ...patch } });
 
@@ -1436,22 +1458,23 @@ function CostFields({
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field
-          label="回测初始资金"
-          name="executionAssumptions.backtestConfig.initialCapital"
-          hint="元；必须 > 0"
-          missing={missingCapital}
-          valueKey={capital === "" ? undefined : capital}
-        >
-          <NumInput
-            value={drafts.cost.initialCapital}
-            placeholder="如 100000"
-            onChange={(value) => setCost({ initialCapital: value })}
-          />
-        </Field>
-
-      </div>
+      {!hiddenField("cost.initialCapital") && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="回测初始资金"
+            name="executionAssumptions.backtestConfig.initialCapital"
+            hint="元；必须 > 0"
+            missing={missingCapital}
+            valueKey={capital === "" ? undefined : capital}
+          >
+            <NumInput
+              value={drafts.cost.initialCapital}
+              placeholder="如 100000"
+              onChange={(value) => setCost({ initialCapital: value })}
+            />
+          </Field>
+        </div>
+      )}
 
       <Section title="六项成本费率（服务端要求六项都要有）" missing={missingRates}>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -1464,7 +1487,7 @@ function CostFields({
               ["lotSize", "每手股数", "100"],
               ["minCommission", "最低佣金", "5"],
             ] as const
-          ).map(([key, label, placeholder]) => (
+          ).filter(([key]) => !hiddenField(`cost.${key}`)).map(([key, label, placeholder]) => (
             <Field
               key={key}
               label={label}
@@ -1571,129 +1594,61 @@ function SearchParameterCandidatePanel({
   );
 }
 
-function ParameterRowForm({
-  row,
-  onChange,
-  onRemove,
-}: {
-  row: ParameterRowDraft;
-  onChange: (next: ParameterRowDraft) => void;
-  onRemove: () => void;
-}) {
-  /** 「待搜索」的数值参数**必须**给最小/最大值 —— 提示走可见文案，不藏在 placeholder 里。 */
-  const numericSearchRange = row.dataType === "number" && row.parameterRole === "TUNABLE";
+function parameterRoleLabel(role: string): string {
+  if (role === "TUNABLE") return "待搜索（TUNABLE）";
+  if (role === "FIXED") return "固定（FIXED）";
+  if (role === "DERIVED") return "推导值（DERIVED）";
+  return role === "" ? "未声明角色" : role;
+}
 
+function parameterBoundsLabel(row: ParameterRowDraft): string {
+  if (row.dataType === "number") {
+    const parts: string[] = [];
+    if (row.min !== "") parts.push(`min ${row.min}`);
+    if (row.max !== "") parts.push(`max ${row.max}`);
+    if (row.step !== "") parts.push(`step ${row.step}`);
+    return parts.length === 0 ? "范围未声明" : parts.join(" · ");
+  }
+  const allowed = row.allowedValuesText.trim();
+  return allowed === "" ? "候选集合未声明" : `候选 ${allowed}`;
+}
+
+/**
+ * ⑤ 的参数声明只读区。
+ *
+ * 参数 code / role / bounds 的唯一声明入口是上方各 AuthoringSlot；这里只如实展示
+ * `definition.parameters[]`，让用户知道当前搜索空间引用了哪些声明。不得重新提供
+ * 可编辑 code 输入，否则会绕过服务端 ownership，重新长出第二套参数真相。
+ */
+function ParameterDeclarationList({ rows }: { rows: readonly ParameterRowDraft[] }) {
   return (
-    <div className="space-y-1.5 rounded-md border bg-muted/20 p-2">
-      <div className="flex flex-wrap items-end gap-1.5">
-        <MiniField label="参数名" className="w-44">
-          <Input
-            className="h-8 w-full font-mono text-xs"
-            value={row.code}
-            placeholder="如 max_volume_ratio"
-            onChange={(event) => onChange({ ...row, code: event.target.value })}
-          />
-        </MiniField>
-        <MiniField label="中文名" className="w-40">
-          <Input
-            className="h-8 w-full text-xs"
-            value={row.name}
-            placeholder="可留空"
-            onChange={(event) => onChange({ ...row, name: event.target.value })}
-          />
-        </MiniField>
-        <MiniField label="取值类型">
-          <EnumSelect
-            value={row.dataType}
-            options={DEFINITION_PARAMETER_TYPE_OPTIONS}
-            onChange={(value) => onChange({ ...row, dataType: value })}
-          />
-        </MiniField>
-        <MiniField label="用途">
-          <EnumRadio
-            value={row.parameterRole}
-            options={DEFINITION_PARAMETER_ROLE_OPTIONS}
-            emptyLabel={null}
-            onChange={(value) => onChange({ ...row, parameterRole: value })}
-          />
-        </MiniField>
-        <Toggle
-          checked={row.required}
-          onChange={(required) => onChange({ ...row, required })}
-          label="必填"
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="ml-auto h-8 w-8"
-          aria-label="删除参数"
-          onClick={onRemove}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-
-      <div className="grid gap-1.5 sm:grid-cols-4">
-        {row.dataType === "number" ? (
-          <>
-            <MiniField label="最小值">
-              <Input
-                className="h-8 w-full font-mono text-xs"
-                value={row.min}
-                placeholder="如 0"
-                onChange={(event) => onChange({ ...row, min: event.target.value })}
-              />
-            </MiniField>
-            <MiniField label="最大值">
-              <Input
-                className="h-8 w-full font-mono text-xs"
-                value={row.max}
-                placeholder="如 1"
-                onChange={(event) => onChange({ ...row, max: event.target.value })}
-              />
-            </MiniField>
-            <MiniField label="步长">
-              <Input
-                className="h-8 w-full font-mono text-xs"
-                value={row.step}
-                placeholder="可留空"
-                onChange={(event) => onChange({ ...row, step: event.target.value })}
-              />
-            </MiniField>
-          </>
-        ) : (
-          <MiniField label="候选集合" className="sm:col-span-3">
-            <Input
-              className="h-8 w-full font-mono text-xs"
-              value={row.allowedValuesText}
-              placeholder="逗号分隔，如 5,10,20"
-              onChange={(event) => onChange({ ...row, allowedValuesText: event.target.value })}
-            />
-          </MiniField>
-        )}
-        <MiniField label="默认值">
-          <Input
-            className="h-8 w-full font-mono text-xs"
-            value={row.defaultValue}
-            placeholder="可留空"
-            onChange={(event) => onChange({ ...row, defaultValue: event.target.value })}
-          />
-        </MiniField>
-      </div>
-
-      {numericSearchRange && (
-        <p className="text-[10px] text-muted-foreground">
-          用途是「待搜索」的数值参数必须同时给出最小值与最大值 —— 缺了参数搜索会拒。
-        </p>
-      )}
-
-      {row.parameterRole === "DERIVED" && (
-        <p className="text-[10px] text-amber-800">
-          角色是「推导值」时必须同时带 <code className="font-mono">derivedFrom</code> 表达式 ——
-          那个键不在本表单里，缺了会由段外的红色清单点出来。
-        </p>
-      )}
+    <div className="space-y-1.5 rounded-md border bg-muted/20 p-2" data-parameter-declaration-readonly>
+      <p className="text-[11px] font-medium">
+        已声明的参数（只读）
+        <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+          参数由上方方案声明；本面板只控制是否加入搜索空间
+        </span>
+      </p>
+      <ul className="space-y-1">
+        {rows.map((row, index) => (
+          <li
+            key={`${row.code}-${index}`}
+            className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px]"
+          >
+            <span className="text-[10px] text-muted-foreground">参数名</span>
+            <code className="font-mono text-[10px]">{row.code === "" ? "（空 code，原样保留）" : row.code}</code>
+            <span className="text-[10px] text-muted-foreground">中文名</span>
+            <span>{row.name === "" ? "（未命名，原样保留）" : row.name}</span>
+            <span className="rounded-full border px-1.5 py-px text-[10px] text-muted-foreground">
+              {parameterRoleLabel(row.parameterRole)}
+            </span>
+            <span className="text-[10px] text-muted-foreground">{parameterBoundsLabel(row)}</span>
+            {row.defaultValue !== "" && (
+              <span className="text-[10px] text-muted-foreground">默认 {row.defaultValue}</span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

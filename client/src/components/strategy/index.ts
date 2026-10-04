@@ -28,7 +28,7 @@ export {
   type StrategyVersionCoordinatesProps,
 } from "./StrategyVersionArtifactsTabs";
 
-/** SCOPE-002 §3.4 —— 通用「预设 + 参数」编辑器（词表来自 strategyDomain.authoring.getVocabulary）。 */
+/** SCOPE-002 §3.4 —— 通用「预设 + 参数」类型（词表来自 strategyDomain.authoring.getVocabulary）。 */
 /** P1 —— 策略定义的「当前组合状态」（信任层：一致 / 变体 / 未验证）。 */
 export {
   DefinitionTrustStatus,
@@ -38,11 +38,10 @@ export {
 /** P1 —— 七段归位到五个任务块（纯分组常量，供概览与测试共用）。 */
 export { DEFINITION_BLOCKS, type DefinitionProgressPresetSegment } from "./DefinitionProgressOverview";
 
-export {
-  PresetEditor,
-  type PresetMaterializeResult,
-  type PresetParameter,
-  type PresetParameterValue,
-  type PresetSelection,
-  type PresetSummary,
-} from "./PresetEditor";
+export type {
+  PresetMaterializeResult,
+  PresetParameter,
+  PresetParameterValue,
+  PresetSelection,
+  PresetSummary,
+} from "./authoringSlotParameter";

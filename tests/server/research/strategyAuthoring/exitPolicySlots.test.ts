@@ -222,18 +222,14 @@ describe("⑤ 参数校验与「没有假旋钮」", () => {
 });
 
 describe("⑥ 契约与词表（防静默漂移）", () => {
-  it("15) 共享契约的槽 id 与本体**逐字同序**", async () => {
-    const shared = await import("../../../../shared/researchContracts");
-    expect([...shared.exitPolicySlotIdSchema.options]).toEqual([...EXIT_POLICY_SLOT_IDS]);
-  });
-
-  it("16) 词表下发 9 个槽，且**不携带 patch**（拼装逻辑留在服务端）", async () => {
+  it("15) generic registry 下发 9 个槽，且**不携带 patch**（拼装逻辑留在服务端）", async () => {
     const { buildStrategyAuthoringVocabulary } = await import(
       "../../../../server/research/strategyAuthoring/vocabulary"
     );
     const vocabulary = buildStrategyAuthoringVocabulary();
-    expect(vocabulary.exitPolicySlots.map(slot => slot.slotId)).toEqual([...EXIT_POLICY_SLOT_IDS]);
-    for (const slot of vocabulary.exitPolicySlots) {
+    const group = vocabulary.authoringSlotGroups.find(item => item.group === "EXIT_POLICY")!;
+    expect(group.slots.map(slot => slot.slotId)).toEqual([...EXIT_POLICY_SLOT_IDS]);
+    for (const slot of group.slots) {
       expect(slot.label.length).toBeGreaterThan(0);
       expect(slot.question.length).toBeGreaterThan(0);
       expect(slot.options.length).toBeGreaterThan(1);
@@ -243,20 +239,21 @@ describe("⑥ 契约与词表（防静默漂移）", () => {
         expect(Object.keys(option)).not.toContain("patch");
       }
     }
-    const json = JSON.stringify(vocabulary.exitPolicySlots);
+    const json = JSON.stringify(group.slots);
     expect(json.includes('"patch"')).toBe(false);
   });
 
-  it("17) 词表的可见性分组与本体一致（常显 3 / 折叠 5 / 研究 1）", async () => {
+  it("16) generic 词表的可见性分组与本体一致（常显 3 / 折叠 5 / 研究 1）", async () => {
     const { buildStrategyAuthoringVocabulary } = await import(
       "../../../../server/research/strategyAuthoring/vocabulary"
     );
     const vocabulary = buildStrategyAuthoringVocabulary();
-    const group = (visibility: string) =>
-      vocabulary.exitPolicySlots.filter(slot => slot.visibility === visibility).map(slot => slot.slotId);
-    expect(group("PRIMARY")).toEqual(["ANCHOR", "TAKE_PROFIT", "TIME_EXIT"]);
-    expect(group("MORE")).toHaveLength(5);
-    expect(group("RESEARCH")).toEqual(["RESEARCH"]);
+    const group = vocabulary.authoringSlotGroups.find(item => item.group === "EXIT_POLICY")!;
+    const byVisibility = (visibility: string) =>
+      group.slots.filter(slot => slot.visibility === visibility).map(slot => slot.slotId);
+    expect(byVisibility("PRIMARY")).toEqual(["ANCHOR", "TAKE_PROFIT", "TIME_EXIT"]);
+    expect(byVisibility("MORE")).toHaveLength(5);
+    expect(byVisibility("RESEARCH")).toEqual(["RESEARCH"]);
   });
 });
 

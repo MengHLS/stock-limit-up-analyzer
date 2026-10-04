@@ -645,68 +645,46 @@ export const strategyPresetParameterValueSchema = z.union([z.number(), z.boolean
 export type StrategyPresetParameterValueDto = z.infer<typeof strategyPresetParameterValueSchema>;
 
 /**
- * FE-PLAN-004 —— 退出政策的 **9 个规则槽**（传输层字面量）。
+ * 通用 AuthoringSlot 协议 —— EXIT_POLICY / ENTRY_CONDITION 及后续策略创作轴共用。
  *
- * 🔴 与 `server/research/strategyAuthoring/exitPolicySlots.ts#EXIT_POLICY_SLOT_IDS`
- *    **逐字同序**，由 `tests/server/research/strategyAuthoring/exitPolicySlotsContract.test.ts`
- *    断言相等 —— 与生命周期状态同款的"防静默漂移"手法。
+ * 🔴 target 中的 recipe / definition / executionAssumptions 全部透传；语义由服务端
+ *    handler 解释。apply 成功时返回完整片段，前端不得自行拼装任何字段。
  */
-export const exitPolicySlotIdSchema = z.enum([
-  "ANCHOR",
-  "TAKE_PROFIT",
-  "TIME_EXIT",
-  "CONFIRMATION",
-  "ESCALATION",
-  "SCHEDULE",
-  "REDUCTION",
-  "STRONG_HOLD",
-  "RESEARCH",
+export const authoringSlotGroupSchema = z.enum([
+  "SELECTION",
+  "EXIT_POLICY",
+  "ENTRY_CONDITION",
+  "POSITION",
+  "COST",
 ]);
-export type ExitPolicySlotIdDto = z.infer<typeof exitPolicySlotIdSchema>;
+export type AuthoringSlotGroupDto = z.infer<typeof authoringSlotGroupSchema>;
 
-/**
- * 应用一个退出政策槽的入参。
- *
- * 🔴 `policy` 用 `z.unknown()` **透传**：它的语义权威是服务端的
- *    `ExitPolicyDefinition` 校验器，shared 层复制一份 schema 只会造成双份口径漂移
- *    （与 StrategyDocument 的处理一致）。服务端在 `applyExitPolicySlot` 里复核。
- */
-export const applyExitPolicySlotInputSchema = z.object({
-  policy: z.unknown(),
-  slotId: exitPolicySlotIdSchema,
-  optionId: z.string().min(1, "optionId 必填"),
-  parameters: z.record(z.string(), strategyPresetParameterValueSchema),
-});
-export type ApplyExitPolicySlotInputDto = z.infer<typeof applyExitPolicySlotInputSchema>;
-
-/**
- * ENTRY_CONDITION —— 服务端权威入场规则槽的传输契约。
- *
- * 🔴 `slotId` 保持开放字符串而不是本地枚举：槽注册表与版本演进由服务端
- *    `server/research/strategyAuthoring/entryConditionSlots.ts` 唯一裁定，
- *    前端只按 vocabulary 下发的清单选择。
- * 🔴 `definition` 透传，canonical 语义由服务端策略 Schema / 槽模块校验。
- */
-export const entryConditionSlotIdSchema = z.string().min(1, "entryConditionSlotId 必填");
-export type EntryConditionSlotIdDto = z.infer<typeof entryConditionSlotIdSchema>;
-
-export const recognizeEntryConditionSlotsInputSchema = z.object({
+export const authoringTargetSchema = z.object({
+  recipe: z.unknown().nullable(),
   definition: z.unknown(),
+  executionAssumptions: z.unknown(),
 });
-export type RecognizeEntryConditionSlotsInputDto = z.infer<
-  typeof recognizeEntryConditionSlotsInputSchema
+export type AuthoringTargetDto = z.infer<typeof authoringTargetSchema>;
+
+export const recognizeAuthoringSlotsInputSchema = z.object({
+  target: authoringTargetSchema,
+});
+export type RecognizeAuthoringSlotsInputDto = z.infer<
+  typeof recognizeAuthoringSlotsInputSchema
 >;
 
-export const applyEntryConditionSlotInputSchema = z.object({
-  definition: z.unknown(),
-  slotId: entryConditionSlotIdSchema,
+export const applyAuthoringSlotInputSchema = z.object({
+  target: authoringTargetSchema,
+}).extend({
+  slotId: z.string().min(1, "slotId 必填"),
   optionId: z.string().min(1, "optionId 必填"),
   parameters: z.record(z.string(), strategyPresetParameterValueSchema).default({}),
 });
-export type ApplyEntryConditionSlotInputDto = z.infer<
-  typeof applyEntryConditionSlotInputSchema
+export type ApplyAuthoringSlotInputDto = z.infer<
+  typeof applyAuthoringSlotInputSchema
 >;
-/** A2 `getBlankDraft` 输入：可选绑定 Dataset Version（不传 = 未绑定骨架）。 */
+
+/** A2 getBlankDraft 输入：可选绑定 Dataset Version（不传 = 未绑定骨架）。 */
 export const strategyAuthoringBlankInputSchema = z.object({
   datasetVersionId: z.number().int().positive().optional(),
 });

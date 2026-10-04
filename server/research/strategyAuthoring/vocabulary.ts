@@ -16,16 +16,8 @@ import { RUNNER_STATE_DEFINITIONS } from "../stateFactorRegistry";
 import { STOP_POLICY_EXPERIMENTS } from "../exitPolicyExperiments";
 import { listStrategyRecipeProjections } from "../recipeRegistry";
 import type { StrategyRecipe } from "../strategySchema/types";
-import {
-  EXIT_POLICY_SLOTS,
-  type ExitPolicySlotId,
-  type ExitPolicySlotVisibility,
-} from "./exitPolicySlots";
-import {
-  ENTRY_CONDITION_SLOTS,
-  type EntryConditionSlotId,
-  type EntryConditionSlotVisibility,
-} from "./entryConditionSlots";
+import { listAuthoringSlotGroups } from "./authoringSlotRegistry";
+import type { AuthoringSlotGroupSummary } from "./authoringSlotTypes";
 import {
   EXIT_POLICY_RULE_ENVELOPE,
   STRATEGY_AUTHORING_SLOTS,
@@ -63,48 +55,6 @@ export interface StrategyAuthoringPresetSummary {
   readonly parameters: readonly StrategyPresetParameter[];
 }
 
-/**
- * FE-PLAN-004 —— 退出政策的槽表（**不含 \`patch\`**）。
- *
- * 🔴 前端只拿"有哪些槽、每槽有哪些方案、每个方案能调哪些参数"；
- *    **拼装 policy 的逻辑一律留在服务端**（\`applyExitPolicySlot\`）——
- *    与 SCOPE-002 §0.2 P4「前端只做选预设 + 填参数」同一纪律。
- */
-export interface StrategyAuthoringExitPolicySlotOptionSummary {
-  readonly optionId: string;
-  readonly displayName: string;
-  readonly summary: string;
-  readonly parameters: readonly StrategyPresetParameter[];
-}
-
-export interface StrategyAuthoringExitPolicySlotSummary {
-  readonly slotId: ExitPolicySlotId;
-  readonly label: string;
-  readonly question: string;
-  readonly visibility: ExitPolicySlotVisibility;
-  readonly options: readonly StrategyAuthoringExitPolicySlotOptionSummary[];
-}
-
-/**
- * ENTRY_CONDITION —— 入场规则槽摘要（**不含 conditions 模板**）。
- *
- * 前端只拿“有哪些槽、每槽有哪些方案、每个方案能调哪些参数”，
- * 条件 / 参数拼装一律由服务端 `applyEntryConditionSlot` 完成。
- */
-export interface StrategyAuthoringEntryConditionSlotOptionSummary {
-  readonly optionId: string;
-  readonly displayName: string;
-  readonly summary: string;
-  readonly parameters: readonly StrategyPresetParameter[];
-}
-
-export interface StrategyAuthoringEntryConditionSlotSummary {
-  readonly slotId: EntryConditionSlotId;
-  readonly label: string;
-  readonly question: string;
-  readonly visibility: EntryConditionSlotVisibility;
-  readonly options: readonly StrategyAuthoringEntryConditionSlotOptionSummary[];
-}
 export interface StrategyAuthoringRunnerState {
   readonly stateId: string;
   readonly version: string;
@@ -117,10 +67,8 @@ export interface StrategyAuthoringVocabulary {
   readonly vocabularyVersion: string;
   readonly presetSlots: readonly StrategyAuthoringPresetSlot[];
   readonly presets: readonly StrategyAuthoringPresetSummary[];
-  /** FE-PLAN-004：退出政策的 9 个规则槽（每槽「方案 + 参数」）。 */
-  readonly exitPolicySlots: readonly StrategyAuthoringExitPolicySlotSummary[];
-  /** ENTRY_CONDITION：服务端权威入场规则槽（每槽「方案 + 参数」，不含 conditions 模板）。 */
-  readonly entryConditionSlots: readonly StrategyAuthoringEntryConditionSlotSummary[];
+  /** 通用 AuthoringSlot 词表：前端统一按 group -> slots 渲染。 */
+  readonly authoringSlotGroups: readonly AuthoringSlotGroupSummary[];
   /**
    * 还没有退出政策时的**起步基准**（= 已登记实验 `SL-00` 的 policy）。
    *
@@ -188,45 +136,8 @@ export function buildStrategyAuthoringVocabulary(): StrategyAuthoringVocabulary 
     description: PRESET_SLOT_DESCRIPTION[slot],
   }));
 
-  const exitPolicySlots: StrategyAuthoringExitPolicySlotSummary[] = EXIT_POLICY_SLOTS.map(slot => ({
-    slotId: slot.slotId,
-    label: slot.label,
-    question: slot.question,
-    visibility: slot.visibility,
-    options: slot.options.map(option => ({
-      optionId: option.optionId,
-      displayName: option.displayName,
-      summary: option.summary,
-      parameters: option.parameters,
-    })),
-  }));
+  const authoringSlotGroups = listAuthoringSlotGroups();
 
-  const entryConditionSlots: StrategyAuthoringEntryConditionSlotSummary[] = ENTRY_CONDITION_SLOTS.map(slot => ({
-    slotId: slot.slotId,
-    label: slot.label,
-    question: slot.question,
-    visibility: slot.visibility,
-    options: slot.options.map(option => ({
-      optionId: option.optionId,
-      displayName: option.displayName,
-      summary: option.summary,
-      parameters: option.parameters.map(parameter => ({
-        code: parameter.code,
-        label: parameter.name,
-        description: parameter.description ?? "",
-        path: parameter.code,
-        valueType: parameter.dataType === "number" ? "number" : parameter.dataType === "boolean" ? "boolean" : "string",
-        ...(parameter.unit !== undefined ? { unit: parameter.unit } : {}),
-        ...(parameter.min !== undefined ? { min: parameter.min } : {}),
-        ...(parameter.max !== undefined ? { max: parameter.max } : {}),
-        ...(parameter.step !== undefined ? { step: parameter.step } : {}),
-        ...(parameter.allowedValues !== undefined ? { allowedValues: parameter.allowedValues } : {}),
-        required: parameter.required,
-        defaultValue: (parameter.defaultValue ?? 0) as StrategyPresetParameterValue,
-      })),
-    })),
-  }));
-  /** 起步基准 = 已登记实验 SL-00 的 policy（**引用**，不是复刻；漂移由测试钉住）。 */
   const baseExperiment = STOP_POLICY_EXPERIMENTS["SL-00"];
   const exitPolicyBasePolicy = (baseExperiment?.policy ?? {}) as unknown as Readonly<Record<string, unknown>>;
   const exitPolicyBaseLabel = "实验基准 SL-00：" + (baseExperiment?.name ?? "");
@@ -250,8 +161,7 @@ export function buildStrategyAuthoringVocabulary(): StrategyAuthoringVocabulary 
     presetSlots,
     presets: summaries.map(s => ({ presetId: s.presetId, slot: s.slot, displayName: s.displayName, status: s.status, version: s.version, advancedOnly: s.advancedOnly, parameters: s.parameters })),
     exitPolicyRuleEnvelope: EXIT_POLICY_RULE_ENVELOPE,
-    exitPolicySlots,
-    entryConditionSlots,
+    authoringSlotGroups,
     exitPolicyBasePolicy,
     exitPolicyBaseLabel,
     recipes,
@@ -269,8 +179,7 @@ export function buildStrategyAuthoringVocabulary(): StrategyAuthoringVocabulary 
     runnerStates,
     deprecatedRunnerBridgeStateField: true,
     exitPolicyRuleEnvelope: EXIT_POLICY_RULE_ENVELOPE,
-    exitPolicySlots,
-    entryConditionSlots,
+    authoringSlotGroups,
     exitPolicyBasePolicy,
     exitPolicyBaseLabel,
     strategyTypes: [...STRATEGY_TYPES],

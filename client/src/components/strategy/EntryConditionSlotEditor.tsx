@@ -10,7 +10,7 @@ import { ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { PresetParameter } from "@/components/strategy/PresetEditor";
+import type { PresetParameter } from "@/components/strategy/authoringSlotParameter";
 
 export type EntryConditionSlotParameterValue = number | boolean | string;
 

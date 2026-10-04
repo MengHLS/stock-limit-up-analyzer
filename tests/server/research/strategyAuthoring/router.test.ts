@@ -44,28 +44,38 @@ describe("strategyDomain.authoring · 只读面", () => {
     expect(vocab.strategyTypes).toContain("THREE_FACTOR_TOPN");
   });
 
-  it("ENTRY_CONDITION 路由：apply 返回 canonical conditions/parameters，再 recognize 精确往返", async () => {
-    const emptyDefinition = { entry: { conditions: [] }, parameters: [] };
-    const applied = await publicCaller.strategyDomain.authoring.applyEntryConditionSlot({
-      definition: emptyDefinition,
+  it("generic AuthoringSlot 路由：apply 返回完整片段，再 recognize 精确往返", async () => {
+    const definition = { entry: { conditions: [] }, parameters: [] };
+    const target = { recipe: null, definition, executionAssumptions: {} };
+    const applied = await publicCaller.strategyDomain.authoring.applyAuthoringSlot({
+      target,
       slotId: "TREND_PULLBACK_AFTER_FIRST_LIMIT_UP",
       optionId: "trend-pullback-after-first-limit-up",
       parameters: {},
     });
     expect(applied.issues).toEqual([]);
-    expect(applied.conditions.map((condition: any) => condition.id)).toContain("entry.trend_pullback.min");
-    expect(applied.parameters.map((parameter: any) => parameter.code)).toContain("entry_peak_pullback_max");
+    const appliedDefinition = applied.definition as {
+      entry: { conditions: Array<{ id: string }> };
+      parameters: Array<{ code: string }>;
+    };
+    expect(appliedDefinition.entry.conditions.map((condition) => condition.id)).toContain("entry.trend_pullback.min");
+    expect(appliedDefinition.parameters.map((parameter) => parameter.code)).toContain("entry_peak_pullback_max");
+    expect(applied.recipe).toBeNull();
+    expect(applied.executionAssumptions).toEqual({});
 
-    const recognized = await publicCaller.strategyDomain.authoring.recognizeEntryConditionSlots({
-      definition: { entry: { conditions: applied.conditions }, parameters: applied.parameters },
+    const recognized = await publicCaller.strategyDomain.authoring.recognizeAuthoringSlots({
+      target: {
+        recipe: applied.recipe,
+        definition: appliedDefinition,
+        executionAssumptions: applied.executionAssumptions,
+      },
     });
-    expect(recognized.slots).toEqual([
-      expect.objectContaining({
-        slotId: "TREND_PULLBACK_AFTER_FIRST_LIMIT_UP",
-        optionId: "trend-pullback-after-first-limit-up",
-        atDefaults: true,
-      }),
-    ]);
+    expect(recognized.slots).toContainEqual(expect.objectContaining({
+      group: "ENTRY_CONDITION",
+      slotId: "TREND_PULLBACK_AFTER_FIRST_LIMIT_UP",
+      optionId: "trend-pullback-after-first-limit-up",
+      atDefaults: true,
+    }));
   });
   it("getBlankDraft（未绑定）返回骨架零件 + 必填段清单", async () => {
     const blank = await publicCaller.strategyDomain.authoring.getBlankDraft({});

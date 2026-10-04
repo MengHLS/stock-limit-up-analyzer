@@ -24,7 +24,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TechnicalHint } from "@/components/common/FieldTechnicalDetails";
-import type { PresetParameter } from "@/components/strategy/PresetEditor";
+import type { PresetParameter } from "@/components/strategy/authoringSlotParameter";
 
 export type ExitSlotParameterValue = number | boolean | string;
 

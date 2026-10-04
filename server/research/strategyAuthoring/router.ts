@@ -11,13 +11,12 @@
  * ✅ 裁定 Q3：`diffAgainstVersion` **不在此暴露** —— 它是纯函数（`./diff.ts`），只给 tests / dev 用。
  */
 import { TRPCError } from "@trpc/server";
-import { z } from "zod";
 import { adminProcedure, publicProcedure, router } from "../../_core/trpc";
 import {
-  applyEntryConditionSlotInputSchema,
+  applyAuthoringSlotInputSchema,
   materializeStrategyPresetInputSchema,
   previewStrategyAuthoringDocumentInputSchema,
-  recognizeEntryConditionSlotsInputSchema,
+  recognizeAuthoringSlotsInputSchema,
   saveStrategyAuthoringDraftInputSchema,
   strategyAuthoringBlankInputSchema,
 } from "../../../shared/researchContracts";
@@ -30,21 +29,7 @@ import { buildStrategyAuthoringBlank } from "./blankDraft";
 import { resolveAuthoringDatasetBinding } from "./datasetBinding";
 import { materializePreset } from "./materialize";
 import { buildStrategyAuthoringVocabulary } from "./vocabulary";
-import {
-  EXIT_POLICY_SLOT_IDS,
-  applyExitPolicySlot,
-  exitSlotIsAtDefaults,
-  recognizeExitPolicySlot,
-} from "./exitPolicySlots";
-import type { ExitPolicyDefinition } from "../exitPolicyCommon";
-import { applyExitPolicySlotInputSchema } from "../../../shared/researchContracts";
-import {
-  ENTRY_CONDITION_SLOT_IDS,
-  applyEntryConditionSlot,
-  entryConditionSlotIsAtDefaults,
-  recognizeEntryConditionSlot,
-  type EntryConditionSlotDefinitionCarrier,
-} from "./entryConditionSlots";
+import { applyAuthoringSlot, recognizeAuthoringSlots } from "./authoringSlotRegistry";
 
 export interface StrategyAuthoringRouterOptions {
   readonly codeVersion: string;
@@ -54,16 +39,6 @@ function badRequest(message: string): never {
   throw new TRPCError({ code: "BAD_REQUEST", message });
 }
 
-function isEntryConditionDefinitionCarrier(value: unknown): value is EntryConditionSlotDefinitionCarrier {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  const entry = record.entry;
-  return typeof entry === "object"
-    && entry !== null
-    && !Array.isArray(entry)
-    && Array.isArray((entry as Record<string, unknown>).conditions)
-    && Array.isArray(record.parameters);
-}
 function summarizeValidationIssues(issues: readonly { readonly code: string; readonly path: string; readonly message: string }[]): string {
   const head = issues.slice(0, 5).map(item => `[${item.code}] ${item.path}: ${item.message}`).join("；");
   return issues.length > 5 ? `${head} …（共 ${issues.length} 处）` : head;
@@ -75,111 +50,23 @@ export function createStrategyAuthoringRouter(options: StrategyAuthoringRouterOp
     getVocabulary: publicProcedure.query(() => buildStrategyAuthoringVocabulary()),
 
     /**
-     * ENTRY_CONDITION —— 把当前 definition **认出**每个入场槽的方案与参数。
+     * 通用 AuthoringSlot —— 识别所有已登记槽（EXIT_POLICY / ENTRY_CONDITION）。
      *
-     * 🔴 识别只在服务端做；认不出返回 `optionId: null`，绝不就近匹配。
+     * 槽的语义由服务端 handler 决定；客户端只按 group -> slot -> option -> parameters 消费。
      */
-    recognizeEntryConditionSlots: publicProcedure
-      .input(recognizeEntryConditionSlotsInputSchema)
-      .query(({ input }) => {
-        if (!isEntryConditionDefinitionCarrier(input.definition)) {
-          return {
-            slots: ENTRY_CONDITION_SLOT_IDS.map(slotId => ({ slotId, optionId: null, parameters: {}, atDefaults: false })),
-          };
-        }
-        const definition = input.definition;
-        return {
-          slots: ENTRY_CONDITION_SLOT_IDS.map(slotId => {
-            const recognized = recognizeEntryConditionSlot(definition, slotId);
-            if (recognized === null) return { slotId, optionId: null, parameters: {}, atDefaults: false };
-            return {
-              slotId,
-              optionId: recognized.optionId,
-              parameters: recognized.parameters,
-              managedConditionIds: recognized.managedConditionIds,
-              atDefaults: entryConditionSlotIsAtDefaults(recognized, slotId),
-            };
-          }),
-        };
-      }),
+    recognizeAuthoringSlots: publicProcedure
+      .input(recognizeAuthoringSlotsInputSchema)
+      .query(({ input }) => recognizeAuthoringSlots(input.target)),
 
-    /**
-     * ENTRY_CONDITION —— 应用一个入场槽。
-     *
-     * 服务端负责认领条件 / 参数并只覆盖本槽拥有的内容；前端只提交
-     * `slotId + optionId + parameters`。`issues` 非空时原样返回当前数组。
-     */
-    applyEntryConditionSlot: publicProcedure
-      .input(applyEntryConditionSlotInputSchema)
-      .mutation(({ input }) => {
-        if (!isEntryConditionDefinitionCarrier(input.definition)) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "AUTHORING_ENTRY_CONDITION_DEFINITION_INVALID：definition 必须含 entry.conditions 与 parameters",
-          });
-        }
-        const result = applyEntryConditionSlot(
-          input.definition,
-          input.slotId,
-          input.optionId,
-          input.parameters,
-        );
-        return {
-          conditions: result.conditions,
-          parameters: result.parameters,
-          issues: result.issues,
-        };
-      }),
-    /**
-     * FE-PLAN-004 —— 把当前 policy **认出**每个槽现在是哪个方案 + 参数。
-     *
-     * 🔴 识别同样只在服务端做（前端不重写匹配口径）。认不出 ⇒ `optionId: null`
-     *    （UI 显示「本表单不识别」并**不改写**），绝不就近匹配。
-     */
-    recognizeExitPolicySlots: publicProcedure
-      .input(z.object({ policy: z.unknown() }))
-      .query(({ input }) => {
-        const policy = input.policy as ExitPolicyDefinition;
-        const usable = typeof policy === "object" && policy !== null && !Array.isArray(policy)
-          && typeof (policy as { stop?: unknown }).stop === "object"
-          && (policy as { stop?: unknown }).stop !== null;
-        return {
-          slots: EXIT_POLICY_SLOT_IDS.map(slotId => {
-            if (!usable) return { slotId, optionId: null, parameters: {}, atDefaults: false };
-            const recognized = recognizeExitPolicySlot(policy, slotId);
-            if (recognized === null) return { slotId, optionId: null, parameters: {}, atDefaults: false };
-            return {
-              slotId,
-              optionId: recognized.optionId,
-              parameters: recognized.parameters,
-              atDefaults: exitSlotIsAtDefaults(recognized, slotId),
-            };
-          }),
-        };
-      }),
-
-    /**
-     * FE-PLAN-004 —— 应用一个**退出政策槽**（止损位置 / 止盈 / 到期 / …）。
-     *
-     * 🔴 语义全在服务端：`applyExitPolicySlot` 负责认领、物化参数、**只覆盖该槽的键**
-     *    并保留其它字段（含本表单不编辑的 `stop.contexts` / `strongHold.scaleOutRatio`）。
-     *    前端只做"选哪个方案 + 填哪些参数"，**不得自行拼装 policy**。
-     *
-     * `issues` 非空 ⇒ `policy` 原样返回（**响亮拒绝**，不返回"看起来能用"的对象）。
-     */
-    applyExitPolicySlot: publicProcedure
-      .input(applyExitPolicySlotInputSchema)
-      .mutation(({ input }) => {
-        const base = input.policy as ExitPolicyDefinition;
-        if (typeof base !== "object" || base === null || Array.isArray(base)) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "AUTHORING_POLICY_INVALID：policy 必须是对象" });
-        }
-        if (typeof base.stop !== "object" || base.stop === null || Array.isArray(base.stop)) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "AUTHORING_POLICY_INVALID：policy.stop 缺失（退出政策必须含止损段）" });
-        }
-        const result = applyExitPolicySlot(base, input.slotId, input.optionId, input.parameters);
-        return { policy: result.policy, issues: result.issues };
-      }),
+    /** 通用 AuthoringSlot —— 应用一个槽，返回完整片段和 issues。 */
+    applyAuthoringSlot: publicProcedure
+      .input(applyAuthoringSlotInputSchema)
+      .mutation(({ input }) => applyAuthoringSlot(
+        input.target,
+        input.slotId,
+        input.optionId,
+        input.parameters,
+      )),
 
     /**
      * A2 —— 空白 canonical 草稿零件。
