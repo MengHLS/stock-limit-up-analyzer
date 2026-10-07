@@ -255,3 +255,17 @@ Goal 驱动：完整目标建议用 /goal <objective> 激活；Orchestrator 按 
 - 本文件由 `CODE-AGENT-INFRA-001` 建立。新增/修改规则时**先合并，不覆盖**。
 - 若本文件与 `docs/architecture/**` 冲突：**架构事实以 `docs/architecture/**` + 代码为准**，本文件只保留规则。
 - 若发现本文件描述的规则与 `.workbuddy/memory/PROJECT_RULES.md` 冲突：以**更严格**的一条为准，并把差异登记到 `docs/architecture/CHANGE-AUDIT.md`。
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in this repo (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles using the default label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

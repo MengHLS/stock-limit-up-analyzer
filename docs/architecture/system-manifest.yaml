@@ -5,10 +5,10 @@
 
 system:
   name: stock-limit-up-analyzer
-  baselineVersion: v2.0.0
+  baselineVersion: v2.2.0
   auditedAt: "2026-09-20"
-  lastChangeAt: "2026-09-20"
-  baselineHistory: ["v1.0.0 (2026-09-19 SYSTEM-BASELINE-001)", "v1.1.0~v1.4.0 (PARAMETER-001/002, ROBUSTNESS-001, OOS-001, WALK-FORWARD-001)", "v2.0.0 (2026-09-20 round-2: PHASE-A/R1/B/D + 判definit定日数据流变更)"]
+  lastChangeAt: "2026-10-04"
+  baselineHistory: ["v1.0.0 (2026-09-19 SYSTEM-BASELINE-001)", "v1.1.0~v1.4.0 (PARAMETER-001/002, ROBUSTNESS-001, OOS-001, WALK-FORWARD-001)", "v2.0.0 (2026-09-20 round-2: PHASE-A/R1/B/D + 判定日数据流变更)", "v2.1.0 (2026-10-03 SCOPE-002 策略创作工作台)", "v2.2.0 (2026-10-04 STRATEGY-T74-FORMALIZATION-001)", "v2.3.0 (2026-10-04 ENTRY-CONDITION-SLOTS-001)"]
   stack:
     frontend: React 19 + Vite 7 + wouter + tRPC client + Tailwind
     backend: Express + tRPC 11
@@ -785,3 +785,377 @@ strategyAuthoring:
       - researchRun.getFinalEvaluation
       - researchRun.getPaperTrading3570001
     evidence: "通用端点 vs 专项端点真实库比对逐字段一致（evaluationDetail 129.6860% / 407 日 / equity 199036.53 / WAITING_FOR_NEW_DATA）；缺坐标 ⇒ null；浏览器两个 Tab 渲染通过"
+
+# ---------------------------------------------------------------------------
+# STRATEGY-T74-FORMALIZATION-001（2026-10-04）
+# ---------------------------------------------------------------------------
+strategyT74Formalization:
+  baselineImpact: minor
+  experiment:
+    id: first-board-pullback/composite-runner-newhigh3-t74
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74
+    runnerBridge:
+      state: NEW_HIGH_3
+      decisionHoldingDays: 5
+      extendToHoldingDays: 74
+    physicalDatasetVersionId: 780001
+    datasetVersionLabel: v8
+    semanticsSource: "v8 is the current physical rebuild of the frozen v7/T80 semantics; 750001 metadata is READY but ds_* tables are empty"
+  runs:
+    observation:
+      runId: RUN-20261004-B067637E
+      gate: OBSERVATION_READY
+      aReturnPct: 15.787690712129931
+      cReturnPct: 151.0958341843399
+      runnerTrigger: 161
+    holdout:
+      runId: RUN-20261004-BF08CD36
+      parentRunId: RUN-20261004-B067637E
+      gate: PASS
+      protocolFingerprint: protocol-sha256:646d8ad19f5405034287aeed712d98f315863ac44f44ebfaaba169cb707b0b4d
+      holdoutAReturnPct: 47.218452022540006
+      holdoutCReturnPct: 105.8425817161599
+      holdoutAMaxDrawdownPct: 17.263937983053136
+      holdoutCMaxDrawdownPct: 14.058593401437204
+  strategy:
+    strategyId: first-limit-pullback-3f-top3-runner-t74
+    version: 1.0.0
+    strategyVersionId: 3600004
+    status: Draft
+    definitionFingerprint: a3d55c83e5de1edd6f91b0cc66949fac477155db1999a0f5f0ddd9b3bc523374
+    provenanceId: 690001
+    researchEvidenceFingerprint: evi-sha256:73552dd34ca8de6a
+  dbChange: none
+  migration: none
+  unchanged:
+    - first-limit-pullback-3f-top3-runner-hold20@1.0.0 (3570001)
+    - simulator
+    - canonicalMetrics
+    - server/strategyCore/**
+
+
+# ---------------------------------------------------------------------------
+# ENTRY-CONDITION-SLOTS-001（2026-10-04）—— 服务端权威入场规则槽
+# ---------------------------------------------------------------------------
+entryConditionSlots:
+  baselineImpact: minor
+  module: server/research/strategyAuthoring/entryConditionSlots.ts
+  featureModule: server/strategyCore/featureRegistry.ts
+  features:
+    - peakCloseSinceEvent
+    - pullbackFromEventPeakClose
+    - trendHoldsMa5Ma10
+  endpoints:
+    - strategyDomain.authoring.recognizeEntryConditionSlots
+    - strategyDomain.authoring.applyEntryConditionSlot
+  sharedContracts:
+    - entryConditionSlotIdSchema
+    - recognizeEntryConditionSlotsInputSchema
+    - applyEntryConditionSlotInputSchema
+  executionPath:
+    - "Core EVENT_TO_CURRENT feature history: MA5/MA10 may use prefix bars before T0"
+    - "Research condition compile accepts eventDayIndex"
+    - "entry.trend_pullback.* + Core unavailable => LOOP_RUN_ENTRY_CONDITION_CORE_REQUIRED"
+  dbChange: none
+  migration: none
+  frontend:
+    - client/src/components/strategy/EntryConditionSlotEditor.tsx
+    - client/src/components/strategy/DefinitionFields.tsx
+    - client/src/pages/StrategyDetail.tsx
+  verification:
+    tsc: "0 error"
+    focusedVitest: "47 files / 561 tests passed"
+    eolDrift: "0"
+
+# ---------------------------------------------------------------------------
+# STRATEGY-TREND-FUSION-P0-001（2026-10-04）
+# P0：3F 选股排序 × 趋势评分融合。只改候选排序；TopN / 仓位 / 退出 / Runner 冻结。
+# ---------------------------------------------------------------------------
+strategyTrendFusionP0:
+  baselineImpact: minor
+  experiment:
+    id: first-board-pullback/composite-runner-newhigh3-t74-trend
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-trend
+    controlStrategyId: first-limit-pullback-3f-top3-runner-t74@2.0.0
+    runnerBridge:
+      state: NEW_HIGH_3
+      decisionHoldingDays: 5
+      extendToHoldingDays: 74
+    physicalDatasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    datasetVersionLabel: v8
+    arms:
+      - { id: control, trendWeight: null, rank: "pure 3F (existing path)" }
+      - { id: trend-w20, trendWeight: 0.2, rank: "weighted 3F blend" }
+      - { id: trend-w30, trendWeight: 0.3, rank: "weighted 3F blend" }
+      - { id: trend-w50, trendWeight: 0.5, rank: "weighted 3F blend" }
+    frozenCoordinates:
+      - topN=3 / maxPositions=5 / EQUITY_RATIO tiers
+      - SL-18.1 unified exit chain / candidateExitPolicy=DISABLED
+      - runnerBridge NEW_HIGH_3 / 5 / 74
+  trendScore:
+    module: server/research/recipeFeatures/trendScoreFeatures.ts
+    formula: "(structureScore + momentumScore + pullbackScore) / 3"
+    structureScore: "close > windowMean AND mean(last3) > mean(first3)"
+    momentumThresholds: { weakBelow: 0, strongAtOrAbove: 0.03 }
+    pullbackThresholds: { shallowAtOrBelow: 0.03, deepAbove: 0.08 }
+    deviationFromPlan:
+      planned: trendHoldsMa5Ma10 (close > MA10 AND MA5 > MA10)
+      reason: "prefix table has only relativeDay=0 (verified 750001/780001); no rd<0 preheat rows => MA10 uncomputable at T+5"
+      status: candidate-boundary (must be frozen on the training window before HOLDOUT)
+  contractChange:
+    file: shared/researchExperimentsContracts.ts
+    field: "compositeExecution.extensionSelectionArms? (optional)"
+    defaultBehavior: "unchanged (single control arm)"
+  dbChange: none
+  migration: none
+  productionExecutionPath: none
+  untouched: "3600005@2.0.0 / provenance 690002 / 6210005 / 6210006 / 3570001"
+  realRun:
+    runId: RUN-20261004-1CA33DAD
+    status: COMPLETED
+    datasetVersionId: 780001
+    startedAt: "2026-10-04T00:13:05Z"
+    completedAt: "2026-10-04T00:16:23Z"
+    elapsedSecApprox: 215
+    selectedEventsUnion: 10320
+    executionRows: 1888970
+    controlParity: PASS
+    arms:
+      - { id: control, trendWeight: null, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434 }
+      - { id: trend-w20, trendWeight: 0.2, returnPct: -59.285630163742, maxDrawdownPct: 70.43560124013597, trades: 1517 }
+      - { id: trend-w30, trendWeight: 0.3, returnPct: -85.60011496494006, maxDrawdownPct: 88.78737103384361, trades: 1562 }
+      - { id: trend-w50, trendWeight: 0.5, returnPct: -95.25460995611013, maxDrawdownPct: 96.03184153019659, trades: 1610 }
+    verdict: "P0 V1 trend score as a ranking term is REJECTED (monotone dose-response); control parity PASS"
+    diagnosis:
+      discreteTrendScoreValues: 7
+      modalShare: "0 (34.39%) + 1/6 (31.16%) = 65.55% of 43550 candidates"
+      selectionChurnDays: { w20: "74.2%", w30: "90.2%", w50: "94.8%" }
+      selectedMeanTrend: { control: 0.2477, w20: 0.481, w30: 0.6442, w50: 0.7703 }
+      selectedMeanThreeFactor: { control: 0.6647, w20: 0.6371, w30: 0.5836, w50: 0.5123 }
+  gateRunP02:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-trend-gate
+    runId: RUN-20261004-A4573C46
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 228
+    selectedEventsUnion: 11561
+    executionRows: 1967285
+    controlParity: PASS
+    usage: "ranking stays pure 3F; trendScore only filters candidates"
+    arms:
+      - { id: control, minTrendScore: null, excluded: 0, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434 }
+      - { id: gate-ge1of6, minTrendScore: 0.16666666666666666, excluded: 14976, returnPct: -21.032936759500032, maxDrawdownPct: 70.45710530754262, trades: 1484 }
+      - { id: gate-ge1of3, minTrendScore: 0.3333333333333333, excluded: 28547, returnPct: -74.32112256904414, maxDrawdownPct: 80.48598711543127, trades: 1546 }
+      - { id: gate-ge2of3, minTrendScore: 0.6666666666666666, excluded: 34459, returnPct: -75.21957612040002, maxDrawdownPct: 79.13915963234217, trades: 1539 }
+    verdict: "REJECTED - trend gate removes 24.7%/70.1%/87.6% of the control picks and costs 172/225/226 pp"
+    diagnosis:
+      killedShareOfControlPicks: { ge1of6: "24.7%", ge1of3: "70.1%", ge2of3: "87.6%" }
+      meanThreeFactorKilledVsKept: { ge1of6: "0.6286 vs 0.6765", ge1of3: "0.6617 vs 0.6718", ge2of3: "0.6667 vs 0.6503" }
+      insight: "alpha is concentrated in the narrow per-day 3F top-3; any meaningful pool shrink displaces picks to worse ranks"
+    combinedVerdict: "trendScore V1 is anti-informative for this strategy (both as ranking term and as gate, monotone)"
+  trendV2RunP1:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-trend-v2
+    runId: RUN-20261004-2B87DD65
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 216
+    selectedEventsUnion: 10200
+    executionRows: 1881408
+    controlParity: PASS
+    definition: "v2 = equal weight of cross-sectional percentiles of (+pullbackDepth, -momentum, -windowGap); fused = (1-w)*3F + w*v2"
+    arms:
+      - { id: control, v2Weight: null, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434 }
+      - { id: v2-w20, v2Weight: 0.2, returnPct: -14.513582406299886, maxDrawdownPct: 60.22691625027443, trades: 1463 }
+      - { id: v2-w35, v2Weight: 0.35, returnPct: -57.9714721425399, maxDrawdownPct: 69.54127114766912, trades: 1424 }
+      - { id: v2-w50, v2Weight: 0.5, returnPct: -77.27140763380005, maxDrawdownPct: 85.08248385667206, trades: 1460 }
+    verdict: "REJECTED - sign-corrected v2 also degrades monotonically, so the cause is not signal direction but selection fragility"
+    combinedTrendVerdict: "v1 ranking -210pp / v1 gate -172pp / v2 ranking -166pp (control 151.10%): stop using trend score in this strategy's selection layer"
+    newRisk: "strategy is highly sensitive to per-day top-3 displacement; 151% likely depends on few large winners (fat-tail / fragile) - run winner-concentration analysis before any production step"
+  t74SlotsRunP2:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-slots
+    runId: RUN-20261004-704FFBD9
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 149
+    controlParity: PASS
+    frozen: "selection, ranking, candidate pool, exit chain, runner, dataset coordinates"
+    arms:
+      - { id: control, maxDailyBuys: 2, maxPositions: 5, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: slots-3-5, maxDailyBuys: 3, maxPositions: 5, returnPct: 119.08976286746005, maxDrawdownPct: 44.875979526901254, trades: 1447, bigWin50: 9, bigWin100: 2 }
+      - { id: slots-3-8, maxDailyBuys: 3, maxPositions: 8, returnPct: 16.155014205388007, maxDrawdownPct: 56.27121236917802, trades: 2308, bigWin50: 11, bigWin100: 2 }
+      - { id: slots-3-12, maxDailyBuys: 3, maxPositions: 12, returnPct: -1.5486293604560442, maxDrawdownPct: 54.2873854218407, trades: 3360, bigWin50: 15, bigWin100: 2 }
+    verdict: "WIDENING SLOTS DOES NOT HELP - more slots do capture more >=+50% trades (9->15) but dilute capital badly (151% -> -1.5%); the biggest winner stays identical (+130.4%) in every arm"
+    derivedHypothesis: "~156 entered names had >=+50% potential vs only 9 realized => the next lever is the EXIT/holding policy, not the buy list"
+  t74StopWideRunP3:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-stopwide
+    runId: RUN-20261004-670F0677
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 152
+    controlParity: PASS
+    varies: "exitPolicy.stop.anchor.stopRatio only (6% control / 8% / 10% / 12%)"
+    arms:
+      - { id: control, stopRatio: 0.06, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, p05TradePct: -6.191765561164253, worseThan10Pct: 12 }
+      - { id: stop-08, stopRatio: 0.08, returnPct: 64.6355983984199, maxDrawdownPct: 49.87972199584667, trades: 1311, bigWin50: 8, p05TradePct: -8.058953278291424, worseThan10Pct: 15 }
+      - { id: stop-10, stopRatio: 0.1, returnPct: 76.52933023111999, maxDrawdownPct: 45.883510751136335, trades: 1251, bigWin50: 9, p05TradePct: -10.049474588872748, worseThan10Pct: 130 }
+      - { id: stop-12, stopRatio: 0.12, returnPct: 45.130, maxDrawdownPct: 47.017, trades: 1220, bigWin50: 8, p05TradePct: -12.047, worseThan10Pct: 88 }
+    verdict: "WIDENING THE STOP IS STRICTLY WORSE - maxDD 43.30% -> 49.88/45.88/47.02%, return 151% -> 64.6/76.5/45.1%, per-trade pain worse, big winners unchanged"
+    implication: "no free drawdown knob left on this chain; only lower exposure (smaller per-position size / cash buffer) or portfolio-level timing can cut DD, both at the cost of return"
+  t74CarryoverRunP6:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-carryover
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-carryover
+    runId: RUN-20261004-EE05EA28
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 197
+    selectedEventsUnion: 9231
+    executionRows: 1821397
+    controlParity: PASS
+    policy: "intent-level carry: fresh top5 ranks 3..5 enter pending; stale 3F score; maxAge 1|2 decision days; optional margin 0.03"
+    arms:
+      - { id: control, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: carry1-stale, maxAgeDays: 1, margin: 0, returnPct: 99.34565169211986, maxDrawdownPct: 55.41258017404069, trades: 1436, bigWin50: 7, carryTrades: 292, carryNetPnl: 3129.7103123999636, carryBigWin50: 1 }
+      - { id: carry1-m03, maxAgeDays: 1, margin: 0.03, returnPct: 84.88223697571978, maxDrawdownPct: 53.75160526140217, trades: 1441, bigWin50: 8, carryTrades: 156, carryNetPnl: -7014.559864400033, carryBigWin50: 0 }
+      - { id: carry2-m03, maxAgeDays: 2, margin: 0.03, returnPct: 66.71723787820018, maxDrawdownPct: 52.366879494100615, trades: 1455, bigWin50: 7, carryTrades: 255, carryNetPnl: -735.3595845909704, carryBigWin50: 0 }
+    verdict: "REJECTED - stale-score carry displaces fresh candidates without adding independent alpha; all carry arms lose to control (151.10%) and raise maxDD from 43.30% to 52~55%"
+    nextStep: "only revisit with a versioned same-day re-score that is separately validated; no production StrategyVersion created"
+    changedContracts: "additive research pure function applyCompositeCarryover; no CandidateEvaluationRun / SimulationConfig / engine schema change"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+  t74CarryoverRefreshRunP7:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh
+    runId: RUN-20261005-4BB55265
+    failedRunIdBeforeFix: RUN-20261005-F2AD66B2
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 205
+    selectedEventsUnion: 9231
+    executionRows: 1821397
+    controlParity: PASS
+    featureVersion: carry-refresh-v1.0.0
+    policy: "same-day CarryRefreshV1 on union(fresh,pending); per-component cross-sectional percentile; fused=(1-w)*3F+w*refresh; suspended carry is unscorable and remains pending, no imputation"
+    arms:
+      - { id: control, refreshWeight: null, maxAgeDays: 0, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: refresh-only-w20, refreshWeight: 0.2, maxAgeDays: 0, returnPct: 25.630673993260068, maxDrawdownPct: 49.10519022235182, trades: 1452, bigWin50: 8, bigWin100: 0 }
+      - { id: refresh-only-w35, refreshWeight: 0.35, maxAgeDays: 0, returnPct: -36.79997383667981, maxDrawdownPct: 51.341175776704006, trades: 1469, bigWin50: 7, bigWin100: 0 }
+      - { id: carry1-refresh-w20, refreshWeight: 0.2, maxAgeDays: 1, returnPct: 82.10539265706018, maxDrawdownPct: 41.13786674563229, trades: 1460, bigWin50: 9, bigWin100: 1, carryTrades: 366, carryNetPnl: -35695.22112270007, carryBigWin50: 1, unscorableCarry: 3 }
+      - { id: carry1-refresh-w35, refreshWeight: 0.35, maxAgeDays: 1, returnPct: 30.692202261040215, maxDrawdownPct: 52.59107467997863, trades: 1504, bigWin50: 8, bigWin100: 1, carryTrades: 430, carryNetPnl: -47567.06340110016, carryBigWin50: 2, unscorableCarry: 3 }
+    verdict: "REJECTED - refresh-only itself destroys control alpha (151.10% -> 25.63% / -36.80%); carry1-refresh does not restore it (82.11% / 30.69%); carry trade PnL is negative"
+    nextStep: "stop carry-weight search; require a separately validated new information source with low correlation and positive IC before another selection experiment"
+    changedContracts: "additive CarryRefreshV1 feature + optional refresh policy on research pure function; no engine / SimulationConfig change"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+  t74LateEntryRunP8:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-late-entry
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-late-entry/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-late-entry
+    runId: RUN-20261005-DF5EDDEB
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 228
+    selectedEventsUnion: 9231
+    executionRows: 1821397
+    controlParity: PASS
+    featureVersion: late-entry-3f-rolling-5-v1.0.0
+    policy: "delay arms keep original top3 and move decision to T+7/T+8/T+10; rescore arms keep original top5 gate and recompute rolling 3F on D-5..D, then output top3; signal at close, execute next open"
+    arms:
+      - { id: control, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: delay-t7, returnPct: -68.20528569660713, maxDrawdownPct: 82.276025393911, trades: 1644, bigWin50: 6, bigWin100: 2, droppedUnavailable: 7 }
+      - { id: delay-t8, returnPct: -80.66923054057992, maxDrawdownPct: 89.39178725840651, trades: 1694, bigWin50: 7, bigWin100: 2, droppedUnavailable: 7 }
+      - { id: delay-t10, returnPct: -44.89798395640019, maxDrawdownPct: 77.51447623046836, trades: 1670, bigWin50: 5, bigWin100: 2, droppedUnavailable: 35 }
+      - { id: rescore-t7, returnPct: -33.818129591539844, maxDrawdownPct: 65.9511061862116, trades: 1607, bigWin50: 6, bigWin100: 2, droppedUnscorable: 8 }
+      - { id: rescore-t8, returnPct: -58.45940336907981, maxDrawdownPct: 70.32059366211544, trades: 1666, bigWin50: 3, bigWin100: 1, droppedUnscorable: 16 }
+      - { id: rescore-t10, returnPct: -58.71080201173805, maxDrawdownPct: 68.11277866090441, trades: 1641, bigWin50: 2, bigWin100: 1, droppedUnscorable: 22 }
+    readBack: "resultAvailable=true / resultIssue=null"
+    verification:
+      tsc: 0
+      focusedTests: 23
+      testChanged: "681 passed / 5 known DB-state failures"
+      eolDrift: 0
+    verdict: "REJECTED - delaying T+6 entry destroys the strategy; rolling 3F inside original top5 remains deeply negative, so no reason to open full-universe T+7 re-ranking"
+    nextStep: "stop carry/delay/window variants; require a new low-correlation positive-IC information source before another selection experiment"
+    changedContracts: "additive LateEntry3F feature + applyCompositeLateEntry research pure function; no engine / SimulationConfig change"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+  t74EventGateRunP9:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-event-gate
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-event-gate/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-event-gate
+    runId: RUN-20261005-8668C385
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 161
+    eventMetadataRows: 5569
+    controlParity: PASS
+    policy: "original top3 ranking unchanged; only new-entry intents are gated; thresholds fixed from 2019-2024; missing event facts fail closed"
+    gates:
+      - { id: control, removed: 0, kept: 0, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: gap-p50, removed: 2918, kept: 2651, returnPct: 38.06376975334012, maxDrawdownPct: 56.76013401174826, trades: 1366, bigWin50: 8, bigWin100: 1 }
+      - { id: gap-p33, removed: 3776, kept: 1793, returnPct: 76.88455012514446, maxDrawdownPct: 48.6333783324438, trades: 1203, bigWin50: 9, bigWin100: 1 }
+      - { id: turnover-p50, removed: 2902, kept: 2667, returnPct: 165.74020567398014, maxDrawdownPct: 49.44017449393602, trades: 1273, bigWin50: 7, bigWin100: 1 }
+      - { id: combo-p50, removed: 4457, kept: 1112, returnPct: 43.92932310427995, maxDrawdownPct: 37.09144157477233, trades: 893, bigWin50: 3, bigWin100: 1 }
+      - { id: histlimit-p67, removed: 3121, kept: 2448, returnPct: -40.99863241694005, maxDrawdownPct: 68.26076363988732, trades: 1066, bigWin50: 5, bigWin100: 1 }
+    verdict: "REJECTED for super-winner capture: no gate increases realized >=+50% count; turnover-p50 gains return but lowers big winners and raises drawdown; combo reduces drawdown but destroys return"
+    nextStep: "only external data supplementation (money flow / dragon-tiger / northbound / fundamentals) can add a genuinely new information source"
+    changedContracts: "compositeExecution.includeEventMetadata optional; DatasetDataReader.loadEventsBatch additive; no existing default behavior changed"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+    readBack: "resultAvailable=true / resultIssue=null"
+    verification:
+      tsc: 0
+      focusedTests: 43
+      eolDrift: 0
+  t74SubNewRunP10:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-subnew
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-subnew/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-subnew
+    runId: RUN-20261007-68FD5C7F
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 168
+    controlParity: PASS
+    listingDates: 3299
+    policy: "3F ranking pre-filter: drop candidates whose listing age at the decision date is < N calendar days (lower ranks backfill)"
+    arms:
+      - { id: control, excludeListedWithinDays: null, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2, subNewTrades: 51, subNewNetPnl: 10323.553560859988 }
+      - { id: excl365, excludeListedWithinDays: 365, returnPct: 65.39066943458027, maxDrawdownPct: 50.771567473378596, trades: 1444, bigWin50: 9, bigWin100: 2, excludedCandidates: 1591, subNewTrades: 0, subNewNetPnl: 0 }
+      - { id: excl180, excludeListedWithinDays: 180, returnPct: 131.14772353143985, maxDrawdownPct: 43.036340068098156, trades: 1434, bigWin50: 10, bigWin100: 2, excludedCandidates: 904, subNewTrades: 31, subNewNetPnl: -93.30847979999726 }
+      - { id: excl90, excludeListedWithinDays: 90, returnPct: 109.96556364480013, maxDrawdownPct: 44.81625053042115, trades: 1437, bigWin50: 9, bigWin100: 2, excludedCandidates: 478, subNewTrades: 42, subNewNetPnl: 6214.824593399988 }
+    verdict: "REJECTED - excluding sub-new listings does not help: all three thresholds lose to control (-19.95 / -41.13 / -85.71 pp); excl180 is the only arm with more >=+50% trades (9 -> 10) but pays -19.95 pp; threshold order is non-monotonic (365 worst, 180 best) => another instance of selection-perturbation fragility"
+    mechanism: "removed slots are backfilled by lower ranks, and P4 already showed rank4/5 backfill has negative net PnL and 0 trades >=+50%"
+    changedContracts: "extensionSelectionArms[].excludeListedWithinDays optional; CompositeDatasetBuildRequest.includeListingDates optional; payload.listingDateBySecurityId; BuildCompositeSourceRunInput.candidateListingFilter (pre-rank)"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+    verification:
+      tsc: 0
+      focusedTests: 33
+      eolDrift: 0
+  frontendRegistration:
+    pages: client/src/researchExperiments/pages.ts
+    listGrouping: "client/src/pages/researchExperiments/experimentModes.ts (multi-factor); also backfills composite-runner-newhigh3-t74 into other-scope"
+  verification:
+    tsc: "0 error"
+    newTests: "P0 34 (trendScoreFeatures 20 + trendRankFusion 6 + compositeDatasetProviderSelection 3 + compositeRunnerTrendFusion 5); manifest 9; mode grouping 15"
+    testChanged: "619 passed / 5 failed - all in limitUp.test / limitUp.watch.test (pre-existing DB-state failures, no import relation to P0)"
+    eolDrift: "0"

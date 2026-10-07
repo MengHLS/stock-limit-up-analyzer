@@ -324,3 +324,23 @@ strategy_versions ──(闭环运行)─ closed_loop_backtest_run (strategyId, 
 🔴 **与 D-91（`search_robustness_*`）/ D-92（`oos_validation_*`）的关系：三族并存、语义各不相同** ——
 D-91 是**冻结快照的邻域统计**（零重跑），D-92 是**单窗口的真实重跑**，D-93 是**多窗口滚动的真实重跑 + 描述性汇总**。
 三者的守卫方向互不相同，**实现不得互相搬移**。
+
+## D-95 STOCK-SELECTION-005 增量：新增 1 张表（2026-10-06 · `STOCK-SELECTION-005`）
+
+| 表 | 列数 | 说明 |
+|---|---|---|
+| `stock_selection_run` | **19** | 一次**手动保存**的选股结果快照：坐标（strategyId / sourceKind / datasetVersionId 可空 / decisionDate / topN）+ **选股清单 `picksJson`** + **剔除统计 `excludedJson`** + 候选/合格计数 + 事件窗 + 保存时点 |
+
+- 🔴 **0 FK / 0 DDL 之外的 DML / 0 ALTER**：手工幂等 SQL `drizzle/0055_stock_selection_run.sql`
+  （1 × `CREATE TABLE IF NOT EXISTS` + 2 × `CREATE INDEX`）+ `scripts/applyStockSelectionRun.mjs`
+  （`-- @guard:` 守卫 + 建表/索引/列签名逐一断言 + 全库 0 FK 校验 + 建表后行数断言；三模式 `--check` / `--dry-run` / apply）。
+  ⇒ 实查：第 1 次 `executed=3`，第 2 次 `executed=0 / skipped=3`；`--check` PASS。
+- 🔴 **唯一约束即幂等机制**：`uq_stock_selection_run_runId`（确定性 `SEL-YYYYMMDD-<8hex>`，
+  键 = strategyId + sourceKind + datasetVersionId + decisionDate + topN）⇒ 同坐标重复保存**覆盖同一行**，
+  不堆重复行；不同 TopN / 载体 / 数据集版本各自独立成行。
+- 🔴 **写入面白名单**：本域**只写** `stock_selection_run` 一张表。`select` 仍是**纯读**查询；
+  唯一 mutation 是 `saveRun`，且**客户端只提交坐标**（picks / 剔除统计恒由服务端重算后落库，不接受客户端数据）。
+- ⚠️ **本表不参与任何执行路径**：清空它只影响「能不能回看当时为什么没选上」，
+  不影响选股语义 / 回测正确性；重算永远走 `server/stockSelection/**` 的权威实现，本表**不是第二套口径**。
+- ⚠️ **快照解析响亮失败**：`excludedJson` / `picksJson` 解析不出来 ⇒ 抛错（不静默当成「没有剔除」）。
+- 📌 **真实库表数**：由 70 → **71**（本节新增 1 张）；`DATABASE-MAP.md` §3 的 round-2 计数未回改，以本节为准。

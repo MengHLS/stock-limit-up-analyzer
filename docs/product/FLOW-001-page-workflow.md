@@ -1,6 +1,6 @@
 # FLOW-001 — 页面功能流程梳理（研究闭环六阶段）
 
-> 日期：**2026-10-03** · 状态：**IMPLEMENTED（§4 侧栏重组已落地；四缺口已由 PRODUCT-DECISIONS-001 裁定并落地为 PD-01/PD-04/PD-03）** · 作者：Product Agent
+> 日期：**2026-10-03**（2026-10-07 增补：单策略专项页收敛）· 状态：**IMPLEMENTED（§4 侧栏重组已落地；四缺口已由 PRODUCT-DECISIONS-001 裁定并落地为 PD-01/PD-04/PD-03；§5 的 P3 遗留已关闭）** · 作者：Product Agent
 > 事实来源：`client/src/App.tsx`（44 条路由）· `client/src/components/AppShell.tsx`（侧栏 27 项）· `client/src/pages/**`（页面头注释 + tRPC 调用）· `server/routers.ts`（21 个顶层 key）
 > 范围前提：**组合回测 `/backtest` 保持原样**（内容 / 命名 / 位置均不动），不纳入主流程。
 > 下游：`docs/product/PRODUCT-DECISIONS-001.md`（四缺口决策）
@@ -31,7 +31,7 @@
         交出：验证结论（必须标注 in-sample / out-of-sample）
                                  │
                                  ▼
-   ⑥ 前向与复盘：前向纸面交易 · 模拟盘（3570001 专项）· 复盘工作台
+   ⑥ 前向与复盘：前向纸面交易 · 复盘工作台
         交出：复盘发现 → 回到 ② （闭环）
 
    ⚙  工具箱：组合回测 /backtest —— 保持原样，独立入口
@@ -44,9 +44,9 @@
 | ① 数据地基 | 数据能不能支撑这个研究？ | `/data-health` `/datasets/**` `/historical-state` `/stock-sync` `/upload` `/operation-logs` | READY 的 `dataset_version`（坐标 + 区间 + 口径 + gate） |
 | ② 观察与假设 | 市场什么状态？我看到什么异常？ | `/`(首页) `/limit-up` `/market` `/sentiment-analysis` `/leader-candidates` `/sentiment-alerts` | 研究问题（Observation → Hypothesis） |
 | ③ 研究实验 | 这个假设历史上成立吗？ | `/research-experiments` → `/:group/:key` → `/runs/:runId` → `/candidates/:id` | Raw Result → Candidate（含坐标与证据指纹） |
-| ④ 策略化 | 能变成可执行、可复现的策略吗？ | `/strategies` → `/:id` → `/:id/compare` `/parameter-search` `/performance` `/backtest-runs` `/backtest-compare` | 冻结的 StrategyVersion + 冻结参数集 + 留档回测 |
+| ④ 策略化 | 能变成可执行、可复现的策略吗？ | `/strategies` → `/:id` → `/:id/compare` `/parameter-search` `/backtest-runs` `/backtest-compare`（绩效 = 策略详情「最终评估」Tab） | 冻结的 StrategyVersion + 冻结参数集 + 留档回测 |
 | ⑤ 验证 | 是不是拟合出来的？ | `/validation` `/validation/robustness` `/validation/oos` `/validation/walk-forward` `/regime-report` | 验证结论（标注 IS / OOS 分离） |
-| ⑥ 前向与复盘 | 实盘节奏下还成立吗？执行得怎么样？ | `/paper-trading` `/paper-trading-3570001` `/review-workbench` | 复盘发现 → 回到 ② |
+| ⑥ 前向与复盘 | 实盘节奏下还成立吗？执行得怎么样？ | `/paper-trading` `/review-workbench`（**按策略版本的留档视图在策略详情 Tab**） | 复盘发现 → 回到 ② |
 
 ## 3. 交接物（流程骨架）
 
@@ -59,7 +59,7 @@
 | ⑤→⑥ | 验证结论（IS/OOS 分离） | ✅ 数据在；✅ **统一状态标识已补齐** —— 策略详情新增「验证状态」Tab（三块验证 × 状态台账 + 深链；只表示「跑没跑过」） |
 | ⑥→② | 复盘发现 | ✅ **闭环已在 UI 表达** —— 首页流程带显式写出「↻ ⑥ → 回到 ② 观察」；复盘工作台新增「闭环出口」区（回 ② 观察 ×2 / 去 ③ 研究 ×1），并声明「只回跳，不替你下研究结论」 |
 
-## 4. 侧栏信息架构重组（✅ 已实现 2026-10-03；28 项一项不丢）
+## 4. 侧栏信息架构重组（✅ 已实现 2026-10-03；2026-10-07 起 26 项）
 
 > 🔴 **本文件早先的自相矛盾已修正**：草案曾把「组合回测」放进 ⚙ 工具箱，与 §5 的「🔒 不挪位置」冲突。
 > 以 §5 为准（用户要求组合回测暂时保持原样）⇒ 最终实现里组合回测**留在 ④ 策略**，不设工具箱分组。
@@ -68,14 +68,14 @@
 ① 数据        数据域健康 · 数据集 · 历史状态查询 · 行情同步 · 上传图片 · 操作日志          (6)
 ② 观察        涨停复盘 · 大盘分析 · 情绪分析 · 龙头候选 · 情绪预警                      (5)
 ③ 研究        独立实验 · 候选                                                          (2)
-④ 策略        策略 · 参数搜索 · 绩效仪表盘 · 回测历史 · 回测对比 · 最终评估(专项) · 组合回测   (7)
+④ 策略        策略 · 参数搜索 · 回测历史 · 回测对比 · 组合回测                      (5)
 ⑤ 验证        验证总览 · 稳健性 · 样本外 OOS · Walk-Forward · Regime / 报告             (5)
-⑥ 前向与复盘   前向纸面交易 · 模拟盘(专项) · 复盘工作台                                  (3)
+⑥ 前向与复盘   前向纸面交易 · 复盘工作台                                               (2)
 ```
 
 原分组为「复盘分析 / 研究 / 策略 / 验证 / 交易 / 系统」（按**功能来源**）；现按**用户所处的研究闭环阶段**划分。
 
-**结构锁**：`tests/client/src/pages/pageFlowContracts.test.ts` §14–§18（分组顺序 · 28 项集合 · 归位 · 组合回测不动 · 旧预览入口）。
+**结构锁**：`tests/client/src/pages/pageFlowContracts.test.ts` §14–§18（分组顺序 · 26 项集合 · 归位 · 组合回测不动 · 旧预览入口）+ §42–§45（单策略专项页收敛）+ §49–§51（策略域优化：证券可读化 / 状态诚实 / 绩效入口收敛）。
 
 **首页入口（原 §4 备注「建议改造成流程入口 + 今日观察」）**：✅ 已落地为**加法式**六阶段入口带
 `client/src/components/research/ResearchFlowNav.tsx`（`current="OBSERVE"`），**行情总览区块一个未删**；
@@ -89,9 +89,10 @@
 | `/regime-report` | 由「系统」→「⑤ 验证」 | P1 | ✅ |
 | `/review-workbench` | 由「系统」→「⑥ 前向与复盘」 | P1 | ✅ |
 | `/paper-trading` | 由「交易」→「⑥ 前向与复盘」 | P2 | ✅ |
+| `/performance` | **退出侧栏**（绩效入口收敛到「策略 → 版本 → 最终评估」）；页面保留为**技术预览**可达，顶部有归属声明 | P3 | ✅ **已收敛（2026-10-07）**：侧栏 ④ 策略 6→5；旧路径不删（就绪门 + 生产回测预览仍有排查价值），页面顶部声明「已不在侧栏」并指向策略详情 |
 | ~~观察类页面补显「当前 `datasetVersionId`」~~ | ❌ **撤销** | ~~P2~~ | 观察页 **dataset-unaware**（读 `limit_up_records` 等 legacy 表），**没有可显示的坐标**；强行显示会造假。见 `SPEC-002` §1 与 `PRODUCT-DECISIONS-001` PD-01「前提修正」 |
 | `/walk-forward`（旧预览） | 保持可达，统一从「⑤ 验证总览」进入 | P2 | ✅（已不在侧栏；入口见 `ValidationIndexPage`） |
-| `/strategy-final-evaluation` `/paper-trading-3570001` | 标记「专项页」，长期收敛进策略详情标签 | P3 | ✅ **标记已落地**（侧栏标签加「（专项）」，并注明绑定单一策略 3570001）；⏳ 长期收敛进策略详情标签仍待后续 |
+| `/strategy-final-evaluation` `/paper-trading-3570001` | 收敛进策略详情「最终评估 / 模拟盘」Tab（侧栏不再单列） | P3 | ✅ **已收敛（2026-10-07）**：侧栏删除两个「（专项）」项；两条旧路径保留为**静态改写**到 `/strategies/<该策略坐标>?version=…&tab=evaluation\|paper`（不 404、不渲染第三套视图）；策略详情新增 `?tab=` 深链（白名单 + 切换写回 URL）；两个专项页文件已删除；通用 Tab 成为唯一留档入口 |
 | `/backtest` 组合回测 | 🔒 **保持原样**（不挪位置 / 不改名 / 不改内容） | — | ✅ |
 
 ## 6. Non-goals 与后续
@@ -99,6 +100,6 @@
 - ❌ 不动组合回测（内容 / 命名 / 位置）
 - ❌ 不拆 `sentiment.*` 端点桶 —— **跨域**，交 Architecture Agent 独立出 Scope（现状：6+ 页面共用该 tRPC key）
 - ❌ 不裁定 Finding / Conclusion 语义 —— 已由 PD-02 裁定**不暴露**
-- ⏳ **P3 遗留**：`/strategy-final-evaluation` / `/paper-trading-3570001` 的「专项页」标记与长期收敛进策略详情标签
+- ✅ **P3 遗留已关闭（2026-10-07）**：`/strategy-final-evaluation` / `/paper-trading-3570001` 两个单策略专项页已收敛进策略详情「最终评估 / 模拟盘」Tab —— 侧栏不再出现任何策略坐标，旧路径保留为静态改写（详见 §5）
 
 > §6（原四缺口）已全部由 `docs/product/PRODUCT-DECISIONS-001.md` 裁定，并落地为 PD-01 / PD-04 / PD-03（见 `SPEC-001..003` / `FE-PLAN-001..002` / `docs/architecture/SCOPE-001-*.md`）。

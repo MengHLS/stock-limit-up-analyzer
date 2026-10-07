@@ -1,10 +1,12 @@
 # SYSTEM-BASELINE — 全局架构基线
 
-> **Baseline Version：`v2.1.0`**（**minor** —— `SCOPE-002` 策略创作工作台：新增 `server/research/strategyAuthoring/**`（8 模块）· `strategyDomain.authoring.*`（5 端点，**不新增顶层 key**）· 8 份 shared 契约 · 1 个前端通用预设编辑器 · **S7** 策略留档（评估 / 模拟盘）按版本坐标通用化（`researchRun.getStrategyVersion*` 2 端点，原专项端点收敛为薄封装）；**0 表 / 0 列 / 0 migration**；不改 simulator / backtest / evaluation / paper trading ⇒ 不触发 `GLOBAL AUDIT REQUIRED`。详见 `CHANGE-AUDIT.md` 2026-10-03 `SCOPE-002` 与 `CONTRACT-MAP.md` C-98）
-> **上一版 Baseline：`v2.0.0`**（**major** —— round-2 全量审计，触发 `GLOBAL AUDIT REQUIRED` 第 4 条（核心数据流变化：判定日 `decisionOffsetDays` 贯穿 Dataset→Run→Experiment→Analysis）+ 第 7 条（核心 Contract 变化：4 份新 shared 契约 + 新增 `shared/patternSemantics.ts`）+ 第 1 条（Domain 新增：`searchRobustness` / `oosValidation` / `walkForward`）。历史：`v1.4.0` = WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
+> **Baseline Version：`v2.7.0`**（**minor** —— `T74-EVENT-GATE-P9-001`：新增可选事件元数据注入、DatasetDataReader.loadEventsBatch、事件事实 gate 与 P9 实验入口；不新增回测原语、不改正式策略、不改 simulator、**0 表 / 0 migration**。真实 Run `RUN-20261005-8668C385` 的事件 gate 全部未增加超级票笔数。详见 `CHANGE-AUDIT.md` 2026-10-05）
+> **上一版 Baseline：`v2.6.0`**（**minor** —— `T74-LATE-ENTRY-P8-001`；历史版本链见 `CHANGE-AUDIT.md`）
+> **历史 Baseline：`v2.2.0`**（**minor** —— `STRATEGY-T74-FORMALIZATION-001`；历史版本链见 `CHANGE-AUDIT.md`）
+> **历史 Baseline：`v2.0.0`**（**major** —— round-2 全量审计，触发 `GLOBAL AUDIT REQUIRED` 第 4 条（核心数据流变化：判定日 `decisionOffsetDays` 贯穿 Dataset→Run→Experiment→Analysis）+ 第 7 条（核心 Contract 变化：4 份新 shared 契约 + 新增 `shared/patternSemantics.ts`）+ 第 1 条（Domain 新增：`searchRobustness` / `oosValidation` / `walkForward`）。历史：`v1.4.0` = WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
 > **Last Audit Time：`2026-09-19`**（SYSTEM-BASELINE-001，一次性全局审计）
-> **Last Change Time：`2026-10-03`**（`SCOPE-002` 策略创作工作台 · 见 `CHANGE-AUDIT.md`）
-> **审计方式**：真实代码 + 真实库（只读探针）+ 既有测试基线；**代码变更 = 0 / DB 变更 = 0 / migration = 0**。
+> **Last Change Time：`2026-10-05`**（`T74-EVENT-GATE-P9-001` · 见 `CHANGE-AUDIT.md`）
+> **审计方式**：真实代码 + 真实库（只读探针）+ 既有测试基线；**本次变更 = 新增事件元数据只读注入 / 事件 gate / 1 个实验入口 / 0 migration**。
 >
 > ⚠️ **两个必须知道的前提（本轮实测）**
 > 1. **审计对象 = 工作区（working tree），不是 HEAD**。round-2（2026-09-20）实测：工作区有 **14 个未提交的 `server/**` 文件 + 1 个 `shared/researchContracts.ts`**（= **PHASE-R1/B/D 三个阶段**的改动尚未提交；而 PARAMETER-001/002 · ROBUSTNESS-001 · OOS-001 · WALK-FORWARD-001 已随 `bb89eb8`/`e6cf717`/`0e90fc1` 等提交入库）⇒ 「HEAD 的代码」与「本基线描述的代码」**不是同一个版本**。
@@ -27,7 +29,7 @@
 | 定位 | 从「涨停/股票分析应用」升级为 **个人量化策略研究平台** |
 | 技术栈 | React 19 · Vite 7 · Express · tRPC 11 · Drizzle ORM（mysql2 / TiDB Cloud）· TypeScript strict · Vitest |
 | 规模（实查 **2026-09-20**） | `server/**` **676** 个 `.ts` · `client/src/**` **213** 个 `.ts/.tsx` · `tests/**` **290** 个测试文件 · `docs/**` **232** 个 `.md` · `scripts/**` **117** 个 |
-| DB | **73** 张 BASE TABLE（schema.ts 声明 **70** + `__drizzle_migrations` + 2 张 legacy 动态行表）· **45** 个 migration（`0000…0044`） |
+| DB | **73** 张 BASE TABLE（schema.ts 声明 **70** + `__drizzle_migrations` + 2 张 legacy 动态行表）· **58** 个 migration（`0000…0056`） |
 | 前端 | **33** 条路由 · 5 组侧栏导航 · **21** 个 tRPC 顶层 key |
 | 当前阶段 | STEP 12 数据地基 `RESEARCH_READY = TRUE`；**BACKTEST-002 = COMPLETE**；**PARAMETER-001 / ROBUSTNESS-001 / OOS-001 / WALK-FORWARD-001 已全部落地**（`9bs`/`9bt`/`9bu`/`9bv`/`9bw`）；**PHASE-A/R1/B/D 四阶段 COMPLETE**（`9by`/`9bz`/`9ca`/`9cb`）⇒ 下一个未占用编号 = **`9cc`** |
 | 最终目标 | 让用户把主观交易经验 → 明确规则 → 程序化策略 → 历史验证 → 参数优化 → 稳健性/OOS → 模拟交易 → 交易纪律，形成**可信、可复现**的闭环 |
@@ -194,7 +196,7 @@
 |---|---|
 | BASE TABLE 总数 | **73** = schema.ts 声明 **70** + `__drizzle_migrations` + 2 张 `rd_rows_*`（legacy）（实查 2026-09-20T02:46Z） |
 | 外键约束 | **0**（全软引用） |
-| migration | **45** 个（`0000…0044`）；**journal 止 0023 / snapshot 止 0015** ⇒ `db:push` **仍不可用**；0041~0044 全部靠 bespoke `scripts/apply*.mjs` 旁路执行（`-- @guard` 幂等 + `--dry-run` / `--check`） |
+| migration | **58** 个（`0000…0056`）；**journal 止 0023 / snapshot 止 0015** ⇒ `db:push` **仍不可用**；0041~0056 全部靠 bespoke `scripts/apply*.mjs` 旁路执行（`-- @guard` 幂等 + `--dry-run` / `--check`） |
 | 实际 apply 机制 | 手写 SQL（`-- @guard:` 幂等）+ 14 个专用 `scripts/apply*.mjs\|mts` + 通用 `applySqlMigration.mjs` |
 | 数据集记账 | `ds_*` 五表 = **1,603,084** 行 = Σ `dataset_version.totalRows`（v1 60,002 + v2 1,543,082）⇒ **闭合，差 0** |
 | 策略 | `strategies` 10 / `strategy_versions` 11（Draft 10 + Validated 1）/ 5 投影表 24·17·19·9·9 / provenance 9 |
@@ -456,7 +458,7 @@ Step 10 如果发现 BASELINE_DRIFT：执行 Drift Audit（见 §20）
 
 | 方式 | 需要读的东西 |
 |---|---|
-| ❌ 全量重审计 | 676 server 文件 + 213 client 文件 + 45 migration + 290 测试 + 232 文档 |
+| ❌ 全量重审计 | 676 server 文件 + 213 client 文件 + 58 migration + 290 测试 + 232 文档 |
 | ✅ 增量审计 | `SYSTEM-BASELINE.md` + `system-manifest.yaml` + `CHANGE-AUDIT.md` + 本 Domain 若干文件 |
 
 ---
@@ -775,7 +777,7 @@ WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
 |---|---|---|
 | `drizzle/schema.ts` | 2292 行 / 60 表 | **2947 行 / 70 表** |
 | 真实库 BASE TABLE | 63 | **73**（= 70 + `__drizzle_migrations` + 2 张 `rd_rows_*`） |
-| migration | 41（`0000…0040`） | **45**（`0000…0044`） |
+| migration | 41（`0000…0040`） | **58**（`0000…0056`） |
 | `db:push` | 不可用 | **仍不可用**（journal 止 0023 / snapshot 止 0015） |
 | `research_artifact` | 未登记 | **31 行**（全 `REPORT`/`INLINE`）；⚠️ **无唯一约束** |
 | `parameter_search_*` | 不存在 | run **3** / combination **12** / result **8** |
@@ -806,7 +808,7 @@ WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
 | # | 原表述 | 实际 | 处置 |
 |---|---|---|---|
 | **BD-05** | 9 份文档版本号为 `v1.0.0`（`SYSTEM-BASELINE.md` 已升 `v1.4.0`）⇒ **同一次变更只升了 1 份文件** | 基线自身**版本分叉** | 11 份文件统一为 **`v2.0.0`** |
-| **BD-06** | `SYSTEM-BASELINE.md:28/193/195/457`、`DATABASE-MAP.md:13/14/16/48`、`system-manifest.yaml:scale` 仍写 **63 表 / 60 声明 / 41 migration** | 实查 **73 / 70 / 45** | 逐处改为双读数（`round-1 → round-2`） |
+| **BD-06** | `SYSTEM-BASELINE.md:28/193/195/457`、`DATABASE-MAP.md:13/14/16/48`、`system-manifest.yaml:scale` 仍写 **63 表 / 60 声明 / 41 migration** | 实查 **73 / 70 / 58** | 逐处改为双读数（`round-1 → round-2`） |
 | **BD-07** | （新）`docs/testing/README.md` 头写「288 测试文件」，但命令表硬编码「277 个文件」 | `scripts/genTestDocs.mts:338` 硬编码 | **未修**（生成物禁手改）⇒ 登记：改硬编码常量需改脚本 |
 
 ### 19.6 round-2 工程化变化（**改变后续所有任务的成本模型**）
@@ -827,3 +829,24 @@ WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
 | `vitest run` | 8 失败文件 / 17 用例 | **7 失败文件 / 16 用例（全部环境依赖）** ⇒ 判据 = **零新增失败文件** |
 | `checkEolDrift --strict` | 0 | **0** |
 | 测试文件总数 | 276 | **290** |
+
+
+---
+
+## ENTRY-CONDITION-SLOTS-001 增量（2026-10-04）
+
+- **新能力**：服务端权威的 `ENTRY_CONDITION` 入场规则轴；首个槽 `TREND_PULLBACK_AFTER_FIRST_LIMIT_UP`，首个方案为「首板后趋势峰值回撤买点」。
+- **新特征**：
+  - `peakCloseSinceEvent` = `max(close[T0..T])`
+  - `pullbackFromEventPeakClose` = `(peakCloseSinceEvent - close[T]) / peakCloseSinceEvent`
+  - `trendHoldsMa5Ma10` = `close > MA10 && MA5 > MA10 ? 1 : 0`
+  - 三者均为 close 时点可用、PIT 安全；MA 可使用首板日前 prefix 历史。
+- **新入口 / 契约**：
+  - `server/research/strategyAuthoring/entryConditionSlots.ts`
+  - `strategyDomain.authoring.recognizeEntryConditionSlots`
+  - `strategyDomain.authoring.applyEntryConditionSlot`
+  - `entryConditionSlotIdSchema` / `recognizeEntryConditionSlotsInputSchema` / `applyEntryConditionSlotInputSchema`
+- **执行链**：Core 用完整可见历史计算 `EVENT_TO_CURRENT` 特征；Research 声明式条件编译接受 `eventDayIndex`；只要文档含 `entry.trend_pullback.*`，Core 不可用时直接报 `LOOP_RUN_ENTRY_CONDITION_CORE_REQUIRED`，禁止静默回落 legacy recipe。
+- **DB**：无 schema / migration / 历史数据回填。
+- **前端**：策略定义第②段新增 `EntryConditionSlotEditor`；服务端 `managedConditionIds` 用于从手动条件列表隐藏槽管理条件；前端只提交槽选择与参数，conditions / parameters 由服务端物化后原子写回。
+- **验证**：`pnpm run check` 0 错；定向 47 文件 / 561 用例全绿；`checkEolDrift --strict` 0。

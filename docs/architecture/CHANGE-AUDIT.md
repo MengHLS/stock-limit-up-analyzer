@@ -1574,3 +1574,1084 @@
 - **Regression Result**：`pnpm run check` ⇒ **0 错**；`exitPolicySlots.test.ts` ⇒ **19 例**；IA ⇒ **33 例**（新增 33：槽渲染条件基于 `effectiveExitPolicy`、改槽也用它、推荐组合标明「可选」、前端**不得**硬编码 policy）；两文件合跑 ⇒ **52/52**
 - **未做**：本轮**未跑** `test:changed`（预算用尽）；真实 DOM 仍未实测。
 - **GLOBAL AUDIT REQUIRED**：**NONE**
+
+---
+
+## 2026-10-04 · `STRATEGY-T74-FORMALIZATION-001`
+
+- **Task**：按路线二把 `NEW_HIGH_3 / decisionHoldingDays=5 / extendToHoldingDays=74` 研究臂注册为独立实验，执行 OBSERVATION → HOLDOUT → Strategy Bridge，创建证据合规的正式 StrategyVersion。
+- **Changed Domains**：Research Experiment（新增 T74 实验）· Strategy（新增独立 StrategyVersion + provenance）。
+- **Changed Files**：`research-experiments/first-board-pullback/composite-runner-newhigh3-t74/**`（新增）· `research-experiments/manifest.ts` · `client/src/researchExperiments/pages.ts`。
+- **Changed Contracts**：无新增顶层契约；复用既有 `ExperimentDefinition` / `COMPOSITE_PORTFOLIO` / OBSERVATION-HOLDOUT confirmatory protocol / `createStrategyFromEvidenceRuns`。新增的实验 ID 为 `first-board-pullback/composite-runner-newhigh3-t74`。
+- **Changed DB**：无 schema / migration；新增真实 Run **2 条**、StrategyVersion **1 条**（`strategy_versions.id=3600004`）、provenance **1 条**（`strategy_research_provenance.id=690001`）。
+- **Changed Execution Path**：无生产执行链改动；只新增独立实验入口与桥接创建路径。
+- **实际坐标与修复**：历史坐标 `750001`（v7）元数据 READY，但当前库物理 `ds_*` 五表为空；改用当前物理重建坐标 `780001`（v8，同 73003 事件 / 同日期范围）后恢复 T80 parity。
+- **OBSERVATION**：`RUN-20261004-B067637E` / COMPLETED / gate `OBSERVATION_READY`；A=`15.787690712129931%` / C=`151.0958341843399%` / trigger=`161`，与 T80-001 冻结值一致。
+- **HOLDOUT**：`RUN-20261004-BF08CD36` / COMPLETED / gate `PASS` / protocol `protocol-sha256:646d8ad19f5405034287aeed712d98f315863ac44f44ebfaaba169cb707b0b4d`；Holdout A=`47.218452022540006%` → C=`105.8425817161599%`，MaxDD `17.263937983053136%` → `14.058593401437204%`。
+- **Strategy Bridge**：创建 `first-limit-pullback-3f-top3-runner-t74@1.0.0`（StrategyVersion ID `3600004`，status `Draft`，definition fingerprint `a3d55c83e5de1edd6f91b0cc66949fac477155db1999a0f5f0ddd9b3bc523374`）+ provenance `690001`；证据指纹 `evi-sha256:73552dd34ca8de6a`。
+- **未变化**：`first-limit-pullback-3f-top3-runner-hold20@1.0.0`（ID `3570001`、provenance `660001`）逐字段未修改；未改 simulator / canonicalMetrics / Strategy Core / Dataset schema。
+- **Regression Result**：`pnpm run check` 0 错；`pnpm run test:changed` 3 failed files / 8 failed tests（`limitUp.test`、`limitUp.watch`、`threeFactorTopNStrategyDocument`；均在既有工作区失败集内且与本任务无 import/依赖关系）、1877 passed；`node scripts/checkEolDrift.mjs --strict` 0。
+- **Baseline Impact**：**minor** —— 新增独立实验 entry point 与 StrategyVersion 落库；更新 `SYSTEM-BASELINE.md` / `system-manifest.yaml` 到 `v2.2.0`。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+
+---
+
+## 2026-10-04 · `ENTRY-CONDITION-SLOTS-001`
+
+- **Task**：新增服务端权威的 `ENTRY_CONDITION` 入场规则槽，首个方案为「首板后趋势峰值回撤买点」，并把 Core / Research 双执行链、shared 契约、策略定义前端接成可复用能力。
+- **Changed Domains**：`strategy` · `research/strategyAuthoring` · `frontend`。
+- **Changed Files**：`server/strategyCore/{featureRegistry,runtime}.ts` · `server/research/strategySchema/definition.ts` · `server/research/recipeFeatures/pullbackFeatures.ts` · `server/research/recipeRegistryAtoms.ts` · `server/research/conditionSignal/compile.ts` · `server/research/strategyAuthoring/{entryConditionSlots,router,vocabulary}.ts` · `shared/researchContracts.ts` · `server/runWorkbenchAssembly/assemble.ts` · `client/src/components/strategy/{EntryConditionSlotEditor,DefinitionFields,definitionDraft,DefinitionProgressOverview}.tsx` · `client/src/pages/StrategyDetail.tsx`。
+- **Changed Contracts**：新增派生行情字段 `peakCloseSinceEvent` / `pullbackFromEventPeakClose` / `trendHoldsMa5Ma10`；`FeatureDefinition.historyMode`（缺省 `TRAILING_BARS`，新增 `EVENT_TO_CURRENT`）；新增 `entryConditionSlotIdSchema` / `recognizeEntryConditionSlotsInputSchema` / `applyEntryConditionSlotInputSchema`；新增 `strategyDomain.authoring.recognizeEntryConditionSlots` / `applyEntryConditionSlot`；装配输入新增可选 `eventDayIndex`。
+- **Changed DB**：**无 schema / migration / DDL / DML**；conditions / parameters 继续落既有 canonical JSON 与投影表。
+- **Changed Execution Path**：Core 对 `EVENT_TO_CURRENT` 使用完整可见历史（MA 可使用首板日前 prefix）；声明式条件编译支持 `eventDayIndex`；若文档声明 `entry.trend_pullback.*` 但 Core 不可用，抛 `LOOP_RUN_ENTRY_CONDITION_CORE_REQUIRED`，不回落 legacy recipe；旧文档 / 旧条件语义不变。
+- **Potential Baseline Drift**：无；新增 `entry.trend_pullback.*` 命名空间仅对新选槽版本生效，旧版本不自动升级、不回填。
+- **Regression Result**：`pnpm run check` 0 错；定向 47 文件 / 561 用例全绿；`node scripts/checkEolDrift.mjs --strict` 0；`pnpm run test:changed` 结果中 3 个已知无关失败文件（`limitUp` / `limitUp.watch` / `threeFactorTopNStrategyDocument`）保持既有失败集。
+- **Baseline Impact**：**minor** —— 新增 `ENTRY_CONDITION` entry point、shared contract 与可复用 slot registry；更新 `SYSTEM-BASELINE.md` / `system-manifest.yaml` 到 `v2.3.0`。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-04 · `STRATEGY-3600005-FINAL-EVALUATION-001`
+
+- **Task**：修正 T74 桥接生成文档缺失的 3F 条件 / 分层仓位 / `candidateExitPolicy`，创建修正版 StrategyVersion `2.0.0`，并执行最终评估。
+- **Changed Domains**：Strategy（修正版 + provenance）· Evaluation（最终评估留档）。
+- **Changed Files**：`scripts/runStrategyT74FinalEvaluation.mts`（新增）· `docs/architecture/CHANGE-AUDIT.md` · `docs/architecture/SYSTEM-BASELINE.md` · `docs/architecture/system-manifest.yaml`。
+- **Changed Contracts**：无新增顶层契约；复用现有 StrategyDocument / closed_loop_backtest_run / evaluationDetail 载荷。
+- **Changed DB**：无 schema / migration；新增 StrategyVersion `3600005`（`first-limit-pullback-3f-top3-runner-t74@2.0.0`，Draft，fingerprint `f6b6147210758ad9ce6f37cffc0d43cab1675a99cb38bb79b3fc18df86dfef3c`）、provenance `690002`；旧 `3600004@1.0.0` 标记 `Retired`；新增评估留档 `6210005` / `6210006`。
+- **Changed Execution Path**：无 simulator / canonicalMetrics / Strategy Core 改动。修正后的文档包含 3 条 entry conditions、`EQUITY_RATIO` 分层仓位、`candidateExitPolicy=DISABLED` 与 Runner T74。
+- **最终评估**：Full baseline 1.62.1=`15.787690712129931%` / T74=`151.0958341843399%`；MaxDD `54.80801079322579%` → `43.302944323482485%`；Runner trigger=`161`；OOS full-run equity slice `43.45785336542358%` → `89.48123527626247%`。isolated HOLDOUT 独立重跑仍为 `47.218452022540006%` → `105.8425817161599%`，两种口径不得混称。
+- **端点验证**：`loadStrategyVersionEvaluation({strategyId:"first-limit-pullback-3f-top3-runner-t74",strategyVersion:"2.0.0"})` ⇒ baseline `6210005` / promoted `6210006`，任务 `STRATEGY-3600005-FINAL-EVALUATION-001`。
+- **未变化**：`3570001` / provenance `660001` 未修改；未改数据库 schema；未进入模拟盘 / Production。
+- **Regression Result**：`pnpm run check` 0 错；最终评估真实落库 + 只读端点选择 PASS；`node scripts/checkEolDrift.mjs --strict` 0。`test:changed` 的既有 3 个无关失败文件不在本任务依赖链。
+- **Baseline Impact**：**minor** —— 本任务修正版与最终评估已登记；当前 `SYSTEM-BASELINE.md` 的 `v2.3.0` 头由并发 `ENTRY-CONDITION-SLOTS-001` 会话持有，未覆盖其内容；本任务以本 CHANGE-AUDIT 条目为准。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-04 · `STRATEGY-3600005-EVAL-CONTRACT-REPAIR-001`
+
+- **Task**：修复最终评估留档 `6210005` / `6210006` 的 `resultJson`，使标准闭环详情读取符合当前 `ClosedLoopRunResult` 契约。
+- **根因**：评估生成时复用了历史 `5970002` 的旧式 `stages/wiring/assembly` 模板；现行 schema 要求 stage 含 `outputKind` / `outputHandoffFingerprint` / `blocked`，且 wiring / assembly 字段形状已升级。
+- **Changed DB**：无 schema / migration；仅重写既有 `6210005` / `6210006` 两行 `resultJson`，保留原 `evaluationDetail`。
+- **修法**：重建为当前契约下的 14-stage 最小闭环结果：前 5 阶段 `EXECUTED`、其余 `SKIPPED`；补齐合法 `overall` / `runnerInjected` / `wiring` / `assembly` / `blockedSummary`。
+- **验证**：`closedLoopRunResultSchema.safeParse` 两行均 PASS；`getClosedLoopBacktestRun(6210006)` 返回 `resultIssue=null`、`result` 非空、14 stages；`loadStrategyVersionEvaluation(2.0.0)` 仍选中 baseline `6210005` / promoted `6210006`，Full T74=`151.0958341843399%`、Runner trigger=`161`。
+- **Changed Files**：`scripts/runStrategyT74FinalEvaluation.mts`（生成器改为直接构造当前 contract 的 result，不再复制旧模板）。
+- **补充修复（明细可渲染）**：`backtest` stage output 恢复真实 `equityCurve` 与 `trades`，`tradesTruncated=false`；前端 `buildClosedLoopRunViewModel` 实测 promoted 行返回 `trades=1434`、`equityCurve=1863`，首个成交与末日权益点可读。
+- **Baseline Impact**：NONE。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-04 · `COMPARE-DETAILS-UX-001`
+
+- **Task**：修复回测对比页的成交明细/收益曲线不可用与操作可达性问题。
+- **Changed Files**：`client/src/components/strategy/StrategyEvaluationTemplate.tsx`（新增收益曲线图）· `client/src/pages/BacktestCompare.tsx`（刷新同时刷新详情缓存）· `client/src/components/strategy/ClosedLoopRunResultPanel.tsx`（交易详情入口移至 sticky 左列）· `tests/client/src/components/strategy/backtestTradeDetailsTable.test.ts`。
+- **Changed DB**：无 schema / migration；补齐既有评估行 `6210005` / `6210006` 的 `stages[backtest].output.initialCapital=100000`，未改动指标。
+- **根因**：`BacktestCompare#buildVersionCompareCurve` 要求 `initialCapital` 才能把 equity 转成累计收益率；且成交表“交易详情”原本在最右列，横向滚动后不可达。
+- **验证**：批量 `getBacktests([6210005,6210006])` 返回 trades `1619/1434`、equityCurve 各 `1863` 点；曲线合并器输出 `1863` 行，两条序列各 `1863` 点；成交明细源码契约测试 **13/13**；EOL 0。
+- **Baseline Impact**：NONE。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+
+---
+
+## 2026-10-04 · `STRATEGY-TREND-FUSION-P0-001`（3F 选股排序 × 趋势评分融合 · P0）
+
+- **Task**：在当前最高收益策略 `first-limit-pullback-3f-top3-runner-t74@2.0.0` 之上加「趋势评分」，**P0 只做选股排序融合**：把候选排序值从纯 3F 合成分换成 `(1-w)·3F + w·trendScore`（w = 0.2 / 0.3 / 0.5 三条臂 + 控制臂），TopN / maxPositions / 分层仓位 / SL-18.1 退出链 / Runner T74 / 数据集坐标**全部冻结**。目的不是一次性实验，而是把能力做成**前端可点击的研究实验**（后续赢家再走新 HOLDOUT 与 Strategy Bridge）。
+- **Changed Domains**：`research`（趋势评分纯计算 + 组合层排序融合）· `research-experiment`（新增 P0 实验入口）· `shared`（descriptor 可选扩展）。
+- **Changed Files**：
+  - 新增 `server/research/recipeFeatures/trendScoreFeatures.ts`（趋势评分纯计算：结构 / 动量 / 回踩 + 加权融合；PIT 形状防线）
+  - `server/research/compositeRunner/index.ts`（`BuildCompositeSourceRunInput.rankFusion` 可选融合 + `decisionWindowBarsOf` + `FusionAccounting`；缺省/null ⇒ 既有纯 3F 排序**逐字段不变**）
+  - `server/researchExperiments/compositeDatasetProvider.ts`（扩展行按**臂并集**装载；缺省 = 单控制臂 ⇒ 既有行为不变）
+  - `shared/researchExperimentsContracts.ts`（`compositeExecution.extensionSelectionArms` **可选**字段）
+  - `server/researchExperiments/runner.ts`（把 `extensionSelectionArms` 透传给 provider）
+  - 新增 `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend/**`（experiment / page / README）
+  - `research-experiments/manifest.ts` · `client/src/researchExperiments/pages.ts`（注册：实验 + 前端页面）
+  - `client/src/pages/researchExperiments/experimentModes.ts`（列表页分组归位：P0 进「多因子」，并**补登**遗漏的 `composite-runner-newhigh3-t74` 到「其他口径」）· `tests/client/src/pages/researchExperimentModeGrouping.test.ts`（分档台账 34 → 36）
+  - 新增测试 `tests/server/research/recipeFeatures/trendScoreFeatures.test.ts`（20 例）· 共享夹具 `tests/server/research/compositeRunner/trendFusionFixture.ts` · `tests/server/research/compositeRunner/trendRankFusion.test.ts`（6 例）· `tests/server/researchExperiments/compositeDatasetProviderSelection.test.ts`（3 例：扩展行并集 + 公平性）· `tests/server/researchExperiments/compositeRunnerTrendFusion.test.ts`（5 例）
+- **Changed Contracts**：新增 `ExperimentDescriptor.compositeExecution.extensionSelectionArms?`（可选；缺省行为与既有一致）。趋势评分**不是**平台级契约，只落在 `trendScoreFeatures.ts` 一处纯函数 + 组合执行输入的可选参数上；未新增第二套回测引擎 / 未改 Strategy Core 语义。
+- **Changed DB**：**无 schema / migration / DDL / DML**（本轮未写库；实验需由用户在平台上发起 Run）。
+- **Changed Execution Path**：仅**实验侧**组合执行模块新增可选排序融合；生产链（Strategy Core / simulator / canonicalMetrics）零改动。`rankFusion` 缺省 / `null` 时既有 3F 排序与账目逐字段不变（有测试锁）。
+- **趋势评分 V1 与方案 V1 的一处如实偏差**：方案 V1 的结构分写作 `trendHoldsMa5Ma10`（收盘 > MA10 且 MA5 > MA10）；实测 `750001` / `780001` 的 `ds_first_limit_pullback_prefix` **只有 `relativeDay = 0`**（每事件 1 行；`post` 为 `1..80`）⇒ **没有任何 rd < 0 的预热行**，决策日（T+5）可见历史只有事件窗 6 根 ⇒ MA10 在该坐标上不可算。P0 因此把结构分定义为**事件窗内均线结构**（`收盘 > 窗内收盘均值` 且 `最近 3 根均值 > 最早 3 根均值`）。该式与动量 / 回踩阈值一样属**候选边界**：必须在训练段冻结后才允许上 HOLDOUT，调整即等于换定义（须新开臂 / 新版本）。
+- **PIT**：趋势评分只读 `rd 0..决策日`（`compositeRunner#decisionWindowBarsOf`），入参多于决策窗长度时 `trendScoreFeatures` **响亮抛错**（不静默 slice）；`trendScore` 不可算的候选被**排除并计数**（`fusionDroppedCandidates`），不插补。有测试锁：改动 `rd >= 6` 的行不改变任何选中结果。
+- **公平性前提（扩展行）**：融合臂可能选中与纯 3F 臂**不同**的事件；实验 descriptor 用 `extensionSelectionArms` 声明四条臂，平台 provider 按**并集**装载 `rd 17..80`，否则融合臂会在 rd16 被数据边界截断、与 Runner 语义不可比。该不变量有测试锁（臂表 ⇄ descriptor 逐项一致）。
+- **未变化**：`3600005@2.0.0` / provenance `690002` / 评估留档 `6210005` / `6210006` **一字未改**；未改 `3570001`；未改 RuleGraph 语义 / 特征定义 / 执行语义；未进 Candidate / Production。
+- **Regression Result**：`pnpm run check` **0 错**；本轮新增/相关测试全绿（P0 四个文件 **34 例**：`trendScoreFeatures` 20 + `trendRankFusion` 6 + `compositeDatasetProviderSelection` 3 + `compositeRunnerTrendFusion` 5；另 `manifest` 9 + 分组契约 15）；`pnpm run test:changed` = **619 passed / 5 failed**，5 例全部落在 `limitUp.watch.test` / `limitUp.test`（依赖真实库既有状态，与本任务无 import 依赖，属既有失败集）；`node scripts/checkEolDrift.mjs --strict` **0**。**顺带修复**：`researchExperimentModeGrouping` 的两条既有红灯（新增实验未归位）——本任务把 T74 与 P0 实验一并归位并同步分档台账。
+- **Baseline Impact**：**minor** —— 新增独立实验 entry point（`first-board-pullback/composite-runner-newhigh3-t74-trend`）+ 一个可选 descriptor 字段；`SYSTEM-BASELINE.md` 头部当前由并发会话持有（`v2.3.0 ENTRY-CONDITION-SLOTS-001`），**本任务不覆盖其内容**，以本条目为准。
+- **Next Step（不在本任务内）**：① 前端发起 EXPLORATORY Run 看四条臂；② 若某权重胜出，先在**训练段**冻结趋势评分边界，再建新 HOLDOUT 协议；③ 通过 `createStrategyFromEvidenceRuns` 建新版本（建议 `first-limit-pullback-3f-top3-runner-t74-trend@1.0.0`），**不得原地改 `3600005@2.0.0`**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-04 · `STRATEGY-TREND-FUSION-P0-RUN-001`（P0 趋势融合 · 真实数据 EXPLORATORY Run）
+
+- **Task**：把 `STRATEGY-TREND-FUSION-P0-001` 的实验在**真实数据**上跑一次（不是单测），给出四条臂的真实数字与诊断。
+- **Changed Domains**：research-experiment（真实 Run）+ research（诊断探针）。
+- **Changed Files**：`research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend/README.md`（补「当前状态」）+ 本条目 + `docs/architecture/system-manifest.yaml`。一次性驱动/探针脚本只落在 `scripts/_scratch/`（gitignore）：`runTrendFusionExploratory.mts` · `_probe_p0_trend_diagnosis.mts`。
+- **Changed Contracts**：无。
+- **Changed DB**：**无 schema / migration**；新增真实 Run **1 条**（`RUN-20261004-1CA33DAD`，status `COMPLETED`，datasetVersionId `780001`，createdAt `2026-10-04T00:13:05Z` → completedAt `2026-10-04T00:16:23Z`，约 215 s）。EXPLORATORY ⇒ `protocolFingerprint = null`、无 confirmatoryGate（符合契约）。
+- **Changed Execution Path**：无（走平台唯一入口 `defaultExperimentRunService().execute`）。
+- **Run 规模**：selectedEvents(union)=`10320`；executionRows=`1888970`；scoredCandidates(融合臂)=`43550`；fusionDroppedMissingTrend=`0`。
+- **结果（C = 挂 NEW_HIGH_3 / 5 / 74；全周期）**：
+  - 控制臂（纯 3F）：`151.0958341843399%` / MaxDD `43.302944323482485%` / 1434 笔
+  - 融合 20%：`-59.285630163742%` / `70.43560124013597%` / 1517 笔（Δ=`-210.38146434808192 pp`）
+  - 融合 30%：`-85.60011496494006%` / `88.78737103384361%` / 1562 笔（Δ=`-236.69594914927995 pp`）
+  - 融合 50%：`-95.25460995611013%` / `96.03184153019659%` / 1610 笔（Δ=`-246.35044414045004 pp`）
+- **控制臂 parity**：**PASS**（A `15.787690712129931%` / 1619 笔、C `151.0958341843399%` / 1434 笔、Runner 触发 `161` 笔，与 T74 留档逐项一致）⇒ 融合臂的负增量**不是坐标漂移**。
+- **诊断（只读基线投影 + 纯计算，不连 DB）**：
+  1. `trendScore` 太粗：43,550 个候选只有 7 个取值，`0` 占 34.39%、`1/6` 占 31.16%（≈66% 挤在两档）⇒ 融合后 TopN 边界大量由 `securityId` 破平决定。
+  2. 换选剧烈：w=0.2 时 **74.2%** 的交易日选中集合发生变化（1962/5569 槽位）；w=0.5 达 **94.8%**（4131/5569）。
+  3. 方向相反：选中标的平均 trendScore `0.2477 → 0.4810 / 0.6442 / 0.7703`，平均 3F `0.6647 → 0.6371 / 0.5836 / 0.5123`，收益与回撤随权重**单调恶化**。
+- **结论**：P0 的 V1 趋势评分**作为排序项被否**（单调剂量-反应）。在本策略语义下「趋势越强越优先」是反向信号，系统性地挤掉了 3F 想要的「低振幅 + 低量比 + 回踩」标的。
+- **未变化 / 未做**：`3600005@2.0.0` 与 `6210005`/`6210006` 一字未改；**未**建任何策略版本；**未**跑 OBSERVATION/HOLDOUT（结论已足够，且新协议需要有新假设）；**未**回改 `RUN-20261004-1CA33DAD`。
+- **Regression Result**：本条目为「文档 + 真实 Run」，代码零改动 ⇒ `pnpm run check` / 测试结果与上一条 `STRATEGY-TREND-FUSION-P0-001` 相同；`node scripts/checkEolDrift.mjs --strict` 0。
+- **Baseline Impact**：minor（实验运行结果登记；`SYSTEM-BASELINE.md` 由并发会话持有，未覆盖）。
+- **Next Step**：若要继续追趋势，换**用法**而非权重 —— ① 门槛/过滤；② 连续化度量；③ 排名（分位）融合；④ 放到退出侧。任一新方案都新开实验/新臂。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+
+---
+
+## 2026-10-04 · `STRATEGY-TREND-GATE-P0-2-001`（趋势分门槛：只筛不改排序 · 实现 + 真实 Run）
+
+- **Task**：按「先做门槛化试一下」实现 P0-2 —— **排序值恒为纯 3F**，趋势分只作**候选门槛**（`trendScore < minTrendScore` 剔除），并在真实数据上跑 EXPLORATORY Run。
+- **Changed Domains**：research（组合层门槛能力）· research-experiment（新实验入口）。
+- **Changed Files**：
+  - `server/research/compositeRunner/index.ts`（`candidateGate?` + `GateAccounting`；缺省/null ⇒ 既有行为逐字段不变）
+  - `shared/researchExperimentsContracts.ts`（`extensionSelectionArms[].minTrendScore?`，可选）
+  - `server/researchExperiments/compositeDatasetProvider.ts`（门槛臂同样按并集装载扩展行）
+  - 新增 `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend-gate/**`（experiment / page / README）
+  - 注册：`research-experiments/manifest.ts` · `client/src/researchExperiments/pages.ts` · `client/src/pages/researchExperiments/experimentModes.ts`（multi-factor）
+  - 测试：新增 `tests/server/research/compositeRunner/trendGate.test.ts`(5) · `tests/server/researchExperiments/compositeRunnerTrendGate.test.ts`(4)；扩 `compositeDatasetProviderSelection.test.ts`(+1) 与 `trendFusionFixture.ts`；分档台账 36 → 37
+- **Changed Contracts**：descriptor 的 `extensionSelectionArms[].minTrendScore`（可选，缺省无门槛）。
+- **Changed DB**：无 schema / migration；新增真实 Run **1 条**（`RUN-20261004-A4573C46`，COMPLETED，datasetVersionId 780001，约 228 s）。
+- **Changed Execution Path**：仅实验侧组合执行模块新增「候选门槛」；生产链零改动。
+- **真实结果（C = Runner T74，全周期）**：控制臂 `151.0958341843399%` / MaxDD `43.302944323482485%` / 1434 笔（**parity PASS**）；
+  门槛 ≥1/6 `-21.032936759500032%`（剔 14,976 候选，Δ `-172.12877094383992 pp`）；
+  门槛 ≥1/3 `-74.32112256904414%`（剔 28,547，Δ `-225.41695675338406 pp`）；
+  门槛 ≥2/3 `-75.21957612040002%`（剔 34,459，Δ `-226.31541030473994 pp`）。回撤 43% → 70–80%。
+- **诊断（只读基线投影 + 纯计算）**：门槛吃掉了控制臂选股的 **24.7% / 70.1% / 87.6%**；被剔者并不明显更差
+  （≥1/3 档：被剔均值 3F `0.6617` vs 留下 `0.6718`；≥2/3 档：留下 `0.6503` 反而低于被剔 `0.6667`）。
+  ⇒ **alpha 集中在「每日 3F 最头部 3 名」这一极窄区间**，任何显著缩小候选池的过滤都会把选股挤到更差的排名上。
+- **合并结论**：`trendScore` V1 对本策略是**反向指标** —— 作排序项（P0：−59/−86/−95%）与作门槛（P0-2：−21/−74/−75%）
+  都是单调负增量。**不建议**继续调权重/阈值，也不建议反向使用（低趋势分本就是 3F 在选的方向）。
+- **未变化 / 未做**：`3600005@2.0.0`、`6210005`/`6210006`、P0 Run `RUN-20261004-1CA33DAD` 全部未改；未建策略版本；未跑 OBSERVATION/HOLDOUT。
+- **Regression Result**：`pnpm run check` **0 错**；定向 7 文件 **48 例全绿**（含门槛 5 + descriptor 4 + 并集 4）；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（新增实验入口 + 可选契约字段 + 真实运行结果登记）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+
+---
+
+## 2026-10-04 · `STRATEGY-TREND-SCORE-V1-FORWARD-IC-001`（趋势评分 V1 的信号质量验证）
+
+- **Task**：先验证**度量本身**再谈用法 —— 在全候选池上测 `trendScore`（及其三个分项）与候选后验收益的关系（IC / 单调性 / 相对 3F 的增量）。
+- **Changed Domains**：无（**纯只读诊断**，零生产代码改动）。
+- **Changed Files**：新增 `docs/evidence/_probe_trend_score_v1_forward_ic.mts` · `docs/evidence/_analysis_trend_score_v1_forward_ic_20261004.json` · `docs/evidence/README.md`（索引）· 本条目。
+  ⚠️ `docs/evidence/` 整个目录在 `.gitignore:152` 被忽略（仓库既有惯例：该目录的新增文件只在本机留存）⇒ 上面的**数字以本条目与 `docs/evidence/README.md` 为准**，换机器后探针需按同一口径重跑。
+- **Changed Contracts / DB / Execution Path**：**无**（不连 DB，只读基线投影缓存工件；不改任何执行语义）。本轮未新增 Run。
+- **口径**：样本 = 3F 资格候选池 43,528 个（基线投影 660001 工件，`rd-1.0.0-1-bd57f47cfcecf245`）；
+  决策信息 = rd 0..5（PIT）；入场 = rd6 开盘、出场 = rdN 收盘，N ∈ {6,8,10,16}（持有 1/3/5/11 个交易日）；
+  **毛收益**（不扣成本、不考虑涨跌停/停牌/T+1 冻结）；`trendScore` 只用 rd0..5。基线投影只到 rd16 ⇒ **不含 Runner 的 17..80 段**。
+- **结果（Spearman IC，200 次 bootstrap 95% CI）**：
+  - `trendScore`：rd8 `-0.0179`、rd10 `-0.0348`、rd16 `-0.0360`（三个视界 CI 均不含 0）
+  - `structureScore`：rd10 `-0.0414`、rd16 `-0.0448`；`momentum(连续)`：rd10 `-0.0338`、rd16 `-0.0409`
+  - `pullbackDepth(连续)`：rd10 `+0.0252`、rd16 `+0.0230`（**回撤越深越好**）
+  - 对照 `3F 合成分`：rd10 `+0.0499`、rd16 `+0.0695`（判据本身有效，非短视界假阴性）
+  - 分档均值（rd16）：`trendScore=1` 档 `-1.27%`（n=4758）vs `=0` 档 `+0.18%`（n=14798）
+- **增量检验（控制 3F 秩的偏 IC）**：`trendScore` rd10 `-0.0372` / rd16 `-0.0393`；`pullbackDepth` `+0.0324` / `+0.0329`；
+  与 3F 的秩相关仅 `pullbackDepth -0.14`、`structure -0.15`、`momentum -0.02` ⇒ **不是 3F 的代理，有独立信息**。
+- **结论**：`trendScore` V1 **不是无用，而是符号用反** —— 它奖励的「站上窗内均线结构 + 追动量」实际为负向，
+  它惩罚的「回撤深」实际为正向。这从机制上解释了 P0（−59/−86/−95%）与 P0-2（−21/−74/−75%）的单调负增量。
+- **未变化 / 未做**：未改任何代码、未建策略版本、未回改 `RUN-20261004-1CA33DAD` / `RUN-20261004-A4573C46`。
+- **Regression Result**：本条目零代码改动；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：NONE（证据文件按 `docs/evidence/` 既有惯例登记）。
+- **Next Step（需用户裁定后才做）**：按**修正符号**重定义趋势分 v2 = 奖励「回撤深 + 涨幅小/负 + 未站上窗内均线」，
+  新开实验（P1）并先看训练段；同时用偏 IC 复核是否只是把 3F 已含的信息换了个写法。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-04 · `STRATEGY-TREND-V2-P1-001`（趋势评分 v2 符号修正 + 分位融合 · 实现 + 真实 Run）
+
+- **Task**：按 IC 验证结论做 P1 —— 把趋势分改成**符号修正版 v2**（回撤深度为正、动量与连续结构偏离为负），逐分量在当日候选内做**横截面分位**后等权，再与 3F 合成分按 `fused = (1-w)·3F + w·v2` 融合，跑真实 EXPLORATORY Run。
+- **Changed Domains**：research（趋势 v2 纯计算 + 组合层分位融合）· research-experiment（新实验入口）。
+- **Changed Files**：
+  - 新增 `server/research/recipeFeatures/trendScoreV2Features.ts`（三方向化分量 + 融合函数；PIT 形状防线与 v1 同口径）
+  - `server/research/compositeRunner/index.ts`（`candidateScoreV2?` 分位融合 + `V2FusionAccounting`；与 `rankFusion` 互斥；缺省/null ⇒ 既有行为逐字段不变）
+  - `shared/researchExperimentsContracts.ts`（`extensionSelectionArms[].v2Weight?` 可选）
+  - `server/researchExperiments/compositeDatasetProvider.ts`（v2 臂并集装载 + 三档旋钮互斥守卫）
+  - 新增 `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend-v2/**`（experiment / page / README）
+  - 注册：`research-experiments/manifest.ts` · `client/src/researchExperiments/pages.ts` · `client/src/pages/researchExperiments/experimentModes.ts`；分档台账 37 → 38
+  - 测试：新增 `tests/server/research/recipeFeatures/trendScoreV2Features.test.ts` · `tests/server/research/compositeRunner/trendV2Fusion.test.ts` · `tests/server/researchExperiments/compositeRunnerTrendV2.test.ts`
+  - `docs/evidence/_probe_trend_score_v1_forward_ic.mts`（补连续结构项 `structureGap`：rd10 IC `-0.0342`、偏 IC `-0.0352`，与二值版同向）
+- **Changed Contracts**：descriptor 的 `extensionSelectionArms[].v2Weight`（可选，与 trendWeight / minTrendScore 三选一）。
+- **Changed DB**：无 schema / migration；新增真实 Run **1 条**（`RUN-20261004-2B87DD65`，COMPLETED，datasetVersionId 780001，约 216 s）。
+- **真实结果（C = Runner T74，全周期）**：控制臂 `151.0958341843399%` / MaxDD `43.302944323482485%` / 1434 笔（**parity PASS**）；
+  v2-w20 `-14.513582406299886%`（Δ `-165.6094165906398 pp`）；v2-w35 `-57.9714721425399%`（Δ `-209.06730632687982 pp`）；
+  v2-w50 `-77.27140763380005%`（Δ `-228.36724181813997 pp`）；回撤 43% → 60/70/85%。v2 臂 `droppedMissingComponents = 0`。
+- **结论（三次实验合并）**：v1（IC 负）排序融合 −210 pp、v1 门槛 −172 pp、**v2（IC 正、符号修正 + 分位）−166 pp**。
+  v2 的分量在全候选池上 IC 为正（偏 IC 亦为正）却仍然打崩 ⇒ **不是信号方向问题，而是「动选股本身就致命」**：
+  策略 alpha 集中在「当日 3F 最头部 3 名」这一极窄集合，任何位移都摧毁它（与 P0-2 门槛吃掉 24.7% 选股即 −172 pp 一致）。
+- **风险提示（新增）**：该策略对选股微扰动高度敏感 ⇒ 151% 很可能由少数大赢家贡献（肥尾依赖 / 脆弱），
+  单次 Run 的好坏不足以判断任何选股层改动；推进模拟盘/生产前建议先做**赢家集中度分析**。
+- **未变化 / 未做**：`3600005@2.0.0` / `6210005` / `6210006` / P0 与 P0-2 的 Run 全部未改；未建策略版本；未跑 OBSERVATION/HOLDOUT。
+- **Regression Result**：`pnpm run check` **0 错**；定向 7 文件 **51 例全绿**；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（新增实验入口 + 可选契约字段 + 真实运行结果登记）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-04 · `T74-WINNER-TAIL-RECALL-001`（赢家尾部结构 + 第 3 名召回诊断）
+
+- **Task**：用户明确目标 —— 「这条策略本质就是抓住几只收益超级高的股票，我想能抓住更多这种股票」。据此做两项只读诊断：(a) 控制臂赢家尾部结构；(b) 每日 3F 第 1/2/3 名各自的「超级票密度」（第 3 名因 `maxDailyBuys=2` 从未被买入）。
+- **Changed Domains**：无（纯只读诊断；零生产代码改动）。
+- **Changed Files**：新增 `scripts/_scratch/_probe_t74_winner_tail.mts`（写 `docs/evidence/_analysis_t74_winner_tail_20261004.json`）· `scripts/_scratch/_probe_t74_rank_slot_recall.mts`（写 `docs/evidence/_analysis_t74_rank_slot_recall_20261004.json`）· 本条目。⚠️ `docs/evidence/` 被 `.gitignore:152` 忽略 ⇒ **数字以本条目为准**。
+- **Changed Contracts / DB / Execution Path**：无（只 SELECT / 只读缓存工件 + 内存重放）。
+- **口径**：控制臂 = `first-limit-pullback-3f-top3` + `c6-b4-14` 组合装配 + Runner T74，真实 provider（780001 / 660001）与真实 simulator；复现 `151.0958341843399%`（parity ✓）。
+- **结果 ①：赢家尾部（1429 笔已实现交易，净收益口径）**：
+  - top-1 交易贡献 **19.53%**、top-5 **75.10%**、**top-10 119.07%** 的总净利；**去掉 top-10 后净利 = −36,014 元（整体亏损）**
+  - 仅 **9 笔 ≥ +50%**（占 0.63%）贡献 **113.72%** 净利；**2 笔 ≥ +100%** 贡献 43.16%；最大单笔 +130.45%
+  - 中位交易 **−1.32%**，胜率 **38.56%**，p95 +15.63%；大赢家分布在 2019/2020/2022/2024/2025/2026（约 1 只/年）
+  - 入场日买入笔数：**1 笔 649 天 / 2 笔 390 天**（`maxDailyBuys=2`、`maxPositions=5`）
+  - 交易名次分布：**rank1 = 1037 笔、rank2 = 392 笔、rank3 = 0 笔**（第 3 名从未被买入）；两笔 +100% 都是 rank1
+- **结果 ②：第 3 名召回（每日 top-3 各自的「曾经成为超级票」密度；maxGain = rd6 开盘 → rd6..80 最大收盘涨幅）**：
+  | 名次 | n | 中位 maxGain | ≥+30% | ≥+50% | ≥+100% | ≥+200% | 最大 |
+  |---|---|---|---|---|---|---|---|
+  | rank1 | 1862 | 13.50% | 22.72% | 10.63% | **3.11%** | 0.48% | +285.6% |
+  | rank2 | 1855 | 13.43% | 24.47% | 11.70% | **3.77%** | 0.70% | +507.2% |
+  | rank3 | 1850 | 13.04% | 23.51% | 11.24% | **2.38%** | 0.27% | +312.5% |
+  ⇒ **第 3 名与第 1/2 名的超级票密度基本同档**（≥+50% 约 11%、≥+100% 约 2.4–3.8%），但**从未被买入**。
+- **结论**：① 该策略是**极端肥尾**结构（9 笔交易 = 全部利润，其余整体亏损）⇒ 三次「改排序」实验的 −166~−228 pp 摆动属于同一机制的必然结果：**换一批票就是换一注彩票**；② 「抓更多」的杠杆**不在排序层，而在买入名额/持仓上限**：每日 top-3 已被证明同质，却只买 2 个（且 649/1039 个入场日只买 1 个）。
+- **口径边界（重要）**：maxGain 是**潜在**涨幅，不等于策略实现收益（策略自身有止损/移动止盈/持有上限，实际只能吃到其中一部分）；但**名次间的相对比较有效** ⇒ 「第 3 名同样值得买」这一结论成立。
+- **未变化 / 未做**：未改任何策略定义、未建策略版本、未回改任何历史 Run；**未**执行「放开买入名额」的变体回测（P2 待裁定）。
+- **Regression Result**：本条目零代码改动 ⇒ 与上一条一致（`pnpm run check` 0 错 / `checkEolDrift --strict` 0）。
+- **Baseline Impact**：NONE（证据按 `docs/evidence/` 惯例登记）。
+- **Next Step（需裁定）**：P2 = **保持 3F 排序与候选池不变，只放开买入名额**（`maxDailyBuys` 2→3；`maxPositions` 5→6/8 两档）并跑真实回测，看「同质第 3 名」能否把潜在超级票转化为实现收益，以及是否被稀释/回撤放大。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-04 · `T74-SLOTS-P2-001`（只放开买入名额 / 持仓上限 · 实现 + 真实 Run）
+
+- **Task**：用户目标为「抓住更多超级股票」。据赢家尾部 + 第 3 名召回诊断（见 `T74-WINNER-TAIL-RECALL-001`），做 P2 = **只放开执行容量**（`maxDailyBuys` 2→3、`maxPositions` 5/8/12），选股/排序/候选池/退出链/Runner/数据坐标逐字段冻结。
+- **Changed Domains**：research-experiment（新实验入口）。**生产代码零改动** —— `maxDailyBuys` / `maxPositions` 是官方已参数化的执行容量旋钮（`strategyFamilyRegistry`）。
+- **Changed Files**：新增 `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-slots/**`（experiment / page / README）· 注册（`research-experiments/manifest.ts` · `client/src/researchExperiments/pages.ts` · `client/src/pages/researchExperiments/experimentModes.ts`，other-scope）· 新增测试 `tests/server/researchExperiments/compositeRunnerT74Slots.test.ts` · 分档台账 38 → 39 · 本条目。
+- **Changed Contracts / DB**：无契约变更；无 schema / migration；新增真实 Run **1 条**（`RUN-20261004-704FFBD9`，COMPLETED，780001，约 149 s）。
+- **真实结果（C = Runner T74，全周期）**：控制臂 `151.0958341843399%` / MaxDD `43.302944323482485%` / 1434 笔 / **≥+50% 共 9 笔** / ≥+100% 2 笔 / 最大单笔 `+130.45%`（parity PASS）；
+  `slots-3-5` `119.08976286746005%`（Δ `-32.006071316879854 pp`，≥+50% 仍 **9** 笔）；
+  `slots-3-8` `16.155014205388007%`（Δ `-134.9408199789519 pp`，≥+50% **11** 笔，MaxDD 56.27%）；
+  `slots-3-12` `-1.5486293604560442%`（Δ `-152.64446354479594 pp`，≥+50% **15** 笔，MaxDD 54.29%）。
+- **结论**：① 只多买第 3 名而不加仓位 ⇒ **超级票笔数一条没多、收益 −32pp**（同预算下赢家仓位被摊薄）；
+  ② 同时放开仓位 ⇒ 超级票笔数 9 → 11 → 15（目标方向有效），但**总收益 151% → 16% / −1.5%**、回撤恶化 ⇒ **多出来的仓位主要买到亏损票**；
+  ③ 四条臂**最大单笔收益几乎相同（+130.4%）** ⇒ 放开名额**没有抓到新的同级别赢家**，只是稀释了原赢家。
+- **推出的新假设**：召回诊断显示 rank1/rank2 各有 ~10.6% / 11.7% 的票曾涨过 +50%，按比例估算入场票里 ≈ **156 只**曾有 ≥+50% 潜在空间，但**仅 9 只实现 ≥+50%** ⇒ 缺口更可能在**退出/持有政策把赢家提前砍掉**，而不是买入名单。
+- **未变化 / 未做**：未改任何策略定义、未建策略版本、未回改历史 Run；**未**执行退出/持有变体（P3 待裁定）。
+- **Regression Result**：`pnpm run check` **0 错**；定向 4 文件 **32 例全绿**（含新 descriptor 测试）；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（新增实验入口 + 真实运行结果登记）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-04 · `T74-TOP5-SUPERSTOCK-POOL-001`（top1–top5 超级票密度 + T+6 落选原因 + 赢家画像）
+
+- **Task**：回答用户的三个问题 —— ① top3 / top5 里各有多少「超级票」；② 这些票为什么在 T+6 被筛掉；③ 若要用「股票池」把超级票筛出来，靠什么特征。
+- **Changed Domains**：无（纯只读诊断；零生产代码改动）。
+- **Changed Files**：新增 `scripts/_scratch/_probe_t74_top5_superstock_pool.mts`（写 `docs/evidence/_analysis_t74_top5_superstock_pool_20261004.json`）· 本条目。⚠️ `docs/evidence/` 被 `.gitignore:152` 忽略 ⇒ **数字以本条目为准**。
+- **Changed Contracts / DB / Execution Path**：**无**（provider 只读装配 + Registry 只读分页 + 内存重放）。
+- **口径**：入场 = rd6 开盘；maxGain = rd6..80 最大收盘 / rd6 开盘 − 1（**潜在**口径，不含退出政策）；控制臂复现 `151.0958341843399%`（parity ✓）；ranks 4–5 用 Registry 真实扩展行（3,662 事件），ranks 6–10 只有基线 rd0..16 ⇒ 仅 ≤11 日口径。
+- **① top1–top5 超级票密度（1,862 个交易日）**：
+  | rank | n | 中位 maxGain | ≥+30% | ≥+50% | ≥+100% | ≥+200% |
+  |---|---|---|---|---|---|---|
+  | 1 | 1862 | 13.50% | 423 | 198 | 58 | 9 |
+  | 2 | 1855 | 13.43% | 454 | 217 | 70 | 13 |
+  | 3 | 1850 | 13.04% | 435 | 208 | 44 | 5 |
+  | **top3 合计** | 5567 | — | 1312 | **623** | **172** | 27 |
+  | 4 | 1840 | 13.15% | 449 | 208 | 54 | 11 |
+  | 5 | 1820 | 13.62% | 473 | 214 | 60 | 12 |
+  | **top5 合计** | 9227 | — | 2234 | **1045** | **286** | 50 |
+  ⇒ **rank1→rank5 毫无衰减**（≥+50% 命中率 11.2–11.7%，≥+100% 2.4–3.8%）：超级票**均匀分布在前 5 名**里，不是「只有第 1 名才有」。
+- **② T+6 落选原因（控制臂全周期，buy 意图 2,914 单 / 成交 2,863）**：
+  - 计划层 skipped：**`MAX_POSITIONS_REACHED` = 4008（压倒性主因：满仓 5/5）** · `MAX_DAILY_BUYS_REACHED` = 105 · `BUDGET_BELOW_MIN_LOT` = 2 · `NO_NEXT_TRADING_DAY` = 3
+  - 订单层被拒（51 单 = 1.75%）：`NO_LIQUIDITY` 31 · `LIMIT_DOWN` 17 · `LIMIT_UP` 2 · `OTHER` 1
+  ⇒ 超级票**不是被选股/排序筛掉的**（top5 已在候选内），而是**被「没有仓位」筛掉的**；执行层只拦了 1.75%。
+- **③ 赢家画像（标签 = maxGain ≥ +50%；样本 = top1–5 的 9,227 个候选，base rate 11.33%）**：
+  按特征三分位的命中率 lift —— `maxAmplitude` 0.94/1.02/1.04 · `meanAmplitude` 0.92/1.00/1.09 · `t1VolumeRatio` 1.03/0.95/1.02 ·
+  `eventRange`（首板日振幅）0.94/1.00/1.06 · `eventBody` 0.99/0.98/1.02 · `momentum` 1.04/0.98/0.98 · `turnoverRate` 1.03/1.04/0.93。
+  ⇒ **现有 T+5 可见特征全部没有区分度（lift ≈ 1）** ⇒ 用「3F 三因子 + 首板日形态 + 换手」建池**筛不出超级票**。
+  ⇒ 数据缺口实测：该投影里 `indexClose` 为空（**大盘状态特征不可算**）、`circulationMarketCap` 为 null（**市值特征不可用**）、无 rd<0 预热行（**首板前历史不可得**）。
+- **结论（P2 + 本次诊断合并）**：① 用户「抓更多超级票」的方向成立，但**杠杆不是多买**（P2：9→15 只 ≥+50% 却把 151% 打到 −1.5%）、**也不是换排序**（三次已否）；② 主要瓶颈是**资金长期被占满**（4008 次满仓拒绝）＋**边际候选不赚钱**；③ 想要真正提高识别率，必须引入**新信息域**：市场/时点状态 → 首板前历史 → 板块/资金流 → 市值/筹码；在现有特征里继续调池子没有证据支持。
+- **未变化 / 未做**：未改任何策略定义、未建策略版本、未回改历史 Run；ranks 6–10 的 74 日口径未测（需再装载一次扩展行）。
+- **Regression Result**：本条目零代码改动；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：NONE。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-05 · `T74-EXIT-AND-PREEVENT-001`（#3 退出侧归因 + #2 新信息域可行性实测）
+
+- **Task**：用户要求先做 #2（补新信息域，看能否用股票池筛出超级票）与 #3（退出侧，赢家是否被提前砍掉）。两项均为**只读诊断**，零生产代码改动。
+- **Changed Files**：新增 `scripts/_scratch/_probe_t74_exit_and_preevent.mts`（写 `docs/evidence/_analysis_t74_exit_and_preevent_20261004.json`）· `scripts/_scratch/_probe_t74_top5_superstock_pool.mts`（写 `_analysis_t74_top5_superstock_pool_20261004.json`）· `scripts/_scratch/_probe_schema.mts` · 本条目。⚠️ `docs/evidence/` 被 `.gitignore:152` 忽略 ⇒ 数字以本条目为准。
+- **Changed Contracts / DB / Execution Path**：**无**（只读 provider 装配 + Registry/stock_daily_prices 只读查询 + 内存重放；控制臂复现 `151.0958341843399%`）。
+- **数据可得性实测（#2 的前置事实）**：`ds_first_limit_pullback_event` 含 `boardType / industryCode / turnover / marketCap / floatMarketCap / historicalLimitCount / daysSincePreviousLimit / limitUpTime`；另有 `stock_daily_prices`（全量日线历史）、`liquidity_daily`（换手/流通市值）、`industry_assignments`、`index_daily`（→ 大盘状态）、`stock_suspension_windows`。**实测为空**：`marketCap` / `floatMarketCap` / `limitUpTime` 在 v8 全为 null；`indexClose` 在该投影里为空。
+- **#3 退出侧结果（1429 笔已实现交易；`maxDuringHold` = 持有期内最大收盘涨幅）**：
+  | 退出类别 | 笔数 | 平均实现 | 平均持有期最大涨幅 | 平均回吐 | 曾达 ≥+50% | 该类别最大实现 |
+  |---|---|---|---|---|---|---|
+  | `STOP_INTRADAY`（盘中止损/移动止损） | 579 | −0.71% | 5.87% | **6.58pp** | **17** | +130.45% |
+  | `TRAIL_MA_EXIT`（MA 趋势止盈） | 609 | +0.95% | 5.10% | 4.15pp | 1 | +49.77% |
+  | `TIME_EXIT`（持有满 5 日） | 203 | +0.14% | 2.59% | 2.44pp | 0 | +15.48% |
+  | `RUNNER_EXTENDED_EXIT`（强势续持后退出） | 38 | **+13.13%** | 17.08% | 3.95pp | 2 | +48.02% |
+  - 全样本：实现 ≥+50% 者 **9 笔**，而**持有期内曾达 ≥+50% 者 20 笔** ⇒ **11 笔被提前砍掉**；
+    其中 **17/20 落在 `STOP_INTRADAY`（止损/移动止损）类别**（平均回吐 6.58pp）⇒ **赢家主要死在止损/移动止损，而不是时间退出**。
+  - `RUNNER_EXTENDED_EXIT` 只有 38 笔但平均 **+13.13%**（全场最好）⇒ 「让赢家活更久」方向正确，但**进入 Runner 的门槛太窄**（只有 38 笔进入）。
+  - 全样本平均：实现 `+0.49%` vs 持有期最大 `+5.38%` ⇒ 平均每笔回吐约 **4.9pp**。
+- **#2 新特征 lift 实测（标签 = maxGain ≥ +50%；base rate 10.97–11.33%）**：
+  - **v8 事件表字段**（样本 9,227）：`turnover` 1.03/1.04/0.93 · `historicalLimitCount` 0.97/0.93/1.10 · `daysSincePreviousLimit` 1.08/1.01/0.90 · `boardType` 全为 main · `marketCap`/`floatMarketCap`/`limitUpTime` **无值**。
+  - **首板前 60 日价格历史**（从 `stock_daily_prices` 逐码取数，样本 1,477，base 10.97%）：
+    `prior20Return` 1.02/0.89/1.09 · `prior60Return` 0.93/1.11/0.96 · `prior60Position` 1.04/0.95/1.02 · `isNewHigh60` 1.02/0.96/1.02 · `prior5VolumeRatio` 1.00/1.02/0.98 · `historyRows` 1.04/1.00/0.96。
+  - ⇒ **两条最可行的新信息域都没有实质区分度（lift 全部在 0.89–1.11）**；现有特征 + 新增前置价格历史**都筛不出超级票**。
+  - **统计限度（必须说明）**：样本 1,477 / base 10.97% ⇒ 命中率标准误约 0.8pp，仅能排除 **强信号（lift ≥ ~1.3）**，不能排除弱信号（1.1–1.2）。
+- **结论**：① 超级票的**识别**在现有可用数据上接近不可行（3F IC 0.05–0.07、各新特征 lift ≈1）——「抓到更多」的可行杠杆不在选股；
+  ② **退出侧有明确、可量化的缺口**：20 笔曾达 ≥+50% 的票里 11 笔被砍，17/20 死在止损/移动止损；
+  ③ Runner 通道（38 笔、均 +13.13%）是唯一被验证「让赢家活着」的机制 ⇒ **放宽止损/移动止损 + 扩大 Runner 进入**是下一步最该测的 P3。
+- **未变化 / 未做**：未改任何策略定义、未建策略版本、未回改历史 Run；**未**执行 P3 变体回测。
+- **Regression Result**：本条目零代码改动；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：NONE。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-05 · `T74-SCALEOUT-READD-CAPABILITY-001`（「高点减仓 / 低点加仓」能力盘点）
+
+- **Task**：用户提出更贴近实盘的方案 —— **高点减仓、低点重新加仓**，要求先确认平台能否执行。本条记录**只读能力盘点**（零代码改动）。
+- **Changed Files**：仅本条目（盘点无产物）。
+- **平台已有（实测代码位置）**：
+  - **分批止损**：退出政策 9 槽里的 `REDUCTION` 槽 + `engine.ts` 的 `stopReduction` / `partialStopScheduled`（分批卖出后 `runnerSlotUsage` 记录剩余仓位占槽）
+  - **到期按比例减仓**：`StrongHoldPolicyDefinition.scaleOutRatio`（`exitPolicyCommon.ts`，在 `extendToHoldingDays` 时按比例卖出）
+  - **退出后重入**：`experiments/simulator/reentry.ts` + `runWorkbenchAssembly/reentryPolicy.ts`（`securityCooldownTradingDays` / `maxEntriesPerMember` / `maxConcurrentOpenPerCode`），但只对**池成员策略**（`firstLimitPoolDailyScore`）有二次信号源
+  - 部分持仓的槽占用已被引擎支持（`runnerSlotUsageBySecurity`）⇒ 「卖出部分仍保留剩余仓」这条机械能力**已具备**。
+- **平台缺失（实测）**：
+  - **盈利触发的分批止盈**：`TAKE_PROFIT`（固定回撤/移动止盈）在触发时**整仓卖出**；`scaleOutRatio` 只挂在 `strongHold` 的**到期点**，无法表达「涨到 +X% 卖一半」。
+  - **加仓（对已持仓回补）**：全仓 grep 无 `addToPosition` / `increasePosition` / `topUp` / `positionIncreases`；`simulator/plan.ts` 的买入预算分配只面向「当前**未持仓**的候选」⇒ **「低点重新加仓」缺少执行原语**。
+  - 重入机制无法替代加仓：T74 的买入信号是「每个首板事件在 T+5 出一次」，卖出后同一事件**不会再有信号** ⇒ 卖飞后不会被买回。
+- **结论（供裁定）**：用户方案在**实盘**可用条件单执行（涨到 X% 卖一半 / 回落到 Y 买回），但要在**平台内**验证需要两项执行语义扩展：
+  1. 把 `scaleOutRatio` 从「到期减仓」推广到「**盈利触发减仓**」（改动小，复用已有部分卖出与槽占用机制）；
+  2. 新增「**加仓/回补**」意图（改动大，触及 plan/engine 预算与槽位语义）。
+  两项均属 `AGENTS.md` §5「改变执行语义」⇒ **必须先裁定再实现**。
+- **建议路线**：先做**离线反事实测算**（用已落盘的真实交易路径模拟「+X% 减半 / 回撤 Y% 回补」），确认有效再投入平台能力建设；否则不做。
+- **Regression Result**：本条零代码改动；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-05 · `T74-STOPWIDE-P3-001`（扩大固定止损 · 实现 + 真实 Run）
+
+- **Task**：用户关切「把止损扩大后回撤会变得难以承受」。据此做 P3-stopwide：**只改 SL-18.1 的固定止损**（`exitPolicy.stop.anchor.stopRatio`，现役 6% → 8%/10%/12%），选股 / 名额 / 移动止损 / MA 止盈 / 时间退出 / strongHold / Runner T74 / 数据坐标逐字段冻结。
+- **Changed Domains**：research-experiment（新实验入口）；**生产代码零改动**（只覆盖已有退出政策字段）。
+- **Changed Files**：新增 `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-stopwide/**`（experiment / page / README）· 注册（manifest / pages / experimentModes，other-scope）· 新增测试 `tests/server/researchExperiments/compositeRunnerT74StopWide.test.ts` · 分档台账 39 → 40 · 本条目。
+- **Changed Contracts / DB**：无契约变更；无 schema / migration；新增真实 Run **1 条**（`RUN-20261004-670F0677`，COMPLETED，780001，约 152 s）。
+- **真实结果（C = Runner T74，全周期）**：
+  | 固定止损 | C 收益 | C 最大回撤 | C 成交 | ≥+50% | ≥+100% | 亏损笔均值 | P5 分位 | 亏超 6% | 亏超 10% | 止损出场 |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | 6%（控制） | 151.0958341843399% | 43.302944323482485% | 1434 | 9 | 2 | −4.131% | −6.192% | 392 | 12 | 579 |
+  | 8% | 64.6355983984199% | 49.87972199584667% | 1311 | 8 | 1 | −4.259% | −8.059% | 240 | 15 | 372 |
+  | 10% | 76.52933023111999% | 45.883510751136335% | 1251 | 9 | 2 | −4.374% | −10.049% | 200 | 130 | 299 |
+  | 12% | 45.130% | 47.017% | 1220 | 8 | 2 | −4.446% | −12.047% | 188 | 88 | 242 |
+- **结论（四输）**：① 回撤三档全部**更大**（43.30% → 49.88/45.88/47.02%）；② 收益更差（151.10% → 64.64/76.53/45.13%）；
+  ③ 逐笔痛感更重（P5 从 −6.19% 到 −8.06/−10.05/−12.05%，亏超 10% 笔数 12 → 15/130/88）；④ 超级票没变多（≥+50% 笔数 9 → 8/9/8）。
+  另有一处反直觉：放宽止损后**止损出场数减少**（579 → 372/299/242，改由 MA 趋势止盈/时间退出离场），但总收益仍更差 ⇒ 被 6% 止损打掉的票多数后来继续下跌。
+- **合并结论（三次容量实验 + 本次）**：这条链上**没有免费降回撤的旋钮** —— 换排序（−166~−228pp）、多买（DD 43→45~56%）、扩大止损（DD 43→46~50%）全部更差。
+  ⇒ 降回撤只能走**降低暴露**（每笔仓位比例 ↓ / 保留现金）或**组合层择时**（大盘状态 / 净值回撤熔断），两者均属「收益-回撤」取舍。
+- **未变化 / 未做**：未改任何策略定义、未建策略版本、未回改历史 Run。
+- **Regression Result**：`pnpm run check` **0 错**；定向 3 文件 **27 例全绿**；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（新增实验入口 + 真实运行结果登记）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · `T74-SCALEOUT-READD-COUNTERFACTUAL-001`（高点减仓 / 低点回补 · 离线反事实）
+
+- **Task**：用户目标是「抓更多超级票」，并希望用**高点减仓 + 低点重新加仓**（实盘可执行、不放宽止损、不加大暴露）来同时控制回撤。本条用**真实成交 + 真实持仓路径**做离线反事实，判定该方案是否成立。
+- **Changed Files**：新增 `scripts/_scratch/_probe_t74_scaleout_cf.mts` · `_probe_t74_scaleout_readd_cf.mts`（分别写 `docs/evidence/_analysis_t74_scaleout_counterfactual_20261005.json`、`_analysis_t74_scaleout_readd_counterfactual_20261005.json`）· 本条目。⚠️ `docs/evidence/` 被 `.gitignore:152` 忽略 ⇒ 数字以本条目为准。
+- **Changed Contracts / DB / Execution Path**：**无**（provider 只读装配 + 内存重放；控制臂复现 151.0958%，净利 188,838 元）。
+- **口径**：控制臂 1429 笔已实现交易；减仓价 = 持仓期内首个收盘 ≥ 入场价×(1+X%)；回补价 = 减仓后首个收盘 ≤ 减仓价×(1−Y%)；期末按原实际离场价平仓；每多一条腿按 20 bps 成本计。
+- **结果 ①「只减仓不回补」（卖 50%）**：
+
+  | 减仓阈值 | 触发 | 组合净利（实际 188,838） | Δ | ≥+50% 笔数（实际 9） |
+  |---|---|---|---|---|
+  | +10% | 236 | 131,283 | **−57,555** | 2 |
+  | +15% | 143 | 125,208 | **−63,630** | 2 |
+  | +20% | 93 | 153,231 | −35,607 | 4 |
+  | +25% | 68 | 143,476 | −45,362 | 4 |
+  | +30% | 50 | 153,834 | −35,004 | 4 |
+
+- **结果 ②「减半 + 低点回补」（完整方案，15 组参数）**：**全部为负**。最好的一组（+20% 减半 / 回撤 8% 回补）净利 151,607（Δ **−37,230**），≥+50% 笔数 9 → **4**；最差 −61,860。
+  关键副产物：**回补成功率很低** —— 回撤 5% 才等到 81/247（33%），回撤 8% 只有 11%，回撤 12% 只有 1% ⇒ **减仓后价格多数继续上涨，「低点」等不到**；少数等到的往往是趋势已走坏。
+- **结论**：① 数学上「混合收益 = f·减仓价 + (1−f)·最终价」⇒ 对「最终刚过 +50%」的票，早减一半就把它拉回 +50% 以下（笔数 9 → 2–4）；② 回补腿在真实路径上大多无法成交，卖飞的部分永久失去上涨；③ ⇒ **「高点减仓 + 低点回补」不成立，最优的仓位处置就是「不动」**。
+- **剩余未测的买入端杠杆（唯一）**：`TopN 3 → 5`。召回诊断已证明 **rank4/5 的 ≥+50% 密度与 rank1–3 同档**（10.63%/11.70%/11.24% vs 11.2%/11.6%），而 P2 的 slots-3-8/12 只多买了「其它交易日的 top-3」，**从未买过当日 rank4/5** ⇒ 这是最后一个直接针对「抓更多超级票」的未测杠杆。
+- **Regression Result**：本条零代码改动；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：NONE。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · `T74-TOP5-P4-001`（选股广度 TopN 3→5 · 实现 + 真实 Run）
+
+- **Task**：抓更多超级票的最后一个未测杠杆 —— 把每日可选范围从 3F top3 扩到 top5（召回诊断显示 rank4/5 的「曾涨过 +50%」密度与 rank1-3 同档）。
+- **Changed Files**：新增 `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-top5/**`（experiment / page / README）· `shared/researchExperimentsContracts.ts`（`extensionSelectionArms[].topN?` 新增可选字段）· `server/researchExperiments/compositeDatasetProvider.ts`（按臂 topN 装载扩展行）· 注册（manifest / pages / experimentModes）· 新增测试 `tests/server/researchExperiments/compositeRunnerT74Top5.test.ts` · 分档台账 40 → 41 · 本条目。
+- **Changed Contracts**：descriptor 的 `compositeExecution.extensionSelectionArms[].topN`（可选，缺省 3 = 既有行为）。
+- **Changed DB**：无 schema / migration；新增真实 Run **2 条**（第一版 `RUN-20261004-C5F4CA32` 因臂设计错误空跑；修正版 `RUN-20261004-6C818086`，COMPLETED，约 196 s）。
+- **第一版设计错误（已修正并记录）**：`maxDailyBuys <= selectionTopN - 2` 时 simulator 按排名顺序买入，**永远买不到 rank4/5**（该版 rank4-5 成交 = 0；top5-3-5 与 P2 slots-3-5 结果完全相同，互为交叉验证）。修正版把单日买入名额放到 4 / 5。
+- **真实结果（修正版，C = Runner T74，全周期）**：控制臂 151.0958341843399% / MaxDD 43.302944323482485% / 1434 笔 / ≥+50% 9 笔（parity PASS）；
+  `top5-4-5` 116.17% / 44.12% / 1454 笔 / ≥+50% 8 笔 / **rank4-5 成交 22 笔、净利 −10,638、≥+50% 0 笔**；
+  `top5-5-5` 82.47% / 46.08% / 1456 笔 / 8 笔 / **rank4-5 28 笔、−12,863、0 笔**；
+  `top5-5-8` −11.35% / 64.28% / 2375 笔 / 11 笔 / **rank4-5 174 笔、−12,477、0 笔**。
+- **结论**：**第 4、5 名不值得买** —— 真正买到的 rank4/5 成交净利全为负、**没有一笔实现 ≥+50%**、组合收益与回撤同时恶化。
+  并记录一条方法论教训：**召回口径的「曾经涨过 +50%」密度 ≠ 可实现收益**（买入后受本策略持有期与退出规则约束）。
+- **穷尽性总结（供用户决策）**：针对「抓更多超级票」，换排序 / 多买名额 / 扩大止损 / 高点减仓+低点回补 / 选股广度 3→5 / 新特征（事件表 + 首板前价格历史）**全部被实测否掉**
+  ⇒ 在本策略现有的数据与执行空间内**已无可用杠杆，保持不动就是最优**；再进一步需要**新信息源**（市场/板块状态、资金流、更丰富的首板前历史、基本面事件），平台当前没有这些域。
+- **未变化 / 未做**：未改任何正式策略定义、未建策略版本、未回改历史 Run。
+- **Regression Result**：`pnpm run check` **0 错**；定向 4 文件 **31 例全绿**；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（新增可选契约字段 + 实验入口 + 真实运行结果）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · \`T74-CARRYOVER-P6-001\`（跨日候选池第一轮 · 实现 + 真实 Run）
+
+- **Task**：实现用户提出的候选延续方向 —— 前一日 top5 中未进入常规买入名额的候选，次日与新 fresh 候选统一重排；第一轮只测原始 3F 分 carry，不引入新评分。
+- **Changed Files**：新增 \`server/research/compositeRunner/carryover.ts\`（纯函数 \`applyCompositeCarryover\`）· \`research-experiments/compositeRunnerBridge.ts\`（零实现 re-export）· \`research-experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover/**\`（experiment / page / README）· 注册（manifest / pages / experimentModes）· 新增测试 \`tests/server/research/compositeRunner/carryover.test.ts\`、\`tests/server/researchExperiments/compositeRunnerT74Carryover.test.ts\` · 分档台账 41 → 42（other-scope 22 → 23）· 本条目。
+- **Changed Contracts / DB / Execution Path**：新增的是研究选股层的**可选纯函数**，不改 \`CandidateEvaluationRun\` schema、不改 \`SimulationConfig\`、不改 \`simulator/engine.ts\` / \`plan.ts\`、不改正式策略定义；无 schema / migration。
+- **口径**：控制臂 top3 / 2 笔 / 5 仓，完全复用 T74；carry 臂 top5 / 2 笔 / 5 仓。fresh 前 2 名进入常规买入尝试，其余进入 pending；pending 保留原始 3F 分，最多跨 1 / 2 个决策日；\`margin=0.03\` 时，pending 必须先高于某只 fresh 至少 0.03 才能插到它前面。Runner \`NEW_HIGH_3 / 5 / 74\`、SL-18.1 退出链、仓位、成本、数据集坐标全部冻结。
+- **真实 Run**：\`RUN-20261004-EE05EA28\`（datasetVersionId \`780001\`，COMPLETED，约 197 s；控制臂 parity **PASS**：A \`15.787690712129931%\` / 1619 笔、C \`151.0958341843399%\` / 1434 笔、trigger \`161\`）。
+- **真实结果（C = Runner T74，全周期）**：
+
+  | 臂 | C 收益 | C 最大回撤 | C 成交 | ≥+50% | ≥+100% | carry 进入买入前 N | carry 成交 | carry 净利 | carry ≥+50% |
+  |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+  | 控制臂 top3 / 2 笔 / 5 仓 | **151.0958%** | **43.3029%** | 1434 | **9** | 2 | 0 | 0 | 0 | 0 |
+  | carry1-stale（margin 0） | 99.3457% | 55.4126% | 1436 | 7 | 2 | 901 | 292 | **+3,130** | 1 |
+  | carry1-m03（margin 0.03） | 84.8822% | 53.7516% | 1441 | 8 | 2 | 529 | 156 | **−7,015** | 0 |
+  | carry2-m03（margin 0.03） | 66.7172% | 52.3669% | 1455 | 7 | 2 | 784 | 255 | **−735** | 0 |
+
+- **结论**：**第一轮 REJECTED**。carry1/margin0 的 carry 成交本身略正（+3,130、1 笔 ≥+50%），但组合收益减少 **51.75 pp**、最大回撤增加 **12.11 pp**；加 margin 或延长到 2 日后，carry 成交净利转负、≥+50% 为 **0**。三条臂都没有增加实现 ≥+50% 的总笔数。
+- **机制判断**：这批候选不是补“空仓位”，而是**排挤 fresh 候选的仓位与资金循环**；原始 3F 分的跨日延续没有引入新信息，因此不具备独立 alpha。第一轮证明“只做 stale-score carry”不值得继续。
+- **下一步（如需继续）**：必须引入**版本化的当日重评分**，并先验证重评分能把 carry 与 fresh 区分开；否则该方向到此结束。
+- **未变化 / 未做**：未改正式策略 \`3600005@2.0.0\`、\`3570001\`、历史 Run；未建新 StrategyVersion；未改 DB。
+- **Regression Result**：\`pnpm run check\` **0 错**；定向 3 文件 **22 例全绿**；\`node scripts/checkEolDrift.mjs --strict\` 待收尾复跑。
+- **Baseline Impact**：minor（新增实验入口 + 研究纯函数 + 真实运行结果）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · T74-CARRYOVER-REFRESH-P7-001（跨日候选池 + 当日重评分 · 实现 + 真实 Run）
+
+- **Task**：在 P6 否掉 stale-score carry 后，按用户要求实现版本化的当日重评分，检验“carry 没有新信息”是否是失败原因。
+- **Changed Files**：新增 server/research/recipeFeatures/carryRefreshScoreFeatures.ts（CarryRefreshV1）· 扩展 server/research/compositeRunner/carryover.ts（可选 refresh 策略、停牌 carry 不计分）· research-experiments/compositeRunnerBridge.ts（零实现 re-export）· 新增 research-experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh/**（experiment / page / README）· 注册（manifest / pages / experimentModes）· 新增测试 tests/server/research/recipeFeatures/carryRefreshScoreFeatures.test.ts、tests/server/researchExperiments/compositeRunnerT74CarryoverRefresh.test.ts，并扩展 tests/server/research/compositeRunner/carryover.test.ts · 分档台账 42 → 43（other-scope 23 → 24）· 本条目。
+- **Changed Contracts / DB / Execution Path**：新增研究层纯函数与实验入口；不改 CandidateEvaluationRun / SimulationConfig / simulator engine / 正式策略；无 schema / migration。
+- **口径**：每个决策日对 fresh + 当日 pending 的 union 统一计算 CarryRefreshV1：
+  1. pullbackDepth = (事件以来最高收盘 − 当前收盘) / 最高收盘，越大越好；
+  2. negMomentum = −(当前收盘 / 首板日收盘 − 1)，越大越好；
+  3. negWindowGap = −(当前收盘 / 事件窗收盘均值 − 1)，越大越好；
+  逐分量在当日 union 内做横截面分位，等权平均后 fused = (1−w)·3F + w·refreshPercentile。
+  Runner NEW_HIGH_3 / 5 / 74、SL-18.1、maxDailyBuys=2、maxPositions=5、数据坐标全部冻结。
+- **臂矩阵**：control（top3，无 refresh）· refresh-only-w20/w35（top5，无 carry）· carry1-refresh-w20/w35（top5，carry 1 日）。
+- **第一次真实 Run（失败，已诊断修复）**：RUN-20261005-F2AD66B2，FAILED；某个 carry 候选在 rd6/rd7 为停牌（barPresent=false、close=null），初版当天重评分 fail-closed 中断。修复为：停牌 carry 当日不计分、不买入、保留到 age 上限内后续再试；不插补价格。fresh 缺分量仍 fail-closed。
+- **最终真实 Run**：RUN-20261005-4BB55265（datasetVersionId 780001，COMPLETED，约 205 s；控制臂 parity PASS：A 15.787690712129931% / 1619 笔、C 151.0958341843399% / 1434 笔、trigger 161；readRunDetail 的 resultIssue=null）。
+- **真实结果（C = Runner T74，全周期）**：
+
+  | 臂 | C 收益 | C 最大回撤 | C 成交 | ≥+50% | ≥+100% | carry 成交 | carry 净利 | carry ≥+50% |
+  |---|---|---:|---:|---:|---:|---:|---:|---:|
+  | control | **151.0958%** | 43.3029% | 1434 | **9** | 2 | 0 | 0 | 0 |
+  | refresh-only-w20 | 25.6307% | 49.1052% | 1452 | 8 | 0 | 0 | 0 | 0 |
+  | refresh-only-w35 | −36.8000% | 51.3412% | 1469 | 7 | 0 | 0 | 0 | 0 |
+  | carry1-refresh-w20 | 82.1054% | **41.1379%** | 1460 | **9** | 1 | 366 | −35,695 | 1 |
+  | carry1-refresh-w35 | 30.6922% | 52.5911% | 1504 | 8 | 1 | 430 | −47,567 | 2 |
+
+  另一个如实计数：carry1-refresh 两条臂均有 refreshUnscorableCarryCandidates=3（停牌），未插补。
+- **结论**：**第二轮 REJECTED**。refresh-only 已经证明重评分本身是负向的（151.10% → 25.63% / −36.80%）；carry1-refresh 没有恢复 alpha（82.11% / 30.69%），carry 成交净利均为负。carry1-refresh-w20 的 ≥+50% 回到 9，但收益腰斩，不能视为有效改善。
+- **合并判断**：P6 stale carry 与 P7 same-day refresh carry 均被真实数据否掉；当前控制臂 top3 / 2 笔 / 5 仓 + Runner T74 仍是最优。后续不应继续在 carry 上换权重，除非先找到与现有 3F 低相关且有正 IC 的新信息源。
+- **未变化 / 未做**：未改正式策略 3600005@2.0.0、3570001、历史 Run；未建新 StrategyVersion；未改 DB。
+- **Regression Result**：pnpm run check 0 错；定向测试 32 例全绿；node scripts/checkEolDrift.mjs --strict 0；pnpm run test:changed 673 passed / 5 failed —— 5 个失败仍全部是已知的 limitUp.test / limitUp.watch.test DB 状态依赖用例，与本改动无 import 关系。
+- **Baseline Impact**：minor（新增研究特征、实验入口 + 真实运行结果）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · T74-LATE-ENTRY-P8-001（延迟入场 + 晚窗口滚动 3F · 实现 + 真实 Run）
+
+- **Task**：检验将原 T+5 候选延后到 T+7 / T+8 / T+10，并在原 top5 门槛内用最近 5 日滚动 3F 重新选择，是否优于 T+6 入场。
+- **Changed Files**：新增 server/research/recipeFeatures/lateEntryScoreFeatures.ts（LateEntry3F 滚动 5 日窗口）· server/research/compositeRunner/lateEntry.ts（applyCompositeLateEntry）· research-experiments/compositeRunnerBridge.ts · research-experiments/first-board-pullback/composite-runner-newhigh3-t74-late-entry/** · 注册（manifest / pages / experimentModes）· 新增测试 tests/server/research/recipeFeatures/lateEntryScoreFeatures.test.ts、tests/server/research/compositeRunner/lateEntry.test.ts、tests/server/researchExperiments/compositeRunnerT74LateEntry.test.ts · 分档台账 43 → 44（other-scope 24 → 25）· 本条目。
+- **Changed Contracts / DB / Execution Path**：新增研究层纯函数与实验入口；不改 CandidateEvaluationRun / SimulationConfig / simulator engine / 正式策略；无 schema / migration。
+- **口径**：control = T+5 选股 / T+6 开盘；delay 臂 = 原 top3 排名不变，目标决策日改为 T+7/T+8/T+10；rescore 臂 = 原 top5 作为门槛，在目标日 D 用 D-5..D 共 6 根 bar 重算 maxAmplitude / meanAmplitude / t1VolumeRatio，按冻结 3F 桶边界重排后取前 3，次日开盘执行。Runner NEW_HIGH_3 / 5 / 74、SL-18.1、maxDailyBuys=2、maxPositions=5、数据坐标全部冻结。
+- **真实 Run**：RUN-20261005-DF5EDDEB（datasetVersionId 780001，COMPLETED，约 228 s；控制臂 parity PASS：A 15.787690712129931% / 1619 笔、C 151.0958341843399% / 1434 笔、trigger 161；readRunDetail 的 resultIssue=null）。
+- **真实结果（C = Runner T74，全周期）**：
+
+  | 臂 | C 收益 | C 最大回撤 | C 成交 | ≥+50% | ≥+100% | 例外计数 |
+  |---|---|---:|---:|---:|---:|---:|
+  | control | **151.0958%** | **43.3029%** | 1434 | **9** | 2 | 0 |
+  | delay-t7 | −68.2053% | 82.2760% | 1644 | 6 | 2 | 不可交易 7 |
+  | delay-t8 | −80.6692% | 89.3918% | 1694 | 7 | 2 | 不可交易 7 |
+  | delay-t10 | −44.8980% | 77.5145% | 1670 | 5 | 2 | 不可交易 35 |
+  | rescore-t7 | −33.8181% | 65.9511% | 1607 | 6 | 2 | 不可评分 8 |
+  | rescore-t8 | −58.4594% | 70.3206% | 1666 | 3 | 1 | 不可评分 16 |
+  | rescore-t10 | −58.7108% | 68.1128% | 1641 | 2 | 1 | 不可评分 22 |
+
+- **结论**：**P8 REJECTED**。纯延迟入场把收益打到 −44.90% ~ −80.67%；原 top5 内的滚动 3F 重排最好也只有 −33.82%（T+7），且实现 ≥+50% 的笔数从 9 降到 6/7/5 或 6/3/2。T+6 入场是原策略 alpha 的组成部分，后移决策日没有可用的正增量。
+- **合并判断**：P6 stale carry、P7 CarryRefreshV1、P8 延迟入场 + 滚动 3F 都被真实数据否掉；当前控制臂 T+5 选股 / T+6 买入 + Runner T74 仍是最优。下一步若要继续，必须先找到与当前 3F 低相关且有正 IC 的新信息源，而不是继续改 carry / 延迟日 / 旧因子窗口。
+- **未变化 / 未做**：未改正式策略 3600005@2.0.0、3570001、历史 Run；未建新 StrategyVersion；未改 DB。
+- **Regression Result**：pnpm run check 0 错；定向测试 23 例全绿；node scripts/checkEolDrift.mjs --strict 0；pnpm run test:changed 681 passed / 5 failed —— 5 个失败仍全部是已知的 limitUp.test / limitUp.watch.test DB 状态依赖用例，与本改动无 import 关系。
+- **Baseline Impact**：minor（新增研究特征、实验入口 + 真实运行结果）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · NEW-INFO-SOURCE-INVENTORY-001（新信息源只读盘点 + 单变量 IC 扫描）
+
+- **Task**：在 P6/P7/P8 连续否掉 carry、重评分与延迟入场后，盘点真实数据库中还有哪些尚未进入当前策略的信息域，并先做只读可行性/单变量扫描。
+- **Changed Files / DB / Execution Path**：无生产代码、无 schema、无 migration、无历史 Run 修改；新增 scripts/_scratch/_probe_new_info_sources.mts、_probe_event_metadata_by_year.mts、_probe_event_metadata_ic.mts（gitignored）· 本条目。
+- **真实覆盖率（只读查询）**：
+  - ds_first_limit_pullback_event@780001：73,003 行；historicalLimitCount 73,003（100%）、daysSincePreviousLimit 69,758（95.6%）、turnover 72,996（99.99%）、limitUpTime/sector/keywords 各 10,538（14.4%，主要 2025–2026）、marketCap/floatMarketCap 均为 0。
+  - limit_up_records：100,330 行，2019-01-02…2026-09-30；limitUpTime/sector 各 16,430（16.4%），turnover 100,182，circulationValue 16,276。
+  - index_daily：7,520 行，4 个指数（000001.SH / 000300.SH / 000905.SH / 399001.SZ），2019-01-02…2026-09-30，close 全覆盖。
+  - liquidity_daily：9,015,158 行，5,131 只证券，1992…2026；turnoverRate 8,938,065、amount/volume 约 900 万，但 circulationMarketCap/totalMarketCap 全为非空 0。
+  - industry_assignments：5,212 行、83 个行业，但全部 effectiveFrom=2026-08-31；只有当前快照，不能用于 2019–2026 历史 PIT 回测。
+  - market_data：225 行，2024-12-31…2026-09-29；两融/成交额覆盖完整，但历史长度不足。
+  - stock_daily_prices：8,898,902 行、5,800 只证券，2019-01-02…2026-09-30；可用于首板前历史，但既有 60 日历史特征的 lift 已约 0.89–1.11。
+  - 未发现 money flow / 龙虎榜 / 北向 / 基本面财务表；这些只能外部补数。
+- **单变量 IC 扫描（3F 候选池；horizon 10/20 的 maxReturn；只读）**：
+  - historicalLimitCount：pooled IC 约 0；top5 日度 IC 约 +0.049 至 +0.053，正 IC 比例约 51% 至 52%。弱。
+  - daysSincePreviousLimit：pooled IC 约 −0.059 至 −0.061；top20% 平均 maxReturn 约 8.6% 至 8.2%，bottom20% 约 10.4% 至 10.6%。方向是距上次涨停越短越好，但强度弱。
+  - turnover：pooled IC 约 −0.069 至 −0.083；top20% 平均 maxReturn 约 8.9% 至 8.6%，bottom20% 约 10.0% 至 10.7%。方向是首板日成交额越低越好，强度弱。
+- **已有市场状态证据**：早期 1.62.1/1.63.0 已测市场状态与流动性闸门；plateauFound=false，最好的市场成交额闸门仍是全窗/oos 取舍且 cost×2 OOS 多为负，不能据此宣称稳健改进。
+- **结论**：现有真实数据库里，没有现成的强新 alpha 信息源。可立即继续做的是事件事实弱过滤（距上次涨停、首板成交额、历史涨停次数）；真正的新信息域（资金流/龙虎榜/北向/基本面）需要先补数据，属于数据接入 + schema/migration 级任务。
+- **建议下一步**：先做 P9 单变量/双变量事件事实过滤扫描（不重排 3F，只对 T74 新开仓做 gate），确认是否能提高实现 >=+50% 笔数或降低回撤；若无效，再考虑外部补数。外部补数前需明确数据源、覆盖率、PIT 可用时点与授权。
+- **Regression Result**：本轮只读，无代码执行路径变更；EOL 以收尾扫描为准。
+- **Baseline Impact**：NONE（研究盘点）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · T74-EVENT-GATE-P9-001（事件事实 gate · 实现 + 真实 Run）
+
+- **Task**：按新信息源盘点结论，在 original top3 不变的前提下，用 2019-2024 训练段的 daysSincePreviousLimit / turnover / historicalLimitCount 分布做新开仓 gate；不重排 3F、不补 rank4/5。
+- **Changed Files**：新增 server/research/compositeRunner/eventGate.ts（applyCompositeEventGate）· server/research/recipeFeatures 无新增（复用事件事实）· server/datasetRegistry/query.ts（新增 EventBatchQuery + loadEventsBatch；InMemory / Db / Snapshot 三实现）· server/researchExperiments/compositeDatasetProvider.ts（可选 includeEventMetadata + selected event facts 注入）· server/researchExperiments/runner.ts（透传 descriptor 开关）· shared/researchExperimentsContracts.ts（includeEventMetadata 可选字段）· research-experiments/compositeRunnerBridge.ts · 新增 research-experiments/first-board-pullback/composite-runner-newhigh3-t74-event-gate/** · 注册（manifest / pages / experimentModes）· 新增测试 tests/server/research/compositeRunner/eventGate.test.ts、tests/server/researchExperiments/compositeRunnerT74EventGate.test.ts · 分档台账 44 → 45（other-scope 25 → 26）· 本条目。
+- **Changed Contracts**：compositeExecution.includeEventMetadata（可选，缺省 false = 既有行为逐字不变）；DatasetDataReader.loadEventsBatch（只增不改，空集合不发 SQL，强制 datasetVersionId）。
+- **Changed DB / Execution Path**：无 schema / migration / DML；不改 simulator / Portfolio / Order / Fill / 正式策略。
+- **口径**：original top3 排名不变，只过滤 positionIntents；gate 阈值固定自 2019-01-02..2024-12-31 训练段；缺失事件事实按不通过处理，不插补。Runner NEW_HIGH_3 / 5 / 74、SL-18.1、maxDailyBuys=2、maxPositions=5、数据坐标全部冻结。
+- **真实 Run**：RUN-20261005-8668C385（datasetVersionId 780001，COMPLETED，约 161 s；控制臂 parity PASS：A 15.787690712129931% / 1619 笔、C 151.0958341843399% / 1434 笔、trigger 161；readRunDetail 的 resultIssue=null；eventMetadataRows=5569）。
+- **真实结果（C = Runner T74，全周期）**：
+
+  | 臂 | C 收益 | C 最大回撤 | C 成交 | ≥+50% | ≥+100% | 过滤 intent | 保留 intent |
+  |---|---|---:|---:|---:|---:|---:|---:|
+  | control | **151.0958%** | **43.3029%** | 1434 | **9** | 2 | 0 | 0 |
+  | gap-p50 | 38.0638% | 56.7601% | 1366 | 8 | 1 | 2918 | 2651 |
+  | gap-p33 | 76.8846% | 48.6334% | 1203 | 9 | 1 | 3776 | 1793 |
+  | turnover-p50 | **165.7402%** | 49.4402% | 1273 | 7 | 1 | 2902 | 2667 |
+  | combo-p50 | 43.9293% | **37.0914%** | 893 | 3 | 1 | 4457 | 1112 |
+  | histlimit-p67 | −40.9986% | 68.2608% | 1066 | 5 | 1 | 3121 | 2448 |
+
+- **结论**：**P9 REJECTED（对“抓更多超级票”的目标）**。没有任何 gate 增加实现 ≥+50% 的笔数；turnover-p50 收益 +14.64 pp，但 ≥+50% 9→7、最大回撤 43.30%→49.44%；combo-p50 虽降回撤到 37.09%，但收益 43.93%、≥+50% 仅 3。事件事实只能做弱过滤，不能作为新 alpha 来源。
+- **合并判断**：P6 carry、P7 当日重评分、P8 延迟入场、P9 事件事实 gate 全部被真实数据否掉。当前控制臂 T+5 选股 / T+6 买入 + Runner T74 仍是最优。
+- **下一步**：只有在外部补数（资金流 / 龙虎榜 / 北向 / 基本面）后，才可能引入真正的新信息源；该路径涉及数据源接入、PIT 时点、schema / migration，需单独授权。
+- **未变化 / 未做**：未改正式策略 3600005@2.0.0、3570001、历史 Run；未建新 StrategyVersion；未改 DB。
+- **Regression Result**：pnpm run check 0 错；定向测试 43 例全绿；node scripts/checkEolDrift.mjs --strict 0；pnpm run test:changed **1011 passed / 8 failed** —— 其中 5 个是既有 limitUp.test / limitUp.watch.test DB 状态依赖失败，另 3 个是当前工作区已有的 threeFactorTopNStrategyDocument 期望未包含 recoveryPath 的漂移，均与 P9 事件元数据读取/gate 无 import 关系。
+- **Baseline Impact**：minor（新增只读事件元数据读取口 + 实验入口 + 真实运行结果）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · STRATEGY-IMPLEMENTATION-REENTRY-001（strong-trend-reentry-v1 接入 Strategy Core；Phase B BLOCKED）
+
+- **Task**：把研究派生策略 `strong-trend-reentry-v1@1.0.0` 接入既有 Strategy Core 执行链（CUSTOM_EVENT resolver），并尝试 Baseline Backtest。
+- **Changed Domains**：Strategy Core（production 事件源）· Run Workbench Assembly（resolver 选择 / 数据集桥常量）· Research（recipeRegistry 新增全选配方）· Strategy Evaluation（暴露 backtest artifacts 供取数）。**未**改 RuleGraph、Portfolio、Execution、simulator、Dataset schema。
+- **Changed Files**：
+  - 新增 `server/strategyCore/production/strongTrendReentryEventSource.ts`（`CUSTOM_EVENT` / `STRONG_TREND_REENTRY_V1` 事件解析器，实现既有 `EventOccurrenceResolver` 契约）
+  - `server/strategyCore/production/index.ts`（re-export）· `versionFromDocument.ts`（只读暴露 `eventCode`）
+  - `server/runWorkbenchAssembly/assemble.ts`（CUSTOM_EVENT + eventCode 命中才启用新 resolver；注释里的 `n` 被误换成换行的两处格式修复）
+  - `server/runWorkbenchAssembly/datasetFromRegistry.ts`（`DATASET_POST_MAX_RELATIVE_DAY` 20 → 80，并重写其依据注释：真实上界仍由各版本 `getPostRelativeDayRange()` 判定）
+  - `server/research/recipeRegistry.ts`（新增 `strong-trend-reentry-select-all`；同时修复该文件被翻成 CRLF 的漂移）
+  - `server/research/strategyEvaluation/evaluate.ts`（新增 `backtestArtifacts` 取值；注释格式修复）
+  - 新增测试 `tests/server/strategyCore/production/strongTrendReentryEventSource.test.ts`（9 例）
+  - Draft 工件 `strategy-drafts/strong-trend-reentry-v1.0.0.{strategy-document,version-record,validation}.json`（`observationWindow.end` 80 → 79）
+  - 报告 `docs/research/RESULT-STRATEGY-IMPLEMENTATION-REENTRY-001.md` · `docs/research/RESULT-BACKTEST-REENTRY-BASELINE-001.md`（+ `docs/research/RESULT-STRATEGY-DEFINITION-REENTRY-001.md` 附录 B 指纹更正）
+- **Changed Contracts**：`CoreVersionFromDocumentResult` 新增只读字段 `eventCode: string | null`（只增不改）；`StrategyEvaluationResult` 新增 `backtestArtifacts`（只增不改）；新增 `resolveEvent` 实现，未改动 `EventOccurrenceResolver` 契约本身。
+- **Changed DB**：**无**（0 schema / 0 migration / 0 DML；全部探针为 SELECT）。
+- **Changed Execution Path**：**无新执行路径** —— 新 resolver 走既有 `context.resolveEvent`；Entry/Exit/Position/Cost 语义未变（`T_CLOSE → T_PLUS_1_OPEN`, `priceType=OPEN`, `TIME_EXIT 20`, `EQUAL_WEIGHT`）。
+- **Potential Baseline Drift**：`DATASET_POST_MAX_RELATIVE_DAY` 20 → 80 放宽了观察窗口的**前置粗筛**（真实护栏仍是每版本 post 深度 + `REGISTRY_BRIDGE_MAX_ROWS`）；`recipeRegistry.ts` 行尾归一化后真实改动仅 +19 行（曾因 CRLF 漂移显示 +609/-584）。
+- **关键发现（Phase B BLOCKED）**：该策略要求 `observationWindow.end≈79`（S 可达 rd=75、RECLAIM 可达 rd=79），事件窗投影实测 **5,806,820 行** > `REGISTRY_BRIDGE_MAX_ROWS = 1,600,000` ⇒ 直读桥抛 `REGISTRY_ROW_BUDGET_EXCEEDED` ⇒ 按契约回落 `buildResearchDataset` ⇒ 本环境在 2019-01-02 的 `index_daily` 读上 `read ECONNRESET`。既有已落库策略普遍用 `{start:5,end:15}`（≈1.24M 行）恰在护栏内，本策略**结构性**超护栏。**未**启动任何优化；**未**自行修改该护栏。
+- **Regression Result**：`pnpm run check` 0 错；定向 vitest 10 文件 233 例全绿；`node scripts/checkEolDrift.mjs --strict` 0。
+- **Baseline Impact**：minor（新增一个事件解析入口 + 一个配方 + 一处桥常量与注释；无 schema / 无策略版本落库）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · STRATEGY-IMPLEMENTATION-REENTRY-001 / 方案 2（事件窗**流式**数据面）
+
+- **Task**：按用户裁定执行「阻塞解除方案 2」——把事件窗直读从「一次性物化整张逐日面板」改为**逐日按需**游标，避免 `REGISTRY_ROW_BUDGET_EXCEEDED` 与跨境重建。
+- **Changed Domains**：Run Workbench Assembly（数据集直读桥 / 装配路由）。**未**改 Strategy Core、RuleGraph、Portfolio、Execution、simulator、Dataset schema、迁移。
+- **Changed Files**：
+  - `server/runWorkbenchAssembly/datasetFromRegistry.ts`：新增 `EventWindowCursorReader` / `EventWindowCursorOptions` / `EventWindowDatasetCursor` / `createEventWindowDatasetCursor` / `estimateEventWindowPanelRowsUpperBound` / `buildEventWindowDatasetCursorFromRegistry`
+  - `server/runWorkbenchAssembly/assemble.ts`：`resolveDataset` 在**物化路径本会超行预算时**改走流式游标；`datasetCursor` / `buildClosedLoopWiringInputs` 形参类型由 `PooledDatasetCursor` 放宽为 `ResearchDatasetCursor`（只放宽，不改既有分支）
+  - `server/runWorkbenchAssembly/pooledDatasetCursor.ts`：`toCanonicalBar` 由模块私有改为导出（供事件窗游标复用**同一** bar 映射，避免复制）
+  - 新增测试 `tests/server/runWorkbenchAssembly/eventWindowDatasetCursor.test.ts`（7 例）
+- **Changed Contracts**：`assembleRunWorkbenchInputs` 的 `datasetCursor` 由池化专用放宽为通用 `ResearchDatasetCursor`（既有池化路径不受影响）。
+- **Changed DB**：**无**（0 schema / 0 migration / 0 DML；全部只读）。
+- **Changed Execution Path**：事件窗在超预算时改用**流式游标**路径（`createStreamingClosedLoopWiring`）。该路径**语义与 `buildWindowRows` 逐字段一致**：同一 `projectEventRow`、同一 `eventScopedSecurityId`、同一 rd 集合（rd=0 ∪ rd ∈ [1, end+1]）、同一前收口径、同一决策成员（rd ∈ [start,end]）、观察日换手/市值同样为 null。**只在物化路径本会失败时启用** ⇒ 既有窄窗口策略行为逐字节不变。
+- **实测效果**：数据集 780001 / 观察窗口 `{1,79}` ⇒ 物化 5,806,820 行 > 护栏 1,600,000；改流式后装配 **10.4 s**、峰值内存 **~2.9 GB**（原为 >30 min 且默认 4 GB 堆 OOM）。
+- **新发现的独立阻塞（未解除）**：research 收尾 `computeCandidateEvaluationRunFingerprint` 抛 `RangeError: Invalid string length` —— `CandidateDayRecord` 的 `universeMembers` + `dropped` 长度 = 当日成员数（≈2,961/日 × 1,961 日 ≈ 1,161 万条字符串）。**非本改动引入**，是平台候选记录 O(决策日×当日成员) 的既有规模上限。已记入 `docs/research/RESULT-BACKTEST-REENTRY-BASELINE-001.md`。
+- **Potential Baseline Drift**：本次仅新增**超预算时**的流式分支；窄窗口策略走原物化分支，不受影响。
+- **Regression Result**：`pnpm run check` 0 错；定向 vitest **20 文件 / 366 例**全绿（含新增 7 例游标测试与既有 pooledDatasetCursor / windowProjection / closedLoopWiring）；`node scripts/checkEolDrift.mjs --strict` 0。
+- **Baseline Impact**：minor（新增流式数据面入口 + 装配路由；无 schema、无策略版本落库）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-05 · STRATEGY-IMPLEMENTATION-REENTRY-001 / 方案 2 续（决策成员收敛 + rank 载体）
+
+- **Task**：按裁定把事件窗流式游标的「当日决策成员」收敛为**事件真正成立**的成员（`universeMembers` 语义变更，已登记），并把 Baseline run 跑通。
+- **Changed Files**：
+  - `server/runWorkbenchAssembly/datasetFromRegistry.ts`：`EventWindowCursorOptions` 增可选 `decisionMemberPredicate` + `EventWindowCandidateMember` 载荷；`BuildDatasetFromRegistryRequest` 增同名可选字段；stats 增 `suppressedNonTriggerMembers`
+  - `server/runWorkbenchAssembly/assemble.ts`：新增 `resolveEventMemberPredicate(document)` —— 用**同一份** `judgeStrongTrendReentryEvent` + `toCoreBarWindow` 构造判定器；仅 `CUSTOM_EVENT` + `STRONG_TREND_REENTRY_V1` 注入
+  - `server/research/framework/datasetCursor.ts`：`ResearchDatasetCursorStats` 增可选 `suppressedNonTriggerMembers`（只增不改）
+  - `server/research/recipeRegistry.ts`：`strong-trend-reentry-select-all` 的 rank 载体 `{isBullish:0}` → `{volumeRatio:1}`（见下）
+  - 测试 `tests/server/runWorkbenchAssembly/eventWindowDatasetCursor.test.ts` → 8 例
+- **Changed Contracts**：`ResearchDatasetCursorStats` 新增可选字段；事件窗流式请求新增可选判定器（缺省 = 既有口径）。
+- **Changed DB**：**无**。
+- **Changed Execution Path**：事件窗流式路径的「当日成员」由「窗口内全部事件（rd ∈ [start,end]）」收敛为「事件成立成员」。**只在流式游标 + 注入判定器时生效**；物化路径与池化路径不变。
+- **口径登记（重要）**：该策略下 `universeMembers` 语义 = **触发成员**（全历史 2,492 候选名额），不是「窗口成员」。判定器与 Core **同源**（同一函数），不存在两套事件语义。
+- **顺带修复**：`directionFromValue(rankValue)` 使全 0 权重 ⇒ rankValue=0 ⇒ `neutral` ⇒ longOnly 判 `NON_LONG_DIRECTION`（首轮 2,492 候选全被跳过）；改为恒正载体 `{volumeRatio:1}`（`topPercentile=1` ⇒ 不影响入选集合）。Draft 指纹随之前移。
+- **实测**：装配 11.5 s / 内存 ~1.5 GB；baseline run 五阶段 `EXECUTED`（首次跑通）。**但结果不可采信**：`candidateExitPolicy` 未声明 ⇒ 退出被 `HOLD_WHILE_SELECTED` 接管（持有中位数 3 日，`TIME_EXIT 20` 未生效）；且 13,897/14,513 单 `SUSPENDED`（执行日无行，未定位）。已记入 `docs/research/RESULT-BACKTEST-REENTRY-BASELINE-001.md`。
+- **Regression Result**：`pnpm run check` 0 错；`node scripts/checkEolDrift.mjs --strict` 0；新增/相关 vitest 全绿。
+- **Baseline Impact**：minor（流式路径新增可选判定器；物化/池化路径不变）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-06 · `STOCK-SELECTION-001`（选股域 + 只读端点 + 「选股」页面 + 真实库 parity）
+
+- **Task**：把「策略用于选股」落地为可用能力 —— ① 策略可扩展的按决策日选股器；③ 只读 tRPC 端点 + **新「选股」页面**（用户明确要求：新开页面且**兼容不同策略**）。目标策略示例 = `first-limit-pullback-3f-top3-runner-t74@2.0.0`（StrategyVersion `3600005`，Full `151.0958%`）。
+- **Changed Domains**：新增 `server/stockSelection/**`（选股域）+ `server/stockSelectionRouter.ts`（只读端点）+ `client/src/pages/StockSelection.tsx`（新页面）。**未**改策略语义 / 执行 / 回测 / 指标 / DB。
+- **Changed Files（新增）**：`server/stockSelection/{types,sliceDataset,registry,index}.ts` · `server/stockSelection/strategies/firstLimitPullback3FTopN.ts` · `server/stockSelectionRouter.ts` · `client/src/pages/StockSelection.tsx` · `tests/server/stockSelection/firstLimitPullback3FTopN.test.ts` · `tests/server/stockSelectionRouter.test.ts` · 报告 `docs/research/RESULT-STOCK-SELECTION-PARITY-001.md`。
+- **Changed Files（修改，逐文件行尾保持原样）**：`server/routers.ts`（注册 `stockSelection`，+2 行）· `client/src/App.tsx`（+4 行：页面 import + 路由）· `client/src/components/AppShell.tsx`（+2 行：`ListChecks` import + ② 观察组「选股」导航项）。
+- **Changed Contracts**：**无**（无 `shared/**` 改动；tRPC 只新增只读端点 `stockSelection.listStrategies` / `stockSelection.select`；`server/datasetRegistry/query.ts` 的试验性 `relativeDays` 改动**已完全回退**，最终 diff 不含该文件）。
+- **Changed DB**：**无**（0 DDL / 0 DML；全部只读 SELECT）。
+- **Changed Execution Path**：**无**。选股域只做「按日取数 → 事件窗投影 → 形状适配 → 结果投影」，打分 / 过滤 / 排序**全部**委托既有 `server/research/compositeRunner#buildFirstLimitPullback3FTop3SourceRun`（唯一权威实现），不新增第二套引擎；不进入模拟盘 / 生产链。
+- **取数口径（重要，已实测）**：候选事件的权威定义 = **数据集自己的相对日**（`rd=5` 行的 `tradeDate` 即决策日）。实现先在**事件表**按 `(datasetVersionId, tradeDate)` 取 30 自然日回退超集（走既有索引 `idx_event_version_date`，实测 48ms），再批量读 `post` rd1..6 并保留 `rd5.tradeDate === 决策日` 者；`prefix` 取 rd0。🔴 反例：直接对 `post` 加 `tradeDate` 谓词会退化为该相对日的全范围扫描（实测 **91,857ms/次**）；改后单日选股 **0.7–2.5s**。
+- **数据面**：只读 rd0..6，**不需要** `.cache/research-dataset-3f-top3-v5-660001.jsonl.gz`（77MB 全史投影），也不重建 1,183 万行 post 表。
+- **Parity（真实库只读，`STOCK-SELECTION-PARITY-001`）**：参考侧 = 缓存基线投影（1,240,693 行 / 1,875 交易日 / 1,862 个有选股结果日）+ 同一权威函数；被测侧 = DB `780001` 按日切片。抽样 6 个决策日 ⇒ **PASS 6 / FAIL 0**：Top-3 面板身份与排序**逐个一致**、分数差 `< 1e-12` ⇒ 「rd0..6 切片」与「rd0..16 全史投影」在选股上等价。
+- **响亮失败（不静默降级）**：`SELECTION_EVENT_DAY_BAR_MISSING`（候选缺 rd0）· `SELECTION_CALENDAR_INCONSISTENT`（无法复现数据集自己的 `relativeDay` ⇒ 日历缺洞）· `SELECTION_PAGE_LIMIT_EXCEEDED`（事件窗口超护栏）· `SELECTION_STRATEGY_UNKNOWN`（未注册策略）。路由把它们如实转成 BAD_REQUEST / INTERNAL_SERVER_ERROR，**不伪装成「今天没有候选」**。
+- **可扩展性（用户要求）**：`StockSelectionStrategy` 端口 + `registry.list()/get(id)`；策略元数据带 `datasetId`，页面据此调 `datasetRegistry.listVersions({datasetId})` 列数据集版本 ⇒ **页面零硬编码**，新增策略只改后端注册。当前注册 1 个（`first-limit-pullback-3f-topn`）。
+- **前端落点**：新页面 `/stock-selection`（导航「② 观察」组「选股」）；查询条件 = 策略 / 数据集版本 / 决策日 / TopN；结果 = 本次事实（含 `datasetVersionId` 真实坐标与数据窗口）+ 选股清单（名次/代码/T0/信号日/计划买入日/3F 分/分位）+ 剔除统计；**空态与失败分开**（无候选 vs 缺 rd0 / 日历缺洞）。
+- **未做（下一步）**：② 前向模块参数化到 `3600005@2.0.0`（`paperTrading3fTop3Runner/**` 仍硬编码 `3570001/hold20/750001/extendToHoldingDays=20`）；④ 行情/事件增量 + 收盘后调度（全市场行情只到 `2026-09-04`）。
+- **Regression Result**：`tsc --noEmit` **0 错**；`vite build` **成功**（3116 modules）；选股域 + router vitest **13/13 全绿**；`node scripts/checkEolDrift.mjs --strict` **0**。未触碰任何既有测试。
+- **Baseline Impact**：**minor**（新增选股域 / 端点 / 页面；`SYSTEM-BASELINE.md` 与 `system-manifest.yaml` 头部由并发会话持有，**本任务不覆盖其内容**，以本条目为准）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `STOCK-SELECTION-002`（口径 × 载体解耦 · A 方案第 1 步：接缝 + 现有实现登记为 dataset 载体）
+
+- **Task**：用户裁定「选股不该跟数据集挂钩」→ 采纳方案 A（**双载体**：`live` 为日常口径、`dataset` 为研究/回放/对拍口径）。本步 = **第 1 步**：把「数据载体」从策略里抽成端口，现有实现登记为 `dataset` 载体。**纯重构 + 契约形状变更，选股行为零变化**。
+- **设计（🔴 解耦的是载体，不是口径）**：口径（首板判定 / 观察窗 rd1..5 / 3F 排序 / 次日开盘）= 策略与 `compositeRunner` 的职责；载体只回答「决策日 D（= T0 + N 收盘）对应的候选事件及其事件窗行」，**不得**实现打分 / 过滤 / 排序。换载体只换数据来源。
+- **Changed Files（新增）**：`server/stockSelection/dataSource.ts`（`SelectionDataSource` 端口 + `SelectionDataSourceKind = dataset | live`）· `server/stockSelection/sources/datasetSource.ts`（`createDatasetSelectionDataSource`，把原先写在策略里的 `ds_*` 取数整体迁入，含 `maxEvents` 护栏与 30 自然日回退窗口）。
+- **Changed Files（修改）**：`strategies/firstLimitPullback3FTopN.ts`（依赖改为 `sources` + `defaultSourceKind`；取数交给载体；**rd0 不变量收归口径层**）· `registry.ts`（默认依赖 = `[dataset 载体]` + `defaultSourceKind=\"dataset\"`）· `types.ts`（`StockSelectionRequest` 顶层**去掉** `datasetVersionId`，改为 `source?: {kind, datasetVersionId?}`；`DailyStockSelection` 增 `source{kind,label}` 与 `datasetVersionId: number|null`；新增 `SELECTION_DATA_SOURCE_UNSUPPORTED` / `SELECTION_DATA_SOURCE_COORDINATE_MISSING`）· `sliceDataset.ts`（`parentDatasetVersionId` 允许 `null`，live 切片如实标 `selection-slice:live:<date>`）· `index.ts` · `stockSelectionRouter.ts`（输入改为 `source` 指认；只把「决策日 + TopN + 载体」交给策略，**不泄漏 strategyId / 数据集细节**）· `client/src/pages/StockSelection.tsx`（请求改为 `source:{kind:\"dataset\",datasetVersionId}`；事实卡增「数据来源（载体）」）。
+- **Changed Contracts**：tRPC `stockSelection.select` 输入形状变更（`datasetVersionId` → `source`）与输出新增 `source` / `datasetVersionId: number|null`。**同一迭代内消费方（页面 / 测试）已同步**；无 `shared/**` 改动。
+- **Changed DB / Execution Path**：**无**（0 DDL / 0 DML；不注册执行路径；不进入模拟盘 / 生产链）。
+- **载体的不静默原则**：请求的载体未注册 ⇒ `SELECTION_DATA_SOURCE_UNSUPPORTED`（**不静默回退到 dataset**）；`dataset` 载体未给坐标 ⇒ `SELECTION_DATA_SOURCE_COORDINATE_MISSING`（不猜版本）。
+- **验证（纯重构必须行为不变）**：真实库只读 parity **PASS 6 / FAIL 0**（2019-01-09 / 2020-04-21 / 2021-07-29 / 2022-11-10 / 2024-02-22 / 2025-06-06；候选/合格数 23/8 · 47/22 · 32/23 · 30/16 · 60/16 · 66/48 —— 与重构前**逐日相同**）；vitest **16/16**（新增「live 载体测试替身得到同一份选股结果」⇒ 接缝真实可替换；新增未注册载体 / 缺坐标两例）；`tsc --noEmit` 0 错；`vite build` 成功；`node scripts/checkEolDrift.mjs --strict` 0。
+- **未做（下一步）**：第 2 步 = 页面主表单去掉「数据集版本」主位（改「数据来源」，默认 `live`，研究口径收进高级区）；第 3 步 = 接 `live` 载体（抽 `isFirstLimit = 当日涨停 && 上一交易日未涨停` 按日判定 + 复用 `isLimitUpClose` / 同一 3F 排序）+ 把 parity 探针升级为 live↔dataset 常规守卫；④ 行情到账（全市场行情仍只到 `2026-09-04`）。
+- **Baseline Impact**：**minor**（新增载体端口 + 契约形状变更；`SYSTEM-BASELINE.md` / `system-manifest.yaml` 头部由并发会话持有，本任务不覆盖）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `STOCK-SELECTION-003`（live 载体接入 + **候选宇宙口径对齐** · 真实数据 live ↔ dataset 对拍 **4/4 PASS**）
+
+- **Task**：方案 A 第 3 步 —— 接 `live` 载体（当日原始行情，不依赖数据集版本），并以 live ↔ dataset 对拍证明**口径同源**。
+- **Changed Files（新增）**：`server/stockSelection/sources/liveSource.ts`（`createLiveSelectionDataSource`：`DbBarStore` 原始行情 + `DbDatasetBuildIO#resolveSt` PIT ST + **同一** `isLimitUpClose` / `limitUpRatio` / `assembleEventRow`）。
+- **Changed Files（修改）**：`dataSource.ts`（新增 `SelectionUniverseScope` 与请求字段 `universe`；结果增 `calendarDays`；新增 `SelectionEventRow` / `SelectionBarRow`，允许 `datasetVersionId: null`）· `types.ts`（新增 `SELECTION_UNIVERSE_VIOLATION`）· `strategies/firstLimitPullback3FTopN.ts`（**声明候选宇宙口径**；日历显式来自载体并做覆盖性反证；计划买入日由日历给出）· `sources/datasetSource.ts`（返回 `calendarDays` + 板块反证）· `registry.ts`（注册 live + dataset）· `index.ts` · 单测。
+- **口径同源（三条）**：① 首板规则 `当日涨停 && 上一交易日未涨停`（与 `datasetRegistry/builder.ts` 同一表达式）；② 涨停判定 = 同一 `isLimitUpClose` + 同一 PIT ST 比例；③ **候选宇宙 = 主板 + 排除 ST/*ST**（实查 780001：`dataset_build_config.excludeSt=1`、73,003 条事件全部 `boardType='main'`）。宇宙口径属**策略语义**，由策略声明（`UNIVERSE_SCOPE`）、载体执行：live 按 `classifyBoard` + PIT ST 过滤，dataset 做**反证**（板块维度；ST 维度需 PIT 解析，属 live 职责）。
+- **PIT 边界（本步修掉一个真缺陷）**：执行日 T0+(n+1) 是**决策日的下一交易日**，其 bar 在决策时不存在 ⇒ live 只读 `<= 决策日` 的行情；日历可含未来（日历是已知信息）但不读未来 bar；计划买入日由日历给出。
+- **🔴 中途失败已记录并修复（不掩盖）**：首轮真实对拍 **1 PASS / 3 FAIL**（live 候选 70 vs dataset 47 等，且把 `920475.BJ` 纳入候选导致身份 `NO_IDENTIFIER`）⇒ 根因 = **候选宇宙未对齐**（live 读全市场且未排 ST）。按此修复后复测通过。
+- **验证（真实数据，全部只读）**：`STOCK-SELECTION-003` 对拍 **PASS 4 / FAIL 0**，且**逐日候选/合格数与 dataset 完全相同** —— 2020-04-21 `47/22` · 2022-11-10 `30/16` · 2024-02-22 `60/16` · 2025-06-06 `66/48`（Top-3 面板身份、分数、计划买入日逐项一致）。单测 **19/19**（含「live 载体在同一夹具给出与 dataset **同一份**选股结果」）。`tsc --noEmit` 0 错；`node scripts/checkEolDrift.mjs --strict` 0。
+- **未做 / 仍需**：① 页面（方案 A 第 2 步）：主表单去掉「数据集版本」，改「数据来源」选择器并默认 live（当前默认仍是 dataset，页面未受影响）；② ④ 行情到账（全市场行情仍只到 `2026-09-04`）—— 在此之前 live 只能选历史日，选不出「今天」。
+- **Changed DB / Execution Path**：**无**（0 DDL / 0 DML；不注册执行路径；不进入模拟盘 / 生产链）。
+- **Baseline Impact**：minor（新增 live 载体 + 候选宇宙口径；`SYSTEM-BASELINE.md` / `system-manifest.yaml` 头部由并发会话持有，本任务不覆盖）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `STOCK-SELECTION-004`（方案 A 第 2 步：页面主表单去数据集 · 「数据来源」改为主位）
+
+- **Task**：用户指出「选股不该跟数据集挂钩」→ 方案 A 第 2 步：把「数据集版本」从主表单移除，改为「数据来源（载体）」选择器，默认 `live`。
+- **Changed Files**：`server/stockSelection/registry.ts`（`StockSelectionRegistry` 增 `listDataSources()`）· `server/stockSelectionRouter.ts`（新增只读端点 `listDataSources`）· `client/src/pages/StockSelection.tsx`（主表单改为 **策略 / 数据来源 / 决策日 / TopN**；「数据集版本（研究口径）」**仅在选择 dataset 载体时出现**；决策日默认今天；结果事实卡展示载体标签与 datasetVersionId）· `tests/server/stockSelectionRouter.test.ts`（+1 例 + appRouter 守卫）。
+- **Changed Contracts**：新增只读端点 `stockSelection.listDataSources`（返回 `[{kind,label}]`）。无 `shared/**` 改动。
+- **Changed DB / Execution Path**：**无**（0 DDL / 0 DML；只读）。
+- **用户可见行为**：日常选股不再需要选择数据集版本（默认走当日行情）；研究口径仍可一键切到数据集快照并选版本。
+- **验证**：vitest **20/20**（选股域 13 + router 7）· `tsc --noEmit` 0 错 · `vite build` 成功 · `node scripts/checkEolDrift.mjs --strict` 0。
+- **仍需（唯一）**：④ 行情到账 —— `stock_daily_prices` 全市场仍只到 `2026-09-04`（之后 400~500 行/日）⇒ live 载体现在只能选历史决策日，**选不出「今天」**。需 Tushare 同步恢复 + 事件/数据集增量的写库授权。
+- **Baseline Impact**：minor（端点 + 页面；`SYSTEM-BASELINE.md` / `system-manifest.yaml` 头部由并发会话持有，本任务不覆盖）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `BAOSTOCK-SYNC-001`（行情回补改走 BaoStock · **诊断完成，尚未写库**）
+
+- **Task**：用户裁定「改用 BaoStock」修复行情断供（`stock_daily_prices` 全市场只到 `2026-09-04`，之后 400~500 行/日），以便 live 选股载体能选出近期决策日。
+- **① provider 支持（实查）**：`server/marketData/providers/index.ts` 注册表**已有** `liquidityProviders["baostock-daily"]` 与 BaoStock 指数 provider；`server/marketData/types.ts#LiquidityProviderName` 含 `"baostock-daily"` 且带**独立单位换算表**（`amountToQianYuan: 0.001` 等）⇒ **与 Tushare 口径不同，禁止混用**。
+- **② 环境（实测）**：Python **3.12.6**；`baostock 0.9.3` 导入 OK + **login success（error_code=0, 2.9s）**；离线包在仓库根 `baostock-0.9.3.tar.gz`（可 `pip install baostock-0.9.3.tar.gz`，不依赖 PyPI）。先前 `ModuleNotFoundError` 是沙箱读不到用户级 site-packages 的假阴性。
+- **③-1 写入路径（实查，零写入）**：入口 = `server/_core/index.ts:122` `POST /api/scheduled/syncStockDailyPrices`；抓取 = `server/tushare.ts:116 fetchTushareDailyPricesByDate(tradeDate)`（按交易日拉全市场）+ `:85 parseTushareDailyPrices`；落库走 `onDuplicateKeyUpdate`（唯一键 `uq_stock_daily_price_stock_date`）⇒ **幂等**。最小改法 = **只替换抓取段**，落库/字段映射/幂等不动。
+- **待确认（决定试跑实现）**：`server/_core/index.ts:122` 端点现有实现（并发/分批/重试/`source` 标记）+ `server/marketData/providers/baostock.ts` 既有 Python 桥导出（仓库已有 BaoStock 股票/指数/ST 三条桥 ⇒ **优先复用，不新写 Python**）。BaoStock 无「一日返回全市场」接口，通常需 `query_all_stock(day)` + 逐票 `query_history_k_data_plus`。
+- **下一步（已获授权，按序执行）**：② 给端点加 BaoStock 分支（复用既有 pythonBridge）→ ③ **只跑 1 个交易日**并复查（行数 / `source` / `preClosePrice` 非空率 / 与既有行不重复 / spot-check 若干票）→ ④ 复查通过后放开 `2026-09-05 → 今天` 全量回补。
+- **DB Impact**：本条**零写入**（0 DDL / 0 DML；全部只读实查）。后续 ③④ 属批量生产数据写入，按用户授权执行。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-06 · `BAOSTOCK-SYNC-002`（STEP 7.3 BaoStock provider · 1 交易日试跑通过 · 全量回补 `2026-09-05`→`2026-10-06`）
+
+- **Task**：按用户 4 步执行 —— ①确认 provider 注入方式 → ②加 BaoStock provider（逐票 + `baostock-daily` 单位换算 + validation）并复用 checkpoint / rateLimiter / retry → ③试跑 1 个交易日并复查（行数 / `source` / `preClosePrice` 非空率 / 无重复 / spot-check）→ ④通过后全量回补 `2026-09-05`→今天（可断点续跑）。承接 `BAOSTOCK-SYNC-001`（诊断）与 `STOCK-SELECTION-00x`（全市场行情停在 `2026-09-04`）。
+- **Changed Domains**：辅助域 `marketDataFoundation`（STEP 7.3 回填框架新增 provider 实现）；**未触碰** Strategy Core / Dataset / Research / Backtest / Paper Trading 语义。
+- **Changed Files**：
+  - 新增 `server/backfill/providerBaostock.ts`：`BaoStockMarketDataProvider implements MarketDataProvider`（`baostockRowToRawBar` / `toBaostockCode` / `BAOSTOCK_RETRY_POLICY`）。
+  - 新增 `server/marketData/providers/baostockSession.ts`：BaoStock `session` 驻留会话客户端。
+  - 新增 `tests/server/backfill/providerBaostock.test.ts`（8 例）。
+  - 改 `server/backfill/units.ts`：新增 `baostock-daily` 换算（`HANDS_PER_SHARE` / `THOUSAND_CNY_PER_CNY` / `convertBaostockDailyUnits`）。
+  - 改 `server/backfill/index.ts`（导出）、`server/marketData/providers/index.ts`（导出会话）、`server/marketData/providers/baostock.ts`（`BaostockStockRow.preClose?`）。
+  - 改 `scripts/providers/baostock_probe.py`：`stock_daily` 增 `preclose` 字段。
+  - 改 `scripts/backfillDaily.ts`：`--provider=tushare|baostock` / `--codes` / `--limit` / `--progress-file`。
+  - 改 `tests/server/backfill/units.test.ts`（+7 例）。
+- **① provider 注入方式（实查结论）**：`server/backfill/scheduler.ts#BackfillSchedulerDeps` 构造注入 provider-neutral 的 `MarketDataProvider#fetchDailyByTradeDate(tradeDate) -> ProviderDailyResult`；`scripts/backfillDaily.ts` 原硬编码 `TushareMarketDataProvider`，现改为 `--provider` 选择。BaoStock **无「全市场单日」端点**（只能逐票 `query_history_k_data_plus`）⇒ provider 逐票拉整段区间 + 按 `tradeDate` 分桶缓存，对 scheduler 保持「按日取全市场」语义。
+- **② 复用与新增**：逐票请求复用 `IntervalRateLimiter` + `withRetry`（`BAOSTOCK_RETRY_POLICY` 3s/6s/12s/24s/48s）；连续失败 5 只冷却 30s；写库阶段复用 `BackfillScheduler` 的 per-day checkpoint + `runDailyPipeline` + `persistInBatches`。逐票结果按「一股一行 JSONL」落 `progressFilePath`（**区间不匹配不复用**）⇒ 取数阶段也可断点续跑。校验复用 `server/backfill/validation.ts#validateCanonicalBackfillBar`（本次未改 validation.ts）。
+- **单位口径**：BaoStock 原始 `volume=股` / `amount=元` → `×0.01` / `×0.001` → `stock_daily_prices` 既有口径 `手` / `千元`（与 Tushare 窄样本一致），系数与 `server/marketData/liquidity.ts` 的 `baostock-daily` scale 单一一致。
+- **③ 试跑（真实，1 交易日 = `2026-09-30`，全 universe 5552）**：逐票 completed=5552 failed=0；写库 `rowCount=5215`，checkpoint `SUCCESS`。复查：`preClosePrice` 非空 **100%（null=0）**、`open/close` 非空 100%、重复键 **0**、spot-check（`000001.SZ` / `600000.SH` / `300750.SZ` / `688981.SH`）与 BaoStock 原始值逐单位一致（如 `600000.SH`：`volume 147484820 股 → 1474848.2 手`，`amount 1386209937.38 元 → 1386209.93738 千元`）。
+- **④ 全量回补（`2026-09-05`→`2026-10-06`）**：目标 17 个交易日（`09-07`…`09-30`；`10-01`…`10-06` 非交易日），`09-30` 已由试跑完成故跳过 16 天。结果：`processed=16 totalRows=83440`，**17/17 SUCCESS、0 FAILED、0 SUSPICIOUS、0 QUOTA_STOPPED**，逐票 5552/5552 成功。区间合计 `stock_daily_prices` = **88,655 行 `source='baostock'`（17 天 × 5215）**，无重复。
+- **覆盖范围事实（必须显式登记）**：BaoStock **只支持 `sh`/`sz`**（实测 `bj.*` → 「股票代码未标识 sh 或 sz」）⇒ **北交所（BJ）不在本次回补范围**；研究 universe 来源 `research_security_identifier_history` 本身也只有 SH 2463 + SZ 3089 = 5552。区间内仍留 `source='tushare'` 共 **146 行**（BJ 134 + SZ 12，后者为新上市未进 universe 的代码，如 `301689.SZ`），**未被覆盖也未被改动**。SH+SZ 覆盖与已知全量日 `2026-09-04` 对齐（SH+SZ `09-04`=5207 → `09-30`=5217）。
+- **Changed Contracts**：**无**（无 `shared/**` 改动；未新增 tRPC 端点）。
+- **Changed DB**：**数据写入，0 DDL / 0 migration**。`stock_daily_prices` 按唯一键 `(stockCode, tradeDate)` 幂等 upsert（`source` 被覆盖为 `baostock`）；`backfill_checkpoints` 写 per-day 状态。**一次性修正**：smoke（`--limit=120`）曾把 `2026-09-30` 标成 `SUCCESS`/96 行（误导）⇒ 已将其 UPDATE 为 `PENDING` 后按全 universe 重跑（**UPDATE 单行，未 DELETE**）。
+- **Changed Execution Path**：新增回填 CLI 运维分支；**不进入** 生产 / 研究执行链。
+- **Potential Baseline Drift**：`system-manifest.yaml#marketDataFoundation.sourcePaths` 已含 `server/backfill/**` 与 `scripts/backfillDaily.ts`（无需改动）；`ROADMAP`/`STOCK-SELECTION-00x` 记录的「行情只到 2026-09-04」已被本任务解决（该文档头部由并发会话持有，本任务不覆盖）。下游若硬编码 `source='tushare'` 需注意 `2026-09-07`…`2026-09-30` 现为 `baostock`。
+- **Regression Result**：`tsc --noEmit` **0 错**；`tests/server/backfill`（16 文件 / **132 用例**）+ `tests/server/marketData` + `tests/server/security` 通过（仅 `tests/server/marketData.test.ts` 4 例为**既有** DB 依赖基线失败，非本次引入）；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（既有域内新增 provider 实现 + 运维 CLI；`SYSTEM-BASELINE.md` / `system-manifest.yaml` 头部由并发会话持有，本任务不覆盖）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `STOCK-SELECTION-005`（选股结果 + 剔除统计持久化 · 手动保存 · 同页历史回看）
+
+- **Task**：用户指令「我需要把这些选股数据都存下来，还有**剔除统计的也要保存，并展示**」，并授权「**允许执行 0055 + 手动保存(B) + 同页历史(A)**」。
+- **Changed Domains**：`stockSelection`（选股域：新增**唯一写路径** = 结果快照；`select` 仍纯读）。
+- **Changed Files**：
+  - 新增 `drizzle/0055_stock_selection_run.sql`（手写幂等 SQL：1 表 + 2 索引）。
+  - 新增 `scripts/applyStockSelectionRun.mjs`（专用幂等 apply + 列签名/索引/0 FK/行数断言；`--check` / `--dry-run` / apply）。
+  - 改 `drizzle/schema.ts`（`stockSelectionRun` 声明 + `StockSelectionRunRow` / `InsertStockSelectionRunRow`）。
+  - 新增 `server/stockSelection/persistence.ts`（`StockSelectionRunStore` 端口 + DB/内存实现 + runId/JSON 纯函数）。
+  - 改 `server/stockSelection/index.ts`（导出持久化）。
+  - 改 `server/stockSelectionRouter.ts`（新增 `saveRun` mutation + `listRuns` / `getRun` query；`runStore` 可注入）。
+  - 改 `client/src/pages/StockSelection.tsx`（「保存选股结果」按钮 + 同页「历史选股记录（含剔除统计）」列表 + 展开明细）。
+  - 新增 `tests/server/stockSelection/persistence.test.ts`（12 例）；改 `tests/server/stockSelectionRouter.test.ts`（+5 例，含 appRouter 端点守卫增补）。
+- **Changed Contracts**：新增 3 个 tRPC 端点 —— `stockSelection.saveRun`（mutation）/ `stockSelection.listRuns` / `stockSelection.getRun`（query）。**无 `shared/**` 改动**。
+- **Changed DB**（**已授权并已执行**）：
+  - 新增表 **`stock_selection_run`**（19 列：坐标快照 + `picksJson` + **`excludedJson`（剔除统计）** + 候选/合格计数 + 事件窗 + `capturedAt`）；
+    唯一键 `uq_stock_selection_run_runId`；索引 `idx_stock_selection_run_decision` / `idx_stock_selection_run_strategy`；**零 FK**。
+  - 幂等实证：第 1 次 `executed=3 / skipped=0`；第 2 次 `executed=0 / skipped=3`；`--check` PASS（60 项断言）。
+  - E2E 实证：`save → list → get → 同坐标再 save` 12/12 PASS（`runId=SEL-20260930-5eb73d0b`，库内该 runId 行数=1），
+    **探针行已清理**（`DELETE` 仅限本轮自建探针行；表内 0 残留）。
+  - **未触碰**任何既有表 / 历史行情 / 数据集 / 策略版本；`stock_daily_prices` 等一律只读。
+- **Changed Execution Path**：**无**。新增的 `saveRun` 只写快照表，不进入策略 / 数据集 / 回测 / 模拟盘执行链；`select` 无副作用不变。
+- **剔除统计口径**：**保存的是当时那份 `filterStats.excluded`**（原因码 → 条数，键序稳定写入），
+  历史回看直接渲染快照，**不重算** ⇒ 回看的就是当时的口径；重算仍只走 `server/research/compositeRunner` 这一权威实现。
+- **Potential Baseline Drift**：`DATABASE-MAP.md` 已追加 `## D-95`（新表，真实库表数 70 → 71）；
+  ⚠️ `scripts/applyStockSelectionRun.mjs` 位于 `.gitignore` 的 `/scripts` 之下 ⇒ **入库需 `git add -f`**（同既有 apply 脚本惯例）。
+- **Regression Result**：`tsc --noEmit` **0 错**；`vitest run tests/server/stockSelection tests/server/stockSelectionRouter.test.ts tests/server/backfill` = **19 文件 / 169 用例全过**；
+  `vite build` **成功**（3116 modules）；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（新增 1 表 + 3 端点 + 1 页面区块；`SYSTEM-BASELINE.md` / `system-manifest.yaml` 头部由并发会话持有，本任务不覆盖）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `STOCK-SELECTION-006`（选股清单展示：股票名称 + K 线弹窗 · 复用既有端点与组件）
+
+- **Task**：用户指令「剔除统计的也展示出来，同时也保存进去，然后**都展示股票名称**，还要把 **K 线**展示出来」+ 补充「**类似于之前那种交易详情的弹窗**」。
+- **Changed Domains**：`stockSelection`（**仅展示层**）；未改选股语义、未改任何服务端契约。
+- **Changed Files**：
+  - 新增 `client/src/lib/stockSelectionPicks.ts`（纯函数：名称 / 代码 / K 线窗口派生）。
+  - 改 `client/src/pages/StockSelection.tsx`：新增共用 `PicksTable`（**当前选股结果**与**历史明细**共用）；
+    列增「名称」+「K 线」操作；点「K 线」开 **交易详情同款弹窗** `StockKlineDialog`。
+  - 新增 `tests/client/src/lib/stockSelectionPicks.test.ts`（6 例）。
+- **剔除统计（复述确认）**：**已保存**（`stock_selection_run.excludedJson`，见 `STOCK-SELECTION-005`）**且已展示**两处 ——
+  ①「本次结果」下方「剔除统计（为什么没选上）」；②「历史选股记录」每行内联徽章（**读的是快照，不重算**）。
+- **名称来源（复用，不新建第二套）**：`researchRun.securityLabels`（既有「证券名称 + 代码」字典端点，
+  内部 `loadSecurityLabels`；名称源 = `limit_up_records`）。**取不到 ⇒ 显示 `—`，绝不用代码冒充名称**。
+  实查：名称源覆盖 **4352** 个代码（全 universe 5552）；本策略候选本身即首板事件 ⇒ 实盘选股命中率高。
+- **K 线（复用，不新写图表）**：`client/src/components/strategy/StockKlineDialog`（回测 / 3F 面板同款弹窗），
+  数据走既有 `researchRun.stockDailySeries`（OHLC + 成交量 + MA5/10/20，区间前后各 30 交易日）。
+  **窗口 = 事件日 T0 ~（计划买入日 ?? 信号日）**；无事件日 ⇒ 按钮禁用（不开空窗口）。
+  实查：`000001.SZ` 窗口返回 **35 根** bar，末端 `2026-09-30` 为本次 BaoStock 回补数据（`11.36/11.65/11.33/11.57`）。
+- **Changed Contracts**：**无**（零新增端点、零 `shared/**` 改动；纯复用 + 客户端展示）。
+- **Changed DB**：**无**（0 DDL / 0 DML；仅只读查询）。
+- **Changed Execution Path**：**无**（纯只读展示；K 线弹窗沿用既有只读端点）。
+- **Potential Baseline Drift**：无。
+- **Regression Result**：`tsc --noEmit` **0 错**；
+  `vitest run tests/server/stockSelection tests/server/stockSelectionRouter.test.ts tests/client/src/lib/stockSelectionPicks.test.ts tests/client/src/components/strategy/StockKlineDialog.test.ts`
+  = **5 文件 / 46 用例全过**；`vite build` **成功**；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Impact**：minor（仅客户端展示层 + 1 个纯函数模块与测试；`SYSTEM-BASELINE.md` / `system-manifest.yaml` 头部由并发会话持有，本任务不覆盖）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `STOCK-SELECTION-007`（剔除统计下沉到**逐只股票** · 保存 + 展示）
+
+- **Task**：用户「**剔除统计的股票还是没展示出来，我需要展示出来**」——此前只有「原因码 → 条数」，没有「**哪只票**为什么没选上」。
+- **Changed Domains**：`research/compositeRunner`（**加性扩展**，行为不变）+ `stockSelection`（口径落库 + 展示）。
+- **Changed Files**：
+  - 改 `server/research/compositeRunner/index.ts`：新增 `CompositeEventExclusionReason` / `CompositeEventExclusion`，
+    `buildCompositeEvents` 返回**新增**字段 `exclusionRecords`（在**同一次循环**、与 `accounting` 同一批判断里 push）。
+  - 改 `server/stockSelection/types.ts`：新增 `StockSelectionExcludedStock`；`filterStats` 增 `excludedStocks`。
+  - 改 `server/stockSelection/strategies/firstLimitPullback3FTopN.ts`：`excluded` 计数**改由逐只明细归并**（`countByReason`），
+    二者恒自洽；逐只明细补齐 `canonicalSecurityId / code / eventId / eventDate / reason`。
+  - 改 `server/stockSelection/persistence.ts`：`excludedJson` 形状扩为 `{counts, stocks}`（**同一 longtext 列，无 DDL**），
+    解析**兼容旧「纯计数」形状**；`StockSelectionRunSummary` 增 `excludedStocks`。
+  - 改 `client/src/pages/StockSelection.tsx`：新增 `ExcludedStocksList`（按原因分组，逐只显示 `名称 代码 · 事件日`），
+    用于**本次结果**与**历史展开**；`FACTORS_UNAVAILABLE` 中文标签。
+  - 改 `drizzle/schema.ts`（**仅列注释**描述新 JSON 形状）。
+  - 测试：`tests/server/stockSelection/firstLimitPullback3FTopN.test.ts`（+1 例：逐只明细与计数自洽）、
+    `tests/server/stockSelection/persistence.test.ts`（13 例，含旧形状兼容）、`tests/server/stockSelectionRouter.test.ts`（断言逐只明细落库/读回）。
+- **口径纪律（关键）**：逐只明细由**唯一权威实现** `buildCompositeEvents` 产出 ⇒ **不存在第二套过滤逻辑**；
+  计数由明细归并 ⇒ 不会出现「有数量、没票」或「有票、数量对不上」。
+  新增原因码 `FACTORS_UNAVAILABLE`（观察窗完整但三因子算不出，原先被并入「无回踩」，现**如实单列**）。
+- **Changed Contracts**：`DailyStockSelection.filterStats` 增 `excludedStocks`（**加性**；既有 `excluded` 语义不变）。
+  无新端点、无 `shared/**` 改动。
+- **Changed DB**：**0 DDL / 0 migration**。`stock_selection_run.excludedJson` 内**同列扩展 JSON 形状**
+  （表内既有 0 行 ⇒ 零兼容风险；解析器仍兼容旧形状，历史行可读）。
+- **Changed Execution Path**：**无**（回测/研究链只多出一个被忽略的返回字段；`compositeDatasetProvider` 为解构消费，实测不受影响）。
+- **Potential Baseline Drift**：`excluded` 中 `NO_PULLBACK_IN_OBSERVATION_WINDOW` 的计数可能因 `FACTORS_UNAVAILABLE` 单列而**变小**
+  —— 这是**更如实**的分类，不是回归。
+- **Regression Result**：`tsc --noEmit` **0 错**；
+  `vitest`（stockSelection + stockSelectionRouter + research/compositeRunner + researchExperiments 相关 + client 助手）
+  = **13 文件 / 81 用例全过**；E2E 探针（真库 `save→list→get` 含逐只明细）**11/11 PASS**，
+  探针行已清理；`vite build` **成功**；`checkEolDrift --strict` **0**。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` 追加；`SYSTEM-BASELINE.md` / `system-manifest.yaml` 头部由并发会话持有，本任务不覆盖）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `STOCK-SELECTION-008`（剔除明细改为**与选股同款表格** · 表内只放「剔除原因」）
+
+- **Task**：用户「被剔除的展示形式也跟选股一样，**只在表格中展示被剔除原因**」——上一版是按原因分组的徽章/胶囊流，与选股清单表格不一致。
+- **Changed Domains**：`stockSelection`（**纯展示层**）；无服务端/DB 改动。
+- **Changed Files**：
+  - 改 `client/src/pages/StockSelection.tsx`：`ExcludedStocksList`（分组徽章）→ **`ExcludedStocksTable`**（与 `PicksTable` 同款表格）。
+  - 改 `client/src/lib/stockSelectionPicks.ts`：新增 `buildKlineTargetForExcludedStock`（剔除票的 K 线窗口）。
+  - 改 `tests/client/src/lib/stockSelectionPicks.test.ts`（+2 例）。
+- **表格形态（与选股清单对齐）**：`名称 | 代码 | 事件日 T0 | 剔除原因 | K 线`。
+  相比选股清单，**用「剔除原因」替换掉「分数 / 横截面分位 / 计划买入」**（剔除票没有这些量，不编造）；
+  「K 线」沿用**交易详情同款弹窗**，窗口以**事件日 T0** 为中心（剔除票没有买入日）。
+- **计数呈现**：不再铺一组徽章，改为表格上方一行 `共 N 只被剔除`；明细缺失（旧记录只存计数）时如实追加说明。
+- **Changed Contracts**：**无**。**Changed DB**：**无**（0 DDL / 0 DML）。**Changed Execution Path**：**无**。
+- **Regression Result**：`tsc --noEmit` **0 错**；
+  `vitest`（stockSelection + router + research/compositeRunner + client 助手/K 线助手）= **11 文件 / 75 用例全过**；
+  `vite build` **成功**；`checkEolDrift --strict` **0**。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` 追加）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+---
+
+## 2026-10-06 · `REPO-HYGIENE-ROOT-RESULT-FILING-001`（根目录整理：删误产物 + RESULT 报告归位 docs/research + 清 .cache 浏览器 profile）
+
+- **Task**：用户「整理根目录文件夹，有些没用的文件删掉」→ 裁定执行 A（RESULT 报告归位）+ B（清 `.cache` 浏览器 profile）。
+- **Changed Domains**：**无**（文档 / 仓库卫生；0 业务代码）。
+- **Changed Files**：
+  - 删除根目录 **27** 个 0 字节误产物 / 临时日志（零内容、零引用、未跟踪或被 gitignore）。
+  - 归位 **36** 份根目录 `RESULT-*.md` / `RESEARCH-TEMPLATE-*.md` → `docs/research/`（用 Move-Item，因均未被跟踪）。
+  - 改 `ROADMAP.md`（5 处裸文件名指针 → `docs/research/…`）· `docs/architecture/CHANGE-AUDIT.md`（6 处同上）。
+  - 删除 `.cache/edge-backtest-*` + `.cache/edge-headless-profile*`（15 目录，≈538 MB，Edge 无头浏览器临时 profile）。
+- **Changed Contracts**：**无**。**Changed DB**：**无**。**Changed Execution Path**：**无**（0 import 变动）。
+- **Potential Baseline Drift**：**无**。**未动**：`calibrate_open_expectation.ts`（被 `server/openExpectation.ts` 注释当可执行命令引用）· 被引用的跟踪文档（`TASK_TRACKING` / `AUDIT-DRS-001-EVIDENCE` / `DEVELOPMENT_PLAN` / `ROADMAP-CHANGELOG`）。
+- **Regression Result**：`checkEolDrift --strict` **0**（指针改写为纯插入，字节增量 = 14 × 替换数：`ROADMAP.md` +70、`CHANGE-AUDIT.md` +84，无其他字节变化）；归位后跟踪文件中对该批文件名的**裸引用残留 = 0**。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` 追加）。保留 `.cache/datasets` · `.cache/leader-candidate-backtest` · `.cache/ROADMAP.before-47-split.md`。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `FLOW-001-P3-3570001-CONVERGENCE-001`（单策略专项页收敛：3570001 → 通用策略详情 Tab）
+
+- **Task**：用户「重新规划前端页面中关于 3570001 的选项，这个 tab 不能单独存在，最好能与通用兼容起来」——关闭 `FLOW-001` §5/§6 的唯一 P3 遗留（此前登记为「需产品决策」）。
+- **Changed Domains**：**Frontend（信息架构 / 路由 / 深链）**；0 业务语义、0 端点、0 DB。
+- **Changed Files**：
+  - 改 `client/src/components/AppShell.tsx`：删除「最终评估 3570001（专项）」「模拟盘 3570001（专项）」两个侧栏项（④ 策略 7→6、⑥ 前向与复盘 3→2；**侧栏不再出现任何策略坐标**）。
+  - 改 `client/src/App.tsx`：两条旧路径 `/strategy-final-evaluation` · `/paper-trading-3570001` 由「渲染专项页」改为 `<Redirect>` 到 `/strategies/<3570001 坐标>?version=1.0.0&tab=evaluation\|paper`（静态改写，旧书签不 404）。
+  - 删 `client/src/pages/StrategyFinalEvaluation.tsx` · `client/src/pages/PaperTrading3570001.tsx`（收敛后无消费者；留档展示只剩一套视图）。
+  - 改 `client/src/pages/StrategyDetail.tsx`：新增 `?tab=` 深链（`STRATEGY_DETAIL_TABS` 白名单；未知值退回 `definition` 不报错）；`Tabs` 由非受控 `defaultValue` 改为受控 `value/onValueChange`，切换 `replace` 写回 URL 且保留 `?version=`。
+  - 改 `client/src/components/strategy/StrategyVersionArtifactsTabs.tsx`：头注释同步；模拟盘 Tab 在**留档自己声明** `runner.state === "NEW_HIGH_3"` 时补回原专项页的信号级 `NEW_HIGH_3` 标记列（数据驱动，不硬编码策略坐标）。
+  - 改 `client/src/pages/PaperTrading.tsx`：`/paper-trading` 头部补一句分工说明（本页只负责新建 / 推进前向运行；按版本看留档在策略详情 Tab）。
+  - 改 `tests/client/src/pages/pageFlowContracts.test.ts`：§15 集合 28→27 项（−2 专项项，+ 并发会话已落地的 `/stock-selection`）、§16 的 ⑥ 组期望；新增 §42–§45（侧栏无策略坐标 / 旧路径为 Redirect 且专项页文件已删 / `?tab=` 白名单与受控写回 / 通用 Tab 只走通用端点且不写死坐标）。
+  - 改 `docs/product/FLOW-001-page-workflow.md`（§1/§2/§4/§5/§6 + 状态行）；改 `docs/architecture/CONTRACT-MAP.md` C-99；改 `server/researchRunRouter.ts`（**仅注释**，指向已收敛的事实）。
+- **Changed Contracts**：**无**（tRPC 顶层 key 与 input/output 形状未变；`getFinalEvaluation` / `getPaperTrading3570001` 保留为薄封装，现无前端消费者）。
+- **Changed DB**：**无**（0 DDL / 0 DML / 0 migration）。
+- **Changed Execution Path**：**无**（未动 `strategyCore` / simulator / Dataset 坐标；纯前端渲染与路由）。
+- **Potential Baseline Drift**：无新增；反倒**消除**一条 —— `docs/INDEX.md` 中 2026-10 的 `RESULT-*` 条目仍按**当时**事实写「新增前端页 `/strategy-final-evaluation` / `/paper-trading-3570001`」，属历史记录，不改写。
+- **Regression Result**：`tsc --noEmit` **0 错**；`vitest run tests/client/src/pages/pageFlowContracts.test.ts` **44/44 通过**；`checkEolDrift --strict` **0**。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` 追加 + `FLOW-001` 状态更新 + `CONTRACT-MAP` C-99 补记）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `FLOW-001-P3-3570001-CONVERGENCE-PLAN-001`（按技能补齐该任务的规范化规划与状态收口）
+
+- **Task**：用户「按照技能规划任务」——把上一轮的收敛改动补成**符合 `.agents/orchestrator` / `product` / `frontend` 规则的规范化任务规划**，并把状态收口写回基线。
+- **Changed Domains**：**文档 / 过程状态**（0 业务代码、0 契约、0 DB、0 执行链）。
+- **Changed Files**：
+  - 新增 `docs/product/FE-PLAN-005-single-strategy-page-convergence.md`：Goal 七要素（objective / DoD / verification / constraints / scope / non-goals / 停止条件）· Pipeline 与裁剪理由（跳过 RESEARCH/STRATEGY/BACKEND，INTEGRATION+REFACTORING 合并，DATABASE = N/A）· Product §8 十项规格 · Frontend §8 十项方案 · Architecture 只分析影响面 · 8 条可测验收标准（AC-1..AC-8）· Verification 命令与真实渲染证据 · Risks / Needs Human · Handoff 顺序。
+  - 改 `docs/INDEX.md`：登记 FE-PLAN-005（进入「产品 / 前端方案」表）。
+  - 改 `.agent/task-state.yaml`：新增 `SPECIAL_PAGE_CONVERGENCE: COMPLETE`（stages + completed 同步）；`last_action` / `last_verification` / `next_action` 更新；`scope.in` 增列该收敛项。
+- **Changed Contracts**：**无**。**Changed DB**：**无**。**Changed Execution Path**：**无**。
+- **Potential Baseline Drift**：无。`FE-PLAN-005` 的状态写为 IMPLEMENTED 而非 PROPOSED，因为该任务的实现与验证已于同日完成并留有证据（§8/§9）。
+- **Regression Result**：纯文档改动（无 `.ts` / `.tsx` 变更）⇒ 未新增/未删除任何测试；`checkEolDrift --strict` 复跑 **0**（新文件为 LF）。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` 追加 + `INDEX` 登记 + `task-state` 阶段收口）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `FRONTEND-EMPTY-ERROR-STATES-001`（空态/错误态覆盖：读取失败不再被伪装成空数据）
+
+- **Task**：`.agent/task-state.yaml` 的 `EMPTY_ERROR_STATES` 阶段 —— 全站扫描「空态 / 错误态 / 加载态」覆盖，并补齐缺口。
+- **Changed Domains**：**Frontend（展示层诚实性）**；0 契约 / 0 DB / 0 执行链 / 0 策略语义。
+- **扫描口径与结果**：`client/src/pages/**/*.tsx` 中所有含 `useQuery(` 的页面 ⇒ **32 个页面**；修复后**三态齐全 32/32、缺口 0**（判据与结果见 `docs/product/FE-PLAN-006` §2）。
+- **Changed Files**：
+  - 改 `client/src/pages/ReviewWorkbench.tsx`：列表分支改为 `loading → **error** → empty`（此前 `listQuery` / `detailQuery` **没有任何 error 分支**，读取失败会落到「暂无前向纸面运行」）；详情补 `detailQuery.isError`；统一使用共享 `ErrorState`。
+  - 改 `client/src/pages/PaperTrading.tsx`：运行列表分支改为 `loading → **error** → empty`；运行详情补 error 分支（此前失败会显示「暂无前向运行」）。
+  - 改 `tests/client/src/pages/pageFlowContracts.test.ts`：新增 §46（全站 32 页三态扫描锁，含 EXEMPT 机制）+ §47（ReviewWorkbench error≠empty 定点锁）+ §48（PaperTrading 分支顺序与诚实文案锁）。
+  - 新增 `docs/product/FE-PLAN-006-empty-error-state-coverage.md`（扫描方法 / 2 处修复 / 真实渲染证据 / backlog）；改 `docs/INDEX.md`（登记 006）；改 `.agent/task-state.yaml`（`EMPTY_ERROR_STATES: COMPLETE`，`current_stage` → `TABLE_SEMANTICS_TRIAGE`）。
+- **Changed Contracts**：**无**（未改任何 tRPC 过程 / schema）。**Changed DB**：**无**。**Changed Execution Path**：**无**。
+- **Regression Result**：`tsc --noEmit` **0 错**；`vitest run tests/client/src/pages/pageFlowContracts.test.ts` **47/47**；`checkEolDrift --strict` **0**。
+- **真实渲染证据（关键）**：用 CDP `Fetch` 域把 `sentiment.listPaperTradingRuns` 打成失败 ⇒ `/review-workbench` 显示「前向纸面运行列表读取失败 + RPC_ERROR」且**不**出现「暂无前向纸面运行」；`/paper-trading` 显示「运行列表读取失败：Failed to fetch」且**不**出现「暂无前向运行」（**2/2**）。对照组（不拦截）`/review-workbench` 正常渲染 4 条运行 ⇒ error 分支不误触发。
+- **未做（已登记 backlog）**：4 个**解构式**取数页面的主查询未捕获 `error`（`Market.tsx` / `LimitUpReview.tsx` / `SentimentAlerts.tsx` / `Backtest.tsx`）——需先判定主查询并设计聚合错误条，登记于 `FE-PLAN-006` §5 与 task-state `next_action`，未静默丢弃。
+- **Potential Baseline Drift**：无。`StrategyVersionCompare` / `BacktestCompare` 属既有 `<query>.error ? ...` 写法，判定为「已有错误面」，不改。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` + `INDEX` + `task-state` + 新增 `FE-PLAN-006`）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `FRONTEND-TABLE-SEMANTICS-TRIAGE-001`（表格排序/分页语义分类登记 · 只分类不改行为）
+
+- **Task**：`.agent/task-state.yaml` 的 `TABLE_SEMANTICS_TRIAGE` 阶段 —— 对全站表格的排序 / 分页语义做**分类登记**（`FE-PLAN-006` 收尾后的下一项）。
+- **Changed Domains**：**文档（只读扫描结论）**；**0 代码 / 0 契约 / 0 DB / 0 行为变化**。
+- **扫描口径与结果**：`client/src/**/*.tsx` 中含 `<table>` 或 `<DataTable>` 的文件 = **29 个**（数据表 23 / 非数据表 6；判据 = `clientSort: .sort(` ∧ `useMemo`；`serverLimit: limit:`；`clientSlice: .slice(`）。
+- **结论**：① **全站没有任何一处服务端分页** —— 所有「翻页/截断」都是「服务端 `limit` 截断 + 客户端展示」；② 排序一律是**客户端** `useMemo().sort()`（只有带排序控件的表才排）；③ 语义**一致**，故本轮**维持现状**，不引入第二套表格封装、不改任何排序行为；④ 若将来引入服务端分页/排序，属**契约变更**，须走 Architecture + Product，不得在页面内加 state 解决。
+- **Changed Files**：新增 `docs/product/FE-PLAN-007-table-sorting-pagination-triage.md`（分类表 A–E + 局限声明 + 规模风险点）；改 `docs/INDEX.md`（登记 007）；改 `.agent/task-state.yaml`（`TABLE_SEMANTICS_TRIAGE: COMPLETE`，`current_stage` → `FINAL`）。
+- **Changed Contracts / DB / Execution Path**：**均无**。
+- **规模风险点（登记，未改）**：`Backtest.tsx`（27 个 `<table>`）与 `SearchRobustnessPanel` 的「客户端排序 + 切片」在主线程上有压力；`DatasetListTable` / `VersionListTable` / `PerformanceDashboard` / `Upload` 四张**域内全量表无任何上限**，数据量上来时需显式截断并如实标注。
+- **Regression Result**：纯文档（本阶段无 `.tsx` 变更）⇒ 零新增/零删除测试；`checkEolDrift --strict` **0**（两个新文档均为 LF）。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` + `INDEX` + `task-state` + 新增 `FE-PLAN-007`）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `FE-PLAN-008-STRATEGY-DOMAIN-OPTIMIZATION-PLAN`（④「策略」域页面优化：只出计划，未改代码）
+
+- **Task**：用户「优化策略里面这几个页面，使用技能先给出计划」⇒ 按 `.agents/product` §8 + `.agents/frontend` §8 + `.agents/orchestrator` §4.2/§7 产出**待裁定方案**（PROPOSED，不改代码）。
+- **Changed Domains**：**文档（方案）**；**0 代码 / 0 契约 / 0 DB / 0 执行链**。
+- **Changed Files**：新增 `docs/product/FE-PLAN-008-strategy-domain-pages-optimization.md`（现状盘点 8 个入口 · 问题清单 P0/P1/P2 · IA 草图 · Product/Frontend 十项 · AC-1..AC-5 · Pipeline · 3 条 NEEDS_HUMAN · 5 步顺序）；改 `docs/INDEX.md`（登记 008）。
+- **实查依据（写进方案，可复核）**：`PerformanceDashboard.tsx` 无 `useSearch`/`useParams`、无 `strategyId`/`version` 入参；`BacktestRuns.tsx`/`BacktestCompare.tsx` 仅 `strategyId`；`PaperTradingTemplate.tsx` 三张表直接渲染 `s.stock`/`p.stock`（真实渲染截图显示 `sec_<uuid>:event:002279.SZ@…`）；`useSecurityLabels.ts` 头注释已声明「前端不做身份翻译」且当前仅 1 个消费者；`StrategyHeader.tsx` 的 `StatusBadge` 直出生命周期状态；`adapters/strategyListAdapter.ts` 缺省 `status` fallback 为 `"Draft"`。
+- **Changed Contracts / DB / Execution Path**：**均无**（方案未落地）。
+- **NEEDS_HUMAN（方案内登记，未自行裁定）**：NH-1 `/performance` 定位（技术预览加隔离条 / 收敛 / 参数化）· NH-2 `status` 缺省值是否改 `UNKNOWN` · NH-3「运行回测」Tab 出口是否立项（先实测）。
+- **Regression Result**：纯文档 ⇒ 零新增/零删除测试；`checkEolDrift --strict` **0**。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` + `INDEX` + 新增 `FE-PLAN-008`）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `FE-PLAN-008-S1-NH1B-NH2A`（策略域优化落地：证券可读化 + 状态诚实 + 绩效入口收敛）
+
+- **Task**：用户裁定「NH-1 **B** / NH-2 **A** / NH-3 暂不立项」⇒ 按 `FE-PLAN-008` 执行 S1 + NH-2A + NH-1B（NH-3 不推进）。
+- **Changed Domains**：**Frontend（策略域展示 + 信息架构）**；0 策略语义 / 0 契约 / 0 DB / 0 执行链。
+- **Changed Files**：
+  - 新增 `client/src/components/strategy/SecurityCell.tsx`：把「证券 = 名称 + 代码，四态如实回退」抽出为**共用**组件（原实现只存在于 `ClosedLoopRunResultPanel` 内）。
+  - 改 `client/src/components/strategy/ClosedLoopRunResultPanel.tsx`：删除本地 `SecurityCell`，改 import 共用组件（**消除重复**，不新增第二套）。
+  - 改 `client/src/components/strategy/PaperTradingTemplate.tsx`：模拟盘留档 **4 张表**（今日策略池 / 近期信号 / 当前持仓 / 历史交易）全部改走 `SecurityCell`；模板内渲染 `<SecurityLabelChunks>` 发起 `researchRun.securityLabels` 只读查询；标签未到 / 失败回退原始 id。
+  - 改 `client/src/components/common/StatusBadge.tsx`：新增可选 `title`（给状态码补人类解释）。
+  - 改 `client/src/components/strategy/StrategyHeader.tsx`：生命周期徽章补 `title`，明确「表示流程走到哪一步，与是否存在回测 / 评估 / 模拟盘留档无关」。
+  - 改 `client/src/adapters/strategyListAdapter.ts`：缺省 `status` 由 `"Draft"` → `"UNKNOWN"`（受控词表既有值，neutral 色），**不再臆造生命周期值**。
+  - 改 `client/src/components/AppShell.tsx`：④ 策略删除「绩效仪表盘」入口（6→5，侧栏总数 27→**26**）。
+  - 改 `client/src/pages/PerformanceDashboard.tsx`：顶部加「技术预览 · 已不在侧栏」归属声明 + 指向「策略 → 该版本 → 最终评估」。
+  - 改 `tests/client/src/pages/pageFlowContracts.test.ts`：§15 集合 27→26（去掉 `/performance`）；新增 §49（模拟盘 4 处走共用 SecurityCell 且无第二份实现）· §50（缺省状态不冒充 Draft + 徽章带解释）· §51（绩效退出侧栏但页面必须声明归属并指向策略）。
+  - 改 `docs/product/FLOW-001-page-workflow.md`（④ 6→5、`/performance` 收敛行、结构锁 §49–§51）；改 `docs/product/FE-PLAN-008-...md`（NH-1/NH-2 标记已裁定 + §11 执行记录）。
+- **Changed Contracts**：**无**（复用既有只读端点 `researchRun.securityLabels`；未改任何 input/output）。**Changed DB**：**无**。**Changed Execution Path**：**无**。
+- **真实渲染证据**：策略详情「模拟盘」Tab 的证券列由 `sec_63f8df6e-…:event:002279.SZ@2026-08-28` 变为「久其软件 / 002279.SZ」（`柳钢股份 / 601003.SH`、`天融信 / 002212.SZ` 同）；页面全文 `sec_<uuid>` 命中 **0**；侧栏实测 **26** 项且无「绩效仪表盘」；`/performance` 顶部归属声明命中。
+- **未做（如实登记）**：`FE-PLAN-008` §S2「详情 Tab 带走坐标的出口链接」未落地；P1-2（运行回测出口）按用户裁定**暂不立项**；P2-1 的绩效内容归位属进一步取舍，本轮只做**入口收敛 + 归属声明**。
+- **Regression Result**：`tsc --noEmit` **0 错**；`vitest run tests/client/src/pages/pageFlowContracts.test.ts` **50/50**；`checkEolDrift --strict` **0**。
+- **Baseline Impact**：minor（`CHANGE-AUDIT` + `FLOW-001` + `FE-PLAN-008`）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `T74-SUBNEW-FILTER-001`（151% 策略：次新股要不要从候选池剔除 · 真实对照实验）
+
+- **Task**：用户先问「151% 策略里有多少是买次新股的（上市一年内）」，在做完只读诊断（1429 笔已实现交易中 **51 笔 = 3.57%** 为次新、净利 +10,324 元 = 5.47%）后，要求「做一下对照实验」验证**次新股要不要从候选池里剔除**。
+- **Changed Domains**：research（组合层新增**排序前**候选池过滤）· research-experiment（新实验入口）· security（新增只读上市日批量装载）。
+- **Changed Files**：
+  - `shared/researchExperimentsContracts.ts`：`extensionSelectionArms[].excludeListedWithinDays?: number|null`（可选；缺省 = 既有行为）。
+  - `server/research/compositeRunner/index.ts`：`BuildCompositeSourceRunInput.candidateListingFilter`（**排序 / 门槛 / 融合之前**执行）+ `ListingFilterAccounting` + `baseSecurityIdOf` + `listingAgeDays`；`buildFirstLimitPullback3FTop3SourceRun` 透传。
+  - `server/researchExperiments/compositeDatasetProvider.ts`：臂级 `excludeListedWithinDays`、请求 `includeListingDates`、载荷 `listingDateBySecurityId`（base securityId → `YYYY-MM-DD`）。
+  - `server/security/repository.ts`：新增只读 `loadListedDatesBySecurityIds`（批量 `IN`，500/批）。
+  - `research-experiments/compositeRunnerBridge.ts`：追加 re-export。
+  - 新增 `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-subnew/**`（experiment / page / README）。
+  - 注册：`research-experiments/manifest.ts` · `client/src/researchExperiments/pages.ts` · `client/src/pages/researchExperiments/experimentModes.ts`（分档台账 45 → 46）。
+  - 测试：新增 `tests/server/research/compositeRunner/listingFilter.test.ts`（6 例）· `tests/server/researchExperiments/compositeRunnerT74SubNew.test.ts`（5 例）；`tests/client/.../researchExperimentModeGrouping.test.ts` 台账 45 → 46。
+- **Changed Contracts**：3 个**可选**字段（`excludeListedWithinDays` / `includeListingDates` / `candidateListingFilter`）+ 1 个载荷字段（`listingDateBySecurityId`）；**缺省路径逐字段不变**（控制臂 parity PASS 为证据）。
+- **Changed DB**：无 schema / migration；新增真实 Run **1 条**（`RUN-20261007-68FD5C7F`，COMPLETED，datasetVersionId 780001，约 168 s）；全程 SELECT 只读。
+- **Changed Execution Path**：无 simulator / canonicalMetrics / Strategy Core 改动；未注册生产执行路径；未创建 StrategyVersion / Candidate。
+- **口径（新增能力）**：上市日 = Security Master `research_securities.listedDate`（PIT，决策日已知）；上市龄 = **决策日** − 上市日（自然日）；上市日不可得 ⇒ **不剔除**并如实计数（alpha 资格过滤 ≠ 风控，不可证实身份不得静默排除）。实测四臂该计数 = **0**。
+- **真实结果（C = Runner T74，全周期）**：控制臂 `151.0958341843399%` / MaxDD `43.302944323482485%` / 1434 笔 / trigger 161（**parity PASS**，与 `6210006` 逐项一致）；
+  `excl365` `65.39066943458027%` / `50.771567473378596%` / 1444 笔 / 剔除候选 1591（Δ `-85.71 pp`）；
+  `excl180` `131.14772353143985%` / `43.036340068098156%` / 1434 笔 / 剔除 904 / **≥+50% 9→10**（Δ `-19.95 pp`）；
+  `excl90` `109.96556364480013%` / `44.81625053042115%` / 1437 笔 / 剔除 478（Δ `-41.13 pp`）。
+- **结论**：**REJECTED —— 剔除次新股不改善收益**（三阈值全部低于控制臂）。机制：被剔除名额由**低名次递补**，而 P4 已实测 rank4/5 递补净利为负、0 笔 ≥+50% ⇒ 「剔除次新」实际是**换一批更差的票**。阈值与结果**非单调**（365 最差、180 最好、90 居中），再次复现既有结论：**任何选股层微扰都以随机方式大幅改变结果**。
+- **口径互证**：控制臂复算的次新成交 51 笔 / 净利 +10,324 / 1 笔 ≥+50%，与独立只读探针 `T74-SUBNEW-SHARE-001`（3.57% / 5.47%）逐项一致。
+- **未变化 / 未做**：未改 `3600005@2.0.0` / `3570001` / 历史 Run；未建策略版本；未跑 OBSERVATION / HOLDOUT；**未测**「选中后跳过、不递补」语义（P9 那种只过滤 intent，需另起一臂）。
+- **Regression Result**：`tsc --noEmit` **0 错**；定向 5 文件 **33 例全绿**（含新 11 例）；`node scripts/checkEolDrift.mjs --strict` **0**。⚠️ 既存失败文件（非本任务引入，文件本身与 HEAD 一致）：`tests/server/researchExperiments/threeFactorTopNStrategyDocument.test.ts` 3 例（`mapDeclaredExitPolicy` 已增 `recoveryPath: null`，用例未同步）。
+- **Baseline Update**：新增 `docs/research/RESULT-T74-SUBNEW-FILTER-001.md`；本条目；`system-manifest.yaml` 增 `t74SubNewRunP10`。`SYSTEM-BASELINE.md` 头部由并发会话持有，本任务不覆盖。
+- **Baseline Impact**：minor（可选契约字段 + 新实验入口 + 真实运行结果登记）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `DATASET-EXCLUDE-SUBNEW-001`（数据集 universe 新增「上市龄」维度 + v9 构建 · 用户授权 A/B）
+
+- **Task**：用户裁定「① 允许在数据集 builder 新增『排除上市 < 365 天』这一 universe 维度；② 允许执行 v9 数据集构建；③ 入场/退出要**可配置**，不接受钉死固定日」⇒ 本条目登记 ① 的落地与 ② 的小样本验证（全量构建后台进行中）。③ 的设计另见后续条目。
+- **Changed Domains**：**Dataset Registry（新 universe 筛选维度）** · **DB（0056 增量列）** · Frontend（构建对话框 / 版本详情如实展示）· 研究脚本（v9 构建）。
+- **Changed Files**：
+  - `drizzle/schema.ts`：`dataset_build_config.excludeListedWithinDays int NULL`。
+  - `shared/datasetRegistryContracts.ts`：`DATASET_BUILD_FILTER_DEFAULTS.excludeListedWithinDays = null` / `DATASET_BUILD_FILTER_LIMITS = {min:1,max:3650}` / zod 可空字段 / `DatasetBuildConfigView` / `describeDatasetFilter` 摘要补「排除次新(上市≥N日)」。
+  - `server/datasetRegistry/filter.ts`：新增纯函数 `isListingAgeExcluded(exclude, ageDays)`（null 恒放行；**严格小于**才剔除；上市日不可得 ⇒ 放行并如实计数）。
+  - `server/datasetRegistry/lifecycle.ts`：`ResolvedBuildConfig` + `normalizeBuildFilter`（非法即抛，不静默夹取）+ `resolveBuildConfig` 回退链。
+  - `server/datasetRegistry/builder.ts`：`FirstLimitPullbackBuildConfig.excludeListedWithinDays` + `DatasetBuildIO.resolveListingAgeDaysSync` + Universe 层第三个筛选（板块 → ST → 上市龄）。
+  - `server/datasetRegistry/db.ts`：`SecurityIndex.listedDateBySecurity`（Security Master 小表全量）+ `resolveListingAgeDaysSync`（先按 tradeDate 解析有效 securityId，再取 listedDate 的**自然日**龄）。
+  - `server/datasetRegistry/{types,registry,runner,query,testHelpers}.ts` · `tests/server/datasetRegistry/builder.test.ts` · `scripts/verifyDataset003a.mts`：随新字段/新 IO 方法对齐。
+  - `client/src/components/datasetRegistry/datasetFilterForm.ts` · `BuildVersionDialog.tsx` · `client/src/pages/datasets/VersionDetail.tsx`：表单状态/校验/载荷 + 输入框 + 详情行。
+  - 新增 `drizzle/0056_dataset_build_config_exclude_listed.sql` + `scripts/applyDatasetBuildConfigExcludeListed.mjs`（bespoke apply：ssl 口径对齐 `server/db.ts`，按 `-- @guard: column` 幂等）。
+  - 新增 `scripts/buildFirstLimitPoolV9Dataset.mts`（v9 构建；支持 `--version/--start/--end/--pre-window-days/--post-window-days/--rebuild`）。
+  - 改 `tests/server/datasetRegistry/filter.test.ts`（+4 例）。
+- **Changed Contracts**：`dataset_build_config` 新增**可空标量维度** `excludeListedWithinDays`（NULL = 不过滤 ⇒ **既有 12 个配置行逐字节不变**；`configVersion` 保持 1，新维度为可空追加）。
+- **Changed DB**：**DDL 1 条**（0056：`ALTER TABLE dataset_build_config ADD COLUMN excludeListedWithinDays int NULL AFTER excludeSt`）。已 apply：`executed=1 / skipped=0`，复跑 **`executed=0 / skipped=1`**（幂等成立）；列实查 `type=int nullable=YES`，既有 12 行该列全为 NULL。**无 migration 历史改写、无 `drizzle-kit generate`、无 `_journal.json` 改动**。DML：新增 v9-smoke（`datasetVersionId=780002`）的 ds_* 行。
+- **真实验证（v9-smoke）**：`--version v9-smoke --start 2019-01-02 --end 2019-03-29`，构建 COMPLETED，`datasetVersionId=780002`。
+  - 构建配置实查：`excludeSt=1 · excludeListedWithinDays=365 · preWindowDays=60 · postWindowDays=80`、boards=`["main"]`；
+  - **前置窗口真的物化了负相对日**：`prefix minRd=-57 maxRd=0`（80,088 行 / 2,315 事件）⇒ 事件日前 60 根收盘可得 ⇒ **MA5/10/20/60 可算**（v8 的 `minRd=0` 结构上不可算）；
+  - `post 1..80`（185,200 行）；
+  - **上市龄过滤生效**：同窗口未过滤（v8 口径）2,434 事件 → 过滤后 2,315，**剔除 119 个次新首板事件（4.89%）**；
+  - **不变量**：v9-smoke 内 `DATEDIFF(tradeDate, listedDate) < 365` 的事件 = **0**；上市日未知 = 0；最小上市龄样本 = 370 天。
+- **未做（如实登记）**：① **全量 v9 构建仍在后台运行**（`2019-01-01..2026-09-04`，预计千万行级，checkpoint/resume 可用）；② 用户要求的「**入场/退出可配置**」尚未设计定稿（不接受钉死固定日 ⇒ 需先定配置形状再实现）；③ 未跑任何基于 v9 的因子实验。
+- **Regression Result**：`tsc --noEmit` **0 错**；`vitest run tests/server/datasetRegistry` **268/268 全绿**（filter 20 → 24）；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Update**：本条目；`drizzle/0056_*.sql`；`scripts/applyDatasetBuildConfigExcludeListed.mjs`；`scripts/buildFirstLimitPoolV9Dataset.mts`。`SYSTEM-BASELINE.md` 头部由并发会话持有，本任务不覆盖。
+- **Baseline Impact**：minor（可选筛选维度 + 1 条增量 DDL + 新构建脚本）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `TREND-ENTRY-MA-V1-001`（趋势触发入场：**配置驱动**求值器 + 3 条预注册臂）
+
+- **Task**：按用户裁定（条件词表**恰好四类**、入场不钉死固定日、收益不钉死固定日期、「先暂时写死成配置」）落地 C —— 入场与退出由配置声明、由唯一求值器执行，收益按「实际入场 → 实际退出」计算。
+- **Changed Domains**：research-experiment（新实验入口 + 新纯函数求值器）。**零 DB / 零契约 / 零执行链**。
+- **Changed Files**：
+  - 新增 `research-experiments/shared/firstBoardPullback/trendEntry.ts`：四类条件（`PRICE_VS_MA` / `MA_ORDER` / `MA_SLOPE` / `RETURN_OVER`）+ `movingAverageAt` + `evaluateCondition` + `evaluateEntry` + `evaluateExit` + `netReturnPct`。**纯函数、零 IO**。
+  - 新增 `research-experiments/first-board-pullback/trend-entry-ma-v1/arms.ts`：**预注册冻结配置**（A1 多头排列 / A2 回踩转强 / A3 站上长均线）+ 统一退出 + 需物化相对日常量。
+  - 新增 `research-experiments/first-board-pullback/trend-entry-ma-v1/{experiment.ts,page.tsx}`。
+  - 注册：`research-experiments/manifest.ts` · `client/src/researchExperiments/pages.ts` · `client/src/pages/researchExperiments/experimentModes.ts`（分档台账 46 → 47）。
+  - 测试：新增 `tests/server/researchExperiments/trendEntry.test.ts`（12 例）· `tests/server/researchExperiments/trendEntryMaV1Arms.test.ts`（6 例）；`tests/client/.../researchExperimentModeGrouping.test.ts` 台账 46 → 47。
+- **Changed Contracts**：**无**（配置为实验内部形状，不进 shared 契约；未改 Strategy Core / RuleGraph / simulator / canonicalMetrics）。
+- **Changed DB**：**无**（本条目只落地代码与测试；真实 Run 待 v9 数据集 READY 后执行）。
+- **钉住的口径（防「随手调参」）**：① 条件词表**四类**，出现第五类即抛错；② `all`(AND)+`any`(OR)；③ 触发 = 观察窗 rd1..20 内**首个**满足日；④ 入场 = 触发日**次一交易日开盘**（要求 `canBuyAtOpen`；不可买 ⇒ `UNFILLABLE`，**不顺延**）；⑤ 退出优先级 = 盘中止损 → 退出条件 → 持有期（自**实际入场日**起算）；⑥ 条件退出默认**次一开盘**成交，不可卖则继续持有；⑦ 数据不足 ⇒ **不可评估**（不插补、不回退前值），按不通过处理并计数；⑧ 窗口末端仍未退出 ⇒ `OPEN_AT_END` 如实标记。
+- **三条预注册臂（写死，不做搜索）**：A1 `MA5>MA10 ∧ MA10>MA20 ∧ MA20>MA60 ∧ close>MA5`；A2 `close>MA10 ∧ close>MA5 ∧ MA20 五日斜率>0`；A3 `close>MA60 ∧ MA5>MA10`。**退出三臂共用**（`MIXED`：20 日持有 / 收盘跌破 MA10 / 盘中 −6% 止损，取先到）⇒ 退出**不是自变量**。
+- **数据坐标**：`requiredDatasetVersionLabel = v9`（主板 · 非 ST · **上市龄 ≥365 天** · preWindow 60）；`prefixRelativeDays = −59..0`（MA60 可达）、`postRelativeDays = 1..80`；`decisionOffsetDays = null`（样本资格不使用 rd ≥ 1）；`usesForwardData = true`。
+- **成本**：佣金 2.5bps + 滑点 2.5bps + 冲击 2.5bps（单边）+ 卖出印花税 5bps ⇒ 买卖合计 20bps。
+- **未做（如实登记）**：① **未跑真实 Run**（v9 全量构建仍在后台 RUNNING）；② 未做参数搜索（按纪律：预注册配置不得跑完再挑）；③ 未接 simulator / 未建 StrategyVersion。
+- **Regression Result**：`tsc --noEmit` **0 错**；定向 `trendEntry` **12/12** · `trendEntryMaV1Arms` **6/6** · 分档台账 15/15；`node scripts/checkEolDrift.mjs --strict` **0**。
+- **Baseline Update**：本条目。（`SYSTEM-BASELINE.md` 头部由并发会话持有，本任务不覆盖。）
+- **Baseline Impact**：minor（新实验入口 + 新纯函数求值器，无契约/DB 变化）。
+- **GLOBAL AUDIT REQUIRED**：NONE。

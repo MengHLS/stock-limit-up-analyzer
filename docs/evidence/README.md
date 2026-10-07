@@ -1719,6 +1719,15 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
 |---|---|
 | `_db_migration_verify_20261003.txt` | 切流前「重导 → 重导入 → 复比对」闭环的原始输出：`s1_core` **56/56 一致**、`s2_market` **9/9 一致**（`stock_daily_prices` 8,898,902 / `liquidity_daily` 9,015,158）；首轮曾抓出 09-21~09-24 补录的 4 行缺口并据以放宽增量窗口 |
 
+### 数据库使用情况与读速实测（2026-10-05）—— 4 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_db_perf.mts` | 只读探针：实例配置 / `GLOBAL STATUS` 关键项 / 库规模 / 读速第一轮（`SELECT 1` RTT、全表 `COUNT(*)` 扫描速率、端到端拉取 20 万行） |
+| `_probe_db_perf_attribution.mts` | 只读探针（归因）：列定义、**窄列 vs 宽列**、**text 协议 vs 二进制协议**、主键点查延迟、4 连接并发——用于把「慢」归因到带宽而非解析/协议/并发 |
+| `_probe_table_size.mts` | 只读探针：逐表 `DATA_LENGTH`/`INDEX_LENGTH` Top20 + `ds_*` 五表精确 `COUNT(*)`；修掉「MySQL 8 `information_schema` 返回**大写列名**、不加 `AS` 别名取不到」的坑 |
+| `_db_perf_20261005.txt` | 上述三探针原始输出 + **单进程 vs 两独立进程并行**的决定性实验（427 KB/s vs 445 KB/s，排除同进程 CPU 混淆）+ 瓶颈推理链 + OS 层未取项说明 + **ECS SSH 主机密钥不一致**的登记；结论：服务端不慢（`COUNT(*)` 890 万行 3.14 s）、延迟好（RTT 19.1 ms），**大批量读封顶 ≈ 400~450 KB/s（约 3.5 Mbps，卡在 ECS 公网出带宽）** |
+
 ### 切换数据源核实（2026-10-03）—— 2 个
 
 | 文件 | 被引用于 |
@@ -1771,3 +1780,19 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
 | `_analysis_runner_state_recovery_control_001.json` / `_analysis_runner_state_recovery_control_001_summary.json` / `_analysis_runner_state_recovery_control_001_version.json` | `docs/research/RESULT-RUNNER-STATE-RECOVERY-CONTROL-001.md`；执行脚本 `scripts/runRunnerStateRecoveryControl001.mts` / 报告脚本 `scripts/reportRunnerStateRecoveryControl001.mts`；NEW_HIGH_3 恢复的三层对照（原始固定日历 / 协变量分层 / 最近邻匹配） |
 | `_analysis_runner_clc2_control_001.json` / `_analysis_runner_clc2_control_001_summary.json` / `_analysis_runner_clc2_control_001_version.json` | `docs/research/RESULT-RUNNER-CLC2-CONTROL-001.md`；执行脚本 `scripts/runRunnerClc2Control001.mts` / 报告脚本 `scripts/reportRunnerClc2Control001.mts`；CLC2 本身的三层对照（原始固定日历 / 单变量分层 / 多变量匹配） |
 | `_analysis_topn_space_factor_001.json` / `_analysis_topn_space_factor_001_summary.json` / `_analysis_topn_space_factor_001_version.json` | `docs/research/RESULT-TOPN-SPACE-FACTOR-001.md`；执行脚本 `scripts/runTopnSpaceFactor001.mts` / 报告脚本 `scripts/reportTopnSpaceFactor001.mts`；3F Top3 空间增强排名 A/B 对照（含每日选股重合率、年度增量与权益曲线） |
+
+### `trend-score-v1-forward-ic` —— 2 个（2026-10-04）
+
+> 背景：P0（趋势分作排序项：−59/−86/−95%）与 P0-2（趋势分作门槛：−21/−74/−75%）都被真实数据否掉，
+> 本证据回到**度量本身**做信号质量诊断（全候选池 43,528 个，入场 rd6 开盘、出场 rdN 收盘、毛收益）。
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_trend_score_v1_forward_ic.mts` | `docs/architecture/CHANGE-AUDIT.md` · `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend-gate/README.md` |
+| `_analysis_trend_score_v1_forward_ic_20261004.json` | 同上 |
+
+**结论（IC = Spearman，200 次 bootstrap 95% CI）**：`trendScore` 与后验收益**显著负相关**且随视界加深
+（rd8/rd10/rd16 = −0.0179 / −0.0348 / −0.0360）；拆项后 `structureScore`（−0.024/−0.041/−0.045）与
+`momentum`（−0.024/−0.034/−0.041）**方向为负**，而 `pullbackDepth`（回撤越深越好）**为正**（+0.010/+0.025/+0.023）。
+控制 3F 后的**偏 IC 不衰减**（trendScore −0.037/−0.039，pullbackDepth +0.032/+0.033，与 3F 秩相关仅 |ρ|≤0.15）
+⇒ 这些分量**不是 3F 的代理**，V1 是「符号用反」而不是「无用」。

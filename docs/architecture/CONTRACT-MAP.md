@@ -358,6 +358,7 @@
 | **语义** | 按 `(strategyId, strategyVersion)` **原样直读** `closed_loop_backtest_run.resultJson` 的扩展载荷：评估取 `result.evaluationDetail`（并补读同 `experimentId` 的对照组作 baseline）；模拟盘取 `result.paperTradingState` / `paperTradingForwardState`。查不到 ⇒ `null`（**不伪造**） |
 | **收敛** | 原专项端点 `getFinalEvaluation` / `getPaperTrading3570001` **变成薄封装**（固定 3570001 坐标），返回形状逐字段不变 ⇒ 专项页无需改动 |
 | **读取路径** | 新增 `listClosedLoopBacktestRunRawResults({ strategyId?, strategyVersion?, experimentId?, runIdPrefix?, limit? })`（**不经旧 reconcile**，与 `getClosedLoopBacktestRunRawResult` 同一纪律） |
-| **consumer** | `client/src/components/strategy/StrategyVersionArtifactsTabs.tsx`（策略详情 Tab）· `client/src/pages/{StrategyFinalEvaluation,PaperTrading3570001}.tsx`（改走通用端点） |
+| **consumer** | `client/src/components/strategy/StrategyVersionArtifactsTabs.tsx`（策略详情「最终评估 / 模拟盘」Tab —— 2026-10-07 起是**唯一**留档展示入口，见下行） |
 | **DB 变更** | **0 表 / 0 列 / 0 migration** |
 | **状态** | **IMPLEMENTED**（`check` 0 错；通用端点 vs 专项端点真实库比对一致；浏览器 Tab 实测通过） |
+| **2026-10-07 更新（单策略专项页收敛）** | 侧栏删除「最终评估 3570001（专项）」「模拟盘 3570001（专项）」两项；旧路径 `/strategy-final-evaluation` · `/paper-trading-3570001` 改为 `<Redirect>` 到 `/strategies/<坐标>?version=…&tab=evaluation\|paper`；两个专项页文件删除；策略详情新增 `?tab=` 深链（白名单 + 切换 `replace` 写回 URL）。**端点契约零变化**：`getStrategyVersionEvaluation` / `getStrategyVersionPaperTrading` 不被改动，`getFinalEvaluation` / `getPaperTrading3570001` 仍保留为薄封装（现无前端消费者） |

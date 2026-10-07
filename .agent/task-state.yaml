@@ -21,7 +21,8 @@ stages:
   PRODUCT: COMPLETE          # FLOW-001 §4/§5（本轮已修正其两处自相矛盾）
   FRONTEND: COMPLETE         # 侧栏按六阶段重组 + 验证总览补旧预览入口
   VERIFICATION: COMPLETE     # check=0 / pageFlowContracts 18/18 / EOL=0
-  SPECIAL_PAGES: COMPLETE    # P3 标记已落地（侧栏加「（专项）」）；长期收敛进策略详情标签仍为后续项
+  SPECIAL_PAGES: COMPLETE    # P3 标记已落地（侧栏加「（专项）」）
+  SPECIAL_PAGE_CONVERGENCE: COMPLETE # P3 收尾：两条专项路径收敛进策略详情 Tab（FE-PLAN-005 · 2026-10-07）
   LINK_HYGIENE: COMPLETE     # 死链清扫 + 站内可达性审计 + 断链守卫（本轮的 FRONTEND-LINK-001）
   HOME_ENTRY: COMPLETE       # 已落地为**加法式**六阶段入口带（PD-05），行情总览未删任何区块
   DOM_VERIFY: COMPLETE       # 无头 Edge + CDP 真实渲染验证 18/18 PASS（探针在仓外 _scratch/）
@@ -37,15 +38,18 @@ stages:
   A11Y_DIALOG_FOCUS: COMPLETE # 对话框焦点还原：9 个受控无 Trigger 对话框有同类缺陷 → 上移 dialog/alert-dialog 包装层统一兜底（15/15 扫描命中）
   A11Y_FOCUS_VISIBLE: COMPLETE # 键盘焦点可见性：版本搜索框 / TabsList / 账户触发器 → 焦点环补齐（DOM 3/3）
   SENTIMENT_SPLIT: NEEDS_HUMAN  # 跨域：sentiment.* 语义桶拆分需 Architecture 出 Scope 并确认是否动契约
-  EMPTY_ERROR_STATES: READY # 下一安全阶段：系统扫描空态/错误态覆盖
+  EMPTY_ERROR_STATES: COMPLETE # 系统扫描（32 页三态齐全）+ 修 2 处「失败伪装成空态」+ CDP 拦截实测（FE-PLAN-006）
+  TABLE_SEMANTICS_TRIAGE: COMPLETE # 29 个含表格文件分类登记（无服务端分页；排序均客户端）· FE-PLAN-007
+  STRATEGY_DOMAIN_OPT_S1: COMPLETE # FE-PLAN-008 S1：证券可读化（SecurityCell 共用）+ NH-2A 状态诚实 + NH-1B 绩效入口收敛
 
-current_stage: "EMPTY_ERROR_STATES"
+current_stage: "FINAL"
 
 completed:
   - PRODUCT
   - FRONTEND
   - VERIFICATION
   - SPECIAL_PAGES
+  - SPECIAL_PAGE_CONVERGENCE
   - LINK_HYGIENE
   - HOME_ENTRY
   - DOM_VERIFY
@@ -60,20 +64,25 @@ completed:
   - A11Y_KEYBOARD
   - A11Y_DIALOG_FOCUS
   - A11Y_FOCUS_VISIBLE
+  - EMPTY_ERROR_STATES
+  - TABLE_SEMANTICS_TRIAGE
+  - STRATEGY_DOMAIN_OPT_S1
 
 blocked: []
 
 needs_human:
   - "SENTIMENT_SPLIT：sentiment.* 被 6+ 页面共用（龙头候选 / 组合回测 / 模拟盘 / 情绪预警 / 行情同步 / 情绪分析），拆分必然改契约与路由，属跨域改动，需用户授权后才能进入"
 
-last_action: "focus-visible 可见性审计：真实 Tab 发现版本搜索框聚焦无视觉变化；全站强制伪类扫描又定位 /data-health 与 /market 的 TabsList；同批检查侧栏账户触发器并补焦点环"
-last_verification: "焦点可见性 DOM 3/3（搜索框真实 Tab；TabsList/账户强制伪类）；pageFlowContracts.test.ts=40/40；check=exit 0；checkEolDrift --strict=0"
-next_action: "继续前端可自主项：系统扫描空态/错误态覆盖；表格排序/分页语义留作后续分类。跨域 SENTIMENT_SPLIT、报告导出、3570001 收敛与 Scatter 键盘替代路径仍需外部条件/产品决策"
+last_action: "FE-PLAN-008 S1+NH：模拟盘留档 4 张表改走共用 SecurityCell（名称+代码，失败回退原始 id，已抽公共组件消除重复）；缺省策略状态 Draft→UNKNOWN；侧栏删「绩效仪表盘」（27→26）并在 /performance 顶部声明归属与指向策略详情"
+last_verification: "pageFlowContracts=50/50（§42–§51）；tsc --noEmit=0 错；真实渲染：模拟盘证券列显示「久其软件/002279.SZ」等且全文 sec_<uuid> 命中 0、侧栏 26 项无「绩效仪表盘」、/performance 归属声明命中"
+next_action: "FE-PLAN-008 剩余：S2「详情 Tab 带走坐标的出口链接（回测历史/回测对比）」；FE-PLAN-006 §5 的 4 页主查询错误面（Market / LimitUpReview / SentimentAlerts / Backtest）。跨域待人工：SENTIMENT_SPLIT、报告导出、Scatter 键盘替代路径"
 
 scope:
   in:
     - "前端信息架构与导航归位（FLOW-001 §4/§5）"
     - "页面可达性 / 降级入口（旧预览 / 专项页标记）"
+    - "单策略专项页收敛（旧链接静态改写进通用 Tab；FE-PLAN-005）"
+    - "诚实三态覆盖（FE-PLAN-006）与表格语义登记（FE-PLAN-007）"
   out:
     - "组合回测 /backtest（内容 / 命名 / 位置均不动）"
     - "sentiment.* 端点桶拆分（跨域，需授权）"

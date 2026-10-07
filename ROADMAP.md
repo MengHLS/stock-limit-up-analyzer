@@ -2677,3 +2677,30 @@ P4 前端研究链路 UI（§48.4，研究能力消费层）
 
 ## 49.2 历史追溯
 2026-09-07 21:45 前的带编号目录名（signal13/costModel14/…/docs/step12-evidence）出现在 §47、TASK_TRACKING §5、memory 等 append-only 记录中，**不追溯改写**；以本节日期对应 §47 改名记录为映射对照（旧名 → 新名）。新增代码一律遵守 §49.1。
+
+---
+
+## STRATEGY-CLOSEOUT-REENTRY-001 · 研究线关闭登记（append-only）
+
+**结论：`strong-trend-reentry-v1 = TERMINATED / NO_EDGE_FOUND`**（日期 2026-10-05）
+
+- **Strategy**：`strong-trend-reentry-v1@1.0.1` → `RESEARCH_TERMINATED / NO_EDGE_FOUND`
+- **Parity**：Event / Reclaim / Entry / Exit / Cost **全部 PASS**
+  （canonical 3,910 S / 2,542 RECLAIM / 2,499 fillable；304/304 eventId 命中；Return Bridge A→D 配对中位 -0.650%）
+- **Canonical Discovery**：**`NO_EDGE_FOUND`** —— T+20 中位 -13.22%（n=2,499）、胜率 30.2%、
+  8/8 年份为负、8 因子全分桶为负、无 TopN 优势
+- **不进入**：Parameter Search / OOS / WFA / Robustness / Paper Trading
+- **数据处置**：未删除任何 Strategy / Research / Dataset / Backtest 数据；历史 Run 全保留
+- **状态标记**：`RESULT-PATTERN-DISCOVERY-STRONG-TREND-001`、`RESULT-PATTERN-REENTRY-STRONG-TREND-001`、
+  `RESULT-PATTERN-REENTRY-RECOVERY-002`、`RESULT-PATTERN-REALTIME-REENTRY-003`
+  → `SUPERSEDED_BY_CANONICAL`；`RESULT-PRE-STRATEGY-REENTRY-001` / `RESULT-STRATEGY-DEFINITION-REENTRY-001`
+  → `SUPERSEDED`；`RESULT-BACKTEST-REENTRY-BASELINE-001` → `INVALIDATED`；
+  `RESULT-BACKTEST-REENTRY-BASELINE-002` → `BASELINE_VALID`（保留）
+- **根因**：Discovery 样本继承（`_pattern_recovery_*`.json 链）导致 Selection Bias（Research 691 ⊂ canonical 3,910，
+  research-only = 0）；Entry / Exit / Cost 已排除（各段中位影响 -0.126% / -0.096% / -0.230%）
+- **流程沉淀**：`docs/research/RESEARCH-TEMPLATE-CASE-TO-STRATEGY-001.md`
+  （Case Discovery → Canonical Event Set → Full-Sample Discovery → Parity → Return Bridge → Gate；
+  **仅 PASS_TO_STRATEGY_DEFINITION 允许创建 Strategy Candidate**）
+- **证据索引**：`docs/research/RESULT-PARITY-002-REENTRY-CANONICAL-EVENTSET.md`、
+  `docs/research/RESULT-PARITY-003-REENTRY-RETURN-BRIDGE.md`、
+  `docs/research/RESULT-DISCOVERY-REENTRY-CANONICAL-001.md`、`docs/research/RESULT-STRATEGY-CLOSEOUT-REENTRY-001.md`
