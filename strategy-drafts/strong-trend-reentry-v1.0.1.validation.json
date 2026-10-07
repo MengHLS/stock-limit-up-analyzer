@@ -1,0 +1,17 @@
+{
+  "task": "STRATEGY-DEFINITION-REENTRY-001",
+  "strategyId": "strong-trend-reentry-v1",
+  "version": "1.0.1",
+  "status": "STRATEGY_DEFINITION_READY",
+  "persistedToDatabase": false,
+  "definitionValid": true,
+  "documentValid": true,
+  "versionRecordValid": true,
+  "documentFingerprint": "5d5d3cbefe797e3d57f9b0c08899805c713d90f9e189cefc26232f8db0817a3b",
+  "documentFingerprintRecomputed": "5d5d3cbefe797e3d57f9b0c08899805c713d90f9e189cefc26232f8db0817a3b",
+  "versionRecordFingerprint": "04e32b895372efe62cf3a6c5c9372414919e760a1a91fb925598a36c4fb97a31",
+  "versionRecordFingerprintRecomputed": "04e32b895372efe62cf3a6c5c9372414919e760a1a91fb925598a36c4fb97a31",
+  "consistencyDrifts": [],
+  "codeVersion": "1.0.0+g7372387",
+  "createdAt": "2026-10-05T00:00:00.000Z"
+}

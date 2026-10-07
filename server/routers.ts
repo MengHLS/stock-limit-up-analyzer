@@ -18,6 +18,8 @@ import { buildExperimentStrategyRouter } from "./researchExperiments/strategyBri
 import { defaultExperimentStrategyBridge } from "./researchExperiments/defaults";
 // FE-1 — 数据域健康看板（STEP 12 gate 认证证据，只读）
 import { dataHealthRouter } from "./dataHealthRouter";
+// STOCK-SELECTION-001 — 选股域只读 API（策略可扩展：listStrategies / select）
+import { stockSelectionRouter } from "./stockSelectionRouter";
 // FE-6/7/8/9 — 研究量化链路（参数搜索/鲁棒性、WFO/过拟合、Regime、复盘工作台）
 import { paramSearchRouter } from "./paramSearchRouter";
 import { walkForwardRouter } from "./walkForwardRouter";
@@ -331,6 +333,8 @@ export const appRouter = router({
   experimentStrategy: buildExperimentStrategyRouter({ bridge: defaultExperimentStrategyBridge() }),
   // FE-1 — 数据域健康看板
   dataHealth: dataHealthRouter,
+  // STOCK-SELECTION-001 — 按决策日选股（只读；一个页面兼容多策略）
+  stockSelection: stockSelectionRouter,
   // FE-6/7/8/9 — 研究量化链路（技术预览口径，真实数据注入见各 router 头注释）
   paramSearch: paramSearchRouter,
   walkForward: walkForwardRouter,

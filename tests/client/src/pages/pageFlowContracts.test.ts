@@ -15,7 +15,7 @@
  *   PD-03：候选列表端点真实存在 + 路由 / 侧栏可达 + 页面只读。
  */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { appRouter } from "../../../../server/routers";
@@ -146,15 +146,15 @@ describe("FLOW-001 · 侧栏按研究闭环阶段重组", () => {
     ]);
   });
 
-  it("15) 导航项一项不丢：恰好 28 项，且与原 27 项 + /candidates 集合一致", () => {
+  it("15) 导航项一项不丢：恰好 26 项（28 − 2 个 3570001 专项项 + /stock-selection − /performance）", () => {
     const all = groups.flatMap((g) => g.paths).sort();
     const EXPECTED = [
       "/backtest", "/backtest-compare", "/backtest-runs", "/candidates", "/data-health",
       "/datasets", "/historical-state", "/leader-candidates", "/limit-up", "/market",
-      "/operation-logs", "/paper-trading", "/paper-trading-3570001", "/parameter-search",
-      "/performance", "/regime-report", "/research-experiments", "/review-workbench",
-      "/sentiment-alerts", "/sentiment-analysis", "/stock-sync", "/strategies",
-      "/strategy-final-evaluation", "/upload", "/validation", "/validation/oos",
+      "/operation-logs", "/paper-trading", "/parameter-search",
+      "/regime-report", "/research-experiments", "/review-workbench",
+      "/sentiment-alerts", "/sentiment-analysis", "/stock-selection", "/stock-sync", "/strategies",
+      "/upload", "/validation", "/validation/oos",
       "/validation/robustness", "/validation/walk-forward",
     ].sort();
     expect(all).toEqual(EXPECTED);
@@ -170,7 +170,7 @@ describe("FLOW-001 · 侧栏按研究闭环阶段重组", () => {
     }
     expect(byLabel["③ 研究"]).toEqual(["/research-experiments", "/candidates"]);
     expect(byLabel["⑤ 验证"]).toContain("/regime-report");
-    expect(byLabel["⑥ 前向与复盘"]).toEqual(["/paper-trading", "/paper-trading-3570001", "/review-workbench"]);
+    expect(byLabel["⑥ 前向与复盘"]).toEqual(["/paper-trading", "/review-workbench"]);
   });
 
   it("17) 🔒 组合回测保持原样：仍在④策略组、未改名、未挪位置（FLOW-001 §5）", () => {
@@ -182,6 +182,156 @@ describe("FLOW-001 · 侧栏按研究闭环阶段重组", () => {
   it("18) ⑤验证总览提供旧技术预览入口（/walk-forward 不在侧栏但可达）", () => {
     expect(groups.flatMap((g) => g.paths)).not.toContain("/walk-forward");
     expect(read("pages/validation/ValidationIndexPage.tsx")).toContain('href="/walk-forward"');
+  });
+});
+
+describe("FLOW-001 · 单策略专项页收敛（3570001 → 通用 Tab）", () => {
+  it("42) 侧栏不再单列任何 3570001 专项项（单策略页不能单独存在）", () => {
+    const src = read("components/AppShell.tsx");
+    expect(src).not.toContain("3570001");
+    expect(src).not.toContain("/strategy-final-evaluation");
+    expect(src).not.toContain("/paper-trading-3570001");
+  });
+
+  it("43) 两条旧路径保留为**静态改写**到策略详情对应 Tab，且不再渲染第三套视图", () => {
+    const app = read("App.tsx");
+    expect(app).toContain('<Route path="/strategy-final-evaluation">');
+    expect(app).toContain('<Route path="/paper-trading-3570001">');
+    expect(app).toContain('artifact3570001Location("evaluation")');
+    expect(app).toContain('artifact3570001Location("paper")');
+    // 收敛必须是「真的只剩一套视图」：两个专项页文件已删除
+    expect(existsSync(path.join(CLIENT, "pages/StrategyFinalEvaluation.tsx"))).toBe(false);
+    expect(existsSync(path.join(CLIENT, "pages/PaperTrading3570001.tsx"))).toBe(false);
+  });
+
+  it("44) 策略详情支持 `?tab=` 深链：白名单 + 受控 Tab + 切换写回 URL", () => {
+    const src = read("pages/StrategyDetail.tsx");
+    expect(src).toContain("STRATEGY_DETAIL_TABS");
+    expect(src).toContain("isStrategyDetailTab(urlTab)");
+    expect(src).toContain("<Tabs value={activeTab} onValueChange={handleTabChange}>");
+    expect(src).toContain("replace: true");
+    // 白名单必须覆盖被收敛进来的两个 Tab
+    expect(src).toMatch(/"evaluation",[\s\S]{0,40}"paper",/);
+  });
+
+  it("45) 3570001 的最终评估 / 模拟盘只走**通用端点**（无第二套取数路径）", () => {
+    const src = read("components/strategy/StrategyVersionArtifactsTabs.tsx");
+    expect(src).toContain("researchRun.getStrategyVersionEvaluation");
+    expect(src).toContain("researchRun.getStrategyVersionPaperTrading");
+    expect(src).not.toContain("getFinalEvaluation");
+    expect(src).not.toContain("getPaperTrading3570001");
+    // 通用 Tab 不得把策略坐标写死
+    expect(src).not.toContain("first-limit-pullback-3f-top3-runner-hold20");
+  });
+});
+
+describe("前端诚实三态 · 带取数的页面必须有 loading / error / empty 分支", () => {
+  /**
+   * 系统扫描（静态）：`client/src/pages/**` 中凡出现 `useQuery` 的页面，
+   * 必须同时声明 loading / error / empty 三类分支 —— 否则「读取失败」会落到空态，
+   * 把一次 RPC 故障伪装成「系统里确实没有数据」（本项目反复强调的「诚实空态」）。
+   *
+   * 若某页面确实不存在「空集合」概念，请把它加进 EXEMPT 并写明理由，不要删断言。
+   */
+  const EXEMPT = new Set<string>([]);
+
+  const PATTERNS = {
+    loading: /isLoading|isFetching|isPending|加载中|加载…|加载\.\.\.|Skeleton/,
+    // 判据 = 仓库既有的错误面写法：`isError` / `<query>.error` / 明示「加载失败/读取失败」/ 共享 ErrorState。
+    // 说明：`.error` 也会命中 `toast.error`（表单/动作失败），因此本锁只保证「页面声明了错误面」，
+    // 更细的「每个主查询各自区分 error 与 empty」由 §47/§48 的定点锁负责。
+    error: /isError|\.error|加载失败|读取失败|ErrorState/,
+    empty: /length === 0|length == 0|暂无|还没有|尚无|空态|EmptyState|无数据|没有数据/,
+  } as const;
+
+  function pageFiles(dir: string, out: string[] = []): string[] {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) pageFiles(full, out);
+      else if (e.name.endsWith(".tsx")) out.push(full);
+    }
+    return out;
+  }
+
+  it("46) 32 个带取数页面的三态分支齐全（缺口 0）", () => {
+    const offenders: string[] = [];
+    let scanned = 0;
+    for (const full of pageFiles(path.join(CLIENT, "pages"))) {
+      const rel = path.relative(CLIENT, full).replace(/\\/g, "/");
+      if (EXEMPT.has(rel)) continue;
+      const src = readFileSync(full, "utf8");
+      if (!src.includes("useQuery(")) continue;
+      scanned += 1;
+      const missing = Object.entries(PATTERNS)
+        .filter(([, rx]) => !rx.test(src))
+        .map(([k]) => k);
+      if (missing.length > 0) offenders.push(`${rel} 缺 ${missing.join("/")}`);
+    }
+    expect(scanned).toBeGreaterThanOrEqual(32);
+    expect(offenders).toEqual([]);
+  });
+
+  it("47) ReviewWorkbench：列表 / 详情两条查询各自的失败分支必须可区分于空态", () => {
+    const src = read("pages/ReviewWorkbench.tsx");
+    // 共享 ErrorState（不是页面自己再造一份错误样式）
+    expect(src).toContain("ErrorState");
+    expect(src).not.toMatch(/function ErrorState\(/);
+    // 两条查询各自有 isError 分支：读取失败 ≠ 「暂无前向纸面运行」
+    expect(src).toContain("listQuery.isError");
+    expect(src).toContain("detailQuery.isError");
+    expect(src).toMatch(/listQuery\.isError[\s\S]{0,400}RPC_ERROR/);
+  });
+});
+
+describe("前端诚实三态 · 定点锁（2 个页面已修）", () => {
+  it("48) PaperTrading：运行列表 / 运行详情各自的失败分支必须可区分于空态", () => {
+    const src = read("pages/PaperTrading.tsx");
+    expect(src).toContain("listQuery.isError");
+    expect(src).toContain("detailQuery.isError");
+    // 列表分支顺序：loading → error → empty（error 不能落进「暂无前向运行」）
+    expect(src).toMatch(/listQuery\.isLoading[\s\S]{0,260}listQuery\.isError[\s\S]{0,400}runs\.length === 0/);
+    // 明示「读取失败 ≠ 暂无运行」，避免再次被当成空态
+    expect(src).toContain("读取失败不代表「暂无运行」");
+  });
+});
+
+describe("FE-PLAN-008 · 策略域优化（S1 证券可读化 / NH-2A 状态诚实 / NH-1B 绩效入口收敛）", () => {
+  it("49) 模拟盘留档 4 处证券列走共用 SecurityCell，且不再有第二份实现", () => {
+    const tpl = read("components/strategy/PaperTradingTemplate.tsx");
+    // 4 张表：今日策略池 / 近期信号 / 当前持仓 / 历史交易
+    expect(tpl.split("<SecurityCell").length - 1).toBe(4);
+    expect(tpl).toContain("useSecurityLabels");
+    expect(tpl).toContain("SecurityLabelChunks");
+    // 不得再直接印原始 identity
+    expect(tpl).not.toMatch(/\{s\.stock\}<\/td>/);
+    expect(tpl).not.toMatch(/\{p\.stock\}<\/td>/);
+    expect(tpl).not.toMatch(/\{h\.stock\}<\/td>/);
+
+    // 单一实现：共用组件只有一份，闭环面板改为 import
+    const shared = read("components/strategy/SecurityCell.tsx");
+    expect(shared).toContain("export function SecurityCell");
+    const panel = read("components/strategy/ClosedLoopRunResultPanel.tsx");
+    expect(panel).toContain('import { SecurityCell } from "@/components/strategy/SecurityCell"');
+    expect(panel).not.toMatch(/function SecurityCell\(/);
+  });
+
+  it("50) 缺省策略状态不再冒充生命周期值；生命周期徽章自带解释", () => {
+    const adapter = read("adapters/strategyListAdapter.ts");
+    expect(adapter).toContain('asStr(raw.status, "UNKNOWN")');
+    expect(adapter).not.toContain('asStr(raw.status, "Draft")');
+
+    const header = read("components/strategy/StrategyHeader.tsx");
+    expect(header).toMatch(/<StatusBadge[\s\S]{0,240}title=/);
+    expect(header).toContain("策略生命周期状态");
+  });
+
+  it("51) 绩效仪表盘退出侧栏，但页面必须显式声明归属并指向策略详情", () => {
+    const shell = read("components/AppShell.tsx");
+    expect(shell).not.toContain('path: "/performance"');
+    const page = read("pages/PerformanceDashboard.tsx");
+    expect(page).toContain("已不在侧栏");
+    expect(page).toContain('href="/strategies"');
+    expect(page).toContain("最终评估");
   });
 });
 

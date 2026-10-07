@@ -11,7 +11,7 @@
  * 安全：均走参数化 drizzle 查询，不拼接用户输入。
  */
 
-import { sql } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import {
   researchSecurities,
@@ -99,6 +99,31 @@ export async function upsertSecurityMaster(
   }
 
   return { securitiesPersisted, identifiersPersisted };
+}
+
+/**
+ * STEP 7.4 · 只读：按 base securityId 批量装载上市日（Security Master 权威时间界）。
+ * 返回 Map<securityId, "YYYY-MM-DD">；listedDate 为 null 的证券不出现在结果中。
+ */
+export async function loadListedDatesBySecurityIds(
+  securityIds: readonly string[],
+): Promise<Map<string, string>> {
+  const db = await getDb();
+  if (!db) throw new Error("数据库不可用（DATABASE_URL 未配置或连接失败）");
+  const unique = [...new Set(securityIds)];
+  const out = new Map<string, string>();
+  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+    const batch = unique.slice(i, i + BATCH_SIZE);
+    if (batch.length === 0) continue;
+    const rows = await db
+      .select({ securityId: researchSecurities.securityId, listedDate: researchSecurities.listedDate })
+      .from(researchSecurities)
+      .where(inArray(researchSecurities.securityId, batch));
+    for (const row of rows) {
+      if (row.listedDate !== null) out.set(row.securityId, row.listedDate);
+    }
+  }
+  return out;
 }
 
 /** Security Master 表级统计（用于验证与报告）。 */

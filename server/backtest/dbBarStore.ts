@@ -18,7 +18,7 @@
  *   volume（手）→ volume；amount（千元）→ amount；turnoverRate → null（未提供，禁止伪造）
  */
 
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { stockDailyPrices } from "../../drizzle/schema";
 import { getDb } from "../db";
 import type { CanonicalMarketBar } from "../data/types";
@@ -57,6 +57,13 @@ const BAR_COLUMNS = {
   volume: stockDailyPrices.volume,
   amount: stockDailyPrices.amount,
 } as const;
+
+/**
+ * 批量切片读取的 chunk 大小（stockCode 个数）。保守固定值 500：与 datasetRegistry 的
+ * IDENTITY_BATCH_SIZE=900 / EVENT_ID_BATCH_SIZE=1000 同量级但更小，叠加 tradeDate 范围
+ * 过滤后单条 IN 的返回体可控。
+ */
+export const BAR_RANGE_READ_CHUNK_SIZE = 500;
 
 /**
  * 把一条 stock_daily_prices 行规范化为 canonical bar（纯函数，供测试与映射复用）。
@@ -124,6 +131,40 @@ export class DbBarStore implements HistoricalBarStore {
       .where(eq(stockDailyPrices.tradeDate, date))
       .orderBy(stockDailyPrices.stockCode);
     return rows.map((row) => stockDailyPriceRowToBar(row));
+  }
+
+  /**
+   * 执行 Overlay 专用：按 stockCode IN (...) AND tradeDate BETWEEN 批量切片读取。
+   *
+   * 与 seriesFor（单标的全历史）的区别：日期范围下推到 SQL（DB-side filtering）、
+   * 每 BAR_RANGE_READ_CHUNK_SIZE 个代码一条语句（分 chunk）、绝不物化全表。
+   */
+  async barsForSecuritiesDateRange(
+    securityIds: readonly string[],
+    startDate: string,
+    endDate: string,
+  ): Promise<readonly CanonicalMarketBar[]> {
+    const db = await getDb();
+    if (!db) return [];
+    const unique = [...new Set(securityIds)].filter((id) => typeof id === "string" && id !== "");
+    if (unique.length === 0 || startDate > endDate) return [];
+    const out: CanonicalMarketBar[] = [];
+    for (let i = 0; i < unique.length; i += BAR_RANGE_READ_CHUNK_SIZE) {
+      const chunk = unique.slice(i, i + BAR_RANGE_READ_CHUNK_SIZE);
+      const rows = await db
+        .select(BAR_COLUMNS)
+        .from(stockDailyPrices)
+        .where(
+          and(
+            inArray(stockDailyPrices.stockCode, chunk),
+            gte(stockDailyPrices.tradeDate, startDate),
+            lte(stockDailyPrices.tradeDate, endDate),
+          ),
+        )
+        .orderBy(stockDailyPrices.tradeDate, stockDailyPrices.stockCode);
+      for (const row of rows) out.push(stockDailyPriceRowToBar(row));
+    }
+    return out;
   }
 
   async seriesFor(securityId: string): Promise<readonly CanonicalMarketBar[]> {
