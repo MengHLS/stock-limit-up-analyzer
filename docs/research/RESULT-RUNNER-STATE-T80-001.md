@@ -160,8 +160,8 @@
 
 ## 6. 证据链
 
-- Raw evidence：`docs/evidence/_analysis_runner_state_t80_001.json`
-- Summary evidence：`docs/evidence/_analysis_runner_state_t80_001_summary.json`
+- Raw evidence：`_analysis_runner_state_t80_001.json`（已清理 2026-10-07）
+- Summary evidence：`_analysis_runner_state_t80_001_summary.json`（已清理 2026-10-07）
 - Execution script：`scripts/runRunnerStateT80Research001.mts`
 - Report script：`scripts/reportRunnerStateT80Research001.mts`
-- Fixed trade source：`docs/evidence/_analysis_3f_top3_v1621_t80_validation_20261002.json`
+- Fixed trade source：`_analysis_3f_top3_v1621_t80_validation_20261002.json`（已清理 2026-10-07）

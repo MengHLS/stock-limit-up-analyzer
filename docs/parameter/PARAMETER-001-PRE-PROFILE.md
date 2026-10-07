@@ -174,7 +174,7 @@ node node_modules/tsx/dist/cli.mjs docs/evidence/_probe_param001_pre_profile.mts
 PP_MARGINAL=1 PP_TAG=before node node_modules/tsx/dist/cli.mjs docs/evidence/_probe_param001_stage_bench.mts
 
 # CPU 采样解析
-python cpuprofile_report.py docs/evidence/_probe_param001_pre_profile.before.cpuprofile.json 55
+python cpuprofile_report.py _probe_param001_pre_profile.before.cpuprofile.json 55
 ```
 
 ---
@@ -920,10 +920,10 @@ loopRun 自身                1,472 ms       2,109 ms      2,109 ms
 |---|---|
 | `docs/evidence/_probe_param001_pre_profile.before.out.txt` | BEFORE：真实 Run 的完整可读输出（含 14 阶段状态、`optimization` 重试、阶段表、计数） |
 | `docs/evidence/_probe_param001_pre_profile.before.json` | BEFORE：阶段树 + 展平表 + 计数 + 刻度（machine-readable） |
-| `docs/evidence/_probe_param001_pre_profile.before.cpuprofile.json` | BEFORE：V8 CPU 采样原始档（5.7 MB，`canonical.ts` = 44.30% 的出处） |
+| `_probe_param001_pre_profile.before.cpuprofile.json`（已清理 2026-10-07） | BEFORE：V8 CPU 采样原始档（5.7 MB，`canonical.ts` = 44.30% 的出处） |
 | `docs/evidence/_probe_param001_pre_profile.after.out.txt` | AFTER（P0 优化后）：同输入、同探针、同插桩的完整输出 |
 | `docs/evidence/_probe_param001_pre_profile.json` | AFTER：阶段树（`_probe_param001_pre_profile.json` 是探针的当前输出路径 ⇒ 即 AFTER 产物） |
-| `docs/evidence/_probe_param001_pre_profile.cpuprofile.json` | AFTER：V8 CPU 采样原始档 |
+| `_probe_param001_pre_profile.cpuprofile.json`（已清理 2026-10-07） | AFTER：V8 CPU 采样原始档 |
 | `docs/evidence/_probe_param001_stage_bench.before.json` / `.before.out.txt` | 边际成本 A/B（BEFORE）：两条曲线（用户窗口 / 数据集整窗）的逐项耗时与 digest |
 | `docs/evidence/_probe_param001_stage_bench.after.json` / `.after.out.txt` | 同上（AFTER）：**用于 Before/After 一致性判据** |
 | `docs/evidence/_probe_param001_recon.out.txt` | 只读侦察：7 条留档 Run 的逐条阶段状态（含「2026-09-14 全部 `optimization = CL_RUNNER_NOT_INJECTED`」这条关键旁证） / `dataset_version` / 策略版本 / 在途 `RUNNING` Run = **0** |

@@ -195,7 +195,7 @@
 ## 8. 证据链
 
 - 派生证据：`docs/evidence/_analysis_profit_running_state_003.json`
-- 原始证据：`docs/evidence/_analysis_exit_confirmation_002.json`
+- 原始证据：`_analysis_exit_confirmation_002.json`（已清理 2026-10-07）
 - 报告生成脚本：`scripts/reportProfitRunningState003.mts`
 - 上游运行脚本：`scripts/runExitConfirmation002.mts`
 

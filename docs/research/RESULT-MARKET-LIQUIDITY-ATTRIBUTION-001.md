@@ -139,7 +139,7 @@
 - liquidity facts 构建：`scripts/buildMarketLiquidityFacts.mts`
 - 回测脚本：`scripts/run3FTopN3MarketLiquidityAttribution001.mts`
 - 汇总脚本：本任务为一次性报告生成脚本，原始完整 summary 见下
-- summary：`docs/evidence/_analysis_3f_top3_market_liquidity_001_summary.json`
+- summary：`_analysis_3f_top3_market_liquidity_001_summary.json`（已清理 2026-10-07）
 - rolling120-p25：`docs/evidence/_analysis_3f_top3_market_liquidity_001_rolling120-p25.json`
 - rolling120-p33：`docs/evidence/_analysis_3f_top3_market_liquidity_001_rolling120-p33.json`
 - rolling120-p40：`docs/evidence/_analysis_3f_top3_market_liquidity_001_rolling120-p40.json`

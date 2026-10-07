@@ -106,4 +106,4 @@ D20<-10% 组：
 ## 附：证据
 
 - run: `scripts/runTrendPoolMaDeviation001.mts`
-- raw JSON: `docs/evidence/_analysis_trend_pool_ma_deviation_001.json`
+- raw JSON: `_analysis_trend_pool_ma_deviation_001.json`（已清理 2026-10-07）

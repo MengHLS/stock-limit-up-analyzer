@@ -216,7 +216,7 @@
 
 ## 7. 证据链
 
-- 原始转移逐事件证据：`docs/evidence/_analysis_exit_trend_deterioration_006.json`
+- 原始转移逐事件证据：`_analysis_exit_trend_deterioration_006.json`（已清理 2026-10-07）
 - 汇总统计：`docs/evidence/_analysis_exit_trend_deterioration_006_summary.json`
 - 运行脚本：`scripts/runExitTrendDeterioration006.mts`
 - 报告脚本：`scripts/reportExitTrendDeterioration006.mts`

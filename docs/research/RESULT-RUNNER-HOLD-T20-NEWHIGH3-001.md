@@ -69,7 +69,7 @@
 
 ## 5. 证据链
 
-- Baseline T80 evidence：`docs/evidence/_analysis_3f_top3_v1621_t80_validation_20261002.json`
+- Baseline T80 evidence：`_analysis_3f_top3_v1621_t80_validation_20261002.json`（已清理 2026-10-07）
 - State embedded evidence：`docs/evidence/_analysis_runner_state_embedded_001_summary.json`
 - State research：`docs/research/RESULT-RUNNER-STATE-T80-001.md`
 - Embedded state validation：`docs/research/RESULT-RUNNER-STATE-EMBEDDED-001.md`

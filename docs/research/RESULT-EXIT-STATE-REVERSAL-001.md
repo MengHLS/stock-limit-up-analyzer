@@ -261,7 +261,7 @@ RAW 变体下，多数事件在 rd6–7 就已经「成立」，失效中位数�
 
 ## 6. 逐笔证据链
 
-- 逐事件明细（含 `estRd/estDate/runLen/failRd/failDate/exitRd/exitDate`、失效退出收益、MFE/MAE、各继续持有臂增量）保存在 `docs/evidence/_analysis_exit_state_reversal_001.json` 的 `detail` 数组，共 12,725 条记录（RAW+SUSTAINED 全部事件）。
+- 逐事件明细（含 `estRd/estDate/runLen/failRd/failDate/exitRd/exitDate`、失效退出收益、MFE/MAE、各继续持有臂增量）保存在 `_analysis_exit_state_reversal_001.json`（已清理 2026-10-07） 的 `detail` 数组，共 12,725 条记录（RAW+SUSTAINED 全部事件）。
 - 汇总（含 perState、年度、分位、右尾等）保存在 `_analysis_exit_state_reversal_001_summary.json`。
 - 冻结坐标、运行快照与 execution fingerprint 保存在 `_analysis_exit_state_reversal_001_version.json`。
 

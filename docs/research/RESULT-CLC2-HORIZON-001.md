@@ -151,7 +151,7 @@
 
 ## 6. 逐笔与完整证据
 
-- 组合层：`_analysis_clc2_horizon_001.json` 的 `portfolio`（含 equity curve）、`incrementAB`、`incrementBC`。
+- 组合层：`_analysis_clc2_horizon_001.json`（已清理 2026-10-07） 的 `portfolio`（含 equity curve）、`incrementAB`、`incrementBC`。
 - CLC2 触发组逐笔：`cohorts.{T20,T40,T60,T80}.events`，每条含 `securityId / entryTime / exitTimeB / holdingDaysB / returnB / exitTimeC / holdingDaysC / returnC / incrementPct`。
 - 运行快照与 execution fingerprint：`_analysis_clc2_horizon_001_version.json`。
 

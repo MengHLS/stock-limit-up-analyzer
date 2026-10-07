@@ -423,8 +423,8 @@
 
 ## 7. 证据链
 
-- 原始逐事件证据：`docs/evidence/_analysis_exit_confirmation_007.json`
-- 汇总结果：`docs/evidence/_analysis_exit_confirmation_007_summary.json`
+- 原始逐事件证据：`_analysis_exit_confirmation_007.json`（已清理 2026-10-07）
+- 汇总结果：`_analysis_exit_confirmation_007_summary.json`（已清理 2026-10-07）
 - 运行脚本：`scripts/runExitConfirmation007.mts`
 - 报告脚本：`scripts/reportExitConfirmation007.mts`
 

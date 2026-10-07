@@ -114,4 +114,4 @@
 - Raw evidence：docs/evidence/_analysis_runner_holding_bridge_001.json
 - Summary evidence：docs/evidence/_analysis_runner_holding_bridge_001_summary.json
 - Execution script：scripts/runRunnerHoldingBridge001.mts
-- Baseline T80：docs/evidence/_analysis_3f_top3_v1621_t80_validation_20261002.json
+- Baseline T80：_analysis_3f_top3_v1621_t80_validation_20261002.json

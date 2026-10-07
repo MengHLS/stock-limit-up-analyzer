@@ -178,7 +178,7 @@
 
 ## 7. 证据链
 
-- Raw evidence：`docs/evidence/_analysis_strategy_exit_validation_010.json`
+- Raw evidence：`_analysis_strategy_exit_validation_010.json`（已清理 2026-10-07）
 - Summary evidence：`docs/evidence/_analysis_strategy_exit_validation_010_summary.json`
 - Execution script：`scripts/runStrategyExitValidation010.mts`
 - Pool builder：`scripts/buildStrategyExitValidation010Pool.mts`

@@ -180,7 +180,7 @@
 
 ## 6. 逐笔/完整证据
 
-- 组合层逐年、退出分布、turnover、cost、equity curve：`_analysis_clc2_portfolio_001.json` 的 `portfolio` 与 `diffVsBaseline`。
+- 组合层逐年、退出分布、turnover、cost、equity curve：`_analysis_clc2_portfolio_001.json`（已清理 2026-10-07） 的 `portfolio` 与 `diffVsBaseline`。
 - CLC2 同组逐笔（现实 / 纯坐标）：`clc2Cohort.realistic.events` / `clc2Cohort.pure.events`。
 - 运行快照与 execution fingerprint：`_analysis_clc2_portfolio_001_version.json`。
 

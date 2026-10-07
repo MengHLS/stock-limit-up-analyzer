@@ -11,7 +11,7 @@
 - 未来标签只记录状态日之后至 T+20：Runner 为后续 high 达到 +20%；Strong Runner 为后续 high 达到 +30%；非 Runner 为后续 high 未达到 +20%。
 - 状态变量：近5日高点距离、相对 MA5/MA10、MA5/MA10 斜率、近2/3日收益、2/3日创新高、收盘在当日区间位置、成交量相对前5日均量、激活后连续创新高/连续收低。
 - 固定描述分档只用于归纳，不用于交易：近5日高点距离 `0~0.5% / 0.5~2% / 2~5% / >5%`；收盘位置 `上1/3 / 中1/3 / 下1/3`；量能与均线方向只按符号分组。
-- 所有原始 event-day 状态记录保留在 `_analysis_runner_state_research_004.json`。
+- 所有原始 event-day 状态记录保留在 `_analysis_runner_state_research_004.json`（已清理 2026-10-07）。
 
 ## 1. 样本与激活后路径
 
@@ -249,8 +249,8 @@
 
 ## 7. 证据链
 
-- 原始逐日状态：`docs/evidence/_analysis_runner_state_research_004.json`
-- 汇总证据：`docs/evidence/_analysis_runner_state_research_004_summary.json`
+- 原始逐日状态：`_analysis_runner_state_research_004.json`（已清理 2026-10-07）
+- 汇总证据：`_analysis_runner_state_research_004_summary.json`（已清理 2026-10-07）
 - 运行脚本：`scripts/runRunnerStateResearch004.mts`
 - 报告生成脚本：`scripts/reportRunnerStateResearch004.mts`
 

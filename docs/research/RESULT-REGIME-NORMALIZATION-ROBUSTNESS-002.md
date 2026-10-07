@@ -102,6 +102,6 @@ C(120,P33) 的改善集中在 full、IS、回撤与成本压力；但没有保�
 ## 附：证据文件
 
 - run 脚本：`scripts/run3FTopN3RegimeNormalizationRobustness002.mts`
-- summary：`docs/evidence/_analysis_3f_top3_regime_normalization_robustness_002_summary.json`
+- summary：`_analysis_3f_top3_regime_normalization_robustness_002_summary.json`（已清理 2026-10-07）
 - 矩阵原始结果：`docs/evidence/_analysis_3f_top3_regime_normalization_robustness_002_w{60|120|250}_p{25|33|40}.json`
 

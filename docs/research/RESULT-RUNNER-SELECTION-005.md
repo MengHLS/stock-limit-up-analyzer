@@ -146,7 +146,7 @@
 
 ## 7. 证据链
 
-- 原始逐日状态：`docs/evidence/_analysis_runner_state_research_004.json`
+- 原始逐日状态：`_analysis_runner_state_research_004.json`（已清理 2026-10-07）
 - 汇总结果：`docs/evidence/_analysis_runner_selection_005_summary.json`
 - 报告生成脚本：`scripts/reportRunnerSelection005.mts`
 - 上游状态研究脚本：`scripts/runRunnerStateResearch004.mts`

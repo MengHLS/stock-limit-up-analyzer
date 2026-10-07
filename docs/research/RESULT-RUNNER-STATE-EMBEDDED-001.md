@@ -154,4 +154,4 @@ Runner 状态没有进入执行层，因此 5 个版本的实际策略结果逐�
 - Execution script：`scripts/runRunnerStateEmbedded001.mts`
 - Report script：`scripts/reportRunnerStateEmbedded001.mts`
 - Runner state research：`docs/research/RESULT-RUNNER-STATE-T80-001.md`
-- Baseline T80 strategy evidence：`docs/evidence/_analysis_3f_top3_v1621_t80_validation_20261002.json`
+- Baseline T80 strategy evidence：`_analysis_3f_top3_v1621_t80_validation_20261002.json`（已清理 2026-10-07）

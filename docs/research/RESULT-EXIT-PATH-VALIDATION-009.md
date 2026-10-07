@@ -111,7 +111,7 @@
 
 ## 5. 证据链
 
-- 原始逐事件：`docs/evidence/_analysis_exit_path_validation_009.json`
+- 原始逐事件：`_analysis_exit_path_validation_009.json`（已清理 2026-10-07）
 - 汇总证据：`docs/evidence/_analysis_exit_path_validation_009_summary.json`
 - 派生脚本：`scripts/runExitPathValidation009.mts`
 - 报告脚本：`scripts/reportExitPathValidation009.mts`

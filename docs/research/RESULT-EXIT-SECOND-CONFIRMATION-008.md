@@ -136,8 +136,8 @@
 
 ## 6. 证据链
 
-- 原始逐事件：`docs/evidence/_analysis_exit_second_confirmation_008.json`
-- 汇总证据：`docs/evidence/_analysis_exit_second_confirmation_008_summary.json`
+- 原始逐事件：`_analysis_exit_second_confirmation_008.json`（已清理 2026-10-07）
+- 汇总证据：`_analysis_exit_second_confirmation_008_summary.json`（已清理 2026-10-07）
 - 派生脚本：`scripts/runExitSecondConfirmation008.mts`
 - 报告脚本：`scripts/reportExitSecondConfirmation008.mts`
 

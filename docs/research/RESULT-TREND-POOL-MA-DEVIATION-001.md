@@ -91,4 +91,4 @@ UP = slope > 0; DOWN = slope <= 0. 表中为 T+20 均值。
 ## 附: 证据
 
 - run: scripts/runTrendPoolMaDeviation001.mts
-- raw JSON: docs/evidence/_analysis_trend_pool_ma_deviation_001.json
+- raw JSON: _analysis_trend_pool_ma_deviation_001.json

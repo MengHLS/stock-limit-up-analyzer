@@ -338,5 +338,5 @@
 | executionProjection | v5 official rows + selected-event v7 rd17..80 |
 | 运行脚本 | `scripts/runRunnerStateT80Ext001.mts` |
 | 报告脚本 | `scripts/reportRunnerStateT80Ext001.mts` |
-| 原始证据 | `docs/evidence/_analysis_runner_state_t80_001.json` |
+| 原始证据 | `_analysis_runner_state_t80_001.json`（已清理 2026-10-07） |
 

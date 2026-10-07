@@ -83,7 +83,7 @@
 
 ## 7. 证据链
 
-- Raw evidence：`docs/evidence/_analysis_3f_top3_v1621_t80_validation_20261002.json`
+- Raw evidence：`_analysis_3f_top3_v1621_t80_validation_20261002.json`（已清理 2026-10-07）
 - Summary evidence：`docs/evidence/_analysis_3f_top3_v1621_t80_validation_20261002_summary.json`
 - Execution script：`scripts/run3FTopN3V1621T80Validation.mts`
 - Report script：`scripts/report3FTopN3V1621T80Validation.mts`

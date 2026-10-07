@@ -289,5 +289,5 @@
 
 - 运行脚本：`scripts/runExitConfirmation002.mts`
 - 报告生成脚本：`scripts/reportExitConfirmation002.mts`
-- 原始证据：`docs/evidence/_analysis_exit_confirmation_002.json`
+- 原始证据：`_analysis_exit_confirmation_002.json`（已清理 2026-10-07）
 
