@@ -1,0 +1,35 @@
+-- 数据集构建筛选：新增「上市龄」维度（排除次新）—— `dataset_build_config.excludeListedWithinDays`
+--
+-- 依据：用户授权（2026-10-07「1 允许」）= 允许在数据集 builder 新增「排除上市 < 365 天」
+--   这一 universe 维度；影响报告见 docs/architecture/CHANGE-AUDIT.md · T74-SUBNEW-FILTER-001
+--   之后的 DATASET-EXCLUDE-SUBNEW-001 条目。
+--   ledger 实查：`drizzle/*.sql` 已至 `0055_stock_selection_run.sql`
+--   ⇒ 本 migration 取号 **0056**（禁 `db:push` / 禁 `drizzle-kit generate`；
+--   自 0024 起 `drizzle/meta/_journal.json` 已停维护，**不是**编号真源）。
+--
+-- 本 migration 只做一件事（纯增量、不改名、不重建、不删数据、不迁移数据）：
+--   ① `dataset_build_config.excludeListedWithinDays` —— 可空 int
+--      NULL  = 不过滤（**既有 5 个版本逐字节不变**）
+--      正整数 = 剔除「上市龄 < N 个自然日」的标的（上市日取 `research_securities.listedDate`，按事件日 PIT 解析）
+--
+-- 🔴 口径边界：
+--   - **只加筛选维度**，不物化任何新列到 `ds_*` 物理表，不改任何既有判定（涨停 / ST / 板块）；
+--   - 上市日不可得的标的**放行**（不静默排除不可证实的身份），并由调用方如实计数；
+--   - `configVersion` 保持 1：新维度为**可空追加**，旧行 NULL 的解释与旧行为完全一致。
+--
+-- 幂等：apply 脚本按 `-- @guard:` 先查 information_schema 再执行；重复运行无副作用
+--   （第二次应为 0 executed / 1 skipped）。
+-- 回滚：`ALTER TABLE `dataset_build_config` DROP COLUMN `excludeListedWithinDays``
+--   （会丢失各版本声明的上市龄口径；已构建的 ds_* 行不受影响）。
+--
+-- 应用（本机口径，二者择一）：
+--   node scripts/applyDatasetBuildConfigExcludeListed.mjs            # bespoke：ssl 口径对齐 server/db.ts，带 --dry-run/--check
+--   node scripts/applySqlMigration.mjs drizzle/0056_dataset_build_config_exclude_listed.sql
+--     ⚠️ 通用执行器硬编码 `ssl:{rejectUnauthorized:true}`；本机 TiDB 为自签证书链时会
+--        `HANDSHAKE_SSL_ERROR` ⇒ 本机请用上面的 bespoke 脚本。
+-- 🔴 `scripts/**` 已被 `.gitignore`（除历史已跟踪文件外）⇒ 这两个脚本是**本地运维工具**，
+--    权威记录 = 本 SQL 文件 + `docs/architecture/CHANGE-AUDIT.md` 的 DATASET-EXCLUDE-SUBNEW-001 条目。
+
+-- @guard: column dataset_build_config.excludeListedWithinDays
+ALTER TABLE `dataset_build_config`
+  ADD COLUMN `excludeListedWithinDays` int NULL AFTER `excludeSt`;

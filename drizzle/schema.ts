@@ -1212,6 +1212,11 @@ export const datasetBuildConfigs = mysqlTable("dataset_build_config", {
   datasetVersionId: bigint("datasetVersionId", { mode: "number" }).notNull(),
   /** 是否排除 ST/*ST（PIT st 维度，不依赖股票名称）。 */
   excludeSt: boolean("excludeSt").notNull().default(false),
+  /**
+   * 上市龄过滤：剔除上市龄 < N 个自然日的标的（null = 不过滤）。
+   * 上市日取 `research_securities.listedDate`，按事件日 PIT 解析。
+   */
+  excludeListedWithinDays: int("excludeListedWithinDays"),
   /** t 日之前的数据天数（前置窗口，0 = 不取前置历史行）。 */
   preWindowDays: int("preWindowDays").notNull().default(0),
   /** t 日之后的数据天数（后置窗口，等价旧 pathHorizon）。 */
@@ -2336,3 +2341,66 @@ export const researchExperimentRun = mysqlTable("research_experiment_run", {
 
 export type ResearchExperimentRunRow = typeof researchExperimentRun.$inferSelect;
 export type InsertResearchExperimentRunRow = typeof researchExperimentRun.$inferInsert;
+
+/**
+ * STOCK-SELECTION-005 — 选股结果快照（每次**手动保存**一行）。
+ *
+ * 用途：把「某个决策日、某个策略、某个数据载体」当时算出的**选股清单**与**剔除统计**冻结下来，
+ * 供页面回看「当时为什么没选上」；重算永远走 `server/stockSelection/**` 的权威实现，本表不参与计算。
+ *
+ * 纪律：
+ *   - **不复制行情 / 不复制数据集**：只有 `datasetVersionId` 一个软引用坐标（可空 = live 载体）；
+ *   - JSON 列一律 `longtext` 且列名以 `Json` 结尾（与 `research_experiment_run` 等一致）；
+ *   - **runId 确定性**：同一 (strategyId, sourceKind, datasetVersionId, decisionDate, topN)
+ *     复用同一 runId ⇒ 重复保存为 UPSERT 覆盖，不产生重复行；
+ *   - 零 FK（全库既有原则：软引用 + 应用层校验）。
+ */
+export const stockSelectionRun = mysqlTable("stock_selection_run", {
+  id: bigint("id", { mode: "number" }).autoincrement().primaryKey(),
+  /** 确定性业务 id（`SEL-YYYYMMDD-<8 hex>`）；UNIQUE，同坐标重复保存即覆盖。 */
+  runId: varchar("runId", { length: 80 }).notNull(),
+  /** 策略 id（软引用代码里的注册表）。 */
+  strategyId: varchar("strategyId", { length: 64 }).notNull(),
+  /** 保存时的策略**名称快照**（代码改名后历史记录仍可读懂）。 */
+  strategyLabel: varchar("strategyLabel", { length: 200 }).notNull(),
+  /** 数据载体 kind（`live` / `dataset`）。 */
+  sourceKind: varchar("sourceKind", { length: 16 }).notNull(),
+  /** 保存时的载体**标签快照**。 */
+  sourceLabel: varchar("sourceLabel", { length: 96 }).notNull(),
+  /** 数据集版本坐标（软引用 `dataset_version.id`）；live 载体为 NULL。 */
+  datasetVersionId: bigint("datasetVersionId", { mode: "number" }),
+  /** 决策日（收盘后）。 */
+  decisionDate: date("decisionDate", { mode: "string" }).notNull(),
+  /** 当日最多选几只（保存时的请求参数）。 */
+  topN: int("topN").notNull(),
+  /** 本次判定涉及的候选事件数。 */
+  candidateEventCount: int("candidateEventCount").notNull(),
+  /** 进入当日排序的合格候选数。 */
+  rankedCandidateCount: int("rankedCandidateCount").notNull(),
+  /**
+   * **剔除统计**：`{ counts: {原因码 → 条数}, stocks: [逐只明细] }` 的 JSON 文本。
+   * 🔴 计数由逐只明细归并 ⇒ 二者恒自洽；键序稳定写入便于对账。
+   * （同一列内扩展形状，无需 DDL；解析兼容早期「纯计数」扁平形状。）
+   */
+  excludedJson: longtext("excludedJson").notNull(),
+  /** **选股清单**（`StockSelectionPick[]` 的 JSON 文本）。 */
+  picksJson: longtext("picksJson").notNull(),
+  /** 事件窗起始交易日（无候选 = NULL）。 */
+  dataWindowStartDate: date("dataWindowStartDate", { mode: "string" }),
+  /** 事件窗结束交易日（无候选 = NULL）。 */
+  dataWindowEndDate: date("dataWindowEndDate", { mode: "string" }),
+  /** 结果组装时点（策略注入的 `now()`，保证可复现）。 */
+  capturedAt: timestamp("capturedAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  /** 一个坐标一行；重复保存走 ON DUPLICATE KEY UPDATE（幂等覆盖）。 */
+  runUnique: uniqueIndex("uq_stock_selection_run_runId").on(table.runId),
+  /** 历史列表按决策日倒序（`id` 单调 ⇒ 等价于保存顺序）。 */
+  decisionIdx: index("idx_stock_selection_run_decision").on(table.decisionDate, table.id),
+  /** 按策略回看历史。 */
+  strategyIdx: index("idx_stock_selection_run_strategy").on(table.strategyId, table.decisionDate),
+}));
+
+export type StockSelectionRunRow = typeof stockSelectionRun.$inferSelect;
+export type InsertStockSelectionRunRow = typeof stockSelectionRun.$inferInsert;
