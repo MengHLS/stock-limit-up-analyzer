@@ -4,7 +4,7 @@ BaoStock provider bridge (STEP 7.6).
 
 Commands:
   index_daily <baostock_code> <start> <end>  -> JSON [{date,open,high,low,close,volume,amount}]
-  stock_daily <baostock_code> <start> <end>  -> JSON [{date,open,high,low,close,volume,amount,turn,tradestatus}]
+  stock_daily <baostock_code> <start> <end>  -> JSON [{date,open,high,low,close,preClose,volume,amount,turn,tradestatus,isST}]
   stock_basic                                -> JSON [{code,name,ipoDate,outDate,type,status}]
   stock_industry <baostock_code>             -> JSON {updateDate,code,code_name,industry,industryClassification} | null
 
@@ -74,7 +74,8 @@ def cmd_index_daily(code, start, end):
 def cmd_stock_daily(code, start, end):
     # tradestatus: 1=交易 0=停牌；isST: 1=ST 0=正常。二者为 BaoStock 提供的权威日线字段。
     # 分页查询，避免长上市股票全量日线被单次 4000 行上限截断。
-    rows = query_k_paged(code, start, end, "date,open,high,low,close,volume,amount,turn,tradestatus,isST")
+    # 追加 preclose（除权前收价）：全市场回填 stock_daily_prices.preClosePrice 必需，BaoStock 免费接口提供。
+    rows = query_k_paged(code, start, end, "date,open,high,low,close,preclose,volume,amount,turn,tradestatus,isST")
     return [
         {
             "date": r[0],
@@ -82,11 +83,12 @@ def cmd_stock_daily(code, start, end):
             "high": r[2],
             "low": r[3],
             "close": r[4],
-            "volume": r[5],
-            "amount": r[6],
-            "turn": r[7],
-            "tradestatus": r[8],
-            "isST": r[9],
+            "preClose": r[5],
+            "volume": r[6],
+            "amount": r[7],
+            "turn": r[8],
+            "tradestatus": r[9],
+            "isST": r[10],
         }
         for r in rows
     ]

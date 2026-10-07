@@ -154,6 +154,9 @@ class ProbeBuildIO implements DatasetBuildIO {
   resolveStSync(): "UNKNOWN" {
     return "UNKNOWN";
   }
+  resolveListingAgeDaysSync(): null {
+    return null;
+  }
   async resolveSt(): Promise<"UNKNOWN"> {
     return "UNKNOWN";
   }

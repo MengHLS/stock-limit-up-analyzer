@@ -6,6 +6,7 @@ export * from "./types";
 export * from "./errors";
 export * from "./units";
 export * from "./provider";
+export * from "./providerBaostock";
 export * from "./canonical";
 export * from "./validation";
 export * from "./rateLimiter";

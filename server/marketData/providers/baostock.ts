@@ -62,6 +62,8 @@ export interface BaostockStockRow {
   high: string;
   low: string;
   close: string;
+  /** 除权前收价（BaoStock `preclose`）；旧 bridge 版本可能缺失。 */
+  preClose?: string;
   volume: string;
   amount: string;
   turn: string;

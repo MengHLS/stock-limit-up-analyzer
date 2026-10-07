@@ -15,6 +15,7 @@ export * from "./sina";
 export * from "./baostock";
 export * from "./akshare";
 export { runPythonScript } from "./pythonBridge";
+export { BaostockSession, getSharedBaostockSession, closeSharedBaostockSession, resolveBaostockPython } from "./baostockSession";
 
 /** 指数 provider 注册表（provider-neutral）。 */
 export const indexProviders: Record<string, IndexProvider> = {
