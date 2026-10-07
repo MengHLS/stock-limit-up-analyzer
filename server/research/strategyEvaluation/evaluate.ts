@@ -31,7 +31,7 @@
 import { createHash } from "node:crypto";
 import { assembleRunWorkbenchInputs } from "../../runWorkbenchAssembly/assemble";
 import type { ResearchDataset } from "../../researchDataset";
-import type { EquityPoint } from "../../backtest/types";
+import type { CostSummary, EquityPoint, ExecutionStats, Position, Trade } from "../../backtest/types";
 import {
   createClosedLoopWiring,
   createStreamingClosedLoopWiring,
@@ -45,6 +45,7 @@ import type {
 } from "../closedLoop/types";
 import type { StrategyDocument } from "../strategySchema/types";
 import type { ResearchParameterSet } from "../types";
+import type { SkippedIntentEntry } from "../simulator/types";
 
 // ---------------------------------------------------------------------------
 // 常量
@@ -307,3 +308,4 @@ export function deriveExperimentId(
     .toUpperCase();
   return `EXP-${datePart}-${digest}`;
 }
+

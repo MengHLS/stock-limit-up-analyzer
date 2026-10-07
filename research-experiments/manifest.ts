@@ -50,10 +50,46 @@ import { twelveFactorCompositeStudyExperiment } from "./first-board-pullback/twe
 import { twelveFactorTopNRankingStudyExperiment } from "./first-board-pullback/twelve-factor-topn-ranking-study/experiment";
 import { leaderCandidateBaselineExperiment } from "./combo-backtest/leader-candidate-baseline/experiment";
 import { compositeRunnerNewHigh3Hold20Experiment } from "./first-board-pullback/composite-runner-newhigh3-hold20/experiment";
+import { compositeRunnerNewHigh3T74Experiment } from "./first-board-pullback/composite-runner-newhigh3-t74/experiment";
+import { compositeRunnerNewHigh3T74TrendExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-trend/experiment";
+import { compositeRunnerNewHigh3T74TrendGateExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-trend-gate/experiment";
+import { compositeRunnerNewHigh3T74TrendV2Experiment } from "./first-board-pullback/composite-runner-newhigh3-t74-trend-v2/experiment";
+import { compositeRunnerT74SlotsExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-slots/experiment";
+import { compositeRunnerT74StopWideExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-stopwide/experiment";
+import { compositeRunnerT74Top5Experiment } from "./first-board-pullback/composite-runner-newhigh3-t74-top5/experiment";
+import { compositeRunnerT74CarryoverExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-carryover/experiment";
+import { compositeRunnerT74CarryoverRefreshExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh/experiment";
+import { compositeRunnerT74LateEntryExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-late-entry/experiment";
+import { compositeRunnerT74EventGateExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-event-gate/experiment";
+import { compositeRunnerT74SubNewExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-subnew/experiment";
+import { trendEntryMaV1Experiment } from "./first-board-pullback/trend-entry-ma-v1/experiment";
 
 /** 全部已注册实验（顺序不参与任何计算；registry 内部按 id 排序输出）。 */
 const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   compositeRunnerNewHigh3Hold20Experiment,
+  compositeRunnerNewHigh3T74Experiment,
+  // P0：3F 选股排序 × 趋势评分融合（只改排序值；Runner / 仓位 / 退出全部冻结）
+  compositeRunnerNewHigh3T74TrendExperiment,
+  // P0-2：趋势分只作候选门槛（只筛不改排序）
+  compositeRunnerNewHigh3T74TrendGateExperiment,
+  // P1：趋势评分 v2（符号修正 + 分位融合）
+  compositeRunnerNewHigh3T74TrendV2Experiment,
+  // P2：只放开买入名额 / 持仓上限（选股与排序冻结）
+  compositeRunnerT74SlotsExperiment,
+  // P3-stopwide：只扩大固定止损（其余冻结），关注回撤
+  compositeRunnerT74StopWideExperiment,
+  // P4：选股广度 TopN 3 -> 5（其余冻结），目标抓更多超级票
+  compositeRunnerT74Top5Experiment,
+  // P6：跨日候选池 carry 1 / 2 日（第一轮不重评分）
+  compositeRunnerT74CarryoverExperiment,
+  // P7：跨日候选池 + 当日 CarryRefreshV1 统一重评分
+  compositeRunnerT74CarryoverRefreshExperiment,
+  // P8：延迟入场 + 原 top5 门槛内晚窗口滚动 3F
+  compositeRunnerT74LateEntryExperiment,
+  // P9：事件事实 gate（不重排 3F）
+  compositeRunnerT74EventGateExperiment,
+  compositeRunnerT74SubNewExperiment,
+  trendEntryMaV1Experiment,
   entryDayExperiment,
   fundamentalStudyExperiment,
   bodyFilteredExitCurveStudyExperiment,

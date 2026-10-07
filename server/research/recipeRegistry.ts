@@ -35,6 +35,7 @@ import {
 import { makeGatedSignalBuilder, type FeatureGate } from "./framework/gatedSignal";
 import type { StrategyRecipe } from "./strategySchema/types";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
+import { buildPullbackFeatureProviders as buildRecipeFeatureProviders } from "./recipeRegistryAtoms";
 import {
   PULLBACK_PARAMETER_IDS,
   FIXED_POOL_THREE_FACTOR_FEATURE_ID,
@@ -214,12 +215,33 @@ function strategyRecipeDefinitions(): readonly StrategyRecipeDefinition[] {
   if (definitionsCache === null) {
     definitionsCache = [
       ...buildPatternRecipeDefinitions(),
+      makeStrongTrendReentrySelectAllRecipeDefinition(),
       makeRollingThreeFactorRecipeDefinition(),
       makeFixedPoolThreeFactorRecipeDefinition(),
       makeCalibratedN5EventRecipeDefinition(),
     ];
   }
   return definitionsCache;
+}
+
+function makeStrongTrendReentrySelectAllRecipeDefinition(): StrategyRecipeDefinition {
+  return {
+    recipeId: "strong-trend-reentry-select-all",
+    point: "close",
+    signalFrequency: "daily",
+    signalDescription: "STRONG_TREND_REENTRY_V1 event candidates: select all confirmed events; no TopN and no ranking filter (rankValue 仅作方向载体，必须为正).",
+    requiredData: ["OHLCV"],
+    selectionSummary: "所有 RECLAIM 候选全选（topPercentile=1；无 TopN）；rankValue=volumeRatio 仅作 long 方向载体",
+    randomSeed: 20_261_005,
+    features: buildRecipeFeatureProviders("close"),
+    signalKind: "weighted",
+    // 🔴 方向载体：平台用 rankValue 的符号推导方向（>0 long / <0 short / =0 neutral），全 0 权重会让
+    //    事件命中日的方向变成 neutral，进而被 longOnly 判为 NON_LONG_DIRECTION。volumeRatio > 0
+    //    且在任何真实 bar 上都有值，故选它做「恒正载体」；topPercentile=1 ⇒ 该值不影响入选集合。
+    defaultWeights: { volumeRatio: 1 },
+    rankingConfig: { higherIsBetter: true },
+    selectionConfig: { method: { kind: "topPercentile", pct: 1 } },
+  };
 }
 
 function makeRollingThreeFactorRecipeDefinition(): StrategyRecipeDefinition {

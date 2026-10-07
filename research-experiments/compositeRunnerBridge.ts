@@ -11,8 +11,12 @@ export {
   buildFirstLimitPullback3FTop3SourceRun,
   buildCompositeEvents,
   buildCompositeSourceRun,
+  baseSecurityIdOf,
   buildCompositeExecutionDataset,
   rebuildCompositeRun,
+  applyCompositeCarryover,
+  applyCompositeLateEntry,
+  applyCompositeEventGate,
   runCompositeRunnerBacktest,
   COMPOSITE_RUNNER_TOP_N,
   COMPOSITE_RUNNER_MAX_AMPLITUDE,
@@ -24,14 +28,34 @@ export {
 export { buildThreeFactorTopNFamilyArmInput } from "../server/research/patternLibrary/threeFactorTopNFamilies";
 export type {
   CompositeExecutionSurfacePayload,
+  CompositeEventMetadata,
   ExperimentCompositeDatasetProvider,
 } from "../server/researchExperiments/compositeDatasetProvider";
+export {
+  CARRY_REFRESH_COMPONENT_IDS,
+  computeCarryRefreshComponents,
+} from "../server/research/recipeFeatures/carryRefreshScoreFeatures";
+export {
+  LATE_ENTRY_SCORE_VERSION,
+  computeLateEntryScore,
+} from "../server/research/recipeFeatures/lateEntryScoreFeatures";
+export type {
+  CarryRefreshComponents,
+} from "../server/research/recipeFeatures/carryRefreshScoreFeatures";
 export type {
   ResearchDataset,
   ResearchDatasetRow,
   CompositeSelectedEvent,
   CompositeExtensionBar,
   BuiltCompositeArm,
+  CompositeCarryoverPolicy,
+  CompositeCarryoverAccounting,
+  CompositeCarryoverRefreshPolicy,
+  CompositeLateEntryPolicy,
+  CompositeLateEntryAccounting,
+  CompositeEventGatePolicy,
+  CompositeEventGateAccounting,
+  ListingFilterAccounting,
   CompositeArmKind,
   CompositeRunnerBacktestResult,
 } from "../server/research/compositeRunner/index";

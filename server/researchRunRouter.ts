@@ -568,7 +568,8 @@ export const researchRunRouter = router({
    * STRATEGY-3570001-FINAL-EVALUATION-001 — 正式策略评估（3570001 vs 1.62.1）。
    *
    * ✅ SCOPE-002 S7：**收敛为通用端点的薄封装**（3570001 坐标），不再写死 runId。
-   * 返回形状与收敛前逐字段一致（前端 `/strategy-final-evaluation` 无需改动）。
+   * 返回形状与收敛前逐字段一致。
+   * 2026-10-07 单策略专项页收敛后，前端只剩**通用** Tab 一处展示；本端点保留为既有契约（无前端消费者，勿新增）。
    */
   getFinalEvaluation: publicProcedure
     .query(async () => {

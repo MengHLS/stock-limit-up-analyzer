@@ -363,7 +363,50 @@ export const experimentDescriptorSchema = z.object({
    * 平台 provider 据此装配「基线官方投影 + 扩展 rd17..80」两个 ResearchDataset。
    */
   compositeExecution: z
-    .object({ baselineDatasetVersionId: z.number().int().positive() })
+    .object({
+      baselineDatasetVersionId: z.number().int().positive(),
+      /**
+       * P0 趋势融合（2026-10-04）：平台 provider 需要为**哪些臂**的选中事件装载扩展行
+       * （rd17..80）——融合臂可能选中与纯 3F 臂**不同**的事件，扩展行缺失会让 Runner
+       * 桥在 rd16 就被迫收尾，比较不再公平。
+       *
+       * 缺省 = 只按既有 3F bucket topN 选择（**既有实验逐字节不变**）。
+       * `trendWeight = null` 表示该臂不使用融合（纯 3F 排序）。
+       */
+      /** 是否把 selected events 的事件事实（涨停历史/天数/成交额等）注入 context.composite；缺省 false。 */
+      includeEventMetadata: z.boolean().optional(),
+      extensionSelectionArms: z
+        .array(
+          z.object({
+            id: z.string().min(1),
+            /** 排序融合权重；null = 该臂不做融合（纯 3F 排序）。 */
+            trendWeight: z.number().min(0).max(1).nullable(),
+            /**
+             * P0-2 趋势分门槛（只筛不改排序）：trendScore < minTrendScore 的候选被剔除。
+             * 缺省 / null = 无门槛。
+             */
+            minTrendScore: z.number().min(0).max(1).nullable().optional(),
+            /**
+             * P1 趋势评分 v2（符号修正版）分位融合权重：fused = (1-w)·3F + w·v2Percentile。
+             * 缺省 / null = 不融合。与 trendWeight / minTrendScore 三者只能有一个生效。
+             */
+            v2Weight: z.number().min(0).max(1).nullable().optional(),
+            /**
+             * P4：该臂的**选股广度**（每日取前 N 名进入候选）。缺省 = 3（既有行为）。
+             * 平台 provider 据此装载扩展行 rd17..80 —— N>3 时必须声明，否则 rank4/5 会在 rd16 被截断。
+             */
+            topN: z.number().int().min(1).max(10).optional(),
+            /**
+             * P10：该臂在**排序前**剔除「上市龄 < N 个自然日」的候选（允许低名次递补）。
+             * 缺省 / null = 不过滤（既有行为逐字节不变）。上市日取 Security Master
+             * `research_securities.listedDate`，按**决策日**计算自然日龄。
+             */
+            excludeListedWithinDays: z.number().int().min(0).max(3650).nullable().optional(),
+          }),
+        )
+        .min(1)
+        .optional(),
+    })
     .optional(),
 });
 export type ExperimentDescriptor = z.infer<typeof experimentDescriptorSchema>;

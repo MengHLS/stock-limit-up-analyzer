@@ -61,6 +61,11 @@ export interface ResearchDatasetCursorStats {
   readonly stExcludedEventCount?: number;
   /** POOL-ST-001：池期内转 ST 当日移池的成员数。 */
   readonly stRemovedMemberCount?: number;
+  /**
+   * 事件窗流式游标：因「事件未成立」而未进当日决策集的候选成员数（口径审计）。
+   * 未启用判定器时为 0 / 缺省。
+   */
+  readonly suppressedNonTriggerMembers?: number;
   /** 本次读取的实际内容源（本地快照 / TiDB 直读）。 */
   readonly contentSource?: string;
 }

@@ -529,6 +529,12 @@ export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRu
           baselineDatasetVersionId,
           extensionDatasetVersionId: facts.datasetVersionId,
           evaluationWindow,
+          ...(descriptor.compositeExecution?.extensionSelectionArms === undefined
+            ? {}
+            : { extensionSelectionArms: descriptor.compositeExecution.extensionSelectionArms }),
+          ...(descriptor.compositeExecution?.includeEventMetadata === true
+            ? { includeEventMetadata: true }
+            : {}),
         });
       }
 
