@@ -215,13 +215,15 @@
 
 ## 11. 归档区
 
-| 目录 | 说明 |
-|---|---|
-| [`archive/README.md`](archive/README.md) | **本次（2026-09-21）归档**：21 份过期 plan / roadmap / todo / 阶段审计与设计快照，含原路径对照表 |
-| [`legacy/README.md`](legacy/README.md) | 2026-09-13 归档：仓库根目录的 14 个非 `_*` 文件 |
-| [`legacy/phase-reports/README.md`](legacy/phase-reports/README.md) | 2026-09-17 归档：`docs/` 根目录的 59 份历史阶段报告（含 PHASE1 STEP2~5 的审计-修复轮次链） |
+| 归档区 | 归档日 | 份数 | 内容 | 索引 |
+|---|---|---|---|---|
+| `docs/archive/` | 2026-09-21 | 21 | 过期 plan / roadmap / todo / 阶段审计与设计快照 | [`archive/README.md`](archive/README.md)（含原路径对照表） |
+| `docs/legacy/` | 2026-09-13 | 14 | 仓库根目录的非 `_*` 文件（含引用已废弃平台的指南） | [`legacy/README.md`](legacy/README.md) |
+| `docs/legacy/phase-reports/` | 2026-09-17 | 59 | `docs/` 根目录的历史阶段报告（PHASE1 STEP2~5 的审计-修复轮次链） | [`legacy/phase-reports/README.md`](legacy/phase-reports/README.md) |
 
-> ⚠️ `docs/legacy/` 与 `docs/archive/` **同为归档区**，`legacy/` 未搬迁的原因见 `archive/README.md` §4。
+> 🔴 **两区并存**：`docs/legacy/`（2026-09-13/17）与 `docs/archive/`（2026-09-21）**语义相同**（都是「过期但保留」）；未合并的原因与代价见 `archive/README.md` §4。
+> 📌 **归档判据**：R1 被取代 / R2 过期快照 / R3 未实施 plan / R4 零引用证据 —— 四条全文见 `archive/README.md` §1。默认是**归档而非删除**。
+> ⚠️ **2026-10-07 例外**：22 份**机器本地**大体积证据（`docs/evidence/_analysis_*.json` 等，199.8 MB）经裁定删除 —— 它们被 `.gitignore` 锚定、**从未进入版本库**；引用处已标注「（已清理 2026-10-07）」，`ROADMAP-CHANGELOG.md` 按「历史条目零改写」保持原样。
 
 ## 12. 过程记忆（不在本仓版本库内）
 
