@@ -50,6 +50,10 @@ class ThrowingDbReader implements DatasetDataReader {
   async listOutcomesPage(): Promise<never> {
     return this.boom();
   }
+  async loadEventsBatch(): Promise<never> {
+    return this.boom();
+  }
+
   async loadOutcomesBatch(): Promise<never> {
     return this.boom();
   }

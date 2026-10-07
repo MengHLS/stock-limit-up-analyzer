@@ -28,6 +28,7 @@ import {
   industryAssignments,
   limitUpRecords,
   liquidityDaily,
+  researchSecurities,
   researchSecurityIdentifierHistory,
   researchSecurityStatusHistory,
   stockDailyPrices,
@@ -214,6 +215,7 @@ function buildConfigMasterToDomain(
     datasetVersionId: row.datasetVersionId,
     boards: boards.map((b) => b),
     excludeSt: row.excludeSt,
+    excludeListedWithinDays: row.excludeListedWithinDays ?? null,
     events: events.map((e) => ({ relativeDay: e.relativeDay, kind: e.kind })),
     preWindowDays: row.preWindowDays,
     postWindowDays: row.postWindowDays,
@@ -508,6 +510,7 @@ export class DbDatasetRegistry implements DatasetRegistryRepository {
       .values({
         datasetVersionId: input.datasetVersionId,
         excludeSt: input.excludeSt,
+        excludeListedWithinDays: input.excludeListedWithinDays,
         preWindowDays: input.preWindowDays,
         postWindowDays: input.postWindowDays,
         outcomeHorizonsJson: JSON.stringify(input.outcomeHorizons),
@@ -517,6 +520,7 @@ export class DbDatasetRegistry implements DatasetRegistryRepository {
       .onDuplicateKeyUpdate({
         set: {
           excludeSt: input.excludeSt,
+          excludeListedWithinDays: input.excludeListedWithinDays,
           preWindowDays: input.preWindowDays,
           postWindowDays: input.postWindowDays,
           outcomeHorizonsJson: JSON.stringify(input.outcomeHorizons),
@@ -623,6 +627,8 @@ interface SecurityIndex {
   identifiersByCode: Map<string, { securityId: string; effectiveFrom: string; effectiveTo: string | null }[]>;
   statusBySecurity: Map<string, SecurityStatusInterval[]>;
   industryByCode: Map<string, IndustryInterval[]>;
+  /** Security Master 上市日（`research_securities.listedDate`）；null = 未知。 */
+  listedDateBySecurity: Map<string, string | null>;
 }
 
 export class DbDatasetBuildIO implements DatasetBuildIO {
@@ -657,7 +663,8 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
     const identifiersByCode = new Map<string, { securityId: string; effectiveFrom: string; effectiveTo: string | null }[]>();
     const statusBySecurity = new Map<string, SecurityStatusInterval[]>();
     const industryByCode = new Map<string, IndustryInterval[]>();
-    if (!db) return { identifiersByCode, statusBySecurity, industryByCode };
+    const listedDateBySecurity = new Map<string, string | null>();
+    if (!db) return { identifiersByCode, statusBySecurity, industryByCode, listedDateBySecurity };
 
     const idRows = await db.select().from(researchSecurityIdentifierHistory);
     for (const row of idRows) {
@@ -698,7 +705,13 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
       list.sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom));
     }
 
-    return { identifiersByCode, statusBySecurity, industryByCode };
+    // Security Master 上市日（小表全量；供「排除次新」的上市龄过滤按 PIT 查表）。
+    const securityRows = await db
+      .select({ securityId: researchSecurities.securityId, listedDate: researchSecurities.listedDate })
+      .from(researchSecurities);
+    for (const row of securityRows) listedDateBySecurity.set(row.securityId, row.listedDate ?? null);
+
+    return { identifiersByCode, statusBySecurity, industryByCode, listedDateBySecurity };
   }
 
   async loadTradingDays(): Promise<string[]> {
@@ -734,6 +747,23 @@ export class DbDatasetBuildIO implements DatasetBuildIO {
       return { status: "NOT_SUSPENDED", source: "PIT_STATUS" };
     }
     return { status: "UNKNOWN", source: "UNKNOWN" };
+  }
+
+  /**
+   * 同步 PIT 上市龄解析（须先 `loadSecurityIndexes`）。
+   *
+   * 口径：先按 `tradeDate` 解析出当时有效的 securityId，再取该身份的 `listedDate`，
+   * 返回 `tradeDate − listedDate` 的**自然日数**。身份或上市日不可得 ⇒ null（不猜）。
+   */
+  resolveListingAgeDaysSync(symbol: string, tradeDate: string): number | null {
+    const securityId = this.activeSecurityId(symbol, tradeDate);
+    if (securityId === null) return null;
+    const listedDate = this.syncedIndex?.listedDateBySecurity.get(securityId) ?? null;
+    if (listedDate === null || listedDate === undefined) return null;
+    const listedMs = Date.parse(listedDate + "T00:00:00Z");
+    const asOfMs = Date.parse(tradeDate + "T00:00:00Z");
+    if (!Number.isFinite(listedMs) || !Number.isFinite(asOfMs)) return null;
+    return Math.floor((asOfMs - listedMs) / 86400000);
   }
 
   private activeSecurityId(symbol: string, tradeDate: string): string | null {

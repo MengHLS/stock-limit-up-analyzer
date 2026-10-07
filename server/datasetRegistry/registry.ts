@@ -714,6 +714,7 @@ export class DatasetRegistryService {
         source: "stock_daily_prices",
         boards: normalized.boards,
         excludeSt: normalized.excludeSt,
+        excludeListedWithinDays: normalized.excludeListedWithinDays,
       },
       filterDefinition: {
         kind: "build-config",

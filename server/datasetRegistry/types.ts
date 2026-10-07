@@ -231,6 +231,8 @@ export interface DatasetBuildConfigRecord {
   boards: DatasetBoard[];
   /** 排除 ST/*ST（PIT st 维度）。 */
   excludeSt: boolean;
+  /** 上市龄过滤：剔除上市龄 < N 个自然日（null = 不过滤）。 */
+  excludeListedWithinDays: number | null;
   /** 事件维度（至少 1 条）。 */
   events: DatasetEventSpec[];
   /** t 日之前的数据天数。 */

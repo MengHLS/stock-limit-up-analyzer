@@ -26,7 +26,7 @@ import type { DatasetBoard, DatasetEventKind, DatasetEventSpec } from "./types";
 export const BUILD_FILTER_DEFAULTS = {
   boards: [] as readonly DatasetBoard[],
   excludeSt: false,
-  events: [{ relativeDay: 0, kind: "firstBoard" }] as readonly DatasetEventSpec[],
+  excludeListedWithinDays: null as number | null,  events: [{ relativeDay: 0, kind: "firstBoard" }] as readonly DatasetEventSpec[],
   preWindowDays: 0,
   postWindowDays: 20,
   outcomeHorizons: [5, 10, 20] as readonly number[],
@@ -36,6 +36,7 @@ export const BUILD_FILTER_DEFAULTS = {
 /** 筛选 / 窗口边界（与 shared `DATASET_BUILD_FILTER_LIMITS` 同值）。 */
 export const BUILD_FILTER_LIMITS = {
   preWindowDays: { min: 0, max: 120 },
+  excludeListedWithinDays: { min: 1, max: 3650 },
   postWindowDays: { min: 1, max: 120 },
   relativeDay: { min: -10, max: 0 },
   maxEvents: 6,
@@ -99,6 +100,22 @@ export function isBoardAllowed(boards: readonly DatasetBoard[], board: string | 
 export function isStExcluded(excludeSt: boolean, st: string | null | undefined): boolean {
   if (!excludeSt) return false;
   return st === "ST" || st === "*ST";
+}
+
+/**
+ * 是否因「上市龄不足」而剔除（`excludeListedWithinDays === null` 恒放行）。
+ *
+ * PIT 纪律：上市龄取**事件日**的 `tradeDate − listedDate`（自然日）。
+ * 上市日不可得（ageDays === null）⇒ **放行并交由调用方如实计数** —— 该过滤是
+ * 「同一性/资格」口径，不可证实的标的不得被静默排除。
+ */
+export function isListingAgeExcluded(
+  excludeListedWithinDays: number | null | undefined,
+  ageDays: number | null | undefined,
+): boolean {
+  if (excludeListedWithinDays === null || excludeListedWithinDays === undefined) return false;
+  if (ageDays === null || ageDays === undefined || !Number.isFinite(ageDays)) return false;
+  return ageDays < excludeListedWithinDays;
 }
 
 /**

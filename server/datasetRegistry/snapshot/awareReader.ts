@@ -1,6 +1,7 @@
 import type {
   DatasetDataReader,
   DatasetVersionCounts,
+  EventBatchQuery,
   EventPageQuery,
   OutcomeBatchQuery,
   OutcomePageQuery,
@@ -91,6 +92,10 @@ export class SnapshotAwareDatasetDataReader
 
   async listEventsPage(query: EventPageQuery): Promise<DatasetPage<FirstLimitPullbackEvent>> {
     return (await this.readerFor(query.datasetVersionId)).listEventsPage(query);
+  }
+
+  async loadEventsBatch(query: EventBatchQuery): Promise<FirstLimitPullbackEvent[]> {
+    return (await this.readerFor(query.datasetVersionId)).loadEventsBatch(query);
   }
 
   async listRawBarsPage(

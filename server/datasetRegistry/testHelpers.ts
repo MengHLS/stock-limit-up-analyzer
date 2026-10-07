@@ -30,6 +30,7 @@ export function makeTestFilter(overrides: Record<string, unknown> = {}) {
   const base: Record<string, unknown> = {
     boards: [] as string[],
     excludeSt: false,
+    excludeListedWithinDays: null,
     events: [{ relativeDay: 0, kind: "firstBoard" as const }],
     preWindowDays: 0,
     postWindowDays: 20,
@@ -55,6 +56,7 @@ export function makeTestBuildConfig(
     endDate: "2024-01-10",
     boards: [] as string[],
     excludeSt: false,
+    excludeListedWithinDays: null,
     events: [{ relativeDay: 0, kind: "firstBoard" as const }],
     preWindowDays: 0,
     postWindowDays: 3,
@@ -85,6 +87,7 @@ export function makeFakeIO(
     loadSecurityIndexes: async () => {},
     resolveStSync: () => "UNKNOWN",
     resolveSuspensionSync: () => ({ status: "UNKNOWN", source: "UNKNOWN" }),
+    resolveListingAgeDaysSync: () => null,
     resolveSt: async () => "UNKNOWN",
     resolveIndustrySync: () => null,
     fetchLimitUpCandidateBars: notUsed as never,

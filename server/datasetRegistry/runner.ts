@@ -288,6 +288,7 @@ export class DefaultDatasetBuildRunner implements DatasetBuildRunner {
           endDate: config.endDate,
           boards: config.boards,
           excludeSt: config.excludeSt,
+          excludeListedWithinDays: config.excludeListedWithinDays,
           events: config.events,
           preWindowDays: config.preWindowDays,
           postWindowDays: config.postWindowDays,

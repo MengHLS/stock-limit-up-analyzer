@@ -362,6 +362,8 @@ export const DATASET_BUILD_FILTER_DEFAULTS = {
   boards: [] as readonly DatasetBoard[],
   /** 排除 ST/*ST（PIT st 维度）。 */
   excludeSt: false,
+  /** 上市龄过滤：剔除上市龄 < N 个自然日的标的（null = 不过滤）。 */
+  excludeListedWithinDays: null as number | null,
   /** 事件维度（默认 = 事件日首板）。 */
   events: [{ relativeDay: 0, kind: "firstBoard" }] as readonly DatasetEventSpec[],
   /** t 日之前的数据天数（前置窗口，0 = 不物化前置行）。 */
@@ -377,6 +379,8 @@ export const DATASET_BUILD_FILTER_DEFAULTS = {
 /** 筛选 / 窗口边界（防止非法配置把构建实例打爆）。 */
 export const DATASET_BUILD_FILTER_LIMITS = {
   preWindowDays: { min: 0, max: 120 },
+  /** 上市龄过滤阈值（自然日）；null = 不过滤。 */
+  excludeListedWithinDays: { min: 1, max: 3650 },
   postWindowDays: { min: 1, max: 120 },
   /** relativeDay 允许 t-10 .. t；不允许 > 0（未来锚点 = 泄漏）。 */
   relativeDay: { min: -10, max: 0 },
@@ -402,6 +406,13 @@ export const datasetEventSpecSchema = z.object({
 export const datasetBuildFilterSchema = z.object({
   boards: z.array(datasetBoardSchema).max(DATASET_BOARDS.length).default([]),
   excludeSt: z.boolean().default(false),
+  excludeListedWithinDays: z
+    .number()
+    .int()
+    .min(DATASET_BUILD_FILTER_LIMITS.excludeListedWithinDays.min)
+    .max(DATASET_BUILD_FILTER_LIMITS.excludeListedWithinDays.max)
+    .nullable()
+    .default(DATASET_BUILD_FILTER_DEFAULTS.excludeListedWithinDays),
   events: z
     .array(datasetEventSpecSchema)
     .min(1, "至少配置一个事件维度")
@@ -438,6 +449,8 @@ export interface DatasetBuildConfigView {
   datasetVersionId: number;
   boards: DatasetBoard[];
   excludeSt: boolean;
+  /** 上市龄过滤：剔除上市龄 < N 个自然日（null = 不过滤）。 */
+  excludeListedWithinDays: number | null;
   events: DatasetEventSpec[];
   preWindowDays: number;
   postWindowDays: number;
@@ -463,17 +476,21 @@ export function describeDatasetFilter(filter: {
   events: readonly DatasetEventSpec[];
   preWindowDays: number;
   postWindowDays: number;
+  excludeListedWithinDays?: number | null;
 }): string {
   const boards = filter.boards.length > 0
     ? filter.boards.map((b) => DATASET_BOARD_LABELS[b]).join("·")
     : "全板块";
   const st = filter.excludeSt ? "排除ST" : "含ST";
+  const age = filter.excludeListedWithinDays === null || filter.excludeListedWithinDays === undefined
+    ? null
+    : `上市≥${filter.excludeListedWithinDays}日`;
   const events = filter.events.length > 0
     ? filter.events
         .map((e) => `${e.relativeDay === 0 ? "T日" : `T${e.relativeDay}日`}${DATASET_EVENT_KIND_LABELS[e.kind]}`)
         .join(" + ")
     : "无事件";
-  return `${boards} / ${st} / ${events} / t-${filter.preWindowDays}..t+${filter.postWindowDays}`;
+  return `${boards} / ${st}${age === null ? "" : ` / 排除次新(${age})`} / ${events} / t-${filter.preWindowDays}..t+${filter.postWindowDays}`;
 }
 
 /**

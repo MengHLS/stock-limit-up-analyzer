@@ -8,6 +8,7 @@ import {
   type ColumnProjection,
   type DatasetDataReader,
   type DatasetVersionCounts,
+  type EventBatchQuery,
   type EventPageQuery,
   type OutcomeBatchQuery,
   type OutcomePageQuery,
@@ -198,6 +199,20 @@ export class SnapshotSqliteReader implements DatasetDataReader {
         items: page,
         nextCursor: hasMore && last ? Buffer.from(JSON.stringify({ tradeDate: last.tradeDate, eventId: last.eventId })).toString("base64url") : null,
       };
+    });
+  }
+
+  async loadEventsBatch(query: EventBatchQuery): Promise<FirstLimitPullbackEvent[]> {
+    if (query.eventIds.length === 0) return [];
+    const projection = resolveColumns("event", query.columns);
+    const placeholders = query.eventIds.map(() => "?").join(", ");
+    return this.withDatabase((db) => {
+      const rows = db
+        .prepare(
+          `SELECT ${projection.sql} FROM "event" WHERE "datasetVersionId" = ? AND "eventId" IN (${placeholders})`,
+        )
+        .all(query.datasetVersionId, ...query.eventIds) as SnapshotRow[];
+      return rows.map((row) => mapEventRow(row, projection.selected));
     });
   }
 

@@ -272,6 +272,13 @@ export interface EventPageQuery {
   columns?: ColumnProjection;
 }
 
+export interface EventBatchQuery {
+  datasetVersionId: number;
+  eventIds: readonly string[];
+  /** 只取这些列（省略 = 全列）。 */
+  columns?: ColumnProjection;
+}
+
 /** 原始窗口分页查询（prefix / post 共用一套 keyset 语义）。 */
 export interface RawBarPageQuery {
   datasetVersionId: number;
@@ -344,6 +351,7 @@ export interface RawBarBatchQuery {
 export interface DatasetDataReader {
   getVersionCounts(datasetVersionId: number): Promise<DatasetVersionCounts>;
   listEventsPage(query: EventPageQuery): Promise<DatasetPage<FirstLimitPullbackEvent>>;
+  loadEventsBatch(query: EventBatchQuery): Promise<FirstLimitPullbackEvent[]>;
   /** 原始行情窗口分页（role 决定读 prefix 还是 post；两表同构）。 */
   listRawBarsPage(
     role: DatasetRawBarRole,
@@ -446,6 +454,14 @@ export class InMemoryDatasetDataReader implements DatasetDataReader {
       })
       .sort((a, b) => compareEventKeys({ tradeDate: a.tradeDate, eventId: a.eventId }, { tradeDate: b.tradeDate, eventId: b.eventId }));
     return paginateInMemory(sorted, limit, (e) => encodeEventCursor(e.tradeDate, e.eventId));
+  }
+
+  async loadEventsBatch(query: EventBatchQuery): Promise<FirstLimitPullbackEvent[]> {
+    if (query.eventIds.length === 0) return [];
+    const ids = new Set(query.eventIds);
+    return this.events
+      .filter((event) => event.datasetVersionId === query.datasetVersionId && ids.has(event.eventId))
+      .sort((a, b) => compareEventKeys(a, b));
   }
 
   async listPathsPage(query: PathPageQuery): Promise<DatasetPage<FirstLimitPullbackPath>> {
@@ -760,6 +776,25 @@ export class DbDatasetDataReader implements DatasetDataReader {
     return { items: page, nextCursor };
   }
 
+  async loadEventsBatch(query: EventBatchQuery): Promise<FirstLimitPullbackEvent[]> {
+    if (query.eventIds.length === 0) return [];
+    const db = await getDb();
+    if (!db) return [];
+    const selection = buildColumnSelection(firstLimitPullbackEvents, query.columns);
+    const rows = selection
+      ? await db.select(selection).from(firstLimitPullbackEvents)
+          .where(and(
+            eq(firstLimitPullbackEvents.datasetVersionId, query.datasetVersionId),
+            inArray(firstLimitPullbackEvents.eventId, [...query.eventIds]),
+          ))
+      : await db.select().from(firstLimitPullbackEvents)
+          .where(and(
+            eq(firstLimitPullbackEvents.datasetVersionId, query.datasetVersionId),
+            inArray(firstLimitPullbackEvents.eventId, [...query.eventIds]),
+          ));
+    return rows.map((row) => eventRowToDomain(row as unknown as typeof firstLimitPullbackEvents.$inferSelect));
+  }
+
   async listEventsPage(query: EventPageQuery): Promise<DatasetPage<FirstLimitPullbackEvent>> {
     const db = await getDb();
     if (!db) return { items: [], nextCursor: null };
@@ -993,6 +1028,7 @@ export function toBuildConfigView(c: DatasetBuildConfigRecord): DatasetBuildConf
     datasetVersionId: c.datasetVersionId,
     boards: [...c.boards],
     excludeSt: c.excludeSt,
+    excludeListedWithinDays: c.excludeListedWithinDays,
     events: c.events.map((e) => ({ relativeDay: e.relativeDay, kind: e.kind })),
     preWindowDays: c.preWindowDays,
     postWindowDays: c.postWindowDays,

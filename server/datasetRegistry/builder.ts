@@ -51,6 +51,7 @@ import { deriveExecutionFacts } from "./executionFacts";
 import { DATASET_LIFECYCLE_ERROR, DatasetLifecycleError } from "./lifecycle";
 import {
   isBoardAllowed,
+  isListingAgeExcluded,
   isStExcluded,
   matchesEventSpec,
   maxLookbackDays,
@@ -137,6 +138,12 @@ export interface DatasetBuildIO {
   resolveStSync(symbol: string, tradeDate: string): StStatus;
   /** 同步 PIT 停牌解析（须先 `loadSecurityIndexes`）。 */
   resolveSuspensionSync(symbol: string, tradeDate: string): SuspensionResolution;
+  /**
+   * 同步 PIT 上市龄解析（须先 `loadSecurityIndexes`）。
+   *
+   * 返回 `tradeDate − listedDate` 的**自然日数**；上市日或身份不可得 ⇒ null（不猜）。
+   */
+  resolveListingAgeDaysSync(symbol: string, tradeDate: string): number | null;
   /** 异步 PIT ST 解析（等价于先 `loadSecurityIndexes` 再 `resolveStSync`；供验证脚本复用）。 */
   resolveSt(symbol: string, tradeDate: string): Promise<StStatus>;
   /** 同步 PIT 行业归属解析（须先 `loadSecurityIndexes`）。 */
@@ -210,6 +217,12 @@ export interface FirstLimitPullbackBuildConfig {
   boards: readonly DatasetBoard[];
   /** 排除 ST/*ST。 */
   excludeSt: boolean;
+  /**
+   * 上市龄过滤：剔除上市龄 < N 个自然日的标的（null = 不过滤）。
+   *
+   * PIT：上市龄按**事件日** `tradeDate − listedDate` 计算（上市日来自 Security Master）。
+   */
+  excludeListedWithinDays: number | null;
   /** 事件维度（至少 1 条）。 */
   events: readonly DatasetEventSpec[];
   /** t 日之前的数据天数。 */
@@ -669,9 +682,12 @@ export class FirstLimitPullbackDatasetBuilder implements DatasetBuilder {
         for (const bar of bars) {
           const st = io.resolveStSync(bar.symbol, tradeDate);
 
-          // ---- Universe 层筛选：板块 + 排除 ST（在信号判定之前，省掉无谓的富集开销）----
+          // ---- Universe 层筛选：板块 + 排除 ST + 上市龄（在信号判定之前，省掉无谓的富集开销）----
           if (!isBoardAllowed(config.boards, boardTypeOf(bar.symbol))) continue;
           if (isStExcluded(config.excludeSt, st)) continue;
+          if (isListingAgeExcluded(config.excludeListedWithinDays, io.resolveListingAgeDaysSync(bar.symbol, tradeDate))) {
+            continue;
+          }
 
           // ---- Signal 层筛选：事件维度（相对日 × 事件类型，OR 语义）----
           // 锚点日 = 事件日(dayIdx) + relativeDay（≤ dayIdx，永远不越到现在之后）。

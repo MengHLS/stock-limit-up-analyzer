@@ -54,6 +54,9 @@ class MemIO implements DatasetBuildIO {
   resolveSuspensionSync(): { status: "SUSPENDED" | "NOT_SUSPENDED" | "UNKNOWN"; source: "PIT_STATUS" | "WINDOW" | "NO_BAR" | "UNKNOWN" } {
     return { status: "NOT_SUSPENDED", source: "PIT_STATUS" };
   }
+  resolveListingAgeDaysSync(): number | null {
+    return null;
+  }
   async resolveSt(symbol: string): Promise<StStatus> {
     return this.resolveStSync(symbol);
   }

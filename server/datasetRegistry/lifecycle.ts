@@ -166,6 +166,8 @@ export interface ResolvedBuildConfig {
   boards: DatasetBoard[];
   /** 排除 ST/*ST。 */
   excludeSt: boolean;
+  /** 上市龄过滤：剔除上市龄 < N 个自然日（null = 不过滤）。 */
+  excludeListedWithinDays: number | null;
   /** 事件维度（至少 1 条；OR 语义）。 */
   events: DatasetEventSpec[];
   /** t 日之前的数据天数。 */
@@ -277,6 +279,19 @@ export function normalizeBuildFilter(raw: unknown): Omit<DatasetBuildConfigRecor
   );
   const excludeSt = raw.excludeSt ?? BUILD_FILTER_DEFAULTS.excludeSt;
   if (typeof excludeSt !== "boolean") fail("excludeSt 必须是布尔值");
+  const rawExcludeListed = raw.excludeListedWithinDays ?? BUILD_FILTER_DEFAULTS.excludeListedWithinDays;
+  let excludeListedWithinDays: number | null = null;
+  if (rawExcludeListed !== null) {
+    if (typeof rawExcludeListed !== "number" || !Number.isFinite(rawExcludeListed)) {
+      fail("excludeListedWithinDays 必须是整数或 null");
+    }
+    excludeListedWithinDays = intInRange(
+      "excludeListedWithinDays",
+      rawExcludeListed,
+      BUILD_FILTER_LIMITS.excludeListedWithinDays.min,
+      BUILD_FILTER_LIMITS.excludeListedWithinDays.max,
+    );
+  }
   const horizons = horizonList(raw.outcomeHorizons);
   for (const h of horizons) {
     if (h < 1 || h > 120) fail(`outcomeHorizons 单个视界必须在 1..120（收到 ${h}）`);
@@ -286,6 +301,7 @@ export function normalizeBuildFilter(raw: unknown): Omit<DatasetBuildConfigRecor
   return {
     boards: normalizeBoards(raw.boards),
     excludeSt,
+    excludeListedWithinDays,
     events,
     preWindowDays,
     postWindowDays,
@@ -320,6 +336,7 @@ export function resolveBuildConfig(
   // 板块 / 排除 ST / 事件维度：新配置行优先；旧版本（无配置行）回退为「不过滤 + 事件日首板」。
   const boards = configRow?.boards ?? [];
   const excludeSt = configRow?.excludeSt ?? false;
+  const excludeListedWithinDays = configRow?.excludeListedWithinDays ?? null;
   const events = configRow?.events ?? [...BUILD_FILTER_DEFAULTS.events];
   const preWindowDays = configRow?.preWindowDays ?? 0;
   const postWindowDays = configRow?.postWindowDays ?? positiveInt(legacy.pathHorizon, BUILD_FILTER_DEFAULTS.postWindowDays);
@@ -331,6 +348,7 @@ export function resolveBuildConfig(
     endDate: version.endDate,
     boards: [...boards],
     excludeSt,
+    excludeListedWithinDays,
     events: [...events],
     preWindowDays,
     postWindowDays,

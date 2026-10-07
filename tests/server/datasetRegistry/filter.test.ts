@@ -14,13 +14,14 @@ import {
   BUILD_FILTER_LIMITS,
   eventSpecKey,
   isBoardAllowed,
+  isListingAgeExcluded,
   isStExcluded,
   matchesAnyEventSpec,
   matchesEventKind,
   matchesEventSpec,
   maxLookbackDays,
 } from "../../../server/datasetRegistry/filter";
-import { DATASET_BOARDS, DATASET_BUILD_FILTER_DEFAULTS } from "@shared/datasetRegistryContracts";
+import { DATASET_BOARDS, DATASET_BUILD_FILTER_DEFAULTS, DATASET_BUILD_FILTER_LIMITS } from "@shared/datasetRegistryContracts";
 
 describe("matchesEventKind（事件类型真值表）", () => {
   it("limitUp：只看锚点日是否涨停", () => {
@@ -164,5 +165,32 @@ describe("默认值与边界常量（双端同源约束）", () => {
     expect(BUILD_FILTER_LIMITS.relativeDay.max).toBe(0);
     // 上游契约 zod 也不接受正锚点（此处只断言常量口径，schema 侧由契约测试覆盖）
     expect(matchesEventSpec({ relativeDay: -1, kind: "limitUp" }, true, false)).toBe(true);
+  });
+});
+
+describe("isListingAgeExcluded（上市龄过滤 = 排除次新）", () => {
+  it("缺省 / null => 恒放行（既有 5 个版本逐字节不变）", () => {
+    expect(BUILD_FILTER_DEFAULTS.excludeListedWithinDays).toBeNull();
+    expect(DATASET_BUILD_FILTER_DEFAULTS.excludeListedWithinDays).toBeNull();
+    expect(isListingAgeExcluded(null, 10)).toBe(false);
+    expect(isListingAgeExcluded(undefined, 10)).toBe(false);
+  });
+
+  it("严格小于阈值才剔除（age == 阈值 保留）", () => {
+    expect(isListingAgeExcluded(365, 364)).toBe(true);
+    expect(isListingAgeExcluded(365, 365)).toBe(false);
+    expect(isListingAgeExcluded(365, 366)).toBe(false);
+  });
+
+  it("上市日不可得（null / NaN）=> 放行，不静默排除不可证实的身份", () => {
+    expect(isListingAgeExcluded(365, null)).toBe(false);
+    expect(isListingAgeExcluded(365, undefined)).toBe(false);
+    expect(isListingAgeExcluded(365, Number.NaN)).toBe(false);
+  });
+
+  it("边界常量与 shared 契约同值", () => {
+    expect(BUILD_FILTER_LIMITS.excludeListedWithinDays).toEqual(
+      DATASET_BUILD_FILTER_LIMITS.excludeListedWithinDays,
+    );
   });
 });
