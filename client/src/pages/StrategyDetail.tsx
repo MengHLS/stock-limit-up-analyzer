@@ -655,6 +655,27 @@ function RunTab({ vm }: { vm: StrategyViewModel }) {
 // ---------------------------------------------------------------------------
 
 /**
+ * 策略详情 Tab 的**合法取值白名单**（`?tab=` 深链的唯一判据）。
+ *
+ * 新增 / 重命名 Tab 时必须同步这里 —— 白名单之外的取值一律退回 `definition`：
+ * 既不模糊猜测，也不抛错（旧书签 / 手改 URL 不应该把页面打崩）。
+ */
+const STRATEGY_DETAIL_TABS = [
+  "definition",
+  "run",
+  "evaluation",
+  "paper",
+  "versions",
+  "validation",
+] as const;
+
+type StrategyDetailTab = (typeof STRATEGY_DETAIL_TABS)[number];
+
+function isStrategyDetailTab(value: string | null): value is StrategyDetailTab {
+  return value !== null && (STRATEGY_DETAIL_TABS as readonly string[]).includes(value);
+}
+
+/**
  * 真正持有编辑器状态的组件。
  *
  * 🔴 由外层用 `key={strategyId}` 挂载 ⇒ **换策略即重挂载**，所有本地状态（草稿、
@@ -668,6 +689,31 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
 
   const urlVersion = new URLSearchParams(search).get("version");
   const pinnedVersion = urlVersion !== null && urlVersion !== "" ? urlVersion : null;
+
+  /**
+   * 深链 Tab：`?tab=evaluation|paper|…`（白名单见 STRATEGY_DETAIL_TABS）。
+   *
+   * 单策略专项页收敛后，`/strategy-final-evaluation` 与 `/paper-trading-3570001`
+   * 就是靠这个参数把旧坐标静态改写进「通用」Tab 的。
+   */
+  const urlTab = new URLSearchParams(search).get("tab");
+  const activeTab: StrategyDetailTab = isStrategyDetailTab(urlTab) ? urlTab : "definition";
+
+  /**
+   * Tab 切换写回 URL（`replace`：不给浏览器历史塞垃圾）。
+   * `?version=` 原样保留 —— 切 Tab 不改变当前版本坐标。
+   */
+  const handleTabChange = (next: string): void => {
+    if (!isStrategyDetailTab(next)) return;
+    const params = new URLSearchParams(search);
+    if (next === "definition") params.delete("tab");
+    else params.set("tab", next);
+    const query = params.toString();
+    setLocation(
+      `/strategies/${encodeURIComponent(strategyId)}${query === "" ? "" : `?${query}`}`,
+      { replace: true },
+    );
+  };
 
   const validate = trpc.strategyDomain.strategy.validate.useMutation();
   const save = trpc.strategyDomain.strategy.save.useMutation();
@@ -1999,7 +2045,7 @@ function StrategyDetailBody({ strategyId }: { strategyId: string }) {
         <Skeleton className="h-72 w-full" />
       ) : (
         loadError === null && (
-          <Tabs defaultValue="definition">
+          <Tabs value={activeTab} onValueChange={handleTabChange}>
             <TabsList>
               <TabsTrigger value="definition" data-tab="definition" className="flex items-center gap-1.5">
                 <ClipboardList className="h-3.5 w-3.5" /> 策略定义

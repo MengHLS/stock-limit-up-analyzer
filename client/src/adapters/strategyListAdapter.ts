@@ -140,7 +140,9 @@ function toStrategySummary(raw: unknown): StrategySummaryRow | null {
     strategyId,
     name: asStr(raw.name),
     latestVersion: asStr(raw.latestVersion),
-    status: asStr(raw.status, "Draft"),
+    // NH-2 A（FE-PLAN-008）：后端没给 status 时**不得**臆造 "Draft"（会被读成真实生命周期状态）。
+    // 用受控词表里既有的 UNKNOWN（lib/status.ts → neutral 色），让「未知」看起来就是未知。
+    status: asStr(raw.status, "UNKNOWN"),
     description: asNullableStr(raw.description),
     strategyType: asNullableStr(raw.strategyType),
     currentVersionId: asNullableNum(raw.currentVersionId),

@@ -76,6 +76,11 @@ export function StrategyEvaluationTemplate({ detail, runId, runStatus }: Strateg
     baseline: baseline.yearly[y]?.totalReturnPct ?? null,
     promoted: promoted.yearly[y]?.totalReturnPct ?? null,
   }));
+  const equityRows = promoted.drawdownCurve.map((p, i) => ({
+    date: p.date,
+    promoted: p.equity,
+    baseline: baseline.drawdownCurve[i]?.equity ?? null,
+  }));
   const drawdownRows = promoted.drawdownCurve.map((p, i) => ({
     date: p.date,
     promoted: p.drawdownPct ?? 0,
@@ -162,6 +167,22 @@ export function StrategyEvaluationTemplate({ detail, runId, runStatus }: Strateg
               <Bar dataKey="baseline" name={baselineLabel} fill="#64748b" />
               <Bar dataKey="promoted" name={promotedLabel} fill="#dc2626" />
             </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="收益曲线">
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={equityRows}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" minTickGap={60} />
+              <YAxis tickFormatter={(value: number) => `${Math.round(value / 10000)}万`} />
+              <Tooltip formatter={(value: number) => `¥${Math.round(value).toLocaleString("en-US")}`} />
+              <Legend />
+              <Line type="monotone" dataKey="baseline" name={baselineLabel} dot={false} stroke="#64748b" />
+              <Line type="monotone" dataKey="promoted" name={promotedLabel} dot={false} stroke="#dc2626" />
+            </LineChart>
           </ResponsiveContainer>
         </div>
       </SectionCard>

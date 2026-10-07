@@ -153,6 +153,13 @@ export const EXPERIMENT_MODES: readonly ExperimentMode[] = [
           "first-board-pullback/composite-factor-3f-amplitude-volume-oos-study",
           "first-board-pullback/composite-factor-4f-equal-weight-oos-study",
           "first-board-pullback/composite-factor-12f-equal-weight-oos-study",
+          // P0（STRATEGY-TREND-FUSION-P0-001）：把 3F 合成分与趋势评分合成**一个排序键**
+          // （自变量 = 排序键的因子合成，故归「多因子」而不是「其他口径」）。
+          "first-board-pullback/composite-runner-newhigh3-t74-trend",
+          // P0-2（只筛不改排序）：趋势分作候选门槛，排序仍是 3F 合成分
+          "first-board-pullback/composite-runner-newhigh3-t74-trend-gate",
+          // P1：趋势评分 v2（符号修正）+ 3F 分位融合
+          "first-board-pullback/composite-runner-newhigh3-t74-trend-v2",
         ],
       },
       {
@@ -176,6 +183,23 @@ export const EXPERIMENT_MODES: readonly ExperimentMode[] = [
           "first-board-pullback/stability-validation",
           "first-board-pullback/oversold-gap-reversal-validation",
           "first-board-pullback/composite-runner-newhigh3-hold20",
+          "first-board-pullback/composite-runner-newhigh3-t74",
+          // P2：只放开执行容量（买入名额 / 持仓上限），选股与排序冻结
+          "first-board-pullback/composite-runner-newhigh3-t74-slots",
+          // P3-stopwide：只扩大固定止损（其余冻结）
+          "first-board-pullback/composite-runner-newhigh3-t74-stopwide",
+          // P4：选股广度 TopN 3 -> 5
+          "first-board-pullback/composite-runner-newhigh3-t74-top5",
+          // P6：跨日候选池（carry 1/2 日），仍属执行/选股口径的 other-scope
+          "first-board-pullback/composite-runner-newhigh3-t74-carryover",
+          // P7：跨日候选池 + 当日 CarryRefreshV1 统一重评分
+          "first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh",
+          // P8：延迟入场 + 原 top5 门槛内晚窗口滚动 3F
+          "first-board-pullback/composite-runner-newhigh3-t74-late-entry",
+          // P9：事件事实 gate（不重排 3F）
+          "first-board-pullback/composite-runner-newhigh3-t74-event-gate",
+          "first-board-pullback/composite-runner-newhigh3-t74-subnew",
+          "first-board-pullback/trend-entry-ma-v1",
         ],
       },
     ],

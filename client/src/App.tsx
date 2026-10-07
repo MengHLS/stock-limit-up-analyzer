@@ -36,8 +36,8 @@ import StrategyDetail from "./pages/StrategyDetail";
 import StrategyVersionCompare from "./pages/StrategyVersionCompare";
 // 回测对比：读取同一策略的多版本留档，折线图 + 交易明细
 import BacktestCompare from "./pages/BacktestCompare";
-import StrategyFinalEvaluation from "./pages/StrategyFinalEvaluation";
-import PaperTrading3570001 from "./pages/PaperTrading3570001";
+// STOCK-SELECTION-001 — 按决策日选股（策略可扩展；只读）
+import StockSelection from "./pages/StockSelection";
 // FE-5 — 研究链路：绩效仪表盘（骨架线）
 import PerformanceDashboard from "./pages/PerformanceDashboard";
 // FE-6 — 研究链路：参数搜索 + 鲁棒性（骨架线）
@@ -94,6 +94,24 @@ function LegacyStrategyRedirect() {
   return <Redirect to={`/strategies/${encodeURIComponent(strategyId)}${suffix}`} />;
 }
 
+/**
+ * 单策略专项页收敛（FLOW-001 §5 的 P3 收尾，2026-10-07）。
+ *
+ * `/strategy-final-evaluation` 与 `/paper-trading-3570001` 曾把 3570001 的**最终评估 / 模拟盘**
+ * 单列成侧栏专项项。这两个能力自 SCOPE-002 S7 起已通用化：任何策略版本都能在
+ * `/strategies/:strategyId?version=…&tab=evaluation|paper` 读到同一份留档。
+ * ⇒ 侧栏不再单列专项项；旧书签按 3570001 坐标**静态改写**进对应 Tab（不渲染第三套视图）。
+ */
+const ARTIFACT_3570001_COORDS = {
+  strategyId: "first-limit-pullback-3f-top3-runner-hold20",
+  version: "1.0.0",
+} as const;
+
+function artifact3570001Location(tab: "evaluation" | "paper"): string {
+  const { strategyId, version } = ARTIFACT_3570001_COORDS;
+  return `/strategies/${encodeURIComponent(strategyId)}?version=${encodeURIComponent(version)}&tab=${tab}`;
+}
+
 function Router() {
   return (
     <Switch>
@@ -133,8 +151,15 @@ function Router() {
       <Route path="/strategy-editor" component={LegacyStrategyRedirect} />
       {/* 回测对比：多版本累计收益率折线图 + 各版本交易明细（`?strategyId=` 为唯一坐标源） */}
       <Route path="/backtest-compare" component={BacktestCompare} />
-          <Route path="/strategy-final-evaluation" component={StrategyFinalEvaluation} />
-          <Route path="/paper-trading-3570001" component={PaperTrading3570001} />
+      {/* 专项页收敛（FLOW-001 §5）：3570001 的留档改由策略详情 Tab 承载，旧链接只做静态改写 */}
+      <Route path="/strategy-final-evaluation">
+        <Redirect to={artifact3570001Location("evaluation")} />
+      </Route>
+      {/* STOCK-SELECTION-001 — 选股：策略 + 决策日 → 当日候选清单 */}
+      <Route path="/stock-selection" component={StockSelection} />
+      <Route path="/paper-trading-3570001">
+        <Redirect to={artifact3570001Location("paper")} />
+      </Route>
       <Route path="/performance" component={PerformanceDashboard} />
       <Route path="/parameter-search" component={ParameterSearch} />
       {/* FRONTEND-FINAL-001（P1-6）— 参数搜索深链：`/parameter-search/:runId` 直达某次搜索 Run。

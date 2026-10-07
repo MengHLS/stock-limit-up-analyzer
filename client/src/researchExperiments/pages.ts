@@ -27,6 +27,19 @@
 
 import DecisionForwardStudyPage from "@experiments/first-board-pullback/decision-forward-study/page";
 import CompositeRunnerNewHigh3Hold20Page from "@experiments/first-board-pullback/composite-runner-newhigh3-hold20/page";
+import CompositeRunnerNewHigh3T74Page from "@experiments/first-board-pullback/composite-runner-newhigh3-t74/page";
+import CompositeRunnerNewHigh3T74TrendPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-trend/page";
+import CompositeRunnerNewHigh3T74TrendGatePage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-trend-gate/page";
+import CompositeRunnerNewHigh3T74TrendV2Page from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-trend-v2/page";
+import CompositeRunnerT74SlotsPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-slots/page";
+import CompositeRunnerT74StopWidePage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-stopwide/page";
+import CompositeRunnerT74Top5Page from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-top5/page";
+import CompositeRunnerT74CarryoverPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover/page";
+import CompositeRunnerT74CarryoverRefreshPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh/page";
+import CompositeRunnerT74LateEntryPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-late-entry/page";
+import CompositeRunnerT74EventGatePage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-event-gate/page";
+import CompositeRunnerT74SubNewPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-subnew/page";
+import TrendEntryMaV1Page from "@experiments/first-board-pullback/trend-entry-ma-v1/page";
 import BodyFilteredExitCurveStudyPage from "@experiments/first-board-pullback/body-filtered-exit-curve-study/page";
 import BodyMaSupportScreenStudyPage from "@experiments/first-board-pullback/body-ma-support-screen-study/page";
 import CompositeFactorEqualWeightStudyPage from "@experiments/first-board-pullback/composite-factor-equal-weight-study/page";
@@ -93,6 +106,19 @@ export const EXPERIMENT_PAGES: Readonly<
     ConditionalPullbackStateExitStudyPage,
   "first-board-pullback/entry-day": EntryDayExperimentPage,
   "first-board-pullback/composite-runner-newhigh3-hold20": CompositeRunnerNewHigh3Hold20Page,
+  "first-board-pullback/composite-runner-newhigh3-t74": CompositeRunnerNewHigh3T74Page,
+  "first-board-pullback/composite-runner-newhigh3-t74-trend": CompositeRunnerNewHigh3T74TrendPage,
+  "first-board-pullback/composite-runner-newhigh3-t74-trend-gate": CompositeRunnerNewHigh3T74TrendGatePage,
+  "first-board-pullback/composite-runner-newhigh3-t74-trend-v2": CompositeRunnerNewHigh3T74TrendV2Page,
+  "first-board-pullback/composite-runner-newhigh3-t74-slots": CompositeRunnerT74SlotsPage,
+  "first-board-pullback/composite-runner-newhigh3-t74-stopwide": CompositeRunnerT74StopWidePage,
+  "first-board-pullback/composite-runner-newhigh3-t74-top5": CompositeRunnerT74Top5Page,
+  "first-board-pullback/composite-runner-newhigh3-t74-carryover": CompositeRunnerT74CarryoverPage,
+  "first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh": CompositeRunnerT74CarryoverRefreshPage,
+  "first-board-pullback/composite-runner-newhigh3-t74-late-entry": CompositeRunnerT74LateEntryPage,
+  "first-board-pullback/composite-runner-newhigh3-t74-event-gate": CompositeRunnerT74EventGatePage,
+  "first-board-pullback/composite-runner-newhigh3-t74-subnew": CompositeRunnerT74SubNewPage,
+  "first-board-pullback/trend-entry-ma-v1": TrendEntryMaV1Page,
   "first-board-pullback/entry-aligned-exit-horizon-study":
     EntryAlignedExitHorizonStudyPage,
   "first-board-pullback/first-board-body-study": FirstBoardBodyStudyPage,

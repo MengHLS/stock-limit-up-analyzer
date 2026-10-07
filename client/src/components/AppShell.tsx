@@ -35,6 +35,7 @@ import {
   Flame,
   LogOut,
   History,
+  ListChecks,
   ShieldCheck,
   SlidersHorizontal,
   TrendingUp,
@@ -84,6 +85,7 @@ const navGroups: NavGroup[] = [
       { label: "大盘分析", path: "/market", icon: BarChart3 },
       { label: "情绪分析", path: "/sentiment-analysis", icon: Activity },
       { label: "龙头候选", path: "/leader-candidates", icon: Crown },
+      { label: "选股", path: "/stock-selection", icon: ListChecks },
       { label: "情绪预警", path: "/sentiment-alerts", icon: Bell },
     ],
   },
@@ -99,11 +101,11 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "策略", path: "/strategies", icon: ClipboardList },
       { label: "参数搜索", path: "/parameter-search", icon: SlidersHorizontal },
-      { label: "绩效仪表盘", path: "/performance", icon: Activity },
+      // 2026-10-07 NH-1 B（FE-PLAN-008）：绩效**入口收敛**到「策略 → 版本 → 最终评估」；
+      // /performance 仍可达（技术预览口径，页面顶部有归属声明），但不再占用侧栏入口。
       { label: "回测历史", path: "/backtest-runs", icon: FileClock },
       { label: "回测对比", path: "/backtest-compare", icon: GitCompareArrows },
-      // P3 专项页（FLOW-001 §5）：绑定单一策略 3570001，不是通用能力；长期收敛进策略详情标签
-      { label: "最终评估 3570001（专项）", path: "/strategy-final-evaluation", icon: ClipboardList },
+      // 2026-10-07 专项页收敛（FLOW-001 §5）：单策略「最终评估」专项项已并入「策略 → 版本 → 最终评估」Tab
       // 🔒 组合回测**不挪位置、不改名**（FLOW-001 §5：用户要求暂时保持原样）
       { label: "组合回测", path: "/backtest", icon: WalletCards },
     ],
@@ -122,7 +124,7 @@ const navGroups: NavGroup[] = [
     label: "⑥ 前向与复盘",
     items: [
       { label: "前向纸面交易", path: "/paper-trading", icon: TrendingUp },
-      { label: "模拟盘 3570001（专项）", path: "/paper-trading-3570001", icon: ClipboardList },
+      // 2026-10-07 专项页收敛（FLOW-001 §5）：单策略「模拟盘」专项项已并入「策略 → 版本 → 模拟盘」Tab
       { label: "复盘工作台", path: "/review-workbench", icon: BookOpenCheck },
     ],
   },

@@ -1,5 +1,7 @@
 /** 通用 Paper Trading 展示模板：数据必须来自持久化 API，策略专属列由调用页注入。 */
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
+import { SecurityLabelChunks, useSecurityLabels } from "@/hooks/useSecurityLabels";
+import { SecurityCell } from "@/components/strategy/SecurityCell";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { SectionCard, StatusBadge } from "@/components/common";
 export type PaperSignalRecord = { tradeDate: string; stock: string; inTop3: boolean; newHigh3: boolean; signalTime: string; plannedEntryPrice: number | null };
@@ -45,7 +47,24 @@ export interface PaperTradingTemplateProps {
   readonly signalColumns?: readonly PaperTradingSignalColumn[];
 }
 
-export function PaperTradingTemplate({ state, forward = null, signalColumns = [] }: PaperTradingTemplateProps) {  const today = state.daily.at(-1);
+export function PaperTradingTemplate({ state, forward = null, signalColumns = [] }: PaperTradingTemplateProps) {
+  const today = state.daily.at(-1);
+
+  /**
+   * 证券身份：留档里存的是 Research canonical identity（`sec_<uuid>`），名称 / 代码必须由
+   * 服务端解析（`researchRun.securityLabels`）。解析未到或查询失败 ⇒ 由 `SecurityCell`
+   * 回退显示原始 id，**不阻断整块留档**（FE-PLAN-008 P0-1）。
+   */
+  const securityIds = useMemo(
+    () => Array.from(new Set([
+      ...state.daily.flatMap((d) => d.signals.map((s) => s.stock)),
+      ...state.openPositions.map((p) => p.stock),
+      ...state.history.map((h) => h.stock),
+    ])).filter((id) => id.length > 0).sort(),
+    [state],
+  );
+  const { labels: securityLabels } = useSecurityLabels(securityIds);
+  const labelOf = (securityId: string) => securityLabels?.[securityId] ?? null;
   const recentSignals = state.daily.flatMap((d) => d.signals).slice(-20).reverse();
   const fillsByStock = new Map((today?.fills ?? []).map((f) => [f.stock, f]));
   const curve = state.daily.map((d) => ({ date: d.tradeDate, equity: d.equity, drawdownPct: d.drawdownPct }));
@@ -53,6 +72,8 @@ export function PaperTradingTemplate({ state, forward = null, signalColumns = []
 
   return (
     <div className="space-y-4 p-4">
+      {/* 只为「证券名称/代码」字典发起只读查询（本身不渲染 UI） */}
+      <SecurityLabelChunks securityIds={securityIds} />
       <SectionCard title="策略运行状态">
         <div className="grid gap-3 md:grid-cols-4 text-sm">
           <div><div className="text-xs text-muted-foreground">Strategy Version</div><div className="font-semibold">#{state.strategyVersionId} · {state.strategyId}@{state.strategyVersion}</div></div>
@@ -90,7 +111,7 @@ export function PaperTradingTemplate({ state, forward = null, signalColumns = []
               const fill = fillsByStock.get(s.stock);
               return (
                 <tr key={s.stock + i} className="border-t border-border">
-                  <td className="py-1 font-mono text-xs">{s.stock}</td>
+                  <td className="py-1"><SecurityCell securityId={s.stock} label={labelOf(s.stock)} /></td>
                   {signalColumns.map((column) => <td key={column.key} className="py-1">{column.value(s, i, fill)}</td>)}
                   <td className="py-1 text-right tabular-nums">{num(s.plannedEntryPrice)}</td>
                   <td className="py-1 text-right tabular-nums">{fill ? num(fill.simulatedFillPrice) : "—"}</td>
@@ -106,7 +127,7 @@ export function PaperTradingTemplate({ state, forward = null, signalColumns = []
           <tbody>
             {recentSignals.map((s, i) => (
               <tr key={"r" + s.tradeDate + s.stock + i} className="border-t border-border">
-                <td className="py-1">{s.tradeDate}</td><td className="py-1 font-mono text-xs">{s.stock}</td>
+                <td className="py-1">{s.tradeDate}</td><td className="py-1"><SecurityCell securityId={s.stock} label={labelOf(s.stock)} /></td>
                 <td className="py-1 text-right tabular-nums">{num(s.plannedEntryPrice)}</td>
                 <td className="py-1 text-xs text-muted-foreground">{s.signalTime}</td>
               </tr>
@@ -125,7 +146,7 @@ export function PaperTradingTemplate({ state, forward = null, signalColumns = []
           <tbody>
             {state.openPositions.map((p, i) => (
               <tr key={p.stock + i} className="border-t border-border">
-                <td className="py-1 font-mono text-xs">{p.stock}</td>
+                <td className="py-1"><SecurityCell securityId={p.stock} label={labelOf(p.stock)} /></td>
                 <td className="py-1 text-right tabular-nums">{num(p.entryPrice)}</td>
                 <td className="py-1 text-right tabular-nums">{num(p.currentPrice)}</td>
                 <td className="py-1 text-right tabular-nums">{p.holdingDays}</td>
@@ -160,7 +181,7 @@ export function PaperTradingTemplate({ state, forward = null, signalColumns = []
           <tbody>
             {recentHistory.map((h, i) => (
               <tr key={h.tradeDate + h.stock + i} className="border-t border-border">
-                <td className="py-1">{h.tradeDate}</td><td className="py-1 font-mono text-xs">{h.stock}</td>
+                <td className="py-1">{h.tradeDate}</td><td className="py-1"><SecurityCell securityId={h.stock} label={labelOf(h.stock)} /></td>
                 <td className="py-1 text-right tabular-nums">{num(h.exitPrice)}</td>
                 <td className="py-1">{h.exitReason}</td>
                 <td className="py-1 text-right tabular-nums">{h.holdingDays ?? "—"}</td>

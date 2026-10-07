@@ -341,6 +341,12 @@ export default function VersionDetail() {
                   />
                   <Row k="排除 ST" v={version.buildConfig.excludeSt ? "是（PIT 状态）" : "否"} />
                   <Row
+                    k="排除次新"
+                    v={version.buildConfig.excludeListedWithinDays === null
+                      ? "否"
+                      : `上市龄 ≥ ${version.buildConfig.excludeListedWithinDays} 自然日`}
+                  />
+                  <Row
                     k="事件维度"
                     v={
                       <span className="font-mono text-xs">

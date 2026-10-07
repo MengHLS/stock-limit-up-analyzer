@@ -57,6 +57,7 @@ import {
   useSecurityLabels,
   type SecurityLabelView,
 } from "@/hooks/useSecurityLabels";
+import { SecurityCell } from "@/components/strategy/SecurityCell";
 
 function fmtPct(v: number | null): string {
   return v === null ? "—" : `${v.toFixed(2)}%`;
@@ -304,46 +305,6 @@ function renderEquityTooltip(props: unknown, initialCapital: number | null) {
 }
 
 /**
- * 「证券」单元格 —— **名称 + 代码**。
- *
- * 回测结果里的 `securityId` 是 Research canonical identity（`sec_<uuid>`），直接展示
- * 用户读不懂；名称与代码由服务端解析（`researchRun.securityLabels`）后在此贴上。
- *
- * 四种**如实**状态，任何一种都不臆造（缺就显示「—」）：
- *   ① 解析成功 → 名称在上、canonical 代码在下；
- *   ② 解析出代码但名称源未收录 → 名称位「—」，**代码照常显示**（名称源只收录涨停过的
- *      股票，回测 universe 是全市场，这种缺口是数据现实）；
- *   ③ 字典未到（加载中 / 查询失败）→ 回退显示原始 `securityId`（截断，完整值挂 `title`）；
- *   ④ identity 不在标识历史里 → 同 ③（`code` 为 null）。
- */
-function SecurityCell({
-  securityId,
-  label,
-}: {
-  securityId: string;
-  label: SecurityLabelView | null;
-}) {
-  if (label?.code) {
-    return (
-      <div className="flex flex-col leading-tight">
-        <span>{label.name ?? "—"}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">
-          {label.code}
-        </span>
-      </div>
-    );
-  }
-  return (
-    <span
-      className="font-mono text-[10px] text-muted-foreground"
-      title={securityId}
-    >
-      {securityId.length <= 14 ? securityId : `${securityId.slice(0, 14)}…`}
-    </span>
-  );
-}
-
-/**
  * 成交明细表 —— 单次回测 trades 的可复用展示。
  *
  * 版本对比页与完整运行面板共用同一组件，避免两处列口径漂移。
@@ -542,6 +503,7 @@ function TradeTableSection({
         <Table className="text-xs">
           <TableHeader>
             <TableRow>
+              <TableHead className="sticky left-0 z-20 w-20 border-r border-slate-100 bg-muted/50 px-2 py-2">操作</TableHead>
               <TableHead className="px-3 py-2">证券（名称 / 代码）</TableHead>
               <TableHead className="px-3 py-2">买入日</TableHead>
               <TableHead className="px-3 py-2">买入价</TableHead>
@@ -554,12 +516,21 @@ function TradeTableSection({
               <TableHead className="px-3 py-2">收益率</TableHead>
               <TableHead className="px-3 py-2">持有(交易日)</TableHead>
               <TableHead className="px-3 py-2">退出原因</TableHead>
-              <TableHead className="px-3 py-2 text-right">交易详情</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {pagedTrades.map(trade => (
               <TableRow key={`${trade.securityId}-${trade.entryTime}`}>
+                <TableCell className="sticky left-0 z-10 border-r border-slate-100 bg-background px-2 py-1.5">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-teal-200 bg-white px-2 py-1 font-medium text-teal-700 transition-colors hover:border-teal-300 hover:bg-teal-50"
+                    onClick={() => onOpenDetail(trade)}
+                  >
+                    <CandlestickChart className="h-3.5 w-3.5" />
+                    详情
+                  </button>
+                </TableCell>
                 <TableCell className="px-3 py-1.5">
                   <SecurityCell
                     securityId={trade.securityId}
@@ -611,16 +582,6 @@ function TradeTableSection({
                 </TableCell>
                 <TableCell className="px-3 py-1.5 text-muted-foreground">
                   {trade.exitReason ?? (trade.openAtEnd ? "期末持仓" : "—")}
-                </TableCell>
-                <TableCell className="px-3 py-1.5 text-right">
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-white px-2 py-1 font-medium text-teal-700 transition-colors hover:border-teal-300 hover:bg-teal-50"
-                    onClick={() => onOpenDetail(trade)}
-                  >
-                    <CandlestickChart className="h-3.5 w-3.5" />
-                    交易详情
-                  </button>
                 </TableCell>
               </TableRow>
             ))}

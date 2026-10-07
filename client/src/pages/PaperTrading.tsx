@@ -369,6 +369,10 @@ export default function PaperTrading() {
               （该规则组合回测不存在，只加在纸面；设为 0 即关闭，可回到与回测仅剩判定时点差异的形态）；
               止损与动态回撤止盈的判定时点可在建仓时选择「开盘 / 收盘 / 开盘+收盘」，组合回测固定为开盘+收盘。
             </p>
+            {/* 专项页收敛（FLOW-001 §5）：本页只负责「建 / 推进」前向运行；留档视图的通用入口在策略详情。 */}
+            <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">
+              本页只负责新建 / 逐日推进前向运行。按策略版本查看模拟盘留档在「策略 → 该版本 → 模拟盘」Tab（任意版本通用，不另设单策略专页）。
+            </p>
           </div>
           <div className="rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-right">
             <p className="text-xs text-orange-700">前向口径</p>
@@ -519,6 +523,11 @@ export default function PaperTrading() {
         </div>
         {listQuery.isLoading ? (
           <p className="p-6 text-center text-sm text-slate-500">加载中…</p>
+        ) : listQuery.isError ? (
+          /* 诚实三态：读取失败 ≠ 暂无运行（前端纪律见 docs/product/FE-PLAN-006） */
+          <p className="p-6 text-center text-sm text-rose-600">
+            运行列表读取失败：{listQuery.error.message}。读取失败不代表「暂无运行」，此处不显示空态。
+          </p>
         ) : runs.length === 0 ? (
           <p className="p-6 text-center text-sm text-slate-500">暂无前向运行。管理员可创建一条运行开始真实样本外闭环。</p>
         ) : (
@@ -585,6 +594,12 @@ export default function PaperTrading() {
 
       {selectedId !== null && detailQuery.isLoading && (
         <p className="p-6 text-center text-sm text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />加载运行详情…</p>
+      )}
+
+      {selectedId !== null && detailQuery.isError && (
+        <p className="p-6 text-center text-sm text-rose-600">
+          运行详情读取失败：{detailQuery.error.message}。此处不渲染替代数据。
+        </p>
       )}
 
       {detail && (

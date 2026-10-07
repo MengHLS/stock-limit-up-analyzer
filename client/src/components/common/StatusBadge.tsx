@@ -15,17 +15,21 @@ export function StatusBadge({
   label,
   icon: Icon,
   className,
+  title,
 }: {
   status: string | null | undefined;
   /** 覆盖显示文本；缺省显示 status 原文。 */
   label?: React.ReactNode;
   icon?: LucideIcon;
   className?: string;
+  /** 原生 title：给「状态码本身看不出含义」的场景补一句解释（如生命周期状态）。 */
+  title?: string;
 }) {
   const style = styleForStatus(status);
   return (
     <Badge
       variant="outline"
+      title={title}
       className={cn("gap-1 font-mono", style.badge, className)}
     >
       {Icon && <Icon className="h-3 w-3" />}

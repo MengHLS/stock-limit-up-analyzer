@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
+import { Link } from "wouter";
 import {
   LineChart,
   Line,
@@ -358,6 +359,25 @@ export default function PerformanceDashboard() {
           <TrendingUp className="h-5 w-5" />
           绩效仪表盘
         </h1>
+      </div>
+
+      {/*
+        NH-1 B（FE-PLAN-008，2026-10-07）：本页**已从侧栏移除**。
+        正式绩效口径是「策略 → 版本 → 最终评估」Tab（按 (strategyId, version) 直读留档）；
+        本页保留是因为它的「数据就绪门 + 生产回测技术预览」仍有排查价值 ——
+        必须显式声明归属，否则会与版本留档的正式口径混淆。
+      */}
+      <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p className="font-medium">技术预览 · 已不在侧栏（正式绩效请看策略详情）</p>
+        <p className="mt-1 text-xs leading-5">
+          本页数据源是**生产回测技术预览**（<span className="font-mono">sentiment.getLeaderCandidateBacktest</span>），
+          与任何策略版本坐标无关，不构成正式策略结论。按策略版本（<span className="font-mono">strategyId + version</span>）
+          的正式绩效口径在
+          <Link href="/strategies" className="mx-1 font-medium underline underline-offset-2">
+            策略 → 该版本 → 最终评估
+          </Link>
+          留档 Tab。
+        </p>
       </div>
 
       {/* 数据就绪门（后端 researchRun.readiness 只读探测） */}

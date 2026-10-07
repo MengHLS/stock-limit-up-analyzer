@@ -36,6 +36,8 @@ export interface FilterEventRow {
 export interface DatasetFilterFormState {
   boards: DatasetBoard[];
   excludeSt: boolean;
+  /** 上市龄过滤阈值（自然日）；空串 = 不过滤。 */
+  excludeListedWithinDays: string;
   events: FilterEventRow[];
   preWindowDays: string;
   postWindowDays: string;
@@ -82,6 +84,9 @@ export function createDefaultFilterForm(): DatasetFilterFormState {
   return {
     boards: [],
     excludeSt: DATASET_BUILD_FILTER_DEFAULTS.excludeSt,
+    excludeListedWithinDays: DATASET_BUILD_FILTER_DEFAULTS.excludeListedWithinDays === null
+      ? ""
+      : String(DATASET_BUILD_FILTER_DEFAULTS.excludeListedWithinDays),
     events: DATASET_BUILD_FILTER_DEFAULTS.events.map((e) => ({
       key: newEventRowKey(),
       relativeDay: String(e.relativeDay),
@@ -194,6 +199,14 @@ export function validateFilterForm(form: DatasetFilterFormState): string | null 
   }
   if (new Set(horizons).size !== horizons.length) return "结果视界存在重复项";
 
+  const rawAge = form.excludeListedWithinDays.trim();
+  if (rawAge !== "") {
+    const age = Number(rawAge);
+    const limits = DATASET_BUILD_FILTER_LIMITS.excludeListedWithinDays;
+    if (!Number.isInteger(age)) return "上市龄阈值须为整数（留空 = 不过滤）";
+    if (age < limits.min || age > limits.max) return `上市龄阈值须在 ${limits.min}..${limits.max}`;
+  }
+
   const batch = Number(form.batchSize);
   if (form.batchSize.trim() === "" || !Number.isInteger(batch)) return "批大小须为整数";
   if (batch < DATASET_BUILD_CONFIG_LIMITS.batchSize.min || batch > DATASET_BUILD_CONFIG_LIMITS.batchSize.max) {
@@ -215,6 +228,9 @@ export function buildFilterPayload(form: DatasetFilterFormState): DatasetBuildFi
   return {
     boards: [...form.boards],
     excludeSt: form.excludeSt,
+    excludeListedWithinDays: form.excludeListedWithinDays.trim() === ""
+      ? null
+      : Number(form.excludeListedWithinDays),
     events,
     preWindowDays: Number(form.preWindowDays),
     postWindowDays: Number(form.postWindowDays),
@@ -228,6 +244,9 @@ export function describeFilterForm(form: DatasetFilterFormState): string {
   return describeDatasetFilter({
     boards: form.boards,
     excludeSt: form.excludeSt,
+    excludeListedWithinDays: form.excludeListedWithinDays.trim() === ""
+      ? null
+      : Number(form.excludeListedWithinDays),
     events: form.events.map((r) => ({ relativeDay: Number(r.relativeDay), kind: r.kind })),
     preWindowDays: Number(form.preWindowDays) || 0,
     postWindowDays: Number(form.postWindowDays) || 0,

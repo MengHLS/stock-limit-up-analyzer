@@ -38,6 +38,7 @@ import {
   StatusDot,
   MetricCard,
   EmptyState,
+  ErrorState,
   TechnicalDetails,
   DataTable,
 } from "@/components/common";
@@ -598,6 +599,22 @@ export default function ReviewWorkbench() {
           <p className="flex items-center gap-1.5 py-6 text-center text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> 加载运行列表…
           </p>
+        ) : listQuery.isError ? (
+          /*
+            诚实空态的反面：读取失败 ≠ 没有数据。此前这里直接落到「暂无前向纸面运行」，
+            会把一次 RPC 故障误读成「系统里确实没有运行」。
+          */
+          <ErrorState
+            className="my-2"
+            error={{
+              code: "RPC_ERROR",
+              title: "前向纸面运行列表读取失败",
+              explanation:
+                "本区块全部数据来自 sentiment.listPaperTradingRuns；读取失败时不渲染任何替代数据，也不把它当成空态。",
+              suggestions: ["稍后重试（重新进入本页或切换运行）", "若持续失败，到「操作日志」核对服务端错误"],
+              technical: listQuery.error.message,
+            }}
+          />
         ) : runs.length === 0 ? (
           <EmptyState
             title="暂无前向纸面运行"
@@ -624,6 +641,20 @@ export default function ReviewWorkbench() {
               <p className="flex items-center gap-1.5 py-4 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> 加载运行详情…
               </p>
+            )}
+
+            {detailQuery.isError && (
+              <ErrorState
+                className="my-2"
+                error={{
+                  code: "RPC_ERROR",
+                  title: "运行详情读取失败",
+                  explanation:
+                    "该运行的订单 / 权益曲线 / 生命周期读数未能取回；此处不渲染任何替代数据。",
+                  suggestions: ["换一条运行，或稍后重试"],
+                  technical: detailQuery.error.message,
+                }}
+              />
             )}
 
             {detail && (

@@ -137,7 +137,14 @@ export function StrategyHeader({
                 {strategyTypeLabel(strategyType)}
               </Badge>
             )}
-            {versionStatus !== null && <StatusBadge status={versionStatus} />}
+            {/* FE-PLAN-008 P1-1：徽章是**策略生命周期状态**，与「有没有回测 / 评估 / 模拟盘留档」无关
+                —— 例如 lifecycle=Draft 的版本同样可能有正式留档；不解释就会被读成「未保存的草稿」。 */}
+            {versionStatus !== null && (
+              <StatusBadge
+                status={versionStatus}
+                title={`策略生命周期状态（${versionStatus}）：Draft → Research → Candidate → Validated → Paper → Approved → Production → Retired。它表示**流程走到哪一步**，与是否存在回测 / 评估 / 模拟盘留档无关。`}
+              />
+            )}
             {loadedTarget === null && (
               <Badge
                 variant="outline"

@@ -365,10 +365,13 @@ export default function BacktestCompare() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void listQuery.refetch()}
-              disabled={listQuery.isFetching}
+              onClick={() => {
+                void listQuery.refetch();
+                if (loadedIds.length >= MIN_COMPARE_RECORDS) void detailsQuery.refetch();
+              }}
+              disabled={listQuery.isFetching || detailsQuery.isFetching}
             >
-              {listQuery.isFetching ? (
+              {listQuery.isFetching || detailsQuery.isFetching ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <RefreshCw className="h-3.5 w-3.5" />

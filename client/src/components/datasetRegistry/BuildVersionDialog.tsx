@@ -284,6 +284,26 @@ export function BuildVersionDialog({
               </Label>
             </div>
 
+            {/* 排除次新（上市龄） */}
+            <div className="space-y-1">
+              <Label className="text-xs" htmlFor="bv-exclude-listed">
+                排除次新：上市龄 ≥
+                <span className="ml-1 text-muted-foreground">
+                  （自然日；留空 = 不过滤。上市日取证券主数据，按事件日 PIT 判定）
+                </span>
+              </Label>
+              <Input
+                id="bv-exclude-listed"
+                className="h-8 w-32 text-xs"
+                inputMode="numeric"
+                min={DATASET_BUILD_FILTER_LIMITS.excludeListedWithinDays.min}
+                max={DATASET_BUILD_FILTER_LIMITS.excludeListedWithinDays.max}
+                value={form.excludeListedWithinDays}
+                onChange={(e) => patchForm({ excludeListedWithinDays: e.target.value })}
+                placeholder="如 365"
+              />
+            </div>
+
             {/* 事件维度 */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">

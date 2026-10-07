@@ -1,8 +1,11 @@
 /**
  * SCOPE-002 S7 —— 策略详情页的「最终评估 / 模拟盘」通用 Tab。
  *
- * 与两个**专项页**（`/strategy-final-evaluation` · `/paper-trading-3570001`）的区别：
- *   这里按**当前加载的版本坐标**（`strategyId + strategyVersion`）查询，任何策略版本都能看；
+ * 2026-10-07 —— **单策略专项页收敛**（FLOW-001 §5 P3 收尾）：
+ *   `/strategy-final-evaluation` 与 `/paper-trading-3570001` 不再单列成侧栏专项项，
+ *   两条旧路径改为按 3570001 坐标**静态改写**进这两个 Tab（见 `client/src/App.tsx`）。
+ *   本组件因此是全站**唯一**的留档展示入口：按**当前加载的版本坐标**
+ *   （`strategyId + strategyVersion`）查询，任何策略版本都能看；
  *   数据来源 = `researchRun.getStrategyVersionEvaluation` / `getStrategyVersionPaperTrading`
  *   （按坐标直读原样留档，查不到即空态，**不伪造**）。
  *
@@ -12,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   PaperTradingTemplate,
   type PaperForwardState,
+  type PaperTradingSignalColumn,
   type PaperTradingState,
 } from "@/components/strategy/PaperTradingTemplate";
 import {
@@ -93,5 +97,24 @@ export function StrategyPaperTradingTab({ strategyId, strategyVersion }: Strateg
       />
     );
   }
-  return <PaperTradingTemplate state={state} forward={forward} />;
+  /**
+   * 信号级 runner 标记列：**是否展示由留档自己声明**（`state.runner.state` 来自 payload），
+   * 不看 strategyId、不硬编码策略坐标 —— 通用 Tab 对任何带 runner 桥接的版本一视同仁。
+   */
+  const runnerSignalColumns: readonly PaperTradingSignalColumn[] =
+    state.runner.state === "NEW_HIGH_3"
+      ? [{
+          key: "newHigh3",
+          header: "NEW_HIGH_3",
+          value: (signal) => (signal.newHigh3 ? "是" : "—"),
+        }]
+      : [];
+
+  return (
+    <PaperTradingTemplate
+      state={state}
+      forward={forward}
+      signalColumns={runnerSignalColumns}
+    />
+  );
 }
