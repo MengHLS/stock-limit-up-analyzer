@@ -143,7 +143,9 @@ describe("成交明细源码契约", () => {
     expect(PANEL).toContain("aria-pressed={active}");
     expect(PANEL).toMatch(/count=\{trades\.length\}/);
     expect(PANEL).toContain("全部");
-    expect(PANEL).toContain("交易详情");
+    expect(PANEL).toContain("sticky left-0");
+    expect(PANEL).toContain("操作");
+    expect(PANEL).toContain("详情");
   });
 
   it("年份筛选驱动同一张表，而非每年各渲染一张表（竖排）", () => {

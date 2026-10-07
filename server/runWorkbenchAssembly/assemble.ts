@@ -23,6 +23,10 @@ import { buildResearchDataset, type ResearchDataset } from "../researchDataset";
 import { baseSecurityIdOf } from "../eventIdentity";
 import {
   buildPooledDatasetCursorFromRegistry,
+  buildEventWindowDatasetCursorFromRegistry,
+  type EventWindowCandidateMember,
+  estimateEventWindowPanelRowsUpperBound,
+  REGISTRY_BRIDGE_MAX_ROWS,
   buildResearchDatasetFromRegistry,
   readDatasetUniverseConstraint,
   resolveObservationWindow,
@@ -53,11 +57,17 @@ import {
   verifyStrategyConsumption,
 } from "../research/patternLibrary/strategyConsumption";
 import { getDefaultFeatureRegistry } from "../strategyCore/featureRegistry";
+import type { ResearchDatasetCursor } from "../research/framework/datasetCursor";
+import type { RuntimeContext } from "../strategyCore/runtime";
 import type { FirstLimitPoolPolicy } from "../strategyCore/types";
 // STRATEGY-ARCH-002 — Strategy Core 生产接线（决策引擎 + 运行留档）。
 import {
   createCoreDecisionSource,
   createDatasetEventResolver,
+  createStrongTrendReentryEventResolver,
+  STRONG_TREND_REENTRY_EVENT_CODE,
+  judgeStrongTrendReentryEvent,
+  toCoreBarWindow,
   coreVersionFromDocument,
   type CoreDecisionSource,
   type CoreVersionFromDocumentResult,
@@ -470,8 +480,8 @@ async function resolveDataset(
   source: DatasetSourceKind;
   sourceNote: string | null;
   registry: BuildDatasetFromRegistryResult | null;
-  /** 池化流式路径专用；事件窗/内存路径为 undefined。 */
-  datasetCursor?: PooledDatasetCursor;
+  /** 流式直读路径（池化 / 事件窗）专用；物化与内存路径为 undefined。 */
+  datasetCursor?: ResearchDatasetCursor;
   /** 已按面板身份桥接的 code → securityId 列表；池化流式路径用它装配公司行为。 */
   securityIdByCode?: ReadonlyMap<string, readonly string[]>;
   datasetVersionId?: number;
@@ -574,6 +584,60 @@ async function resolveDataset(
   }
 
   if (policy === "prefer-registry" && boundId !== undefined) {
+    /**
+     * 🔴 事件窗**流式**直读（2026-10-05 · STRATEGY-IMPLEMENTATION-REENTRY-001）。
+     *
+     * 物化面板的行数上界 = `totalEvents × (end + 2)`。一旦超 `REGISTRY_BRIDGE_MAX_ROWS`，
+     * 物化路径**必然**抛 `REGISTRY_ROW_BUDGET_EXCEEDED` 并回落重建（跨境链路下重建不可用）
+     * ⇒ 改走同一份 ds_* 数据的**逐日按需**游标：同一 rd 口径、同一事件级身份
+     * （`sec_<uuid>::event:<eventId>`），只是不再一次性物化整张面板。
+     *
+     * 该判断**只在物化路径本会失败时**成立 ⇒ 既有的窄窗口策略（如 `{start:5,end:15}`）
+     * 行为逐字节不变（仍走物化直读）。
+     */
+    if (observationWindow !== null) {
+      const projectedRowUpperBound = await estimateEventWindowPanelRowsUpperBound(boundId, observationWindow);
+      if (projectedRowUpperBound !== null && projectedRowUpperBound > REGISTRY_BRIDGE_MAX_ROWS) {
+        try {
+          // 事件语义只有一份实现：判定器直接复用 Strategy Core 的同一个判定函数。
+          const decisionMemberPredicate = resolveEventMemberPredicate(request.strategyDocument);
+          const streaming = await buildEventWindowDatasetCursorFromRegistry({
+            datasetVersionId: boundId,
+            ...(decisionMemberPredicate === undefined ? {} : { decisionMemberPredicate }),
+            name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
+            observationWindow,
+            dateRange: { startDate: request.startDate, endDate: request.endDate },
+            ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
+          });
+          return {
+            dataset: streaming.dataset,
+            datasetCursor: streaming.cursor,
+            securityIdByCode: streaming.securityIdByCode,
+            source: "registry",
+            sourceNote:
+              `事件窗**流式**直读（不物化整张逐日面板）：dataset_version.id=${String(streaming.version.id)} / ` +
+              `窗口内事件 ${streaming.stats.eventCount} / 交易日 ${streaming.stats.tradingDayCount} / ` +
+              `观察窗口 rd ∈ [${observationWindow.start}, ${observationWindow.end}] / 面板按需覆盖 rd ≤ ${streaming.stats.maxRelativeDay} / ` +
+              `内容源 ${streaming.stats.contentSource}。切流式的原因：物化行数上界 ${projectedRowUpperBound} > 护栏 ${REGISTRY_BRIDGE_MAX_ROWS}。` +
+              `🔴 datasetRowCount 此处显示的是窗口内**事件数**，不是面板行数（流式不物化面板）。`,
+            registry: null,
+            datasetVersionId: streaming.version.id ?? boundId,
+            datasetRowCount: streaming.stats.eventCount,
+          };
+        } catch (error) {
+          if (!(error instanceof RegistryDatasetBridgeError)) throw error;
+          const constraint = await readDatasetUniverseConstraint(boundId);
+          const rebuilt = await rebuildDataset(request, constraint);
+          return {
+            dataset: rebuilt,
+            source: "rebuild",
+            sourceNote:
+              `事件窗流式直读失败（${error.code}）：${error.message}` + constraintNote(constraint),
+            registry: null,
+          };
+        }
+      }
+    }
     try {
       const registry = await buildResearchDatasetFromRegistry({
         datasetVersionId: boundId,
@@ -641,6 +705,52 @@ async function resolveDataset(
  * 🔴 无约束时**必须明说**：那是一句「本次跑的是全板块」的诚实声明 —— 否则用户会以为
  * 结果仍然出自他绑定的主板数据集。
  */
+/**
+ * 构造事件窗流式游标的「决策成员判定器」。
+ *
+ * 🔴 这里**不复制**任何事件语义：直接调用 `judgeStrongTrendReentryEvent`（Strategy Core 生产侧
+ * 的同一个判定函数），并复用 `toCoreBarWindow` 作为 bar 序列 → Core 时间语义的唯一转换入口。
+ * 因此「数据集认为今天事件成立」与「Core 认为今天事件成立」永远同源。
+ *
+ * 只有声明 `CUSTOM_EVENT` + `STRONG_TREND_REENTRY_V1` 的文档才注入；其余文档返回 undefined
+ * ⇒ 保持既有「rd ∈ [start,end] 即成员」口径不变。
+ */
+function resolveEventMemberPredicate(
+  document: StrategyDocument,
+): ((member: EventWindowCandidateMember) => boolean) | undefined {
+  try {
+    const coreVersion = coreVersionFromDocument({
+      document,
+      createdAt: "1970-01-01T00:00:00.000Z",
+    });
+    if (
+      !coreVersion.ok
+      || coreVersion.eventType !== "CUSTOM_EVENT"
+      || coreVersion.eventCode !== STRONG_TREND_REENTRY_EVENT_CODE
+    ) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return (member) => {
+    const window = toCoreBarWindow(member.bars);
+    const context: RuntimeContext = {
+      timestamp: { date: member.tradeDate, point: "close" },
+      instrument: { securityId: member.panelSecurityId, code: member.symbol },
+      visibleData: window.universe,
+      currentRelativeDay: window.currentRelativeDay,
+      state: { positionState: "FLAT", openPositions: 0 },
+    };
+    try {
+      return judgeStrongTrendReentryEvent(context, STRONG_TREND_REENTRY_EVENT_CODE) === true;
+    } catch {
+      // 判定失败（缺 rd0 / 数据异常）⇒ 不冒充「事件成立」。
+      return false;
+    }
+  };
+}
+
 function constraintNote(constraint: DatasetUniverseConstraint | null): string {
   if (constraint === null) {
     return "本次重建未继承任何板块约束（数据源未声明）⇒ 证券池为全板块（含创业板 300/301、科创板 688、北交所）。";
@@ -986,7 +1096,14 @@ export function assembleStrategySide(
       const eventResolver =
         eventTypes.length === 0
           ? undefined
-          : createDatasetEventResolver({
+          : coreVersionResult.eventType === "CUSTOM_EVENT" && coreVersionResult.eventCode === STRONG_TREND_REENTRY_EVENT_CODE
+            ? createStrongTrendReentryEventResolver({
+                eventAnchored: true,
+                eventTypes,
+                eventCode: STRONG_TREND_REENTRY_EVENT_CODE,
+                declaredBy: "runWorkbenchAssembly: STRONG_TREND_REENTRY_V1",
+              })
+            : createDatasetEventResolver({
               eventAnchored: true,
               eventTypes,
               limitUpRatio: coreVersionResult.limitUpRatio,
@@ -1270,7 +1387,7 @@ export function buildClosedLoopWiringInputs(
   dataset: ResearchDataset,
   side: AssembledStrategySide,
   corporateActionResolver?: CorporateActionResolverLike,
-  researchDatasetCursor?: PooledDatasetCursor,
+  researchDatasetCursor?: ResearchDatasetCursor,
 ): ClosedLoopWiringInputs {
   return {
     researchDataset: dataset,
@@ -1398,3 +1515,6 @@ export async function assembleRunWorkbenchInputs(
     },
   };
 }
+
+
+

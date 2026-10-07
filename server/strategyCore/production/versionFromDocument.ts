@@ -35,6 +35,8 @@ export type CoreVersionFromDocumentResult =
       readonly adaptation: LegacyAdaptationResult;
       /** 文档声明的事件类型（**仅读**；`null` = 文档没声明事件）。 */
       readonly eventType: string | null;
+      /** CUSTOM_EVENT 的 eventCode（仅读；非 CUSTOM_EVENT 为 null）。 */
+      readonly eventCode: string | null;
       /** 文档声明的涨停阈值（**仅读**；`null` = 未声明 ⇒ 运行期不做涨停校验）。 */
       readonly limitUpRatio: number | null;
       /** 文档声明的池策略（仅 FIRST_LIMIT_POOL；旧事件窗策略为 null）。 */
@@ -180,6 +182,8 @@ export function coreVersionFromDocument(
 
   const legacy = normalized.definition;
   const eventType = legacy.entry?.event?.type === undefined ? null : String(legacy.entry.event.type);
+  const rawEventCode = (legacy.entry?.event?.params ?? {})["eventCode"];
+  const eventCode = typeof rawEventCode === "string" && rawEventCode.trim() !== "" ? rawEventCode.trim() : null;
   const rawRatio = (legacy.entry?.event?.params ?? {})["limitUpRatio"];
   const limitUpRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) ? rawRatio : null;
   const firstLimitPool = readFirstLimitPoolPolicy(legacy);
@@ -189,6 +193,7 @@ export function coreVersionFromDocument(
     version,
     adaptation,
     eventType,
+    eventCode,
     limitUpRatio,
     firstLimitPool,
     notes: [
@@ -301,3 +306,4 @@ function readFirstLimitPoolPolicy(legacy: LegacyStrategyDefinition): FirstLimitP
     maxDailyCandidates: maxDailyCandidates as number,
   };
 }
+

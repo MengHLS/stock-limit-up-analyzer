@@ -103,11 +103,11 @@ import type { FirstLimitPoolPolicy } from "../strategyCore/types";
 import { buildPoolProjection, type PoolMemberRecord } from "./poolProjection";
 import { loadTradingCalendar } from "../security/tradingCalendar";
 import { addDays } from "../security/dates";
-import {
-  createPooledDatasetCursor,
-  type PooledDatasetCursor,
-  type PooledDatasetCursorReader,
-} from "./pooledDatasetCursor";
+import { createPooledDatasetCursor, toCanonicalBar, type PooledDatasetCursor, type PooledDatasetCursorReader } from "./pooledDatasetCursor";
+import type { CanonicalMarketBar } from "../data";
+import type { ResearchDatasetCursor, ResearchDatasetCursorDay, ResearchDatasetCursorStats } from "../research/framework/datasetCursor";
+import { deriveDatasetUniverseId } from "../research/datasetAccess/handle";
+import { RESEARCH_DATASET_BUILDER_VERSION, RESEARCH_DATASET_ROW_SCHEMA_VERSION } from "../researchDataset/types";
 
 // ---------------------------------------------------------------------------
 // 错误
@@ -196,13 +196,18 @@ export function filterPoolEventsByBoardScope<T extends {
 }
 
 /**
- * `ds_*_post.relativeDay` 的结构上限（== 表内可用的最远观察日）。
+ * `ds_*_post.relativeDay` 的**结构上限**（本桥接受的观察窗口末日的粗略前置上界）。
  *
- * 依据：`plugins.ts#rawBarCreateSql` 生成的 post 表只承载 rd ≥ 1 的原始日线，390002 实测
- * rd ∈ [1, 20]（`docs/evidence/_probe_dataset_window_coverage.mts`）。策略声明的观察窗口
- * 若超出该上限，本桥**响亮拒绝**（`REGISTRY_OBSERVATION_WINDOW_INVALID`），不静默夹取。
+ * 依据：`plugins.ts#rawBarCreateSql` 生成的 post 表只承载 rd ≥ 1 的原始日线。不同数据集版本
+ * 的 post 深度不同（390002 实测 rd ∈ [1, 20]；first_limit_pullback v8 / 780001 实测
+ * rd ∈ [1, 80]，`docs/evidence/_probe_dataset_window_coverage.mts`）。
+ *
+ * 🔴 该常量**只是前置粗筛**：真正能否满足窗口由 `buildResearchDatasetFromRegistry` 用**本版本**
+ * 的 `getPostRelativeDayRange()` 实测值判定（`neededMaxRelativeDay = window.end + 1`；不足则
+ * `REGISTRY_POST_WINDOW_TOO_SHORT`）。策略声明超出本上限 ⇒ `REGISTRY_OBSERVATION_WINDOW_INVALID`，
+ * 两处都**响亮拒绝**、不静默夹取。
  */
-export const DATASET_POST_MAX_RELATIVE_DAY = 20;
+export const DATASET_POST_MAX_RELATIVE_DAY = 80;
 
 /** 策略声明的观察窗口（相对事件日的**交易日**偏移；`start = 1` 即 T+1）。 */
 export interface ObservationWindowSpec {
@@ -876,6 +881,13 @@ export interface BuildDatasetFromRegistryRequest {
   };
   /** dataReady 声明（与 `buildResearchDataset` 同口径：缺省 false = 冒烟）。 */
   readonly dataReady?: boolean;
+  /**
+   * 决策成员判定器（仅事件窗流式路径；可选）。
+   *
+   * 提供后「当日决策成员」收敛为事件真正成立的成员（判定器由装配层注入**同一份**
+   * Strategy Core 事件判定器）；缺省 = 窗口内 rd ∈ [start,end] 即成员。
+   */
+  readonly decisionMemberPredicate?: (member: EventWindowCandidateMember) => boolean;
 }
 
 /** 直读结果。 */
@@ -1634,3 +1646,638 @@ function buildDataSnapshotFromRegistry(
     coverageGaps: [],
   };
 }
+
+// ---------------------------------------------------------------------------
+// 事件窗**流式**游标（EVENT-WINDOW STREAMING CURSOR）
+//
+// ## 为什么需要它（2026-10-05 · STRATEGY-IMPLEMENTATION-REENTRY-001）
+//
+// 事件窗物化路径（`buildWindowRows`）把**全部事件 × (rd 0..end+1)** 一次性投影成
+// `ResearchDataset.rows`。对 73,003 事件 / `end=79` 的数据集（780001）实测 5,806,820 行，
+// 远超 `REGISTRY_BRIDGE_MAX_ROWS`（1,600,000）⇒ 直读被拒、回落重建（跨境链路下不可用）。
+//
+// 本游标把同一份数据面改成**逐日按需**：内存里只保留「窗口仍覆盖当前交易日」的事件，
+// 每个交易日发射一份 slice。**语义与 `buildWindowRows` 逐字段一致**（同一 `projectEventRow`、
+// 同一事件级身份 `sec_<uuid>::event:<eventId>`、同一 rd 口径与同一前收口径），
+// 因此这是**数据面形状**变更，不是策略语义变更。
+//
+// 边界（与物化路径**相同**，不新增也不掩盖）：面板最多到 rd=end+1；观察日换手/市值仍为 null。
+// ---------------------------------------------------------------------------
+
+/** 事件窗流式游标的内容读取口（只读、可注入）。 */
+export interface EventWindowCursorReader {
+  loadPrefixBars(eventIds: readonly string[]): Promise<readonly FirstLimitPullbackRawBar[]>;
+  loadPostBars(
+    eventIds: readonly string[],
+    relativeDays: readonly number[],
+  ): Promise<readonly FirstLimitPullbackRawBar[]>;
+}
+
+export interface EventWindowDatasetCursor extends ResearchDatasetCursor {
+  next(): Promise<IteratorResult<ResearchDatasetCursorDay>>;
+}
+
+/**
+ * 交给「决策成员判定器」的成员载荷（rd ∈ [start, end] 的候选）。
+ *
+ * 🔴 事件语义**不在本层**：本层只把 bars（rd 0..当前日，升序）原样交出去，
+ * 由调用方用**同一份** Strategy Core 事件判定器决定今天算不算决策成员。
+ */
+export interface EventWindowCandidateMember {
+  readonly eventId: string;
+  readonly symbol: string;
+  readonly panelSecurityId: string;
+  readonly canonicalSecurityId: string;
+  readonly tradeDate: string;
+  readonly relativeDay: number;
+  /** rd 0..当前日（升序）；下标即相对日，与 toCoreBarWindow 同口径。 */
+  readonly bars: readonly CanonicalMarketBar[];
+}
+
+/** 事件窗流式游标构造参数。 */
+export interface EventWindowCursorOptions {
+  readonly reader: EventWindowCursorReader;
+  /** 参与投影的事件（已按 [cursorStart, rangeEnd] 过滤；顺序不限）。 */
+  readonly events: readonly FirstLimitPullbackEvent[];
+  readonly identityByEventId: ReadonlyMap<string, string>;
+  readonly datasetVersion: string;
+  readonly datasetGate: ResearchDatasetGate;
+  readonly tradingDates: readonly string[];
+  readonly observationWindow: ObservationWindowSpec;
+  readonly contentSource?: string;
+  /**
+   * 决策成员判定器（可选）。
+   *
+   * 缺省 = 既有口径：rd ∈ [start, end] 即决策成员（窗口内全部事件）。
+   * 提供后 = 在其之上再要求该判定器为真，使「当日成员」收敛为事件真正成立的成员。
+   *
+   * 🔴 只影响「谁进决策集」，不改变 rows / executionBars / 面板身份 / rd 口径；
+   * 判定器由调用方注入（本层不认识任何具体策略），保证事件语义只有一份实现。
+   */
+  readonly decisionMemberPredicate?: (member: EventWindowCandidateMember) => boolean;
+}
+
+interface EventWindowActiveMember {
+  readonly event: FirstLimitPullbackEvent;
+  readonly canonicalSecurityId: string;
+  readonly panelSecurityId: string;
+  readonly barsByRelativeDay: Map<number, FirstLimitPullbackRawBar>;
+  readonly barsByDate: Map<string, FirstLimitPullbackRawBar>;
+}
+
+/**
+ * 单次预读的交易日跨度。
+ *
+ * 读放大：每跨 N 日一次批量查询（N 日约 N×39 个事件 ⇒ N×39×81 行）。
+ * 内存：活跃成员 = 窗口覆盖当前日的全部事件（≈ (end+2) 日 × 事件密度）。
+ */
+const EVENT_WINDOW_LOAD_AHEAD_DAYS = 10;
+
+function eventWindowRowKey(row: ResearchDatasetRow): string {
+  return `${row.tradeDate}\u0000${row.securityId}`;
+}
+
+function eventWindowPreClose(member: EventWindowActiveMember, relativeDay: number): number | null {
+  if (relativeDay === 0) return member.event.previousClose ?? null;
+  const previous = member.barsByRelativeDay.get(relativeDay - 1);
+  return previous !== undefined
+    && typeof previous.close === "number"
+    && Number.isFinite(previous.close)
+    ? previous.close
+    : null;
+}
+
+function eventWindowVisibleBars(
+  member: EventWindowActiveMember,
+  relativeDay: number,
+): readonly CanonicalMarketBar[] {
+  const out: CanonicalMarketBar[] = [];
+  for (const [day, raw] of [...member.barsByRelativeDay.entries()].sort((a, b) => a[0] - b[0])) {
+    if (day > relativeDay) break;
+    out.push(toCanonicalBar(raw, eventWindowPreClose(member, day)));
+  }
+  return out;
+}
+
+function eventWindowRowOf(
+  member: EventWindowActiveMember,
+  bar: FirstLimitPullbackRawBar,
+  tradeDate: string,
+): ResearchDatasetRow {
+  return projectEventRow(
+    member.event,
+    member.panelSecurityId,
+    bar,
+    tradeDate,
+    eventWindowPreClose(member, bar.relativeDay),
+    bar.relativeDay === 0,
+  );
+}
+
+/**
+ * 构造事件窗流式游标。
+ *
+ * 调用方必须先备好：真实交易日序列（含 warmup 与退出尾窗）、身份桥接结果、数据集版本标签。
+ * 游标本身只做「按需读 bars → 逐日投影」这一件事，不查元数据、不猜窗口。
+ */
+export function createEventWindowDatasetCursor(
+  options: EventWindowCursorOptions,
+): EventWindowDatasetCursor {
+  const startRd = Math.max(0, options.observationWindow.start);
+  const endRd = options.observationWindow.end;
+  const maxRd = endRd + 1;
+  const tradingDates = [...options.tradingDates];
+  const postRelativeDays = Array.from({ length: Math.max(0, maxRd) }, (_, i) => i + 1);
+
+  const eventsByDate = new Map<string, FirstLimitPullbackEvent[]>();
+  for (const event of options.events) {
+    const list = eventsByDate.get(event.tradeDate) ?? [];
+    list.push(event);
+    eventsByDate.set(event.tradeDate, list);
+  }
+  for (const list of eventsByDate.values()) {
+    list.sort((a, b) => (a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0));
+  }
+
+  let index = 0;
+  let loadedThrough = -1;
+  let lastRequestedDate: string | null = null;
+  const active = new Map<string, EventWindowActiveMember>();
+  const retainedMemberIds = new Set<string>();
+  const retainedRows: ResearchDatasetRow[] = [];
+  const retainedRowKeys = new Set<string>();
+  let barsRead = 0;
+  let admittedMemberCount = 0;
+  let retiredMemberCount = 0;
+  let peakActiveMemberCount = 0;
+  let suppressedNonTriggerMembers = 0;
+
+  function recordRetainedRow(row: ResearchDatasetRow): void {
+    if (!retainedMemberIds.has(row.securityId)) return;
+    const key = eventWindowRowKey(row);
+    if (retainedRowKeys.has(key)) return;
+    retainedRowKeys.add(key);
+    retainedRows.push(row);
+  }
+
+  async function loadBucket(dayIndex: number): Promise<void> {
+    const date = tradingDates[dayIndex];
+    if (date === undefined) return;
+    const bucket = eventsByDate.get(date) ?? [];
+    if (bucket.length > 0) {
+      const eventIds = bucket.map((event) => event.eventId);
+      const [prefixBars, postBars] = await Promise.all([
+        options.reader.loadPrefixBars(eventIds),
+        options.reader.loadPostBars(eventIds, postRelativeDays),
+      ]);
+      barsRead += prefixBars.length + postBars.length;
+      const prefixByEvent = new Map(prefixBars.map((bar) => [bar.eventId, bar] as const));
+      const postByEvent = new Map<string, FirstLimitPullbackRawBar[]>();
+      for (const bar of postBars) {
+        const list = postByEvent.get(bar.eventId) ?? [];
+        list.push(bar);
+        postByEvent.set(bar.eventId, list);
+      }
+      for (const event of bucket) {
+        const canonical = options.identityByEventId.get(event.eventId);
+        if (canonical === undefined) {
+          throw new RegistryDatasetBridgeError(
+            "REGISTRY_SECURITY_IDENTITY_UNRESOLVED",
+            `事件窗流式直读：事件 ${event.eventId} 缺少 canonical securityId（调用方必须先跑 ` +
+              `resolveSecurityIdsByEvent）。🔴 不用代码冒充身份。`,
+          );
+        }
+        const barsByRelativeDay = new Map<number, FirstLimitPullbackRawBar>();
+        const barsByDate = new Map<string, FirstLimitPullbackRawBar>();
+        const prefix = prefixByEvent.get(event.eventId);
+        if (prefix !== undefined) {
+          barsByRelativeDay.set(prefix.relativeDay, prefix);
+          barsByDate.set(prefix.tradeDate, prefix);
+        }
+        for (const bar of postByEvent.get(event.eventId) ?? []) {
+          barsByRelativeDay.set(bar.relativeDay, bar);
+          barsByDate.set(bar.tradeDate, bar);
+        }
+        const panelSecurityId = eventScopedSecurityId(canonical, event.eventId);
+        active.set(panelSecurityId, {
+          event,
+          canonicalSecurityId: canonical,
+          panelSecurityId,
+          barsByRelativeDay,
+          barsByDate,
+        });
+        admittedMemberCount += 1;
+      }
+    }
+    loadedThrough = dayIndex;
+  }
+
+  async function ensureLoadedThrough(dayIndex: number): Promise<void> {
+    const target = Math.min(tradingDates.length - 1, dayIndex + EVENT_WINDOW_LOAD_AHEAD_DAYS);
+    while (loadedThrough < target) await loadBucket(loadedThrough + 1);
+  }
+
+  async function next(): Promise<IteratorResult<ResearchDatasetCursorDay>> {
+    if (index >= tradingDates.length) return { done: true, value: undefined };
+    const dayIndex = index;
+    const tradeDate = tradingDates[index]!;
+    index += 1;
+    lastRequestedDate = tradeDate;
+    await ensureLoadedThrough(dayIndex);
+
+    const rows: ResearchDatasetRow[] = [];
+    const members = new Set<string>();
+    const executionBars = new Map<string, CanonicalMarketBar>();
+    const visibleBars = new Map<string, readonly CanonicalMarketBar[]>();
+    const finished: string[] = [];
+
+    for (const member of active.values()) {
+      const bar = member.barsByDate.get(tradeDate);
+      if (bar === undefined) continue;
+      const relativeDay = bar.relativeDay;
+      const row = eventWindowRowOf(member, bar, tradeDate);
+      rows.push(row);
+      recordRetainedRow(row);
+      executionBars.set(
+        member.panelSecurityId,
+        toCanonicalBar(bar, eventWindowPreClose(member, relativeDay)),
+      );
+      if (relativeDay >= startRd && relativeDay <= endRd) {
+        const visible = eventWindowVisibleBars(member, relativeDay);
+        const isDecisionMember =
+          options.decisionMemberPredicate === undefined
+            ? true
+            : options.decisionMemberPredicate({
+                eventId: member.event.eventId,
+                symbol: member.event.symbol,
+                panelSecurityId: member.panelSecurityId,
+                canonicalSecurityId: member.canonicalSecurityId,
+                tradeDate,
+                relativeDay,
+                bars: visible,
+              });
+        if (isDecisionMember) {
+          members.add(member.panelSecurityId);
+          visibleBars.set(member.panelSecurityId, visible);
+        } else {
+          suppressedNonTriggerMembers += 1;
+        }
+      }
+      if (relativeDay >= maxRd) finished.push(member.panelSecurityId);
+    }
+    for (const panelSecurityId of finished) {
+      active.delete(panelSecurityId);
+      retiredMemberCount += 1;
+    }
+    peakActiveMemberCount = Math.max(peakActiveMemberCount, active.size);
+    rows.sort((left, right) => left.securityId.localeCompare(right.securityId));
+    return {
+      done: false,
+      value: {
+        tradeDate,
+        isTradingDay: true,
+        rows,
+        members: [...members].sort(),
+        executionBars,
+        visibleBars,
+      },
+    };
+  }
+
+  async function getDaySlice(tradeDate: string): Promise<ResearchDatasetCursorDay> {
+    if (lastRequestedDate !== null && tradeDate < lastRequestedDate) {
+      throw new Error(
+        `事件窗流式游标只支持顺序读取：请求 ${tradeDate} 早于已消费的 ${lastRequestedDate}。`,
+      );
+    }
+    for (;;) {
+      const item = await next();
+      if (item.done) {
+        return { tradeDate, isTradingDay: false, rows: [], members: [], executionBars: new Map(), visibleBars: new Map() };
+      }
+      if (item.value.tradeDate === tradeDate) return item.value;
+    }
+  }
+
+  async function restart(): Promise<void> {
+    index = 0;
+    loadedThrough = -1;
+    lastRequestedDate = null;
+    active.clear();
+    barsRead = 0;
+    admittedMemberCount = 0;
+    retiredMemberCount = 0;
+    peakActiveMemberCount = 0;
+    suppressedNonTriggerMembers = 0;
+  }
+
+  /** 标记「回测需要保留其逐日行」的面板身份；此后 next() 会为它们逐日记账。 */
+  function retainSecurityIds(securityIds: readonly string[]): void {
+    const newlyRetained: string[] = [];
+    for (const securityId of securityIds) {
+      if (retainedMemberIds.has(securityId)) continue;
+      retainedMemberIds.add(securityId);
+      newlyRetained.push(securityId);
+    }
+    if (newlyRetained.length === 0) return;
+    const currentDate = index > 0 ? tradingDates[index - 1] : null;
+    if (currentDate === null) return;
+    for (const securityId of newlyRetained) {
+      const member = active.get(securityId);
+      if (member === undefined) continue;
+      const bar = member.barsByDate.get(currentDate);
+      if (bar === undefined) continue;
+      recordRetainedRow(eventWindowRowOf(member, bar, currentDate));
+    }
+  }
+
+  return {
+    metadata: {
+      datasetVersion: options.datasetVersion,
+      builderVersion: RESEARCH_DATASET_BUILDER_VERSION,
+      rowSchemaVersion: RESEARCH_DATASET_ROW_SCHEMA_VERSION,
+      universeId: deriveDatasetUniverseId(options.datasetVersion),
+      startDate: tradingDates[0] ?? "",
+      endDate: tradingDates[tradingDates.length - 1] ?? "",
+      rowCount: null,
+      universeDayCount: tradingDates.length,
+      gate: options.datasetGate,
+    },
+    tradingDates,
+    next,
+    getDaySlice,
+    restart,
+    retainSecurityIds,
+    takeRetainedRows: () => retainedRows.slice(),
+    stats: (): ResearchDatasetCursorStats => ({
+      barsRead,
+      admittedMemberCount,
+      retiredMemberCount,
+      removedByMinimumScoreCount: 0,
+      peakActiveMemberCount,
+      suppressedNonTriggerMembers,
+      contentSource: options.contentSource ?? "UNKNOWN",
+    }),
+    async close(): Promise<void> {},
+  };
+}
+
+/** 事件窗行数**上界**估计 = totalEvents × (end + 2)；仅用于决定是否改走流式游标。 */
+export async function estimateEventWindowPanelRowsUpperBound(
+  datasetVersionId: number,
+  window: ObservationWindowSpec,
+  deps: BuildDatasetFromRegistryDeps = {},
+): Promise<number | null> {
+  const content = defaultDatasetContentDependencies();
+  const registry = deps.metadataReader ?? content.metadataReader;
+  const version = await withReadRetry("registry.getVersionById", () =>
+    registry.getVersionById(datasetVersionId),
+  );
+  if (version === undefined) return null;
+  const totalEvents = (version as { totalEvents?: unknown }).totalEvents;
+  if (typeof totalEvents !== "number" || !Number.isFinite(totalEvents) || totalEvents <= 0) return null;
+  return totalEvents * (window.end + 2);
+}
+
+/** 事件窗流式直读结果。 */
+export interface BuildEventWindowCursorFromRegistryResult {
+  readonly cursor: EventWindowDatasetCursor;
+  readonly version: DatasetVersion;
+  readonly definition: DatasetDefinition;
+  /** 兼容装配摘要 / 策略定义的轻量数据集；真实行情只在 cursor 中按需读取。 */
+  readonly dataset: ResearchDataset;
+  /** code → 面板身份（canonical::event:eventId），供公司行为装配使用。 */
+  readonly securityIdByCode: ReadonlyMap<string, readonly string[]>;
+  readonly stats: {
+    readonly eventCount: number;
+    readonly tradingDayCount: number;
+    readonly datasetVersion: string;
+    readonly observationWindow: ObservationWindowSpec;
+    readonly maxRelativeDay: number;
+    readonly contentSource: string;
+  };
+}
+
+/**
+ * 事件窗**流式**直读：不物化整张逐日面板，只返回按交易日推进的 cursor。
+ *
+ * 与 `buildResearchDatasetFromRegistry`（物化）读取**同一份** ds_* 数据、**同一** rd 口径、
+ * **同一**事件级身份；差别只在「什么时候读、读多少在内存里」。
+ */
+export async function buildEventWindowDatasetCursorFromRegistry(
+  request: BuildDatasetFromRegistryRequest,
+  deps: BuildDatasetFromRegistryDeps = {},
+): Promise<BuildEventWindowCursorFromRegistryResult> {
+  const window = request.observationWindow ?? null;
+  if (window === null || window === undefined) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_OBSERVATION_WINDOW_UNDECLARED",
+      "事件窗流式直读：请求未提供 observationWindow，拒绝按猜测投影（不猜窗口）。",
+    );
+  }
+  const content = defaultDatasetContentDependencies();
+  const registry = deps.metadataReader ?? content.metadataReader;
+  const baseReader = deps.contentReader ?? content.reader;
+  const reader = "pinReader" in baseReader && typeof (baseReader as { pinReader?: unknown }).pinReader === "function"
+    ? await (baseReader as { pinReader(datasetVersionId: number): Promise<DatasetDataReader> }).pinReader(request.datasetVersionId)
+    : baseReader;
+  const identityProvider = deps.identityProvider ?? content.identityProvider;
+  const contentSource = reader instanceof SnapshotSqliteReader
+    ? "本地快照(SQLite dataset.sqlite)"
+    : "TiDB 直读";
+
+  const version = await perfRunAsync("dataset.version_and_definition", () =>
+    withReadRetry("registry.getVersionById", () => registry.getVersionById(request.datasetVersionId)),
+  );
+  if (version === undefined) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_VERSION_NOT_FOUND",
+      `事件窗流式直读：dataset_version.id=${request.datasetVersionId} 不存在。`,
+    );
+  }
+  if (version.status !== "READY") {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_VERSION_NOT_READY",
+      `事件窗流式直读：dataset_version.id=${request.datasetVersionId} status=${version.status}，只有 READY 可用。`,
+    );
+  }
+  const definition = await perfRunAsync("dataset.definition_read", () =>
+    withReadRetry("registry.getDefinitionById", () => registry.getDefinitionById(version.datasetId)),
+  );
+  if (definition === undefined) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_DEFINITION_MISSING",
+      `事件窗流式直读：dataset_version.id=${request.datasetVersionId} 所属 definition 不存在。`,
+    );
+  }
+  if (definition.datasetCode !== "first_limit_pullback") {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_DATASET_CODE_UNSUPPORTED",
+      `事件窗流式直读：datasetCode=${JSON.stringify(definition.datasetCode)} 尚不支持。`,
+    );
+  }
+
+  const maxRelativeDay = window.end + 1;
+  const postRange = await perfRunAsync("dataset.post_range", () =>
+    withReadRetry("registry.getPostRelativeDayRange", () =>
+      reader.getPostRelativeDayRange(request.datasetVersionId),
+    ),
+  );
+  if (postRange === null) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_POST_WINDOW_MISSING",
+      `事件窗流式直读：dataset_version.id=${request.datasetVersionId} 无 post 行情。`,
+    );
+  }
+  if (maxRelativeDay > postRange.max) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_POST_WINDOW_TOO_SHORT",
+      `事件窗流式直读：策略声明的观察窗口 end=${window.end} 需要 post rd ≤ ${maxRelativeDay}，` +
+        `但版本最大 rd=${postRange.max}。🔴 不静默夹取窗口。`,
+    );
+  }
+
+  const rangeStart = request.dateRange?.startDate ?? version.startDate ?? version.endDate ?? postRange.max.toString();
+  const rangeEnd = request.dateRange?.endDate ?? version.endDate ?? rangeStart;
+  if (rangeStart > rangeEnd) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_OBSERVATION_WINDOW_INVALID",
+      `事件窗流式直读：请求日期范围倒序 [${rangeStart}, ${rangeEnd}]。`,
+    );
+  }
+  const calendarStart = addDays(rangeStart, -Math.max(180, (maxRelativeDay + 5) * 3));
+  const calendarSearchEnd = addDays(rangeEnd, Math.max(60, maxRelativeDay * 3 + 10));
+  const calendar = await perfRunAsync("dataset.trading_calendar", () =>
+    loadTradingCalendar(calendarStart, calendarSearchEnd, {
+      name: `event-window-cursor:${request.datasetVersionId}`,
+      exchange: ["SSE", "SZSE"],
+    }),
+  );
+  const calendarDates = calendar.tradingDaysBetween(calendarStart, calendarSearchEnd);
+  const rangeStartIndex = calendarDates.findIndex((date) => date >= rangeStart);
+  const rangeEndIndex = calendarDates.findIndex((date) => date > rangeEnd);
+  const warmupCount = maxRelativeDay + 1;
+  const warmupIndex = rangeStartIndex < 0 ? 0 : Math.max(0, rangeStartIndex - warmupCount);
+  const cursorStart = calendarDates[warmupIndex] ?? rangeStart;
+  const tailEndIndex = rangeEndIndex < 0 ? calendarDates.length : rangeEndIndex + maxRelativeDay;
+  const cursorEnd = calendarDates[Math.min(calendarDates.length - 1, Math.max(0, tailEndIndex - 1))] ?? rangeEnd;
+  const tradingDates = calendarDates.filter((date) => date >= cursorStart && date <= cursorEnd);
+  if (tradingDates.length === 0) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_WINDOW_EMPTY",
+      `事件窗流式直读：窗口 [${cursorStart}, ${cursorEnd}] 内无交易日。`,
+    );
+  }
+
+  const events = await perfRunAsync("dataset.events_page", () =>
+    withReadRetry("registry.listEvents", () =>
+      readAllEvents(reader, request.datasetVersionId, { fromDate: cursorStart, toDate: rangeEnd }),
+    ),
+  );
+  if (events.length === 0) {
+    throw new RegistryDatasetBridgeError(
+      "REGISTRY_EMPTY_VERSION",
+      `事件窗流式直读：窗口 [${cursorStart}, ${rangeEnd}] 内无可用首板事件。`,
+    );
+  }
+  const identityByEventId = await perfRunAsync("dataset.identity_bridge.resolve", () =>
+    identityProvider.resolveSecurityIdsByEvent(request.datasetVersionId, events),
+  );
+
+  const datasetGate: ResearchDatasetGate = request.dataReady === true
+    ? gateFromVersionStatus(version.status)
+    : "INCONCLUSIVE";
+  const normalizedRequest = normalizeResearchDatasetRequest({
+    name: request.name,
+    startDate: cursorStart,
+    endDate: cursorEnd,
+    asOfPerTradeDate: true,
+  });
+  const universeDefinition: UniverseDefinition = {
+    rule: "事件窗流式直读：真实成员由 cursor 逐日推进；本轻量数据集只承载身份/日期元信息。",
+    asOfDescription: "逐日 PIT（asOf = tradeDate）",
+    days: tradingDates.map((tradeDate) => ({
+      tradeDate,
+      isTradingDay: true,
+      members: [],
+      excludedByReason: {},
+    })),
+  };
+  const datasetVersion = computeDatasetVersionStreaming(normalizedRequest, universeDefinition, []);
+  const dataSnapshot = buildDataSnapshotFromRegistry(
+    normalizedRequest,
+    version,
+    definition,
+    [],
+    window,
+    maxRelativeDay,
+  );
+  const dataset: ResearchDataset = {
+    datasetVersion,
+    universeDefinition,
+    policySet: derivePolicySet(
+      normalizeResearchDatasetRequest({
+        name: request.name,
+        startDate: cursorStart,
+        endDate: rangeEnd,
+        asOfPerTradeDate: true,
+      }),
+      dataSnapshot,
+    ),
+    dataSnapshot,
+    rows: [],
+    gate: datasetGate,
+    gateNotes: [
+      "事件窗流式直读：不物化整张逐日面板；真实行情由 cursor 按需读取。",
+      `观察窗口 rd ∈ [${window.start}, ${window.end}]；面板按需覆盖 rd=0 与 rd ∈ [1, ${maxRelativeDay}]。`,
+      contentSource,
+    ],
+  };
+
+  const cursorReader: EventWindowCursorReader = {
+    loadPrefixBars: (eventIds) =>
+      readEventBars(reader, request.datasetVersionId, eventIds, "prefix", [0]),
+    loadPostBars: (eventIds, relativeDays) =>
+      readEventBars(reader, request.datasetVersionId, eventIds, "post", relativeDays),
+  };
+  const cursor = createEventWindowDatasetCursor({
+    reader: cursorReader,
+    events,
+    identityByEventId,
+    datasetVersion,
+    datasetGate,
+    tradingDates,
+    observationWindow: window,
+    contentSource,
+    ...(request.decisionMemberPredicate === undefined
+      ? {}
+      : { decisionMemberPredicate: request.decisionMemberPredicate }),
+  });
+
+  const securityIdByCode = new Map<string, string[]>();
+  for (const event of events) {
+    const canonical = identityByEventId.get(event.eventId);
+    if (canonical === undefined) continue;
+    const panelId = eventScopedSecurityId(canonical, event.eventId);
+    const values = securityIdByCode.get(event.symbol) ?? [];
+    if (!values.includes(panelId)) values.push(panelId);
+    securityIdByCode.set(event.symbol, values);
+  }
+
+  return {
+    cursor,
+    version,
+    definition,
+    dataset,
+    securityIdByCode,
+    stats: {
+      eventCount: events.length,
+      tradingDayCount: tradingDates.length,
+      datasetVersion,
+      observationWindow: window,
+      maxRelativeDay,
+      contentSource,
+    },
+  };
+}
+

@@ -17,3 +17,4 @@ export * from "./eventSource";
 export * from "./coreDecision";
 export * from "./versionFromDocument";
 export * from "./runRecord";
+export * from "./strongTrendReentryEventSource";

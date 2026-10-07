@@ -104,7 +104,7 @@ function exchangeFromSymbol(symbol: string): string {
   return dot >= 0 ? symbol.slice(dot + 1).toUpperCase() : "UNKNOWN";
 }
 
-function toCanonicalBar(
+export function toCanonicalBar(
   bar: FirstLimitPullbackRawBar,
   preClose: number | null,
 ): CanonicalMarketBar {
