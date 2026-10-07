@@ -29,7 +29,7 @@
 | 定位 | 从「涨停/股票分析应用」升级为 **个人量化策略研究平台** |
 | 技术栈 | React 19 · Vite 7 · Express · tRPC 11 · Drizzle ORM（mysql2 / TiDB Cloud）· TypeScript strict · Vitest |
 | 规模（实查 **2026-09-20**） | `server/**` **676** 个 `.ts` · `client/src/**` **213** 个 `.ts/.tsx` · `tests/**` **290** 个测试文件 · `docs/**` **232** 个 `.md` · `scripts/**` **117** 个 |
-| DB | **73** 张 BASE TABLE（schema.ts 声明 **70** + `__drizzle_migrations` + 2 张 legacy 动态行表）· **58** 个 migration（`0000…0056`） |
+| DB | **71** 张 BASE TABLE（实查 2026-10-07：**63** 静态 + **5** 张按需创建 `ds_*`（随数据集构建浮动）+ 2 张 legacy `rd_rows_*` + `__drizzle_migrations`）· **58** 个 migration（`0000…0056`） |
 | 前端 | **33** 条路由 · 5 组侧栏导航 · **21** 个 tRPC 顶层 key |
 | 当前阶段 | STEP 12 数据地基 `RESEARCH_READY = TRUE`；**BACKTEST-002 = COMPLETE**；**PARAMETER-001 / ROBUSTNESS-001 / OOS-001 / WALK-FORWARD-001 已全部落地**（`9bs`/`9bt`/`9bu`/`9bv`/`9bw`）；**PHASE-A/R1/B/D 四阶段 COMPLETE**（`9by`/`9bz`/`9ca`/`9cb`）⇒ 下一个未占用编号 = **`9cc`** |
 | 最终目标 | 让用户把主观交易经验 → 明确规则 → 程序化策略 → 历史验证 → 参数优化 → 稳健性/OOS → 模拟交易 → 交易纪律，形成**可信、可复现**的闭环 |
@@ -194,7 +194,7 @@
 
 | 项 | 真实值 |
 |---|---|
-| BASE TABLE 总数 | **73** = schema.ts 声明 **70** + `__drizzle_migrations` + 2 张 `rd_rows_*`（legacy）（实查 2026-09-20T02:46Z） |
+| BASE TABLE 总数 | **71**（实查 2026-10-07）= **63** 静态 + **5** 张 `ds_*`（按需创建，随数据集构建浮动）+ 2 张 `rd_rows_*`（legacy）+ `__drizzle_migrations` |
 | 外键约束 | **0**（全软引用） |
 | migration | **58** 个（`0000…0056`）；**journal 止 0023 / snapshot 止 0015** ⇒ `db:push` **仍不可用**；0041~0056 全部靠 bespoke `scripts/apply*.mjs` 旁路执行（`-- @guard` 幂等 + `--dry-run` / `--check`） |
 | 实际 apply 机制 | 手写 SQL（`-- @guard:` 幂等）+ 14 个专用 `scripts/apply*.mjs\|mts` + 通用 `applySqlMigration.mjs` |
@@ -776,7 +776,7 @@ WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
 | 项 | round-1 | **round-2** |
 |---|---|---|
 | `drizzle/schema.ts` | 2292 行 / 60 表 | **2947 行 / 70 表** |
-| 真实库 BASE TABLE | 63 | **73**（= 70 + `__drizzle_migrations` + 2 张 `rd_rows_*`） |
+| 真实库 BASE TABLE | 63 | **71**（= 63 静态 + 5 张 `ds_*` + 2 张 `rd_rows_*` + `__drizzle_migrations`） |
 | migration | 41（`0000…0040`） | **58**（`0000…0056`） |
 | `db:push` | 不可用 | **仍不可用**（journal 止 0023 / snapshot 止 0015） |
 | `research_artifact` | 未登记 | **31 行**（全 `REPORT`/`INLINE`）；⚠️ **无唯一约束** |
