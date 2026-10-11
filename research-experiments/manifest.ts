@@ -62,7 +62,18 @@ import { compositeRunnerT74CarryoverRefreshExperiment } from "./first-board-pull
 import { compositeRunnerT74LateEntryExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-late-entry/experiment";
 import { compositeRunnerT74EventGateExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-event-gate/experiment";
 import { compositeRunnerT74SubNewExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-subnew/experiment";
+import { compositeRunnerT74InvertedExperiment } from "./first-board-pullback/composite-runner-newhigh3-t74-inverted/experiment";
 import { trendEntryMaV1Experiment } from "./first-board-pullback/trend-entry-ma-v1/experiment";
+import { rollingPoolRightTailMvpExperiment } from "./first-board-pullback/rolling-pool-right-tail-mvp/experiment";
+// `FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002`：round-1 滚动池的续研
+// （连续观察买点 + preReturn10 排序 + 真实账户执行；绑定 780004/v10，**同样不套 v5 公共底座**）
+import { rollingPoolEarlyEntryRunnerExperiment } from "./first-board-pullback/rolling-pool-early-entry-runner/experiment";
+// `FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003`：滚动池续研（连续观察窗口 N × 最晚成交 L ×
+// 再入场政策；五组矩阵在同一 Run 内执行；绑定 780004/v10，**同样不套 v5 公共底座**）
+import { rollingPoolObservationWindowExperiment } from "./first-board-pullback/rolling-pool-observation-window/experiment";
+// `FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004`：滚动池续研（破位修复再触发 × 每日 ST 硬闸门；
+// 两组 A/B；绑定 780004/v10，**同样不套 v5 公共底座**）
+import { rollingPoolRecoveryStExperiment } from "./first-board-pullback/rolling-pool-recovery-st/experiment";
 
 /** 全部已注册实验（顺序不参与任何计算；registry 内部按 id 排序输出）。 */
 const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
@@ -89,6 +100,8 @@ const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   // P9：事件事实 gate（不重排 3F）
   compositeRunnerT74EventGateExperiment,
   compositeRunnerT74SubNewExperiment,
+  // TAIL-SELECTION-002：3F 振幅取向翻转（1 − Σ(oriented)/3 ≡ 三方向全翻）；目标 = 选出更多右尾超级股票
+  compositeRunnerT74InvertedExperiment,
   trendEntryMaV1Experiment,
   entryDayExperiment,
   fundamentalStudyExperiment,
@@ -123,6 +136,14 @@ const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
   ...compositeFactorOosValidationExperiments,
   twelveFactorTopNRankingStudyExperiment,
   leaderCandidateBaselineExperiment,
+  // 滚动观察池 × 每日右尾识别（绑定 780004/v10；**不套 v5 公共底座**，见下方豁免说明）
+  rollingPoolRightTailMvpExperiment,
+  // 滚动观察池续研：连续观察买点 × preReturn10 排序 × 固定 Runner（同为 780004/v10 豁免）
+  rollingPoolEarlyEntryRunnerExperiment,
+  // 滚动观察池续研 003：连续观察窗口 N × 最晚成交 L × 再入场政策（五组一个 Run；同为 780004/v10 豁免）
+  rollingPoolObservationWindowExperiment,
+  // 滚动观察池续研 004：破位修复再触发 × 每日 ST 硬闸门（两组 A/B；同为 780004/v10 豁免）
+  rollingPoolRecoveryStExperiment,
 ];
 
 /**
@@ -130,10 +151,32 @@ const RAW_EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] = [
  *
  * 原始定义不直接注册：生产清单中的每个核心实验都必须声明 Dataset `v5`，
  * 并输出 commonSample、entryDay × exitDay 面板、逐日净收益曲线和 Run 坐标。
+ *
+ * 🔴 显式豁免（`FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001`）：
+ *    `withFirstBoardPullbackFoundation` 在 `run()` 里**硬要求 Dataset version label = `v5`**
+ *    （`shared/firstBoardPullback/foundation.ts#assertCoreDatasetV5`）。
+ *    滚动池实验绑定的是 780004 / `v10-listed365-pre10-post80`（因为需要 `preWindowDays=10`
+ *    来算 `preReturn10`，且需要 rd1..70 的标签视界），**在 v5 上根本跑不起来**。
+ *    因此这里按 id 显式豁免，而不是改公共底座的数据集要求（那会波及既有 49 个实验）。
+ *    豁免是**具名、可 grep、可 review** 的，不是「顺带漏掉」。
  */
+const FOUNDATION_EXEMPT_EXPERIMENT_IDS: ReadonlySet<string> = new Set([
+  "first-board-pullback/rolling-pool-right-tail-mvp",
+  // 同一续研族：同样是 780004 / `v10-listed365-pre10-post80`（preReturn10 需要 preWindowDays=10，
+  // 早期入场需要 post rd1..80 的成交与退出路径），在 v5 上根本跑不起来。
+  "first-board-pullback/rolling-pool-early-entry-runner",
+  // 003 续研：五组矩阵同样绑定 780004 / `v10-listed365-pre10-post80`
+  // （N=5/T+20 的买点需要 post rd1..19 的观察分，Runner 续持尾部需要到 rd80）。
+  "first-board-pullback/rolling-pool-observation-window",
+  // 004 续研：破位修复再触发 + 每日 ST 硬闸门同样绑定 780004 / `v10-listed365-pre10-post80`
+  // （修复窗口需要 post rd1..19 的逐日证据，Runner 续持尾部需要到 rd80；ST 闸门本身不读 Dataset）。
+  "first-board-pullback/rolling-pool-recovery-st",
+]);
+
 export const EXPERIMENT_DEFINITIONS: readonly ExperimentDefinition[] =
   RAW_EXPERIMENT_DEFINITIONS.map(definition =>
-    definition.descriptor.id.startsWith("first-board-pullback/")
+    definition.descriptor.id.startsWith("first-board-pullback/") &&
+    !FOUNDATION_EXEMPT_EXPERIMENT_IDS.has(definition.descriptor.id)
       ? withFirstBoardPullbackFoundation(definition)
       : definition
   );

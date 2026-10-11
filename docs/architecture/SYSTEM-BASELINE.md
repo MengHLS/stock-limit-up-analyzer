@@ -1,12 +1,17 @@
 # SYSTEM-BASELINE — 全局架构基线
 
-> **Baseline Version：`v2.7.0`**（**minor** —— `T74-EVENT-GATE-P9-001`：新增可选事件元数据注入、DatasetDataReader.loadEventsBatch、事件事实 gate 与 P9 实验入口；不新增回测原语、不改正式策略、不改 simulator、**0 表 / 0 migration**。真实 Run `RUN-20261005-8668C385` 的事件 gate 全部未增加超级票笔数。详见 `CHANGE-AUDIT.md` 2026-10-05）
-> **上一版 Baseline：`v2.6.0`**（**minor** —— `T74-LATE-ENTRY-P8-001`；历史版本链见 `CHANGE-AUDIT.md`）
+> **2026-10-10 当前状态补充（只读复核，未发生架构版本跃迁）**：最新研究以 [PROJECT-REVIEW-NEXT-STEPS-20261010](../research/PROJECT-REVIEW-NEXT-STEPS-20261010.md) 的证据分级为准。真实库 `3600006` 仍为 `Validated`，但后续 `RESULT-VALIDATION-FINAL-001` 的判定为 `RESEARCH_CANDIDATE`；该版本暂无研究 provenance 行、暂无同 strategyId 的 `closed_loop_backtest_run`。以存储文档调用 `assembleStrategySide` 已复现 `RECIPE_NOT_REGISTERED`。不能把「版本已落库 / 历史研究 PASS」解释为正式入口已验证可运行。`ARCHITECTURE.md` BD-14 同日修正：非流式含 optimization/regime，流式只装配子集；finalize 为编排器内置路径。下文带审计日期的历史数量不是本日实时数量。
+
+> **Baseline Version：`v2.9.0`**（**minor** —— `FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007`：① 新增**可选** UNKNOWN 处理声明 `SimulationConfig.executionEligibilityUnknownPolicy`（**缺省 `REJECT`**，见 `CONTRACT-MAP.md` C-102 / `EXECUTION-FLOW.md` E-96）；② 新增**探索性**轻量 ST 资格政策 `KNOWN_ST_ONLY_EXPLORATORY` / `recovery-known-st-only/1.0.0` 与只读标签索引端口（见 `CONTRACT-MAP.md` C-103）—— `UNKNOWN` 可参与、仅排除已有历史记录中的 `ST`。**缺省仍为原严格政策**；`stGate.ts` 严格契约 `ST_GATE_CONTRACT_VERSION = "1.1.0"` **零改动**；`UNKNOWN` **绝不**改写为 `NORMAL`，`ST` 在两种政策下**恒拒绝**。本轮结论限定为**探索性**（接受 UNKNOWN + 历史非 PIT 标签 + 旧 Dataset 局限），**不是** PIT / OOS / 模拟交易 / 实盘验证。详见 `CHANGE-AUDIT.md` 2026-10-11）
+> **上一版 Baseline：`v2.8.0`**（**minor** —— `FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005` **续修 / Finding A**：新增 platform 级 **权威装配配置入口** `assembleCompositeRunnerSimulationConfig`（契约 `composite-assembly-config/1.0.0`，**只装配、不撮合**，带配置指纹）；研究实验的辅助装配路径不再顺带做一次**结果被丢弃的真实撮合** ⇒ 隔夜 ST 在辅助路径上同样买不进。**同时登记一条 `BASELINE_DRIFT`**：`system-manifest.yaml` 此前从**自身陈旧的 `v2.3.0`** 递增到 `v2.4.0`，未接续本头部的版本链；本轮把两份文件的版本链**合并统一为 `v2.8.0`**（`v2.7.0 → v2.8.0`），`v2.4.0` 的内容并入本版并保留在历史里。详见 `CHANGE-AUDIT.md` 2026-10-11）
+> **历史 Baseline：`v2.7.0`**（**minor** —— `T74-EVENT-GATE-P9-001`：新增可选事件元数据注入、DatasetDataReader.loadEventsBatch、事件事实 gate 与 P9 实验入口；不新增回测原语、不改正式策略、不改 simulator、**0 表 / 0 migration**。真实 Run `RUN-20261005-8668C385` 的事件 gate 全部未增加超级票笔数。详见 `CHANGE-AUDIT.md` 2026-10-05）
+> **历史 Baseline：`v2.6.0`**（**minor** —— `T74-LATE-ENTRY-P8-001`；历史版本链见 `CHANGE-AUDIT.md`）
+> **历史 Baseline：`v2.4.0`**（**minor** —— `FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005`（phase 1）的 `SimulationConfig.executionEligibilityGate` 可选执行资格闸门 + `ST_GATE_CONTRACT_VERSION 1.1.0` 区间语义；⚠️ 该编号当时由 `system-manifest.yaml` **自身陈旧的 `v2.3.0`** 递增而来（= `BASELINE_DRIFT`），未接续本头部链条；内容已并入 `v2.8.0`，**编号保留、不删历史**）
 > **历史 Baseline：`v2.2.0`**（**minor** —— `STRATEGY-T74-FORMALIZATION-001`；历史版本链见 `CHANGE-AUDIT.md`）
 > **历史 Baseline：`v2.0.0`**（**major** —— round-2 全量审计，触发 `GLOBAL AUDIT REQUIRED` 第 4 条（核心数据流变化：判定日 `decisionOffsetDays` 贯穿 Dataset→Run→Experiment→Analysis）+ 第 7 条（核心 Contract 变化：4 份新 shared 契约 + 新增 `shared/patternSemantics.ts`）+ 第 1 条（Domain 新增：`searchRobustness` / `oosValidation` / `walkForward`）。历史：`v1.4.0` = WALK-FORWARD-001 新增 `walkForward` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.3.0` = OOS-001 新增 `oosValidation` 模块 + 2 表 + 1 契约 + 6 端点 + 1 面板；`v1.2.0` = ROBUSTNESS-001 新增 `searchRobustness` 子模块 + 3 表 + 1 契约 + 6 端点；`v1.1.1` = PARAMETER-002 patch；`v1.1.0` = PARAMETER-001 的 minor 跃迁）
 > **Last Audit Time：`2026-09-19`**（SYSTEM-BASELINE-001，一次性全局审计）
-> **Last Change Time：`2026-10-05`**（`T74-EVENT-GATE-P9-001` · 见 `CHANGE-AUDIT.md`）
-> **审计方式**：真实代码 + 真实库（只读探针）+ 既有测试基线；**本次变更 = 新增事件元数据只读注入 / 事件 gate / 1 个实验入口 / 0 migration**。
+> **Last Change Time：`2026-10-11`**（`FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007`：可选 UNKNOWN 处理声明 + 探索性轻量 ST 资格政策 · 见 `CHANGE-AUDIT.md`）
+> **审计方式**：真实代码 + 既有测试基线 + **本轮真实 SMOKE/STUDY Run**（只读 Dataset `780004`；轻量标签索引为只读 `SELECT`；STUDY 经既有 `startRun` / `artifactStorage` 写标准研究 Run）；**本次变更 = 1 个可选执行配置字段 + 1 个新研究侧政策版本 + 1 个只读标签索引端口 + 0 migration / 0 DDL / 0 批量写**。
 >
 > ⚠️ **两个必须知道的前提（本轮实测）**
 > 1. **审计对象 = 工作区（working tree），不是 HEAD**。round-2（2026-09-20）实测：工作区有 **14 个未提交的 `server/**` 文件 + 1 个 `shared/researchContracts.ts`**（= **PHASE-R1/B/D 三个阶段**的改动尚未提交；而 PARAMETER-001/002 · ROBUSTNESS-001 · OOS-001 · WALK-FORWARD-001 已随 `bb89eb8`/`e6cf717`/`0e90fc1` 等提交入库）⇒ 「HEAD 的代码」与「本基线描述的代码」**不是同一个版本**。
@@ -850,3 +855,141 @@ WalkForwardExecutionHooks { readCurrentContext, runFoldSearch, runFoldOos }
 - **DB**：无 schema / migration / 历史数据回填。
 - **前端**：策略定义第②段新增 `EntryConditionSlotEditor`；服务端 `managedConditionIds` 用于从手动条件列表隐藏槽管理条件；前端只提交槽选择与参数，conditions / parameters 由服务端物化后原子写回。
 - **验证**：`pnpm run check` 0 错；定向 47 文件 / 561 用例全绿；`checkEolDrift --strict` 0。
+
+---
+
+## FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005 增量（2026-10-11 · 当时写作 `v2.4.0` ⇒ 已并入 `v2.8.0`，minor）
+
+> ⚠️ **版本链合并（`BASELINE_DRIFT`）**：本节当时的版本号 `v2.4.0` 来自 `system-manifest.yaml`
+> **自身陈旧的 `v2.3.0`** 递增，**未接续**本文件头部的 `v2.7.0` 链条。2026-10-11 续修已把两份文件
+> **统一为 `v2.8.0`**（`v2.7.0 → v2.8.0`）；**本节内容逐字保留**（不覆盖历史），编号 `v2.4.0` 亦保留在头部历史里。
+
+> 触发 minor 的依据（`AGENTS.md` §8 表）：**新增 platform 级 contract / entry point** ——
+> `SimulationConfig.executionEligibilityGate`（可选执行资格闸门）及其逐笔审计字段。
+> 这是撮合层第一次拥有「成交时点外部资格裁决」的**显式可选**入口（缺省 ⇒ 既有行为逐字节不变）。
+
+- **新契约（全部 additive，缺省不声明 ⇒ 逐字节不变）**：
+  - `SimulationConfig.executionEligibilityGate?: { gateId; policyVersion; decideBuy(input) }`
+  - `SimulationConfigSnapshot.executionEligibility?: { gateId; policyVersion }`（**函数不入 JSON**）
+  - `TradeSimulationRun.executionEligibilityAudit?: ExecutionEligibilityAuditEntry[]`（仅声明闸门时出现）
+  - 形状类型集中在 `server/research/simulator/types.ts`；`validate.ts` 做形状校验与
+    「FILLED ⇒ NORMAL」断言。
+- **实际调用链**：
+  ```text
+  research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#createStExecutionEligibilityGate
+    → groupSimConfig.executionEligibilityGate
+    → server/research/simulator/engine.ts#runTradeSimulation
+        → due-order 循环：side === "buy" 时先 decideBuy（早于报价 / 现金 / 持仓 / 成本 / 成交计数）
+        → status !== "NORMAL" 或 allowed !== true ⇒ REJECTED（audit + stats.rejectedOrders）
+        → 收尾硬断言：FILLED ⇒ status === "NORMAL"，否则抛 EXECUTION_ELIGIBILITY_VIOLATION
+  ```
+  🔴 纯撮合层**不 import** `research-experiments/**`；研究装配层负责经平台数据服务取证据。
+  🔴 只约束**买入**；卖出与已持仓退出完全不受影响。
+- **ST 闸门契约语义修正**：`ST_GATE_CONTRACT_VERSION` `1.0.0 → 1.1.0`。
+  区间有效性与可知性统一使用真正的 `effectiveAt`（不再是交易日午夜）；
+  日期形式 `effectiveFrom` = 当地 00:00、日期形式 `effectiveTo` **覆盖整日**（23:59:59，闭区间含端点）；
+  精确时间不扩展到整日；无效日期 / 不支持格式记 `INVALID_STATUS_TIME_FORMAT`（UNKNOWN，失败关闭）。
+  仍声明 `1.0.0` 的 provider 记 `PROVIDER_CONTRACT_MISMATCH`。
+- **研究侧诊断**：provider 明确缺失时走**早诊断**（只做事件扫描，不读 post rd≥1、不 `freezeSelection`、
+  不撮合）；未扫描的候选数与覆盖分母一律 `null`（**未测**，不是 0），
+  `stCoverageBlocked.measurement ∈ {MEASURED, NOT_SCANNED_PROVIDER_ABSENT}`，schema 强制二者与计数一致。
+- **DB / migration / 历史数据**：**无**（本轮不写库、不建 Dataset、不跑 Run）。
+- **不影响**：A/B 规则、T+20、五日综合分、排序因子、TopK、Runner、成本、seed、主指标、
+  bootstrap、停止判据、Dataset `780004`、策略版本 `3600005`。
+- **验证**：`pnpm run check` 0 错；新增/受影响测试与 `test:changed` 结果见
+  `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005.md`。
+
+---
+
+## FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005 **续修**（Finding A + Finding B）增量（2026-10-11 · 基线 `v2.8.0`，minor）
+
+> 触发 minor 的依据（`AGENTS.md` §8 表）：**新增 platform 级 entry point**
+> （`server/research/compositeRunner/index.ts#assembleCompositeRunnerSimulationConfig`，
+> 契约 `composite-assembly-config/1.0.0`）+ **登记并合并 1 条 `BASELINE_DRIFT`**。
+
+- **Finding A（真实漏洞）**：`runCompositeRunnerBacktest` 会**真的撮合一次**
+  （`runTradeSimulation`），而 `rolling-pool-recovery-st` 实验曾**每组**调用它、只为取
+  `assembly.simulationConfig`，那次撮合结果被丢弃 —— 且该调用**不接受**执行资格闸门
+  ⇒ 正式账户已受闸门保护时，这条辅助路径**仍可能买进一笔隔夜 ST**。
+  修复方式 = **首选方案**：拆出**只装配、不撮合**的权威入口
+  `assembleCompositeRunnerSimulationConfig`（`RunCompositeRunnerBacktest` 现在
+  = 该入口 + `runTradeSimulation`，**同一段装配实现，不存在第二份**），实验改用该入口。
+- **新入口契约**：`COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION = "composite-assembly-config/1.0.0"`；
+  入参 = `Omit<RunCompositeRunnerBacktestInput, "sourceRun">`（+ 可选 `corporateActionResolver`，
+  用于复用解析器 / 纯合成测试不连库）；产物 = `{ contractVersion, simulationConfig,
+  assemblyConfigFingerprint, assembly }`，**结构上不存在** `run` / 交易 / 权益曲线。
+- **配置指纹**：`fingerprintSimulationConfig(config) = sha256(canonicalJson(配置可序列化面))`；
+  不可序列化的函数以 `fn:<name>` 占位（**不静默丢弃**）。它与 `run.fingerprint` **不是同一个东西**。
+- **实际调用链**：
+  ```text
+  research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#run
+    → assembleCompositeRunnerSimulationConfig（只装配；每组一次，用于跨组配置一致性断言）
+        → server/runWorkbenchAssembly/assemble.ts#assembleRunWorkbenchInputs（唯一装配实现）
+    → 账户循环：runTradeSimulation（**全部**带 executionEligibilityGate）
+  ```
+  🔴 辅助装配路径**不撮合**；纯撮合层（`server/research/simulator/**`）**零改动**、
+  不 import `research-experiments/**`、不连 DB。
+  🔴 既有调用方（`paperTrading3fTop3Runner/**`、其它 `research-experiments/**` 实验）
+  **行为与 digest 逐字节不变**：本入口的配置与 `runCompositeRunnerBacktest` 的配置
+  深层相等 + 指纹相等（测试实测）。
+- **Finding B（`BASELINE_DRIFT`）**：`SYSTEM-BASELINE.md` 头部为 `v2.7.0`
+  （上一版 `v2.6.0`），而 `system-manifest.yaml` 被从**自身陈旧的 `v2.3.0`** 递增到 `v2.4.0`
+  ⇒ 两份文件的版本链分叉。本轮**合并统一为 `v2.8.0`**（`v2.7.0 → v2.8.0`），
+  两份文件的历史条目**全部保留**（含 `v2.4.0`），并登记 drift 原因。
+- **DB / migration / 历史数据**：**无**（本轮不写库、不建 Dataset、不跑 Run、不改 schema）。
+- **不影响**：A/B 规则、T+20、五日综合分、排序因子、TopK、Runner、成本、seed、主指标、
+  bootstrap、停止判据、Dataset `780004`、策略版本 `3600005`。
+- **验证**：见 `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005.md` §10。
+
+---
+
+## `FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007` 增量（`v2.8.0 → v2.9.0`，minor）
+
+> 目标 / 预注册 / 结果：`docs/research/GOAL|PREREG|RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md`。
+
+- **本轮唯一的口径变化 = ST 资格政策**（用户明确授权）：新增显式政策
+  `KNOWN_ST_ONLY_EXPLORATORY` / `recovery-known-st-only/1.0.0` —— **`UNKNOWN` 可参与，
+  仅排除已有历史记录中的 `ST`**。**参数缺省仍是原严格政策**
+  （`recovery-st-execution-eligibility/1.0.0`，只认可 PIT 可核验 `NORMAL`）。
+- **新增可选执行配置字段**：`SimulationConfig.executionEligibilityUnknownPolicy`
+  （`"REJECT"`（缺省） / `"ALLOW_WHEN_DECISION_ALLOWS"`）。只在**显式声明**
+  `ALLOW_WHEN_DECISION_ALLOWS` **且** `decision.allowed === true` **且** `status === "UNKNOWN"`
+  时才放行；`ST` **恒拒绝**（即使闸门错误返回 `allowed = true`）。逐笔审计**保留真实 `UNKNOWN`**，
+  **绝不**改写为 `NORMAL`；未声明的既有快照与冻结指纹**逐字节不变**。
+- **新增只读来源端口**：`server/researchExperiments/knownStLabelIndex.ts#loadKnownStLabelIndex`
+  —— **一次性** `SELECT` `research_security_status_history`（`statusType='ST'`）+ primary 身份映射，
+  建 `(symbol, 日期)` 只读索引 + 来源指纹；经 `@experiments/compositeRunnerBridge` **零实现 re-export**
+  注入研究层 ⇒ **实验作者函数不直连 SQL**。
+- **不伪造 PIT 证据**：来源**没有** `availableAsOf` 列 ⇒ 索引**不构造**可获知时间；
+  `availability` / `confidence` **原样保留**（实测 841/841 `UNKNOWN` / `medium`）；
+  **不把缺席派生成 `NORMAL`**；边界 / 重叠 / 非法时间 / 不可识别取值 ⇒ `UNKNOWN`；
+  身份用**该日期对应**的证券身份解析，**不用今天的名称**、**不用行情涨跌停字段**、
+  **不凭空生成 `securityId`**。
+- **严格契约零改动**：`server/securityStatus/**` 与 `stGate.ts`
+  （`ST_GATE_CONTRACT_VERSION = "1.1.0"`、`evaluateStGate`、`summarizeStCoverage`、`evaluateStGateForCandidate`）
+  **一行未改**；轻量政策是**另一个有版本的资格决策**。价格状态求值不受 ST 政策驱动，
+  ST / `UNKNOWN` **不抹掉**观察历史。
+- **轻量模式不继承的严格前置**：不使用 `stSummary.blocked` / `providerVerifiable`；
+  **不**把 provider 的 `verifiable` 伪造为 `true`；null-provider 早诊断**只保留在缺省严格模式**；
+  缺状态**不再**暂停全部账户；旧终态 `ST_COVERAGE_BLOCKED` **不是**轻量模式的必然终点。
+- **实际调用链（未新开路径）**：
+  ```text
+  research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#run
+    → loadKnownStLabelIndex（仅 stPolicy=known-st-only；只读 SELECT；经 compositeRunnerBridge 注入）
+    → 确认日收盘：decideKnownStOnlyEligibility（已知 ST ⇒ 不进排序候选）
+    → 共享执行投影 → 权威装配（assembleCompositeRunnerSimulationConfig，只装配）
+    → 账户循环：runTradeSimulation（**同一个** due-order 循环；带 createKnownStOnlyEligibilityGate
+        + executionEligibilityUnknownPolicy="ALLOW_WHEN_DECISION_ALLOWS"）
+  ```
+- **DB / migration / 历史数据**：**0 表 / 0 列 / 0 migration / 0 DDL / 0 批量写 / 0 回填**；
+  轻量索引为**只读** `SELECT`；STUDY 只经既有 `startRun` / `artifactStorage` 写**标准研究 Run**。
+  **不重建 Dataset**（沿用 `datasetVersionId = 780004`），**不采购数据**，**不修 builder / `poolStIndex`**。
+- **不影响**：A/B 价格规则、T+20 边界、五日综合分、`preReturn10` 排序与破平键、Top3、
+  Random 实现与种子、再入场、当日权益 20% 仓位、成本、冻结 Runner（`3600005` / T74）、
+  主指标与 bootstrap、停止判据、Dataset `780004`。
+- **结论边界（必须随结果一起读）**：本轮 `UNKNOWN` 被接受 + 使用**历史（非 PIT）标签** + 旧 Dataset 局限
+  ⇒ 即使原主靶判据满足，结论也只能是**探索性**，**不得**升级为 PIT / OOS / 模拟交易 / 实盘验证。
+- **验证**：`pnpm run check` 0 错；`tests/server/researchExperiments/rollingPoolRecoveryStLightPolicy.test.ts`
+  17/17；既有 `rollingPoolRecoverySt*.test.ts` / `simulator/**` / `positionSizingExecution` 全绿
+  （**未修改任何既有断言**）；`test:changed` **零新增失败文件**；EOL `--strict` 已跟踪漂移 0。
+  详见 `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md`。

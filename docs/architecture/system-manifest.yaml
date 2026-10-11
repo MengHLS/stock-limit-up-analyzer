@@ -5,10 +5,20 @@
 
 system:
   name: stock-limit-up-analyzer
-  baselineVersion: v2.2.0
+  baselineVersion: v2.9.0
   auditedAt: "2026-09-20"
-  lastChangeAt: "2026-10-04"
-  baselineHistory: ["v1.0.0 (2026-09-19 SYSTEM-BASELINE-001)", "v1.1.0~v1.4.0 (PARAMETER-001/002, ROBUSTNESS-001, OOS-001, WALK-FORWARD-001)", "v2.0.0 (2026-09-20 round-2: PHASE-A/R1/B/D + 判定日数据流变更)", "v2.1.0 (2026-10-03 SCOPE-002 策略创作工作台)", "v2.2.0 (2026-10-04 STRATEGY-T74-FORMALIZATION-001)", "v2.3.0 (2026-10-04 ENTRY-CONDITION-SLOTS-001)"]
+  lastChangeAt: "2026-10-11"
+  # 🔴 v2.9.0（2026-10-11 · FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007）：
+  #    新增**可选** UNKNOWN 处理声明 SimulationConfig.executionEligibilityUnknownPolicy（缺省 REJECT）
+  #    + 探索性轻量 ST 资格政策 KNOWN_ST_ONLY_EXPLORATORY / recovery-known-st-only/1.0.0
+  #    + 只读标签索引端口 server/researchExperiments/knownStLabelIndex.ts（经 compositeRunnerBridge 注入）。
+  #    缺省仍为原严格政策；stGate.ts 严格契约 1.1.0 零改动；0 表 / 0 列 / 0 migration / 0 DDL / 0 批量写。
+  # 🔴 BASELINE_DRIFT / 版本链合并（2026-10-11 · FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005 续修）：
+  #    本文件此前从**自身陈旧的 v2.3.0** 递增到 v2.4.0，未接续 SYSTEM-BASELINE.md 头部的版本链
+  #    （该头部当时已是 v2.7.0）。本轮把两份文件的版本链**合并统一为 v2.8.0**（v2.7.0 → v2.8.0）。
+  #    历史条目**全部保留**（含 v2.4.0 —— 编号保留，不删历史；其内容已并入 v2.8.0）。
+  #    另注：v2.5.0 在仓库任何文件中都没有登记（观测到的断号，如实登记，不回填臆造条目）。
+  baselineHistory: ["v1.0.0 (2026-09-19 SYSTEM-BASELINE-001)", "v1.1.0~v1.4.0 (PARAMETER-001/002, ROBUSTNESS-001, OOS-001, WALK-FORWARD-001)", "v2.0.0 (2026-09-20 round-2: PHASE-A/R1/B/D + 判定日数据流变更)", "v2.1.0 (2026-10-03 SCOPE-002 策略创作工作台)", "v2.2.0 (2026-10-04 STRATEGY-T74-FORMALIZATION-001)", "v2.3.0 (2026-10-04 ENTRY-CONDITION-SLOTS-001)", "v2.6.0 (2026-10-05 T74-LATE-ENTRY-P8-001 延迟入场 + 晚窗口滚动 3F)", "v2.7.0 (2026-10-05 T74-EVENT-GATE-P9-001 事件事实 gate)", "v2.4.0 (2026-10-11 FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005: SimulationConfig.executionEligibilityGate 可选执行资格闸门 + ST_GATE_CONTRACT_VERSION 1.1.0 区间语义；⚠️ BASELINE_DRIFT：本条目由本文件自身陈旧的 v2.3.0 递增而来，未接续基线链的 v2.7.0；内容已并入 v2.8.0，编号保留)", "v2.8.0 (2026-10-11 FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005 续修: 新增权威装配配置入口 assembleCompositeRunnerSimulationConfig（composite-assembly-config/1.0.0，只装配不撮合 + 配置指纹）；辅助装配路径不再顺带撮合 ⇒ 隔夜 ST 在辅助路径同样买不进；同时把本文件与 SYSTEM-BASELINE.md 的版本链合并统一到 v2.8.0)", "v2.9.0 (2026-10-11 FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007: 可选 UNKNOWN 处理声明 SimulationConfig.executionEligibilityUnknownPolicy（缺省 REJECT；仅显式 ALLOW_WHEN_DECISION_ALLOWS 且 allowed=true 且 status=UNKNOWN 才放行；ST 恒拒绝；审计保留真实 UNKNOWN、绝不改写 NORMAL）+ 探索性轻量 ST 资格政策 KNOWN_ST_ONLY_EXPLORATORY / recovery-known-st-only/1.0.0（UNKNOWN 可参与、仅排除已有历史记录中的 ST；不伪造 availableAsOf、不改 availability/confidence、不把缺席派生成 NORMAL）+ 只读标签索引端口 loadKnownStLabelIndex；缺省仍为原严格政策，stGate.ts 严格契约 1.1.0 零改动；0 表 / 0 列 / 0 migration)"]
   stack:
     frontend: React 19 + Vite 7 + wouter + tRPC client + Tailwind
     backend: Express + tRPC 11
@@ -277,9 +287,12 @@ domains:
       - StrategyDecision / signalBuilder
       - Dataset bars
       - SimulationConfig (positionSizing, executionPolicy)
+      - "SimulationConfig.executionEligibilityGate? (optional, additive — RECOVERY-ST-FIX-005 F1: 成交前执行资格闸门；缺省 ⇒ 行为逐字节不变)"
+      - "SimulationConfig.executionEligibilityUnknownPolicy? (optional, additive — RECOVERY-LIGHT-ST-007: REJECT（缺省）/ ALLOW_WHEN_DECISION_ALLOWS；仅在显式声明且 allowed=true 且 status=UNKNOWN 时放行，ST 恒拒绝；只在显式声明时进入快照)"
       - initialCapital
     outputs:
       - TradeSimulationRun (equityCurve / trades / auditTrail)
+      - "TradeSimulationRun.executionEligibilityAudit? (optional, additive — 仅当声明 executionEligibilityGate 时出现；逐笔 status 必须落在政策允许集合内（NORMAL；或显式声明 ALLOW_WHEN_DECISION_ALLOWS 时的 UNKNOWN）才可能 FILLED；审计保留真实状态，不改写为 NORMAL)"
       - CanonicalMetrics
       - BacktestRunPayload
       - closed_loop_backtest_run row
@@ -1159,3 +1172,162 @@ strategyTrendFusionP0:
     newTests: "P0 34 (trendScoreFeatures 20 + trendRankFusion 6 + compositeDatasetProviderSelection 3 + compositeRunnerTrendFusion 5); manifest 9; mode grouping 15"
     testChanged: "619 passed / 5 failed - all in limitUp.test / limitUp.watch.test (pre-existing DB-state failures, no import relation to P0)"
     eolDrift: "0"
+
+# ---------------------------------------------------------------------------
+# RECOVERY-ST-FIX-005 增量（2026-10-11 · 编号 `9c5`）—— 版本 v2.3.0 → **v2.4.0**（minor）
+# ⚠️ BASELINE_DRIFT：该递增来自本文件**自身陈旧的 v2.3.0**，未接续 SYSTEM-BASELINE.md 头部的
+#    v2.7.0 链条。2026-10-11 续修已把两份文件统一到 **v2.8.0**；本节内容**逐字保留**。
+# ---------------------------------------------------------------------------
+recoveryStFix005:
+  task: "FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005（phase 1：代码 / 测试 / 文档；不跑 SMOKE/STUDY、不写 DB、不建 Dataset）"
+  platformContractAdded:
+    - "SimulationConfig.executionEligibilityGate?: { gateId; policyVersion; decideBuy(input) }（可选；additive）"
+    - "SimulationConfigSnapshot.executionEligibility?: { gateId; policyVersion }（仅声明闸门时出现，函数不入 JSON）"
+    - "TradeSimulationRun.executionEligibilityAudit?: readonly ExecutionEligibilityAuditEntry[]（仅声明闸门时出现）"
+    - "ExecutionEligibilityCheckInput / ExecutionEligibilityDecision / ExecutionEligibilityGate / ExecutionEligibilityAuditEntry（server/research/simulator/types.ts）"
+  executionChain:
+    - "server/research/simulator/engine.ts#runTradeSimulation：due-order 循环内、**报价/现金/持仓/成本/成交计数之前**调用 decideBuy；status !== NORMAL 或 allowed !== true ⇒ 拒单（audit REJECTED + stats.rejectedOrders）"
+    - "只对 side==='buy' 生效；卖出与已持仓退出**不经过**闸门"
+    - "收尾硬断言：任何 outcome===FILLED 的买入必须 status==='NORMAL'，否则抛 EXECUTION_ELIGIBILITY_VIOLATION（整轮失败）"
+    - "缺省（未声明）⇒ 快照 / 记录 / 指纹逐字节不变（digest 常量锁在 tests/server/researchExperiments/rollingPoolRecoveryStExecutionGate.test.ts）"
+  researchWiring:
+    - "research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#createStExecutionEligibilityGate（policyVersion = recovery-st-execution-eligibility/1.0.0）"
+    - "真实成交前用同一个 evaluateStGate 判 PRE_FILL；研究侧逐笔审计 + execution-eligibility-rejections-{group}.csv"
+    - "确认日资格只用于排序 / 计划；成交日结论不在前一日使用（不递补 rank4）"
+  stGateContract:
+    - "ST_GATE_CONTRACT_VERSION 1.0.0 → 1.1.0：区间有效性与可知性统一使用真正 effectiveAt；日期形式 effectiveFrom=当日00:00、effectiveTo 覆盖整日；无效日期/格式记 INVALID_STATUS_TIME_FORMAT（UNKNOWN）"
+  earlyDiagnostic:
+    - "provider 明确缺失 ⇒ 只做事件扫描，不读 post rd≥1、不 freezeSelection、不撮合；未扫描计数一律 null（未测），measurement=NOT_SCANNED_PROVIDER_ABSENT"
+  changedDb: none
+  changedMigration: none
+  productionExecutionPath: "research-only（研究实验装配层注入；生产 closed-loop 路径未声明闸门 ⇒ 行为不变）"
+  untouched: "A/B 规则 / T+20 / 五日综合分 / 排序因子 / TopK / Runner / 成本 / seed / 主指标 / bootstrap / 停止判据 / Dataset 780004 / 策略版本 3600005"
+  verification:
+    tsc: 0
+    eolDrift: "见 RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005.md（未跟踪 CRLF 探针单独披露）"
+
+# ---------------------------------------------------------------------------
+# RECOVERY-ST-FIX-005 **续修**（Finding A + Finding B）（2026-10-11 · 编号 `9c5b`）
+# —— 版本链合并：v2.7.0 → **v2.8.0**（minor）；同时登记 `v2.4.0` 的 `BASELINE_DRIFT`
+# ---------------------------------------------------------------------------
+recoveryStFix005FindingA:
+  contractVersion: "composite-assembly-config/1.0.0"
+  contract: "COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION（server/research/compositeRunner/index.ts）"
+  entryPoint: "server/research/compositeRunner/index.ts#assembleCompositeRunnerSimulationConfig"
+  entryPointInput: "Omit<RunCompositeRunnerBacktestInput, \"sourceRun\">（+ 可选 corporateActionResolver，用于复用解析器 / 纯合成测试不连库）"
+  entryPointOutput: "{ contractVersion, simulationConfig, assemblyConfigFingerprint, assembly }（**结构上不存在 run / 交易 / 权益曲线**）"
+  fingerprint: "fingerprintSimulationConfig(config) = sha256(canonicalJson(配置可序列化面))；函数以 fn:<name> 占位（不静默丢弃）；与 run.fingerprint 不是同一个东西"
+  holeFixed: "runCompositeRunnerBacktest 会真的撮合一次且不接受执行资格闸门；rolling-pool-recovery-st 实验曾每组调用它、只为取 simulationConfig（结果被丢弃）⇒ 辅助路径可能买进隔夜 ST"
+  fixChoice: "首选方案（拆出只装配、不撮合的权威入口；runCompositeRunnerBacktest = 该入口 + runTradeSimulation，同一段装配实现）"
+  executionChain:
+    - "experiment.ts#run → assembleCompositeRunnerSimulationConfig（只装配；不产生任何撮合结果）"
+    - "→ server/runWorkbenchAssembly/assemble.ts#assembleRunWorkbenchInputs（唯一装配实现，未改）"
+    - "账户循环：runTradeSimulation（全部带 executionEligibilityGate）"
+  matchingLayerUntouched:
+    - "server/research/simulator/** 本轮**零改动**（不 import research-experiments/**、不连 DB）"
+    - "未提供 corporateActionResolver 时装配请求对象**不多键**（缺省行为逐字节不变）"
+  defaultOffIdentity:
+    - "同一输入下 assembleCompositeRunnerSimulationConfig 与 runCompositeRunnerBacktest 的 simulationConfig 深层相等 + 配置指纹相等"
+    - "缺省（无闸门）真实撮合的 tradeDigest / equityDigest / run.fingerprint / canonicalMetrics 与旧路径逐字节相同（tests/server/researchExperiments/rollingPoolRecoveryStAuxiliaryAssembly.test.ts）"
+  testEvidence:
+    - "tests/server/researchExperiments/rollingPoolRecoveryStAuxiliaryAssembly.test.ts（7 例；含撮合调用计数 = 0 的隔离断言与真实撮合输出断言）"
+    - "probe-digest-before.json vs probe-digest-after.json/after2.json 仍逐字节相同（另加一次复核运行 probe-digest-after3.json：去掉旧文件里混入的两行 shell 输出后 payload sha256 完全相同）"
+  changedDb: none
+  changedMigration: none
+  baselineDrift:
+    - "BASELINE_DRIFT：system-manifest.yaml 的 baselineVersion 曾为 v2.4.0，由**自身陈旧的 v2.3.0** 递增而来，未接续 SYSTEM-BASELINE.md 头部（v2.7.0）的版本链。"
+    - "处置：两份文件版本链**合并统一为 v2.8.0**（v2.7.0 → v2.8.0）；历史条目全部保留（含 v2.4.0，内容并入 v2.8.0，编号不删）。"
+    - "观测到的断号：v2.5.0 在仓库任何文件中都无登记 —— 如实登记，不回填臆造条目。"
+  verification:
+    tsc: 0
+    targetedTests: "4 文件 / 85 例全绿（rollingPoolRecoverySt 39 + StBlocked 14 + StExecutionGate 25 + StAuxiliaryAssembly 7）"
+    testChanged: "exit 1：4 文件 / 10 例既有失败（threeFactorTopNStrategyDocument 3 + limitUp 1 + limitUp.watch 4 + datasetFilterForm 2）—— 与改动前同一集合，零新增"
+    eolDrift: "tracked 漂移 0；未跟踪 CRLF 1 = 其他会话的 _scratch/overlap/probe01_db_state.mjs（未触碰，不声称全仓绿）"
+
+# ---------------------------------------------------------------------------
+# RECOVERY-LIGHT-ST-007（轻量 ST 政策 + 最小执行契约兼容）（2026-10-11）
+# —— 版本：v2.8.0 → **v2.9.0**（minor）
+# ---------------------------------------------------------------------------
+recoveryLightSt007:
+  task: "FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007（显式 ST 政策适配 + 必要执行契约兼容 + 测试 + SMOKE/STUDY + 报告；EXPLORATORY / KNOWN_ST_ONLY）"
+  userAuthorization:
+    - "用户明确授权：允许未知参与，仅排除已有记录中的 ST（探索性研究）—— 这是本轮唯一的口径变化，且不得伪装成已验证 NORMAL"
+    - "DEFAULT_UNCHANGED：参数缺省仍是原严格政策 recovery-st-execution-eligibility/1.0.0（只认可 PIT 可核验 NORMAL）"
+  platformContractAdded:
+    - "SimulationConfig.executionEligibilityUnknownPolicy?: \"REJECT\" | \"ALLOW_WHEN_DECISION_ALLOWS\" | null（缺省 REJECT；additive）"
+    - "EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES / DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY / executionEligibilityStatusAllowed(status, policy)（server/research/simulator/types.ts，**唯一**放行判据）"
+    - "SimulationConfigSnapshot.executionEligibility.unknownPolicy?（**只在显式声明时出现** ⇒ 未声明的既有快照与冻结指纹逐字节不变）"
+    - "研究侧政策：ST_ELIGIBILITY_POLICY_IDS / resolveStEligibilityPolicy / decideKnownStOnlyEligibility / decideStrictEligibility / KnownStLabelIndexPort（research-experiments/shared/rollingPoolRecovery/knownStPolicy.ts）"
+    - "只读来源端口：server/researchExperiments/knownStLabelIndex.ts#loadKnownStLabelIndex（经 @experiments/compositeRunnerBridge 零实现 re-export 注入研究层）"
+  executionChain:
+    - "server/research/simulator/engine.ts#runTradeSimulation：仍是 E-94 的**同一个** due-order 循环与**同一个**位置（报价/现金/持仓/成本/成交计数之前）；只把放行判据换成 executionEligibilityStatusAllowed"
+    - "放行语义：allowed===true 且 status==='NORMAL'；仅当显式声明 ALLOW_WHEN_DECISION_ALLOWS 时 status==='UNKNOWN' 也可放行；status==='ST' **恒拒绝**（即使闸门错误返回 allowed=true）；其它取值一律拒绝"
+    - "收尾硬断言：FILLED ⇒ executionEligibilityStatusAllowed(status, policy)，否则抛 EXECUTION_ELIGIBILITY_VIOLATION；validate.ts 的记录校验按 record.config.executionEligibility.unknownPolicy 同步"
+    - "非法配置：SIM_CONFIG_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_INVALID（引擎 EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_INVALID）；声明政策却无闸门 ⇒ ..._UNKNOWN_POLICY_WITHOUT_GATE（不静默忽略）"
+    - "禁止（未发生）：把 UNKNOWN 改写为 NORMAL / 移除整个执行闸门 / 另开第二条模拟器路径"
+  researchWiring:
+    - "确认日收盘：decideKnownStOnlyEligibility（已知 ST ⇒ 不进入排序候选；UNKNOWN 本轮允许；明确 NORMAL 参与）"
+    - "成交前：createKnownStOnlyEligibilityGate（gate id = recovery-light-st-007/known-st-only-prefill-gate，policyVersion = recovery-known-st-only/1.0.0）"
+    - "实验参数：descriptor.parameters 新增 stPolicy（kind ENUM，required false，defaultValue 'strict'，allowedValues ['strict','known-st-only']）"
+    - "运行工具：tests/tools/rollingPoolRecoveryStRun.mts --st-policy <strict|known-st-only>（非法值 exit 2）；输出目录 _scratch/fbp7/（不覆盖历史 _scratch/fbp4/）"
+    - "终态（四选一）：EXPLORATORY_COMPLETED / SMOKE_ENGINEERING_FAILED / DATA_LIMITED / EXECUTION_FAILED；退出码 0 / 1 / 4 与既有 3（严格 ST_COVERAGE_BLOCKED）"
+  labelSourceBoundary:
+    - "来源 = research_security_status_history 的 ST 维度（statusType='ST'）+ research_security_identifier_history（primary）；**一次性只读 SELECT**"
+    - "不伪造 availableAsOf（来源表没有该列）；不修改 availability / confidence（实测 841/841 = UNKNOWN / medium）；不把缺席派生成 NORMAL（无覆盖 ⇒ UNKNOWN）"
+    - "边界 / 重叠 / 非法时间写法 / 不可识别状态取值 ⇒ UNKNOWN；身份用该日期对应的证券身份（resolveSecurityIdByEngineKey），不用今天的名称、不用行情涨跌停字段、不凭空生成 securityId"
+  strictContractUntouched:
+    - "server/securityStatus/** 与 research-experiments/shared/rollingPoolRecovery/stGate.ts **一行未改**（ST_GATE_CONTRACT_VERSION 保持 1.1.0；evaluateStGate / summarizeStCoverage / evaluateStGateForCandidate 未动）"
+    - "轻量模式不继承严格前置：不用 stSummary.blocked / providerVerifiable；不伪造 verifiable=true；null-provider 早诊断只属严格模式；ST_COVERAGE_BLOCKED 不是轻量模式的必然终点"
+    - "价格状态求值不受 ST 政策驱动；ST / UNKNOWN 不抹掉观察历史"
+  closedLoopStep: "recap"
+  changedDb: none
+  changedMigration: none
+  changedDataset: none
+  productionExecutionPath: "research-only（研究实验装配层注入；缺省严格政策 ⇒ 生产 closed-loop 路径未声明该字段，行为不变）"
+  untouched: "A/B 价格规则 / T+20 / 五日综合分 / preReturn10 排序与破平键 / Top3 / Random 实现与种子 / 再入场 / 当日权益 20% 仓位 / 成本 / 冻结 Runner 3600005 / 主指标与 bootstrap / 停止判据 / Dataset 780004"
+  conclusionBoundary: "接受 UNKNOWN + 历史（非 PIT）标签 + 旧 Dataset 局限 ⇒ 结论只能是**探索性**，不得升级为 PIT / OOS / 模拟交易 / 实盘验证"
+  verification:
+    tsc: 0
+    newTests: "tests/server/researchExperiments/rollingPoolRecoveryStLightPolicy.test.ts（18 例：政策行为表 / 显式 UNKNOWN 真实成交并保留审计 / 缺省仍拒单 / 已知 ST 恒拒 零买入 / 隔夜·重试·再入场拒单不改账 / 非法配置响亮失败 / 快照缺省不变 / 平仓后再入场遇 ST / 矩阵路径显式声明 matrixEmitted / 仓位随当日权益）"
+    regression: "rollingPoolRecoverySt 39 + StBlocked 14 + StExecutionGate 25 + StAuxiliaryAssembly 7 + LightPolicy 18 + contract 23 + simulator/** 70 + positionSizing* 33 全绿；**未修改任何既有断言**"
+    testChanged: "exit 1：4 文件 / 10 例既有失败（threeFactorTopNStrategyDocument 3 + limitUp 1 + limitUp.watch 4 + datasetFilterForm 2）—— 与改动前同一集合，零新增（并发会话已在纯 HEAD worktree 上复现同一集合）"
+    eolDrift: "tracked 漂移 0；未跟踪 CRLF 1 = 其他会话的 _scratch/overlap/probe01_db_state.mjs（未触碰，不声称全仓绿）"
+  smoke:
+    attempts: 3
+    outcome: "SMOKE #3 通过（exit 0）：6 账户真实进入撮合；9 项工程自检全过、0 失败；已知 ST 买入 = 0；UNKNOWN 订单 1,176 ⇒ 成交 1,137 / 拒单 39；墙钟 1,654.7 s；31 产物"
+    fixedDefects:
+      - "样本账不平：NEVER_IN_WATCH_POOL(69) 被重复计入 excludedByReason ⇒ 平台 EXPERIMENT_RESULT_INVALID（旧代码从不产出矩阵 ⇒ 从未暴露）；修复 = 独立成观察项 + 实验内样本账自检"
+      - "矩阵路径从未写 status / matrixEmitted ⇒ 「跑成功产出矩阵」与「刻意暂停」在信封上无法区分；修复 = 显式声明 + 单测锁定 + 运行工具 matrixEmitted ⇔ terminalState 互证"
+  studyRun:
+    runId: RUN-20261011-2BAEF26C
+    accounts: 42
+    parameters: { randomAccountCount: 20, stPolicy: "known-st-only" }
+    computationStatus: SUCCEEDED
+    terminalStateInPayload: EXPLORATORY_COMPLETED
+    persistedRunStatus: FAILED
+    persistedRunErrorCode: EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED
+    artifactsPersisted: 0
+    durationMs: 1651238
+    wallClockSeconds: 1675.6
+    endToEndTerminalState: EXECUTION_FAILED
+    blocker:
+      limits: "EXPERIMENT_ARTIFACT_MAX_COUNT=100 / EXPERIMENT_ARTIFACT_MAX_SINGLE_BYTES=64 MiB / EXPERIMENT_ARTIFACT_MAX_TOTAL_BYTES=256 MiB"
+      oversized: "observation-repair-ledger-{B-2024,A-2024,B-2025,A-2025} = 107,832,874 / 99,097,445 / 75,348,967 / 69,919,745 B"
+      totalBytes: 373034966
+      conclusion: "合计 ≈ 355.8 MiB > 256 MiB ⇒ 单纯分片不能解除；需 S-1 平台侧压缩/上调上限 或 S-2 经授权削减研究交付物内容（须用户裁定）"
+    rerunPolicy: "不重跑（同配置必然同样失败；数字逐位相同 ⇒ 不存在结果筛选）"
+  resultsHeadline:
+    primaryBRminusAR: 0.00010746332813927245
+    primaryBlock20: [-0.00010386697112622846, 0.00035113068573729665]
+    primaryBlock40: [-0.00011194732406190081, 0.0003492843861128875]
+    sampleGateMet: false
+    judgement: INSUFFICIENT_EVIDENCE
+    aRtotalReturnPct: 2.82374327699999
+    bRtotalReturnPct: -25.8124063088
+    aRmaxDrawdownPct: 22.0125062888
+    bRmaxDrawdownPct: 29.5992059813
+    rVsRandom: "A：R 优于 18/20（分位 0.90）；B：R 优于 1/20（分位 0.05）"
+    knownStExcludedCandidates: 3
+    knownStBuys: 0
+    unknownFilledOrders: 7895
+    runnerContribution: UNMEASURED

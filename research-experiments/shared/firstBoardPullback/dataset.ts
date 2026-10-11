@@ -38,20 +38,23 @@ function approximatelyEqual(left: number, right: number): boolean {
   return Math.abs(left - right) <= FIRST_BOARD_PULLBACK_EPSILON;
 }
 
-function normalizeBar(row: ExperimentBarRow | undefined, relativeDay: number): NormalizedFoundationBar {
-  const values = row?.values ?? {};
-  const open = numberValue(values, "open");
-  const high = numberValue(values, "high");
-  const low = numberValue(values, "low");
-  const close = numberValue(values, "close");
-  const preClose = numberValue(values, "preClose");
-  const limitUpPrice = numberValue(values, "limitUpPrice");
-  const limitDownPrice = numberValue(values, "limitDownPrice");
-  const barPresent = booleanValue(values, "barPresent") ?? row !== undefined;
-  const suspended = stringValue(values, "suspensionStatus") === "SUSPENDED";
-  const canBuyAtOpen = booleanValue(values, "canBuyAtOpen");
-  const canSellAtClose = booleanValue(values, "canSellAtClose");
-  const structurallyValid =
+/**
+ * 结构有效性判据（**唯一实现**）。
+ *
+ * 从 `normalizeBar` 内联条件提取出来，使「研究标签顺延原语」可以喂入**同一条**判据构造
+ * `NormalizedFoundationBar`，而不必复制第二份定义。缺省行为逐字节不变。
+ */
+export function foundationBarStructurallyValid(prices: {
+  readonly open: number | null;
+  readonly high: number | null;
+  readonly low: number | null;
+  readonly close: number | null;
+  readonly preClose: number | null;
+  readonly limitUpPrice: number | null;
+  readonly limitDownPrice: number | null;
+}): boolean {
+  const { open, high, low, close, preClose, limitUpPrice, limitDownPrice } = prices;
+  return (
     open !== null &&
     high !== null &&
     low !== null &&
@@ -67,7 +70,32 @@ function normalizeBar(row: ExperimentBarRow | undefined, relativeDay: number): N
     limitUpPrice > 0 &&
     limitDownPrice > 0 &&
     high >= Math.max(open, close) &&
-    low <= Math.min(open, close);
+    low <= Math.min(open, close)
+  );
+}
+
+function normalizeBar(row: ExperimentBarRow | undefined, relativeDay: number): NormalizedFoundationBar {
+  const values = row?.values ?? {};
+  const open = numberValue(values, "open");
+  const high = numberValue(values, "high");
+  const low = numberValue(values, "low");
+  const close = numberValue(values, "close");
+  const preClose = numberValue(values, "preClose");
+  const limitUpPrice = numberValue(values, "limitUpPrice");
+  const limitDownPrice = numberValue(values, "limitDownPrice");
+  const barPresent = booleanValue(values, "barPresent") ?? row !== undefined;
+  const suspended = stringValue(values, "suspensionStatus") === "SUSPENDED";
+  const canBuyAtOpen = booleanValue(values, "canBuyAtOpen");
+  const canSellAtClose = booleanValue(values, "canSellAtClose");
+  const structurallyValid = foundationBarStructurallyValid({
+    open,
+    high,
+    low,
+    close,
+    preClose,
+    limitUpPrice,
+    limitDownPrice,
+  });
   return {
     relativeDay,
     open,

@@ -149,9 +149,25 @@ export function resolveEntryDay(
   return null;
 }
 
-function findExecutableExit(
+/**
+ * 顺延出场搜索（**唯一实现**）。
+ *
+ * 规则（与既有口径逐字一致，未改动）：
+ *   1. 目标日自身可卖（`canSellAtClose === true`）⇒ 目标日收盘出场；
+ *   2. 否则向后顺延：先看「开盘价高于跌停价」（= 事实上可卖）⇒ 该日**开盘**出场；
+ *      再看 `canSellAtClose === true` ⇒ 该日**收盘**出场；
+ *   3. 到 `maxRelativeDay` 仍未成交 ⇒ `null`（调用方按右删失 / MTM 处理）。
+ *
+ * 🔴 `maxRelativeDay` 是**为「顺延最多再 N 交易日」这类研究口径**追加的可选形参。
+ *    缺省 = `FIRST_BOARD_PULLBACK_MAX_RELATIVE_DAY`（= 20）⇒ **既有 25 个调用方逐字节不变**。
+ *    加它的原因：`FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001` 的标签口径要求
+ *    「主退出不可卖时顺延到其后首个可卖收盘，**最多再 10 交易日**」，
+ *    而原来这个上界被写死成 20。**不复制第二份顺延规则**（规格 §7 明禁）。
+ */
+export function findExecutableExit(
   barsByRelativeDay: ReadonlyMap<number, NormalizedFoundationBar>,
-  targetDay: number
+  targetDay: number,
+  maxRelativeDay: number = FIRST_BOARD_PULLBACK_MAX_RELATIVE_DAY
 ): {
   day: number;
   price: number;
@@ -163,7 +179,7 @@ function findExecutableExit(
   }
   for (
     let day = targetDay + 1;
-    day <= FIRST_BOARD_PULLBACK_MAX_RELATIVE_DAY;
+    day <= maxRelativeDay;
     day += 1
   ) {
     const bar = barsByRelativeDay.get(day);

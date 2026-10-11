@@ -37,6 +37,11 @@ import {
   firstLimitPullbackPrefixes,
   firstLimitPullbackPosts,
 } from "../../drizzle/schema";
+import {
+  chunkArray,
+  defaultConcurrency,
+  mapWithConcurrency,
+} from "../datasetRegistry/concurrency";
 import type { FirstLimitPullbackEvent, FirstLimitPullbackRawBar } from "../datasetRegistry/types";
 import { STRUCTURAL_COLUMNS } from "../researchRuntime/datasetColumns";
 import type { RegistryResearchDatasetReader, ResearchDatasetReader } from "../researchRuntime/datasetReader";
@@ -71,6 +76,69 @@ export {
   EXPERIMENT_EVENT_SCAN_HARD_LIMIT,
   EXPERIMENT_EVENT_SCAN_LIMIT,
 };
+
+// ---------------------------------------------------------------------------
+// `RECOVERY-LIGHT-ST-007` TASK B —— 行情读取的**相对日分批**与**有界并发**
+// ---------------------------------------------------------------------------
+//
+// ## 为什么不是「加快 SQL」
+//
+// 跨境 TiDB 上实验的耗时构成里，**往返次数**是主项而不是 SQL 本身：
+// 实测同一次 SMOKE（6 账户）中 `barQueryCount = 890`、`postRowCount = 1,560,800`
+// （80 相对日 × ceil(19,510/2,000) 块 = 800 次 post + 3 相对日 × 30 块 = 90 次 prefix），
+// 而进程 CPU 只烧了约 60 s —— 也就是说**绝大部分墙钟是在等往返**。
+//
+// 旧的读法把「相对日」当成最外层循环：每个相对日 × 每个 `IN (eventId…)` 分块各发一条
+// `SELECT … WHERE datasetVersionId = ? AND eventId IN (…) AND relativeDay IN (…)`
+// —— 读取层（`loadRawBarsBatch`）**本来就接受复数 `relativeDays`**，只是端口每次都只塞 1 天。
+//
+// ## 本改动的两条正交优化（都在同一份读取链内）
+//
+// 1. **相对日分批**：把声明过的相对日按 `barDayBatchSize` 连续切片，一片一次查询
+//    ⇒ 往返次数 ÷ 片长，**读取行数不变**（同一批行只是被合并进更少的响应）。
+// 2. **有界并发**：把「(相对日片 × 事件分块)」展开成查询任务，用仓库既有的有界并发原语
+//    `mapWithConcurrency`（`server/datasetRegistry/concurrency.ts`，与连接池 `connectionLimit`
+//    对齐）叠起来 ⇒ 墙钟 ≈ 往返次数 / 并发度。
+//
+// 🔴 **语义不变**：相对日仍必须是声明过的白名单；`observation` 仍走 PIT 结构闸门与
+//    `freezeSelection` 前置断言；结果按 `relativeDay` 拆回**逐日**数组，逐日缓存与
+//    逐日返回的对外形状**逐字不变**；`barDayBatchSize = 1 && concurrency = 1`
+//    就是旧路径的逐查询等价形态（回归时可用环境变量强制退回）。
+//
+// ## 开关（**端口缺省 = 旧行为**；生产装配 `defaults.ts` 显式选择优化形态）
+//
+// | 环境变量 | 作用 | 生产装配缺省 |
+// |---|---|---|
+// | `EXPERIMENT_BAR_DAY_BATCH` | 每次查询携带的相对日数（1 = 逐日，旧行为） | 8 |
+// | `EXPERIMENT_BAR_READ_CONCURRENCY` | 在飞的行情查询上限（1 = 串行，旧行为） | `defaultConcurrency()` |
+// | `EXPERIMENT_BAR_CHUNK_SIZE` | 单个 `IN (eventId…)` 的事件数 | `EXPERIMENT_BAR_BATCH_SIZE` |
+//
+// 🔴 **为什么端口本身的缺省仍是 `1`（逐日/串行）**：端口是被几十个实验与单测直接构造的公共件，
+//    「缺省静默改变每次读法的查询形状」会让既有断言（例如 `datasetPort.test.ts` 的
+//    「同一个相对日只读一次」逐调用计数）在**未评审**的情况下变红。因此这里把选择权交给
+//    **生产装配**（`server/researchExperiments/defaults.ts` 显式传入 `resolveBarDayBatchSize()` /
+//    `resolveBarReadConcurrency()`）：真实 Run 走优化形态，既有调用方与单测逐字不变。
+
+/** 生产装配使用的相对日片长缺省值（实测标定见 `RESULT-…-LIGHT-ST-007`）。 */
+export const EXPERIMENT_BAR_DAY_BATCH_DEFAULT = 8;
+
+function resolvePositiveIntEnv(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback;
+}
+
+/**
+ * 生产装配的相对日片长（`EXPERIMENT_BAR_DAY_BATCH`；非法/缺省取
+ * `EXPERIMENT_BAR_DAY_BATCH_DEFAULT`）。置 `1` 可**无条件退回**旧的逐日读法做对照。
+ */
+export function resolveBarDayBatchSize(): number {
+  return resolvePositiveIntEnv(process.env.EXPERIMENT_BAR_DAY_BATCH, EXPERIMENT_BAR_DAY_BATCH_DEFAULT);
+}
+
+/** 生产装配的行情读并发上限（`EXPERIMENT_BAR_READ_CONCURRENCY`；缺省 = 连接池对齐值）。 */
+export function resolveBarReadConcurrency(): number {
+  return resolvePositiveIntEnv(process.env.EXPERIMENT_BAR_READ_CONCURRENCY, defaultConcurrency());
+}
 
 /** 列投影的可用表（列名白名单的权威来源 = drizzle 表对象）。 */
 const COLUMN_TABLES = {
@@ -238,12 +306,28 @@ export function createRegistryExperimentDatasetPort(deps: {
   }) => Promise<ExperimentDatasetVersionOption[]>;
   /** 事件分页大小（每次 `loadEventPage` 的行数）；缺省 `EXPERIMENT_EVENT_PAGE_SIZE`。 */
   eventPageSize?: number;
-  /** 行情批量读的分块大小；缺省 `EXPERIMENT_BAR_BATCH_SIZE`。 */
+  /**
+   * 行情批量读的**事件分块**大小；缺省 `EXPERIMENT_BAR_BATCH_SIZE`
+   * （可用 `EXPERIMENT_BAR_CHUNK_SIZE` 覆盖）。
+   */
   barBatchSize?: number;
+  /**
+   * 每次行情查询携带的**相对日数**（≥1）；**缺省 `1`** = 每个相对日一条查询（旧行为）。
+   * 生产装配用 `resolveBarDayBatchSize()` 显式选择优化形态（缺省片长 8）。
+   */
+  barDayBatchSize?: number;
+  /**
+   * 在飞的行情查询上限（≥1）；**缺省 `1`** = 串行（旧行为）。
+   * 生产装配用 `resolveBarReadConcurrency()` 显式选择优化形态（缺省 = 连接池对齐值 8）。
+   */
+  barReadConcurrency?: number;
 }): ExperimentDatasetPort {
   const reader = deps.reader;
   const pageSize = deps.eventPageSize ?? EXPERIMENT_EVENT_PAGE_SIZE;
-  const barBatchSize = deps.barBatchSize ?? EXPERIMENT_BAR_BATCH_SIZE;
+  const barBatchSize =
+    deps.barBatchSize ?? resolvePositiveIntEnv(process.env.EXPERIMENT_BAR_CHUNK_SIZE, EXPERIMENT_BAR_BATCH_SIZE);
+  const barDayBatchSize = deps.barDayBatchSize ?? 1;
+  const barReadConcurrency = deps.barReadConcurrency ?? 1;
 
   async function getVersionFacts(datasetVersionId: number): Promise<ExperimentDatasetFacts | null> {
     const context: ResearchDatasetVersionContext | null = await reader.getVersionContext(datasetVersionId);
@@ -324,6 +408,22 @@ export function createRegistryExperimentDatasetPort(deps: {
     };
 
     const barCache = new Map<string, Promise<readonly ExperimentBarRow[]>>();
+    /**
+     * **相对日片**缓存（`RECOVERY-LIGHT-ST-007` TASK B）。
+     *
+     * 一次「相对日片 × 事件分块」的读会一次性填满该片内**每个**相对日的 `barCache`
+     * ⇒ 同一片内的并发/后续调用只共享一个在飞 Promise（不重复发查询）。
+     */
+    const barDayGroupCache = new Map<string, Promise<void>>();
+    /** 相对日 → 它所属的片（片由**声明过的**相对日顺序切片，取值稳定）。 */
+    const prefixGroupOfDay = new Map<number, readonly number[]>();
+    for (const group of chunkArray(prefixDays, barDayBatchSize)) {
+      for (const day of group) prefixGroupOfDay.set(day, group);
+    }
+    const postGroupOfDay = new Map<number, readonly number[]>();
+    for (const group of chunkArray(postDays, barDayBatchSize)) {
+      for (const day of group) postGroupOfDay.set(day, group);
+    }
     let selectedEventIds: Set<string> | null = null;
 
     function freezeSelection(eventIds: readonly string[]): void {
@@ -388,28 +488,41 @@ export function createRegistryExperimentDatasetPort(deps: {
     }
 
     /**
-     * 批量读一天的行情，**按 `barBatchSize` 分块**。
+     * 批量读**一组相对日**的行情，按 `barBatchSize` 分事件块、按 `barReadConcurrency` 并发。
      *
      * 🔴 为什么必须分块：读取层的批量接口实现是**单条** `IN (eventId…)` 查询。
      *    全量扫描时 eventIds 上万，一次性下推会让 SQL 参数表无界膨胀
-     *    （参数包 / 解析开销 / 计划退化）。分块后查询次数 = 「每相对日 × 块数」，
+     *    （参数包 / 解析开销 / 计划退化）。分块后查询次数 = 「相对日片数 × 块数」，
      *    量级仍是 O(相对日数 × N/块)，而不是 O(事件数 × 相对日数)。
+     *
+     * 🔴 `RECOVERY-LIGHT-ST-007` TASK B：`relativeDays` 一次性下推（读取层本来就接受复数），
+     *    并把独立的 `(片 × 块)` 查询用有界并发叠起来。返回**按相对日拆好**的映射，
+     *    对外逐日形状与逐日读法**逐字相同**（只是行来自更少的响应）。
      */
-    async function loadBars(
+    async function loadBarsForDays(
       role: "prefix" | "post",
-      relativeDay: number,
+      relativeDays: readonly number[],
       eventIds: readonly string[],
-    ): Promise<readonly ExperimentBarRow[]> {
+    ): Promise<Map<number, ExperimentBarRow[]>> {
       // 物理角色（prefix/post）与声明角色（feature/observation）的映射**只在这里**发生。
       const columnRole: "feature" | "observation" = role === "prefix" ? "feature" : "observation";
       const projected = columns[columnRole];
-      const out: ExperimentBarRow[] = [];
+      const byDay = new Map<number, ExperimentBarRow[]>();
+      for (const day of relativeDays) byDay.set(day, []);
+      const tasks: (readonly string[])[] = [];
       for (let start = 0; start < eventIds.length; start += barBatchSize) {
-        const chunk = eventIds.slice(start, start + barBatchSize);
+        tasks.push(eventIds.slice(start, start + barBatchSize));
+      }
+      /**
+       * 🔴 **保序**：`mapWithConcurrency` 的结果与输入**按序对应**，且这里按「块序 → 块内读取序」
+       * 逐块拼回 ⇒ 同一相对日的行序与旧的「串行逐块」读法**逐行相同**。
+       * 并发只改变**发出顺序**，不改变**结果顺序**（否则产物指纹会因调度抖动而不稳）。
+       */
+      const perChunkRows = await mapWithConcurrency(tasks, async (chunk) => {
         const query = {
           datasetVersionId: facts.datasetVersionId,
           eventIds: chunk,
-          relativeDays: [relativeDay],
+          relativeDays: [...relativeDays],
           columns: projections[columnRole],
         };
         const rows =
@@ -417,18 +530,59 @@ export function createRegistryExperimentDatasetPort(deps: {
             ? await reader.loadPrefixBars(query)
             : await reader.loadPostBars(query);
         stats.barQueryCount += 1;
-        for (const bar of rows) out.push(toBarRow(bar, projected));
+        return rows.map((bar) => toBarRow(bar, projected));
+      }, barReadConcurrency);
+      for (const rows of perChunkRows) {
+        for (const row of rows) {
+          const bucket = byDay.get(row.relativeDay);
+          if (bucket === undefined) continue;
+          bucket.push(row);
+        }
       }
       if (role === "prefix") {
-        stats.prefixRowCount += out.length;
+        let count = 0;
+        for (const rows of byDay.values()) count += rows.length;
+        stats.prefixRowCount += count;
       } else {
-        stats.postRowCount += out.length;
-        stats.maxPostRelativeDayRead =
-          stats.maxPostRelativeDayRead === null
-            ? relativeDay
-            : Math.max(stats.maxPostRelativeDayRead, relativeDay);
+        let count = 0;
+        for (const rows of byDay.values()) count += rows.length;
+        stats.postRowCount += count;
+        for (const relativeDay of relativeDays) {
+          stats.maxPostRelativeDayRead =
+            stats.maxPostRelativeDayRead === null
+              ? relativeDay
+              : Math.max(stats.maxPostRelativeDayRead, relativeDay);
+        }
       }
-      return out;
+      return byDay;
+    }
+
+    /**
+     * 确保某个相对日所属的**片**已读入 `barCache`（每片只发一轮查询，并发调用共享同一次读）。
+     *
+     * 返回该片的 Promise；调用方随后从 `barCache` 取自己要的那一天。
+     */
+    function ensureDayGroupLoaded(
+      role: "prefix" | "post",
+      group: readonly number[],
+      eligibleEvents: readonly { readonly eventId: string }[],
+    ): Promise<void> {
+      const key = `${role}:${group[0] ?? "empty"}:${group[group.length - 1] ?? "empty"}`;
+      let pending = barDayGroupCache.get(key);
+      if (pending === undefined) {
+        pending = (async () => {
+          const byDay = await loadBarsForDays(
+            role,
+            group,
+            eligibleEvents.map((event) => event.eventId),
+          );
+          for (const [day, rows] of byDay) {
+            barCache.set(`${role === "prefix" ? "prefix" : "post"}:${day}`, Promise.resolve(rows));
+          }
+        })();
+        barDayGroupCache.set(key, pending);
+      }
+      return pending;
     }
 
     const access: ExperimentDatasetAccess = {
@@ -451,19 +605,15 @@ export function createRegistryExperimentDatasetPort(deps: {
           );
         }
         const key = `prefix:${relativeDay}`;
-        let pending = barCache.get(key);
-        if (pending === undefined) {
-          pending = (async () => {
-            const events = await access.events();
-            return loadBars(
-              "prefix",
-              relativeDay,
-              events.map((e) => e.eventId),
-            );
-          })();
-          barCache.set(key, pending);
-        }
-        return pending;
+        const cached = barCache.get(key);
+        if (cached !== undefined) return cached;
+        const events = await access.events();
+        await ensureDayGroupLoaded(
+          "prefix",
+          prefixGroupOfDay.get(relativeDay) ?? [relativeDay],
+          events,
+        );
+        return barCache.get(key) ?? [];
       },
       async observation(relativeDay: number) {
         // 🔴 结构级 PIT 闸门：未声明 usesForwardData 时**调用即抛**。
@@ -491,23 +641,19 @@ export function createRegistryExperimentDatasetPort(deps: {
         // 空样本集可以继续走“无观测数据”的结果组装；没有样本时严禁再去触碰未来数据。
         if (selectedEventIds.size === 0) return [];
         const key = `post:${relativeDay}`;
-        let pending = barCache.get(key);
-        if (pending === undefined) {
-          pending = (async () => {
-            const events = await access.events();
-            const selected = selectedEventIds;
-            const eligibleEvents = selected === null
-              ? events
-              : events.filter((event) => selected.has(event.eventId));
-            return loadBars(
-              "post",
-              relativeDay,
-              eligibleEvents.map((e) => e.eventId),
-            );
-          })();
-          barCache.set(key, pending);
-        }
-        return pending;
+        const cached = barCache.get(key);
+        if (cached !== undefined) return cached;
+        const events = await access.events();
+        const selected = selectedEventIds;
+        const eligibleEvents = selected === null
+          ? events
+          : events.filter((event) => selected.has(event.eventId));
+        await ensureDayGroupLoaded(
+          "post",
+          postGroupOfDay.get(relativeDay) ?? [relativeDay],
+          eligibleEvents,
+        );
+        return barCache.get(key) ?? [];
       },
     };
 

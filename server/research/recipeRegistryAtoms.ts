@@ -52,6 +52,11 @@ export {
   CALIBRATED_N5_EVENT_FEATURE_ID,
 } from "./recipeFeatures/rollingThreeFactorScoreFeatures";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
+import {
+  EVENT_STATE_AMPLITUDE_FEATURE_IDS,
+  getDefaultFeatureRegistry,
+} from "../strategyCore/featureRegistry";
+import { toCoreBarWindow } from "../strategyCore/production/barWindow";
 
 // ---------------------------------------------------------------------------
 // 可用性声明
@@ -337,6 +342,67 @@ export function buildCalibratedN5EventFeatureProvider(point: DecisionPoint): Fea
       if (bars.length < 6) return null;
       const raw = computeRollingThreeFactorRaw(bars.slice(0, 6));
       return raw === null ? null : calibratedN5ThreeFactorCompositeScoreOf(raw);
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 后事件状态振幅（EVENT_STATE_LONG 族）—— **复用 Strategy Core 的同一份定义**
+// ---------------------------------------------------------------------------
+
+/**
+ * 后事件状态振幅窗口（冻结：rd11~15）。与
+ * `server/strategyCore/featureRegistry.ts#EVENT_STATE_AMPLITUDE_WINDOW` **同源**，
+ * 本处只是把它读出来做可读性说明，不另立数值。
+ */
+export const EVENT_STATE_AMPLITUDE_FEATURE_VERSION = "1.0.0";
+
+/**
+ * 由 **Strategy Core 注册表**构造 rd11~15 振幅特征（`maxAmp5` / `avgAmp5`）的 FeatureProvider。
+ *
+ * 🔴 为什么这样写（口径唯一）：
+ *   本函数**不复制**振幅公式。它在构造期从 `getDefaultFeatureRegistry()` 取回 Core 的
+ *   `FeatureDefinition`，运行期直接调用它的 `compute`。bar 序列 → Core 时间语义
+ *   （带 `relativeDay` 的 `VisibleBar[]`，rd0 = 序列首根）走**唯一转换入口**
+ *   `strategyCore/production/barWindow.ts#toCoreBarWindow`。
+ *
+ *   因此：Core 里那两个特征的定义一旦变化，本配方**自动跟随**；不存在「研究报告一份实现、
+ *   平台执行另一份实现」的第二套口径。
+ *
+ * ⚠️ 与 `research` 侧旧 harness 的关系：`scripts/_scratch/stage1run.ts` 等曾各自手写
+ *   `amp5()`（`bars.slice(-6)`）。那是**历史研究副本**，本函数是正式链路的唯一实现。
+ */
+export function buildEventStateAmplitudeFeatureProvider(
+  featureId: string,
+  point: DecisionPoint,
+): FeatureProvider {
+  const definition = getDefaultFeatureRegistry().get(featureId);
+  if (definition === null) {
+    throw new StrategyRecipeRuntimeError(
+      "RECIPE_FEATURE_NOT_PRODUCED",
+      `配方特征 \`${featureId}\` 未在 Strategy Core 注册（已登记：` +
+        `${EVENT_STATE_AMPLITUDE_FEATURE_IDS.maxAmp5}、${EVENT_STATE_AMPLITUDE_FEATURE_IDS.avgAmp5}）—— ` +
+        `拒绝在本层另写一套振幅实现。`,
+    );
+  }
+  return makeBarFeatureProvider({
+    featureId,
+    version: definition.version,
+    availability: samePointAvailability(point),
+    compute: (bars, decisionTime) => {
+      if (bars.length === 0) return null;
+      const window = toCoreBarWindow(bars);
+      const visible = window.universe.bars;
+      const value = definition.compute({
+        asOf: decisionTime,
+        bars: visible,
+        // rd0 = 序列首根（`toCoreBarWindow` 的锚定口径 = 继承 legacy `eventBaselineOf`）。
+        eventDayBar: visible[0] ?? null,
+        // 振幅特征不读事件日字段与参数；给空实现即可（不臆造值）。
+        eventField: () => null,
+        parameters: {},
+      });
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
     },
   });
 }

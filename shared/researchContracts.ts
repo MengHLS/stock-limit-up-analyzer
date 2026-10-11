@@ -1530,6 +1530,16 @@ export const closedLoopRunResultSchema = z.object({
        * 用途：让「界面上改了哪些、这次到底按什么跑的」一眼可辨，杜绝静默口径漂移。
        */
       runtimeOverrides: z.array(z.string()).optional(),
+      /**
+       * EVENT-STATE-LONG-EXECUTION-PARITY-001 — 本次**执行尾窗**（交易日，可选）。
+       *
+       * 事件窗策略的行情覆盖 = `rd ≤ 观察窗末端 + 1 + 本值`；**决策成员范围不变**。
+       * 由策略已声明的 `TIME_EXIT`（`TRADING_DAY`）派生，缺省 `0`（缺省字段 = 既有行为）。
+       * 进契约的目的：让「持仓期读了多少行情」成为可审计的留档事实。
+       */
+      eventWindowExitTailTradingDays: z.number().int().min(0).optional(),
+  /** 夹取前的派生尾窗（仅当被数据集 post 上限夹取时存在；两者同时可见 = 不静默）。 */
+  eventWindowExitTailTradingDaysClampedFrom: z.number().int().min(0).optional(),
       simulation: z.object({
         initialCapital: z.number(),
         maxPositions: z.number().nullable(),

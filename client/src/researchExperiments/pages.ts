@@ -39,7 +39,12 @@ import CompositeRunnerT74CarryoverRefreshPage from "@experiments/first-board-pul
 import CompositeRunnerT74LateEntryPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-late-entry/page";
 import CompositeRunnerT74EventGatePage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-event-gate/page";
 import CompositeRunnerT74SubNewPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-subnew/page";
+import CompositeRunnerT74InvertedPage from "@experiments/first-board-pullback/composite-runner-newhigh3-t74-inverted/page";
 import TrendEntryMaV1Page from "@experiments/first-board-pullback/trend-entry-ma-v1/page";
+import RollingPoolRightTailMvpPage from "@experiments/first-board-pullback/rolling-pool-right-tail-mvp/page";
+import RollingPoolEarlyEntryRunnerPage from "@experiments/first-board-pullback/rolling-pool-early-entry-runner/page";
+import RollingPoolObservationWindowPage from "@experiments/first-board-pullback/rolling-pool-observation-window/page";
+import RollingPoolRecoveryStPage from "@experiments/first-board-pullback/rolling-pool-recovery-st/page";
 import BodyFilteredExitCurveStudyPage from "@experiments/first-board-pullback/body-filtered-exit-curve-study/page";
 import BodyMaSupportScreenStudyPage from "@experiments/first-board-pullback/body-ma-support-screen-study/page";
 import CompositeFactorEqualWeightStudyPage from "@experiments/first-board-pullback/composite-factor-equal-weight-study/page";
@@ -118,7 +123,12 @@ export const EXPERIMENT_PAGES: Readonly<
   "first-board-pullback/composite-runner-newhigh3-t74-late-entry": CompositeRunnerT74LateEntryPage,
   "first-board-pullback/composite-runner-newhigh3-t74-event-gate": CompositeRunnerT74EventGatePage,
   "first-board-pullback/composite-runner-newhigh3-t74-subnew": CompositeRunnerT74SubNewPage,
+  "first-board-pullback/composite-runner-newhigh3-t74-inverted": CompositeRunnerT74InvertedPage,
   "first-board-pullback/trend-entry-ma-v1": TrendEntryMaV1Page,
+  "first-board-pullback/rolling-pool-right-tail-mvp": RollingPoolRightTailMvpPage,
+  "first-board-pullback/rolling-pool-early-entry-runner": RollingPoolEarlyEntryRunnerPage,
+  "first-board-pullback/rolling-pool-observation-window": RollingPoolObservationWindowPage,
+  "first-board-pullback/rolling-pool-recovery-st": RollingPoolRecoveryStPage,
   "first-board-pullback/entry-aligned-exit-horizon-study":
     EntryAlignedExitHorizonStudyPage,
   "first-board-pullback/first-board-body-study": FirstBoardBodyStudyPage,

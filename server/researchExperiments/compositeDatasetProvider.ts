@@ -70,6 +70,15 @@ export interface CompositeExtensionSelectionArm {
   readonly topN?: number;
   /** P10：该臂在排序前剔除上市龄 < N 个自然日的候选；缺省 / null = 不过滤。 */
   readonly excludeListedWithinDays?: number | null;
+  /**
+   * `TAIL-SELECTION-002`：该臂的 3F **振幅取向**；缺省 `"LOW"` = 既有冻结口径（逐位不变）。
+   *
+   * 🔴 取向**烙在候选扫描**里（`buildCompositeEvents`），所以不同取向的臂会选中**不同事件集合**；
+   * 扩展面板按「声明臂选中事件的**并集**」装载 rd17..80 ⇒ **每个用到的取向都必须在此声明**，
+   * 否则该取向选中的事件拿不到扩展行情，Runner 延长会在 rd16 被数据边界截断（实测会从
+   * 1434 笔塌到 79 笔，且**看起来像策略变差**）。
+   */
+  readonly amplitudeOrientation?: "LOW" | "HIGH";
 }
 
 export interface CompositeDatasetBuildRequest {
@@ -196,16 +205,33 @@ export function createDefaultCompositeDatasetProvider(
   return {
     async build(request) {
       const baseline = await loadBaseline();
-      // 选股只为确定「哪些事件需要扩展行」；使用与实验完全相同的共享实现。
-      const built = buildCompositeEvents(baseline, COMPOSITE_RUNNER_MAX_AMPLITUDE);
       const selectionArms: readonly CompositeExtensionSelectionArm[] =
         request.extensionSelectionArms ?? [{ id: "bridge_selection", trendWeight: null }];
+      // 选股只为确定「哪些事件需要扩展行」；使用与实验完全相同的共享实现。
+      //
+      // 🔴 TAIL-SELECTION-002：取向烙在扫描里 ⇒ **按取向分组建候选**（每个用到的取向只扫一次），
+      // 缺省（无臂声明 HIGH）只扫 LOW 一次 ⇒ 与既有行为**逐位一致**。
+      const orientationOf = (arm: CompositeExtensionSelectionArm): "LOW" | "HIGH" =>
+        arm.amplitudeOrientation ?? "LOW";
+      const builtByOrientation = new Map<"LOW" | "HIGH", ReturnType<typeof buildCompositeEvents>>();
+      const builtFor = (orientation: "LOW" | "HIGH"): ReturnType<typeof buildCompositeEvents> => {
+        const existing = builtByOrientation.get(orientation);
+        if (existing !== undefined) return existing;
+        const next = buildCompositeEvents(baseline, COMPOSITE_RUNNER_MAX_AMPLITUDE, {
+          amplitudeOrientation: orientation,
+        });
+        builtByOrientation.set(orientation, next);
+        return next;
+      };
+      for (const arm of selectionArms) builtFor(orientationOf(arm));
       const needsListingDates = selectionArms.some(
         (arm) => arm.excludeListedWithinDays !== undefined && arm.excludeListedWithinDays !== null,
       );
       const candidateSecurityIds = new Set<string>();
-      for (const list of built.bucketCandidatesByDate.values()) {
-        for (const candidate of list) candidateSecurityIds.add(candidate.event.securityId);
+      for (const built of builtByOrientation.values()) {
+        for (const list of built.bucketCandidatesByDate.values()) {
+          for (const candidate of list) candidateSecurityIds.add(candidate.event.securityId);
+        }
       }
       const listingDateBySecurityId = needsListingDates || request.includeListingDates === true
         ? await loadListingDatesFn([...candidateSecurityIds].map((id) => id.split("::event:")[0]!))
@@ -231,6 +257,7 @@ export function createDefaultCompositeDatasetProvider(
               + "（trendWeight / minTrendScore / v2Weight 只能选一个）。",
           );
         }
+        const built = builtFor(orientationOf(selectionArm));
         const arm = buildCompositeSourceRun({
           armId: selectionArm.id,
           label: selectionArm.v2Weight !== undefined && selectionArm.v2Weight !== null

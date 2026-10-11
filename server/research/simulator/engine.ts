@@ -75,6 +75,9 @@ import {
 } from "./advancedStop";
 import { evaluateRunnerBridgePolicyState, evaluateRunnerHoldingBridgeStateByRegistry } from "../stateFactorRegistry";
 import type {
+  ExecutionEligibilityAuditEntry,
+  ExecutionEligibilityDecision,
+  ExecutionEligibilityUnknownPolicy,
   PlanSkipCode,
   ReentryBlockCode,
   SecurityBoard,
@@ -89,8 +92,11 @@ import type {
   SustainedCloseDeclineReversalExitPolicyDefinition,
 } from "../exitPolicyCommon";
 import {
+  DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY,
+  EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES,
   TRADE_SIMULATION_RUN_RECORD_KIND,
   TRADE_SIMULATION_RUN_RECORD_VERSION,
+  executionEligibilityStatusAllowed,
 } from "./types";
 // PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
 import { perfBegin, perfCount, perfEnd, perfRun } from "../../observability";
@@ -249,6 +255,23 @@ function buildConfigSnapshot(
     maxDailyBuys: config.maxDailyBuys ?? null,
     directionPolicy: config.directionPolicy ?? "longOnly",
     reentryPolicy: config.reentryPolicy ?? null,
+    // EXEC-ELIGIBILITY-001：只在声明闸门时出现该字段（未声明 ⇒ 快照逐字节不变）。
+    ...(config.executionEligibilityGate === undefined || config.executionEligibilityGate === null
+      ? {}
+      : {
+          executionEligibility: {
+            gateId: config.executionEligibilityGate.gateId,
+            policyVersion: config.executionEligibilityGate.policyVersion,
+            /**
+             * EXEC-ELIGIBILITY-LIGHT-001：**只在显式声明**未知处理政策时多出该键 ⇒
+             * 未声明的既有快照与冻结指纹**逐字节不变**（既有断言是精确对象相等）。
+             */
+            ...(config.executionEligibilityUnknownPolicy === undefined
+              || config.executionEligibilityUnknownPolicy === null
+              ? {}
+              : { unknownPolicy: config.executionEligibilityUnknownPolicy }),
+          },
+        }),
     marketRegimeGate:
       config.marketRegimeGate === undefined || config.marketRegimeGate === null
         ? null
@@ -496,6 +519,64 @@ export function runTradeSimulation(
   });
   const cost: CostModel = frozenClone(simConfig.cost);
 
+  /**
+   * EXEC-ELIGIBILITY-001（FIX-005 / F1）— **可选**执行资格闸门。
+   *
+   * 🔴 缺省（`undefined` / `null`）⇒ 本函数行为**逐字节不变**（既有 Run 的指纹不变）。
+   * 🔴 只对**买入**生效；卖出与已持仓退出完全不经过它。
+   * 🔴 闸门由调用方注入（研究装配层）；本层不 import 研究侧模块、不直连数据库。
+   */
+  const executionEligibilityGate = simConfig.executionEligibilityGate ?? null;
+  if (
+    executionEligibilityGate !== null
+    && (typeof executionEligibilityGate.gateId !== "string"
+      || executionEligibilityGate.gateId.length === 0
+      || typeof executionEligibilityGate.policyVersion !== "string"
+      || executionEligibilityGate.policyVersion.length === 0
+      || typeof executionEligibilityGate.decideBuy !== "function")
+  ) {
+    throw new TradeSimulationError(
+      "EXECUTION_ELIGIBILITY_GATE_INVALID",
+      "交易模拟：simConfig.executionEligibilityGate 形状非法"
+        + "（需要 { gateId: string, policyVersion: string, decideBuy(input): decision }）"
+        + " —— 拒绝以「没有闸门」的语义静默跑下去",
+    );
+  }
+
+  /**
+   * EXEC-ELIGIBILITY-LIGHT-001（`RECOVERY-LIGHT-ST-007` §4）— **可选**未核验状态处理。
+   *
+   * 🔴 缺省 = `REJECT` ⇒ 既有行为逐字节不变。
+   * 🔴 只有**显式**声明 `ALLOW_WHEN_DECISION_ALLOWS` 时才可能放行 `UNKNOWN`；
+   *    `ST` 永远拒绝（见下面的 `executionEligibilityStatusAllowed`）。
+   * 🔴 声明了未知政策却没有闸门 ⇒ 配置自相矛盾（政策无处生效）⇒ **响亮失败**，
+   *    不静默忽略（那会让「本轮声明允许 UNKNOWN」变成一句空话）。
+   */
+  const executionEligibilityUnknownPolicy: ExecutionEligibilityUnknownPolicy =
+    simConfig.executionEligibilityUnknownPolicy ?? DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY;
+  if (
+    !(EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES as readonly string[])
+      .includes(executionEligibilityUnknownPolicy)
+  ) {
+    throw new TradeSimulationError(
+      "EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_INVALID",
+      `交易模拟：simConfig.executionEligibilityUnknownPolicy 取值非法`
+        + `（${JSON.stringify(executionEligibilityUnknownPolicy)}）；`
+        + `允许值只有 [${EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES.join(", ")}]`,
+    );
+  }
+  if (
+    executionEligibilityGate === null
+    && simConfig.executionEligibilityUnknownPolicy !== undefined
+    && simConfig.executionEligibilityUnknownPolicy !== null
+  ) {
+    throw new TradeSimulationError(
+      "EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_WITHOUT_GATE",
+      "交易模拟：声明了 executionEligibilityUnknownPolicy 但没有声明 executionEligibilityGate"
+        + " —— 未核验状态处理政策无处生效。拒绝静默忽略该声明。",
+    );
+  }
+
   const portfolio = new Portfolio(simConfig.initialCapital, tradingDates, {
     ...(maxPositions === null ? {} : { maxPositions }),
   });
@@ -545,6 +626,20 @@ export function runTradeSimulation(
   const equityCurve: EquityPoint[] = [];
   const skippedEntries: SkippedIntentEntry[] = [];
   let pending: PendingOrder[] = [];
+  /**
+   * EXEC-ELIGIBILITY-001 — 逐笔执行资格检查记录（按订单处理顺序，确定性）。
+   *
+   * 🔴 只记录**真实发生**的调用（含被拒的那一笔），绝不事后按候选表推断。
+   */
+  const eligibilityChecks: {
+    readonly orderId: string;
+    readonly securityId: string;
+    readonly plannedDate: string;
+    readonly executionDate: string;
+    readonly decision: ExecutionEligibilityDecision;
+  }[] = [];
+  /** 通过闸门并且**真实成交**的买入订单（用于审计 outcome，不用于放行判定）。 */
+  const eligibilityFilledOrderIds = new Set<string>();
   /**
    * 已触发止损的持仓。
    *
@@ -729,6 +824,69 @@ export function runTradeSimulation(
         entry.side === "sell"
           ? triggeredExitReasonFor(entry.securityId) ?? entry.exitReason
           : null;
+
+      /**
+       * EXEC-ELIGIBILITY-001（FIX-005 / F1）— **买入**订单在真实成交时点先过资格闸门。
+       *
+       * 位置刻意放在**任何**成交副作用之前（报价 / 现金 / 持仓 / 成本 / 成交计数都不动），
+       * 且用 `date`（= 引擎本日真正要执行的交易日）作为**实际**检查日；
+       * 计划日 `entry.tradeDate` 原样记入审计 ⇒ 「计划 vs 实际」可对照。
+       * 🔴 卖出与已持仓退出**不受影响**（本分支只处理 `side === "buy"`）。
+       */
+      if (entry.side === "buy" && executionEligibilityGate !== null) {
+        const rawDecision = executionEligibilityGate.decideBuy({
+          securityId: entry.securityId,
+          plannedDate: entry.tradeDate,
+          executionDate: date,
+          side: "buy",
+        });
+        if (rawDecision === null || rawDecision === undefined || typeof rawDecision !== "object") {
+          throw new TradeSimulationError(
+            "EXECUTION_ELIGIBILITY_GATE_INVALID",
+            `交易模拟：执行资格闸门 \`${executionEligibilityGate.gateId}\` 在`
+              + `（${date}, ${entry.securityId}）没有返回判决对象 —— 无结论必须由闸门显式表达`
+              + "（`allowed: false`），不得以「没有返回」冒充放行",
+          );
+        }
+        const decision: ExecutionEligibilityDecision = rawDecision;
+        eligibilityChecks.push({
+          orderId: entry.orderId,
+          securityId: entry.securityId,
+          plannedDate: entry.tradeDate,
+          executionDate: date,
+          decision,
+        });
+        // 🔴 失败关闭：只有「显式放行 **且** status 在政策允许集合内」才允许继续。
+        //    `NORMAL` 恒允许；`UNKNOWN` 只在显式声明 `ALLOW_WHEN_DECISION_ALLOWS` 时允许；
+        //    `ST` 与任何其它取值一律拒绝（**即使**闸门错误地返回 `allowed = true`）。
+        const allowed =
+          decision.allowed === true
+          && executionEligibilityStatusAllowed(decision.status, executionEligibilityUnknownPolicy);
+        if (!allowed) {
+          stats.rejectedOrders += 1;
+          // 既有原因词表（`backtest/types.ts`）没有「执行资格」这一码；具名信息由 explanation
+          // **如实**带出（含 status / reason / provider / 计划日 vs 实际日），不新造第二套原因码。
+          stats.byReason.OTHER = (stats.byReason.OTHER ?? 0) + 1;
+          audit.recordOrder({
+            orderId: entry.orderId,
+            securityId: entry.securityId,
+            tradeDate: entry.tradeDate,
+            side: entry.side,
+            requestedQuantity: entry.quantity,
+            filledQuantity: 0,
+            status: "REJECTED",
+            rejectionReason: "OTHER",
+            explanation:
+              `执行资格闸门拒绝（gate=${executionEligibilityGate.gateId}`
+              + ` policy=${executionEligibilityGate.policyVersion}）：status=${decision.status}`
+              + ` reason=${decision.reason} provider=${decision.providerId}`
+              + ` checkedAt=${decision.checkedAt} 计划日=${entry.tradeDate} 实际日=${date}`
+              + `；未扣现金、未建仓、不计成交（隔夜转 ST / 无结论订单取消）。`,
+          });
+          continue;
+        }
+      }
+
       const bar = dayBars.get(entry.securityId);
       if (!bar) {
         // 停牌：当日非 universe 成员 → 无行 → 无成交（显式拒绝，不静默顺延）。
@@ -920,6 +1078,9 @@ export function runTradeSimulation(
       const orderStatus = result.status;
       if (result.status === "PARTIALLY_FILLED") stats.partialFills += 1;
       stats.totalFills += 1;
+      if (entry.side === "buy" && executionEligibilityGate !== null) {
+        eligibilityFilledOrderIds.add(entry.orderId);
+      }
       accumulateCost(entry.side, tradeCost, slippage);
 
       audit.recordFill(
@@ -1949,6 +2110,53 @@ export function runTradeSimulation(
   stats.totalOrders = orderSeq;
 
   // 11. 不可变总记录（追溯字段 + 指纹）。
+  /**
+   * EXEC-ELIGIBILITY-001（FIX-005 / F1）— 逐笔执行资格审计 + 🔴 **硬断言**。
+   *
+   * 断言：任何 `outcome === "FILLED"` 的买入必须 `status === "NORMAL"`；
+   * 例外**仅**在显式声明 `executionEligibilityUnknownPolicy = "ALLOW_WHEN_DECISION_ALLOWS"`
+   * 时放宽到 `UNKNOWN`（EXEC-ELIGIBILITY-LIGHT-001 / `RECOVERY-LIGHT-ST-007`）。
+   * 违反即**整轮抛错**（绝不允许「把 false 写进 CSV 然后继续报告收益」）。
+   * 🔴 审计记录**保留真实 `status`**（`UNKNOWN` 不改写为 `NORMAL`）。
+   */
+  const executionEligibilityAudit: readonly ExecutionEligibilityAuditEntry[] | null =
+    executionEligibilityGate === null
+      ? null
+      : eligibilityChecks.map((check) => ({
+          orderId: check.orderId,
+          securityId: check.securityId,
+          side: "buy" as const,
+          plannedDate: check.plannedDate,
+          executionDate: check.executionDate,
+          status: check.decision.status,
+          reason: check.decision.reason,
+          providerId: check.decision.providerId,
+          policyVersion: check.decision.policyVersion,
+          gateId: executionEligibilityGate.gateId,
+          evidenceFingerprint: check.decision.evidenceFingerprint,
+          checkedAt: check.decision.checkedAt,
+          plannedCheckDate: check.decision.plannedCheckDate,
+          outcome: eligibilityFilledOrderIds.has(check.orderId) ? "FILLED" : "REJECTED",
+        }));
+  if (executionEligibilityAudit !== null) {
+    const violations = executionEligibilityAudit.filter(
+      (row) =>
+        row.outcome === "FILLED"
+        && !executionEligibilityStatusAllowed(row.status, executionEligibilityUnknownPolicy),
+    );
+    if (violations.length > 0) {
+      throw new TradeSimulationError(
+        "EXECUTION_ELIGIBILITY_VIOLATION",
+        `交易模拟：${violations.length} 笔真实买入成交没有通过执行资格闸门`
+          + `（status ∉ ${executionEligibilityUnknownPolicy === "ALLOW_WHEN_DECISION_ALLOWS"
+            ? "NORMAL / UNKNOWN(本轮显式允许)"
+            : "NORMAL"}）`
+          + " —— 整轮失败，禁止继续报告收益。首笔："
+          + JSON.stringify(violations[0]),
+      );
+    }
+  }
+
   const body: Omit<TradeSimulationRun, "fingerprint"> = {
     recordKind: TRADE_SIMULATION_RUN_RECORD_KIND,
     recordVersion: TRADE_SIMULATION_RUN_RECORD_VERSION,
@@ -1979,6 +2187,10 @@ export function runTradeSimulation(
     costs: deepFreeze({ ...costSummary }),
     executionStats: deepFreeze({ ...stats, byReason: { ...stats.byReason } }),
     skipped: skippedEntries.map(entry => deepFreeze(entry)),
+    // 🔴 只在声明闸门时出现该字段（未声明 ⇒ 记录与其指纹逐字节不变）。
+    ...(executionEligibilityAudit === null
+      ? {}
+      : { executionEligibilityAudit: executionEligibilityAudit.map(entry => deepFreeze(entry)) }),
     audit: deepFreeze(audit.snapshot()),
   };
   const fingerprint = perfRun("backtest.fingerprint", () => computeTradeSimulationRunFingerprint(body));

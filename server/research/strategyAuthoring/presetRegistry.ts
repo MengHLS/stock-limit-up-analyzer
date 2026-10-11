@@ -447,6 +447,8 @@ function buildStopOverridePresets(): AtomicStrategyPreset[] {
  */
 const RECIPE_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   "leader-candidate-baseline": "涨幅前 5 名",
+  "event-state-long-amp5-top3": "后事件状态 · 低振幅 5 日最大值取前 3",
+  "strong-trend-reentry-select-all": "强趋势再入场 · 全部确认事件",
   "first-limit-pullback-3f-top1": "首板回踩 · 3F 评分取第 1",
   "first-limit-pullback-3f-top2": "首板回踩 · 3F 评分取前 2",
   "first-limit-pullback-3f-top3": "首板回踩 · 3F 评分取前 3",

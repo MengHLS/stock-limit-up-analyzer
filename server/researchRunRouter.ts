@@ -270,8 +270,14 @@ async function deriveDatasetGateSummary(): Promise<ResearchDatasetGateSummary> {
  * 可得性**（`ClosedLoopStageInputById` 要求的同链前驱产出）。后者以 `loopRun` 返回的
  * `stages[].blocked` 为准——例如只给 `evaluationInput` 而不含 backtest 阶段时，
  * evaluation 执行器可注册，但若没有 backtestSummary 种子，编排器仍会阻塞。
+ *
+ * 🔴 导出原因（EVENT-STATE-LONG-EXECUTION-PARITY-001）：该形状是
+ * `closedLoopBacktestRun` **读路径**（`getBacktests`）校验的契约字段。任何在
+ * `persistClosedLoopBacktestRun` 之外自己拼 `result.wiring` 的调用方都会写出
+ * 「落库成功但读不出来」的记录（实测：`wiring.requestedStages 等 6 项 expected array/boolean,
+ * received undefined`）。导出它 = 让复现工具复用**唯一实现**，而不是各拼一份。
  */
-function toWiringSummary(
+export function toWiringSummary(
   inputs: ClosedLoopWiringInputs,
   requested?: readonly ClosedLoopStageId[],
 ): ClosedLoopWiringSummary {

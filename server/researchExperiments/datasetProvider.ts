@@ -82,6 +82,10 @@ export function createRegistryProtocolDatasetProvider(deps: {
   eventScanLimit?: number;
   eventPageSize?: number;
   barBatchSize?: number;
+  /** `RECOVERY-LIGHT-ST-007` TASK B：相对日分批片长（缺省 = 端口旧行为 `1`）。 */
+  barDayBatchSize?: number;
+  /** `RECOVERY-LIGHT-ST-007` TASK B：在飞的行情查询上限（缺省 = 端口旧行为 `1`）。 */
+  barReadConcurrency?: number;
 }): ExperimentDatasetProvider {
   const port = createRegistryExperimentDatasetPort({
     reader: deps.reader,
@@ -91,6 +95,8 @@ export function createRegistryProtocolDatasetProvider(deps: {
     ...(deps.eventScanLimit !== undefined ? { eventScanLimit: deps.eventScanLimit } : {}),
     ...(deps.eventPageSize !== undefined ? { eventPageSize: deps.eventPageSize } : {}),
     ...(deps.barBatchSize !== undefined ? { barBatchSize: deps.barBatchSize } : {}),
+    ...(deps.barDayBatchSize !== undefined ? { barDayBatchSize: deps.barDayBatchSize } : {}),
+    ...(deps.barReadConcurrency !== undefined ? { barReadConcurrency: deps.barReadConcurrency } : {}),
   });
   return {
     datasetCode: deps.datasetCode,

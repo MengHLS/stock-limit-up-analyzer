@@ -70,15 +70,20 @@ strategy 阶段产物（strategyDocument / coreVersion）
       首日判定（关键）：今天成立 ∧ 昨天尚未成立  ⇒ 额外求一次「截到昨天」的窗口
           （WINDOW(ANY_DAY) 一旦成立会永久「已成立」⇒ 不能只看 ruleEvaluation.satisfied）
           ↓
-      runTradeSimulation(dataset, sourceRun, simConfig)   simulator/engine.ts:250
-          ├─ :440 逐日主循环
-          ├─ :671 planDecisionDay                            plan.ts:212
-          │    └─ :359 applyPositionSizing                   plan.ts:120（模块私有）
-          ├─ :684 positionSizing + initialCapital 透传
-          ├─ :512 executionModel.quote
-          ├─ :575-576 portfolio.buy / sell
-          ├─ :598 computeTradeCost
-          └─ :444 portfolio.settle()   ← T+1 三态账本每日结算
+      runTradeSimulation(dataset, sourceRun, simConfig)   simulator/engine.ts#runTradeSimulation
+          ├─ 逐日主循环
+          ├─ 🔴 RECOVERY-ST-FIX-005（F1，可选）：`simConfig.executionEligibilityGate` 声明时，
+          │     due-order 循环对 **buy** 先调 `decideBuy({securityId, plannedDate, executionDate})`：
+          │     `status !== "NORMAL"` 或 `allowed !== true` ⇒ **拒单**（早于报价 / 现金 / 持仓 /
+          │     成本 / 成交计数）；卖出与已持仓退出**不经过**该闸门。
+          │     缺省未声明 ⇒ 本链**逐字节不变**。收尾断言：FILLED ⇒ status === "NORMAL"。
+          ├─ planDecisionDay                            plan.ts#planDecisionDay
+          │    └─ applyPositionSizing                   plan.ts（模块私有）
+          ├─ positionSizing + initialCapital 透传
+          ├─ executionModel.quote
+          ├─ portfolio.buy / sell
+          ├─ computeTradeCost
+          └─ portfolio.settle()   ← T+1 三态账本每日结算
           ↓
       TradeSimulationRun { equityCurve, trades, auditTrail }
 ```
@@ -349,3 +354,63 @@ walkForward/executor.ts   ← 逐 Fold 串行编排（零回测代码、零 HTTP
    且全部读取判据在新进程里**逐条复现一致**（含四条撮合指纹）。
    🔴 二者不可互相替代：若「已完成」的判定依赖内存态，第 1 层会绿、第 2 层会露馅；
 3. **创建级**：同冻结配置的副 Run ⇒ `scheduleFingerprint` / fold 坐标一致。
+
+---
+
+## E-94 RECOVERY-ST-FIX-005 增量：**成交前执行资格闸门**（2026-10-11 · `9c5`）
+
+| 项 | 内容 |
+|---|---|
+| **新入口（可选）** | `SimulationConfig.executionEligibilityGate?: { gateId; policyVersion; decideBuy(input) }`（`server/research/simulator/types.ts`） |
+| **形状** | `ExecutionEligibilityCheckInput = { securityId, plannedDate, executionDate, side }`；`ExecutionEligibilityDecision = { allowed, status, reason, providerId, policyVersion, evidenceFingerprint, checkedAt, plannedCheckDate }` |
+| **落点（真实撮合链）** | `server/research/simulator/engine.ts#runTradeSimulation` 的 **due-order 循环**：`side === "buy"` 时**先**调 `decideBuy`，位置早于 `executionModel.quote` / `portfolio.buy` / `computeTradeCost` / `stats.totalFills` |
+| **拒绝语义** | `status !== "NORMAL"` **或** `allowed !== true` ⇒ `audit.recordOrder(REJECTED)` + `stats.rejectedOrders` + `continue`；**不扣现金、不建仓、不计成本、不计成功入场次数**；不递补其它候选 |
+| **不受影响** | 卖出与已持仓退出（`side === "sell"`）**完全不经过**闸门；`maxPositions` / `maxDailyBuys` / 退出政策 / 成本模型 / 排序都不变 |
+| **审计** | `TradeSimulationRun.executionEligibilityAudit?`（仅声明闸门时出现；未声明时字段缺失 ⇒ 记录与指纹逐字节不变）；收尾**硬断言** FILLED ⇒ `status === "NORMAL"`，否则抛 `EXECUTION_ELIGIBILITY_VIOLATION` |
+| **注入方** | `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#createStExecutionEligibilityGate`（研究装配层；纯撮合层**零反向依赖**，不连 DB） |
+| **与既有闸门的分工** | 确认日收盘资格只决定**候选池 / 排序 / 抽样**；成交日 ST 由本入口在**成交时刻**拒单（隔夜转 ST 不可能成交） |
+| **DB 影响** | **0 表 / 0 列 / 0 migration / 0 写入** |
+| **状态** | IMPLEMENTED（`pnpm run check` 0 错；真实 `runTradeSimulation` 验收见 `tests/server/researchExperiments/rollingPoolRecoveryStExecutionGate.test.ts`） |
+
+---
+
+## E-95 RECOVERY-ST-FIX-005 **续修 / Finding A** 增量：**权威装配配置入口（只装配、不撮合）**（2026-10-11 · `9c5b`）
+
+| 项 | 内容 |
+|---|---|
+| **修的是什么洞** | `runCompositeRunnerBacktest` 内部会**真的撮合一次**（`runTradeSimulation`），且**不接受**执行资格闸门；`rolling-pool-recovery-st` 实验曾**每组**调用它、只为取 `assembly.simulationConfig`（那次撮合的**结果被丢弃**）⇒ 即使正式账户已全部受闸门保护，这条**辅助路径仍可能买进一笔隔夜 ST** |
+| **新入口** | `server/research/compositeRunner/index.ts#assembleCompositeRunnerSimulationConfig`（**权威装配配置入口**，契约 `COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION = "composite-assembly-config/1.0.0"`） |
+| **入参 / 产物** | 入参 = `Omit<RunCompositeRunnerBacktestInput, "sourceRun">`（+ 可选 `corporateActionResolver`，用于复用解析器 / 纯合成测试不连库）；产物 = `{ contractVersion, simulationConfig, assemblyConfigFingerprint, assembly }` —— **结构上不存在** `run` / 交易 / 权益曲线 |
+| **与旧入口的关系** | `runCompositeRunnerBacktest` = **本入口 + `runTradeSimulation`**（同一段装配实现，**不存在第二份**）；因此两者产出的 `simulationConfig` 深层相等、配置指纹相等（测试实测） |
+| **装配链（未改）** | `assembleCompositeRunnerSimulationConfig` → `server/runWorkbenchAssembly/assemble.ts#assembleRunWorkbenchInputs`（唯一装配实现；注入数据集 ⇒ `resolveDataset` 走 `injected` 分支） |
+| **配置指纹** | `fingerprintSimulationConfig(config) = sha256(canonicalJson(配置可序列化面))`；不可序列化的函数以 `fn:<name>` 占位（**不静默丢弃**）。⚠️ 它不是 `run.fingerprint`，只是「两次装配是否同一份配置」的审计对账 |
+| **研究侧落点** | `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#run` 每组改用本入口（保留「跨组配置一致」断言），并在 `frozen-config.json` 的 `auxiliaryAssembly` 里留档入口名 / 契约版本 / 配置指纹 / `matchingExecuted: false` |
+| **缺省不变** | 未提供闸门时，装配请求对象**不多键**、`run.config` 无 `executionEligibility`、`simulationConfig` 与旧路径逐字节相同；既有调用方（`paperTrading3fTop3Runner/**` 与其它实验）**零改动** |
+| **反向依赖** | 纯撮合层（`server/research/simulator/**`）本轮**零改动**：不 import `research-experiments/**`、不连 DB；新入口只在 `server/research/compositeRunner` + 装配层 |
+| **DB 影响** | **0 表 / 0 列 / 0 migration / 0 写入**（本轮不跑 Run、不建 Dataset） |
+| **状态** | IMPLEMENTED（`pnpm run check` 0 错；真实撮合验收见 `tests/server/researchExperiments/rollingPoolRecoveryStAuxiliaryAssembly.test.ts`：装配期间撮合调用计数 = 0、注入闸门后隔夜 ST 零成交） |
+
+---
+
+## E-96 RECOVERY-LIGHT-ST-007 增量：**可选 UNKNOWN 处理声明** + **探索性轻量 ST 资格闸门**（2026-10-11 · `9c5b` 之后）
+
+> 目标：`docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md` §4。
+> 预注册：`docs/research/PREREG-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md`。
+
+| 项 | 内容 |
+|---|---|
+| **修的是什么** | E-94 的闸门**只**放行 `status === "NORMAL"`，收尾断言要求 `FILLED ⇒ NORMAL`。用户已明确授权本轮**探索性政策**：`UNKNOWN` 可参与、仅排除已有历史记录中的 `ST`。原实现下 `UNKNOWN` 一律拒单 ⇒ 无法表达该政策 |
+| **新可选声明** | `SimulationConfig.executionEligibilityUnknownPolicy?: "REJECT" \| "ALLOW_WHEN_DECISION_ALLOWS"`（`server/research/simulator/types.ts`）；常量 `EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES` / `DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY = "REJECT"` / 判据 `executionEligibilityStatusAllowed(status, policy)` |
+| **放行语义（唯一）** | `allowed === true` **且** `status === "NORMAL"` ⇒ 放行；**仅当显式声明** `ALLOW_WHEN_DECISION_ALLOWS` 时 `status === "UNKNOWN"` 也可放行；`status === "ST"` **永远拒绝**（即使闸门错误返回 `allowed = true`）；其它取值一律拒绝 |
+| **落点（真实撮合链，未新开路径）** | 仍是 `server/research/simulator/engine.ts#runTradeSimulation` 的 **due-order 循环**（E-94 的同一处），只把放行判据换成 `executionEligibilityStatusAllowed`；位置依旧早于 `executionModel.quote` / `portfolio.buy` / `computeTradeCost` / `stats.totalFills` |
+| **审计** | `executionEligibilityAudit[].status` **保留真实状态**（`UNKNOWN` **绝不**改写为 `NORMAL`）；收尾硬断言改为「FILLED ⇒ 政策允许集合」；`validate.ts` 的记录校验按 `record.config.executionEligibility.unknownPolicy` 同步 |
+| **快照（缺省不变）** | `SimulationConfigSnapshot.executionEligibility` 新增**可选** `unknownPolicy`，**只在显式声明时出现** ⇒ 未声明的既有快照与冻结指纹**逐字节不变**（既有精确对象断言与 digest 常量锁不被打扰） |
+| **非法配置** | 取值非法 ⇒ `SIM_CONFIG_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_INVALID`；声明了政策却**没有**闸门 ⇒ `SIM_CONFIG_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_WITHOUT_GATE`（引擎亦抛 `..._WITHOUT_GATE`）—— 拒绝静默忽略该声明 |
+| **新研究侧政策** | `research-experiments/shared/rollingPoolRecovery/knownStPolicy.ts`：政策 id `KNOWN_ST_ONLY_EXPLORATORY` / 版本 `recovery-known-st-only/1.0.0`；**缺省仍是原严格政策**（`recovery-st-execution-eligibility/1.0.0`）。行为表：已知 ST ⇒ 不进入排序候选 + 成交前拒单；明确正常记录 ⇒ 参与 + 可执行；无记录 / 身份无法解析 / 证据不能判断 ⇒ `UNKNOWN` **且注明本轮允许** |
+| **标签来源（只读、经桥接）** | `server/researchExperiments/knownStLabelIndex.ts#loadKnownStLabelIndex`（**一次性** `SELECT` `research_security_status_history` 的 ST 维度 + `research_security_identifier_history`（primary），建 `(symbol, 日期)` 只读索引 + 来源指纹）；经 `@experiments/compositeRunnerBridge` **零实现 re-export** 注入研究层 ⇒ **实验作者函数不直连 SQL** |
+| **不伪造 PIT 证据** | 来源表**没有** `availableAsOf` 列 ⇒ 索引**不构造**可获知时间；`availability` / `confidence` **原样保留**（实测 841/841 `UNKNOWN` / `medium`）；**不把缺席派生成 NORMAL**（无区间覆盖 ⇒ `UNKNOWN`）；边界 / 重叠 / 非法时间写法 / 不可识别状态取值 ⇒ `UNKNOWN` |
+| **新执行资格闸门实现** | `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#createKnownStOnlyEligibilityGate`（gate id `recovery-light-st-007/known-st-only-prefill-gate`）；与 E-94 的严格闸门是**两个身份**，两版政策不共用冻结配置 |
+| **不继承的严格前置** | 轻量模式**不**使用 `stSummary.blocked` / `providerVerifiable` 作为前置条件，**不**把 `providerVerifiable` 伪造为 `true`，缺状态**不再**暂停全部账户；null-provider 早诊断**只保留在缺省严格模式**；旧终态 `ST_COVERAGE_BLOCKED` **不是**轻量模式的必然终点 |
+| **严格契约未动** | `evaluateStGate` 的 `ST_GATE_CONTRACT_VERSION = "1.1.0"` 与 `stGate.ts` **零改动**；价格状态求值不受 ST 政策驱动，ST / UNKNOWN **不抹掉**观察历史 |
+| **DB 影响** | **0 表 / 0 列 / 0 migration / 0 写入**（轻量索引为只读 `SELECT`；STUDY 只经既有 `startRun` / `artifactStorage` 写标准研究 Run） |
+| **状态** | IMPLEMENTED（`pnpm run check` 0 错；真实撮合验收见 `tests/server/researchExperiments/rollingPoolRecoveryStLightPolicy.test.ts`：显式声明后 `UNKNOWN` 真实成交且审计保留 `UNKNOWN`、缺省仍拒单、已知 ST 恒拒、拒单不改账、仓位随当日权益） |

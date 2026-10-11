@@ -13,6 +13,7 @@
  *   - 语义与脚本逐字一致（保证 PROMOTE-001 不漂移）；
  *   - 不新增第二套回测引擎。
  */
+import { createHash } from "node:crypto";
 import { assembleRunWorkbenchInputs } from "../../runWorkbenchAssembly/assemble";
 import { runTradeSimulation } from "../simulator/engine";
 import { evaluateCandidateRun } from "../signalEngine/evaluate";
@@ -38,6 +39,7 @@ import type { PositionIntent, SelectedCandidate } from "../framework/contract";
 import type { SimulationConfig, TradeSimulationRun } from "../simulator/types";
 import type { StrategyDocument } from "../strategySchema/types";
 import type { RunnerHoldingBridgePolicyDefinition } from "../exitPolicyCommon";
+import type { CorporateActionResolverLike } from "../../corporateActions/resolver";
 import type { CompositeCarryoverAccounting } from "./carryover";
 import type { CompositeLateEntryAccounting } from "./lateEntry";
 import type { CompositeEventGateAccounting } from "./eventGate";
@@ -265,7 +267,26 @@ export interface CompositeEventExclusion {
   readonly reason: CompositeEventExclusionReason;
 }
 
-export function buildCompositeEvents(dataset: ResearchDataset, maxAmplitude: number): {
+/**
+ * 🔴 `TAIL-SELECTION-002`：3F 合成分的**取向**变换。
+ *
+ * - `"LOW"`（缺省 / 冻结口径）：恒等 —— 既有行为逐位不变。
+ * - `"HIGH"`：取补 `1 − score` ≡ `1 − Σ(oriented)/3 = Σ(1 − oriented)/3`
+ *   ⇒ **等价于把三个方向全部翻转**（`maxAmplitude` / `meanAmplitude` LOW→HIGH、
+ *   `t1VolumeRatio` HIGH→LOW），桶边界与浮点路径与冻结契约 `FROZEN-BUCKET-CONTRACT-001` 同源。
+ *
+ * 存在理由：冻结 3F 的两个振幅因子是 LOW 取向（偏好低振幅），而实测右尾
+ * （`rd40 ≥ +50%` / `rd60 ≥ +100%`）住在**高振幅**里 ⇒ 冻结 3F **结构上反尾选择**。
+ */
+export function orientAmplitudeScore(score: number, orientation: "LOW" | "HIGH"): number {
+  return orientation === "HIGH" ? 1 - score : score;
+}
+
+export function buildCompositeEvents(
+  dataset: ResearchDataset,
+  maxAmplitude: number,
+  options: { readonly amplitudeOrientation?: "LOW" | "HIGH" } = {},
+): {
   events: CompositeEventRecord[];
   tradingDays: string[];
   bucketCandidatesByDate: Map<string, BucketCandidate[]>;
@@ -274,6 +295,7 @@ export function buildCompositeEvents(dataset: ResearchDataset, maxAmplitude: num
   /** 逐只剔除明细（原因码 + 事件身份）；与 `accounting` 的过滤计数同源。 */
   exclusionRecords: CompositeEventExclusion[];
 } {
+  const amplitudeOrientation = options.amplitudeOrientation ?? "LOW";
   const tradingDays = dataset.universeDefinition.days.filter((day) => day.isTradingDay).map((day) => day.tradeDate);
   const dayIndex = new Map(tradingDays.map((date, index) => [date, index]));
   const rowsBySecurity = new Map<string, ResearchDatasetRow[]>();
@@ -370,9 +392,16 @@ export function buildCompositeEvents(dataset: ResearchDataset, maxAmplitude: num
     accounting.bucketPassed += 1;
     const score = threeFactorCompositeScoreOf(raw, { requirePullback: true });
     if (score === null) continue;
+    // 🔴 TAIL-SELECTION-002：**取向翻转**（缺省 "LOW" ⇒ 既有冻结口径逐位不变）。
+    //
+    // 冻结契约 `FROZEN-BUCKET-CONTRACT-001` 的方向是 maxAmplitude/meanAmplitude = LOW、
+    // t1VolumeRatio = HIGH；而实测右尾住在**高振幅**里 ⇒ 冻结 3F 结构上反尾选择。
+    // `1 − Σ(oriented)/3 = Σ(1 − oriented)/3` ⇒ 取补**等价于三个方向全部翻转**，
+    // 桶边界与浮点路径与冻结契约同源（不新增第二套 3F 口径）。
+    const orientedScore = orientAmplitudeScore(score, amplitudeOrientation);
     const signalDate = bars[5]!.timestamp;
     const list = bucketCandidatesByDate.get(signalDate) ?? [];
-    list.push({ event: eventRecord, signalDate, score });
+    list.push({ event: eventRecord, signalDate, score: orientedScore });
     bucketCandidatesByDate.set(signalDate, list);
   }
   return { events, tradingDays, bucketCandidatesByDate, rankCandidatesByTe, accounting, exclusionRecords };
@@ -720,9 +749,19 @@ export function buildFirstLimitPullback3FTop3SourceRun(input: {
     readonly minListingAgeDays: number;
     readonly listingDateOf: (securityId: string) => string | null;
   } | null;
+  /**
+   * 🔴 `TAIL-SELECTION-002`：**3F 取向翻转**（缺省 `"LOW"` = 既有冻结口径，逐位不变）。
+   *
+   * `"HIGH"` ⇒ 排序键取补 `1 − Σ(oriented)/3` ≡ 三个方向全部翻转
+   * （`maxAmplitude` / `meanAmplitude` LOW→HIGH、`t1VolumeRatio` HIGH→LOW）。
+   * 冻结契约 `FROZEN-BUCKET-CONTRACT-001` **未被修改**；此处只是取补，浮点同源。
+   */
+  amplitudeOrientation?: "LOW" | "HIGH";
 }): BuiltCompositeArm {
   const maxAmplitude = input.maxAmplitude ?? COMPOSITE_RUNNER_MAX_AMPLITUDE;
-  const built = buildCompositeEvents(input.dataset, maxAmplitude);
+  const built = buildCompositeEvents(input.dataset, maxAmplitude, {
+    amplitudeOrientation: input.amplitudeOrientation ?? "LOW",
+  });
   return buildCompositeSourceRun({
     armId: input.armId ?? "bridge_selection",
     label: input.label ?? "1.62.1 bridge selection",
@@ -856,6 +895,16 @@ export interface RunCompositeRunnerBacktestInput {
   createdAt: string;
   name: string;
   runnerBridge?: RunnerHoldingBridgePolicyDefinition | null;
+  /**
+   * 已解析的公司行为解析器（可选；**装配期一次性映射**，见 `CorporateActionResolverLike`）。
+   *
+   * - **缺省** ⇒ 装配层照旧按证券代码区间真实读取 `corporate_actions`（既有行为逐字节不变）；
+   * - **提供** ⇒ 复用调用方的解析器（参数扫描 / 走查在同一份数据上跑 N 组时避免重复查询），
+   *   同时让纯合成 fixture 的单元测试可以**完全不触碰数据库**。
+   *
+   * 🔴 它只影响「公司行为从哪里来」，不改变任何撮合口径。
+   */
+  corporateActionResolver?: CorporateActionResolverLike;
 }
 
 export interface CompositeRunnerBacktestResult {
@@ -863,9 +912,91 @@ export interface CompositeRunnerBacktestResult {
   simulationConfig: SimulationConfig;
 }
 
-export async function runCompositeRunnerBacktest(
-  input: RunCompositeRunnerBacktestInput,
-): Promise<CompositeRunnerBacktestResult> {
+/**
+ * `COMPOSITE-ASSEMBLY-CONFIG-001`（`FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005` 续修 · Finding A）
+ * —— **权威装配配置入口的契约版本**。
+ *
+ * 为什么需要：`runCompositeRunnerBacktest` 会**真的撮合一次**（`runTradeSimulation`）。
+ * 研究实验若只想拿「权威装配出的 `simulationConfig`」（例如每组先装配一次、再对同一份配置跑
+ * 全部账户），调用它就等于**顺带做了一次与结果无关的真实撮合** —— 那次撮合既浪费，又会让
+ * 「未声明执行资格闸门」的路径多买一笔隔夜 ST（AUDIT-004 §9.2 的同源缺陷）。
+ *
+ * 因此本版本拆出**只装配、不撮合**的入口 `assembleCompositeRunnerSimulationConfig`：
+ * 它与 `runCompositeRunnerBacktest` **共用同一段装配实现**（不可能漂移），只是不调用撮合。
+ */
+export const COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION = "composite-assembly-config/1.0.0";
+
+/**
+ * 权威装配配置入口的入参：与 `RunCompositeRunnerBacktestInput` **同一份请求**，
+ * 只去掉 `sourceRun` —— 候选记录只被**撮合**消费，配置入口不接受它（避免「装配偷偷读候选」）。
+ */
+export type AssembleCompositeRunnerSimulationConfigInput =
+  Omit<RunCompositeRunnerBacktestInput, "sourceRun">;
+
+/** 权威装配配置入口的产物（**没有任何撮合结果**：不存在 `run` 字段）。 */
+export interface CompositeRunnerAssemblyConfigResult {
+  /** 本入口的契约版本（进留档，便于对账「这份配置是谁装配的、按哪版契约」）。 */
+  readonly contractVersion: typeof COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION;
+  /** 装配层产出的执行配置（与 `runCompositeRunnerBacktest` 逐字节同一实现）。 */
+  readonly simulationConfig: SimulationConfig;
+  /**
+   * 配置**可序列化面**的指纹（`sha256(canonicalJson)`；函数以 `fn:<name>` 占位，不做静默丢弃）。
+   *
+   * ⚠️ 它**不是**运行结果指纹，也**不是**`run.fingerprint`；只用于「两次装配是否同一份配置」的审计对账。
+   */
+  readonly assemblyConfigFingerprint: string;
+  /** 装配事实（供留档对账；不参与任何计算）。 */
+  readonly assembly: {
+    readonly datasetVersion: string;
+    readonly datasetSource: string;
+    readonly datasetVersionId: number | null;
+    readonly eventWindowExitTailTradingDays: number | undefined;
+    readonly runtimeOverrides: readonly string[];
+    readonly strategyDecisionEngine: "strategy-core" | "legacy-recipe";
+  };
+}
+
+/** 函数值 ⇒ `fn:<name>` 占位（**不可序列化 ≠ 可以被丢掉**：静默丢弃会让两个不同闸门指纹相同）。 */
+function canonicalizeConfigValue(value: unknown): unknown {
+  if (typeof value === "function") {
+    const name = (value as { readonly name?: string }).name;
+    return `fn:${name === undefined || name === "" ? "anonymous" : name}`;
+  }
+  if (Array.isArray(value)) return value.map(canonicalizeConfigValue);
+  if (value !== null && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) out[key] = canonicalizeConfigValue(source[key]);
+    return out;
+  }
+  return value;
+}
+
+/** 配置的规范化 JSON（对象键排序 ⇒ 与字面量书写顺序无关）。 */
+export function canonicalJsonOfSimulationConfig(config: SimulationConfig): string {
+  return JSON.stringify(canonicalizeConfigValue(config));
+}
+
+/** 装配配置指纹：`sha256(规范化 JSON)`（hex，全 64 位）。 */
+export function fingerprintSimulationConfig(config: SimulationConfig): string {
+  return createHash("sha256").update(canonicalJsonOfSimulationConfig(config), "utf8").digest("hex");
+}
+
+/**
+ * 🔴 **权威装配配置入口**（`COMPOSITE-ASSEMBLY-CONFIG-001`）—— 只装配，**不撮合**。
+ *
+ * 与 `runCompositeRunnerBacktest` 的关系：后者 = 本入口 + `runTradeSimulation`（一段代码，无第二条实现）。
+ * 契约：
+ *   1. **不执行任何模拟**（不调用 `runTradeSimulation`，不产生交易 / 权益 / 审计数组）；
+ *   2. 装配路径与 `runCompositeRunnerBacktest` **完全相同**（同一 `assembleRunWorkbenchInputs` 请求、
+ *      同一 `name` / `runnerBridge` 合并口径）⇒ 两者产出的 `simulationConfig` 逐字节一致；
+ *   3. **不自己解析数据集**：`dataset` 由调用方注入 ⇒ 装配层的 `resolveDataset` 走 `injected` 分支
+ *      （不直读 registry、不重建）。公司行为解析器**可注入**：注入时装配层不查库；
+ *      **未注入时保持既有行为**（装配层照旧读 `corporate_actions`，并读一次数据集 post 上限以夹取尾窗）。
+ */
+export async function assembleCompositeRunnerSimulationConfig(
+  input: AssembleCompositeRunnerSimulationConfigInput,
+): Promise<CompositeRunnerAssemblyConfigResult> {
   const assembled = await assembleRunWorkbenchInputs({
     strategyId: input.strategyDocument.strategyId,
     strategyVersion: input.strategyDocument.version,
@@ -878,6 +1009,10 @@ export async function runCompositeRunnerBacktest(
     dataReady: true,
     datasetSourcePolicy: "prefer-registry",
     researchDataset: input.dataset,
+    // 🔴 未提供时**不加这个键**：与改动前的请求对象逐字节相同（缺省行为不变）。
+    ...(input.corporateActionResolver === undefined
+      ? {}
+      : { corporateActionResolver: input.corporateActionResolver }),
   });
   const base = assembled.inputs.simulationConfig;
   if (!base) throw new Error("compositeRunner: assembleRunWorkbenchInputs 未产出 simulationConfig");
@@ -890,6 +1025,31 @@ export async function runCompositeRunnerBacktest(
         },
       }
     : { ...base, name: input.name };
+  return {
+    contractVersion: COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION,
+    simulationConfig,
+    assemblyConfigFingerprint: fingerprintSimulationConfig(simulationConfig),
+    assembly: {
+      datasetVersion: assembled.assembly.datasetVersion,
+      datasetSource: assembled.assembly.datasetSource,
+      datasetVersionId: assembled.assembly.datasetVersionId,
+      eventWindowExitTailTradingDays: assembled.assembly.eventWindowExitTailTradingDays,
+      runtimeOverrides: assembled.assembly.runtimeOverrides,
+      strategyDecisionEngine: assembled.assembly.strategyDecisionEngine,
+    },
+  };
+}
+
+/**
+ * 组合回测：**唯一**撮合入口（`assembleCompositeRunnerSimulationConfig` + `runTradeSimulation`）。
+ *
+ * 未提供执行资格闸门时，`simulationConfig` 与历史版本**逐字节相同**（Toolkit 缺省行为不变）；
+ * 需要闸门的研究实验自行注入（见 `SimulationConfig.executionEligibilityGate`）。
+ */
+export async function runCompositeRunnerBacktest(
+  input: RunCompositeRunnerBacktestInput,
+): Promise<CompositeRunnerBacktestResult> {
+  const { simulationConfig } = await assembleCompositeRunnerSimulationConfig(input);
   const run = runTradeSimulation({ dataset: input.dataset, sourceRun: input.sourceRun, simConfig: simulationConfig });
   return { run, simulationConfig };
 }

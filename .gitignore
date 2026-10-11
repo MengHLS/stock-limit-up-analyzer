@@ -155,3 +155,5 @@ _*.py
 
 # 数据库迁移备份（含明文凭据，禁止入库）
 .env.bak-*
+/scripts/
+/_scratch/

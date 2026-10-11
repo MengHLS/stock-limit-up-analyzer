@@ -67,8 +67,13 @@ describe("PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）",
     ]);
   });
 
-  it("配方 id 集合（原 2 个 + 3F TopN 6 个，合计 8 个）", () => {
+  it("配方 id 集合（原 2 个 + 3F TopN 6 个 + 后事件状态 / 强趋势再入场）", () => {
+    // 2026-10-10：本清单是**穷举契约**，注册新配方必须同步更新。
+    //   - `event-state-long-amp5-top3`：EVENT-STATE-LONG-EXECUTION-PARITY-001 注册
+    //     （策略版本 3600006 的文档早已声明该 recipeId）。
+    //   - `strong-trend-reentry-select-all`：既有未提交改动引入的注册（本轮之前该断言即已失败）。
     expect(registeredStrategyRecipeIds()).toEqual([
+      "event-state-long-amp5-top3",
       "first-limit-pool-fixed-3f",
       "first-limit-pool-rolling-3f",
       "first-limit-pullback-3f-calibrated-n5",
@@ -80,6 +85,7 @@ describe("PATTERN-LIBRARY-001 · 注册表由声明库派生（迁移等价）",
       "first-limit-pullback-3f-top5-no-pullback-gate",
       PULLBACK_RECIPE_ID,
       "leader-candidate-baseline",
+      "strong-trend-reentry-select-all",
     ]);
   });
 

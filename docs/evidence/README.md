@@ -1724,6 +1724,27 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
 |---|---|
 | `_db_migration_verify_20261003.txt` | 切流前「重导 → 重导入 → 复比对」闭环的原始输出：`s1_core` **56/56 一致**、`s2_market` **9/9 一致**（`stock_daily_prices` 8,898,902 / `liquidity_daily` 9,015,158）；首轮曾抓出 09-21~09-24 补录的 4 行缺口并据以放宽增量窗口 |
 
+### ER_RECORD_FILE_FULL（1114）应急诊断（2026-10-08）—— 4 个
+
+> 背景：`/tmp` 满导致 `ER_RECORD_FILE_FULL 1114`（`The table '/tmp/#sql...' is full`），
+> 需磁盘临时表的查询失败；用户要求 DBA 排查并恢复到 **≥15 GB 可用空间**后再 resume 780004。
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_disk_full_20261008.mts` | 只读探针（第一轮）：`tmpdir`/`datadir`/`TempTable` 策略、`Created_tmp_disk_tables`、`PROCESSLIST`、InnoDB 临时表空间、刻意触发磁盘临时表的复现测试、`dataset_version`/`build_job` 现状 |
+| `_probe_disk_full_round2_20261008.mts` | 只读探针（第二轮）：**绕开临时表**（`SHOW PROCESSLIST` 替代 `information_schema.PROCESSLIST ORDER BY`，后者自身也会 1114）、构建作业时间线、780004 详情、`ds_*` 按 `datasetVersionId` 分组的残留行数 |
+| `_db_disk_full_20261008.txt` | 两轮原始输出 + 三条恢复验证 SQL 的实测结果（**② 仍失败 ⇒ 未恢复**）+ **空间去向量化**（库 3 天 8,797→14,545 MB，+5.6 GB 几乎全来自失败构建 v9/v10 残留）+ 失败点可复现特征（6 次全部停在 `lastTradeDate=2019-04-02`、`processedRows=426,688`）+ 权限边界 + **OS 层被 SSH 凭据阻塞**的登记 + 待执行命令清单 |
+| `_db_disk_full_resolution_20261008.txt` | **故障解除记录（扩容）**：根因 = 报错里的 `/tmp` 是**容器内** `/tmp`，落在 overlay 可写层 ⇒ 底层是宿主根分区 `/dev/vda3`（当时 40G/38G/**0 可用**），宿主 `/tmp` 是 **tmpfs（836M 仅用 75M）与磁盘无关**；🎯 **决定性发现 = 云盘物理早已 60 GiB，但 GPT 只切到 40 GiB，尾部 20.00 GiB 从未分配**（`dmesg` 见 `detected capacity change from 83886080 to 125829120`）；处置 = 备份 GPT → `growpart /dev/vda 3` → `partx -u` → `resize2fs /dev/vda3`（ext4 online grow，start 不变、不移动数据页）；结果 = **40G→59G，可用 0→18.89 GiB**（满足 ≥15 GB）；三条验证 SQL **全部通过**（含原先必挂的 ② `PROCESSLIST ORDER BY TIME DESC`）；780004 job `900010` **已自动续跑并越过原固定卡点**（426,688→2,286,748 行，2019-04-02→2020-09-21）；含 5 项遗留风险 R1~R5（**失败构建不回滚 `ds_*` 行**为首）与「未做操作」声明 |
+
+### MinIO 对象存储占用审计（2026-10-08）—— 1 个
+
+> 背景：`/data/minio` ≈ 14 G，与 MySQL 抢同一块根分区（扩容前仅剩 0 可用）。
+> 需回答「为什么这么多文件 / 哪些不用的可以删」。
+
+| 文件 | 被引用于 |
+|---|---|
+| `_minio_storage_audit_20261008.txt` | **只读审计**：唯一非空 bucket `research`（7413 物理文件 / 136 个 Run，另 `files` 为空桶）；**14 G 里 13.62 G 全在 `tables/`**（输入面板快照，每 Run ~58 个 `panel-*.csv.gz`）；🔴 **md5 去重：3383 个 part.1 只有 115 个唯一内容 ⇒ 97.7% 是逐字节重复副本，可回收 13.30 GB**（`single-factor-v1` 25 个 run 各存一份同一快照 = 5.87 G，占 42%）；🟢 **孤儿对象 = 0**（MinIO 136 个 runId 全在库中）；引用链 = `research_experiment_run.resultManifestKey` → `manifest.json` → 其内 `artifactRefs`，读端点 `GET /api/experiments/artifact` 有「前缀闸 + manifest 闸」⇒ **直接 rm 会 404，删必须与改引用一起做**；含 4 个方案（A 不删 / B 删 2 个 FAILED Run 产物 0.31 G / C 单保 `single-factor-v1` 5.64 G / **D 内容寻址去重 13.30 G**）+ 全量原始输出 |
+
 ### 数据库使用情况与读速实测（2026-10-05）—— 4 个
 
 | 文件 | 被引用于 |
@@ -1801,3 +1822,19 @@ node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/clos
 `momentum`（−0.024/−0.034/−0.041）**方向为负**，而 `pullbackDepth`（回撤越深越好）**为正**（+0.010/+0.025/+0.023）。
 控制 3F 后的**偏 IC 不衰减**（trendScore −0.037/−0.039，pullbackDepth +0.032/+0.033，与 3F 秩相关仅 |ρ|≤0.15）
 ⇒ 这些分量**不是 3F 的代理**，V1 是「符号用反」而不是「无用」。
+
+### TiDB -> 阿里云 ECS 增量同步（2026-10-09）—— 1 个
+
+> 背景：正式服务上传图片后记录先写入 TiDB Cloud，ECS 侧落后 1 行。已交付幂等增量同步脚本（主键差集 + 显式 id upsert + 时区对齐）。
+
+| 文件 | 被引用于 |
+|---|---|
+| `_tidb_to_ecs_sync_20261009.txt` | 同步脚本 `scripts/_scratch/ecs_sync_uploaded_images.sh` / 本机入口 `scripts/_scratch/sync_from_tidb.sh`；TiDB Cloud -> ECS MySQL 的 `uploaded_images` 增量回灌（主键 id 反连接差集、显式 id `INSERT ... ON DUPLICATE KEY UPDATE`、TiDB 会话 `SET time_zone='+08:00'` 与 ECS 对齐、空字段按列语义写 NULL）；含幂等复跑与端到端自检证据 |
+
+### 「上传图片→识别」链路多表同步（2026-10-09）—— 1 个
+
+> 背景：上一版只同步 `uploaded_images`，遗漏了识别产物。本次按依赖顺序补齐 `uploaded_images` → `operation_logs` → `limit_up_records` 整条链路（+2 / +43 行），并**明确排除** `stock_daily_prices`/`market_data`（ECS 侧行数反而更多，反向回灌会污染）。
+
+| 文件 | 被引用于 |
+|---|---|
+| `_tidb_to_ecs_recognition_chain_20261009.txt` | 同步脚本 `scripts/_scratch/ecs_sync_recognition_chain.sh` / 本机入口 `scripts/_scratch/sync_chain.sh`；含链路源码实证（`server/routers.ts:534/556/567/721/725/727/739`）、43+2 条差集全列 MD5 校验、以及 🔴 `information_schema.TABLES.AUTO_INCREMENT` 对本实例不可信（须用「无 id 插入实测」判定）的证据 |

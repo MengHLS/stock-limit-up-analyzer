@@ -868,6 +868,24 @@ export interface BuildDatasetFromRegistryRequest {
    */
   readonly observationWindow?: ObservationWindowSpec | null;
   /**
+   * **执行尾窗**（交易日；仅事件窗语义；可选，缺省 `0`）。
+   *
+   * 🔴 存在的理由（EVENT-STATE-LONG-EXECUTION-PARITY-001 定位的合同缺口）：
+   *   此前事件窗投影把「决策窗口」与「执行行情覆盖」绑在同一个 `{start,end}` 上 ——
+   *   面板/游标只到 `rd = end + 1`（决策日**下一交易日**），**没有任何持仓期行情**。
+   *   于是「持仓 40 个交易日」这类策略在正式链路上**结构性不可能**：到点无法取价成交，
+   *   也无法做期末重估。
+   *
+   * 🔴 语义边界（**不得混淆**）：
+   *   - 它**只**扩大「读进面板/游标的行情相对日上限」= `end + 1 + exitTailTradingDays`；
+   *   - 它**不**改变决策成员范围 —— 决策仍是 `rd ∈ [start, end]`（本层 `startRd/endRd`）；
+   *   - 因此「后续 bar 参与决策」在结构上不可能发生（`visibleBars` 仍按决策日截断）。
+   *
+   * 缺省 `0` ⇒ 未声明持仓期的策略**行为逐字节不变**（不迁就任何单个策略改全局默认值）。
+   * 由装配层按策略**已声明的出场政策**派生后传入（本层不认识任何具体策略）。
+   */
+  readonly exitTailTradingDays?: number;
+  /**
    * 池化策略声明（仅 FIRST_LIMIT_POOL 策略）。提供时本桥走池化逐日投影，
    * 不读取 observationWindow，也不回落事件窗语义。
    */
@@ -1343,9 +1361,17 @@ export async function buildResearchDatasetFromRegistry(
         `无法支撑撮合（回落重建并如实记录）。`,
     );
   }
-  /** 事件窗：最远相对日 = 窗口末 + 1（决策日下一交易日执行）；池化：池龄上限。 */
+  /**
+   * 事件窗：最远相对日 = 窗口末 + 1（决策日下一交易日执行）+ **执行尾窗**（持仓期行情，
+   * 缺省 0 ⇒ 既有行为不变）；池化：池龄上限。
+   */
+  const eventWindowExitTailTradingDays = poolPolicy === null
+    ? Math.max(0, Math.trunc(request.exitTailTradingDays ?? 0))
+    : 0;
   const neededMaxRelativeDay =
-    poolPolicy === null ? window!.end + 1 : poolPolicy.poolAgeCapTradingDays;
+    poolPolicy === null
+      ? window!.end + 1 + eventWindowExitTailTradingDays
+      : poolPolicy.poolAgeCapTradingDays;
   if (poolPolicy !== null && poolPolicy.poolAgeCapTradingDays > postRange.max) {
     throw new RegistryDatasetBridgeError(
       "POOL_AGE_CAP_EXCEEDED",
@@ -1715,6 +1741,13 @@ export interface EventWindowCursorOptions {
    * 判定器由调用方注入（本层不认识任何具体策略），保证事件语义只有一份实现。
    */
   readonly decisionMemberPredicate?: (member: EventWindowCandidateMember) => boolean;
+  /**
+   * 执行尾窗（交易日；可选，缺省 `0`）。
+   *
+   * 🔴 只扩大行情读取上限（`maxRd = end + 1 + exitTailTradingDays`），
+   *    **不**改变决策成员范围（仍是 `rd ∈ [startRd, endRd]`）。
+   */
+  readonly exitTailTradingDays?: number;
 }
 
 interface EventWindowActiveMember {
@@ -1785,7 +1818,13 @@ export function createEventWindowDatasetCursor(
 ): EventWindowDatasetCursor {
   const startRd = Math.max(0, options.observationWindow.start);
   const endRd = options.observationWindow.end;
-  const maxRd = endRd + 1;
+  /**
+   * 🔴 **执行尾窗**：行情读取上限 = 决策窗末端 + 1（决策日下一交易日的成交）+ 尾窗。
+   *    `endRd + 1` 是**入场**那一根；尾窗负责覆盖持仓、不可卖顺延与期末状态。
+   *    决策成员范围（`startRd..endRd`）**不受尾窗影响**（见下方 `next()`）。
+   */
+  const exitTailTradingDays = Math.max(0, Math.trunc(options.exitTailTradingDays ?? 0));
+  const maxRd = endRd + 1 + exitTailTradingDays;
   const tradingDates = [...options.tradingDates];
   const postRelativeDays = Array.from({ length: Math.max(0, maxRd) }, (_, i) => i + 1);
 
@@ -2027,6 +2066,11 @@ export async function estimateEventWindowPanelRowsUpperBound(
   datasetVersionId: number,
   window: ObservationWindowSpec,
   deps: BuildDatasetFromRegistryDeps = {},
+  /**
+   * 执行尾窗（交易日）。缺省 `0` ⇒ 与既有估计一致。
+   * 🔴 必须与真正投影的相对日上限一致，否则会**低估**行数、错误地走材料化路径。
+   */
+  exitTailTradingDays = 0,
 ): Promise<number | null> {
   const content = defaultDatasetContentDependencies();
   const registry = deps.metadataReader ?? content.metadataReader;
@@ -2036,7 +2080,8 @@ export async function estimateEventWindowPanelRowsUpperBound(
   if (version === undefined) return null;
   const totalEvents = (version as { totalEvents?: unknown }).totalEvents;
   if (typeof totalEvents !== "number" || !Number.isFinite(totalEvents) || totalEvents <= 0) return null;
-  return totalEvents * (window.end + 2);
+  const tail = Math.max(0, Math.trunc(exitTailTradingDays));
+  return totalEvents * (window.end + 2 + tail);
 }
 
 /** 事件窗流式直读结果。 */
@@ -2117,7 +2162,8 @@ export async function buildEventWindowDatasetCursorFromRegistry(
     );
   }
 
-  const maxRelativeDay = window.end + 1;
+  const exitTailTradingDays = Math.max(0, Math.trunc(request.exitTailTradingDays ?? 0));
+  const maxRelativeDay = window.end + 1 + exitTailTradingDays;
   const postRange = await perfRunAsync("dataset.post_range", () =>
     withReadRetry("registry.getPostRelativeDayRange", () =>
       reader.getPostRelativeDayRange(request.datasetVersionId),
@@ -2249,6 +2295,7 @@ export async function buildEventWindowDatasetCursorFromRegistry(
     tradingDates,
     observationWindow: window,
     contentSource,
+    ...(exitTailTradingDays === 0 ? {} : { exitTailTradingDays }),
     ...(request.decisionMemberPredicate === undefined
       ? {}
       : { decisionMemberPredicate: request.decisionMemberPredicate }),

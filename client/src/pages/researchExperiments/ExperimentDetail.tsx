@@ -113,6 +113,26 @@ export default function ResearchExperimentDetail() {
   );
   const versionOptions = versionsQuery.data ?? [];
 
+  /**
+   * 🔴 只列**兼容**的 Dataset 版本。
+   *
+   * 描述符可以声明 `requiredDatasetVersionLabel`（冻结数据口径，例如
+   * `first-board-pullback/rolling-pool-right-tail-mvp` 要求 `v10-listed365-pre10-post80`）。
+   * 后端 `assertDatasetCodeMatches` 会**响亮拒绝**不匹配的版本 —— 但那是运行之后才炸。
+   * 「普通运行只选兼容 Dataset」要求在选择器这一层就把不兼容版本挡在外面，
+   * 并且**默认选中**兼容版本，而不是永远默认最新版（最新版往往正是口径不同的那个）。
+   *
+   * 未声明该字段的实验**行为完全不变**（选项 = 全部版本，默认 = 最新）。
+   */
+  const requiredVersionLabel = descriptor?.datasetRequirement.requiredDatasetVersionLabel ?? null;
+  const compatibleVersionOptions = useMemo(
+    () =>
+      requiredVersionLabel === null
+        ? versionOptions
+        : versionOptions.filter((option) => option.version === requiredVersionLabel),
+    [versionOptions, requiredVersionLabel],
+  );
+
   // ---- Dataset 版本坐标：URL 是唯一权威（默认取最新） ----
   const deepLinkVersionId = useMemo(() => {
     const raw = new URLSearchParams(search).get("datasetVersionId");
@@ -120,8 +140,13 @@ export default function ResearchExperimentDetail() {
     const parsed = Number(raw);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
   }, [search]);
-  const selectedVersionId = deepLinkVersionId ?? versionOptions[0]?.datasetVersionId ?? null;
+  const selectedVersionId = deepLinkVersionId ?? compatibleVersionOptions[0]?.datasetVersionId ?? null;
   const selectedVersion = versionOptions.find((v) => v.datasetVersionId === selectedVersionId) ?? null;
+  /** 深链指向了不兼容版本：保留 URL 权威（让平台错误可见），但在页面上说清楚。 */
+  const selectedVersionIncompatible =
+    requiredVersionLabel !== null &&
+    selectedVersion !== null &&
+    selectedVersion.version !== requiredVersionLabel;
 
   // ---- 参数表单（默认值来自描述符；改口径只改后端声明） ----
   const [rawParams, setRawParams] = useState<Record<string, RawValue>>({});
@@ -489,7 +514,16 @@ export default function ResearchExperimentDetail() {
                   的数据集版本。请先在「数据集」页构建一个 READY 版本。
                 </p>
               )}
-              {versionOptions.length > 0 && (
+              {!versionsQuery.isLoading &&
+                versionOptions.length > 0 &&
+                compatibleVersionOptions.length === 0 && (
+                  <p className="text-xs text-red-600">
+                    本实验冻结了 Dataset 版本标签{" "}
+                    <span className="font-mono">{requiredVersionLabel}</span>
+                    ，但当前数据集下没有该版本的记录 ⇒ 不能运行（不提供不兼容版本以免误跑）。
+                  </p>
+                )}
+              {compatibleVersionOptions.length > 0 && (
                 <Select
                   value={selectedVersionId === null ? undefined : String(selectedVersionId)}
                   onValueChange={(value) =>
@@ -500,7 +534,7 @@ export default function ResearchExperimentDetail() {
                     <SelectValue placeholder="选择 Dataset 版本" />
                   </SelectTrigger>
                   <SelectContent>
-                    {versionOptions.map((option) => (
+                    {compatibleVersionOptions.map((option) => (
                       <SelectItem
                         key={option.datasetVersionId}
                         value={String(option.datasetVersionId)}
@@ -516,6 +550,21 @@ export default function ResearchExperimentDetail() {
                 <p className="text-xs text-muted-foreground">
                   已选：<span className="font-mono">{selectedVersion.version}</span> ·
                   事件数 {selectedVersion.totalEvents ?? "—"} · 状态 {selectedVersion.status}
+                  {requiredVersionLabel !== null ? (
+                    <>
+                      {" "}
+                      · 本实验要求冻结标签{" "}
+                      <span className="font-mono">{requiredVersionLabel}</span>
+                    </>
+                  ) : null}
+                </p>
+              )}
+              {selectedVersionIncompatible && (
+                <p className="text-xs text-red-600">
+                  当前 URL 指定的版本标签是{" "}
+                  <span className="font-mono">{selectedVersion!.version}</span>，与实验冻结的{" "}
+                  <span className="font-mono">{requiredVersionLabel}</span>{" "}
+                  不一致 ⇒ 运行会被平台拒绝（这一条如实显示，不自动替换你的选择）。
                 </p>
               )}
             </CardContent>

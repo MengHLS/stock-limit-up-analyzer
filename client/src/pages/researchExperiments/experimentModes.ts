@@ -199,7 +199,21 @@ export const EXPERIMENT_MODES: readonly ExperimentMode[] = [
           // P9：事件事实 gate（不重排 3F）
           "first-board-pullback/composite-runner-newhigh3-t74-event-gate",
           "first-board-pullback/composite-runner-newhigh3-t74-subnew",
+          // TAIL-SELECTION-002：3F 振幅取向翻转（目标 = 选出更多右尾超级股票）
+          "first-board-pullback/composite-runner-newhigh3-t74-inverted",
           "first-board-pullback/trend-entry-ma-v1",
+          // FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001：滚动观察池 × 每日右尾识别
+          // （自变量 = 「逐日观察 + 选择」这一结构，不是因子合成 ⇒ other-scope）
+          "first-board-pullback/rolling-pool-right-tail-mvp",
+          // FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002：滚动池续研
+          // （自变量 = 「早期入场买点 + 排序」这一执行结构，不是因子合成 ⇒ other-scope）
+          "first-board-pullback/rolling-pool-early-entry-runner",
+          // FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003：滚动池续研 003
+          // （自变量 = 「连续观察窗口 N × 最晚成交 L × 再入场政策」这一执行结构 ⇒ other-scope）
+          "first-board-pullback/rolling-pool-observation-window",
+          // FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004：滚动池续研 004
+          // （自变量 = 「破位后修复再触发 + 每日 ST 硬闸门」这一执行/状态结构 ⇒ other-scope）
+          "first-board-pullback/rolling-pool-recovery-st",
         ],
       },
     ],

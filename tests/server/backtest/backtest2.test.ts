@@ -502,8 +502,20 @@ describe("已实现 / 未实现盈亏", () => {
     expect(closed).toHaveLength(1);
     const trade = closed[0]!;
     expect(trade.netPnl).not.toBeNull();
-    // 不变量：Net = Gross − Fees − Slippage
-    expect(trade.netPnl!).toBeCloseTo(trade.grossPnL! - trade.fees - trade.slippageAmount, 6);
+    // 🔴 IMPACT-NETPNL-SIGN-001（2026-10-07）：本处原先断言
+    //   `Net = Gross − Fees − Slippage`
+    // —— 那条「不变量」**本身是错的**：`grossPnL` 当时用**无滑点基准价**累加，
+    // 再减去**有符号**的 `slippageAmount`（`cost.ts:50` = `(price − basePrice) × qty`），
+    // 而卖出成交价由 `base × (1 − bps)` 构造 ⇒ 卖出侧滑点结构性为负
+    // ⇒ 那次「减法」把卖出滑点又加回来一次（高估 `2 × |卖出滑点|`）。
+    // 正确不变量 = 成交价口径毛盈亏 − 费用（滑点已在价格里，不再二次扣减）。
+    // 证据与量化见 `docs/research/IMPACT-NETPNL-SIGN-001.md`。
+    expect(trade.netPnl!).toBeCloseTo(trade.grossPnL! - trade.fees, 6);
+    // Gross 自身也必须是成交价口径（= 记录里的 exitPrice/entryPrice 之差 × 数量）
+    expect(trade.grossPnL!).toBeCloseTo(
+      (trade.exitPrice! - trade.entryPrice) * trade.quantity,
+      6,
+    );
   });
 });
 

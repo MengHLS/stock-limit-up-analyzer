@@ -37,15 +37,33 @@ import type { ExecutionModelId, ExecutionRuleSet, Order, Side } from "./types";
  * 新增 `zeroVolumePolicy`）。没有版本号，未来看到一条历史回测结果**无法判断它用的是哪套政策**
  * ⇒ 「结果为什么不同」永远说不清。
  *
- * 递增规则：**任何会改变成交结果的默认值变更**都必须 +1，并同步更新
+ * 递增规则：**任何会改变成交结果或逐笔盈亏口径的默认值变更**都必须 +1，并同步更新
  * `describeExecutionPolicy()` 的文案与 `DEFAULT_BACKTEST_EXECUTION_POLICY`。
  *
  * 版本史：
  *   v1（BACKTEST-002）：T+1 强制；`blockLimitUpBuys` / `blockLimitDownSells` 默认 **true**；
  *     `suspensionPolicy = "REJECT"`；`allowPartialFill = true`；`zeroVolumePolicy = "REJECT"`。
  *     （v0 = 隐式历史行为：涨跌停拦截默认 false、零成交量不看。）
+ *   v2（IMPACT-NETPNL-SIGN-001，2026-10-07）：**逐笔净盈亏口径修正** —— `netPnl` 由
+ *     「无滑点基准价毛盈亏 − 费用 − 有符号滑点」改为「成交价口径毛盈亏 − 费用」，
+ *     消除卖出侧滑点被二次扣减（高估 `2 × |卖出侧滑点|`；实测隐含 5.10bp vs 配置 5bp）。
+ *     **成交与撮合行为零变化**：变的是逐笔 `netPnl` / `returnPct` 及由其派生的
+ *     `profitFactor` / `expectancy` / `winRate` / 集中度；`totalReturnPct` / MaxDD / CAGR
+ *     不受影响（出自权益台账）。🔴 **cache 判据含本版本号 ⇒ 旧缓存自然失效**，
+ *     这是刻意的（避免继续供应旧口径的逐笔盈亏）。
  */
-export const BACKTEST_EXECUTION_POLICY_VERSION = 1 as const;
+export const BACKTEST_EXECUTION_POLICY_VERSION = 2 as const;
+
+/**
+ * 逐笔净盈亏口径标记（`IMPACT-NETPNL-SIGN-001`）。
+ *
+ * - `cash-v1`（历史，v1 及以前）：无滑点基准价毛盈亏 − 费用 − 有符号滑点
+ *   ⇒ **卖出侧滑点被扣两次**，`netPnl` 高估 `2 × |卖出侧滑点|`。
+ * - `cash-v2`（当前，v2 起）：成交价口径毛盈亏 − 费用 = **真实现金损益**。
+ *
+ * 🔴 历史 Run **不回填**（AGENTS.md §5）：两代行靠 `executionPolicyVersion`（1 / 2）区分。
+ */
+export const NETPNL_CALIBER = "cash-v2" as const;
 
 /** 执行政策（Backtest Execution Policy）。 */
 export interface BacktestExecutionPolicy {
@@ -127,6 +145,7 @@ export function describeExecutionPolicy(policy: BacktestExecutionPolicy): readon
     "部分成交 = " + (policy.allowPartialFill ? "允许（现金不足按可买手数缩量）" : "不允许（不足即拒）"),
     "成交量为 0 = " +
       (policy.zeroVolumePolicy === "REJECT" ? "不可成交（保守；记 NO_LIQUIDITY）" : "忽略成交量（⚠️ 可能按正常价成交零成交日）"),
+    "逐笔净盈亏口径 = " + NETPNL_CALIBER + "（成交价口径；卖出侧滑点不二次扣减）",
     "执行政策版本 = v" + String(BACKTEST_EXECUTION_POLICY_VERSION),
   ];
 }

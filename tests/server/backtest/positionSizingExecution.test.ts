@@ -15,6 +15,7 @@ import type { CostModel } from "../../../server/engine/domain";
 import {
   BACKTEST_EXECUTION_POLICY_VERSION,
   DEFAULT_BACKTEST_EXECUTION_POLICY,
+  NETPNL_CALIBER,
   describeExecutionPolicy,
 } from "../../../server/backtest/context";
 
@@ -311,8 +312,13 @@ describe("确定性 — 同输入两次 ⇒ 逐字节相同", () => {
 });
 
 describe("B-01 / B-05 — 执行政策版本与零成交量政策", () => {
-  it("政策版本常量存在且为 v1；默认政策含零成交量 REJECT", () => {
-    expect(BACKTEST_EXECUTION_POLICY_VERSION).toBe(1);
+  // 🔴 IMPACT-NETPNL-SIGN-001（2026-10-07）：版本号由 v1 → v2。
+  //    这不是「为了让测试通过而改测试」——`context.ts:40-41` 明确规定
+  //    「**任何会改变成交结果或逐笔盈亏口径的默认值变更**都必须 +1」，
+  //    而 v2 正是逐笔净盈亏口径修正（`netPnl` 不再二次扣减卖出侧滑点）。
+  //    本断言的作用是**记录当前版本**，因此随版本递增而更新是它的预期用法。
+  it("政策版本常量存在且为 v2；默认政策含零成交量 REJECT", () => {
+    expect(BACKTEST_EXECUTION_POLICY_VERSION).toBe(2);
     expect(DEFAULT_BACKTEST_EXECUTION_POLICY.zeroVolumePolicy).toBe("REJECT");
     expect(DEFAULT_BACKTEST_EXECUTION_POLICY.blockLimitUpBuys).toBe(true);
     expect(DEFAULT_BACKTEST_EXECUTION_POLICY.blockLimitDownSells).toBe(true);
@@ -325,7 +331,13 @@ describe("B-01 / B-05 — 执行政策版本与零成交量政策", () => {
     expect(text).toContain("涨停不可买");
     expect(text).toContain("跌停不可卖");
     expect(text).toContain("成交量为 0");
-    expect(text).toContain("执行政策版本 = v1");
+    expect(text).toContain("执行政策版本 = v2");
+  });
+
+  it("政策说明文案必须含逐笔净盈亏口径标记（IMPACT-NETPNL-SIGN-001）", () => {
+    const text = describeExecutionPolicy(DEFAULT_BACKTEST_EXECUTION_POLICY).join(" ");
+    expect(text).toContain(NETPNL_CALIBER);
+    expect(NETPNL_CALIBER).toBe("cash-v2");
   });
 
   it("把零成交量政策改成 IGNORE 时文案必须带警告（防静默宽松）", () => {

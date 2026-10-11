@@ -375,10 +375,36 @@ export function fromLegacyStrategyDefinition(
       entry.event.params as Readonly<Record<string, CoreScalar>> | undefined,
     ),
   ];
+  /**
+   * 🔴 `WINDOW` 节点**必须**进规则图 —— 即使没有任何 enabled 条件。
+   *
+   * `LAST_VALID_DAY` / `FIRST_VALID_DAY` 的**候选日集合由窗口定义**
+   * （`ruleGraph.ts#triggerCandidateDays` 取窗口 journal 写入的 `validDays`）。
+   * 丢掉 WINDOW ⇒ `validDays` 为空 ⇒ `resolveTriggerSatisfaction` 退化为
+   * 「当前日即候选日」⇒ 触发**每个决策日都成立**；而生产决策源
+   * （`coreDecision.ts#createCoreDecisionSource`）用「**首个成立日**」转移判据
+   * （`satisfiedToday && !satisfiedBefore`），事件窗数据集又**只在决策日**
+   * 把成员暴露给 pipeline（rd ∈ [start,end]）⇒ **转移日永不出现 ⇒ 该策略 0 信号**
+   * （EVENT-STATE-LONG-EXECUTION-PARITY-001 实测：全部成员被剔 `INSUFFICIENT_FEATURES`）。
+   *
+   * 无 enabled 条件时，窗口子节点用**显式恒真条件**占位（`entry.window.always`）：
+   * 空 `ALL` 被 `validateRuleNode` 拒绝（「ALL 至少需要 1 个子节点」，且空 `ALL`
+   * 在求值层返回 `false`），而恒真条件既通过校验、又不引入任何数据依赖、
+   * 也不触发事件判定计数（不会放大 `occurredEventCount`）。
+   */
   if (conditionNodes.length > 0) {
     steps.push(Rule.window(window, quantifier, Rule.all(conditionNodes, "entry.conditions"), "entry.window"));
   } else {
-    notes.push("legacy 入场没有 enabled 条件 ⇒ 规则图不含 WINDOW 节点（窗口不参与判定）");
+    steps.push(Rule.window(
+      window,
+      quantifier,
+      Rule.condition(Expr.constant(1), "EQ", Expr.constant(1), "entry.window.always"),
+      "entry.window",
+    ));
+    notes.push(
+      "legacy 入场没有 enabled 条件 ⇒ WINDOW 子节点用**显式恒真条件**占位（entry.window.always）：" +
+        "窗口必须参与判定，否则 LAST_VALID_DAY / FIRST_VALID_DAY 因 validDays 为空而退化为「每个决策日都成立」",
+    );
   }
   steps.push(Rule.trigger(entry.trigger.type, "entry.trigger"));
   const ruleGraph = steps.length === 1 ? (steps[0] as RuleNode) : Rule.sequence(steps, "entry");

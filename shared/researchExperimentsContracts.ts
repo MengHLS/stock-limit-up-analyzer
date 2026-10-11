@@ -331,6 +331,40 @@ export const experimentDescriptorSchema = z.object({
   /** 作者 / 来源（如 `stock-limit-up-analyzer` / 外部 AI 名称）。 */
   source: z.string().min(1),
   tags: z.array(z.string()).optional(),
+  /**
+   * `PLAN-RESEARCH-DESIGN-001` P2 —— **靶指标声明**（可选；缺省 = 未声明，既有实验不受影响）。
+   *
+   * 为什么需要：t74 链全程把「组合总收益」当主指标，而它实际是**约 5 笔的统计量**
+   * （`151.0958% = 9 笔`、top10% 占比 438.7%）⇒ 靶与目标错配。尾部目标必须把
+   * **尾部计数/概率列为主判据**，并**同时**报均值（只报一个会得出方向相反的结论）。
+   */
+  targetMetric: z.object({
+    /** 机器可读的指标名（如 `bigWin50Count` / `portfolioTotalReturnPct`）。 */
+    code: z.string().min(1),
+    /** 人类可读说明。 */
+    label: z.string().min(1),
+    /** 该指标为何对应本实验的研究目标。 */
+    rationale: z.string().min(1),
+    /** 目标类型：均值 / 尾部 / 风险 / 覆盖。 */
+    kind: z.enum(["MEAN", "TAIL", "RISK", "COVERAGE"]),
+    /** 是否必须与均值并列报告（尾部类应为 true）。 */
+    reportMeanAlongside: z.boolean(),
+  }).optional(),
+  /**
+   * `PLAN-RESEARCH-DESIGN-001` P5 —— **事前判据 / ABORT / 停止规则**（可选）。
+   *
+   * 🔴 **事后不得修改**；修改即视为新实验（升 `version`）。
+   * 为什么需要：47 实验 / 162 Run 呈广度堆叠，下一步由上一轮结果决定；
+   * 既有合并结论「这条链上没有免费降回撤的旋钮」正是矿脉挖尽的签名。
+   */
+  preRegisteredCriteria: z.object({
+    /** 事前判据（逐条可判定）。 */
+    criteria: z.array(z.string().min(1)).min(1),
+    /** 中止条件：命中即停止且不得解读其他臂。 */
+    abortConditions: z.array(z.string().min(1)),
+    /** 停止规则：本族问到什么程度即关闭该方向。 */
+    stoppingRule: z.string().min(1),
+  }).optional(),
   /** 参数定义列表（前端据此渲染表单）。 */
   parameters: z.array(experimentParameterDefinitionSchema),
   /** Dataset 需求声明。 */
@@ -402,6 +436,14 @@ export const experimentDescriptorSchema = z.object({
              * `research_securities.listedDate`，按**决策日**计算自然日龄。
              */
             excludeListedWithinDays: z.number().int().min(0).max(3650).nullable().optional(),
+            /**
+             * `TAIL-SELECTION-002`：该臂的 3F **振幅取向**。缺省 `"LOW"` = 既有冻结口径。
+             *
+             * 🔴 取向烙在**候选扫描**里 ⇒ 不同取向选中**不同事件集合**；扩展面板按声明臂
+             * 选中事件的**并集**装载 rd17..80 ⇒ **每个用到的取向都必须在此声明**，
+             * 否则该取向选中的事件拿不到扩展行情，Runner 延长会在 rd16 被数据边界截断。
+             */
+            amplitudeOrientation: z.enum(["LOW", "HIGH"]).optional(),
           }),
         )
         .min(1)

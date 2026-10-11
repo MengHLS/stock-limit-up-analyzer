@@ -669,6 +669,108 @@ export function makeRollingObservationWindowFeatures(): readonly FeatureDefiniti
   return [rollingMaxAmplitude];
 }
 
+/**
+ * 后事件状态轴（`EVENT_STATE_LONG` 研究族第一版）所需的特征 id（稳定 id / version）。
+ *
+ * 🔴 冻结定义（来自 `RESULT-POST-EVENT-STATE-FACTOR-DISCOVERY-001` 起的一系列研究，
+ *    在 `RESULT-POST-EVENT-STATE-T0-INDEPENDENCE-001` 与 `RESULT-POST-EVENT-STATE-LONG-BOUND-001` 中复核）：
+ *    - 窗口 = 事件窗 **rd11~15**（5 根 bar 的**链式前收**振幅）；
+ *    - **决策时点下界 = rd15** —— rd0~rd14 上**不可得**（`T0-INDEPENDENCE-001` 结论 C）；
+ *    - 振幅公式与 `observationMaxAmplitude` **逐字一致**：`(high - low) / 上一根 close`，
+ *      链式前收自事件日收盘起步。
+ */
+export const EVENT_STATE_AMPLITUDE_FEATURE_IDS = {
+  maxAmp5: "maxAmp5",
+  avgAmp5: "avgAmp5",
+} as const;
+
+/** 后事件状态振幅窗口（冻结：rd11~15）。决策时点下界 = `end`。 */
+export const EVENT_STATE_AMPLITUDE_WINDOW = { start: 11, end: 15 } as const;
+
+/**
+ * 取 rd11~15 的 5 个链式前收振幅；**窗口不完整 ⇒ null（不臆造）**。
+ *
+ * 🔴 三道结构性防线（全部为**静态可判**，不依赖调用方自觉）：
+ *   1. **决策点下界**：当前 bar 的相对日 `< 15` ⇒ 直接 null ⇒ **rd14 及以前拿不到完整定义**；
+ *   2. **上限硬截断**：`bar.relativeDay <= 15` ⇒ **rd16+ 的 bar 永不进入计算**（即使决策日在 rd20+）；
+ *   3. **完整性**：结果必须**恰为 5 个**，否则 null。
+ */
+function eventStateAmplitudeValues(
+  context: FeatureComputeContext,
+): readonly number[] | null {
+  const window = EVENT_STATE_AMPLITUDE_WINDOW;
+  const current = lastBar(context.bars);
+  if (current === null || current.relativeDay < window.end) return null;
+  const event = context.eventDayBar;
+  if (event === null || event.relativeDay !== 0) return null;
+  if (!finiteClose(event.close) || event.close <= 0) return null;
+  const post = context.bars
+    .filter((bar) => bar.relativeDay >= 1 && bar.relativeDay <= window.end)
+    .sort((left, right) => left.relativeDay - right.relativeDay);
+  let runningPreClose = event.close;
+  const values: number[] = [];
+  for (const bar of post) {
+    if (bar.high === null || bar.low === null || bar.close === null) return null;
+    const amplitude = (bar.high - bar.low) / runningPreClose;
+    if (!Number.isFinite(amplitude)) return null;
+    if (bar.relativeDay >= window.start) values.push(amplitude);
+    runningPreClose = bar.close;
+  }
+  const expected = window.end - window.start + 1;
+  return values.length === expected ? values : null;
+}
+
+/**
+ * 后事件状态轴：rd11~15 振幅特征（`EVENT_STATE_LONG` 第一版候选的**排名因子**）。
+ *
+ * - `maxAmp5` = max(振幅[rd11..rd15])
+ * - `avgAmp5` = mean(振幅[rd11..rd15])
+ *
+ * 两者都声明 `EVENT_TO_CURRENT`（Runtime 传入 `barsUpTo(决策日)` 的完整可见序列，
+ * 不按 `lookback` 截断）与 `sameBarLeakage("close", 0)`（**无未来依赖**：全部被读 bar 的相对日 ≤ 决策日）。
+ *
+ * ⚠️ 这两个特征是**「事件后状态」因子**：其定义预设**决策日 ≥ rd15**。
+ *    它们**不能**被用于 T=0（事件日）决策——在 rd0~rd14 上 `compute` 一律返回 null。
+ *
+ * ⚠️ 本函数**不修改** `observationMaxAmplitude` / `observationMeanAmplitude`（rd1~5）
+ *    与 `rollingMaxAmplitude`（rd1~min(当前日,5)）的任何定义。
+ */
+export function makeEventStateAmplitudeFeatures(): readonly FeatureDefinition[] {
+  const leakage = sameBarLeakage("close", 0);
+  const window = EVENT_STATE_AMPLITUDE_WINDOW;
+  const fromValues = (
+    featureId: string,
+    pick: (values: readonly number[]) => number,
+    description: string,
+  ): FeatureDefinition => ({
+    featureId,
+    version: BUILTIN_FEATURE_VERSION,
+    inputs: ["high", "low", "close", "relativeDay"],
+    lookback: 1,
+    historyMode: "EVENT_TO_CURRENT",
+    leakage,
+    description,
+    compute: (context) => {
+      const values = eventStateAmplitudeValues(context);
+      if (values === null) return null;
+      const value = pick(values);
+      return Number.isFinite(value) ? value : null;
+    },
+  });
+  return [
+    fromValues(
+      EVENT_STATE_AMPLITUDE_FEATURE_IDS.maxAmp5,
+      (values) => Math.max(...values),
+      "事件窗 rd" + String(window.start) + "~" + String(window.end) + " 的最大日振幅（链式前收）；决策时点下界 rd" + String(window.end),
+    ),
+    fromValues(
+      EVENT_STATE_AMPLITUDE_FEATURE_IDS.avgAmp5,
+      (values) => values.reduce((sum, value) => sum + value, 0) / values.length,
+      "事件窗 rd" + String(window.start) + "~" + String(window.end) + " 的平均日振幅（链式前收）；决策时点下界 rd" + String(window.end),
+    ),
+  ];
+}
+
 /** 特征 id → legacy `bar.<field>` 派生字段名的映射（**唯一权威**；未登记即拒绝）。 */
 export const DERIVED_BAR_FIELD_TO_FEATURE_ID: Readonly<Record<string, string>> = Object.freeze({
   volumeRatio: "volumeRatio",
@@ -700,6 +802,7 @@ export function createDefaultFeatureRegistry(): FeatureRegistry {
   definitions.push(...makeEventPeakPullbackFeatures());
   definitions.push(...makeObservationWindowFeatures());
   definitions.push(...makeRollingObservationWindowFeatures());
+  definitions.push(...makeEventStateAmplitudeFeatures());
   definitions.push(makePctChangeFeature());
   return createFeatureRegistry(definitions);
 }

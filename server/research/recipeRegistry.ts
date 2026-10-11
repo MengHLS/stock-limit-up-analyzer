@@ -36,12 +36,14 @@ import { makeGatedSignalBuilder, type FeatureGate } from "./framework/gatedSigna
 import type { StrategyRecipe } from "./strategySchema/types";
 import { StrategyRecipeRuntimeError } from "./recipeErrors";
 import { buildPullbackFeatureProviders as buildRecipeFeatureProviders } from "./recipeRegistryAtoms";
+import { EVENT_STATE_AMPLITUDE_FEATURE_IDS } from "../strategyCore/featureRegistry";
 import {
   PULLBACK_PARAMETER_IDS,
   FIXED_POOL_THREE_FACTOR_FEATURE_ID,
   CALIBRATED_N5_EVENT_FEATURE_ID,
   ROLLING_THREE_FACTOR_FEATURE,
   buildCalibratedN5EventFeatureProvider,
+  buildEventStateAmplitudeFeatureProvider,
   buildFixedPoolThreeFactorFeatureProvider,
   buildRollingThreeFactorFeatureProvider,
   requireNumericParameter,
@@ -219,6 +221,7 @@ function strategyRecipeDefinitions(): readonly StrategyRecipeDefinition[] {
       makeRollingThreeFactorRecipeDefinition(),
       makeFixedPoolThreeFactorRecipeDefinition(),
       makeCalibratedN5EventRecipeDefinition(),
+      makeEventStateLongMaxAmp5Top3RecipeDefinition(),
     ];
   }
   return definitionsCache;
@@ -277,6 +280,40 @@ function makeFixedPoolThreeFactorRecipeDefinition(): StrategyRecipeDefinition {
     buildGates: () => [],
     rankFeatureId: FIXED_POOL_THREE_FACTOR_FEATURE_ID,
     rankingConfig: { higherIsBetter: true },
+    selectionConfig: { method: { kind: "topN", n: 3 } },
+  };
+}
+
+/**
+ * EVENT_STATE_LONG 族 · `maxAmp5` Top3 配方（2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001）。
+ *
+ * 🔴 为什么必须注册：策略版本 `3600006`（`event-state-long-maxamp5-top3@1.0.0`）的文档里
+ *    **已经声明**了 `recipe.recipeId = "event-state-long-amp5-top3"`，但该 id 此前从未注册
+ *    ⇒ 正式装配 `requireRecipe` 路径 1 必抛 `RECIPE_NOT_REGISTERED`，这个版本**无法执行**。
+ *    缺的不是新语义，而是把「文档已声明的配方」接上真实可执行实例。
+ *
+ * 🔴 口径只此一份：特征值由 `buildEventStateAmplitudeFeatureProvider` 调用 Strategy Core
+ *    注册表里的 `maxAmp5`（`strategyCore/featureRegistry.ts#makeEventStateAmplitudeFeatures`）；
+ *    本定义只声明**横截面怎么排序、选几个**，不重算因子。
+ *
+ * 方向：`higherIsBetter=false`（低振幅优先），与文档 `recipe.rankingConfig` 一致。
+ */
+function makeEventStateLongMaxAmp5Top3RecipeDefinition(): StrategyRecipeDefinition {
+  return {
+    recipeId: "event-state-long-amp5-top3",
+    point: "close",
+    signalFrequency: "daily",
+    signalDescription:
+      "EVENT_STATE_LONG：rd11~15 链式前收日振幅最大值 maxAmp5 的同日横截面升序取前 3（低振幅优先）",
+    requiredData: ["OHLCV"],
+    selectionSummary: "同一决策日按 maxAmp5 升序 TopN=3（低振幅优先；并列由既有确定性规则裁定）",
+    randomSeed: 20_261_010,
+    features: [
+      buildEventStateAmplitudeFeatureProvider(EVENT_STATE_AMPLITUDE_FEATURE_IDS.maxAmp5, "close"),
+    ],
+    signalKind: "weighted",
+    defaultWeights: { [EVENT_STATE_AMPLITUDE_FEATURE_IDS.maxAmp5]: 1 },
+    rankingConfig: { higherIsBetter: false },
     selectionConfig: { method: { kind: "topN", n: 3 } },
   };
 }

@@ -22,6 +22,10 @@ import { defaultDatasetContentDependencies } from "../datasetRegistry/snapshot/c
 import { RegistryResearchDatasetReader } from "../researchRuntime/datasetReader";
 import type { ExperimentDatasetPort } from "./datasetPort";
 import {
+  resolveBarDayBatchSize,
+  resolveBarReadConcurrency,
+} from "./datasetPort";
+import {
   ExperimentDatasetProviderRegistry,
   createProviderExperimentDatasetPort,
   createRegistryProtocolDatasetProvider,
@@ -96,6 +100,20 @@ export function createDefaultExperimentDatasetPort(): ExperimentDatasetPort {
         dataReader: content.reader,
       }),
       listVersionOptions: listRealVersionOptions,
+      /**
+       * 🔴 `RECOVERY-LIGHT-ST-007` TASK B —— 真实 Run 的行情读取策略（**生产装配显式选择**）。
+       *
+       * 跨境 TiDB 上实验耗时的主项是**往返次数**（实测 6 账户 SMOKE：890 次行情查询、
+       * 1,560,800 行，而进程 CPU 仅约 60 s）。这里把「相对日分批」与「有界并发」
+       * 在实际装配处打开：读取层（`loadRawBarsBatch`）本来就接受复数 `relativeDays`，
+       * 端口过去只塞 1 天。端口自身缺省仍是旧的逐日/串行形态 ⇒ 未被本装配构造的调用方
+       * （单测、其它 provider）行为逐字不变。
+       *
+       * 运行时可用 `EXPERIMENT_BAR_DAY_BATCH=1 EXPERIMENT_BAR_READ_CONCURRENCY=1`
+       * 无条件退回旧形态做对照（见 `datasetPort.ts` 的开关表）。
+       */
+      barDayBatchSize: resolveBarDayBatchSize(),
+      barReadConcurrency: resolveBarReadConcurrency(),
     }),
   );
   return createProviderExperimentDatasetPort({ registry });

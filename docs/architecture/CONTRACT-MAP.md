@@ -105,6 +105,37 @@
 | **兼容性规则** | ① 默认政策 = T+1 强制 + 拦涨停买 + 拦跌停卖 + 停牌拒单不顺延 + 允许部分成交；② 执行语义不在 `SUPPORTED_EXECUTION_SEMANTICS`（`:197`）⇒ 装配层**响亮抛错** `..._EXECUTION_SEMANTICS_UNSUPPORTED`（`:223`）；③ 未知 `positionSizing` kind ⇒ 抛 `..._UNKNOWN_POSITION_SIZING`；④ 缺 `fraction` **响亮抛错**，不静默回落到等权；⑤ 🔴 **历史 6 条留档在 v0 隐式政策下，未回填** |
 | **状态** | READY（FACT） |
 
+### C-100 RECOVERY-ST-FIX-005 增量：**可选执行资格闸门** `SimulationConfig.executionEligibilityGate`（2026-10-11 · `9c5`）
+
+| 项 | 内容 |
+|---|---|
+| **定义位置** | `server/research/simulator/types.ts`（`ExecutionEligibilityGate` / `ExecutionEligibilityCheckInput` / `ExecutionEligibilityDecision` / `ExecutionEligibilityAuditEntry`） |
+| **producer（注入方）** | `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#createStExecutionEligibilityGate`（研究装配层；`policyVersion = recovery-st-execution-eligibility/1.0.0`） |
+| **consumer** | `server/research/simulator/engine.ts#runTradeSimulation`（due-order 循环内的买入分支）+ `validate.ts`（形状与 `FILLED ⇒ NORMAL` 断言） |
+| **可选性** | ✅ `readonly executionEligibilityGate?: ExecutionEligibilityGate \| null`，缺省 / `null` ⇒ 既有执行路径**逐字节不变**（含 001/002/003 与正式策略） |
+| **快照** | `SimulationConfigSnapshot.executionEligibility?: { gateId, policyVersion }` —— **只放身份，函数不入 JSON** |
+| **输出** | `TradeSimulationRun.executionEligibilityAudit?`（仅声明闸门时出现；逐笔 status / reason / providerId / policyVersion / checkedAt / plannedCheckDate / outcome） |
+| **语义** | 只约束**买入**；`status !== "NORMAL"` 或 `allowed !== true` ⇒ 拒单（早于现金 / 持仓 / 成本 / 成交计数）；卖出不受影响 |
+| **兼容性规则** | ① 未声明 ⇒ 记录与指纹不变（digest 常量锁）；② 声明 ⇒ 新字段出现，快照里只有可序列化身份；③ 非法形状 ⇒ `SIM_CONFIG_EXECUTION_ELIGIBILITY_GATE_INVALID` 响亮失败，不静默退化成「没有闸门」；④ `decideBuy` 返回非对象 ⇒ 引擎抛 `EXECUTION_ELIGIBILITY_GATE_INVALID` |
+| **DB 变更** | **0 表 / 0 列 / 0 migration** |
+| **状态** | READY（FACT，additive minor；基线 `v2.4.0` → 已在 `v2.8.0` 合并） |
+
+### C-101 RECOVERY-ST-FIX-005 **续修 / Finding A** 增量：**权威装配配置入口契约** `composite-assembly-config/1.0.0`（2026-10-11 · `9c5b`）
+
+| 项 | 内容 |
+|---|---|
+| **定义位置** | `server/research/compositeRunner/index.ts`：`COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION` / `AssembleCompositeRunnerSimulationConfigInput` / `CompositeRunnerAssemblyConfigResult` / `assembleCompositeRunnerSimulationConfig` / `fingerprintSimulationConfig` |
+| **契约版本** | ✅ `COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION = "composite-assembly-config/1.0.0"`（随产物返回，进留档） |
+| **producer** | `assembleCompositeRunnerSimulationConfig(input)`（**只装配、不撮合**） |
+| **consumer** | `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#run`（经 `@experiments/compositeRunnerBridge` 零实现 re-export）；`runCompositeRunnerBacktest` 内部同一实现 |
+| **入参** | `Omit<RunCompositeRunnerBacktestInput, "sourceRun">` + 可选 `corporateActionResolver`（缺省 ⇒ 装配层照旧读 `corporate_actions`，请求对象**不多键**） |
+| **产物** | `{ contractVersion, simulationConfig, assemblyConfigFingerprint, assembly }` —— 🔴 **结构上不存在** `run` / 交易 / 权益曲线（不是「结果被丢弃」，而是**没有产生结果**） |
+| **装配链（未改）** | → `server/runWorkbenchAssembly/assemble.ts#assembleRunWorkbenchInputs`（唯一装配实现；注入数据集 ⇒ `resolveDataset` = `injected`） |
+| **指纹** | `fingerprintSimulationConfig(config) = sha256(canonicalJson(配置可序列化面))`（hex 64）；函数值以 `fn:<name>` 占位（**不静默丢弃**）；⚠️ **不是** `run.fingerprint` |
+| **兼容性规则** | ① 既有调用方（`paperTrading3fTop3Runner/**`、其它 `research-experiments/**`）**零改动**；② 与 `runCompositeRunnerBacktest` 的 `simulationConfig` 深层相等 + 指纹相等（测试实测）；③ 缺省（无闸门）真实撮合的 `tradeDigest` / `equityDigest` / `run.fingerprint` / `canonicalMetrics` 与旧路径**逐字节相同**；④ 纯撮合层 `server/research/simulator/**` **零改动**，无反向依赖、不连 DB |
+| **DB 变更** | **0 表 / 0 列 / 0 migration / 0 写入** |
+| **状态** | READY（FACT，additive minor；基线 `v2.8.0`；验收见 `tests/server/researchExperiments/rollingPoolRecoveryStAuxiliaryAssembly.test.ts`） |
+
 ---
 
 ## C-07 / C-08 · `BacktestRunResult` 与 Canonical Metrics
@@ -362,3 +393,38 @@
 | **DB 变更** | **0 表 / 0 列 / 0 migration** |
 | **状态** | **IMPLEMENTED**（`check` 0 错；通用端点 vs 专项端点真实库比对一致；浏览器 Tab 实测通过） |
 | **2026-10-07 更新（单策略专项页收敛）** | 侧栏删除「最终评估 3570001（专项）」「模拟盘 3570001（专项）」两项；旧路径 `/strategy-final-evaluation` · `/paper-trading-3570001` 改为 `<Redirect>` 到 `/strategies/<坐标>?version=…&tab=evaluation\|paper`；两个专项页文件删除；策略详情新增 `?tab=` 深链（白名单 + 切换 `replace` 写回 URL）。**端点契约零变化**：`getStrategyVersionEvaluation` / `getStrategyVersionPaperTrading` 不被改动，`getFinalEvaluation` / `getPaperTrading3570001` 仍保留为薄封装（现无前端消费者） |
+
+---
+
+### C-102 RECOVERY-LIGHT-ST-007 增量：**可选 UNKNOWN 处理声明** `SimulationConfig.executionEligibilityUnknownPolicy`（2026-10-11 · `9c5b` 之后）
+
+| 项 | 内容 |
+|---|---|
+| **定义位置** | `server/research/simulator/types.ts`（`EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES` / `ExecutionEligibilityUnknownPolicy` / `DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY` / `executionEligibilityStatusAllowed`）；字段挂在既有 `SimulationConfig` 上 |
+| **契约形状** | `readonly executionEligibilityUnknownPolicy?: "REJECT" \| "ALLOW_WHEN_DECISION_ALLOWS" \| null`；**缺省 = `REJECT`**（失败关闭） |
+| **producer（注入方）** | `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts#run`（**仅**轻量政策组 `stPolicy=known-st-only` 时写入 `ALLOW_WHEN_DECISION_ALLOWS`；严格缺省**不写该键**） |
+| **consumer** | `server/research/simulator/engine.ts#runTradeSimulation`（due-order 循环放行判据 + 收尾硬断言）、`server/research/simulator/validate.ts`（配置形状 + 记录校验） |
+| **放行语义** | `allowed === true` **且** `status === "NORMAL"` ⇒ 放行；`status === "UNKNOWN"` **仅当显式声明** `ALLOW_WHEN_DECISION_ALLOWS` 时放行；`status === "ST"` **永远拒绝**（即使 `allowed = true`）；其它取值一律拒绝 |
+| **审计（真实状态）** | `TradeSimulationRun.executionEligibilityAudit[].status` **保留** `UNKNOWN`（**禁止**改写为 `NORMAL`）；收尾断言 `FILLED ⇒ statusAllowed(status, policy)`，违反抛 `EXECUTION_ELIGIBILITY_VIOLATION` |
+| **快照** | `SimulationConfigSnapshot.executionEligibility.unknownPolicy?` —— **只在显式声明时出现** ⇒ 未声明的既有快照与冻结指纹**逐字节不变** |
+| **兼容性规则** | ① 缺省 / `null` ⇒ 既有执行路径与记录指纹**逐字节不变**；② 取值非法 ⇒ `SIM_CONFIG_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_INVALID`（引擎抛 `..._UNKNOWN_POLICY_INVALID`）；③ 声明了政策却没有闸门 ⇒ `SIM_CONFIG_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_WITHOUT_GATE`（引擎抛 `..._WITHOUT_GATE`）—— 不静默忽略；④ **禁止**：把 `UNKNOWN` 改写为 `NORMAL`、移除整个执行闸门、另开第二条模拟器路径 |
+| **DB 变更** | **0 表 / 0 列 / 0 migration** |
+| **状态** | READY（FACT，additive minor；基线 `v2.8.0`） |
+
+### C-103 RECOVERY-LIGHT-ST-007 增量：**探索性轻量 ST 资格政策** `KNOWN_ST_ONLY_EXPLORATORY`（2026-10-11 · `9c5b` 之后）
+
+| 项 | 内容 |
+|---|---|
+| **定义位置** | `research-experiments/shared/rollingPoolRecovery/knownStPolicy.ts`（政策 id 闭集 `ST_ELIGIBILITY_POLICY_IDS` / `resolveStEligibilityPolicy` / `decideKnownStOnlyEligibility` / `decideStrictEligibility` / `KnownStLabelIndexPort`）；经 `research-experiments/shared/rollingPoolRecovery/index.ts` 零逻辑导出 |
+| **政策版本** | 严格（缺省）= `recovery-st-execution-eligibility/1.0.0`（**未改**）；本轮探索性 = **`recovery-known-st-only/1.0.0`**（id `KNOWN_ST_ONLY_EXPLORATORY`） |
+| **producer（来源）** | `server/researchExperiments/knownStLabelIndex.ts#loadKnownStLabelIndex`（**只读** `SELECT` `research_security_status_history`（`statusType='ST'`）+ `research_security_identifier_history`（primary），建 `(symbol, 日期)` 索引 + 来源指纹 + availability/confidence 分布）；经 `research-experiments/compositeRunnerBridge.ts` **零实现 re-export** 注入研究层 |
+| **consumer** | `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts`（确认日收盘候选资格 + `createKnownStOnlyEligibilityGate` 成交前复查）；`result.ts`（payload schema / 表 / 统计）；`tests/tools/rollingPoolRecoveryStRun.mts`（`--st-policy`） |
+| **行为表（逐字）** | 已有记录明确 ST/\*ST ⇒ **不进入排序候选 + 成交前拒单**（审计 `ST` + 来源 / 生效区间 / 证据指纹）；明确正常记录 ⇒ 参与 + 可执行（`NORMAL`）；无记录 / 身份无法解析 / 证据不能判断 ⇒ **`UNKNOWN`，注明"本轮允许"**（参与 + 可执行） |
+| **实验参数** | `descriptor.parameters` 新增 `stPolicy`（`kind: "ENUM"`，`required: false`，`defaultValue: "strict"`，`allowedValues: ["strict","known-st-only"]`）；CLI `tests/tools/rollingPoolRecoveryStRun.mts --st-policy <strict\|known-st-only>`，非法值 exit 2 |
+| **PIT 边界（不伪造）** | 来源**没有** `availableAsOf` 列 ⇒ 索引**不构造**可获知时间；`availability` / `confidence` **原样保留**；**不把缺席派生成 `NORMAL`**；边界 / 重叠 / 非法时间 / 不可识别取值 ⇒ `UNKNOWN`；身份解析用**该日期对应**的证券身份（`resolveSecurityIdByEngineKey`），**不用今天的名称**、**不用行情涨跌停字段**、**不凭空生成 `securityId`** |
+| **与严格契约的关系** | `stGate.ts` / `ST_GATE_CONTRACT_VERSION = "1.1.0"` / `evaluateStGate` **零改动**；轻量政策是**另一个有版本的资格决策**，两者并存且**缺省为严格** |
+| **轻量模式不继承的前置** | 不用 `stSummary.blocked` / `providerVerifiable`；不伪造 `verifiable=true`；null-provider 早诊断只属严格模式；`ST_COVERAGE_BLOCKED` **不是**轻量模式的必然终点（终态见 §8 四选一） |
+| **快照 / 身份** | `frozenConfig` 增 `stEligibilityPolicyId/Version/Parameter/Exploratory/StrictDefault` ⇒ 两种政策**不可能**共用同一份冻结配置；`customPayload.status` 新增 `EXPLORATORY_KNOWN_ST_ONLY`、新增 `terminalState` 与 `stEligibilityPolicy`（来源覆盖与政策描述） |
+| **兼容性规则** | ① 缺省严格 ⇒ 004 行为、产物集与断言**不变**；② 轻量模式**新增**两份产物（`st-light-eligibility-decisions.csv` / `st-light-policy-summary.json`），严格模式**不产出**；③ 新字段在 zod schema 中为 `optional`（旧载荷仍可校验）；④ 结论只能是**探索性**：UNKNOWN 被接受 + 历史（非 PIT）标签 + 旧 Dataset 局限 |
+| **DB 变更** | **0 表 / 0 列 / 0 migration / 0 写入**（标签索引为只读 `SELECT`） |
+| **状态** | READY（FACT，additive minor；基线 `v2.8.0`；验收见 `tests/server/researchExperiments/rollingPoolRecoveryStLightPolicy.test.ts`） |

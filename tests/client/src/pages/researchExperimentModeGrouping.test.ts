@@ -57,8 +57,13 @@ const EXPECTED_MODE_COUNTS: Record<string, { total: number; kinds: Record<string
     //             +composite-runner-newhigh3-t74-late-entry（P8 延迟入场）
     //             +composite-runner-newhigh3-t74-event-gate（P9 事件事实 gate）
     //             +composite-runner-newhigh3-t74-trend（P0 趋势融合，multi-factor）
-    total: 47,
-    kinds: { "single-factor": 6, "multi-factor": 13, "other-scope": 28 },
+    // 2026-10-07：+composite-runner-newhigh3-t74-inverted（TAIL-SELECTION-002 3F 取向翻转）
+    // 2026-10-10：+rolling-pool-right-tail-mvp（FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001，other-scope）
+    //              +rolling-pool-early-entry-runner（FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002，other-scope）
+    // 2026-10-10：+rolling-pool-observation-window（FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003，other-scope）
+    // 2026-10-11：+rolling-pool-recovery-st（FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004，other-scope）
+    total: 52,
+    kinds: { "single-factor": 6, "multi-factor": 13, "other-scope": 33 },
   },
   "combo-backtest": { total: 1, kinds: { "other-scope": 1 } },
 };

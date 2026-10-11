@@ -34,7 +34,6 @@ interface OpenTrade {
   securityId: string;
   entryTime: string;
   entryPrice: number;
-  entryBasePrice: number;
   /** 建仓候选评分；旧调用方未提供时为 null。 */
   entryScore: number | null;
   /** 剩余持仓数量。 */
@@ -44,9 +43,17 @@ interface OpenTrade {
   totalEntryCost: number;
   /** 累计现金费用（买 + 卖）。 */
   fees: number;
-  /** 累计滑点金额（买 + 卖）。 */
+  /** 累计滑点金额（买 + 卖；**有符号诊断量**，正 = 成本、卖侧为负）。不参与净盈亏计算。 */
   slippageAmount: number;
-  /** 累计毛盈亏（纯价格差，无滑点）。 */
+  /**
+   * 累计毛盈亏（**成交价口径，滑点已含在价格里**）。
+   *
+   * 🔴 `IMPACT-NETPNL-SIGN-001`：此前本字段用「无滑点基准价」累加，再由 `netPnl` 扣一次
+   * **有符号**滑点。因卖出成交价由 `slippedSellPriceAdjusted` 以 `base × (1 − bps)` 构造
+   * ⇒ 卖出侧滑点结构性为负 ⇒ 那个「减法」等于把它又加回来一次 ⇒ `netPnl` 高估
+   * `2 × |卖出侧滑点|`（实测隐含 5.10bp vs 配置 5bp）。
+   * 现改为成交价口径 ⇒ `netPnl = grossPnL − fees` 即真实现金损益。
+   */
   grossPnL: number;
 }
 
@@ -161,7 +168,6 @@ export class Portfolio {
         open.quantity = Math.round(open.quantity * ratio);
         open.totalQuantity = Math.round(open.totalQuantity * ratio);
         open.entryPrice = open.entryPrice / ratio;
-        open.entryBasePrice = open.entryBasePrice / ratio;
       }
       open.grossPnL += dividendCash;
       open.totalEntryCost += rightsCash;
@@ -224,7 +230,6 @@ export class Portfolio {
       securityId: fill.securityId,
       entryTime: fill.timestamp,
       entryPrice: fill.price,
-      entryBasePrice: fill.basePrice,
       entryScore: fill.score ?? null,
       quantity,
       totalQuantity: quantity,
@@ -285,7 +290,10 @@ export class Portfolio {
       open.quantity -= quantity;
       open.fees += tradeCost.total;
       open.slippageAmount += slippage;
-      open.grossPnL += (fill.basePrice - open.entryBasePrice) * quantity;
+      // 🔴 IMPACT-NETPNL-SIGN-001：用**成交价**累加毛盈亏（滑点已含在 `fill.price` 里）。
+      // 此前用无滑点基准价累加、再由 `netPnl` 二次扣减 `slippageAmount`；因卖出侧滑点
+      // 结构性为负（`base × (1 − bps)`），那次「减法」实际把滑点又加回来一次。
+      open.grossPnL += (fill.price - open.entryPrice) * quantity;
       if (decreased.closed) this.finalizeClosedTrade(open, fill);
     }
 
@@ -301,7 +309,9 @@ export class Portfolio {
 
   /** 结算一个完整交易生命周期（清仓）。 */
   private finalizeClosedTrade(open: OpenTrade, fill: Fill): void {
-    const netPnl = open.grossPnL - open.fees - open.slippageAmount;
+    // 🔴 IMPACT-NETPNL-SIGN-001：滑点已含在成交价里（见 `OpenTrade.grossPnL`），
+    // 这里**不再二次扣减** `slippageAmount` ⇒ `netPnl` = 真实现金损益。
+    const netPnl = open.grossPnL - open.fees;
     this.completedTrades.push({
       securityId: open.securityId,
       entryTime: open.entryTime,

@@ -144,6 +144,132 @@ export interface ReentryPolicy {
   readonly maxConcurrentOpenPerCode?: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// EXEC-ELIGIBILITY-001（FIX-005 / F1）— **可选**执行资格闸门
+// ---------------------------------------------------------------------------
+
+/**
+ * 执行资格检查入参（引擎在**真实成交时点**装配，纯数据）。
+ *
+ * 🔴 `executionDate` 是引擎本日真正要执行该买单的交易日（不是「计划成交日」）；
+ *    `plannedDate` 是意图产生的决策日。两者分开记录 ⇒ 「计划 vs 实际」可审计。
+ */
+export interface ExecutionEligibilityCheckInput {
+  readonly securityId: string;
+  /** 计划（决策 / 确认）日：`YYYY-MM-DD`。 */
+  readonly plannedDate: string;
+  /** 实际检查 / 成交日：`YYYY-MM-DD`。 */
+  readonly executionDate: string;
+  readonly side: Side;
+}
+
+/**
+ * 执行资格判决。
+ *
+ * 🔴 **只有 `allowed === true` 且 `status === "NORMAL"` 才可能成交**；引擎还会把
+ *    `status !== "NORMAL"` 一律按拒绝处理（失败关闭），不信任调用方的 `allowed`。
+ */
+export interface ExecutionEligibilityDecision {
+  /** 是否放行（`false` ⇒ 拒单，不扣现金、不建仓、不计成功次数）。 */
+  readonly allowed: boolean;
+  /** 判决状态标签；约定 `"NORMAL"` 是**唯一**放行值（其余一律拒绝）。 */
+  readonly status: string;
+  /** 稳定原因码（自由文本但从闭集取值，如 `VERIFIED_NORMAL` / `VERIFIED_ST` / `NO_STATUS_FACT`）。 */
+  readonly reason: string;
+  /** 证据来源身份（provider）。 */
+  readonly providerId: string;
+  /** 资格政策版本（注入方声明；逐笔审计带上它）。 */
+  readonly policyVersion: string;
+  /** 证据指纹（可追溯到具体公告 / 采集批次）；无证据时 `null`。 */
+  readonly evidenceFingerprint: string | null;
+  /** 实际检查时刻（`YYYY-MM-DDTHH:mm:ss`，当地）。 */
+  readonly checkedAt: string;
+  /** 计划检查时刻 / 日期（供「计划 vs 实际」对照）；缺省 `null`。 */
+  readonly plannedCheckDate: string | null;
+}
+
+/**
+ * **可选**执行资格闸门（默认缺省 ⇒ 引擎行为逐字节不变）。
+ *
+ * 🔴 纯撮合层**不反向依赖**任何研究侧模块：本接口只声明形状，由调用方（研究装配层）
+ *    注入实现；研究层负责经平台数据服务取证据。本层**不直连数据库**。
+ */
+export interface ExecutionEligibilityGate {
+  /** 闸门身份（进入配置快照与逐笔审计）。 */
+  readonly gateId: string;
+  /** 政策版本（进入配置快照与逐笔审计）。 */
+  readonly policyVersion: string;
+  /**
+   * 判定某笔**买入**订单能否在 `executionDate` 执行。
+   *
+   * 🔴 无结论必须返回 `allowed: false`（失败关闭），**不得**用 `NORMAL` 兜底。
+   * 🔴 只对买入生效；卖出与已持仓退出**不经过**本闸门。
+   */
+  decideBuy(input: ExecutionEligibilityCheckInput): ExecutionEligibilityDecision;
+}
+
+/**
+ * 逐笔执行资格审计（**仅当声明了 `executionEligibilityGate` 时存在**）。
+ *
+ * 🔴 记录的是**实际**检查事实（引擎在成交时点调用闸门的返回值），不是事后推断；
+ *    未声明闸门时该字段**不出现** ⇒ 既有 Run 记录逐字节不变。
+ */
+export interface ExecutionEligibilityAuditEntry {
+  readonly orderId: string;
+  readonly securityId: string;
+  readonly side: Side;
+  /** 意图产生的决策日。 */
+  readonly plannedDate: string;
+  /** 真实检查 / 成交日。 */
+  readonly executionDate: string;
+  /** 闸门返回的**真实**状态标签（`UNKNOWN` 原样保留，**绝不**改写成 `NORMAL`）。 */
+  readonly status: string;
+  readonly reason: string;
+  readonly providerId: string;
+  readonly policyVersion: string;
+  readonly gateId: string;
+  readonly evidenceFingerprint: string | null;
+  readonly checkedAt: string;
+  readonly plannedCheckDate: string | null;
+  /** 该笔最终是否真实成交（`REJECTED` 含被本闸门或其后的撮合约束拒绝）。 */
+  readonly outcome: "FILLED" | "REJECTED";
+}
+
+// ---------------------------------------------------------------------------
+// EXEC-ELIGIBILITY-LIGHT-001（RECOVERY-LIGHT-ST-007 §4）— **可选** UNKNOWN 处理声明
+// ---------------------------------------------------------------------------
+
+/**
+ * 未核验状态（`UNKNOWN`）的处理政策（**闭集**）。
+ *
+ * 🔴 **缺省 = `REJECT`** ⇒ 未声明时引擎行为与既有实现**逐字节相同**（既有 Run 记录与指纹不变）。
+ * 🔴 `ALLOW_WHEN_DECISION_ALLOWS` **只**放行 `status === "UNKNOWN"` **且** `allowed === true` 的判决；
+ *    `status === "ST"` **永远拒绝**，即使闸门错误地返回 `allowed = true`。
+ * 🔴 本声明**不**放宽 `NORMAL` 的定义：只有显式声明它的本轮政策才可能用到它。
+ */
+export const EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES = [
+  "REJECT",
+  "ALLOW_WHEN_DECISION_ALLOWS",
+] as const;
+export type ExecutionEligibilityUnknownPolicy =
+  (typeof EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES)[number];
+
+/** 缺省未知处理政策（**必须**是 `REJECT`：失败关闭）。 */
+export const DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY: ExecutionEligibilityUnknownPolicy = "REJECT";
+
+/**
+ * 某状态标签在给定未知处理政策下能否**真实成交**。
+ *
+ * 🔴 这是**唯一**的放行判据（引擎收尾断言与记录校验共用），避免三处各写一遍。
+ */
+export function executionEligibilityStatusAllowed(
+  status: string,
+  unknownPolicy: ExecutionEligibilityUnknownPolicy,
+): boolean {
+  if (status === "NORMAL") return true;
+  return status === "UNKNOWN" && unknownPolicy === "ALLOW_WHEN_DECISION_ALLOWS";
+}
+
 /** 被计划层跳过（未下单）的意图条目。 */
 export interface SkippedIntentEntry {
   /** 决策日（YYYY-MM-DD）。 */
@@ -198,6 +324,30 @@ export interface SimulationConfig {
    * 再交给 `planDecisionDay` 写成 skipped（绝不静默丢弃）。
    */
   readonly reentryPolicy?: ReentryPolicy;
+  /**
+   * EXEC-ELIGIBILITY-001（FIX-005 / F1）— **可选**执行资格闸门。
+   *
+   * 缺省 / `null` = 未启用 ⇒ 既有执行路径**逐字节不变**（含 001/002/003 与正式策略）。
+   * 声明后：每笔**买入**订单在**真实成交时点**（执行日的订单处理阶段，早于报价、
+   * 现金 / 持仓 / 成本 / 成交计数更新）先要求 `decideBuy(...)` 放行；
+   * `status !== "NORMAL"` 或 `allowed !== true` 一律**拒单**（`UNKNOWN` 的例外见
+   * `executionEligibilityUnknownPolicy`，**缺省仍拒绝**）。卖出与已持仓退出不受影响。
+   *
+   * 🔴 闸门实现由**调用方注入**（研究装配层）；本层不 import 研究侧模块、不直连数据库。
+   */
+  readonly executionEligibilityGate?: ExecutionEligibilityGate | null;
+  /**
+   * EXEC-ELIGIBILITY-LIGHT-001（`RECOVERY-LIGHT-ST-007` §4）— **可选**未核验状态处理声明。
+   *
+   * 缺省 / `null` ⇒ `REJECT`：`status !== "NORMAL"` 一律拒单（= 既有行为，**逐字节不变**）。
+   * 只有**显式**声明 `ALLOW_WHEN_DECISION_ALLOWS`（并同时声明 `executionEligibilityGate`）时，
+   * `status === "UNKNOWN"` **且** `allowed === true` 的买入判决才被放行。
+   *
+   * 🔴 `status === "ST"` **始终**拒单，即使闸门返回 `allowed = true`。
+   * 🔴 声明后逐笔审计**保留真实 `UNKNOWN`**（不改写为 `NORMAL`）。
+   * 🔴 本字段是「本轮显式政策」的落点，**不是**把 UNKNOWN 当成 NORMAL 的开关。
+   */
+  readonly executionEligibilityUnknownPolicy?: ExecutionEligibilityUnknownPolicy | null;
   /**
    * MARKET-REGIME-001 市场状态闸门（可选）。缺省 / null = 不限制，既有执行路径逐字节不变。
    *
@@ -333,6 +483,18 @@ export interface SimulationConfigSnapshot {
   readonly candidateExitPolicy: CandidateExitPolicy;
   /** 再入场策略快照（null = 未声明；声明时进入结果记录与指纹）。 */
   readonly reentryPolicy: ReentryPolicy | null;
+  /**
+   * 执行资格闸门的**可序列化身份**（缺省字段**不出现** ⇒ 未启用时快照逐字节不变）。
+   *
+   * 🔴 这里**只**放身份（函数不入 JSON）；逐笔判决在 `executionEligibilityAudit`。
+   * 🔴 `unknownPolicy` **只在显式声明 `executionEligibilityUnknownPolicy` 时出现** ⇒
+   *    未声明 UNKNOWN 政策的既有快照与冻结指纹**逐字节不变**（既有断言是精确对象相等）。
+   */
+  readonly executionEligibility?: {
+    readonly gateId: string;
+    readonly policyVersion: string;
+    readonly unknownPolicy?: ExecutionEligibilityUnknownPolicy;
+  };
   /** 市场状态闸门快照（null = 未声明；声明时进入结果记录与指纹）。 */
   readonly marketRegimeGate: {
     readonly blockedDecisionDates: readonly string[];
@@ -446,6 +608,15 @@ export interface TradeSimulationRun {
   readonly executionStats: ExecutionStats;
   /** 被计划层跳过（未下单）的意图（决策日 → 原因），保证不静默。 */
   readonly skipped: readonly SkippedIntentEntry[];
+  /**
+   * EXEC-ELIGIBILITY-001（FIX-005 / F1）— 逐笔执行资格审计。
+   *
+   * 🔴 **仅当 `simConfig.executionEligibilityGate` 声明时存在**：未声明时该字段
+   *    完全不出现 ⇒ 既有 Run 记录（及其指纹）逐字节不变。
+   * 🔴 每一笔 `outcome === "FILLED"` 的买入都必然 `status === "NORMAL"`：
+   *    引擎在成交前断言，违反即**整轮抛错**（不允许「写个 false 继续报收益」）。
+   */
+  readonly executionEligibilityAudit?: readonly ExecutionEligibilityAuditEntry[];
   /** 审计追踪（逐订单/成交/持仓「为什么」）。 */
   readonly audit: AuditTrail;
 

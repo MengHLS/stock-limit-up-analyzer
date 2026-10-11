@@ -56,6 +56,43 @@ export class DatasetBuildCancelledError extends Error {
  * 「月度候选下推」（`CANDIDATE_RANGE_MAX_MONTHS = 1`，实测 ~12.8s）。60s 给出 ~4.7× 余量。
  * 超时 → 返回 false，调用方**不得回滚数据**（写入者可能仍活着）。
  */
+/**
+ * 构建失败的**诊断串**（DATASET-DIAG-001）。
+ *
+ * 为什么需要：drizzle 把驱动错误包成 `Error("Failed query: <SQL>")`，**底层 MySQL 的
+ * `errno` / `code` / `sqlState` / `sqlMessage` 只挂在 `err.cause` 上**。此前只落 `err.message`
+ * ⇒ `dataset_build_job.errorMessage`（上限 16 000 字符）被 SQL 文本塞满、**零错误码**，
+ * 导致 v9(780003) / v10(780004) 的**确定性**写入失败排查 6 轮仍无法定性。
+ *
+ * 纯诊断：**不改变**任何构建 / 重试 / 清场 / 状态机逻辑；只扩展落库的错误文本。
+ */
+export function describeBuildError(err: unknown): string {
+  const base = err instanceof Error ? err.message : String(err);
+  const parts: string[] = [base];
+  const seen = new Set<unknown>();
+  let cursor: unknown = err instanceof Error ? (err as { cause?: unknown }).cause : undefined;
+  for (let depth = 0; depth < 4 && cursor && !seen.has(cursor); depth += 1) {
+    seen.add(cursor);
+    const e = cursor as {
+      message?: unknown;
+      code?: unknown;
+      errno?: unknown;
+      sqlState?: unknown;
+      sqlMessage?: unknown;
+      cause?: unknown;
+    };
+    const fields: string[] = [];
+    if (e.code !== undefined) fields.push(`code=${String(e.code)}`);
+    if (e.errno !== undefined) fields.push(`errno=${String(e.errno)}`);
+    if (e.sqlState !== undefined) fields.push(`sqlState=${String(e.sqlState)}`);
+    if (e.sqlMessage !== undefined) fields.push(`sqlMessage=${String(e.sqlMessage)}`);
+    if (fields.length > 0) parts.push(`cause[${depth}]: ${fields.join(" · ")}`);
+    else if (e.message !== undefined) parts.push(`cause[${depth}].message=${String(e.message).slice(0, 500)}`);
+    cursor = e.cause;
+  }
+  return parts.join(" | ");
+}
+
 export const BUILD_STOP_TIMEOUT_MS = 60_000;
 
 function parseResumeCheckpoint(raw: string | null): DatasetBuildCheckpoint | null {
@@ -316,7 +353,7 @@ export class DefaultDatasetBuildRunner implements DatasetBuildRunner {
     } catch (err) {
       // 取消是正常终止：job → CANCELLED、version → FAILED 已由 service.cancelJob 落库，此处不再写终态。
       if (err instanceof DatasetBuildCancelledError) return;
-      const message = err instanceof Error ? err.message : String(err);
+      const message = describeBuildError(err);
       // 🔴 不吞异常（铁律）：这个 catch 曾经**完全没有日志**，于是一旦 failJob 的写入没生效，
       // 表现只有「版本 FAILED + 作业永久 RUNNING + 零线索」——实测在真实库上复现两次
       // （版本 510002：B2 在 Phase 1 结束后停止推进，作业 630004 停留 RUNNING，errorMessage 为空）。

@@ -118,7 +118,8 @@ Dataset → Research → Strategy → Parameter Search → Backtest
 | 阶段 | 装配声明 | 执行器实装 |
 |---|---|---|
 | data / research / strategy / backtest / evaluation | `wired: true` | ✅ 已实装 |
-| optimization / regime / finalize | `wired: true` | ⚠️ **`executors.ts` 未见对应 runner**（drift 候选，见 §11） |
+| optimization / regime | `wired: true` | ✅ 非流式 `buildExecutor` 有对应分支；流式 `createStreamingClosedLoopWiring` 未装配这两项（2026-10-10 复核） |
+| finalize | `wired: true` | ✅ `closedLoop/orchestrator.ts#runClosedLoop` 在提供 lifecycle 配置时走内置路径，无需独立 runner（2026-10-10 复核） |
 | robustness / oos / overfitting / paper / review / discipline | `notWired` ⇒ 如实 `CL_RUNNER_NOT_INJECTED` | ❌ 未装配（各自有独立 tRPC 路由可达） |
 
 **纪律**：未装配阶段必须**如实** BLOCKED / `CL_RUNNER_NOT_INJECTED`，**禁止**改成静默 success。
@@ -189,7 +190,7 @@ client/src/researchExperiments/** + pages/researchExperiments/**
 | **BD-11** | `server/researchCore/**` / `server/researchEngine/**` / `server/researchPlanner/**` 是领域权威入口 | **三个目录已不存在**（提交 `e79b510` 拆解：`researchCore` → `server/research/*.ts`；`researchEngine/planner/moduleRegistry.ts` → `research/patternLibrary/moduleRegistry.ts`；`researchEngine/datasetReader.ts` → `researchRuntime/datasetReader.ts`） | 结构性漂移 |
 | **BD-12** | 两套 Research 数据模型并存（复数 4 表「生产不可达但被 barrel 隐性加载」） | 旧 Research 表已 DROP / RENAME 为 `archive_research_*`（migration `0046`），旧领域层与研究引擎代码整体删除 | **已解决** |
 | **BD-13** | `drizzle/schema.ts` 2947 行 / 70 张表；migration 45 | 2224 行 / **≈55** 张；migration **56** | 数字漂移 |
-| **BD-14** | 闭环「实装 8/14 阶段」 | `requirements.ts` 声明 8 阶段 `wired: true`，但 `executors.ts` 只初始化 data/research/strategy/backtest/evaluation；optimization/regime/finalize **无对应 runner**（可能由其它入口补，**未证实**） | 待核漂移 |
+| **BD-14** | 曾把流式装配子集解释为整个 `executors.ts` 无 optimization/regime/finalize | **2026-10-10 已核清**：非流式 `buildExecutor` 实装 optimization/regime；流式 `createStreamingClosedLoopWiring` 只装配五项；finalize 由编排器在 lifecycle 配置存在时内置处理 | ✅ 已修正；按入口区分可达性 |
 | **BD-15** | `docs/architecture/**` 各图均为 round-2 读数 | 本文件（`ARCHITECTURE.md`）与 `MODULE-MAP.md` / `LEGACY-MAP.md` 为 2026-10-03 新读数 | 新增读数 |
 | **BD-16** | `tests/server/research/strategyCandidate/importBoundary.test.ts` 是「本项目唯一被测试固化的跨域边界」（`DOMAIN-MAP.md` §2 原文） | **该测试文件已不存在**；`researchCore` 也已删除 ⇒ 该守卫的守护对象消失 | ✅ **已修正**（CODE-AGENT-INFRA-002：`DOMAIN-MAP` / `CONTRACT-MAP` / `DEPENDENCY-MAP` / `system-manifest.yaml` 的引用已改指活守卫） |
 | **BD-17** | `DOMAIN-MAP.md` §2 / `DEPENDENCY-MAP.md` D-92 引用 `importBoundary.test.ts` | 现有**活着的**边界守卫 = `legacyFreeProductionChain.test.ts`（7）+ `oosValidationBoundary` / `robustnessBoundary` / `walkForwardBoundary`（55） | ✅ **已修正**（同上） |

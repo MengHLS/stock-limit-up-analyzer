@@ -23,9 +23,15 @@ import { stopPolicyDefinitionErrors } from "../stopPolicy";
 import { runnerBridgePolicyErrors } from "../exitPolicyCommon";
 import type { SecurityBoard } from "./types";
 import type {
+  ExecutionEligibilityUnknownPolicy,
   SimulationConfig,
   SimulationConfigSnapshot,
   TradeSimulationRun,
+} from "./types";
+import {
+  DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY,
+  EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES,
+  executionEligibilityStatusAllowed,
 } from "./types";
 
 function issue(
@@ -286,6 +292,86 @@ export function validateSimulationConfig(
           );
         }
       }
+    }
+  }
+  if (config.executionEligibilityGate !== undefined && config.executionEligibilityGate !== null) {
+    const gate: unknown = config.executionEligibilityGate;
+    if (typeof gate !== "object" || Array.isArray(gate)) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_EXECUTION_ELIGIBILITY_GATE_INVALID",
+          "simConfig.executionEligibilityGate",
+          "executionEligibilityGate 必须是对象（缺省 / null = 不启用）"
+        )
+      );
+    } else {
+      const shape = gate as Record<string, unknown>;
+      if (typeof shape.gateId !== "string" || shape.gateId.length === 0) {
+        issues.push(
+          issue(
+            "SIM_CONFIG_EXECUTION_ELIGIBILITY_GATE_INVALID",
+            "simConfig.executionEligibilityGate.gateId",
+            "gateId 必须是非空字符串"
+          )
+        );
+      }
+      if (typeof shape.policyVersion !== "string" || shape.policyVersion.length === 0) {
+        issues.push(
+          issue(
+            "SIM_CONFIG_EXECUTION_ELIGIBILITY_GATE_INVALID",
+            "simConfig.executionEligibilityGate.policyVersion",
+            "policyVersion 必须是非空字符串"
+          )
+        );
+      }
+      if (typeof shape.decideBuy !== "function") {
+        issues.push(
+          issue(
+            "SIM_CONFIG_EXECUTION_ELIGIBILITY_GATE_INVALID",
+            "simConfig.executionEligibilityGate.decideBuy",
+            "decideBuy 必须是函数（无结论必须显式返回 allowed=false，不得靠「没返回」放行）"
+          )
+        );
+      }
+    }
+  }
+  /**
+   * EXEC-ELIGIBILITY-LIGHT-001（`RECOVERY-LIGHT-ST-007` §4）—— **可选**未核验状态处理声明。
+   *
+   * 🔴 缺省 / `null` = `REJECT`（既有行为，校验不新增任何约束）。
+   * 🔴 取值必须在闭集内；**声明了政策却没有闸门** ⇒ 自相矛盾 ⇒ 响亮失败
+   *    （不静默忽略「本轮允许 UNKNOWN」这句声明）。
+   */
+  if (
+    config.executionEligibilityUnknownPolicy !== undefined
+    && config.executionEligibilityUnknownPolicy !== null
+  ) {
+    const unknownPolicy: unknown = config.executionEligibilityUnknownPolicy;
+    if (
+      typeof unknownPolicy !== "string"
+      || !(EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES as readonly string[]).includes(unknownPolicy)
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_INVALID",
+          "simConfig.executionEligibilityUnknownPolicy",
+          `executionEligibilityUnknownPolicy 必须是 [${EXECUTION_ELIGIBILITY_UNKNOWN_POLICIES.join(", ")}] 之一`
+            + "（缺省 / null = REJECT：UNKNOWN 一律拒单）"
+        )
+      );
+    }
+    if (
+      config.executionEligibilityGate === undefined
+      || config.executionEligibilityGate === null
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY_WITHOUT_GATE",
+          "simConfig.executionEligibilityUnknownPolicy",
+          "声明了未知状态处理政策却没有 executionEligibilityGate ⇒ 政策无处生效；"
+            + "拒绝静默忽略该声明"
+        )
+      );
     }
   }
   if (config.executionRules !== undefined) {
@@ -1265,6 +1351,106 @@ export function validateTradeSimulationRun(
     issues.push(
       issue("RECORD_SKIPPED_INVALID", "record.skipped", "skipped 必须是数组")
     );
+  /**
+   * EXEC-ELIGIBILITY-001（FIX-005 / F1）：逐笔执行资格审计（**可选**字段）。
+   *
+   * 🔴 只做形状与「FILLED ⇒ 政策允许的状态」断言；未声明闸门的记录没有该字段 ⇒ 不检查。
+   * 🔴 EXEC-ELIGIBILITY-LIGHT-001（`RECOVERY-LIGHT-ST-007` §4）：记录里的
+   *    `config.executionEligibility.unknownPolicy === "ALLOW_WHEN_DECISION_ALLOWS"` 时，
+   *    `FILLED` 允许 `UNKNOWN`（**保留真实状态**，不改写为 NORMAL）；否则仍必须 `NORMAL`。
+   */
+  const auditUnknownPolicy: ExecutionEligibilityUnknownPolicy =
+    record.config?.executionEligibility?.unknownPolicy ?? DEFAULT_EXECUTION_ELIGIBILITY_UNKNOWN_POLICY;
+  if (
+    record.executionEligibilityAudit !== undefined
+    && !Array.isArray(record.executionEligibilityAudit)
+  ) {
+    issues.push(
+      issue(
+        "RECORD_EXECUTION_ELIGIBILITY_AUDIT_INVALID",
+        "record.executionEligibilityAudit",
+        "executionEligibilityAudit 必须是数组"
+      )
+    );
+  } else if (Array.isArray(record.executionEligibilityAudit)) {
+    record.executionEligibilityAudit.forEach((entry, index) => {
+      const base = `record.executionEligibilityAudit[${index}]`;
+      for (const field of [
+        "orderId",
+        "securityId",
+        "plannedDate",
+        "executionDate",
+        "status",
+        "reason",
+        "providerId",
+        "policyVersion",
+        "gateId",
+        "checkedAt",
+      ] as const) {
+        if (typeof entry[field] !== "string" || entry[field].length === 0) {
+          issues.push(
+            issue(
+              "RECORD_EXECUTION_ELIGIBILITY_AUDIT_INVALID",
+              `${base}.${field}`,
+              `${field} 必须是非空字符串`
+            )
+          );
+        }
+      }
+      if (entry.side !== "buy") {
+        issues.push(
+          issue(
+            "RECORD_EXECUTION_ELIGIBILITY_AUDIT_INVALID",
+            `${base}.side`,
+            "执行资格审计只对买入订单成立（side 必须是 buy）"
+          )
+        );
+      }
+      if (entry.evidenceFingerprint !== null && typeof entry.evidenceFingerprint !== "string") {
+        issues.push(
+          issue(
+            "RECORD_EXECUTION_ELIGIBILITY_AUDIT_INVALID",
+            `${base}.evidenceFingerprint`,
+            "evidenceFingerprint 必须是字符串或 null"
+          )
+        );
+      }
+      if (entry.plannedCheckDate !== null && typeof entry.plannedCheckDate !== "string") {
+        issues.push(
+          issue(
+            "RECORD_EXECUTION_ELIGIBILITY_AUDIT_INVALID",
+            `${base}.plannedCheckDate`,
+            "plannedCheckDate 必须是字符串或 null"
+          )
+        );
+      }
+      if (entry.outcome !== "FILLED" && entry.outcome !== "REJECTED") {
+        issues.push(
+          issue(
+            "RECORD_EXECUTION_ELIGIBILITY_AUDIT_INVALID",
+            `${base}.outcome`,
+            "outcome 必须是 FILLED / REJECTED"
+          )
+        );
+      }
+      if (
+        entry.outcome === "FILLED"
+        && !executionEligibilityStatusAllowed(entry.status, auditUnknownPolicy)
+      ) {
+        issues.push(
+          issue(
+            "RECORD_EXECUTION_ELIGIBILITY_VIOLATION",
+            `${base}.status`,
+            "真实成交的执行资格 status 必须是 NORMAL"
+              + (auditUnknownPolicy === "ALLOW_WHEN_DECISION_ALLOWS"
+                ? "（本记录显式声明允许 UNKNOWN ⇒ UNKNOWN 也合格）"
+                : "")
+              + "（其它状态成交即整轮不合格）"
+          )
+        );
+      }
+    });
+  }
   const sides: readonly Side[] = ["buy", "sell"];
   if (Array.isArray(record.skipped)) {
     record.skipped.forEach((entry, index) => {

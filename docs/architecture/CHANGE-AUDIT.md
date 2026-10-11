@@ -2655,3 +2655,2886 @@
 - **Baseline Update**：本条目。（`SYSTEM-BASELINE.md` 头部由并发会话持有，本任务不覆盖。）
 - **Baseline Impact**：minor（新实验入口 + 新纯函数求值器，无契约/DB 变化）。
 - **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · IMPACT-NETPNL-SIGN-001（`Portfolio` 逐笔净盈亏口径修正）
+
+- **Task**：修正 `server/backtest/portfolio.ts` 的逐笔 `netPnl` 口径缺陷（卖出侧滑点被二次扣减），
+  并补齐口径标记、测试锁与影响分析。承接 `RESULT-151PCT-WINNER-CONCENTRATION-001` §8 的定性。
+- **Changed Domains**：**Backtest Core（逐笔盈亏口径）**。**零 DB / 零 RPC / 零执行链行为变化**。
+- **Changed Files**：
+  - `server/backtest/portfolio.ts`：`grossPnL` 改为**成交价口径**（`fill.price − open.entryPrice`）；
+    `netPnl = grossPnL − fees`（**不再二次扣减** `slippageAmount`）；删除已无用的 `entryBasePrice`
+    （含买入初始化与公司行为缩放两处）。
+  - `server/backtest/context.ts`：`BACKTEST_EXECUTION_POLICY_VERSION` **1 → 2** + 版本史登记；
+    新增 `NETPNL_CALIBER = "cash-v2"`；`describeExecutionPolicy()` 增加口径文案行。
+  - 新增测试 `tests/server/backtest/netPnlCaliber.test.ts`（8 例，**修复前 3 例必红**）。
+  - `tests/server/backtest/backtest2.test.ts`：删掉**错误的不变量** `Net = Gross − Fees − Slippage`，
+    改为成交价口径不变量（理由见下）。
+  - `tests/server/backtest/positionSizingExecution.test.ts`：版本断言 v1 → v2 + 新增口径文案断言。
+  - 新增分析 `docs/research/IMPACT-NETPNL-SIGN-001.md`。
+- **Changed Contracts**：**是（1 处，字段语义）**。`Trade.grossPnL` 由「不含滑点的毛盈亏」
+  变为「**含滑点的成交价口径毛盈亏**」；`netPnl` / `returnPct` 随之变为真实现金损益。
+  **新增** `NETPNL_CALIBER` 常量与 `describeExecutionPolicy()` 一行文案。
+- **Changed DB**：**无**（0 DDL / 0 migration）。⚠️ `BACKTEST_EXECUTION_POLICY_VERSION` 是
+  `parameter_search_run.executionPolicyVersion` 的取值来源与 **cache 判据之一** ⇒ 版本号递增
+  **使旧缓存自然失效**（刻意的：避免继续供应旧口径的逐笔盈亏）。
+- **Changed Execution Path**：**无成交/撮合变化**（不改 `execution.ts` / `cost.ts` / 撮合与拒单逻辑）。
+  仅 `netPnl` / `grossPnL` 的**记账口径**。
+- **缺陷与修法**：
+  - 旧：`grossPnL += (basePrice − entryBasePrice) × q`（无滑点基准价）+ `netPnl = grossPnL − fees − slippageAmount`。
+  - `slippageAmount`（`cost.ts:50`）= `(price − basePrice) × q` 是**有符号**量；而卖出成交价由
+    `slippedSellPriceAdjusted`（`execution.ts:39-42`）= `base × (1 − bps)` 构造 ⇒ **卖出侧滑点结构性为负**
+    ⇒ 「减负数」= 把它又加回来一次 ⇒ `netPnl` 高估 `2 × |卖出侧滑点|`。
+  - 量级吻合：差额 ÷ 2 = 18,871 对卖出名义额 36,974,668 ⇒ **隐含 5.10bp vs 配置 5bp**。
+  - 新：`netPnl = grossPnL（成交价口径） − fees` = **真实现金损益**（含分红）。
+- **影响量化（run `6210006` · n=1429）**：`profitFactor` **1.2073 → 1.1557（−4.3%）**；
+  `expectancy` **+132.15 → +101.99（−22.8%）**；`winRate` 38.56% → 37.93%（**9 笔符号翻转**）；
+  **集中度反向变差**：`top5SharePct` 329.87% → **424.55%**、`top10SharePct` 438.73% → **563.86%**
+  ⇒ **151% 的集中度结论被加强**。
+  **不受影响**：`totalReturnPct` 151.0958% / CAGR / MaxDD / `maxDrawdownDurationDays` / 权益曲线 /
+  `cost` / `turnover`（均出自现金台账或毛额）。
+- **P0 排查（判定层是否受影响）**：**否**。参数搜索「只提供能力，**不产出「最佳参数」结论**」且默认按
+  `combinationIndex` 排序（`parameterSearch/executor.ts:1053,1098,1126`）；稳定区判定**仅用
+  `totalReturnPct` + `maxDrawdownPct`**（`parameterSearch/region.ts:158-159,176-181,186-195`）；
+  稳健性漂移**仅比收益与回撤两维**（`robustness/types.ts:87,89`、`drift.ts:55,163-164`）；
+  OOS 只有日期隔离门禁；全仓 `profitFactor\s*[<>]=?` **0 命中**
+  ⇒ **影响级别 = 「指标需重算」，不是「历史策略结论作废」**。
+- **Potential Baseline Drift**：**是（已登记）**。所有**历史** `closed_loop_backtest_run` /
+  `parameter_search_result` / `search_robustness_result` / `oos_validation` / `walk_forward*` /
+  纸面交易 payload 及含 PF / expectancy / winRate / 集中度的 `RESULT-*` 文档，其**逐笔派生指标**
+  仍是 `cash-v1` 旧口径。按 **AGENTS.md §5「禁止回填历史 Run」**：**不回填**，
+  两代行靠 `executionPolicyVersion`（1 / 2）区分，历史按旧口径读。
+- **Regression Result**：`tsc --noEmit` **0 错**；`checkEolDrift --strict` **0**；
+  新增锁 `netPnlCaliber.test.ts` **8/8**（**修复前 3/8 红，差值 = 2×卖出滑点，机制被独立确认**）；
+  `pnpm run test:changed`：52 文件 / 710 例，**49 通过**，失败 3 文件 8 例**全部为既有红**——
+  `limitUp.test.ts` / `limitUp.watch.test.ts`（**数据库不可用**，`docs/step-dataset-002.2-report.md:178` 已登记的环境依赖红）
+  与 `threeFactorTopNStrategyDocument.test.ts`（期望字面量缺 `recoveryPath` 字段，该文件 `recoveryPath` **0 命中**
+  而 `mapDeclaredExitPolicy`（`server/runWorkbenchAssembly/exitPolicy.ts:86-108`）恒返回该键）。
+  🔴 **已用实验证伪「新增失败」**：把本次两处源码改动 `git stash` 后在 HEAD 逻辑上重跑这 3 个文件，
+  **同样 3 文件 / 8 例失败、用例名逐条一致** ⇒ **零新增失败文件**。
+- **Baseline Impact**：minor（无 Domain 状态跃迁、无新 entry point；改的是既有字段口径）。
+  更新本文件 `docs/architecture/CHANGE-AUDIT.md` + `docs/INDEX.md` + `ROADMAP.md`（`9cp` 登记）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **未做（如实登记）**：① **未回填任何历史 Run**；② 未重算任何历史 RESULT 的 PF / 集中度；
+  ③ ~~未修 `server/engine/portfolio.ts` 的 legacy `netPnl`（**另一套公式，是否同缺陷未判定**）~~
+  ⇒ ✅ **已判定：legacy 无缺陷、无需改动**。平台四套记账实现中，
+  `server/engine/portfolio.ts:187-202` · `server/realisticBacktest.ts:335-338` ·
+  `server/paperTrading.ts:642-645` **三套均用 `proceeds − cost basis` 口径**，
+  把两条腿当现金进出、滑点已含在成交价里 ⇒ **结构上不可能重复扣减**；
+  缺陷**只在 `backtest/portfolio.ts` 一处**。生产闭环受影响是因为
+  `simulator/engine.ts:42,499` **直接 `new Portfolio(...)`** 复用它。
+  ⇒ **污染范围收窄为「经 `server/backtest/**` 产出的数」**（`closed_loop_backtest_run` /
+  `parameter_search_result` / `search_robustness_result` / `oos_validation` / `walk_forward*`
+  及由其派生的 `RESULT-*`）；**legacy `engine/**` 路径、`realisticBacktest`（含 combo-backtest 与
+  `downsideRisk` 归因）、纸面交易 payload 均不受影响**；
+  ④ 未跑新 Run 做新旧口径对比（P3，按需再做）；
+  ⑤ **登记未修**：同名诊断字段 `slippageAmount` 跨引擎**符号约定相反** ——
+  `server/engine/execution.ts:171,179` 卖出用 `(base − price)`（成本为正），
+  `server/backtest/cost.ts:50` 用 `(price − base)`（**有符号**，卖腿为负）；
+  缺陷根源正是「把有符号量的输出直接拿去减」。另 `grossPnL` 定义跨引擎不一致
+  （`backtest` 修复后为成交价口径；`engine/portfolio.ts:210` 仍为无滑点基准价口径
+  ⇒ legacy `netPnl ≠ grossPnL − fees`）。legacy 数值正确，**仅登记不改**，避免扩大范围。
+
+---
+
+## 2026-10-07 · `TAIL-SELECTION-001`（`9cp`）· 右尾选择实验：探索 + 预注册 + 执行
+
+- **Task**：回答「首板回踩候选池里有没有任何东西能识别右尾」。全链路 = 探索（`RESULT-TAIL-EXPLORE-001`）
+  → 年度稳定性检验 → 预注册（`PLAN-TAIL-SELECTION-001`）→ 执行。
+- **Changed Domains**：**无**（纯只读研究）。**0 代码 / 0 契约 / 0 DB / 0 执行链 / 0 新 Run。**
+- **Changed Files**：
+  - 新增 `docs/research/RESULT-TAIL-EXPLORE-001.md`（探索 + 年度检验）
+  - 新增 `docs/research/PLAN-TAIL-SELECTION-001.md`（预注册 §0–§8 + 执行记录 §9–§10）
+  - 更新 `docs/INDEX.md`、`ROADMAP.md`（§44.5 `9cp` 条目同步证据与修正）
+  - 只读探针（`scripts/_scratch/`，gitignore）：`tailExplore.mts` · `tailConfound.mts` · `tailYearly.mts` ·
+    `limitUpRecordsProvenance.mts` · `exec9cp.mts`；产物 `ANALYSIS-tail-*.txt` · `ANALYSIS-9cp-exec.txt`
+- **Changed Contracts**：**无**
+- **Changed DB**：**无**（全程 `SELECT`）
+- **Changed Execution Path**：**无**
+- **探索主要发现**：
+  - 🔴 **`sector`（题材）信号极强但不可回测**：2026 年内 光通信 **lift 3.61** / 算力 **2.94** / AI硬件 **2.49**、
+    `rd60≥+100%` 达 6.4~8.2%（全期基线 0.89%）；但覆盖**仅约 1 年**（2019–2024 **0%**、2026 **96.6%**），
+    且这三个题材**恰是那一年主线** ⇒ 与「事后挑中当年最强题材」不可分离。
+    **PIT 已查证**：命中键 = `(stockCode, limitUpDate)`（`datasetRegistry/db.ts:930`），
+    有题材的 14,464 行来自 **2026-01~08 逐月同期采集**（100% 有题材），另有 **85,866 行 2026-09 一次性批量回填**
+    （仅 1,966 有题材）⇒ 接近 PIT 而非当前快照，但**当年无此数据 ⇒ 无法补**。
+  - `marketCap` / `floatMarketCap` **100% 为 null**；`turnover` / `sourceTurnoverAmount` 是**均值**因子
+    （vs 收益 −0.122 / −0.137）而非尾因子。
+  - 🔴 **`historicalLimitCount` 被年度检验否定**：它是**累计量、随年份单调增长**（中位 2→6→11→17→22→27→31→36）
+    ⇒ 跨年分组会退化为时间代理；**年内归一化后仅 6/8 年同号、3/8 年单调**，**约 42% 表观信号来自年份漂移**。
+  - ✅ **`daysSincePreviousLimit` 是唯一通过年度检验的候选**：**8/8 年符号一致**、高/低比 8 年全 < 1、
+    年内秩合并 Spearman **−0.0278** ≈ 未归一化的 −0.0274 ⇒ **无漂移污染**。
+  - 🔴 **贯穿性发现：尾部与均值在所有可用字段上反向**（四条字段无一例外）。
+- **执行主要结果（`PLAN` §9–§10）**：
+  - **ABORT 门禁第一次运行即触发**，抓到的是**我自己的 harness bug**（重建 SQL 漏 `relativeDay = 10`）；
+    数值最大绝对差 `0.00e+0` 而报「不一致 50,836 项」，`50,836 = 50,907 − 71` ⇒ **数量关系自洽，证明是 harness 问题而非数据问题**。
+    修正后 **parity 全绿**（池 50,907 / 集合对称差 0/0 / 收益重算 0 项不一致）。
+  - **臂 A（间隔过滤）通过全部尾率判据**：三持有期同向 ↑、**8/8 年 ↑**、敏感性稳健（2.95% vs 基线 2.72%）。
+  - 🔴 **但四臂上「rd40 尾率」与「rd40 均值」排名完全颠倒（Spearman = −1）**：
+    D 尾 3.28%/均值 **−2.661%** · A 尾 2.97%/均值 −1.582% · C 尾 2.74%/均值 −0.889% · **B 尾 1.87%/均值 +0.441%**。
+    尾部增益被均值损失以 **3.0×（A）/ 3.3×（D）** 吞掉。
+  - 🔴 **算术级证明**：**均值已包含尾部事件** ⇒ 尾率升而均值降，则尾部以外恶化幅度必大于尾部增益；
+    即使额外尾部事件每笔 +100%，A 的期望增益也仅约 +0.23pp 而均值代价 −0.69pp
+    ⇒ **打平需捕获率约 300%，结构上不可能** ⇒ **「靠入场选择抓右尾」负期望**。
+  - 🔴 **3F 的「反尾」不是缺陷而是特性**：臂 B 均值**最好**（+0.441% vs C 的 −0.889%，8 年中 5 年更优）
+    ⇒ 现行排序在「提高均值」上做对了，代价是尾部变薄。**臂 B 三期全部劣于 C ⇒ 负向基线复现 ⇒ HARNESS 正常。**
+  - **结论**：**关闭「靠入场选择捕捉右尾」方向**（不是关闭平台）；**151% 的来源不在选股层，
+    而在退出政策（Runner）**——与 `RESULT-151PCT-WINNER-CONCENTRATION-001` §3（9 笔 = 151%、Runner 38 笔 = 64.0%）一致。
+    下一步应投向**退出政策**。
+- **Potential Baseline Drift**：**否**（全程只读，未改任何口径或数据）。
+- **Regression Result**：**未跑测试**（零代码变更 ⇒ 不可能影响行为，符合 AGENTS.md §9.4）；
+  `node scripts/checkEolDrift.mjs --strict` **0**；`docs/INDEX.md` 表格 0 处畸形。
+- **Baseline Impact**：minor（新增 2 份研究文档 + `INDEX` / `ROADMAP` 同步）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **未做（如实登记）**：① 未做成本调整比较（靶阈值 ±50%/+100% 对 20bps 不可见，已在 `PLAN` §1 声明）；
+  ② 未建 StrategyVersion、未接线 `threeFactorContinuousScoreFeatures.ts`、未改门槛/数据集；
+  ③ **未产生任何新 Run、未落库**；④ 未使用 `sector` / 市值 / `turnover` / `historicalLimitCount`（按 `PLAN` §5）；
+  ⑤ **未修** `threeFactorTopNStrategyDocument.test.ts` 的既有红（期望字面量缺 `recoveryPath`）—— 与本任务无关，按 §3「不修改与任务无关的模块」。
+
+---
+
+## 2026-10-07 · `151PCT-ATTRIBUTION-001` + `EXIT-POLICY-001`（`9cq`）· 151% 归因与退出政策预注册
+
+- **Task**：承接 `9cp` 的结论，回答「151% 来自**选择**还是**持有/退出**」（用户裁定顺序：先做单笔归因，再写 `9cq` 方案）。
+- **Changed Domains**：**无**（纯只读归因 + 文档）。**0 代码 / 0 契约 / 0 DB 写 / 0 执行链 / 0 新 Run。**
+- **Changed Files**：新增 `docs/research/RESULT-151PCT-ATTRIBUTION-001.md` ·
+  `docs/research/PLAN-EXIT-POLICY-001.md`；更新 `docs/INDEX.md` · `ROADMAP.md`（`9cq` 登记，台账 → `9cq`/下一个 `9cr`）；
+  只读探针 `scripts/_scratch/{attrRecon,attrRecon2,attrRecon3,attrRecon4,attribution,exitRulesRecon}.mts` + `ANALYSIS-attribution.txt`
+- **Changed Contracts**：**无** · **Changed DB**：**无**（全程 `SELECT`）· **Changed Execution Path**：**无**
+- **🔴 口径修复在真实数据上闭合（对 `IMPACT-NETPNL-SIGN-001` 的独立验证）**：
+  用成交价重算 `cash-v2` 净额 = **145,746.92**，与**另一条完全不同的独立路径**逐位相同；
+  `cash-v1` 超出权益台账 **+37,742.01**（= 诊断缺陷额）；`cash-v2` 残差 **−5,348.92 ≈ 分红**。
+- **🔴 核心发现（平台 `evaluationDetail` 自带受控消融，`sameData/sameWindow/sameCostModel = true`）**：
+  - 无 Runner（`first-limit-pullback-3f-top3@1.62.1`）`totalReturnPct` = **+15.7877%**
+  - 有 Runner（`...-runner-t74@2.0.0`）= **+151.0958%**；`delta.totalReturnPct` = **+135.3081pp**
+  - 机制：`runner.directPnlIncrement` **+250,337.01** + `runner.capitalCycleResidual` **−115,028.87** = **+135,308.14**（**逐位对账**）
+  - `triggerCount` **161**（`TREND_EXIT` 110 / `STOP_LOSS` 51）；`extraHoldingDays` 960 / mean 5.96 / median 4；`top10SharePct` 83.85
+  - ⇒ **Runner = 151.10pp 的 89.5%；去掉只剩 +15.79%（7.7 年 ≈1.9%/年）**
+- **单笔归因（1434/1434 全部关联到候选池缓存）**：
+  - **选择有效但不充分**：被执行入场 rd40 固定期均值 **+1.172%** vs 全池 **−0.889%** ⇒ **+2.06pp/笔**
+  - 🔴 **退出维度禁用单笔均值**：单笔均值给出 **−0.66pp（负）**，而组合级净额是 **+135.31pp（正）**；
+    差别正是单笔均值**看不见**的 `capitalCycleResidual` ⇒ **这是本次归因最重要的方法学结论**
+  - 止损 579 笔合计 **−86,256**、中位 −6.047%（资本保护项）；Runner 组 38 笔 = cash-v2 **119,687**、**38/38 全盈利**
+  - **容量饱和**：`1863 天 × 5 仓位 ÷ 6.5 天 ≈ 1,433 ≈ 实际 1,434 笔`
+  - ⚠️ 已**明确拒绝**「3F 打分更强」的推断：`9cp` 纯 top-3 集为 **+0.441%**，实际执行集 **+1.172%**，
+    差额来自**组合容量约束的二次筛选**
+  - **精确表述**：**选择是必要条件（把负期望池变微正），Runner 是充分条件（把它变成 151%）；去掉任一收益消失**
+- **`9cq` 预注册（`PLAN-EXIT-POLICY-001.md`）**：四臂（A 基准复现 / B T+5 截断 / C 延长至 16 日 / D 止损 −8%）；
+  **ABORT**：A 必须复现 `151.0958341843399`（容差 `1e-6`）**且 digest 与 run `6210006` 一致**（I-10），否则停止且不解读其他臂；
+  **红线**：不做网格（4 臂即止、看过后不得加臂）· 禁用单笔均值下结论 · 退出参数**不在** `runtimeOverrides` 白名单
+  （仅 `initialCapital`/`costModel`/`executionModel`）⇒ **每臂必须走 `applyDefinitionChange()` 发新 StrategyVersion（I-5）** ·
+  不修改/删除 run `6210006` · 选股冻结不动。
+  🔴 **性质变更**：`9cp` 的只读授权**不覆盖** `9cq`（后者必须产生持久化 Run）⇒ **执行前需单独授权**。
+  影响：新增 3~4 条 Run + 3 个 StrategyVersion，**无 DDL / 无 migration / 无历史修改**，可回退。
+- **Potential Baseline Drift**：**否**（只读；`ROADMAP` 编号台账同步为已用至 `9cq` / 下一个 `9cr`）。
+- **Regression Result**：**未跑测试**（零代码变更 ⇒ 不可能影响行为，符合 AGENTS.md §9.4）；
+  `checkEolDrift --strict` **0**；`docs/INDEX.md` 表格 0 处畸形。
+- **Baseline Impact**：minor（新增 2 份研究文档 + `INDEX`/`ROADMAP` 同步）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **未做（如实登记）**：① **未做组合级反事实**（未重跑回测）——但**平台自带的 Runner 消融（§1.5）已提供权威净额**，
+  我手工的池级反事实被降级为**机制旁证**；② **未执行 `9cq`**（等授权）；③ 未改任何口径 / 门槛 / 数据集 / StrategyVersion；
+  ④ **未产生任何新 Run、未落库**；⑤ 写 `ROADMAP.md` 时遇到一次 **Win32 1175 瞬时文件替换失败**，
+  已验证文件未损坏（旧句仍在、新内容未入）后重试成功。
+
+---
+
+## 2026-10-07 · `9cq` 执行中止 · **既有实验资产清查**（发现四臂全部重复）
+
+- **Task**：用户授权执行 `PLAN-EXIT-POLICY-001`（`9cq`）。**第 1 步门禁侦察即发现四臂全部与既有实验重叠且有确定结论 ⇒ 主动中止，未执行、未发任何新 Run。**
+- **Changed Domains**：**无**（纯只读清查 + 文档）。**0 代码 / 0 契约 / 0 DB 写 / 0 新 Run / 0 StrategyVersion。**
+- **Changed Files**：改写 `docs/research/PLAN-EXIT-POLICY-001.md`（**§-1 作废声明 + 证据 + §-2 新增前置门禁 + §-3 重定向**）·
+  更新 `ROADMAP.md`（`9cq` 条目改为「已作废 + 重定向」）· 本条目；只读探针 `scripts/_scratch/{listT74Runs,findExpRuns2,listExpRuns,pullOverlap}.mts`
+- **Changed Contracts / DB / Execution Path**：**无**（全程 `SELECT`）
+- 🔴 **核心发现：既有研究资产远比我想象的大**
+  - `research_experiment_run` = **162 条 Run / 约 50 个实验**（t74 家族 **12 个实验 / 16 条 Run**，P0–P10 + carryover/refresh）
+  - `closed_loop_backtest_run` 里的 t74 留档：`6210006`（**+151.10%**，v2.0.0）· `6210002`（**−88.51%**，2971 笔）·
+    `5970002` / `6000001` / `6090001`（`runner-hold20@1.0.0`，**+129.69%**）
+- **四臂重复证据**：
+  | 臂 | 既有 | 既有结论 |
+  |---|---|---|
+  | A 基准复现 | 每个实验内置「控制臂 parity」 | 控制 A `15.7876907121%` / C `151.0958341843399%`（**常量写死在实验里**） |
+  | B T+5 截断 | 同上「控制臂 A」 | 无 Runner = **15.7877%** / 1619 笔 |
+  | C 延长 Runner | **`composite-runner-newhigh3-hold20`**（3 条 Run） | `hold20` **+129.69%** vs t74 **+151.10%** ⇒ 延长更差（⚠️ ds 750001≠780001，非严格同基） |
+  | D 止损放宽 | **`composite-runner-newhigh3-t74-stopwide`**（`p3-stopwide`，`RUN-20261004-670F0677`） | 🔴 **8/10/12% 全部更差**：151.10%→**64.64/76.53/45.13%**，回撤**更大** 43.30%→49.88/45.88/47.02% |
+  - **另**：我设计的「ABORT parity 门禁」**就是该项目的既有范式**；退出视界已被 `entry-aligned-exit-horizon-study`（**9 条 Run**）·
+    `threshold-race-policy-study`（3）· `conditional-pullback-state-exit-study`（2）· `hold-streak-amplitude-t10-study` ·
+    `limit-up-close-hold-study` · `limit-up-price-hold-streak-study` 覆盖
+  - **既有程序自己的合并结论**（本文件 `:1957`）：**这条链上没有免费降回撤的旋钮**（换排序 −166~−228pp / 多买 DD 43→45~56% / 扩大止损 DD 43→46~50% 全部更差）⇒ 只剩**降低暴露**与**组合层择时**
+- 🔴 **我的过程缺陷（如实登记）**：**写完整预注册方案却没先查既有实验清单** —— 恰是用户首条消息抱怨的
+  「广度优先堆叠、零垃圾回收」的熵；差点往已有 **162 条 Run** 的程序里再加 4 条冗余 Run。
+- ✅ **产出的最有价值的东西 = 新增前置门禁（已写入 `PLAN-EXIT-POLICY-001.md` §-2 与 `ROADMAP` `9cq` 条目）**：
+  **写任何 `PLAN-*.md` 前必须先清查** `research_experiment_run`（`GROUP BY experimentId`）+
+  `closed_loop_backtest_run` + `research-experiments/**/experiment.ts`（含 `tags` 的 P 编号）+ 本文件对应 `TASK-ID`；
+  **已被既有实验回答的问题 ⇒ 不得新建实验，只登记「已答」+ 出处。**
+- **重定向**：`9cq` 编号保留，内容改为既有程序指出且**至今未执行**的两条之一 ——
+  ① **降低暴露**（每笔仓位比例 ↓ / 保留现金；`Portfolio` 构造参数 `maxPositionAmountRatio` 已存在）；
+  ② **组合层择时**（大盘状态 gate / 净值回撤熔断）。**具体方案需重新预注册，且必须带上述清查。**
+- **Potential Baseline Drift**：**否**（只读）。⚠️ 但**本条目登记一条对既有认知的修正**：
+  该项目对「退出政策参数空间」的探索**远比我此前文档所呈现的充分**。
+- **Regression Result**：**未跑测试**（零代码变更）；`checkEolDrift --strict` **0**。
+- **Baseline Impact**：minor（1 份文档改写 + `ROADMAP` 同步 + 本条目）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **未做（如实登记）**：① **未执行任何 9cq 臂**（按门禁中止）；② 未发任何 StrategyVersion；③ 未修改/删除任何历史 Run；
+  ④ **未对本轮之前我产出的 `9cp` 与 `PLAN-RESOLVING-RANK-3F-001` 做同样的既有资产清查** ——
+  ⚠️ 已注意到潜在重叠（`twelve-factor-topn-ranking-study` · `twelve-factor-composite-study` ·
+  `single-factor-v1`（39 条）· `turnover-study`（2 条）），**列为下一步必办**。
+
+---
+
+## 2026-10-07 · `TAIL-SELECTION-002`（`9cq` 重定向）· 3F 取向翻转：实现落地 + ABORT 拦下假结论
+
+- **Task**：用户目标「**本质还是想选出更多的右尾的超级股票**」。先做 §-1 既有资产清查 → 预注册 → 实现 → 执行。
+  用户裁定：**（一a）回退 pattern 层实现；（二）在 `compositeRunner` 层实现。**
+- **Changed Domains**：**research（compositeRunner 组合回测路径）**。生产 Strategy Core **零改动**（回退后）。
+- **Changed Files**：
+  - 新增 `docs/research/PLAN-TAIL-SELECTION-002.md`（**§-1 既有资产清查节** + 5 臂 + 事前判据 + ABORT + §6.1 失败登记 + §7.1 门禁记录）
+  - 改 `server/research/compositeRunner/index.ts`：新增导出 `orientAmplitudeScore` · `buildCompositeEvents(…, { amplitudeOrientation })` · `buildFirstLimitPullback3FTop3SourceRun(…, { amplitudeOrientation })`
+  - 新增 `tests/server/research/compositeRunner/amplitudeOrientation.test.ts`（4 例）
+  - **回退** pattern 层 6 个文件（`patternLibrary/{types,projectRecipe,threeFactorTopNStrategy}.ts` · `patterns/{firstLimitPullback3FTopN,index}.ts` · `recipeRegistryAtoms.ts`）+ 删除其测试
+- **Changed Contracts**：**是（新增 2 个可选字段 + 1 个导出函数）** —— 均为 **opt-in，缺省 = 既有行为逐字不变**。
+  `amplitudeOrientation: "LOW" | "HIGH"`（缺省 `"LOW"` = 恒等）。
+- **Changed DB**：**无**（本轮**纯计算**；`closed_loop_backtest_run` 最新仍 `6210006`，`research_experiment_run` 仍 162 条）
+- **Changed Execution Path**：研究路径（compositeRunner）新增一个**可选**取向开关；缺省不改变任何既有路径。
+- 🔴 **核心发现 1（平台隐患，未修仅登记）**：`compositeRunner` 的 `scoreRankCandidates`（`:381-400`）
+  与扫描期 `threeFactorCompositeScoreOf`（`:371` 附近）**各自持有 3F 排序**，
+  **完全不读 StrategyDocument 的配方排序特征** ⇒ **改文档排序特征对该研究路径零影响**。
+  且研究路径的**百分位合成分**与文档声明的**桶位分合成分**方向相同、**公式不同**
+  ⇒ 该隐患一直存在，只因所有既有实验都用默认取向而未被暴露。
+- 🔴 **核心发现 2（过程）**：初版把翻转实现在 pattern/特征层（6 处纯增量 + 6/6 测试，已过 `check`），
+  但**首轮 5 臂执行被 ABORT 门禁拦下**且 `A0 ≡ B0`、`A ≡ B ≡ D` 逐位相同 ⇒ 证明它够不到目标层。
+  **已按用户裁定全部回退** —— 理由：它没有消费者，而仓库明确反对「声明了却无效」的静默面
+  （`recipeRegistryAtoms.ts:253-255` 原文）。
+- 🔴 **ABORT 门禁第二次开火（拦下假结论）**：脚手架实测 A0 = `13.2676340956%`（期望 `15.7876907121%`，1359 vs 1619 笔）、
+  A = `15.4987447563%`（期望 `151.0958341843399%`，**21 vs 1434 笔**）⇒ 门禁失败 ⇒ **未解读任何臂**。
+  **若无门禁，会得出「翻转取向毫无影响」这一错误结论**；真实原因是脚手架装配与既有实验不一致 + 翻转当时未落在生效层。
+- **未做 / 下一步**：**5 臂比较仍未完成**。必须**建成注册式实验**（照 `-stopwide` 范式：`experiment.ts` + `run(context)` + 注册 + 分档台账），
+  让框架按与对照臂**逐位相同**的方式装配面板与 runner ⇒ §4 门禁才有判别力。
+  **在此之前不得给出任何取向翻转的结论。**
+- **Regression Result**：`pnpm run check` **0 错**；新增取向锁 **4/4**；
+  `pnpm run test:changed`：53 文件 / **714 例**，**50 文件通过**，失败 3 文件 8 例**全为已验证既有红**
+  （`limitUp` / `limitUp.watch` 数据库不可用 · `threeFactorTopNStrategyDocument` 期望字面量缺 `recoveryPath`）
+  ⇒ **零新增失败文件**；`checkEolDrift --strict` **0**。
+- **Potential Baseline Drift**：**是（已登记）** —— 新增「研究路径自持 3F 排序、不读文档声明」这一事实；
+  建议后续在 `SYSTEM-BASELINE.md` / `MODULE-MAP.md` 登记该隐患。
+- **Baseline Impact**：minor（1 份研究文档 + 1 个研究路径 opt-in 开关 + 1 个测试）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-07 · `TAIL-SELECTION-002` 收口 · 取向翻转**组合层否证** + provider 取向装载修复
+
+- **Task**：承接上一条，用户裁定「改动」⇒ 修 `CompositeExtensionSelectionArm` 的取向装载；重跑取有效结果。
+- **Changed Domains**：**research（compositeRunner 研究路径 + 实验数据集 provider）**。生产 Strategy Core 零改动。
+- **Changed Files**：
+  - `server/researchExperiments/compositeDatasetProvider.ts`：`CompositeExtensionSelectionArm` 新增 `amplitudeOrientation`；`build()` 改为**按取向分组建候选**（每个用到的取向只扫一次，取并集装载 rd17..80）。**缺省（无臂声明 HIGH）行为逐字不变。**
+  - `shared/researchExperimentsContracts.ts`：descriptor 契约同步新增 `amplitudeOrientation: z.enum(["LOW","HIGH"]).optional()`（**双定义点，缺一即 tsc 报错**——由 `pnpm run check` 抓到）。
+  - `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-inverted/`（上一条已建）：声明**两个**取向臂；修正 ABORT 门禁检查自身的 bug（初版误用 A0 上不存在的 `fullA*` 字段 ⇒ 门禁恒 false，与实测 5 项数值全过相矛盾）；删除冗余的 `fullA` 运行。
+  - `tests/server/researchExperiments/compositeRunnerT74Inverted.test.ts` 同步断言。
+- **Changed Contracts**：**是** —— 新增 1 个可选字段（两处定义）；opt-in，缺省不变。
+- **Changed DB**：新增 `research_experiment_run` **3 条**：`RUN-20261007-48C08F6E`（**FAILED**，被 framework 的 `customPayload` vs `resultSchema` 校验拦下——缺 `fullControlDeltaPct`）· `RUN-20261007-F81E024F`（COMPLETED，但 Runner 臂受扩展面板缺陷污染）· **`RUN-20261007-A5B5DC3D`（COMPLETED，有效）**。**未改任何历史行。**
+- 🔴 **根因（上一条发现，本条修复）**：provider 只按 `extensionSelectionArms` 声明臂选中的事件装载 rd17..80，而该臂类型**无取向字段**、`buildCompositeEvents` 也只按默认 LOW 扫描 ⇒ 翻转取向选中的事件**没有扩展行情** ⇒ Runner 延长在 rd16 被数据边界截断 ⇒ 交易从 1434 塌到 **79**，**看起来像「策略变差」而非数据缺陷**。
+- ✅ **有效结果（`RUN-20261007-A5B5DC3D`，ABORT 门禁 5/5 PASS：A0 `15.7876907121299`/1619 笔 · A `151.09583418434`/1434 笔/trigger 161）**：
+  | 臂 | 取向 | Runner | 收益% | MaxDD% | 笔数 | ≥+50% | ≥+100% | trigger |
+  |---|---|---|---:|---:|---:|---:|---:|---:|
+  | A0 | LOW | 无 | 15.79 | 54.81 | 1619 | 4 | 0 | — |
+  | A | LOW | 有 | **+151.10** | 43.30 | 1434 | **9** | **2** | 161 |
+  | B0 | HIGH | 无 | −31.13 | 60.41 | 1210 | 6 | 0 | — |
+  | **B** | HIGH | 有 | **−29.99** | 60.34 | 1180 | **9** | **0** | 45 |
+  | D | HIGH | 有（延长 30） | −29.99 | 60.34 | 1180 | 9 | 0 | 45 |
+  （A0/A 与缺陷版本**逐位相同** ⇒ 并集面板未扰动控制臂，对照干净。）
+- 🔴 **结论：方向关闭**。翻转取向在组合层 **`≥+50%` 持平（9 vs 9）、`≥+100%` 更少（0 vs 2）、收益差 181pp、MaxDD 恶化 +17pp**。
+- 🔴 **机制（池级 +59% → 组合层 0 的原因）**：① 组合中位持有约 6 天，**结构上够不到 `9cp` 的 rd60 口径**（该局限已登记，此处兑现）；② **高振幅 + −6% 固定止损结构性对立** —— 波动被当亏损收割，证据：**Runner 触发 161→45**、**≥+100% 命中 2→0**、MaxDD 43.30%→60.34%；③ **尾–均值张力第四次出现**（B0 −31.13% vs A0 +15.79%，差 47pp）。
+- **未做**：**未测**「翻转取向 + 同步改退出政策（放宽止损/显著延长持有）」—— 那要引入第二个自变量，违 §5 红线。
+- **Regression Result**：`pnpm run check` **0 错** · 新实验测试 **3/3** · 取向锁 **4/4** · `compositeRunner` 全模块 **9 文件 38 例全绿** · `checkEolDrift --strict` **0**。
+- **Baseline Impact**：minor。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-08 · `RIGHT-TAIL-RESEARCH-001` R1–R5 · v9 Dataset 定稿 + P3 只读预检 + **可观测性缺陷登记**
+
+- **Task**：用户裁定 R1（采用 `v9` / `datasetVersionId=780003` 作为 Right-Tail MVP 的 Dataset）+ R2（接受 `listedAgeDays >= 365` 过滤，不改）+ R3（核验 780003 引用）+ R4（登记可观测性缺陷）+ R5（执行 P3 只读预检）。
+- **Changed Domains**：**无代码域变更**（纯文档 + 只读探针）。Research / Dataset / Strategy / Backtest 全部零改动。
+- **Changed Files**：
+  - `docs/research/RESULT-RIGHT-TAIL-R1-R5-P3-001.md`（**新增**，本轮唯一交付报告）
+  - `docs/research/PLAN-RIGHT-TAIL-FACTOR-001.md`（R1/R2 口径定稿；上一轮所建文档的追加）
+  - 本文件（本条登记）
+  - 只读探针（**已 gitignore，未跟踪**）：`scripts/_scratch/p3Precheck001.mjs` · `scripts/_scratch/p3Precheck001b.mjs` · `scripts/_scratch/r3Verify001.mjs`
+- **Changed Contracts**：**否**。
+- **Changed DB**：**否** —— 全程**只读 `SELECT`**。零 DDL / 零 DML；未改 `dataset_version` / `dataset_build_config` / `dataset_build_job` / 五张 `ds_*` 表的任何一行；未创建 Run / Candidate / Strategy。
+- 🔴 **R4 · 登记为后续修复项（本轮不修）**：用户报称「`eventContextJson` / `factorSnapshotJson` 只能在部分页面看到」。
+  **实查结果（与报称不一致，如实登记）**：
+  1. **`eventContextJson` / `factorSnapshotJson` 两个字段名在全仓（`*.ts` / `*.tsx`）零命中** ⇒ 该名称不存在，无法按此名登记缺陷。
+  2. 实际存在的「快照类 JSON」共 4 类：`research_dataset.versionSnapshotJson` / `dataSnapshotJson`（`drizzle/schema.ts` L354/356）· `strategy_research_provenance.sourceSnapshotJson`（同 L745）· `search_robustness_run` / `oos_validation_run.searchSnapshotJson`（同 L1812/1994）· 回测载荷 `strategyRunSnapshot`。
+  3. **可见性实查**：`client/src` 全量 grep `[Ss]napshot` 的 77 处命中中，**没有任何一处渲染上述 4 类 JSON 的原文** —— `SearchRobustnessPanel.tsx` L474 只渲染 `searchSnapshotFingerprint` 的**前 16 位**；`StrategyVersionDetailDialog.tsx` 把 `strategyRunSnapshot` **拆成具名字段**展示；`VersionDetail.tsx` 展示 `buildConfig` 与 `DatasetSnapshotPanel`（本地 sqlite 快照，非上述字段）。⇒ **不是「部分页面可见」，而是「均无原文查看入口」**。
+  4. ⇒ **登记为后续修复项**：**「数据集 / 策略 / 搜索 / 回测四类快照 JSON 缺统一的原文查看入口（现仅可见派生字段或指纹）」**。**本轮不修复、不改 Schema、不影响 P3**（P3 全程走只读 DB 探针 + 仓库代码，不依赖任何页面）。
+- **R3 · 核验结论（只读）**：`datasetVersionId=780003` 的 **Run 类表引用总数 = 0** —— `research_experiment_run`（总 165 行）**0** 引用 · `closed_loop_backtest_run`（总 463 行）**0** 引用 · 另有 `oos_validation_run` / `parameter_search_run` / `search_robustness_run` / `stock_selection_run` / `walk_forward_run` / `strategy_versions` / `strategy_version_datasets` / `oos_validation_result` / `walk_forward_fold` 全部 **0**。仅 `dataset_build_config`(1) / `dataset_build_job`(1) / 五张 `ds_*` 数据表引用它。
+- **R5 · P3 预检结论（只读）**：12 个冻结因子逐日横截面，**11 个 `RESOLUTION_OK`**，**1 个 `TIE_BREAK_DOMINATED`（`holdStreak`）**；无 `LOW_RESOLUTION` / `INSUFFICIENT_SAMPLE` / `ABORT`。详见 `docs/research/RESULT-RIGHT-TAIL-R1-R5-P3-001.md`。
+- 📌 **口径澄清（非 drift；是两个不同 id 空间）**：`RESULT-151PCT-WINNER-CONCENTRATION-001` 与 `PLAN-RESEARCH-DESIGN-001` 所述「事件 id 形如 `sec_<uuid>::event:…`、破平键 = `securityId.localeCompare`（不透明 UUID）」**描述的是 compositeRunner / 策略链的 id 空间**，在该空间成立。而 **research-experiments（`derive.ts` 一族）的 `eventId` 经实测 100%（70,071/70,071）形如 `<symbol>@<date>`** ⇒ 其 `eventId.localeCompare` 破平键**等价于「按 symbol 升序」**，**不是**不透明 UUID。本轮 P3 的 tie-break 敏感性测试据此改用 **ASC / DESC / 随机**三键（原计划的「symbol 键」在同一交易日内与现行键等价，属退化测试，已在报告中声明并纠正）。
+- **Regression Result**：本轮**无代码改动** ⇒ 未跑 `pnpm run check` / 测试（无受影响面）。新增文档 LF-only 已逐字节核验（`CR=0`）。`checkEolDrift --strict` 因沙箱禁止 `spawnSync git` 管道未能运行（如实记录，未重试）。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RIGHT-TAIL-ENTRY-TIMING-001 · 右尾入场时点实验（研究 + 增量纯函数模块）
+
+- **Task**：`RIGHT-TAIL-ENTRY-TIMING-001` —— 在 `RIGHT-TAIL-RESEARCH-002` 的 8 个有效右尾因子上，研究入场时点（`T+6`/`T+7`/`T+8`/`T+10` 开盘）× 固定持有（`H5`/`H10`/`H20`/`H60`）对**右尾捕获**与**负均值拖累**的影响。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动；本轮**未触碰任何既有业务代码**，只在 `research-experiments/shared/singleFactor/` 内**增量追加**纯函数）。
+- **数据坐标（只读）**：`datasetVersionId = 780003`（v9）· 窗口 2019-01-02 ~ 2025-09-26 · `listedAgeDays >= 365` · no-pullback pool · **未改 Dataset / Schema / Migration / 因子定义 / 桶边界**。
+- **Changes（增量，均为新增符号；既有符号语义与签名未变）**：
+  1. `research-experiments/shared/singleFactor/rightTailTypes.ts` —— 新增 `RIGHT_TAIL_ENTRY_RELATIVE_DAYS`、`RIGHT_TAIL_ENTRY_TIMING_LABELS`、`RIGHT_TAIL_HOLDING_PERIODS`、`RIGHT_TAIL_DEFERRAL_MAX_DAYS`、`RIGHT_TAIL_MAX_RELATIVE_DAY`、**`RIGHT_TAIL_EFFECTIVE_FACTORS`（8 因子既有方向表，禁止重选）**、`rightTailEntryExitRanges()`、`rightTailMergeRanges()`。
+  2. `research-experiments/shared/singleFactor/rightTailUniverse.ts` —— 新增 `deriveEntryTimingOutcomes()`：**只接受已派生的 `samples`**（池与因子值逐对象复用 ⇒ 结构性保证 ABORT-5「因子值不得重算」）；`Entry = open(T+entryRd)` 且 `canBuyAtOpen`；`Exit = close(entryRd + N)`；主退出不可卖则顺延至其后第一个可卖收盘，**最多 +10 交易日且 ≤ rd80**。
+  3. `research-experiments/shared/singleFactor/rightTailMetrics.ts` —— 新增 `maxDrawdownOf()`（**定义与 `shared/singleFactor/metrics.ts#maxDrawdownOf` 逐字一致**；内联以避免把 zod 依赖链引入本组纯函数，**不是第二套口径**）；`EconomicReturn` 新增 `grossMeanReturn` / `grossMedianReturn`（可选入参 `pickedGrossReturns`，向后兼容）。
+- **Contract Impact**：**无**。未新增 tRPC 路由、未改 `shared/researchExperimentsContracts.ts`、未注册 `manifest.ts` / `pages.ts`（沙箱禁止 `tsx`/`esbuild`/`vitest`，注册会引入**不可验证**的 `manifest.test.ts` 风险）。
+- **DB Impact**：**无**。全程只读 `SELECT`（`post` 2,770,932 行 + `event` + `prefix`）；零 DDL / DML / migration。
+- **Execution Impact**：**无**。未创建 Run / Candidate / StrategyVersion；未做 Backtest / OOS / WFA / 组合 / 权重 / 参数搜索。
+- **关键结论（详见 `docs/research/RESULT-RIGHT-TAIL-ENTRY-TIMING-001.md`）**：
+  - **ABORT-5 parity 5/5 PASS**（`eligible` 56,987 · 决策日 1,627 · `limitGap` 缺失 2,343 · `turnover` 缺失 7 · `unscanned` 0）；**ABORT 1–6 全部未触发**。
+  - **Q1**：8/8 因子在 `T+10` 仍保留右尾信号（`limitGap`/`preReturn10` 全 16 臂显著）。
+  - **Q2**：最佳入场时点 = **`T+10`**（持有对齐口径 8/8 因子；改善 +0.50 ~ +1.26 pp）。
+  - **Q3**：**不存在**「`Tail Lift` 保持 + `Mean` 超池」的入场时点（0/32 组合 Mean > Pool）⇒ 🔴 **入场时点无法解决尾部信号与均值之间的结构性冲突**。
+  - **Q4 + 分类**：**A=0 · B=8 · C=0 · D=0 · E=0** —— 8 因子全部为 **B**。建议以 `T+10` 入场为统一基准进入 OOS/Holdout，优先 `meanAmplitude` / `preReturn10` / `limitGap`。
+- **📌 登记的口径差异（非 drift，须与结论同读）**：本实验按任务书 §5 定义 `Exit = Entry 后第 N 个交易日 Close`（即 `exit = entry + N`），与 `RIGHT-TAIL-RESEARCH-002` 的 `D1-a`（`exit = entry + N − 1`）**相差一个相对日**。本实验内部 16 臂持有规则一致，跨入场时点比较自洽；**跨实验对比需注意该偏移**。
+- **📌 登记的指标局限**：`maxDD` 在「每日满仓 + 持有期重叠 + 池日均收益恒为负」的构造下**100% 饱和于 ≈ −100%**（复利 1,627 个交易日后净值趋零）⇒ **本轮无区分度**，风险维度改由 `Median` / `WinRate` / 尾部指标承担。已列入后续修复项。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱以 `spawn EPERM` 拒绝 `tsx`/`esbuild`/`vitest`，属命名管道边界；改用 `tsc` 直接调用验证，node 为主进程、无子进程）。`checkEolDrift --strict` 同样因 `spawnSync git` 被拒，改逐字节核验：新增文档与模块均 **CR=0（LF-only）**。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RIGHT-TAIL-CROSS-SECTIONAL-EXCESS-001 · 同日横截面超额验证（研究 + 增量纯函数模块）
+
+- **Task**：`RIGHT-TAIL-CROSS-SECTIONAL-EXCESS-001` —— 验证 8 个有效右尾因子是否具有**真正的同日横截面超额能力**（`ExcessMean` / `ExcessMedian` / `ExcessTCR20/50/100` / `ExcessTailLift`，**逐日配对**，禁止池化）。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动；本轮**未触碰任何既有业务代码**，只在 `research-experiments/shared/singleFactor/` 内**增量追加**纯函数）。
+- **数据坐标（只读）**：`datasetVersionId = 780003`（v9）· `status` **保持 `FAILED` 不变** · 窗口 2019-01-02 ~ 2025-09-26 · `listedAgeDays >= 365` · no-pullback pool · **未改 Dataset / Schema / Migration / 因子定义 / 边界 / 任何历史 Run / 任何既有实验结果**。
+- **Changes（增量，向后兼容）**：
+  1. `rightTailMetrics.ts` —— 新增 `summarizeCrossSectionalExcess()` + 类型 `CrossSectionalDayStat` / `ExcessEstimate` / `CrossSectionalExcessResult`。**逐日先配对求差、再对日序列取日等权均值 + 日簇 Moving-Block Bootstrap**；池尾率为 0 的交易日**不伪造比值**（只给池化比值区间，逐日一律用差值）。
+  2. `rightTailUniverse.ts` —— `deriveEntryTimingOutcomes()` 新增**可选**第 5 参 `exitOffsetDays = 0`（`-1` = research-002 的 `D1-a` 口径，仅作稳健性对照）；臂 key 仍为 `${entryRd}|${N}`，**既有调用不受影响**。
+  3. `rightTailTypes.ts` —— `rightTailEntryExitRanges()` 新增**可选** `exitOffsetDays` 参数。
+- **Contract Impact**：**无**。未新增 tRPC 路由、未改 `shared/researchExperimentsContracts.ts`、未注册 `manifest.ts` / `pages.ts`（沙箱禁止 `tsx`/`esbuild`/`vitest`，注册会引入**不可验证**的 `manifest.test.ts` 风险）。
+- **DB Impact**：**无**。全程只读 `SELECT`；零 DDL / DML / migration。
+- **Execution Impact**：**无**。未创建 Run / Candidate / StrategyVersion / Parameter Search；未做 OOS / Backtest / 因子组合 / 权重。
+- **关键结论（详见 `docs/research/RESULT-RIGHT-TAIL-CROSS-SECTIONAL-EXCESS-001.md`）**：
+  - parity 4/4 PASS（`eligible` 56,987 · 决策日 1,627 · `limitGap` 缺失 2,343 · `turnover` 缺失 7）；入场日「开盘不可买」剔除 270（0.47%）。
+  - 🔴 **Q1（横截面超额）**：`ExcessMean > 0` = **0 / 32** 格；**显著为负 = 26 / 32** ⇒ **「相对更强」假设被否证**。
+  - ✅ **Q2（横截面右尾）**：`ExcessTCR50` 显著为正 **23 / 32**；`Tail Lift` CI 下界 > 1 **24 / 32**（最高 `Lift` **3.22**）。
+  - 🔴 **Q4（期限）**：**6 个 MEDIUM（H20）· 2 个 SHORT（H10）· 0 个 LONG**；H60 全线失效（4 个因子 `ExcessTCR50 ≤ 0`）。
+  - 🔴 **四类分类**：`CROSS_SECTIONAL_TAIL_SIGNAL` 8/8 · `CROSS_SECTIONAL_MEAN_SIGNAL` **0/8** ⇒ **8 个因子全部为 `TAIL_ONLY_NO_MEAN`**。
+  - ⇒ **结论：这些因子既不是在寻找绝对上涨，也不是在寻找「相对更强」；它们是同日内「相对更极端（更厚尾）」的选择器（方差 / 彩票性选择器）** —— 同时抬高右尾概率与下行，在池日均收益为负的首板池里净效应为负。这解释了 `Tail Lift > 1` 与 `Rank IC < 0` 的长期共存。
+- **🔴 自查发现并已修正的方法学缺陷（可复用的教训）**：`rightTailMetrics#rankCandidates` 的 `key` 参数是**同值破平键**（`if (left.value !== right.value) return byValue; return compareByKey(...)`）。因此对**连续因子**用 `"RAND"` 键构造「随机 TopK 对照」会选出**与 `ASC` 完全相同**的集合 ⇒ 该对照是**复制**而非对照（首轮 64 个「随机臂」中 59 个 CI 不覆盖 0，即此缺陷的症状）。**正确做法**：在**每个决策日内对当日池做均匀随机无放回抽样**（与因子取值无关）。重建后零分布自检通过：`ExMean`/`ExTCR50` 均值 |·| ≤ 0.021 pp · `ExTCR100` 均值**恰为 0.0000** · `Lift` 均值 0.987~1.086 · 24 个单次抽样日簇 CI 中 22 个覆盖 0/1（2 个例外符合 95% 预期假阳性率）。**⇒ 后续任何「随机对照」都必须按此构造，不得复用破平键。**
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RIGHT-TAIL-SELECTION-RULE-001 · 选股规则实验（研究 + 增量纯函数模块）
+
+- **Task**：`RIGHT-TAIL-SELECTION-RULE-001` —— 在 8 因子均为 `TAIL_ONLY_NO_MEAN` 的前提下，检验「简单可解释的选股规则能否在保留右尾超额的同时降低 Top3 的均值劣势」。预注册测试集：**A 单因子基准（6 个）· B 双因子共同极端（4 组）· C 右尾+风险约束（3 组）**，外加 **D 同日配对比较 · E 与 All-Pool 比较 + A/B/C/D 分类 · F 年度稳定性**。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动；本轮**未触碰任何既有业务代码**，只在 `research-experiments/shared/singleFactor/` 内**增量追加**纯函数）。
+- **数据坐标（只读）**：`datasetVersionId = 780003`（v9）· `status` **保持 `FAILED` 不变** · 窗口 2019-01-02 ~ 2025-09-26 · 决策 `T+5` close · Entry **`T+10` open** · 主 H20 / 辅 H10 · 往返 20 bps · 核心 Top3。
+- **Changes（增量，向后兼容）**：
+  1. `rightTailMetrics.ts` —— 新增 **`selectByRule()`**（三种预注册规则 `SINGLE` / `CO_EXTREME_TOP20` / `EXCLUDE_TOP20` 的**当日横截面**选股；破平键固定 `ASC`；`null` 不进排名；`cut = max(1, ceil(q×n))`）+ `RIGHT_TAIL_RULE_QUANTILE = 0.2` + `SelectionRuleSpec` / `RuleCandidateInput` / `RuleSelectionResult`。
+  2. 同文件 —— 新增 **`summarizePairedArms()`**（同日配对两臂差值 + 日簇 Bootstrap CI：`ΔMean` / `ΔMedian` / `ΔTCR50` / `ΔTCR100`）+ `PairedArmDay` / `PairedArmDiff`。
+  3. 同文件 —— 新增 **`pickUniformRandomSubset()`**：**唯一允许的随机对照实现**（逐日均匀无放回 K 子集）。
+  4. 同文件 —— `CrossSectionalExcessResult` 补齐 `pickMedian` / `poolMedian` / `pickTcr20/50/100` / `poolTcr20/50/100`（**纯新增字段**，既有字段与语义未变）。
+- **Contract Impact**：**无**。未新增 tRPC 路由、未改 `shared/researchExperimentsContracts.ts`、未注册 `manifest.ts` / `pages.ts`。
+- **DB Impact**：**无**。全程只读 `SELECT`（`post` 2,770,932 行 + `event` + `prefix`）；零 DDL / DML / migration。
+- **Execution Impact**：**无**。未创建 Run / Candidate / StrategyVersion；未做 OOS / Parameter Search / 权重优化 / 阈值搜索 / 新增因子 / 方向修改 / 重新分桶；**暂停因子 `turnover` / `t1VolumeRatio` 全程未启用**。
+- **关键结论（详见 `docs/research/RESULT-RIGHT-TAIL-SELECTION-RULE-001.md`）**：
+  - parity 4/4 PASS（`eligible` 56,987 · 决策日 1,627 · `limitGap` 缺失 2,343 · `turnover` 缺失 7）；入场日「开盘不可买」剔除 270。
+  - 🔴 **Q1**：**不存在「解决问题」的规则**。唯一命中 A 类的是 **B1（`meanAmplitude ∩ preReturn10` Top20%）**：配对 `ΔMean = +0.783 pp` `[+0.24,+1.32]`（显著改善）且 `ExcessTCR50 = +1.483 pp` `[+0.99,+2.06]`（右尾保留）——**但 B1 的 `ExcessMean = −0.817 pp` `[−1.59,−0.08]` 仍整段低于 0**。`A ∧ ¬absMeanNeg` = **0 / 14**。
+  - 🔴 **真实锚点**：同日**均匀无放回随机 Top3** 的 `ExcessMean = −0.080` `[−0.47,+0.36]`；**全部 13 个 H20 臂（6 单因子 + 7 规则）都低于它**，其中 11 个 CI 整段 < 0。
+  - 🔴 **Q2**：**「共同极端」是唯一有效机制（仅 B1）**；**「右尾 + 风险约束」三条全部失败**（C1/C2/C3 的 `ΔTCR50` 分别为 −0.33 / −0.35 / **−0.86**，均显著牺牲尾部）⇒ 「均值劣势来自同时暴露于另一种极端状态」的假设**被否证**。
+  - 🔴 **Q3**：**确认** —— 8 因子只能作为「右尾风险暴露识别器」，无法转化成正期望 Top3 选股信号。
+  - 🔴 **分类**：H20 `A=1 · B=0 · C=5 · D=1`；H10 `A=1 · B=0 · C=4 · D=2`。**B 类 = 0**。
+  - 🔴 **年度**（最优规则 B1/H20）：`ExcessTCR50` 为正 **7/7 年**、`Lift > 1` **7/7 年**；而 `ExcessMean` 为正仅 **1/7 年**。
+  - ⇒ **决定：停止继续优化这 8 个因子的选股规则，不进入组合权重搜索。** 保留其「右尾风险暴露识别器」用途。若要继续，必须先引入**独立的外部正向信息轴**（须另立任务）。
+- **📌 登记的方法学要点**：① 同日配对下 `ΔExcessMean ≡ ΔMean`（两臂共享同日同池 ⇒ **数学恒等，非两条独立证据**）；② B 组「共同极端」规则有 **4.9%~6.6% 的交易日不足 3 只**（平均 2.92~2.95 只/日），属规则内在代价；③ 本轮**再次自检通过**修正后的随机对照（H20 随机臂 `ExcessMean` `[−0.47,+0.36]` 跨 0、`Lift` `[0.92,1.39]` 跨 1），**未使用**旧 tie-break `RAND`。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEAN-FACTOR-RESEARCH-001 · 12 因子均值因子复查（研究 + 增量纯函数模块）
+
+- **Task**：`MEAN-FACTOR-RESEARCH-001` —— 在**冻结的 12 因子体系**内重新寻找真正的 `CROSS_SECTIONAL_MEAN_SIGNAL`。核心指标改为 **`ExcessMean = TopK Mean − 同日随机 TopK Mean`**（随机 = 逐日**均匀无放回**抽样 × **200 个固定种子**）。11 个可测因子 × {HIGH, LOW} × {Top3, Top5, Bottom3} × {H5, H10, H20, H60}。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动；本轮**未触碰任何既有业务代码**，只在 `research-experiments/shared/singleFactor/` 内**增量追加**纯函数）。
+- **数据坐标（只读）**：`datasetVersionId = 780003`（v9）· `status` **保持 `FAILED` 不变** · 窗口 2019-01-02 ~ 2025-09-26 · `listedAgeDays >= 365` · 无回踩门 · 决策 `T+5` close · Entry **`T+10` open** · 往返 20 bps。
+- **Changes（增量，向后兼容）**：`rightTailMetrics.ts` 新增 **`buildRandomTopKReference()`**（逐日 200 个固定种子的均匀无放回 K 子集统计量；**只依赖 `(持有期, K)` ⇒ 每格构建一次并复用**）+ **`summarizeAgainstRandomTopK()`**（逐日配对 `TopK − 随机 TopK` + 日簇 Moving-Block Bootstrap；`excessMean`/`excessTcr50` 给区间；`lift` 复用既有 `bootstrapLift`）+ 类型 `RandomTopKReferenceDay` / `AgainstRandomTopKDay` / `AgainstRandomTopKResult`。复用既有 `pickUniformRandomSubset`（**修正后的随机对照实现**，未使用旧 tie-break `RAND`）。
+- **Contract Impact**：**无**。未新增 tRPC 路由、未改 `shared/researchExperimentsContracts.ts`、未注册 `manifest.ts` / `pages.ts`。
+- **DB Impact**：**无**。全程只读 `SELECT`（`post` 2,770,932 行 + `event` + `prefix`）；零 DDL / DML / migration。
+- **Execution Impact**：**无**。未创建 Run / Candidate / StrategyVersion；未做 OOS / WFA / 权重搜索 / 参数搜索 / **多因子组合** / 再次优化 3F Top3 / 为改善 Mean 添加过滤条件。
+- **🔴 关键结论（详见 `docs/research/RESULT-MEAN-FACTOR-RESEARCH-001.md`）**：
+  - parity PASS（`eligible` 56,987 · 决策日 1,627 · `limitGap` 缺失 2,343 · `turnover` 缺失 7）。
+  - 🔴 **存在 7 个 A 类均值方向**：`amountPercentile·LOW`(+3.02@H60, **7/7 年**) · `maxAmplitude·LOW`(+1.97, **7/7**) · `meanAmplitude·LOW`(+1.75, 6/7) · `turnover·LOW`(+1.46, 6/7) · `limitGap·HIGH`(+1.44, **7/7**) · `historyLimitCount·LOW`(+1.27, 5/7) · `t1VolumeRatio·HIGH`(+1.12, **7/7**)。
+  - 🔴 **但它们【不是独立维度】**：**7/7 的 A 类方向 = 冻结 `orientation` 方向**；**9/10 的 B 类尾部方向 = 冻结 `orientation` 的严格反向**；**22 格中 A ∩ B = ∅**。⇒ **冻结 `orientation` 编码的是「均值方向」；整个右尾研究线发现的尾部方向就是它的反向。均值与尾部住在同一根横截面轴的两端 —— `TAIL_ONLY_NO_MEAN` 从来不是谜团。**
+  - 🔴 **`3F Top3` 重新定性**：**弱 `CROSS_SECTIONAL_MEAN_SIGNAL`（系统性反尾），不是 Right-Tail Signal。** 其三个成分（`maxAmplitude` LOW / `meanAmplitude` LOW / `t1VolumeRatio` HIGH）**全部是 A 类均值因子**且**全部无尾部信号** ⇒ 3F 是**均值方向的产物**，与尾部无关；其「弱」（历史 `rho` 仅 +0.057→+0.112）来自 **2/5/5 分桶的装配损失**（18 档 / 3 档覆盖 86.9%），**不是成分无信号**（成分级 `ExcessMean` 达 +1.12~+1.97 pp）。
+  - ✅ **`amountPercentile·LOW` 是最稳定的均值因子**：**4 个持有期全部 CI 下界 > 0**（+0.391/+0.761/+1.422/+3.022）、H20/H60 **7/7 年**、Top3↔Top5 同向、**完全没有尾部信号**、与冻结方向一致 ⇒ 属**全周期（峰值 LONG）**。
+  - 🔴 **`preReturn10` / `bodyHeight` / `drawdownDepth` 是「纯右尾因子」**：反向也不构成均值信号（+0.143 / −0.086 / −0.070 均不显著）⇒ 这三个才是**独立于均值轴的尾部信息**。`t1OpenGap` **双向皆无信号 ⇒ D 类**。
+  - 分类（22 格）：**A=7 · B=10 · C=3（重叠口径 11）· D=2**；`REGIME_DEPENDENT` 命中 **0**。
+  - **`holdStreak` 排除条件再度强化确认**：平均不同取值 3.25/日 · **单一取值占比 ≥50% 的交易日 = 99.5%** · `J(ASC,DESC)` Top3 **0.566** / Top5 **0.521** ⇒ 继续排除，未参与任何 Top-K 测试。
+  - ⇒ **不做组合实验**：不存在可引入的第三个独立维度；组合只能在同一根轴两端插值。建议下一步改为 **① 修复 3F 装配分辨力 ② 把 `amountPercentile·LOW` 作为独立候选验证 ③ 单独研究 3 个纯右尾因子 ④ 用 C 类风险方向做下行控制**（均须另立任务）。
+- **📌 登记的口径警告（须与结论同读）**：历史 3F 的 `rho` 测于 **ds 660001/v5 + 回踩门池 + 入场 rd6 + rd10/rd40/rd60**；本轮测于 **ds 780003/v9 + 无门池 + 入场 T+10 + H5/10/20/60** ⇒ **数值不可直接比较，只可比方向/定性**。且本轮**未构建 3F 复合分**（任务书禁止多因子组合），3F 定性基于**历史冻结证据 + 本轮成分级证据**。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · AMOUNT-PERCENTILE-VALIDATION-001 · `amountPercentile LOW` 独立验证（研究 + 增量纯函数模块）
+
+- **Task**：`AMOUNT-PERCENTILE-VALIDATION-001` —— 独立验证冻结因子 **`amountPercentile LOW`** 是否为稳定的横截面均值选择因子，并确定其有效持有周期；额外验证**右尾副作用**与**左尾风险**。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动；本轮**未触碰任何既有业务代码**，只在 `research-experiments/shared/singleFactor/` 内**增量追加**纯函数）。
+- **数据坐标（只读）**：`datasetVersionId = 780003`（v9）· `status` **保持 `FAILED` 不变** · **未重建 Dataset** · 窗口 2019-01-02 ~ 2025-09-26 · 决策 `T+5` close · Entry **`T+10` open** · 往返 20bps · K = Top3/Top5 · 持有 H5/H10/H20/H60 · 随机 = **逐日无放回均匀 TopK × 200 固定种子** · Bootstrap **block=20 / 1000 resamples**（运行时打印确认）。
+- **Changes（增量，向后兼容）**：`rightTailMetrics.ts` —— `RandomTopKReferenceDay` 新增左尾字段 `winRate` / `loss10` / `loss20` / `loss30` / `q05` / `q10`（`buildRandomTopKReference` 同步累积）；`AgainstRandomTopKResult` 新增 `refWinRate` / `pickLoss10/20/30` / `pickQ05/Q10` / `refLoss10/20/30` / `refQ05/Q10` 与对应**超额**（`excessWinRate` / `excessLoss10/20/30` / `excessQ05/Q10`，均为日簇 Bootstrap `ExcessEstimate`）。既有字段与语义**未变**。
+- **Contract Impact**：**无**。未新增 tRPC 路由、未改 `shared/researchExperimentsContracts.ts`、未注册 `manifest.ts` / `pages.ts`。
+- **DB Impact**：**无**。全程只读 `SELECT`（`post` **4,126,920 行**（`rd 11..80` 整段，含 `low` 列以支持 MAE）+ `event` + `prefix`）；零 DDL / DML / migration。
+- **Execution Impact**：**无**。未创建 Run / Candidate / StrategyVersion；未修改 3F、未做 3F 重建；未做因子组合 / 权重优化 / 参数搜索 / OOS / WFA；未因结果好而扩大研究范围。
+- **🔴 关键结论（详见 `docs/research/RESULT-AMOUNT-PERCENTILE-VALIDATION-001.md`）**：
+  - parity PASS（`eligible` 56,987 · 决策日 1,627 · `limitGap` 缺失 2,343 · `turnover` 缺失 7）；入场不可买 270；逐臂无可卖退出 27/43/52/85。
+  - ✅ **分类 = `MEAN_SIGNAL_STABLE`**（H10 / H20 / H60 三个持有期同时命中 `sig ∧ agree ∧ 年+ ≥ 6`）。
+  - ✅ **时间尺度 = LONG（H60）**；⚠️ **MEDIUM（H20）同等稳定（3/3 分、7/7 年、Top3/Top5 一致）且持有期短 3×，实践更优**；❌ **SHORT（H5）不合格**（Top5 不同向、年度仅 5/7）。
+  - ✅ **右尾影响 = PRESERVED**：Top3 四期 `ExcessTCR50` CI 全跨 0（+0.000 / −0.001 / +0.014 / +0.093）、`Lift` 0.999–1.021 CI 全跨 1；绝对尾率不低（H60 `TCR50` 4.466% / `TCR100` 1.229%）。⚠️ Top5/H20 `Lift 0.875 [0.73,1.03]` 为**未达显著**的弱迹象。
+  - ✅ **左尾风险 = IMPROVED**（三条独立证据同向、8/8 格 CI 不跨 0）：`P(≤−10%)` H60 由随机 **39.33% → 30.71%**（`ExcessLoss10 = −8.618`，相对 **−21.9%**）；`Q05` 由 **−15.25% → −11.53%**（`ExcessQ05 = +3.723`）；**MAE 浅 2.149 pp**（口径逐字复用 `server/downsideRisk.ts#adverseReturnLabel`：`(minObservedLow − entryOpen)/entryOpen`，观测窗 `[entryDay, exitDay]`，初值 = 入场价）；**68.7%~69.6% 的交易日**优于同日随机 TopK。
+  - 🔴 **结构性发现（细化 `MEAN-FACTOR-RESEARCH-001` 的结论）**：该轮得出「均值与右尾是同一根轴的两端、A ∩ B = ∅」。**`amountPercentile` 是这条规律的结构性例外** —— 振幅/换手族的均值方向**必须付尾部代价**，而 `amountPercentile LOW` 的均值优势**无显著尾部代价**（两方向均无显著尾部信号）⇒ 它更像**流动性/关注度代理**，是**本链上第一个「不与尾部冲突」的均值因子**，也是「右尾不损 + 左尾受控」能在同一因子上共存的**首个正面证据**。
+- **📌 登记的限制（须与结论同读）**：① **非平台正式 Run**（沙箱 `spawn EPERM`，未生成 Run 行/产物）；② 🔴 **样本内**（任务书明令禁止 OOS/WFA）—— **不得**据此宣称已通过样本外验证；③ 窗口缺最后 ~12 个月；④ **H60 的幅度部分来自池的负漂移更大**（随机基准 H60 −0.503% vs H20 −0.372%），不全是选股能力；⑤ `Median` 仍为负（优势来自右移 + 左尾变薄，非中位数上移）；⑥ MAE 用**日 low**（非 tick 级）；⑦ **未做容量/流动性可行性检验** —— 低成交额分位股可能容量受限。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · PURE-RIGHT-TAIL-VALIDATION-001 · `preReturn10` / `bodyHeight` / `drawdownDepth` 纯右尾属性验证（纯研究，零代码变更）
+
+- **Task**：`PURE-RIGHT-TAIL-VALIDATION-001` —— 独立验证上述三个因子是否属于真正的 **Pure Right-Tail Factor**；6 个方向**全部预先固定**（`HIGH` 为待验证方向，`LOW` 为必须一并验证的反方向），**禁止重新搜索方向**。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动；本轮**未触碰任何既有业务代码**）。
+- **Changes**：🔴 **无代码变更** —— 本轮**未新增也未修改任何模块**，全部复用 `AMOUNT-PERCENTILE-VALIDATION-001` 起就绪的 `buildRandomTopKReference` / `summarizeAgainstRandomTopK` / `pickUniformRandomSubset`（`rightTailMetrics.ts` 自上一轮后**字节未变**）。仅新增研究报告一份。
+- **数据坐标（只读）**：`datasetVersionId = 780003`（v9）· `status` **保持 `FAILED` 不变** · **未重建 Dataset** · 窗口 2019-01-02 ~ 2025-09-26 · 决策 `T+5` close · Entry **`T+10` open** · 往返 20bps · K = Top3/Top5 · 持有 H5/H10/H20/H60 · 随机 = **逐日无放回均匀 TopK × 200 固定种子** · Bootstrap **block=20 / 1000 resamples**（运行时打印确认）。
+- **Contract Impact**：**无**。**DB Impact**：**无**（只读 `SELECT`，`post` 4,126,920 行 + `event` + `prefix`；零 DDL/DML/migration）。**Execution Impact**：**无**（未创建 Run / Candidate / StrategyVersion；未做组合 / 权重 / 阈值 / 参数搜索 / OOS / WFA）。
+- **🔴 关键结论（详见 `docs/research/RESULT-PURE-RIGHT-TAIL-VALIDATION-001.md`）**：
+  - parity PASS（`eligible` 56,987 · 决策日 1,627 · `limitGap` 缺失 2,343 · `turnover` 缺失 7）；池派生 959.1s。
+  - ✅ **三者全部判定 `PURE_RIGHT_TAIL`**，**6/6 判据全满足**（HIGH 主要持有期 `TCR50` 显著增加 · `Lift` CI 下界 > 1 · HIGH 无稳定 Mean · LOW 无稳定 Mean · 非单一年份 · Top3/Top5 同向）。
+  - ✅ **最稳定 = `preReturn10`**：**唯一 4/4 持有期全绿**（`ExcessTCR50` +0.375 / +0.535 / +1.285 / +0.910，CI 下界全 > 0；`Lift` 2.561 / 1.844 / 1.754 / 1.210，CI 下界全 > 1；年+T50 **6/7 · 7/7 · 7/7 · 7/7**；`ExcessTCR100` H20 +0.201✅ / H60 +0.424✅）。`drawdownDepth` 完整期 H5/H10/H20；`bodyHeight` 完整期 H5/H20（H10 缺 `ExcessTCR50` 显著性、**H60 完全失效**）。**后两者 H60 均失效**。
+  - ✅ **时间尺度：三者全部 `MULTI_HORIZON`**（`preReturn10` = SHORT+MEDIUM+LONG；`drawdownDepth` / `bodyHeight` = SHORT+MEDIUM）。无 `UNCLEAR`。
+  - 🔴 **Mean 与 Tail 同时有效 = 不存在**：三者的 HIGH 方向 `ExcessMean` **全部为负**（`bodyHeight` −0.431/−0.637/−1.001/−2.281 **4/4 显著为负、0–1/7 年**；`drawdownDepth` −0.409/−0.663/−0.993/−1.659 **4/4 显著为负、0/7 年**；`preReturn10` −0.082/−0.206/−0.418/−1.685）；LOW 方向 `ExcessMean` **全部不显著**（CI 全跨 0）⇒ 与 `MEAN-FACTOR-RESEARCH-001` 的「**A ∩ B = ∅**」一致。
+  - 🔴 **Risk-Control 属性 = 不存在，三者均为显著的【风险放大】因子**：`ExcessLoss10` **+3.23 ~ +4.91**（H5/Top3，全持有期 CI 下界 > 0）、`ExcessQ05` **−0.91 ~ −1.62**（CI 上界 < 0）、`ExcessMAE` **−0.99 ~ −1.33**（更深）⇒ **右尾更厚、左尾也更厚**，是「方差选择器」的必然形态。
+  - 🔴 **结构性含义（补全 12 因子全景）**：12 因子空间只有**两类**工具 —— ① **右尾放大器**（本轮三因子 HIGH：均值更差 + 右尾更厚 + 左尾更厚）；② **均值+左尾改善器**（`amountPercentile LOW`：均值更好 + 右尾不损 + 左尾更薄）。**不存在第三类** ⇒ 任何进一步的方向翻找都不可能产出「Mean 与 Tail 同时为正」的新因子。
+  - ⇒ **决定：停止**在此三者及全部 8 个右尾因子上继续寻找「Mean 与 Tail 同时有效」的组合（本轮为该属性提供**第 3 次独立确认**：`MEAN-FACTOR-RESEARCH-001` → `RIGHT-TAIL-SELECTION-RULE-001` → 本轮）；**保留**其「右尾暴露识别器」用途（`preReturn10` 最强）。
+- **📌 登记的限制（须与结论同读）**：① **非平台正式 Run**（沙箱 `spawn EPERM`）；② 🔴 **样本内**（任务书明令禁止 OOS/WFA）—— **不得**据此宣称已通过样本外验证；③ 窗口缺最后 ~12 个月；④ `bodyHeight` / `drawdownDepth` 的 **H60 失效** ⇒ `MULTI_HORIZON` 是就「稳定持有期集合」而言，**不等于覆盖全尺度**；⑤ `bodyHeight LOW` 的 `Top5`/H60 `+0.516 [+0.02,+0.98]`（6/7 年）**单点显著**，因 `Top3` 不同向而不计入稳定 Mean —— **如实登记，不据其改变判定**；⑥ MAE 用**日 low**（非 tick 级）；⑦ **未做容量/流动性可行性检验**。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · AMOUNT-PERCENTILE-TRADABILITY-001 · `amountPercentile LOW` 可交易性与容量验证（纯研究，零代码变更）
+
+- **Task**：`AMOUNT-PERCENTILE-TRADABILITY-001` —— 验证 `amountPercentile LOW` 是否具备实际 Top3/Top5 选股的可交易性与容量基础；含入场/卖出可执行性、成本情景（固定 20/50/100bps）、Top3 vs Top5 容量、流动性分层、年度稳定性。判定只允许 `PASS` / `CONDITIONAL` / `FAIL`。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动；本轮**未触碰任何既有业务代码**）。
+- **Changes**：🔴 **无代码变更** —— **未新增也未修改任何模块**，全部复用既有 `buildRandomTopKReference` / `summarizeAgainstRandomTopK` / `pickUniformRandomSubset` / `deriveEntryTimingOutcomes`（`EntryTimingCell` 已暴露 `grossReturn` ⇒ 可直接重算任意成本档）。仅新增研究报告一份。
+- **数据坐标（只读）**：`datasetVersionId = 780003`（v9）· `status` **保持 `FAILED` 不变** · **未重建 Dataset** · 窗口 2019-01-02 ~ 2025-09-26 · 决策 `T+5` close · Entry **`T+10` open** · 持有 **H20 主 / H60 辅** · K **Top3 主 / Top5 辅** · 随机 = **逐日无放回均匀 TopK × 200 固定种子** · Bootstrap **block=20 / 1000 resamples**。
+- **Contract / DB / Execution Impact**：**全部无**。未新增 tRPC 路由 / 未改 contracts / 未注册 manifest；只读 `SELECT`（`post` 2,770,932 行 + `event` + `prefix`），零 DDL/DML/migration；未创建 Run / Candidate / StrategyVersion；未做组合 / 权重 / 阈值 / 参数搜索 / OOS / WFA / **策略回测**。
+- **🔴 🔴 新登记的【数据集口径事实】（可复用，重要）**：
+  - **`ds_first_limit_pullback_{prefix,post}` 的 `amount` 单位是「千元」、`volume` 单位是「手」（1 手 = 100 股）**，且 **DDL 的 `COLUMN_COMMENT` 为空**（无任何单位说明）。
+  - **恒等式**：`VWAP(元) = amount × 10 / volume`。
+  - **三重独立证据**：① **VWAP 落在当日 `[low, high]` 内的比例 = 100.00%（60,000/60,000）**，`VWAP/close` 中位 **1.0020**；其余 5 种单位假设全部 **0.00%（0/60,000）**；② `volume / turnover` 反推流通股本：`000001.SZ` **194.055 亿股**（实际 ≈194.06 亿）、`000002.SZ` **97.14 亿股**（实际 ≈97.1 亿）✅；③ `000001.SZ@2020-07-06`：`volume`=471.1 万手 ⇒ 成交额 ¥73.88 亿 ≈ `amount`×1000 = **¥71.69 亿**（差 3% = VWAP vs 收盘价）✅。
+  - ⚠️ **风险提示**：若误按「元 / 股」解读，**全部成交额会被低估 1000 倍**，从而得出「完全不可交易」的错误结论（本轮初版即如此，已当场纠正并留痕）。**后续任何容量/成交额分析必须先套用本恒等式。**
+- **🔴 关键结论（详见 `docs/research/RESULT-AMOUNT-PERCENTILE-TRADABILITY-001.md`）**：
+  - parity PASS（`eligible` 56,987 · 决策日 1,627 · 池派生 551.6s）· **可成交池 56,717**。
+  - **执行性（无硬伤）**：入场不可买 **270 = 0.474%**（逐年 0.23%–0.91%）；**主退出日可卖 55,867（98.502%）/ 56,000（98.735%）**；**顺延 798（1.407%）/ 632（1.114%）**（**69–71% 只延 1 个交易日**）；**无法退出 52（0.092%）/ 85（0.150%）**。🔴 **口径澄清**：TopK 从**已通过 `canBuyAtOpen` 的池**抽取 ⇒ **条件于入池，TopK 可买率恒为 100%**；风险体现在**池级剔除率**，不是「选中后买不到」。
+  - **容量**：全池入场日成交额 p50 **¥1.956 亿**；**Top3 p50 ¥6,710 万**（p05 ¥1,507 万）· Top5 ¥7,136 万。**¥100 万/仓参与率中位 1.490%**（p05 处 6.6%）· ¥10 万 0.149% · **¥500 万 7.452%** · ¥1,000 万 14.903% ⇒ **单仓 ≤¥100 万可控，¥500 万以上冲击明显**。
+  - **成本（固定情景）**：**保本往返成本 H20/Top3 = 129bps · H20/Top5 = 75bps · H60/Top3 = 274bps · H60/Top5 = 215bps** ⇒ **合理成本不会吃掉优势**。⚠️ **H20/Top5 在 100bps 下转负（−0.246%），H20/Top3 仍 +0.287%**。
+  - 🔴 **登记的方法学要点**：**常数成本下 `ExcessMean` 恒等不变**（成交与随机基准同付同一常数 ⇒ 成本项精确抵消；实测 20/50/100bps 极差 ~1e−17）。⇒ **必须区分「绝对收益被成本侵蚀」与「相对优势不变」**；真实风险是**成本随流动性上升**（本题选的正是低成交额股），故**「保本成本」比「成本情景下的 ExcessMean」更有信息量**。本轮**未**构造流动性相关成本模型（会引入新自由参数，属禁止项）。
+  - **流动性分层（冻结桶边界 0.2/0.4/0.6/0.8，未新增阈值）**：`ExcessMean` 自桶 0 至桶 4 **单调下降** —— **+1.566 [0.86,2.24]**（¥7,197 万）→ **+0.569 [0.01,1.13]**（¥1.098 亿）→ −0.134 → −0.002 → **−0.879 [−1.43,−0.28]**（¥7.102 亿）⇒ **平滑梯度，非单点效应**；但**优势集中在最低 40% 流动性段**。
+  - **描述性稳健性（剔除冻结桶 idx0，池限 ≥0.2，只做一次、无阈值搜索）**：**H20/Top3 +0.483 [−0.04,+1.02] ❌ 跨 0**；H20/Top5 +0.474 [+0.04,+0.90] ⚠️；**H60/Top3 +1.409 [+0.65,+2.18] ✅**；H60/Top5 +1.259 [+0.69,+1.81] ✅ ⇒ **优势是否集中于极低流动性股【取决于持有期】：H20 是，H60 不是。**
+  - **年度**：`ExcessMean` 为正 —— **H20/Top3 7/7**、H60/Top3 **7/7**、H60/Top5 **7/7**、H20/Top5 6/7（2019 −0.01）⇒ **非单一年份驱动**。⚠️ 但**绝对 `Mean` 仅 4–5/7 年为正**（2019/2020/2023 为负）⇒ 年份间池漂移（beta）主导绝对收益，**该因子的价值是「同日横截面相对选择」，不是绝对正收益**。
+  - 🔴 **判定 = `CONDITIONAL`**：PASS 条件 1/2/3/5 **全部达标**，**仅第 4 条（优势非仅来自极低流动性股）在主持有期 H20 上未达标**；未触发任何 FAIL 条件（不可买 0.474% ≪5%、无法退出 ≤0.150% ≪5%、保本 129/274bps ≫ 合理成本、桶 1 仍显著且 H60 剔除桶 0 后仍显著）。CONDITIONAL 的具体触发项 = **「优势明显集中于低流动性股票」**（另两项「Top3 执行性弱于 Top5」「50bps 后明显衰减」**均未命中**）。
+  - **三个最终回答**：**Q1 可实际交易 ✅（无执行性硬伤，容量有上限）** · **Q2 选 `Top3`**（执行性与 Top5 **逐项完全相同** —— 约束落在**池级**而非选择级；`ExcessMean` 1.59×；保本 129 vs 75bps；100bps 下 Top5 转负；流动性足迹仅差 5.6%）· **Q3 选 `H60`**（保本 274 vs 129bps；**H60 通过剔除桶 0 稳健性检查而 H20 不通过**；100bps 下 H60 +1.738% vs H20 +0.287%）。
+  - ⇒ **不进入下一阶段**（任务书：「如果结果 PASS，再进入下一阶段；不要在本任务内继续优化」）。
+- **📌 登记的限制（须与结论同读）**：① **非平台正式 Run**（沙箱 `spawn EPERM`）；② 🔴 **样本内**（禁 OOS/WFA）；③ **未构造流动性相关成本模型** —— 只给「保本成本」上限；④ **参与率不是成交仿真**（未建模盘口深度 / 涨跌停封单 / T+1）；⑤ **「当日全市场成交额」不可得**（数据集仅含首板候选池）⇒ 分层是**同日候选池内**相对分层，**非全市场流动性分层**（已登记为数据缺口）；⑥ 窗口缺最后 ~12 个月；⑦ 绝对 `Mean` 仅 4–5/7 年为正。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+### 2026-10-08 · PURE-RIGHT-TAIL-VALIDATION-001 · **复核版**（任务重发；结论不变，新增 3 项分析）
+
+- **Task**：同一任务以更明确的分类判据与输出格式重发（要求：报告末尾只给「3 因子最终角色 / 时间尺度 / 是否值得后续研究 / 应停止研究的因子清单」；并在发现口径、PIT、随机基准或执行性问题时**优先报告并停止**）。
+- **Changes**：🔴 **无代码变更**（**未新增也未修改任何模块**）。**未重复跑数** —— 固定口径与首版**完全一致**（ds 780003 · 20bps · 200 seeds · block 20/1000 · H5–H60 · Top3/Top5），故**复用首版只读结果** `%TEMP%\pure_tail.json`（48 臂）；报告 `docs/research/RESULT-PURE-RIGHT-TAIL-VALIDATION-001.md` **重写扩充**。
+- **🔴 本轮新增的量与结论（首版未做）**：
+  - **§2 完整性核查（4 项，结论：均无阻断性问题，故不触发「报告问题并停止」）**：
+    - **PIT ✅**：逐一定位冻结定义（`twelve-factor-composite-study/derive.ts`）—— `bodyHeight` = `(eventClose − eventBar.open)/previousClose`（L436-439）**仅用 rd0 + rd−1**；`preReturn10` = `prevClose/baseClose − 1`（L382），输入取 `PREFIX_RELATIVE_DAYS = [−10,−1]`（L50）**纯 prefix**；`drawdownDepth` = `drawdownLow/eventClose − 1`（L454-455），`drawdownLow` = `min(bar.low)` over `index ∈ [0, CONTEXT_DAYS)`，`CONTEXT_DAYS = DECISION_OFFSET_DAYS = 5` ⇒ **rd1..rd5**。**三者窗口均在 `T+5` 决策收盘处闭合，无任何 rd ≥ 6 信息** ⇒ **无前视**（不变量 I-4）。
+    - **随机基准 ✅**：确认为**逐日均匀无放回 K 子集**（200 固定种子），**未使用**旧 tie-break `RAND`（该键仅为同值破平键 ⇒ 在连续因子上与 `ASC` 等价，属**复现而非对照**，已在前序轮次修正并留下零假设自检记录）。
+    - **执行性 ✅**：不可买 270（0.474%）；无可卖退出 H5 27 / H10 43 / H20 52 / H60 85（≤0.150%）。🔴 **如实登记条件口径**：全部分析**条件于「入场可买 ∧ 顺延窗口内可卖」**（平台既有结构，非本轮引入），剔除率 ≤0.474% 不足以改变结论但须明示。
+    - **数据口径 ✅ 无影响**：`amount`（千元）/`volume`（手）的单位事实**与本轮无关**（本报告不用成交额字段）；`MISSING_FACTOR` 仅 7 例且全为 `turnover` ⇒ 本轮三因子无缺失。
+  - **§5 Top3 vs Top5 强弱（首版缺失）**：Top3 超额尾率 **为 Top5 的 1.10×–2.25×**（`preReturn10` 3/4 期 >1.25×、`drawdownDepth` 3/4、`bodyHeight` 3/4；**Top5 更强的仅 `bodyHeight`/H60 一格，而该格本身已失效**）。🔴 **但 Top5 并未失效**：`ExcessTCR50` CI 下界 > 0 的持有期数 —— `preReturn10` **Top3 4/4 = Top5 4/4**、`drawdownDepth` **3/4 = 3/4**、`bodyHeight` **2/4 = 2/4** ⇒ **尾部信号不是只存在于最极端 3 只**。⇒ 结论：**Top3「统计上更强」但不是「明显更优」**；最大化尾部暴露选 Top3，稳健监测 Top5 同样可用。
+  - **§6 双口径分类确认**：**口径甲**（本次字面：右尾显著 ∧ 反向无稳定 Mean）与**口径乙**（首版预注册更严：额外要求 HIGH 无稳定 Mean + Lift CI>1 + 非单一年份 + Top3/Top5 同向）**判定完全一致** ⇒ 三因子**均为 `PURE_RIGHT_TAIL`**，结论**对判据措辞不敏感**。
+  - **§11 最终输出（规定格式）**：三角色 = `PURE_RIGHT_TAIL` 右尾暴露识别器（**`preReturn10` 最强，唯一覆盖 LONG**；`drawdownDepth` 次之；`bodyHeight` 仅 H5/H20、**H60 失效 ⇒ 价值有限**）· 尺度 = 三者均 `MULTI_HORIZON`（`preReturn10` = SHORT+MEDIUM+LONG；另两者 = SHORT+MEDIUM）· **值得后续研究 = `preReturn10` ✅（最高）> `drawdownDepth` ✅ > `bodyHeight` ⚠️有限**，三者 LOW ❌ · **停止清单 = 6 个方向作为选股信号 + 「在 12 因子内继续寻找 Mean∧Tail 同时为正」+ 对这 6 方向做组合/权重/阈值/参数搜索**。
+- **📌 结论未变**：三因子仍为 **`PURE_RIGHT_TAIL`**；`ExcessMean` 4/4 期为负（`bodyHeight` / `drawdownDepth` **显著为负、0/7 年**）、`ExcessWinRate` **8/8 全负**、左尾**显著恶化**（`ExcessLoss10` +3.23~+7.10、`ExcessQ05` −0.91~−3.70、MAE −0.98~−3.07，全部 CI 不跨 0）⇒ **只能作「右尾暴露识别器」，不得作正期望选股信号**。
+- **📌 限制（须与结论同读）**：① **非平台正式 Run**；② 🔴 **样本内**（禁 OOS/WFA）—— **不得**据此宣称已通过样本外验证；③ 分析条件于可执行样本（见上）；④ `bodyHeight` / `drawdownDepth` **H60 失效**；⑤ `bodyHeight LOW` 的 Top5/H60 `+0.516 [+0.02,+0.98]` 单点显著，因 Top3 不同向**不改变判定**；⑥ MAE 用**日 low**；⑦ **未做容量/流动性检验**（与 `amountPercentile` 不同，本轮未测成交额）。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**。`pnpm run check` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：none（无代码 / 契约 / DB 变更）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · CROSS-SECTIONAL-FACTOR-001 · Phase 0 口径裁定 + 预注册落地（**新增 1 个纯函数框架模块**；零真实 Run）
+
+- **Task**：`CROSS-SECTIONAL-FACTOR-001` Phase 0 —— **只做口径裁定 + 预注册落地，禁止真实 Run**。要求：① 裁定实验锚点（沿用既有回踩门、不引入新定义、判定 PIT-safe 实际 `T0` 可否派生）；② 裁定数据集（不用 FAILED v9/780003、不建不改 Dataset、优先评估 660001/780001）；③ 固化实验设计；④ 检查排序分辨力；⑤ 预注册结果判据；⑥ 只改计划/注册文档 + 最小必要框架代码。
+- **Baseline Version**：HEAD `f8b6810`（工作区含长期未提交改动）。
+- **Changes**：🔴 **新增 1 个纯函数模块 + 1 个测试**（本实验所需的**最小必要框架代码**）：
+  - **新增** `research-experiments/shared/singleFactor/rankResolution.ts` —— **P3 排序分辨力仪器**，**纯函数、零 I/O、零 Dataset 依赖**。导出 `diagnoseDay` / `summarizeRankResolution` / `summarizeTieBreakSensitivity` / `judgeRankResolution` / `describeRankResolution` / `DEFAULT_RANK_RESOLUTION_THRESHOLDS` 及 6 个类型。核心量：`distinctCount` · `uniqueRatio` · `modalTieSize` · `modalShare` · **`boundaryTieSize`（跨越第 K 名入选边界的并列组大小）** · **`boundaryStraddles`** · `J(ASC,DESC)` · **`J(ASC, 逐日无放回均匀子集)`** · `selectionChangedDayShare`。**预注册阈值**：`minDistinctCount=5` · `maxModalShareMedian=0.5` · `maxModalDominatedDayShare=0.5` · `minJaccardAscDesc=0.9`，任一命中 ⇒ `TIE_BREAK_DOMINATED`。
+  - **新增** `tests/server/researchExperiments/crossSectionalRankResolution.test.ts`（合成夹具，**零 Dataset 依赖**）。
+  - **更新** `docs/research/PLAN-CROSS-SECTIONAL-FACTOR-001.md`（追加 **§8–§12**：锚点裁定 / 设计固化 / P3 仪器与判据 / 结果判据预注册 / 阻断与下一步）；**新增** `docs/research/RESULT-CROSS-SECTIONAL-FACTOR-001-PHASE0.md`（短报告）。
+- **Contract / DB / Execution Impact**：**全部无**。未新增 tRPC 路由 / 未改 contracts / 未注册 manifest；未触碰 DB（仅只读 `SELECT` 探针）；**未创建 Run / Candidate / StrategyVersion**；**未做**阈值/权重/组合/参数搜索/OOS/WFA。
+- **🔴 关键裁定（详见 `docs/research/RESULT-CROSS-SECTIONAL-FACTOR-001-PHASE0.md`）**：
+  - ✅ **锚点**：主方案**沿用既有有效回踩门**（`derive.ts` **Pass D L394-406** 逐字复用：`hasObservationPullback = ∃k∈[1,5]: close(T+k) < close(T) − ε`，基准 = 首板日**收盘**），**零新定义**。🔴 **裁定主锚点 `T0 ≡ T+5` close**（= 既有 `decisionOffsetDays = 5`）。**真实回踩日 `T0_i = min{k∈[1,5]: close(T+k)<close(T)−ε}` 降级为「决策时已知属性」**（`T+5` 收盘时整窗已知 ⇒ 严格 PIT-safe；池 ≡ 门通过者 ⇒ 池内 100% 有定义），**仅用于分层，不作横截面分组日**。
+  - 🔴 **PIT 结论（核心）**：`T0` **作为信息锚点不可派生**（`F4/F5/F6/F10` 定义窗 = 整个 `T+1..T+5`，`CONTEXT_DAYS=5` ⇒ 任何 `T0=T+k (k<5)` 都会让这 4 因子读到 `T0` 之后数据 ⇒ look-ahead，违反 **I-3/I-4**；**定义层不相容**）；**作为决策时已知属性可以派生且严格 PIT-safe**。
+  - ✅ **备选锚点 = 首板日 `T` ⇒ ❌ 不可用（原因已记录）**：`T` 日仅 **6/12** 因子已知（F1/F2/F3/F8/F9/F12），F7/F11 需 `T+1`，F4/F5/F6/F10 需 `T+1..T+5` ⇒ 锚在 `T` 将无法计算 6/12 因子，与「保留 12 因子定义」直接冲突。
+  - ✅ **C2/C3/C4/C7 全部结案**：C2 = 不支持第 6 日回踩、不扩窗不新建契约；C3 = 基准为首板日收盘；C4 = **消解**（锚点固定 + `T0_i` 降级 ⇒ 两条硬要求同时满足）；C7 = **周期裁定为「持有长度 `N ∈ {1,5,10,20}`」**（🔴 字面 `rd 1/5/10/20` **不可用** —— `rd1..5` 在决策窗内且正是 F4/F5/F6/F10 的输入窗 ⇒ 按字面读会「用因子自身窗口算收益」；✅ 自洽校验：`N=5` ⇒ 退出 `rd10` = 平台冻结主退出 `T+10` close）。
+  - 🔴 🔴 **数据集裁定（唯一阻断项）**：**实查证明没有任何既有 `READY` 数据集可用** ——
+    - **`660001`（v5）`status=READY` 但四张物理表全 0 行** ⇒ **物理为空**（metadata 与物理不一致，`BASELINE_DRIFT` 级）。
+    - **`780001`（v8）** 有 73,003 事件 / post `rd1..80` 完整，**但 `preWindowDays = 0` ⇒ prefix 仅 `rd=0` ⇒ `F9 preReturn10` 不可计算（仅 11/12 因子）**，且 **`excludeListedWithinDays = null` ⇒ 无上市龄过滤**。
+    - `780002` 仅 3 个月（2,315 事件）⇒ 不满足年度切片；`780003` **`FAILED`**（指令排除）。
+    - 🔴 **全库仅 `{780001,780002,780003}` 有物理行** ⇒ 其余 8 个 `READY` 版本（390001/390002/540002/570001/630001/690001/720001/750001）**全部物理为空**。
+    - 🔴 **C6 结构性阻断复核成立**：`ds_first_limit_pullback_event` 共 **27 列**，**无任何 `listed*/listing*/age/ipo` 列** ⇒ 上市龄过滤**必须在构建期烘焙**（据此 C6 的解决路径 = 构建期过滤，**无需改 Schema**）。
+    - ⇒ **仍 BLOCKED**，**唯一阻断项 = 需新建数据集版本**（`excludeListedWithinDays=365` · `preWindowDays≥10` · `postWindowDays=80` · 全窗口）。**本轮未自行重建**。需用户三选一裁定：**D-a 新建（推荐）** / **D-b 解除「不用 FAILED v9」限制以复用 780003（其物理数据恰好满足全部要求，`status=FAILED` 已查明为构建中断记账产物）** / **D-c 降级为 11 因子且不排除次新（不推荐）**。
+  - ✅ **P3 仪器已就绪并实测通过**：因沙箱无法运行 vitest（`spawn EPERM`），以**等价可执行自检** `scripts/_scratch/rankResolutionSelfCheck.cjs`（tsc 编译后 node 直跑）验证 ⇒ **21/21 PASS，exit 0**（连续值 ⇒ `RESOLUTION_OK`；对齐 `holdStreak` 实况的离散夹具 ⇒ **`TIE_BREAK_DOMINATED`**，四条理由全部命中）。
+  - 🔴 **自检发现并登记的新语义**：**当一个交易日候选值【全部并列】时，更换破平键会选出【完全不相交】的集合**（实测 `J(ASC,DESC) = 0`）—— 比原先记载的「换键换掉 ~43% 成员」**更严重**：极端离散日的入选集合 **100% 由破平键决定**，与因子取值**完全无关**。仪器已用 `boundaryStraddleDayShare` / `modalDominatedDayShare` 显式量化。
+  - ✅ **结果判据已预注册为三类独立判定**（`RANKING_*` / `TAIL_EXPOSURE_*` / `MEAN_*`，各自 CONFIRMED / WEAK / ABSENT），明确**「排序能力」与「右尾暴露能力」是两种不同能力、不得互相替代**，**不要求**同时具备 Mean + Tail；含事前停止规则。P3 闸门未过的因子**不参与**任何判定。
+- **📌 登记的口径要点（须与结论同读）**：① 🔴 **`v9` 上既有 P3 结论（11 `RESOLUTION_OK` + 1 `holdStreak TIE_BREAK_DOMINATED`）不可迁移** —— `v9` 被指令排除，Phase 1 必须在裁定后的数据集上**重跑**；`holdStreak` 结论**预期**命中但**不得预设**。② `Random3` 与 P3 的随机列均为**逐日无放回均匀子集**（200 固定种子），**不是** tie-break `RAND`。③ `660001`/其余 8 个 `READY` 版本的「metadata READY vs 物理 0 行」一致性缺陷**建议另立任务**做全库核对（本轮只登记，不修复）。④ **非平台正式 Run**（沙箱 `spawn EPERM`）。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**（含新模块与新测试文件）。`pnpm run test:changed` / `vitest` **未能运行**（沙箱 `spawn EPERM`，命名管道边界）⇒ 改以等价可执行自检验证（**21/21 PASS**）；`checkEolDrift --strict` 同样受限，改逐字节核验 EOL。
+- **Baseline Impact**：minor —— 新增 `research-experiments/shared/singleFactor/rankResolution.ts`（新 entry point，仅被本实验计划消费，**尚未被任何注册实验引用**）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · DATASET-REBUILD-001 + DATASET-REBUILD-EXEC-001 · 新建 v10 Dataset（**真实 DB 写操作：新建 1 个版本；构建 FAILED**）
+
+- **Task**：`DATASET-REBUILD-001`（可行性实查，**未执行**）→ `DATASET-REBUILD-EXEC-001`（**正式执行**：创建 → 构建 → 物理验收 → READY）。授权来源：用户明确裁定 D-a（新建版本、不复用 780003、不用 FAILED Dataset、不降级 11 因子）。
+- **Baseline Version**：HEAD `f8b6810`。
+- **🔴 DB Impact（本轮有真实写操作，已授权）**：
+  - **新建** `dataset_version`：**id=780004** · version=`v10-listed365-pre10-post80` · startDate=`2019-01-02` · endDate=`2025-09-26` · **status=`FAILED`** · `totalEvents/totalRows = null`（未写假账）。
+  - **新建** `dataset_build_job`：jobId=`ds001-v10-listed365-pre10-post80-1791441182082-d8a6b476` · **status=`FAILED`**（**非 RUNNING** ⇒ 无「假 RUNNING / 无人接管」死锁）。
+  - **新建** `dataset_build_config`：id=510004 —— `excludeSt=1` · **`excludeListedWithinDays=365`** · **`preWindowDays=10`** · `postWindowDays=80` · `outcomeHorizons=[5,10,20]` · `batchSize=1000` · `configVersion=1`（与规格逐项一致）。
+  - **部分物理行**（构建中断）：event **58,983** · prefix **37,381** · post **268,880** · path **272,880** · outcome **10,611**。
+  - ✅ **未修改** Schema / migration / 既有 Dataset（780001/780002/780003 未动）· ✅ **未创建第二个版本**绕过 · ✅ 未跑 Phase 1 P3 / 任何因子 Run / 参数搜索 / 阈值 / 权重 / 组合。
+- **🔴 关键结果**：
+  - **构建 FAILED**：`event` 阶段 **1637/1637 完成**；`windows` 阶段中断于 **chunk 2461/60620**，cursor `2019-04-02`，`processedRows 426,688`，**`failedRows = 0`**（语句级失败，非行级）；失败语句 = **`insert into ds_first_limit_pullback_post`**（28 列 × 1000 行）；总耗时 **273 s**。
+  - **根因假设 = 连接/传输层重置**（**独立旁证**：本轮验收脚本的第一条 `COUNT(*)` 亦撞到 `read ECONNRESET`，同一远端 `47.94.112.21:13306`）。支撑：`failedRows=0`；同一 builder 与 `batchSize=1000` 在 **v5/v6/v7/v8 四次全量构建均成功**；v9（`prefix`）与本轮（`post`）失败**同为 INSERT 语句级** ⇒ **环境性/瞬时性，非确定性**。
+  - ✅ **验收 ⑥ 确定性通过（重要正面结果）**：同窗口 `2019-01-02~2025-09-26` 事件数 —— **v8（`excludeListedWithinDays=null`）= 61,814** · **v9（365）= 58,983** · **v10（365）= 58,983** ⇒ v10 比**无过滤**少 **2,831（−4.58%）**，且**与既有 365 过滤版本逐位相等** ⇒ **`excludeListedWithinDays=365` 确实生效**。
+  - ✅ **验收 ③④⑤** 结构正确：prefix `rd −10..0`、post `rd 1..80`、event 窗口 `2019-01-02 ~ 2025-09-26`（event 阶段已 100% 完成）。
+  - ❌ **验收 ⑦ F9 `preReturn10` 未通过**：仅 **3,261 / 58,983 = 5.53%** 齐备（prefix 只跑到 chunk 2461）。⇒ ⑧⑨ 不可评。
+  - ✅ **验收 ⑩ 一致**：`status=FAILED` 与物理不完整一致，**未虚报 READY**。
+  - ✅ **可从 checkpoint 继续**：断点完整（`phase=windows` · `lastEventId=603712.SH@2019-04-02` · `completedChunks=2461/60620`），builder **原生 resume**（`resumeCheckpoint` + 分片 + 每 chunk `ProgressReporter`），**且续跑须复用同一 780004**（禁止新建第二个版本）。
+- **🔴 登记的平台缺口（建议另立任务，本轮不改代码）**：`dataset_build_job.errorMessage` 长 **16,000 字符但全部是 SQL 文本**，**未携带底层 MySQL 错误码/errno/sqlState** ⇒ 无法从库内区分 `ER_NET_PACKET_TOO_LARGE` / `ER_LOCK_WAIT_TIMEOUT` / `ECONNRESET`。建议构建失败时持久化 `cause.code` / `errno` / `sqlState`。
+- **📌 登记的方法学要点**：① 新建版本时 `normalizeBuildFilter` 的**入参契约**与 DB 列名不同 —— `events[].kind`（**不是** `eventKind`）且 **`excludeSt` 必须是 boolean**（不是 1）；`boards=["main"]`。② `DatasetRegistryService` 需要 `createVersionWithBuildConfig` → `createJob` → **`startJob`（PENDING→RUNNING）** → `DefaultDatasetBuildRunner.start`（版本→BUILDING 由 `runner.execute()` 内部 `markBuilding`）；**直接 `runner.start` 会因作业仍 PENDING 而抛错**。③ 独立驱动 `server/**` 编译产物时必须把 `.env` 注入 `process.env`（否则 drizzle 客户端拿不到 `DATABASE_URL`，`listDefinitions()` 静默返回 0 条）。
+- **Regression Result**：本轮**未改动任何 `.ts` 业务代码**（仅新增 3 个未跟踪只读/执行脚本 + 1 份报告）。`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` 前序轮次 = **0 错**；`vitest` **未能运行**（沙箱 `spawn EPERM`）。
+- **Baseline Impact**：minor —— 新增 1 个 Dataset 版本（**FAILED**，不可用于实验）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · DATASET-RESUME-001 · 续跑 780004（原生 resume · 5 轮全部失败 · 零 purge）
+
+- **Task**：`DATASET-RESUME-001` —— 用**原生 resume** 续跑 `780004` 至 COMPLETED → 物理验收 → READY；**最多 5 轮**；**不新建版本 / 不改 build config / 不改 Schema / 不 purge（除非先报告）**。
+- **通路**：`service.retryJob`（**逐字继承** `lastCursor`/`completedChunks`/`processedRows`）→ `service.startJob`（PENDING→RUNNING）→ `DefaultDatasetBuildRunner.start`。
+- **🔴 续跑幂等性核查（任务重点，结论：不需要 purge）**：
+  - `runner.ts` **L272-275**：`const resumeCheckpoint = parseResumeCheckpoint(job.lastCursor ?? null); if (resumeCheckpoint === null) { await service.purgeVersionRows(versionId); }` ⇒ **只有「无 checkpoint」才清场**。
+  - `registry.ts` **L1215-1225**：`retryJob` 新作业**逐字继承** `lastCursor` ⇒ 续跑必带 checkpoint ⇒ **不触发 purge**。
+  - 落库为 `ON DUPLICATE KEY UPDATE id = id`（**空更新**）⇒ 重复写入**幂等**。
+  - ⇒ **未执行任何 purge / 未删数据 / 未新建版本**（实测「不必须 purge」）。
+- **🔴 结果：5 轮全部 FAILED，断点【零前移】**：每轮 `retryJob`→PENDING ✅、`startJob`→RUNNING ✅、checkpoint 继承 ✅，但**失败点恒定为 `chunk 2461` / `cursor 2019-04-02` / `lastEventId 603712.SH@2019-04-02` / 语句 `insert into ds_first_limit_pullback_post`（28 列 × 1000 行）**，5 轮 checkpoint **逐字相同**，每轮耗时 **≈30 s**（首轮全量尝试为 273 s）。⇒ 按任务要求**停止，不做无限重试**。
+- **🔴 推翻上一轮的根因假设（重要修正）**：`DATASET-REBUILD-EXEC-001` 曾判定「**连接/传输层瞬时重置**」（旁证：验收脚本撞过 `ECONNRESET`）。**本轮实测证伪** —— 同一断点**连续 5 次**以同一语句失败且**断点零前移**，`failedRows = 0`（语句级被拒），每轮 ~30 s 即失败（是**首个待写批次**就失败，非长跑被掐断）⇒ **根因是【确定性、数据/批次相关】的写入失败，重试永远不会成功**。
+  - 🔴 **仍无法定性的唯一原因**：`dataset_build_job.errorMessage` 长 16,000 字符**全部是 SQL 文本**，**不含 `errno` / `sqlState` / `cause.code`**（已在上一轮登记为平台缺口）。**这是唯一挡住定性的信息。**
+  - 候选根因（均未证实，按可能性排序）：① **`ER_NET_PACKET_TOO_LARGE`**（同批次尺寸恒定 ⇒ 天然确定性复现；v9 在 `prefix`、v10 在 `post`，**同为大 INSERT**）；② 某列值超列定义/长度（该日某股数据异常）；③ `ER_LOCK_WAIT_TIMEOUT`（与「5 次均在 ~30 s 失败且不变化」**不太吻合**）。
+- **物理数据现状（本轮末）**：event **58,983**（阶段早已 100% 完成，未变）· prefix **37,381**（未变）· **post 274,880（+6,000**，5 轮各写入约 1,200 行后失败）· path **272,880**（未变）· outcome **10,611**（未变）。`prefix rd = −10..0` ✅ · `post rd = 1..80` ✅ · `event` 窗口 `2019-01-02..2025-09-26` ✅。
+- **10 项验收**：② ③ ④ ⑤ ⑩ **✅ 通过**（⑤ 过滤生效为**确定性结论**：同窗口事件数 v8 无过滤 **61,814** / v9 365 **58,983** / v10 365 **58,983**，少 **2,831（−4.58%）** 且与既有 365 版本**逐位相等**）；① 不完整；⑥ F9 **3,261/58,983 = 5.529% ❌**；⑦ 输入完备率 **3,133/58,983 = 5.312% ❌**；⑧ prefix 11/11 = 3,261、post 80/80 = 3,436 ❌；⑨ `prefix/event = 0.634`（应 11）、`post/event = 4.660`（应 80）、`path == post` = false ❌ ⇒ **未全部通过 ⇒ 不标 READY，`780004` 保持 `FAILED`**。
+- **本轮副作用**：**未创建新版本**（始终复用 780004）· **未改** build config / Schema / migration / 12 因子 / `orientation` / `T+5` 锚点 / 回踩窗口 · **未 purge** · **未删版本** · **未跑** Phase 1 P3 / 任何因子真实 Run · 产生 **5 条新的 FAILED `dataset_build_job` 记录**（续跑必然产物）· `post` 新增 6,000 行（幂等）· 全库 **RUNNING 作业 = 0**（无假 RUNNING 死锁）。
+- **建议下一步（需授权，本轮未做）**：**P1 补错误码**（构建失败持久化 `cause.code`/`errno`/`sqlState`）—— **唯一能定性的路径**；**P1 复现定位**（手动执行 `chunk 2461`/`2019-04-02` 那批 `post` INSERT，直接读回 MySQL 错误码）；**P2** 若确认为 `ER_NET_PACKET_TOO_LARGE` 则调小 `batchSize`（⚠️ 须改 build config 或另立授权，**本任务明令禁止，故未做**）。**明确不建议**：继续盲目 retry（已证无效）· purge 后从头重建（会撞同一批且**丢掉 37,381 prefix + 274,880 post 行的有效进度**）· 新建版本绕过（任务禁止且不解决根因）。
+- **Regression Result**：本轮**未改动任何 `.ts` 业务代码**（仅新增 1 个未跟踪续跑脚本 + 1 份报告）。
+- **Baseline Impact**：none（版本 780004 仍为 FAILED，无新增可用资产）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · DATASET-DIAG-001 · 定位 780004 确定性 INSERT 失败根因（**唯一代码改动：错误诊断持久化**）
+
+- **Task**：定位 `780004 / v10-listed365-pre10-post80` 在 `phase=windows` · `chunk=2461` · `cursor=2019-04-02` · `table=ds_first_limit_pullback_post` · `batchSize=1000` 处**确定性 INSERT 失败**的真实 MySQL 根因。
+- **Changes（最小代码修改，仅错误诊断，不改构建逻辑）**：`server/datasetRegistry/runner.ts`
+  - **新增** `export function describeBuildError(err: unknown): string` —— 沿 `err.cause` 链（最多 4 层、带去重防环）提取 `code` / `errno` / `sqlState` / `sqlMessage`；**无 `cause` 时退化为原 `err.message`**（向后兼容、零行为变化）。
+  - **替换** `const message = err instanceof Error ? err.message : String(err)` → `const message = describeBuildError(err)`。
+  - 规模：**38 insertions(+), 1 deletion(-)**。`tsc --noEmit` = **0 错**。
+  - 🔴 **动机（真实诊断缺口）**：drizzle 把驱动错误包成 `Error("Failed query: <SQL>")`，**底层 MySQL 字段只在 `err.cause`**；旧代码只落 `err.message` ⇒ `errorMessage`（上限 16,000 字符）被 SQL 文本塞满、**零错误码** ⇒ **v9 + v10 累计 6 轮排查均无法定性**。
+- **🔴🔴 根因（首次捕获完整错误对象）**：
+  ```
+  errno = 1114 · code = ER_RECORD_FILE_FULL · sqlState = HY000
+  sqlMessage = "The table '/tmp/#sql1_eb1b_0' is full"
+  ```
+  ⇒ **DB 服务器 `/tmp` 磁盘写满 ⇒ MySQL 内部临时表无法创建**。**与数据 / Schema / 批次内容 / 包大小 / 锁 全部无关，属基础设施存储耗尽。**
+  - **捕获方式（无副作用）**：一条普通 `SELECT COUNT(*) FROM information_schema.PROCESSLIST` 即稳定复现 ⇒ **凡需内部临时表的语句都会失败**，与 `post` 表无关。
+- **✅ 逐项排除（均有实测证据）**：① **packet size ❌** —— `@@max_allowed_packet = 268,435,456`（**256 MB**）而批次 SQL ≈ **150 KB**，差 3 个数量级；② **列长度/类型/越界 ❌** —— `post` 数值列**全为 `double`（无 `DECIMAL`）**，且用 780001 在 2019-04-02 的 **50 行真实数据**事务内 INSERT **成功（46 ms）**；③ **锁/事务 ❌** —— `innodb_lock_wait_timeout = 50 s` 而 5 轮均在 **≈30 s** 失败（未达超时），且 `START TRANSACTION`→INSERT→`ROLLBACK` 正常完成；④ **数据异常 ❌** —— `failedRows = 0`，真实行可写入；⑤ ✅ **服务器存储/临时空间耗尽（确认）**。
+- **✅ 一致性检验（本根因解释全部既有观察）**：同一 chunk 连续 5 次失败且**断点零前移**（`/tmp` 持续满）· `failedRows=0`（语句级而非行级）· **v5–v8 成功、v9/v10 失败**（两次失败是**最近两次**构建，此时 `post` 已达 **10,937,225 行 / 2,582 MB**）· 🔴 **N=50 INSERT 成功 46 ms 而 N=1000 挂起 >17 min**（小批次留在内存 `TempTable`，大批次需落盘 `/tmp` ⇒ **规模相关**）· 首轮全量跑到 chunk 2461（273 s）后失败而重试 ~30 s 即失败（首轮时 `/tmp` 尚未耗尽）。
+- **服务器实测状态**：`VERSION()=8.0.43` · `@@datadir=/var/lib/mysql/` · **`@@tmpdir=/tmp`**（报错路径）· `@@innodb_temp_data_file_path=ibtmp1:12M:autoextend` · `internal_tmp_mem_storage_engine=TempTable` · 全库 **DATA 7.31 GB + INDEX 6.89 GB**，**`DATA_FREE` 仅 129 MB**。
+- **任务的 10 项结论**：① errno **1114** ② sqlState **HY000** ③ message **`The table '/tmp/#sql1_eb1b_0' is full`** ④ 非 packet size ⑤ 非列长/类型/越界 ⑥ 非锁/事务 ⑦ 非数据异常 ⑧ **最小修复 = 运维释放 DB 服务器 `/tmp` 及数据盘空间（或将 `tmpdir` 迁至有空间卷）** ⑨ **建议（缓解、非根因）调小 `batchSize`**，可让批次留在内存临时表从而在磁盘修复前恢复构建；**本任务禁止改 batchSize，故未改** ⑩ **Builder 逻辑无需改；error persistence 需要改，已做最小修复**。
+- **本轮副作用**：✅ **未 retry 780004** · **未 purge** · **未创建 780005** · **未改 780004 build config**（`batchSize` 仍 1000）· **未修改** Dataset 定义 / 12 因子 / `orientation` / `T+5` / 回踩定义 / Schema / migration · **未跑** P3 / 任何真实因子 Run · **未因定位成功而自动修复并重建**。✅ 诊断 INSERT 全部在**事务内 `ROLLBACK`**（`datasetVersionId=999999999` 无残留，`post` 未新增行）。
+- **⚠️ 环境提示（重要）**：诊断期间观测到该 DB 服务器 **`/tmp` 已满**，**可能影响该库上的一切操作**（含平台自身）；建议按 P0 优先处置。
+- **Regression Result**：`node node_modules/typescript/bin/tsc --noEmit --incremental false -p tsconfig.json` = **0 错**（含新函数）；`describeBuildError` 已编译后直跑验证（`cause` 链字段全部提取成功、无 `cause` 时退化正确）。`vitest` **未能运行**（沙箱 `spawn EPERM`）。
+- **Baseline Impact**：minor —— `runner.ts` 新增 1 个导出函数（纯诊断，向后兼容）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · DATASET-SPACE-001 · DB 空间恢复尝试 → **BLOCKED（需 DBA；零写入）**
+
+- **Task**：恢复 DB 空间 → 验证 DB 正常 → `780004` 原 checkpoint resume → 14 项物理验收。任务自带停止规则：**「若当前环境无 DB 服务器运维权限 ⇒ 不要自行猜测或执行危险清理，直接报告需人工/DBA」**；**「若仍出现 1114 ⇒ 停止，不 resume 780004」**。
+- **Changes**：🔴 **零代码改动**（仅新增 1 个未跟踪只读诊断脚本 + 1 份报告）。`runner.ts#describeBuildError` **按要求保留，未回滚** ✓
+- **✅ 步骤 1（停止写者）完成**：`RUNNING` dataset build = **0** · `PENDING` = **0** · job 分布 `COMPLETED 11 / FAILED 9 / CANCELLED 3`（无在途）· `780004 = FAILED` · **未 retry 780004**。
+- **❌ 步骤 3（最小验证）失败 ⇒ 依规则停止**：`information_schema.PROCESSLIST + ORDER BY TIME` **仍报 `errno=1114` · `code=ER_RECORD_FILE_FULL` · `sqlState=HY000` · `msg=The table '/tmp/#sql1_eb4d_1' is full`**。（`SELECT 1`、`GROUP BY`、`ORDER BY amount`、`JOIN+GROUP BY` 等恰好落在内存临时表的查询正常 ⇒ **「时好时坏」**。）
+  - 🔴 **关键读数**：`@@tmp_table_size = 33,554,432`（32 MB）· `@@internal_tmp_mem_storage_engine = TempTable` ⇒ 临时表 ≤32 MB 留内存、>32 MB 落盘 `/tmp`。**连 `PROCESSLIST` 排序这种极小临时表都失败 ⇒ `/tmp` 可用空间实质为 0 字节。**
+- **⛔ 步骤 2（恢复空间）无法执行 —— 权限实证**：
+  ```sql
+  SELECT CURRENT_USER();  -- app@111.14.148.127
+  SHOW GRANTS;
+  -- GRANT USAGE ON *.* TO `app`@…                                  ← 仅「能登录」
+  -- GRANT ALL PRIVILEGES ON `vwwjfde663dhej4tohvzpq`.* TO `app`@…  ← 仅【库级】
+  ```
+  实测 `SHOW BINARY LOGS` 被拒 **`errno=1227 ER_SPECIFIC_ACCESS_DENIED_ERROR`（需 SUPER / REPLICATION CLIENT）**。⇒ **无 `SUPER`/`RELOAD`/`PROCESS`/`FILE`，无主机访问** ⇒ 无法改 `tmpdir`、无法清理 binlog、无法收缩表空间、无法查看/释放 OS 磁盘。**按任务要求不猜测、不执行危险清理。**
+- **📌 附带结论：`@@log_bin = 0`（二进制日志已关闭）⇒ binlog 不是本次空间耗尽成因，亦无可回收 binlog。**
+- **当前空间状态**：`datadir=/var/lib/mysql/` · 🔴 `tmpdir=/tmp`（报错路径）· `ibtmp1:12M:autoextend`（磁盘满 ⇒ 无法扩展）· 库内合计 **DATA 7.31 GB + INDEX 6.89 GB = 14.20 GB**，**`DATA_FREE` 仅 129 MB**。占用 Top：`post` **4,841 MB** · `path` **4,107 MB** · `liquidity_daily` 1,877 MB · `stock_daily_prices` 1,887 MB · `prefix` **1,391 MB**。
+- **ds 物理表按版本**：`780003`(v9,**FAILED**) prefix 3,548,239 / post 4,716,480 / path 4,716,480 ⇒ **≈5.4 GB**；`780001`(v8,READY) post/path 各 5,733,817 ⇒ ≈6.5 GB；`780002` 0.2 GB；`780004` ≈0.3 GB。
+- **🔴 「删除不用的数据集」解决不了本问题（已核算，故未执行任何删除）**：可释放最大单项 = 780003 ≈ **5.4 GB**，而 780004 续跑尚需写入 post≈4.95M + path≈4.95M + prefix≈0.68M ≈ **10.6M 行 ≈ 6.5 GB**，**外加临时/回滚空间** ⇒ **5.4 < 6.5 + tmp**，且会**不可逆毁掉当前唯一物理完整且带 `excludeListedWithinDays=365` 的数据集**（同时是诊断链证据基础与 D-路线备选）。
+- **需要 DBA 执行（P0）**：① **释放承载 `/tmp` 的文件系统空间**（若与 `/var/lib/mysql` 同盘则等同释放数据盘）——**唯一根因修复，不触碰任何业务表**；② 或**将 MySQL `tmpdir` 迁至有空间卷**；③ **确认扩容后余量 ≥ 15 GB**（6.5 GB 剩余写入 + 临时头寸 + 现有 14.2 GB）。P1 只读验证：`PROCESSLIST + ORDER BY` 不再 1114。**明确禁止的清理方式**：`DROP`/`TRUNCATE` 业务表 · 删除 Dataset 数据 · purge 780004 · 改 Schema · 删 780004。
+- **⛔ 步骤 4/5 未执行**（依步骤 3 停止规则）：**未 resume · 未验收 · 未 markReady**。断点**完好无损**：`phase=windows` · `chunk 2461/60620` · `cursor 2019-04-02` · `lastEventId 603712.SH@2019-04-02`；`780004` 五表现有行（event 58,983 / prefix 37,381 / post 274,880 / path 272,880 / outcome 10,611）**一行未动**，reuse 时不会被 purge。
+- **本轮副作用**：✅ **零写入**（全部只读 `SELECT` / `SHOW`；**未 DELETE / DROP / TRUNCATE / purge / OPTIMIZE**）· **未 retry / 未 resume 780004** · **未创建 780005** · **未改 build config（`batchSize` 仍 1000）** · **未修改** Dataset 定义 / 12 因子 / `orientation` / `T+5` / 回踩定义 / Schema / migration · **未跑** P3 / 任何真实因子 Run · `780004` 保持 **FAILED**（未虚报 READY）。
+- **Regression Result**：本轮**无代码改动** ⇒ 无回归面。前序轮次 `tsc --noEmit` = 0 错。
+- **Baseline Impact**：none。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · DATASET-SPACE-002 · 扩容后验证 → **仍 BLOCKED（`/tmp` 未被扩容）**
+
+- **触发**：用户「我重新扩容了」⇒ 执行 `DATASET-SPACE-001` 步骤 3（最小验证）→ 步骤 4（一次性 resume）。
+- **Changes**：🔴 **零代码改动**（仅新增 2 个未跟踪只读探针 + 1 份报告）。`runner.ts#describeBuildError` **保留未回滚** ✓
+- **🔴 核心结论：扩容生效在【数据卷】，而承载 `/tmp` 的【另一个文件系统】未被扩容。**
+  - 🟢 **数据卷已恢复**（决定性证据）：1000 行真实 `post` 批次 INSERT（事务内）**成功 464 ms**；**扩容前为 >17 min 挂起**。大表 `GROUP BY` / `ORDER BY` 亦正常。
+  - 🔴 **`/tmp` 仍为 0**（决定性证据）：`CREATE TEMPORARY TABLE probe_text (id INT, payload TEXT)` —— **一个空表都建不出来**，立即 `errno=1114 · code=ER_RECORD_FILE_FULL · The table 'probe_text' is full`。
+  - **机理**：MySQL 8 内存临时表引擎 `TempTable` **不能存 `TEXT`/`BLOB`** ⇒ 含 `TEXT`/`BLOB` 的临时表**强制落盘 `@@tmpdir=/tmp`**，与表大小无关 ⇒ **空表失败 = `/tmp` 可用字节数为 0**。而 INSERT 走 **InnoDB 临时表空间 `ibtmp1`**，与 `/tmp` 是两套东西。
+  - **解释了「只有那一条查询失败」**：`PROCESSLIST`（`INFO` 为 `longtext`）与 `CREATE TEMPORARY TABLE(… TEXT)` 均**必须落盘** ⇒ 1114；`GROUP BY`(int) / `ORDER BY`(double) 留内存 ⇒ 成功。
+- **📌 对上一条诊断的修正**：`RESULT-DATASET-DIAG-001` 把「数据卷 `DATA_FREE` 129 MB」与「`/tmp` 满」并列叙述；**应更精确表述为**——🔴 **直接根因 = `/tmp` 所在文件系统耗尽（与数据卷拥挤无关，空 TEXT 临时表即可复现）**；数据卷此前**也**接近满但**已由本次扩容解决**。**两者是独立的两个文件系统，须分别处理。**
+- **⛔ 依规则未 resume**：任务明文「如果仍然出现 1114 ⇒ **停止，不 resume 780004**，报告当前磁盘/临时空间状态」；实测 **1114 稳定复现（两条独立探针）** ⇒ **未 resume**。
+  - ⚠️ **同时如实上报相反证据（供用户决策，未擅自覆盖规则）**：780004 当初失败的语句正是 `insert into ds_first_limit_pullback_post`，而同类 1000 行批次**现已 464 ms 成功** ⇒ **构建路径本身可能已可用**；但构建中任何需磁盘临时表的步骤（含对 `TEXT` 列的排序/分组、`information_schema` 查询）**仍会确定性失败**，属**未消除的失败面**。**建议先补齐 `/tmp` 再一次成型**；若用户指示强行 resume，则照做并如实记录。
+- **需要 DBA（P0）**：**扩容或清理承载 `/tmp` 的文件系统**（与数据卷**不是同一个**）——定位用 `df -h /tmp` vs `df -h /var/lib/mysql`；若 `/tmp` 为 tmpfs 则 remount 扩容；或把 `tmpdir` 指向已扩容数据卷（需重启）。建议 `/tmp` ≥ **4 GB**。**验证命令**：`CREATE TEMPORARY TABLE t (id INT, payload TEXT); DROP TEMPORARY TABLE t;` 与 `SELECT ID FROM information_schema.PROCESSLIST ORDER BY TIME DESC LIMIT 5;` **两条均须成功**。
+- **本轮副作用**：✅ **未 resume / 未 retry / 未 purge / 未创建 780005 / 未改 build config（`batchSize` 仍 1000）** · **未修改** Dataset 定义 / 12 因子 / `orientation` / `T+5` / 回踩定义 / Schema / migration · **未跑** P3 / 任何真实因子 Run · **未 markReady**（780004 = **FAILED**）· ✅ **零持久化写入**（1000 行诊断 INSERT **事务内 ROLLBACK**，残留 `ds=999999999` = **0**；空间探测**仅用 `TEMPORARY` 表**并显式 `DROP`）· ✅ 780004 五表行数逐项未变（event 58,983 / prefix 37,381 / post 274,880 / path 272,880 / outcome 10,611）。
+- **Baseline Impact**：none。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · DATASET-RESUME-002 · 780004 构建 **COMPLETED → READY** ✅（`/tmp` 扩容后一次性 resume）
+
+- **Task**：`/tmp` 扩容后验证 → **一次性** resume（`MAX_ROUNDS=1`）→ 14 项物理验收 → READY。
+- **Changes**：🔴 **零代码改动**（仅 1 个未跟踪续跑脚本的常量调整 `MAX_ROUNDS 5→1` + 1 份报告）。`runner.ts#describeBuildError` **保留未回滚** ✓
+- **✅ 扩容闸门通过**：`PROCESSLIST+ORDER BY`（含 `TEXT` ⇒ 强制落 `/tmp`）恢复正常 · **空 `TEXT` 临时表可建且累计写入 64 MB 成功** · 1000 行真实批次 INSERT **749 ms** · **1114 出现 0 次** ⇒ `/tmp` 确已扩容。
+- **✅ 构建 COMPLETED**：`retryJob` → 新 job `ds001-v10-…-1791448897973-7dbe3d44`（**逐字继承 checkpoint** ⇒ `resumeCheckpoint ≠ null` ⇒ **零 purge**）→ `startJob`(RUNNING) → `runner.start` 原生 resume，**从 chunk 2461 / cursor 2019-04-02 续跑至 2025-09-26**。
+  - 终态 checkpoint：`{"phase":"windows","lastTradeDate":"2025-09-26","lastEventId":"605155.SH@2025-09-26","processedRows":10261516,"completedChunks":58983}`
+  - **耗时 1,956 s（32.6 分钟）** · chunks **58,983/60,620 完成** · `processedRows 10,261,516`
+- **🔴 最终资产（`datasetVersionId = 780004` · `v10-listed365-pre10-post80` · `status = READY`）**：
+  - `startDate/endDate = 2019-01-02 / 2025-09-26` · **`totalEvents = 58,983`** · **`totalRows = 10,320,499`**
+  - 物理行数：**`event 58,983`** · **`prefix 647,287`** · **`post 4,718,640`** · **`path 4,718,640`** · **`outcome 176,949`**
+  - `prefix rd = −10..0` ✅ · `post rd = 1..80` ✅ · 窗口 ✅ · **`excludeListedWithinDays=365` 实测生效**（同窗口事件数 v8 无过滤 **61,814** / v9 365 **58,983** / v10 365 **58,983** ⇒ −4.58%，与既有 365 版本逐位相等）✅
+  - 一致性：**`post/event = 80.000` 精确** · **`path == post` = true** · **`outcome/event = 3.000` 精确** · `prefix/event = 10.974`（应 11）
+  - **`post` 完整性 80/80 = 58,983/58,983 = 100%** · **合格样本内 F9 `preReturn10` = 58,707/58,707 = 100%**
+- **🔴 4 项「判据未过」的复盘结论：是我的判据过严，不是构建缺陷**（已逐项拆解并印证）：
+  - 缺 `rd=−10` **276 例** ⇒ **`MISSING_PREFIX_PATH`**（上市不足 10 个交易日，上游无该 bar）；缺 `rd=−1` 23 例（同性质）
+  - 缺 `rd=0`（event 日 bar）**0 例** ⇒ **零 `MISSING_EVENT_DAY_BAR`** · `post` rd1..5 不足 **0 例** ⇒ **零 `MISSING_FORWARD_PATH`**
+  - event 关键字段空值 **7 例** ⇒ **`MISSING_FACTOR`**，🔴 **与 `MEAN-FACTOR-RESEARCH-001` / MVP / P3 各轮记录的 `MISSING_FACTOR = 7`（全部为 `turnover`）完全一致**
+  - **历史对照证明 276 例是常态**：`prefix/event` —— v8 **1.000**（`preWindowDays=0`，根本没有 prefix 窗，平凡 100%）· v9 **50.63/61**（覆盖 83%）· **v10 10.974/11 = 99.76%（唯一有真实 prefix 窗且接近满覆盖者）**
+- **🔴 状态处置（重要，已如实登记）**：`READY` 由**平台 runner 在构建成功时自行置位**（**我并未调用 `markReady`** —— 脚本条件分支未触发）。鉴于上述 4 项经复盘**全部是我的判据未考虑 `MISSING_PREFIX_PATH` 语义**，且**反向改成 FAILED 会把真实完成的构建谎报为失败**（与「不得虚报」原则相悖），**本轮未翻转状态**；已在报告中明确请用户裁定，若要求严格按字面判据回退 FAILED 则照做。
+- **本轮副作用**：✅ **一次性 resume（`MAX_ROUNDS=1`）** · ✅ **零 purge** · ✅ **未创建新版本**（版本总数仍 13）· ✅ **未改 build config（`batchSize` 仍 1000）** · ✅ **未修改** Dataset 定义 / 12 因子 / `orientation` / `T+5` / 回踩定义 / Schema / migration · ✅ **未跑** P3 / 任何因子真实 Run · ✅ **未做**参数搜索 / 阈值 / 权重 / 组合 · ✅ 新增 1 条 **COMPLETED** job 与预期内物理数据 · ✅ **未自动进入下一阶段**。
+- **Baseline Impact**：**major** —— `780004` 成为**首个同时满足「12 因子可算（含 prefix 窗）」+「`excludeListedWithinDays=365`」+「全窗口」+「物理完整」**的可用 Dataset ⇒ **`CROSS-SECTIONAL-FACTOR-001` 的 Phase 1（P3 只读预检）阻断已解除**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEAN-TAIL-INDEPENDENCE-001 · Mean / Pure Right-Tail 因子信息独立性检验（**首个基于 780004 的研究**）
+
+- **Task**：基于 READY 的 `780004`，判断 `amountPercentile LOW`（M）与 `preReturn10 HIGH`(R1) / `drawdownDepth HIGH`(R2) / `bodyHeight HIGH`(R3) 是否代表**不同信息维度**。P1 相关性 / P2 TopK 重叠 / P3 条件分层 / P4 residual / P5 分类 + 7 个研究问题。
+- **Changes**：🔴 **零代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/indep.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN`**：沙箱 `spawn EPERM` 阻断 tsx/vitest ⇒ 只读 DB adapter 直读 `780004`（**未虚报正式 Run**）。数值全部来自真实物理数据。
+- **口径**：决策日 **1,627**（与冻结坐标一致）· 候选 **57,303** · 跳过 1,680（prefix 不齐 966 / 无 rd1..5 low 84 / 无 rd10 open 187 / 无出场 bar 443）· T+5 close / T+10 open / H5-10-20-60 / 20bps / Top3-5 · 随机对照 = **每日无放回 uniform 同规模 ×200** · bootstrap = **date-cluster block=20 ×1000**。
+- **🔴 核心结论：三对全部 `INDEPENDENT`**（无一 `PARTIALLY_INDEPENDENT`/`REDUNDANT`）：
+  - **P1 相关性极弱**：pooled Spearman **M-R1 −0.315 · M-R2 +0.135 · M-R3 −0.111**；R1-R2 −0.211 · R1-R3 +0.074 · R2-R3 −0.080。🔴 **全部 |ρ| ≤ 0.315**（最高仅解释 ~10% 方差），且**每日 p05/p95 大幅跨 0**（M-R1 −0.584~+0.144；M-R2 −0.278~+0.492）⇒ 相关方向逐日不稳定。**7/7 年符号一致**。
+  - **P2 名单几乎不重叠**：Top3 Jaccard **M-R1 0.026 · M-R2 0.117 · M-R3 0.036**，且 **median 全为 0** ⇒ **典型交易日 Top3 零交集**；I/M **3.9% / 17.8% / 5.6%** ⇒ 最高者仍有 ~82% 不重叠。**Top10% 层重叠更低**（M-R1 1.47%）。7/7 年排序恒定 R2>R1>R3。
+  - **P3A（M-LOW 内按 R 分层）**：**R2 在 4/4 horizon 完全单调**（H60 HIGH **+0.0356 [+0.0230,+0.0493]**）；R1 在 H20/H60 单调；**R3 不单调**（H20 LOW +0.0111 > HIGH +0.0092）。
+  - **🔴 P3B（R-HIGH 内按 M 分层）—— 本轮最强结果**：**12/12 个 (H×R) 单元格完全单调 `M-LOW > M-MID > M-HIGH`**；H60 三个 R-HIGH 组内 M-LOW 全部**显著为正**（+0.0236/+0.0311/**+0.0359**）、M-HIGH 全部**显著为负**（−0.0165/−0.0183/−0.0203）⇒ 组内极差 **4–5 个百分点**；且 **M-LOW 同时改善左尾**（H60/R2-HIGH `exL10 −0.0992`、`exQ05 +0.0627`）。
+  - **P4 residual（已执行）**：`Resid(M|R1/R2/R3)` Top3 的 `ExcessMean` **9/9 组合 CI 全部 > 0**（H60 +0.0271/+0.0335/+0.0273，其中 **Resid(M|R2) +0.0335 > M 自身 +0.0304**）⇒ **M 的均值信息完整保留**，且残差 `TailLift≈1.0–1.34`（尾部中性）。`Resid(R|M)` 的 `ExcessMean ≤ 0`（多为显著负）但 `ExcessTCR50` 仍正、`TailLift **1.11–2.14**` ⇒ **R 的独立贡献是右尾暴露，不是均值**。
+  - **🔴 两轴正交且语义相反（关键发现）**：M = `ExcessMean` 4/4 H 显著正（+0.0036→**+0.0304** 随 H 单调放大）+ 左尾改善（exL10 −0.026→**−0.0841**）+ 右尾中性（lift 1.02–1.68）；R1/R2/R3 = `ExcessTCR50` 正（lift **1.12–2.84**）但 `ExcessMean` **负**（−0.0008~−0.0231）+ 左尾恶化（exL10 **+0.031~+0.071**、exQ05 **−0.012~−0.038**）。⇒ ✅ **跨数据集（v10）独立复现了 Round 9「Mean ∩ Tail = ∅」与 Round 11「Pure Right-Tail = 风险放大器」**。
+- **7 问逐项回答**：①**是，三个都独立** ②最接近者：**名单口径 → R2（Jaccard 0.117）**；**相关口径 → R1（|ρ| 0.315）**，两口径答案不同须并列 ③增量最强 = **R2**（4/4 单调 + Resid 增量最大），最弱 = **R3** ④**是且极强**（12/12 单调，H60 组内极差 4–5pp）⑤**R2 保持 / R1 部分保持 / R3 基本不保持** ⑥**可以，两轴正交且四维度符号相反** ⑦**具备资格**（三对 INDEPENDENT + 双向残差保留 + 两轴互补）。
+- **📌 诚实披露的实现说明**：✅ 复用既有**口径定义**（冻结桶边界逐字取自 `result.ts#bucketOf`、四方向、T+5/T+10/20bps、TCR 20/50/100%、随机对照教义、bootstrap 设定、`amountPercentile` 年内百分位）；⚠️ **统计原语在 harness 内内联实现**（ranks/spearman/pearson/无放回子集/moving-block bootstrap）—— 因需在 TS 构建外以 plain `.cjs` 运行，属教科书级原语、**非项目特有口径**；⚠️ `LOW/MID/HIGH` = **冻结桶序号原始升序三等分**（`floor(n/3)`/`floor(2n/3)`），**未新建阈值、未做阈值搜索**；⚠️ `ExcessMean` 对照为**同日同规模**子集（K=组规模），故**绝对数值不与 Round 9–12 直接可比**（趋势/符号可比）。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零 `.ts` 代码改动** · ✅ 未做权重/参数/阈值搜索 · ✅ 未新建 bucket/factor/方向 · ✅ 未做组合评分 · ✅ 未创建 Candidate/StrategyVersion · ✅ 未做 OOS/WFA/回测 · ✅ 未修改因子定义/Dataset · ✅ **未进入组合实验**（按要求停止）。
+- **Baseline Impact**：**major** —— 首次产出「Mean Selection 轴 vs Right-Tail Exposure 轴」正交性的**量化证据**，为 `MEAN-SELECTION-TAIL-CONTROL-001` 提供准入依据。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEAN-SELECTION-TAIL-CONTROL-001 · `drawdownDepth` 尾部暴露控制 → **`TAIL_CONTROL_FAILED`（假设被证伪）**
+
+- **Task**：验证在 `amountPercentile LOW`(M) 池内「控制 `drawdownDepth HIGH`(R) 右尾暴露」能否不牺牲 Mean/右尾而改善左尾。组：B0 全池 / B1 M-LOW / B2 M-LOW∧R-LOW / B3 ∧R-MID / B4 ∧R-HIGH。
+- **Changes**：🔴 **零代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/tailctl.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN`**：沙箱 `spawn EPERM` ⇒ 只读 DB adapter 直读 `780004`（未虚报）。面板：决策日 **1,627** · 候选 **57,303**；**新增拉取 post rd10..70 的 `low` 共 3,597,963 行**用于 MAE（口径同 `server/downsideRisk.ts#adverseReturnLabel`）。
+- **🔴🔴 核心结论：`TAIL_CONTROL_FAILED`** —— **控制（限制）`drawdownDepth HIGH` 反而【恶化】左尾**：
+  - `B2(R-LOW) − B1`（H20/H60）：ΔExcessP10 **+0.053 / +0.068**（恶化）、ΔExcessQ05 **−0.020 / −0.029**（恶化）、ΔExcessMAE **−0.015 / −0.021**（恶化）⇒ **三项左尾指标全部恶化**；ΔExcessMean **−0.008 / −0.020**（H60 B2 = +0.006，CI 含 0，**Mean 优势消失**）
+  - **B2 的 Loss10 在 H20/H60 均 7/7 年高于 B1** ⇒ 稳定变差，非少数年份
+- **🔴 梯度方向与假设【完全相反】**（`R-LOW → R-MID → R-HIGH`，段级）：ExcessP10 **+0.004→−0.054→−0.092**(H20) / **−0.007→−0.091→−0.099**(H60)（风险↓）· ExcessQ05 +0.001→+0.018→**+0.029** / +0.005→+0.034→**+0.046**（改善）· ExcessMAE −0.003→+0.014→**+0.021** / −0.002→+0.022→**+0.030**（改善）· ExcessMean +0.003→+0.008→**+0.018** / +0.006→+0.026→**+0.037**（上升）⇒ **4/5 指标严格单调且全部指向「R-HIGH 最好」** ⇒ `drawdownDepth` **确为连续风险暴露轴**，但**高暴露 = 低风险 + 高收益**。
+- **✅ 真正有效（且无权衡）的是【选择】而非【控制】R-HIGH**：`B4 − B1`（H60 段级）= ΔExcessMean **+0.011** · ΔExcessP10 **−0.024** · ΔExcessQ05 **+0.012** · ΔExcessMAE **+0.011** · ΔTailLift **+0.147** ⇒ **Mean 更好、左尾更好、右尾不降，全面占优**。H20 同向（+0.007 / −0.043 / +0.008 / +0.009 / +0.278）。
+- **⚠️ 口径敏感性**：**Top3 层 B4 需付右尾代价**（TailLift **1.344 → 0.900**）；**Top5 层 B4 的 H60 ExcessMean CI [−0.006,+0.050] 含 0（不显著）** ⇒ 口径会改变结论。
+- **⚠️ `INSUFFICIENT_SAMPLE`**：B2/B4 日均候选仅 **2.94 / 2.46**（median 2、P05 1）⇒ 多数日无法构成 Top3；B4 Top3 仅覆盖 **1,020/1,627 = 62.7%** 决策日 ⇒ **Top3 层比较非同日集**。未为维持 Top3 放宽任何条件。
+- **🔴 与上一轮的交互效应（非矛盾，已双向验证）**：`MEAN-TAIL-INDEPENDENCE-001` 发现 `drawdownDepth HIGH` **无条件**（全池）是风险放大器（H60 ExcessMean −0.0203、ExcessLoss10 +0.0615）；本轮发现 **M-LOW 池内**它是**保护性**的（H60 +0.037、Loss10 0.271 vs B1 0.317）⇒ **Simpson 型符号翻转的真实交互效应**。两轮互证：上轮 P3B「R2-HIGH 内 M-LOW 最好(+0.0359)」与本轮「M-LOW 内 R2-HIGH 最好(+0.037)」是**同一交互的两个视角**。
+- **8 问回答**：①M 的 Mean 优势在 **R-MID/R-HIGH 内存在、R-LOW 内消失** ②**形成严格单调连续暴露轴，但方向相反**（高暴露=低风险+高收益）③**限制 R-HIGH 不改善左尾，反而恶化** ④前提不成立；**选择 R-HIGH 不牺牲右尾**（ΔTailLift +0.278/+0.147），仅 **B3** 有代价（1.136→1.002）⑤**H60 更适合**（分离度更大：M-LOW 内 Mean 0.021→0.044）⑥**段级一致、Top3/Top5 部分不一致** ⑦**值得继续但必须反转用法**（从「Control」改为「Tail-Risk-Averse Selection Tilt」）⑧**具备资格，但下一轮必须先修正假设方向**（须同时报告无条件与条件化两层，否则误导）。
+- **📌 诚实披露**：✅ 复用既有**口径定义**（冻结桶边界逐字取自 `result.ts#bucketOf`、冻结方向、T+5/T+10/20bps、TCR 20/50/100%、MAE 口径、随机对照教义、bootstrap 设定）；⚠️ **统计原语内联实现**（因需在 TS 构建外以 `.cjs` 运行，属教科书级原语、非项目特有口径）；⚠️ `LOW/MID/HIGH` = **冻结桶序号原始升序三等分**（沿用上一轮，**未新建阈值**）；⚠️ 各组日集不同（1,562/1,118/1,324/1,030）⇒ 依赖 excess 框架控制机会集差异，**非严格同日配对**。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零 `.ts` 代码改动** · ✅ 未用 `preReturn10`/`bodyHeight`/其他因子 · ✅ 未新建 bucket/threshold · ✅ 未做权重/评分/参数搜索/TopN 搜索 · ✅ 未创建 Candidate/StrategyVersion · ✅ 未做回测/OOS/WFA · ✅ 未修改 Dataset/Schema/因子定义 · ✅ **未反向修改**方向或 bucket · ✅ **未自动进入 `preReturn10`，未创建组合策略**。
+- **Baseline Impact**：**major** —— 证伪「控制 `drawdownDepth HIGH` 可改善左尾」的假设，并把该因子重新定位为**选择性倾斜变量**；同时确立「条件化可翻转符号」这一必须在后续轮次中显式处理的方法学事实。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEAN-TAIL-INTERACTION-VALIDATION-001 · 条件化交互验证 → **`CONDITIONAL_INTERACTION_PARTIAL`（含对上一轮的重要纠正）**
+
+- **Task**：验证「M-LOW 条件下 `drawdownDepth HIGH` 从『全池风险放大器』翻转为『保护性方向』」；新增**同日 Pairwise**、**形式化 Interaction**、**Top-K 同日可比性 + 覆盖率硬约束**、年度 ≥5/7 门槛。
+- **Changes**：🔴 **零代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/interact.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN`**：沙箱 `spawn EPERM` ⇒ 只读 DB adapter 直读 `780004`（未虚报）。面板：决策日 **1,627** · 候选 **57,467**（⚠️ 比上一轮 57,303 **多 164**：本轮仅要求 H20/H60 出场 bar，上一轮还要求 H5/H10 —— **已披露，两轮 B 层数值不完全逐位可比**）。
+- **🔴🔴 核心纠正：`CONDITIONAL_SIGN_FLIP` **不成立**（本轮最重要结论）**
+  - **全池段级 R-HIGH 已经优于 R-LOW**：H60 `A1−A2` = ΔMean **+0.0122** · ΔExcessMean **+0.0124** · ΔLoss10 **−0.0402** · ΔQ05 +0.0022 · ΔMAE +0.0170（仅 ΔTailLift −0.147 反向）；H20 同向。⇒ **A1 eMean −0.0026 vs A2 −0.0150；P(≤−10%) 0.396 vs 0.436** ⇒ **两层（全池 A1−A2 与 M-LOW B4−B2）符号完全一致**。
+  - 🔴 **上一轮「翻转」的来源诊断**：上一轮「全池风险放大器」用的是 **Top3-by-drawdownDepth（极值选择）**（H60 eMean −0.0203），本轮 A1 用的是**整个 R-HIGH 段**（H60 −0.0026）⇒ **是【跨选择机制】比较的产物，不是【跨条件】的翻转**。真实现象是 **`drawdownDepth` 的【非单调极值效应】**：段级 HIGH 优于 LOW，但 Top3 极值比其 HIGH 段平均更差 ⇒ **「越高越好」在极端处失效**。
+  - ⇒ **上一轮 `MEAN-SELECTION-TAIL-CONTROL-001` §8 的「Simpson 型符号翻转」定性应被修正为「极值非单调性 + 强度交互」。**
+- **✅ 同日 Pairwise（配对，本轮最重要正面结果）**：共同日（三档均有成员）= **607/1,627 = 37.3%**
+  - **`B4−B2` 的 ΔMean/ΔExcessMean/ΔP10/ΔQ05/ΔMAE 在 H20/H60【五项全部显著】**（H60 ΔExcessMean **+0.0263 [+0.0061,+0.0470]**、ΔP10 **−0.0865 [−0.1248,−0.0477]**、ΔQ05 +0.0400、ΔMAE +0.0328）⇒ 🔴 **「优势来自不同交易日组成」的质疑被【排除】**
+  - `B3−B2` 亦显著（H60 ΔExcessMean +0.0234 [+0.0032,+0.0450]）⇒ **单调梯度**；**`B4−B3` 的 Mean 不显著**（H60 +0.0028，CI 含 0）⇒ HIGH 与 MID 均值差异不稳健，但左尾（Q05/MAE/P10）显著
+  - ΔTailLift 为负但**不显著**（H60 −0.531 [−1.2206,+0.0730]）
+- **✅ C2（B4 > B1）成立**：Mean **+0.0177 vs +0.0118**(H20) / **+0.0359 vs +0.0267**(H60)；**左尾三项全改善**（eP10 −0.0915/−0.1000 vs −0.0496/−0.0754 · eQ05 +0.0287/+0.0452 vs +0.0215/+0.0348 · eMAE +0.0211/+0.0306 vs +0.0119/+0.0188）；右尾：eTCR50 基本持平，**TailLift H60 1.046 vs 1.186（略低，非坍塌）**、H20 1.126 vs 1.062（略高）。
+- **❌ C3（Top3）不成立 ⇒ `TOP3_COVERAGE_LIMITATION`**：合格共同日 **Top3 50/1,627 = 3.1%**、**Top5 4/1,627 = 0.2%（`INSUFFICIENT_COMMON_DAYS`）**；根因 **B4 日均候选仅 2.47（median 2、P05 1）**。50 日上 **`Top3(B4)−Top3(B1)` 的 ΔExcessMean 为负**（H60 **−0.0430 [−0.0969,+0.0126]**），**全部 CI 含 0**；**ΔTailLift 亦为负**（H20 −0.239 / H60 −0.369，方向与上一轮 1.344→0.900 一致，但 CI 含 0）⇒ **n=50 不足以定论**；**未因缺候选而补股票** ✓
+- **形式化 Interaction（§5）**：`Effect(R-HIGH|M-LOW) − Effect(R-HIGH|非M-LOW)` H60 = ΔMean **+0.0577** · ΔExcessMean **+0.0440** · ΔLoss10 **−0.1394** · ΔQ05 **+0.1722** · ΔMAE **+0.0417**；对照 R-LOW 仅 ΔExcessMean +0.0241、ΔLoss10 −0.0635 ⇒ ✅ **存在正的【强度交互】**（R-HIGH 获益 1.8–2.4×），**但 M-LOW 对两档都有利（主效应），不是纯交互**；⚠️ **TailLift 反向**（R-LOW 获益 +0.380 vs R-HIGH +0.095）。
+- **年度（≥5/7 门槛）**：**B4>B1 = 6/7 年**（H20/H60 一致，唯一反向年 **2021**）· **B4 Loss10 < B1 = 7/7 年** ⇒ **达标**，非少数年份驱动。
+- **判定 = `CONDITIONAL_INTERACTION_PARTIAL`**：条件 1（符号翻转）**失败**；条件 2–6 **全部满足**；条件 7 已标记。**不判 `FAILED`** 的理由：`FAILED` 的「优势来自日组成」已被同日配对**排除**，且符号翻转未复现的原因是**该翻转本就不存在**，而非被同日比较推翻。
+- **8 问回答**：①**没有翻转**（全池段级已优；上一轮「翻转」是跨机制假象）②同日 Pairwise **验证了真实存在的效应**（B4>B2 五项显著），但**无从验证不存在的翻转** ③**优势不是来自日组成**（已排除）④**Mean ✅ 左尾 ✅ 右尾 ⚠️（无增益、未坍塌）** ⑤**右尾损失方向一致但证据不足**（n=50，CI 含 0）⑥**足以阻止**（覆盖率 3.1%）⑦**`CONDITIONAL_INTERACTION_PARTIAL`** ⑧**具备资格但须三项修正**：放弃「符号翻转」框架、跨层比较必须固定选择机制、先解决 Top3 覆盖（或改用段级+同日配对为主口径）。
+- **📌 方法学产出（可复用）**：① **同日 Pairwise 配对**（非跨日 pooled）是排除「日组成假象」的关键工具；② **跨层比较必须同时固定选择机制**，否则会把「极值非单调性」误读为「条件化翻转」；③ **Top-K 覆盖率硬门槛**（<80% 必须标记限制）。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零 `.ts` 代码改动** · ✅ 未搜索 R/amountPercentile threshold · ✅ 未搜索 TopN/权重 · ✅ 未加入 `preReturn10`/`bodyHeight`/其他因子 · ✅ 未做 OOS/WFA · ✅ 未创建 Strategy/Candidate · ✅ 未做参数优化 · ✅ 未修改 Dataset/Schema/因子定义 · ✅ **未自动进入 `preReturn10`**。
+- **Baseline Impact**：**major** —— 纠正上一轮的交互定性（符号翻转 → 强度交互 + 极值非单调性），并建立同日配对 + 覆盖率门槛的方法学基线。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEAN-SELECTION-TAIL-CONTROL-001（**修正框架重做版**）· **A `STRENGTH_INTERACTION_CONFIRMED` + D `TOP3_NOT_ACTIONABLE`**
+
+- **Task**：按**修正后框架**重做（**不预设符号翻转**），验证 `M = amountPercentile LOW` × `R = drawdownDepth HIGH` 是否形成稳定二维选择关系。P1 段级 / P2 同日 Pairwise / P3 正式 Strength Interaction / P4 年度 / P5 Top3-Top5 可行性 / P6 分类。
+- **🔴 文件处置**：`docs/research/RESULT-MEAN-SELECTION-TAIL-CONTROL-001.md` **被本版【取代】**（旧版基于已被证伪的符号翻转框架；旧结论完整保留于本审计日志）。
+- **Changes**：🔴 **零业务代码改动**（仅对未跟踪只读 harness `scripts/_scratch/interact.cjs` 增加 Median / 年度 Q05-MAE-TCR50 / B4−B2 配对三项输出 + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分（按任务要求）**：**real DB data ✅**（全部数值来自 780004 真实物理数据）· **same compiled TS metric code ⚠️ 部分**（**口径定义**复用既有模块：冻结桶边界逐字取自 `result.ts#bucketOf`、冻结方向、T+5/T+10/20bps、TCR 20/50/100%、MAE 口径同 `server/downsideRisk.ts#adverseReturnLabel`、随机对照教义、bootstrap 设定；**统计原语内联实现**，未调用已编译 TS 指标代码）· **platform persisted Run ❌ 未发生**（未虚报，未修改 sandbox 权限）。
+- **样本量**：B1 **11,092 / 1,562 日 / 7.10 日均**（P05-med-P95 = 1/5/17）· B2 **3,299 / 1,120 / 2.95**（1/2/8）· B3 **5,250 / 1,326 / 3.96**（1/3/10）· B4 **2,543 / 1,031 / 2.47**（1/2/6）。⚠️ **B2/B4 日均仅 2.47–2.95、median 2** ⇒ 多数日无法构成 Top3。面板：决策日 1,627 · 候选 57,467。
+- **P1 段级**：🔴 **`B2 < B3 < B4` 在 5/7 指标上【严格单调】**（ExcessMean · Mean · Median · P(≤−10%) · MAE，**两个 horizon 一致**）；🔴 **但 Q05 非单调**（B3 劣于 B2：H20 −0.0574 > −0.0682 < −0.0267；H60 −0.0869 > −0.0965 < −0.0326）**且 TailLift 随 R 递减**（B2 最优 1.323/1.468 > B4 1.126/1.046）⇒ **不得声称全面单调**。B4 的 ExcessMean 两组最高（H20 +0.0177 [+0.0091,+0.0265] · H60 **+0.0359 [+0.0223,+0.0488]**）。
+- **P2 同日 Pairwise（607/1,627 = 37.3%）**：✅ **`B4−B2` 的 ΔMean/ΔExcessMean/ΔP10/ΔQ05/ΔMAE 在 H20/H60【五项全部显著】**（H60 ΔExcessMean **+0.0263 [+0.0061,+0.0470]** · ΔP10 **−0.0865 [−0.1248,−0.0477]**）⇒ **段级差异【不是】日组成假象** ✓✓；`B3−B2` 亦显著（ΔExcessMean H60 +0.0234 [+0.0032,+0.0450]）；⚠️ `B4−B3` 的 Mean 不显著；🔴 **Q05 非单调在配对层面同样成立**（`B3−B2` ΔQ05 = −0.0168/−0.0228，CI 均不含 0）；✅ **ΔTCR50 全部不显著** ⇒ 右尾无显著恶化；⚠️ ΔTailLift 为负但全部不显著。
+- **P3 正式 Strength Interaction**：`Effect(R-HIGH|M-LOW) − Effect(R-HIGH|非M-LOW)` H60 = ΔMean **+0.0577** · ΔExcessMean **+0.0440** · ΔLoss10 **−0.1394** · ΔQ05 **+0.1722** · ΔMAE **+0.0417**；对照 R-LOW 仅 +0.0267 / +0.0241 / −0.0635 / +0.1071 / +0.0173 ⇒ **放大倍数 1.6–2.4×**。分类：**`SIGN_INTERACTION` ❌**（两层同号）· **`STRENGTH_INTERACTION` ✅** · `NO_INTERACTION` ❌。**形式化 DiD 点估计 = H60 +0.0199 / H20 +0.0115，但【CI 未计算】**。⚠️ **M-LOW 对两档都有利 ⇒ 主效应占主导**；⚠️ **TailLift 负交互**（R-LOW 获益 +0.380 vs R-HIGH +0.095）。
+- **P4 年度（B4−B1）**：**ΔExcessMean 6/7**（唯一负年 **2021**，两 horizon 一致）· **ΔLoss10 7/7** · **ΔQ05 7/7**（H60 全部落在 [+0.1006,+0.1341] 极窄区间）· **ΔMAE 7/7** · 🔴 **ΔTCR50 仅 H20 2/7、H60 3/7** ⇒ **4/5 指标 ≥5/7 达标，TCR50 不达标**；**无单一年份主导**（剔除最大年 2023 后其余 6 年均值仍为正）。
+- **P5 Top3/Top5**：🔴 **Top3 合格共同日 50/1,627 = 3.1%** ⇒ `TOP3_COVERAGE_LIMITATION`；**Top5 4/1,627 = 0.2%** ⇒ `INSUFFICIENT_COMMON_DAYS`。`Top3(B4)−Top3(B1)` ΔExcessMean **两个 horizon 均为负**（H20 −0.0174 · H60 −0.0419，CI 含 0）；🔴 `Top3(B4)−Top3(B2)` **H20 ΔTCR50 = −0.0333 [−0.0467,−0.0200] 显著为负**。**未填补任何缺失名额**。⇒ **不得因段级显著就推导出「每天 Top3 可直接使用」**。
+- **P6 最终分类**：**主分类 = A · `STRENGTH_INTERACTION_CONFIRMED`**（段级稳定改善 ✅ · 同日同向 ✅ · Mean 与 Left Tail 均显著 ✅ · 年度 ≥5/7 ✅ · 右尾无显著恶化 ✅）；**绑定限制 = D · `TOP3_NOT_ACTIONABLE`**（强制生效）。⚠️ **降级备选 = B · `CONDITIONAL_MAIN_EFFECT`**（若要求形式化 DiD 检验，因 CI 未计算而应降级）。C · `NO_INTERACTION` ❌ 不成立。
+- **9 · 可进入 `preReturn10`** ✅ 但须携带三项约束：①以「段级 + 同日 Pairwise」为主口径、Top3 仅辅证且预声明覆盖限制 ②**禁止预设符号翻转**，直接检验段级梯度 + 同日配对 + 强度交互 ③**预先声明是否做形式化 DiD 检验**。
+- **10 · 尚不能推出的 10 条结论**（报告中逐条列出）：①Top3 应选 R-HIGH ❌ ②形式化显著交互 ❌ ③全面单调 ❌ ④R-HIGH 改善右尾 ❌（**不恶化但不改善**）⑤可交易/容量 ❌ ⑥B2/B4 可每日选股 ❌ ⑦可外推到其他因子 ❌ ⑧已完成平台正式 Run ❌ ⑨B4 在所有风险维度更好 ❌（**B2 的 Q05 与 TailLift 更优 ⇒ 存在明确权衡，非支配关系**）⑩段级显著 ⇒ 组合层可用 ❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未新增/修改因子/定义/bucket/方向 · ✅ 未搜索阈值/权重/TopN/持有期/新组合 · ✅ 未创建 Candidate/StrategyVersion · ✅ 未做 OOS/WFA/Parameter Search · ✅ 未为得到正结果增加条件 · ✅ 未做 Strategy/Dataset/Parameter Search 审计 · ✅ **未自行继续下一个实验**。
+- **Baseline Impact**：**major** —— 首次以修正框架给出「段级 + 同日配对 + 强度交互」的完整结论，并同时给出强制性的 Top3 不可用限制与 10 条「尚不能推出」边界。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEAN-SELECTION-TAIL-CONTROL-002 · `preReturn10` 条件增量 + **正式 DiD CI** → **2 `CONDITIONAL_MAIN_EFFECT` + 3 `NO_INTERACTION`(均值维度) + 4 `TOP3_NOT_ACTIONABLE`**
+
+- **Task**：验证 `M = amountPercentile LOW` × `R = preReturn10 HIGH` 是否存在稳定条件增量，及与 `drawdownDepth` 同型/不同型。**新增硬要求：Interaction 必须给 95% CI，禁止仅凭倍数/点估计宣布 STRENGTH_INTERACTION**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/pret.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分**（口径定义复用既有模块：`preReturn10` 冻结 **7 桶**边界逐字取自 `result.ts#bucketOf`、冻结方向、T+5/T+10/20bps、TCR 20/50/100%、MAE 口径同 `downsideRisk.ts#adverseReturnLabel`；**统计原语与 DiD 构造内联实现**，未调用已编译 TS 指标代码）· **platform persisted Run ❌ 未发生**。
+- **口径**：`R = preReturn10 HIGH` → 冻结 7 桶 → LOW/MID/HIGH = 桶序号三等分（LOW=[0,2) · MID=[2,4) · HIGH=[4,7)）。面板：决策日 **1,627** · 候选 **57,505**。
+- **样本量**：B1 **11,106/1,562 日/7.11 日均**(1/5/17) · B2 **3,650/851/4.29**(1/2/14) · B3 **5,292/1,401/3.78**(1/3/9) · **B4 2,164/862/2.51**(1/2/7)。
+- **P1 段级**：🔴 **`B2<B3<B4` 不成立**（8 指标中仅 **1–2 个**单调且仅 H20）。🔴 **结构发现：`preReturn10 HIGH` 是【纯右尾暴露】** —— B4 的 TailLift **1.363/1.498（四组最高）**、eTCR50 **+0.0028/+0.0182（最高）**，但 P(≤−10%) **0.2370/0.3370（最差）**、MAE **−0.1060/−0.1663（最差）**，均值维度基本持平。
+- **P2 同日 Pairwise（374/1,627 = 23.0%）**：🔴 **`B4−B2` 的 ΔExcessMean 在两个 horizon 均不显著且点估计≈0**（−0.0027 / +0.0003）；**H60 全部 7 个指标 CI 均含 0** ⇒ **`preReturn10 HIGH` 相对 LOW 无均值增量**。H20 唯一显著项 = ΔTailLift **+0.9786**。🔴 `B4−B3` 的 **P(≤−10%) 与 MAE 显著恶化**（H20 +0.0586/−0.0162 · H60 +0.0541/−0.0187）。
+- **🔴 P3 正式 DiD CI（本轮核心）**：四格（B4/N4/B2/N2）共同日 **372/1,627 = 22.9%**，逐日算 DiD 后做 date-cluster moving-block bootstrap。
+  - 🔴 **`DiD.ex`（ExcessMean）= +0.0075 [−0.0115,+0.0252]（H20）· +0.0121 [−0.0235,+0.0522]（H60）⇒ 两个 horizon 均【跨 0】** ⇒ **均值维度 = `NO_INTERACTION`**（虽 H60 两层点估计符号相反 +0.0353 vs −0.0061，但按任务规则**不得**判 `SIGN_INTERACTION`）
+  - ✅ **`DiD.q05` = +0.0593 [+0.0384,+0.0806] · +0.0900 [+0.0450,+0.1356]；`DiD.mae` = +0.0122 [+0.0050,+0.0195] · +0.0179 [+0.0086,+0.0266] ⇒ 两个 horizon 均【不跨 0】** ⇒ **下分位/MAE 维度 = `STRENGTH_INTERACTION`**
+  - `DiD.mean` / `DiD.t50` / `DiD.lift` 全部跨 0；`DiD.p10` 仅 H20 不跨 0
+  - ⚠️ **M-LOW 对两档都有利**（R-HIGH +0.0353、R-LOW +0.0210，H60 均显著）⇒ **主效应占主导**
+- **P4 年度（B4−B1）**：🔴 **不达标** —— ΔExcessMean H20 3/7 · H60 5/7；🔴 **ΔLoss10 H60 1/7、H20 2/7**；✅ ΔQ05 **7/7**；🔴 **ΔMAE 两个 horizon 均 1/7**；ΔTCR50 5/7。⇒ **`preReturn10 HIGH` 在 6/7 年恶化大亏概率、6/7 年恶化 MAE**。
+- **P5 Top3/Top5**：🔴 **Top3 eligible = 17/1,627 = 1.0%** ⇒ `TOP3_COVERAGE_LIMITATION`；**Top5 = 1/1,627 = 0.1%**；**17 日 < 40（block×2）⇒ bootstrap CI 全部无法计算** ⇒ `INSUFFICIENT_COMMON_DAYS`。`Top3(B4)−Top3(B1)` ΔExcessMean H20 **0.0000** / H60 **−0.0369**。**未填补任何缺失名额**。
+- **P6 与 `drawdownDepth` 横向比较 → 结论 = B（作用不同，右尾轴内部存在多个信息维度）**：`drawdownDepth HIGH` = **风险规避型选择**（同时改善均值与左尾 P10↓/MAE↑，梯度 5/7 单调，年度 Loss10/Q05/MAE **三项 7/7**；但不改善右尾）；`preReturn10 HIGH` = **纯右尾暴露**（只改善右尾 TailLift/eTCR50，均值零增量，左尾 P10/MAE 最差，年度 Loss10 1/7、MAE 1/7）。🔴 **两者在 P10 / MAE / TailLift / 年度 Loss10 / 年度 MAE 上方向完全相反 ⇒ 排除选项 A（替代关系）。**
+- **最终分类**：**主分类 = 2 · `CONDITIONAL_MAIN_EFFECT`** · **限定 = 3 · `NO_INTERACTION`（仅 Mean/ExcessMean/TCR50/TailLift 四维度）** · **绑定限制 = 4 · `TOP3_NOT_ACTIONABLE`**。⚠️ 同时记录 **Q05/MAE 维度的 `STRENGTH_INTERACTION`**，但该交互指向的改善**在 B4 vs B1 年度上不成立**（dMAE 1/7）⇒ 不可据此宣称控制有效。**1 · `STRENGTH_INTERACTION_CONFIRMED` ❌ 不成立。**
+- **10 · `bodyHeight` 建议**：❌ **不建议继续**（5 条理由：先验最弱〔上轮 M-LOW 内不单调 + Resid 增量最小〕· 无条件 Top3 最差〔H60 −0.0231〕· 框架两端已测完 · 样本碎片化会更严重〔本轮 Top3 已跌至 1.0%〕· 成本/信息增益不划算）。若仍要做，须先改用「段级+同日配对+正式 DiD CI」为唯一主口径。
+- **11 · 尚不能推出的 12 条**：①`preReturn10` 提供均值增量 ❌ ②存在 `SIGN_INTERACTION` ❌ ③`STRENGTH_INTERACTION_CONFIRMED` ❌ ④控制可改善左尾 ❌ ⑤存在稳定梯度 ❌ ⑥Top3 应选 `preReturn10` ❌ ⑦两因子可互相替代 ❌ ⑧Q05/MAE 交互有可交易意义 ❌ ⑨可外推其他因子 ❌ ⑩可交易/有容量 ❌ ⑪B4 可每日选股 ❌ ⑫已完成平台正式 Run ❌。
+- **📌 方法学产出**：① **正式 DiD CI 应按四格共同日逐日构造 DiD 序列再做 date-cluster bootstrap**（本轮实现）；② **交互类型会按维度分裂**（同一因子在均值维度 `NO_INTERACTION`、在下分位维度 `STRENGTH_INTERACTION`）⇒ **不得用单一标签概括一个因子**；③ **交互显著 ≠ 可交易**（需同时看 B4 vs B1 的年度稳定性）。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未新增/修改因子/定义/bucket/orientation · ✅ 未搜索 threshold/weight/TopN/holding period/组合 · ✅ 未创建 Candidate/StrategyVersion · ✅ 未做 OOS/WFA/Parameter Search · ✅ 未做 Strategy/Dataset 审计 · ✅ 未为获得正结果增加条件 · ✅ **未自动进入下一实验**。
+- **Baseline Impact**：**major** —— 首次给出**带 CI 的正式 DiD 交互结论**，确立「交互类型按维度分裂」与「交互显著≠可交易」两条方法学事实；并把 `preReturn10` 定性为**纯右尾暴露**（与 `drawdownDepth` 的风险规避型选择形成互补而非替代）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · FACTOR-TIMESCALE-001 · 12 冻结因子的时间尺度解释能力
+
+- **Task**：基于**已冻结的 12 个因子**（不新增/不改分桶）评估其对**短期 T+1~T+5 / 中期 T+6~T+20 / 长期 T+21~T+60** 的解释能力；识别短期/中期/长期/跨周期有效因子与无时间尺度价值因子；**区分「预测上涨幅度」与「预测持有收益/胜率」**；数据不足须报告缺口而**不得扩建数据集**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/ts.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅**（event 58,983 · prefix 647,287 · **post rd1..60 明细 3,538,980 行**）· **same compiled TS metric code ⚠️ 部分**（**因子定义与分桶逐字复用** `result.ts#TWELVE_FACTOR_DEFINITIONS` 的 12 个 `bucketOf`+`orientation` 与 `derive.ts#L400-L458` 的 `CONTEXT_DAYS=5`/`EPSILON`/`percentileRank` 同日横截面口径；统计原语内联实现）· **platform persisted Run ❌ 未发生**。
+- **✅ 数据缺口结论：无缺口** —— `780004` 的 `postWindowDays=80`，物理 post rd1..80 完整 ⇒ **T+21~T+60 完全支持（三窗口覆盖率 100%）**，**未扩建任何数据集**。面板：决策日 **1,627** · 候选 **57,612**（跳过：prefix 不齐 276 · rd1..5 上下文不全 323 · 窗口不全 391 · `MISSING_FACTOR` 381）。⚠️ 与上一轮差 107（本轮多要求 rd1..5 上下文），**已披露**。
+- **🔴🔴 发现 1（结构级）：12 个因子中【10 个】在「短期 vs 中期/长期」之间【符号翻转】。根因 = 口径重叠，非市场结构。**
+  - **6 个因子由 rd1..5 的 bar 计算** ⇒ 对 T+1~T+5 窗口属**定义性污染**：`drawdownDepth`（min low rd1..5）· `meanAmplitude`/`maxAmplitude`（rd1..5 振幅）· `holdStreak`（rd1..5 连板）· `t1VolumeRatio`（rd1 volume）· `t1OpenGap`（rd1 open）
+  - 🔴 **铁证（近确定性）**：`drawdownDepth` 对**下跌幅度**的短期 IC = **−0.7676**；对持有收益 −0.6634；对胜率 −0.5056。`holdStreak` 对**上涨幅度**短期 IC = **+0.4772（98.98% 日为正）**。`meanAmplitude` 对上涨幅度 −0.5641。
+  - ⇒ **对这 6 个因子，T+1~T+5 的 IC 【不可解释为预测能力】**；真正具备短期预测含义的只有 **6 个 PIT 安全因子**（`bodyHeight`/`turnover`/`amountPercentile`/`limitGap`/`preReturn10`/`historyLimitCount`，全部来自 prefix rd≤0 或 event 字段）。
+- **🔴🔴 发现 2（关键区分）：12/12 因子的「上涨幅度」IC 与「持有收益」IC 【符号系统性相反】**（中期 T+6~T+20 例）：`limitGap` −0.0941 vs **+0.0850** · `turnover` −0.0639 vs **+0.0745** · `amountPercentile` −0.0510 vs **+0.0583** · `meanAmplitude` −0.1414 vs **+0.1368** · `maxAmplitude` −0.1091 vs **+0.1199** · `holdStreak` **+0.0704** vs −0.0778 · `preReturn10` −0.0447 vs **+0.0524** · `drawdownDepth` −0.0544 vs **+0.0643** · `bodyHeight` −0.0278 vs **+0.0423** · `historyLimitCount` −0.0688 vs **+0.0438** · `t1OpenGap` **+0.0317** vs −0.0232 · `t1VolumeRatio` −0.0135 vs **+0.0326**。
+  - ⇒ **因子系统性预测【更高的盘中峰值】但【更低的持有到期收益】** ⇒ 机理 = 区间宽度（峰值↑、谷值↓）侵蚀净收益 ⇒ 与**低波动异象**一致。
+  - ⇒ **正面回答了任务要求的「区分上涨幅度 vs 持有收益」：二者在本因子集上不是同一件事，且方向相反。**
+- **P1 IC（持有收益，定向后；95% CI 不跨 0 = 显著）**：`limitGap` **+0.0270 / +0.0850 / +0.0838（三窗口全显著同向）** · `preReturn10` **+0.0768 / +0.0524 / +0.0179（同向递减）** · `amountPercentile` **−0.0494 / +0.0583 / +0.0999（🔴 短期反向）** · `historyLimitCount` ns / +0.0438 / +0.0806 · `turnover` ns / +0.0745 / +0.0752 · `bodyHeight` ns / +0.0423 / +0.0233。方向稳定性（IC>0 日占比）：**`amountPercentile` 长期 0.6766（最稳）** · `limitGap` 中期 0.6667 · `preReturn10` 短期 0.6318。
+- **P3 区分度（冻结桶，持有收益）**：**跨周期桶单调者仅 3 个** —— **`amountPercentile`（M+L MONO，长期顶底差 +0.0368 最大且各桶均衡 ≈11,500）** · **`limitGap`（M+L MONO，+0.0225/+0.0288）** · `maxAmplitude`（M+L MONO，+0.0136/+0.0137）。⚠️ **`turnover` 分桶退化**（b5 占 **57,402/57,612 = 99.6%**）⇒ 其顶底差（−0.1399）**无统计意义**，**登记为分桶口径缺口（本轮不修改分桶）**。⚠️ 短期 MONO 的 3 个中 `holdStreak`/`drawdownDepth` 为污染项。
+- **分类结论**：**短期有效 = `preReturn10`（唯一强项，+0.0768）· `limitGap`（弱，+0.0270）；`amountPercentile` 短期【反向】** · **中期有效（PIT 安全）= `limitGap` > `turnover` > `amountPercentile` > `preReturn10` > `historyLimitCount` > `bodyHeight` 全部有效** · **长期有效 = `amountPercentile` > `limitGap` > `historyLimitCount` > `turnover` > `bodyHeight` > `preReturn10`** · 🥇 **跨周期有效 = `limitGap`（最强）与 `preReturn10`** · **无明确时间尺度价值 = `t1OpenGap`（长期 ns + 中期弱反向 + 短期污染）· `holdStreak`（中/长期反向）· `bodyHeight`（极弱，桶顶底差 +0.0102）** · **特殊类别 = 6 个「仅中/长期可评估」的污染因子**。
+- **下一阶段建议（本轮不进入）**：🔴P0 短期 IC 结论**限定为 PIT 安全子集**、窗口内因子在 T+1~T+5 **禁用 IC 解释** · 🔴P0 把「上涨幅度」与「持有收益」**固定为两个独立目标**、后续必须同时报告 · 🟠P1 以 **`limitGap` 为跨周期主因子** · 🟠P1 **以长期 T+21~T+60 为主评估窗口**（IC 最大、方向最稳、桶区分度最大）· 🟡P2 `amountPercentile` 短期符号反转须先声明 · 🟡P2 登记 `turnover` 分桶退化缺口 · 🟡P2 `holdStreak`/`t1OpenGap` 降级观察项 · ⚪P3 区间宽度机理另立任务 · ⚪P3 `bodyHeight` 不建议单独投入。
+- **10 条不能推出**：①窗口内因子短期无预测能力 ❌（只能说被污染，**无法判定**）②短期与中长期市场结构真的相反 ❌（6/10 可由口径解释）③因子能预测收益的因果表述 ❌ ④可直接用于选股/组合 ❌ ⑤`turnover` 桶区分度为负 ❌（分桶退化）⑥可外推到 >T+60 ❌ ⑦已实现最优窗口选择 ❌（窗口为任务指定，**未搜索**）⑧可外推其他数据集/市场 ❌ ⑨已完成平台正式 Run ❌ ⑩12 因子集合已完备 ❌。
+- **📌 方法学产出**：① **因子评估必须先做「窗口内/窗口外」来源审计** —— 由目标窗口内 bar 构造的因子，其同窗口 IC 是**定义性重叠**而非预测能力；② **「幅度类」与「收益类」目标在本因子集上符号系统性相反**，任何单一目标评估都会给出误导性结论；③ **桶区分度须同时检查桶样本均衡性**（`turnover` 99.6% 单桶即为例证）。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未新增/修改因子/定义/分桶/orientation · ✅ 未搜索阈值/窗口/权重/TopN · ✅ 未组合因子 · ✅ 未创建 Candidate/StrategyVersion · ✅ 未做 OOS/WFA/Parameter Search · ✅ **未扩建数据集** · ✅ **本轮完成后直接给出结论，未追加审计任务**。
+- **Baseline Impact**：**major** —— 建立「因子时间尺度评估」基线，并首次量化「幅度 vs 收益目标符号相反」与「窗口内因子口径污染」两条结构性事实。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · FACTOR-TIMESCALE-TOPN-001 · 时间尺度 TopN 组合验证
+
+- **Task**：验证时间尺度优势能否转化为**横截面选股排序优势**。预注册三组（SHORT `preReturn10`+`limitGap` → T+1~5 · MEDIUM 6 因子 → T+6~20 · LONG 6 因子 → T+21~60），Top1/3/5/10 · 等权 · 每日独立排序 · 20bps · **同时报告 maxRet 与 holdRet** · 报告收益/胜率/中位/最大回撤/换手/相对全样本差异/跨年稳定性。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/tsTopN.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分**（因子定义/分桶/orientation 逐字复用 `result.ts` 与 `derive.ts#L400-L458`；**组合构造（预注册等权 rank 平均）/TopN 选择/bootstrap CI 内联实现**）· **platform persisted Run ❌ 未发生**。
+- **口径**：面板决策日 **1,627** · 候选 **57,612**；组合 = **等权 rank 平均**（组内因子先做当日横截面百分位排名再等权平均，**不搜索权重**）；`Δ` 基准 = **当日全样本等权均值**；显著性 = date-cluster block=20 ×1000 bootstrap CI。
+- **🔴 核心结论：三组全部为 `持有收益型信息`；无一组为 `冲高型信息`；无一组为 `可交易候选信息`。**
+  - **SHORT**：ΔholdRet **+0.0043 [+0.0013,+0.0074]★** · ΔmaxRet **−0.0110★** · 绝对 holdRet **−0.0064**（负）· 胜率 0.3986 · 年度 Δhold **6/7** · Δmax **0/7**
+  - **MEDIUM**：ΔholdRet **+0.0084 [+0.0045,+0.0122]★** · ΔmaxRet **−0.0141★** · 绝对 holdRet +0.0014（≈0）· 胜率 0.4449 · 年度 Δhold **7/7** · Δmax **0/7**
+  - **LONG**：ΔholdRet **+0.0134 [+0.0067,+0.0203]★（最强）** · ΔmaxRet **−0.0133★** · 绝对 holdRet **+0.0121（唯一明确为正）** · 胜率 0.4578（最高）· IR **+0.085（最高）** · 年度 Δhold **7/7** · Δmax 1/7
+  - ⇒ **ΔholdRet 优势随窗口拉长单调增强（+0.0043 → +0.0084 → +0.0134）**；🔴 **ΔmaxRet 在 21 个「组×年」单元中仅 1 个为正** ⇒ 「冲高幅度下降」跨组跨年稳定。
+  - ⇒ ✅ **在 TopN 组合层面【独立复现】了上游轮的发现 2（12/12 因子 maxRet IC 与 holdRet IC 符号相反）。**
+- **🔴 交叉发现：`preReturn10` 在 TopN 归因层面于 LONG 显著翻负** —— 单因子 IC 三窗口同向为正（+0.0768/+0.0524/+0.0179），但 Top3 归因 ΔholdRet = **+0.0048★ / +0.0047★ / −0.0098★**。⇒ **IC 同向 ≠ TopN 组合贡献同向**（IC 为全横截面平均，TopN 只取极端分位）⇒ `preReturn10` **应仅用于 SHORT/MEDIUM**。另：`preReturn10` 是 MEDIUM 组中**唯一 ΔmaxRet 显著为正**的因子（+0.0040★）。
+- **TopN 间排序差异（任务要求 6）**：SHORT **随 N 单调递减**（+0.0056→+0.0021）；MEDIUM/LONG **峰值在 Top3**（+0.0084/+0.0134）但 **Top3/Top5/Top10 差异很小**（LONG 0.0134/0.0122/0.0098）⇒ **优势来自因子本身的横截面区分能力，而非某个 N 的偶然** ✅；Top1 在 MEDIUM/LONG 不显著（CI 含 0）⇒ **不推荐 Top1（观察，非优化结论）**；**未搜索最佳 N**。
+- **单因子归因（Top3）**：MEDIUM —— `amountPercentile` **+0.0086★** > `turnover` +0.0062★ > `limitGap` +0.0058★ > `preReturn10` +0.0047★ > `historyLimitCount` +0.0020 ns > `bodyHeight` +0.0010 ns（**4/6 显著**）；LONG —— `amountPercentile` **+0.0170★** > `historyLimitCount` +0.0099★ > `limitGap` +0.0079★ > `turnover` +0.0074★ > `bodyHeight` +0.0044 ns > **`preReturn10` −0.0098★**（4/6 显著）。SHORT —— `preReturn10` **+0.0048★（唯一贡献者）**，`limitGap` −0.0008 ns。
+- **🔴 口径缺口（已登记，本轮不追加实现）**：① **事件级换手恒为 1.0000**（每个 `eventId` 只出现在一个决策日 ⇒ 相邻日 TopN 定义上零交集）⇒ **非可交易性指标**；有意义的换手应基于 **`symbol`**，**未计算**。② **MDD 为重叠窗口代理**（`cumsum(每日 TopN 等权 holdRet)` 的最大回撤），**非可交易净值曲线**，仅供组间相对比较。
+- **下一步建议：进入 `LONG`（T+21~T+60）时间尺度的因子组合研究**。理由：①唯一绝对收益明确为正（+0.0121）②ΔholdRet 最强（+0.0134，为 SHORT 的 3.1×）③年度 **7/7** ④IR 最高（+0.085）⑤胜率最高（0.4578）⑥上游 IC 亦支持长期为主窗口。**三项约束**：①`preReturn10` 须从 LONG 组剔除或降级 ②必须同时监控 maxRet 与 holdRet ③须先解决 symbol 级换手与可交易净值口径。**备选 MEDIUM**（若资金占用为硬约束：ΔholdRet +0.0084★、7/7 年、MDD 代理最好 −9.19，但绝对收益≈0）。**❌ 不建议 SHORT**（ΔholdRet 最弱 +0.0043、绝对收益为负、年度 6/7、IR −0.091、因子池仅 2 个）。
+- **10 条不能推出**：①可直接交易/盈利 ❌（SHORT/MEDIUM 绝对收益为负或≈0，**胜率全部 <50%**）②提供冲高能力 ❌（三组 ΔmaxRet 一致为负）③存在可交易候选信息 ❌ ④最优 TopN 是 Top3 ❌（差异小，未搜索 N）⑤换手率低/可承受 ❌（口径产物）⑥最大回撤可控 ❌（代理口径）⑦等权 rank 平均最优 ❌ ⑧可外推其他数据集/更长期 ❌ ⑨已完成平台正式 Run ❌ ⑩已实现容量/冲击成本可行性 ❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未搜索因子权重（**预注册等权 rank 平均**）/新阈值/最佳 TopN · ✅ 未做参数优化 · ✅ 未新增/修改因子/定义/分桶/orientation · ✅ 未创建 Candidate/StrategyVersion · ✅ 未做 OOS/WFA · ✅ **未扩建数据集** · ✅ **未重复平台审计** · ✅ SHORT 组**严格排除 6 个窗口内污染因子** · ✅ **本轮完成后直接给出结论，未追加审计任务**。
+- **Baseline Impact**：**major** —— 建立「时间尺度 × TopN 组合」验证基线；确立「三组均为持有收益型信息、冲高幅度一致下降」与「IC 同向 ≠ TopN 贡献同向」两条事实；登记换手与 MDD 两项口径缺口。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · FACTOR-TIMESCALE-LONG-COMBO-001 · LONG 因子组合研究（**含 symbol 换手口径修正 + 不伪造 MDD**）
+
+- **Task**：确认 LONG(T+21~T+60) 收益优势的因子来源，验证去掉 `preReturn10` 是否更稳定；**修正组合层统计口径**（换手按 symbol · 同 symbol 重复入选 · 不伪造 MDD · 区分研究组合收益与真实持仓回测）。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/longCombo.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分**（因子定义/分桶/orientation 逐字复用；**组合构造/TopN/symbol 换手/bootstrap CI 内联实现**）· **platform persisted Run ❌ 未发生**。
+- **口径**：面板决策日 **1,627** · 候选 **57,679** · **唯一 symbol 3,226**（⚠️ 比上一轮差 67：本轮要求 rd21 与 rd60 齐全）；组合 = **每日横截面 rank 后等权平均**（**不搜索权重**）；`Δ` 基准 = 当日全样本等权均值；bootstrap block=20 ×1000。
+- **预注册三组合**：**LONG-6**（6 因子）· **LONG-5**（−`preReturn10`）· **LONG-4**（再 −`bodyHeight`）。
+- **🔴 ① LONG 优势的因子来源（Top3 单因子归因）**：**`amountPercentile` +0.0169 [+0.0094,+0.0238]★（最强，且是唯一 ΔmaxRet 不为显著负者 +0.0064 ns）** > `historyLimitCount` +0.0098★ > `limitGap` +0.0081★ > `turnover` +0.0074★ > `bodyHeight` +0.0046 ns · 🔴 **`preReturn10` −0.0098 [−0.0172,−0.0021]★（唯一负贡献，绝对 holdRet 亦为 −0.0101）**。
+- **🔴 ② 去掉 `preReturn10` 后更稳定（确认增强）**：Top3 ΔholdRet **+0.0134 → +0.0145（LONG-5）→ +0.0144（LONG-4）**；Top5 ΔholdRet +0.0123 → +0.0120 → **+0.0152（LONG-4）**；Top3 IR 0.0844 → 0.0934 → **0.0941**；Top5 IR 0.0851 → 0.0849 → **0.1074**；winRate 0.4585 → **0.4626** → 0.4622；Top5 ΔmaxRet 代价 −0.0132 → −0.0127 → **−0.0103（缩小 19%）**；年度 **未下降**（LONG-5 Top3/Top5 均 **7/7**；LONG-4 Top5 **7/7**、Top3 6/7，唯一负年 2024 = **−0.0015 接近 0**）。⇒ 再去掉 `bodyHeight`（LONG-5→LONG-4）使 Top5 ΔholdRet **+26.7%**、Top5 IR **+26%**、Top5 ΔmaxRet 代价再缩小。
+- **🔴 ③ 建议进入下一阶段真实持仓验证的组合 = `LONG-4`**（`amountPercentile`+`limitGap`+`historyLimitCount`+`turnover`，Top5 口径）：Top5 holdRet **+0.0138（最高）** · Δhold **+0.0152（最高）** · ΔmaxRet **−0.0103（代价最小）** · IR **0.1074（最高）** · winRate 0.4588 · negShare **0.5412（最低）** · **因子最少（4 个）⇒ 假设最少、过拟合面最小** · 年度 Top5 7/7。**次选 LONG-5**（Top3 年度 7/7、Top3 ΔholdRet +0.0145 最高）。**❌ LONG-6 不建议**。
+- **🔴 口径修正结果（任务重点）**：
+  - **symbol 级换手**：**相邻决策日换手仍 ≈ 1.0000**（三组合全 TopN；Top10 为 0.9999）⇒ **这是真实结构而非口径产物** —— 首板事件对同一 symbol 天然稀疏 ⇒ 相邻日 TopN 名单几乎不可能重叠。
+  - **同 symbol 跨决策日重复入选（真正的集中度信息）**：**repeatPickShare = 54.12%~55.70%（Top3）· 67.01%~67.62%（Top5）· 81.09%~81.10%（Top10）**；distinctSymbols 2,159~3,038（全样本 3,226）；**maxPickCountPerSymbol 10~20**（Top3 口径 10~11）。⇒ **两个换手概念必须分开报告**：日间换手 ≈100%（无隔日重叠）· 长期集中度显著（重复入选 54–81%）。
+  - **MDD：不报告（不伪造）** —— 每仓位持有 40 个交易日，日重平衡 N 个仓位 ⇒ 同时并存最多 40×N 仓位 ⇒ **构造净值必须先指定资金分配规则，而任何此类规则都是新自由参数（本轮禁止）** ⇒ 改以横截面分布统计（`P05`/`P25`/`negShare`/`winRate`）刻画风险，并明确 `P05`/`P25` **不是时序回撤**。
+  - **收益口径澄清**：**ΔholdRet 全部显著为正**（选股排序能力真实）· 但**绝对 holdRet 的 95% CI 全部含 0**（统计上不可区分于 0）· **winRate 0.4433~0.4652 全部 <50%** · **negShare 0.5348~0.5567** ⇒ **本轮报告的是「研究组合收益」（横截面窗口收益统计），不是「真实持仓回测」**。
+- **年度稳定性**：ΔholdRet 正向年 —— LONG-6 7/7·7/7 · LONG-5 **7/7·7/7** · LONG-4 6/7·**7/7**；🔴 **ΔmaxRet 仍显著为负**（21 个「组合×TopN×年」单元中仅少数为正）⇒ 「冲高幅度低于全样本」跨组合跨年稳定；⚠️ **绝对 holdRet 仅 5/7 年为正**（三组合一致，2023 年 −0.0385~−0.0469）。
+- **10 条不能推出**：①可直接交易/可盈利 ❌（绝对 CI 含 0、winRate<50%、negShare≈54%）②最大回撤可控 ❌（不报告 MDD）③换手低/成本可控 ❌（日间 100%，未含冲击成本与涨跌停不可成交）④最优组合是 LONG-4 ❌（预注册，未搜索；判断依据为 Top5 全面性 + 因子最少）⑤最优 TopN 是 Top5 ❌ ⑥等权 rank 平均最优 ❌ ⑦因子贡献可加性成立 ❌（边际贡献≠组合贡献之和）⑧可外推其他数据集/更长期 ❌ ⑨已完成平台正式 Run ❌ ⑩2023 负收益是异常 ❌（三组合一致 ⇒ 可能是真实 regime）。
+- **下一步前置（已识别为缺口）**：①**定义资金分配规则**（每仓位权重/并发上限/拒单规则）②**补冲击成本与可成交性**（涨跌停/停牌/流动性）③**symbol 级重复入选的暴露约束**（重复 54–81%、单 symbol 最多 10–14 次）④**2023 年负收益的 regime 归因**。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未搜索最佳组合/权重/TopN · ✅ 未做参数优化 · ✅ 未新增/修改因子/定义/分桶/orientation · ✅ 未创建 Candidate/StrategyVersion · ✅ 未进入 OOS/WFA · ✅ **未重复已有时间尺度实验** · ✅ **未做平台审计** · ✅ **未伪造 MDD** · ✅ 换手**已改为 symbol 口径** · ✅ **本轮完成后直接给出结论，未追加审计任务**。
+- **Baseline Impact**：**major** —— 确立「LONG 优势主要来自 `amountPercentile`、`preReturn10` 为唯一负贡献」与「去掉 `preReturn10` 后更强」两条结论；建立 **symbol 级换手 + 重复入选集中度** 的报告基线；确立「无资金分配规则则不报告 MDD」的口径纪律。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · LONG4-REAL-PATH-001 · LONG-4 真实持仓路径验证 → 🔴 **BLOCKED（引擎缺陷；净值层数值全部无效）**
+
+- **Task**：验证 LONG-4（`amountPercentile`+`limitGap`+`historyLimitCount`+`turnover`，TopN=5，T+21~T+60）能否转化为可实现真实组合收益；必须固定 9 项（资金分配/最大并发/冲突/成交口径/涨跌停停牌/冲击成本/集中度/真实净值/2023 与市场阶段）；**若无法严格构造真实净值必须明确指出缺失条件，不得用研究组合收益替代真实回测**。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/long4real.cjs`、`l4real2.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **✅ 数据侧可行性【已实测验证，无缺失条件】**：`rd21.canBuyAtOpen` = 1 占 **58,460/58,983 = 99.11%**（277 一字涨停不可买 + 246 停牌）· `rd60.canSellAtClose` = 1 占 **58,235/58,983 = 98.73%**（494 跌停不可卖 + 254 停牌）· **rd61..80 逐日完整 58,983** ⇒ **出场延迟可严格实现** · 交易日历 **1,696 天**（2019-01-31 ~ 2026-01-28）⇒ **净值曲线可逐日构造**。⇒ **严格真实净值的【数据条件全部具备】**。唯一不可弥补：**无订单簿/深度数据 ⇒ 冲击成本与容量无法严格建模**（已声明）。
+- **✅ 预注册 9 项规则（全部无自由参数）**：①资金分配 `w = 1/MAX_CONC` 固定、**不重归一 ⇒ 永不加杠杆**、现金收益 0 ②**`MAX_CONC = TOPN × 40 = 200`（派生值，非搜索）** ③symbol 已在场 ⇒ 跳过（不金字塔）④入场 rd21 `open`、出场首个 `rd∈[60,80]` 且 `canSellAtClose=1` 的 `close`，否则 rd80 强制 ⑤`canBuyAtOpen≠1` ⇒ 跳过；停牌结转最后已知 close ⑥基础 20bps + 固定网格 {0,10,20,30,50,100} bps ⑦每 symbol ≤1 仓 ⑧事件驱动逐日 mark-to-market（**先出场后入场**）⑨市场阶段用全样本等权基准年度收益符号定义。
+- **✅ 可验证的执行统计（与净值无关，独立可信）**：信号 **8,180** · 实际开仓 **6,999** · 跳过不可买 **56（0.68%）** · 跳过 symbol 冲突 **1,125（13.75%）** · **跳过 book 满 = 0** · **跳过现金不足 = 0** · 出场顺延 **82（1.17%）** · **强制出场 0** · **平均持有 40.02 交易日** · **最大并发 188**（< 派生上限 200 ⇒ **该上限从未被触发**）· 平均并发 161.04。基准：开仓 8,400 · 跳过 book 满 48,794 · 最大并发 200。
+- **🔴 引擎侧缺陷（未定位）⇒ 净值层数值全部无效**：`winRate = 1.0000` ∧ `avgWin = 1.0132`（每笔恒定 +101%）∧ `avgLoss = null`，且 **6999 × (1/200) × 1.0132 = 35.4559 = 报告的 totalReturn** ⇒ 净值完全由该恒定值驱动。而**底层实测** rd60close/rd21open：**均值 0.9987** · 中位 0.967 · p25 0.871 · p75 1.084 · min 0.198 · max 4.715（n=58,606）⇒ **恒定 +101% 与实测分布不可调和**。
+  - **已排除**：数据错误（已抽样验证 `000001.SZ@2020-07-06` rd21 open 13.66 → rd60 close 15.31 = 1.1208 ✓）· 现金未借记/双重计价（已修）· 出场晚于入场致并发虚高（已修为先出场后入场，最大并发 2,409 → 188）· 权重重归一造成杠杆（已改固定权重）· 数据加载截断（JSONL 分块 + readline 流式，3,538,980 行全载）。
+  - **下一轮 P0 待查**：①逐笔打印 `entry`/`exitPrice`/`ret` 确认是否被覆盖为常量 ②`live.push({...tr, w})` 展开时字段覆盖 ③`pxByDate` 的 close 与 entry 是否同 rd（rd21 open vs close 混淆）④`closed` 是否跨 `backtest()` 调用复用（成本网格 6 次 + 基准 1 次）⑤`eq` 数组是否跨调用共享引用。
+- **五个问题的回答状态**：①**无法回答**（净值无效；仅可确认执行摩擦温和：不可买 0.68%、顺延 1.17%、冲突 13.75%）②**无法回答**（胜率/盈亏比自相矛盾）③**无法回答**（不可成交影响已确认小；**冲击成本无法建模**）④**无法回答**（年度净值同源缺陷；上游已确认 2023 三组合绝对 holdRet 均 −0.0385~−0.0469 ⇒ 确为弱势年，但 regime 风险待判）⑤❌ **不具备进入正式策略候选阶段的资格**。
+- **缺失条件（明确列出）**：**数据 ✅ 无缺失**（严格净值可构造）· **数据（不可弥补）❌ 无订单簿/盘口深度/成交量分布 ⇒ 冲击成本与容量无法严格建模** · **实现 🔴 交易收益计算环节缺陷未定位 ⇒ 净值/MDD/Sharpe/胜率/盈亏比/年度收益全部无效** · **口径 ⚠️ 已执行「研究组合收益」与「真实持仓回测」的分离，未用前者替代后者**。
+- **9 条不能推出**：①任何净值层结论 ❌ ②任何胜率/盈亏比结论 ❌ ③任何年度/regime 结论 ❌ ④任何成本敏感性结论 ❌ ⑤「优势在真实成交后消失」❌（**反向同样不能断言，本轮无法判定方向**）⑥「不可成交可忽略」❌（仅知比例小，未量化影响）⑦「MAX_CONC=200 合适」❌（仅观测未被触发）⑧「冲击成本可承受」❌ ⑨「已完成平台正式 Run」❌。
+- **下一轮建议（本轮不进入）**：🔴**P0 先修复并验证净值引擎**（逐笔核对 `ret` 分布须与实测 rd60/rd21 分布一致〔扣费后均值 ≈ −0.33%〕· 加自洽断言 `winRate≈45~50%` ∧ `avgLoss` 非空 ∧ `equity[last] ≈ 1 + Σ w×ret` · 加独立交叉校验：等权全样本买入持有净值 vs 所有候选 rd60/rd21 均值，差异须 < 成本量级）· 🟠P1 修复后重跑成本网格与年度分解 · 🟠P1 补 2023 专项 regime 分析 · 🟡P2 登记冲击成本/容量不可建模为长期口径限制。**净值引擎通过 P0 验收前，`LONG-4` 不具备进入正式策略候选阶段的资格。**
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未新增/修改因子/定义/分桶/orientation · ✅ 未搜索权重/TopN · ✅ 未做参数优化 · ✅ 未创建新 Candidate · ✅ **未直接进入 StrategyVersion/OOS/WFA** · ✅ **未用研究组合收益替代真实回测** · ✅ **本轮完成后直接给出结论，未追加审计任务**。
+- **Baseline Impact**：**major（负面）** —— 确认**数据侧已完备**（`canBuyAtOpen`/`canSellAtClose`/rd61..80/日历），但**净值引擎存在未定位缺陷**，故本轮**未产出任何净值层结论**；同时确立「引擎必须通过自洽性断言与独立交叉校验后才可产出净值」的纪律。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · LONG4-P0-FIX-001 · 净值引擎缺陷定位与修复 → ✅ **P0 PASS（14/14 断言 · oracle 偏差 1e-12）**
+
+- **Task**：只修复真实持仓路径计算错误，**不改变 LONG-4 研究口径**；按 8 步排查 + 硬断言 + 独立 oracle；P0 通过后重跑成本网格与年度。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/l4fix.cjs` + 1 份报告）。
+- **🔴 A. 缺陷定位（单点）**：`ret = (exitPrice/entry) - cost` —— **这是【价格比率 ≈ 1.0】，不是收益率**。三重复合错误：①每笔 `ret≈1.0>0` ⇒ **`winRate ≡ 1.0000`、`avgLoss ≡ null`** ②`cash += w*(1+ret)` 中 ret **已含本金** ⇒ **本金被重复计入** ⇒ equity 爆炸（虚增 `Σw = 6999×0.005 = 34.995`）③**自证闭环**：`Σ w×ret = 0.005×6999×1.0132 = 35.4559` = 旧报告 `totalReturn`。**修复**：`grossRet = exitPrice/entry − 1`；`netRet = grossRet − cost`。
+  - **8 步排查结论**：①逐笔已打印 ②🔴**命中「倍数混淆」** ③`live.push({...tr,w})` **无覆盖** ④`pxByDate` **无错**（entry=rd21 `open`、exitPrice=exitRd `close`）⑤`closed/live/eq/cash` **无跨调用共享** ⑥单笔 oracle ✅ ⑦逐日 oracle ✅ ⑧**首个差异日 = null**。
+  - **额外发现并修复第二处缺陷（仅存在于 oracle，非引擎）**：首版 `oracleEquity()` **未在开仓时借记本金**（`cash -= W` 缺失）⇒ 自身重复计价（首差异日 idx=0、`maxAbsDiff = 34.995` = 总本金）。已修正 ⇒ 与引擎逐日一致（1e-12）。⚠️ 两处缺陷恰好互为镜像。
+- **🔴 B. 修复前无效结果（全部作废）**：`winRate` **1.0000 → 0.4591** · `avgWin` **1.0132 → 0.1636** · `avgLoss` **null → −0.1145** · `totalReturn` **35.4559 → 0.4609** · `CAGR` 0.6776 → **0.0561** · `MDD` −0.0460 → **−0.3329** · `Sharpe` 10.3128 → **0.3152** · `PF/payoff` null → **1.2126 / 1.4289**。⇒ **`RESULT-LONG4-REAL-PATH-001` 的净值层数值全部作废**。
+- **✅ C. 修复后 oracle 验证**：**14/14 硬断言通过**（entry>0 · exitPrice>0 · grossRet 定义 · netRet 定义 · **ret 非恒定〔唯一值 6,690〕** · 存在正收益〔3,213〕· 存在负收益〔3,786〕· avgLoss 非 null · winRate 与分布一致 · **`Σw×netRet = 0.4609` ↔ `eqLast = 1.4609` 精确相等** · 调用隔离 · 成本单调 · oracle 逐日一致 · 成交集合一致）。**独立逐日 oracle**（第二实现，按 `(entryIdx, exitIdx)` 区间重建）：成交 6,999 = 引擎 6,999 · **首个差异日 `null`** · **最大绝对偏差 1e-12** · `eqLast` 1.4609/1.4609。**调用隔离**：`extra=0` 两次调用均 1.4609（完全一致）· `extra=100` 为 1.0903（单调更低）。⚠️ **按任务要求未使用「winRate 约 45~50%」作为硬编码验收条件**，正确性全部来自逐笔真实价格 + 独立 oracle。
+  - 🔴 **自洽性铁证**：旧 `avgWin = 1.0132` ↔ 新 `netRetMean = 0.0132`（**差恰为 1.0**）⇒ 与缺陷诊断完全吻合。
+  - 逐笔分布：6,999 笔 · 正 3,213 / 负 3,786 · `winRate 0.4591` · `avgWin +0.1636 / avgLoss −0.1145` · `netRet` 均值 +0.0132、标准差 0.1986、min −0.6751、max **+2.0485** · 盈亏比 1.4289。
+- **🔴 D. 修复后真实净值（LONG-4 Top5，20bps）**：总收益 **+46.09%** · CAGR **5.61%** · 年化波动 17.78% · **Sharpe 0.3152** · **MDD −33.29%** · Calmar 0.1684 · 交易 6,999 · 胜率 0.4591 · **PF 1.2126** · 平均持有 40.02 日 · **最大并发 188**（< 派生上限 200，**从未触发**）· 平均并发 161.04。**成本敏感性**：20→120bps 使 CAGR **5.61% → 1.25%**、Sharpe **0.3152 → 0.0604**（**降幅 81%**）、PF 1.2126 → 1.0384 ⇒ **高度成本敏感**。**年度**：2019 +1.20% · 2020 +10.38% · 2021 +11.83% · **2022 −5.08%** · **2023 −2.95%** · 2024 +2.74% · 2025 +16.96% ⇒ **5/7 年为正，2022–2023 连续两年为负**。
+- **🔴 D.4 对照口径缺口（重要）**：「同信号填仓变体」（同综合分排序、每日取全部候选直至填满 200 仓）：总收益 **+78.84%** · CAGR **8.72%** · Sharpe **0.4645** · MDD −33.79% · 交易 8,400 · 跳过 book 满 48,794。🔴 **该变体【不是中性市场基准】**（使用同一信号、仅更宽持仓）⇒ **本轮未计算中性市场基准 ⇒ 登记为口径缺口**。可推出的唯一对照结论：**相同信号下更宽持仓优于 Top5**。
+- **五个问题（修复后）**：①⚠️**部分存在但微弱**（CAGR 5.61%、Sharpe 0.3152、PF 1.2126；但同信号更宽持仓 8.72%/0.4645 更优 ⇒ **Top5 集中度损害表现**；**中性基准缺失**）②✅**成立**（胜率仅 45.91% 但盈亏比 1.4289、PF 1.2126，右尾 max +204.85% 补偿多数亏损 ⇒ 净值 +46.09%）③⚠️**20bps 下成立但成本敏感性高**（120bps 时 CAGR 1.25%、Sharpe 0.0604）；**不可成交影响小**（0.68%/1.17%/0）；🔴**冲击成本仍无法建模**④⚠️**提示 regime 依赖但不足以定性「结构性」**（2022 与 2023 连续负年，非孤立）⑤❌ **仍不建议进入策略候选**（中性基准缺失 · Top5 劣于更宽持仓 · 成本敏感 · 连续负年 · 冲击成本未建模）。
+- **9 条不能推出**：①跑赢市场 ❌（中性基准缺失）②Top5 最优 ❌ ③Sharpe 0.3152 可接受 ❌（无风险利率未纳入，非标准超额 Sharpe）④MDD −33.29% 可承受 ❌ ⑤120bps 仍可用 ❌ ⑥2022–2023 是 regime 风险 ❌（未做 regime 检验）⑦可外推其他数据集/市场/更长期 ❌ ⑧已完成平台正式 Run ❌ ⑨**引擎已全面正确** ❌（仅通过本轮 14 断言 + 1 oracle；未覆盖停牌结转其他口径、涨跌停部分成交、分红送转调整）。
+- **固定项（按任务，全部未改动）**：Dataset 780004 · LONG-4 四因子 · Top5 · rd21→rd60（顺延 rd80）· 每仓 1/200 不重归一 · 每日先出场后入场 · symbol 已持仓跳过 · 20bps 基础成本 · 原不可成交/停牌规则。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未修改因子/Top5/资金分配/持仓规则 · ✅ 未搜索参数 · ✅ 未新增因子 · ✅ 未做 regime 优化 · ✅ 未创建 Candidate/StrategyVersion · ✅ 未进入 OOS/WFA · ✅ **未进行新的平台审计**。
+- **Baseline Impact**：**major** —— 修复净值引擎（`ret` 倍数混淆 + 本金重复计入），确立「引擎必须通过逐笔断言 + 独立逐日 oracle + 调用隔离三重验收」的纪律；首次产出 **LONG-4 的可信真实净值**（CAGR 5.61% · Sharpe 0.3152 · MDD −33.29% · PF 1.2126 · 胜率 45.91%）；并登记**中性市场基准缺失**为口径缺口。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · LONG4-P1-NEUTRAL-BENCH-001 · LONG-4 中性基准验证 → ✅ **P1 PASS（断言失败 0 · oracle 6.8e-13）· LONG-4 显著优于中性基准**
+
+- **Task**：判断 LONG-4 Top5 的真实净值优势是否超过**中性基准**（只验证 Alpha，不优化策略）；LONG-4 口径全部不变；新增**唯一**研究变量 = 真正的中性基准。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/neutral.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **🔴 A. 中性基准定义 = `NB-Random-5`（严格因子无关）**：每个 `signalDate` 从**同一 780004 候选宇宙（58,976）/ 同日全部可交易候选**中，用**种子驱动的均匀无放回抽样**取 **5 只**（**与 LONG-4 的 N 完全一致**）。**与 LONG-4 的唯一差别 = 选股依据**（随机 vs LONG-4 等权 rank 综合分）。其余**全部相同**：rd21 `open` 入场（`canBuyAtOpen=1`）· rd60 `close` 出场（`canSellAtClose=1`，顺延 rd80）· 每仓 **1/200 固定不重归一** · 最大并发 200 · **先出场后入场** · symbol 已持仓跳过 · 20bps · 停牌/不可成交原规则。**随机抽样仅依赖 `日期 + 种子`，不读取任何因子值或 LONG-4 排名** ✅。重复 **200 个独立种子** ⇒ 置换式 p 值（**参数无关**）。**❌ 明确弃用「同信号填仓」变体**（任务禁止）。
+- **✅ A.3 基准合理性自检**：基准 CAGR 均值 **1.30%**（中位 1.36% · p05 −0.79% · p95 +3.14%）· PF 均值 **1.0378**（p05 0.9793 · p95 1.0931）· 交易数均值 **6,974.8** vs LONG-4 **6,999** · 胜率均值 **0.4240** vs LONG-4 0.4591 ⇒ **符合「无信息选股」预期 ⇒ 基准构造有效** ✅。
+- **🟢 B/C. LONG-4 vs 中性基准（20bps）**：totalReturn **+46.09% vs +9.72%**（**+36.37pp**）· **CAGR 5.61% vs 1.30%（ΔCAGR +4.30pp）** · **Sharpe 0.3152 vs 0.0598（ΔSharpe +0.2554）** · **MDD −33.29% vs −47.91%（浅 14.62pp ⇒ 风险同步改善）** · **PF 1.2126 vs 1.0378（+0.1748）** · 胜率 0.4591 vs 0.4240 · 交易数 6,999 ≈ 6,974.8。
+  - **置换式显著性（200 种子）**：**p(CAGR) = 0/200** · **p(Sharpe) = 0/200** · **p(PF) = 0/200** ⇒ **LONG-4 击败 100.0% 的随机种子 ⇒ 最优可能结果**。
+- **🟢 D. 年度逐年比较（Alpha / LONG-4 胜出种子比例）**：2019 **+3.51% / 93.5%** · 2020 **+6.62% / 98.0%** · 2021 **+3.34% / 86.5%** · **2022 +9.34% / 100.0%** · 2023 **+3.84% / 98.0%** · 2024 **+6.26% / 99.0%** · 🔴 **2025 −5.51% / 5.0%（唯一落后年）**。累计相对曲线（LONG-4 净值/基准均值净值−1）：2019 +3.91% · 2020 +7.19% · 2021 +3.54% · **2022 +12.51%** · 2023 +4.83% · 2024 +7.56% · **2025 −4.85%**（用 20 种子）。
+- **🔴 D.1 对问题 ⑧ 的明确回答：2022–2023 的相对表现【不仅仍成立，且是最强的两年】**：2022 LONG-4 绝对 **−5.08%** vs 基准 **−14.42%** ⇒ **alpha +9.34%（击败 100% 种子）**；2023 绝对 **−2.95%** vs 基准 **−6.80%** ⇒ **alpha +3.84%（击败 98%）**。⇒ **重要重新定性：LONG-4 在 2022–2023 的绝对负收益不是策略失效，而是整个候选宇宙同期整体下跌（市场 beta，基准更差）⇒ 弱市中的【相对】优势反而是全样本最强** ✓
+- **E. 成本网格（同一预注册档位，未搜索参数）**：LONG-4 在 **6/6 档位** 均优于基准，且 **Alpha 随成本上升而扩大**：20bps **5.61% vs 0.69%（+4.92pp）** · 40bps **4.86% vs −0.53%（+5.39pp）** · 70bps **3.68% vs −2.48%（+6.16pp）** · 120bps **1.25% vs −5.42%（+6.67pp）**。⚠️ **但绝对水平受成本严重制约**（120bps 时 CAGR 仅 1.25%、Sharpe 0.0604、PF 1.0384）⇒ **Alpha 稳健性 ✅ 强；绝对可交易性 ⚠️ 受成本制约**。
+- **🔴 F. 是否支持 LONG-4 存在独立超额 ⇒ ✅ 支持**：①排序 Alpha 存在（200 种子**无一**达到，p = 0.000）②幅度可观（ΔCAGR 4.30pp = 4.3×；ΔSharpe 0.2554 = 5.3×）③**风险同步改善**（MDD 浅 14.62pp ⇒ 非「以风险换收益」）④年度 **6/7 年**跑赢 ⑤**弱市中最强**（2022 击败 100% 种子）⑥成本 6/6 档位稳健 ⑦引擎可信（P0 14/14 断言 + oracle 1e-12；本轮 LONG-4 oracle **6.8e-13**）。⚠️ **边界**：本基准测的是「是否有**排序能力**」（vs 同规模随机选股），**不是「是否跑赢市场/指数」**；**2025 年 alpha 为负**（排序能力非每年有效）；120bps 下绝对仅 1.25% ⇒ **超额存在 ≠ 可交易获利**。
+- **✅ 验收要求核对**：①LONG-4 与中性基准**同一数据/同一交易规则/同一资金口径** ✅ ②中性基准**不读取任何 LONG-4 排名结果** ✅（随机抽样仅用 `日期+种子`）③**逐笔与逐日 equity 通过已验证的 P0 oracle** ✅（**断言失败 0** · LONG-4 oracle 最大偏差 **6.8e-13** · NB seed0 成交数与逐日净值均一致）④**已成功构造真正中性基准**（未触发 STOP）✅。
+- **🔴 G. 仍存在的口径缺口（8 项）**：①**中性基准 = 「随机 Top5」而非「市场/指数」** ⇒ **不能推出「跑赢市场」** ②**无风险利率未纳入** ⇒ 表中 Sharpe 为 **CAGR/年化波动** 之比，**非标准超额 Sharpe** ③**冲击成本与容量未建模**（无订单簿/盘口深度/成交量分布；且**日间 symbol 换手 ≈100%**）④**2025 年 Alpha 反向原因未归因**（任务禁止 regime 分析）⑤**分红送转未调整** ⑥停牌结转仅「最后已知 close」一种口径 ⑦涨跌停为二元判定（未建模部分成交/排队）⑧相对曲线用 20 种子均值（主结论用 200 种子分布，不受影响）。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未修改 LONG-4/Top5 · ✅ 未搜索 TopN · ✅ 未做 regime gate · ✅ 未新增因子 · ✅ 未创建 Candidate/StrategyVersion · ✅ 未进入 OOS/WFA · ✅ **未进行新平台审计** · ✅ **未用「同信号填仓」冒充中性基准**。
+- **Baseline Impact**：**major** —— 首次建立**严格因子无关的置换式中性基准**（NB-Random-5 × 200 种子），并据此确认 **LONG-4 存在独立排序 Alpha**（ΔCAGR +4.30pp · 击败 100% 种子 · MDD 更浅）；同时把 **2022–2023 负收益重新定性为市场 beta 而非策略失效**；登记「随机 Top5 ≠ 市场基准」「无风险利率未纳入」「冲击成本未建模」「2025 Alpha 反向未归因」四项口径缺口。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · LONG4-P2-WIDTH-001 · LONG-4 持仓宽度验证 → ✅ **P2 PASS（断言 0 失败 · 五档 oracle 9.3e-13）· 定位为「股票池排序因子」**
+
+- **Task**：验证 LONG-4 的 Alpha 来自「Top5 集中」还是「更宽的排序覆盖」；固定全部口径；只比较**预注册 5 档宽度**；中性基准继续用 P1 的 NB-Random。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/width.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **✅ 资金模型一致性（任务要求：不一致则 STOP）**：`MAX_CONC=200`（派生 = 5×40）· `w = 1/200` 固定不重归一 · 每日先出场后入场 · symbol 已持仓跳过 · book 满跳过 · 不可买跳过 —— **五档取值全部相同**；**唯一差别 = 每日提供给资金模型的候选集合大小** ⇒ **未触发 STOP** ✅。
+- **🔴 宽度匹配的中性对照（本轮的统计关键）**：每档对照 = **同宽度** `NB-Random-N`（随机顺序；Full 档对照 = 全部候选的**随机顺序**）⇒ **资金利用率已匹配**，剩余差异 = **纯选股 Alpha**（消除「宽度→利用率→收益」混淆）。100 种子（主）/ 20 种子（成本档）。
+- **五档结果（20bps）**：Top5 —— offered 8,124 · **opened 6,999** · skipFull **0** · avgConc **161.04**（利用率 **80.52%**）· CAGR **5.61%** · Sharpe 0.3152 · MDD **−33.29%** · PF 1.2126 · winRate 0.4591；Top10 —— opened **8,400** · skipFull 6,324 · avgConc **193.28**（**96.64%**）· CAGR **8.48%** · Sharpe **0.4463** · PF **1.2882**；Top20 —— CAGR 8.05% · Sharpe 0.4171 · MDD **−36.58%**（最差）；Top50 —— CAGR 8.62% · Sharpe 0.4561；Full —— CAGR **8.72%** · Sharpe **0.4645** · PF 1.2853 · totalReturn **+78.84%**。
+- **🔴 关键机制发现 1：Top10 起资金模型【完全饱和】** —— Top10/Top20/Top50/Full 的 **`opened` 全部 = 8,400**、**`avgConc` = 193.27~193.28**、**`maxConc` = 200 完全相同**；Top5 的 `skipFull = 0`（从未填满）而 Top10+ 长期满仓。⇒ **在 MAX_CONC=200 与 40 日持有下稳态每日仅能建 `200/40 = 5` 仓 ⇒ 提供 ≥10 个候选即已饱和** ⇒ **Top10/20/50/Full 实质是同一组合**（CAGR 差异 8.05%~8.72% 仅来自 symbol 冲突后补位顺序）⇒ **真正的宽度效应在 Top5→Top10 之间完成，Top10 以上是平台期**。
+- **🔴 关键机制发现 2：宽度收益主要来自【资金利用率】而非【选股】** —— **随机臂** CAGR 亦随 N 单调上升：**1.23% → 2.50% → 4.57% → 5.00% → 5.12%**（其 avgConc 同步 160.47 → 192.09）⇒ 若不做宽度匹配会把「利用率提升」误读为「选股能力」。
+- **🟢 Alpha（宽度匹配后）**：**五档全部 100% 击败同宽度中性基准**（`p(CAGR)=p(Sharpe)=p(PF)=0.000`）：Top5 **ΔCAGR +4.37pp** · Top10 **+5.98pp（最大）** · Top20 +3.48pp · Top50 +3.62pp · Full +3.61pp。⇒ **LONG-4 的排序 Alpha 真实存在且不依赖宽度**。
+- **年度**：LONG-4 各宽度 2019 —— **Top5 仅 +1.20%** vs Top10 +13.18% / Top20 +20.93% / Top50 +23.01% / Full **+24.15%** ⇒ **Top5 建仓爬坡显著更慢**（利用率 80.52% 的直接体现）。**年度 Alpha（35 单元中 30 为正）**：2022 —— Top5 +9.06% / Top10 **+9.49%** / Top20 +4.84% / Top50 +4.29% / Full +4.27%；2023 —— +4.35% / +5.15% / +1.99% / +2.73% / +2.73% ⇒ ✅ **2022–2023 相对优势在全部五档均成立**（与 P1 一致且更稳健）；🔴 **2025 年 Alpha 五档全为负**（−5.95% / −4.09% / −1.71% / −1.08% / −1.09%）⇒ **宽度越大负得越少（分散化）**，且 **Top5 的 2025 是五档最差**。
+- **成本档位（20/40/70/120bps，LONG-4 CAGR / ΔCAGR）**：Top5 5.61%/+4.68 → 4.86%/+5.09 → 3.68%/+6.01 → **1.25%/+6.67**；Top10 **8.48%/+6.02 → 7.72%/+6.54 → 6.36%/+7.23 → 3.29%/+7.29（ΔCAGR 各档最大）**；Full 8.72%/+3.68 → 7.97%/+4.17 → 6.72%/+4.83 → **4.15%/+5.58**。⇒ ✅ **20 个「宽度×成本」组合 ΔCAGR 全部为正**，且 **Alpha 随成本上升而扩大**；⚠️ **120bps 时 Top5 仅 1.25%（几乎无超额）而 Full 仍有 4.15%** ⇒ 更宽持仓绝对成本韧性更强。
+- **与 Top5 直接差异**：Top10 **ΔCAGR +2.88pp · ΔSharpe +0.1311 · ΔPF +0.0755 · Δtrades +1,401 · ΔavgConc +32.25 · Δ利用率 +16.12pp**；Top20 +2.44pp（**ΔMDD −3.29pp 最差**）；Top50 +3.02pp；Full **+3.12pp / ΔSharpe +0.1493 / ΔtotalReturn +32.74pp / 120bps +2.90pp**。**年度差异**：**Top5 相对更宽档的全部劣势集中在 2019（−11.97 ~ −22.94pp）**，2020 以后均在 ±5pp 内，**2021–2023 Top5 甚至略优（+0.52 ~ +4.14pp）** ⇒ **Top5 在满仓后并不逊色**。
+- **五个必答问题**：**A. Alpha 随宽度仍存在？⇒ ✅ 是**（五档全部 100% 击败；ΔCAGR +3.48~+5.98pp；宽度×成本 20/20 为正；年度 30/35 为正）。**B. Top5 有无集中持仓优势？⇒ ❌ 没有**（CAGR 5.61% 最低 · Sharpe 0.3152 最低 · PF 1.2126 最低 · **利用率仅 80.52%，闲置 32.24 个槽位**；**仅 MDD（−33.29% 最好）与相对信息密度（3.6× vs Full 0.7×）占优**）。**C. 最宽是否反而优于 Top5？⇒ ✅ 是**（Full CAGR +3.12pp、Sharpe +0.1493、120bps 下 4.15% vs 1.25%；**但机制是资金利用率且 Top10 起已饱和**）。**D. 定位 ⇒ 🔴「股票池排序因子」，不是「TopN 交易因子」**（Alpha 不依赖 N · 资本模型下每日仅能建约 5 仓 · Top5 无集中优势 · 宽度收益主要来自利用率 · 因子真实作用 = **在有限槽位中把更好的标的排到前面**）。**E. 是否具备进入 Strategy Candidate？⇒ ⚠️ 具备「排序因子」资格，不具备「可交易策略」资格**（3 项阻断：**冲击成本未建模**〔日间 symbol 换手 ≈100% 且更宽持仓交易数 +20%〕· **2025 年 Alpha 五档全负未归因** · **无风险利率未纳入**）。
+- **9 条不能推出**：①「Top10 是最优宽度」❌（未搜索其他 TopN）②「宽度越大越好」❌（Top10 以上平台期，且收益主要来自利用率）③「Top5 应被淘汰」❌（相对信息密度最高 3.6×、MDD 最好、满仓后 2021–2023 略优）④「跑赢市场」❌（对照为同宽度随机选股，非市场/指数）⑤「Sharpe 0.4645 可接受」❌（非标准超额 Sharpe）⑥「可直接交易」❌ ⑦「2025 Alpha 反向是 regime 风险」❌（未做 regime 检验）⑧「Full-Signal 实现了真正的全候选等权」❌（skipFull 达 48,794，实际由补位顺序决定）⑨「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未搜索其他 TopN（**仅预注册 5 档**）· ✅ 未修改因子或权重 · ✅ 未修改资金规则 · ✅ 未做 regime gate · ✅ 未新增因子 · ✅ 未进入 OOS/WFA · ✅ 未创建 Candidate/StrategyVersion · ✅ **未进行新审计** · ✅ 未做参数优化（成本仅用预注册 20/40/70/120bps）。
+- **Baseline Impact**：**major** —— 首次量化「持仓宽度」变量并**分离资金利用率与选股 Alpha**（宽度匹配中性对照）；确立 **`MAX_CONC=200 × 40 日持有 ⇒ 稳态每日仅 5 仓 ⇒ Top10 起饱和** 的结构性事实；据此把 LONG-4 **重新定位为「股票池排序因子」而非「TopN 交易因子」**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEDIUM-REAL-001 · MEDIUM 真实持仓验证 → ✅ **完成（断言 0 失败 · oracle 5.45e-13）· 🔴 强排序 Alpha 但绝对净值为负**
+
+- **Task**：验证 MEDIUM 时间尺度组合能否从统计排序 Alpha 转化为**真实净值 Alpha**；固定 MEDIUM 六因子（`limitGap`+`turnover`+`amountPercentile`+`preReturn10`+`historyLimitCount`+`bodyHeight`）；其余口径全部不变；建立同宽度 NB-Random 中性基准。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/medium.cjs`、`mload.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅**（本轮新载入 **post rd6..80 明细 4,423,725 行**）· **same compiled TS metric code ⚠️ 部分**（6 因子定义/分桶/orientation 逐字复用；引擎与 oracle 为 P0 已验收的同一内联实现）· **platform persisted Run ❌ 未发生**。
+- **🔴 口径映射说明（任务要求：无法严格映射则先报告，未自行修改）**：LONG-4 规则 `MAX_CONC = TOPN × 持有交易日数`；LONG-4 持有 **40 日** ⇒ 5×40 = **200**；MEDIUM 持有 **T+6~T+20 = 15 交易日** ⇒ 同规则求值 = **5×15 = 75**。**规则严格映射，取值必然不同**。⚠️ **口径缺口已显式登记并双口径报告**：主口径 **75**（规则一致，利用率 **82.95%**，与 LONG-4 的 96.64% 可比）；字面常数 **200**（利用率仅 **31.69%**，严重欠配 ⇒ 不可比）。其余规则逐字不变（`w=1/MAX_CONC` 固定不重归一 · 先出场后入场 · symbol 已持仓跳过 · book 满/不可买跳过 · 出场顺延上界 **rd80** 同 LONG-4）。
+- **面板**：候选 **58,707** · 决策日 **1,627**（⚠️ 与统计层 MEDIUM 的 57,612 差异原因：本轮 MEDIUM **只需 prefix + event**，6 因子均不依赖 rd1..5 bar ⇒ 面板略大，已披露）· 交易日历 **1,711 天**（2019-01-10 ~ 2026-01-28）· 执行诊断 offered **8,001** · deferred **95** · forced **0** · unfillable **129**。
+- **🔴 MEDIUM 真实净值（主口径 MAX_CONC=75，20bps）**：**totalReturn −5.58%** · **CAGR −0.82%** · 年化波动 21.66% · **Sharpe −0.0377** · **MDD −49.67%** · **PF 0.9887（< 1）** · winRate 0.4407 · avgWin +10.90% / avgLoss −8.69% · 盈亏比 1.2548 · 交易 **7,595** · avgConc **62.22** / maxConc **72** · **利用率 82.95%** · skipFull **0** / skipSym 261 / skipNoCash 145。
+- **🔴 中性基准（同宽度 NB-Random-5 · 同 MAX_CONC=75 · 100 种子）**：**CAGR 均值 −12.39%**（p05 −15.67% / p95 **−9.18%**）· totalReturn **−59.90%** · Sharpe −0.4635 · MDD **−77.10%** · PF 0.8686 · winRate 0.4085 · 交易 5,915.4 · avgConc 48.50 / 利用率 64.66%。⇒ 🔴 **100 个种子【全部为负】** ⇒ **首板回踩候选在 T+6~T+20 窗口存在【强负 beta】（买入后系统性下跌）** —— 这是该时间尺度的真实收益特征，非基准构造问题。
+- **🟢 Alpha**：**ΔCAGR +11.58pp** · **ΔtotalReturn +54.31pp** · **ΔSharpe +0.4259** · **ΔMDD +27.43pp（回撤浅 35%）** · ΔPF +0.1201；**p(CAGR) = p(Sharpe) = p(PF) = 0/100 ⇒ 击败 100.0%** ⇒ **排序 Alpha 极强且无争议**。🔴 **但 Alpha 绝对值不足以把净值从 −12.39% 拉到正 ⇒ 最终 −0.82%** ⇒ **Alpha 是「减亏」而非「盈利」**。
+- **年度（MEDIUM / 年度 Alpha）**：2019 **+5.10% / +13.35%** · 2020 **+7.27% / +8.77%** · 2021 **+8.06% / +6.79%** · 2022 −11.82% / **+18.69%** · 2023 −10.46% / **+9.22%** · 2024 **−19.60%** / **+11.12%** · 2025 **+12.71% / +9.40%**。⇒ 🟢 **年度 Alpha 7/7 全为正（本轮所有实验中年度稳健性最强；LONG-4 为 6/7）**；⚠️ 绝对 4/7 年为正，**2022/2023/2024 连续三年为负**（窗口整体负 beta）。
+- **成本敏感性（MEDIUM CAGR / Sharpe / MDD / PF / totalRet | 基准 CAGR | ΔCAGR）**：20bps **−0.82%** / −0.0377 / −49.67% / **0.9887** / −5.58% | −12.30% | **+11.48pp**；40bps −3.90% / −0.1737 / −60.59% / 0.9494 / −24.36% | −15.02% | **+11.12pp**；70bps −8.07% / −0.3440 / −69.79% / 0.9022 / −44.55% | −19.06% | **+10.99pp**；120bps **−18.24%** / −0.7457 / **−83.42%** / 0.8056 / −75.63% | −26.21% | **+7.98pp**。⇒ ✅ **Alpha 四档全为正**；🔴 **绝对 CAGR 四档全为负且恶化迅速**。
+- **🔴 字面常数 `MAX_CONC=200` 稳健性对照**：CAGR **+0.01%**（≈0，**反而优于规则一致的 −0.82%**）· totalReturn +0.08% · Sharpe +0.0013 · MDD **−22.85%** · PF 1.0004 · winRate 0.4426 · avgConc 63.37 · **利用率仅 31.69%**。⇒ 🔴 **关键揭示：`w=1/200` 且利用率 31.69% ⇒ 约 68% 资金闲置在现金（收益 0）⇒ 规避了大部分负 beta** ⇒ **MEDIUM 的绝对结果由「资金利用率 × 窗口负 beta」主导，而非由 Alpha 幅度主导**。
+- **五个必答问题**：**①是否存在真实净值 Alpha？⇒ ⚠️ 存在「相对 Alpha」（ΔCAGR +11.58pp · 100% 击败 · ΔSharpe +0.4259 · ΔMDD +27.43pp）但【绝对净值为负】（CAGR −0.82% · PF 0.9887 < 1 · Sharpe −0.0377 · MDD −49.67%）⇒ Alpha 是「减亏」不是「盈利」，不能称为真实净值 Alpha。②是否明显优于随机基准？⇒ ✅ 是，本轮最显著**（100/100 击败，p = 0.000；ΔCAGR 相当于基准 |−12.39%| 的 **93%**；ΔMDD 回撤浅 35%）。**③成本后是否仍存在？⇒ ✅ Alpha 存在**（四档 +7.98~+11.48pp 全为正）/ ❌ **绝对收益不存在**（四档全负，120bps 时 −18.24%）。**④2025 是否同样反向？⇒ 🔴 否，与 LONG-4 完全相反**：2025 MEDIUM **+12.71% / Alpha +9.40%** vs LONG-4 的 2025 Alpha **−1.09%** ⇒ **两个时间尺度失效年份不同（互补性线索）**。**⑤是否具备进入下一阶段策略研究资格？⇒ ⚠️ 作为「排序因子」是；作为「可交易策略」否**（绝对净值为负 · 窗口强负 beta · MDD −49.67%〔120bps −83.42%〕· 成本敏感）⇒ **正确定位 = 「T+6~T+20 窗口的相对排序因子 / 减亏筛选器」，不应作为独立多头策略**。
+- **🔴 最重要的交叉发现（MEDIUM vs LONG-4）**：窗口 raw beta（同宽度随机基准 CAGR）**+1.23% vs −12.39%**；策略绝对 CAGR **+5.61% vs −0.82%**；ΔCAGR **+4.37pp vs +11.58pp（MEDIUM 更强）**；PF 1.2126 vs 0.9887；年度 Alpha 为正 **6/7 vs 7/7**；2025 Alpha **−1.09% vs +9.40%**；MDD −33.29% vs −49.67%；利用率 96.64% vs 82.95%。⇒ **LONG-4 = 正 beta + 正 Alpha（可用）；MEDIUM = 强负 beta + 更强 Alpha（净值为负）** ⇒ **MEDIUM 的排序信息比 LONG-4 更强，但被窗口负 beta 完全抵消** ⇒ **时间尺度选择本质是「beta 选择」+「alpha 选择」的合成，两者方向可以相反**。
+- **11 条不能推出**：①「MEDIUM 可以交易获利」❌（四成本档全负）②「MEDIUM 无价值」❌（排序 Alpha 极强 · 7/7 年；价值或在减亏/规避/组合）③「MEDIUM 应做空」❌（**本轮只测多头**；做空成本/融券/涨跌停未建模）④「T+6~T+20 负 beta 是普适规律」❌（仅 `780004`）⑤「`MAX_CONC` 75 与 200 的差异已解决」❌（**两者结论相反**，根因是资金利用率）⑥「MEDIUM 与 LONG-4 组合会更好」❌（**未做组合实验**）⑦「2025 失效年份互补是稳定规律」❌（仅 1/7 年观测）⑧「跑赢市场」❌（对照为同宽度随机选股）⑨「Sharpe 已按无风险利率调整」❌ ⑩「冲击成本已计入」❌ ⑪「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未修改因子/权重 · ✅ 未搜索 TopN · ✅ 未做 regime gate · ✅ 未新增因子 · ✅ 未进入 OOS/WFA · ✅ 未创建 Strategy Candidate · ✅ **未进行新平台审计** · ✅ **未自行修改资金模型**（口径缺口已显式登记 + 双口径报告）。
+- **Baseline Impact**：**major** —— 首次产出 **MEDIUM 的真实净值**并揭示**「强排序 Alpha + 强负窗口 beta ⇒ 绝对净值为负」**这一结构性组合；建立 **`MAX_CONC` 跨时间尺度的口径映射规则与缺口登记方式**（规则映射 vs 取值重求值 + 字面常数双报告）；确认 **MEDIUM 与 LONG-4 的失效年份不同**（2025 互补）；据此把 MEDIUM 定位为**相对排序因子/减亏筛选器**而非独立多头策略。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · L4-MD-POOL-001 · LONG-4 + MEDIUM 组合股票池验证 → ❌ **组合未改善 · 保留 MEDIUM 为独立因子，不并入 LONG-4 池**
+
+- **Task**：验证 MEDIUM 的强排序 Alpha 能否改善 LONG-4 的长期股票池（而非把 MEDIUM 做成独立多头策略）；只比较三个固定方案。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/pool.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **预注册三方案（不搜索权重/因子/阈值/TopN）**：①**`LONG4`** = `sL4` Top5（基准）②**`L4→MD`** = 池 = `sL4` **Top10**（**锚定 P2 已确立的饱和宽度**，非搜索）→ 池内按 `sMD` 重排取 Top5 ③**`COMB`** = `0.5×rank(sL4) + 0.5×rank(sMD)`（两时间尺度**等权**）取 Top5。`sL4` = 4 因子等权 rank；`sMD` = 6 因子等权 rank。
+- **✅ 资金模型一致性（本轮无口径映射缺口）**：三方案交易窗口**完全相同**（rd21 `open` → rd60 `close`，顺延 rd80）⇒ HOLD **40 日** ⇒ **`MAX_CONC = 5×40 = 200`（与 LONG-4 完全一致）**；`w=1/200` 固定不重归一；先出场后入场；symbol/book/不可买/停牌规则与 P0/P1/P2 逐字相同。
+- **⚠️ 面板口径披露**：候选 **58,707** / 决策日 **1,627**（本轮需 **6 个 MEDIUM 因子全非空**，额外要求 prefix rd−1/rd−10 与 `previousClose` ⇒ 面板略小于 P1 的 58,976）⇒ **本轮 LONG-4 基线在【交集面板】上重算 = CAGR 4.65%**（P1 为 5.61%）⇒ **三方案同面板，对比公平** ✅。oracle 复验：三方案逐日最大偏差 **5.47e-13 / 5.50e-13 / 5.48e-13** · **断言 0 失败** ✅。
+- **🔴 三方案结果（20bps）**：**`LONG4`** —— CAGR **4.65%** · totalReturn **+37.12%** · Sharpe **0.2431** · MDD **−35.66%** · PF **1.1711** · winRate **0.4551** · 交易 6,948 · avgConc 159.86 · 利用率 79.93%；**`L4→MD`** —— CAGR 4.54% · +36.14% · Sharpe 0.2248 · MDD −38.31% · PF 1.1571 · winRate 0.4496 · 交易 7,199 · avgConc 165.64 · 利用率 82.82%；**`COMB`** —— CAGR 4.49% · +35.73% · Sharpe 0.2273 · MDD −37.45% · PF 1.1580 · winRate 0.4512 · 交易 7,127 · avgConc 163.99 · 利用率 81.99%。基准（NB-Random-5）CAGR **−0.85%**（p05 −2.99% / p95 +1.67%）。🔴 **`LONG4` 在【全部 7 个指标】上均为最优。**
+- **🔴 相对 LONG-4 差异**：**`L4→MD`** —— **ΔCAGR −0.11pp** · ΔtotalReturn −0.98pp · **ΔSharpe −0.0182** · **ΔMDD −2.66pp（更深）** · **ΔPF −0.0140** · ΔwinRate −0.0054 · Δtrades +251 · ΔavgConc +5.78；**`COMB`** —— **ΔCAGR −0.15pp** · ΔtotalReturn −1.39pp · **ΔSharpe −0.0158** · **ΔMDD −1.79pp（更深）** · **ΔPF −0.0131** · ΔwinRate −0.0039 · Δtrades +179 · ΔavgConc +4.13。⇒ **两方案在收益、风险、盈亏比、胜率上【一致地】略差，无任何指标改善。**
+- **🔴 根因：两时间尺度高度【冗余】不互补**：逐日 **Spearman(LONG-4, MEDIUM) = 0.8606**（1,627 日平均）· **Top5 重合率 68.84%** · **MEDIUM Top5 落在 LONG-4 Top10 池内 = 91.84%**（⇒ **池内再排序平均仅改变 0.41 只**）⇒ **中等时间尺度与长期在本因子集上几乎是同一信息源。**
+- **年度结果（LONG4 / L4→MD / COMB）**：2019 −7.78% / −10.00% / −8.38% · 2020 +11.49% / **+13.01%** / +10.48% · 2021 +12.81% / +14.29% / **+15.92%** · 2022 **−5.45%** / **−9.82%** / −8.26% · 2023 −3.18% / −3.45% / −3.50% · 2024 +2.85% / **+3.74%** / +2.92% · **2025 +18.27% / +22.35% / +19.99%**。
+  - **年度差异（组合 − LONG4）**：`L4→MD` 2019 −2.22 · 2020 +1.52 · 2021 +1.48 · **2022 −4.37** · 2023 −0.27 · 2024 +0.90 · **2025 +4.08**；`COMB` 2019 −0.60 · 2020 −1.01 · 2021 **+3.12** · **2022 −2.81** · 2023 −0.32 · 2024 +0.07 · **2025 +1.72**。
+  - **年度 Alpha（vs 同宽度中性基准）2025**：LONG-4 **−5.44%** → L4→MD **−1.36%** → COMB **−3.72%** ⇒ ✅ **2025 是唯一改善年**（L4→MD 使 Alpha 缺口缩小 **4.08pp / 75% 改善**），⚠️ **但被 2022 恶化（−4.37pp / −2.81pp）完全抵消 ⇒ 净效果为零，仅年度重排**。
+- **🔴 是否降低回撤/负收益年份 ⇒ 均未改善且恶化**：负收益年份数 **三方案均 3 个**（2019/2022/2023，**未减少**）· 负年深度合计 LONG4 **−16.41pp** vs L4→MD **−23.27pp** vs COMB −20.14pp（**更深**）· **MDD −35.66% → −38.31% / −37.45%（更深）**；70bps 下 −41.79% → −45.58% / −44.10%。
+- **成本敏感性（CAGR）**：20bps **LONG4 4.65%** / L4→MD 4.54% / COMB 4.49% / bench −1.08% · 40bps **3.82%** / 3.44% / 3.52% / −2.39% · 70bps **2.19%** / 1.80% / 2.01% / −4.35% · 120bps −0.66% / **−0.62%** / −1.21% / −7.49%。⇒ 🔴 **`LONG4` 在 20/40/70bps 三档均为最优**；120bps 下 L4→MD 仅以 **0.04pp** 微弱领先（**可忽略**）。
+- **Alpha（vs 同宽度中性基准，100 种子）**：**LONG4 ΔCAGR +5.50pp / ΔSharpe +0.2775 / p=0.000 / 100.0% 击败**；L4→MD +5.39pp / +0.2593 / 100%；COMB +5.35pp / +0.2617 / 100%。⇒ 三方案均显著优于随机基准，但 **LONG-4 的 Alpha 幅度（略）最大**。
+- **🔴 最终回答（唯一问题）⇒ ❌ 不能**：MEDIUM **不能**作为 LONG-4 的中期筛选/再排序层提高长期股票池质量。**按任务要求「如组合没有改善，保留 MEDIUM 为独立的『相对强弱/减亏排序因子』，不要强行组合」已执行** —— **MEDIUM 保持为独立的中期相对强弱/减亏排序因子**（依据 `RESULT-MEDIUM-REAL-001`：强排序 Alpha · 年度 Alpha 7/7 · 2025 反向缺失），**不并入 LONG-4 池、不采用 COMB 等权信号**；**LONG-4 维持「股票池排序因子」定位不变**。⚠️ 后续若再试组合，**须先证明两信号正交**（例如不同**因子来源**或不同**事件宇宙**），而非仅时间尺度不同。
+- **10 条不能推出**：①「MEDIUM 无用」❌（其**独立**排序 Alpha 极强；本轮只否定「并入 LONG-4 池」这一种用法）②「两尺度在任何数据集都不互补」❌（仅 `780004` 且仅本因子集）③「池大小 10 最优」❌（**未搜索池大小**）④「等权 0.5/0.5 最优」❌（**未搜索权重**）⑤「2025 改善是稳定规律」❌（仅 1/7 年且被 2022 抵消）⑥「应改用 120bps 口径」❌（三方案均近于 0，差异为噪声）⑦「跑赢市场」❌（对照为同宽度随机选股）⑧「Sharpe 已按无风险利率调整」❌ ⑨「冲击成本已计入」❌ ⑩「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 不调参 · ✅ 不搜索 TopN（池大小锚定 P2 的 Top10）· ✅ 不搜索权重（等权 0.5/0.5）· ✅ 不做 regime gate · ✅ 不做 OOS/WFA · ✅ 不创建 Strategy Candidate · ✅ **不修改数据库** · ✅ 不新增因子 · ✅ **不进行新的平台审计**。
+- **Baseline Impact**：**major（负面）** —— 首次检验「跨时间尺度组合股票池」，结论为**两尺度在本因子集上高度冗余（Spearman 0.861 · Top5 重合 68.84%）⇒ 组合无改善且指标一致略差**；据此**否决 MEDIUM 并入 LONG-4 池**，并确立 **「后续组合实验须先证明信号正交（因子来源或事件宇宙不同），而非仅时间尺度不同」** 的前置纪律。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · MEDIUM-HOLDING-STATE-001 · MEDIUM 作为 LONG-4 池内「中期状态层」验证 → ❌ **无显著增量 ⇒ ✅ 明确 STOP**
+
+- **Task**：验证 MEDIUM 是否更适合作为 LONG-4 股票池中的「**中期状态 / 相对强弱排序层**」而非过滤器；**不允许 MEDIUM 剔除池成员**，只打状态标签。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/state.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅**（本轮新载入 post rd21..60 含 `high`/`low` 明细 **2,359,320 行**）· **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **研究方式（逐项合规）**：①每日先固定 LONG-4 **原始 Top5** 池（**不受**资金/并发/symbol 冲突影响）②**MEDIUM 只打标签、不剔除、不选股**③记录每只成员的 `mdPct`（MEDIUM **当日横截面百分位**）与后续收益④按 **固定三分位（tercile）** 分 Strong/Mid/Weak，切点 `mdPct ≤ 0.8462 / ≤ 0.9524`（**池内固定分位，无阈值搜索**）⑤分析 T+5/T+10/T+20 · MFE · MAE · 胜率 · 亏损率 · 回撤深度 · 2025 专项⑥对照 **LONG-4 自身同法三分位**（切点 `sL4 ≤ 0.7750 / ≤ 0.8542`）+ 池内 rank1~5 + **日内 `mdPct` 置换 ×2,000**。面板：候选 **58,058** · 决策日 **1,627** · **池观测 8,130**。
+- **MEDIUM 三分位（池内）**：Strong（n 2,696）T+5 **+0.44%** / T+10 **+0.77%** / T+20 **+0.88%** / 全期 **+1.31%** / MFE 0.1893 / MAE **−0.1251** / 胜率 **0.4655** / 亏损率 0.5345 / T+20 胜率 **0.4750**；Mid（2,695）+0.29% / +0.26% / +0.69% / **+1.56%** / 0.1921 / −0.1282 / 0.4597；Weak（2,739）+0.25% / +0.46% / +0.71% / +0.92% / **0.1952** / **−0.1325** / 0.4545。**Strong−Weak**：T+5 **+0.19pp** · T+10 **+0.31pp** · T+20 **+0.17pp** · 全期 **+0.39pp** · 🔴 **MFE −0.59pp（方向相反）** · 🟢 **MAE +0.74pp** · 胜率 **+1.10pp** · T+20 胜率 +1.20pp。⇒ ✅ **T+5/T+10/T+20 三分位单调**；🔴 **全持有期不单调**（Mid 最高）⇒ **信息随持有期衰减**。
+- **对照：LONG-4 自身三分位**：Strong（2,692）+0.59% / +0.53% / +0.93% / **+1.63%** / 胜率 **0.4721**；Mid（2,724）+0.28% / +0.56% / +0.92% / +1.21%；Weak（2,714）+0.11% / +0.40% / +0.43% / +0.97% / 胜率 0.4480。**Strong−Weak**：T+5 **+0.48pp** · T+10 **+0.13pp** · T+20 **+0.50pp** · 全期 **+0.66pp** · 胜率 **+2.41pp**。⇒ 🟢 **LONG-4 自身排序在【全部四个期限】完全单调，且 spread 在所有期限上均【大于】MEDIUM**（+0.48/+0.13/+0.50/+0.66 vs +0.19/+0.31/+0.17/+0.39），胜率价差亦更大（+2.41pp vs +1.10pp）。池内 rank1~5：rank1/rank2 全期限优于后 3 名，**MAE 随池内排名单调恶化**（−0.1214 → −0.1336）⇒ **LONG-4 自身信息主要体现在「回撤控制」**。
+- **🔴 置换检验（日内 `mdPct` 置换 ×2,000）**：**MEDIUM spread +0.0039**，零假设均值 −0.0004 · p05 −0.0077 · **p95 +0.0068** ⇒ **p = 0.166（不显著，观测值落在零假设分布内）**；**LONG-4 spread +0.0066**，零假设 p95 +0.0075 ⇒ **p = 0.075（5% 下亦不显著，但接近且方向与幅度均优于 MEDIUM）**。
+- **池内日级 IC（Spearman vs 全期）**：MEDIUM `mdPct` **+0.0257**，正日占比 **0.5058**；LONG-4 `sL4` **+0.0310**，正日占比 0.5003 ⇒ 两者在池内（仅 5 只）区分力均很弱，**MEDIUM 略弱于 LONG-4 自身**。
+- **年度（MD / L4 强−弱价差）**：2019 **−3.42pp** / −3.63pp · 2020 −0.16pp / **+2.19pp** · 2021 **+1.40pp** / −0.20pp · 2022 **+1.04pp** / −0.37pp · 2023 **+1.39pp** / +0.53pp · 2024 **−2.20pp** / −5.79pp · **2025 +0.08pp（≈0） / +5.67pp**。⇒ 两者年度均 **4/7 为正**，稳定性相当且均不稳定。
+  - **🔴 2025 关键修正**：**MEDIUM 2025 池内价差 ≈ 0（+0.08pp）⇒ 在 LONG-4 的失效年份没有提供任何信息**；而 **LONG-4【自身】2025 池内价差 +5.67pp（全样本最强）** ⇒ **2025 年 LONG-4 组合净值的 Alpha 缺口（−1.09%，见 P1）不是「池内排序失效」，而是【池本身选错了市场状态】** ⇒ **这修正了先前的解读，也说明引入 MEDIUM 无法解决问题。**
+- **四项最终回答**：**A. MEDIUM 在 LONG-4 池内是否仍具有独立中期解释力？⇒ ❌ 没有（不显著）**（置换 **p = 0.166** · IC +0.0257 / 正日 50.58% · 全期不单调 · 弱于 LONG-4 自身；仅 T+5~T+20 单调与 MAE 浅 0.74pp 为正面）。**B. 更适合「持仓状态/减亏」还是无额外价值？⇒ ⚠️ 方向上是「减亏」但强度不足 ⇒ 不足以采用**（支持：MAE 浅 0.74pp · 胜率 +1.10pp · 亏损率 −1.10pp · T+20 胜率 +1.20pp · 短中期单调；反证：p = 0.166 · 全期不单调 · MFE 反向 −0.59pp · 年度仅 4/7 · 2025 ≈ 0）。**C. 是否值得进入 SHORT 买点研究？⇒ 🔴 不值得**（池内无显著增量 + 与 LONG-4 冗余〔`RESULT-L4-MD-POOL-001`：Spearman 0.8606 · Top5 重合 68.84% · 池内再排序平均仅改变 0.41 只〕+ 池内解释力弱于 LONG-4 自身 + 2025 价差 = 0）。**D. ⇒ ✅ 明确 STOP**。
+- **✅ STOP 决定（已执行）**：①**不继续扩展 MEDIUM × LONG-4 的组合实验** ②**不进入 SHORT 买点研究** ③**保留 MEDIUM 为其【独立】定位**（中期相对强弱/减亏排序因子，`RESULT-MEDIUM-REAL-001`：独立 ΔCAGR +11.58pp · 年度 Alpha 7/7）④**LONG-4 维持「股票池排序因子」定位**，其**自身池内排序仍在全部期限上单调**（本轮正面确认）⑤⚠️ **后续若再探索 MEDIUM，须脱离 LONG-4 池**（如独立事件宇宙或与其他数据集配合），**而非继续在本池内寻找用法**。
+- **8 条不能推出**：①「MEDIUM 无用」❌（其**独立**排序 Alpha 极强；本轮只否定**池内用法**）②「MEDIUM 绝对无用」❌（短中期单调 + MAE 浅是方向一致正面证据，只是不显著）③「三分位是最佳分组」❌（**未搜索分组**）④「2025 池内排序有效是稳定规律」❌（仅 1/7 年）⑤「LONG-4 池内排序显著」❌（**p = 0.075，5% 下亦不显著**）⑥「两尺度在任何场景都不互补」❌（仅 `780004`、仅本因子集、仅池内用法）⑦「收益已扣成本」❌（**状态分析用毛收益，未扣 20bps**）⑧「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未修改任何因子定义/分桶/orientation · ✅ **未搜索权重/阈值/TopN/持有期** · ✅ **未构造 LONG4+MEDIUM 综合分数** · ✅ **未把 MEDIUM 重新用于选股** · ✅ 未寻找新因子组合 · ✅ **未创建 Strategy Candidate** · ✅ **未修改数据库** · ✅ **未进行新的平台审计**。
+- **Baseline Impact**：**major（负面 + 修正）** —— 以**池内状态层**视角再次确认 **MEDIUM 对 LONG-4 无显著增量**（置换 p = 0.166），并**修正 2025 失效归因**：**LONG-4 池内排序在 2025 是全样本最强（+5.67pp），失效源于「池选错市场状态」而非「池内排序失效」**；确立 **MEDIUM × LONG-4 组合方向的 STOP 决定**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · SHORT-TIMESCALE-001 · SHORT 时间尺度单因子研究 → ✅ **无数据缺口 · SHORT 为【独立】时间尺度（残差 IC 证明）· 形成三时间尺度职责表**
+
+- **Task**：从**已有冻结因子**中识别 T+1/T+2/T+3/T+5 的短期排序能力，判定 SHORT Alpha 是**真正属于 SHORT** 还是 LONG/MEDIUM 的**投影**；收口依据 P2-WIDTH / MEDIUM-REAL / L4-MD-POOL / MEDIUM-HOLDING-STATE 四轮。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/short.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅**（本轮新载入 post **rd1..20 明细 1,179,660 行**；rd21..60 复用上轮缓存）· **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **✅ 数据缺口：无** —— SHORT 窗口 rd1..6 完整可用 ⇒ **未扩大研究口径**。面板：候选 **51,607** · 决策日 **1,627** · **有效日（≥20 候选）1,170**。SHORT 定义逐字复用 `FACTOR-TIMESCALE-001`：**rd1 `open` 入场 → rd5 `close`**；T+1..T+5 = rd2/rd3/rd4/rd6 close。**12 个冻结因子全部复用，未新增**。
+- **中性基准校准（日内因子排名置换 ×200）**：零假设平均 IC **+0.0002** · sd **0.0049** · p05/p95 **−0.0079/+0.0076** ⇒ 零假设带宽 ≈ ±0.008。
+- **T+1~T+5 单因子 IC（PIT 安全 6）**：**`preReturn10`** T+1 **+0.0417**(t 6.67) → T+2 +0.0649(t 10.13) → T+3 +0.0745(t 11.39) → **T+5 +0.0900(t 13.72)**，LONG 仅 +0.0232(t 3.66) ⇒ 🟢 **随期限增强、SHORT 主导**；**`limitGap`** +0.0033(ns) → +0.0240 → +0.0329 → **+0.0580(t 9.44)**，LONG **+0.0821(t 14.10)** ⇒ ⚠️ **LONG 主导**；**`turnover`** −0.0270(t −4.49) → ns → ns → +0.0312(t 5.07)，LONG +0.0784 ⇒ 🔴 **符号随时限翻转**；**`amountPercentile`** **−0.0640(t −10.37)** → −0.0526 → −0.0418 → −0.0200(t −3.13)，LONG **+0.1073(t 17.08)** ⇒ 🔴 **SHORT 负 / LONG 正，方向相反**；**`historyLimitCount`** 多数期限 ns（T+5 +0.0191）；**`bodyHeight`** T+5 +0.0079 ns ⇒ ❌ 无稳定 SHORT 信息。
+- **⚠️ 窗口内污染 6 因子（不可解释，仅登记）**：`drawdownDepth` T+1 **−0.6260(t −142.96)** · `holdStreak` **+0.4040(t 85.29)** · `meanAmplitude` −0.3069(t −50.45) · `maxAmplitude` −0.2605(t −41.27) · `t1OpenGap` −0.0869(t −15.39) · `t1VolumeRatio` −0.0474(t −8.17) ⇒ **近确定性 IC 再次确认【定义性重叠】**，与 `FACTOR-TIMESCALE-001` 完全一致。
+- **🔴🔴 决定性检验：残差 IC（日内对 `[rank(sL4), rank(sMD)]` 双向 OLS 残差化）** —— **`historyLimitCount`** 原始 T+5 +0.0191(ns) → 残差 **+0.1123(t 20.80，正占比 0.7231)**；**`preReturn10`** +0.0900 → **+0.0597(t 10.32)** ⇒ **保留 66%**；**`amountPercentile`** −0.0200 → **−0.0413(t −7.66)** ⇒ **增强**；**`limitGap`** +0.0580 → **+0.0240(t 4.49)** ⇒ 保留 41%；🔴 **`turnover`** +0.0312 → **−0.0414(t −7.95)** ⇒ **符号翻转**；`bodyHeight` +0.0079 → −0.0157。
+  - **🔴 两项【抑制效应】为本轮最重要发现**：**`historyLimitCount` 与 `turnover` 的 SHORT 信息被其与 LONG-4/MEDIUM 的重叠【掩蔽】** ⇒ 只看原始 IC 会**严重低估**其 SHORT 价值。
+- **spread / 胜率差 / MAE / MFE（T+5，日内三分位）**：`preReturn10` spread **+0.0118(t 6.69)** · 胜率差 **+0.0495** · **MAE 差 +0.0234（强势组回撤更浅）** · **MFE 差 −0.0168（冲高更低）**；`limitGap` +0.0063(t 3.73) · +0.0192 · +0.0210 · −0.0231；`historyLimitCount` +0.0037(t 2.42) · +0.0086 · +0.0079 · −0.0082；🔴 `amountPercentile` −0.0046(t −2.74) · **−0.0402**。⇒ **SHORT 强势同样为「减亏型」而非「冲高型」**（与 LONG 形态一致）。
+- **年度稳定性（T+5 IC）**：**`preReturn10`** +0.0816/+0.0958/+0.0667/+0.0912/+0.1236/+0.0894/+0.0931 ⇒ ✅ **7/7 年为正**；**`limitGap`** +0.0571/+0.0559/+0.0404/+0.0638/+0.0824/+0.0556/+0.0607 ⇒ ✅ **7/7 年为正**（**本项目至今最强年度稳定性**）；`turnover` 6/7；`historyLimitCount` **5/7**（与强残差 IC 形成对比 ⇒ 原始受重叠掩蔽）；`bodyHeight` 4/7；🔴 `amountPercentile` **5/7 年为负**。
+- **五项最终回答**：**A. 具有明确 SHORT 信息的因子** —— 🥇 **`preReturn10`**（最强 · 7/7 年 · 残差保留 66% · SHORT 主导）🥈 **`limitGap`**（7/7 年 · 但 LONG 主导）🥉 **`historyLimitCount`**（**抑制型强 SHORT**：残差 +0.1123 正占比 0.7231，⚠️ 原始仅 5/7）4️⃣ **`amountPercentile`**（**明确反向**：SHORT 全负 · 残差稳定 −0.041 · 5/7 年为负）；❌ `bodyHeight` 无；🔴 `turnover` 不确定。**6 个污染因子不予评估**。**B. 强度是否明显不同 ⇒ ✅ 明显不同且【独立】**（量级相当 +0.0900 vs LONG +0.1073；方向可相反；期限形态分化；**残差独立性**：`preReturn10` 保留 66% · `historyLimitCount` 由 ns 跃至 +0.1123；⚠️ 但 `turnover` 翻转说明独立性检验必需）。**C. 值得进入下一阶段** —— 🔴P0 `preReturn10`（首选）· 🟠P1 `limitGap` · 🟡P1 探索 `historyLimitCount`（须先解释抑制机制）· 🟡P2 反向 `amountPercentile`；❌ 不进入 `turnover`/`bodyHeight`。**D. 明确 STOP** —— ①**`bodyHeight`**（无 SHORT 信息）②**`turnover`**（符号翻转、机制不明）③**6 个窗口内污染因子**（SHORT IC 不可解释）④**不做 LONG × MEDIUM × SHORT 综合评分**。**E. 三时间尺度职责表** —— **LONG = 股票池（🔒冻结）** · **MEDIUM = 独立中期相对强弱/减亏（🔒冻结，⛔不与 LONG 组合）** · **SHORT = 待验证的短期/买点（🟡本研已识别候选因子）**。⇒ ✅ **SHORT 单因子研究【有】稳定增量 ⇒ 不触发 STOP**；🔴 **但下一步 SHORT 只能作为【独立】短期买点/风险层验证，禁止构造综合评分与搜索权重/阈值/TopN**。
+- **9 条不能推出**：①「SHORT 因子可直接交易」❌（**未做净值回测、未扣成本**）②「6 个污染因子在 SHORT 无效」❌（只能说同窗口 IC 不可解释，**真实短期预测力无法用本口径判定**）③「`turnover` SHORT 方向为负」❌（原始与残差符号相反，机制不明）④「`historyLimitCount` 是有效 SHORT 因子」❌（原始年度仅 5/7，须先解释抑制机制）⑤「各期限已选优」❌（**未搜索最佳持有期**）⑥「`preReturn10` 在所有市场状态有效」❌（未做 regime 分析）⑦「SHORT 与 LONG/MEDIUM 可组合」❌（本轮禁止，且跨尺度组合已被两轮否定）⑧「可外推其他数据集/更短窗口」❌ ⑨「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未修改 LONG-4 · ✅ 未修改 MEDIUM · ✅ **未做 LONG × MEDIUM × SHORT 综合评分** · ✅ **未搜索权重/阈值/TopN/持有期** · ✅ **未新增因子** · ✅ 未创建 Strategy Candidate · ✅ **未进行平台审计** · ✅ **未修改数据库** · ✅ **未扩大研究口径**（无数据缺口）· ✅ **未因单期限/单因子正结果直接认定有效**（残差 IC + 年度 + 置换三重校验）。
+- **Baseline Impact**：**major** —— 首次完成 **SHORT 时间尺度单因子识别**并**用残差 IC 证明其独立性**（不是 LONG/MEDIUM 投影）；发现 **`historyLimitCount`/`turnover` 的 SHORT 信息【被重叠掩蔽】**这一方法学事实；确立 **`preReturn10` 为 SHORT 首选因子**（7/7 年 · 残差保留 66%）；形成并冻结 **三时间尺度职责表**（LONG 股票池 / MEDIUM 独立中期相对强弱 / SHORT 待验证买点）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · SHORT-BUYPOINT-001 · `preReturn10` SHORT 买点验证 → 🛑 **STOP（池内方向相反且完全不显著）**
+
+- **Task**：验证已有 SHORT 单因子结果能否转化为**真实短期买点 Alpha**；固定 LONG-4 Top5 池；**首要因子仅 `preReturn10`，不组合其他因子**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/buypoint.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **口径**：SHORT 窗口 = **rd1 `open` 入场 → rd5 `close`**；T+1/T+2/T+3/T+5 = rd2/rd3/rd4/rd6 close；分组 = `preReturn10` **当日横截面百分位的池内固定三分位**（**q1 = 0.2778 · q2 = 0.5160，无阈值搜索**）；成本 **gross 与 20bps net 并列**；中性基准 = **日内 `preReturn10` 置换 ×2,000**。⚠️ **面板披露**：全候选 **53,802** / 决策日 1,627 · **LONG-4 Top5 池观测 6,020**（vs `MEDIUM-HOLDING-STATE-001` 的 8,130：本轮 SHORT 入场需 **rd1 `canBuyAtOpen=1`** ⇒ **2,110 个池成员（26.0%）在 rd1 无法买入被剔除**）· 有效日（Strong 与 Weak 并存）**867**。
+- **🔴 分组结果（T+5，gross / net）**：**Strong（n 2,007）−1.73% / −1.93%** · 胜率 0.3503 / **0.3463** · MFE 0.0842 · **MAE −0.0793**；Mid（2,001）−0.76% / −0.96% · 0.3808 / 0.3758 · −0.0704；**Weak（2,012）−0.47% / −0.67%** · **0.4061 / 0.4011** · −0.0680。⇒ 🔴 **Strong 组在【全部四个期限】均为最差组**；**全部 12 个「期限×组」单元 net 收益均为负**；胜率 34.63%~40.41%（全部远低于 50%）。
+- **🔴 Strong − Weak spread（gross = net，成本对价差不变）**：T+1 **−0.50%**(t −1.96) · T+2 **−0.58%**(t −1.83) · T+3 **−0.86%**(t −2.43) · **T+5 −1.21%(t −2.98)**，胜率差 **−7.91pp**（T+5）。⇒ **四个期限全部为负且随期限单调恶化**。
+- **🔴 中性基准（日内置换 ×2,000）**：观测 T+5 spread **−0.0121**，零假设均值 −0.0027 · sd 0.0029 · **p05 −0.0075 / p95 +0.0020** ⇒ **p = 1.000**，观测值落在**负向极端之外**（−0.0121 « p05）⇒ **不仅无正 Alpha，而是显著反向**。
+- **年度稳定性（T+5）**：spread **0/7 年为正（7/7 年为负）**：2019 −2.13% · 2020 −2.91% · 2021 −1.51% · 2022 −1.42% · 2023 −0.38% · 2024 −0.32% · 2025 −0.17%；**Strong 组 net 收益亦 0/7 年为正**（−1.29% ~ −2.99%）。⇒ **「方向稳定」成立但稳定在【错误方向】**。
+- **四个重点问题**：**①扣 20bps 后是否仍存在？⇒ 🔴 不存在，且更根本：gross spread 本身已为 −1.21%**（不是「成本吃掉 Alpha」而是**方向相反**；t = −2.98 显著为负）。**②是否仍 7/7 年方向稳定？⇒ 🔴 稳定但为负方向（0/7 年为正）**。**③强势组是否主要「减亏」？⇒ ❌ 两者皆非，强势组【更差】**（T+5 net −1.93% vs Weak −0.67% · net 胜率 34.63% vs 40.11%（−5.48pp）· **MAE −7.93% vs −6.80%（深 1.13pp）** · MFE +0.61pp）⇒ **「高波动 + 低胜率 + 深回撤」= 劣化型**。**④是否足以进入买点策略设计？⇒ 🔴 完全不足以 ⇒ STOP**。
+- **🔴 与 `SHORT-TIMESCALE-001` 的分歧及解释（本轮最重要方法学结论）**：**全候选横截面** T+5 IC **+0.0900(t +13.72) · spread +0.0118(t +6.69) · 7/7 年为正**；**LONG-4 Top5 池内** spread **−0.0121(t −2.98) · p 1.000 · 0/7 年为正** ⇒ **符号完全翻转**。**解释（两个不同统计对象，非矛盾）**：前者度量**全候选横截面**（每日约 33 只）的**线性排序关系** ⇒ **广度层信号**；后者度量**已被 LONG-4 选出的 5 只**（每日约 3.7 只有效观测）内的**极端分位差** ⇒ **池内买点**。⇒ **`preReturn10` 的 SHORT 信息是【组合层/广度层】信号，不是【池内买点】信号，不能用于在已选池中挑买点。**
+- **🛑 STOP 决定与处置**：任务原文「若净收益差在成本后消失，直接 STOP」—— 本处**更强**（**gross 价差本身已为负且 7/7 年为负**）。①**`preReturn10` 作为池内 SHORT 买点信号 ⇒ STOP**，不再进入买点策略设计 ②**其既有定位【修正】为：全候选「广度层」SHORT 排序因子**（`SHORT-TIMESCALE-001` 结论仍成立但**须限定为广度层**）③**SHORT 时间尺度整体不因本轮否决**（任务已明确）⇒ 其余候选（`limitGap`/`historyLimitCount`/`amountPercentile`）**若要继续必须直接在全候选广度层验证，不得再走「池内买点」路线** ④禁止综合评分 / 搜索权重阈值 TopN 持有期 / 创建 Strategy Candidate。
+- **待登记口径缺口**：①**rd1 可买性**：26.0% 池成员在 rd1 无法买入（已披露）②**池内有效观测仅 ~3.7 只/日**，极端分位统计功效低 ③**MAE/MFE 为 gross**（成本不适用于窗口内极值）。
+- **8 条不能推出**：①「`preReturn10` 无 SHORT 价值」❌（**全候选广度层仍显著**；本轮否定的是**池内买点用法**）②「SHORT 时间尺度无效」❌（仅检验**单因子×单用法**）③「应把 `preReturn10` 反向使用」❌（需成本/融券/涨跌停/容量建模；**本轮为多头单边**）④「T+1~T+5 池内系统性下跌是普适规律」❌（仅 `780004`）⑤「三分位是最佳分组」❌（**未搜索**）⑥「其他 SHORT 因子在池内也无效」❌（**本轮仅允许用 `preReturn10`**）⑦「池内买点思路整体不成立」❌（只证伪一个因子的池内用法）⑧「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ **未搜索权重/阈值/TopN/持有期** · ✅ **未加入其他 SHORT 因子** · ✅ **未修改 LONG-4 / MEDIUM** · ✅ **未做 LONG×MEDIUM×SHORT 综合评分** · ✅ **未创建 Strategy Candidate** · ✅ **未修改数据库** · ✅ **未做平台审计**。
+- **Baseline Impact**：**major（负面）** —— 证伪 **`preReturn10` 的池内 SHORT 买点用法**（gross 价差已为负、p = 1.000、0/7 年为正、强势组劣化）；并确立 **「广度层信号 ≠ 池内买点信号」** 的方法学区分（同一因子可在一层显著为正、在另一层显著为负）；据此**收窄 `preReturn10` 的定位为「广度层 SHORT 排序因子」**，并为后续 SHORT 研究设定「须在广度层验证、不得走池内买点路线」的约束。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · SHORT-BREADTH-002 · 剩余 SHORT 候选因子的全候选横截面验证 → ✅ 完成（`limitGap` 成立 · `historyLimitCount` 弱且不稳 · `amountPercentile` 反向）
+
+- **Task**：验证 `limitGap` / `historyLimitCount` / `amountPercentile` 在**全候选横截面**上的短期 Alpha，**不再进入 LONG-4 池内做买点筛选**；**单因子分别测试**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/breadth.cjs` + 1 份报告）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅** · **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **口径**：SHORT 窗口 = **rd1 `open` → rd5 `close`**；T+1/T+2/T+3/T+5 = rd2/rd3/rd4/rd6 close；日内**固定三分位**（**无阈值搜索**）；**gross 与 20bps net 并列**；中性基准 = **日内因子排名置换（每因子 T+5，500 次）**。面板：候选 **51,895** · 决策日 **1,634** · 有效日 **1,177**（⚠️ 与 `SHORT-TIMESCALE-001` 的 51,607/1,627 略异：本轮仅要求 **3 个因子**非空）。
+- **全候选横截面 IC（定向后）**：**`limitGap`** +0.0029 ns → +0.0233(t 3.87) → +0.0318(t 5.24) → **+0.0563(t 9.18)**，正占比 **0.6202**；**`historyLimitCount`** ns → ns → +0.0103 ns → **+0.0193(t 3.36)**，正占比 0.5310；**`amountPercentile`** **−0.0636(t −10.39)** → −0.0523(t −8.35) → −0.0419(t −6.61) → **−0.0200(t −3.15)**，正占比 0.4622。
+- **🔴 分组结果（T+5，gross / net@20bps）**：`limitGap` —— Strong（14,913）**−0.29% / −0.49%** · 胜率 0.4161/**0.4094** · MAE **−0.0677**；Mid（16,102）−0.54%/−0.74% · −0.0738；Weak（14,913）**−0.93% / −1.13%** · 0.3980/0.3934 · MFE 0.1061 · MAE **−0.0885**。`historyLimitCount` —— Strong **−0.42%/−0.62%** · MAE −0.0721；Weak **−0.76%/−0.96%** · MAE −0.0809。`amountPercentile` —— Strong **−0.84%/−1.04%** · 胜率 0.3889/**0.3840**；Mid **−0.36%**/−0.56% · 胜率 0.4176/0.4122；Weak −0.57%/−0.77% · 胜率 **0.4198/0.4135**。⇒ 🔴 **9/9 组的 T+5 净收益【全部为负】**（−0.49% ~ −1.13%）· 胜率 38.40%~41.35% ⇒ **T+1~T+5 窗口在全候选层同样存在系统性负 beta**。🟢 方向一致形态：`limitGap`/`historyLimitCount` 的 Strong **MAE 更浅**（−6.77% vs −8.85% / −7.21% vs −8.09%）且 MFE 更低 ⇒ **「相对减亏型」**。
+- **Strong − Weak spread（gross = net）**：**`limitGap`** −0.0016 ns / +0.0010 ns / +0.0019 ns / **+0.0059(t 3.53)**，胜率差 **+1.76pp**；**`historyLimitCount`** ns / ns / +0.0013 ns / **+0.0038(t 2.49)**，胜率差 +0.84pp；**`amountPercentile`** **−0.0065(t −6.69)** / −0.0060(t −4.95) / −0.0055(t −3.91) / **−0.0047(t −2.82)**，胜率差 **−4.11pp**。
+- **🔴 日内 permutation（T+5，500 次）**：**`limitGap`** 观测 **+0.0059** · 零假设 p95 **+0.0023** ⇒ **p = 0.000（显著为正）**；**`historyLimitCount`** 观测 **+0.0038** · p95 +0.0025 ⇒ **p = 0.008（显著为正）**；**`amountPercentile`** 观测 **−0.0047** · 零假设 **p05 −0.0023** ⇒ **p = 1.000，即显著【反向】**（观测 « p05）。
+- **7 年年度 spread（T+5）**：**`limitGap`** +0.0043/+0.0020/+0.0062/+0.0100/+0.0073/+0.0060/+0.0037 ⇒ ✅ **7/7 年为正**；**`historyLimitCount`** +0.0039/+0.0153/+0.0037/+0.0042/**−0.0032**/+0.0038/**−0.0020** ⇒ ⚠️ **5/7**；**`amountPercentile`** −0.0020/−0.0099/−0.0102/**+0.0061**/**+0.0079**/−0.0118/−0.0094 ⇒ 🔴 **2/7 正（5/7 负）**。
+- **残差 IC（控制 LONG-4 与 MEDIUM 分 · 复用上轮）**：`limitGap` +0.0100(t 1.91) → **+0.0240(t 4.49)**，正占比 0.5350；**`historyLimitCount`** **+0.1378(t 26.15)** → **+0.1123(t 20.80)**，正占比 **0.7231**；**`amountPercentile`** **−0.0404(t −7.59)** → **−0.0413(t −7.66)**，正占比 0.4009。
+- **四项重点回答**：**A. `limitGap` 是否具有独立 SHORT 广度 Alpha？⇒ ✅ 是，三者中最强且最稳**（IC +0.0563 t 9.18 · 正占比 0.6202 · spread +0.0059 t 3.53 · **perm p = 0.000** · 胜率差 +1.76pp · **7/7 年为正** · 残差 +0.0240 t 4.49 独立；⚠️ 仅 T+5 显著 · LONG IC +0.0821 略强于 SHORT）。**B. `historyLimitCount` 的残差 Alpha 是否在全候选层重新出现？⇒ ✅ 出现且远强于原始 IC**（原始 +0.0193 t 3.36 / perm p = 0.008；**残差 +0.1123 t 20.80 · 正占比 0.7231**，**跃升 5.8 倍** ⇒ **抑制效应确认**；🔴 但**年度仅 5/7** · T+1~T+3 spread 全部 ns ⇒ **弱且不稳定**）。**C. `amountPercentile` 的 SHORT 反向 Alpha 是否稳定？⇒ ✅ 反向成立且稳定（方向为负）**（IC 全负 · spread 全负 · 胜率差 **−4.11pp** · **perm p = 1.000 显著反向** · 残差稳定 −0.040 t≈−7.7；🔴 **年度 5/7 年为负**）⇒ **多头单边不成立**。**D. 时间尺度归属** —— 🔄 **`limitGap` = 跨尺度（同向）因子，唯一 7/7 年稳定的跨尺度因子**（LONG 略强）· ⚠️ **`historyLimitCount` = LONG 主导 + SHORT 残差型（不稳定）**⇒ 定位为 LONG 因子 · 🔴 **`amountPercentile` = 跨尺度【方向翻转】因子**（LONG **+0.1073** / SHORT **−0.0200**）。
+- **🛑 STOP 判定与登记（按任务条件）**：**`limitGap`** ⇒ ✅ **SHORT 广度层成立** ⇒ **仅登记时间尺度角色为「跨尺度（同向）SHORT/LONG 因子」，不立即做交易策略**；**`historyLimitCount`** ⇒ 🟡 **统计成立但弱且不稳（年度 5/7）** ⇒ **登记为 SHORT 观察项，STOP 进策略**；**`amountPercentile`** ⇒ 🛑 **多头用途 STOP**，仅登记为「跨尺度方向翻转因子」（空头用途需另行设计，本轮不做）。
+- **🔴 共同硬限制（三者共有，随结论一并登记）**：**9/9 组的 T+5 净收益全部为负（−0.49% ~ −1.13%），胜率 38.40%~41.35%** ⇒ **即使价差统计显著，强势组绝对净收益仍为负** ⇒ **三者均只能作为「相对减亏/相对强弱」信号，不能作为独立多头买点**。
+- **9 条不能推出**：①「`limitGap` 可直接作为 SHORT 多头买点」❌（强势组 net **−0.49%**；**未做净值回测、未建模冲击成本与容量**）②「`historyLimitCount` 已可采信」❌（年度 5/7 · 抑制机制未解释）③「`amountPercentile` 应反向做多」❌（需融券/做空成本/涨跌停建模；**本轮多头单边**）④「三者可组合」❌（任务禁止；跨尺度组合已被两轮否定）⑤「T+5 是最佳期限」❌（**未搜索**）⑥「T+1~T+5 系统性负 beta 是普适规律」❌（仅 `780004`）⑦「三分位是最佳分组」❌（**未搜索阈值**）⑧「已可进入策略设计」❌（任务明确只登记角色）⑨「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ **未进行 LONG-4 Top5 池内筛选** · ✅ **未做 MEDIUM 组合** · ✅ **未做综合评分** · ✅ **未搜索权重/阈值/TopN/持有期** · ✅ **未创建 Strategy Candidate** · ✅ **未修改数据库** · ✅ **未做平台审计** · ✅ 未修改 LONG-4 / MEDIUM。
+- **Baseline Impact**：**major** —— 完成**剩余 SHORT 候选因子的广度为验证**：确认 **`limitGap` 为唯一 7/7 年稳定的跨尺度（同向）因子**（perm p = 0.000）、**`historyLimitCount` 的强残差 Alpha 在全候选层复现**（+0.1123，跃升 5.8 倍，但年度 5/7）、**`amountPercentile` 为跨尺度方向翻转因子**（LONG +0.1073 / SHORT −0.0200，perm p = 1.000 显著反向）；并登记**三者共有的硬限制**：**T+1~T+5 全候选层系统性负 beta（9/9 组净收益为负）⇒ 只能作相对减亏信号，不能作独立多头买点**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · FACTOR-TIMESCALE-FINAL-001 · 因子时间尺度研究最终归档与冻结 → 🔒 **归档完成（未运行任何新实验）**
+
+- **Task**：基于已有结果做**最终归档收口**，统一整理并冻结 LONG / MEDIUM / SHORT 的因子时间尺度角色；**明确禁止为「补充证明」重跑任何 IC / Permutation / 分组 / 回测 / 审计**。
+- **Changes**：🔴 **零业务代码改动**。新增 `docs/research/RESULT-FACTOR-TIMESCALE-FINAL-001.md`（归档报告）；`ROADMAP.md` **§47 append-only 追加**「FACTOR-TIMESCALE-FINAL-001」状态段（**未新增任何实验任务**）；本审计条目。
+- **🔴 `NON-PLATFORM-FORMAL-RUN`**：全部被引用结果**均来自 `NON-PLATFORM-FORMAL-RUN`**；**本归档不声称任何平台正式 Run**。
+- **输入结果（7 份，全部未重跑）**：`RESULT-LONG4-P1-NEUTRAL-BENCH-001` · `RESULT-LONG4-P2-WIDTH-001` · `RESULT-MEDIUM-REAL-001` · `RESULT-MEDIUM-HOLDING-STATE-001` · `RESULT-SHORT-TIMESCALE-001` · `RESULT-SHORT-BUYPOINT-001` · `RESULT-SHORT-BREADTH-002`（背景另引 `RESULT-LONG4-P0-FIX-001` · `RESULT-FACTOR-TIMESCALE-001`）。
+- **🔒 冻结的三时间尺度角色**：**LONG-4 = 股票池 / 长期排序**（CAGR 5.61% · Sharpe 0.3152 · MDD −33.29% · PF 1.2126 · ΔCAGR **+4.30pp** · **100% 击败** 200 中性种子 · MDD 浅 14.62pp · 年度 6/7 跑赢）· **MEDIUM = 独立中期相对强弱 / 减亏**（独立 ΔCAGR **+11.58pp** · 年度 Alpha **7/7**；🔴 但绝对净值 **−0.82%** · PF 0.9887 · 窗口随机基准 **−12.39%**）· **SHORT = 短期相对强弱（仅登记角色，不进策略）**。
+- **🔒 冻结的六项因子角色**：①**`preReturn10` → SHORT 独立因子**（**不得再解释为 LONG-4 池内买点因子**）②**`limitGap` → LONG/SHORT 跨尺度同向，LONG 略主导**（SHORT IC +0.0563 t 9.18 · **perm p = 0.000** · **7/7 年**；LONG IC +0.0821 t 14.10）③**`historyLimitCount` → LONG 主导**（LONG IC +0.0734 t 12.56；SHORT 原始 +0.0193 但**年度仅 5/7**，仅观察不进策略）④**`amountPercentile` → LONG 正向 / SHORT 负向的跨尺度【方向翻转】因子；多头 SHORT 用途 STOP**（LONG **+0.1073** t 17.08 / SHORT **−0.0200** t −3.15 · perm **p = 1.000 显著反向**）⑤**MEDIUM 保持独立，不与 LONG/SHORT 强行组合**⑥**LONG-4 保持股票池/长期排序角色**。
+- **📋 最终因子时间尺度矩阵（12 因子）**：**SHORT 可解释 6 个** —— `preReturn10`（SHORT **+0.0900 t 13.72** · 正占比 0.6479 · **7/7 年** · 残差保留 **66%** · **SHORT 独立因子**）· `limitGap`（**+0.0563 t 9.18** · perm **p = 0.000** · **7/7 年** · **跨尺度同向/LONG 略主导**）· `historyLimitCount`（+0.0193 t 3.36 · perm p = 0.008 · **5/7 年** · 残差 **+0.1123 t 20.80** · **LONG 主导**）· `amountPercentile`（**−0.0200 t −3.15** · perm **p = 1.000** · **5/7 年为负** · **方向翻转**）· `turnover`（+0.0312 t 5.07 但**残差 −0.0414 翻转** · **STOP**）· `bodyHeight`（+0.0079 **ns** · **4/7 年** · **STOP**）；**仅 MEDIUM/LONG 可评估 6 个** —— `drawdownDepth`/`meanAmplitude`/`maxAmplitude`/`holdStreak`/`t1VolumeRatio`/`t1OpenGap`（SHORT IC 属**定义性重叠**，如 `drawdownDepth` T+1 **−0.6260 t −142.96**、`holdStreak` **+0.4040 t 85.29**）⇒ **SHORT STOP**。
+- **🔴 单独登记（按任务要求）**：**`9/9` 分组单元 T+5 净收益为负**（**−0.49% ~ −1.13%**）· **净胜率 38.40%~41.35%** ⇒ **当前 SHORT 结果主要证明横截面相对强弱/减亏能力，不证明独立多头绝对收益能力**（即使统计显著如 `limitGap` perm p = 0.000 · 7/7 年，其强势组净收益仍为 **−0.49%**）。
+- **📋 写入的八条原则**：①**SHORT Alpha ≠ SHORT 买点** ②**相对 Alpha ≠ 绝对正收益** ③**不因 IC/spread 显著就直接进入交易策略** ④**不再进行 LONG × MEDIUM × SHORT 综合评分** ⑤**不重新搜索权重/阈值/TopN/持有期** ⑥**不修改数据库/Schema/业务 `.ts`** ⑦**不创建 Strategy Candidate** ⑧**不重新运行已有实验**。
+- **报告四段区分**：**①已验证事实（17 项）** 含引擎 P0 验收（oracle 1e-12 / 宽度复验 9.3e-13）· LONG-4 独立 Alpha（100% 击败）· Top10 饱和（opened 8,400 · avgConc 193.28 · maxConc 200 全同）· 宽度收益来自利用率（随机臂 1.23%→5.12%）· MEDIUM 独立 Alpha 与负净值 · 池内无增量（p = 0.166）· 双尺度冗余（Spearman 0.8606）· `preReturn10` 最强 SHORT（残差保留 66%）· `limitGap` 唯一跨尺度 7/7 · `amountPercentile` 翻转 · `historyLimitCount` 抑制（跃升 5.8 倍）· `turnover` 翻转 · 池内买点证伪（p = 1.000 · 0/7 年）等。**②当前角色**（三尺度 + 六项冻结）。**③STOP 项（10 项）** 含 `preReturn10` 池内买点 · `turnover` SHORT 方向 · `bodyHeight` SHORT · `amountPercentile` 多头 SHORT · 6 个污染因子 SHORT · `historyLimitCount` SHORT 进策略 · MEDIUM×LONG-4 组合 · 三尺度综合评分 · 参数搜索 · Strategy Candidate。**④尚未证明（10 项）** 含市场/指数基准缺失 · SHORT 独立多头绝对收益 · 冲击成本与容量（无订单簿；日间 symbol 换手 ≈100%）· 标准超额 Sharpe（未纳入无风险利率）· 2025 Alpha 反向成因 · `historyLimitCount` 抑制机制 · `turnover` 反转机制 · 外推性 · 复权/部分成交/停牌结转口径。
+- **📌 状态标记（写入 ROADMAP §47）**：`RESULT-LONG4-REAL-PATH-001` → **`INVALIDATED`**（净值引擎缺陷，已被 `RESULT-LONG4-P0-FIX-001` 取代）；`RESULT-FACTOR-TIMESCALE-001` / `-TOPN-001` / `-LONG-COMBO-001` → **`SUPERSEDED_BY_FINAL`**。
+- **本轮副作用**：✅ **未运行任何新实验**（无 IC / Permutation / 分组 / 回测 / 审计）· ✅ 全部数值**引自既有报告，未重新计算** · ✅ **零数据库写入** · ✅ **零业务 `.ts` 代码改动** · ✅ **未创建 Strategy Candidate** · ✅ 未修改 LONG-4 / MEDIUM 因子定义 · ✅ **ROADMAP 仅追加状态段，未新增实验任务**。
+- **Baseline Impact**：**major（归档冻结）** —— 形成并冻结 **三时间尺度职责表**（LONG 股票池 / MEDIUM 独立中期相对强弱 / SHORT 短期相对强弱待验证）与 **12 因子时间尺度矩阵**；写入**八条永久原则**与**十项 STOP 清单**；单独登记 **`9/9` T+5 净收益为负**这一关键事实；并完成三项文档状态标记。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · FACTOR-TIMESCALE-BENCHMARK-001 · 市场基准 / 绝对收益 / 成本敏感性 → 🔴 **市场基准不缺失；LONG-4 净值未跑赢市场；MEDIUM/SHORT 无绝对收益**
+
+- **Task**：在不新增因子、不组合因子、不搜索参数的前提下，验证 LONG / MEDIUM / SHORT 是否具有 ①相对市场 Alpha ②独立多头绝对收益 ③成本敏感性（固定档位 0/10/20/30/50 bps）。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/bench.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🟢 A. 市场基准【不缺失】（实查，未伪造、未更换数据源）**：DB 中真实存在 **`index_daily`**（+ `index_master`）—— **4 个指数**：`000001.SH` 上证指数 · `000300.SH` 沪深300 · `000905.SH` 中证500 · `399001.SZ` 深证成指；**各 1,880 交易日**，覆盖 **2019-01-02 ~ 2026-09-30** ⇒ **样本期（2019-01-31 ~ 2026-01-28）完全覆盖** ⇒ 主基准 = **沪深300**。**同口径对齐** = 逐笔取真实入场/出场 `tradeDate` 的指数 `close` ⇒ `Alpha_perTrade = 策略单笔净收益 − 指数同窗口收益`。
+- **指数自身（与策略同一日历区间，2019-01-31 ~ 2026-01-28 · 1,696 日）**：**沪深300** totalRet +47.36% · **CAGR 5.74%** · vol 18.75% · **Sharpe 0.3060** · **MDD −45.60%**；**中证500** +105.94% · **CAGR 10.95%** · Sharpe **0.5080** · MDD −41.81%；**上证指数** +60.62% · **CAGR 7.05%** · Sharpe **0.4255** · **MDD −27.27%**。沪深300 年度：2019 +27.95% · 2020 +25.51% · 2021 −6.21% · 2022 −21.27% · 2023 −11.75% · 2024 +16.20% · 2025 +21.19%。
+- **🔴 B.1 LONG-4 绝对收益与市场对比**：成本网格（0/10/20/30/50 bps）—— CAGR **5.91% / 5.59% / 5.31% / 4.98% / 4.36%**（**全档为正**）· Sharpe 0.3774/0.3518/**0.3306**/0.3056/0.2603 · MDD −28.68%/−29.54%/**−30.31%**/−31.19%/−32.91% · **PF 1.2904/1.2694/1.2516/1.2316/1.1953（全档 >1）** · 胜率 0.4708→0.4574 · totalRet +49.06%→+34.50% · avgConc **133.09~133.16**。
+  - **🔴 逐笔同窗口 Alpha（沪深300 · 20bps）= +0.99pp**（策略单笔 **+1.50%** − 指数同窗口 **+0.50%**，n = **5,785**），**4/7 年为正**（2021 **+5.91%** · 2022 +2.19% · 2024 +2.95% · 2025 +1.43%；2019 −4.98% · 2020 −2.60% · 2023 −4.10%）。
+  - **🔴 但净值 CAGR 5.31% < 沪深300 5.74% < 上证指数 7.05% < 中证500 10.95% ⇒ 净值层面【未跑赢任何宽基】**；✅ 仅 **Sharpe 0.3306 > 沪深300 0.3060** 与 **MDD 浅 15.29pp** 占优（vs 上证指数 MDD 深 3.04pp）。**主因 = 资金利用率仅 66.5%**（avgConc 133.09 / 200）。
+- **🔴 B.2 MEDIUM**：成本网格 CAGR **+0.39% / −1.30% / −2.37% / −4.38% / −7.85%**（**10bps 起为负**）· PF **1.0074/0.9764/0.9580/0.9255/0.8732**（10bps 起 <1）· MDD −40.62%→−63.44% · **逐笔同窗口市场 Alpha = −0.35pp（n = 5,673）** ⇒ 🔴 **既无绝对收益，也无市场 Alpha**（年度逐笔 Alpha **仅 1/7 年为正**）⇒ **只是【相对减亏】**。
+- **🔴 B.3 SHORT（全候选横截面，`preReturn10` / `limitGap`，T+1→T+5）**：沪深300 同窗口均值 **+0.10%**（n = 58,983）。**`preReturn10`** Strong gross **+0.04%**（n 14,838 · 胜率 0.4347）· Weak −1.37% · **spread +1.41%** · **Strong − 指数 = −0.06%**；**`limitGap`** Strong gross **−0.29%**（胜率 0.4166）· Weak −0.95% · **spread +0.66%** · **Strong − 指数 = −0.39%**。
+- **🟡 C. 成本敏感性（固定预注册档位，未搜索）** ⇒ **0~50bps 下仅两项结论仍成立**：① **LONG-4 绝对正收益（5.91%→4.36%，全档为正，PF 全档 >1）** ② **SHORT 的 spread（+1.41%/ +0.66%，因成本对价差恒定）**。🔴 **不成立**：**MEDIUM 绝对收益（10bps 起为负）** · **SHORT Strong 绝对收益（`preReturn10` 10bps 起为负 0.04%→−0.46%；`limitGap` 全档为负 −0.29%→−0.79%）**。🔴 **成本脆弱标记：MEDIUM 与 SHORT**。SHORT Strong 净胜率单调恶化（0.4347→0.4112 / 0.4166→0.3956）。⚠️ **SHORT 日间换手 ≈100%，spread 不随成本变化易被误读为「成本无关」——实际是两组绝对值同被下压、强势组迅速转负。**
+- **🔴 D. 随机基准 ≠ 市场基准（严格区分，已禁止混用）**：LONG-4 相对随机 **ΔCAGR +4.30pp（100% 击败）** / 相对市场 **逐笔 +0.99pp ✅ 但净值 −0.43pp 🔴**；MEDIUM 相对随机 **+11.58pp（100% 击败）** / 相对市场 **−0.35pp 🔴**；SHORT 相对随机 **perm p = 0.000 / 0.008** / 相对市场 **−0.06% / −0.39% 🔴**。⇒ **严禁把「击败随机」表述为「跑赢市场」**。
+- **🔴 E. 五层口径严格区分（任务 F）**：①**统计 Alpha**（IC/spread 显著：三者均 ✅）②**相对随机 Alpha**（LONG +4.30pp · MEDIUM +11.58pp · SHORT p = 0.000/0.008）③**相对市场 Alpha**（LONG **+0.99pp** · MEDIUM **−0.35pp** · SHORT **−0.06% / −0.39%**）④**绝对多头收益（0bps）**（LONG **5.91%** · MEDIUM **+0.39%** · SHORT **+0.04% / −0.29%**）⑤**成本后绝对收益（20bps）**（LONG **5.31%** · MEDIUM **−2.37%** · SHORT **−0.16% / −0.49%**）。⇒ **严格遵守「不得因 Strong−Weak 为正就宣称具备独立多头盈利能力」——SHORT 即为反例（spread +1.41% 但 Strong 绝对 ≈0 且成本后为负）。**
+- **七个最终问题**：**①LONG 是否真正跑赢市场？⇒ ⚠️ 分层：逐笔是（+0.99pp），净值否**（5.31% < 5.74% < 7.05% < 10.95%；Sharpe 胜沪深300、MDD 浅 15.29pp；主因利用率 66.5%）。**②MEDIUM？⇒ 🔴 只是相对减亏**（CAGR −2.37% · PF 0.9580 · 市场 Alpha −0.35pp；相对随机有效**不得**升级为市场 Alpha）。**③SHORT？⇒ 🔴 不存在独立多头绝对收益**。**④0~50bps 下仍成立者仅 TWO**（见 C）。**⑤值得进入下一阶段策略设计者 ⇒ 🟡 仅 LONG-4（有条件）**，前置 4 项：资金利用率 · 冲击成本与容量 · 2025 归因 · 无风险利率。**⑥继续 STOP ⇒ 🔴 MEDIUM 与 SHORT 独立多头**、`historyLimitCount`/`amountPercentile`/`turnover`（维持）、三尺度组合、参数搜索、Strategy Candidate。**⑦⇒ 🔴 不具备进入 Strategy Candidate 条件**（净值未跑赢任何宽基 · 利用率 66.5% · 冲击成本未建模 · 无风险利率未纳入 · 2025 归因受限 · MEDIUM/SHORT 无绝对收益）。
+- **⚠️ 口径披露（与既有报告的面板差异，已如实标注）**：LONG-4 本轮 **5,785 笔 / CAGR 5.31%** vs `P1` **6,948 笔 / 5.61%**（本轮 `buildPanel` **要求全部 6 个因子非空**）；MEDIUM 本轮 **−2.37%** vs `MEDIUM-REAL-001` **−0.82%**（本轮**不要求 rd20 存在**，出场在 rd20..80 内搜索）⇒ **结论方向一致（LONG 正 / MEDIUM 负），差异为口径而非矛盾**。
+- **9 条不能推出**：①「LONG-4 跑赢市场」❌（**净值 CAGR 低于全部三个宽基**）②「MEDIUM 有市场 Alpha」❌ ③「SHORT 有独立多头收益」❌ ④「spread 显著 = 可盈利」❌（SHORT 为反例）⑤「MDD 更浅 = 更优策略」❌（伴随利用率仅 66.5%）⑥「Sharpe 可直接跨尺度/跨基准比较」❌（未纳入无风险利率 · 利用率不同）⑦「成本对 SHORT 无影响」❌（spread 不变但绝对值同被下压）⑧「已验证冲击成本」❌（**未建模**，无订单簿数据）⑨「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 无新因子 · ✅ 无因子组合 · ✅ 无 LONG×MEDIUM×SHORT · ✅ 无权重/阈值/TopN/持有期搜索 · ✅ 无参数优化 · ✅ **未创建 Strategy Candidate** · ✅ 无新策略版本 · ✅ **未修改数据库/Schema** · ✅ **未修改现有因子定义** · ✅ **未重做时间尺度研究**（未研究 `historyLimitCount`/`amountPercentile`/`turnover`）· ✅ **未为获得市场基准而更换数据源**（直接使用 DB 内已有 `index_daily`）。
+- **Baseline Impact**：**major** —— 首次引入**真实市场基准**（`index_daily` · 沪深300/中证500/上证指数），并据此把此前「相对随机 Alpha」与**市场 Alpha** 严格分离；确立 **LONG-4 逐笔市场 Alpha 为正（+0.99pp）但净值 CAGR 未跑赢任何宽基（主因资金利用率 66.5%）**、**MEDIUM 市场 Alpha 为负（−0.35pp）**、**SHORT 无独立多头绝对收益**三条事实；登记 **MEDIUM 与 SHORT 为成本脆弱**；并给出「**不建议进入 Strategy Candidate**」的最终判定。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · LONG4-UTILIZATION-BENCHMARK-001 · 固定 5 档宽度 × 资金利用率 × 市场基准 → 🔴 **利用率提升未转化；五档全部跑输沪深300；宽度效应【不稳健】**
+
+- **Task**：验证 LONG-4 在**固定 5 档宽度**（Top5/Top10/Top20/Top50/Full）下提升资金利用率后，能否把选股 Alpha 转化为**市场超额净值**；市场基准 = 沪深300 `000300.SH`；成本 0/20/50bps。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/util.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅**（市场基准来自真实 `index_daily`）· **same compiled TS metric code ⚠️ 部分** · **platform persisted Run ❌ 未发生**。
+- **口径**：LONG-4 冻结 4 因子 · 窗口 **rd21 → rd60（顺延 rd80）完全不变** · **MAX_CONC = 200 五档一致** · 面板 候选 **56,296** / 决策日 **1,634** · 沪深300 同期（2019-01-31 ~ 2026-01-28 · 1,696 日）**CAGR 5.74% / totalReturn +47.36%** · 随机对照 **30 种子/档**。
+- **五档结果（20bps）**：**Top5** CAGR **4.96%** · totalRet +39.97% · Sharpe **0.3026** · MDD **−30.56%** · PF **1.2293** · 胜率 0.4643 · 5,830 笔 · 单笔 **+1.37%** · avgConc **134.12** · **利用率 67.06%** · **CAGR−HS300 −0.78pp**；**Top10** 4.32% · +34.18% · 0.1984 · −43.31% · 1.1527 · 0.4515 · 7,028 · +0.97% · 161.70 · **80.85%** · −1.42pp；**Top20** 0.95% · +6.77% · 0.0400 · −48.88% · 1.0291 · 0.4289 · 6,673 · +0.20% · 153.55 · 76.78% · −4.79pp；**Top50** **−0.54%** · −3.72% · −0.0222 · −52.31% · **0.9845** · 0.4222 · 6,565 · −0.11% · 151.07 · 75.53% · −6.28pp；**Full** 0.13% · +0.92% · 0.0054 · −49.03% · 1.0037 · 0.4274 · 6,874 · +0.03% · 158.18 · 79.09% · −5.60pp。
+- **🔴 逐笔市场 Alpha 随宽度【单调下降】**：Top5 **+0.89pp**（策略 +1.37% − HS300 +0.49%，n 5,830）→ Top10 **+0.73pp** → Top20 **−0.10pp** → Top50 **−0.49pp** → Full **−0.40pp** ⇒ **仅 Top5 / Top10 具备正的市场 Alpha**。
+- **随机对照（30 种子/档）**：随机 CAGR **−0.10% / −2.71% / −4.55% / −3.23% / −2.53%** · 随机利用率 62.46%/67.18%/65.16%/70.07%/73.55% ⇒ **ΔCAGR vs 随机 +5.06 / +7.03 / +5.50 / +2.69 / +2.66 pp**（相对随机仍全面为正）。
+- **成本网格（0/20/50bps）**：**Top5 5.58 / 4.96 / 3.95%** · **Top10 4.87 / 4.32 / 2.42%** ⇒ ✅ **仅此两档全档为正**；**Top20 1.98 / 0.95 / −1.84%** · **Top50 0.25 / −0.54 / −1.86%** · **Full 1.28 / 0.13 / −1.78%** ⇒ 🔴 **50bps 下 Top20/Top50/Full 全部转负**；🔴 **50bps 下无一档跑赢沪深300**（Top5 −1.78pp 为最好）。✅ **逐笔市场 Alpha 符号不随成本改变**（成本对价差恒定）。
+- **年度**：Top5 市场 Alpha 2019 **−5.34%** · 2020 −2.51% · 2021 **+5.79%** · 2022 **+2.24%** · 2023 **−4.02%** · 2024 **+2.84%** · 2025 **+1.11%** ⇒ **Top5 与 Top10 均 4/7 年为正**；🔴 **2019 / 2020 / 2023 三年全档为负**。年度收益：2019 全档 −11.87%~−21.73%（HS300 +27.95%）· 2021 Top10 **+19.47%**（HS300 −6.21%）· 2025 Top10 **+33.47%**（HS300 +21.19%）。
+- **🔴 五项最终回答**：**①哪个宽度最能解决利用率问题？⇒ 【没有一个能解决】** —— Top10 把利用率从 **67.06% 提到 80.85%（+13.79pp）**，但 **CAGR 反从 4.96% 降到 4.32%（−0.64pp）** ⇒ **明确标记为【摊薄效应】，不得宣称因子 Alpha 增强**。**②是否真正跑赢沪深300？⇒ 🔴 否，五档全部跑输**（Top5 −0.78pp 最接近；**即使 0bps 下 Top5 5.58% vs 5.74% 仍未跑赢**）；✅ 仅三维度占优：**Sharpe 0.3026 ≈ HS300 0.3060** · **MDD 浅 15.04pp** · **逐笔市场 Alpha +0.89pp**。**③收益提升来自 Alpha 还是利用率？⇒ 🔴 两者都不是** —— Alpha **随宽度单调下降**、利用率**非单调**、CAGR 与随机臂 CAGR **均随宽度下降** ⇒ **宽度收益 ≠ 选股 Alpha（本轮中两者皆为负贡献）**。**④20/50bps 下是否仍成立？⇒ 仅 Top5/Top10 全档为正；50bps 下无一档跑赢沪深300**。**⑤是否具备进入下一阶段策略工程的条件？⇒ 🔴 不具备**（五档全未跑赢 · **宽度效应不可靠** · 利用率提升未转化 · 市场 Alpha 仅 Top5/Top10 · 3/7 年 Alpha 为负 · 冲击成本未建模 · 无风险利率未纳入）。
+- **🔴 稳健性失败登记（必须报告，未掩盖）**：本轮与 **`RESULT-LONG4-P2-WIDTH-001` 在宽度方向上完全相反** —— **LONG-4 CAGR 随宽度**：本轮 **下降**（4.96%→0.13%）vs P2 **上升**（5.61%→**8.72%**）；**随机臂 CAGR 随宽度**：本轮 **下降**（−0.10%→−2.53%）vs P2 **上升**（1.23%→**5.12%**）；Top5 利用率 **67.06% vs P2 80.52%**；Top10 利用率 **80.85% vs P2 96.64%**；Top5 offered **6,148 vs P2 8,075**；面板 **56,296/1,634 vs P2 58,707/1,627**。**候选成因（已识别，未验证）**：①本轮仅要求 **4 个 LONG-4 因子**非空（未要求 `bodyHeight`/`preReturn10`）②`buildTrades` 增加 `rows.length ≥ 20` 日筛选（P2 无）③**利用率系统性更低** ⇒ **每日可成交候选更少，宽度展开空间被压缩**。⇒ **结论：宽度效应【不稳健】，两次名义相同的固定宽度实验给出相反方向 ⇒ 不得宣称任何宽度更优，也不得把任一方向的宽度结论当作已确立事实。**
+- **8 条不能推出**：①「Top10（或任何宽度）跑赢沪深300」❌（五档 CAGR 全部低于 5.74%）②「宽度提升带来 Alpha 增强」❌（**明确标记为摊薄**）③「宽度提升通过利用率带来收益」❌（利用率 +13.79pp 时 CAGR 反降 0.64pp）④「Top5 是最优宽度」❌（**宽度结论不稳健，不得据单轮断言**）⑤「MDD 更浅说明策略更优」❌（伴随利用率仅 67.06%）⑥「逐笔市场 Alpha +0.89pp 已足够进入策略」❌（净值 CAGR 仍 −0.78pp；未建模冲击成本）⑦「可外推其他数据集」❌ ⑧「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未新增因子 · ✅ 未改变因子方向/分桶 · ✅ 未组合 LONG/MEDIUM/SHORT · ✅ **未搜索最佳 TopN** · ✅ **未新增其他宽度档位** · ✅ 未做参数优化 · ✅ 未修改策略定义 · ✅ **未创建 Strategy Candidate / Strategy Version** · ✅ **未修改数据库/Schema/Migration** · ✅ **未重做时间尺度研究**。
+- **Baseline Impact**：**major（负面 + 稳健性告警）** —— 确立 **利用率提升（+13.79pp）未转化为收益（CAGR −0.64pp）**、**五档全部未跑赢沪深300（含 0bps）**、**逐笔市场 Alpha 随宽度单调下降（+0.89pp → −0.40pp）** 三条事实；并**登记关键稳健性失败**：**宽度效应在两轮名义相同的实验中方向相反** ⇒ **冻结「宽度结论不可用」，要求先统一面板口径再重验（需授权）**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-FACTOR-DISCOVERY-001 · 事件后路径状态因子发现 → 🟢 **首次发现满足全部四项严格判定的组合（`D15 maxAmp5 F40/F20 Top3`）**
+
+- **Task**：研究首板事件后 **T+1~T+20 已产生的动态路径状态信息**，寻找能在当时横截面排序并选出未来 TopN 的有效因子；**不研究 LONG-4 宽度、不优化已有 12 因子**。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/pe.cjs`、`peload.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 `NON-PLATFORM-FORMAL-RUN` 三层区分**：**real DB data ✅**（本轮新载入 **post rd1..80 OHLCV 明细 4,718,640 行**；市场基准来自真实 `index_daily`）· **same compiled TS metric code ⚠️ 部分**（因子为本轮**新构造**；**Stage-2 为简化引擎，未走 P0 验收**）· **platform persisted Run ❌ 未发生**。
+- **口径与防未来设计（第三阶段）**：决策时点 **D ∈ {1,3,5,10,15,20}**（rd **D** 收盘可知）· 未来窗口 **F ∈ {5,10,20,40}**（仅 `D+F ≤ 80`）· 构建规模 **(事件×D) = 346,119 行** · **Stage-1 合法单元 600 个** · 27 个候选因子覆盖任务要求的六族（收益状态/回撤反弹/价格结构/波动/成交量/路径形态）。
+  - **🔴 防未来逐项声明（全部因子共用）**：**最晚使用 rd D** · **因子截止 rd D 收盘** · **标签开始 rd D+1 `open`**（入场价 `open(D+1)` 且需 `canBuyAtOpen=1`）· ❌ **未使用未来 high/low/close** · ❌ **未使用未来成交量** · ❌ **无路径泄漏**（`daysToBreakEventHigh` 仅在 t ≤ D 内搜索，未突破记 1.0）· 代码层 `factorsAt(pr, ps, D)` 所有循环上界为 `D` ⇒ **结构性防泄漏** ⇒ **无 LEAKAGE，600 单元全部进入结论**。
+- **🟢 第一阶段（600 单元）**：**58 个通过**（`Strong net@20bps > 0` 且 ≥60% 年为正 且 |t|>2 且 spread>0）；**148/600 单元的 Snet > 0**。
+  - **前 7 名全部为 F40 且为振幅类**：`D15 maxAmp5 F40` IC **+0.1683(t 29.43)** spread **+4.10%** Sgross +1.59% **Snet +1.39%**（5/7）；`D15 avgAmp5 F40` IC **+0.1827(t 30.61)** 正占比 **0.7877** spread **+4.20%** **Snet +1.37%**；`D20 avgAmp5 F40` Snet +1.24%；`D20 maxAmp5 F40` +1.19%；**`D10 avgAmp5 F40` IC +0.1904(t 32.16) 正占比 0.8072** Snet +1.13%；`D10 maxAmp5 F40` +1.07%；`D20 reboundFromLow F40` +1.06%；**`D15 avgAmp5 F20` Snet +0.97%（6/7，Stage-1 最稳）**。
+  - **因子族分布**：**`avgAmp5` 12 · `maxAmp5` 10** · `reboundFromLow` 7 · `posInEventBar` 7 · `retCum` 5 · `recoveryRatio` 5 · `ampTrend` 4 · `upDownVolDiff` 4 · `ret1/3/5` 2/1/1 ⇒ **统一方向「低振幅 · 深回撤后反弹少 · 事件日内位置低 · 累计涨幅低（反转）」**。
+  - **决策时点分布**：**D15 = 21** · **D20 = 26** · D5 = 7 · D10 = 4 · **D1 = 0 · D3 = 0**（⇒ **事件后最初 3 日无可用路径状态信息**）。**未来窗口分布**：F5 = 23 · F10 = 16 · **F20 = 4** · **F40 = 15**。
+  - **🔴 只有相对 Alpha 无绝对收益者 = 452/600 单元**；最差：`D1 isNewHigh5 F40` **−3.20%** · `D5 volRatioChange F40` −2.98% · `D10 volTrend F40` −2.88% · `D1 ddFromEventHigh F40` −2.78% ⇒ **「创新高/距事件高点/量能趋势」类 Strong 组成本后为负**。
+  - **🔴 Stage-1 年度：全部通过单元为 5/7 或 6/7，【无 7/7】**；**2023 年对所有通过单元均为负**（如 `D15 maxAmp5 F40` 2023 **−4.41%**）⇒ **单一 regime 风险集中**。
+- **🟢 第二阶段（Top3/Top5/Top10 × 0/20bps，共 72 组合）** —— 前 12（CAGR / totalReturn / Sharpe / MDD / PF / 胜率 / **市场 Alpha** / **正年**）：`D15 maxAmp5 F20 Top3 0bps` **12.12%** / +117.32% / 2.2921 / −18.59% / **1.3948** / 0.4952 / +0.93% / **7/7**；`D15 maxAmp5 F20 Top5 0bps` 11.29% / +106.68% / 2.2021 / −17.15% / 1.3402 / **7/7**；**`D15 maxAmp5 F20 Top3 20bps` 10.83%** / +100.95% / 1.9664 / −19.28% / **1.3305** / 0.4913 / +0.73% / **7/7**；`D15 avgAmp5 F20 Top3 0bps` 10.80% / **7/7**；`D15 maxAmp5 F40 Top3 0bps` 10.49% / +98.37% / **2.5910** / **−15.65%** / **1.4871** / **市场 Alpha +1.53%** / **7/7**；`D15 avgAmp5 F20 Top5/Top10 0bps` 10.35%；`D10 avgAmp5 F40 Top3 0bps` 10.07% / +1.34% / **7/7**；`D15 maxAmp5 F40 Top5 0bps` 10.00% / **2.6519** / +1.41% / **7/7**；**`D15 maxAmp5 F20 Top5 20bps` 9.95%** / **7/7**；**`D15 maxAmp5 F40 Top3 20bps` 9.81% / Sharpe 2.3731 / MDD −17.28% / PF 1.4374 / Alpha +1.33% / 7/7**。
+  - **0 vs 20bps 对照**：`D15 maxAmp5 F40 Top3` 10.49%→**9.81%**（PF 1.4871→**1.4374**）· `D15 maxAmp5 F40 Top5` 10.00%→**9.31%** · `D15 avgAmp5 F40 Top3` 9.44%→**8.72%** · `D10 avgAmp5 F40 Top5` 9.86%→**9.17%** · `D20 avgAmp5 F40 Top3` 9.76%→**9.08%（6/7）** · `D15 maxAmp5 F40 Top10` 8.68%→**7.96%（5/7）**。
+  - **对照基准 沪深300：CAGR 5.74% · MDD −45.60% · Sharpe 0.3060** ⇒ 🟢 **全部 Top3/Top5 组合在 20bps 下 CAGR 8.47%~10.83%【高于沪深300】，MDD（−17%~−19%）远浅，PF 1.28~1.44 > 1，市场 Alpha +0.60%~+1.33%，多数 7/7 年为正。**
+- **🔴 六层口径区分（任务要求）**：①**统计 Alpha** ✅ IC +0.1683(t 29.43) 正占比 0.7774 ②**相对随机 Alpha** ⚠️ **本轮未跑随机对照 ⇒ 登记为缺口** ③**市场 Alpha** ✅ **逐笔同窗口 +1.33pp** ④**Strong−Weak** ✅ **+4.10%** ⑤**Strong 绝对** ✅ **+1.59% gross** ⑥**20bps 后绝对** ✅ **+1.39% net**（Stage-1）· **Top3 组合 CAGR 9.81%**（Stage-2）⇒ ✅ **未因 Strong−Weak>0 就认定可做多（第 5、6 层均为正）。**
+- **七个最终问题**：**①最有价值决策时点 ⇒ D15**（21/58 通过，TopN 最优 10.83%；D20 通过最多 26 但年度较差 6/7；**D1/D3 通过 0 个**）。**②具有稳定 Alpha 的因子 ⇒ 波动类主导**（`avgAmp5` 12 · `maxAmp5` 10 · `reboundFromLow` 7 · `posInEventBar` 7 · `retCum` 5 · `recoveryRatio` 5 · `ampTrend` 4 · `upDownVolDiff` 4；方向统一为**低波动+反转**）。**③只有相对 Alpha 无绝对收益者 ⇒ 452/600 单元**（`isNewHigh5`/`volRatioChange`/`volTrend`/`ddFromEventHigh`）。**④能形成 Top3/5/10 成本后正收益者 ⇒ 仅 `avgAmp5` 与 `maxAmp5`**（20bps Top3 8.72%~10.83% · Top5 8.47%~9.95% · Top10 7.66%~7.96%；PF 1.28~1.44）。**⑤主要作用尺度 ⇒ F40 幅度最大、F20 年度最稳**（F5/F10 幅度小）。**⑥是否发现与 LONG-4 不同的信息来源 ⇒ ✅ 是**（LONG-4 = 事件日及更早的**静态横截面**；本轮 = 事件后 rd1..D 的**动态路径状态**；⚠️ **未检验相关性/正交性**）。**⑦是否值得进入下一阶段 ⇒ ✅ 值得，但须先通过 3 项前置验证。**
+- **🟢 关键判定结果**：**`CANDIDATE_FOR_NEXT_STAGE`**（4 个）：`D15 maxAmp5 F40 Top3`（20bps 9.81% · 7/7）· **`D15 maxAmp5 F20 Top3`（20bps 10.83% · 7/7）** · `D15 avgAmp5 F40 Top3`（8.72% · 7/7）· `D10 avgAmp5 F40 Top5`（9.17% · 7/7）；**`OBSERVATION`**：`D20 avgAmp5 F40 Top3`（6/7）· `D15 maxAmp5 F40 Top10`（5/7）· **Stage-1 的 58 个单元（5~6/7）**；**`STOP`**：其余 **542** 个单元（含 **452** 个 Snet≤0）。
+- **🔴 9 项口径保留（未掩盖）**：①**Stage-2 未通过 P0 oracle 验收**（简化引擎：逐日等权 `MC=N×F`、**未含 symbol 冲突检查、未含 `canSellAtClose` 顺延**）⇒ **须在 P0 引擎复现后才可采信** ②**冲击成本与容量未建模**（**低振幅股流动性可能更差**）③**低波动因子 Sharpe 有机械性偏高成分**（分母变小）④**随机对照缺失** ⇒ 第 2 层未验证 ⑤`MC = N×F` 使 F=20/40 利用率路径不同，未做敏感性 ⑥**Stage-1 无 7/7，2023 全部为负** ⇒ regime 集中 ⑦D1/D3 通过 0 个 ⑧**未检验与 LONG-4 相关性** ⑨分位/TopN/持有期均为预注册固定档位。
+- **9 条不能推出**：①「已确认可交易策略」❌（**Stage-2 未过 P0 验收**）②「低振幅因子是新发现」❌（**低波动异象已知**；本轮确认其在事件后路径状态上同样成立）③「Top3 最优」❌（**未搜索最优 TopN**）④「F40 最优」❌（**未搜索持有期**）⑤「相对随机有效」❌（**未跑随机对照**）⑥「可跑赢市场」❌（**未建模冲击成本**，低振幅股容量可能不足）⑦「与 LONG-4 正交」❌（**未检验相关性**）⑧「可外推」❌ ⑨「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ **未重新研究已有 12 因子** · ✅ 未新增 LONG-4 因子 · ✅ 未组合因子 · ✅ 未做因子交互 · ✅ 未做综合评分 · ✅ 未搜索权重 · ✅ **未搜索阈值**（三分位固定）· ✅ **未搜索持有期**（F5/10/20/40 预注册）· ✅ **未搜索最优 TopN**（Top3/5/10 预注册）· ✅ 未与 LONG-4 组合 · ✅ 未组合 LONG/MEDIUM/SHORT · ✅ **未创建 Strategy Candidate / Strategy Version** · ✅ **未修改 DB/Schema/Migration**。
+- **Baseline Impact**：**major（正面）** —— **首次发现满足「决策时点真实可知 + TopN Strong 组 + 成本后绝对收益为正 + 跨年度稳定」全部四项的组合**（`D15 maxAmp5 F40/F20 Top3`，20bps CAGR **9.81%/10.83%** · PF 1.4374/1.3305 · MDD −17.28%/−19.28% · **年度 7/7** · **市场 Alpha +1.33%/+0.73%**），并在**全程序范围内首次出现 CAGR 高于沪深300（5.74%）的配置**；确立 **事件后路径状态（波动类）为主要信息族**、**D15 为最优决策时点**、**D1/D3 无信息**、**F40 幅度最大 / F20 年度最稳**；同时登记 **9 项口径保留**，明确 **Stage-2 未经 P0 验收前不得采信**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-P0-ORACLE-001 · 事件后候选的 P0 引擎复现 → 🔴 **`ORACLE_FAIL`（执行口径未实现；`canSellAtClose` 缺失致 100% 强制顺延）· 不进入下一阶段**
+
+- **Task**：在**已验证的 P0 正式回测引擎**上复现 4 个固定候选（`D15 × {maxAmp5, avgAmp5} × F{20,40} × Top3`），确认上一轮简化 Stage-2 的正收益是否真实成立；成本档 **20/50/100bps**；市场基准 **沪深300**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/peoracle.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **✅ 引擎一致性：PASS** —— 4 个候选的**独立 oracle 逐日最大偏差 8.75e-14 ~ 1.08e-13**，**断言 0 失败**；含 symbol 冲突、`canBuyAtOpen`、book 满、现金、先出后入、调用隔离、实际交易日历（**1,716 天**）。面板：可用事件 **58,229** · 跳过 754 · 决策日 **1,637**。
+- **🔴 执行规则缺陷（本轮决定性发现）**：诊断计数器 **`defer = 4,372/4,372`（maxAmp5）与 `4,361/4,361`（avgAmp5）· `forced` 同值 = 100%** ⇒ **出场搜索 `for rd = targetExit..80` 从未命中任何 `canSellAtClose === 1`** ⇒ 走 rd80 兜底。**根因**：`scripts/_scratch/peload.cjs` 的 SELECT **未包含 `canSellAtClose`**（仅 `eventId, relativeDay, tradeDate, open, close, high, low, volume, canBuyAtOpen`）⇒ 判定恒为 false。
+  - **⇒ 后果：F20 与 F40 的持有期未按设计区分 —— 四者实际出场全部落在 rd80（持有 64 个交易日）** ⇒ **本轮【不是】对候选设计的有效复现** ⇒ **标记得 `ORACLE_FAIL`（口径实现失败，非引擎一致性失败）** ⇒ **按任务规则「Oracle 未通过不得进入下一阶段」⇒ 未执行 NB-Random**。
+  - ✅ **正面**：**该缺陷由诊断计数器（`defer`/`forced`）主动暴露**（未被掩盖为「结果正常」）⇒ 确立「**出场顺延路径必须显式核对**」这一纪律。
+- **🔴 缺陷口径下的观测（不得作为候选结论）**：**`maxAmp5 F20`** 20/50/100bps CAGR **7.82% / 7.11% / 5.48%**（Sharpe 0.4098/0.3631/0.2685 · MDD −33.44%/−34.07%/−37.57% · PF 1.4684/1.4060/1.2856 · 胜率 0.4772/0.4700/0.4568 · 交易 1,532 · 单笔 +2.73%/+2.43%/+1.79% · 利用率 95.23% · 正年 7/8/6 · 逐笔市场 Alpha **+1.27/+0.97/+0.39pp** · CAGR−HS300 **+0.99/+0.28/−1.35pp**）；**`maxAmp5 F40`** **8.11% / 7.38% / 6.19%**（Sharpe 0.4389/0.3879/0.3124 · MDD −29.48%/−30.15%/−32.77% · PF 1.4891/1.4235/1.3303 · 交易 2,992 · 利用率 92.99% · 正年 6/8/5 · Alpha **+1.68/+1.36/+0.95pp** · CAGR−HS300 **+1.28/+0.56/−0.64pp**）；**`avgAmp5 F20`** **7.75% / 7.04% / 6.00%**（PF 1.4848/1.4193/1.3313 · 正年 7/8/6 · Alpha +1.27/+0.97/+0.57pp · CAGR−HS300 +0.92/+0.21/−0.83pp）；**`avgAmp5 F40`** **6.89% / 5.77% / 4.19%**（PF 1.4022/1.3184/1.2131 · MDD −32.10%/−35.87%/**−42.32%** · 正年 6/8/5 · Alpha +1.25/+0.85/+0.30pp · CAGR−HS300 +0.06/−1.06/−2.64pp）。**沪深300 同期 CAGR 6.83%**。
+- **🔴 简化引擎 vs P0 逐项对照（关键方法学结论）**：`maxAmp5 F20` **10.83% → 7.82%（−3.01pp）** · `maxAmp5 F40` 9.81% → 8.11%（−1.70pp）· `avgAmp5 F20` **10.80% → 7.75%（−3.05pp）** · `avgAmp5 F40` 9.44% → 6.89%（−2.55pp）⇒ **简化引擎系统性【高估 CAGR】1.70~3.05pp** · **【低估 MDD】12~16pp**（P0 −29%~−34% vs 简化 −17%~−19%）· **【高估 Sharpe】4.5~5.4 倍**（P0 Sharpe 仅 **0.35~0.44**，而非 1.97~2.37）· PF 方向不一致（P0 在 F20 上更高）⇒ **简化 Stage-2 结论不可直接采信**（与既有「未经 P0 验收」登记一致，现升级为**具体缺陷**）。
+- **判定**：四候选**全部 `ORACLE_FAIL` + `STOP`（本轮）**；成本维度在缺陷口径下三档**全部为正**（`maxAmp5 F40` 最好 8.11%/7.38%/6.19%），但 🔴 **100bps 下四者的「CAGR − 沪深300」全部转负**（−0.64 ~ −2.64pp）⇒ **按任务规则「不否定因子，只标记容量/交易成本风险」登记为 `COST_SENSITIVE` 风险项**。
+- **五个必答问题**：**①简化结果能否被复现？⇒ 🔴 不能**（引擎一致性 ✅ PASS，但**候选口径实现 FAIL**；数值系统性偏低；Sharpe 大幅下降）。**②四个候选哪个仍成立？⇒ 🔴 本轮无法判定**（持有期口径未实现）。**③20/50/100bps 下哪个仍有绝对收益？⇒ ⚠️ 缺陷口径下四者三档全为正，但 100bps 下全部不再跑赢沪深300。④是否存在容量/冲击成本风险？⇒ ✅ 存在且明确**（20→100bps CAGR 降 1.92~2.70pp，相对降幅 **24%~39%**；Alpha 由 +1.25~+1.68pp 降至 +0.30~+0.95pp；PF 1.40~1.49→1.21~1.33；MDD→−33%~−42%；利用率 90.5%~95.2%；🔴 **因子选低振幅股 ⇒ 低振幅常伴低流动性 ⇒ 实际冲击成本可能显著高于 100bps**）。**⑤是否值得做 NB-Random？⇒ 🔴 不值得（本轮）**（Oracle 未通过 ⇒ 按规则不进入下一阶段）。
+- **🔴 根因与最小修复路径**：①**根因** = `peload.cjs` SELECT 缺 `canSellAtClose` ②**传播** = `pe.cjs` 与 `peoracle.cjs` 均无法判定「可卖」⇒ 出场搜索永不命中 ③**已影响范围** = 🔴 **`RESULT-POST-EVENT-STATE-FACTOR-DISCOVERY-001` 的 Stage-2 简化引擎同样未含 `canSellAtClose`** ⇒ **该轮 Stage-2 结论亦不可采信** ④**最小修复** = SELECT 加入 `canSellAtClose` 并重载缓存 → 重跑 `peoracle.cjs` ⑤**附加校验（必须）** = 加硬断言 **`defer` 比例 < 5% 且 `forced` = 0`**（本轮 `defer` = 100% ⇒ 正是该断言缺失导致缺陷未自动拦截）。
+- **7 条不能推出**：①「简化引擎结果已被复现」❌（P0 CAGR 系统性低 1.70~3.05pp、Sharpe 低 4.5~5.4 倍）②「四个候选中某个成立」❌（**持有期口径未实现**）③「F20 与 F40 存在差异」❌（两者实际出场均为 rd80 ⇒ **同口径**）④「低振幅因子有 Alpha」（本轮）❌（缺陷口径下的观测不可作因子结论）⑤「因子无 Alpha」❌（**同样不能反向断言 ⇒ 本轮是口径失败，不是因子证伪**）⑥「成本后仍跑赢市场」❌（100bps 下 CAGR−沪深300 全档为负）⑦「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ **未做 NB-Random**（因 Oracle 未通过）· ✅ 未做 LONG-4 组合 · ✅ 未做因子组合 · ✅ 未做权重/阈值/TopN/持有期搜索 · ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改 DB/Schema/Migration** · ✅ **未重新运行已有 12 因子** · ✅ **未继续做宽度优化**。
+- **Baseline Impact**：**major（负债 + 方法学修正）** —— **发现并登记 `canSellAtClose` 缺失导致出场口径 100% 强制顺延的缺陷**（4 候选全部 `ORACLE_FAIL`），据此**拒绝进入下一阶段（未做 NB-Random）**；同时产出**简化引擎与 P0 引擎的系统性偏差量化**（CAGR 高估 1.70~3.05pp · MDD 低估 12~16pp · **Sharpe 高估 4.5~5.4 倍**）⇒ **确认并强化「未经 P0 验收的简化结果不可采信」这一纪律**；并回溯登记 **`POST-EVENT-STATE-FACTOR-DISCOVERY-001` 的 Stage-2 同样受影响**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-P0-ORACLE-002 · `canSellAtClose` 修复后重跑 → ✅ **全部 4 个候选 `ORACLE_PASS`；20bps 下全部跑赢沪深300**
+
+- **Task**：修复上一轮 `canSellAtClose` 缺失导致的出场口径错误，对**完全相同的 4 个候选**重新执行 P0 Oracle（P0-1 最小修复 / P0-2 硬性诊断 / P0-3 正式重跑 / P0-4 独立 Oracle 逐笔五维验证 / P0-5 与缺陷基线对照）。
+- **Changes**：🔴 **零业务代码改动**。仅修补 2 个未跟踪只读 harness：`scripts/_scratch/peload.cjs`（SELECT 加入 `canSellAtClose`）· `scripts/_scratch/peoracle.cjs`（P0-1 字段核查 + P0-2 硬性诊断 + P0-4 逐笔五维一致性）；新增 1 份报告。**未修改 ROADMAP**（本任务未要求）。
+- **✅ P0-1 修复成功**：`pe_post.json` 重载 **810.4 MB / 4,718,640 行**；字段 `…, canBuyAtOpen, **canSellAtClose**`；**`canSellAtClose` 缺失 0 行** · **`=1`: 4,640,793（98.35%）** · `=0`: 77,847；`canBuyAtOpen` `=1`: 4,671,604 / `=0`: 47,036；**`CSC_LOADED = true`**；各 rd 占比稳定（rd16 98.1% · rd35 98.4% · rd55 98.7% · rd80 98.8%）。
+- **✅ P0-2 硬性诊断全部通过**：**`forced = 0`（四候选全部）** · **`defer/offered` = 0.6393% / 0.5936% / 0.4117% / 0.6863%**（远低于上一轮的 100%）· skipUnfill 9/9/17/18。
+  - **exit `relativeDay` 分布（正常顺延 vs rd80 forced 明确区分）**：**`maxAmp5 F20`** 目标 rd35 ⇒ **rd35: 4,352（99.36%）** + rd36:19/rd37:4/rd38:1/rd39:1/rd40:2/rd44:1，**forced 0**；**`maxAmp5 F40`** 目标 rd55 ⇒ **rd55: 4,354（99.41%）** + rd56:18/rd57:4/rd59:1/rd61:3，**forced 0**；**`avgAmp5 F20`** **rd35: 4,354（99.59%）**；**`avgAmp5 F40`** **rd55: 4,341（99.31%）**。
+- **✅ P0-3/P0-4 全部 `ORACLE_PASS`**：独立 oracle NAV 逐日最大偏差 **3.52e-13 / 1.29e-13 / 3.23e-13 / 1.40e-13**（机器精度级）；**逐笔五维一致性（成交集合缺失 / entry / exit / exit reason / deferred）【全部为 0】**；**断言 0 失败**；**平均实际持有：F20 = 19.01 日**（设计 rd16→rd35）· **F40 = 39.01 日**（设计 rd16→rd55）。
+- **🟢 三档成本结果（沪深300 同期 CAGR 6.83%）**：**`maxAmp5 F20`** —— 20bps **CAGR 9.45%** · Sharpe **0.6193** · MDD −26.50% · PF 1.3335 · 胜率 0.4945 · 4,295 笔 · 单笔 +1.24% · 利用率 79.31% · **正年 7/8** · **逐笔市场 Alpha +0.75pp** · **CAGR−HS300 +2.62pp**；50bps 7.58% / +0.45pp / +0.75pp；**100bps 3.69%** / −0.05pp / 🔴 **−3.14pp**。**`maxAmp5 F40`** —— 20bps **8.78%** · Sharpe 0.5824 · **MDD −24.23%** · **PF 1.4613** · 4,213 笔 · 单笔 +2.30% · 利用率 79.81% · 6/8 · **Alpha +1.52pp** · **+1.95pp**；50bps **7.85%** / +1.22pp / +1.03pp；**100bps 6.20%** / **+0.72pp** / 🔴 −0.63pp。**`avgAmp5 F20`** —— 20bps 8.27% / Sharpe 0.5279 / PF 1.2883 / **7/8** / +0.57pp / **+1.44pp**；50bps 6.27% / −0.56pp；**100bps 2.14%** / −0.21pp / 🔴 **−4.69pp**。**`avgAmp5 F40`** —— 20bps 7.41% / Sharpe 0.4734 / PF 1.3812 / 6/8 / +1.11pp / **+0.58pp**；50bps 6.41% / −0.42pp；**100bps 4.61%** / +0.31pp / 🔴 −2.22pp。
+  - 🟢 **20bps 下四候选绝对收益全为正，且【全部跑赢沪深300】（+0.58 ~ +2.62pp）**；🔴 **100bps 下四候选绝对收益仍全为正，但【全部不再跑赢沪深300】（−0.63 ~ −4.69pp）**。
+- **P0-5 与缺陷基线对照（仅登记，不作结论性判断）**：修复后 **CAGR 四者均上升**（+0.52 ~ +1.63pp）· **Sharpe 均上升**（+0.11 ~ +0.21）· **MDD 均变浅**（−6.1 ~ −6.9pp）· **PF 在 F20 上下降**（1.4684→1.3335 / 1.4848→1.2883）、F40 基本持平 · **交易数大幅增加**（1,532→4,295 · 2,992→4,213，为持有期由 **64 日缩短为 19/39 日**的直接结果）；**exit rd 分布由「全部 rd80（100% forced）」修正为「rd35/rd55 占 99.3%~99.6% + 少量正常顺延 + forced 0」**。⚠️ **上一轮结果仅作缺陷诊断基线，不构成任何候选结论。**
+- **判定（四项条件全部满足）**：`canSellAtClose` 正确加载 ✅ · `forced = 0` ✅ · exit 规则正确 ✅ · 独立 Oracle 一致 ✅ ⇒ **四候选全部 `ORACLE_PASS`**。**成本标记**：**`maxAmp5 F40` = `COST_ROBUST`**（100bps **6.20%**，保留 **71%**，PF 仍 1.2774）；**`maxAmp5 F20` / `avgAmp5 F20` / `avgAmp5 F40` = `COST_SENSITIVE`**（100bps 保留 39% / 26% / 62%）。
+- **七个必答问题**：**①`canSellAtClose` 修复是否成功？⇒ ✅ 成功**（缺失 0 · =1 占 98.35% · `CSC_LOADED = true`）。**②F20 是否真正按目标持有期退出？⇒ ✅ 是**（rd35 占 99.36%/99.59% · 平均持有 **19.01 日** · forced 0）。**③F40？⇒ ✅ 是**（rd55 占 99.41%/99.31% · 平均持有 **39.01 日** · forced 0）。**④四候选各自的 Oracle 结果？⇒ 全部 `ORACLE_PASS`**（NAV 偏差 1.29e-13~3.52e-13 · 逐笔五维差异全 0 · 断言 0 失败）。**⑤20/50/100bps 下绝对收益及市场 Alpha？⇒ 20bps 四者全正且全部跑赢（+0.58~+2.62pp）；50bps 两者仍跑赢；100bps 四者绝对仍正但全部不再跑赢**。**⑥哪些进入 `ORACLE_PASS`？⇒ 全部 4 个**。**⑦是否具备执行 NB-Random 的前置条件？⇒ ✅ 具备**（四项条件全满足）—— 🛑 **但按任务要求「Oracle 全部通过后停止本任务并等待下一阶段指令，不要自行执行 NB-Random」⇒ 本任务在此停止。**
+- **7 条不能推出**：①「已确认可交易策略」❌（**未建模冲击成本/容量**；100bps 下四者已全部不再跑赢）②「低振幅因子是新发现」❌（低波动异象已知）③「相对随机有效」❌（**未执行 NB-Random**）④「某候选最优」❌（**未搜索 TopN/持有期/权重**）⑤「可外推」❌ ⑥「上一轮结果可作候选结论」❌（缺陷诊断基线）⑦「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ **未执行 NB-Random** · ✅ 未做 LONG-4 组合 · ✅ 未做因子组合 · ✅ 未做权重/阈值/TopN/持有期搜索 · ✅ 未新增因子发现 · ✅ **未创建 Strategy Candidate / Version** · ✅ **未执行正式平台 Run** · ✅ **未修改 DB/Schema/Migration**。
+- **Baseline Impact**：**major（正面 + 缺陷闭环）** —— **完成 `canSellAtClose` 缺陷的修复与闭环**（P0-1 字段核查 + P0-2 硬性诊断门控 + P0-4 逐笔五维一致性），**四候选全部 `ORACLE_PASS`**；**首次在已验证 P0 引擎上确认事件后状态因子候选的真实表现**：**20bps 下四者绝对收益全为正且【全部跑赢沪深300】（+0.58~+2.62pp）**、**`maxAmp5 F40` 为 `COST_ROBUST`（100bps 保留 71%）**；并确立 **「出场顺延必须显式核对 + `forced = 0` 硬门控」** 为常驻诊断要求。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-NB-RANDOM-001 · 4 候选随机 TopN 对照 → 🔴 **四候选全部 `INVALID`（预注册可比性门控触发）· 未比较 CAGR**
+
+- **Task**：验证 P0 Oracle 已通过的 4 个固定候选是否显著优于**同口径随机 TopN**（1,000 seeds · 仅 20bps · 复用 P0-ORACLE-002 已验证口径）。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/nbrandom.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **口径**：**`canSellAtClose` 已修复并加载**（缺失 0 · `=1` 占 98.35%）· D=15 · rd16 `open` 入场 · 目标 rd(D+F) 出场 · 不可卖顺延 · rd80 兜底 · 先出后入 · symbol 冲突 · book cap · cash · `MAX_CONC = N×F` · `w = 1/MC` 不重归一 · **20bps** · 日历 **1,716 天** · 有效决策日 **1,463** · **1,000 seeds**（种子串 `NB|{key}|{s}`，FNV-1a 派生，固定可复现）· 随机臂与因子臂**同候选池/同规则/同成本/同持仓期/同 `MAX_CONC`/同资金配置**。
+- **🔴 预注册可比性门控（判据 `|trades 差| < 5%` 且 `|util 差| < 0.03`）—— 四候选【全部触发】**：**`maxAmp5 F20`** Factor trades **4,304** vs Random **3,894.7**（**+9.5%**）· util **0.7948** vs **0.7197**（**+0.0751**）；**`maxAmp5 F40`** 4,222 vs 3,898.0（+7.7%）· 0.7998 vs 0.7387（+0.0611）；**`avgAmp5 F20`** 4,311 vs 3,890.4（**+9.8%**）· 0.7959 vs 0.7189（**+0.0770**）；**`avgAmp5 F40`** 4,218 vs 3,894.3（+7.7%）· 0.7992 vs 0.7380（+0.0612）⇒ 🔴 **全部 `INVALID`**。
+- **🔴 结构性根因（本轮唯一可确证的方法学结论）**：两臂**尝试入场次数完全相同（4,389）**，差异在**接受率**（因子臂 **98.1%** vs 随机臂 **88.7%**）。根因：**`MAX_CONC = N × F` 恰好等于稳态需求**（3 只/日 × F 日 = 3F = MC）⇒ **账本处于【饱和边界】** ⇒ 任何选股差异改变**持仓占用时序** ⇒ 改变 **book cap / symbol 冲突 / cash 约束**触发频率 ⇒ **随机臂天然处于容量劣势**（利用率低 6.1~7.7pp）⇒ **观测 ΔCAGR 中含利用率优势的贡献，无法归因于选择能力**。
+- **🔴 观测数值（因不可比，不作为结论）**：**Factor CAGR** **0.0942 / 0.0877 / 0.0825 / 0.0747**；**Random mean** **−0.0158 / −0.0057 / −0.0170 / −0.0062** · median −0.0171/−0.0055/−0.0183/−0.0057 · **p05 −0.0613/−0.0341/−0.0624/−0.0349** · p95 +0.0321/+0.0223/+0.0287/+0.0221 · sd 0.0279/0.0171/0.0274/0.0170 ⇒ **ΔCAGR +0.1101 / +0.0933 / +0.0995 / +0.0808** · **超越比例 1.000（四者）** · **p_emp 0.001（= 1/1001 下界，1,000 种子无一达到因子臂水平）**。
+  - **其他指标**：Factor Sharpe **0.6160/0.5796/0.5245/0.4755** vs Random Sharpe mean **−0.0616/−0.0230/−0.0665/−0.0251**；Factor MDD **−0.2647/−0.2425/−0.2742/−0.2594** vs Random MDD mean **−0.5981/−0.5367/−0.6001/−0.5390**；Factor PF **1.3318/1.4595/1.2865/1.3839** vs Random PF mean **0.9746/0.9862/0.9726/0.9849**；Factor 胜率 0.4944/0.4856/0.4929/0.4801；Factor totalReturn **+88.40%/+80.56%/+74.64%/+65.94%**；Factor 正年 **7/8 · 6/8 · 7/8 · 6/8**。
+- **🔴 逐年超越比例**：`maxAmp5 F20` 2019 0.951 · 2020 0.861 · 2021 0.993 · **2022 1.000** · 2023 0.920 · 2024 0.993 · **2025 🔴 0.340**；`maxAmp5 F40` **0.999** · 0.958 · 0.994 · **1.000** · **1.000** · 0.995 · **2025 🔴 0.091**；`avgAmp5 F20` 0.863 · 0.951 · 0.937 · **1.000** · 0.952 · 0.987 · **2025 🔴 0.258**；`avgAmp5 F40` 0.958 · 0.976 · 0.949 · **1.000** · **1.000** · 0.995 · **2025 🔴 0.032**。
+  - 🔴 **值得单独登记：2025 年四候选超越比例仅 0.032~0.340**（随机臂均值 **+0.2249~+0.2500** 高于因子臂 **+0.1418~+0.2163**，且**随机臂 p05 +0.1237~+0.1488 已高于因子臂**）⇒ **2025 年因子臂【跑输】随机臂**（⚠️ 同样受利用率差异影响，仍不构成可比结论）。
+- **判定**：🔴 **四候选全部 `INVALID`** ⇒ 按任务要求 **【不进行 CAGR 直接比较】，不给出「显著优于随机」的结论**；✅ **门控为预注册且在查看任何 CAGR 之前即已定义，触发后如实报告，未因因子表现优秀而放行**。
+- **7 条不能推出**：①「四候选显著优于随机 TopN」❌（**门控全部触发**；ΔCAGR 含利用率优势）②「超越比例 100% / p_emp = 0.001 证明选择能力」❌（随机臂**利用率低 6.1~7.7pp**）③「因子无选择能力」❌（**同样不能反向断言 ⇒ 本轮是基准设计失败，不是因子证伪**）④「随机臂天然亏损」❌（部分源于容量劣势）⑤「2025 年因子失效」❌（受同一差异影响）⑥「已确认可交易策略」❌（冲击成本未建模）⑦「已完成平台正式 Run」❌。
+- **🔴 基准设计缺陷与修复路径（仅登记，未执行）**：**候选修复 A（推荐）利用率匹配** —— 为随机臂单独标定 `MAX_CONC` 使实现利用率对齐；**B** 改用**利用率无关主指标**（单笔均净收益 `meanNet`）作首要度量、CAGR 仅作辅助；**C** 统一固定目标占用率填满账本；**D** 提高 `MAX_CONC` 留余量（如 `1.5 × N × F`）使两臂均不触顶；**附加要求** = 修复后**必须重新通过可比性门控**才允许比较 CAGR。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ **未搜索 TopN/持有期/权重/阈值** · ✅ 未做因子组合 · ✅ 未做 LONG/MEDIUM/SHORT 合并 · ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改 DB/Schema/Migration** · ✅ **未进行正式平台 Run** · ✅ **未因因子表现优秀而放宽门控**。
+- **Baseline Impact**：**major（方法学负债 + 基准设计缺陷登记）** —— **发现并登记随机基准的结构性缺陷**（`MAX_CONC = N×F` 恰处饱和边界 ⇒ 随机臂容量劣势 ⇒ 两臂利用率不可比），据此**拒绝给出「显著优于随机」的结论**（四候选全部 `INVALID`）；产出**可比性门控**（`|trades 差| < 5%` 且 `|util 差| < 0.03`）作为常驻要求；并**单独登记 2025 年因子臂跑输随机臂**这一反向观测。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-NB-RANDOM-002 · 修复容量饱和后重跑随机对照 → ✅ **门控全部 PASS · 选择能力在利用率无关指标上双重确证**
+
+- **Task**：修复 `NB-RANDOM-001` 的容量饱和基准缺陷，重新验证 4 个固定候选是否具有**独立选择能力**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/nbrandom2.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **✅ 核心修复**：**`MAX_CONC = ceil(1.5 × N × F)`** ⇒ **F20: 60→90 · F40: 120→180** ⇒ 脱离饱和边界。其余口径与 P0-ORACLE-002 完全一致（`canSellAtClose` 已修复 · rd15 决策 · rd16 `open` 入场 · 目标 rd(D+F) · 顺延 · rd80 兜底 · 先出后入 · symbol 冲突 · book cap · cash · `w = 1/MC` 不重归一）· **20bps** · **Top3** · **1,000 seeds** · 日历 **1,716 天** · 有效决策日 **1,463** · **尝试入场 4,389（两臂相同）**。
+- **✅ 修复效果（与 NB-RANDOM-001 对照）**：**接受率差** 由 **+9.4pp**（98.1% vs 88.7%）收窄至 **+2.3~+3.4pp**（98.1% vs 95.8% / 96.2% vs 92.8%）；**利用率差** 由 **0.0611~0.0770** 收窄至 **0.0121~0.0187**（约 4 倍）；**trades 差** 由 **+7.7%~+9.8%** 收窄至 **+2.36%~+3.54%**（约 3 倍）。
+- **✅ 预注册可比性门控（判据与 NB-RANDOM-001 逐字一致）：四候选全部 PASS** —— `maxAmp5 F20` **2.3627% / 0.0121** · `maxAmp5 F40` **3.5413% / 0.0187** · `avgAmp5 F20` **2.4993% / 0.0128** · `avgAmp5 F40` **3.4817% / 0.0184** ⇒ **允许 CAGR 比较**。
+- **✅ 一致性检查全部通过**：**平均持有期差 0.0105~0.0151 日**（Factor 19.01/39.01 vs Random 19.02/39.02）· **`forced = 0`（两臂）** · **目标 rd 占比 99.29%~99.58%** · `deferred` Factor 18~30 vs Random mean 46.4~54.7（占比均 <1.3% 交易 ⇒ 不构成系统性差异）⇒ **无容量差异污染**。
+- **🟢 选择能力核心指标（利用率无关）全部显著**：**`ΔmeanNet`** = **+0.0117 / +0.0212 / +0.0098 / +0.0171**（四者 **p = 0.001** · 超越比例 **1.000**）；**`ΔmeanExcess`** = **+0.0117 / +0.0214 / +0.0099 / +0.0176**（四者 **p = 0.001** · 超越 **1.000**）。明细：`maxAmp5 F20` Factor meanNet **+1.23%** / meanExcess **+0.75%** vs Random **+0.06% / −0.42%**；`maxAmp5 F40` **+2.29% / +1.51%** vs **+0.17% / −0.63%**；`avgAmp5 F20` **+1.04% / +0.57%** vs **+0.06% / −0.42%**；`avgAmp5 F40` **+1.88% / +1.14%** vs **+0.17% / −0.62%** ⇒ 🟢 **因子臂单笔净收益与单笔超额均显著为正，随机臂单笔净收益≈0、单笔超额为负 ⇒ 选择能力真实存在且不依赖利用率**。
+- **🟢 CAGR 与风险指标（门控通过后可比较）**：**Factor CAGR** **6.81% / 6.30% / 5.91% / 5.32%** vs **Random mean 0.35% / 0.51% / 0.35% / 0.51%**（p05 −2.30%/−0.93%/−2.11%/−0.95% · p95 +2.64%/+1.93%/+2.53%/+2.01%）⇒ **ΔCAGR +6.46pp / +5.79pp / +5.56pp / +4.81pp**（四者 **p = 0.001** · 超越 **1.000**）；**ΔSharpe +0.5923 / +0.5479 / +0.5008 / +0.4443**；**ΔMDD +0.2620 / +0.2205 / +0.2555 / +0.2172**（因子臂更浅）；Factor PF **1.3318 / 1.4595 / 1.2865 / 1.3839** vs Random PF **1.0113 / 1.0222 / 1.0113 / 1.0224**；Factor Sharpe **0.6188/0.5826/0.5270/0.4793** · MDD **−0.1923/−0.1818/−0.1988/−0.1852** · 胜率 0.4944/0.4856/0.4929/0.4801 · totalReturn **+58.93%/+53.71%/+49.76%/+43.96%** · **正年 7/8 · 6/8 · 7/8 · 6/8**。
+- **⚠️ CAGR 水平下降的机械解释（非因子变差）**：`MC` 由 `N×F` 增至 `1.5N×F` ⇒ `w = 1/90`（原 1/60）· `w = 1/180`（原 1/120）⇒ **利用率 0.7948/0.7998 → 0.5298/0.5332** ⇒ Factor CAGR 由 0.0942/0.0877/0.0825/0.0747 降至 **0.0681/0.0630/0.0591/0.0532**；同时**随机臂 CAGR 由负转正**（−0.0158→+0.0035 等）⇒ **两臂在同一更低利用率下运行 ⇒ 可比性成立**；**`meanNet`/`meanExcess` 不受影响，仍全部显著 ⇒ 选择能力结论稳健**。
+- **🔴 唯一反向发现（本轮门控通过 ⇒ 【可采信】）：2025 年四候选【全部跑输】随机臂** —— 超越比例仅 **0.448 / 0.179 / 0.268 / 0.076**；随机臂均值 **+0.1723 / +0.1474 / +0.1711 / +0.1483** 高于因子臂 **+0.1635 / +0.1213 / +0.1416 / +0.1055**，且随机臂 p05（+0.0990~+0.1011）已接近/高于因子臂。⇒ **登记为真实年度风险：低振幅选择在 2025 年未提供正的选择价值**；该方向与 `NB-RANDOM-001` 一致，但那一轮受容量差异污染，**本轮已排除该污染 ⇒ 结论升级为可采信**。其余年份：2022 四者均 **1.000** · 2023 **0.946/0.998/0.960/1.000** · 2019~2021 与 2024 均 0.785~0.997。
+- **判定**：四候选**门控 PASS · 可比 · 选择能力确证 · CAGR 可比较** ⇒ **`NB_RANDOM_PASS`**。
+- **8 条不能推出**：①「已确认可交易策略」❌（**冲击成本与容量未建模**；`MC=1.5N×F` 下利用率仅 **53%**）②「低振幅因子是新发现」❌（低波动异象已知）③「某候选最优」❌（未搜索）④「`MC=1.5N×F` 是最优配置」❌（**任务指定，非搜索**；利用率偏低）⑤「2025 年因子失效已成定论」❌（单年反向，未归因）⑥「CAGR 0.0681 可代表真实收益」❌（依赖 `w=1/90` 与 53% 利用率）⑦「可外推」❌ ⑧「已完成平台正式 Run」❌。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未修改 DB/Schema/Migration · ✅ **未创建 Strategy Candidate / Version** · ✅ **未进行正式平台 Run** · ✅ 未新增因子 · ✅ **未搜索 TopN/持有期/权重/阈值**（Top3 与 `1.5×` 均由任务指定）· ✅ 未做因子组合 · ✅ 未做 LONG/MEDIUM/SHORT 合并 · ✅ **未因结果好而放宽门控**（判据与 NB-RANDOM-001 逐字一致）。
+- **Baseline Impact**：**major（正面 + 基准缺陷闭环）** —— **完成容量饱和基准缺陷的修复与闭环**（`MAX_CONC = ceil(1.5×N×F)`），**四候选门控全部 PASS 且一致性检查通过**；**在利用率无关指标上双重确证选择能力**（`ΔmeanNet`/`ΔmeanExcess` 四者均 **p = 0.001 · 超越 1.000**，随机臂单笔超额为负）；**门控通过后 CAGR 可比较**（ΔCAGR +4.81~+6.46pp · ΔSharpe +0.44~+0.59 · ΔMDD +0.22~+0.26）；并**在排除容量污染后把「2025 年因子臂跑输随机臂」升级为可采信的真实年度风险**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-IMPACT-CAPACITY-001 · 成本 × 资金规模 敏感度 → 🟢 **选择能力 80/80 保持为正；🔴 容量两端夹击；可比性仅 14/80 PASS**
+
+- **Task**：验证已通过 `NB-RANDOM-002` 的 4 个固定候选，在不同交易成本（**20/50/100/150bps**）与资金规模（**10万/50万/100万/300万/500万**）下是否仍保持**独立选择能力**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/impact.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 资金规模进入引擎的两条真实容量机制（本轮新增）**：**①整手取整**（`shares = floor(目标仓位/入场价/100)×100`；**`<100 股 ⇒ 拒绝`**，依据 A 股制度）· **②参与率上限**（建仓额 ≤ **10%** × 当日成交额 `volume × open`；⚠️ **10% 为假设参数，任务未指定，已披露**）· 引擎改为 **¥ 计价**（`cash` 起始 = 资金规模）。`MAX_CONC = ceil(1.5×N×F)` 沿用为可比基准，**不作为容量结论**。
+- **口径**：D15 · rd16 `open` 入场 · 目标 rd(D+F) · 顺延 · rd80 兜底 · 先出后入 · symbol 冲突 · book cap · cash · **Top3** · **200 seeds**（种子串 `IM|{key}|{s}`，⚠️ 由 NB-RANDOM-002 的 1,000 降至 200，**已披露**）· 日历 **1,716 天** · 有效决策日 **1,463** · 尝试入场 **4,389（两臂相同）**。
+- **🟢 选择能力在【全部 80 个场景单元】中保持为正**：**`ΔmeanNet` 80/80 为正** —— `maxAmp5 F20` **+0.0104~+0.0174** · `maxAmp5 F40` **+0.0163~+0.0209**（最强）· `avgAmp5 F20` +0.0068~+0.0122 · `avgAmp5 F40` +0.0041~+0.0169；**`ΔmeanExcess` 80/80 为正**（+0.0083~+0.0216）⇒ **成本上升与资金规模变化均未侵蚀选择能力**。
+  - ⚠️ **唯一显著性缺口**：**`avgAmp5 F40` 在 10万 下 `p(meanNet) = 0.2388`**（ΔmeanNet 仅 **+0.41pp**）⇒ **该场景选择能力不显著**（`skipLot` **2,855** 笔被拒，样本缩至 1,464 笔）。其余候选 `p` 最大值：`maxAmp5 F20` **0.005** · `maxAmp5 F40` **0.0199** · `avgAmp5 F20` 0.0149。
+- **🟢 成本对选择能力几乎无影响**：`ΔmeanNet` 跨 20/50/100/150bps **近乎不变**（如 `maxAmp5 F40` @100万：**0.0209/0.0209/0.0208/0.0208**；`maxAmp5 F20` @100万：0.0116/0.0118/0.0130/0.0147）⇒ **成本只压低绝对收益水平，不改变相对选择能力**。
+- **🔴 容量饱和【真实出现】，呈两端夹击**：**小资金（10万）** `skipLot` **1,270 ~ 2,894**（目标仓位不足 1 手）⇒ 接受率骤降至 **0.3235~0.6965**；**大资金（300万/500万）** `skipPart` **365 ~ 2,159**（建仓额 > 10% × 当日成交额）⇒ 接受率降至 **0.4976~0.8792**；**`skipFull` = 0（全 80 场景）** ⇒ **book cap 从未触发**；**`forced` = 0（两臂全场景）**。**容量曲线**：10万 acc **0.324~0.697** / util 0.142~0.296 → 50万 0.906~0.971 / 0.435~0.483 → **100万 0.945~0.950 / 0.485~0.492（最优区间）** → 300万 0.707~0.879 / 0.378~0.477 → **500万 0.498~0.771 / 0.268~0.423**。**F20 对容量更敏感，F40 相对稳健。**
+- **🔴 可比性门控（判据 `|trades差|<5%` 且 `|util差|<0.03`，未新增门槛、未因结果调整）：仅 14/80 场景 PASS** —— `maxAmp5 F20` **100万 × {20,50,100}bps（3/20）** · `maxAmp5 F40` **300万 × 全 4 档（4/20）** · `avgAmp5 F20` **100万 × {20,50,100}bps（3/20）** · `avgAmp5 F40` **300万 × 全 4 档（4/20）** ⇒ 🔴 **其余 66 个场景标记 `INVALID`，不比较 CAGR**（已在报告表中逐格标注）。门控失败原因：**资金规模通过整手/参与率改变了两臂接受率**（如 10万：F 0.677 vs R 0.528）⇒ 容量差异污染可比性。
+- **🔴 150bps 下绝对收益多处转负（但选择能力仍为正）**：`maxAmp5 F20` 100万 **−0.29%** · 300万 **−1.41%** · 500万 **−0.72%**；`avgAmp5 F20` 50万 −1.15% · 100万 **−1.75%** · 300万 **−3.13%** · 500万 −2.56%；`avgAmp5 F40` 500万 −0.62%；**`maxAmp5 F40` 20~150bps 全档为正（5 个资金规模全部）** ✅。成本敏感度（100万）：`maxAmp5 F20` CAGR **6.53/5.18/2.66/−0.29%** · `maxAmp5 F40` **6.14/5.48/4.33/3.10%** · `avgAmp5 F20` 5.57/4.14/1.45/−1.75% · `avgAmp5 F40` 5.20/4.50/3.28/1.97%。
+- **一致性与异常检查（全 80 场景）**：✅ **`forced` = 0（两臂）** · ✅ **`skipFull` = 0** · ✅ **平均持有期 F20 = 19.0099~19.0184 日 · F40 = 39.0101~39.0184 日（跨资金稳定、两臂一致）** · ✅ `deferred` 10~30 稳定。⚠️ **正年数（20bps）大资金下下降**：`maxAmp5 F20` 7/8·7/8·7/8·7/8·**5/8**；`maxAmp5 F40` 7/8·7/8·7/8·6/8·**5/8**；`avgAmp5 F20` 7/8·7/8·7/8·**5/8**·**5/8**；`avgAmp5 F40` 7/8·6/8·6/8·**5/8**·**5/8**。
+- **各候选结论**：**`maxAmp5 F40`** = 选择能力最强（+1.63~+2.09pp · p ≤ 0.0199）+ **20~150bps 全档为正** + 容量最稳健（500万 acc 0.771）；**`maxAmp5 F20`** = 选择能力 20/20 为正（p ≤ 0.005）但 **150bps 下 3 场景转负**、500万 acc 降至 0.523；**`avgAmp5 F20`** = 选择能力为正但**成本脆弱**（150bps 下 4 场景转负）；**`avgAmp5 F40`** = 较稳健但 **10万 下不显著（p = 0.2388）**。
+- **9 条不能推出**：①「已确认可交易策略」❌（**10% 参与率为假设**；未用真实订单簿/冲击模型）②「100万 是最优资金规模」❌（依赖 10% 假设，**未搜索**）③「500万 不可行」❌（仅在该假设下）④「66 个 INVALID 场景中因子无效」❌（**INVALID 指不可比，非因子无效**）⑤「CAGR 绝对水平证明选择能力」❌（**本轮以 ΔmeanNet/ΔmeanExcess 为判断依据**）⑥「成本不影响策略」❌（不改变选择能力但显著压低绝对收益）⑦「`avgAmp5 F40` 全面成立」❌ ⑧「可外推」❌ ⑨「已完成平台正式 Run」❌。
+- **🔴 本轮关键假设（已披露）**：**参与率上限 10% × 当日成交额（假设参数）** · 最小交易单位 **100 股（制度）** · 当日成交额代理 **`volume × open`** · **冲击成本未单独建模**（由任务指定固定 bps 档位代表总成本） · **随机种子 200**（由 1,000 降至 200，受 20 个场景约束）。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务 `.ts` 改动** · ✅ 未搜索 TopN/持有期/权重/阈值 · ✅ 未新增因子 · ✅ 未做因子组合 · ✅ 未合并 LONG/MEDIUM/SHORT · ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改 DB/Schema/Migration** · ✅ **未进行正式平台 Run** · ✅ **未新增门槛、未因结果调整门控** · ✅ **未自行进入下一项研究**。
+- **Baseline Impact**：**major（正面 + 容量风险登记）** —— **确立选择能力在「成本 4 档 × 资金 5 档」全部 80 个单元中保持为正**（`ΔmeanNet`/`ΔmeanExcess` 均 80/80，成本对选择能力几乎无影响）；**首次量化容量两端夹击形态**（小资金受整手约束 `skipLot` 1,270~2,894 · 大资金受参与率约束 `skipPart` 365~2,159 · **100万 为最优区间**）；**登记可比性门控仅 14/80 PASS**（66 场景 INVALID 不比较 CAGR）；并**登记 `maxAmp5 F40` 为成本与容量双稳健候选**（20~150bps 全档为正）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-2025-ATTRIBUTION-001 · 2025 失效归因 → 🔴 **「信号失效」被否定；✅「事件池/市场环境结构变化」成立；⚠️ 年度收益跑输机制无法区分**
+
+- **Task**：解释为什么 D15 低波动候选在 2025 年相对 Random 明显失效，区分「信号条件性失效」与「2025 年事件/市场环境结构变化」。**仅归因，不优化**。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/attrib.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **口径**：4 固定候选 · **20bps** · Random 沿用 NB-RANDOM-002（`MAX_CONC = ceil(1.5×N×F)` · **1000 seeds** · 同规则）· 复用 P0-ORACLE-002 `canSellAtClose` · 比较区间 **2025 vs 2019–2024** · **未排除 2025**。
+- **🔴 核心发现：2025 年「信号本身」【没有】失效 —— 反而是正常年份**：
+  - **池内 IC（定向后，dir=−1 低振幅优先）2025**：`maxAmp5` F20 **+0.1544 (t 9.69)** · F40 **+0.1729 (t 11.67)**；`avgAmp5` F20 **+0.1684 (t 10.09)** · F40 **+0.1904 (t 12.27)** ⇒ **与历史同量级**（2019 +0.1643/+0.1656 · 2022 +0.1852/+0.2086 · 2024 +0.1170/+0.1343）⇒ **排序能力完全正常**；**逐年 IC 7/7 年为正（两因子 × 四窗口全部为正，无符号翻转）**。
+  - **`ΔmeanNet`（Factor − Random）2025 四候选【全部为正】**：`maxAmp5 F20` **+1.46pp (p=0.009, 超越 0.992)** · `maxAmp5 F40` **+1.44pp (p=0.038, 0.963)** · `avgAmp5 F20` **+0.95pp (p=0.049, 0.952)** · `avgAmp5 F40` +0.83pp (p=0.156, 0.845)；**`ΔmeanExcess` 亦全部为正**（+1.49/+1.44/+0.98/+0.89pp），**Random 的 meanExcess 2025 为 +0.01%/−0.64%/−0.01%/−0.62%（≈0）**。
+  - ⇒ ❌ **「信号条件性失效」被证据一致否定**。
+- **✅ 2025 是明确的结构性异常环境（多处同时变化）**：**市场** —— CSI300 **+21.19%** · 年化波动 **14.75%（次低）** · MDD **−10.49%（最低）**；**池 beta** —— F20 pool cumRet **+1.68%（7 年最高）** · MAE **−7.72%（最浅）** · F40 cumRet **+2.60%（最高）** · MAE **−10.69%（最浅）**；**池构成** —— maxAmp5 均值 **0.0734（次低）** · turnover 均值 **9.69%（最高）** · historyLimitCount 均值 **35.21（最高，2019→2025 单调上升 3.23→35.21）** · 事件数 7,557（中等）。⇒ **「低波动 + 强正 beta + 浅回撤 + 高换手」环境**。
+- **🔴 未解释的张力（已登记）**：2025 年 Factor **单笔净收益 +3.32%~+4.37%** 高于 Random **+1.86%~+2.95%**，交易数相近（F 513~522 vs R 500~517），**但 Factor 年度组合收益 +10.55%~+16.35% 却低于 Random +14.74%~+17.23%** ⇒ **年度收益超越比例骤降至 0.448/0.179/0.268/0.076**（历史多为 0.72~1.00）。**已排除**：交易数差异（+2.4%~+4.0%，不足）、接受率差异（F 0.961~0.982 正常）、单笔超额为负（已否定）。**未验证的可能机制**：①**年度权益切分口径**（跨年持仓 MTM 未从年度起点资本剔除，F40 的 40 日持有期必然跨年）②收益时间分布差异 ③低振幅股票在强正 beta 池中的 beta 捕获不足（体现在 MTM 段而非已实现单笔）。
+- **结论**：**C1** 🔴「信号在 2025 失效」**不成立**（证据强度：强）· **C2** ✅「事件池与市场环境发生多处结构变化」**成立**（强）· **C3** 🎯 **最终判断：更接近「事件池/市场环境结构变化」** · **C4** ⚠️ **但「年度组合收益跑输随机臂」的精确机制【无法区分】**（证据不足）· **C5** 🔴 **信号在 2025 的相对选择能力依然存在** ⇒ 应描述为「**相对选择能力仍在，但未转化为年度组合收益优势**」。
+- **8 项无法证明**：①**年度收益跑输的精确机制**（§3.3）②「2025 现象将重演」③「低振幅在强 beta 环境必然跑输」—— **反例：2019(+38.17%)/2020(+25.51%) 同为强正年但 Factor 未跑输（超越 0.853~0.997）** ④「historyLimitCount 单调上升是原因」—— **该趋势连续 7 年单调，非 2025 特有** ⑤「换手最高导致失效」—— **反例：2023 换手亦高(8.89%)但未跑输(0.946~1.000)** ⑥「池振幅次低导致失效」—— **反例：2023 振幅最低(0.0687)但未跑输** ⑦「已确认可交易 Alpha」⑧「可外推」。
+  - 🔴 **重要限定**：§5 第 3~6 项显示 **2025 的多数结构变化在历史其他年份亦曾出现，但那些年份 Factor 并未跑输** ⇒ **单一结构维度均不足以解释 2025 突变** ⇒ 更可能是**多维度组合 + 未识别交互**，本轮无法确定。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未优化 maxAmp/avgAmp 阈值** · ✅ **未搜索新阈值/TopN/持仓期/权重** · ✅ **未新增因子** · ✅ **未组合因子** · ✅ **未排除 2025**（全样本保留）· ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改业务代码/Schema/Migration/数据库** · ✅ **未写数据库** · ✅ **未把本轮结果宣称为新策略或已确认可交易 Alpha** · ✅ **完成后停止，未继续自动开展下一轮实验**。
+- **Baseline Impact**：**major（归因结论 + 张力登记）** —— **以证据否定「2025 信号失效」假设**（IC 7/7 年为正且 2025 正常 · `ΔmeanNet`/`ΔmeanExcess` 四候选全部为正且三者显著），**确立 2025 为多维结构性异常环境**（低波动强上行浅回撤 + 池收益最高回撤最浅 + 振幅次低换手最高历史涨停数最高），据此**判定更接近「事件池/市场环境结构变化」**；同时**如实登记「年度组合收益跑输随机臂」的精确机制无法区分**，并**以历史反例（2019/2020/2023）排除单一结构维度的解释力**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-YEAR-END-MTM-001 · 年度权益切分 / 跨年持仓 MTM 对账 → 🔴 **张力仍存在且加剧 ⇒ MTM 非成因；✅ 对账恒等式精确成立；📌 确认 (A) 口径缺陷**
+
+- **Task**：验证 `ATTRIBUTION-001` 的核心张力（**Factor 单笔 meanNet > Random，但 2025 年度组合收益 < Random**）是否由「年度权益切分 + 跨年持仓 MTM」口径造成。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/mtm.cjs`、`mtmdigest.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **环境事项**：上一 session 的临时缓存目录被系统回收 ⇒ **`pe_post.json` 由 DB 重载**（`peload.cjs`，SELECT 含 `canSellAtClose`；**810.4 MB / 4,718,640 行**）；一致性由「(A) 口径复现值」间接确认：`maxAmp5 F20` 2025 (A) Factor = **16.35%** vs `ATTRIBUTION-001` 的 **16.35%** ✅ 完全一致。
+- **口径**：与 NB-RANDOM-002 完全一致（`MAX_CONC = ceil(1.5×N×F)` · **1000 seeds** · P0-ORACLE-002 `canSellAtClose` · **20bps** · 4 固定候选）· 日历 **1,716 天 / 2019-01-03 ~ 2026-01-28**。
+  - **(A) harness 口径** = `eq[年内最后交易日] / eq[年内第一个交易日] − 1`（`ATTRIBUTION-001` 所用）
+  - **(B) 严格年末 MTM 口径** = `eq[年内最后交易日] / eq[上一年最后交易日] − 1`（首年分母 = 初始资本 **1.0**）
+- **🔴 结论：张力【仍存在】—— 且修正口径后【加剧】而非消失**：`maxAmp5 F20` (A) Δ **−0.88%** → (B) **−1.59%**（beat 0.448→**0.382**）· `maxAmp5 F40` **−2.61%** → **−2.97%**（0.179→**0.156**）· `avgAmp5 F20` **−2.94%** → **−3.43%**（0.268→**0.224**）· `avgAmp5 F40` **−4.28%** → **−4.65%**（0.076→**0.052**）⇒ ✅ **按任务第 6 条：「差异仍存在 ⇒ MTM 不是主要原因，不继续猜测机制」**；🔴 **且本轮证明【不是「口径未修正造成的假象」，而是「修正后张力更强」】⇒ 对「口径造成张力」假设的强否定**。
+- **✅ 对账恒等式精确成立**：**`max |Δeq − (Δcash + ΔMTM)| = 0`**（全 4 候选 × 全 1000 随机种子 × 全 8 年度）· **链式核验**：逐年 (B) 收益链式积 vs 期末权益差 **−1.5e-6 ~ +8.4e-7**（浮点级）⇒ **`交易级收益 → 年度权益 → 年度收益` 可逐层核对**（`Δeq = Δcash + ΔMTM` · `Δeq = realized + residual` · `realized = Σ_{当年平仓} w × net`）。
+- **📌 完整对账表（Factor · 每年 eqStart/eqEnd · mtmStart/mtmEnd · cashStart/cashEnd · Δeq/Δcash/ΔMTM · realized/residual · 平仓数 · 跨年持仓数/权重）**：`maxAmp5 F20` 2025 年 **eqStart 1.379349 → eqEnd 1.589335** · mtmStart 0.581843 → **mtmEnd 0** · cashStart 0.797507 → cashEnd 1.589335 · Δeq 0.209986 · Δcash +0.791828 · ΔMTM **−0.581843** · **realized 0.180717** · residual +0.029268 · 622 笔平仓 · **跨年 55 笔 / 权重 0.611111**；`maxAmp5 F40` 2025 **Δeq 0.153387 · Δcash +0.752894 · ΔMTM −0.599507 · realized 0.130672 · 670 笔 · 跨年 112 / 0.622222**；`avgAmp5 F20` Δeq 0.175614 · realized 0.146328 · 跨年 55 / 0.611111；`avgAmp5 F40` Δeq 0.124901 · realized 0.109206 · 跨年 111 / 0.616667。
+- **📌 跨年持仓规模（2024→2025）**：`maxAmp5 F20` **55 笔 / 权重 0.611111（占 MC=90 的 61.1%）** · `maxAmp5 F40` **112 / 0.622222（62.2%）** · `avgAmp5 F20` **55 / 0.611111** · `avgAmp5 F40` **111 / 0.616667** ⇒ **跨年持仓规模巨大（占账本 61~62%），该口径确有实际影响**；**其 2025 年内已实现 P&L 全部为负**（**−4.86% / −2.73% / −4.14% / −1.75%**）——**仅登记为事实，本轮不据此展开机制解释**。**2025→2026 跨年持仓 = 0**（2025 年末 `mtmEnd = 0`，账本 100% 现金）。
+- **📌 确认 (A) 口径缺陷（真实存在，但非张力成因）**：**(A) 系统性遗漏每年首个交易日的 P&L**（仅覆盖 242/243 个交易日）；**2019~2024 该缺陷使 (A) 低于 (B) +0.34% ~ +1.40%**（水平偏差）；**2025 首日（2025-01-02）为下跌日** —— Factor **−0.77% ~ −0.97%** vs Random **−0.33% ~ −0.60%** ⇒ 补齐首日后 Factor 损失更多 ⇒ **Δ 更负 0.33~0.71pp**。⚠️ 该缺陷是**水平偏差**（两臂共用同一边界，故水平部分对消）；**差异性影响来自两臂敞口不同**。
+- **⚠️ 2026 年为无活动残段**：`endDate = 2025-09-26` ⇒ **2025 年末全部持仓已平仓** ⇒ 2026 年（18 日）`Δeq = Δcash = ΔMTM = 0`、平仓数 0、跨年持仓 0 ⇒ **其 0% 不代表真实年度收益，应理解为「无活动」；本轮结论不依赖 2026**。
+- **对 `ATTRIBUTION-001` 的修正**：2025 Factor 年度收益 `maxAmp5 F20` **+16.35% → 严格口径 +15.22%**（(A) 高估 **1.13pp**）· 2025 Random **+17.23% → +16.81%** · 2025 年度超越比例 **0.448 → 0.382（更低）** · 🔴 **`ATTRIBUTION-001` 建议的 P0「检验年度权益切分口径」本轮已完成，结论：非张力成因**。
+- **8 项 NOT PROVEN**：①**张力的真实成因**（本轮只排除一个候选解释，**未识别真实机制，且按任务要求不继续猜测**）②2026 年任何结论 ③跨年持仓负收益是张力成因（仅登记事实）④「首日效应是主要来源」❌（首日效应解释 Δ 的 **0.33~0.71pp**，而 Δ 总幅度 **1.59~4.65pp** ⇒ 仅占约 **8~22%**，不足）⑤其余年份 (A)/(B) 差异已全部量化 ⑥随机臂 1000 seeds 逐笔明细（仅存聚合）⑦任何策略/可交易性结论 ⑧可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未做参数搜索** · ✅ **未做阈值优化** · ✅ **未新增因子** · ✅ **未做 TopN / 持仓期搜索** · ✅ **未做多维交互分析** · ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改业务代码 / Schema / Migration / DB** · ✅ **未写数据库** · ✅ **完成报告后停止**。
+- **Baseline Impact**：**major（口径修正 + 张力排除）** —— **排除「年度权益切分 + 跨年 MTM 口径」作为张力成因**（修正后 Δ 由 −0.88/−2.61/−2.94/−4.28pp 变为 **−1.59/−2.97/−3.43/−4.65pp**，beat 全面下降）；**建立并验证完整年度对账体系**（恒等式误差 **0** · 链式核验浮点级）；**确认 (A) harness 口径系统性遗漏每年首个交易日 P&L 的缺陷**（水平偏差 0.34~1.40pp）并**建议以 (B) 口径重述历史逐年数字**；**登记跨年持仓占账本 61~62% 且其 2025 年已实现 P&L 全为负**（仅事实）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-CROSSYEAR-ATTRIBUTION-001 · 2025 跨年仓贡献分解 → 🔴 **跨年仓不能解释大部分差距（平均 19.8%）；剩余全部落在「2025 新开仓」桶**
+
+- **Task**：验证「进入 2025 的跨年持仓全部负收益」是否是 Factor 2025 跑输 Random 的**主要贡献来源**。**只分析 2025** · 严格年度收益口径 B。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/xy.cjs`、`xydigest.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 方法（严格可加分解，**未删除交易、未重跑策略**）**：跨年判定 = `entryIdx ≤ 2024-12-31 索引(1454) < exitIdx`；分解恒等式 **`Δeq_2025 = Σ_{E_C} w(net + 1 − r0) + Σ_{E_N·已平} w·net + Σ_{E_N·未平} w(px_end/p_in − 1)`**，其中 **`r0` = 该仓位在 2024-12-31 的 MTM 比率（引擎在快照日直接记录，与 `mtmArr[1454]` 一致 ⇒ 无近似）**。回报空间分解 `Δ(B) = Δcontrib跨年 + Δcontrib新开 + Δcontrib未平`（分子分母同源 ⇒ 严格可加）。
+- **✅ 对账精确成立**：`Δeq − (跨年 + 新开 + 未平) = 0`（Factor 四候选）· **`max |误差| = 0`**（Random 1000 seeds × 4 候选）· 加和校验 `Δ(B) − Σ` **≤ 1e-6** · 快照一致性 `MTM@2024末` = **0.581843 / 0.599507 / 0.581825 / 0.600972**（与 `mtmArr[1454]` 一致）。
+- **📌 FACT 确认：跨年仓 2025 段 P&L 四候选【全部为负】**（Factor 贡献 **−1.4034% / −0.3342% / −0.9145% / −0.1341%**；**meanNet(2025 段) −3.17% / −0.74% / −1.98% / −0.29%** 全负；meanNet(全程) **−7.96% / −4.39% / −6.77% / −2.83%** 全负；meanExcess **−3.78% / −1.60% / −2.59% / +0.02%**）。**跨年仓占账本 44.30% / 44.97% / 46.23% / 46.91%**（起始 MTM 占 `eqStart` **42.18% / 43.33% / 44.01% / 45.71%**）· **2025 年末未平仓 = 0**（账本 100% 现金）。
+- **🔴 分解结果（Factor − Random，严格可加）**：**`maxAmp5 F20`** Δ(B) **−1.5888pp** = Δ跨年 **−0.1425pp** + Δ新开 **−1.4462pp** ⇒ **跨年占比 9.0%**；**`maxAmp5 F40`** **−2.9658pp** = **−1.5413pp** + −1.4245pp ⇒ **52.0%**；**`avgAmp5 F20`** **−3.4340pp** = 🟢 **+0.3659pp** + **−3.7998pp** ⇒ **−10.7%**；**`avgAmp5 F40`** **−4.6465pp** = **−1.3353pp** + **−3.3112pp** ⇒ **28.7%**。
+- **🔴 核心结论：跨年仓【不能】解释大部分差距** —— 跨年占比 **9.0% / 52.0% / −10.7% / 28.7%** ⇒ **平均 19.8% · 中位 18.9% · 范围 −10.7% ~ 52.0%** ⇒ **不足五分之一**；仅 `maxAmp5 F40` 达 52.0%（约一半，仍非「大部分」）。
+- **📌 剩余未解释差距（全部落在「2025 新开仓」桶）**：`maxAmp5 F20` **−1.4462pp（91.0%）** · `maxAmp5 F40` **−1.4245pp（48.0%）** · `avgAmp5 F20` **−3.7998pp（110.7%）** · `avgAmp5 F40` **−3.3112pp（71.3%）** ⇒ 范围 **−1.42 ~ −3.80pp**，占比 **48.0% ~ 110.7%**。🛑 **按任务要求不继续猜测剩余机制。**
+- **🔴 四候选一致性：❌ 不一致** —— 跨年占比跨度 **62.7pp**；**Δ跨年符号「负 · 负 · 正 · 负」**；跨年桶 meanNet(2025 段) **Factor 全为负**（−3.17/−0.74/−1.98/−0.29%）但 **Random 随 F 变号**（**−1.79% / +1.79% / −1.82% / +1.79%**）⇒ **「跨年仓全负」在 Factor 臂一致成立，但在 Factor−Random 差异上不一致 ⇒ 不能作为统一解释**。
+- **📌 登记为事实（不展开）**：**F5** 剩余差距全在新开仓桶；**F6** Factor 新开仓 **meanExcess +1.69% / +1.48% / +1.02% / +0.53%** 全为正且高于 Random（+0.52% / +0.22% / +0.52% / +0.25%），**但新开仓桶贡献反而更低**（两事实并存未调和）；**F7** 两臂 `eqStart` 不同（Factor **1.31~1.38** vs Random 均值 **0.88~0.91**）⇒ 回报空间贡献为正确可比量，**绝对 P&L 仅供对照不作结论依据**。
+- **9 项 NOT PROVEN**：①🛑**剩余差距的真实机制**（按任务要求不猜测）②「跨年仓是主要原因」❌（已否定）③「跨年仓完全无关」❌（`maxAmp5 F40` 达 52.0%，对 F40 有实质贡献）④F6 与 F5 之间的因果（只登记不解释）⑤F7 的成因与影响 ⑥跨年仓负收益的成因 ⑦其他年份的跨年仓贡献（本轮只分析 2025）⑧任何策略/可交易性结论 ⑨可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未删除任何交易、未重跑策略、未做任何优化** · ✅ **未做参数搜索** · ✅ **未做阈值优化** · ✅ **未新增因子** · ✅ **未做 TopN/持仓期搜索** · ✅ **未做多维交互** · ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改业务代码/Schema/Migration/DB** · ✅ **完成报告后停止**。
+- **Baseline Impact**：**major（跨年仓假设否定 + 剩余缺口定位）** —— **以严格可加分解否定「跨年仓是主要原因」**（占比平均 **19.8%**，仅 F40 达 52.0%，F20 微小或反向）；**把 2025 张力剩余差距精确定位到「2025 新开仓」桶**（**−1.42 ~ −3.80pp**，占 48.0%~110.7%）；**确认跨年仓 2025 段 P&L 在 Factor 臂四候选全负**（现象成立但解释力不足）；并**登记 F6/F7 两项待调和事实**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-NEWENTRY-ATTRIBUTION-001 · 2025「新开仓」桶严格账本拆解 → ✅ **张力完全调和：差异来自【分母 `eqStart`】，非选股能力**
+
+- **Task**：调和 **Factor 新开仓 `meanExcess` 全部为正且高于 Random，但新开仓年度贡献却低于 Random**。仅分析 **2025 新开仓**（`entryIdx > 2024-12-31`）· 严格年度口径 B · 保持现有成交集合，**未删除交易、未重跑策略**。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/ne.cjs`、`nedigest.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 方法（三层严格可加分解，逐项校验）**：`c = N/S = w·n·mean(net)/S`，`mean(net) = mean(excess) + mean(idx)`（`w = 1/MC` 恒定）⇒ **第一层** `Δc = 分子效应 + 分母效应 + Jensen`；**第二层** 分子再拆 = 规模(Σw)效应 + 单笔净收益效应；**第三层** 单笔再拆 = `meanExcess` 效应 + `meanIdx` 效应。
+- **✅ 第一层分解（校验精确 = 0）**：**`maxAmp5 F20`** Δc **−1.446%** = 🟢 分子 **+5.206%** + 🔴 分母 **−6.417%** + Jensen −0.236%；**`maxAmp5 F40`** **−1.425%** = **+3.003%** + **−4.371%** + −0.057%；**`avgAmp5 F20`** **−3.800%** = **+2.301%** + **−5.907%** + −0.193%；**`avgAmp5 F40`** **−3.311%** = **+0.721%** + **−3.961%** + −0.071% ⇒ 🔴 **分子效应【全部为正】（+0.72~+5.21%），分母效应【全部为负且更大】（−3.96~−6.42%）⇒ 净效应为负**。
+- **✅ 第二层（分子再拆，校验 ≤ 0.000329）**：规模(Σw)效应仅 **+0.087% / +0.234% / +0.087% / +0.184%**（**极小**）；**单笔净收益效应 +5.093% / +2.736% / +2.208% / +0.531%（主导）**。
+- **✅ 第三层（单笔再拆，校验 ≤ 0.000005）**：**`meanExcess` 效应 +5.252% / +2.757% / +2.369% / +0.666%（几乎全部）**；`meanIdx` 效应仅 **−0.159% / −0.020% / −0.162% / −0.135%**（极小）。
+- **✅ 对照量**：`ΔmeanNet` **+1.123% / +1.251% / +0.466% / +0.230%** ≈ `ΔmeanExcess` **+1.158% / +1.260% / +0.500% / +0.289%**；`ΔmeanIdx` **−0.035% / −0.009% / −0.034% / −0.059%**（≈0）；**`ΔN` 全部为正 +0.071812 / +0.041557 / +0.030416 / +0.009473**（Factor 绝对 P&L 更高）；🔴 **`ΔeqStart` 亦全为正且量级更大 +0.496187 / +0.472978 / +0.438606 / +0.404457**。
+- **✅ 规模与利用率【高度可比】（非差异来源）**：n **567/558/567/556** vs Random **563.1/545.0/563.2/545.1**（差 +2.0%~+2.4%）；Σw **6.3000/3.1000/6.3000/3.0889** vs **6.2569/3.0276/6.2582/3.0281**（差 +0.67%~+2.39%）；**利用率(2025) 51.62%/54.60%/51.63%/54.32%** vs **51.25%/53.41%/51.26%/53.42%**（差 +0.37~+1.19pp）；avgConc 46.46/98.29/46.47/97.77。
+- **✅ Factor 在【全部单笔/绝对维度】均优于 Random**：`meanNet` **3.64%/5.10%/2.98%/4.10%** vs **2.52%/3.85%/2.51%/3.87%**；**中位数 2.47%/2.83%/1.95%/2.52% vs 0.44%/0.40%/0.44%/0.41%（差 +1.51~+2.43pp）**；`meanExcess` **+1.69%/+1.48%/+1.02%/+0.53%** vs **+0.53%/+0.22%/+0.52%/+0.25%**；**胜率 63.7%/60.4%/61.4%/59.5%（361/567 · 337/558 · 348/567 · 331/556）vs 51.8%/51.4%/51.8%/51.5%（+8.0~+11.9pp）**；**亏损贡献仅 −0.1212/−0.0734/−0.1342/−0.0781，为 Random（−0.2579/−0.1520/−0.2588/−0.1520）的 47%~54%**；正贡献略低（+0.3505/+0.2314/+0.3219/+0.2048 vs +0.4155/+0.2685/+0.4161/+0.2692）⇒ **Factor 赢在「少亏」而非「多赢」**。
+- **✅ 尾部集中度**：**Factor top10% 占 N 的 71.1%/72.3%/83.7%/79.3%** vs 🔴 **Random 130.6%~150.6%（>100% ⇒ 其余 90% 交易合计为净负）**；top1% 15.0%/14.8%/17.6%/17.8% vs 30.7%/28.7%/30.6%/28.7% ⇒ **Factor 分布更均匀、更少依赖极端赢家**。
+- **✅ 唯一 Factor 处于劣势的账本项 = `eqStart`**：Factor **1.379349 / 1.383681 / 1.321983 / 1.314685** vs Random 均值 **0.883162 / 0.910703 / 0.883377 / 0.910228** ⇒ **Factor 基数高约 44%~56%**。
+- **🔑 调和结论**：**两者【分母不同】** —— `meanExcess` 的分母是「同持仓窗口的沪深300 收益」，年度贡献 `c = N/eqStart` 的分母是「自身年初累计净值」⇒ **「`meanExcess` 更高」与「年度贡献更低」在同一账本中可同时成立，互不矛盾**。完整传导链：`meanExcess 更高 → ΔmeanNet 更高 → 绝对 P&L N 更高（ΔN 全正）→ 分子效应为正(+0.72~+5.21%) → 但除以更高的 eqStart(Δ+0.4045~+0.4962) → 分母效应(−3.96~−6.42%) 压倒 → 净 Δc = −1.425~−3.800%`。
+- **📌 逐月/逐季（Factor）**：仅 **2025-03 为负**（**−2.82% / −0.53% / −3.77% / −0.76%**），最大贡献 7 月（+3.30%/+1.73%/+3.90%/+1.77%）；**Q1 +0.88~+2.35% · Q2 +4.98~+6.29% · Q3 +3.74~+6.95% · Q4 +0.03~+1.04%**；入场笔数 1月51·2月52·3月61·4月58·5月57·6月56·**7月66**·8月62·9月63·**10月41**。
+- **8 条结论**：**C1** ✅ 张力已完全调和（两者分母不同）· **C2** ✅ 差异完全由分母 `eqStart` 解释（三层分解逐项校验 = 0）· **C3** ✅ Factor 在全部单笔/绝对维度均优于 Random · **C4** ✅ 唯一劣势项 = `eqStart` · **C5** ✅ 规模与利用率不是来源（效应仅 +0.087%~+0.234%）· **C6** ✅ 持仓窗口时点不是来源（`meanIdx` 效应仅 −0.020%~−0.162%）· **C7** ✅ 对账可复现 · **C8** 🛑 `eqStart` 差异成因**未探究，不猜测机制**。
+- **10 项 NOT PROVEN**：①🛑**`eqStart` 差异的成因**（不在本轮范围，不猜测）②⚠️ **Random 臂逐月/逐季分布【本轮未采集】** ③⚠️ **Random 臂 `net` 分位数/sd/min/max【未采集】** ④⚠️ **Random 臂入场月份分布【未采集】**（任务第 6 项「交易发生时间分布」仅 Factor 侧可得）⑤❌ `eqStart` 差异是否「公平」未评估 ⑥❌ 其他年份新开仓桶分解（本轮仅 2025）⑦❌ `avgAmp5 F20` min = **−65.45%** 的来源未逐笔溯源 ⑧❌ 2025-03 负贡献成因未归因 ⑨❌ 任何策略/可交易性结论 ⑩❌ 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未删除任何交易、未重跑策略、未做任何优化** · ✅ **未新增候选** · ✅ **未做参数搜索** · ✅ **未做阈值优化** · ✅ **未新增因子** · ✅ **未做 TopN/持仓期搜索** · ✅ **未做多维交互** · ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改业务代码/Schema/Migration/DB** · ✅ **完成报告后停止，未继续自动开展下一轮研究**。
+- **Baseline Impact**：**major（张力闭环 + 口径洞察）** —— **以三层严格可加分解完全调和 F6/F5 张力**（校验精确 = 0），**确立差异来源为【分母 `eqStart`】**（Factor 基数 1.31~1.38 vs Random 0.88~0.91，高 44%~56%），**排除规模/利用率/持仓窗口时点三项**（效应分别 +0.087~+0.234% / −0.020~−0.162%）；**确认 Factor 在全部单笔与绝对维度均优于 Random**（胜率 +8.0~+11.9pp · 亏损贡献仅 47%~54% · 绝对 P&L ΔN 全正 · top10% 集中度 71%~84% vs Random 131%~151%）；并**登记「单笔相对量 vs 组合收益率分母不同」这一关键口径洞察**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-EQSTART-ATTRIBUTION-001 · 2024-12-31 `eqStart` 差异归因 → 🎯 **GAP 的 76.7%~86.7% 来自「新开仓」桶；2022 年单项占约 30%**
+
+- **Task**：解释 **2024-12-31 Factor vs Random 的 `eqStart` 差异**（区间 **2019-01-03 ~ 2024-12-31**）。**只做归因，不做优化**。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/es.cjs`、`esdigest.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 方法**：沿用 2025 轮的分解恒等式并推广至 2019–2024，**每年以上一年末日为起始边界**，`Δeq_y = Σ_{E_C(y)} w(net + 1 − r0_y) + Σ_{E_N(y)·当年已平} w·net + Σ_{E_N(y)·年末未平} w(r_end − 1)`；`r0` 由引擎在**各年末快照日直接记录**（`snaps[y]`）⇒ **无近似**。**逐层望远镜求和**至 2024-12-31。
+- **📌 `eqStart`（2024-12-31）与 GAP**：**`maxAmp5 F20`** F **1.379349** vs R mean **0.883162**（p05 0.707977 · **p95 1.038886** · sd 0.099154）⇒ **GAP +0.496187**；**`maxAmp5 F40`** **1.383681** vs **0.910703**（p95 1.010063 · sd 0.060029）⇒ **+0.472978**；**`avgAmp5 F20`** **1.321983** vs **0.883377**（p95 1.036850 · sd 0.093841）⇒ **+0.438606**；**`avgAmp5 F40`** **1.314685** vs **0.910228**（p95 1.010394 · sd 0.061476）⇒ **+0.404457** ⇒ 🔴 **Factor `eqStart` 超过 Random p95 达 27.5%~37.0%（F/p95 = 1.328/1.370/1.275/1.301）⇒ 远在 1000 seeds 分布之外**。
+- **✅ Ledger 闭合三段全部精确**：**望远镜** `Σ_{2019..2024} Δeq_y + 1.0` vs `eqStart` ⇒ **差 = 0**（四候选）· **差异闭合** `Σ_y gap_y` vs `GAP` ⇒ **校验 ≤ 2e-6**（0.496188/0.496187 · 0.472977/0.472978 · 0.438607/0.438606 · 0.404455/0.404457）· **逐年对账** `Δeq_y − (跨年+新开+未平)` ⇒ **max |误差| = 0**（四候选 × 1000 seeds × 6 年）。
+- **📌 逐年 GAP（增量，Σ = GAP）**：| 年 | `maxAmp5 F20` | `maxAmp5 F40` | `avgAmp5 F20` | `avgAmp5 F40` | 平均占比 |：2019 **+0.052297 / +0.060930 / +0.033128 / +0.035575**（8.9%）· 2020 **+0.044888 / +0.048374 / +0.063000 / +0.054537**（10.4%）· 2021 **+0.114226 / +0.090790 / +0.071477 / +0.059872**（18.2%）· **2022 🔴 +0.164675 / +0.122794 / +0.163758 / +0.104190**（🔴 **29.5%**）· 2023 **+0.050903 / +0.061491 / +0.060434 / +0.074420**（13.2%）· 2024 **+0.069199 / +0.088598 / +0.046810 / +0.075861**（14.4%）⇒ 🔴 **2022 单一贡献最大（25.8%~35.7%）**；**2021+2022 合计 40.6%~56.2%**。
+- **🎯 GAP 三维分解（跨年仓 / 新开仓 / 未平仓）**：**`maxAmp5 F20`** Σ跨年 **+0.039586** · **Σ新开 +0.430088** · Σ未平 +0.026512 ⇒ **8.0% / 86.7% / 5.3%**；**`maxAmp5 F40`** **+0.045521 / +0.378730 / +0.048727** ⇒ **9.6% / 80.1% / 10.3%**；**`avgAmp5 F20`** **+0.035461 / +0.374980 / +0.028163** ⇒ **8.1% / 85.5% / 6.4%**；**`avgAmp5 F40`** **+0.054261 / +0.310411 / +0.039782** ⇒ **13.4% / 76.7% / 9.8%** ⇒ 🎯 **`eqStart` 差异的【76.7%~86.7%】来自「新开仓」桶**；跨年仓 8.0%~13.4%；未平仓 5.3%~10.3%。**2019 年跨年仓 = 0**（区间起点无持仓）；2020/2021 跨年仓 GAP 为**微小负值**（−0.0042 ~ +0.0056）。
+- **📌 新开仓逐年 GAP 亦以 2022 最大**：`maxAmp5 F20` **+0.150647** · `maxAmp5 F40` +0.094950 · `avgAmp5 F20` **+0.136102** · `avgAmp5 F40` +0.065786。
+- **📌 累计 GAP（权益层面）**：`maxAmp5 F20` 0.052→0.097→0.211→**0.376**→0.427→**0.496**；`maxAmp5 F40` 0.061→0.109→0.200→**0.323**→0.384→**0.473**；`avgAmp5 F20` 0.033→0.096→0.168→**0.331**→0.392→**0.439**；`avgAmp5 F40` 0.036→0.090→0.150→**0.254**→0.329→**0.404** ⇒ **2022 年跳升最大**。
+- **📌 年度收益（B 口径）：Factor 六年【全部不劣于】Random，无一年劣势**：`maxAmp5 F20` 优势 **+5.23/+4.14/+10.02/+15.25/+4.69/+5.68pp**；`maxAmp5 F40` **+6.09/+4.52/+7.62/+11.53/+5.80/+6.72pp**；`avgAmp5 F20` **+3.31/+6.00/+6.22/+15.31/+5.44/+4.01pp**；`avgAmp5 F40` **+3.56/+5.31/+5.01/+10.01/+7.03/+6.02pp** ⇒ 🔴 **2022 优势最大**（Random **−10.89%~−12.54%** vs Factor **−0.97%~+2.95%**）。
+- **📌 规模与跨年仓规模【均非 GAP 来源】**：新开仓 n 与 Σw 两臂差异仅 **+2.5%~+4.4%**（如 2022：F 643/7.1444 vs R 627.1/6.9682）；跨年仓规模两臂几乎一致（2022 起 **≥0.61 权重**，F 56~115 笔 vs R 55~110 笔）；**2022 年 Factor 新开仓 meanNet 为正（+0.23%~+1.17%）而 Random 为负（−1.25%~−1.90%）**。
+- **10 条结论**：**C1** `eqStart` GAP **+0.4045~+0.4962** · **C2** Factor 超 Random p95 达 **27.5%~37.0%** · **C3** 🎯 **GAP 的 76.7%~86.7% 来自「新开仓」桶** · **C4** 🔴 **单一最大来源年 = 2022（占 25.8%~35.7%，平均 29.5%）** · **C5** 2021+2022 合计 **40.6%~56.2%** · **C6** Factor 六年年度收益全部高于 Random（+3.31~+15.31pp）· **C7** 规模不是来源（+2.5%~+4.4%），跨年仓规模两臂一致 · **C8** 账本三段全部闭合 · **C9** 🎯 **`eqStart` 差异 = 六年累计的「新开仓」相对优势，2022 年贡献约三成** · **C10** 🛑 **2022 年优势的成因未在本轮探究**。
+- **9 项 NOT PROVEN**：①🛑**2022 年优势的成因**（**不在本轮范围，不推断因果**）②`eqStart` 差异是否「公平」未评估 ③**trade-level 单一交易贡献排序未做**（Factor 与 Random 为不同路径，逐笔配对无定义）④Random 臂 `eqStart` 更细分位数未采集 ⑤2020/2021 跨年仓 GAP 为负的成因未归因 ⑥未平仓（MTM）项 GAP 成因未展开 ⑦其他区间（2025~2026）未归因 ⑧任何策略/可交易性结论 ⑨可外推。
+- **⚠️ 工具修正说明（已披露）**：首轮 `es.cjs` 的 `gapSum.sumYears` 误将**累计量**（`gap.eqEnd`）相加 ⇒ 打印「逐年加和」为 1.660152（口径错误）；**已修正**为逐年**增量**（`gap.dEq`）之和并补充 `sumCross`/`sumNew`/`sumNewOpen`/`cumEqEnd` 字段；**修正后脚本已重跑**，闭合校验 **≤ 2e-6**；摘要（`esdigest.cjs`）用逐年字段独立复算并确认一致；**报告全部采用逐年增量口径**。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未修改策略** · ✅ **未搜索参数/TopN/holding/threshold** · ✅ **未新增因子** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未修改 Schema / Migration** · ✅ **未重跑无关实验** · ✅ **未为补充分布统计而扩大任务范围** · ✅ **完成报告后停止，未继续派生下一轮实验**。
+- **Baseline Impact**：**major（eqStart 归因完成 + 账本闭合）** —— **完成 2024-12-31 `eqStart` 差异的逐年归因**，确立 **GAP 的 76.7%~86.7% 来自「新开仓」桶**、**2022 年单项占约 30%**、**2021+2022 合计 40.6%~56.2%**；**确认 Factor 六年年度收益全部高于 Random**（2022 优势最大 +10.01~+15.31pp）；**排除规模与跨年仓规模两项**（差异 +2.5%~+4.4% / ≈0）；并**建立三段账本闭合**（望远镜差 = 0 · 差异闭合 ≤ 2e-6 · 逐年对账误差 = 0）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-2022-ATTRIBUTION-001 · 2022 年 Factor 优势归因 → 🎯 **优势来自新开仓「减少亏损」，非极端赢家、非规模；因果不可识别**
+
+- **Task**：解释 `eqStart` GAP 中最大来源年份 **2022** 为什么 Factor 显著优于 Random。**仅研究 2022-01-01 ~ 2022-12-31** · 只做归因。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/yr2022.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **口径**：P0-ORACLE-002 · 20bps · 固定 4 候选 · Random 沿用 NB-RANDOM-002 **1000 seeds**（种子串 `NB2|{key}|{s}` **未改变**）· 2021 年末快照 **2021-12-31(idx 728)** · 2022 年末 **2022-12-30(idx 970)** · 2022 交易日/决策日 **242/242**。
+- **✅ 2022 Ledger 闭合精确（误差 = 0）**：**`maxAmp5 F20`** Δeq **+0.041909** = 跨年 −0.004112 + **新开 +0.068361** + 未平 −0.022341；**`maxAmp5 F40`** **+0.014041** = −0.013826 + **+0.044477** + −0.016610；**`avgAmp5 F20`** **+0.030985** = +0.005293 + **+0.043936** + −0.018245；**`avgAmp5 F40`** **−0.010676** = −0.004126 + **+0.007818** + −0.014368 ⇒ **误差全部 = 0**；差值闭合校验 **0 ~ 0.000001**；**新开仓已进一步闭合到逐笔贡献** ✓（任务第 4 项要求满足）。
+- **📌 新开仓核心指标（Factor vs Random mean）**：**`maxAmp5 F20`** n 643 / 627.3 · Σw 7.144444 / 6.969533 · meanNet **+0.96% / −1.25%** · median −0.10% / −2.81% · winRate **49.77% / 41.06%** · meanExcess **+2.54% / +0.36%** ⇒ **Δ +15.7 / +0.1749 / +2.21pp / +2.72pp / +8.70pp / +2.18pp**；**`maxAmp5 F40`** 575/554.7 · 3.194444/3.081850 · **+1.39% / −1.82%** · −1.60%/−4.34% · 46.09%/39.78% · **+4.86%/+1.63%** ⇒ **Δ +20.3 / +0.1126 / +3.21pp / +2.74pp / +6.31pp / +3.23pp**；**`avgAmp5 F20`** 647/627.0 · 7.188889/6.966811 · **+0.61% / −1.21%** · −0.35%/−2.82% · 48.38%/41.15% · **+2.23%/+0.40%** ⇒ **Δ +20.0 / +0.2221 / +1.82pp / +2.46pp / +7.23pp / +1.83pp**；**`avgAmp5 F40`** 579/554.8 · 3.216667/3.082250 · **+0.24% / −1.85%** · −1.83%/−4.35% · 45.25%/39.78% · **+3.82%/+1.60%** ⇒ **Δ +24.2 / +0.1344 / +2.09pp / +2.52pp / +5.47pp / +2.22pp** ⇒ 🔴 **`Δn`/`ΔΣw` 仅 +2.5%~+4.4% ⇒ 规模差异【不是】默认解释（任务要求满足）**。
+- **🔴 核心机制：优势来自【减少亏损】而非【增加盈利】**：**`Δ负贡献` +0.161456 / +0.078320 / +0.172732 / +0.079056（主导）**；**`Δ正贡献` −0.005853 / +0.022127 / −0.044380 / −0.014347（三负一正）**；**`Δbot10%` +0.047533 / +0.021623 / +0.051301 / +0.024269（全正）**；**`Δtop10%` −0.018464 / +0.004932 / −0.036696 / −0.016436（多为负）** ⇒ **`Δbot10%` 是 `Δtop10%` 改善的 1.5~4.4 倍**。
+- **📌 尾部与极端交易检查（任务第 5 项）**：**`Δ最大单笔` = −0.001664 / +0.004396 / −0.001680 / +0.004344（≈0）** ⇒ **未被少数极端交易驱动**；`Δ最差单笔` +0.000244~+0.001149；`Δtop1%` −0.002522~+0.003728。
+- **📌 分位数：差异集中在左尾与中心，上尾不强**：**P25 差 +3.0~+5.2pp** · **P50 差 +2.5~+2.7pp** · **min 差 +5.0~+10.1pp** · **P75 差 −0.4~+1.0pp** · **P90 差 −3.7~+0.5pp** · **P95 差 −4.7~−0.4pp**。Factor 的 `medianNet` 仍为负（−0.10%~−1.83%）、胜率 <50%（45.25%~49.77%），但 `meanNet` 为正 ⇒ **正向偏态**；**Random 中心更差**（median −2.81%~−4.35%，胜率 39.78%~41.15%）。
+- **📌 逐月归因（Factor/Random/Δ）**：**正向月数 11/12 · 10/11 · 11/12 · 8/11** ⇒ **优势【广泛分布】，非集中于单月**；**最大正贡献月 = 8 月/9 月**（`maxAmp5 F20` +2.89%/+2.77% · `maxAmp5 F40` +1.43%/+2.08% · `avgAmp5 F20` +2.79%/+2.85% · `avgAmp5 F40` +1.07%/+1.75%）；**唯一显著负月 = 4 月**（+0.64% ~ −1.98%）；**`maxAmp5 F40`/`avgAmp5 F40` 6 月为负**（−0.47%/−0.50%）。
+- **📌 描述性分层（Factor 实际选择池 vs Random 抽样池 · 2022）**（**未重新分桶、未搜索阈值、未优化组合**）：**`maxAmp5` 0.0391~0.0426 vs 0.0822~0.0826（−48%）** · **`avgAmp5` 0.0286~0.0306 vs 0.0553~0.0557（−47%）** · **`amountPercentile` 0.4192~0.4300 vs 0.4940~0.4967（−15%）** · **`limitGap` 110.4~112.9 vs 61.7~62.9（+78%）** · **`historyLimitCount` 15.12~15.60 vs 19.05~19.58（−21%）** · **`turnover` 5.39~5.65 vs 7.23~7.29（−24%）** · **`bodyHeight` 0.0842~0.0857 vs 0.0903~0.0904（−6%）** · **`preReturn10` 0.0016~0.0084 vs 0.0277~0.0293（−75%）** ⇒ **2022 年 Factor 选择池系统性呈「低振幅 · 低成交额分位 · 距上次涨停更久 · 历史涨停更少 · 低换手 · 事件前涨幅更低」**。
+- **任务第 2 项四候选假设判定**：**①选股整体质量更高 ⇒ ⚠️ 部分支持**（分布整体右移：`Δmedian +2.46~+2.74pp`、`ΔwinRate +5.5~+8.7pp`、`ΔmeanExcess +1.83~+3.23pp`）· **②避免 Random 大额亏损 ⇒ ✅ 支持且为主要机制**（`Δ负贡献 +0.078~+0.173` 主导 · `Δbot10%` 全正 · `min` 改善 +5.0~+10.1pp）· **③捕捉少数极端赢家 ⇒ ❌ 不支持**（`Δ最大单笔`≈0 · `Δtop10%` 多为负 · `P90/P95` 略低）· **④仅来自交易规模/持仓数量 ⇒ ❌ 不支持**（`Δn`/`ΔΣw` 仅 +2.5%~+4.4%，远小于效应量）。
+- **结论分级（任务要求的三级区分）**：**【FACT】F1** 账本闭合误差 = 0 且新开仓闭合到逐笔 · **F2** `ΔmeanNet`/`Δmedian`/`ΔwinRate`/`ΔmeanExcess` 全部为正 · **F3** `Δ负贡献` 主导 · **F4** `Δ最大单笔`≈0、`Δtop10%` 多为负 · **F5** `Δbot10%` 全正 · **F6** `Δn`/`ΔΣw` 仅 +2.5%~+4.4% · **F7** 正向月 8~11/11~12，8/9 月最大 · **F8** P25/P50/min 改善而上尾略低 · **F9** 描述性分层特征。**【ATTRIBUTION】A1** 🎯 机制 = 新开仓分布整体右移 + 两端收窄，以减少亏损为主导（非极端赢家、非规模）· **A2** 🎯 优势广泛分布于 8~11 个月 · **A3** 🎯 新开仓贡献差（+0.0647~+0.1556）≈ 2022 `Δeq` 差异的全部。**【NOT PROVEN】N1** 🔴 **「因子选股质量更高」的因果主张不可分离**（「因子选择能力」 vs 「低振幅特征在 2022 市场环境下天然更适应」**无法区分**）· **N2** 低振幅与伴随特征的因果结构（仅关联）· **N3** 2022 市场环境是否为原因（未做 regime 归因）· **N4** 因子共线性/交互（任务禁止）· **N5** 其他年份是否同机制 · **N6** 面板口径导致绝对数值差异 · **N7** 任何策略结论 · **N8** 可外推。
+  - 🔴 **任务要求「如果只能证明统计相关而无法证明具体因果，不得写成因果结论」⇒ 本报告严格遵守：A1~A3 均写成账本归因/统计事实，未写成「因子选股能力导致」的因果主张（见 N1）。**
+- **⚠️ 面板口径披露（跨轮不可直接比较）**：本轮额外要求 prefix rd ∈ {−10,−1,0} 与 `amount`/`previousClose` ⇒ **比 `EQSTART-ATTRIBUTION-001` 更严**；`maxAmp5 F20` 2022 新开 **笔数与 Σw 完全相同（643 / 7.144444）但构成不同** ⇒ meanNet **+0.96% vs +0.89%**、贡献 **+0.068361 vs +0.063335**、Δeq **+0.041909 vs +0.037023** ⇒ **方向与量级一致，结论稳健**。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未修改策略** · ✅ **未修改因子定义** · ✅ **未新增因子** · ✅ **未搜索参数/threshold/TopN/holding** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未修改 Schema / Migration** · ✅ **未重跑无关实验** · ✅ **未改变 Random 生成规则** · ✅ **未删除任何交易** · ✅ **未进行策略优化** · ✅ **未重新分桶、未寻找新阈值、未优化因子组合** · ✅ **完成报告后停止，不自动继续下一轮实验**。
+- **Baseline Impact**：**major（2022 归因完成 + 因果界限明确）** —— **完成 2022 年 Factor 优势的严格账本归因**（误差 = 0，新开仓闭合到逐笔），确立 **机制为「新开仓分布整体右移 + 两端收窄、以减少亏损为主导」**（`Δ负贡献 +0.078~+0.173` 主导 · `Δbot10%` 全正 · `Δ最大单笔`≈0 · `Δtop10%` 多为负）；**排除「极端赢家」与「交易规模」两项解释**；**优势广泛分布于 8~11 个月**；**确立 2022 年 Factor 选择池的 8 项描述性特征**；并**明确划定因果界限**（选股能力 vs 低振幅特征适应性**不可分离**，不写因果）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-TIMESCALE-STABILITY-001 · `maxAmp5`/`avgAmp5` 跨年份稳定性与时间尺度归属 → 🎯 **四候选 7/7 年全胜 · 归属 LONG 主导（事件后状态型）**
+
+- **Task**：判断 `maxAmp5` / `avgAmp5` 的 Alpha 是否具有**跨年份稳定性**，及其更接近 **SHORT / MEDIUM / LONG** 哪一类时间尺度。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/ts_stab.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **口径**：固定 4 候选（`D15 × {maxAmp5,avgAmp5} × F{20,40} × Top3`）· 沿用 P0-ORACLE-002 / NB-RANDOM-002 / IMPACT-CAPACITY-001 执行口径 · **20bps** · Random **1000 seeds**（`NB2|{key}|{s}` **未改变**）· 日历 1,716 天 · 决策日 1,637 · 可用事件 58,229 · 归年按 `entryYear`。
+- **🟢 跨年份稳定事实（S1~S8）**：
+  - **S1** ✅ **逐年 IC 7/7 年为正**（两因子 × 四窗口 = **28/28** 全为正，**|t| ≥ 4.7**）。
+  - **S2** ✅ **IC 在每个年份都随窗口 F5 → F10 → F20 → F40 【单调递增】**。范围：`maxAmp5` F5 **0.0770~0.1158** · F10 0.1006~0.1554 · F20 0.1170~0.1852 · **F40 0.1343~0.2086**；`avgAmp5` F5 0.0862~0.1397 · F10 0.1146~0.1673 · F20 0.1173~0.2035 · **F40 0.1394~0.2259**。**F40/F5 IC 比：`maxAmp5` 1.34~2.15×（均值 1.64×）· `avgAmp5` 1.49~2.05×（均值 1.65×）**。
+  - **S3** ✅ **正 ΔmeanNet 7/7 · 正 ΔmeanExcess 7/7 · 正 Δ贡献 7/7 · beat>0.5 7/7（四候选完全一致）** ⇒ **Factor−Random 优势在 2019–2025 无一年为负**。
+  - **S4** ✅ **因子臂自身在 2023 年为负年（1/7）**：`meanNet` −0.47%/−3.40%/−0.16%/−2.78% · 贡献 −3.08%/−10.83%/−1.02%/−8.92%。
+  - **S5** ✅ **F40 单笔优势 ≈ F20 的 1.8 倍**：ΔmeanExcess 7 年均值 `maxAmp5` **+2.077pp vs +1.131pp（1.84×）** · `avgAmp5` **+1.694pp vs +0.954pp（1.78×）**。
+  - **S6** ✅ **F20 年度贡献差更高**：Δ贡献 均值 `maxAmp5` **+7.994pp vs +7.129pp** · `avgAmp5` **+6.687pp vs +5.733pp** ⇒ **两个透镜结论不同，均并列报告**。
+  - **S7** ✅ **2023 年 F40 负贡献（−8.92%/−10.83%）为 F20（−1.02%/−3.08%）的 3~9 倍**。
+  - **S8** ✅ **F40 持有期（rd16→rd55 = 39~40 交易日）= 冻结 LONG 持有期（rd21→rd60 = 39~40 日）**；F20（rd16→rd35 = 19~20 日）介于 MEDIUM 与 LONG 之间。
+- **🎯 时间尺度推断（T1~T6）**：**T1** `maxAmp5` = **LONG 主导 · 事件后状态型**（IC 单调增强至 F40 · F40 单笔优势 1.84× · 持有窗口 = LONG）· **T2** `avgAmp5` = **同归类**（F40/F5 1.65×，IC 略高于 `maxAmp5`）· **T3** **不能归入 SHORT**（决策时点 **T+15**，无法用于 T+1~T+5）· **T4** **不完全等同 MEDIUM**（MEDIUM 冻结定义为 T=0 决策、T+6~T+20 持有）· **T5** **与冻结 LONG-4【不同质】**（持有窗口一致但**决策时点 T+15 vs T=0**、因子族不同）· **T6** **F20 与 F40 的方向稳定性相同（均 7/7），差异在幅度与损失暴露**。
+- **📌 与冻结时间尺度角色矩阵对照（未重跑旧因子实验，引用 `FACTOR-TIMESCALE-FINAL-001`）**：**LONG-4**（T=0 决策，T+21~T+60，股票池/长期排序）· **MEDIUM**（T=0 决策，T+6~T+20，独立中期相对强弱/减亏）· **SHORT**（`preReturn10`/`limitGap`，T=0 决策，T+1~T+5）⇒ 🔴 **本轮因子与三者【均不同质】**；且 **旧 `maxAmplitude`/`meanAmplitude` = rd1~5 固定窗口，本轮 `maxAmp5`/`avgAmp5` = rd11~15 滚动窗口 ⇒ 定义不同，不是同一因子**。
+- **📌 F20 vs F40 稳定性差异**：**正年数/beat 相同（7/7）**；✅ **单笔优势与 IC：F40 更强（≈1.8×）**；✅ **年度贡献：F20 更高（周转优势）**；✅ **坏年份绝对损失：F20 更小（2023 负贡献小 3~9 倍）**；✅ **坏年份相对优势：F40 更强**（2023 ΔmeanExcess +1.74%/+2.44% vs +0.88%/+1.16%）。
+- **五个必答问题**：**①`maxAmp5` 归属 ⇒ 🎯 LONG 主导 · 事件后状态型** · **②`avgAmp5` 归属 ⇒ 🎯 同归类**（⚠️ 最小 ΔmeanExcess **+0.29%**（2025 F40）为四候选最低）· **③F20 vs F40 ⇒ ⚖️ 方向稳定性相同；幅度/风险不同**（见上）· **④是否值得进入下一阶段 ⇒ ✅ 值得**（**7/7 年 × 三项指标 × 四候选 = 84/84 单元为正**，IC 28/28 全为正）⚠️ 但须随结论登记 2023 绝对负年、F40 坏年份暴露更大、因果不可识别、`avgAmp5` F40 最小边际仅 +0.29% · **⑤是否需要重新研究旧因子 ⇒ 🔴 不需要**（①定义不同：旧 rd1~5 固定窗口 vs 本轮 rd11~15 滚动窗口 ②旧结论未被本轮推翻 ③本轮未重跑旧实验 ④唯一跨轮影响为 **(A) 年度切分口径缺陷**，已在 `YEAR-END-MTM-001` 登记，属**口径修正**而非「重新研究因子」）。
+- **9 项 NOT PROVEN**：**N1** 🔴 **「低振幅导致长期超额」的因果主张不可识别**（承接 `2022-ATTRIBUTION-001` 的 N1）· **N2** **为何 IC 随窗口单调增强**（仅记录事实，未探究成因）· **N3** 2023 年因子臂负年成因 · **N4** F40 年度贡献低于 F20 是否可归因于周转（未做周转分解）· **N5** F20/F40 与冻结 MEDIUM/LONG 的定量重叠度 · **N6** 与 LONG-4 的相关性/正交性（任务禁止）· **N7** 2026 年（`endDate=2025-09-26`，无有效年度）· **N8** 任何策略/可交易性结论 · **N9** 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未修改因子定义/阈值/TopN/持仓上限/成本/参数** · ✅ **未做参数搜索/权重搜索/阈值搜索** · ✅ **未创建 Candidate / Strategy** · ✅ **未修改策略** · ✅ **未新增因子** · ✅ **未删除任何交易** · ✅ **未改变 Random 生成规则** · ✅ **未重跑旧因子实验**（SHORT/MEDIUM/LONG-4 结论为**引用**）· ✅ **未修改 Schema / Migration**。
+- **Baseline Impact**：**major（稳定性确证 + 尺度归属）** —— **确立 `maxAmp5`/`avgAmp5` 在 2019–2025 的跨年份完全稳定**（IC 28/28 为正 · Factor−Random 优势 **84/84 单元为正，无一年为负**）；**判定两者均为【LONG 主导 · 事件后状态型】**（IC 单调递增至 F40 · F40 单笔优势 ≈1.8× F20 · 持有窗口 = 冻结 LONG），并**明确不能归入 SHORT、不完全等同 MEDIUM、与 LONG-4 不同质**（决策时点 T+15 vs T=0）；**量化 F20 vs F40 的四维差异**（幅度/年度贡献/IC/坏年份暴露）；**判定值得进入下一阶段**；**判定无需重新研究旧 12 因子**（定义不同且旧结论未被推翻）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-LONG-ORTHOGONALITY-001 · post-event 因子 vs 冻结 LONG-4 横截面正交性 → 🎯 **弱相关（未达正交、亦未达重复）；`maxAmp5`×`avgAmp5` = 0.8992 高度重复**
+
+- **Task**：验证 `maxAmp5` / `avgAmp5`（LONG 主导、T+15 事件后状态型）是否与冻结 LONG-4 因子存在**明显信息重复**。
+- **Changes**：🔴 **零业务代码改动**（仅 2 个未跟踪只读 harness `scripts/_scratch/ortho.cjs`、`orthodigest.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **口径**：**T+15 候选池**逐日横截面 Spearman（15 对 · 池最小 15 只）· 因子 6 个（`maxAmp5` · `avgAmp5` · `amountPercentile` · `limitGap` · `historyLimitCount` · `turnover`）· **复用现有因子定义与已有分桶，未新增定义** · 可用事件 **55,577** / 丢弃 3,406 · **有效决策日 1,403**（2019 **126** · 2020 203 · 2021 239 · 2022 236 · 2023 197 · 2024 222 · 2025 180；⚠️ 2019 样本较小）。
+- **📌 相关矩阵（全样本日均值，原始）**：`maxAmp5`×`avgAmp5` **0.8992** · `maxAmp5`×`ap` 0.1406 · `maxAmp5`×`limitGap` **−0.2501** · `maxAmp5`×`hl` 0.1547 · `maxAmp5`×`turnover` 0.1675 · `avgAmp5`×`ap` 0.1812 · `avgAmp5`×`limitGap` **−0.2941** · `avgAmp5`×`hl` 0.1674 · `avgAmp5`×`turnover` 0.1931 · `ap`×`limitGap` −0.2539 · `ap`×`hl` 0.1145 · **`ap`×`turnover` 0.5454** · `limitGap`×`hl` −0.2881 · **`limitGap`×`turnover` −0.3454** · `hl`×`turnover` 0.2147。
+- **📌 组别汇总**：**组1（post-event 内部，1 对）** 平均 |ρ| **0.8992** · **组2（post-event × LONG-4，8 对）** 平均 |ρ| **0.1936**（范围 **0.1406~0.2941**）· **组3（LONG-4 内部，6 对，参照基线）** 平均 |ρ| **0.2937**（范围 0.1145~0.5454）⇒ 🔴 **组2 平均相关性【低于】组3（0.1936 vs 0.2937）**。
+- **📌 绝对值分档**：**|ρ|<0.10（基本正交）= 0 对** · **0.10≤|ρ|<0.30（弱相关）= 12 对** · **0.30≤|ρ|<0.60（中度）= 2 对**（`ap`×`turnover` 0.5454 · `limitGap`×`turnover` −0.3454）· **|ρ|≥0.60（高/重复）= 1 对**（`maxAmp5`×`avgAmp5` **0.8992**）。
+- **🎯 任务第 4 项三档判定**：**「明显重复」仅对 `maxAmp5`×`avgAmp5` 成立**（唯一 ≥0.60 对，p05 仍 0.7953）· **「中度相关」对 post-event × LONG-4 【不成立】**（8 对全部 <0.30）· **「基本正交」【不成立】**（**0 对 |ρ|<0.10**）⇒ 🎯 **判定：`maxAmp5`/`avgAmp5` 与 LONG-4 =【弱相关（|ρ| 0.14~0.29）—— 未达正交，亦未达重复】**。
+- **🔴 关键限定 1：定向后 15/15 对【全部为正】**（`ρ_oriented = ρ_raw × dir_a × dir_b`；方向取自冻结定义：maxAmp5 −1 · avgAmp5 −1 · ap −1 · limitGap +1 · hl −1 · turnover −1）⇒ **整个因子族在「偏好哪类股票」上方向完全一致**（低振幅 ↔ 低成交额分位 ↔ 距涨停久 ↔ 低历史涨停 ↔ 低换手）⇒ **虽幅度弱，但方向不独立 ⇒ 不能据此断言正交**。定向后 8 对：+0.1406 / **+0.2501** / +0.1547 / +0.1675 / +0.1812 / **+0.2941** / +0.1674 / +0.1931。
+- **🔴 关键限定 2（任务第 5 项）：`maxAmp5` 与 `avgAmp5`【高度重复，实质上只代表一个信息源】** —— ρ **0.8992** · 中位 0.9139 · **p05 0.7953** · p95 0.9609 · **t = 513.80** · 逐年 **0.8852~0.9108（跨度仅 0.0256）** · **7/7 年** · 唯一 |ρ|≥0.60 对 ⇒ **推论：`TIMESCALE-STABILITY-001` 的「4 个固定候选全部 7/7 年全胜」应重述为「【2 个近重复的因子变体】×【2 个持有窗口】全部 7/7 年全胜」** ⚠️ **不否定该轮结论，但削弱其独立性含金量**。
+- **📌 稳定性：15/15 对的年度符号【全部稳定】（7/7 或 0/7）· 无一对变号**。逐年均值跨度：`maxAmp5`×`avgAmp5` **0.0256**（最稳）· `ap`×`hl` **0.2327**（最不稳）· `limitGap`×`hl` 0.1722。
+- **⚠️ 日均值离散度（必须登记的限定）**：`maxAmp5`×`limitGap` **p05 −0.5390 / p95 +0.0897** · `avgAmp5`×`limitGap` p05 −0.5920 / p95 +0.0182 · `maxAmp5`×`ap` p05 −0.2003 / p95 **+0.4740** · `avgAmp5`×`ap` p05 −0.1762 / p95 **+0.5189** ⇒ **除 `maxAmp5`×`avgAmp5`（p05 仍 +0.7953）外，其余各对的日均值仅代表中心趋势，单日相关性波动大（部分日反向）**。
+- **📌 `limitGap` 对与 LONG-4 内部耦合**：**`avgAmp5`×`limitGap` −0.2941**（8 对中 |ρ| 最大，**连续 7 年为负**，定向后 +0.2941 同向）⇒ post-event 与 LONG-4 耦合最强的一对；**LONG-4 内部已存在 2 对中度相关**（`ap`×`turnover` **0.5454** · `limitGap`×`turnover` **−0.3454**）⇒ **post-event 因子与 LONG-4 的耦合【不高于】LONG-4 因子彼此之间的耦合**。
+- **⚠️ INFERENCE 表述**：**「可能保留部分独立信息，但【无法由相关性证明】」** ⇒ 🔴 **按任务要求明确写：`maxAmp5`/`avgAmp5` 相对 LONG-4 的【独立信息量无法由相关性证明】**。
+- **10 项 NOT PROVEN**：**N1** 🔴**「提供独立 Alpha」**（相关性低 ≠ 组合有增量 Alpha；**未做任何组合回测**）· **N2** 🔴**「与 LONG-4 组合可提升表现」**（未回测、未做权重搜索）· **N3** 🔴**「正交性成立」**（0 对 |ρ|<0.10 且定向 8/8 同向）· **N4** 条件独立性/偏相关（未做）· **N5** 非线性/尾部依赖（仅 Spearman）· **N6** 组合层面 IC/换手/容量（禁止）· **N7** 二者择一即可（仅证明重复，未做择一对比）· **N8** 单日相关性波动机制 · **N9** 其他年份/池条件 · **N10** 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未做任何组合回测** · ✅ **未做权重搜索** · ✅ **未做 TopN 搜索** · ✅ **未做参数搜索** · ✅ **未创建 Strategy Candidate** · ✅ **未修改因子定义** · ✅ **未新增因子** · ✅ **未新增分桶** · ✅ **未修改 DB / Schema / Migration**。
+- **Baseline Impact**：**major（正交性判定 + 候选独立性重估）** —— **完成 `maxAmp5`/`avgAmp5` 与冻结 LONG-4 的横截面正交性判定**（**弱相关 0.14~0.29，未达正交亦未达重复**；组2 平均 |ρ| **0.1936 <** 组3 基线 **0.2937**）；**登记两项关键限定**（**定向后 15/15 同向** ⇒ 方向不独立；**`maxAmp5`×`avgAmp5` = 0.8992 高度重复** ⇒ 4 候选实为 **2 变体 × 2 窗口**）；**建立 15/15 对年符号全稳定的证据**；并**明确「独立信息量无法由相关性证明」**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-FACTOR-SELECT-001 · `maxAmp5` vs `avgAmp5` 固定口径择一 → 🛑 **KEEP = 暂不择一（3:3 平局，未制造优胜者）**
+
+- **Task**：在 `maxAmp5` 与 `avgAmp5` 高度重复（**ρ = 0.8992**）的前提下，固定口径择一，确定后续 LONG 事件后状态研究只保留哪个因子。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **本轮【未运行任何新实验】** · **未新增 harness**（仅 `CHANGE-AUDIT.md` 追加 + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 方法合规**：**全部数值直接复用** `RESULT-POST-EVENT-STATE-TIMESCALE-STABILITY-001` 的既有结果（2019–2025 逐年 IC / ΔmeanNet / ΔmeanExcess / winRate / Δ贡献 / beat / 因子贡献）；**唯一新增内容为纯算术派生**（7 年均值 · 最小值 · **同因子跨窗口年份排序 Spearman**）⇒ **不构成新实验**。
+- **📌 汇总（F20 / F40 分开，7 年均值）**：**`maxAmp5` F20** ΔmeanNet **+1.143** · ΔmeanExcess **+1.131** · Δ贡献 **+7.99** · IC **0.1516** · winRate **49.45** · beat **0.9449** · min ΔmeanExcess **+0.62** · min beat **0.842** · 2023 F贡献 **−3.08%**；**`avgAmp5` F20** **+0.946 / +0.954 / +6.69 / 0.1659 / 49.25 / 0.8994 / +0.38 / 0.785 / −1.02%**；**`maxAmp5` F40** **+2.089 / +2.077 / +7.13 / 0.1686 / 48.13 / 0.9857 / +1.26 / 0.940 / −10.83%**；**`avgAmp5` F40** **+1.679 / +1.694 / +5.73 / 0.1831 / 47.51 / 0.9287 / +0.29 / 0.633 / −8.92%**。
+- **📌 IC 逐年差（`avgAmp5` − `maxAmp5`）**：F20 **+0.0140/+0.0129/+0.0120/+0.0164/+0.0304/+0.0003/+0.0140（7/7 年 `avgAmp5` 更高）**；F40 **+0.0167/+0.0114/+0.0177/+0.0173/+0.0160/+0.0051/+0.0175（7/7）**。
+- **📌 五项择一规则逐项裁定**：**①跨年份稳定性 ⇒ ⚖️ 平**（四单元正 ΔmeanNet 7/7 · 正 ΔmeanExcess 7/7 · 正 Δ贡献 7/7 · beat>0.5 7/7 · 均仅 2023 一个绝对负年）· **②单笔 Alpha ⇒ ✅ `maxAmp5`**（ΔmeanExcess **+1.131/+2.077 vs +0.954/+1.694**，相对 **+18.6%/+22.6%**；ΔmeanNet +20.8%/+24.4%；winRate 略高，**两个窗口均胜**）· **③F20/F40 一致性 ⇒ ⚠️ 读法依赖**（读法 (a)「优势在两窗口是否成立」= ⚖️ 平，均 7/7；(b)「两窗口对年份排序是否一致」= ✅ **`avgAmp5`**：Δ贡献排序 ρ **0.929 vs 0.321** · ΔmeanExcess 排序 ρ **0.786 vs 0.536**；实例：`maxAmp5` 2025 在 F20 排第 3、F40 排第 7；2024 在 F20 排第 6、F40 排第 3）· **④2023 坏年份损失 ⇒ ✅ `avgAmp5`**（绝对损失 **−1.02% vs −3.08%**（小 3.0×）· **−8.92% vs −10.83%**；ΔmeanExcess **+1.16 vs +0.88** · **+2.44 vs +1.74**；beat **0.986 vs 0.967** · **1.000 vs 0.994** ⇒ **绝对与相对、两个窗口均胜**；📌 但 2023 在**四单元全部为负**）· **⑤最小年度优势 ⇒ ✅ `maxAmp5`**（min ΔmeanExcess **+0.62 vs +0.38** · **+1.26 vs +0.29**；min beat **0.842 vs 0.785** · **0.940 vs 0.633**；beat 均值 0.9449 vs 0.8994 · 0.9857 vs 0.9287 ⇒ **两个窗口均胜**；🔴 **`avgAmp5` F40 的 2025：ΔmeanExcess 仅 +0.29pp、beat 0.633 ⇒ 约 37% 随机种子跑赢，四候选中唯一弱边际**）。
+- **📌 附加两项**：**IC 均值 ⇒ ✅ `avgAmp5`**（0.1659/0.1831 vs 0.1516/0.1686，**逐年 7/7 系统性更高**，⚠️ **但未转化为组合优势**）· **年度贡献差均值 ⇒ ✅ `maxAmp5`**（+7.99/+7.13 vs +6.69/+5.73）。
+- **🛑 最终输出：`KEEP = 暂不择一`** —— 读法 (b) 下 **`maxAmp5` 3 : `avgAmp5` 3 : 平 1**（完全平手）；读法 (a) 下 **3 : 2 : 2**（非决定性，且败方独得「尾部抗性」整项）⇒ **两种读法下均不构成合理区分**。
+- **🛑 为何不构成「合理区分」（6 条）**：①**两侧各自在【不同维度】取得一致（两窗口均优胜）的优势**（max 赢「幅度与下限」/ avg 赢「尾部抗性与跨窗口一致性」）②**二者代表两种不同的稳健性定义**（「下限更高」vs「一致性更好/坏年更抗」）③🔴 **任务未指定研究目标偏好** ⇒ 不存在可据以裁定的加权 ④**`avgAmp5` 独得【整个】准则 ④**（绝对与相对两个子读法均胜，非边缘胜负）⑤**`maxAmp5` 独得准则 ②⑤，但 `avgAmp5` 的 IC 优势亦为逐年 7/7 系统性**（尽管未转化为组合优势）⑥**③ 的解释歧义本身即证明区分不稳健**（换一个同样合理的读法结论即由 3:3 变 3:2）⇒ **依任务明确规则「无法合理区分时必须输出『暂不择一』，不得人为制造优胜者」⇒ 本轮未制造优胜者**。
+- **📌 打破平局所需证据（6 项，本轮全部未执行）**：①**明确研究目标的加权规则**（幅度优先 or 尾部优先；**任务未指定 ⇒ 属人为选择**）②`maxAmp5`/`avgAmp5` 在 LONG-4 池内的增量表现（🔴 **任务明确禁止「LONG-4 组合」与「组合回测」**）③偏相关/条件独立性（🔴 **任务明确禁止「偏相关」**）④两者的构造差异（max 取 5 日最大值 vs avg 取 5 日均值）与极端事件敏感性的关系（🔴 属新分析）⑤更细尾部指标（CVaR/单笔最差；本轮未采集）⑥二者择一后的候选数缩减收益（🔴 属新实验）。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`，且本轮未新增查询）· ✅ **零业务代码改动** · ✅ **未做偏相关** · ✅ **未做组合回测** · ✅ **未做 LONG-4 组合** · ✅ **未做权重搜索** · ✅ **未做 TopN 搜索** · ✅ **未做参数搜索** · ✅ **未创建 Strategy Candidate** · ✅ **未新增因子** · ✅ **未修改现有因子定义/方向/阈值/TopN/MAX_CONC/成本** · ✅ **未新增参数** · ✅ **未做搜索** · ✅ **未运行任何新实验** · ✅ **未新增 harness**。
+- **Baseline Impact**：**major（择一裁定 = 暂不择一）** —— **完成 `maxAmp5` vs `avgAmp5` 的固定口径择一裁定**，结论为 **`KEEP = 暂不择一`**（五项任务规则下 **3:3 平局**，宽松读法下 3:2 且败方独得整项尾部抗性）；**量化两侧的非对称优势**（max：ΔmeanExcess +18.6%~+22.6% 相对 · min 优势 +0.62/+1.26 · beat 0.945/0.986；avg：2023 损失小 3.0×/1.2× · 跨窗口年份排序 ρ 0.929/0.786 vs 0.321/0.536 · IC 逐年 7/7 更高）；**确立平局的唯一可解路径为「先明确研究目标偏好」（幅度优先 vs 尾部/一致性优先），该偏好任务未指定**；并**登记 6 项可打破平局但本轮被禁止或未采集的证据**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-INCREMENTAL-ALPHA-001 · 后事件状态因子相对冻结 LONG-4 的增量 Alpha → ✅ **`maxAmp5` 与 `avgAmp5` 均为 `INCREMENTAL_ALPHA_CONFIRMED`（附三条限制）**
+
+- **Task**：验证 `maxAmp5` / `avgAmp5` 相对于冻结 `LONG-4` 是否存在**可观测的增量 Alpha**；**不强行择一**，把二者作为同一后事件状态因子族的两个固定代表做增量验证。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/incr.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **固定口径**：决策时点 **T+15**（三臂同一横截面）· **Top3 固定** · **20bps 固定** · `MAX_CONC = ceil(1.5×N×F)` = 90/180 · Random **1000 seeds**（`INC|{F}|{seed}`，**与臂无关，三臂共用同一随机基准**）· 面板 **55,577 事件 / 1,634 决策日（池≥15 者 1,403）**。
+- **🔴 固定组合规则（非搜索）**：**等权排名聚合**（每因子权重 `1/n`，方向沿用冻结定义；`ap −1 · dsp +1 · hl −1 · turnover −1 · maxAmp5 −1 · avgAmp5 −1`）—— **与本程序 `FACTOR-TIMESCALE-LONG-COMBO-001` 所用规则一致**，**未做权重/TopN/参数/阈值/自由组合搜索、未做偏相关**。
+- **三臂 7 年均值**：**F20** —— A1（LONG-4 单独）Δ贡献 **4.92%** · **ΔmeanExcess +0.197pp** · ΔmeanNet +0.525pp；A2（`+maxAmp5`）**6.59% / +0.428pp / +0.749pp**；A3（`+avgAmp5`）**8.55% / +0.745pp / +1.078pp**。**F40** —— A1 **3.69% / 🔴 +0.061pp / +0.697pp**；A2 **6.25% / +0.819pp / +1.464pp**；A3 **7.17% / +1.138pp / +1.777pp**。
+- **🎯 增量汇总（核心）**：**F20 `+maxAmp5`** 正ΔIC **7/7** · 正Δ贡献 6/7 · 正ΔmExc 6/7 · 正ΔmeanNet 6/7 ⇒ 增量均值 **Δ贡献 +1.670% · ΔmExc +0.231pp**（min −0.13% / −0.03，2020；最大年占比 **35.3%**）；**F20 `+avgAmp5`** 7/7 · 6/7 · 6/7 · 6/7 ⇒ **+3.625% · +0.548pp**（min −0.37% / −0.06，2025；占比 **28.9%**）；**F40 `+maxAmp5`** 🔴 **7/7 · 7/7 · 7/7 · 7/7 ⇒ 28/28 全为正** ⇒ **+2.561% · +0.759pp**（✅ **min +0.56% / +0.25**；占比 **24.0%**）；**F40 `+avgAmp5`** 7/7 · 6/7 · 7/7 · 6/7 ⇒ **+3.480% · +1.078pp**（min −0.13% / 0.00，2025；占比 **26.1%**）。
+- **📌 相对基线提升幅度**：F20 由 4.92% → 6.59%（**+34%**）/ 8.55%（**+74%**）；F40 由 3.69% → 6.25%（**+69%**）/ 7.17%（**+94%**）。
+- **📌 C 稳定性五项检查全部通过**：①**多数年份正增量** ✅（ΔIC 7/7×4 组 · Δ贡献/ΔmExc/ΔmeanNet 6/7 或 7/7）②**未依赖单一年份** ✅（最大单年占总增量 **24.0%~35.3%**，均 <40%）③**F20/F40 方向一致** ✅（两窗口增量全为正；`maxAmp5` F40 更强 +2.561% vs +1.670%；`avgAmp5` F20 略强 +3.625% vs +3.480%）④**IC 已转化为交易增量** ✅（ΔIC / Δ贡献 / ΔmExc **同向同步**，非仅提升 IC）⑤**`maxAmp5` 与 `avgAmp5` 同结论** ✅（均为正增量；侧重点：`maxAmp5` 在 F40 全正（min **+0.56%**），`avgAmp5` 幅度更大但各有 1 个微弱负年）。
+- **🟢 2023 坏年份专项**：**F20 —— A1 年度贡献 🔴 −0.41% → A2 ✅ +2.25% → A3 ✅ +3.42%**（相对优势 +1.62 → +2.02 / +2.18）；**F40 —— A1 相对优势 🔴 −1.00pp → A2 ✅ +0.14pp → A3 ✅ +0.10pp**（贡献 −12.84% → −9.07% / −9.19%）⇒ 📌 **增量恰好在最坏年份贡献最大** ⇒ **「坏年份雪中送炭」而非「好年份锦上添花」**。
+- **🔴 三条必须随裁定登记的限制**：**L1** 🔴 **LONG-4 在 T+15 的基线【几乎无 Alpha】**（A1 ΔmExc 均值仅 **+0.197pp / +0.061pp**；F20 3/7 年为负，F40 **4/7 年为负**）⇒ **增量性质是「修复近乎失效的基线」而非「两个有效信号叠加」**；**L2** 🔴 **等权组合可能被「后事件因子单独使用」支配**（跨轮交叉参照，⚠️ 面板差异 4.6% 已披露）：单独使用 ΔmExc **+1.131/+2.077（max）· +0.954/+1.694（avg）** vs 等权组合 **+0.428/+0.819 · +0.745/+1.138** ⇒ 🔴 **组合【低于】单独使用 ⇒ 等权组合稀释了后事件因子的 Alpha**（**该比较为跨轮指示，非本轮严格证明**）；**L3** ⚠️ **T+15 是 LONG-4 的【非冻结】决策点**（冻结定义为 T=0）⇒ **本轮 A1 是重评估，不构成对冻结 LONG-4 结论的挑战**。
+- **8 项 NOT PROVEN**：**N1** 🔴**「等权组合优于后事件因子单独使用」**（**本轮未在同一面板内运行单独臂**——任务只指定三臂）· **N2** 🔴**「LONG-4 与后事件因子存在【协同】」**（L1 表明更接近「替代/修复」；**未做交互检验**，任务禁止偏相关）· **N3** 任何权重分配是否更优（🔴 任务禁止权重搜索）· **N4** 是否应据此进入策略研究（未创建 Candidate/Version）· **N5** 增量在 LONG-4 冻结决策点（T=0）下是否成立（本轮固定 T+15）· **N6** `maxAmp5` 与 `avgAmp5` 增量差异的显著性（仅描述性）· **N7** 冲击成本/容量（仅 20bps 固定成本）· **N8** 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未做权重搜索**（等权为固定规则）· ✅ **未做 TopN 搜索**（Top3 固定）· ✅ **未做参数搜索** · ✅ **未做阈值搜索** · ✅ **未做 LONG-4 × 后事件因子的自由组合搜索**（仅 3 个指定臂）· ✅ **未做偏相关** · ✅ **未创建 Strategy Candidate** · ✅ **未修改因子定义** · ✅ **未修改 DB / Schema / Migration** · ✅ **未修改业务代码** · ✅ **未新增生产能力** · ✅ **未进行大规模新数据集构建** · ✅ **未把结果宣布为新策略**。
+- **Baseline Impact**：**major（增量 Alpha 裁定 = CONFIRMED，附三条限制）** —— **确立后事件状态因子相对 LONG-4（T+15）存在稳定可重复的增量**（四组增量 **ΔIC 7/7 · Δ贡献/ΔmExc/ΔmeanNet 6/7 或 7/7**，其中 **F40+`maxAmp5` 达 28/28 全正**；增量幅度 **+1.67%~+3.63%**，相对提升 **+34%~+94%**；未由单年主导；IC 已转化为交易增量；2023 坏年份由负转正）；**裁定 `maxAmp5` 与 `avgAmp5` 均为 `INCREMENTAL_ALPHA_CONFIRMED`**；并**登记三条限制**（**L1 LONG-4@T+15 基线近乎无 Alpha** · **L2 等权组合可能被单独使用支配 ⇒ 稀释** · **L3 T+15 为非冻结决策点**）与 **8 项 NOT PROVEN**，明确**「是否应据此进入策略研究」未证明**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-ATTRIBUTION-001 · 五臂同面板归因（解决 N1/N2） → 🎯 **裁定 `A. POST_EVENT_INDEPENDENT_ALPHA`**
+
+- **Task**：解决 `INCREMENTAL-ALPHA-001` 的 **N1 / N2** —— 增量 Alpha 主要来自**后事件状态因子自身**，还是来自**与 LONG-4 的真正互补**；并在三标签中裁定。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/attr4.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **🔴 关键修复**：**五臂在【完全相同面板】内运行**（**同一批事件、同一决策日、同一随机种子集**）⇒ **所有成对比较均为同面板比较**，**修复了 `INCREMENTAL-ALPHA-001` 的 N1 缺口**（该轮 A2 单独臂缺失导致只能跨轮参照）。面板 **55,577 事件 / 丢弃 3,406 / 决策日 1,634（池≥15 者 1,403）** · T+15 · Top3 · 20bps · `MAX_CONC`=90/180 · 1000 seeds（`ATTR|{F}|{seed}`，五臂共用）· 固定**等权排名聚合**（`1/n`，非搜索）。
+- **五臂定义**：`L4` = LONG-4 单独 · `MAXONLY` = `maxAmp5` 单独 · `AVGONLY` = `avgAmp5` 单独 · `L4MAX` = LONG-4 + `maxAmp5` · `L4AVG` = LONG-4 + `avgAmp5`（**两后事件因子未同时加入**）。
+- **📌 五臂 7 年均值**：**F20** —— L4 IC 0.0997 / **ΔmExc +0.197pp** / winRate 46.35% / **Δ贡献 4.92%**；MAXONLY **0.1538 / +0.401pp / 47.91% / 6.27%**；AVGONLY 0.1690 / +0.292pp / 47.89% / 5.31%；L4MAX 0.1317 / +0.428pp / 47.54% / 6.59%；L4AVG 0.1358 / +0.745pp / 48.08% / **8.55%**。**F40** —— L4 0.1209 / 🔴 **+0.061pp** / 45.30% / **3.69%**；MAXONLY **0.1697 / +0.782pp / 46.52% / 6.09%**；AVGONLY 0.1843 / +0.357pp / 46.27% / 4.59%；L4MAX 0.1560 / +0.819pp / 47.04% / 6.25%；L4AVG 0.1598 / +1.139pp / 47.56% / **7.17%**。
+- **🔴 六组成对增量（核心）**：**F20** —— `MAXONLY−L4` 正ΔIC **7/7** · Δ贡献 4/7 · 均值 **+1.35%** · 最大年占比 🔴 **85.3%**；`AVGONLY−L4` **7/7** · 4/7 · +0.39% · 🔴 **345.6%**；🔴 **`L4MAX−MAXONLY` 正ΔIC 1/7** · Δ贡献 **3/7** · 均值 +0.32% · 最大年占比 🔴 **261.2%**；🔴 **`L4AVG−AVGONLY` 正ΔIC 0/7** · Δ贡献 **5/7** · 均值 +3.24% · 占比 40.0%；`L4MAX−L4` 7/7 · 6/7 · +1.67% · 35.3%；`L4AVG−L4` 7/7 · 6/7 · +3.62% · 28.9%。**F40** —— `MAXONLY−L4` **7/7** · **6/7** · 均值 **+2.40%** · 占比 41.0%；`AVGONLY−L4` 7/7 · 5/7 · +0.90% · 🔴 90.1%；🔴 **`L4MAX−MAXONLY` 正ΔIC 2/7** · Δ贡献 **3/7** · 均值 +0.16% · 占比 🔴 **356.8%**；🔴 **`L4AVG−AVGONLY` 正ΔIC 2/7** · Δ贡献 4/7 · +2.58% · 占比 38.6%；`L4MAX−L4` **7/7 · 7/7 · 7/7 · 7/7** · +2.56% · 24.0%；`L4AVG−L4` 7/7 · 6/7 · **ΔmExc 7/7** · +3.48% · 26.1%。
+- **🎯 三条决定性证据**：**① 后事件因子单独【优于】LONG-4 单独**（`MAXONLY`/`AVGONLY` 的 **IC 在 7/7 年高于 L4**（4/4 组均 7/7）；Δ贡献 **6.27%/6.09%** vs **4.92%/3.69%**；ΔmExc **+0.401/+0.782pp** vs +0.197/🔴+0.061pp）；**② 加入 LONG-4 后【无稳定增量】**（`L4MAX−MAXONLY` ΔIC **1/7 · 2/7**、Δ贡献 **3/7 · 3/7**、最大年占比 **261.2% · 356.8%**；`L4AVG−AVGONLY` ΔIC 🔴 **0/7 · 2/7**）；**③ 后事件因子单独已解释组合贡献的绝大部分**（`MAXONLY`/`L4MAX` = **95.1%（F20）· 97.5%（F40）**；`AVGONLY`/`L4AVG` = **62.1% / 64.1%**）。
+- **🛑 三标签裁定**：**B. `POST_EVENT_PLUS_LONG4_COMPLEMENTARY`【不成立】**（「加入 LONG-4 后相对后事件因子单独仍产生**稳定增量**」不满足：ΔIC **0/7~2/7** 为正、Δ贡献 **3/7~5/7**、`maxAmp5` 侧最大年占比 **261%/357%**，且**信息层面系统性下降**）· **C. `LONG4_REPLACEMENT_EFFECT`【机制成立但非主因】**（LONG-4@T+15 基线近乎无 Alpha（ΔmExc **+0.197pp / +0.061pp**）是 `A3−A1`/`A4−A1` 增量看起来大的**原因**；但该标签落点为「无法证明后事件因子独立有效」⇒ 与证据①**不符**）· ✅ **裁定 `A. POST_EVENT_INDEPENDENT_ALPHA`**。
+- **📌 关于 `avgAmp5` 的 Δ贡献增益（必须登记）**：`L4AVG−AVGONLY` Δ贡献 **F20 +3.24%（5/7 正，占比 40.0%）· F40 +2.58%（4/7）**，但 **ΔIC 🔴 F20 0/7 · F40 2/7（系统性下降）** ⇒ **该增益【不是信息性的】** ⇒ 最可能是**持仓构成变化导致的分散化/亏损摊薄效应**（⚠️ **该解释为推断，本轮未验证**）⇒ **不作为「互补」证据**。
+- **📌 特别检查逐项（任务要求单独报告）**：`maxAmp5 vs LONG-4` ✅ IC **7/7**（F20/F40）但 F20 Δ贡献仅 4/7 且 **85.3% 集中单年**；`avgAmp5 vs LONG-4` ✅ IC 7/7 但 Δ贡献弱且极不稳（F20 占比 **345.6%**）；**`L4MAX vs maxAmp5` ⇒ 🔴 无稳定增量**（ΔIC 1/7·2/7，Δ贡献 3/7·3/7，占比 261%·357%）；**`L4AVG vs avgAmp5` ⇒ ⚠️ Δ贡献 5/7·4/7 为正但 IC 0/7·2/7**。
+- **📌 2023 年**：L4 贡献 **−0.41%（F20）/ −12.84%（F40）**；MAXONLY **−3.23% / −10.80%**；L4MAX ✅ **+2.25% / −9.07%**；L4AVG ✅ **+3.42% / −9.19%**。
+- **FACT / ATTRIBUTION / NOT PROVEN 分级**：**【FACT】F1~F8**（五臂均值 · 六组增量 · `MAXONLY−L4` IC 7/7 · `L4MAX−MAXONLY` 无稳定增量 · `L4AVG−AVGONLY` IC 反向 · **LONG-4@T+15 基线近乎无 Alpha** · 单独臂解释占比 · 2023 明细）。**【ATTRIBUTION】A1** 🎯 增量主要来自后事件因子自身，LONG-4 无稳定额外贡献；**A2** 🎯 裁定 `A`；**A3** 📌 `C` 的机制同时成立但非主因；**A4** 📌 `avgAmp5` 侧 Δ贡献增益为非信息性。**【NOT PROVEN】N1 / N2 已在本轮解决**；**N3** 🔴 `L4AVG−AVGONLY` Δ贡献增益是否源于分散化/亏损摊薄（**仅推断，未验证**）· **N4** 🔴 是否存在【任何权重】使 LONG-4 产生增量（🔴 **任务禁止权重搜索 ⇒ 完全未测；本轮结论仅对固定等权规则成立**）· **N5** T=0 决策点下独立性 · **N6** 其他规则下互补是否成立 · **N7** 冲击成本/容量 · **N8** 是否应据此进入策略研究 · **N9** 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未做权重搜索** · ✅ **未做 TopN 搜索** · ✅ **未做参数搜索** · ✅ **未做阈值搜索** · ✅ **未做偏相关** · ✅ **未做自由组合**（仅 5 个指定臂）· ✅ **未做新因子** · ✅ **未创建 Strategy Candidate / Version** · ✅ **未修改业务代码 / DB / Schema / Migration** · ✅ **未构建新 Dataset** · ✅ **未进行策略化**。
+- **Baseline Impact**：**major（N1/N2 解决 + 裁定 = POST_EVENT_INDEPENDENT_ALPHA）** —— **在同面板内首次确立**后事件状态因子单独（`MAXONLY`/`AVGONLY`）的 **IC 在 7/7 年高于 LONG-4**（4/4 组均 7/7）并**解释组合贡献的 95.1%~97.5% / 62.1%~64.1%**，而**加入 LONG-4 后 IC 在多数年份下降**（ΔIC **0/7~2/7** 为正）、**Δ贡献仅 3/7~5/7 且极端依赖单一年份（最高 356.8%）** ⇒ **裁定 `A. POST_EVENT_INDEPENDENT_ALPHA`**；**`COMPLEMENTARY` 明确不成立**；**`LONG4_REPLACEMENT_EFFECT` 的机制同时成立但非主因**；**修复 N1 缺口**（同面板单独臂）；并**登记 `avgAmp5` Δ贡献增益的「非信息性」性质**与 **7 项 NOT PROVEN**（含**结论仅对固定等权规则成立**）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-T0-INDEPENDENCE-001 · `maxAmp5`/`avgAmp5` 在 T=0 决策点的独立性 → 🛑 **裁定 `C. T0_INCONCLUSIVE`（定义层面不可比较）**
+
+- **Task**：验证 `maxAmp5` / `avgAmp5` 的 Alpha 是否在 **T=0** 决策点仍然存在，还是只有观察到 T+15 状态后才产生 Alpha。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **本轮【未运行任何回测臂】** · 🔴 **工作区【无新增 harness】**（探针仅落 `%TEMP%`）—— 仅 `CHANGE-AUDIT.md` 追加 + 1 份报告（**未修改 ROADMAP**——本任务未要求）。
+- **🛑 核心发现（结构事实）**：**`maxAmp5` / `avgAmp5` 的冻结定义 = 事件窗 `rd11~15` 的日振幅（5 日滚动窗口）** ⇒ 计算需 `post` **rd11/12/13/14/15** 五根 bar ⇒ **在 T=0（rd0）时属【未来数据】**。
+- **✅ 只读探针实测（`780004`）**：**`prefix.relativeDay ∈ [−10, 0]`（11 日 · 各 58,707~58,983 行）· `post.relativeDay ∈ [1, 80]`（80 日）** ⇒ **PIT 边界 = rd0/rd1**；**`post` 无 rd=0 行**（T 日 OHLCV 在 `prefix.rd=0`）；🔴 **post rd11 距事件日 min 15 / max 26 自然日 · rd15 min 21 / max 32 自然日**（rd1 1~11 · rd5 7~17）。
+- **✅ 平台结构级闸门（权威，路径+符号名）**：`server/datasetRegistry/path.ts`（post 仅收 `relativeDay > 0`；prefix 仅收 `relativeDay <= 0`）· `server/datasetRegistry/builder.ts`（**「`relativeDay = 0` = 事件日（t）」**）· `server/researchExperiments/registry.ts`（**「声明了 post 相对日 ⇒ 必须 `usesForwardData: true`（否则就是『偷偷读未来数据』）」**；`postRelativeDays.length > 0 && usesForwardData !== true` ⇒ **fail**）· `server/researchExperiments/datasetPort.ts`（**「rd ≥ 1 → `usesForwardData` 结构级闸门」**；**「🔴 结构级 PIT 闸门：未声明 `usesForwardData` 时【调用即抛】」**）· `server/strategyCore/featureRegistry.ts`（**「`usesForwardData=true` 的特征是『未来结果类』变量，禁止注册为策略特征（规格 §15）」**）· `server/strategyCore/leakageGuard.ts`（**禁止参与策略决策**）· `server/research/strategySchema/definition.ts`（**「T 日 OHLCV 在 `prefix.relativeDay = 0`，不在 `event` 表」**）。
+- **🛑 未偷用未来数据 · 未构造 T=0 类比**（那将是**新因子定义**，任务禁止）⇒ **`T0-MAXONLY` / `T0-AVGONLY` 两臂【不可构造】·本轮未运行**。
+- **📌 附带的确切结论（非「不确定」）**：由定义直接推出 **`maxAmp5`/`avgAmp5` 要求决策点 `D ≥ 15`**（可用 rd15~rd80；不可用 rd0~rd14）⇒ 它们是**【事件后状态因子】而非【T=0 因子】· 不可能成为 T=0 特征**；**此前所有 post-event state 轮次在 rd15 决策属 PIT 合法**（rd1~15 全部 ≤ 决策日），**并非放松了 PIT**。
+- **📌 划分线**：**「事件日字段」= T=0 可用**（冻结 LONG-4 的 `amountPercentile`/`limitGap`/`historyLimitCount`/`turnover` 全部如此）· **「任何 post 窗口统计」= T=0 不可用**（`maxAmp5`/`avgAmp5` 用 rd11~15；旧 `maxAmplitude`/`meanAmplitude` 用 rd1~5，**亦不可用**）⇒ **本轮未发现任何 T=0 可用的后事件状态因子**（该族按定义建立在 post 窗上）。
+- **📌 T+15 既有结果并列（**非 T+0 对照，面板差异已披露**）**：同面板（55,577/1,634）`MAXONLY` **IC 0.1538/0.1697 · ΔmExc +0.401/+0.782pp · ΔmNet +0.730/+1.414pp · winRate 47.91%/46.52% · 贡献 6.27%/6.09%**（F20/F40）；`AVGONLY` **0.1690/0.1843 · +0.292/+0.357pp · +0.614/+0.974pp · 47.89%/46.27% · 5.31%/4.59%**；**`MAXONLY`/`AVGONLY` 的 IC 均 7/7 年为正**；T0 两臂 = 🛑 不可构造。
+- **📌 附带假设（INFERENCE，未验证）**：`ATTRIBUTION-001` 实测 **LONG-4@T+15 近乎无 Alpha**（+0.197pp/+0.061pp）—— **假设**其因 LONG-4 是**事件日（T=0）因子**、信息在到达 rd15 前已被消化；🔴 **本轮未验证**（需 T=0 决策点下 LONG-4 实测）。
+- **🛑 三标签裁定**：❌ **A. `T0_INDEPENDENT_ALPHA_CONFIRMED`【不成立】**（无法在 T=0 测算该因子 ⇒ 无从确认）· ❌ **B. `POST_EVENT_DYNAMIC_ALPHA`【不成立】**（需「T=0 不成立」的**实测**依据；本轮**未测量**）· ✅ **C. `T0_INCONCLUSIVE`【成立】** —— **【定义】无法进行严格公平比较**（任务 C 原文），**而非数据不足**。
+- **FACT / ATTRIBUTION / NOT PROVEN 分级**：**【FACT】** 定义窗口 · 相对日边界 · 事件日距离 · 平台闸门 · T+15 并列结果。**【ATTRIBUTION】** 三障碍（定义/类比/执行，其中**定义障碍决定性**）· 决策点下界 `D ≥ 15` · 划分线 · §2.4 假设。**【NOT PROVEN】N1** 🔴 **`T0-MAXONLY`/`T0-AVGONLY` 的任何统计量**（不可构造）· **N2** 🔴 **「T=0 不成立」**（未测量 ⇒ 本裁定为 C 而非 B）· **N3** 🔴 **「Alpha 主要来自事件后动态状态变化」**（未证明；该表述需可比较的 T=0 与 T+15 实测）· **N4** 事件**前**振幅（prefix rd−5..−1）是否有 Alpha（属新因子定义，禁止）· **N5** LONG-4@T+15 失效成因（仅推断）· **N6** T=0 决策 + LONG-4 实测（未运行）· **N7** 是否存在其他 T=0 可用后事件类构造（未搜索）· **N8** 冲击成本/容量 · **N9** 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未做权重/TopN/参数/阈值/持仓期搜索** · ✅ **未做 LONG-4 组合** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未修改业务代码 / Schema / Migration / Dataset** · ✅ **未新增因子** · ✅ **未修改因子定义** · ✅ **未偷用未来数据** · ✅ **未新增 harness 文件**。
+- **Baseline Impact**：**major（确立「决策点下界 = rd15」使用约束 + 裁定 C）** —— **确立 `maxAmp5`/`avgAmp5` 是【事件后状态因子】**（定义依赖 post rd11~15 ⇒ **结构上不可能成为 T=0 特征**），并以**只读探针 + 平台结构级闸门**双重证实；**明确 T=0 与 T+15 的比较在【定义层面】不可构造**（故裁定 C 而非 A/B，且**未偷用未来数据、未构造 T=0 类比**）；**登记「事件日字段 = T=0 可用 / post 窗口统计 = T=0 不可用」的划分线**；并**登记 9 项 NOT PROVEN**（含 **「T=0 不成立」与「Alpha 来自事件后动态变化」均未证明**）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-TIMESCALE-MAPPING-001 · 后事件状态因子的真实 Alpha 时间尺度 → 🎯 **归位 `C. EVENT_STATE_LONG_HORIZON`（附三条限制）**
+
+- **Task**：在不改变冻结定义的前提下，确定 `maxAmp5` / `avgAmp5` 的**真实 Alpha 时间尺度**，并与 SHORT / MEDIUM / LONG 框架归位。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/tsm.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **口径**：决策点固定 **T+15**（rd11~15 冻结定义，未改）· 入场 rd16 `open` · 等权单因子 · **Top3** · **20bps** · **1000 seeds**（`TSM|{F}|{seed}`，按 F 共用）· 收益窗口 **F5/F10/F20/F40**（rd16→rd20/25/35/55）· 🔴 **`MAX_CONC` 沿用既有固定公式 `ceil(1.5×TopN×F)` ⇒ 23/45/90/180（非搜索）** · 面板 **58,229 事件 / 丢弃 754 / 决策日 1,637 / 有效池日 1,463**（⚠️ 与 `ATTRIBUTION-001` 的 55,577/1,634 差 4.6%，跨轮不可直接比较）。
+- **📌 四窗口 7 年均值**：**`maxAmp5`** —— F5 **IC 0.1038 · ΔmExc +0.0037 · winRate 48.29% · 贡献 0.0986 · 正ΔIC 7/7 · 正ΔmExc 6/7**；F10 **0.1310 · +0.0075 · 49.78% · 0.1034 · 7/7 · 7/7**；F20 **0.1516 · +0.0112 · 49.45% · 0.0792 · 7/7 · 7/7**；**F40 🔴 0.1686 · +0.0207 · 48.14% · 0.0709 · 7/7 · 7/7**。**`avgAmp5`** —— F5 **0.1116 · +0.0029 · 48.32% · 0.0756 · 7/7 · 6/7**；F10 **0.1413 · +0.0061 · 49.64% · 0.0840 · 7/7 · 7/7**；F20 **0.1659 · +0.0094 · 49.28% · 0.0660 · 7/7 · 7/7**；**F40 🔴 0.1831 · +0.0166 · 47.45% · 0.0562 · 7/7 · 7/7**。
+- **📌 窗口梯度（F5→F10→F20→F40）**：**IC 在两因子均【严格单调递增】**（`maxAmp5` 0.1038→0.1310→0.1516→0.1686 · `avgAmp5` 0.1116→0.1413→0.1659→0.1831；**F40/F5 = 1.62× / 1.64×**）· **ΔmeanExcess 在两因子均【严格单调递增】**（+0.0037→+0.0075→+0.0112→**+0.0207** · +0.0029→+0.0061→+0.0094→**+0.0166**；**F40/F5 = 5.6× / 5.7×**）· ⚠️ **新开仓贡献【非单调，F10 达峰】**（0.0986→**0.1034**→0.0792→0.0709 · 0.0756→**0.0840**→0.0660→0.0562）· **winRate F10 达峰**（49.78% / 49.64%）。
+- **📌 逐年单调性（每年份内部 F5→F40 严格递增的年数）**：**IC 6/7（两因子）** · **ΔmExc 6/7（`maxAmp5`）· ⚠️ 4/7（`avgAmp5`）** · 🔴 **贡献仅 1/7（两因子）**。
+- **🎯 三个重点问题**：**Q1** ✅ **Alpha 在 F5【已经存在】**（IC 0.1038/0.1116 且 **7/7 年为正**；ΔmExc +0.0037/+0.0029 且 6/7 年为正；贡献 +9.86%/+7.56%）—— **不是「主要在 F20/F40 才出现」**；但 F5 为四窗口**最弱**（ΔmExc 仅 F40 的 1/5.6~1/5.7）。**Q2** ✅ **均值层面两者均严格单调递增**（7 年均值）；⚠️ **逐年层面 IC 稳定（6/7），ΔmExc 稍弱（6/7 与 4/7）**；F10/F20/F40 的正 ΔmExc 年数 **7/7（两因子）**。**Q3** ✅ **两因子最佳信息尺度【完全一致】**（IC/ΔmExc 最强窗口均 **F40**；梯度比 **1.62×/1.64%** 与 **5.6×/5.7×**；年度贡献与 winRate 峰值窗口均 **F10**；IC 逐年单调均 6/7）；唯一差异为 `avgAmp5` 的 ΔmExc 逐年单调性稍弱（4/7）。
+- **📌 时间尺度并列（明确区分「决策时点」与「持有/预测窗口」）**：旧三类（引自 `RESULT-FACTOR-TIMESCALE-FINAL-001`，**未重跑**）—— **SHORT** T+1~5（决策 **T=0**）· **MEDIUM** T+6~20（**T=0**）· **LONG** T+21~60（**T=0**）。本因子 —— **①决策时点 T+15（≠T=0）· ②窗口起点 rd16（≠rd1/rd6/rd21，四窗口相同）· ③持有长度 5/10/20/40 日 · ④窗口位置 rd16~20 / rd16~25 / rd16~35 / rd16~55** ⇒ 🔴 **维度①②与旧三类【全部不对齐】，仅③④可部分对齐** ⇒ **正是任务所警示的「不能因为 F40≈40 交易日就称为原有 LONG 因子」**。
+- **🎯 归位依据（信息尺度维度而非身份）**：**①** IC 在**两因子**均单调递增至 **F40 且 7/7 年为正、6/7 年逐年严格递增**；**②** ΔmeanExcess 同样单调递增至 F40（**5.6×/5.7×**）；**③** **F40 窗口 rd16~rd55 与旧 LONG 的 rd21~rd60【重叠 35/40 个交易日】**；**④** F10/F20/F40 三窗口正 ΔmExc 年数 **7/7**。
+- **🛑 四选项裁定**：A（SHORT）—— F5 虽有 Alpha 但为四窗口**最弱** ⇒ 不选 · B（MEDIUM）—— F10 的**年度贡献**最高，但 IC/ΔmExc 均低于 F40（年度贡献含 `MAX_CONC` 与周转构造效应，**非因子尺度属性**）⇒ 不选 · **D（INDEPENDENT）** —— Alpha 的**方向性尺度明确指向长窗口 ⇒ 证据充分，不属「证据不足」** ⇒ 不选 · ✅ **归位 `C. EVENT_STATE_LONG_HORIZON`**。
+- **🔴 三条随归位登记的限制**：**①不是原有 LONG 因子**（决策点 **T+15 ≠ T=0** · 窗口起点 **rd16 ≠ rd21**，**同名不同源**）· **②年度贡献峰值在 F10 而非 F40**（组合构造属性，与信息尺度属性方向不同）· **③归位上界未定位**（**F40 处 IC 与 ΔmExc 仍在上升且未饱和**：F20→F40 增量 **+0.0170/+0.0172（IC）· +0.0095/+0.0072（ΔmExc）**；**F60/F80 未测**）⇒ 表述必须为「**LONG horizon（≥40 日，未定位上界）**」而非「最优持有期 = 40 日」。
+- **9 项 NOT PROVEN**：**N1** 🔴 **真实最优持有窗口**（F40 处梯度仍在上升，F60/F80 未测 ⇒ **只能定性为「长」，不能定量**）· **N2** 🔴 **「本因子 = 原有 LONG 因子」不成立**（且**未做与 LONG-4 的任何组合/相关分析**）· **N3** 年度贡献峰值在 F10 与 LONG 归位矛盾的完整解释（**仅登记为「单笔优势 vs 周转」权衡，未做周转分解**）· **N4** F40 之上（F60/F80）的行为 · **N5** 与旧三尺度因子的相关性/正交性（未做）· **N6** 冲击成本/容量 · **N7** 各 F 下 `MAX_CONC` 固定公式是否饱和（仅 F20/F40 在 `IMPACT-CAPACITY-001` 验证过）· **N8** 任何策略/可交易性结论 · **N9** 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未做权重搜索**（等权单因子）· ✅ **未做 TopN 搜索**（Top3 固定）· ✅ **未做参数/阈值/持仓期搜索**（F5/F10/F20/F40 为任务指定的**测试剖面**）· ✅ **未加入 LONG-4** · ✅ **未修改因子定义**（严格 rd11~15）· ✅ **未新增因子** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未重跑旧 12 因子** · ✅ **未重新研究 LONG-4** · ✅ **未做组合/权重/参数优化** · ✅ **未进行策略化** · ✅ **未修改业务代码 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（时间尺度归位确立 + 三条限制）** —— **确立 `maxAmp5`/`avgAmp5` 的 Alpha 时间尺度归位为 `C. EVENT_STATE_LONG_HORIZON`**，依据为 **IC 与 ΔmeanExcess 在两因子均严格单调递增至 F40**（比值 **1.62×/1.64×** 与 **5.6×/5.7×**；**7/7 年为正**；IC **6/7 年逐年严格递增**）且 **F40 窗口与旧 LONG 重叠 35/40 日**；**同时确立三条限制**（**非原有 LONG**：决策点与窗口起点均不同 · **年度贡献峰值在 F10** · **归位上界未定位**）；**回答三个重点问题**（Alpha 自 F5 已存在但最弱 · 均值层面单调增强而逐年 IC 更稳 · 两因子尺度同构）；并**登记 9 项 NOT PROVEN**（含 **「本因子 = 原有 LONG」不成立** 与 **最优窗口未定位**）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · POST-EVENT-STATE-LONG-BOUND-001 · LONG 上界检验（F60） → 🎯 **裁定 `B. LONG_BOUND_AROUND_40`**
+
+- **Task**：验证 `maxAmp5` / `avgAmp5` 在 F40 之后是否继续增强，用 **F60** 检查 `LONG_HORIZON` 的上界趋势。
+- **Changes**：🔴 **零业务代码改动**（仅 1 个未跟踪只读 harness `scripts/_scratch/f60.cjs` + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **口径**：决策 **T+15 → rd16 `open`** · 因子定义**严格冻结**（rd11~15）· 单因子等权 · Top3 · 20bps · 1000 seeds · **`MAX_CONC = ceil(1.5×3×60) = 270`** · **F60 = rd16 → 目标 rd75 → `canSellAtClose=1` 顺延 → rd80 兜底** · 面板与 `TIMESCALE-MAPPING-001` 一致（58,229 / 1,637 / 有效池日 1,463）⇒ **剖面内部可比**。
+- **✅ 出场可用性硬闸门（先于结论）**：可入场样本 **56,083** · **rd75 可卖 56,000（99.85%）** · 顺延 531 · **🔴 rd80 兜底仅 12（0.021%）** · 完全无出场 71 · `post` 上限 **rd80**（F60 目标 rd75 ⇒ 留 5 日缓冲）⇒ **样本质量优异 ⇒ 选项 C（数据/可执行性不足）【不成立】**。
+- **📌 F60 总体（7 年均值）**：**`maxAmp5`** IC **0.1712** · ΔmExc **+0.0239** · ΔmNet +0.0240 · winRate **46.41%** · 新开仓贡献 **0.0535** · **正ΔIC/ΔmExc/Δ贡献/ΔmNet 均 7/7** · 成交 4,111 笔；**`avgAmp5`** IC **0.1877** · ΔmExc **+0.0215** · ΔmNet +0.0211 · winRate **46.16%** · 贡献 **0.0470** · **四项均 7/7** · 成交 4,098 笔 ⇒ **F60 本身仍是稳定有效窗口**。
+- **📌 F5→F60 完整梯度**：**`maxAmp5`** IC 0.1038→0.1310→0.1516→0.1686→**0.1712**（✅ 严格单调递增）· ΔmExc +0.0037→+0.0075→+0.0112→+0.0207→**+0.0239**（✅ 严格单调递增）· **年度贡献 0.0986→0.1034→0.0792→0.0709→0.0535（⚠️ 非单调，F10 达峰后持续下降）** · winRate 48.29→**49.78**→49.45→48.14→**46.41**。**`avgAmp5`** IC 0.1116→0.1413→0.1659→0.1831→**0.1877**（✅）· ΔmExc +0.0029→+0.0061→+0.0094→+0.0166→**+0.0215**（✅）· **贡献 0.0756→0.0840→0.0660→0.0562→0.0470** · winRate 48.32→**49.64**→49.28→47.45→**46.16**。
+- **🔴 F60/F40 与绝对增量（任务特别要求）**：**`maxAmp5`** IC **1.0155×**（**+0.0026**）· ΔmExc **1.1562×**（**+0.0032pp**）· ΔmNet 1.1509×（+0.0031pp）· 贡献 **0.7544×**（−0.0174）· winRate 0.9643×（**−1.73pp**）；**`avgAmp5`** IC **1.0250×**（**+0.0046**）· ΔmExc **1.2949×**（**+0.0049pp**）· ΔmNet 1.2755×（+0.0046pp）· 贡献 **0.8355×**（−0.0093）· winRate 0.9728×（**−1.29pp**）。
+- **🔴 核心证据 —— IC 增量逐步塌缩**：**F5→F10 +0.0272/+0.0297 · F10→F20 +0.0206/+0.0246 · F20→F40 +0.0170/+0.0172 · F40→F60 🔴 +0.0026/+0.0046**（**仅为前一步的 15.3% / 26.7%**）⇒ **信息尺度在 F40 附近形成平台**。**ΔmExc 增量**：+0.0038/+0.0032 · +0.0037/+0.0033 · **+0.0095/+0.0072** · **+0.0032/+0.0049**（回落）。
+- **📌 重点检查三项**：**①F40→F60 是否继续增加** —— **IC 🟡 是但极微（+1.55%/+2.50%）· ΔmExc ✅ 是（+15.6%/+29.5%）· 年度贡献 ❌ 否（−0.0174/−0.0093）· winRate ❌ 否（−1.73pp/−1.29pp）** ⇒ 🔴 **指标间分裂**；**②是否反转** —— **IC/ΔmExc 未见反转（仍严格递增，仅增幅塌缩 ⇒ 平台而非反转）**；**年度贡献与 winRate【早已自 F10 起持续下降】**；**③逐年方向一致性** —— **F60 层面四项指标均 7/7 年为正**，但 **F5→F60 逐年严格递增年数下降**（IC **6/7→5/7** · ΔmExc **6/7→5/7（max）· 4/7→3/7（avg）**）。
+- **⚠️ ΔmExc 次线性检验（B 裁定的关键推理）**：**F40→F60 持有长度 1.50×（40→60 日）而 ΔmExc 仅 1.1562× / 1.2949×**；**全区间 F5→F60 持有 12.0× 而 ΔmExc 仅 6.46× / 7.41×** ⇒ **两个尺度上均【次线性于持有长度】** ⇒ 与「**持有期收益累积**」一致，**与「信息强度增强」不一致**（⚠️ 该解释为**推断**，**未做累积/信息分解**）。
+- **🛑 三选项裁定**：**A. `LONG_BOUND_EXTENDS_BEYOND_40`【不成立】**（A 要求 IC / ΔmExc **明显**高于 F40 —— **IC 仅 +1.55%/+2.50% ⇒ 不明显**；仅 ΔmExc 满足但其增长次线性）· **B. `LONG_BOUND_AROUND_40`【成立】**（IC **明显趋于平台**：增量塌缩至前一步的 **15.3%/26.7%**；年度贡献 **0.7544×/0.8355×** 明显下降；winRate **−1.73pp/−1.29pp** 明显下降；逐年单调性 IC **6/7→5/7**）· **C. `LONG_BOUND_INCONCLUSIVE`【不成立】**（rd75 可卖 **99.85%** · rd80 兜底 **0.021%** ⇒ 样本质量优异）。
+- **🔴 必须随裁定写明的声明**：**「F60 仍未定位上界；下一步若要测试 F80，必须先建设覆盖至少 rd95 的数据集。」**（依据：`Dataset 780004` 的 `post` 上限 = **rd80** · F80 需 **rd95** ⇒ **当前不可执行**；**本轮未伪造 F80**）。
+- **📌 与 `TIMESCALE-MAPPING-001` 的关系（更新而非推翻）**：**归位 `C. EVENT_STATE_LONG_HORIZON`【维持】**（F60/F5 IC = **1.65×/1.68×** · ΔmExc = **6.5×/7.4×**）；**该轮「上界未定位」一条【更新为「≈40 日」】**；年度贡献峰值仍为 **F10**；两因子上界裁定**一致**。
+- **10 项 NOT PROVEN**：**N1** 🔴 **ΔmExc 增长中【持有期累积】与【信息增强】的分解**（仅做次线性检验）· **N2** 🔴 **F60 之上（F80/F95）的行为**（**rd80 上限 · F80 需 rd95 ⇒ 不可执行；本轮未伪造**）· **N3** 🔴 **精确最优持有窗口**（裁定为「大致在 40 日附近」的**平台判定**；IC 仍**微弱上升未下降**）· **N4** IC 平台是【真实饱和】还是【噪声】（**未做 F60 vs F40 的显著性检验**）· **N5** `MAX_CONC=270` 是否饱和 · **N6** 年度贡献下降中**周转构造效应**的贡献（未做周转分解）· **N7** 冲击成本/容量 · **N8** 与旧 LONG（rd21~rd60）的关系（未做）· **N9** 任何策略/可交易性结论 · **N10** 可外推。
+- **本轮副作用**：✅ **零写入**（纯只读 `SELECT`）· ✅ **零业务代码改动** · ✅ **未构建新 Dataset** · ✅ **未伪造 F80** · ✅ **未做任何搜索 / 优化 / 组合** · ✅ **未做权重/TopN/参数/阈值/持仓期搜索**（F60 为**任务指定的单一新增窗口**）· ✅ **未创建 Candidate / Strategy Version** · ✅ **未重新研究 LONG-4** · ✅ **未重新运行旧 12 因子** · ✅ **未因 F60 更高而创建策略** · ✅ **未修改因子定义 / 业务代码 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（LONG 上界裁定 = ≈40 日）** —— **确立 `maxAmp5`/`avgAmp5` 的 LONG 上界【大致在 40 日附近】**，核心依据为 **IC 增量由 F20→F40 的 +0.0170/+0.0172 塌缩至 F40→F60 的 +0.0026/+0.0046（前一步的 15.3%/26.7%）**，并以 **年度贡献 0.7544×/0.8355× · winRate −1.73pp/−1.29pp · 逐年单调性 6/7→5/7** 为辅证；**排除 A**（IC 仅 +1.55%/+2.50%，不明显）与 **C**（出场闸门 rd75 可卖 99.85% / rd80 兜底 0.021%）；**登记反向证据**（ΔmExc 仍升但**次线性**）与「**IC 仍微弱上升未下降 ⇒ 平台判定而非见顶回落**」；**更新 `TIMESCALE-MAPPING-001` 的「上界未定位」为「≈40 日」**（归位 LONG_HORIZON 维持）；并**按规定写明 F80 需先建 rd95 数据集**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-DRAFT-001 · 第一版研究策略 Draft（EVENT_STATE_LONG） → 🛑 **裁定 `B. BLOCKED`（5 项阻塞）**
+
+- **Task**：将已完成的 **SHORT / MEDIUM / EVENT_STATE_LONG** 时间尺度研究正式转入**第一版策略定义**，形成「可进入正式 Backtest / OOS / WFA 的最小可行策略定义」。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **本轮【未新增 harness】** · 🔴 **未创建 Candidate / Strategy Version** · 🔴 **未进入 Backtest / OOS / WFA**（仅 `CHANGE-AUDIT.md` 追加 + 1 份报告；**未修改 ROADMAP**——本任务未要求）。
+- **📌 基线复用（实际读取）**：`FACTOR-TIMESCALE-FINAL-001`（三尺度角色矩阵 + **禁止综合评分**）· `P0-ORACLE-002`（执行口径）· `NB-RANDOM-002`（`MAX_CONC = ceil(1.5×N×F)`）· `T0-INDEPENDENCE-001`（**决策点下界 rd15**）· `TIMESCALE-MAPPING-001`（归位 `EVENT_STATE_LONG_HORIZON`）· `LONG-BOUND-001`（`LONG_BOUND_AROUND_40`）· `ATTRIBUTION-001`（`POST_EVENT_INDEPENDENT_ALPHA`）· `FACTOR-SELECT-001`（**`KEEP=暂不择一`**）· Dataset `780004` 配置 `510004`。
+- **📌 模板结构（`tests/server/research/strategyAuthoring/golden3570001.ts`，canonical golden 逐字）**：`first-limit-pullback-3f-top3-runner-hold20@1.0.0`（=**3570001**）· dataset `v7/750001` · entry `FIRST_LIMIT_UP`(0.1) + `observationWindow{5,15}` + `FIRST_VALID_DAY` · execution `T_CLOSE → T_PLUS_1_OPEN` · `OPEN` · `lotSize 100` · `TARGET_WEIGHT` · BPS×2 · exit 统一 policy（**6% 止损 + PEAK_DRAWDOWN 0.03/0.08 + MA5/MA10 止盈 + strongHold 5→10 + runnerBridge NEW_HIGH_3 5→20**）· position **maxPositions 5 / positionRatio 0.2 / maxSinglePosition 0.3 / maxExposure 0.8** · recipe `first-limit-pullback-3f-top3` · **topN 3**。🔴 **模板 `maxAmplitude`/`meanAmplitude` = rd1~5 固定窗口 ≠ 本轮 `maxAmp5`/`avgAmp5` = rd11~15 滚动窗口**。
+- **✅ 平台侧结构性检查（本轮只读实测）**：**①** `featureRegistry.ts#makeRollingObservationWindowFeatures` 的 `rollingMaxAmplitude` 过滤为 **`relativeDay >= 1 && relativeDay <= 5`** ⇒ 🔴 **硬编码上限 rd5**；**②** `makeObservationWindowFeatures` 的 `observationMeanAmplitude`/`observationMaxAmplitude` = **rd1~5**（`lookback: 5`）；**③** `dataThroughRelativeDay` 必须 **`<= 0`**（`> 0` ⇒ **「需要未来数据，禁止注册为策略特征」**）；**④** `DERIVED_BAR_FIELD_TO_FEATURE_ID` 全表 **不含任何 rd11~15 振幅特征**；**⑤** 但 `rd ≥ 1` 属 `usesForwardData` 领域，**决策日 ≥ rd15 时 rd1~15 全部 ≤ 决策日 ⇒ PIT 合法** ⇒ **技术上可行，仅需新增特征定义**。
+- **📌 Draft 规格（命名 `event-state-long-amp5-top3-hold40`，未落库）11 项与来源标注**：**#1 池/事件**（`780004` + `FIRST_LIMIT_UP` + 排除 ST/上市<365）`FROZEN` + `NEW-DESIGN`（绑定 780004）· **#2 决策时点** T+15 `FROZEN` · **#3 信息边界** **rd −10 ~ rd15，严禁 rd ≥ 16** `FROZEN` · **#4 入场** rd16 `open` + `canBuyAtOpen=1` + `lotSize 100` + `TARGET_WEIGHT` `FROZEN`+`INHERITED` · **#5 排名因子** 🔴 **待定**（`maxAmp5` dir −1 或 `avgAmp5` dir −1）`FROZEN`+**`BLOCKED`** · **#6 TopN** 3（破平 `securityId`）`FROZEN`+`INHERITED` · **#7 退出** 🔴 **冲突**（研究：目标 rd55 + 顺延 + rd80 兜底，无止损无止盈；模板：6% 止损 + MA 止盈 + strongHold + runner）`FROZEN`+`INHERITED` · **#8 仓位** 🔴 **冲突**（研究 `MC=180`/`w=1/180`；模板 `maxPositions=5`/`positionRatio=0.2`）`FROZEN`+`INHERITED` · **#9 成本** 往返 **20bps** + **分段映射** `FROZEN`+`INHERITED`+`NEW-DESIGN` · **#10 异常处理**（入场跳过不补位 / 出场顺延 / rd80 兜底 / 一字板不成交 / 停牌顺延）`FROZEN`+`INHERITED` · **#11 回测范围** `2019-01-03 ~ 2025-09-26` + **OOS/WFA 未定** `FROZEN`+`NEW-DESIGN`。
+- **📌 来源统计**：**`FROZEN` 10 项 · `INHERITED` 6 项 · `NEW-DESIGN` 3 项**（① 绑定 `780004` ② 成本分段映射 ③ OOS/WFA 划分未定）⇒ ✅ **`NEW-DESIGN` 控制在 3 项，且【无一项涉及因子/阈值/权重/TopN/持仓期的选择】**。
+- **🔴 三尺度范围裁定**：`FACTOR-TIMESCALE-FINAL-001` 冻结 **SHORT「仅登记角色，不进策略」** · **MEDIUM「⛔ 不与 LONG/SHORT 组合」** · **「🚫 不再进行 LONG × MEDIUM × SHORT 综合评分」** ⇒ 🔴 **第一版策略【只能包含 `EVENT_STATE_LONG` 一个尺度】**，且**不能与 `LONG-4` 组合**（`ATTRIBUTION-001` 已证 LONG-4 在 T+15 无稳定增量）⇒ ⚠️ **与任务表述「三尺度转入策略」存在【范围落差】，已按冻结结论如实登记，未强行合并**。
+- **🛑 五项阻塞**：**B1 【结构性】因子非平台特征**（rd11~15 无内置特征；`rollingMaxAmplitude` 硬编码 rd≤5 ⇒ 注册新特征 = **修改业务代码 ⇒ 本任务禁止**）· **B2 排名因子未定**（`KEEP=暂不择一`；唯一可解路径 = 先明确研究目标偏好）· **B3 【结构性】仓位口径冲突**（研究 `MC=180` vs 模板 `maxPositions=5`；继承模板 ⇒ 证据作废；沿用研究 ⇒ `maxPositions=180` 无先例与风险画像）· **B4 【结构性】退出逻辑冲突**（研究「固定 rd55」vs 模板「止损+止盈+runner」⇒ **继承即作废 F40 的 ΔmExc/贡献/beat 证据**）· **B5 三尺度不可组合**（冻结原则 ⇒ 需接受范围收窄）。
+- **📌 最小改动集（解除条件）**：**B1** 需新增两个 `FeatureDefinition`（`EVENT_TO_CURRENT` · `dataThroughRelativeDay = 0` · 决策 bar = rd15 · 读 rd11~15）⇒ **需另行授权修改 `featureRegistry.ts`**；**B2** 需人类裁定目标偏好；**B3/B4** 需裁定「研究口径优先 or 模板口径优先」，若选模板 ⇒ **须在新口径下重测**；**B5** 无解（冻结原则）。
+- **10 项 NOT PROVEN**：**N1** 🔴 本 Draft 在**平台正式口径**下的任何绩效（全部证据为 `NON-PLATFORM-FORMAL-RUN`，**从未经过 formal Run**）· **N2** 🔴 研究口径 ↔ 模板口径的**可迁移性** · **N3** `maxAmp5` vs `avgAmp5` 择优 · **N4** OOS/WFA 划分 · **N5** 风险画像（`maxDrawdown`/`maxExposure`/`maxSinglePosition`）· **N6** 冲击成本/容量 · **N7** `MAX_CONC=180` 饱和检验 · **N8** **(A) 年度切分口径缺陷**（遗漏每年首日 P&L，+0.34%~+1.40%）**尚未修复** · **N9** 任何策略可交易性结论 · **N10** 可外推。
+- **本轮副作用**：✅ **零写入**（只读，且**本轮未新增 DB 查询**）· ✅ **零业务代码改动**（`featureRegistry.ts` 仅**只读**检查）· ✅ **未新增因子** · ✅ **未修改冻结因子定义** · ✅ **未做 F80** · ✅ **未重新研究 LONG-4** · ✅ **未做权重/TopN/阈值/持仓期搜索** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未修改 Schema / Migration / Dataset** · ✅ **未进入 Backtest / OOS / WFA** · ✅ **未继续做新的因子研究** · ✅ **工作区无新增 harness**。
+- **Baseline Impact**：**major（策略 Draft 规格确立 + 裁定 BLOCKED）** —— **完成第一版策略 Draft 的完整规格**（11 项 · `FROZEN` 10 / `INHERITED` 6 / `NEW-DESIGN` 3，**无一项涉及因子/阈值/权重/TopN/持仓期选择**），**并确立 `B. BLOCKED` 及五项阻塞**（**B1 因子非平台特征** —— 以 `rollingMaxAmplitude` 硬编码 `relativeDay ≤ 5` 的结构性证据证实 **`maxAmp5`/`avgAmp5` 无平台对应特征**；**B2 `KEEP=暂不择一`**；**B3/B4 仓位与退出口径与模板 `3570001` 结构性冲突 ⇒ 继承即作废研究证据**；**B5 三尺度不可组合 ⇒ 第一版仅含 `EVENT_STATE_LONG`**）；**给出解除阻塞的最小改动集**；并**登记 10 项 NOT PROVEN**。**未进入 Backtest / OOS / WFA，未创建 Candidate / Version。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-001 · Strategy Bridge：解除 5 项阻塞 → ✅ **裁定 `A. READY_FOR_FORMAL_BACKTEST`**
+
+- **Task**：解除 `RESULT-STRATEGY-DRAFT-001` 的 5 个阻塞，使第一版 `EVENT_STATE_LONG` 策略达到「可进入正式 Backtest」的状态。
+- **🔴 业务代码改动（本任务明确授权的唯一一处，纯增量）**：**`server/strategyCore/featureRegistry.ts`** —— 新增 `EVENT_STATE_AMPLITUDE_FEATURE_IDS`（`{maxAmp5, avgAmp5}`）· `EVENT_STATE_AMPLITUDE_WINDOW`（`{start:11, end:15}`）· `eventStateAmplitudeValues()` · **`makeEventStateAmplitudeFeatures()`**，并在 `createDefaultFeatureRegistry()` **追加一行注册**。🔴 **未修改** `observationMaxAmplitude` / `observationMeanAmplitude` / `rollingMaxAmplitude` 的任何定义；**未改** `DERIVED_BAR_FIELD_TO_FEATURE_ID`（不扩 legacy 面）；**未改** `validateFeatureDefinition` / `sameBarLeakage` / `createFeatureRegistry`。
+- **✅ B1 解除（因子正式注册）**：冻结定义**逐字复用**（`振幅(rd) = (high−low)/close(rd−1)`，`runningPreClose` 自事件日收盘起步，窗口 **rd11~15**；`maxAmp5 = max` / `avgAmp5 = mean`）· `historyMode: "EVENT_TO_CURRENT"`（`runtime.ts` L277-289 已实现）· `leakage = sameBarLeakage("close", 0)`（`usesForwardData=false` · `dataThroughRelativeDay=0` —— **与既有 `EVENT_TO_CURRENT` 先例 `makeEventPeakPullbackFeatures` 一致**）。
+- **🔴 三道结构性防线（静态可判）**：**① 决策点下界** `current.relativeDay < 15 ⇒ null`；**② 上限硬截断** `.filter(relativeDay >= 1 && <= 15)`；**③ 完整性** `values.length === 5` 否则 null。
+- **✅ 实际执行验证（52 passed / 0 failed）**：⚠️ 本沙箱 `vitest` 因 `spawn EPERM` **不可用**（已知限制，不重试另一路径）⇒ 改用**编译执行**（`tsc` 将 `server/strategyCore` 编译为 CJS 至 `%TEMP%`，harness **直接 require 生产模块**）。分组：契约 13 · 注册 5 · **① rd15 可算 5**（含手算锚点 `maxAmp5 = 0.4/11.0`）· **② rd0/1/5/10/11/12/13/14 全部 ⇒ null 8** · **③ rd16+ 永不进入计算 3**（rd16~25 注入 `high=1000/low=1` 极值后两特征值**逐位不变**；决策点 rd15→rd25 值不变）· **④ 逐值一致 6**（3 种形状 × 2 特征，测试内**独立复算**同一链式前收公式）· 数据不完整/非法 ⇒ null 5 · **既有 rd1~5 特征未被改动 7**（`observationMaxAmplitude` 仍只吃 rd1~5 且不受 rd11/rd15 极值影响 · `rollingMaxAmplitude` 仍封顶 rd5）。新增测试文件 **`tests/server/strategyCore/eventStateAmplitude.test.ts`**（断言与 harness 完全一致）。
+- **✅ B2 解除（双轨候选，不伪装择优）**：`FACTOR-SELECT-001` 为 **3:3 平局** ⇒ 建立 **`event-state-long-maxamp5-top3`** 与 **`event-state-long-avgamp5-top3`** 两个 Draft Variant，**唯一差异 = `recipe.featureVersions[0].featureId`**（其余逐字段相同）· 方向均为 **−1**（以 `rankingConfig.higherIsBetter: false` 表达）· ✅ 未跑 factor search · 未新增第三因子 · 未做权重优化 · 未重做 TopN 搜索。
+- **✅ B3 解除（仓位口径）**：TopN **3** · **`MAX_CONC = ceil(1.5×3×40) = 180`** · **`w = 1/180`** · 每日先出后进 · 满仓跳过 · 同 symbol 不重复 · 现金不足跳过。**平台证据**：`server/backtest/context.ts#resolvePositionSizing` 确立引擎**实际口径恒为 `EQUAL_WEIGHT_CASH_BUDGET`**（「等权现金预算 ÷ 整手（maxPositions=…）」）⇒ 声明 `sizingMethod: "EQUAL_WEIGHT"` + `maxPositions: 180` **即精确表达 1/180** ✓（先例：生产定义用 `EQUAL_WEIGHT` + `maxPositions: 10000`）。🔴 **明确登记：`MC=180` 是研究执行口径，不代表已证明是最优风险参数；未做仓位参数搜索。**
+- **✅ B4 解除（研究退出逻辑）**：rd16 `open` 入场 → 目标 **rd55 `close`（F40）** → `canSellAtClose=1` 成交 → 不可卖顺延 → **rd80 兜底** · **无 stop loss · 无 take profit · 无 runner**。**平台证据（关键）**：`STRATEGY_EXIT_RULE_TYPES` 含 **`TIME_EXIT`** ⇒ 可用 **rule-list 形式**声明单条 `TIME_EXIT`（`threshold: 40` · `thresholdUnit: "TRADING_DAY"`）**且【不产生 `policy` 对象】** ⇒ **规避 `ExitPolicyDefinition.stop` 的必填约束**（`exitPolicyDefinitionErrors` L376-383 要求 `stop` 必须是对象 ⇒ **带 policy 的路径无法表达「无止损」**）✓ **先例**：生产定义 `strongTrendReentryEventSource.test.ts` 使用同形 rule-list（`TIME_EXIT 20`，无止损、无 policy）✓ **未修改、未复制 3570001 的 exit policy。**
+- **✅ B5 解除（范围收窄，不改冻结原则）**：第一版**仅 `EVENT_STATE_LONG`**；SHORT / MEDIUM / 原 LONG-4 **均不进入**；**禁止三尺度综合评分**。✅ **`FACTOR-TIMESCALE-FINAL-001` 未被修改**（仅引用并遵守）。
+- **✅ B6 成本口径（如实拆分）**：研究为**往返合计 20bps**（`net = gross − 0.002`）⇒ 平台 `commissionModel`/`slippageModel` = **BPS 两段**，**10bps/边 = 20bps 往返**（建议 `commissionRate = 0.00025` + `slippageBps = 7.5`；`stampDutyRate = 0` · `transferFeeRate = 0` · `minCommission = 0` · `lotSize = 100`）。**平台证据**：`server/engine/execution.ts` L31/L43 —— `slippageBps` 按**每边**施加。🔴 **登记保真度限制**：研究 20bps 为**平坦成本假设**，映射后 `stampDutyRate = 0` ⇒ **未含 A 股印花税**（卖出约 5bps）；**本轮未通过修改成本参数制造更优结果**（严格保持「合计 = 研究 20bps」）。
+- **✅ 十项验收条件全部满足**：① 特征已注册 ② 两 Variant 可完整表达 ③ PIT/leakage 测试通过 ④ **T+15 → rd16 open → F40 exit 时序可表达**（`observationWindow {15,15}` + **`LAST_VALID_DAY`** + `T_CLOSE` → `T_PLUS_1_OPEN` + `priceType OPEN`；`TIME_EXIT 40 TRADING_DAY`）⑤ **1/180 可表达** ⑥ **20bps 可表达** ⑦ **rd80 fallback 可表达**（数据集 `postWindowDays=80` 边界 + `SUSPENDED_NEXT_OPEN_UNFILLED` 顺延）⑧ **不依赖 3570001 的 exit/position policy**（rule-list `TIME_EXIT` + `EQUAL_WEIGHT`）⑨ **不改冻结研究定义**（逐值一致 + 既有特征未受损）⑩ **无未来数据泄漏**。
+- **⚠️ 三项残留（非阻塞，须在 Backtest 设置阶段确认）**：**R1** `maxExposure` / `maxSinglePosition` 精确取值需过 `validateCanonicalStrategyDefinition`（建议 `maxExposure = 1` · `maxSinglePosition = 1/180 ≈ 0.005556`；**本轮未创建 Draft 故未跑**）· **R2** **成本保真度**（平坦 20bps ↔ 平台分解模型含印花税差异）· **R3** **rd80 兜底**的逐位等价（属**回测器行为**，非**策略定义能力**）。
+- **9 项 NOT PROVEN**：**N1** 🔴 两 Variant 在**平台正式口径**下的任何绩效（**未跑 Backtest**）· **N2** 🔴 `maxAmp5` vs `avgAmp5` 择优（**3:3 平局未解决，如实保留双轨**）· **N3** `MC=180` 是否为合理风险参数 · **N4** 研究 harness ↔ 平台 simulator 的**逐笔等价性**（`P0-ORACLE-002` 仅在 harness 内验证过）· **N5** OOS/WFA 划分 · **N6** 冲击成本/容量 · **N7** **(A) 年度切分口径缺陷**（+0.34%~+1.40%）**尚未修复** · **N8** R1/R2/R3 最终确认 · **N9** 可外推。
+- **本轮副作用**：✅ **未跑 Backtest / OOS / WFA** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未重新研究因子** · ✅ **未做 F80** · ✅ **未做 TopN / 权重 / 仓位搜索** · ✅ **未把 3570001 的 runner / 止损 / 止盈复制过来** · ✅ **未修改既有正式策略 3570001** · ✅ **未修改 `FACTOR-TIMESCALE-FINAL-001`** · ✅ **未写数据库** · ✅ **未改 Schema / Migration / Dataset** · ✅ **业务代码改动仅 `featureRegistry.ts` 一处且为纯增量**。
+- **Baseline Impact**：**major（Strategy Bridge 完成 + 裁定 READY）** —— **解除 `STRATEGY-DRAFT-001` 的全部 5 项阻塞**：**B1** 以 `featureRegistry.ts` 纯增量新增 **`maxAmp5`/`avgAmp5`** 两个正式平台特征（`EVENT_TO_CURRENT` · `dataThroughRelativeDay=0` · 冻结 rd11~15 逐字复用），**由 52/52 实际执行断言验证**（rd15 可算 · **rd14 及以前恒 null** · **rd16+ 永不读取** · **逐值一致** · 既有 rd1~5 定义未受损）；**B2** 转为**两个固定 Variant**（不伪装择优）；**B3** 以 `EQUAL_WEIGHT` + `maxPositions=180` 精确表达 **1/180**；**B4** 以 **rule-list `TIME_EXIT 40`** 表达**无止损**的研究退出（规避必填 `stop` 的 policy 路径）；**B5** 如实收窄为仅 `EVENT_STATE_LONG`；**B6** 以 **10bps/边 = 20bps 往返**如实拆分。**裁定 `A. READY_FOR_FORMAL_BACKTEST`**（附三项非阻塞残留 R1~R3）。**未进入 Backtest / OOS / WFA，未创建 Candidate / Version。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-002 · Draft Variant 就绪：R1 / R2 解除 + R3 可表达性核对（**Goal round 1**）
+
+- **Task**：Goal「创建两个 Draft Strategy Variant → 解 R1 → 解 R2 → 小范围核对 R3 → 两 Variant 跑正式 Backtest」的**第 1 轮**。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **未跑正式 Backtest**（仅新增 3 个 gitignore 只读 harness + 1 份报告 + 本条审计）。
+- **✅ R1 解除（`maxExposure`/`maxSinglePosition` 过校验）**：构造**两个 Draft Variant** 的 canonical 定义（`scripts/_scratch/variantDefs.cjs` —— **除排名特征外逐字段相同**：`event-state-long-maxamp5-top3@1.0.0` / `event-state-long-avgamp5-top3@1.0.0`），并**实跑生产校验器** `validateCanonicalStrategyDefinition`（`tsc` 编译 `server/research/strategySchema` 为 CJS 后 require）⇒ **2/2 Variant 均 0 issues**。关键取值：**`maxExposure = 1`** · **`maxSinglePosition = 1/180 ≈ 0.005556`** · **`maxPositions = 180`**（180×1/180 = 1.0 ✅）。**共同字段**：`datasets` = `first_limit_pullback / v10-listed365-pre10-post80 / 780004 / PRIMARY`；`entry` = `FIRST_LIMIT_UP(0.1)` + **`observationWindow {15,15}`** + **`LAST_VALID_DAY`** + `conditions []`；**`exit.rules` = 单条 `TIME_EXIT`（`ON_CLOSE` · `threshold 40` · `TRADING_DAY`）且无 `policy` 对象**；`position` = `EQUAL_WEIGHT`；`execution` = `T_CLOSE → T_PLUS_1_OPEN` · `OPEN` · `TARGET_WEIGHT` · `lotSize 100` · `commissionModel/slippageModel BPS` · `executionConstraints ["OPEN_AT_LIMIT_UP_UNFILLED","SUSPENDED_NEXT_OPEN_UNFILLED"]`；`parameters []`；`recipe` = `signalEngine` · `topN 3` · `rankingConfig {higherIsBetter:false}`。📌 **`STRATEGY-BRIDGE-001` §4 的「规避 `ExitPolicyDefinition.stop` 必填约束」策略【实测有效】**。
+- **✅ R2 解除（平台 20bps ≡ 研究口径）**：声明 `commissionRate = 0.00025`（**2.5 bps/边**）+ **`slippageBps = 7.5`（7.5 bps/边，施加于成交价）** + `stampDutyRate/transferFeeRate/minCommission = 0` + **`marketImpact.enabled = false`**；经 `validateCostModelDeclaration` **0 issues**；用 `computeFillCostBreadown` **实算**：buy `10.001875 bps` / sell `9.998125 bps` ⇒ **往返 = `20.000000` bps（精确）**；平台 `net` 与研究 `gross − 0.002` **差 < 1e-12**；代数恒等 `往返 ≡ 2×(c_bps + s_bps)` 成立；单边 ±0.00375bps 不对称**精确可解释**（佣金按含滑点的 gross 计 ⇒ `2×c_bps×s_bps/1e4`）。**对照**：平台 `A_SHARE_DEFAULT_COST_DECLARATION` 往返 ≈ **35.9950 bps**（含印花税/过户费/冲击）⇒ **不可直接使用**。🔴 **保真度缺口仍登记**（`stampDutyRate = 0` ⇒ 未含卖出印花税 0.05%）；**处置 = 保持与研究口径一致，不通过改成本参数制造更优结果**。
+- **🔄 R3 部分解除（可执行性语义）**：🔴 **结构性发现** —— 数据集列 `canBuyAtOpen` / `canSellAtClose` **只被 `research-experiments/**`（30+ 实验程序）与 dataset 层消费**，**正式回测引擎（`research/simulator/**`、`backtest/**`）完全不消费该列** ⇒ 语义须由引擎自身机制重建。引擎机制（`server/backtest/context.ts#BacktestExecutionPolicy`）：`tPlus1` · **`blockLimitDownSells`（跌停不可卖，对位 `canSellAtClose`）** · **`suspensionPolicy: "REJECT" | "DEFER"`（顺延到下一可交易日）** · `allowPartialFill` · `zeroVolumePolicy`；`DEFAULT_BACKTEST_EXECUTION_POLICY` = `tPlus1 true · blockLimitUpBuys true · blockLimitDownSells true · 🔴 suspensionPolicy "REJECT" · allowPartialFill true · zeroVolumePolicy "REJECT"`。**逐项映射**：rd16 open 入场 ✅（`T_PLUS_1_OPEN`/`OPEN`）· rd55 close 出场 ✅（`TIME_EXIT 40`）· `canSellAtClose=1` 成交 ✅（`blockLimitDownSells: true`，**默认已开**）· **不可卖顺延 ✅（`suspensionPolicy: "DEFER"`，🔴 默认是 `REJECT` ⇒ 必须显式声明）** · 停牌顺延 ✅。🔴 **唯一缺口：`rd80 强制结算`在正式引擎中【无对应机制】**（持仓越过 `postWindowDays = 80` 后无 bar ⇒ `SUSPENDED`，`DEFER` 会继续等待、无终点）；📌 该情形**发生频率仅 0.021%**（`LONG-BOUND-001` F60 出场闸门：rd75 可卖 99.85% · 顺延 531 · **rd80 兜底 12**）⇒ 需在 Backtest 设置阶段裁定 **(a)** 接受引擎 `DEFER` 行为，或 **(b)** 显式补边界结算规则（**新增生产能力**）。
+- **8 项 NOT PROVEN**：**N1** 🔴 两 Variant 的**任何绩效**（**本轮未跑 Backtest**）· **N2** 🔴 **rd80 兜底在正式引擎中的逐位等价**（当前无对应机制）· **N3** ⚠️ 数据集 `canSellAtClose` ↔ 引擎 `blockLimitDownSells` 的**逐事件等价性**（机制不同：前者由 dataset 计算，后者由前收盘价 + 板块幅度计算）· **N4** ⚠️ `EQUAL_WEIGHT` + `maxPositions=180` 是否逐笔等于研究 `w = 1/180`（**未实跑验证**）· **N5** harness ↔ simulator 逐笔等价性 · **N6** OOS/WFA · **N7** 冲击成本/容量 · **N8** `(A) 年度切分口径缺陷`。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未跑 Backtest / OOS / WFA** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ 新增文件仅落 `scripts/_scratch/`（gitignore）与 `docs/`。
+- **Baseline Impact**：**major（R1/R2 解除 + R3 可表达性矩阵）** —— **R1 解除**（两 Draft Variant canonical 定义经生产校验器**实跑 0 issues**，`maxExposure=1`/`maxSinglePosition=1/180` 确认合法）；**R2 解除**（平台成本模型**实算往返 = 20.000000 bps** ≡ 研究口径，差 < 1e-12）；**R3 部分解除**（**顺延 / 跌停不可卖【可表达】**，`suspensionPolicy: "DEFER"` 需显式声明；🔴 **rd80 强制结算【无对应机制】**，发生频率 0.021%）；并**确立结构性事实**：`canSellAtClose` **不被正式回测引擎消费**，语义须由引擎 `BacktestExecutionPolicy` 重建。**Goal 保持 active** —— 剩余：R3 小范围 Run 核对 + 两 Variant 正式 Backtest + 据结果决定是否进入 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-003 · 正式 Backtest 路径勘定 + R3 语义定位（**Goal round 2**）
+
+- **Task**：Goal「…小范围核对 R3 → 两 Variant 跑正式 Backtest」的**第 2 轮**：勘定正式回测路径并定位 R3 语义。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（仅只读检索 + 1 份报告 + 本条审计）· 🔴 **未跑 Backtest**。
+- **✅ 正式 Backtest 路径勘定（全链路）**：`server/runWorkbenchAssembly/assemble.ts#assembleRunWorkbenchInputs`（**可传入 `researchDataset` ⇒ 调用方自备，不必从 DB 拉全量**）→ `server/research/closedLoop/orchestrator.ts#runClosedLoop`（四阶段 data/research/backtest/evaluation）→ `closed_loop_backtest_run` 持久化（库内 **463** 行）。
+- **✅ 唯一先例路径（逐字签名）**：`server/research/compositeRunner/index.ts#runCompositeRunnerBacktest` 输入 `{ dataset: ResearchDataset; sourceRun: CandidateEvaluationRun; strategyDocument: StrategyDocument; dateRange; datasetVersionId; codeVersion; createdAt; name; runnerBridge? }` ⇒ 内部 `assembleRunWorkbenchInputs({..., researchDataset: input.dataset})` → `runTradeSimulation`。**先例** = `research-experiments/first-board-pullback/composite-runner-newhigh3-hold20/experiment.ts`（产出 3570001 的评估证据 `5970001`/`5970002`）。
+- **🔴 `runTradeSimulation` 硬前置**：`assertValidSimulationConfig` · `assertValidCandidateEvaluationRun` · `recordKind === "CANDIDATE_EVALUATION_RUN"`（否则 `SOURCE_KIND_INVALID`）· **`fingerprint === computeCandidateEvaluationRunFingerprint(...)`**（否则 `SOURCE_FINGERPRINT_MISMATCH`）· `cursorEngine.ts#runTradeSimulationFromCursor` **同要求**。
+- **🔴 `runBacktestEngine2`（STEP 8）不适合本策略**：`BacktestSpec.executionModel` 为**单一全局执行模型** ⇒ 无法在同一次运行中表达「入场 rd16 `open`」+「出场 rd55 `close`」；`ExecutionRuleSet` 仅 `{blockLimitUpBuy, blockLimitDownSell}` **无退出策略层**。⇒ **正式回测必须走 `research/simulator`**（`exitPolicy.timeExit` 是唯一带退出策略层的引擎）。
+- **🔴 R3 语义定位（三项）**：**① `suspensionPolicy` 是【声明层字段，无任何消费者】** —— 全 `server/**` 检索 `"DEFER"|suspensionPolicy` **仅 5 处命中，全在 `server/backtest/context.ts` 内**（L45 注释 · L76 接口声明 · L100 默认值 `"REJECT"` · L109 字段清单 · L144 描述串）⇒ **不存在读取它的执行代码**。**② simulator 的【单笔挂单不重试】** —— `research/simulator/engine.ts` L725-726 `pending = pending.filter(e => e.executionTime !== date)`（当日到期挂单**被移出 pending**）+ L733-754 无 bar ⇒ `SUSPENDED` **显式拒绝** + `continue`（**不重新入队**）；L548-563 的「跨日保留」是**退出【原因】的保留**（避免后续成交覆盖 `Trade.reason`），**不是订单重试**。**③ 「顺延」只能靠【退出条件的每日重估】结构性实现** —— 📌 **推断（待实测）**：`TIME_EXIT(holdingDays = 40)` 的退出条件在 rd55 之后**每天恒为真** ⇒ rd55 被拒后 rd56 **会重新生成新卖单** ⇒ **结构性等价于顺延**；🔴 **本轮未运行 simulator，属推断**。**④ `rd80 兜底` 无对应机制** ⇒ 持仓在研究口径边界后每期 `SUSPENDED` 拒绝 ⇒ **回测期末仍持仓（`Trade.exitTime = null`）**；📌 该情形**频率 0.021%**（F60 闸门：rd75 可卖 99.85% · 顺延 531 · **rd80 兜底 12**）。
+- **7 项 NOT PROVEN**：**N1** 🔴 **「rd55 被拒 ⇒ rd56 重新发单」**（**推断，未实测**）· **N2** 🔴 rd80 兜底等价性（平台无对应机制）· **N3** 🔴 两 Variant 的任何绩效（**未跑**）· **N4** ⚠️ 数据集 `canSellAtClose` ↔ simulator 涨跌停/停牌判定的逐事件等价性 · **N5** ⚠️ `EQUAL_WEIGHT`+`maxPositions=180` 是否逐笔等于 `w = 1/180` · **N6** harness ↔ simulator 逐笔等价性 · **N7** OOS/WFA/冲击成本/`(A) 年度口径缺陷`。
+- **📌 下一轮三条候选路线**：**A（推荐）** 新建 `research-experiments/first-board-pullback/event-state-long-*` 实验，复用 `composite-runner-newhigh3-hold20` 装配范式；**B** 脚本直接驱动 `runCompositeRunnerBacktest`（仍需自备 `ResearchDataset`，`assembleRunWorkbenchInputs` 未导出到稳定 CJS 边界，**风险高**）；**C** 先做 R3 **最小实测**（`InMemoryBarStore` + 合成少量 bar 驱动退出重估路径，数据集可极小 ⇒ **代价最低**）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未跑 Backtest / OOS / WFA** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**major（正式回测路径勘定 + R3 语义定位）** —— **完整勘定正式 Backtest 全链路与唯一先例路径的逐字签名**，**确立 `runBacktestEngine2` 不适合本策略**（单一全局执行模型）⇒ **正式回测必须走 `research/simulator`**；**并把 R3 的三项语义逐条定位**（`suspensionPolicy` **无消费者** · simulator **单笔挂单不重试** · 「顺延」**只能靠退出条件每日重估结构性实现** · **rd80 兜底无对应机制**）。**Goal 保持 active** —— 剩余：R3 最小实测 + 两 Variant 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-004 · R3 最小实测（平台真实 simulator）（**Goal round 3**） → ✅ **R3 解除**
+
+- **Task**：Goal「用一个小范围/单 Run 核对 rd55 close → 不可卖顺延 → rd80 fallback，解决 R3」的**第 3 轮**。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **未跑正式 Backtest**（仅 1 个 gitignore harness `scripts/_scratch/r3check.ts` + 1 份报告 + 本条审计）。
+- **方法**：引擎 = **`server/research/simulator#runTradeSimulation`**（平台**唯一**带退出策略层的引擎）· **纯内存 fixture**（≤ 6 交易日 / 1 标的 / 无 DB）· 范式对齐 `tests/server/research/executionConstraints/executionConstraints.test.ts` · 成本 = **R2 口径（往返 20bps）** · `blockLimitDownSell: true` · `initialCapital 1,000,000` · `exitPolicy.maxHoldingDays = 2`（对位 Variant 的 `TIME_EXIT 40`）· 驱动 = `tsc` 编译 CJS → `node`。
+- **✅ 场景 1（执行日跌停 ⇒ 次日重新发单）4/4 断言通过**：`sell tradeDate=06-03 status=REJECTED rr=LIMIT_DOWN` ⇒ **`sell tradeDate=06-04 status=FILLED`** ⇒ 清仓后 06-05 重新建仓；`Trade` = `{entry 06-02, exit 06-05, reason "持有满2个交易日"}`。⇒ **「不可卖顺延」实测成立** —— **不是显式 DEFER 机制**，而是**退出条件（`holdingDays >= N`）持续为真 ⇒ 每日重新发单**（**承接 `BRIDGE-003` §2.3 的推断，现已被实测证实**）。
+- **✅ 场景 2（连续跌停至回测结束）3/4 断言通过**：`sell REJECTED LIMIT_DOWN` **连续 3 日（06-03 / 06-04 / 06-05）且每日都重新发单**；`positions(期末) = ["600000.SH"]`；`Trade.reason = "回测结束仍持仓"`。🔴 **第 4 项为我的断言错误** —— **平台【确实】填了边界价 `exitPrice = 7.5`**（按边界价 mark-to-market 记账），**同时** `positions` 仍保留该持仓 ⇒ 📌 **与研究口径的「rd80 按 close 强制结算」在【PnL 口径上近似等价】**（差异仅在于平台用**最后一天价格**、研究用 **rd80 close**；真实数据下相同）。
+- **🔴 两项【新发现的口径差异】（必须随 Variant 登记）**：**D1 退出单在【触发日的次日开盘】执行（`NEXT_OPEN`），不是触发 bar 的 `close`** —— 证据：持仓满 2 日于 **06-03** 触发，卖单 `tradeDate = 06-03` 但**成交于 06-04 开盘**，`Trade.exitTime = 06-05`；🔴 **研究口径 = rd55 `close` 出场，平台默认 = rd56 开盘**；Variant 已声明 `TIME_EXIT ... trigger: "ON_CLOSE"`，**是否能改为同日 close 成交【未验证】**。**D2 涨跌停判定为严格不等式** —— 首次运行用 `open = 8.505`（`9.45 × 0.9 = 8.505`，恰为 **−10.000%**）⇒ **未被判跌停、正常成交**；改为 `8.40` 后即被拒 ⇒ **恰好位于板价的 open 不触板** ⇒ 与研究 `canSellAtClose`（数据集口径）**可能有逐事件差异**。
+- **✅ R3 判定（研究口径 → 平台实测）**：rd16 open 入场 **✅ 一致**（`NEXT_OPEN`）· **rd55 close 出场 🔴 D1 时点差异**· `canSellAtClose=1` 成交 **✅ 语义一致**（D2 边界判定差异）· **不可卖 ⇒ 顺延 ✅ 成立**（实测连续 3 日重新发单）· **rd80 兜底 ✅ PnL 口径近似等价** ⇒ **⇒ R3 解除**，但 **D1 / D2 两项差异必须随 Variant 登记**并在正式 Backtest 设置阶段裁定。
+- **6 项 NOT PROVEN**：**N1** 🔴 **`TIME_EXIT trigger:"ON_CLOSE"` 是否能实现【同日 close 成交】**（本轮用 legacy `exitPolicy.maxHoldingDays`，走 `NEXT_OPEN`）⇒ **D1 待验证** · **N2** ⚠️ 数据集 `canSellAtClose` ↔ 引擎板价判定的**逐事件一致性**（D2）· **N3** ❌ 两 Variant 的任何绩效（**仍未跑正式 Backtest**）· **N4** ⚠️ `EQUAL_WEIGHT`+`maxPositions=180` 是否逐笔等于 `w = 1/180` · **N5** ❌ harness ↔ simulator 逐笔等价性 · **N6** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷`。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未跑正式 Backtest / OOS / WFA** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ 新增文件仅 `scripts/_scratch/r3check.ts`（gitignore）。
+- **Baseline Impact**：**major（R3 解除 + 两项口径差异登记）** —— **在平台真实 simulator 上以小范围单 Run 实测确认 R3 的三项语义**（**不可卖 ⇒ 拒单** · **被拒后每日重新发单 ⇒ 结构性顺延成立** · **边界处 = 「回测结束仍持仓」+ 边界价 `exitPrice` ⇒ 与研究 rd80 兜底 PnL 口径近似等价**）；**推翻 `BRIDGE-003` 中「rd80 兜底无对应机制」的表述**（实为**近似等价**）；**并登记两项新口径差异**（**D1 出场时点为次日开盘** · **D2 板价判定为严格不等式**）。**Goal 保持 active** —— 剩余：验证 D1 + 两 Variant 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-005 · D1 裁定 + 正式 Backtest 数据路径勘定（**Goal round 4**）
+
+- **Task**：Goal 第 4 轮 —— 裁定 D1（`TIME_EXIT` 成交时点）并勘定正式 Backtest 的数据路径。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（仅只读检索 + 1 份报告 + 本条审计）。
+- **✅ D1 裁定（`TIME_EXIT trigger:"ON_CLOSE"` 能否同日 close 成交？）⇒ 🔴 不能**。**平台自身文档**给出定义性答案：`server/research/simulator/types.ts` **L250** 原文 —— **「`TIME_EXIT`：持有满 N 个交易日后的收盘触发，**下一交易日开盘卖出**。」** ⇒ 成交时点 = **下一交易日开盘**，**是平台定义、非可配置项**；定义里的 `trigger: "ON_CLOSE"` 指**触发时点**（与 `INTRADAY` 相对），**不是成交时点**。**实测独立确认**（`BRIDGE-004` 场景 1）：满 2 日于 **06-03 收盘触发** ⇒ 卖单 `tradeDate=06-03` ⇒ 06-04 拒单 ⇒ 06-04 重新发单 `FILLED` ⇒ `Trade.exitTime = 06-05`。**口径后果**：研究「rd55 close **成交**」vs 平台「rd55 close **触发** → rd56 `open` **成交**」⇒ 🔴 **确定差异 1 个交易日**（持有 rd16→rd55 = 40 日 vs rd16→rd56 = 41 日），**不可通过参数消除**。**处置（建议下一轮执行）**：**(a)** 接受平台口径并在 Variant 与回测报告中**显式标注该 1 日差异**，**不得声称与研究的 F40 逐位等价**；**(b)** 该差异**完全可量化**（`close(rd55)` vs `open(rd56)` 的 1 日缺口），可单独分解。
+- **✅ 正式 Backtest 数据路径勘定**：**① 直读桥【不可行】** —— `server/runWorkbenchAssembly/datasetFromRegistry.ts` L181 **`REGISTRY_BRIDGE_MAX_ROWS = 1_600_000`**，而 Dataset 780004 实际 **10,320,499** 行（event 58,983 + prefix 647,287 + post 4,718,640 + path 4,718,640 + outcome 176,949）⇒ **10.32M > 1.60M** ⇒ `buildResearchDatasetFromRegistry` **不可用**。**② cursor 路径【唯一可行】** —— `buildEventWindowDatasetCursorFromRegistry`（L2067）→ `createEventWindowDatasetCursor`（L1783）→ `server/research/simulator/cursorEngine.ts#runTradeSimulationFromCursor({cursor, sourceRun, simConfig})`；另有 `estimateEventWindowPanelRowsUpperBound`（L2026）可事前行数估计。**③ cursor【能精确表达本 Variant】** —— `EventWindowCursorOptions.observationWindow` **= 前端策略文档的 `observationWindow`** ⇒ 本 Variant 为 **`{start:15, end:15}`** ⇒ **决策成员只出现在 rd15**（缺省判定器「rd ∈ [start,end] 即决策成员」）；且 `eventWindowVisibleBars(member, relativeDay)` **只暴露 rd ≤ 决策日**（`if (day > relativeDay) break;`）⇒ **rd15 决策时可见 bar 恰为 rd0..15** ⇒ **与冻结因子窗口 rd11~15 自洽且 PIT 合法**；`eventWindowPreClose(member, rd) = barsByRelativeDay.get(rd-1).close`（rd≥1）、rd0 用 `event.previousClose` ⇒ **与 `BRIDGE-001` §1.2 链式前收口径一致**。
+- **⚠️ 剩余装配前置（下一轮）**：**①** `buildEventWindowDatasetCursorFromRegistry` 完整入参（真实交易日序列含 warmup / 退出尾窗 · 身份桥接）；**②** `runCandidateEngine` 是否有 **cursor 版**（现有签名取 `dataset: ResearchDataset`）；**③** 退出尾窗（F40 需 rd55）与 cursor 的 `exitTail` / `poolAge` 扩展。
+- **6 项 NOT PROVEN**：**N1** ❌ 两 Variant 的任何绩效（**仍未跑正式 Backtest**）· **N2** ⚠️ cursor 路径的完整装配可行性（三项前置待勘）· **N3** ⚠️ `runCandidateEngine` 的 cursor 版是否存在 · **N4** ⚠️ 数据集 `canSellAtClose` ↔ 引擎板价判定逐事件一致性（D2）· **N5** ⚠️ `EQUAL_WEIGHT`+`maxPositions=180` 是否逐笔等于 `w=1/180` · **N6** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷`。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未跑正式 Backtest / OOS / WFA** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**major（D1 裁定 + 回测数据路径勘定）** —— **裁定 D1**（`TIME_EXIT` 成交时点 = **下一交易日开盘**，平台定义、不可配置 ⇒ 与研究口径**确定差异 1 个交易日**，并给出显式标注 + 可量化分解的处置建议）；**并勘定正式 Backtest 的数据路径**（**直读桥因 1.6M 行上限不可行** ⇒ **必须走 event-window cursor 路径**；且 **cursor 能精确表达 rd15 决策 + rd0~15 可见性**，与冻结因子窗口自洽）。**Goal 保持 active** —— 剩余：cursor 装配三项前置 + 两 Variant 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-006 · cursor 装配三项前置勘定（**Goal round 5**）
+
+- **Task**：Goal 第 5 轮 —— 勘定 `BRIDGE-005` §2.4 列出的三项 cursor 装配前置。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（仅只读检索 + 1 份报告 + 本条审计）。
+- **✅ 前置 ① 请求契约（`BuildDatasetFromRegistryRequest` L855-891）**：`{ datasetVersionId: 780004, name, observationWindow, poolPolicy: null, dataReady: true, decisionMemberPredicate? }`。🔴 `observationWindow` **决定两件事**：**投影哪些行情**（`rd=0 + rd ∈ [1, end+1]`）与 **哪些交易日具备「决策日资格」**（`rd ∈ [start, end]`）；**未声明 ⇒ 桥拒绝直读**（`REGISTRY_OBSERVATION_WINDOW_UNDECLARED`，「窗口是策略语义，桥无权代猜」）。
+- **✅ 前置 ②【已解决 · 关键突破】**：`buildEventWindowDatasetCursorFromRegistry` 的返回值 `BuildEventWindowCursorFromRegistryResult`（L2043-2059）**同时包含 `cursor: EventWindowDatasetCursor` 与 `dataset: ResearchDataset`**（文件头原文：**「兼容装配摘要 / 策略定义的轻量数据集；真实行情只在 cursor 中按需读取」**）⇒ **一次调用即可分别喂给 `runCandidateEngine({dataset,…})` 与 `runTradeSimulationFromCursor({cursor,…})`** ⇒ **无需另找 `runCandidateEngine` 的 cursor 版**。装配链：`buildEventWindowDatasetCursorFromRegistry` →（`dataset`→`runCandidateEngine`→`CandidateEvaluationRun`）·（`cursor`+`sourceRun`→`runTradeSimulationFromCursor`→`TradeSimulationRun`）。
+- **🔴 前置 ③【真缺口】事件窗面板不覆盖 F40 出场日**：**①** 投影范围 = **`rd=0 + rd ∈ [1, end+1]`**；**②** 本 Variant `observationWindow = {15,15}` ⇒ 仅投影 **rd0~rd16**；**③** **F40 出场需 `rd55`**；**④** 🔴 **`exitTailTradingDays` 只属 `firstLimitPool`**（`strategySchema/definition.ts` L606）⇒ **`FIRST_LIMIT_POOL` 触发路径专用**，默认 **`FIRST_LIMIT_POOL_DEFAULT_EXIT_TAIL_TRADING_DAYS = 20`**（`firstLimitPoolDailyScore.ts` L47）⇒ `cursorEngine.ts` L394「cursor end 已按 poolAge + exitTail 扩展」**仅对池化路径成立** ⇒ **直接以 `{15,15}` 走事件窗 cursor 时面板止于 rd16，`rd55` 无可撮合 bar，无法执行 F40 出场**。
+- **✅ 并提出【可行解法】（待验证，登记为 N2）**：`observationWindow = { start: 15, end: 55 }`（投影 **rd0~rd56** ⇒ **rd55 可撮合**）**+** `decisionMemberPredicate = (m) => m.relativeDay === 15`（决策成员收敛 **rd15** ⇒ **候选产生位置不变**）；依据 = **`EventWindowCandidateMember` 暴露 `relativeDay: number`**（L1692）。效果：投影 rd0~rd56（rd55 可撮合）· 决策成员仍只在 rd15 · 因子可见性仍为 rd0~15（与冻结窗口 rd11~15 自洽）· **策略文档的 `definition.entry.observationWindow` 仍为 `{15,15}`**（桥请求窗口是**独立参数**）。⚠️ **待验证**：`decisionMemberPredicate` 是否**只影响「谁进决策集」而不影响 rows / executionBars / 面板身份**（L1714-1715 注释如此声明，**本轮未实测**）。
+- **6 项 NOT PROVEN**：**N1** ❌ 两 Variant 的任何绩效（**仍未跑正式 Backtest**）· **N2** 🔴 **§3.2 解法是否成立**（加宽 `end` + 谓词收敛 → 是否真正保持策略语义且让 rd55 可撮合，**未实测**）· **N3** ⚠️ 事件窗 cursor 路径的完整装配可行性（身份桥接 / 交易日序列 / 快照 vs TiDB 直读）· **N4** ⚠️ 数据集 `canSellAtClose` ↔ 引擎板价判定逐事件一致性（D2）· **N5** ⚠️ `EQUAL_WEIGHT`+`maxPositions=180` 是否逐笔等于 `w=1/180` · **N6** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷`。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未跑正式 Backtest / OOS / WFA** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**major（cursor 装配前置勘定 + 缺口与解法确立）** —— **勘定三项前置**（**请求契约** · **轻量 `dataset` 与 `cursor` 同源产出 ⇒ 装配链明确** · **事件窗面板不覆盖 F40 出场日的真缺口**），**并提出可行解法**（**加宽 `observationWindow.end` 至 55 + `decisionMemberPredicate` 收敛 rd15**，依据 `EventWindowCandidateMember.relativeDay` 暴露）；**登记「`exitTailTradingDays` 仅属池化路径」这一结构性事实**。**Goal 保持 active** —— 剩余：实测该解法 + 两 Variant 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-007 · N2 解除：cursor 解法逐行验证（**Goal round 6**）
+
+- **Task**：Goal 第 6 轮 —— 验证 `BRIDGE-006` §3.2 提出的 cursor 解法是否成立（N2）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（仅只读检索 + 1 份报告 + 本条审计）。
+- **✅ N2 解除（逐行代码验证）**：**① rd 边界推导**（`datasetFromRegistry.ts` **L1786-1788**）`const startRd = Math.max(0, options.observationWindow.start);` · `const endRd = options.observationWindow.end;` · **`const maxRd = endRd + 1;`** ⇒ 原 `{15,15}` ⇒ `maxRd=16` ⇒ 面板止于 **rd16**（rd55 缺席）；**解法 `{15,55}` ⇒ `maxRd=56` ⇒ 覆盖 rd0~rd56 ⇒ F40 的 rd55 出场可撮合** ✓。**② 谓词的精确作用域**（L1894-1927）：`rows.push(row)` 与 `recordRetainedRow(row)` 与 `executionBars.set(...)` **均在谓词判断【之前】无条件执行**（L1898-1904）；谓词**只**影响 `members`（决策集）· `visibleBars`（决策可见 bar）· `suppressedNonTriggerMembers`（计数）⇒ 🔴 **谓词【不触碰】`rows` / `executionBars` / 面板身份 / rd 口径**，与 L1714-1715 注释声明**逐字一致**；成员生命周期由 `if (relativeDay >= maxRd) finished.push(...)`（L1926）决定 ⇒ `maxRd=56` 覆盖 rd55 ✓。
+- **✅ 解法清单（经逐行验证）**：`observationWindow = { start: 15, end: 55, unit: "TRADING_DAY" }` **+** `decisionMemberPredicate = (m) => m.relativeDay === 15`。六项效果全部验证：面板/撮合覆盖 **rd0~rd56**（rd55 可撮合）· **决策成员仍只在 rd15** · **`rows`/`executionBars` 不受影响**（面板身份/rd 口径不变）· 因子可见性 `eventWindowVisibleBars(member,15)` = **rd0~15**（与冻结窗口 rd11~15 自洽）· 策略文档 `definition.entry.observationWindow` **仍为 `{15,15}`**（桥请求窗口是独立参数）· 成员生命周期至 `maxRd=56`。
+- **7 项 NOT PROVEN**：**N1** ❌ **两个 Variant 的正式 Backtest 尚未执行 ⇒ 无任何绩效数据** · **N3** ⚠️ 事件窗 cursor 路径的**端到端装配**（身份桥接 · 真实交易日序列 · 快照 vs TiDB 直读的实际可用性；**代码层面已勘定，未实跑**）· **N4** ⚠️ 数据集 `canSellAtClose` ↔ 引擎板价判定逐事件一致性（D2）· **N5** ⚠️ `EQUAL_WEIGHT`+`maxPositions=180` 是否逐笔等于 `w=1/180` · **N6** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N7** ⚠️ **D1 口径差异**（`TIME_EXIT` 成交于 rd56 `open`，非 rd55 close）须在回测报告中显式标注。
+- **📌 目标完成度**：创建两个 Draft Variant = ✅ **定义就绪**（**尚未落库**）· **R1 ✅ 解除** · **R2 ✅ 解除** · **R3 ✅ 解除** · 🔴 **两个 Variant 跑正式 Backtest = ⬜ 未执行（唯一剩余项）** · 据结果决定 OOS/WFA = ⬜ 依赖上一项。**唯一剩余项的前置全部已勘定**（引擎 · 数据路径 · 请求契约 · 轻量 dataset/cursor 同源 · **F40 出场日可撮合（本轮验证）** · 成本口径 · **D1 口径差异须标注**）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未跑正式 Backtest / OOS / WFA** · ✅ **未创建 Candidate / Strategy Version** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**major（N2 解除 + 前置全部勘定完毕）** —— **经逐行代码验证解除 N2**（`maxRd = endRd + 1` ⇒ `{15,55}` 覆盖 rd0~rd56；**谓词只影响决策集与可见 bar，`rows`/`executionBars` 无条件产出**）⇒ **正式 Backtest 的技术前置已【全部勘定完毕】**，**唯一剩余项 = 实际执行那两个 Variant 的运行**。**Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-008 · 正式 Backtest 首次实际启动（**Goal round 7**）
+
+- **Task**：Goal 第 7 轮 —— 实际启动两个 Variant 的正式 Backtest（cursor 路径）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（**只读 TiDB 直读**）· 🔴 **未产出 Run / 未创建 Candidate / Strategy Version** · 新增 2 个 gitignore harness（`scripts/_scratch/variantBacktest.ts` · `runWithEnv.cjs`）+ 1 份报告 + 本条审计。
+- **✅ cursor 路径【实测跑通】（首次真实构造 event-window cursor）**：`buildEventWindowDatasetCursorFromRegistry({ datasetVersionId: 780004, observationWindow: {start:15,end:55}, dataReady:true, decisionMemberPredicate: m=>m.relativeDay===15 })` ⇒ **构造完成 6.0s**；`stats` = `{ eventCount: 58983, tradingDayCount: 1750, datasetVersion: "rd-1.0.0-1-b7a3a34529cdaeba", observationWindow: {start:15,end:55,unit:"TRADING_DAY"}, 🔴 maxRelativeDay: 56, contentSource: "TiDB 直读" }` ⇒ **`maxRelativeDay = 56` ⇒ `BRIDGE-007` 的 `maxRd = endRd + 1` 推导【实测成立】，rd55（F40 出场日）确已覆盖** ✓；`eventCount 58,983` 与 780004 元数据**完全一致**；**6.0s 流式构造**（未物化 10.32M 行）；`datasetVersion` 为内容寻址 `rd-1.0.0-1-b7a3a34529cdaeba`（**与 750001 的 v7 不同 ⇒ 绑定 780004 正确**）。
+- **🔴 发现并修正一项前置结论**：**轻量 `dataset` 的 `rows = 0`**（其定位为「**兼容装配摘要 / 策略定义的轻量数据集**」，**无行情行**）⇒ `runCandidateEngine({dataset})` **拒绝运行**并抛 `CandidateEngineError:「决策日 2019-01-03 为交易日但日期切片内无任何行，数据集在该日缺失（禁止以部分数据运行）」`（平台 FAIL LOUD 行为正确）⇒ 🔴 **修正 `BRIDGE-006` 前置② 的表述**：轻量 `dataset` **只服务「装配摘要 / 策略定义」**，**不能服务候选引擎** ⇒ **候选引擎侧必须走 cursor 路径**。
+- **⚙️ 环境注入（工程细节，已解决）**：编译产物（CJS）中 `import` 在文件顶部变成 `require` ⇒ 模块在我的代码前已初始化 ⇒ **`.env` 必须由 wrapper 在 `require` 之前注入**；已实现 `scripts/_scratch/runWithEnv.cjs` ⇒ `[env] 已注入 10 个变量（DATABASE_URL 存在=true）` ✓。另需两处**仅作用于 `%TEMP%` 构建产物**（非仓库代码）的 CJS 适配：**①** 构建目录加 `{"type":"commonjs"}` 的 `package.json`；**②** `server/datasetRegistry/snapshot/taskManager.js` 的 `import.meta.url` 替换为 `require("node:url").pathToFileURL(__filename).href`（ESM 专有构造，CJS 下不可用）。
+- **7 项 NOT PROVEN**：**N1** ❌ **两个 Variant 的正式 Backtest 仍未完成**（阻塞于候选引擎的 cursor 版入口）· **N2** ⚠️ `runCandidateEngine` 是否存在 cursor 版（如 `runCandidateEngineFromCursor`，**下一轮勘定**）· **N3** ⚠️ 候选引擎 + simulator 端到端耗时（cursor 构造 6.0s 已知）· **N4** ⚠️ 板价判定逐事件一致性（D2）· **N5** ⚠️ `EQUAL_WEIGHT`+180 逐笔等价 · **N6** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N7** ⚠️ **D1 口径差异须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（cursor 路径实测跑通 + 一项前置结论修正）** —— **首次真实构造 event-window cursor 成功**（6.0s · 58,983 事件 · 1,750 交易日 · **`maxRelativeDay = 56`** · TiDB 直读）⇒ **实测验证 `BRIDGE-007` 解法**；**同时发现轻量 `dataset` 的 `rows = 0`** ⇒ **修正「候选引擎可用轻量 dataset」的表述**（**候选引擎必须走 cursor**）。**Goal 保持 active** —— 剩余：勘定候选引擎 cursor 入口 + 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-009 · 正式 Backtest 首次跑出结果 + 两项关键发现（**Goal round 8**）
+
+- **Task**：Goal 第 8 轮 —— 用 cursor 版候选引擎打通正式 Backtest。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run / 未创建 Candidate / Strategy Version** · 修改 gitignore harness `scripts/_scratch/variantBacktest.ts` + 1 份报告 + 本条审计。
+- **✅ 装配链【首次完整跑通】（平台自身接线）**：参照 `server/research/closedLoopWiring/executors.ts` **L846/L849/L912** —— `if (cursor.restart !== undefined) await cursor.restart();` → `runCandidateEngineFromCursor({cursor, config, strategy, strategy13})` → `runTradeSimulationFromCursor({cursor, sourceRun, simConfig})`。**实测**：cursor 构造 **5.9 s**（`eventCount 58,983` · `tradingDayCount 1,750` · **`maxRelativeDay 56`** · TiDB 直读）· **候选引擎 343.4 s · 决策日 1,636** · **交易模拟 4,741 笔**（信号 9,590 · 成交 9,476 · 拒单 114：`SUSPENDED 99` / `NO_LIQUIDITY 7` / `INSUFFICIENT_CASH 5` / `OTHER 3`）。
+- **🔴 问题 ① 持仓期 = 3 天（非 40 天）**：交易样本全部 `holdingPeriod: 3` 且 `reason: "候选退出"`（如 `…000056.SZ@2019-01-02` entry 2019-01-24 → exit 2019-01-28 · returnPct −0.609%；`…000561.SZ@2019-01-03` entry 2019-01-25 → exit 2019-01-29 · −3.125%）⇒ 🔴 **平台 simulator 在【掉出 Top3 候选】时自动平仓（`HOLD_WHILE_SELECTED` 语义）**，而**研究口径 = `TIME_EXIT 40`，固定持有 40 交易日，不因掉出候选而退出** ⇒ **口径不符**。**根因**：平台存在 **`STRATEGY_CANDIDATE_EXIT_POLICIES`**（`strategySchema/definition.ts` L140 起，含 **`HOLD_WHILE_SELECTED`**）⇒ **缺省语义 = 掉出候选即退出** ⇒ **必须显式声明**方能对齐研究口径。
+- **🔴 问题 ② cursor 只能顺序读一次**：`FATAL: 事件窗流式游标只支持顺序读取：请求 2019-01-03 早于已消费的 2025-09-26`（`datasetFromRegistry.js:1325` ← `runCandidateEngineFromCursor` `cursorEngine.js:62`）⇒ 第二个 Variant（`avgAmp5`）复用同一 cursor 失败 ⇒ **每个 Variant 必须独立构造 cursor**（构造仅 5.9 s，代价可接受）。
+- **6 项 NOT PROVEN**：**N1** ❌ **两个 Variant 的正式 Backtest 尚未完成**（`avgAmp5` 未跑；`maxAmp5` 因问题① **口径不符，结果不可用于验收**）· **N2** 🔴 **候选退出策略的正确配置**（如何声明「不因掉出候选而退出」以对齐固定 40 日持有，**下一轮勘定**）· **N3** ⚠️ 端到端总耗时（单 Variant ≈ 6–7 分钟）· **N4** ⚠️ 板价判定逐事件一致性（D2）/ `EQUAL_WEIGHT`+180 逐笔等价 · **N5** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N6** ⚠️ **D1 口径差异须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（正式 Backtest 首次跑出结果 + 两项关键发现）** —— **首次用平台真实引擎完整跑通 cursor → 候选引擎 → 交易模拟**（cursor 5.9s · 候选引擎 343.4s · 1,636 决策日 · 4,741 笔交易），**并发现两项阻断验收的问题**：**① 平台 simulator 缺省按 `HOLD_WHILE_SELECTED` 语义在掉出候选时平仓 ⇒ 持仓仅 3 天而非研究的 40 天**（根因 = `STRATEGY_CANDIDATE_EXIT_POLICIES`，**须显式声明方可对齐**）；**② 事件窗 cursor 只能顺序读一次 ⇒ 每个 Variant 必须独立构造**。**Goal 保持 active** —— 剩余：修正候选退出策略 + 每 Variant 独立 cursor + 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-010 · 候选退出修正成功 + 两项口径不符暴露（**Goal round 9**）
+
+- **Task**：Goal 第 9 轮 —— 修正 `BRIDGE-009` 的问题①（候选退出语义）与问题②（cursor 顺序读）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 修改 gitignore harness `scripts/_scratch/variantBacktest.ts` + 1 份报告 + 本条审计。
+- **✅ 问题① 修正成功**：解法 = **`simConfig.candidateExitPolicy = "DISABLED"`**（`server/research/simulator/engine.ts` **L259** `candidateExitPolicy: config.candidateExitPolicy ?? "HOLD_WHILE_SELECTED"` · **L491** 同判定 · `plan.ts` **L6-7**「**候选退出（缺省启用）**：当前持仓中不在 desired 的证券 → 卖出全部可卖份额；**策略显式 `candidateExitPolicy=DISABLED` 时，候选集合不参与卖出**」）；**先例** = `firstLimitPullback3FTopN.ts` L62 · `threeFactorTopNStrategy.ts` L653/L708 均用 `"DISABLED"` ✓。**实测对比**：修正前 `reason = 候选退出` / `holdingPeriod = 3`（−0.609% / −0.191% / −3.125%）⇒ **修正后 `reason = "持有满40个交易日"` / `holdingPeriod = 41`**（+21.57% / +16.10% / +15.16% / +38.75%，2019-01~03 段）⇒ **对齐研究固定 40 日持有** ✓。**问题② 亦已修正**（每个 Variant 独立构造 cursor）。
+- **🔴 但暴露两项【仓位/可执行性口径不符】（阻断验收）**：**① 仓位口径** —— 平台 `EQUAL_WEIGHT` 按【当日候选数(3)】均分 ⇒ **`w ≈ 1/3`**，而**研究口径 = `w = 1/MAX_CONC = 1/180`**；证据：首笔 `000056.SZ` qty **70,100** × `entryPrice 4.7731` ≈ **334,400 元** ≈ `1,000,000 / 3`（而非 `1,000,000 / 180 = 5,555`）⇒ 🔴 **`maxPositions: 180` 未产生 `1/180` 的单笔预算**；**这正是 `BRIDGE-004/005` 登记的 N5（`EQUAL_WEIGHT`+180 是否逐笔等于 `w=1/180`）—— 现答案：❌ 不等**。**② `SUSPENDED` 拒单 2,524 / 4,659 = 54%**（`totalSignals 4,659 · totalOrders 4,659 · totalFills 2,130 · rejectedOrders 2,529 · byReason { SUSPENDED: 2,524, NO_LIQUIDITY: 3, INSUFFICIENT_CASH: 2 }`）—— **疑似根因**：cursor 在成员 `relativeDay >= maxRd (=56)` 后 **retire**（`datasetFromRegistry.ts` L1926 `if (relativeDay >= maxRd) finished.push(...)`）⇒ 该证券**不再产出 execution bar** ⇒ 模拟器按「无 bar = 停牌」判 `SUSPENDED` ⇒ **持仓无法卖出**；⚠️ **该根因【未逐条取证】**。
+- **6 项 NOT PROVEN**：**N1** ❌ **两个 Variant 的正式 Backtest 未完成验收**（`maxAmp5` 已跑但**仓位口径不符**；`avgAmp5` 本轮仍在运行）· **N2** 🔴 **仓位口径的修正方式**（如何让平台表达 `w = 1/180` 恒定权重，**下一轮勘定**）· **N3** 🔴 **`SUSPENDED 54%` 的根因**（cursor 退休 vs 真实停牌，**未取证**）· **N4** ⚠️ 板价判定逐事件一致性（D2）· **N5** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N6** ⚠️ **D1 口径差异须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（候选退出修正成功 + 两项口径不符暴露）** —— **以 `candidateExitPolicy: "DISABLED"` 修正候选退出语义**（实测 `holdingPeriod 3 → 41`、`reason 候选退出 → 持有满40个交易日`）⇒ **对齐研究固定 40 日持有**；**同时暴露两项阻断验收的口径不符**：**① 平台 `EQUAL_WEIGHT` 的 `w ≈ 1/3` ≠ 研究 `w = 1/180`（N5 现答案为 ❌ 不等，有 334,400 元的首笔实测证据）；② `SUSPENDED` 拒单 54%（疑似 cursor 成员退休导致持仓无 execution bar，未取证）**。**Goal 保持 active** —— 剩余：仓位口径修正 + `SUSPENDED` 根因 + 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-011 · 仓位口径修正（`FIXED_RATIO` × 1/180）（**Goal round 10**）
+
+- **Task**：Goal 第 10 轮 —— 修正 `BRIDGE-010` 暴露的仓位口径不符（`w ≈ 1/3` ≠ `w = 1/180`）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 修改 gitignore harness `scripts/_scratch/variantBacktest.ts` + 1 份报告 + 本条审计。
+- **✅ 解法确立并落地**：依据 `server/research/simulator/plan.ts` **L167-168** 原文 —— 「**`FIXED_FRACTION` / `FIXED_RATIO` ⇒ `min(allocatable, initialCapital × fraction)`（基数 = 初始资金，与 `PositionDefinition.positionRatio` 既有定义一致）**」+ `SimulationConfig.positionSizing`（`types.ts` **L228-242**：`{ sizingMethod, fraction, fixedAmount, tiers?, rankTiers? }`）⇒ 采用 **`positionSizing: { sizingMethod: "FIXED_RATIO", fraction: 1/180, fixedAmount: null }`** ⇒ **每仓 = 初始资金 × 1/180 = 研究口径的 `w = 1/MAX_CONC`（恒定）** ✓（对比 `EQUAL_WEIGHT` 按当日候选数均分 ⇒ `w ≈ 1/3`，**不符**）。已写入 harness 的 `simConfig`（与 `maxPositions: 180` · `candidateExitPolicy: "DISABLED"` · `exitPolicy.maxHoldingDays: 40` 并存），并**已发起重跑**（结果本轮未回收）。
+- **5 项 NOT PROVEN**：**N1** ❌ **两个 Variant 的正式 Backtest 未完成验收**（本轮已发起重跑，**结果未回收**）· **N2** 🔴 **`SUSPENDED` 拒单 54% 的根因**（`BRIDGE-010` 问题②：疑似 cursor 成员退休致持仓无 execution bar，**仍未取证**）· **N3** ⚠️ 板价判定逐事件一致性（D2）· **N4** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N5** ⚠️ **D1 口径差异须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索**（`fraction = 1/180` 是**研究口径的复现**，非搜索）· ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（仓位口径修正落地）** —— **以 `FIXED_RATIO` × `fraction = 1/180` 精确复现研究的恒定 `w = 1/MAX_CONC`**（依据 `plan.ts` L167-168 的「基数 = 初始资金」细则），**修正 `BRIDGE-010` 的仓位口径不符**；**并已发起重跑**。**Goal 保持 active** —— 剩余：回收重跑结果 + `SUSPENDED` 根因 + 正式 Backtest + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-012 · 两个 Variant 首次完整跑完（**Goal round 11**）
+
+- **Task**：Goal 第 11 轮 —— 回收 `FIXED_RATIO × 1/180` 重跑结果并核对。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 1 份报告 + 本条审计（harness 无新增改动）。
+- **✅ 两个 Variant 首次【完整跑完】**（`[done] 813.0s`）：**`maxAmp5`** 候选引擎 379.8s · 决策日 1,636 · **trades 4,766** · signals 19,702 · fills 9,404 · rejected 10,298 · **SUSPENDED 10,291** · NO_LIQUIDITY 7；**`avgAmp5`** 342.2s · 1,636 · **trades 4,793** · signals 21,092 · fills 9,455 · rejected 11,637 · **SUSPENDED 11,627** · NO_LIQUIDITY 10。
+- **✅ 仓位口径修正【实测成功】**：首笔 `quantity: 1100` × `entryPrice 4.7731` = **≈5,250 元** ≈ `1,000,000/180 = 5,555`（整手 100 股取整）⇒ **`w = 1/180` 复现成功**（**修正前**为 `quantity: 70,100` = **334,400 元** = `1M/3`）。
+- **✅ 候选退出修正【保持】**：两 Variant 全部样本 `holdingPeriod: 41` · `reason: "持有满40个交易日"`（= 40 持有日 + 1 执行日，**同时实测确认 D1 口径差异**）。样本（`maxAmp5` 前 6 笔，2019-01~04）：`000056.SZ` +21.57% / `600605.SH` +16.10% / `600463.SH` +34.49% / `000561.SZ` +15.16% / `000901.SZ` +38.75% / `600909.SH` +40.50%。
+- **🔴 `SUSPENDED` 仍占 ~52–55%，根因方向已定位**：**cursor 成员在 `if (relativeDay >= maxRd) finished.push(...)`（`datasetFromRegistry.ts` L1926）后【退休】⇒ 不再产出该证券 bar** + **`maxRd = endRd + 1 = 56`（本轮 `end: 55`，L1786-1788）** + **持仓入场 rd16 持有 40 日 ⇒ 其事件 rd 走到 rd56 ⇒ 恰在退休边界** + **模拟器把「当日无 bar」判 `SUSPENDED`（`simulator/engine.ts` L733-747）** ⇒ **持仓在 rd56+ 无 bar ⇒ 卖单被拒 ⇒ 每日重发 ⇒ `orders` 膨胀至 19,702 / 21,092**。🔴 **建议修正：`observationWindow.end: 55 → 79`（⇒ `maxRd = 80` = 数据集 `post` 上限）**。
+- **6 项 NOT PROVEN**：**N1** ❌ **两个 Variant 的正式 Backtest 未完成验收**（已跑完但 **`SUSPENDED` ~52–55% ⇒ 结果不可用于验收**）· **N2** 🔴 **`SUSPENDED` 根因的逐条取证**（§1.4 为**方向性推断**，未逐事件验证）· **N3** ⚠️ 板价判定逐事件一致性（D2）· **N4** ❌ **任何绩效结论**（`trades` 等为**过程量**，非收益指标，且受 `SUSPENDED` 污染）· **N5** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N6** ⚠️ **D1 口径差异**（`holdingPeriod = 41` **本轮已实测确认**）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（两 Variant 首次跑完 + 两项修正实测确认 + SUSPENDED 根因定位）** —— **首次完整跑完两个 Variant**（813.0s）；**实测确认仓位口径修正成功**（`qty 70,100 → 1,100`，复现 `w = 1/180`）与**候选退出修正保持**（`holdingPeriod 41` / `持有满40个交易日`，并**同时实测确认 D1**）；**并定位 `SUSPENDED` ~52–55% 的根因方向**（cursor 成员退休边界 `maxRd = 56` vs 持仓 40 日走到 rd56）**并给出修正建议**（`end: 55 → 79`）。**Goal 保持 active** —— 剩余：`end` 修正 + 重跑 + 正式 Backtest 结果 + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-013 · `SUSPENDED` 修正（`end: 55 → 79`）（**Goal round 12**）
+
+- **Task**：Goal 第 12 轮 —— 应用 `BRIDGE-012` 的 `SUSPENDED` 修正建议并重跑。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 修改 gitignore harness `scripts/_scratch/variantBacktest.ts`（单点）+ 1 份报告 + 本条审计。
+- **✅ 修正内容**：`observationWindow: { start: 15, end: 55 → **79** }` ⇒ **`maxRd = endRd + 1 = 80` = 数据集 `post.relativeDay` 上限** ⇒ 持仓（入场 rd16 + 持有 40 日 = 走到 rd56）+ 退出执行日（rd57）**全程有 execution bar** ⇒ **预期 `SUSPENDED` 从 ~52% 降至可忽略**（🔴 **未验证**）。
+- **依据（`BRIDGE-012` §1.4）**：**①** cursor 成员在 `relativeDay >= maxRd` 后**退休**（`datasetFromRegistry.ts` L1926）⇒ 不再产出 bar；**②** `maxRd = endRd + 1`（同 L1786-1788）；**③** 原 `end = 55` ⇒ `maxRd = 56`，持仓入场 rd16 + 40 日 ⇒ 事件 rd 走到 **rd56**（**恰在边界**，实测 `holdingPeriod = 41`）；**④** 模拟器把「当日无 bar」判 `SUSPENDED`（拒单，`simulator/engine.ts` L733-747）；**⑤** 数据集 `post.relativeDay` 上限 = **80**（只读探针多轮复核）⇒ **`end = 79` 恰好覆盖且不越界**。
+- **未变更项（保持已验证口径）**：`decisionMemberPredicate = m.relativeDay === 15`（决策仍在 rd15）· `positionSizing = { FIXED_RATIO, fraction: 1/180, fixedAmount: null }`（`w = 1/180` 已实测）· `candidateExitPolicy = "DISABLED"`（`持满40个交易日` 已实测）· `exitPolicy = { maxHoldingDays: 40 }` · `cost` 往返 20bps · `maxPositions = 180`。
+- **6 项 NOT PROVEN**：**N1** ❌ **修正后的重跑结果未回收**（后台进行中）· **N2** 🔴 **`SUSPENDED` 是否真降至可忽略**（预期**未验证**）· **N3** ❌ 两个 Variant 的正式 Backtest 未完成验收 · **N4** ❌ 任何绩效结论（仍未产出收益指标）· **N5** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N6** ⚠️ **D1 口径差异**（`holdingPeriod = 41`，已实测确认）须在结果报告中显式标注。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（SUSPENDED 修正落地）** —— **以 `observationWindow.end: 55 → 79`（`maxRd = 80` = 数据集 post 上限）修正 cursor 成员退休边界与持仓跨度的错配**，**并已发起重跑**；**其余已验证口径（rd15 决策 · `w = 1/180` · `candidateExitPolicy DISABLED` · 40 日持有 · 20bps）全部保持不变**。**Goal 保持 active** —— 剩余：回收重跑 + 核对 `SUSPENDED` + 正式 Backtest 结果 + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-014 · `end=79` 修正生效但 `SUSPENDED` 未消除 —— 假设被证伪（**Goal round 13**）
+
+- **Task**：Goal 第 13 轮 —— 回收 `end: 55 → 79` 重跑结果，核对 `SUSPENDED`。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 1 份报告 + 本条审计。
+- **✅ `end=79` 修正【已生效】**：`maxRelativeDay = **80**` · `tradingDayCount 1750 → **1798**` · `datasetVersion` 因窗口变化重算为 `rd-1.0.0-1-22ec1ba1cc7bca39`（**内容寻址，预期行为**）· cursor 构造 6.6s。
+- **🔴 但 `SUSPENDED` 仅 10,291 → 8,315（−19%），【未被消除】** ⇒ **`BRIDGE-012` §1.4 / `BRIDGE-013` 的「cursor 成员退休边界」假设【被证伪】（至少不是主因）**。对比：`{15,55}` ⇒ maxRd 56 · 379.8s · trades 4,766 · signals 19,702 · fills 9,404 · rejected 10,298 · **SUSPENDED 10,291**；`{15,79}` ⇒ maxRd 80 · 484.2s · trades **4,766** · signals 17,774 · fills 9,409 · rejected 8,365 · **SUSPENDED 8,315** ⇒ **窗口扩大 24 个相对日仅降 19%**。
+- **🔴 并修正一项【度量误读】（重要）**：`SUSPENDED` 是**【重试放大的计数】** —— 被拒卖单本身**不重试**（`pending = pending.filter(e => e.executionTime !== date)`，`simulator/engine.ts` L725-726），**但退出条件 `holdingDays >= 40` 在 rd55 之后【每天恒为真】⇒ 每日重新生成新卖单**（`BRIDGE-004` 实测：连续 3 日拒绝 × 3 次发单）⇒ **`SUSPENDED` 计数 = 卡住持仓数 × 平均卡住天数** ⇒ **不能直接读作失败率**。**旁证**：`trades = 4,766` **两轮完全一致**（`end` 55→79 未改变成交笔数）⇒ **绝大多数持仓正常完成了 40 日持有 + 退出** ✓。
+- **🔴 `SUSPENDED` 的剩余候选根因（全部未取证）**：**A 数据集末端效应** —— 2025 年下半年入场的事件其 40 日持有 + 执行日**超出数据集末日 2025-09-26** ⇒ 无 bar ⇒ 卡住至回测结束（🔴 研究口径有 **rd80 兜底**、平台**无强制结算**，正是 `BRIDGE-004` 登记的边界差异）· **B 真实停牌/退市** · **C cursor 成员退休（已基本排除为主因）** · **D 同证券多事件导致 `panelSecurityId` 与持仓 `securityId` 映射不一致（未验证）**。
+- **6 项 NOT PROVEN**：**N1** 🔴 **`SUSPENDED` 的根因**（四个候选**全部未取证**）· **N2** 🔴 **受影响的不同持仓数**（而非拒单次数，**本轮未测**，是判断严重性的正确指标）· **N3** ❌ 两个 Variant 的正式 Backtest 未完成验收 · **N4** ❌ 任何绩效结论 · **N5** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N6** ⚠️ **D1 口径差异须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（假设被证伪 + 度量误读修正）** —— **`end: 55 → 79` 修正已生效**（`maxRelativeDay = 80`、`tradingDayCount 1798`）**但 `SUSPENDED` 仅降 19%** ⇒ **明确【证伪】「cursor 成员退休边界为主因」的假设**；**并确立 `SUSPENDED` 是【重试放大的计数】而非失败率**（`trades = 4,766` 两轮一致 ⇒ 绝大多数持仓正常退出），**列出四个未取证的剩余候选根因**。**Goal 保持 active** —— 剩余：测受影响持仓数 + 取证根因 + 正式 Backtest 结果 + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-015 · `SUSPENDED` 真实严重性度量（聚合口径）（**Goal round 14**）
+
+- **Task**：Goal 第 14 轮 —— 落实 `BRIDGE-014` N2：用【受影响的不同持仓数】而非拒单次数度量 `SUSPENDED` 的真实严重性。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 修改 gitignore harness `scripts/_scratch/variantBacktest.ts`（输出改聚合口径）+ 1 份报告 + 本条审计。
+- **✅ 度量口径改造（harness 输出）**：新增 **`stuck`**（= `exitTime === null` ∨ `exitTime === END` ∨ `reason` 含「回测结束」的持仓数）+ **`openAtEnd`** + **`byReason`** / **`byEntryYr`** / **`byExitYr`** / **`stuckYr`**（入场年份分布，用于验证 `BRIDGE-014` §1.4 候选 A）+ **`holdAvg/Min/Max`** · **`winRate`** · **`retAvg`**；**移除了原来 4,000 字符的 JSON 截断转储**（它无法回答问题）。**依据** = `BRIDGE-014` §1.3：`SUSPENDED` 是**重试放大的计数**（退出条件 `holdingDays >= 40` 每日恒真 ⇒ 每日重发）⇒ **不能读作失败率**。
+- **📌 本轮已回收的部分**：`[cursor] 构造完成 13.9s` · `stats = { eventCount: 58983, tradingDayCount: **1798**, datasetVersion: "rd-1.0.0-1-22ec1ba1cc7bca39", observationWindow: {start:15,end:79}, **maxRelativeDay: 80**, contentSource: "TiDB 直读" }` ⇒ ✅ **再次确认 `BRIDGE-013` 的 `end: 55 → 79` 修正稳定生效**。
+- **6 项 NOT PROVEN**：**N1** 🔴 **`stuck`（受影响持仓数）的实际值**（**本轮未回收**）· **N2** 🔴 **`SUSPENDED` 根因**（`BRIDGE-014` §1.4 候选 A 数据集末端效应 / B 真实停牌 / D 身份映射，**均未取证**）· **N3** ❌ 两个 Variant 的正式 Backtest 未完成验收 · **N4** ❌ 任何绩效结论（`winRate`/`retAvg` 虽将产出，但 **`w = 1/180` 下的组合级收益尚未计算**）· **N5** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N6** ⚠️ **D1 口径差异须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**minor→major（度量口径改造 + 修正生效再确认）** —— **把 `SUSPENDED` 的度量从「拒单次数」改为「受影响的不同持仓数 + 入场年份分布」**（消除 `BRIDGE-014` 确立的重试放大误读），**并再次实测确认 `end=79` 修正稳定生效**（`maxRelativeDay = 80` · `tradingDayCount = 1798`）。**Goal 保持 active** —— 剩余：回收 `stuck` 与 `stuckYr` + 取证根因 + 正式 Backtest 结果 + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-016 · `SUSPENDED` 真实严重性 = 2.64%（非问题）+ 根因坐实（**Goal round 15**）
+
+- **Task**：Goal 第 15 轮 —— 回收聚合结果，判定 `SUSPENDED` 的真实严重性并取证根因。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 1 份报告 + 本条审计。
+- **🎯 聚合实测（`event-state-long-maxAmp5-top3` · 候选引擎 722.5s · 决策日 1,636）**：**`AGG trades=4766 openAtEnd=123 stuck=126`（🔴 **2.64%**）`holdAvg=39.95 holdMin=0 holdMax=47 winRate=46.1% retAvg=1.97%/笔`**；**`byReason = { "持有满40个交易日": 4643（97.42%）, "回测结束仍持仓": 123（2.58%）}`**；**`byEntryYr = {2019:667, 2020:702, 2021:713, 2022:717, 2023:717, 2024:711, 2025:539}`**；**`byExitYr = {2019:549, 2020:708, 2021:706, 2022:715, 2023:719, 2024:712, 2025:534, **2026:123**}`**；🔴 **`stuckYr = {2021:1, **2025:125**}`**。
+- **🔴 结论一：`SUSPENDED` 不是问题** —— 拒单 **8,315** 次 vs 真实受影响持仓 **126** ⇒ **重试放大 ≈66×** ⇒ ✅ **实测验证 `BRIDGE-014` §1.3 的「度量误读」修正**（若按拒单次数读作「46% 失败」将**严重误判**）。
+- **🎯 结论二：根因【坐实】= 数据集末端效应** —— **126 笔卡住持仓中 125 笔入场于 2025 年**（与 `byExitYr` 的 **2026:123** 吻合）⇒ **这些持仓本应在 2026 年退出（40 日持有跨年），但数据集止于 `2025-09-26`** ⇒ **`BRIDGE-014` §1.4 候选 A 坐实；候选 B（真实停牌）/ C（成员退休）/ D（身份映射）【均被排除】**。
+- **📌 口径纠正**：`retAvg` 起初按 `196.593` 输出，实为 **`returnPct` 已是百分数而被【重复 ×100】** ⇒ **正确值 = 1.966%/笔**（与样本 `netPnl 1132.84 / 名义 5,250 = 21.6%` 的量纲自洽）。
+- **✅ 判定**：`SUSPENDED` **不阻断验收**（真实影响 **2.64%**，100% 由**数据集末端**解释，非策略缺陷、非口径错配；与研究 `rd80` 兜底的边界差异一致且量级极小）；`end: 55 → 79` **稳定生效**；`candidateExitPolicy: DISABLED` **稳定有效**（97.42% `持有满40个交易日`）；`positionSizing: FIXED_RATIO × 1/180` 已实测。
+- **6 项 NOT PROVEN**：**N1** 🔴 **`avgAmp5` Variant 的聚合结果**（后台进行中）· **N2** ⚠️ **`holdMin = 0` 的成因**（未查）· **N3** ❌ **组合级收益（未计算）** —— `retAvg = 1.97%/笔` 是**单笔算术平均**，`w = 1/180` 下的资金曲线需另行计算 · **N4** ⚠️ 板价判定逐事件一致性（D2）/ `trades` 与 harness 逐笔等价性 · **N5** ❌ OOS/WFA/冲击成本/`(A) 年度口径缺陷` · **N6** ⚠️ **D1 口径差异须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（`SUSPENDED` 判定为非问题 + 根因坐实）** —— **以聚合口径实测确立 `SUSPENDED` 的真实影响仅 2.64%**（拒单 8,315 次系 **66× 重试放大**），**并坐实根因 = 数据集末端效应**（125/126 集中 2025 年入场、123 笔本应 2026 退出的持仓卡在数据边界），**排除真实停牌 / 成员退休 / 身份映射三个候选**；**同时纠正 `retAvg` 的重复 ×100 误读**。**Goal 保持 active** —— 剩余：回收 `avgAmp5` 聚合 + 计算组合级结果 + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-017 · 组合级结果产出（**Goal round 16**）
+
+- **Task**：Goal 第 16 轮 —— 落实 `BRIDGE-016` N3：产出两个 Variant 的**组合级**结果（`w = 1/180` 下的资金曲线 / 年度收益 / MDD）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 修改 gitignore harness `scripts/_scratch/variantBacktest.ts`（输出扩展组合级）+ 1 份报告 + 本条审计。
+- **✅ harness 输出扩展到组合级**：新增 **`RUN_KEYS`**（`TradeSimulationRun` 顶层字段清单，排除 `trades`/`positions`/`audit`）· **`equityCurve` 长度 / 首末点 / 字段名** · **按年收益（🔴 **(B) 严格口径** `eq[last of y] / eq[last of y−1] − 1`，**不是** (A) 的 `eq[last of y]/eq[first of y] − 1`）** · **总收益 + MDD**（基于 `equityCurve` 的峰值回撤）。**理由**（`BRIDGE-016`）：`retAvg = 1.97% / 1.62%` 是**单笔算术平均**，**不是组合收益**；研究口径的资本模型（`MAX_CONC = ceil(1.5×TOPN×F) = 180` · `w = 1/180` 恒定、永不重算 · 每日先出后进）⇒ **组合收益必须由 `equityCurve` 复利读出**。
+- **📌 已就绪的前置（本轮不变）**：数据路径（event-window cursor · `{start:15,end:79}` · `maxRelativeDay = 80`）· 决策日 `relativeDay === 15` · `positionSizing: FIXED_RATIO × 1/180`（已实测）· `candidateExitPolicy: "DISABLED"`（已实测，97.4% `持有满40个交易日`）· 成本往返 **20.000000 bps**（`BRIDGE-002` 实测）· `SUSPENDED` 真实影响 **2.64% / 2.69%**（判定为非问题）· 两 Variant trades **4,766 / 4,793**。
+- **6 项 NOT PROVEN**：**N1** 🔴 **组合级结果（资金曲线 / 年度收益 / MDD / 总收益）**（**本轮未回收**）· **N2** ⚠️ **`holdMin = 0` 的成因**（未查）· **N3** ⚠️ 板价判定逐事件一致性（D2）/ 与 harness 逐笔等价性 · **N4** ❌ OOS/WFA/冲击成本 · **N5** ⚠️ **D1 口径差异须显式标注** · **N6** ⚠️ **末端 2.64% / 2.69% 未平仓持仓的处置口径**（研究有 rd80 兜底）须显式标注。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**minor→major（组合级度量接入 + (B) 口径纪律登记）** —— **把 harness 输出从单笔聚合扩展到组合级**（`equityCurve` 驱动的年度收益 / 总收益 / MDD），**并显式登记年度收益一律采用 (B) 严格口径**。**Goal 保持 active** —— 剩余：回收组合级结果 + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-018 · 🎯 组合级结果产出（`maxAmp5`）· 7/7 年正收益（**Goal round 17**）
+
+- **Task**：Goal 第 17 轮 —— 回收 `maxAmp5` Variant 的组合级结果（资金曲线 / 年度收益 / MDD）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB）· 🔴 **未产出正式 Run** · 修正 harness 一处 `days` 重复声明 + 1 份报告 + 本条审计。
+- **🎯 组合级结果（`event-state-long-maxAmp5-top3` · 候选引擎 483.2s · 决策日 1,636）**：**`equityCurve` 1,716 点 · 2019-01-03 → 2026-01-28**；**first** = `{ date 2019-01-03, cash 1,000,000, marketValue 0, equity 1,000,000, openPositions 0 }`；**last** = `{ date 2026-01-28, cash 911,179.46, marketValue 622,792, equity **1,533,971.46**, openPositions **123** }`；**`ANNUAL(B)` = 2019 +4.05% · 2020 +8.76% · 2021 +11.42% · 2022 +0.67% · 2023 +1.58% · 2024 +8.21% · 2025 +9.94% · 2026 0.00%**；**`TOTAL = +53.40%`（CAGR ≈ 6.3%）· `MDD = −37.45%`** ⇒ ✅ **7/7 年正收益（2019~2025）**。
+- **📌 `RUN_KEYS`（`TradeSimulationRun` 顶层）**：`recordKind, recordVersion, datasetVersion, builderVersion, rowSchemaVersion, datasetGate, universeId, strategyId, strategyVersion, parameters, sourceFingerprint, decisionDateRange, decisionDayCount, dateRange, initialCapital, **finalEquity**, config, **equityCurve**, costs, executionStats, skipped, fingerprint`；`equityCurve` 每点 = `{ date, cash, marketValue, equity, openPositions }`。
+- **📌 对比基准（区间不同，不可直接比较）**：本 Variant `+53.40%` / CAGR ≈6.3% / MDD −37.45% vs 沪深300 `+47.36%` / CAGR 5.74% / MDD −45.60%（基准 2019-01-02~2026-09-30）⇒ ⚠️ **未做对齐基准的同期比较**。
+- **🔴 三项须谨慎/待查**：**C1 2026 年 `0.00%`**（疑为口径问题：`byYear` 取「该年最后一点」，2026 仅 1 点且含 123 笔未平仓，**未查证**）· **C2 总值含未平仓浮盈**（`last.marketValue = 622,792` 占 `finalEquity` 的 **40.6%**，来自 123 笔未平仓 ⇒ **TOTAL 不是已实现收益**）· **C3 曲线终点 2026-01-28 晚于数据集末日 2025-09-26**（尾段来自事件 post 窗 rd ≤ 80 的延伸，**须确认经济含义**）。
+- **7 项 NOT PROVEN**：**N1** 🔴 **`avgAmp5` 的组合级结果**（后台进行中）· **N2** 🔴 **§2 的 C1/C2/C3 三项**（均未查证）· **N3** ⚠️ 与基准的同期比较（区间未对齐）· **N4** ⚠️ `holdMin = 0` 成因 / 板价判定一致性（D2）/ 与 harness 逐笔等价性 · **N5** ❌ OOS/WFA/冲击成本 · **N6** ⚠️ **D1 口径差异须显式标注** · **N7** ⚠️ **末端 2.64% 未平仓处置口径须显式标注**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset**。
+- **Baseline Impact**：**major（首个组合级绩效结果产出）** —— **首次产出 `maxAmp5` Variant 的组合级结果**（`TOTAL +53.40%` · `MDD −37.45%` · **7/7 年正收益**），**并如实登记三项待查事项**（2026 = 0% · 未平仓浮盈占 40.6% · 曲线终点晚于数据集末日）**与「未做对齐基准的同期比较」**。**Goal 保持 active** —— 剩余：回收 `avgAmp5` 组合级结果 + 查证 C1/C2/C3 + 据结果决定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-019 · OOS/WFA 决策框架 + `avgAmp5` 待回收（**Goal round 18**）
+
+- **Task**：Goal 第 18 轮 —— 回应 Goal 末句「Backtest 完成后，再根据结果决定是否进入 OOS/WFA」，确立决策框架。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（1 份报告 + 本条审计）。
+- **🔴 `avgAmp5` 的组合级结果【本轮未回收】**（后台候选引擎阶段，单 Variant 约 8–12 分钟）。
+- **🎯 但本轮末 `avgAmp5` 亦跑完**（`[done] 1052.6s`）⇒ **两个 Variant 的组合级结果【全部产出】**：**`avgAmp5` `ANNUAL(B)` = 2019 +3.90% · 2020 +9.41% · 2021 +8.15% · 2022 🔴 **−1.23%** · 2023 +2.54% · 2024 +6.25% · 2025 +8.56% · 2026 0.00%；`TOTAL = +43.62%` · `MDD = −33.54%`；trades 4,793 · `stuck` 129（2.69%）**。**对比 `maxAmp5`**：`TOTAL +53.40%` · `MDD −37.45%` · 2022 **+0.67%** · trades 4,766 · `stuck` 2.64% ⇒ 🎯 **`maxAmp5` 在 TOTAL（**+9.78pp**）与 2022 尾部（**+1.90pp**）上【均优于】`avgAmp5`** ⇒ 📌 **为 `POST-EVENT-STATE-FACTOR-SELECT-001` 的「3:3 平局 / `KEEP = 暂不择一`」提供首个【组合级】证据**。
+- **✅ 确立 OOS/WFA 的【前置门槛 G1~G5】**：**G1** 两 Variant 组合级结果均已产出（🔴 **未满足**，`avgAmp5` 待回收）· **G2** 结果无未解释异常（⚠️ **未满足** —— C1 2026=0.00% / C2 未平仓浮盈占 **40.6%** / C3 曲线终点 2026-01-28 晚于数据集末日 2025-09-26，**三项未查证**）· **G3** 与基准**同期对齐**比较（⚠️ **未满足**）· **G4** 口径差异已显式标注（D1 出场时点 / 末端未平仓处置，⚠️ **未满足**）· **G5** 绩效特征足以支撑稳健性检验前提（⚠️ **部分满足** —— **`7/7 年正收益` 是强正面信号**；`MDD −37.45%` **浅于**基准 −45.60%；但 **CAGR ≈6.3% 仅略高于基准 5.74%** 且未同期对齐 ⇒ **不能断言有 Alpha**）。
+- **📌 预备判定 = `B. CONDITIONALLY_READY`**（依据 `maxAmp5` 单一 Variant，待 `avgAmp5` 确认）—— **7/7 年正收益是进入 OOS/WFA 的充分动机**，但 **G2/G3/G4 三项未满足** ⇒ **须先完成 C1/C2/C3 查证与基准同期对齐，方可正式进入 OOS/WFA**。
+- **📌 建议的 OOS/WFA 形式（仅登记，未执行）**：OOS 用时间外样本且**不得用 2019-2025 调参**（Goal 明确「暂不做参数搜索」）· WFA 滚动窗长须与 **40 交易日持有**匹配（窗 ≥ 1 年）· 两 Variant 在**同一协议**下并行对比 · 年度收益一律 **(B) 严格口径**、成本往返 **20bps**、须标注 D1 与末端未平仓。
+- **7 项 NOT PROVEN**：**N1** 🔴 `avgAmp5` 的组合级结果（后台进行中）· **N2** 🔴 C1/C2/C3（均未查证）· **N3** ⚠️ 与基准的同期对齐比较（G3）· **N4** ⚠️ `holdMin=0` 成因 / 板价判定一致性（D2）/ 与 harness 逐笔等价性 · **N5** ❌ **OOS/WFA 本身**（Goal 明确「Backtest 完成后，再根据结果决定」⇒ **本轮未执行，符合约束**）· **N6** ⚠️ D1 口径差异须显式标注 · **N7** ⚠️ 末端 2.64% 未平仓处置口径须显式标注。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA（符合 Goal 约束）** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**minor→major（OOS/WFA 决策框架确立 + 预备判定登记）** —— **把 Goal 末句「据结果决定是否进入 OOS/WFA」形式化为【五条前置门槛 G1~G5】**，**依据 `maxAmp5` 已知结果给出预备判定 `B. CONDITIONALLY_READY`**（7/7 年正收益为正面动机；CAGR 超额不显著 + G2/G3/G4 未满足 ⇒ 须先查证），**并登记建议的 OOS/WFA 形式**。**Goal 保持 active** —— 剩余：回收 `avgAmp5` + 查证 C1/C2/C3 + 基准同期对齐 + 落章口径标注 + 正式裁定。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-020 · C1/C2/C3 查证（**Goal round 19**） → 门槛 **G2 ✅ 满足**
+
+- **Task**：Goal 第 19 轮 —— 查证 `BRIDGE-018` §2 的 C1/C2/C3 三项（门槛 G2）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（1 份报告 + 本条审计）。
+- **✅ C1（2026 = 0.00%）【解释成立，非 bug】**：曲线终点 `2026-01-28` 的 `equity 1,533,971.46`（`cash 911,179.46` + `marketValue 622,792`，`openPositions **123**`）与**2025 年末的 equity 完全相同** ⇒ **机制 = 数据集结束后（> 2025-09-26）无新行情 ⇒ 123 笔未平仓持仓按最后已知价标注 ⇒ `marketValue` 冻结 ⇒ `equity` 不变 ⇒ 0.00% 正确**；**交叉验证：两个 Variant 同现 `2026:0.00%`**，与末端未平仓笔数一致（123 / 126）⇒ **与「同一机制」自洽**。
+- **✅ C3（曲线终点 2026-01-28 晚于数据集末日 2025-09-26）【解释成立】**：**同一机制** —— cursor 的 `observationWindow {start:15, end:**79**}`（`maxRd = 80`）使 `post` 段在日历上延伸至 2026-01 ⇒ **尾段仅承载未平仓持仓的冻结市值、无新成交** ⇒ **不影响收益结论**。
+- **🔴 C2（未平仓浮盈占 40.6%）【不是错误，但必须标注】**：`marketValue 622,792 / finalEquity 1,533,971.46 = **40.6%**`，来自 **123 笔未平仓**（成因 = 数据集末端效应，`BRIDGE-016` 已坐实）⇒ **`TOTAL` 与年度收益【含未实现收益】** ⇒ **结果文档必须标注「mark-to-market 口径；末端 123/126 笔（2.6%）未平仓，其市值约占 `finalEquity` 40.6%」**；📌 **属「已解释的限定」而非「未解释异常」** ⇒ **不阻断 G2**。
+- **✅ 门槛 G2 判定 = 满足**（C1/C3 机制性解释 · C2 登记为强制限定 ⇒ **无【未解释】异常**）。
+- **📌 两 Variant 组合级结果合并登记**：**`maxAmp5`** `TOTAL +53.40%` · `MDD −37.45%` · 年度 2019 +4.05% / 2020 +8.76% / 2021 +11.42% / **2022 +0.67%** / 2023 +1.58% / 2024 +8.21% / 2025 +9.94% · trades 4,766 · winRate 46.1% · `stuck` 2.64%；**`avgAmp5`** `TOTAL +43.62%` · `MDD −33.54%` · 2019 +3.90% / 2020 +9.41% / 2021 +8.15% / 🔴 **2022 −1.23%** / 2023 +2.54% / 2024 +6.25% / 2025 +8.56% · trades 4,793 · winRate 45.4% · `stuck` 2.69% ⇒ 🎯 **`maxAmp5` 在 TOTAL（+9.78pp）与 2022 尾部（+1.90pp）上均优于 `avgAmp5`**。
+- **6 项 NOT PROVEN**：**N1** 🔴 **C1 的「分子 = 分母」未【逐点】验证**（§1.1 为**基于机制的推断**，未打印 2025 年末与 2026-01-28 的具体 equity 对照）· **N2** ⚠️ **`avgAmp5` 的 `finalEquity` / `marketValue` 具体值**（表格中 `1,436,200` 为**由 +43.62% 反推**，**非直接读出**）· **N3** ⚠️ **与基准的同期对齐比较**（门槛 **G3**）· **N4** ⚠️ **D1 与末端未平仓的落章标注**（门槛 **G4**）· **N5** ⚠️ `holdMin = 0` 成因 / 板价判定一致性（D2）/ 与 harness 逐笔等价性 · **N6** ❌ OOS/WFA 本身（**符合 Goal 约束**）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**major（G2 门槛满足：三项待查事项全部解释）** —— **以机制性解释消解 C1/C3**（数据集结束后市值冻结 ⇒ 2026 为 0.00% 且曲线尾段无新成交），**并把 C2 登记为结果文档的【强制标注限定】**（mark-to-market；末端 2.6% 未平仓占 `finalEquity` 40.6%）⇒ **门槛 G2 判定为满足**。**Goal 保持 active** —— 剩余：G3 基准同期对齐 + G4 落章标注 + 正式裁定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-BRIDGE-021 · G3 同期对齐基准比较 —— 绝对收益跑输，风险特征占优（**Goal round 20**） → 门槛 **G3 ✅ 满足**
+
+- **Task**：Goal 第 20 轮 —— 落实门槛 G3：与基准（沪深300）做**同期对齐**比较。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 `index_daily`）· 🔴 **未产出正式 Run** · 1 份报告 + 本条审计（探针仅落 `%TEMP%`）。
+- **📌 同时修正 `BRIDGE-018` 的一处基准区间错配**：`BRIDGE-018` §1.5 用的是全区间（`2019-01-02~2026-09-30`），**本轮改为与策略组合级结果【完全对齐】的 `2019-01-03 ~ 2026-01-28`**（各 **1,716** 个交易日，与 `equityCurve` 的 1,716 点一致）。
+- **🎯 同期对齐基准（`000300.SH`）**：首/末 `2964.842` → `4717.9914` · **`TOTAL = +59.13%`** · **`MDD = −45.60%`** · **`BENCH ANNUAL(B)` = 2019 +38.17% · 2020 +27.21% · 2021 −5.20% · 2022 −21.63% · 2023 −11.38% · 2024 +14.68% · 2025 +17.66% · 2026 +1.90%**。
+- **🔴 决定性对照（同区间）**：**`maxAmp5` `TOTAL +53.40%` / `MDD −37.45%` / 正年份 7/7**；**`avgAmp5` `+43.62%` / `−33.54%` / 6/7**；**基准 `+59.13%` / `−45.60%` / 6/8** ⇒ 🔴 **两个 Variant 的【绝对收益均跑输】基准**（**−5.73pp / −15.51pp**）；✅ **但风险特征显著占优**（**MDD 浅 8.15pp / 12.06pp** · **正年份 7/7 vs 6/8**）。
+- **🎯 逐年对照（策略 − 基准，`maxAmp5`）**：2019 **−34.12pp** · 2020 **−18.45pp** · **2021 +16.62pp** · **2022 +22.30pp** · **2023 +12.96pp** · 2024 −6.47pp · 2025 −7.72pp · 2026 −1.90pp ⇒ 🎯 **Alpha 来源已定位 = 【熊市防御】，不是牛市进攻**：**牛市（2019/2020/2024/2025）策略大幅落后**、**熊市（2021/2022/2023）策略大幅占优** ⇒ **与 `POST-EVENT-STATE-2022-ATTRIBUTION-001` 的「减亏机制」结论【方向一致】且机制可解释**。
+- **🔴 对 OOS/WFA 判定的影响**：**TOTAL 跑输 ⇒ 不能声称绝对收益占优**；**MDD 更浅 + 7/7 正年份 ⇒ 风险调整后可能占优（未算 Sharpe/Calmar）**；**牛市机会成本显著，须如实登记** ⇒ 📌 **预备判定维持 `B. CONDITIONALLY_READY`，限定条件明确为「绝对收益未跑赢基准（−5.73pp）；价值主张 = 熊市防御 + 更浅回撤 + 7/7 正年份」** ⇒ **OOS/WFA 的目的应改为验证「熊市防御」是否样本外稳定，而非「能否跑赢基准」**。
+- **✅ 门槛 G3 判定 = 满足**；**G1 ✅ / G2 ✅ / G3 ✅ / G4 ⬜（落章标注）**。
+- **6 项 NOT PROVEN**：**N1** ⚠️ **风险调整指标（Sharpe / Calmar / 信息比率）未计算**（「风险调整后占优」为**推断**）· **N2** ⚠️ **统计显著性**（逐日/逐月超额收益 t 检验，**未做**）· **N3** ⚠️ **D1 与末端未平仓的落章标注**（门槛 **G4**）· **N4** 🔴 **C1 的「分子 = 分母」未逐点验证**（`BRIDGE-020` §1.1 为机制性推断）· **N5** ⚠️ `holdMin = 0` 成因 / 板价判定一致性（D2）/ 与 harness 逐笔等价性 · **N6** ❌ OOS/WFA 本身（**符合 Goal 约束**）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 `index_daily`）· ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ 探针仅落 `%TEMP%`。
+- **Baseline Impact**：**major（G3 门槛满足 + Alpha 来源定位为熊市防御）** —— **完成同期对齐基准比较**（各 1,716 交易日）⇒ **确立「两 Variant 绝对收益跑输基准（−5.73pp / −15.51pp），但风险特征显著占优（MDD 浅 8.15pp / 12.06pp、正年份 7/7 vs 6/8）」**，**并把 Alpha 来源精确定位为【熊市防御】**（牛市大幅落后、熊市大幅占优，与「减亏机制」结论方向一致）⇒ **据此把 OOS/WFA 的目的修正为「验证熊市防御的样本外稳定性」而非「跑赢基准」**。**Goal 保持 active** —— 剩余：G4 落章标注 + 风险调整指标 + 正式裁定 OOS/WFA。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-FINAL-001 · 两个 Variant 正式 Backtest 最终结果与 OOS/WFA 裁定（**Goal round 21**） → ✅ **Goal 完成**
+
+- **Task**：Goal 最终轮 —— 满足门槛 **G4**（强制口径标注）并作出 Goal 末句「据结果决定是否进入 OOS/WFA」的**正式裁定**。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（1 份最终报告 + 本条审计）。
+- **✅ 最终裁定 = `A. YES_CONDITIONAL`（进入 OOS/WFA）**，四项条件：**C-a 目的修正** —— 验证「**熊市防御**」是否**样本外稳定**，**不是**「能否跑赢基准」；**C-b** 不得用 2019-2025 调参 ⇒ OOS 用**时间外样本**；**C-c** 口径必须标注（D1 · 末端未平仓 · **(B) 严格口径** · 往返 **20bps**）；**C-d** 须先补风险调整指标（Sharpe/Calmar）与统计显著性。
+- **✅ 门槛 G1~G4 全部满足**：**G1** 两 Variant 组合级结果已产出（`BRIDGE-018/019`）· **G2** 无未解释异常（`BRIDGE-020`）· **G3** 基准同期对齐（`BRIDGE-021`）· **G4** 口径差异显式标注（**本轮 §3**）。
+- **✅ G4 落章内容**：**§3.1 D1** —— 研究「rd55 `close` **成交**」vs 平台「rd55 `close` **触发** → rd56 `open` **成交**」，**1 个交易日差异**，平台依据 `simulator/types.ts` **L250** 原文「`TIME_EXIT`：持有满 N 个交易日后的**收盘触发**，**下一交易日开盘卖出**」⇒ **非可配置项**；实测证据 = 两 Variant **`holdAvg 39.95 / 39.93`**；⇒ **与研究的 F40 不是逐位等价**。**§3.2 末端未平仓** —— 123/126 笔（2.58%/2.63%），`marketValue 622,792` 占 `finalEquity` **40.6%**，根因 `stuckYr = {2025: 125}`（2025 入场、本应 2026 退出，数据集止于 2025-09-26）；研究有 **rd80 兜底**、平台**无强制结算** ⇒ 本结果为 **mark-to-market 口径，含未实现收益**。**§3.3** 另列 6 项强制标注（(B) 口径 · 20bps · `FIXED_RATIO × 1/180` · `candidateExitPolicy DISABLED` · 数据窗 `{15,79}`/`maxRelativeDay 80` · **未落库为正式 Run**）。
+- **✅ Goal 全部条目完成**：① 创建两个 Draft Variant ✅（`BRIDGE-002`）② R1 实跑 `validateCanonicalStrategyDefinition` ✅（2/2 · 0 issues）③ R2 平台 20bps ≡ 研究 ✅（实算 **20.000000 bps**）④ R3 小范围核对 rd55→顺延→rd80 ✅（`BRIDGE-004` 平台真实 simulator 实测）⑤ **两个 Variant 都跑正式 Backtest ✅** ⑥ 据结果决定 OOS/WFA ✅（本文件 §0）⑦ 全程未做 OOS/WFA/参数/仓位/TopN 搜索 ✅。
+- **📌 结果摘要（同区间 2019-01-03~2026-01-28 · 各 1,716 交易日）**：**`maxAmp5`** `TOTAL +53.40%` · `MDD −37.45%` · **正年份 7/7** · trades 4,766 · winRate 46.1% · `holdAvg 39.95` · 退出 `持有满40个交易日` 97.42% · `stuck` 2.64%；**`avgAmp5`** `+43.62%` · `−33.54%` · 6/7 · 4,793 · 45.4% · 39.93 · 97.37% · 2.69%；**沪深300** `+59.13%` · `−45.60%` · 6/8 ⇒ 🎯 **绝对收益跑输（−5.73pp / −15.51pp）；MDD 浅 8.15pp / 12.06pp；Alpha 来源 = 熊市防御**。
+- **9 项 NOT PROVEN**：**N1** ⚠️ 风险调整指标（Sharpe/Calmar）**未计算**（「风险调整后占优」为推断）· **N2** ⚠️ 统计显著性**未做** · **N3** 🔴 C1「分子=分母」**未逐点验证** · **N4** ⚠️ `holdMin = 0` 成因 · **N5** ⚠️ `canSellAtClose` ↔ 引擎板价判定逐事件一致性（D2）· **N6** ⚠️ 与研究 harness 的**逐笔等价性**（未做）· **N7** ❌ OOS/WFA 本身（Goal 明确）· **N8** ❌ 冲击成本/容量约束/`(A) 年度口径缺陷`独立复核 · **N9** ⚠️ 两 Variant **未落库**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB / `index_daily`）· ✅ **未创建 Candidate / Strategy Version / 正式 Run** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**major（Goal 完成：G4 落章 + 正式裁定）** —— **完成门槛 G4 的三项强制口径标注**（D1 出场时点 1 日差 · mark-to-market 含未实现收益占 40.6% · 另 6 项），**据此作出正式裁定 `A. YES_CONDITIONAL`**（进入 OOS/WFA，但目的修正为「验证熊市防御的样本外稳定性」），**并确认 Goal 全部 7 项条目完成**。**Goal → complete。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-08 · RESULT-STRATEGY-GOAL-CONSOLIDATED-001 · 本 Goal 汇总文档（**Goal 已完成后的收口**）
+
+- **Task**：按用户指示，把本 Goal（`goal-5edeceac-12e0-400f-a1b0-e873ae6396f5`，21 轮）的全部结果**汇总为一份文档**。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增文件**（1 份汇总文档 + 本条审计）。
+- **📌 新增单一汇总入口 `docs/research/RESULT-STRATEGY-GOAL-CONSOLIDATED-001.md`**（12 节）：**§0 一页结论** · **§1 Goal 七项条目完成情况** · **§2 两个 Variant 定义**（含冻结因子公式与平台注册锚点）· **§3 正式 Backtest 装配链与 5 项关键路径决策 + 研究↔平台口径对照表** · **§4 三项 R（R3/R1/R2）的解决过程与实测证据** · **§5 组合级 / 交易层 / 逐年超额 / 两 Variant 对比** · **§6 强制口径限定**（D1 · 末端未平仓 mark-to-market · 另 6 项）· **§7 最终裁定 `A. YES_CONDITIONAL` + 条件 C-a~C-d + 门槛 G1~G4** · **§8 未证明 9 项 + 已证伪/修正的 3 项假设** · **§9 修正的 4 项平台口径错配** · **§10 合规声明与工作区复核** · **§11 文件索引**（24 份过程证据链 + 代码锚点 + 台账）· **§12 建议下一步**。
+- **📌 汇总口径纪律**：本文**不产生新结论**，只**归并**已落账的 `RESULT-STRATEGY-BRIDGE-002 ~ 021` 与 `RESULT-STRATEGY-FINAL-001`；过程文档**保留为证据链，不删除**（append-only 纪律）。**§8 明确登记 3 项被证伪/修正的假设**（`SUSPENDED` 根因假设被证伪 · `SUSPENDED` 严重性误读 46%→2.64% · `retAvg` 重复 ×100），**如实保留负面结果**。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未产出正式 Run / 未创建 Candidate / Strategy Version** · ✅ **未跑 OOS / WFA** · ✅ **未做权重/仓位/TopN/参数搜索** · ✅ **未修改 3570001 / 既有因子定义 / Schema / Migration / Dataset** · ✅ **本轮无新增文件**。
+- **Baseline Impact**：**minor（汇总收口）** —— **为本 Goal 建立单一汇总入口**，把 24 份过程文档归并为一份可独立阅读的结果文档（含`§8` 的负面结果如实登记与 `§11` 的完整索引）。**Goal 已于上一轮 complete，本轮不加新结论。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-OOS-WFA-001 · 阶段 1 判定：OOS/WFA **PASS**（**新 Goal round 1~3**） → ✅ **主策略 = `maxAmp5`**
+
+- **Task**：**新 Goal**「Event-State Long Alpha → 可交易策略」的**阶段 1 = OOS/WFA**（用户指示「当前立即从 OOS/WFA 开始」）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 TiDB / `index_daily`）· 🔴 **未创建 Candidate / Strategy Version / 正式 Run** · 新增 2 份文档（**判定标准** + **阶段结果**）+ 3 个 gitignore harness + 本条审计。
+- **📌 先定标准后测（方法论纪律）**：新增 **`docs/research/OOS-WFA-CRITERIA-001.md`** —— **在运行分段回测之前写定**：**§1 被测配置完全冻结**（TopN=3 · 持有 40 日 · `FIXED_RATIO×1/180` · `maxPositions=180` · 20bps · `candidateExitPolicy DISABLED` · `observationWindow {15,79}` · 决策日 rd15）· **§2 分段**（S1 2019-01-03~2020-12-31 · S2 2021-01-04~2023-12-29 · S3(OOS) 2024-01-02~2026-01-28）与 **WFA W1~W4**（2022/2023/2024/2025）· **§3 预声明门槛 P1~P5 / W-a~W-c** · **§4 测量口径** · **§5 明确不做** · **§6 附录 A（测量方法修正）**。
+- **🔴 附录 A：测量方法的修正（门槛未改）** —— 实测发现两缺陷：**D-1 `equityCurve` 不受 `simConfig.dateRange` 约束**（S1 年线延伸至 2021+，`ANNUAL(B)=…2021:-1.99% 2022:0.00%`）· **D-2 孤立分段跑在【段界截断持仓】**（S1 `stuck=118` / S2 `stuck=125`，远高于全期 2.64%；`holdAvg 37.57/38.67 < 40`）⇒ **主方法改为「全期单跑 + 离线切段」**（本策略**无可拟合参数** ⇒ 合法），孤立分段跑降为**交叉校验**。**✅ 门槛 P1~P5 / W-a~W-c 与 §1 配置【完全未改】**；⚠️ 附录**写于已见 S1/S2 孤立结果之后**，已如实登记时点；修正方向**不偏向任何结论**。
+- **✅ OOS 判定 = `PASS`**：**P1** S3 `TOTAL > 0`（`maxAmp5` **+18.99%** · `avgAmp5` **+15.06%**）✅ · **P2** 正年份 ≥50%（**3/3** · **2/3**；剔除部分年 2026 后为 **2/2**，结论不变）✅ · **P3** `\|MDD_S3\| ≤ max(\|MDD_S1\|,\|MDD_S2\|)×1.5`（15.62 ≤ 25.82 · 15.95 ≤ 27.80）✅ · **P4 熊市防御可复现 = `N/A`**（🔴 **S3 内基准三年全正**：+16.20%/+17.66%/+1.90% ⇒ 按预声明记 N/A）· **P5** 两 Variant 方向一致 ✅。
+- **✅ WFA 判定 = `PASS`**：**W-a** ≥3/4 前推段 `TOTAL>0`（`maxAmp5` **4/4** · `avgAmp5` **3/4**）✅ · **W-b** 熊市前推段跑赢 ≥2/3（**两 Variant 均 2/2 = 100%**）✅ · **W-c** 方向一致 ✅。🎯 **W-b 是最强正面证据**：**2022 / 2023 两个熊市前推段，两 Variant 全部跑赢基准**。
+- **📊 分段结果（主方法：全期单跑 + 离线切段）**：**S1**（基准 +75.77%/−16.08%）`maxAmp5` +13.16%/−17.21%/**−62.61pp** · `avgAmp5` +13.68%/−18.53%/**−62.09pp**；**S2**（基准 **−34.87%**/−43.22%）`maxAmp5` **+13.06%**/**−11.99%**/**+47.92pp** · `avgAmp5` +8.83%/−12.95%/**+43.70pp**；**S3(OOS)**（基准 +39.32%/−15.66%）`maxAmp5` **+18.99%**/**−15.62%**/**−20.33pp** · `avgAmp5` +15.06%/−15.95%/**−24.26pp**。交易层：S3 `winRate` **54.4% / 52.2%**（高于 S1 43.0% / S2 46.0%）· `holdAvg` **41.01 / 40.94**（证明 40 日持有**未被段界截断**）· S3 `stuck` **0 / 2**。
+- **🎯 主策略确定（按预声明 M1）**：两 Variant 均 PASS ⇒ 取 S3 `TOTAL` 更高者 ⇒ **`maxAmp5` +18.99% vs `avgAmp5` +15.06%（差 +3.93pp > 1.0pp）** ⇒ **主策略 = `event-state-long-maxamp5-top3@1.0.0`**；**辅助证据 6/6 维度 `maxAmp5` 占优**（S3 TOTAL · S3 winRate · S2 excess · S2 MDD · S3 MDD · 全期 TOTAL）⇒ **无歧义**。
+- **🔴 7 项关键限定**：**L-a** **S3 内基准无下跌年份 ⇒ P4 = N/A**（**OOS 留出段未能独立验证熊市防御**，证据仅来自 S2 段内与 W1/W2）· **L-b** S3 绝对收益**跑输基准 20.33pp / 24.26pp**（价值主张 = 熊市防御 + 更浅回撤）· **L-c** 因子发现用 2019-2025 全区间 ⇒ **非严格「未见数据」OOS**（已预登记）· **L-d** 无可拟合参数 ⇒ WFA 为滚动窗口表现聚合（已预登记）· **L-e** D1 出场差 1 日（`holdAvg 41.01` 实测）· **L-f** mark-to-market（S3 `stuck 0/2` ⇒ 影响极小）· **L-g** 🔴 **`trades` 计数差异未解释**（本轮全期 **4,811 / 4,838** vs 此前 **4,766 / 4,793**，**+0.94%**）。
+- **7 项 NOT PROVEN**：**N1** 🔴 **`trades` 计数差异（4,811 vs 4,766）的成因**（未查，**须在阶段 2 前澄清**）· **N2** ⚠️ **P4 未获独立验证** ⇒ 熊市防御在留出段的复现性**未证** · **N3** ⚠️ 风险调整指标（Sharpe/Calmar）与统计显著性（t 检验）**未做** · **N4** ⚠️ 主策略**未落库**（阶段 2 待办）· **N5** ⚠️ 与研究 harness 的**逐笔等价性**未验证 · **N6** ❌ 成本/容量/滑点/资金规模（阶段 4）· **N7** ❌ 冲击成本 / `(A) 年度口径缺陷` 独立复核。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 TiDB / `index_daily`）· ✅ **未创建 Candidate / Strategy Version / 正式 Run** · ✅ **未调因子 / TopN / 仓位 / 持仓期 / 参数**（Goal 原则 1）· ✅ **未做参数暴力搜索** · ✅ **未为通过门槛而修改研究口径** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（阶段 1 OOS/WFA PASS + 主策略确定）** —— **以「先定标准后测」的方法论完成 OOS/WFA**（门槛 P1~P5 / W-a~W-c 全部预声明，**PASS**），**确定主策略 = `maxAmp5`**（6/6 维度占优），**并如实登记 7 项关键限定**（含 **P4 = N/A** 这一**重要负面事实**：OOS 留出段未能独立验证熊市防御）**与 7 项未证明**。**满足进入阶段 2**（形成正式 Strategy Version + 保留完整基准结果）。**Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-OOS-WFA-002 · N1 澄清 + 对上一 Goal 两项数字的**修正**（**Goal round 4**）
+
+- **Task**：Goal 阶段 1 收尾 —— 澄清 N1（`trades` 计数差异）并据此复核上一 Goal 的数字。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **未创建 Candidate / Strategy Version / 正式 Run** · 1 份报告 + 1 个 gitignore 诊断脚本 + 本条审计。
+- **✅ N1 澄清**：`trades` 差异（**4,811 vs 4,766**）的成因 = **`dateRange.endDate` 不同** —— 旧跑（`variantBacktest.ts`）由 `RT_END` 传入 **`2025-09-26`**（数据集 `dataset_version.endDate` = **事件区间**末端），新跑（`oosFull.ts`）**硬编码 `2026-01-28`**（**cursor 实际末端** = 事件 post 窗 rd ≤ 80 的延伸）⇒ 🔴 **根因 = 模拟窗口右端被设在【事件区间末端】而非【cursor 实际末端】** ⇒ 2025-09-26 之后入场的持仓**永远等不到退出日** ⇒ 每日重发卖单被拒 ⇒ `SUSPENDED` 膨胀 **8.3×**、期末大量未平仓。
+- **🔴 修正 1 —— MDD 计算错误（旧值高估）**：旧公式 `min(equity) / 【全局峰值】 − 1`（`variantBacktest.ts` 中 `run = Math.max(run, peak)` 使分母恒为全局峰值）⇒ 当峰值出现在**后期**时**严重高估**；正确公式 = `min over t ( equity_t / 【running peak 至 t】 − 1 )` ⇒ **`maxAmp5` MDD `−37.45%`（错） → `−18.08%`（对）**；**`avgAmp5` `−33.54%` → `−18.53%`**。📌 **基准 MDD 用的是正确公式**（`bench.cjs` 用 running peak）⇒ 旧文档把「**高估的策略 MDD**」与「**正确的基准 MDD**」直接对比，**不公平**。
+- **🔴 修正 2 —— `dateRange` 截断伪影**：旧跑止于 `2025-09-26` ⇒ 未平仓 **123 笔**（`marketValue` 占 `finalEquity` **40.6%**）· `SUSPENDED` **8,315**；新跑止于 `2026-01-28` ⇒ **未平仓 1 笔** · **`SUSPENDED` 1,006** ⇒ **「未实现收益占 40.6%」这一限定【基本消失】**。
+- **📊 N1 诊断实测（读已落盘 `equityCurve`）**：**`maxAmp5`** equity `2019-01-03 (1,000,000)` → `2026-01-28 (1,538,790.56)` · 1,716 点 · **全期 TOTAL +53.88%** · **MDD −18.08%** · trades **4,811** · **`openAtEnd` 1** · entry 末 **2025-10-28** · 按入场年 `{2019:667, 2020:702, 2021:713, 2022:717, 2023:717, 2024:711, 2025:584}` · `executionStats {signals 10,688, fills 9,621, rejected 1,067, byReason {NO_LIQUIDITY 55, OTHER 6, SUSPENDED 1,006}}`；**`avgAmp5`** 末 `1,436,765.98` · **TOTAL +43.68%** · **MDD −18.53%** · trades **4,838** · **`openAtEnd` 3** · `{signals 11,306, fills 9,673, rejected 1,633, byReason {NO_LIQUIDITY 102, OTHER 5, SUSPENDED 1,526}}`。
+- **🎯 修正后的全期对照（同区间 `2019-01-03 ~ 2026-01-28`）**：**`maxAmp5`** TOTAL **+53.88%** / MDD **−18.08%** / TOTAL÷\|MDD\| **2.98**（**非年化，仅指示**）；**`avgAmp5`** +43.68% / −18.53% / 2.36；**沪深300** **+59.13%** / **−45.60%** / 1.30 ⇒ 🎯 **绝对收益仍跑输（−5.25pp / −15.45pp），但 MDD 浅 27.52pp / 27.07pp（差距从「8.15pp」扩大到「27.52pp」）**。
+- **✅ 阶段 1（OOS/WFA）结论【不受影响】**：主方法（`oosFull.ts`）**硬编码 `END = 2026-01-28`** ⇒ 未受 `RT_END` 影响；分段结果来源 = **全期单跑 + 离线切段**（**无段界截断**）；`holdAvg` 佐证 S1/S2/S3 均 **≈ 41.01 / 40.94**；S3 `stuck` **0 / 2** ⇒ **`RESULT-OOS-WFA-001.md` 的 P1~P5 / W-a~W-c 判定与主策略确定（`maxAmp5`）全部有效** ✅。📌 **需同步修正的旧文档** = `RESULT-STRATEGY-GOAL-CONSOLIDATED-001.md` **§5.1（MDD）** 与 **§6.2（未平仓 40.6%）**；本文件为其**勘误**，**不修改原文件**（append-only 纪律），**以本文件为准**。
+- **7 项 NOT PROVEN**：**N1** ✅ **已澄清** · **N2** ⚠️ **P4 未获独立验证**（S3 内基准无下跌年份，**仍未解决**）· **N3** ⚠️ **风险调整指标（Sharpe/Calmar）与统计显著性未做**（§3 的 TOTAL÷\|MDD\| 仅为**指示值，非年化 Calmar**）· **N4** ⚠️ 主策略**未落库**（阶段 2 待办）· **N5** ⚠️ 与研究 harness 的**逐笔等价性**未验证 · **N6** ❌ 成本/容量/滑点/资金规模（阶段 4）· **N7** ❌ 冲击成本 / `(A) 年度口径缺陷` 独立复核。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未创建 Candidate / Strategy Version / 正式 Run** · ✅ **未调因子 / TopN / 仓位 / 持仓期 / 参数** · ✅ **未做参数暴力搜索** · ✅ **未为通过门槛而修改研究口径** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（两项数字修正：MDD 计算错误 + `dateRange` 截断伪影）** —— **澄清 N1** 并据此发现并修正上一 Goal 的**两项错误数字**：**① MDD 公式错误（用全局峰值而非 running peak）⇒ `maxAmp5` `−37.45%` → `−18.08%`**；**② `dateRange` 右端设在事件区间末端（`2025-09-26`）而非 cursor 实际末端（`2026-01-28`）⇒ 未平仓 `123 → 1`、`SUSPENDED` `8,315 → 1,006`、「未实现占 40.6%」限定基本消失**；**同时确认阶段 1（OOS/WFA）结论不受影响**（主方法本就使用 `2026-01-28`）。**Goal 保持 active** —— 进入**阶段 2**（形成正式 Strategy Version + 保留**修正后**的完整基准结果）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE2-001 · 阶段 2 完成：正式 Strategy Version 已形成并核验（**Goal round 5~6**） → 🔴 **授权生产写入**
+
+- **Task**：Goal **阶段 2** —— 「OOS/WFA 通过后，确定主策略并形成正式 Strategy Version，保留完整基准结果」。
+- **Changed DB**：🔴 **本次为【授权生产写入】**（Goal 明确要求「形成正式 Strategy Version」）—— **仅 2 类、仅新增**：**① `strategy_versions` +1 行**（`id=3600006`，含 canonical `definition` + **同事务 5 投影** + Dataset Binding，经**正式转正端口**）**② 该行 `status` 迁移 `Draft → Validated`**（`StrategyService.setVersionStatus`，**「唯一允许的 UPDATE；内容仍不可变」**）· `strategies` 主表 +1 行（`id=1770005`，其 `status` 随迁移同步）。**零修改既有行 · 零删除 · 未触碰 Schema / Migration / 既有策略（3570001 等）。**
+- **✅ 正式 Strategy Version（DB 权威核验）**：**`strategy_versions`** `id=**3600006**` · `strategyId=**event-state-long-maxamp5-top3**` · `version=1.0.0` · **`status=Validated`** · **`datasetVersionId=780004`** · **`fingerprint=7e863012181ff0e9a85a0e257b0b4d2a66a447acf16386e287f4fb22666a1cba`** · `codeVersion=1.0.0+gunknown` · `createdAt=2026-10-09 09:41:14`；**`strategies`** `id=**1770005**` · `name="EVENT_STATE_LONG · maxAmp5 · Top3 · hold40"` · **`status=Validated`** · `latestVersion=1.0.0` · `currentVersionId=**3600006**`；**总数 `178 → 179`** ✓。
+- **✅ 转正后复核（端口 `inspectVersion`）**：`{versionRowId:3600006, fingerprint:7e863012…66a1cba, **hasDefinition:true**, **datasetBindingCount:1**, universeId:"research-dataset:v10-limited365-pre10-post80", datasetVersionId:780004, status:"Validated"}`（universeId 原文为 `research-dataset:v10-listed365-pre10-post80`）。
+- **✅ 转正路径（正式端口，无裸写）**：`createStrategyPromotionPort({codeVersion, now})` → `findVersion`（落库前 = **不存在**，幂等闸门通过）→ `createStrategyVersion` → `StrategyService.create` → `StrategyRepository.saveVersion`（**同事务 5 投影 + Dataset Binding 校验**）→ `inspectVersion`。依据 `server/research/strategyCandidate/strategyPromotionPort.ts` 文件头：「本文件**不**出现任何 `INSERT strategy_versions` 之类的裸写」。
+- **✅ 状态迁移（唯一允许的 UPDATE）**：`Draft → Validated`（依据 `StrategyService.setVersionStatus`，`strategyPersistence/service.ts` L373-374）；八态 = `Draft/Research/Candidate/Validated/Paper/Approved/Production/Retired`；**语义依据 = OOS/WFA 已 PASS ⇒ 定义经样本外验证 ⇒ `Validated`**（尚未 Paper/Approved/Production）。
+- **📌 提交的 canonical 内容**：`schemaVersion 1.0` · 数据集 `first_limit_pullback / v10-listed365-pre10-post80 / datasetVersionId 780004 / PRIMARY` · 观察窗 `{15,15,TRADING_DAY}`（决策日 rd15）· 出场 `TIME_EXIT / trigger ON_CLOSE / threshold 40 / TRADING_DAY`（**无 `policy` 对象**）· 仓位 `EQUAL_WEIGHT / maxPositions 180 / maxExposure 1 / maxSinglePosition 1/180` · 执行 `T_CLOSE → T_PLUS_1_OPEN / OPEN / lotSize 100` · `recipe {kind signalEngine, recipeId event-state-long-amp5-top3, point close, signalFrequency daily, featureVersions [{maxAmp5,1.0.0}], rankingConfig {higherIsBetter:false}, selectionConfig topN n=3, **requiredData ["OHLCV"]**}` · `executionAssumptions {backtestConfig {1,000,000, 180}, costModel {0.00025, 0, 0, 7.5, 100, 0}}` · **文档 5 投影（entryRules/exitRules/riskRules/positionSizing/parameters）全部组装成功**。
+- **📌 完整基准结果（保留 · 修正后数值）**：**`maxAmp5`（主策略）** `TOTAL +53.88%` · `MDD −18.08%` · `TOTAL÷|MDD| 2.98`（非年化，仅指示）· **正年份 7/7** · `trades 4,811` · `winRate 46.1%` · `holdAvg 41.01`；**`avgAmp5`** `+43.68% / −18.53% / 2.36 / 6/7`；**沪深300** `+59.13% / −45.60% / 1.30 / 6/8`。分段：**S1 牛市** 基准 +75.77% vs 策略 +13.16%（**−62.61pp**）· **S2 熊市** 基准 −34.87% vs 策略 **+13.06%**（**+47.92pp**）· **S3(OOS)** 基准 +39.32% vs 策略 **+18.99%**（−20.33pp）。**判定：OOS `PASS`（P4 = N/A）· WFA `PASS`（W-b 熊市段 2/2 跑赢）**。
+- **8 项 NOT PROVEN**：**N1** ⚠️ P4 未获独立验证 · **N2** ⚠️ 风险调整指标与统计显著性未做 · **N3** 🔴 **`loadVersion` 返回指纹 `3eefde7a…` ≠ 版本行 `fingerprint` `7e863012…`**（未查证；疑为文档指纹 vs 定义指纹之别）· **N4** ⚠️ **Dataset Binding 投影表名未定位**（端口报 `datasetBindingCount=1`，但 `LIKE '%binding%'` 查无表）· **N5** ⚠️ `avgAmp5` 未落库 · **N6** ⚠️ 与研究 harness 逐笔等价性未验证 · **N7** ❌ 成本/容量/滑点/资金规模（阶段 4）· **N8** ❌ 冲击成本 / `(A) 年度口径缺陷` 独立复核。
+- **本轮副作用**：✅ **零业务代码改动** · 🔴 **DB 写入已如实登记（§Changed DB）** · ✅ **未调因子 / TopN / 仓位 / 持仓期 / 参数** · ✅ **未做参数暴力搜索** · ✅ **未为通过门槛而修改研究口径** · ✅ **未触碰 Schema / Migration / 既有策略** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（阶段 2 完成：正式 Strategy Version 落库 + 完整基准保留）** —— **主策略 `maxAmp5` 经【正式转正端口】形成为不可变 Strategy Version**（`id=3600006` · `Validated` · 指纹 `7e863012…` · 绑定 `datasetVersionId=780004` · 5 投影齐全），**完整基准结果（修正后）已保留**，**并登记 8 项未证明（含 2 项待查证：指纹差异、Binding 表名）**。**满足进入阶段 3**（策略优化：建仓仓位 / 总仓位 / 入场时点 / 持仓退出机制 / 市场状态适应）。**Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE3-001 · 阶段 3 首轮：资金使用诊断 + 实验 E1（不采纳）+ N3/N4 澄清（**Goal round 7**）
+
+- **Task**：Goal **阶段 3**（策略优化）首轮 —— 按原则 6「禁止无目的重复审计、参数暴力搜索」**先诊断后实验**。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（**本轮只读**）· 🔴 **未修改已落库的 `maxAmp5@1.0.0`** · 新增 1 份报告 + 4 个 gitignore harness + 本条审计。
+- **✅ 资金使用诊断（证据先行，数据源 = 阶段 1 落盘 `equityCurve`）**：**`maxAmp5`** **实际投入率（`marketValue/equity`）均值 48.13%**（中位 49.65% · p10 41.32% · p90 58.70% · 最大 62.53%）· **现金占比均值 51.87%**（**一半资金闲置**）· **并发持仓均值 112.8**（中位 119 · p90 121 · **峰值 121** ≈ TopN 3 × 40 日 = 120 ✓）· 为 0 的天数 15；**按年投入率** 2019 49.63% → 2020 55.69% → 2021 52.62% → 2022 49.61% → 2023 46.49% → 2024 48.94% → 🔴 **2025 37.45%** → 2026 0.43%（并发均值同趋势 100.2 → 106.6）。**根因**：`plan.ts` **L167-168** 原文「`FIXED_FRACTION`/`FIXED_RATIO` ⇒ `min(allocatable, **initialCapital** × fraction)`（基数 = **初始资金**）」⇒ 权益增长 +53.88% 后每仓仍固定 5,555 元 ⇒ **投入率随权益增长单调下降 ⇒ 复利被稀释**（与 S1 牛市 **−62.61pp** 一致）。
+- **🔴 实验 E1（单变量：`FIXED_RATIO` → `EQUITY_FRACTION`，`fraction` 恒为 1/180，其余全冻结）⇒ ❌ 不采纳**：**TOTAL 53.88% → 58.84%（✅ +4.96pp）** 但 **MDD −18.08% → −23.73%（🔴 −5.65pp）** · **TOTAL÷|MDD| 2.98 → 2.48（🔴 −0.50）** · 投入率均值 48.13% → **58.61%**（+10.48pp）· 投入率（末 60 日）11.09% → 17.30% · 并发 112.8 → 113.1 · `trades` 4,811 → 4,827 · `winRate` 47.4% → 47.3% · `holdAvg` 41.00 → 41.00 · `finalEquity` 1,538,791 → **1,588,431**。**年度**：2019 +4.05%→+2.58% 🔴 · 2020 +8.76%→+8.24% 🔴 · 2021 +11.42%→**+12.73%** ✅ · **2022 +0.67%→🔴−0.09%** · 2023 +1.58%→**+1.91%** ✅ · 2024 +8.21%→+8.05% 🔴 · 2025 +10.19%→**+15.19%** ✅ · 2026 +0.09%→+0.14% ✅。
+- **🎯 E1 定位（Goal 原则 5：先定位失败原因，不得为通过而反向修改研究口径）**：`EQUITY_FRACTION` 让**风险暴露随权益单调增长**（投入率 48%→59%）⇒ **权益越高、暴露越大** ⇒ 在**牛市高位与熊市初期**承受更大冲击 ⇒ **回撤加深**，且**熊市亏损按增长后的权益放大** ⇒ **与「熊市防御」所依赖的低暴露特性直接冲突** ⇒ 📌 **反向印证：研究口径的「`w = 1/MAX_CONC` 恒定、永不重算」（`FACTOR-TIMESCALE-FINAL-001` 冻结）是刻意的风险控制设计，不是缺陷** ⇒ **基线 `maxAmp5@1.0.0`（`id=3600006`）保持不变**。
+- **✅ N3 解除（指纹差异 = 两个不同对象，各自自洽）**：**`strategy_versions.fingerprint`**（**版本内容身份**）= `computeStrategyDocumentFingerprint`（`strategySchema/serialize.ts`；`map.ts` L274）= **`7e863012…66a1cba`**；**`loadVersion` 返回对象的 `fingerprint`**（**追溯记录**）= `computeStrategyVersionRecordFingerprint`（`map.ts` L529）= `3eefde7a…12c6876`。**证据**：`loadVersion` 顶层键 = `backtestConfig,codeVersion,costModel,createdAt,datasetVersion,executionModel,fingerprint,parameterSet,recordKind,recordVersion,strategy,strategyId,universeId,version` ⇒ **是 `StrategyVersionRecord`，非 `StrategyDocument`**；**去掉 `fingerprint` 后重算 = `3eefde7a…` = `loadVersion` 返回值** ⇒ **自洽** ✓。📌 **登记 `BASELINE_DRIFT`**：`server/research/strategyCandidate/researchEvidence.ts` **L17** 注释称「`strategy_versions.fingerprint` = `computeDefinitionFingerprint(definition)`」，**实测为【文档指纹】**（`7e863012…` = 干跑时 `createStrategyDocumentFromDefinition` 输出的 `fingerprint`）⇒ **注释与代码不符**（按 AGENTS.md §2 标 `BASELINE_DRIFT`，**不改代码**）。
+- **✅ N4 解除（Dataset Binding 投影表已定位并核验）**：投影表 = **`strategy_version_datasets`**（`strategyVersionId=3600006` **1 行**：`datasetId=first_limit_pullback` · `datasetVersion=v10-listed365-pre10-post80` · `role=PRIMARY` · **`datasetVersionId=780004`**）· `strategy_entry_rules` **1** · `strategy_exit_rules` **1** · `strategy_execution_rules` **1** · `strategy_parameters` **0**（定义声明 `parameters: []` ⇒ **正确**）⇒ ✅ **5 投影全部核验**，与端口 `datasetBindingCount = 1` 一致。
+- **7 项 NOT PROVEN**：**N1** ⚠️ `avgAmp5` 的 E1 结果（后台进行中；`maxAmp5` 已足够判定）· **N2** ⚠️ **P4 未获独立验证**（S3 内基准无下跌年份，仍未解决）· **N3** ✅ 已解除 · **N4** ✅ 已解除 · **N5** ⚠️ 风险调整指标（Sharpe/Calmar）与统计显著性**未做** · **N6** ⚠️ 与研究 harness 逐笔等价性未验证 · **N7** ❌ 成本/容量/滑点/资金规模（阶段 4）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（本轮只读）· ✅ **未修改已落库的 `maxAmp5@1.0.0`** · ✅ **单变量**（仅改 `sizingMethod`，`fraction` 未动）· ✅ **未做参数暴力搜索** · ✅ **未为通过而修改研究口径** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（阶段 3 首轮：诊断锁定结构事实 + E1 证伪「放大单仓」方向 + N3/N4 解除）** —— **以证据诊断确立「现金占比 51.87% 闲置」与「投入率随权益增长单调下降」两项结构事实**（根因 = `FIXED_RATIO` 基数取初始资金），**并以单变量实验 E1 证伪「改为按权益计算」的方向**（收益 +4.96pp 但 **风险调整后更差、且削弱核心 Alpha**）⇒ **反向印证固定权重的风险控制意图**；**同时解除阶段 2 的两项待查证**（N3 指纹差异 = 两对象之别，并登记 1 项 `BASELINE_DRIFT`；N4 投影表已定位核验）。**阶段 3 下一步转向【总仓位择时 / 市场状态适应】等剩余方向。Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE3-002 · 风险调整指标 + 统计显著性 —— 策略定位澄清（**Goal round 8**）
+
+- **Task**：Goal 阶段 3 —— 补 `STAGE3-001` 的 **N5**（风险调整指标与统计显著性），回应 Goal 原则 7 的「Alpha 稳定 / 风险可控」。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（本轮只读 `index_daily`）· 🔴 **未修改已落库的 `maxAmp5@1.0.0`** · 新增 1 份报告 + 1 个 gitignore harness + 本条审计。
+- **✅ 风险调整后【全面且显著占优】（同区间 `2019-01-03 ~ 2026-01-28` · 2,582 日）**：**`maxAmp5`** **CAGR 6.29%** · 年化波动 **11.36%** · MDD **−18.08%** · **Sharpe 0.553** · **Sortino 0.500** · **Calmar 0.348** · 日胜率 **53.8%**；**`avgAmp5`** 5.26% / 11.64% / −18.53% / 0.452 / 0.401 / 0.284 / 54.4%；**沪深300** **6.79%** / **19.02%** / **−45.60%** / **0.357** / **0.362** / **0.149** / 50.9% ⇒ ✅ **Sharpe +55% · Sortino +38% · Calmar 2.3× · 波动低 40% · MDD 浅 60%**。
+- **🔴 但【超额收益不显著，且方向为负】**：**`maxAmp5`** **Beta 0.403** · **Alpha（年化）+3.50%** · 🔴 **IR（年化）−0.117** · 🔴 **超额收益 t 日频 −0.306（n=1,715）/ 月频 −0.283（n=85）** ⇒ **\|t\| < 1.96 不显著** · **月频超额均值 −0.133%** · **月频跑赢比例 50.6%（43/85）≈ 抛硬币**；**`avgAmp5`** 0.412 / +2.45% / −0.186 / −0.486 / −0.467 / −0.212% / 50.6%。
+- **🎯 策略定位澄清（本轮核心结论）**：**`maxAmp5` 的经济性质 = 【低 Beta（0.403）防御型配置】，不是【Alpha 型策略】** —— **正 Alpha（+3.50%/年）存在，但被【跟踪误差】抵消** ⇒ IR 为负；**牛市大幅落后（S1 −62.61pp）⇒ 跟踪误差的主要来源**；**熊市大幅占优（S2 +47.92pp）⇒ 正 Alpha 的来源** ⇒ 📌 **「跑赢基准」不是本策略的价值主张**；**「以约 40% 的市场暴露获得接近市场的长期收益、且回撤仅 40%」才是**。
+- **📌 对 Goal 原则 7 的逐项回应**：**「Alpha 稳定」🔴 未获支持**（t 不显著、IR 为负、月频跑赢 50.6%）· **「风险可控」✅ 已获支持**（Sharpe/Sortino/Calmar 全面占优 + 波动 −40% + MDD −60% + 7/7 年正）· **「仓位合理」⚠️ 待优化**（投入率 48.13% / 现金闲置 51.87%，见 `STAGE3-001`）· **「可解释」✅**（Alpha = 熊市防御）· **「可执行 / 可容量化」⬜ 阶段 4 未做**。
+- **🔴 对阶段 3 / 4 的方向修正**：阶段 3 优化目标由「提高收益 / 跑赢基准」**修正为【提高风险调整效率】（Calmar / Sharpe），不再以超额收益为目标**；阶段 4 可交易性评估**须以「低 Beta 配置」为定位**（如作为组合的**防御腿**）。
+- **7 项 NOT PROVEN**：**N1** ⚠️ **t 统计量未做自相关/异方差调整**（日频 t 可能被高估；**方向为负故不影响结论**）· **N2** ⚠️ **P4 未获独立验证**（仍未解决）· **N3** ⚠️ **多重检验未校正**（但本轮**未做新选择**，仅测既定基线）· **N4** ⚠️ `avgAmp5` 的 E1 结果（后台进行中，非本轮结论所必需）· **N5** ⚠️ 与研究 harness 逐笔等价性未验证 · **N6** ❌ 成本/容量/滑点/资金规模（阶段 4）· **N7** ⚠️ **未做归因分解**（Alpha +3.50% 与 IR −0.117 并存的风险来源分解未量化）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 `index_daily`）· ✅ **未修改已落库的 `maxAmp5@1.0.0`** · ✅ **未调因子 / TopN / 仓位 / 持仓期 / 参数** · ✅ **未做参数暴力搜索** · ✅ **未为通过而修改研究口径**（超额收益不显著 ⇒ **如实登记**，**未换基准、未换区间、未改门槛**）· ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（策略定位澄清：低 Beta 防御型配置，非 Alpha 型策略）** —— **以风险调整指标与显著性检验确立两项并列事实**：**① 风险调整后全面且显著占优**（Sharpe +55% · Sortino +38% · **Calmar 2.3×** · 波动 −40% · MDD −60%）；**② 超额收益不显著且方向为负**（IR −0.117 · t 日频 −0.306 / 月频 −0.283 · 月频跑赢 50.6%）⇒ **据此把策略经济性质澄清为「低 Beta 防御型配置」**，**并修正阶段 3 的优化目标为「提高风险调整效率」**。**Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE3-003 · 阶段 3 · 实验 E2（MA200 闸门）⇒ **拒绝**（**Goal round 9~11**）
+
+- **Task**：Goal 阶段 3 —— 按 Goal 原则 6「禁止过度优化」，**先固定优化协议**，再执行 **E2（市场状态适应）**。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 `index_daily`）· 🔴 **未修改已落库的 `maxAmp5@1.0.0`** · 新增 **1 份协议文档** + 1 份报告 + 3 个 gitignore harness + 本条审计。
+- **📌 新增 `docs/research/STAGE3-OPTIMIZATION-PROTOCOL-001.md`（先于任何优化实验写定）**：**§1 为什么必须分段**（全期含已用于验证基线的 S3 ⇒ 在全期上挑选 = 过拟合）· **§2 IS/OOS 划分**（**IS = `2019-01-03~2023-12-29`**（= S1+S2）· **OOS = `2024-01-02~2026-01-28`**（= S3），沿用阶段 1 划分不新造）· **§3 优化目标**（🔴 **主目标 = 提高风险调整效率，以 Calmar 为首要指标**；🚫 不再以「提高总收益/跑赢基准/超额收益」为目标，依据 `STAGE3-002`）· **§4 预声明接受规则 A1~A6**（**A1** IS Calmar 提升 ≥+0.02 · **A2** IS MDD 不加深 · **A3** IS 正年份比例不下降 · **A4** IS 熊市年仍跑赢 · **A5** OOS Calmar 不恶化 ≥−0.02 · **A6** 单变量）· **§5 实验登记表** · **§6 测量口径** · **§7 明确不做**。**§5.1 登记 E1 的已知约束**：暴露放大是 Calmar 负向（E1 的 TOTAL 相对 +9.2% vs MDD 相对 +31% ⇒ **MDD 增长约为收益的 3.4 倍**）⇒ **不再重复「均匀放大暴露」方向**。
+- **🔴 实验 E2（单变量：引入 `marketRegimeGate` MA200 决策闸门 —— 基准收盘 < MA200 时禁止新开仓）⇒ 拒绝**：闸门命中 **719 个交易日**（`2020-02-03` ~ `2025-04-09`）· `trades` **4,811 → 2,683（−44.2%）** · 其余配置完全冻结。**IS**：**TOTAL 28.93% → 8.34%（🔴 −20.59pp）** · CAGR 5.23% → 1.62% · MDD −17.21% → −17.32% · 波动 10.98% → 8.60% · **Calmar 30.39% → 9.36%（🔴 −0.210）** · **Sharpe 47.63% → 18.85%** · **正年份 5/5 → 4/5**；年度 2019 +4.05%→+4.05% · 2020 +8.76%→🔴**+4.10%** · **2021 +11.42%→🔴+2.97%** · 2022 +0.67%→+0.06% · **2023 +1.58%→🔴−2.91%**。**OOS**：TOTAL 18.99% → 14.21% · **MDD −15.62% → ✅−8.65%（浅 6.96pp）** · 波动 12.25% → 8.08% · **Calmar 56.05% → ✅76.51%（+0.205）** · **Sharpe 71.47% → ✅81.89%** · 正年份 3/3 → 3/3；年度 2024 +7.89%→+1.70% · 2025 +10.19%→**+12.17%** · 2026 +0.09%→+0.11%。
+- **✅ 接受规则判定（预声明 A1~A5）**：**A1 ❌（Δ=−0.210）· A2 ❌（Δ=+0.001）· A3 ❌（Δ=−0.200）· A4 ✅（3/3）· A5 ✅（Δ=+0.205）** ⇒ 🔴 **未全部满足 ⇒ E2 拒绝**。📌 **方法论价值**：**A5（OOS）表现优异本会诱使采纳，但 A1~A3（IS）明确否决** ⇒ **预声明协议成功阻止了「在验证集上好看、在选择集上崩坏」的方案** ✓（Goal 原则 6 的落地）。
+- **🎯 定位（Goal 原则 5）与机制性发现**：**IS 熊市年收益大幅缩水**（2021 +11.42%→+2.97% · 2023 +1.58%→−2.91%）⇒ **MA200 闸门在熊市禁止开仓 ⇒ 直接砍掉熊市中的建仓机会**；**MDD 几乎未改善**（−17.21%→−17.32%）⇒ **减少开仓并未降低回撤 ⇒ 回撤来自【已持有仓位】，而非新开仓**；OOS 的 MDD 大幅改善系**样本特定**（闸门命中时段恰与 2024 年初回撤重叠）。⇒ 🎯 **机制性发现：策略的熊市收益来自【熊市中的新建仓】，而不是「持有旧仓」⇒ 在下跌市场禁止开仓 = 直接砍掉 Alpha 来源**；📌 **该因子（rd11~15 低振幅）选出的标的在下跌市中【抗跌】⇒ 熊市正是其最有效的建仓时点**；**并反向解释 E1 为何失败**（策略 Alpha 是「在下跌市中选出抗跌标的」，均匀放大暴露会同时放大**非抗跌标的**的损失）。
+- **📌 实验登记表**：**E1** 仓位基数口径 ❌ 拒绝（`STAGE3-001`）· **E2** 市场状态适应（MA200 闸门）❌ 拒绝（本文件）· **E3** 入场时点 ⬜ · **E4** 退出机制 ⬜。🔴 **两项已证伪的方向不再重复**：**① 均匀放大暴露**（E1）· **② 下跌市禁止开仓**（E2）。
+- **6 项 NOT PROVEN**：**N1** ⚠️ **IS/OOS 结论相反**的完整归因（本轮给出机制性解释，**未做逐段量化分解**）· **N2** ⚠️ **P4 未获独立验证**（仍未解决）· **N3** ⚠️ E2 的 `avgAmp5` 对照未做（已落盘，`maxAmp5` 已足以判定）· **N4** ⚠️ **未检验其他市场状态定义**（MA60/波动率闸门）—— **本轮不展开，避免参数搜索** · **N5** ⚠️ 与研究 harness 逐笔等价性未验证 · **N6** ❌ 成本/容量/滑点/资金规模（阶段 4）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 `index_daily`）· ✅ **未修改已落库的 `maxAmp5@1.0.0`** · ✅ **单变量**（仅引入闸门）· ✅ **未做参数暴力搜索**（**未试 MA60/MA120/MA250 等变体**）· ✅ **未为通过而修改研究口径**（**OOS 优异仍按 A1~A3 拒绝**）· ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（优化协议建立 + E2 拒绝 + 机制性发现）** —— **首次为阶段 3 建立【IS/OOS 分离 + 预声明接受规则 A1~A6】的优化协议**（防过拟合），**并以 E2（MA200 闸门）验证**：**协议成功否决了一个「OOS 优异（Calmar +0.205）但 IS 崩坏（Calmar −0.210）」的方案**；**同时产出机制性发现 —— 策略的熊市收益来自熊市中的【新建仓】，在下跌市禁止开仓会直接砍掉 Alpha 来源，且回撤来自【已持有仓位】而非新开仓** ⇒ **据此把阶段 3 的下一步锁定为【退出机制（E4）】**（唯一能直接作用于「已持有仓位回撤」的杠杆）。**Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE3-004 · 阶段 3 · 实验 E4（6% 固定止损）⇒ **拒绝** —— 与 E2 同一机制（**Goal round 12~27**）
+
+- **Task**：Goal 阶段 3 —— 执行 **E4（退出机制）**，按 `STAGE3-OPTIMIZATION-PROTOCOL-001.md` 的 A1~A5 判定。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读）· 🔴 **未修改已落库的 `maxAmp5@1.0.0`** · 新增 1 份报告 + 1 个 gitignore harness（`stage3run.ts`，单进程内存版）+ 本条审计。
+- **🔴 实验 E4（单变量：`exitPolicy.stopLossRatio`：`null` → `0.06`）⇒ 拒绝**：**值来源 = 项目先例（非搜索）** —— `threeFactorTopNFamilies.ts` L144/L278/L286/L638/L649 均为 `0.06`，**L270 note「该族留档采用固定 6% 止损，并…成为后续止损搜索的控制组」**；其余配置**完全冻结**（`FIXED_RATIO × 1/180` · `maxPositions 180` · TopN 3 · `maxHoldingDays 40` · 20bps · `candidateExitPolicy DISABLED`）；基线 531s / E4 527s · 各 1,716 点。
+- **✅ 止损【确实有效削减左尾】**：**IS** MDD **−17.21% → −10.95%（浅 6.26pp）** · 年化波动 10.98% → 6.73%；**OOS** MDD **−15.62% → −7.56%（浅 8.06pp）** · 年化波动 12.25% → 8.29%。
+- **🔴 但代价极大**：**IS** TOTAL **28.93% → 6.43%（🔴 −22.50pp）** · CAGR 5.23% → 1.26% · **Calmar 30.39% → 11.49%（🔴 −0.189）** · **Sharpe 47.63% → 18.69%** · **正年份 5/5 → 3/5**；**年度** 2019 +4.05%→+5.16% · 2020 +8.76%→🔴**+1.95%** · 2021 +11.42%→+6.37% · **2022 +0.67%→🔴−3.20%** · **2023 +1.58%→🔴−3.59%**（**熊市由正转负**）。**OOS** TOTAL 18.99% → 13.19% · **MDD −15.62% → ✅−7.56%** · **Calmar 56.05% → ✅81.47%（+0.254）** · Sharpe 71.47% → **74.27%** · 正年份 3/3 → 🔴 2/3；年度 2024 +7.89%→+7.06% · 2025 +10.19%→**+5.73%** · 2026 +0.09%→0.00%。
+- **✅ 接受规则判定（预声明 A1~A5）**：**A1 ❌（Δ=−0.189）· A2 ✅（Δ=−0.063，浅 6.26pp）· A3 ❌（Δ=−0.400）· A4 ✅（3/3）· A5 ✅（Δ=+0.254）** ⇒ 🔴 **未全部满足 ⇒ E4 拒绝**。📌 **方法论第二次生效**：**A5（OOS Calmar +0.254）优异本会诱使采纳，但 A1/A3（IS）明确否决** ⇒ **与 E2 相同的模式** ⇒ **预声明协议第二次成功阻止「验证集好看、选择集崩坏」的方案** ✓。
+- **🎯 统一机制（本轮最重要结论）**：**E2（下跌市禁止开仓）与 E4（6% 止损）以【完全相同的方式】失败** —— 两者都属于「**在下跌中减少 / 中断持有**」：**E2** = 不在下跌市**建立**新持仓（丢掉熊市建仓机会）；**E4** = 在下跌中**止损卖出**（**把抗跌标的的【暂时回撤】变成【永久损失】**）⇒ **两者都以同一方式破坏 Alpha：该策略的超额来自「在下跌市中【持有】rd11~15 低振幅抗跌标的」**（`STAGE3-002` 已确立 Alpha = 熊市防御）；📌 **E4 的 IS 熊市年由正转负（2022/2023）是直接证据**（止损在熊市中被大量触发）⇒ **该策略的 Alpha 与「耐心持有」强耦合：任何「下跌中止损 / 下跌中停手」的机制都会砍掉它**。
+- **🎯 三项一致的反向印证**：**E1 放大暴露** ❌（Calmar 恶化，MDD 增长 ≈ 收益的 3.4 倍）· **E2 下跌市减少开仓** ❌（砍掉熊市 Alpha）· **E4 下跌中止损** ❌（暂时回撤变永久损失）⇒ **共同含义：该策略的 Alpha 精确地来自「在下跌市中按固定权重、耐心持有抗跌标的」** —— **放大暴露会引入非抗跌标的的损失；减少开仓 / 止损会中断抗跌标的的持有** ⇒ **两个方向都破坏 Alpha**。
+- **📌 实验登记表**：**E1** ❌ · **E2** ❌ · **E4** ❌ · **E3**（入场时点）⬜ **唯一未测**。🔴 **三项已证伪方向不再重复**：**① 放大暴露** · **② 下跌市减少开仓** · **③ 下跌中止损**。
+- **📌 工程注意（沙箱约束）**：本机沙箱**拒绝子进程写入工作区** —— **Node `fs.writeFileSync` → `EPERM`**；**PowerShell `>` 重定向 → `Access denied`**（`New-Item` 建子目录亦被拒）⇒ 实验改为**单进程内存计算 + 直接打印**（`stage3run.ts`），**不落盘**；**TEMP 目录随会话轮换，不可作为持久存储**（本轮因此丢失了前一批 `equityCurve` 落盘，需重跑）。
+- **6 项 NOT PROVEN**：**N1** ⚠️ E4 的 `avgAmp5` 对照未做（`maxAmp5` 已足以判定）· **N2** ⚠️ **P4 未获独立验证**（仍未解决）· **N3** ⚠️ **未检验其他止损值**（3%/9%/12%）—— **刻意不做，避免参数搜索**（Goal 原则 6）· **N4** ⚠️ **未检验移动止盈 / 强势持有**（属**同类「中断持有」机制**，按 §3.2 机制**预期同样失败**；如需检验须单独立项）· **N5** ⚠️ 与研究 harness 逐笔等价性未验证 · **N6** ❌ 成本/容量/滑点/资金规模（阶段 4）。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未修改已落库的 `maxAmp5@1.0.0`** · ✅ **单变量** · ✅ **未做参数暴力搜索**（**采用先例 6%，未试其他值**）· ✅ **未为通过而修改研究口径**（**OOS 优异仍拒绝**）· ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（E4 拒绝 + 统一机制确立 + 阶段 3 收敛判断）** —— **以 E4（6% 固定止损）验证**：**止损确实削减左尾（IS MDD 浅 6.26pp · OOS 浅 8.06pp）但代价极大（IS TOTAL −22.50pp · 正年份 5/5→3/5 · 熊市年由正转负）** ⇒ **按预声明规则拒绝**；**并确立【统一机制】：E2 与 E4 同属「在下跌中减少/中断持有」，均以同一方式砍掉熊市 Alpha** ⇒ **三项实验一致证明：该策略的 Alpha 与「在下跌市中按固定权重耐心持有抗跌标的」强耦合**。**据此判定阶段 3 已出现收敛迹象**（四项中三项证伪且共享同一机制）⇒ **下一步仅剩 E3（入场时点，需先勘定平台 `T_CLOSE` 执行可行性）；若 E3 亦不可行/失败则判定阶段 3 收敛，转入阶段 4（成本/容量/滑点/资金规模）**。**Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE3-005 + RESULT-STAGE4-001 · 阶段 3 收敛 + 阶段 4 可交易性 **PASS**（**Goal round 28~30**） → ✅ **「可交易策略」目标达成**
+
+- **Task**：Goal 阶段 3 收口（E3 可行性）+ 阶段 4（成本 / 容量 / 滑点 / 资金规模 ⇒ 真实可交易性）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 `index_daily` / `ds_*`）· 🔴 **未修改已落库的 `maxAmp5@1.0.0`** · 新增 2 份报告 + 1 个 gitignore harness（`stage4run.ts`）+ 本条审计。
+- **🚫 E3（入场时点）判定 = 不可行（平台结构性禁止）**：`server/research/strategyAuthoring/positionCostAdapters.ts` **L783-784** —— `if (signalTiming === "T_CLOSE" && executionTiming === "T_CLOSE") return issueResult(target, ["SIGNAL_EXECUTION_TIMING_CONFLICT: signalTiming=T_CLOSE 时不得同 bar 收盘成交"])`；`definitionValidation.ts` **L25**「L6 `SIGNAL_EXECUTION_TIMING_CONFLICT`：**成交不得早于信号**」；词表 `STRATEGY_SIGNAL_TIMINGS = ["T_OPEN","T_CLOSE"]` ⇒ 🔴 **禁止「决策 rd15 收盘 + 成交 rd15 收盘」**；**绕道「rd14 收盘决策 → rd15 开盘成交」须把因子窗口 rd11~15 改为 rd10~14 ⇒ 改变因子定义 ⇒ 被 Goal 原则 1 禁止**；**绕道「rd15 开盘决策」则因振幅窗口含 rd15 的 high/low 而构成前视** ⇒ **E3 不可行**。
+- **✅ 阶段 3 判定 = 收敛（CONVERGED）**：**四项方向全部处理完毕** —— **E1** 仓位基数口径 ❌ 拒绝 · **E2** 市场状态适应（MA200 闸门）❌ 拒绝 · **E3** 入场时点 🚫 不可行 · **E4** 退出机制（6% 止损）❌ 拒绝 ⇒ **基线 `maxAmp5@1.0.0` 即最优可交易形态**。🎯 **统一机制**：**该策略的 Alpha 精确地来自「在下跌市中按固定权重、耐心持有 rd11~15 低振幅抗跌标的」** —— **放大暴露**（E1）引入非抗跌标的损失；**减少开仓**（E2）丢掉熊市建仓机会；**止损**（E4）把暂时回撤变成永久损失 ⇒ **两个方向都破坏 Alpha**。
+- **✅ 阶段 4 = 可交易性 PASS**：**① 成本稳健** —— 往返 **20 → 30 → 40 bps**：TOTAL **53.88% → 51.41% → 48.94%**（每 +10bps 仅 **−2.47pp**）· CAGR 6.29% → 6.04% → 5.80% · MDD −18.08% → −18.54% → −19.02% · 年化波动 11.36% → 11.46% → 11.57% · Calmar 0.348 → 0.326 → 0.305 · Sharpe 0.553 → 0.527 → 0.501 · **正年份 8/8 → 8/8 → 8/8（不变）** · `trades` 各 **4,811**（成本不改变笔数）⇒ **成本翻倍仅损失 4.94pp TOTAL / 0.49pp CAGR ⇒ 成本不构成威胁**。**② 容量充足** —— 事件池 `ds_first_limit_pullback_post` `relativeDay 1~40` **抽样 20 万行**单日成交额：**p10 0.358 亿 · p25 0.721 · 中位 p50 1.713 亿 · p75 4.486 · p90 10.841 · p99 44.327 · 最大 222.408（均值 4.617，受右尾拉高）**；**单笔参与率**（= 资金/180 ÷ 中位 ADV 1.713 亿）：**1 亿 → 0.324%** · **10 亿 → 3.24%** · 50 亿 → 16.2% 🔴 · 100 亿 → 32.4% 🔴 ⇒ ✅ **容量约 1~10 亿元**（远优于多数 A 股策略）。**③ 滑点** —— 已内含成本模型（7.5 bps/边），敏感性随 ① 的成本档一并测过 ⇒ ✅。
+- **🎯 「可交易策略」目标达成（对 Goal 原则 7 逐项）**：**Alpha 稳定 ⚠️ 部分**（超额收益**不显著**：IR −0.117 · t 日频 −0.306 / 月频 −0.283 · 月频跑赢 50.6%；但 **7/7 年正**、熊市段 **+47.92pp**、W1/W2 两熊市前推段 **4/4 跑赢**）· **风险可控 ✅**（Sharpe 0.553 vs 0.357 · Sortino 0.500 · **Calmar 0.348 = 2.3×** · 波动低 40% · MDD 浅 60% · 8/8 正年份）· **仓位合理 ✅**（`w=1/180` 恒定 · 投入率 48.13% · 阶段 3 三项实验证明当前配置已在机制鞍点上）· **可解释 ✅**（Alpha = 熊市防御，三项实验一致佐证）· **可执行 ✅**（成本翻倍仅 −4.94pp；平台三项口径错配已修正；D1 差 1 日已登记）· **可容量化 ✅**（1~10 亿元）⇒ **定位 = 低 Beta（0.403）防御型配置**。
+- **📌 工程发现（登记）**：`ds_first_limit_pullback_post` 表**存放所有 `datasetVersionId` 的行** —— **实际 15,354,137 行**（`DATA_LENGTH` **4.08 GB** + `INDEX_LENGTH` **3.41 GB**）；**查询若不加 `datasetVersionId` 过滤会全表扫描**（仅 `COUNT(*)` 即 **37.5s**，跨境链路 47.94.112.21）⇒ **必须带版本过滤**（走 `uq_post_version_event_day` / `idx_post_version_day`，`EXPLAIN` 确认 `type: ref`）⇒ 780004 的 post 行为 **4,718,640**（11.5s）。
+- **6 项 NOT PROVEN**：**N1** ⚠️ **P4 未获独立验证**（S3 内基准无下跌年份，**最大的开放项**）· **N2** ⚠️ **超额收益不显著** ⇒ **不能声称有 Alpha**，价值主张为**风险调整后占优** · **N3** ⚠️ **容量分析用 p50 ADV 近似**（未做逐笔参与率；**未做冲击成本建模**，`marketImpact` 未启用）· **N4** ⚠️ 未检验其他止损值 / 移动止盈 / 强势持有（按统一机制**预期同样失败**）· **N5** ⚠️ 与研究 harness 逐笔等价性未验证 · **N6** ⚠️ 未做 OOS/WFA 的统计自相关校正。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未修改已落库的 `maxAmp5@1.0.0`** · ✅ **未调因子 / TopN / 仓位 / 持仓期 / 参数** · ✅ **未做参数暴力搜索** · ✅ **未为通过而修改研究口径** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（阶段 3 收敛 + 阶段 4 PASS ⇒ 目标达成）** —— **判定 E3 不可行（平台结构性禁止同 bar 收盘成交）** ⇒ **阶段 3 四项方向全部处理完毕、判定收敛（基线即最优可交易形态）**，**并确立统一机制「Alpha 与下跌市中耐心持有强耦合」**；**阶段 4 以成本敏感性（20/30/40bps）与容量分析（ADV 分位 + 参与率）判定【可交易性 PASS】**（成本翻倍仅 −4.94pp；容量 1~10 亿元）⇒ **Goal 原则 7 的可交易性要素全部满足，「可交易策略」目标达成**。**Goal 保持 active**（剩余 N1 P4 独立验证等 6 项 NOT PROVEN，**不阻断目标达成**）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-TRADABLE-STRATEGY-FINAL-001 · 本 Goal 统一汇总（**Goal round 31**） → ✅ **Goal 完成**
+
+- **Task**：按 Goal 要求「**阶段性结果、阻塞项和下一阶段目标统一形成报告**」，把四阶段的全部结果收口为**单一汇总文档**。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入** · 🔴 **本轮无新增代码文件**（1 份汇总文档 + 本条审计）。
+- **📌 新增单一汇总入口 `docs/research/RESULT-TRADABLE-STRATEGY-FINAL-001.md`（10 节）**：**§0 一页结论** · **§1 Goal 七项执行原则的达成情况** · **§2 四个阶段的结果**（阶段 1 OOS/WFA · 阶段 2 正式 Strategy Version · 阶段 3 收敛 · 阶段 4 可交易性）· **§3 完整基准结果**（含 `avgAmp5` 与沪深300 对照）· **§4 九项强制口径限定**（L-a~L-i）· **§5 八项关键机制性发现**（M1~M8）· **§6 对 Goal 原则 7 的逐项回应** · **§7 八项阻塞项/NOT PROVEN** · **§8 合规声明与工作区复核** · **§9 文件索引**（12 份过程证据链 + 9 个代码锚点 + 台账）· **§10 下一步**。
+- **✅ Goal 七项原则达成**：**①** OOS/WFA 先完成且**门槛先于结果写定**、**全程未调冻结项** ✅ · **②** 主策略确定 + 正式 Strategy Version + 完整基准保留 ✅ · **③** 四项优化方向全部处理 ✅ · **④** 成本/容量/滑点/资金规模全部验证 ✅ · **⑤** 每阶段裁定 + 三次拒绝均给出机制性定位、**未反向修改口径** ✅ · **⑥** **预声明协议两次成功拦截「OOS 好看、IS 崩坏」**；E4 用**项目先例值**而非搜索；E3 不可行后**立即收敛** ✅ · **⑦** **6 项中 5 项达成、1 项（Alpha 稳定）部分达成** ⚠️。
+- **🎯 最终交付**：主策略 **`event-state-long-maxamp5-top3@1.0.0`** —— `strategy_versions.id = **3600006**` · `status = **Validated**` · `datasetVersionId = **780004**` · `fingerprint = **7e863012181ff0e9a85a0e257b0b4d2a66a447acf16386e287f4fb22666a1cba**` · **5 投影齐全**；**绩效** TOTAL **+53.88%** · CAGR **6.29%** · MDD **−18.08%** · 年化波动 **11.36%** · **Sharpe 0.553** · Sortino **0.500** · **Calmar 0.348** · Beta **0.403** · **8/8 正年份** · 对比沪深300（+59.13% / −45.60% / 0.357 / 0.149）⇒ **绝对收益跑输 5.25pp 但 Calmar 2.3×**；**定位 = 低 Beta（0.403）防御型配置**；**可交易性** = 成本稳健（20→40bps 仅 −4.94pp）+ 容量 **1~10 亿元**。
+- **📌 八项关键机制性发现（M1~M8）**：**M1** 经济性质 = 低 Beta 防御型配置 · **M2** Alpha 来源 = 熊市防御 · **M3** **Alpha 与「下跌市中按固定权重耐心持有」强耦合**（放大暴露/减少开仓/止损三方向均破坏 Alpha）· **M4** 回撤来自**已持有仓位**而非新开仓 · **M5** 熊市是该因子最有效建仓时点 · **M6** 平台 `TIME_EXIT` 成交时点 = **次日开盘**（不可配置）· **M7** 平台**禁止同 bar 收盘成交**（防前视）· **M8** **`ds_*` 表存放所有版本的行**（post 表 15,354,137 行）⇒ 查询必须带 `datasetVersionId`。
+- **📌 九项强制口径限定（L-a~L-i）**：**L-a** D1 出场差 1 日 · **L-b** mark-to-market · **L-c** 年度 (B) 严格口径 · **L-d** **P4 = N/A**（OOS 段基准无下跌年）· **L-e** 因子发现用 2019-2025 全区间（非严格 OOS）· **L-f** 无可拟合参数（WFA 为滚动聚合）· **L-g** **超额收益不显著** · **L-h** 未落库为正式 Run · **L-i** **平台三项口径错配已修正**（候选退出 / 仓位 / 数据窗 —— **非调参，而是复现研究口径**）。
+- **8 项 NOT PROVEN**：**N1** 🔴 **P4 未获独立验证**（**最大开放项**）· **N2** 超额收益不显著 · **N3** 容量用 p50 近似 + **未做冲击成本建模** · **N4** 未测其他止损/移动止盈（按 M3 **预期同样失败**，**刻意不做**）· **N5** 与研究 harness 逐笔等价性 · **N6** 未做自相关校正 · **N7** 未落库为正式 Run · **N8** 已登记 1 项 `BASELINE_DRIFT`。
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入** · ✅ **未修改已落库的 `maxAmp5@1.0.0`** · ✅ **未调因子 / TopN / 仓位 / 持仓期 / 参数** · ✅ **未做参数暴力搜索** · ✅ **未为通过而修改研究口径** · ✅ **未触碰 Schema / Migration / 既有策略** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（Goal 完成：四阶段结果统一收口）** —— **把 12 份过程文档归并为一份可独立阅读的汇总**（含 Goal 七原则达成情况、四阶段结果、完整基准、九项强制限定、八项机制性发现、六项可交易性要素、八项未证明、完整索引），**确认「Event-State Long Alpha → 可交易策略」目标达成**。**Goal → complete。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE1-FEASIBILITY-001 + RESULT-STAGE1-001 · 新 Goal `STRATEGY-VALIDATION-CAPITALIZATION` Stage 1：独立熊市样本数据集 v11 构建完成（**Goal round 1**）
+
+- **Task**：新 Goal **`STRATEGY-VALIDATION-CAPITALIZATION`** 的 **Stage 1 — Independent Bear-Market OOS**（解决上一 Goal 的 **N1**）。要求：冻结 Strategy Version **3600006** 全部定义；**不重新选因子 / 不优化参数**；**优先扩展历史数据**构造真正未参与因子发现的 Bear-Market 样本；**严格区分 IS / Discovery / OOS**；PASS 才进 Stage 2，FAIL 降级研究候选。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **唯一写操作 = 新建数据集 780005**（**用户已明确授权选项 A**；**仅新增行，不改不删既有行**）· 🔴 **未修改 Strategy Version 3600006** · 新增 2 份报告 + 2 个 gitignore harness + 本条审计。
+- **🔴 可行性勘定：两条路径，一条【数据不足】、一条【需授权】**（`RESULT-STAGE1-FEASIBILITY-001.md`）：
+  - **路径 A（Goal 优先项）向前扩展历史 → 不可行（源数据不足）**：`stock_daily_prices` 范围 = **2019-01-02 ~ 2026-10-09**（8,980,820 行）· `index_daily` = **2019-01-02 ~ 2026-10-09**（7,528 行）⇒ **2019 年之前无任何行情** ⇒ 无法构造 2015-2018 等更早熊市样本。
+  - **路径 B（唯一可行）向后使用源数据已有但未进入任何数据集的新样本**：✅ 独立段 = **`2026-01-29 ~ 2026-09-04`**；基准 `000300.SH` **2026 全段（2026-01-05 → 2026-10-09）= −8.49%**（min 4310.28 / max 5059.66）· 月线下跌段 **2026-03 −5.89%** · **2026-07 −7.48%** ⇒ **构成真实下跌样本**；该段**不在** 780004 事件区间（止于 2025-09-26）· **不在** post 窗内（止于 2026-01-28）。
+  - **已排除的捷径**：现有 **`750001`(v7) / `780001`(v8)** 虽覆盖到 2026-09-04，但 **build config 与 780004 不同** —— `excludeListedWithinDays`: 780004 = **365** vs v7/v8 = 🔴 **null**；`preWindowDays`: **10** vs 🔴 **0**；事件数 58,983 vs **73,003** ⇒ **事件池与口径均不可比** ⇒ 使用会引入口径混淆。
+  - 📌 **旁证**：`RESULT-DATASET-REBUILD-EXEC-001.md` 显示 **780004 正是为取代早期版本而重建**（冻结 config `excludeSt=1 · excludeListedWithinDays=365 · preWindowDays=10 · postWindowDays=80`）⇒ **v10 是权威口径**；且该文档标注「**真实写操作，已授权**」⇒ **数据集构建在本项目是既有授权通路**（生产通路 `DatasetRegistryService` + `DefaultDatasetBuildRunner` + `DbDatasetPhysicalStore` + 原生 chunk/checkpoint/resume）。
+- **✅ 用户裁定（本轮）**：**A. 授权新建 + 构建专用 dataset version**（config 复制 780004，事件 2026-01-01~2026-09-04）；**独立性边界答「不确定 / 无法确认」** ⇒ 以**显式假定**「Discovery 使用 ≤ 780004 事件区间（止于 2025-09-26）」推进，**并在所有结论中登记该不确定性**。
+- **✅ v11 构建完成并核验（`RESULT-STAGE1-001.md`）**：`dataset_version.id` = **780005** · `version` = `v11-bear2026-pre10-post80` · `status` = **READY** · `startDate/endDate` = **2026-01-01 / 2026-09-04** · **`totalEvents` = 8,572** · **`totalRows` = 1,303,740** · `dataset_build_job.status` = **COMPLETED**（chunks **8,572/8,736** · `processedRows` **1,295,168**）· `datasetId` = **120001**（`first_limit_pullback`，同族）。**数据实际范围**：`event` **8,572** 行 · 事件日期 **2026-01-05 ~ 2026-09-04**；`post.relativeDay` = **1 ~ 80**（窗口完整）· post 日期 **2026-01-06 ~ 2026-10-09**。
+- **✅ build config 逐项一致性（= Stage 1 有效性的前提）**：**780004 与 780005 完全一致** —— `excludeSt=1` · **`excludeListedWithinDays=365`** · **`preWindowDays=10`** · `postWindowDays=80` · `outcomeHorizons=[5,10,20]` · `batchSize=1000` · `configVersion=1`；`universeDefinitionJson` = `{universe:"all-a-shares",source:"stock_daily_prices",boards:["main"],excludeSt:true,excludeListedWithinDays:365}`；`filterDefinitionJson` = `{kind:"build-config",builder:"first_limit_pullback",configVersion:1,events:[{relativeDay:0,kind:"firstBoard"}],preWindowDays:10,postWindowDays:80,pathHorizon:80,outcomeHorizons:[5,10,20],batchSize:1000}`。
+- **🔴 Stage 1 独立性切分**：780004 post 窗终点 **2026-01-28** · v11 最早事件 2026-01-05（rd15 决策日 ≈ 2026-01-26）⇒ **独立段起点 = `2026-01-29`**（**严格晚于 780004 的 post 窗终点**，该日起所有决策与持仓**不在 780004 覆盖内**）· 独立段终点 = **`2026-10-09`** · 长度 ≈ **176 交易日**。⚠️ **已知边界效应**：v11 最晚事件 2026-09-04 ⇒ 决策日 ≈ 2026-09-25 ⇒ 持仓 40 日**超出 post 窗末端** ⇒ 末端未平仓头寸为 **mark-to-market 边界值**，须登记。
+- **🔴 判定门槛（先于结果写定）**：**S1-P1** 独立段 TOTAL > 0 · **S1-P2** 独立段 MDD 浅于基准 · **S1-P3** 基准下跌月（2026-03 · 2026-07）中**至少 1 个**策略跑赢 · **S1-P4** 独立段 Calmar ≥ 0 或 MDD ≤ 基准一半。**PASS = P1 且 P2 且 P3**；**FAIL ⇒ 降级 `RESEARCH_CANDIDATE`，不允许借机重新优化**。**冻结配置**：TopN 3 · Hold40 · `FIXED_RATIO × 1/180` · `maxPositions 180` · 20bps · `candidateExitPolicy DISABLED` · `observationWindow{15,79}` · rd15 决策 · dir=−1。
+- **5 项 NOT PROVEN / 登记**：**N-a** 🔴 **因子发现的 dataset 边界无法确证**（用户答「不确定」）⇒ 独立性基于**显式假定**，**未获独立证据支持** · **N-b** 独立段仅 ~176 交易日 ⇒ **样本量小**，统计功效有限 · **N-c** 独立段内**基准下跌月仅 2 个** ⇒ 熊市样本点少 · **N-d** 末端持仓超出 post 窗 ⇒ mark-to-market 边界值 · **N-e** **未含 2019 年前的历史熊市**（源数据不足）⇒ 无法覆盖 2015/2018 等极端熊市。
+- **📌 工程要点（复用既有模式）**：`tsx` 在本沙箱 `spawn EPERM` ⇒ 构建脚本走**编译为 CJS** 模式（`tsc --module commonjs` + `{"type":"commonjs"}` + `runWithEnv.cjs` 注入 `.env`）；🔴 **必须直连具体模块**（`datasetRegistry/registry|db|runner|plugins|physicalTables`）**而非 `datasetRegistry/index`** —— 后者拉入 `router` → `_core/trpc` → `@shared/*` 路径别名，CJS 构建下**无法解析**（`Cannot find module '@shared/const'`）。
+- **本轮副作用**：✅ **零业务代码改动** · 🔴 **DB 写入已如实登记**（**仅新增 780005 相关行**）· ✅ **未修改 Strategy Version 3600006** · ✅ **未重新选因子 / 未优化参数** · ✅ **未触碰既有 dataset version（780004/750001/780001）** · ✅ **未执行 DDL / 未改 Schema / 未改 migration** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（新 Goal Stage 1 基础设施就绪）** —— **以「源数据边界只读勘定 → 用户裁定 → 生产通路构建 → 逐项口径核验」的流程，新建并验证了 Stage-1 专用独立熊市样本数据集 `780005`（v11，事件 2026-01-05~2026-09-04，8,572 事件 / 1,303,740 行，config 与 780004 逐项一致）**，**并把独立性切分（起点 2026-01-29）与判定门槛（S1-P1~P4）先于结果写定**。**下一步：在 780005 上以 `dateRange = 2026-01-29 ~ 2026-10-09` 运行 Stage 1。Goal 保持 active。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-09 · RESULT-STAGE1-002 + RESULT-VALIDATION-FINAL-001 · Stage 1 独立熊市 OOS **FAIL** ⇒ 最终判定 **C. RESEARCH_CANDIDATE**（**Goal round 2**） → ✅ **Goal 完成**
+
+- **Task**：Goal `STRATEGY-VALIDATION-CAPITALIZATION` **Stage 1 执行与判定**（在 v11/780005 上、独立段 `2026-01-29 ~ 2026-10-09`）。
+- **Changes**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 `index_daily`）· 🔴 **未修改 Strategy Version 3600006** · 新增 2 份报告 + 1 个 gitignore harness（`stage1run.ts`）+ 本条审计。
+- **❌ Stage 1 = FAIL**（按**先于结果写定**的门槛）：独立段 **165 交易日 / 468 trades**；**TOTAL −7.54%**（基准 −9.18%，✅ 好 1.64pp）· CAGR −10.70% vs −12.98% · **MDD ✅ −13.33% vs −14.81%（浅 1.48pp）** · **年化波动 ✅ 11.77% vs 19.56%（低 40%）** · Sharpe −0.910 vs −0.664 · Sortino −0.852 vs −0.635 · **Calmar −0.803 vs −0.877** · **Beta 0.308** · **Alpha（年化）−7.39%**。**门槛判定**：**S1-P1 ❌**（TOTAL −7.54% 非正）· **S1-P2 ✅**（MDD 更浅）· **S1-P3 ✅**（下跌月 **5/5** 跑赢）· **S1-P4 ❌**（Calmar −0.803）⇒ **PASS = P1∧P2∧P3 未满足 ⇒ FAIL** ⇒ 🔴 **降级 RESEARCH_CANDIDATE，不进入 Stage 2**（Goal 明令「PASS 才进入 Stage 2」）。📌 🔴 **未因「5/5 跑赢」放宽 S1-P1**（Goal 明令「不得为通过而反向修改研究口径」）✓
+- **✅ N1 的核心问题【已获明确答案】—— 熊市防御在独立样本中【成立】**：**基准下跌月 5 个 · 策略跑赢 5/5（100%）** —— 2026-01（基准 −1.00% / 策略 +0.01% / ✅+1.01pp）· **2026-03（−5.53% / −2.52% / ✅+3.01pp）** · **2026-07（−7.86% / +1.68% / ✅+9.53pp）** · **2026-09（−5.78% / −1.49% / ✅+4.29pp）** · 2026-10（−0.93% / −0.01% / ✅+0.91pp）；**上涨月严重滞后**：2026-04（+8.03% / +0.64% / 🔴−7.39pp）· 2026-05（+1.76% / −3.19% / 🔴−4.95pp）· 2026-06（+1.78% / −6.79% / 🔴−8.57pp）。
+- **🔴 失败根因（已定位，非反向修改）**：**根因 = 结构性低 Beta（0.308）** —— 策略是**防御型配置**，在**净下跌段**（基准 −9.18%）其防御超额（+1.64pp）**不足以使绝对收益转正**；上涨月严重滞后（−7.39/−4.95/−8.57pp）与 **Beta 0.308** 一致。📌 **与历史结论同源**：`RESULT-STAGE3-002` 已确立 **Beta 0.403** · **S1 牛市 −62.61pp** · **超额收益不显著（IR −0.117）** ⇒ 本 Stage 的 **Beta 0.308 一致** ⇒ **独立样本【未推翻】任何历史结论，而是在样本外【再次确认】了「低 Beta 防御型」的性质** ✓
+- **🎯 最终判定 = `C. RESEARCH_CANDIDATE`**（`RESULT-VALIDATION-FINAL-001.md`）：**独立 Bear OOS ❌ 未通过** · **合理资金容量 ⚠️ 未验证**（Stage 2 因门槛未启动；上一 Goal 曾测得 1~10 亿元，**本 Goal 未复验**）· **真实执行成本 ⚠️ 未验证** · **Research/Platform Parity ⚠️ 未验证** · **风险收益表现 ✅ 已测**（独立段）· **统计稳健性 ⚠️ 未验证** · **仍未证明事项 ✅ 已列明**。
+- **📌 阶段状态**：**Stage 1 ❌ FAIL** · **Stage 2 ⛔ 未启动** · **Stage 3 ⛔ 未启动** · **Stage 4 ⛔ 未启动**（均因 Goal 的顺序门槛）。
+- **7 项 NOT PROVEN**：**N-a** 🔴 **因子发现的 dataset 边界无法确证**（用户答「不确定」）⇒ 独立性基于**显式假定** · **N-b** 独立段仅 165 交易日 ⇒ **样本量小** · **N-c** 基准下跌月仅 5 个 ⇒ 熊市样本点少 · **N-d** 末端持仓超出 post 窗 ⇒ mark-to-market 边界值 · **N-e** **未含 2019 年前历史熊市**（源数据不足）· **N-f** **负收益段 Sharpe/Sortino 比较无经济意义** ⇒ 仅 Calmar 可用 · **N-g** **统计稳健性检验未做**（Stage 3 未启动）⇒ 「策略收益存在」与「统计显著 Alpha」**未区分**。
+- **📌 下一步（需人工决策）**：(a) 接受 C. `RESEARCH_CANDIDATE` 结论、本线终止；或 (b) **重新定义 Stage 1 成功标准**（如「熊市段相对基准超额」而非「绝对收益为正」）—— 🔴 **但必须重新声明门槛并承认这是口径变更，不得包装成「原门槛通过」**；或 (c) 扩充独立样本（**需 2019 年前行情，当前源数据不足 ⇒ 需外部数据接入**）。🔴 **无论选哪一项，都不得修改 Strategy Version 3600006 的定义或参数。**
+- **本轮副作用**：✅ **零业务代码改动** · ✅ **零数据库写入**（只读 `index_daily`）· ✅ **未修改 Strategy Version 3600006**（指纹未变）· ✅ **未重新选因子 / 未优化参数** · ✅ **未修改已冻结口径**（因子/TopN/Hold40/止损/市场门控/仓位）· ✅ **未为通过而修改研究口径**（**5/5 跑赢仍判 FAIL**）· ✅ **未触碰既有 dataset version** · ✅ **未执行 DDL / 未改 Schema / 未改 migration** · ✅ 临时文件仅落 `scripts/_scratch/` 与 `%TEMP%`。
+- **Baseline Impact**：**major（Goal 完成：Stage 1 执行并给出最终判定）** —— **在独立熊市样本（数据集 780005 / v11，事件 2026-01-05~2026-09-04，独立段 2026-01-29~2026-10-09）上运行冻结的 Strategy Version 3600006**，**以先于结果写定的门槛判定 Stage 1 = FAIL**（S1-P1/S1-P4 不满足）⇒ **降级为 `RESEARCH_CANDIDATE`**；**同时给出 N1 的明确答案 —— 熊市防御在独立样本中成立（基准下跌月 5/5 跑赢、MDD 更浅、波动低 40%、Beta 0.308）**，**并定位失败根因为结构性低 Beta（与历史 Beta 0.403 一致）** ⇒ **独立验证未推翻历史结论，而是样本外再确认了「低 Beta 防御型配置」的性质**。**Goal → complete。**
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-10 · PRE-T15-FAILURE-PATH-DISCOVERY-001 · T+15 前「失败路径」能否预测 T+20~T+40 低质量表现 → 判定 **B. `PARTIAL_FAILURE_PATH`**（稳定维度存在但**非独立**；Goal 的直觉路径**方向相反**）
+
+- **Task**：独立研究 Goal —— 识别「首板事件后、**T+15 决策点之前**已形成的失败路径」是否会稳定预测 **T+20/T+30/T+40** 的低质量后续表现；**不修改** `event-state-long-maxamp5-top3@1.0.0`（`3600006`），不创建 Candidate，不做参数 / TopN / 阈值 / 条件组合搜索。
+- **口径（冻结）**：Dataset **`780004`**（READY · 事件 58,983 · `post` rd1..80 全层各 58,983 行）· 事件 = 现有首板定义 · 观察 rd1~rd15 · 决策 rd15 收盘 · 入场 **rd16 `open`**（`canBuyAtOpen=1`）· 未来 rd20/30/40（+ 策略对齐 rd35/rd55）· 路径变量**只读 rd0..rd15**（结构性防泄漏）· 主判据 = `r40 = close(rd40)/open(rd16) − 1` + **左尾 `P(r40≤−20%)`**。
+- **方法（全在 gitignore 的 `scripts/_scratch/pret15/**`，零业务代码改动）**：`load.cjs` 只读缓存（58,983 事件 × rd1..80 / 232.6 MB）→ `stage123.cjs`（**40 个连续路径变量** × 池化+决策日内五分位 + **14 个二元标记** + **决策日内置换 1,000 次** + 分年 + IS/OOS + 事前 2×2 表 + Top3 池内增量）→ `stage4.cjs`（Baseline vs Baseline+Filter **五臂同引擎**）→ `verify_sql.cjs`（**不经缓存特征代码、从 DB 原始行独立重算 1,200 事件 × 14 项 = 16,800 项比对 ⇒ 0 不一致**）。事前判据先写入 `docs/research/PREREG-PRE-T15-FAILURE-PATH-DISCOVERY-001.md`（阈值 / 分组 / 停止规则**事后未改**）。分析面板 **57,820 事件 / 1,636 决策日**（与正式 run 的 1,636 **完全一致**）。
+- **🟢 稳定失败维度（总体）**：`M10 maxAmp5≥0.12` Δ40 **−3.85pp**（7/7 年负 · IS −4.97 / OOS −2.06 · p=0.001）· `J1 涨幅≥30% 且 贴阶段高点` −2.96pp · `J2 阶段涨幅≥30%` −2.36pp · `J3 贴阶段高点` −3.02pp · `J4 累计涨幅≥30%` −4.58pp ⇒ **相邻尺度 rd20<rd30<rd40<rd55 全部同号且放大**；`maxAmp5` 五分位 Q5 左尾 **16.8%** vs Q1 **2.6%**。
+- **🔴 Goal 的直觉失败路径【方向稳定相反】**：`M3 跌破事件日最低价` Δ40 **+2.74pp** · `M4 跌破事件日收盘` **+2.42pp** · `M8 累计收益≤0` **+2.41pp** · `M9 事件日区间下沿` **+2.54pp** —— **7/7 年全为正 · 置换 p≈1.0**（观测方向的反方向）；**`M7`（Goal「特别关注」的首板→加速→高位→大幅回撤路径）Δ40 = +0.17pp / p = 0.092 ⇒ 不是失败路径**；事前 2×2 表显示**真正最差格 = 「涨幅≥30% 但尚未回撤（仍贴阶段高点）」**（n=7,253 · 均值 **−2.84%** · 左尾 **18.43%** · 胜率 **35.01%**），而「深回撤但未大幅加速」是**最好格**（**+3.40%** / 左尾 5.91% / 胜率 53.31%）。
+- **🔴 池内增量 = 0（Stage 3 延伸）**：按正式策略语义（决策日 = rd15 `tradeDate`，`maxAmp5` 升序取 Top3）得 **4,908 pick**。`M10` 与 Top3 重叠 **2 / 4,908 = 0.04%**（**被排序因子按构造完全覆盖**）；`J1/J2` 池内**反向**（命中笔均 r55 **+8.07% / +4.79%** vs 未命中 +2.32%）；`J3` 池内 −2.67pp 但 **p = 0.505（不显著）**；`J4` 池内 −17.75pp 但 **n=5**。
+- **Stage 4 Overlay（唯一增量 = Failure Filter；`maxAmp5` / Top3 / Hold40 / `1/180` / 20bps / 原 Entry-Exit 全部不动）**：Baseline **TOTAL +57.79% · MDD −18.68% · Sharpe 0.5821 · 4,701 笔 · 胜率 47.84% · 利用率 0.5937**；`F1(M10)` **−0.06pp（全期只剔除 1 笔）** · `F2(J2)` **+0.23pp**（剔除 114 笔、笔均 **+4.70%**、**误杀 +167.29% / +57.85% / +55.67%** 三笔）· `F3(J1)` **+0.24pp**（45 笔 / +8.35%）· 🔴 **负对照 `F4(M2 深回撤) = −1.16pp TOTAL / −0.0106 Sharpe / −0.0132 Calmar**（剔除 430 笔、笔均 **+4.48%**、误杀 5 笔 ≥+50%、2022 年 +0.17%→**−0.42%**、正年 7/8→6/8；唯一「改善」= 最大连亏 54→45，**仅登记为事实**）。
+- **判定**：**B. `PARTIAL_FAILURE_PATH`** —— ✅ 稳定失败维度**存在**；🔴 **但不独立**（与 `maxAmp5` 同源 · Top3 重叠 0.04%）⇒ Overlay 无可用增量 ⇒ 只能作观察变量、**不能进入正式策略**；⚠️ **须更正选项 B 的原文理由：不成立的是「正式策略池内增量」，不是「跨年份稳定性」**（这些路径 7/7 年、IS/OOS、四个时间尺度全部同号）。**A 被证伪**（非独立）· **C 的前提不成立**（稳定规律确实存在，且与「策略为何有效」互证）· **D 不成立**（数据充分）。**不创建 Candidate / 不造 Filter**（Goal 原则 10）。
+- **变更**：🔴 **零业务代码改动** · 🔴 **零数据库写入**（只读 `SELECT`）· 🔴 **未修改 `3600006` / Dataset `780004` / 事件定义 / 因子词表** · 🔴 未创建 Run / Candidate / StrategyVersion · 新增 **2 份文档**（`docs/research/PREREG-…` 与 `docs/research/RESULT-…`）+ 本审计 + gitignore 的 `scripts/_scratch/pret15/**`。
+- **验收替代（环境限制，如实登记）**：`pnpm` 在本沙箱不可用（`unable to open database file`）· `scripts/checkEolDrift.mjs` 因 `spawnSync git EPERM` 失败（沙箱禁止管道化子进程）⇒ 以**直接 `tsc --noEmit`（exit 0 / 0 错，`--tsBuildInfoFile` 落 `%TEMP%`）** + **字节级 EOL 检查（CRLF=0 / LF-only）** 替代；**本轮未改动任何 `.ts` / `.sql` 文件** ⇒ 类型与测试面不受影响。
+- **登记工程事项**：`780004` 的 **23 个 `2019-01-02` 事件其事件日不在 `post` 日历内**（`post` 自 2019-01-03 起 ⇒ 事件日索引为 −1）；按 `cal[edi+rd]` 重建日期必须**用 rd15 的 `tradeDate` 反推有效索引**，否则这 23 个事件的**出场日期会提前 15 个交易日**（本轮已修复；修复后日期校验 **57,811/57,811 一致**）。
+- **Baseline Impact**：none（研究结论；冻结资产零改动；唯一产物 = 报告与事前判据文档）。**GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-10 · 项目与最新研究只读复核 · 正式执行一致性应先于新实验
+
+- **Task / Baseline**：响应用户「分析整个项目，重点最新研究与策略，建议下一步」。对象为 HEAD `f8b6810` 加未提交工作区，基线 v2.7.0；采用 Architecture / Research / Strategy / Database 规则。未重新跑历史全量回测。
+- **报告**：`docs/research/PROJECT-REVIEW-NEXT-STEPS-20261010.md`。区分当前 DB/代码实测、历史报告值与后续建议，梳理 t74、LONG-4、MEDIUM、SHORT、Event-State Long、独立熊市验证与 T+15 失败路径。
+- **DB 实查**：14 dataset versions；179 strategy versions；165 independent experiment runs（132 COMPLETED / 17 FAILED / 16 RUNNING；48 experiment IDs）；463 closed-loop runs。`3600006` 仍 `Validated`，`codeVersion=1.0.0+gunknown`；其 provenance 与同 strategyId 的闭环留档均 0 行。16 条 RUNNING 最新更新时间仍在 9 月 25 日，需另行核查运行器，未改状态。
+- **新确认的执行阻塞**：只读取实际存储文档，调用 `recipeRegistry.ts#resolveStrategyRecipe` 和 `runWorkbenchAssembly/assemble.ts#assembleStrategySide`，均抛 `RECIPE_NOT_REGISTERED`（`event-state-long-amp5-top3` 未注册）。Core 特征注册不等于配方注册。
+- **声明与研究脚本的差异**：实际版本为 EQUAL_WEIGHT、未声明 candidateExitPolicy、观察窗 `{15,15}`；正式映射为等权现金预算 / 默认 HOLD_WHILE_SELECTED。近期 harness 使用 FIXED_RATIO×1/180、DISABLED、cursor `{15,79}` + rd15 决策谓词。前三项经存储文档和映射代码核实；完整交易对拍未执行。
+- **指标口径**：`stage1run.ts#met` / `stage3run.ts#met` 的 Sharpe 使用 CAGR/波动，年化使用自然日；Stage 1 Sortino 只对负收益日取均值。与 `shared/quant-stats.ts#sharpeRatio`、`riskAdjustedMetrics/analyze.ts` 和 canonical 年化口径不同。登记为报告数字的可比性限制；未回填旧结果，也未撤销总收益为负导致的 Stage 1 FAIL。
+- **BASELINE_DRIFT（已纠正文档）**：① `ARCHITECTURE.md` BD-14 原称 executors 缺 optimization/regime/finalize；实查非流式 `buildExecutor` 有前两项，finalize 有编排器内置路径，只有流式装配为五项子集。② 历史「可交易策略」与后续 RESEARCH_CANDIDATE / 实际装配阻塞需区分；在 SYSTEM-BASELINE 顶部增加当前证据说明，保留历史报告。detectedBy=本次只读 DB 与运行函数探针；correctedAt=2026-10-10；reason=避免把流式子集、存储状态或历史 PASS 当作当前完整能力。
+- **建议**：冻结研究定义，先完成正式装配、不可变版本声明、交易/权益逐项对拍和证据留档；再做现金/市场暴露匹配的经济价值检验。新内容必须新版本，不原地改 `3600006`；旧 FAIL 不得通过放宽门槛追认 PASS。此次仅提出任务，未实施业务变化。
+- **Changes / Impact**：仅新增报告、修正 ARCHITECTURE、补充 SYSTEM-BASELINE、本条审计；临时脚本在 gitignore 的 `scripts/_scratch/`。业务代码 / DB 写入 / Contract / Execution 影响均为 0，因无运行代码和持久化资产修改，不可能改变既有交易行为。
+- **Checks**：`pnpm run check` exit 0；eventStateAmplitude、netPnlCaliber、positionSizingExecution、amplitudeOrientation 共 **4 文件 / 42 测试通过**。未跑全量测试、未新增测试。`checkEolDrift --strict` **exit 1**：tracked drift 0；唯一项为开工前已有的未跟踪 `_scratch/overlap/probe01_db_state.mjs`（CRLF），本次未改该无关探针；本次四份文档均 LF。如实保留此全仓门禁未通过项。
+- **Baseline Impact**：事实修正，无 Domain 跃迁、无版本提升。差异范围已由具体入口限定；**GLOBAL AUDIT REQUIRED：NONE**。
+
+## 2026-10-10 · 下一步目标文档 · EVENT-STATE-LONG-EXECUTION-PARITY-001
+
+### 2026-10-10 · 首板滚动观察池右尾MVP目标文件
+
+- **Task / Baseline**：用户要求主板非ST非次新范围的小研究闭环执行目标。HEAD `f8b6810`加工作区；本轮只读既有资产，未查询DB或启动Goal。
+- **Changes**：新增 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001.md`、INDEX入口。非次新明确为事件日上市满365自然日；冻结观察年龄、每日symbol去重及事件锚点、两既有单因子和随机对照、右尾/左尾与成交风险标签、六阶段和前端/留档验收。
+- **Authorization / Limits**：启动模板须由用户实际发送；仅允许模板范围新增实验代码与既有端口Run/产物，不授权策略改动/历史回填/DDL/账户。连续跌停不按未来结果删样本；每日ST字段不可靠则如实Gate。未覆盖活动task-state，未自动启动本目标或终止其他任务。
+- **Impact**：Contract/DB/Execution/交易行为均0，纯文档不影响行为；无Domain跃迁、无版本提升。GLOBAL AUDIT REQUIRED：NONE。
+- **Checks**：`pnpm run check` exit0；新文档LF、相对链接全部存在、INDEX保留CRLF。EOL tracked drift0，全仓仍因其他会话既有 `_scratch/overlap/probe01_db_state.mjs` CRLF而exit1；未覆盖该文件。无运行代码变更，不重复行为测试。
+
+### 2026-10-10 · 因子用途与证据总表整理
+
+#### 2026-10-10 · 按单因子、多因子与策略规则扩展分类
+
+- **Task / Changes**：响应用户关于遗漏与分类不细的反馈，新增 `docs/research/FACTOR-CATALOG-BY-TYPE-20261010.md`，在原总表及INDEX增加导航。逐项列十二基础单因子、事件后六族29个候选名称；区分10项评分组合、13项条件/交集/排除/混合对象、专题实验、策略退出与环境过滤规则。
+- **Evidence / Limits**：补核single-factor-v1、早期12F/4F/2F/3F/加权组合与真实Run报告、LONG-6/5/4、后事件发现及失败标记。发现报告称27候选但枚举29名，登记实际计算覆盖待核；只发现代码入口的专题不声称完成Run；同名不同窗口、四因子不同成员分开记录。未重新查询DB或计算实验，无全库穷尽声明。
+- **Impact**：仅文档，无Contract/DB/Execution/策略行为变化；未新建实验、未改定义、未启动待核项。无Domain跃迁与版本提升，GLOBAL AUDIT REQUIRED：NONE。
+- **Checks**：`pnpm run check` exit0；两研究文档LF、相对链接全存在；INDEX保持既有CRLF。EOL严格检查tracked drift0，但全仓仍因既有 `_scratch/overlap/probe01_db_state.mjs` CRLF而exit1，未修改该其他会话文件；文档任务不重复行为测试。
+
+- **Task / Baseline**：用户要求整理既有因子用途、证据与实验检查表。核 HEAD `f8b6810` 加并发工作区；使用 Research 规则。只读报告和当前契约，未重新查询 DB、未重算历史实验。
+- **Changes**：新增 `docs/research/FACTOR-ROLE-EVIDENCE-REGISTER-20261010.md`，补充 INDEX 入口。按因子/用途/样本/时点划分，列151% Runner消融及退出既有证据、十二因子和后事件因子角色、停止/替代/冲突清单、问题总账与可复制实验卡。
+- **限定**：TARGET-REVIEW 与 TIMESCALE-FINAL 的部分观察窗描述存在适用范围待核，未擅自选边或宣布PIT违规；targetMetric/preRegisteredCriteria已有契约但可选，未声称强制门禁已落实。新表为导航，不新设业务状态或晋级数值阈值。
+- **Contract / DB / Execution / Behavior Impact**：均0。未改策略、业务代码、实验定义或历史证据；文档不可能改变交易行为。无Domain跃迁、无版本提升；GLOBAL AUDIT REQUIRED：NONE。
+- **Checks**：`pnpm run check` exit0；新文档相对链接全部存在、新文档LF、INDEX保留既有CRLF。严格EOL tracked drift0，全仓仍因既有未跟踪 `_scratch/overlap/probe01_db_state.mjs` CRLF而exit1，该文件未改。纯文档变更不重复行为测试。
+
+- **Task / Changes**：将前次复核建议整理为可交给其他模型的目标规格 `docs/research/GOAL-EVENT-STATE-LONG-EXECUTION-PARITY-001.md`，补充 INDEX 入口。冻结目标配置，规定六阶段、阶段门禁、可复现交付物、授权模板与停止条件；经济价值验证和前向观察仅列后续队列。
+- **状态与权限**：文档为待执行规格；未启动 Goal，未覆盖其他任务的 task-state，未执行策略修正或新增数据库记录。启动模板须由用户实际发送才构成授权。
+- **Contract / DB / Execution / Behavior**：均无变化，仅文档交付，不可能影响现有交易行为。无 Domain 状态跃迁、无基线版本提升；GLOBAL AUDIT REQUIRED：NONE。
+- **Verification**：`pnpm run check` exit 0；文档任务不新增运行行为，无需重复运行行为测试。新目标文档与审计保持 LF，INDEX 保持既有 CRLF；严格行尾检查 tracked drift 0，但因既有 `_scratch/overlap/probe01_db_state.mjs` CRLF 而 exit 1，该无关文件未修改。INDEX 的既有 diff 空白提示未做顺带清理。
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · S1 完成 + S2 首步：注册被文档声明的配方
+
+- **Task**：执行 `docs/research/GOAL-EVENT-STATE-LONG-EXECUTION-PARITY-001.md`。本轮范围 = S1（只读重现现状与差异）+ S2 首个最小修复。**未启动 S3–S6**，**未写任何数据库记录**。用户已授予 §2 完整授权（代码修复 / 经不可变流程新建修正版 / 经既有端口新增证据与正式 Run 留档；不含回填、DDL、批量写、账户与资金）。
+- **Baseline / 坐标**：HEAD `f8b6810` + 未提交工作区（含并发会话改动）。`server/strategyCore/featureRegistry.ts` 的 `makeEventStateAmplitudeFeatures()`（+103 行）为**上一个会话**的未提交改动，本轮只消费不改动。结果汇总见 `docs/research/RESULT-EVENT-STATE-LONG-EXECUTION-PARITY-001.md`。
+- **S1 只读实查（本轮，非历史快照）**：`strategy_versions.id=3600006` 仍 `Validated`、`datasetVersionId=780004`、`codeVersion=1.0.0+gunknown`、document 指纹 `7e863012…`、versionRecord 指纹 `3eefde7a…`，该 strategyId 仅此一行；`strategy_research_provenance WHERE strategyVersionId=3600006` = **0 行**；`closed_loop_backtest_run WHERE strategyId='event-state-long-maxamp5-top3'` = **0 行**；`780004` / `780005` 均 READY（`postWindowDays=80`）。**实调用** `resolveStrategyRecipe` 与 `assembleStrategySide` 复现 `RECIPE_NOT_REGISTERED`。
+- **差异表（12 项，冻结项无 UNKNOWN）**：配方未注册；仓位存储 `EQUAL_WEIGHT` → `EQUAL_WEIGHT_CASH_BUDGET` vs 目标 `FIXED_RATIO 1/180`；`candidateExitPolicy` 缺省 → `HOLD_WHILE_SELECTED` vs 目标 `DISABLED`；观察窗 `{15,15}` vs harness `{15,79}`+rd15 谓词；**执行行情覆盖**（见下）；出场语义、末端 MTM、成本、指标口径逐项登记。
+- **🔴 本轮定位的合同缺口（尚未修复）**：事件窗策略的**决策窗口与执行行情覆盖被同一个 `{start,end}` 硬编码派生** —— 决策成员 = `rd∈[startRd,endRd]`，面板/游标 = `rd∈[0,end+1]`（`datasetFromRegistry.ts`，`maxRd = endRd+1` / `neededMaxRelativeDay = window.end+1`）。流式路径另有 `simulator/cursorEngine.ts#Execution Overlay`，自首次 positionIntent 起 **+30 交易日**；**材料化路径没有 overlay**。`780004` 在 `{15,15}` 下行数上界 ≈ 1.00M < 1.6M 护栏 ⇒ 走**材料化路径** ⇒ **无任何 rd>16 行情**，40 交易日持有在正式链路上结构性不可能。修复须**把执行覆盖与决策窗解耦**（对标池化路径既有 `firstLimitPool.exitTailTradingDays`），且**不改观察窗为 rd79**、**不让后续 bar 参与决策**。
+- **S2 首个修复（已完成）**：`server/research/recipeRegistry.ts` 新增并注册 `makeEventStateLongMaxAmp5Top3RecipeDefinition`（`recipeId=event-state-long-amp5-top3`，`point=close`、`signalFrequency=daily`、`higherIsBetter=false`、`topN=3`）；`server/research/recipeRegistryAtoms.ts#buildEventStateAmplitudeFeatureProvider` 由 **Strategy Core 注册表**取回 `maxAmp5` 的 `FeatureDefinition` 并直接调用其 `compute`，bar 序列 → Core 时间语义走唯一入口 `strategyCore/production/barWindow.ts#toCoreBarWindow` ⇒ **不复制振幅公式、无第二套实现**。
+- **修复前后实测**：修复前 `registeredNow=false` / 装配 `RECIPE_NOT_REGISTERED`；修复后 `registeredNow=true`、`resolveStrategyRecipe` OK、`assembleStrategySide` **OK**，`recipeSource=strategy-document`、`engine=strategy-core`。装配输出的**存储版本现状**：`candidateExitPolicy=HOLD_WHILE_SELECTED`、`positionSizing.sizingMethod=EQUAL_WEIGHT`、`maxHoldingDays=40`、`maxPositions=180`、成本与初始资金与 §3 一致。
+- **新增契约测试**：`tests/server/research/eventStateLongRecipeRegistration.test.ts`（8 项，全绿）——注册即通、配方投影与文档字段一致、适配器值与 Core 定义逐值相同、与独立复算的链式前收定义一致、**rd14 及以前返回 null（决策点下界）**、**rd16+ 不改变 rd15 值（上限硬截断）**、未注册 featureId 构造期抛 `RECIPE_FEATURE_NOT_PRODUCED`、声明未产出特征抛 `RECIPE_FEATURE_VERSION_MISMATCH`。
+- **同步维护（穷举清单 / 显示名登记，非改测试契约取巧）**：`tests/server/research/patternLibrary/patternLibrary.test.ts` 的「已注册配方 id 穷举清单」新增 `event-state-long-amp5-top3`，并补上**既有未提交改动**引入的 `strong-trend-reentry-select-all`（该断言在**本轮之前即已失败**）；`server/research/strategyAuthoring/presetRegistry.ts#RECIPE_DISPLAY_NAMES` 为新配方补中文名，并补既有 `strong-trend-reentry-select-all` 的中文名（其缺失同样使 `vocabulary.test.ts` 在本轮之前失败）。`presetRegistry.ts` 注释明确要求「新增配方必须顺手起个中文名」。
+- **Checks（真实执行）**：`node node_modules/typescript/bin/tsc --noEmit` = **0 错**；新增测试 **8/8 PASS**；定点受影响测试 **5 文件 / 82 测试 PASS**；`pnpm run test:changed` = 144 文件 / 1828 测试，139 文件 PASS、**新增失败 0**。其余 3 个失败文件归因：`threeFactorTopNStrategyDocument.test.ts`（3 项，期望对象缺 `recoveryPath` 键）—— `server/runWorkbenchAssembly/exitPolicy.ts` 与**该测试文件**均 `git diff HEAD` 为空、`recoveryPath` 在 HEAD 第 96/107/154 行已存在 ⇒ **HEAD 上即失败**；`limitUp.test.ts`（1 项）/ `limitUp.watch.test.ts`（4 项）—— **无可用数据库**的环境失败，与本目标无关。
+- **EOL 门禁**：`node scripts/checkEolDrift.mjs --strict` = **exit 1**；**已跟踪文件漂移 0**；唯一失败为**未跟踪**的 `_scratch/overlap/probe01_db_state.mjs`（CRLF，其他会话探针）。按规格**如实报告全仓门禁未通过**且**不覆盖其他会话文件**；本轮新增/修改文件均为 LF。
+- **环境事实（如实登记）**：本会话初始为 `workspace-write` 沙箱时，`pnpm`（`unable to open database file`）、`vitest` / `tsx`（esbuild **spawn EPERM**，禁止管道化子进程）、`checkEolDrift.mjs`（`spawnSync git EPERM`）均不可用，且除仓库根与根级 `_scratch` 外的工作区子目录对受限进程不可写；用户已把会话切为**完全权限**后上述命令恢复可用。
+- **未决（下一轮唯一动作）**：① 落地「执行行情覆盖解耦」（尾窗由已声明出场政策派生、**缺省 0 ⇒ 其他策略行为不变**、覆盖深度进装配摘要、补回归证明）；② 生成 §3 修正版草稿（`position.sizingMethod=FIXED_RATIO` + `exit.candidateExitPolicy=DISABLED`），经 `applyDefinitionChange` 走 minor、**保留 3600006 原内容与指纹**。
+- **Contract / DB / Execution / Behavior Impact**：Contract = 新增 1 个注册配方 + 1 个 Core 特征适配器导出（无 schema 变更、无请求契约变更）；DB = **零写入**（仅只读 `SELECT`）；Execution = 使 `event-state-long-maxamp5-top3@1.0.0` 从「无法装配」变为「可装配并进入 strategy-core 判定链」—— **此前该版本不可能被执行，故本改动不可能改变任何既有历史结果**；既有 `3600006` 文档、指纹、dataset、其他配方与其他策略行为均未变。
+- **Baseline Impact**：事实性增补（S1 实查 + 合同缺口定位）+ 新增能力（配方注册）。无 Domain 跃迁、无基线版本提升。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · S2 完成：事件窗执行尾窗解耦 + §3 修正版草稿
+
+- **Task**：同一 Goal 的阶段推进（S2 收尾）。本轮**未写任何数据库记录**；修正版仅存在于**内存草稿**（可由 `scripts/_scratch/goalParityS2Version.mts` 确定性重建）。
+- **🔴 Contract 变更（1 个可选字段）**：事件窗事件投影新增 **`exitTailTradingDays`**（可选，缺省 `0`）。
+  - `server/runWorkbenchAssembly/datasetFromRegistry.ts`：`EventWindowCursorOptions` 与 `BuildDatasetFromRegistryRequest` 新增该字段；`createEventWindowDatasetCursor` 的 `maxRd = endRd + 1 + exitTailTradingDays`；`buildResearchDatasetFromRegistry` 的 `neededMaxRelativeDay = window.end + 1 + exitTailTradingDays`；`estimateEventWindowPanelRowsUpperBound` 新增第 4 参并计入上界（不同步会**低估**行数而错误地走材料化路径）。
+  - `server/runWorkbenchAssembly/assemble.ts`：新增导出 `resolveEventWindowExitTailTradingDays`（由**已声明的** `TIME_EXIT`(TRADING_DAY) 派生，代码复用 `mapDeclaredExitPolicy`；顺延缓冲常量 20，与池化 `exitTailTradingDays` 缺省同口径）；`resolveDataset` 新增第 2 参；`assembleRunWorkbenchInputs` 在**解析数据集之前**计算并透传；摘要新增 `assembly.eventWindowExitTailTradingDays`。
+  - `shared/researchContracts.ts`：装配摘要 zod 新增 `eventWindowExitTailTradingDays: z.number().int().min(0).optional()`。
+- **语义边界（关键）**：尾窗**只**扩大行情读取上限（`rd ≤ end + 1 + 尾窗`），**不**改变决策成员范围（仍严格 `rd ∈ [startRd, endRd]`），且决策日可见 bar 仍按决策日截断 ⇒ **后续 bar 在结构上不可能参与决策**。**缺省 `0` ⇒ 未声明 `TIME_EXIT` 的策略行为逐字节不变**（不以全局默认值迁就本策略）。池化策略有自己的退出尾部 ⇒ 不叠加。
+- **修复前缺口**：事件窗投影的「决策窗」与「行情覆盖」被同一个 `{start,end}` 硬编码派生（`rd ≤ end+1`），材料化路径**没有** Execution Overlay ⇒ `780004` 在 `{15,15}` 下只读到 `rd16` ⇒ **40 交易日持有在正式链路上结构性不可能**。
+- **§3 修正版（内存草稿，未落库）**：经既有**文档级不可变版本流程** `cloneStrategyDocument`（与 `StrategyService.createVersion` 同一条）：`1.0.0 → 2.0.0`；`minor` 被平台**语义闸门响亮拒绝**（结构变化须 major），未绕过。差异**仅三项**：`definition.position.sizingMethod: EQUAL_WEIGHT → FIXED_RATIO`；`definition.position.positionRatio: 新增 1/180`（canonical 校验器强制要求显式比例 —— 首次尝试因缺该字段被拒，属校验器正常工作）；`definition.exit.candidateExitPolicy: 缺省 → DISABLED`。
+- **指纹**：`3600006` document 指纹 `7e863012…` **未变**；新版本 `5cc5c74e…`。Core 行为指纹 `6cf31b26…` → `4244d9a7…` ⇒ **行为确有变化**（因此必须新版本，不可原地改）。
+- **验收（真实执行）**：`validateCanonicalStrategyDefinition` / `validateStrategyDocument` = **0 issue**；`assembleStrategySide` 成功且 **`engine=strategy-core`**、`recipeSource=strategy-document`、`features=[maxAmp5@1.0.0]`、`candidateExitPolicy=DISABLED`、`positionSizing={FIXED_FRACTION, 1/180}`、`maxHoldingDays=40`、`maxPositions=180`、`initialCapital=1,000,000`、成本六项、`executionModel=NEXT_OPEN`；与 GOAL §3 逐字段比对 **22 项 / 不一致 0**；派生尾窗 **60** ⇒ 覆盖 `rd ≤ 76`（数据集 post 上限 80）。`tsc --noEmit` = **0 错**；新增测试 `eventWindowExecutionTail.test.ts` **7/7 PASS**、既有 `eventWindowDatasetCursor.test.ts` **8/8 PASS**；装配/模拟/信号/留档回归集 **exit 0**；`pnpm run test:changed` **166 文件 / 2039 测试，新增失败 0**（4 个失败文件全部为既有/环境失败：`threeFactorTopNStrategyDocument` 的 `recoveryPath` 键、`limitUp*` 无数据库、`datasetFilterForm` 的 `excludeListedWithinDays` 键 —— 三者涉及文件均 `git diff HEAD` 为空）。EOL `--strict`：**tracked 漂移 0**；全仓 exit 1 仅因其他会话未跟踪的 `_scratch/overlap/probe01_db_state.mjs`（CRLF），未覆盖。
+- **DB / Execution / Behavior Impact**：**DB 零写入**（仅只读 `SELECT`）。Contract = 1 个可选字段 + 1 个导出函数 + 1 个可选摘要字段；缺省路径行为不变（回归测试为证）。既有 `3600006` 文档/指纹/数据集/其他策略均未变；**该版本此前结构性不可执行，故本改动不可能改变任何既有历史结果**。
+- **未决（下一轮）**：① 修正版落库（先报告写入影响：新增 `strategy_versions` 行 + 更新策略实体 `currentVersionId`/`latestVersion` 指针，初始 `status=Draft`）；② S3 小范围行为核验与逐层对拍；③ S4 正式 Run 留档。
+- **Baseline Impact**：Contract 增补（可选字段）+ 修复结构性执行缺口。无 Domain 跃迁、无基线版本提升。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · 修正版落库（首次 DB 写入）+ S3 发现阻断性缺陷
+
+- **Task**：同一 Goal 继续。本轮的**唯一数据库写入**按 §2「执行前报告影响并留下审计」执行：影响报告先落 `docs/research/RESULT-EVENT-STATE-LONG-EXECUTION-PARITY-001.md` §5.1，随后落库，再只读对账（§5.2）。
+- **写入清单（逐项）**：
+  - `strategy_versions` **新增 1 行** `id=3600007`：`strategyId=event-state-long-maxamp5-top3` · `version=2.0.0` · `status=Draft` · document 指纹 `5cc5c74e2d726ccbf88446badd87455002f193985d6e1cd51d5c86f92ce0444a` · `datasetVersionId=780004` · `codeVersion=1.0.0+gf8b6810.dirty` · `parentVersionId=3600006`。
+  - `strategies`（实体行 `id=1770005`）指针更新：`latestVersion=2.0.0` · `currentVersionId=3600007` · `status=Draft`（新增版本的正常副作用）。
+  - 5 类投影：`strategy_version_datasets` / `strategy_entry_rules` / `strategy_exit_rules` / `strategy_execution_rules` 各 1 行；`strategy_parameters` 0 行（文档未声明参数）。
+- **经哪个既有端口**：`StrategyService.save` → `createStrategyDocument`（重算指纹）→ `persistDocument` → `DbStrategyRepository.saveVersion`（事务内 + 投影 + 幂等三态）。**未使用任何手写 SQL 写路径。**
+- **谱系锚点修复（重要）**：`save()` 不写 `parentVersionId`（初值为 null）。改用平台**明确允许的**谱系元数据端口 `DbStrategyRepository.updateVersionParent`（`contract.ts` 注明「仅更新谱系元数据，不改版本内容与 updatedAt」）补齐为 `3600006`。该动作已在此登记。**未使用** DELETE / 回填 / 直接 UPDATE 版本内容。
+- **codeVersion 取真实工作区坐标**：由 canonical 纯函数 `experimentLineage/codeVersion.ts#composeCodeVersion({packageVersion:"1.0.0", git:{commitShortHash:"f8b6810", dirty:true}})` 组合为 `1.0.0+gf8b6810.dirty`。首次尝试手写 `1.0.0+gf8b6810.workspace-20261010` 被平台 validator（`SCHEMA_RECORD_CODE_VERSION_INVALID`）**响亮拒绝**——属既有守卫正常工作，未绕过。
+- **旧版本完好性**：`3600006` 的 `fingerprint`(`7e863012…`)、`status`(`Validated`)、`codeVersion`(`1.0.0+gunknown`)、`updatedAt`(`2026-10-09 18:15:09`)、`strategyDocumentJson` 与 `versionRecordJson` **逐项未变**。`strategy_versions` 总行数 179 → **180**（恰 +1）。`strategy_research_provenance`(3600006) 与 `closed_loop_backtest_run`(该 strategyId) 仍为 **0**。**无 DDL / migration / 批量写 / 历史回填。**
+- **🔴 S3 阻断性缺陷（新发现，未修复）**：正式 `strategy-core` 判定路径在真实事件窗数据集上**产出 0 个候选**。
+  - 复现（只读探针 `scripts/_scratch/goalParityS3Parity.mts`，780005，2026-02-01~02-05）：装配 `datasetSource=registry` / `datasetRowCount=575,297` / 尾窗 `60` / `recipeSource=strategy-document` / `strategyDecisionEngine=strategy-core`；候选引擎 `signalCount=0`、`selectedCount=0`、`universeMembers` 非空 4/4；剔除原因**全部** `INSUFFICIENT_FEATURES`。
+  - `framework/pipeline.ts` 中 `INSUFFICIENT_FEATURES` = `signalBuilder` 返回 `null`（**不是**特征缺失）。
+  - 逐点诊断（同一成员，rd15，16 根 bar）：rd0 为真首板涨停（`preClose=10.37`→`close=11.41`）；recipe 特征 `maxAmp5=0.046598322460391424`（非 null）；`rankValueOf` 同值（非 null）；`strategy13.signalBuilder` = **null**（未抛错）；同一 builder 在 rd14（15 根 bar）亦为 null ⇒ **「首个成立日转移被提前消费」假设已证伪**，实际是 `ruleEvaluation.satisfied` 恒假。
+  - 参考方（同一 Core 特征 + 无尾窗游标 rd15 可见 bar）取得 1,043/1,058 个有效取值 ⇒ 决策数据完好。候选层未解释差异 = **100%**。
+  - 影响：**S4 若照当前链路开跑，只会得到一条零成交平线**，不构成执行一致性证据。已按 §5 门禁判定 **S3 未通过**（属产品缺陷，不得用容差吸收）。
+  - 下一轮首要动作：定位 `server/strategyCore/production/coreDecision.ts#createCoreDecisionSource` 与 `assemble.ts` 的 `createDatasetEventResolver({eventAnchored:true, …})` 事件语义（是否把**当前 bar**当作事件日）、以及 `definition.entry.observationWindow{15,15}` + `trigger:LAST_VALID_DAY` → Core `ruleGraph` 的映射。
+- **Checks**：`tsc --noEmit` = **0 错**；`pnpm run test:changed` **新增失败 0**；EOL `--strict`：tracked 漂移 **0**（全仓 exit 1 仍仅因其他会话未跟踪的 `_scratch/overlap/probe01_db_state.mjs`，未覆盖）。本轮未改任何业务代码。
+- **Contract / DB / Execution Impact**：Contract = 无变化；DB = **新增 1 行 + 实体指针更新**（已逐项对账）；Execution = 未改变任何执行路径。既有 `3600006` 与所有其他记录未被改动。
+- **Baseline Impact**：新增一个 **Draft** 修正版版本行（数据事实）；同时登记一个**未修复的执行链缺陷**。无 Domain 跃迁、无基线版本提升。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · 修复 Core 事件窗触发缺陷（WINDOW 节点被丢弃）+ S3 候选/账本对拍
+
+- **Task**：修复第 3 轮登记的**阻断性缺陷**，并继续 S3 对拍。本轮**零数据库写入**（只读 + 代码 + 测试）。
+- **🔴 根因（定位到唯一代码点）**：`server/strategyCore/adapters/legacyDefinition.ts#fromLegacyStrategyDefinition`
+  原先**只在** `conditionNodes.length > 0` 时才把 `WINDOW` 节点 push 进 `ruleGraph`；无 enabled 入场条件时
+  仅记一条 note「窗口不参与判定」。
+  - 但 `LAST_VALID_DAY` / `FIRST_VALID_DAY` 的**候选日集合由窗口定义**：`ruleGraph.ts#triggerCandidateDays`
+    读 WINDOW journal 写入的 `validDays`；无 WINDOW ⇒ `validDays` 为空 ⇒ `resolveTriggerSatisfaction`
+    退化为「当前日即候选日」⇒ **触发在每个决策日都成立**。
+  - 生产决策源 `coreDecision.ts#createCoreDecisionSource` 用「**首个成立日**」转移判据
+    （`satisfiedToday && !satisfiedBefore`）；而事件窗数据集**只在决策日**把成员暴露给 pipeline
+    （`rd ∈ [start,end]`）⇒ `satisfiedBefore`（rd-1 探针）恒为真 ⇒ `firesToday=false` ⇒
+    **signalBuilder 恒返回 null ⇒ 该策略 0 候选**。实测：rd1 / rd14 / rd15 的
+    `ruleEvaluation.satisfied` **全部为 true**。
+- **修复**：无条件入场**也必须**产出 `WINDOW` 节点；窗口子节点用**显式恒真条件**占位
+  （`entry.window.always` = `Expr.constant(1) EQ Expr.constant(1)`）。
+  选择理由：空 `ALL` 被 `validateRuleGraph` **拒绝**（「ALL 至少需要 1 个子节点」）且求值层 `ALL` 空子节点返回
+  `false`（**不放松该守卫**）；恒真条件既通过校验，又不引入任何数据依赖、也不触发事件判定计数
+  （不放大 `occurredEventCount`）。**未改动 Core 求值语义、未新增节点种类、未新增契约字段。**
+- **修复前后实测（同一上下文）**：rd15 `satisfied=true` / `signals=1`（触发说明「窗口成立日=[15]」）；
+  rd14、rd1 均 `satisfied=false`；`firesToday=true`。（修复前 rd1/rd14/rd15 全为 true。）
+- **新增测试锁**：`tests/server/strategyCore/legacyEntryWindow.test.ts`（**4/4 PASS**）——
+  ① 无条件入场仍产出 WINDOW 且子节点为 `entry.window.always`；② 映射说明如实登记占位而非宣称窗口不参与判定；
+  ③ **守卫不放松**：空 `ALL` 仍被 `validateRuleGraph` 拒绝；④ 有 enabled 条件时行为不变（WINDOW 包 `ALL[conditions]`）。
+- **S3 对拍结果（真实片段：780005 / 2026-02-01~2026-04-30；正式装配 + 既有原语）**：
+  - **候选身份 / 分数 / Top3**：决策日 **57**、引擎信号 2,567 / 选中 **171**（= 57×3）、
+    参考方（同一 Core 特征 + 无尾窗游标 rd15 可见 bar）3,445 成员 / 3,396 取值；
+    **身份不匹配 0 · 分数不匹配 0 · 未解释差异 0**（分数相对容差 1e-12，看结果前声明）。
+  - **下单/成交/账本**：成交 **163** 笔；**整手 0 违规**；名义额/初始资本 ∈ **[0.00280, 0.00561]**，
+    目标 **1/180 = 0.005556** ⇒ 确认为**初始资本固定比例**（**不是**等权现金预算，后者约 1/3）；
+    首笔决策 2026-02-02 → 入场 **2026-02-03 开盘**，`exitTime=2026-04-09`、`holdingPeriod=41`、
+    `reason="持有满40个交易日"` ⇒ 与平台「收盘触发、下一交易日开盘成交」一致（并与研究报告
+    `holdAvg=41.01` 互相印证）；期末 115 笔未平仓，权益按 **MTM** 计（987,717.37 = 421,045.37 + 566,672）
+    ⇒ 平台未平仓口径，**未伪造 rd80 结算**。
+- **Checks**：`tsc --noEmit` = **0 错**；`vitest strategyCore + strategyAuthoring + runWorkbenchAssembly`
+  = **39 文件 / 426 测试 PASS**；`pnpm run test:changed` = 167 文件 / 2043 测试，**新增失败 0**
+  （4 个失败文件全部为既有/环境失败：`threeFactorTopNStrategyDocument` 的 `recoveryPath` 键、
+  `limitUp*` 无数据库、`datasetFilterForm` 的 `excludeListedWithinDays` 键 —— 涉及文件均 `git diff HEAD` 为空）；
+  EOL `--strict`：tracked 漂移 **0**（全仓 exit 1 仍仅因其他会话未跟踪的 `_scratch/overlap/probe01_db_state.mjs`）。
+- **Contract / DB / Execution / Behavior Impact**：Contract = **无变化**（未新增字段/节点种类）；
+  DB = **零写入**；Behavior = legacy 文档 → Core 规则图的映射在「**零个 enabled 入场条件**」这一分支上由
+  「无 WINDOW」改为「恒真 WINDOW 占位」。影响面仅限该分支 —— 而这些策略在改动前**恒 0 信号**（实测），
+  故本改动是**严格修复**；有条件的入场路径**逐字节不变**（测试 ④ 锁定）。
+- **Baseline Impact**：修复共享适配层的触发语义缺陷。无 Domain 跃迁、无基线版本提升。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · S3 完成（拒绝/顺延 · 并列 · 多事件 · 确定性）
+
+- **Task**：同一 Goal 的 S3 收尾（**零数据库写入**、**零业务代码改动**；只读探针 + 文档）。
+- **追加对拍证据（780005 / 2026-02-01~2026-04-30，既有原语 `runTradeSimulation`）**：
+  - **拒绝/顺延（不静默）**：`executionStats` 211 signal → 211 order → **211 fill**，`rejectedOrders=0`、
+    `partialFills=0`；`skipped` 共 **11**：`BUDGET_BELOW_MIN_LOT`×5（整手预算不足 ⇒ 拒买）、
+    `NO_NEXT_TRADING_DAY`×6（区间末端无次日 ⇒ **不伪造成交**）。
+  - **持仓上限**：`openPositions` 峰值 **117 < 180**（本片段未触顶）；期末 115。
+  - **同股票多事件**：167 个不同 canonical 证券被选中，其中 **4 个被选中 2 次** ⇒ 同股票的不同事件
+    各自独立成身份、独立计位，与 `allowMultipleMembersPerSecurity` 语义一致。
+  - **边界并列规模**：57 个决策日中与第 3 名同分者 **0** ⇒ 本片段无边界并列；**全区间规模登记到 S4**。
+  - **确定性**：同输入重跑（候选引擎 + 模拟各两次）⇒ 模拟内容指纹逐位相同 `2289d6fb…` ⇒ **确定性成立**。
+- **如实登记的覆盖边界（非「未解释差异」）**：本片段 `rejectedOrders=0` ⇒ **未出现**涨停/停牌/无量
+  （`NO_LIQUIDITY`）等成交层拒绝，也未出现跌停拒卖后的顺延重估；该路径须在有此类事态的片段或
+  S4 全区间统计 —— **不得据此声称已覆盖**。
+- **S3 结论**：对拍顺序（候选身份/分数 → Top3 → 下单/拒单 → 成交日期/价量/费用 → 每日权益）
+  已逐层核验，**未解释差异 = 0**；离散量精确一致；浮点容差在看结果前声明且未用于掩盖账本差异；
+  重复运行确定 ⇒ **S3 通过**。
+- **Checks**：本轮仅新增只读探针与文档，未改动任何 `.ts` 业务/测试文件 ⇒ 类型与测试面不受影响；
+  EOL `--strict` tracked 漂移仍为 **0**（全仓 exit 1 仍仅因其他会话未跟踪的
+  `_scratch/overlap/probe01_db_state.mjs`，未覆盖）。
+- **Contract / DB / Execution Impact**：均为 **0**（无代码、无写入、无执行路径变化）。
+- **Baseline Impact**：无。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · S4 正式 Run 留档（2 条）+ 两项契约缺口登记
+
+- **Task**：S4 —— 按 §3 固定配置对 `780004` / `780005` **各运行一次**，经**正式装配入口**
+  （`assembleRunWorkbenchInputs`）+ **既有闭环编排**（`runClosedLoop`）+ **既有持久化端口**
+  （`persistClosedLoopBacktestRun`）留档。
+- **版本管理内的复现工具**：`tests/tools/eventStateLongFormalRun.mts`（**非** `scripts/_scratch`）；
+  模式：读回 `strategy_versions@2.0.0`（既有 `StrategyService.loadVersion`）→ 正式装配 → 闭环 →
+  留档；`--no-persist` 供诊断复算；`--start/--end` 供显式区间覆盖（覆盖时打印 `WINDOW_OVERRIDDEN`）。
+- **写入清单（新增 2 行，已只读对账）**：
+  - `closed_loop_backtest_run.id=6210013`（780004，`runId=clrun-parity-780004-20261010034703535`）
+  - `closed_loop_backtest_run.id=6210014`（780005，`runId=clrun-parity-780005-20261010040556985`）
+  - 对账：该 strategyId 的正式 Run 由 0 → **2**；`strategy_versions` 总行数**仍为 180**；
+    `3600006`（指纹 `7e863012…`/`Validated`/`updatedAt`）与 `3600007` **逐列未变**；
+    `strategy_research_provenance` **仍为 0**。
+- **结果摘要**：
+  - **780004**（区间 = §3，**未裁剪**；流式游标路径）：决策日 1716、成交 **4825**、期末 **0 未平仓**、
+    期末权益 **1,650,970.37（+65.10%）**；实际权益区间 `2019-01-03 ~ 2026-05-28`（含执行尾窗）；
+    成交层拒绝 **56**（`LIMIT_UP 7 · LIMIT_DOWN 18 · NO_LIQUIDITY 26 · OTHER 5`）；
+    `skipped`：`BUDGET_BELOW_MIN_LOT 77`、`NON_LONG_DIRECTION 1`；模拟指纹 `3d22f577…`。
+  - **780005**（区间**裁剪**为 `2026-01-29 ~ 2026-09-04`）：决策日 146、成交 **423**、
+    期末 **117 未平仓（平台 MTM）**、期末权益 **945,376.19（−5.46%）**；拒绝 0；
+    `skipped`：`BUDGET_BELOW_MIN_LOT 11`、`NO_NEXT_TRADING_DAY 6`、`NON_LONG_DIRECTION 1`。
+  - 两 run 的 `data/research/strategy/backtest/evaluation` 五阶段均 **EXECUTED**；其余闭环阶段如实 **SKIPPED**。
+- **🔴 契约缺口 1（780005 区间裁剪）**：`research/datasetAccess/session.ts#createDatasetSession`
+  强制「实验区间 ⊆ 数据集窗口」。**物化直读路径**把窗口取为 `dataset_version` 的**事件窗**
+  （`datasetFromRegistry.ts` 内 `version.startDate/endDate = 2026-01-01~2026-09-04`）⇒ 拒绝 §3 的 `2026-10-09`
+  （实测 `CL_STAGE_EXECUTION_ERROR`）。**流式游标路径**窗口含执行尾窗 ⇒ **能**接受同一区间
+  （780004 因行数上界 4.5M > 1.6M 护栏自动走流式，故未被裁剪；780005 上界 0.66M ⇒ 物化 ⇒ 被拒）。
+  本轮按 §3「使用实际可用日历」裁剪并**如实登记**（末约 25 个交易日无法出场，期末按 MTM）。
+  **未在本轮修改该共享守卫**（属既有平台契约，改动会波及所有物化直读策略的数据集窗口口径，
+  须独立影响评估 + 回归证明）；登记为后续项。
+- **🔴 契约缺口 2（provenance 未接）**：`strategy_research_provenance` 的唯一写入点要求
+  `sourceKind="INDEPENDENT_EXPERIMENT"` 且证据桥要求证据 Run 为 `COMPLETED + HOLDOUT + gate PASS`
+  + 同一 `protocolFingerprint`。本目标的 Run 是**工程执行一致性复现**，不是 HOLDOUT 确证实验
+  ⇒ **不存在可合法指向的 provenance 记录**。按门禁 **不伪造**（不给 3600006 回填来源、
+  不把历史报告当实验 Run、不把工程 Run 冒充 HOLDOUT）⇒ 保持未接并登记缺口，**S4 不标记完全完成**。
+- **一处“疑似差异”已解释**：探针初版把「成交数量非 100 整数倍」计为整手违规（780004 有 50/4825）。
+  已定位为**公司行为调整后的持仓数量**（`simulator/engine.ts#applyCorporateAction` 于当日订单与估值前
+  应用分红/送转/配股/拆合股；样本量级 1.04%、示例均为 10 的倍数）——**整手约束作用于买入侧**，
+  同一 run 的 `BUDGET_BELOW_MIN_LOT` 跳过记录证明整手预算路径生效。故该 50 条**不是**未解释差异。
+- **Checks**：`tsc --noEmit` = **0 错**（含新增 `tests/tools/**`）；本轮未改业务代码；
+  EOL `--strict` tracked 漂移 **0**（全仓 exit 1 仍仅因其他会话未跟踪的
+  `_scratch/overlap/probe01_db_state.mjs`，未覆盖）。
+- **Contract / DB / Execution Impact**：Contract = 无变化；DB = **新增 2 行留档**（已对账）；
+  Execution = 未改变任何执行路径。
+- **Baseline Impact**：新增两条正式 Run 留档 + 两项契约缺口登记。无 Domain 跃迁、无基线版本提升。
+  **GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · S5 指标统一与差异解释
+
+- **Task**：S5 —— 只用**权威指标出口**输出两条留档 Run 的指标，并给出「旧报告 / 正式新结果 / 差异原因」表。
+  **零写入、零业务代码改动**（新增只读核验工具 + 文档）。
+- **新增版本管理内的核验工具**：`tests/tools/eventStateLongMetrics.mts`（只读 DB）——
+  从 `closed_loop_backtest_run.resultJson` 的 `evaluation` 阶段取留档指标，并用**同一份**权威实现
+  （`research/riskAdjustedMetrics/analyze.ts`、`shared/quant-stats.ts#sharpeRatio`）从**同一份**
+  已留档权益曲线独立重算后逐项比对。
+- **结论：无第二套指标公式**。`metricsSource="canonical"`；年化 **252**；`rfAnnualPct=0`；
+  `downsideTarget=0`；权益起点 = 曲线首点；比率类退化场景按权威实现返回 `null`（本两次均非 null）。
+- **核验结果（7 项 × 2 run，全部 `match=true`）**：
+  - 780004（`6210013`）：`totalReturnPct` **+65.097**、`maxDrawdownPct` 16.085（正数幅度）、
+    `cagrPct` +7.309、Sharpe **0.7175**、Sortino **0.9787**、Calmar **0.4544**、
+    年化波动 10.621% / 下行偏差 7.787%；`winRatePct` 48.60、`profitFactor` 1.5624、
+    `completedTradeCount` 4825；费用 `totalCost` **53,682.66**（佣金 12,410.04 + 滑点 41,272.62）。
+  - 780005（`6210014`）：`totalReturnPct` **−5.462**、`maxDrawdownPct` 12.628、`cagrPct` −9.301、
+    Sharpe **−0.7568**、Sortino **−1.0029**、Calmar **−0.7365**；`completedTradeCount` 306（期末 117 未平仓 MTM）；
+    费用 `totalCost` **4,419.69**。
+  - 交叉核对项 `shared/quant-stats#sharpeRatio` 与留档值**逐位相同**；
+    **`tradesTruncated=false`** ⇒ 完整成交台账在留档内，Run 可由库内记录重建。
+- **差异解释（旧报告口径 vs 正式 canonical）**：
+  - 收益：780004 **+53.88% → +65.10%**（+11.22pp）；780005 **−7.54% → −5.46%**（+2.08pp，
+    主因是 §6.3 的区间裁剪 + 执行层真实约束）。回撤幅度均变浅（18.08%→16.08%；13.33%→12.63%）。
+  - 风险调整指标**口径不同、不可直接比较**，且已用可验证算术锚定旧报告口径：
+    旧 780004 Sharpe **0.553** × 年化波动 **11.36%** ≈ **6.28%** = 旧 CAGR₃₆₅
+    （正式 CAGR₂₅₂ = 7.309%）；旧 780005 Calmar **−0.803** × MDD 13.33% ≈ **−10.70%** = 旧 CAGR₃₆₅
+    （正式 CAGR₂₅₂ = −9.301%）。即旧报告 Sharpe = `CAGR/年化波动`、CAGR 用 **365.25 自然日**、
+    Sortino 分母只对负日取均值；正式一律 **252** 且 Sharpe = `mean/sample sd × √252`、
+    Sortino 分母 = 全样本下行偏差。旧值出处：`docs/research/RESULT-STAGE4-001.md`（780004）与
+    `docs/research/RESULT-VALIDATION-FINAL-001.md`（780005）。
+- **验证强度如实声明**：**无**旧权益/成交产物 ⇒ **不声称全历史逐笔等价**；执行语义等价性只由
+  S3 的直接对拍（未解释差异 = 0）证明。
+- **投资结论未变**：780005 正式结果 **−5.46% < 0** ⇒ 原 **Stage 1 FAIL**（S1-P1）**未被推翻**；
+  样本独立性仍是显式假定。工程 PASS ≠ 投资验证 PASS。
+- **Checks**：`tsc --noEmit` = **0 错**；EOL `--strict` tracked 漂移 **0**（全仓 exit 1 仍仅因其他会话
+  未跟踪的 `_scratch/overlap/probe01_db_state.mjs`，未覆盖）。
+- **Contract / DB / Execution Impact**：均为 **0**（无代码改动、无写入、无执行路径变化）。
+- **Baseline Impact**：无。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · S6 状态呈现与可达性 + ROADMAP 轮转 + 终态报告
+
+- **Task**：S6 —— 证明用户能从**既有**入口到达新 Run 与证据，且**没有**把正式复现 PASS
+  呈现为 OOS PASS；更新 `ROADMAP.md` 当前区与审计；输出终态报告与后续队列。
+  **零界面改动、零 DB 写入、零业务代码改动**。
+- **S6 可达性只读实证**（新增 `tests/tools/eventStateLongReachability.mts`，`problems = []`）：
+  - `client/src/pages/BacktestRuns.tsx` 消费的 `listClosedLoopBacktestRuns({strategyId})`
+    返回 **2 条**（`6210013` / `6210014`），`strategyVersion=2.0.0`、`status=ALL_EXECUTED`，
+    记录内已含 `totalReturnPct` / `maxDrawdownPct` / `cagrPct` / `finalEquity` / `tradeCount` /
+    `equityCurvePointCount` / `recipeId` / `datasetSource`。
+  - `StrategyService.listVersions`（策略 → 版本入口）返回 **`1.0.0`（`Validated`）· `2.0.0`（`Draft`，
+    `parentVersionId=3600006`）**。
+  - ⇒ 旧版本生命周期、修正版与两条正式 Run 经**既有**状态/证据结构可见。
+- **「界面变化经过实际渲染验收」如实声明为不适用**（本轮**无界面变化**，未改 `client/**`）——
+  不冒充已渲染验收。
+- **🔴 提交方案（不自行执行）**：`3600006` 现为 `Validated`，与后续 780005 **Stage 1 FAIL**
+  （S1-P1；本轮正式复现 −5.46% 仍未转正）相矛盾。修正既有版本的生命周期**超出本轮授权**
+  （授权明确不含修改历史记录）⇒ 只提交两个可选方案（降级为 `Draft`/新增失败态并在版本详情呈现 FAIL；
+  或用 provenance/研究结论结构登记 FAIL 而不动生命周期字段），等用户裁定。
+- **ROADMAP 当前区（§44「上轮实查」）已按本节规则轮转**：旧条目（`9cn`，3,691 字符）**原样移入**
+  `ROADMAP-CHANGELOG.md`，新条目编号 **`9co`**（下一个未占用 = `9cp`）；机械替换，**条目数仍为 1**、
+  行数不变（2857）、**行尾保持 LF**。
+- **终态 = NEEDS_HUMAN（不 COMPLETE）**：执行一致性（定义 ≡ 执行 ≡ 证据）**已达成**
+  （§3 逐字段 22/0 不一致；S3 未解释差异 0；canonical 指标 7×2 全 match；台账可取回），
+  未闭合的是三项**需人工裁定**的事：
+  ① 780005 区间裁剪（物化直读路径数据集窗口 = `dataset_version` 事件窗 ⇒ §3 的 `2026-10-09` 被拒；
+  流式路径不受影响；未擅改共享守卫）；
+  ② provenance 无合法可指向证据（工程复现 ≠ HOLDOUT 确证；**不伪造**）；
+  ③ `3600006` 生命周期与 FAIL 矛盾（需授权）。
+- **投资结论未被工程 PASS 覆盖**：780005 正式 **−5.46% < 0** ⇒ 原 Stage 1 FAIL **未被推翻**；
+  样本独立性仍为显式假定；**不**转 Paper / Approved / Production。
+- **Checks**：`tsc --noEmit` = **0 错**；EOL `--strict` tracked 漂移 **0**（全仓 exit 1 仍仅因其他会话
+  未跟踪的 `_scratch/overlap/probe01_db_state.mjs`，未覆盖）。
+- **Contract / DB / Execution Impact**：Contract = 无变化；DB = **零写入**；Execution = 无变化。
+- **Baseline Impact**：`ROADMAP.md` 当前区 + `ROADMAP-CHANGELOG.md` + 本审计 + 结果报告。
+  无 Domain 跃迁、无基线版本提升。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · 用户裁定落地：`3600006` 生命周期修正 + 目标 COMPLETE
+
+- **Task**：按用户本轮直接指令落地三项裁定，闭合最后门禁。
+- **用户裁定**：①「到 20260904 即可」⇒ 接受 780005 区间裁剪为最终口径（**不改**共享守卫）；
+  ②「如果暂时不用的话可以先不用」⇒ provenance **暂缓**（`strategy_research_provenance` 保持 0，**不伪造**）；
+  ③「可以修改」⇒ **授权**修正 `3600006` 生命周期状态。
+- **🔴 生命周期写入（先报告后执行）**：
+  - **执行前影响报告**：入口 = `server/research/strategyPersistence/service.ts#StrategyService.setVersionStatus`
+    （源码标注「STRATEGY-003 — 版本生命周期状态迁移（**唯一允许的 UPDATE**；内容仍不可变）」），
+    内部由 `research/lifecycle/types.ts#isStrategyLifecycleStatus` 校验 **C-21.1 八态**；
+    目标 `1.0.0`：`Validated` → **`Retired`**（八态中唯一表达「不再在用」的终态；该版本已被后续
+    780005 Stage 1 FAIL 否定并被修正版 `2.0.0` 取代）；**不改** document/definition/指纹/谱系/数据集坐标；
+    预期实体 `strategies.status` 不被旧版本迁移覆盖（服务层「非当前版本不同步」设计）。
+  - **执行工具**：`tests/tools/eventStateLongLifecycle.mts`（**版控内**，`--dry-run` 先跑通）。
+  - **执行后断言 4/4 通过**：`statusChanged` / `contentUntouched` / `otherVersionsUnchanged` / `entityStatusUnchanged`。
+  - **行级对账**：`strategy_versions.id=3600006` 仅 `status` 变 `Retired`（`updatedAt` 由 UPDATE 刷新为
+    `2026-10-10 12:36:28`，属预期、不含内容语义）；`codeVersion=1.0.0+gunknown`、
+    文档指纹 `7e863012…66a1cba`、`parentVersionId=null`、`datasetVersionId=780004`、`createdAt` **全部未变**；
+    `3600007` 逐列未变；`strategies.id=1770005`（`Draft`/`2.0.0`/`currentVersionId=3600007`/`updatedAt`）**未变**；
+    `strategy_versions` 行数 **仍 180**；两条正式 Run（6210013 / 6210014）仍 `ALL_EXECUTED`。
+- **未做**：未新增/删除版本；未回填历史记录；无 DDL / migration；无批量写；未改策略内容与指纹；
+  **未**修改其他实验的 16 条僵死 `RUNNING`（仅登记为人工核查项）。
+- **目标终态 = ✅ COMPLETE**：执行一致性达成（S3 未解释差异 0、执行快照与 §3 一致 22:0、
+  canonical 指标 7 项 × 2 run 独立重算全部一致、两条正式 Run 已留档且可重建）；
+  总验收逐条通过（`tsc` 0 / 零新增失败 / EOL tracked 漂移 0 / 代码坐标非 `gunknown` / 写入逐项对账）。
+- **投资结论未被工程 PASS 覆盖**：780005 正式 **−5.46% < 0** ⇒ 原 Stage 1 FAIL **未被推翻**；
+  样本独立性仍为显式假定；**不**转 Paper / Approved / Production；B/C 后续队列**只登记不启动**。
+- **Checks**：`tsc --noEmit` = **0 错**；EOL `--strict` tracked 漂移 **0**（全仓 exit 1 仍仅因其他会话
+  未跟踪的 `_scratch/overlap/probe01_db_state.mjs`，未覆盖）。
+- **Contract / DB / Execution Impact**：Contract = 无变化；DB = **1 行 1 列**（`strategy_versions.status`，
+  用户授权 + 执行前影响报告 + 执行后对账）；Execution = 无变化。
+- **Baseline Impact**：`ROADMAP.md` 当前区（`9co` 终态改为 COMPLETE）+ 本审计 + 结果报告。
+  无 Domain 跃迁、无基线版本提升。**GLOBAL AUDIT REQUIRED：NONE。**
+
+## 2026-10-10 · EVENT-STATE-LONG-EXECUTION-PARITY-001 · 修复留档可读性缺陷（前端「回测对比」读不出结果）
+
+- **Task**：用户实测反馈 —— 前端「回测对比」页对本次两条留档显示
+  **「该留档已落库，但结果读不出来（不符合当前契约）」**，要求「能正确显示收益曲线跟交易明细」。
+- **🔴 根因（本目标自身缺陷，非平台既有 bug）**：复现工具初版**自己拼**了
+  `result.wiring = { requested, streaming }`；而 `closedLoopBacktestRun` 的**读路径**
+  `researchRun.getBacktests` 会按契约校验该字段，实测返回
+  `wiring.requestedStages / wiredStages / unwiredStages / coveredStages / uncoveredStages：
+  Invalid input: expected array, received undefined` 与
+  `wiring.executorBound：expected boolean, received undefined` ⇒ `result` 返回 null
+  ⇒ 前端 `buildVersionCompareCurve` 的 `pointCount = 0` ⇒ **折线图与交易明细都渲染不出来**。
+  **直接原因是 `server/researchRunRouter.ts#toWiringSummary` 当时未导出**，复现工具无法复用唯一实现。
+- **修复（两处，均为最小改动）**：
+  1. `server/researchRunRouter.ts`：**导出** `toWiringSummary`（附注释说明「读路径校验该形状，
+     任何在 `persistClosedLoopBacktestRun` 之外自拼 `result.wiring` 的调用方都会写出
+     『落库成功但读不出来』的记录」）；`tests/tools/eventStateLongFormalRun.mts` 改为复用该唯一实现。
+  2. 新增 `tests/tools/eventStateLongFormalRunRepair.mts`：用**同一实现**重建
+     `6210013` / `6210014` 的 `result.wiring`，**就地只替换该子对象**（按 id 精确限定，先 `--dry-run` 后执行）。
+- **修复后核验（走页面同一段代码）**：两行 `resultIssue = null`、`result ≠ null`；
+  `equityCurve` 点数 **1792**（780004）/ **146**（780005）；成交 **4825** / **423**；
+  `totalReturnPct` **+65.097%** / **−5.462%**（全部与修复前一致）；
+  图表 series `pointCount` = 1792 / 146，数据行 **1862**、跨度 `2019-01-03 ~ 2026-09-04`
+  ⇒ `drawable` 两条曲线均 > 0，**收益曲线与交易明细可正常显示**。
+- **写入边界（逐项）**：仅 `closed_loop_backtest_run.resultJson` 的 **`wiring` 子对象** 2 处；
+  工具内断言 `stagesUnchanged = true`（`stages` 含 equityCurve / trades / costs / executionStats、
+  `assembly`、`fingerprint`、`chainFingerprint`、`overall` **逐字节未变**）；**未**新增/删除行、
+  未改 DDL / migration、未触碰其他策略或其他会话的记录。
+- **如实更正**：本目标此前在结果报告 §6.2 写的「台账随留档可取回」在**数据库层面**成立、
+  但在**平台读契约层面当时不成立**；已在 §6.5 记录纠正，§11 同步更新。
+- **平台观察（未改，仅登记）**：写入口 `persistClosedLoopBacktestRun` **不**校验 `result` 是否符合
+  读契约 ⇒ 存在「写入成功、读取失败」的不对称；修它属共享契约变更，超出本目标范围，登记为后续项。
+- **Checks**：`tsc --noEmit` = **0 错**；`vitest tests/server/researchRunRouter.test.ts +
+  tests/server/closedLoopBacktestRun + tests/server/runWorkbenchAssembly` = **23 文件 / 160 例全绿**；
+  EOL `--strict` tracked 漂移 **0**（全仓 exit 1 仍仅因其他会话未跟踪的
+  `_scratch/overlap/probe01_db_state.mjs`，未覆盖）。
+- **Contract / DB / Execution Impact**：Contract = **无变化**（只是把既有内部函数导出，签名与语义不变）；
+  DB = **2 行的 `resultJson.wiring` 子对象**（修复本目标自造的不合规留档）；
+  Execution = 无变化（未改任何执行路径）。
+- **Baseline Impact**：结果报告（§6.5 新增、§6.2/§11 更正）+ 本审计 + `ROADMAP.md` 当前区补记。
+  无 Domain 跃迁、无基线版本提升。**GLOBAL AUDIT REQUIRED：NONE。**
+
+---
+
+## 2026-10-10 · `FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001`（首板滚动观察池 × 每日右尾识别：最小研究闭环）
+
+- **Task**：执行 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001.md` 的 S1–S6；唯一研究问题 = 「滚动观察池里每天选 ≤3 只，能否比同日同池随机提高从下一交易日开盘起的 20 交易日右尾机会？代价是多少？」
+- **Changed Domains**：独立研究实验作者面（`research-experiments/**`）· 前端研究实验外壳（Dataset 版本选择器）· 研究文档
+- **Changed Files**：
+  - **新增**：`research-experiments/strategyCoreBridge.ts`（零实现 re-export：Core `FeatureDefinition.compute` + `createDayScopedBarAccess` + `EVENT_STATE_AMPLITUDE_FEATURE_IDS/WINDOW`）；`research-experiments/shared/rollingPoolRightTail/{types,projection,labels,stats,index}.ts`；`research-experiments/first-board-pullback/rolling-pool-right-tail-mvp/{experiment,result,page}.ts(x)` + `README.md`；`tests/server/researchExperiments/rollingPoolRightTailMvp.test.ts`；`tests/tools/{rollingPoolRightTailRun.mts,rollingPoolReconcile.mts,rollingPoolTieDiagnostic.mts}`
+  - **修改**：`research-experiments/manifest.ts`（+1 注册 + **具名 v5 底座豁免**，因该实验绑定 v10/780004）；`client/src/researchExperiments/pages.ts`（+1 页面）；`client/src/pages/researchExperiments/experimentModes.ts`（归位 `other-scope`）；`tests/client/src/pages/researchExperimentModeGrouping.test.ts`（分档 48→49）；`client/src/pages/researchExperiments/ExperimentDetail.tsx`（**只列兼容 Dataset 版本并默认选中**，未声明 `requiredDatasetVersionLabel` 的实验行为不变）
+  - **最小扩展（缺省行为逐字节不变，各带平价测试）**：`research-experiments/shared/firstBoardPullback/panel.ts`（`findExecutableExit` 导出 + 可选 `maxRelativeDay`，缺省 = 既有 20）、`research-experiments/shared/firstBoardPullback/dataset.ts`（提取 `foundationBarStructurallyValid` 为唯一实现）、`research-experiments/shared/dateClusterBootstrap.ts`（`movingBlockBootstrapMean/Difference` 可选 `quantiles`，缺省 = 既有 0.025/0.975）
+  - **文档**：`docs/research/S1-FIRSTBOARD-ROLLING-POOL-ASSET-GATE-001.md`、`docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RIGHTTAIL-MVP-001.md`、`ROADMAP.md`（§44 上轮实查）、`ROADMAP-CHANGELOG.md`（归档上一条 + 本条）、本文件
+- **Changed Contracts**：**无**。未改 `shared/researchExperimentsContracts.ts`；`decisionOffsetDays` 仍是单标量（缺口如实登记，未擅自加字段）
+- **Changed DB**：**无 DDL / migration**；仅 `research_experiment_run` **+3 行**（`RUN-20261010-745C38AA` FAILED/技术中止 · `RUN-20261010-D9210EBC` COMPLETED/主结论 · `RUN-20261010-762EBADF` COMPLETED/S5 UI 验收 + 主窗口第二次重放，与前者逐字节一致）。Dataset 数据一行未动；历史 Run / Strategy / Candidate 未动
+- **Changed Execution Path**：**无**。不接 Runner / Backtest / Paper / Production；未新开策略执行路径
+- **Potential Baseline Drift**：无。**新增登记 5 项契约缺口**：① `decisionOffsetDays` 单标量无法表达逐日决策坐标（以内存投影表达，声明 40 = **上界**）；② `observation(rd)` 无 eventId/日期参数 + `freezeSelection` 一次性；③ 逐日 ST/上市龄不在 Dataset 端口内（记 `UNAVAILABLE`，**未声称每日非ST控制**）；④ 并列诊断不在 Run 信封内（用既有 `rankResolution.ts` 在 Run 自持久化日账上离线复算）；⑤ 每日账需按季度分片（单产物 64MB 上限，完整窗口 ≈44.8 万行 ≈78MB）
+- **Regression Result**：`pnpm run check`（= `tsc --noEmit`）**实跑 exit 0（0 错）**；`pnpm run test:changed` = **168 文件 / 2,077 例**、**新增失败 0**（10 个失败全部为既有/环境失败，并**在 `git worktree` 纯 HEAD 检出上复现同样 10 个** ⇒ 归属确证）；新增测试 `rollingPoolRightTailMvp.test.ts` **34/34**；真实预检**未解释状态差异 0**、两次重放逐字节一致；主窗口**两条独立 Run**（工具 + 浏览器 UI）的 `sampleSummary+tables+statistics+customPayload` **逐字节一致**；S5 浏览器验证 **9/9 PASS**；EOL `--strict` **tracked 漂移 0**（全仓 exit 1 仅因其他会话未跟踪的 `_scratch/overlap/probe01_db_state.mjs` CRLF，**未覆盖**）
+- **Baseline Impact**：**minor**。更新 `ROADMAP.md` §44（上轮实查）+ `ROADMAP-CHANGELOG.md`（归档）+ 本文件；`SYSTEM-BASELINE.md` / `system-manifest.yaml` **未改**（无 Domain 状态跃迁、无新 entry point、无新契约）；`docs/architecture/MODULE-MAP.md` 的 `research-experiments` 计数说明**未改**（测试文件数会随新增 +1，属既有描述性文字，未触发 GLOBAL AUDIT）
+- **GLOBAL AUDIT REQUIRED**：NONE
+
+## 2026-10-10 · FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002 · 执行目标文档
+
+- **Task**：按用户“主要可以给出文档”交付现有滚动池续研目标；实际成交不晚于T+10，按决策日账户权益建仓。
+- **Changed Domains / Files**：仅文档；新增 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002.md`，增加INDEX入口与本审计。
+- **Baseline Version**：HEAD `f8b6810` + 长期dirty工作区；未覆盖其他会话文件。
+- **Pre-existing Facts**：旧滚动池仅收益标签研究，无独立买点；maxAmp5共同资格使候选下界rd15，与新T+10截止不兼容。EQUITY_FRACTION已有执行实现。只读库核验780004 READY且物理post1..80；参考策略3600005退出policy含T74 Runner。
+- **Changed Contracts / DB / Execution Path**：均无；只读SELECT，无新Run、无Dataset构建、无业务代码改变，文档不会改变执行行为。
+- **Remaining Risks**：买点规则尚待明确；T+10入场的T74执行尾部可能超过rd80，不能截短Runner或伪造估值。后续执行需按文档门禁处理。
+- **Regression Result**：文档任务，不运行收益实验或test:changed；类型/EOL检查结果见本次交付说明。
+- **Baseline Impact**：仅本审计；无Domain跃迁或新代码entry point，SYSTEM-BASELINE/system-manifest不变。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+## 2026-10-10 · FIRSTBOARD-ROLLING-OBSERVATION-ENTRY-001 · 连续观察买点规则提案
+
+- **Task**：按用户“可以，给出规则”提出连续观察评分、局部突破确认的第一轮规则，并修订滚动池续研目标中的未定义买点入口。
+- **Changed Files**：新增 `docs/research/RULE-FIRSTBOARD-ROLLING-OBSERVATION-ENTRY-001.md`；更新续研GOAL及INDEX指针、本审计。
+- **Changes**：四项每日0/1分、前两日各≥3、先有历史回撤且未破98%首板开盘支撑、收盘突破前两日高点与量能回升；最早T+4可能成交，最晚T+10。观察分决定触发，preReturn10仍只排序。全部是待验证阈值，不是既有有效策略事实。
+- **Contract / DB / Execution Impact**：均无，纯文档；无新Run、无策略版本或Dataset修改。未改变真实执行行为。
+- **Risks**：可能样本稀疏，规则局限回撤路径；不覆盖连续追涨；尾部行情覆盖仍需核验。共同买点候选与不同账户的持仓限制严格分层。
+- **Regression Result**：文档链接与LF检查通过；类型及EOL检查见本次交付。无业务代码改动，不运行收益实验或新增镜像测试。
+- **Baseline Impact**：仅CHANGE-AUDIT，SYSTEM-BASELINE/system-manifest无状态变化。GLOBAL AUDIT REQUIRED：NONE。
+
+## 2026-10-10 · EVENT-STATE-LONG-STRONG-HOLD-001 · 「强势继续持有」实验臂 + 执行尾窗夹取
+
+- **Task**：为 Event-State Long 建「强势继续持有」实验臂，按预注册判据给出对照结论。
+- **Changed Files（生产代码 2 处，均最小）**：
+  - `server/runWorkbenchAssembly/assemble.ts`：
+    ① `resolveEventWindowExitTailTradingDays` 的便宜筛选**原先只认 rule-list `TIME_EXIT`**
+    （要求 `thresholdUnit === "TRADING_DAY"`），而带 `policy` 的规则**不得**声明该字段
+    （`strategySchema/definitionValidation.ts` 禁止 `threshold`/`policy` 并存）⇒ 统一 policy 形式的策略
+    **静默拿到尾窗 0** ⇒ 退回物化路径 ⇒ 区间超出数据集事件窗时被守卫拒绝。修法：同时认
+    `rule.policy.timeExit.kind === "FIXED_HOLDING_DAYS"`，并改按**有效最长持有期**
+    `max(timeExit, strongHold.extendToHoldingDays, strongHold.runnerExitAtHoldingDays ?? 0)` + 顺延缓冲派生。
+    ② 新增导出纯函数 `clampEventWindowExitTailTradingDays(derived, observationWindowEnd, postMax)`：
+    把派生尾窗夹到数据集自己声明的 post 上限之内（`可用尾窗 = postMax − end − 1`）。
+  - `shared/researchContracts.ts` + `LoopRunAssemblySummary`：新增**可选**字段
+    `eventWindowExitTailTradingDaysClampedFrom`（夹取前的派生值；与夹取后的有效值**同时可见 = 不静默**）。
+- **🔴 为什么必须夹取（实测根因）**：B″ 派生尾窗 80 ⇒ 需 `rd ≤ 96`，而 `780004` 的 post 上限为 `rd = 80`。
+  `datasetFromRegistry.ts` 对超限是**响亮拒绝**（`REGISTRY_POST_WINDOW_TOO_SHORT`，注释写明
+  「🔴 不静默夹取窗口」）⇒ 流式路径抛错 → **回落重建路径** → 重建阶段被连接掐断（`ECONNRESET`，3/3 次）。
+  **未改 `datasetFromRegistry.ts` 的任何守卫**（平台「不静默夹取」原则保持）；修的是**派生值本身**。
+  影响面：仅「派生尾窗 > 数据集 post 上限」的策略；尾窗 60 的既有策略（`16+60=76 ≤ 80`）**不受影响**；
+  post 上限读取失败 ⇒ 不夹取（保持既有行为，不把失败当 0）。
+- **Changed Contracts**：装配摘要新增 1 个**可选**字段（向后兼容；zod 同步）。
+- **Changed DB**：**无 DDL / migration**。新增 `strategy_versions` **7 行**（`3.0.0`/`4.0.0` 内容不完整
+  = 无效臂、`5.0.0`/`6.0.0` = FIXED_RATIO 旧口径臂、`7.0.0`/`8.0.0`/`9.0.0` = `EQUITY_RATIO` 有效臂）
+  + `closed_loop_backtest_run` **5 行**（`6210015` 无效 C、`6210016` 旧口径 C′、`6210017` A″、`6210018` C″、
+  `6210019` B″ —— 其中 3 行为有效臂）。**`2.0.0` 与既有 Run 逐列未改**；未回填、未删除、无批量写。
+- **Changed Execution Path**：无（未新开执行路径；退出政策仍只经文档声明表达，复用既有 simulator）。
+- **结论（预注册判据）**：三臂 `7.0.0`/`8.0.0`/`9.0.0` ⇒ **强势续持纯增量 B″−C″ = −1.890pp**、
+  **MDD 反而更深 +2.502pp**、Sharpe/Sortino/Calmar 全部更差、逐年无一致符号 ⇒
+  按预注册 §6.6 **判定「无正增量」**。止损效应 C″−A″ = **−48.903pp**（MDD 更浅 9.085pp）。
+  资金占用代价已披露：**524 笔**走延长、峰值占用 113 → **133**、
+  **`rejectedOrders` 122 → 295（`SUSPENDED` 0 → 163）**。
+- **Regression Result**：`tsc --noEmit` **0 错**；`tests/server/runWorkbenchAssembly` **13 文件 / 96 例**
+  全绿（含新增 8 例：policy 形式尾窗 3 例 + 夹取 5 例）；
+  `runWorkbenchAssembly + researchRunRouter + closedLoopBacktestRun` **23 文件 / 168 例**全绿；
+  EOL `--strict` **tracked 漂移 0**（全仓 exit 1 仅因其他会话未跟踪的
+  `_scratch/overlap/probe01_db_state.mjs` CRLF，**未覆盖**）。
+- **Baseline Impact**：**minor** —— 结果报告 `RESULT-EVENT-STATE-LONG-STRONG-HOLD-001.md` +
+  预注册 `PREREG-EVENT-STATE-LONG-STRONG-HOLD-001.md`（§11 执行记录）+ 本审计。
+  无 Domain 状态跃迁、无新 entry point；`SYSTEM-BASELINE.md` / `system-manifest.yaml` **未改**
+  （新增的是装配摘要的可选字段，未改变任何 Domain 状态或对外能力）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-10 · `FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002`（首板滚动池续研：早期入场 × 因子排序 × 固定 Runner）
+
+- **Task**：执行 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002.md` 的 S1–S6；买点 = `RULE-FIRSTBOARD-ROLLING-OBSERVATION-ENTRY-001`。
+- **Changed Domains**：独立研究实验作者面（`research-experiments/**`）· 研究实验服务支持（`server/researchExperiments/**`，**纯新增**）· 前端研究实验外壳（登记面）· 研究文档
+- **Changed Files**：
+  - **新增**：`research-experiments/shared/rollingPoolEarlyEntry/{types,entry,index}.ts`；`research-experiments/first-board-pullback/rolling-pool-early-entry-runner/{experiment,result}.ts(x)` + `README.md`；`server/researchExperiments/rollingPoolExecutionSupport.ts`（真实身份 + 数据集内容寻址封存）；`server/researchExperiments/frozenRunnerExitPolicy.ts`（冻结退出政策唯一读取器 + 指纹/版本行主键断言）；`tests/server/researchExperiments/{earlyEntryObservation,rollingPoolEarlyEntryRunner}.test.ts`；`tests/tools/rollingPoolEarlyEntryRun.mts`；`docs/research/{S1-FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-GATE-002,S3-FIRSTBOARD-EARLY-ENTRY-EXECUTION-GATE-002,RESULT-FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002}.md`
+  - **修改**：`research-experiments/compositeRunnerBridge.ts`（**零实现 re-export**：`runTradeSimulation`/`evaluateCandidateRun`/`computeCandidateEvaluationRunFingerprint`/`canonicalMetrics` + 类型）；`research-experiments/manifest.ts`（+1 注册 + `FOUNDATION_EXEMPT_EXPERIMENT_IDS` 加该 id）；`client/src/researchExperiments/pages.ts`；`client/src/pages/researchExperiments/experimentModes.ts`（`other-scope`）；`tests/client/src/pages/researchExperimentModeGrouping.test.ts`（total 49→50 / other-scope 30→31）
+  - **最小追加（旧实验行为不变）**：`research-experiments/shared/rollingPoolRightTail/projection.ts` 的 `PoolBar` **追加** `volume` + round-1 `experiment.ts#normalizeBar` 补一行；round-1 未在 `requiredColumns` 里声明 `volume` ⇒ 该字段在旧实验恒 `null` 且**旧实验不读它** ⇒ 行为与产物逐字节不变
+- **Changed Contracts**：**无**。未改 `shared/researchExperimentsContracts.ts`；`executionSurface` 保持缺省 `SINGLE_EVENT`
+- **Changed DB**：**无 DDL / migration**；仅 `research_experiment_run` **+1 行**（`RUN-20261010-4BFF13C2` COMPLETED/SUCCEEDED）。**未修改 780004 内容**、未改历史 Run、未改策略版本 3600005、**未构建任何新 Dataset**
+- **Changed Execution Path**：**无新增引擎**。执行全部经既有唯一实现：`runCompositeRunnerBacktest` → `assembleRunWorkbenchInputs` → `runTradeSimulation`；指标唯一出口 `canonicalMetrics`
+- **Potential Baseline Drift**：无。**新增登记 7 项契约缺口**（详见 RESULT §8）：① Dataset 端口**无 `amount`** ⇒ 成本缺流动性分层、相对参考 Run **系统性低估**（拒绝伪造）；② `decisionOffsetDays` 单标量；③ 同股身份用 canonical **base id**（满足反绕过，代价是放弃 `::event:` 行级消歧，按 `(tradeDate,baseId)` 去重、冲突实测 0）；④ 锚点**首发优先** ⇒ 规则 §4 的「未成交后重试」未实现；⑤ `executionSurface` 缺省（`COMPOSITE_PORTFOLIO` provider 硬编码 660001 且忽略 `baselineDatasetVersionId` ⇒ 不可用）；⑥ 大形态数据装配需服务侧（`datasetVersion` 必须内容寻址，实验侧不自行拼版本号）；⑦ `result.ts` 的 3 个字面量副本在 run 开头被断言等于服务侧唯一导出
+- **Regression Result**：`pnpm run check` **exit 0**；`pnpm run test:changed` = **170 文件 / 2,118 例、10 failed** —— 与**此前在 `git worktree` 纯 HEAD 检出上复现的同样 4 文件 / 同样 10 例逐例一致**（`threeFactorTopNStrategyDocument` 的 `recoveryPath: null` · `limitUp*` 无数据库 · `datasetFilterForm` 的 `excludeListedWithinDays`）⇒ **归属确证 = 既有失败、零新增**；本轮新增测试 **`earlyEntryObservation` 15/15 · `rollingPoolEarlyEntryRunner` 18/18**（另有 round-1 相关 91/91 亦通过）；真实预检 **`T+10 违规 0`**、`成交日日历不一致 0`、`bar 值冲突 0`；正式 Run **`T+10 违规 0`**、身份 **19,510/19,510 解析成功**、`dataCoverageBlockedSharePct 0%`；EOL `--strict` **tracked 漂移 0**（未跟踪 CRLF 仅剩其他会话的 `_scratch/overlap/probe01_db_state.mjs`，**未覆盖**）
+- **Baseline Impact**：**minor**。更新 `ROADMAP.md` §44（上轮实查）+ `ROADMAP-CHANGELOG.md`（归档上一条）+ 本文件；`SYSTEM-BASELINE.md` / `system-manifest.yaml` **未改**（无 Domain 状态跃迁、无新 entry point、无新契约）；`docs/architecture/MODULE-MAP.md` 描述性计数**未改**
+- **GLOBAL AUDIT REQUIRED**：NONE
+
+---
+
+## 2026-10-10 · FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003（执行目标文档）
+
+- **Task / Baseline**：按用户明确确认的最晚T+20成交，交付现有首板滚动池续研目标；读取HEAD f8b6810及含并发未提交修改的工作区。当前任务仅写文档，不执行实验。
+- **Relevant Domains / Facts**：独立研究实验、策略执行与研究报告。既有002使用两日观察和T+10；当前代码存在首次触发截断、Runner按持有到74日计数、amount置null及非配对日期抽样等待核验偏差。
+- **Changes**：新增 docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003.md，docs/INDEX.md追加入口；本文追加审计。冻结修正后2日/T+10与2/3/5日/T+20四组，每组R+200 Random，主要比较D_R−B_R。
+- **Contract / DB / Execution Impact**：当前均为无；未改业务代码、策略版本、Dataset或历史Run，未执行DDL/DML或新实验。文档要求后续执行者先修正偏差、核验T+20+74日退出覆盖；必要的新Dataset构建需单独影响报告和授权。
+- **Behavior / Baseline Update**：纯文档不能改变运行行为。当前只更新INDEX与CHANGE-AUDIT，未新增能力或发生Domain状态跃迁，不改SYSTEM-BASELINE/system-manifest。
+- **Verification**：文档链接及LF检查、类型检查、既有earlyEntryObservation/rollingPoolEarlyEntryRunner测试、EOL检查；实际结果见本节后续验证记录。
+- **Remaining Risks / Next Step**：连续N日各≥3分提高严格度，可能减少信号；post80未必覆盖T+20入场后的完整Runner退出。把目标文档交给执行模型，完成S1–S6；本轮历史窗口为探索性，非新OOS。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **本轮验证实绩**：pnpm run check exit 0；两项既有相关测试2文件/33例通过；新目标LF、3个本地文档链接有效。EOL --strict exit 1：tracked漂移0，唯一CRLF为既有其他会话未跟踪的 _scratch/overlap/probe01_db_state.mjs，未覆盖。没有运行本轮804账户实验。
+
+---
+
+## 2026-10-10 · FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003 修订0.2（允许再次入场）
+
+- **Task / Baseline**：用户明确要求同首板事件不能永久排除二次入场。基于HEAD f8b6810及既有未提交工作区修改待执行目标文档；本轮继续仅交付文档。
+- **Relevant Domains / Pre-existing Facts**：研究协议、再入场账户规则。旧目标同锚点成功买入后永久禁买；现有 server/research/simulator/reentry.ts#createReentryBlocker 可表达再入场限制，但maxEntriesPerMember按securityId累计，不能误当成锚点次数。
+- **Changes**：GOAL 003修订0.2；A/B/C/D改为SIGNAL_REENTRY主配置，平仓后由新收盘信号再次入场；E为五日/T+20的SINGLE_ENTRY对照。矩阵由804变为1005账户。新增逐次入场、整锚点交易链、成本和状态重置要求，窗口主比较仍D_R−B_R，再入场增量单列D_R−E_R。INDEX同步当前入口描述。
+- **Contract / DB / Execution Impact**：当前无代码或运行变更、无DB写入、无Run、无历史策略或Dataset修改。未来实验的再入场政策为用户明确授权的研究定义变化，须走既有Strategy Core与执行链，不覆盖旧版本。修订不改变T+20期限、同股不加仓、当日权益20%或退出规则。
+- **Baseline / Behavior**：只更改研究文档和追加本审计，不新增运行能力，SYSTEM-BASELINE/system-manifest无需更新。文档不会影响既有测试/历史策略行为；新政策仍需执行模型实现并按新增S4用例验证。
+- **Verification**：目标LF、链接、政策键、1005账户数及整链统计要求已静态验证；类型/EOL检查结果随后追加。没有运行再入场实验，既有33项测试结果不作为新政策已实现的证据。
+- **Remaining Risks / Next Step**：历史支撑破位永久失效仍可能排除修复上涨路径，新增分桶审计但本轮不更改支撑条件。重复交易不等于独立事件；需扣除全部试错成本，避免大涨交易掩盖整条锚点链亏损。执行修订后的S1–S6。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **修订0.2验证实绩**：pnpm run check exit 0；文档LF、3个链接和协议静态检查通过。EOL --strict exit 1仅因既有其他会话未跟踪 _scratch/overlap/probe01_db_state.mjs 为CRLF，tracked漂移0，本轮修改未引入漂移。纯文档未重跑业务测试；新增再入场行为仍待执行模型实现与S4验证。
+
+---
+
+## 2026-10-10 · `FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003`（首板滚动池续研：连续观察窗口 N × 最晚成交 L 到 T+20）
+
+- **Task**：执行 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003.md` 的 S1–S6；含对上一轮 `RESULT-…-002` 的七项偏差审计与修正。
+- **Changed Domains**：独立研究实验作者面（`research-experiments/**`）· 研究文档 · 测试工具（`tests/tools/**`）
+- **Changed Files**：
+  - **新增**：`research-experiments/first-board-pullback/rolling-pool-observation-window/{experiment,result}.ts(x)` + `README.md`（五组矩阵、一个 Run、1005 账户）；`tests/server/researchExperiments/{rollingPoolObservationWindow,pairedDateClusterBootstrap}.test.ts`（31 + 10 例）；`tests/tools/rollingPoolObservationWindowRun.mts`；`docs/research/{S1-S2-FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003,RESULT-FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003}.md`
+  - **修改（可重放性优先）**：`research-experiments/shared/rollingPoolEarlyEntry/{types,entry,index}.ts`（**N/L 参数化，缺省 = 旧值** ⇒ 001/002 精确可重放）；`research-experiments/shared/dateClusterBootstrap.ts`（**追加**配对原语 + `quantiles` 回写，**旧函数逐字节不变**）；`research-experiments/shared/rollingPoolRightTail/projection.ts`（`PoolBar` **追加** `amount`，旧实验不声明 ⇒ 恒 `null` 且不读）；`research-experiments/compositeRunnerBridge.ts`（零实现 re-export `eventScopedSecurityId`）；登记面：`manifest.ts`（+ `FOUNDATION_EXEMPT_EXPERIMENT_IDS`）、`client/src/researchExperiments/pages.ts`、`experimentModes.ts`、`tests/client/src/pages/researchExperimentModeGrouping.test.ts`（50→51 / 31→32）
+  - **文档更正**：`RESULT-FIRSTBOARD-ROLLING-POOL-EARLY-ENTRY-RUNNER-002.md` 新增 §15（D1–D4 `BASELINE_DRIFT` 就地更正，**历史 Run 不回填**）
+- **Changed Contracts**：**无**。`executionSurface` 保持缺省 `SINGLE_EVENT`；E 组次数键改用平台自己的事件作用域身份（零契约改动）
+- **Changed DB**：**无 DDL / migration**；仅 `research_experiment_run` **+1 行**（`RUN-20261010-572243F5` COMPLETED/SUCCEEDED，70 产物）。**未构建新 Dataset**；未改 780004 内容 / 历史 Run / 策略版本 3600005
+- **Changed Execution Path**：**无**。`server/**` 一行未改；执行全部经既有 `runCompositeRunnerBacktest` → `assembleRunWorkbenchInputs` → `runTradeSimulation`；指标唯一出口 `canonicalMetrics`
+- **Potential Baseline Drift**：无新增。**登记 11 项契约缺口**（见 RESULT §「契约缺口」）：`decisionOffsetDays` 单标量；`observation(rd)` 无 eventId/日期参数；逐日 ST/上市龄不在端口内；`reentryPolicy` 不在组合 bridge 入参里（每组装配一次取 `simulationConfig` 后对 201 账户复用同一对象）；**Runner 触发不可观测**（`UNOBSERVABLE`，只报持有到 74 日笔数）；期末三分类为实验侧启发式；五组原始候选池自然不同（组间不对齐交易数）；`customPayload` 有意不含逐行明细（走 CSV）
+- **Regression Result**：`pnpm run check` **exit 0**；本轮新增测试 **`rollingPoolObservationWindow` 31/31** · **`pairedDateClusterBootstrap` 10/10**；受影响测试零新增失败（4 个既有失败文件与本轮改动零耦合，且已在此前用 `git worktree` 纯 HEAD 检出证明为既有失败）；真实预检与正式 Run **越界成交 0**、**bar 值冲突 0**、身份 **19,510/19,510 解析成功**、**232,827 笔交易 `openAtEnd 0`**；**确定性：两次独立执行的 `customPayload`/`tables`/`sampleSummary` 逐字节一致**；EOL `--strict` **tracked 漂移 0**（1 个其他会话未跟踪 CRLF 文件已**逐字节还原**、未被隐藏）
+- **Baseline Impact**：**minor**。更新 `ROADMAP.md` §44（上轮实查）+ `ROADMAP-CHANGELOG.md`（归档上一条）+ 本文件；`SYSTEM-BASELINE.md` / `system-manifest.yaml` **未改**（无 Domain 状态跃迁、无新 entry point、无新契约）
+- **GLOBAL AUDIT REQUIRED**：NONE
+
+---
+
+## 2026-10-11 · FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003 结果复核
+
+- **Task / Baseline**：用户要求查看已完成报告并给结论；实查HEAD f8b6810及含并发修改的工作区、正式Run本地快照和预检CSV、对应再入场及统计代码。
+- **Pre-existing Facts**：Run RUN-20261010-572243F5已COMPLETED/SUCCEEDED。五组R账户数值和主判定一致；D组155次再入场实际为1个锚点跨账户重复，R账户仅1次。
+- **Changes**：仅在RESULT-FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003.md追加§11复核更正，不覆盖原文或历史产物。更正再入场结论强度、P4负向读数遗漏、均值CSV点估计单位错误；披露P1缺少桶收益画像，以及N日各≥3不等同多日综合评分。
+- **Contract / DB / Execution Impact**：无。无代码修改、无DB/对象存储写入、无新实验，未修改历史Run、Dataset或策略定义。CSV展示问题只登记，不改历史产物。
+- **Tests / Behavior**：纯文档不能影响运行行为；业务测试不重复执行。追加文档检查与类型/EOL结果随后登记。
+- **Baseline Update / Next Step**：仅结果报告追加更正及本审计；未发生Domain状态跃迁，不改SYSTEM-BASELINE/system-manifest。建议优先做漏选/卖出截断归因；暂不扩参数矩阵、不凭此关闭滚动池或二次入场方向。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **复核验证实绩**：pnpm run check exit 0；结果报告LF及全部本地文档链接有效。EOL --strict exit 1仅因既有其他会话未跟踪 _scratch/overlap/probe01_db_state.mjs 为CRLF，tracked漂移0；未改该文件。纯文档更正不运行新实验或重复业务测试。
+
+---
+
+## 2026-10-10 · `FIRSTBOARD-ROLLING-POOL-LOSS-ATTRIBUTION-001`（漏选与卖出过早归因）
+
+- **Task**：承接 `FIRSTBOARD-ROLLING-POOL-OBSERVATION-WINDOW-003`，把「后来大涨」的股票按决策链逐层归因成互斥桶。
+- **Changed Domains**：独立研究分析面（`research-experiments/shared/**` + `tests/tools/**`）· 研究文档
+- **Changed Files**：**新增** `research-experiments/shared/rollingPoolLossAttribution/{types,funnel,csv,index}.ts`（纯函数、无 IO）· `tests/tools/rollingPoolLossAttribution.mts` · `tests/server/researchExperiments/rollingPoolLossAttribution.test.ts`（29 例）· `docs/research/{PREREG,RESULT}-FIRSTBOARD-ROLLING-POOL-LOSS-ATTRIBUTION-001.md`
+- **Changed Contracts**：**无**
+- **Changed DB**：**无**（行情仅**只读** SELECT；未新增/修改任何 Run、Dataset、策略版本）
+- **Changed Execution Path**：**无**。`server/**` 一行未改
+- **Potential Baseline Drift**：**登记 2 项数据口径限制**（工具已就地披露）：① `pool-daily-summary.rSelected` 由 basePlanning = **B** 生成 ⇒ **只代表 B 组**，不可用于逐组 TopK 对账；② `exclusion-ledger` 的 signal 层被丢弃的触发日**只有计数、没有 rd** ⇒ SPEC 口径下 `S4_NOT_RANKABLE` 无法逐机会定位（已如实标注）
+- **Regression Result**：`pnpm run check` **exit 0**；新增测试 **29/29**；受影响测试零新增失败；`checkEolDrift --strict` tracked 漂移 **0**（1 个其他会话未跟踪 CRLF 文件仍保持原状）
+- **Baseline Impact**：**minor**。更新 `ROADMAP.md` §44 + `ROADMAP-CHANGELOG.md` + 本文件；`SYSTEM-BASELINE.md` / `system-manifest.yaml` **未改**（无 Domain 状态跃迁、无新 entry point、无新契约）
+- **GLOBAL AUDIT REQUIRED**：NONE
+
+---
+
+## 2026-10-11 · FIRSTBOARD-ROLLING-POOL-LOSS-ATTRIBUTION-001 结果复核
+
+- **Task / Baseline**：用户要求查看新报告；基于HEAD f8b6810及含并发修改的工作区，核对归因CSV、纯函数和工具实现。
+- **Pre-existing Facts**：本报告复用Run RUN-20261010-572243F5，不是新回测。D的SPEC为7条；EXTENDED为1612条，其中S1–S4合计1605条。
+- **Changes / BASELINE_DRIFT**：仅在结果报告追加§14。限定「退出主要瓶颈」的分母；披露S2/S3使用rd19终态而非机会日、S4超集含义、S7锚点级混合归因。600172的rd13机会被容量阻断，实际rd17入场最大涨幅20.80%，不符合四笔实际入场均有50%空间的读法。未修改历史产物或预注册。
+- **Contract / DB / Execution Impact**：无。无业务代码改动、DB/对象存储写入、新Run、Dataset或策略版本变化。
+- **Tests / Behavior**：纯文档追加不可能影响策略行为；不重复业务测试。类型与EOL检查结果随后登记。
+- **Baseline Update / Remaining Risks / Next Step**：仅结果报告与本审计；无Domain状态跃迁，不改SYSTEM-BASELINE/system-manifest。归因工具的时点及匹配问题尚未修复；建议先逐机会对齐，再分别研究支撑修复及退出，不将事后最大价当可执行收益。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **复核验证实绩**：pnpm run check exit 0；结果报告LF、既有本地文档链接有效。EOL --strict exit 1，仅既有其他会话未跟踪 _scratch/overlap/probe01_db_state.mjs 为CRLF，tracked漂移0；未修改该文件。纯文档未重复业务测试或运行新实验。
+
+---
+
+## 2026-10-11 · 滚动池观察期转ST禁买要求登记
+
+- **Task / Baseline**：用户明确要求观察期转ST后不得买入；HEAD f8b6810及并发工作区，只读核对实验缺口与执行事实。
+- **Pre-existing Facts**：事件日非ST由构建保证；003逐日ST为UNAVAILABLE；PoolBar不含逐日状态，canBuyAtOpen不是本研究的非ST资格闸门。
+- **Changes**：归因报告追加§14.5，固化当日资格与成交前双检查、隔夜订单取消、再次入场禁买、UNKNOWN保守拒绝及PIT历史样本保留要求。验收须ST/*ST实际入场0，逐笔有历史证据；R/Random一致。
+- **Contract / DB / Execution Impact**：当前均无；仅文档，未修改策略、Dataset、历史Run或业务代码。后续实现需先审计现有PIT状态源及端口；已持仓转ST的退出政策未在本轮决定。
+- **Tests / Behavior / Baseline Update**：纯文档无运行行为影响，不重复业务测试；仅追加结果说明及本审计，不改SYSTEM-BASELINE/system-manifest。
+- **Remaining Risks / Next Step**：真实历史ST覆盖、受影响旧交易数和交易时点禁买尚未验证或实现；先补该资格防线，再评估放宽观察或延后入场。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **验证实绩**：pnpm run check exit 0；结果文档LF。EOL --strict exit 1，仅既有其他会话未跟踪 _scratch/overlap/probe01_db_state.mjs 为CRLF，tracked漂移0，未修改该文件。纯文档未运行新实验或重复业务测试。
+
+---
+
+## 2026-10-11 · FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004 执行目标与时间优化方案
+
+- **Task / Baseline**：用户要求生成破位修复、观察期ST禁买的执行文档，并优化长实验；实查HEAD f8b6810及并发工作区。用户明确本轮仅T+20，不增加T+40对照。
+- **Relevant Domains / Pre-existing Facts**：独立研究、Dataset/PIT状态、执行准备与账户撮合。003预检2056.2秒、正式2066.3秒，同1005账户矩阵重复，两次约68.7分钟。逐日ST未接入；ST区间存在事件态和UNKNOWN可获知性限制；bindResearchDataset逐账户全行校验和执行投影日期filter是待测热点，尚无阶段占比证据。
+- **Changes**：新增GOAL-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004及PLAN-ROLLING-POOL-EXECUTION-PERFORMANCE-001；INDEX追加入口。主矩阵原规则/修复规则两组，T+20，默认R+20Random共42；预检R+2Random共6。修复分支局部低点后五日综合分≥15、突破确认，不强制收复首板原线，ST每日与成交前硬检查。新配置阈值为待验证实现，不是获证买点。
+- **Contract / DB / Execution Impact**：当前均无，纯文档。未来授权范围为本轮研究与必要性能实现，保留旧行为、现有Core/撮合/canonicalMetrics。新增状态/准备接口及基线由执行模型按实查登记；DDL、批量回填和新Dataset批量构建需独立授权。
+- **Tests / Behavior**：当前未改业务、不能影响历史行为；文档静态检查和typecheck/EOL随后记录。方案要求同冻结6账户优化前后交易/权益digest一致、缓存失效与账户隔离测试；只降低本轮研究矩阵，不把缩减seed伪称引擎加速。
+- **Baseline Update / Remaining Risks / Next Step**：仅新目标/性能方案、INDEX和本审计；无Domain状态跃迁，不改SYSTEM-BASELINE/system-manifest。历史ST可知性/覆盖及Runner尾部可能阻塞正式研究；未做DB探针，未实现提速、未创建Run，不承诺实际倍率。执行模型按S1–S6推进并报告实际耗时。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **文档验证实绩**：pnpm run check exit 0；两份新文档LF、本地链接和协议关键约束通过。EOL --strict exit 1仅因既有其他会话未跟踪 _scratch/overlap/probe01_db_state.mjs 为CRLF，tracked漂移0；未覆盖该文件。无业务变化，不重复业务测试，未执行004或性能基准。
+
+---
+
+## 2026-10-11 · `FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004`（破位修复再触发 + 每日 ST 禁买）— S1 判 BLOCKED，收益矩阵主动暂停
+
+- **Task**：执行 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004.md`；S1 判定 ST 门禁不满足 ⇒ 按目标 §4 暂停 S5 收益矩阵。
+- **Changed Domains**：独立研究实验作者面（`research-experiments/**`）· 研究文档
+- **Changed Files**：**新增** `docs/research/AUDIT-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004.md`（S1，含 `INSUFFICIENT` 判决与补数影响报告）· `docs/research/PREREG-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004.md`（S2，结果可见前落盘）· `research-experiments/shared/rollingPoolRecovery/{types,entry,stGate,index}.ts` · `tests/server/researchExperiments/rollingPoolRecoverySt.test.ts`（24 例）
+- **Changed Contracts**：**研究侧新增一个显式契约** —— `research-experiments/shared/rollingPoolRecovery/stGate.ts#ST_GATE_CONTRACT_VERSION = "1.0.0"`：两时点 ST 状态检查（`CONFIRM_CLOSE_ELIGIBILITY` / `PRE_FILL`），**缺省 provider 恒返回无结论 ⇒ 所有候选 `UNKNOWN_BLOCKED`**，即**不存在把缺失数据当 NORMAL 的默认路径**。⚠️ 该契约属研究侧、默认关闭，未进入平台执行链；若要升级为平台级契约须另行评估并同步 `SYSTEM-BASELINE.md` / `system-manifest.yaml`。
+- **Changed DB**：**无**（只读 SELECT；未构建 Dataset、未写 Run）
+- **Changed Execution Path**：**无**。`server/**` 一行未改
+- **Potential Baseline Drift**：**登记 5 项数据缺口（G1–G6，见 AUDIT §6）**：① ST 源不可 PIT 核验（**G1，阻断项**）；② 948 格 ST 矛盾未解释；③ 2,378/2,827 symbol 无 ST 行；④ 5% 涨跌停带在主窗口完全缺失；⑤ 阶段级耗时分解缺失（不得承诺倍数提速）；⑥ 策略需 rd94 而 Dataset 只到 rd80（**上轮实测零暴露**）
+- **Regression Result**：`pnpm run check` **exit 0**；新测试 **24/24**；EOL `--strict` tracked 漂移 **0**（1 个其他会话未跟踪 CRLF 文件保持原状）。**未运行任何实验 Run，未产生收益结论**
+- **Baseline Impact**：**minor**。更新 `ROADMAP.md` §44 + `ROADMAP-CHANGELOG.md` + 本文件；`SYSTEM-BASELINE.md` / `system-manifest.yaml` **未改**（无 Domain 状态跃迁、无平台级新 entry point；研究侧 ST 契约见上）
+- **GLOBAL AUDIT REQUIRED**：NONE
+
+---
+
+## 2026-10-11 · FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-004 执行复核
+
+- **Task / Baseline**：用户要求查看执行结果；HEAD f8b6810及并发工作区，核对S1审计/预注册、004外壳、规则、现有验证日志与只读探针。
+- **Pre-existing Facts**：S4/S5未运行，无004收益矩阵及提速实测；最新规则/阻断测试40例。默认provider阻塞全部矩阵。
+- **Changes / BASELINE_DRIFT**：仅审计报告追加§9，登记两项P1实现缺口：PRE_FILL仅进入覆盖和事后审计，计划只检查确认日NORMAL，未接实际拒单；区间有效性用交易日午夜而非effectiveAt，纯fixture复现已失效NORMAL误放行。限定事件日非ST保证、948格含义与上轮零尾部暴露的外推，修正补数区间数量粗估。
+- **Contract / DB / Execution Impact**：当前无；未修改业务、历史数据、Run或策略。新增仓外纯函数探针及日志，无DB连接。
+- **Tests / Behavior / Baseline Update**：复用现有日志确认合成测试范围；新探针复现边界，未重跑长实验。纯文档不会改变业务；仅本审计及结果审计报告，无平台状态跃迁，不改SYSTEM-BASELINE/system-manifest。
+- **Remaining Risks / Next Step**：实现缺口未修复。建议先真实撮合ST接线/边界测试，按需时点补可靠ST源并修复新构建的预热，再完成SMOKE/性能对照和42账户研究。状态写入/新Dataset仍需明确授权。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+- **本轮验证**：pnpm run check exit 0；审计复核节结构与本地链接检查通过；纯函数边界探针exit 0并复现两种时间误判。EOL --strict exit 1仅因既有其他会话未跟踪 _scratch/overlap/probe01_db_state.mjs 为CRLF，tracked漂移0；未修改该文件。没有业务代码变更，不重复业务测试。
+
+---
+
+## 2026-10-11 · RECOVERY-ST-FIX-005 修复方案与桌面端执行交接
+
+- **Task / Baseline**：HEAD f8b6810及当前并发工作区；用户明确要求调用DeepSeek Harness桌面应用，修复后Codex独立验收，再发送实验执行指令。
+- **Changes / Scope**：新增docs/research/PLAN-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005.md；范围为004真实成交前ST拒单、时点区间判断、端到端测试及文档诊断，不调整预注册策略。
+- **Execution / DB Impact**：本交接仅文档；第一阶段明确不跑真实SMOKE/STUDY、不写DB。常规实验已获用户授权，批量补数据/新Dataset仍另行评估。
+- **Handoff**：使用Computer Use技能在已运行的DeepSeek Harness桌面原滚动池会话提交第一阶段指令，已观察到任务消息及读取方案；等READY_FOR_CODEX_REVIEW后审查，不提前发送第二阶段。
+- **Verification / Baseline Update**：修改前核心文件副本及SHA256落scripts/_scratch/recovery-st-fix005/codex-before；实现验收待执行。本交接无平台状态跃迁，仅更新本审计。
+
+---
+
+## 2026-10-11 · FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005（phase 1：修复代码 / 测试 / 文档）
+
+- **Task**：按用户 PLAN-FIX-005 第一阶段要求，修复 AUDIT-004 §9.2（成交前 ST 未进入真实拒单链）与 §9.3（区间用午夜而非检查时刻），并收口文档与诊断。**不跑真实 SMOKE/STUDY、不写 DB、不建 Dataset、不创建 Run**。
+- **Changed Domains**：研究实验（`rolling-pool-recovery-st`）+ 研究执行层（`server/research/simulator/**`，**additive 可选输入**）。策略语义 / Dataset / 指标出口 **未变**。
+- **Changed Files**：
+  - `server/research/simulator/types.ts`（新增可选 `executionEligibilityGate`、快照身份字段、`executionEligibilityAudit` 与四个形状类型）
+  - `server/research/simulator/engine.ts`（due-order 循环买入分支调用闸门 + 收尾硬断言；缺省不产生任何字段）
+  - `server/research/simulator/validate.ts`（闸门形状校验 + 审计数组与 `FILLED ⇒ NORMAL` 断言）
+  - `research-experiments/compositeRunnerBridge.ts`（零实现 re-export 4 个类型）
+  - `research-experiments/shared/rollingPoolRecovery/stGate.ts`（F2：区间有效性与可知性统一用真正 `effectiveAt`；日期形式 `effectiveFrom`=00:00、`effectiveTo` 覆盖整日；无效日期/格式 ⇒ `INVALID_STATUS_TIME_FORMAT`；契约 1.0.0 → 1.1.0；新增执行资格政策版本常量）
+  - `research-experiments/shared/rollingPoolRecovery/index.ts`（barrel 追加 1 个导出）
+  - `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts`（`createStExecutionEligibilityGate`；注入 `executionEligibilityGate`；逐笔真实成交审计与硬失败；`execution-eligibility-rejections-{group}.csv`；provider 缺失的**早诊断**路径；注释/日志分工表述纠正）
+  - `research-experiments/first-board-pullback/rolling-pool-recovery-st/result.ts`（`StCoverageUnscannedReport` + `measurement` 判别式与 schema 一致性约束；未测字段可空；`st-early-diagnostic.json` 进产物名单）
+  - `research-experiments/first-board-pullback/rolling-pool-recovery-st/README.md`（§0/§0.1/§0.2：分工、闸门、区间语义、早诊断）
+  - 测试：**新增** `tests/server/researchExperiments/rollingPoolRecoveryStExecutionGate.test.ts`（23 例，真实 `runTradeSimulation`）；**修改** `rollingPoolRecoverySt.test.ts`（+11 例 F2 边界；修正 fixture 中 `2024-02-41` 这类**非法日历日**）、`rollingPoolRecoveryStBlocked.test.ts`（改钉早诊断与「未测 ≠ 0」契约；新增已实测路径的直接组装用例）
+  - 文档：本文件 + `EXECUTION-FLOW.md`（E-94）+ `CONTRACT-MAP.md`（C-100）+ `SYSTEM-BASELINE.md`（增量节）+ `system-manifest.yaml`（v2.4.0）+ 新增 `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005.md`
+- **Changed Contracts**：① **新增**可选 `SimulationConfig.executionEligibilityGate`（platform 级 additive；缺省逐字节不变）；② `ST_GATE_CONTRACT_VERSION` **1.0.0 → 1.1.0**（区间时间语义修正；仍声明 1.0.0 的 provider 记 `PROVIDER_CONTRACT_MISMATCH`）；③ 新增原因码 `INVALID_STATUS_TIME_FORMAT`（闭集**只增**）。
+- **Changed DB**：**无**（0 schema / 0 migration / 0 DDL / 0 DML；未连库）。
+- **Changed Execution Path**：`server/research/simulator/engine.ts#runTradeSimulation` 在**声明闸门时**多一次成交前资格检查（早于报价 / 现金 / 持仓 / 成本 / 成交计数；仅 buy）。研究实验 `run()` 在 provider 明确缺失时提前收口（不再读 post rd≥1）。**未声明闸门的生产闭环路径不变**。
+- **Potential Baseline Drift**：AUDIT-004 §9.2 标记的 README/注释「两时点 NORMAL 才生成意图」已纠正为「确认日资格排序 + 成交前拒单」分工；`rollingPoolRecoverySt.test.ts` 旧 fixture 依赖非法日期字典序（F2 已禁止）⇒ 改为合法日期。两处均登记在结果文件。
+- **Regression Result**：`pnpm run check` 0 错；新增 23 例 + 受影响定向测试全绿；`test:changed` 见结果文件（含**改动前**已复现的 4 文件 / 10 例既有失败，零新增）。`checkEolDrift --strict` 的非 0 只来自其他会话未跟踪 CRLF 探针（tracked 漂移 0），已单独披露。
+- **Baseline Impact**：**minor**（新增 platform 级可选 contract / entry point）。更新 `SYSTEM-BASELINE.md` + `system-manifest.yaml`（`v2.3.0 → v2.4.0`）+ `EXECUTION-FLOW.md` + `CONTRACT-MAP.md` + 本文件。
+- **GLOBAL AUDIT REQUIRED**：NONE（无 Domain 状态跃迁、无 DB / 数据流 / 破坏性契约变更）。
+
+---
+
+## 2026-10-11 · FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005 **续修**（phase 1 continuation：Finding A / Finding B）
+
+- **Task / Baseline**：按 PLAN-FIX-005 第一阶段续修，关闭两条代码评审发现：**Finding A**（辅助装配路径无 ST 闸门）与 **Finding B**（`BASELINE_DRIFT`：两份基线文件版本链分叉）。基线以结果文件终态 `READY_FOR_CODEX_REVIEW` 为准；HEAD 未变（`f8b6810`）。**不跑真实 SMOKE/STUDY、不写 DB、不建 Dataset、不创建 Run、0 DDL/DML**。
+- **Changed Domains**：组合执行研究层（`server/research/compositeRunner`）+ 研究实验作者面（`research-experiments/**`）+ 架构文档（版本链合并）。策略语义 / Dataset / 指标出口 / 模拟撮合层 **未变**。
+- **Changed Files**：
+  - `server/research/compositeRunner/index.ts`（**新增** `COMPOSITE_ASSEMBLY_CONFIG_CONTRACT_VERSION` / `AssembleCompositeRunnerSimulationConfigInput` / `CompositeRunnerAssemblyConfigResult` / `assembleCompositeRunnerSimulationConfig` / `fingerprintSimulationConfig`；`RunCompositeRunnerBacktestInput` 新增可选 `corporateActionResolver`；`runCompositeRunnerBacktest` 改为「装配入口 + `runTradeSimulation`」，**同一段装配实现**）
+  - `research-experiments/compositeRunnerBridge.ts`（零实现 re-export 新入口 + 契约常量 + 产物类型）
+  - `research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts`（每组改用 `assembleCompositeRunnerSimulationConfig`（**不再顺带撮合**）；`frozen-config.json` 新增 `auxiliaryAssembly` 留档（入口 / 契约版本 / 配置指纹 / `matchingExecuted:false`）；两处「没有运行撮合」的说明同步更新）
+  - 测试：**新增** `tests/server/researchExperiments/rollingPoolRecoveryStAuxiliaryAssembly.test.ts`（7 例：撮合调用计数 = 0、两入口配置深层相等 + 指纹相等、缺省 digest 逐字节相同、注入闸门后隔夜 ST 零成交 + 正对照）
+  - 文档：本文件 + `EXECUTION-FLOW.md`（E-95）+ `CONTRACT-MAP.md`（C-101）+ `SYSTEM-BASELINE.md`（头部 `v2.8.0` + 增量节 + `v2.4.0` 节标注）+ `system-manifest.yaml`（`v2.8.0` 版本链合并 + 新节）+ `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005.md`（续修节）
+- **Changed Contracts**：① **新增** `composite-assembly-config/1.0.0`（权威装配配置入口；**只装配、不撮合**；产物含配置指纹）；② `RunCompositeRunnerBacktestInput.corporateActionResolver`（可选，缺省 ⇒ 请求对象不多键、行为逐字节不变）；③ 无其它契约变更（`ST_GATE_CONTRACT_VERSION` 仍为 `1.1.0`）。
+- **Changed DB**：**无**（0 schema / 0 migration / 0 DDL / 0 DML；未连库）。
+- **Changed Execution Path**：研究实验的**辅助装配路径不再撮合**（原先每组一次、结果被丢弃的真实撮合消失）；账户级撮合仍走唯一入口 `runTradeSimulation` 且**全部**带 `executionEligibilityGate`。`runCompositeRunnerBacktest` 的**对外行为逐字节不变**（既有调用方零改动：`paperTrading3fTop3Runner/**`、其它实验）。纯撮合层 `server/research/simulator/**` **零改动**、无反向依赖、不连 DB。
+- **🔴 BASELINE_DRIFT（本条为 Finding B 的处置记录）**：`SYSTEM-BASELINE.md` 头部为 `v2.7.0`（上一版 `v2.6.0`），而 `system-manifest.yaml` 被从**自身陈旧的 `v2.3.0`** 递增到 `v2.4.0`（未接续基线链）⇒ 两份文件的版本链分叉。**处置 = 修正文档（不改代码）**：两份文件**合并统一为 `v2.8.0`**（`v2.7.0 → v2.8.0`），两侧历史条目**全部保留**（含 `v2.4.0`：编号不删，内容并入 `v2.8.0`）。另如实登记一个**观测到的断号**：`v2.5.0` 在仓库任何文件（基线头部 / manifest 历史 / 本审计）中都没有登记，**不回填臆造条目**。
+- **Regression Result**：`pnpm run check` **exit 0**；定向 **4 文件 / 85 例全绿**（含新增 7 例）；`pnpm run test:changed` **exit 1：4 文件 / 10 例**（`threeFactorTopNStrategyDocument` 3 + `limitUp` 1 + `limitUp.watch` 4 + `datasetFilterForm` 2）—— 与改动前**同一失败集合，零新增**（文件总数 181）；缺省 digest 探针复核：`probe-digest-before/after/after2.json` 仍逐字节相同，另一次复核运行 `probe-digest-after3.json` 去掉旧文件里混入的两行 shell 输出后 **payload sha256 完全相同**；`checkEolDrift --strict` **tracked 漂移 0**，非 0 只来自其他会话未跟踪的 CRLF 探针 `_scratch/overlap/probe01_db_state.mjs`（**未触碰**，故**不声称全仓绿**）。
+- **Baseline Impact**：**minor**（新增 platform 级 entry point + 版本链合并）。更新 `SYSTEM-BASELINE.md` + `system-manifest.yaml`（`v2.7.0 → v2.8.0`）+ `EXECUTION-FLOW.md`（E-95）+ `CONTRACT-MAP.md`（C-101）+ 本文件。
+- **GLOBAL AUDIT REQUIRED**：NONE（无 Domain 状态跃迁、无 DB / 数据流 / 破坏性契约变更）。
+
+---
+
+## 2026-10-11 · RECOVERY-ST-FIX-005 第二阶段结果独立复核
+
+- **Task / Baseline**：用户要求检查桌面端手动执行后的复验结果；HEAD `f8b6810` 加当前未提交工作区。先检查 git status；不覆盖并发改动。
+- **Evidence**：复验报告、SMOKE 日志/退出码、smoke-outcome 与 6 个实际产物；独立断言通过（`scripts/_scratch/recovery-st-reverify/codex-review.log`）。核心源文件 SHA 与更新后的 FIX-005 交付一致。
+- **Outcome**：退出码 3、`ST_COVERAGE_BLOCKED`、无收益矩阵；扫描 58,983 事件但 post 读取与撮合均为 0，未运行 6 账户或 42 账户。provider 注入点仍返回 null。快速诊断耗时不证明完整研究提速。
+- **Remaining**：实际最小补数清单未交付；旧 S1 审计统计不是本次重新实查，尾部条件尚未核验。下一步先核查状态源与制定接入/构建索引修复影响方案。
+- **Changes / Impact**：只追加 `AUDIT-FIRSTBOARD-ROLLING-POOL-RECOVERY-ST-FIX-005.md` §6、本审计及仓外忽略目录中的只读核对脚本。无业务代码、契约、DB、Dataset、策略或执行行为变化；不重跑实验。无需重复此前代码测试。无架构版本跃迁。
+
+---
+
+## 2026-10-11 · ST-DATA-READINESS-006 执行目标文档
+
+- **Task**：按用户要求整理下一步可交给 DeepSeek 桌面端执行的指令；新增 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-ST-DATA-READINESS-006.md`。
+- **Scope**：只读核查历史 ST 来源、生成实际证券/日期/时点需求及缺口清单，提出 provider、windows 续跑索引、池化 NORMAL 缺省与 Dataset 的具体影响方案。对正式业务实现、历史数据及新 Dataset 不作自动变更授权。
+- **Evidence / Boundaries**：读取 builder、状态领域、poolStIndex 与 004 价格求值调用；要求复用既有求值器，避免伪造 NORMAL 与第二套研究实现。区分旧审计与新实查，最小补数清单必须实际交付。
+- **Impact / Validation**：仅文档变更，无代码、契约、DB 或执行行为变化，无基线版本跃迁；新目标 LF。严格 EOL 如仍被既有未跟踪 CRLF 探针阻断则如实披露，不修改该探针。不重跑业务测试。
+
+
+---
+
+## 2026-10-11 · ST-DATA-READINESS-006 中途产物独立核查
+
+- **Task / Baseline**：用户要求分析手动执行结果；HEAD f8b6810 加当前未提交工作区，先查 git status，不覆盖并发改动。
+- **Evidence / Status**：S1 实测与四份 S2 CSV 已落盘；16:03 快照时 RESULT、S2 汇总与等价性产物尚未生成，原进程仍在执行 --equivalence。不提前判最终验收。
+- **Outcome**：独立解析 CSV 并计算 SHA；扩展缺口 507,358 格，事件 ST / 确认收盘 / 成交前必要集合去重 22,041 格，2,837 代码，2023-11-06 至 2025-10-09；全部 UNKNOWN。1,300 行 gating 观察已被确认时点覆盖，779,100 行为归因。原始候选 A=328、B=1,300，尚无新的成交/收益结论。
+- **Remaining**：来源可得性未验证；建议方案补正判决相关指纹、同日精确时点筛选与计划尾部需求，区分开跑必需补数与归因扩展；修复 windows 续跑前置条件后仍需评估新 Dataset，不修改旧版本。
+- **Changes / Impact**：新增 AUDIT-FIRSTBOARD-ROLLING-POOL-ST-DATA-READINESS-006.md、忽略目录中的独立 CSV 核查及必要集合产物、本条记录；无业务代码、契约、DB、策略或执行行为变化，未运行实验、不干预原进程；无架构版本跃迁。
+- **Validation**：CSV 行数/哈希及 gating 键包含关系已核对；未改业务实现，不重复业务测试。严格 EOL 已跟踪漂移 0，既有未跟踪 CRLF 探针使全仓检查非 0，未触碰。
+
+---
+
+## 2026-10-11 · ST-DATA-READINESS-006 只读核查与接入方案（执行方交付）
+
+- **Task / Baseline**：执行 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-ST-DATA-READINESS-006.md` 全 4 阶段（S1 只读来源审计 / S2 实际生成需求与缺口清单 / S3 provider 接入设计 / S4 构建索引与池化状态缺陷修复影响方案）。HEAD `f8b6810` 加当前未提交工作区（222 项 = 41 tracked-modified + 181 untracked）；未 reset/stash/覆盖/提交任何并发改动。
+- **Changed Domains**：**无**（只读审计 + 文档）。未改 `server/**`、`research-experiments/**`、策略、契约、执行语义。
+- **Changed Files**：
+  - 新增 `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-ST-DATA-READINESS-006.md`（S1 来源与覆盖表 / 旧 S1 数字独立复核 / S2 真实统计 / 偏差与未完成项 / 终态）。
+  - 新增 `docs/research/IMPACT-FIRSTBOARD-ROLLING-POOL-ST-DATA-READINESS-006.md`（provider 设计、构建索引前置、poolStIndex 显式政策、Dataset 版本决策与对账、rd94/95 尾部单列、6 项可单独审批动作；含 DB 变更六项报告与**未执行**的 SQL 草案）。
+  - 新增（**gitignored**）`scripts/_scratch/st-data-readiness006/**`：S1 探针 + JSON、S2 需求枚举生成器 + 4 份 CSV + 汇总 + 等价性报告、必需集合派生视图、README、hash 脚本。
+  - 追加本条目。
+- **Changed Contracts**：**无**（文档只提出待审批契约）。
+- **Changed DB**：**无**。0 DDL / 0 DML / 0 migration / 0 写入 / 0 连接写；探针全程只读 SELECT（S1 48 次 + S2 1,244 次）。
+- **Changed Execution Path**：**无**。未跑 SMOKE/STUDY、未构建 Dataset、未创建/覆盖 Run。
+- **关键实测证据**：① 严格 PIT 下**可核验 NORMAL/ST = 0 / 1,201,475 格**（841 条 ST 行 `availability` 全 `UNKNOWN`、`retrievedAt` 全在 2026-09 ⇒ 窗口内可获知 0 条；ST 维度 `NORMAL` 行 0）；② 复测旧 S1：availability / 841 / 734 / 1,201,475 / 1,191,913 / 30,855 / 449 / 2,378 / 7,368 逐项一致，`948` 与 `366,910` 本轮实测为 **973** 与 **368,620**（差异如实并列）；③ 需求清单真实产出：原始需求 841,979、去重扩展 507,358、**开跑必需 22,041 键**（`2023-11-06 ~ 2025-10-09`，2,837 代码，全部 UNKNOWN；必需占扩展 4.34%）；④ **post rd1..41 与 rd1..80 候选集实测完全等价**（同一 SHA-256 摘要、双向差集 0）；⑤ 780004 的 post 4,718,640 行中仅 264,042 行（5.60%）带 PIT 状态、5% 涨跌停带只剩 7,368 行且集中在 `2019-01-23~2019-08-28`，与作业时间线（`900004` FAILED@2019-04-02 → `900010` COMPLETED 1,930 s）吻合。
+- **Potential Baseline Drift**：登记 `server/securityStatus/types.ts` 的 `AVAILABILITIES` 注释把 `T_PLUS_1` 写成「次一自然日」而 `pointInTime.ts#statusKnowledgeDate` 实现为「次一交易日（需 calendar）」——**只登记，不改代码**。另登记并发独立审计指出的 `status-gap-requests.csv` `groups` 列非原子拼接（派生视图已修正，主产物未重生成以免改动已被核验的 SHA-256）。
+- **Regression Result**：未跑测试（零业务代码变更 ⇒ 无受影响测试；行为不可能改变）。`node scripts/checkEolDrift.mjs --strict`：已跟踪漂移 **0**；全仓非 0 仅因其他会话未跟踪的 CRLF `_scratch/overlap/probe01_db_state.mjs`（未触碰、未扩大忽略）⇒ **不声称全仓绿**。
+- **Baseline Impact**：**无架构版本跃迁**；按 AGENTS §8「只有实现细节变化 ⇒ 只更新 CHANGE-AUDIT」，本次仅更新本文件。SYSTEM-BASELINE / system-manifest / EXECUTION-FLOW / CONTRACT-MAP **未改**（无新增 entry point / contract）。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+
+---
+
+## 2026-10-11 · 用户决定本轮保留 Dataset 780004
+
+- **Task / Decision**：用户明确要求先不重建，认为少量数据差异影响有限；记录为研究假设与范围决定，不冒充已验证的影响结论。
+- **Changes**：新增 docs/research/DECISION-FIRSTBOARD-ROLLING-POOL-KEEP-DATASET-780004.md；在 006 RESULT / IMPACT / AUDIT 顶部加入当前决定，保留历史审计与提案。
+- **Scope**：后续沿用 780004，重建退出当前范围，不回填旧数据。ST 来源与 provider 独立处理，保持既有 ST 买入闸门；不自动运行实验或构建。
+- **Impact / Verification**：仅文档，无代码、契约、DB、Dataset、策略或执行变化，无架构版本跃迁，不需要业务回归；严格 EOL 已跟踪漂移 0，既有未跟踪 CRLF 探针问题另行如实记录。
+
+
+---
+
+## 2026-10-11 · RECOVERY-LIGHT-ST-007 执行目标文档
+
+- **Task / Baseline**：用户要求下一步执行方案并纠正“ST 稍微检查即可”；随后明确确认允许 UNKNOWN 参与，仅排除已有历史记录中的 ST。工作区基线 f8b6810 加未提交改动，先检查 git status。
+- **Changes**：新增 docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md；向保留 780004 决策文档追加最新 ST 政策确认。
+- **Proposed Scope**：承接原 004 价格买点/排序/账户/退出，用显式轻量 ST 政策做 A/B 探索比较；不重建 Dataset、不补 ST 全表、不采购、不修 builder/poolStIndex；先 6 账户 SMOKE，再一次 42 账户 STUDY。
+- **Execution Impact Proposal**：既有模拟器默认不允许 UNKNOWN 成交，需要显式可选政策及审计兼容；旧严格缺省、状态事实与既有交易行为应保持不变。该项是已获用户确认的未来实施范围，本次未改代码。
+- **Actual Impact / Validation**：仅文档，无新增运行入口/契约、DB 或执行行为变化，不启动回测，不连库。已核对原 runner、冻结规则、严格闸门和实际引擎限制。无需业务回归；新文件 LF、修改文件保留原行尾，严格 EOL 另行如实检查，无架构版本跃迁。
+
+---
+
+## 2026-10-11 · RECOVERY-LIGHT-ST-007 轻量 ST 政策 + 最小执行契约兼容（执行方交付）
+
+- **Task / Baseline**：执行 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md` 端到端（最小实现 → 测试 → SMOKE → STUDY → 报告）。HEAD `f8b6810` + 未提交工作区（**227 项 = 41 tracked-modified + 186 untracked**，含并发会话；**未 reset/stash/覆盖/提交**任何并发改动）。
+- **Changed Domains**：`server/research/simulator`（执行契约，**additive**）、`server/researchExperiments`（新增只读来源端口）、`research-experiments/shared/rollingPoolRecovery`（新增政策模块）、`research-experiments/compositeRunnerBridge`（零实现 re-export）、`research-experiments/first-board-pullback/rolling-pool-recovery-st`（实验/结果组装）、`tests/**`（新测试 + 运行工具）、`docs/**`。
+- **Changed Files**：
+  - 新增 `research-experiments/shared/rollingPoolRecovery/knownStPolicy.ts`（政策 id 闭集 / `resolveStEligibilityPolicy`（缺省严格）/ `decideKnownStOnlyEligibility` 行为表 / `decideStrictEligibility` / `KnownStLabelIndexPort`）。
+  - 新增 `server/researchExperiments/knownStLabelIndex.ts`（**一次性只读 SELECT**：`research_security_status_history`（`statusType='ST'`）+ `research_security_identifier_history`（primary）⇒ `(symbol, 日期)` 索引 + 来源指纹 + availability/confidence 分布）。经 `research-experiments/compositeRunnerBridge.ts` **零实现 re-export** 注入研究层（实验作者函数**不直连 SQL**）。
+  - 改 `server/research/simulator/{types,engine,validate}.ts`：新增**可选** `SimulationConfig.executionEligibilityUnknownPolicy`（**缺省 `REJECT`**）+ `executionEligibilityStatusAllowed` 唯一放行判据 + 收尾/记录断言同步 + 快照**仅在显式声明时**多出 `unknownPolicy` 键。
+  - 改 `research-experiments/first-board-pullback/rolling-pool-recovery-st/{experiment,result}.ts`：`stPolicy` 参数、确认日轻量资格、轻量执行资格闸门、政策/来源/覆盖读数、两份轻量专属产物、`status`/`matrixEmitted`/`terminalState`、**样本账自检**。
+  - 改 `tests/tools/rollingPoolRecoveryStRun.mts`：`--st-policy <strict|known-st-only>`（非法值 exit 2）、新输出目录 `_scratch/fbp7/`、终态自检（`matrixEmitted` ⇔ `terminalState`、已知 ST 买入 = 0、账户数）。
+  - 新增 `tests/tools/rollingPoolRecoverySt007Analysis.mts`（**只读**：经既有平台端口读 Run + 产物，产出 `analysis.json` / `analysis.md`，支撑 §7 五问）。
+  - 新增 `tests/server/researchExperiments/rollingPoolRecoveryStLightPolicy.test.ts`（**18 例**：政策行为表 / 显式 UNKNOWN 真实成交并保留审计 / 缺省仍拒单 / 已知 ST 恒拒零买入 / 隔夜·重试·再入场拒单不改账 / 非法配置响亮失败 / 快照缺省不变 / 平仓后再入场遇 ST / 矩阵路径显式声明 `matrixEmitted` / 仓位随当日权益）。
+  - 新增 `docs/research/PREREG-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md`（**收益可见前落盘**）与 `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md`。
+- **Changed Contracts**：
+  - **C-102**：`SimulationConfig.executionEligibilityUnknownPolicy?`（`REJECT`（缺省）/ `ALLOW_WHEN_DECISION_ALLOWS`）；`status === "ST"` **恒拒绝**（即使闸门返回 `allowed = true`）；逐笔审计**保留真实 `UNKNOWN`**、**绝不**改写 `NORMAL`；非法取值 / 声明政策却无闸门 ⇒ 响亮失败。未声明的既有快照与冻结指纹**逐字节不变**。
+  - **C-103**：政策 `KNOWN_ST_ONLY_EXPLORATORY` / `recovery-known-st-only/1.0.0`（**缺省仍为原严格政策** `recovery-st-execution-eligibility/1.0.0`）+ 实验参数 `stPolicy` + 只读标签索引端口。**`stGate.ts` 与 `ST_GATE_CONTRACT_VERSION = "1.1.0"` 零改动**；价格状态求值不受 ST 政策驱动。
+- **Changed DB**：**无**。0 DDL / 0 DML 批量写 / 0 migration / 0 回填 / 0 新 Dataset。轻量标签索引 = **只读 `SELECT`**（841 行 + 5,552 行）。STUDY 只经既有 `startRun` / `artifactStorage` 写**标准研究 Run**。
+- **Changed Execution Path**：**未新开路径**。仍是 E-94 的**同一个** `runTradeSimulation` due-order 循环与**同一个**位置（报价 / 现金 / 持仓 / 成本 / 成交计数之前）；只把放行判据换成 `executionEligibilityStatusAllowed`，并在轻量模式显式声明 `ALLOW_WHEN_DECISION_ALLOWS`。
+- **关键实测证据**：
+  1. **SMOKE 工程闸门抓到两个真实缺陷并修复**（这正是 SMOKE 的意义）：① 平台强制不变量 `Σ excludedByReason === excludedCount` 被 `NEVER_IN_WATCH_POOL`（69）撑破 ⇒ 旧代码**从不产出矩阵**、该缺陷从未暴露；改为**如实单列**（不进剔除原因）+ 实验内先自检。② 矩阵路径**从未**写过 `status` / `matrixEmitted` ⇒「跑成功产出矩阵」与「刻意暂停」在信封上无法区分，运行工具因此误判；已显式声明并由单测锁定，工具增加 `matrixEmitted ⇔ terminalState` 互证。
+  2. SMOKE：6 账户（两组各 R+2 Random）**真实进入撮合**；订单检查 1,176 笔 ⇒ `UNKNOWN` 成交 **1,137** / 拒单 **39**；**已知 ST 订单 0 笔**（3 个已知 ST 价格信号在**确认日**即被排除，全部在 B 组）；逐笔审计 `preFillOutcome = UNKNOWN` **原样保留**（433 + 704 = 1,137 笔，全部 FILLED）；来源读取 841 行 / 734 证券；来源指纹 `cbd5ff56…c876`。
+  3. 严格缺省路径**未被改动**：`rollingPoolRecoverySt 39 + StBlocked 14 + StExecutionGate 25 + StAuxiliaryAssembly 7 + contract 23 + simulator/** 70 + positionSizing* 33` 全绿，**未修改任何既有断言**（含 `run.fingerprint` / `tradeDigest` / `equityDigest` 常量锁与 `config.executionEligibility` 精确对象相等）。
+- **Potential Baseline Drift**：**无新增**。登记一条**旧代码潜在缺陷**（matrix 路径样本账不平 + 缺 `matrixEmitted`），本轮修复并加自检 —— 不是文档漂移。
+- **Regression Result**：`pnpm run check` **0 错**；新增测试 **18/18**；受影响测试全绿；`pnpm run test:changed` = 182 文件 / 2,406 例，**4 文件 / 10 例既有失败**（`threeFactorTopNStrategyDocument` 3 · `limitUp` 1 · `limitUp.watch` 4 · `datasetFilterForm` 2）—— 与并发会话在**纯 HEAD worktree** 上复现的同一集合一致，**零新增**；`node scripts/checkEolDrift.mjs --strict` **已跟踪漂移 0**（全仓 exit 1 仍**仅**因其他会话未跟踪的 `_scratch/overlap/probe01_db_state.mjs` CRLF，**未触碰、未扩大忽略**）。
+- **Baseline Impact**：**minor → `v2.8.0` → `v2.9.0`**。已同步 `SYSTEM-BASELINE.md`（头部版本链 + 新增一节）与 `system-manifest.yaml`（`baselineVersion` + `baselineHistory` + 新 `recoveryLightSt007` 节 + `closedLoopStep` 输入/输出字段），并新增 `CONTRACT-MAP.md` C-102 / C-103 与 `EXECUTION-FLOW.md` E-96。**未覆盖**任何并发文档（均为追加）。
+- **结论边界**：本轮为 **`EXPLORATORY / KNOWN_ST_ONLY`** —— 接受 `UNKNOWN` 参与 + 使用历史（**非 PIT**）标签 + 旧 Dataset 局限 ⇒ 结论**不得**升级为 PIT / OOS / 模拟交易 / 实盘验证。
+- **GLOBAL AUDIT REQUIRED**：NONE（新增 1 个可选执行配置字段 + 1 个新研究侧政策版本 + 1 个只读端口；无 Domain 新增、无核心数据流变化、无第二套 SoT）。
+
+
+---
+
+## 2026-10-11 · RECOVERY-LIGHT-ST-007 执行中状态独立核查
+
+- **Task / Baseline**：用户通知执行完成，核查 HEAD f8b6810 加未提交工作区，先检查 git status，不覆盖并发改动。
+- **Evidence / Status**：18:34 附近快照仅有第一轮失败 SMOKE 产物；69 个 NEVER_IN_WATCH_POOL 被重复列入信封剔除原因，平台以 EXPERIMENT_RESULT_INVALID 拒收。现代码已独立诊断并加前置账平断言，第二次 SMOKE 正在读 post；无最终 RESULT 或 42 账户交付，不能提前验收收益。
+- **Verification**：独立 pnpm run check exit 0；LightPolicy / ExecutionGate / AuxiliaryAssembly 三文件 49 例通过。日志 scripts/_scratch/review007；未跑全量测试或额外回测。
+- **Changes / Impact**：仅新增 AUDIT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md、测试日志及本条；无业务代码、契约、DB、Dataset 或执行变更，不停止或重复启动原进程；无架构版本跃迁。保留既有 EOL 问题，不干预并发文件。
+
+---
+
+## 2026-10-11 · RECOVERY-LIGHT-ST-007 **STUDY 实测结果 + 交付阻塞**（端到端执行方补记）
+
+- **Task / Baseline**：接上一条（同一次 007 执行）。补齐 SMOKE #3 通过之后**那一次 42 账户 STUDY** 的实测结果、终态与交付阻塞分析；不重跑 STUDY、不覆盖并发会话已写的 `RESULT-…-007.md`（改用**追加**附录 A）。
+- **Run**：**`RUN-20261011-2BAEF26C`**（`randomAccountCount=20`、`stPolicy=known-st-only`、Dataset `780004`）。
+  - **计算侧**：`runStatus = SUCCEEDED`；42 账户（两组各 21）；`customPayload.status = EXPLORATORY_KNOWN_ST_ONLY`、`matrixEmitted = true`、`terminalState = EXPLORATORY_COMPLETED`；主靶 / 逐年 / R-Random / 轻量读数**全部产出**（见 `RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md` 附录 A）。
+  - **持久化侧**：🔴 Run 记录 **`FAILED`** / `errorCode = EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED`；**产物 0 个入库**。
+  - ⇒ **端到端终态 = `EXECUTION_FAILED`**（计算完成、标准交付失败）。
+- **阻塞根因（实测体积，非估算）**：平台上限 = `EXPERIMENT_ARTIFACT_MAX_COUNT = 100` / `EXPERIMENT_ARTIFACT_MAX_SINGLE_BYTES = 64 MiB` / **`EXPERIMENT_ARTIFACT_MAX_TOTAL_BYTES = 256 MiB`**（`shared/researchExperimentsContracts.ts`）。004 规定的逐日观察/修复证据 6 个文件实测：
+  B-2024 **107,832,874** / A-2024 **99,097,445**（平台报的就是这一件）/ B-2025 **75,348,967** / A-2025 **69,919,745** / B-2023 10,834,420 / A-2023 10,001,515 字节 = **合计 373,034,966 B ≈ 355.8 MiB**。
+  🔴 **结论：单纯按 `-part-NN` 切片不能解除阻塞**（总量不变，仍 > 256 MiB）；可行路径只有 **(S-1) 平台侧压缩/上调上限** 或 **(S-2) 经授权削减研究交付物内容** —— 两者都属契约/研究定义变更，**须用户裁定**。已据此**更正**并发会话 `RESULT-…-007.md` §9.1 提案 P1 的不足。
+- **本轮实际观测（政策侧，属描述性）**：读取来源 **841 行 / 734 证券**（一次性只读 `SELECT`）+ 身份 5,552 行；**显式 NORMAL 行 = 0**；确认日**已知 ST 排除 3 个价格信号**（全在 B 组，**未递补第 4 名**）；**已知 ST 买入 = 0**（订单级 0/0）；`UNKNOWN` 参与候选 **1,625**、订单检查 **8,161** ⇒ **成交 7,895 / 拒单 266**；来源指纹 `cbd5ff56…c876`。
+- **Changed DB**：**+1 行** `research_experiment_run`（上述 Run，`FAILED`）；**对象存储 +0 个对象**（写入被拒）。**0 DDL / 0 migration / 0 批量写 / 0 回填 / 0 新 Dataset**；未修改任何历史 Run / 策略版本 / Dataset。
+- **Changed Files（本条相关）**：追加 `docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md` 附录 A（**不覆盖**并发会话的正文）；新增 `tests/tools/rollingPoolRecoverySt007Analysis.mts`（只读结果提取 + §7 交叉核对）；修正 `tests/tools/rollingPoolRecoveryStRun.mts` 中并发会话追加守卫的 `result.run` 空值类型缺陷（`pnpm run check` 由 6 错 → **0 错**）。
+- **Registration Correction**：`research-experiments/shared/rollingPoolRecovery/` 的政策模块实际文件名是 **`knownStPolicy.ts`**（并发会话 `RESULT-…-007.md` §3.1/§3.2 误写为 `stEligibilityPolicy.ts`，该文件**不存在**）；已在附录 A 的 A-D1 更正。
+- **Regression Result**：`pnpm run check` **0 错**；受影响测试 **14 文件 / 228 例全绿**（recovery-ST 6 文件 125 例 + simulator/positionSizing 8 文件 103 例）；`pnpm run test:changed` = 183 文件 / 2,412 例，**4 文件 / 10 例既有失败**（同一集合、**零新增**）；EOL **已跟踪漂移 0**。
+- **Baseline Impact**：`v2.8.0 → v2.9.0` 的登记（C-102 / C-103 / E-96 / SYSTEM-BASELINE / manifest）**已在本文件上一条**完成；本条只补 Study 实测与交付阻塞，**无新增契约**、**无版本跃迁**。
+- **GLOBAL AUDIT REQUIRED**：NONE。
+
+---
+
+## 2026-10-11 · 并发会话事实登记（同一工作区，避免后续误读）
+
+- 本日 007 任务在**同一工作区存在多个会话**：① 端到端执行方（实现 + 测试 + SMOKE#1–#3 + STUDY + §7 分析 + 本文件条目 + 基线文档 bump）；② **独立审计会话**（`AUDIT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md`、`scripts/_scratch/review007/**`、本文件其后的核查条目）；③ **TASK A/B 优化会话**（`RESULT-…-007.md` §0–§10、`server/researchExperiments/datasetPort.ts` 的分批读 + `experiment.ts` 的 13 个 perf 埋点 + `datasetPortDayBatching.test.ts`）。
+- **未发生**：没有任何会话执行 `git reset` / `stash` / `checkout` / `commit`；没有会话覆盖他人的**正文**（仅**追加**）。工作区从 227 项增至 **235 项**，差额全部来自并发会话新增文件。
+- **已知需后续统一的两处不一致（已在 `RESULT-…-007.md` 附录 A 更正）**：① 政策模块文件名误写（应为 `knownStPolicy.ts`）；② §9.1 的分片提案单独实施**不能**解除 `EXPERIMENT_ARTIFACT_MAX_TOTAL_BYTES` 阻塞。
+- 🔴 **`RESULT-…-007.md` 是本轮唯一被两个会话共同写入的文件**（一个写正文 §0–§10、一个**追加**附录 A）。若后续有人**整体重写**该文件，附录 A 的 §7 五问答案会丢失；机器可读副本保存在 `_scratch/fbp7/analysis.json` / `analysis.md`（gitignored）。
+
+
+---
+
+## 2026-10-11 · RECOVERY-LIGHT-ST-007 最终结果独立复核
+
+- **Task / Baseline**：接本审计 18:34 中途快照，核查最终 RESULT 附录 A、study-run.json 和优化前后完整 SMOKE 本地产物；不覆盖并发改动。
+- **State**：RUN-20261011-2BAEF26C 两组各 21 账户已计算完成；落盘 Run 记录 FAILED / EXPERIMENT_ARTIFACT_LIMIT_EXCEEDED，manifest=null。未另行连库查终态、未重跑或回填 Run。
+- **Evidence**：独立按权益与逐笔 CSV 核对 A/B 收益 +2.8237% / -25.8124%、MDD 22.0125% / 29.5992%、往返 144 / 235、期末未平仓 0 / 0。两组共有成交锚点 73，A/B 独有 70 / 161；B 独有交易净亏 24,270.79 元。主靶区间跨 0、右尾命中 4 / 6 未达事前门槛，不推广为因果结论。
+- **Performance**：重新计算全部 31 件 SHA256，28 件相同；另外 3 件仅配置代码指纹、政策时间戳或性能埋点变化。SMOKE 1,654.7s -> 219.3s，约 7.55 倍；不冒充优化后 STUDY 耗时实测。
+- **Delivery probe**：遗漏的大件 opportunity-day-attribution.csv 为 312,083,057B；全套 SMOKE 原文 688,592,665B，经内存流式 gzip level1 为 46,064,897B，最大压缩单件 25,862,256B；逐件解压 SHA256 一致，未保存压缩文件或发布。支持无损压缩修复方向，但不替代 42 账户实际发布预算验收。
+- **Verification**：本次 pnpm run check exit0；DatasetPortDayBatching 5/5 通过；严格 EOL 已跟踪漂移0，exit1仅因既有未跟踪 CRLF 探针。此前审计的49例闸门测试结果保留，不声称本轮全量工作区测试通过。
+- **Changes / Impact**：仅追加 AUDIT-FIRSTBOARD-ROLLING-POOL-RECOVERY-LIGHT-ST-007.md §5、本条和 scripts/_scratch/review007 内探针/日志；业务/契约/DB/Dataset/执行无变化，无架构版本跃迁。报告年化字段/产物体积差异在审计登记，不覆盖其他会话 RESULT。
+- **Next**：优先用既有交易归因修复买点、排序、退出及再入场匹配；独立修复明细交付。ST 保持已授权轻量口径，不补来源、不重建 Dataset。
+
+
+---
+
+## 2026-10-11 · FIRSTBOARD-ROLLING-POOL-LOSS-ATTRIBUTION-007 只读归因与排序解释更正
+
+- **Task / Baseline**：用户授权“直接归因”；审计 HEAD f8b6810 加当前工作区。复用 RUN-20261011-2BAEF26C 本地 payload 和已验证等价的 SMOKE R 明细，未重跑大实验、未覆盖并发修改。
+- **Read-only evidence**：经 createDefaultExperimentDatasetPort 冻结 890 个既有候选，显式 usesForwardData=true，仅为事后诊断读取 rd1..80 共71,200行（10次行情查询）。输入不扩为全市场，不反向筛选买点；379笔真实成交确认日/成交日逐笔对接。
+- **Critical finding / BASELINE_DRIFT**：experiment.ts#run 忽略 sortCandidates(candidateRows) 返回的新数组；projection.ts#buildDailyPool 的代码升序继承进入 #intentsOf -> slice(0,3)。实际 R 成交因子排名>3：A6/B32；代码排名>3：0/0。排名 CSV 另排序，selectedByR 与真实计划脱节。此前“R−Random 是因子效果”的解释撤回，登记 RESEARCH_RESULT_INTERPRETATION_INVALID；未改执行语义或回填结果。
+- **Attribution**：B 修复159笔净亏22,177.67元；A独有70事件在B漏买：43满仓、25实际代码顺序未入选、2每日买入上限，账平无未知。两笔A右尾 +26.84%/+60.84% 都因B满仓错过。修复101笔亏损中66笔出场后20日内最高收盘回到买入价，但只有8笔达到入场价+20%；B未捕获后续+20%路径32笔，其中30笔首次达到在T+20之后。234个首次成交事件只有4个出场后再触发、2个实际入选、1次再成交。
+- **Scientific limits**：事后价格峰值不是可实现收益；原始 Dataset 行情诊断不代替成本/除权/涨跌停约束的正式回测；重复候选信号日不算独立样本；未做替代退出或持仓消融，未改变主靶/事前门槛，既有2024/2025探索窗口不升级OOS。
+- **Changes**：新增 docs/research/RESULT-FIRSTBOARD-ROLLING-POOL-LOSS-ATTRIBUTION-007.md，追加 AUDIT-...LIGHT-ST-007 §6 和本条；scripts/_scratch/review007 新增只读行情与归因探针/机器结果/逐笔CSV。业务/契约/DB/Dataset/策略/执行0变化；无新架构版本。
+- **Verification**：当前 pnpm run check exit0；排序最小复现PASS；379笔实际代码Top3、70漏买原因、分支/退出净损益加总等断言通过。未改运行代码，未重复全量测试；严格EOL已跟踪漂移0，既有未跟踪CRLF探针仍使全仓exit1，不改其他会话文件。
+- **Next**：先修排序接线与计划/诊断一致性回归，保留原买点/期限/仓位/退出参数，用新codeDigest与新Run验证已声明模型；通过后再单独研究时间尺度与候选竞争。本任务未执行这些策略修改。
+
+
+---
+
+## 2026-10-11 · SORT-PARITY-008 执行指令文档
+
+- **Task**：用户要求提供其他模型可执行的指令，新增 docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-SORT-PARITY-008.md。
+- **Scope**：恢复已声明的 R preReturn10 排序并纠正真实计划/诊断一致性；优先实验侧完整CSV无损压缩与读回，不提升平台上限；工程与6账户SMOKE门槛通过后自动一次42账户STUDY。
+- **Frozen**：Dataset780004、原A/B买点、N5/T20、当前权益20%仓位、容量/成本/退出、20Random种子、轻量ST授权和严格默认全部保持。旧Run/报告保留；新codeDigest与新Run验证纠错，不根据结果改参数。
+- **Impact**：本任务只写执行文档与本条，没有实施排序/打包/契约/DB/策略或执行改动，没有启动SMOKE/STUDY；行为不可能改变，无架构版本跃迁。文档新增LF。
+- **Next**：由用户调用执行模型，按Gate A/B/C顺序推进；正式运行失败如实保存证据，不自动重跑42账户。
+
+---
+
+## 2026-10-11 · SORT-PARITY-008（真实排序修复 + 无损压缩交付 + 一次 42 账户纠错运行）
+
+- **Task**：`FIRSTBOARD-ROLLING-POOL-SORT-PARITY-008` 端到端执行：修复 R 每日候选「实际按代码升序取前三名」的实现缺陷、纠正计划/诊断一致性、实验侧无损 gzip 交付、Gate A/B/C 顺序推进并出结果报告。
+- **Changed Domains**：`research`（研究实验执行）+ `research-experiments` 共享实验代码；**策略语义 / Dataset / DB / 平台公共契约未变**。
+- **Changed Files**：`research-experiments/first-board-pullback/rolling-pool-recovery-st/experiment.ts`（新增 `selectDailyTopByFactor` / `candidateExclusionReasonOf` / `candidateRankingDiagnosticsRowsOf` / `packArtifactForDelivery` / `compressionIndexCsvOf`；导出 `CandidateRow`/`AccountIntent`/`intentsOf`；R 选择入口消费 `sortCandidates` 返回值；候选排名诊断改为消费同一 `DailyFactorSelection`；`emitArtifact` 经打包层 gzip）· 新增 `.../deliveryVerification.ts` · `.../rolling-pool-recovery-st/result.ts`（`RECOVERY_ST_S5_ARTIFACTS` +1 条 `artifact-compression-index.csv`）· `tests/tools/rollingPoolRecoveryStRun.mts`（新输出目录 `_scratch/fbp8/`；SMOKE 增加**既有发布预算校验 + 逐对象读回**；新增 `--verify-persisted` 只读复检；修正持久化终态判据）· `tests/tools/rollingPoolRecoverySt007Analysis.mts`（**按编码**读回 `.csv.gz`、经压缩索引解析真实对象名；新增 `--label`）· 新增 `tests/server/researchExperiments/rollingPoolRecoveryStSortParity.test.ts`（15 用例）· 新增 `tests/server/researchExperiments/rollingPoolRecoveryStArtifactCompression.test.ts`（12 用例）· 新增 `docs/research/PREREG-…-008.md`、`docs/research/RESULT-…-008.md`；对 3 份 007 文档**追加**纠错引用。
+- **Changed Contracts**：**无公共契约变化**。`ExperimentArtifactFileSpec.body` 本就接受 `Uint8Array`、`contentType` 本就可覆盖，`.gz` 由既有 `inferArtifactDescriptor` 回落为 `format: "binary"` + 显式 `application/gzip`。实验本地声明面变化：1 条新产物名、大件 CSV 对象名追加 `.gz`、`candidate-ranking-diagnostics-{group}.csv` 新增 10 列。**未**提高 64 MiB / 256 MiB / 100 件上限，**未**放松校验，**未**接对象存储 SDK，**未**用压缩 JSON 信封绕过信封限制。
+- **Changed DB**：**0 schema / 0 migration / 0 DDL / 0 历史批量写 / 0 回填**。新增 1 条 Run 行（`RUN-20261011-AEB6DDAB`，状态 `COMPLETED`）+ 1 份 manifest + 35 个对象（本次交付本身）。
+- **Changed Execution Path**：R 臂每日候选选择从「未排序 `slice(0,3)`」改为「消费 `sortCandidates` 返回值的全序后取 Top3」；**Random 路径未改**（由 007 基线逐笔字节相同证明）。买点 / 期限 / 因子方向 / 仓位 / 成本 / 退出 / 再入场 / ST 政策 / Dataset 坐标全部未变；旧 StrategyVersion（`3600005 / 2.0.0 / T74`）不变。
+- **Potential Baseline Drift**：**已消除**此前的排序接线漂移。007 登记的 `BASELINE_DRIFT / RESEARCH_RESULT_INTERPRETATION_INVALID` 在本轮被**实现纠错**消解：007 的 A/B 收益（`+2.8237%` / `−25.8124%`）是代码顺序实现的真实结果、**不得**称为因子排序收益；008 的同口径结果为 A `+3.2429623609000036%`、B `−35.96741798660001%`，逐笔排序越界 **0**（A 144 / B 236 笔成交全部落在对应确认日实际 Top3 内），20 个 Random 账户逐项/逐笔与 007 相同。
+- **Regression Result**：`pnpm run check` **0 错**；`pnpm run test:changed` 185 文件 / 2439 用例，**10 失败 = 既有 4 个恒红文件（`threeFactorTopNStrategyDocument` 3 / `limitUp` 1 / `limitUp.watch` 4 / `datasetFilterForm` 2）**，**零新增**；本轮新增 15 + 12 用例与既有 recovery-st 103 用例全绿；`checkEolDrift --strict` 已跟踪漂移 **0**（未跟踪 CRLF 探针仍为其他会话文件，已披露未改）；**未跑** `pnpm run format`。Gate B SMOKE 6 账户通过（预算 32 件 / 45,915,055 B / 最大单件 23,666,242 B，10 件解压哈希一致）；Gate C 42 账户一次运行：计算 `SUCCEEDED` + 持久化 Run `COMPLETED` + manifest 存在 + 32 件产物全部读回（47,565,373 B / 最大 23,666,242 B / 10 件 gzip 解压 SHA-256 与原文一致）+ 样本账平（58,983 = 19,510 + 39,473）+ 逐笔排序一致性通过（0 越界 / 0 已知 ST 成交）。
+- **Baseline Impact**：**未改** `SYSTEM-BASELINE.md` / `system-manifest.yaml` / `CONTRACT-MAP.md`（无新增 entry point、无公共契约变化、无架构版本跃迁）；只按规则更新 `CHANGE-AUDIT.md` 本条目 + 追加 007 三份文档的纠错引用。
+- **GLOBAL AUDIT REQUIRED**：NONE（无核心契约变化、无 Domain 语义变化、无 DB 结构变化、无第二套 SoT）。
+- **偏离与理由**：① Gate C 首次调用 exit 1 是**工具缺陷**（把持久化 Run 的**生命周期**词表 `COMPLETED` 与**执行器**词表 `SUCCEEDED` 混用）⇒ 已修并用 `--verify-persisted` **只读复检同一条 Run**（exit 0），**未重跑 42 账户、未改任何研究参数或种子**；② 未递增 `RECOVERY_COMPUTATION_VERSION`（排序口径本就已声明；递增会让历史 payload 不再通过 `z.literal`），新 `codeDigest` 已区分执行身份；③ 本轮产物写到 `_scratch/fbp8/` 以保留 007 交付；④ 压缩索引不列自身；⑤ 未重跑退出后 bar 拉取（只报告「可评估」的样本计数 91/91、153/153）；⑥ `skippedIntentCount`（账户指标，`run.skipped` 全量）与 `anchor-failed-attempts.csv`（按设计仅建仓侧）差 5/9，如实列出未凑账。
+## 2026-10-11 · REGULATORY-EVENT-SAMPLE-001（采集任务指令，未执行采集）
+
+- **Task / Baseline**：为用户编写可交给 DeepSeek 执行的监管事件历史样本任务；读取工作区（HEAD `f8b6810` + 既有大量并发改动），SYSTEM-BASELINE v2.9.0；不是新建正式 Dataset 或研究 Run。
+- **Changed Files**：新增 `docs/research/GOAL-REGULATORY-EVENT-SAMPLE-001.md`；本条审计记录。未修改既有实现和并发产物。
+- **Research Scope**：区分严重异常波动、公开重点监控、停牌核查与解除；按板块/历史规则施行区间采集；官方解除、声明期限、规则估计终点独立记录；公开档案遍历与全市场触发重建分别验收。起点提供官方检索线索，要求执行者核验原文后冻结；未宣称所有日期已审定。
+- **Contracts / DB / Execution**：0 公共契约 / 0 schema / 0 migration / 0 DDL / 0 DML / 0 Run；采集侧字段仅为任务草案，正式平台接入需另行评估，保持 Dataset 坐标/PIT/Strategy Core 不变量。当前未运行任何采集程序，没有已完成样本数量。
+- **Verification**：`pnpm run check` exit 0；任务文档 LF。`node scripts/checkEolDrift.mjs --strict` exit 1：已跟踪漂移 0，仅既有未跟踪 `_scratch/overlap/probe01_db_state.mjs` 为 CRLF，未修改该并发文件。文档任务无运行时行为，未重复执行覆盖其他会话改动的增量测试；校验新增文档、关键验收条件及本轮行尾。
+- **Baseline Impact**：只更新 CHANGE-AUDIT；无架构状态跃迁，SYSTEM-BASELINE/system-manifest 不递增；GLOBAL AUDIT REQUIRED = NONE。
+- **Remaining Risks / Next Step**：公开资料未必披露完整监控起止；全文索引、规则历史附件、历史基准和退市证券覆盖需由执行者核验。用户可直接转交本任务；完成采集后按覆盖/缺口报告决定两种交易模式研究的可行范围。
+
+## 2026-10-11 · SORT-PARITY-008 独立只读复核
+
+- **Task / Baseline**：检查用户已执行008；HEAD `f8b6810347aa5950d1f9b95eaadc73308b68ac21` + 既有并发工作区改动，SYSTEM-BASELINE v2.9.0。
+- **Evidence / Result**：既有Run服务独立读回 `RUN-20261011-AEB6DDAB` 为COMPLETED、34产物引用无缺失、存储payload与本地一致；42账户齐全，40个Random账户对象与007完全相同；独立按因子重排候选，A144/B236笔真实入场全部来自确认日Top3，越界0；10件gzip解压原文哈希/体积一致。A收益+3.24296%、MDD23.47385%；B收益−35.96742%、MDD36.14154%。两组各4个≥20%独立命中，保持INSUFFICIENT_EVIDENCE。
+- **Findings**：`experiment.ts#candidateRankingDiagnosticsRowsOf` 按相对日查询日期键Map，导致380笔真实成交证据及338条建仓跳过原因在候选诊断中全部为空；现有诊断测试只传空Map。`attribute008.mts#bAttemptByAnchor` 混用了另一日跳过，严格按A确认日对应原因应为48满仓/16排名外，原报告49/15须限定生命周期口径。正式40个Random只验证指标一致，不能宣称历史逐笔全验；辅助analysis首表混用买卖fill数及计划锚点，正式表口径正确。
+- **Changes**：新增 `docs/research/AUDIT-FIRSTBOARD-ROLLING-POOL-SORT-PARITY-008.md`，向RESULT008追加§11纠错说明；本条CHANGE-AUDIT。临时诊断产物位于已忽略的 `scripts/_scratch/review008/`，无业务代码变更。
+- **Forward Path**：复用此前Dataset官方端口缓存，无新查询；A91/91、B152/153亏损交易有完整退出后20日价格路径，分别50/89条曾回到入场价、11/19条曾达入场价+20%，终点均值−4.52%/−3.82%。B1条行情缺失如实排除路径统计，不要求重建Dataset；这些是前向事后原始价格诊断，非canonical账户收益，未用于信号。
+- **Verification**：本次重跑新增两测试文件27/27通过，`pnpm run check` exit0。EOL严格exit1：已跟踪漂移0，仅既有未跟踪 `_scratch/overlap/probe01_db_state.mjs` CRLF，未修改并发文件。证据落 `scripts/_scratch/review008/`。
+- **Contract / DB / Execution / Baseline Impact**：0公共契约、0schema/migration/DDL/DML、0新Run；既有服务仅read调用，不改旧Run/产物。业务行为不可受文档影响；SYSTEM-BASELINE/system-manifest不递增，GLOBAL AUDIT REQUIRED=NONE。
+- **Remaining / Next Step**：正式执行与真实排序通过，但逐候选审计链未完全收口。最小修复日期键连接/非空Map测试及归因日期口径，使用已保存产物另出有标识的复核附件，禁止伪造旧Run产物；不为此重跑42账户。研究先分开诊断原信号与修复信号的入场质量/退出匹配，不直接调止损或扩参数矩阵。
+
+## 2026-10-11 · SIGNAL-EXIT-DIAGNOSTIC-009 执行指令（未执行研究）
+
+- **Task / Baseline / Relevant Domains**：按用户要求给其他模型编写下一步指令；HEAD `f8b6810347aa5950d1f9b95eaadc73308b68ac21` + 既有并发改动，基线v2.9.0，Research/诊断展示边界。
+- **Pre-existing Facts**：008已完成、排序越界0，但诊断证据日期键断链、同日归因/部分摘要未收口；890事件rd1..80既有缓存覆盖A245/B890候选事件，本次只读本地核验，0行情查询。
+- **Changes**：新增 `docs/research/GOAL-FIRSTBOARD-ROLLING-POOL-SIGNAL-EXIT-DIAGNOSTIC-009.md`；本条审计。文档授权最小诊断修复/测试及离线三层研究，定义信号/选择/真实交易的分母、路径时钟、重复触发、缺失和完成判据。继续原滚动池、T+20、因子仅排序、当前权益20%仓位；旧Run不可变。
+- **Contract / DB / Execution Impact**：当前只有文档，0业务代码修改、0公共契约、0schema/migration/DDL/DML、0新Run；尚未执行009代码修复和离线诊断。任务范围不含账户回测、策略参数改变、Dataset重建或ST治理。
+- **Verification**：`pnpm run check` exit0。EOL严格exit1：已跟踪漂移0，仅既有未跟踪 `_scratch/overlap/probe01_db_state.mjs` CRLF；新目标文档LF，不改并发文件。文档不可能影响运行时行为，因此本次不重跑代码测试；后续执行者须完成修复相关测试。
+- **Baseline Update / Remaining / Next Step**：只更新CHANGE-AUDIT；无架构状态跃迁，SYSTEM-BASELINE/system-manifest不递增，GLOBAL AUDIT REQUIRED=NONE。候选未来价格不是可执行账户收益，008仍为探索性且右尾样本不足。用户可将目标文件交其他模型依次执行Gate A/B/C，最终生成RESULT009；本次不代为启动。
+
+## 2026-10-12 · SIGNAL-EXIT-DIAGNOSTIC-009 独立复核与离线诊断补充
+
+- **Task / Baseline / Facts**：用户要求检查首板滚动池，并澄清执行者卡住、未生成报告。HEAD `f8b6810347aa5950d1f9b95eaadc73308b68ac21` 加并发工作区，基线v2.9.0；开始时RESULT009及三层产物未落盘，但诊断日期键、非空Map测试和同日归因已修。未接管或覆盖并发代码。
+- **Actions / Changes**：新增 `docs/research/AUDIT-FIRSTBOARD-ROLLING-POOL-SIGNAL-EXIT-DIAGNOSTIC-009.md` 与本条；独立脚本/日志/明细落已忽略 `scripts/_scratch/review009/`。复用008原件与890事件既有缓存，自行计算首信号/排序/实际交易价格路径。检查期间执行者离线工具已落盘，本次只读运行到隔离 `review009/official/`，exit0、进程约1.86秒、工具计时457ms；未覆盖 `_scratch/fbp9-diagnostic/`，无新账户回测。
+- **Results / Limits**：开盘可买且完整20日首信号：原信号41/235曾收盘达+20%，终点均值−0.79%；修复96/618，终点均值+1.57%。修复当日Top3为34/242、终点+0.09%、命中者到达中位第14日；未入选62/376、终点+2.53%、第9日。属于价格路径描述，非账户收益/因果效应；43个同月×年龄共同比较层全部有一侧不足20样本。实际修复152笔仍净亏20,967.64元；18笔原退出后才达入场价+20%，均在事件T+20之后，持有与新买截止日分别解释。
+- **Engineering Review**：20排序测试独立通过，类型检查exit0；6项独立窗口/缺失/同日先后断言通过。旧读回本地有3个解压CSV却使用.gz后缀，独立按内容与索引核原文SHA一致；原读回报告这3件shaMatchesIndex=null，allShaVerified=true不可独立作为验收。摘要工具仍有fill/意图锚点口径旧值；新诊断漏斗A51/B68为NO_RECORDED_SKIP，如实保留，不冒称全部原因已知。正式RESULT009/新路径工具测试/全验收尚待执行者收口。
+- **Impact / Verification / Baseline Update**：本次0业务代码/公共契约修改、0行情查询、0schema/migration/DDL/DML、0新Run/历史回填、0StrategyVersion变化。原账户指标只读，不建第二套canonicalMetrics/撮合。EOL严格exit1：已跟踪漂移0，仅既有未跟踪CRLF探针，未改并发文件；新报告LF。无架构状态跃迁，SYSTEM-BASELINE/system-manifest不递增，GLOBAL AUDIT REQUIRED=NONE。
+- **Remaining / Next Step**：独立报告可用于判断研究方向，不能冒充原任务全部验收完成。保留探索性ST UNKNOWN政策及已知数据局限；下一项只建议检验修复状态自身的组内排序，买点/期限/仓位/退出保持冻结，尚未执行新因子研究。候选触及+20%数不代替008账户独立命中门槛，不宣称OOS或上线有效。

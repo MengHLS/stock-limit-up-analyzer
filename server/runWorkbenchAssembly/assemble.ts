@@ -96,6 +96,8 @@ import { mapDeclaredExitPolicy } from "./exitPolicy";
 import { mapDeclaredReentryPolicy } from "./reentryPolicy";
 import { mapDeclaredMarketRegimeGate } from "./marketRegimeGate";
 import type { ClosedLoopRuntimeConfig } from "../../shared/researchContracts";
+import { defaultDatasetContentDependencies } from "../datasetRegistry/snapshot/contentDependencies";
+import { withReadRetry } from "../readRetry";
 
 export { LoopRunAssemblyError } from "./errors";
 
@@ -358,6 +360,20 @@ export interface LoopRunAssemblySummary {
   readonly strategyDecisionEngineNote: string;
   /** 本次真实生效的显式覆写字段（空数组 = 全部取策略文档声明）。 */
   readonly runtimeOverrides: readonly string[];
+  /**
+   * EVENT-STATE-LONG-EXECUTION-PARITY-001 — **本次执行尾窗**（交易日）。
+   *
+   * 语义：事件窗策略的行情覆盖 = `rd ≤ 观察窗末端 + 1 + 本值`；**决策成员范围不变**。
+   * 值由策略已声明的 `TIME_EXIT`（`TRADING_DAY`）派生，缺省 `0`。
+   * 它进摘要的唯一目的是**可审计**：让「持仓期到底读了多少行情」成为留档事实，
+   * 而不是散在代码常量里（此前是硬编码 end+1，40 交易日持有结构性不可执行）。
+   */
+  readonly eventWindowExitTailTradingDays?: number;
+  /**
+   * 夹取前的**派生**尾窗（仅当被数据集 post 上限夹取时存在）。
+   * 存在 ⇒ `eventWindowExitTailTradingDays` 是夹取后的**有效**值，两者都要可见（不静默）。
+   */
+  readonly eventWindowExitTailTradingDaysClampedFrom?: number;
   readonly simulation: {
     readonly initialCapital: number;
     readonly maxPositions: number | null;
@@ -475,6 +491,12 @@ export type DatasetSourcePolicy = "prefer-registry" | "rebuild";
  */
 async function resolveDataset(
   request: AssembleRunWorkbenchInputsRequest,
+  /**
+   * 事件窗执行尾窗（交易日；池化路径忽略）。由 `assembleRunWorkbenchInputs` 按策略
+   * **已声明的出场政策**派生后传入 —— 见 `resolveEventWindowExitTailTradingDays`。
+   * 缺省 `0` ⇒ 未声明持仓期的策略行为不变。
+   */
+  exitTailTradingDays = 0,
 ): Promise<{
   dataset: ResearchDataset;
   source: DatasetSourceKind;
@@ -596,7 +618,12 @@ async function resolveDataset(
      * 行为逐字节不变（仍走物化直读）。
      */
     if (observationWindow !== null) {
-      const projectedRowUpperBound = await estimateEventWindowPanelRowsUpperBound(boundId, observationWindow);
+      const projectedRowUpperBound = await estimateEventWindowPanelRowsUpperBound(
+        boundId,
+        observationWindow,
+        {},
+        exitTailTradingDays,
+      );
       if (projectedRowUpperBound !== null && projectedRowUpperBound > REGISTRY_BRIDGE_MAX_ROWS) {
         try {
           // 事件语义只有一份实现：判定器直接复用 Strategy Core 的同一个判定函数。
@@ -606,6 +633,7 @@ async function resolveDataset(
             ...(decisionMemberPredicate === undefined ? {} : { decisionMemberPredicate }),
             name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
             observationWindow,
+            ...(exitTailTradingDays === 0 ? {} : { exitTailTradingDays }),
             dateRange: { startDate: request.startDate, endDate: request.endDate },
             ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
           });
@@ -643,6 +671,7 @@ async function resolveDataset(
         datasetVersionId: boundId,
         name: `run-workbench-${request.strategyId}-${request.startDate}_${request.endDate}`,
         observationWindow,
+        ...(exitTailTradingDays === 0 ? {} : { exitTailTradingDays }),
         ...(request.dataReady !== undefined ? { dataReady: request.dataReady } : {}),
       });
       if (registry.executionBarsAvailable) {
@@ -749,6 +778,127 @@ function resolveEventMemberPredicate(
       return false;
     }
   };
+}
+
+/**
+ * 事件窗执行尾窗的**不可卖顺延缓冲**（交易日）。
+ *
+ * 与池化路径既有 `firstLimitPool.exitTailTradingDays` 的默认值 `20` **同口径**：
+ * 持仓到点触发退出后，若遇跌停 / 停牌不可卖，需额外交易日等待可卖；期末未平仓还要能重估。
+ * 该常量**只**用于「读多少行情」，不参与任何撮合或估值计算。
+ */
+const EVENT_WINDOW_EXIT_TAIL_DEFERRAL_BUFFER = 20;
+
+/**
+ * 由策略**已声明的出场政策**派生事件窗执行尾窗（交易日）。
+ *
+ * 🔴 为什么必须派生而不是让策略自己声明一个数：
+ *   「持有 N 个交易日」这个事实已经写在 `definition.exit.rules`（`TIME_EXIT` / `TRADING_DAY`）里，
+ *   再要用户在别处重复声明一次「数据要读到哪里」= 两处口径可漂移。这里读**同一份声明**，
+ *   复用**同一个**映射函数 `mapDeclaredExitPolicy`（禁第二套出场政策解读）。
+ *
+ * 🔴 缺省 `0`：没有启用中的 `TIME_EXIT` ⇒ 不扩大行情覆盖 ⇒ 既有策略行为逐字节不变。
+ *    这正是「不改变全局默认值来迁就某个策略」的落地方式。
+ *
+ * 返回值语义：`maxHoldingDays + EVENT_WINDOW_EXIT_TAIL_DEFERRAL_BUFFER`。
+ * 例：`TIME_EXIT 40 TRADING_DAY` ⇒ 尾窗 60 ⇒ 覆盖到 `rd = end + 1 + 60`。
+ */
+export function resolveEventWindowExitTailTradingDays(
+  request: AssembleRunWorkbenchInputsRequest,
+): number {
+  const document = request.strategyDocument;
+  // 池化策略有自己的 `exitTailTradingDays`（池龄 + 退出尾部），不叠加事件窗尾窗。
+  if (document.definition?.firstLimitPool !== undefined && document.definition.firstLimitPool !== null) {
+    return 0;
+  }
+  const rules = document.definition?.exit?.rules;
+  if (rules === undefined || rules.length === 0) return 0;
+  /**
+   * 🔴 先做**无副作用的便宜筛选**：只有真的存在「启用中的时间退出」时才去解析配方与参数。
+   *
+   * 两种**合法**声明形式都必须认（否则统一 policy 形式的策略会静默拿到尾窗 0，
+   * 进而退回物化路径并在「区间超出数据集事件窗」时被守卫拒绝 —— 实测
+   * EVENT-STATE-LONG-STRONG-HOLD-001 的 C 臂即因此失败）：
+   *   ① rule-list：`type = TIME_EXIT` 且 `thresholdUnit = TRADING_DAY`（`threshold` = 天数）；
+   *   ② 统一 policy：`rule.policy.timeExit.kind = FIXED_HOLDING_DAYS` —— 此时规则**不得**再声明
+   *      `threshold` / `thresholdUnit`（`strategySchema/definitionValidation.ts` 明确禁止两者并存）。
+   */
+  const hasTimeExit = rules.some((rule) => {
+    if (rule.enabled === false) return false;
+    const policyTimeExit =
+      rule.policy === undefined || rule.policy === null ? null : rule.policy.timeExit ?? null;
+    if (
+      policyTimeExit !== null
+      && policyTimeExit.kind === "FIXED_HOLDING_DAYS"
+      && Number.isFinite(policyTimeExit.holdingDays)
+    ) {
+      return true;
+    }
+    return rule.type === "TIME_EXIT" && rule.thresholdUnit === "TRADING_DAY";
+  });
+  if (!hasTimeExit) return 0;
+  const { runtime } = requireRecipe(document, request.recipeId, request.eventDayIndex ?? 0);
+  const parameterSet = runtime.resolveParameters(document.parameters);
+  const policy = mapDeclaredExitPolicy(
+    rules,
+    parameterSet,
+    document.definition?.exit?.strongHold,
+  );
+  const maxHoldingDays = policy?.maxHoldingDays ?? null;
+  /**
+   * 🔴 尾窗按**有效最长持有期**派生，而不是只看 `timeExit`：
+   *   `strongHold` 会把持有期从 `atHoldingDays` 延长到 `extendToHoldingDays`
+   *   （本实验 40 → 60），`runnerExitAtHoldingDays` 还能再往后推。
+   *   只看 `timeExit` 会让「延长后的持仓」缺少行情覆盖 —— 持仓被延长到第 60 日却没有 rd≥61 的 bar。
+   */
+  const strongHold = policy?.strongHold ?? null;
+  const strongHoldHorizon = strongHold === null
+    ? 0
+    : Math.max(strongHold.extendToHoldingDays, strongHold.runnerExitAtHoldingDays ?? 0);
+  const effectiveMaxHoldingDays = Math.max(maxHoldingDays ?? 0, strongHoldHorizon);
+  if (effectiveMaxHoldingDays <= 0) return 0;
+  return effectiveMaxHoldingDays + EVENT_WINDOW_EXIT_TAIL_DEFERRAL_BUFFER;
+}
+
+/**
+ * 把**派生**执行尾窗夹取到「数据集自己声明的 post 覆盖上限」之内。
+ *
+ * 🔴 为什么必须夹取（实测，EVENT-STATE-LONG-STRONG-HOLD-001）：
+ *   `datasetFromRegistry.ts` 对「读到超过数据集 post 上限」是**响亮拒绝**的
+ *   （`REGISTRY_POST_WINDOW_TOO_SHORT`，注释写明「🔴 不静默夹取窗口」）—— 这个守卫是对的。
+ *   但**派生尾窗**若超过该上限，流式路径会抛错并**回落到重建路径**：
+ *   实测 780004（post 上限 rd=80）上，`strongHold 40→60` 派生尾窗 80 ⇒ 需 rd≤96 > 80
+ *   ⇒ 流式抛错 → 回落重建 → 在重建阶段被连接掐断（`ECONNRESET`）。
+ *   正确做法是让**派生值本身**就落在数据集能提供的范围内，并把夹取前后都记录下来（不静默）。
+ *
+ * 语义：`可用尾窗 = post 上限 − 观察窗末端 − 1`（`+1` 是入场那一根 bar）。
+ *   例：`post=80, end=15` ⇒ 可用尾窗 64 ⇒ 覆盖恰好到 rd=80。
+ *   若数据集连入场那一根都覆盖不到（`可用尾窗 ≤ 0`）⇒ 返回 0（不追加，交给既有守卫响亮拒绝）。
+ */
+export function clampEventWindowExitTailTradingDays(
+  derivedTail: number,
+  observationWindowEnd: number | null,
+  datasetPostMaxRelativeDay: number | null,
+): number {
+  if (derivedTail <= 0) return 0;
+  if (observationWindowEnd === null || datasetPostMaxRelativeDay === null) return derivedTail;
+  const capacity = datasetPostMaxRelativeDay - observationWindowEnd - 1;
+  if (capacity <= 0) return 0;
+  return Math.min(derivedTail, capacity);
+}
+
+/** 只读数据集 post 相对日上限（失败 ⇒ null = 不夹取，保持既有行为，不把失败当 0）。 */
+async function readDatasetPostRelativeDayMax(datasetVersionId: number): Promise<number | null> {
+  try {
+    const content = defaultDatasetContentDependencies();
+    const range = await withReadRetry(
+      "registry.getPostRelativeDayRange",
+      () => content.reader.getPostRelativeDayRange(datasetVersionId),
+    );
+    return range === null ? null : range.max;
+  } catch {
+    return null;
+  }
 }
 
 function constraintNote(constraint: DatasetUniverseConstraint | null): string {
@@ -1421,7 +1571,31 @@ export async function assembleRunWorkbenchInputs(
   // -- 1. 数据集：优先直读已绑定 datasetVersionId 的已落库 ds_* 数据集；缺失才回落重建 --
   //    （原路径无条件重建 ⇒ 无视已绑定数据集、分钟级等待、产物可能漂移；见模块头与
   //     docs/evidence/_probe_ds_rows.mts。）
-  const datasetResolution = await perfRunAsync("dataset.resolve", () => resolveDataset(request));
+  // 🔴 EVENT-STATE-LONG-EXECUTION-PARITY-001：执行尾窗必须在**解析数据集之前**确定，
+  //    否则「持仓期行情」不会进入面板/游标（见 `resolveEventWindowExitTailTradingDays`）。
+  const eventWindowExitTailTradingDaysDerived = resolveEventWindowExitTailTradingDays(request);
+  /**
+   * 🔴 夹取到数据集自己声明的 post 上限（**记录夹取前后**，不静默）。
+   * 见 `clampEventWindowExitTailTradingDays` 的实测说明。
+   */
+  const observationWindowEndForTail =
+    (request.strategyDocument.definition?.entry?.observationWindow?.end as number | undefined) ?? null;
+  const datasetPostMaxRelativeDay =
+    request.datasetVersionId === undefined
+      ? null
+      : await readDatasetPostRelativeDayMax(request.datasetVersionId);
+  const eventWindowExitTailTradingDays = clampEventWindowExitTailTradingDays(
+    eventWindowExitTailTradingDaysDerived,
+    observationWindowEndForTail,
+    datasetPostMaxRelativeDay,
+  );
+  const eventWindowExitTailTradingDaysClampedFrom =
+    eventWindowExitTailTradingDays === eventWindowExitTailTradingDaysDerived
+      ? undefined
+      : eventWindowExitTailTradingDaysDerived;
+  const datasetResolution = await perfRunAsync("dataset.resolve", () =>
+    resolveDataset(request, eventWindowExitTailTradingDays),
+  );
   const dataset = datasetResolution.dataset;
 
   // -- 2~5. 策略侧装配（**同步**；抽成 `assembleStrategySide` 供闭环内的参数评估器复用）--
@@ -1488,6 +1662,15 @@ export async function assembleRunWorkbenchInputs(
         ?? datasetResolution.registry?.version.id
         ?? null,
       dateRange: { startDate: request.startDate, endDate: request.endDate },
+      /**
+       * 🔴 EVENT-STATE-LONG-EXECUTION-PARITY-001：本次**执行尾窗**（交易日）。
+       * 它只扩大行情覆盖（`rd ≤ end + 1 + 尾窗`），**不**改变决策成员范围。
+       * 值取自策略已声明的 `TIME_EXIT`（缺省 0）⇒ 事件窗策略的持仓期可撮合性可审计。
+       */
+      eventWindowExitTailTradingDays,
+      ...(eventWindowExitTailTradingDaysClampedFrom === undefined
+        ? {}
+        : { eventWindowExitTailTradingDaysClampedFrom }),
       strategyId: request.strategyDocument.strategyId,
       strategyVersion: request.strategyDocument.version,
       recipeId: side.recipeRuntime.recipeId,
