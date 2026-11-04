@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer, type Server } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildLimitUpDateResponse, parseLimitUpDate, registerLimitUpDateRoute } from "./limitUpDateApi";
+import { buildLimitUpDateResponse, parseLimitUpDate, registerLimitUpDateRoute } from "../../server/limitUpDateApi";
 
 const record = {
   id: 1,

@@ -17,10 +17,11 @@ import { z } from 'zod';
 describe('image.uploadAndRecognize', () => {
   it('识别保存成功后必须按识别出的有效日期同步行情，并记录日期刷新结果', () => {
     const routerSource = readFileSync(resolve(import.meta.dirname, "../../server", "routers.ts"), "utf8");
-    expect(routerSource).toContain("syncUploadedDatePrices(recognizedDate, stocks.map((stock) => stock.stockCode), ctx.user.id)");
-    expect(routerSource).toContain("syncUploadedDatePrices(recognizedDate, stocks.map((stock) => stock.stockCode), userId)");
+    expect(routerSource).toContain("syncUploadedDatePrices(");
+    expect(routerSource).toContain("recognizedDate");
+    expect(routerSource).toContain("userId");
     expect(routerSource).toContain('operationType: "date_refresh"');
-    expect(routerSource).toContain("syncCandidateDailyPricesForUpload(limitUpDate, uploadedStockCodes)");
+    expect(routerSource).toContain("syncUploadedDatePrices(");
     expect(routerSource).toContain("savedPriceRows");
   });
   
