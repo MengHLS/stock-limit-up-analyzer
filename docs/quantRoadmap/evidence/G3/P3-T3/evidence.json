@@ -1,0 +1,22 @@
+{
+  "taskId": "P3-T3",
+  "gate": "G3",
+  "status": "VALIDATED",
+  "capturedAt": "2026-09-09T22:26:00+08:00",
+  "realData": false,
+  "reproducible": true,
+  "note": "legacy 模拟器已降级为 research-only 显式出口（非移除，研究下行风险报表仍有意依赖其资金循环+逐笔退出语义）",
+  "singleExport": "server/research/legacyTransactionSimulator.ts (RESEARCH_LEGACY_SIMULATION_SOURCE)",
+  "researchOnlyRefs": [
+    { "file": "server/downsideRisk.ts", "refs": 5, "purpose": "下行风险研究实验段模拟" },
+    { "file": "server/overfittingGuard.ts", "refs": 2, "purpose": "成本敏感性/打地鼠基准" },
+    { "file": "server/leaderCandidates.ts:1038", "refs": 1, "purpose": "研究报表 realisticSimulation 兜底（includeResearch=true 且无 override）" }
+  ],
+  "productionPathLegacyCalls": 0,
+  "equivalenceGuard": "server/research/engineNonEquivalence.test.ts 锁定 legacy≠生产引擎（伪等价被拦截）",
+  "verification": {
+    "staticRefScan": "PASS（4 文件，0 生产 router）",
+    "engineStrategyTests": "117 PASS"
+  },
+  "files": ["server/research/legacyTransactionSimulator.ts"]
+}

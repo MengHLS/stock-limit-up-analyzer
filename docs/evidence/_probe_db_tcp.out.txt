@@ -1,0 +1,30 @@
+# 运行留档 —— docs/evidence/_probe_db_tcp.mjs
+# 运行时间：2026-09-19 22:16（GMT+8）
+# 结论：TCP 到 TiDB gateway 正常（2~20ms，实为本地代理应答），海外站点 200
+#       ⇒ 不是网络中断；TiDB 域名解析到真实公网 IP（非 fake-IP），GitHub 走 fake-IP。
+目标：host=gateway03.us-east-1.prod.aws.tidbcloud.com port=4000（凭据不打印）
+
+=== TCP 连通性（连续 4 次，间隔 2s） ===
+第 1 次：CONNECTED  20ms
+第 2 次：CONNECTED  2ms
+第 3 次：CONNECTED  3ms
+第 4 次：CONNECTED  3ms
+
+=== 对照组：公网 HTTPS（判断本机出网是否正常） ===
+https://www.baidu.com/  →  HTTP 200  81ms
+https://api.github.com/  →  ERR TimeoutError: The operation was aborted due to timeout  10009ms
+=== DNS 解析 ===
+gateway03.us-east-1.prod.aws.tidbcloud.com -> 166.117.11.138, 3.33.211.247
+api.github.com -> 198.18.0.217
+www.cloudflare.com -> 198.18.0.225
+www.baidu.com -> 157.148.69.151, 157.148.69.186
+
+=== 海外站点 HTTP 可达性 ===
+https://www.cloudflare.com/ -> 200 608ms
+https://1.1.1.1/ -> 200 903ms
+https://www.google.com/ -> 200 417ms
+https://registry.npmjs.org/ -> 200 427ms
+
+=== 本机代理相关 env ===
+  CODEBUDDY_SERVICE_PROXY_URL = http://127.0.0.1:5355/internal/hooks/services/invoke
+(以上为空则 env 无代理)

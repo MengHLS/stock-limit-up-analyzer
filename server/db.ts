@@ -1,6 +1,9 @@
-import { eq, desc, like, or, sql, gte, count, and } from "drizzle-orm";
+import { eq, desc, asc, like, or, sql, gte, count, and, inArray, notInArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { lte } from "drizzle-orm";
+import { normalizeStockCode } from "./stockIdentity";
+import type { RawDailyPriceRow } from "./data";
+import { runLeaderCandidateResearchReport, runLeaderCandidateStrategyBacktest } from "./leaderCandidateStrategyBacktest";
 import { 
   InsertUser, 
   users, 
@@ -18,39 +21,312 @@ import {
   MarketData,
   stockDailyPrices,
   InsertStockDailyPrice,
+  indexDaily,
   sentimentAlerts,
   InsertSentimentAlert,
   SentimentAlert,
   operationLogs,
   InsertOperationLog,
-  OperationLog
+  OperationLog,
+  stockSuspensionWindows,
+  InsertStockSuspensionWindow,
+  backtestRuns,
+  InsertBacktestRun,
+  BacktestRun,
+  paperTradingRuns,
+  InsertPaperTradingRun,
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import { normalizeLimitUpTime } from '../shared/limitUpTime';
+// 连板梯队情绪评分公式（单一真源，见 shared/boardEmotionScore.ts）
+import { computeBoardEmotionScore } from '../shared/boardEmotionScore';
 import { normalizeSectorName } from '../shared/stockDataNormalization';
 import {
-  buildLeaderCandidateBacktest,
   buildLeaderCandidates,
+  buildLeaderCandidatesForDate,
   buildLeaderCandidateDailyPriceMap,
+  type LeaderCandidateBacktestContext,
   type LeaderCandidateBacktestOptions,
+  type LeaderCandidateBacktestResult,
   type LeaderCandidateDailyPrice,
   type LeaderCandidateDailyPriceCoverage,
+  type LeaderCandidateDailyPriceRow,
+  type LeaderCandidateSourceRecord,
 } from './leaderCandidates';
+import {
+  paginateLeaderCandidateHistory,
+  type LeaderCandidateHistoryPage,
+  type LeaderCandidateHistoryQuery,
+} from './leaderCandidateHistory';
+import {
+  readLeaderCandidateBacktestSnapshot,
+  writeLeaderCandidateBacktestSnapshot,
+  clearLeaderCandidateBacktestSnapshotsSync,
+} from './leaderCandidateBacktestSnapshot';
+import { TTLCache, stableHash } from './backtestCache';
 import { buildSentimentCycleAnalysis } from './sentimentCycle';
 import { parseStoredMarketYi } from './marketFactors';
+// 跨境链路瞬时错误的有界重试（只读安全；实现见 `server/readRetry.ts` 头注释）。
+// 此前仅 researchEngine 用了它，龙头候选池等直连查询裸跑 ⇒ 一次 `read ECONNRESET` 直接冒到 UI。
+// 🔴 RESEARCH-EXPERIMENT-002：原路径是 `./researchEngine/readRetry` —— 那会让「整个库的入口」
+//    在**模块加载期**与旧 Research 目录（`server/researchEngine/**`）挂在一起
+//    （002 的 import 图可达性探针实测命中）。实现与领域无关，已搬到 `server/readRetry.ts`；
+//    旧路径保留为转出口，两者**同一份实现**（零行为变化）。
+import { withReadRetry } from './readRetry';
+// PARAMETER-001-PRE — 性能剖析（默认关闭；`PARAM_PROFILE=1` 才生效）。
+import { PERF_DB_HOOK_ENABLED, installDbPerfHook } from './observability';
+import { runMonkeyBenchmark, runCostSensitivity } from './overfittingGuard';
+import {
+  advancePaperTradingDay,
+  buildForwardPreparedBuys,
+  buildPaperTradingSummary,
+  classifyAdvanceKind,
+  createInitialPaperTradingState,
+  paperTradingAdvanceDiagnosis,
+  resolveEffectivePaperSettings,
+  PaperTradingCalendarStaleError,
+  type PaperTradingAdvanceDiagnosis,
+  type PaperTradingEffectiveSettings,
+  type PaperTradingRunOptions,
+  type PaperTradingState,
+  type PaperTradingStrategyKey,
+  type PaperTradingSummary,
+} from './paperTrading';
 
 let _db: ReturnType<typeof drizzle> | null = null;
+
+interface ClosableDbPool {
+  end(): Promise<void> | void;
+  promise?(): ClosableDbPool;
+}
+
+/**
+ * 连接池上限（DB_POOL_SIZE 可覆盖）。
+ *
+ * 默认 16（原为 10 = mysql2 默认值）。依据：跨境 TiDB 受控标定显示吞吐在 ~6 条并发连接后进入
+ * 平台期（1→3→6 连接 = 5,666→15,458→18,357 行/s），但研究装配每批同时发 3 条批量语句
+ * （prefix / path / outcome），并按页流水叠 3 层 → 稳态最多约 9 条语句在飞；
+ * 再留出余量给常规页面查询。上限 64 防止误填一个巨大值把对端连接数打满。
+ */
+function resolvePoolSize(): number {
+  const raw = Number(process.env.DB_POOL_SIZE);
+  if (Number.isFinite(raw) && raw >= 1) return Math.min(Math.floor(raw), 64);
+  return 16;
+}
+
+/**
+ * 空闲连接回收阈值（`DB_IDLE_TIMEOUT_MS` 可覆盖）。
+ *
+ * 🔴 默认 **3 分钟**（2026-09-21 `BD-24` 由实测**派生**，原为 10 分钟）—— 判据只有一条：
+ *   **必须严格小于实测链路空闲窗口的下界**，否则回收器就赶不上对端掐连接。
+ *
+ *   - 实测窗口（A/B 探针 `docs/evidence/_probe_db_keepalive_ab.mts`，同一条 socket 空闲后复用）：
+ *     空闲 **240s 存活**、**330s 起全部失败**（`read ECONNRESET`）⇒ 窗口 ∈ **(240, 330] s**；
+ *   - 因此阈值必须 **< 240s** ⇒ 取 **180_000**（留 25% 余量）。
+ *
+ *   反面教材（原值 600_000 的失效机理）：一次 `researchRun.loopRun` 真实运行 **588,881 ms**，
+ *   9.81 分钟 **小于** 10 分钟 ⇒ 期间一条空闲连接都没被回收 ⇒ 跑完后的留档 INSERT 撞上的全是被
+ *   掐死的 socket（`prefix-BD24` 证据：3 次 insert + 紧随的 SELECT 全 `ECONNRESET`）⇒「回测历史」
+ *   恒缺这条（用户报障）。旧注释写的「与对端窗口同量级**且更短**」在实测数字面前**不成立**（600s > 330s）。
+ *
+ *   🔴 **本项的能力边界（源码级核实，别当万能药）** —— mysql2 的回收循环
+ *   （`node_modules/mysql2/lib/base/pool.js:198-210`）**只处理自由队列里的连接**，且判据是
+ *   `Date.now() - _freeConnections.get(0).lastActiveTime > idleTimeout`；而 `lastActiveTime` 是
+ *   **在 `release()` 里**被刷新的（`.../base/pool_connection.js:23-30`）⇒
+ *   **任何在「掐断窗口」期间处于「被借出」状态的连接，回收器都看不见它**，等它被还回池时时间戳又是新的
+ *   ⇒ **本项对它永久无效**。所以本项只能**缩小**写库边界的陈旧连接数量，**不能清零**：
+ *     · 修前（600s）：`prefix-BD24` 证据里写库边界**至少 4 条**已死（3 次 INSERT + 紧随的 SELECT 全失败）；
+ *     · 修后（180s）：同一探针重跑，写库边界只剩 **1 条**已死 —— 第 1 次尝试仍撞死连接、白等 **19.28 s**
+ *       的 TCP 重传超时；第 2 次换到新连接 **3.86 s** 成功 ⇒ `fbpRows` **0 → 1**。
+ *   ⇒ **承重项是留档重试预算**，不是本项：连接级错误会把那条连接移出池，故 N 次尝试能清掉 N 条陈旧连接
+ *     （见 `researchRunRouter.ts#CLOSED_LOOP_PERSIST_ATTEMPTS`）；本项负责把 N 压进预算之内。
+ *
+ *   ⚠️ 代价（如实登记）：跨境建连 1.3~3.0s，交互式页面**空闲超过 3 分钟**后的下一次查询要重新握手一次。
+ *   这是**刻意选择**：宁可偶发多等 1 次握手，也不接受「长算后写库丢一条」这种**静默错**。
+ *
+ * ⚠️ 注意（配合下方 `maxIdle`）：本值**只有在 `maxIdle < connectionLimit` 时才会被读取**
+ * —— mysql2 的回收定时器可选择性启动，见 `node_modules/mysql2/lib/base/pool.js:29-32`；
+ * 回收动作按 `_freeConnections.get(0)`（**空闲最久的那条**）逐个销毁，见同文件 `_removeIdleTimeoutConnections`。
+ */
+export function resolveIdleTimeoutMs(): number {
+  const raw = Number(process.env.DB_IDLE_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 1_000) return Math.floor(raw);
+  return 180_000;
+}
+
+/**
+ * 实测的链路空闲窗口下界（毫秒）—— 供**可证伪单测**比对（`tests/server/dbPoolConfig.test.ts`）：
+ * `resolveIdleTimeoutMs()` 的默认值必须**严格小于**本值，否则回收器赶不上对端掐连接（`BD-24`）。
+ *
+ * 来源：`docs/evidence/_probe_db_keepalive_ab.mts` 的 `aliveAtSec` 最大值 = **240s**（`0ms` 组）。
+ */
+export const MEASURED_DB_IDLE_WINDOW_LOWER_BOUND_MS = 240_000;
+
+/**
+ * 是否开启 MySQL 压缩协议（`compress`，mysql2 官方连接选项）。
+ *
+ * 依据：受控交替 A/B 实测（同一 SQL、单连接、两轮交替，排除网络漂移）——
+ *   - raw 查询路径 68.1s → 14.6s（**4.66×**）；
+ *   - drizzle prepared statement 真实路径 6.00×（确认不是 text protocol 的假象）。
+ * 对**小查询无副作用**（COUNT 1.00×，小分页反而 1.3×），因此可以安全地开在全站共享连接池上，
+ * 不需要为「大查询」单独建池。
+ *
+ * `DB_COMPRESS=0|false|off|no` 可关闭（仅用于 A/B 复现与故障排查，生产保持开启）。
+ */
+function resolveCompress(): boolean {
+  const raw = process.env.DB_COMPRESS;
+  if (raw === undefined || raw.trim() === "") return true;
+  return !/^(0|false|off|no)$/i.test(raw.trim());
+}
+
+/**
+ * TCP 保活**首次探测**的初始延迟（毫秒；`DB_KEEPALIVE_INITIAL_DELAY_MS` 可覆盖）。
+ *
+ * 🔴 **默认 0 = 保持原行为，且这是刻意的**（2026-09-21 `BD-24` 实测裁定，**别改成有限值**）：
+ *   ⒜ `0` 的语义：Node 文档 *"Setting `initialDelay` to 0 will leave the value unchanged from the
+ *      default"* ⇒ 首次探测等**系统默认**（本机 `HKLM\…\Tcpip\Parameters` 未配 `KeepAliveTime`
+ *      ⇒ 2 小时）⇒ 分钟级尺度上**保活等于没开**（这才是长算后写库撞死连接的环境前提）。
+ *   ⒝ 但把 `0` 改成有限值（试过 **30_000**）**不是修复、而是引雷**：A/B 探针
+ *      （`docs/evidence/_probe_db_keepalive_ab.mts`）实测 ——
+ *        · 空闲窗口 ∈ **(240, 330] s**：`0` 组 240s 存活、330/360/480s 全部 `read ECONNRESET`（errno −4077）；
+ *          **`30_000` 组同样全部失败** ⇒ 「开保活就不会被掐」**证伪**，它挡不住链路掐断；
+ *        · 差别只在**失败形态**：`0` 组是半开 socket 等 **19.3~20.0s** 的 TCP 重传超时，
+ *          `30_000` 组是 **0 ms** 的已关闭 socket（`Can't add new command when connection is in closed state`）。
+ *      ⒞ 而**真正跑一次的真实运行**（`_probe_fbp_looprun_repro2.keepalive-trial.out.txt`）证明这个「快失败」
+ *        会把整条链路**打崩**：留档第 1 次尝试报 `EPIPE`（`writeAfterFIN`）→ mysql2
+ *        `_handleFatalError → _notifyError` **再次** `emit('error')`，而
+ *        `pool_connection.js` 注册的是 **`once('error')`**（第一次已被消费）⇒ **unhandled 'error' event
+ *        ⇒ 进程直接退出**（`code: 'EPIPE', fatal: true`）。保活关闭时同一路径只报 `ECONNRESET`、
+ *        进程不死（`_probe_fbp_looprun_repro2.prefix-BD24.out.json`）⇒ **故保活必须维持「等于没开」**。
+ *   ⇒ 结论：长算后写库不丢的落点**不在**这里，而在 `idleTimeout`（让空闲连接在**被掐之前**就被回收）
+ *     + 留档写路径的有界重试。本项保留仅为**可复现的实验开关**（`DB_KEEPALIVE_INITIAL_DELAY_MS=30000`
+ *     可复现上述崩溃）。
+ *
+ * 注意单位：本值**是毫秒**（`net.Socket#setKeepAlive` 收毫秒，内部 `/1000` 交给 libuv 的秒参数）。
+ */
+function resolveKeepAliveInitialDelayMs(): number {
+  const raw = Number(process.env.DB_KEEPALIVE_INITIAL_DELAY_MS);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  return 0;
+}
+
+interface PoolConnectionErrorEmitter {
+  on(event: "connection", listener: (connection: { on(event: "error", listener: (error: unknown) => void): void }) => void): unknown;
+}
+
+/**
+ * mysql2 的 PoolConnection 在致命网络错误上会二次 `emit('error')`，而连接自身通常只注册
+ * 一次性错误监听。长算结束后的陈旧连接因此可能以 unhandled 'error' 直接终止进程。
+ *
+ * 这里只挂一个日志兜底，不改变连接状态机，也不吞掉查询路径已经拿到的错误；
+ * 它保证 `persistClosedLoopBacktestRun` 的既有重试预算有机会继续执行。
+ */
+export function attachPoolConnectionErrorLogger(pool: PoolConnectionErrorEmitter): void {
+  pool.on("connection", (connection) => {
+    connection.on("error", (error) => {
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.warn(`[Database] pooled connection error: ${detail}`);
+    });
+  });
+}
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      const poolSize = resolvePoolSize();
+      // 解析 DATABASE_URL：把 ssl 查询参数（JSON 字符串）转成对象传给 drizzle，
+      // 避免 mysql2 把 `ssl={"rejectUnauthorized":true}` 误当 SSL profile 名称（Unknown SSL profile）。
+      // 注意：URL.searchParams 会丢失 JSON 双引号（`{"a":1}` → `{a:1}` 无法 JSON.parse），
+      // 故从原始字符串按 `ssl={...}` 直接提取，保持 JSON 原样。
+      const raw = process.env.DATABASE_URL;
+      const u = new URL(raw);
+      const sslMatch = raw.match(/[?&]ssl=(\{[^&]*\})/);
+      let ssl: { rejectUnauthorized?: boolean } | undefined;
+      if (sslMatch) {
+        try {
+          const parsed = JSON.parse(sslMatch[1]) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            ssl = parsed as { rejectUnauthorized?: boolean };
+          }
+        } catch {
+          // ssl 参数非法时忽略（不传 ssl）
+        }
+      }
+      _db = drizzle({
+        connection: {
+          host: u.hostname,
+          port: u.port ? Number(u.port) : 4000,
+          user: decodeURIComponent(u.username),
+          password: decodeURIComponent(u.password),
+          database: u.pathname.slice(1),
+          ...(ssl ? { ssl } : {}),
+          // ---------------- 连接池显式配置（跨境 TiDB 实测，见 ROADMAP §47 数据集构建性能专项）----------------
+          // 默认值（mysql2：connectionLimit=10 / queueLimit=0）在「串行 await」的调用模式下等于只用 1 条连接，
+          // 连接池形同虚设。这里显式声明，让有界并发（server/datasetRegistry/concurrency.ts）真正跑在池上：
+          //   - connectionLimit 可用 DB_POOL_SIZE 调整（默认 16）；并发工具默认取 8，留给常规查询的余量充足；
+          //   - enableKeepAlive + keepAliveInitialDelay：跨境链路建连成本高（实测首连 1.3~3.0s），
+          //     保活省握手。🔴 **不要**用「把初始延迟设成有限值」去修「长算后写库丢条」：`BD-24`
+          //     实测那会让 EPIPE 的二次 `emit('error')` 变成 unhandled 'error' ⇒ **进程退出**。
+          //     该问题由 `idleTimeout` **缩小**陈旧连接数量 + 留档重试预算**清掉剩余**两者合起来解决
+          //     （`idleTimeout` 单独不够 —— 它看不见「被借出跨越掐断窗口」的连接，见
+          //     `resolveIdleTimeoutMs` 注释里的能力边界）。本项默认仍是 `0`（= 保活在分钟级尺度上等于没开）。
+          //   - connectTimeout：避免坏链路把整个请求无限挂住；
+          //   - compress：MySQL 压缩协议。跨境链路是**吞吐受限**（RTT 208ms 只占总耗时 ~2%），
+          //     压缩直接减少在途字节数，是本题最大的单点杠杆（实测 4.66×~6.00×，对小查询无副作用）。
+          //
+          // 🔴 maxIdle 必须 < connectionLimit（2026-09-13 修复「Failed query: … ECONNRESET」）：
+          //   mysql2 的 idle 回收定时器**只在 maxIdle < connectionLimit 时启动**
+          //   （`lib/base/pool.js`：`if (this.config.maxIdle < this.config.connectionLimit) this._removeIdleTimeoutConnections()`）。
+          //   此前二者都设为 poolSize ⇒ `idleTimeout: 60_000` 是**死配置**，空闲连接永不回收；
+          //   而 `getConnection()` 从 `_freeConnections` 直接 `pop()`、**不做存活探测/ping**
+          //   ⇒ 被对端（TiDB / 中间 LB）断掉的死连接留在池里、被原样发出，首条语句抛
+          //   `read ECONNRESET`，Drizzle 包成 `Failed query: …`。
+          //   取 `poolSize - 1`（下限 1）恢复 idle 回收；被回收的连接即便残留，下一次取用由
+          //   既有 `withReadRetry` 兜住（但先从源头减少「取出死连接」的概率才是正解）。
+          //   `idleTimeout` 取 **小于实测链路空闲窗口下界**（3 分钟 < 240s）：
+          //   再宽（原 10 分钟）就会出现「长算 9.81 分钟 ⇒ 一条都没回收 ⇒ 写库撞死连接」（`BD-24`），
+          //   修后同一场景写库边界的陈旧连接由「至少 4 条」降到「1 条」。能力边界与代价见
+          //   `resolveIdleTimeoutMs` 注释。
+          waitForConnections: true,
+          connectionLimit: poolSize,
+          maxIdle: Math.max(1, poolSize - 1),
+          idleTimeout: resolveIdleTimeoutMs(),
+          queueLimit: 0,
+          enableKeepAlive: true,
+          keepAliveInitialDelay: resolveKeepAliveInitialDelayMs(),
+          connectTimeout: 20_000,
+          compress: resolveCompress(),
+        },
+      });
+      // PARAMETER-001-PRE — 性能剖析（默认关闭）：把底层 mysql2 pool 的 query/execute 包一层
+      // 只做「往返计数 + 墙钟记账」，不改 SQL / 参数 / 返回。关闭时该层完全不存在。
+      // 见 `server/observability/dbHook.ts` 头注释。
+      if (PERF_DB_HOOK_ENABLED) installDbPerfHook((_db as unknown as { $client?: unknown }).$client);
+      const client = (_db as unknown as { $client?: PoolConnectionErrorEmitter }).$client;
+      if (client !== undefined) attachPoolConnectionErrorLogger(client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
     }
   }
   return _db;
+}
+
+/**
+ * 关闭进程内共享连接池，供一次性 CLI 在任务结束后释放 socket。
+ *
+ * Web 进程不应调用；导出 CLI 调用后进程不会继续接受数据库查询。
+ */
+export async function closeDb(): Promise<void> {
+  const db = _db;
+  _db = null;
+  if (!db) return;
+
+  const client = (db as unknown as { $client?: ClosableDbPool }).$client;
+  if (!client) return;
+  const pool =
+    typeof client.promise === "function" ? client.promise() : client;
+  await pool.end();
 }
 
 // ==================== User Functions ====================
@@ -144,6 +420,7 @@ export async function createLimitUpRecord(record: InsertLimitUpRecord): Promise<
 
   const result = await db.insert(limitUpRecords).values(normalizeLimitUpRecordTime(record));
   const insertId = result[0].insertId;
+  invalidateLeaderCandidateBacktestCaches();
   
   const [newRecord] = await db.select().from(limitUpRecords).where(eq(limitUpRecords.id, insertId));
   return newRecord || null;
@@ -164,6 +441,7 @@ export async function createLimitUpRecordsBatch(records: InsertLimitUpRecord[]):
     totalAffected += result[0].affectedRows;
   }
   
+  invalidateLeaderCandidateBacktestCaches();
   return totalAffected;
 }
 
@@ -323,6 +601,7 @@ export async function updateLimitUpRecord(id: number, data: Partial<InsertLimitU
   }
 
   await db.update(limitUpRecords).set(normalizedData).where(eq(limitUpRecords.id, id));
+  invalidateLeaderCandidateBacktestCaches();
   
   const [updated] = await db.select().from(limitUpRecords).where(eq(limitUpRecords.id, id));
   return updated || null;
@@ -334,6 +613,7 @@ export async function deleteLimitUpRecord(id: number): Promise<boolean> {
   if (!db) return false;
 
   const result = await db.delete(limitUpRecords).where(eq(limitUpRecords.id, id));
+  if (result[0].affectedRows > 0) invalidateLeaderCandidateBacktestCaches();
   return result[0].affectedRows > 0;
 }
 
@@ -578,22 +858,28 @@ export type LeaderCandidateMarketFactorRow = {
 };
 
 export async function getLeaderCandidateMarketFactorRows(): Promise<LeaderCandidateMarketFactorRow[]> {
+  const cached = marketFactorRowsCache.get(MARKET_FACTOR_ROWS_CACHE_KEY);
+  if (cached) return cached;
   const db = await getDb();
   if (!db) return [];
   const [limitUpCounts, marketRows] = await Promise.all([
-    db.select({
-      dataDate: limitUpRecords.limitUpDate,
-      limitUpCount: count(),
-    }).from(limitUpRecords).groupBy(limitUpRecords.limitUpDate),
-    db.select({
-      dataDate: marketData.dataDate,
-      turnover: marketData.turnover,
-      marginBalance: marketData.marginBalance,
-      note: marketData.note,
-    }).from(marketData),
+    withReadRetry("leaderCandidateMarketFactors.limitUpCounts", () =>
+      db.select({
+        dataDate: limitUpRecords.limitUpDate,
+        limitUpCount: count(),
+      }).from(limitUpRecords).groupBy(limitUpRecords.limitUpDate),
+    ),
+    withReadRetry("leaderCandidateMarketFactors.marketRows", () =>
+      db.select({
+        dataDate: marketData.dataDate,
+        turnover: marketData.turnover,
+        marginBalance: marketData.marginBalance,
+        note: marketData.note,
+      }).from(marketData),
+    ),
   ]);
   const marketByDate = new Map(marketRows.map((row) => [row.dataDate, row]));
-  return limitUpCounts.map((row) => {
+  const result = limitUpCounts.map((row) => {
     const market = marketByDate.get(row.dataDate);
     return {
       dataDate: row.dataDate,
@@ -603,6 +889,8 @@ export async function getLeaderCandidateMarketFactorRows(): Promise<LeaderCandid
       note: market?.note ?? null,
     };
   });
+  marketFactorRowsCache.set(MARKET_FACTOR_ROWS_CACHE_KEY, result);
+  return result;
 }
 
 function buildVerifiedMarketFactorMap(rows: LeaderCandidateMarketFactorRow[]) {
@@ -643,9 +931,61 @@ export async function deleteMarketData(id: number): Promise<boolean> {
   return result[0].affectedRows > 0;
 }
 
+/** market_data 全表最新一条数据的日期；空表返回 null。 */
+export async function getLatestMarketDataDate(): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const [row] = await db.select({ date: marketData.dataDate })
+    .from(marketData)
+    .orderBy(desc(marketData.dataDate))
+    .limit(1);
+  return row?.date ?? null;
+}
+
+/**
+ * 大盘数据补缺所需的两个只读输入（均为 [startDate, endDate] 内的日期，升序去重）：
+ *
+ * - `calendarDates`：可视为交易日的**日期并集**
+ *   = `index_daily` 的交易日（项目交易日历唯一权威）∪ `limit_up_records` 的涨停记录日。
+ *   ⚠️ 刻意取并集：`index_daily` 全仓无自动同步（停更即静默 no-op），单靠它会继承同一隐患
+ *   ⇒ 任一来源停更都不至于让大盘数据补缺静默卡死。任一方都没有的日期（周末/节假日）不会入集。
+ * - `existingDates`：`market_data` 已有数据行的日期。**按「存在即尊重」判定**，
+ *   与页面 `getLimitUpWithMarketData` 的匹配口径一致（手工录入行不会被自动同步覆盖）。
+ */
+export async function getMarketDataGapInputs(startDate: string, endDate: string): Promise<{
+  calendarDates: string[];
+  existingDates: string[];
+}> {
+  const db = await getDb();
+  if (!db) return { calendarDates: [], existingDates: [] };
+
+  const range = and(gte(marketData.dataDate, startDate), lte(marketData.dataDate, endDate));
+  const [indexRows, limitUpRows, existingRows] = await Promise.all([
+    db.selectDistinct({ date: indexDaily.tradeDate })
+      .from(indexDaily)
+      .where(and(gte(indexDaily.tradeDate, startDate), lte(indexDaily.tradeDate, endDate))),
+    db.selectDistinct({ date: limitUpRecords.limitUpDate })
+      .from(limitUpRecords)
+      .where(and(gte(limitUpRecords.limitUpDate, startDate), lte(limitUpRecords.limitUpDate, endDate))),
+    db.selectDistinct({ date: marketData.dataDate })
+      .from(marketData)
+      .where(range),
+  ]);
+
+  const calendarDates = Array.from(
+    new Set([...indexRows.map(r => r.date), ...limitUpRows.map(r => r.date)]),
+  ).sort((a, b) => a.localeCompare(b));
+
+  return {
+    calendarDates,
+    existingDates: existingRows.map(r => r.date).sort((a, b) => a.localeCompare(b)),
+  };
+}
+
 // ==================== Stock Daily Price Functions ====================
 
-export type StockDailyPriceUpsert = Pick<InsertStockDailyPrice, "stockCode" | "tradeDate" | "openPrice" | "closePrice" | "lowPrice" | "amount" | "preClosePrice" | "source">;
+export type StockDailyPriceUpsert = Pick<InsertStockDailyPrice, "stockCode" | "tradeDate" | "openPrice" | "closePrice" | "highPrice" | "lowPrice" | "amount" | "volume" | "preClosePrice" | "source">;
 
 /** 为候选池价格同步返回最小涨停记录集合。 */
 export async function getLimitUpRecordsForStockPriceSync(): Promise<Array<{ stockCode: string; limitUpDate: string }>> {
@@ -665,10 +1005,370 @@ export async function getLimitUpRecordsForStockPriceSyncByDate(limitUpDate: stri
     .where(eq(limitUpRecords.limitUpDate, limitUpDate));
 }
 
-/** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格。 */
+/** 返回涨停记录去重（股票+日期）后的明细，供行情同步检查页展示名称、板数与题材。 */
+export async function getLimitUpRecordsForSyncCheck(): Promise<Array<{
+  stockCode: string;
+  stockName: string;
+  limitUpDate: string;
+  boardCount: string | null;
+  sector: string | null;
+}>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({
+    stockCode: limitUpRecords.stockCode,
+    stockName: limitUpRecords.stockName,
+    limitUpDate: limitUpRecords.limitUpDate,
+    boardCount: limitUpRecords.boardCount,
+    sector: limitUpRecords.sector,
+  }).from(limitUpRecords)
+    .orderBy(limitUpRecords.limitUpDate, limitUpRecords.stockCode);
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = `${row.stockCode}|${row.limitUpDate}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * @deprecated 危险：本函数会把 `stock_daily_prices` 全表（实测 889 万行）拉到 Node 侧建字符串 Set，
+ * 跨境 TiDB 实测耗时 ~700s、内存约 1GB。行情同步检查已改用 `server/stockPriceIndex.ts` 的位图索引
+ * （冷建 ~43s、磁盘快照 ~84ms）。**不要再新增调用方**；确需按 (股票, 交易日) 判存请用索引。
+ */
+export async function getStockDailyPricePairs(): Promise<Set<string>> {
+  const db = await getDb();
+  if (!db) return new Set();
+  const rows = await db.select({
+    stockCode: stockDailyPrices.stockCode,
+    tradeDate: stockDailyPrices.tradeDate,
+  }).from(stockDailyPrices);
+  return new Set(rows.map((row) => `${row.stockCode}|${row.tradeDate}`));
+}
+
+// ==================== Stock Suspension Window Functions ====================
+
+export type SuspensionWindowInput = {
+  stockCode: string;
+  startDate: string;
+  endDate: string;
+  source: "tushare-daily-infer" | "manual";
+  note?: string | null;
+};
+
+/** 将同一股票同一来源下重叠的停牌区间合并为最小覆盖区间。 */
+export function mergeSuspensionWindows(windows: Array<{ startDate: string; endDate: string }>): Array<{ startDate: string; endDate: string }> {
+  if (windows.length === 0) return [];
+  const sorted = [...windows].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+  const merged: Array<{ startDate: string; endDate: string }> = [];
+  for (const window of sorted) {
+    const last = merged.at(-1);
+    if (last && window.startDate <= last.endDate) {
+      if (window.endDate > last.endDate) last.endDate = window.endDate;
+    } else {
+      merged.push({ startDate: window.startDate, endDate: window.endDate });
+    }
+  }
+  return merged;
+}
+
+/** 合并重叠停牌窗口并保留各自备注（合并区间时优先保留已有非空备注）。 */
+function mergeSuspensionWindowsWithNote(windows: Array<{ startDate: string; endDate: string; note: string | null }>): Array<{ startDate: string; endDate: string; note: string | null }> {
+  if (windows.length === 0) return [];
+  const sorted = [...windows].sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate));
+  const merged: Array<{ startDate: string; endDate: string; note: string | null }> = [];
+  for (const window of sorted) {
+    const last = merged.at(-1);
+    if (last && window.startDate <= last.endDate) {
+      if (window.endDate > last.endDate) last.endDate = window.endDate;
+      if (!last.note && window.note) last.note = window.note;
+    } else {
+      merged.push({ startDate: window.startDate, endDate: window.endDate, note: window.note });
+    }
+  }
+  return merged;
+}
+
+/**
+ * 按「股票 + 来源」分组写入停牌窗口：先删除该股票该来源的旧窗口，再写入合并后的窗口，
+ * 使推断结果可被幂等覆盖，同时不误删另一来源（如人工标记）的窗口。
+ */
+export async function upsertSuspensionWindows(rows: SuspensionWindowInput[]): Promise<number> {
+  const db = await getDb();
+  if (!db || rows.length === 0) return 0;
+  const groups = new Map<string, SuspensionWindowInput[]>();
+  for (const row of rows) {
+    const key = `${row.stockCode}::${row.source}`;
+    const list = groups.get(key) ?? [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  let total = 0;
+  for (const [key, list] of Array.from(groups.entries())) {
+    const [stockCode, source] = key.split("::") as [string, SuspensionWindowInput["source"]];
+    const merged = mergeSuspensionWindowsWithNote(list.map(({ startDate, endDate, note }) => ({ startDate, endDate, note: note ?? null })));
+    await db.delete(stockSuspensionWindows)
+      .where(and(eq(stockSuspensionWindows.stockCode, stockCode), eq(stockSuspensionWindows.source, source)));
+    if (merged.length > 0) {
+      await db.insert(stockSuspensionWindows).values(merged.map(({ startDate, endDate, note }) => ({
+        stockCode,
+        startDate,
+        endDate,
+        source,
+        note,
+      })));
+    }
+    total += merged.length;
+  }
+  // 停牌窗口直接决定 T+1/T+2 溢价是否可用 → 回测缓存必须失效。
+  if (total > 0) invalidateLeaderCandidateBacktestCaches();
+  return total;
+}
+
+/** 读取停牌窗口；可选按股票代码过滤。 */
+export async function getStockSuspensionWindows(codes?: string[]): Promise<Array<{ id: number; stockCode: string; startDate: string; endDate: string; source: "tushare-daily-infer" | "manual"; note: string | null }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const query = db.select({
+    id: stockSuspensionWindows.id,
+    stockCode: stockSuspensionWindows.stockCode,
+    startDate: stockSuspensionWindows.startDate,
+    endDate: stockSuspensionWindows.endDate,
+    source: stockSuspensionWindows.source,
+    note: stockSuspensionWindows.note,
+  }).from(stockSuspensionWindows);
+  const rows = codes && codes.length > 0
+    ? await query.where(inArray(stockSuspensionWindows.stockCode, codes)).orderBy(stockSuspensionWindows.stockCode, stockSuspensionWindows.startDate)
+    : await query.orderBy(stockSuspensionWindows.stockCode, stockSuspensionWindows.startDate);
+  return rows.map((row) => ({
+    id: row.id,
+    stockCode: row.stockCode,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    source: row.source,
+    note: row.note,
+  }));
+}
+
+/** 删除指定 id 的停牌窗口（供人工撤销）。 */
+export async function deleteSuspensionWindow(id: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.delete(stockSuspensionWindows).where(eq(stockSuspensionWindows.id, id));
+  if (result[0].affectedRows > 0) invalidateLeaderCandidateBacktestCaches();
+  return result[0].affectedRows > 0;
+}
+
+/** 将停牌窗口展开为「股票代码 → 停牌交易日集合」，仅保留落在市场交易日历内的日期。 */
+export function expandSuspendedDatesByStock(
+  windows: Array<{ stockCode: string; startDate: string; endDate: string }>,
+  tradingDates: string[],
+): Map<string, Set<string>> {
+  const byStock = new Map<string, Set<string>>();
+  if (tradingDates.length === 0) return byStock;
+  // tradingDates 必须升序才能二分；调用方传入的是排序后的交易日历，这里做一次廉价兜底。
+  const sorted = tradingDates.every((date, index) => index === 0 || tradingDates[index - 1]! <= date)
+    ? tradingDates
+    : [...tradingDates].sort((left, right) => left.localeCompare(right));
+  /** 返回第一个 >= date 的下标（不存在则为长度）。 */
+  const lowerBound = (date: string): number => {
+    let low = 0;
+    let high = sorted.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (sorted[mid]! < date) low = mid + 1;
+      else high = mid;
+    }
+    return low;
+  };
+  for (const window of windows) {
+    // 原实现是 O(窗口数 × 交易日数) 的全量扫描；改为二分定位区间后只遍历区间内的日期。
+    const start = lowerBound(window.startDate);
+    const set = byStock.get(window.stockCode) ?? new Set<string>();
+    for (let index = start; index < sorted.length; index += 1) {
+      const date = sorted[index]!;
+      if (date > window.endDate) break;
+      set.add(date);
+    }
+    byStock.set(window.stockCode, set);
+  }
+  return byStock;
+}
+
+export type CorrectLimitUpStockIdentityResult =
+  | { ok: true; updatedRows: number; dates: string[] }
+  | { ok: false; conflicts: Array<{ limitUpDate: string; existingNames: string[] }> };
+
+/**
+ * 批量校正涨停记录的名称/代码（按旧代码+旧名称精确定位，避免误伤同代码下的其他股票）。
+ * - fromName 必须精确匹配，防止一个代码下混有多只不同股票时误改；
+ * - toCode 会自动规范化后缀（6→SH、0/3→SZ、4/8/92→BJ）；
+ * - 若新代码在相同涨停日已存在其他记录，返回 conflicts 交由上层提示，不做更新（防重复）。
+ */
+export async function correctLimitUpStockIdentity(params: {
+  fromCode: string;
+  fromName: string;
+  toCode: string;
+  toName: string;
+}): Promise<CorrectLimitUpStockIdentityResult> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("数据库不可用，无法校正");
+  }
+  const toCode = normalizeStockCode(params.toCode);
+  const toName = params.toName.trim();
+  if (!toName) throw new Error("股票名称不能为空");
+
+  const targets = await db.select({ id: limitUpRecords.id, limitUpDate: limitUpRecords.limitUpDate })
+    .from(limitUpRecords)
+    .where(and(eq(limitUpRecords.stockCode, params.fromCode), eq(limitUpRecords.stockName, params.fromName)));
+  if (targets.length === 0) {
+    throw new Error(`未找到待校正记录：${params.fromCode} ${params.fromName}`);
+  }
+  const targetIds = targets.map((target) => target.id);
+  const dates = Array.from(new Set(targets.map((target) => String(target.limitUpDate))));
+
+  // 冲突检测：目标代码在相同涨停日已有其他记录（非本次待改行）
+  const conflicted = await db.select({
+    limitUpDate: limitUpRecords.limitUpDate,
+    stockName: limitUpRecords.stockName,
+  }).from(limitUpRecords)
+    .where(and(
+      eq(limitUpRecords.stockCode, toCode),
+      inArray(limitUpRecords.limitUpDate, dates),
+      notInArray(limitUpRecords.id, targetIds),
+    ));
+  if (conflicted.length > 0) {
+    const byDate = new Map<string, string[]>();
+    for (const row of conflicted) {
+      const key = String(row.limitUpDate);
+      const list = byDate.get(key) ?? [];
+      list.push(row.stockName ?? "-");
+      byDate.set(key, list);
+    }
+    return {
+      ok: false,
+      conflicts: Array.from(byDate.entries())
+        .sort(([left], [right]) => right.localeCompare(left))
+        .map(([limitUpDate, existingNames]) => ({ limitUpDate, existingNames })),
+    };
+  }
+
+  await db.update(limitUpRecords)
+    .set({ stockCode: toCode, stockName: toName })
+    .where(inArray(limitUpRecords.id, targetIds));
+
+  invalidateLeaderCandidateBacktestCaches();
+  return { ok: true, updatedRows: targetIds.length, dates };
+}
+
+// ---------------------------------------------------------------------------
+// (stockCode, tradeDate) 数据库级唯一约束（P2-F3）
+//
+// stock_daily_prices 必须以 (stockCode, tradeDate) 唯一：
+//   - 迁移/schema 中已声明 uq_stock_daily_price_stock_date；
+//   - 若历史库因早期未建约束而存在重复行，直接加唯一索引会失败，因此先清理脏数据
+//     （同一股票—交易日保留最小 id 行），再补建约束；
+//   - 幂等：仅当约束缺失时才执行清理 + DDL，进程内只执行一次。
+// upsertStockDailyPrices 依赖该唯一键做 ON DUPLICATE KEY UPDATE。
+// ---------------------------------------------------------------------------
+
+const STOCK_DAILY_PRICE_UNIQUE_INDEX = "uq_stock_daily_price_stock_date";
+
+/** 需要删除的重复行 id（同一 stockCode+tradeDate 只保留最小 id）。纯函数，供 SQL 路径与测试复用。 */
+export function duplicateStockDailyPriceIdsToRemove(
+  rows: ReadonlyArray<{ id: number; stockCode: string; tradeDate: string }>,
+): number[] {
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const key = `${row.stockCode}::${row.tradeDate}`;
+    const list = groups.get(key) ?? [];
+    list.push(row.id);
+    groups.set(key, list);
+  }
+  const toRemove: number[] = [];
+  for (const ids of Array.from(groups.values())) {
+    ids.sort((left: number, right: number) => left - right);
+    for (const id of ids.slice(1)) toRemove.push(id);
+  }
+  return toRemove.sort((left: number, right: number) => left - right);
+}
+
+let stockDailyUniqueEnsured = false;
+let stockDailyUniqueEnsurePromise: Promise<void> | null = null;
+
+/** 拼接 error 及其 cause 链上的全部 message（Drizzle 包装错误把真实原因放在 cause 里）。 */
+function errorMessageChain(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    parts.push(current.message);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return parts.join(" | ");
+}
+
+/** MySQL/TiDB：唯一索引已存在时的错误（ER_DUP_KEYNAME, 1061）。 */
+function isDuplicateIndexNameError(error: unknown): boolean {
+  return /Duplicate key name|ER_DUP_KEYNAME|already exists/i.test(errorMessageChain(error));
+}
+
+/** 需先清理重复数据再建索引的错误（ER_DUP_ENTRY, 1062）。 */
+function isDuplicateEntryError(error: unknown): boolean {
+  return /Duplicate entry|ER_DUP_ENTRY/i.test(errorMessageChain(error));
+}
+
+/**
+ * 确保 stock_daily_prices 存在 (stockCode, tradeDate) 唯一约束。
+ * 流程（幂等）：
+ *   1) 尝试创建唯一索引；若已存在（Duplicate key name）→ 完成；
+ *   2) 若因历史重复行失败（Duplicate entry）→ 先删除同键中的多余行（保留最小 id），再重试创建。
+ * 返回 promise 不 reject（失败降级告警），保证 upsert 主路径不被 DDL 问题阻塞。
+ */
+function ensureStockDailyPricesUniqueIndex(db: NonNullable<Awaited<ReturnType<typeof getDb>>>): Promise<void> {
+  if (stockDailyUniqueEnsured) return Promise.resolve();
+  if (!stockDailyUniqueEnsurePromise) {
+    stockDailyUniqueEnsurePromise = (async () => {
+      const createIndex = () => db.execute(sql.raw(
+        `CREATE UNIQUE INDEX \`${STOCK_DAILY_PRICE_UNIQUE_INDEX}\` ON \`stock_daily_prices\` (\`stockCode\`, \`tradeDate\`)`,
+      ));
+      try {
+        await createIndex();
+      } catch (error) {
+        if (isDuplicateIndexNameError(error)) {
+          stockDailyUniqueEnsured = true; // 约束已存在
+          return;
+        }
+        if (!isDuplicateEntryError(error)) throw error;
+        // 历史脏数据：删除同一 (stockCode, tradeDate) 中 id 较大的重复行，再补建约束。
+        await db.execute(sql`
+          DELETE \`p1\` FROM \`stock_daily_prices\` AS \`p1\`
+          INNER JOIN \`stock_daily_prices\` AS \`p2\`
+            ON \`p1\`.\`stockCode\` = \`p2\`.\`stockCode\`
+           AND \`p1\`.\`tradeDate\` = \`p2\`.\`tradeDate\`
+           AND \`p1\`.\`id\` > \`p2\`.\`id\`
+        `);
+        await createIndex();
+      }
+      stockDailyUniqueEnsured = true;
+    })().catch((error: unknown) => {
+      // DDL 失败（如无权限）不应使 upsert 崩溃：降级并告警，让上层继续。
+      stockDailyUniqueEnsurePromise = null;
+      console.warn(`[Database] 确保 stock_daily_prices 唯一约束失败：`, error);
+    });
+  }
+  return stockDailyUniqueEnsurePromise;
+}
+
+/** 按股票代码和交易日幂等覆盖写入 Tushare 日线价格（依赖 (stockCode, tradeDate) 唯一键）。 */
 export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Promise<number> {
   const db = await getDb();
   if (!db || rows.length === 0) return 0;
+  // 惰性确保唯一约束（幂等；失败只告警不阻塞写入，避免数据同步完全中断）。
+  await ensureStockDailyPricesUniqueIndex(db);
 
   const BATCH_SIZE = 500;
   for (let index = 0; index < rows.length; index += BATCH_SIZE) {
@@ -677,8 +1377,10 @@ export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Pro
       set: {
         openPrice: sql`VALUES(\`openPrice\`)`,
         closePrice: sql`VALUES(\`closePrice\`)`,
+        highPrice: sql`VALUES(\`highPrice\`)`,
         lowPrice: sql`VALUES(\`lowPrice\`)`,
         amount: sql`VALUES(\`amount\`)`,
+        volume: sql`VALUES(\`volume\`)`,
         preClosePrice: sql`VALUES(\`preClosePrice\`)`,
         source: sql`VALUES(\`source\`)`,
         sourceUpdatedAt: new Date(),
@@ -686,7 +1388,102 @@ export async function upsertStockDailyPrices(rows: StockDailyPriceUpsert[]): Pro
       },
     });
   }
+  // 行情变更会改变 T+1/T+2 溢价与出清口径 → 回测缓存必须失效。
+  invalidateLeaderCandidateBacktestCaches();
   return rows.length;
+}
+
+/**
+ * 以「每股一条」的聚合形式返回已同步行情的日偏移序列，供位图索引重建（见 server/stockPriceIndex.ts）。
+ *
+ * 关键：绝不能退化成 `SELECT stockCode, tradeDate FROM stock_daily_prices`（实测 889 万行需 ~700s）。
+ * 这里用 GROUP_CONCAT 把每只股票的交易日压成一串「距 2019-01-01 的天数」，回传行数 ≈ 股票数（约 5,800），
+ * 实测 ~90s / 40MB —— 且只在快照缺失或过期时执行一次，之后从磁盘快照秒载。
+ */
+export async function getStockDailyPriceDaySeries(): Promise<Array<{ stockCode: string; offsets: string }>> {
+  const db = await getDb();
+  if (!db) return [];
+  // GROUP_CONCAT 默认上限 1024 字符，会被静默截断导致行情被误判为缺失。
+  // SET SESSION 必须与查询跑在同一条连接上，故用事务把两者绑定（连接池下不能依赖两次独立调用的巧合）。
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET SESSION group_concat_max_len = 4294967295`);
+    const [rows] = await tx.execute(sql`
+      SELECT \`stockCode\` AS stockCode,
+             GROUP_CONCAT(DATEDIFF(\`tradeDate\`, '2019-01-01') ORDER BY \`tradeDate\` SEPARATOR ',') AS offsets
+      FROM \`stock_daily_prices\`
+      GROUP BY \`stockCode\`
+    `);
+    const list = Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+    return list
+      .map((row) => ({
+        stockCode: String(row.stockCode ?? ""),
+        offsets: row.offsets === null || row.offsets === undefined ? "" : String(row.offsets),
+      }))
+      .filter((row) => row.stockCode.length > 0);
+  });
+}
+
+/**
+ * 从 index_daily（7,452 行）取交易日历，实测 ~0.2s。
+ * 用于替代对大表扫 `DISTINCT tradeDate`（实测 ~8.4s）的降级路径。
+ */
+export async function getIndexDailyTradeDates(startDate?: string, endDate?: string): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [];
+  if (startDate) conditions.push(gte(indexDaily.tradeDate, startDate));
+  if (endDate) conditions.push(lte(indexDaily.tradeDate, endDate));
+  const query = db.selectDistinct({ tradeDate: indexDaily.tradeDate }).from(indexDaily);
+  const rows = conditions.length > 0
+    ? await query.where(and(...conditions)).orderBy(indexDaily.tradeDate)
+    : await query.orderBy(indexDaily.tradeDate);
+  return rows.map((row) => row.tradeDate);
+}
+
+/** 指数日线序列的一根 bar（大盘日线走势图的数据源形状）。 */
+export interface IndexDailySeriesPoint {
+  tradeDate: string;
+  /** 指数点位（点）。 */
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  /** 成交额（千元，index_daily 原始单位）；缺失为 null，不插值不伪造。 */
+  amount: number | null;
+  /** 成交量（手）。 */
+  volume: number | null;
+}
+
+/**
+ * 读取**单个指数**的日线序列（升序），供「大盘日线走势图」使用。
+ *
+ * 口径：`index_daily` 里该 indexCode 最近 `days` 个**交易日**（按 tradeDate 取，不按自然日）。
+ * 缺字段（close/amount 为 null）原样返回 null，由前端断点 —— 不插值、不推导。
+ * 实测成本：60 个交易日 ≈ 1.1s（2026-09-18，见 docs/evidence/_probe_market_page_timing.out.json）。
+ */
+export async function getIndexDailySeries(
+  indexCode: string,
+  days: number = 60,
+): Promise<IndexDailySeriesPoint[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const rows = await db
+    .select({
+      tradeDate: indexDaily.tradeDate,
+      open: indexDaily.open,
+      high: indexDaily.high,
+      low: indexDaily.low,
+      close: indexDaily.close,
+      amount: indexDaily.amount,
+      volume: indexDaily.volume,
+    })
+    .from(indexDaily)
+    .where(eq(indexDaily.indexCode, indexCode))
+    .orderBy(desc(indexDaily.tradeDate))
+    .limit(days);
+
+  return rows.reverse();
 }
 
 /** 返回本地已存在的实际交易日集合，用于外部交易日历限频时的安全回退。 */
@@ -701,46 +1498,78 @@ export async function getStockDailyPriceTradeDates(startDate?: string, endDate?:
   return rows.map((row) => row.tradeDate);
 }
 
-/** 构造候选池回测所需的股票—交易日价格映射。 */
-export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, LeaderCandidateDailyPrice>> {
+/**
+ * 读取 stock_daily_prices 原始行情行（喂给价格映射与 Strategy Engine canonical 层）。
+ *
+ * STEP 7.3 内存安全：支持按 tradeDate 区间 / stockCode 列表有界查询；不传范围时保持
+ * 历史行为（全量）。全市场回填后表规模约 9M 行，调用方应尽量传入范围，禁止无条件
+ * `db.select().from(stockDailyPrices)` 全表物化（详见 server/backfill/pagination.ts）。
+ */
+async function loadStockDailyPriceRows(range?: { startDate?: string; endDate?: string; stockCodes?: string[] }): Promise<LeaderCandidateDailyPriceRow[]> {
   const db = await getDb();
-  if (!db) return new Map();
-  const rows = await db.select({
+  if (!db) return [];
+  const base = db.select({
     stockCode: stockDailyPrices.stockCode,
     tradeDate: stockDailyPrices.tradeDate,
     openPrice: stockDailyPrices.openPrice,
     closePrice: stockDailyPrices.closePrice,
+    highPrice: stockDailyPrices.highPrice,
     lowPrice: stockDailyPrices.lowPrice,
     amount: stockDailyPrices.amount,
+    volume: stockDailyPrices.volume,
+    preClosePrice: stockDailyPrices.preClosePrice,
   }).from(stockDailyPrices);
-
-  return buildLeaderCandidateDailyPriceMap(rows);
+  const conditions = [];
+  if (range?.startDate) conditions.push(gte(stockDailyPrices.tradeDate, range.startDate));
+  if (range?.endDate) conditions.push(lte(stockDailyPrices.tradeDate, range.endDate));
+  if (range?.stockCodes && range.stockCodes.length > 0) conditions.push(inArray(stockDailyPrices.stockCode, range.stockCodes));
+  return conditions.length > 0 ? base.where(and(...conditions)) : base;
 }
 
-/** 返回候选回测使用的行情覆盖状态，供研究页面提示低价与成交额的实际回填进度。 */
+/** 构造候选池回测所需的股票—交易日价格映射。 */
+export async function getLeaderCandidateDailyPriceMap(): Promise<Map<string, LeaderCandidateDailyPrice>> {
+  return buildLeaderCandidateDailyPriceMap(await loadStockDailyPriceRows());
+}
+
+/** 返回候选回测使用的行情覆盖状态，供研究页面提示高低价与成交额/量的实际回填进度。 */
 export async function getLeaderCandidateDailyPriceCoverage(): Promise<LeaderCandidateDailyPriceCoverage> {
+  const cachedCoverage = dailyPriceCoverageCache.get(DAILY_PRICE_COVERAGE_CACHE_KEY);
+  if (cachedCoverage) return cachedCoverage;
   const db = await getDb();
-  if (!db) return { rowCount: 0, stockCount: 0, startDate: null, endDate: null, lowPriceCount: 0, amountCount: 0 };
+  if (!db) return { rowCount: 0, stockCount: 0, startDate: null, endDate: null, highPriceCount: 0, lowPriceCount: 0, amountCount: 0, volumeCount: 0 };
   const rows = await db.select({
     rowCount: sql<number>`COUNT(*)`,
     stockCount: sql<number>`COUNT(DISTINCT ${stockDailyPrices.stockCode})`,
     startDate: sql<string | null>`MIN(${stockDailyPrices.tradeDate})`,
     endDate: sql<string | null>`MAX(${stockDailyPrices.tradeDate})`,
+    highPriceCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.highPrice} IS NOT NULL THEN 1 ELSE 0 END)`,
     lowPriceCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.lowPrice} IS NOT NULL THEN 1 ELSE 0 END)`,
     amountCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.amount} IS NOT NULL THEN 1 ELSE 0 END)`,
+    volumeCount: sql<number>`SUM(CASE WHEN ${stockDailyPrices.volume} IS NOT NULL THEN 1 ELSE 0 END)`,
   }).from(stockDailyPrices);
   const row = rows[0];
-  return {
+  const coverage = {
     rowCount: Number(row?.rowCount ?? 0),
     stockCount: Number(row?.stockCount ?? 0),
     startDate: row?.startDate ?? null,
     endDate: row?.endDate ?? null,
+    highPriceCount: Number(row?.highPriceCount ?? 0),
     lowPriceCount: Number(row?.lowPriceCount ?? 0),
     amountCount: Number(row?.amountCount ?? 0),
+    volumeCount: Number(row?.volumeCount ?? 0),
   };
+  dailyPriceCoverageCache.set(DAILY_PRICE_COVERAGE_CACHE_KEY, coverage);
+  return coverage;
 }
 
-/** 获取涨停数与大盘数据的关联统计（最近N天）*/
+/**
+ * 获取涨停数与大盘数据的关联统计（最近N天）。
+ *
+ * 性能（HOMEPAGE 优化，2026-09-18）：原实现 `db.select().from(limitUpRecords)` 会把窗口内
+ * ~2000 行的**全部列**（含 `keywords` TEXT）拉回内存再在 JS 里累加，实测中位 **925ms**。
+ * 改为**服务端聚合** —— 只回「日期 + 条数」与「日期 + 成交额/两融」两张小结果集（各 ~23 行），
+ * 口径**逐字不变**（仍是 `count(*)` 行数、仍按日期升序、仍按同一 startDate 截断）。
+ */
 export async function getLimitUpWithMarketData(days: number = 30): Promise<{
   date: string;
   limitUpCount: number;
@@ -755,20 +1584,22 @@ export async function getLimitUpWithMarketData(days: number = 30): Promise<{
   startDate.setDate(startDate.getDate() - days);
   const startDateStr = startDate.toISOString().split('T')[0];
 
-  // 获取涨停数据
-  const limitUpRecordsData = await db.select().from(limitUpRecords)
+  // 获取涨停数据：服务端按日期聚合，只回「日期 + 条数」
+  const limitUpStats = await db
+    .select({
+      date: limitUpRecords.limitUpDate,
+      limitUpCount: sql<number>`COUNT(*)`,
+    })
+    .from(limitUpRecords)
     .where(gte(limitUpRecords.limitUpDate, startDateStr))
-    .orderBy(desc(limitUpRecords.limitUpDate));
+    .groupBy(limitUpRecords.limitUpDate);
 
-  // 按日期统计涨停数
-  const dateMap = new Map<string, number>();
-  for (const record of limitUpRecordsData) {
-    const date = record.limitUpDate;
-    dateMap.set(date, (dateMap.get(date) || 0) + 1);
-  }
-
-  // 获取大盘数据
-  const marketDataList = await db.select().from(marketData)
+  // 获取大盘数据：只取展示需要的三列
+  const marketDataList = await db.select({
+    dataDate: marketData.dataDate,
+    turnover: marketData.turnover,
+    marginBalance: marketData.marginBalance,
+  }).from(marketData)
     .where(gte(marketData.dataDate, startDateStr))
     .orderBy(desc(marketData.dataDate));
 
@@ -782,11 +1613,11 @@ export async function getLimitUpWithMarketData(days: number = 30): Promise<{
   }
 
   // 合并数据，按日期排序
-  const result = Array.from(dateMap.entries())
-    .map(([date, limitUpCount]) => ({
-      date,
-      limitUpCount,
-      ...marketDataMap.get(date),
+  const result = limitUpStats
+    .map((row) => ({
+      date: row.date,
+      limitUpCount: Number(row.limitUpCount),
+      ...marketDataMap.get(row.date),
     }))
     .sort((a, b) => a.date.localeCompare(b.date)); // 按日期升序
 
@@ -862,7 +1693,7 @@ export async function getConnectionBoardStats(date: string) {
   const db = await getDb();
   if (!db) return null;
 
-  // 1. 一次性获取所有涨停记录（优化：避免多次数据库查询）
+  // 1. 一次性获取所有涨停记录（优化：避免查询多次数据库）
   const allRecords = await db.select().from(limitUpRecords)
     .orderBy(desc(limitUpRecords.limitUpDate));
   
@@ -977,19 +1808,8 @@ export async function getConnectionBoardStats(date: string) {
   const maxBoards = stocksWithBoards.length > 0 ? Math.max(...stocksWithBoards.map(s => s.boards)) : 0;
   const board3Plus = stocksWithBoards.filter(s => s.boards >= 3).length;
   
-  // 情绪评分计算公式
-  let emotionScore = 0;
-  if (totalLimitUp > 0) {
-    const connectionRatio = connectionBoards / totalLimitUp;
-    const maxBoardScore = Math.min(maxBoards / 10, 1);
-    const board3PlusRatio = connectionBoards > 0 ? board3Plus / connectionBoards : 0;
-    
-    emotionScore = Math.round(
-      connectionRatio * 40 + 
-      maxBoardScore * 30 + 
-      board3PlusRatio * 30
-    );
-  }
+  // 情绪评分公式：与 「连板梯队名录」(server/boardRoster.ts) 共用同一实现（shared/boardEmotionScore）
+  const emotionScore = computeBoardEmotionScore({ totalLimitUp, connectionBoards, maxBoards, board3Plus });
 
   return {
     distribution,
@@ -1327,8 +2147,57 @@ export function buildMaxConnectionBoardTrend(records: Array<Pick<LimitUpRecord, 
   });
 }
 
-/** 获取每日最高连板趋势（数据库全量涨停记录）。 */
-export async function getMaxConnectionBoardTrend() {
+/**
+ * 通用「TTL 结果缓存 + 单飞」包装（供情绪分析两个端点使用）。
+ *
+ * 单飞的必要性：两者都是秒级～十秒级的跨境全表读，前端重挂载 / 多标签页 / React Query
+ * 重试都可能并发打入同一份请求；无单飞时每个请求各跑一遍全表扫描，既拖慢页面又争抢
+ * 跨境连接池（与 `getLeaderCandidates` 的 `leaderCandidatesInFlight` 同一理由）。
+ */
+function cachedReadResult<T>(
+  cache: TTLCache<T>,
+  inFlight: Map<string, Promise<T>>,
+  key: string,
+  compute: () => Promise<T>,
+): Promise<T> {
+  const cached = cache.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const promise = compute()
+    .then((result) => {
+      cache.set(key, result);
+      return result;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+  inFlight.set(key, promise);
+  return promise;
+}
+
+/**
+ * 情绪分析两个只读端点的结果缓存（TTL 10 分钟）+ 单飞表。
+ *
+ * 背景（2026-09-20 实测，跨境 TiDB）：这两个端点此前**完全没有缓存**，每次打开
+ * `/sentiment-analysis` 都要重跑「全表取数 + 全量重算」——
+ *   · `getMaxConnectionBoardTrend`：6.2s（取数 2.4s / 99,918 行，计算仅 0.06s）；
+ *   · `getSentimentCycleAnalysis`：取数 2.8s + 计算 16.5s + 1.47MB 序列化。
+ * 两者都只依赖 `limit_up_records`，只在涨停记录写入时变化 ⇒ 适合结果缓存。
+ *
+ * 失效：应用内写入由 `invalidateLeaderCandidateBacktestCaches()` 主动清空；TTL 只作为
+ * 「外部脚本回填（不走应用写入口）」的兜底，与同文件的 `marketFactorRowsCache` 同量级。
+ *
+ * 缓存键：`nonce`。前端「刷新数据」按钮传一个新 nonce ⇒ 换键 ⇒ 真重算（既不绕过、
+ * 也不清空别人的缓存）；普通挂载一律用 `0` 复用。条目数由 TTLCache 的 maxEntries 兜住。
+ */
+const sentimentTrendCache = new TTLCache<Awaited<ReturnType<typeof buildMaxConnectionBoardTrend>>>(10 * 60 * 1000, 4);
+const sentimentCycleCache = new TTLCache<Awaited<ReturnType<typeof buildSentimentCycleAnalysis>>>(10 * 60 * 1000, 4);
+const sentimentTrendInFlight = new Map<string, Promise<Awaited<ReturnType<typeof buildMaxConnectionBoardTrend>>>>();
+const sentimentCycleInFlight = new Map<string, Promise<Awaited<ReturnType<typeof buildSentimentCycleAnalysis>>>>();
+
+/** `getMaxConnectionBoardTrend` 的实际取数与计算体（缓存键与单飞判定在包装函数里）。 */
+async function buildMaxConnectionBoardTrendResult() {
   const db = await getDb();
   if (!db) return [];
 
@@ -1341,8 +2210,18 @@ export async function getMaxConnectionBoardTrend() {
   return buildMaxConnectionBoardTrend(allRecords);
 }
 
-/** 获取基于主板最高连板趋势的情绪周期、原龙头断板和新周期候选分析。 */
-export async function getSentimentCycleAnalysis() {
+/** 获取每日最高连板趋势（数据库全量涨停记录；结果缓存 + 单飞，`nonce` 换键即强制重算）。 */
+export async function getMaxConnectionBoardTrend(options: { nonce?: number } = {}) {
+  return cachedReadResult(
+    sentimentTrendCache,
+    sentimentTrendInFlight,
+    `trend:${options.nonce ?? 0}`,
+    buildMaxConnectionBoardTrendResult,
+  );
+}
+
+/** `getSentimentCycleAnalysis` 的实际取数与计算体（缓存键与单飞判定在包装函数里）。 */
+async function buildSentimentCycleAnalysisResult() {
   const db = await getDb();
   if (!db) return buildSentimentCycleAnalysis([]);
 
@@ -1359,44 +2238,323 @@ export async function getSentimentCycleAnalysis() {
   return buildSentimentCycleAnalysis(records);
 }
 
-/** 获取最新交易日的主板龙头候选池。 */
-export async function getLeaderCandidates() {
+/** 获取基于主板最高连板趋势的情绪周期、原龙头断板和新周期候选分析（结果缓存 + 单飞）。 */
+export async function getSentimentCycleAnalysis(options: { nonce?: number } = {}) {
+  return cachedReadResult(
+    sentimentCycleCache,
+    sentimentCycleInFlight,
+    `cycle:${options.nonce ?? 0}`,
+    buildSentimentCycleAnalysisResult,
+  );
+}
+
+/** `getLeaderCandidates` 的实际计算体（无缓存、无单飞），由下面的包装函数调用。 */
+async function buildLeaderCandidatesResult() {
   const db = await getDb();
   if (!db) return buildLeaderCandidates([]);
 
-  const records = await db.select({
-    stockCode: limitUpRecords.stockCode,
-    stockName: limitUpRecords.stockName,
-    limitUpDate: limitUpRecords.limitUpDate,
-    limitUpTime: limitUpRecords.limitUpTime,
-    sector: limitUpRecords.sector,
-    turnover: limitUpRecords.turnover,
-    circulationValue: limitUpRecords.circulationValue,
-  }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
+  const records = await withReadRetry("getLeaderCandidates.records", () =>
+    db.select({
+      stockCode: limitUpRecords.stockCode,
+      stockName: limitUpRecords.stockName,
+      limitUpDate: limitUpRecords.limitUpDate,
+      limitUpTime: limitUpRecords.limitUpTime,
+      sector: limitUpRecords.sector,
+      turnover: limitUpRecords.turnover,
+      circulationValue: limitUpRecords.circulationValue,
+      keywords: limitUpRecords.keywords,
+    }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime),
+  );
 
   const latestDate = records[0]?.limitUpDate;
   if (!latestDate) return buildLeaderCandidates(records);
+  // 信号日行情与涨停聚合相互独立 ⇒ 并行取数，省掉一次串行往返。
+  // 涨停聚合走 `getLeaderCandidateMarketFactorRows`（已带缓存），
+  // 即便缓存未命中也不会与 records 查询争抢同一连接。
+  const [signalDayPrices, marketFactorRows] = await Promise.all([
+    withReadRetry("getLeaderCandidates.signalDayPrices", () =>
+      db.select({
+        stockCode: stockDailyPrices.stockCode,
+        tradeDate: stockDailyPrices.tradeDate,
+        openPrice: stockDailyPrices.openPrice,
+        closePrice: stockDailyPrices.closePrice,
+        highPrice: stockDailyPrices.highPrice,
+        lowPrice: stockDailyPrices.lowPrice,
+        amount: stockDailyPrices.amount,
+        volume: stockDailyPrices.volume,
+        preClosePrice: stockDailyPrices.preClosePrice,
+      }).from(stockDailyPrices).where(eq(stockDailyPrices.tradeDate, latestDate)),
+    ),
+    getLeaderCandidateMarketFactorRows(),
+  ]);
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
-  const signalDayPrices = await db.select({
-    stockCode: stockDailyPrices.stockCode,
-    tradeDate: stockDailyPrices.tradeDate,
-    openPrice: stockDailyPrices.openPrice,
-    closePrice: stockDailyPrices.closePrice,
-    lowPrice: stockDailyPrices.lowPrice,
-    amount: stockDailyPrices.amount,
-  }).from(stockDailyPrices).where(eq(stockDailyPrices.tradeDate, latestDate));
   const priceByStockDate = buildLeaderCandidateDailyPriceMap(signalDayPrices);
-  const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
+  const marketFactorsByDate = buildVerifiedMarketFactorMap(marketFactorRows);
   return buildLeaderCandidates(records, { phaseByDate, priceByStockDate, marketFactorsByDate });
 }
 
-/** 获取基于历史候选池的T+1连板延续回测结果。 */
-export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktestOptions = {}) {
-  const db = await getDb();
-  if (!db) return buildLeaderCandidateBacktest([], options);
+/**
+ * 获取最新交易日的主板龙头候选池。
+ *
+ * 2026-09-13 性能修复：页面首屏关键路径上唯一的端点，此前无缓存
+ * （实测热调用仍需 23.7s，因为每次重跑全表 GROUP BY + 情绪周期重算）。
+ * 现在加两层：进程内 TTL 结果缓存 + 单飞去重；数据写入由
+ * `invalidateLeaderCandidateBacktestCaches()` 主动失效。
+ */
+export async function getLeaderCandidates() {
+  const cached = leaderCandidatesResultCache.get(LEADER_CANDIDATES_CACHE_KEY);
+  if (cached) return cached;
+  const inFlight = leaderCandidatesInFlight.get(LEADER_CANDIDATES_CACHE_KEY);
+  if (inFlight) return inFlight;
+  const promise = buildLeaderCandidatesResult()
+    .then((result) => {
+      leaderCandidatesResultCache.set(LEADER_CANDIDATES_CACHE_KEY, result);
+      return result;
+    })
+    .finally(() => {
+      leaderCandidatesInFlight.delete(LEADER_CANDIDATES_CACHE_KEY);
+    });
+  leaderCandidatesInFlight.set(LEADER_CANDIDATES_CACHE_KEY, promise);
+  return promise;
+}
 
-  const records = await db.select({
+type BacktestBaseContext = {
+  records: LeaderCandidateSourceRecord[];
+  /** 全量原始日线行情行（供 Strategy Engine canonical/Feature 层使用）。 */
+  rawRows: RawDailyPriceRow[];
+  context: LeaderCandidateBacktestContext;
+};
+
+// 回测基础上下文按「日期区间」隔离缓存（回填后全量 489 万行价格无法单值缓存）。
+const backtestBaseContextCache = new Map<string, { value: BacktestBaseContext; expiresAt: number }>();
+const BACKTEST_BASE_CONTEXT_TTL_MS = 15 * 60 * 1000;
+const backtestResultCache = new TTLCache<LeaderCandidateBacktestResult>(30 * 60 * 1000, 256);
+/**
+ * 数据版本号：涨停记录 / 日线行情每次写入都自增。
+ * 用途：判定一次「耗时数分钟」的回测计算是否横跨了数据写入 —— 横跨则结果可能基于
+ * 半同步数据，只回传不写缓存，避免把中间态固化进内存与磁盘快照。
+ */
+let backtestCacheGeneration = 0;
+
+/**
+ * 涨停记录 / 日线行情写入后调用：回测结果不再可信，清空内存缓存与磁盘快照。
+ * 这是「上传新数据后页面必须显示新数据」的正确性保证，不是单纯的性能优化。
+ */
+export function invalidateLeaderCandidateBacktestCaches(): void {
+  backtestCacheGeneration += 1;
+  // 数据戳备忘必须同时清掉，否则钩子失效后仍会命中 15s 内的旧戳。
+  backtestDataStampMemo = null;
+  backtestResultCache.clear();
+  backtestBaseContextCache.clear();
+  // 候选池结果缓存 / 聚合缓存同样依赖涨停记录与行情，必须一并失效。
+  // ⚠️ 不在此清 `dailyPriceCoverageCache`：该缓存 TTL 仅 10 分钟，而清空会让下一次读取
+  // 重跑 890 万行全表聚合（~9s）；而本函数在批量写入时是逐批调用的（见
+  // createLimitUpRecordsBatch），逐批清空会把一次回填变成数十次全表扫描。
+  leaderCandidatesResultCache.clear();
+  marketFactorRowsCache.clear();
+  // 情绪分析两个端点读的也是 `limit_up_records` 全表 ⇒ 同样必须失效，
+  // 否则「上传新数据后页面仍显示旧结果」（与 10 分钟 TTL 叠加会更明显）。
+  sentimentTrendCache.clear();
+  sentimentCycleCache.clear();
+  clearLeaderCandidateBacktestSnapshotsSync();
+}
+// 价格覆盖率是对 890 万行 stock_daily_prices 的全表聚合扫描（~9s），且仅在回填后变化。
+// 用独立长 TTL 缓存（10 分钟）解耦于 base context 的 3 分钟 TTL，避免每次冷缓存回测都重扫。
+const dailyPriceCoverageCache = new TTLCache<LeaderCandidateDailyPriceCoverage>(10 * 60 * 1000, 4);
+const DAILY_PRICE_COVERAGE_CACHE_KEY = "coverage";
+
+/**
+ * 「最新交易日龙头候选池」结果缓存（2026-09-13 性能修复）。
+ *
+ * 背景：`getLeaderCandidates` 是页面首屏关键路径上唯一的端点（页头四个统计卡片 +
+ * 当日评分列表 + 图表全部依赖它），但此前**完全没有缓存**。实测（跨境 TiDB）：
+ *   · 冷调用 32.4s、热调用仍 23.7s —— 「热」并不快，因为它每次都在重跑
+ *     「涨停记录全表 GROUP BY + 情绪周期全量重算」。
+ * 对比：同页的 `getLeaderCandidateBacktest` 有 30 分钟结果缓存（367s → 0ms）。
+ *
+ * 本缓存只存「结果」，不含业务语义；数据写入时由
+ * `invalidateLeaderCandidateBacktestCaches()` 主动清空，保证上传新数据后页面立即刷新。
+ */
+const leaderCandidatesResultCache = new TTLCache<Awaited<ReturnType<typeof buildLeaderCandidatesResult>>>(5 * 60 * 1000, 4);
+const LEADER_CANDIDATES_CACHE_KEY = "latest";
+
+/**
+ * 单飞（single-flight）：同一 key 的并发/密集重复请求共享同一次计算。
+ *
+ * 必要性：候选池计算耗时数十秒，前端在 `staleTime` 之前若发生重挂载、
+ * 多标签页或 React Query 重试，会并发打入多个请求。无单飞时每个请求各跑一遍
+ * 全表扫描，既拖慢页面又争抢跨境连接池。单飞让后来者直接复用首个 Promise。
+ */
+const leaderCandidatesInFlight = new Map<string, Promise<Awaited<ReturnType<typeof buildLeaderCandidatesResult>>>>();
+
+/**
+ * 涨停记录按日聚合（`getLeaderCandidateMarketFactorRows` 的原始输出）缓存。
+ *
+ * 该查询是对 `limit_up_records` 的**全表 GROUP BY**，且被两处调用：
+ *   ① `getLeaderCandidates`（每次页面加载）
+ *   ② `loadBacktestBaseContext`（冷缓存回测）
+ * 此前无任何缓存，属于纯重复劳动 —— 聚合结果只在涨停记录写入时变化。
+ */
+const marketFactorRowsCache = new TTLCache<LeaderCandidateMarketFactorRow[]>(10 * 60 * 1000, 4);
+const MARKET_FACTOR_ROWS_CACHE_KEY = "all";
+
+/** 日期字符串（YYYY-MM-DD）按日历日平移 days 天（UTC，避免本地时区偏移）。 */
+function shiftDate(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** 计算「今天往前 days 天」的回测区间（纸面交易等前向功能仅需近期数据）。 */
+function recentBacktestRange(days: number): { startDate: string; endDate: string } {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return { startDate: shiftDate(today, -days), endDate: today };
+}
+
+/**
+ * 加载回测区间的连续交易日历（独立于候选股价格行）。
+ * engine 持仓推进依赖「连续交易日」：若交易序列出现空洞（非涨停日被跳过），
+ * 持有期/止损/止盈的逐日推进会被扭曲。故交易日历从 index_daily 全量 distinct 提供，
+ * 不与候选股价格行（rawRows）的日期并集混用。
+ */
+async function loadBacktestTradingDates(minLimitUpDate: string, maxLimitUpDate: string): Promise<string[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const start = minLimitUpDate ? shiftDate(minLimitUpDate, -45) : undefined;
+  const end = maxLimitUpDate ? shiftDate(maxLimitUpDate, 7) : undefined;
+  if (!start || !end) return [];
+  const rows = await db.execute(
+    sql.raw(`SELECT DISTINCT tradeDate FROM index_daily WHERE tradeDate >= '${start}' AND tradeDate <= '${end}' ORDER BY tradeDate`),
+  );
+  return ((rows as unknown as Array<Array<{ tradeDate: string }>>)?.[0] ?? []).map((r) => r.tradeDate);
+}
+
+/** 把每只股票相邻涨停日（间隔 <= gapDays 自然日）合并为不相交的连续窗口。 */
+function mergeLimitUpWindows(
+  rows: Array<{ stockCode: string; limitUpDate: string }>,
+  gapDays: number,
+): Array<{ stockCode: string; startDate: string; endDate: string }> {
+  const byStock = new Map<string, string[]>();
+  for (const r of rows) {
+    const list = byStock.get(r.stockCode) ?? [];
+    list.push(r.limitUpDate);
+    byStock.set(r.stockCode, list);
+  }
+  const ranges: Array<{ stockCode: string; startDate: string; endDate: string }> = [];
+  const dayMs = 86_400_000;
+  for (const [code, dates] of Array.from(byStock.entries())) {
+    dates.sort();
+    let start = dates[0];
+    let end = dates[0];
+    for (let i = 1; i < dates.length; i += 1) {
+      const d = dates[i];
+      if (Date.parse(`${d}T00:00:00Z`) - Date.parse(`${end}T00:00:00Z`) <= gapDays * dayMs) {
+        end = d;
+      } else {
+        ranges.push({ stockCode: code, startDate: start, endDate: end });
+        start = d;
+        end = d;
+      }
+    }
+    ranges.push({ stockCode: code, startDate: start, endDate: end });
+  }
+  return ranges;
+}
+
+/**
+ * 按「每个涨停日的精确窗口」加载价格行（STEP 7.3 内存安全铁律 + 持有期语义）。
+ * 回测只需每个涨停日前后一小段价格：前 lookbackDays 自然日（feature 回溯 SMA20/avgAmount20/volatility20
+ * ≈20 个交易日）～ 后 forwardDays 自然日（持有 maxHoldingDays 个交易日 + T+1 买入 + SELL 成交日 buffer）。
+ * 涨停表回填到 2019 后，若沿用「每股 MIN~MAX 连续窗口」会命中 489 万行（全区间）/ 100 万行（最近 2 年）
+ * 并卡死回测；精确窗口化把最近 2 年收敛到 ~47 万行，去掉每股涨停日之间的空档。
+ * 去重不能在 SQL 里直接做（DISTINCT 全字段 ~55s、OR 展开 SQL >1.7MB 超时），故两步走：
+ * 应用层把每股相邻涨停日合并为互不重叠的区间 → 落连接级临时表 → JOIN 价格（无笛卡尔积、无去重）。
+ */
+async function loadBacktestPriceRows(range?: { startDate?: string; endDate?: string }): Promise<LeaderCandidateDailyPriceRow[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const { startDate, endDate } = range ?? {};
+  const lookbackDays = 30; // 覆盖 SMA20 / avgAmount20 / volatility20 的 20 个交易日回溯
+  const forwardDays = 14;  // 覆盖 maxHoldingDays(5) 交易日持有 + T+1 买入 + SELL 成交 + 长假 buffer
+  // 专用连接：临时表是连接级的，连接池复用会丢表。
+  const conn = await (db as unknown as { $client: { promise(): { getConnection(): Promise<any> } } }).$client.promise().getConnection();
+  try {
+    // 1. 区间内全部涨停日（DATE_FORMAT 固定为 YYYY-MM-DD，规避 mysql2 本地时区偏移）。
+    const innerWhere =
+      startDate || endDate
+        ? ` WHERE 1=1${startDate ? ` AND limitUpDate >= ${conn.escape(startDate)}` : ""}${endDate ? ` AND limitUpDate <= ${conn.escape(endDate)}` : ""}`
+        : "";
+    const [limitUpRows] = await conn.query(
+      `SELECT stockCode, DATE_FORMAT(limitUpDate, '%Y-%m-%d') AS limitUpDate FROM limit_up_records${innerWhere} ORDER BY stockCode, limitUpDate`,
+    );
+    if ((limitUpRows as Array<Record<string, unknown>>).length === 0) return [];
+
+    // 2. 合并相邻涨停日为不相交区间（间隔 <= lookback+forward 自然日即视为同一窗口）。
+    const ranges = mergeLimitUpWindows(limitUpRows as Array<{ stockCode: string; limitUpDate: string }>, lookbackDays + forwardDays);
+    if (ranges.length === 0) return [];
+
+    // 3. 区间落临时表（连接级，随连接释放自动销毁；一次性批量插入减少往返）。
+    await conn.query("DROP TEMPORARY TABLE IF EXISTS tmp_limitup_window");
+    await conn.query("CREATE TEMPORARY TABLE tmp_limitup_window (stockCode VARCHAR(20), startDate DATE, endDate DATE, KEY idx_win (stockCode, startDate))");
+    const values = ranges.map((r) => `(${conn.escape(r.stockCode)},${conn.escape(r.startDate)},${conn.escape(r.endDate)})`).join(",");
+    await conn.query(`INSERT INTO tmp_limitup_window (stockCode, startDate, endDate) VALUES ${values}`);
+
+    // 4. JOIN 价格（区间互不重叠，无需去重）。
+    const [priceRows] = await conn.query(
+      `SELECT p.stockCode, DATE_FORMAT(p.tradeDate, '%Y-%m-%d') AS tradeDate, p.openPrice, p.closePrice, p.highPrice, p.lowPrice, p.amount, p.volume, p.preClosePrice
+       FROM stock_daily_prices p
+       JOIN tmp_limitup_window w ON w.stockCode = p.stockCode
+         AND p.tradeDate >= DATE_SUB(w.startDate, INTERVAL ${lookbackDays} DAY)
+         AND p.tradeDate <= DATE_ADD(w.endDate, INTERVAL ${forwardDays} DAY)`,
+    );
+    return (priceRows as Array<Record<string, unknown>>).map((r) => ({
+      stockCode: String(r.stockCode),
+      tradeDate: String(r.tradeDate),
+      openPrice: r.openPrice as string | number | null,
+      closePrice: r.closePrice as string | number | null,
+      highPrice: r.highPrice as string | number | null,
+      lowPrice: r.lowPrice as string | number | null,
+      amount: r.amount as string | number | null,
+      volume: r.volume as string | number | null,
+      preClosePrice: r.preClosePrice as string | number | null,
+    }));
+  } finally {
+    conn.release();
+  }
+}
+
+/**
+ * 加载回测所需的「仅依赖 DB、不依赖参数」的中间数据，单独物化并短 TTL 缓存。
+ * 这样参数变化时只需重算模拟部分，不必每次全量拉涨停记录 + 情绪周期 + 停牌窗口。
+ */
+export async function loadBacktestBaseContext(range?: { startDate?: string; endDate?: string }): Promise<BacktestBaseContext> {
+  const now = Date.now();
+  const rangeKey = `${range?.startDate ?? ""}|${range?.endDate ?? ""}`;
+  const cached = backtestBaseContextCache.get(rangeKey);
+  if (cached && now < cached.expiresAt) {
+    return cached.value;
+  }
+  const db = await getDb();
+  if (!db) {
+    const empty: BacktestBaseContext = { records: [], rawRows: [], context: {} };
+    backtestBaseContextCache.set(rangeKey, { value: empty, expiresAt: now + BACKTEST_BASE_CONTEXT_TTL_MS });
+    return empty;
+  }
+
+  const { startDate, endDate } = range ?? {};
+  const limitUpDateFilters = [
+    startDate ? gte(limitUpRecords.limitUpDate, startDate) : undefined,
+    endDate ? lte(limitUpRecords.limitUpDate, endDate) : undefined,
+  ].filter((f): f is NonNullable<typeof f> => Boolean(f));
+
+  // 有界拉取日线（STEP 7.3 内存安全铁律）：按「每只候选股自身涨停窗口」下推查询，
+  // 禁止全表物化 / 全局连续窗口 —— 数据链回填后 stock_daily_prices 已 890 万行，
+  // 无条件全表会卡死回测。回填到 2019 后，全区间价格行 JOIN 命中 489 万行；
+  // 把回测区间下推到涨停记录 + 每股窗口后，最近 2 年可收敛到 ~80 万行。
+  // 五路查询相互独立（mysql2 连接池默认 10 连接），并行执行；交易日历依赖 records 日期区间，延后串行补取。
+  const recordsQuery = db.select({
     stockCode: limitUpRecords.stockCode,
     stockName: limitUpRecords.stockName,
     limitUpDate: limitUpRecords.limitUpDate,
@@ -1404,13 +2562,618 @@ export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktes
     sector: limitUpRecords.sector,
     turnover: limitUpRecords.turnover,
     circulationValue: limitUpRecords.circulationValue,
-  }).from(limitUpRecords).orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
+    // 涨停关键词：历史期大面积缺失，仅用于字段覆盖识别与题材兜底，不参与评分。
+    keywords: limitUpRecords.keywords,
+  }).from(limitUpRecords);
+  if (limitUpDateFilters.length > 0) {
+    recordsQuery.where(and(...limitUpDateFilters));
+  }
+  recordsQuery.orderBy(desc(limitUpRecords.limitUpDate), limitUpRecords.limitUpTime);
+
+  // 2026-09-15 修复：五路并行读**各自带读重试**。跨境链路偶发 ECONNRESET，而这里任一路
+  // 失败都会让整轮回测（冷算 305~413s）作废。现场：`stock_suspension_windows` 的一次瞬时
+  // 读失败直接冒成 tRPC 500，用户等了两分钟只拿到报错。
+  const [records, rawRows, dailyPriceCoverage, marketFactorRows, suspensionWindows] = await Promise.all([
+    withReadRetry("loadBacktestBaseContext.records", () => recordsQuery),
+    withReadRetry("loadBacktestBaseContext.priceRows", () => loadBacktestPriceRows(range)),
+    withReadRetry("loadBacktestBaseContext.dailyPriceCoverage", () => getLeaderCandidateDailyPriceCoverage()),
+    withReadRetry("loadBacktestBaseContext.marketFactorRows", () => getLeaderCandidateMarketFactorRows()),
+    withReadRetry("loadBacktestBaseContext.suspensionWindows", () => getStockSuspensionWindows()),
+  ]);
 
   const cycleAnalysis = buildSentimentCycleAnalysis(records);
   const phaseByDate = new Map(cycleAnalysis.days.map((day) => [day.date, { phase: day.phase, maxBoards: day.maxBoards }]));
-  const priceByStockDate = await getLeaderCandidateDailyPriceMap();
-  const dailyPriceCoverage = await getLeaderCandidateDailyPriceCoverage();
-  const marketFactorsByDate = buildVerifiedMarketFactorMap(await getLeaderCandidateMarketFactorRows());
-  const tradingDates = Array.from(new Set(Array.from(priceByStockDate.keys()).map((key) => key.split("::").at(-1)!))).sort();
-  return buildLeaderCandidateBacktest(records, options, { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage, marketFactorsByDate });
+  const sortedLimitUpDates = records.map((r) => r.limitUpDate).sort();
+  const minLimitUpDate = sortedLimitUpDates[0] ?? "";
+  const maxLimitUpDate = sortedLimitUpDates[sortedLimitUpDates.length - 1] ?? "";
+  const priceByStockDate = buildLeaderCandidateDailyPriceMap(rawRows);
+  const marketFactorsByDate = buildVerifiedMarketFactorMap(marketFactorRows);
+  // 交易日历独立提供（连续），不从候选价格行推得，避免「每股窗口不连续」破坏持仓推进。
+  const tradingDates = await loadBacktestTradingDates(minLimitUpDate, maxLimitUpDate);
+  const suspendedDatesByStock = expandSuspendedDatesByStock(suspensionWindows, tradingDates);
+
+  const value: BacktestBaseContext = {
+    records,
+    rawRows,
+    context: { phaseByDate, priceByStockDate, tradingDates, dailyPriceCoverage, marketFactorsByDate, suspendedDatesByStock },
+  };
+  backtestBaseContextCache.set(rangeKey, { value, expiresAt: now + BACKTEST_BASE_CONTEXT_TTL_MS });
+  return value;
+}
+
+/**
+ * 龙头候选回测的「数据版本戳」。
+ *
+ * ## 为什么需要（2026-09-15 实查 · 页面「历史候选池回测」不随时间更新）
+ *
+ * 缓存命中判定此前只认「参数哈希 + TTL」⇒ **绕过服务端的写入**（Python / 外部脚本往同一个
+ * 跨境 TiDB 写行情）不会触发 `invalidateLeaderCandidateBacktestCaches()`，旧结果被无限复用。
+ * 本次现场：`index_daily` 于 19:03 推进到 2026-09-15，而 18:59 算出的快照（样本最新日
+ * 2026-09-11）继续被返回；该页「越常看越不更新」还叠了第二条 —— 命中磁盘快照会把内存
+ * TTL 重新计时 30 分钟。
+ *
+ * ## 口径（三条链末端，与「某天为何不出现」的判据链一一对应）
+ *
+ *   ① `limit_up_records.MAX(limitUpDate)`  —— 涨停信号末端（出现新的候选日）
+ *   ② `index_daily.MAX(tradeDate)`         —— 交易日历末端（= T+N 观察日的唯一来源；
+ *                                              它推进后，末端信号日才可能凑齐观察日）
+ *   ③ `stock_daily_prices.MAX(tradeDate)`  —— 日线行情末端（T+1 溢价的数据前提）
+ *
+ * 正常同步下三者只增不减 ⇒ 任一推进即换键 ⇒ 快照与内存缓存自然未命中，**不依赖任何钩子**，
+ * 因而对「绕过应用的外部写入」同样自愈。成本只有 1 次往返的查询。
+ *
+ * ⚠️ 不用 `COUNT(*)` / `CREATE_TIME`：`stock_daily_prices` 890 万行，聚合扫描实测 ≈9s
+ * （见 `PROJECT_RULES.md` 的缓存失效铁律）。三个 `MAX()` 均有索引
+ * （`idx_limit_up_date` / `idx_index_daily_trade_date` / `idx_stock_daily_price_trade_date`），
+ * 合并成一条语句后实测 5 轮交错中位 ≈214ms。
+ */
+const BACKTEST_DATA_STAMP_SQL = `
+SELECT
+  (SELECT MAX(limitUpDate) FROM limit_up_records)   AS lu,
+  (SELECT MAX(tradeDate)   FROM index_daily)        AS cal,
+  (SELECT MAX(tradeDate)   FROM stock_daily_prices) AS px`;
+
+/**
+ * 数据戳备忘 TTL。
+ *
+ * 数据戳查询要 1 次跨境往返（实测 ≈214ms），直接挂在「热调用 ≈0ms」的命中路径上不可接受。
+ * 15s 备忘把热路径拉回 0ms，同时把「外部写入 → 页面可见」的延迟上界钉在 15s；
+ * 应用内写入走 `invalidateLeaderCandidateBacktestCaches()` 立即清备忘，不受此 TTL 影响。
+ */
+const BACKTEST_DATA_STAMP_TTL_MS = 15 * 1000;
+let backtestDataStampMemo: { value: string; expiresAt: number } | null = null;
+
+/** 读取数据版本戳；读失败返回常量 `unknown`（退回「只靠 TTL / 写入钩子」的旧口径，绝不阻断回测）。 */
+async function readBacktestDataStamp(): Promise<string> {
+  const now = Date.now();
+  if (backtestDataStampMemo && now < backtestDataStampMemo.expiresAt) return backtestDataStampMemo.value;
+  const db = await getDb();
+  if (!db) return "unknown";
+  try {
+    const rows = await db.execute(sql.raw(BACKTEST_DATA_STAMP_SQL));
+    const row = (rows as unknown as Array<Array<Record<string, unknown>>>)?.[0]?.[0];
+    const value = row ? `lu:${row.lu ?? "-"}|cal:${row.cal ?? "-"}|px:${row.px ?? "-"}` : "unknown";
+    backtestDataStampMemo = { value, expiresAt: now + BACKTEST_DATA_STAMP_TTL_MS };
+    return value;
+  } catch (error) {
+    console.warn("[LeaderCandidateBacktest] 数据戳读取失败，本次退回旧口径（仅靠 TTL / 写入钩子失效）:", error);
+    return "unknown";
+  }
+}
+
+/** 单飞表：同一缓存键的并发请求共享同一次计算（冷算 305~413s，不能让页面重复触发）。 */
+const backtestInFlight = new Map<string, Promise<LeaderCandidateBacktestResult>>();
+
+/**
+ * 获取基于历史候选池的T+1连板延续回测结果（按参数哈希做结果缓存）。
+ *
+ * 正式生产入口（STEP 5 P2-2 边界）：结果由 Strategy Engine 新链路产出——
+ *   rawRows → toCanonicalBar/validateMarketBar → runFeaturePipeline →
+ *   FeatureSnapshotBundle → leader-candidate-baseline(featureMode="limit-up-confirm") →
+ *   PositionSizer/RiskManager → runBacktestWithRisk → Adapter → LeaderCandidateBacktestResult。
+ * 本函数为「生产核心版」：下行风险研究等 research-legacy 报表不在此构建
+ * （downsideRiskResearch / strategyPortfolioSnapshot 为 null），生产请求路径
+ * legacy 交易模拟器调用为 0。完整分析报表请调用 getLeaderCandidateResearch。
+ */
+export async function getLeaderCandidateBacktest(options: LeaderCandidateBacktestOptions = {}): Promise<LeaderCandidateBacktestResult> {
+  // 缓存键 = 参数哈希 **+ 数据戳**：两者任一变化都必须重算（见 BACKTEST_DATA_STAMP_SQL 注释）。
+  const cacheKey = stableHash({ params: options, dataStamp: await readBacktestDataStamp() });
+  const cached = backtestResultCache.get(cacheKey);
+  if (cached) return cached;
+  // 单飞：页面会同时打「聚合」（getLeaderCandidateBacktest）与「明细分页」
+  // （getLeaderCandidateHistoryPage → 本函数）两个端点，二者共用同一 key。
+  // 无单飞时两条并发请求各跑一遍全量模拟，把跨境库的负载直接翻倍。
+  const inFlight = backtestInFlight.get(cacheKey);
+  if (inFlight) return inFlight;
+  const promise = buildLeaderCandidateBacktest(cacheKey, options).finally(() => {
+    backtestInFlight.delete(cacheKey);
+  });
+  backtestInFlight.set(cacheKey, promise);
+  return promise;
+}
+
+/** 实际计算路径（缓存键与单飞判定已由 `getLeaderCandidateBacktest` 完成）。 */
+async function buildLeaderCandidateBacktest(
+  cacheKey: string,
+  options: LeaderCandidateBacktestOptions,
+): Promise<LeaderCandidateBacktestResult> {
+  // 磁盘快照：进程重启 / 内存 TTL 过期后仍可秒回（实测全区间重算 ≈305s）。
+  // 命中条件由快照层负责（key + 版本 + TTL），数据写入时会被主动清空。
+  const snapshot = await readLeaderCandidateBacktestSnapshot<LeaderCandidateBacktestResult>(cacheKey);
+  if (snapshot) {
+    backtestResultCache.set(cacheKey, snapshot.payload);
+    return snapshot.payload;
+  }
+  const range = { startDate: options.startDate, endDate: options.endDate };
+  const generationAtStart = backtestCacheGeneration;
+  const { records, rawRows, context } = await loadBacktestBaseContext(range);
+  const result = runLeaderCandidateStrategyBacktest(records, rawRows, context, options);
+  // 计算期间若发生数据写入（涨停/行情），本次结果可能基于半同步数据：只返回不缓存。
+  if (backtestCacheGeneration === generationAtStart) {
+    backtestResultCache.set(cacheKey, result);
+    await writeLeaderCandidateBacktestSnapshot(cacheKey, result);
+  }
+  return result;
+}
+
+/**
+ * 完整分析报表（研究端点专用，STEP 5 P2-2）：生产核心 + 下行风险研究报表。
+ *
+ * 风险研究实验段使用 research-legacy 交易模拟器（显式研究来源、带 provenance），
+ * 仅允许研究请求调用；不得进入 getLeaderCandidateBacktest 生产请求。返回结果形状
+ * 与生产核心一致，但 downsideRiskResearch / strategyPortfolioSnapshot 非空，
+ * finalVerdict 含样本外（WFA）稳健性成分。
+ */
+export async function getLeaderCandidateResearch(options: LeaderCandidateBacktestOptions = {}): Promise<LeaderCandidateBacktestResult> {
+  const cacheKey = `research:${stableHash(options)}`;
+  const cached = backtestResultCache.get(cacheKey);
+  if (cached) return cached;
+  const range = { startDate: options.startDate, endDate: options.endDate };
+  const { records, rawRows, context } = await loadBacktestBaseContext(range);
+  const result = runLeaderCandidateResearchReport(records, rawRows, context, options);
+  backtestResultCache.set(cacheKey, result);
+  return result;
+}
+
+/**
+ * 「全样本历史明细」服务端分页（2026-09-11 性能修复）。
+ *
+ * 明细行数达数万行（≈30MB JSON），全量回传会让浏览器在序列化 + 渲染数万个 <tr> 时卡死。
+ * 本入口复用 `getLeaderCandidateBacktest` 的 30 分钟结果缓存，只在服务端切片，
+ * 单次响应恒 <= pageSize 行；过滤发生在切片之前，计数恒反映筛选后的全量。
+ */
+export async function getLeaderCandidateHistoryPage(
+  options: LeaderCandidateBacktestOptions & LeaderCandidateHistoryQuery,
+): Promise<LeaderCandidateHistoryPage> {
+  const { page, pageSize, phase, onlySuccess, ...backtestOptions } = options;
+  const result = await getLeaderCandidateBacktest(backtestOptions);
+  return paginateLeaderCandidateHistory(result.historicalRows, { page, pageSize, phase, onlySuccess });
+}
+
+/** 打地鼠基准：随机打乱评分排序重复回测，判断真实策略是否显著优于随机选股。 */
+export async function runMonkeyBenchmarkForBacktest(options: LeaderCandidateBacktestOptions, trialCount = 100) {
+  const result = await getLeaderCandidateBacktest(options);
+  const { context } = await loadBacktestBaseContext({ startDate: options.startDate, endDate: options.endDate });
+  return runMonkeyBenchmark(
+    result.historicalRows,
+    options.realistic,
+    context.priceByStockDate ?? new Map(),
+    context.tradingDates ?? [],
+    trialCount,
+  );
+}
+
+/** 交易成本敏感性：在 0/1/1.5/2/3 倍成本下重复回测，判断策略是否依赖理想无成本环境。 */
+export async function runCostSensitivityForBacktest(options: LeaderCandidateBacktestOptions, multipliers?: number[]) {
+  const result = await getLeaderCandidateBacktest(options);
+  const { context } = await loadBacktestBaseContext({ startDate: options.startDate, endDate: options.endDate });
+  return runCostSensitivity(
+    result.historicalRows,
+    options.realistic,
+    context.priceByStockDate ?? new Map(),
+    context.tradingDates ?? [],
+    multipliers,
+  );
+}
+
+/** 从回测结果提取扁平关键指标，供历史列表页快速展示（不承载完整明细）。 */
+function extractBacktestSummary(result: LeaderCandidateBacktestResult) {
+  return {
+    observationDays: result.observationDays,
+    appliedMinScore: result.appliedMinScore,
+    totalSamples: result.totalSamples,
+    successCount: result.successCount,
+    successRate: result.successRate,
+    averageClosePremium: result.premium.averageClosePremium,
+    tPlus1To2AverageReturn: result.tPlus1CloseToTPlus2Close.averageReturn,
+    realisticTotalReturn: result.realisticSimulation.totalReturn,
+    realisticMaxDrawdown: result.realisticSimulation.maxDrawdown,
+    realisticWinRate: result.realisticSimulation.winRate,
+    realisticTradeCount: result.realisticSimulation.tradeCount,
+  };
+}
+
+export type BacktestRunSummary = {
+  id: number;
+  createdAt: string | null;
+  summary: Record<string, unknown> | null;
+};
+
+export type SavedBacktestRun = {
+  id: number;
+  createdAt: string | null;
+  options: LeaderCandidateBacktestOptions;
+  summary: Record<string, unknown> | null;
+  result: LeaderCandidateBacktestResult;
+};
+
+function timestampToIso(value: Date | string | null): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+/** 保存一次回测（参数 + 完整结果），返回记录 id。参数哈希作为去重/缓存键。 */
+export async function saveBacktestRun(options: LeaderCandidateBacktestOptions, result: LeaderCandidateBacktestResult): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const paramsJson = JSON.stringify(options);
+  const summary = extractBacktestSummary(result);
+  const inserted = await db.insert(backtestRuns).values({
+    paramsHash: stableHash(options),
+    paramsJson,
+    summaryJson: JSON.stringify(summary),
+    resultJson: JSON.stringify(result),
+  });
+  return Number(inserted[0].insertId);
+}
+
+/** 列出已保存的回测（摘要级，不含完整结果），按保存时间倒序。 */
+export async function listBacktestRuns(limit = 50): Promise<BacktestRunSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({
+    id: backtestRuns.id,
+    createdAt: backtestRuns.createdAt,
+    summaryJson: backtestRuns.summaryJson,
+  }).from(backtestRuns).orderBy(desc(backtestRuns.createdAt)).limit(limit);
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: timestampToIso(row.createdAt),
+    summary: row.summaryJson ? (JSON.parse(row.summaryJson) as Record<string, unknown>) : null,
+  }));
+}
+
+/** 读取单条已保存回测的完整结果。 */
+export async function getBacktestRun(id: number): Promise<SavedBacktestRun | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(backtestRuns).where(eq(backtestRuns.id, id));
+  const row = rows[0];
+  if (!row) return null;
+  let result: LeaderCandidateBacktestResult | null = null;
+  try {
+    result = JSON.parse(row.resultJson ?? "null") as LeaderCandidateBacktestResult;
+  } catch {
+    return null;
+  }
+  let options: LeaderCandidateBacktestOptions = {};
+  try {
+    options = JSON.parse(row.paramsJson ?? "{}") as LeaderCandidateBacktestOptions;
+  } catch {
+    options = {};
+  }
+  let summary: Record<string, unknown> | null = null;
+  try {
+    summary = row.summaryJson ? (JSON.parse(row.summaryJson) as Record<string, unknown>) : null;
+  } catch {
+    summary = null;
+  }
+  return { id: row.id, createdAt: timestampToIso(row.createdAt), options, summary, result };
+}
+
+// ==================== 前向纸面交易（四-P1：真实样本外兜底） ====================
+
+export type PaperTradingRunSummary = {
+  id: number;
+  label: string;
+  strategyKey: PaperTradingStrategyKey;
+  status: "active" | "paused" | "completed";
+  lastProcessedDate: string | null;
+  createdAt: string | null;
+  summary: PaperTradingSummary | null;
+};
+
+export type PaperTradingRunDetail = PaperTradingRunSummary & {
+  initialCapital: number;
+  options: PaperTradingRunOptions;
+  /** 该运行**实际生效**的退出/仓位/成交约束参数（含缺省回落），供页面如实展示。 */
+  effectiveSettings: PaperTradingEffectiveSettings;
+  state: PaperTradingState;
+};
+
+const PAPER_TRADING_STRATEGY_KEYS: PaperTradingStrategyKey[] = ["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"];
+
+function isPaperTradingStrategyKey(value: string): value is PaperTradingStrategyKey {
+  return (PAPER_TRADING_STRATEGY_KEYS as string[]).includes(value);
+}
+
+function parsePaperTradingState(json: string | null, initialCapital: number): PaperTradingState {
+  if (!json) return createInitialPaperTradingState(initialCapital);
+  try {
+    const parsed = JSON.parse(json) as PaperTradingState;
+    // 结构兜底：老数据缺字段时补默认值，避免推进崩溃。
+    return {
+      cash: parsed.cash ?? initialCapital,
+      // 🔴 `equityAtEntry` 是 2026-09-18 新增字段（组合无条件止损的分母）：
+      // 之前落库的持仓没有它 ⇒ 在这里补为「初始资金」。
+      // 这是**近似**（真实分母是建仓当日的账户总权益），所以补值这件事必须写在持久化边界上、
+      // 而不是散落在判定函数里 —— 否则「哪些持仓是近似的」在数据层就再也看不出来了。
+      positions: Array.isArray(parsed.positions)
+        ? parsed.positions.map((position) => ({
+          ...position,
+          equityAtEntry: Number.isFinite(position?.equityAtEntry) && (position?.equityAtEntry ?? 0) > 0
+            ? position.equityAtEntry
+            : initialCapital,
+        }))
+        : [],
+      pendingBuys: Array.isArray(parsed.pendingBuys) ? parsed.pendingBuys : [],
+      orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+      equityCurve: Array.isArray(parsed.equityCurve) ? parsed.equityCurve : [],
+      lastProcessedDate: parsed.lastProcessedDate ?? null,
+    };
+  } catch {
+    return createInitialPaperTradingState(initialCapital);
+  }
+}
+
+/** 用「仅该信号日及以前」的数据生成候选，供前向清单评分（point-in-time）。 */
+function buildForwardCandidates(records: LeaderCandidateSourceRecord[], date: string, context: LeaderCandidateBacktestContext) {
+  return buildLeaderCandidatesForDate(records, date, {
+    phaseByDate: context.phaseByDate,
+    priceByStockDate: context.priceByStockDate,
+    marketFactorsByDate: context.marketFactorsByDate,
+  }).candidates;
+}
+
+/** 构造初始状态：以 startDate 收盘生成首个准备买入清单，尚未成交。 */
+function buildInitialForwardState(
+  records: LeaderCandidateSourceRecord[],
+  context: LeaderCandidateBacktestContext,
+  options: LeaderCandidateBacktestOptions,
+  strategyKey: PaperTradingStrategyKey,
+  startDate: string,
+  initialCapital: number,
+): PaperTradingState {
+  const realistic = options.realistic ?? {};
+  const downside = options.downsideRisk ?? {};
+  const maxPositions = Math.max(1, Math.floor(realistic.maxPositions ?? 5));
+  const candidates = buildForwardCandidates(records, startDate, context);
+  const pendingBuys = buildForwardPreparedBuys(
+    candidates,
+    startDate,
+    strategyKey,
+    {
+      appliedMinScore: options.minScore ?? null,
+      penaltyWeight: downside.penaltyWeight,
+      hardRiskThreshold: downside.hardRiskThreshold ?? 0,
+      priceByStockDate: context.priceByStockDate,
+    },
+    new Set(),
+    maxPositions,
+  );
+  const state = createInitialPaperTradingState(initialCapital);
+  state.pendingBuys = pendingBuys;
+  state.lastProcessedDate = startDate;
+  return state;
+}
+
+/** 归一化参数：把初始资金并入 realistic，确保固定仓位占比等口径一致。 */
+function normalizePaperTradingOptions(options: PaperTradingRunOptions, initialCapital: number): PaperTradingRunOptions {
+  return { ...options, realistic: { ...(options.realistic ?? {}), initialCapital: Math.floor(initialCapital) } };
+}
+
+/** 创建一次前向纸面交易运行，返回运行 id。初始准备清单以最新信号日收盘生成。 */
+export async function createPaperTradingRun(
+  label: string,
+  strategyKey: PaperTradingStrategyKey,
+  options: PaperTradingRunOptions,
+  initialCapital: number,
+): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  // 纸面交易为前向功能，仅需近期数据即可生成最新信号日候选与情绪周期上下文。
+  const { records, context } = await loadBacktestBaseContext(recentBacktestRange(365));
+  const dates = Array.from(new Set(records.map((record) => record.limitUpDate))).sort();
+  const startDate = dates.at(-1);
+  if (!startDate) return 0;
+  // 🔴 建运行前置校验（2026-09-14）：推进集合只按 `index_daily` 交易日历取，最新信号日一旦越过日历末端，
+  // 这条运行**从创建起就不可能被推进**（真实事故：2026-09-14 建的运行锚在 09-14，而日历停在 09-04）。
+  // 宁可在创建时响亮失败，也不留一条永远不动、且只能靠「提示成功」掩盖的新运行。
+  const calendarLastDate = context.tradingDates?.at(-1) ?? null;
+  if (calendarLastDate === null || startDate > calendarLastDate) {
+    throw new PaperTradingCalendarStaleError(
+      `最新信号日 ${startDate} 已越过交易日历末端 ${calendarLastDate ?? "（无数据）"}，`
+        + "该运行无法被推进。请先同步指数日线（index_daily）后再创建。",
+      { signalDate: startDate, calendarLastDate },
+    );
+  }
+  const normalized = normalizePaperTradingOptions(options, initialCapital);
+  const state = buildInitialForwardState(records, context, normalized, strategyKey, startDate, initialCapital);
+  const inserted = await db.insert(paperTradingRuns).values({
+    label,
+    strategyKey,
+    paramsJson: JSON.stringify(normalized),
+    initialCapital: Math.floor(initialCapital),
+    status: "active",
+    lastProcessedDate: state.lastProcessedDate,
+    stateJson: JSON.stringify(state),
+  });
+  return Number(inserted[0].insertId);
+}
+
+/** 列出前向纸面交易运行（含扁平摘要），按创建时间倒序。 */
+export async function listPaperTradingRuns(limit = 50): Promise<PaperTradingRunSummary[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(paperTradingRuns).orderBy(desc(paperTradingRuns.createdAt)).limit(limit);
+  return rows.map((row) => {
+    const state = parsePaperTradingState(row.stateJson, row.initialCapital);
+    return {
+      id: row.id,
+      label: row.label,
+      strategyKey: isPaperTradingStrategyKey(row.strategyKey) ? row.strategyKey : "baseline",
+      status: row.status,
+      lastProcessedDate: row.lastProcessedDate,
+      createdAt: timestampToIso(row.createdAt),
+      summary: buildPaperTradingSummary(state, row.initialCapital),
+    };
+  });
+}
+
+/** 读取单条前向纸面交易运行的完整状态。 */
+export async function getPaperTradingRun(id: number): Promise<PaperTradingRunDetail | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(paperTradingRuns).where(eq(paperTradingRuns.id, id));
+  const row = rows[0];
+  if (!row) return null;
+  let options: PaperTradingRunOptions = {};
+  try {
+    options = JSON.parse(row.paramsJson ?? "{}") as PaperTradingRunOptions;
+  } catch {
+    options = {};
+  }
+  const state = parsePaperTradingState(row.stateJson, row.initialCapital);
+  return {
+    id: row.id,
+    label: row.label,
+    strategyKey: isPaperTradingStrategyKey(row.strategyKey) ? row.strategyKey : "baseline",
+    status: row.status,
+    lastProcessedDate: row.lastProcessedDate,
+    createdAt: timestampToIso(row.createdAt),
+    summary: buildPaperTradingSummary(state, row.initialCapital),
+    initialCapital: row.initialCapital,
+    options,
+    // 🔴 生效参数必须由服务端算好下发（唯一缺省源在 paperTrading.ts）：
+    // 让页面自己再写一遍缺省值，就是 D2「参数恒为硬编码缺省而页面零处展示」的成因。
+    effectiveSettings: resolveEffectivePaperSettings(options),
+    state,
+  };
+}
+
+/** 更新运行状态（active / paused / completed）。 */
+export async function setPaperTradingRunStatus(id: number, status: "active" | "paused" | "completed"): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(paperTradingRuns).set({ status }).where(eq(paperTradingRuns.id, id));
+}
+
+/** 回写运行状态（唯一事实源，覆盖式写入 stateJson）。 */
+async function persistPaperTradingRunState(id: number, state: PaperTradingState): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(paperTradingRuns).set({
+    stateJson: JSON.stringify(state),
+    lastProcessedDate: state.lastProcessedDate,
+  }).where(eq(paperTradingRuns.id, id));
+}
+
+/** 一次推进的完整结果：摘要（失败时为 null）+ 明确的诊断（为什么推进了 / 为什么没动）。 */
+export type PaperTradingAdvanceResult = {
+  summary: PaperTradingSummary | null;
+  diagnosis: PaperTradingAdvanceDiagnosis;
+};
+
+/**
+ * 把一次运行推进到「已有日线行情的最新交易日」。
+ * 逐日：开盘成交既有准备清单 → 收盘止盈止损出清 → 标记市值 → 生成下一交易日清单。
+ *
+ * 🔴 不再「静默返回旧摘要」：推进集合按 `index_daily` 交易日历取，日历一旦滞后于行情就恒为空；
+ * 此时必须把 `calendar-stale` 如实报出（调用方据此提示），否则表现为「提示成功但结果没动」。
+ */
+export async function advancePaperTradingRunToLatest(id: number): Promise<PaperTradingAdvanceResult> {
+  const db = await getDb();
+  if (!db) {
+    return { summary: null, diagnosis: paperTradingAdvanceDiagnosis({ kind: "database-unavailable" }) };
+  }
+  const run = await getPaperTradingRun(id);
+  if (!run) {
+    return { summary: null, diagnosis: paperTradingAdvanceDiagnosis({ kind: "run-not-found" }) };
+  }
+  if (run.status !== "active") {
+    return {
+      summary: null,
+      diagnosis: paperTradingAdvanceDiagnosis({ kind: "run-not-active", lastProcessedDate: run.state.lastProcessedDate }),
+    };
+  }
+  // 纸面交易为前向功能：从 lastProcessedDate 往前留 45 天上下文即可正确推进，
+  // 无需加载 2019 年以来的全量历史（回填后全量会命中 489 万行价格并卡死）。
+  const lastProcessed = run.state.lastProcessedDate;
+  const { records, rawRows, context } = await loadBacktestBaseContext(
+    lastProcessed ? { startDate: shiftDate(lastProcessed, -45) } : recentBacktestRange(365),
+  );
+  const priceByStockDate = context.priceByStockDate ?? new Map<string, LeaderCandidateDailyPrice>();
+  const tradingDates = context.tradingDates ?? [];
+  // 日历末端 = 推进集合的上界；行情末端 = 已加载候选股日线的最后一天。两者不一致即「日历落后」。
+  const calendarLastDate = tradingDates.at(-1) ?? null;
+  const marketLastDate = rawRows.reduce<string>((max, row) => (row.tradeDate > max ? row.tradeDate : max), "") || null;
+  const datesToAdvance = tradingDates.filter((date) => lastProcessed === null || date > lastProcessed);
+
+  const diagnose = (advancedDates: readonly string[]) => paperTradingAdvanceDiagnosis({
+    kind: classifyAdvanceKind({ advancedDates, calendarLastDate, marketLastDate }),
+    lastProcessedDate: lastProcessed,
+    advancedDates,
+    calendarLastDate,
+    marketLastDate,
+  });
+
+  if (datesToAdvance.length === 0) {
+    // 空转必须区分「已是最新」与「日历落后」（前者合法、后者是环境故障）。
+    return { summary: run.summary, diagnosis: diagnose([]) };
+  }
+
+  const options = run.options;
+  const realistic = options.realistic ?? {};
+  const downside = options.downsideRisk ?? {};
+
+  let state = run.state;
+  for (const today of datesToAdvance) {
+    const candidates = buildForwardCandidates(records, today, context);
+    const result = advancePaperTradingDay({
+      state,
+      today,
+      signalCandidates: candidates,
+      priceByStockDate,
+      tradingDates,
+      strategyKey: run.strategyKey,
+      realistic,
+      // 纸面专属设置：缺字段时由 advancePaperTradingDay 内部按缺省常量解析
+      // ⇒ 旧运行（paramsJson 里没有 paperTrading 块）**零写库**即按「开盘+收盘 / 组合止损 3%」生效。
+      paperTrading: options.paperTrading,
+      appliedMinScore: options.minScore ?? null,
+      penaltyWeight: downside.penaltyWeight,
+      hardRiskThreshold: downside.hardRiskThreshold ?? 0,
+    });
+    state = result.state;
+  }
+
+  await persistPaperTradingRunState(id, state);
+  return { summary: buildPaperTradingSummary(state, run.initialCapital), diagnosis: diagnose(datesToAdvance) };
+}
+
+/** 推进所有 active 运行到最新交易日，供每日定时任务调用（逐条带诊断，便于调度器显式告警）。 */
+export async function advanceAllActivePaperTradingRuns(): Promise<Array<{ runId: number; label: string; summary: PaperTradingSummary | null; diagnosis: PaperTradingAdvanceDiagnosis }>> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ id: paperTradingRuns.id, label: paperTradingRuns.label })
+    .from(paperTradingRuns)
+    .where(eq(paperTradingRuns.status, "active"));
+  const results: Array<{ runId: number; label: string; summary: PaperTradingSummary | null; diagnosis: PaperTradingAdvanceDiagnosis }> = [];
+  for (const row of rows) {
+    const { summary, diagnosis } = await advancePaperTradingRunToLatest(row.id);
+    results.push({ runId: row.id, label: row.label, summary, diagnosis });
+  }
+  return results;
 }

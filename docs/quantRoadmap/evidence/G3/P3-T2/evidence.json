@@ -1,0 +1,22 @@
+{
+  "taskId": "P3-T2",
+  "gate": "G3",
+  "status": "VALIDATED",
+  "capturedAt": "2026-09-09T22:25:00+08:00",
+  "realData": false,
+  "reproducible": true,
+  "note": "架构事实验证（静态调用图）：4 研究 router 已走生产引擎，legacy 模拟器调用=0；澄清验收措辞「不再调用 getLeaderCandidateBacktest」实为「不再走 legacy」",
+  "routers": [
+    { "router": "paramSearchRouter", "calls": "getLeaderCandidateBacktest", "legacyCalls": 0 },
+    { "router": "walkForwardRouter", "calls": "getLeaderCandidateBacktest + loadBacktestBaseContext", "legacyCalls": 0 },
+    { "router": "marketRegimeRouter", "calls": "getLeaderCandidateBacktest", "legacyCalls": 0 },
+    { "router": "routers.ts sentiment", "calls": "getLeaderCandidateBacktest endpoint", "legacyCalls": 0 }
+  ],
+  "productionChain": "getLeaderCandidateBacktest(db.ts) -> runLeaderCandidateStrategyBacktest -> runStrategyEngineBacktest(Strategy Engine), includeResearch=false + realisticSimulationOverride 注入，不经 legacy",
+  "legacyBranch": "RESEARCH_LEGACY_SIMULATION_SOURCE 仅在 buildLeaderCandidateBacktest 的 includeResearch=true 且无 override 分支兜底（研究报表专用）",
+  "verification": {
+    "staticCallGraph": "PASS（grep 确认 legacy 只被 research-only 模块引用）",
+    "engineStrategyTests": "117 PASS"
+  },
+  "files": []
+}

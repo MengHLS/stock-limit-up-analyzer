@@ -1,0 +1,15 @@
+起始状态：dataset="首板回踩（first_limit_pullback）" version="v12026-08-01 ~ 2026-08-311,130 事件READY"
+
+=== 步骤 1：Input.dispatchMouseEvent 点 Trigger 打开下拉 ===
+  trigger rect={"ok":true,"x":1088,"y":363,"text":"v12026-08-01 ~ 2026-08-311,130 事件READY"}
+    [native] trigger @ (1088,363)
+  打开后 optionCount=2 options=[{"text":"v12026-08-01 ~ 2026-08-311,130 事件READY","state":"checked","selected":"true"},{"text":"v22024-09-01 ~ 2026-09-0123,978 事件READY","state":"unchecked","selected":"false"}]
+  ✅ 下拉已打开（Trigger 被原生点击驱动成功）
+
+=== 步骤 2：Input.dispatchMouseEvent 点 v2 选项 ===
+  item rect={"ok":true,"x":1088,"y":441,"text":"v22024-09-01 ~ 2026-09-0123,978 事件READY"}
+    [native] option(v2) @ (1088,441)
+  选后 version="v22024-09-01 ~ 2026-09-0123,978 事件READY" dataset="首板回踩（first_limit_pullback）"
+  ✅ 生效 —— 原生输入管道可以驱动 Radix Select
+
+（只读诊断：没有点「开始研究」，不产生任何研究数据。）

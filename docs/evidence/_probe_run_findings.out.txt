@@ -1,0 +1,147 @@
+Run 720005：分析 28 条
+Finding 24 条（按 researchStrength 降序）
+其中来自「回踩深度」分析的有：720094, 720095, 720100, 720101
+
+ . ★TOP        strength=1      grade=STRONG   type=STABILITY status=DISCOVERED
+    title  = future_return_5d 在按 year 分片的 3 个切片上方向一致
+    from   = #720087 [P1] STABILITY「基准稳定性 · 按 year 分组」
+    sample = {"sampleCount":5062,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 2. ★TOP        strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0288）
+    from   = #720089 [P0] CONDITIONAL「回踩期未破首板日开盘价（T+3） → T+5 收益」
+    effect = {"groupReturn":0.04397165008970606,"benchmarkReturn":0.015210360880304351,"excessReturn":0.02876128920940171,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720089.group=ALL","medianReturn":0.013698630136986452,"winRate":0.5672634554625575,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.04397165008970606,"sampleCount":18041}]}
+    sample = {"sampleCount":18041,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 3. ★TOP        strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0492）
+    from   = #720090 [P0] CONDITIONAL「回踩期未破首板日开盘价（T+5） → T+5 收益」
+    effect = {"groupReturn":0.06442810407209941,"benchmarkReturn":0.015210360880304351,"excessReturn":0.04921774319179506,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720090.group=ALL","medianReturn":0.02868852459016387,"winRate":0.6480205986482137,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.06442810407209941,"sampleCount":15535}]}
+    sample = {"sampleCount":15535,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 4. ★TOP        strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_low_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0245）
+    from   = #720092 [P1] CONDITIONAL「回踩期未破首板日最低价（T+3） → T+5 收益」
+    effect = {"groupReturn":0.039690877936778966,"benchmarkReturn":0.015210360880304351,"excessReturn":0.024480517056474613,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720092.group=ALL","medianReturn":0.01108033240997231,"winRate":0.5518343815513627,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.039690877936778966,"sampleCount":19080}]}
+    sample = {"sampleCount":19080,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 5. ★TOP        strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_low_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0434）
+    from   = #720093 [P1] CONDITIONAL「回踩期未破首板日最低价（T+5） → T+5 收益」
+    effect = {"groupReturn":0.0586010275167809,"benchmarkReturn":0.015210360880304351,"excessReturn":0.04339066663647655,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720093.group=ALL","medianReturn":0.02383139654623118,"winRate":0.6242064917954246,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.0586010275167809,"sampleCount":16698}]}
+    sample = {"sampleCount":16698,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 6. ★TOP 【深度】 strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 1 AND pullback_close_ratio_2d <= 0.95」的样本在 future_return_5d 上优于全样本（超额 -0.0849）
+    from   = #720094 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2） → T+5 收益」
+    effect = {"groupReturn":-0.06966360932060599,"benchmarkReturn":0.015210360880304351,"excessReturn":-0.08487397020091034,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720094.group=ALL","medianReturn":-0.0740380107468715,"winRate":0.14232209737827714,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":-0.06966360932060599,"sampleCount":1602}]}
+    sample = {"sampleCount":1602,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 7. ★TOP 【深度】 strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 1 AND pullback_close_ratio_2d >= 0.98 AND pullback_close_ratio_2d <= 1」的样本在 future_return_5d 上优于全样本（超额 -0.0294）
+    from   = #720095 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益」
+    effect = {"groupReturn":-0.014214315931919914,"benchmarkReturn":0.015210360880304351,"excessReturn":-0.029424676812224267,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720095.group=ALL","medianReturn":-0.020451339915373703,"winRate":0.3558606124604013,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":-0.014214315931919914,"sampleCount":2841}]}
+    sample = {"sampleCount":2841,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 8. ★TOP        strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 1 AND pullback_min_volume_ratio_2d <= 0.5」的样本在 future_return_5d 上优于全样本（超额 0.1026）
+    from   = #720096 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+2） → T+5 收益」
+    effect = {"groupReturn":0.11779482018055168,"benchmarkReturn":0.015210360880304351,"excessReturn":0.10258445930024732,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720096.group=ALL","medianReturn":0.04595252089864159,"winRate":0.600383631713555,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.11779482018055168,"sampleCount":1564}]}
+    sample = {"sampleCount":1564,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+ 9.              strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 1 AND pullback_last_volume_ratio_2d > 1」的样本在 future_return_5d 上优于全样本（超额 0.0328）
+    from   = #720098 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益」
+    effect = {"groupReturn":0.048045788100885306,"benchmarkReturn":0.015210360880304351,"excessReturn":0.03283542722058096,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720098.group=ALL","medianReturn":0.022244691607684414,"winRate":0.6072326771312115,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.048045788100885306,"sampleCount":11531}]}
+    sample = {"sampleCount":11531,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+10.              strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 1 AND pullback_last_is_bullish_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0393）
+    from   = #720099 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益」
+    effect = {"groupReturn":0.05455914213052407,"benchmarkReturn":0.015210360880304351,"excessReturn":0.03934878125021972,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720099.group=ALL","medianReturn":0.026915113871635588,"winRate":0.6305765448711314,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.05455914213052407,"sampleCount":9661}]}
+    sample = {"sampleCount":9661,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+11.       【深度】 strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_3d == 1 AND pullback_close_ratio_3d <= 0.95」的样本在 future_return_5d 上优于全样本（超额 -0.0843）
+    from   = #720100 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+3） → T+5 收益」
+    effect = {"groupReturn":-0.06906701836934014,"benchmarkReturn":0.015210360880304351,"excessReturn":-0.08427737924964449,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720100.group=ALL","medianReturn":-0.07075471698113199,"winRate":0.1089560752994866,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":-0.06906701836934014,"sampleCount":1753}]}
+    sample = {"sampleCount":1753,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+12.       【深度】 strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1」的样本在 future_return_5d 上优于全样本（超额 -0.0260）
+    from   = #720101 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益」
+    effect = {"groupReturn":-0.01081060539316304,"benchmarkReturn":0.015210360880304351,"excessReturn":-0.026020966273467398,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720101.group=ALL","medianReturn":-0.0161182074042001,"winRate":0.35175438596491226,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":-0.01081060539316304,"sampleCount":2280}]}
+    sample = {"sampleCount":2280,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+13.              strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5」的样本在 future_return_5d 上优于全样本（超额 0.0648）
+    from   = #720102 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益」
+    effect = {"groupReturn":0.08000195560312344,"benchmarkReturn":0.015210360880304351,"excessReturn":0.06479159472281909,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720102.group=ALL","medianReturn":0.005185825410544555,"winRate":0.5172815533980583,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.08000195560312344,"sampleCount":2575}]}
+    sample = {"sampleCount":2575,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+14.              strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_3d == 1 AND pullback_last_volume_ratio_3d > 1」的样本在 future_return_5d 上优于全样本（超额 0.0578）
+    from   = #720104 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益」
+    effect = {"groupReturn":0.07300607968810624,"benchmarkReturn":0.015210360880304351,"excessReturn":0.05779571880780189,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720104.group=ALL","medianReturn":0.04360943970349356,"winRate":0.6934857635893011,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.07300607968810624,"sampleCount":9272}]}
+    sample = {"sampleCount":9272,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+15.              strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_3d == 1 AND pullback_last_is_bullish_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0526）
+    from   = #720105 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益」
+    effect = {"groupReturn":0.06785874097821962,"benchmarkReturn":0.015210360880304351,"excessReturn":0.05264838009791527,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720105.group=ALL","medianReturn":0.03703703703703705,"winRate":0.6745709123757905,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.06785874097821962,"sampleCount":8856}]}
+    sample = {"sampleCount":8856,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+16.              strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 0」的样本在 future_return_5d 上优于全样本（超额 -0.0885）
+    from   = #720106 [P2] CONDITIONAL「回踩期已破首板日开盘价（对照组）（T+2） → T+5 收益」
+    effect = {"groupReturn":-0.0733007181798934,"benchmarkReturn":0.015210360880304351,"excessReturn":-0.08851107906019776,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720106.group=ALL","medianReturn":-0.07937877480586712,"winRate":0.20281075842015991,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":-0.0733007181798934,"sampleCount":4127}]}
+    sample = {"sampleCount":4127,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+17.              strength=1      grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_low_2d == 0」的样本在 future_return_5d 上优于全样本（超额 -0.0976）
+    from   = #720107 [P2] CONDITIONAL「回踩期已破首板日最低价（对照组）（T+2） → T+5 收益」
+    effect = {"groupReturn":-0.08237446302792074,"benchmarkReturn":0.015210360880304351,"excessReturn":-0.0975848239082251,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720107.group=ALL","medianReturn":-0.08805759526305763,"winRate":0.1820161792159303,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":-0.08237446302792074,"sampleCount":3214}]}
+    sample = {"sampleCount":3214,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+18.              strength=1      grade=STRONG   type=STABILITY status=DISCOVERED
+    title  = future_return_5d 在按 year 分片的 3 个切片上方向一致
+    from   = #720112 [P2] STABILITY「事件后收益研究 · 按 year 分组稳定性复核」
+    sample = {"sampleCount":5062,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+19.              strength=0.9727354633073144 grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0186）
+    from   = #720088 [P0] CONDITIONAL「回踩期未破首板日开盘价（T+2） → T+5 收益」
+    effect = {"groupReturn":0.03384713404567008,"benchmarkReturn":0.015210360880304351,"excessReturn":0.018636773165365727,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720088.group=ALL","medianReturn":0.007010172490048704,"winRate":0.5312531864994392,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.03384713404567008,"sampleCount":19614}]}
+    sample = {"sampleCount":19614,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+20.              strength=0.9345296462827006 grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_3d == 1 AND pullback_min_volume_ratio_3d <= 0.3」的样本在 future_return_5d 上优于全样本（超额 0.2042）
+    from   = #720103 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+3） → T+5 收益」
+    effect = {"groupReturn":0.2193736885398994,"benchmarkReturn":0.015210360880304351,"excessReturn":0.20416332765959505,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720103.group=ALL","medianReturn":0.19470863526570048,"winRate":0.782798833819242,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.2193736885398994,"sampleCount":686}]}
+    sample = {"sampleCount":686,"grade":"MEDIUM","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+21.              strength=0.9058353092269532 grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_low_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0153）
+    from   = #720091 [P1] CONDITIONAL「回踩期未破首板日最低价（T+2） → T+5 收益」
+    effect = {"groupReturn":0.03050212634165202,"benchmarkReturn":0.015210360880304351,"excessReturn":0.015291765461347667,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720091.group=ALL","medianReturn":0.004873294346978511,"winRate":0.5199006186973255,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.03050212634165202,"sampleCount":20527}]}
+    sample = {"sampleCount":20527,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+22.              strength=0.8926355060746956 grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = 满足条件「pullback_holds_event_open_2d == 1 AND pullback_min_volume_ratio_2d <= 0.3」的样本在 future_return_5d 上优于全样本（超额 0.2077）
+    from   = #720097 [P1] CONDITIONAL「回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+2） → T+5 收益」
+    effect = {"groupReturn":0.22290433173997068,"benchmarkReturn":0.015210360880304351,"excessReturn":0.20769397085966632,"benchmarkUnavailable":false,"benchmarkSource":"in-analysis:analysis=720097.group=ALL","medianReturn":0.19750889679715308,"winRate":0.8237476808905381,"buckets":[{"label":"ALL","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"CONDITION","metricValue":0.22290433173997068,"sampleCount":539}]}
+    sample = {"sampleCount":539,"grade":"MEDIUM","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+23.              strength=0.883820379578103 grade=STRONG   type=EFFECT status=DISCOVERED
+    title  = turnover 的 Q5 >= 12.9970 档位在 future_return_5d 上与其他档位存在明显差异
+    from   = #720108 [P1] QUANTILE「turnover 分位 → T+5 收益（5 档）」
+    effect = {"groupReturn":0.0010193419013992022,"benchmarkReturn":0.015210360880304351,"excessReturn":-0.01419101897890515,"benchmarkUnavailable":false,"benchmarkSource":"descriptive:analysis=720086.variable=future_return_5d","medianReturn":-0.01991330262801408,"winRate":0.4285112655295852,"buckets":[{"label":"Q1 < 3.5885","metricValue":0.029139792554810567,"sampleCount":4750},{"label":"Q2 [3.5885, 5.7303)","metricValue":0.016373591841390717,"sampleCount":4749},{"label":"Q3 [5.7303, 8.4029)","metricValue":0.017596851129795067,"sampleCount":4750},{"label":"Q4 [8.4029, 12.9970)","metricValue":0.011942617631250697,"sampleCount":4750},{"label":"Q5 >= 12.9970","metricValue":0.0010193419013992022,"sampleCount":4749}]}
+    sample = {"sampleCount":4749,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+24.              strength=0.7277040226888425 grade=STRONG   type=HORIZON_PATTERN status=DISCOVERED
+    title  = 目标变量 的效果集中在 T+5~T+20（峰值 T+5）
+    from   = #720085 [P0] EVENT_STUDY「全样本基准 · 事件后收益 T+5/T+10/T+20」
+    effect = {"groupReturn":0.015210360880304351,"benchmarkReturn":null,"excessReturn":null,"benchmarkUnavailable":true,"benchmarkSource":"unavailable:horizon-shape","medianReturn":-0.005747126436781614,"winRate":0.47416950865226726,"buckets":[{"label":"5","metricValue":0.015210360880304351,"sampleCount":23751},{"label":"10","metricValue":0.013496945220528064,"sampleCount":23543},{"label":"20","metricValue":0.01290959940552959,"sampleCount":23033}]}
+    sample = {"sampleCount":23033,"grade":"STRONG","thresholds":{"weak":100,"medium":300,"strong":1000}}
+
+小结：深度分档 Finding 的排位 = #720094 第 6 名 / #720095 第 7 名 / #720100 第 11 名 / #720101 第 12 名（默认只展示前 8 名）

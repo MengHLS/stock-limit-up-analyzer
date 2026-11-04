@@ -1,0 +1,232 @@
+--- 渲染态 ---
+{
+  "bodyLen": 727,
+  "hasHeader": true,
+  "hasStep1": true,
+  "hasDatasetLabel": true,
+  "hasVersionLabel": true,
+  "hasQuestionLabel": true,
+  "textareaCount": 1,
+  "comboCount": 2,
+  "hasStartButton": true,
+  "hasExpertLink": true,
+  "controlCount": 4,
+  "controlTexts": [
+    {
+      "tag": "button",
+      "id": "ask-dataset",
+      "type": "button",
+      "probe": "数据集"
+    },
+    {
+      "tag": "button",
+      "id": "ask-version",
+      "type": "button",
+      "probe": "Dataset 版本"
+    },
+    {
+      "tag": "textarea",
+      "id": "ask-question",
+      "type": null,
+      "probe": "研究问题 / 如：首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？"
+    },
+    {
+      "tag": "input",
+      "id": "ask-cap",
+      "type": null,
+      "probe": "最多生成多少条分析（20 ~ 50，默认 30）"
+    }
+  ],
+  "forbiddenInControls": [],
+  "forbiddenInText": [],
+  "forbiddenTextHits": [],
+  "guidanceLines": [
+    "提出研究问题，系统自动设计并执行研究",
+    "你只需要选一份 Dataset + 用一句话说清想研究什么。 研究方法、特征 / 目标 / 视界 / 分组 / 稳定性复核全部由系统设计 —— 你最终只负责判断「是否值得进入下一阶段」。",
+    "只有两项是必填：Dataset 版本、研究问题。其余全部由系统决定。",
+    "用交易语言描述假设即可 —— 不要填写特征名、目标变量、视界、分组维度， 那些由系统根据问题自动决定。",
+    "→ 会识别成「回踩有效性」：自动建 全样本基准 + 不破开盘价守卫条件 + 缩量/阳线精修 + 对照组 + 稳定性复核",
+    "→ 会识别成「持有期研究」：自动铺开多视界并做跨切片稳定性复核"
+  ],
+  "questionVisible": true,
+  "previewSentinelVisible": false,
+  "exampleCount": 3,
+  "exampleTexts": [
+    "首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？→ 会识别成「回踩有效性」：自动建 全样本基准 + 不破开盘价守卫条件 + 缩量/阳线精修 + 对照组 + 稳定性复核",
+    "首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？→ 同上，并会把「回踩深度分档」排到精修条件的前面（按提问侧重排序）",
+    "首板之后不同持有期（T+5 / T+10 / T+20）收益差异大吗？哪个持有期最稳？→ 会识别成「持有期研究」：自动铺开多视界并做跨切片稳定性复核"
+  ],
+  "exHintLineCount": 3,
+  "navState": [
+    {
+      "label": "涨停复盘",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "大盘分析",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "情绪分析",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "龙头候选",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "组合回测",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "回测历史",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "前向纸面交易",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "上传图片",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "数据域健康",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "历史状态查询",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "数据集构建",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "提问研究",
+      "active": true,
+      "orangeIcon": true
+    },
+    {
+      "label": "研究实验",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "策略",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "绩效仪表盘",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "参数搜索",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "WFO/OOS 分析",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "Regime/报告",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "复盘工作台",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "行情同步",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "情绪预警",
+      "active": false,
+      "orangeIcon": false
+    },
+    {
+      "label": "操作日志",
+      "active": false,
+      "orangeIcon": false
+    }
+  ],
+  "hasFetchError": false
+}
+
+--- 断言 ---
+PASS  无 Failed to fetch / 白屏 / 运行时报错
+PASS  页头「提出研究问题…」已渲染
+PASS  步骤条「① 提出问题」已渲染
+PASS  存在「数据集」选择
+PASS  存在「Dataset 版本」选择
+PASS  存在「研究问题」输入
+PASS  研究问题用 textarea 承载（实得 1 个）
+PASS  数据集 / 版本两个下拉就位（实得 2 个 combobox）
+PASS  存在 [开始研究] 按钮
+PASS  §27 默认模式控件总数 ≤ 4（数据集 / 版本 / 研究问题 / 折叠区规模上限，实得 4 个）
+PASS  §27 默认模式无任何底层分析字段**控件**（命中：无）
+PASS  §27 可见文案（排除「系统自动决定」说明句后）无底层分析字段（命中：无）
+      · 被排除的说明句 6 条（含禁用词但属「系统自动决定」的告知文案）：
+        - 提出研究问题，系统自动设计并执行研究
+        - 你只需要选一份 Dataset + 用一句话说清想研究什么。 研究方法、特征 / 目标 / 视界 / 分组 / 稳定性复核全部由系统设计 —— 你最终只负责判断「是否值得进入下一阶段」。
+        - 只有两项是必填：Dataset 版本、研究问题。其余全部由系统决定。
+        - 用交易语言描述假设即可 —— 不要填写特征名、目标变量、视界、分组维度， 那些由系统根据问题自动决定。
+        - → 会识别成「回踩有效性」：自动建 全样本基准 + 不破开盘价守卫条件 + 缩量/阳线精修 + 对照组 + 稳定性复核
+        - → 会识别成「持有期研究」：自动铺开多视界并做跨切片稳定性复核
+      · ASK 步控件清单（4 个）：
+        - <button #ask-dataset> 数据集
+        - <button #ask-version> Dataset 版本
+        - <textarea #ask-question> 研究问题 / 如：首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？
+        - <input #ask-cap> 最多生成多少条分析（20 ~ 50，默认 30）
+PASS  §17 「高级 / 专家模式」入口存在（两种模式并存）
+PASS  示例问题共 3 条（实得 3 条）
+PASS  每条示例都带一句识别说明（实得 3 条）
+PASS  示例 #1 覆盖标志性文本「不跌破首板开盘价」
+PASS  示例 #2 覆盖标志性文本「回踩深度」
+PASS  示例 #3 覆盖标志性文本「持有期」
+PASS  侧栏「提问研究」为高亮项（实得 active=true）
+PASS  侧栏「提问研究」图标着色（text-orange-600）
+PASS  侧栏「研究实验」未高亮（更长命中优先，实得 active=false）
+
+--- 交互：点示例问题 ---
+{
+  "clicked": {
+    "clicked": true
+  },
+  "value": "首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？"
+}
+PASS  示例问题按钮可点击
+PASS  点示例后研究问题已被填入（实得："首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？"）
+
+--- 交互：清空问题后点开始研究（应被前端拦住）---
+{
+  "reasons": [
+    "· 研究问题至少要 4 个字"
+  ],
+  "stillOnAskStep": true,
+  "reachedPreview": false
+}
+PASS  校验失败时列出原因（实得 1 条）
+PASS  校验未通过时仍停在「① 提出问题」（判据 = ASK 卡独有控件 #ask-question 仍在）
+PASS  校验未通过时不进入「② 研究计划预览」（判据 = 预览独有内容「预计分析数」未出现）
+
+ALL PASS

@@ -1,0 +1,4 @@
+PASS  /stock-sync            textLen= 2073 nav= 0 head=["行情同步检查"] fetchFail=false errs=0
+
+ALL PASS
+证据：docs/evidence/_probe_app_boot_render.json

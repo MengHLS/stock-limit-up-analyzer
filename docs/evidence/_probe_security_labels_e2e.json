@@ -1,0 +1,20 @@
+{
+  "runCount": 3,
+  "tradeTotal": 388,
+  "uniqueSecurityId": 251,
+  "withCode": 251,
+  "withName": 158,
+  "nameMissCount": 93,
+  "nameSamples": [
+    "海鸥股份 603269.SH",
+    "继峰股份 603997.SH",
+    "麦迪科技 603990.SH",
+    "力鼎光电 605118.SH",
+    "雄韬股份 002733.SZ",
+    "海澜之家 600398.SH",
+    "顺发恒能 000631.SZ",
+    "东方新能 002310.SZ"
+  ],
+  "failures": 0,
+  "result": "PASS"
+}

@@ -1,0 +1,353 @@
+import { describe, expect, it } from "vitest";
+import { buildDownsideRiskResearch, calculateRiskAdjustedPerformance, calculateStrategyEvaluation, scoreDownsideRiskSignal } from "../../server/downsideRisk";
+import type { LeaderCandidateBacktestRow } from "../../server/leaderCandidates";
+import { simulateRealisticTPlus1ToTPlus2 } from "../../server/realisticBacktest";
+
+function row(overrides: Partial<LeaderCandidateBacktestRow>): LeaderCandidateBacktestRow {
+  return {
+    date: "2026-08-18",
+    nextDate: "2026-08-19",
+    nextDayDate: "2026-08-19",
+    secondDayDate: "2026-08-20",
+    stockCode: "600001.SH",
+    stockName: "测试股",
+    sector: "题材A",
+    boards: 2,
+    sectorCount: 4,
+    score: 80,
+    limitUpTime: "09:40:00",
+    turnover: "20",
+    circulationValue: "100",
+    marketCapScore: 16,
+    success: false,
+    signalClosePrice: 10,
+    nextOpenPrice: 10,
+    nextClosePrice: 10,
+    nextOpenPremium: 0,
+    nextClosePremium: 0,
+    secondDayOpenPrice: 10,
+    secondDayClosePrice: 10,
+    secondDayOpenPremium: 0,
+    secondDayClosePremium: 0,
+    tPlus1CloseToTPlus2CloseReturn: 0,
+    tPlus1CloseToTPlus2CloseSuccess: false,
+    phase: "修复上升",
+    maxBoards: 3,
+    ...overrides,
+  };
+}
+
+function buildWeightSelectionFixture() {
+  const dates = Array.from({ length: 42 }, (_, index) => `2026-03-${String(index + 1).padStart(2, "0")}`);
+  const rows: LeaderCandidateBacktestRow[] = [];
+  const prices = new Map<string, { openPrice: number; closePrice: number; lowPrice: number; amount: number }>();
+  for (let index = 0; index < 40; index += 1) {
+    const date = dates[index]!;
+    const secondDayDate = dates[index + 1]!;
+    const highRisk = row({
+      date, nextDate: date, nextDayDate: date, secondDayDate,
+      stockCode: `600H${String(index).padStart(3, "0")}.SH`, stockName: `高风险${index}`,
+      score: 90, boards: 4, sectorCount: 1, limitUpTime: "14:40:00", marketCapScore: 4, phase: "高位退潮", maxBoards: 6,
+    });
+    const lowRisk = row({
+      date, nextDate: date, nextDayDate: date, secondDayDate,
+      stockCode: `600L${String(index).padStart(3, "0")}.SH`, stockName: `低风险${index}`,
+      score: 80, boards: 2, sectorCount: 4, limitUpTime: "09:40:00", marketCapScore: 16, phase: "修复上升", maxBoards: 3,
+    });
+    rows.push(highRisk, lowRisk);
+    prices.set(`${highRisk.stockCode}::${date}`, { openPrice: 10, closePrice: 10, lowPrice: 9.8, amount: 5_000 });
+    prices.set(`${highRisk.stockCode}::${secondDayDate}`, { openPrice: 8, closePrice: 8, lowPrice: 8, amount: 5_000 });
+    prices.set(`${lowRisk.stockCode}::${date}`, { openPrice: 10, closePrice: 10, lowPrice: 10, amount: 90_000 });
+    prices.set(`${lowRisk.stockCode}::${secondDayDate}`, { openPrice: 12, closePrice: 12, lowPrice: 10, amount: 90_000 });
+  }
+  return { dates, rows, prices };
+}
+
+describe("buildDownsideRiskResearch", () => {
+  it("基于相邻交易日权益曲线计算可复算的夏普、索提诺、卡玛与回撤压力，不读取候选未来价格", () => {
+    const performance = calculateRiskAdjustedPerformance({
+      initialCapital: 100,
+      finalCapital: 108,
+      maxDrawdown: 10,
+      equityCurve: [
+        { date: "2026-01-01", equity: 100, cash: 100, openPositions: 0 },
+        { date: "2026-01-02", equity: 110, cash: 100, openPositions: 0 },
+        { date: "2026-01-03", equity: 99, cash: 99, openPositions: 0 },
+        { date: "2026-01-04", equity: 108, cash: 108, openPositions: 0 },
+      ],
+    } as never);
+
+    expect(performance).toMatchObject({
+      returnSampling: "相邻交易日收盘权益",
+      riskFreeAnnualRate: 0,
+      annualizationTradingDays: 252,
+      equityPointCount: 4,
+      dailyReturnCount: 3,
+      annualizedReturn: 64108.93,
+      dailyVolatility: 11.2937,
+      annualizedVolatility: 179.28,
+      annualizedDownsideDeviation: 91.65,
+      calmarRatio: 6410.893,
+      ulcerIndex: 5.08,
+    });
+    expect(performance.sharpeRatio).toBeGreaterThan(0);
+    expect(performance.sortinoRatio).toBeGreaterThan(0);
+  });
+
+  it("权益点不足或波动为零时不制造无限夏普、索提诺或卡玛比率", () => {
+    const performance = calculateRiskAdjustedPerformance({
+      initialCapital: 100,
+      finalCapital: 100,
+      maxDrawdown: 0,
+      equityCurve: [{ date: "2026-01-01", equity: 100, cash: 100, openPositions: 0 }],
+    } as never);
+
+    expect(performance).toMatchObject({ dailyReturnCount: 0, annualizedReturn: null, sharpeRatio: null, sortinoRatio: null, calmarRatio: null });
+  });
+
+  it("从既有资金曲线、订单、交易日和日线成交额复算六层评价，不将其反馈到信号评分", () => {
+    const first = row({ stockCode: "600101.SH", date: "2026-01-01", nextDayDate: "2026-01-02", secondDayDate: "2026-01-03" });
+    const second = row({ stockCode: "600102.SH", date: "2026-01-02", nextDayDate: "2026-01-03", secondDayDate: "2026-01-04" });
+    const evaluation = calculateStrategyEvaluation({
+      initialCapital: 100000,
+      finalCapital: 96000,
+      totalReturn: -4,
+      maxDrawdown: 12,
+      winRate: 33.3,
+      profitFactor: 0.5,
+      peakOpenPositionCount: 2,
+      assumptions: { slippageBps: 10 },
+      equityCurve: [
+        { date: "2026-01-02", equity: 100000, cash: 50000, openPositions: 1 },
+        { date: "2026-01-03", equity: 105000, cash: 30000, openPositions: 2 },
+        { date: "2026-01-04", equity: 96000, cash: 96000, openPositions: 0 },
+      ],
+      trades: [
+        { signalDate: first.date, entryDate: first.nextDayDate, exitDate: first.secondDayDate, stockCode: first.stockCode, stockName: first.stockName, score: 80, shares: 1000, entryPrice: 10, exitPrice: 11, totalFees: 15, netPnl: 985, netReturn: 9.85, status: "filled", reason: null },
+        { signalDate: second.date, entryDate: second.nextDayDate, exitDate: second.secondDayDate, stockCode: second.stockCode, stockName: second.stockName, score: 80, shares: 1000, entryPrice: 10, exitPrice: 9, totalFees: 15, netPnl: -1015, netReturn: -10.15, status: "filled", reason: null },
+        { signalDate: "2026-01-01", entryDate: "2026-01-02", exitDate: "2026-01-04", stockCode: "600103.SH", stockName: "测试丙", score: 80, shares: 1000, entryPrice: 10, exitPrice: 9, totalFees: 15, netPnl: -1015, netReturn: -10.15, status: "filled", reason: null },
+      ],
+    } as never, {
+      tradingDates: ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"],
+      priceByStockDate: new Map([[`${first.stockCode}::${first.nextDayDate}`, { openPrice: 10, closePrice: 11, amount: 20_000 }], [`${second.stockCode}::${second.nextDayDate}`, { openPrice: 10, closePrice: 9, amount: 20_000 }]]),
+    }, [first, second]);
+
+    expect(evaluation.core).toMatchObject({ totalReturn: -4, maxDrawdown: 12 });
+    expect(evaluation.tradeQuality).toMatchObject({ tradeCount: 3, maxConsecutiveLosses: 2, expectancy: -3.48, averageWin: 9.85, averageLoss: -10.15, payoffRatio: 0.97 });
+    expect(evaluation.tailRisk.valueAtRisk95).not.toBeNull();
+    expect(evaluation.tailRisk.conditionalValueAtRisk95).toBeLessThanOrEqual(evaluation.tailRisk.valueAtRisk95!);
+    expect(evaluation.stability).toMatchObject({ rollingWindowTradingDays: 63, topFivePositiveDayReturnContribution: 100 });
+    expect(evaluation.tradingRealism).toMatchObject({ totalFees: 45, modeledOneWaySlippageBps: 10, maxOpenPositions: 2, entryParticipationCoverageCount: 2 });
+    expect(evaluation.tradingRealism.averageEntryParticipationBps).toBe(5);
+    expect(evaluation.tradingRealism.averageCapitalUtilization).toBeGreaterThan(0);
+  });
+
+  it("默认采用45日训练与14日验证的滚动参数", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const result = buildDownsideRiskResearch(rows, { observationDays: 2 }, {}, { priceByStockDate: prices, tradingDates: dates });
+    expect(result).toMatchObject({ rollingTrainTradingDays: 45, rollingValidationTradingDays: 14 });
+  });
+
+  it("只以信号日特征计分，并优先用买入后完整实际交易日最低价路径生成下行标签和可比实验", () => {
+    const highRisk = row({
+      stockCode: "600001.SH", stockName: "高风险", boards: 4, sectorCount: 1, score: 45, limitUpTime: "14:40:00", turnover: "1", marketCapScore: 4, phase: "高位退潮", maxBoards: 6,
+    });
+    const lowRisk = row({ stockCode: "600002.SH", stockName: "低风险" });
+    const prices = new Map([
+      ["600001.SH::2026-08-18", { openPrice: 10, closePrice: 10, lowPrice: 9.8, amount: 5000 }],
+      ["600001.SH::2026-08-19", { openPrice: 10, closePrice: 9, lowPrice: 8.5, amount: 5000 }],
+      ["600001.SH::2026-08-20", { openPrice: 8.5, closePrice: 8, lowPrice: 7, amount: 5000 }],
+      ["600002.SH::2026-08-18", { openPrice: 10, closePrice: 10, lowPrice: 9.9, amount: 90000 }],
+      ["600002.SH::2026-08-19", { openPrice: 10, closePrice: 10.5, lowPrice: 10.2, amount: 90000 }],
+      ["600002.SH::2026-08-20", { openPrice: 10.4, closePrice: 10.4, lowPrice: 10.1, amount: 90000 }],
+    ]);
+    const result = buildDownsideRiskResearch([highRisk, lowRisk], {
+      observationDays: 2,
+      mediumDownsidePercent: 4,
+      highDownsidePercent: 8,
+      penaltyWeight: 0.5,
+      hardRiskThreshold: 65,
+    }, {
+      initialCapital: 100000,
+      maxPositions: 2,
+      commissionRate: 0,
+      stampDutyRate: 0,
+      transferFeeRate: 0,
+      slippageBps: 0,
+    }, { priceByStockDate: prices, tradingDates: ["2026-08-19", "2026-08-20"] });
+
+    expect(result.featureMatrix.every((feature) => feature.timing === "信号日")).toBe(true);
+    expect(result.labeledSampleSize).toBe(2);
+    expect(result.lowPriceLabelSampleSize).toBe(2);
+    expect(result.signalAmountSampleSize).toBe(2);
+    expect(result.riskTiers.find((tier) => tier.tier === "高风险")).toMatchObject({ sampleSize: 1, averageMaxAdverseReturn: -30, mediumDownsideCount: 1, highDownsideCount: 1 });
+    expect(result.riskTiers.find((tier) => tier.tier === "低风险")).toMatchObject({ sampleSize: 1, averageMaxAdverseReturn: 0, mediumDownsideCount: 0, highDownsideCount: 0 });
+    expect(result.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"]);
+    expect(result.experiments.find((experiment) => experiment.key === "hardFilter")).toMatchObject({ inputCandidateCount: 1, excludedCandidateCount: 1 });
+    expect(result.experiments.find((experiment) => experiment.key === "qualityGate")!.excludedCandidateCount).toBeGreaterThanOrEqual(1);
+    expect(result.experiments.every((experiment) => experiment.realisticSimulation.assumptions.initialCapital === 100000)).toBe(true);
+    expect(result.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
+  });
+
+  it("观察期不完整时不生成下行标签，避免用不完整的未来路径比较风险分层", () => {
+    const incomplete = row({ stockCode: "600003.SH" });
+    const prices = new Map([["600003.SH::2026-08-19", { openPrice: 10, closePrice: 9 }]]);
+    const result = buildDownsideRiskResearch([incomplete], { observationDays: 2 }, {}, { priceByStockDate: prices, tradingDates: ["2026-08-19"] });
+
+    expect(result.labeledSampleSize).toBe(0);
+    expect(result.riskTiers.reduce((sum, tier) => sum + tier.sampleSize, 0)).toBe(0);
+  });
+
+  it("滚动验证窗口始终位于前置训练窗口之后，且只用验证期完整标签生成实验", () => {
+    const dates = Array.from({ length: 42 }, (_, index) => `2026-02-${String(index + 1).padStart(2, "0")}`);
+    const rows = dates.slice(0, 40).map((date, index) => row({
+      stockCode: `600${String(index).padStart(3, "0")}.SH`, stockName: `窗口${index}`, date, nextDate: dates[index + 1], nextDayDate: dates[index], secondDayDate: dates[index + 1],
+    }));
+    const prices = new Map<string, { openPrice: number; closePrice: number; lowPrice: number; amount: number }>();
+    for (const item of rows) {
+      prices.set(`${item.stockCode}::${item.nextDayDate}`, { openPrice: 10, closePrice: 10, lowPrice: 9, amount: 60000 });
+      if (item.secondDayDate) prices.set(`${item.stockCode}::${item.secondDayDate}`, { openPrice: 10, closePrice: 10, lowPrice: 9, amount: 60000 });
+      prices.set(`${item.stockCode}::${item.date}`, { openPrice: 10, closePrice: 10, lowPrice: 9, amount: 60000 });
+    }
+    const result = buildDownsideRiskResearch(rows, { observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10 }, {}, { priceByStockDate: prices, tradingDates: dates });
+
+    expect(result.rollingWindows).toHaveLength(1);
+    expect(result.rollingWindows[0]).toMatchObject({ calibrationStartDate: dates[0], calibrationEndDate: dates[29], validationStartDate: dates[30], validationEndDate: dates[39], labeledSampleSize: 10 });
+    expect(result.labeledSampleSize).toBe(10);
+  });
+
+  it("在每个训练窗口内从固定网格选出更优扣分权重，并只将其用于后续验证窗口", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true,
+    }, {
+      initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0,
+      trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2,
+    }, { priceByStockDate: prices, tradingDates: dates });
+
+    const window = result.rollingWindows[0]!;
+    expect(result.autoTunePenaltyWeight).toBe(true);
+    expect(result.penaltyWeightGrid).toEqual([0, 0.15, 0.35, 0.55, 0.75, 1]);
+    expect(window.autoTunedPenaltyWeight).toBe(0.15);
+    expect(window.trainingSampleSize).toBe(60);
+    expect(window.weightTrials).toHaveLength(6);
+    expect(window.weightTrials.find((trial) => trial.penaltyWeight === 0.15)!.objectiveValue).toBeGreaterThan(window.weightTrials.find((trial) => trial.penaltyWeight === 0)!.objectiveValue);
+    expect(window.experiments.find((experiment) => experiment.key === "riskPenalty")!.realisticSimulation.assumptions.exitStrategy).toBe("riskManagedHold");
+  });
+
+  it("验证期未来价格变化不会影响已在训练期选出的权重，完全平局时选择更小权重", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const options = { observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true };
+    const realistic = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2 };
+    const before = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: prices, tradingDates: dates });
+    for (const item of rows.filter((candidate) => candidate.date >= dates[30]!)) {
+      prices.set(`${item.stockCode}::${item.nextDayDate}`, { openPrice: 10, closePrice: 1, lowPrice: 1, amount: 1 });
+      if (item.secondDayDate) prices.set(`${item.stockCode}::${item.secondDayDate}`, { openPrice: 1, closePrice: 1, lowPrice: 1, amount: 1 });
+    }
+    const after = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: prices, tradingDates: dates });
+    expect(after.rollingWindows[0]!.autoTunedPenaltyWeight).toBe(before.rollingWindows[0]!.autoTunedPenaltyWeight);
+
+    const tied = buildDownsideRiskResearch(rows.filter((candidate) => candidate.stockName.startsWith("高风险")), { observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true }, realistic, { priceByStockDate: prices, tradingDates: dates });
+    expect(tied.rollingWindows[0]!.autoTunedPenaltyWeight).toBe(0);
+  });
+
+  it("关闭自动寻优时所有验证窗口回退使用手动扣分权重", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: false, penaltyWeight: 0.55,
+    }, { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0 }, { priceByStockDate: prices, tradingDates: dates });
+
+    expect(result.rollingWindows[0]).toMatchObject({ autoTunedPenaltyWeight: 0.55, weightTrials: [] });
+    expect(result.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("手动设定");
+  });
+
+  it("将全部无重叠验证窗口在同一连续资金账户中拼接，并返回有序且无重复的整体样本外曲线", () => {
+    const dates = Array.from({ length: 72 }, (_, index) => `2026-04-${String(index + 1).padStart(2, "0")}`);
+    const rows = dates.slice(0, 70).map((date, index) => row({
+      date, nextDate: date, nextDayDate: date, secondDayDate: dates[index + 1]!,
+      stockCode: `601${String(index).padStart(3, "0")}.SH`, stockName: `拼接${index}`,
+    }));
+    const prices = new Map<string, { openPrice: number; closePrice: number; lowPrice: number; amount: number }>();
+    for (const item of rows) {
+      prices.set(`${item.stockCode}::${item.nextDayDate}`, { openPrice: 10, closePrice: 10, lowPrice: 9.8, amount: 60_000 });
+      prices.set(`${item.stockCode}::${item.secondDayDate}`, { openPrice: 10.5, closePrice: 10.5, lowPrice: 10, amount: 60_000 });
+    }
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: false, penaltyWeight: 0.35,
+    }, {
+      initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0,
+      trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2,
+    }, { priceByStockDate: prices, tradingDates: dates });
+
+    const walkForward = result.walkForward!;
+    expect(result.rollingWindows).toHaveLength(4);
+    expect(walkForward).toMatchObject({ startDate: dates[30], endDate: dates[69], validationWindowCount: 4 });
+    expect(walkForward.equityCurve.map((point) => point.date)).toEqual([...walkForward.equityCurve.map((point) => point.date)].sort());
+    expect(new Set(walkForward.equityCurve.map((point) => point.date)).size).toBe(walkForward.equityCurve.length);
+    for (const experiment of walkForward.experiments) {
+      const source = result.experiments.find((item) => item.key === experiment.key)!;
+      expect(experiment).toMatchObject({ totalReturn: source.realisticSimulation.totalReturn, finalCapital: source.realisticSimulation.finalCapital, completedCount: source.realisticSimulation.completedCount });
+    }
+  });
+
+  it("对五种策略执行同一全周期连续回测，并只在验证段应用训练选出的风险扣分权重", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const realistic = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2 };
+    const result = buildDownsideRiskResearch(rows, {
+      observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true, penaltyWeight: 0.35,
+    }, realistic, { priceByStockDate: prices, tradingDates: dates });
+
+    expect(result.fullCycle).toMatchObject({ startDate: dates[0], endDate: dates[39] });
+    expect(result.fullCycle.experiments.map((experiment) => experiment.key)).toEqual(["baseline", "riskPenalty", "hardFilter", "qualityBlend", "qualityGate"]);
+    expect(result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")).toMatchObject({ inputCandidateCount: rows.length, excludedCandidateCount: 0 });
+    expect(result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.description).toContain("前置训练窗口自动选出的风险扣分权重");
+    expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.exitStrategy === "riskManagedHold")).toBe(true);
+    expect(result.fullCycle.experiments.every((experiment) => experiment.realisticSimulation.assumptions.initialCapital === realistic.initialCapital)).toBe(true);
+    const standaloneBaseline = simulateRealisticTPlus1ToTPlus2(rows, realistic, prices, dates);
+    expect(result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")!.realisticSimulation).toMatchObject({
+      totalReturn: standaloneBaseline.totalReturn,
+      finalCapital: standaloneBaseline.finalCapital,
+      maxDrawdown: standaloneBaseline.maxDrawdown,
+      filledCount: standaloneBaseline.filledCount,
+      completedCount: standaloneBaseline.completedCount,
+    });
+    expect(result.fullCycle.tradeDifferences).toHaveLength(rows.length);
+    expect(new Set(result.fullCycle.tradeDifferences.map((item) => `${item.signalDate}::${item.stockCode}`)).size).toBe(rows.length);
+    const highRisk = result.fullCycle.tradeDifferences.find((item) => item.stockName.startsWith("高风险"))!;
+    const lowRisk = result.fullCycle.tradeDifferences.find((item) => item.stockName.startsWith("低风险"))!;
+    expect(highRisk).toMatchObject({ hardFilterExcluded: true, hardFilter: null });
+    expect(highRisk.riskPenalty!.score).toBeLessThan(highRisk.baseline!.score);
+    expect(highRisk).toMatchObject({ qualityGateExcluded: true, qualityGate: null });
+    expect(lowRisk).toMatchObject({ hardFilterExcluded: false });
+    expect(lowRisk.hardFilter).not.toBeNull();
+    expect(lowRisk.qualityBlend).not.toBeNull();
+    expect(lowRisk.qualityGate).not.toBeNull();
+    const attribution = result.fullCycle.riskPenaltyAttribution;
+    const baselineFilled = result.fullCycle.experiments.find((experiment) => experiment.key === "baseline")!.realisticSimulation.filledCount;
+    const riskPenaltyFilled = result.fullCycle.experiments.find((experiment) => experiment.key === "riskPenalty")!.realisticSimulation.filledCount;
+    expect(attribution.baselineOnlyFilledCount + attribution.commonFilledCount).toBe(baselineFilled);
+    expect(attribution.riskPenaltyOnlyFilledCount + attribution.commonFilledCount).toBe(riskPenaltyFilled);
+    expect(attribution.commonFilledDifferentReturnCount).toBe(0);
+    expect(attribution.autoTunedSignalCount + attribution.fallbackWeightSignalCount).toBe(rows.length);
+    expect(result.factorAblations).toHaveLength(5);
+    expect(result.factorAblations.every((factor) => Number.isFinite(factor.fullCycle.returnDelta) && Number.isFinite(factor.walkForward.drawdownDelta))).toBe(true);
+    expect(result.factorAblations.every((factor) => factor.fullCycle.filledCount >= 0 && factor.walkForward.filledCount >= 0)).toBe(true);
+  });
+
+  it("未来价格路径变化不会改变风险因子在信号日的消融覆盖和平均贡献", () => {
+    const { dates, rows, prices } = buildWeightSelectionFixture();
+    const options = { observationDays: 2, rollingTrainTradingDays: 30, rollingValidationTradingDays: 10, autoTunePenaltyWeight: true, penaltyWeight: 0.35 };
+    const realistic = { initialCapital: 100000, maxPositions: 1, commissionRate: 0, stampDutyRate: 0, transferFeeRate: 0, slippageBps: 0, trailingProfitActivationPercent: 100, strongHoldMinReturn: 100, maxHoldingDays: 2 };
+    const baseline = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: prices, tradingDates: dates });
+    const futureChangedPrices = new Map(prices);
+    const changedKey = `${rows.at(-1)!.stockCode}::${dates.at(-1)!}`;
+    futureChangedPrices.set(changedKey, { ...futureChangedPrices.get(changedKey)!, closePrice: 1, lowPrice: 1 });
+    const changed = buildDownsideRiskResearch(rows, options, realistic, { priceByStockDate: futureChangedPrices, tradingDates: dates });
+    expect(changed.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution])).toEqual(
+      baseline.factorAblations.map((factor) => [factor.key, factor.affectedSignalCount, factor.averageContribution]),
+    );
+    expect(changed.fullCycle.tradeDifferences.map((item) => [item.signalDate, item.stockCode, item.qualityBlend?.score, item.qualityGateExcluded])).toEqual(
+      baseline.fullCycle.tradeDifferences.map((item) => [item.signalDate, item.stockCode, item.qualityBlend?.score, item.qualityGateExcluded]),
+    );
+  });
+});

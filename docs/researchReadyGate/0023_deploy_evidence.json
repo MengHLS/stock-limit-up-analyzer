@@ -1,0 +1,160 @@
+{
+  "journalEntry": {
+    "idx": 23,
+    "version": "5",
+    "when": 1788676035482,
+    "tag": "0023_security_identity_unification",
+    "breakpoints": true
+  },
+  "expectedHash": "e68e3fe9d3e3b568c36c3d8128a1c2822fd369847cf1defbf59c04658ae45d9a",
+  "chunkCount": 20,
+  "before": {
+    "lastLedger": {
+      "id": 384171,
+      "hash": "99463357ca65fbe22ee4273526434752545e0e3330611375e177f17e750f63d4",
+      "created_at": "1788673171854"
+    },
+    "ledgerRows": 23,
+    "industry_assignments": [
+      "id:int:NO",
+      "securityId:varchar(20):NO",
+      "industryCode:varchar(32):NO",
+      "industryName:varchar(64):NO",
+      "effectiveFrom:date:NO",
+      "effectiveTo:date:YES",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO"
+    ],
+    "industry_assignments_rows": 0,
+    "liquidity_daily": [
+      "id:int:NO",
+      "securityId:varchar(20):NO",
+      "tradeDate:date:NO",
+      "turnoverRate:double:YES",
+      "circulationMarketCap:double:YES",
+      "totalMarketCap:double:YES",
+      "amount:double:YES",
+      "volume:double:YES",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO"
+    ],
+    "liquidity_daily_rows": 0,
+    "corporate_actions": [
+      "id:int:NO",
+      "securityId:varchar(20):NO",
+      "actionType:enum('dividend','bonus_issue','transfer','rights_issue','split','reverse_split','other'):NO",
+      "effectiveDate:date:NO",
+      "recordDate:date:YES",
+      "announcementDate:date:YES",
+      "cashAmount:varchar(32):YES",
+      "bonusRatio:varchar(32):YES",
+      "transferRatio:varchar(32):YES",
+      "rightsRatio:varchar(32):YES",
+      "rightsPrice:varchar(32):YES",
+      "splitRatio:varchar(32):YES",
+      "description:text:YES",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO",
+      "createdAt:timestamp:NO",
+      "updatedAt:timestamp:NO"
+    ],
+    "corporate_actions_rows": 0,
+    "adjustment_factors": [
+      "id:int:NO",
+      "securityId:varchar(20):NO",
+      "effectiveDate:date:NO",
+      "foreFactor:varchar(32):NO",
+      "backFactor:varchar(32):NO",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO",
+      "createdAt:timestamp:NO",
+      "updatedAt:timestamp:NO"
+    ],
+    "adjustment_factors_rows": 0
+  },
+  "appliedChunks": 20,
+  "after": {
+    "lastLedger": {
+      "id": 414155,
+      "hash": "e68e3fe9d3e3b568c36c3d8128a1c2822fd369847cf1defbf59c04658ae45d9a",
+      "created_at": "1788676035482"
+    },
+    "ledgerRows": 24,
+    "industry_assignments": [
+      "id:int:NO",
+      "securityId:varchar(48):YES",
+      "securityCode:varchar(20):NO",
+      "industryCode:varchar(32):NO",
+      "industryName:varchar(64):NO",
+      "effectiveFrom:date:NO",
+      "effectiveTo:date:YES",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO"
+    ],
+    "industry_assignments_indexes": [
+      "PRIMARY(id)",
+      "idx_industry_assign_industry_code(industryCode)",
+      "uq_industry_assign_security_effective(effectiveFrom)"
+    ],
+    "liquidity_daily": [
+      "id:int:NO",
+      "securityId:varchar(48):YES",
+      "securityCode:varchar(20):NO",
+      "tradeDate:date:NO",
+      "turnoverRate:double:YES",
+      "circulationMarketCap:double:YES",
+      "totalMarketCap:double:YES",
+      "amount:double:YES",
+      "volume:double:YES",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO"
+    ],
+    "liquidity_daily_indexes": [
+      "PRIMARY(id)",
+      "idx_liquidity_daily_trade_date(tradeDate)",
+      "uq_liquidity_daily_security_date(tradeDate)"
+    ],
+    "corporate_actions": [
+      "id:int:NO",
+      "securityId:varchar(48):YES",
+      "securityCode:varchar(20):NO",
+      "actionType:enum('dividend','bonus_issue','transfer','rights_issue','split','reverse_split','other'):NO",
+      "effectiveDate:date:NO",
+      "recordDate:date:YES",
+      "announcementDate:date:YES",
+      "cashAmount:varchar(32):YES",
+      "bonusRatio:varchar(32):YES",
+      "transferRatio:varchar(32):YES",
+      "rightsRatio:varchar(32):YES",
+      "rightsPrice:varchar(32):YES",
+      "splitRatio:varchar(32):YES",
+      "description:text:YES",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO",
+      "createdAt:timestamp:NO",
+      "updatedAt:timestamp:NO"
+    ],
+    "corporate_actions_indexes": [
+      "PRIMARY(id)",
+      "uq_corporate_action_security_date_type(actionType)",
+      "idx_corporate_action_security_effective(effectiveDate)"
+    ],
+    "adjustment_factors": [
+      "id:int:NO",
+      "securityId:varchar(48):YES",
+      "securityCode:varchar(20):NO",
+      "effectiveDate:date:NO",
+      "foreFactor:varchar(32):NO",
+      "backFactor:varchar(32):NO",
+      "source:varchar(32):NO",
+      "retrievedAt:timestamp:NO",
+      "createdAt:timestamp:NO",
+      "updatedAt:timestamp:NO"
+    ],
+    "adjustment_factors_indexes": [
+      "PRIMARY(id)",
+      "uq_adjustment_factor_security_date(effectiveDate)",
+      "idx_adjustment_factor_security_date(effectiveDate)"
+    ]
+  }
+}

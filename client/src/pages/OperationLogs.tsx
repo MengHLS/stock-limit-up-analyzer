@@ -6,9 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { getLoginUrl } from "@/const";
-import { AlertCircle, ArrowLeft, ClipboardList, Loader2, RefreshCw } from "lucide-react";
+import { AlertCircle, ClipboardList, Loader2, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "wouter";
 import { toast } from "sonner";
 
 type OperationTypeFilter = "" | "image_recognition" | "date_refresh";
@@ -82,7 +81,7 @@ export default function OperationLogsPage() {
 
   if (!authLoading && !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="flex items-center justify-center p-4 py-20">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <CardTitle>请先登录</CardTitle>
@@ -90,9 +89,6 @@ export default function OperationLogsPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <Button asChild><a href={getLoginUrl()}>登录</a></Button>
-            <Link href="/">
-              <Button variant="outline" className="w-full"><ArrowLeft className="mr-2 h-4 w-4" />返回首页</Button>
-            </Link>
           </CardContent>
         </Card>
       </div>
@@ -100,20 +96,11 @@ export default function OperationLogsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      <header className="sticky top-0 z-50 w-full border-b bg-white/85 backdrop-blur-xl shadow-sm">
-        <div className="container flex h-14 items-center justify-between gap-3">
-          <Link href="/">
-            <Button variant="ghost" size="sm" className="gap-2"><ArrowLeft className="h-4 w-4" />返回首页</Button>
-          </Link>
-          <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-            <ClipboardList className="h-4 w-4 text-orange-600" />
-            操作日志
-          </div>
-        </div>
-      </header>
-
-      <main className="container max-w-[1400px] py-6">
+    <div className="container max-w-[1400px] py-6">
+      <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-700">
+        <ClipboardList className="h-4 w-4 text-orange-600" />
+        <h1 className="text-lg font-semibold">操作日志</h1>
+      </div>
         <div className="mb-5">
           <h1 className="text-2xl font-bold text-slate-900">操作日志</h1>
           <p className="mt-1 text-sm text-slate-600">记录当前账号发起的图片识别结果，以及识别完成后的上传日期数据刷新状态。</p>
@@ -229,7 +216,6 @@ export default function OperationLogsPage() {
             )}
           </CardContent>
         </Card>
-      </main>
     </div>
   );
 }

@@ -1,0 +1,883 @@
+{
+  "generatedAt": "2026-09-16T13:02:51.358Z",
+  "datasetVersionId": 390002,
+  "experimentId": 240002,
+  "runId": 570001,
+  "detect": {
+    "analysisCount": 13,
+    "resultCount": 208,
+    "detectedCount": 13,
+    "createdCount": 0,
+    "reusedCount": 13,
+    "findingIds": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13
+    ],
+    "findingsByType": {
+      "EFFECT": 13
+    },
+    "untestedInteractions": [
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_holds_event_low_3d == 0」尚未被任何 Result 验证",
+        "findingIds": [
+          1,
+          2
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 0 AND pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1」尚未被任何 Result 验证",
+        "findingIds": [
+          2,
+          3
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 0 AND pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.95 AND pullback_close_ratio_3d <= 0.98」尚未被任何 Result 验证",
+        "findingIds": [
+          2,
+          4
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 0 AND pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d < 0.95」尚未被任何 Result 验证",
+        "findingIds": [
+          2,
+          5
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 0 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5」尚未被任何 Result 验证",
+        "findingIds": [
+          2,
+          6
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 0 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_close_ratio_3d >= 1」尚未被任何 Result 验证",
+        "findingIds": [
+          2,
+          9
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 0 AND pullback_holds_event_low_3d == 1 AND obs_3d.return_from_event_close > 0」尚未被任何 Result 验证",
+        "findingIds": [
+          2,
+          11
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1 AND pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.95 AND pullback_close_ratio_3d <= 0.98」尚未被任何 Result 验证",
+        "findingIds": [
+          3,
+          4
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1 AND pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d < 0.95」尚未被任何 Result 验证",
+        "findingIds": [
+          3,
+          5
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5」尚未被任何 Result 验证",
+        "findingIds": [
+          3,
+          6
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_close_ratio_3d >= 1」尚未被任何 Result 验证",
+        "findingIds": [
+          3,
+          9
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1 AND pullback_holds_event_low_3d == 1 AND obs_3d.return_from_event_close > 0」尚未被任何 Result 验证",
+        "findingIds": [
+          3,
+          11
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.95 AND pullback_close_ratio_3d <= 0.98 AND pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d < 0.95」尚未被任何 Result 验证",
+        "findingIds": [
+          4,
+          5
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.95 AND pullback_close_ratio_3d <= 0.98 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5」尚未被任何 Result 验证",
+        "findingIds": [
+          4,
+          6
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.95 AND pullback_close_ratio_3d <= 0.98 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_close_ratio_3d >= 1」尚未被任何 Result 验证",
+        "findingIds": [
+          4,
+          9
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.95 AND pullback_close_ratio_3d <= 0.98 AND pullback_holds_event_low_3d == 1 AND obs_3d.return_from_event_close > 0」尚未被任何 Result 验证",
+        "findingIds": [
+          4,
+          11
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d < 0.95 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5」尚未被任何 Result 验证",
+        "findingIds": [
+          5,
+          6
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d < 0.95 AND pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_close_ratio_3d >= 1」尚未被任何 Result 验证",
+        "findingIds": [
+          5,
+          9
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d < 0.95 AND pullback_holds_event_low_3d == 1 AND obs_3d.return_from_event_close > 0」尚未被任何 Result 验证",
+        "findingIds": [
+          5,
+          11
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_holds_event_low_3d == 1 AND obs_3d.return_from_event_close > 0」尚未被任何 Result 验证",
+        "findingIds": [
+          6,
+          11
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      },
+      {
+        "title": "组合条件「pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_close_ratio_3d >= 1 AND pullback_holds_event_low_3d == 1 AND obs_3d.return_from_event_close > 0」尚未被任何 Result 验证",
+        "findingIds": [
+          9,
+          11
+        ],
+        "combinedConditions": null,
+        "reason": "同 Run 内没有**纯合取**的条件分析同时覆盖这两组子句 ⇒ 组合效果无真实 Result 支撑。按任务书 §12，此处只登记待验证假设，**不产出 Finding**。请新建覆盖该组合的 CONDITIONAL 分析后重跑。"
+      }
+    ],
+    "skipped": [],
+    "durationMs": 26380
+  },
+  "findings": [
+    {
+      "id": 1,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0245）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540001,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.039690877936778966,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.024480517056474613,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540001.group=ALL",
+        "medianReturn": 0.01108033240997231,
+        "winRate": 0.5518343815513627,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.039690877936778966,
+            "sampleCount": 19080
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 19080,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 2,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 0」的样本在 future_return_5d 上优于全样本（超额 -0.1001）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540002,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": -0.08490900594150945,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": -0.1001193668218138,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540002.group=ALL",
+        "medianReturn": -0.0909332688588008,
+        "winRate": 0.1565180102915952,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": -0.08490900594150945,
+            "sampleCount": 4664
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 4664,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 3,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.98 AND pullback_close_ratio_3d <= 1」的样本在 future_return_5d 上优于全样本（超额 -0.0260）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540003,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": -0.01081591535585229,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": -0.026026276236156644,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540003.group=ALL",
+        "medianReturn": -0.016224188790560517,
+        "winRate": 0.3500210349179638,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": -0.01081591535585229,
+            "sampleCount": 2377
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 2377,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 4,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d >= 0.95 AND pullback_close_ratio_3d <= 0.98」的样本在 future_return_5d 上优于全样本（超额 -0.0513）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540004,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": -0.03607086997557693,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": -0.05128123085588128,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540004.group=ALL",
+        "medianReturn": -0.039610389610389686,
+        "winRate": 0.1835463782366437,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": -0.03607086997557693,
+            "sampleCount": 3051
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 3051,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 5,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_close_ratio_3d < 0.95」的样本在 future_return_5d 上优于全样本（超额 -0.0882）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540005,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": -0.07295125720084457,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": -0.08816161808114892,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540005.group=ALL",
+        "medianReturn": -0.07409997409997413,
+        "winRate": 0.10504959422903516,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": -0.07295125720084457,
+            "sampleCount": 2218
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 2218,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 6,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5」的样本在 future_return_5d 上优于全样本（超额 0.0564）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540006,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.07158337381059238,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.05637301293028803,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540006.group=ALL",
+        "medianReturn": -0.0013171272385230014,
+        "winRate": 0.495265841223598,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.07158337381059238,
+            "sampleCount": 2746
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 2746,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 9,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_close_ratio_3d >= 1」的样本在 future_return_5d 上优于全样本（超额 0.1746）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540009,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.18983376475914185,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.17462340387883746,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540009.group=ALL",
+        "medianReturn": 0.12599961788997818,
+        "winRate": 0.8379360465116279,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.18983376475914185,
+            "sampleCount": 1376
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 1376,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 11,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND obs_3d.return_from_event_close > 0」的样本在 future_return_5d 上优于全样本（超额 0.0771）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540011,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.09229961517084762,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.07708925429054327,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540011.group=ALL",
+        "medianReturn": 0.05574324324324326,
+        "winRate": 0.7788570928502669,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.09229961517084762,
+            "sampleCount": 11427
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 11427,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 13,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_5d == 1 AND pullback_min_volume_ratio_5d <= 0.5」的样本在 future_return_5d 上优于全样本（超额 0.0404）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540013,
+      "researchStrength": 1,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.05556793780059904,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.04035757692029468,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540013.group=ALL",
+        "medianReturn": -0.007032930185232344,
+        "winRate": 0.4614011601963409,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.05556793780059904,
+            "sampleCount": 4482
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 4482,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 8,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d > 0.5」的样本在 future_return_5d 上优于全样本（超额 0.0191）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540008,
+      "researchStrength": 0.9823778277592318,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.034329252268265935,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.019118891387961585,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540008.group=ALL",
+        "medianReturn": 0.012422360248447142,
+        "winRate": 0.5613444349210236,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.034329252268265935,
+            "sampleCount": 16334
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 16334,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 10,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.5 AND pullback_last_volume_ratio_3d > 1」的样本在 future_return_5d 上优于全样本（超额 0.1628）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540010,
+      "researchStrength": 0.9436553189178124,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.17800177470264966,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.1627914138223453,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540010.group=ALL",
+        "medianReturn": 0.1442307692307693,
+        "winRate": 0.8312586445366529,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.17800177470264966,
+            "sampleCount": 723
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 723,
+        "grade": "MEDIUM",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 7,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_3d == 1 AND pullback_min_volume_ratio_3d <= 0.3」的样本在 future_return_5d 上优于全样本（超额 0.1968）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540007,
+      "researchStrength": 0.9392756467965596,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.2120009019663627,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.19679054108605837,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540007.group=ALL",
+        "medianReturn": 0.18481147105682424,
+        "winRate": 0.7687943262411348,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.2120009019663627,
+            "sampleCount": 705
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 705,
+        "grade": "MEDIUM",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    },
+    {
+      "id": 12,
+      "findingType": "EFFECT",
+      "title": "满足条件「pullback_holds_event_low_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0153）",
+      "status": "DISCOVERED",
+      "target": "future_return_5d",
+      "primaryAnalysisId": 540012,
+      "researchStrength": 0.9058353092269532,
+      "researchStrengthGrade": "STRONG",
+      "effect": {
+        "groupReturn": 0.03050212634165202,
+        "benchmarkReturn": 0.015210360880304351,
+        "excessReturn": 0.015291765461347667,
+        "benchmarkUnavailable": false,
+        "benchmarkSource": "in-analysis:analysis=540012.group=ALL",
+        "medianReturn": 0.004873294346978511,
+        "winRate": 0.5199006186973255,
+        "buckets": [
+          {
+            "label": "ALL",
+            "metricValue": 0.015210360880304351,
+            "sampleCount": 23751
+          },
+          {
+            "label": "CONDITION",
+            "metricValue": 0.03050212634165202,
+            "sampleCount": 20527
+          }
+        ]
+      },
+      "sample": {
+        "sampleCount": 20527,
+        "grade": "STRONG",
+        "thresholds": {
+          "weak": 100,
+          "medium": 300,
+          "strong": 1000
+        }
+      },
+      "limitations": [
+        "本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。",
+        "事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。",
+        "材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。",
+        "条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。",
+        "该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。"
+      ]
+    }
+  ],
+  "verdict27": {
+    "findingA_pullbackDepth": {
+      "detected": true,
+      "count": 4,
+      "ids": [
+        3,
+        4,
+        5,
+        9
+      ],
+      "note": "回撤深度与未来收益关系已检出（越深越差，呈单调）"
+    },
+    "findingB_brokeBelowOpen": {
+      "detected": true,
+      "count": 9,
+      "ids": [
+        1,
+        2,
+        6,
+        11,
+        13,
+        8,
+        10,
+        7,
+        12
+      ],
+      "note": "是否跌破首板最低价与未来收益关系已检出（破位明显差）"
+    },
+    "findingC_combination": {
+      "detected": true,
+      "count": 10,
+      "ids": [
+        3,
+        4,
+        5,
+        6,
+        9,
+        11,
+        13,
+        8,
+        10,
+        7
+      ],
+      "note": "组合关系已检出"
+    }
+  }
+}

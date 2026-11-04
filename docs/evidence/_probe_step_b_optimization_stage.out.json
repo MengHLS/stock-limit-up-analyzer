@@ -1,0 +1,203 @@
+{
+  "generatedAt": "2026-09-17T12:41:03.003Z",
+  "stageIds": [
+    "data",
+    "research",
+    "strategy",
+    "backtest",
+    "evaluation",
+    "optimization"
+  ],
+  "searchableDocument": {
+    "id": 420001,
+    "strategyId": "cand-360001",
+    "version": "1.0.0",
+    "derivation": {
+      "spaceParameterCount": 3,
+      "spaceParameters": [
+        {
+          "type": "number",
+          "name": "max_drawdown",
+          "min": 0,
+          "max": 0.3,
+          "step": 0.01
+        },
+        {
+          "type": "number",
+          "name": "max_volume_ratio",
+          "min": 0.05,
+          "max": 1,
+          "step": 0.05
+        },
+        {
+          "type": "number",
+          "name": "require_bullish",
+          "min": 0,
+          "max": 1,
+          "step": 1
+        }
+      ],
+      "excluded": [],
+      "declaredParameterNames": [
+        "max_drawdown",
+        "max_volume_ratio",
+        "require_bullish"
+      ]
+    }
+  },
+  "unsearchableDocument": {
+    "id": 360001,
+    "strategyId": "limit-up-baseline",
+    "version": "1.0.0",
+    "derivation": {
+      "spaceParameterCount": 0,
+      "spaceParameters": [],
+      "excluded": [
+        {
+          "name": "topN",
+          "type": "number",
+          "reason": "数值参数缺 step（必须 > 0 且有限）——搜索空间的范围必须由文档声明，不替你猜"
+        },
+        {
+          "name": "minScore",
+          "type": "number",
+          "reason": "数值参数缺 min / max / step（必须 > 0 且有限）——搜索空间的范围必须由文档声明，不替你猜"
+        }
+      ],
+      "declaredParameterNames": [
+        "topN",
+        "minScore"
+      ]
+    }
+  },
+  "probeWindow": {
+    "startDate": "2026-08-22",
+    "endDate": "2026-09-01",
+    "fromDatasetVersionId": 390002,
+    "datasetEnd": "2026-09-01"
+  },
+  "mainCase": {
+    "ok": true,
+    "elapsedMs": 50102,
+    "datasetVersion": "rd-1.0.0-1-286424011d3cedf5",
+    "datasetSource": "registry",
+    "registeredStages": [
+      "data",
+      "research",
+      "strategy",
+      "backtest",
+      "evaluation",
+      "optimization"
+    ],
+    "stages": [
+      {
+        "stageId": "data",
+        "state": "EXECUTED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "research",
+        "state": "EXECUTED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "strategy",
+        "state": "EXECUTED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "backtest",
+        "state": "EXECUTED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "evaluation",
+        "state": "EXECUTED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "optimization",
+        "state": "EXECUTED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "robustness",
+        "state": "SKIPPED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "oos",
+        "state": "SKIPPED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "overfitting",
+        "state": "SKIPPED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "regime",
+        "state": "SKIPPED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "paper",
+        "state": "SKIPPED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "review",
+        "state": "SKIPPED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "discipline",
+        "state": "SKIPPED",
+        "reasonCode": null
+      },
+      {
+        "stageId": "finalize",
+        "state": "SKIPPED",
+        "reasonCode": null
+      }
+    ],
+    "executedStageCount": 6,
+    "optimizationStageState": "EXECUTED",
+    "optimizationRef": {
+      "kind": "optimizationRef",
+      "handoffVersion": 1,
+      "synthetic": false,
+      "source": {
+        "module": "parameterSearch",
+        "moduleRunKind": "PARAMETER_SEARCH_RUN",
+        "runId": "OPT-PROBE-OPT::cand-360001",
+        "fingerprint": "a1d562297d3124be7d28b48062d6c5ee13440a5678c71fe10093a1df833d2b85"
+      },
+      "method": "random",
+      "candidateParameterKeys": [],
+      "evaluatedCandidateCount": 12,
+      "consistency": {
+        "status": "degraded",
+        "note": "random 采样 12 / 全网格 1240 组（固定种子，确定性）；稳定区 verdict=degraded-bad-point-rate、合格 1 组、坏点率 91.66666666666666%、产出候选 0 个（搜索键：max_drawdown / max_volume_ratio / require_bullish）；全部声明参数均进搜索空间"
+      }
+    },
+    "evaluatedCountMatchesBudget": true,
+    "noteMentionsSearchScope": true,
+    "evaluationBaselineTotalReturnPct": -3.4885310636999955
+  },
+  "negativeCase": {
+    "strategyId": "limit-up-baseline",
+    "registeredStages": [
+      "data",
+      "research",
+      "strategy",
+      "backtest",
+      "evaluation",
+      "optimization"
+    ],
+    "runThrew": true,
+    "errorCodeMatched": true,
+    "producedNoRun": true,
+    "throwMessageHead": "ClosedLoopError: 阶段 optimization 失败：[CL_OPTIMIZATION_PARAMETER_SPACE_EMPTY] 装配层：optimization 阶段无可搜索参数 —— 文档 limit-up-baseline@1.0.0 声明了 2 个参数（topN / minScore），但没有一个同时具备 min / max / step。逐条原因：topN → 数值参数缺 step（必须 > 0 且有限）——搜索空间的范围必须由文档声明，不替你猜；minScore → 数值参数缺 min / max / step（必须 > 0 且有限）——搜索空间的范围必须由文档声明，不替你猜。"
+  }
+}

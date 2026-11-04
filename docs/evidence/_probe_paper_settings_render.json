@@ -1,0 +1,156 @@
+{
+  "url": "http://127.0.0.1:3000/paper-trading",
+  "stages": [
+    {
+      "stage": "settings-collected",
+      "hasGrid": true
+    }
+  ],
+  "settings": {
+    "hasGrid": true,
+    "groups": [
+      "exit",
+      "position",
+      "constraint"
+    ],
+    "numberInputs": [
+      {
+        "label": "组合无条件止损（%）",
+        "value": "3"
+      },
+      {
+        "label": "单票止损比例（%）",
+        "value": "5"
+      },
+      {
+        "label": "强势续持阈值（%）",
+        "value": "3"
+      },
+      {
+        "label": "最多续持（交易日）",
+        "value": "5"
+      },
+      {
+        "label": "回撤止盈激活（%）",
+        "value": "6"
+      },
+      {
+        "label": "回撤止盈回撤（%）",
+        "value": "3"
+      },
+      {
+        "label": "最大持仓数",
+        "value": "5"
+      },
+      {
+        "label": "固定单笔比例（%）",
+        "value": "20"
+      },
+      {
+        "label": "一字跌停可卖概率（%）",
+        "value": "0"
+      },
+      {
+        "label": "单笔成交额占比上限",
+        "value": "0"
+      }
+    ],
+    "checkboxes": [
+      {
+        "label": "盘中止损",
+        "checked": false
+      },
+      {
+        "label": "禁追涨停买入",
+        "checked": false
+      },
+      {
+        "label": "禁一字涨停买入",
+        "checked": false
+      },
+      {
+        "label": "一字跌停卖不出",
+        "checked": false
+      },
+      {
+        "label": "一字跌停按概率可卖",
+        "checked": false
+      }
+    ],
+    "phaseOptions": [
+      "both",
+      "open",
+      "close"
+    ],
+    "phaseValue": "both",
+    "portfolioStopLossDefault": "3",
+    "mentionsPortfolioStopRule": true,
+    "mentionsPaperOnlyDivergence": true,
+    "pageErr": false
+  },
+  "interaction": {
+    "setPhaseResult": "close",
+    "phaseAfterChange": "close",
+    "resetClicked": true,
+    "phaseAfterReset": "both"
+  },
+  "viewClicked": true,
+  "effective": {
+    "hasPanel": true,
+    "rows": [
+      {
+        "label": "止损 / 回撤止盈判定时点",
+        "explicit": false,
+        "text": "止损 / 回撤止盈判定时点 默认 开盘 + 收盘（缺省）"
+      },
+      {
+        "label": "组合无条件止损",
+        "explicit": false,
+        "text": "组合无条件止损 默认 3% 纸面专属，回测无此规则"
+      },
+      {
+        "label": "单票止损比例",
+        "explicit": false,
+        "text": "单票止损比例 默认 5%"
+      },
+      {
+        "label": "强势续持阈值",
+        "explicit": false,
+        "text": "强势续持阈值 默认 3%"
+      },
+      {
+        "label": "最多续持",
+        "explicit": false,
+        "text": "最多续持 默认 5 个交易日"
+      },
+      {
+        "label": "回撤止盈",
+        "explicit": false,
+        "text": "回撤止盈 默认 激活 6% / 回撤 3%"
+      },
+      {
+        "label": "最大持仓数",
+        "explicit": false,
+        "text": "最大持仓数 默认 5"
+      },
+      {
+        "label": "仓位方式",
+        "explicit": false,
+        "text": "仓位方式 默认 等权（现金 ÷ 本批笔数）"
+      },
+      {
+        "label": "盘中止损",
+        "explicit": false,
+        "text": "盘中止损 默认 关闭"
+      },
+      {
+        "label": "成交约束",
+        "explicit": false,
+        "text": "成交约束 默认 全部关闭（不施加成交可行性约束）"
+      }
+    ],
+    "rowCount": 10,
+    "undefinedish": [],
+    "runRows": 14
+  }
+}

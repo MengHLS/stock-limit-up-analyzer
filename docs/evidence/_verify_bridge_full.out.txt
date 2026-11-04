@@ -1,0 +1,73 @@
+只读引用：experimentId=180001 conclusionId=180001
+
+### 真实 TiDB · Provenance 契约 —— PASS（8 项）
+  ✓ create(DIRECT) 全字段往返
+  ✓ UNIQUE(strategyVersionId)：重复 create → ALREADY_EXISTS
+  ✓ create(INHERITED) + 缺省 origin 归一为 DIRECT
+  ✓ getByStrategyVersionId / getBySourceCandidateId / listByStrategyId
+  ✓ 入参非法 → INVALID_INPUT
+  ✓ deleteByStrategyVersionId：删后再删 → NOT_FOUND
+  ✓ deleteByStrategyId：返回删除行数并把该策略清空（非级联，应用层调用）
+  ✓ StrategyProvenanceError 携带稳定错误码
+
+### 真实 TiDB · Candidate 来源字段契约 —— PASS（7 项）
+  ✓ create 写入 4 个来源字段并完整往返
+  ✓ 缺省来源字段归一为 null（不是 undefined）
+  ✓ list({ sourceDatasetVersionId }) 过滤生效
+  ✓ update 只改草图：来源快照与 status 不动
+  ✓ update 硬拒结构锚与来源快照（响亮失败，不静默忽略）
+  ✓ update 状态机守卫：非法迁移被拒、合法迁移通过（既有语义未改）
+  ✓ 自建自清：契约创建的候选已全部删除
+
+### 裸 SQL UNIQUE(strategyVersionId) 复核 —— PASS（重复插入错误码 ER_DUP_ENTRY）
+
+### InMemory · Provenance 契约 —— PASS（8 项）
+  ✓ create(DIRECT) 全字段往返
+  ✓ UNIQUE(strategyVersionId)：重复 create → ALREADY_EXISTS
+  ✓ create(INHERITED) + 缺省 origin 归一为 DIRECT
+  ✓ getByStrategyVersionId / getBySourceCandidateId / listByStrategyId
+  ✓ 入参非法 → INVALID_INPUT
+  ✓ deleteByStrategyVersionId：删后再删 → NOT_FOUND
+  ✓ deleteByStrategyId：返回删除行数并把该策略清空（非级联，应用层调用）
+  ✓ StrategyProvenanceError 携带稳定错误码
+
+### InMemory · Candidate 来源字段契约 —— PASS（7 项）
+  ✓ create 写入 4 个来源字段并完整往返
+  ✓ 缺省来源字段归一为 null（不是 undefined）
+  ✓ list({ sourceDatasetVersionId }) 过滤生效
+  ✓ update 只改草图：来源快照与 status 不动
+  ✓ update 硬拒结构锚与来源快照（响亮失败，不静默忽略）
+  ✓ update 状态机守卫：非法迁移被拒、合法迁移通过（既有语义未改）
+  ✓ 自建自清：契约创建的候选已全部删除
+
+### DB / InMemory 语义一致（Provenance）—— PASS
+
+### DB / InMemory 语义一致（Candidate 来源字段）—— PASS
+
+### 行数守恒（前后逐表比对）
+  ✓ research_experiment: 2 → 2
+  ✓ research_hypothesis: 0 → 0
+  ✓ research_run: 13 → 13
+  ✓ research_analysis: 248 → 248
+  ✓ research_analysis_condition: 630 → 630
+  ✓ research_analysis_metric: 0 → 0
+  ✓ research_result: 4299 → 4299
+  ✓ research_conclusion: 11 → 11
+  ✓ research_strategy_candidate: 9 → 9
+  ✓ research_artifact: 0 → 0
+  ✓ research_analysis_template: 0 → 0
+  ✓ research_analysis_template_item: 0 → 0
+  ✓ strategy_versions: 10 → 10
+  ✓ strategy_version_datasets: 8 → 8
+  ✓ strategy_parameters: 21 → 21
+  ✓ strategy_entry_rules: 16 → 16
+  ✓ strategy_exit_rules: 16 → 16
+  ✓ strategy_execution_rules: 8 → 8
+  ✓ strategy_research_provenance: 8 → 8
+  ✓ dataset_version: 2 → 2
+  ✓ 哨兵自建自清：provenance(c-0061-verify)=0 行、candidate(0061-%)=0 行
+
+{
+  "failures": [],
+  "pass": true
+}

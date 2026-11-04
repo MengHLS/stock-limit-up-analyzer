@@ -1,0 +1,37 @@
+-- RESEARCH-PLANNER-001（续）— Candidate 计划溯源列（纯增量 migration）
+--
+-- 目标：补齐任务书 §16 要求的 Candidate 完整 provenance。
+--
+-- ---------------------------------------------------------------------------
+-- 只做一件事
+--   research_strategy_candidate  +1 列 +1 索引  —— 来源 Research Plan id（软引用 research_plan.id）
+--
+-- provenance 六项对照（§16）与本表的落点：
+--   researchId         → experimentId（既有）
+--   researchRunId      → sourceResearchRunId（既有，RESEARCH-006.1）
+--   researchPlanId     → sourceResearchPlanId（**本次新增**）
+--   datasetVersionId   → sourceDatasetVersionId（既有，RESEARCH-006.1）
+--   findingIds         → sourceFindingIds（既有，RESEARCH-FINDING-001）
+--   conclusionId       → conclusionId（既有）
+--
+-- ---------------------------------------------------------------------------
+-- 🔴 为什么不塞进 `sourceTraceJson`
+--
+--   该表已确立的分工是「JSON 存**证据快照**，列存**可检索的谱系锚点**」。
+--   计划 id 需要被反查（「这份计划产出了哪些候选」「这条候选当时被裁掉了什么」），
+--   属于锚点而非快照 —— 塞进 JSON 会让这类反查退化成全表扫描 + JSON 解析。
+--
+-- 🔴 为什么可空且不 backfill
+--
+--   本列生效前的候选走的是人工 / 老路径，没有计划来源。如实置 NULL，
+--   不伪造一个「看起来像」的计划 id（与 sourceHypothesisId / sourceResearchRunId 同一纪律）。
+--
+-- 幂等：apply 脚本按 `-- @guard:` 先查 information_schema 再执行，重复运行无副作用。
+-- ===========================================================================
+
+-- @guard: column research_strategy_candidate.sourceResearchPlanId
+ALTER TABLE `research_strategy_candidate` ADD COLUMN `sourceResearchPlanId` bigint;
+--> statement-breakpoint
+-- @guard: index research_strategy_candidate.idx_research_candidate_plan
+CREATE INDEX `idx_research_candidate_plan` ON `research_strategy_candidate` (`sourceResearchPlanId`);
+--> statement-breakpoint

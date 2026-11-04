@@ -4,13 +4,22 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server/_core/index.ts",
+    "local": "tsx watch server/_core/index.ts",
+    "dev": "tsx watch server/_core/index.ts",
     "build": "vite build && esbuild server/_core/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "start": "NODE_ENV=production node dist/index.js",
+    "start": "node dist/index.js --production",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "drizzle-kit generate && drizzle-kit migrate"
+    "test:changed": "tsx scripts/testChanged.mts",
+    "docs:tests": "tsx scripts/genTestDocs.mts",
+    "backfill:daily": "tsx scripts/backfillDaily.ts",
+    "dataset:snapshot": "tsx scripts/datasetSnapshot.ts",
+    "dataset:build-pool-v6": "tsx scripts/buildFirstLimitPoolV6Dataset.mts --version v6",
+    "study:run-pool-rolling": "tsx scripts/runFirstLimitPoolRollingStudy.mts",
+    "db:push": "drizzle-kit generate && drizzle-kit migrate",
+    "strategy:verify-3570001": "tsx scripts/verifyStrategy3570001Regression.mts",
+    "strategy:verify-authoring": "tsx scripts/verifyStrategyAuthoringE2E.mts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",

@@ -1,0 +1,23 @@
+{
+  "poolConfig": {
+    "connectionLimit": null,
+    "maxIdle": null,
+    "idleTimeout": null,
+    "enableKeepAlive": null,
+    "connectTimeout": null
+  },
+  "poolState": {
+    "freeConnections": null,
+    "allConnections": null
+  },
+  "firstQuery": {
+    "ok": true,
+    "elapsedMs": 3264,
+    "rowCount": 5337
+  },
+  "afterIdle": {
+    "ok": true,
+    "elapsedMs": 2876,
+    "rowCount": 5337
+  }
+}

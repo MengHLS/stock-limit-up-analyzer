@@ -1,0 +1,31 @@
+--- research_experiment ---
+id, datasetVersionId, name, description, researchType, status, configJson, sampleCount, startedAt, completedAt, createdAt, updatedAt
+--- research_hypothesis ---
+id, experimentId, name, statement, nullHypothesis, alternativeHypothesis, status, conclusion, createdAt, updatedAt, runId, researchQuestion, conditionsJson, target, horizon, expectedDirection, expectedEffect, sourceFindingIdsJson, sourceConclusionId
+--- research_question ---
+id, datasetVersionId, questionText, researchType, createdBy, intentJson, status, experimentId, planId, runId, conclusionId, createdAt, updatedAt
+--- research_plan ---
+id, questionId, experimentId, runId, datasetVersionId, moduleKeysJson, planJson, plannedCount, materializedCount, droppedCount, maxAnalysisPerPlan, capApplied, generatedBy, status, notesJson, createdAt, updatedAt
+--- research_run ---
+id, experimentId, runNo, status, configJson, inputSnapshotJson, sampleCount, startedAt, completedAt, errorCode, errorMessage, createdAt, executionLogJson
+--- research_analysis ---
+id, runId, analysisType, name, target, configJson, status, createdAt, completedAt, planId, moduleKey, priority, purpose, requiredFlag
+--- research_result ---
+id, analysisId, resultType, dimensionJson, metricCode, metricValue, sampleCount, resultJson, createdAt
+--- research_finding ---
+id, experimentId, runId, primaryAnalysisId, findingType, title, summary, status, target, dimensionJson, sourceResultIdsJson, effectJson, sampleJson, horizonJson, stabilityJson, monotonicityJson, interactionJson, effectStrength, sampleStrength, stabilityStrength, horizonConsistency, monotonicityStrength, researchStrength, researchStrengthGrade, policyJson, limitationsJson, evidenceJson, fingerprint, createdAt, updatedAt
+--- research_conclusion ---
+id, experimentId, hypothesisId, conclusionType, title, conclusion, evidenceJson, confidence, status, createdAt, updatedAt, researchQuestion, evidenceSummary, findingIdsJson, limitationsJson, nextQuestionsJson
+--- research_strategy_candidate ---
+id, experimentId, conclusionId, strategyDefinitionId, name, description, entryRuleJson, filterRuleJson, exitRuleJson, riskRuleJson, parameterSpaceJson, status, createdAt, updatedAt, sourceDatasetVersionId, sourceResearchRunId, sourceTraceJson, sourceDatasetDivergenceReason, sourceHypothesisId, sourceFindingIdsJson, sourceResearchPlanId
+=== 外键锚点速查 ===
+research_experiment: (无跨表锚点列)
+research_hypothesis: experimentId / runId
+research_question: experimentId / runId / planId
+research_plan: experimentId / runId / questionId
+research_run: experimentId
+research_analysis: runId / planId
+research_result: analysisId
+research_finding: experimentId / runId
+research_conclusion: experimentId / hypothesisId
+research_strategy_candidate: experimentId

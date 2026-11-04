@@ -1,0 +1,339 @@
+{
+  "recentTradingDates": [
+    "2026-09-18",
+    "2026-09-17",
+    "2026-09-16",
+    "2026-09-15",
+    "2026-09-14",
+    "2026-09-11",
+    "2026-09-10",
+    "2026-09-09",
+    "2026-09-08",
+    "2026-09-07",
+    "2026-09-04",
+    "2026-09-03",
+    "2026-09-02",
+    "2026-09-01",
+    "2026-08-31"
+  ],
+  "records": [
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-08-25",
+      "limitUpTime": "13:32:49",
+      "boardCount": "6天3板",
+      "sector": "农业"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-08-26",
+      "limitUpTime": "10:53:24",
+      "boardCount": "7天4板",
+      "sector": "农业"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-08-27",
+      "limitUpTime": "09:30:06",
+      "boardCount": "8天5板",
+      "sector": "农林牧渔"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-08-28",
+      "limitUpTime": "09:25:00",
+      "boardCount": "9天6板",
+      "sector": "农林牧渔"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-08-31",
+      "limitUpTime": "09:25:00",
+      "boardCount": "10天7板",
+      "sector": "农林牧渔"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-09-01",
+      "limitUpTime": "09:34:27",
+      "boardCount": "11天8板",
+      "sector": "农林牧渔"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-09-07",
+      "limitUpTime": "14:37:54",
+      "boardCount": "15天9板",
+      "sector": "农林牧渔"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-09-16",
+      "limitUpTime": "09:40:23",
+      "boardCount": "1",
+      "sector": "大农业"
+    },
+    {
+      "stockName": "万向德农",
+      "stockCode": "600371.SH",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "13:09:13",
+      "boardCount": "2天2板",
+      "sector": "大农业"
+    },
+    {
+      "stockName": "世联行",
+      "stockCode": "002285.SZ",
+      "limitUpDate": "2026-09-08",
+      "limitUpTime": "14:56:24",
+      "boardCount": "1",
+      "sector": "地产"
+    },
+    {
+      "stockName": "世联行",
+      "stockCode": "002285.SZ",
+      "limitUpDate": "2026-09-16",
+      "limitUpTime": "13:34:39",
+      "boardCount": "1",
+      "sector": "其他"
+    },
+    {
+      "stockName": "世联行",
+      "stockCode": "002285.SZ",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "10:21:18",
+      "boardCount": "2天2板",
+      "sector": "其他"
+    },
+    {
+      "stockName": "世联行",
+      "stockCode": "002285.SZ",
+      "limitUpDate": "2026-09-18",
+      "limitUpTime": "13:25:06",
+      "boardCount": "3天3板",
+      "sector": "房地产"
+    },
+    {
+      "stockName": "中晶科技",
+      "stockCode": "003026.SZ",
+      "limitUpDate": "2026-09-15",
+      "limitUpTime": "13:19:24",
+      "boardCount": "1",
+      "sector": "半导体"
+    },
+    {
+      "stockName": "中晶科技",
+      "stockCode": "003026.SZ",
+      "limitUpDate": "2026-09-16",
+      "limitUpTime": "09:34:48",
+      "boardCount": "2天2板",
+      "sector": "半导体"
+    },
+    {
+      "stockName": "中晶科技",
+      "stockCode": "003026.SZ",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "09:59:39",
+      "boardCount": "3天3板",
+      "sector": "半导体"
+    },
+    {
+      "stockName": "共达电声",
+      "stockCode": "002655.SZ",
+      "limitUpDate": "2026-08-21",
+      "limitUpTime": "10:04:03",
+      "boardCount": "1",
+      "sector": "光通信"
+    },
+    {
+      "stockName": "共达电声",
+      "stockCode": "002655.SZ",
+      "limitUpDate": "2026-09-16",
+      "limitUpTime": "13:34:18",
+      "boardCount": "1",
+      "sector": "光通信"
+    },
+    {
+      "stockName": "共达电声",
+      "stockCode": "002655.SZ",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "10:28:27",
+      "boardCount": "2天2板",
+      "sector": "光通信"
+    },
+    {
+      "stockName": "内蒙新华",
+      "stockCode": "603230.SH",
+      "limitUpDate": "2026-09-16",
+      "limitUpTime": "09:38:25",
+      "boardCount": "1",
+      "sector": "其他"
+    },
+    {
+      "stockName": "内蒙新华",
+      "stockCode": "603230.SH",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "09:25:00",
+      "boardCount": "2天2板",
+      "sector": "传媒"
+    },
+    {
+      "stockName": "内蒙新华",
+      "stockCode": "603230.SH",
+      "limitUpDate": "2026-09-18",
+      "limitUpTime": "14:13:07",
+      "boardCount": "3天3板",
+      "sector": "传媒"
+    },
+    {
+      "stockName": "华瓷股份",
+      "stockCode": "001216.SZ",
+      "limitUpDate": "2026-09-15",
+      "limitUpTime": "09:30:15",
+      "boardCount": "1",
+      "sector": "AI硬件"
+    },
+    {
+      "stockName": "华瓷股份",
+      "stockCode": "001216.SZ",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "09:30:36",
+      "boardCount": "3天3板",
+      "sector": "其他"
+    },
+    {
+      "stockName": "华瓷股份",
+      "stockCode": "001216.SZ",
+      "limitUpDate": "2026-09-18",
+      "limitUpTime": "09:56:39",
+      "boardCount": "4天4板",
+      "sector": "AI硬件"
+    },
+    {
+      "stockName": "澳弘电子",
+      "stockCode": "605058.SH",
+      "limitUpDate": "2026-09-11",
+      "limitUpTime": "10:20:17",
+      "boardCount": "1",
+      "sector": "PCB"
+    },
+    {
+      "stockName": "澳弘电子",
+      "stockCode": "605058.SH",
+      "limitUpDate": "2026-09-14",
+      "limitUpTime": "13:38:18",
+      "boardCount": "2天2板",
+      "sector": "PCB"
+    },
+    {
+      "stockName": "澳弘电子",
+      "stockCode": "605058.SH",
+      "limitUpDate": "2026-09-15",
+      "limitUpTime": "14:41:47",
+      "boardCount": "3天3板",
+      "sector": "PCB"
+    },
+    {
+      "stockName": "澳弘电子",
+      "stockCode": "605058.SH",
+      "limitUpDate": "2026-09-16",
+      "limitUpTime": "09:37:54",
+      "boardCount": "4天4板",
+      "sector": "PCB"
+    },
+    {
+      "stockName": "澳弘电子",
+      "stockCode": "605058.SH",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "13:22:40",
+      "boardCount": "5天5板",
+      "sector": "PCB"
+    },
+    {
+      "stockName": "经纬股份",
+      "stockCode": "301390.SZ",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "09:25:00",
+      "boardCount": "1",
+      "sector": "公告"
+    },
+    {
+      "stockName": "经纬股份",
+      "stockCode": "301390.SZ",
+      "limitUpDate": "2026-09-18",
+      "limitUpTime": "09:25:00",
+      "boardCount": "2天2板",
+      "sector": "公告"
+    },
+    {
+      "stockName": "锡华科技",
+      "stockCode": "603248.SH",
+      "limitUpDate": "2026-09-15",
+      "limitUpTime": "14:44:32",
+      "boardCount": "1",
+      "sector": "风电"
+    },
+    {
+      "stockName": "锡华科技",
+      "stockCode": "603248.SH",
+      "limitUpDate": "2026-09-17",
+      "limitUpTime": "14:02:57",
+      "boardCount": "3天3板",
+      "sector": "风电"
+    },
+    {
+      "stockName": "锡华科技",
+      "stockCode": "603248.SH",
+      "limitUpDate": "2026-09-18",
+      "limitUpTime": "09:52:55",
+      "boardCount": "4天4板",
+      "sector": "风电"
+    }
+  ],
+  "boardCountOn0917": [
+    {
+      "stockName": "万向德农",
+      "boardCount": "2天2板"
+    },
+    {
+      "stockName": "世联行",
+      "boardCount": "2天2板"
+    },
+    {
+      "stockName": "中晶科技",
+      "boardCount": "3天3板"
+    },
+    {
+      "stockName": "共达电声",
+      "boardCount": "2天2板"
+    },
+    {
+      "stockName": "内蒙新华",
+      "boardCount": "2天2板"
+    },
+    {
+      "stockName": "华瓷股份",
+      "boardCount": "3天3板"
+    },
+    {
+      "stockName": "澳弘电子",
+      "boardCount": "5天5板"
+    },
+    {
+      "stockName": "经纬股份",
+      "boardCount": "1"
+    },
+    {
+      "stockName": "锡华科技",
+      "boardCount": "3天3板"
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+== 全仓原生 select 表面 / 选项配色取证（夜间模式）== 2026-09-19T15:24:10.204Z
+BASE=http://127.0.0.1:3000 BROWSER=C:\Program Files\Google\Chrome\Application\chrome.exe PORT=22861 ROUTES=/,/market,/operation-logs,/backtest,/paper-trading,/review-workbench
+
+--- / ---
+  暗色主题 = true，可见 select = 1
+    #0 选项 1873 个 · 自身底 oklch(0.185 0.004 286)（底来自 select）· 文字 oklch(0.92 0.002 286)· 对比度 14.74
+        选项首 = {"text":"2026-09-18","bg":"oklch(0.255 0.005 286)","bgA":1,"color":"oklch(0.93 0.002 286)","contrast":12.93}  末 = {"text":"2019-01-02","bg":"oklch(0.255 0.005 286)","bgA":1,"color":"oklch(0.93 0.002 286)","contrast":12.93}
+  PASS  /：每个 select 的表面都由作者控制（不透明底），或显式写了 bg-transparent  → 0:oklch(0.185 0.004 286)
+  PASS  /：每个 select 的文字对比度 ≥ 4.5  → all ≥ 4.5
+  PASS  /：选项自带不透明底 + 浅/深字（弹层不依赖平台默认色），对比度 ≥ 4.5  → 2 个选项采样全过（样例 {"text":"2026-09-18","bg":"oklch(0.255 0.005 286)","bgA":1,"color":"oklch(0.93 0.002 286)","contrast":12.93}）
+
+--- /market ---
+  SKIP  /market 可量  → 等待 25000ms 内未出现 select
+
+--- /operation-logs ---
+  暗色主题 = true，可见 select = 2
+    #0 选项 3 个 · 自身底 oklch(0.185 0.004 286)（底来自 select）· 文字 oklch(0.92 0.002 286)· 对比度 14.74
+        选项首 = {"text":"全部类型","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null}  末 = {"text":"日期数据刷新","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null}
+    #1 选项 5 个 · 自身底 oklch(0.185 0.004 286)（底来自 select）· 文字 oklch(0.92 0.002 286)· 对比度 14.74
+        选项首 = {"text":"全部状态","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null}  末 = {"text":"失败","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null}
+  PASS  /operation-logs：每个 select 的表面都由作者控制（不透明底），或显式写了 bg-transparent  → 0:oklch(0.185 0.004 286) | 1:oklch(0.185 0.004 286)
+  PASS  /operation-logs：每个 select 的文字对比度 ≥ 4.5  → all ≥ 4.5
+  FAIL  /operation-logs：选项自带不透明底 + 浅/深字（弹层不依赖平台默认色），对比度 ≥ 4.5  → [{"text":"全部类型","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null},{"text":"日期数据刷新","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null},{"text":"全部状态","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null},{"text":"失败","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.92 0.002 286)","contrast":null}]
+
+--- /backtest ---
+  暗色主题 = true，可见 select = 2
+    #0 选项 3 个 · 自身底 rgba(0, 0, 0, 0)（底来自 section）· 文字 oklch(0.79 0.011 286)· 对比度 8.42
+        选项首 = {"text":"全部","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}  末 = {"text":"未入场","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}
+    #1 选项 327 个 · 自身底 rgba(0, 0, 0, 0)（底来自 section）· 文字 oklch(0.79 0.011 286)· 对比度 8.42
+        选项首 = {"text":"全部","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}  末 = {"text":"达到最多续持5个交易日","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}
+  FAIL  /backtest：每个 select 的表面都由作者控制（不透明底），或显式写了 bg-transparent  → 0:rgba(0, 0, 0, 0) | 1:rgba(0, 0, 0, 0)
+  PASS  /backtest：每个 select 的文字对比度 ≥ 4.5  → all ≥ 4.5
+  FAIL  /backtest：选项自带不透明底 + 浅/深字（弹层不依赖平台默认色），对比度 ≥ 4.5  → [{"text":"全部","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null},{"text":"未入场","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null},{"text":"全部","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null},{"text":"达到最多续持5个交易日","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}]
+
+--- /paper-trading ---
+  暗色主题 = true，可见 select = 1
+    #0 选项 5 个 · 自身底 oklch(0.245 0.005 286)（底来自 select）· 文字 oklch(0.79 0.011 286)· 对比度 8.42
+        选项首 = {"text":"原始策略","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}  末 = {"text":"质量门控策略","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}
+  PASS  /paper-trading：每个 select 的表面都由作者控制（不透明底），或显式写了 bg-transparent  → 0:oklch(0.245 0.005 286)
+  PASS  /paper-trading：每个 select 的文字对比度 ≥ 4.5  → all ≥ 4.5
+  FAIL  /paper-trading：选项自带不透明底 + 浅/深字（弹层不依赖平台默认色），对比度 ≥ 4.5  → [{"text":"原始策略","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null},{"text":"质量门控策略","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.79 0.011 286)","contrast":null}]
+
+--- /review-workbench ---
+  暗色主题 = true，可见 select = 2
+    #0 选项 2 个 · 自身底 oklch(0.185 0.004 286)（底来自 select）· 文字 oklch(0.715 0.008 286)· 对比度 7.37
+        选项首 = {"text":"buy","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null}  末 = {"text":"sell","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null}
+    #1 选项 2 个 · 自身底 oklch(0.185 0.004 286)（底来自 select）· 文字 oklch(0.715 0.008 286)· 对比度 7.37
+        选项首 = {"text":"已成交","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null}  末 = {"text":"未成交","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null}
+  PASS  /review-workbench：每个 select 的表面都由作者控制（不透明底），或显式写了 bg-transparent  → 0:oklch(0.185 0.004 286) | 1:oklch(0.185 0.004 286)
+  PASS  /review-workbench：每个 select 的文字对比度 ≥ 4.5  → all ≥ 4.5
+  FAIL  /review-workbench：选项自带不透明底 + 浅/深字（弹层不依赖平台默认色），对比度 ≥ 4.5  → [{"text":"buy","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null},{"text":"sell","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null},{"text":"已成交","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null},{"text":"未成交","bg":"rgba(0, 0, 0, 0)","bgA":0,"color":"oklch(0.715 0.008 286)","contrast":null}]
+
+=== 覆盖统计：可见 select 合计 8 个（其中显式 bg-transparent 0 个）· 选项采样 16 个 ===
+⚠️ 覆盖边界：`<select>` 共 47 处 / 16 个文件，其中 30 处位于 research / strategy / parameterSearch / walkForward
+   等页面的**面板或弹窗内部**，需逐级操作才可达 —— 本轮按路由可达的 6 条页面取证；
+   组件内的其余 select 由同一条 @layer base 规则覆盖（规则是全局的，与是否被本轮走到无关）。
+
+=== 汇总：PASS=10 FAIL=5 SKIP=1 ===

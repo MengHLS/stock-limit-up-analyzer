@@ -1,0 +1,660 @@
+/**
+ * RESEARCH-EXPERIMENT-001 — Experiment Runner（规格 §12）。
+ *
+ * ## 边界（本文件**不**理解任何实验业务）
+ *
+ * ```
+ * Runner:      load / validate / resolve dataset / validate parameters / execute
+ *              / capture result / capture error / return execution metadata
+ * Experiment:  「具体研究什么、怎么算」（`research-experiments/**` 里的 run()）
+ * ```
+ *
+ * ## 两类失败，两条不同的出口（这条分界是刻意的）
+ *
+ * | 何时 | 例子 | 行为 |
+ * | --- | --- | --- |
+ * | **执行前**就能判定 | 实验未注册 / 参数越界 / 版本不是 READY / 相对日超视界 | **抛领域错误**（→ tRPC 错误，`[CODE] …`） |
+ * | **执行中**才发生 | `run()` 抛异常 / 结果不符契约 | **返回 `runStatus: FAILED` 的 outcome**（`result: null` + `error` 如实回报） |
+ *
+ * 理由：前者是「这次请求本身不成立」，调用方应当看到参数化错误；
+ * 后者是「请求成立但这次跑失败了」，属于**执行事实**，页面上要能同时看到
+ * 「用了哪个 Dataset 版本 / 什么参数 / 跑了多久 / 失败码」。
+ */
+
+import {
+  experimentResultEnvelopeSchema,
+  type ExperimentConfirmatoryGate,
+  type ExperimentAuxiliaryDatasetRequirement,
+  type ExperimentDatasetBinding,
+  type ExperimentDatasetAccess,
+  type ExperimentDescriptor,
+  type ExperimentEvaluationWindow,
+  type ExperimentArtifactFileSpec,
+  type ExperimentResultEnvelope,
+  type ExperimentParameterValues,
+  type ExperimentProtocolContext,
+  type ExperimentRunOutcome,
+} from "@shared/researchExperimentsContracts";
+import { ExperimentError, toExperimentError } from "./errors";
+import { computeExperimentCodeDigest } from "./codeDigest";
+import { validateConfirmatoryGate } from "./protocol";
+import { assertSafeRelativeName } from "../artifactStorage/objectKey";
+import type { ExperimentDatasetPort } from "./datasetPort";
+import {
+  assertRequirementCodeMatches,
+  assertRequirementRelativeDaysWithinHorizon,
+  assertDatasetCodeMatches,
+  assertRelativeDaysWithinHorizon,
+  assertVersionReady,
+} from "./datasetPort";
+import type { ExperimentRegistry } from "./registry";
+import type { ExperimentDefinition, ExperimentResultPayload, ExperimentRunContext } from "./types";
+
+/** Runner 入参。 */
+export interface ExperimentRunRequest {
+  experimentId: string;
+  datasetVersionId: number;
+  parameters?: ExperimentParameterValues;
+  /** alias → auxiliary datasetVersionId。 */
+  auxiliaryDatasetVersionIds?: Readonly<Record<string, number>>;
+  /** 平台级事件日期过滤窗口。 */
+  evaluationWindow?: ExperimentEvaluationWindow | null;
+  /** 平台解析后的研究协议。 */
+  protocol?: ExperimentProtocolContext;
+}
+
+/** Runner 依赖（一律注入 ⇒ 单测可用内存替身，不必连真库）。 */
+export interface ExperimentRunnerDeps {
+  registry: ExperimentRegistry;
+  datasetPort: ExperimentDatasetPort;
+  /**
+   * COMPOSITE-RUNNER-DATASET-PROVIDER-001 —— 组合执行面的数据装配端口。
+   *
+   * 仅在实验 descriptor 声明 `executionSurface: "COMPOSITE_PORTFOLIO"` 时被调用；
+   * 未注入而实验声明了该 surface ⇒ 响亮失败（不静默降级成「没有数据」）。
+   */
+  compositeDatasetProvider?: import("./compositeDatasetProvider").ExperimentCompositeDatasetProvider;
+  /** 可注入的时钟（默认 `() => new Date()`）；测试用它固定耗时。 */
+  now?: () => Date;
+}
+
+export interface ExperimentRunner {
+  /** 已注册实验的描述符列表（升序）。 */
+  listDescriptors(): ExperimentDescriptor[];
+  /** 取描述符；不存在 → 抛 `EXPERIMENT_NOT_FOUND`。 */
+  requireDescriptor(experimentId: string): ExperimentDescriptor;
+  /** 参数校验 + 默认值归并（**唯一**实现；router 与 run 共用）。 */
+  resolveParameters(descriptor: ExperimentDescriptor, provided?: ExperimentParameterValues): ExperimentParameterValues;
+  /** 只做「执行前」的全部校验（含 Dataset 解析）；不合规即抛。 */
+  prepare(request: ExperimentRunRequest): Promise<PreparedExperimentRun>;
+  /** 完整执行一次实验（只返回可下发的 outcome）。 */
+  run(request: ExperimentRunRequest): Promise<ExperimentRunOutcome>;
+  /**
+   * 完整执行一次实验，**并把实验声明的文件产物一起交回**（RESEARCH-EXPERIMENT-004）。
+   *
+   * 🔴 与 `run()` 的分工是刻意的（规格 §17）：`outcome` 是发给浏览器的执行事实，
+   *    里面**没有**产物字节；产物字节只经 `runDetailed().artifactFiles` 交给服务层去落对象存储。
+   *    `run()` 就是 `(await runDetailed()).outcome`（单一执行路径，不复制一份逻辑）。
+   */
+  runDetailed(request: ExperimentRunRequest): Promise<ExperimentRunDetailedResult>;
+}
+
+/** 执行结果：可下发的 outcome + （仅服务端可见的）文件产物。 */
+export interface ExperimentRunDetailedResult {
+  outcome: ExperimentRunOutcome;
+  artifactFiles: readonly ExperimentArtifactFileSpec[];
+}
+
+/** 执行前的准备结果（页面上「即将用什么跑」的那一组事实）。 */
+export interface PreparedExperimentRun {
+  definition: ExperimentDefinition;
+  descriptor: ExperimentDescriptor;
+  /** 注册到当前进程的实验定义代码指纹。 */
+  codeDigest: string;
+  resolvedParameters: ExperimentParameterValues;
+  evaluationWindow: ExperimentEvaluationWindow | null;
+  /** 已解析的 Dataset 事实（避免 `run()` 里再解析一次，浪费一次跨境查询）。 */
+  facts: import("./types").ExperimentDatasetFacts;
+  auxiliary: ReadonlyArray<{
+    requirement: ExperimentAuxiliaryDatasetRequirement;
+    facts: import("./types").ExperimentDatasetFacts;
+  }>;
+  datasetBindings: ExperimentDatasetBinding[];
+}
+
+// ---------------------------------------------------------------------------
+// 参数校验 / 默认值归并
+// ---------------------------------------------------------------------------
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * 参数校验 + 默认值归并。
+ *
+ * 🔴 前端表单的校验**不是权威** —— 后端在这里独立重做一遍（规格 §17 的 ux 纪律）。
+ * 三条硬规则：
+ *   1. **未知参数键一律拒绝**（打错参数名不该静默无效）；
+ *   2. 缺必填 ⇒ 拒绝（**不用 0 / 空串兜底**）；
+ *   3. 越界 / 类型不符 ⇒ 拒绝（**不夹取** —— 夹取等于悄悄改窄实验）。
+ */
+export function resolveExperimentParameters(
+  descriptor: ExperimentDescriptor,
+  provided?: ExperimentParameterValues,
+): ExperimentParameterValues {
+  const supplied = provided ?? {};
+  const declaredCodes = new Set(descriptor.parameters.map((p) => p.code));
+
+  for (const key of Object.keys(supplied)) {
+    if (!declaredCodes.has(key)) {
+      throw new ExperimentError(
+        "EXPERIMENT_PARAMETER_INVALID",
+        `实验 "${descriptor.id}" 不存在参数 "${key}"（已声明：[${[...declaredCodes].sort().join(", ")}]）` +
+          `—— 打错的参数名会被静默忽略，因此在此拒绝`,
+        { key, declared: [...declaredCodes] },
+      );
+    }
+  }
+
+  const resolved: ExperimentParameterValues = {};
+  for (const param of descriptor.parameters) {
+    const raw = Object.prototype.hasOwnProperty.call(supplied, param.code)
+      ? supplied[param.code]
+      : param.defaultValue;
+    const required = param.required === true;
+
+    if (raw === undefined || raw === null) {
+      if (required) {
+        throw new ExperimentError(
+          "EXPERIMENT_PARAMETER_INVALID",
+          `参数 "${param.code}"（${param.label}）为必填，但本次没有提供`,
+          { code: param.code },
+        );
+      }
+      // 非必填参数在注册时已保证有 defaultValue ⇒ 回落到它。
+      resolved[param.code] = param.defaultValue as never;
+      continue;
+    }
+
+    const bounds = param.bounds ?? null;
+    const assertBounds = (value: number, label: string): void => {
+      if (!bounds) return;
+      const { min, max } = bounds;
+      if (min !== null && min !== undefined && value < min) {
+        throw new ExperimentError(
+          "EXPERIMENT_PARAMETER_INVALID",
+          `参数 "${param.code}"${label} = ${value} 小于下界 ${min}（**不夹取**）`,
+          { code: param.code, value, min },
+        );
+      }
+      if (max !== null && max !== undefined && value > max) {
+        throw new ExperimentError(
+          "EXPERIMENT_PARAMETER_INVALID",
+          `参数 "${param.code}"${label} = ${value} 大于上界 ${max}（**不夹取**）`,
+          { code: param.code, value, max },
+        );
+      }
+    };
+
+    switch (param.kind) {
+      case "INT": {
+        if (!isFiniteNumber(raw) || !Number.isInteger(raw)) {
+          throw new ExperimentError(
+            "EXPERIMENT_PARAMETER_INVALID",
+            `参数 "${param.code}" 必须是整数，实际 ${JSON.stringify(raw)}`,
+            { code: param.code, value: raw },
+          );
+        }
+        assertBounds(raw, "");
+        resolved[param.code] = raw;
+        break;
+      }
+      case "NUMBER": {
+        if (!isFiniteNumber(raw)) {
+          throw new ExperimentError(
+            "EXPERIMENT_PARAMETER_INVALID",
+            `参数 "${param.code}" 必须是有限数值，实际 ${JSON.stringify(raw)}`,
+            { code: param.code, value: raw },
+          );
+        }
+        assertBounds(raw, "");
+        resolved[param.code] = raw;
+        break;
+      }
+      case "BOOLEAN": {
+        if (typeof raw !== "boolean") {
+          throw new ExperimentError(
+            "EXPERIMENT_PARAMETER_INVALID",
+            `参数 "${param.code}" 必须是布尔值，实际 ${JSON.stringify(raw)}`,
+            { code: param.code, value: raw },
+          );
+        }
+        resolved[param.code] = raw;
+        break;
+      }
+      case "ENUM": {
+        const allowed = param.allowedValues ?? [];
+        if (typeof raw !== "string" || !allowed.includes(raw)) {
+          throw new ExperimentError(
+            "EXPERIMENT_PARAMETER_INVALID",
+            `参数 "${param.code}" 必须是 [${allowed.join(", ")}] 之一，实际 ${JSON.stringify(raw)}`,
+            { code: param.code, value: raw, allowed },
+          );
+        }
+        resolved[param.code] = raw;
+        break;
+      }
+      case "INT_LIST": {
+        if (!Array.isArray(raw) || raw.some((v) => !isFiniteNumber(v) || !Number.isInteger(v))) {
+          throw new ExperimentError(
+            "EXPERIMENT_PARAMETER_INVALID",
+            `参数 "${param.code}" 必须是整数数组，实际 ${JSON.stringify(raw)}`,
+            { code: param.code, value: raw },
+          );
+        }
+        if (raw.length === 0) {
+          throw new ExperimentError(
+            "EXPERIMENT_PARAMETER_INVALID",
+            `参数 "${param.code}" 不得为空数组`,
+            { code: param.code },
+          );
+        }
+        for (const value of raw) assertBounds(value, " 的元素");
+        resolved[param.code] = raw;
+        break;
+      }
+      default: {
+        // 穷尽性保护：新增 kind 而未在此处理 ⇒ 响亮拒绝（不静默放过）。
+        throw new ExperimentError(
+          "EXPERIMENT_METADATA_INVALID",
+          `参数 "${param.code}" 的种类 ${String(param.kind)} 未被 runner 支持`,
+          { code: param.code, kind: param.kind },
+        );
+      }
+    }
+  }
+  return resolved;
+}
+
+// ---------------------------------------------------------------------------
+// 结果校验
+// ---------------------------------------------------------------------------
+
+/**
+ * 结果信封的一致性校验（**结构诚实性**）。
+ *
+ * 除了 zod 形状校验，额外钉两条账目相等的断言 —— 它们是「样本量为什么是这个数」
+ * 的唯一诊断线索，账不平就意味着有样本被静默吞掉：
+ *   1. `eligibleCount + excludedCount === candidateCount`；
+ *   2. `Σ excludedByReason === excludedCount`。
+ */
+export function validateExperimentResultEnvelope(
+  envelope: ExperimentResultEnvelope,
+  experimentId: string,
+): void {
+  const parsed = experimentResultEnvelopeSchema.safeParse(envelope);
+  if (!parsed.success) {
+    throw new ExperimentError(
+      "EXPERIMENT_RESULT_INVALID",
+      `实验 "${experimentId}" 的结果不符合信封契约：${parsed.error.issues
+        .slice(0, 5)
+        .map((i) => `${i.path.join(".")} ${i.message}`)
+        .join("；")}`,
+      { issues: parsed.error.issues.slice(0, 20) },
+    );
+  }
+  const summary = parsed.data.sampleSummary;
+  if (summary.eligibleCount + summary.excludedCount !== summary.candidateCount) {
+    throw new ExperimentError(
+      "EXPERIMENT_RESULT_INVALID",
+      `实验 "${experimentId}" 的样本账不平：eligible(${summary.eligibleCount}) + ` +
+        `excluded(${summary.excludedCount}) ≠ candidate(${summary.candidateCount})`,
+      { summary },
+    );
+  }
+  const reasonSum = Object.values(summary.excludedByReason).reduce((a, b) => a + b, 0);
+  if (reasonSum !== summary.excludedCount) {
+    throw new ExperimentError(
+      "EXPERIMENT_RESULT_INVALID",
+      `实验 "${experimentId}" 的剔除原因合计 ${reasonSum} ≠ excludedCount ${summary.excludedCount}` +
+        `（剔除原因必须逐项如实，否则「为什么样本变少」无从诊断）`,
+      { reasonSum, summary },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Runner
+// ---------------------------------------------------------------------------
+
+/** 运行日志上限（防止实验写出无界日志撑爆响应体）。 */
+export const MAX_EXPERIMENT_LOG_LINES = 200;
+
+/**
+ * 构造 Runner（纯注入，无隐藏单例）。
+ */
+export function createExperimentRunner(deps: ExperimentRunnerDeps): ExperimentRunner {
+  const { registry, datasetPort } = deps;
+  const now = deps.now ?? (() => new Date());
+
+  function requireDescriptor(experimentId: string): ExperimentDescriptor {
+    return registry.require(experimentId).descriptor;
+  }
+
+  async function prepare(request: ExperimentRunRequest): Promise<PreparedExperimentRun> {
+    // 1) load（未注册 ⇒ EXPERIMENT_NOT_FOUND）
+    const definition = registry.require(request.experimentId);
+    const descriptor = definition.descriptor;
+
+    // 2) validate parameters（含默认值归并）
+    const resolvedParameters = resolveExperimentParameters(descriptor, request.parameters);
+
+    // 3) resolve dataset
+    const facts = await datasetPort.getVersionFacts(request.datasetVersionId);
+    if (facts === null) {
+      throw new ExperimentError(
+        "EXPERIMENT_DATASET_VERSION_NOT_FOUND",
+        `数据集版本 ${request.datasetVersionId} 不存在`,
+        { datasetVersionId: request.datasetVersionId },
+      );
+    }
+    assertVersionReady(facts);
+    assertDatasetCodeMatches(descriptor, facts);
+    assertRelativeDaysWithinHorizon(descriptor, facts);
+
+    const auxiliaryRequirements = descriptor.auxiliaryDatasetRequirements ?? [];
+    const auxiliary: Array<PreparedExperimentRun["auxiliary"][number]> = [];
+    for (const item of auxiliaryRequirements) {
+      const versionId = request.auxiliaryDatasetVersionIds?.[item.alias];
+      if (versionId === undefined) {
+        throw new ExperimentError(
+          "EXPERIMENT_DATASET_VERSION_NOT_FOUND",
+          `辅助 Dataset "${item.alias}" 缺少 datasetVersionId`,
+          { alias: item.alias, datasetCode: item.requirement.datasetCode },
+        );
+      }
+      const auxiliaryFacts = await datasetPort.getVersionFacts(versionId);
+      if (auxiliaryFacts === null) {
+        throw new ExperimentError(
+          "EXPERIMENT_DATASET_VERSION_NOT_FOUND",
+          `辅助 Dataset 版本 ${versionId} 不存在`,
+          { alias: item.alias, datasetVersionId: versionId },
+        );
+      }
+      assertVersionReady(auxiliaryFacts);
+      assertRequirementCodeMatches(descriptor.id, item.requirement, auxiliaryFacts);
+      assertRequirementRelativeDaysWithinHorizon(
+        descriptor.id,
+        item.requirement,
+        auxiliaryFacts,
+      );
+      auxiliary.push({ requirement: item, facts: auxiliaryFacts });
+    }
+
+    const datasetBindings: ExperimentDatasetBinding[] = [
+      {
+        alias: "primary",
+        datasetVersionId: facts.datasetVersionId,
+        datasetCode: facts.datasetCode,
+        datasetVersionLabel: facts.datasetVersionLabel,
+      },
+      ...auxiliary.map((item) => ({
+        alias: item.requirement.alias,
+        datasetVersionId: item.facts.datasetVersionId,
+        datasetCode: item.facts.datasetCode,
+        datasetVersionLabel: item.facts.datasetVersionLabel,
+      })),
+    ];
+
+    return {
+      definition,
+      descriptor,
+      codeDigest: computeExperimentCodeDigest(definition),
+      resolvedParameters,
+      evaluationWindow: request.evaluationWindow ?? null,
+      facts,
+      auxiliary,
+      datasetBindings,
+    };
+  }
+
+  return {
+    listDescriptors() {
+      return registry.list().map((d) => d.descriptor);
+    },
+
+    requireDescriptor,
+
+    resolveParameters(descriptor, provided) {
+      return resolveExperimentParameters(descriptor, provided);
+    },
+
+    prepare,
+
+    async run(request: ExperimentRunRequest): Promise<ExperimentRunOutcome> {
+      return (await executeDetailed(request)).outcome;
+    },
+
+    async runDetailed(request: ExperimentRunRequest): Promise<ExperimentRunDetailedResult> {
+      return executeDetailed(request);
+    },
+  };
+
+  /**
+   * 执行主体（`run` / `runDetailed` 共用，**只有一份**）。
+   *
+   * 把「声明文件产物」的收集器也放在这里：它需要与 `logs` 同样的**执行期**边界 ——
+   * 名字非法要按「实验写错了」处理（当场抛领域错误），而不是静默丢弃那个产物。
+   */
+  async function executeDetailed(request: ExperimentRunRequest): Promise<ExperimentRunDetailedResult> {
+      // ---- 执行前：不合规即抛（调用方看到的是参数化领域错误）----
+      const prepared = await prepare(request);
+      const {
+        definition,
+        descriptor,
+        codeDigest,
+        resolvedParameters,
+        evaluationWindow,
+        facts,
+      } = prepared;
+
+      const { access, stats, freezeSelection } = datasetPort.createAccess({
+        descriptor,
+        facts,
+        evaluationWindow,
+      });
+      const datasets: Record<string, ExperimentDatasetAccess> = {
+        primary: access,
+      };
+      for (const item of prepared.auxiliary) {
+        datasets[item.requirement.alias] = datasetPort.createAccess({
+          descriptor,
+          requirement: item.requirement.requirement,
+          facts: item.facts,
+          evaluationWindow,
+        }).access;
+      }
+      const logs: string[] = [];
+      const artifactFiles: ExperimentArtifactFileSpec[] = [];
+      const context: ExperimentRunContext = {
+        descriptor,
+        codeDigest,
+        protocol: request.protocol ?? null,
+        parameters: resolvedParameters,
+        dataset: access,
+        datasets,
+        freezeSelection: (eventIds) => freezeSelection(eventIds),
+        log: (message: string) => {
+          if (logs.length < MAX_EXPERIMENT_LOG_LINES) logs.push(message);
+        },
+        artifact: (spec: ExperimentArtifactFileSpec) => {
+          // 🔴 名字在这里就校验（唯一权威 = `artifactStorage/objectKey.ts`）：
+          //    非法名字绝不能等到上传阶段才炸，那时实验结果已经算完了。
+          let safeName: string;
+          try {
+            safeName = assertSafeRelativeName(spec.name);
+          } catch (error) {
+            throw new ExperimentError(
+              "EXPERIMENT_ARTIFACT_KEY_INVALID",
+              `实验 "${descriptor.id}" 声明的产物名字非法：${(error as Error).message}`,
+              { name: spec.name, role: spec.role },
+            );
+          }
+          artifactFiles.push({ ...spec, name: safeName });
+        },
+      };
+
+      // COMPOSITE-RUNNER-DATASET-PROVIDER-001：仅对声明了 COMPOSITE_PORTFOLIO 的实验
+      // 注入组合执行面（数据装配在 server 侧完成；实验不碰 DB）。
+      if (descriptor.executionSurface === "COMPOSITE_PORTFOLIO") {
+        const provider = deps.compositeDatasetProvider;
+        if (provider === undefined) {
+          throw new ExperimentError(
+            "EXPERIMENT_COMPOSITE_PROVIDER_UNAVAILABLE",
+            `实验 "${descriptor.id}" 声明 executionSurface=COMPOSITE_PORTFOLIO，`
+              + "但装配未注入 compositeDatasetProvider（拒绝静默降级）",
+            { experimentId: descriptor.id },
+          );
+        }
+        const baselineDatasetVersionId = descriptor.compositeExecution?.baselineDatasetVersionId;
+        if (baselineDatasetVersionId === undefined) {
+          throw new ExperimentError(
+            "EXPERIMENT_COMPOSITE_BASELINE_MISSING",
+            `实验 "${descriptor.id}" 声明 COMPOSITE_PORTFOLIO，但未声明 compositeExecution.baselineDatasetVersionId`,
+            { experimentId: descriptor.id },
+          );
+        }
+        (context as { composite?: unknown }).composite = await provider.build({
+          baselineDatasetVersionId,
+          extensionDatasetVersionId: facts.datasetVersionId,
+          evaluationWindow,
+          ...(descriptor.compositeExecution?.extensionSelectionArms === undefined
+            ? {}
+            : { extensionSelectionArms: descriptor.compositeExecution.extensionSelectionArms }),
+          ...(descriptor.compositeExecution?.includeEventMetadata === true
+            ? { includeEventMetadata: true }
+            : {}),
+        });
+      }
+
+      const startedAt = now();
+      let payload: ExperimentResultPayload | null = null;
+      let envelope: ExperimentResultEnvelope | null = null;
+      let confirmatoryGate: ExperimentConfirmatoryGate | undefined;
+      let failure: ExperimentError | null = null;
+
+      try {
+        // 4) execute
+        payload = await definition.run(context);
+        // 5) capture result（信封由平台填 metadata / parameters，实验无法谎报坐标）
+        envelope = {
+          metadata: {
+            experimentId: descriptor.id,
+            experimentName: descriptor.name,
+            experimentVersion: descriptor.version,
+            datasetVersionId: facts.datasetVersionId,
+            datasetCode: facts.datasetCode,
+            datasetVersionLabel: facts.datasetVersionLabel,
+            datasetStartDate: facts.startDate,
+            datasetEndDate: facts.endDate,
+            computationVersion: descriptor.version,
+            experimentCodeDigest: codeDigest,
+            researchPhase: request.protocol?.phase ?? "EXPLORATORY",
+            protocolFingerprint: request.protocol?.protocolFingerprint ?? null,
+            evaluationWindow,
+            ...(prepared.datasetBindings.length > 1
+              ? { datasetBindings: prepared.datasetBindings }
+              : {}),
+          },
+          parameters: resolvedParameters,
+          sampleSummary: payload.sampleSummary,
+          ...(payload.tables !== undefined ? { tables: [...payload.tables] } : {}),
+          ...(payload.statistics !== undefined ? { statistics: [...payload.statistics] } : {}),
+          ...(payload.distributions !== undefined ? { distributions: [...payload.distributions] } : {}),
+          ...(payload.comparisons !== undefined ? { comparisons: [...payload.comparisons] } : {}),
+          ...(payload.charts !== undefined ? { charts: [...payload.charts] } : {}),
+          ...(payload.confirmatoryGate !== undefined
+            ? { confirmatoryGate: payload.confirmatoryGate }
+            : {}),
+          ...(payload.customPayload !== undefined ? { customPayload: payload.customPayload } : {}),
+        };
+        confirmatoryGate = payload.confirmatoryGate;
+        validateConfirmatoryGate({
+          phase: request.protocol?.phase ?? "EXPLORATORY",
+          protocolFingerprint: request.protocol?.protocolFingerprint ?? null,
+          gate: confirmatoryGate,
+        });
+        validateExperimentResultEnvelope(envelope, descriptor.id);
+        const custom = definition.resultSchema.safeParse(payload.customPayload);
+        if (!custom.success) {
+          throw new ExperimentError(
+            "EXPERIMENT_RESULT_INVALID",
+            `实验 "${descriptor.id}" 的 customPayload 不符合本实验自己的 resultSchema：${custom.error.issues
+              .slice(0, 5)
+              .map((i) => `${i.path.join(".")} ${i.message}`)
+              .join("；")}`,
+            { issues: custom.error.issues.slice(0, 20) },
+          );
+        }
+      } catch (error) {
+        // 6) capture error（执行期失败：如实回报，不吞错、也不抛出）
+        failure = toExperimentError(error);
+        envelope = null;
+      }
+
+      const finishedAt = now();
+
+      const outcome: ExperimentRunOutcome = {
+        runStatus: failure === null ? "SUCCEEDED" : "FAILED",
+        descriptor,
+        execution: {
+          startedAt: startedAt.toISOString(),
+          finishedAt: finishedAt.toISOString(),
+          durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+          resolvedParameters,
+          /** 实验自己写的运行日志（有界；让「跑到哪一步了」在失败时也看得到）。 */
+          logs,
+          datasetFacts: {
+            datasetVersionId: facts.datasetVersionId,
+            datasetCode: facts.datasetCode,
+            datasetVersionLabel: facts.datasetVersionLabel,
+            status: facts.status,
+            startDate: facts.startDate,
+            endDate: facts.endDate,
+            datasetTotalEvents: facts.totalEvents,
+            eventCount: stats.eventCount,
+            prefixRowCount: stats.prefixRowCount,
+            postRowCount: stats.postRowCount,
+            maxPostRelativeDayRead: stats.maxPostRelativeDayRead,
+            decisionOffsetDays: descriptor.datasetRequirement.decisionOffsetDays,
+            forwardDataRead: stats.postRowCount > 0,
+            evaluationWindow,
+            researchPhase: request.protocol?.phase ?? "EXPLORATORY",
+            protocolFingerprint: request.protocol?.protocolFingerprint ?? null,
+            selectionFrozen: stats.selectionFrozen,
+            selectedEventCount: stats.selectedEventCount,
+            eventScanPolicy: stats.eventScanPolicy,
+            eventScanLimit: stats.eventScanLimit,
+            eventPageCount: stats.eventPageCount,
+            barQueryCount: stats.barQueryCount,
+            eventScanTruncated: stats.eventScanTruncated,
+          },
+        },
+        result: envelope,
+        error:
+          failure === null
+            ? null
+            : {
+                code: failure.code,
+                message: failure.message,
+                ...(failure.detail !== undefined ? { detail: failure.detail } : {}),
+              },
+      };
+
+      // 🔴 只有成功时才把文件产物交出去：失败的 Run 不产出 Manifest、不落对象存储
+      //    （规格 §12：失败路径只写 `FAILED` + `errorMessage`）。
+      return { outcome, artifactFiles: failure === null ? artifactFiles : [] };
+  }
+}
+

@@ -1,0 +1,1338 @@
+/**
+ * STEP 14 / C-14.1 — 交易模拟核心：校验层。
+ *
+ * 全部校验为纯函数，返回结构化结果（不抛错）；另有 assert* 便捷入口在非法时抛
+ * ResearchValidationError（复用 research 层既有 ResearchValidationIssue / Result /
+ * Error，与 framework validation.ts 同一错误体系）。
+ *
+ * 校验对象：
+ *   - SimulationConfig（模拟输入）：窗口/资金/成本/执行模型/持仓上限/方向策略/
+ *     涨跌停拦截/板块覆盖的形状与取值合法性；
+ *   - TradeSimulationRun（结果记录）：供反序列化后结构复核（字段种类、枚举、数组
+ *     形态、数值有限性、权益曲线日期升序），保证 JSON → 对象不回退类型边界。
+ */
+
+import {
+  ResearchValidationError,
+  type ResearchValidationIssue,
+  type ResearchValidationResult,
+} from "../experimentValidation";
+import type { ExecutionModelId, Side } from "../../backtest/types";
+import { trailingPolicyDefinitionErrors } from "../trailingPolicy";
+import { stopPolicyDefinitionErrors } from "../stopPolicy";
+import { runnerBridgePolicyErrors } from "../exitPolicyCommon";
+import type { SecurityBoard } from "./types";
+import type {
+  SimulationConfig,
+  SimulationConfigSnapshot,
+  TradeSimulationRun,
+} from "./types";
+
+function issue(
+  code: string,
+  path: string,
+  message: string
+): ResearchValidationIssue {
+  return { code, path, message };
+}
+
+function result(issues: ResearchValidationIssue[]): ResearchValidationResult {
+  return { valid: issues.length === 0, issues };
+}
+
+function assertValid(r: ResearchValidationResult): void {
+  if (!r.valid) throw new ResearchValidationError(r.issues);
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const EXECUTION_MODEL_IDS: readonly ExecutionModelId[] = [
+  "NEXT_OPEN",
+  "NEXT_CLOSE",
+  "VWAP_PROXY",
+  "LIMIT_PRICE",
+];
+const BOARDS: readonly SecurityBoard[] = ["main", "gem", "star", "bse"];
+
+function isValidDate(value: unknown): value is string {
+  return typeof value === "string" && DATE_RE.test(value);
+}
+
+// ---------------------------------------------------------------------------
+// SimulationConfig
+// ---------------------------------------------------------------------------
+
+function validateCostModel(
+  cost: unknown,
+  path: string
+): ResearchValidationIssue[] {
+  const issues: ResearchValidationIssue[] = [];
+  if (cost === null || typeof cost !== "object") {
+    issues.push(issue("SIM_COST_INVALID", path, "cost 必须是对象"));
+    return issues;
+  }
+  const c = cost as Record<string, unknown>;
+  for (const field of [
+    "commissionRate",
+    "stampDutyRate",
+    "transferFeeRate",
+    "slippageBps",
+    "lotSize",
+    "minCommission",
+  ] as const) {
+    const value = c[field];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      issues.push(
+        issue(
+          "SIM_COST_FIELD_INVALID",
+          `${path}.${field}`,
+          `${field} 必须是有限数字`
+        )
+      );
+    }
+  }
+  if (
+    typeof c.commissionRate === "number" &&
+    (c.commissionRate as number) < 0
+  ) {
+    issues.push(
+      issue(
+        "SIM_COST_RATE_NEGATIVE",
+        `${path}.commissionRate`,
+        "commissionRate 不能为负"
+      )
+    );
+  }
+  if (typeof c.stampDutyRate === "number" && (c.stampDutyRate as number) < 0) {
+    issues.push(
+      issue(
+        "SIM_COST_RATE_NEGATIVE",
+        `${path}.stampDutyRate`,
+        "stampDutyRate 不能为负"
+      )
+    );
+  }
+  if (
+    typeof c.transferFeeRate === "number" &&
+    (c.transferFeeRate as number) < 0
+  ) {
+    issues.push(
+      issue(
+        "SIM_COST_RATE_NEGATIVE",
+        `${path}.transferFeeRate`,
+        "transferFeeRate 不能为负"
+      )
+    );
+  }
+  if (typeof c.slippageBps === "number" && (c.slippageBps as number) < 0) {
+    issues.push(
+      issue(
+        "SIM_COST_RATE_NEGATIVE",
+        `${path}.slippageBps`,
+        "slippageBps 不能为负"
+      )
+    );
+  }
+  if (
+    typeof c.lotSize === "number" &&
+    (!Number.isInteger(c.lotSize) || (c.lotSize as number) <= 0)
+  ) {
+    issues.push(
+      issue("SIM_COST_LOT_INVALID", `${path}.lotSize`, "lotSize 必须是正整数")
+    );
+  }
+  if (typeof c.minCommission === "number" && (c.minCommission as number) < 0) {
+    issues.push(
+      issue(
+        "SIM_COST_FEE_NEGATIVE",
+        `${path}.minCommission`,
+        "minCommission 不能为负"
+      )
+    );
+  }
+  return issues;
+}
+
+/** 校验模拟输入配置。 */
+export function validateSimulationConfig(
+  config: SimulationConfig | undefined | null
+): ResearchValidationResult {
+  const issues: ResearchValidationIssue[] = [];
+  if (config === null || typeof config !== "object") {
+    return result([
+      issue("SIM_CONFIG_INVALID", "simConfig", "模拟配置缺失或非对象"),
+    ]);
+  }
+  if (config.name !== undefined && typeof config.name !== "string") {
+    issues.push(
+      issue("SIM_CONFIG_NAME_INVALID", "simConfig.name", "name 必须是字符串")
+    );
+  }
+  if (config.dateRange !== undefined) {
+    const range = config.dateRange;
+    if (!isValidDate(range.startDate) || !isValidDate(range.endDate)) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_DATE_RANGE_INVALID",
+          "simConfig.dateRange",
+          "dateRange 必须含合法 startDate/endDate（YYYY-MM-DD）"
+        )
+      );
+    } else if (range.startDate > range.endDate) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_DATE_RANGE_REVERSED",
+          "simConfig.dateRange",
+          "dateRange.startDate 不能晚于 endDate"
+        )
+      );
+    }
+  }
+  if (
+    typeof config.initialCapital !== "number" ||
+    !Number.isFinite(config.initialCapital) ||
+    config.initialCapital <= 0
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_CAPITAL_INVALID",
+        "simConfig.initialCapital",
+        "initialCapital 必须是正有限数字"
+      )
+    );
+  }
+  issues.push(...validateCostModel(config.cost, "simConfig.cost"));
+  if (
+    config.executionModel !== undefined &&
+    !EXECUTION_MODEL_IDS.includes(config.executionModel as ExecutionModelId)
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_EXECUTION_MODEL_INVALID",
+        "simConfig.executionModel",
+        `executionModel 必须是 ${EXECUTION_MODEL_IDS.join(" / ")} 之一`
+      )
+    );
+  }
+  if (config.maxPositions !== undefined && config.maxPositions !== null) {
+    if (
+      typeof config.maxPositions !== "number" ||
+      !Number.isInteger(config.maxPositions) ||
+      config.maxPositions <= 0
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_MAX_POSITIONS_INVALID",
+          "simConfig.maxPositions",
+          "maxPositions 必须是正整数或 null"
+        )
+      );
+    }
+  }
+  if (config.maxDailyBuys !== undefined && config.maxDailyBuys !== null) {
+    if (
+      typeof config.maxDailyBuys !== "number" ||
+      !Number.isInteger(config.maxDailyBuys) ||
+      config.maxDailyBuys <= 0
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_MAX_DAILY_BUYS_INVALID",
+          "simConfig.maxDailyBuys",
+          "maxDailyBuys 必须是正整数或 null"
+        )
+      );
+    }
+  }
+  if (
+    config.directionPolicy !== undefined &&
+    config.directionPolicy !== "longOnly"
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_DIRECTION_POLICY_INVALID",
+        "simConfig.directionPolicy",
+        "directionPolicy 必须是 longOnly"
+      )
+    );
+  }
+  if (
+    config.candidateExitPolicy !== undefined
+    && config.candidateExitPolicy !== "HOLD_WHILE_SELECTED"
+    && config.candidateExitPolicy !== "DISABLED"
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_CANDIDATE_EXIT_POLICY_INVALID",
+        "simConfig.candidateExitPolicy",
+        "candidateExitPolicy 必须是 HOLD_WHILE_SELECTED 或 DISABLED"
+      )
+    );
+  }
+  if (config.reentryPolicy !== undefined && config.reentryPolicy !== null) {
+    const policy = config.reentryPolicy;
+    if (typeof policy !== "object" || Array.isArray(policy)) {
+      issues.push(issue("SIM_CONFIG_REENTRY_POLICY_INVALID", "simConfig.reentryPolicy", "reentryPolicy 必须是对象"));
+    } else {
+      for (const key of ["securityCooldownTradingDays", "maxEntriesPerMember", "maxConcurrentOpenPerCode"] as const) {
+        const value = policy[key];
+        if (value === undefined || value === null) continue;
+        if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+          issues.push(
+            issue(
+              "SIM_CONFIG_REENTRY_POLICY_INVALID",
+              `simConfig.reentryPolicy.${key}`,
+              `${key} 必须是正整数或 null`
+            )
+          );
+        }
+      }
+    }
+  }
+  if (config.executionRules !== undefined) {
+    const rules = config.executionRules;
+    if (
+      rules.blockLimitUpBuy !== undefined &&
+      typeof rules.blockLimitUpBuy !== "boolean"
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_RULE_INVALID",
+          "simConfig.executionRules.blockLimitUpBuy",
+          "blockLimitUpBuy 必须是布尔"
+        )
+      );
+    }
+    if (
+      rules.blockLimitDownSell !== undefined &&
+      typeof rules.blockLimitDownSell !== "boolean"
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_RULE_INVALID",
+          "simConfig.executionRules.blockLimitDownSell",
+          "blockLimitDownSell 必须是布尔"
+        )
+      );
+    }
+  }
+  if (
+    config.allowPartialFill !== undefined &&
+    typeof config.allowPartialFill !== "boolean"
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_PARTIAL_INVALID",
+        "simConfig.allowPartialFill",
+        "allowPartialFill 必须是布尔"
+      )
+    );
+  }
+  if (config.exitPolicy !== undefined) {
+    const policy = config.exitPolicy;
+    const ratio = (value: unknown): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value > 0;
+    const nonNegativeRatio = (value: unknown): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0;
+    if (policy.stopLossRatio !== null && policy.stopLossRatio !== undefined && !ratio(policy.stopLossRatio)) {
+      issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.stopLossRatio", "stopLossRatio 必须是正有限数字或 null"));
+    }
+    if (policy.takeProfitRatio !== null && policy.takeProfitRatio !== undefined && !ratio(policy.takeProfitRatio)) {
+      issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.takeProfitRatio", "takeProfitRatio 必须是正有限数字或 null"));
+    }
+    if (
+      policy.maxHoldingDays !== null &&
+      policy.maxHoldingDays !== undefined &&
+      (!Number.isInteger(policy.maxHoldingDays) || policy.maxHoldingDays <= 0)
+    ) {
+      issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.maxHoldingDays", "maxHoldingDays 必须是正整数或 null"));
+    }
+    if (
+      policy.trailingTakeProfitActivationRatio !== null &&
+      policy.trailingTakeProfitActivationRatio !== undefined &&
+      !nonNegativeRatio(policy.trailingTakeProfitActivationRatio)
+    ) {
+      issues.push(issue(
+        "SIM_CONFIG_EXIT_POLICY_INVALID",
+        "simConfig.exitPolicy.trailingTakeProfitActivationRatio",
+        "trailingTakeProfitActivationRatio 必须是非负有限数字或 null",
+      ));
+    }
+    if (
+      policy.trailingTakeProfitDrawdownRatio !== null &&
+      policy.trailingTakeProfitDrawdownRatio !== undefined &&
+      !ratio(policy.trailingTakeProfitDrawdownRatio)
+    ) {
+      issues.push(issue(
+        "SIM_CONFIG_EXIT_POLICY_INVALID",
+        "simConfig.exitPolicy.trailingTakeProfitDrawdownRatio",
+        "trailingTakeProfitDrawdownRatio 必须是正有限数字或 null",
+      ));
+    }
+    if (
+      policy.trailingTakeProfitTrigger !== null &&
+      policy.trailingTakeProfitTrigger !== undefined &&
+      policy.trailingTakeProfitTrigger !== "INTRADAY" &&
+      policy.trailingTakeProfitTrigger !== "ON_CLOSE"
+    ) {
+      issues.push(issue(
+        "SIM_CONFIG_EXIT_POLICY_INVALID",
+        "simConfig.exitPolicy.trailingTakeProfitTrigger",
+        "trailingTakeProfitTrigger 必须是 INTRADAY / ON_CLOSE 或 null",
+      ));
+    }
+    if (
+      policy.advancedTrailingPolicy !== null
+      && policy.advancedTrailingPolicy !== undefined
+    ) {
+      if (
+        policy.trailingTakeProfitDrawdownRatio !== null
+        && policy.trailingTakeProfitDrawdownRatio !== undefined
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy",
+          "advancedTrailingPolicy 与 trailingTakeProfitDrawdownRatio 不能同时声明",
+        ));
+      }
+      for (const detail of trailingPolicyDefinitionErrors(policy.advancedTrailingPolicy)) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.advancedTrailingPolicy",
+          detail,
+        ));
+      }
+    }
+    if (policy.advancedStopPolicy !== null && policy.advancedStopPolicy !== undefined) {
+      for (const detail of stopPolicyDefinitionErrors(policy.advancedStopPolicy)) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.advancedStopPolicy",
+          detail,
+        ));
+      }
+    }
+    const recoveryPath = policy.recoveryPath;
+    if (recoveryPath !== null && recoveryPath !== undefined) {
+      if (
+        typeof recoveryPath !== "object"
+        || Array.isArray(recoveryPath)
+        || recoveryPath.kind !== "HIGHER_HIGH_STREAK_RECOVERY"
+        || !Number.isFinite(recoveryPath.activationRatio)
+        || recoveryPath.activationRatio <= 0
+        || recoveryPath.activationRatio >= 1
+        || !Number.isInteger(recoveryPath.confirmationDays)
+        || recoveryPath.confirmationDays < 0
+        || recoveryPath.confirmationDays > 3
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.recoveryPath",
+          "recoveryPath 必须是 HIGHER_HIGH_STREAK_RECOVERY，activationRatio∈(0,1)，confirmationDays∈{0,1,2,3}",
+        ));
+      }
+    }
+    const runnerBridge = policy.runnerBridge;
+    if (runnerBridge !== null && runnerBridge !== undefined) {
+      for (const message of runnerBridgePolicyErrors(runnerBridge, "simConfig.exitPolicy.runnerBridge")) {
+        issues.push(issue("SIM_CONFIG_EXIT_POLICY_INVALID", "simConfig.exitPolicy.runnerBridge", message));
+      }
+    }
+    const clc2ReversalPath = policy.clc2ReversalPath;
+    if (clc2ReversalPath !== null && clc2ReversalPath !== undefined) {
+      if (
+        typeof clc2ReversalPath !== "object"
+        || Array.isArray(clc2ReversalPath)
+        || clc2ReversalPath.kind !== "SUSTAINED_CLOSE_DECLINE_REVERSAL"
+        || (
+          clc2ReversalPath.sustainMinRun !== undefined
+          && (
+            !Number.isInteger(clc2ReversalPath.sustainMinRun)
+            || clc2ReversalPath.sustainMinRun < 1
+          )
+        )
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.clc2ReversalPath",
+          "clc2ReversalPath 必须是 SUSTAINED_CLOSE_DECLINE_REVERSAL，sustainMinRun 缺省或为正整数",
+        ));
+      }
+    }
+    const strongHold = policy.strongHold;
+    if (strongHold !== null && strongHold !== undefined) {
+      if (
+        !Number.isInteger(strongHold.atHoldingDays) ||
+        strongHold.atHoldingDays <= 0 ||
+        !Number.isInteger(strongHold.extendToHoldingDays) ||
+        strongHold.extendToHoldingDays <= strongHold.atHoldingDays ||
+        !Number.isFinite(strongHold.minReturnRatio) ||
+        typeof strongHold.requireAboveMa5 !== "boolean" ||
+        typeof strongHold.requireAboveMa10 !== "boolean" ||
+        policy.maxHoldingDays === null ||
+        policy.maxHoldingDays === undefined ||
+        strongHold.atHoldingDays !== policy.maxHoldingDays ||
+        (
+          strongHold.afterExtendedHold !== undefined
+          && strongHold.afterExtendedHold !== "TIME_EXIT"
+          && strongHold.afterExtendedHold !== "TREND"
+        ) ||
+        (
+          strongHold.scaleOutRatio !== undefined
+          && strongHold.scaleOutRatio !== null
+          && (
+            !Number.isFinite(strongHold.scaleOutRatio)
+            || strongHold.scaleOutRatio <= 0
+            || strongHold.scaleOutRatio >= 1
+          )
+        ) ||
+        (
+          strongHold.runnerExitAtHoldingDays !== undefined
+          && strongHold.runnerExitAtHoldingDays !== null
+          && (
+            !Number.isInteger(strongHold.runnerExitAtHoldingDays)
+            || strongHold.runnerExitAtHoldingDays <= strongHold.extendToHoldingDays
+          )
+        ) ||
+        (
+          strongHold.maxConcurrentRunners !== undefined
+          && strongHold.maxConcurrentRunners !== null
+          && (
+            !Number.isInteger(strongHold.maxConcurrentRunners)
+            || strongHold.maxConcurrentRunners <= 0
+          )
+        ) ||
+        (
+          strongHold.replacementScoreMargin !== undefined
+          && strongHold.replacementScoreMargin !== null
+          && (
+            !Number.isFinite(strongHold.replacementScoreMargin)
+            || strongHold.replacementScoreMargin < 0
+          )
+        )
+      ) {
+        issues.push(issue(
+          "SIM_CONFIG_EXIT_POLICY_INVALID",
+          "simConfig.exitPolicy.strongHold",
+          "strongHold 参数非法（atHoldingDays 必须等于 maxHoldingDays，extendToHoldingDays 必须更大）",
+        ));
+      }
+    }
+  }
+  if (config.securityBoards !== undefined) {
+    const boards = config.securityBoards;
+    if (
+      boards === null ||
+      typeof boards !== "object" ||
+      Array.isArray(boards)
+    ) {
+      issues.push(
+        issue(
+          "SIM_CONFIG_BOARDS_INVALID",
+          "simConfig.securityBoards",
+          "securityBoards 必须是 securityId → board 映射"
+        )
+      );
+    } else {
+      for (const [securityId, board] of Object.entries(boards)) {
+        if (typeof securityId !== "string" || securityId.trim() === "") {
+          issues.push(
+            issue(
+              "SIM_CONFIG_BOARD_KEY_INVALID",
+              "simConfig.securityBoards",
+              "securityBoards 键（securityId）不能为空"
+            )
+          );
+        }
+        if (!BOARDS.includes(board as SecurityBoard)) {
+          issues.push(
+            issue(
+              "SIM_CONFIG_BOARD_VALUE_INVALID",
+              `simConfig.securityBoards.${securityId}`,
+              `board 必须是 ${BOARDS.join(" / ")} 之一`
+            )
+          );
+        }
+      }
+    }
+  }
+  if (
+    config.corporateActionResolver !== undefined &&
+    (
+      config.corporateActionResolver === null ||
+      typeof config.corporateActionResolver !== "object" ||
+      typeof config.corporateActionResolver.actionsFor !== "function"
+    )
+  ) {
+    issues.push(
+      issue(
+        "SIM_CONFIG_CORPORATE_ACTION_RESOLVER_INVALID",
+        "simConfig.corporateActionResolver",
+        "corporateActionResolver 必须提供 actionsFor(securityId, date)"
+      )
+    );
+  }
+  return result(issues);
+}
+
+/** 模拟输入配置非法即抛 ResearchValidationError。 */
+export function assertValidSimulationConfig(
+  config: SimulationConfig | undefined | null
+): void {
+  assertValid(validateSimulationConfig(config));
+}
+
+// ---------------------------------------------------------------------------
+// TradeSimulationRun（反序列化复核用）
+// ---------------------------------------------------------------------------
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/** 校验结果记录的形态（供 deserialize 复核；不重算统计一致性）。 */
+export function validateTradeSimulationRun(
+  record: TradeSimulationRun | undefined | null
+): ResearchValidationResult {
+  const issues: ResearchValidationIssue[] = [];
+  if (record === null || typeof record !== "object") {
+    return result([issue("RECORD_INVALID", "record", "运行记录缺失或非对象")]);
+  }
+  if (record.recordKind !== "TRADE_SIMULATION_RUN") {
+    issues.push(
+      issue(
+        "RECORD_KIND_INVALID",
+        "record.recordKind",
+        "recordKind 必须是 TRADE_SIMULATION_RUN"
+      )
+    );
+  }
+  if (record.recordVersion !== 1) {
+    issues.push(
+      issue(
+        "RECORD_VERSION_INVALID",
+        "record.recordVersion",
+        "recordVersion 必须是 1"
+      )
+    );
+  }
+  for (const [field, label] of [
+    ["datasetVersion", "datasetVersion"],
+    ["builderVersion", "builderVersion"],
+    ["rowSchemaVersion", "rowSchemaVersion"],
+    ["universeId", "universeId"],
+    ["strategyId", "strategyId"],
+    ["strategyVersion", "strategyVersion"],
+    ["sourceFingerprint", "sourceFingerprint"],
+  ] as const) {
+    const value = (record as unknown as Record<string, unknown>)[field];
+    if (typeof value !== "string" || value.trim() === "") {
+      issues.push(
+        issue(
+          "RECORD_FIELD_EMPTY",
+          `record.${field}`,
+          `${label} 不能为空字符串`
+        )
+      );
+    }
+  }
+  if (typeof record.datasetGate !== "string") {
+    issues.push(
+      issue(
+        "RECORD_DATASET_GATE_INVALID",
+        "record.datasetGate",
+        "datasetGate 必须是字符串"
+      )
+    );
+  }
+  if (
+    record.parameters === null ||
+    typeof record.parameters !== "object" ||
+    Array.isArray(record.parameters)
+  ) {
+    issues.push(
+      issue(
+        "RECORD_PARAMETERS_INVALID",
+        "record.parameters",
+        "parameters 必须是参数值对象"
+      )
+    );
+  } else {
+    for (const value of Object.values(record.parameters)) {
+      const v: unknown = value;
+      const isScalar =
+        v === null ||
+        typeof v === "number" ||
+        typeof v === "string" ||
+        typeof v === "boolean";
+      if (!isScalar)
+        issues.push(
+          issue(
+            "RECORD_PARAMETERS_VALUE_INVALID",
+            "record.parameters",
+            "参数值不是可序列化原子值"
+          )
+        );
+      if (typeof v === "number" && !Number.isFinite(v))
+        issues.push(
+          issue(
+            "RECORD_PARAMETERS_NAN",
+            "record.parameters",
+            "参数值禁止 NaN/Infinity"
+          )
+        );
+    }
+  }
+  const decisionRange = record.decisionDateRange;
+  const simRange = record.dateRange;
+  if (
+    !decisionRange ||
+    !isValidDate(decisionRange.startDate) ||
+    !isValidDate(decisionRange.endDate) ||
+    decisionRange.startDate > decisionRange.endDate
+  ) {
+    issues.push(
+      issue(
+        "RECORD_DECISION_RANGE_INVALID",
+        "record.decisionDateRange",
+        "decisionDateRange 必须含合法且不倒序的日期区间"
+      )
+    );
+  }
+  if (
+    !simRange ||
+    !isValidDate(simRange.startDate) ||
+    !isValidDate(simRange.endDate) ||
+    simRange.startDate > simRange.endDate
+  ) {
+    issues.push(
+      issue(
+        "RECORD_SIM_RANGE_INVALID",
+        "record.dateRange",
+        "dateRange 必须含合法且不倒序的日期区间"
+      )
+    );
+  }
+  if (!isFiniteNumber(record.initialCapital) || record.initialCapital <= 0) {
+    issues.push(
+      issue(
+        "RECORD_CAPITAL_INVALID",
+        "record.initialCapital",
+        "initialCapital 必须是正有限数字"
+      )
+    );
+  }
+  if (!isFiniteNumber(record.finalEquity) || record.finalEquity < 0) {
+    issues.push(
+      issue(
+        "RECORD_FINAL_EQUITY_INVALID",
+        "record.finalEquity",
+        "finalEquity 必须是非负有限数字"
+      )
+    );
+  }
+  if (
+    typeof record.decisionDayCount !== "number" ||
+    !Number.isInteger(record.decisionDayCount) ||
+    record.decisionDayCount <= 0
+  ) {
+    issues.push(
+      issue(
+        "RECORD_DECISION_DAY_COUNT_INVALID",
+        "record.decisionDayCount",
+        "decisionDayCount 必须是正整数（引擎保证至少一个决策日）"
+      )
+    );
+  }
+
+  // config 快照形态。
+  const config: SimulationConfigSnapshot | undefined = record.config;
+  if (!config || typeof config !== "object") {
+    issues.push(
+      issue("RECORD_CONFIG_INVALID", "record.config", "config 快照缺失或非对象")
+    );
+  } else {
+    if (
+      !config.dateRange ||
+      !isValidDate(config.dateRange.startDate) ||
+      !isValidDate(config.dateRange.endDate)
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_RANGE_INVALID",
+          "record.config.dateRange",
+          "config.dateRange 日期非法"
+        )
+      );
+    }
+    if (!isFiniteNumber(config.initialCapital) || config.initialCapital <= 0) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_CAPITAL_INVALID",
+          "record.config.initialCapital",
+          "config.initialCapital 非法"
+        )
+      );
+    }
+    if (!config.cost || typeof config.cost !== "object") {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_COST_INVALID",
+          "record.config.cost",
+          "config.cost 缺失"
+        )
+      );
+    } else {
+      issues.push(...validateCostModel(config.cost, "record.config.cost"));
+    }
+    if (
+      !EXECUTION_MODEL_IDS.includes(config.executionModel as ExecutionModelId)
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_EXECUTION_MODEL_INVALID",
+          "record.config.executionModel",
+          "executionModel 非法"
+        )
+      );
+    }
+    if (
+      config.maxPositions !== null &&
+      (typeof config.maxPositions !== "number" ||
+        !Number.isInteger(config.maxPositions) ||
+        config.maxPositions <= 0)
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_MAX_POSITIONS_INVALID",
+          "record.config.maxPositions",
+          "maxPositions 必须是正整数或 null"
+        )
+      );
+    }
+    if (
+      config.maxDailyBuys !== undefined &&
+      config.maxDailyBuys !== null &&
+      (typeof config.maxDailyBuys !== "number" ||
+        !Number.isInteger(config.maxDailyBuys) ||
+        config.maxDailyBuys <= 0)
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_MAX_DAILY_BUYS_INVALID",
+          "record.config.maxDailyBuys",
+          "maxDailyBuys 必须是正整数或 null"
+        )
+      );
+    }
+    if (config.directionPolicy !== "longOnly") {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_DIRECTION_POLICY_INVALID",
+          "record.config.directionPolicy",
+          "directionPolicy 必须是 longOnly"
+        )
+      );
+    }
+    const candidateExitPolicy = config.candidateExitPolicy ?? "HOLD_WHILE_SELECTED";
+    if (
+      candidateExitPolicy !== "HOLD_WHILE_SELECTED"
+      && candidateExitPolicy !== "DISABLED"
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_CANDIDATE_EXIT_POLICY_INVALID",
+          "record.config.candidateExitPolicy",
+          "candidateExitPolicy 非法"
+        )
+      );
+    }
+    const rules = config.executionRules;
+    if (
+      !rules ||
+      typeof rules.blockLimitUpBuy !== "boolean" ||
+      typeof rules.blockLimitDownSell !== "boolean"
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_RULES_INVALID",
+          "record.config.executionRules",
+          "executionRules 必须含两个布尔开关"
+        )
+      );
+    }
+    if (typeof config.allowPartialFill !== "boolean") {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_PARTIAL_INVALID",
+          "record.config.allowPartialFill",
+          "allowPartialFill 必须是布尔"
+        )
+      );
+    }
+    if (
+      typeof config.tPlus1 !== "boolean" ||
+      typeof config.lotSize !== "number" ||
+      !Number.isInteger(config.lotSize) ||
+      config.lotSize <= 0
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_MARKET_INVALID",
+          "record.config",
+          "tPlus1/lotSize 形态非法"
+        )
+      );
+    }
+    const expectedEntryExitModel =
+      candidateExitPolicy === "DISABLED"
+        ? "EXIT_RULES_LONG_ONLY_CASH_BUDGET"
+        : "HOLD_WHILE_SELECTED_LONG_ONLY_CASH_BUDGET";
+    if (
+      config.decisionPoint !== "close" ||
+      config.entryExitModel !== expectedEntryExitModel ||
+      (config.corporateActions !== "NOT_APPLIED" && config.corporateActions !== "APPLIED")
+    ) {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_SEMANTICS_INVALID",
+          "record.config",
+          "执行假设语义常量与版本不匹配"
+        )
+      );
+    }
+    const exitPolicy = config.exitPolicy;
+    if (exitPolicy === undefined || exitPolicy === null || typeof exitPolicy !== "object") {
+      issues.push(
+        issue(
+          "RECORD_CONFIG_EXIT_POLICY_INVALID",
+          "record.config.exitPolicy",
+          "exitPolicy 缺失"
+        )
+      );
+    } else {
+      const activation = exitPolicy.trailingTakeProfitActivationRatio;
+      const drawdown = exitPolicy.trailingTakeProfitDrawdownRatio;
+      if (
+        activation !== undefined
+        && activation !== null
+        && (!isFiniteNumber(activation) || activation < 0)
+      ) {
+        issues.push(
+          issue(
+            "RECORD_CONFIG_EXIT_POLICY_INVALID",
+            "record.config.exitPolicy.trailingTakeProfitActivationRatio",
+            "trailingTakeProfitActivationRatio 必须是非负有限数字或 null"
+          )
+        );
+      }
+      if (
+        drawdown !== undefined
+        && drawdown !== null
+        && (!isFiniteNumber(drawdown) || drawdown <= 0)
+      ) {
+        issues.push(
+          issue(
+            "RECORD_CONFIG_EXIT_POLICY_INVALID",
+            "record.config.exitPolicy.trailingTakeProfitDrawdownRatio",
+            "trailingTakeProfitDrawdownRatio 必须是正有限数字或 null"
+          )
+        );
+      }
+      const trigger = exitPolicy.trailingTakeProfitTrigger;
+      if (
+        trigger !== undefined
+        && trigger !== null
+        && trigger !== "INTRADAY"
+        && trigger !== "ON_CLOSE"
+      ) {
+        issues.push(
+          issue(
+            "RECORD_CONFIG_EXIT_POLICY_INVALID",
+            "record.config.exitPolicy.trailingTakeProfitTrigger",
+            "trailingTakeProfitTrigger 必须是 INTRADAY / ON_CLOSE 或 null"
+          )
+        );
+      }
+      const advanced = exitPolicy.advancedTrailingPolicy;
+      if (advanced !== undefined && advanced !== null) {
+        for (const detail of trailingPolicyDefinitionErrors(advanced)) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.advancedTrailingPolicy",
+              detail,
+            )
+          );
+        }
+      }
+      const advancedStop = exitPolicy.advancedStopPolicy;
+      if (advancedStop !== undefined && advancedStop !== null) {
+        for (const detail of stopPolicyDefinitionErrors(advancedStop)) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.advancedStopPolicy",
+              detail,
+            )
+          );
+        }
+      }
+      const strongHold = exitPolicy.strongHold;
+      if (strongHold !== undefined && strongHold !== null) {
+        if (
+          typeof strongHold.afterExtendedHold !== "string"
+          || (
+            strongHold.afterExtendedHold !== "TIME_EXIT"
+            && strongHold.afterExtendedHold !== "TREND"
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.afterExtendedHold",
+              "afterExtendedHold 必须是 TIME_EXIT / TREND"
+            )
+          );
+        }
+        if (
+          strongHold.scaleOutRatio !== null
+          && (
+            typeof strongHold.scaleOutRatio !== "number"
+            || !Number.isFinite(strongHold.scaleOutRatio)
+            || strongHold.scaleOutRatio <= 0
+            || strongHold.scaleOutRatio >= 1
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.scaleOutRatio",
+              "scaleOutRatio 必须是 (0,1) 或 null"
+            )
+          );
+        }
+        if (
+          strongHold.runnerExitAtHoldingDays !== null
+          && (
+            typeof strongHold.runnerExitAtHoldingDays !== "number"
+            || !Number.isInteger(strongHold.runnerExitAtHoldingDays)
+            || strongHold.runnerExitAtHoldingDays <= strongHold.extendToHoldingDays
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.runnerExitAtHoldingDays",
+              "runnerExitAtHoldingDays 必须是大于 extendToHoldingDays 的整数或 null"
+            )
+          );
+        }
+        if (
+          strongHold.maxConcurrentRunners !== null
+          && (
+            typeof strongHold.maxConcurrentRunners !== "number"
+            || !Number.isInteger(strongHold.maxConcurrentRunners)
+            || strongHold.maxConcurrentRunners <= 0
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.maxConcurrentRunners",
+              "maxConcurrentRunners 必须是正整数或 null"
+            )
+          );
+        }
+        if (
+          strongHold.replacementScoreMargin !== null
+          && (
+            typeof strongHold.replacementScoreMargin !== "number"
+            || !Number.isFinite(strongHold.replacementScoreMargin)
+            || strongHold.replacementScoreMargin < 0
+          )
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.strongHold.replacementScoreMargin",
+              "replacementScoreMargin 必须是非负有限数字或 null"
+            )
+          );
+        }
+      }
+      const recoveryPath = exitPolicy.recoveryPath;
+      if (recoveryPath !== undefined && recoveryPath !== null) {
+        if (
+          typeof recoveryPath !== "object"
+          || Array.isArray(recoveryPath)
+          || recoveryPath.kind !== "HIGHER_HIGH_STREAK_RECOVERY"
+          || !Number.isFinite(recoveryPath.activationRatio)
+          || recoveryPath.activationRatio <= 0
+          || recoveryPath.activationRatio >= 1
+          || !Number.isInteger(recoveryPath.confirmationDays)
+          || recoveryPath.confirmationDays < 0
+          || recoveryPath.confirmationDays > 3
+        ) {
+          issues.push(
+            issue(
+              "RECORD_CONFIG_EXIT_POLICY_INVALID",
+              "record.config.exitPolicy.recoveryPath",
+              "recoveryPath 必须是 HIGHER_HIGH_STREAK_RECOVERY，activationRatio∈(0,1)，confirmationDays∈{0,1,2,3}"
+            )
+          );
+        }
+      }
+      const runnerBridge = exitPolicy.runnerBridge;
+      if (runnerBridge !== undefined && runnerBridge !== null) {
+        for (const message of runnerBridgePolicyErrors(runnerBridge, "record.config.exitPolicy.runnerBridge")) {
+          issues.push(issue("RECORD_CONFIG_EXIT_POLICY_INVALID", "record.config.exitPolicy.runnerBridge", message));
+        }
+      }
+    }
+  }
+
+  // 权益曲线：日期升序 + 数值有限。
+  if (!Array.isArray(record.equityCurve) || record.equityCurve.length === 0) {
+    issues.push(
+      issue(
+        "RECORD_EQUITY_CURVE_EMPTY",
+        "record.equityCurve",
+        "equityCurve 必须是非空数组"
+      )
+    );
+  } else {
+    record.equityCurve.forEach((point, index) => {
+      const base = `record.equityCurve[${index}]`;
+      if (!point || !isValidDate(point.date))
+        issues.push(
+          issue(
+            "RECORD_EQUITY_POINT_DATE_INVALID",
+            `${base}.date`,
+            "date 必须是 YYYY-MM-DD"
+          )
+        );
+      for (const field of ["cash", "marketValue", "equity"] as const) {
+        if (!isFiniteNumber(point[field]) || point[field] < 0) {
+          issues.push(
+            issue(
+              "RECORD_EQUITY_POINT_NUMERIC_INVALID",
+              `${base}.${field}`,
+              `${field} 必须是非负有限数字`
+            )
+          );
+        }
+      }
+      if (!Number.isInteger(point.openPositions) || point.openPositions < 0) {
+        issues.push(
+          issue(
+            "RECORD_EQUITY_POINT_OPEN_INVALID",
+            `${base}.openPositions`,
+            "openPositions 必须是非负整数"
+          )
+        );
+      }
+      if (index > 0 && record.equityCurve[index - 1]!.date >= point.date) {
+        issues.push(
+          issue(
+            "RECORD_EQUITY_CURVE_UNSORTED",
+            "record.equityCurve",
+            "equityCurve 日期必须严格升序"
+          )
+        );
+      }
+    });
+  }
+
+  if (!Array.isArray(record.trades)) {
+    issues.push(
+      issue("RECORD_TRADES_INVALID", "record.trades", "trades 必须是数组")
+    );
+  } else {
+    record.trades.forEach((trade, index) => {
+      const base = `record.trades[${index}]`;
+      if (!trade || !isValidDate(trade.entryTime))
+        issues.push(
+          issue(
+            "RECORD_TRADE_ENTRY_INVALID",
+            `${base}.entryTime`,
+            "entryTime 必须是 YYYY-MM-DD"
+          )
+        );
+      if (!isFiniteNumber(trade.quantity) || trade.quantity <= 0)
+        issues.push(
+          issue(
+            "RECORD_TRADE_QUANTITY_INVALID",
+            `${base}.quantity`,
+            "quantity 必须是正有限数字"
+          )
+        );
+      if (!isFiniteNumber(trade.entryPrice) || trade.entryPrice <= 0)
+        issues.push(
+          issue(
+            "RECORD_TRADE_ENTRY_PRICE_INVALID",
+            `${base}.entryPrice`,
+            "entryPrice 必须是正有限数字"
+          )
+        );
+      if (typeof trade.openAtEnd !== "boolean")
+        issues.push(
+          issue(
+            "RECORD_TRADE_OPEN_AT_END_INVALID",
+            `${base}.openAtEnd`,
+            "openAtEnd 必须是布尔"
+          )
+        );
+    });
+  }
+
+  if (!Array.isArray(record.positions))
+    issues.push(
+      issue(
+        "RECORD_POSITIONS_INVALID",
+        "record.positions",
+        "positions 必须是数组"
+      )
+    );
+  const costs = record.costs;
+  if (!costs || typeof costs !== "object") {
+    issues.push(
+      issue("RECORD_COSTS_INVALID", "record.costs", "costs 缺失或非对象")
+    );
+  } else {
+    for (const field of [
+      "buyCommission",
+      "sellCommission",
+      "stampDuty",
+      "transferFee",
+      "slippage",
+      "otherFees",
+      "totalFees",
+      "totalCost",
+    ] as const) {
+      if (!isFiniteNumber(costs[field]))
+        issues.push(
+          issue(
+            "RECORD_COSTS_NUMERIC_INVALID",
+            `record.costs.${field}`,
+            `${field} 必须是有限数字`
+          )
+        );
+    }
+  }
+  const execStats = record.executionStats;
+  if (!execStats || typeof execStats !== "object") {
+    issues.push(
+      issue(
+        "RECORD_EXEC_STATS_INVALID",
+        "record.executionStats",
+        "executionStats 缺失或非对象"
+      )
+    );
+  } else {
+    for (const field of [
+      "totalSignals",
+      "totalOrders",
+      "totalFills",
+      "rejectedOrders",
+      "partialFills",
+    ] as const) {
+      const value = execStats[field];
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+        issues.push(
+          issue(
+            "RECORD_EXEC_STATS_COUNT_INVALID",
+            `record.executionStats.${field}`,
+            `${field} 必须是非负整数`
+          )
+        );
+      }
+    }
+    if (
+      !execStats.byReason ||
+      typeof execStats.byReason !== "object" ||
+      Array.isArray(execStats.byReason)
+    ) {
+      issues.push(
+        issue(
+          "RECORD_EXEC_STATS_BY_REASON_INVALID",
+          "record.executionStats.byReason",
+          "byReason 必须是对象"
+        )
+      );
+    }
+  }
+  if (!Array.isArray(record.skipped))
+    issues.push(
+      issue("RECORD_SKIPPED_INVALID", "record.skipped", "skipped 必须是数组")
+    );
+  const sides: readonly Side[] = ["buy", "sell"];
+  if (Array.isArray(record.skipped)) {
+    record.skipped.forEach((entry, index) => {
+      const base = `record.skipped[${index}]`;
+      if (!entry || !isValidDate(entry.date))
+        issues.push(
+          issue(
+            "RECORD_SKIPPED_DATE_INVALID",
+            `${base}.date`,
+            "date 必须是 YYYY-MM-DD"
+          )
+        );
+      if (!sides.includes((entry as { side?: Side }).side as Side))
+        issues.push(
+          issue(
+            "RECORD_SKIPPED_SIDE_INVALID",
+            `${base}.side`,
+            "side 必须是 buy/sell"
+          )
+        );
+      if (
+        typeof (entry as { code?: unknown }).code !== "string" ||
+        typeof (entry as { reason?: unknown }).reason !== "string"
+      ) {
+        issues.push(
+          issue(
+            "RECORD_SKIPPED_SHAPE_INVALID",
+            base,
+            "code/reason 必须是字符串"
+          )
+        );
+      }
+    });
+  }
+  const audit = record.audit;
+  if (
+    !audit ||
+    typeof audit !== "object" ||
+    !Array.isArray(audit.orders) ||
+    !Array.isArray(audit.fills) ||
+    !Array.isArray(audit.positions)
+  ) {
+    issues.push(
+      issue(
+        "RECORD_AUDIT_INVALID",
+        "record.audit",
+        "audit 必须含 orders/fills/positions 三数组"
+      )
+    );
+  }
+  if (
+    typeof record.fingerprint !== "string" ||
+    record.fingerprint.trim() === ""
+  ) {
+    issues.push(
+      issue(
+        "RECORD_FINGERPRINT_INVALID",
+        "record.fingerprint",
+        "fingerprint 不能为空"
+      )
+    );
+  }
+  return result(issues);
+}
+
+/** 结果记录非法即抛 ResearchValidationError。 */
+export function assertValidTradeSimulationRun(
+  record: TradeSimulationRun | undefined | null
+): void {
+  assertValid(validateTradeSimulationRun(record));
+}

@@ -1,0 +1,17 @@
+{
+  "experimentId": "EXP-20260914-PROBE001",
+  "elapsedMs": 112525,
+  "datasetSource": "rebuild",
+  "datasetVersion": "rd-1.0.0-1-c014a852fd8c8a5d",
+  "datasetRowCount": 142947,
+  "datasetSecurityCount": 3180,
+  "datasetSourceNote": "直读成功但该数据集不可用于撮合（dataset_version.id=390002 / 23978 行）：它是「首板事件窗口」投影（只含事件日 rd=0 行情，post/T+N 行情未并入 rows）⇒ 交易模拟在决策日下一交易日取不到行情，订单会被全部拒为 SUSPENDED（0 成交、曲线恒平）。已回落 buildResearchDataset 重建逐日面板。本次重建已继承该数据集的 universe 约束：板块=main、排除 ST/*ST（来源=build-config）。",
+  "trades": 185,
+  "distinctSecurities": 159,
+  "boardDistribution": {
+    "main": 159
+  },
+  "nonMainCount": 0,
+  "failures": 0,
+  "pass": true
+}

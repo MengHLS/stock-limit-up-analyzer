@@ -1,0 +1,39 @@
+=== 全仓行尾实测（工作区磁盘字节）===
+tracked 文件总数 = 1590
+PURE_LF=1584  PURE_CRLF=3  MIXED=0  EMPTY=3
+仓库本地 core.autocrlf = false
+.gitattributes 是否存在 = 不存在（无过滤器 ⇒ 工作区==blob）
+
+--- 按顶层目录 ---
+  server             PURE_LF=553
+  docs               PURE_LF=367
+  tests              PURE_LF=243
+  client             PURE_LF=202 EMPTY=1 PURE_CRLF=2
+  scripts            PURE_LF=120
+  drizzle            PURE_LF=57 EMPTY=1
+  (repo root)        PURE_LF=18 EMPTY=1
+  .workbuddy         PURE_LF=12 PURE_CRLF=1
+  shared             PURE_LF=11
+  patches            PURE_LF=1
+
+--- PURE_CRLF 文件清单（共 3 个）---
+  ✔ .workbuddy/memory/PROJECT_RULES.md  (crlf=564 lf=564)
+  ✔ client/src/App.tsx  (crlf=142 lf=142)
+  ✔ client/src/components/AppShell.tsx  (crlf=248 lf=248)
+
+--- MIXED 文件清单（共 0 个，应为 0）---
+
+--- 规则文件点名过的文件（记载 vs 磁盘）---
+  ✔ ROADMAP.md                                   crlf=0     lf=2454  PURE_LF
+  ✔ ROADMAP-CHANGELOG.md                         crlf=0     lf=2167  PURE_LF
+  ✔ README.MD                                    crlf=0     lf=57    PURE_LF
+  ✔ drizzle/schema.ts                            crlf=0     lf=1979  PURE_LF
+  ✔ client/src/App.tsx                           crlf=142   lf=142   PURE_CRLF
+  ✔ client/src/components/AppShell.tsx           crlf=248   lf=248   PURE_CRLF
+  ✔ client/src/index.css                         crlf=0     lf=247   PURE_LF
+  ✔ vite.config.ts                               crlf=0     lf=88    PURE_LF
+  ✔ server/_core/index.ts                        crlf=0     lf=197   PURE_LF
+  ✔ .workbuddy/memory/PROJECT_RULES.md           crlf=564   lf=564   PURE_CRLF
+  ✔ .workbuddy/memory/MEMORY.md                  crlf=0     lf=67    PURE_LF
+
+=== ALL CONSISTENT === mismatch=0 mixed=0

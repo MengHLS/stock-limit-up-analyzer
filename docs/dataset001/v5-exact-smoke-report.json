@@ -1,0 +1,47 @@
+{
+  "datasetCode": "first_limit_pullback",
+  "version": "v5-exact-smoke",
+  "versionId": 630001,
+  "jobId": "ds001-v5-exact-smoke-1790076516575-a65490c9",
+  "status": "COMPLETED",
+  "window": {
+    "from": "2026-08-01",
+    "to": "2026-09-04"
+  },
+  "filter": {
+    "boards": [
+      "main"
+    ],
+    "excludeSt": true,
+    "events": [
+      {
+        "relativeDay": 0,
+        "kind": "firstBoard"
+      }
+    ],
+    "preWindowDays": 20,
+    "postWindowDays": 20,
+    "outcomeHorizons": [
+      5,
+      10,
+      20
+    ],
+    "batchSize": 500
+  },
+  "counts": {
+    "events": 1285,
+    "prefixes": 26985,
+    "posts": 24138,
+    "paths": 24138,
+    "outcomes": 3855,
+    "totalRows": 80401
+  },
+  "processedRows": 79116,
+  "failedRows": 0,
+  "chunks": 1285,
+  "elapsedSec": 23.8,
+  "throughput": {
+    "rowsPerSec": 3378.2,
+    "eventsPerSec": 54
+  }
+}

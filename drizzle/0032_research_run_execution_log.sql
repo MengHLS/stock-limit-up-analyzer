@@ -1,0 +1,20 @@
+-- RESEARCH-002 — Run 执行批次日志（research_run.executionLogJson）
+--
+-- 背景（为什么必须有这一列）：
+--   `research_run.inputSnapshotJson` 的语义已由 RESEARCH-001 定死为「**执行时真实落定的
+--   配置快照，事后不得修改**」。但 Run 一旦支持「增量补跑」（只补算尚无结果的分析、
+--   不重跑已完成的），同一条 Run 的结果就会来自**多次执行**。若此时不动快照、也不另记
+--   一笔，读者会以为「这条 Run 只跑过快照里列出的那些分析」—— 那是静默不实。
+--
+--   故新增本列：与 `configJson` / `inputSnapshotJson` 同风格的**追加式批次日志**。
+--   每执行一批追加一条，如实记录「第几批 / 什么模式 / 跑了哪些分析 / 耗时 / 成败」。
+--   `inputSnapshotJson` 保持不可变；两者合起来才完整还原一条 Run 的执行史。
+--
+-- 口径：
+--   - 追加式（append-only）：只新增条目，不修改既有条目；
+--   - `sequence` 单调递增、不跳号；batch 1 = 首次全量执行；
+--   - ⚠️ 本列生效之前已存在的 Run（如 180001）其 batch 1 只体现在 `inputSnapshotJson` 里，
+--     日志自 batch 2 起记录 —— 这是**如实的版本边界**，不 backfill 伪造历史。
+--
+-- 幂等：TiDB 支持 ADD COLUMN IF NOT EXISTS（已实测可重复执行）。
+ALTER TABLE `research_run` ADD COLUMN IF NOT EXISTS `executionLogJson` longtext NULL;

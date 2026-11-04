@@ -1,0 +1,71 @@
+{
+  "capturedAt": "2026-09-06T13:49:14.469Z",
+  "options": {
+    "seed": 20260906,
+    "budget": 2,
+    "coreIndexCodes": [
+      "000001.SH",
+      "000300.SH",
+      "399001.SZ",
+      "399006.SZ"
+    ],
+    "calendarName": "index-daily-calendar",
+    "dataReady": false
+  },
+  "samplesPlanned": 23,
+  "samplesQueried": 23,
+  "sampleErrors": [],
+  "checks": {
+    "IDENTITY_CODE": {
+      "pass": 23,
+      "fail": 0
+    },
+    "LIFECYCLE_MASTER": {
+      "pass": 23,
+      "fail": 0
+    },
+    "TRADABILITY_MASTER_BOUND": {
+      "pass": 23,
+      "fail": 0
+    },
+    "INDUSTRY_PIT": {
+      "pass": 23,
+      "fail": 0
+    },
+    "INDUSTRY_GROWTH": {
+      "pass": 23,
+      "fail": 0
+    },
+    "CA_EFFECTIVE_SET": {
+      "pass": 23,
+      "fail": 0
+    },
+    "CA_KNOWN_SET": {
+      "pass": 23,
+      "fail": 0
+    },
+    "PRICE_DAY": {
+      "pass": 23,
+      "fail": 0
+    },
+    "LIQUIDITY_DAY": {
+      "pass": 23,
+      "fail": 0
+    },
+    "MARKET_STATE_DAY": {
+      "pass": 23,
+      "fail": 0
+    },
+    "KNOWLEDGE_CONSISTENCY": {
+      "pass": 23,
+      "fail": 0
+    },
+    "PIT_SUBSET_DIMS": {
+      "pass": 23,
+      "fail": 0
+    }
+  },
+  "failures": [],
+  "industryPitGuardExercised": 3,
+  "gate": "INCONCLUSIVE"
+}

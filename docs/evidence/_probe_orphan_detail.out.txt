@@ -1,0 +1,73 @@
+=== research_run 状态分布（全库） ===
+[{"status":"COMPLETED","c":15},{"status":"FAILED","c":1},{"status":"PENDING","c":1}]
+=== research_analysis 状态分布（全库） ===
+[{"status":"CANCELLED","c":1},{"status":"COMPLETED","c":322},{"status":"PENDING","c":1}]
+=== 非终态 Run（hasSnapshot = 是否执行过） ===
+[
+  {
+    "id": 630002,
+    "experimentId": 360002,
+    "runNo": 1,
+    "status": "PENDING",
+    "hasSnapshot": 0,
+    "hasExecLog": 0,
+    "sampleCount": null,
+    "startedAt": null,
+    "completedAt": null,
+    "errorCode": null,
+    "errorMessage": null,
+    "createdAt": "2026-09-16 15:42:08",
+    "experimentStatus": "DRAFT",
+    "experimentName": "首板后 5 日区间内震荡 → T+10 收益",
+    "datasetVersionId": 390002
+  }
+]
+=== 非终态 Analysis（父 Run 状态 + 结果行数） ===
+[
+  {
+    "id": 630001,
+    "runId": 630002,
+    "status": "PENDING",
+    "analysisType": "CONDITIONAL",
+    "name": "没跌破涨停日最低价的",
+    "planId": null,
+    "moduleKey": null,
+    "createdAt": "2026-09-16 15:59:21",
+    "completedAt": null,
+    "runStatus": "PENDING",
+    "experimentId": 360002,
+    "resultRows": 0
+  }
+]
+=== 涉及 Experiment 全景 ===
+[
+  {
+    "experimentId": 360002,
+    "experiment": {
+      "id": 360002,
+      "name": "首板后 5 日区间内震荡 → T+10 收益",
+      "status": "DRAFT",
+      "datasetVersionId": 390002,
+      "sampleCount": null,
+      "startedAt": null,
+      "completedAt": null,
+      "createdAt": "2026-09-16 15:41:55"
+    },
+    "runs": [
+      {
+        "id": 630002,
+        "runNo": 1,
+        "status": "PENDING",
+        "hasSnapshot": 0,
+        "startedAt": null,
+        "completedAt": null,
+        "createdAt": "2026-09-16 15:42:08",
+        "analyses": 1,
+        "completedAnalyses": 0
+      }
+    ]
+  }
+]
+=== 结论 ===
+非终态 Run = 1，其中 hasSnapshot=true（执行过）= 0
+非终态 Analysis = 1，其中父 Run 已终态（真孤儿）= 0

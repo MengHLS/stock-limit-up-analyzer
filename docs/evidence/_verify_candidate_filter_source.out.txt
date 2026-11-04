@@ -1,0 +1,223 @@
+
+==============================================================================
+[0] 缺陷复现：旧前端口径（first P0）会挑中哪条分析
+==============================================================================
+  Run 780002：11 条分析，其中 P0 2 条（下按 analysisId 升序 = 旧前端 find 的遍历顺序）
+    · #780001 [EVENT_STUDY] 条件数=0 requiredFlag=true 全样本基准 · 事件后收益 T+5/T+10
+    · #780004 [CONDITIONAL] 条件数=1 requiredFlag=true 回踩期未破首板日最低价（T+3） → T+5 收益
+  ok   旧口径 `find(a => a.priority === "P0")` 命中的是无条件基准分析 — 实得 #780001
+  ok   该基准分析条件数为 0（⇒ 旧口径调用必然被服务端拒绝） — conditionCount=0
+  ok   同 Run 存在带条件的守卫分析（⇒ 本来就有可用的来源，只是挑错了） — #780004 conditionCount=1
+
+==============================================================================
+[1] 聚合层新增 candidateEligibleAnalyses（排序的唯一实现）
+==============================================================================
+  candidateEligibleAnalyses = [
+  {
+    "analysisId": 780004,
+    "name": "回踩期未破首板日最低价（T+3） → T+5 收益",
+    "analysisType": "CONDITIONAL",
+    "priority": "P0",
+    "requiredFlag": true,
+    "conditionCount": 1,
+    "isQuestionEmphasis": false,
+    "why": "计划必需项 · P0 · 条件分析 · 1 条条件"
+  },
+  {
+    "analysisId": 780005,
+    "name": "回踩期未破首板日最低价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益",
+    "analysisType": "CONDITIONAL",
+    "priority": "P1",
+    "requiredFlag": false,
+    "conditionCount": 2,
+    "isQuestionEmphasis": false,
+    "why": "P1 · 条件分析 · 2 条条件"
+  },
+  {
+    "analysisId": 780006,
+    "name": "回踩期未破首板日最低价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益",
+    "analysisType": "CONDITIONAL",
+    "priority": "P1",
+    "requiredFlag": false,…
+  ok   清单非空 — count=3
+  ok   清单里每一条都 conditionCount > 0（硬门槛，不是「排后面」）
+  ok   无条件的 EVENT_STUDY 基准**不在**清单里
+  ok   清单第 0 条 = 带条件的守卫分析 — 实得 #780004
+  ok   清单第 0 条给出了排序理由（可审查，非黑箱） — 计划必需项 · P0 · 条件分析 · 1 条条件
+  ok   逐条分析视图已带 conditionCount 字段
+
+==============================================================================
+[1b] getOutcome({runId}) 与 getOutcome({questionId}) 必须等价
+==============================================================================
+  byRun      : planId=120002 datasetVersionId=390002 questionId=120002 moduleKeys=[
+  "BREAKOUT_SUCCESS_RESEARCH",
+  "PULLBACK_EFFECTIVENESS"
+]
+  questionAlignment.source = REQUIRED_FALLBACK（问题里没有点明具体精修维度，回落到本问题的 2 条必需项（核心口径）分析。）
+  ok   按 runId 定位也能解析出 planId — 实得 120002
+  ok   按 runId 定位也能解析出 datasetVersionId — 实得 390002
+  ok   按 runId 定位也能解析出 questionId — 实得 120002
+  byQuestion : planId=120002 datasetVersionId=390002 moduleKeys=[
+  "BREAKOUT_SUCCESS_RESEARCH",
+  "PULLBACK_EFFECTIVENESS"
+]
+  ok   两条入口的 planId 一致 — 120002 vs 120002
+  ok   两条入口的 datasetVersionId 一致
+  ok   两条入口的 moduleKeys 一致
+  ok   两条入口的 §13 提问锚点一致（emphasisAnalysisNames 随 plan 一起恢复） — REQUIRED_FALLBACK vs REQUIRED_FALLBACK
+  ok   两条入口的 candidateEligibleAnalyses 完全一致
+
+==============================================================================
+[2] createCandidate 不传 analysisId（产品 / Workbuddy 的真实调用方式）
+==============================================================================
+  candidateId = 630003
+  filterRuleSource = {
+  "origin": "AUTO",
+  "analysisId": 780004,
+  "analysisName": "回踩期未破首板日最低价（T+3） → T+5 收益",
+  "conditionCount": 1,
+  "eligibleCount": 3,
+  "eligible": [
+    {
+      "analysisId": 780004,
+      "name": "回踩期未破首板日最低价（T+3） → T+5 收益",
+      "analysisType": "CONDITIONAL",
+      "priority": "P0",
+      "requiredFlag": true,
+      "conditionCount": 1,
+      "isQuestionEmphasis": false,
+      "why": "计划必需项 · P0 · 条件分析 · 1 条条件"
+    },
+    {
+      "analysisId": 780005,
+      "name": "回踩期未破首板日最低价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益",
+      "analysisType": "CONDITIONAL",
+      "priority": "P1",
+      "requiredFlag": false,
+      "conditionCount": 2,
+      "isQuestionEmphasis": false,
+      "why": "P1 · 条件分析…
+  candidate.filterRule = {
+  "groups": [
+    {
+      "groupNo": 0,
+      "groupLogicalOperator": "AND",
+      "conditions": [
+        {
+          "groupNo": 0,
+          "sortOrder": 0,
+          "fieldName": "pullback_holds_event_low_3d",
+          "operator": "==",
+          "value": 1,
+          "logicalOperator": "AND",
+          "groupLogicalOperator": "AND"
+        }
+      ]
+    }
+  ]
+}
+  provenance = {
+  "candidateId": 630003,
+  "researchId": 510002,
+  "researchRunId": 780002,
+  "researchPlanId": 120002,
+  "datasetVersionId": 390002,
+  "findingIds": [
+    120003,
+    120004,
+    120002,
+    120005,
+    120006,
+    120001
+  ],
+  "conclusionId": 690001,
+  "complete": true
+}
+  ok   创建成功（旧口径在此必然失败）
+  ok   filterRuleSource.origin === "AUTO" — AUTO
+  ok   自动挑选落在带条件的守卫分析上 — 实得 #780004
+  ok   导出的条件数 > 0 — conditionCount=1
+  ok   候选真的带上了 filterRule（不是空口径）
+  ok   filterRule.groups 非空
+  ok   provenance 六项齐备
+  ok   sourceTraceJson 记下了来源分析（可追溯）
+
+==============================================================================
+[2b] createCandidate({ runId }) 与 { questionId } 产出同一份条件
+==============================================================================
+  candidateId = 630004  origin=AUTO  来源=#780004
+  ok   按 runId 调用同样成功
+  ok   导出的 filterRule 与 questionId 入口逐字一致
+  ok   §16 provenance 六项齐备（runId 入口修复前为 false） — {
+  "candidateId": 630004,
+  "researchId": 510002,
+  "researchRunId": 780002,
+  "researchPlanId": 120002,
+  "datasetVersionId": 390002,
+  "findingIds": [
+    120003,
+    120004,
+    120002,
+    120005,
+    120006,
+    120001
+  ],
+  "conclusionId": 690001,
+  "complete": true
+}
+
+==============================================================================
+[3] 显式传无条件的分析：仍拒绝，但错误信息必须告诉调用方该选哪条
+==============================================================================
+  $ BAD_REQUEST: 分析 780001（EVENT_STUDY）没有任何条件，无法导出候选题筛选条件。本 Run 可导出条件的分析：#780004 回踩期未破首板日最低价（T+3） → T+5 收益（1 条条件）；#780005 回踩期未破首板日最低价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益（2 条条件）；#780006 回踩期未破首板日最低价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益（2 条条件）
+  ok   显式传无条件分析被拒绝 — BAD_REQUEST: 分析 780001（EVENT_STUDY）没有任何条件，无法导出候选题筛选条件。本 Run 可导出条件的分析：#780004 回踩期未破首板日最低价（T+3） → T+5 收益（1 条条件）；#780005 回踩
+  ok   错误信息给出了「本 Run 可导出条件的分析」
+  ok   错误信息点名了正确的那条备选 — BAD_REQUEST: 分析 780001（EVENT_STUDY）没有任何条件，无法导出候选题筛选条件。本 Run 可导出条件的分析：#780004 回踩期未破首板日最低价（T+3） → T+5 收益（1 条条件）；#780005 回踩期未破首板日最低价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益（2 条条件）；#780006 回踩期未破首板日最低价 且 回踩期最小量能比 
+
+==============================================================================
+[4] 显式传有效分析：与自动挑选结果逐字一致
+==============================================================================
+  candidateId = 630005  filterRule = {
+  "groups": [
+    {
+      "groupNo": 0,
+      "groupLogicalOperator": "AND",
+      "conditions": [
+        {
+          "groupNo": 0,
+          "sortOrder": 0,
+          "fieldName": "pullback_holds_event_low_3d",
+          "operator": "==",
+          "value": 1,
+          "logicalOperator": "AND",
+          "groupLogicalOperator": "AND"
+        }
+      ]
+    }
+  ]
+}
+  ok   显式指定有效分析创建成功
+  ok   filterRuleSource.origin === "EXPLICIT" — EXPLICIT
+  ok   显式与自动两条路径导出的 filterRule 逐字一致（同一份分组逻辑）
+
+==============================================================================
+[5] 前端展示层纯函数（从 React-free 模块直接 import，零重复实现）
+==============================================================================
+  ok   AUTO 标签 — 系统自动选择
+  ok   EXPLICIT 标签 — 调用方指定
+  ok   NONE 标签（必须与「有条件」明显区分） — 无可用条件
+
+==============================================================================
+[6] 收尾：清理探针产生的候选草稿
+==============================================================================
+  ok   候选 #630003 已删除 — null
+  ok   候选 #630004 已删除 — null
+  ok   候选 #630005 已删除 — null
+  ok   清理后确实读不到（不是静默失败）
+
+==============================================================================
+汇总
+==============================================================================
+  检查项 41 / 失败 0
+  结论：ALL PASS —— 缺陷已修复且在真实失败数据上验证通过
+  建于并已清理的候选：#630003, #630004, #630005

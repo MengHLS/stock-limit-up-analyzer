@@ -1,0 +1,185 @@
+{
+  "generatedAt": "2026-09-13T14:43:52.025Z",
+  "database": "TiDB(TiDB Cloud)",
+  "tables": [
+    {
+      "table": "backtest_runs",
+      "exists": true,
+      "rowCount": 1,
+      "error": null,
+      "columns": [
+        {
+          "name": "id",
+          "type": "int",
+          "nullable": "NO"
+        },
+        {
+          "name": "paramsHash",
+          "type": "varchar(64)",
+          "nullable": "NO"
+        },
+        {
+          "name": "paramsJson",
+          "type": "text",
+          "nullable": "NO"
+        },
+        {
+          "name": "summaryJson",
+          "type": "text",
+          "nullable": "YES"
+        },
+        {
+          "name": "resultJson",
+          "type": "longtext",
+          "nullable": "YES"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": "NO"
+        }
+      ],
+      "latest": [
+        {
+          "id": 1,
+          "paramsHash": "ed52b73eec5e554f3a4ce922c8efde474512c66e",
+          "paramsHead": "{\"observationDays\":1}",
+          "summaryHead": "{\"observationDays\":1,\"appliedMinScore\":65,\"totalSamples\":775,\"successCount\":300,\"successRate\":38.7,\"averageClosePremium\":3.21,\"tPlus1To2AverageReturn\":0.84,\"realisticTotalReturn\":215.98,\"realisticMaxDrawdown\":40.41,\"realisticWinRate\":43.6,\"realisticTradeCount\":775}",
+          "resultChars": 5610196,
+          "createdAt": "2026-09-04 16:27:24"
+        }
+      ]
+    },
+    {
+      "table": "paper_trading_runs",
+      "exists": true,
+      "rowCount": 1,
+      "error": null,
+      "columns": [
+        {
+          "name": "id",
+          "type": "int",
+          "nullable": "NO"
+        },
+        {
+          "name": "label",
+          "type": "varchar(120)",
+          "nullable": "NO"
+        },
+        {
+          "name": "strategyKey",
+          "type": "varchar(32)",
+          "nullable": "NO"
+        },
+        {
+          "name": "paramsJson",
+          "type": "text",
+          "nullable": "NO"
+        },
+        {
+          "name": "initialCapital",
+          "type": "int",
+          "nullable": "NO"
+        },
+        {
+          "name": "status",
+          "type": "enum('active','paused','completed')",
+          "nullable": "NO"
+        },
+        {
+          "name": "lastProcessedDate",
+          "type": "date",
+          "nullable": "YES"
+        },
+        {
+          "name": "stateJson",
+          "type": "longtext",
+          "nullable": "YES"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": "NO"
+        },
+        {
+          "name": "updatedAt",
+          "type": "timestamp",
+          "nullable": "NO"
+        }
+      ]
+    },
+    {
+      "table": "research_run",
+      "exists": true,
+      "rowCount": 12,
+      "error": null,
+      "columns": [
+        {
+          "name": "id",
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        {
+          "name": "experimentId",
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        {
+          "name": "runNo",
+          "type": "int",
+          "nullable": "NO"
+        },
+        {
+          "name": "status",
+          "type": "varchar(20)",
+          "nullable": "NO"
+        },
+        {
+          "name": "configJson",
+          "type": "longtext",
+          "nullable": "YES"
+        },
+        {
+          "name": "inputSnapshotJson",
+          "type": "longtext",
+          "nullable": "YES"
+        },
+        {
+          "name": "sampleCount",
+          "type": "int",
+          "nullable": "YES"
+        },
+        {
+          "name": "startedAt",
+          "type": "timestamp",
+          "nullable": "YES"
+        },
+        {
+          "name": "completedAt",
+          "type": "timestamp",
+          "nullable": "YES"
+        },
+        {
+          "name": "errorCode",
+          "type": "varchar(64)",
+          "nullable": "YES"
+        },
+        {
+          "name": "errorMessage",
+          "type": "text",
+          "nullable": "YES"
+        },
+        {
+          "name": "createdAt",
+          "type": "timestamp",
+          "nullable": "NO"
+        },
+        {
+          "name": "executionLogJson",
+          "type": "longtext",
+          "nullable": "YES"
+        }
+      ]
+    }
+  ]
+}

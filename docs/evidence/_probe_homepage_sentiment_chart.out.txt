@@ -1,0 +1,77 @@
+== 首页底部「最高连板折线图 + 日期范围滑块」· 真实浏览器探针 == 2026-09-20T14:35:57.929Z
+BASE=http://127.0.0.1:3000 BROWSER=chrome.exe PORT=25999
+CDP 已连接
+
+--- 0. 主题准备 ---
+  INFO  进入页面时 localStorage.theme  → null
+
+--- A/B/C. 夜间：首页出图、图表结构、滑块位置 ---
+  INFO  首页首个区块（指数卡）出现耗时  → 227ms
+  INFO  底部折线图**画出折线**耗时（含服务端取数+计算，冷/热见下）  → 2914ms
+  PASS  首页底部折线图真的渲染出折线  → ms=2914
+  PASS  折线图不是首屏的堵点（指数卡更早出现）  → 指数=227ms 折线=2914ms
+  夜间量据：{"isLastChild":true,"childCount":5,"dots":90,"curve":{"stroke":"rgb(251, 146, 60)","strokeWidth":"3px","contrast":7.18},"slider":{"label":"90 个交易日","belowChart":true,"surface":"#221d1d"},"badge":"2026年05月15日 至 2026年09月18日","rotated":0}
+  PASS  区块存在于首页
+  PASS  区块是首页内容容器的**最后一个**子元素（= 最下面）  → siblings=["div[card]","div[card]","div[card]","div[card]","div"]
+  PASS  卡片标题 = 「每日最高连板折线图」  → 每日最高连板折线图
+  PASS  折线本体存在（.recharts-line-curve）  → rgb(251, 146, 60)
+  PASS  默认窗口 = 最近 90 个交易日（可见点数 = 90）  → dots=90
+  PASS  不画旋转的 Y 轴标题（首页硬口径）  → count=0
+  PASS  Y 轴刻度文字都在 SVG 内（不越界被裁）  → ticks=4 outside=0
+  PASS  区间徽标显示日期范围  → 2026年05月15日 至 2026年09月18日
+  PASS  卡片头右侧仍有通往完整分析的文本链接  → {"tag":"a","href":"/sentiment-analysis"}
+  PASS  日期范围滑块存在
+  PASS  滑块在折线图**下面**（几何判据：slider.top > chart.bottom）  → chart.bottom=3222 slider.top=3234
+  PASS  滑块有可见表面（不是透明）  → surface=#221d1d from=div
+  PASS  滑块显示可见交易日数  → 90 个交易日
+  PASS  滑块显示的交易日数 = 主图可见点数（两处联动一致）  → slider=90 个交易日 dots=90
+
+--- D. 夜间可读性（对比度 = 文字色 vs 真实合成背景）---
+  PASS  夜间：卡片标题对比度 ≥ 4.5  → contrast=12.8 bg=#202023
+  PASS  夜间：卡片副标题对比度 ≥ 4.5  → contrast=6.4
+  PASS  夜间：区间徽标文字对比度 ≥ 4.5  → contrast=8.39 bg=#231a17
+  PASS  夜间：滑块文字对比度 ≥ 4.5  → contrast=7.88
+  PASS  夜间：折线（图形对象）对卡片底对比度 ≥ 3  → stroke=rgb(251, 146, 60) contrast=7.18
+  INFO  布局已稳定（连续 4 次采样一致）  → {"h":3896,"skeletons":0,"top":3282}
+  INFO  已把 dark 稳定滚入视口  → {"top":486,"bottom":1052,"vh":1100} 迭代=1
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_home_sentiment_chart.dark.png  clip={"x":304,"y":3274,"w":1047,"h":582}
+
+--- D2. 悬浮数据点 ⇒ tooltip（夜间）---
+  INFO  布局已稳定（连续 4 次采样一致）  → {"h":3896,"skeletons":0,"top":3282}
+  INFO  已把 首页图表区块 稳定滚入视口  → {"top":486,"bottom":1052,"vh":1100} 迭代=1
+  INFO  悬浮点与命中元素  → {"x":851,"y":803,"hit":"circle","inChart":true}
+  PASS  悬浮点落在图表绘制区内（否则 recharts 不会弹 tooltip）  → {"x":851,"y":803,"hit":"circle","inChart":true}
+  INFO  tooltip 触发方式  → CDP 真实鼠标移动
+  tooltip：{"found":true,"visibility":"visible","text":"2026年07月20日最高连板：3板股票：立新能源","bg":"oklch(0.255 0.005 286)","opacity":"1","bgOpaque":true,"contrast":12.93}
+  PASS  悬浮后 tooltip 可见且带当日最高连板文案  → 2026年07月20日最高连板：3板股票：立新能源
+  PASS  夜间：tooltip 表面不透明（不依赖页面底色）  → oklch(0.255 0.005 286)
+  PASS  夜间：tooltip 文字对比度 ≥ 4.5  → contrast=12.93
+
+--- C2. 真实鼠标拖动右端手柄（用户点名的「日期选择滑块」）---
+  INFO  布局已稳定（连续 4 次采样一致）  → {"h":3896,"skeletons":0,"top":3282}
+  INFO  已把 日期范围滑块 稳定滚入视口  → {"top":931,"bottom":999,"vh":1100} 迭代=1
+  INFO  按点命中元素  → {"tag":"div","aria":"调整结束日期"}
+  PASS  按点确实落在右端手柄上（不是拖了个空）  → {"tag":"div","aria":"调整结束日期"}
+  拖动前：{"dots":90,"label":"90 个交易日","badge":"2026年05月15日 至 2026年09月18日"}
+  拖动后：{"dots":29,"label":"29 个交易日","badge":"2026年05月15日 至 2026年06月25日"}
+  PASS  拖动右端手柄后主图可见点数变少（真的联动）  → before=90 after=29
+  PASS  拖动后滑块交易日数 = 新的可见点数  → slider=29 个交易日 dots=29
+  PASS  拖动后区间徽标右端日期左移（区间确实变了）  → before=2026年05月15日 至 2026年09月18日 after=2026年05月15日 至 2026年06月25日
+  INFO  布局已稳定（连续 4 次采样一致）  → {"h":3896,"skeletons":0,"top":3282}
+  INFO  已把 dark.dragged 稳定滚入视口  → {"top":486,"bottom":1052,"vh":1100} 迭代=1
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_home_sentiment_chart.dark.dragged.png  clip={"x":304,"y":3274,"w":1047,"h":582}
+
+--- E. 亮色基线（localStorage=light + reload；不能只摘 <html>.dark）---
+  INFO  亮色下再次出图耗时（服务端结果缓存应命中）  → 1175ms
+  亮色量据：{"theme":"light","curve":{"stroke":"rgb(234, 88, 12)","strokeWidth":"3px","contrast":3.56},"title":{"text":"每日最高连板折线图","color":"oklch(0.2 0.02 240)","colorHex":"#0e171e","effBg":"#ffffff","backdropFrom":"div[card]","fontSize":"16px","contrast":18.1},"slider":"90 个交易日"}
+  PASS  亮色主题真的生效（html 无 .dark 且折线回到日间档 #ea580c = rgb(234,88,12)）  → class="" stroke=rgb(234, 88, 12)
+  PASS  亮色：卡片标题对比度 ≥ 4.5  → contrast=18.1
+  PASS  亮色：卡片副标题对比度 ≥ 4.5  → contrast=5.98
+  PASS  亮色：滑块文字对比度 ≥ 4.5  → contrast=6.16
+  PASS  亮色：折线（图形对象）对卡片底对比度 ≥ 3  → contrast=3.56
+  PASS  亮色下可见点数仍是默认窗口 90  → dots=90
+  INFO  布局已稳定（连续 4 次采样一致）  → {"h":3896,"skeletons":0,"top":3282}
+  INFO  已把 light 稳定滚入视口  → {"top":486,"bottom":1052,"vh":1100} 迭代=1
+  截图落盘：D:\stock-limit-up-analyzer\docs\evidence\_shot_home_sentiment_chart.light.png  clip={"x":304,"y":3274,"w":1047,"h":582}
+
+=== 汇总：PASS 35 / FAIL 0 / SKIP 0 ===

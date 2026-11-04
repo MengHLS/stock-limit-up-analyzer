@@ -1,0 +1,120 @@
+{
+  "capturedAt": "2026-09-06T08:08:14.884Z",
+  "migrationLedgerRows": 24,
+  "migrationLast": {
+    "id": 414155,
+    "hash": "e68e3fe9d3e3b568",
+    "created_at": "1788676035482"
+  },
+  "stock_daily_prices": {
+    "rows": 748519,
+    "min_tradeDate": "Wed Jan 02 2019 00:00:00 GMT+0800 (中国标准时间)",
+    "max_tradeDate": "Fri Sep 04 2026 00:00:00 GMT+0800 (中国标准时间)",
+    "min_sourceUpdatedAt": "Fri Sep 04 2026 14:32:54 GMT+0800 (中国标准时间)",
+    "max_sourceUpdatedAt": "Sun Sep 06 2026 08:08:06 GMT+0800 (中国标准时间)"
+  },
+  "research_securities": {
+    "rows": 0
+  },
+  "research_security_identifier_history": {
+    "rows": 0
+  },
+  "research_security_status_history": {
+    "rows": 0
+  },
+  "industry_assignments": {
+    "rows": 0
+  },
+  "index_master": {
+    "rows": 0
+  },
+  "index_daily": {
+    "rows": 0
+  },
+  "liquidity_daily": {
+    "rows": 0
+  },
+  "corporate_actions": {
+    "rows": 0
+  },
+  "adjustment_factors": {
+    "rows": 0
+  },
+  "backfill_checkpoints": {
+    "rows": 174,
+    "min_tradeDate": "Wed Jan 02 2019 00:00:00 GMT+0800 (中国标准时间)",
+    "max_tradeDate": "Tue Sep 17 2019 00:00:00 GMT+0800 (中国标准时间)",
+    "min_completedAt": "Sun Sep 06 2026 07:45:36 GMT+0800 (中国标准时间)",
+    "max_completedAt": "Sun Sep 06 2026 08:08:05 GMT+0800 (中国标准时间)"
+  },
+  "ohlcvRange": {
+    "min": "Wed Jan 02",
+    "max": "Fri Sep 04"
+  },
+  "ohlcvDistinctStocks": 4855,
+  "ohlcvDuplicateKeys": 0,
+  "ohlcvByYear": [
+    {
+      "year": 2019,
+      "rows": 632187,
+      "tradingDays": 174,
+      "stocks": 3830
+    },
+    {
+      "year": 2024,
+      "rows": 1,
+      "tradingDays": 1,
+      "stocks": 1
+    },
+    {
+      "year": 2025,
+      "rows": 21483,
+      "tradingDays": 65,
+      "stocks": 1404
+    },
+    {
+      "year": 2026,
+      "rows": 94848,
+      "tradingDays": 164,
+      "stocks": 3288
+    }
+  ],
+  "checkpoints": [
+    {
+      "status": "SUCCESS",
+      "count": 174
+    }
+  ],
+  "checkpointRange": {
+    "min": "Wed Jan 02",
+    "max": "Tue Sep 17"
+  },
+  "schema_industry_assignments": {
+    "hasSecurityCode": true,
+    "securityIdNullable": true,
+    "uniqueIndexFirstCols": [
+      "uq_industry_assign_security_effective"
+    ]
+  },
+  "schema_liquidity_daily": {
+    "hasSecurityCode": true,
+    "securityIdNullable": true,
+    "uniqueIndexFirstCols": [
+      "uq_liquidity_daily_security_date"
+    ]
+  },
+  "schema_corporate_actions": {
+    "hasSecurityCode": true,
+    "securityIdNullable": true,
+    "uniqueIndexFirstCols": [
+      "uq_corporate_action_security_date_type"
+    ]
+  },
+  "schema_adjustment_factors": {
+    "hasSecurityCode": true,
+    "securityIdNullable": true,
+    "uniqueIndexFirstCols": [
+      "uq_adjustment_factor_security_date"
+    ]
+  }
+}

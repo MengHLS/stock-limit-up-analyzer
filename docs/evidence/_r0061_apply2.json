@@ -1,0 +1,495 @@
+{
+  "mode": "apply",
+  "statementsTotal": 6,
+  "executed": [],
+  "skipped": [
+    "column:research_strategy_candidate.sourceDatasetVersionId",
+    "column:research_strategy_candidate.sourceResearchRunId",
+    "column:research_strategy_candidate.sourceTraceJson",
+    "column:research_strategy_candidate.sourceDatasetDivergenceReason",
+    "index:research_strategy_candidate.idx_research_candidate_source_dataset_version",
+    "table:strategy_research_provenance"
+  ],
+  "candidateColumns": [
+    {
+      "name": "research_strategy_candidate.sourceDatasetVersionId",
+      "present": true,
+      "type": "bigint",
+      "expectedType": "bigint",
+      "nullable": "YES",
+      "expectedNullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "research_strategy_candidate.sourceResearchRunId",
+      "present": true,
+      "type": "bigint",
+      "expectedType": "bigint",
+      "nullable": "YES",
+      "expectedNullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "research_strategy_candidate.sourceTraceJson",
+      "present": true,
+      "type": "longtext",
+      "expectedType": "longtext",
+      "nullable": "YES",
+      "expectedNullable": "YES",
+      "ok": true
+    },
+    {
+      "name": "research_strategy_candidate.sourceDatasetDivergenceReason",
+      "present": true,
+      "type": "varchar(512)",
+      "expectedType": "varchar(512)",
+      "nullable": "YES",
+      "expectedNullable": "YES",
+      "ok": true
+    }
+  ],
+  "candidateIndex": {
+    "name": "idx_research_candidate_source_dataset_version",
+    "columns": "sourceDatasetVersionId",
+    "present": true
+  },
+  "provenance": {
+    "exists": true,
+    "rows": 0,
+    "columns": [
+      {
+        "name": "id",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "PRI",
+        "expectedKey": "PRI",
+        "ok": true
+      },
+      {
+        "name": "strategyVersionId",
+        "present": true,
+        "type": "int",
+        "expectedType": "int",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "UNI",
+        "expectedKey": "UNI",
+        "ok": true
+      },
+      {
+        "name": "strategyId",
+        "present": true,
+        "type": "varchar(64)",
+        "expectedType": "varchar(64)",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "MUL",
+        "expectedKey": "MUL",
+        "ok": true
+      },
+      {
+        "name": "strategyVersion",
+        "present": true,
+        "type": "varchar(32)",
+        "expectedType": "varchar(32)",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      },
+      {
+        "name": "sourceCandidateId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "MUL",
+        "expectedKey": "MUL",
+        "ok": true
+      },
+      {
+        "name": "sourceConclusionId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "MUL",
+        "expectedKey": "MUL",
+        "ok": true
+      },
+      {
+        "name": "sourceExperimentId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      },
+      {
+        "name": "sourceResearchRunId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      },
+      {
+        "name": "sourceDatasetVersionId",
+        "present": true,
+        "type": "bigint",
+        "expectedType": "bigint",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      },
+      {
+        "name": "sourceDatasetLabel",
+        "present": true,
+        "type": "varchar(96)",
+        "expectedType": "varchar(96)",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      },
+      {
+        "name": "sourceSnapshotJson",
+        "present": true,
+        "type": "longtext",
+        "expectedType": "longtext",
+        "nullable": "YES",
+        "expectedNullable": "YES",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      },
+      {
+        "name": "origin",
+        "present": true,
+        "type": "varchar(16)",
+        "expectedType": "varchar(16)",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      },
+      {
+        "name": "createdAt",
+        "present": true,
+        "type": "timestamp",
+        "expectedType": "timestamp",
+        "nullable": "NO",
+        "expectedNullable": "NO",
+        "key": "",
+        "expectedKey": "",
+        "ok": true
+      }
+    ],
+    "indexes": [
+      {
+        "name": "uq_strategy_research_provenance_version",
+        "present": true,
+        "unique": true,
+        "expectedUnique": true,
+        "columns": "strategyVersionId",
+        "expectedColumns": "strategyVersionId",
+        "ok": true
+      },
+      {
+        "name": "idx_strategy_research_provenance_strategy",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "strategyId",
+        "expectedColumns": "strategyId",
+        "ok": true
+      },
+      {
+        "name": "idx_strategy_research_provenance_conclusion",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "sourceConclusionId",
+        "expectedColumns": "sourceConclusionId",
+        "ok": true
+      },
+      {
+        "name": "idx_strategy_research_provenance_candidate",
+        "present": true,
+        "unique": false,
+        "expectedUnique": false,
+        "columns": "sourceCandidateId",
+        "expectedColumns": "sourceCandidateId",
+        "ok": true
+      }
+    ]
+  },
+  "fk": {
+    "candidate": 0,
+    "provenance": 0,
+    "schemaTotal": 0
+  },
+  "schemaUnchanged": [
+    {
+      "table": "research_experiment",
+      "ok": true,
+      "expected": 12,
+      "actual": 12
+    },
+    {
+      "table": "research_hypothesis",
+      "ok": true,
+      "expected": 10,
+      "actual": 10
+    },
+    {
+      "table": "research_run",
+      "ok": true,
+      "expected": 13,
+      "actual": 13
+    },
+    {
+      "table": "research_analysis",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_analysis_condition",
+      "ok": true,
+      "expected": 10,
+      "actual": 10
+    },
+    {
+      "table": "research_analysis_metric",
+      "ok": true,
+      "expected": 7,
+      "actual": 7
+    },
+    {
+      "table": "research_result",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_conclusion",
+      "ok": true,
+      "expected": 11,
+      "actual": 11
+    },
+    {
+      "table": "research_artifact",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_analysis_template",
+      "ok": true,
+      "expected": 6,
+      "actual": 6
+    },
+    {
+      "table": "research_analysis_template_item",
+      "ok": true,
+      "expected": 9,
+      "actual": 9
+    },
+    {
+      "table": "research_strategy_candidate",
+      "ok": true,
+      "expected": 18,
+      "actual": 18
+    }
+  ],
+  "rowCounts": {
+    "before": {
+      "research_experiment": 2,
+      "research_hypothesis": 0,
+      "research_run": 8,
+      "research_analysis": 19,
+      "research_analysis_condition": 11,
+      "research_analysis_metric": 0,
+      "research_result": 674,
+      "research_conclusion": 7,
+      "research_strategy_candidate": 0,
+      "research_artifact": 0,
+      "research_analysis_template": 0,
+      "research_analysis_template_item": 0,
+      "strategy_versions": 0,
+      "strategy_version_datasets": 0,
+      "strategy_parameters": 0,
+      "strategy_entry_rules": 0,
+      "strategy_exit_rules": 0,
+      "strategy_execution_rules": 0,
+      "dataset_version": 2,
+      "dataset_definition": 1
+    },
+    "after": {
+      "research_experiment": 2,
+      "research_hypothesis": 0,
+      "research_run": 8,
+      "research_analysis": 19,
+      "research_analysis_condition": 11,
+      "research_analysis_metric": 0,
+      "research_result": 674,
+      "research_conclusion": 7,
+      "research_strategy_candidate": 0,
+      "research_artifact": 0,
+      "research_analysis_template": 0,
+      "research_analysis_template_item": 0,
+      "strategy_versions": 0,
+      "strategy_version_datasets": 0,
+      "strategy_parameters": 0,
+      "strategy_entry_rules": 0,
+      "strategy_exit_rules": 0,
+      "strategy_execution_rules": 0,
+      "dataset_version": 2,
+      "dataset_definition": 1
+    },
+    "diff": [
+      {
+        "table": "research_experiment",
+        "before": 2,
+        "after": 2,
+        "changed": false
+      },
+      {
+        "table": "research_hypothesis",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_run",
+        "before": 8,
+        "after": 8,
+        "changed": false
+      },
+      {
+        "table": "research_analysis",
+        "before": 19,
+        "after": 19,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_condition",
+        "before": 11,
+        "after": 11,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_metric",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_result",
+        "before": 674,
+        "after": 674,
+        "changed": false
+      },
+      {
+        "table": "research_conclusion",
+        "before": 7,
+        "after": 7,
+        "changed": false
+      },
+      {
+        "table": "research_strategy_candidate",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_artifact",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_template",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "research_analysis_template_item",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "strategy_versions",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "strategy_version_datasets",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "strategy_parameters",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "strategy_entry_rules",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "strategy_exit_rules",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "strategy_execution_rules",
+        "before": 0,
+        "after": 0,
+        "changed": false
+      },
+      {
+        "table": "dataset_version",
+        "before": 2,
+        "after": 2,
+        "changed": false
+      },
+      {
+        "table": "dataset_definition",
+        "before": 1,
+        "after": 1,
+        "changed": false
+      }
+    ]
+  },
+  "notes": [
+    "provenance 行数 = 0"
+  ],
+  "failures": [],
+  "pass": true
+}

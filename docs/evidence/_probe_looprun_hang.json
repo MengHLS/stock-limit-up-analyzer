@@ -1,0 +1,82 @@
+{
+  "A_frontend_shape": {
+    "ms": 3,
+    "ok": false,
+    "name": "TRPCError",
+    "message": "[\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"dateRange\",\n      \"startDate\"\n    ],\n    \"message\": \"startDate 必填\"\n  },\n  {\n    \"origin\": \"string\",\n    \"code\": \"too_small\",\n    \"minimum\": 1,\n    \"inclusive\": true,\n    \"path\": [\n      \"dateRange\",\n      \"endDate\"\n    ],\n    \"message\": \"endDate 必填\"\n  }\n]"
+  },
+  "B_real_dates": {
+    "ms": 7,
+    "ok": true,
+    "experimentId": "EXP-20260913-766D87CC",
+    "runnerInjected": [],
+    "overall": {
+      "status": "NO_STAGE_EXECUTED",
+      "executedStageCount": 0,
+      "blockedStageCount": 14,
+      "skippedStageCount": 0,
+      "firstBlockedReasonCode": "CL_DATA_NOT_INJECTED",
+      "synthetic": false,
+      "note": "首阻塞 data（CL_DATA_NOT_INJECTED）：真实数据链未注入（缺 data 执行器 / dataProvider）；不伪造 datasetSummary——接真实 DB 在 VALIDATED 阶段"
+    },
+    "blockedSummary": [
+      {
+        "stageId": "data",
+        "reasonCode": "CL_DATA_NOT_INJECTED"
+      },
+      {
+        "stageId": "research",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "strategy",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "backtest",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "evaluation",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "optimization",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "robustness",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "oos",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "overfitting",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "regime",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "paper",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "review",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "discipline",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      },
+      {
+        "stageId": "finalize",
+        "reasonCode": "CL_UPSTREAM_BLOCKED"
+      }
+    ]
+  },
+  "totalMs": 10
+}

@@ -1,0 +1,307 @@
+=== [1] 既有「回踩/破位」分析的条件字段（Dataset 390002 相关 Run）===
+
+#540013 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+5 未破位 且 缩量≤50%（5日窗口） → 之后5日收益
+  g0.s0  pullback_holds_event_low_5d == 1
+  g0.s1  pullback_min_volume_ratio_5d <= 0.5
+
+#540012 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+2 未破位（早确认） → 之后5日收益
+  g0.s0  pullback_holds_event_low_2d == 1
+
+#540011 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 未破位 且 收盘相对首板日为正（守线 + 翻红） → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  obs_3d.return_from_event_close > 0
+
+#540010 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 未破位 且 缩量≤50% 且 末日放量（量能比>1） → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_min_volume_ratio_3d <= 0.5
+  g0.s2  pullback_last_volume_ratio_3d > 1
+
+#540009 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 未破位 且 缩量≤50% 且 收盘已高于首板日收盘 → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_min_volume_ratio_3d <= 0.5
+  g0.s2  pullback_close_ratio_3d >= 1
+
+#540008 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 未破位 但 未缩量（>50%） → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_min_volume_ratio_3d > 0.5
+
+#540007 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 未破位 且 极致缩量≤30% → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_min_volume_ratio_3d <= 0.3
+
+#540006 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 未破位 且 缩量≤50%（缩量洗盘验证） → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_min_volume_ratio_3d <= 0.5
+
+#540005 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 回撤 5%+ 且未破位 → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_close_ratio_3d < 0.95
+
+#540004 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 回撤 2~5%（标准回踩）且未破位 → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_close_ratio_3d >= 0.95
+  g0.s2  pullback_close_ratio_3d <= 0.98
+
+#540003 [CONDITIONAL] target=future_return_5d
+  name=观察日·T+3 回撤 0~2%（浅回踩）且未破位 → 之后5日收益
+  g0.s0  pullback_holds_event_low_3d == 1
+  g0.s1  pullback_close_ratio_3d >= 0.98
+  g0.s2  pullback_close_ratio_3d <= 1
+
+#510045 [CONDITIONAL] target=segment_max_drawdown_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤8%+ → 之后5日最深跌幅
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.08
+
+#510044 [CONDITIONAL] target=segment_max_drawdown_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤6~8% → 之后5日最深跌幅
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.06
+  g0.s2  future_return_5d > -0.08
+
+#510043 [CONDITIONAL] target=segment_max_drawdown_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤4~6% → 之后5日最深跌幅
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.04
+  g0.s2  future_return_5d > -0.06
+
+#510042 [CONDITIONAL] target=segment_max_drawdown_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤2~4% → 之后5日最深跌幅
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.02
+  g0.s2  future_return_5d > -0.04
+
+#510041 [CONDITIONAL] target=segment_max_drawdown_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤0~2% → 之后5日最深跌幅
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= 0
+  g0.s2  future_return_5d > -0.02
+
+#510040 [CONDITIONAL] target=segment_max_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤8%+ → 之后5日最大有利偏移
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.08
+
+#510039 [CONDITIONAL] target=segment_max_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤6~8% → 之后5日最大有利偏移
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.06
+  g0.s2  future_return_5d > -0.08
+
+#510038 [CONDITIONAL] target=segment_max_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤4~6% → 之后5日最大有利偏移
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.04
+  g0.s2  future_return_5d > -0.06
+
+#510037 [CONDITIONAL] target=segment_max_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤2~4% → 之后5日最大有利偏移
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.02
+  g0.s2  future_return_5d > -0.04
+
+#510036 [CONDITIONAL] target=segment_max_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤0~2% → 之后5日最大有利偏移
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= 0
+  g0.s2  future_return_5d > -0.02
+
+#510035 [CONDITIONAL] target=segment_return_5_8d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤8%+ → 之后3日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.08
+
+#510034 [CONDITIONAL] target=segment_return_5_8d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤6~8% → 之后3日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.06
+  g0.s2  future_return_5d > -0.08
+
+#510033 [CONDITIONAL] target=segment_return_5_8d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤4~6% → 之后3日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.04
+  g0.s2  future_return_5d > -0.06
+
+#510032 [CONDITIONAL] target=segment_return_5_8d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤2~4% → 之后3日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.02
+  g0.s2  future_return_5d > -0.04
+
+#510031 [CONDITIONAL] target=segment_return_5_8d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤0~2% → 之后3日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= 0
+  g0.s2  future_return_5d > -0.02
+
+#510030 [CONDITIONAL] target=segment_return_5_6d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤8%+ → 之后1日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.08
+
+#510029 [CONDITIONAL] target=segment_return_5_6d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤6~8% → 之后1日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.06
+  g0.s2  future_return_5d > -0.08
+
+#510028 [CONDITIONAL] target=segment_return_5_6d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤4~6% → 之后1日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.04
+  g0.s2  future_return_5d > -0.06
+
+#510027 [CONDITIONAL] target=segment_return_5_6d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤2~4% → 之后1日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.02
+  g0.s2  future_return_5d > -0.04
+
+#510026 [CONDITIONAL] target=segment_return_5_6d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤0~2% → 之后1日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= 0
+  g0.s2  future_return_5d > -0.02
+
+#510025 [CONDITIONAL] target=segment_max_drawdown_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 已回撤(相对首板收盘) → 之后5日最深跌幅
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d < 0
+
+#510024 [CONDITIONAL] target=segment_max_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 已回撤(相对首板收盘) → 之后5日最大有利偏移
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d < 0
+
+#510023 [CONDITIONAL] target=segment_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 已回撤(相对首板收盘) → 之后5日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d < 0
+
+#510022 [CONDITIONAL] target=segment_return_5_8d
+  name=首板后回撤·T+5 未破首板最低价 且 已回撤(相对首板收盘) → 之后3日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d < 0
+
+#510021 [CONDITIONAL] target=segment_return_5_6d
+  name=首板后回撤·T+5 未破首板最低价 且 已回撤(相对首板收盘) → 之后1日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d < 0
+
+#510020 [CONDITIONAL] target=segment_max_drawdown_5_10d
+  name=首板后回撤·T+5 已回撤(相对首板收盘) → 之后5日最深跌幅
+  g0.s0  future_return_5d < 0
+
+#510019 [CONDITIONAL] target=segment_max_return_5_10d
+  name=首板后回撤·T+5 已回撤(相对首板收盘) → 之后5日最大有利偏移
+  g0.s0  future_return_5d < 0
+
+#510018 [CONDITIONAL] target=segment_return_5_8d
+  name=首板后回撤·T+5 已回撤(相对首板收盘) → 之后3日收益
+  g0.s0  future_return_5d < 0
+
+#510017 [CONDITIONAL] target=segment_return_5_6d
+  name=首板后回撤·T+5 已回撤(相对首板收盘) → 之后1日收益
+  g0.s0  future_return_5d < 0
+
+#510016 [CONDITIONAL] target=segment_max_drawdown_4_9d
+  name=首板后回撤·T+4 已回撤(相对首板收盘) → 之后5日最深跌幅
+  g0.s0  future_return_4d < 0
+
+#510015 [CONDITIONAL] target=segment_max_return_4_9d
+  name=首板后回撤·T+4 已回撤(相对首板收盘) → 之后5日最大有利偏移
+  g0.s0  future_return_4d < 0
+
+#510014 [CONDITIONAL] target=segment_return_4_7d
+  name=首板后回撤·T+4 已回撤(相对首板收盘) → 之后3日收益
+  g0.s0  future_return_4d < 0
+
+#510013 [CONDITIONAL] target=segment_return_4_5d
+  name=首板后回撤·T+4 已回撤(相对首板收盘) → 之后1日收益
+  g0.s0  future_return_4d < 0
+
+#510012 [CONDITIONAL] target=segment_max_drawdown_3_8d
+  name=首板后回撤·T+3 已回撤(相对首板收盘) → 之后5日最深跌幅
+  g0.s0  future_return_3d < 0
+
+#510011 [CONDITIONAL] target=segment_max_return_3_8d
+  name=首板后回撤·T+3 已回撤(相对首板收盘) → 之后5日最大有利偏移
+  g0.s0  future_return_3d < 0
+
+#510010 [CONDITIONAL] target=segment_return_3_6d
+  name=首板后回撤·T+3 已回撤(相对首板收盘) → 之后3日收益
+  g0.s0  future_return_3d < 0
+
+#510009 [CONDITIONAL] target=segment_return_3_4d
+  name=首板后回撤·T+3 已回撤(相对首板收盘) → 之后1日收益
+  g0.s0  future_return_3d < 0
+
+#510008 [CONDITIONAL] target=segment_max_drawdown_2_7d
+  name=首板后回撤·T+2 已回撤(相对首板收盘) → 之后5日最深跌幅
+  g0.s0  future_return_2d < 0
+
+#510007 [CONDITIONAL] target=segment_max_return_2_7d
+  name=首板后回撤·T+2 已回撤(相对首板收盘) → 之后5日最大有利偏移
+  g0.s0  future_return_2d < 0
+
+#510006 [CONDITIONAL] target=segment_return_2_5d
+  name=首板后回撤·T+2 已回撤(相对首板收盘) → 之后3日收益
+  g0.s0  future_return_2d < 0
+
+#510005 [CONDITIONAL] target=segment_return_2_3d
+  name=首板后回撤·T+2 已回撤(相对首板收盘) → 之后1日收益
+  g0.s0  future_return_2d < 0
+
+#510004 [CONDITIONAL] target=segment_max_drawdown_1_6d
+  name=首板后回撤·T+1 已回撤(相对首板收盘) → 之后5日最深跌幅
+  g0.s0  future_return_1d < 0
+
+#510003 [CONDITIONAL] target=segment_max_return_1_6d
+  name=首板后回撤·T+1 已回撤(相对首板收盘) → 之后5日最大有利偏移
+  g0.s0  future_return_1d < 0
+
+#510002 [CONDITIONAL] target=segment_return_1_4d
+  name=首板后回撤·T+1 已回撤(相对首板收盘) → 之后3日收益
+  g0.s0  future_return_1d < 0
+
+#510001 [CONDITIONAL] target=segment_return_1_2d
+  name=首板后回撤·T+1 已回撤(相对首板收盘) → 之后1日收益
+  g0.s0  future_return_1d < 0
+
+#480135 [CONDITIONAL] target=segment_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤8%+ → 之后5日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d <= -0.08
+  g0.s1  future_return_5d < -0.08
+
+#480134 [CONDITIONAL] target=segment_return_5_10d
+  name=首板后回撤·T+5 未破首板最低价 且 回撤6~8% → 之后5日收益
+  g0.s0  holds_event_low_5d == 1
+  g0.s0  holds_event_low_5d == 1
+  g0.s1  future_return_5d < -0.06
+  g0.s1  future_return_5d <= -0.06
+  g0.s2  future_return_5d >= -0.08
+
+=== [2] Dataset Version 390002 真实视界 ===
+C:\work\sourcecode\stock-limit-up-analyzer\server\researchEngine\datasetReader.ts:126
+    this.dataReader = deps.dataReader ?? new DbDatasetDataReader();
+                           ^
+
+TypeError: Cannot read properties of undefined (reading 'dataReader')
+    at new RegistryResearchDatasetReader (C:\work\sourcecode\stock-limit-up-analyzer\server\researchEngine\datasetReader.ts:126:28)
+    at <anonymous> (C:\work\sourcecode\stock-limit-up-analyzer\docs\evidence\_probe_research_planner_baseline.mts:56:16)
+    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+
+Node.js v22.22.2

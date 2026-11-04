@@ -1,0 +1,50 @@
+==============================================================================
+analysisId=720094  type=CONDITIONAL  status=COMPLETED  runId=720005  priority=P1
+name   = 回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2） → T+5 收益
+target = future_return_5d
+条件（groupNo/sortOrder/字段/运算符/值）：
+  g0 s0  pullback_holds_event_open_2d == 1
+  g0 s1  pullback_close_ratio_2d <= 0.95
+结果行 16 条：
+  [GROUPED] SAMPLE_COUNT             = 23751   dim=-
+  [GROUPED] MEAN_RETURN              = 0.015210360880304351   dim=-
+  [GROUPED] MEDIAN_RETURN            = -0.005747126436781614   dim=-
+  [GROUPED] WIN_RATE                 = 0.47416950865226726   dim=-
+  [GROUPED] STD_RETURN               = 0.13343730914141402   dim=-
+  [GROUPED] SAMPLE_COUNT             = 1602   dim=-
+  [GROUPED] MEAN_RETURN              = -0.06966360932060599   dim=-
+  [GROUPED] MEDIAN_RETURN            = -0.0740380107468715   dim=-
+  [GROUPED] WIN_RATE                 = 0.14232209737827714   dim=-
+  [GROUPED] STD_RETURN               = 0.07780956258862198   dim=-
+  [GROUPED] MAX_DRAWDOWN             = -0.03714995650032536   dim=-
+  [GROUPED] MAX_DRAWDOWN             = -0.1014619885378548   dim=-
+  [SCALAR] DIFFERENCE               = -0.08487397020091034   dim=-
+  [SCALAR] RELATIVE_DIFFERENCE      = -5.580010288303695   dim=-
+  [SCALAR] T_STAT_DIFFERENCE        = -39.88208884936247   dim=-
+  [SCALAR] P_VALUE_DIFFERENCE       = 0   dim=-
+
+==============================================================================
+analysisId=720095  type=CONDITIONAL  status=COMPLETED  runId=720005  priority=P1
+name   = 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+target = future_return_5d
+条件（groupNo/sortOrder/字段/运算符/值）：
+  g0 s0  pullback_holds_event_open_2d == 1
+  g0 s1  pullback_close_ratio_2d >= 0.98
+  g0 s2  pullback_close_ratio_2d <= 1
+结果行 16 条：
+  [GROUPED] SAMPLE_COUNT             = 23751   dim=-
+  [GROUPED] MEAN_RETURN              = 0.015210360880304351   dim=-
+  [GROUPED] MEDIAN_RETURN            = -0.005747126436781614   dim=-
+  [GROUPED] WIN_RATE                 = 0.47416950865226726   dim=-
+  [GROUPED] STD_RETURN               = 0.13343730914141402   dim=-
+  [GROUPED] SAMPLE_COUNT             = 2841   dim=-
+  [GROUPED] MEAN_RETURN              = -0.014214315931919914   dim=-
+  [GROUPED] MEDIAN_RETURN            = -0.020451339915373703   dim=-
+  [GROUPED] WIN_RATE                 = 0.3558606124604013   dim=-
+  [GROUPED] STD_RETURN               = 0.07308228541019945   dim=-
+  [GROUPED] MAX_DRAWDOWN             = -0.03714995650032536   dim=-
+  [GROUPED] MAX_DRAWDOWN             = -0.04812492201362194   dim=-
+  [SCALAR] DIFFERENCE               = -0.029424676812224267   dim=-
+  [SCALAR] RELATIVE_DIFFERENCE      = -1.9345153638218933   dim=-
+  [SCALAR] T_STAT_DIFFERENCE        = -18.14522874794033   dim=-
+  [SCALAR] P_VALUE_DIFFERENCE       = 0   dim=-

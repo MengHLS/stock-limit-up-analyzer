@@ -1,0 +1,138 @@
+{
+  "datasetVersion": "rd-1.0.0-1-cffc2a0e66efbf0b",
+  "gate": "INCONCLUSIVE",
+  "gateNotes": [
+    "覆盖缺口：NO_ROWS_BUILT",
+    "dataReady=false（冒烟口径）；缺口在 dataReady=true 时判 FAIL"
+  ],
+  "universeDefinition": {
+    "rule": "STEP 11 resolveHistoricalUniverse：LISTING/TRADING 正向确认，SUSPENSION/DELISTING 显式阻断，UNKNOWN 默认拒绝",
+    "asOfDescription": "逐日 PIT（每交易日 asOf = 该日 tradeDate）",
+    "days": [
+      {
+        "tradeDate": "2026-09-01",
+        "isTradingDay": true,
+        "members": [],
+        "excludedByReason": {
+          "DELISTED": 337,
+          "NOT_YET_LISTED": 1,
+          "TRADING_UNKNOWN": 5214
+        }
+      },
+      {
+        "tradeDate": "2026-09-02",
+        "isTradingDay": true,
+        "members": [],
+        "excludedByReason": {
+          "DELISTED": 337,
+          "TRADING_UNKNOWN": 5215
+        }
+      },
+      {
+        "tradeDate": "2026-09-03",
+        "isTradingDay": true,
+        "members": [],
+        "excludedByReason": {
+          "DELISTED": 337,
+          "TRADING_UNKNOWN": 5215
+        }
+      },
+      {
+        "tradeDate": "2026-09-04",
+        "isTradingDay": true,
+        "members": [],
+        "excludedByReason": {
+          "DELISTED": 337,
+          "TRADING_UNKNOWN": 5215
+        }
+      }
+    ]
+  },
+  "dataSnapshot": {
+    "capturedAt": "2026-09-06T14:39:38.942Z",
+    "request": {
+      "name": "smoke-tradable-daily",
+      "startDate": "2026-09-01",
+      "endDate": "2026-09-04",
+      "asOfPerTradeDate": true,
+      "asOf": null,
+      "coreIndexCodes": [
+        "000001.SH",
+        "000300.SH",
+        "399001.SZ",
+        "399006.SZ"
+      ]
+    },
+    "calendarName": "research-dataset-calendar",
+    "calendarFirstDate": "2019-01-02",
+    "calendarLastDate": "2026-09-04",
+    "tradingDays": 4,
+    "domains": [
+      {
+        "domain": "A OHLCV",
+        "rowsLoaded": 22190,
+        "securitiesCovered": 5550,
+        "datesCovered": 4,
+        "datesExpected": 4,
+        "note": "stock_daily_prices 逐日批量（raw 未复权）；code 键按完整代码计。A 域已 FULL（§44.1）"
+      },
+      {
+        "domain": "B Master",
+        "rowsLoaded": 5552,
+        "securitiesCovered": 5552,
+        "datesCovered": 4,
+        "datesExpected": 4,
+        "note": "research_securities 全表加载（身份层，整窗口适用）"
+      },
+      {
+        "domain": "C Status",
+        "rowsLoaded": 0,
+        "securitiesCovered": 22,
+        "datesCovered": 4,
+        "datesExpected": 4,
+        "note": "research_security_status_history 区间与窗口重叠计数；未全量时 universe 成员受限（默认拒绝）"
+      },
+      {
+        "domain": "D CA",
+        "rowsLoaded": 239,
+        "securitiesCovered": 19,
+        "datesCovered": 4,
+        "datesExpected": 4,
+        "note": "corporate_actions effectiveDate<=endDate 的事件计数（announcementDate PIT 由 reconstruct 过滤）"
+      },
+      {
+        "domain": "E Liquidity",
+        "rowsLoaded": 196,
+        "securitiesCovered": 49,
+        "datesCovered": 4,
+        "datesExpected": 4,
+        "note": "liquidity_daily 逐日批量；code 键按完整代码计。E 域回填中（§44.2 CODE_READY）"
+      },
+      {
+        "domain": "F Index",
+        "rowsLoaded": 12,
+        "securitiesCovered": 6,
+        "datesCovered": 4,
+        "datesExpected": 4,
+        "note": "index_daily 逐日批量（coreIndexCodes）"
+      },
+      {
+        "domain": "G Industry",
+        "rowsLoaded": 3949,
+        "securitiesCovered": 3949,
+        "datesCovered": 4,
+        "datesExpected": 4,
+        "note": "industry_assignments 区间与窗口重叠计数（归属按 securityId=完整代码计）"
+      }
+    ],
+    "coverageGaps": [
+      "NO_ROWS_BUILT"
+    ]
+  },
+  "rowSummary": {
+    "rows": 0,
+    "memberDays": 0,
+    "indexDates": 4,
+    "sampleRow": null
+  }
+}

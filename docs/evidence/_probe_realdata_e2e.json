@@ -1,0 +1,190 @@
+{
+  "elapsedMs": 37823,
+  "overall": {
+    "status": "PARTIAL_BLOCKED",
+    "executedStageCount": 5,
+    "blockedStageCount": 9,
+    "skippedStageCount": 0,
+    "firstBlockedReasonCode": "CL_RUNNER_NOT_INJECTED",
+    "synthetic": false,
+    "note": "首阻塞 optimization（CL_RUNNER_NOT_INJECTED）：阶段 optimization 执行器未注入（注入式执行器表缺 optimization 项）；无法执行该阶段"
+  },
+  "runnerInjected": [
+    "data",
+    "research",
+    "strategy",
+    "backtest",
+    "evaluation",
+    "regime"
+  ],
+  "assembly": {
+    "datasetVersion": "rd-1.0.0-1-daa445d21c7c5f86",
+    "datasetGate": "PASS",
+    "datasetRowCount": 1500,
+    "datasetSecurityCount": 300,
+    "dateRange": {
+      "startDate": "2025-06-03",
+      "endDate": "2025-06-30"
+    },
+    "strategyId": "limit-up-baseline",
+    "strategyVersion": "1.1.0",
+    "recipeId": "leader-candidate-baseline",
+    "recipeSource": "explicit-request",
+    "recipeFeatureIds": [
+      "pctChange"
+    ],
+    "selectionSummary": "按当日涨跌幅由高到低取前 5 名",
+    "simulation": {
+      "initialCapital": 100000,
+      "maxPositions": 5,
+      "executionModel": "NEXT_OPEN",
+      "costModel": {
+        "commissionRate": 0.0003,
+        "stampDutyRate": 0.001,
+        "transferFeeRate": 0.00001,
+        "slippageBps": 10,
+        "lotSize": 100,
+        "minCommission": 5
+      }
+    }
+  },
+  "wiring": {
+    "wiredStages": [
+      "data",
+      "research",
+      "strategy",
+      "backtest",
+      "evaluation",
+      "regime",
+      "finalize"
+    ],
+    "unwiredStages": [
+      "optimization",
+      "robustness",
+      "oos",
+      "overfitting",
+      "paper",
+      "review",
+      "discipline"
+    ],
+    "coveredStages": [
+      "data",
+      "research",
+      "strategy",
+      "backtest",
+      "evaluation"
+    ],
+    "uncoveredStages": [
+      "optimization",
+      "robustness",
+      "oos",
+      "overfitting",
+      "regime",
+      "paper",
+      "review",
+      "discipline",
+      "finalize"
+    ],
+    "executorBound": false
+  },
+  "stages": [
+    {
+      "stageId": "data",
+      "state": "EXECUTED",
+      "outputKind": "datasetSummary",
+      "blockedReasonCode": null,
+      "blockedDetail": null
+    },
+    {
+      "stageId": "research",
+      "state": "EXECUTED",
+      "outputKind": "researchSummary",
+      "blockedReasonCode": null,
+      "blockedDetail": null
+    },
+    {
+      "stageId": "strategy",
+      "state": "EXECUTED",
+      "outputKind": "strategyDocRef",
+      "blockedReasonCode": null,
+      "blockedDetail": null
+    },
+    {
+      "stageId": "backtest",
+      "state": "EXECUTED",
+      "outputKind": "backtestSummary",
+      "blockedReasonCode": null,
+      "blockedDetail": null
+    },
+    {
+      "stageId": "evaluation",
+      "state": "EXECUTED",
+      "outputKind": "evaluationRef",
+      "blockedReasonCode": null,
+      "blockedDetail": null
+    },
+    {
+      "stageId": "optimization",
+      "state": "BLOCKED",
+      "outputKind": "optimizationRef",
+      "blockedReasonCode": "CL_RUNNER_NOT_INJECTED",
+      "blockedDetail": "阶段 optimization 执行器未注入（注入式执行器表缺 optimization 项）；无法执行该阶段"
+    },
+    {
+      "stageId": "robustness",
+      "state": "BLOCKED",
+      "outputKind": "robustnessRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    },
+    {
+      "stageId": "oos",
+      "state": "BLOCKED",
+      "outputKind": "oosRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    },
+    {
+      "stageId": "overfitting",
+      "state": "BLOCKED",
+      "outputKind": "overfittingRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    },
+    {
+      "stageId": "regime",
+      "state": "BLOCKED",
+      "outputKind": "regimeRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    },
+    {
+      "stageId": "paper",
+      "state": "BLOCKED",
+      "outputKind": "paperRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    },
+    {
+      "stageId": "review",
+      "state": "BLOCKED",
+      "outputKind": "reviewRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    },
+    {
+      "stageId": "discipline",
+      "state": "BLOCKED",
+      "outputKind": "disciplineRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    },
+    {
+      "stageId": "finalize",
+      "state": "BLOCKED",
+      "outputKind": "finalizeRef",
+      "blockedReasonCode": "CL_UPSTREAM_BLOCKED",
+      "blockedDetail": "上游阶段 optimization 已阻塞，本阶段及后续不执行（禁止伪造中间产物冒充已执行）"
+    }
+  ]
+}

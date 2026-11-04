@@ -1,0 +1,75 @@
+research* 表清单：
+  · research_analysis
+  · research_analysis_condition
+  · research_analysis_metric
+  · research_analysis_template
+  · research_analysis_template_item
+  · research_artifact
+  · research_conclusion
+  · research_datasets
+  · research_experiment
+  · research_experiment_batches
+  · research_experiments
+  · research_finding
+  · research_hypothesis
+  · research_plan
+  · research_question
+  · research_result
+  · research_run
+  · research_runs
+  · research_securities
+  · research_security_identifier_history
+  · research_security_status_history
+  · research_strategy_candidate
+
+research_result 列（9 个）：
+  id                           bigint               nullable=NO
+  analysisId                   bigint               nullable=NO
+  resultType                   varchar              nullable=NO
+  dimensionJson                longtext             nullable=YES
+  metricCode                   varchar              nullable=NO
+  metricValue                  double               nullable=YES
+  sampleCount                  int                  nullable=YES
+  resultJson                   longtext             nullable=YES
+  createdAt                    timestamp            nullable=NO
+
+research_analysis_metric 列（7 个）：
+  id                           bigint               nullable=NO
+  analysisId                   bigint               nullable=NO
+  metricCode                   varchar              nullable=NO
+  metricName                   varchar              nullable=NO
+  configJson                   longtext             nullable=YES
+  displayOrder                 int                  nullable=NO
+  createdAt                    timestamp            nullable=NO
+
+research_finding 列（30 个）：
+  id                           bigint               nullable=NO
+  experimentId                 bigint               nullable=NO
+  runId                        bigint               nullable=YES
+  primaryAnalysisId            bigint               nullable=YES
+  findingType                  varchar              nullable=NO
+  title                        varchar              nullable=NO
+  summary                      text                 nullable=YES
+  status                       varchar              nullable=NO
+  target                       varchar              nullable=YES
+  dimensionJson                longtext             nullable=YES
+  sourceResultIdsJson          longtext             nullable=YES
+  effectJson                   longtext             nullable=YES
+  sampleJson                   longtext             nullable=YES
+  horizonJson                  longtext             nullable=YES
+  stabilityJson                longtext             nullable=YES
+  monotonicityJson             longtext             nullable=YES
+  interactionJson              longtext             nullable=YES
+  effectStrength               double               nullable=YES
+  sampleStrength               double               nullable=YES
+  stabilityStrength            double               nullable=YES
+  horizonConsistency           double               nullable=YES
+  monotonicityStrength         double               nullable=YES
+  researchStrength             double               nullable=YES
+  researchStrengthGrade        varchar              nullable=YES
+  policyJson                   longtext             nullable=YES
+  limitationsJson              longtext             nullable=YES
+  evidenceJson                 longtext             nullable=YES
+  fingerprint                  varchar              nullable=YES
+  createdAt                    timestamp            nullable=NO
+  updatedAt                    timestamp            nullable=NO

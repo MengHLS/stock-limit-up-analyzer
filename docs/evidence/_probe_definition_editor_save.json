@@ -1,0 +1,696 @@
+{
+  "summary": {
+    "definedCount": 8,
+    "legacyCount": 1,
+    "roundTripExactAll": true,
+    "assumptionsExactAll": true,
+    "executionModelDerivedExactAll": true,
+    "newPathAllOk": true,
+    "oldPathAllConflict": true,
+    "oldPathCodes": [
+      "SCHEMA_DEFINITION_VIEW_CONFLICT"
+    ],
+    "editorErrorsZeroAll": true,
+    "datasetSwitchWithoutSyncAllFail": true,
+    "datasetSwitchAllThreeAllOk": true,
+    "legacySameAsBeforeOk": true
+  },
+  "report": [
+    {
+      "strategyId": "cand-360008",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_OPEN",
+        "original": "NEXT_OPEN",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.description",
+        "entry.conditions.id",
+        "parameters.description"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "cand-360007",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_OPEN",
+        "original": "NEXT_OPEN",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.description",
+        "entry.conditions.id",
+        "parameters.description"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "cand-360006",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_OPEN",
+        "original": "NEXT_OPEN",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.description",
+        "entry.conditions.id",
+        "parameters.description"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "cand-360005",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_CLOSE",
+        "original": "NEXT_CLOSE",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.description",
+        "entry.conditions.id",
+        "parameters.description"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "cand-360004",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_OPEN",
+        "original": "NEXT_OPEN",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.description",
+        "entry.conditions.id",
+        "parameters.description"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "cand-360002",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_OPEN",
+        "original": "NEXT_OPEN",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.description",
+        "entry.conditions.id",
+        "parameters.description"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "cand-360001",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_OPEN",
+        "original": "NEXT_OPEN",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.description",
+        "entry.conditions.id",
+        "parameters.description"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "cand-270001",
+      "version": "1.0.0",
+      "kind": "definition",
+      "roundTripExact": true,
+      "roundTripDiffs": [],
+      "assumptionsExact": true,
+      "executionModelDerived": {
+        "derived": "NEXT_OPEN",
+        "original": "NEXT_OPEN",
+        "exact": true
+      },
+      "editorErrors": [],
+      "editorWarnings": [],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "exit.rules.description",
+        "exit.rules.id",
+        "entry.conditions.id"
+      ],
+      "bindingBefore": {
+        "datasetId": "first_limit_pullback",
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002,
+        "note": "由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）",
+        "role": "PRIMARY"
+      },
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_VIEW_CONFLICT",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_VIEW_CONFLICT] positionSizing: positionSizing 与 definition 派生结果不一致。definition 是 Canonical（唯一权威），v1 字段是其派生视图；请删除该字段让组装层自动派生，或修正 definition —— 本层不会静默覆盖。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.positionSizing: positionSizing 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "newPath": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchWithoutSync": {
+        "ok": false,
+        "code": "SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH",
+        "message": "研究实验校验失败：\n  [SCHEMA_DEFINITION_DATASET_VERSION_MISMATCH] datasetVersion: datasetVersion（v2-probe-next）与 definition.datasets 的 PRIMARY 绑定（v2）不一致\n  [SCHEMA_DEFINITION_DATASET_VERSION_ID_MISMATCH] datasetVersionId: datasetVersionId（390003）与 definition.datasets 的 PRIMARY 绑定（390002）不一致\n  [SCHEMA_UNIVERSE_DATASET_MISMATCH] universe.universeId: 派生 universe（research-dataset:v2）引用的数据集版本与 document.datasetVersion（v2-probe-next）不一致\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersion: datasetVersion 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。\n  [SCHEMA_DEFINITION_VIEW_DRIFT] definitionView.datasetVersionId: datasetVersionId 与 definition 的单向派生结果不一致：definition 是 Canonical，v1 字段只能是它的视图。不一致意味着文档被手工改写或组装层出错，必须修复而不是静默取其一。",
+        "derived": null
+      },
+      "datasetSwitchWithSync": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "datasetSwitchAllThree": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 2,
+          "exitRules": 2,
+          "riskRules": 0,
+          "positionSizingKind": "equal-weight"
+        }
+      },
+      "legacyStillSavesUnchanged": null
+    },
+    {
+      "strategyId": "limit-up-baseline",
+      "version": "1.1.0",
+      "kind": "legacy",
+      "roundTripExact": null,
+      "roundTripDiffs": [],
+      "assumptionsExact": null,
+      "executionModelDerived": null,
+      "editorErrors": [],
+      "editorWarnings": [
+        "该版本没有 Canonical 定义（definition 缺失）。"
+      ],
+      "editorGaps": [],
+      "uneditedKeys": [
+        "定义态=raw"
+      ],
+      "bindingBefore": null,
+      "docLevelCoordinate": {
+        "datasetVersion": "v2",
+        "datasetVersionId": 390002
+      },
+      "oldPath": null,
+      "newPath": null,
+      "datasetSwitchWithoutSync": null,
+      "datasetSwitchWithSync": null,
+      "datasetSwitchAllThree": null,
+      "legacyStillSavesUnchanged": {
+        "ok": true,
+        "code": null,
+        "message": null,
+        "derived": {
+          "entryRules": 5,
+          "exitRules": 4,
+          "riskRules": 4,
+          "positionSizingKind": "equal-weight"
+        }
+      }
+    }
+  ]
+}

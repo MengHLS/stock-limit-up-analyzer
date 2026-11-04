@@ -59,6 +59,9 @@ jspm_packages/
 # TypeScript cache
 *.tsbuildinfo
 
+# Vitest runtime temp config snapshots
+vitest.config.ts.timestamp-*.mjs
+
 # Optional npm cache directory
 .npm
 
@@ -101,8 +104,54 @@ jspm_packages/
 tmp/
 temp/
 
+# 本地调试临时产物（验收截图 / CDP 脚本 / 探针结果），不入库
+_*.png
+_*.jpg
+_*.jpeg
+_*.webp
+
+# 本地性能索引快照（可随时由服务端重建）
+
 # Database
 *.db
 *.sqlite
 *.sqlite3
 .project-config.json
+
+# BaoStock 安装包与运行时产物
+baostock-0.9.3.tar.gz
+scripts/_backfill_*.json
+scripts/_baostock_stock_basic_dump.json
+
+# Git 恢复时损坏 .git 的备份（含 reflog，供对照历史提交消息，确认后可删）
+.git.broken/
+# WorkBuddy 工作区数据（记忆 / 细则）—— 只存在于本地，⚠️ 禁止 `git add -f` 强制加入
+# [REPO-HYGIENE-WORKBUDDY-UNTRACK-001] 2026-09-19：曾被两次强制加回（a0cc3c6 删除 → 0e90fc1 复加）
+.workbuddy/
+.manus/
+
+# 一次性过程脚本（Python 行手术 / 追加 / 巡检）—— 应写到仓外 C:\work\sourcecode\_scratch\  [REPO-HYGIENE-PY-SCRIPTS-001]
+# 本仓库技术栈不含 Python；scripts/providers/*.py 是产品依赖（server 的 pythonBridge 子进程调用），不受本规则影响
+_*.py
+
+# 根目录 `_*` 过程文件（一次性迁移/回滚脚本、测试输出产物）—— 应写到仓外 C:\work\sourcecode\_scratch\  [REPO-HYGIENE-ROOT-SCRATCH-001]
+# 本仓库技术栈不含 Python；scripts/providers/*.py 是产品依赖（server 的 pythonBridge 子进程调用），不受本规则影响
+# ⚠️ 锚定根目录（前导 /）是刻意的：docs/evidence/ 下的 `_*_probe.mjs` 是已跟踪真探针，不能被忽略
+/_*.mts
+/_*.mjs
+/_*.json
+
+# scripts/ 下的一次性探针脚本（2026-09-17 实测：10 个零引用 ad-hoc DB 探针堆在生产脚本目录里）
+# 应写到仓外 C:\work\sourcecode\_scratch\  [REPO-HYGIENE-SCRIPTS-SCRATCH-001]
+# ⚠️ 只锚定 scripts/ 直下、且以 _ 开头的 .ts/.mts/.mjs —— 不动 scripts/providers/*.py（产品依赖）、
+#    也不动 scripts/_dump/（被 backfillStatusLiquidity_sql.ts 引用）
+/scripts/_*.ts
+/scripts/_*.mts
+/scripts/_*.mjs
+
+/docs/evidence/
+/.ai/mcp/mcp.json
+/scripts
+
+# 数据库迁移备份（含明文凭据，禁止入库）
+.env.bak-*

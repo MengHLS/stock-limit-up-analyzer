@@ -1,0 +1,17 @@
+== 下拉弹层夜间可读性取证 == 2026-09-19T15:13:03.062Z BASE=http://127.0.0.1:3000
+
+--- 主题 = light ---
+  option 计算样式：{"optionCount":1873,"o0":{"color":"oklch(0.2 0.02 240)","background":"oklch(1 0 0)","cs":"light"},"o1":{"color":"oklch(0.2 0.02 240)","background":"oklch(1 0 0)","cs":"light"},"selectColor":"oklch(0.2 0.02 240)","selectBg":"oklch(0.985 0.002 240)"}
+  选择器视口位置：{"x":481,"y":550,"top":533,"left":419,"w":124,"h":34}（滚动前 {"x":481,"y":550,"top":533,"left":419,"w":124,"h":34}）
+  截图：D:\stock-limit-up-analyzer\docs\evidence\_shot_ladder_date_select_popup.light.closed.png
+  点开后：{"matchesOpen":false,"activeTag":"BODY"}
+  截图：D:\stock-limit-up-analyzer\docs\evidence\_shot_ladder_date_select_popup.light.open.png
+
+--- 主题 = dark ---
+  option 计算样式：{"optionCount":1873,"o0":{"color":"oklch(0.93 0.002 286)","background":"oklch(0.255 0.005 286)","cs":"dark"},"o1":{"color":"oklch(0.93 0.002 286)","background":"oklch(0.255 0.005 286)","cs":"dark"},"selectColor":"oklch(0.92 0.002 286)","selectBg":"oklch(0.185 0.004 286)"}
+  选择器视口位置：{"x":481,"y":550,"top":533,"left":419,"w":124,"h":34}（滚动前 {"x":481,"y":550,"top":533,"left":419,"w":124,"h":34}）
+  截图：D:\stock-limit-up-analyzer\docs\evidence\_shot_ladder_date_select_popup.dark.closed.png
+  点开后：{"matchesOpen":false,"activeTag":"BODY"}
+  截图：D:\stock-limit-up-analyzer\docs\evidence\_shot_ladder_date_select_popup.dark.open.png
+
+完成。

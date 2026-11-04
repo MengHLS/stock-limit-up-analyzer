@@ -1,0 +1,19 @@
+{
+  "taskId": "P1-T3",
+  "gate": "G1",
+  "taskName": "Industry securityId 关联回填",
+  "status": "VALIDATED",
+  "capturedAt": "2026-09-09T20:52:00+08:00",
+  "realData": true,
+  "reproducible": true,
+  "script": "scripts/backfillIndustrySecurityId.mjs",
+  "before": { "total": 5212, "null": 5212, "notnull": 0 },
+  "after": { "total": 5212, "null": 0, "notnull": 5212 },
+  "ambiguityCheck": { "codeMappingToMultipleSecurityIds": 0 },
+  "orphanCheck": { "industrySecurityIdWithoutSecuritiesMaster": 0 },
+  "idempotency": {
+    "rerunAffectedRows": 0,
+    "note": "WHERE securityId IS NULL 保证幂等；重跑直接跳过"
+  },
+  "mappingRule": "SUBSTRING_INDEX(securityCode,'.',1)=identifier.securityCode AND UPPER(SUBSTRING_INDEX(securityCode,'.',-1))=identifier.exchange AND identifierType='primary'"
+}

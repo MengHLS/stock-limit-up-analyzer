@@ -1,0 +1,29 @@
+{
+  "taskId": "P1-T2",
+  "gate": "G0",
+  "taskName": "Data Foundation 版本快照冻结",
+  "status": "VALIDATED",
+  "capturedAt": "2026-09-09T20:50:00+08:00",
+  "realData": true,
+  "reproducible": true,
+  "fingerprint": "781854d0da819916daf80e08acc72313461e0f579091aeec3fb4b4b4fee3edb8",
+  "dataFoundationReady": true,
+  "g0Checks": {
+    "total": 15,
+    "pass": 15,
+    "pending": 0,
+    "fail": 0
+  },
+  "input": "docs/researchReadyGate/research_ready_gate.json",
+  "output": "docs/quantRoadmap/snapshots/data-foundation-v1.json",
+  "script": "scripts/freezeDataFoundation.mjs",
+  "reproducibilityCheck": {
+    "runs": 3,
+    "fingerprints": [
+      "781854d0da819916daf80e08acc72313461e0f579091aeec3fb4b4b4fee3edb8",
+      "781854d0da819916daf80e08acc72313461e0f579091aeec3fb4b4b4fee3edb8",
+      "781854d0da819916daf80e08acc72313461e0f579091aeec3fb4b4b4fee3edb8"
+    ],
+    "identical": true
+  }
+}

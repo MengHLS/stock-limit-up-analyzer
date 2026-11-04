@@ -1,0 +1,72 @@
+{
+  "e2e": {
+    "dataset": {
+      "datasetId": "DS-rd-1.0.0-1-fd1c487f2fe19e27",
+      "datasetVersion": "rd-1.0.0-1-fd1c487f2fe19e27",
+      "name": "e2e-tradable-daily-certified",
+      "dateRange": {
+        "from": "2025-01-02",
+        "to": "2025-01-08"
+      },
+      "rowCount": 25618,
+      "memberDays": 25618,
+      "gate": "PASS",
+      "gateNotes": [],
+      "fingerprints": {
+        "rowsFingerprint": "f1747f87c2289a3b9eccbe73e5b0dc7d",
+        "policySetFingerprint": "df245013b1e14f18",
+        "versionSnapshotFingerprint": "39ec61d263de29c0"
+      }
+    },
+    "certification": {
+      "status": "CERTIFIED",
+      "researchSafe": true,
+      "reasons": [
+        "构建 gate=PASS 且逐日 PIT、survivorship-safe、无依赖历史 PIT 不完整的可选域"
+      ]
+    },
+    "capabilityFacts": {
+      "industryHistoricalPit": "CONDITIONAL",
+      "liquidityHistoricalCoverage": "CONDITIONAL",
+      "corporateActionPit": "AVAILABLE"
+    },
+    "metadata": {
+      "securitiesTotal": 5552,
+      "securitiesDelisted": 337,
+      "industryRows": 5212,
+      "industryDistinctEffectiveFrom": 1,
+      "priceWindow": [
+        "2019-01-02",
+        "2026-09-09"
+      ],
+      "liquidityWindow": [
+        "1992-03-31",
+        "2026-09-04"
+      ],
+      "indexWindow": [
+        "2019-01-02",
+        "2026-09-04"
+      ]
+    },
+    "researchRun": {
+      "runId": "RUN-EXP-E2E-B9F42F-D4D1",
+      "experimentId": "EXP-E2E-B9F42F",
+      "datasetId": "DS-rd-1.0.0-1-fd1c487f2fe19e27",
+      "datasetVersion": "rd-1.0.0-1-fd1c487f2fe19e27",
+      "datasetFingerprint": "39ec61d263de29c0",
+      "strategyId": "leader-candidate-baseline",
+      "strategyVersion": "1.0.0",
+      "persisted": true
+    },
+    "chain": {
+      "candidateDays": 5,
+      "selectedSlots": 25,
+      "simulationFinalEquity": 1019749.9887932001,
+      "tradeCount": 9,
+      "equityCurvePointCount": 5,
+      "candidateFingerprint": "9f157496af505ef3613389362d67db30cf1a0b42d351fe8c54d5dc2240d2dbec",
+      "simulationFingerprint": "d395ff0c25c8a0bbd605f181314a1d82692c43468b005069ddb77830a507ead5"
+    },
+    "elapsedSec": "247.9"
+  }
+}

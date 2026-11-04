@@ -1,0 +1,315 @@
+# 研究报告 · Run #1
+
+> **本报告是既有 Research 结果的展示层投影（PHASE-A-001）。**
+> 全部数值直接引自 `research_result` / `research_finding` / `research_conclusion`，
+> 生成过程**未重新查询原始行情、未重算收益或条件统计、未重算 Finding**。
+> 报告不包含最佳参数、策略推荐、收益承诺或买卖建议；
+> 指标名称一律使用 `metricCode` 原文，不做业务化改名。
+
+实验：**[自动研究] 首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？**
+
+## 1. 基本信息
+
+| 项 | 值 |
+| --- | --- |
+| Report | Research Report（`artifactType = REPORT`） |
+| Experiment | #480003 · [自动研究] 首板后回踩深度是否影响后续收益？回踩得深一点是不是更值得买入，还是回踩浅一点更好？ |
+| 研究类型 | FEATURE |
+| Run | #1（runId=750003）· 状态 COMPLETED |
+| Dataset Version | 首板回踩（first_limit_pullback）· v2（datasetVersionId=390002） |
+| Dataset 覆盖 | 2024-09-01 ~ 2026-09-01 · 事件 23978 |
+| Run 样本量 | 23978 |
+| Run 完成时间 | 2026-09-16T17:57:23.000Z |
+| 数据快照时间 | 2026-09-16T17:55:32.560Z |
+| 快照 Dataset Version | 390002 |
+| Pattern | event-return-research（事件后收益研究）、first-limit-pullback-hold-shrink（首板回踩 · 守线 + 缩量） |
+| 结论归属 | #660003（SUPPORTED） |
+| Generator Version | 1.0.0 |
+
+## 2. Research Analysis 清单
+
+共 **28** 条分析（全部来自 `research_analysis`，未凭空生成）。
+
+| analysisId | 类型 | Module | 状态 | 目标(target) | 优先级 | 结果行 | 主要配置摘要 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| #750057 | EVENT_STUDY | PULLBACK_EFFECTIVENESS | COMPLETED | — | P0 | 36 | {"horizons":[5,10,20],"minSampleCount":100} |
+| #750058 | DESCRIPTIVE | PULLBACK_EFFECTIVENESS | COMPLETED | — | P1 | 57 | {"minSampleCount":100,"variables":["future_return_5d","turnover","limit_up_premium"]} |
+| #750059 | STABILITY | PULLBACK_EFFECTIVENESS | COMPLETED | — | P1 | 14 | {"minSampleCount":100,"stabilityDimension":"year","targetField":"future_return_5d"} |
+| #750060 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P0 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750061 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P0 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750062 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P0 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750063 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750064 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750065 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750066 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750067 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750068 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750069 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750070 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750071 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750072 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750073 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750074 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750075 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750076 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750077 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P1 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750078 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P2 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750079 | CONDITIONAL | PULLBACK_EFFECTIVENESS | COMPLETED | future_return_5d | P2 | 16 | {"minSampleCount":100,"targetField":"future_return_5d"} |
+| #750080 | QUANTILE | PULLBACK_EFFECTIVENESS | COMPLETED | — | P1 | 28 | {"featureField":"turnover","minSampleCount":100,"quantileGroups":5,"targetField":"future_return_5d"} |
+| #750081 | QUANTILE | PULLBACK_EFFECTIVENESS | COMPLETED | — | P1 | 28 | {"featureField":"limit_up_premium","minSampleCount":100,"quantileGroups":5,"targetField":"future_return_5d"} |
+| #750082 | QUANTILE | PULLBACK_EFFECTIVENESS | COMPLETED | — | P1 | 0 | {"featureField":"market_cap","minSampleCount":100,"quantileGroups":5,"targetField":"future_return_5d"} |
+| #750083 | SEGMENT_RELATION | PULLBACK_EFFECTIVENESS | COMPLETED | — | P1 | 31 | {"minSampleCount":100,"windowA":[0,5],"windowAStat":"max_drawdown","windowB":[5,10],"windowBStat":"return","windowBands":5} |
+| #750084 | STABILITY | EVENT_RETURN_RESEARCH | COMPLETED | — | P2 | 14 | {"minSampleCount":100,"stabilityDimension":"year","targetField":"future_return_5d"} |
+
+**分析意图（`purpose` 原文）**
+
+- #750057：建立全样本参照系：没有它就无法判断「某个条件下更好」到底是条件起了作用，还是这段时间整体就好。
+- #750058：描述目标与特征的中心趋势 / 离散度 / 缺失率，用于判断数据能否支撑后续比较。
+- #750059：检验全样本结论是否只在个别年份 / 板块成立，避免把一次性行情当成规律。
+- #750060：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。目标：T+5 收益。条件在 T+2 收盘即可判定（观察日变量 availableFromOffset = 2），不含未来信息。
+- #750061：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。目标：T+5 收益。条件在 T+3 收盘即可判定（观察日变量 availableFromOffset = 3），不含未来信息。
+- #750062：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。目标：T+5 收益。条件在 T+5 收盘即可判定（观察日变量 availableFromOffset = 5），不含未来信息。
+- #750063：要求「截至 T+k，回调期间最低价始终没有跌破首板日最低价」。目标：T+5 收益。条件在 T+2 收盘即可判定（观察日变量 availableFromOffset = 2），不含未来信息。
+- #750064：要求「截至 T+k，回调期间最低价始终没有跌破首板日最低价」。目标：T+5 收益。条件在 T+3 收盘即可判定（观察日变量 availableFromOffset = 3），不含未来信息。
+- #750065：要求「截至 T+k，回调期间最低价始终没有跌破首板日最低价」。目标：T+5 收益。条件在 T+5 收盘即可判定（观察日变量 availableFromOffset = 5），不含未来信息。
+- #750066：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。按回踩深度（T+k 收盘 / 首板日收盘）分档，检验「回踩深度是否影响后续收益」。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+- #750067：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。按回踩深度（T+k 收盘 / 首板日收盘）分档，检验「回踩深度是否影响后续收益」。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+- #750068：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+- #750069：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+- #750070：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日放量是「资金重新进场」的代理量：检验放量确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+- #750071：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日收阳是「当日买盘占优」的代理量：检验红盘确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+- #750072：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。按回踩深度（T+k 收盘 / 首板日收盘）分档，检验「回踩深度是否影响后续收益」。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+- #750073：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。按回踩深度（T+k 收盘 / 首板日收盘）分档，检验「回踩深度是否影响后续收益」。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+- #750074：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+- #750075：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+- #750076：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日放量是「资金重新进场」的代理量：检验放量确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+- #750077：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日收阳是「当日买盘占优」的代理量：检验红盘确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+- #750078：对照组：截至 T+k 已跌破首板日开盘价的样本后续如何走。目标：T+5 收益。有对照组才能回答「不满足条件会怎样」，否则只有单侧证据。
+- #750079：对照组：截至 T+k 已跌破首板日最低价的样本后续如何走。目标：T+5 收益。有对照组才能回答「不满足条件会怎样」，否则只有单侧证据。
+- #750080：检验「首板日可观测的 turnover」是否单调地影响后续收益 —— 这是唯一能在 T 日直接用于决策的一类变量。
+- #750081：检验「首板日可观测的 limit_up_premium」是否单调地影响后续收益 —— 这是唯一能在 T 日直接用于决策的一类变量。
+- #750082：检验「首板日可观测的 market_cap」是否单调地影响后续收益 —— 这是唯一能在 T 日直接用于决策的一类变量。
+- #750083：把「回撤深浅」当成连续变量而不是分档条件，检验它与**随后一段**收益的单调关系。两窗取值区间不重叠（A = T+1..T+anchor、B = T+anchor+1..T+anchor+span），因此不存在同义反复。
+- #750084：辅助方法「事件后收益研究」建议的稳定性复核：同一结论换一个维度再验一次。
+
+## 3. Research Result
+
+共 **528** 行结果（全部来自 `research_result`，**原样引用**：不重算、不换算、不补 0）。
+
+**逐分析结果行数**
+
+| analysisId | 分析名 | 结果行 | 结果形态 |
+| --- | --- | --- | --- |
+| #750057 | 全样本基准 · 事件后收益 T+5/T+10/T+20 | 36 | GROUPED |
+| #750058 | 全样本分布 · future_return_5d / turnover / limit_up_premium | 57 | GROUPED |
+| #750059 | 基准稳定性 · 按 year 分组 | 14 | GROUPED/SCALAR |
+| #750060 | 回踩期未破首板日开盘价（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750061 | 回踩期未破首板日开盘价（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750062 | 回踩期未破首板日开盘价（T+5） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750063 | 回踩期未破首板日最低价（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750064 | 回踩期未破首板日最低价（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750065 | 回踩期未破首板日最低价（T+5） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750066 | 回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750067 | 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750068 | 回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750069 | 回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750070 | 回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750071 | 回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750072 | 回踩期未破首板日开盘价 且 回踩深度落在 <0.95]（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750073 | 回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750074 | 回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750075 | 回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750076 | 回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750077 | 回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750078 | 回踩期已破首板日开盘价（对照组）（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750079 | 回踩期已破首板日最低价（对照组）（T+2） → T+5 收益 | 16 | GROUPED/SCALAR |
+| #750080 | turnover 分位 → T+5 收益（5 档） | 28 | GROUPED/SCALAR |
+| #750081 | limit_up_premium 分位 → T+5 收益（5 档） | 28 | GROUPED/SCALAR |
+| #750082 | market_cap 分位 → T+5 收益（5 档） | 0 | — |
+| #750083 | T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系） | 31 | GROUPED/SCALAR |
+| #750084 | 事件后收益研究 · 按 year 分组稳定性复核 | 14 | GROUPED/SCALAR |
+
+**结果明细**
+
+#### #750057 · 全样本基准 · 事件后收益 T+5/T+10/T+20（EVENT_STUDY）
+
+| resultId | metricCode | 类型 | 维度 | 值 | 样本量 | 明细 |
+| --- | --- | --- | --- | --- | --- | --- |
+| #661057 | SAMPLE_COUNT | GROUPED | {"horizon":5} | 23751 | 23751 | {"availableVariables":["future_return_5d","max_return_5d","min_return_5d","max_drawdown_5d","is_breakout_5d","days_to_breakout_5d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":5,"lowSample":false,"metricDefinition":"过滤非有限值后的样本数。","unavailableVariables":[],"va…（已截断，完整内容见原表字段） |
+| #661058 | MEAN_RETURN | GROUPED | {"horizon":5} | 0.015210360880304351 | 23751 | {"availableVariables":["future_return_5d","max_return_5d","min_return_5d","max_drawdown_5d","is_breakout_5d","days_to_breakout_5d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":5,"lowSample":false,"metricDefinition":"有限样本的算术平均（作用于收益型变量）。","unavailableVariables…（已截断，完整内容见原表字段） |
+| #661059 | MEDIAN_RETURN | GROUPED | {"horizon":5} | -0.005747126436781614 | 23751 | {"availableVariables":["future_return_5d","max_return_5d","min_return_5d","max_drawdown_5d","is_breakout_5d","days_to_breakout_5d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":5,"lowSample":false,"metricDefinition":"有限样本的中位数（作用于收益型变量）。","unavailableVariables"…（已截断，完整内容见原表字段） |
+| #661060 | STD_RETURN | GROUPED | {"horizon":5} | 0.13343730914141402 | 23751 | {"availableVariables":["future_return_5d","max_return_5d","min_return_5d","max_drawdown_5d","is_breakout_5d","days_to_breakout_5d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":5,"lowSample":false,"metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","unavailableVar…（已截断，完整内容见原表字段） |
+| #661061 | WIN_RATE | GROUPED | {"horizon":5} | 0.47416950865226726 | 23751 | {"availableVariables":["future_return_5d","max_return_5d","min_return_5d","max_drawdown_5d","is_breakout_5d","days_to_breakout_5d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":5,"lowSample":false,"metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。"…（已截断，完整内容见原表字段） |
+| #661062 | T_STAT | GROUPED | {"horizon":5} | 10.606922316378684 | 23751 | {"availableVariables":["future_return_5d","max_return_5d","min_return_5d","max_drawdown_5d","is_breakout_5d","days_to_breakout_5d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":5,"lowSample":false,"metricDefinition":"Newey-West HAC 稳健 t 统计量（shared/quant-stats.…（已截断，完整内容见原表字段） |
+| #661063 | P_VALUE | GROUPED | {"horizon":5} | 0 | 23751 | {"availableVariables":["future_return_5d","max_return_5d","min_return_5d","max_drawdown_5d","is_breakout_5d","days_to_breakout_5d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":5,"lowSample":false,"metricDefinition":"正态近似的双尾 p 值 2·(1−Φ(\|t\|))（由 HAC t 统计量推出）。**不…（已截断，完整内容见原表字段） |
+| #661064 | MAX_FAVORABLE_EXCURSION | GROUPED | {"horizon":5} | 0.11984551975693544 | 23751 | {"horizon":5,"metricDefinition":"对事件级 `max_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大有利偏移）。","variable":"max_return_5d"} |
+| #661065 | MAX_ADVERSE_EXCURSION | GROUPED | {"horizon":5} | -0.06281773585074968 | 23751 | {"horizon":5,"metricDefinition":"对事件级 `min_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大不利偏移）。","variable":"min_return_5d"} |
+| #661066 | MAX_DRAWDOWN | GROUPED | {"horizon":5} | -0.03714995650032536 | 23751 | {"horizon":5,"metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。","variable":"max_drawdown_5d"} |
+| #661067 | BREAKOUT_RATE | GROUPED | {"horizon":5} | 0.9349820668946536 | 23751 | {"horizon":5,"metricDefinition":"对 0/1 型 `is_breakout_{h}d` 变量取均值（[T+1, T+h] 区间内突破事件日高点的比例）。","variable":"is_breakout_5d"} |
+| #661068 | MEAN_DAYS_TO_BREAKOUT | GROUPED | {"horizon":5} | 1.0921093715152326 | 23751 | {"horizon":5,"metricDefinition":"对 `days_to_breakout_{h}d` 变量取均值（仅统计已突破样本；未突破为 null 不参与）。","variable":"days_to_breakout_5d"} |
+| #661069 | SAMPLE_COUNT | GROUPED | {"horizon":10} | 23543 | 23543 | {"availableVariables":["future_return_10d","max_return_10d","min_return_10d","max_drawdown_10d","is_breakout_10d","days_to_breakout_10d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":10,"lowSample":false,"metricDefinition":"过滤非有限值后的样本数。","unavailableVariables"…（已截断，完整内容见原表字段） |
+| #661070 | MEAN_RETURN | GROUPED | {"horizon":10} | 0.013496945220528064 | 23543 | {"availableVariables":["future_return_10d","max_return_10d","min_return_10d","max_drawdown_10d","is_breakout_10d","days_to_breakout_10d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":10,"lowSample":false,"metricDefinition":"有限样本的算术平均（作用于收益型变量）。","unavailableVa…（已截断，完整内容见原表字段） |
+| #661071 | MEDIAN_RETURN | GROUPED | {"horizon":10} | -0.014058106841612027 | 23543 | {"availableVariables":["future_return_10d","max_return_10d","min_return_10d","max_drawdown_10d","is_breakout_10d","days_to_breakout_10d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":10,"lowSample":false,"metricDefinition":"有限样本的中位数（作用于收益型变量）。","unavailableVar…（已截断，完整内容见原表字段） |
+| #661072 | STD_RETURN | GROUPED | {"horizon":10} | 0.17549685288029304 | 23543 | {"availableVariables":["future_return_10d","max_return_10d","min_return_10d","max_drawdown_10d","is_breakout_10d","days_to_breakout_10d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":10,"lowSample":false,"metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","unavail…（已截断，完整内容见原表字段） |
+| #661073 | WIN_RATE | GROUPED | {"horizon":10} | 0.4515992014611562 | 23543 | {"availableVariables":["future_return_10d","max_return_10d","min_return_10d","max_drawdown_10d","is_breakout_10d","days_to_breakout_10d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":10,"lowSample":false,"metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不…（已截断，完整内容见原表字段） |
+| #661074 | T_STAT | GROUPED | {"horizon":10} | 6.868385290660956 | 23543 | {"availableVariables":["future_return_10d","max_return_10d","min_return_10d","max_drawdown_10d","is_breakout_10d","days_to_breakout_10d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":10,"lowSample":false,"metricDefinition":"Newey-West HAC 稳健 t 统计量（shared/quant…（已截断，完整内容见原表字段） |
+| #661075 | P_VALUE | GROUPED | {"horizon":10} | 6.532552276894422e-12 | 23543 | {"availableVariables":["future_return_10d","max_return_10d","min_return_10d","max_drawdown_10d","is_breakout_10d","days_to_breakout_10d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":10,"lowSample":false,"metricDefinition":"正态近似的双尾 p 值 2·(1−Φ(\|t\|))（由 HAC t 统计量…（已截断，完整内容见原表字段） |
+| #661076 | MAX_FAVORABLE_EXCURSION | GROUPED | {"horizon":10} | 0.15819937740401271 | 23543 | {"horizon":10,"metricDefinition":"对事件级 `max_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大有利偏移）。","variable":"max_return_10d"} |
+| #661077 | MAX_ADVERSE_EXCURSION | GROUPED | {"horizon":10} | -0.08873670261230782 | 23543 | {"horizon":10,"metricDefinition":"对事件级 `min_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大不利偏移）。","variable":"min_return_10d"} |
+| #661078 | MAX_DRAWDOWN | GROUPED | {"horizon":10} | -0.06570106467681808 | 23543 | {"horizon":10,"metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。","variable":"max_drawdown_10d"} |
+| #661079 | BREAKOUT_RATE | GROUPED | {"horizon":10} | 0.9484527483526566 | 23543 | {"horizon":10,"metricDefinition":"对 0/1 型 `is_breakout_{h}d` 变量取均值（[T+1, T+h] 区间内突破事件日高点的比例）。","variable":"is_breakout_10d"} |
+| #661080 | MEAN_DAYS_TO_BREAKOUT | GROUPED | {"horizon":10} | 1.1854718142643568 | 23543 | {"horizon":10,"metricDefinition":"对 `days_to_breakout_{h}d` 变量取均值（仅统计已突破样本；未突破为 null 不参与）。","variable":"days_to_breakout_10d"} |
+| #661081 | SAMPLE_COUNT | GROUPED | {"horizon":20} | 23033 | 23033 | {"availableVariables":["future_return_20d","max_return_20d","min_return_20d","max_drawdown_20d","is_breakout_20d","days_to_breakout_20d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":20,"lowSample":false,"metricDefinition":"过滤非有限值后的样本数。","unavailableVariables"…（已截断，完整内容见原表字段） |
+| #661082 | MEAN_RETURN | GROUPED | {"horizon":20} | 0.01290959940552959 | 23033 | {"availableVariables":["future_return_20d","max_return_20d","min_return_20d","max_drawdown_20d","is_breakout_20d","days_to_breakout_20d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":20,"lowSample":false,"metricDefinition":"有限样本的算术平均（作用于收益型变量）。","unavailableVa…（已截断，完整内容见原表字段） |
+| #661083 | MEDIAN_RETURN | GROUPED | {"horizon":20} | -0.02218300983110669 | 23033 | {"availableVariables":["future_return_20d","max_return_20d","min_return_20d","max_drawdown_20d","is_breakout_20d","days_to_breakout_20d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":20,"lowSample":false,"metricDefinition":"有限样本的中位数（作用于收益型变量）。","unavailableVar…（已截断，完整内容见原表字段） |
+| #661084 | STD_RETURN | GROUPED | {"horizon":20} | 0.22864613637163236 | 23033 | {"availableVariables":["future_return_20d","max_return_20d","min_return_20d","max_drawdown_20d","is_breakout_20d","days_to_breakout_20d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":20,"lowSample":false,"metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","unavail…（已截断，完整内容见原表字段） |
+| #661085 | WIN_RATE | GROUPED | {"horizon":20} | 0.4402379195067946 | 23033 | {"availableVariables":["future_return_20d","max_return_20d","min_return_20d","max_drawdown_20d","is_breakout_20d","days_to_breakout_20d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":20,"lowSample":false,"metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不…（已截断，完整内容见原表字段） |
+| #661086 | T_STAT | GROUPED | {"horizon":20} | 4.720696784609775 | 23033 | {"availableVariables":["future_return_20d","max_return_20d","min_return_20d","max_drawdown_20d","is_breakout_20d","days_to_breakout_20d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":20,"lowSample":false,"metricDefinition":"Newey-West HAC 稳健 t 统计量（shared/quant…（已截断，完整内容见原表字段） |
+| #661087 | P_VALUE | GROUPED | {"horizon":20} | 0.000002353168678359552 | 23033 | {"availableVariables":["future_return_20d","max_return_20d","min_return_20d","max_drawdown_20d","is_breakout_20d","days_to_breakout_20d"],"definition":"path.relativeDay=h 的 closeFromEventClose（事件日收盘 → T+h 收盘收益）。","horizon":20,"lowSample":false,"metricDefinition":"正态近似的双尾 p 值 2·(1−Φ(\|t\|))（由 HAC t 统计量…（已截断，完整内容见原表字段） |
+| #661088 | MAX_FAVORABLE_EXCURSION | GROUPED | {"horizon":20} | 0.20814418062142329 | 23033 | {"horizon":20,"metricDefinition":"对事件级 `max_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大有利偏移）。","variable":"max_return_20d"} |
+| #661089 | MAX_ADVERSE_EXCURSION | GROUPED | {"horizon":20} | -0.12096918761405634 | 23033 | {"horizon":20,"metricDefinition":"对事件级 `min_return_{h}d` 变量取均值（[T+1, T+h] 区间内最大不利偏移）。","variable":"min_return_20d"} |
+| #661090 | MAX_DRAWDOWN | GROUPED | {"horizon":20} | -0.09951547056431302 | 23033 | {"horizon":20,"metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。","variable":"max_drawdown_20d"} |
+| #661091 | BREAKOUT_RATE | GROUPED | {"horizon":20} | 0.9592126115605972 | 23033 | {"horizon":20,"metricDefinition":"对 0/1 型 `is_breakout_{h}d` 变量取均值（[T+1, T+h] 区间内突破事件日高点的比例）。","variable":"is_breakout_20d"} |
+| #661092 | MEAN_DAYS_TO_BREAKOUT | GROUPED | {"horizon":20} | 1.3303913043478262 | 23033 | {"horizon":20,"metricDefinition":"对 `days_to_breakout_{h}d` 变量取均值（仅统计已突破样本；未突破为 null 不参与）。","variable":"days_to_breakout_20d"} |
+
+#### #750058 · 全样本分布 · future_return_5d / turnover / limit_up_premium（DESCRIPTIVE）
+
+| resultId | metricCode | 类型 | 维度 | 值 | 样本量 | 明细 |
+| --- | --- | --- | --- | --- | --- | --- |
+| #661093 | SAMPLE_COUNT | GROUPED | {"variable":"future_return_5d"} | 23751 | 23978 | {"groupBy":"variable","metricDefinition":"过滤非有限值后的样本数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661094 | SAMPLE_COUNT | GROUPED | {"variable":"turnover"} | 23975 | 23978 | {"groupBy":"variable","metricDefinition":"过滤非有限值后的样本数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661095 | SAMPLE_COUNT | GROUPED | {"variable":"limit_up_premium"} | 23978 | 23978 | {"groupBy":"variable","metricDefinition":"过滤非有限值后的样本数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661096 | MISSING_COUNT | GROUPED | {"variable":"future_return_5d"} | 227 | 23978 | {"groupBy":"variable","metricDefinition":null,"roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661097 | MISSING_COUNT | GROUPED | {"variable":"turnover"} | 3 | 23978 | {"groupBy":"variable","metricDefinition":null,"roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661098 | MISSING_COUNT | GROUPED | {"variable":"limit_up_premium"} | 0 | 23978 | {"groupBy":"variable","metricDefinition":null,"roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661099 | MISSING_RATE | GROUPED | {"variable":"future_return_5d"} | 0.009467011427141549 | 23978 | {"groupBy":"variable","metricDefinition":null,"roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661100 | MISSING_RATE | GROUPED | {"variable":"turnover"} | 0.00012511468846442572 | 23978 | {"groupBy":"variable","metricDefinition":null,"roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661101 | MISSING_RATE | GROUPED | {"variable":"limit_up_premium"} | 0 | 23978 | {"groupBy":"variable","metricDefinition":null,"roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661102 | MEAN | GROUPED | {"variable":"future_return_5d"} | 0.015210360880304351 | 23751 | {"groupBy":"variable","metricDefinition":"有限样本的算术平均。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661103 | MEAN | GROUPED | {"variable":"turnover"} | 9.063458327424442 | 23975 | {"groupBy":"variable","metricDefinition":"有限样本的算术平均。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661104 | MEAN | GROUPED | {"variable":"limit_up_premium"} | 0.10006514647651432 | 23978 | {"groupBy":"variable","metricDefinition":"有限样本的算术平均。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661105 | MEDIAN | GROUPED | {"variable":"future_return_5d"} | -0.005747126436781614 | 23751 | {"groupBy":"variable","metricDefinition":"有限样本的中位数（偶数取中间两者均值）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661106 | MEDIAN | GROUPED | {"variable":"turnover"} | 6.9447 | 23975 | {"groupBy":"variable","metricDefinition":"有限样本的中位数（偶数取中间两者均值）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661107 | MEDIAN | GROUPED | {"variable":"limit_up_premium"} | 0.10000000000000007 | 23978 | {"groupBy":"variable","metricDefinition":"有限样本的中位数（偶数取中间两者均值）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661108 | STD | GROUPED | {"variable":"future_return_5d"} | 0.13343730914141402 | 23751 | {"groupBy":"variable","metricDefinition":"有限样本的标准差（除以 n−1）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661109 | STD | GROUPED | {"variable":"turnover"} | 7.903353335912992 | 23975 | {"groupBy":"variable","metricDefinition":"有限样本的标准差（除以 n−1）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661110 | STD | GROUPED | {"variable":"limit_up_premium"} | 0.0005759666636537729 | 23978 | {"groupBy":"variable","metricDefinition":"有限样本的标准差（除以 n−1）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661111 | MIN | GROUPED | {"variable":"future_return_5d"} | -0.6463120049435425 | 23751 | {"groupBy":"variable","metricDefinition":"有限样本最小值。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661112 | MIN | GROUPED | {"variable":"turnover"} | 0.069 | 23975 | {"groupBy":"variable","metricDefinition":"有限样本最小值。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661113 | MIN | GROUPED | {"variable":"limit_up_premium"} | 0.08695652173913038 | 23978 | {"groupBy":"variable","metricDefinition":"有限样本最小值。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661114 | MAX | GROUPED | {"variable":"future_return_5d"} | 0.6205128205128206 | 23751 | {"groupBy":"variable","metricDefinition":"有限样本最大值。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661115 | MAX | GROUPED | {"variable":"turnover"} | 91.6783 | 23975 | {"groupBy":"variable","metricDefinition":"有限样本最大值。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661116 | MAX | GROUPED | {"variable":"limit_up_premium"} | 0.125 | 23978 | {"groupBy":"variable","metricDefinition":"有限样本最大值。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661117 | P01 | GROUPED | {"variable":"future_return_5d"} | -0.23736735330304004 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数（shared/quant-stats.percentile）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661118 | P01 | GROUPED | {"variable":"turnover"} | 0.8329660000000001 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数（shared/quant-stats.percentile）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661119 | P01 | GROUPED | {"variable":"limit_up_premium"} | 0.09872611464968162 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数（shared/quant-stats.percentile）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661120 | P05 | GROUPED | {"variable":"future_return_5d"} | -0.15551504707286584 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661121 | P05 | GROUPED | {"variable":"turnover"} | 1.79675 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661122 | P05 | GROUPED | {"variable":"limit_up_premium"} | 0.0993788819875776 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661123 | P10 | GROUPED | {"variable":"future_return_5d"} | -0.11904761904761904 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661124 | P10 | GROUPED | {"variable":"turnover"} | 2.4654 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661125 | P10 | GROUPED | {"variable":"limit_up_premium"} | 0.09961685823754785 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661126 | P25 | GROUPED | {"variable":"future_return_5d"} | -0.06218172121463524 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661127 | P25 | GROUPED | {"variable":"turnover"} | 4.10965 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661128 | P25 | GROUPED | {"variable":"limit_up_premium"} | 0.09987463435018816 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661129 | P50 | GROUPED | {"variable":"future_return_5d"} | -0.005747126436781614 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数（= 分位定义下的中位数）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661130 | P50 | GROUPED | {"variable":"turnover"} | 6.9447 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数（= 分位定义下的中位数）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661131 | P50 | GROUPED | {"variable":"limit_up_premium"} | 0.10000000000000007 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数（= 分位定义下的中位数）。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661132 | P75 | GROUPED | {"variable":"future_return_5d"} | 0.06607482117686211 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661133 | P75 | GROUPED | {"variable":"turnover"} | 11.4543 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661134 | P75 | GROUPED | {"variable":"limit_up_premium"} | 0.10022779043280194 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661135 | P90 | GROUPED | {"variable":"future_return_5d"} | 0.17121588089330012 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661136 | P90 | GROUPED | {"variable":"turnover"} | 17.86662 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661137 | P90 | GROUPED | {"variable":"limit_up_premium"} | 0.1005586592178771 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661138 | P95 | GROUPED | {"variable":"future_return_5d"} | 0.2670496594119521 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661139 | P95 | GROUPED | {"variable":"turnover"} | 23.431 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661140 | P95 | GROUPED | {"variable":"limit_up_premium"} | 0.10085836909871236 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661141 | P99 | GROUPED | {"variable":"future_return_5d"} | 0.5261210976523042 | 23751 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661142 | P99 | GROUPED | {"variable":"turnover"} | 37.807151999999945 | 23975 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661143 | P99 | GROUPED | {"variable":"limit_up_premium"} | 0.10163934426229516 | 23978 | {"groupBy":"variable","metricDefinition":"线性插值分位数。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661144 | SKEWNESS | GROUPED | {"variable":"future_return_5d"} | 1.4046902489339537 | 23751 | {"groupBy":"variable","metricDefinition":"adjusted Fisher-Pearson g1；n < 3 返回 null。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661145 | SKEWNESS | GROUPED | {"variable":"turnover"} | 3.1862169774574527 | 23975 | {"groupBy":"variable","metricDefinition":"adjusted Fisher-Pearson g1；n < 3 返回 null。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661146 | SKEWNESS | GROUPED | {"variable":"limit_up_premium"} | 5.787449326143635 | 23978 | {"groupBy":"variable","metricDefinition":"adjusted Fisher-Pearson g1；n < 3 返回 null。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661147 | KURTOSIS | GROUPED | {"variable":"future_return_5d"} | 3.898767516638003 | 23751 | {"groupBy":"variable","metricDefinition":"adjusted Fisher-Pearson g2；n < 4 返回 null。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661148 | KURTOSIS | GROUPED | {"variable":"turnover"} | 18.519072561377392 | 23975 | {"groupBy":"variable","metricDefinition":"adjusted Fisher-Pearson g2；n < 4 返回 null。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+| #661149 | KURTOSIS | GROUPED | {"variable":"limit_up_premium"} | 285.5662925433817 | 23978 | {"groupBy":"variable","metricDefinition":"adjusted Fisher-Pearson g2；n < 4 返回 null。","roles":{"future_return_5d":"OUTCOME","limit_up_premium":"FEATURE","turnover":"FEATURE"}} |
+
+#### #750059 · 基准稳定性 · 按 year 分组（STABILITY）
+
+| resultId | metricCode | 类型 | 维度 | 值 | 样本量 | 明细 |
+| --- | --- | --- | --- | --- | --- | --- |
+| #661150 | SAMPLE_COUNT | GROUPED | {"year":2024} | 5062 | 5062 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","period":2024,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。"} |
+| #661151 | MEAN_RETURN | GROUPED | {"year":2024} | 0.025251535309809357 | 5062 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","period":2024,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 …（已截断，完整内容见原表字段） |
+| #661152 | MEDIAN_RETURN | GROUPED | {"year":2024} | -0.004204787921893224 | 5062 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","period":2024,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 n…（已截断，完整内容见原表字段） |
+| #661153 | WIN_RATE | GROUPED | {"year":2024} | 0.4847886210983801 | 5062 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","period":2024,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致…（已截断，完整内容见原表字段） |
+| #661154 | SAMPLE_COUNT | GROUPED | {"year":2025} | 10261 | 10261 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","period":2025,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。"} |
+| #661155 | MEAN_RETURN | GROUPED | {"year":2025} | 0.016185663797082108 | 10261 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","period":2025,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 …（已截断，完整内容见原表字段） |
+| #661156 | MEDIAN_RETURN | GROUPED | {"year":2025} | -0.005468215994531789 | 10261 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","period":2025,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 n…（已截断，完整内容见原表字段） |
+| #661157 | WIN_RATE | GROUPED | {"year":2025} | 0.4713965500438554 | 10261 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","period":2025,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致…（已截断，完整内容见原表字段） |
+| #661158 | SAMPLE_COUNT | GROUPED | {"year":2026} | 8428 | 8428 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","period":2026,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。"} |
+| #661159 | MEAN_RETURN | GROUPED | {"year":2026} | 0.007992040022305988 | 8428 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","period":2026,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 …（已截断，完整内容见原表字段） |
+| #661160 | MEDIAN_RETURN | GROUPED | {"year":2026} | -0.007305739623245782 | 8428 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","period":2026,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 n…（已截断，完整内容见原表字段） |
+| #661161 | WIN_RATE | GROUPED | {"year":2026} | 0.47116753678215473 | 8428 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"lowSample":false,"metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","period":2026,"stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致…（已截断，完整内容见原表字段） |
+| #661162 | MEAN_RETURN | GROUPED | {"year":"ALL"} | 0.015210360880304351 | 23751 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","period":"ALL","stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。"} |
+| #661163 | STABILITY_RATIO | SCALAR | — | 1 | 23751 | {"dimension":"year","dimensionKey":"year","excludedForMissingDimension":0,"excludedForMissingOutcome":227,"groupCount":3,"metricDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。","outcomeVariable":"future_return_5d","stabilityRatioDefinition":"各子区间均值的符号与整体均值符号一致的占比 [0,1]；整体均值为 0 时返回 null。"} |
+
+#### #750060 · 回踩期未破首板日开盘价（T+2） → T+5 收益（CONDITIONAL）
+
+| resultId | metricCode | 类型 | 维度 | 值 | 样本量 | 明细 |
+| --- | --- | --- | --- | --- | --- | --- |
+| #661164 | SAMPLE_COUNT | GROUPED | {"group":"ALL"} | 23751 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFFERENCE …（已截断，完整内容见原表字段） |
+| #661165 | MEAN_RETURN | GROUPED | {"group":"ALL"} | 0.015210360880304351 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIF…（已截断，完整内容见原表字段） |
+| #661166 | MEDIAN_RETURN | GROUPED | {"group":"ALL"} | -0.005747126436781614 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFF…（已截断，完整内容见原表字段） |
+| #661167 | WIN_RATE | GROUPED | {"group":"ALL"} | 0.47416950865226726 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","relativeDifferenceDef…（已截断，完整内容见原表字段） |
+| #661168 | STD_RETURN | GROUPED | {"group":"ALL"} | 0.13343730914141402 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATI…（已截断，完整内容见原表字段） |
+| #661169 | SAMPLE_COUNT | GROUPED | {"group":"CONDITION"} | 19614 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFFE…（已截断，完整内容见原表字段） |
+| #661170 | MEAN_RETURN | GROUPED | {"group":"CONDITION"} | 0.03384713404567008 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATI…（已截断，完整内容见原表字段） |
+| #661171 | MEDIAN_RETURN | GROUPED | {"group":"CONDITION"} | 0.007010172490048704 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIV…（已截断，完整内容见原表字段） |
+| #661172 | WIN_RATE | GROUPED | {"group":"CONDITION"} | 0.5312531864994392 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","relativeDiffere…（已截断，完整内容见原表字段） |
+| #661173 | STD_RETURN | GROUPED | {"group":"CONDITION"} | 0.13094279984205276 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"…（已截断，完整内容见原表字段） |
+| #661174 | MAX_DRAWDOWN | GROUPED | {"group":"ALL"} | -0.03714995650032536 | 23931 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。","outco…（已截断，完整内容见原表字段） |
+| #661175 | MAX_DRAWDOWN | GROUPED | {"group":"CONDITION"} | -0.021442054436018484 | 19760 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。",…（已截断，完整内容见原表字段） |
+| #661176 | DIFFERENCE | SCALAR | — | 0.018636773165365727 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"**条件组均值 − 全部样本均值**（left = 条件组，right = 全样本）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"REL…（已截断，完整内容见原表字段） |
+| #661177 | RELATIVE_DIFFERENCE | SCALAR | — | 1.2252683096755568 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"(条件组均值 − 全样本均值) / \|全样本均值\|；基准均值为 0 时返回 null。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"REL…（已截断，完整内容见原表字段） |
+| #661178 | T_STAT_DIFFERENCE | SCALAR | — | 14.625078418508178 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"Welch 两样本 t 统计量 (m₁ − m₂)/√(s₁²/n₁ + s₂²/n₂)（left − right）。**不校正重叠视界带来的样本相关**，仅作研究辅助。","outcomeVariable":"future_retu…（已截断，完整内容见原表字段） |
+| #661179 | P_VALUE_DIFFERENCE | SCALAR | — | 0 | 19614 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_2d == 1","conditionSampleCount":19614,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"由 Welch t 统计量经**正态近似**得到的双尾 p 值（与 T_STAT 的 p 值同一近似口径）。未做多重比较校正，也不是交易有效性的证据。","outcomeVariable":"future_return_5d","re…（已截断，完整内容见原表字段） |
+
+#### #750061 · 回踩期未破首板日开盘价（T+3） → T+5 收益（CONDITIONAL）
+
+| resultId | metricCode | 类型 | 维度 | 值 | 样本量 | 明细 |
+| --- | --- | --- | --- | --- | --- | --- |
+| #661180 | SAMPLE_COUNT | GROUPED | {"group":"ALL"} | 23751 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFFERENCE …（已截断，完整内容见原表字段） |
+| #661181 | MEAN_RETURN | GROUPED | {"group":"ALL"} | 0.015210360880304351 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIF…（已截断，完整内容见原表字段） |
+| #661182 | MEDIAN_RETURN | GROUPED | {"group":"ALL"} | -0.005747126436781614 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFF…（已截断，完整内容见原表字段） |
+| #661183 | WIN_RATE | GROUPED | {"group":"ALL"} | 0.47416950865226726 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","relativeDifferenceDef…（已截断，完整内容见原表字段） |
+| #661184 | STD_RETURN | GROUPED | {"group":"ALL"} | 0.13343730914141402 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATI…（已截断，完整内容见原表字段） |
+| #661185 | SAMPLE_COUNT | GROUPED | {"group":"CONDITION"} | 18041 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFFE…（已截断，完整内容见原表字段） |
+| #661186 | MEAN_RETURN | GROUPED | {"group":"CONDITION"} | 0.04397165008970606 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATI…（已截断，完整内容见原表字段） |
+| #661187 | MEDIAN_RETURN | GROUPED | {"group":"CONDITION"} | 0.013698630136986452 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIV…（已截断，完整内容见原表字段） |
+| #661188 | WIN_RATE | GROUPED | {"group":"CONDITION"} | 0.5672634554625575 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","relativeDiffere…（已截断，完整内容见原表字段） |
+| #661189 | STD_RETURN | GROUPED | {"group":"CONDITION"} | 0.12987555068286105 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"…（已截断，完整内容见原表字段） |
+| #661190 | MAX_DRAWDOWN | GROUPED | {"group":"ALL"} | -0.03714995650032536 | 23931 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。","outco…（已截断，完整内容见原表字段） |
+| #661191 | MAX_DRAWDOWN | GROUPED | {"group":"CONDITION"} | -0.013750414905644355 | 18177 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。",…（已截断，完整内容见原表字段） |
+| #661192 | DIFFERENCE | SCALAR | — | 0.02876128920940171 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"**条件组均值 − 全部样本均值**（left = 条件组，right = 全样本）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"REL…（已截断，完整内容见原表字段） |
+| #661193 | RELATIVE_DIFFERENCE | SCALAR | — | 1.8909011716246809 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"(条件组均值 − 全样本均值) / \|全样本均值\|；基准均值为 0 时返回 null。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"REL…（已截断，完整内容见原表字段） |
+| #661194 | T_STAT_DIFFERENCE | SCALAR | — | 22.159257268280776 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"Welch 两样本 t 统计量 (m₁ − m₂)/√(s₁²/n₁ + s₂²/n₂)（left − right）。**不校正重叠视界带来的样本相关**，仅作研究辅助。","outcomeVariable":"future_retu…（已截断，完整内容见原表字段） |
+| #661195 | P_VALUE_DIFFERENCE | SCALAR | — | 0 | 18041 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_3d == 1","conditionSampleCount":18041,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"由 Welch t 统计量经**正态近似**得到的双尾 p 值（与 T_STAT 的 p 值同一近似口径）。未做多重比较校正，也不是交易有效性的证据。","outcomeVariable":"future_return_5d","re…（已截断，完整内容见原表字段） |
+
+#### #750062 · 回踩期未破首板日开盘价（T+5） → T+5 收益（CONDITIONAL）
+
+| resultId | metricCode | 类型 | 维度 | 值 | 样本量 | 明细 |
+| --- | --- | --- | --- | --- | --- | --- |
+| #661196 | SAMPLE_COUNT | GROUPED | {"group":"ALL"} | 23751 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFFERENCE …（已截断，完整内容见原表字段） |
+| #661197 | MEAN_RETURN | GROUPED | {"group":"ALL"} | 0.015210360880304351 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIF…（已截断，完整内容见原表字段） |
+| #661198 | MEDIAN_RETURN | GROUPED | {"group":"ALL"} | -0.005747126436781614 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFF…（已截断，完整内容见原表字段） |
+| #661199 | WIN_RATE | GROUPED | {"group":"ALL"} | 0.47416950865226726 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","relativeDifferenceDef…（已截断，完整内容见原表字段） |
+| #661200 | STD_RETURN | GROUPED | {"group":"ALL"} | 0.13343730914141402 | 23751 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATI…（已截断，完整内容见原表字段） |
+| #661201 | SAMPLE_COUNT | GROUPED | {"group":"CONDITION"} | 15535 | 15535 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"过滤非有限值后的样本数。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIVE_DIFFE…（已截断，完整内容见原表字段） |
+| #661202 | MEAN_RETURN | GROUPED | {"group":"CONDITION"} | 0.06442810407209941 | 15535 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的算术平均（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATI…（已截断，完整内容见原表字段） |
+| #661203 | MEDIAN_RETURN | GROUPED | {"group":"CONDITION"} | 0.02868852459016387 | 15535 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的中位数（作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"RELATIV…（已截断，完整内容见原表字段） |
+| #661204 | WIN_RATE | GROUPED | {"group":"CONDITION"} | 0.6480205986482137 | 15535 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"**严格大于 0** 的样本占比（v > 0；v == 0 计为未胜，不四舍五入）。","outcomeVariable":"future_return_5d","relativeDiffere…（已截断，完整内容见原表字段） |
+| #661205 | STD_RETURN | GROUPED | {"group":"CONDITION"} | 0.12685270280316094 | 15535 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"有限样本的标准差（除以 n−1，作用于收益型变量）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"…（已截断，完整内容见原表字段） |
+| #661206 | MAX_DRAWDOWN | GROUPED | {"group":"ALL"} | -0.03714995650032536 | 23931 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"ALL","metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。","outco…（已截断，完整内容见原表字段） |
+| #661207 | MAX_DRAWDOWN | GROUPED | {"group":"CONDITION"} | -0.0008967437790988421 | 15665 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","group":"CONDITION","metricDefinition":"**对事件级 `max_drawdown_{h}d` 变量取均值**（回撤本身为负）。注意：本码**不是**净值曲线回撤（那属 Backtest 阶段，不在 RESEACH-002 范围）。",…（已截断，完整内容见原表字段） |
+| #661208 | DIFFERENCE | SCALAR | — | 0.04921774319179506 | 15535 | {"conditionCount":1,"conditionRule":"pullback_holds_event_open_5d == 1","conditionSampleCount":15535,"differenceDefinition":"DIFFERENCE = mean(条件样本) − mean(全样本)。","metricDefinition":"**条件组均值 − 全部样本均值**（left = 条件组，right = 全样本）。","outcomeVariable":"future_return_5d","relativeDifferenceDefinition":"REL…（已截断，完整内容见原表字段） |
+| #661209 | RELATIVE_DIFFERENCE | SCALAR | — | 3.2358037773795565 | 15535 | {"conditionCount":1,"conditionRule":"p

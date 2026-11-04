@@ -1,0 +1,23 @@
+{
+  "mode": "dry-run",
+  "sqlFile": "drizzle/0040_candidate_plan_provenance.sql",
+  "statementCount": 2,
+  "executed": 0,
+  "skippedExisting": 0,
+  "missingAfterRun": [
+    "column research_strategy_candidate.sourceResearchPlanId",
+    "index research_strategy_candidate.idx_research_candidate_plan"
+  ],
+  "pass": false,
+  "foreignKeyCountInSchema": 0,
+  "statements": [
+    {
+      "label": "column research_strategy_candidate.sourceResearchPlanId",
+      "action": "would-execute"
+    },
+    {
+      "label": "index research_strategy_candidate.idx_research_candidate_plan",
+      "action": "would-execute"
+    }
+  ]
+}

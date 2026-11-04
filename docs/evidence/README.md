@@ -1,0 +1,1803 @@
+# `docs/evidence/` —— 根目录证据簇（2026-09-13 归位）
+
+> **这是什么**：原本散落在仓库根目录的 `_*` 探针脚本与运行结果，共 **85 个文件**，于 2026-09-13 整体迁入本目录。
+
+> ⚠️ **2026-10-07 清理**：22 份大体积机器本地证据（`_analysis_*.json` / `*.cpuprofile.json`，合计 199.8 MB）已从本目录移除。
+> 它们**从未进入 git**（`/docs/evidence/` 被 `.gitignore` 锚定）⇒ 只存在于本机，无法从版本库恢复。
+> 本文件与相关 `docs/research/RESULT-*.md`、`docs/parameter/PARAMETER-001-PRE-PROFILE.md` 中的引用已就地标注「（已清理 2026-10-07）」。
+> `ROADMAP-CHANGELOG.md` 的历史交付清单按「历史条目零改写」保持原样 —— 其中指向这些文件的记录属历史存档，不应回改。
+
+> **为什么归位**：`PROJECT_RULES.md:73` 明确根目录 `_*` 探针「可安全留存作证据」，但 96 个裸文件堆在根目录会掩盖真实源码结构（项目自己的审计报告 `docs/audit/reports/2026-09-09_AUDIT-002_*.md` 的 C-2 条目即为此立项）。归位后根目录文件数 131 → 20。
+
+> **为什么放在 `docs/` 下**：`tsconfig.json` 的 `include` 只覆盖 `client/src/**`、`shared/**`、`server/**`，`vitest.config.ts` 的 `include` 同理 ⇒ `docs/evidence/**` **不进编译、不进测试**，与原来的根目录待遇一致，而相对 import 已从 `./server/…` 修正为 `../../server/…`。
+
+
+## 路径约定（🔴 历史文档的读写判据）
+
+**2026-09-13 之前的文档/日志里出现的裸文件名（如 `_r007_probe_result.md`），一律指向本目录下的同名文件。**
+
+原因是 `PROJECT_RULES.md:129` 有明文「**历史条目零改写**」⇒ `ROADMAP-CHANGELOG.md` 与 `.workbuddy/memory/**` 里的历史提及**一个字符都没改**，只在本文件与该日日志里登记了这条映射。
+
+
+## 如何重跑这些探针
+
+```bash
+# 必须在项目根目录执行（脚本按 CWD 写输出、按 ../../ 找源码）
+npx tsx docs/evidence/_r007_run_engine.mts
+```
+
+⚠️ 探针依赖真实 TiDB：跑 `getDb()` 的脚本会拖住 event loop，须以 `process.exit()` 显式收尾；研究 Run 在途时**禁跑**（见 `PROJECT_RULES.md:36`）。
+
+
+## 文件索引
+
+
+### `r006` —— 2 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r006_probe.mjs` | `ROADMAP.md`、`docs/research/RESEARCH-006.0-architecture.md` |
+| `_r006_probe_result.md` | `ROADMAP.md`、`docs/research/RESEARCH-006.0-architecture.md` |
+
+### `r0061` —— 8 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r0061_apply.json` | `ROADMAP.md`、`docs/research/RESEARCH-006.1-implementation.md` |
+| `_r0061_apply2.json` | `ROADMAP.md`、`docs/research/RESEARCH-006.1-implementation.md` |
+| `_r0061_check.json` | `ROADMAP.md`、`docs/research/RESEARCH-006.1-implementation.md` |
+| `_r0061_fulltest.clean.log` | `docs/research/RESEARCH-006.1-implementation.md` |
+| `_r0061_fulltest.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.1-implementation.md` |
+| `_r0061_probe.mjs` | `docs/research/RESEARCH-006.1-implementation.md` |
+| `_r0061_probe_result.md` | `ROADMAP.md`、`docs/research/RESEARCH-006.1-implementation.md` |
+| `_r0061_verify.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.1-implementation.md` |
+
+### `r0062` —— 5 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r0062_fulltest.clean.log` | `docs/research/RESEARCH-006.2-implementation.md` |
+| `_r0062_fulltest.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.2-implementation.md` |
+| `_r0062_probe.mjs` | `docs/research/RESEARCH-006.2-implementation.md` |
+| `_r0062_probe_result.md` | `ROADMAP.md`、`docs/research/RESEARCH-006.2-implementation.md` |
+| `_r0062_verify.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.2-implementation.md` |
+
+### `r0063` —— 4 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r0063_bridge_tests.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.3-implementation.md` |
+| `_r0063_fulltest.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.3-implementation.md` |
+| `_r0063_tsc.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.3-implementation.md` |
+| `_r0063_verify.log` | `ROADMAP.md`、`docs/research/RESEARCH-006.3-implementation.md` |
+
+### `r00641` —— 4 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r00641_build.log` | `docs/research/RESEARCH-006.4.1-A-implementation.md` |
+| `_r00641_fulltest.log` | `docs/research/RESEARCH-006.4.1-A-implementation.md` |
+| `_r00641_tsc.log` | `docs/research/RESEARCH-006.4.1-A-implementation.md` |
+| `_r00641_verify.log` | — |
+
+### `r00641b` —— 6 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r00641b_focused_tests.log` | `docs/research/RESEARCH-006.4.1-B-implementation.md` |
+| `_r00641b_fulltest.log` | `docs/research/RESEARCH-006.4.1-B-implementation.md` |
+| `_r00641b_tsc.log` | `docs/research/RESEARCH-006.4.1-B-implementation.md` |
+| `_r00641b_verify_pass.log` | `docs/research/RESEARCH-006.4.1-B-implementation.md` |
+| `_r00641b_verify_run2_econnreset.log` | `docs/research/RESEARCH-006.4.1-B-implementation.md` |
+| `_r00641b_vitebuild.log` | `docs/research/RESEARCH-006.4.1-B-implementation.md` |
+
+### `r007` —— 18 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r007_audit_probe.mjs` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_audit_probe2.mjs` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_audit_probe2_result.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_audit_probe3.mjs` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_audit_probe3_result.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_audit_probe_result.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_batch_plan.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_build_run.mts` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_catalog.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_catalog_probe.mts` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_conclusion.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_conclusion.mts` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_probe.mjs` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_probe_result.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_run_engine.mts` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_run_result.md` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_summarize.mts` | `docs/research/RESEARCH-010-implementation.md` |
+| `_r007_summary.md` | `docs/research/RESEARCH-010-implementation.md` |
+
+### `r0071` —— 10 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r0071_apply.mts` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_batch_plan.md` | `ROADMAP.md`、`docs/research/RESEARCH-007.1-pullback-correction.md`、`docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r0071_fix.md` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_fix.mts` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_offline.mjs` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_offline_mtd.md` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_run_engine.mts` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_run_result.md` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_summarize.mts` | `docs/research/RESEARCH-007.1-pullback-correction.md` |
+| `_r0071_summary.md` | `ROADMAP.md`、`docs/research/RESEARCH-007.1-pullback-correction.md`、`docs/research/RESEARCH-007.2-research-matrix-view.md` 等 4 处 |
+
+### `r008` —— 3 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r008_matrix_probe.mts` | `ROADMAP.md`、`docs/research/RESEARCH-007.2-research-matrix-view.md`、`docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r008_matrix_probe_result.md` | `ROADMAP.md`、`docs/research/RESEARCH-007.2-research-matrix-view.md`、`docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r008_matrix_probe_result_135.md` | `docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+
+### `r009` —— 3 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r009_coverage_probe.mts` | `ROADMAP.md`、`docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r009_coverage_probe_result.md` | `ROADMAP.md`、`docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r009_coverage_probe_result_135.md` | `docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+
+### `r010` —— 4 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_r010_backfill_apply.mts` | `ROADMAP.md`、`docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r010_backfill_plan.md` | `docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r010_backfill_run.mts` | `ROADMAP.md`、`docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+| `_r010_backfill_run_result.md` | `docs/research/RESEARCH-007.3-run-540001-coverage-backfill.md` |
+
+### `pool` —— 2 个
+
+> 连接池死连接治理证据簇（2026-09-13：`Failed query: … U read ECONNRESET`）。
+> 生产代码坐标：`server/db.ts`（`maxIdle` / `resolveIdleTimeoutMs` / `withReadRetry` 接线）。
+
+| 文件 | 用途 |
+|---|---|
+| `_probe_pool_stale.mts` / `.json` | 证明「SQL 本身没问题」（两次均成功 / 5,337 行）⇒ 报错来自连接层 |
+| `_probe_pool_fix_verify.mts` / `.json` | 修复验证：回收定时器可启动 + `getLeaderCandidates()` 真跑通 + 瞬时错误重试恢复 + 语义错误不误重试 |
+
+### `runworkbench` —— 12 个
+
+> 运行工作台「真实跑通」证据簇（`useRealData=true`：真实构数据集 → 真实读策略文档 → 按配方装配阶段入参）。
+> 生产代码坐标：`server/runWorkbenchAssembly/**`、`server/research/recipeRegistry.ts`、`server/research/closedLoopWiring/executors.ts`。
+
+| 文件 | 用途 |
+|---|---|
+| `_probe_realdata_assembly.mts` / `.json` | 列真实策略与版本（发现 `hasRecipe=false`，配方需注册表兜底） |
+| `_probe_strategy_doc_shape.mts` / `.json` | 检查 3 份策略文档的 costModel / executionModel / recipe 形态 |
+| `_probe_realdata_e2e.mts` / `.json` | **核心取证**：真实 tRPC caller 走 `loopRun({useRealData:true})` → 5 阶段 EXECUTED |
+| `_probe_regime_subset.mts` / `.json` | 子集链验证：证明 regime 受 canonical 前驱未装配所限 |
+| `_probe_regime_executor.mts` / `.json` | regime 执行器本体单独验证（7 项断言全过） |
+| `_probe_inflight_check2.mts` / `_probe_inflight_runs.json` | 改 server 前的在途 Run 安全检查（零在途） |
+
+### `diag` —— 5 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_diag_cand_count.mts` | — |
+| `_diag_cand_sketch.mts` | — |
+| `_diag_dsv_read.mts` | — |
+| `_diag_pool_state.mts` | — |
+| `_diag_wb_view.mts` | — |
+
+### `e2e` —— 3 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_e2e_first_board_pullback.mts` | `ROADMAP.md` |
+| `_e2e_sketch_form.mts` | `ROADMAP.md` |
+| `_e2e_sketch_roundtrip.mts` | `ROADMAP.md` |
+
+### `misc` —— 10 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_create_analyses.log` | — |
+| `_dupcheck_probe.mjs` | `ROADMAP.md`、`docs/step-dataset-003b-report.md` |
+| `_limitprecision_probe.mjs` | `ROADMAP.md`、`docs/step-dataset-003b-report.md` |
+| `_perf_probe.mts` | — |
+| `_perflog.txt` | — |
+| `_probe_when_gap.mts` | `ROADMAP.md` |
+| `_s003_verify.log` | `docs/strategy/STRATEGY-003-report.md` |
+| `_t1anchor_probe.mjs` | `docs/step-dataset-003b-report.md` |
+| `_vite_build_c41c.log` | — |
+| `_vite_build_whengap.log` | `ROADMAP.md` |
+
+### `perf` —— 7 个（2026-09-13 运行工作台「等很久」专项）
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_liquidity_scale.mts` | `liquidity_daily` = 901.5 万行；唯一键 `(securityCode, tradeDate)`；单条 400 只查询 ≈ 250ms（`Batch_Point_Get`）⇒ **SQL 无罪** | `ROADMAP.md` |
+| `_probe_run_timing.mts` | 单月涨停候选 4.1s（11,377 行）；三月 23.1s（29,247 行）；`loadTradingDays` 382ms | — |
+| `_probe_bandwidth.mts` | 🔴 **首轮单次采样得出「并发惩罚 3.45×」，后被证伪**（见 `_probe_concurrency_interleaved.mts`）；`compress` 净收益 2.57× | `ROADMAP.md`（记录教训） |
+| `_probe_singleconn.mts` | `compress=true` 3130ms vs `false` 8039ms（2.57×）；1 连接 vs 4 连接 = 3143 vs 3782ms | — |
+| `_probe_concurrency_penalty.mts` | 三轮中位：c=1/2/4 = 2011/1369/1940ms ⇒ 惩罚 0.96×（**推翻**前结论） | — |
+| `_probe_concurrency_interleaved.mts` | 🔴 **权威结论**：交错 5 轮，c=1/2/4 = 1406/1268/1355ms ⇒ **并发无惩罚（0.96×）**。单次采样不可信 | `ROADMAP.md` |
+| `_probe_build_cost.mts` | 390002 窗口 = 484 交易日 / 5,604 标的 / 23,978 事件；涨停候选均值 **5,615ms per 30 日 × 23 片 ≈ 129s**；Phase2 定向取数 400 只 × 30 日 ≈ 5.7s | `ROADMAP.md` |
+
+### `datasetdirect` —— 7 个（2026-09-13 运行工作台「数据集被无视」专项修复）
+
+> **背景**：用户质疑「我明明设置了数据集，为什么还要去日线行情表查」。实查证实指控成立 ——
+> `assemble.ts` 无条件从零重建，无视策略已绑定的 `datasetVersionId=390002`，也无视 `ds_*` 里
+> 已落库的 1,543,082 行。修复 = 新增「优先直读已绑定数据集」桥
+> （生产代码：`server/runWorkbenchAssembly/datasetFromRegistry.ts`）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_ds_rows.mts`（在 `perf` 节亦有登记） | 🔴 **决定性证据**：`ds_*` 五表按 390002 计数 = 23,978 + 503,538 + 471,816 + 471,816 + 71,934 = **1,543,082**（与 `dataset_version.totalRows` 逐字一致）；`prefix` 样本证明含 OHLCV | `ROADMAP.md` |
+| `_probe_strategy_dataset_binding.mts`（在 `perf` 节亦有登记） | 🔴 **绑定确认**：3 份策略文档全部含 `datasetVersionId: 390002`（PRIMARY） | `ROADMAP.md` |
+| `_probe_registry_direct_e2e.mts` | **桥本体验证**：390002 直读 → 23,978 行 / 484 日 / `bindResearchDataset` 全部不变量通过 / 事件计数与真实库逐字一致 ✅。**耗时 40.8s → 7.9s**（并发优化后） | `ROADMAP.md` |
+| `_probe_registry_direct_breakdown.mts` | **耗时拆分**：事件分页 limit=5000 最优（5.3s）；rd=0 批读 batch=1000/conc=16 最优（1.4s）⇒ 最优组合 ≈ 6.7s | `ROADMAP.md` |
+| `_probe_runworkbench_dataset_source.mts` | **装配层三路径验证**（真实 DB）：A 带绑定 id → `registry` / **6.2s** / 23,978 行；B 无绑定 → `rebuild` / 60.6s / 96,912 行 + 原因如实；C 不存在 id → `rebuild` + `REGISTRY_VERSION_NOT_FOUND`（不静默）⇒ **直读比重建快 ~10×** | `ROADMAP.md` |
+| `_probe_post_coverage.mts` | 🔴 **回答「T+N 撮合是否要重新设计数据集表」**：`prefix` rd∈[-20,0] / 503,538 行 / **rd=0 上 (tradeDate,symbol) 严格唯一（0 冲突）**；`post` rd∈[1,20] / 471,816 行 / **在 (tradeDate,symbol) 上有 95,977 组冲突、单日最多 8 行** ⇒ `post` 不是逐日面板、不能直接并入 `rows`（会破唯一键）；23,978 事件中 23,107 个覆盖满 20 日、871 个不足（窗口末端）；`outcome` horizon = {5,10,20}；event 覆盖 484 日 | 本轮回答（`ROADMAP.md` / 记忆） |
+| `_probe_observe5_buy.mts` | 🔴 **回答「T日首板 → 观察5日 → 满足条件买入」能否表达**：`resolveSignalTimeline` 四个 trigger 的 `earliestSignalOffset`（`FIRST_VALID_DAY`/`EVERY_VALID_DAY`=T+1、`NEXT_TRADING_DAY`=T+2、`LAST_VALID_DAY`=T+5）；`CALENDAR_DAY` ⇒ `resolvable=false`（前视引用一律拒）；字段引用形态（`bar.*`=`currentBar` / `prefix.rd*`=`preEvent` / `post.rd*`=`forwardBar` / `path.*`&`outcome.*`=`labelOnly`）；**`post.rd6` 被 `INVALID_FUTURE_REFERENCE` 拒绝、`post.rd1` 放行** ⇒ 证明「观察5日内满足条件」用 `bar.*` + `condition` 表达、**不需要 `post`** | 本轮回答（`ROADMAP.md` / 记忆） |
+| `_probe_research_to_condition.mts` | 🔴 **回答「条件应由研究实验测算出来」的链路缺口**：研究侧 **12 种**分析类型（非 5 种）；`CONDITIONAL` 的输入即「结构化条件集」、输出为「条件样本 vs 全样本」的均值/中位/胜率/回撤 + Welch t/p；🔴 **但** 研究侧条件字段名（`FEATURE_VARIABLES`/`OUTCOME_VARIABLES`，如 `pre_return_5d`）与策略侧字段引用（`bar.*`/`prefix.rdN.*`/`post.rdN.*`）**是两套不同源的词表**，中间缺一层翻译；结论 `evidence` 输出的是**统计判定**（`alpha`/`materialityAbs`/`minSampleCount`/`stabilityMinConsistentRatio`），**不是可直接转成策略条件的表达式** | 本轮回答 |
+| `_probe_gap_analysis.mts` | 🔴 **决定性：把 3 处缺口钉死在代码坐标**（方案文档 `docs/research/PLAN-research-to-strategy-condition.md` 的证据底座）：① 声明 **12 种**分析 / **实际注册仅 6 种**（`descriptive`/`eventStudy`/`quantile`/`conditional`/`stability`/`segmentRelation`），**未实现 = `DISTRIBUTION`/`CORRELATION`/`IC`/`PATH`/`REGIME`/`SIGNIFICANCE`**（`analyses/registry.ts:60-65`）；② `FEATURE_VARIABLES` 共 **17 个，全部只读 `event` + `prefix`（≤ T）**；③ 🔴 **观察日（T+1..T+5 中间某一天）的「当日 bar 属性」变量数 = 0** ⇒ 「观察日缩量 / 观察日回踩」这类条件**今天测不出来**（不是不好用，是测不了） | `PLAN-research-to-strategy-condition.md` + 本轮回答 |
+
+---
+
+### `strategyspec` —— 2 个（2026-09-13 18:06 用户完整策略规格「首板回踩 · 量价时三维过滤」落地）
+
+> **背景**：用户给出完整策略规格（首板质量 / 回调形态 / 时间窗口 / 买卖点与风控 / 误区）。
+> 目标 = 逐条翻译为策略字段引用，并实查**每条今天能否表达**（不凭感觉说「可以」）。
+> 结论文档：`docs/research/STRATEGY-SPEC-first-limit-pullback.md`。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_condition_mapping.mts` | 🔴 **决定性：用户策略可完整表达并通过定义校验器** —— `validateCanonicalStrategyDefinition` 返回 **`valid = true, issues = 0`**（6 条入场条件 + 硬止损 + 时间止损）。逐条解析：`event.daysSincePreviousLimit`/`event.isFirstLimit` = `eventDay`；`prefix.rd0.*` = `preEvent rd=0`；`bar.*` = `currentBar`；`resolveSignalTimeline(FIRST_VALID_DAY, {1,5})` ⇒ `earliestSignalOffset=1` / `resolvable=true`。⚠️ **首跑 5 条 issue 全是探针写错枚举**（`schemaVersion` 正确为 `"1.0"`；`signalTiming` = `T_OPEN\|T_CLOSE`；`executionTiming` = `T_CLOSE\|T_PLUS_1_OPEN\|…`；`quantityMethod` = `FIXED_SHARES\|TARGET_WEIGHT\|AMOUNT`；`STOP_LOSS` 需 `threshold`）—— **策略条件本身零 issue** | `STRATEGY-SPEC-first-limit-pullback.md` + 本轮回答 |
+| `_probe_semantic_gaps.mts` | 🔴 **量化 3 处语义偏差**（校验器只查结构、不查语义）：**G1**「回调期间最低价」= 累积约束 `min(low[T+1..T+k])`，逐日条件 `bar.low>=prefix.rd0.low` 只是近似 —— 实测差 **T+1=0 / T+2=201 / T+3=630 / T+4=993 / T+5=1,393**（逐日 76.0% vs 累积 70.2%，**高估 5.8%**）；**G2** 前5日均量需 rd=-5..-1 聚合、**单一字段引用表达不了**（但 **23,978/23,978 事件前5日 prefix 完整**）；**G3** 「反包前一日」需窗口内相对引用 `T+k-1`、**框架无此能力**；另实查 `close=high`（实体涨停）= 23,907/23,978（99.7%）、一字板 706、`marketCap`/`floatMarketCap` **100% NULL**、`industryCode` 空 99.5% | `STRATEGY-SPEC-first-limit-pullback.md` + 本轮回答 |
+
+
+---
+
+### `backtestpersist` —— 5 组（2026-09-13 闭环回测「零成交」根因修复 + 2026-09-14「每次回测自动留档」）
+
+> **背景**：用户先报「运行策略后前端没有任何东西产生」（2026-09-13），修复后又报
+> 「每次回测的结果应该保存，并有地方可以展示」（2026-09-14）。两轮指向同一件事：
+> **闭环 `loopRun` 此前是无状态调用，跑完即弃** —— 结果既不展示、也不落库。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_backtest_zero_trades.mts` | 🔴 **「0 成交」根因取证（改动前）**：registry 直读 23,978 行 ⇒ **59/59 单全 `SUSPENDED`、0 成交、权益曲线恒 100,000**；同一策略同窗口强制 rebuild ⇒ **133 笔成交 / 期末 112,169.43（+12.17%）**；「执行日有没有行」逐单核对：registry 意图 60 → 有行 **0**、rebuild 意图 255 → 有行 **250** | `ROADMAP.md` §44 |
+| `_probe_after_fix_backtest_output.mts` + `.json` | ✅ **修复后真实 tRPC 复验（6/6 PASS，8m21s）**：`datasetSource=rebuild` / **292,489 行** / `tradeCount=133` / `finalEquity=112169.43` / 曲线 57 点中 **54 个不同取值（非平）** / `byReason={INSUFFICIENT_CASH:6}`（**零 `SUSPENDED`**） | `ROADMAP.md` §44 |
+| `_probe_backtest_storage_state.mts` + `.json` | 🔴 **留档现状取证**：legacy `backtest_runs` 真实库**存在但仅 1 行**（2026-09-04 16:27，单条 `resultJson` **5,610,196 字符 ≈ 5.6MB**）；`research_run` 实查 13 列（`executionLogJson` 是**批次日志**、非结果）⇒ 证明闭环结果**无处可落** | 本轮 `ROADMAP.md` §44 |
+| `_probe_closed_loop_persist_e2e.mts` + `.json` | ✅ **留档端到端（真实 tRPC + 真库）**：跑一次 ⇒ 留档 **+1 行**；列表摘要**逐字段等于**运行结果（9 项比对）；详情含完整 `stages`（14 阶段）与权益曲线/成交明细；**列表不携带长文本结果**；同 `runId` 写两次**仍只有一行**（幂等收敛），且探针自清理不留污染 | 本轮 `ROADMAP.md` §44 |
+| `_probe_clbr_rows.mts` | 🔧 **留档行巡检 / 残留清理**（默认**只读**）：列出每行坐标 + 状态 + 成交 + `resultJson` 字符数，用于判断产品页是否有探针残留。⚠️ 加 `--clean-probe-rows` 时按**双重命名守卫**（`experimentId LIKE 'EXP-PROBE%'` **且** `strategyId LIKE 'probe-%'`）删除，并额外列出「**只命中单侧守卫**」的可疑行**不自动删**（防止守卫放宽后误删真实运行）。已清掉首跑崩溃留下的 1 行幂等残留（`EXP-PROBE-IDEM` / `resultJson` 仅 451 字符）⇒ 现留档 **2 行全为真实运行**（`cand-360001@1.0.0`，39,808 字符） | 本轮 `ROADMAP.md` §44 + `ROADMAP-CHANGELOG.md` |
+
+### `seclabels` —— 5 个（2026-09-14 成交明细「证券名称 + 代码」）
+
+> 触发 = 用户「**成交明细我需要展示股票的名称及代码**」（2026-09-14）。
+> 核心事实：闭环结果 `trades[].securityId` 是 `sec_<uuid>`（**不是**代码），而真实库
+> **没有证券名称主数据表** ⇒ 必须两步解析（`identifier_history` → `limit_up_records`）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_symbol_name_source.mts` + `.log` | 🔴 **键形状取证**：`trades[].securityId` 实测为 **`sec_<uuid>`**（3 次留档共 **388** 笔 / **251** 个唯一值），与 `limit_up_records.stockCode`（`603439.SH` 形式）**匹配率 0** ⇒ 直接印在表格里毫无可读性；`Trade` 字段并集 = 11 个、**不含任何名称类字段**；`limit_up_records` = **99,617** 行 / **4,324** 个 distinct code | 本轮 `ROADMAP.md` §44 |
+| `_probe_symbol_identity_bridge.mts` + `.log` | ✅ **身份桥可用性**：`research_securities` **5,552** 行、`research_security_identifier_history` **5,552** 行（`distinctIds == distinctCodes` ⇒ **无 code reuse**）⇒ `sec_<uuid>` → 代码 **251/251 全覆盖**；经名称源后 **158/251** 能取到名称 | 同上 |
+| `_probe_name_tables.mts` + `.log` | 🔴 **名称源穷举**：真实库 **60 张表**中，含 name 的列共 **26** 个，其中**只有** `limit_up_records.stockName` 承载股票名称（`stock_watchlist.stockName` 仅 6 行）；**确认不存在证券名称主数据表** | 同上 |
+| `_probe_name_gap_diagnosis.mts` + `.log` | 🔴 **缺口根因**：93 个缺名称的代码去 `limit_up_records` 精确查 **0 命中** ⇒ **收录口径问题、非键匹配 bug**；缺口集中在**创业板 300/301（74/152）与科创板 688（19/35）**，而沪主板 **0/30**、深主板 **0/34** 全有 | 同上 |
+| `_probe_security_labels_e2e.mts` + `.json` + `.log` | ✅ **端到端（真实 tRPC + 真库）· 0 失败 PASS**：端点返回 251 条与入参去重数一致；**251/251** 译成 canonical 代码、**格式/交易所冲突 0**；名称覆盖 **158/251 = 62.9%**（缺口 93，且缺口内**非法代码 0** ⇒ 是收录问题）；空数组与 **501** 个 id **实测被 zod 拒**；端点与仓储直调**逐条零差异** | 同上 |
+
+### `runrestore` —— 3 个（2026-09-14 「运行结果刷新即丢」诊断 + 展示层修复）
+
+> 触发 = 用户「**我刚才跑过的回测，结果又没了，是什么问题**」（2026-09-14）。
+> 核心事实：**数据没丢**（留档 `id=60001` 完整在库），丢的是**展示层**（结果只存 `useState`，而 `dev` 是单进程 `tsx watch` ⇒ 整页重载即丢）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_run_tab_hydration.mts` + `.json` | ✅ **刷新恢复路径（真实 tRPC + 真库）· 0 失败 PASS**：`listBacktests({strategyId,limit:1})` 按策略命中且**倒序**；**列表行不带 `result`**；详情摘要与列表**逐字段一致**；`buildClosedLoopRunViewModel`（**前端同一函数**）构建成功 ⇒ `stages=14`、`trades=208/208`、曲线 57 点；首笔 `sec_314d87cf-…` → **欣天科技 300615.SZ**；同时实查 `closed_loop_backtest_run#id=60001`（`cand-270001@1.0.0`、208 笔、期末 96,481.05）证明「数据没丢」 | 本轮 `ROADMAP.md` §44 |
+| `tests/client/src/pages/strategyRunResultPersist.test.ts`（**不在本目录**，登记于此便于溯源） | ✅ **7/7 通过**：静态扫真实源码 + 真实 `appRouter` 端点断言，钉住「留档恢复存在 / 按策略取最近一次 / **本次结果优先**（分支顺序）/ 复用同一套 VM + 面板 / 空态**禁**谎称「还没跑过」/ `resultJson` 为空必须明说 / 跑完 `invalidate`」 | 同上 |
+| `_dev_boot_check.log` | 🔴 **端口取证**：实测 `Port 3000 is busy, using port 3101 instead` ⇒ 3000 落在 Windows 保留段 `2980–3079`（`node` 直接 `listen(3000)` = **`EACCES`**、**非** `EADDRINUSE`；`netstat` **看不到**占用者）⇒ **必须按启动日志打印的端口访问** | 同上 |
+
+### `datasetscope` —— 4 组（2026-09-14：数据集范围继承 + 成交代码译码正确性）
+
+| 文件 | 结论 | 引用于 |
+|---|---|---|
+| `_probe_dataset_scope_inherit_e2e.mts` + `.json` | ✅ **PASS / 0 失败（真实 tRPC `loopRun`，112,525ms）**：证券池 **5146 → 3180**（主板）；`datasetSourceNote` 含「已继承该数据集的 universe 约束：板块=main、排除 ST/*ST（来源=build-config）」；成交 **185 笔 / 159 只 distinct，{main: 159}，非主板 0**；留档旁路 1 行、自清理 0 残留 | 本轮 `ROADMAP.md` §44 / §44.5 `9am` |
+| `_probe_dataset_board_scope.mts` + `.log` | 数据集声明实查：`dataset_version.id=390002` → `universeDefinitionJson={"universe":"all-a-shares","source":"stock_daily_prices","boards":["main"],"excludeSt":true}`；`dataset_build_config_board = main`；三条留档 `datasetSource=rebuild` + `datasetSecurityCount` 5146/5133 | 同上 |
+| `_probe_trade_code_correctness.mts` + `.log` | 译码无歧义：`cand-270001` 的 188 只 distinct 中 **「同一 `securityId` 有多条 primary 行」= 0** ⇒ 排除张冠李戴；前缀分布 300×105 / 301×46 / 688×32 | 同上 |
+| `tests/server/runWorkbenchAssembly/universeConstraint.test.ts`（**不在本目录**，登记于此便于溯源） | ✅ **8/8**：权威优先（build_config > universeDefinitionJson）、不猜（形状不符 → `none`）、非法板块抛 `UniverseConstraintError`（含 `unknown`）、`excludeSt` 只认严格 `true` | 同上 |
+
+### `datasetwindow` —— 6 组（2026-09-14：运行**真正从绑定数据集取数** + 直读桥键域修正）
+
+> 触发 = 用户「**策略运行的时候是需要从数据集中取数据啊**」（纠正上一轮把「每次运行都回落重建」当既成事实的登记）。
+> 核心事实：**数据一直在** —— `ds_*_post`（rd≥1）实测 **471,816 行完整 OHLCV**、rd=+1 覆盖全部 23,978 个事件；
+> 是**投影口径过窄**（旧桥只投 `prefix` 的 rd=0，每事件恰 1 行 = 23,978 行 ⇒ `executionBarsAvailable=false` ⇒ 必然回落重建）。
+> 顺带抓到并修掉一条被本次改动**激活**的潜伏缺陷：旧桥把代码同时写进 `securityId` 与 `code`（键域违规）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_dataset_window_coverage.mts` | ✅ 证数据集**有**撮合行情：post rd∈[1,20] **471,816 行**；rd=+1 覆盖全部 23,978 事件；rd∈[0,20] 合成逐日面板 **354,544 行**；**102,727** 个重复 `(symbol, tradeDate)` 组的 `close` 极差合计 **= 0** ⇒ 无损去重 | §44 / §44.5 `9an` / `PROJECT_RULES.md` |
+| `_probe_bridge_window_cost.mts` | 成本实测：全窗口直读 ≈ **16.5s** vs 重建 **60.6s**（~**3.7×**）；旧口径（仅 rd=0）1.8s / 23,978 行；护栏由 20 万提到 **40 万**（计量对象改 `rows.length`） | 同上 |
+| `_probe_symbol_identity_coverage.mts` + `.log` | ✅ **100%（2,967 / 2,967）** 事件 symbol 可在其事件日解析到唯一 `sec_<uuid>`（`NO_IDENTIFIER=0` / `AMBIGUOUS=0`）；`research_security_identifier_history` 仅 **5,552 行**、1.1s 可全量载入 | 同上 |
+| `_probe_symbol_identity_bridge.mts` + `.log` | 键域分叉的证据基础：`ds_*` 三表**只有 `symbol`（代码域）**、canonical 身份在 `research_securities.securityId`（`sec_<uuid>`）；`ResearchDatasetRow` 的 `securityId`（身份）与 `code`（完整代码）是**两个字段** | 同上 |
+| `_probe_dataset_window_run_e2e.mts` + `.json` + `.log` | ✅ **ALL PASS / 0 失败**（真实 tRPC `loopRun`，`cand-360004@1.0.0`，14.3s）：`datasetSource="registry"` / `note=null` / `versionId=390002` / 面板 **112,920 行 / 2,967 证券** / `backtest=EXECUTED` / **真实成交 35 笔**（修复前恒 **0 笔 / 全 SUSPENDED**）/ 期末 73,207.86；**身份域**：35/35 成交键全 `sec_<uuid>`（「代码形态」= **0**）、`researchRun.securityLabels` 解析 **35/35 = 100%**、板块 `{main: 35}`；留档 1 行、自清理 **0** | 同上 |
+| `tests/server/runWorkbenchAssembly/windowProjection.test.ts`（**不在本目录**，登记于此便于溯源） | ✅ **18/18**：窗口解析 5（未声明 ⇒ null / 合法 / 非 `TRADING_DAY` / 五种非法值 / 非对象）+ 面板投影 9（rd 0..4、**决策日资格 = rd∈[1,3]**、`preClose` 链式、观察日流动性 null、**重叠无损合并**、数值冲突即抛 `REGISTRY_WINDOW_ROW_CONFLICT`、缺中间相对日、**`securityId` 取自身份映射且 `code ≠ securityId`**、缺身份即抛）+ 身份桥接 4（区间内/外、**code reuse**、歧义即拒、非法 symbol） | 同上 |
+
+> 归档脚本（同轮）：`_append_archive_dataset_window.py`（`ROADMAP.md` §44 插入 + §44.5 `9an` + `ROADMAP-CHANGELOG.md` append）、
+> `_append_rules_dataset_window.py`（`PROJECT_RULES.md` 追加两节：数据集窗口投影 / 键域 = `sec_<uuid>`）。
+
+### `papertradingadvance` —— 7 个（2026-09-14：前向纸面交易「推进」按钮「提示成功但没变化」）
+
+> 触发 = 用户「**前向交易闭环，推荐按钮有点问题**」（澄清后 = 「**推进 / 推进到最新**」按钮；现象「**提示成功但结果明显不对**」）。
+> 核心事实：推进的**交易日历唯一来源 = `index_daily`**，而它**只有手动脚本写入、全仓无自动同步**，实查停更在 **2026-09-04**，而行情表已到 **2026-09-14**；
+> 推进集合 `tradingDates.filter(d => d > lastProcessedDate)` 因此**恒为空** ⇒ 结构性 no-op 却报成功（`updatedAt == createdAt` 是「从未落过新状态」的旁证）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_paper_trading_state.mts` | ✅ 只读实查：列运行状态 + `stateJson` 解析规模 + **三个日历末端对比**（`index_daily` 09-04 vs `stock_daily_prices` 09-14 vs `limit_up_records` 09-14）；两条运行 `lastProcessedDate` 均在日历末端之后、`updatedAt == createdAt` | `ROADMAP.md` §44 17:38 条 |
+| `_probe_paper_trading_advance_dryrun.mts` | 内存干跑推进循环（**不 persist**，复刻 `db.ts` 循环）⇒ `datesToAdvance = []` ⇒ 证明「无待推日」是**结构性的**、不是撮合失败 | 同上 |
+| `_probe_index_daily_freshness.mts` | `index_daily` 新鲜度：行数 / distinct 日 / 末端 / `retrievedAt` ⇒ 定位「日历停更」这一**数据面**根因 | 同上 |
+| `_probe_paper_advance_e2e.mts` | ✅ **17 / 17 PASS**（真实 tRPC `appRouter.createCaller`）：补数后 `#1` **推进 09-11、09-14 两日**（`filled=5` / `open=3` / `exited=2` / `finalEquity=100,468.08` / `tradingDayCount=2`）、`stateJson` **1,960 → 3,466**、`equityCurve` 2 点；二次推进**如实 `already-latest`**；坏 id ⇒ `run-not-found`。⚠️ **会写入** `paper_trading_runs`（推进职责所在，已在文件头声明） | 同上 |
+| `_probe_paper_create_guard.mts` | ✅ **5 / 5 PASS**：建运行**正向路径**（信号日 ≤ 日历末端）可正常创建 ⇒ 证明新守卫**不会误锁**新建运行；探针行按**可识别命名域** `PROBE-CALENDAR-GUARD-` 自清理、零残留 | 同上 |
+| `_append_memory_paper_advance_diag.py` | 17:15 **诊断**小节追加脚本（append-only + 纯 LF 双向断言） | `.workbuddy/memory/2026-09-14.md` |
+| `_append_memory_paper_advance_fix.py` | 17:38 **修复 + 实证 + 归档**小节追加脚本（同上纪律，含前缀不变断言「非 append-only」） | 同上 |
+
+| 关联测试（**不在本目录**，登记于此便于溯源） | 结论要点 |
+|---|---|
+| `tests/server/paperTrading.test.ts` | ✅ **22 / 22**（原 10 例 + 新增 12 例）：`classifyAdvanceKind` 三态判定 5（含事故现场常量 `CALENDAR_END=2026-09-04` / `MARKET_END=2026-09-14`）+ `paperTradingAdvanceDiagnosis` 人话结论 6 + `PaperTradingCalendarStaleError` 1 |
+
+> 归档脚本（同轮）：`_append_archive_paper_advance.py`（`ROADMAP.md` §44 插入 + §44.5 `9ao` + `ROADMAP-CHANGELOG.md` append + 本 README 分组）、`_append_rules_paper_advance.py`（`PROJECT_RULES.md`：数据源与回填补一条 + 新增一节）、
+`_append_memory_paper_advance_diag.py` / `_append_memory_paper_advance_fix.py`（当日日志 append）、
+`_verify_archive_paper_advance.py`（**回读校验**：锚点 / 编号先后 / 行尾 / 旧条目零改写，**ALL PASS**）。
+
+## 🔴 2026-09-15 清理：`.py` 过程脚本全部移除（49 个 / 407.8 KB）
+
+> **判据** = 引用扫描分桶（本仓库铁律：**按引用关系而非文件类别**）：**D 零引用 34** + **B2 仅本目录自身索引 4** + **B 仅被 `ROADMAP-CHANGELOG.md` / 当日日志提及 11** = **49 个**；**A 组 4 个全部保留**。（`REPO-HYGIENE-PY-SCRIPTS-001`）
+>
+> **性质**：这 49 个 `.py` **全部是一次性过程脚本**，**不含任何测量结论** ⇒ 不属于本目录要留存的「证据」：
+> `_apply_*` 18（改 `ROADMAP.md` 字节级行手术）/ `_append_*` 18（追加日志与记忆文档）/ `_inspect_*` 7（只读打印行号找锚点）/ `_edit_*` `_fix_*` `_migrate_*` `_verify_*` 6（改源码、迁移组件、回读校验）。
+>
+> **根因（为什么会攒出 49 个）**：本仓库文档是**纯 CRLF 行尾**且禁用 `prettier --write` ⇒ 每次改文档都要临时写一个 Python **字节级行手术**脚本；又因 Windows 的 Python **看不到 Git Bash 的 `/tmp`**，它们被丢进本目录（当时唯一不进 `tsc` / `vitest` 的地方），自 2026-09-13 起累积 **49 个 / 407.8 KB**。
+>
+> **保留（A 组，一个没动）**：`scripts/providers/baostock_probe.py` / `baostock_corporate_actions.py` / `akshare_sw_probe.py` —— **本仓库技术栈确实不含 Python，但这三个是产品依赖**（`server/marketData/providers/pythonBridge.ts` / `akshare.ts` / `baostock.ts`、`server/security/baostock.ts`、`scripts/backfillCorporateActionsBaostock.ts` 经 `runPythonScript()` 子进程调用，删则切断 BaoStock / AkShare 数据桥）；`docs/legacy/upload_script_example.py` = 面人类 legacy 示例。
+>
+> **未动（一个没删）**：本目录全部**真探针**（`.mts` 121 / `.mjs` 12）与**运行结果**（`.log` 61 / `.json` 31 / `.md` 24 / `.txt` 6）；`server/**` `client/**` `shared/**` `drizzle/**` 零改动。
+>
+> **方式** = 用户裁定**真删除**：43 个原已被 git 跟踪 ⇒ 内容永久留存于 git 历史，`git checkout -- <path>` 可随时恢复；6 个未跟踪的是本轮新建的临时脚本，无需留档。
+>
+> **防复发**：一次性过程脚本**一律写到仓外** `C:\work\sourcecode\_scratch\`；细则见 `.workbuddy/memory/PROJECT_RULES.md`「🔴 过程脚本纪律（2026-09-15 起，强制）」；`.gitignore` 已加 `_*.py` 兜底。
+>
+> ⚠️ **本文件上文各分组里对 `_append_*.py` / `_verify_*.py` / `_apply_*.py` 的提及属历史记载** —— `PROJECT_RULES.md`「历史条目零改写」纪律要求不改写它们，但其指向的文件已于 2026-09-15 删除。
+
+### 补充（2026-09-15，`REPO-HYGIENE-ROADMAP-TRIM-001`）：ROADMAP.md 整理带出的两件事
+
+1. **有 3 个已删 `.py` 是被 `ROADMAP.md` 引用的**（上一轮的引用扫描漏判了，见当日日志的「扫描假阴性」自纠）：`_apply_schema_clbr.py`、`_edit_sentiment_page_leaderlist.py`、`_migrate_sketch_primitives.py`。它们出现在 `ROADMAP.md` §44「上轮实查」条目里，形式是「**该次手术由带 N 处断言的脚本执行**」—— 属**过程叙述，不是可复核的证据数据**。按用户裁定**保持已删**，与 CHANGELOG 里那 3 处的处理方式一致。
+2. 🔴 这三处提及所在的 §44 历史条目，已在本轮 ROADMAP 整理中**整体移入 `ROADMAP-CHANGELOG.md`**（见其「ROADMAP.md §44 / §44.5 历史条目归档」小节）⇒ **这些 `.py` 的提及现在位于 CHANGELOG 的历史归档区**，属「历史记载」，其指向的文件已于 2026-09-15 删除。ROADMAP.md 整理前逐字节备份：`.cache/ROADMAP.md.before-cleanup-20260915`。
+
+### 补充二（2026-09-15，`REPO-HYGIENE-ROOT-SCRATCH-001`）：根目录 3 个 `_*` 过程文件清理
+
+| 文件 | 体量 | 性质 | 外部引用 |
+|---|---|---|---|
+| `_vitest_final.json` | 1,379,602 B | vitest 全量输出产物 | **零** |
+| `_moveTestsToRoot.mts` | 7,473 B | 已执行的一次性迁移脚本（tests 迁至根目录） | 仅被下一行提及 |
+| `_migrate_tests_rollback.mjs` | 2,059 B | 前者的物理逆操作（回滚保险） | **零** |
+
+**判据**：本仓库铁律 —— **按引用关系而非文件类别**。全库（排除 `node_modules/`）grep 三个文件名，
+**唯一命中** = `_migrate_tests_rollback.mjs` 自身注释里提到 `_moveTestsToRoot.mts` ⇒ 零外部引用。
+三者**均已 git 跟踪** ⇒ `git rm` 后内容永久留存历史，`git checkout <commit> -- <path>` 可恢复。
+
+**方式** = 用户裁定**三个全删**；同时裁定把「过程脚本一律写到仓外」的担保规则
+**从 `_*.py` 扩到根目录锁定的 `/_*.mts` / `/_*.mjs` / `/_*.json`**。
+⚠️ **锁定根目录（前导 `/`）是刻意的**：本目录下 11 个 `_*_probe.mjs` 是**已跟踪的真探针**，
+若用无锚的 `_*.mjs` 会连它们一起忽略。已核对根目录 `components.json` / `package.json` /
+`tsconfig.json` **不以 `_` 开头**、不受影响。细则见 `.workbuddy/memory/PROJECT_RULES.md`「🔴 过程脚本纪律」。
+
+> ⚠️ 本目录内的 `_probe_sentiment_page_render.mjs`（2026-09-15 新建：情绪分析页真机渲染验收 ——
+> 无头 Edge + CDP，断言「每日最高连板明细」整块已不存在 / 龙头列表默认折叠且卡片数 ≤ 6 /
+> 点「展开其余 N 只」后卡片数 == 总数）**已补登记进 git 跟踪**，与另 11 个已跟踪 `.mjs` 探针一致
+> （本节上文第一段的计数「`.mjs` 12」本已含它）。
+
+> ⚠️ 本目录内的 `_probe_backtest_default_range.mjs`（2026-09-15 新建：**组合回测页默认回测区间验收** ——
+> 无头 Edge + CDP，只读断言 `/backtest` 的「回测开始日期」输入框默认 `value == 2025-09-01`、
+> 「回测结束日期」== 当天且 ≥ 起点；不点击、不触发回测）**已登记进 git 跟踪**，与其它已跟踪 `.mjs` 探针一致。
+
+> ⚠️ 本目录内的 `_probe_backtest_trade_diff_removed.mjs`（2026-09-15 新建：**组合回测页「逐笔交易差异对比」删除验收** ——
+> A 阶段真机 dev server 取 `Backtest.tsx` 模块（HTTP 200）断言产物不含 `data-trade-difference-table` / `逐笔交易差异对比` / `TradeDiffCell`，
+> 仍含 `fullCycleTradeDifferences` 与 `ReturnLineChart`；B 阶段无头 Edge + CDP 真机渲染，等「全周期五策略收益对比」出现后断言
+> `[data-trade-difference-table]` 元素数 == 0 且正文无该文案 / 「仅看有差异订单」，**同屏仍渲染全周期对比** = 「不存在」不是「没渲染」）
+> **已登记进 git 跟踪**，与其它已跟踪 `.mjs` 探针一致。
+
+> ⚠️ 本目录内的 `_probe_index_coverage.mts`（2026-09-15 新建：**指数行情同步「服务层」验收** ——
+> 真库**只读**直调 `getIndexSyncOverview()`，打印 `index_daily` 覆盖、日历末端 vs 行情末端、
+> 落后自然日/交易日、逐指数计划动作与区间、provider 可用性；**不发任何外部请求**）与
+> `_probe_index_sync_page.mjs`（2026-09-15 新建：**`/stock-sync` 指数区块真机渲染验收** ——
+> 无头 Edge + CDP，13 项断言含「落后告警 ↔ 本次计划」**口径一致性**，**只读、绝不点击同步**
+> 以免消耗 tushare 配额；🔴 随机端口 + `taskkill /F /T` 杀整棵进程树，
+> 避免残留渲染子进程导致 CDP 连到空白页而全部假失败）
+> **已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_today_gap.mts`（2026-09-15 新建、同日扩至 15 节；**「某天为何不出现」总诊断**）——
+> 真库**只读**一次性读齐「某天为何不出现」的**判据链**：① 日历末端（`index_daily`）② bar 覆盖（`stock_daily_prices`）
+> ③ **数据集窗口**（`dataset_version`；🔴 **仅 `registry` 直读路径**是硬边界，`rebuild` 回落用用户窗口）④ 运行推进进度（`paper_trading_runs.lastProcessedDate`）；
+> 另附 **DB 时区校准**（判「盘后」还是「盘中」快照）、**「涨停记录驱动」覆盖实证**、**组合回测留档窗口**、
+> 以及 **legacy「原来的」回测（`/backtest`）专段**：`limit_up_records` 末端（它的信号源）、
+> **信号日资格复刻**（`leaderCandidates.ts:951-958` 的 `if (!nextDate) continue` ⇒ 可回测末日 = 日历倒数第 `observationDays+1` 个交易日，**当天必然缺席**）、
+> 昨日信号的 **T+1 观察数据是否就位**；**不写库、不发任何外部请求**；**已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_dataset_vs_today.mts`（2026-09-15 新建，**「组合回测跟数据集有没有关系」判定**）——
+> 真库**只读**一次读齐：`dataset_version` **声明窗口** vs `ds_*` 三表**内容**实际覆盖（event / post 的 min·max `tradeDate`）、
+> 目标日当天有无行、各策略的 `datasetVersionId` 绑定与 `observationWindow` 声明、
+> **判定表**（`dateRange` 终点设目标日时各策略走 `registry` 还是回落 `rebuild`、是否越界）、
+> 以及 `closed_loop_backtest_run` 留档的 `datasetSource`；**不写库、不发任何外部请求**；
+> **已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_assemble_window_bounds.mts`（2026-09-15 新建，**装配层 / 会话层「窗口边界」分层实证**）——
+> 同一策略、同一份文档，只改 `endDate` 跑**两个对照用例**（`2026-09-15` 越界 vs `2026-09-01` 窗口末），
+> 各打印装配结果（`datasetSource` / 行数 / 直读产物窗口）并调用 `createDatasetSession` 观察是否 FAIL FAST；
+> 实测结论 = **装配层不校验、会话层抛「超出数据集窗口」**；每次约 11s（直读 390002 投影约 11 万行）；
+> **不写库、不发任何外部请求**；**已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 `_probe_planned_position_render.mjs`（2026-09-17 新建，**「组合回测 → 交易明细」快照面板「比例在表格里」验收**）——
+> 无头 Chrome + CDP **零依赖**、**只读**（不点任何写操作按钮）：点开「交易明细」页签 → 等
+> `[data-strategy-portfolio-snapshot]` 与「准备买入」表渲染 → 读两张表的表头 / 行 / `tfoot` → 再逐个切换五策略复读。
+> 断言含：① **反证段落钩子**（`[data-planned-position-sizing]` 与 `[data-planned-position-chips]` 必须**不存在**，
+> 即比例只能出现在表格里）；② 当前持仓表头含「持仓市值 / 占总权益」，逐行同时给金额与 `x.xx%`；
+> ③ **资金恒等式** `合计行现金 + 持仓市值 ≈ 总权益`（±1%）—— 这是「占比」分母正确的硬证据；
+> ④ 准备买入表头含「计划仓位」，逐行 `[data-planned-position]` 单元格含 `x.xx%` 与 `¥金额`，
+> `Σ(逐只比例) ≈ 合计行总比例`，合计行回显口径与「股数待次日开盘价确定，开盘前不预估」；
+> ⑤ 口径来源徽标 `[data-portfolio-provenance]` 存在 —— 如实标注该快照由 **research-legacy 交易模拟器**
+> 产出、与「回测总览」的 **生产 Strategy Engine 段非等价**（🔴 引擎段每笔固定 100 股、**不读分仓下拉**；
+> 实证 = 生产核心快照 1232 笔成交 `shares` 全为 100，详见 `ROADMAP-CHANGELOG.md` 的 `9av` 条）。
+> ⚠️ `/backtest` 走 `getLeaderCandidateResearch`（**仅内存缓存**，进程重启即冷）⇒ **冷算数分钟到 20 分钟**，
+> 本探针按 `WAIT_SEC`（默认 1800s）耐心等待，并把中间结果**同步落盘** `_probe_planned_position_render.json`。
+> 另有 `CDP_PORT` / `PAGE_URL` 两个旋钮（并发跑别的探针时改端口）。**已登记进 git 跟踪**。
+> 同面板的截图探针 = `_shot_planned_position_panel.mjs`（就绪判据已随之改为 `[data-strategy-portfolio-snapshot] tfoot`）。
+
+> ⚠️ 本目录内的 `_probe_app_boot_render.mjs`（2026-09-17 新建，**「服务起来了但页面是不是白屏」全站启动渲染验收**）——
+> 无头 Chrome（注意：用 `chrome.exe`，非 Edge）+ CDP **零依赖**，单浏览器实例逐路由
+> `Page.navigate` → 轮询 DOM 直到有内容或超时 → 量 `innerText` 长度 / `h1,h2` / 侧栏链接数 /
+> **`Failed to fetch` / `加载异常`文案** / `window.__errs`（经 `addScriptToEvaluateOnNewDocument` 钩住
+> `error` / `unhandledrejection` / `console.error`）；结果**同步落盘** `_probe_app_boot_render.json`（探针被中断日志仍在）。
+> **两个 env 旋钮**：`ROUTES=/a,/b`（默认 11 条主路由）、`WAIT_SEC=N`（默认 25s）。
+> ⚠️ **实测 `/stock-sync` 冷启动 > 25s 才出内容**（该路由首屏慢是既有事实，不是白屏）⇒ 复测它必须 `WAIT_SEC=70`。
+> **只读、零写入、不点按钮**；**已登记进 git 跟踪**，与其它已跟踪探针一致。
+
+> ⚠️ 本目录内的 favicon 工具链（2026-09-17 新建，**标签页图标 = 首页左上角侧栏 Logo 的矢量复刻**）——
+> 三件套须按顺序跑：`_gen_favicon_svg.mts`（**生成器**：从 `node_modules/tailwindcss/theme.css` 取
+> `orange-500` / `red-600` 的 oklch 令牌、从 `client/src/index.css` 取 `--radius`、从 `AppShell.tsx` 取
+> 类名与图标名、从 `lucide-react` 取字形节点 ⇒ 生成 `client/public/favicon.svg`，**生成物禁手改**）
+> → `_gen_favicon_assets.mjs`（无头 Chrome 把该 SVG 栅格化成 `favicon-16x16.png` / `favicon-32x32.png` /
+> `apple-touch-icon.png` / `favicon.ico`，**不引入任何依赖**：本机既无 Pillow 也无 ImageMagick）
+> → `_probe_favicon_render.mjs`（**验收**：与真机 4× 实拍逐像素对拍）。
+> 🔴 **两个踩过的坑**：① XML 注释里出现**连续两个短横线**（当时顺手写了 `--radius-lg`）⇒ 整份 SVG
+> 解析失败、图标根本不显示；② 页面的 `bg-gradient-to-br` 在 CSS Color 4 下**按 oklab 插值**，而 SVG 渐变
+> 只能按 sRGB 插值 ⇒ 只给两个端点色标时**中调偏差达 12/255**，生成器改为用 12 个色标折线逼近 oklab 曲线后
+> 降到 **≤1/255**（色标位置**自适应插入**：真曲线在 sRGB 色域边界有折角，均匀分段压不下去）。
+> 验收口径 = **日间**主题下对拍（夜间态被 `darkCompatibility.css` 用 `color-mix` 压低色度，属主题差异而非图标差异）：
+> 纯背景区峰值差 **2/255**、字形掩膜 **IoU 0.9984**、渐变端点与中调 **≤1/255**、5 个资源均 200 且
+> PNG/ICO 头部尺寸与声明一致；`WAIT_SEC` / `CDP_PORT` 两个旋钮可调。**只读**，唯一输出 = 证据图 `_evidence_favicon.png`。
+
+> ⚠️ **分仓口径核对**（2026-09-17 新建，回答「页面为什么显示 100%」）—— `_probe_position_sizing_caliber.mts`：
+> 用**唯一权威实现** `server/positionBudget#allocatePlannedBudgets` 喂真机渲染抓到的真实运行时数字，
+> 把 **等权 / 评分加权 / 固定单笔比例 20%** 三种口径在同一批计划上并列复算。
+> 🔴 实测结论（**全部断言通过**）：
+> ① **等权 = 可用现金 ÷ 本批笔数** ⇒ 当日只有 1 只入选时，该笔必然吃掉 **100% 可用现金**；
+> ② **评分加权在单笔时退化为满仓**（合计分 = 本笔分），与等权同值；
+> ③ **固定单笔比例 = 初始资金 × 20%**，**与权益增长脱钩**（真机数据里 = ¥20,000/笔，
+> 只相当于**当前权益的 2.69%** —— 这是「每笔恒定比例」而非「1/5 当前资金」）；
+> ④ 两笔时等权各 1/2 且**合计恰为全部可用现金**（¥230,419 × 2 = ¥460,838）。
+> ⇒ 页面上的 100% **不是计算错误，是「等权」在该情形下的定义结果**；
+> **系统里目前没有任何口径给出「单只 = 当前权益 ÷ 最大持仓数」**（该语义只能作为**单标的上限**引入，
+> 而用户已明确**不设上限**）。
+> ⚠️ 影响面（按快照 `historicalRows` 实测按 `nextDayDate` 分组）：745 个决策日里 **384 天只有 1 只候选**；
+> **2019–2024 日均候选仅 1.2–1.8 只**（多数日子等价于满仓单票），2025 起才变密（2026 日均 44.9 只、0% 的日子候选 <5）。
+> **只读**：不连库、不发请求、不写任何文件；数字改动需同步改 5 个策略的常量。
+> ⚠️ **止损口径偏差审计**（2026-09-18 新建，`9bd` · STOPLOSS-PARITY-AUDIT-001；`9be` 修复后翻转断言）—— 四个**只读**探针：
+> ① `_probe_stoploss_divergence.mts`：用**同一条价格路径**分别喂组合回测（`server/realisticBacktest`）
+> 与 前向纸面（`server/paperTrading`），逐字段比对 `exitDate / exitPrice / reason`。
+> 🔴 `9bd` 初版断言方向 = 「**偏差存在**」（12/12 通过）：**前向纸面完全没有「开盘阶段止损」** ——
+> 建仓 10.00、止损 5%（止损价 9.50）时，T+2 开 **9.40** 收 **10.60** ⇒ 回测按开盘 9.40 出清、
+> 纸面**根本不出清**；开 9.40 收 **9.20** ⇒ 回测 9.40 / 纸面 **9.20（低 2.13%）**；
+> **对照组「仅盘中破位」两端都按 9.50 出清** ⇒ 偏差**只**在开盘分支。
+> ✅ **`9be` 已把断言方向翻转为「两端等价 + 唯一刻意分叉」**（全部通过）：D1 修复后两端退出日 /
+> 成交价 / 原因三处**逐位一致**；唯一差异是**纸面专属**的「组合无条件止损」（回测源码零命中），
+> 并附反证「`portfolioStopLossPercent: 0` ⇒ 纸面复原等价」「`exitJudgementPhase: "close"` ⇒ 有意的时点差异」。
+> 🔴 **翻转原因是本探针最重要的一课**：D1 修好之后，旧版「断言偏差存在」的探针**必然失败** ——
+> 留着它等于把 bug 当规范。**修完缺陷必须同步翻转断言方向**。
+> **不连库**；输出落盘 `_probe_stoploss_divergence.out.txt`。
+> ② `_probe_paper_run_params.mts`：真库**只读**读 `paper_trading_runs` 的参数快照与出清原因分布。
+> 🔴 实测 4 条运行的 `paramsJson.realistic` **只含 `initialCapital`**（7 项止损参数全走硬编码缺省）；
+> 10 笔已出清里 **0 笔**「开盘触发止损」。⚠️ 这是**历史事实**（已推进过的日子不可回溯、新规则只在此后的
+> 推进日生效），**不要读成「分支仍不存在」** —— 分支存在性看 ① 的源码断言。
+> ⚠️ 两个坑：**须非沙箱运行**（本机沙箱内出站被拦）；首连可能被 **TiDB Serverless 冷启动**掐断
+> （`Connection lost`），重跑即可；`.env` 的 `?ssl={"rejectUnauthorized":true}` 必须**按 JSON 提取后以对象传入**
+> （`mysql2` 误当 SSL profile 名）。输出落盘 `_probe_paper_run_params.out.txt`。
+> ③ 🔴 `_probe_inflight_runs.mts`（`9be` 新建，真库**只读**）：**改 `server/**` 前的在途 Run 闸门** ——
+> 改 server 会热重启并**杀掉在途 Run**，动手前必须证明「零 RUNNING」。扫 `information_schema` 找出**所有**
+> 含 `status` 列的表（实测 23 张），逐张 `COUNT(status='RUNNING')` 并打印命中行的**时间戳**。
+> 两条设计要点：① **不做猜测式白名单**（只查 1 张表就报「零在途」是旧事故形态）；② 只报「有 RUNNING」不够，
+> 必须给时间戳让人区分**真在途**与**历史僵死**，否则会误杀用户正在跑的任务。实测：所有真实 Run 表 RUNNING=0；
+> 唯一命中 `research_question` #270001 的时间戳停在 **30 小时前**、且服务在其后已重启过 ⇒ **僵尸态**。
+> 输出落盘 `_probe_inflight_runs.out.txt`。
+> ④ ✅ `_probe_paper_settings_render.mjs`（`9be` 新建，无头 Chrome + CDP，**只读**）：
+> 「前向纸面交易」**策略设置 + 生效参数**的前端可达性验收，**18/18 通过**。断言：三组设置容器
+> （exit / position / constraint）齐备；判定时点下拉 3 选项且缺省 `both`；「组合无条件止损」输入缺省 = 3；
+> 数值项 10 个；成交可行性开关 5 个且**默认全关**（= 改动前行为）；页面含纸面专属差异的如实声明；
+> 判定时点**可交互**（改 `close` 读回 `close`，点「恢复默认设置」回到 `both`）；详情页「该运行实际生效的参数」
+> 面板渲染、组合止损行 = 3%、**至少一行如实标注「默认」**、无 `undefined/NaN`。
+> ⚠️ 坑：受控 `<select>` 必须走**原型上的 native value setter** 再派发 `change`，直接 `el.value = x`
+> 会被 React 的 value tracker 判为「没变化」⇒ 探针**假通过**（页面其实没动）。**不点「创建」**（会真建运行）。
+> 输出落盘 `_probe_paper_settings_render.json`。
+> ⑤ ✅ `_probe_backtest_layout_pagination.mjs`（`9bf` 新建，无头 Chrome + CDP，**只读**）：
+> 「组合回测」页签归属 + 「全部模拟订单」分页的前端可达性验收，**50/50 通过（零 SKIP）**。断言：六页签标签与顺序；
+> 回测总览 = 全周期五策略收益对比 + 当前持仓与下一交易日准备买入 + 全部模拟订单，且三块迁出物（统一策略评价 /
+> 高位连板风控生效情况 / 资金与仓位审计）**均不得出现在总览**；策略对比含 `data-strategy-evaluation`、
+> 风险归因含 `data-board-height-impact`、交易明细含 `data-capital-position-audit`（后两页不得出现订单表）；
+> 分页：第 1 页 20 行 / `1 / 52` → 「下一页」`2 / 52` 且首行不同 → 「最后一页」`52 / 52` 共 9 行 →
+> 每页条数改 10 ⇒ 回到 `1 / 103` 且 10 行 → 关键词筛选 ⇒ 回到第 1 页且行数 = 页内区间长度。
+> ⚠️ 坑一：Radix Select 只认 **pointerdown**，纯 JS `el.click()` 打不开下拉 ⇒ 必须用 CDP
+> `Input.dispatchMouseEvent` 发真实鼠标事件（本探针用真鼠标做翻页与下拉）；受控 `<input>` 同样要走
+> 原型 native value setter + 派发 `input` 事件。
+> ⚠️ 坑二：探针自带**空闲端口探测** —— 上一轮残留的无头 Chrome 会占住 30000/30001 之类高位端口，
+> 固定/盲随机端口会让 Chrome 静默起不来。
+> ⚠️ 坑三：该页数据来自 `sentiment.getLeaderCandidateResearch`（冷算可达数十分钟）⇒ 数据相关断言在
+> 40 分钟窗口内未就绪时一律记 **SKIP 并如实报「未验证」**，绝不谎报 PASS。
+> ⚠️ 坑四（`9bf` 用户实报「策略对比下的样式乱了」后新增）：新增 **H 组「同屏卡片几何一致性」** —— 总览 / 策略对比 /
+> 风险归因 三页签逐个断言同屏卡片的左边距与宽度一致（±1px）。🔴 **必须量卡片本体**：锚点优先取 `> .rounded-2xl` 子元素、
+> 否则取锚点自身 —— 直接量锚点会得到 `280/1255` vs `304/1207` 的**假差异**（差的正是容器那 24px 内边距）。另有 **H2 反事实对照**：
+> 当场把容器 div 的 class 剥掉，卡片必须立刻变宽（`[304,1207]` → `[280,1255]`）⇒ 证明容器类是**承重件**而非装饰。
+> 输出落盘 `_probe_backtest_layout_pagination.out.txt`。
+
+---
+
+### `backtestriskblocks` —— 1 个（2026-09-18 事项 `rZPX8O`「回测总览页面添加功能」）
+
+> **背景**：用户要求在「回测总览 → 全周期五策略收益对比」折线图**下方**加入区块，
+> 逐策略展示「最大回撤 / 回撤持续时间 / 收复回撤所用时间 / 最大收益百分比 / 当前收益百分比」。
+> 交付 = `client/src/lib/fullCycleRiskBlocks.ts`（纯函数派生，回撤三项**搬运服务端权威值**）
+> + `client/src/pages/Backtest.tsx#FullCycleRiskBlocks`（锚点 `data-full-cycle-risk-blocks` /
+> `data-full-cycle-risk-card={<key>}`，渲染在 `data-full-cycle-comparison` 卡片**内部**）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_full_cycle_risk_blocks.mjs` + `.out.txt` | ✅ **PASS 37 / FAIL 0 / SKIP 0 ⇒ ALL PASS**（研究数据 15s 就绪）。**A** 区块在折线图同卡片内、折线图下方 447px；**B** 恰 5 张卡，key 与标题顺序正确；**C** 5 × 5 项指标齐全且格式合法（百分比 / N 个交易日 / 样本不足），收益两项无「样本不足」；**D 口径交叉核对 20 / 20** —— 区块四项与「策略对比 → 六层评价」**同一策略列**的 `Max Drawdown` / `最大回撤持续时间` / `最大回撤恢复时间` / `Total Return` **数值逐个相等**（**`9bh` 新口径**下：原始策略 `40.39% / 19 / 16 / 364.2%`、质量门控 `59.42% / 111 / 43 / 60.85%`）；**E 几何** —— 5 张卡同排等宽 223px × 5、同一 top，行左边缘 325 与折线图 325 **逐像素对齐**、行宽 1165 = 折线图 1165，且不越出所属卡片 `[280,1535]`。🔴 两项时长的口径（`9bh` 起）= 锁定**最大回撤那一次**区间：持续＝峰值日→谷底日、收复＝谷底日回到前高（未收复计至期末）⇒ D 段交叉核对**仍成立**（两侧同源）。 | `ROADMAP.md` §44.5 `9bg` + `9bh`（口径修订）、`ROADMAP-CHANGELOG.md` 同名条目 |
+
+> ⚠️ 坑一（本轮真踩）：**探针输出禁止接管道**。本沙箱 Bash 的 `head` / `tail` 不在 PATH 上 ⇒ 管道读端
+> 立刻关闭 ⇒ 探针 `console.log` 抛 `EPIPE` 并触发 `uncaughtException` **提前中止**；更糟的是探针开头的
+> `fs.writeFileSync(OUT, '')` **已经把上一份好结果清空**（本轮一次误加 `| tail -40` 直接毁掉一份 37 项全绿的留档）。
+> 正确做法 = `run_in_background` 直接跑（不加任何管道），只读同名 `.out.txt`。
+> ⚠️ 坑二：卡片标题取**服务端实验的 `label`** —— 首项是**「原始策略」**，与订单/持仓页签用的
+> 「原始评分基准」是**不同来源的同义标题**，探针断言不可混用（首跑因此假 FAIL）。
+> ⚠️ 坑三：卡片脚注必须取 `querySelectorAll('p')` 的**最后一个** `p`。`p:last-of-type` 按**各自父节点**
+> 判 last-of-type（不按文档序）⇒ 会先命中卡内 flex 容器里那个**唯一的标签 `p`**，读出标题而非脚注（首跑第二个假 FAIL）。
+
+---
+
+### `homepagerework` —— 1 个（2026-09-18 ~ 09-19 事项 `rKRNzQ`「大盘日线走势图」，共四轮）
+
+> **背景**：用户对首页（`/`，HOMEPAGE-001，`9be` 产物）提 5 条要求 —— ① 展示库里四条指数、区块过大且日期太少
+> ⇒ 更小区块 + 更多日期 + 四指数并列；② 成交量/两融/涨停数图「右侧坐标有两个」；③ 连板梯队与题材热力图换位；
+> ④ 连板梯队要附件 `QQ20260918-230855.png` 的版式；⑤ 首页加载过慢。
+> 交付 = `client/src/pages/Dashboard.tsx` 重写（拆成 `IndexTrendSection` / `MarketOverviewSection` /
+> `BoardLadderSection` / `SectorHeatmapSection`，各卡自持 query + 骨架屏）+ `server/boardRoster.ts` 新增
+> `firstBoardStocks` / `changePct` / `oneWordBoard` + `server/db.ts#getLimitUpWithMarketData` 改服务端聚合。
+> **2026-09-18 追加（`9bj`）**：连板梯队左列「高度」口径按用户裁定改为**「若该股本日涨停会达到的连板数」**（断板 +1 / 首板未续不 +1），唯一实现 = `shared/ladderHeight.ts`，本文末行探针为其定案证据。
+> **2026-09-19 第三轮追加（`9bk`）**：用户四条 —— ①「首板未续」也要 +1；② 高度行 > 3 时加折叠按钮且默认折叠；③ 梯队行内按题材**当日**热力排序、**无关是否断板**；④ 题材热力图的排序规则按**当日**数据而不是合计。交付 = `shared/ladderHeight.ts`（改 `brokenKind ? boards + 1 : boards`）+ 新增 `shared/sectorHeatOrder.ts`（当日题材热度查表 + 降序比较器，梯队与热力图**共用**）+ `client/src/pages/Dashboard.tsx`（默认折叠 `LADDER_VISIBLE_ROWS=3` / 行内断板与涨停混排 / 热力图换排序键）+ `tests/shared/sectorHeatOrder.test.ts`。⚠️ 副产品认知：**「附件图可见的那一部分不含某类」≠「该图不含该类」** —— 上一轮据此推断「首板未续不 +1」，本轮被用户裁定推翻（附件 2 板行 8 格只是 38 格的子集）。
+> **2026-09-19 第四轮追加（`9bl`）**：用户澄清折叠口径 —— 原话「**之前说的超过三行折叠是每个高度内超过三行折叠那个高度到只有三行**」。⇒ `9bk` 的「**整个梯队的高度行** > 3 ⇒ 只留最高 3 行」
+> **2026-09-19 第五轮追加（`9bu`）**：用户口述「**现在首页最下面有四个大的跳转按钮没用 去掉**」⇒ 首页底部四张「快捷入口」卡片（涨停复盘明细 / 大盘分析 / 情绪分析 / 上传图片）**整体移除**（`Dashboard.tsx` 删 `SHORTCUTS` 常量 + 渲染块 + 已无引用的 `Link` import）。探针原断言「快捷入口 4 个」**改写为反证断言**：「底部 0 张快捷入口卡片、0 条指向这四个路由的跳转链」（`links=0 / cards=0`），改回即红；⚠️ 只断言**首页不再有这四张卡**，**不断言**这四个路由本身不可达（侧栏入口仍在）。复跑 **PASS 54 / FAIL 0 / SKIP 0**。免责声明与其它区块零回归。
+> **2026-09-20 第八轮追加（用户口述）**：用户原话「**首页免责声明去掉**」⇒ 底部那段 ⑤ 免责声明（`<p>` 四句 = 「不构成投资建议」合规措辞 + 板数口径 / 一字板判据 / 两融延迟三条口径说明）**整块删除** —— 用户在「**整块删掉** / 只删合规语留口径说明 / 内容不删压成一行小字」三选项中选定整块删掉；区块编号随之收拢（原 ⑥ 底部折线图 ⇒ **⑤**）。⚠️ 只删**首页这一块** —— 研究侧的强制免责声明（结论正文 `evidence.disclaimer`、溯源区 `PROVENANCE_DISCLAIMER`，规格 §13/§15 **必须原样渲染**）**一字未动**；`PROJECT_RULES.md` / `MEMORY.md` 里的「免责声明不得删」已同步**限定适用范围**（只指研究侧强制件）。探针 `_probe_homepage_rework.mjs` 原断言「免责声明保留」**反转为**「首页免责声明已移除」（首页出现「免责声明」字样即红）⇒ 复跑 **PASS 64 / FAIL 0 / SKIP 0**。
+> **2026-09-19 第四轮追加（`9bl`）· 续**：属**口径错读**，改为**每个高度组各自判断**（该组网格行数 > 3 ⇒ 该组折到 3 行，本组按钮展开/收起）。交付 = `client/src/pages/Dashboard.tsx#LadderGroupGrid` + `useGridColumnCount`（`LADDER_VISIBLE_ROWS` → `LADDER_GROUP_VISIBLE_ROWS`；旧锚点 `data-homepage-ladder-toggle` / `-rows-total/-visible` 删除 → 新锚点 `data-ladder-grid*` + `data-homepage-ladder-group-toggle`；整梯队不再整体收起）+ 探针 F 节重写为逐组断言（47 → **48** 条）。⚠️ 副作用认知：**「行」在响应式网格里必须先换算成「格」**（3 行 = 3 × 当前列数），列数取自计算样式而非另立断点表。用户同时裁定：`limit_up_records` 2026-09-16 名称错录**由用户自行处理，本项目不再跟踪**。
+
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_homepage_rework.mjs` + `.out.txt` | ✅ **PASS 64 / FAIL 0 / SKIP 0 ⇒ ALL PASS**（2026-09-20 第八轮复跑；较 `9bu` 轮 +10 条：B 段刻度可见性 / I 段柱色随主题 / F 段去冗余文案 / 免责声明反证 / 压尾桶断言 / 入口链接口径修订）。⚠️ 首跑 60/2，两条 FAIL 均为**断言自身的问题**（非产品回归），详见本节末「第八轮两处断言修订」。**B 大盘三图（本轮重写断言）**：图 1 = 涨停家数**柱状图独立成图**（实测 **22 柱 / 0 折线**，左轴刻度 `25/50/75/100` 家）；图 2 = 成交额 + 两融余额**两条折线合到一图**（**0 柱 / 2 折线**），**左右各一条带刻度纵轴**（左 `14926/16926/18926/22506` 亿、右 `26125/26275/26425/26641` 亿，各自定域）；两图绘图区 `bar=[389,1025] == line=[389,1025]`（柱与折线竖直对齐）；`.recharts-yAxis .recharts-label` = **0 个**（不再画旋转轴标题 —— 旧版与刻度数字重叠，用户反馈「根本看不见」）；所有纵轴刻度文字 `insideSvg=true`（完整可见、未被裁 —— 刻度已取整，`16,126.02` 这类 8 字符小数刻度在 52px 轴宽里会裁掉首位）；单位改由每图小标题（`涨停家数（柱，左轴：家）` / `成交额（左轴：亿）· 两融余额（右轴：亿）`）与图例（`成交额(亿)` / `两融余额(亿)`）承载。**I 柱色随主题（本轮新增）**：亮色 `rgb(239, 68, 68)`（红-500，感知亮度 **0.229**）、暗夜 `rgb(185, 28, 28)`（红-700，**0.1123** ⇒ 压暗约 51%）—— 经 `[data-theme-toggle]` 真实切主题 + reload 后量 `getComputedStyle(fill)`，不靠肉眼声称。**F 折叠（本轮 +1 条）**：折叠按钮旁**不再有**说明文字（`siblings=[]`，容器文本就是按钮文案本身）—— 实测（列 6）`6 板 1 行 / 4 板 1 行 / 3 板 1 行`（均无按钮、无裁切）· `2 板 7 行 → 默认 3 行 / 渲染 18 格`、`首板(66) 11 行 → 默认 3 行 / 渲染 18 格`（各带本组按钮 `data-homepage-ladder-group-toggle` + `aria-expanded=false`）；**只点第 1 个可折叠组** ⇒ 该组 `7/7@true`、首板仍 `3/11@false`（证明是组内开关）；逐组展开后全部 `rows-visible = rows-total`；**整个梯队高度行不再整体收起**（`renderedRows=5 = grids=5`，「2 板」「首板」默认即在 DOM）。**G 排序**：梯队每个高度行内「**非压尾题材**」当日涨停家数**非递增**（样例 4 板 = `7, 6, 3`）+ **压尾桶「其他」恒在行尾且连续**（实测 2 板尾部 5 格 / 首板尾部 8 格 —— 该日「其他」10 家 = 当日最多，**故意不参与名次**）、**断板格与涨停格交错**（交错行 = `4 板 / 3 板 / 2 板`）；热力图第一数据列 = `09-18`、该列显示值**逐行等于**服务端当日真值、行序非递增（`7 > 6 > 6 > 6 > 5 … > 0`），⚠️ **合计列非单调**（`64,98,50,6,82,…`）⇒ 直接反证「不是按合计排序」。**H 首板未续**：2 板行 **38 格（其中断板 30 格）**同时含涨停格与断板格；首板行 **66 格、零删除线**。**D 全量版式（逐组展开后）**：分组 `6 板(1 格) / 4 板(3 格) / 3 板(5 格) / 2 板(38 格) / 首板(66)(66 格)`、6 列网格、**35 格删除线断板**且首行为涨跌幅、3 格「一字板」标、非断板格首行 = `HH:MM`。**A/C/E 与零回归全部保持 PASS**：4 张指数卡同 top（`tops=[217]`）×276px×120 交易日、`ladderTop=1111 < heatTop=2272`、两重卡片容器 674ms 同存且指数图 3762ms 早于梯队表 5393ms；热力表「合计」列 / 底部四张快捷入口卡片已移除（`links=0 / cards=0`，反证断言；口径已排除折线图区块内那条**有意**的 `/sentiment-analysis` 入口链，并正向断言该链恰 1 条） / **首页免责声明已移除（反证断言）** / 标题「行情总览」/ 无残留骨架屏（0） | `ROADMAP.md` §44 `9bl`/`9bu`、`ROADMAP-CHANGELOG.md` 同名条目 |
+| `_shot_homepage.mjs` | 整页 / 局部截图（第 4 参传 CSS 选择器即裁剪该元素、**第 5 参传选择器则先点击再截**，用于截「展开后的梯队」），供人工目视核对版式 | 同上（目视附件） |
+| `_probe_homepage_data_sources.mts` + `.out.json` | 改造前数据源对账：`index_daily` **恰四条**指数（各 1873 行 / 2019-01-02~2026-09-18 / close 0 空值）；`market_data` 218 行、末端 2026-09-17；`limit_up_records` 最新记录日 78 只；`stock_daily_prices` 在最新记录日覆盖 441 只（含全部涨停股） | 同上 |
+| `_probe_ladder_quote_fields.mts` + `.out.json` | 版式字段可行性：最新日 78 只涨停股行情 **78/78 覆盖**、断板场景 88/89；**一字板判据（`open==high==low`）命中 经纬股份 / 华纺股份 / 百通能源** —— 前两只与用户附件图 2 板行的「一字板」标**逐只吻合** | 同上 |
+| `_probe_ladder_caliber_drift.mts` + `.out.json` | 高度口径对拍（首轮）：给出 5 只断板股差 1 板的**清单**；⚠️ 当时对成因的推测「附件图 = 工具源的「N天M板」**累计口径**」**已被 `9bj` 推翻、作废**（真正含义 = 若本日涨停会达到的连板数）。意外收获：**2026-09-16 名称错录**（`001216.SZ`→「华统股份」、`603248.SH`→「镌华科技」） | `ROADMAP.md` `9bi`（成因结论作废）、`9bj` |
+| `_probe_ladder_height_caliber.mts` + `.out.json` | ✅ **`9bj` 定案依据**。⒜ 澳弘电子 `605058.SH` 连板链 = `09-11 / 09-14 / 09-15 / 09-16 / 09-17`（09-12/13 周末，**无断档**）⇒ 本算法 5 板正确、附件 6 板非数据缺口；⒝ 库内 `boardCount` 列**基本全 NULL**（只在首板行填 `1`）⇒ **不可作真源**（窗口内 952 行与重算不一致）；⒞ 断板股逐只：澳弘电子 5→6 / 中晶科技 3→4 / 共达电声·中岩大地·万向德农 2→3，当日涨停股 4→4、3→3 ⇒ **断板 +1、涨停 +0** | `ROADMAP.md` §44/§44.5 `9bj`、`shared/ladderHeight.ts`、`tests/shared/ladderHeight.test.ts` |
+| `_probe_board_roster_after_change.mts` + `.out.json` | 改造后名录字段核对：`firstBoardStocks` 66 只、`oneWordBoard` 78/78 有值、`changePct` 34/35（1 只缺行情 ⇒ 如实 `null`）；分组格数 `5板1 / 4板2 / 3板3 / 2板11 / 首板(66)96`（⚠️ 该次运行早于 `9bj` 口径修订；修订后 = `6板1 / 4板3 / 3板5 / 2板8 / 首板(66)96`） | 同上 |
+| `_probe_homepage_timing.mts` + `.out.json` | 首屏耗时基线（**交错 3 轮取中位**）：单指数 296ms / 四指数串行 1197ms / **四指数并行 303ms** / 单条窗口函数 SQL 349ms / 三合图 925ms / 题材分布 466ms / 连板名录 446ms ⇒ 并行批量已够，**未新增端点** | 同上 |
+
+> ⚠️ 坑一（本轮真踩，三处）：**主机侧正则被「习惯性二次转义」**。探针文件里直接写的正则字面量用 `/^\\d+\\s*板$/` 会匹配「反斜杠 + d」⇒ **全部假 FAIL**；
+> 而**同一探针内、写在传给浏览器的模板串里的**正则**必须**保留 `\\d`（否则被 JS 字符串吃掉）。判断依据 = **这段正则最终由谁解析**。
+> ⚠️ 坑二：recharts 的 **Legend 图标也是 `svg.recharts-surface`**（宽约 14px）⇒ `querySelectorAll('.recharts-surface')` 会把图例算成绘图面，
+> 「联数」虚高、`.recharts-cartesian-grid` 取不到而读出 `null`。必须按尺寸过滤（本探针取 `width > 300`）。
+> ⚠️ 坑三：`jsonEval` 的表达式若写成 `(function(){...})` **忘了末尾 `()`**，CDP 会把函数对象序列化成 `undefined` ⇒ 断言静默记 SKIP（本探针首跑 4/9 项因此跳过，而非 FAIL —— **SKIP 不掉以轻心**）。
+
+> ⚠️ 坑四：断板股首行的涨跌幅可能因**行情缺失**呈现「—」⇒ 断言必须允许该形态（这正是「不推算」的正确表现），若只断言「含 %」会把正确实现判成 FAIL。
+> ⚠️ 坑五（第三轮真踩）：**默认折叠会把「全量行」断言变成「假 SKIP」**（不会报 FAIL，更隐蔽） 梯队改为默认折叠后 `[data-ladder-group]` 只剩 3 行 ⇒ 直接跑版式断言会看不到「首板(N)」行与低高度行（上一轮那几条会静默 SKIP，而不是 FAIL）。正确顺序 = **先断言折叠态**（`data-homepage-ladder-rows-total` / `-visible` + `aria-expanded`）→ **再点按钮展开** → 才做全量版式断言。
+> ⚠️ 坑六：`aria-expanded` 是**字符串** `'false' / 'true'`（不是布尔）⇒ 断言必须比字符串，写 `=== false` 会假 FAIL。另：原生 `<button>` 用 DOM `el.click()` 即可（**只有 Radix 受控控件**才必须走 CDP `Input.dispatchMouseEvent` 真实鼠标）。
+> ⚠️ 坑七（本轮新学，复用价值高）：**要独立取服务端真值做对拍，不必自己拼 tRPC 请求体** —— 无输入 query 直接 `fetch(BASE + '/api/trpc/<router>.<procedure>')` 即 **200**（返回 `{result:{data:{json:…}}}`）；带输入则 `?input={"json":{…}}`。本探针用它把「梯队行内热度非递增」与「热力图当日列 = 服务端真值」做成**跨进程对拍**，而不是复述前端代码逻辑（否则等于自证）。
+> ⚠️ 坑八：判「排序键是当日还是合计」**不要**只断言「当日列非递增」—— 顺带记录**合计列是否也非递增**：本日实测合计列 `64,98,50,6,82,…` **非单调** ⇒ 直接反证「不是按合计排序」，比间接推断有力。
+> ⚠️ 坑九（第四轮真踩，复用价值高）：**「超过 N 行」在响应式网格里不是常量** —— 网格列数随断点变（`grid-cols-2 / sm:3 / lg:4 / xl:6`），「3 行」对应 6/9/12/18 格。别写死格数，也**别另立一张断点表**（会与 `grid-cols-*` 类漂移）：读 `getComputedStyle(grid).gridTemplateColumns` 的 token 数，并在 `ResizeObserver` 里同步；⚠️ **只在值真的变了才 `setState`**，否则观察自身高度变化会打成渲染环。
+> ⚠️ 坑十：**JSX 正文不吃 Markdown** —— 卡片描述里写的 `**加粗**` 会**原样渲染成星号**（本轮看截图才发现，顺手清了 4 处）。文案强调要用 `<strong>` / `className`，别照抄 Markdown 习惯。
+> ⚠️ 探针纪律（第四轮成型）：**折叠态断言必须先「逐组展开」再跑全量版式断言** —— 组内折叠会让被折的组只渲染 3 行，直接数格数会得到「少一半」的假象（若断言写成「≥ 某数」则静默变 SKIP）。顺序固定为 F（折叠态 + 展开）→ D（全量版式）→ G（排序）。
+>
+> 🔴 **第八轮两处断言修订（2026-09-20）—— 两条 FAIL 都是断言自身的问题，不是产品回归**：
+> ⒜ **入口链接计数口径过期**：原断言「指向这四个路由的链接数 === 0」写在**还没有**底部折线图区块的时候；
+>    第 17 轮用户要求把折线图**本体**放上首页后，该区块卡片头右侧带一条**有意**的 `/sentiment-analysis` 链接
+>    ⇒ 被数进去（实测 `links=1`）。现改为用 `closest('[data-homepage-sentiment-chart]')` **排除该区块内的链接**，
+>    并**正向**断言那条链接恰 1 条（`chartEntryLinks === 1`）—— 否则「排除掉之后什么都算通过」。
+> ⒝ **行内热度单调断言漏了压尾桶**：原断言对**整行** heats 判非递增，与 `9bx` 的用户裁定
+>    「把『其他』题材放到最后」**本身就矛盾**（`TAIL_SECTORS` 的热度**故意不参与名次**）；该日「其他」10 家
+>    = 当日最多 ⇒ 2 板行尾 5 格 / 首板行尾 8 格被判成违规。正解 = **只在非压尾段判单调** + 新增
+>    「压尾桶连续且恒在行尾」断言（**比原断言更严**）。⚠️ 同一口径早在 `9bx` 的专项探针
+>    `_probe_ladder_tail_sector.mjs` 里就写对了（本轮实测 **PASS 32 / FAIL 0**，其中含
+>    「2026-09-18 · 2 板 · 压尾：5 个『其他』全部在末尾（首个 #34/38）」与「首板 · 压尾：8 个全部在末尾」）
+>    —— 是这份老探针没跟上，不是产品坏了。
+> ⚠️ 副作用认知（复用价值高）：**探针对拍用的「服务端真值」本身可能是带滚动时间窗的** ——
+>    `limitUp.getSectorDistribution` 内部是 `new Date() - 30 自然日`（`server/db.ts:441`），隔天复跑
+>    窗口就从 22 个交易日缩到 21 个（两次运行的日志都在案）⇒ 写断言时别把它当静态快照。
+
+---
+
+### `navhighlight` —— 1 个（2026-09-15 建；2026-09-19 `9bm` / HOMEPAGE-005 扩用到「首页入口」）
+
+> **背景**：2026-09-15 用户报障「侧栏高亮串板块」—— 旧 `AppShell.tsx` 用 `location.startsWith(item.path)`
+> ⇒ `/backtest-runs`（回测历史）把 `/backtest`（组合回测）一起点亮。
+> 修法 = **分段精确匹配 + 全局取最长命中**（`normalizePath` 剥 query/hash/尾斜杠 → `isPathActive` 按段比较 →
+> `activeNavPath` 取最长命中），本探针即该实现（`AppShell.tsx#isPathActive`）的常驻回归护栏。
+> **2026-09-19 扩用（`9bm` / HOMEPAGE-005）**：用户要求「首页做成点击左上角网站标题访问，不要单独有一栏在
+> 复盘分析下面」⇒ 侧栏「首页」导航项删除、`/` 的期望高亮从 `[首页]` 改为 **`[]`（零高亮）**，
+> 并新增「标题按钮形态 = 首页入口」与「点题回首页」两组断言 —— 即**这个探针从此同时是「首页入口」的护栏**。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_sidebar_active_highlight.mjs` + `.out.txt` | ✅ **PASS 37 / FAIL 0 / SKIP 0 ⇒ ALL PASS**（`9bm` 后复跑；断言 32 → 37 条）。**1/6 导航路由 22 条**：逐条断言「侧栏恰好 1 项高亮且文案正确」（⚠️ 本轮同时纠正一处**过期断言** —— `/` 原先期望点亮「涨停复盘」，与 HOMEPAGE-001 之后的真实导航早已不符，本轮之前未复跑故未被发现 ⇒ 改为 `['/limit-up', '涨停复盘']`，并补登漏掉的 `/research/ask`）。**2/6 详情路由 5 条**：`/strategies/:id`、`/research/:id`、`/research/candidates/:id`、`/datasets/:id`、`/datasets/:id/versions` 均点亮**父项**。**3/6 反向断言 2 条**：`/backtest-runs` 不得点亮「组合回测」、`/backtest` 不得点亮「回测历史」。**4/6 点击流 4 条**：真实 `el.click()` 后比对 `location.pathname` + 高亮集合。**5/6 首页入口 3 条（本轮新增）**：站在 `/` 时侧栏**零高亮**（实测 `[]`）；侧栏 `[data-slot="sidebar-menu-button"]` 中**确无**「首页」项；`[data-slot="sidebar-home-link"]` 存在且 `text=涨停复盘助手` / `title=aria-label=返回首页` / `cursor=pointer`。**6/6 首页入口点击流 1 条（本轮新增）**：从 `/strategies` 点左上角标题 ⇒ `path=/` 且高亮 `[]`。 | `ROADMAP.md` §44 `9bm`、§44.5 `9bm`、`ROADMAP-CHANGELOG.md` 同名条目 |
+
+> ⚠️ 坑一（本轮真踩，复用价值高）：**断言会「过期」，而代码没坏** —— 改完 `9bm` 首跑即报
+> `FAIL / 期望唯一高亮=[涨停复盘] 实际=[]`；根因不是本轮改动，而是 `ROUTES` 里的 `/` 条目自 HOMEPAGE-001
+> 起就已与产品事实不符（该探针当时未登记、未复跑，所以一直没人发现）。⇒ 断言失败先问
+> 「**被断言的事实是否仍是当前产品事实**」，再去看代码。
+> ⚠️ 坑二：**「路由」与「入口载体」是两件事** —— 删导航项**不必**动路由（`/` 仍指向 `Dashboard`），
+> 但**必须同步**「站在该路由上侧栏该亮什么」的断言，否则会立刻假失败。
+> ⚠️ 坑三（工具层，非探针）：**同一条消息里并行发两个 `Edit` 改同一文件 ⇒ 后写覆盖先写，前者静默丢失**
+> （本轮 `ROUTES` 的 `/` → `/limit-up` 就被吞掉一次，靠复跑探针才发现）。改同一文件的多处修改**必须串行**。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_shot_homepage_nav9bm.png` | 首页（`/`）整页截图，目视核对「侧栏『复盘分析』组已无『首页』项 + 左上角标题为首页入口」；内容高 **3290px**，与 `9bl` 完全一致 ⇒ 本轮只动入口、**未影响版式** | 同上（目视附件） |
+
+---
+
+### `bt002closeout` —— 2 个（2026-09-19：BACKTEST-002 收尾「BacktestResult 真正落库」+ 首个真实 Run 的性能量级）
+
+> **背景**：BACKTEST-002 收尾要求「**真实 Run → `closed_loop_backtest_run.resultJson.backtest`**」的
+> 端到端证据（此前只有内存级契约测试），并顺带回答「Backtest 能不能当参数搜索底座」。
+> 两个探针各管一件事：**落库端到端** 与 **单次 Run 耗时量级**（不混在一起，避免互相掩盖）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_backtest_closeout_e2e.mts` + `.json` | ✅ **ALL PASS / 0 失败**（真实 tRPC `loopRun`，`cand-360004@1.0.0` / `dataset_version.id=390002`，窗口 `2025-01-02~2025-03-31`，耗时 **593.3s**）：① 返回含 `backtest` 与 `strategyRun`（**并列不覆盖**）；② `stages=14`、`backtest=EXECUTED`、**真实成交 3 笔**；③ 有界：`equitySamples=57` / `tradeSamples=3`（≤60）、两个 digest 均 sha256、`backtest` 段 **10,775B**、段内**无** `equityCurve/tradeLedger/trades/positions/orders`；④ **B-04 真实链路**：`evaluationRef.metricsSource="canonical"`，5 个重叠标量与 `backtest.canonicalMetrics` **逐项相等**，`annualizationBasis={TRADING_DAYS,252}`；⑤ 真库只读核验：留档 **1 行**、`resultJson.backtest` 存在、落库段与内存段**序列化逐字节相同**、历史 6 条**含 backtest 段 = 0**、`strategies/strategy_versions` 行数未变 | `ROADMAP.md` §44 `9br` / §44.5、`docs/research/BACKTEST-002-IMPLEMENTATION-REPORT.md` §7 §9 §12 |
+| `_probe_core_eval_perf.mts` + `.json` | ⚠️ **实测（非推断）**：`StrategyRuntime.evaluateWithDetail` 单次 **≈381µs**（20,000 次，含预热）⇒ 按真实调用量（每决策日 **2 次**：当日 + 截到昨天）推算 **≈52s**，只占同窗口观测耗时 593.3s 的 **8.7%** ⇒ **41×  slowdown 的主因不在 Core 求值层**（本条**否证**了"ARCH-002 逐决策日求值 = 主因"的初始猜测）；剩余 ~541s 未定位；同日 `tushare*` 用例整片超时 ⇒ 环境因素不可排除 | 同上 §13 R-06 |
+
+> 🔴 坑一（本轮真踩，且**两次复现**）：**「留档只尝试一次」在长运行下必然失败** ——
+> 计算阶段 593~616s 完全不碰 DB ⇒ 结束时池中连接已被链路静默重置 ⇒ 唯一一次 `insert` 失败，
+> **长运行每次都静默丢掉留档**。判据不是"报错文案"，而是「紧随其后的只读 SELECT 首发也失败、
+> **重试即成功**」。修法 = `persistClosedLoopBacktestRun` 改**有界重试**（≤3 次、线性退避），
+> 语义仍是 best-effort（**不抛**：把"历史列表少一条"升级成"回测结果丢失"是更坏的交易）。
+> ⚠️ 坑二：**耗时与请求窗口无关** —— 3 个月窗口 593.3s、1 个月窗口 616.4s（同路径同策略）
+> ⇒ 瓶颈在**数据集装载**（112,920 行），不在逐决策日扫描；别再用"缩小窗口"当加速手段。
+
+---
+
+### `baseline001` —— 6 个（2026-09-19：SYSTEM-BASELINE-001 全局架构基线的真实库取证）
+
+> **背景**：SYSTEM-BASELINE-001 要求「必须实际审计整个项目、不得只拼接已有报告」，
+> 且基线必须登记**当前真实 DB 状态**（ROADMAP §36「真实状态优先」）。三个探针各管一件事，
+> **全程 SELECT、零 DML、零 DDL**，互不覆盖，`errors=0`。
+> 纪律：探针跑在**研究 Run 在途之外**；输出全部落盘（Win stdout 不可靠）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_baseline_state.mts` + `.out.json` + `.out.txt` | ✅ **`errors=0`**（2026-09-19T08:40Z）。逐表真实行数：`strategies` 10 / `strategy_versions` 11（Draft 10 + Validated 1，`codeVersion` **11/11 = `1.0.0+gunknown`**，`datasetVersionId` NULL **0**）/ 5 投影表 24·17·19·9·9 / provenance 9 / `research_strategy_candidate` 13（CONVERTED 9、DRAFT 3、ARCHIVED 1；已转正 9）/ `closed_loop_backtest_run` **7**（**7/7 `PARTIAL_BLOCKED`**；`datasetSource` registry 4 + rebuild 3；带 BACKTEST-002 载荷 **1/7**，`policyVer=1`）/ legacy 复数表 `research_experiments` 0 · `research_runs` 2 · `research_experiment_batches` 0 · `research_datasets` 7。行情：`stock_daily_prices` **8,895,704** / `index_daily` 7,492 / `research_securities` 5,552 / `industry_assignments` 5,212。`dataset_definition` 1 / `dataset_version` 2。**BASE TABLE = 63** | `docs/architecture/DATABASE-MAP.md`、`docs/architecture/SYSTEM-BASELINE-001-REPORT.md` §5 |
+| `_probe_baseline_tables.mts` + `.out.json` | ✅ 枚举真实库全部 **63** 张 BASE TABLE ⇒ 与 `drizzle/schema.ts` 声明的 **60** 张相差 **3**：`__drizzle_migrations`（24 行，drizzle 元数据）+ `rd_rows_05809b1a6d97aa02`(163) + `rd_rows_5dce9db1421bec38`(800)（B 体系 legacy 动态行表）。⇒ 同时佐证 **journal 止于 0023 / `__drizzle_migrations` 24 行**、`db:push` 不可用 | `DATABASE-MAP.md` §1 §2 §7 D-1 |
+| `_probe_baseline_ds_accounting.mts` + `.out.json` | ✅ 按 `datasetVersionId` 分组复算 ds_* 五表：v1 = 1130+23,730+15,876+15,876+3,390 = **60,002** = 其 `totalRows`；v2 = 23,978+503,538+471,816+471,816+71,934 = **1,543,082** = 其 `totalRows` ⇒ **逐版本精确闭合，差 0，无孤儿行**。（本条**推翻**了此前由全表 COUNT 相加得出的「疑似差 10,000 行」——那是加法出错；见 §坑一） | `DATABASE-MAP.md` §3.1、`SYSTEM-BASELINE-001-REPORT.md` §1 方法学要点 |
+
+> 🔴 **坑一（本轮真踩，复用价值极高）**：**「看起来不闭合」先复算，不要先写结论**——
+> 全表 COUNT 相加得 `ds_*` = 1,613,084，而 `dataset_version.totalRows` 之和 = 1,603,084，
+> 一度被判定为「10,000 行孤儿数据」的疑似缺陷。改为**按 `datasetVersionId` 分组**复算后，
+> 逐版本精确相等、差为 0 —— **是我自己的加法算错了**。⇒ 登记事实前必须能**复算**；
+> 只登记「能复算的事实」，不登记「看起来像的事实」。
+> ⚠️ 坑二：**只读探针也要避免逐表两次往返** —— 每张表先查 `information_schema` 再 `COUNT(*)`
+> × 39 张表 ⇒ 在 TiDB Cloud 上耗时约 **28s**（`stock_daily_prices` 单表 COUNT 占 5s）；
+> 若只为「有/无」判断，可直接 COUNT 并捕获异常，省一半往返。
+> ⚠️ 坑三：**`resultJson LIKE '%"backtest"%'` 不是「有 backtest 段」的判据** ——
+> `ClosedLoopEvaluationRef` 里存在 `backtestFingerprint`，该模式会**误命中全部 7 行**。
+> 正确判据 = 取 `$.backtest.executionMetadata.executionPolicyVersion`（实测 1/7 非空）。
+
+| `_probe_baseline_delta.mts` + `.out.json` + `.out.txt` | ✅ **增量复核**（2026-09-19T08:58Z，`errors=0`）：只复核「会随在途 Run 变化」的少量量，跑得快。结果：`closed_loop_backtest_run` **7 → 8**（新增 `clrun-20260919083211921` / `EXP-20260919-PARAM001PRE` / `createdAt 08:43:11`）；带 BACKTEST-002 载荷（`policyVer=1` + `strategyRun`）**1/7 → 2/8**；`strategy_versions` 仍 11 / `research_strategy_candidate` 仍 13 / `dataset_version` 未变。**动机**：主采样（08:40Z）时该 Run **正在在途**（08:32 起，约 657s）⇒ 主采样值是该时刻快照，需与复核值分开陈述 | `SYSTEM-BASELINE.md` §7 §16、`DATABASE-MAP.md` §3.5、`SYSTEM-BASELINE-001-REPORT.md` §5 |
+
+> ⚠️ 坑四：**并发环境下的基线必须带时间戳** —— 本轮审计期间**另有会话在跑 PARAMETER-001-PRE**
+> （且在 16:56 改动了 `server/strategyCore/runtime.ts`）⇒ ① 基线描述的是**工作区**不是 HEAD；
+> ② **行号会漂移**，定位改用「路径 + 符号名」；③ 随在途任务变化的采样值（Run 行数、指标）**必须标时间戳**。
+> 该三条已作为 `BASELINE_DRIFT` BD-01 ~ BD-04 登记在 `docs/architecture/CHANGE-AUDIT.md` 与
+> `docs/architecture/SYSTEM-BASELINE.md` §12.5，并写入 `AGENT-GUIDE.md` 陷阱 15/16。
+### `param001pre` —— 8 个（2026-09-19：PARAMETER-001-PRE「参数搜索性能 Profile 与执行架构决定」）
+
+> **背景**：`BACKTEST-002` 收尾留下 R-06（同一条真实链路 `2026-09-14` 实测 14.3 s → `2026-09-19` 593.3 s，
+> ≈41×，且**缩短请求窗口不缩短耗时**），而 PARAMETER-001（Parameter Search）要在同一条链路上跑几百次
+> ⇒ 规格要求先做一轮**完整、可重复**的性能 Profile 再决定架构。
+>
+> 本簇三类探针分工（**互不掩盖**）：**权威 Profile**（真实 Run + V8 CPU 采样）、
+> **阶段级微观基准**（真实数据、**零写库**、可反复跑、含单组参数边际成本 A/B）、**只读侦察**（阶段状态事实）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_param001_pre_profile.mts` | 权威 Profile 探针：真实 tRPC `loopRun` + **进程内 V8 CPU 采样**（1 ms）+ 阶段插桩。`PP_END` 换窗口 / `PP_CPU=0` 关采样 | `docs/parameter/PARAMETER-001-PRE-PROFILE.md` §3 §4 |
+| `_probe_param001_pre_profile.before.out.txt` + `.before.json` + `.before.cpuprofile.json` | **BEFORE 实测**（`cand-360004@1.0.0` / `dataset_version.id=390002` / `2025-01-02~2025-03-31` / 100,000 / policy v1）：墙钟 **657,796 ms**；**`optimization` 阶段占 92.83%**（610,652.5 ms，12 组样本）；主链只占 **0.97%**（6,395.1 ms）；数据集装载 17,145.5 ms（2.61%）；留档写库 22,085.2 ms（3.36%）；**DB 往返仅 61 次 ⇒ 无 N+1**；采样 CPU ≈ 墙钟（`idle` 5.18%）⇒ **纯 CPU-bound**；`canonicalMetrics.tradeCount=3`、`equityDigest=d208a2d0…`（与 BACKTEST-002 落库值逐字节相同） | 同上 §1 §4 §5 §7 |
+| （同上的 `.cpuprofile`） | **CPU 第一热点**：`server/strategyCore/canonical.ts` = **44.30% self**（291.4 s / 657.9 s）；根因 = `runtime.ts` 在**每次** `evaluateWithDetail` 里对**整份定义**算 **2 次** `computeDefinitionFingerprint` ⇒ 853,527 成员槽 × 2 次求值 × 2 次指纹 = **341 万次 canonical JSON + sha256** | 同上 §6 §11 |
+| `_probe_param001_stage_bench.mts` | 阶段级微观基准（真实数据、**零写库**）：数据集装载 / 装配 / research / backtest / evaluation / payload 六段计时 + **单组参数边际成本 A/B**（用户窗口 vs 数据集整窗）+ 一致性判据字段（`canonicalMetrics` / `equityDigest` / `tradeDigest` / 三个评估器）。🔴 **必须 `process.exit()` 收尾**（连接池拖住 event loop） | 同上 §10 §12 |
+| `_probe_param001_stage_bench.before.json` + `.before.out.txt` | **边际成本实测**：用户窗口（57 决策日 / 7,731 成员槽）= **5,039 ms/组**；数据集整窗（484 决策日 / 70,483 成员槽）= **46,739 ms/组** ⇒ **9.28×**；主链 research 5,474.3 ms | 同上 §10 |
+| `_probe_param001_stage_bench.after.json` + `.after.out.txt` | **AFTER（本轮唯一优化后）**：边际成本 **2,500 ms/组**（用户窗口）/ **21,748 ms/组**（整窗）⇒ **2.02× / 2.15×**；`canonicalMetrics` / 两个 digest / 三个评估器 / 样本数 / `truncated` **逐项或逐字节相等**（整窗组 27 笔 −45.00% 的**亏损**曲线覆盖了 `profitFactor` / `averageLossPct` 分支） | 同上 §10 §12 |
+| `_probe_param001_pre_profile.json` + `.cpuprofile.json` + `.after.out.txt` | **AFTER 端到端实测**：墙钟 **365,725 ms**（BEFORE 657,796 ms ⇒ **1.80×**；剔除同期恶化的跨境写库后计算路径 **2.07×**）；`research.decision_days 5,865` / `universe_member_slots 853,527` / `backtest.trades 327` / `resultJson 43,903 B` **逐项与 BEFORE 相同**；两个 digest 逐字节相同 | 同上 §1 §5.4 §12 |
+| `_probe_param001_recon.mts` + `.out.txt` | 只读侦察：7 条留档 Run 的逐条阶段状态 —— **#300001/#270001/#240001 的 `optimization = EXECUTED`；2026-09-14 三条全部 `optimization = CL_RUNNER_NOT_INJECTED`**（R-06 的 41× 关键旁证）；`dataset_version` 仅 2 行（390001/390002，均 READY）；`research_run` 在途 `RUNNING = 0` | 同上 §7.3 §16 RISK-6 |
+
+> 🔴 坑一（本轮真踩，价值高）：**「插桩后变慢」不是优化没生效** —— 同一次运行带插桩 + 1 ms CPU 采样时
+> 是 657.8 s，无插桩的历史实测是 593.3 s（约 +11%）。**Before/After 必须同条件**，
+> 跨报告引用数字时必须写清「带不带插桩 / 带不带采样」。
+> 🔴 坑二：**DB 刻度是「并发求和」不是墙钟** —— `db.read_ms = 101,430 ms` 而 `dataset.resolve` 墙钟只有
+> 17,145 ms，因为 48 条批读以并发 16 飞行，各自的墙钟相加自然大于外层墙钟。
+> 拿 `db.read_ms` 当「网络占比」会得出 6.4 倍的错误结论（真实占比 = 17.1 s / 657.8 s = **2.61%**）。
+> 🔴 坑三：**`process.exit()` 必须显式写** —— 基准探针忘了收尾 ⇒ 输出早已写盘、进程却一直挂着，
+> 直到工具层 SIGTERM（看起来像「跑不完」，其实早就跑完了）。判据 = **产物文件已完整**，不是退出码。
+> 🔴 坑四：**「同一次运行的环境会在两次对照之间变化」** —— AFTER 那轮的跨境 `insert` 从 2 次尝试变成 3 次
+> （22.1 s → 58.7 s），把端到端的 2.07× 稀释成 1.80×。**报数时必须把「环境项」与「计算项」分开算**。
+
+---
+
+## PARAMETER-001（Parameter Search 完整实现 · 编号 `9bs` · 2026-09-19）
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_param001_strategy_inventory.mts` | 只读盘点参数搜索可用的真实上游：`strategy_versions.datasetVersionId` 全部 = `390002`；`strategy_parameters` **24 行全 `TUNABLE`**（`roleDistribution` 只有 TUNABLE 一项，说明真实库还没有 FIXED/DERIVED 样本）；`dataset_version` 仅 2 行（390001 v1 / 390002 v2，均 READY） | `docs/parameter-search/PARAMETER-001-REPORT.md` §3 §9 |
+| `_e2e_parameter_search.mts` + `_e2e_parameter_search.out.json` | **真实库全链**（走 `appRouter.createCaller`，零 mock）：创建 → 4 组合 → 执行 → Backtest → Evaluation → 落档 → 查结果 → Resume。`PARAM001_MODE=create/full/verify`；`PARAM001_CLEAN=1` 自清、缺省保留产物。**实测 37 项 / 0 失败**：4 组合 **39 s** 全成功、`metricsSource=canonical`、二次 `start` ⇒ `evaluated=0 / skipped=4`、结果行不重复 | 同上 §9 §10 |
+| `_probe_parameter_search_dom.mjs` + `.out.json` | **前端可达性（量 DOM，不截图）**：`/parameter-search` 面板锚点命中、3 条真实 Run 行、点「添加参数」出现 4 种搜索形态（`INTEGER_RANGE/DECIMAL_RANGE/ENUM/FIXED`）、点「查看详情」后详情 + 结果区渲染（`startButton`/`cancelButton` 可见）、点「查看组合」展开、**0 page error** | 同上 §8 |
+| `_probe_param001_list.mts` | 只读诊断：`paramSearch.listSearches` 真的返回行（证明「列表空」若出现只能是前端 / 环境问题） | 同上 §8 |
+| `_probe_param001_cdp_health.mjs` | 无头浏览器 CDP 连通性自检（target 列表 / navigate 结果 / body 前 300 字符）；DOM 探针报「锚点未出现」时**先跑它定性** | 同上 §8 §11 |
+
+> 🔴 坑一（本轮真踩，**验收判据错不是产品缺陷**）：`dataset_version.startDate/endDate` 是 **UTC 时间戳**
+> （北京日 2024-09-01 存成 `2024-08-31T16:00:00.000Z`）⇒ 探针用 `toISOString().slice(0,10)` 取业务日期会**少一天**，
+> 于是搜索窗口越界、4 个组合全部 `SIM_RANGE_OUT_OF_DATASET`（62 s 全失败）。**取业务日期必须按北京时区格式化。**
+> 🔴 坑二（第三次踩，务必外化）：**DOM 探针的 JS 模板串里写正则 `\n` / `\s` 会被 JS 当转义吃掉** ⇒
+> `Runtime.evaluate` 直接语法错、`snap` 恒 `undefined` ⇒ 探针报「页面不可达」，而页面其实完全正常。
+> 判据：**探针报「找不到元素」时第一动作是 `console.log` 一次匹配结果**，不要先怀疑产品。
+> 🔴 坑三：**单次 `Page.navigate` 偶发不落地（body 恒空）** ⇒ 轮询里必须**周期性重新导航**，
+> 并以「body 有内容」为前置条件，否则 60 s 全在等一个不会来的锚点。
+> 🔴 坑四：**只杀自己那棵树**（`taskkill /F /T /PID <pid>`），**绝禁按镜像名杀**（`/IM chrome.exe`）——
+> 那会连用户自己的浏览器一起杀掉。本轮实测残留 26 个无头 Edge 进程会占住 CDP 端口。
+> 🔴 坑五：`DataTable`（`@/components/common`）**不接受 `id` 属性** ⇒ DOM 锚点要用**页面主体唯一长文本**或自备包裹元素。
+
+---
+
+## PARAMETER-002（参数有效性 Gate · 2026-09-19）
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_param002_recon.mts` | 只读侦察：**同族策略历史上真出过成交**（`closed_loop_backtest_run`：`cand-360001` 2025-01-02..2025-02-28 **90 笔**、`cand-360006` 35 笔、`cand-960001` 9 笔）；`dataset_version` 只有 2 行（390001/390002，均 READY） | `PARAMETER-002-REPORT.md` §2 §3 |
+| `_probe_param002_recipe.mts` | 只读：候选文档的 `recipe` 全文 —— `first-limit-pullback-hold-shrink` 是**选择型配方**（`selectionConfig.topN=5` + `rankingConfig`），**不含任何参数绑定** | 同上 §2 |
+| `_probe_param002_candidate.mts` | 只读：候选草稿的 `parameterSpaceJson` 里**逐参数写明了语义**（「缩量阈值…0.3 = 相对首板日缩到 30% 以内」）⇒ 参数**本意**就是门槛值；但 `filterRuleJson` 为 NULL | 同上 §2 §5 |
+| `_probe_param002_parameter_sensitivity.mts` + `.out.json` | **决定性证据**。Part 1 链路快照：`Core parameterSchema` 声明 3 个参数、**规则图 `PARAMETER_REFERENCE` = 0 个**；覆写**到达**装配层（A/B 的 `experimentConfig.parameters` 不同）且引擎 = `strategy-core`。Part 2 真实 A/B（同窗口、逐参数隔离）：三组**权益曲线逐字节相同**（`4c9f7a66cb21c94c`）。Part 3 **正对照**：把 `cond-2` 改成 `bar.volumeRatio <= max_volume_ratio`（参数引用）后，A=0.05 → **0 笔**、B=1.0 → **8 笔 / −10.36% / maxDD 10.54% / 胜率 50%** | 同上 §3 §4 §5 §6 |
+| `_e2e_param002_parameter_effect.mts` + `.out.json` | **真实 tRPC 端到端（13/13 PASS）**：① 负例 A —— 对「死参数」策略创建搜索被**响亮拒绝**（`PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER`）；② 负例 B（N-01）—— 窗口越界被拒（`PARAMETER_SEARCH_WINDOW_OUT_OF_DATASET_RANGE`，信息含 **requested window** 与 **dataset window**）；③ 正例 —— 自建「参数引用」策略版本，2 组合真实执行 **21 s**，结果 **出现差异**（0.05 → 0 笔 / 1.0 → **8 笔、−10.36%**）；④ Resume 二次 `start` ⇒ `evaluated=0 / skipped=2`。**自建自清**（策略级联 + 三张 PS 表按 `searchRunId` 删，残留 0） | 同上 §7 §8 |
+
+> 🔴 坑一（本轮真踩，**探针判据错不是产品缺陷**）：正对照首版写成 `bar.volume <= max_volume_ratio`
+> （**成交量 vs 比值**，量纲不同）⇒ 条件**恒为假** ⇒ A/B 都无信号、看起来「参数不影响」。
+> 正确写法是 `bar.volumeRatio <= max_volume_ratio`（派生字段 = 决策日量能 / 首板日量能，与配方门槛同义）。
+> **教训：构造最小差异实验时，先确认「这一维确实可能变化」，否则会把自己的错误当成产品缺陷。**
+> 🔴 坑二：手工改 `definition` 而把 v1 视图（`entryRules`）留在原处 ⇒ 校验器**正确拒绝**
+> （`SCHEMA_DEFINITION_VIEW_CONFLICT` / `_VIEW_DRIFT`）。构造文档必须走
+> `createStrategyDocumentFromDefinition`（v1 视图单向派生）—— 那条纪律是对的，不是坑。
+> 🔴 坑三：**显式搜索域覆盖能把「死参数」重新塞回搜索空间**（实测：三个死参数被覆盖后 `searchable` 又变 3 个）
+> ⇒ 死参数剥离必须放在**覆盖之后**（`派生 → 覆盖 → 剥离 → 校验`），并为「给死参数赋会变化的搜索域」加响亮拒绝。
+
+## ROBUSTNESS-001（Search-Result Robustness Analysis · `9bu`）· 2026-09-19
+
+| 文件 | 用途 | 判据 |
+|---|---|---|
+| `_e2e_robustness_search.mts` | **真实 tRPC + TiDB 端到端**（2 参数 × 2 值 = 4 组合）：自建含**参数引用**的新策略版本 → 真实 2×2 搜索（真跑回测）→ 创建/执行稳健性分析 → 落库 → 查询；覆盖规格 §21 的 A~G 七条判据（未重跑回测 / 未重算指标 / 确定性 / 口径可变而源不变 / 缺格不补值 / 零成交不误判 / 不串线）。自建自清（`ROBUSTNESS001_KEEP=1` 保留、`ROBUSTNESS001_CLEAN_ONLY=1` 只清理）。 | **42/42 PASS** |
+| `_e2e_robustness_search.out.json` | 上述探针的完整结论（含逐条断言、汇总、清理结果） | — |
+| `_probe_robustness_unverified_reference.mts` | **§12 参数引用未验证**：在**用户自有的真实历史 Run**（`cand-360001`，`referenceCheckApplied = NULL`）上创建并执行稳健性分析，断言标记与说明文本（含领域码）正确、执行后标记不丢、源 Run **逐字节未被改写**；只创建一个自建 Run 并自清。 | **9/9 PASS** |
+| `_probe_robustness_unverified_reference.out.json` | 上述探针结论 | — |
+| `_probe_robustness_dom.mjs` | **前端可达性（量 DOM，不截图）**：面板锚点 → 等列表查询落地 → 点「查看详情」（COMPLETED 行）→ 断言详情 / **二维稳定性矩阵 4 格** / 结果行 4 条 / 排序过滤控件 → 点「查看邻域」→ 断言邻域明细；再**深链 `?robRunId=` 直接打开**，断言无需点击即自渲染且 0 page error。 | `pass=true`、0 page error |
+| `_probe_robustness_dom.out.json` | 上述探针结论（含每步 DOM 快照与深链检查） | — |
+| `_probe_rob001_template.mts` | 只读：模板策略 `cand-360001@1.0.0` 的 `definition`（条件 / 事件 / 观测窗口）与声明的参数投影（用于挑「可被参数引用」的参数） | 只读诊断 |
+| `_probe_rob001_ps_runs.mts` | 只读：库里现存的 Parameter Search Run 清单（含 `referenceCheckApplied`、canonical 结果行数）—— 判断「前端是否有真实数据可用」 | 只读诊断 |
+
+⚠️ **前置**：`_probe_robustness_dom.mjs` 需要库里有 **COMPLETED + 全 canonical 结果**的 Search Run，且至少要有一条 **COMPLETED 的 Robustness Run** 才有东西可点：
+先跑 `ROBUSTNESS001_KEEP=1 node --import tsx docs/evidence/_e2e_robustness_search.mts`，验收完再跑 `ROBUSTNESS001_CLEAN_ONLY=1 node --import tsx docs/evidence/_e2e_robustness_search.mts` 归零。
+
+## OOS-001（Out-of-Sample Validation · `9bv`）· 2026-09-19
+
+> **与 ROBUSTNESS-001 的关系**：两者是**并列兄弟域**，语义**正好相反** ——
+> `searchRobustness/**` 对冻结结果做邻域稳定性判断（**零重跑零重算**，import 黑名单守卫钉死）；
+> `oosValidation/**` 必须在**它没见过的数据窗口**上**真实重跑回测并重算 canonical 指标**
+> （import **白名单 + 必含清单**守卫钉死，必须出现 `createStrategyBacktestBridge` 与 `projectCanonicalMetrics`）。
+> 两个域的守卫方向**镜像相反**，故本域实现**不允许**放进 `searchRobustness/**`。
+
+| 文件 | 用途 | 判据 |
+|---|---|---|
+| `_e2e_oos_validation.mts` | **真实 tRPC + TiDB 端到端**，五模式（`search` / `oos` / `full` / `verify` / `clean`）。链路：自建含**参数引用**的策略版本 → 真实 2×2 参数搜索（真跑回测）→ 冻结候选（源 Run + `parameterHash` + OOS 窗口）→ 创建 OOS Run → **在 OOS 窗口真实重跑回测** → canonical 重算 → 落库 → IS/OOS 对照。IS 窗口 `2025-01-02..2025-02-28`、OOS 窗口 `2025-03-01..2025-04-30`、`datasetVersionId = 390002`。自建自清（`OOS001_KEEP=1` 保留；`OOS001_MODE=clean` 按 id 精确删、连带自建策略）。 | 阶段一 **2/2**、阶段二 **12/12 PASS** |
+| `_e2e_oos_validation.search.out.txt` | 阶段一（`OOS001_MODE=search`）日志：S1 搜索达 `COMPLETED`（2/2 组合）、S2 存在 canonical 结果行（OOS 的 IS 基线有源）。真实回测耗时 **42 s** | **2/2 PASS** |
+| `_e2e_oos_validation.oos.out.txt` | 阶段二（`OOS001_MODE=oos`）日志：V1~V10 共 12 条判据（参数冻结可复核 / 禁调参 / 窗口隔离 / canonical 重算 / 撮合指纹差异 / 源三表**未被改写** / 幂等 / 不串线 / 状态机 / 对照成立） | **12/12 PASS** |
+| `_e2e_oos_validation.rerun.out.txt` | **跨进程确定性证据**：阶段二**再独立跑一遍**，12 条判据全部复现 | **12/12 PASS**（与上一份逐项一致） |
+| `_e2e_oos_validation.clean.out.txt` + `.clean.out.json` | **归零阶段**（`OOS001_MODE=clean`）的日志与结构化结论：按 id 精确删除自建 OOS Run／自建策略（级联），打印四表残留计数并校验 `PASS（mode=clean）`。**幂等**：对已删除的 id 复跑不抛错（`未找到策略，无法删除` ⇒ 记为「已不存在（幂等跳过）」） | `PASS（mode=clean）`、自建行残留 0 |
+| `_e2e_oos_validation.state.json` | **跨阶段交接坐标**（`searchRunId` / `oosRunId` / 自建 `strategyId`）—— 阶段二与 `clean` 模式都依赖它，否则会漏删自建策略 | — |
+| `_probe_oos_source_scan.mts` + `.out.json` / `.out.txt` | 只读：扫描 `parameter_search_run` 全表（含窗口、`datasetId`/`version`）+ 各自组合/结果行 + 策略版本的**参数引用可过性**（复算 `ruleGraphRefs`）—— 用于在第 ① 步实测「仓库全部既有策略版本都没有可搜索参数」这一**结构性事实** | 只读诊断 |
+| `_probe_oos_dom.mjs` | **前端可达性（量 DOM，不截图）**：面板锚点 → 等列表查询落地 → 点「已完成」行打开详情 → 断言**六项冻结坐标** / 冻结参数集 / 固定坐标 / 运行内容指纹 / **IS×OOS 对照表 6 行** / 三项派生对照 / 三处读数来源；并断言**创建区块内 `<input>` 恰为 4 个**（规格 §5：界面上无处可写参数值）；再**深链 `?oosRunId=` 直接打开**，断言无需点击即自渲染且 0 page error。**只读**：绝不点「执行样本外验证」 | `pass=true`、0 page error |
+| `_probe_oos_dom.out.json` | 上述探针结论（含每步 DOM 快照、`startButtonNeverClicked`、深链检查） | — |
+
+⚠️ **前置**：`_probe_oos_dom.mjs` 需要库里至少有一条**已 `COMPLETED` 的 OOS Run**（且其源组合有 canonical 结果）才有东西可点：
+先跑 `OOS001_KEEP=1 OOS001_MODE=search` → `OOS001_MODE=oos`（两阶段），验收完再跑 `OOS001_MODE=clean` 归零。
+
+> 🔴 坑一（本轮真踩，**探针判据错不是产品缺陷**）：首版 DOM 探针把「锚点出现」当成「数据到位」。
+> `/parameter-search` 页同时挂三块面板，OOS 列表查询在 **dev 冷启**下落地要 **~20 s**（实测 22 s；
+> 同机热态复跑只需 6 s ⇒ 是 Vite 冷编译，不是查询慢）。⇒ 判据必须等到**目标行数 > 0**，
+> 并且「点不中就一直重试」，否则会点在 `加载中…` 上、看起来像「详情不可达」。
+> 🔴 坑二（同类）：pass 表达式里误用了「面板就绪」那一帧的快照去判 `runRowCount > 0` ——
+> 那一帧列表**必然**还没落地。**快照必须取「已达标的那一步」，不能取第一帧。**
+>
+> 🔴 坑三（**证据工具缺陷，已修**）：脚本原先在 `clean` 模式下把结论写到**通用**文件名
+> `.out.json` / `.out.txt`，于是最后一跑清理会**覆盖**主阶段的结构化结论（12/12 判据 + 源三表 digest）。
+> 已改为按模式落盘（`clean` ⇒ `.clean.out.json` / `.clean.out.txt`），与兄弟脚本
+> `_e2e_robustness_search.mts`（`*.cleanonly.out.json`）的约定对齐。主阶段逐条断言完整保存在
+> `.oos.out.txt` / `.rerun.out.txt`：含 12 条 `[PASS]`、`digest(run/combination/result)=7abdb690/26fc7cb6/b74772d3`
+> （创建/执行两阶段各采样一次、逐字节不变）、IS/OOS 对照 JSON、`backtestFingerprint` 双侧读数、
+> 以及 `executed=false` 的幂等复核。
+
+## WALK-FORWARD-001（Walk-Forward Validation · 编号 `9bw`）· 2026-09-19
+
+> **三方向镜像守卫（本仓第三条执行边）**：`searchRobustness/**` = import **黑名单**（禁够到回测/评估端口，
+> **零重跑**）；`oosValidation/**` = **必含清单**（必须够到 `createStrategyBacktestBridge` +
+> `projectCanonicalMetrics`，**必须重跑**）；`walkForward/**` = **黑名单 + 「执行只能经由注入钩子」**
+> （可以 import OOS **类型**以复用版本常量，但**不得**自行 import 回测/评估/闭环执行面，
+> 也**不得**自建第二套执行路径）。三套守卫**互不可搬移**。
+>
+> 本域与 `walkForwardRun/**`（C-19.1 内存态几何原语，id 前缀 `WFA`）**刻意不并入全域 `export *`**：
+> ESM 的 `export *` 遇同名导出**静默遮蔽**（不报错）⇒ 本域一律**按文件路径 import**。
+
+| 文件 | 用途 | 判据 |
+|---|---|---|
+| `_e2e_walk_forward.mts` | **真实 tRPC + TiDB 端到端**，六模式（`create` / `run` / `full` / `verify` / `rerun` / `clean`）。链路：自建含**参数引用**的策略版本 → 建 Walk-Forward Run（只冻结）→ **执行**：逐 Fold 真实搜索（**搜索窗口 == 该 Fold 的 IS**）→ 冻结候选（源组合行 + `parameterHash` 复核）→ 在**紧邻的、没见过的** OOS 窗口真实重跑 → canonical 指标 → 多 Fold 描述性汇总。`datasetVersionId = 390002`；`WINDOW_CONFIG = {2025-01-02..2025-06-30, IS 40 / OOS 25 / step 25, ROLLING, maxFolds 2}`；`SELECTION_POLICY = FIRST_ELIGIBLE_COMBINATION`。自建自清（`WF001_KEEP=1` 保留；`WF001_MODE=clean` **以 DB 为准**按 `strategyId` 精确删）。 | `create` **7/7**、`run` **10/10**、`rerun` **11/11** |
+| `_e2e_walk_forward.out.txt` + `.out.json` | `create` + `run` 日志与结构化结论。实测 Fold 坐标：**#0 IS `2025-01-02..2025-03-06` / OOS `2025-03-07..2025-04-11`**、**#1 IS `2025-02-14..2025-04-11` / OOS `2025-04-14..2025-05-21`**（由真实交易日序列推导，非硬编码）；`scheduleFingerprint = e3451bfc…d2bd7`。执行耗时 **193 s**（第二轮） | `run` **10/10 PASS** |
+| `_e2e_walk_forward.rerun.out.txt` + `.rerun.out.json` | **跨进程确定性 / 幂等证据**（`WF001_MODE=rerun`，**换进程**再执行同一个已 `COMPLETED` 的 Run）：W15 断言 `executed=false`、状态仍 `COMPLETED`；W4~W12 全部在新进程里**逐条复现一致**（含四条撮合指纹）；W14 断言**零新增行**（PS +0 / OOS +0）。耗时 **7 s** | `rerun` **11/11 PASS** |
+| `_e2e_walk_forward.clean.out.txt` + `.clean.out.json` | **归零阶段**：两表 + 自建策略 / 策略版本全部删除，打印残留计数 `{"walkForwardRun":0,"walkForwardFold":0,"strategies":0,"strategyVersions":0}`。**幂等**（对已删 id 复跑不抛错） | `PASS（mode=clean）`、残留 0 |
+| `_e2e_walk_forward.state.json` | **跨阶段交接坐标**（`walkForwardRunId` / `determinismRunId` / `ownStrategyId`）—— `run` / `rerun` / `clean` 都依赖它；🔴 `ownStrategyId` **必须**从这里解析（见坑四） | — |
+| `_probe_wf001_recon.mts` | 施工前**只读**侦察：数据集 `390002` 可用区间与交易日计数（`2024-10-01..2025-06-30` 有 **178** 个交易日）、模板 `cand-360001@1.0.0` 的 TUNABLE 清单、**`entryRuleGraph` 引用参数 = `[]`**、不带引用筛查 ⇒ `MAX_COMBINATIONS_EXCEEDED`（**1240 > 256**）、参数声明在 `definition.parameters[]`（**不是** `definition.parameterSpace`） | 只读诊断 |
+| `_probe_walk_forward_dom.mjs` + `.out.json` | **前端可达性（量 DOM，不截图）**：面板锚点 → 等**列表查询落地**（Run 行 > 0 且至少一条「已完成」）→ 点行打开详情（窗口排程 + 两条指纹 + 选择策略 + Fold 窗口清单 + **Fold 矩阵 2 行**）→ 点 Fold 行（**Fold 详情**五项齐备）→ **深链 `?walkForwardRunId=…&foldIndex=0` 无需点击**即渲染详情**且 Fold 选中一并还原** → 负向**双轨**禁词判据 → 汇总表**恰 6 行**（在汇总区块内数）。含**作用域自证**：`rootDataSlot="card"` / `rootHasOosCreateButton=false` / `rootTextLen` 随详情展开 800→2593→**4328**。**只读**：`neverClickedWriteButtons=true` | `pass=true`、0 page error |
+
+⚠️ **前置**：`_probe_walk_forward_dom.mjs` 需要库里至少有一条**已完成**的 Walk-Forward Run：
+先跑 `WF001_MODE=create` → `WF001_MODE=run`（两阶段），**跑完 DOM 探针之后**再 `WF001_MODE=clean` 归零。
+
+> 🔴 坑四（本轮真踩，**探针缺陷不是产品缺陷**）：`run` 第一轮 **7/10**，FAIL = W9/W10/W12，逐条核实**全是探针自身缺陷**：
+> - **W9**：`OWN_STRATEGY_ID` 原先用 `Date.now()` 生成 ⇒ `run` 阶段（**新进程**）重算 `parameterHash` 时
+>   **用错了 strategyId**（`computeParameterHash` 的 `strategyVersionId` 参与哈希）⇒ 哈希必然不等。
+>   修法：`ownStrategyId` **跨阶段从状态文件解析**（环境变量 > 状态文件 > 新生成）。
+> - **W10**：同根因（比对的是 `create` 阶段的旧 id）。修法：`resolveOwnStrategyId(state)` + 把 W10 重写为
+>   「Run 行与逐 Fold 行自洽 + 与同配置副 Run 一致」。
+> - **W12**：把 `completedFoldCount` 错当成 `SUCCEEDED` 计数。读 `aggregate.ts` 确认
+>   `completed = status === "OOS_COMPLETED"`、`contributing = outcome === "SUCCEEDED"`
+>   ⇒ 实测 `completed=2 / contributing=0` 是**正确**行为。修法：**分别按生命周期字段与结果字段**核对。
+> - **附带发现（非缺陷）**：首轮选中的候选是 `{"max_volume_ratio":0.3}`（参数域下界），两个 Fold 都 0 成交
+>   ⇒ 汇总退化为「无贡献」。已把参数域抬到 `[1, 1.75]` 以取得有经济学含义的对照。
+>
+> 🔴 坑五（**工具链真踩**）：在**模板字符串内部**写注释时写了反引号 ⇒ 模板串提前闭合 ⇒ `SyntaxError`，
+> **探针根本没跑**；而磁盘上仍是**上一版**的 `*.out.json`，极易把 stale 产物当成新结论读。
+> ⇒ 证据脚本写完先 `node --check`，且**必须先确认 stdout 有内容**再解析产物。
+>
+> 🔴 坑六（**判据设计真踩**）：`/parameter-search` 页同时挂**四块**面板 ⇒
+> ⒜ 整页 `innerText` 里含兄弟面板的**免责文案**（如参数搜索面板「不产出「最佳参数」结论」），
+> 整页扫禁词会**把别的域判成本域违规**；⒝ `table tbody tr` 会把兄弟面板的指标表一起数进来（实测 6 → 12）。
+> 修法：作用域收窄到**本面板卡片子树**（`data-slot="card"`）并**自证**（根节点自述 + 文本长度随交互增长）。
+> 另：本面板**自己渲染的服务端 notes** 原文即「也不称任何 Fold 为「最好 / 最差」（规格 §12）」
+> ⇒ 裸词表扫描会把**正确的免责声明**判成违规 ⇒ 禁词判据改为**双轨**
+> （自由文本里含禁词的**行**必须同时含否定标记；标题 / 表头 / 按钮 / 徽标这些**结论承载面**一律不得出现）。
+
+
+---
+
+> 🔴 **2026-09-19 第六轮追加（故障诊断）**：用户报「复盘分析 → **龙头候选**加载不出来」。
+> 本轮为**只读诊断**（零源码改动、零库写入、未重启任何服务），完整结论见
+> `docs/research/LEADER-CANDIDATE-LOADFAIL-DIAG-001.md`。一句话：两个重端点 500
+> （`Connection lost` / `connect ETIMEDOUT`，栈顶 `loadBacktestPriceRows`），
+> 但**同一条全区间查询用全新连接 22.8 s 就跑通**（153 万行 / ≈248 MB）
+> ⇒ 失败源是 **dev server 连接池内的死连接**（`getConnection()` 不做存活探测 + `release()` 把坏连接放回池顶，
+> 重试 3 次落在同一条上），不是查询太重、也不是网络慢。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_lc_slowpath.mjs` + `.out.txt` | 只读：数据戳 / 规模 / **分段与全区间真实取回**。全区间 **22,827 ms / 1,529,449 行 / ≈248 MB**（`fetchAll=19.3s`）；年内 4.0s / 20.8 万行 / 34 MB ⇒ 链路 ≈12.9 MB/s，**不是带宽瓶颈** | `docs/research/LEADER-CANDIDATE-LOADFAIL-DIAG-001.md` §3 |
+| `_probe_db_tcp.mjs` + `.out.txt` | 只读：TCP 到 TiDB gateway 通（2~20 ms，实为本地代理应答）、`cloudflare/google/npmjs` 全 200 ⇒ **不是网络中断**；TiDB 走真实公网 IP（非 fake-IP），GitHub 才走 198.18.x.x | 同上 §3 |
+---
+
+### `ladderselreadability` —— 2 个（2026-09-19：首页连板梯队「选择日期」夜间模式文字看不清）
+
+> 用户原话：「首页连板梯队日期选择器夜间模式文字看不清，调整一下」。
+> **根因**：该 `<select>` 只写了 `border border-border`，`background-color` 落到 Tailwind preflight 的**透明**
+> ⇒ 控件表面与**展开的选项弹层**一律由 UA / 平台决定；而 `option` 的文字色是 `inherit` 来的 `--foreground`
+> （暗色近白）。Windows Chrome 的选项弹层是浏览器进程按**平台主题**绘制的独立窗口，与页面 CSS 不共享表面
+> ⇒ 平台表面为浅色时即「浅字浅底」。
+> **修法**（`client/src/pages/Dashboard.tsx`）：`border-input bg-background text-foreground`
+> + `[&>option]:bg-popover [&>option]:text-popover-foreground` + 键盘焦点 `ring`
+> （表面不再依赖平台默认色）。⚠️ `Market.tsx` 的同名下拉是同一种写法、同一缺陷，本轮**未动**（用户只报了首页）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_ladder_date_select_dark.mjs` + `.out.txt` | 亮 / 暗两套主题量 `select` / `option` / `label` 的 computed 与**真实绘制色**（颜色用 canvas 反解，因为本仓令牌是 `oklch()`）。**改前 5 PASS / 2 FAIL**：`select` 与 `option` 的 `backgroundColor` 均为 `rgba(0,0,0,0)`（表面交给 UA / 平台）；**若平台弹层为纯白，暗色文字对比度仅 1.27**（AA 需 ≥ 4.5）。**改后 7 PASS / 0 FAIL**：`select` 底 = `oklch(0.185 0.004 286)`（暗）/ `oklch(0.985 0.002 240)`（亮）、`option` 底 = `oklch(0.255 0.005 286)` 且 `backdropFrom=option`（作者可控）、对比度 **14.74 / 12.93 / 17.32** | `ROADMAP.md` 同名条目、`.workbuddy/memory/2026-09-19.md` |
+| `_probe_ladder_date_select_dark.BEFORE.txt` | 修复**前**的同名输出留档（同一探针、改前跑的那一次），用于「2 FAIL → 0 FAIL」的前后对照 | 同上 |
+| `_probe_ladder_date_select_popup.mjs` + `.out.txt` | 🔴 **负结论（省时间用）**：原生 `<select>` 的**展开弹层在 Windows 上无法用 CDP 截图**，`Input.dispatchMouseEvent` 合成点击也点不开（`:open` 恒 `false`，`activeElement` 仍是 `BODY`）⇒ 别在这上面耗时间；改用 `option` 的 computed `backgroundColor` / `color` 作可断言代理 | 同上 |
+| `_shot_ladder_date_select.light.png` / `_shot_ladder_date_select.dark.png` | 目视附件：选择器 + 首个选项在亮 / 暗两套主题下的真实像素（`_*.png` 被 `.gitignore` 排除在库外） | 同上（目视附件） |
+| `_shot_ladder_date_select_popup.*.png` | 弹层取证的副产物截图（闭合态可用；`*.open.png` 里**没有**弹层 —— 正是上面那条负结论） | 同上（目视附件） |
+
+> 🔴 **同轮偶发事故（已修复，登记备查）**：清理本轮 png 时用 `glob('docs/evidence/*.png')` 误删了
+> 3 张历史目视附件（`_shot_homepage_full.png` / `_shot_homepage_ladder.png` / `_shot_homepage_nav9bm.png`）。
+> 三者均**未被 git 跟踪**（`.gitignore:108` 的 `_*.png`），故无法从版本库恢复 ⇒ 已用其产出脚本
+> `_shot_homepage.mjs` **按原名重新截图补回**（2026-09-19 23:12，`contentHeight=3258`；`ladder` 版用第 4 参裁剪
+> `[data-homepage-ladder]`）。⚠️ 教训：**清仓内图片一律按文件名逐个指定，禁用 `*.png` 通配**。
+---
+
+### `selectsurface` —— 2 个（2026-09-19：全仓原生 `<select>` 表面 / 选项配色的系统性收口）
+
+> 用户原话：「同一写法缺陷一起修复」（承接上一条：首页连板梯队「选择日期」夜间看不清）。
+> **盘点结论**：全仓 `<select>` **47 处 / 16 个文件**，其中 **6 处没有任何 `bg-*`**（`Backtest.tsx` ×4、
+> `Dashboard.tsx`、`Market.tsx`），且 **47/47 处都没有给 `option` 上过色** ⇒ 控件表面与**展开的选项弹层**
+> 一律交给 UA / 平台决定（Windows 弹层是浏览器进程按**平台主题**画的独立窗口），暗色下即「浅字浅底」。
+> **修法 = 一条全局规则**（`client/src/index.css` 的 `@layer base`）：
+>
+> ```css
+> select { background-color: var(--background); color: var(--foreground); }
+> select option, select optgroup { background-color: var(--popover); color: var(--popover-foreground); }
+> ```
+>
+> 放 `base` 层 ⇒ **任何显式工具类（`bg-white` / `bg-transparent` / `text-slate-600` …）照旧覆盖它**，
+> 它只补「作者没声明」的空档 ⇒ **不必逐个改 47 处**。首页那处仍保留等价的行内类
+> （显式优先，与 `OperationLogs.tsx` 的既有写法一致）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_select_surface_dark.mjs` + `.out.txt` | 按**真实导航**巡检 6 条路由（`/` · `/market` · `/operation-logs` · `/backtest` · `/paper-trading` · `/review-workbench`）的全部可见 select：自身表面是否不透明、文字对「真实绘制底」的对比度、选项的底/字/对比度。**改前 10 PASS / 5 FAIL / 1 SKIP → 改后 18 PASS / 0 FAIL / 1 SKIP**。暗色实测：`/backtest` 两个**无 `bg` 类**的选择器由 `rgba(0,0,0,0)` 变 **`oklch(0.185 0.004 286)`**；`/` 的 **1873 个选项**与其余路由的选项全部 **`oklch(0.255 0.005 286)` + `oklch(0.93 0.002 286)`（对比度 12.93）**；选择器文字对比度 **12.8~14.74**。**规则作用域自证**：注入一个**没有任何 class** 的 `<select>`（与 `Market` / `Backtest` 同形态）→ 同样拿到令牌色（14.74 / 12.93）⇒ 证明覆盖是**全局**的，与「本轮是否走到该元素」无关 | `ROADMAP.md` 同名条目、`.workbuddy/memory/2026-09-19.md` |
+| `_shot_select_surface.backtest.png` / `_shot_select_surface.home.png` | 目视附件：暗色下 `/backtest`（**原本没有任何 `bg` 类**，表面由平台决定 ⇒ 改动前是 `rgba(0,0,0,0)`）与 `/` 的选择器真实像素 —— 均为「深底 + 浅字 + 清晰下拉箭头」。 `_*.png` 由 `.gitignore` 排除在库外 | 同上（目视附件） |
+| `_probe_select_surface_dark.BEFORE.txt` | 把 `index.css` 那条规则**临时移除**后重跑的同一探针输出（A/B 对照；移除/复原各断言字节数 7995 / 9542、md5 回 `969d26cf…`） | 同上 |
+
+> ⚠️ **覆盖边界（不隐瞒）**：47 处 select 中有 **30 处**位于 research / strategy / parameterSearch / walkForward
+> 等页面的**面板或弹窗内部**，需逐级操作才可达 ⇒ 本轮按 6 条路由取证。
+> `/market` 那条**等不到**（SKIP）：它的「选择日期」子组件用 `limitUp.getConnectionBoardStats` —— **全表扫
+> `limit_up_records`** 的旧端点（实测约 68s，且当前 dev server 连接池有死连接 ⇒ 更久），选择器落在骨架屏之后，
+> 150s 预算内未出现。该处写法**无任何 `bg` 类**，已被同一条规则覆盖；旁证 = `/backtest` 两个同形态选择器的
+> 实测 + 无 class 注入自证。
+>
+> 🔴 **A/B 对照的操作教训**：把「被移除的规则块」在复原时**从同一文件里再取出来是错的** —— 移除后它就没了。
+> 正确做法 = 移除时把块**存侧车文件**，复原时从侧车读回（本轮脚本因这个 bug 把 `apply` 卡住，
+> 一度让工作区处于「规则已移除」状态；已用插入脚本按 md5 `969d26cf…` 复原并断言）。
+
+---
+
+### `laddertailorder` —— 5 个（2026-09-19：连板梯队组内行序 —— 当日全市场题材热度降序 + 兜底桶「其他」压尾 + **与热力图同序**）
+
+> 用户原话①：「首页连板梯队里每个高度内排序，把“其他”题材放到最后」；
+> 原话②：「每个高度内排序不是按格子高度内题材热度排序，而是按当日所有涨停题材热度排序」；
+> 原话③（同日追加）：「那就是现在相同热度的题材，排序和下面的题材热力图排序不同，导致对不上」。
+> **口径判读**：② 说的是**既有**口径 —— 排序键本来就是 `limitUp.getSectorDistribution` 的**当日全市场**题材涨停家数
+> （`server/db.ts#getDailySectorDistribution` 对当日全部 `limit_up_records` 按 `normalizeSectorName` 聚合），
+> **不是**「本组内该题材出现几次」；本轮为它补上可失败断言（下「口径取证」）。① 是新增规则：兜底桶「其他」压尾。
+> ③ 是**真缺陷**：两处的**次级键不同** —— 梯队「封板时间升序」、热力图「窗口合计降序 → 题材名」
+> ⇒ **同当日热度**的题材在两处次序分叉。已统一为 `shared/sectorHeatOrder.ts#compareSectorOrder` **单点定义**：
+> **① 非压尾档在前 → ② 当日家数降序 → ③ 窗口合计降序 → ④ 题材名升序**；
+> 梯队的「封板时间 → 代码」降为 `tieBreak`、**仅在同一题材内部**生效 ⇒ 同一题材的格子仍挨在一起。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_ladder_tail_sector.mjs` + `.out.txt` | 无头 Chrome + CDP 按**正常导航**打开 `/`，用**真实 `change` 事件**切梯队「选择日期」，先**展开每个折叠组**（否则尾部的「其他」不在 DOM 里）再逐格抽 DOM（代码 / 名称 / 题材 / 是否断板）。3 个日期（默认 `2026-09-18` + 「其他」家数最多的 `2026-09-02` / `2026-09-16`）逐组断言：⒜ 压尾、⒝ 非「其他」段当日热度单调不增、⒞ 口径取证、⒟ **同热度相邻对的窗口合计单调不增**、⒠ **题材次序与热力图表序一致**（仅当「梯队所选日期 == 热力图最新列」时可比）。**改后 32 PASS / 0 FAIL**。典型实测（`2026-09-18`）：`2 板` 行 38 格末尾 5 格、`首板` 行 66 格末尾 8 格全是「其他」，而当日「其他」热度 **10 = 全市场最高**（次高半导体 7）；同热度次键 **18 处全部合规**（例：`PCB(合计68) ≥ 传媒(合计4)`、`光通信(69) ≥ 机器人(56) ≥ 外贸出口(5)`）；与热力图同序核对 **33 个题材序号严格递增** | `ROADMAP.md` `9bx` 条目、`.workbuddy/memory/2026-09-19.md` |
+| `_probe_ladder_tail_sector.PREV.txt` | **负例对照（A/B；「改前」= `HEAD` 的 `shared/sectorHeatOrder.ts` + `Dashboard.tsx`）**：同一探针 ⇒ **PASS 14 / FAIL 8 / exit 1**。默认日 `2026-09-18` 实测三条：⒜ `2 板` 的「其他」在**第 1~5 格**；⒝ `首板` 的「其他」在**第 1~8 格**；⒞ **「题材次序分叉」** —— `2 板：外贸出口(热力图#7) 排在 光通信(热力图#5) 之前`、`同热度(5) 外贸出口(合计5) 却在 光通信(合计69) 之前` ⇒ **用户报的「对不上」被逐条复现**。A/B 用侧车文件存当前版本、复原后断言 md5 逐字节相同（`05d4fec3…` / `3aaa4d69…`） | 同上 |
+| `_probe_ladder_tail_sector.BEFORE.txt` | 第一轮的同类对照：只停用「压尾」分支（不动 Dashboard）⇒ **PASS 14 / FAIL 6 / exit 1**，`2026-09-02` 的 4 个高度组里「其他」全部出现在**首位** | 同上 |
+| `_shot_ladder_tail_sector.png` / `.tail.png` / `.prev.tail.png` / `.before.png` | 目视附件。⚠️ `_shot_..._tail_sector.png`（页面首屏视口）只能看到梯队卡片与说明文案，**看不到**列序本身 —— 列序由 `.out.txt` 的逐格「题材(当日热度)」串承担；`.tail.png` 是**压尾边界特写**（把第一个「其他」格滚到视口中央后截视口）⇒ `2 板` 组末行肉眼可见连续「其他」格（含断板虚线格）；`.prev.tail.png` 是改前的同一特写（「其他」跑到组首）。`_*.png` 被 `.gitignore` 排除在库外 | 同上（目视附件） |
+
+> 🔴 **两条探针自身的坑（都已修，写下来省下一次）**：
+> ① 等「日期已切换」**不能**用 `card.innerText.includes(date)` —— `<select>` 的 `innerText` 含**全部** `<option>` 的文本，
+>    判定在切换前就为真 ⇒ 量到**上一个日期的旧 DOM**，产出假 PASS / 假 FAIL 且**毫无异常**；判据要绑到
+>    「板数窗口：… ~ `<date>`」那段 `<span>`。
+> ② **跨日期硬比两处次序会产出假 FAIL**：热力图恒按**最新一列**排，而梯队可选任意日期 ⇒ 只有「梯队所选日期 == 热力图最新列」时
+>    两处**主键**才可比（其余日期只比「同热度次键」）。本轮实测：未收窄时 `2026-09-16` 报 3 条「次序分叉」，逐条复核确认是
+>    **比较对象错了**（当天 PCB 热度 11 > AI硬件 7，而热力图按 `2026-09-18` 把 AI硬件排到 #1），不是产品缺陷 ⇒ 已按此收窄判据。
+
+## PHASE-R1-001 · 观察日 PIT 护栏（编号 `9bz`）
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_e2e_r1_decision_day.mts` + `.out.json` | 真实 DB 端到端**五路**验证（同一 Dataset Version `390002`、窗口 `2025-01-02..2025-02-28`，全部带对照）：**实验 A（无决策日声明）** —— Run#1 观察日条件 `pullback_min_low_2d >= 0` ⇒ 预检拒绝 `OBSERVATION_WITHOUT_DECISION_DAY`（Run `FAILED`、`startedAt=null`、无半成品）；Run#2 同实验换纯特征条件 `turnover >= 3` ⇒ `COMPLETED`、12.9 s、`sampleCount=1720`、`resultCount=16`、`conclusionId=870001`（**对照**：排除「数据集没数据 / 版本不可用 / 引擎坏了」）。**实验 B（`experiment.config.decisionOffsetDays=2`）** —— Run#3 观察日 offset=2（≤ d）⇒ **`COMPLETED`、13.1 s、1720 / 16 / `conclusionId=870002`（正向跑通）**；Run#4 同实验 offset=3（> d）⇒ `VARIABLE_ROLE_VIOLATION`；Run#5 `run.config.decisionOffsetDays=3` 与实验的 2 异值 ⇒ `DECISION_OFFSET_CONFLICT`。三种拒绝**全部发生在预检阶段**（`startedAt=null`）、分析被收敛为 CANCELLED 不留孤儿；自建自清（`purgedAfter=2`）。**副产品（高价值）**：Run#2 真实触发 `emitReportArtifact`（产出 `artifact=#60001`）⇒ 推翻 PHASE-A 复核遗留⒝「钩子从未被观测到触发」 | `ROADMAP.md` `9bz` 条目、`docs/research/PHASE-R1-001-implementation.md`、`.workbuddy/memory/2026-09-20.md` |
+
+## PHASE-D-001 · Evidence → Candidate 确定性派生桥（编号 `9cb`）
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_e2e_d_evidence_bridge.mts` + `.out.json` | 真实 DB 端到端**完整闭环**（走 `appRouter` 真实 tRPC，13/13 PASS）：实验 `decisionOffsetDays=2` → Run `1200002` `COMPLETED`（14.4 s）→ Finding `360002`（EFFECT）→ Conclusion `1080002` → 候选 `1020003` **派生** `filterRule = [{bar.haircutFromEventLow, <=, max_drawdown}]`（条件数 **0 → 1**）、`sourceFindingIds=[360002]`、`skipped=1`、`directionMismatchCount=1`、`patternIds=[first-limit-pullback-hold-shrink]` → `ACCEPTED → promote` 成功（`cand-1020003@1.0.0`、provenance `origin=DIRECT`）。**对照**：同一结论 `deriveFromEvidence:false` ⇒ `filterRule=null` 且无 `derivation` 段（零回归硬证据）。含一条**哨兵断言**（上游结论仍不写 `findingIds` ⇒ 修好后会变红，提醒撤销脚手架回填）。自建自清（`clean` 模式幂等） | `ROADMAP.md` `9cb` 条目、`docs/research/PHASE-D-001-implementation.md` |
+| `_probe_d_evidence_shape.mts` + `.out.json` | 只读形态审计（**纯 SELECT**）：`research_finding` 68 / `research_conclusion` 15 / `research_strategy_candidate` 13 / `research_hypothesis` 5；conclusion `findingIdsJson` **12 NULL + 3 空数组**（无一非空）；candidate `sourceFindingIdsJson` 4 条非空、`sourceHypothesisId` **13 条全 NULL**、`sourceTraceJson` 0 NULL；并给出 finding 的真实 `dimensionJson`（`{dimensionKey:"group", conditionRule:"<字符串>", conditionCount}`）⇒ 佐证「派生只能用 `research_analysis_condition` 的结构化条件，不能解析该字符串」 | 同上 |
+| `_probe_d_conditional_shape.mts` + `.out.json` | 只读+自建自清诊断（3 个 Run，**定位 `pat_*` 无区分度**）：`pat_pullback_hold_depth_2d <= 0` ⇒ CONDITION 桶 **0** 个样本（且无 CONDITION 行）；`> 0` ⇒ **1718 = 全样本**、`DIFFERENCE=0`、`P=1` ⇒ Finding **0**；**内建对照** `pullback_holds_event_open_2d == 1` ⇒ CONDITION **1436**、`DIFFERENCE=0.01566`、`P=0.0005` ⇒ Finding **1**。⇒ 唯一地把原因钉在「`pat_*` 变量本身」而非 config / 数据集 / 引擎 | 同上 |
+| `_probe_d_finding_config.mts` + `.out.json` | 只读诊断（反查「真库**已证明能产 Finding** 的 analysis 配置」）：所有产过 Finding 的 `CONDITIONAL` 分析 config 均为 `{"targetField":"future_return_5d"}`（**不带** `featureField` / `quantileGroups`），条件全用**内建变量**（`pullback_holds_event_open_2d` 等），**没有一个用 `pat_*`** —— 这正是 E2E 第一版产 0 条 Finding 的原因（config 形态错） | 同上 |
+
+| `_probe_baseline_v2_state.mts` + `.out.json` + `.out.txt` | ✅ **round-2 增量复核**（2026-09-20T02:46Z，`errors=0`）。目的 = 复核基线 v1.0.0 之后新增的 10 张表与变化面。读数：BASE TABLE **73**（= schema.ts 声明 **70** + `__drizzle_migrations` + 2 `rd_rows_*`）；`parameter_search_run` 28 列/**3 行** · `parameter_search_combination` 10 列/**12 行** · `parameter_search_result` 23 列/**8 行**；`search_robustness_*`(33/28/16 列) · `oos_validation_*`(32/41 列) · `walk_forward_*`(29/34 列) **全部存在但 0 行**；`research_artifact` **31 行**（全 `REPORT`/`INLINE`）；`closed_loop_backtest_run` **8**（8/8 `PARTIAL_BLOCKED`）；`research_strategy_candidate` 13（`sourceFindingIdsJson` 非空 **4**）；`dataset_version` v1/v2 均 `hasDecisionOffset = 0` ⇒ 老数据集上观察日条件会被拒 | `docs/architecture/SYSTEM-BASELINE-002-REPORT.md` §5、`SYSTEM-BASELINE.md` §19.3 |
+
+> 🔴 坑五（round-2 真踩）：**「一处事实写多处」的文档体系在并发编辑下必然分叉** —— 并发会话把
+> `SYSTEM-BASELINE.md` 升到 `v1.4.0` 并补了 4 份增量章节，**但另 9 份文件仍写 `v1.0.0`**，
+> 且 `63 表 / 60 声明 / 41 migration` 三处规模数字全部过期（实查 `73 / 70 / 45`）。
+> ⇒ ① 引用规模数字前**先实查**（`grep -c mysqlTable drizzle/schema.ts` / `ls drizzle/*.sql`）；
+> ② 版本号要**一次改齐**所有文件；③ 建议后续加 `scripts/checkBaselineConsistency.mts` 自动比对（本任务仅登记）。
+> ⚠️ 坑六：**审计前先判定「该不该全量审计」** —— 本轮先做 Drift 检测，判定命中
+> `GLOBAL AUDIT REQUIRED` #1（Domain 新增）+ #4（核心数据流变化：判定日）+ #7（核心 Contract 变化：4 份新契约）
+> 才做全量；否则按协议只做增量。
+
+## 9cc · Parameter Consumption + Semantic + Provenance + Projection 四断点闭环
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_probe_9cc_audit.mts` + `.out.json` | **只读**审计（Phase A + C 的证据面）。不猜列名（先读 `information_schema`）。读数：`research_conclusion` **15** 条 —— `findingIdsJson` **12 NULL + 3 空数组（无一非空）**，且 `researchQuestion` / `evidenceSummary` **全 NULL**、`limitationsJson` / `nextQuestionsJson` 全 `[]`；其中 `660001` / `660003` 所属 Run（`750001` / `750003`）**各有 24 条 Finding** ⇒ 证据链在**列上**断开。`research_strategy_candidate` **13** 条、`sourceFindingIdsJson` 非空 **4** 条。`parameter_search_*` = **3 / 12 / 8** 行；唯一 `COMPLETED` 的 Run（`PSRUN-20260919-15d3afc8`）4 个组合 `totalReturnPct` **逐位相同**（`-44.526726784500006`）、`tradeCount=0`，而 `backtestFingerprint` **互不相同** ⇒「参数落库了但执行结果无差异」的现场 | `ROADMAP.md` `9cc` 条目、`docs/research/9cc-implementation.md` §3/§7 |
+| `_probe_9cc_strategy_params.mts` + `.out.json` | **只读**选材探针（Phase A 的**前置**：先找「规则图真的引用了 TUNABLE 参数」的策略版本，否则正例 E2E 只会得到重复结果）。走 `DbStrategyRepository#getVersionBundle`（与 `paramSearchRouter#loadStrategyBundle` 同路径）+ `collectRuleParameterReferences`。读数：**11 个策略版本全部 `referenced = []`** —— 其中 9 个声明了 3 个 TUNABLE（`max_drawdown` / `max_volume_ratio` / `require_bullish`，均带 min/max/step）**却一个都没被规则图引用** ⇒ 印证 `9bt` 的 N-02，也说明**仓库当时不存在可作正例的策略版本**（正例必须由 `createFromConclusion` 派生得到） | 同上 §3 |
+| `_e2e_9cc_closed_loop.mts` + `.out.json` | 🔴 **真实 DB 端到端，24/24 PASS**（走 `appRouter` 真实 tRPC + 真实 TiDB + 真实数据集 + 真实回测）。**§1（AR-12）** 三个 Run（Dataset Version `390002`、窗口 `2025-01-02..2025-02-28`、`decisionOffsetDays=2`）：`pat_pullback_hold_depth_2d <= 0` ⇒ CONDITION **1436**、`> 0` ⇒ **282**、ALL **1718**（**修复前实测为 `0` / `1718`**，见 `_probe_d_conditional_shape.out.json`）⇒ 两侧互补且都有样本。**§1b（AR-13）** 三个结论的 `findingIdsJson` 分别 `[450001]` / `[450002]` / `[450003]`，**与本 Run 真实 Finding 逐 id 相等、零孤儿**（修复前是 `[]`）。**§2–§3（闭环一）** `createFromConclusion` 派生出 `filterRule = [{bar.volumeRatio, <=, max_volume_ratio}]`、`sourceFindingIds=[450003]` → `promote` ⇒ `cand-1110001@1.0.0`，其**规则图引用 `max_volume_ratio`**（`9bt` 指出的历史缺口当场闭合）。**§4（闭环二）** 2 个组合（`max_volume_ratio` = **0.05 / 1**，声明全域两端）真实执行 16 s / 0 失败：`tradeCount` **0 → 1**、`totalReturnPct` **0 → −0.6814%**、撮合指纹 `dc5627dce6c7…` ≠ `0f02b2f64d0b…`。**§4b（实际消费）** 直接调评估端口复核：请求 `{max_volume_ratio:0.05}` ⇒ **实际消费** `{max_drawdown:0.02, max_volume_ratio:0.05, require_bullish:0}`（逐键相等）、复核指纹与落库**逐位相同**、且实际值**压过了文档默认值 0.3**。自建自清（`purgedAfter={experiments:1, strategies:1}`、`finalExperimentCount=7`） | 同上 §11/§12/§13 |
+
+> 🔴 本任务修正的一条**坑**（值得复用）：`9bt` 的「正例」是**手工改文档**的产物，仓库里
+> **没有任何一份已落库的策略版本**能让规则图引用参数（`_probe_9cc_strategy_params` 实测 11/11 引用面为空）。
+> ⇒ 参数消费的 E2E **必须先跑选材探针**，否则会拿「死参数策略」跑出「4 组指标全同」的假证据
+> （真库现存 PS Run 就是这个形态：4 组合指标逐位相同、指纹各异）。
+> ⚠️ 另一条：**参数域要取声明全域的端点**。首轮用 `{0.05, 0.25}`（远窄于 `max_drawdown` 声明域 `[0, 0.3]`）
+> 时两个组合成交/收益**逐位相同** —— 参数确实被消费（指纹不同），但阈值不咬数据 ⇒ 判据失去分辨力。
+> 另：**参数值域越界会以 `PARAMETER_OUT_OF_RANGE` 让该组合失败**（首轮把 `max_drawdown` 抬到 1.0 即踩）。
+
+| `_ops_cleanup_9cc_ps_residue.mts` + `.out.json` | 🔴 **一次性运维脚本（默认只读预览，`--apply` 才删）** —— 清理**本任务 E2E 遗留**的孤儿 Parameter Search 行。**为什么要它（如实登记）**：`_e2e_9cc_closed_loop.mts` 的 §5 自清原只按 `searchRunId` 删，而本会话**第二次试跑在 §4b 抛错**（参数越界）⇒ 没走到 §5 ⇒ 留下 1 run / 2 combinations / 2 results；第三次跑的新进程不知道那个 `searchRunId` ⇒ 永久残留（实测 `parameter_search_run` 由 3 变 **4**）。**判据（三条同时成立才删）**：① `strategyId` 形如 `cand-<正整数>`；② `strategies` 表里**不存在**该 id（孤儿）；③ `createdAt >= --since`（默认 `2026-09-20T00:00:00Z`）。**执行结果**：识别 1 个待删（`PSRUN-20260920-d2d6b9fc` / `cand-1050001`），**3 个用户自有的 `cand-360001` Run 全部保留**；删除 2 results + 2 combinations + 1 run ⇒ `parameter_search_run` 回到 **3**。**附带修掉一个真 bug**：`--since` 是 ISO（`T` 分隔）而 TiDB `createdAt` 是 `YYYY-MM-DD HH:MM:SS`（空格分隔）⇒ **字符串比较恒把「今天」判成窗外**，第一版预览因此报「待删 0 个」（**静默无效的清理**）；改为走 `Date.parse` 后正确。**并把 E2E 的自清改为「按 `strategyId` 也删一次」**（自愈：中途崩溃也不再生孤儿；`_combination`/`_result` 无 `strategyId` 列 ⇒ 先取 `searchRunId` 再删子表） | `ROADMAP.md` `9cc` 条目、`docs/research/9cc-implementation.md` §15 |
+
+## `9cd` · FRONTEND-FINAL-001（前端完整闭环实现）
+
+| 文件 | 说明 | 来源 |
+| --- | --- | --- |
+| `_probe_frontend_final_001_state.mts` + `.out.json` | **只读状态探针（阶段一审计的证据面）**。21 张研究/策略/参数/验证表的真实行数 + 关键表真实列名。**读数**：`research_analysis` **351** / `research_finding` **68** / `research_conclusion` **15** / `research_strategy_candidate` **13** / `strategy_versions` **11** / `strategy_parameters` **24**（`distinct parameterRole` **仅 TUNABLE**）/ `parameter_search_run·combination·result` = **3·12·8**；而 🔴 **`oos_validation_run` / `oos_validation_result` / `walk_forward_run` / `walk_forward_fold` / `search_robustness_run` 全部为 0** ⇒ 验证域三块前端面板**从未显示过任何真实数据**。结论 §15 覆盖：`findingIdsJson` 有值 **0**（12 NULL + 3 空数组）、`researchQuestion` / `evidenceSummary` **全 NULL**、`evidenceJson` 有值 15（其中含 finding 且 findingIds 空 = **3 条** = 历史兜底的真实适用对象）。**该探针踩到并已登记的一条坑**：本机 drizzle/TiDB `db.execute()` 返回的是 **`[rows, fields]`**，直接当 rows 用会让**所有 count 读成 0、`information_schema` 读成「表不存在」**，而 `errors` 数组仍为空 ⇒ 静默产出整张假结论（连跑 3 轮才发现） | `docs/research/FRONTEND-FINAL-001-AUDIT.md` |
+| `_probe_9cc_strategy_params.mts` + `.out.json`（重跑） | 选材探针**本轮重跑**以确认 P0-3 的前置条件：**11 个策略版本全部 `referenced = []`、`tunableReferenced = []`、`e2eEligible = false`** ⇒ 按规格 §5.1「不满足则停止真实运行」，**不得**拿现成版本跑参数搜索（否则只会复现「4 组合指标逐位相同」的假证据） | `docs/research/FRONTEND-FINAL-001-REPORT.md` |
+| `_ff1_walk_forward.keep.out.txt` | 🔴 **真实 Walk-Forward 全链**（`WF001_MODE=full WF001_KEEP=1`，**保留留档**）：**17/17 PASS / 真实执行 92 s**。产出 `walk_forward_run=2 / fold=4`、`oos_validation_run=+2 / result=+2`、`parameter_search_run=+2`。Fold 读数：`#0` IS `2025-01-02..2025-03-06` 收益 **−10.36% / 8 笔** → OOS `2025-03-07..2025-04-11` **+7.30% / 2 笔**；`#1` IS `2025-02-14..2025-04-11` **−3.65% / 0 笔** → OOS `2025-04-14..2025-05-21` **+21.66% / 1 笔**。W4~W14 逐条证明「每 Fold 独立搜索（`sourceSearchRunId` 互不相同）+ 独立样本外 + 泄漏窗口不重叠 + 幂等」 | `ROADMAP.md` `9cd` 条目 |
+| `_probe_ff1_backend_verification.mts` + `.out.json` | 🔴 **真实留档复核（只读 + 走 `appRouter.createCaller` 真 tRPC）**。① 表级计数证明「不再全 0」：`oos_validation_run=2 / result=2 / walk_forward_run=2 / fold=4 / parameter_search_run=5 / combination=16 / result=12`。② **P0-2 落库实测**：`parameter_search_result.reproductionJson` 里的 `resolvedParameterSet` **含未被请求的键**（请求 `{max_volume_ratio:1}` ⇒ 解析 `{max_drawdown:0.02, max_volume_ratio:1, require_bullish:0}`）⇒ 证明落的是**真实解析集**而非请求回显。③ **P0-2 对外投影实测**：`getSearchResults` 返回 `parameterResolution = {status:"MATCHED", requestedParameterCount:1, resolvedParameterCount:3, additionalParameterCodes:["max_drawdown","require_bullish"]}`。④ **参数真的改变执行**：同一 Run 两组合 `tradeCount` **0 → 16**、`totalReturnPct` **−3.65% → −2.59%**、`profitFactor` **null → 1.10**（对照：旧 Run `PSRUN-20260919-15d3afc8` 4 组合指标逐位相同） | `docs/research/FRONTEND-FINAL-001-REPORT.md` |
+| `_probe_ff1_frontend_smoke.mjs` + `.out.json` + `_ff1_frontend_smoke.log` | 🔴 **无头 Edge + CDP 前端路由冒烟**：16 条路由逐一导航并**量 DOM 正文**，**16/16 PASS、0 控制台错误**。判据不是「页面能打开」而是「**页面上出现真库里存在的 id**」（`OOSV-20260920-875957a6` / `WFV-20260920-5cceca95` / `PSRUN-20260920-e37d9c2a` 均命中）⇒ 证明页面读的是**真实留档**。**该探针抓到一个真缺陷**：控制台报 `No procedure found on path "describe"` ⇒ `ParameterSearch` / `WalkForwardAnalysis` / `ReviewWorkbench` 三处**过期类型断言**使请求路径退化成裸 `describe` / `journal.reconcile`（恒 404），致 FE-6 技术预览静默吃写死默认值、FE-7「端点就绪门」永远显示不可达；修后 `/parameter-search` 正文 3034 → **4082** 字符。另探针自身两处需注意：CDP 必须取 `/json/list` 的 **page 目标**（浏览器级 ws 不支持 `Page.enable`）；白屏阈值不能定太高（`/datasets` 是紧凑表格页，正文仅 139 字符但**含真实数据行**） | `ROADMAP.md` `9cd` 条目 |
+| `_ff1_test_changed.log` | `pnpm run test:changed` 原始输出：**2 失败文件 / 5 例，全部属既有环境依赖基线（`limitUp` / `limitUp.watch`）⇒ 零新增失败文件**（1504 passed / 1509） | `ROADMAP.md` `9cd` 条目 |
+
+## `9ce` · RESEARCH-EXPERIMENT-001（独立研究实验体系 + AI 接入规范）· 2026-09-20
+
+| 文件 | 作用 | 结论 |
+| --- | --- | --- |
+| `_e2e_research_experiments.mts` | 真库全链 E2E：`appRouter.createCaller` → `researchExperiments.run` → Runner → Registry 桥 → `ds_*` 五表 → 真实计算 → 结果信封 zod 复核；含**确定性第二次执行**与三个负例 | —— |
+| `_e2e_research_experiments.out.json` / `.out.txt` | 上述运行结果 | **28 PASS / 0 FAIL**（墙钟 19.3 s；`eventCount=20000`/`prefixRowCount=20000`/`postRowCount=100000`；样本账 100000=1996+98004；同输入第二次执行指纹**逐字节相等**；**24 张严格守恒表 Δ=0**，负例前后行数一致） |
+| `_probe_research_experiments_frontend.mjs` | 前端可达性冒烟（无头 Edge + CDP，量 DOM）：列表页 / 详情页 / **真实点击运行** / 结果页挂载 / 错误态 / 控制台 | —— |
+| `_probe_research_experiments_frontend.out.json` / `.out.txt` | 上述运行结果 | **23 PASS / 0 FAIL**（挂载 `data-experiment-page` + 3 表 + 2 张 recharts 图 + 执行元数据；不存在实验显示 `EXPERIMENT_NOT_FOUND` 结构化错误态；无 `No procedure found on path`） |
+| `_probe_experiment_dataset_choice.mts` | 只读选材探针：列 `dataset_definition` / `dataset_version` 与 READY 版本五表行数、rd 覆盖、事件与窗口样本（供示例实验选坐标） | 实测 `dataset_version` 仅 `390001 v1`（1130 事件）与 `390002 v2`（23978 事件）两个 READY 版本；prefix rd ∈ [-20,0]、post rd ∈ [1,20] |
+
+**两条留给后人的判据提醒（本会话真踩）**：
+
+1. 🔴 **列投影必须并上骨架列**（`eventId` / `tradeDate` / `symbol` / `relativeDay` / `datasetVersionId`）：
+   只下推「声明列」会把身份列裁掉 ⇒ 领域映射器产出 `eventId: undefined` ⇒ 按 eventId 批量取行情**恒 0 行**
+   （首次 E2E 症状 `prefixRowCount=0` + 全部样本 `MISSING_EVENT_DAY_BAR`）；
+   ⚠️ **单测抓不到** —— `InMemoryResearchDatasetReader` 不实现列裁剪 ⇒ 判据只能是本探针（真库）或
+   `tests/server/researchExperiments/datasetPort.test.ts` 里「断言下推查询的 `columns`」那一例。
+2. 🔴 **CDP 探针必须先设桌面视口**（`Emulation.setDeviceMetricsOverride` 1440×900）：
+   `Sidebar collapsible="icon"` 在默认 800×600 下折叠 ⇒ 菜单文字不进 `innerText`，
+   曾把「侧栏缺导航项」误判为产品缺陷（1440 下 29 项齐全）。
+
+## `backtestdarkmode` —— 2 个（2026-09-20：/backtest「各策略回撤与收益特征」五卡片夜间被冲成中间灰）
+
+> 用户原话：「这里的黑暗模式挂了修一下」（附 `/backtest` 回测总览截图；截图里五张卡是**浅灰紫**、
+> 卡内浅色文字糊成一片）。**落地提交 = `78c18cd`「修复组合回测界面黑暗模式」**（31 `+` / 42 `-`，只动
+> `client/src/theme/darkCompatibility.css` 一个文件；**零 `server/**` 改动** ⇒ 不触发热重启）。
+>
+> **根因（单点，已逐条取证，非推断）**：五张卡片写的是 `bg-violet-50/40`
+> （`client/src/pages/Backtest.tsx#FullCycleRiskBlocks`），而 `client/src/theme/darkCompatibility.css`
+> 是**按「源码中实际出现的类名清单」生成**的 —— 生成器上一次运行是 2026-09-17（`9au` 的「顺带修正」），
+> 当时源码里只有 `/60`、`/70`、**没有 `/40`**；而本区块是 **2026-09-18**（`rZPX8O`）才加进页面的。
+> ⇒ 夜间下这条类**零规则命中**，卡片保留 `var(--color-violet-50)` 浅紫 × 40% 透明度，
+> 在近黑页面上合成出 **`#75747b` 的中间灰**（探针实测 lum 0.177），卡内浅色文字随之全部失效。
+> **修法 = 重跑生成器**（`node scripts/generateDarkCompatibility.mjs`；**禁手改生成物**）：
+> 补出包括 `.dark .bg-violet-50\/40` 在内的 **14 条新选择器**（另含源码已出现但生成物缺的
+> `bg-red-600` / `bg-red-500` / `bg-emerald-500` / `bg-amber-500` / `hover:text-orange-700` 系列），
+> 并清掉 **17 条「源码里已不存在」的旧选择器**（`bg-emerald-50/40`、`bg-emerald-500/70`、
+> `bg-red-500/70`、`bg-rose-500/10`、`bg-amber-500/5` 等 —— 已 grep 复核源码确实不再出现）。
+> 🔴 **静态自查（用来证明「不碰亮色」）**：`git diff 87c31c9 78c18cd -- client/src/theme/darkCompatibility.css`
+> 的 **31 行选择器改动 100% 以 `.dark` 开头、非 `.dark` 作用域 0 行** ⇒ 非 dark 渲染在数学上不可能被改动。
+> 另：交叉扫 `client/src` 的 272 个硬编码色类，生成后仍未覆盖的 29 个**全部可解释**
+> （500/700/800 档实心强调色 = 生成器有意不覆盖；其余都是只以 `dark:` 变体形式出现的类；
+> 唯一裸用的 `bg-slate-500` 是 `Dashboard.tsx` 的 2px 分隔线，暗色下本就清晰）。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_full_cycle_risk_blocks_dark.mjs` + `.out.txt` | 无头 Chrome + CDP **量 DOM**。同一页面内三态 A/B（**不 reload、不改工作区文件**，避免 skill §9 那条「A/B 别动同一份文件」的坑）：① `dark`（现状）② `light`（in-page 摘掉 `<html>.dark`，实测应用不会自行加回）③ `dark + revert`（注入一条把 `bg-violet-50/40` 还原成亮色取值的规则 ⇒ **复现缺陷**）。判据 = 卡片**真实合成底**（canvas 反解 + 自底向上合成 —— 卡片本身是 40% 半透明，只看 `backgroundColor` 会漏判）的**相对亮度** + 「文字色 vs 真实底」的 **WCAG 对比度**。**改后 13 PASS / 0 FAIL / 0 SKIP**：卡片底 **#1d1d23 / lum 0.0126**（`backdropFrom` = 卡片自身）、项名 7.03、数值最低 **6.29**（20 个样本）、策略名 3.52~7.81、区块标题 11.45、说明段 8.42。**复现态同一量**：卡片底 **#75747b / lum 0.177 —— 与用户截图的像素逐字节同值**、项名 1.94、数值 2.54、策略名 1.03~2.15 ⇒ 缺陷点被精确定位。附 **INFO**（既有水平、非本轮回归项）：亮色下卡片内最低对比度 **4.36**（`+396.43%` 的 `#ec003f` 落在 `#fbfaff` 底上，略低于 AA 4.5，属既有、未修） | `client/src/theme/darkCompatibility.css`（提交 `78c18cd`）、`.workbuddy/memory/2026-09-20.md` |
+| `_shot_full_cycle_risk_dark.dark.before.png` / `.dark.after.png` / `.light.png` | 目视附件：同一区块在「复现态（浅灰紫卡）/ 改后夜间 / 亮色」三态下的真实像素（`_*.png` 被 `.gitignore` 排除在库外） | 同上（目视附件） |
+
+> 🔴 **两条探针自身的坑（都已修，写下来省下一次）**：
+> ① **`Page.captureScreenshot` 的 `clip` 字段名是 `width` / `height`**，写成 `w` / `h` 会被 CDP 以
+>    `Failed to deserialize params.clip.height - BINDINGS: mandatory field missing` 拒掉；而极简 CDP 客户端的
+>    `send()` 通常只把 `m.result` 交回调用方、**失败响应里只有 `m.error`** ⇒ 调用方拿到 `undefined`，
+>    报错点还会偏到下游的 `.slice` 上（本探针因此整段中止过一轮）。
+>    修法 = `ws.onmessage` 里把 `m.error` 也透出（如 `{ __cdpError: m.error }`），并给截图套 try/catch ——
+>    **截图只是目视附件，不许它把「量据 + 断言」的主流程打死**。
+> ② 🔴 **禁用 `captureBeyondViewport: true`**：/backtest 页面极长，整页合成实测会让 CDP 卡死数分钟不返回。
+>    正确做法 = `scrollIntoView({ block: 'center' })` 后按**视口坐标**截（本探针即此法）。
+> ③ `darkCompatibility.css` 这类**生成物与源码同步**的层，**新增硬编码色类后必须重跑生成器**；
+>    本轮的教训是「页面加了新类、没人重跑 ⇒ 夜间静默降级」，而失败形态**不是报错**，是「颜色看着怪」。
+
+### `sentimentspeed` —— 情绪分析页加载耗时（跨境取数 × 全量重算）
+
+> **触发**：用户 2026-09-20 截图 `/sentiment-analysis` 长时间转圈（「优化一下这里的加载速度」）。
+>
+> **实测拆分（改造前，「跨境取数」与「JS 计算」分开量）**：
+> `getMaxConnectionBoardTrend` 共 **6.2s** = 取数 2.4s（99,918 行 × 3 列）+ 纯计算 **0.06s**；
+> `getSentimentCycleAnalysis` 共 **37.8s** = 取数 2.8s（同表 7 列）+ 纯计算 **16.5s** + 1.47MB 序列化。
+> ⇒ 瓶颈**不是取数、也不是「全表」本身**，而是 `buildSentimentCycleAnalysis` 里的一段
+> O(断板股 × 全量未来交易日 × 当天记录数) 比较。
+>
+> **定位方法（可复用）**：① 用 mysql2 直连只跑同一 SQL 量「取数」；② 把行落盘后用 `tsx` 直接调**纯函数**量「计算」
+> （两者必须分开，否则永远只能猜）；③ 热点用 `node --cpu-prof --import tsx <script>` 打 V8 CPU profile，
+> 再按 self time 排序。本次 profile 显示断板事件循环里的**两层匿名回调合计占 79%**，正是
+> `tradingDates.slice(index + 1).filter((date) => recordsByDate.get(date).some((r) => r.stockCode === code))` ——
+> 对**每一只**断板日涨停股都把 1,800 多个未来交易日重扫一遍。
+>
+> **三条改动（都可证明不改变结果）**：
+> ① 上式改写为「取该股自己的上榜日集合中晚于断板日的那部分」。
+>    等价性：`recordsByDate` 与 `stockDates` 同为**主板**口径、`tradingDates` 是全量日期
+>    ⇒ 「未来交易日 ∩ 该股上榜日」恒等于「该股上榜日中晚于断板日者」；排序保持升序
+>    ⇒ 后续 `find()` 取到的首个突破日与 `Math.max` 结果均不变。
+> ② `buildLeaderCandidatesForDate` 新增**可选** `sharedIndex`（全量降序交易日 + 每股上榜日 + 名称表 + 构建器），
+>    断板事件循环里 **353 次**调用不再各自重扫全表；**不传时行为与性能都不变**（既有调用方零影响，
+>    `buildLeaderCandidates` / 候选页 / 回测路径均未改动调用方式）。
+> ③ 两个端点加**进程内 10 分钟 TTL 结果缓存 + 单飞**（沿用本仓 `TTLCache` + `leaderCandidatesInFlight` 模式），
+>    并在 `invalidateLeaderCandidateBacktestCaches()` 里一并清空 ⇒ 上传新数据后仍立即刷新。
+>    缓存键含 `nonce`：前端「刷新数据」按钮自增 nonce ⇒ 换键 ⇒ **真重算**（不是假刷新，也不清空别人的缓存）。
+>
+> 🔴 **等价性判据 = 逐字节比对**（不是「看着一样」）：改造前后各对**全量真实数据**
+> （1,873 个交易日 / 373 个周期段 / 353 个断板事件 / 649 条龙头列表）生成规范 JSON ——
+> **2,715,688 bytes，md5 均为 `ff9b76a105dc18b778d82b8828f06e5d` ⇒ IDENTICAL**。
+> （基线 JSON 2.7MB 不入库，留在仓外 `C:\work\sourcecode\_scratch\baseline_{before,after,after2}.json`。）
+>
+> | 端点 | 改造前 | 改造后（冷） | 改造后（热 = 结果缓存命中） |
+> |---|---|---|---|
+> | `getMaxConnectionBoardTrend` | 6.2s | **3.4s** | **26ms** |
+> | `getSentimentCycleAnalysis` | 37.8s | **4.8s** | **140ms** |
+> | `buildSentimentCycleAnalysis` 纯计算 | 16,537ms | — | **995ms（16.6×）** |
+>
+> ⚠️ 剩余冷启耗时几乎全是**跨境取数**（99,918 行 × 7 列，2.4~2.8s），是该链路的既有物理成本，本轮不动。
+>
+> 同轮还给首页最下面补了「情绪分析」快捷入口（用户同一条要求的下半句），故探针一并覆盖两侧。
+> ⚠️ **该「快捷入口条」随后被用户否定**（原话：「我是要把最高连板折线图展示在首页 包含折线图下面的
+> 日期选择滑块，而不是现在这样加个跳转按钮」）⇒ 已换成**图表本体 + 日期滑块**，详见本文件
+> `homepagesentimentchart` 一节。本节的 A/B 段（加载耗时）仍有效；C/D/E 段已改为量新图表区块，
+> 下方行内数据即复跑后的最新一轮。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_sentiment_load_and_home_entry.mjs` + `.out.txt` | 无头 Chrome + CDP **量 DOM**。**20 PASS / 0 FAIL / 0 SKIP**：① `/sentiment-analysis` 冷启（服务端重启后首访）**6,702ms** 出图、reload（命中结果缓存）**805ms**；四张统计卡与「情绪周期与周期龙头 / 龙头列表」区块齐全，console error 0；② 首页底部 `[data-homepage-sentiment-chart]` **真的渲染出折线**（`.recharts-line-curve`，**90 个数据点**）、**内含日期范围滑块**（「90 个交易日」）、且是所在容器**最后一个**子元素（siblings = 4 张卡 + 本区块 `div`；免责声明已于第八轮删除）；③ 夜间：卡片标题 **12.8** / 副标题 **6.4**（底 `#202023`）；亮色基线 18.1 / 5.98（底 `#ffffff`）——两主题都远超 AA；④ 区块内仍保留通往 `/sentiment-analysis` 的文本链接（`[data-homepage-sentiment-entry]`），**真鼠标点击**后 `location.pathname === '/sentiment-analysis'`，跳转后 854ms 出图 | 见 `docs/evidence/_probe_sentiment_load_and_home_entry.out.txt` |
+| `_shot_sentiment_load.sentiment.chart.png` / `.home.chart.dark.png` / `.home.chart.light.png` | 目视附件：改造后的情绪分析图表区、首页底部「折线图 + 日期滑块」区块（夜间 / 亮色）。`_*.png` 被 `.gitignore` 排除在库外 | 同上（目视附件） |
+
+> 🔴 **两条本轮新踩/复用的要点**：
+> ① **「服务端自报耗时」≠「用户看到的时间」**：缓存命中后端点 140ms，但用户侧 reload 到出图仍要 **790ms**
+>    （应用启动 + React Query + Recharts 渲染）。要证明「用户够得到」，必须量**页面**，不是量端点。
+> ② **要量「冷启」就必须先让服务端缓存真的空掉**：探针前用「触碰某个 `server/**` 文件 → 等 `tsx watch`
+>    重启 → 核对监听端口 PID 变化」拿到一个干净进程，否则量到的是上一轮留下的热缓存（**会把冷启说快**）。
+
+### `homepagesentimentchart` —— 首页底部「每日最高连板折线图 + 日期范围滑块」
+
+> **触发**：上一轮把用户的「把这个图标加到首页最下面」理解成了**加一个跳转按钮**（`SentimentEntrySection`），
+> 用户 2026-09-20 明确纠正：*「我是要把最高连板折线图展示在首页 包含折线图下面的日期选择滑块，
+> 而不是现在这样加个跳转按钮」* ⇒ 首页底部要的是**图本身**（含滑块），跳转链接只是图上的一个次要附注。
+>
+> **做法 = 抽共享组件，不复制粘贴**：把 `/sentiment-analysis` 里的「折线图卡 + 滑块」整块提成
+> `client/src/components/MaxConnectionBoardTrendChart.tsx`，**首页与情绪分析页同源**。
+> 抽出的判据不是「看起来像」，而是这两段逻辑**必须只有一份实现**：
+> ① `buildDistinctHighBoardLabels`（Y 轴刻度去重）；② `normalizeVisibleRange`（窗口对齐）——
+> 两页各留一份迟早会漂。日期格式 `formatChineseDate`（`YYYY年MM月DD日`）同步下沉到
+> `client/src/lib/displayFormat.ts`，仍是单实现。
+>
+> **首页与情绪分析页的差异（用 props 表达，而不是 fork 组件）**：
+> `chartHeight`（首页 340 / 情绪页 430）、`yAxisLabel`（首页传 `null` —— 首页硬口径禁画旋转 Y 轴标题）、
+> `sliderHint`、`headerExtra`（首页放一条「情绪周期与龙头列表 →」文本链接）、
+> `cardProps`（首页挂 `data-homepage-sentiment-chart` 供探针挂钩，不影响渲染）。
+>
+> 🔴 **首页只调轻的那个端点**：`getMaxConnectionBoardTrend`（热缓存 ~26ms），
+> **故意不调** `getSentimentCycleAnalysis`（冷 4.8s）—— 代价是 tooltip 少一行「周期」信息，
+> 换来首页不被重端点拖住。数据热路径仍是「指数卡 409ms → 折线图 1610ms」，
+> 折线图**不是**首屏堵点（见 `.out.txt` 第 12 行断言）。
+>
+> 🔴 **SVG 属性吃不到 `darkCompatibility.css`**：`stroke` / `fill` 这些是 **SVG 表现属性**，
+> 主题令牌那套 CSS 变量映射层管不到 ⇒ 组件内用 `useTheme()` 显式切两套 `CHART_PALETTE`：
+> 日间 `grid #e2e8f0 / axis #64748b / line #ea580c`，夜间 `grid #3f3f3f / axis #a1a1aa / line #fb923c`。
+> 只改 CSS 类是不够的 —— 这是本轮唯一需要「写死在组件里」的地方。
+
+| 文件 | 结论要点 | 被引用于 |
+|---|---|---|
+| `_probe_homepage_sentiment_chart.mjs` + `.out.txt` | 无头 Chrome + CDP **量 DOM**。**35 PASS / 0 FAIL / 0 SKIP**：① 默认窗口 90 点、折线已画出（夜间 `rgb(251,146,60)` / 亮色 `rgb(234,88,12)`）、Y 轴旋转标题数 = **0**（首页硬口径）、Y 轴刻度 4 个全在 SVG 内不越界；② 区块是首页内容容器的**最后一个子元素**（siblings = 4 卡 + 本区块；免责声明已于第八轮删除）；③ 滑块在折线图**下面**（几何判据 `slider.top > chart.bottom`：3316 > 3304）、有可见表面（不是透明）、显示「90 个交易日」且**与主图可见点数联动一致**；④ 夜间对比度：标题 12.8 / 副标题 6.4 / 徽标 8.39 / 滑块 7.88 / 折线 7.18，亮色 18.1 / 5.98 / 6.16 / 3.56 —— 两主题全部过 AA；⑤ **CDP 真实鼠标悬浮**弹出 tooltip（`2026年07月20日 最高连板：3板 股票：立新能源`，底 `oklch(0.255 0.005 286)` 不透明，文字对比 12.93）；⑥ **真实鼠标拖动右端手柄** ⇒ 可见点数 **90 → 29**、滑块文案与徽标右端日期同步左移（真联动，不是只动滑块） | 见 `docs/evidence/_probe_homepage_sentiment_chart.out.txt` |
+| `_probe_sentiment_load_and_home_entry.mjs` + `.out.txt`（本轮改 C/D/E 段） | 上一轮探针的 C/D/E 段从「量跳转按钮」改为「量折线图区块」：断言 `[data-homepage-sentiment-chart] .recharts-line-curve` 存在、是容器最后一个子元素、含滑块、含通向 `/sentiment-analysis` 的链接、两主题对比度达标。A/B 段（情绪分析页冷/热加载耗时）不变 | 同上 |
+| `_shot_home_sentiment_chart.dark.png` / `.dark.dragged.png` / `.light.png` | 目视附件：首页底部折线图（夜间基线 / 夜间拖动后缩短 / 亮色基线）。`_*.png` 被 `.gitignore` 排除在库外 | 同上（目视附件） |
+
+> 🔴 **本轮新踩的坑（已进入 CDP 技能）：首页是「渐进渲染」的，量之前必须先等布局停稳**。
+> 首次探针 tooltip 与拖动双失败（27 PASS / 6 FAIL），一度误判成「CDP 事件的 `pageY` 没带滚动偏移」。
+> 逐字段实测把这个假设**推翻**了：真实 CDP 事件的 `pageY === clientY + scrollY` 完全成立。
+> 真正原因 = **首页加载后布局还在长**：滚动到折叠区时采样到页面高度 `3485 → 3978`（+493px）、
+> 区块 doc-top `2871 → 3364`，于是「滚到图表 → 悬浮」的坐标在悬浮那一刻已经过期 ⇒ 命中落空 ⇒
+> recharts 收到 `mouseleave` ⇒ tooltip 收起。
+> **修法 = `waitForStableLayout()`**：连续 4 次采样（页面总高 + 骨架屏数量 + 区块 doc-top）全一致、
+> 且骨架屏计数为 0 才继续；`centerOn` 每轮重新核对元素是否真在视口内（不是算一次坐标就用到底）。
+> ⚠️ 这条与已知的「CDP 事件不可信」是**两码事**：不要因为 tooltip 没弹就去怀疑输入通道，
+> 先量「悬浮时元素还在不在那个位置」。
+
+## `9ci` · EXP-001（首板后回踩第一性研究 · 独立实验首次真实投产）· 2026-09-21
+
+| 文件 | 作用 | 结论 |
+| --- | --- | --- |
+| `_e2e_9ci_exp001.mts` | 真库全链 E2E：真实 `ExperimentDefinition` + 真实 Dataset 版本（`first_limit_pullback` v2 / id=390002）+ 真实 TiDB + 真实 MinIO，20 步逐条判据 | **20 步全 PASS**；`RUN-20260920-2A91D7C2`（`COMPLETED`，`durationMs=135389`）；产物 10 个对象逐个 `exists()` + **绕开服务层**列举 MinIO 前缀复核；账目缺口 3978 单列（步 5b）；Object Key 角色段不重复（步 9b） |
+| `_e2e_9ci_exp001.out.json` / `.out.txt` | 上述运行结果 | 同上 |
+| `_probe_9ci_exp001_numbers.mts` | 只读数字探针：从 `listRuns` 取最新 `COMPLETED` Run 复算样本口径 | 候选 20000 / 入池 19877 / 剔除 123 / 缺口 3978 |
+| `_probe_9ci_exp001_numbers.out.json` | 上述运行结果 | 同上 |
+| `_probe_9ci_exp001_frontend.mjs` | 前端可达性（无头 Edge + CDP **量 DOM**）：**完整真实用户路径** —— 列表页 → 点「打开」→ 详情页 → **真点一次「运行」** → 自定义结果页 → 点「打开这一条 Run」→ RunDetail | **42 PASS / 0 FAIL**；新 Run `RUN-20260920-902A6515`；🔴 首屏「样本账有缺口」告警条实测渲染且可见（取**最内层**命中盒，textLen=151，含 3978 / 23978） |
+| `_probe_9ci_exp001_frontend.out.json` / `.out.txt` | 上述运行结果 | 同上 |
+
+**留给后人的四条判据提醒（本会话真踩 —— 全是「判据自己写错」而不是产品缺陷）**：
+
+1. 🔴 **实验详情页不会自动渲染历史 Run**：结果区渲染条件是 `outcome !== null`，而 `outcome` 只来自
+   **本次会话的 `runMutation`**（`client/src/pages/researchExperiments/ExperimentDetail.tsx`）
+   ⇒ 「保留了一条 Run」与「页面能看到结果」是两件事。要验证**实验自定义结果页**，**必须真点一次「运行」**；
+   历史 Run 只能走 `/research-experiments/:group/:key/runs/:runId`，而 RunDetail **刻意不重建 execution**
+   ⇒ 走通用渲染器、**不挂**实验自定义页面（`RunDetail.tsx` 文件头有明文）。
+   （第一版探针假设「保留的 Run 会自动出现在详情页」，因此得到 15 条**假 FAIL**。）
+2. 🔴 **侧栏导航项不是 `<a href>`**：`client/src/components/AppShell.tsx` 用 `SidebarMenuButton` +
+   `onClick={() => handleNavigate(item.path)}` ⇒ `a[href="/research-experiments"]` **永远查不到**。
+   正确锚点 = `[data-sidebar="menu-button"]`（按文案匹配）+ `data-active`（当前高亮）。
+3. 🔴 **观察类别在 DOM 里是中文标签**：`page.tsx` 的 `OBSERVATION_META[kind].label` 渲染的是
+   「描述性事实 / 分组比较 / 值得进一步验证 / 局限」，枚举码 `DESCRIPTIVE / COMPARATIVE / …`
+   **从不进 DOM** ⇒ 拿枚举码当判据恒为 FAIL。
+4. 🔴 **「免责声明不得删」的适用范围已收窄**：只约束**研究侧强制件**（`Dashboard.tsx` 首板梯队区块 /
+   结论正文 `evidence.disclaimer`）；**独立实验页从未要求挂免责声明**，拿它当判据会得到恒假的 FAIL。
+
+> 🔴 **这一类错误的危害不比产品缺陷小**：一条恒假的判据挂在「已验证」列表里，等于在回归闸上挖了个洞 ——
+> 它要么永远红（被当噪声忽略），要么被修成永远绿（什么都没证明）。**发现时必须同时登记「判据为什么错」。**
+
+⚠️ **本索引的缺口**：`9cg`（旧 Research 整体退役）与 `9ch`（RESEARCH-EXPERIMENT-004 独立实验持久化）
+两轮的证据文件**尚未在本索引登记**（本次只补登 `9ci`），下次维护本文件时应一并补齐。
+
+---
+
+## `9cj` · EXP-001 收口修正（全量样本 + 数据质量 + 决策时点条件矩阵）· 2026-09-21
+
+> 编号 `9cj`。前置 `9ci`（EXP-001 首次真实投产）同在本文件索引中。
+> 🔴 本轮的核心是**把「只有 20000 个事件」这件事真正解决**（缺口 3978 → **0**），
+> 因此证据里**每个数字都必须能被独立复算** —— 三个探针的分工就是「结论面 / 表格面 / 独立 SQL 基线」。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_probe_9cj_preflight.mts` → `.out.json` | **独立 SQL 基线**：不经过任何实验代码，直接查 TiDB（Run 状态 / Dataset 版本 / 事件表 / post 相对日分布 / 坏 Bar 分档） | `safeToRun = true`；后视坏 Bar 分档 **449 / 427 / 775**，与 Run 的 `invalidOhlcByRelativeDay` **逐档完全一致** ⇒ 数据质量数字是算出来的 |
+| `_probe_9cj_run_readback.mts` → `.out.json` | **结论面**：从 MinIO **读回 `result.json`**（不是内存值），导出账目 / 数据质量 / 45 格矩阵 / 24 条观察 / H1–H3 / 11 条口径说明 | `candidateCount = 23978`、`unscannedEventCount = 0`、`eligible 23712 / excluded 266`；矩阵 **45 格** |
+| `_probe_9cj_tables.mts` → `.out.json` | **表格面**：从 MinIO 读回 `result.json` 里 **6 张表的每一行**（readback 只 slice 了 8 行） | 行数 `5 / 15 / 6 / 5 / 9 / 45`；报告 §8/§9/§11/§12 逐行取自这里 |
+| `_e2e_9ci_exp001.mts`（**扩到 25 步**）→ `_e2e_9cj_exp001_full_scan.out.json` | 真库全链 E2E（真实 ExperimentDefinition + 真实 Dataset + 真实 TiDB + 真实 MinIO） | **25 步全 PASS**；Run `RUN-20260921-9D216C34`；产物 **12 个对象** |
+| `_e2e_9cj_exp001_full_scan_run1.out.json` | 上述 E2E 的**第一轮**输出 | 保留以对照「6c 判据写错 → 修好后复跑」的前后差异 |
+| `_probe_9ci_exp001_frontend.mjs`（**扩到 46 判据**）→ `.out.json` / `.out.txt` | 无头 Edge + CDP 量 DOM，走**完整真实用户路径**（列表 → 打开 → **真点运行** → 自定义结果页 → RunDetail） | **46 PASS / 0 FAIL**；新 Run `RUN-20260921-8557F38A`；`D4` 双侧互补判据 |
+| `_gate_9cj_done.out.txt` | **规格 §16 完成判据闸门输出**（13 条，逐条从落盘证据现读；脚本为一次性 `_scratch/check_9cj_done.py`） | **13 / 13 PASS** ⇒ EXP-001 可标记正式 `COMPLETE` |
+| `_gate_9cj_report_reconcile.out.txt` | **报告 ↔ 证据对账闸门输出**（脚本 `_scratch/reconcile_report_9cj.py`） | 报告 **359 项数字缺失 0 项**；闸门自身可证伪（篡改 1 处必被抓住） |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+pnpm exec tsx docs/evidence/_probe_9cj_preflight.mts   > docs/evidence/_probe_9cj_preflight.out.json
+pnpm exec tsx docs/evidence/_probe_9cj_run_readback.mts > docs/evidence/_probe_9cj_run_readback.out.json
+pnpm exec tsx docs/evidence/_probe_9cj_tables.mts      > docs/evidence/_probe_9cj_tables.out.json
+# 会写 1 行 Run + N 个对象（属被测能力本身）；不要在无必要时反复重跑
+EXP001_KEEP=1 pnpm exec tsx docs/evidence/_e2e_9ci_exp001.mts > docs/evidence/_e2e_9cj_exp001_full_scan.out.json
+node docs/evidence/_probe_9ci_exp001_frontend.mjs
+```
+
+🔴 **本次用到的一条「报告纪律」**：报告里的 **359 项数字全部由上述落盘证据现算**，
+并用一次性对账闸门逐字符串校验（**缺失 0 项**）；该闸门**自身可证伪**（故意篡改报告 1 处必被抓住）。
+⚠️ 对账时发现「进舍规则」是隐性口径：`.xx5` 这类中点值，Python `f"{x:.2f}"` 是 **half-even**、
+JS `toFixed` 是 **half-away-from-zero** ⇒ 2 个值曾出现假冲突，已显式指定规则。
+
+---
+
+## `9ck` · ROBUSTNESS-CROSS-STAGE-001（现有 Robustness 跨阶段通用性审计）· 2026-09-21
+
+> 编号 `9ck`。**纯只读审计**：`server/**` / `shared/**` / `client/**` / `tests/**` / `drizzle/**` **零改动**（机器证据：`git status --porcelain --` 这些路径的结果与审计开始前**逐行相同**）。⚠️ 按规格 §11 的台账登记要求，本轮修改了 4 个**文档**文件（`ROADMAP.md` / `ROADMAP-CHANGELOG.md` / `CHANGE-AUDIT.md` / 本文件）—— 不是「零改动」，但**全部落在文档面**。
+> 🔴 本轮证据的特点是**「否定性事实」占多数** —— 要证明的不是「有什么」，而是「**没有什么**」
+> （核心比较机制从未跨域复用 / C-18.1 与 C-18.2 零持久化 / 研究实验体系零 Robustness）。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_probe_robustness_cross_stage_state.mts` → `.out.json` | **只读真库状态**（**每条 SQL 均为 SELECT**）：全库扫 `%robust%` 表 / 三表精确行数 / C-18.1·C-18.2 落库表是否存在 / 父子完整性 / `parameter_search_run` 两列与 NULL 占比（含 `normalizeRows` 形状自检） | 全库 robustness 表**恰 3 张**（全是 `search_robustness_*`）；`robustness_run` / `robustness_sample` / `stochastic_robustness_run` **不存在** ⇒ **零持久化是实测事实**（不只是「代码看起来没写」）；`search_robustness_run` **0** 行 / `_result` **6** / `_parameter_analysis` **3**；🔴 **9 行孤儿**（父表 0 行、0 FK 无级联）；`referenceCheckApplied IS NULL` = **3** / 5 |
+| `_gate_robustness_cross_stage_audit.out.txt` | **报告对账闸门输出**（脚本 `_scratch/check_robustness_cross_stage_audit.py`）：75 条判据逐条**从真实文件 / 探针 JSON 现读**（不读「报告里怎么写的」） | **75 / 75 PASS**（退出码 0）；**闸门自身可证伪**（篡改探针 `search_robustness_run` 计数 ⇒ 必变红，已实测）；首跑 2 条 FAIL 全为**判据自身写错**并已登记「为什么错」 |
+| 报告（未在 evidence 目录） | `docs/research/ROBUSTNESS-CROSS-STAGE-001.md`（535 行 / 17 节，纯 LF） | 结论 **B（核心可复用，需要轻量适配）**；`ROBUSTNESS-CROSS-STAGE-001 = AUDIT_COMPLETE`；**EXP-002 未标记为开始** |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+pnpm exec tsx docs/evidence/_probe_robustness_cross_stage_state.mts > docs/evidence/_probe_robustness_cross_stage_state.out.json
+python C:/work/sourcecode/_scratch/check_robustness_cross_stage_audit.py
+```
+
+⚠️ **本索引的缺口（沿 `9ci` 的登记，仍未补）**：`9cg`（旧 Research 整体退役）与 `9ch`（RESEARCH-EXPERIMENT-004 独立实验持久化）两轮的证据文件**尚未在本索引登记**。
+
+---
+
+## `9cl` · EXP-002（Research Robustness / Stability Validation 完整闭环）· 2026-09-21
+
+> 编号 `9cl`。**跨阶段 Robustness 复用**轮：`server/research/robustness/{dimension,comparison,multiDimension}.ts` 为**新增泛化层**（3 文件 / 1540 行）；`{drift,evaluate,index,serialize}.ts` 为**既有文件泛化**（旧调用方形状不变）。
+> 🔴 本轮的证据特点：**每一类证据都配一条「反证」** —— 该是 0 的地方是 0（自检行）、**该动的地方真的动了**（非 0 delta 行 39/48）；
+> 且**中间态证据全部留档**（`.first` / `.prefix` / `.extendonly` / `.r4` 四份），所以「第一次为什么错、错在哪一步」可被第三方复核。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_e2e_9cl_exp002_stability_validation.mts` → `.out.json` | **真机 E2E 29 步**：真库 + 真 Dataset（`first_limit_pullback` / `390002`）+ 真 MinIO，经 tRPC 端点跑完整 Run（对象存储可用 → 前置闸无在途 Run → 定义已注册 → Run 生命周期 → 信封 → 矩阵结构 → 样本账两套守恒 → 全量扫描 → **真重算四条证据** → 不伪造 0 → 观察项 → 产物声明 / 逐个 `exists()` / 角色段不重复 / Manifest 索引 / **绕开服务层列 MinIO 前缀** → 读回 result.json / 3 CSV / SVG / 核心记录 → 页面读端点 → 核心记录坐标自洽 → 清理复核） | **29 / 29 PASS**；Run **`RUN-20260921-46934548`**（`COMPLETED` / `SUCCEEDED` / `durationMs = 128475` / 探针壁钟 133629 ms）；MinIO **8 对象**；`manifest` = `result 1 / tables 3 / charts 1 / artifacts 2 / logs 1`；CSV 数据行 **48 / 17 / 17**；SVG **14430 B 可闭合**；`robustness-run.json` **54679 B**、指纹 `ddd458d62578b483…`；**自清理 0 残留** |
+| `.first.out.json` | 同一条 E2E 的**首跑**结果（Run `RUN-20260921-A95F5B48`） | **22 PASS / 7 FAIL**，7 条**全部是判据自身写错**（字段名 `subjectKind`、`eventScanPolicy` 属平台 `datasetFacts`、`unavailable` 下发的是**标签**不是**码**、`HORIZON_T5` 按定义不可用、信封 `eligible` ≠ 核心 `eligible`、`RBM-…` 是派生值、清理后有**刻意保留**的 Run）—— **0 条是产品缺陷**；这是「判据自身写错也会静默给出假结论」的**可复核样本** |
+| `_probe_9cl_exp002_frontend.mjs` → `.out.json` / `.out.txt` | **前端可达性**（无头 Edge + Node `WebSocket` 直连 CDP **量 DOM**，零依赖）：列表页 → 点「打开」→ 详情页 → **真点一次「运行」** → 自定义结果页（10 张卡片）→ 点「打开这一条 Run」→ RunDetail | **56 PASS / 0 FAIL / `PROBE_EXIT = 0`**（新 Run **`RUN-20260921-C95B1D47`**，正文 23996 字符）；D15/D15b/D15c 钉死容差线（`refLineStroke #dc2626` / `refLineY1 8` / `yTicks [0,0.25,0.5,0.75,1]` / `barCount 48` / `chartSurfaceCount 1`）；越界措辞句子级扫描 552 句 / 4162 句 offenders **0**；控制台 error **0**；🔴 **`prefix` / `extendonly` / `r4` 三份中间态同目录留档，用于复核「产品缺陷 → 错修 → 正解」全过程** |
+| `_ops_cleanup_9cl_superseded_runs.mts` → `.out.json` | **白名单式运维清理**：只删被取代的中间态 Run，白名单外出现即 `exit 2` | `deletedRows = [1,1,1]`、`deletedObjects = 24`、`leftoverObjectsInDeletedPrefixes = 0`；清理后保留 `RUN-20260921-A95F5B48` 与 `RUN-20260921-C95B1D47`（均 `COMPLETED`） |
+| 报告（未在 evidence 目录） | `docs/research/EXP-002-REPORT.md`（774 行 / **19 项** / 52479 B / 纯 LF） | `EXP-002 = COMPLETE`；**§25 停止条件未触发**（泛化非大规模重构、未影响 Strategy / Parameter Search / Backtest 既有语义） |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+# 会写 Run + 写 MinIO 对象（属被测能力本身）；脚本自带前置闸与自清理，不要在无必要时反复重跑
+pnpm exec tsx docs/evidence/_e2e_9cl_exp002_stability_validation.mts > docs/evidence/_e2e_9cl_exp002_stability_validation.out.json
+node docs/evidence/_probe_9cl_exp002_frontend.mjs
+# 清理中间态 Run（默认 dry-run 语义受白名单约束；白名单外出现即 exit 2）
+pnpm exec tsx docs/evidence/_ops_cleanup_9cl_superseded_runs.mts > docs/evidence/_ops_cleanup_9cl_superseded_runs.out.json
+```
+
+🔴 **本轮的三条报告纪律（都可复核）**：
+⒜ **负向结论也要证据** —— `sensitive = 0` 必须配对「非 0 变化量行 39 / 48」，否则「0 敏感」无法与「机制空转」区分；
+⒝ **两个口径不得混用** —— 平台累计 `datasetFacts.eventPageCount = 24` vs 实验自己数的 `candidates.eventPageCount = 12`（`12 × 2`，同一件事被数了两次）；信封 `eligible` vs 核心 `eligible`（不同义，换算必须显式）；
+⒞ **闸门必须可证伪** —— `公共机制 · 12` 经**注入式验证**（注入 `"nonBreakOpen"` 立刻变红并点名；还原后逐字节一致）。
+
+⚠️ **本索引的缺口（沿 `9ci` / `9ck` 的登记，仍未补）**：`9cg`（旧 Research 整体退役）与 `9ch`（RESEARCH-EXPERIMENT-004 独立实验持久化）两轮的证据文件**尚未在本索引登记**（`CHANGE-AUDIT` `BD-12` / `BD-20`）。
+
+---
+
+## `9cm` · STRATEGY-RESEARCH-BRIDGE-001（Independent Experiment → Strategy 正式桥接 + 首板回踩 Strategy 首条真实闭环）· 2026-09-21
+
+> 编号 `9cm`。**首条真实 Strategy 闭环轮**：把 `Dataset 390002 → EXP-001 / EXP-002 真实 Run → first-board-pullback v1.0.0`
+> 这条链路做成**可追溯**，并让它在 **Parameter Search** 与 **Backtest** 两处被**真实消费**。
+> 🔴 本轮的证据特点：**每一条「链路成立」的结论都配一条「真实消费」的实测**，而不是只看类型 / 只看页面渲染；
+> 同时**修掉 2 条真实产品缺陷**，并各自用**注入式验证**证明其回归判据可证伪。
+> ⛔→✅ 本轮原有一道项目惯用闸跑不了（`.git/refs` 缺失 ⇒ 本机 git 拒识该仓库）；**同日已按用户裁定完成修复**（见本节末「`9cm` 收尾」），`checkEolDrift.mjs` 现可运行并报 **0 漂移 / 0 新 CRLF**。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_e2e_srb001_bridge_consumption.mts` → `.out.json` / `.out.txt` | **真机全链 E2E 8 段 / 43 判据**：真实 Dataset `390002` + **3 个真实 Run** → 真实建策略 → 幂等重放 → 证据改变时**响亮冲突** → 溯源读回 → 三张表**真实落盘行** → §14 Parameter Search（真实 `createSearch`）→ §15 Backtest 装配（真实 `assembleRunWorkbenchInputs`）→ 自清理 | **43 / 43 PASS**，`phase = done`；落盘交付物 `strategy_versions.id = 1110001` / `provenance.id = 630001`；证据指纹 `evi-sha256:f0959a03f21bd16a`；§14 `searchable` 恰 = 2 个 TUNABLE、组合 **44**、`referenceCheckApplied = true`；§15 装配 **13094 ms / 150873 行 / 2967 只证券**、`recipeSource = strategy-declarative-conditions`、**`strategyDecisionEngine = strategy-core`**；自清 `parameterSearchRun 1 / combination 44 / result 0` |
+| `_probe_srb001_doc_params.mts` → `.out.json` | **只读根因探针**（缺陷 #1 的证据）：读策略文档的 `hasRecipe` / 参数面 / 条件 / 观察窗口 / 数据集坐标，并**对同一次编译分别走合成配方与已注册配方** | 确证「缺陷只在**合成配方路径**」：`hasRecipe = false`；参数 `maxBreakDepthRatio`(0~0.1 step 0.01, 默认 0) / `maxVolumeRatio`(0.5~2 step 0.5, 默认 1)；两条条件**都是** `PARAMETER_REFERENCE`；`compileConditionRecipe = {ok:false, code:"RECIPE_PARAMETER_INVALID"}` 而 `registeredRecipe = {ok:true, resolved:{…}}` |
+| `_probe_srb001_strategy_detail_frontend.mjs` → `.out.json` / `.out.txt` | **前端可达性**（无头 Edge + Node `WebSocket` 直连 CDP **量 DOM**，零依赖）：`/strategies` → **点策略卡片**（卡片是**整块 `<button>`**，无「打开」文案）→ 等标签渲染 → **真实鼠标点「版本与状态」**（Radix 只认真实鼠标）→ 等**证据区块本体**渲染 → C 段逐项断言 | **36 PASS / 0 FAIL × 2 次确定性**；证据区块「研究证据（**5** 条 · 只读）」、指纹徽标与后端**逐字节一致**、3 个中文类别标签（**枚举码不进 DOM**）、3 个 runId、2 个实验编号、5 条 `reference` 路径、数据集坐标 `#390002（v2）`、尾注「不构成本策略的买入 / 卖出规则」全部可见；择优措辞句子级扫描 **174 句 / 97 句 offenders 0** |
+| `_probe_srb001_git_and_eol_state.py` → `.out.json` | **只读环境取证**（git 元数据完整性 + 行尾状态）：直读 `.git` 结构与 mtime（不经 git）→ 经**影子 GIT_DIR** 枚举对象库 → 统计 `index` 引用 blob 的缺失面 → 逐路径判别「文件丢了」还是「只有对象丢了」→ 两层行尾判据 | ⛔ `.git/refs` 与 `.git/packed-refs` **不存在** ⇒ `is_git_directory()` 失败 ⇒ 本机 git 拒识仓库；对象库剩 **5792** 对象 / **235** commit，存活最新 commit = `07fcbf494032`（**2026-09-19 22:56**），reflog 尖端 `a871b033…`（09-21 02:21）**不可解析**；`index` 1830 个唯一 blob 中 **241 个缺失**，而这 241 个路径**在工作区全部还在** ⇒ **元数据丢失、工作区零丢失**；行尾：本轮 **15/15 个改动文件全为纯 LF**（`taskFilesAllLf = true`），全仓 `i/lf w/crlf` **329** 个均为 **2026-08-30** 起的长期状态 |
+| `_probe_srb001_git_repair_and_eol.py` → `.out.json` | **「修后」只读取证**（git 元数据修复 + 329 文件 EOL 归一化的验收证据，全只读） | `git fsck` **rc=0 且零输出**；`git multi-pack-index verify` **rc=0**；`show-ref` 双 ref = `a871b033…`（`main` = `origin/main`）；`HEAD` = `a871b033…` / 2026-09-21 02:21:56 / 「第一次自动研究」；行尾矩阵 = `i/lf w/lf` **1807** / `i/crlf w/crlf` **5**（有意）/ `i/none` 15 / `i/-text` 10 / `i/mixed` 2，**`i/lf w/crlf` = 0**；`status` = 38 ` M` + 20 `??` / **0 删除**；`diff --numstat` **38** 文件；**`diff --stat HEAD` = 38 files / +3950 / −433（与归一化前逐字相同 ⇒ 归一化零内容漂移）**；索引 stat 抽样 `size: 310`（畸形 `345` 已修） |
+| `_probe_srb001_baseline.mts` / `_probe_srb001_result_paths.mts` | 第一阶段现状确认（**只读**）：既有桥 / 读路径 / 三张表列名 / 证据可解析路径 | 结论并入报告 §2（按规格 §2 **未单独交付审计报告**） |
+| 报告（未在 evidence 目录） | `docs/strategy/STRATEGY-RESEARCH-BRIDGE-001-REPORT.md`（**本任务唯一**最终报告） | `STRATEGY-RESEARCH-BRIDGE-001 = COMPLETE`（§23 判据 24/24）；**两条真实缺陷已修 + 可证伪回归**；`BD-21` / `BD-22` / `BD-23` 新增技术债登记 |
+
+**重跑方式**（均在项目根目录执行）：
+
+```bash
+# 会写 1 条策略 + 1 条溯源行（属被测能力本身，脚本默认保留）；会自清 parameter_search 3 类行
+pnpm exec tsx docs/evidence/_e2e_srb001_bridge_consumption.mts > docs/evidence/_e2e_srb001_bridge_consumption.out.json
+# 只读
+pnpm exec tsx docs/evidence/_probe_srb001_doc_params.mts      > docs/evidence/_probe_srb001_doc_params.out.json
+node docs/evidence/_probe_srb001_strategy_detail_frontend.mjs
+python docs/evidence/_probe_srb001_git_and_eol_state.py       > docs/evidence/_probe_srb001_git_and_eol_state.out.json
+# 只读（修后验收）
+python docs/evidence/_probe_srb001_git_repair_and_eol.py     > docs/evidence/_probe_srb001_git_repair_and_eol.out.json
+```
+
+🔴 **本轮的 3 条报告 / 证据纪律（都可复核）**：
+
+⒜ **「接线完成」≠「用户够得到」** —— 溯源面板住在**「版本与状态」标签页**内（详情页默认标签是「策略定义」），
+列表入口是**整块 `<button>`** 卡片；因此验收必须走**完整真实用户路径**并**真点标签**。
+⚠️ **Radix Tabs 对 JS `.click()` 会返回成功但内容不切换**（**假 PASS 来源**）⇒ 必须用 CDP `Input.dispatchMouseEvent` 发**真实鼠标事件**。
+
+⒝ **判据自身写错 = 与产品缺陷同级** —— 本轮登记 **6 条**（前端探针 5 条 + 行尾粗判据 1 条），
+其中行尾那条最危险：初次按「已跟踪文件应为 LF」判，报出 **333** 个「不应为 CRLF」，
+**差点把 2026-08-30 起的长期状态记成「本轮引入 329 处漂移」** ⇒ 修正为「**基线 blob ↔ 工作区**」比对后才成立。
+
+⒞ **修法本身也可以是错的** —— 「判据可证伪」必须**注入式实测**，不能靠声明：缺陷 #1 改成 `void name` ⇒ **3 条变红**；
+缺陷 #2 摘掉一个读方法的 `withReadRetry` ⇒ **恰好 2 条变红**（另两条仍绿，证明各自生效）。
+
+⛔→✅ **本节同时登记的环境缺陷（非本轮引入）—— 已于同日按用户裁定修复**：本仓 `.git/refs` + `.git/packed-refs` 缺失曾使
+项目惯用的两道 git 闸（`git status --porcelain` 前置、`node scripts/checkEolDrift.mjs` 行尾哨兵）**不可运行**（报 `fatal: not a git repository`）。
+修复**严格最小面**：① 整份备份 `.git`（36 文件 / 13 973 963 B → `_scratch/srb001_git_backup/dotgit`）；② **纯新增** `.git/refs`、`.git/refs/heads`、`.git/refs/tags` 空目录 ⇒ git **立即重新识别仓库**；③ `git fetch origin`（**只写对象库 + `refs/remotes/origin/*`**，不碰工作区/索引）⇒ 对象 5788 → **12088**，`origin/main` = `a871b033…` 拉回；④ 恢复 `refs/heads/main` = `a871b033…`，再重建索引。🚫 全程**未**用 `reset --hard` / `checkout -f` / `clean`。
+**结果**：`git fsck` **rc=0 零输出**、`git multi-pack-index verify` **rc=0**、`show-ref` 双 ref 齐备、`HEAD` = 「第一次自动研究」(2026-09-21 02:21:56)。
+🔴 **修复途中挖出第二层损坏（比 refs 更隐蔽）**：陈旧 `multi-pack-index`（09-19 22:56）与 09-20 20:50 被改写的 pack **不匹配** ⇒ `fsck` **rc=32** 报 `failed to load pack in position 0` + 26 条 `failed to load pack entry`，而 `verify-pack` 认为旧 pack **自身完整**。切分后定性：这 26 个 oid **既不在旧 idx 也不在新 idx**（真缺失、且**不被任何 ref 引用**）；`core.multiPackIndex=false` 下 `fsck --connectivity-only` **rc=0 零输出** ⇒ **唯一缺陷就是那份陈旧 midx**。修法 = 备份后删除并 `git multi-pack-index write` 重建。
+
+✅ **EOL 归一化（同一裁定）**：**329** 个 `i/lf w/crlf`（`.ts` 209 / `.tsx` 70 / `.json` 18 / `.md` 10 / `.sql` 10 / `.mts` 5 / `.mjs` 2 / `.py` 1 / `.patch` 1 / `.yaml` 1 / 无扩展名 2；mtime 集中在 **2026-08-30（144）** 与 **2026-09-13（164）** ⇒ **长期状态，非本轮引入**）**全部转回纯 LF**：先 zip 备份（877 167 B）→ 逐文件校验「纯 CRLF」（`crlf 计数 == lf 计数` 且无孤立 CR）→ 原子替换 + 回读 → 复查 **归零**（`i/lf w/lf` 1478 → **1807**），合计减少 **80 177** 字节。范围外**不动**的 5 个 `i/crlf w/crlf`（有意 CRLF）：`.gitignore`、`client/src/App.tsx`、`client/src/components/AppShell.tsx`、`docs/evidence/_after_tsc_phaseA.out.txt`、`tests/server/marketSync.test.ts`。
+🔴 **归一化零内容漂移的硬证据**：`git diff --stat HEAD` 在归一化**前后逐字相同** = `38 files changed, 3950 insertions(+), 433 deletions(-)（⚠️ 该 `38 / +3950 / −433` 是**归一化完成瞬间**的读数 —— 与归一化**之前**逐字相同，**这才是判据：EOL 归一化没有改变既有改动集**。此后本轮又追加了 `scripts/checkEolDrift.mjs` 注释修正与四处台账登记，而这些**都是被跟踪文件** ⇒ `diff --stat HEAD` 会自然变大；**当前快照一律以 `docs/evidence/_probe_srb001_git_repair_and_eol.out.json` 的 `D_diffStatHead_lastLine` 为准**。）`；`git status` 前后同为 **58**（38 ` M` + 20 `??`）；**0 个 `D` 条目** ⇒ **工作区文件零丢失**。
+
+⚠️ **归一化过程中踩到并修掉一个「判据分叉」陷阱（已升级为纪律）**：归一化后 `git status` 一度从 58 跳到 **387**（329 个目标全报 ` M`），而 `git diff --numstat` 仍是 **38** —— **同一棵树、两个口径给出矛盾结论**。逐步切分后定性：`git hash-object` = `git rev-parse :path` = `git rev-parse HEAD:path`（三方哈希**逐字节相同**）、`git diff --quiet` **rc=0**、`git diff-files -p` **空**，但 `git diff-files --raw` / `--name-only` / `git status` 报 `M`；`git ls-files --debug` 显示索引条目记录的是**畸形 stat**（`size: 345` = 旧 CRLF 尺寸，而 blob 只有 310 B；`mtime` 停在 2026-08-30）。⚠️ **`git reset --mixed HEAD` 解决不了** —— 它会按 oid **复用**旧索引里那份畸形 stat。✅ **正解**：`cp .git/index <备份> && rm .git/index && git read-tree HEAD`（**只动索引、不碰工作区**）⇒ 索引 stat 变为正确的 `size: 310`，`status` 回到 **58**。⇒ 教训：**「stat 判据」与「内容判据」会分叉，矛盾时拿 `git hash-object` 一锤定音**；已把该坑写入 `scripts/checkEolDrift.mjs` 的运维注记（该哨兵自身只用 `git diff --numstat`，**不受此坑影响**）。
+⚠️ 同时**修正该哨兵里已失效的背景注释**：旧注释称「仓库仅 3 个有意 CRLF 文件」并列出 `.workbuddy/memory/PROJECT_RULES.md`（该路径已 untrack + gitignore）⇒ 实测为 **5** 个，已按实测改写。
+
+**备份物**（均在 `C:\work\sourcecode\_scratch\`，**不进仓库**）：`srb001_git_backup\dotgit\`（整份 `.git`）/ `srb001_eol_backup_2026-09-21.zip`（329 文件 CRLF 原样，877 167 B）/ `srb001_index_before_rebuild.bak`（206 050 B）/ `srb001_midx_backup\multi-pack-index.stale.bak`（164 008 B）。
+`BD-22`（git 元数据受损）与 `BD-23`（329 个 CRLF 长期状态）**均已关闭**。👍 **工作区文件零丢失**：241 个「缺失 blob」对应的路径**全部**在工作区仍存在，且 329 个被归一化的文件在 `git diff --stat HEAD` 上**逐字未变**。
+⚠️ **「改 `server/**`」纪律的合规复核（本轮补做，如实登记，含流程瑕疵）**：EOL 归一化的 329 个文件里含 **20 个 `server/**`**（`server/_core/*` 16 个 + `server/recognition.ts` / `stockPriceSync.ts` / `storage.ts` / `tushare.ts`）、**5 个 `shared/**`**、**167 个 `tests/**`**、**85 个 `client/**`**、24 个 `drizzle/**` ⇒ 落在「三门」第一条的触发范围内。复核结论：
+① 🔴 **逐字节等同于 HEAD（零语义变化）**：`git diff --stat HEAD -- server/_core server/recognition.ts server/stockPriceSync.ts server/storage.ts server/tushare.ts` **输出为空**；5 个 `shared/**` 同为空；`tests/**` 只剩 **3 个** 9cm 自有改动文件（`compile.test.ts` / `exp001FundamentalStudy.test.ts` / `runPersistence.test.ts`）⇒ 其余 164 个归一化测试文件同样零 diff。且这 20 个 `server/**` 文件**均不出现在** `git status` 的 ` M` 列表里（列表里全是 9cm 自有改动）。
+② ✅ **在途 Run 检查**：`docs/evidence/_probe_inflight_runs.mts` 全表扫描 ⇒ `RUNNING = 0`；唯一命中 `archive_research_question:270001`，时间戳停在 **2026-09-17T06:50:58**（已登记的历史僵死行，且属**已退役**的 `archive_*` 表）⇒ **0 个真实在途 Run**，归一化未打断任何真实进度。
+③ ✅ **未主动杀 / 重启 dev server**：`pnpm run dev`（PID 10556）与 `tsx watch server/_core/index.ts`（PID 600）**存活**；因内容逐字节未变，watcher 的自动 reload（若被 mtime 触发）在语义上是 **no-op**，而纪律明确要求「常驻服务别杀」。
+⚠️ **流程瑕疵（诚实登记）**：`tsx watch` 是**按 mtime** 触发 reload 的 ⇒ **即使内容未变，批量重写已跟踪源文件也会让 dev server 重载**。正确顺序是**动手前**先跑在途 Run 检查（本轮做在**事后**，属流程瑕疵；结论仍是安全的，因为 `RUNNING` 真实值为 0）。⇒ 已升级为纪律：**任何批量重写已跟踪源文件（哪怕只改行尾）前，先跑 `_probe_inflight_runs.mts`**。
+## `9cm` 收尾② · `BD-21` 闭环 + Parameter Search 首次实际研究运行 · 2026-09-21
+
+> 编号 `9cm`（**同号收尾**，未新增编号）。本节 = 收尾项 `BD-21` 与 **Parameter Search 首次真实运行**的证据索引。
+> 🔴 **这不是审计**：本轮只修「真正阻塞 Parameter Search 实际运行」的问题，然后**直接运行**参数搜索。
+
+| 文件 | 作用 | 关键结论 |
+| --- | --- | --- |
+| `_probe_bd21_recipe_fallback_real_db.mts` → `.out.json` / `.out.txt` | **真库只读体检**：遍历 `listStrategies()` + `listVersions` + `getVersionBundle`，对**每个**策略版本跑 `assembleStrategySide` 并捕获 `warn` | **5 / 5 PASS**；全库 **12** 策略 / **13** 版本 ⇒ `strategy-document` **9** / `strategy-declarative-conditions` **2** / `explicit-request` **0** / **`default-fallback` 2**（`limit-up-baseline@1.0.0` + `@1.1.0`，各 `warn` **恰 1**）；warn 文本含策略身份与配方 id |
+| `_probe_ps001_first_round.mts` → `.out.json` / `.out.txt` | **Parameter Search 第一轮真实运行**（真实 tRPC / 真实 TiDB / 真实回测）：`createSearch` → `getSearch` → `startSearch` → `getSearchResults`；11 步判据 | **11 / 11 PASS**；`PSRUN-20260921-45da2fb2`；4 组合；`evaluated = 4` / `reusedFromCache = 4`（**跨 Run** 复用）/ `failed = 0`；9560 ms；`parameter_search_result` 行数 == 4；**默认保留 Search Run**（真实研究产物） |
+| ↑ **同脚本** `PS001_SCALE=expand` → `_probe_ps001_expanded.out.json` / `.out.txt` | 同上的**扩大规模**轮（9 组合，窗口 2025-01-02 ~ 2025-06-30） | **11 / 11 PASS**；`PSRUN-20260921-b43a5716`；9 组合；`evaluated = 9` / `reusedFromCache = 0`（**全部真算**）/ `failed = 0`；105241 ms；**9 / 9 `SUCCEEDED`**；`parameter_search_result` 行数 == 9 |
+| 单测（不在 evidence 目录） | `tests/server/runWorkbenchAssembly/recipeFallback.test.ts`（用 `assembleStrategySide` —— 纯装配、零 DB） | **4 / 4 PASS**（A 兜底 ⇒ `default-fallback` + **恰一条** warn；B 显式 ⇒ `explicit-request` + **零** warn；C 判别力；D zod 闭集四值哨兵）；**注入式**改回 `explicit-request` ⇒ **恰好 2 条变红** |
+| 报告（不在 evidence 目录） | `docs/strategy/STRATEGY-RESEARCH-BRIDGE-001-REPORT.md` **§26**（75036 B / 纯 LF） | 6 节结构：`BD-21` / 闭环状态 / 连接状态 / 11 问 / Tests / 非阻塞项 + ROADMAP；数字**全部从本节落盘证据现算**，由 `_scratch/srb001_closeout_report.py` 生成并带 3 条自检 |
+
+**重跑方式**（均在项目根目录执行；长任务**不要接管道**，输出重定向到文件）：
+
+```bash
+# 只读：真库配方来源分布 + 兜底 warn 计数
+pnpm exec tsx docs/evidence/_probe_bd21_recipe_fallback_real_db.mts > docs/evidence/_probe_bd21_recipe_fallback_real_db.out.txt 2>&1
+
+# 会写真库（parameter_search_run / _combination / _result 三类行）+ 真跑回测；默认保留 Search Run（真实研究产物）
+PS001_SCALE=smoke  pnpm exec tsx docs/evidence/_probe_ps001_first_round.mts > docs/evidence/_probe_ps001_first_round.out.txt 2>&1
+PS001_SCALE=expand pnpm exec tsx docs/evidence/_probe_ps001_first_round.mts > docs/evidence/_probe_ps001_expanded.out.txt 2>&1
+
+# 清理本探针创建的 Search Run（3 张表按 searchRunId 精确删；默认关闭，必须显式 PS001_CLEAN=1）
+PS001_CLEAN=1 PS001_SCALE=smoke pnpm exec tsx docs/evidence/_probe_ps001_first_round.mts > /dev/null 2>&1
+```
+
+🔴 **本轮登记「判据自身写错」3 条（全部是探针自身，0 条产品缺陷）+ 1 条文档漂移**：
+
+⒜ **宽容断言把整条判据旁路** —— 步骤 0 写成「`datasetVersionId === 390002` **或** 该值为 `undefined` / `null`」，后半**恒真**；而下方 `createSearch` 又**显式传了** `datasetVersionId` ⇒ **「坐标能否从文档派生」这条从未被检验过**。已拆为 `0a`（版本身份）+ `0b`（`resolvePrimaryDatasetVersionId(document) === 390002`，**不依赖调用方传值**）。
+⒝ **桶内聚合会张冠李戴** —— 初版按参数分桶再比各桶指标集合，桶内混着**其他参数**的差异（如 `breakDepth = 0` 桶含 `[0/0.5]` 与 `[0/1]`，`tradeCount ∈ {12, 31}` 那 12↔31 的差**来自 volumeRatio**）⇒ 读者**必然误读**。已改为**边际效应（配对比较）**：固定其余参数比较目标参数，并加 `evidenceForInsensitive.notVacuous`（`distinctValues ≥ 2` 且 `comparisonGroupsWithMultipleValues ≥ 1`）。
+⒞ **把「子集」当「互斥」** —— `evaluatedCount + reusedFromCacheCount === 组合数` 假设两者互斥；真实语义是 **`reused ⊆ evaluated`**（**缓存复用也是一次评估**，只是未重算）⇒ expand 轮 `evaluated = 9 / reused = 2` 被**误判 FAIL**。已改为 `completed + failed === 组合数 && evaluated === 组合数 && reused <= evaluated`。⚠️ 注意 expand 轮的 `reused = 2` 出现在**中间态**，**最终落盘**轮次为 `reused = 0`。
+⒟ **文档与行为漂移（已就地修正）** —— `_probe_ps001_first_round.mts` 文件头 docstring 的 `expand` 网格写作 `{0, 0.02, 0.05} × {0.5, 1, 2}`，而实际常量是 `{0, 0.05, 0.1} × {0.5, 1, 1.5}` ⇒ **照文档复跑会得到与已落盘证据不同的网格**。已按实测改写 docstring；`.out.json` 证据**未改**（它记录的是真实跑过的东西）。
+
+---
+
+## `BD-24` · 「跑完策略在『回测历史』里看不到」—— 长算后留档写库撞死连接 · 2026-09-21
+
+> **触发**：用户原话「刚才我跑了一下first-board-pullback，在回测历史中没有看到」。入口 = 策略页「运行策略」（`/strategies/first-board-pullback`），页面**出了结果**（`loopRun` 返回完整 14 阶段轨迹），但「回测历史」（`/backtest-runs`）没有这条。
+
+### 定位（先把「是没跑 / 还在算 / 跑完没存」三者分开）
+
+| 探针 | 结论 |
+| --- | --- |
+| `_probe_fbp_backtest_history.mts` + `_v2` + `.out.json` | 「回测历史」**唯一**数据源 = `closed_loop_backtest_run`；全库 **8** 行、最新 **2026-09-19**、`strategyId LIKE 'cand-%'` 占全部、`fbpRows = 0` |
+| `_probe_fbp_recent_writes.mts` + `.out.json` | 近 2h **全库**扫描：该表 **零新增**（同时排除「写到别的表了」）|
+| `_probe_fbp_ui_reach.mts` + `.out.json` | 真 tRPC 只读端点可达 ⇒ 页面链路正常，问题只在**写路径** |
+| `_probe_fbp_looprun_repro2.mts`（**进程内** `appRouter.createCaller`）| **抓到了原始错误**：idle 清单见下 |
+
+**唯一写入点** = `server/researchRunRouter.ts#loopRun` → `persistClosedLoopBacktestRun`，它是 **best-effort**（全失败只 `console.warn`、绝不抛）⇒ 页面照出结果、库里静默缺行 —— 这正是用户看到的现象。
+
+### 修前证据：`_probe_fbp_looprun_repro2.prefix-BD24.out.{json,txt}`（**已被另存保护，勿覆盖**）
+
+- 一次真实运行 **588881 ms**（9.81 分钟）后：`[loopRun] 留档第 1/3 次尝试失败` → `第 2/3` → `第 3/3` → **留档失败（历史列表将缺此条）**；3 次错误**全部** `Failed query: insert into closed_loop_backtest_run …`；
+- 3 条告警的间隔 = **19.585 s / 19.875 s**，减去退避 0.3 / 0.6 s ⇒ **每次失败恰 ≈19.28 s**（半开 socket 等 TCP 重传超时 —— 这是「重试代价」的实测标尺）；
+- ⚠️ 该次运行 `snapshotArchive('after')` 的列表 SELECT **也失败**（同一个 `ECONNRESET`）⇒ 探针走 catch 分支，所以 `prefix-BD24.out.json` 里 **`loopRunWarnings` 为空**、`fatalError = TRPCError: Failed query: select …`，而那 3 条 `[loopRun]` 告警在 **`capturedConsole`** 里（**易误读，特此记明**）⇒ 池里**至少 4 条**连接已死 ⇒ **3 次重试必然不够**；
+- 服务端 `wait_timeout = 28800` ⇒ **不是 TiDB 掐的**；DB host = `gateway03.us-east-1.prod.aws.tidbcloud.com:4000`。
+
+### 根因（两条，全部实测，无一条靠推断）
+
+⒜ **池的回收阈值大于对端窗口** —— `_probe_db_keepalive_ab.mts` 实测链路空闲窗口 **∈ (240, 330] s**（同一条 socket 空闲后复用：**240s 存活**、**330/360/480s 全部失败**；每组失败后立刻新建连接做对照**全部成功** ⇒ 死掉的只是那条空闲 socket，不是网关整体不可用）。而池 `idleTimeout` = **600s** ⇒ 9.81 分钟的长算（其间不再发 SQL）**恰好躲过回收**。
+⒝ **保活实际未生效** —— `enableKeepAlive: true` 但 `keepAliveInitialDelay: 0`；Node 文档：*"Setting `initialDelay` to 0 will leave the value unchanged from the default"* ⇒ 首次探测等**系统默认**（本机 `HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters` **未配置** `KeepAliveTime`/`KeepAliveInterval`（实测 `reg query` 报「找不到指定的注册表项或值」）⇒ **2 小时**）⇒ 死连接既不被检出、也留不到被提前移除。
+
+### 🔴 修复的能力边界（**这条是本轮最重要的更正**）
+
+回收循环（`node_modules/mysql2/lib/base/pool.js:198-210`）的实现是：
+
+```js
+while (this._freeConnections.length > this.config.maxIdle ||
+       (this._freeConnections.length > 0 &&
+        Date.now() - this._freeConnections.get(0).lastActiveTime > this.config.idleTimeout)) {
+  this._freeConnections.get(0).destroy();
+}
+```
+
+而 `lastActiveTime` 是在 **`release()`** 里被刷新的（`.../base/pool_connection.js:23-30`）⇒
+
+- 它**只处理自由队列** ⇒ 「借出跨越掐断窗口、之后才还回池」的连接**永远不在它的视野里**；
+- 那条连接还回池时时间戳又被刷新成「刚刚」⇒ **即使它站在自由队列里，也判不出过期**；
+⇒ 所以 `idleTimeout` 只能**缩小**写库边界的陈旧连接数量，**不能清零**。实测印证：
+
+| | 写库边界的陈旧连接 | 结果 |
+| --- | --- | --- |
+| 修前（600s） | **≥4 条**（3 次 INSERT + 紧随的 SELECT 全失败） | `fbpRows` = **0**，留档丢失 |
+| 修后（180s） | **1 条**（第 1 次尝试仍撞死连接，白等 **19.28 s**） | 第 2 次换新连接 **3.86 s** 成功 ⇒ `fbpRows` = **1** |
+
+⇒ **承重项是留档重试预算**（连接级错误会把那条连接移出池 ⇒ N 次尝试清掉 N 条陈旧连接），`idleTimeout` 只负责把陈旧连接**压进**这个预算。⚠️ 注释里原先写的「死连接在被掐之前就被回收」（以及「保活是防线」）都**过强/有误**，已按实测改写。
+
+### 🔴 一次被证伪的「修复」（本轮最有价值的负面证据）
+
+先试的办法是「把保活初始延迟改成 **30_000**，让死连接被快速检出」，结果**两连击**：
+
+⒜ **A/B 探针证伪其假设**：`30_000` 组在 330/360/480s **同样全部失败** ⇒ **保活挡不住链路掐断**；
+⒝ **真跑一次直接崩进程**：`_probe_fbp_looprun_repro2.keepalive-trial.out.txt` —— 失败形态从「半开挂 **19.3~20.0s** 后 `ECONNRESET`」变成「**0ms** 已关闭 socket」，于是 `EPIPE`（`writeAfterFIN`）触发 mysql2 `_handleFatalError → _notifyError` **再次** `emit('error')`，而 `node_modules/mysql2/lib/base/pool_connection.js` 注册的是 **`once('error')`**（第一次已被消费）⇒ **`Unhandled 'error' event` ⇒ 进程退出**（`code: 'EPIPE', fatal: true`）。
+
+⇒ **已按证据回退**（`keepAliveInitialDelay` 维持 `0`），并在 `server/db.ts` 就地写下红线；改动保留为**可复现的实验开关**（`DB_KEEPALIVE_INITIAL_DELAY_MS=30000`）。
+
+### 修复（零 DDL / 零迁移 / 零新依赖 / 零新端点）
+
+| 落点 | 改动 | 判据（派生自实测，不是拍脑袋） |
+| --- | --- | --- |
+| `server/db.ts#resolveIdleTimeoutMs` | 默认 **600_000 → 180_000** | 必须**严格小于**实测窗口下界 **240s**（留 25% 余量）⇒ 把「一直待在自由队列」的陈旧连接清掉，陈旧数量实测 **≥4 → 1** |
+| `server/db.ts` | 新增导出常量 `MEASURED_DB_IDLE_WINDOW_LOWER_BOUND_MS = 240_000` | 供单测**交叉核对落盘证据**（`A_current.aliveAtSec` 最大值）⇒ 数字不靠记忆 |
+| `server/db.ts#resolveKeepAliveInitialDelayMs` | 默认**维持 `0`**（**不是**修复项） | A/B + 真跑双证：有限值 ⇒ 保活无效且引 `EPIPE` 崩进程 |
+| `server/researchRunRouter.ts#persistClosedLoopBacktestRun` | 重试 **3 → 6**；**仅瞬时错误**重试；导出 + 依赖注入 | 实测池内**至少 4 条**已死 ⇒ 3 次必然不够（**承重项**）；非瞬时错误重试不可能成功（省下 N × 19.28s）|
+
+### 修复后真跑（`_probe_fbp_looprun_repro2.out.{json,txt}`，同一条探针、同一组入参）
+
+- `appearedInHistory` = **true**；`fbpRows` **0 → 1**；耗时 **571761 ms**（9.53 分钟）；`[loopRun]` 告警 **2** 条（第 1 次失败 + 第 2 次成功各一条）；
+- **时长可分解且自洽**（这就是「1 条陈旧连接」的直接读数）：计算 ≈ **548.3 s** + 第 1 次失败 **19.28 s** + 退避 **0.3 s** + 第 2 次成功 **3.86 s** ≈ **571.7 s** = 落盘 `durationMs`；
+- 写入的那一行：`runId = clrun-20260921121418150`、`strategyId = first-board-pullback`、`initialCapital = 1000000`、`finalEquity = 924331.41`、`tradeCount = 35`（**真实研究产物，默认不清理**）。
+
+### 用法（复跑）
+
+```bash
+# ① A/B：链路空闲窗口 + 保活 A/B（只读，约 9 分钟）
+node_modules/.bin/tsx docs/evidence/_probe_db_keepalive_ab.mts > docs/evidence/_probe_db_keepalive_ab.stdout.txt 2>&1
+
+# ② 端到端：真跑一次 first-board-pullback（约 10 分钟；会**覆盖**自身 out.*，复跑前先另存）
+node_modules/.bin/tsx docs/evidence/_probe_fbp_looprun_repro2.mts > docs/evidence/_probe_fbp_looprun_repro2.out.txt 2>&1
+
+# ③ 单测
+node_modules/.bin/vitest run tests/server/dbPoolConfig.test.ts tests/server/closedLoopBacktestRun/
+```
+
+⚠️ `_probe_db_idle_window.mts`（上一轮的窗口探针）**已被 ① 取代**：它在上一轮被中断，磁盘上只留 `t=0` 建连 + `空闲 60.0s ⇒ 复用成功` 两行**部分证据**（只能证明「窗口 > 60s」）。
+
+## 2026-09-21 · 异步独立实验真实链路
+
+- 探针：`_probe_async_experiment_real.mts`。
+- 运行：`first-board-pullback/entry-day`，`Dataset 390002`，`maxEvents=10`。
+- 目的：验证 `startRun -> 单进程后台队列 -> Run 元数据/代码指纹 -> 结果与 Manifest 落对象存储 -> 终态可读`。
+- 结果：`RUN-20260921-A0E433D0`，`COMPLETED`，`durationMs=34027`，`resultAvailable=true`，`manifestAvailable=true`，`artifactCount=2`，`experimentCodeDigest=exp-code-sha256:0e28dc3d32d2857756de9c031ee1f52f28ce56b186f25a2fa6de6d1eef58e0d1`。
+
+## 2026-09-22 · 首板后回踩确认性 Observation / Holdout 与污染审计
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_run_protocol_confirmation.mts` → `_run_protocol_confirmation.out.{json,txt}` | 生产 Run Service 真实执行 `first-board-pullback/decision-forward-study`；协议 `first-board-pullback-forward-confirmation@1.0.0`，Observation `2024-09-01..2025-12-31`、Holdout `2026-01-01..2026-09-01` | Observation `RUN-20260921-8AF91CE9`：`COMPLETED / OBSERVATION_READY`，15,297 样本，H1 预检 **0/10**；Holdout `RUN-20260921-54D654BB`：`COMPLETED / PASS`（机械 Gate），8,415 样本，H1 **8/10** |
+| `_probe_holdout_contamination.mts` → `.out.json` | 只读审计 Holdout 是否与历史 Run 重叠 | `contaminated=true`；污染来源 `RUN-20260921-A87E7438`（`EXPLORATORY`，`evaluationWindow=null` ⇒ Dataset 全窗）⇒ 2026 不是干净 OOS，禁止创建正式策略 |
+
+⚠️ 本次实验的机械化 `PASS` **不能升级为策略证据**：方向在两个时段完全反转（Observation 0/10，Holdout 8/10），且 2026 已被早期探索运行读过。新门禁会在 Holdout 启动前拒绝此类窗口，并在 Strategy Bridge 再次拒绝已污染证据。
+
+## 2026-09-22 · 主板执行事实层与确认性 Dataset v3
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `drizzle/0050_limit_execution_facts.sql` | event / prefix / post 新增前收、涨跌停价、停牌、可交易性字段 | 真库 `20 executed / pass=true`；幂等 `20 skipped / pass=true` |
+| `docs/dataset001/v3-confirmatory-report.json` | 真实构建 `first_limit_pullback@v3-confirmatory`，`2019-01-01..2024-08-31`，`main + excludeSt`，T-20..T+20 | `READY`；`49154 events / 3189359 rows`；job `COMPLETED`；耗时 `606.9s` |
+| `_probe_v3_execution_facts.mts` → `.out.json` | 真库验收新增执行事实层 | Observation `26383` events；Holdout `22771` events；post `983080`；前收非空 `979495`；停牌 `2717`；一字涨停 `6807`；一字跌停 `2259`；可买 `967332`；可卖 `959733` |
+
+本批只覆盖沪深主板；日期感知规则已覆盖创业板 2020-08-24 前后 10% / 20% 的制度切换，但 v3 数据本身没有创业板事件。
+
+## 2026-09-22 · 首板后回撤但不破开盘价交易研究
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_run_hold_open_price_pullback.mts` → `.out.json` | 真实 Run：`first-board-pullback/hold-open-price-pullback` × `Dataset 540002`；T+1..T+5 等待首次相对首板收盘 100bps 回撤；不破首板开盘价；次日开盘入场；T+10/15/20 退出 | `RUN-20260921-35357C36`，`COMPLETED / SUCCEEDED`，234,032ms；候选 **49,154**、eligible **48,897**、触发 **34,637**、入场前破位 **5,221**、未触发 **9,039**、触发后不可买 **143**、交易样本 **101,751** |
+
+真实结果：交易模式 T+10 / T+15 / T+20 中位净收益分别为 **-1.80% / -2.83% / -3.57%**；全部样本 T+1 开盘入场基准分别为 **-3.23% / -4.15% / -4.92%**。模式相对基准更好，但绝对收益仍为负，且尚未做日期聚类 Bootstrap、Holdout 或破位后实际退出撮合。
+
+### 一字板首板排除复跑（experiment `1.1.0`）
+
+- 新 Run：`RUN-20260922-2090E5A6`，参数 `excludeOneWordLimitUp=true`。
+- 识别一字涨停首板 **1,621** 个并全部剔除；eligible 由 **48,897 → 47,276**。
+- 入场前破位由 **5,221 → 4,214**，未触发由 **9,039 → 8,425**；两者合计正好减少 **1,621**。
+- 触发数 **34,637**、触发后不可买 **143**、交易样本 **101,751** 均不变。
+- T+10/T+15/T+20 的所有收益指标与上一版逐位相同 ⇒ 一字板事件原先就没有进入可交易触发集，本次排除对该交易模式结果没有增量影响。
+
+## 2026-09-22 · 首板前上下文 / 首板后振幅 / 换手率 + 日期聚类 Bootstrap
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_run_pre_event_context_study.mts` → `.out.json` | 首板前 `daysSincePreviousLimit` + T-5/T-10/T-20 前期涨幅 → T+1 开盘到 T+5/T+10/T+20 收益 | `RUN-20260922-71838486`；eligible **47,120**，间隔已知 **44,850**、未知 **2,270**；间隔越短越差、首板前越跌后续相对越好 |
+| `_run_post_event_amplitude_study.mts` → `.out.json` | T+1..T+5 是否触及涨跌停 + 平均振幅 → T+6 开盘到 T+10/T+15/T+20 收益 | `RUN-20260922-3F4B3C39`；无涨跌停 **25,409**、有涨跌停 **23,488**；无涨跌停及各视界均更好，振幅 ≥8% 明显更差 |
+| `_run_turnover_study.mts` → `.out.json` | 首板日换手率 + 流通市值 → 未来收益；1000 次 Moving Block Bootstrap，block=20 交易日 | `RUN-20260922-4A0DAF7B`；换手率非空 **49,150**、流通市值非空 **0**；≥10% 换手率的聚类 Bootstrap 95% CI 在 T+5/T+10/T+20 均显著为负区间，流通市值返回 `INSUFFICIENT_DATA` |
+
+## 2026-09-26 · 独立实验列表页「模式分级 + 组内分页」
+
+**需求（用户原话）**：「独立实验页面需要优化一下，需要分级展示，第一层需要展示模式，对于不同的模式下的实验进行分组，然后实验也要分页展示」。
+
+**为什么需要真浏览器**：分级 / 分页是**渲染层**性质 —— tRPC 返回 200、单测全绿都不能证明「模式卡片真的在 DOM 里」「组内翻页真的换了行集」「折叠真的收起了内容」「既有『打开』入口没被改版打断」。
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_probe_list001_experiment_modes.mjs` → `.out.{txt,json}` | 无头 Chrome + CDP 按**正常导航路径**走到 `/research-experiments`：A **两级分级不漏**（一级 = 命名空间，键序 = 映射声明；模式内「各档之和 == 一级计数」；两级计数之和各自 == list API 34；最大档 17 < 34 ⇒ 分级真的发生）；B **档内分页**（比例 = ceil(N/5) / 真实点「下一页」/ 第 2 页行数 = min(5,N−5) / 两页行集零交集 / 区间文案随页更新 / 状态按 `modeKey::kindKey` 隔离）；C 折叠（档级 + 模式级 + 作用域隔离 + 全部收起/展开 + 按钮文案翻转）；D 既有「打开」→ 详情路由仍可达；E 零回归（list 200 / console error 0 / 请求失败 0 / 未被登录门拦住）；F 夜间可读性（canvas 反解真实色算对比度，三级标题 + 分页控件） | **PASS 44 / FAIL 0 / SKIP 0 ⇒ ALL PASS**。实测 2 模式 × 4 档：`first-board-pullback` 33 = 单因子 6 + 多因子 10 + 其他口径 17，`combo-backtest` 1 = 其他口径 1；计数和 **34 == API 34**；`other-scope`（17 个）真实翻页：第 2 页 5 行、与第 1 页交集 0；夜间对比度 一级标题 **12.8** / 说明 **6.4** / 分页页码 **6.81** / 每页控件 **8.19**（全部 ≥ 4.5:1） |
+| （同上，口径变更记录） | 本探针**首版**量的是「7 个研究范式」分组（PASS 31），用户改口径为「命名空间 → 单/多因子」后**整份重写**（PASS 44）。留档：暗色段曾 8 条全 SKIP —— `Page.reload` 后 `waitFor` 命中**上一节的旧文档**，在「新文档已换主题、列表还没挂上」的空窗期量到节点全灭，**看起来像产品没渲染**；解法 = **带文档哨兵的硬导航** + 就绪诊断落盘 ⇒ **产品零改动**，是探针自己的竞态 |
+
+**本轮登记的「判据自身写错」2 条**（按项目纪律登记原因，而不是只把颜色刷绿）：
+
+1. 🔴 **探针里漏了一个开引号**：`querySelectorAll(<选择器> [data-experiment-row]').length` —— 第二段选择器没有起始引号 ⇒ 整段是语法错误 ⇒ `Runtime.evaluate` 返 `undefined` ⇒ `|| 0` 把它变成「其他组可见行 0」，**看起来像产品的作用域泄漏**（首跑 FAIL 1）。真因是断言自身拼错，不是页面错。
+2. 🔴 **「文本含『页』」不是页码判据**：分页条里「**每**页」（标签）也含「页」，首跑因此把标签当成了页码 span（量到 `text="每页"`）。已改成绑形状的正则（`第 \d+ / \d+ 页`）—— 与 `PROJECT_RULES.md` 的「绑到真正承载目标值的节点」同一类坑。
+
+**本轮附带发现（非本次需求引入）**：`client/src/theme/darkCompatibility.css` 在 **HEAD 上已滞后** —— `client/src/pages/researchExperiments/artifactViews.tsx` 里的 `border-violet-300` / `border-pink-300` / `text-pink-700` **从未进过兼容层**（该文件自 RESEARCH-EXPERIMENT-004 起就在用这三个类）。按「生成物禁手改、必须重跑生成器」重跑 `scripts/generateDarkCompatibility.mjs` 后一并补齐（另含纯排序 churn：新增 `client/**` 文件会改变生成器的扫描顺序，属已知现象）。
+
+
+
+## 2026-09-26 · 3F TopN 策略化：Core 真实回测链路打通（含两处 server 修复）
+
+**需求（任务书原文要点）**：冻结 3F（`maxAmplitude` LOW + `meanAmplitude` LOW + `t1VolumeRatio` HIGH，等权各 1/3），
+在首板回踩候选池上**每日按 3F 合成分降序排名、只选 TopN**（先测 N=3 / N=5），明确并固定买入时点/价格、
+持有周期、退出规则、仓位分配并严格 PIT；**用现有 Strategy Core 执行真实回测**，输出收益、胜率、最大回撤、
+交易数、年度表现与完整「评分→排名→入选→交易」证据链。
+
+| 证据 | 内容 | 结果 |
+|---|---|---|
+| `_probe_3f_topn_backtest.mts` → `.json` / `.out.txt` | 主探针：装配 3F TopN 策略文档 → `evaluateStrategyParameters`（官方标量）→ **同一份数据集注入复跑**取交易明细与候选证据链（零额外取数）；带 `coreDecisionDiag`（Core 决策源 digest）与 `executionPanelAudit`（面板覆盖直方图 + 卖单按「原因 × 执行日是否有行」交叉统计） | 链路打通。630001 冒烟（`--window-end 15`）：决策日/信号/入选 **25 / 761 / 100**、交易 49（完成 44）、胜率 50%、`MAX_POSITIONS_REACHED` 由 76 降到 3；690001：`220 / 2395 / 914`、交易 404 |
+| `_probe_registry_row_budget.mts` → `.out.txt` | 直读桥**行预算**：事件数 × (end+2) 行/事件 vs `REGISTRY_BRIDGE_MAX_ROWS` | 660001（v5）= 73,003 事件 ⇒ 即便 `end=5` 也需 **511,021 行**，**任何合法窗口都超原护栏 400,000** |
+| `_probe_v5_events_per_year.mts` → `.out.txt` | v5 **按年**事件数与行预算（判断能否分片绕开护栏） | 各年 5,993~10,924 事件（101k~186k 行，单看都在护栏内）；但直读桥**没有日期区间参数**（`assemble.ts:428-433` 只传 versionId/name/observationWindow）⇒ 行数由**版本总事件数**决定 ⇒ **按年切分无效** |
+| `_probe_dataset_version_catalog.mts` → `.out.txt` | 所有 `dataset_version` 的规模与可直读性（单版本事件上限 ≈ 23,529） | 唯一「v5 口径且可直读」的只有 **630001**（1,285 事件 / 1 个月）；660001、570001、390002 均超护栏 |
+| `_probe_dataset_version_alignment.mts` → `.out.txt` | 660001 vs 690001 **口径比对**（能否用后者替代前者） | **不同口径**：v5 = `excludeSt:true` + `kind:"firstBoard"`；combo-v1 = `excludeSt:false` + `kind:"limitUp"`（含非首板涨停）。重叠区 2025-11-03..2026-09-04 事件数 **10,418 vs 15,473** ⇒ 690001 **不能替代 v5** |
+| `_probe_limitdown_sanity.mts` → `.out.txt` | `LIMIT_DOWN`（开盘跌停）拒单率是否为**数据问题** | 真实开盘跌停率仅 **0.255%**（660001）/ 0.295%（690001）⇒ 判据无错；探针里 854 次是「**卖不掉的仓位每天重试**」的堆积（重试偏差），不是判据错误 |
+
+### 本轮定位并修复的两个根因（均改 `server/**`）
+
+1. 🔴 **零信号且不报错**（Task 之前的最大阻塞）：
+   - `strategyCore/adapters/legacyDefinition.ts:356` 在 **enabled 条件为空时直接丢弃 WINDOW 节点** ⇒ 规则图退化为 `SEQUENCE[EVENT, TRIGGER]`；
+   - `strategyCore/ruleGraph.ts:437` 在 TRIGGER 无 WINDOW journal 时候选日 = `[currentDay]`，而 `NEXT_TRADING_DAY` 要求 `currentDay === last + 1` ⇒ **恒不成立**。
+   - 修法（在策略文档侧）：放一条**恒真条件哨兵**（`bar.close > 0`）让窗口进入规则图；trigger 改用 `FIRST_VALID_DAY`。修复后 630001 由 `0 信号` 变为 **761 信号 / 100 入选**。
+
+2. 🔴 **持仓永久悬挂**（执行层缺陷）：卖出订单的 `executionTime` 固定是**下一交易日**，若该证券在执行日**无行情行**，卖出必然被拒，而引擎**逐日重试直到期末**。实测 690001：`holdingPeriod` 出现 **67 / 76 / 108 / 134** 的长尾，`SUSPENDED / 执行日无行` 697 次、`SUBMITTED / 执行日无行` 705 次。
+
+### 两处 server 改动（用户 2026-09-26 裁定：提高护栏 + 加兜底）
+
+| 文件 | 改动 | 依据 |
+|---|---|---|
+| `server/runWorkbenchAssembly/datasetFromRegistry.ts` | `REGISTRY_BRIDGE_MAX_ROWS` 400,000 → **1,400,000** | 护栏的隐含前提是「版本事件数 ≤ 2 万」（400,000 ÷ 20 行/事件），而 v5 有 73,003 事件 ⇒ 护栏容量已落后于数据规模。1,400,000 覆盖 v5 在 `end ≤ 17` 的全部合法窗口：v5 + `end=15` = 1,241,051 行；吞吐实测 152,442 行取数 **55s** ⇒ 124 万行约 8~15 分钟 |
+| `server/research/simulator/engine.ts` | 新增 **(d-2) 面板末日清算**：若持仓证券在**下一交易日无行情行**，则以**当日收盘价**强制清算 | 复用 (c2) 止损/止盈的「syntheticBar → `executionModel.quote` → `portfolio.sell`」路径 ⇒ 滑点/费用/涨跌停拦截与正常路径完全一致 |
+
+**⚠️ 第一版兜底已实测无效并撤销**（留档，避免重犯）：初版判据是 `nextDate >= lastBarDateBySecurity.get(sec)`（「最后一个有行情日」）。
+失败原因 = 面板里**同一证券的多个事件会合并**，行跨度实测达 **34~210 行**（见 `面板覆盖（证券数 / 行数直方图）`），
+`lastDate` 被推得很远 ⇒ `nextDate >= lastDate` **从不成立** ⇒ 兜底零触发（重跑结果与改动前**逐位相同**，只有因代码变更而变的指纹不同）。
+第二版改为判「**明日是否有行**」才真正触发。教训：**别用「面板末日」这种会被数据合并推远的量做判据，要判真正的失败条件（执行日无行）**。
+
+### 观察窗口的两条实测事实（写进模式文件头）
+
+- **窗口 `end` 只调「执行面板深度」，不改入选集合**：`[5,5]` / `[5,9]` / `[5,15]` 的信号数与入选数**完全相同**（761 / 100），
+  因为 Core 的 `firesToday = satisfiedToday && !satisfiedBefore` 与 trigger 类型无关（语义 = 首个成立日）⇒ 事件只在 T+5 出一次信号。
+- **但 `end` 决定退出能不能成交**：`[5,5]` 面板到 rd 6、`[5,9]` 到 rd 10、`[5,15]` 到 rd 16；
+  630001 实测完成的卖出 **5 → 25 → 44**，期末仍持仓 **19 → 16 → 5**，执行日无行的卖单 **229 → 176 → 0**。
+
+
+
+### v5 全区间正式结果（`dataset_version.id = 660001`，2019-01-01 ~ 2026-09-04）
+
+护栏提高 + 流式指纹修复后，registry 直读终于跑通全区间：**969,060 行 / 取数 412.7s**（`NODE_OPTIONS=--max-old-space-size=8192`）。
+
+| 指标 | N3 | N5 |
+|---|---|---|
+| 总收益 | **-64.91%** | **-63.51%** |
+| 年化（CAGR） | -13.21% | -12.75% |
+| 最大回撤 | 66.02% | 64.21% |
+| 胜率 | 39.62% | 39.47% |
+| 盈亏比 | 0.7254 | 0.7339 |
+| 完成交易数 | 578 | 750 |
+| 决策日 / 信号 / 入选 | 1,863 / 3,314 / 1,575 | 1,863 / 3,314 / 1,940 |
+| 双跑指纹一致 | true | true |
+
+年度（年内首末权益比）：2019 -19.22%/-14.91%，2020 -34.57%/-35.51%，2021 -22.55%/-23.43%，
+2022 -12.18%/-10.04%，2023 -5.39%/-5.22%，2024 +1.72%/+2.01%，2025 +1.40%/+0.07%，2026 -1.46%/-1.61%（N3/N5）。
+
+结论文档：`docs/research/RESULT-3F-TOPN-STRATEGY-001.md`（脚本机械生成 + 独立回校 38 项数字一致）。
+
+### 第三个容量瓶颈：`computeDatasetVersion` 的 `RangeError`
+
+护栏放宽到 124 万行后立刻撞上第二个瓶颈：
+`RangeError: Invalid string length` @ `canonicalStringify`（`version.ts:27`）← `computeDatasetVersion`（`:56`）
+← `buildResearchDatasetFromRegistry`（`datasetFromRegistry.ts:1115`）。原因 = 它要把整个
+`{request, universeDefinition, rows}` **先拼成一个 canonical 字符串**再 SHA-256，行数过百万时越过 V8 字符串上限。
+
+修法：改用**已存在**的 `computeDatasetVersionStreaming`（逐行 `hash.update`，内存 O(1)），
+它与一次性版**对同内容产出完全相同的版本字符串**，该等价性已由
+`tests/server/researchDataset/partitioned.test.ts:121` 钉死 ⇒ 零语义变更（测试 10/10 通过）。
+教训：**放宽行数护栏时，要同步检查「有没有别的地方把全量行拼成单个字符串」**。
+
+### 🔴 决定性发现：执行侧语义是「每证券一次信号」，不是「每事件一次」
+
+跑通后核对发现的**架构级口径退化**（不是配置问题，registry 与 rebuild 两条路径都逃不掉）：
+
+- v5 全区间：**754 笔交易 / 754 个不同证券 ⇒ 每证券恰好 1 笔**；N3 同样 **581 笔 / 581 个证券 = 每证券 1.000 笔**。
+- 信号总数 **3,314**，与面板证券数（3,334）同量级；而 Dataset v5 有 **73,003 个首板事件**（覆盖率仅 4.5%）。
+- 成因链：面板按 `(securityId, tradeDate)` 合并 ⇒ 同证券多事件合成一条**超长 bars 序列**
+  （实测 `maxBarCount = 837`、`maxRelativeDayObserved = 836`）；`anchorPolicy = SERIES_START`
+  把事件锚定在 `bars[0]`（序列首日）⇒ 该证券后续首板不再被识别为事件；再叠加
+  `firesToday = satisfiedToday && !satisfiedBefore`（语义 = 首个成立日）⇒ **每证券终身只出一次信号**。
+- ⇒ 本轮出的执行侧结论**不能**与研究侧事件级结论（`RESULT-OOS-COMPOSITE-3F-001`）横向比较，
+  已在报告开头醒目登记；「Dataset schema 引入事件维度（面板键 `(eventId, relativeDay)`）」登记为后续事项。
+
+### 数据库上云清点（2026-09-28）—— 2 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_db_migration_inventory.mts` | 只读清点探针；产出本节另两个文件 |
+| `_db_migration_inventory.md` / `.json` | 迁移方案讨论（TiDB Cloud → 阿里云 ECS 自建 MySQL） |
+
+### ECS 自建 MySQL 公网连通性与安全姿态（2026-09-28）—— 3 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_ecs_mysql_connectivity_probe.mjs` | 只读探针（3 条判据，含 1 条负向）；产出本节另两个文件 |
+| `_ecs_mysql_connectivity.md` / `.json` | 迁移方案「本机 → ECS 新库」写入通路验收证据；P3 负向判据曾抓出 `root@'%'` 公网暴露并据以收敛 |
+
+
+### T2「数据地基」迁移验收（2026-09-28）—— 1 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_t2_market_verify_raw.txt` | ECS 侧 `verify.sh s2_market` 原始输出（源库 TiDB vs 目标库 MySQL 逐表精确 `COUNT(*)`）：**9/9 表一致 / 17,994,199 行**，独立复跑结果相同 ⇒ 结果可复现 |
+
+### 应用切流验收（2026-10-03）—— 1 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_db_migration_verify_20261003.txt` | 切流前「重导 → 重导入 → 复比对」闭环的原始输出：`s1_core` **56/56 一致**、`s2_market` **9/9 一致**（`stock_daily_prices` 8,898,902 / `liquidity_daily` 9,015,158）；首轮曾抓出 09-21~09-24 补录的 4 行缺口并据以放宽增量窗口 |
+
+### 数据库使用情况与读速实测（2026-10-05）—— 4 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_db_perf.mts` | 只读探针：实例配置 / `GLOBAL STATUS` 关键项 / 库规模 / 读速第一轮（`SELECT 1` RTT、全表 `COUNT(*)` 扫描速率、端到端拉取 20 万行） |
+| `_probe_db_perf_attribution.mts` | 只读探针（归因）：列定义、**窄列 vs 宽列**、**text 协议 vs 二进制协议**、主键点查延迟、4 连接并发——用于把「慢」归因到带宽而非解析/协议/并发 |
+| `_probe_table_size.mts` | 只读探针：逐表 `DATA_LENGTH`/`INDEX_LENGTH` Top20 + `ds_*` 五表精确 `COUNT(*)`；修掉「MySQL 8 `information_schema` 返回**大写列名**、不加 `AS` 别名取不到」的坑 |
+| `_db_perf_20261005.txt` | 上述三探针原始输出 + **单进程 vs 两独立进程并行**的决定性实验（427 KB/s vs 445 KB/s，排除同进程 CPU 混淆）+ 瓶颈推理链 + OS 层未取项说明 + **ECS SSH 主机密钥不一致**的登记；结论：服务端不慢（`COUNT(*)` 890 万行 3.14 s）、延迟好（RTT 19.1 ms），**大批量读封顶 ≈ 400~450 KB/s（约 3.5 Mbps，卡在 ECS 公网出带宽）** |
+
+### 切换数据源核实（2026-10-03）—— 2 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_datasource_identity.mts` | 只读探针：走应用自己的入口（`.env` → `getDb()`）取**实连库身份**（`@@hostname` / `@@version` / `DATABASE()` / `CURRENT_USER()` / `@@session.time_zone`）与服务端 `information_schema.processlist` 的客户端 IP 分布；内含「**不能用 `@@port` 判断新库**」的判据说明（`@@port` 是服务端监听端口，非客户端连接端口） |
+| `_datasource_switch_verify_20261003.txt` | 上述探针原始输出 + 本机全量非本机 ESTABLISHED 连接统计 + 进程身份识别 + 代码层「零硬编码」检索结论；结论：**14 条连接全指向 `47.94.112.21:13306`，0 条连向旧 TiDB**；`MinIO` 端点切流前即同机（非本轮变更） |
+
+### 切流后时间语义回归（2026-10-03）—— 4 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_mysql_session_tz.mts` | 只读探针：新库 `@@global/@@session.time_zone` / `now()` / `unix_timestamp(now())`，并直接对比 `dataset_build_job.startedAt` 与 `updatedAt` 的库内 instant |
+| `_probe_mysql_tz_orm_vs_raw.mts` | 只读探针：**同一行走 drizzle 读 vs 裸 SQL 读**的对照（决定性证据，抓出库默认列读值 +8h） |
+| `_probe_srcdb_timezone.mts` | 只读探针：源库 TiDB Cloud 会话时区（`now() == utc_timestamp()` ⇒ 源库为 UTC，用 `.env.bak-tidb-20260928` 的 DSN，不打印凭据） |
+| `_mysql_session_tz_regression_20261003.txt` | 上述三探针的原始输出 + drizzle 源码摘录 + 影响面与修法建议；结论：容器 `time_zone='+08:00'` 与 drizzle 硬编码的 UTC 假设错位 ⇒ **切流引入**的 +8h 时间语义回归 |
+
+
+## 2026-10-02 · 首板回撤池右尾与退出路径研究 — 2 个
+
+| 文件 | 被引用于 |
+|---|---|
+| `_analysis_trend_pool_right_tail_001.json` | `docs/research/RESULT-TREND-POOL-RIGHT-TAIL-001.md`；脚本 `scripts/runTrendPoolRightTail001.mts` |
+| `_analysis_exit_path_research_001.json` | `docs/research/RESULT-EXIT-PATH-RESEARCH-001.md`；脚本 `scripts/runExitPathResearch001.mts` |
+| `_analysis_exit_confirmation_002.json`（已清理 2026-10-07） | `docs/research/RESULT-EXIT-CONFIRMATION-002.md`；脚本 `scripts/runExitConfirmation002.mts` |
+| `_analysis_profit_running_state_003.json` | `docs/research/RESULT-PROFIT-RUNNING-STATE-003.md`；派生自 `_analysis_exit_confirmation_002.json`（已清理 2026-10-07）；脚本 `scripts/reportProfitRunningState003.mts` |
+| `_analysis_runner_state_research_004.json`（已清理 2026-10-07） / `_analysis_runner_state_research_004_summary.json`（已清理 2026-10-07） | `docs/research/RESULT-RUNNER-STATE-RESEARCH-004.md`；运行脚本 `scripts/runRunnerStateResearch004.mts` / 报告脚本 `scripts/reportRunnerStateResearch004.mts` |
+| `_analysis_runner_selection_005_summary.json` | `docs/research/RESULT-RUNNER-SELECTION-005.md`；派生自 `_analysis_runner_state_research_004.json`（已清理 2026-10-07）；脚本 `scripts/reportRunnerSelection005.mts` |
+| `_analysis_exit_trend_deterioration_006.json`（已清理 2026-10-07） / `_analysis_exit_trend_deterioration_006_summary.json` | `docs/research/RESULT-EXIT-TREND-DETERIORATION-006.md`；运行脚本 `scripts/runExitTrendDeterioration006.mts` / 报告脚本 `scripts/reportExitTrendDeterioration006.mts` |
+| `_analysis_exit_confirmation_007.json`（已清理 2026-10-07） / `_analysis_exit_confirmation_007_summary.json`（已清理 2026-10-07） | `docs/research/RESULT-EXIT-CONFIRMATION-007.md`；运行脚本 `scripts/runExitConfirmation007.mts` / 报告脚本 `scripts/reportExitConfirmation007.mts` |
+| `_analysis_exit_second_confirmation_008.json`（已清理 2026-10-07） / `_analysis_exit_second_confirmation_008_summary.json`（已清理 2026-10-07） | `docs/research/RESULT-EXIT-SECOND-CONFIRMATION-008.md`；派生脚本 `scripts/runExitSecondConfirmation008.mts` / 报告脚本 `scripts/reportExitSecondConfirmation008.mts` |
+| `_analysis_exit_path_validation_009.json`（已清理 2026-10-07） / `_analysis_exit_path_validation_009_summary.json` | `docs/research/RESULT-EXIT-PATH-VALIDATION-009.md`；派生脚本 `scripts/runExitPathValidation009.mts` / 报告脚本 `scripts/reportExitPathValidation009.mts` |
+| `_analysis_strategy_exit_validation_010.json`（已清理 2026-10-07） / `_analysis_strategy_exit_validation_010_summary.json` | `docs/research/RESULT-STRATEGY-EXIT-VALIDATION-010.md`；池构建 `scripts/buildStrategyExitValidation010Pool.mts` / 执行脚本 `scripts/runStrategyExitValidation010.mts` / 报告脚本 `scripts/reportStrategyExitValidation010.mts` |
+| `_analysis_3f_top3_v1621_t80_validation_20261002.json`（已清理 2026-10-07） / `_analysis_3f_top3_v1621_t80_validation_20261002_summary.json` | `docs/research/RESULT-3F-TOPN-3-V1_62_1-T80-001.md`；执行脚本 `scripts/run3FTopN3V1621T80Validation.mts` / 报告脚本 `scripts/report3FTopN3V1621T80Validation.mts`；实际 T+80 坐标 `datasetVersionId=750001`（v7），660001 仅为 v5/T+20 |
+| `_analysis_runner_state_t80_001.json`（已清理 2026-10-07） / `_analysis_runner_state_t80_001_summary.json`（已清理 2026-10-07） | `docs/research/RESULT-RUNNER-STATE-T80-001.md`；执行脚本 `scripts/runRunnerStateT80Research001.mts` / 报告脚本 `scripts/reportRunnerStateT80Research001.mts`；固定 1.62.1 实际成交样本，T+10/T+15/T+20 单变量状态研究 |
+| `_analysis_runner_state_embedded_001.json` / `_analysis_runner_state_embedded_001_summary.json` | `docs/research/RESULT-RUNNER-STATE-EMBEDDED-001.md`；执行脚本 `scripts/runRunnerStateEmbedded001.mts` / 报告脚本 `scripts/reportRunnerStateEmbedded001.mts`；5 个状态独立只读内嵌验证 |
+| `_analysis_runner_holding_bridge_001.json` / `_analysis_runner_holding_bridge_001_summary.json` | `docs/research/RESULT-RUNNER-HOLDING-BRIDGE-001.md`；执行脚本 `scripts/runRunnerHoldingBridge001.mts` / 报告脚本 `scripts/reportRunnerHoldingBridge001.mts`；12 个单变量 × T+20/T+80 Runner Holding Bridge 正式验证 |
+| `_analysis_runner_holding_bridge_001_consistency.json` | `docs/research/RESULT-RUNNER-HOLDING-BRIDGE-001-CONSISTENCY.md`；统一正式 1.62.1 性能基线（1,359/+57.73%）与 Bridge T80 研究执行基线（1,619/+15.79%），并留档研究版本身份 |
+| `_analysis_runner_holding_newhigh3_t80_001.json` / `_analysis_runner_holding_newhigh3_t80_001_summary.json` / `_analysis_runner_holding_newhigh3_t80_001_version.json` | `docs/research/RESULT-RUNNER-HOLDING-NEWHIGH3-T80-001.md`；执行脚本 `scripts/runRunnerHoldingNewHigh3T80_001.mts` / 报告脚本 `scripts/reportRunnerHoldingNewHigh3T80_001.mts`；`study-runner-holding-bridge-newhigh3-t74@1.0.0` 正式 Runner 持有验证（A 1,359/+57.73% ↔ B 1,619/+15.79% ↔ C 1,434/+151.10%），含 exitPolicy 逐字段唯一性快照与 execution fingerprint |
+| `_analysis_runner_holding_newhigh3_oos_wfa_001.json` / `_analysis_runner_holding_newhigh3_oos_wfa_001_summary.json` / `_analysis_runner_holding_newhigh3_oos_wfa_001_wfa_windows.json` / `_analysis_runner_holding_newhigh3_oos_wfa_001_version.json` | `docs/research/RESULT-RUNNER-HOLDING-NEWHIGH3-OOS-WFA-001.md`；执行脚本 `scripts/runRunnerHoldingNewHigh3OosWfa001.mts` / 报告脚本 `scripts/reportRunnerHoldingNewHigh3OosWfa001.mts`；`study-runner-holding-bridge-newhigh3-t74@1.0.0` 的严格 OOS + Rolling WFA（full parity PASS；standalone OOS / 逐年 WFA / cost×2 / 每窗口 execution fingerprint） |
+| `_analysis_entry_exit_clock_001.json` / `_analysis_entry_exit_clock_001_summary.json` / `_analysis_entry_exit_clock_001_version.json` | `docs/research/RESULT-ENTRY-EXIT-CLOCK-001.md`；执行脚本 `scripts/runEntryExitClock001.mts` / 报告脚本 `scripts/reportEntryExitClock001.mts`；探针 `docs/evidence/_probe_entry_exit_clock_001.mts`；“实际入场日计持有” vs “固定事件日退出” 三类口径（E_close / H_signal / H_fill）的收益分布、亏损尾部与入场日错位测量 |
+| `_analysis_runner_state_clock_map_001.json` / `_analysis_runner_state_clock_map_001_summary.json` / `_analysis_runner_state_clock_map_001_version.json` | `docs/research/RESULT-RUNNER-STATE-CLOCK-MAP-001.md`；执行脚本 `scripts/runRunnerStateClockMap001.mts` / 报告脚本 `scripts/reportRunnerStateClockMap001.mts`；13 个冻结状态变量 × 观测日 rd10/15/20 × 退出日 rd20/40/60/80 × 三口径（EE_close / HE_close / HH_open）+ 观测日 ±2 平移稳健性 |
+| `_analysis_exit_state_decision_001.json` / `_analysis_exit_state_decision_001_summary.json` / `_analysis_exit_state_decision_001_version.json` | `docs/research/RESULT-EXIT-STATE-DECISION-001.md`；执行脚本 `scripts/runExitStateDecision001.mts` / 报告脚本 `scripts/reportExitStateDecision001.mts`；6 个状态 × T+10/15/20 × 继续持有至 T+20/40/60/80 的「状态即退出 vs 继续持有」增量价值（H_fill 可执行口径、逐笔配对、年度稳定性、右尾与亏损尾部） |
+| `_analysis_runner_holding_bridge_001_consistency.json` | `docs/research/RESULT-RUNNER-HOLDING-BRIDGE-001-CONSISTENCY.md`；统一正式 1.62.1 性能基线（1,359/+57.73%）与 Bridge T80 研究执行基线（1,619/+15.79%），并留档研究版本身份 |
+| `_analysis_exit_state_reversal_001.json`（已清理 2026-10-07） / `_analysis_exit_state_reversal_001_summary.json` / `_analysis_exit_state_reversal_001_version.json` | `docs/research/RESULT-EXIT-STATE-REVERSAL-001.md`；执行脚本 `scripts/runExitStateReversal001.mts` / 报告脚本 `scripts/reportExitStateReversal001.mts`；状态成立→首次失效后的退出增量价值（RAW vs SUSTAINED，5 状态 × T+40/60/80，H_fill） |
+| `_analysis_clc2_portfolio_001.json`（已清理 2026-10-07） / `_analysis_clc2_portfolio_001_summary.json` / `_analysis_clc2_portfolio_001_version.json` | `docs/research/RESULT-CLC2-PORTFOLIO-001.md`；执行脚本 `scripts/runClc2Portfolio001.mts` / 报告脚本 `scripts/reportClc2Portfolio001.mts`；CLC2 反弹确认后的真实组合资金循环实验（A 确认后退出 / B 继续持有至 T+80 / C 冻结基准，附纯 CLC2 坐标与资本循环指标） |
+| `_analysis_clc2_horizon_001.json`（已清理 2026-10-07） / `_analysis_clc2_horizon_001_summary.json` / `_analysis_clc2_horizon_001_version.json` | `docs/research/RESULT-CLC2-HORIZON-001.md`；执行脚本 `scripts/runClc2Horizon001.mts` / 报告脚本 `scripts/reportClc2Horizon001.mts`；CLC2 反弹确认 × 固定持有窗口 T+20/40/60/80 的组合层增量（A/B/C 三臂、统一资金槽位与成本、年度与逐笔对照） |
+| `_analysis_runner_state_transition_001.json` / `_analysis_runner_state_transition_001_summary.json` / `_analysis_runner_state_transition_001_version.json` | `docs/research/RESULT-RUNNER-STATE-TRANSITION-001.md`；执行脚本 `scripts/runRunnerStateTransition001.mts` / 报告脚本 `scripts/reportRunnerStateTransition001.mts`；+10%/+15% 后强势状态 ↔ CLC2 先后转换与转换后 T+20/40/60/80 表现（含锚点对照与年度稳定性） |
+| `_analysis_runner_state_recovery_001.json` / `_analysis_runner_state_recovery_001_summary.json` / `_analysis_runner_state_recovery_001_version.json` | `docs/research/RESULT-RUNNER-STATE-RECOVERY-001.md`；执行脚本 `scripts/runRunnerStateRecovery001.mts` / 报告脚本 `scripts/reportRunnerStateRecovery001.mts`；以首个 CLC2 为共同锚点的 NEW_HIGH_3 恢复增量研究（恢复时间分布、速度梯度、价格位置分层、年度稳定性） |
+| `_analysis_runner_state_recovery_timing_001.json` / `_analysis_runner_state_recovery_timing_001_summary.json` / `_analysis_runner_state_recovery_timing_001_version.json` | `docs/research/RESULT-RUNNER-STATE-RECOVERY-TIMING-001.md`；执行脚本 `scripts/runRunnerStateRecoveryTiming001.mts` / 报告脚本 `scripts/reportRunnerStateRecoveryTiming001.mts`；CLC2 后 NEW_HIGH_3 恢复日 D1–D10 的固定日历对照、当日恢复面板与恢复速度口径分离 |
+| `_analysis_runner_state_recovery_control_001.json` / `_analysis_runner_state_recovery_control_001_summary.json` / `_analysis_runner_state_recovery_control_001_version.json` | `docs/research/RESULT-RUNNER-STATE-RECOVERY-CONTROL-001.md`；执行脚本 `scripts/runRunnerStateRecoveryControl001.mts` / 报告脚本 `scripts/reportRunnerStateRecoveryControl001.mts`；NEW_HIGH_3 恢复的三层对照（原始固定日历 / 协变量分层 / 最近邻匹配） |
+| `_analysis_runner_clc2_control_001.json` / `_analysis_runner_clc2_control_001_summary.json` / `_analysis_runner_clc2_control_001_version.json` | `docs/research/RESULT-RUNNER-CLC2-CONTROL-001.md`；执行脚本 `scripts/runRunnerClc2Control001.mts` / 报告脚本 `scripts/reportRunnerClc2Control001.mts`；CLC2 本身的三层对照（原始固定日历 / 单变量分层 / 多变量匹配） |
+| `_analysis_topn_space_factor_001.json` / `_analysis_topn_space_factor_001_summary.json` / `_analysis_topn_space_factor_001_version.json` | `docs/research/RESULT-TOPN-SPACE-FACTOR-001.md`；执行脚本 `scripts/runTopnSpaceFactor001.mts` / 报告脚本 `scripts/reportTopnSpaceFactor001.mts`；3F Top3 空间增强排名 A/B 对照（含每日选股重合率、年度增量与权益曲线） |
+
+### `trend-score-v1-forward-ic` —— 2 个（2026-10-04）
+
+> 背景：P0（趋势分作排序项：−59/−86/−95%）与 P0-2（趋势分作门槛：−21/−74/−75%）都被真实数据否掉，
+> 本证据回到**度量本身**做信号质量诊断（全候选池 43,528 个，入场 rd6 开盘、出场 rdN 收盘、毛收益）。
+
+| 文件 | 被引用于 |
+|---|---|
+| `_probe_trend_score_v1_forward_ic.mts` | `docs/architecture/CHANGE-AUDIT.md` · `research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend-gate/README.md` |
+| `_analysis_trend_score_v1_forward_ic_20261004.json` | 同上 |
+
+**结论（IC = Spearman，200 次 bootstrap 95% CI）**：`trendScore` 与后验收益**显著负相关**且随视界加深
+（rd8/rd10/rd16 = −0.0179 / −0.0348 / −0.0360）；拆项后 `structureScore`（−0.024/−0.041/−0.045）与
+`momentum`（−0.024/−0.034/−0.041）**方向为负**，而 `pullbackDepth`（回撤越深越好）**为正**（+0.010/+0.025/+0.023）。
+控制 3F 后的**偏 IC 不衰减**（trendScore −0.037/−0.039，pullbackDepth +0.032/+0.033，与 3F 秩相关仅 |ρ|≤0.15）
+⇒ 这些分量**不是 3F 的代理**，V1 是「符号用反」而不是「无用」。

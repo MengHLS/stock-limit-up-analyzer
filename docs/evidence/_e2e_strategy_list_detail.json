@@ -1,0 +1,76 @@
+{
+  "total": 14,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "列表 / 详情用到的 7 个端点全部存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "list 返回数组且非空",
+      "ok": true,
+      "detail": "9 条"
+    },
+    {
+      "name": "每行都含 list 页渲染所需的 5 个字段",
+      "ok": true,
+      "detail": "异常 0 行"
+    },
+    {
+      "name": "updatedAt 形如 YYYY-MM-DD…（页面只截前 10 位、不做时区换算）",
+      "ok": true,
+      "detail": "样例 2026-09-13"
+    },
+    {
+      "name": "按 updatedAt 降序排序可复现，且首条即最大时间戳",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "所有行的 status 都落在客户端 8 态词表内（StatusBadge 不会拿到未知状态）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "模板 id「limit-up-baseline」已存在于真实库中 ⇒ 新建时清空 strategyId 是必需而非臆测",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "load → 裸 StrategyDocument（顶层没有 .strategy 外壳）",
+      "ok": true,
+      "detail": "键 18 个"
+    },
+    {
+      "name": "listVersions 至少一版（版本选择器有事可显示）",
+      "ok": true,
+      "detail": "1 版"
+    },
+    {
+      "name": "loadVersion → §17 版本记录（文档在 .strategy 下）",
+      "ok": true,
+      "detail": "顶层键 14 个"
+    },
+    {
+      "name": "剥壳后等价：loadVersion(.strategy) 与 load 指向同一策略",
+      "ok": true,
+      "detail": "cand-360008 vs cand-360008"
+    },
+    {
+      "name": "剥壳后读得出 name / version（否则编辑器会显示空文档）",
+      "ok": true,
+      "detail": "1.0.0 名称=[CAND-4GROUPS] ④-c 回撤深度≤10%（"
+    },
+    {
+      "name": "路径 = /strategies/:strategyId，版本在 ?version= 上（列表与详情分家后的一致口径）",
+      "ok": true,
+      "detail": "/strategies/cand-360008?version=1.0.0"
+    },
+    {
+      "name": "按深链解析出的坐标加载，命中的正是同一版本",
+      "ok": true,
+      "detail": "cand-360008@1.0.0"
+    }
+  ]
+}

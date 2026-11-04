@@ -1,0 +1,660 @@
+
+==============================================================================
+[0] 用户输入（只有两项 —— 没有任何底层分析字段）
+==============================================================================
+  datasetVersionId = 390002
+  researchQuestion = 首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？
+  未传：feature / target / horizon / descriptiveVariable / segment / grouping / condition / analysisType
+  → §27 验收标准：若本探针能跑出结论，即证明用户无需填写底层分析字段。
+
+==============================================================================
+[1] 研究方法目录（§3 可扩展注册机制）
+==============================================================================
+共 7 个已注册研究方法：
+  · BREAKOUT_SUCCESS_RESEARCH  突破成功率研究
+      检验「T+h 窗口内是否突破首板日高点」的驱动因素，以及突破之后的表现。
+      适用：研究问题里出现「突破 / 新高 / 创新高 / 冲高」；想回答「什么样的首板更容易再上台阶」
+      需要的分析能力：QUANTILE / CONDITIONAL / STABILITY / EVENT_STUDY / DESCRIPTIVE  首选视界：5/10
+  · ENTRY_TIMING_RESEARCH      入场时点研究
+      检验「等 T+k 再入场」与「更早/更晚入场」相比，后续收益是否有系统性差异。
+      适用：研究问题里出现「什么时候买 / 第几天买 / 确认后买 / 等几天」；想回答「早买 vs 等确认」的取舍
+      需要的分析能力：CONDITIONAL / EVENT_STUDY / STABILITY / SEGMENT_RELATION  首选视界：5/10
+  · EVENT_RETURN_RESEARCH      事件后收益研究
+      刻画「首板事件本身」之后不同视界的收益分布与基准水平，为其它研究提供参照系。
+      适用：研究问题是开放式的「首板之后会怎样」；需要先拿到全样本基准，才能判断某个条件下的样本是否真的更好
+      需要的分析能力：EVENT_STUDY / DESCRIPTIVE / STABILITY / QUANTILE  首选视界：5/10/20
+  · HOLDING_PERIOD_RESEARCH    持有期研究
+      比较不同持有视界的收益 / 回撤，回答「持有多久性价比最高」。
+      适用：研究问题里出现「持有 / 拿几天 / 多久 / 短线几天」；需要在多个视界之间做取舍
+      需要的分析能力：EVENT_STUDY / QUANTILE / SEGMENT_RELATION / STABILITY  首选视界：1/2/3/5/10/20
+  · MARKET_REGIME_STABILITY    稳定性 / 市场环境研究
+      检验某个结论是否只在特定年份 / 板块成立（跨期一致性），而不是全样本平均出来的假象。
+      适用：研究问题里出现「稳定 / 一直有效 / 不同年份 / 不同市场 / 环境」；任何研究在进入 Candidate 之前的稳定性复核
+      需要的分析能力：STABILITY / QUANTILE / DESCRIPTIVE  首选视界：5/10
+  · PULLBACK_EFFECTIVENESS     回踩有效性研究
+      检验「首板之后出现回踩，只要没跌破某个支撑位，后续收益是否仍优于全样本」——即回踩是「洗盘」还是「走坏」。
+      适用：研究问题里出现「回踩 / 回调 / 洗盘 / 不破某价位 / 缩量」等表述；想验证一条「等回踩再买」的入场逻辑是否真的比直接追首板好
+      需要的分析能力：CONDITIONAL / SEGMENT_RELATION / STABILITY / QUANTILE / EVENT_STUDY / DESCRIPTIVE  首选视界：5/10/20
+  · STOP_LOSS_RESEARCH         破位 / 止损研究
+      检验「跌破支撑位之后是否应当离场」——破位样本的后续收益与回撤代价。
+      适用：研究问题里出现「止损 / 离场 / 破位 / 破了就走 / 割」；想给一条入场逻辑配一个可量化的离场条件
+      需要的分析能力：CONDITIONAL / SEGMENT_RELATION / STABILITY  首选视界：5/10
+
+==============================================================================
+[2] createQuestion（意图识别 → Experiment / Run / Plan 落库）
+==============================================================================
+questionId  = 90001
+experimentId= 480001
+runId       = 750001
+planId      = 90001
+计划生成耗时 8227ms
+
+--- 意图识别（§5 系统自动判定，用户不在输入里选）---
+  主方法      : PULLBACK_EFFECTIVENESS（回踩有效性研究）
+  研究类型    : FEATURE
+  回落基线    : 否
+  判定依据（落库的 selectionRationale，用户可核对系统为什么这么理解）：
+    · 研究方法：回踩有效性研究（PULLBACK_EFFECTIVENESS）
+    · 识别到研究方法：回踩有效性研究（PULLBACK_EFFECTIVENESS）
+    · 判定依据：加权分 6（专指词命中 2 个，命中词：回踩 / 跌破）
+    · 同时命中其它方法（作为辅助）：事件后收益研究（EVENT_RETURN_RESEARCH，加权分 1）
+    · 采用收益视界：T+5 / T+10 / T+20
+    · 主目标取 T+5 收盘收益（future_return_5d）—— 它是最直观、也最容易与「全样本基准」对照的量。
+  命中分句（分句 → 关键词 → 方法）：
+    · 「后面的收益是不是更好」 命中「收益」 → EVENT_RETURN_RESEARCH
+    · 「首板之后回踩」 命中「回踩」 → PULLBACK_EFFECTIVENESS
+    · 「只要不跌破首板开盘价」 命中「跌破」 → PULLBACK_EFFECTIVENESS
+  已登记关键词命中情况：EVENT_RETURN_RESEARCH:收益 / PULLBACK_EFFECTIVENESS:回踩 / PULLBACK_EFFECTIVENESS:跌破
+  未命中关键词（用于解释「为什么没选某方法」）：BREAKOUT_SUCCESS_RESEARCH:突破 / BREAKOUT_SUCCESS_RESEARCH:新高 / BREAKOUT_SUCCESS_RESEARCH:冲高 / BREAKOUT_SUCCESS_RESEARCH:创新高 / BREAKOUT_SUCCESS_RESEARCH:breakout / BREAKOUT_SUCCESS_RESEARCH:new high / ENTRY_TIMING_RESEARCH:入场 / ENTRY_TIMING_RESEARCH:时点 / ENTRY_TIMING_RESEARCH:什么时候买 / ENTRY_TIMING_RESEARCH:第几天 / ENTRY_TIMING_RESEARCH:确认 / ENTRY_TIMING_RESEARCH:等 / ENTRY_TIMING_RESEARCH:追高 / ENTRY_TIMING_RESEARCH:timing / ENTRY_TIMING_RESEARCH:entry / ENTRY_TIMING_RESEARCH:when to buy / ENTRY_TIMING_RESEARCH:等确认 / ENTRY_TIMING_RESEARCH:入场时点 / EVENT_RETURN_RESEARCH:涨幅 / EVENT_RETURN_RESEARCH:基准 / EVENT_RETURN_RESEARCH:全样本 / EVENT_RETURN_RESEARCH:分布 / EVENT_RETURN_RESEARCH:表现 / EVENT_RETURN_RESEARCH:return / EVENT_RETURN_RESEARCH:baseline / EVENT_RETURN_RESEARCH:event study / HOLDING_PERIOD_RESEARCH:持有 / HOLDING_PERIOD_RESEARCH:拿几天 / HOLDING_PERIOD_RESEARCH:多久 / HOLDING_PERIOD_RESEARCH:视界 / HOLDING_PERIOD_RESEARCH:周期 / HOLDING_PERIOD_RESEARCH:持有期 / HOLDING_PERIOD_RESEARCH:holding / HOLDING_PERIOD_RESEARCH:horizon / HOLDING_PERIOD_RESEARCH:days to hold / HOLDING_PERIOD_RESEARCH:几天最好 / MARKET_REGIME_STABILITY:稳定 / MARKET_REGIME_STABILITY:一致性 / MARKET_REGIME_STABILITY:不同年份 / MARKET_REGIME_STABILITY:分年 / MARKET_REGIME_STABILITY:市场环境 / MARKET_REGIME_STABILITY:牛熊 / MARKET_REGIME_STABILITY:regime / MARKET_REGIME_STABILITY:stability / MARKET_REGIME_STABILITY:consistent / PULLBACK_EFFECTIVENESS:回调 / PULLBACK_EFFECTIVENESS:洗盘 / PULLBACK_EFFECTIVENESS:不破 / PULLBACK_EFFECTIVENESS:未破 / PULLBACK_EFFECTIVENESS:破位 / PULLBACK_EFFECTIVENESS:支撑 / PULLBACK_EFFECTIVENESS:缩量 / PULLBACK_EFFECTIVENESS:放量 / PULLBACK_EFFECTIVENESS:pullback / PULLBACK_EFFECTIVENESS:dip / PULLBACK_EFFECTIVENESS:retrace / PULLBACK_EFFECTIVENESS:守住 / PULLBACK_EFFECTIVENESS:生命线 / PULLBACK_EFFECTIVENESS:支撑位 / STOP_LOSS_RESEARCH:止损 / STOP_LOSS_RESEARCH:离场 / STOP_LOSS_RESEARCH:破位 / STOP_LOSS_RESEARCH:割肉 / STOP_LOSS_RESEARCH:走坏 / STOP_LOSS_RESEARCH:stop loss / STOP_LOSS_RESEARCH:exit / STOP_LOSS_RESEARCH:break down / STOP_LOSS_RESEARCH:破位就走
+  未采纳分句  : （无）
+
+--- 计划规模（§8/§9/§10）---
+  计划条数  = 28（上限 30，发生过裁剪=否）
+  被丢弃    = 0 条
+  优先级分布：P0 核心 4 / P1 辅助 21 / P2 探索 3
+
+--- 计划预览：核心分析清单（§18 正式执行前可看）---
+  [P0] EVENT_STUDY    全样本基准 · 事件后收益 T+5/T+10/T+20
+  [P0] CONDITIONAL    回踩期未破首板日开盘价（T+2） → T+5 收益
+  [P0] CONDITIONAL    回踩期未破首板日开盘价（T+3） → T+5 收益
+  [P0] CONDITIONAL    回踩期未破首板日开盘价（T+5） → T+5 收益
+--- 辅助分析清单 ---
+  [P1] DESCRIPTIVE    全样本分布 · future_return_5d / turnover / limit_up_premium
+  [P1] STABILITY      基准稳定性 · 按 year 分组
+  [P1] CONDITIONAL    回踩期未破首板日最低价（T+2） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日最低价（T+3） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日最低价（T+5） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+2） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+2） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+2） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+3） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益
+  [P1] CONDITIONAL    回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益
+  [P1] QUANTILE       turnover 分位 → T+5 收益（5 档）
+  [P1] QUANTILE       limit_up_premium 分位 → T+5 收益（5 档）
+  [P1] QUANTILE       market_cap 分位 → T+5 收益（5 档）
+  [P1] SEGMENT_RELATION T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系）
+--- 探索分析清单 ---
+  [P2] CONDITIONAL    回踩期已破首板日开盘价（对照组）（T+2） → T+5 收益
+  [P2] CONDITIONAL    回踩期已破首板日最低价（对照组）（T+2） → T+5 收益
+  [P2] STABILITY      事件后收益研究 · 按 year 分组稳定性复核
+
+--- §22 数据有效性检查（执行前）---
+  passed=true  已检 28 条  未通过 0 条
+    · 已生成 28 条分析，引用的变量都已在 Dataset 390002 的变量目录中登记（path 相对日 1..20，outcome 视界 5/10/20）。
+    · ⚠️ 执行前只能确认「变量已登记」，**不能确认「变量有值」**：特征在该版本上的实际填充率要到执行后才能核对。若某条分析最终零结果，结论页会把它单列为「执行完成但零结果」，既不算作已验证、也不算作已排除。
+  该 Dataset 能力提示：（无缺口）
+  ok   §5 意图识别命中 PULLBACK_EFFECTIVENESS（而非泛化的 EVENT_RETURN_RESEARCH） — PULLBACK_EFFECTIVENESS
+  ok   §10 P0 核心分析 ≥ 1 — coreCount=4
+  ok   §22 执行前数据有效性检查通过
+  ok   计划条数 > 0 — plannedCount=28
+
+==============================================================================
+[3] §7 Analysis Plan 结构化登记（notesJson.spec）
+==============================================================================
+  ok   §7 spec 已落库
+  researchModule = PULLBACK_EFFECTIVENESS（回踩有效性研究）  辅助：EVENT_RETURN_RESEARCH
+  datasetVersionId = 390002
+  analysisTypes = CONDITIONAL / DESCRIPTIVE / EVENT_STUDY / QUANTILE / SEGMENT_RELATION / STABILITY
+  horizons = T+5 / T+10 / T+20
+
+  featureMapping（特征侧：条件 / 分组 / 描述用到的变量）
+    future_return_5d                 角色=descriptive            命中 1 条
+    limit_up_premium                 角色=grouping,descriptive   命中 2 条
+    market_cap                       角色=grouping               命中 1 条
+    pullback_close_ratio_2d          角色=condition              命中 3 条
+        ↳ T+2 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+    pullback_close_ratio_3d          角色=condition              命中 3 条
+        ↳ T+3 收盘 / 首板日收盘（1 = 持平，< 1 = 仍在回踩）
+    pullback_holds_event_low_2d      角色=condition              命中 2 条
+        ↳ **不成立（已破位/非阳线）**：截至 T+2，回调期间最低价始终未跌破**首板日最低价**
+        ↳ 截至 T+2，回调期间最低价始终未跌破**首板日最低价**
+    pullback_holds_event_low_3d      角色=condition              命中 1 条
+        ↳ 截至 T+3，回调期间最低价始终未跌破**首板日最低价**
+    pullback_holds_event_low_5d      角色=condition              命中 1 条
+        ↳ 截至 T+5，回调期间最低价始终未跌破**首板日最低价**
+    pullback_holds_event_open_2d     角色=condition              命中 8 条
+        ↳ **不成立（已破位/非阳线）**：截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+        ↳ 截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+    pullback_holds_event_open_3d     角色=condition              命中 7 条
+        ↳ 截至 T+3，回调期间最低价始终未跌破**首板日开盘价**
+    pullback_holds_event_open_5d     角色=condition              命中 1 条
+        ↳ 截至 T+5，回调期间最低价始终未跌破**首板日开盘价**
+    pullback_last_is_bullish_2d      角色=condition              命中 1 条
+        ↳ T+2 当日为阳线（收盘 > 开盘）
+    pullback_last_is_bullish_3d      角色=condition              命中 1 条
+        ↳ T+3 当日为阳线（收盘 > 开盘）
+    pullback_last_volume_ratio_2d    角色=condition              命中 1 条
+        ↳ T+2 当日成交量 / 首板日成交量（> 1 = 放量）
+    pullback_last_volume_ratio_3d    角色=condition              命中 1 条
+        ↳ T+3 当日成交量 / 首板日成交量（> 1 = 放量）
+    pullback_min_volume_ratio_2d     角色=condition              命中 2 条
+        ↳ T+1..T+2 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+    pullback_min_volume_ratio_3d     角色=condition              命中 2 条
+        ↳ T+1..T+3 期间最小成交量 / 首板日成交量（< 1 = 缩量）
+    turnover                         角色=grouping,descriptive   命中 2 条
+    year                             角色=grouping               命中 2 条
+
+  targetMapping（结果侧）
+    future_return_5d                 角色=target     命中 25 条  视界=T+5
+
+  baseline（比较基准）
+    全样本基准 · 事件后收益 T+5/T+10/T+20
+      全样本无条件事件研究 —— 判断「某条件下是否更好」的参照系；没有它就无法区分「条件起了作用」与「这段时间整体就好」。
+
+  condition（主条件口径，P0 必需项）
+    回踩期未破首板日开盘价（T+2） → T+5 收益
+        表达式：pullback_holds_event_open_2d == 1
+        口径  ：截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+        口径  ：**不成立（已破位/非阳线）**：截至 T+2，回调期间最低价始终未跌破**首板日开盘价**
+    回踩期未破首板日开盘价（T+3） → T+5 收益
+        表达式：pullback_holds_event_open_3d == 1
+        口径  ：截至 T+3，回调期间最低价始终未跌破**首板日开盘价**
+    回踩期未破首板日开盘价（T+5） → T+5 收益
+        表达式：pullback_holds_event_open_5d == 1
+        口径  ：截至 T+5，回调期间最低价始终未跌破**首板日开盘价**
+
+  segments（两窗关系）
+    T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系）
+      A 窗 T+0..T+5 的 max_drawdown  ↔  B 窗 T+5..T+10 的 return
+
+  stabilityPlan（稳定性分析计划）
+    年份（year） → 基准稳定性 · 按 year 分组
+    年份（year） → 事件后收益研究 · 按 year 分组稳定性复核
+
+  interactionPlan（关系 / 分布类分析计划）
+    [SEGMENT_RELATION] T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系）
+      分段关系：A 窗 T+0..T+5 的「max_drawdown」 ↔ B 窗 T+5..T+10 的「return」（两窗不重叠，因此不是同义反复）。
+  ok   §7 spec 与落库计划条数一致
+  ok   §7 condition 至少登记一条 P0 口径 — condition=3
+
+==============================================================================
+[4] getPlan（从库里的计划重算预览，验证「预览即所跑」）
+==============================================================================
+  ok   重读的计划条数与创建时一致 — 28 vs 28
+  ok   重读的 P0 条数与创建时一致 — 4 vs 4
+  ok   重读的 §7 登记与创建时一致
+  重读 planId=90001 status=PLANNED plannedCount=28 P0=4 P1=21 P2=3
+
+==============================================================================
+[5] 计划明细（每条含 priority / purpose / required / 条件，§10）
+==============================================================================
+   0. [P0]*必需 EVENT_STUDY      全样本基准 · 事件后收益 T+5/T+10/T+20
+      目标：（无）
+      目的：建立全样本参照系：没有它就无法判断「某个条件下更好」到底是条件起了作用，还是这段时间整体就好。
+   1. [P1]     DESCRIPTIVE      全样本分布 · future_return_5d / turnover / limit_up_premium
+      目标：（无）
+      目的：描述目标与特征的中心趋势 / 离散度 / 缺失率，用于判断数据能否支撑后续比较。
+   2. [P1]     STABILITY        基准稳定性 · 按 year 分组
+      目标：（无）
+      目的：检验全样本结论是否只在个别年份 / 板块成立，避免把一次性行情当成规律。
+   3. [P0]*必需 CONDITIONAL      回踩期未破首板日开盘价（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。目标：T+5 收益。条件在 T+2 收盘即可判定（观察日变量 availableFromOffset = 2），不含未来信息。
+   4. [P0]*必需 CONDITIONAL      回踩期未破首板日开盘价（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_3d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。目标：T+5 收益。条件在 T+3 收盘即可判定（观察日变量 availableFromOffset = 3），不含未来信息。
+   5. [P0]*必需 CONDITIONAL      回踩期未破首板日开盘价（T+5） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_5d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。目标：T+5 收益。条件在 T+5 收盘即可判定（观察日变量 availableFromOffset = 5），不含未来信息。
+   6. [P1]     CONDITIONAL      回踩期未破首板日最低价（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_low_2d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日最低价」。目标：T+5 收益。条件在 T+2 收盘即可判定（观察日变量 availableFromOffset = 2），不含未来信息。
+   7. [P1]     CONDITIONAL      回踩期未破首板日最低价（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_low_3d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日最低价」。目标：T+5 收益。条件在 T+3 收盘即可判定（观察日变量 availableFromOffset = 3），不含未来信息。
+   8. [P1]     CONDITIONAL      回踩期未破首板日最低价（T+5） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_low_5d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日最低价」。目标：T+5 收益。条件在 T+5 收盘即可判定（观察日变量 availableFromOffset = 5），不含未来信息。
+   9. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 1  且  pullback_min_volume_ratio_2d <= 0.5
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+  10. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 1  且  pullback_min_volume_ratio_2d <= 0.3
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+  11. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 1  且  pullback_last_volume_ratio_2d > 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日放量是「资金重新进场」的代理量：检验放量确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+  12. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 1  且  pullback_last_is_bullish_2d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日收阳是「当日买盘占优」的代理量：检验红盘确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+  13. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 1  且  pullback_close_ratio_2d >= 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。「还没跌回首板日收盘」是强势整理的代理量：检验强势整理与弱势整理后续收益是否不同。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+  14. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 1  且  pullback_close_ratio_2d >= 0.98  且  pullback_close_ratio_2d <= 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。按回踩深度（T+k 收盘 / 首板日收盘）分档，检验「回踩深度是否影响后续收益」。目标：T+5 收益。两个条件都在 T+2 收盘可判定。
+  15. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_3d == 1  且  pullback_min_volume_ratio_3d <= 0.5
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+  16. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_3d == 1  且  pullback_min_volume_ratio_3d <= 0.3
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。缩量是「抛压衰竭」的代理量：检验缩量回踩是否比放量回踩更值得参与。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+  17. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_3d == 1  且  pullback_last_volume_ratio_3d > 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日放量是「资金重新进场」的代理量：检验放量确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+  18. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_3d == 1  且  pullback_last_is_bullish_3d == 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。回踩末日收阳是「当日买盘占优」的代理量：检验红盘确认是否改善后续表现。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+  19. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_3d == 1  且  pullback_close_ratio_3d >= 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。「还没跌回首板日收盘」是强势整理的代理量：检验强势整理与弱势整理后续收益是否不同。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+  20. [P1]     CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_3d == 1  且  pullback_close_ratio_3d >= 0.98  且  pullback_close_ratio_3d <= 1
+      目的：要求「截至 T+k，回调期间最低价始终没有跌破首板日开盘价」。按回踩深度（T+k 收盘 / 首板日收盘）分档，检验「回踩深度是否影响后续收益」。目标：T+5 收益。两个条件都在 T+3 收盘可判定。
+  21. [P2]     CONDITIONAL      回踩期已破首板日开盘价（对照组）（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_open_2d == 0
+      目的：对照组：截至 T+k 已跌破首板日开盘价的样本后续如何走。目标：T+5 收益。有对照组才能回答「不满足条件会怎样」，否则只有单侧证据。
+  22. [P2]     CONDITIONAL      回踩期已破首板日最低价（对照组）（T+2） → T+5 收益
+      目标：future_return_5d
+      条件：pullback_holds_event_low_2d == 0
+      目的：对照组：截至 T+k 已跌破首板日最低价的样本后续如何走。目标：T+5 收益。有对照组才能回答「不满足条件会怎样」，否则只有单侧证据。
+  23. [P1]     QUANTILE         turnover 分位 → T+5 收益（5 档）
+      目标：（无）
+      目的：检验「首板日可观测的 turnover」是否单调地影响后续收益 —— 这是唯一能在 T 日直接用于决策的一类变量。
+  24. [P1]     QUANTILE         limit_up_premium 分位 → T+5 收益（5 档）
+      目标：（无）
+      目的：检验「首板日可观测的 limit_up_premium」是否单调地影响后续收益 —— 这是唯一能在 T 日直接用于决策的一类变量。
+  25. [P1]     QUANTILE         market_cap 分位 → T+5 收益（5 档）
+      目标：（无）
+      目的：检验「首板日可观测的 market_cap」是否单调地影响后续收益 —— 这是唯一能在 T 日直接用于决策的一类变量。
+  26. [P1]     SEGMENT_RELATION T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系）
+      目标：（无）
+      目的：把「回撤深浅」当成连续变量而不是分档条件，检验它与**随后一段**收益的单调关系。两窗取值区间不重叠（A = T+1..T+anchor、B = T+anchor+1..T+anchor+span），因此不存在同义反复。
+  27. [P2]     STABILITY        事件后收益研究 · 按 year 分组稳定性复核
+      目标：（无）
+      目的：辅助方法「事件后收益研究」建议的稳定性复核：同一结论换一个维度再验一次。
+  ok   §10 每条计划项都有 priority / purpose / required — 缺 0 条
+
+==============================================================================
+[6] runResearch（物化 → 真实执行 → Finding → Conclusion）
+==============================================================================
+执行总耗时 156.3s（28 条分析）
+runId=750001 runStatus=COMPLETED 冻结样本数=23978
+
+--- 逐分析执行状态 ---
+  #750001 [P0] COMPLETED 结果  36 行  EVENT_STUDY      全样本基准 · 事件后收益 T+5/T+10/T+20
+  #750002 [P1] COMPLETED 结果  57 行  DESCRIPTIVE      全样本分布 · future_return_5d / turnover / limit_up_premium
+  #750003 [P1] COMPLETED 结果  14 行  STABILITY        基准稳定性 · 按 year 分组
+  #750004 [P0] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价（T+2） → T+5 收益
+  #750005 [P0] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价（T+3） → T+5 收益
+  #750006 [P0] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价（T+5） → T+5 收益
+  #750007 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日最低价（T+2） → T+5 收益
+  #750008 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日最低价（T+3） → T+5 收益
+  #750009 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日最低价（T+5） → T+5 收益
+  #750010 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+2） → T+5 收益
+  #750011 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+2） → T+5 收益
+  #750012 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益
+  #750013 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益
+  #750014 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+2） → T+5 收益
+  #750015 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+2） → T+5 收益
+  #750016 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.5（缩量）（T+3） → T+5 收益
+  #750017 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩期最小量能比 ≤ 0.3（缩量）（T+3） → T+5 收益
+  #750018 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+3） → T+5 收益
+  #750019 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+3） → T+5 收益
+  #750020 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益
+  #750021 [P1] COMPLETED 结果  16 行  CONDITIONAL      回踩期未破首板日开盘价 且 回踩深度落在 [0.98, 1]（T+3） → T+5 收益
+  #750022 [P2] COMPLETED 结果  16 行  CONDITIONAL      回踩期已破首板日开盘价（对照组）（T+2） → T+5 收益
+  #750023 [P2] COMPLETED 结果  16 行  CONDITIONAL      回踩期已破首板日最低价（对照组）（T+2） → T+5 收益
+  #750024 [P1] COMPLETED 结果  28 行  QUANTILE         turnover 分位 → T+5 收益（5 档）
+  #750025 [P1] COMPLETED 结果  28 行  QUANTILE         limit_up_premium 分位 → T+5 收益（5 档）
+  #750026 [P1] COMPLETED 结果   0 行  QUANTILE         market_cap 分位 → T+5 收益（5 档）
+  #750027 [P1] COMPLETED 结果  31 行  SEGMENT_RELATION T+1..T+5 最大回撤 → T+6..T+10 收益（分段关系）
+  #750028 [P2] COMPLETED 结果  14 行  STABILITY        事件后收益研究 · 按 year 分组稳定性复核
+
+  完成 28 / 失败 0 / 未完成 0（共 28）
+  ok   全部计划分析执行器可见（条数 = 计划条数） — 28 vs 28
+  ok   零失败 — failed=0
+  ok   零未完成 — pending=0
+  零结果分析（执行完成但未产出结果行）：#750026
+  ok   §22 零结果分析被如实报告（数量与现场统计一致） — 报告 1 vs 实测 1
+  ok   §22 存在零结果时必须 passed=false（不能报成「全部通过」） — emptyResult=1 passed=false
+  ok   §22 大多数分析产出了结果（真实执行到位的下限：≥ 80%） — 有结果 27 / 28
+
+==============================================================================
+[7] getOutcome（Finding 聚合 → 排序 → 去重 → 冲突 → Top Findings → 结论）
+==============================================================================
+  问题：首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？
+  研究方法：PULLBACK_EFFECTIVENESS / EVENT_RETURN_RESEARCH
+  分析：28 条（完成 28 / 失败 0 / 未完成 0）
+  Finding：共 23 条，去重合并掉 1 条，默认展示 8 条（另有 15 条在折叠区）
+
+--- §22 数据有效性 ---
+  passed=false  失败=0  未完成=0  零结果=1
+    · 存在 1 条分析未通过有效性检查（失败 0 条、未完成 0 条、执行完成但**零结果** 1 条），共 28 条。
+    · 「执行完成但零结果」既不是成功也不是失败：执行器跑完了，但没有任何可报告的分组 / 样本。常见成因有两类 —— ① 条件把样本筛成了 0 条；② 该分析引用的特征在该 Dataset 上全为空。这类分析**没有进入任何 Finding 的证据**，因此不要把它当作「已验证」或「已排除」。
+    零结果 #750026 market_cap 分位 → T+5 收益（5 档）
+      QUANTILE 分析执行完成但没有产出任何结果行。请核对：该分析引用的特征 / 条件字段在这个 Dataset 版本上的实际填充率（「声明了这个变量」不等于「这个变量有值」）。
+  ok   §22 dataValidity.passed 与三个缺口维度自洽 — passed=false
+
+--- §13 Top Findings（每条必须回答：发现了什么 / 什么条件 / 什么目标 / 哪个视界 / 样本量 / 与基准差异 / 效果大小 / 稳定性）---
+
+  ── findingId=90007 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_low_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0245）
+     摘要：条件组均值 0.0397 vs 全样本 0.0152；条件组样本 19080，全样本 23751。
+     来自分析 #750008（CONDITIONAL）「回踩期未破首板日最低价（T+3） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=19080（STRONG）
+     效果：{
+  "groupReturn": 0.039690877936778966,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.024480517056474613,
+  "winRate": 0.5518343815513627,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+  ── findingId=90004 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_open_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0288）
+     摘要：条件组均值 0.0440 vs 全样本 0.0152；条件组样本 18041，全样本 23751。
+     来自分析 #750005（CONDITIONAL）「回踩期未破首板日开盘价（T+3） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=18041（STRONG）
+     效果：{
+  "groupReturn": 0.04397165008970606,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.02876128920940171,
+  "winRate": 0.5672634554625575,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+  ── findingId=90008 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_low_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0434）
+     摘要：条件组均值 0.0586 vs 全样本 0.0152；条件组样本 16698，全样本 23751。
+     来自分析 #750009（CONDITIONAL）「回踩期未破首板日最低价（T+5） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=16698（STRONG）
+     效果：{
+  "groupReturn": 0.0586010275167809,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.04339066663647655,
+  "winRate": 0.6242064917954246,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+  ── findingId=90005 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_open_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0492）
+     摘要：条件组均值 0.0644 vs 全样本 0.0152；条件组样本 15535，全样本 23751。
+     来自分析 #750006（CONDITIONAL）「回踩期未破首板日开盘价（T+5） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=15535（STRONG）
+     效果：{
+  "groupReturn": 0.06442810407209941,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.04921774319179506,
+  "winRate": 0.6480205986482137,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+  ── findingId=90013 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_open_2d == 1 AND pullback_close_ratio_2d >= 1」的样本在 future_return_5d 上优于全样本（超额 0.0627）
+     摘要：条件组均值 0.0779 vs 全样本 0.0152；条件组样本 11966，全样本 23751。
+     来自分析 #750014（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+2） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=11966（STRONG）
+     效果：{
+  "groupReturn": 0.07793511788650166,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.06272475700619731,
+  "winRate": 0.7070031756643824,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+  ── findingId=90011 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_open_2d == 1 AND pullback_last_volume_ratio_2d > 1」的样本在 future_return_5d 上优于全样本（超额 0.0328）
+     摘要：条件组均值 0.0480 vs 全样本 0.0152；条件组样本 11531，全样本 23751。
+     来自分析 #750012（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末日量能比 > 1（放量确认）（T+2） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=11531（STRONG）
+     效果：{
+  "groupReturn": 0.048045788100885306,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.03283542722058096,
+  "winRate": 0.6072326771312115,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+  ── findingId=90019 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_open_3d == 1 AND pullback_close_ratio_3d >= 1」的样本在 future_return_5d 上优于全样本（超额 0.0767）
+     摘要：条件组均值 0.0919 vs 全样本 0.0152；条件组样本 11304，全样本 23751。
+     来自分析 #750020（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末期收盘仍在首板日收盘之上（T+3） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=11304（STRONG）
+     效果：{
+  "groupReturn": 0.091908921721904,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.07669856084159966,
+  "winRate": 0.7760969568294409,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+  ── findingId=90012 [EFFECT] 强度 1（STRONG） DISCOVERED
+     标题：满足条件「pullback_holds_event_open_2d == 1 AND pullback_last_is_bullish_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0393）
+     摘要：条件组均值 0.0546 vs 全样本 0.0152；条件组样本 9661，全样本 23751。
+     来自分析 #750013（CONDITIONAL）「回踩期未破首板日开盘价 且 回踩末日为阳线（红盘）（T+2） → T+5 收益」 目标=future_return_5d 视界=T+?
+     样本：n=9661（STRONG）
+     效果：{
+  "groupReturn": 0.05455914213052407,
+  "benchmarkReturn": 0.015210360880304351,
+  "excessReturn": 0.03934878125021972,
+  "winRate": 0.6305765448711314,
+  "benchmarkUnavailable": false
+}
+     稳定性：null
+     与其他 Finding 冲突：90021,90022,90014,90020
+     局限：本发现来自既有 Analysis 的**统计结果层**，非样本级重算；未做多重比较校正。 ¶ 事件样本存在**重叠视界**，独立性假设不严格成立；t / p 类统计仅作研究辅助。 ¶ 材料性阈值 materialityAbs=0.005；样本分级阈值 100/300/1000（可配置、可复核）。 ¶ 条件组与全样本**并非独立样本**（条件组是全样本的子集），组间检验的独立性假设不严格成立。 ¶ 该条件是否构成**可交易**信号尚未验证：本阶段只回答「值得进一步研究」（任务书 §14/§26）。
+
+--- §15 结论 ---
+{
+  "id": 660001,
+  "conclusionType": "SUPPORTED",
+  "title": "[自动研究] 首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？ — 自动结论（SUPPORTED）",
+  "conclusion": "【研究问题】首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？\n\n【针对该问题】以下 4 条是按本问题的核心口径（必需项）筛出的直接证据：\n  · 满足条件「pullback_holds_event_open_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0288）（n=18041，超额 2.88 个百分点，稳定性未评估）\n  · 满足条件「pullback_holds_event_open_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0492）（n=15535，超额 4.92 个百分点，稳定性未评估）\n  · 满足条件「pullback_holds_event_open_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0186）（n=19614，超额 1.86 个百分点，稳定性未评估）\n  · 目标变量 的效果集中在 T+5~T+20（峰值 T+5）（n=23033，超额不可用，稳定性未评估）\n\n【统计判定】\n假设：「首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？」\n\n判定：**在预设规则下支持该假设**（样本、效应量、统计量、方向稳定性四项均达标）。\n\n关键量：Q5 − Q1 的 future_return_5d 均值差 = -0.0281；p = 0.0000；t = -9.5539；样本 23748（最小分组 4749）；方向一致性 0.750。\n\n判定依据（按顺序短路）：\n1. [通过] R2_样本达标 —— 总样本 23748（门槛 30），最小分组样本 4749（门槛 30）\n2. [通过] R3_效应达到最小实际阈值 —— |效应| = 0.0281，阈值 0.005\n3. [通过] R4_统计量达标 —— p = 0.0000，alpha = 0.05\n4. [通过] R5_方向稳定 —— 一致性 0.750，下限 0.6\n\n⚠️ 自动结论仅为**研究辅助**，不等同于统计显著性或交易有效性；任何策略性判断必须经 Backtest / 稳健性 / OOS 验证后才可成立，本阶段不产出交易结论。\n\n⚠️ 本结论仅说明「这批研究证据是否值得进入下一阶段」，**不构成任何盈利能力判断、不构成投资建议**。统计关系不等于可交易策略：样本内关系可能在样本外失效，交易成本 / 流动性 / 涨跌停无法成交等约束尚未纳入。",
+  "evidenceSummary": null,
+  "researchQuestion": "首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？",
+  "findingIds": [],
+  "limitations": [],
+  "nextQuestions": [],
+  "confidence": 0.85,
+  "status": "DRAFT"
+}
+  ok   §15 结论已生成
+
+--- §15 建议（只能表示「是否值得进入下一研究阶段」，不得声称赚钱）---
+  stage = NEEDS_MORE_RESEARCH
+  text  = 本轮研究有 1 条分析虽然执行完成，但没有产出任何结果 ——这意味着计划的证据不完整。建议先核对这些分析引用的字段在该 Dataset 上的填充率，再评估是否进入下一阶段。
+    · 有 1 条分析执行完成但**零结果** ⇒ 计划的一部分证据缺失（常见成因：条件筛出 0 条样本，或该特征在该 Dataset 上全为空）。
+  强制免责声明（前端必须原样渲染）：
+    ⚠️ 本结论仅说明「这批研究证据是否值得进入下一阶段」，**不构成任何盈利能力判断、不构成投资建议**。统计关系不等于可交易策略：样本内关系可能在样本外失效，交易成本 / 流动性 / 涨跌停无法成交等约束尚未纳入。
+  ok   §15 建议文本不含「赚钱 / 盈利 / 稳赚 / 必涨」类断言
+  ok   §15 建议附有独立免责声明字段
+  ok   §15 结论正文已拼接免责声明后缀（withDisclaimer 真正生效）
+
+--- §13 / §15 提问锚点（用户问的那件事是否可读）---
+  source = REQUIRED_FALLBACK  候选分析 4 条
+  note   = 问题里没有点明具体精修维度，回落到本问题的 4 条必需项（核心口径）分析。
+  相关 Finding 4 条：
+    · #90004 满足条件「pullback_holds_event_open_3d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0288）
+        来自 #750005（CONDITIONAL）「回踩期未破首板日开盘价（T+3） → T+5 收益」  n=18041
+    · #90005 满足条件「pullback_holds_event_open_5d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0492）
+        来自 #750006（CONDITIONAL）「回踩期未破首板日开盘价（T+5） → T+5 收益」  n=15535
+    · #90003 满足条件「pullback_holds_event_open_2d == 1」的样本在 future_return_5d 上优于全样本（超额 0.0186）
+        来自 #750004（CONDITIONAL）「回踩期未破首板日开盘价（T+2） → T+5 收益」  n=19614
+    · #90001 目标变量 的效果集中在 T+5~T+20（峰值 T+5）
+        来自 #750001（EVENT_STUDY）「全样本基准 · 事件后收益 T+5/T+10/T+20」  n=23033
+  ok   §15 结论锚定了研究问题（researchQuestion = 用户原话） — 首板之后回踩，只要不跌破首板开盘价，后面的收益是不是更好？
+  ok   §15 结论正文含「【研究问题】」与「【统计判定】」两段
+  ok   §15 结论正文不再出现占位符「(未登记假设陈述)」
+  ok   §13 本问题未被点明精修维度 ⇒ 提问锚点如实地回落到必需项（REQUIRED_FALLBACK） — REQUIRED_FALLBACK
+  ok   §13 「针对你的问题」区块拿到了证据（非空） — n=4
+
+--- 下一步动作提示 ---
+  · 核对 1 条「零结果」分析引用的字段实际填充率（「数据集登记了这个变量」不等于「这个变量有值」）；确认后再把这些分析当作有效证据。
+  · 人工 review 23 条 Finding 的状态（系统只产出 DISCOVERED，SUPPORTED / WEAK / REJECTED 必须由人判断）。
+  · 对存在反向证据的发现补做稳定性 / 分层研究，确认适用范围。
+  · 如决定继续：创建 Candidate 草图（保留 researchId / runId / planId / datasetVersionId / findingIds / conclusionId 全套溯源）。
+
+==============================================================================
+[8] §2.1 / §30 复用证据：自动规划 vs 既有手工分析（run 570001）逐条件对照
+==============================================================================
+旧 Run 570001 的 CONDITIONAL 分析共 13 条（planId=null ⇒ 专家手工创建）
+
+  ✓ 条件完全相同：新 #750007（P1） ⇄ 旧 #540012
+     目标 T+5 收益 | 条件签名 pullback_holds_event_low_2d|==|number:1
+     新值：SAMPLE_COUNT=20527  MEAN_RETURN=0.03050212634165202  MEDIAN_RETURN=0.004873294346978511  WIN_RATE=0.5199006186973255  STD_RETURN=0.1307069846494153  MAX_DRAWDOWN=-0.024177199160539103  DIFFERENCE=0.015291765461347667  RELATIVE_DIFFERENCE=1.0053519164787683  T_STAT_DIFFERENCE=12.157938932259611  P_VALUE_DIFFERENCE=0
+
+  ✓ 条件完全相同：新 #750008（P1） ⇄ 旧 #540001
+     目标 T+5 收益 | 条件签名 pullback_holds_event_low_3d|==|number:1
+     新值：SAMPLE_COUNT=19080  MEAN_RETURN=0.039690877936778966  MEDIAN_RETURN=0.01108033240997231  WIN_RATE=0.5518343815513627  STD_RETURN=0.12956115319374722  MAX_DRAWDOWN=-0.017121375415778566  DIFFERENCE=0.024480517056474613  RELATIVE_DIFFERENCE=1.6094632631743824  T_STAT_DIFFERENCE=19.17786493338828  P_VALUE_DIFFERENCE=0
+
+  ok   自动规划的条件与手工基线存在完全重合项（可逐字对照） — matched=2
+  ok   重合项上的统计结果逐字一致（证明只有一套统计实现） — mismatch=0
+
+==============================================================================
+[9] §16 createCandidate（Research → Candidate，人工确认前的 DRAFT）
+==============================================================================
+  ok   存在 P0 守卫分析可用于导出候选条件
+candidateId = 570001 status=DRAFT
+provenance 回执：{
+  "candidateId": 570001,
+  "researchId": 480001,
+  "researchRunId": 750001,
+  "researchPlanId": 90001,
+  "datasetVersionId": 390002,
+  "findingIds": [
+    90007,
+    90004,
+    90008,
+    90005,
+    90013,
+    90011,
+    90019,
+    90012
+  ],
+  "conclusionId": 660001,
+  "complete": true
+}
+sourceDatasetVersionId = 390002
+sourceResearchRunId   = 750001
+sourceResearchPlanId  = 90001
+conclusionId          = 660001
+sourceFindingIds      = [90007,90004,90008,90005,90013,90011,90019,90012]
+filterRule.groups     = {
+  "groups": [
+    {
+      "groupNo": 0,
+      "groupLogicalOperator": "AND",
+      "conditions": [
+        {
+          "groupNo": 0,
+          "sortOrder": 0,
+          "fieldName": "pullback_holds_event_open_2d",
+          "operator": "==",
+          "value": 1,
+          "logicalOperator": "AND",
+          "groupLogicalOperator": "AND"
+        }
+      ]
+    }
+  ]
+}
+  ok   §16 provenance 六项齐备 — {
+  "candidateId": 570001,
+  "researchId": 480001,
+  "researchRunId": 750001,
+  "researchPlanId": 90001,
+  "datasetVersionId": 390002,
+  "findingIds": [
+    90007,
+    90004,
+    90008,
+    90005,
+    90013,
+    90011,
+    90019,
+    90012
+  ],
+  "conclusionId": 660001,
+  "complete": true
+}
+  ok   §16 sourceResearchPlanId 已写入 — 90001 vs 90001
+  ok   §16 sourceResearchRunId 已写入
+  ok   §16 sourceDatasetVersionId 已写入
+  ok   §16 候选状态为 DRAFT（不自动进 Strategy） — DRAFT
+  ok   候选筛选条件由研究分析的落库条件导出（同源）
+  ok   候选条件与源分析条件逐字一致 — got=pullback_holds_event_open_2d|==|number:1 expected=pullback_holds_event_open_2d|==|number:1
+
+==============================================================================
+[10] §27 验收判据
+==============================================================================
+  ① 输入只有 datasetVersionId + researchQuestion：✓（本探针构造时就没有别的入参）
+  ② 研究方法由系统判定：PULLBACK_EFFECTIVENESS（用户未填 Feature/Target/Horizon/Descriptive/Segment）
+  ③ 计划由系统生成：28 条（P0 4 / P1 21 / P2 3）
+  ④ 分析真实执行：完成 28 / 28，结果行合计 528
+  ⑤ Finding 聚合：23 条 → 默认展示 8 条
+  ⑥ 结论已生成：SUPPORTED
+  ⑦ 建议阶段：NEEDS_MORE_RESEARCH
+  ⑧ Candidate 可创建且带全套 provenance：✓ #570001
+
+==============================================================================
+检查项：37  失败：0
+结论：✓ 首板回踩 E2E 全部通过
+==============================================================================

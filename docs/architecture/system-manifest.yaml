@@ -1,0 +1,1161 @@
+# system-manifest.yaml — 机器可读架构基线
+# 由 SYSTEM-BASELINE-001 建立；与 SYSTEM-BASELINE.md 同源同版本。
+# 纪律：所有字段值必须来自真实代码/真实库实查，不得虚构。
+# 归属标记（owner marker）：FACT | DESIGN | PLANNED | LEGACY | BLOCKED | DEPRECATED | OBSERVED
+
+system:
+  name: stock-limit-up-analyzer
+  baselineVersion: v2.2.0
+  auditedAt: "2026-09-20"
+  lastChangeAt: "2026-10-04"
+  baselineHistory: ["v1.0.0 (2026-09-19 SYSTEM-BASELINE-001)", "v1.1.0~v1.4.0 (PARAMETER-001/002, ROBUSTNESS-001, OOS-001, WALK-FORWARD-001)", "v2.0.0 (2026-09-20 round-2: PHASE-A/R1/B/D + 判定日数据流变更)", "v2.1.0 (2026-10-03 SCOPE-002 策略创作工作台)", "v2.2.0 (2026-10-04 STRATEGY-T74-FORMALIZATION-001)", "v2.3.0 (2026-10-04 ENTRY-CONDITION-SLOTS-001)"]
+  stack:
+    frontend: React 19 + Vite 7 + wouter + tRPC client + Tailwind
+    backend: Express + tRPC 11
+    orm: Drizzle ORM (mysql2 / TiDB Cloud)
+    test: Vitest (node environment)
+  scale:                       # 实查 2026-09-20（round-2）
+    serverFiles: 676           # server/**/*.ts
+    clientFiles: 213           # client/src/**/*.ts|tsx
+    testFiles: 290
+    docsFiles: 232             # docs/**/*.md
+    scriptsFiles: 117
+    schemaDeclaredTables: 70
+    realBaseTables: 73
+    migrations: 45
+    appRoutes: 34              # 新增 /research/report/:runId
+    trpcTopLevelRouters: 21
+  authority:
+    masterControl: ROADMAP.md
+    evidenceHierarchy: ["real DB", "actual runtime", "actual code", "automated tests", "docs", "design assumptions"]
+  invariants:
+    - "canonicalMetrics 是 Backtest 的唯一指标来源"
+    - "Evaluation 在已有 canonical 时不得重新计算重叠指标"
+    - "NOT_AVAILABLE 不得被评估器数值顶替"
+    - "strategy_versions.strategyDocumentJson 是策略定义唯一 SoT；5 张投影表只能单向派生"
+    - "datasetVersionId 是运行时唯一权威数据集坐标"
+    - "禁止 db:push / drizzle-kit generate / 手写 _journal.json"
+    - "历史 Run 不回填"
+    - "未装配阶段必须以 CL_RUNNER_NOT_INJECTED 如实 BLOCKED"
+    - "client/** 不得 import server/** 运行时值（仅 import type 允许）"
+
+domains:
+
+  dataset:
+    status: READY
+    marker: FACT
+    purpose: 原始数据标准化 → 事件检测 → 相对日窗口物化 → 版本化数据集；提供版本坐标与筛选/构建配置
+    sourcePaths:
+      - server/datasetRegistry/**          # A 体系（权威，17 文件）
+      - shared/datasetRegistryContracts.ts # wire 契约
+      - server/runWorkbenchAssembly/datasetFromRegistry.ts # A→研究链唯一读桥
+      - server/researchDataset/**          # B 体系（LEGACY）
+      - server/research/datasetAccess/**   # B 体系访问层（LEGACY）
+    entryPoints:
+      - server/datasetRegistry/registry.ts#DatasetRegistryService.createVersionWithBuildConfig
+      - server/datasetRegistry/runner.ts#DefaultDatasetBuildRunner.start
+      - server/datasetRegistry/query.ts#DatasetQueryService
+      - server/datasetRegistry/router.ts#buildDatasetRegistryRouter  # 24 procedures
+    inputs:
+      - stock_daily_prices
+      - research_securities
+      - research_security_status_history
+      - industry_assignments
+      - liquidity_daily
+      - index_daily (交易日历唯一来源)
+      - FirstLimitPullbackBuildConfig
+    outputs:
+      - dataset_version row (status READY)
+      - ds_first_limit_pullback_{event,prefix,post,path,outcome}
+      - DatasetVersionCounts (totalRows = 五表行数之和)
+    consumers: [research, backtest, frontend]
+    persistence:
+      - dataset_definition (1)
+      - dataset_version (2)
+      - dataset_build_job (4)
+      - dataset_build_config (2) + _event + _board
+      - ds_first_limit_pullback_event (25108)
+      - ds_first_limit_pullback_prefix (527268)
+      - ds_first_limit_pullback_post (487692)
+      - ds_first_limit_pullback_path (487692)
+      - ds_first_limit_pullback_outcome (75324)
+    tests:
+      - tests/server/datasetRegistry/**
+      - tests/server/researchDataset/**
+      - tests/server/research/datasetAccess/**
+      - tests/shared/datasetRegistryContracts.test.ts
+      - tests/client/src/adapters/datasetRegistryAdapter.test.ts
+    knownRisks:
+      - "桥仅支持单一 datasetCode first_limit_pullback (datasetFromRegistry.ts:978)"
+      - "prefix/post 物理表不在 drizzle migration 链内（双源漂移）"
+      - "未注册插件 code 构建抛 BUILDER_NOT_REGISTERED"
+      - "读路径列清单非插件化（query.ts:90-104）"
+    legacyPaths:
+      - server/researchDataset/**（B 体系，内容寻址串 + research_datasets）
+      - rd_rows_05809b1a6d97aa02 / rd_rows_5dce9db1421bec38
+    verifiedFacts:
+      - "五表记账闭合：1,603,084 = v1 60,002 + v2 1,543,082，差 0"
+      - "event 25108 + prefix 527268 + post 487692 + path 487692 + outcome 75324 = 1603084"
+
+  research:
+    status: READY
+    marker: FACT
+    purpose: 从 datasetVersionId 出发的探索性研究：假设→实验→运行→分析→结果→结论→候选策略
+    sourcePaths:
+      - server/researchCore/**      # 单数 10 表领域层（权威）
+      - server/researchEngine/**    # 分析引擎 + planner
+      - server/research/framework/**
+      - server/research/signalEngine/**
+      - server/research/conditionSignal/**
+      - server/research/recipeFeatures/**
+      - server/research/patternLibrary/**
+      - server/research/strategyCandidate/**
+      - shared/researchContracts.ts
+    entryPoints:
+      - server/researchCore/repository/db.ts#createDbResearchRepositories
+      - server/research/signalEngine/engine.ts#runCandidateEngine
+      - server/researchEngineRouter.ts
+      - server/researchPlannerRouter.ts
+      - server/research/strategyCandidate/router.ts#promote
+    inputs:
+      - datasetVersionId
+      - research question / hypothesis / analysis config
+    outputs:
+      - research_conclusion
+      - research_strategy_candidate
+      - StrategyVersion (经 promote)
+    consumers: [strategy, frontend]
+    persistence:
+      - research_experiment (7)
+      - research_hypothesis (5)
+      - research_run (18)
+      - research_analysis (352)
+      - research_analysis_condition (735)
+      - research_analysis_metric (0)
+      - research_result (6680)
+      - research_conclusion (15)
+      - research_strategy_candidate (13)
+      - research_artifact (0)
+      - research_finding (68) / research_question (3) / research_plan (3)
+    tests:
+      - tests/server/researchCore/**
+      - tests/server/researchEngine/**
+      - tests/server/research/strategyCandidate/**
+      - tests/server/researchRunRouter.test.ts
+    knownRisks:
+      - "两套 Research 数据模型并存（单数 vs 复数）⇒ ✅ 已解决：旧表已 DROP/RENAME 为 archive_research_*（migration 0046）"
+      - "主 barrel 隐式加载 legacy 死代码 ⇒ ✅ 已解决：server/research/index.ts 已删除"
+      - "research_analysis_metric / research_artifact ⇒ 已随 migration 0046 退役/归档"
+    legacyPaths: []
+    legacyPathsRetired: "server/research/{experiment,status,engineAdapter}.ts、persistence/**、*Service.ts 均已退役（e79b510 / REFACTOR-001 55f7838）；注：run.ts / sweep.ts 仍在产（sweep#computeParameterSpaceFingerprint 被 parameterSearch · rollingOptimization · walkForwardRun 引用），非 legacy"
+    boundaryGuard:
+      - "tests/server/research/legacyFreeProductionChain.test.ts（AST import 图可达性 Gate，7 用例）—— 取代已删除的 importBoundary.test.ts"
+
+  strategy:
+    status: READY
+    marker: FACT
+    purpose: 策略规则与参数定义、版本化、生命周期；Core 为语义权威，legacy 定义为存储编码
+    sourcePaths:
+      - server/strategyCore/**              # 语义权威（20 文件 / ~6.8k 行）
+      - server/strategyCore/production/**   # 生产接线（6 文件）
+      - server/strategyCore/adapters/legacyDefinition.ts
+      - server/research/strategySchema/**   # 存储编码（12 文件）
+      - server/research/strategyPersistence/**
+      - server/research/lifecycle/**
+      - server/strategy/**                  # LEGACY 引擎策略层
+    entryPoints:
+      - server/strategyCore/runtime.ts#StrategyRuntime.evaluate
+      - server/strategyCore/production/coreDecision.ts#createCoreDecisionSource
+      - server/strategyCore/version.ts#applyDefinitionChange
+      - server/runWorkbenchAssembly/assemble.ts#assembleStrategySide
+      - server/researchRouter.ts#strategy.* / lifecycle.*
+    inputs:
+      - StrategyDocument (strategyDocumentJson)
+      - parameterSet
+      - RuntimeContext
+      - datasetVersionId
+    outputs:
+      - StrategyDecision
+      - StrategyRunSnapshot
+      - strategies / strategy_versions / 5 投影表
+    consumers: [backtest, research, frontend]
+    persistence:
+      - strategies (10)
+      - strategy_versions (11)
+      - strategy_parameters (24)
+      - strategy_entry_rules (17)
+      - strategy_exit_rules (19)
+      - strategy_execution_rules (9)
+      - strategy_version_datasets (9)
+      - strategy_research_provenance (9)
+    tests:
+      - tests/server/strategyCore/** (12 文件)
+      - tests/server/research/strategySchema/**
+      - tests/server/research/strategyPersistence/**
+      - tests/server/strategy/** (legacy)
+    knownRisks:
+      - "setVersionStatus 不吃 §23 迁移表 ⇒ Draft→Production 跳级不被拒 (service.ts:362)"
+      - "codeVersion 11/11 = 1.0.0+gunknown（不可复现）"
+      - "server/strategy/** 与 strategySchema/** 命名撞车"
+      - "ALL_DAYS 在 legacy 侧不可表达（N-04）"
+      - "阈值型出场需入场价/入场日，仍在 exitRules 声明（N-03）"
+    legacyPaths:
+      - server/strategy/**（但经 runBacktestWithRisk 生产可达）
+      - server/research/strategySchema/legacyViews.ts 的 v1 字段
+      - server/research/framework/leakage.ts（恒通过）
+    coreSemantics:
+      - "WINDOW 只考虑当前决策日及之前 ⇒ evaluate 必须逐决策日调用"
+      - "updateVersionDefinition() 恒抛 VERSION_IMMUTABLE"
+      - "事件判定必须由运行方注入，未注入即抛错"
+      - "DATASET_BINDING_IN_DEFINITION_FORBIDDEN（机器可查）"
+
+  parameterSearch:
+    status: READY
+    marker: FACT
+    purpose: 参数空间派生 → Grid 全组合搜索 → 组合执行（复用 Backtest + Evaluation）→ 结果留档；支持续跑 / 重试 / 缓存复用
+    sourcePaths:
+      - server/research/parameterSearch/**
+      - server/research/rollingOptimization/**
+      - server/research/parameterSpace.ts
+      - server/research/parameterStability.ts
+      - server/paramSearchRouter.ts
+      - server/research/strategyEvaluation/parameterSpaceFromDocument.ts
+      - shared/parameterSearchContracts.ts
+    entryPoints:
+      - server/research/parameterSearch/run.ts#runParameterSearch
+      - server/research/parameterSearch/executor.ts#createParameterSearchRun
+      - server/research/parameterSearch/executor.ts#executeParameterSearchRun
+      - server/research/parameterSearch/executor.ts#retryParameterSearchCombination
+      - server/research/parameterSearch/executor.ts#cancelParameterSearchRun
+      - server/research/parameterSearch/searchSpace.ts#deriveParameterSearchSpaceFromProjection
+      - server/research/parameterSearch/parameterHash.ts#computeParameterHash
+      - server/research/rollingOptimization/run.ts#runRollingOptimization
+      - server/paramSearchRouter.ts (技术预览 describe/run/rolling/robustness/stochastic；PARAMETER-001 持久化 createSearch/listSearches/getSearch/startSearch/cancelSearch/getSearchResults/retrySearchCombination)
+    inputs: [StrategyDocument(参数投影 parameterRole), 搜索空间定义, 评估端口, datasetVersionId, 回测窗口]
+    outputs: [PersistedSearchRun, 组合计划, 单组合 canonical metrics, 候选策略(非 production)]
+    consumers: [frontend]
+    persistence:
+      - parameter_search_run
+      - parameter_search_combination
+      - parameter_search_result
+    tests:
+      - tests/server/research/parameterSearch/**
+      - tests/server/research/rollingOptimization/**
+      - tests/server/research/strategyEvaluation/optimizationStage.test.ts
+    knownRisks:
+      - "R-01 已收口（2026-09-19 / 9bs）：搜索结果落库三表，历史 Run 可回看 / 续跑 / 重试"
+      - "R-05 已修复（2026-09-19 / 9bs）：搜索域派生改读 parameterRole ⇒ FIXED 不进搜索空间、DERIVED 不得直接搜索（判据与 listSearchableParameters 等价，有守护测试）"
+      - "N-02 已定性（2026-09-19 / 9bt）= 情况 D：参数「声明在 schema 里」≠「决策引擎会读它」；判据 = strategyCore/ruleGraph.ts#collectRuleParameterReferences。createSearch 已加死参数护栏（PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER + OVERRIDE_ON_UNREFERENCED_PARAMETER）；顺序纪律 = 派生 → 覆盖 → 死参数剥离 → 校验"
+      - "N-01 已修复（2026-09-19 / 9bt）：createSearch 前置窗口校验（dataset_version 日期按北京业务日）⇒ PARAMETER_SEARCH_WINDOW_OUT_OF_DATASET_RANGE"
+      - "N-05 收敛状态（2026-09-19 / 9bt）：parameterSpaceFromDocument.ts = LEGACY/PREVIEW（消费者 = 技术预览端点 + 闭环 optimization 阶段，后者只持有 document、拿不到 role 投影行）；parameterSearch/searchSpace.ts = PS 唯一使用，静态源码守卫测试钉住"
+      - "遗留：parameter_search_result.backtestRunId 恒 NULL（评估端口走内存态 5 阶段闭环、不落 closed_loop_backtest_run 行）；追溯改用 backtestFingerprint + evaluationId + Run 坐标（N-03 = DEFERRED）"
+      - "遗留：历史策略文档不可变 ⇒ 现有候选文档的 TUNABLE 参数多为「死参数」，要用参数搜索须以参数引用改写并生成新版本"
+      - "derivedFrom 仍无求值器（仅人类可读）"
+      - "缓存判据 = 规格 §13 五要素，不含 codeVersion ⇒ 代码变更但未 bump 执行政策版本时 cache 不失效"
+    legacyPaths:
+      - server/research/parameterStability.ts（仅测试可达）
+      - server/research/experimentService.ts / sweepService.ts
+  backtest:
+    status: READY
+    marker: FACT
+    purpose: 历史执行模拟：组合会计、T+1 账本、执行模型、涨跌停/停牌/零成交拦截、成本、审计、canonical 指标
+    sourcePaths:
+      - server/backtest/**                  # 事实上的 Backtest Core（16 文件）
+      - server/research/simulator/**        # 生产撮合编排
+      - server/research/closedLoop/**
+      - server/research/closedLoopWiring/**
+      - server/runWorkbenchAssembly/assemble.ts
+      - server/closedLoopBacktestRun/**
+      - server/researchRunRouter.ts
+    entryPoints:
+      - server/research/simulator/engine.ts#runTradeSimulation
+      - server/research/simulator/plan.ts#planDecisionDay
+      - server/backtest/backtestResult.ts#canonicalMetrics
+      - server/researchRunRouter.ts#loopRun
+      - server/researchRunRouter.ts#persistClosedLoopBacktestRun
+    inputs:
+      - StrategyDecision / signalBuilder
+      - Dataset bars
+      - SimulationConfig (positionSizing, executionPolicy)
+      - initialCapital
+    outputs:
+      - TradeSimulationRun (equityCurve / trades / auditTrail)
+      - CanonicalMetrics
+      - BacktestRunPayload
+      - closed_loop_backtest_run row
+    consumers: [evaluation, frontend]
+    persistence:
+      - closed_loop_backtest_run (7)
+      - backtest_runs (1, legacy)
+    tests:
+      - tests/server/backtest/** (8 文件)
+      - tests/server/research/simulator/**
+      - tests/server/research/closedLoop/**
+      - tests/server/research/closedLoopWiring/**
+      - tests/server/researchRunRouter.test.ts
+    knownRisks:
+      - "三段不可互换执行契约（AR-1）"
+      - "第二套 metrics 口径 backtest/metrics.ts 仍在（AR-6）"
+      - "止损三落点互不相通（AR-3）"
+      - "运行级复现快照缺失（R-02）"
+      - "长运行连接重置曾导致必然丢档（已修：有界重试 ≤3）"
+    legacyPaths:
+      - server/backtest/engine.ts#runBacktestEngine2（仅测试）
+      - server/realisticBacktest.ts#simulateRealisticTPlus1ToTPlus2
+      - server/research/legacyTransactionSimulator.ts
+    confirmedFacts:
+      executionPolicyVersion: 1
+      annualizationDays: 252
+      canonicalMetricsKeys: 8
+      zeroVolumePolicyDefault: REJECT
+      maxDrawdownPct: positive magnitude
+      resultJsonSegments: [strategyRun, backtest]
+      persistRetryAttempts: 3
+      historicalRunsBackfilled: false
+
+  evaluation:
+    status: PARTIAL
+    marker: FACT
+    purpose: 收益/风险/回撤/交易质量指标；策略参数评估端口；闭环 evaluation 阶段
+    sourcePaths:
+      - server/research/strategyEvaluation/**
+      - server/research/performanceMetrics/**
+      - server/research/riskAdjustedMetrics/**
+      - server/research/tradeQualityMetrics/**
+      - server/historicalState/audit/**
+    entryPoints:
+      - server/research/strategyEvaluation/evaluate.ts#evaluateStrategyParameters
+      - server/research/performanceMetrics/evaluate.ts#evaluatePerformance
+      - server/research/riskAdjustedMetrics/evaluate.ts#evaluateRiskAdjustedMetrics
+      - server/research/tradeQualityMetrics/evaluate.ts#evaluateTradeQualityMetrics
+      - server/researchRouter.ts#metrics.evaluate
+    inputs: [TradeSimulationRun / equityCurve / trades, CanonicalMetrics]
+    outputs: [ClosedLoopEvaluationRef]
+    consumers: [backtest, frontend]
+    persistence: [closed_loop_backtest_run.summaryJson]
+    tests:
+      - tests/server/backtest/canonicalMetricsParity.test.ts
+      - tests/server/research/performanceMetrics/**
+      - tests/server/research/riskAdjustedMetrics/**
+      - tests/server/research/tradeQualityMetrics/**
+      - tests/server/research/strategyEvaluation/**
+    knownRisks:
+      - "第二套口径 backtest/metrics.ts 未收口（唯一在产消费方 tradeQualityMetrics/analyze.ts:442，read-only）"
+      - "dataReady 默认 false ⇒ 必须显式传 true，否则 INCONCLUSIVE（runAudit.ts:74）"
+      - "未接线时 metricsSource 如实标 evaluators（非缺陷，但意味着指标来源不唯一）"
+    legacyPaths: []
+
+  robustness:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: 成本/滑点/参数/执行四轴扰动 + Monte Carlo/Bootstrap/成交顺序随机化 + 因子消融 + 搜索结果邻域稳定性分析（ROBUSTNESS-001，零重跑）
+    sourcePaths:
+      - server/research/robustness/**
+      - server/research/stochasticRobustness/**
+      - server/research/searchRobustness/**
+      - server/research/factorAblation/**
+      - server/overfittingGuard.ts
+    entryPoints:
+      - server/research/robustness/evaluate.ts#runRobustnessStress
+      - server/research/stochasticRobustness/run.ts#runStochasticRobustness
+      - server/research/searchRobustness/executor.ts#createSearchRobustnessRun
+      - server/research/searchRobustness/executor.ts#startSearchRobustnessRun
+      - server/research/searchRobustness/analysis.ts#analyzeSearchRobustness
+      - server/research/factorAblation/run.ts#runAblationAssessment
+      - server/overfittingGuard.ts#buildOverfittingGuardReport
+    inputs: [参数集, 回测配置, 扰动规格, parameter_search_run/combination/result（冻结快照）]
+    outputs: [扰动重估结果, 漂移归因, 随机化结论, 邻域稳定性/敏感性/离散度/二维稳定性矩阵]
+    consumers: [frontend]
+    persistence:
+      - search_robustness_run
+      - search_robustness_result
+      - search_robustness_parameter_analysis
+    router: server/paramSearchRouter.ts（同域扩 6 端点：createRobustnessRun / listRobustnessRuns / getRobustnessRun / startRobustnessRun / cancelRobustnessRun / getRobustnessResults）
+    contract: shared/searchRobustnessContracts.ts
+    tests:
+      - tests/server/research/robustness/**
+      - tests/server/research/stochasticRobustness/**
+      - tests/server/research/searchRobustness/**
+      - tests/server/research/factorAblation/**
+    knownRisks:
+      - "factorAblation 仅测试可达（CODE_READY 未接线，AR-10）"
+      - "闭环 robustness 阶段未装配 ⇒ CL_RUNNER_NOT_INJECTED"
+      - "ROBUSTNESS-001 只消费 COMPLETED 且结果全为 canonical 的 Search Run（否则响亮拒绝）；对 referenceCheckApplied 为 NULL 的历史 Run 会如实标 ROBUSTNESS_PARAMETER_REFERENCE_UNVERIFIED（不保证参数真的被策略消费）"
+      - "数值型 ENUM 搜索域不可编译（PARAMETER-001 口径：数值域只支持等步长区间）⇒ 小规模穷举须用 INTEGER_RANGE / DECIMAL_RANGE 表达"
+      - "二维稳定性矩阵在搜索空间含 > 2 个可变参数时只取前两个，多命中格标 AMBIGUOUS（不挑代表）"
+    legacyPaths: []
+
+  oos:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: IS/OOS 隔离记录与归档账本 + 冻结候选参数的样本外真实重跑验证（OOS-001，必须重跑）
+    sourcePaths:
+      - server/research/oosIsolation/**
+      - server/research/oosValidation/**      # OOS-001
+      - server/research/oosEvaluation.ts     # LEGACY 6.4
+    entryPoints:
+      - server/research/oosIsolation/run.ts#runOosIsolation
+      - server/research/oosValidation/executor.ts#createOosValidationRun
+      - server/research/oosValidation/executor.ts#startOosValidationRun
+      - server/walkForwardRouter.ts#oos
+    inputs: [IS/OOS 切分, 参数集, 评估结果, 源 parameter_search_run + parameterHash + oosWindow]
+    outputs: [OOS 记录, 隔离账本, OOS Run 冻结坐标 + IS/OOS 逐项对照]
+    consumers: [frontend]
+    persistence:
+      - oos_validation_run
+      - oos_validation_result
+    router: server/paramSearchRouter.ts（同域扩 6 端点：createOosRun / listOosRuns / getOosRun / startOosRun / cancelOosRun / getOosResult）
+    contract: shared/oosValidationContracts.ts
+    tests:
+      - tests/server/research/oosIsolation/**
+      - tests/server/research/oosValidation/**
+      - tests/server/research/oosEvaluation.test.ts
+    knownRisks:
+      - "闭环 oos 阶段未装配 ⇒ CL_RUNNER_NOT_INJECTED"
+      - "oosEvaluation.ts（legacy 6.4）仅测试可达"
+      - "OOS-001 与 searchRobustness 是并列兄弟域且语义相反（前者必须重跑、后者结构性零重跑）⇒ 实现不得互相搬移；两侧守卫方向镜像（一为黑名单、一为必含清单）"
+      - "OOS-001 的 IS 侧六项指标里 averageWin / averageLoss 两侧都拿不到（源 canonical 面与 OOS 重算面均不产出）⇒ 恒为 null，不补值"
+    legacyPaths: [server/research/oosEvaluation.ts, server/research/trainValidationOos.ts]
+
+  walkForward:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: Train → Optimize → Freeze → Test → Move Window 滚动窗编排与留档
+    sourcePaths:
+      - server/research/walkForwardRun/**
+      - server/research/walkForward.ts          # LEGACY 6.5
+      - server/research/walkForwardService.ts   # LEGACY 6.5
+      - server/research/datasetSplit.ts
+      - server/walkForwardRouter.ts
+    entryPoints:
+      - server/research/walkForwardRun/run.ts#runWalkForward
+      - server/research/walkForwardRun/windows.ts#generateWalkForwardSplits
+      - server/walkForwardRouter.ts#run
+    inputs: [窗口规格, 评估端口, 参数空间]
+    outputs: [window id / train period / test period / parameters / result / metrics]
+    consumers: [frontend]
+    persistence: []
+    tests:
+      - tests/server/research/walkForwardRun/**
+      - tests/server/research/walkForward(Service).test.ts
+    knownRisks:
+      - "datasetSplit 为 PARTIAL（工具被生产引用，服务本体无调用）"
+      - "闭环部分阶段未装配"
+    legacyPaths:
+      - server/research/walkForward.ts
+      - server/research/walkForwardService.ts
+      - server/research/datasetSplit.ts（部分）
+
+  walkForwardValidation:
+    status: FACT
+    marker: FACT
+    purpose: 滚动窗口验证的编排层（WALK-FORWARD-001）—— 逐 Fold 独立搜索 → 冻结候选 → 紧邻样本外真实重跑 → 多 Fold 描述性汇总
+    sourcePaths:
+      - server/research/walkForward/**
+    entryPoints:
+      - server/research/walkForward/executor.ts#createWalkForwardValidationRun
+      - server/research/walkForward/executor.ts#startWalkForwardValidationRun
+      - server/research/walkForward/windowSchedule.ts#buildWalkForwardSchedule
+    inputs: [冻结配置(策略版本 + datasetVersionId + 窗口几何 + selectionPolicy), 交易日序列]
+    outputs: [窗口排程 + 双重指纹, Fold 坐标与状态, 冻结候选, IS/OOS canonical 指标, 描述性汇总]
+    consumers: [frontend]
+    persistence:
+      - walk_forward_run
+      - walk_forward_fold
+    router: server/paramSearchRouter.ts（同域扩 6 端点：createWalkForwardRun / listWalkForwardRuns / getWalkForwardRun / getWalkForwardFold / startWalkForwardRun / cancelWalkForwardRun；零新 router）
+    contract: shared/walkForwardContracts.ts
+    executionSeam: WalkForwardExecutionHooks（由组合根 paramSearchRouter 用既有 PS / OOS application service 实现；域层零复制策略 IO、零 HTTP 自调用）
+    tests:
+      - tests/server/research/walkForward/**
+    knownRisks:
+      - "三方向镜像守卫：searchRobustness=黑名单+零重跑 / oosValidation=必含清单+必须重跑 / walkForward=黑名单+「执行只能经由注入钩子」⇒ 三套实现不得互相搬移"
+      - "本域与 C-19.1 walkForwardRun/** 刻意不并入全域 export *（同名导出会被静默遮蔽）；both 一律按文件路径 import"
+      - "全仓库 11 个既有策略版本的 ruleGraphRefs 全为空 ⇒ 搜历史候选必被 PARAMETER_SEARCH_NO_REFERENCED_TUNABLE_PARAMETER 拒绝；要真搜参数必须自建含参数引用的新版本"
+      - "cand-360001@1.0.0 的 3 个 TUNABLE 笛卡尔积 1240 > 256 ⇒ MAX_COMBINATIONS_EXCEEDED（禁截断）"
+      - "LeakageGuard 对配方特征恒通过 ⇒ 策略层无独立未来函数防护；本域 future-leak 防护为几何级（窗口不重叠 + 搜索不越界 + 每 Fold 独立搜索）"
+    legacyPaths: []
+
+  overfitting:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: CSCV-PBO + 参数敏感性 + 聚合结论
+    sourcePaths:
+      - server/research/overfittingDetection/**
+      - server/research/pbo.ts                    # LEGACY 6.5
+      - server/research/overfittingAssessment.ts   # LEGACY 6.5
+    entryPoints:
+      - server/research/overfittingDetection/run.ts#runOverfittingDetection
+      - server/walkForwardRouter.ts#overfit
+    inputs: [多配置回测矩阵, IS/OOS 切分]
+    outputs: [PBO, 参数敏感性, 过拟合结论]
+    consumers: [frontend]
+    persistence: []
+    tests:
+      - tests/server/research/overfittingDetection/**
+      - tests/server/research/pbo.test.ts
+      - tests/server/research/overfittingAssessment.test.ts
+    knownRisks:
+      - "legacy pbo/overfittingAssessment 仅测试可达"
+      - "闭环 overfitting 阶段未装配"
+    legacyPaths:
+      - server/research/pbo.ts
+      - server/research/overfittingAssessment.ts
+
+  simulation:
+    status: FACT
+    marker: FACT
+    purpose: 用贴近实盘的 signal/position/execution/risk/capital/cost 口径做模拟交易，并留档
+    sourcePaths:
+      - server/research/paperAccount/**
+      - server/paperTrading.ts
+      - server/paperTradingScheduler.ts
+      - server/research/signalToPnl/**
+    entryPoints:
+      - server/research/paperAccount/run.ts#assemblePaperAccountRun
+      - server/paperTrading.ts#createPaperTradingRun / advancePaperTradingRunToLatest
+      - server/paperTradingScheduler.ts#startPaperTradingScheduler
+      - server/research/signalToPnl/engine.ts#runSignalToPnlLoop
+      - server/reviewRouter.ts#paper.run
+    inputs: [策略版本, 数据集坐标, 交易日历]
+    outputs: [paper run / order / fill / position / PnL]
+    consumers: [review, frontend]
+    persistence: [paper_trading_runs (4)]
+    tests:
+      - tests/server/research/paperAccount/**
+      - tests/server/research/signalToPnl/**
+    knownRisks:
+      - "signalToPnl 编排引擎无生产调用（闭环 paper 阶段 notWired）"
+      - "PaperTrading 走 legacy sentiment.* 语义"
+    legacyPaths: [server/paperTrading.ts（legacy 语义但在产）]
+
+  production:
+    status: PLANNED
+    marker: PLANNED
+    purpose: 完整闭环部署 / 实盘对接
+    sourcePaths: []
+    entryPoints: []
+    inputs: []
+    outputs: []
+    consumers: []
+    persistence: []
+    tests: []
+    knownRisks:
+      - "无任何实现；Live Trading 无实现"
+      - "闭环 6 阶段未装配"
+    legacyPaths: []
+
+  # ── 辅助域（非规格要求，但为完整基线所必需） ──────────────────────────
+
+  marketDataFoundation:
+    status: RESEARCH_READY
+    marker: FACT
+    purpose: STEP 12 A–H 数据地基（OHLCV / Security Master / Status / CorpActions / Liquidity / Index / Industry / Gate）
+    sourcePaths:
+      - scripts/backfill*.ts
+      - server/backfill/**
+      - server/marketData/**
+      - server/security/**
+      - server/data/boardRules.ts
+    entryPoints:
+      - scripts/step12_certify.mjs
+      - scripts/backfillDaily.ts
+    inputs: [BaoStock / Tushare providers]
+    outputs: [stock_daily_prices / research_securities / ...]
+    consumers: [dataset]
+    persistence:
+      - stock_daily_prices (8895704)
+      - index_daily (7492)
+      - research_securities (5552)
+      - industry_assignments (5212)
+      - corporate_actions / adjustment_factors / liquidity_daily
+    tests:
+      - tests/server/backfill/**
+      - tests/server/research/framework/**
+    knownRisks:
+      - "index_daily 是交易日历唯一来源；停更会静默 no-op 却报成功 ⇒ 补数须 --force"
+      - "industry securityId 曾全 NULL；effectiveFrom 单点（BaoStock 只给当前快照）"
+      - "BaoStock 单账号单会话 ⇒ C/E/G 禁并发"
+    legacyPaths: []
+
+  marketRegime:
+    status: FACT
+    marker: FACT
+    purpose: 七维 PIT 市场状态标签 + 归因
+    sourcePaths: [server/research/marketRegime/**, server/marketRegimeRouter.ts]
+    entryPoints: [server/research/marketRegime/run.ts#runMarketRegimeAnalysis]
+    inputs: [dataset rows]
+    outputs: [Regime tags + attribution]
+    consumers: [frontend, closedLoop.regime]
+    persistence: []
+    tests: [tests/server/research/marketRegime/**]
+    knownRisks: []
+    legacyPaths: []
+
+  lifecycleAndReview:
+    status: FACT_TECHNICAL_PREVIEW
+    marker: FACT
+    purpose: 策略八态生命周期 + 候选转正 + 交易日志 + 纪律反馈
+    sourcePaths:
+      - server/research/lifecycle/**
+      - server/research/strategyCandidate/**
+      - server/research/tradeJournal/**
+      - server/research/disciplineFeedback/**
+      - server/reviewRouter.ts
+    entryPoints:
+      - server/research/lifecycle/map.ts#applyLifecycleTransition
+      - server/research/strategyCandidate/router.ts#promote
+      - server/research/tradeJournal/reconcile.ts#reconcilePlanVsActual
+      - server/research/disciplineFeedback/run.ts#buildDisciplineFeedbackRun
+    inputs: [strategy version, candidate, paper run, trade records]
+    outputs: [lifecycle ledger, strategy version, journal drafts, discipline report]
+    consumers: [frontend]
+    persistence: [strategies / strategy_versions / strategy_research_provenance]
+    tests:
+      - tests/server/research/lifecycle/**
+      - tests/server/research/strategyCandidate/**
+      - tests/server/research/tradeJournal/**
+      - tests/server/research/disciplineFeedback/**
+    knownRisks:
+      - "setVersionStatus 绕过 §23 迁移表（与 lifecycle.transition 不一致）"
+      - "reviewRouter 头注释称未合并进 appRouter，实际已注册（陈旧注释）"
+    legacyPaths: []
+
+database:
+  sampledAt: "2026-09-19T08:40Z (+ delta recheck 2026-09-19T08:58Z)"
+  closedLoopBacktestRunRows: "7 @08:40Z -> 8 @08:58Z"
+  workspaceCaveat: "审计对象为工作区（working tree），非 HEAD：审计时存在 11 个未提交的 server/** 改动（+254/-79）。行号为 auditedAt 快照，定位以路径+符号名为准。"
+  realBaseTables: 63
+  schemaDeclaredTables: 60
+  deltaExplanation: "__drizzle_migrations (24 rows) + rd_rows_05809b1a6d97aa02 (163) + rd_rows_5dce9db1421bec38 (800)"
+  foreignKeys: 0
+  migrations:
+    files: 41
+    range: "0000-0040"
+    journalStopsAt: "0023"
+    snapshotsStopAt: "0015"
+    __drizzle_migrationsRows: 24
+    dbPushUsable: false
+    applyMechanism: "手写 SQL(-- @guard 幂等) + scripts/apply*.mjs|mts (14 专用 + 1 通用)"
+  hardRules:
+    - "禁 db:push"
+    - "禁 drizzle-kit generate"
+    - "禁手写 _journal.json"
+    - "migration 必须显式"
+    - "不随意修改历史数据"
+    - "历史 Run 不回填"
+  protectedTables:
+    - closed_loop_backtest_run
+    - strategy_versions
+    - dataset_version
+
+testing:
+  baseline:
+    failingFiles: 8
+    failingCases: 17
+    judgement: "失败文件集合逐项一致 = 零新增"
+  framework: Vitest 3 (environment node, no setupFiles, no testTimeout override)
+  include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "tests/**/*.spec.ts"]
+
+openFindings:
+  architectureRisks:
+    AR-1: "三段不可互换执行契约并存"
+    AR-2: "R-06 单次 Run 657.8s：主因已定位（canonical.ts 44.3% CPU / fingerprint 每求值 2 次）并已修（research -52%，digest 不变）；剩余瓶颈 = DB 读取 ≈95s（58 次往返）"
+    AR-3: "止损三落点互不相通；server/engine/** 完全不执行止损"
+    AR-4: "策略层无独立未来函数防护（legacy LeakageGuard 恒通过）"
+  functionalRisks:
+    R-01: "搜索结果不落库"
+    R-02: "运行级复现快照缺失"
+    R-03: "codeVersion 11/11 = 1.0.0+gunknown"
+    R-04: "setVersionStatus 绕过 §23 迁移表"
+    R-05: "parameterRole 门槛未生效"
+    R-06: "两套 Metrics 口径并存"
+    R-07: "数据集桥仅支持单一 datasetCode"
+    R-08: "prefix/post 不在 migration 链内"
+    R-09: "无 FK ⇒ 校验-提交窗口"
+    R-10: "单次运行可复现性不完整（N-05/N-06）"
+
+nextStage:
+  id: ROBUSTNESS-PARAMETER-CONSUMPTION
+  status: PLANNED
+  blocking: "PARAMETER-001（9bs）与 PARAMETER-002（9bt）均已完成：PS 有效性已 gate（死参数护栏 + 前置窗口校验 + 参数引用正例证明执行链正确）。下一步由 Robustness / OOS / Walk-Forward 消费 Parameter Search 结果。⚠️ 遗留：闭环 optimization 阶段仍用旧派生器；历史候选文档的参数需改写为参数引用；N-03 = DEFERRED"
+  createdTasks:
+    - "系统性创建 BACKTEST-003 / BACKTEST-004 = 禁止"
+
+# ── round-2 全量审计（2026-09-20）追加登记 ──────────────────────────────
+roundTwo:
+  auditedAt: "2026-09-20"
+  trigger:
+    - "GLOBAL AUDIT REQUIRED #4 核心数据流变化：判定日 decisionOffsetDays 贯穿 Dataset→Run→Experiment→Analysis"
+    - "GLOBAL AUDIT REQUIRED #7 核心 Contract 变化：4 份新 shared 契约 + 新增 shared/patternSemantics.ts"
+    - "GLOBAL AUDIT REQUIRED #1 Domain 新增：searchRobustness / oosValidation / walkForward"
+  phasesCompleted:
+    - "A  (9by) Research Report Artifact 最小闭环 — researchEngine/report/**；真实 Run 已观测到钩子触发"
+    - "R1 (9bz) look-ahead 双层截断 — 数据集层按 T+1..T+d 截断池子 + 研究层护栏改为按声明判定日校验（旧护栏 Math.max 循环定义、恒真）"
+    - "B  (9ca) Pattern 语义槽 — shared/patternSemantics.ts（16 项 operator 白名单 + 唯一 Expander）+ semanticRegistry（唯一 SoT，深冻结）+ 两侧投影"
+    - "D  (9cb) 结论→候选派生桥 — strategyCandidate/evidenceDerivation.ts（唯一实现）；createFromConclusion 默认派生"
+  newContracts:
+    - "shared/parameterSearchContracts.ts (0041)"
+    - "shared/searchRobustnessContracts.ts (0042)"
+    - "shared/oosValidationContracts.ts (0043)"
+    - "shared/walkForwardContracts.ts (0044)"
+    - "shared/patternSemantics.ts (PHASE-B-001, 跨域语义契约)"
+    - "shared/researchContracts.ts 新增 pullbackScreenConditionSchema.decisionOffsetDays (PHASE-R1-001)"
+  newTablesRound2:
+    - "parameter_search_run / parameter_search_combination / parameter_search_result"
+    - "search_robustness_run / search_robustness_result / search_robustness_parameter_analysis"
+    - "oos_validation_run / oos_validation_result"
+    - "walk_forward_run / walk_forward_fold"
+  newErrorCodes:
+    - "OBSERVATION_WITHOUT_DECISION_DAY → BAD_REQUEST"
+    - "INVALID_DECISION_OFFSET → BAD_REQUEST"
+    - "DECISION_OFFSET_CONFLICT → BAD_REQUEST"
+    - "REPORT_RUN_NOT_COMPLETED → PRECONDITION_FAILED"
+    - "INVALID_PULLBACK_DECISION_OFFSET → (未映射, 落 INTERNAL_SERVER_ERROR)"
+  newCrossDomainEdgesUnGuarded:
+    - "~~server/researchEngine/** → server/research/patternLibrary/**~~ ⇒ ✅ 已消解：researchEngine 已删除，该边不存在"
+  resolvedRisks:
+    R-01: "搜索结果不落库 ⇒ 已解决：parameter_search_{run,combination,result} 三层落库（persistence.ts:144/312/451）"
+    R-02: "运行级复现快照缺失 ⇒ 部分解决：已有 parameterSpaceJson / datasetVersionId / startDate/endDate / executionPolicyVersion / evaluationConfigFingerprint / metricsVersion / engineVersion / runFingerprint；仍缺 seed / universe / codeVersion"
+  newRisksRound2:
+    AR-9: "新依赖边 researchEngine → research/patternLibrary 无测试守护"
+    AR-10: "INVALID_PULLBACK_DECISION_OFFSET 未映射 tRPC code（与 R1 三码待遇不一致）"
+    AR-11: "research_artifact 无 DB 唯一约束，幂等只靠服务层 checksum（并发/多进程无兜底）"
+    AR-12: "pat_* 语义变量无区分度：声明写归一化回撤比例，投影按 field=low+MIN 取绝对值 ⇒ 恒 > 0（PHASE-B 交付缺陷，未修）"
+    AR-13: "结论不写 findingIds（engine.ts:370 正常分支写空数组）⇒ 证据链在列上断裂，D 阶段靠脚手架回填"
+    AR-14: "strategyProjection 未接生产组装（仅测试可达）⇒ 策略侧语义 PIT 护栏「机制级通过、真实链路未跑」"
+    AR-15: "内存态技术预览端点与持久化端点双轨并存（paramSearch.run/rolling/robustness/stochastic；walkForwardRouter 预览 vs paramSearch.createWalkForwardRun）"
+    AR-16: "planner 的 patternId 路径仍写空 filterRule（未接 Pattern 语义声明）"
+  verificationBaseline:
+    tsc: "0 error / exit 0（原 23 条 parameterSearch·searchRobustness 遗留已清零）"
+    vitest: "7 失败文件 / 16 失败用例（全部环境依赖）⇒ 判据 = 零新增失败文件"
+    eolDrift: "0 漂移"
+  engineeringChanges:
+    - "pnpm run test:changed = scripts/testChanged.mts（增量测试：git diff → 反向依赖图 → 只跑受影响）"
+    - "pnpm run docs:tests = scripts/genTestDocs.mts（生成 docs/testing/**，生成物禁手改）"
+    - "server/observability/** 新增（PARAM_PROFILE=1 性能剖析，生产已用、无专属测试）"
+    - ".workbuddy/ 已 untrack + gitignore（禁止 git add -f）⇒ 项目记忆不再随仓库走"
+    - "shared/sectorHeatOrder.ts 升级为四键全序（修「梯队 vs 热力图排序对不上」，10 个测试锁定）"
+
+# ---------------------------------------------------------------------------
+# SCOPE-002（2026-10-03）—— 策略创作工作台（纯前端构建 Strategy）
+# ---------------------------------------------------------------------------
+strategyAuthoring:
+  baselineImpact: minor
+  module: server/research/strategyAuthoring/**
+  files:
+    - server/research/strategyAuthoring/diff.ts
+    - server/research/strategyAuthoring/jsonPointer.ts
+    - server/research/strategyAuthoring/presetRegistry.ts
+    - server/research/strategyAuthoring/vocabulary.ts
+    - server/research/strategyAuthoring/materialize.ts
+    - server/research/strategyAuthoring/blankDraft.ts
+    - server/research/strategyAuthoring/datasetBinding.ts
+    - server/research/strategyAuthoring/router.ts
+    - client/src/components/strategy/PresetEditor.tsx
+    - client/src/components/strategy/StrategyVersionArtifactsTabs.tsx
+    - server/closedLoopBacktestRun/strategyVersionArtifacts.ts
+  endpoints:
+    - strategyDomain.authoring.getVocabulary
+    - strategyDomain.authoring.getBlankDraft
+    - strategyDomain.authoring.materializePreset
+    - strategyDomain.authoring.previewDocument
+    - strategyDomain.authoring.saveDraft
+    - researchRun.getStrategyVersionEvaluation
+    - researchRun.getStrategyVersionPaperTrading
+  sharedContracts:
+    - strategyAuthoringSlotSchema
+    - strategyPresetParameterValueSchema
+    - strategyAuthoringBlankInputSchema
+    - materializeStrategyPresetInputSchema
+    - strategyAuthoringDraftOriginSchema
+    - saveStrategyAuthoringDraftInputSchema
+    - previewStrategyAuthoringDocumentInputSchema
+    - strategyVersionCoordinatesInputSchema
+  dbChange: none
+  executionPathChange: none
+  acceptance:
+    - "3570001 等价锚点：预设物化 policy == golden policy（逐字段）"
+    - "diffAgainstVersion(空白草稿 + 预设 + 用户填自由段) == equal:true"
+    - "strategyAuthoring 测试 66/66；client strategy 测试 115/115；定向回归 326/326"
+  s7Convergence:
+    endpoints:
+      - researchRun.getStrategyVersionEvaluation
+      - researchRun.getStrategyVersionPaperTrading
+    thinWrappers:
+      - researchRun.getFinalEvaluation
+      - researchRun.getPaperTrading3570001
+    evidence: "通用端点 vs 专项端点真实库比对逐字段一致（evaluationDetail 129.6860% / 407 日 / equity 199036.53 / WAITING_FOR_NEW_DATA）；缺坐标 ⇒ null；浏览器两个 Tab 渲染通过"
+
+# ---------------------------------------------------------------------------
+# STRATEGY-T74-FORMALIZATION-001（2026-10-04）
+# ---------------------------------------------------------------------------
+strategyT74Formalization:
+  baselineImpact: minor
+  experiment:
+    id: first-board-pullback/composite-runner-newhigh3-t74
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74
+    runnerBridge:
+      state: NEW_HIGH_3
+      decisionHoldingDays: 5
+      extendToHoldingDays: 74
+    physicalDatasetVersionId: 780001
+    datasetVersionLabel: v8
+    semanticsSource: "v8 is the current physical rebuild of the frozen v7/T80 semantics; 750001 metadata is READY but ds_* tables are empty"
+  runs:
+    observation:
+      runId: RUN-20261004-B067637E
+      gate: OBSERVATION_READY
+      aReturnPct: 15.787690712129931
+      cReturnPct: 151.0958341843399
+      runnerTrigger: 161
+    holdout:
+      runId: RUN-20261004-BF08CD36
+      parentRunId: RUN-20261004-B067637E
+      gate: PASS
+      protocolFingerprint: protocol-sha256:646d8ad19f5405034287aeed712d98f315863ac44f44ebfaaba169cb707b0b4d
+      holdoutAReturnPct: 47.218452022540006
+      holdoutCReturnPct: 105.8425817161599
+      holdoutAMaxDrawdownPct: 17.263937983053136
+      holdoutCMaxDrawdownPct: 14.058593401437204
+  strategy:
+    strategyId: first-limit-pullback-3f-top3-runner-t74
+    version: 1.0.0
+    strategyVersionId: 3600004
+    status: Draft
+    definitionFingerprint: a3d55c83e5de1edd6f91b0cc66949fac477155db1999a0f5f0ddd9b3bc523374
+    provenanceId: 690001
+    researchEvidenceFingerprint: evi-sha256:73552dd34ca8de6a
+  dbChange: none
+  migration: none
+  unchanged:
+    - first-limit-pullback-3f-top3-runner-hold20@1.0.0 (3570001)
+    - simulator
+    - canonicalMetrics
+    - server/strategyCore/**
+
+
+# ---------------------------------------------------------------------------
+# ENTRY-CONDITION-SLOTS-001（2026-10-04）—— 服务端权威入场规则槽
+# ---------------------------------------------------------------------------
+entryConditionSlots:
+  baselineImpact: minor
+  module: server/research/strategyAuthoring/entryConditionSlots.ts
+  featureModule: server/strategyCore/featureRegistry.ts
+  features:
+    - peakCloseSinceEvent
+    - pullbackFromEventPeakClose
+    - trendHoldsMa5Ma10
+  endpoints:
+    - strategyDomain.authoring.recognizeEntryConditionSlots
+    - strategyDomain.authoring.applyEntryConditionSlot
+  sharedContracts:
+    - entryConditionSlotIdSchema
+    - recognizeEntryConditionSlotsInputSchema
+    - applyEntryConditionSlotInputSchema
+  executionPath:
+    - "Core EVENT_TO_CURRENT feature history: MA5/MA10 may use prefix bars before T0"
+    - "Research condition compile accepts eventDayIndex"
+    - "entry.trend_pullback.* + Core unavailable => LOOP_RUN_ENTRY_CONDITION_CORE_REQUIRED"
+  dbChange: none
+  migration: none
+  frontend:
+    - client/src/components/strategy/EntryConditionSlotEditor.tsx
+    - client/src/components/strategy/DefinitionFields.tsx
+    - client/src/pages/StrategyDetail.tsx
+  verification:
+    tsc: "0 error"
+    focusedVitest: "47 files / 561 tests passed"
+    eolDrift: "0"
+
+# ---------------------------------------------------------------------------
+# STRATEGY-TREND-FUSION-P0-001（2026-10-04）
+# P0：3F 选股排序 × 趋势评分融合。只改候选排序；TopN / 仓位 / 退出 / Runner 冻结。
+# ---------------------------------------------------------------------------
+strategyTrendFusionP0:
+  baselineImpact: minor
+  experiment:
+    id: first-board-pullback/composite-runner-newhigh3-t74-trend
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-trend/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-trend
+    controlStrategyId: first-limit-pullback-3f-top3-runner-t74@2.0.0
+    runnerBridge:
+      state: NEW_HIGH_3
+      decisionHoldingDays: 5
+      extendToHoldingDays: 74
+    physicalDatasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    datasetVersionLabel: v8
+    arms:
+      - { id: control, trendWeight: null, rank: "pure 3F (existing path)" }
+      - { id: trend-w20, trendWeight: 0.2, rank: "weighted 3F blend" }
+      - { id: trend-w30, trendWeight: 0.3, rank: "weighted 3F blend" }
+      - { id: trend-w50, trendWeight: 0.5, rank: "weighted 3F blend" }
+    frozenCoordinates:
+      - topN=3 / maxPositions=5 / EQUITY_RATIO tiers
+      - SL-18.1 unified exit chain / candidateExitPolicy=DISABLED
+      - runnerBridge NEW_HIGH_3 / 5 / 74
+  trendScore:
+    module: server/research/recipeFeatures/trendScoreFeatures.ts
+    formula: "(structureScore + momentumScore + pullbackScore) / 3"
+    structureScore: "close > windowMean AND mean(last3) > mean(first3)"
+    momentumThresholds: { weakBelow: 0, strongAtOrAbove: 0.03 }
+    pullbackThresholds: { shallowAtOrBelow: 0.03, deepAbove: 0.08 }
+    deviationFromPlan:
+      planned: trendHoldsMa5Ma10 (close > MA10 AND MA5 > MA10)
+      reason: "prefix table has only relativeDay=0 (verified 750001/780001); no rd<0 preheat rows => MA10 uncomputable at T+5"
+      status: candidate-boundary (must be frozen on the training window before HOLDOUT)
+  contractChange:
+    file: shared/researchExperimentsContracts.ts
+    field: "compositeExecution.extensionSelectionArms? (optional)"
+    defaultBehavior: "unchanged (single control arm)"
+  dbChange: none
+  migration: none
+  productionExecutionPath: none
+  untouched: "3600005@2.0.0 / provenance 690002 / 6210005 / 6210006 / 3570001"
+  realRun:
+    runId: RUN-20261004-1CA33DAD
+    status: COMPLETED
+    datasetVersionId: 780001
+    startedAt: "2026-10-04T00:13:05Z"
+    completedAt: "2026-10-04T00:16:23Z"
+    elapsedSecApprox: 215
+    selectedEventsUnion: 10320
+    executionRows: 1888970
+    controlParity: PASS
+    arms:
+      - { id: control, trendWeight: null, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434 }
+      - { id: trend-w20, trendWeight: 0.2, returnPct: -59.285630163742, maxDrawdownPct: 70.43560124013597, trades: 1517 }
+      - { id: trend-w30, trendWeight: 0.3, returnPct: -85.60011496494006, maxDrawdownPct: 88.78737103384361, trades: 1562 }
+      - { id: trend-w50, trendWeight: 0.5, returnPct: -95.25460995611013, maxDrawdownPct: 96.03184153019659, trades: 1610 }
+    verdict: "P0 V1 trend score as a ranking term is REJECTED (monotone dose-response); control parity PASS"
+    diagnosis:
+      discreteTrendScoreValues: 7
+      modalShare: "0 (34.39%) + 1/6 (31.16%) = 65.55% of 43550 candidates"
+      selectionChurnDays: { w20: "74.2%", w30: "90.2%", w50: "94.8%" }
+      selectedMeanTrend: { control: 0.2477, w20: 0.481, w30: 0.6442, w50: 0.7703 }
+      selectedMeanThreeFactor: { control: 0.6647, w20: 0.6371, w30: 0.5836, w50: 0.5123 }
+  gateRunP02:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-trend-gate
+    runId: RUN-20261004-A4573C46
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 228
+    selectedEventsUnion: 11561
+    executionRows: 1967285
+    controlParity: PASS
+    usage: "ranking stays pure 3F; trendScore only filters candidates"
+    arms:
+      - { id: control, minTrendScore: null, excluded: 0, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434 }
+      - { id: gate-ge1of6, minTrendScore: 0.16666666666666666, excluded: 14976, returnPct: -21.032936759500032, maxDrawdownPct: 70.45710530754262, trades: 1484 }
+      - { id: gate-ge1of3, minTrendScore: 0.3333333333333333, excluded: 28547, returnPct: -74.32112256904414, maxDrawdownPct: 80.48598711543127, trades: 1546 }
+      - { id: gate-ge2of3, minTrendScore: 0.6666666666666666, excluded: 34459, returnPct: -75.21957612040002, maxDrawdownPct: 79.13915963234217, trades: 1539 }
+    verdict: "REJECTED - trend gate removes 24.7%/70.1%/87.6% of the control picks and costs 172/225/226 pp"
+    diagnosis:
+      killedShareOfControlPicks: { ge1of6: "24.7%", ge1of3: "70.1%", ge2of3: "87.6%" }
+      meanThreeFactorKilledVsKept: { ge1of6: "0.6286 vs 0.6765", ge1of3: "0.6617 vs 0.6718", ge2of3: "0.6667 vs 0.6503" }
+      insight: "alpha is concentrated in the narrow per-day 3F top-3; any meaningful pool shrink displaces picks to worse ranks"
+    combinedVerdict: "trendScore V1 is anti-informative for this strategy (both as ranking term and as gate, monotone)"
+  trendV2RunP1:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-trend-v2
+    runId: RUN-20261004-2B87DD65
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 216
+    selectedEventsUnion: 10200
+    executionRows: 1881408
+    controlParity: PASS
+    definition: "v2 = equal weight of cross-sectional percentiles of (+pullbackDepth, -momentum, -windowGap); fused = (1-w)*3F + w*v2"
+    arms:
+      - { id: control, v2Weight: null, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434 }
+      - { id: v2-w20, v2Weight: 0.2, returnPct: -14.513582406299886, maxDrawdownPct: 60.22691625027443, trades: 1463 }
+      - { id: v2-w35, v2Weight: 0.35, returnPct: -57.9714721425399, maxDrawdownPct: 69.54127114766912, trades: 1424 }
+      - { id: v2-w50, v2Weight: 0.5, returnPct: -77.27140763380005, maxDrawdownPct: 85.08248385667206, trades: 1460 }
+    verdict: "REJECTED - sign-corrected v2 also degrades monotonically, so the cause is not signal direction but selection fragility"
+    combinedTrendVerdict: "v1 ranking -210pp / v1 gate -172pp / v2 ranking -166pp (control 151.10%): stop using trend score in this strategy's selection layer"
+    newRisk: "strategy is highly sensitive to per-day top-3 displacement; 151% likely depends on few large winners (fat-tail / fragile) - run winner-concentration analysis before any production step"
+  t74SlotsRunP2:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-slots
+    runId: RUN-20261004-704FFBD9
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 149
+    controlParity: PASS
+    frozen: "selection, ranking, candidate pool, exit chain, runner, dataset coordinates"
+    arms:
+      - { id: control, maxDailyBuys: 2, maxPositions: 5, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: slots-3-5, maxDailyBuys: 3, maxPositions: 5, returnPct: 119.08976286746005, maxDrawdownPct: 44.875979526901254, trades: 1447, bigWin50: 9, bigWin100: 2 }
+      - { id: slots-3-8, maxDailyBuys: 3, maxPositions: 8, returnPct: 16.155014205388007, maxDrawdownPct: 56.27121236917802, trades: 2308, bigWin50: 11, bigWin100: 2 }
+      - { id: slots-3-12, maxDailyBuys: 3, maxPositions: 12, returnPct: -1.5486293604560442, maxDrawdownPct: 54.2873854218407, trades: 3360, bigWin50: 15, bigWin100: 2 }
+    verdict: "WIDENING SLOTS DOES NOT HELP - more slots do capture more >=+50% trades (9->15) but dilute capital badly (151% -> -1.5%); the biggest winner stays identical (+130.4%) in every arm"
+    derivedHypothesis: "~156 entered names had >=+50% potential vs only 9 realized => the next lever is the EXIT/holding policy, not the buy list"
+  t74StopWideRunP3:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-stopwide
+    runId: RUN-20261004-670F0677
+    status: COMPLETED
+    datasetVersionId: 780001
+    elapsedSecApprox: 152
+    controlParity: PASS
+    varies: "exitPolicy.stop.anchor.stopRatio only (6% control / 8% / 10% / 12%)"
+    arms:
+      - { id: control, stopRatio: 0.06, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, p05TradePct: -6.191765561164253, worseThan10Pct: 12 }
+      - { id: stop-08, stopRatio: 0.08, returnPct: 64.6355983984199, maxDrawdownPct: 49.87972199584667, trades: 1311, bigWin50: 8, p05TradePct: -8.058953278291424, worseThan10Pct: 15 }
+      - { id: stop-10, stopRatio: 0.1, returnPct: 76.52933023111999, maxDrawdownPct: 45.883510751136335, trades: 1251, bigWin50: 9, p05TradePct: -10.049474588872748, worseThan10Pct: 130 }
+      - { id: stop-12, stopRatio: 0.12, returnPct: 45.130, maxDrawdownPct: 47.017, trades: 1220, bigWin50: 8, p05TradePct: -12.047, worseThan10Pct: 88 }
+    verdict: "WIDENING THE STOP IS STRICTLY WORSE - maxDD 43.30% -> 49.88/45.88/47.02%, return 151% -> 64.6/76.5/45.1%, per-trade pain worse, big winners unchanged"
+    implication: "no free drawdown knob left on this chain; only lower exposure (smaller per-position size / cash buffer) or portfolio-level timing can cut DD, both at the cost of return"
+  t74CarryoverRunP6:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-carryover
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-carryover
+    runId: RUN-20261004-EE05EA28
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 197
+    selectedEventsUnion: 9231
+    executionRows: 1821397
+    controlParity: PASS
+    policy: "intent-level carry: fresh top5 ranks 3..5 enter pending; stale 3F score; maxAge 1|2 decision days; optional margin 0.03"
+    arms:
+      - { id: control, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: carry1-stale, maxAgeDays: 1, margin: 0, returnPct: 99.34565169211986, maxDrawdownPct: 55.41258017404069, trades: 1436, bigWin50: 7, carryTrades: 292, carryNetPnl: 3129.7103123999636, carryBigWin50: 1 }
+      - { id: carry1-m03, maxAgeDays: 1, margin: 0.03, returnPct: 84.88223697571978, maxDrawdownPct: 53.75160526140217, trades: 1441, bigWin50: 8, carryTrades: 156, carryNetPnl: -7014.559864400033, carryBigWin50: 0 }
+      - { id: carry2-m03, maxAgeDays: 2, margin: 0.03, returnPct: 66.71723787820018, maxDrawdownPct: 52.366879494100615, trades: 1455, bigWin50: 7, carryTrades: 255, carryNetPnl: -735.3595845909704, carryBigWin50: 0 }
+    verdict: "REJECTED - stale-score carry displaces fresh candidates without adding independent alpha; all carry arms lose to control (151.10%) and raise maxDD from 43.30% to 52~55%"
+    nextStep: "only revisit with a versioned same-day re-score that is separately validated; no production StrategyVersion created"
+    changedContracts: "additive research pure function applyCompositeCarryover; no CandidateEvaluationRun / SimulationConfig / engine schema change"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+  t74CarryoverRefreshRunP7:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-carryover-refresh
+    runId: RUN-20261005-4BB55265
+    failedRunIdBeforeFix: RUN-20261005-F2AD66B2
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 205
+    selectedEventsUnion: 9231
+    executionRows: 1821397
+    controlParity: PASS
+    featureVersion: carry-refresh-v1.0.0
+    policy: "same-day CarryRefreshV1 on union(fresh,pending); per-component cross-sectional percentile; fused=(1-w)*3F+w*refresh; suspended carry is unscorable and remains pending, no imputation"
+    arms:
+      - { id: control, refreshWeight: null, maxAgeDays: 0, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: refresh-only-w20, refreshWeight: 0.2, maxAgeDays: 0, returnPct: 25.630673993260068, maxDrawdownPct: 49.10519022235182, trades: 1452, bigWin50: 8, bigWin100: 0 }
+      - { id: refresh-only-w35, refreshWeight: 0.35, maxAgeDays: 0, returnPct: -36.79997383667981, maxDrawdownPct: 51.341175776704006, trades: 1469, bigWin50: 7, bigWin100: 0 }
+      - { id: carry1-refresh-w20, refreshWeight: 0.2, maxAgeDays: 1, returnPct: 82.10539265706018, maxDrawdownPct: 41.13786674563229, trades: 1460, bigWin50: 9, bigWin100: 1, carryTrades: 366, carryNetPnl: -35695.22112270007, carryBigWin50: 1, unscorableCarry: 3 }
+      - { id: carry1-refresh-w35, refreshWeight: 0.35, maxAgeDays: 1, returnPct: 30.692202261040215, maxDrawdownPct: 52.59107467997863, trades: 1504, bigWin50: 8, bigWin100: 1, carryTrades: 430, carryNetPnl: -47567.06340110016, carryBigWin50: 2, unscorableCarry: 3 }
+    verdict: "REJECTED - refresh-only itself destroys control alpha (151.10% -> 25.63% / -36.80%); carry1-refresh does not restore it (82.11% / 30.69%); carry trade PnL is negative"
+    nextStep: "stop carry-weight search; require a separately validated new information source with low correlation and positive IC before another selection experiment"
+    changedContracts: "additive CarryRefreshV1 feature + optional refresh policy on research pure function; no engine / SimulationConfig change"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+  t74LateEntryRunP8:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-late-entry
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-late-entry/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-late-entry
+    runId: RUN-20261005-DF5EDDEB
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 228
+    selectedEventsUnion: 9231
+    executionRows: 1821397
+    controlParity: PASS
+    featureVersion: late-entry-3f-rolling-5-v1.0.0
+    policy: "delay arms keep original top3 and move decision to T+7/T+8/T+10; rescore arms keep original top5 gate and recompute rolling 3F on D-5..D, then output top3; signal at close, execute next open"
+    arms:
+      - { id: control, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: delay-t7, returnPct: -68.20528569660713, maxDrawdownPct: 82.276025393911, trades: 1644, bigWin50: 6, bigWin100: 2, droppedUnavailable: 7 }
+      - { id: delay-t8, returnPct: -80.66923054057992, maxDrawdownPct: 89.39178725840651, trades: 1694, bigWin50: 7, bigWin100: 2, droppedUnavailable: 7 }
+      - { id: delay-t10, returnPct: -44.89798395640019, maxDrawdownPct: 77.51447623046836, trades: 1670, bigWin50: 5, bigWin100: 2, droppedUnavailable: 35 }
+      - { id: rescore-t7, returnPct: -33.818129591539844, maxDrawdownPct: 65.9511061862116, trades: 1607, bigWin50: 6, bigWin100: 2, droppedUnscorable: 8 }
+      - { id: rescore-t8, returnPct: -58.45940336907981, maxDrawdownPct: 70.32059366211544, trades: 1666, bigWin50: 3, bigWin100: 1, droppedUnscorable: 16 }
+      - { id: rescore-t10, returnPct: -58.71080201173805, maxDrawdownPct: 68.11277866090441, trades: 1641, bigWin50: 2, bigWin100: 1, droppedUnscorable: 22 }
+    readBack: "resultAvailable=true / resultIssue=null"
+    verification:
+      tsc: 0
+      focusedTests: 23
+      testChanged: "681 passed / 5 known DB-state failures"
+      eolDrift: 0
+    verdict: "REJECTED - delaying T+6 entry destroys the strategy; rolling 3F inside original top5 remains deeply negative, so no reason to open full-universe T+7 re-ranking"
+    nextStep: "stop carry/delay/window variants; require a new low-correlation positive-IC information source before another selection experiment"
+    changedContracts: "additive LateEntry3F feature + applyCompositeLateEntry research pure function; no engine / SimulationConfig change"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+  t74EventGateRunP9:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-event-gate
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-event-gate/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-event-gate
+    runId: RUN-20261005-8668C385
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 161
+    eventMetadataRows: 5569
+    controlParity: PASS
+    policy: "original top3 ranking unchanged; only new-entry intents are gated; thresholds fixed from 2019-2024; missing event facts fail closed"
+    gates:
+      - { id: control, removed: 0, kept: 0, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2 }
+      - { id: gap-p50, removed: 2918, kept: 2651, returnPct: 38.06376975334012, maxDrawdownPct: 56.76013401174826, trades: 1366, bigWin50: 8, bigWin100: 1 }
+      - { id: gap-p33, removed: 3776, kept: 1793, returnPct: 76.88455012514446, maxDrawdownPct: 48.6333783324438, trades: 1203, bigWin50: 9, bigWin100: 1 }
+      - { id: turnover-p50, removed: 2902, kept: 2667, returnPct: 165.74020567398014, maxDrawdownPct: 49.44017449393602, trades: 1273, bigWin50: 7, bigWin100: 1 }
+      - { id: combo-p50, removed: 4457, kept: 1112, returnPct: 43.92932310427995, maxDrawdownPct: 37.09144157477233, trades: 893, bigWin50: 3, bigWin100: 1 }
+      - { id: histlimit-p67, removed: 3121, kept: 2448, returnPct: -40.99863241694005, maxDrawdownPct: 68.26076363988732, trades: 1066, bigWin50: 5, bigWin100: 1 }
+    verdict: "REJECTED for super-winner capture: no gate increases realized >=+50% count; turnover-p50 gains return but lowers big winners and raises drawdown; combo reduces drawdown but destroys return"
+    nextStep: "only external data supplementation (money flow / dragon-tiger / northbound / fundamentals) can add a genuinely new information source"
+    changedContracts: "compositeExecution.includeEventMetadata optional; DatasetDataReader.loadEventsBatch additive; no existing default behavior changed"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+    readBack: "resultAvailable=true / resultIssue=null"
+    verification:
+      tsc: 0
+      focusedTests: 43
+      eolDrift: 0
+  t74SubNewRunP10:
+    experimentId: first-board-pullback/composite-runner-newhigh3-t74-subnew
+    descriptor: research-experiments/first-board-pullback/composite-runner-newhigh3-t74-subnew/experiment.ts
+    pageKey: first-board-pullback/composite-runner-newhigh3-t74-subnew
+    runId: RUN-20261007-68FD5C7F
+    status: COMPLETED
+    datasetVersionId: 780001
+    baselineDatasetVersionId: 660001
+    elapsedSecApprox: 168
+    controlParity: PASS
+    listingDates: 3299
+    policy: "3F ranking pre-filter: drop candidates whose listing age at the decision date is < N calendar days (lower ranks backfill)"
+    arms:
+      - { id: control, excludeListedWithinDays: null, returnPct: 151.0958341843399, maxDrawdownPct: 43.302944323482485, trades: 1434, bigWin50: 9, bigWin100: 2, subNewTrades: 51, subNewNetPnl: 10323.553560859988 }
+      - { id: excl365, excludeListedWithinDays: 365, returnPct: 65.39066943458027, maxDrawdownPct: 50.771567473378596, trades: 1444, bigWin50: 9, bigWin100: 2, excludedCandidates: 1591, subNewTrades: 0, subNewNetPnl: 0 }
+      - { id: excl180, excludeListedWithinDays: 180, returnPct: 131.14772353143985, maxDrawdownPct: 43.036340068098156, trades: 1434, bigWin50: 10, bigWin100: 2, excludedCandidates: 904, subNewTrades: 31, subNewNetPnl: -93.30847979999726 }
+      - { id: excl90, excludeListedWithinDays: 90, returnPct: 109.96556364480013, maxDrawdownPct: 44.81625053042115, trades: 1437, bigWin50: 9, bigWin100: 2, excludedCandidates: 478, subNewTrades: 42, subNewNetPnl: 6214.824593399988 }
+    verdict: "REJECTED - excluding sub-new listings does not help: all three thresholds lose to control (-19.95 / -41.13 / -85.71 pp); excl180 is the only arm with more >=+50% trades (9 -> 10) but pays -19.95 pp; threshold order is non-monotonic (365 worst, 180 best) => another instance of selection-perturbation fragility"
+    mechanism: "removed slots are backfilled by lower ranks, and P4 already showed rank4/5 backfill has negative net PnL and 0 trades >=+50%"
+    changedContracts: "extensionSelectionArms[].excludeListedWithinDays optional; CompositeDatasetBuildRequest.includeListingDates optional; payload.listingDateBySecurityId; BuildCompositeSourceRunInput.candidateListingFilter (pre-rank)"
+    dbChange: none
+    migration: none
+    productionExecutionPath: none
+    untouched: "3600005@2.0.0 / 3570001 / all historical runs"
+    verification:
+      tsc: 0
+      focusedTests: 33
+      eolDrift: 0
+  frontendRegistration:
+    pages: client/src/researchExperiments/pages.ts
+    listGrouping: "client/src/pages/researchExperiments/experimentModes.ts (multi-factor); also backfills composite-runner-newhigh3-t74 into other-scope"
+  verification:
+    tsc: "0 error"
+    newTests: "P0 34 (trendScoreFeatures 20 + trendRankFusion 6 + compositeDatasetProviderSelection 3 + compositeRunnerTrendFusion 5); manifest 9; mode grouping 15"
+    testChanged: "619 passed / 5 failed - all in limitUp.test / limitUp.watch.test (pre-existing DB-state failures, no import relation to P0)"
+    eolDrift: "0"

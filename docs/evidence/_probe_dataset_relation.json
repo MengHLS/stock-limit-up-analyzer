@@ -1,0 +1,104 @@
+{
+  "checkedAt": "2026-09-13T06:04:40.758Z",
+  "cols_dataset_version": [
+    "id",
+    "datasetId",
+    "version",
+    "status",
+    "startDate",
+    "endDate",
+    "universeDefinitionJson",
+    "filterDefinitionJson",
+    "featureVersion",
+    "sourceVersion",
+    "totalEvents",
+    "totalRows",
+    "createdAt",
+    "completedAt"
+  ],
+  "cols_dataset_definition": [
+    "id",
+    "datasetCode",
+    "name",
+    "description",
+    "datasetType",
+    "storageType",
+    "status",
+    "eventTableName",
+    "prefixTableName",
+    "postTableName",
+    "pathTableName",
+    "outcomeTableName",
+    "featureTableName",
+    "createdAt",
+    "updatedAt"
+  ],
+  "cols_research_datasets": [
+    "id",
+    "datasetId",
+    "datasetVersion",
+    "name",
+    "startDate",
+    "endDate",
+    "asOfPerTradeDate",
+    "asOf",
+    "rowsFingerprint",
+    "policySetFingerprint",
+    "versionSnapshotFingerprint",
+    "versionSnapshotJson",
+    "dataSnapshotJson",
+    "universeDefinitionJson",
+    "rowCount",
+    "gate",
+    "gateNotesJson",
+    "createdAt",
+    "rowsTableName"
+  ],
+  "cols_research_experiments": [
+    "id",
+    "experimentId",
+    "strategyId",
+    "strategyVersion",
+    "snapshotJson",
+    "status",
+    "createdAt",
+    "updatedAt"
+  ],
+  "dataset_definition_rows": [
+    {
+      "id": 120001,
+      "datasetCode": "first_limit_pullback"
+    }
+  ],
+  "dataset_version_rows": [
+    {
+      "id": 390001,
+      "datasetId": 120001,
+      "version": "v1",
+      "status": "READY"
+    },
+    {
+      "id": 390002,
+      "datasetId": 120001,
+      "version": "v2",
+      "status": "READY"
+    }
+  ],
+  "research_experiments_rows": {
+    "count": 0,
+    "keys": [],
+    "sample": []
+  },
+  "cols_dataset_build_config": [
+    "id",
+    "datasetVersionId",
+    "excludeSt",
+    "preWindowDays",
+    "postWindowDays",
+    "outcomeHorizonsJson",
+    "batchSize",
+    "configVersion",
+    "createdAt",
+    "updatedAt"
+  ]
+}

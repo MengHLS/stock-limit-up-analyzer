@@ -1,0 +1,979 @@
+/**
+ * STEP STRATEGY-003 — Strategy Definition 富领域模型（类型权威源 + 词表 + 字段时间域目录）。
+ *
+ * 定位（SPEC §9 / §22 / §24）：StrategyDefinition 是「一个 StrategyVersion 的完整可复现规则快照」。
+ * 它**嵌入 `StrategyDocument.definition`**（最终落到 `strategy_versions.strategyDocumentJson`），
+ * 而不是另建并行领域模块或第二套 Source of Truth（用户裁定 D1）。
+ *
+ *   StrategyDefinition
+ *   ├── schemaVersion   ← Definition 自身结构版本（≠ strategy version，SPEC §30）
+ *   ├── entry           ← 研究什么事件 / 观察多久 / 满足什么条件 / 何时产生 Signal
+ *   ├── exit            ← 什么时候卖（rules[]）
+ *   ├── position        ← 买多少
+ *   ├── risk            ← 如何控制风险（规则，不是风险评价结果）
+ *   ├── execution       ← Signal 之后如何成交（signalTiming 与 executionTiming 严格分离）
+ *   ├── parameters      ← 参数定义（FIXED / TUNABLE / DERIVED）
+ *   └── datasets        ← Dataset **引用**（PRIMARY / VALIDATION / OOS），不复制任何 Dataset 数据
+ *
+ * 与 v1 既有字段的关系（SPEC §六：新模型增加能力，不一次性砍掉旧模型）：
+ *   本文件**不修改** StrategyDocument 的任何一个既有字段。`map.ts` 提供 `deriveLegacyViews()`，
+ *   由 Definition **单向派生** entryRules / exitRules / riskRules / positionSizing / parameters /
+ *   executionModel，作为既有消费者的兼容视图（派生是有损的，映射表见 map.ts 注释与本目录报告）。
+ *
+ * 🔴 字段时间域目录（SPEC §十一 / §十二 / §二十六）——本文件是**唯一权威**：
+ *   字段引用必须能判定「属于哪个时间域」。目录完全对齐本项目 Dataset 的真实五层语义
+ *   （`server/datasetRegistry/naming.ts:11-16` 与 `shared/datasetRegistryContracts.ts:658-696`）：
+ *
+ *     event    时点身份（**不含逐日行情**）               → EVENT_DAY（事件日已公开信息）
+ *     prefix   原始行情 relativeDay ∈ [-preWindowDays,0]  → PRE_EVENT（后视，PIT 安全）
+ *     post     原始行情 relativeDay ∈ [1, postWindowDays] → FORWARD_BAR（前视：仅**信号日及之前**可用）
+ *     path     衍生指标 relativeDay ∈ [1, postWindowDays] → LABEL_ONLY（文档明示「前视，仅打标签」）
+ *     outcome  按 horizon 聚合结果                       → LABEL_ONLY（标签/未来结果）
+ *
+ *   注意：**T 日 OHLCV 在 `prefix.relativeDay = 0`，不在 `event` 表**（event 表无 OHLCV 列）。
+ *   首板回踩的「首板日开盘价」因此写作 `prefix.rd0.open`，而不是 `event.open`。
+ *
+ *   无法判定时间域的引用（未知根、未知字段）→ `unknown` → Validation **默认拒绝**（默认拒绝白名单，
+ *   而不是「黑名单里包含 future 就拒绝」这种可绕过的方案）。
+ *
+ * 铁律：纯模块（无 DB / 无 IO / 无 Date.now / 无 Math.random）；全部字段 readonly；可 JSON 序列化；
+ * 禁用 NaN / Infinity；确定性；失败响亮。本模块**不含校验逻辑**（见 definitionValidation.ts），
+ * 也**不含持久化**（见 strategyPersistence/）。
+ */
+
+import type { ResearchParameterValue } from "../types";
+import type {
+  ResearchTrailingPolicyDefinition,
+  StrongHoldAfterExtendedExitPolicy,
+} from "../trailingPolicy";
+import type {
+  ExitPolicyDefinition,
+  RunnerEvaluationContextDefinition,
+  RunnerStateConditionReference,
+} from "../exitPolicyCommon";
+
+// ---------------------------------------------------------------------------
+// Definition 自身结构版本（≠ strategy version，SPEC §30）
+// ---------------------------------------------------------------------------
+
+/**
+ * StrategyDefinition **结构**版本。与 `StrategyDocument.version`（策略版本 major.minor.patch）
+ * 完全不是一个概念：本字段描述「Definition 的 JSON 结构长什么样」，未来结构演进时递增
+ * （1.0 → 1.1 → 2.0），供迁移/兼容判定。
+ */
+export const STRATEGY_DEFINITION_SCHEMA_VERSION = "1.0" as const;
+
+/** 当前支持的 Definition 结构版本白名单（Migration 时按此白名单做兼容转换）。 */
+export const STRATEGY_DEFINITION_SCHEMA_VERSIONS = ["1.0"] as const;
+
+export type StrategyDefinitionSchemaVersion = (typeof STRATEGY_DEFINITION_SCHEMA_VERSIONS)[number];
+
+// ---------------------------------------------------------------------------
+// 词表白名单（SPEC §10.1「不要把事件类型永久写死成少数几个」→ 白名单 + 扩展位）
+// ---------------------------------------------------------------------------
+
+/** 事件类型白名单。`CUSTOM_EVENT` 为扩展位：具体语义由 `event.params.eventCode` 表达。 */
+export const STRATEGY_EVENT_TYPES = [
+  "FIRST_LIMIT_UP",
+  "LIMIT_UP",
+  "BREAKOUT",
+  "PRICE_PATTERN",
+  "CUSTOM_EVENT",
+] as const;
+export type StrategyEventType = (typeof STRATEGY_EVENT_TYPES)[number];
+
+/** 观察窗口单位。量化系统默认 `TRADING_DAY`（SPEC §10.2）。 */
+export const STRATEGY_WINDOW_UNITS = ["TRADING_DAY", "CALENDAR_DAY"] as const;
+export type StrategyWindowUnit = (typeof STRATEGY_WINDOW_UNITS)[number];
+
+/** 触发时点（条件满足后何时产生 Signal）。 */
+export const STRATEGY_TRIGGER_TYPES = [
+  "FIRST_VALID_DAY",
+  "LAST_VALID_DAY",
+  "EVERY_VALID_DAY",
+  "NEXT_TRADING_DAY",
+  "FIRST_LIMIT_POOL",
+] as const;
+export type StrategyTriggerType = (typeof STRATEGY_TRIGGER_TYPES)[number];
+
+/** 首板股票池的评分阶段。 */
+export const STRATEGY_FIRST_LIMIT_POOL_SCORE_STAGES = [
+  "EARLY_OHLC",
+  "FULL_3F",
+] as const;
+export type StrategyFirstLimitPoolScoreStage =
+  (typeof STRATEGY_FIRST_LIMIT_POOL_SCORE_STAGES)[number];
+
+/** 条件比较操作符。 */
+export const STRATEGY_CONDITION_OPERATORS = [
+  "GREATER_THAN",
+  "GREATER_THAN_OR_EQUAL",
+  "LESS_THAN",
+  "LESS_THAN_OR_EQUAL",
+  "EQUAL",
+  "NOT_EQUAL",
+  "IN",
+  "NOT_IN",
+] as const;
+export type StrategyConditionOperator = (typeof STRATEGY_CONDITION_OPERATORS)[number];
+
+/** 条件右值类型（SPEC §10.3：CONSTANT / FIELD_REFERENCE / PARAMETER_REFERENCE，保留扩展能力）。 */
+export const STRATEGY_CONDITION_VALUE_TYPES = [
+  "CONSTANT",
+  "FIELD_REFERENCE",
+  "PARAMETER_REFERENCE",
+] as const;
+export type StrategyConditionValueType = (typeof STRATEGY_CONDITION_VALUE_TYPES)[number];
+
+/** 出场规则类型（SPEC §12）。 */
+export const STRATEGY_EXIT_RULE_TYPES = [
+  "TAKE_PROFIT",
+  "TRAILING_TAKE_PROFIT",
+  "STOP_LOSS",
+  "TIME_EXIT",
+  "SIGNAL_EXIT",
+  "FORCED_EXIT",
+] as const;
+export type StrategyExitRuleType = (typeof STRATEGY_EXIT_RULE_TYPES)[number];
+
+/** 候选退出政策（退出定义优先级高于候选集合变化）。 */
+export const STRATEGY_CANDIDATE_EXIT_POLICIES = [
+  "HOLD_WHILE_SELECTED",
+  "DISABLED",
+] as const;
+export type StrategyCandidateExitPolicy = (typeof STRATEGY_CANDIDATE_EXIT_POLICIES)[number];
+
+/** 出场规则触发时点。 */
+export const STRATEGY_EXIT_TRIGGERS = ["ON_ENTRY", "ON_OPEN", "ON_CLOSE", "INTRADAY"] as const;
+export type StrategyExitTrigger = (typeof STRATEGY_EXIT_TRIGGERS)[number];
+
+/** 出场阈值单位。 */
+export const STRATEGY_EXIT_THRESHOLD_UNITS = ["RATIO", "PERCENT", "TRADING_DAY", "PRICE"] as const;
+export type StrategyExitThresholdUnit = (typeof STRATEGY_EXIT_THRESHOLD_UNITS)[number];
+
+/** 仓位规模方法（SPEC §13 + 项目扩展 EQUITY_RATIO）。 */
+export const STRATEGY_POSITION_SIZING_METHODS = [
+  "FIXED_AMOUNT",
+  "FIXED_RATIO",
+  "EQUITY_RATIO",
+  "EQUAL_WEIGHT",
+  "RISK_BASED",
+] as const;
+export type StrategyPositionSizingMethod = (typeof STRATEGY_POSITION_SIZING_METHODS)[number];
+
+/** 信号产生时点（**与成交时点严格分离**，SPEC §15）。 */
+export const STRATEGY_SIGNAL_TIMINGS = ["T_OPEN", "T_CLOSE"] as const;
+export type StrategySignalTiming = (typeof STRATEGY_SIGNAL_TIMINGS)[number];
+
+/** 成交时点（相对信号 bar 的 T）。本项目 T+1 模型的关键：`T_CLOSE` 出信号 → `T_PLUS_1_OPEN` 成交。 */
+export const STRATEGY_EXECUTION_TIMINGS = [
+  "T_CLOSE",
+  "T_PLUS_1_OPEN",
+  "T_PLUS_1_CLOSE",
+  "T_PLUS_2_OPEN",
+] as const;
+export type StrategyExecutionTiming = (typeof STRATEGY_EXECUTION_TIMINGS)[number];
+
+/** 成交价类型。 */
+export const STRATEGY_PRICE_TYPES = ["OPEN", "CLOSE", "HIGH", "LOW", "VWAP"] as const;
+export type StrategyPriceType = (typeof STRATEGY_PRICE_TYPES)[number];
+
+/** 数量决定方式。 */
+export const STRATEGY_QUANTITY_METHODS = ["FIXED_SHARES", "TARGET_WEIGHT", "AMOUNT"] as const;
+export type StrategyQuantityMethod = (typeof STRATEGY_QUANTITY_METHODS)[number];
+
+/** 滑点 / 佣金模型标识（具体费率仍在 `executionAssumptions.costModel`，本层只声明模型种类）。 */
+export const STRATEGY_COST_MODELS = ["NONE", "BPS", "FIXED"] as const;
+export type StrategyCostModelId = (typeof STRATEGY_COST_MODELS)[number];
+
+/** 参数角色（SPEC §16 / §17：未来 Parameter Search 直接读 `TUNABLE`）。 */
+export const STRATEGY_PARAMETER_ROLES = ["FIXED", "TUNABLE", "DERIVED"] as const;
+export type StrategyParameterRole = (typeof STRATEGY_PARAMETER_ROLES)[number];
+
+/** 参数数据类型（与 `ResearchParameterType` 对齐，保证可复用既有参数校验器）。 */
+export const STRATEGY_PARAMETER_DATA_TYPES = ["number", "string", "boolean", "json"] as const;
+export type StrategyParameterDataType = (typeof STRATEGY_PARAMETER_DATA_TYPES)[number];
+
+/** Dataset 绑定角色（SPEC §21）。 */
+export const STRATEGY_DATASET_ROLES = ["PRIMARY", "VALIDATION", "OOS"] as const;
+export type StrategyDatasetRole = (typeof STRATEGY_DATASET_ROLES)[number];
+
+/**
+ * Dataset Version 的显示 / 快照 label 形态（Dataset Registry 的 `dataset_version.version`，如 `v1` / `v2`）。
+ * 只用于展示与快照，**不是**跨模块唯一引用（唯一引用是 `datasetVersionId`）。
+ */
+export const STRATEGY_DATASET_VERSION_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+
+/**
+ * 是否为合法的 Dataset Registry 权威坐标（`dataset_version.id`：正整数）。
+ *
+ * 纯形态判定（不查库）；「存在 / READY / datasetId 一致」属引用完整性，
+ * 只能在持久化层查真实 `dataset_version` 判定（见 strategyPersistence/datasetBindingValidation.ts）。
+ */
+export function isValidDatasetVersionId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+// ---------------------------------------------------------------------------
+// 字段引用解析：时间域目录（唯一权威）
+// ---------------------------------------------------------------------------
+
+/** 字段引用的时间域。 */
+export const STRATEGY_FIELD_TIME_DOMAINS = [
+  /** `prefix.rd{n}`（n ≤ 0）：事件日之前 / 事件日当根的后视行情，PIT 安全。 */
+  "PRE_EVENT",
+  /** `event.<field>`：事件日的时点身份信息（无逐日行情），事件日收盘即可知。 */
+  "EVENT_DAY",
+  /** `bar.<field>`：观察窗口内**当前正在评估的那根 bar** —— 按构造不含前视。 */
+  "CURRENT_BAR",
+  /** `post.rd{n}`（n ≥ 1）：事件日之后的原始行情 —— 只有 n ≤ 最早信号偏移才可用。 */
+  "FORWARD_BAR",
+  /** `path.*` / `outcome.*`：Dataset 明示的「前视，仅打标签」层 —— 禁止作为信号条件输入。 */
+  "LABEL_ONLY",
+  /** 无法判定时间域 —— Validation 默认拒绝（SPEC §二十六）。 */
+  "UNKNOWN",
+] as const;
+export type StrategyFieldTimeDomain = (typeof STRATEGY_FIELD_TIME_DOMAINS)[number];
+
+/** `event` 层字段白名单（对齐 `DatasetEventItem`，**不含 OHLCV**）。 */
+export const STRATEGY_EVENT_FIELDS = [
+  "symbol",
+  "tradeDate",
+  "market",
+  "industryCode",
+  "boardType",
+  "previousClose",
+  "limitUpPrice",
+  "turnover",
+  "isFirstLimit",
+  "previousLimitDate",
+  "daysSincePreviousLimit",
+  "historicalLimitCount",
+  "marketCap",
+  "floatMarketCap",
+] as const;
+
+/** 原始行情 bar 字段白名单（对齐 `DatasetRawBarItem` 的纯日线列，prefix / post / bar 同构）。 */
+export const STRATEGY_BAR_FIELDS = [
+  "open",
+  "high",
+  "low",
+  "close",
+  "volume",
+  "amount",
+  "tradeDate",
+  "relativeDay",
+] as const;
+
+/**
+ * **派生行情字段**（**只**在 `bar.*` / 当前 bar 上成立，见 `STRATEGY_CURRENT_BAR_FIELDS`）。
+ *
+ * ## 为什么需要它
+ *
+ * 配方的门槛（`FeatureGate`）大多是**相对事件日基准**的量（「缩量 ≤ 首板量能 × 比例」「回撤深度 ≤ X」），
+ * 而原始行情列只能表达「与另一处行情值**直接**比较」—— 写不出 `bar.volume <= prefix.rd0.volume * 0.3`：
+ * `ConditionDefinition` 的右值**没有算术形态**（只有 常量 / 字段引用 / 参数引用）。
+ * 2026-09-16 实测：这类写法会被转正转换器**静默降级成字符串常量**（`"prefix.rd0.volume * 0.3"`），
+ * 于是「声明」与「执行」口径不一致 —— 见 `BRIDGE-CONDITION-EXPRESSION-001`。
+ *
+ * ## 命名唯一真源 = 配方特征 id（`recipeRegistry.PULLBACK_FEATURE_IDS`）
+ *
+ * | 本表字段（`bar.*`） | 配方特征（执行侧） | 在当前 bar 上的口径 |
+ * |---|---|---|
+ * | `volumeRatio` | `volumeRatio` | 当日成交量 / 事件日成交量（< 1 为缩量） |
+ * | `haircutFromEventLow` | `haircutFromEventLow` | (事件日开盘价 − 当日最低价) / 事件日开盘价（**正数 = 跌破**） |
+ * | `isBullish` | `isBullish` | 当日收盘 > 当日开盘 ? 1 : 0（用 0/1 数值，便于与常量比较） |
+ * | `momentumFromEventClose` | `momentumFromEventClose` | 当日收盘 / 事件日收盘 − 1 |
+ * | `peakCloseSinceEvent` | `peakCloseSinceEvent` | max(close[T0..T])，包含事件日 |
+ * | `pullbackFromEventPeakClose` | `pullbackFromEventPeakClose` | (峰值收盘 − 当前收盘) / 峰值收盘 |
+ * | `trendHoldsMa5Ma10` | `trendHoldsMa5Ma10` | close > MA10 且 MA5 > MA10（MA 可含 prefix 历史） |
+ *
+ * ## 时间域与 PIT 安全
+ *
+ * 全部按 **`CURRENT_BAR`** 求值：只用「当前 bar + 事件日基准」⇒ **按构造不含任何前视**。
+ * 注意与 Dataset `path` 层的同名派生列（`path.volumeRatio` / `path.pullbackFromEventHigh` …，
+ * 见 `datasetRegistry/path.ts`）**口径相同、取数语义不同**：`path.*` 是**固定的 rd ≥ 1 行**、
+ * 属「前视，仅打标签」层 ⇒ **禁止**作为信号条件；派生字段则是「在任意当前 bar 上重算」⇒ 信号日可安全使用。
+ *
+ * ## 边界（如实声明，不夸大）
+ *
+ * 本表只登记「执行侧已实现（配方特征已存在）」的派生量，对齐表能逐行对上配方特征；
+ * Promote 阶段**不求值**它们（求值是执行侧的事），本表的作用是让「声明」写得下、
+ * 且与执行**同名同义**（可校验、不漂移）。
+ */
+export const STRATEGY_DERIVED_BAR_FIELDS = [
+  "volumeRatio",
+  "haircutFromEventLow",
+  "isBullish",
+  "momentumFromEventClose",
+  "observationMeanAmplitude",
+  "observationMaxAmplitude",
+  "rollingMaxAmplitude",
+  "drawdownFromEventClose",
+  "peakCloseSinceEvent",
+  "pullbackFromEventPeakClose",
+  "trendHoldsMa5Ma10",
+] as const;
+
+/**
+ * 当前 bar（`bar.*`）可用字段白名单 = 原始行情列 + 派生字段。
+ *
+ * `prefix.*` / `post.*` **只**用原始列（`STRATEGY_BAR_FIELDS`）：派生量只在「当前 bar」这一语义下成立，
+ * 不允许写成 `prefix.rd0.volumeRatio` / `post.rd3.volumeRatio` —— 那会凭空放宽「可以引用什么」，
+ * 而白名单的语义是「**真实可提供**的字段」，不是「名字听起来合理」。
+ */
+export const STRATEGY_CURRENT_BAR_FIELDS = [
+  ...STRATEGY_BAR_FIELDS,
+  ...STRATEGY_DERIVED_BAR_FIELDS,
+] as const;
+
+/** 字段引用的解析结果（判别联合）。 */
+export type StrategyFieldReference =
+  | { readonly kind: "preEvent"; readonly relativeDay: number; readonly field: string }
+  | { readonly kind: "eventDay"; readonly field: string }
+  | { readonly kind: "currentBar"; readonly field: string }
+  | { readonly kind: "forwardBar"; readonly relativeDay: number; readonly field: string }
+  | { readonly kind: "labelOnly"; readonly root: "path" | "outcome"; readonly field: string }
+  | { readonly kind: "unknown"; readonly raw: string };
+
+const PRE_EVENT_RE = /^prefix\.rd(-?\d+)\.([A-Za-z][A-Za-z0-9_]*)$/;
+const FORWARD_BAR_RE = /^post\.rd(\d+)\.([A-Za-z][A-Za-z0-9_]*)$/;
+const EVENT_RE = /^event\.([A-Za-z][A-Za-z0-9_]*)$/;
+const CURRENT_BAR_RE = /^bar\.([A-Za-z][A-Za-z0-9_]*)$/;
+const LABEL_ONLY_RE = /^(path|outcome)\.(.+)$/;
+
+/**
+ * 解析字段引用（唯一权威实现；Validation 与未来运行时 Adapter 必须共用本函数）。
+ *
+ * 不支持「模糊匹配」：任何无法被上述前缀精确解析的引用一律返回 `unknown`，
+ * 由 Validation 默认拒绝。这样新增 Dataset 列时不会静默放宽 PIT 边界。
+ */
+export function parseStrategyFieldReference(field: string): StrategyFieldReference {
+  if (typeof field !== "string" || field.trim() === "") {
+    return { kind: "unknown", raw: String(field) };
+  }
+  const raw = field.trim();
+  const preEvent = PRE_EVENT_RE.exec(raw);
+  if (preEvent !== null) {
+    return { kind: "preEvent", relativeDay: Number(preEvent[1]), field: preEvent[2] };
+  }
+  const forward = FORWARD_BAR_RE.exec(raw);
+  if (forward !== null) {
+    return { kind: "forwardBar", relativeDay: Number(forward[1]), field: forward[2] };
+  }
+  const event = EVENT_RE.exec(raw);
+  if (event !== null) {
+    return { kind: "eventDay", field: event[1] };
+  }
+  const currentBar = CURRENT_BAR_RE.exec(raw);
+  if (currentBar !== null) {
+    return { kind: "currentBar", field: currentBar[1] };
+  }
+  const labelOnly = LABEL_ONLY_RE.exec(raw);
+  if (labelOnly !== null) {
+    return { kind: "labelOnly", root: labelOnly[1] as "path" | "outcome", field: labelOnly[2] };
+  }
+  return { kind: "unknown", raw };
+}
+
+/** 字段引用所属时间域（供 Validation 分层判定与文档化）。 */
+export function resolveFieldTimeDomain(reference: StrategyFieldReference): StrategyFieldTimeDomain {
+  switch (reference.kind) {
+    case "preEvent":
+      return reference.relativeDay <= 0 ? "PRE_EVENT" : "UNKNOWN";
+    case "eventDay":
+      return "EVENT_DAY";
+    case "currentBar":
+      return "CURRENT_BAR";
+    case "forwardBar":
+      return reference.relativeDay >= 1 ? "FORWARD_BAR" : "UNKNOWN";
+    case "labelOnly":
+      return "LABEL_ONLY";
+    case "unknown":
+      return "UNKNOWN";
+  }
+}
+
+/** 字段是否在对应层的白名单内（未知字段 → false，由 Validation 报 UNKNOWN_FIELD_REFERENCE）。 */
+export function isKnownFieldReference(reference: StrategyFieldReference): boolean {
+  switch (reference.kind) {
+    case "preEvent":
+    case "forwardBar":
+      return (STRATEGY_BAR_FIELDS as readonly string[]).includes(reference.field);
+    case "eventDay":
+      return (STRATEGY_EVENT_FIELDS as readonly string[]).includes(reference.field);
+    case "currentBar":
+      // 当前 bar 额外允许**派生字段**（相对事件日基准的比值），见 STRATEGY_DERIVED_BAR_FIELDS。
+      return (STRATEGY_CURRENT_BAR_FIELDS as readonly string[]).includes(reference.field);
+    case "labelOnly":
+    case "unknown":
+      return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 信号时间线（Look-Ahead 静态判定的基础）
+// ---------------------------------------------------------------------------
+
+/**
+ * 由 `trigger` + `observationWindow` 解出的静态信号时间线。
+ *
+ * 语义：观察窗口的 `relativeDay` 相对**事件日 T**（与 Dataset 的 `post.relativeDay` 同一坐标系）。
+ * 信号在窗口内某个相对日 `k` 产生：
+ *   - 判定第一个满足条件的 bar → `FIRST_VALID_DAY`，k 下界 = windowStart；
+ *   - 每个满足条件的 bar 都出信号 → `EVERY_VALID_DAY`，k 下界 = windowStart；
+ *   - 窗口内最后一个满足条件的 bar → `LAST_VALID_DAY`，k 下界 = windowEnd；
+ *   - 条件满足后**再顺延一个交易日**才出信号 → `NEXT_TRADING_DAY`，k 下界 = windowStart + 1。
+ *
+ * ⇒ **允许在 entry condition 中引用的最大前视相对日 = earliestSignalOffset**。
+ *   引用 `post.rd{n}` 当 `n > earliestSignalOffset` 时，条件在该 bar 上求值需要读取未来数据。
+ */
+export interface StrategySignalTimeline {
+  readonly windowStart: number;
+  readonly windowEnd: number;
+  readonly unit: StrategyWindowUnit;
+  readonly earliestSignalOffset: number;
+  /** 允许引用的最大前视相对日（= earliestSignalOffset）。 */
+  readonly maxReferencableOffset: number;
+  /**
+   * 时间线是否可静态解析。`unit = CALENDAR_DAY` 时无法把自然日窗口映射到 Dataset 的
+   * 交易日 `relativeDay` 坐标系 ⇒ false（前视引用一律拒绝，宁严不宽）。
+   */
+  readonly resolvable: boolean;
+}
+
+/** 由 trigger 与观察窗口解出静态信号时间线。 */
+export function resolveSignalTimeline(
+  trigger: StrategyTriggerType,
+  window: ObservationWindow,
+): StrategySignalTimeline {
+  const windowStart = window.start;
+  const windowEnd = window.end;
+  let earliestSignalOffset: number;
+  switch (trigger) {
+    case "FIRST_VALID_DAY":
+    case "EVERY_VALID_DAY":
+      earliestSignalOffset = windowStart;
+      break;
+    case "FIRST_LIMIT_POOL":
+      // 池化策略从入池首板日（T+0）起每日评估；窗口仍用于声明后续面板深度。
+      earliestSignalOffset = 0;
+      break;
+    case "LAST_VALID_DAY":
+      earliestSignalOffset = windowEnd;
+      break;
+    case "NEXT_TRADING_DAY":
+      earliestSignalOffset = windowStart + 1;
+      break;
+  }
+  const resolvable = window.unit === "TRADING_DAY";
+  return {
+    windowStart,
+    windowEnd,
+    unit: window.unit,
+    earliestSignalOffset,
+    maxReferencableOffset: earliestSignalOffset,
+    resolvable,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Domain 类型
+// ---------------------------------------------------------------------------
+
+/** 事件定义（研究什么事件）。 */
+export interface EventDefinition {
+  readonly type: StrategyEventType;
+  /** 扩展参数（如 `CUSTOM_EVENT` 的 eventCode）；只允许标量值，保持可序列化与确定性。 */
+  readonly params?: Readonly<Record<string, string | number | boolean>>;
+  readonly description?: string;
+}
+
+/** 观察窗口（观察多长时间；**必须明确单位**，SPEC §10.2）。 */
+export interface ObservationWindow {
+  /** 窗口起点（相对事件日的偏移；1 = T+1）。 */
+  readonly start: number;
+  /** 窗口终点（相对事件日的偏移；含端点）。 */
+  readonly end: number;
+  readonly unit: StrategyWindowUnit;
+}
+
+/** 条件定义（通用表达，不做成大量固定字段，SPEC §10.3）。 */
+export interface ConditionDefinition {
+  /** 条件 id（所在条件下标派生；缺省由规范化按 `cond-<n>` 补齐，n 从 1 起）。 */
+  readonly id?: string;
+  /** 左值：**必须**是字段引用（`prefix.rd0.open` / `event.limitUpPrice` / `bar.low` / `post.rd2.high`）。 */
+  readonly field: string;
+  readonly operator: StrategyConditionOperator;
+  /** 右值；语义由 `valueType` 决定。 */
+  readonly value: ResearchParameterValue | readonly ResearchParameterValue[];
+  readonly valueType: StrategyConditionValueType;
+  readonly description?: string;
+  readonly enabled: boolean;
+}
+/**
+ * StateCondition：引用已注册的布尔状态实现。
+ *
+ * `NEW_HIGH_3` / `MA10_SLOPE_POSITIVE` 等名字属于策略配置，不属于 Schema 分支；
+ * 执行实现由 `server/research/stateFactorRegistry.ts` 注册，并保留 PIT 评估上下文。
+ */
+export interface StateConditionDefinition extends RunnerStateConditionReference {
+  readonly id: string;
+  readonly enabled: boolean;
+  readonly description?: string;
+  readonly evaluationContext?: RunnerEvaluationContextDefinition;
+}
+
+/**
+ * FactorCondition：引用 feature registry 的因子，再以现有比较算子形成声明条件。
+ * 因子计算与版本仍由既有 feature registry / semantics contract 负责。
+ */
+export interface FactorConditionDefinition {
+  readonly id: string;
+  readonly featureId: string;
+  readonly featureVersion: string;
+  readonly operator: StrategyConditionOperator;
+  readonly value: ResearchParameterValue | readonly ResearchParameterValue[];
+  readonly valueType: StrategyConditionValueType;
+  readonly evaluationContext?: RunnerEvaluationContextDefinition;
+  readonly enabled: boolean;
+  readonly description?: string;
+}
+
+/** Strategy 可复用的状态 / 因子声明面；执行实现不在这里。 */
+export interface StateFactorDefinitionSet {
+  readonly states?: readonly StateConditionDefinition[];
+  readonly factors?: readonly FactorConditionDefinition[];
+}
+
+/** 触发定义（条件满足后何时产生 Signal，SPEC §11）。 */
+export interface TriggerDefinition {
+  readonly type: StrategyTriggerType;
+  readonly params?: Readonly<Record<string, string | number | boolean>>;
+  readonly description?: string;
+}
+
+/**
+ * 首板股票池策略声明（可选；仅 `trigger.type = FIRST_LIMIT_POOL` 时生效）。
+ *
+ * 该对象把「首板事件入池 → 每日评分 → 次一交易日开盘执行 → 评分只影响买入」的
+ * 池化语义写进版本快照。旧的事件窗策略不携带本字段，执行侧继续走既有路径。
+ */
+export interface FirstLimitPoolDefinition {
+  readonly poolPolicyId: string;
+  readonly admissionEventType: "FIRST_LIMIT_UP";
+  readonly admittedRelativeDay: 0;
+  /** 事件板块范围；默认仅主板，与 v5 正式研究 universe 对齐。 */
+  readonly boardScope?: readonly ("main" | "chinext" | "star" | "bse")[];
+  /**
+   * 是否排除 ST/*ST（PIT 口径：事件日 + 池期内逐日）。
+   *
+   * 缺省 = 由策略构造器决定的默认值（池化族默认 true：ST 永久不做）。
+   * 显式声明 `false` 只用于历史对照，不是推荐配置。
+   */
+  readonly excludeSt?: boolean;
+  /**
+   * 再入场策略（可选）。只约束**新建仓**，不影响退出与已持仓。
+   * 缺省 = 不限制（既有池化版本行为逐字节不变）。
+   */
+  readonly reentryPolicy?: {
+    /** 同一底层代码出场后 K 个交易日内不得再买（含出场当日）。 */
+    readonly securityCooldownTradingDays?: number;
+    /** 同一池成员身份累计买入次数上限；1 = 一次性成员。 */
+    readonly maxEntriesPerMember?: number;
+    /** 同一底层代码同时最多允许在仓的池成员数。 */
+    readonly maxConcurrentOpenPerCode?: number;
+  };
+  /** 池龄上限（交易日）；超过即移除。 */
+  readonly poolAgeCapTradingDays: number;
+  /** 滚动 3F 评分声明；新池化版本使用该字段替代早期/完整两段声明。 */
+  readonly scorePolicy?: "ROLLING_THREE_FACTOR";
+  /** 首次评分日（含）；默认 T+1。 */
+  readonly scoreStartRelativeDay?: number;
+  /** 滚动评分最大窗口（默认 5；满窗后固定）。 */
+  readonly scoreWindowDays?: number;
+  /** 最低评分；低于该值当日移池。 */
+  readonly minimumScore?: number;
+  /** 滚动振幅风控上限（如 0.14 = 14%）。 */
+  readonly maxObservationAmplitude?: number;
+  /** 冻结校准版本 id。 */
+  readonly calibrationVersion?: string;
+  /** true = 低于最低分立即移池；仅影响未来买入。 */
+  readonly removeBelowMinimumScore?: boolean;
+  /** 同一证券的多个首板事件是否保留为独立成员。 */
+  readonly allowMultipleMembersPerSecurity?: boolean;
+  /** 数据集为池成员退出额外保留的交易日尾部。 */
+  readonly exitTailTradingDays?: number;
+  /** 旧版两段评分声明；仅历史文档兼容使用。 */
+  readonly earlyScoreStageEnd?: number;
+  /** 旧版两段评分声明；仅历史文档兼容使用。 */
+  readonly fullScoreStart?: number;
+  /** 连续不可评分达到该交易日数后移除。 */
+  readonly scoreInvalidationDays: number;
+  /** 恒为 false：评分只影响买入，不触发卖出。 */
+  readonly scoreAffectsExit: false;
+  /** 每日候选上限；0 = 不额外限制。 */
+  readonly maxDailyCandidates: number;
+  /**
+   * 面板物化预算（可选；由装配/数据桥强制执行，超限稳定失败）。
+   */
+  readonly panelBudgets?: {
+    readonly maxMembersPerDay?: number;
+    readonly maxPanelRows?: number;
+  };
+}
+
+/** 入场定义。 */
+export interface EntryDefinition {
+  readonly event: EventDefinition;
+  readonly observationWindow: ObservationWindow;
+  readonly conditions: readonly ConditionDefinition[];
+  readonly trigger: TriggerDefinition;
+}
+
+/** 出场规则（SPEC §12：type / trigger / threshold / condition / priority / enabled）。 */
+export interface ExitRuleDefinition {
+  readonly id?: string;
+  readonly type: StrategyExitRuleType;
+  readonly trigger: StrategyExitTrigger;
+  /** 数值阈值（与 `thresholdUnit` 配对）；由参数表达时改用 `parameter`。 */
+  readonly threshold?: number;
+  readonly thresholdUnit?: StrategyExitThresholdUnit;
+  /** 阈值由参数表达时的参数 code（须存在于 `parameters`）。 */
+  readonly parameter?: string;
+  /**
+   * Advanced research-only trailing policy. When present, threshold /
+   * parameter / thresholdUnit must be omitted and the simulator evaluates the
+   * policy at close.
+   */
+  readonly trailingPolicy?: ResearchTrailingPolicyDefinition;
+  /** 统一退出策略；与 trailingPolicy 二选一。 */
+  readonly policy?: ExitPolicyDefinition;
+  /** 附加条件（可选；同样受 Look-Ahead 约束）。 */
+  readonly condition?: ConditionDefinition;
+  /** 优先级（数值越小越优先；同一出场定义内必须唯一）。 */
+  readonly priority: number;
+  readonly enabled: boolean;
+  readonly description?: string;
+}
+
+/** 出场定义。 */
+export interface ExitDefinition {
+  readonly rules: readonly ExitRuleDefinition[];
+  /**
+   * 候选退出政策；缺省 = HOLD_WHILE_SELECTED（兼容既有策略）。
+   * `DISABLED` 表示候选评分只控制买入，不触发持仓卖出。
+   */
+  readonly candidateExitPolicy?: StrategyCandidateExitPolicy;
+  /**
+   * 实验性时间退出延长。到指定持有日收盘，若仍满足强势条件，则继续持有到延长日。
+   */
+  readonly strongHold?: {
+    readonly atHoldingDays: number;
+    readonly minReturnRatio: number;
+    readonly requireAboveMa5: boolean;
+    readonly requireAboveMa10: boolean;
+    readonly extendToHoldingDays: number;
+    /**
+     * 到 extendToHoldingDays 后的行为。
+     * 缺省 TIME_EXIT 保持旧语义；TREND 表示继续持有，直到趋势止盈或止损。
+     */
+    readonly afterExtendedHold?: StrongHoldAfterExtendedExitPolicy;
+    /** 到 extendToHoldingDays 时卖出的仓位比例；缺省 = 不减仓。 */
+    readonly scaleOutRatio?: number | null;
+    /** runner 最迟在该持有日收盘产生退出信号；下一交易日开盘成交。 */
+    readonly runnerExitAtHoldingDays?: number | null;
+    /** 组合中允许同时存在的趋势 runner 数量上限。 */
+    readonly maxConcurrentRunners?: number | null;
+    /** 新候选评分超过最弱 runner 入仓评分的最小差值，才允许替换。 */
+    readonly replacementScoreMargin?: number | null;
+  };
+}
+
+/** 仓位定义（SPEC §13）。 */
+export interface PositionDefinition {
+  readonly sizingMethod: StrategyPositionSizingMethod;
+  /**
+   * 每仓比例 (0, 1]。
+   * `FIXED_RATIO` = 初始资金基数；`EQUITY_RATIO` = 每次决策时现有总权益基数。
+   */
+  readonly positionRatio?: number;
+  /** `FIXED_AMOUNT` 的固定金额（> 0）。 */
+  readonly fixedAmount?: number;
+  /** 最大同时持仓数（>= 1）。 */
+  readonly maxPositions: number;
+  /** 组合最大暴露 (0, 1]。 */
+  readonly maxExposure?: number;
+  /** 单标的最大占比 (0, 1]。 */
+  readonly maxSinglePosition?: number;
+  /** 比例由参数表达时的参数 code。 */
+  readonly parameter?: string;
+  /** 实验：按候选 signalValue 分档的权益仓位比例（与 sizingMethod=EQUITY_RATIO 配合）。 */
+  readonly positionTiers?: readonly { readonly minScore: number; readonly fraction: number }[];
+  /** 实验：按候选 signalValue 分档的权益仓位比例，值由参数 code 提供（前端可覆写）。 */
+  readonly positionTiersParameter?: string;
+  /** 实验：按候选当日 rank 分档的权益仓位比例（rank 1 = 最优）。 */
+  readonly positionRankTiers?: readonly { readonly maxRank: number; readonly fraction: number }[];
+  /** 实验：按候选当日 rank 分档的权益仓位比例，值由参数 code 提供（前端可覆写）。 */
+  readonly positionRankTiersParameter?: string;
+}
+
+/**
+ * 风险定义（SPEC §14）。
+ * ⚠️ 这是**风险规则**，不是风险评价结果（不含 Sharpe / MaxDD 实测值等）。
+ */
+export interface RiskDefinition {
+  /** 单笔止损比例 (0, 1)。 */
+  readonly stopLoss?: number;
+  /** 组合最大回撤闸门 (0, 1)。 */
+  readonly maxDrawdown?: number;
+  /** 组合最大暴露 (0, 1]。 */
+  readonly maxExposure?: number;
+  /** 单标的最大占比 (0, 1]。 */
+  readonly maxSinglePosition?: number;
+  /** 最大同时持仓数（>= 1）。 */
+  readonly maxPositions?: number;
+  /** 单日亏损上限 (0, 1]。 */
+  readonly dailyLossLimit?: number;
+  /** 集中度上限 (0, 1]。 */
+  readonly concentrationLimit?: number;
+  /** 扩展槽：未来风险维度（保持前向兼容，不因新增维度而递增 schemaVersion）。 */
+  readonly extensions?: Readonly<Record<string, number | string | boolean>>;
+}
+
+/** 执行定义（SPEC §15：signalTiming 与 executionTiming **必须分离**）。 */
+export interface ExecutionDefinition {
+  readonly signalTiming: StrategySignalTiming;
+  readonly executionTiming: StrategyExecutionTiming;
+  readonly priceType: StrategyPriceType;
+  readonly quantityMethod: StrategyQuantityMethod;
+  readonly lotSize: number;
+  readonly slippageModel?: StrategyCostModelId;
+  readonly commissionModel?: StrategyCostModelId;
+  /** 执行约束声明（如「一字板不可成交」「停牌顺延」）；只声明，不在本任务执行。 */
+  readonly executionConstraints?: readonly string[];
+}
+
+/** 参数定义（SPEC §16 / §17）。 */
+export interface ParameterDefinition {
+  /** 参数 code（版本内唯一，须匹配 `[A-Za-z_][A-Za-z0-9_]*`）。 */
+  readonly code: string;
+  readonly name: string;
+  readonly dataType: StrategyParameterDataType;
+  readonly parameterRole: StrategyParameterRole;
+  readonly defaultValue?: ResearchParameterValue;
+  /** 是否允许 null（如「不设阈值 = null」）。 */
+  readonly nullable?: boolean;
+  /** 数值约束（仅 `dataType = number`）。 */
+  readonly min?: number;
+  readonly max?: number;
+  readonly step?: number;
+  /** 字符串白名单（仅 `dataType = string`）。 */
+  readonly allowedValues?: readonly string[];
+  /** json 数组最小长度（仅 `dataType = json`）。 */
+  readonly minItems?: number;
+  /** json 数组最大长度（仅 `dataType = json`）。 */
+  readonly maxItems?: number;
+  readonly unit?: string;
+  readonly description?: string;
+  readonly required: boolean;
+  /** `DERIVED` 参数的推导表达式（人类可读，如 `maxPositions * positionRatio`）；DERIVED 必填。 */
+  readonly derivedFrom?: string;
+}
+
+/** Dataset 绑定**引用**（SPEC §21：只建立引用，不复制 Dataset 数据、不改 Dataset 结构）。 */
+export interface StrategyDatasetBinding {
+  /** Dataset Registry 业务码（`dataset_definition.datasetCode`，如 `first_limit_pullback`）；legacy 形态为 `ds_…`。 */
+  readonly datasetId: string;
+  /**
+   * 🔴 STEP STRATEGY-004 — **Dataset Registry 权威坐标**：`dataset_version.id`（跨模块唯一 Dataset Version 引用）。
+   *
+   * - 提供时：引用完整性由持久化层查真实 `dataset_version` 校验
+   *   （存在 / status=READY / datasetId 与 `datasetId` 一致 / label 与 `datasetVersion` 一致），
+   *   任一不满足即拒绝保存（不自动创建、不自动补 Dataset、不绕过 Registry）；
+   * - 缺省时：本绑定走 **legacy `rd-…` 兼容分支**，`datasetVersion` 必须是 `rd-…` 内容寻址串。
+   */
+  readonly datasetVersionId?: number;
+  /**
+   * Dataset Version 的 **label / 快照**（Dataset Registry 的 `dataset_version.version`，如 `v2`）。
+   *
+   * - `datasetVersionId` 存在时 = 该版本的显示 label，必须与 Registry 的 `version` 一致；
+   * - `datasetVersionId` 缺省时 = legacy `rd-…` 内容寻址串（保留旧兼容分支，不删除）。
+   */
+  readonly datasetVersion: string;
+  readonly role: StrategyDatasetRole;
+  readonly note?: string;
+}
+
+/**
+ * 完整策略定义（Canonical Definition 的领域形态）。
+ *
+ * 本对象随 `StrategyDocument.definition` 一起进入 `strategy_versions.strategyDocumentJson`，
+ * 是该版本「可复现的核心规则快照」。5 张投影表全部由本对象单向派生。
+ */
+/**
+ * 市场状态闸门声明（MARKET-REGIME-001）。
+ *
+ * 只约束**新建仓**：命中日期当日不建仓；已有持仓/退出路径完全不受影响。
+ * 决策日集合由研究侧按 PIT 规则（指数趋势 / 涨停家数 / 炸板率等）预先算出并冻结进版本。
+ */
+export interface MarketRegimeFilterDefinition {
+  /** 被排除的决策日（YYYY-MM-DD，升序、无重复）。 */
+  readonly blockedDecisionDates: readonly string[];
+  /** 人类可读标签（仅审计用途）。 */
+  readonly label?: string;
+}
+
+export interface StrategyDefinition {
+  readonly schemaVersion: string;
+  readonly entry: EntryDefinition;
+  /** 通用状态 / 因子声明；缺省 = 本版本不额外声明（既有策略逐字节不变）。 */
+  readonly stateFactors?: StateFactorDefinitionSet;
+  /**
+   * 首板股票池策略（可选）。仅在 `entry.trigger.type = FIRST_LIMIT_POOL` 时允许声明。
+   */
+  readonly firstLimitPool?: FirstLimitPoolDefinition;
+  /**
+   * MARKET-REGIME-001 市场状态闸门（可选，研究截面）。
+   *
+   * 语义：`blockedDecisionDates` 命中的决策日**不新建仓**（退出与已持仓完全不受影响）。
+   * 该字段承载「研究侧按 PIT 规则算出的被排除决策日集合」——把市场状态过滤表达成
+   * 版本可复现的声明的数据面；缺省 = 不限制（既有行为逐字节不变）。
+   */
+  readonly marketRegimeFilter?: MarketRegimeFilterDefinition;
+  readonly exit: ExitDefinition;
+  readonly position: PositionDefinition;
+  readonly risk: RiskDefinition;
+  readonly execution: ExecutionDefinition;
+  readonly parameters: readonly ParameterDefinition[];
+  readonly datasets: readonly StrategyDatasetBinding[];
+}
+
+/** `createStrategyDefinition` 输入（`schemaVersion` 缺省由组装层补 `1.0`）。 */
+export type StrategyDefinitionInput = Omit<StrategyDefinition, "schemaVersion"> & {
+  readonly schemaVersion?: string;
+};
+
+// ---------------------------------------------------------------------------
+// 规范化（确定性顺序；与指纹稳定性直接相关）
+// ---------------------------------------------------------------------------
+
+/** `cond-<n>` / `exit-<n>` 风格 id 解析（缺省 id 由下标派生，保证同一输入必得同一 id）。 */
+export function resolveConditionId(condition: ConditionDefinition, index: number): string {
+  const id = condition.id;
+  return typeof id === "string" && id.trim() !== "" ? id.trim() : `cond-${index + 1}`;
+}
+
+/** 解析出场规则 id（缺省 `exit-<n>`）。 */
+export function resolveExitRuleId(rule: ExitRuleDefinition, index: number): string {
+  const id = rule.id;
+  return typeof id === "string" && id.trim() !== "" ? id.trim() : `exit-${index + 1}`;
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** 数值可选字段比较（缺省视为 -1，保证 legacy 绑定排在 new 绑定之前且顺序确定）。 */
+function compareOptionalNumber(left: number | undefined, right: number | undefined): number {
+  return (left ?? -1) - (right ?? -1);
+}
+
+/**
+ * 规范化：补齐缺省 id、按确定性顺序整理数组，使「同一语义定义 → 同一 canonical 串 → 同一指纹」。
+ *
+ * 排序规则：
+ *   - `parameters`：按 `code` 升序（参数顺序无语义）；
+ *   - `datasets`：按 (role, datasetId, datasetVersion, datasetVersionId) 升序（绑定顺序无语义）；
+ *   - `exit.rules`：按 (priority, id) 升序（priority 已表达优先级，数组顺序无语义）；
+ *   - `entry.conditions`：**保持调用方顺序**（条件求值顺序可能承载语义，不重排）。
+ * 输入为已隔离的深拷贝，本函数原地整理，绝不修改调用方对象。
+ */
+export function normalizeStrategyDefinition(input: StrategyDefinitionInput): StrategyDefinition {
+  const clone = structuredClone(input) as Record<string, unknown>;
+
+  const parameters = clone.parameters;
+  if (Array.isArray(parameters)) {
+    clone.parameters = (parameters as ParameterDefinition[])
+      .map((item) => ({ ...item }))
+      .sort((a, b) => compareText(a.code, b.code));
+  }
+
+  const datasets = clone.datasets;
+  if (Array.isArray(datasets)) {
+    const next = datasets as StrategyDatasetBinding[];
+    clone.datasets = next
+      .map((item) => ({ ...item }))
+      .sort((a, b) =>
+        compareText(a.role, b.role)
+        || compareText(a.datasetId, b.datasetId)
+        || compareText(a.datasetVersion, b.datasetVersion)
+        || compareOptionalNumber(a.datasetVersionId, b.datasetVersionId));
+  }
+
+  const entry = clone.entry as EntryDefinition | undefined;
+  if (entry !== undefined && entry !== null && Array.isArray(entry.conditions)) {
+    clone.entry = {
+      ...entry,
+      conditions: entry.conditions.map((condition, index) => ({
+        ...condition,
+        id: resolveConditionId(condition, index),
+      })),
+    };
+  }
+
+  // MARKET-REGIME-001：决策日集合规范化（升序、去重后保序），保证同一声明必得同一指纹。
+  const marketRegimeFilter = clone.marketRegimeFilter as
+    | { readonly blockedDecisionDates?: unknown; readonly label?: unknown }
+    | undefined;
+  if (
+    marketRegimeFilter !== undefined
+    && marketRegimeFilter !== null
+    && Array.isArray(marketRegimeFilter.blockedDecisionDates)
+  ) {
+    const dates = marketRegimeFilter.blockedDecisionDates.filter(
+      (value): value is string => typeof value === "string",
+    );
+    clone.marketRegimeFilter = {
+      ...marketRegimeFilter,
+      blockedDecisionDates: [...dates].sort((left, right) =>
+        left < right ? -1 : left > right ? 1 : 0,
+      ),
+    };
+  }
+
+  const stateFactors = clone.stateFactors as StateFactorDefinitionSet | undefined;
+  if (stateFactors !== undefined && stateFactors !== null) {
+    clone.stateFactors = {
+      ...(Array.isArray(stateFactors.states)
+        ? { states: [...stateFactors.states].sort((a, b) => compareText(a.id, b.id)) }
+        : {}),
+      ...(Array.isArray(stateFactors.factors)
+        ? { factors: [...stateFactors.factors].sort((a, b) => compareText(a.id, b.id)) }
+        : {}),
+    };
+  }
+  const exit = clone.exit as ExitDefinition | undefined;
+  if (exit !== undefined && exit !== null && Array.isArray(exit.rules)) {
+    const rules: ExitRuleDefinition[] = exit.rules.map((rule, index) => {
+      const withId: ExitRuleDefinition = { ...rule, id: resolveExitRuleId(rule, index) };
+      if (withId.condition === undefined || withId.condition === null) return withId;
+      return {
+        ...withId,
+        condition: { ...withId.condition, id: resolveConditionId(withId.condition, 0) },
+      };
+    });
+    rules.sort((a, b) => (a.priority - b.priority) || compareText(a.id as string, b.id as string));
+    clone.exit = { ...exit, rules };
+  }
+
+  return clone as unknown as StrategyDefinition;
+}
+
+/** 观察窗口是否合法（`start >= 1`、`end >= start`）；供 Validation 与消费方复用。 */
+export function isValidObservationWindow(window: ObservationWindow): boolean {
+  return Number.isInteger(window.start)
+    && Number.isInteger(window.end)
+    && window.start >= 1
+    && window.end >= window.start;
+}

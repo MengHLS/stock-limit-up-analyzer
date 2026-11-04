@@ -1,0 +1,14 @@
+PASS  /                      textLen= 3159 nav= 0 head=[] fetchFail=false errs=0
+PASS  /datasets              textLen=  310 nav= 1 head=[] fetchFail=false errs=0
+PASS  /strategies            textLen=  863 nav= 0 head=["策略"] fetchFail=false errs=0
+PASS  /leader-candidates     textLen=  317 nav= 0 head=["龙头候选池","主线中的重点观察候选"] fetchFail=false errs=0
+PASS  /market                textLen=  577 nav= 0 head=["大盘分析"] fetchFail=false errs=0
+PASS  /paper-trading         textLen=  671 nav= 0 head=["前向纸面交易闭环","新建前向运行","运行列表"] fetchFail=false errs=0
+FAIL  /stock-sync            textLen=    0 nav= 0 head=[] fetchFail=false errs=0
+PASS  /data-health           textLen= 4523 nav= 0 head=["数据域健康看板","数据域覆盖（A~G，由 gate 项派生）"] fetchFail=false errs=0
+PASS  /research              textLen=  818 nav= 6 head=[] fetchFail=false errs=0
+PASS  /sentiment-analysis    textLen=  303 nav= 0 head=["情绪分析","最高连板趋势"] fetchFail=false errs=0
+PASS  /backtest-runs         textLen=  748 nav= 3 head=["回测历史"] fetchFail=false errs=0
+
+FAILURES(1): /stock-sync
+证据：docs/evidence/_probe_app_boot_render.json

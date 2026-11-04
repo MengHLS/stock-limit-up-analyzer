@@ -1,0 +1,492 @@
+{
+  "generatedAt": "2026-09-16T08:19:29.092Z",
+  "dbAvailable": true,
+  "inFlight": {
+    "runOrAnalysisNotDone": 1,
+    "safeToEditServer": false
+  },
+  "tableState": {
+    "research_experiment": {
+      "exists": true,
+      "rowCount": 2
+    },
+    "research_hypothesis": {
+      "exists": true,
+      "rowCount": 0
+    },
+    "research_run": {
+      "exists": true,
+      "rowCount": 13
+    },
+    "research_analysis": {
+      "exists": true,
+      "rowCount": 266
+    },
+    "research_analysis_condition": {
+      "exists": true,
+      "rowCount": 630
+    },
+    "research_analysis_metric": {
+      "exists": true,
+      "rowCount": 0
+    },
+    "research_result": {
+      "exists": true,
+      "rowCount": 5083
+    },
+    "research_conclusion": {
+      "exists": true,
+      "rowCount": 12
+    },
+    "research_strategy_candidate": {
+      "exists": true,
+      "rowCount": 9
+    },
+    "research_artifact": {
+      "exists": true,
+      "rowCount": 0
+    },
+    "research_analysis_template": {
+      "exists": true,
+      "rowCount": 0
+    },
+    "research_analysis_template_item": {
+      "exists": true,
+      "rowCount": 0
+    },
+    "research_experiments": {
+      "exists": true,
+      "rowCount": 0
+    },
+    "research_runs": {
+      "exists": true,
+      "rowCount": 2
+    },
+    "research_experiment_batches": {
+      "exists": true,
+      "rowCount": 0
+    },
+    "research_datasets": {
+      "exists": true,
+      "rowCount": 7
+    },
+    "research_finding": {
+      "exists": false,
+      "rowCount": null
+    }
+  },
+  "findingCarrier": {
+    "tablesMatchingFinding": [],
+    "columnsMatchingFinding": []
+  },
+  "hypothesisColumns": [
+    {
+      "COLUMN_NAME": "id",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "PRI"
+    },
+    {
+      "COLUMN_NAME": "experimentId",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "name",
+      "COLUMN_TYPE": "varchar(200)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "statement",
+      "COLUMN_TYPE": "text",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "nullHypothesis",
+      "COLUMN_TYPE": "text",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "alternativeHypothesis",
+      "COLUMN_TYPE": "text",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "status",
+      "COLUMN_TYPE": "varchar(32)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "conclusion",
+      "COLUMN_TYPE": "text",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "createdAt",
+      "COLUMN_TYPE": "timestamp",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "updatedAt",
+      "COLUMN_TYPE": "timestamp",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    }
+  ],
+  "conclusionColumns": [
+    {
+      "COLUMN_NAME": "id",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "PRI"
+    },
+    {
+      "COLUMN_NAME": "experimentId",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "hypothesisId",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "conclusionType",
+      "COLUMN_TYPE": "varchar(32)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "title",
+      "COLUMN_TYPE": "varchar(200)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "conclusion",
+      "COLUMN_TYPE": "text",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "evidenceJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "confidence",
+      "COLUMN_TYPE": "double",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "status",
+      "COLUMN_TYPE": "varchar(20)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "createdAt",
+      "COLUMN_TYPE": "timestamp",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "updatedAt",
+      "COLUMN_TYPE": "timestamp",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    }
+  ],
+  "candidateColumns": [
+    {
+      "COLUMN_NAME": "id",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "PRI"
+    },
+    {
+      "COLUMN_NAME": "experimentId",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "conclusionId",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "strategyDefinitionId",
+      "COLUMN_TYPE": "varchar(64)",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "name",
+      "COLUMN_TYPE": "varchar(200)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "description",
+      "COLUMN_TYPE": "text",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "entryRuleJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "filterRuleJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "exitRuleJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "riskRuleJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "parameterSpaceJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "status",
+      "COLUMN_TYPE": "varchar(20)",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "createdAt",
+      "COLUMN_TYPE": "timestamp",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "updatedAt",
+      "COLUMN_TYPE": "timestamp",
+      "IS_NULLABLE": "NO",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "sourceDatasetVersionId",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": "MUL"
+    },
+    {
+      "COLUMN_NAME": "sourceResearchRunId",
+      "COLUMN_TYPE": "bigint",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "sourceTraceJson",
+      "COLUMN_TYPE": "longtext",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    },
+    {
+      "COLUMN_NAME": "sourceDatasetDivergenceReason",
+      "COLUMN_TYPE": "varchar(512)",
+      "IS_NULLABLE": "YES",
+      "COLUMN_KEY": ""
+    }
+  ],
+  "lifecycle": {
+    "runByStatus": [
+      {
+        "status": "COMPLETED",
+        "c": 12
+      },
+      {
+        "status": "FAILED",
+        "c": 1
+      }
+    ],
+    "analysisByStatus": [
+      {
+        "status": "COMPLETED",
+        "c": 265
+      },
+      {
+        "status": "PENDING",
+        "c": 1
+      }
+    ],
+    "experimentByStatus": [
+      {
+        "status": "COMPLETED",
+        "c": 2
+      }
+    ]
+  },
+  "datasetVersions": [
+    {
+      "id": 390001,
+      "datasetId": 120001,
+      "version": "v1",
+      "status": "READY",
+      "startDate": "2026-08-01",
+      "endDate": "2026-08-31",
+      "totalEvents": 1130,
+      "totalRows": 60002
+    },
+    {
+      "id": 390002,
+      "datasetId": 120001,
+      "version": "v2",
+      "status": "READY",
+      "startDate": "2024-09-01",
+      "endDate": "2026-09-01",
+      "totalEvents": 23978,
+      "totalRows": 1543082
+    }
+  ],
+  "resultShape": {
+    "resultByType": [
+      {
+        "resultType": "GROUPED",
+        "c": 4060
+      },
+      {
+        "resultType": "SCALAR",
+        "c": 1023
+      }
+    ],
+    "metricTop": [
+      {
+        "metricCode": "SAMPLE_COUNT",
+        "c": 728
+      },
+      {
+        "metricCode": "MEAN_RETURN",
+        "c": 726
+      },
+      {
+        "metricCode": "MEDIAN_RETURN",
+        "c": 714
+      },
+      {
+        "metricCode": "WIN_RATE",
+        "c": 699
+      },
+      {
+        "metricCode": "STD_RETURN",
+        "c": 636
+      },
+      {
+        "metricCode": "T_STAT_DIFFERENCE",
+        "c": 245
+      },
+      {
+        "metricCode": "P_VALUE_DIFFERENCE",
+        "c": 245
+      },
+      {
+        "metricCode": "DIFFERENCE",
+        "c": 220
+      },
+      {
+        "metricCode": "RELATIVE_DIFFERENCE",
+        "c": 220
+      },
+      {
+        "metricCode": "MAX_DRAWDOWN",
+        "c": 153
+      },
+      {
+        "metricCode": "T_STAT",
+        "c": 54
+      },
+      {
+        "metricCode": "P_VALUE",
+        "c": 54
+      },
+      {
+        "metricCode": "SPREAD_TOP_BOTTOM",
+        "c": 25
+      },
+      {
+        "metricCode": "PAIR_SAMPLE_COUNT",
+        "c": 20
+      },
+      {
+        "metricCode": "PAIR_CORRELATION",
+        "c": 20
+      },
+      {
+        "metricCode": "PAIR_RANK_CORRELATION",
+        "c": 20
+      },
+      {
+        "metricCode": "P25",
+        "c": 14
+      },
+      {
+        "metricCode": "P90",
+        "c": 14
+      },
+      {
+        "metricCode": "MAX",
+        "c": 14
+      },
+      {
+        "metricCode": "P99",
+        "c": 14
+      }
+    ],
+    "analysesByType": [
+      {
+        "analysisType": "CONDITIONAL",
+        "c": 220
+      },
+      {
+        "analysisType": "SEGMENT_RELATION",
+        "c": 20
+      },
+      {
+        "analysisType": "STABILITY",
+        "c": 12
+      },
+      {
+        "analysisType": "QUANTILE",
+        "c": 5
+      },
+      {
+        "analysisType": "EVENT_STUDY",
+        "c": 5
+      },
+      {
+        "analysisType": "DESCRIPTIVE",
+        "c": 4
+      }
+    ]
+  }
+}

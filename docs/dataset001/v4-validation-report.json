@@ -1,0 +1,47 @@
+{
+  "datasetCode": "first_limit_pullback",
+  "version": "v4-validation",
+  "versionId": 570001,
+  "jobId": "ds001-v4-validation-1790073852478-eb58ab62",
+  "status": "COMPLETED",
+  "window": {
+    "from": "2024-09-01",
+    "to": "2026-09-04"
+  },
+  "filter": {
+    "boards": [
+      "main"
+    ],
+    "excludeSt": true,
+    "events": [
+      {
+        "relativeDay": 0,
+        "kind": "firstBoard"
+      }
+    ],
+    "preWindowDays": 20,
+    "postWindowDays": 20,
+    "outcomeHorizons": [
+      5,
+      10,
+      20
+    ],
+    "batchSize": 1000
+  },
+  "counts": {
+    "events": 24079,
+    "prefixes": 505659,
+    "posts": 480010,
+    "paths": 480010,
+    "outcomes": 72237,
+    "totalRows": 1561995
+  },
+  "processedRows": 1537916,
+  "failedRows": 0,
+  "chunks": 24079,
+  "elapsedSec": 260.8,
+  "throughput": {
+    "rowsPerSec": 5989.2,
+    "eventsPerSec": 92.3
+  }
+}

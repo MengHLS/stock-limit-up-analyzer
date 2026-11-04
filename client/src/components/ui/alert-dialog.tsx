@@ -2,6 +2,7 @@ import * as React from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 
 import { cn } from "@/lib/utils";
+import { useDialogFocusRestore } from "@/lib/dialogFocusRestore";
 import { buttonVariants } from "@/components/ui/button";
 
 function AlertDialog({
@@ -44,8 +45,12 @@ function AlertDialogOverlay({
 
 function AlertDialogContent({
   className,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
+  // 🔴 同 dialog.tsx：受控且无 AlertDialogTrigger 时 Radix 不还原焦点（实测）
+  const focusRestore = useDialogFocusRestore();
   return (
     <AlertDialogPortal>
       <AlertDialogOverlay />
@@ -56,6 +61,14 @@ function AlertDialogContent({
           className
         )}
         {...props}
+        onOpenAutoFocus={(event) => {
+          focusRestore.onOpenAutoFocus();
+          onOpenAutoFocus?.(event);
+        }}
+        onCloseAutoFocus={(event) => {
+          focusRestore.onCloseAutoFocus(event);
+          onCloseAutoFocus?.(event);
+        }}
       />
     </AlertDialogPortal>
   );

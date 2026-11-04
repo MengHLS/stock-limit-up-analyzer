@@ -1,7 +1,28 @@
-import type { SentimentCyclePhase } from "./sentimentCycle";
+import { SENTIMENT_CYCLE_PHASES, type SentimentCyclePhase } from "./sentimentCycle";
 import { buildLatestStockNameMap, normalizeSectorName } from "../shared/stockDataNormalization";
+import {
+  buildFieldCoverage,
+  buildFieldCoverageReport,
+  hasFieldValue,
+  resolveThemeWithFallback,
+  type FieldCoverageCounts,
+  type FieldCoverageReport,
+} from "../shared/fieldAvailability";
+import { DEFAULT_MAX_PARTICIPATING_BOARDS, boardHeightPositionScale, isBoardParticipationRestricted } from "../shared/boardHeightRisk";
 import { buildDownsideRiskResearch, calculateQualityBlendScoreForRisk, defaultDownsideRiskPenaltyWeight, scoreDownsideRiskSignal, type DownsideRiskExperimentItem, type DownsideRiskOptions, type DownsideRiskResearchResult, type DownsideRiskStrategyKey } from "./downsideRisk";
-import { simulateRealisticTPlus1ToTPlus2, type RealisticBacktestOptions, type RealisticBacktestResult } from "./realisticBacktest";
+import type { PositionSizingStrategy, RealisticBacktestOptions, RealisticBacktestResult } from "./realisticBacktest";
+import { allocatePlannedBudgets } from "./positionBudget";
+import { RESEARCH_LEGACY_SIMULATION_SOURCE } from "./research/legacyTransactionSimulator";
+import { computeTechnicalFactorValues, evaluateFactorEffectiveness } from "./technicalFactors";
+import type { FactorEffectivenessReport, TechnicalFactorKey } from "./technicalFactors";
+import { buildFactorNeutralizationReport } from "./factorCombination";
+import type { FactorNeutralizationReport } from "./factorCombination";
+import { buildOverfittingGuardReport } from "./overfittingGuard";
+import type { OverfittingGuardReport } from "./overfittingGuard";
+import { buildFinalVerdict } from "./factorScore";
+import type { FinalVerdict } from "./factorScore";
+import { parseNonNegativeNumber, parsePositivePrice } from "./data/validation";
+import { median } from "../shared/quant-stats";
 
 export type LeaderCandidateSourceRecord = {
   stockCode: string;
@@ -11,6 +32,11 @@ export type LeaderCandidateSourceRecord = {
   sector: string | null;
   turnover: string | null;
   circulationValue: string | null;
+  /**
+   * 涨停关键词（如「商业航天+军工+碳纤维」）。历史期大面积缺失，仅用于字段覆盖识别
+   * 与「sector 缺失时的题材兜底」，不参与任何评分。
+   */
+  keywords?: string | null;
 };
 
 export type LeaderCandidateTrajectoryPoint = {
@@ -38,6 +64,13 @@ export type LeaderCandidate = {
   reasons: string[];
   riskTags: string[];
   trajectory: LeaderCandidateTrajectoryPoint[];
+  /**
+   * 信号日该股题材是否可解析（sector 缺失时为 false，题材家数改用同日中性兜底值）。
+   * 缺省（undefined）按「可用」处理，保证历史调用方与既有夹具语义不变。
+   */
+  sectorAvailable?: boolean;
+  /** 信号日该股封板时间是否可得；false 时封板相关风险不再作为风险证据。 */
+  limitUpTimeAvailable?: boolean;
 };
 
 export type LeaderCandidateResult = {
@@ -45,7 +78,7 @@ export type LeaderCandidateResult = {
   totalMainBoardLimitUps: number;
   maxBoards: number;
   strongSectors: Array<{ sector: string; count: number }>;
-  /** 当日全部可评分主板1–4板涨停股，不受重点候选准入或展示上限影响。 */
+  /** 当日全部可评分主板涨停股（不限连板高度，含首板与四板以上），不受重点候选准入或展示上限影响。 */
   allScoredStocks: LeaderCandidate[];
   candidates: LeaderCandidate[];
 };
@@ -54,6 +87,18 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   sectorCount?: number;
   limitUpTime?: string | null;
   turnover?: string | null;
+  /**
+   * 字段可用性（缺失降级依据）。缺省 undefined 按「可用」处理，兼容既有夹具与调用方：
+   *   - sectorAvailable === false     → 题材家数为同日中性兜底值，题材支撑不产生风险扣分；
+   *   - limitUpTimeAvailable === false → 封板时间缺失不产生风险扣分（缺失 ≠ 封板偏晚）。
+   */
+  sectorAvailable?: boolean;
+  limitUpTimeAvailable?: boolean;
+  /**
+   * 单笔仓位缩放系数（高位连板「降低仓位」用，缺省 1 = 不缩放）。
+   * 只影响该笔的预算上限，不改变排序、不删除候选、不使用未来信息。
+   */
+  positionScale?: number;
   /** 信号日可见的下行风险字段；不参与既有原始评分阈值与排序。 */
   riskScore?: number;
   riskTier?: "低风险" | "中风险" | "高风险";
@@ -77,6 +122,16 @@ export type LeaderCandidateBacktestRow = Pick<LeaderCandidate, "stockCode" | "st
   tPlus1CloseToTPlus2CloseSuccess: boolean | null;
   phase: SentimentCyclePhase | null;
   maxBoards: number | null;
+  /** 信号日次一市场交易日即停牌（当日无法卖出），T+1/T+2 溢价不可用。 */
+  suspendedAfterSignal?: boolean;
+  /** 复牌后首个可交易日（涨停后停牌样本的有效离场观察日）。 */
+  resumeDate?: string | null;
+  /** 复牌首日相对信号日收盘的开盘溢价（%）。 */
+  resumeOpenPremium?: number | null;
+  /** 复牌首日相对信号日收盘的收盘溢价（%）。 */
+  resumeClosePremium?: number | null;
+  /** 信号日技术面因子值（换手率/量比/振幅），严格 point-in-time，缺失时为 null。 */
+  technicalFactors?: Record<TechnicalFactorKey, number | null>;
 };
 
 export type LeaderCandidateScoreBand = {
@@ -130,14 +185,38 @@ export type LeaderCandidateBacktestResult = {
   outOfSampleTPlus2Premium: LeaderCandidatePremiumSummary;
   tPlus1CloseToTPlus2Close: LeaderCandidateExitSummary;
   outOfSampleTPlus1CloseToTPlus2Close: LeaderCandidateExitSummary;
+  resumeDayExit: LeaderCandidateExitSummary;
+  outOfSampleResumeDayExit: LeaderCandidateExitSummary;
   outOfSampleScoreBands: LeaderCandidateScoreBand[];
   phaseFunnel: LeaderCandidatePhaseFunnelItem[];
   historicalRows: LeaderCandidateBacktestRow[];
   realisticSimulation: RealisticBacktestResult;
-  downsideRiskResearch: DownsideRiskResearchResult;
+  /**
+   * 下行风险研究报告。仅在显式研究路径（runLeaderCandidateResearchReport / includeResearch=true）
+   * 下非空；生产回测请求（getLeaderCandidateBacktest，includeResearch=false）为 null，
+   * 以避免生产请求隐式执行 research-legacy 交易模拟器（STEP 5 P2-2 边界）。
+   */
+  downsideRiskResearch: DownsideRiskResearchResult | null;
   dailyPriceCoverage: LeaderCandidateDailyPriceCoverage;
   marketFactorCoverage: LeaderCandidateMarketFactorCoverage;
-  strategyPortfolioSnapshot: LeaderCandidateStrategyPortfolioSnapshot;
+  /**
+   * 五策略持仓与准备买入快照，来源为下行风险研究的全周期实验（含 research-legacy 模拟）。
+   * 与研究报表同生命周期：生产回测请求为 null。
+   */
+  strategyPortfolioSnapshot: LeaderCandidateStrategyPortfolioSnapshot | null;
+  /** 技术面因子有效性三件套评估（RankIC/IC_IR、分位数分层单调性、阶段 IC 稳定性）。 */
+  factorEvaluation: FactorEffectivenessReport;
+  /** 因子组合与筛选：相关性矩阵、高相关去重建议、标准化+市值中性化后的技术因子。 */
+  factorCombination: FactorNeutralizationReport;
+  /** 过拟合防护：Deflated Sharpe（按参数搜索次数校正）。 */
+  overfittingGuard: OverfittingGuardReport;
+  /** 最终结论：逐因子评分与评级 + 策略过拟合风险 + 策略质量（可配置权重）。 */
+  finalVerdict: FinalVerdict;
+  /**
+   * 回测区间内「涨停时间 / 所属板块 / 涨停关键词」的采集覆盖报告与降级说明。
+   * 仅用于识别与展示旧数据缺失，不参与评分、排序或成交。
+   */
+  fieldCoverage: FieldCoverageReport;
 };
 
 export type LeaderCandidatePortfolioHolding = {
@@ -166,8 +245,59 @@ export type LeaderCandidatePreparedBuy = {
   riskScore: number;
   riskTier: "低风险" | "中风险" | "高风险";
   strategyScore: number;
+  /**
+   * 高位连板仓位缩放系数（1 = 未降仓；0.6 = 5 板；0.3 = 6 板及以上；0 = 连板高度超过参与上限）。
+   * 与模拟器 `LeaderCandidateBacktestRow.positionScale` 同源（`shared/boardHeightRisk`）；
+   * 原始策略作为对照基准不施加该约束，恒为 1。
+   */
+  positionScale: number;
+  /**
+   * 该笔计划预算上限（元）= 分仓口径预算 × positionScale。
+   * ⚠️ 这是**预算上限**而非成交额：股数还要由次日开盘价、整手与费用约束共同决定，
+   * 开盘前不可知，故不在此回显股数（禁以假设价格估算）。
+   */
+  plannedBudget: number;
+  /** 计划预算占该策略当前可用现金的比例（%），保留 2 位小数。 */
+  plannedBudgetRatio: number;
   reasons: string[];
   conditions: string[];
+};
+
+/** 最新候选池中已被模型识别，但在下一交易日前已知约束下不能进入计划买入的标的。 */
+export type LeaderCandidateBlockedBuy = {
+  rank: number;
+  stockCode: string;
+  stockName: string;
+  sector: string;
+  boards: number;
+  signalDate: string;
+  score: number;
+  riskScore: number;
+  riskTier: "低风险" | "中风险" | "高风险";
+  strategyScore: number;
+  /** 候选不能买入的原因；按实际拦截顺序记录，可能同时命中多项。 */
+  blockReasons: string[];
+};
+
+/** 「下一交易日准备买入」清单的仓位口径回显：只描述**已知**信息，不含对次日行情的任何假设。 */
+export type LeaderCandidatePositionSizing = {
+  /** 分仓口径（与 `RealisticBacktestOptions.positionSizingStrategy` 同源）。 */
+  strategy: PositionSizingStrategy;
+  /** 固定单笔比例（百分数）；仅 `fixedPercent` 口径有意义。 */
+  fixedPositionPercent: number;
+  /** 组合初始资金；仅 `fixedPercent` 口径的分母。 */
+  initialCapital: number;
+  /** 分配所依据的可用现金（= 该策略期末现金），与模拟器下一决策日所见一致。 */
+  cash: number;
+  /** 参与分配的笔数（= 分配分母）。 */
+  plannedCount: number;
+  /** 高位连板参与上限；原始策略不施加该约束（其逐笔系数恒为 1）。 */
+  maxParticipatingBoards: number;
+  /** 本批实际计划买入中被降低仓位的笔数（`0 < positionScale < 1`）。 */
+  positionScaledCount: number;
+  /** 计划预算合计（元）与占可用现金比例（%）。固定比例口径可能超过 100%，如实呈现、不夹取。 */
+  totalPlannedBudget: number;
+  totalPlannedBudgetRatio: number;
 };
 
 export type LeaderCandidateStrategyPortfolio = {
@@ -181,8 +311,11 @@ export type LeaderCandidateStrategyPortfolio = {
   availableSlots: number;
   currentHoldings: LeaderCandidatePortfolioHolding[];
   preparedBuys: LeaderCandidatePreparedBuy[];
+  blockedBuys: LeaderCandidateBlockedBuy[];
   candidateCount: number;
   excludedHighRiskCount: number;
+  /** 上述准备买入清单的仓位口径回显（前端据此说明「比例是怎么算出来的」）。 */
+  plannedPositionSizing: LeaderCandidatePositionSizing;
   note: string;
 };
 
@@ -199,6 +332,9 @@ export type LeaderCandidateBacktestOptions = {
   minScore?: number;
   realistic?: RealisticBacktestOptions;
   downsideRisk?: DownsideRiskOptions;
+  /** 回测区间起止（YYYY-MM-DD，含边界）。缺省表示不限（加载全量历史，数据量极大）。 */
+  startDate?: string;
+  endDate?: string;
 };
 
 export type LeaderCandidatePhaseFunnelItem = {
@@ -217,6 +353,8 @@ export type LeaderCandidateBacktestContext = {
   marketFactorsByDate?: Map<string, LeaderCandidateMarketFactors>;
   /** 由日线行情提供的完整实际交易日序列；价格回测不使用自然日推算。 */
   tradingDates?: string[];
+  /** 股票代码 → 停牌交易日集合，用于识别涨停后停牌样本并改以复牌首日计算离场收益。 */
+  suspendedDatesByStock?: Map<string, Set<string>>;
 };
 
 export type LeaderCandidateMarketFactors = {
@@ -242,8 +380,11 @@ export type LeaderCandidateMarketFactorCoverage = {
 export type LeaderCandidateDailyPrice = {
   openPrice: number | null;
   closePrice: number | null;
+  highPrice?: number | null;
   lowPrice?: number | null;
   amount?: number | null;
+  volume?: number | null;
+  preClosePrice?: number | null;
 };
 
 export type LeaderCandidateDailyPriceCoverage = {
@@ -251,8 +392,10 @@ export type LeaderCandidateDailyPriceCoverage = {
   stockCount: number;
   startDate: string | null;
   endDate: string | null;
+  highPriceCount: number;
   lowPriceCount: number;
   amountCount: number;
+  volumeCount: number;
 };
 
 export type LeaderCandidateDailyPriceRow = {
@@ -260,26 +403,31 @@ export type LeaderCandidateDailyPriceRow = {
   tradeDate: string;
   openPrice: string | number | null;
   closePrice: string | number | null;
+  highPrice?: string | number | null;
   lowPrice?: string | number | null;
   amount?: string | number | null;
+  volume?: string | number | null;
+  preClosePrice?: string | number | null;
 };
 
 /** 保留开盘或收盘任一有效价格；只有两项都无效时才丢弃该交易日记录。 */
 export function buildLeaderCandidateDailyPriceMap(rows: LeaderCandidateDailyPriceRow[]): Map<string, LeaderCandidateDailyPrice> {
   const map = new Map<string, LeaderCandidateDailyPrice>();
+  // 统一使用 canonical 数据层的解析语义（server/data/validation）：
+  //   price（元/股）→ parsePositivePrice；volume（手）/amount（千元）→ parseNonNegativeNumber。
+  // 禁止在此重复维护一套 toPositiveNumber / toNonNegativeNumber。
   for (const row of rows) {
-    const parsedOpenPrice = Number(row.openPrice);
-    const parsedClosePrice = Number(row.closePrice);
-    const parsedLowPrice = row.lowPrice === null || row.lowPrice === undefined ? null : Number(row.lowPrice);
-    const parsedAmount = row.amount === null || row.amount === undefined ? null : Number(row.amount);
-    const openPrice = Number.isFinite(parsedOpenPrice) && parsedOpenPrice > 0 ? parsedOpenPrice : null;
-    const closePrice = Number.isFinite(parsedClosePrice) && parsedClosePrice > 0 ? parsedClosePrice : null;
+    const openPrice = parsePositivePrice(row.openPrice);
+    const closePrice = parsePositivePrice(row.closePrice);
     if (openPrice === null && closePrice === null) continue;
     map.set(`${row.stockCode}::${row.tradeDate}`, {
       openPrice,
       closePrice,
-      lowPrice: parsedLowPrice !== null && Number.isFinite(parsedLowPrice) && parsedLowPrice > 0 ? parsedLowPrice : null,
-      amount: parsedAmount !== null && Number.isFinite(parsedAmount) && parsedAmount >= 0 ? parsedAmount : null,
+      highPrice: parsePositivePrice(row.highPrice),
+      lowPrice: parsePositivePrice(row.lowPrice),
+      amount: parseNonNegativeNumber(row.amount),
+      volume: parseNonNegativeNumber(row.volume),
+      preClosePrice: parsePositivePrice(row.preClosePrice),
     });
   }
   return map;
@@ -292,7 +440,55 @@ type LeaderCandidateBuildOptions = {
   priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
   marketFactorsByDate?: Map<string, LeaderCandidateMarketFactors>;
   riskPenaltyWeight?: number;
+  /** 允许参与的最高连板高度；超过的高位连板仅在风险标签中显式提示（默认见 boardHeightRisk）。 */
+  maxParticipatingBoards?: number;
+  /**
+   * 复用索引（见 `LeaderCandidateSharedIndex`）。**可选**，不传时保持「每次调用自行构建」的
+   * 原行为，既有调用方语义与性能都不变。
+   */
+  sharedIndex?: LeaderCandidateSharedIndex;
 };
+
+/**
+ * `buildLeaderCandidatesForDate` 的全量索引。
+ *
+ * ## 为什么需要
+ *
+ * 该函数每次调用都要自行做一遍「`records.filter(≤ targetDate)` + 建日期 Set + 建
+ * `stockDates` Map（每股一个 Set）」。实测本项目 99,918 行涨停记录下单次约 **47ms**。
+ * 当调用方需要对**很多个日期**逐个求值时（`buildSentimentCycleAnalysis` 的断板事件循环
+ * 实测 353 次），这份索引就是 353 次重复劳动 —— 占该分析总计算 16.5s 的绝大部分。
+ *
+ * ## 把索引从「截至目标日」放宽到「全量」为什么不改变结果
+ *
+ * `tradingDates` **降序**排列 ⇒ `calculateBoards` 里的 `index + 1` 指向的是**更早**的日期；
+ * `stockDates` 中多出来的「目标日之后」的日期只可能在「从目标日往回走」时被查询，
+ * 而往回走永远不会经过它们；`trajectoryDates` 同样只取目标日及更早的 7 个交易日。
+ * ⇒ 与逐日现算的索引在**被读取的键集合上完全一致**。
+ * （改造前后对全量真实数据逐字节比对，见 `docs/evidence`。）
+ */
+export type LeaderCandidateSharedIndex = {
+  /** 全量交易日，**降序**（与内部口径一致）。 */
+  tradingDates: string[];
+  /** 每只**主板**股票出现过的涨停日期集合。 */
+  stockDates: Map<string, Set<string>>;
+  /** 股票代码 → 最新名称（等价于 `buildLatestStockNameMap(全量 records)`）。 */
+  stockNameByCode: Map<string, string>;
+};
+
+/** 构建可跨日期复用的全量索引（用法见 `LeaderCandidateSharedIndex`）。 */
+export function buildLeaderCandidateSharedIndex(records: LeaderCandidateSourceRecord[]): LeaderCandidateSharedIndex {
+  const tradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
+    .sort((left, right) => right.localeCompare(left));
+  const stockDates = new Map<string, Set<string>>();
+  for (const record of records) {
+    if (!isMainBoardStock(record.stockCode)) continue;
+    const dates = stockDates.get(record.stockCode) ?? new Set<string>();
+    dates.add(record.limitUpDate);
+    stockDates.set(record.stockCode, dates);
+  }
+  return { tradingDates, stockDates, stockNameByCode: buildLatestStockNameMap(records) };
+}
 
 function isMainBoardStock(stockCode: string) {
   return !/^(300|301|688|920)/.test(stockCode);
@@ -376,6 +572,24 @@ function calculateExitSummary(rows: LeaderCandidateBacktestRow[]): LeaderCandida
   };
 }
 
+/** 仅统计「涨停后停牌」样本的复牌首日离场收益。 */
+function calculateResumeExitSummary(rows: LeaderCandidateBacktestRow[]): LeaderCandidateExitSummary {
+  const resumeRows = rows.filter((row) => row.suspendedAfterSignal && row.resumeClosePremium !== null);
+  const returns = resumeRows.map((row) => row.resumeClosePremium!);
+  const positiveReturnCount = returns.filter((value) => value > 0).length;
+  const averageReturn = returns.length === 0
+    ? null
+    : Number((returns.reduce((total, value) => total + value, 0) / returns.length).toFixed(2));
+  return {
+    sampleSize: resumeRows.length,
+    successCount: positiveReturnCount,
+    successRate: percent(positiveReturnCount, resumeRows.length),
+    averageReturn,
+    positiveReturnCount,
+    positiveReturnRate: percent(positiveReturnCount, resumeRows.length),
+  };
+}
+
 /**
  * 仅使用 targetDate 当日及以前的记录构建候选，确保历史回测的每个信号不读取未来数据。
  */
@@ -385,25 +599,36 @@ export function buildLeaderCandidatesForDate(
   options: LeaderCandidateBuildOptions = {},
 ): LeaderCandidateResult {
   const recordsAsOfDate = records.filter((record) => record.limitUpDate <= targetDate);
-  const stockNameByCode = options.stockNameByCode ?? buildLatestStockNameMap(records);
+  const stockNameByCode = options.stockNameByCode ?? options.sharedIndex?.stockNameByCode ?? buildLatestStockNameMap(records);
   if (recordsAsOfDate.length === 0) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], allScoredStocks: [], candidates: [] };
   }
 
-  const tradingDates = Array.from(new Set(recordsAsOfDate.map((record) => record.limitUpDate)))
-    .sort((left, right) => right.localeCompare(left));
+  // 交易日与「每股涨停日期集合」优先取自调用方复用的全量索引（见 `LeaderCandidateSharedIndex`）。
+  // 全量降序交易日里，自 `targetDate` 起向后的那一段恰好就是「截至目标日」的交易日集合。
+  const sharedIndex = options.sharedIndex;
+  let tradingDates: string[];
+  let stockDates: Map<string, Set<string>>;
+  if (sharedIndex) {
+    const asOfIndex = sharedIndex.tradingDates.indexOf(targetDate);
+    tradingDates = asOfIndex >= 0 ? sharedIndex.tradingDates.slice(asOfIndex) : sharedIndex.tradingDates;
+    stockDates = sharedIndex.stockDates;
+  } else {
+    tradingDates = Array.from(new Set(recordsAsOfDate.map((record) => record.limitUpDate)))
+      .sort((left, right) => right.localeCompare(left));
+    stockDates = new Map<string, Set<string>>();
+    for (const record of recordsAsOfDate) {
+      if (!isMainBoardStock(record.stockCode)) continue;
+      const dates = stockDates.get(record.stockCode) ?? new Set<string>();
+      dates.add(record.limitUpDate);
+      stockDates.set(record.stockCode, dates);
+    }
+  }
   if (!tradingDates.includes(targetDate)) {
     return { date: null, totalMainBoardLimitUps: 0, maxBoards: 0, strongSectors: [], allScoredStocks: [], candidates: [] };
   }
 
   const tradingDateIndex = new Map(tradingDates.map((date, index) => [date, index]));
-  const stockDates = new Map<string, Set<string>>();
-  for (const record of recordsAsOfDate) {
-    if (!isMainBoardStock(record.stockCode)) continue;
-    const dates = stockDates.get(record.stockCode) ?? new Set<string>();
-    dates.add(record.limitUpDate);
-    stockDates.set(record.stockCode, dates);
-  }
 
   const calculateBoards = (stockCode: string, date: string) => {
     const dates = stockDates.get(stockCode);
@@ -429,11 +654,22 @@ export function buildLeaderCandidatesForDate(
   }
 
   const currentRecords = Array.from(currentRecordsByCode.values());
+  // 字段可用性识别：只使用该信号日记录（PIT 安全），得到该日「题材/封板时间」是否整体已采集。
+  const fieldCoverage: FieldCoverageCounts = buildFieldCoverage(currentRecords, targetDate);
+  // 题材聚合：只并入可解析题材的记录。历史期 sector 大面积缺失时，
+  // 旧口径会把当日全部缺失记录兜底成同一个「其他」题材 —— 既虚增题材共振得分，
+  // 又让「题材支撑不足」的风险扣分永不触发。这里改为「无法解析就不并入任何题材桶」。
+  const themeByCode = new Map<string, string>();
   const sectorCounts = new Map<string, number>();
   for (const record of currentRecords) {
-    const sector = normalizeSectorName(record.sector);
-    sectorCounts.set(sector, (sectorCounts.get(sector) ?? 0) + 1);
+    const { theme } = resolveThemeWithFallback(record);
+    if (theme === null) continue;
+    themeByCode.set(record.stockCode, theme);
+    sectorCounts.set(theme, (sectorCounts.get(theme) ?? 0) + 1);
   }
+  // 题材家数中性兜底：题材未知的标的改用「同日已解析题材家数的中位数」（只用同日横截面，PIT 安全）。
+  // 既不取上限（旧口径的巨型兜底题材 → 伪装成题材极强），也不取 1（伪造成题材极弱）。
+  const neutralSectorCount = median(Array.from(sectorCounts.values())) ?? 1;
 
   const strongSectors = Array.from(sectorCounts.entries())
     .map(([sector, count]) => ({ sector, count }))
@@ -442,14 +678,17 @@ export function buildLeaderCandidatesForDate(
 
   const currentDateIndex = tradingDateIndex.get(targetDate) ?? 0;
   const trajectoryDates = tradingDates.slice(currentDateIndex, currentDateIndex + 7).reverse();
-  // 五板及以上属于高位情绪观察范围，不进入候选评分或组合回测，避免高位风险与低位启动筛选混在同一口径。
-  const scorableRecords = currentRecords.filter((record) => calculateBoards(record.stockCode, targetDate) < 5);
+  // 覆盖全市场、任意连板高度的主板涨停股（含首板与四板以上），不再按连板数量截断评分范围。
+  const scorableRecords = currentRecords;
   const rankedAllScoredStocks = scorableRecords
     .map((record) => {
-      const sector = normalizeSectorName(record.sector);
+      const hasTheme = themeByCode.has(record.stockCode);
+      // 题材未知时保留可读兜底名用于展示；家数走中性值，且不参与风险扣分。
+      const sector = hasTheme ? themeByCode.get(record.stockCode)! : normalizeSectorName(null);
       const boards = calculateBoards(record.stockCode, targetDate);
-      const sectorCount = sectorCounts.get(sector) ?? 0;
+      const sectorCount = hasTheme ? (sectorCounts.get(sector) ?? 0) : neutralSectorCount;
       const limitUpMinutes = timeToMinutes(record.limitUpTime);
+      const limitUpTimeAvailable = hasFieldValue(record.limitUpTime);
       const turnover = parseNumeric(record.turnover);
       const marketCap = calculateMarketCapScore(record.circulationValue);
       const boardScore = Math.min(boards, 6) * 7;
@@ -471,6 +710,8 @@ export function buildLeaderCandidatesForDate(
         sectorCount,
         score,
         limitUpTime: record.limitUpTime,
+        sectorAvailable: hasTheme,
+        limitUpTimeAvailable,
         turnover: record.turnover,
         circulationValue: record.circulationValue,
         marketCapScore: marketCap.score,
@@ -496,22 +737,38 @@ export function buildLeaderCandidatesForDate(
       const riskPenalty = Number((risk.riskScore * (options.riskPenaltyWeight ?? defaultDownsideRiskPenaltyWeight)).toFixed(2));
       const netScore = Number(Math.max(0, score - riskPenalty).toFixed(2));
 
-      const reasons = [`${boards}板高度`, `${sector} ${sectorCount}只涨停`];
-      if (record.limitUpTime) reasons.push(`${record.limitUpTime.slice(0, 5)} 封板`);
+      const baseReasons = [`${boards}板高度`, hasTheme ? `${sector} ${sectorCount}只涨停` : `题材未采集（同日中性家数 ${sectorCount}）`];
+      if (record.limitUpTime) baseReasons.push(`${record.limitUpTime.slice(0, 5)} 封板`);
       const formattedTurnover = formatTurnover(record.turnover);
-      if (formattedTurnover) reasons.push(`成交额 ${formattedTurnover}`);
-      if (record.circulationValue) reasons.push(`流通市值 ${record.circulationValue}亿元 · ${marketCap.label} ${marketCap.score}分`);
+      if (formattedTurnover) baseReasons.push(`成交额 ${formattedTurnover}`);
+      if (record.circulationValue) baseReasons.push(`流通市值 ${record.circulationValue}亿元 · ${marketCap.label} ${marketCap.score}分`);
 
       const riskTags: string[] = [];
       if (boards === 1) riskTags.push("首板待晋级确认");
-      if (sectorCount <= 1) riskTags.push("题材支撑偏弱");
+      if (hasTheme && sectorCount <= 1) riskTags.push("题材支撑偏弱");
       if (limitUpMinutes !== null && limitUpMinutes > 14 * 60 + 30) riskTags.push("封板偏晚");
-      if (boards >= 4 && sectorCount <= 2) riskTags.push("高位题材支撑弱");
+      if (boards >= 4 && hasTheme && sectorCount <= 2) riskTags.push("高位题材支撑弱");
       if (marketCap.score === 0) riskTags.push("流通市值缺失");
       if (marketCap.label === "小盘弹性") riskTags.push("小盘波动较大");
       if (marketCap.label === "超大盘弹性偏低") riskTags.push("超大盘弹性偏低");
+      // 高位连板：超过允许参与上限直接标注「限制参与」，否则按档位标注「降低仓位」。
+      if (isBoardParticipationRestricted(boards, options.maxParticipatingBoards)) {
+        riskTags.push(`${boards}板高位连板，限制参与`);
+      } else if (boardHeightPositionScale(boards, options.maxParticipatingBoards) < 1) {
+        riskTags.push(`${boards}板高位连板，降低仓位`);
+      }
+      // 缺失字段：显式标注，避免读者把「历史未采集」误读为个股异常。
+      if (!hasTheme) {
+        riskTags.push(fieldCoverage.sectorAvailable ? "本股题材数据缺失" : "题材数据整段缺失（历史未采集）");
+      }
+      if (!limitUpTimeAvailable) {
+        riskTags.push(fieldCoverage.limitUpTimeAvailable ? "本股封板时间缺失" : "封板时间整段缺失（历史未采集）");
+      }
       if (risk.riskTier === "高风险") riskTags.push("下行风险偏高");
       if (risk.riskTier === "中风险") riskTags.push("下行风险中等");
+
+      const reasons = [...baseReasons];
+      if (!hasTheme) reasons.push("题材数据缺失，题材家数按同日中性值处理");
 
       return {
         rank: 0,
@@ -532,6 +789,8 @@ export function buildLeaderCandidatesForDate(
         marketCapLabel: marketCap.label,
         reasons,
         riskTags,
+        sectorAvailable: hasTheme,
+        limitUpTimeAvailable,
         trajectory: trajectoryDates.map((date) => ({
           date,
           boards: stockDates.get(record.stockCode)?.has(date) ? calculateBoards(record.stockCode, date) : 0,
@@ -547,8 +806,10 @@ export function buildLeaderCandidatesForDate(
   const allScoredStocks = rankedAllScoredStocks.map((candidate, index) => ({ ...candidate, rank: index + 1 }));
   const rankedCandidates = allScoredStocks
     .filter((candidate) => (
-      candidate.boards >= 2
-      || (candidate.sectorCount >= 3 && candidate.limitUpTime !== null && timeToMinutes(candidate.limitUpTime)! <= 13 * 60 + 30)
+      // 「题材共振 + 早封」准入路径必须建立在真实可得的题材与封板时间上；
+      // 字段缺失时不得凭中性兜底值伪造该路径，退回到纯评分阈值判断。
+      (candidate.sectorAvailable && candidate.limitUpTimeAvailable
+        && candidate.sectorCount >= 3 && candidate.limitUpTime !== null && timeToMinutes(candidate.limitUpTime)! <= 13 * 60 + 30)
       || candidate.score >= 52
     ))
     .sort((left, right) => (
@@ -599,12 +860,12 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     rollingWindows: Array<Pick<DownsideRiskResearchResult["rollingWindows"][number], "validationStartDate" | "validationEndDate" | "autoTunedPenaltyWeight">>;
     priceByStockDate?: Map<string, LeaderCandidateDailyPrice>;
     historicalRows: LeaderCandidateBacktestRow[];
+    /** 高位连板参与上限；缺省取 `shared/boardHeightRisk` 默认值（与模拟器一致）。 */
+    maxParticipatingBoards?: number;
   },
 ): LeaderCandidateStrategyPortfolioSnapshot {
   const latestSignalDate = latestCandidates.date;
-  const candidatePool = latestCandidates.candidates.filter((candidate) => (
-    options.appliedMinScore === null || candidate.score >= options.appliedMinScore
-  ));
+  const maxParticipatingBoards = options.maxParticipatingBoards ?? DEFAULT_MAX_PARTICIPATING_BOARDS;
   const experimentByKey = new Map(fullCycleExperiments.map((experiment) => [experiment.key, experiment]));
   const appliedPenaltyWeight = latestSignalDate && options.autoTunePenaltyWeight
     ? options.rollingWindows.find((window) => latestSignalDate >= window.validationStartDate && latestSignalDate <= window.validationEndDate)?.autoTunedPenaltyWeight ?? options.penaltyWeight
@@ -614,14 +875,16 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     .filter((row) => row.date === latestSignalDate)
     .map((row) => [row.stockCode, row]));
   const qualityScoringContext = { priceByStockDate: options.priceByStockDate };
-  const scoredCandidatePool = candidatePool.map((candidate) => {
-    const historicalRow = latestRowByStockCode.get(candidate.stockCode);
-    const signalRow = historicalRow ? { ...historicalRow, score: candidate.score } : null;
-    const qualityScore = signalRow
-      ? calculateQualityBlendScoreForRisk(signalRow, candidate.riskScore, qualityScoringContext)
-      : candidate.score;
-    return { candidate, qualityScore };
-  });
+  const scoredCandidatePool = latestCandidates.candidates
+    .filter((candidate) => options.appliedMinScore === null || candidate.score >= options.appliedMinScore)
+    .map((candidate) => {
+      const historicalRow = latestRowByStockCode.get(candidate.stockCode);
+      const signalRow = historicalRow ? { ...historicalRow, score: candidate.score } : null;
+      const qualityScore = signalRow
+        ? calculateQualityBlendScoreForRisk(signalRow, candidate.riskScore, qualityScoringContext)
+        : candidate.score;
+      return { candidate, qualityScore };
+    });
   const sortedQualityScores = scoredCandidatePool.map(({ qualityScore }) => qualityScore).sort((left, right) => left - right);
   const qualityMedianIndex = Math.floor(sortedQualityScores.length / 2);
   const qualityGateThreshold = sortedQualityScores.length === 0
@@ -662,38 +925,99 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
     const heldCodes = new Set(holdings.map((holding) => holding.stockCode));
     const maxPositions = simulation?.assumptions.maxPositions ?? 0;
     const availableSlots = Math.max(0, maxPositions - holdings.length);
-    const candidateWithScore = scoredCandidatePool.map(({ candidate, qualityScore }) => ({
-      candidate,
-      strategyScore: key === "riskPenalty"
+    const strategyScoreOf = ({ candidate, qualityScore }: (typeof scoredCandidatePool)[number]) => (
+      key === "riskPenalty"
         ? Math.max(0, snapshotRound(candidate.score - candidate.riskScore * appliedPenaltyWeight))
         : key === "qualityBlend" || key === "qualityGate"
           ? qualityScore
-        : candidate.score,
+        : candidate.score
+    );
+    const withStrategyScore = (items: typeof scoredCandidatePool) => items.map((item) => ({
+      candidate: item.candidate,
+      strategyScore: strategyScoreOf(item),
     }));
-    const excludedHighRiskCount = key === "hardFilter"
-      ? candidateWithScore.filter(({ candidate }) => candidate.riskScore >= options.hardRiskThreshold).length
-      : key === "qualityGate"
-        ? candidateWithScore.filter(({ candidate, strategyScore }) => candidate.riskScore >= options.hardRiskThreshold || strategyScore < (qualityGateThreshold ?? Number.NEGATIVE_INFINITY)).length
-      : 0;
-    const strategyCandidates = candidateWithScore
-      .filter(({ candidate, strategyScore }) => (
-        key === "hardFilter"
-          ? candidate.riskScore < options.hardRiskThreshold
-          : key === "qualityGate"
-            ? candidate.riskScore < options.hardRiskThreshold && strategyScore >= (qualityGateThreshold ?? Number.POSITIVE_INFINITY)
-            : true
-      ))
-      .sort((left, right) => (
+    const compareCandidates = (
+      left: { candidate: LeaderCandidate; strategyScore: number },
+      right: { candidate: LeaderCandidate; strategyScore: number },
+    ) => (
         right.strategyScore - left.strategyScore
         || right.candidate.boards - left.candidate.boards
         || right.candidate.sectorCount - left.candidate.sectorCount
         || (left.candidate.limitUpTime ?? "99:99:99").localeCompare(right.candidate.limitUpTime ?? "99:99:99")
         || left.candidate.stockCode.localeCompare(right.candidate.stockCode)
-      ));
-    const preparedBuys = strategyCandidates
-      .filter(({ candidate }) => !heldCodes.has(candidate.stockCode))
-      .slice(0, availableSlots)
-      .map(({ candidate, strategyScore }, index) => ({
+    );
+    const toBlockedBuy = (
+      { candidate, strategyScore }: { candidate: LeaderCandidate; strategyScore: number },
+      blockReasons: string[],
+    ) => ({
+      rank: candidate.rank,
+      stockCode: candidate.stockCode,
+      stockName: candidate.stockName,
+      sector: candidate.sector,
+      boards: candidate.boards,
+      signalDate: latestSignalDate ?? "",
+      score: candidate.score,
+      riskScore: candidate.riskScore,
+      riskTier: candidate.riskTier,
+      strategyScore,
+      blockReasons,
+    } satisfies LeaderCandidateBlockedBuy);
+    const strategyFilterReasons = (item: { candidate: LeaderCandidate; strategyScore: number }) => {
+      const reasons: string[] = [];
+      if (key === "hardFilter" || key === "qualityGate") {
+        if (item.candidate.riskScore >= options.hardRiskThreshold) {
+          reasons.push(`策略风控剔除：风险分 ${item.candidate.riskScore} ≥ 阈值 ${options.hardRiskThreshold}`);
+        }
+        if (isBoardParticipationRestricted(item.candidate.boards, maxParticipatingBoards)) {
+          reasons.push(`策略风控剔除：${item.candidate.boards} 板超过参与上限 ${maxParticipatingBoards} 板`);
+        }
+      }
+      if (key === "qualityGate" && item.strategyScore < (qualityGateThreshold ?? Number.NEGATIVE_INFINITY)) {
+        reasons.push(`质量门控剔除：质量复合分 ${item.strategyScore} < 当日中位数 ${qualityGateThreshold ?? "-"}`);
+      }
+      return reasons;
+    };
+    const candidateWithScore = withStrategyScore(scoredCandidatePool);
+    const strategyCandidates = candidateWithScore
+      .filter((item) => strategyFilterReasons(item).length === 0)
+      .sort(compareCandidates);
+    const strategyExcludedCandidates = candidateWithScore
+      .filter((item) => strategyFilterReasons(item).length > 0)
+      .sort(compareCandidates)
+      .map((item) => toBlockedBuy(item, strategyFilterReasons(item)));
+    const heldCandidateBlocks = strategyCandidates
+      .filter(({ candidate }) => heldCodes.has(candidate.stockCode))
+      .map((item) => toBlockedBuy(item, ["已有当前持仓，不支持加仓"]));
+    const availableStrategyCandidates = strategyCandidates
+      .filter(({ candidate }) => !heldCodes.has(candidate.stockCode));
+    const slotExcludedCandidates = availableStrategyCandidates
+      .slice(availableSlots)
+      .map((item) => toBlockedBuy(item, [
+        availableSlots === 0
+          ? `没有剩余持仓名额（当前 ${holdings.length} / 上限 ${maxPositions}）`
+          : `按优先级排在剩余 ${availableSlots} 个持仓名额之外`,
+      ]));
+    const selectedCandidates = availableStrategyCandidates.slice(0, availableSlots);
+    // 计划仓位：口径唯一权威 = server/positionBudget（与交易模拟器同一实现，禁在此重写公式）。
+    // 决策时点可用现金 = 该策略期末现金，与模拟器「下一决策日」所见一致。
+    const planCash = simulation?.equityCurve.at(-1)?.cash ?? simulation?.initialCapital ?? 0;
+    const planStrategy = simulation?.assumptions.positionSizingStrategy ?? "equal";
+    const planFixedPercent = simulation?.assumptions.fixedPositionPercent ?? 0;
+    const planInitialCapital = simulation?.assumptions.initialCapital ?? 0;
+    // 高位连板降仓：原始策略作为对照基准不施加（恒 1）；其余策略与模拟器同一规则、同一系数。
+    const planScales = selectedCandidates.map(({ candidate }) => (
+      key === "baseline" ? 1 : boardHeightPositionScale(candidate.boards, maxParticipatingBoards)
+    ));
+    // 权重用「策略生效分」（strategyScore）：与模拟器实际用于加权的 row.score 同源。
+    // 保留 positionScale=0 的候选参与分仓分母，严格复现模拟器的预算口径。
+    const planBudgets = allocatePlannedBudgets({
+      strategy: planStrategy,
+      cash: planCash,
+      initialCapital: planInitialCapital,
+      fixedPositionPercent: planFixedPercent,
+      targets: selectedCandidates.map(({ strategyScore }, index) => ({ score: strategyScore, positionScale: planScales[index]! })),
+    });
+    const selectedPlans = selectedCandidates.map(({ candidate, strategyScore }, index) => ({
         rank: index + 1,
         stockCode: candidate.stockCode,
         stockName: candidate.stockName,
@@ -704,6 +1028,9 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
         riskScore: candidate.riskScore,
         riskTier: candidate.riskTier,
         strategyScore,
+        positionScale: planScales[index]!,
+        plannedBudget: snapshotRound(planBudgets[index] ?? 0),
+        plannedBudgetRatio: planCash > 0 ? snapshotRound(((planBudgets[index] ?? 0) / planCash) * 100) : 0,
         reasons: candidate.reasons,
         conditions: [
           `下一实际交易日开盘涨幅不低于${simulation?.assumptions.minimumExpectedOpenChangePercent ?? -2}%`,
@@ -711,6 +1038,32 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
           "以开盘时可用资金、最大持仓与策略排序为准，未承诺成交",
         ],
       } satisfies LeaderCandidatePreparedBuy));
+    const preparedBuys = selectedPlans.filter((plan) => plan.positionScale > 0 && plan.plannedBudget > 0);
+    const zeroBudgetBlocks = selectedPlans
+      .filter((plan) => plan.positionScale === 0 || plan.plannedBudget <= 0)
+      .map((plan) => ({
+        rank: plan.rank,
+        stockCode: plan.stockCode,
+        stockName: plan.stockName,
+        sector: plan.sector,
+        boards: plan.boards,
+        signalDate: plan.signalDate,
+        score: plan.score,
+        riskScore: plan.riskScore,
+        riskTier: plan.riskTier,
+        strategyScore: plan.strategyScore,
+        blockReasons: plan.positionScale === 0
+          ? [`连板高度 ${plan.boards} 板超过参与上限 ${maxParticipatingBoards} 板，仓位系数为 0`]
+          : [planCash <= 0 ? "可用现金为 0，无法分配计划预算" : "计算后的计划预算为 0，无法形成可执行买入计划"],
+      } satisfies LeaderCandidateBlockedBuy));
+    const blockedBuys = [
+      ...strategyExcludedCandidates,
+      ...heldCandidateBlocks,
+      ...slotExcludedCandidates,
+      ...zeroBudgetBlocks,
+    ];
+    const totalPlannedBudget = snapshotRound(preparedBuys.reduce((sum, plan) => sum + plan.plannedBudget, 0));
+    const positionScaledCount = preparedBuys.filter((plan) => plan.positionScale < 1).length;
 
     return {
       key,
@@ -723,16 +1076,28 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
       availableSlots,
       currentHoldings: holdings,
       preparedBuys,
+      blockedBuys,
       candidateCount: strategyCandidates.length,
-      excludedHighRiskCount,
+      excludedHighRiskCount: strategyExcludedCandidates.length,
+      plannedPositionSizing: {
+        strategy: planStrategy,
+        fixedPositionPercent: planFixedPercent,
+        initialCapital: planInitialCapital,
+        cash: snapshotRound(planCash),
+        plannedCount: selectedPlans.length,
+        maxParticipatingBoards,
+        positionScaledCount,
+        totalPlannedBudget,
+        totalPlannedBudgetRatio: planCash > 0 ? snapshotRound((totalPlannedBudget / planCash) * 100) : 0,
+      },
       note: key === "riskPenalty"
         ? `最新信号日使用风险扣分权重 ${appliedPenaltyWeight}；若该日不在已完成验证窗口内，则使用手动回退权重。`
         : key === "hardFilter"
-          ? `风险分不低于 ${options.hardRiskThreshold} 的候选不纳入该策略准备清单。`
+          ? `风险分不低于 ${options.hardRiskThreshold} 或连板高度超过 ${maxParticipatingBoards} 板的候选不纳入该策略准备清单。`
           : key === "qualityBlend"
             ? "固定质量复合分：68%原始候选强度、32%信号日安全度，加早封、题材共振与充足成交额奖励。"
             : key === "qualityGate"
-              ? `仅保留质量复合分不低于当日中位数 ${qualityGateThreshold ?? "-"} 且风险分低于 ${options.hardRiskThreshold} 的候选。`
+              ? `仅保留质量复合分不低于当日中位数 ${qualityGateThreshold ?? "-"}、风险分低于 ${options.hardRiskThreshold} 且连板高度不超过 ${maxParticipatingBoards} 板的候选。`
               : "按原始候选评分排序。",
     } satisfies LeaderCandidateStrategyPortfolio;
   });
@@ -747,15 +1112,42 @@ export function buildLeaderCandidateStrategyPortfolioSnapshot(
 }
 
 /**
+ * 生产核心模式（includeResearch=false）必须由调用方注入 realisticSimulationOverride，
+ * 防止生产请求意外回退到 research-legacy 模拟器（STEP 5 P2-2 边界铁律）。
+ */
+function throwProductionOverrideRequired(): never {
+  throw new Error(
+    "buildLeaderCandidateBacktest 生产核心模式（includeResearch=false）缺少 realisticSimulationOverride："
+    + "生产回测模拟结果必须由 Strategy Engine 注入，禁止回退到 legacy 交易模拟器。",
+  );
+}
+
+/**
  * 回测口径：在T日收盘后，严格使用T日及以前数据生成候选；
  * 成功定义为该股票在下一已记录交易日（T+1）仍出现在涨停记录中。
+ *
+ * runtime（可选，Step 5 FIX-2 / P2-2）：
+ *   · realisticSimulationOverride：生产入口注入由 Strategy Engine
+ *     （runStrategyEngineBacktest + Risk/PositionSizer/Backtest Core）产出的模拟结果。
+ *   · includeResearch（默认 true）：研究路径开关。研究报表（下行风险/持仓快照/
+ *     finalVerdict 样本外成分）依赖 research-legacy 模拟器，仅研究路径构建；
+ *     生产核心请求由 runLeaderCandidateStrategyBacktest 传入 includeResearch=false 与
+ *     realisticSimulationOverride，从而保证生产请求路径不隐式执行 legacy 交易模拟器。
+ *     当 includeResearch=true 且未传 override 时（研究兼容调用方与既有测试），
+ *     顶层模拟段使用研究出口 RESEARCH_LEGACY_SIMULATION_SOURCE 兜底。
  */
 export function buildLeaderCandidateBacktest(
   records: LeaderCandidateSourceRecord[],
   options: LeaderCandidateBacktestOptions = {},
   context: LeaderCandidateBacktestContext = {},
+  runtime: { realisticSimulationOverride?: RealisticBacktestResult; includeResearch?: boolean } = {},
 ): LeaderCandidateBacktestResult {
   const observationDays = options.observationDays ?? 1;
+  // STEP 5 P2-2：研究报表（downsideRiskResearch / strategyPortfolioSnapshot 及 finalVerdict 的样本外成分）
+  // 依赖 research-legacy 交易模拟器，仅研究路径显式开启（includeResearch=true，默认兼容历史调用方）。
+  // 生产回测请求由 leaderCandidateStrategyBacktest.ts 传入 includeResearch=false，
+  // 保证生产请求路径不隐式执行 legacy 模拟器。
+  const includeResearch = runtime.includeResearch ?? true;
   const candidateTradingDates = Array.from(new Set(records.map((record) => record.limitUpDate)))
     .sort((left, right) => left.localeCompare(right));
   const marketTradingDates = Array.from(new Set(context.tradingDates ?? candidateTradingDates))
@@ -768,6 +1160,7 @@ export function buildLeaderCandidateBacktest(
     recordsByDate.set(record.limitUpDate, codes);
   }
 
+  // 股票名称：回测明细展示用「最近稳定名称」避免 OCR 漂移；ST 涨跌停比例的正确历史判定依赖 STEP 7.5 历史状态数据（见报告 P1）。
   const stockNameByCode = buildLatestStockNameMap(records);
   const rows: LeaderCandidateBacktestRow[] = [];
   // 信号日只来自涨停记录；观察日优先来自完整市场交易日历，避免无涨停日被误跳过。
@@ -792,6 +1185,7 @@ export function buildLeaderCandidateBacktest(
       phaseByDate: context.phaseByDate,
       priceByStockDate: context.priceByStockDate,
       marketFactorsByDate: context.marketFactorsByDate,
+      maxParticipatingBoards: options.downsideRisk?.maxParticipatingBoards,
     });
     const nextDayCodes = recordsByDate.get(nextDate) ?? new Set<string>();
     const phaseContext = context.phaseByDate?.get(date);
@@ -802,7 +1196,34 @@ export function buildLeaderCandidateBacktest(
       const secondDayPrice = secondDayDate
         ? context.priceByStockDate?.get(`${candidate.stockCode}::${secondDayDate}`)
         : undefined;
+      const suspendedSet = context.suspendedDatesByStock?.get(candidate.stockCode);
+      const isSuspendedOn = (d: string | null | undefined) => (d ? (suspendedSet?.has(d) ?? false) : false);
+      const suspendedAfterSignal = isSuspendedOn(nextDayDate);
+      // 复牌首日 = 信号日后第一个非停牌市场交易日；涨停后停牌样本以此作为可离场观察日。
+      let resumeDate: string | null = null;
+      if (suspendedAfterSignal && marketIndex !== undefined) {
+        for (let offset = 1; ; offset += 1) {
+          const candidateResumeDate = marketTradingDates[marketIndex + offset];
+          if (!candidateResumeDate) break;
+          if (!isSuspendedOn(candidateResumeDate)) {
+            resumeDate = candidateResumeDate;
+            break;
+          }
+        }
+      } else if (!suspendedAfterSignal) {
+        resumeDate = nextDayDate;
+      }
+      const resumePrice = resumeDate
+        ? context.priceByStockDate?.get(`${candidate.stockCode}::${resumeDate}`)
+        : undefined;
       const tPlus1CloseToTPlus2CloseReturn = premiumPercent(nextDayPrice?.closePrice, secondDayPrice?.closePrice);
+      const technicalFactors = computeTechnicalFactorValues(
+        candidate.stockCode,
+        date,
+        candidate.circulationValue,
+        signalPrice,
+        context,
+      );
       rows.push({
         date,
         nextDate,
@@ -813,6 +1234,8 @@ export function buildLeaderCandidateBacktest(
         sector: candidate.sector,
         boards: candidate.boards,
         sectorCount: candidate.sectorCount,
+        sectorAvailable: candidate.sectorAvailable,
+        limitUpTimeAvailable: candidate.limitUpTimeAvailable,
         score: candidate.score,
         riskScore: candidate.riskScore,
         riskTier: candidate.riskTier,
@@ -836,6 +1259,11 @@ export function buildLeaderCandidateBacktest(
         tPlus1CloseToTPlus2CloseSuccess: tPlus1CloseToTPlus2CloseReturn === null ? null : tPlus1CloseToTPlus2CloseReturn > 0,
         phase: phaseContext?.phase ?? null,
         maxBoards: phaseContext?.maxBoards ?? null,
+        suspendedAfterSignal,
+        resumeDate,
+        resumeOpenPremium: premiumPercent(signalPrice?.closePrice, resumePrice?.openPrice),
+        resumeClosePremium: premiumPercent(signalPrice?.closePrice, resumePrice?.closePrice),
+        technicalFactors,
       });
     }
   }
@@ -898,41 +1326,47 @@ export function buildLeaderCandidateBacktest(
   const outOfSampleTPlus2Premium = calculatePremiumSummary(outOfSampleAtThreshold, "secondDayOpenPremium", "secondDayClosePremium");
   const tPlus1CloseToTPlus2Close = calculateExitSummary(appliedRows);
   const outOfSampleTPlus1CloseToTPlus2Close = calculateExitSummary(outOfSampleAtThreshold);
-  const realisticSimulation = simulateRealisticTPlus1ToTPlus2(
-    appliedRows,
-    options.realistic,
-    context.priceByStockDate,
-    marketTradingDates,
-  );
+  const resumeDayExit = calculateResumeExitSummary(appliedRows);
+  const outOfSampleResumeDayExit = calculateResumeExitSummary(outOfSampleAtThreshold);
+  // 生产核心请求（includeResearch=false）必须由调用方注入 Strategy Engine 模拟结果；
+  // 研究路径（includeResearch=true）未注入 override 时，以研究出口兜底（legacy 兼容调用方与既有测试）。
+  const realisticSimulation = runtime.realisticSimulationOverride
+    ?? (includeResearch
+      ? RESEARCH_LEGACY_SIMULATION_SOURCE.simulate(appliedRows, options.realistic, context.priceByStockDate, marketTradingDates)
+      : throwProductionOverrideRequired());
   // 风险研究使用全历史候选生成多个滚动窗口；每个窗口的验证段严格位于前置训练段之后，避免固定70/30切分限制可验证样本量。
-  const downsideRiskResearch = buildDownsideRiskResearch(appliedRows, options.downsideRisk, options.realistic, {
-    priceByStockDate: context.priceByStockDate,
-    tradingDates: marketTradingDates,
-    marketFactorsByDate: context.marketFactorsByDate,
-  });
-  const latestSignalDate = candidateTradingDates.at(-1) ?? null;
-  const latestCandidateResult = latestSignalDate
-    ? buildLeaderCandidatesForDate(records, latestSignalDate, {
-      candidateLimit: null,
-      stockNameByCode,
-      phaseByDate: context.phaseByDate,
+  // P2-2：风险研究实验的模拟段为 research-legacy 语义，仅研究路径构建；生产回测请求不进入该分支。
+  const downsideRiskResearch = includeResearch
+    ? buildDownsideRiskResearch(appliedRows, options.downsideRisk, options.realistic, {
       priceByStockDate: context.priceByStockDate,
+      tradingDates: marketTradingDates,
       marketFactorsByDate: context.marketFactorsByDate,
     })
-    : buildLeaderCandidates([]);
-  const strategyPortfolioSnapshot = buildLeaderCandidateStrategyPortfolioSnapshot(
-    latestCandidateResult,
-    downsideRiskResearch.fullCycle.experiments,
-    {
-      appliedMinScore,
-      penaltyWeight: downsideRiskResearch.penaltyWeight,
-      autoTunePenaltyWeight: downsideRiskResearch.autoTunePenaltyWeight,
-      hardRiskThreshold: downsideRiskResearch.hardRiskThreshold,
-      rollingWindows: downsideRiskResearch.rollingWindows,
-      priceByStockDate: context.priceByStockDate,
-      historicalRows: appliedRows,
-    },
-  );
+    : null;
+  const latestSignalDate = candidateTradingDates.at(-1) ?? null;
+  // 持仓快照依赖研究实验（含 research-legacy 逐笔退出），仅研究路径生成。
+  const strategyPortfolioSnapshot = includeResearch
+    ? buildLeaderCandidateStrategyPortfolioSnapshot(
+      latestSignalDate ? buildLeaderCandidatesForDate(records, latestSignalDate, {
+        candidateLimit: null,
+        stockNameByCode,
+        phaseByDate: context.phaseByDate,
+        priceByStockDate: context.priceByStockDate,
+        marketFactorsByDate: context.marketFactorsByDate,
+      }) : buildLeaderCandidates([]),
+      downsideRiskResearch?.fullCycle.experiments ?? [],
+      {
+        appliedMinScore,
+        penaltyWeight: downsideRiskResearch?.penaltyWeight ?? defaultDownsideRiskPenaltyWeight,
+        autoTunePenaltyWeight: downsideRiskResearch?.autoTunePenaltyWeight ?? false,
+        hardRiskThreshold: downsideRiskResearch?.hardRiskThreshold ?? 0,
+        rollingWindows: downsideRiskResearch?.rollingWindows ?? [],
+        priceByStockDate: context.priceByStockDate,
+        historicalRows: appliedRows,
+        maxParticipatingBoards: downsideRiskResearch?.boardHeightRiskControl.maxParticipatingBoards,
+      },
+    )
+    : null;
   const signalDates = Array.from(new Set(appliedRows.map((row) => row.date))).sort();
   const marketFactorRows = signalDates.map((date) => context.marketFactorsByDate?.get(date));
   const marketFactorCoverage: LeaderCandidateMarketFactorCoverage = {
@@ -944,7 +1378,7 @@ export function buildLeaderCandidateBacktest(
     startDate: signalDates[0] ?? null,
     endDate: signalDates.at(-1) ?? null,
   };
-  const phaseOrder: SentimentCyclePhase[] = ["冰点试错", "修复上升", "上升发酵", "高位分歧", "高位亢奋", "高位退潮"];
+  const phaseOrder: SentimentCyclePhase[] = [...SENTIMENT_CYCLE_PHASES];
   const phaseFunnel = phaseOrder.map((phase) => {
     const phaseRows = outOfSampleAtThreshold.filter((row) => row.phase === phase);
     const successCount = phaseRows.filter((row) => row.success).length;
@@ -958,8 +1392,21 @@ export function buildLeaderCandidateBacktest(
     };
   });
 
+  const factorEvaluationReport = evaluateFactorEffectiveness(rows);
+  const factorCombinationReport = buildFactorNeutralizationReport(rows);
+  const overfittingGuardReport = buildOverfittingGuardReport(realisticSimulation, 30);
+  // P2-2：样本外（WFA）风险稳健性来自研究报表，仅研究路径可用；生产核心结论不含该成分，由研究端点补齐。
+  const riskPenaltyRobustness = downsideRiskResearch?.strategyRobustness.find((item) => item.key === "riskPenalty") ?? null;
+  const finalVerdict = buildFinalVerdict(
+    factorEvaluationReport,
+    factorCombinationReport,
+    overfittingGuardReport,
+    riskPenaltyRobustness?.walkForwardOosSharpe ?? null,
+    overfittingGuardReport.realSharpe,
+  );
+
   return {
-    definition: `候选仅限1至4板主板涨停股；成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
+    definition: `候选覆盖全市场主板涨停股（不限连板高度，含首板与四板以上）；成功=候选在T日收盘后入池，且在第${observationDays}个后续已记录交易日T+${observationDays}仍为涨停；最后${observationDays}个交易日因缺少完整结果不纳入样本。`,
     observationDays,
     appliedMinScore,
     totalSamples: appliedRows.length,
@@ -983,6 +1430,8 @@ export function buildLeaderCandidateBacktest(
     outOfSampleTPlus2Premium,
     tPlus1CloseToTPlus2Close,
     outOfSampleTPlus1CloseToTPlus2Close,
+    resumeDayExit,
+    outOfSampleResumeDayExit,
     // 该分层始终以所有样本外行计算，不受当前手动阈值影响，用于比较各评分区间的独立样本外表现。
     outOfSampleScoreBands: scoreBandDefinitions.map((definition) => calculateBand(outOfSampleRows, definition)),
     // 阶段漏斗使用当前评分阈值下的独立样本外行；每行的阶段仅来自候选信号日，不读取后续验证日。
@@ -995,10 +1444,18 @@ export function buildLeaderCandidateBacktest(
       stockCount: 0,
       startDate: null,
       endDate: null,
+      highPriceCount: 0,
       lowPriceCount: 0,
       amountCount: 0,
+      volumeCount: 0,
     },
     marketFactorCoverage,
     strategyPortfolioSnapshot,
+    factorEvaluation: factorEvaluationReport,
+    factorCombination: factorCombinationReport,
+    overfittingGuard: overfittingGuardReport,
+    finalVerdict,
+    // 字段覆盖识别（展示 / 审计用）：说明旧数据哪些字段整段缺失、回测如何降级。
+    fieldCoverage: buildFieldCoverageReport(records),
   };
 }

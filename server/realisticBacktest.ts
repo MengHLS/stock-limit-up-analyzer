@@ -1,4 +1,17 @@
 import type { LeaderCandidateBacktestRow, LeaderCandidateDailyPrice } from "./leaderCandidates";
+import {
+  OPEN_EXPECTATION_DEFAULT_TABLE,
+  bucketOfLimitUpTime,
+  classifyOpenExpectation,
+  formatMissedReason,
+  summarizeOpenExpectationTiers,
+  type OpenExpectationBucketKey,
+  type OpenExpectationTable,
+  type OpenExpectationTier,
+  type OpenExpectationTierOutcome,
+} from "./openExpectation";
+import { allocatePlannedBudgets } from "./positionBudget";
+import { isPriceAtLimitDown, isPriceAtLimitUp } from "./data/boardRules";
 
 export type PositionSizingStrategy = "equal" | "scoreWeighted" | "fixedPercent";
 export type ExitStrategy = "riskManagedHold";
@@ -25,6 +38,18 @@ export type RealisticBacktestOptions = {
   strongHoldMinReturn?: number;
   maxHoldingDays?: number;
   minimumExpectedOpenChangePercent?: number;
+  /** 开启「次日开盘预期三档」门控：按 t 日封板时间分档的期望区间替代一刀切最低开盘溢价阈值。 */
+  expectationTierEnabled?: boolean;
+  /** 期望档位表（期望中心/下界/上界，%）；缺省使用校准默认表。 */
+  expectationTable?: OpenExpectationTable;
+  /** T+1 一字涨停（开盘即封死、全天无开板）无法成交，跳过买入。 */
+  blockOneWordLimitUpBuys?: boolean;
+  /** 用当日最低价模拟盘中止损：开盘未破位但盘中触及止损价即成交。 */
+  enableIntradayStopLoss?: boolean;
+  /** 单笔买入占当日成交额的比例上限（0 表示不限制），用于容量约束。 */
+  maxPositionAmountRatio?: number;
+  /** 检测除权除息跳空（信号日收盘与 T+1 前收不一致）并标记样本。 */
+  detectExRights?: boolean;
 };
 
 export type RealisticTrade = {
@@ -40,16 +65,46 @@ export type RealisticTrade = {
   totalFees: number;
   netPnl: number | null;
   netReturn: number | null;
+  /** 盈亏占资金比：净盈亏 ÷ 入场时账户总权益 × 100（%），衡量该笔交易对组合权益的贡献。未成交或未出清时为 null。 */
+  pnlToEquityRatio: number | null;
+  /** 次日开盘预期档位（exceeds/meets/misses）；未开启三档门控时为 null。 */
+  openExpectationTier?: OpenExpectationTier | null;
+  /** t 日封板时间所属预期分档。 */
+  openExpectationBucket?: OpenExpectationBucketKey | null;
   /** 实际买入成交价（含滑点）相对信号日收盘价的买点涨幅。 */
   entryPointPremium?: number | null;
   /** 兼容旧表格字段，与 entryPointPremium 相同，不再单独展示。 */
   entryDayChange?: number | null;
+  /** 是否检测到除权除息跳空（收益口径存疑）。 */
+  exRights?: boolean;
   status: "filled" | "skipped";
   reason: string | null;
 };
 
 export type RealisticEquityPoint = { date: string; equity: number; cash: number; openPositions: number };
 
+/**
+ * 回测模拟结果（API response 形状）。
+ *
+ * ⚠️ 语义口径（STEP 5 P2-1）——必须与调用方理解一致，字段名沿用历史 API 不得改名：
+ *
+ * 生产 realisticSimulation 由 Strategy Engine 产出，语义为：
+ *   T 收盘信号 → T+1 开盘买入 → Risk 准入 → 持有 → 退出或期末估值。
+ * 生产策略 leader-candidate-baseline 退出策略为 hold-while-selected（持仓不再入选当日候选池
+ * 即卖出，见 G3 P3-T1）；当无退出信号时持仓持有到回测期末按市价估值（Mark-to-Market）。
+ * 因此「已平仓交易」在无退出信号的场景下可能长期为 0，这属于正常结果，不是回测失败。
+ *
+ * 由此产生的最重要消费者约定：
+ *   - completedCount  只统计**已完成平仓**的交易；未平仓的持仓不计入。
+ *   - openPositionCount 表示回测结束时**仍持有**的仓位；这些仓位既不计入胜率，也不计为失败交易。
+ *   - winRate         只针对 completed trades 计算；completedCount = 0 时为 null（不是 0%）。
+ *   - winningTrades   同样只统计已完成交易。
+ *   - averageReturn / profitFactor 基于 completed trades 的收益/盈亏；无可平仓交易时为 null。
+ *   - winRate === null 表示「样本不足/无可平仓交易」，**绝不等于策略胜率为 0%**。
+ *
+ * 因此：禁止把 winRate 直接对外解释为「策略胜率」。前端展示口径见
+ * client/src/pages/Backtest.tsx（统一展示为「已平仓胜率」）。
+ */
 export type RealisticBacktestResult = {
   assumptions: {
     initialCapital: number;
@@ -72,15 +127,28 @@ export type RealisticBacktestResult = {
     strongHoldMinReturn: number;
     maxHoldingDays: number;
     minimumExpectedOpenChangePercent: number;
+    expectationTierEnabled: boolean;
+    blockOneWordLimitUpBuys: boolean;
+    enableIntradayStopLoss: boolean;
+    maxPositionAmountRatio: number;
+    detectExRights: boolean;
   };
   initialCapital: number;
   finalCapital: number;
   netProfit: number;
+  /** 组合总收益率（%）：含期末仍持仓的浮动盈亏（Mark-to-Market），不要求交易已平仓。 */
   totalReturn: number;
+  /** 最大回撤（%）：基于逐日权益曲线（含未平仓持仓估值）计算。 */
   maxDrawdown: number;
   tradeCount: number;
+  /** 实际成交（建仓）笔数：含回测期末仍未平仓的持仓。 */
   filledCount: number;
+  /**
+   * 已完成平仓的交易笔数。
+   * long-only（无 SELL）语义下该值可能为 0 —— 这表示「没有平仓事件」，不是回测失败。
+   */
   completedCount: number;
+  /** 回测结束时仍持有的仓位数（未实现盈亏；不计入胜率，也不计为失败交易）。 */
   openPositionCount: number;
   peakOpenPositionCount: number;
   minimumCash: number;
@@ -88,15 +156,26 @@ export type RealisticBacktestResult = {
   priceAvailableCount: number;
   capacitySkippedCount: number;
   skippedCount: number;
+  /** 已平仓交易中净收益为正的笔数；只统计 completedCount 口径内的交易。 */
   winningTrades: number;
+  /**
+   * 已平仓交易胜率（%）＝ winningTrades / completedCount × 100。
+   * completedCount = 0 时为 null（样本不足），绝不等于 0%。
+   * 禁止对外解释为「策略胜率」。
+   */
   winRate: number | null;
+  /** 已平仓交易的平均收益率（%）；无已平仓交易时为 null。 */
   averageReturn: number | null;
+  /** 已平仓交易的盈亏比（总盈利 / 总亏损）；无可平仓交易或分母为 0 时为 null。 */
   profitFactor: number | null;
   blockedBuyCount: number;
   blockedSellCount: number;
   missingDataCount: number;
+  exRightsCount: number;
   equityCurve: RealisticEquityPoint[];
   trades: RealisticTrade[];
+  /** 开启三档门控时的分档汇总（各档成交/放弃笔数、胜率与平均收益）。 */
+  openExpectationTierSummary?: OpenExpectationTierOutcome[];
 };
 
 type Position = {
@@ -104,6 +183,8 @@ type Position = {
   shares: number;
   entryPrice: number;
   capitalCost: number;
+  /** 该笔买入发生时账户总权益（现金 + 存续持仓按最近收盘估值），用于计算盈亏占资金比。 */
+  equityAtEntry: number;
   previousClosePrice: number | null;
   highestClosePrice: number;
   latestValuationPrice: number;
@@ -113,6 +194,15 @@ type Position = {
 const round = (value: number, digits = 2) => Number(value.toFixed(digits));
 const rate = (count: number, total: number) => total === 0 ? null : round((count / total) * 100, 1);
 const validPrice = (value: number | null): value is number => value !== null && Number.isFinite(value) && value > 0;
+
+/** 按当日成交额（Tushare daily amount，单位千元）对基础滑点做流动性分层加成；无成交额信息时回落为固定基础滑点。 */
+function amountAdjustedSlippageBps(baseBps: number, amount: number | null | undefined): number {
+  if (amount === null || amount === undefined || !Number.isFinite(amount) || amount <= 0) return baseBps;
+  if (amount < 100_000) return baseBps + 20;      // 成交额 < 1 亿元
+  if (amount < 500_000) return baseBps + 10;      // 1 ~ 5 亿元
+  if (amount < 2_000_000) return baseBps + 5;     // 5 ~ 20 亿元
+  return baseBps;                                 // ≥ 20 亿元
+}
 
 /** 使用订单标识生成稳定抽样值，使概率模式在重复回测时可复现。 */
 function hitsDeterministicProbability(key: string, probability: number) {
@@ -126,7 +216,12 @@ function hitsDeterministicProbability(key: string, probability: number) {
   return (hash >>> 0) % 10_000 < Math.round(probability * 100);
 }
 
-function createSkippedTrade(row: LeaderCandidateBacktestRow, reason: string, entryDate: string | null = row.nextDayDate): RealisticTrade {
+function createSkippedTrade(
+  row: LeaderCandidateBacktestRow,
+  reason: string,
+  entryDate: string | null = row.nextDayDate,
+  expectation?: { tier: OpenExpectationTier | null; bucket: OpenExpectationBucketKey | null },
+): RealisticTrade {
   return {
     signalDate: row.date,
     entryDate,
@@ -140,6 +235,9 @@ function createSkippedTrade(row: LeaderCandidateBacktestRow, reason: string, ent
     totalFees: 0,
     netPnl: null,
     netReturn: null,
+    pnlToEquityRatio: null,
+    openExpectationTier: expectation?.tier ?? null,
+    openExpectationBucket: expectation?.bucket ?? null,
     status: "skipped",
     reason,
   };
@@ -171,6 +269,12 @@ export function simulateRealisticTPlus1ToTPlus2(
   const strongHoldMinReturn = Math.min(100, Math.max(0, options.strongHoldMinReturn ?? 3));
   const maxHoldingDays = Math.max(2, Math.floor(options.maxHoldingDays ?? 5));
   const minimumExpectedOpenChangePercent = Math.min(100, Math.max(-50, options.minimumExpectedOpenChangePercent ?? -2));
+  const expectationTierEnabled = options.expectationTierEnabled ?? false;
+  const expectationTable = options.expectationTable ?? OPEN_EXPECTATION_DEFAULT_TABLE;
+  const blockOneWordLimitUpBuys = options.blockOneWordLimitUpBuys ?? false;
+  const enableIntradayStopLoss = options.enableIntradayStopLoss ?? false;
+  const maxPositionAmountRatio = Math.max(0, options.maxPositionAmountRatio ?? 0);
+  const detectExRights = options.detectExRights ?? false;
   const assumptions = {
     initialCapital,
     maxPositions,
@@ -192,6 +296,11 @@ export function simulateRealisticTPlus1ToTPlus2(
     strongHoldMinReturn,
     maxHoldingDays,
     minimumExpectedOpenChangePercent,
+    expectationTierEnabled,
+    blockOneWordLimitUpBuys,
+    enableIntradayStopLoss,
+    maxPositionAmountRatio,
+    detectExRights,
   };
   const sortedRows = rows.slice().sort((left, right) => (
     left.nextDayDate.localeCompare(right.nextDayDate) || right.score - left.score || left.stockCode.localeCompare(right.stockCode)
@@ -220,7 +329,9 @@ export function simulateRealisticTPlus1ToTPlus2(
   ));
   const settlePosition = (key: string, position: Position, date: string, rawExitPrice: number, reason: string | null) => {
     const trade = findFilledTrade(position);
-    const slippedExit = rawExitPrice * (1 - slippageBps / 10_000);
+    const exitAmount = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.amount ?? null;
+    const exitSlippageBps = amountAdjustedSlippageBps(slippageBps, exitAmount);
+    const slippedExit = rawExitPrice * (1 - exitSlippageBps / 10_000);
     const grossExit = slippedExit * position.shares;
     const sellFees = grossExit * (commissionRate + stampDutyRate + transferFeeRate);
     const proceeds = grossExit - sellFees;
@@ -232,6 +343,7 @@ export function simulateRealisticTPlus1ToTPlus2(
       trade.totalFees = round(trade.totalFees + sellFees);
       trade.netPnl = round(netPnl);
       trade.netReturn = round((netPnl / position.capitalCost) * 100);
+      trade.pnlToEquityRatio = position.equityAtEntry > 0 ? round((netPnl / position.equityAtEntry) * 100) : null;
       trade.reason = reason;
     }
     positions.delete(key);
@@ -244,7 +356,13 @@ export function simulateRealisticTPlus1ToTPlus2(
       const marketOpenPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`)?.openPrice ?? null;
       if (!validPrice(marketOpenPrice)) continue;
       const openReturnPercent = ((marketOpenPrice - position.entryPrice) / position.entryPrice) * 100;
-      const opensAtLimitDown = validPrice(position.previousClosePrice) && marketOpenPrice <= position.previousClosePrice * 0.901;
+      const opensAtLimitDown = isPriceAtLimitDown({
+        stockCode: position.row.stockCode,
+        stockName: position.row.stockName,
+        price: marketOpenPrice,
+        referencePrice: position.previousClosePrice,
+        tradeDate: date,
+      }) === true;
       if (openReturnPercent <= -stopLossPercent) {
         if (blockLimitDownSells && opensAtLimitDown) {
           const trade = findFilledTrade(position);
@@ -255,6 +373,8 @@ export function simulateRealisticTPlus1ToTPlus2(
       }
     }
     const entryRows = candidatesByEntryDate.get(date) ?? [];
+    // 当日开盘买入发生前的账户总权益（开盘止损已结算，现金 + 存续持仓按最近可见收盘估值），作为当日所有买入的「入场时组合总权益」基准。
+    const equityAtEntry = cash + Array.from(positions.values()).reduce((sum, position) => sum + position.latestValuationPrice * position.shares, 0);
     const unavailable = entryRows.filter((row) => !validPrice(row.nextOpenPrice));
     for (const row of unavailable) {
       missingDataCount += 1;
@@ -262,73 +382,134 @@ export function simulateRealisticTPlus1ToTPlus2(
     }
     const heldCodes = new Set(Array.from(positions.values()).map((position) => position.row.stockCode));
     const eligibleRows = entryRows.filter((row) => validPrice(row.nextOpenPrice));
-    const belowExpectationRows = eligibleRows.filter((row) => {
+    // —— 次日开盘预期三档判定 ——
+    // 开启三档门控时：按 t 日封板时间分档，用该档位期望区间(下界/上界)比较 t+1 实际开盘溢价；
+    // 不及预期(misses)→放弃买入；符合/超预期→进入后续仓位分配。未开启时退回旧的一刀切最低溢价阈值。
+    const gateInfo = new Map<LeaderCandidateBacktestRow, { bucket: OpenExpectationBucketKey; tier: OpenExpectationTier | null; skip: boolean; openPremium: number | null; band: { lower: number; upper: number } | null }>();
+    for (const row of eligibleRows) {
       const signalClosePrice = row.signalClosePrice;
-      return validPrice(signalClosePrice)
-        && ((row.nextOpenPrice! - signalClosePrice) / signalClosePrice) * 100 < minimumExpectedOpenChangePercent;
-    });
-    for (const row of belowExpectationRows) {
-      const signalClosePrice = row.signalClosePrice;
-      if (!validPrice(signalClosePrice)) continue;
-      const openChange = ((row.nextOpenPrice! - signalClosePrice) / signalClosePrice) * 100;
-      blockedBuyCount += 1;
-      trades.push(createSkippedTrade(row, `T+1开盘低于预期（${round(openChange)}% < ${minimumExpectedOpenChangePercent}%），不买入`));
+      const openPremium = validPrice(signalClosePrice)
+        ? ((row.nextOpenPrice! - signalClosePrice) / signalClosePrice) * 100
+        : null;
+      const bucket = bucketOfLimitUpTime(row.limitUpTime);
+      if (!expectationTierEnabled) {
+        gateInfo.set(row, { bucket, tier: null, skip: openPremium !== null && openPremium < minimumExpectedOpenChangePercent, openPremium, band: null });
+        continue;
+      }
+      const band = expectationTable[bucket] ?? expectationTable.unknown;
+      const tier = openPremium === null ? null : classifyOpenExpectation(bucket, openPremium, expectationTable);
+      gateInfo.set(row, { bucket, tier, skip: tier === "misses", openPremium, band: { lower: band.lower, upper: band.upper } });
     }
-    const expectationEligibleRows = eligibleRows.filter((row) => !belowExpectationRows.includes(row));
+    const expectationOf = (row: LeaderCandidateBacktestRow) => {
+      const info = gateInfo.get(row);
+      return info && info.tier ? { tier: info.tier, bucket: info.bucket } : undefined;
+    };
+    const missRows = eligibleRows.filter((row) => gateInfo.get(row)!.skip);
+    for (const row of missRows) {
+      const info = gateInfo.get(row)!;
+      blockedBuyCount += 1;
+      const reason = expectationTierEnabled
+        ? `${formatMissedReason(info.openPremium ?? 0, info.bucket, "misses", expectationTable)}，放弃买入`
+        : `T+1开盘低于预期（${round(info.openPremium ?? 0)}% < ${minimumExpectedOpenChangePercent}%），不买入`;
+      trades.push(createSkippedTrade(row, reason, row.nextDayDate, { tier: info.tier, bucket: info.bucket }));
+    }
+    const expectationEligibleRows = eligibleRows.filter((row) => !gateInfo.get(row)!.skip);
     const overlappingRows = expectationEligibleRows.filter((row) => heldCodes.has(row.stockCode));
-    for (const row of overlappingRows) trades.push(createSkippedTrade(row, "同一股票已有持仓"));
+    for (const row of overlappingRows) trades.push(createSkippedTrade(row, "同一股票已有持仓", row.nextDayDate, expectationOf(row)));
     const available = expectationEligibleRows.filter((row) => !heldCodes.has(row.stockCode));
     const slots = Math.max(0, maxPositions - positions.size);
     const selected = available.slice(0, slots);
+    // 分仓口径唯一权威 = server/positionBudget#allocatePlannedBudgets（展示层回显同一函数）。
+    // 此处刻意**不**传 positionScale：高位连板的缩放仍留在下方 plannedBudget 处施加，
+    // 以保证本次抽取前后行为逐字节不变。
+    const allocatedBudgets = allocatePlannedBudgets({
+      strategy: positionSizingStrategy,
+      cash,
+      initialCapital,
+      fixedPositionPercent,
+      targets: selected.map((row) => ({ score: row.score })),
+    });
     const budgetByRow = new Map<LeaderCandidateBacktestRow, number>();
-    if (positionSizingStrategy === "scoreWeighted") {
-      const scoreTotal = selected.reduce((sum, row) => sum + Math.max(row.score, 0), 0);
-      for (const row of selected) {
-        budgetByRow.set(row, scoreTotal > 0 ? cash * Math.max(row.score, 0) / scoreTotal : cash / selected.length);
-      }
-    } else if (positionSizingStrategy === "fixedPercent") {
-      for (const row of selected) budgetByRow.set(row, initialCapital * fixedPositionPercent / 100);
-    } else {
-      for (const row of selected) budgetByRow.set(row, cash / selected.length);
+    for (let budgetIndex = 0; budgetIndex < selected.length; budgetIndex += 1) {
+      budgetByRow.set(selected[budgetIndex]!, allocatedBudgets[budgetIndex] ?? 0);
     }
     for (const row of available) {
       if (selected.includes(row)) continue;
-      trades.push(createSkippedTrade(row, slots === 0 ? "超过最大持仓数" : "资金按评分排序优先分配", null));
+      trades.push(createSkippedTrade(row, slots === 0 ? "超过最大持仓数" : "资金按评分排序优先分配", null, expectationOf(row)));
     }
     for (const row of selected) {
       if (positions.size >= maxPositions) {
-        trades.push(createSkippedTrade(row, "超过最大持仓数"));
+        trades.push(createSkippedTrade(row, "超过最大持仓数", row.nextDayDate, expectationOf(row)));
         continue;
       }
       const entryOpenPrice = row.nextOpenPrice!;
-      const limitUp = validPrice(row.signalClosePrice) && entryOpenPrice >= row.signalClosePrice * 1.099;
+      const entryDayPrice = priceByStockDate.get(`${row.stockCode}::${row.nextDayDate}`);
+      const entryHighPrice = entryDayPrice?.highPrice ?? null;
+      const entryLowPrice = entryDayPrice?.lowPrice ?? null;
+      const entryAmount = entryDayPrice?.amount ?? null;
+
+      // 涨跌停判定统一走 boardRules 权威（主板 10% / ST 5% / 创业板·科创板 20% / 北交所 30%），
+      // 不再使用 1.099 / 0.901 近似。规则不可判定时视为不能确认触及（null），不做「伪 10%」假设。
+      const limitUp = isPriceAtLimitUp({
+        stockCode: row.stockCode,
+        stockName: row.stockName,
+        price: entryOpenPrice,
+        referencePrice: row.signalClosePrice,
+        tradeDate: date,
+      }) === true;
       if (blockLimitUpBuys && limitUp) {
         blockedBuyCount += 1;
-        trades.push(createSkippedTrade(row, "T+1开盘接近涨停，按保守规则不可追买"));
+        trades.push(createSkippedTrade(row, "T+1开盘接近涨停，按保守规则不可追买", row.nextDayDate, expectationOf(row)));
         continue;
       }
-      const slippedEntry = entryOpenPrice * (1 + slippageBps / 10_000);
-      const plannedBudget = budgetByRow.get(row) ?? 0;
+      // 一字涨停：开盘即封死且全天无开板（开≈高≈低），挂单无法成交。
+      const oneWordLimitUp = limitUp
+        && validPrice(entryHighPrice) && validPrice(entryLowPrice)
+        && Math.abs(entryHighPrice - entryLowPrice) <= entryOpenPrice * 0.002
+        && Math.abs(entryOpenPrice - entryHighPrice) <= entryOpenPrice * 0.002;
+      if (blockOneWordLimitUpBuys && oneWordLimitUp) {
+        blockedBuyCount += 1;
+        trades.push(createSkippedTrade(row, "T+1一字涨停封死，无法买入", row.nextDayDate, expectationOf(row)));
+        continue;
+      }
+
+      const entrySlippageBps = amountAdjustedSlippageBps(slippageBps, entryAmount);
+      const slippedEntry = entryOpenPrice * (1 + entrySlippageBps / 10_000);
+      // 单笔仓位缩放（高位连板「降低仓位」）：只向下调整本笔预算上限，不改变选股与排序。
+      // 缺省 1 表示不缩放；缩放后总预算不增加，因此不会破坏「预算之和 ≤ 现金」的资金不变量。
+      const plannedBudget = (budgetByRow.get(row) ?? 0) * (row.positionScale ?? 1);
       const executableBudget = Math.min(plannedBudget, cash);
-      const shares = Math.floor(executableBudget / (slippedEntry * (1 + commissionRate + transferFeeRate)) / lotSize) * lotSize;
+      let shares = Math.floor(executableBudget / (slippedEntry * (1 + commissionRate + transferFeeRate)) / lotSize) * lotSize;
+      // 容量约束：单笔买入金额不超过当日成交额的一定比例，避免回测买入现实中无法成交的仓位。
+      if (maxPositionAmountRatio > 0 && validPrice(entryAmount)) {
+        const capacityShares = Math.floor((entryAmount * 1000 * maxPositionAmountRatio) / entryOpenPrice / lotSize) * lotSize;
+        if (capacityShares < shares) shares = capacityShares;
+      }
       if (shares < lotSize) {
         missingDataCount += 1;
-        trades.push(createSkippedTrade(row, "可用资金不足以买入一手"));
+        trades.push(createSkippedTrade(row, "可用资金不足以买入一手", row.nextDayDate, expectationOf(row)));
         continue;
       }
       const grossEntry = slippedEntry * shares;
       const buyFees = grossEntry * (commissionRate + transferFeeRate);
       const capitalCost = grossEntry + buyFees;
       if (capitalCost > cash + 1e-8) {
-        trades.push(createSkippedTrade(row, "可用资金不足以完成买入"));
+        trades.push(createSkippedTrade(row, "可用资金不足以完成买入", row.nextDayDate, expectationOf(row)));
         continue;
       }
+      // 除权除息检测：信号日收盘与 T+1 前收不一致说明发生除权，收益口径存疑。
+      const entryPreClose = entryDayPrice?.preClosePrice ?? null;
+      const exRights = detectExRights
+        && validPrice(row.signalClosePrice)
+        && validPrice(entryPreClose)
+        && Math.abs(entryPreClose - row.signalClosePrice) / row.signalClosePrice > 0.01;
       cash -= capitalCost;
       positions.set(`${row.stockCode}::${date}`, {
         row,
         shares,
         entryPrice: slippedEntry,
         capitalCost,
+        equityAtEntry,
         previousClosePrice: row.nextClosePrice,
         highestClosePrice: slippedEntry,
         latestValuationPrice: slippedEntry,
@@ -349,6 +530,10 @@ export function simulateRealisticTPlus1ToTPlus2(
         totalFees: round(buyFees),
         netPnl: null,
         netReturn: null,
+        pnlToEquityRatio: null,
+        openExpectationTier: expectationOf(row)?.tier ?? null,
+        openExpectationBucket: expectationOf(row)?.bucket ?? null,
+        exRights,
         status: "filled",
         reason: null,
       });
@@ -370,6 +555,7 @@ export function simulateRealisticTPlus1ToTPlus2(
       const marketPrice = priceByStockDate.get(`${position.row.stockCode}::${date}`);
       const marketClosePrice = marketPrice?.closePrice ?? null;
       const marketOpenPrice = marketPrice?.openPrice ?? null;
+      const marketLowPrice = marketPrice?.lowPrice ?? null;
       const exitPrice = date === position.row.secondDayDate
         ? position.row.secondDayClosePrice ?? marketClosePrice
         : marketClosePrice;
@@ -384,12 +570,34 @@ export function simulateRealisticTPlus1ToTPlus2(
       position.latestValuationPrice = exitPrice;
       const holdingDays = Math.max(1, (tradingDateIndex.get(date) ?? position.entryTradingDateIndex) - position.entryTradingDateIndex + 1);
       const closeReturnPercent = ((exitPrice - position.entryPrice) / position.entryPrice) * 100;
-      const limitDown = validPrice(position.previousClosePrice) && exitPrice <= position.previousClosePrice * 0.901;
+      const previousClose = position.previousClosePrice;
+      const limitDown = isPriceAtLimitDown({
+        stockCode: position.row.stockCode,
+        stockName: position.row.stockName,
+        price: exitPrice,
+        referencePrice: previousClose,
+        tradeDate: date,
+      }) === true;
+      const opensAtLimitDown = isPriceAtLimitDown({
+        stockCode: position.row.stockCode,
+        stockName: position.row.stockName,
+        price: marketOpenPrice,
+        referencePrice: previousClose,
+        tradeDate: date,
+      }) === true;
       const oneWordLimitDown = limitDown
-        && validPrice(position.previousClosePrice)
+        && opensAtLimitDown
         && validPrice(marketOpenPrice)
-        && marketOpenPrice <= position.previousClosePrice * 0.901
-        && Math.abs(marketOpenPrice - exitPrice) <= position.previousClosePrice * 0.002;
+        && validPrice(previousClose)
+        && Math.abs(marketOpenPrice - exitPrice) <= previousClose * 0.002;
+      // 盘中止损：开盘未破位但当日最低价触及止损价，按止损价成交（贴近真实硬止损）。
+      if (enableIntradayStopLoss && !oneWordLimitDown) {
+        const stopPrice = position.entryPrice * (1 - stopLossPercent / 100);
+        if (validPrice(marketLowPrice) && validPrice(marketOpenPrice) && marketOpenPrice > stopPrice && marketLowPrice <= stopPrice) {
+          settlePosition(key, position, date, stopPrice, `盘中触及止损（${round((stopPrice - position.entryPrice) / position.entryPrice * 100)}% ≤ -${stopLossPercent}%）`);
+          continue;
+        }
+      }
       const oneWordProbabilityFill = oneWordLimitDown
         && enableOneWordLimitDownProbability
         && hitsDeterministicProbability(`${position.row.stockCode}::${position.row.nextDayDate}::${date}`, oneWordLimitDownSellProbability);
@@ -488,6 +696,18 @@ export function simulateRealisticTPlus1ToTPlus2(
     trade.reason === "超过最大持仓数" || trade.reason === "资金按评分排序优先分配" || trade.reason === "同一股票已有持仓"
   )).length;
   const priceAvailableCount = rows.filter((row) => validPrice(row.nextOpenPrice)).length;
+  const openExpectationTierSummary = expectationTierEnabled
+    ? summarizeOpenExpectationTiers(
+      trades
+        .filter((trade) => trade.openExpectationTier !== null && trade.openExpectationTier !== undefined)
+        .map((trade) => ({
+          tier: trade.openExpectationTier!,
+          status: trade.status,
+          netReturn: trade.netReturn,
+          closed: trade.status === "filled" && trade.netPnl !== null,
+        })),
+    )
+    : undefined;
   return {
     assumptions,
     initialCapital: round(initialCapital),
@@ -512,7 +732,9 @@ export function simulateRealisticTPlus1ToTPlus2(
     blockedBuyCount,
     blockedSellCount,
     missingDataCount,
+    exRightsCount: trades.filter((trade) => trade.exRights === true).length,
     equityCurve,
     trades,
+    openExpectationTierSummary,
   };
 }

@@ -1,0 +1,1197 @@
+{
+  "date": "2026-09-18",
+  "prevDate": "2026-09-17",
+  "metrics": {
+    "totalLimitUp": 78,
+    "connectionBoards": 12,
+    "firstBoards": 66,
+    "maxBoards": 4,
+    "board3Plus": 4,
+    "emotionScore": 28,
+    "brokenCount": 35,
+    "brokenConnectionCount": 5,
+    "prevTotalLimitUp": 47
+  },
+  "window": {
+    "lookbackDays": 60,
+    "startDate": "2026-07-20",
+    "tradingDateCount": 45,
+    "exhausted": false
+  },
+  "counts": {
+    "connectionStocks": 12,
+    "firstBoardStocks": 66,
+    "brokenStocks": 35,
+    "brokenKindConnection": 5,
+    "brokenKindFirst": 30
+  },
+  "quoteCoverage": {
+    "brokenWithChangePct": "34/35",
+    "upWithOneWordFlag": "78/78",
+    "oneWordStocks": [
+      "经纬股份(301390.SZ)",
+      "华纺股份(600448.SH)",
+      "百通能源(001376.SZ)"
+    ]
+  },
+  "groups": [
+    {
+      "label": "4 板",
+      "cellCount": 2
+    },
+    {
+      "label": "3 板",
+      "cellCount": 3
+    },
+    {
+      "label": "2 板",
+      "cellCount": 11
+    },
+    {
+      "label": "首板(66)",
+      "cellCount": 96
+    }
+  ],
+  "groupsFull": [
+    {
+      "label": "4 板",
+      "items": [
+        {
+          "code": "603248.SH",
+          "name": "锡华科技",
+          "sector": "风电",
+          "boards": 4,
+          "time": "09:52:55",
+          "changePct": 9.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001216.SZ",
+          "name": "华瓷股份",
+          "sector": "AI硬件",
+          "boards": 4,
+          "time": "09:56:39",
+          "changePct": 10.01,
+          "oneWordBoard": false,
+          "brokenKind": null
+        }
+      ]
+    },
+    {
+      "label": "3 板",
+      "items": [
+        {
+          "code": "002285.SZ",
+          "name": "世联行",
+          "sector": "房地产",
+          "boards": 3,
+          "time": "13:25:06",
+          "changePct": 9.89,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603230.SH",
+          "name": "内蒙新华",
+          "sector": "传媒",
+          "boards": 3,
+          "time": "14:13:07",
+          "changePct": 10.04,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "003026.SZ",
+          "name": "中晶科技",
+          "sector": "半导体",
+          "boards": 3,
+          "time": "09:59:39",
+          "changePct": 0.54,
+          "oneWordBoard": false,
+          "brokenKind": "connection"
+        }
+      ]
+    },
+    {
+      "label": "2 板",
+      "items": [
+        {
+          "code": "301390.SZ",
+          "name": "经纬股份",
+          "sector": "公告",
+          "boards": 2,
+          "time": "09:25:00",
+          "changePct": 20,
+          "oneWordBoard": true,
+          "brokenKind": null
+        },
+        {
+          "code": "600448.SH",
+          "name": "华纺股份",
+          "sector": "外贸出口",
+          "boards": 2,
+          "time": "09:25:00",
+          "changePct": 9.94,
+          "oneWordBoard": true,
+          "brokenKind": null
+        },
+        {
+          "code": "000504.SZ",
+          "name": "南华生物",
+          "sector": "医药医疗",
+          "boards": 2,
+          "time": "09:31:39",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600630.SH",
+          "name": "龙头股份",
+          "sector": "外贸出口",
+          "boards": 2,
+          "time": "09:34:11",
+          "changePct": 9.95,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002836.SZ",
+          "name": "新宏泰",
+          "sector": "其他",
+          "boards": 2,
+          "time": "09:36:33",
+          "changePct": 9.96,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002453.SZ",
+          "name": "华软科技",
+          "sector": "半导体",
+          "boards": 2,
+          "time": "10:41:15",
+          "changePct": 10.1,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603626.SH",
+          "name": "科森科技",
+          "sector": "机器人",
+          "boards": 2,
+          "time": "11:05:17",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600127.SH",
+          "name": "金健米业",
+          "sector": "其他",
+          "boards": 2,
+          "time": "14:24:17",
+          "changePct": 9.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002655.SZ",
+          "name": "共达电声",
+          "sector": "光通信",
+          "boards": 2,
+          "time": "10:28:27",
+          "changePct": 0.32,
+          "oneWordBoard": false,
+          "brokenKind": "connection"
+        },
+        {
+          "code": "600371.SH",
+          "name": "万向德农",
+          "sector": "大农业",
+          "boards": 2,
+          "time": "13:09:13",
+          "changePct": -1.53,
+          "oneWordBoard": false,
+          "brokenKind": "connection"
+        },
+        {
+          "code": "003001.SZ",
+          "name": "中岩大地",
+          "sector": "PCB",
+          "boards": 2,
+          "time": "13:44:06",
+          "changePct": -1.57,
+          "oneWordBoard": false,
+          "brokenKind": "connection"
+        }
+      ]
+    },
+    {
+      "label": "首板(66)",
+      "items": [
+        {
+          "code": "001376.SZ",
+          "name": "百通能源",
+          "sector": "公告",
+          "boards": 1,
+          "time": "09:25:00",
+          "changePct": 9.99,
+          "oneWordBoard": true,
+          "brokenKind": null
+        },
+        {
+          "code": "603686.SH",
+          "name": "福龙马",
+          "sector": "公告",
+          "boards": 1,
+          "time": "09:30:02",
+          "changePct": 10.03,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002298.SZ",
+          "name": "中电鑫龙",
+          "sector": "算力",
+          "boards": 1,
+          "time": "09:33:54",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002589.SZ",
+          "name": "瑞康医药",
+          "sector": "医药医疗",
+          "boards": 1,
+          "time": "09:35:03",
+          "changePct": 10.1,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001317.SZ",
+          "name": "三羊马",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "09:35:42",
+          "changePct": 10.01,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "000910.SZ",
+          "name": "大亚圣象",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "09:38:03",
+          "changePct": 10.06,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603138.SH",
+          "name": "海量数据",
+          "sector": "AI应用",
+          "boards": 1,
+          "time": "09:41:42",
+          "changePct": 10.04,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001233.SZ",
+          "name": "海安集团",
+          "sector": "次新",
+          "boards": 1,
+          "time": "09:41:48",
+          "changePct": 9.99,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "601579.SH",
+          "name": "会稽山",
+          "sector": "大消费",
+          "boards": 1,
+          "time": "09:43:04",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002161.SZ",
+          "name": "远望谷",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "09:44:15",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002300.SZ",
+          "name": "太阳电缆",
+          "sector": "风电",
+          "boards": 1,
+          "time": "09:45:09",
+          "changePct": 10.03,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603402.SH",
+          "name": "陕西旅游",
+          "sector": "次新",
+          "boards": 1,
+          "time": "09:45:19",
+          "changePct": 10.01,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600343.SH",
+          "name": "航天动力",
+          "sector": "其他",
+          "boards": 1,
+          "time": "09:45:26",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "688292.SH",
+          "name": "浩瀚深度",
+          "sector": "AI应用",
+          "boards": 1,
+          "time": "09:45:50",
+          "changePct": 20.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002965.SZ",
+          "name": "祥鑫科技",
+          "sector": "AI硬件",
+          "boards": 1,
+          "time": "09:47:39",
+          "changePct": 10.01,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603120.SH",
+          "name": "肯特催化",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "09:48:53",
+          "changePct": 9.99,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002713.SZ",
+          "name": "东易日盛",
+          "sector": "算力",
+          "boards": 1,
+          "time": "09:49:33",
+          "changePct": 9.97,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002471.SZ",
+          "name": "中超控股",
+          "sector": "AI硬件",
+          "boards": 1,
+          "time": "09:50:00",
+          "changePct": 9.96,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "605188.SH",
+          "name": "国光连锁",
+          "sector": "大消费",
+          "boards": 1,
+          "time": "09:51:00",
+          "changePct": 9.97,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "601123.SH",
+          "name": "马厂股份",
+          "sector": "次新",
+          "boards": 1,
+          "time": "09:51:57",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603122.SH",
+          "name": "合富中国",
+          "sector": "医药医疗",
+          "boards": 1,
+          "time": "09:55:38",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603068.SH",
+          "name": "博通集成",
+          "sector": "AI应用",
+          "boards": 1,
+          "time": "09:55:47",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603316.SH",
+          "name": "诚邦股份",
+          "sector": "AI硬件",
+          "boards": 1,
+          "time": "10:06:05",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002185.SZ",
+          "name": "华天科技",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "10:09:42",
+          "changePct": 10.01,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001211.SZ",
+          "name": "双枪科技",
+          "sector": "大消费",
+          "boards": 1,
+          "time": "10:11:51",
+          "changePct": 9.99,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "003041.SZ",
+          "name": "真爱美家",
+          "sector": "AI应用",
+          "boards": 1,
+          "time": "10:11:51",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603001.SH",
+          "name": "奥康国际",
+          "sector": "公告",
+          "boards": 1,
+          "time": "10:12:34",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600640.SH",
+          "name": "国脉文化",
+          "sector": "AI应用",
+          "boards": 1,
+          "time": "10:12:51",
+          "changePct": 10.04,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001238.SZ",
+          "name": "浙江正特",
+          "sector": "外贸出口",
+          "boards": 1,
+          "time": "10:17:54",
+          "changePct": 9.99,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603725.SH",
+          "name": "天安新材",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "10:23:20",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "601026.SH",
+          "name": "道生天合",
+          "sector": "风电",
+          "boards": 1,
+          "time": "10:26:22",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002623.SZ",
+          "name": "亚玛顿",
+          "sector": "其他",
+          "boards": 1,
+          "time": "10:27:21",
+          "changePct": 9.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002134.SZ",
+          "name": "天津普林",
+          "sector": "PCB",
+          "boards": 1,
+          "time": "10:27:45",
+          "changePct": 9.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603353.SH",
+          "name": "和顺石油",
+          "sector": "AI硬件",
+          "boards": 1,
+          "time": "10:30:26",
+          "changePct": 9.99,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002029.SZ",
+          "name": "七匹狼",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "10:34:45",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001399.SZ",
+          "name": "惠科股份",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "10:35:27",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "601133.SH",
+          "name": "柏诚股份",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "10:37:24",
+          "changePct": 9.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002971.SZ",
+          "name": "和远气体",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "10:41:09",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600838.SH",
+          "name": "上海九百",
+          "sector": "大消费",
+          "boards": 1,
+          "time": "10:51:15",
+          "changePct": 9.99,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002849.SZ",
+          "name": "威星智能",
+          "sector": "算力",
+          "boards": 1,
+          "time": "11:00:24",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001229.SZ",
+          "name": "魅视科技",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "11:02:39",
+          "changePct": 10.01,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "301583.SZ",
+          "name": "托伦斯",
+          "sector": "次新",
+          "boards": 1,
+          "time": "11:03:36",
+          "changePct": 20,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600847.SH",
+          "name": "万里股份",
+          "sector": "其他",
+          "boards": 1,
+          "time": "11:05:27",
+          "changePct": 10.04,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603232.SH",
+          "name": "格尔软件",
+          "sector": "AI应用",
+          "boards": 1,
+          "time": "11:08:02",
+          "changePct": 9.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001212.SZ",
+          "name": "中硕新材",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "11:09:36",
+          "changePct": 9.99,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603118.SH",
+          "name": "共进股份",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "11:13:11",
+          "changePct": 10.03,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600621.SH",
+          "name": "华鑫股份",
+          "sector": "大金融",
+          "boards": 1,
+          "time": "11:18:39",
+          "changePct": 9.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "601811.SH",
+          "name": "新华文轩",
+          "sector": "传媒",
+          "boards": 1,
+          "time": "11:22:32",
+          "changePct": 9.97,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "920298.BJ",
+          "name": "腾信精密",
+          "sector": "次新",
+          "boards": 1,
+          "time": "13:00:01",
+          "changePct": 30,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "601086.SH",
+          "name": "国芳集团",
+          "sector": "大消费",
+          "boards": 1,
+          "time": "13:12:02",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "000532.SZ",
+          "name": "华金资本",
+          "sector": "大金融",
+          "boards": 1,
+          "time": "13:12:39",
+          "changePct": 10.02,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600606.SH",
+          "name": "绿地控股",
+          "sector": "房地产",
+          "boards": 1,
+          "time": "13:14:37",
+          "changePct": 9.85,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "301689.SZ",
+          "name": "电科思仪",
+          "sector": "次新",
+          "boards": 1,
+          "time": "13:15:39",
+          "changePct": 20,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "688175.SH",
+          "name": "高凌信息",
+          "sector": "其他",
+          "boards": 1,
+          "time": "13:16:17",
+          "changePct": 19.98,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603016.SH",
+          "name": "新宏泰",
+          "sector": "其他",
+          "boards": 1,
+          "time": "13:20:04",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "000410.SZ",
+          "name": "沈阳机床",
+          "sector": "其他",
+          "boards": 1,
+          "time": "13:28:12",
+          "changePct": 10.08,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "000509.SZ",
+          "name": "华塑控股",
+          "sector": "PCB",
+          "boards": 1,
+          "time": "13:29:21",
+          "changePct": 9.91,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002005.SZ",
+          "name": "德豪润达",
+          "sector": "外贸出口",
+          "boards": 1,
+          "time": "13:29:24",
+          "changePct": 9.92,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "603375.SH",
+          "name": "盛景微",
+          "sector": "AI硬件",
+          "boards": 1,
+          "time": "13:37:47",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "001332.SZ",
+          "name": "锡装股份",
+          "sector": "其他",
+          "boards": 1,
+          "time": "14:15:18",
+          "changePct": 10.01,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600719.SH",
+          "name": "大连热电",
+          "sector": "其他",
+          "boards": 1,
+          "time": "14:15:20",
+          "changePct": 10.07,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "000002.SZ",
+          "name": "万科A",
+          "sector": "房地产",
+          "boards": 1,
+          "time": "14:22:18",
+          "changePct": 9.93,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600881.SH",
+          "name": "亚泰集团",
+          "sector": "房地产",
+          "boards": 1,
+          "time": "14:33:28",
+          "changePct": 10.29,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600261.SH",
+          "name": "阳光照明",
+          "sector": "外贸出口",
+          "boards": 1,
+          "time": "14:44:45",
+          "changePct": 10.03,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "600577.SH",
+          "name": "精达股份",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "14:45:14",
+          "changePct": 9.96,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "002980.SZ",
+          "name": "华盛昌",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "14:53:00",
+          "changePct": 10,
+          "oneWordBoard": false,
+          "brokenKind": null
+        },
+        {
+          "code": "000920.SZ",
+          "name": "沃顿科技",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "09:40:45",
+          "changePct": 4.2,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "300434.SZ",
+          "name": "金石亚药",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "09:43:54",
+          "changePct": -1.92,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600293.SH",
+          "name": "三峡新材",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "09:44:09",
+          "changePct": -1.76,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600721.SH",
+          "name": "百花医药",
+          "sector": "医药医疗",
+          "boards": 1,
+          "time": "09:47:42",
+          "changePct": 0.67,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "000868.SZ",
+          "name": "安凯客车",
+          "sector": "新能源汽车",
+          "boards": 1,
+          "time": "09:47:51",
+          "changePct": -1.72,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "000981.SZ",
+          "name": "山子高科",
+          "sector": "新能源汽车",
+          "boards": 1,
+          "time": "10:03:00",
+          "changePct": -0.33,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "002339.SZ",
+          "name": "积成电子",
+          "sector": "电力",
+          "boards": 1,
+          "time": "10:16:36",
+          "changePct": -2.31,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600593.SH",
+          "name": "大连圣亚",
+          "sector": "其他",
+          "boards": 1,
+          "time": "10:30:35",
+          "changePct": 1.94,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600822.SH",
+          "name": "上海物贸",
+          "sector": "新能源汽车",
+          "boards": 1,
+          "time": "10:34:58",
+          "changePct": 0.21,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "001365.SZ",
+          "name": "天海电子",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "10:38:57",
+          "changePct": 2.16,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "605288.SH",
+          "name": "凯迪股份",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "10:39:54",
+          "changePct": 2.86,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "000980.SZ",
+          "name": "众泰汽车",
+          "sector": "新能源汽车",
+          "boards": 1,
+          "time": "10:58:00",
+          "changePct": -3.38,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600609.SH",
+          "name": "金杯汽车",
+          "sector": "新能源汽车",
+          "boards": 1,
+          "time": "11:03:49",
+          "changePct": 0.28,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600354.SH",
+          "name": "敦煌种业",
+          "sector": "大农业",
+          "boards": 1,
+          "time": "11:06:01",
+          "changePct": 4.92,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "605088.SH",
+          "name": "冠盛股份",
+          "sector": "新能源汽车",
+          "boards": 1,
+          "time": "11:10:27",
+          "changePct": 0.12,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "002321.SZ",
+          "name": "华英农业",
+          "sector": "大农业",
+          "boards": 1,
+          "time": "11:20:06",
+          "changePct": -4.13,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "002640.SZ",
+          "name": "跨境通",
+          "sector": "出口降税",
+          "boards": 1,
+          "time": "13:01:48",
+          "changePct": -1.86,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600641.SH",
+          "name": "先导基电",
+          "sector": "半导体",
+          "boards": 1,
+          "time": "13:13:09",
+          "changePct": 1.36,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600699.SH",
+          "name": "均胜电子",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "13:17:38",
+          "changePct": 1.36,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "002796.SZ",
+          "name": "世嘉科技",
+          "sector": "光通信",
+          "boards": 1,
+          "time": "13:28:27",
+          "changePct": -2.37,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600929.SH",
+          "name": "雪天盐业",
+          "sector": "新能源汽车",
+          "boards": 1,
+          "time": "13:29:18",
+          "changePct": null,
+          "oneWordBoard": null,
+          "brokenKind": "first"
+        },
+        {
+          "code": "605162.SH",
+          "name": "新中港",
+          "sector": "电力",
+          "boards": 1,
+          "time": "13:32:02",
+          "changePct": 1.23,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "603009.SH",
+          "name": "北特科技",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "13:44:44",
+          "changePct": 4.05,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600792.SH",
+          "name": "云煤能源",
+          "sector": "其他",
+          "boards": 1,
+          "time": "13:44:55",
+          "changePct": -0.75,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "601872.SH",
+          "name": "招商轮船",
+          "sector": "其他",
+          "boards": 1,
+          "time": "13:46:56",
+          "changePct": 2.33,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "600356.SH",
+          "name": "恒丰纸业",
+          "sector": "烟草",
+          "boards": 1,
+          "time": "13:59:57",
+          "changePct": 1.18,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "603960.SH",
+          "name": "克来机电",
+          "sector": "机器人",
+          "boards": 1,
+          "time": "14:17:48",
+          "changePct": 0.71,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "300741.SZ",
+          "name": "华宝股份",
+          "sector": "烟草",
+          "boards": 1,
+          "time": "14:51:30",
+          "changePct": -7.43,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "605577.SH",
+          "name": "龙版传媒",
+          "sector": "传媒",
+          "boards": 1,
+          "time": "14:53:33",
+          "changePct": 4.8,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        },
+        {
+          "code": "601218.SH",
+          "name": "吉鑫科技",
+          "sector": "风电",
+          "boards": 1,
+          "time": "14:56:03",
+          "changePct": -3.31,
+          "oneWordBoard": false,
+          "brokenKind": "first"
+        }
+      ]
+    }
+  ]
+}

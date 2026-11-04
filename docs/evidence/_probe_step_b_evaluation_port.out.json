@@ -1,0 +1,449 @@
+{
+  "generatedAt": "2026-09-17T12:17:20.949Z",
+  "pickedDocument": {
+    "id": 420001,
+    "strategyId": "cand-360001",
+    "version": "1.0.0",
+    "recipeId": "first-limit-pullback-hold-shrink",
+    "parameters": [
+      {
+        "name": "max_drawdown",
+        "type": "number",
+        "defaultValue": 0.02,
+        "hasDefault": true
+      },
+      {
+        "name": "max_volume_ratio",
+        "type": "number",
+        "defaultValue": 0.3,
+        "hasDefault": true
+      },
+      {
+        "name": "require_bullish",
+        "type": "number",
+        "defaultValue": 0,
+        "hasDefault": true
+      }
+    ]
+  },
+  "readyDatasets": [
+    {
+      "id": 390002,
+      "version": "v2",
+      "startDate": "2024-09-01",
+      "endDate": "2026-09-01",
+      "totalEvents": 23978,
+      "totalRows": 1543082
+    },
+    {
+      "id": 390001,
+      "version": "v1",
+      "startDate": "2026-08-01",
+      "endDate": "2026-08-31",
+      "totalEvents": 1130,
+      "totalRows": 60002
+    }
+  ],
+  "probeWindow": {
+    "startDate": "2026-08-22",
+    "endDate": "2026-09-01",
+    "fromDatasetVersionId": 390002,
+    "datasetEnd": "2026-09-01"
+  },
+  "observationWindowDeclaration": {
+    "end": 3,
+    "start": 1,
+    "unit": "TRADING_DAY"
+  },
+  "firstRun": {
+    "experimentId": "EXP-20260917-D5ACE47D",
+    "runId": "STRATEGY-EVAL::EXP-20260917-D5ACE47D",
+    "parameterSet": {
+      "max_drawdown": 0.02,
+      "max_volume_ratio": 0.3,
+      "require_bullish": 0
+    },
+    "datasetVersion": "rd-1.0.0-1-286424011d3cedf5",
+    "datasetSource": "registry",
+    "datasetRowCount": 112920,
+    "backtestFingerprint": "a3eb02e0b6518e07ad352a0cdaf9d5b28f7ba75638750055f9b9b340d3d51ac0",
+    "performance": {
+      "fingerprint": "452e24555a63c84d47c111ad62eab2c72c4b1faf667a7f1dc6a20349be1a9541",
+      "inputFingerprint": "d23a469274648abbec2f4cd019258b6da11e9497a18bb75c1c6293633e6cc680",
+      "totalReturnPct": -3.4885310636999955,
+      "cagrPct": -77.49314139234656,
+      "maxDrawdownPct": 5.248971265899993
+    },
+    "riskAdjusted": {
+      "fingerprint": "aed45a82ec1a6b39cfe00e54533590f3a2546a52b56b1850f4dab5a227657856",
+      "sharpeRatio": -4.400622310807859,
+      "sortinoRatio": -4.8415541325261575,
+      "calmarRatio": -14.763491256997677
+    },
+    "tradeQuality": {
+      "fingerprint": "794bbd2f613e20b383f15970fbfd20e05f3e37dafffdeedc965ab31236e60b05",
+      "winRatePct": 0,
+      "profitFactor": 0,
+      "completedTradeCount": 2
+    },
+    "evaluatorsCovered": [
+      "performanceMetrics",
+      "riskAdjustedMetrics",
+      "tradeQualityMetrics"
+    ],
+    "stages": [
+      {
+        "stageId": "data",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "research",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "strategy",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "backtest",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "evaluation",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "optimization",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "robustness",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "oos",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "overfitting",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "regime",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "paper",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "review",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "discipline",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "finalize",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      }
+    ]
+  },
+  "reuseRun": {
+    "experimentId": "EXP-20260917-D5ACE47D",
+    "runId": "STRATEGY-EVAL::EXP-20260917-D5ACE47D",
+    "parameterSet": {
+      "max_drawdown": 0.02,
+      "max_volume_ratio": 0.3,
+      "require_bullish": 0
+    },
+    "datasetVersion": "rd-1.0.0-1-286424011d3cedf5",
+    "datasetSource": "injected",
+    "datasetRowCount": 112920,
+    "backtestFingerprint": "a3eb02e0b6518e07ad352a0cdaf9d5b28f7ba75638750055f9b9b340d3d51ac0",
+    "performance": {
+      "fingerprint": "452e24555a63c84d47c111ad62eab2c72c4b1faf667a7f1dc6a20349be1a9541",
+      "inputFingerprint": "d23a469274648abbec2f4cd019258b6da11e9497a18bb75c1c6293633e6cc680",
+      "totalReturnPct": -3.4885310636999955,
+      "cagrPct": -77.49314139234656,
+      "maxDrawdownPct": 5.248971265899993
+    },
+    "riskAdjusted": {
+      "fingerprint": "aed45a82ec1a6b39cfe00e54533590f3a2546a52b56b1850f4dab5a227657856",
+      "sharpeRatio": -4.400622310807859,
+      "sortinoRatio": -4.8415541325261575,
+      "calmarRatio": -14.763491256997677
+    },
+    "tradeQuality": {
+      "fingerprint": "794bbd2f613e20b383f15970fbfd20e05f3e37dafffdeedc965ab31236e60b05",
+      "winRatePct": 0,
+      "profitFactor": 0,
+      "completedTradeCount": 2
+    },
+    "evaluatorsCovered": [
+      "performanceMetrics",
+      "riskAdjustedMetrics",
+      "tradeQualityMetrics"
+    ],
+    "stages": [
+      {
+        "stageId": "data",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "research",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "strategy",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "backtest",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "evaluation",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "optimization",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "robustness",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "oos",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "overfitting",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "regime",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "paper",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "review",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "discipline",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "finalize",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      }
+    ],
+    "scalarIdenticalToFirst": true,
+    "backtestFingerprintSame": true,
+    "datasetSourceChangedToInjected": true,
+    "performanceSame": true,
+    "riskAdjustedSame": true,
+    "tradeQualitySame": true
+  },
+  "firstDatasetSource": "registry",
+  "overrideRun": {
+    "overrides": {
+      "max_drawdown": 0.05,
+      "max_volume_ratio": 0.75,
+      "require_bullish": 1
+    },
+    "experimentId": "EXP-20260917-9EC9DED2",
+    "runId": "STRATEGY-EVAL::EXP-20260917-9EC9DED2",
+    "parameterSet": {
+      "max_drawdown": 0.05,
+      "max_volume_ratio": 0.75,
+      "require_bullish": 1
+    },
+    "datasetVersion": "rd-1.0.0-1-286424011d3cedf5",
+    "datasetSource": "injected",
+    "datasetRowCount": 112920,
+    "backtestFingerprint": "1aaa3863ef2e2775b14f7e9909942042691187a5218bee1f8c09e177f3bea847",
+    "performance": {
+      "fingerprint": "47667ee28d75caa36a1622729beff5cd38504c2dc542e2061f56cd174f3fe5e2",
+      "inputFingerprint": "d1c3aa91339f55255f2406bcae68961325a02ce175d17610c115de72b856c367",
+      "totalReturnPct": 2.2688102033999957,
+      "cagrPct": 156.57512100931353,
+      "maxDrawdownPct": 0.046469940976588756
+    },
+    "riskAdjusted": {
+      "fingerprint": "2e4063037f63b2142ae1642d3c4b717c00e7a919f7f4f59643cc2e603cf348e7",
+      "sharpeRatio": 9.897039291425294,
+      "sortinoRatio": 405.3534517028936,
+      "calmarRatio": 3369.3849770154657
+    },
+    "tradeQuality": {
+      "fingerprint": "c6315c51aafb320a1a257b219ef0038d87270552f406f2795b6d26acbaf78b49",
+      "winRatePct": 0,
+      "profitFactor": 0,
+      "completedTradeCount": 2
+    },
+    "evaluatorsCovered": [
+      "performanceMetrics",
+      "riskAdjustedMetrics",
+      "tradeQualityMetrics"
+    ],
+    "stages": [
+      {
+        "stageId": "data",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "research",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "strategy",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "backtest",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "evaluation",
+        "state": "EXECUTED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "optimization",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "robustness",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "oos",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "overfitting",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "regime",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "paper",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "review",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "discipline",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      },
+      {
+        "stageId": "finalize",
+        "state": "SKIPPED",
+        "reasonCode": null,
+        "detail": null
+      }
+    ],
+    "performanceChanged": true,
+    "tradeQualityChanged": true,
+    "backtestFingerprintChanged": true,
+    "experimentIdChanged": true
+  },
+  "negativeCase": {
+    "threw": true,
+    "errorName": "StrategyRecipeRuntimeError",
+    "errorCode": "RECIPE_PARAMETER_UNKNOWN",
+    "errorMessage": "配方 first-limit-pullback-hold-shrink：本次覆写提供了参数 `definitely_not_declared_xyz`，但它不在策略文档的参数 schema 里（已声明：max_drawdown、max_volume_ratio、require_bullish）。拒绝静默忽略 —— 那会让调用方以为该维度参与了寻优、实际却被丢掉。"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "taskId": "P2-T1",
+  "gate": "G2",
+  "status": "VALIDATED",
+  "capturedAt": "2026-09-09T21:30:00+08:00",
+  "realData": true,
+  "reproducible": true,
+  "table": {
+    "name": "research_datasets",
+    "exists": true,
+    "columnCount": 18,
+    "columns": [
+      "id", "datasetId", "datasetVersion", "name", "startDate", "endDate",
+      "asOfPerTradeDate", "asOf", "rowsFingerprint", "policySetFingerprint",
+      "versionSnapshotFingerprint", "versionSnapshotJson", "dataSnapshotJson",
+      "universeDefinitionJson", "rowCount", "gate", "gateNotesJson", "createdAt"
+    ]
+  },
+  "persistedDataset": {
+    "datasetId": "DS-rd-1.0.0-1-6d8b8d3d9e3a989a",
+    "datasetVersion": "rd-1.0.0-1-6d8b8d3d9e3a989a",
+    "name": "universe-tradable-daily",
+    "window": "2024-01-02 ~ 2024-01-05",
+    "rowCount": 20391,
+    "gate": "INCONCLUSIVE",
+    "rowsFingerprint": "743365069721e762071964e88a661327",
+    "policySetFingerprint": "8ee5e42b4d96094e",
+    "versionSnapshotFingerprint": "d1a1a9966a3d3992"
+  },
+  "idempotency": {
+    "datasetIdUnique": true,
+    "datasetIdDerivedFrom": "DS-<datasetVersion>",
+    "replayOnSameVersion": true
+  },
+  "blockingFixApplied": {
+    "issue": "G1 TRADING status dimension never backfilled → resolveHistoricalUniverse default-deny all securities (universe=0, rows=0)",
+    "fix": "scripts/backfillTradingStatus.mjs derived 5552 TRADING records from research_securities.listedDate/delistedDate",
+    "effect": "universe 0 → 20391 member-days; rows 0 → 20391; excludedReasonCodes dropped TRADING_UNKNOWN",
+    "idempotent": true
+  },
+  "files": [
+    "drizzle/schema.ts (researchDatasets table)",
+    "drizzle/0024_research_datasets.sql",
+    "scripts/migrate_add_research_datasets.ts",
+    "server/researchDataset/persist.ts",
+    "server/researchDataset/index.ts (export persist)",
+    "scripts/runStep126BuildDataset.mts (--persist flag)",
+    "scripts/backfillTradingStatus.mjs"
+  ],
+  "verification": {
+    "tsc": "PASS",
+    "tests": "server/researchDataset/policy.test.ts (16) + version.test.ts (6) = 22 PASS",
+    "realBuild": "PASS (20391 rows persisted)"
+  }
+}

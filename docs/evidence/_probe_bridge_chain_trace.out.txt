@@ -1,0 +1,24 @@
+===== 单链贯通追踪 · 起点 candidateId=360008 =====
+
+  ✅ 7. research_strategy_candidate: {"id":360008,"name":"[CAND-4GROUPS] ④-c 回撤深度≤10%（深回踩） · 守线+缩量≤30%","status":"CONVERTED","experimentId":240002,"conclusionId":510001,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetDivergenceReason":null,"traceLen":3947,"strategyDefinitionId":"cand-360008"}
+  ✅ 6. research_conclusion: {"id":510001,"experimentId":240002,"conclusionType":"SUPPORTED","title":"正式数据，首板回踩与未来收益的关系 — 自动结论（SUPPORTED）","status":"DRAFT","evidenceLen":9022}
+  ✅ 2. research_experiment: {"id":240002,"name":"正式数据，首板回踩与未来收益的关系","status":"COMPLETED","datasetVersionId":390002}
+  ✅ 1. dataset_version: {"id":390002,"datasetId":120001,"version":"v2","status":"READY","startDate":"2024-08-31T16:00:00.000Z","endDate":"2026-08-31T16:00:00.000Z","totalEvents":23978,"totalRows":1543082}
+  ✅ 3. research_run: {"id":570001,"experimentId":240002,"runNo":8,"status":"COMPLETED","sampleCount":23978}
+  ✅ 4. research_analysis: 该 Run 共 13 条（+ LIMIT 上限），前 3 条：[{"id":540001,"runId":570001,"analysisType":"CONDITIONAL","name":"观察日·T+3 未破首板最低价（买入条件线） → 之后5日收益","target":"future_return_5d","status":"COMPLETED"},{"id":540002,"runId":570001,"analysisType":"CONDITIONAL","name":"观察日·T+3 已破首板最低价（逻辑证伪） → 之后5日收益","target":"future_return_5d","status":"COMPLETED"},{"id":540003,"runId":570001,"analysisType":"CONDITIONAL","name":"观察日·T+3 回撤 0~2%（浅回踩）且未破位 → 之后5日收益","target":"future_return_5d","status":"COMPLETED"}]
+  ✅ 5. research_result: 覆盖 13 个分析、合计 208 行（前 3：[{"analysisId":540001,"n":16,"samples":"333630"},{"analysisId":540002,"n":16,"samples":"189362"},{"analysisId":540003,"n":16,"samples":"166469"}]）
+  ✅ 8. strategy_research_provenance: {"id":180007,"strategyVersionId":420007,"strategyId":"cand-360008","origin":"DIRECT","sourceCandidateId":360008,"sourceConclusionId":510001,"sourceExperimentId":240002,"sourceResearchRunId":570001,"sourceDatasetVersionId":390002,"sourceDatasetLabel":"v2"}
+  ✅ 9. strategies: {"id":420007,"strategyId":"cand-360008","name":"[CAND-4GROUPS] ④-c 回撤深度≤10%（深回踩） · 守线+缩量≤30%","status":"Draft","latestVersion":"1.0.0","currentVersionId":420007}
+  ✅ 10. strategy_versions: {"id":420007,"strategyId":"cand-360008","version":"1.0.0","status":"Draft","datasetVersionId":390002,"datasetVersion":"v2","universeId":"research-dataset:v2","docLen":5605,"fingerprint":"a1c7da95b742e78cd97982de159633df7a7bd2ba359b6c85c999ee8914243a14"}
+  ✅ 11. strategy_parameters: 3 行
+  ✅ 12. strategy_entry_rules: 2 行
+  ✅ 13. strategy_exit_rules: 2 行
+  ✅ 14. strategy_execution_rules: 1 行
+  ✅ 15. strategy_version_datasets: 1 行
+     参数明细：[{"code":"max_drawdown","dataType":"number","parameterRole":"TUNABLE","defaultValueJson":"0.1","minValue":0,"maxValue":0.3,"stepValue":0.01},{"code":"max_volume_ratio","dataType":"number","parameterRole":"TUNABLE","defaultValueJson":"0.3","minValue":0.05,"maxValue":1,"stepValue":0.05},{"code":"require_bullish","dataType":"number","parameterRole":"TUNABLE","defaultValueJson":"0","minValue":0,"maxValue":1,"stepValue":1}]
+     出场规则：[{"ruleId":"exit-stop-loss","ruleType":"STOP_LOSS","triggerType":"INTRADAY","thresholdValue":0.05,"thresholdUnit":"RATIO","parameterCode":null,"priority":1},{"ruleId":"exit-time-exit","ruleType":"TIME_EXIT","triggerType":"ON_CLOSE","thresholdValue":5,"thresholdUnit":"TRADING_DAY","parameterCode":null,"priority":3}]
+     入场规则：[{"ruleId":"cond-1","ruleType":"CONDITION","eventType":"FIRST_LIMIT_UP","windowStart":1,"windowEnd":3,"windowUnit":"TRADING_DAY","triggerType":"NEXT_TRADING_DAY","conditionCount":2},{"ruleId":"cond-2","ruleType":"CONDITION","eventType":"FIRST_LIMIT_UP","windowStart":1,"windowEnd":3,"windowUnit":"TRADING_DAY","triggerType":"NEXT_TRADING_DAY","conditionCount":2}]
+     执行规则：[{"signalTiming":"T_CLOSE","executionTiming":"T_PLUS_1_OPEN","priceType":"OPEN","quantityMethod":"TARGET_WEIGHT","lotSize":100}]
+     数据绑定：[{"datasetId":"first_limit_pullback","datasetVersion":"v2","datasetVersionId":390002,"role":"PRIMARY","note":"由 RESEARCH-006.3 promote 绑定（唯一坐标 dataset_version.id）"}]
+
+== CHAIN COMPLETE ==

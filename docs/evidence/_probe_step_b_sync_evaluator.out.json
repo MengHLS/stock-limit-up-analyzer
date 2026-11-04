@@ -1,0 +1,49 @@
+{
+  "generatedAt": "2026-09-17T12:29:21.703Z",
+  "picked": {
+    "docId": 420001,
+    "strategyId": "cand-360001",
+    "datasetVersionId": 390002,
+    "dateRange": {
+      "startDate": "2026-08-22",
+      "endDate": "2026-09-01"
+    }
+  },
+  "asyncBaseline": {
+    "parameterSet": {
+      "max_drawdown": 0.02,
+      "max_volume_ratio": 0.3,
+      "require_bullish": 0
+    },
+    "datasetSource": "registry",
+    "totalReturnPct": -3.4885310636999955,
+    "maxDrawdownPct": 5.248971265899993,
+    "tradeCount": 2
+  },
+  "syncCall": {
+    "isPromise": false,
+    "status": "succeeded",
+    "metrics": {
+      "totalReturnPct": -3.4885310636999955,
+      "maxDrawdownPct": 5.248971265899993,
+      "tradeCount": 2
+    },
+    "error": null
+  },
+  "matchesAsyncBaseline": true,
+  "overrideCall": {
+    "status": "succeeded",
+    "metrics": {
+      "totalReturnPct": 2.2688102033999957,
+      "maxDrawdownPct": 0.046469940976588756,
+      "tradeCount": 2
+    },
+    "error": null,
+    "differsFromBaseline": true
+  },
+  "unknownKeyCall": {
+    "threw": false,
+    "status": "failed",
+    "errorhead": "StrategyRecipeRuntimeError: 配方 first-limit-pullback-hold-shrink：本次覆写提供了参数 `definitely_not_declared_xyz`，但它不在策略文档的参数 schema 里（已声明：max_drawdown、max_volume_ratio、require_bullish）。拒绝静默忽略 —— 那会让调用方以为该维度参与了"
+  }
+}
