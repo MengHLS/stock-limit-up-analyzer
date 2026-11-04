@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseRecognitionResult } from "./recognition";
 
 describe("parseRecognitionResult", () => {
-  it("uses the API date and normalizes stock exchange suffixes", () => {
+  it("uses the image date first and normalizes stock exchange suffixes", () => {
     const result = parseRecognitionResult(
       JSON.stringify({
         date: "2024-01-02",
@@ -20,7 +20,7 @@ describe("parseRecognitionResult", () => {
       "2026-08-18",
     );
 
-    expect(result.date).toBe("2026-08-18");
+    expect(result.date).toBe("2024-01-02");
     expect(result.stocks[0].stockCode).toBe("600000.SH");
     expect(result.stocks[0].limitUpTime).toBe("09:31:00");
   });
@@ -44,6 +44,11 @@ describe("parseRecognitionResult", () => {
     expect(result.stocks).toHaveLength(1);
     expect(result.stocks[0].stockCode).toBe("300001.SZ");
     expect(result.stocks[0].sector).toBe("");
+  });
+
+  it("falls back to the API date when the image has no valid date", () => {
+    const result = parseRecognitionResult('{"date":"","stocks":[]}', "2026-08-18");
+    expect(result.date).toBe("2026-08-18");
   });
 
   it("rejects results without a valid date", () => {

@@ -45,10 +45,10 @@ function extractContent(rawContent: unknown): string {
   throw new Error("无法解析LLM返回内容");
 }
 
-export function parseRecognitionResult(rawContent: unknown, fallbackDate: string): RecognitionResult {
+export function parseRecognitionResult(rawContent: unknown, fallbackDate?: string): RecognitionResult {
   const parsed = JSON.parse(extractContent(rawContent)) as { date?: unknown; stocks?: unknown };
   const modelDate = textValue(parsed.date);
-  const date = DATE_PATTERN.test(fallbackDate) ? fallbackDate : modelDate;
+  const date = DATE_PATTERN.test(modelDate) ? modelDate : fallbackDate?.trim() ?? "";
   if (!DATE_PATTERN.test(date)) {
     throw new Error("识别结果缺少有效的涨停日期");
   }

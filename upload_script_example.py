@@ -3,15 +3,16 @@
 股票涨停分析工具 - 本地图片上传脚本
 
 使用方法:
-    python3 upload_script_example.py <image_path> <date> [api_url] [auth_token]
+    python3 upload_script_example.py <image_path> [date] [api_url] [auth_token]
 
 参数说明:
     image_path: 图片文件路径（必需）
-    date: 涨停日期，格式为YYYY-MM-DD（必需）
+    date: 可选的回退日期，格式为YYYY-MM-DD；优先使用图片中识别出的日期
     api_url: API服务器地址，默认为 https://3000-xxx.manus.computer
     auth_token: 认证令牌（JWT），可从浏览器cookie中获取
 
 示例:
+    python3 upload_script_example.py ./screenshot.png
     python3 upload_script_example.py ./screenshot.png 2026-03-04
     python3 upload_script_example.py ./screenshot.png 2026-03-04 https://3000-xxx.manus.computer your_token_here
 """
@@ -23,6 +24,7 @@ import json
 import requests
 from pathlib import Path
 from datetime import datetime
+from typing import Optional
 
 
 class StockUploadClient:
@@ -43,13 +45,13 @@ class StockUploadClient:
             'Authorization': f'Bearer {auth_token}'
         }
     
-    def upload_and_recognize(self, image_path: str, limit_up_date: str) -> dict:
+    def upload_and_recognize(self, image_path: str, limit_up_date: Optional[str] = None) -> dict:
         """
         上传图片并自动识别涨停数据
         
         Args:
             image_path: 图片文件路径
-            limit_up_date: 涨停日期，格式为YYYY-MM-DD
+            limit_up_date: 可选回退日期，格式为YYYY-MM-DD；优先使用图片日期
             
         Returns:
             API返回的结果字典
@@ -58,11 +60,12 @@ class StockUploadClient:
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"图片文件不存在: {image_path}")
         
-        # 验证日期格式
-        try:
-            datetime.strptime(limit_up_date, '%Y-%m-%d')
-        except ValueError:
-            raise ValueError(f"日期格式错误: {limit_up_date}，应为YYYY-MM-DD")
+        # 仅在提供回退日期时验证格式；最终日期以图片识别结果为准
+        if limit_up_date:
+            try:
+                datetime.strptime(limit_up_date, '%Y-%m-%d')
+            except ValueError:
+                raise ValueError(f"日期格式错误: {limit_up_date}，应为YYYY-MM-DD")
         
         # 读取图片文件
         with open(image_path, 'rb') as f:
@@ -80,14 +83,15 @@ class StockUploadClient:
             'base64Data': base64_data,
             'fileName': file_name,
             'mimeType': mime_type,
-            'limitUpDate': limit_up_date
         }
+        if limit_up_date:
+            payload['limitUpDate'] = limit_up_date
         
         # 发送请求
         endpoint = f"{self.api_url}/api/trpc/image.uploadAndRecognize"
         
         print(f"📤 正在上传图片: {file_name}")
-        print(f"📅 涨停日期: {limit_up_date}")
+        print(f"📅 回退日期: {limit_up_date or '未提供（优先识别图片日期）'}")
         print(f"🔗 API端点: {endpoint}")
         print(f"💡 提示: 图片上传后将在后台异步识别，无需等待识别完成")
         
@@ -147,14 +151,14 @@ def main():
     """主函数"""
     
     # 检查参数
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print("❌ 参数不足")
         print(__doc__)
         print(get_auth_token_from_browser())
         sys.exit(1)
     
     image_path = sys.argv[1]
-    limit_up_date = sys.argv[2]
+    limit_up_date = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
     
     # 获取API URL和Token
     api_url = sys.argv[3] if len(sys.argv) > 3 else input("请输入API服务器地址 (如 https://3000-xxx.manus.computer): ").strip()

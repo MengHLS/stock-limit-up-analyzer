@@ -109,13 +109,13 @@ describe('image.uploadAndRecognize', () => {
   });
 
   it('应该正确处理识别结果中的日期优先级', () => {
-    // 用户提供的日期应该优先于LLM识别的日期
+    // 图片中识别出的日期应该优先于用户提供的回退日期
     const userProvidedDate = '2026-03-04';
     const llmRecognizedDate = '2026-03-05';
 
-    const recognizedDate = userProvidedDate || llmRecognizedDate;
+    const recognizedDate = llmRecognizedDate || userProvidedDate;
     
-    expect(recognizedDate).toBe('2026-03-04');
+    expect(recognizedDate).toBe('2026-03-05');
   });
 
   it('应该正确处理空的识别结果', () => {

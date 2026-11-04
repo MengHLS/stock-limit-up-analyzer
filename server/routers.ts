@@ -297,7 +297,7 @@ export const appRouter = router({
         imageUrl: z.string(),
         imageId: z.number().optional(),
         fileName: z.string().optional(),
-        limitUpDate: z.string(),
+        limitUpDate: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { imageUrl, imageId, fileName, limitUpDate } = input;
@@ -325,7 +325,7 @@ export const appRouter = router({
 
 请严格按照以下JSON格式返回数据：
 {
-  "date": "图片中的涨停日期，格式为YYYY-MM-DD；若图片没有日期则使用用户提供的日期",
+  "date": "优先填写图片中的涨停日期，格式为YYYY-MM-DD；图片没有日期时使用用户提供的日期",
   "stocks": [
     {
       "stockCode": "股票代码，如002361.SZ",
@@ -341,7 +341,7 @@ export const appRouter = router({
 }
 
 注意事项：
-1. 优先使用用户提供的日期；没有用户日期时才从图片标题识别日期
+1. 优先从图片标题或图片内容识别涨停日期；图片无法识别有效日期时才使用用户提供的日期
 2. 仔细识别表格中的每一行股票，不要合并或遗漏行
 3. 股票代码保留数字，并补充正确交易所后缀：深市.SZ、沪市.SH、北交所.BJ
 4. 涨停时间统一为HH:MM:SS（例如14:56:30）；如果图片只有HH:MM则补秒为:00，无法确认时返回空字符串
@@ -419,7 +419,7 @@ export const appRouter = router({
               sector?: string;
               keywords?: string;
             }) => {
-              // 使用用户选择的日期（优先级更高）
+              // 使用图片识别出的日期；解析失败时才回退到请求日期
               return {
               stockCode: stock.stockCode,
               stockName: stock.stockName,
@@ -478,7 +478,7 @@ export const appRouter = router({
         base64Data: z.string(),
         fileName: z.string(),
         mimeType: z.string(),
-        limitUpDate: z.string(),
+        limitUpDate: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { base64Data, fileName, mimeType, limitUpDate } = input;
@@ -528,7 +528,7 @@ export const appRouter = router({
                 content: `你是一个专业的中文股票涨停复盘图片识别助手。请逐行提取图片中的全部涨停股票信息，并严格输出JSON。
 
 识别指南：
-1. 日期优先使用接口传入的日期；只有没有传入日期时才从图片标题识别YYYY-MM-DD。
+1. 日期优先从图片标题或图片内容识别YYYY-MM-DD；只有图片没有有效日期时才使用接口传入的日期。
 2. 股票代码只保留数字和交易所后缀，按市场补充.SZ、.SH或.BJ。常见代码格式：
    - 深业主板: 000xxx.SZ
    - 创业板: 300xxx.SZ

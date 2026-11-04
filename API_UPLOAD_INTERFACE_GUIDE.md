@@ -1,5 +1,7 @@
 # 股票涨停分析工具 - 上传接口完整指南
 
+> 最新调用口径请优先参考 [IMAGE_UPLOAD_RECOGNIZE_API.md](./IMAGE_UPLOAD_RECOGNIZE_API.md)。当前接口上传后后台异步识别并保存，图片中的日期优先于请求参数日期；`limitUpDate` 仅作为图片日期无法识别时的可选回退值。
+
 ## 📋 目录
 
 1. [接口概述](#接口概述)
@@ -15,18 +17,18 @@
 
 ## 接口概述
 
-**uploadAndRecognize** 是一个受保护的 API 接口，用于上传股票涨停复盘图片并自动识别其中的股票数据。该接口会：
+**uploadAndRecognize** 是一个受保护的 API 接口，用于上传股票涨停复盘图片并在后台自动识别、保存其中的股票数据。该接口会：
 
 1. 接收 base64 编码的图片数据
 2. 将图片上传到云存储（S3）
 3. 调用 LLM 进行视觉识别
 4. 解析 LLM 返回的 JSON 数据
 5. 将识别结果批量保存到数据库
-6. 返回识别结果摘要
+6. 立即返回 `imageId`，后台继续识别、保存和补行情
 
 **特点**：
 - ✅ 自动识别涨停日期和股票信息
-- ✅ 支持自定义涨停日期（覆盖 LLM 识别结果）
+- ✅ 优先使用图片识别出的涨停日期，支持请求日期回退
 - ✅ 支持多种图片格式（PNG、JPG、GIF、WebP）
 - ✅ 自动处理图片存储和数据库保存
 - ✅ 完整的错误处理和状态跟踪
@@ -54,7 +56,7 @@ POST /api/trpc/image.uploadAndRecognize
 | `base64Data` | string | ✅ | 图片的 base64 编码数据 | `iVBORw0KGgo...` |
 | `fileName` | string | ✅ | 原始文件名 | `screenshot.png` |
 | `mimeType` | string | ✅ | 图片 MIME 类型 | `image/png` |
-| `limitUpDate` | string | ✅ | 涨停日期，格式 YYYY-MM-DD | `2026-03-04` |
+| `limitUpDate` | string | ❌ | 图片日期无法识别时的回退日期，格式 YYYY-MM-DD | `2026-03-04` |
 
 ### 请求示例
 

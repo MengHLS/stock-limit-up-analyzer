@@ -11,6 +11,7 @@ import { sdk } from "./sdk";
 import * as db from "../db";
 import { syncCandidateDailyPrices } from "../stockPriceSync";
 import { fetchMarketFactorSnapshot } from "../marketFactors";
+import { registerLimitUpDateRoute } from "../limitUpDateApi";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -47,6 +48,9 @@ async function startServer() {
       createContext,
     })
   );
+
+  // Public REST API: return all stored limit-up fields for one trading date.
+  registerLimitUpDateRoute(app, db.getLimitUpRecordsByDate);
 
   // 定时任务回调：自动获取大盘成交额与两融余额并写入数据库
   app.post("/api/scheduled/syncMarketData", async (req, res) => {
